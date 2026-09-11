@@ -433,6 +433,69 @@ func Test_RouteMPLSService_CreateConfig_BackendFailure(t *testing.T) {
 	assert.Len(t, show.Rules, 1)
 }
 
+// Test_RouteMPLSService_UpdateConfig_FailedPublishLeavesPreviousIntact
+// verifies that an incremental update whose publish fails leaves the
+// published config exactly as it was.
+//
+// The update must change a copy of the nexthop lists rather than the lists
+// readers see.
+func Test_RouteMPLSService_UpdateConfig_FailedPublishLeavesPreviousIntact(t *testing.T) {
+	readvertised := makeRule(t, "10.0.0.0/24", "203.0.113.1", 100)
+	readvertised.Nexthop.Weight = 7
+
+	cases := []struct {
+		name  string
+		event *routemplspb.UpdateEvent
+	}{
+		{
+			name: "withdraw of one nexthop",
+			event: &routemplspb.UpdateEvent{Event: &routemplspb.UpdateEvent_Withdraw{
+				Withdraw: makeRule(t, "10.0.0.0/24", "203.0.113.1", 100),
+			}},
+		},
+		{
+			name: "re-advertise with a new weight",
+			event: &routemplspb.UpdateEvent{Event: &routemplspb.UpdateEvent_Update{
+				Update: readvertised,
+			}},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			svc := NewRouteMPLSService(&flakyBackend{})
+			ctx := t.Context()
+
+			_, err := svc.CreateConfig(ctx, &routemplspb.CreateConfigRequest{
+				Name: "mpls0",
+				Rules: []*routemplspb.Rule{
+					makeRule(t, "10.0.0.0/24", "203.0.113.1", 100),
+					makeRule(t, "10.0.0.0/24", "203.0.113.2", 200),
+				},
+			})
+			require.NoError(t, err)
+
+			_, err = svc.UpdateConfig(ctx, &routemplspb.UpdateConfigRequest{
+				Name:    "mpls0",
+				Updates: []*routemplspb.UpdateEvent{tc.event},
+			})
+			require.Equal(t, codes.Internal, status.Code(err))
+
+			show, err := svc.ShowConfig(ctx, &routemplspb.ShowConfigRequest{Name: "mpls0"})
+			require.NoError(t, err)
+			require.Len(t, show.Rules, 2)
+			for _, rule := range show.Rules {
+				assert.Equal(t, uint64(1), rule.GetNexthop().GetWeight())
+			}
+			labels := []uint32{
+				show.Rules[0].GetNexthop().GetLabel(),
+				show.Rules[1].GetNexthop().GetLabel(),
+			}
+			assert.ElementsMatch(t, []uint32{100, 200}, labels)
+		})
+	}
+}
+
 // Test_RouteMPLSService_ConcurrentAccess runs with -race to detect data races.
 func Test_RouteMPLSService_ConcurrentAccess(t *testing.T) {
 	svc := newTestService(t)

@@ -4,14 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"sync"
 	"unicode/utf8"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
 	filterpbconv "github.com/yanet-platform/yanet2/bindings/go/filterpbconv/v1"
-	"github.com/yanet-platform/yanet2/controlplane/ffi"
+	"github.com/yanet-platform/yanet2/controlplane/configstore"
 	"github.com/yanet-platform/yanet2/modules/forward/bindings/go/cforward"
 	forwardpb "github.com/yanet-platform/yanet2/modules/forward/controlplane/forwardpb/v1"
 )
@@ -51,37 +50,22 @@ func (m *forwardConfig) Free() error {
 type ForwardService struct {
 	forwardpb.UnimplementedForwardServiceServer
 
-	mu sync.RWMutex
-
-	// deferred holds superseded module handles whose free was refused
-	// because a live configuration generation still referenced them.
-	// This service is their owner: it retries them on its next update,
-	// through ReclaimDeferred, and nothing else remembers them.
-	deferred []ModuleHandle
-	backend  Backend
-	configs  map[string]forwardConfig
+	backend Backend
+	configs *configstore.Store[*forwardConfig]
 }
 
 func NewForwardService(backend Backend) *ForwardService {
 	return &ForwardService{
 		backend: backend,
-		configs: map[string]forwardConfig{},
+		configs: configstore.NewStore[*forwardConfig](),
 	}
 }
 
 func (m *ForwardService) ListConfigs(
 	ctx context.Context, request *forwardpb.ListConfigsRequest,
 ) (*forwardpb.ListConfigsResponse, error) {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-
-	configs := make([]string, 0, len(m.configs))
-	for name := range m.configs {
-		configs = append(configs, name)
-	}
-
 	response := &forwardpb.ListConfigsResponse{
-		Configs: configs,
+		Configs: m.configs.Names(),
 	}
 
 	return response, nil
@@ -93,11 +77,7 @@ func (m *ForwardService) ShowConfig(ctx context.Context, req *forwardpb.ShowConf
 		return nil, status.Error(codes.InvalidArgument, "module config name is required")
 	}
 
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-
-	config, ok := m.configs[req.Name]
-
+	config, ok := m.configs.Get(name)
 	if !ok {
 		return nil, status.Errorf(codes.NotFound, "config %q not found", name)
 	}
@@ -205,23 +185,15 @@ func (m *ForwardService) UpdateConfig(ctx context.Context, req *forwardpb.Update
 		rules = append(rules, rule)
 	}
 
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	module, err := m.backend.UpdateModule(name, rules)
+	err := m.configs.Update(name, func(*forwardConfig, bool) (*forwardConfig, error) {
+		module, err := m.backend.UpdateModule(name, rules)
+		if err != nil {
+			return nil, err
+		}
+		return &forwardConfig{Rules: reqRules, Module: module}, nil
+	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to update module config: %w", err)
-	}
-
-	m.reclaimDeferred()
-
-	if oldModule, ok := m.configs[name]; ok {
-		m.parkOrFree(oldModule.Module)
-	}
-
-	m.configs[name] = forwardConfig{
-		Rules:  reqRules,
-		Module: module,
 	}
 
 	return &forwardpb.UpdateConfigResponse{}, nil
@@ -233,58 +205,24 @@ func (m *ForwardService) DeleteConfig(ctx context.Context, req *forwardpb.Delete
 		return nil, status.Error(codes.InvalidArgument, "module config name is required")
 	}
 
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	config, ok := m.configs[name]
-	if !ok {
+	err := m.configs.Delete(name, func(*forwardConfig) error {
+		return m.backend.DeleteModule(name)
+	})
+	if errors.Is(err, configstore.ErrNotFound) {
 		return nil, status.Errorf(codes.NotFound, "config %q not found", name)
 	}
-
-	if err := m.backend.DeleteModule(name); err != nil {
+	if err != nil {
 		return nil, fmt.Errorf("failed to delete module config %q: %w", name, err)
 	}
-
-	m.reclaimDeferred()
-	m.parkOrFree(config.Module)
-
-	delete(m.configs, name)
 
 	return &forwardpb.DeleteConfigResponse{}, nil
 }
 
-// parkOrFree frees the handle when it is dangling and parks it for
-// retry when a live generation still references it. The caller must
-// hold m.mu.
-func (m *ForwardService) parkOrFree(handle ModuleHandle) {
-	if handle == nil {
-		return
-	}
-	if err := handle.Free(); errors.Is(err, ffi.ErrStillReferenced) {
-		m.deferred = append(m.deferred, handle)
-	}
-}
-
-// ReclaimDeferred retries every deferred handle, dropping the ones whose
-// generations have drained and keeping the rest deferred. It is the
-// reclamation handler for this module's superseded configs; the service
-// itself runs it after each successful publish, and anything else may
-// call it at any time.
+// ReclaimDeferred retries every superseded config whose free was refused,
+// releasing the ones whose generations have drained.
+//
+// The service runs it after each successful publish, and anything else
+// may call it at any time.
 func (m *ForwardService) ReclaimDeferred() {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.reclaimDeferred()
-}
-
-// reclaimDeferred is ReclaimDeferred without the lock. The caller must
-// hold m.mu.
-func (m *ForwardService) reclaimDeferred() {
-	kept := m.deferred[:0]
-	for _, handle := range m.deferred {
-		if err := handle.Free(); errors.Is(err, ffi.ErrStillReferenced) {
-			kept = append(kept, handle)
-		}
-	}
-	clear(m.deferred[len(kept):])
-	m.deferred = kept
+	m.configs.ReclaimDeferred()
 }

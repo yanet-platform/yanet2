@@ -1,16 +1,13 @@
 package blackhole
 
 import (
-	"errors"
-
-	"github.com/yanet-platform/yanet2/controlplane/ffi"
-
 	"context"
-	"sync"
+	"errors"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	"github.com/yanet-platform/yanet2/controlplane/configstore"
 	blackholepb "github.com/yanet-platform/yanet2/modules/blackhole/controlplane/blackholepb/v1"
 )
 
@@ -48,22 +45,15 @@ func (m *config) Free() error {
 type BlackholeService struct {
 	blackholepb.UnimplementedBlackholeServiceServer
 
-	// deferred holds superseded module handles whose free was refused
-	// because a live configuration generation still referenced them.
-	// This service is their owner: it retries them on its next update,
-	// through ReclaimDeferred, and nothing else remembers them.
-	deferred []ModuleHandle
-
-	mu      sync.Mutex
 	backend Backend
-	configs map[string]*config
+	configs *configstore.Store[*config]
 }
 
 // NewBlackholeService constructs a BlackholeService backed by the given Backend.
 func NewBlackholeService(backend Backend) *BlackholeService {
 	return &BlackholeService{
 		backend: backend,
-		configs: map[string]*config{},
+		configs: configstore.NewStore[*config](),
 	}
 }
 
@@ -72,15 +62,7 @@ func (m *BlackholeService) ListConfigs(
 	ctx context.Context,
 	req *blackholepb.ListConfigsRequest,
 ) (*blackholepb.ListConfigsResponse, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	names := make([]string, 0, len(m.configs))
-	for name := range m.configs {
-		names = append(names, name)
-	}
-
-	return &blackholepb.ListConfigsResponse{Configs: names}, nil
+	return &blackholepb.ListConfigsResponse{Configs: m.configs.Names()}, nil
 }
 
 // ShowConfig returns the named config when it exists.
@@ -93,10 +75,7 @@ func (m *BlackholeService) ShowConfig(
 		return nil, errConfigNameRequired
 	}
 
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	if _, ok := m.configs[name]; !ok {
+	if _, ok := m.configs.Get(name); !ok {
 		return nil, status.Error(codes.NotFound, "no config found")
 	}
 
@@ -114,10 +93,14 @@ func (m *BlackholeService) UpdateConfig(
 		return nil, errConfigNameRequired
 	}
 
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	if err := m.updateConfig(name); err != nil {
+	err := m.configs.Update(name, func(*config, bool) (*config, error) {
+		module, err := m.backend.UpdateModule(name)
+		if err != nil {
+			return nil, err
+		}
+		return &config{Module: module}, nil
+	})
+	if err != nil {
 		return nil, status.Errorf(
 			codes.Internal,
 			"failed to update module config %q: %v", name, err,
@@ -125,27 +108,6 @@ func (m *BlackholeService) UpdateConfig(
 	}
 
 	return &blackholepb.UpdateConfigResponse{}, nil
-}
-
-// updateConfig publishes a fresh config and, on success, frees the old module
-// handle and stores the new one.
-//
-// The caller must hold m.mu.
-func (m *BlackholeService) updateConfig(name string) error {
-	mod, err := m.backend.UpdateModule(name)
-	if err != nil {
-		return err
-	}
-
-	m.reclaimDeferred()
-
-	if old, ok := m.configs[name]; ok {
-		m.parkOrFree(old.Module)
-	}
-
-	m.configs[name] = &config{Module: mod}
-
-	return nil
 }
 
 // DeleteConfig removes the named config if it is not referenced by any
@@ -159,60 +121,27 @@ func (m *BlackholeService) DeleteConfig(
 		return nil, errConfigNameRequired
 	}
 
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	entry, ok := m.configs[name]
-	if !ok {
+	err := m.configs.Delete(name, func(*config) error {
+		return m.backend.DeleteModule(name)
+	})
+	if errors.Is(err, configstore.ErrNotFound) {
 		return nil, status.Error(codes.NotFound, "no config found")
 	}
-
-	if err := m.backend.DeleteModule(name); err != nil {
+	if err != nil {
 		return nil, status.Errorf(
 			codes.Internal,
 			"failed to delete module config %q: %v", name, err,
 		)
 	}
 
-	// The delete retired the generation holding the published module;
-	// retry the deferred ones, then retire this one.
-	m.reclaimDeferred()
-	m.parkOrFree(entry.Module)
-
-	delete(m.configs, name)
-
 	return &blackholepb.DeleteConfigResponse{}, nil
 }
 
-// parkOrFree frees the handle when it is dangling and parks it for
-// retry when a live generation still references it. The caller must
-// hold m.mu.
-func (m *BlackholeService) parkOrFree(handle ModuleHandle) {
-	if err := handle.Free(); errors.Is(err, ffi.ErrStillReferenced) {
-		m.deferred = append(m.deferred, handle)
-	}
-}
-
-// ReclaimDeferred retries every deferred handle, dropping the ones whose
-// generations have drained and keeping the rest deferred. It is the
-// reclamation handler for this module's superseded configs; the service
-// itself runs it after each successful publish, and anything else may
-// call it at any time.
+// ReclaimDeferred retries every superseded config whose free was refused,
+// releasing the ones whose generations have drained.
+//
+// The service runs it after each successful publish, and anything else
+// may call it at any time.
 func (m *BlackholeService) ReclaimDeferred() {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.reclaimDeferred()
-}
-
-// reclaimDeferred is ReclaimDeferred without the lock. The caller must
-// hold m.mu.
-func (m *BlackholeService) reclaimDeferred() {
-	kept := m.deferred[:0]
-	for _, handle := range m.deferred {
-		if err := handle.Free(); errors.Is(err, ffi.ErrStillReferenced) {
-			kept = append(kept, handle)
-		}
-	}
-	clear(m.deferred[len(kept):])
-	m.deferred = kept
+	m.configs.ReclaimDeferred()
 }
