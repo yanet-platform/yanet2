@@ -4,9 +4,12 @@
 //! a family of services — readiness, metrics, and so on — is simply the
 //! entries whose name ends in that family's own trailing segment (e.g.
 //! `ReadinessService`, `MetricsService`): the built-in one plus one per
-//! running operator. That list is what a CLI probes when no service is
-//! named, what a short alias resolves against, and what an error hint
-//! suggests.
+//! running operator, plus any that prefix that segment with a qualifier
+//! naming the narrower scope they serve. That list is what a CLI probes
+//! when no service is named, what a short alias resolves against, and what
+//! an error hint suggests. Ending a service name in a family's segment is
+//! therefore an undertaking to answer that family's own request, since
+//! every member is probed with it unasked.
 
 use core::time::Duration;
 use std::collections::BTreeMap;
@@ -42,7 +45,7 @@ pub const DISCOVERY_TIMEOUT: Duration = Duration::from_secs(1);
 
 /// Outcome of resolving a short alias against the discovered services.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Resolution {
+enum Resolution {
     /// Exactly one service matched the alias.
     Resolved(String),
     /// Several services matched; these are the candidates.
@@ -56,8 +59,9 @@ pub enum Resolution {
 /// hint about it.
 #[derive(Debug, Clone, Copy)]
 pub struct Family {
-    /// Trailing segment of every service's fully-qualified name (e.g.
-    /// `ReadinessService`).
+    /// Trailing part of every member's service name (e.g.
+    /// `ReadinessService`), which a member may prefix with a qualifier
+    /// naming the scope it serves.
     suffix: &'static str,
     /// User-facing verb every error from this family carries (e.g.
     /// `"ready"`).
@@ -111,6 +115,107 @@ impl Family {
         list_services(connection, self.suffix).await
     }
 
+    /// The qualifier a member prefixes the family's shared name with,
+    /// lowercased, or nothing when it serves the family's whole subject.
+    ///
+    /// A qualifier is the member's own name, and the only name it answers
+    /// to: the package it sits in belongs to the member serving that
+    /// package's whole subject, so a qualified one never competes for it.
+    /// Spelling a qualifier the same as an operator or a package therefore
+    /// takes that word away from it, and is a naming mistake.
+    fn qualifier(&self, fqn: &str) -> Option<String> {
+        let (_, service) = fqn.rsplit_once('.').unwrap_or(("", fqn));
+
+        service
+            .strip_suffix(self.suffix)
+            .filter(|qualifier| !qualifier.is_empty())
+            .map(str::to_lowercase)
+    }
+
+    /// Derives a short display alias for `fqn`, a member of this family.
+    ///
+    /// A qualified member is named by its qualifier. Any other member is
+    /// named by its package — the last segment that is neither a bare
+    /// version marker (`v1`, `v2`, …) nor ends in `pb` (`operatorpb`,
+    /// `ynpb`, …) — so `controlplane.ynpb.v1.ReadinessService` becomes
+    /// `controlplane` and `operators.route.operatorpb.v1.ReadinessService`
+    /// becomes `route`. Falls back to the whole `fqn` when nothing remains,
+    /// e.g. a bare service name with no package at all.
+    pub fn derive_alias(&self, fqn: &str) -> String {
+        if let Some(qualifier) = self.qualifier(fqn) {
+            return qualifier;
+        }
+
+        let (package, _) = fqn.rsplit_once('.').unwrap_or(("", fqn));
+
+        package
+            .split('.')
+            .rev()
+            .find(|segment| !segment.is_empty() && !is_version_segment(segment) && !segment.ends_with("pb"))
+            .map(str::to_owned)
+            .unwrap_or_else(|| fqn.to_owned())
+    }
+
+    /// Derives a display alias for every service in `services`, keyed by the
+    /// service's own fully-qualified name.
+    ///
+    /// Two services whose derived alias collides both fall back to their
+    /// full name — a short alias is only useful when it is unambiguous.
+    pub fn alias_map(&self, services: &[String]) -> BTreeMap<String, String> {
+        let mut aliases: BTreeMap<String, String> = services
+            .iter()
+            .map(|service| (service.clone(), self.derive_alias(service)))
+            .collect();
+
+        let mut counts: BTreeMap<String, usize> = BTreeMap::new();
+        for alias in aliases.values() {
+            *counts.entry(alias.clone()).or_insert(0) += 1;
+        }
+
+        for (service, alias) in aliases.iter_mut() {
+            if counts.get(alias.as_str()).copied().unwrap_or(0) > 1 {
+                *alias = service.clone();
+            }
+        }
+
+        aliases
+    }
+
+    /// Resolves a short alias (e.g. `route`) against the discovered
+    /// `services`.
+    ///
+    /// A qualified service answers to its qualifier alone: it never joins
+    /// the candidates for a word that named another service before it was
+    /// discovered, and a word that names it outright takes it over one that
+    /// merely spells that word inside a package. Every other service matches
+    /// when its name contains the alias as a case-insensitive substring,
+    /// which lets both an operator name (`forward`) and a package segment
+    /// (`controlplane`) select their service without spelling out the whole
+    /// name.
+    fn resolve_alias(&self, alias: &str, services: &[String]) -> Resolution {
+        let alias = alias.to_lowercase();
+
+        let mut matched: Vec<String> = services
+            .iter()
+            .filter(|service| self.qualifier(service).is_some_and(|qualifier| qualifier == alias))
+            .cloned()
+            .collect();
+
+        if matched.is_empty() {
+            matched = services
+                .iter()
+                .filter(|service| self.qualifier(service).is_none() && service.to_lowercase().contains(&alias))
+                .cloned()
+                .collect();
+        }
+
+        match matched.len() {
+            0 => Resolution::Unknown,
+            1 => Resolution::Resolved(matched.remove(0)),
+            _ => Resolution::Ambiguous(matched),
+        }
+    }
+
     /// Resolves a short alias against `services`.
     ///
     /// A name containing `.` is assumed already fully qualified and returned
@@ -128,7 +233,7 @@ impl Family {
             return Ok(name.to_owned());
         }
 
-        match resolve_alias(name, services) {
+        match self.resolve_alias(name, services) {
             Resolution::Resolved(resolved) => Ok(resolved),
             Resolution::Ambiguous(candidates) => {
                 let message = format!("service name \"{name}\" is ambiguous");
@@ -213,7 +318,7 @@ impl Family {
 }
 
 /// Lists the fully-qualified names of the services registered with the
-/// gateway whose last dot-separated segment is `suffix`, sorted.
+/// gateway whose last dot-separated segment ends in `suffix`, sorted.
 ///
 /// The sort makes probing order — and hence rendered blocks — stable across
 /// runs, since the registry itself is unordered.
@@ -245,55 +350,15 @@ pub async fn list_services(connection: &Connection, suffix: &str) -> Result<Vec<
     Ok(services)
 }
 
-/// Reports whether `name`'s last dot-separated segment is exactly `suffix`,
-/// so that a service merely mentioning it elsewhere in its name is not
-/// mistaken for a match.
+/// Reports whether `name`'s last dot-separated segment ends in `suffix`, so
+/// that a service merely mentioning it elsewhere in its name is not mistaken
+/// for a match.
+///
+/// The segment may carry a qualifier ahead of the suffix, naming a scope
+/// narrower than the family's own subject; such a service is a member like
+/// any other, and the qualifier is the word it answers to.
 fn has_suffix(name: &str, suffix: &str) -> bool {
-    name.rsplit('.').next() == Some(suffix)
-}
-
-/// Resolves a short alias (e.g. `route`) against the discovered `services`.
-///
-/// A service matches when its name contains the alias as a case-insensitive
-/// substring, which lets both an operator name (`forward`) and a package
-/// segment (`controlplane`) select their service without spelling out the
-/// whole FQN.
-pub fn resolve_alias(alias: &str, services: &[String]) -> Resolution {
-    let alias = alias.to_lowercase();
-
-    let mut matched: Vec<String> = services
-        .iter()
-        .filter(|service| service.to_lowercase().contains(&alias))
-        .cloned()
-        .collect();
-
-    match matched.len() {
-        0 => Resolution::Unknown,
-        1 => Resolution::Resolved(matched.remove(0)),
-        _ => Resolution::Ambiguous(matched),
-    }
-}
-
-/// Derives a short display alias from a service FQN — the inverse of
-/// [`resolve_alias`].
-///
-/// Drops the trailing segment (the service name itself, e.g.
-/// `ReadinessService`), then discards any remaining segment that is a bare
-/// version marker (`v1`, `v2`, …) or ends in `pb` (`operatorpb`, `ynpb`,
-/// …), and takes the last segment left. `controlplane.ynpb.v1.ReadinessService`
-/// becomes `controlplane`; `operators.route.operatorpb.v1.ReadinessService`
-/// becomes `route`. Falls back to the full `fqn` when nothing remains, e.g.
-/// a bare `ReadinessService` with no package at all.
-pub fn derive_alias(fqn: &str) -> String {
-    let segments: Vec<&str> = fqn.split('.').collect();
-    let package = &segments[..segments.len().saturating_sub(1)];
-
-    package
-        .iter()
-        .rev()
-        .find(|segment| !is_version_segment(segment) && !segment.ends_with("pb"))
-        .map(|segment| (*segment).to_owned())
-        .unwrap_or_else(|| fqn.to_owned())
+    name.rsplit('.').next().is_some_and(|segment| segment.ends_with(suffix))
 }
 
 /// Reports whether `segment` is a bare version marker: `v` followed by one
@@ -306,33 +371,8 @@ fn is_version_segment(segment: &str) -> bool {
     !digits.is_empty() && digits.bytes().all(|byte| byte.is_ascii_digit())
 }
 
-/// Derives a display alias for every service in `services`, keyed by the
-/// service's own FQN.
-///
-/// Two services whose derived alias collides both fall back to their full
-/// FQN — a short alias is only useful when it is unambiguous.
-pub fn alias_map(services: &[String]) -> BTreeMap<String, String> {
-    let mut aliases: BTreeMap<String, String> = services
-        .iter()
-        .map(|service| (service.clone(), derive_alias(service)))
-        .collect();
-
-    let mut counts: BTreeMap<String, usize> = BTreeMap::new();
-    for alias in aliases.values() {
-        *counts.entry(alias.clone()).or_insert(0) += 1;
-    }
-
-    for (service, alias) in aliases.iter_mut() {
-        if counts.get(alias.as_str()).copied().unwrap_or(0) > 1 {
-            *alias = service.clone();
-        }
-    }
-
-    aliases
-}
-
 /// Connects to the gateway afresh and lists the services whose last segment
-/// is `suffix`, within `budget`.
+/// ends in `suffix`, within `budget`.
 ///
 /// This is the best-effort half of discovery, and the only half that has to
 /// establish its own connection: every caller reaches an endpoint nothing has
@@ -388,7 +428,7 @@ pub fn services_hint(caption: &str, empty_message: &str, services: &[String]) ->
 }
 
 /// Best-effort discovery for shell completion: the services whose last
-/// segment is `suffix`, or an empty list on any failure.
+/// segment ends in `suffix`, or an empty list on any failure.
 ///
 /// Strictly best-effort — a tab-completion must never print an error nor hang
 /// — so a gateway that is down, slow or refusing us auth yields no candidates
@@ -420,6 +460,13 @@ pub fn candidates(args: &ConnectionArgs, suffix: &str, budget: Duration) -> Vec<
 mod test {
     use super::*;
 
+    const READINESS: Family = Family::new("ReadinessService", "ready", "readiness");
+    const METRICS: Family = Family::new("MetricsService", "metrics", "metrics");
+
+    /// The metrics service scoped to the hardware ports rather than to the
+    /// instance behind the gateway, and so named by a qualifier.
+    const PORT_METRICS: &str = "controlplane.ynpb.v1.PortMetricsService";
+
     fn services(suffix: &str) -> Vec<String> {
         vec![
             format!("controlplane.ynpb.v1.{suffix}"),
@@ -430,6 +477,39 @@ mod test {
         ]
     }
 
+    /// The metrics services a configured gateway registers: its own, one
+    /// per built-in module and one per running operator, sorted as
+    /// discovery hands them over.
+    fn metrics_services() -> Vec<String> {
+        vec![
+            "controlplane.ynpb.v1.MetricsService".to_owned(),
+            "modules.acl.controlplane.aclpb.v1.MetricsService".to_owned(),
+            "modules.forward.controlplane.forwardpb.v1.MetricsService".to_owned(),
+            "modules.fwstate.controlplane.fwstatepb.v1.MetricsService".to_owned(),
+            "modules.route.controlplane.routepb.v1.MetricsService".to_owned(),
+            "operators.pipeline.operatorpb.v1.MetricsService".to_owned(),
+            "operators.route.operatorpb.v1.MetricsService".to_owned(),
+        ]
+    }
+
+    /// The same services once the gateway also serves the port metrics.
+    fn metrics_services_with_ports() -> Vec<String> {
+        let mut services = metrics_services();
+        services.push(PORT_METRICS.to_owned());
+        services.sort();
+
+        services
+    }
+
+    /// A qualified service beside one that spells that qualifier inside a
+    /// package, which only a rule reading the qualifier tells apart.
+    fn port_and_a_lookalike() -> Vec<String> {
+        vec![
+            PORT_METRICS.to_owned(),
+            "operators.transport.operatorpb.v1.MetricsService".to_owned(),
+        ]
+    }
+
     #[test]
     fn service_is_recognised_by_its_last_segment() {
         assert!(has_suffix("controlplane.ynpb.v1.ReadinessService", "ReadinessService"));
@@ -437,6 +517,11 @@ mod test {
             "operators.route.operatorpb.v1.MetricsService",
             "MetricsService"
         ));
+    }
+
+    #[test]
+    fn test_has_suffix_matches_a_qualifier_before_the_suffix() {
+        assert!(has_suffix(PORT_METRICS, "MetricsService"));
     }
 
     #[test]
@@ -459,7 +544,7 @@ mod test {
 
         assert_eq!(
             Resolution::Resolved("operators.route.operatorpb.v1.ReadinessService".to_owned()),
-            resolve_alias("route", &services)
+            READINESS.resolve_alias("route", &services)
         );
     }
 
@@ -469,7 +554,7 @@ mod test {
 
         assert_eq!(
             Resolution::Resolved("operators.decap.operatorpb.v1.MetricsService".to_owned()),
-            resolve_alias("DeCap", &services)
+            METRICS.resolve_alias("DeCap", &services)
         );
     }
 
@@ -479,7 +564,81 @@ mod test {
 
         assert_eq!(
             Resolution::Resolved("controlplane.ynpb.v1.ReadinessService".to_owned()),
-            resolve_alias("controlplane", &services)
+            READINESS.resolve_alias("controlplane", &services)
+        );
+    }
+
+    #[test]
+    fn test_resolve_alias_is_unaffected_by_a_qualified_service() {
+        let registry = metrics_services();
+        let with_ports = metrics_services_with_ports();
+
+        for alias in ["controlplane", "route", "acl", "pipeline", "operatorpb", "metrics"] {
+            assert_eq!(
+                METRICS.resolve_alias(alias, &registry),
+                METRICS.resolve_alias(alias, &with_ports),
+                "alias \"{alias}\" resolves differently once the port service is discovered"
+            );
+        }
+    }
+
+    #[test]
+    fn test_resolve_alias_is_ambiguous_for_a_word_two_services_share() {
+        let services = metrics_services_with_ports();
+
+        assert_eq!(
+            Resolution::Ambiguous(vec![
+                "modules.route.controlplane.routepb.v1.MetricsService".to_owned(),
+                "operators.route.operatorpb.v1.MetricsService".to_owned(),
+            ]),
+            METRICS.resolve_alias("route", &services)
+        );
+    }
+
+    #[test]
+    fn test_resolve_alias_qualified_service_does_not_take_the_package_word() {
+        // A gateway running no modules, where the package word still names
+        // one service, is where taking it away would show.
+        let mut services = services("MetricsService");
+        services.push(PORT_METRICS.to_owned());
+        services.sort();
+
+        assert_eq!(
+            Resolution::Resolved("controlplane.ynpb.v1.MetricsService".to_owned()),
+            METRICS.resolve_alias("controlplane", &services)
+        );
+    }
+
+    #[test]
+    fn test_resolve_alias_selects_a_qualified_service_by_its_qualifier() {
+        let services = port_and_a_lookalike();
+
+        assert_eq!(
+            Resolution::Resolved(PORT_METRICS.to_owned()),
+            METRICS.resolve_alias("port", &services)
+        );
+    }
+
+    #[test]
+    fn test_resolve_alias_ignores_a_partial_spelling_of_a_qualifier() {
+        let services = port_and_a_lookalike();
+
+        assert_eq!(
+            Resolution::Resolved("operators.transport.operatorpb.v1.MetricsService".to_owned()),
+            METRICS.resolve_alias("por", &services)
+        );
+    }
+
+    #[test]
+    fn test_resolve_alias_is_ambiguous_when_two_services_share_a_qualifier() {
+        let services = vec![
+            "a.v1.PortMetricsService".to_owned(),
+            "b.v1.PortMetricsService".to_owned(),
+        ];
+
+        assert_eq!(
+            Resolution::Ambiguous(services.clone()),
+            METRICS.resolve_alias("port", &services)
         );
     }
 
@@ -494,7 +653,7 @@ mod test {
                 "operators.pipeline.operatorpb.v1.MetricsService".to_owned(),
                 "operators.route.operatorpb.v1.MetricsService".to_owned(),
             ]),
-            resolve_alias("operatorpb", &services)
+            METRICS.resolve_alias("operatorpb", &services)
         );
     }
 
@@ -502,12 +661,12 @@ mod test {
     fn unmatched_alias_is_unknown() {
         let services = services("ReadinessService");
 
-        assert_eq!(Resolution::Unknown, resolve_alias("balancer", &services));
+        assert_eq!(Resolution::Unknown, READINESS.resolve_alias("balancer", &services));
     }
 
     #[test]
     fn any_alias_is_unknown_without_discovered_services() {
-        assert_eq!(Resolution::Unknown, resolve_alias("route", &[]));
+        assert_eq!(Resolution::Unknown, READINESS.resolve_alias("route", &[]));
     }
 
     #[test]
@@ -533,19 +692,36 @@ mod test {
 
     #[test]
     fn derive_alias_drops_version_and_pb_segments() {
-        assert_eq!("controlplane", derive_alias("controlplane.ynpb.v1.ReadinessService"));
-        assert_eq!("route", derive_alias("operators.route.operatorpb.v1.ReadinessService"));
+        assert_eq!(
+            "controlplane",
+            READINESS.derive_alias("controlplane.ynpb.v1.ReadinessService")
+        );
+        assert_eq!(
+            "route",
+            READINESS.derive_alias("operators.route.operatorpb.v1.ReadinessService")
+        );
+    }
+
+    #[test]
+    fn test_derive_alias_names_a_qualified_service_by_its_qualifier() {
+        assert_eq!("port", METRICS.derive_alias(PORT_METRICS));
     }
 
     #[test]
     fn derive_alias_handles_double_digit_versions() {
-        assert_eq!("route", derive_alias("operators.route.operatorpb.v12.ReadinessService"));
+        assert_eq!(
+            "route",
+            READINESS.derive_alias("operators.route.operatorpb.v12.ReadinessService")
+        );
     }
 
     #[test]
     fn derive_alias_falls_back_to_the_full_name_when_nothing_remains() {
-        assert_eq!("ReadinessService", derive_alias("ReadinessService"));
-        assert_eq!("v1.pb.ReadinessService", derive_alias("v1.pb.ReadinessService"));
+        assert_eq!("ReadinessService", READINESS.derive_alias("ReadinessService"));
+        assert_eq!(
+            "v1.pb.ReadinessService",
+            READINESS.derive_alias("v1.pb.ReadinessService")
+        );
     }
 
     #[test]
@@ -555,10 +731,25 @@ mod test {
             "operators.route.operatorpb.v1.ReadinessService".to_owned(),
         ];
 
-        let aliases = alias_map(&services);
+        let aliases = READINESS.alias_map(&services);
 
         assert_eq!(Some(&"controlplane".to_owned()), aliases.get(&services[0]));
         assert_eq!(Some(&"route".to_owned()), aliases.get(&services[1]));
+    }
+
+    #[test]
+    fn test_alias_map_names_a_qualified_service_by_its_qualifier() {
+        let mut services = services("MetricsService");
+        services.push(PORT_METRICS.to_owned());
+        services.sort();
+
+        let aliases = METRICS.alias_map(&services);
+
+        assert_eq!(
+            Some(&"controlplane".to_owned()),
+            aliases.get("controlplane.ynpb.v1.MetricsService")
+        );
+        assert_eq!(Some(&"port".to_owned()), aliases.get(PORT_METRICS));
     }
 
     #[test]
@@ -568,13 +759,11 @@ mod test {
             "b.route.v2.ReadinessService".to_owned(),
         ];
 
-        let aliases = alias_map(&services);
+        let aliases = READINESS.alias_map(&services);
 
         assert_eq!(Some(&services[0]), aliases.get(&services[0]));
         assert_eq!(Some(&services[1]), aliases.get(&services[1]));
     }
-
-    const READINESS: Family = Family::new("ReadinessService", "ready", "readiness");
 
     #[test]
     fn test_resolve_among_fully_qualified_name_skips_lookup() {
