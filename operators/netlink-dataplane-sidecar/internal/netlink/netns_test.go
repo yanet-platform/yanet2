@@ -1,6 +1,7 @@
 package netlink_test
 
 import (
+	"errors"
 	"net/netip"
 	"os"
 	"testing"
@@ -8,8 +9,8 @@ import (
 
 	"github.com/stretchr/testify/require"
 	vnetlink "github.com/vishvananda/netlink"
+	"github.com/yanet-platform/yanet2/operators/netlink-dataplane-sidecar/internal/desired"
 	netreconcile "github.com/yanet-platform/yanet2/operators/netlink-dataplane-sidecar/internal/netlink"
-	"github.com/yanet-platform/yanet2/operators/netlink-dataplane-sidecar/internal/netplan"
 )
 
 // Test_Reconciler_NetnsMTU verifies that Linux enforces the intended parent and
@@ -64,17 +65,19 @@ func Test_Reconciler_NetnsMTU(t *testing.T) {
 					VlanId:    101, VlanProtocol: vnetlink.VLAN_PROTOCOL_8021Q,
 				}))
 			}
-			state := netplan.State{Links: []netplan.Link{
-				{Name: "aaa9", Kind: netplan.LinkKindVLAN, Parent: "kni9", VLANID: 100, MTU: tc.desiredChild},
+			state := desired.State{Links: []desired.Link{
+				{Name: "aaa9", Kind: desired.LinkKindVLAN, Parent: "kni9", VLANID: 100, MTU: tc.desiredChild},
 				{Name: "kni9", MTU: tc.desiredParent},
 			}}
 			reconciler := netreconcile.NewReconciler(handle, netreconcile.NewProcSysctl())
 			for idx := range 2 {
-				err := reconciler.Apply(t.Context(), state)
+				setup := func() error {
+					return errors.Join(reconciler.Create(t.Context(), state), reconciler.Configure(t.Context(), state))
+				}
 				if tc.wantError {
-					require.Error(t, err, "pass %d", idx)
+					require.Error(t, setup(), "pass %d", idx)
 				} else {
-					require.NoError(t, err, "pass %d", idx)
+					require.Eventually(t, func() bool { return setup() == nil }, 5*time.Second, 20*time.Millisecond)
 				}
 				for name, expected := range map[string]int{"kni9": tc.wantParent, "aaa9": tc.wantChild, "eth0": 2000} {
 					link, err := handle.LinkByName(name)
@@ -106,8 +109,8 @@ func newKernelTAP(t *testing.T, handle *vnetlink.Handle, name string, mtu int) *
 	return link
 }
 
-// Test_Reconciler_Netns verifies that real KNI recreation restores its VLAN
-// and explicit IPv6LL while loopback and dummy MTU drift also converges.
+// Test_Reconciler_Netns verifies that late KNI permits a later VLAN creation
+// and configuration retry while loopback and dummy setup proceeds immediately.
 func Test_Reconciler_Netns(t *testing.T) {
 	if os.Getenv("YANET_NETNS_TESTS") != "1" {
 		t.Skip("requires a disposable network namespace")
@@ -124,39 +127,30 @@ func Test_Reconciler_Netns(t *testing.T) {
 			_ = handle.LinkDel(dummy)
 		}
 	})
-	state := netplan.State{Links: []netplan.Link{
+	state := desired.State{Links: []desired.Link{
 		{Name: "kni9", MTU: 1500, Addresses: []netip.Prefix{netip.MustParsePrefix("fe80::f1/64")}},
-		{Name: "vlan9", Kind: netplan.LinkKindVLAN, Parent: "kni9", VLANID: 100},
-		{Name: "lo", Kind: netplan.LinkKindLoopback, MTU: 9000},
-		{Name: "dummy9", Kind: netplan.LinkKindDummy, MTU: 9000},
+		{Name: "vlan9", Kind: desired.LinkKindVLAN, Parent: "kni9", VLANID: 100},
+		{Name: "lo", Kind: desired.LinkKindLoopback, MTU: 9000},
+		{Name: "dummy9", Kind: desired.LinkKindDummy, MTU: 9000},
 	}}
 	reconciler := netreconcile.NewReconciler(handle, netreconcile.NewProcSysctl())
-	previousIndex := 0
-	for range 2 {
-		parent := newKernelTAP(t, handle, "kni9", 9000)
-		require.NotEqual(t, previousIndex, parent.Index)
-		previousIndex = parent.Index
-		require.Eventually(t, func() bool { return reconciler.Apply(t.Context(), state) == nil }, 5*time.Second, 20*time.Millisecond)
-		for _, name := range []string{"lo", "dummy9"} {
-			link, err := handle.LinkByName(name)
-			require.NoError(t, err)
-			require.NoError(t, handle.LinkSetMTU(link, 1500))
-		}
-		addresses, err := handle.AddrList(parent, vnetlink.FAMILY_V6)
+	require.Error(t, reconciler.Create(t.Context(), state))
+	require.Error(t, reconciler.Configure(t.Context(), state))
+	for _, name := range []string{"lo", "dummy9"} {
+		link, err := handle.LinkByName(name)
 		require.NoError(t, err)
-		require.Len(t, addresses, 1)
-		require.Equal(t, "fe80::f1/64", addresses[0].IPNet.String())
-		require.NoError(t, handle.AddrDel(parent, &addresses[0]))
-		require.Eventually(t, func() bool { return reconciler.Apply(t.Context(), state) == nil }, 5*time.Second, 20*time.Millisecond)
-		for name, mtu := range map[string]int{"kni9": 1500, "vlan9": 1500, "lo": 9000, "dummy9": 9000} {
-			link, err := handle.LinkByName(name)
-			require.NoError(t, err)
-			require.Equal(t, mtu, link.Attrs().MTU, name)
-		}
-		addresses, err = handle.AddrList(parent, vnetlink.FAMILY_V6)
-		require.NoError(t, err)
-		require.Len(t, addresses, 1)
-		require.Equal(t, "fe80::f1/64", addresses[0].IPNet.String())
-		require.NoError(t, handle.LinkDel(parent))
+		require.Equal(t, 9000, link.Attrs().MTU)
 	}
+	parent := newKernelTAP(t, handle, "kni9", 9000)
+	require.NoError(t, reconciler.Create(t.Context(), state))
+	require.Eventually(t, func() bool { return reconciler.Configure(t.Context(), state) == nil }, 5*time.Second, 20*time.Millisecond)
+	for name, mtu := range map[string]int{"kni9": 1500, "vlan9": 1500, "lo": 9000, "dummy9": 9000} {
+		link, err := handle.LinkByName(name)
+		require.NoError(t, err)
+		require.Equal(t, mtu, link.Attrs().MTU, name)
+	}
+	addresses, err := handle.AddrList(parent, vnetlink.FAMILY_V6)
+	require.NoError(t, err)
+	require.Len(t, addresses, 1)
+	require.Equal(t, "fe80::f1/64", addresses[0].IPNet.String())
 }

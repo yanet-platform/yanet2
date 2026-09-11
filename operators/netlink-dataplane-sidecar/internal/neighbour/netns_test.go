@@ -8,13 +8,13 @@ import (
 
 	"github.com/stretchr/testify/require"
 	vnetlink "github.com/vishvananda/netlink"
+	"github.com/yanet-platform/yanet2/operators/netlink-dataplane-sidecar/internal/desired"
 	"github.com/yanet-platform/yanet2/operators/netlink-dataplane-sidecar/internal/neighbour"
 	netreconcile "github.com/yanet-platform/yanet2/operators/netlink-dataplane-sidecar/internal/netlink"
-	"github.com/yanet-platform/yanet2/operators/netlink-dataplane-sidecar/internal/netplan"
 )
 
 // Test_Discover_Netns verifies that a real neighbour dump carries the observed
-// link index and a complete empty dump follows explicit kernel withdrawal.
+// logical device and a complete empty dump follows explicit kernel withdrawal.
 func Test_Discover_Netns(t *testing.T) {
 	if os.Getenv("YANET_NETNS_TESTS") != "1" {
 		t.Skip("requires a disposable network namespace")
@@ -29,12 +29,11 @@ func Test_Discover_Netns(t *testing.T) {
 	require.NoError(t, err)
 	wanted := vnetlink.Neigh{LinkIndex: link.Attrs().Index, IP: net.ParseIP("192.0.2.1"), HardwareAddr: net.HardwareAddr{2, 0, 0, 0, 0, 1}, State: vnetlink.NUD_PERMANENT}
 	require.NoError(t, handle.NeighSet(&wanted))
-	state := netplan.State{Links: []netplan.Link{{Name: "kni9"}}}
+	state := desired.State{Links: []desired.Link{{Name: "kni9"}}}
 	entries, err := neighbour.Discover(t.Context(), handle, state, map[string]string{"kni9": "logical9"})
 	require.NoError(t, err)
 	require.Len(t, entries, 1)
 	require.Equal(t, netip.MustParseAddr("192.0.2.1"), entries[0].NextHop)
-	require.Equal(t, uint32(link.Attrs().Index), entries[0].Ifindex)
 	require.Equal(t, "logical9", entries[0].HardwareRoute.Device)
 	require.NoError(t, handle.NeighDel(&wanted))
 	entries, err = neighbour.Discover(t.Context(), handle, state, map[string]string{"kni9": "logical9"})

@@ -23,13 +23,16 @@ server:
 register:
   interval: 30s
 
-# This interval provides periodic full interface and neighbour resync.
+# Refresh neighbours initially, on RTM_NEWNEIGH, and periodically. Deletion
+# events do not trigger a refresh, avoiding immediate withdrawal on flaps.
+# Independent initial interface setup retries use the same backoff limits.
 reconcile:
-  interval: 30s
+  interval: 5m
   initial_backoff: 500ms
   max_backoff: 30s
 
-# Read once at startup. A changed configuration requires a new Pod namespace.
+# Read once at startup. A changed configuration requires a process restart.
+source: netplan
 netplan_path: /etc/netplan/00-interfaces.yaml
 
 # One stable source per sidecar namespace, shared by every transport attempt.

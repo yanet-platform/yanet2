@@ -5,7 +5,6 @@ import type { Neighbour, NeighbourTableInfo } from '@yanet/core/api/neighbours';
 import { MERGED_TAB } from './types';
 
 const REFRESH_INTERVAL_MS = 5000;
-const PREFETCH_CONCURRENCY = 2;
 
 export interface UseNeighboursResult {
     tables: NeighbourTableInfo[];
@@ -64,16 +63,13 @@ export const useNeighbours = (activeTab: string, paused = false): UseNeighboursR
 
     const prefetchAll = useCallback(async (tableList: NeighbourTableInfo[]): Promise<void> => {
         const keys = [MERGED_TAB, ...tableList.map((t) => t.name || '').filter(Boolean)];
-        const results: PromiseSettledResult<{ key: string; neighbours: Neighbour[] }>[] = [];
-        for (let offset = 0; offset < keys.length; offset += PREFETCH_CONCURRENCY) {
-            results.push(...await Promise.allSettled(
-                keys.slice(offset, offset + PREFETCH_CONCURRENCY).map(async (key) => {
-                    const tableFilter = key === MERGED_TAB ? undefined : key;
-                    const data = await API.neighbours.list(tableFilter);
-                    return { key, neighbours: data.neighbours || [] };
-                }),
-            ));
-        }
+        const results = await Promise.allSettled(
+            keys.map(async (key) => {
+                const tableFilter = key === MERGED_TAB ? undefined : key;
+                const data = await API.neighbours.list(tableFilter);
+                return { key, neighbours: data.neighbours || [] };
+            }),
+        );
         const firstRejected = results.find((r) => r.status === 'rejected');
         if (firstRejected && firstRejected.status === 'rejected') {
             toaster.error('nb-list-error', 'Failed to fetch neighbours', firstRejected.reason);
@@ -144,10 +140,10 @@ export const useNeighbours = (activeTab: string, paused = false): UseNeighboursR
 
     const removeNeighbours = useCallback(
         async (table: string, nextHopWires: (string | undefined)[]): Promise<void> => {
-            const wires = [...new Set(nextHopWires.filter((wire): wire is string => wire !== undefined))];
+            const wires = nextHopWires.filter((w): w is string => w !== undefined);
             try {
                 await API.neighbours.removeNeighbours(table, wires);
-                toaster.success('nb-removed', `Removed all device variants of ${wires.length} IP(s).`);
+                toaster.success('nb-removed', `${wires.length} neighbour(s) removed.`);
                 await reloadAll();
             } catch (err) {
                 toaster.error('nb-remove-error', 'Failed to remove neighbours', err);

@@ -14,6 +14,7 @@ import (
 	vnetlink "github.com/vishvananda/netlink"
 	"golang.org/x/sys/unix"
 
+	"github.com/yanet-platform/yanet2/operators/netlink-dataplane-sidecar/internal/desired"
 	netreconcile "github.com/yanet-platform/yanet2/operators/netlink-dataplane-sidecar/internal/netlink"
 	"github.com/yanet-platform/yanet2/operators/netlink-dataplane-sidecar/internal/netplan"
 )
@@ -189,7 +190,7 @@ func Test_Reconciler_RejectsNonEthernetKNI(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			backend := newFakeBackend()
 			backend.Links["kni0"] = test.link
-			err := netreconcile.NewReconciler(backend, backend).Apply(t.Context(), netplan.State{Links: []netplan.Link{{Name: "kni0"}}})
+			err := netreconcile.NewReconciler(backend, backend).Configure(t.Context(), desired.State{Links: []desired.Link{{Name: "kni0"}}})
 			require.Error(t, err)
 			require.Empty(t, backend.Operations)
 			require.Empty(t, backend.Settings)
@@ -216,8 +217,8 @@ func Test_Reconciler_PolicyBeforeIPv6Enable(t *testing.T) {
 		}
 	}
 	acceptRA := false
-	state := netplan.State{Links: []netplan.Link{{Name: "kni0", AcceptRA: &acceptRA}}}
-	require.NoError(t, netreconcile.NewReconciler(backend, backend).Apply(t.Context(), state))
+	state := desired.State{Links: []desired.Link{{Name: "kni0", AcceptRA: &acceptRA}}}
+	require.NoError(t, netreconcile.NewReconciler(backend, backend).Configure(t.Context(), state))
 	require.True(t, checked)
 }
 
@@ -231,8 +232,8 @@ func Test_Reconciler_RepairsFailedDAD(t *testing.T) {
 			failed := mustAddr(prefix)
 			failed.Flags = unix.IFA_F_DADFAILED
 			backend.Addresses["kni0"] = []vnetlink.Addr{failed}
-			state := netplan.State{Links: []netplan.Link{{Name: "kni0", Addresses: []netip.Prefix{netip.MustParsePrefix(prefix)}}}}
-			require.NoError(t, netreconcile.NewReconciler(backend, backend).Apply(t.Context(), state))
+			state := desired.State{Links: []desired.Link{{Name: "kni0", Addresses: []netip.Prefix{netip.MustParsePrefix(prefix)}}}}
+			require.NoError(t, netreconcile.NewReconciler(backend, backend).Configure(t.Context(), state))
 			require.Equal(t, []vnetlink.Addr{mustAddr(prefix)}, backend.Addresses["kni0"])
 			require.Less(t, slices.Index(backend.Operations, "delete-address:kni0:"+prefix), slices.Index(backend.Operations, "address:kni0:"+prefix))
 		})
@@ -252,8 +253,8 @@ func Test_Reconciler_FailedDADRepairError(t *testing.T) {
 			backend.Addresses["kni0"] = []vnetlink.Addr{failed, unlisted}
 			injected := errors.New("repair failed")
 			backend.Failures[operation] = injected
-			state := netplan.State{Links: []netplan.Link{{Name: "kni0", Addresses: []netip.Prefix{netip.MustParsePrefix("fe80::f1/64")}}}}
-			require.ErrorIs(t, netreconcile.NewReconciler(backend, backend).Apply(t.Context(), state), injected)
+			state := desired.State{Links: []desired.Link{{Name: "kni0", Addresses: []netip.Prefix{netip.MustParsePrefix("fe80::f1/64")}}}}
+			require.ErrorIs(t, netreconcile.NewReconciler(backend, backend).Configure(t.Context(), state), injected)
 			require.Contains(t, backend.Addresses["kni0"], unlisted)
 		})
 	}
@@ -269,8 +270,8 @@ func Test_Reconciler_TentativeAddressBlocksConvergence(t *testing.T) {
 	address := mustAddr("fe80::f1/64")
 	address.Flags = unix.IFA_F_TENTATIVE
 	backend.Addresses["kni0"] = []vnetlink.Addr{address}
-	state := netplan.State{Links: []netplan.Link{{Name: "kni0", Addresses: []netip.Prefix{netip.MustParsePrefix("fe80::f1/64")}}}}
-	require.ErrorContains(t, netreconcile.NewReconciler(backend, backend).Apply(t.Context(), state), "duplicate address detection")
+	state := desired.State{Links: []desired.Link{{Name: "kni0", Addresses: []netip.Prefix{netip.MustParsePrefix("fe80::f1/64")}}}}
+	require.ErrorContains(t, netreconcile.NewReconciler(backend, backend).Configure(t.Context(), state), "duplicate address detection")
 	require.Empty(t, backend.Operations)
 }
 
@@ -282,8 +283,8 @@ func Test_Reconciler_CancellationDuringLookup(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 	backend.BeforeLookup = func(string) { cancel() }
-	state := netplan.State{Links: []netplan.Link{{Name: "kni0", MTU: 9000}}}
-	require.ErrorIs(t, netreconcile.NewReconciler(backend, backend).Apply(ctx, state), context.Canceled)
+	state := desired.State{Links: []desired.Link{{Name: "kni0", MTU: 9000}}}
+	require.ErrorIs(t, netreconcile.NewReconciler(backend, backend).Configure(ctx, state), context.Canceled)
 	require.Equal(t, 1500, backend.Links["kni0"].Attrs().MTU)
 	require.Empty(t, backend.Operations)
 }
@@ -335,7 +336,7 @@ func addressStrings(addresses []vnetlink.Addr) []string {
 }
 
 // fixtureNamespace supplies kernel-created base links for the public fixture.
-func fixtureNamespace(t *testing.T) (*fakeBackend, netplan.State) {
+func fixtureNamespace(t *testing.T) (*fakeBackend, desired.State) {
 	t.Helper()
 	state, err := netplan.ParseFile("../netplan/testdata/dataplane.yaml")
 	require.NoError(t, err)
@@ -348,58 +349,31 @@ func fixtureNamespace(t *testing.T) (*fakeBackend, netplan.State) {
 	return backend, state
 }
 
-// Test_Reconciler_RestoresImmutableTopology verifies that the same snapshot
-// restores links, addresses, MTU, administrative state and sysctls after drift.
-func Test_Reconciler_RestoresImmutableTopology(t *testing.T) {
-	for _, mutation := range []string{"idempotent", "missing VLAN", "missing dummy", "recreated KNI", "configuration drift"} {
-		t.Run(mutation, func(t *testing.T) {
-			backend, state := fixtureNamespace(t)
-			state.Links = append(state.Links, netplan.Link{
-				Name: "loop1", Kind: netplan.LinkKindDummy, MTU: 9000,
-				Addresses: []netip.Prefix{netip.MustParsePrefix("198.51.100.1/32")},
-			})
-			reconciler := netreconcile.NewReconciler(backend, backend)
-			require.NoError(t, reconciler.Apply(t.Context(), state))
-			backend.Operations = nil
-			switch mutation {
-			case "missing VLAN":
-				delete(backend.Links, "kni0.802")
-				delete(backend.Addresses, "kni0.802")
-			case "missing dummy":
-				delete(backend.Links, "loop1")
-				delete(backend.Addresses, "loop1")
-			case "recreated KNI":
-				for name, link := range backend.Links {
-					if link.Attrs().ParentIndex == 2 {
-						delete(backend.Links, name)
-						delete(backend.Addresses, name)
-					}
-				}
-				backend.Links["kni0"] = baseLink("kni0", 50)
-			case "configuration drift":
-				for _, link := range backend.Links {
-					link.Attrs().MTU = 1500
-					link.Attrs().Flags &^= net.FlagUp
-				}
-				backend.Addresses = map[string][]vnetlink.Addr{}
-				backend.Settings = map[string]string{}
-			}
-			require.NoError(t, reconciler.Apply(t.Context(), state))
-			if mutation == "idempotent" {
-				require.Empty(t, backend.Operations)
-			}
-			require.Len(t, backend.Links, len(state.Links))
-			for _, wanted := range state.Links {
-				link := backend.Links[wanted.Name]
-				require.Equal(t, wanted.MTU, link.Attrs().MTU)
-				require.NotZero(t, link.Attrs().Flags&net.FlagUp)
-				require.Equal(t, "0", backend.Settings[wanted.Name+"/disable_ipv6"])
-				for _, prefix := range wanted.Addresses {
-					require.Contains(t, addressStrings(backend.Addresses[wanted.Name]), prefix.String())
-				}
-			}
-		})
+// Test_Reconciler_CreationAndConfiguration verifies that creation never changes
+// existing interface settings and configuration never creates missing links.
+func Test_Reconciler_CreationAndConfiguration(t *testing.T) {
+	backend, state := fixtureNamespace(t)
+	reconciler := netreconcile.NewReconciler(backend, backend)
+	require.Error(t, reconciler.Create(t.Context(), state), "VLAN MTU requires a parent increase")
+	require.Equal(t, 1500, backend.Links["kni0"].Attrs().MTU)
+	require.Empty(t, backend.Settings)
+	require.Error(t, reconciler.Configure(t.Context(), state), "VLANs are still absent")
+	require.Nil(t, backend.Links["kni0.802"])
+	require.NoError(t, reconciler.Create(t.Context(), state))
+	require.NoError(t, reconciler.Configure(t.Context(), state))
+	for _, wanted := range state.Links {
+		link := backend.Links[wanted.Name]
+		require.Equal(t, wanted.MTU, link.Attrs().MTU)
+		require.NotZero(t, link.Attrs().Flags&net.FlagUp)
+		require.Equal(t, "0", backend.Settings[wanted.Name+"/disable_ipv6"])
+		for _, prefix := range wanted.Addresses {
+			require.Contains(t, addressStrings(backend.Addresses[wanted.Name]), prefix.String())
+		}
 	}
+	backend.Operations = nil
+	require.NoError(t, reconciler.Create(t.Context(), state))
+	require.NoError(t, reconciler.Configure(t.Context(), state))
+	require.Empty(t, backend.Operations)
 }
 
 // Test_Reconciler_ParentOrdering verifies that parent activation and both MTU
@@ -411,23 +385,15 @@ func Test_Reconciler_ParentOrdering(t *testing.T) {
 			parent := baseLink("kni0", 1)
 			parent.MTU = initialMTU
 			backend.Links["kni0"] = parent
-			if initialMTU > 9000 {
-				backend.Links["aaa"] = &vnetlink.Vlan{
-					LinkAttrs: vnetlink.LinkAttrs{Name: "aaa", Index: 2, ParentIndex: 1, MTU: initialMTU},
-					VlanId:    0, VlanProtocol: vnetlink.VLAN_PROTOCOL_8021Q,
-				}
+			backend.Links["aaa"] = &vnetlink.Vlan{
+				LinkAttrs: vnetlink.LinkAttrs{Name: "aaa", Index: 2, ParentIndex: 1, MTU: initialMTU},
+				VlanId:    0, VlanProtocol: vnetlink.VLAN_PROTOCOL_8021Q,
 			}
-			if initialMTU < 9000 {
-				backend.Links["aaa"] = &vnetlink.Vlan{
-					LinkAttrs: vnetlink.LinkAttrs{Name: "aaa", Index: 2, ParentIndex: 1, MTU: initialMTU},
-					VlanId:    0, VlanProtocol: vnetlink.VLAN_PROTOCOL_8021Q,
-				}
-			}
-			state := netplan.State{Links: []netplan.Link{
-				{Name: "aaa", Kind: netplan.LinkKindVLAN, Parent: "kni0", MTU: 9000},
+			state := desired.State{Links: []desired.Link{
+				{Name: "aaa", Kind: desired.LinkKindVLAN, Parent: "kni0", MTU: 9000},
 				{Name: "kni0", MTU: 9000},
 			}}
-			require.NoError(t, netreconcile.NewReconciler(backend, backend).Apply(t.Context(), state))
+			require.NoError(t, netreconcile.NewReconciler(backend, backend).Configure(t.Context(), state))
 			require.Equal(t, 9000, parent.MTU)
 			require.Equal(t, 9000, backend.Links["aaa"].Attrs().MTU)
 			parentChange := slices.Index(backend.Operations, "mtu:kni0")
@@ -453,8 +419,8 @@ func Test_Reconciler_PreservesUnspecifiedState(t *testing.T) {
 	automatic.Flags = 128
 	backend.Addresses["kni0"] = []vnetlink.Addr{mustAddr("192.0.2.1/24"), mustAddr("2001:db8::1/64"), automatic}
 	backend.Addresses["eth0"] = []vnetlink.Addr{automatic}
-	state := netplan.State{Links: []netplan.Link{{Name: "kni0", Addresses: []netip.Prefix{netip.MustParsePrefix("fe80::f1/64")}}}}
-	require.NoError(t, netreconcile.NewReconciler(backend, backend).Apply(t.Context(), state))
+	state := desired.State{Links: []desired.Link{{Name: "kni0", Addresses: []netip.Prefix{netip.MustParsePrefix("fe80::f1/64")}}}}
+	require.NoError(t, netreconcile.NewReconciler(backend, backend).Configure(t.Context(), state))
 	require.ElementsMatch(t, []vnetlink.Addr{mustAddr("192.0.2.1/24"), mustAddr("2001:db8::1/64"), mustAddr("fe80::f1/64")}, backend.Addresses["kni0"])
 	require.Equal(t, []vnetlink.Addr{automatic}, backend.Addresses["eth0"])
 	require.Equal(t, 1500, backend.Links["kni0"].Attrs().MTU)
@@ -467,13 +433,14 @@ func Test_Reconciler_NewVLANUsesDesiredParentMTU(t *testing.T) {
 	backend := newFakeBackend()
 	backend.Links["kni0"] = baseLink("kni0", 1)
 	backend.Links["kni0"].Attrs().MTU = 9000
-	state := netplan.State{Links: []netplan.Link{
+	state := desired.State{Links: []desired.Link{
 		{Name: "kni0", MTU: 1500},
-		{Name: "vlan0", Kind: netplan.LinkKindVLAN, Parent: "kni0", VLANID: 10},
+		{Name: "vlan0", Kind: desired.LinkKindVLAN, Parent: "kni0", VLANID: 10},
 	}}
 	reconciler := netreconcile.NewReconciler(backend, backend)
 	for range 2 {
-		require.NoError(t, reconciler.Apply(t.Context(), state))
+		require.NoError(t, reconciler.Create(t.Context(), state))
+		require.NoError(t, reconciler.Configure(t.Context(), state))
 		require.Equal(t, 1500, backend.Links["kni0"].Attrs().MTU)
 		require.Equal(t, 1500, backend.Links["vlan0"].Attrs().MTU)
 	}
@@ -485,8 +452,8 @@ func Test_Reconciler_DummyIPv6LL(t *testing.T) {
 	backend := newFakeBackend()
 	backend.Links["dummy0"] = &vnetlink.Dummy{LinkAttrs: baseLink("dummy0", 1).LinkAttrs}
 	backend.Addresses["dummy0"] = []vnetlink.Addr{mustAddr("fe80::abcd/64"), mustAddr("2001:db8::1/128")}
-	state := netplan.State{Links: []netplan.Link{{Name: "dummy0", Kind: netplan.LinkKindDummy, Addresses: []netip.Prefix{netip.MustParsePrefix("fe80::f1/64")}}}}
-	require.NoError(t, netreconcile.NewReconciler(backend, backend).Apply(t.Context(), state))
+	state := desired.State{Links: []desired.Link{{Name: "dummy0", Kind: desired.LinkKindDummy, Addresses: []netip.Prefix{netip.MustParsePrefix("fe80::f1/64")}}}}
+	require.NoError(t, netreconcile.NewReconciler(backend, backend).Configure(t.Context(), state))
 	require.ElementsMatch(t, []string{"2001:db8::1/128", "fe80::f1/64"}, addressStrings(backend.Addresses["dummy0"]))
 }
 
@@ -496,17 +463,17 @@ func Test_Reconciler_PartialFailureRetry(t *testing.T) {
 	backend := newFakeBackend()
 	backend.Links["kni0"] = baseLink("kni0", 1)
 	backend.Addresses["kni0"] = []vnetlink.Addr{mustAddr("fe80::abcd/64")}
-	state := netplan.State{Links: []netplan.Link{{Name: "kni0", MTU: 9000, Addresses: []netip.Prefix{
+	state := desired.State{Links: []desired.Link{{Name: "kni0", MTU: 9000, Addresses: []netip.Prefix{
 		netip.MustParsePrefix("192.0.2.1/24"), netip.MustParsePrefix("fe80::f1/64"),
 	}}}}
 	injected := errors.New("address rejected")
 	backend.Failures["address:fe80::f1/64"] = injected
 	reconciler := netreconcile.NewReconciler(backend, backend)
-	require.ErrorIs(t, reconciler.Apply(t.Context(), state), injected)
+	require.ErrorIs(t, reconciler.Configure(t.Context(), state), injected)
 	require.Contains(t, addressStrings(backend.Addresses["kni0"]), "192.0.2.1/24")
 	require.Contains(t, backend.Addresses["kni0"], mustAddr("fe80::abcd/64"))
 	delete(backend.Failures, "address:fe80::f1/64")
-	require.NoError(t, reconciler.Apply(t.Context(), state))
+	require.NoError(t, reconciler.Configure(t.Context(), state))
 	require.Len(t, backend.Addresses["kni0"], 2)
 }
 
@@ -520,7 +487,7 @@ func Test_Reconciler_RejectsIncompleteOrReplacedState(t *testing.T) {
 			backend.Addresses["kni0"] = []vnetlink.Addr{mustAddr("fe80::f1/128"), mustAddr("fe80::abcd/64")}
 			ctx, cancel := context.WithCancel(t.Context())
 			defer cancel()
-			state := netplan.State{Links: []netplan.Link{{Name: "kni0"}}}
+			state := desired.State{Links: []desired.Link{{Name: "kni0"}}}
 			switch failure {
 			case "late KNI":
 				delete(backend.Links, "kni0")
@@ -537,8 +504,32 @@ func Test_Reconciler_RejectsIncompleteOrReplacedState(t *testing.T) {
 			case "cancelled":
 				cancel()
 			}
-			require.Error(t, netreconcile.NewReconciler(backend, backend).Apply(ctx, state))
+			require.Error(t, netreconcile.NewReconciler(backend, backend).Configure(ctx, state))
 			require.Len(t, backend.Addresses["kni0"], 2)
 		})
 	}
+}
+
+// Test_Reconciler_IndependentLinks verifies that delayed KNI or failed policy
+// does not prevent creating and configuring other available links.
+func Test_Reconciler_IndependentLinks(t *testing.T) {
+	backend := newFakeBackend()
+	backend.Links["kni0"] = baseLink("kni0", 1)
+	injected := errors.New("sysctl unavailable")
+	backend.Failures["sysctl:kni0"] = injected
+	state := desired.State{Links: []desired.Link{
+		{Name: "kni0"}, {Name: "kni1"},
+		{Name: "dummy0", Kind: desired.LinkKindDummy, MTU: 9000},
+		{Name: "vlan0", Kind: desired.LinkKindVLAN, Parent: "kni1", VLANID: 100},
+	}}
+	reconciler := netreconcile.NewReconciler(backend, backend)
+	require.Error(t, reconciler.Create(t.Context(), state))
+	require.ErrorIs(t, reconciler.Configure(t.Context(), state), injected)
+	require.NotZero(t, backend.Links["dummy0"].Attrs().Flags&net.FlagUp)
+	require.Equal(t, 9000, backend.Links["dummy0"].Attrs().MTU)
+	backend.Links["kni1"] = baseLink("kni1", 2)
+	delete(backend.Failures, "sysctl:kni0")
+	require.NoError(t, reconciler.Create(t.Context(), state))
+	require.NoError(t, reconciler.Configure(t.Context(), state))
+	require.NotZero(t, backend.Links["vlan0"].Attrs().Flags&net.FlagUp)
 }

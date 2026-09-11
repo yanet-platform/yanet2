@@ -6,7 +6,6 @@ import (
 	"go.uber.org/zap"
 
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
-	operatorpb "github.com/yanet-platform/yanet2/operators/route/operatorpb/v1"
 )
 
 type options struct {
@@ -145,63 +144,20 @@ func WithRouteServiceConfiguredModules(names ...string) RouteServiceOption {
 }
 
 type neighbourServiceOptions struct {
-	OnChanged          func()
-	OnSnapshotReceived func(string, bool) bool
-	OnTableRemoved     func(string)
-	Readiness          *NeighbourReadiness
-	RemoteTable        string
-	RemoteDevices      []string
-	ReplacementLimits  NeighbourReplacementLimits
-	ListLimits         NeighbourListLimits
+	OnChanged     func()
+	Readiness     *NeighbourReadiness
+	RemoteTable   string
+	RemoteDevices []string
 }
 
 func newNeighbourServiceOptions() *neighbourServiceOptions {
 	return &neighbourServiceOptions{
-		OnChanged:          func() {},
-		OnSnapshotReceived: func(string, bool) bool { return false },
-		OnTableRemoved:     func(string) {},
-		ReplacementLimits: NeighbourReplacementLimits{
-			MaxEntries:           operatorpb.NeighbourSnapshotEntries,
-			MaxBytes:             operatorpb.NeighbourSnapshotBytes,
-			MaxConcurrentStreams: operatorpb.NeighbourConcurrentStreams,
-		},
-		ListLimits: NeighbourListLimits{MaxConcurrentStreams: 4, MaxDuration: 5 * time.Minute},
+		OnChanged: func() {},
 	}
 }
 
 // NeighbourServiceOption configures NewNeighbourService.
 type NeighbourServiceOption func(*neighbourServiceOptions)
-
-// WithNeighbourListLimits overrides positive read admission and lifetime limits.
-//
-// Nonpositive fields keep the defaults: four readers and five minutes per read.
-func WithNeighbourListLimits(limits NeighbourListLimits) NeighbourServiceOption {
-	return func(options *neighbourServiceOptions) {
-		if limits.MaxConcurrentStreams > 0 {
-			options.ListLimits.MaxConcurrentStreams = limits.MaxConcurrentStreams
-		}
-		if limits.MaxDuration > 0 {
-			options.ListLimits.MaxDuration = limits.MaxDuration
-		}
-	}
-}
-
-// WithNeighbourReplacementLimits overrides positive staging limits.
-//
-// Nonpositive fields keep their defaults.
-func WithNeighbourReplacementLimits(limits NeighbourReplacementLimits) NeighbourServiceOption {
-	return func(options *neighbourServiceOptions) {
-		if limits.MaxEntries > 0 {
-			options.ReplacementLimits.MaxEntries = limits.MaxEntries
-		}
-		if limits.MaxBytes > 0 {
-			options.ReplacementLimits.MaxBytes = limits.MaxBytes
-		}
-		if limits.MaxConcurrentStreams > 0 {
-			options.ReplacementLimits.MaxConcurrentStreams = limits.MaxConcurrentStreams
-		}
-	}
-}
 
 // WithNeighbourServiceOnChanged registers a callback fired whenever
 // neighbour state mutates so the reconcile loop can wake up.
@@ -209,20 +165,6 @@ func WithNeighbourServiceOnChanged(fn func()) NeighbourServiceOption {
 	return func(o *neighbourServiceOptions) {
 		o.OnChanged = fn
 	}
-}
-
-// WithNeighbourServiceOnSnapshotReceived observes replacements after content
-// and input authorization have been committed.
-//
-// The callback receives whether the content changed and may request an
-// additional reconcile wake even with equivalent content.
-func WithNeighbourServiceOnSnapshotReceived(callback func(string, bool) bool) NeighbourServiceOption {
-	return func(options *neighbourServiceOptions) { options.OnSnapshotReceived = callback }
-}
-
-// WithNeighbourServiceOnTableRemoved observes committed table deletions.
-func WithNeighbourServiceOnTableRemoved(callback func(string)) NeighbourServiceOption {
-	return func(options *neighbourServiceOptions) { options.OnTableRemoved = callback }
 }
 
 // WithNeighbourServiceReadiness couples table commits to input authorization.

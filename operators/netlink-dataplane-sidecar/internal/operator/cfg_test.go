@@ -2,6 +2,7 @@ package operator_test
 
 import (
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -19,6 +20,7 @@ func Test_Config_PublicationDefaults(t *testing.T) {
 	require.Equal(t, "netlink-dataplane-default", config.NeighbourTable)
 	require.Equal(t, uint32(100), config.NeighbourPriority)
 	require.Equal(t, 5*time.Second, config.NeighbourPublishTimeout)
+	require.Equal(t, 5*time.Minute, config.Reconcile.Interval.Unwrap())
 	require.NoError(t, xcfg.Decode([]byte("neighbour_publish_timeout: 15s\n"), config))
 	require.Equal(t, 15*time.Second, config.PublicationConfig().Timeout)
 	config.Gateways[1].Endpoint = config.Gateways[0].Endpoint
@@ -83,5 +85,59 @@ func Test_Config_ShippedDefaults(t *testing.T) {
 	config, err := xcfg.LoadConfig[sidecaroperator.Config](shippedConfigPath)
 	require.NoError(t, err)
 	require.NotEmpty(t, config.Gateways)
-	require.Equal(t, sidecaroperator.DefaultNetplanPath, config.NetplanPath.Unwrap())
+	require.Equal(t, "netplan", config.Source)
+	require.NotNil(t, config.NetplanPath)
+	require.Equal(t, sidecaroperator.DefaultNetplanPath, *config.NetplanPath)
+	require.Equal(t, sidecaroperator.DefaultNeighbourUpdateInterval, config.Reconcile.Interval.Unwrap())
+	require.NoError(t, xcfg.Decode([]byte("reconcile: {interval: 10s}\n"), config))
+	require.Equal(t, 10*time.Second, config.Reconcile.Interval.Unwrap())
+}
+
+// Test_Config_SourceSelection verifies the explicit selector and source-specific
+// exclusivity through the production file loader, including nullable paths.
+func Test_Config_SourceSelection(t *testing.T) {
+	defaults := sidecaroperator.DefaultConfig()
+	require.Empty(t, defaults.Source)
+	require.Nil(t, defaults.NetplanPath)
+	for _, tc := range []struct {
+		name   string
+		data   string
+		valid  bool
+		source string
+		path   string
+	}{
+		{name: "missing source"},
+		{name: "empty source", data: "source: ''"},
+		{name: "unknown source", data: "source: automatic"},
+		{name: "no alias", data: "source: Netplan"},
+		{name: "netplan default", data: "source: netplan", valid: true, source: "netplan"},
+		{name: "netplan null path", data: "source: netplan\nnetplan_path: null", valid: true, source: "netplan"},
+		{name: "netplan explicit path", data: "source: netplan\nnetplan_path: /no/file/read/during/decode", valid: true, source: "netplan", path: "/no/file/read/during/decode"},
+		{name: "netplan empty path", data: "source: netplan\nnetplan_path: ''"},
+		{name: "netplan with native", data: "source: netplan\nnative: {}"},
+		{name: "netplan with null native", data: "source: netplan\nnative: null"},
+		{name: "native missing block", data: "source: native"},
+		{name: "native null block", data: "source: native\nnative: null"},
+		{name: "native empty topology", data: "source: native\nnative: {}", valid: true, source: "native"},
+		{name: "native null path", data: "source: native\nnative: {}\nnetplan_path: null", valid: true, source: "native"},
+		{name: "native explicit path", data: "source: native\nnative: {}\nnetplan_path: /no/file", source: "native"},
+		{name: "native empty path", data: "source: native\nnative: {}\nnetplan_path: ''"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "sidecar.yaml")
+			require.NoError(t, os.WriteFile(path, []byte("gateways: [{name: direct, endpoint: '127.0.0.1:9'}]\n"+tc.data+"\n"), 0o600))
+			config, err := xcfg.LoadConfig[sidecaroperator.Config](path, xcfg.WithKnownFields())
+			if !tc.valid {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, tc.source, config.Source)
+			if tc.path == "" {
+				require.Nil(t, config.NetplanPath)
+			} else {
+				require.Equal(t, tc.path, *config.NetplanPath)
+			}
+		})
+	}
 }

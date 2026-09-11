@@ -1,5 +1,4 @@
 import type { Neighbour, NeighbourTableInfo } from '@yanet/core/api/neighbours';
-import { getNeighbourId } from './utils';
 
 const ZERO_MAC = '00:00:00:00:00:00';
 
@@ -26,15 +25,17 @@ export interface MergeDebugResult {
 /**
  * Derives shadowed candidates and MAC-conflict info for a merged-view row.
  *
- * Only the same canonical IP/device pair competes across sources. Results are
- * sorted by priority ascending (lower value = higher precedence).
+ * Matches candidate entries by next_hop alone — the backend merge map is keyed
+ * by next_hop only, so device is not part of the match key. Results are sorted
+ * by priority ascending (lower value = higher precedence / wins).
+ * Only called when isMergedView is true.
  */
 export const getMergeDebug = (
     winner: Neighbour,
     cache: Map<string, Neighbour[]>,
     tables: NeighbourTableInfo[],
 ): MergeDebugResult => {
-    const winnerId = getNeighbourId(winner);
+    const winnerIp = winner.next_hop ?? '';
     const winnerMac = winner.link_addr || '';
 
     const candidates: ShadowedCandidate[] = [];
@@ -46,7 +47,8 @@ export const getMergeDebug = (
 
         const entries = cache.get(tableName) || [];
         for (const entry of entries) {
-            if (getNeighbourId(entry) !== winnerId) continue;
+            const entryIp = entry.next_hop ?? '';
+            if (entryIp !== winnerIp) continue;
 
             const entryMac = entry.link_addr || '';
             const macDiffers =
@@ -69,3 +71,4 @@ export const getMergeDebug = (
 
     return { shadowed: candidates, macConflict };
 };
+

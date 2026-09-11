@@ -105,8 +105,9 @@ readiness:
   # Remote mode also requires disabled local monitoring and explicit gateway_devices.
   # Set the table to the sidecar's neighbour_table. The age budget must exceed
   # its publication cadence plus transport/retry time; empty table retains local mode.
+  # The 10m budget allows the default 5m periodic refresh plus transport/retry time.
   remote_neighbour_table: ""
-  remote_neighbour_max_age: 2m
+  remote_neighbour_max_age: 10m
   expect_bird: false
   # rate_threshold: maximum RIB updates/sec below which the bulk-load
   # gate starts counting toward the stability window.

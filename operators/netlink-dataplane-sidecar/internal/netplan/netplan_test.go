@@ -7,6 +7,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/yanet-platform/yanet2/operators/netlink-dataplane-sidecar/internal/desired"
 	"github.com/yanet-platform/yanet2/operators/netlink-dataplane-sidecar/internal/netplan"
 )
 
@@ -16,11 +17,11 @@ func Test_Parse_DataplaneFixture(t *testing.T) {
 	state, err := netplan.ParseFile("testdata/dataplane.yaml")
 	require.NoError(t, err)
 	require.Len(t, state.Links, 11)
-	counts := map[netplan.LinkKind]int{}
+	counts := map[desired.LinkKind]int{}
 	for _, link := range state.Links {
 		counts[link.Kind]++
 		require.Equal(t, 9000, link.MTU)
-		if link.Kind == netplan.LinkKindVLAN {
+		if link.Kind == desired.LinkKindVLAN {
 			require.Contains(t, []int{1600, 1619, 2000, 802}, link.VLANID)
 			require.False(t, link.IPv6LinkLocal)
 			expected := "fe80::f1/64"
@@ -30,8 +31,8 @@ func Test_Parse_DataplaneFixture(t *testing.T) {
 			require.Contains(t, link.Addresses, netip.MustParsePrefix(expected))
 		}
 	}
-	require.Equal(t, map[netplan.LinkKind]int{
-		netplan.LinkKindKNI: 2, netplan.LinkKindVLAN: 8, netplan.LinkKindLoopback: 1,
+	require.Equal(t, map[desired.LinkKind]int{
+		desired.LinkKindKNI: 2, desired.LinkKindVLAN: 8, desired.LinkKindLoopback: 1,
 	}, counts)
 }
 
@@ -90,7 +91,7 @@ func Test_Parse_ManagedBoundary(t *testing.T) {
 				require.NoError(t, err)
 			} else {
 				require.Error(t, err)
-				require.Equal(t, netplan.State{}, state)
+				require.Equal(t, desired.State{}, state)
 			}
 		})
 	}
@@ -209,8 +210,36 @@ network:
 	require.Len(t, state.Links, 3)
 	require.True(t, state.Links[0].IsEgress())
 	require.Equal(t, netip.MustParsePrefix("192.0.2.7/24"), state.Links[0].Addresses[0])
-	require.Equal(t, netplan.LinkKindLoopback, state.Links[1].Kind)
-	require.Equal(t, netplan.LinkKindDummy, state.Links[2].Kind)
+	require.Equal(t, desired.LinkKindLoopback, state.Links[1].Kind)
+	require.Equal(t, desired.LinkKindDummy, state.Links[2].Kind)
 	require.False(t, state.Links[1].IsEgress())
 	require.False(t, state.Links[2].IsEgress())
+}
+
+// Test_Parse_DisabledDHCP verifies that managed links accept only omitted or
+// boolean false DHCP declarations, independently of router advertisement policy.
+func Test_Parse_DisabledDHCP(t *testing.T) {
+	for _, topology := range []string{
+		"ethernets: {kni0: {%s}}",
+		"ethernets: {lo: {%s}}",
+		"ethernets: {kni0: {}}, vlans: {v0: {id: 0, link: kni0, %s}}",
+		"dummy-devices: {dummy0: {%s}}",
+	} {
+		for _, field := range []string{"dhcp4", "dhcp6"} {
+			for _, value := range []string{"false", "true", "null", "'false'", "'no'", "no", "0", "[]"} {
+				t.Run(topology+"/"+field+"/"+value, func(t *testing.T) {
+					data := fmt.Sprintf("network: {version: 2, "+topology+"}", field+": "+value+", accept-ra: true")
+					state, err := netplan.Parse([]byte(data))
+					if value == "false" {
+						require.NoError(t, err)
+						omitted, err := netplan.Parse(fmt.Appendf(nil, "network: {version: 2, "+topology+"}", "accept-ra: true"))
+						require.NoError(t, err)
+						require.Equal(t, omitted, state)
+					} else {
+						require.Error(t, err)
+					}
+				})
+			}
+		}
+	}
 }

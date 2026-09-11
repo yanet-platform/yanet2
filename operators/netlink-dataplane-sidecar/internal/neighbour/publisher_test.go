@@ -3,22 +3,17 @@ package neighbour_test
 import (
 	"context"
 	"errors"
-	"io"
-	"maps"
 	"net"
 	"net/netip"
 	"slices"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
-	"google.golang.org/grpc/status"
 	"google.golang.org/grpc/test/bufconn"
 	"google.golang.org/protobuf/proto"
 
@@ -28,30 +23,25 @@ import (
 	operatorpb "github.com/yanet-platform/yanet2/operators/route/operatorpb/v1"
 )
 
-type publicationCall struct {
-	Method  string
-	Context context.Context
-	Chunk   *operatorpb.ReplaceNeighboursRequest
-}
-
-type publicationTable struct {
-	Priority uint32
-	Entries  []*operatorpb.NeighbourEntry
-}
-
-// publicationService records real streaming transport and commits only at EOF.
-type publicationService struct {
+// recordingPublicationService captures decoded requests without receiver state.
+type recordingPublicationService struct {
 	operatorpb.UnimplementedNeighbourServiceServer
-	mu     sync.Mutex
-	tables map[string]publicationTable
-	calls  []publicationCall
-	hook   func(publicationCall) error
+	Requests chan *operatorpb.ReplaceNeighboursRequest
 }
 
-// newPublicationService serves the fixture with default gRPC message limits.
-func newPublicationService(t *testing.T) (*publicationService, operatorpb.NeighbourServiceClient) {
+func (m *recordingPublicationService) ReplaceNeighbours(ctx context.Context, request *operatorpb.ReplaceNeighboursRequest) (*operatorpb.ReplaceNeighboursResponse, error) {
+	select {
+	case m.Requests <- request:
+		return &operatorpb.ReplaceNeighboursResponse{}, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
+// newPublicationClient records wire payloads using default gRPC message limits.
+func newPublicationClient(t *testing.T) (<-chan *operatorpb.ReplaceNeighboursRequest, operatorpb.NeighbourServiceClient) {
 	t.Helper()
-	service := &publicationService{tables: map[string]publicationTable{}}
+	service := &recordingPublicationService{Requests: make(chan *operatorpb.ReplaceNeighboursRequest, 1)}
 	listener := bufconn.Listen(1024 * 1024)
 	server := grpc.NewServer()
 	operatorpb.RegisterNeighbourServiceServer(server, service)
@@ -74,86 +64,7 @@ func newPublicationService(t *testing.T) (*publicationService, operatorpb.Neighb
 	)
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, connection.Close()) })
-	return service, operatorpb.NewNeighbourServiceClient(connection)
-}
-
-// SetHook injects failures at receive, commit and response boundaries.
-func (m *publicationService) SetHook(hook func(publicationCall) error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.hook = hook
-}
-
-// Store replaces one complete fixture snapshot.
-func (m *publicationService) Store(name string, table publicationTable) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.tables[name] = table
-}
-
-// Tables captures immutable committed entries.
-func (m *publicationService) Tables() map[string]publicationTable {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return maps.Clone(m.tables)
-}
-
-// Calls captures completed receive boundaries without sharing the history slice.
-func (m *publicationService) Calls() []publicationCall {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return slices.Clone(m.calls)
-}
-
-// record runs a potentially blocking hook outside the history lock.
-func (m *publicationService) record(call publicationCall) error {
-	hook := m.appendCall(call)
-	if hook != nil {
-		if err := hook(call); err != nil {
-			return err
-		}
-	}
-	return status.FromContextError(call.Context.Err()).Err()
-}
-
-// appendCall atomically records a boundary and captures its failure hook.
-func (m *publicationService) appendCall(call publicationCall) func(publicationCall) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.calls = append(m.calls, call)
-	return m.hook
-}
-
-func (m *publicationService) ReplaceNeighbours(stream grpc.ClientStreamingServer[operatorpb.ReplaceNeighboursRequest, operatorpb.ReplaceNeighboursResponse]) error {
-	var first *operatorpb.ReplaceNeighboursRequest
-	var entries []*operatorpb.NeighbourEntry
-	for {
-		chunk, err := stream.Recv()
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			return err
-		}
-		if first == nil {
-			first = chunk
-		}
-		if err := m.record(publicationCall{Method: "chunk", Context: stream.Context(), Chunk: chunk}); err != nil {
-			return err
-		}
-		entries = append(entries, chunk.GetEntries()...)
-	}
-	if first == nil {
-		return status.Error(codes.InvalidArgument, "missing snapshot")
-	}
-	if err := m.record(publicationCall{Method: "commit", Context: stream.Context()}); err != nil {
-		return err
-	}
-	m.Store(first.GetTable(), publicationTable{Priority: first.GetDefaultPriority(), Entries: entries})
-	if err := m.record(publicationCall{Method: "response", Context: stream.Context()}); err != nil {
-		return err
-	}
-	return stream.SendAndClose(&operatorpb.ReplaceNeighboursResponse{})
+	return service.Requests, operatorpb.NewNeighbourServiceClient(connection)
 }
 
 // publicationConfig supplies a stable namespace identity for all transports.
@@ -169,7 +80,7 @@ func newPublisherTarget(name string, client neighbour.Client) neighbour.GatewayT
 // testDesiredEntry carries a complete observed identity in the publisher namespace.
 func testDesiredEntry(nextHop, device string) neighbour.Entry {
 	return neighbour.Entry{
-		NextHop: netip.MustParseAddr(nextHop), Ifindex: 10,
+		NextHop:       netip.MustParseAddr(nextHop),
 		HardwareRoute: hwroute.HardwareRoute{SourceMAC: [6]byte{2, 0, 0, 0, 0, 1}, DestinationMAC: [6]byte{2, 0, 0, 0, 0, 2}, Device: device},
 	}
 }
@@ -180,73 +91,65 @@ func wireEntry(entry neighbour.Entry) *operatorpb.NeighbourEntry {
 		NextHop:      commonpb.NewIPAddressFromAddr(entry.NextHop.Unmap()),
 		HardwareAddr: commonpb.NewMACAddressEUI48(entry.HardwareRoute.SourceMAC),
 		LinkAddr:     commonpb.NewMACAddressEUI48(entry.HardwareRoute.DestinationMAC),
-		Device:       entry.HardwareRoute.Device, State: operatorpb.NeighbourState_NUD_PERMANENT, Ifindex: entry.Ifindex,
+		Device:       entry.HardwareRoute.Device, State: operatorpb.NeighbourState_NUD_PERMANENT,
 	}
 }
 
-// Test_Publish_PairOrdering verifies that equal IPs retain device scope and
-// mapped IPv4 is canonicalized before deterministic pair ordering.
-func Test_Publish_PairOrdering(t *testing.T) {
-	service, client := newPublicationService(t)
-	config := publicationConfig()
-	first := testDesiredEntry("fe80::1", "logical0")
-	second := testDesiredEntry("fe80::1", "logical1")
-	entries := []neighbour.Entry{second, first, testDesiredEntry("::ffff:192.0.2.1", "logical0")}
-	targets := []neighbour.GatewayTarget{newPublisherTarget("first", client)}
-	require.NoError(t, neighbour.Publish(t.Context(), entries, targets, config))
-	actual := service.Tables()[config.TableName]
-	require.Len(t, actual.Entries, 3)
-	for idx, entry := range []neighbour.Entry{entries[2], first, second} {
-		address, err := actual.Entries[idx].GetNextHop().ToAddr()
-		require.NoError(t, err)
-		require.Equal(t, entry.NextHop.Unmap(), address)
-		require.Equal(t, entry.HardwareRoute.Device, actual.Entries[idx].GetDevice())
+// Test_Publish_WireRequest verifies canonical IP ordering, complete payloads
+// without receiver-owned metadata, and preservation of caller input.
+func Test_Publish_WireRequest(t *testing.T) {
+	ipv4 := testDesiredEntry("::ffff:192.0.2.1", "logical0")
+	ipv6 := testDesiredEntry("2001:db8::1", "logical1")
+	linkLocal := testDesiredEntry("fe80::1", "logical0")
+	for _, tc := range []struct {
+		name     string
+		entries  []neighbour.Entry
+		expected []*operatorpb.NeighbourEntry
+	}{
+		{
+			name:     "canonical IP ordering",
+			entries:  []neighbour.Entry{linkLocal, ipv6, ipv4},
+			expected: []*operatorpb.NeighbourEntry{wireEntry(ipv4), wireEntry(ipv6), wireEntry(linkLocal)},
+		},
+		{name: "empty replacement"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			requests, client := newPublicationClient(t)
+			config := publicationConfig()
+			original := slices.Clone(tc.entries)
+			targets := []neighbour.GatewayTarget{newPublisherTarget("first", client)}
+			require.NoError(t, neighbour.Publish(t.Context(), tc.entries, targets, config))
+			require.Equal(t, original, tc.entries)
+			expected := &operatorpb.ReplaceNeighboursRequest{
+				Table: config.TableName, DefaultPriority: config.DefaultPriority,
+				Entries: tc.expected,
+			}
+			require.Len(t, requests, 1)
+			require.True(t, proto.Equal(expected, <-requests))
+		})
 	}
 }
 
-// Test_Publish_WireChunk verifies that table metadata and the complete observed
-// forwarding payload reach the transport without receiver-owned fields.
-func Test_Publish_WireChunk(t *testing.T) {
-	service, client := newPublicationService(t)
-	config := publicationConfig()
-	entry := testDesiredEntry("2001:db8::1", "logical0")
-	targets := []neighbour.GatewayTarget{newPublisherTarget("first", client)}
-	require.NoError(t, neighbour.Publish(t.Context(), []neighbour.Entry{entry}, targets, config))
-	expected := &operatorpb.ReplaceNeighboursRequest{
-		Table: config.TableName, DefaultPriority: config.DefaultPriority,
-		Entries: []*operatorpb.NeighbourEntry{wireEntry(entry)},
-	}
-	calls := service.Calls()
-	require.NotEmpty(t, calls)
-	require.True(t, proto.Equal(expected, calls[0].Chunk))
-}
-
-// Test_Publish_EmptyReplacement verifies that an empty complete snapshot clears
-// only its own table and cannot enumerate or remove another producer's source.
-func Test_Publish_EmptyReplacement(t *testing.T) {
-	service, client := newPublicationService(t)
-	config := publicationConfig()
-	service.Store(config.TableName, publicationTable{Priority: 7, Entries: []*operatorpb.NeighbourEntry{wireEntry(testDesiredEntry("fe80::1", "logical0"))}})
-	service.Store("netlink-dataplane-other", publicationTable{Priority: 7})
-	targets := []neighbour.GatewayTarget{newPublisherTarget("first", client)}
-	require.NoError(t, neighbour.Publish(t.Context(), nil, targets, config))
-	require.Empty(t, service.Tables()[config.TableName].Entries)
-	require.Equal(t, uint32(7), service.Tables()["netlink-dataplane-other"].Priority)
-	require.Len(t, service.Tables(), 2)
-}
-
-// Test_Publish_InvalidSnapshot verifies that invalid pairs are rejected before
-// any transport opens, including the two wire representations of IPv4.
+// Test_Publish_InvalidSnapshot verifies that invalid payloads and duplicate
+// canonical IPs are rejected before any transport call.
 func Test_Publish_InvalidSnapshot(t *testing.T) {
-	for _, test := range []struct {
+	for _, tc := range []struct {
 		name   string
 		mutate func([]neighbour.Entry) []neighbour.Entry
 	}{
-		{name: "duplicate pair", mutate: func(entries []neighbour.Entry) []neighbour.Entry { return append(entries, entries[0]) }},
+		{name: "duplicate IP", mutate: func(entries []neighbour.Entry) []neighbour.Entry { return append(entries, entries[0]) }},
+		{name: "duplicate IP on another device", mutate: func(entries []neighbour.Entry) []neighbour.Entry {
+			duplicate := entries[0]
+			duplicate.HardwareRoute.Device = "logical1"
+			return append(entries, duplicate)
+		}},
 		{name: "mapped duplicate", mutate: func(entries []neighbour.Entry) []neighbour.Entry {
 			duplicate := entries[0]
 			duplicate.NextHop = netip.MustParseAddr("::ffff:192.0.2.1")
 			return append(entries, duplicate)
+		}},
+		{name: "mapped duplicate on another device", mutate: func(entries []neighbour.Entry) []neighbour.Entry {
+			return append(entries, testDesiredEntry("::ffff:192.0.2.1", "logical1"))
 		}},
 		{name: "invalid address", mutate: func(entries []neighbour.Entry) []neighbour.Entry { entries[0].NextHop = netip.Addr{}; return entries }},
 		{name: "zoned address", mutate: func(entries []neighbour.Entry) []neighbour.Entry {
@@ -257,12 +160,20 @@ func Test_Publish_InvalidSnapshot(t *testing.T) {
 			entries[0].HardwareRoute.Device = strings.Repeat("d", 80)
 			return entries
 		}},
+		{name: "zero source MAC", mutate: func(entries []neighbour.Entry) []neighbour.Entry {
+			entries[0].HardwareRoute.SourceMAC = [6]byte{}
+			return entries
+		}},
+		{name: "zero destination MAC", mutate: func(entries []neighbour.Entry) []neighbour.Entry {
+			entries[0].HardwareRoute.DestinationMAC = [6]byte{}
+			return entries
+		}},
 	} {
-		t.Run(test.name, func(t *testing.T) {
-			service, client := newPublicationService(t)
-			entries := test.mutate([]neighbour.Entry{testDesiredEntry("192.0.2.1", "logical0")})
+		t.Run(tc.name, func(t *testing.T) {
+			client := &unavailableClient{}
+			entries := tc.mutate([]neighbour.Entry{testDesiredEntry("192.0.2.1", "logical0")})
 			require.Error(t, neighbour.Publish(t.Context(), entries, []neighbour.GatewayTarget{newPublisherTarget("first", client)}, publicationConfig()))
-			require.Empty(t, service.Calls())
+			require.Zero(t, client.Calls)
 		})
 	}
 }

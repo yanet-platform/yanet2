@@ -1,11 +1,19 @@
-package netplan
+package desired
 
 import (
 	"errors"
 	"fmt"
 	"net/netip"
+	"regexp"
 	"strings"
 )
+
+var managedEthernetName = regexp.MustCompile(`^kni[0-9]+$`)
+
+// IsKNIName identifies the only supported base Ethernet configuration names.
+func IsKNIName(name string) bool {
+	return managedEthernetName.MatchString(name)
+}
 
 const (
 	minIPv6MTU  = 1280
@@ -93,7 +101,7 @@ func (m State) Validate() error {
 		links[link.Name] = link
 		switch link.Kind {
 		case LinkKindKNI:
-			if !managedEthernetName.MatchString(link.Name) || link.Parent != "" {
+			if !IsKNIName(link.Name) || link.Parent != "" {
 				return fmt.Errorf("link %q: expected a base KNI", link.Name)
 			}
 		case LinkKindLoopback:
@@ -101,7 +109,7 @@ func (m State) Validate() error {
 				return fmt.Errorf("link %q: expected kernel loopback lo", link.Name)
 			}
 		case LinkKindDummy, LinkKindVLAN:
-			if link.Name == "lo" || link.Name == "eth0" || link.Name == "eth1" || managedEthernetName.MatchString(link.Name) {
+			if link.Name == "lo" || link.Name == "eth0" || link.Name == "eth1" || IsKNIName(link.Name) {
 				return fmt.Errorf("link %q: name is reserved for an existing interface", link.Name)
 			}
 			if link.Kind == LinkKindDummy && link.Parent != "" {

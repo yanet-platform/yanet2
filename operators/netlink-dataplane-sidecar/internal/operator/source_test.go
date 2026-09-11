@@ -6,12 +6,13 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/yanet-platform/yanet2/operators/netlink-dataplane-sidecar/internal/desired"
 	"github.com/yanet-platform/yanet2/operators/netlink-dataplane-sidecar/internal/netplan"
 	sidecaroperator "github.com/yanet-platform/yanet2/operators/netlink-dataplane-sidecar/internal/operator"
 )
 
 // sourceFixture provides addresses and optional policy requiring deep copies.
-func sourceFixture(t *testing.T) netplan.State {
+func sourceFixture(t *testing.T) desired.State {
 	t.Helper()
 	state, err := netplan.Parse([]byte("network: {version: 2, ethernets: {kni0: {addresses: ['fe80::1/64'], accept-ra: false}}}"))
 	require.NoError(t, err)
@@ -30,17 +31,6 @@ func Test_Source_InputIsolation(t *testing.T) {
 	snapshot, ok := source.Snapshot()
 	require.True(t, ok)
 	require.Equal(t, expected, snapshot)
-}
-
-// Test_Source_WakeCoalescing verifies that notification bursts retain one
-// pending wake and never block the event observer.
-func Test_Source_WakeCoalescing(t *testing.T) {
-	source := sidecaroperator.NewSource(sourceFixture(t))
-	for range 1000 {
-		source.Notify()
-	}
-	<-source.Wake()
-	require.Empty(t, source.Wake())
 }
 
 // Test_Source_SnapshotIsolation verifies that mutating a returned snapshot
@@ -63,7 +53,23 @@ func Test_Source_SnapshotIsolation(t *testing.T) {
 func Test_Source_AdvanceRetainsDesiredState(t *testing.T) {
 	state := sourceFixture(t)
 	source := sidecaroperator.NewSource(state)
-	source.Advance(netplan.State{})
+	source.Advance(desired.State{})
+	require.Empty(t, source.Wake())
+	snapshot, ok := source.Snapshot()
+	require.True(t, ok)
+	require.Equal(t, state, snapshot)
+}
+
+// Test_Source_NotifyCoalesces verifies that event bursts retain one pending
+// collection without blocking reception or changing the immutable topology.
+func Test_Source_NotifyCoalesces(t *testing.T) {
+	state := sourceFixture(t)
+	source := sidecaroperator.NewSource(state)
+	for range 1000 {
+		source.Notify()
+	}
+	require.Len(t, source.Wake(), 1)
+	<-source.Wake()
 	snapshot, ok := source.Snapshot()
 	require.True(t, ok)
 	require.Equal(t, state, snapshot)

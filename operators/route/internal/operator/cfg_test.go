@@ -4,6 +4,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -52,6 +53,28 @@ func Test_ShippedDefaultConfig_NoUnknownKeys(t *testing.T) {
 	data, err := os.ReadFile("../../etc/yanet/yanet-route-operator-default.yaml")
 	require.NoError(t, err)
 	require.NoError(t, xcfg.CheckKnownKeys[operator.Config](data))
+}
+
+// Test_Config_RemoteNeighbourDefaultAge verifies that code and shipped defaults
+// allow a quiet five-minute publication interval plus transport and retry time.
+func Test_Config_RemoteNeighbourDefaultAge(t *testing.T) {
+	shipped, err := xcfg.LoadConfig[operator.Config]("../../etc/yanet/yanet-route-operator-default.yaml")
+	require.NoError(t, err)
+	for _, tc := range []struct {
+		name   string
+		config *operator.Config
+	}{
+		{name: "code default", config: operator.DefaultConfig()},
+		{name: "shipped YAML", config: shipped},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			maxAge := tc.config.Readiness.RemoteNeighbourMaxAge
+			require.Equal(t, 10*time.Minute, maxAge)
+			publicationInterval := 5 * time.Minute
+			transportAndRetryAllowance := time.Minute
+			require.Greater(t, maxAge, publicationInterval+transportAndRetryAllowance)
+		})
+	}
 }
 
 // Test_ShippedDefaultConfig_OmittedServerEndpointUsesEphemeralPort verifies that

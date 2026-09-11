@@ -13,6 +13,7 @@ import (
 	"github.com/yanet-platform/yanet2/common/go/operator"
 	ynpb "github.com/yanet-platform/yanet2/controlplane/ynpb/v1"
 	"github.com/yanet-platform/yanet2/modules/route/controlplane/routepb/v1"
+	"github.com/yanet-platform/yanet2/operators/route/internal/discovery/neigh"
 )
 
 type neighbourGeneration interface {
@@ -40,47 +41,50 @@ func NewGatewayActuator(
 	options ...GatewayActuatorOption,
 ) (*GatewayActuator, error) {
 	opts := newGatewayActuatorOptions()
-	for _, option := range options {
-		option(opts)
+	for _, o := range options {
+		o(opts)
 	}
 
 	if opts.Function.Name.Unwrap() == "" {
 		return nil, fmt.Errorf("gateway actuator: function is required")
 	}
-	connection, err := operator.DialGateway(cfg)
+
+	conn, err := operator.DialGateway(cfg)
 	if err != nil {
 		return nil, err
 	}
 
-	config := opts.Function
+	fn := opts.Function
 	function := &ynpb.Function{
-		Id: &commonpb.FunctionId{Name: config.Name.Unwrap()},
+		Id: &commonpb.FunctionId{Name: fn.Name.Unwrap()},
 		Chains: []*ynpb.FunctionChain{{
 			Chain: &ynpb.Chain{
-				Name: config.Chain.Unwrap(),
+				Name: fn.Chain.Unwrap(),
 				Modules: []*commonpb.ModuleId{{
 					Type: "route",
-					Name: config.Module.Unwrap(),
+					Name: fn.Module.Unwrap(),
 				}},
 			},
-			Weight: config.Weight,
+			Weight: fn.Weight,
 		}},
 	}
+
 	log := opts.Log.With(zap.String("gateway", cfg.Name))
 	actuatorOptions := []operator.FunctionActuatorOption{operator.WithFunctionLog(log)}
-	if config.IgnorePdump {
+	if fn.IgnorePdump {
 		actuatorOptions = append(actuatorOptions, operator.WithIgnorePDump())
 	}
+
 	return &GatewayActuator{
 		name:             cfg.Name,
-		conn:             connection,
-		routes:           routepb.NewRouteServiceClient(connection),
+		conn:             conn,
+		routes:           routepb.NewRouteServiceClient(conn),
 		function:         function,
-		functionActuator: operator.NewFunctionActuator(ynpb.NewFunctionServiceClient(connection), actuatorOptions...),
+		functionActuator: operator.NewFunctionActuator(ynpb.NewFunctionServiceClient(conn), actuatorOptions...),
 		devices:          opts.Devices,
 		remoteInput:      opts.RemoteInput,
 		onFIBBuilt:       opts.OnFIBBuilt,
-		log:              log.With(zap.String("function", config.Name.Unwrap())),
+		log:              log.With(zap.String("function", fn.Name.Unwrap())),
 	}, nil
 }
 
@@ -89,34 +93,38 @@ func (m *GatewayActuator) Close() error {
 	return m.conn.Close()
 }
 
-// Apply pushes each FIB and republishes the network function.
+// Apply builds and pushes the FIB for each module config to the gateway,
+// then republishes the operator's network function.
 //
-// Partial gateway failures do not skip other modules. Expired or superseded
-// remote input prevents new writes, including retries of a captured snapshot.
+// Every FIB is attempted and the function is published even on a partial
+// failure — the joined errors let the reconcile loop retry under backoff.
+// Expired or superseded remote input prevents new writes, including retries
+// of a captured snapshot.
 func (m *GatewayActuator) Apply(ctx context.Context, snapshot RouteSnapshot) error {
 	if err := m.validateNeighbourInput(snapshot.NeighbourGeneration); err != nil {
 		return err
 	}
-	var applyErr error
+	neighbours := neigh.FilterByDevices(snapshot.Neighbours, m.devices)
+
+	var err error
 	for name, dump := range snapshot.RIBs {
 		if name == "" {
-			m.log.Warn("skipping unnamed module config")
+			err = errors.Join(err, fmt.Errorf("FIB is missing module config name"))
 			continue
 		}
-		fib, stats := BuildFIB(dump, snapshot.Neighbours, m.devices, WithFIBScopeSource(snapshot.NeighbourScopeSource))
-		if stats.AmbiguousNextHops != 0 {
-			m.log.Warn("unscoped next hops have multiple devices", zap.String("module", name), zap.Int("ambiguous_next_hops", stats.AmbiguousNextHops))
-		}
+
+		fib, stats := BuildFIB(dump, neighbours)
 		fib.Name = name
 		m.onFIBBuilt(name, stats)
-		if err := m.pushFIB(ctx, fib, snapshot.NeighbourGeneration); err != nil {
-			applyErr = errors.Join(applyErr, fmt.Errorf("module %q: %w", name, err))
+		if e := m.pushFIB(ctx, fib, snapshot.NeighbourGeneration); e != nil {
+			err = errors.Join(err, fmt.Errorf("failed to push FIB to gateway %q: %w", m.name, e))
 		}
 	}
-	if err := m.validateNeighbourInput(snapshot.NeighbourGeneration); err != nil {
-		return errors.Join(applyErr, err)
+
+	if e := m.validateNeighbourInput(snapshot.NeighbourGeneration); e != nil {
+		return errors.Join(err, e)
 	}
-	return errors.Join(applyErr, m.applyFunction(ctx))
+	return errors.Join(err, m.applyFunction(ctx))
 }
 
 func (m *GatewayActuator) validateNeighbourInput(generation uint64) error {
@@ -129,52 +137,66 @@ func (m *GatewayActuator) validateNeighbourInput(generation uint64) error {
 	return nil
 }
 
+// applyFunction publishes the operator's single network-function definition to
+// the gateway.
 func (m *GatewayActuator) applyFunction(ctx context.Context) error {
 	if err := m.functionActuator.Apply(ctx, m.function); err != nil {
 		return fmt.Errorf("failed to update function on gateway %q: %w", m.name, err)
 	}
+
 	return nil
 }
 
+// pushFIB applies fib to the gateway via the UpdateFIB unary RPC.
 func (m *GatewayActuator) pushFIB(ctx context.Context, fib FIB, generation uint64) error {
 	entries := make([]*routepb.FIBEntry, len(fib.Entries))
 	for idx, entry := range fib.Entries {
-		converted, err := fibEntryToProto(entry)
+		e, err := fibEntryToProto(entry)
 		if err != nil {
 			return fmt.Errorf("failed to convert FIB entry for prefix %q: %w", entry.Prefix, err)
 		}
-		entries[idx] = converted
+		entries[idx] = e
 	}
-	request := &routepb.UpdateFIBRequest{
+
+	req := &routepb.UpdateFIBRequest{
 		ModuleName: fib.Name,
 		Entries:    entries,
 	}
+
 	if err := m.validateNeighbourInput(generation); err != nil {
 		return err
 	}
-	if _, err := m.routes.UpdateFIB(ctx, request); err != nil {
+	if _, err := m.routes.UpdateFIB(ctx, req); err != nil {
 		return fmt.Errorf("failed to call UpdateFIB: %w", err)
 	}
+
 	m.log.Debug("pushed FIB to gateway", zap.String("name", fib.Name))
 	return nil
 }
 
+// fibEntryToProto converts an internal FIBEntry to the wire range format.
 func fibEntryToProto(entry FIBEntry) (*routepb.FIBEntry, error) {
 	network, ok := xnetip.NetworkFromPrefix(entry.Prefix)
 	if !ok {
 		return nil, fmt.Errorf("invalid prefix %q", entry.Prefix)
 	}
+
 	nexthops := make([]*routepb.FIBNexthop, len(entry.Nexthops))
-	for idx, nexthop := range entry.Nexthops {
+	for idx, nh := range entry.Nexthops {
 		nexthops[idx] = &routepb.FIBNexthop{
-			SrcMac: commonpb.NewMACAddressEUI48(nexthop.SourceMAC),
-			DstMac: commonpb.NewMACAddressEUI48(nexthop.DestinationMAC),
-			Device: nexthop.Device,
+			SrcMac: commonpb.NewMACAddressEUI48(nh.SourceMAC),
+			DstMac: commonpb.NewMACAddressEUI48(nh.DestinationMAC),
+			Device: nh.Device,
 		}
 	}
+
 	ipRange, err := commonpb.NewIPRange(entry.Prefix.Addr(), network.LastAddr())
 	if err != nil {
 		return nil, err
 	}
-	return &routepb.FIBEntry{Range: ipRange, Nexthops: nexthops}, nil
+
+	return &routepb.FIBEntry{
+		Range:    ipRange,
+		Nexthops: nexthops,
+	}, nil
 }

@@ -7,10 +7,10 @@ import (
 
 	vnetlink "github.com/vishvananda/netlink"
 
-	"github.com/yanet-platform/yanet2/operators/netlink-dataplane-sidecar/internal/netplan"
+	"github.com/yanet-platform/yanet2/operators/netlink-dataplane-sidecar/internal/desired"
 )
 
-// LinkIdentity detects replacement during one restoration or discovery pass.
+// LinkIdentity detects replacement during one setup or discovery pass.
 type LinkIdentity struct {
 	Name            string
 	Index           int
@@ -48,7 +48,7 @@ func IdentifyLink(link vnetlink.Link) (LinkIdentity, error) {
 }
 
 // ValidateLink rejects incompatible objects without deleting or migrating them.
-func ValidateLink(wanted netplan.Link, link, parent vnetlink.Link) error {
+func ValidateLink(wanted desired.Link, link, parent vnetlink.Link) error {
 	identity, err := IdentifyLink(link)
 	if err != nil {
 		return err
@@ -57,20 +57,20 @@ func ValidateLink(wanted netplan.Link, link, parent vnetlink.Link) error {
 		return fmt.Errorf("link %q resolved as %q", wanted.Name, identity.Name)
 	}
 	switch wanted.Kind {
-	case netplan.LinkKindKNI:
+	case desired.LinkKindKNI:
 		if identity.Loopback || (identity.Type != "device" &&
 			(identity.Type != "tuntap" || identity.TuntapMode != vnetlink.TUNTAP_MODE_TAP)) {
 			return fmt.Errorf("KNI %q has incompatible type %q", wanted.Name, identity.Type)
 		}
-	case netplan.LinkKindLoopback:
+	case desired.LinkKindLoopback:
 		if !identity.Loopback {
 			return errors.New("lo is not a kernel loopback")
 		}
-	case netplan.LinkKindDummy:
+	case desired.LinkKindDummy:
 		if identity.Type != "dummy" {
 			return fmt.Errorf("dummy %q has incompatible type %q", wanted.Name, identity.Type)
 		}
-	case netplan.LinkKindVLAN:
+	case desired.LinkKindVLAN:
 		vlan, ok := link.(*vnetlink.Vlan)
 		if !ok || parent == nil || parent.Attrs() == nil ||
 			vlan.ParentIndex != parent.Attrs().Index || vlan.VlanId != wanted.VLANID ||

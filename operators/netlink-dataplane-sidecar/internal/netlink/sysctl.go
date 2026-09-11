@@ -7,7 +7,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/yanet-platform/yanet2/operators/netlink-dataplane-sidecar/internal/netplan"
+	"github.com/yanet-platform/yanet2/operators/netlink-dataplane-sidecar/internal/desired"
 )
 
 // ProcSysctl writes per-interface IPv6 settings below procfs.
@@ -32,7 +32,7 @@ func (m *ProcSysctl) SetIPv6(
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if err := netplan.ValidateInterfaceName(interfaceName); err != nil {
+	if err := desired.ValidateInterfaceName(interfaceName); err != nil {
 		return fmt.Errorf("invalid interface name %q: %w", interfaceName, err)
 	}
 	if setting != "accept_ra" && setting != "addr_gen_mode" && setting != "disable_ipv6" {
