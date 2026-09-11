@@ -12,84 +12,83 @@ import (
 	"github.com/yanet-platform/yanet2/operators/route/internal/discovery/neigh"
 )
 
-// neighbourEntry returns a complete device-scoped entry with caller metadata.
+// neighbourEntry returns an IP-keyed entry with caller metadata.
 func neighbourEntry(address, device string, priority uint32) neigh.NeighbourEntry {
 	return neigh.NeighbourEntry{
 		NextHop:       netip.MustParseAddr(address),
 		HardwareRoute: neigh.HardwareRoute{Device: device, DestinationMAC: [6]byte{2, 0, 0, 0, 0, 1}},
-		Priority:      priority, Ifindex: 10, State: neigh.NeighbourStatePermanent,
+		Priority:      priority, State: neigh.NeighbourStatePermanent,
 		UpdatedAt: time.Unix(1, 0),
 	}
 }
 
-// keyedEntries preserves every canonical IP/device pair in a source snapshot.
-func keyedEntries(entries ...neigh.NeighbourEntry) map[neigh.Key]neigh.NeighbourEntry {
-	result := map[neigh.Key]neigh.NeighbourEntry{}
+// keyedEntries indexes a snapshot by canonical IP.
+func keyedEntries(entries ...neigh.NeighbourEntry) map[netip.Addr]neigh.NeighbourEntry {
+	result := map[netip.Addr]neigh.NeighbourEntry{}
 	for _, entry := range entries {
-		result[entry.Key()] = entry
+		result[entry.NextHop.Unmap()] = entry
 	}
 	return result
 }
 
-// Test_NeighTable_PairPriority verifies that an override and its withdrawal
-// affect only the matching IP/device pair.
-func Test_NeighTable_PairPriority(t *testing.T) {
+// Test_NeighTable_IPPriority verifies that priority selects one entry per IP,
+// even when source tables advertise different devices.
+func Test_NeighTable_IPPriority(t *testing.T) {
 	table := neigh.NewNeighTable()
 	_, err := table.CreateSource("kernel", 100, true)
 	require.NoError(t, err)
 	_, err = table.CreateSource("static", 10, true)
 	require.NoError(t, err)
 	first := neighbourEntry("fe80::1", "kni0", 0)
-	second := neighbourEntry("fe80::1", "kni1", 0)
-	second.Ifindex = 20
+	second := neighbourEntry("fe80::2", "kni1", 0)
 	second.HardwareRoute.DestinationMAC[5] = 2
 	require.NoError(t, table.SwapSource("kernel", keyedEntries(first, second)))
 	preferred := first
+	preferred.HardwareRoute.Device = "kni2"
 	preferred.HardwareRoute.DestinationMAC[5] = 3
 	require.NoError(t, table.Add("static", []neigh.NeighbourEntry{preferred}))
 	view := table.View()
 	_, count := view.Entries()
 	require.Equal(t, 2, count)
-	actual, found := view.Lookup(first.Key())
+	actual, found := view.Lookup(first.NextHop)
 	require.True(t, found)
 	require.Equal(t, "static", actual.Source)
 	require.Equal(t, uint32(10), actual.Priority)
 	require.Equal(t, preferred.HardwareRoute, actual.HardwareRoute)
-	actual, found = view.Lookup(second.Key())
+	actual, found = view.Lookup(second.NextHop)
 	require.True(t, found)
 	require.Equal(t, "kernel", actual.Source)
 	require.Equal(t, uint32(100), actual.Priority)
 	require.Equal(t, second.HardwareRoute, actual.HardwareRoute)
 	require.NoError(t, table.SwapSource("static", nil))
-	actual, found = table.View().Lookup(first.Key())
+	actual, found = table.View().Lookup(first.NextHop)
 	require.True(t, found)
 	require.Equal(t, "kernel", actual.Source)
 	require.Equal(t, first.HardwareRoute, actual.HardwareRoute)
 }
 
-// Test_NeighTable_IPWideRemoval verifies that removal withdraws every device
-// variant of the IP in one source, preserving other addresses and sources.
-func Test_NeighTable_IPWideRemoval(t *testing.T) {
+// Test_NeighTable_IPRemoval verifies that removal preserves other addresses
+// and sources, regardless of their device payload.
+func Test_NeighTable_IPRemoval(t *testing.T) {
 	table := neigh.NewNeighTable()
 	_, err := table.CreateSource("kernel", 100, true)
 	require.NoError(t, err)
 	_, err = table.CreateSource("static", 10, true)
 	require.NoError(t, err)
 	first := neighbourEntry("fe80::1", "kni0", 0)
-	second := neighbourEntry("fe80::1", "kni1", 0)
 	unrelated := neighbourEntry("fe80::2", "kni0", 0)
-	require.NoError(t, table.SwapSource("kernel", keyedEntries(first, second, unrelated)))
+	require.NoError(t, table.SwapSource("kernel", keyedEntries(first, unrelated)))
+	first.HardwareRoute.Device = "kni1"
 	require.NoError(t, table.Add("static", []neigh.NeighbourEntry{first}))
 	require.NoError(t, table.Remove("kernel", []netip.Addr{first.NextHop}))
 	kernel, found := table.SourceView("kernel")
 	require.True(t, found)
 	entries, _ := kernel.All()
 	require.Equal(t, keyedEntries(neighbourEntry("fe80::2", "kni0", 100)), maps.Collect(entries))
-	actual, found := table.View().Lookup(first.Key())
+	actual, found := table.View().Lookup(first.NextHop)
 	require.True(t, found)
 	require.Equal(t, "static", actual.Source)
-	_, found = table.View().Lookup(second.Key())
-	require.False(t, found)
+	require.Equal(t, "kni1", actual.HardwareRoute.Device)
 }
 
 // Test_NeighTable_SourceLifecycle verifies that mutations retain source metadata
@@ -107,7 +106,7 @@ func Test_NeighTable_SourceLifecycle(t *testing.T) {
 	require.NoError(t, table.UpdateSource("custom", 70))
 	view, found := table.SourceView("custom")
 	require.True(t, found)
-	_, found = view.Lookup(entry.Key())
+	_, found = view.Lookup(entry.NextHop)
 	require.True(t, found)
 	require.ElementsMatch(t, []neigh.SourceInfo{
 		{Name: "kernel", DefaultPriority: 100, BuiltIn: true},
@@ -133,18 +132,18 @@ func Test_NeighTable_SourceLifecycle(t *testing.T) {
 func Test_NeighTable_ImmutableReplacement(t *testing.T) {
 	table := neigh.NewNeighTable()
 	first := neighbourEntry("fe80::1", "kni0", 0)
-	second := neighbourEntry("fe80::1", "kni1", 0)
+	second := neighbourEntry("fe80::2", "kni1", 0)
 	input := keyedEntries(first, second)
 	changed, err := table.ReplaceSource(t.Context(), "snapshot", 50, input)
 	require.NoError(t, err)
 	require.True(t, changed)
-	require.Equal(t, first, input[first.Key()])
+	require.Equal(t, first, input[first.NextHop])
 	clear(input)
 	previous, found := table.SourceView("snapshot")
 	require.True(t, found)
 	oldMerged := table.View()
-	oldSnapshot := table.Snapshot()
-	stored, found := previous.Lookup(first.Key())
+	oldFiltered := neigh.FilterByDevices(oldMerged, []string{"kni0"})
+	stored, found := previous.Lookup(first.NextHop)
 	require.True(t, found)
 	require.True(t, stored.UpdatedAt.After(first.UpdatedAt))
 	require.Empty(t, stored.Source)
@@ -152,17 +151,17 @@ func Test_NeighTable_ImmutableReplacement(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, changed)
 	current, _ := table.SourceView("snapshot")
-	actual, found := current.Lookup(first.Key())
+	actual, found := current.Lookup(first.NextHop)
 	require.True(t, found)
 	require.Equal(t, stored, actual)
 	first.HardwareRoute.Device = "kni2"
 	changed, err = table.ReplaceSource(t.Context(), "snapshot", 100, keyedEntries(first))
 	require.NoError(t, err)
 	require.True(t, changed)
-	_, found = table.View().Lookup(neigh.NewKey(first.NextHop, "kni0"))
+	_, found = neigh.FilterByDevices(table.View(), []string{"kni0"}).Lookup(first.NextHop)
 	require.False(t, found)
-	for _, view := range []neigh.NexthopCacheView{previous, oldMerged, oldSnapshot.ViewByDevices([]string{"kni0"})} {
-		actual, found := view.Lookup(neigh.NewKey(first.NextHop, "kni0"))
+	for _, view := range []neigh.NexthopCacheView{previous, oldMerged, oldFiltered} {
+		actual, found := view.Lookup(first.NextHop)
 		require.True(t, found)
 		require.Equal(t, stored.HardwareRoute, actual.HardwareRoute)
 		require.Equal(t, stored.UpdatedAt, actual.UpdatedAt)
@@ -178,14 +177,15 @@ func Test_NeighTable_CanonicalIdentity(t *testing.T) {
 	first := neighbourEntry("::ffff:192.0.2.1", "kni0", 0)
 	second := neighbourEntry("192.0.2.1", "kni1", 0)
 	require.NoError(t, table.Add("static", []neigh.NeighbourEntry{first, second}))
-	actual, found := table.View().Lookup(first.Key())
+	actual, found := table.View().Lookup(first.NextHop.Unmap())
 	require.True(t, found)
 	require.True(t, actual.NextHop.Is4())
+	require.Equal(t, "kni1", actual.HardwareRoute.Device)
 	require.NoError(t, table.Remove("static", []netip.Addr{first.NextHop}))
 	_, count := table.View().Entries()
 	require.Zero(t, count)
 	input := keyedEntries(first)
-	input[neigh.Key{NextHop: first.NextHop, Device: "kni0"}] = first
+	input[first.NextHop] = first
 	changed, err := table.ReplaceSource(t.Context(), "snapshot", 100, input)
 	require.Error(t, err)
 	require.False(t, changed)
@@ -193,7 +193,7 @@ func Test_NeighTable_CanonicalIdentity(t *testing.T) {
 	require.False(t, found)
 }
 
-// Test_NeighTable_ReplacementChanges verifies that scope, MAC, state and priority
+// Test_NeighTable_ReplacementChanges verifies that device, MAC, state and priority
 // changes refresh only the modified entry's timestamp.
 func Test_NeighTable_ReplacementChanges(t *testing.T) {
 	for _, test := range []struct {
@@ -204,7 +204,6 @@ func Test_NeighTable_ReplacementChanges(t *testing.T) {
 		{name: "source MAC", priority: 100, mutate: func(entry *neigh.NeighbourEntry) { entry.HardwareRoute.SourceMAC[5]++ }},
 		{name: "destination MAC", priority: 100, mutate: func(entry *neigh.NeighbourEntry) { entry.HardwareRoute.DestinationMAC[5]++ }},
 		{name: "device", priority: 100, mutate: func(entry *neigh.NeighbourEntry) { entry.HardwareRoute.Device = "kni2" }},
-		{name: "scope", priority: 100, mutate: func(entry *neigh.NeighbourEntry) { entry.Ifindex++ }},
 		{name: "state", priority: 100, mutate: func(entry *neigh.NeighbourEntry) { entry.State = neigh.NeighbourState(2) }},
 		{name: "explicit priority", priority: 100, mutate: func(entry *neigh.NeighbourEntry) { entry.Priority = 20 }},
 		{name: "default priority", priority: 200, mutate: func(entry *neigh.NeighbourEntry) {}},
@@ -216,15 +215,15 @@ func Test_NeighTable_ReplacementChanges(t *testing.T) {
 			_, err := table.ReplaceSource(t.Context(), "snapshot", 100, keyedEntries(first, second))
 			require.NoError(t, err)
 			old := table.View()
-			prior, _ := old.Lookup(first.Key())
+			prior, _ := old.Lookup(first.NextHop)
 			test.mutate(&first)
 			changed, err := table.ReplaceSource(t.Context(), "snapshot", test.priority, keyedEntries(first, second))
 			require.NoError(t, err)
 			require.True(t, changed)
-			current, _ := table.View().Lookup(first.Key())
+			current, _ := table.View().Lookup(first.NextHop)
 			require.True(t, current.UpdatedAt.After(prior.UpdatedAt))
-			prior, _ = old.Lookup(second.Key())
-			current, _ = table.View().Lookup(second.Key())
+			prior, _ = old.Lookup(second.NextHop)
+			current, _ = table.View().Lookup(second.NextHop)
 			require.Equal(t, prior, current)
 			changed, err = table.ReplaceSource(t.Context(), "snapshot", test.priority, keyedEntries(first, second))
 			require.NoError(t, err)
@@ -244,7 +243,7 @@ func Test_NeighTable_ReplacementCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 	for _, name := range []string{"snapshot", "absent"} {
-		for _, entries := range []map[neigh.Key]neigh.NeighbourEntry{nil, input} {
+		for _, entries := range []map[netip.Addr]neigh.NeighbourEntry{nil, input} {
 			changed, err := table.ReplaceSource(ctx, name, 100, entries)
 			require.ErrorIs(t, err, context.Canceled)
 			require.False(t, changed)

@@ -123,12 +123,10 @@ func NewOperator(cfg *Config, options ...Option) (*Operator, error) {
 	}
 
 	var remoteInput *NeighbourReadiness
-	scopeSource := cfg.NetlinkMonitor.TableName
 	if cfg.Readiness.RemoteNeighbourTable != "" {
-		scopeSource = cfg.Readiness.RemoteNeighbourTable
-		remoteInput = NewNeighbourReadiness(scopeSource, cfg.Readiness.RemoteNeighbourMaxAge, tracker)
+		remoteInput = NewNeighbourReadiness(cfg.Readiness.RemoteNeighbourTable, cfg.Readiness.RemoteNeighbourMaxAge, tracker)
 	}
-	source := NewRouteSource(neighTable, routeRIBStore, WithRouteSourceNeighbours(scopeSource, remoteInput))
+	source := NewRouteSource(neighTable, routeRIBStore, WithRouteSourceRemoteInput(remoteInput))
 	wake := source.WakeFunc()
 	ribHelper := newRIBReadiness(cfg.Readiness, routeRIBStore, moduleName, tracker, withRIBReadinessLog(log))
 
@@ -160,7 +158,7 @@ func NewOperator(cfg *Config, options ...Option) (*Operator, error) {
 			devices = append(devices, cfg.GatewayDevices[gateway.Name]...)
 		}
 		neighbourOptions = append(neighbourOptions,
-			WithNeighbourServiceRemoteSource(scopeSource, devices),
+			WithNeighbourServiceRemoteSource(cfg.Readiness.RemoteNeighbourTable, devices),
 			WithNeighbourServiceReadiness(remoteInput),
 		)
 	}

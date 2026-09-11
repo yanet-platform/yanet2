@@ -1,8 +1,8 @@
 package operator_test
 
 import (
+	"bytes"
 	"context"
-	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -12,26 +12,24 @@ import (
 	"net"
 	"net/http"
 	"net/netip"
+	"os"
+	"os/exec"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
-	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
-	"google.golang.org/grpc/test/bufconn"
 	"google.golang.org/protobuf/encoding/protowire"
 	"google.golang.org/protobuf/proto"
 
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
-	"github.com/yanet-platform/yanet2/common/go/readiness"
 	"github.com/yanet-platform/yanet2/controlplane/gateway"
 	ynpb "github.com/yanet-platform/yanet2/controlplane/ynpb/v1"
 	"github.com/yanet-platform/yanet2/operators/route/internal/discovery/neigh"
@@ -39,174 +37,43 @@ import (
 	operatorpb "github.com/yanet-platform/yanet2/operators/route/operatorpb/v1"
 )
 
-// Test_NeighbourService_RemoteRemoval verifies that incremental deletion cannot
-// mutate complete remote input while explicit and implicit static edits work.
-func Test_NeighbourService_RemoteRemoval(t *testing.T) {
-	tracker := readiness.NewTracker([]readiness.ScopeSpec{{Name: "neighbours"}})
-	input := operator.NewNeighbourReadiness("remote", time.Minute, tracker)
-	fixture := newNeighbourServiceFixture(t,
-		operator.WithNeighbourServiceRemoteSource("remote", []string{"logical0"}),
-		operator.WithNeighbourServiceReadiness(input),
-	)
-	chunk := replacementChunk("remote", 100, "192.0.2.1")
-	require.NoError(t, sendNeighbourSnapshot(t.Context(), fixture.Client, chunk))
-	before := sourceEntries(t, fixture.Table, "remote")
-	generation, available := input.Generation()
-	require.True(t, available)
-	changes := fixture.Changes.Load()
-	_, err := fixture.Client.RemoveNeighbours(t.Context(), &operatorpb.RemoveNeighboursRequest{
-		Table: "remote", NextHops: []*commonpb.IPAddress{chunk.Entries[0].NextHop},
-	})
-	require.Equal(t, codes.FailedPrecondition, status.Code(err))
-	require.Equal(t, before, sourceEntries(t, fixture.Table, "remote"))
-	require.Equal(t, changes, fixture.Changes.Load())
-	current, available := input.Generation()
-	require.True(t, available)
-	require.Equal(t, generation, current)
-	_, err = fixture.Table.CreateSource("static", 10, true)
-	require.NoError(t, err)
-	for _, table := range []string{"static", ""} {
-		_, err = fixture.Client.UpdateNeighbours(t.Context(), &operatorpb.UpdateNeighboursRequest{Table: table, Entries: chunk.Entries})
-		require.NoError(t, err)
-		_, err = fixture.Client.RemoveNeighbours(t.Context(), &operatorpb.RemoveNeighboursRequest{
-			Table: table, NextHops: []*commonpb.IPAddress{chunk.Entries[0].NextHop},
-		})
-		require.NoError(t, err)
-		require.Empty(t, sourceEntries(t, fixture.Table, "static"))
-	}
-	require.Equal(t, before, sourceEntries(t, fixture.Table, "remote"))
-}
-
-type replacementProgress struct {
-	Chunks   int
-	Finished bool
-	Error    error
-}
-
-// replacementObserver records when the real handler requests another chunk.
-//
-// The next receive starts only after validation and staging of the prior chunk,
-// so assertions about incomplete streams do not depend on transport timing.
-type replacementObserver struct {
-	mu       sync.Mutex
-	progress map[string]replacementProgress
-}
-
-// Record serializes progress updates from independent server streams.
-func (m *replacementObserver) Record(identity string, finished bool, err error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	progress := m.progress[identity]
-	if finished {
-		progress.Finished, progress.Error = true, err
-	} else {
-		progress.Chunks++
-	}
-	m.progress[identity] = progress
-}
-
-// Progress returns an independent observation for a single stream.
-func (m *replacementObserver) Progress(identity string) replacementProgress {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return m.progress[identity]
-}
-
-type observedReplacementStream struct {
-	grpc.ServerStream
-	Observer *replacementObserver
-	Identity string
-	received bool
-}
-
-// RecvMsg observes accepted chunks without replacing any service logic.
-func (m *observedReplacementStream) RecvMsg(message any) error {
-	if m.received {
-		m.Observer.Record(m.Identity, false, nil)
-	}
-	err := m.ServerStream.RecvMsg(message)
-	m.received = err == nil
-	return err
-}
-
 type neighbourServiceFixture struct {
 	Table    *neigh.NeighTable
+	Service  *operator.NeighbourService
 	Client   operatorpb.NeighbourServiceClient
+	Endpoint string
 	Changes  atomic.Int64
-	Observer *replacementObserver
-	Sequence atomic.Int64
-	Lists    *neighbourListObserver
 }
 
-// neighbourListProgress observes real transport sends and handler completion.
-type neighbourListProgress struct {
-	Started         atomic.Int64
-	Completed       atomic.Int64
-	HandlerFinished atomic.Bool
-	HandlerCode     atomic.Uint32
-}
-
-type neighbourListObserver struct {
-	mu    sync.Mutex
-	reads map[string]*neighbourListProgress
-}
-
-// Read returns the stable counters for one independently identified RPC.
-func (m *neighbourListObserver) Read(identity string) *neighbourListProgress {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if m.reads[identity] == nil {
-		m.reads[identity] = &neighbourListProgress{}
-	}
-	return m.reads[identity]
-}
-
-type observedNeighbourListStream struct {
-	grpc.ServerStream
-	Progress *neighbourListProgress
-}
-
-// SendMsg records entry and exit without bypassing HTTP/2 flow control.
-func (m *observedNeighbourListStream) SendMsg(message any) error {
-	m.Progress.Started.Add(1)
-	err := m.ServerStream.SendMsg(message)
-	m.Progress.Completed.Add(1)
-	return err
-}
-
-// newNeighbourServiceFixture serves the production handler with default caps.
+// newNeighbourServiceFixture serves the real unary handlers with default caps.
 func newNeighbourServiceFixture(t *testing.T, options ...operator.NeighbourServiceOption) *neighbourServiceFixture {
 	t.Helper()
-	fixture := &neighbourServiceFixture{
-		Table:    neigh.NewNeighTable(),
-		Observer: &replacementObserver{progress: map[string]replacementProgress{}},
-		Lists:    &neighbourListObserver{reads: map[string]*neighbourListProgress{}},
-	}
-	options = append(options, operator.WithNeighbourServiceOnChanged(func() { fixture.Changes.Add(1) }))
-	service := operator.NewNeighbourService(fixture.Table, options...)
-	listener := bufconn.Listen(1024 * 1024)
-	server := grpc.NewServer(grpc.StreamInterceptor(func(
-		service any, stream grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler,
-	) error {
-		identities := metadata.ValueFromIncomingContext(stream.Context(), "snapshot-id")
-		identity := ""
-		if len(identities) != 0 {
-			identity = identities[0]
-		}
-		if info.FullMethod == operatorpb.NeighbourService_ListStream_FullMethodName {
-			progress := fixture.Lists.Read(identity)
-			err := handler(service, &observedNeighbourListStream{ServerStream: stream, Progress: progress})
-			progress.HandlerCode.Store(uint32(status.Code(err)))
-			progress.HandlerFinished.Store(true)
-			return err
-		}
-		err := handler(service, &observedReplacementStream{
-			ServerStream: stream, Observer: fixture.Observer, Identity: identity,
-		})
-		fixture.Observer.Record(identity, true, err)
-		return err
-	}))
-	operatorpb.RegisterNeighbourServiceServer(server, service)
+	return newInterceptedNeighbourFixture(t, nil, options...)
+}
+
+// newInterceptedNeighbourFixture permits controlled failures around real commits.
+func newInterceptedNeighbourFixture(t *testing.T, interceptor grpc.UnaryServerInterceptor, options ...operator.NeighbourServiceOption) *neighbourServiceFixture {
+	t.Helper()
+	fixture := &neighbourServiceFixture{Table: neigh.NewNeighTable()}
+	options = append([]operator.NeighbourServiceOption{
+		operator.WithNeighbourServiceOnChanged(func() { fixture.Changes.Add(1) }),
+	}, options...)
+	fixture.Service = operator.NewNeighbourService(fixture.Table, options...)
+	server := grpc.NewServer(grpc.UnaryInterceptor(interceptor))
+	operatorpb.RegisterNeighbourServiceServer(server, fixture.Service)
+	fixture.Endpoint = serveTestGRPCServer(t, server)
+	connection, err := grpc.NewClient(fixture.Endpoint, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, connection.Close()) })
+	fixture.Client = operatorpb.NewNeighbourServiceClient(connection)
+	return fixture
+}
+
+// serveTestGRPCServer serves registered handlers until test cleanup and joins.
+func serveTestGRPCServer(t *testing.T, server *grpc.Server) string {
+	t.Helper()
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
 	var group errgroup.Group
 	group.Go(func() error {
 		err := server.Serve(listener)
@@ -220,168 +87,11 @@ func newNeighbourServiceFixture(t *testing.T, options ...operator.NeighbourServi
 		_ = listener.Close()
 		require.NoError(t, group.Wait())
 	})
-	connection, err := grpc.NewClient("passthrough:///neighbour-service",
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
-		grpc.WithStaticStreamWindowSize(64*1024),
-		grpc.WithStaticConnWindowSize(64*1024),
-		grpc.WithContextDialer(func(ctx context.Context, address string) (net.Conn, error) {
-			return listener.DialContext(ctx)
-		}),
-	)
-	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, connection.Close()) })
-	fixture.Client = operatorpb.NewNeighbourServiceClient(connection)
-	return fixture
+	return listener.Addr().String()
 }
 
-// Test_NeighbourService_ListReadBudgets verifies that stalled readers across
-// generations cannot exceed admission and are reclaimed without client reads.
-//
-// Fixed HTTP/2 windows force real sends to block. Only after all blocked sends
-// have exited and a fresh read succeeds do the old clients resume consumption.
-func Test_NeighbourService_ListReadBudgets(t *testing.T) {
-	for _, tc := range []struct {
-		name    string
-		limit   int
-		readers int
-		cancel  bool
-	}{
-		{name: "server expiry without client deadline", limit: 2, readers: 2},
-		{name: "default admission and client cancellation", limit: -1, readers: 4, cancel: true},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			duration := 3 * time.Second
-			if tc.cancel {
-				duration = -1
-			}
-			fixture := newNeighbourServiceFixture(t, operator.WithNeighbourListLimits(operator.NeighbourListLimits{
-				MaxConcurrentStreams: tc.limit, MaxDuration: duration,
-			}))
-			address := netip.MustParseAddr("2001:db8::1")
-			const entryCount = 5 * operatorpb.NeighbourChunkEntries
-			streams := []grpc.ServerStreamingClient[operatorpb.ListNeighboursResponse]{}
-			readers := []*neighbourListProgress{}
-			cancels := []context.CancelFunc{}
-			for idx := range tc.readers {
-				chunks := []*operatorpb.ReplaceNeighboursRequest{}
-				for range entryCount / operatorpb.NeighbourChunkEntries {
-					chunk := replacementChunk("snapshot", uint32(idx+1))
-					for range operatorpb.NeighbourChunkEntries {
-						entry := replacementChunk("snapshot", 1, address.String()).Entries[0]
-						entry.Device = strings.Repeat("d", 79)
-						chunk.Entries = append(chunk.Entries, entry)
-						address = address.Next()
-					}
-					chunks = append(chunks, chunk)
-				}
-				require.NoError(t, sendNeighbourSnapshot(t.Context(), fixture.Client, chunks...))
-				identity := fmt.Sprintf("reader-%d", idx)
-				ctx, cancel := context.WithCancel(t.Context())
-				t.Cleanup(cancel)
-				cancels = append(cancels, cancel)
-				_, hasDeadline := ctx.Deadline()
-				require.False(t, hasDeadline)
-				table := ""
-				if idx%2 != 0 {
-					table = "snapshot"
-				}
-				stream, err := fixture.Client.ListStream(metadata.AppendToOutgoingContext(ctx, "snapshot-id", identity),
-					&operatorpb.ListNeighboursRequest{Table: table},
-				)
-				require.NoError(t, err)
-				streams = append(streams, stream)
-				progress := fixture.Lists.Read(identity)
-				readers = append(readers, progress)
-				require.Eventually(t, func() bool {
-					return progress.Started.Load() >= 2 && progress.Started.Load() > progress.Completed.Load()
-				}, time.Second, time.Millisecond)
-			}
-			require.NoError(t, sendNeighbourSnapshot(t.Context(), fixture.Client, replacementChunk("snapshot", 100)))
-			for _, progress := range readers {
-				require.False(t, progress.HandlerFinished.Load())
-				require.Greater(t, progress.Started.Load(), progress.Completed.Load())
-			}
-			rejected, err := fixture.Client.ListStream(
-				metadata.AppendToOutgoingContext(t.Context(), "snapshot-id", "excess"),
-				&operatorpb.ListNeighboursRequest{},
-			)
-			require.NoError(t, err)
-			_, err = rejected.Recv()
-			require.Equal(t, codes.ResourceExhausted, status.Code(err))
-			require.Zero(t, fixture.Lists.Read("excess").Started.Load())
-			if tc.cancel {
-				for _, cancel := range cancels {
-					cancel()
-				}
-			}
-			code := codes.DeadlineExceeded
-			if tc.cancel {
-				code = codes.Canceled
-			}
-			require.Eventually(t, func() bool {
-				for _, progress := range readers {
-					if !progress.HandlerFinished.Load() || progress.Completed.Load() != progress.Started.Load() {
-						return false
-					}
-				}
-				return true
-			}, 10*time.Second, time.Millisecond)
-			for _, progress := range readers {
-				require.Equal(t, code, codes.Code(progress.HandlerCode.Load()))
-			}
-			require.EventuallyWithT(t, func(collect *assert.CollectT) {
-				stream, err := fixture.Client.ListStream(t.Context(), &operatorpb.ListNeighboursRequest{})
-				require.NoError(collect, err)
-				chunk, err := stream.Recv()
-				require.NoError(collect, err)
-				require.Empty(collect, chunk.GetNeighbours())
-				_, err = stream.Recv()
-				require.ErrorIs(collect, err, io.EOF)
-			}, time.Second, time.Millisecond)
-			for _, stream := range streams {
-				count := 0
-				for {
-					chunk, err := stream.Recv()
-					if err != nil {
-						require.Equal(t, code, status.Code(err))
-						break
-					}
-					count += len(chunk.GetNeighbours())
-				}
-				require.Less(t, count, entryCount)
-			}
-		})
-	}
-}
-
-// Open starts an independently observable generated-client stream.
-func (m *neighbourServiceFixture) Open(t *testing.T, ctx context.Context) (grpc.ClientStreamingClient[operatorpb.ReplaceNeighboursRequest, operatorpb.ReplaceNeighboursResponse], string) {
-	t.Helper()
-	identity := fmt.Sprint(m.Sequence.Add(1))
-	stream, err := m.Client.ReplaceNeighbours(metadata.AppendToOutgoingContext(ctx, "snapshot-id", identity))
-	require.NoError(t, err)
-	return stream, identity
-}
-
-// WaitStaged waits for the handler to accept the specified number of chunks.
-func (m *neighbourServiceFixture) WaitStaged(t *testing.T, identity string, count int) {
-	t.Helper()
-	require.Eventually(t, func() bool {
-		return m.Observer.Progress(identity).Chunks >= count
-	}, 5*time.Second, time.Millisecond)
-}
-
-// WaitFinished waits until an aborted handler has released its staging slot.
-func (m *neighbourServiceFixture) WaitFinished(t *testing.T, identity string) error {
-	t.Helper()
-	require.Eventually(t, func() bool {
-		return m.Observer.Progress(identity).Finished
-	}, 5*time.Second, time.Millisecond)
-	return m.Observer.Progress(identity).Error
-}
-
-// replacementChunk returns bounded entries with server-owned metadata unset.
-func replacementChunk(table string, priority uint32, addresses ...string) *operatorpb.ReplaceNeighboursRequest {
+// replacementRequest returns a complete snapshot with server metadata unset.
+func replacementRequest(table string, priority uint32, addresses ...string) *operatorpb.ReplaceNeighboursRequest {
 	request := &operatorpb.ReplaceNeighboursRequest{Table: table, DefaultPriority: priority}
 	for _, address := range addresses {
 		request.Entries = append(request.Entries, &operatorpb.NeighbourEntry{
@@ -395,26 +105,17 @@ func replacementChunk(table string, priority uint32, addresses ...string) *opera
 	return request
 }
 
-// sendNeighbourSnapshot returns the final server status, including send EOFs.
-func sendNeighbourSnapshot(ctx context.Context, client operatorpb.NeighbourServiceClient, chunks ...*operatorpb.ReplaceNeighboursRequest) error {
-	stream, err := client.ReplaceNeighbours(ctx)
-	if err != nil {
-		return err
+// sendNeighbourSnapshot sends exactly one full request through the unary client.
+func sendNeighbourSnapshot(ctx context.Context, client operatorpb.NeighbourServiceClient, request *operatorpb.ReplaceNeighboursRequest) error {
+	response, err := client.ReplaceNeighbours(ctx, request)
+	if err == nil && response == nil {
+		return errors.New("missing replacement acknowledgement")
 	}
-	for _, chunk := range chunks {
-		if err := stream.Send(chunk); err != nil {
-			if !errors.Is(err, io.EOF) {
-				return err
-			}
-			break
-		}
-	}
-	_, err = stream.CloseAndRecv()
 	return err
 }
 
-// sourceEntries copies a published view for timestamp and alias assertions.
-func sourceEntries(t *testing.T, table *neigh.NeighTable, name string) map[neigh.Key]neigh.NeighbourEntry {
+// sourceEntries copies an immutable source view, including entry ages.
+func sourceEntries(t *testing.T, table *neigh.NeighTable, name string) map[netip.Addr]neigh.NeighbourEntry {
 	t.Helper()
 	view, found := table.SourceView(name)
 	require.True(t, found)
@@ -422,48 +123,93 @@ func sourceEntries(t *testing.T, table *neigh.NeighTable, name string) map[neigh
 	return maps.Collect(entries)
 }
 
+// Test_NeighbourService_RemoteRemoval verifies that only complete replacements
+// can mutate configured remote input, while ordinary static edits still work.
+func Test_NeighbourService_RemoteRemoval(t *testing.T) {
+	fixture, input, _, _ := newReadinessFixture(t, 200*time.Millisecond)
+	request := replacementRequest("remote", 100, "192.0.2.1")
+	require.NoError(t, sendNeighbourSnapshot(t.Context(), fixture.Client, request))
+	before := sourceEntries(t, fixture.Table, "remote")
+	generation, available := input.Generation()
+	require.True(t, available)
+	_, err := fixture.Client.RemoveNeighbours(t.Context(), &operatorpb.RemoveNeighboursRequest{
+		Table: "remote", NextHops: []*commonpb.IPAddress{request.Entries[0].NextHop},
+	})
+	require.Equal(t, codes.FailedPrecondition, status.Code(err))
+	_, err = fixture.Client.UpdateNeighbours(t.Context(), &operatorpb.UpdateNeighboursRequest{Table: "remote", Entries: request.Entries})
+	require.Equal(t, codes.FailedPrecondition, status.Code(err))
+	require.Equal(t, before, sourceEntries(t, fixture.Table, "remote"))
+	current, available := input.Generation()
+	require.True(t, available)
+	require.Equal(t, generation, current)
+	require.Equal(t, int64(1), fixture.Changes.Load())
+	for _, stale := range []bool{false, true} {
+		if stale {
+			require.Eventually(t, func() bool { return !input.Available() }, time.Second, time.Millisecond)
+		}
+		_, err = fixture.Client.UpdateTable(t.Context(), &operatorpb.UpdateNeighbourTableRequest{Name: "remote", DefaultPriority: 200})
+		require.Equal(t, codes.FailedPrecondition, status.Code(err))
+		require.Equal(t, []neigh.SourceInfo{{Name: "remote", DefaultPriority: 100, EntryCount: 1}}, fixture.Table.ListSources())
+		require.Equal(t, before, sourceEntries(t, fixture.Table, "remote"))
+		current, available = input.Generation()
+		require.Equal(t, !stale, available)
+		require.Equal(t, generation, current)
+		require.Equal(t, int64(1), fixture.Changes.Load())
+	}
+	request.DefaultPriority = 200
+	require.NoError(t, sendNeighbourSnapshot(t.Context(), fixture.Client, request))
+	require.Equal(t, []neigh.SourceInfo{{Name: "remote", DefaultPriority: 200, EntryCount: 1}}, fixture.Table.ListSources())
+	require.Equal(t, uint32(200), sourceEntries(t, fixture.Table, "remote")[netip.MustParseAddr("192.0.2.1")].Priority)
+	current, available = input.Generation()
+	require.True(t, available)
+	require.Equal(t, generation+1, current)
+	require.Equal(t, int64(2), fixture.Changes.Load())
+	_, err = fixture.Client.CreateTable(t.Context(), &operatorpb.CreateNeighbourTableRequest{Name: "custom", DefaultPriority: 10})
+	require.NoError(t, err)
+	_, err = fixture.Client.UpdateTable(t.Context(), &operatorpb.UpdateNeighbourTableRequest{Name: "custom", DefaultPriority: 20})
+	require.NoError(t, err)
+	require.Contains(t, fixture.Table.ListSources(), neigh.SourceInfo{Name: "custom", DefaultPriority: 20})
+	require.Equal(t, int64(4), fixture.Changes.Load())
+	_, err = fixture.Table.CreateSource("static", 10, true)
+	require.NoError(t, err)
+	for _, table := range []string{"static", ""} {
+		_, err = fixture.Client.UpdateNeighbours(t.Context(), &operatorpb.UpdateNeighboursRequest{Table: table, Entries: request.Entries})
+		require.NoError(t, err)
+		_, err = fixture.Client.RemoveNeighbours(t.Context(), &operatorpb.RemoveNeighboursRequest{
+			Table: table, NextHops: []*commonpb.IPAddress{request.Entries[0].NextHop},
+		})
+		require.NoError(t, err)
+		require.Empty(t, sourceEntries(t, fixture.Table, "static"))
+	}
+}
+
 // Test_NeighbourService_AtomicReplacement verifies that entries and priority
-// become visible together only on EOF.
+// commit together and retained views never change after a replacement.
 func Test_NeighbourService_AtomicReplacement(t *testing.T) {
 	for _, existing := range []bool{false, true} {
 		t.Run(fmt.Sprintf("existing=%t", existing), func(t *testing.T) {
 			fixture := newNeighbourServiceFixture(t)
 			if existing {
-				require.NoError(t, sendNeighbourSnapshot(t.Context(), fixture.Client,
-					replacementChunk("snapshot", 10, "192.0.2.1"),
-				))
+				require.NoError(t, sendNeighbourSnapshot(t.Context(), fixture.Client, replacementRequest("snapshot", 10, "192.0.2.1")))
 			}
-			before := fixture.Table.ListSources()
-			oldMerged := fixture.Table.View()
+			previous := fixture.Table.View()
+			oldEntries, _ := previous.All()
+			before := maps.Collect(oldEntries)
 			changes := fixture.Changes.Load()
-			first := replacementChunk("snapshot", 200, "192.0.2.2")
-			second := replacementChunk("snapshot", 200, "2001:db8::1")
-			second.Entries[0].Priority = 7
-			stream, identity := fixture.Open(t, t.Context())
-			for idx, chunk := range []*operatorpb.ReplaceNeighboursRequest{first, second} {
-				require.NoError(t, stream.Send(chunk))
-				fixture.WaitStaged(t, identity, idx+1)
-				require.Equal(t, before, fixture.Table.ListSources())
-				require.Equal(t, changes, fixture.Changes.Load())
-				_, found := fixture.Table.View().Lookup(neigh.NewKey(netip.MustParseAddr("192.0.2.2"), "logical0"))
-				require.False(t, found)
-			}
-			_, err := stream.CloseAndRecv()
-			require.NoError(t, err)
+			request := replacementRequest("snapshot", 200, "192.0.2.2", "2001:db8::1")
+			request.Entries[1].Priority = 7
+			require.NoError(t, sendNeighbourSnapshot(t.Context(), fixture.Client, request))
 			require.Equal(t, changes+1, fixture.Changes.Load())
 			require.Equal(t, []neigh.SourceInfo{{Name: "snapshot", DefaultPriority: 200, EntryCount: 2}}, fixture.Table.ListSources())
 			entries := sourceEntries(t, fixture.Table, "snapshot")
-			require.Equal(t, uint32(200), entries[neigh.NewKey(netip.MustParseAddr("192.0.2.2"), "logical0")].Priority)
-			require.Equal(t, uint32(7), entries[neigh.NewKey(netip.MustParseAddr("2001:db8::1"), "logical0")].Priority)
+			require.Equal(t, uint32(200), entries[netip.MustParseAddr("192.0.2.2")].Priority)
+			require.Equal(t, uint32(7), entries[netip.MustParseAddr("2001:db8::1")].Priority)
 			for _, entry := range entries {
 				require.Equal(t, neigh.NeighbourStatePermanent, entry.State)
 				require.False(t, entry.UpdatedAt.IsZero())
 			}
-			_, found := oldMerged.Lookup(neigh.NewKey(netip.MustParseAddr("192.0.2.2"), "logical0"))
-			require.False(t, found)
-			_, found = fixture.Table.View().Lookup(neigh.NewKey(netip.MustParseAddr("192.0.2.1"), "logical0"))
-			require.False(t, found)
-
+			oldEntries, _ = previous.All()
+			require.Equal(t, before, maps.Collect(oldEntries))
 			response, err := fixture.Client.List(t.Context(), &operatorpb.ListNeighboursRequest{Table: "snapshot"})
 			require.NoError(t, err)
 			require.Len(t, response.GetNeighbours(), 2)
@@ -474,37 +220,27 @@ func Test_NeighbourService_AtomicReplacement(t *testing.T) {
 	}
 }
 
-// Test_NeighbourService_EquivalentReplacement verifies that equivalent content
-// in a different chunk order retains timestamps and produces no wake.
-func Test_NeighbourService_EquivalentReplacement(t *testing.T) {
-	fixture := newNeighbourServiceFixture(t)
-	first := replacementChunk("snapshot", 100, "192.0.2.1")
-	second := replacementChunk("snapshot", 100, "2001:db8::1")
-	require.NoError(t, sendNeighbourSnapshot(t.Context(), fixture.Client, first, second))
-	before := sourceEntries(t, fixture.Table, "snapshot")
-	changes := fixture.Changes.Load()
-	require.NoError(t, sendNeighbourSnapshot(t.Context(), fixture.Client, second, first))
-	require.Equal(t, before, sourceEntries(t, fixture.Table, "snapshot"))
-	require.Equal(t, changes, fixture.Changes.Load())
-}
-
 // Test_NeighbourService_EmptyReplacement verifies that an explicit empty
-// snapshot clears a source once and an equivalent empty refresh stays silent.
+// replacement clears only its source and an empty heartbeat retains generation.
 func Test_NeighbourService_EmptyReplacement(t *testing.T) {
-	fixture := newNeighbourServiceFixture(t)
-	require.NoError(t, sendNeighbourSnapshot(t.Context(), fixture.Client, replacementChunk("snapshot", 100, "192.0.2.1")))
-	for range 2 {
-		require.NoError(t, sendNeighbourSnapshot(t.Context(), fixture.Client, replacementChunk("snapshot", 100)))
-		require.Empty(t, sourceEntries(t, fixture.Table, "snapshot"))
-		require.Equal(t, []neigh.SourceInfo{{Name: "snapshot", DefaultPriority: 100}}, fixture.Table.ListSources())
-		require.Equal(t, int64(2), fixture.Changes.Load())
-	}
+	fixture, input, _, _ := newReadinessFixture(t, time.Minute)
+	require.NoError(t, sendNeighbourSnapshot(t.Context(), fixture.Client, replacementRequest("other", 100, "192.0.2.2")))
+	require.NoError(t, sendNeighbourSnapshot(t.Context(), fixture.Client, replacementRequest("remote", 100, "192.0.2.1")))
+	require.NoError(t, sendNeighbourSnapshot(t.Context(), fixture.Client, replacementRequest("remote", 100)))
+	generation, _ := input.Generation()
+	require.NoError(t, sendNeighbourSnapshot(t.Context(), fixture.Client, replacementRequest("remote", 100)))
+	current, available := input.Generation()
+	require.True(t, available)
+	require.Equal(t, generation, current)
+	require.Empty(t, sourceEntries(t, fixture.Table, "remote"))
+	require.Len(t, sourceEntries(t, fixture.Table, "other"), 1)
+	require.Equal(t, int64(3), fixture.Changes.Load())
 }
 
-// Test_NeighbourService_DeviceNameBoundary verifies that both incremental and
-// complete updates preserve byte-exact device names within the dataplane ABI.
+// Test_NeighbourService_DeviceNameBoundary verifies that incremental and full
+// updates enforce the byte limit rather than counting Unicode characters.
 func Test_NeighbourService_DeviceNameBoundary(t *testing.T) {
-	for _, test := range []struct {
+	for _, tc := range []struct {
 		name   string
 		device string
 		valid  bool
@@ -514,24 +250,23 @@ func Test_NeighbourService_DeviceNameBoundary(t *testing.T) {
 		{name: "79 UTF-8 bytes", device: strings.Repeat("é", 39) + "a", valid: true},
 		{name: "80 UTF-8 bytes", device: strings.Repeat("é", 40)},
 	} {
-		t.Run(test.name, func(t *testing.T) {
+		t.Run(tc.name, func(t *testing.T) {
 			fixture := newNeighbourServiceFixture(t)
 			_, err := fixture.Table.CreateSource("static", 100, true)
 			require.NoError(t, err)
-			chunk := replacementChunk("remote", 100, "192.0.2.1")
-			chunk.Entries[0].Device = test.device
+			request := replacementRequest("snapshot", 100, "192.0.2.1")
+			request.Entries[0].Device = tc.device
 			for _, replace := range []bool{false, true} {
 				table := "static"
 				if replace {
-					table = "remote"
-					err = sendNeighbourSnapshot(t.Context(), fixture.Client, chunk)
+					table = "snapshot"
+					err = sendNeighbourSnapshot(t.Context(), fixture.Client, request)
 				} else {
-					_, err = fixture.Client.UpdateNeighbours(t.Context(), &operatorpb.UpdateNeighboursRequest{Table: table, Entries: chunk.Entries})
+					_, err = fixture.Client.UpdateNeighbours(t.Context(), &operatorpb.UpdateNeighboursRequest{Table: table, Entries: request.Entries})
 				}
-				if test.valid {
+				if tc.valid {
 					require.NoError(t, err)
-					entries := sourceEntries(t, fixture.Table, table)
-					require.Contains(t, entries, neigh.NewKey(netip.MustParseAddr("192.0.2.1"), test.device))
+					require.Equal(t, tc.device, sourceEntries(t, fixture.Table, table)[netip.MustParseAddr("192.0.2.1")].HardwareRoute.Device)
 				} else {
 					require.Equal(t, codes.InvalidArgument, status.Code(err))
 				}
@@ -540,249 +275,182 @@ func Test_NeighbourService_DeviceNameBoundary(t *testing.T) {
 	}
 }
 
-// Test_NeighbourService_PairIdentity verifies that equal IPs on distinct devices
-// retain their scope and mapped IPv4 duplicates cannot replace last-good data.
-func Test_NeighbourService_PairIdentity(t *testing.T) {
-	fixture := newNeighbourServiceFixture(t)
-	first := replacementChunk("snapshot", 100, "192.0.2.1")
-	first.Entries[0].Ifindex = 10
-	second := replacementChunk("snapshot", 100, "192.0.2.1")
-	second.Entries[0].Device = "logical1"
-	second.Entries[0].Ifindex = 20
-	require.NoError(t, sendNeighbourSnapshot(t.Context(), fixture.Client, first, second))
-	before := sourceEntries(t, fixture.Table, "snapshot")
-	require.Len(t, before, 2)
-	require.Equal(t, uint32(10), before[neigh.NewKey(netip.MustParseAddr("192.0.2.1"), "logical0")].Ifindex)
-	require.Equal(t, uint32(20), before[neigh.NewKey(netip.MustParseAddr("192.0.2.1"), "logical1")].Ifindex)
-	duplicate := replacementChunk("snapshot", 100, "::ffff:192.0.2.1")
-	require.Equal(t, codes.InvalidArgument, status.Code(sendNeighbourSnapshot(t.Context(), fixture.Client, first, duplicate)))
-	require.Equal(t, before, sourceEntries(t, fixture.Table, "snapshot"))
-}
-
-// Test_NeighbourService_InvalidReplacement verifies that malformed later chunks
-// cannot publish any staged entries or change last-good table metadata.
+// Test_NeighbourService_InvalidReplacement verifies that a malformed final
+// entry cannot alter entries, priority, generation or expired freshness.
 func Test_NeighbourService_InvalidReplacement(t *testing.T) {
-	for _, test := range []struct {
+	for _, tc := range []struct {
 		name   string
-		mutate func(*operatorpb.ReplaceNeighboursRequest, *operatorpb.ReplaceNeighboursRequest) []*operatorpb.ReplaceNeighboursRequest
+		mutate func(*operatorpb.ReplaceNeighboursRequest)
 	}{
-		{name: "empty stream", mutate: func(first, second *operatorpb.ReplaceNeighboursRequest) []*operatorpb.ReplaceNeighboursRequest {
-			return nil
+		{name: "missing table", mutate: func(request *operatorpb.ReplaceNeighboursRequest) { request.Table = "" }},
+		{name: "overlong table", mutate: func(request *operatorpb.ReplaceNeighboursRequest) { request.Table = strings.Repeat("t", 129) }},
+		{name: "invalid table prefix", mutate: func(request *operatorpb.ReplaceNeighboursRequest) { request.Table = "_remote" }},
+		{name: "non ASCII table", mutate: func(request *operatorpb.ReplaceNeighboursRequest) { request.Table = "réseau" }},
+		{name: "nil entry", mutate: func(request *operatorpb.ReplaceNeighboursRequest) { request.Entries[1] = nil }},
+		{name: "nil next hop", mutate: func(request *operatorpb.ReplaceNeighboursRequest) { request.Entries[1].NextHop = nil }},
+		{name: "short next hop", mutate: func(request *operatorpb.ReplaceNeighboursRequest) { request.Entries[1].NextHop.Addr = []byte{1, 2, 3} }},
+		{name: "nil source MAC", mutate: func(request *operatorpb.ReplaceNeighboursRequest) { request.Entries[1].HardwareAddr = nil }},
+		{name: "nil destination MAC", mutate: func(request *operatorpb.ReplaceNeighboursRequest) { request.Entries[1].LinkAddr = nil }},
+		{name: "source MAC above EUI48", mutate: func(request *operatorpb.ReplaceNeighboursRequest) { request.Entries[1].HardwareAddr.Addr = 1 << 48 }},
+		{name: "destination MAC above EUI48", mutate: func(request *operatorpb.ReplaceNeighboursRequest) { request.Entries[1].LinkAddr.Addr = 1 << 48 }},
+		{name: "overlong device", mutate: func(request *operatorpb.ReplaceNeighboursRequest) {
+			request.Entries[1].Device = strings.Repeat("d", 80)
 		}},
-		{name: "missing table", mutate: func(first, second *operatorpb.ReplaceNeighboursRequest) []*operatorpb.ReplaceNeighboursRequest {
-			first.Table = ""
-			return []*operatorpb.ReplaceNeighboursRequest{first}
+		{name: "unknown remote device", mutate: func(request *operatorpb.ReplaceNeighboursRequest) { request.Entries[1].Device = "unknown" }},
+		{name: "missing remote device", mutate: func(request *operatorpb.ReplaceNeighboursRequest) { request.Entries[1].Device = "" }},
+		{name: "server owned source", mutate: func(request *operatorpb.ReplaceNeighboursRequest) { request.Entries[1].Source = "remote" }},
+		{name: "server owned timestamp", mutate: func(request *operatorpb.ReplaceNeighboursRequest) { request.Entries[1].UpdatedAt = 1 }},
+		{name: "duplicate IP on same device", mutate: func(request *operatorpb.ReplaceNeighboursRequest) {
+			request.Entries[1].NextHop = request.Entries[0].NextHop
 		}},
-		{name: "overlong table", mutate: func(first, second *operatorpb.ReplaceNeighboursRequest) []*operatorpb.ReplaceNeighboursRequest {
-			first.Table = strings.Repeat("t", 129)
-			return []*operatorpb.ReplaceNeighboursRequest{first}
+		{name: "duplicate IP on different device", mutate: func(request *operatorpb.ReplaceNeighboursRequest) {
+			request.Entries[1].NextHop = request.Entries[0].NextHop
+			request.Entries[1].Device = "logical1"
 		}},
-		{name: "invalid table prefix", mutate: func(first, second *operatorpb.ReplaceNeighboursRequest) []*operatorpb.ReplaceNeighboursRequest {
-			first.Table = "_snapshot"
-			return []*operatorpb.ReplaceNeighboursRequest{first}
-		}},
-		{name: "non ASCII table", mutate: func(first, second *operatorpb.ReplaceNeighboursRequest) []*operatorpb.ReplaceNeighboursRequest {
-			first.Table = "\u0442\u0430\u0431\u043b\u0438\u0446\u0430"
-			return []*operatorpb.ReplaceNeighboursRequest{first}
-		}},
-		{name: "different table", mutate: func(first, second *operatorpb.ReplaceNeighboursRequest) []*operatorpb.ReplaceNeighboursRequest {
-			second.Table = "another"
-			return []*operatorpb.ReplaceNeighboursRequest{first, second}
-		}},
-		{name: "different priority", mutate: func(first, second *operatorpb.ReplaceNeighboursRequest) []*operatorpb.ReplaceNeighboursRequest {
-			second.DefaultPriority++
-			return []*operatorpb.ReplaceNeighboursRequest{first, second}
-		}},
-		{name: "nonempty then empty", mutate: func(first, second *operatorpb.ReplaceNeighboursRequest) []*operatorpb.ReplaceNeighboursRequest {
-			second.Entries = nil
-			return []*operatorpb.ReplaceNeighboursRequest{first, second}
-		}},
-		{name: "empty then nonempty", mutate: func(first, second *operatorpb.ReplaceNeighboursRequest) []*operatorpb.ReplaceNeighboursRequest {
-			first.Entries = nil
-			return []*operatorpb.ReplaceNeighboursRequest{first, second}
-		}},
-		{name: "two empty chunks", mutate: func(first, second *operatorpb.ReplaceNeighboursRequest) []*operatorpb.ReplaceNeighboursRequest {
-			first.Entries, second.Entries = nil, nil
-			return []*operatorpb.ReplaceNeighboursRequest{first, second}
-		}},
-		{name: "duplicate across chunks", mutate: func(first, second *operatorpb.ReplaceNeighboursRequest) []*operatorpb.ReplaceNeighboursRequest {
-			return []*operatorpb.ReplaceNeighboursRequest{first, first}
-		}},
-		{name: "duplicate within chunk", mutate: func(first, second *operatorpb.ReplaceNeighboursRequest) []*operatorpb.ReplaceNeighboursRequest {
-			second.Entries = append(second.Entries, second.Entries[0])
-			return []*operatorpb.ReplaceNeighboursRequest{first, second}
-		}},
-		{name: "nil entry", mutate: func(first, second *operatorpb.ReplaceNeighboursRequest) []*operatorpb.ReplaceNeighboursRequest {
-			second.Entries[0] = nil
-			return []*operatorpb.ReplaceNeighboursRequest{first, second}
-		}},
-		{name: "nil next hop", mutate: func(first, second *operatorpb.ReplaceNeighboursRequest) []*operatorpb.ReplaceNeighboursRequest {
-			second.Entries[0].NextHop = nil
-			return []*operatorpb.ReplaceNeighboursRequest{first, second}
-		}},
-		{name: "short next hop", mutate: func(first, second *operatorpb.ReplaceNeighboursRequest) []*operatorpb.ReplaceNeighboursRequest {
-			second.Entries[0].NextHop.Addr = []byte{1, 2, 3}
-			return []*operatorpb.ReplaceNeighboursRequest{first, second}
-		}},
-		{name: "nil source MAC", mutate: func(first, second *operatorpb.ReplaceNeighboursRequest) []*operatorpb.ReplaceNeighboursRequest {
-			second.Entries[0].HardwareAddr = nil
-			return []*operatorpb.ReplaceNeighboursRequest{first, second}
-		}},
-		{name: "nil destination MAC", mutate: func(first, second *operatorpb.ReplaceNeighboursRequest) []*operatorpb.ReplaceNeighboursRequest {
-			second.Entries[0].LinkAddr = nil
-			return []*operatorpb.ReplaceNeighboursRequest{first, second}
-		}},
-		{name: "source MAC above EUI48", mutate: func(first, second *operatorpb.ReplaceNeighboursRequest) []*operatorpb.ReplaceNeighboursRequest {
-			second.Entries[0].HardwareAddr.Addr = 1 << 48
-			return []*operatorpb.ReplaceNeighboursRequest{first, second}
-		}},
-		{name: "destination MAC above EUI48", mutate: func(first, second *operatorpb.ReplaceNeighboursRequest) []*operatorpb.ReplaceNeighboursRequest {
-			second.Entries[0].LinkAddr.Addr = 1 << 48
-			return []*operatorpb.ReplaceNeighboursRequest{first, second}
-		}},
-		{name: "overlong device", mutate: func(first, second *operatorpb.ReplaceNeighboursRequest) []*operatorpb.ReplaceNeighboursRequest {
-			second.Entries[0].Device = strings.Repeat("d", 80)
-			return []*operatorpb.ReplaceNeighboursRequest{first, second}
-		}},
-		{name: "client owned source", mutate: func(first, second *operatorpb.ReplaceNeighboursRequest) []*operatorpb.ReplaceNeighboursRequest {
-			second.Entries[0].Source = "snapshot"
-			return []*operatorpb.ReplaceNeighboursRequest{first, second}
-		}},
-		{name: "client owned timestamp", mutate: func(first, second *operatorpb.ReplaceNeighboursRequest) []*operatorpb.ReplaceNeighboursRequest {
-			second.Entries[0].UpdatedAt = 1
-			return []*operatorpb.ReplaceNeighboursRequest{first, second}
+		{name: "duplicate mapped IPv4", mutate: func(request *operatorpb.ReplaceNeighboursRequest) {
+			request.Entries[1].NextHop = commonpb.NewIPAddressFromAddr(netip.MustParseAddr("::ffff:192.0.2.2"))
+			request.Entries[1].Device = "logical1"
 		}},
 	} {
-		t.Run(test.name, func(t *testing.T) {
-			fixture := newNeighbourServiceFixture(t)
-			good := replacementChunk("snapshot", 10, "192.0.2.1")
-			require.NoError(t, sendNeighbourSnapshot(t.Context(), fixture.Client, good))
-			before := sourceEntries(t, fixture.Table, "snapshot")
-			metadata := fixture.Table.ListSources()
-			chunks := test.mutate(replacementChunk("snapshot", 200, "192.0.2.2"), replacementChunk("snapshot", 200, "192.0.2.3"))
-			err := sendNeighbourSnapshot(t.Context(), fixture.Client, chunks...)
-			require.Equal(t, codes.InvalidArgument, status.Code(err), "%v", err)
-			require.Equal(t, before, sourceEntries(t, fixture.Table, "snapshot"))
-			require.Equal(t, metadata, fixture.Table.ListSources())
+		t.Run(tc.name, func(t *testing.T) {
+			fixture, input, _, _ := newReadinessFixture(t, 20*time.Millisecond)
+			require.NoError(t, sendNeighbourSnapshot(t.Context(), fixture.Client, replacementRequest("remote", 10, "192.0.2.1")))
+			before := sourceEntries(t, fixture.Table, "remote")
+			generation, _ := input.Generation()
+			require.Eventually(t, func() bool { return !input.Available() }, time.Second, time.Millisecond)
+			request := replacementRequest("remote", 200, "192.0.2.2", "192.0.2.3")
+			tc.mutate(request)
+			require.Equal(t, codes.InvalidArgument, status.Code(sendNeighbourSnapshot(t.Context(), fixture.Client, request)))
+			require.Equal(t, before, sourceEntries(t, fixture.Table, "remote"))
+			require.Equal(t, []neigh.SourceInfo{{Name: "remote", DefaultPriority: 10, EntryCount: 1}}, fixture.Table.ListSources())
+			current, available := input.Generation()
+			require.False(t, available)
+			require.Equal(t, generation, current)
 			require.Equal(t, int64(1), fixture.Changes.Load())
 		})
 	}
 }
 
-// sizedReplacement adds unknown protobuf data to exercise serialized byte caps.
+// sizedReplacement adds unknown wire data without changing semantic entries.
 func sizedReplacement(t *testing.T, request *operatorpb.ReplaceNeighboursRequest, size int) *operatorpb.ReplaceNeighboursRequest {
 	t.Helper()
-	unknown := protowire.AppendTag(nil, 100, protowire.BytesType)
-	unknown = protowire.AppendBytes(unknown, make([]byte, size-proto.Size(request)-len(unknown)-3))
-	request.ProtoReflect().SetUnknown(unknown)
+	tag := protowire.AppendTag(nil, 100, protowire.BytesType)
+	remaining := size - proto.Size(request) - len(tag)
+	padding := remaining - protowire.SizeVarint(uint64(remaining))
+	request.ProtoReflect().SetUnknown(protowire.AppendBytes(tag, make([]byte, padding)))
 	require.Equal(t, size, proto.Size(request))
 	return request
 }
 
-// Test_NeighbourService_ReplacementLimits verifies that per-chunk and aggregate
-// limits reject the whole snapshot and release the staging slot for a retry.
-func Test_NeighbourService_ReplacementLimits(t *testing.T) {
-	first := replacementChunk("snapshot", 200, "192.0.2.2")
-	second := replacementChunk("snapshot", 200, "192.0.2.3")
-	tooMany := replacementChunk("snapshot", 200)
-	for idx := range 1001 {
-		tooMany.Entries = append(tooMany.Entries, replacementChunk("snapshot", 200,
-			fmt.Sprintf("2001:db8::%x", idx+1),
-		).Entries[0])
+// numberedReplacement returns distinct IPv6 entries with maximal device payload.
+func numberedReplacement(table string, count int, address netip.Addr) *operatorpb.ReplaceNeighboursRequest {
+	request := replacementRequest(table, math.MaxUint32)
+	for range count {
+		entry := replacementRequest(table, 0, address.String()).Entries[0]
+		entry.Device = strings.Repeat("d", 79)
+		entry.Priority = math.MaxUint32
+		request.Entries = append(request.Entries, entry)
+		address = address.Next()
 	}
-	for _, test := range []struct {
-		name   string
-		limits operator.NeighbourReplacementLimits
-		chunks []*operatorpb.ReplaceNeighboursRequest
-	}{
-		{name: "chunk entry count", chunks: []*operatorpb.ReplaceNeighboursRequest{first, tooMany}},
-		{name: "chunk serialized bytes", chunks: []*operatorpb.ReplaceNeighboursRequest{first,
-			sizedReplacement(t, proto.Clone(second).(*operatorpb.ReplaceNeighboursRequest), 256*1024+1),
-		}},
-		{name: "staged entry count", limits: operator.NeighbourReplacementLimits{MaxEntries: 1}, chunks: []*operatorpb.ReplaceNeighboursRequest{first, second}},
-		{name: "staged serialized bytes", limits: operator.NeighbourReplacementLimits{MaxBytes: proto.Size(first) + proto.Size(second) - 1}, chunks: []*operatorpb.ReplaceNeighboursRequest{first, second}},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			limits := test.limits
-			limits.MaxConcurrentStreams = 1
-			fixture := newNeighbourServiceFixture(t, operator.WithNeighbourReplacementLimits(limits))
-			good := replacementChunk("snapshot", 10, "192.0.2.1")
-			require.NoError(t, sendNeighbourSnapshot(t.Context(), fixture.Client, good))
-			before := sourceEntries(t, fixture.Table, "snapshot")
-			metadata := fixture.Table.ListSources()
-			err := sendNeighbourSnapshot(t.Context(), fixture.Client, test.chunks...)
-			require.Equal(t, codes.ResourceExhausted, status.Code(err), "%v", err)
-			require.Equal(t, before, sourceEntries(t, fixture.Table, "snapshot"))
-			require.Equal(t, metadata, fixture.Table.ListSources())
-			require.Equal(t, int64(1), fixture.Changes.Load())
-			require.NoError(t, sendNeighbourSnapshot(t.Context(), fixture.Client, good))
-		})
-	}
-
-	t.Run("inclusive entry and byte boundaries", func(t *testing.T) {
-		boundary := sizedReplacement(t, second, 256*1024)
-		fixture := newNeighbourServiceFixture(t, operator.WithNeighbourReplacementLimits(operator.NeighbourReplacementLimits{
-			MaxEntries: 2, MaxBytes: proto.Size(first) + proto.Size(boundary),
-		}))
-		require.NoError(t, sendNeighbourSnapshot(t.Context(), fixture.Client, first, boundary))
-		require.Len(t, sourceEntries(t, fixture.Table, "snapshot"), 2)
-	})
+	return request
 }
 
-// Test_NeighbourService_InterruptedReplacement verifies that cancellation and
-// deadlines preserve the previous table, including when no source existed.
+// Test_NeighbourService_ReplacementLimits verifies inclusive entry and full
+// protobuf byte limits in both the handler and the default gRPC transport.
+func Test_NeighbourService_ReplacementLimits(t *testing.T) {
+	for _, direct := range []bool{false, true} {
+		t.Run(fmt.Sprintf("direct=%t", direct), func(t *testing.T) {
+			fixture := newNeighbourServiceFixture(t)
+			replace := func(request *operatorpb.ReplaceNeighboursRequest) error {
+				if direct {
+					_, err := fixture.Service.ReplaceNeighbours(t.Context(), request)
+					return err
+				}
+				return sendNeighbourSnapshot(t.Context(), fixture.Client, request)
+			}
+			request := numberedReplacement(strings.Repeat("t", operatorpb.NeighbourTableNameBytes), operatorpb.NeighbourSnapshotEntries, netip.MustParseAddr("2001:db8::1"))
+			for _, entry := range request.Entries {
+				entry.HardwareAddr.Addr, entry.LinkAddr.Addr = 1<<48-1, 1<<48-1
+				entry.State = operatorpb.NeighbourState(-1)
+			}
+			require.LessOrEqual(t, proto.Size(request), operatorpb.NeighbourSnapshotBytes)
+			require.NoError(t, replace(request))
+			before := sourceEntries(t, fixture.Table, request.Table)
+			request.Entries = append(request.Entries, replacementRequest(request.Table, 0, "2001:db8:1::1").Entries[0])
+			require.Less(t, proto.Size(request), operatorpb.NeighbourSnapshotBytes)
+			require.Equal(t, codes.ResourceExhausted, status.Code(replace(request)))
+			require.Equal(t, before, sourceEntries(t, fixture.Table, request.Table))
+			boundary := sizedReplacement(t, replacementRequest("snapshot", 100, "192.0.2.1"), operatorpb.NeighbourSnapshotBytes)
+			require.NoError(t, replace(boundary))
+			before = sourceEntries(t, fixture.Table, "snapshot")
+			oversized := sizedReplacement(t, replacementRequest("snapshot", 200, "192.0.2.2"), operatorpb.NeighbourSnapshotBytes+1)
+			require.Equal(t, codes.ResourceExhausted, status.Code(replace(oversized)))
+			require.Equal(t, before, sourceEntries(t, fixture.Table, "snapshot"))
+			require.NoError(t, replace(boundary))
+			require.Equal(t, int64(2), fixture.Changes.Load())
+		})
+	}
+}
+
+// Test_NeighbourService_InterruptedReplacement verifies that cancellation before
+// the handler commits cannot create, clear or refresh input.
 func Test_NeighbourService_InterruptedReplacement(t *testing.T) {
 	for _, existing := range []bool{false, true} {
 		for _, deadline := range []bool{false, true} {
 			t.Run(fmt.Sprintf("existing=%t/deadline=%t", existing, deadline), func(t *testing.T) {
-				fixture := newNeighbourServiceFixture(t, operator.WithNeighbourReplacementLimits(operator.NeighbourReplacementLimits{MaxConcurrentStreams: 1}))
+				fixture, input, _, _ := newReadinessFixture(t, time.Minute)
 				if existing {
-					require.NoError(t, sendNeighbourSnapshot(t.Context(), fixture.Client, replacementChunk("snapshot", 10, "192.0.2.1")))
+					require.NoError(t, sendNeighbourSnapshot(t.Context(), fixture.Client, replacementRequest("remote", 10, "192.0.2.1")))
 				}
-				before := fixture.Table.ListSources()
-				oldView := fixture.Table.View()
-				changes := fixture.Changes.Load()
+				before, _ := fixture.Table.View().All()
+				metadata := fixture.Table.ListSources()
+				generation, available := input.Generation()
 				ctx, cancel := context.WithCancel(t.Context())
-				defer cancel()
 				if deadline {
-					ctx, cancel = context.WithTimeout(ctx, time.Second)
-					defer cancel()
+					cancel()
+					ctx, cancel = context.WithDeadline(t.Context(), time.Now().Add(-time.Second))
 				}
-				stream, identity := fixture.Open(t, ctx)
-				require.NoError(t, stream.Send(replacementChunk("snapshot", 200, "192.0.2.2")))
-				fixture.WaitStaged(t, identity, 1)
+				cancel()
+				response, err := fixture.Service.ReplaceNeighbours(ctx, replacementRequest("remote", 200, "192.0.2.2"))
 				code := codes.Canceled
 				if deadline {
 					code = codes.DeadlineExceeded
-					<-ctx.Done()
-				} else {
-					cancel()
 				}
-				// Observe the transport abort before a graceful half-close could
-				// race it and commit a clean EOF instead.
-				serverError := fixture.WaitFinished(t, identity)
-				_, err := stream.CloseAndRecv()
+				require.Nil(t, response)
 				require.Equal(t, code, status.Code(err))
-				if deadline {
-					// Client expiry can reach the server as a transport cancellation
-					// before its independently scheduled deadline fires.
-					require.Contains(t, []codes.Code{codes.Canceled, codes.DeadlineExceeded}, status.Code(serverError))
-				} else {
-					require.Equal(t, code, status.Code(serverError))
-				}
-				require.Equal(t, before, fixture.Table.ListSources())
-				oldEntries, _ := oldView.All()
-				currentEntries, _ := fixture.Table.View().All()
-				require.Equal(t, maps.Collect(oldEntries), maps.Collect(currentEntries))
-				require.Equal(t, changes, fixture.Changes.Load())
-				require.NoError(t, sendNeighbourSnapshot(t.Context(), fixture.Client, replacementChunk("snapshot", 200)))
+				after, _ := fixture.Table.View().All()
+				require.Equal(t, maps.Collect(before), maps.Collect(after))
+				require.Equal(t, metadata, fixture.Table.ListSources())
+				current, currentAvailable := input.Generation()
+				require.Equal(t, generation, current)
+				require.Equal(t, available, currentAvailable)
 			})
 		}
 	}
 }
 
-// Test_NeighbourService_BuiltInReplacement verifies that even an empty complete
-// snapshot cannot change entries or priority of a protected source.
+// Test_NeighbourService_LostResponse verifies that a real commit survives a
+// transport failure and repeating the same request is semantically idempotent.
+func Test_NeighbourService_LostResponse(t *testing.T) {
+	var calls atomic.Int32
+	fixture := newInterceptedNeighbourFixture(t, func(ctx context.Context, request any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
+		response, err := handler(ctx, request)
+		if err == nil && info.FullMethod == operatorpb.NeighbourService_ReplaceNeighbours_FullMethodName && calls.Add(1) == 1 {
+			return nil, status.Error(codes.Unavailable, "response lost after commit")
+		}
+		return response, err
+	})
+	request := replacementRequest("snapshot", 100, "192.0.2.1")
+	require.Equal(t, codes.Unavailable, status.Code(sendNeighbourSnapshot(t.Context(), fixture.Client, request)))
+	before := sourceEntries(t, fixture.Table, "snapshot")
+	require.Len(t, before, 1)
+	require.NoError(t, sendNeighbourSnapshot(t.Context(), fixture.Client, request))
+	require.Equal(t, before, sourceEntries(t, fixture.Table, "snapshot"))
+	require.Equal(t, int64(1), fixture.Changes.Load())
+}
+
+// Test_NeighbourService_BuiltInReplacement verifies that even empty snapshots
+// cannot alter a protected source's entries or default priority.
 func Test_NeighbourService_BuiltInReplacement(t *testing.T) {
 	fixture := newNeighbourServiceFixture(t)
 	_, err := fixture.Table.CreateSource("kernel", 10, true)
@@ -790,57 +458,70 @@ func Test_NeighbourService_BuiltInReplacement(t *testing.T) {
 	entry := neigh.NeighbourEntry{NextHop: netip.MustParseAddr("192.0.2.1"), UpdatedAt: time.Now()}
 	require.NoError(t, fixture.Table.Add("kernel", []neigh.NeighbourEntry{entry}))
 	before := sourceEntries(t, fixture.Table, "kernel")
-	for _, chunk := range []*operatorpb.ReplaceNeighboursRequest{replacementChunk("kernel", 200, "192.0.2.2"), replacementChunk("kernel", 200)} {
-		err := sendNeighbourSnapshot(t.Context(), fixture.Client, chunk)
-		require.Equal(t, codes.FailedPrecondition, status.Code(err))
+	for _, request := range []*operatorpb.ReplaceNeighboursRequest{replacementRequest("kernel", 200, "192.0.2.2"), replacementRequest("kernel", 200)} {
+		require.Equal(t, codes.FailedPrecondition, status.Code(sendNeighbourSnapshot(t.Context(), fixture.Client, request)))
 		require.Equal(t, before, sourceEntries(t, fixture.Table, "kernel"))
 		require.Equal(t, []neigh.SourceInfo{{Name: "kernel", DefaultPriority: 10, EntryCount: 1, BuiltIn: true}}, fixture.Table.ListSources())
 		require.Zero(t, fixture.Changes.Load())
 	}
 }
 
-// Test_NeighbourService_ConcurrencyAndCompletionOrder verifies that the default
-// four slots apply across tables, and a slow older stream can commit last.
-func Test_NeighbourService_ConcurrencyAndCompletionOrder(t *testing.T) {
-	fixture := newNeighbourServiceFixture(t, operator.WithNeighbourReplacementLimits(operator.NeighbourReplacementLimits{
-		MaxEntries: -1, MaxBytes: -1, MaxConcurrentStreams: -1,
-	}))
-	streams := make([]grpc.ClientStreamingClient[operatorpb.ReplaceNeighboursRequest, operatorpb.ReplaceNeighboursResponse], 4)
-	for idx := range streams {
-		stream, identity := fixture.Open(t, t.Context())
-		table := "snapshot"
-		if idx >= 2 {
-			table = fmt.Sprintf("other-%d", idx)
+// Test_NeighbourService_ConcurrentReaders verifies that named and merged unary
+// reads see one whole generation while full snapshots are replaced concurrently.
+func Test_NeighbourService_ConcurrentReaders(t *testing.T) {
+	fixture := newNeighbourServiceFixture(t)
+	first := replacementRequest("snapshot", 100, "192.0.2.1", "192.0.2.2")
+	second := replacementRequest("snapshot", 200, "2001:db8::1", "2001:db8::2", "2001:db8::3")
+	require.NoError(t, sendNeighbourSnapshot(t.Context(), fixture.Client, first))
+	var group errgroup.Group
+	group.Go(func() error {
+		for range 30 {
+			for _, request := range []*operatorpb.ReplaceNeighboursRequest{second, first} {
+				if err := sendNeighbourSnapshot(t.Context(), fixture.Client, request); err != nil {
+					return err
+				}
+			}
 		}
-		require.NoError(t, stream.Send(replacementChunk(table, uint32(100+idx), fmt.Sprintf("192.0.2.%d", idx+1))))
-		fixture.WaitStaged(t, identity, 1)
-		streams[idx] = stream
+		return nil
+	})
+	for _, table := range []string{"", "snapshot"} {
+		group.Go(func() error {
+			for range 60 {
+				response, err := fixture.Client.List(t.Context(), &operatorpb.ListNeighboursRequest{Table: table})
+				if err != nil {
+					return err
+				}
+				count := len(response.GetNeighbours())
+				if count != 2 && count != 3 {
+					return fmt.Errorf("partial snapshot of %d entries", count)
+				}
+				seen := map[netip.Addr]bool{}
+				for _, entry := range response.GetNeighbours() {
+					address, err := entry.GetNextHop().ToAddr()
+					if err != nil || seen[address] || entry.GetSource() != "snapshot" ||
+						(count == 2 && (!address.Is4() || entry.GetPriority() != 100)) ||
+						(count == 3 && (!address.Is6() || entry.GetPriority() != 200)) {
+						return errors.New("mixed snapshot")
+					}
+					seen[address] = true
+				}
+			}
+			return nil
+		})
 	}
-	require.Empty(t, fixture.Table.ListSources())
-	err := sendNeighbourSnapshot(t.Context(), fixture.Client, replacementChunk("fifth", 200))
-	require.Equal(t, codes.ResourceExhausted, status.Code(err))
-	for _, idx := range []int{1, 2, 3, 0} {
-		_, err := streams[idx].CloseAndRecv()
-		require.NoError(t, err)
-		if idx == 1 || idx == 0 {
-			entries := sourceEntries(t, fixture.Table, "snapshot")
-			require.Len(t, entries, 1)
-			require.Equal(t, uint32(100+idx), entries[neigh.NewKey(netip.MustParseAddr(fmt.Sprintf("192.0.2.%d", idx+1)), "logical0")].Priority)
-		}
-	}
-	require.Equal(t, int64(4), fixture.Changes.Load())
-	require.NoError(t, sendNeighbourSnapshot(t.Context(), fixture.Client, replacementChunk("fifth", 200)))
+	require.NoError(t, group.Wait())
 }
 
-// newNeighbourGatewayClient exposes a real receiver behind a registered TCP
-// backend and the production gateway, including both proxy message boundaries.
-func newNeighbourGatewayClient(t *testing.T) (operatorpb.NeighbourServiceClient, string) {
+type neighbourGatewayFixture struct {
+	*neighbourServiceFixture
+	HTTP string
+}
+
+// newNeighbourGatewayClient runs the production TCP and JSON proxy paths with
+// default receive sizes and authentication disabled only in this fixture.
+func newNeighbourGatewayClient(t *testing.T) neighbourGatewayFixture {
 	t.Helper()
-	backendListener, err := net.Listen("tcp", "127.0.0.1:0")
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = backendListener.Close() })
-	server := grpc.NewServer()
-	operatorpb.RegisterNeighbourServiceServer(server, operator.NewNeighbourService(neigh.NewNeighTable()))
+	fixture := newNeighbourServiceFixture(t)
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = listener.Close() })
@@ -849,350 +530,346 @@ func newNeighbourGatewayClient(t *testing.T) (operatorpb.NeighbourServiceClient,
 	httpAddress := httpListener.Addr().String()
 	require.NoError(t, httpListener.Close())
 	config := gateway.DefaultConfig()
+	config.Auth.Disabled = true
 	config.Server.HTTPEndpoint = httpAddress
 	proxy, err := gateway.NewGateway(config, gateway.WithListener(listener))
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, proxy.Close()) })
 	ctx, cancel := context.WithCancel(t.Context())
 	var group errgroup.Group
-	group.Go(func() error {
-		err := server.Serve(backendListener)
-		if errors.Is(err, grpc.ErrServerStopped) {
-			return nil
-		}
-		return err
-	})
 	group.Go(func() error { return proxy.Run(ctx) })
 	t.Cleanup(func() {
 		cancel()
-		server.Stop()
 		require.NoError(t, group.Wait())
 	})
-	connection, err := grpc.NewClient(listener.Addr().String(),
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
-		grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(operatorpb.NeighbourListChunkBytes)),
-	)
+	connection, err := grpc.NewClient(listener.Addr().String(), grpc.WithTransportCredentials(insecure.NewCredentials()))
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, connection.Close()) })
 	registration, stopRegistration := context.WithTimeout(t.Context(), 10*time.Second)
 	defer stopRegistration()
-	_, err = ynpb.NewGatewayClient(connection).Register(
-		registration,
+	_, err = ynpb.NewGatewayClient(connection).Register(registration,
 		&ynpb.RegisterRequest{Backend: &ynpb.BackendDesc{
-			Name:     operatorpb.NeighbourService_ServiceDesc.ServiceName,
-			Endpoint: backendListener.Addr().String(),
-		}},
-		grpc.WaitForReady(true),
+			Name: operatorpb.NeighbourService_ServiceDesc.ServiceName, Endpoint: fixture.Endpoint,
+		}}, grpc.WaitForReady(true),
 	)
 	require.NoError(t, err)
-	return operatorpb.NewNeighbourServiceClient(connection), "http://" + httpAddress + "/api/" + operatorpb.NeighbourService_ServiceDesc.ServiceName
+	fixture.Client = operatorpb.NewNeighbourServiceClient(connection)
+	fixture.Endpoint = "grpc://" + listener.Addr().String()
+	return neighbourGatewayFixture{
+		neighbourServiceFixture: fixture,
+		HTTP:                    "http://" + httpAddress + "/api/" + operatorpb.NeighbourService_ServiceDesc.ServiceName,
+	}
 }
 
-// Test_NeighbourService_ListThroughGateway verifies that the default merged read
-// remains complete beyond 512 MiB after replacements and incremental growth.
+// Test_NeighbourService_ListThroughGateway verifies IP-priority merging and
+// metadata through both proxy hops, including incremental static overrides.
 func Test_NeighbourService_ListThroughGateway(t *testing.T) {
-	client, _ := newNeighbourGatewayClient(t)
-	ctx, cancel := context.WithTimeout(t.Context(), 8*time.Minute)
-	defer cancel()
-	tables := []string{
-		strings.Repeat("a", operatorpb.NeighbourTableNameBytes),
-		strings.Repeat("b", operatorpb.NeighbourTableNameBytes),
+	fixture := newNeighbourGatewayClient(t)
+	client := fixture.Client
+	first := replacementRequest("first", 100, "192.0.2.1", "192.0.2.2")
+	second := replacementRequest("second", 200, "::ffff:192.0.2.1", "2001:db8::1")
+	second.Entries[0].Device = "logical1"
+	for _, request := range []*operatorpb.ReplaceNeighboursRequest{first, second} {
+		require.NoError(t, sendNeighbourSnapshot(t.Context(), client, request))
 	}
-	device := strings.Repeat("d", 79)
-	address := netip.MustParseAddr("2001:db8::1")
-	for _, table := range tables {
-		stream, err := client.ReplaceNeighbours(ctx)
+	_, err := client.CreateTable(t.Context(), &operatorpb.CreateNeighbourTableRequest{Name: "static", DefaultPriority: 10})
+	require.NoError(t, err)
+	static := replacementRequest("static", 10, "192.0.2.2", "192.0.2.3")
+	static.Entries[0].Device = "logical2"
+	_, err = client.UpdateNeighbours(t.Context(), &operatorpb.UpdateNeighboursRequest{Table: "static", Entries: static.Entries})
+	require.NoError(t, err)
+	for _, table := range []string{"first", "second", "static", ""} {
+		response, err := client.List(t.Context(), &operatorpb.ListNeighboursRequest{Table: table})
 		require.NoError(t, err)
-		totalBytes := 0
-		for range operatorpb.NeighbourSnapshotEntries / operatorpb.NeighbourChunkEntries {
-			chunk := replacementChunk(table, math.MaxUint32)
-			for range operatorpb.NeighbourChunkEntries {
-				chunk.Entries = append(chunk.Entries, &operatorpb.NeighbourEntry{
-					NextHop:      commonpb.NewIPAddressFromAddr(address),
-					HardwareAddr: commonpb.NewMACAddressEUI48([6]byte{0xfe, 0xff, 0xff, 0xff, 0xff, 1}),
-					LinkAddr:     commonpb.NewMACAddressEUI48([6]byte{0xfe, 0xff, 0xff, 0xff, 0xff, 2}),
-					Device:       device, State: operatorpb.NeighbourState_NUD_PERMANENT, Ifindex: math.MaxInt32,
-				})
-				address = address.Next()
+		expected := map[netip.Addr]*operatorpb.NeighbourEntry{}
+		for _, request := range []*operatorpb.ReplaceNeighboursRequest{second, first, static} {
+			if table != "" && table != request.Table {
+				continue
 			}
-			require.LessOrEqual(t, proto.Size(chunk), operatorpb.NeighbourChunkBytes)
-			totalBytes += proto.Size(chunk)
-			require.NoError(t, stream.Send(chunk))
+			for _, entry := range request.Entries {
+				address, err := entry.NextHop.ToAddr()
+				require.NoError(t, err)
+				copy := proto.Clone(entry).(*operatorpb.NeighbourEntry)
+				copy.NextHop = commonpb.NewIPAddressFromAddr(address.Unmap())
+				copy.Source, copy.Priority, copy.State = request.Table, request.DefaultPriority, operatorpb.NeighbourState_NUD_PERMANENT
+				expected[address.Unmap()] = copy
+			}
 		}
-		require.LessOrEqual(t, totalBytes, operatorpb.NeighbourSnapshotBytes)
-		_, err = stream.CloseAndRecv()
-		require.NoError(t, err)
+		require.Len(t, response.GetNeighbours(), len(expected))
+		for _, entry := range response.GetNeighbours() {
+			address, err := entry.NextHop.ToAddr()
+			require.NoError(t, err)
+			wanted := expected[address]
+			require.NotNil(t, wanted)
+			require.Positive(t, entry.UpdatedAt)
+			wanted.UpdatedAt = entry.UpdatedAt
+			require.True(t, proto.Equal(wanted, entry))
+			delete(expected, address)
+		}
+		require.Empty(t, expected)
 	}
-	const extraEntries = 2
-	for range extraEntries {
-		chunk := replacementChunk(tables[0], 0, address.String())
-		chunk.Entries[0].Device = device
-		chunk.Entries[0].Ifindex = math.MaxInt32
-		_, err := client.UpdateNeighbours(ctx, &operatorpb.UpdateNeighboursRequest{
-			Table: tables[0], Entries: chunk.Entries,
+}
+
+// Test_NeighbourService_ListUnaryLimits verifies inclusive full-response sizing
+// through the real gateway and independent named and merged overflow failures.
+func Test_NeighbourService_ListUnaryLimits(t *testing.T) {
+	fixture := newNeighbourGatewayClient(t)
+	table := strings.Repeat("t", operatorpb.NeighbourTableNameBytes)
+	_, err := fixture.Table.CreateSource(table, math.MaxUint32, false)
+	require.NoError(t, err)
+	address := netip.MustParseAddr("2001:db8::1")
+	wire := numberedReplacement(table, 1, address).Entries[0]
+	wire.Source, wire.State, wire.UpdatedAt = table, operatorpb.NeighbourState_NUD_PERMANENT, 1<<32
+	entryBytes := protowire.SizeTag(1) + protowire.SizeBytes(proto.Size(wire))
+	count := operatorpb.NeighbourListUnaryBytes/entryBytes + 1
+	excess := count*entryBytes - operatorpb.NeighbourListUnaryBytes
+	entries := make([]neigh.NeighbourEntry, 0, count)
+	for range count {
+		device := wire.Device
+		shrink := min(excess, len(device)-1)
+		device = device[:len(device)-shrink]
+		excess -= shrink
+		entries = append(entries, neigh.NeighbourEntry{
+			NextHop: address, UpdatedAt: time.Unix(wire.UpdatedAt, 0), Priority: wire.Priority,
+			State:         neigh.NeighbourStatePermanent,
+			HardwareRoute: neigh.HardwareRoute{Device: device, SourceMAC: wire.HardwareAddr.EUI48(), DestinationMAC: wire.LinkAddr.EUI48()},
 		})
-		require.NoError(t, err)
 		address = address.Next()
 	}
-	response, err := client.List(ctx, &operatorpb.ListNeighboursRequest{})
+	require.Zero(t, excess)
+	require.NoError(t, fixture.Table.Add(table, entries))
+	for _, name := range []string{table, ""} {
+		response, err := fixture.Client.List(t.Context(), &operatorpb.ListNeighboursRequest{Table: name})
+		require.NoError(t, err)
+		require.Len(t, response.GetNeighbours(), count)
+		require.Equal(t, operatorpb.NeighbourListUnaryBytes, proto.Size(response))
+	}
+	require.NoError(t, sendNeighbourSnapshot(t.Context(), fixture.Client, replacementRequest("small", 100, "192.0.2.1")))
+	response, err := fixture.Client.List(t.Context(), &operatorpb.ListNeighboursRequest{})
 	require.Nil(t, response)
 	require.Equal(t, codes.ResourceExhausted, status.Code(err))
-	require.ErrorContains(t, err, "use ListStream")
-	stream, err := client.ListStream(ctx, &operatorpb.ListNeighboursRequest{})
-	require.NoError(t, err)
-	const totalEntries = 2*operatorpb.NeighbourSnapshotEntries + extraEntries
-	seen := make([]bool, totalEntries+1)
-	count, totalBytes := 0, 0
-	for {
-		chunk, err := stream.Recv()
-		if err == io.EOF {
-			break
-		}
-		require.NoError(t, err)
-		require.NotEmpty(t, chunk.GetNeighbours())
-		require.LessOrEqual(t, len(chunk.GetNeighbours()), operatorpb.NeighbourListChunkEntries)
-		require.LessOrEqual(t, proto.Size(chunk), operatorpb.NeighbourListChunkBytes)
-		totalBytes += proto.Size(chunk)
-		count += len(chunk.GetNeighbours())
-		for _, entry := range chunk.GetNeighbours() {
-			address, err := entry.GetNextHop().ToAddr()
-			if err != nil || !address.Is6() {
-				t.Fatalf("listed address is not IPv6: %v", entry.GetNextHop())
-			}
-			raw := address.As16()
-			idx := binary.BigEndian.Uint64(raw[8:])
-			if binary.BigEndian.Uint64(raw[:8]) != 0x20010db800000000 ||
-				idx == 0 || idx > totalEntries || seen[idx] {
-				t.Fatalf("unexpected or duplicate listed address %s", address)
-			}
-			seen[idx] = true
-			table := tables[0]
-			if idx > operatorpb.NeighbourSnapshotEntries && idx <= 2*operatorpb.NeighbourSnapshotEntries {
-				table = tables[1]
-			}
-			if entry.GetSource() != table || entry.GetDevice() != device ||
-				entry.GetPriority() != math.MaxUint32 || entry.GetIfindex() != math.MaxInt32 ||
-				entry.GetUpdatedAt() == 0 {
-				t.Fatalf("listed metadata changed for %s", address)
-			}
-		}
-	}
-	require.Equal(t, totalEntries, count)
-	require.Greater(t, totalBytes, operatorpb.NeighbourListUnaryBytes)
-}
-
-// Test_NeighbourService_ListStreamHTTP verifies that the production JSON gateway
-// exposes all chunks and distinguishes a successful end from a missing source.
-func Test_NeighbourService_ListStreamHTTP(t *testing.T) {
-	client, endpoint := newNeighbourGatewayClient(t)
-	address := netip.MustParseAddr("2001:db8::1")
-	for _, table := range []string{"first", "second"} {
-		chunk := replacementChunk(table, 10)
-		for range operatorpb.NeighbourChunkEntries {
-			chunk.Entries = append(chunk.Entries, replacementChunk(table, 10, address.String()).Entries[0])
-			address = address.Next()
-		}
-		require.NoError(t, sendNeighbourSnapshot(t.Context(), client, chunk))
-	}
-	httpClient := &http.Client{Timeout: 10 * time.Second}
-	t.Cleanup(httpClient.CloseIdleConnections)
 	for _, tc := range []struct {
 		name  string
-		table string
 		count int
-		code  codes.Code
-	}{
-		{name: "default merged read", count: 2 * operatorpb.NeighbourChunkEntries},
-		{name: "named source read", table: "first", count: operatorpb.NeighbourChunkEntries},
-		{name: "missing source is an error", table: "missing", code: codes.NotFound},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			var body string
-			require.Eventually(t, func() bool {
-				request, err := http.NewRequestWithContext(t.Context(), http.MethodPost, endpoint+"/ListStream",
-					strings.NewReader(fmt.Sprintf(`{"table":%q}`, tc.table)),
-				)
-				require.NoError(t, err)
-				request.Header.Set("Content-Type", "application/json")
-				response, err := httpClient.Do(request)
-				if err != nil {
-					return false
-				}
-				defer response.Body.Close()
-				require.Equal(t, http.StatusOK, response.StatusCode)
-				require.Equal(t, "text/event-stream", response.Header.Get("Content-Type"))
-				data, err := io.ReadAll(response.Body)
-				require.NoError(t, err)
-				body = string(data)
-				return true
-			}, 10*time.Second, time.Millisecond)
-			count, complete := 0, false
-			for event := range strings.SplitSeq(strings.TrimSpace(body), "\n\n") {
-				kind, data, ok := strings.Cut(event, "\ndata: ")
-				require.True(t, ok)
-				switch kind {
-				case "event: message":
-					var chunk operatorpb.ListNeighboursResponse
-					require.NoError(t, json.Unmarshal([]byte(data), &chunk))
-					count += len(chunk.GetNeighbours())
-				case "event: end":
-					complete = true
-				case "event: error":
-					var failure struct {
-						Code uint32 `json:"code"`
-					}
-					require.NoError(t, json.Unmarshal([]byte(data), &failure))
-					require.Equal(t, tc.code, codes.Code(failure.Code))
-				default:
-					t.Fatalf("unexpected stream event %q", kind)
-				}
-			}
-			require.Equal(t, tc.count, count)
-			require.Equal(t, tc.code == codes.OK, complete)
+	}{{name: table, count: count}, {name: "small", count: 1}} {
+		response, err := fixture.Client.List(t.Context(), &operatorpb.ListNeighboursRequest{Table: tc.name})
+		require.NoError(t, err)
+		require.Len(t, response.GetNeighbours(), tc.count)
+	}
+	next := entries[0]
+	next.NextHop = address
+	require.NoError(t, fixture.Table.Add(table, []neigh.NeighbourEntry{next}))
+	for _, name := range []string{table, ""} {
+		response, err := fixture.Service.List(t.Context(), &operatorpb.ListNeighboursRequest{Table: name})
+		require.Nil(t, response)
+		require.Equal(t, codes.ResourceExhausted, status.Code(err))
+		response, err = fixture.Client.List(t.Context(), &operatorpb.ListNeighboursRequest{Table: name})
+		require.Nil(t, response)
+		require.Equal(t, codes.ResourceExhausted, status.Code(err))
+		checkNeighbourHTTPList(t, fixture.HTTP, name, 0, codes.ResourceExhausted)
+		t.Run("CLI overflow/"+name, func(t *testing.T) {
+			checkNeighbourCLIError(t, fixture.Endpoint, "ResourceExhausted", "--table", name)
 		})
+	}
+	checkNeighbourHTTPList(t, fixture.HTTP, "small", 1, codes.OK)
+}
+
+// checkNeighbourHTTPList checks JSON data or real gRPC-to-HTTP error translation.
+func checkNeighbourHTTPList(t *testing.T, endpoint, table string, count int, code codes.Code) {
+	t.Helper()
+	httpClient := &http.Client{Timeout: 10 * time.Second}
+	t.Cleanup(httpClient.CloseIdleConnections)
+	var response *http.Response
+	require.Eventually(t, func() bool {
+		request, err := http.NewRequestWithContext(t.Context(), http.MethodPost, endpoint+"/List",
+			strings.NewReader(fmt.Sprintf(`{"table":%q}`, table)),
+		)
+		require.NoError(t, err)
+		request.Header.Set("Content-Type", "application/json")
+		response, err = httpClient.Do(request)
+		return err == nil
+	}, 10*time.Second, time.Millisecond)
+	defer response.Body.Close()
+	data, err := io.ReadAll(response.Body)
+	require.NoError(t, err)
+	if code == codes.OK {
+		require.Equal(t, http.StatusOK, response.StatusCode, string(data))
+		var result operatorpb.ListNeighboursResponse
+		require.NoError(t, json.Unmarshal(data, &result))
+		require.Len(t, result.GetNeighbours(), count)
+	} else {
+		wantedStatus := map[codes.Code]int{codes.NotFound: http.StatusNotFound, codes.ResourceExhausted: http.StatusTooManyRequests}
+		require.Equal(t, wantedStatus[code], response.StatusCode, string(data))
+		require.Contains(t, response.Header.Get("Content-Type"), "text/plain")
+		require.NotEmpty(t, data)
+		require.NotContains(t, string(data), `"neighbours":`)
 	}
 }
 
-// neighbourListStream allows mutations exactly between emitted chunks.
-type neighbourListStream struct {
-	grpc.ServerStream
-	RequestContext context.Context
-	OnChunk        func(*operatorpb.ListNeighboursResponse) error
+// Test_NeighbourService_ListUnaryHTTP verifies that real JSON reads distinguish
+// populated named and merged views, empty data and unknown sources.
+func Test_NeighbourService_ListUnaryHTTP(t *testing.T) {
+	fixture := newNeighbourGatewayClient(t)
+	for _, request := range []*operatorpb.ReplaceNeighboursRequest{
+		replacementRequest("first", 100, "192.0.2.1"), replacementRequest("second", 100, "2001:db8::1"), replacementRequest("empty", 100),
+	} {
+		require.NoError(t, sendNeighbourSnapshot(t.Context(), fixture.Client, request))
+	}
+	checkNeighbourHTTPList(t, fixture.HTTP, "", 2, codes.OK)
+	checkNeighbourHTTPList(t, fixture.HTTP, "first", 1, codes.OK)
+	checkNeighbourHTTPList(t, fixture.HTTP, "empty", 0, codes.OK)
+	checkNeighbourHTTPList(t, fixture.HTTP, "missing", 0, codes.NotFound)
 }
 
-func (m *neighbourListStream) Context() context.Context { return m.RequestContext }
-func (m *neighbourListStream) Send(chunk *operatorpb.ListNeighboursResponse) error {
-	return m.OnChunk(chunk)
+// Test_NeighbourService_ListCancellation verifies that cancelled and unknown
+// reads fail rather than returning a successful empty response.
+func Test_NeighbourService_ListCancellation(t *testing.T) {
+	fixture := newNeighbourServiceFixture(t)
+	response, err := fixture.Client.List(t.Context(), &operatorpb.ListNeighboursRequest{})
+	require.NoError(t, err)
+	require.Empty(t, response.GetNeighbours())
+	response, err = fixture.Client.List(t.Context(), &operatorpb.ListNeighboursRequest{Table: "missing"})
+	require.Nil(t, response)
+	require.Equal(t, codes.NotFound, status.Code(err))
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	response, err = fixture.Service.List(ctx, &operatorpb.ListNeighboursRequest{})
+	require.Nil(t, response)
+	require.Equal(t, codes.Canceled, status.Code(err))
 }
 
-// Test_NeighbourService_ListStreamSnapshot verifies that mutations between chunks
-// cannot change the selected view, for both merged and source-specific reads.
-func Test_NeighbourService_ListStreamSnapshot(t *testing.T) {
+// checkedNeighbourContext signals entry into a real handler's context checks.
+type checkedNeighbourContext struct {
+	context.Context
+	OnCheck func()
+}
+
+func (m checkedNeighbourContext) Err() error {
+	err := m.Context.Err()
+	m.OnCheck()
+	return err
+}
+
+// Test_NeighbourService_CancellationBeforeCommit verifies that cancellation
+// behind a table writer cannot change content or refresh expired input.
+func Test_NeighbourService_CancellationBeforeCommit(t *testing.T) {
+	fixture, input, _, _ := newReadinessFixture(t, 20*time.Millisecond)
+	require.NoError(t, sendNeighbourSnapshot(t.Context(), fixture.Client, replacementRequest("remote", 100, "192.0.2.1")))
+	before := sourceEntries(t, fixture.Table, "remote")
+	generation, _ := input.Generation()
+	require.Eventually(t, func() bool { return !input.Available() }, time.Second, time.Millisecond)
+	locked, release := make(chan struct{}), make(chan struct{})
+	resume := sync.OnceFunc(func() { close(release) })
+	writerContext := checkedNeighbourContext{Context: t.Context(), OnCheck: sync.OnceFunc(func() {
+		close(locked)
+		<-release
+	})}
+	t.Cleanup(resume)
+	first := make(chan error, 1)
+	go func() {
+		_, err := fixture.Table.ReplaceSource(writerContext, "remote", 100, before)
+		first <- err
+	}()
+	awaitGatewayResult(t, locked)
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	checked := make(chan struct{})
+	var checks atomic.Int32
+	requestContext := checkedNeighbourContext{Context: ctx, OnCheck: func() {
+		if checks.Add(1) == 2 {
+			close(checked)
+		}
+	}}
+	second := make(chan error, 1)
+	go func() {
+		_, err := fixture.Service.ReplaceNeighbours(requestContext, replacementRequest("remote", 200, "192.0.2.2"))
+		second <- err
+	}()
+	awaitGatewayResult(t, checked)
+	cancel()
+	resume()
+	require.NoError(t, awaitGatewayResult(t, first))
+	require.Equal(t, codes.Canceled, status.Code(awaitGatewayResult(t, second)))
+	require.Equal(t, before, sourceEntries(t, fixture.Table, "remote"))
+	current, available := input.Generation()
+	require.False(t, available)
+	require.Equal(t, generation, current)
+	require.Equal(t, int64(1), fixture.Changes.Load())
+}
+
+// runNeighbourCLI invokes the opt-in official binary against a real gateway.
+func runNeighbourCLI(t *testing.T, endpoint string, arguments ...string) (string, string, error) {
+	t.Helper()
+	binary := os.Getenv("YANET_NEIGHBOUR_CLI_BINARY")
+	if binary == "" {
+		t.Skip("set YANET_NEIGHBOUR_CLI_BINARY to the built neighbour CLI")
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
+	defer cancel()
+	command := exec.CommandContext(ctx, binary, append([]string{"--endpoint", endpoint, "show"}, arguments...)...)
+	var stdout, stderr bytes.Buffer
+	command.Stdout, command.Stderr = &stdout, &stderr
+	err := command.Run()
+	return stdout.String(), stderr.String(), err
+}
+
+// checkNeighbourCLIError rejects partial output in both table and JSON formats.
+func checkNeighbourCLIError(t *testing.T, endpoint, code string, arguments ...string) {
+	t.Helper()
+	stdout, stderr, err := runNeighbourCLI(t, endpoint, arguments...)
+	require.Error(t, err)
+	require.NotEmpty(t, stderr)
+	require.Empty(t, stdout)
+	stdout, stderr, err = runNeighbourCLI(t, endpoint, append(arguments, "--format", "json")...)
+	require.Error(t, err, stderr)
+	var failure struct {
+		OK    *bool `json:"ok"`
+		Error struct {
+			Code string `json:"code"`
+		} `json:"error"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(stdout), &failure), stdout)
+	require.NotNil(t, failure.OK)
+	require.False(t, *failure.OK)
+	require.Equal(t, code, failure.Error.Code)
+}
+
+// Test_NeighbourService_UnaryCLI verifies that the official client preserves
+// named and merged JSON shapes and reports missing sources without partial data.
+func Test_NeighbourService_UnaryCLI(t *testing.T) {
+	fixture := newNeighbourGatewayClient(t)
+	require.NoError(t, sendNeighbourSnapshot(t.Context(), fixture.Client, replacementRequest("snapshot", 100, "192.0.2.1", "2001:db8::1")))
+	require.NoError(t, sendNeighbourSnapshot(t.Context(), fixture.Client, replacementRequest("other", 100, "2001:db8::2")))
 	for _, table := range []string{"", "snapshot"} {
-		t.Run(fmt.Sprintf("table=%q", table), func(t *testing.T) {
-			fixture := newNeighbourServiceFixture(t)
-			addresses := []string{}
-			address := netip.MustParseAddr("2001:db8::1")
-			for range operatorpb.NeighbourListChunkEntries + 1 {
-				addresses = append(addresses, address.String())
-				address = address.Next()
-			}
-			require.NoError(t, sendNeighbourSnapshot(t.Context(), fixture.Client,
-				replacementChunk("snapshot", 10, addresses[:operatorpb.NeighbourListChunkEntries]...),
-				replacementChunk("snapshot", 10, addresses[operatorpb.NeighbourListChunkEntries:]...),
-			))
-			before, err := fixture.Client.List(t.Context(), &operatorpb.ListNeighboursRequest{Table: table})
-			require.NoError(t, err)
-			var received []*operatorpb.NeighbourEntry
-			chunks := 0
-			service := operator.NewNeighbourService(fixture.Table)
-			err = service.ListStream(&operatorpb.ListNeighboursRequest{Table: table}, &neighbourListStream{
-				RequestContext: t.Context(),
-				OnChunk: func(chunk *operatorpb.ListNeighboursResponse) error {
-					chunks++
-					received = append(received, chunk.GetNeighbours()...)
-					if chunks == 1 {
-						if len(chunk.GetNeighbours()) != operatorpb.NeighbourListChunkEntries {
-							return fmt.Errorf("unexpected first chunk size: %d", len(chunk.GetNeighbours()))
-						}
-						return sendNeighbourSnapshot(t.Context(), fixture.Client, replacementChunk("snapshot", 200, "192.0.2.1"))
-					}
-					return nil
-				},
-			})
-			require.NoError(t, err)
-			require.Equal(t, 2, chunks)
-			expected := map[neigh.Key]*operatorpb.NeighbourEntry{}
-			for _, entry := range before.GetNeighbours() {
-				address, err := entry.GetNextHop().ToAddr()
-				require.NoError(t, err)
-				expected[neigh.NewKey(address, entry.GetDevice())] = entry
-			}
-			for _, entry := range received {
-				address, err := entry.GetNextHop().ToAddr()
-				require.NoError(t, err)
-				key := neigh.NewKey(address, entry.GetDevice())
-				require.True(t, proto.Equal(expected[key], entry), "changed or duplicate entry for %s", address)
-				delete(expected, key)
-			}
-			require.Empty(t, expected)
-			after, err := fixture.Client.List(t.Context(), &operatorpb.ListNeighboursRequest{Table: table})
-			require.NoError(t, err)
-			require.Len(t, after.GetNeighbours(), 1)
-		})
+		arguments := []string{}
+		addresses := []string{"192.0.2.1", "2001:db8::1"}
+		if table != "" {
+			arguments = append(arguments, "--table", table)
+		} else {
+			addresses = append(addresses, "2001:db8::2")
+		}
+		stdout, stderr, err := runNeighbourCLI(t, fixture.Endpoint, arguments...)
+		require.NoError(t, err, stderr)
+		for _, address := range addresses {
+			require.Contains(t, stdout, address)
+		}
+		if table != "" {
+			require.NotContains(t, stdout, "2001:db8::2")
+		}
+		stdout, stderr, err = runNeighbourCLI(t, fixture.Endpoint, append(arguments, "--format", "json")...)
+		require.NoError(t, err, stderr)
+		var entries []map[string]any
+		require.NoError(t, json.Unmarshal([]byte(stdout), &entries))
+		require.Len(t, entries, len(addresses))
+		listed := []string{}
+		for _, entry := range entries {
+			require.NotContains(t, entry, "ifindex")
+			address, ok := entry["next_hop"].(string)
+			require.True(t, ok)
+			listed = append(listed, address)
+			require.Equal(t, "PERMANENT", entry["state"])
+		}
+		require.ElementsMatch(t, addresses, listed)
 	}
-}
-
-// Test_NeighbourService_ListStreamCompletion verifies that empty views complete,
-// missing sources fail, and cancellation or a failed send interrupts the read.
-func Test_NeighbourService_ListStreamCompletion(t *testing.T) {
-	for _, tc := range []struct {
-		name   string
-		table  string
-		cancel bool
-		code   codes.Code
-	}{
-		{name: "empty merged view completes", code: codes.OK},
-		{name: "missing source is not an empty view", table: "absent", code: codes.NotFound},
-		{name: "cancelled empty read fails", cancel: true, code: codes.Canceled},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			service := operator.NewNeighbourService(neigh.NewNeighTable())
-			ctx, cancel := context.WithCancel(t.Context())
-			defer cancel()
-			if tc.cancel {
-				cancel()
-			}
-			chunks := 0
-			err := service.ListStream(&operatorpb.ListNeighboursRequest{Table: tc.table}, &neighbourListStream{
-				RequestContext: ctx,
-				OnChunk: func(chunk *operatorpb.ListNeighboursResponse) error {
-					chunks++
-					if len(chunk.GetNeighbours()) != 0 {
-						return fmt.Errorf("unexpected entries in empty view: %d", len(chunk.GetNeighbours()))
-					}
-					return nil
-				},
-			})
-			require.Equal(t, tc.code, status.Code(err))
-			if tc.code == codes.OK {
-				require.Equal(t, 1, chunks)
-			} else {
-				require.Zero(t, chunks)
-			}
-		})
-	}
-	for _, cancelRead := range []bool{false, true} {
-		t.Run(fmt.Sprintf("interrupted chunk cancel=%t", cancelRead), func(t *testing.T) {
-			fixture := newNeighbourServiceFixture(t)
-			chunk := replacementChunk("snapshot", 10)
-			address := netip.MustParseAddr("2001:db8::1")
-			for range operatorpb.NeighbourListChunkEntries {
-				entry := replacementChunk("snapshot", 10, address.String()).Entries[0]
-				chunk.Entries = append(chunk.Entries, entry)
-				address = address.Next()
-			}
-			require.NoError(t, sendNeighbourSnapshot(t.Context(), fixture.Client, chunk, replacementChunk("snapshot", 10, address.String())))
-			ctx, cancel := context.WithCancel(t.Context())
-			defer cancel()
-			chunks := 0
-			err := operator.NewNeighbourService(fixture.Table).ListStream(&operatorpb.ListNeighboursRequest{}, &neighbourListStream{
-				RequestContext: ctx,
-				OnChunk: func(chunk *operatorpb.ListNeighboursResponse) error {
-					chunks++
-					if cancelRead {
-						cancel()
-						return nil
-					}
-					return status.Error(codes.Unavailable, "stream failed")
-				},
-			})
-			code := codes.Unavailable
-			if cancelRead {
-				code = codes.Canceled
-			}
-			require.Equal(t, code, status.Code(err))
-			require.Equal(t, 1, chunks)
-		})
-	}
+	checkNeighbourCLIError(t, fixture.Endpoint, "NotFound", "--table", "missing")
 }

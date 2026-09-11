@@ -11,10 +11,10 @@ import (
 	vnetlink "github.com/vishvananda/netlink"
 	"golang.org/x/sys/unix"
 
-	"github.com/yanet-platform/yanet2/operators/netlink-dataplane-sidecar/internal/netplan"
+	"github.com/yanet-platform/yanet2/operators/netlink-dataplane-sidecar/internal/desired"
 )
 
-// Backend permits interface restoration and narrowly scoped IPv6LL cleanup.
+// Backend permits interface setup and narrowly scoped IPv6LL cleanup.
 type Backend interface {
 	LinkList() ([]vnetlink.Link, error)
 	LinkByName(string) (vnetlink.Link, error)
@@ -31,127 +31,135 @@ type Sysctl interface {
 	SetIPv6(context.Context, string, string, string, func() error) error
 }
 
-// Reconciler restores desired values without retaining historical ownership.
+// Reconciler separates interface creation from configuration during bootstrap.
+//
+// One worker retries these operations until success, then stops calling them.
 type Reconciler struct {
-	backend   Backend
-	sysctl    Sysctl
-	applySlot chan struct{}
+	backend Backend
+	sysctl  Sysctl
 }
 
-// NewReconciler serializes restoration through the supplied kernel handle.
+// NewReconciler uses the supplied kernel handle for startup mutations.
 func NewReconciler(backend Backend, sysctl Sysctl) *Reconciler {
-	return &Reconciler{backend: backend, sysctl: sysctl, applySlot: make(chan struct{}, 1)}
+	return &Reconciler{backend: backend, sysctl: sysctl}
 }
 
-// Apply preserves successful partial setup for the next idempotent pass.
-func (m *Reconciler) Apply(ctx context.Context, state netplan.State) error {
-	if m.backend == nil || m.sysctl == nil || m.applySlot == nil {
-		return errors.New("apply network state: uninitialized reconciler")
-	}
-	select {
-	case m.applySlot <- struct{}{}:
-		defer func() { <-m.applySlot }()
-	case <-ctx.Done():
-		return ctx.Err()
-	}
+func (m *Reconciler) readLinks(ctx context.Context, state desired.State) (map[string]vnetlink.Link, error) {
 	if err := ctx.Err(); err != nil {
-		return err
+		return nil, err
+	}
+	if m.backend == nil {
+		return nil, errors.New("interface setup: netlink backend is nil")
 	}
 	if err := state.Validate(); err != nil {
-		return err
+		return nil, err
 	}
 	links, err := m.backend.LinkList()
 	if err != nil {
-		return fmt.Errorf("list links: %w", err)
+		return nil, fmt.Errorf("list links: %w", err)
 	}
 	existing := map[string]vnetlink.Link{}
 	for _, link := range links {
 		identity, err := IdentifyLink(link)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		if _, duplicate := existing[identity.Name]; duplicate {
-			return fmt.Errorf("duplicate link %q in dump", identity.Name)
+			return nil, fmt.Errorf("duplicate link %q in dump", identity.Name)
 		}
 		existing[identity.Name] = link
 	}
+	return existing, nil
+}
+
+// Create ensures dummy and VLAN existence without configuring existing links.
+//
+// KNI and loopback must be supplied by the kernel/dataplane. A VLAN whose MTU
+// exceeds its observed parent waits for parent configuration on a later retry.
+func (m *Reconciler) Create(ctx context.Context, state desired.State) error {
+	existing, err := m.readLinks(ctx, state)
+	if err != nil {
+		return err
+	}
+	var failures error
+	for _, wanted := range state.Links {
+		failures = errors.Join(failures, m.createLink(ctx, wanted, state, existing))
+	}
+	return failures
+}
+
+func (m *Reconciler) createLink(ctx context.Context, wanted desired.Link, state desired.State, existing map[string]vnetlink.Link) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	parent := existing[wanted.Parent]
+	if link := existing[wanted.Name]; link != nil {
+		return ValidateLink(wanted, link, parent)
+	}
+	if wanted.Kind == desired.LinkKindKNI || wanted.Kind == desired.LinkKindLoopback {
+		return fmt.Errorf("kernel link %q is not available yet", wanted.Name)
+	}
+	attributes := vnetlink.LinkAttrs{Name: wanted.Name, MTU: wanted.MTU}
+	var created vnetlink.Link = &vnetlink.Dummy{LinkAttrs: attributes}
+	if wanted.Kind == desired.LinkKindVLAN {
+		if err := ValidateLink(desired.Link{Name: wanted.Parent}, parent, nil); err != nil {
+			return fmt.Errorf("create VLAN %q: parent %q: %w", wanted.Name, wanted.Parent, err)
+		}
+		identity, _ := IdentifyLink(parent)
+		var err error
+		parent, err = m.resolve(ctx, identity)
+		if err != nil {
+			return err
+		}
+		attributes.ParentIndex = parent.Attrs().Index
+		if attributes.MTU == 0 {
+			attributes.MTU = parent.Attrs().MTU
+			for _, desiredParent := range state.Links {
+				if desiredParent.Name == wanted.Parent && desiredParent.MTU != 0 {
+					attributes.MTU = desiredParent.MTU
+				}
+			}
+		}
+		created = &vnetlink.Vlan{
+			LinkAttrs: attributes, VlanId: wanted.VLANID,
+			VlanProtocol: vnetlink.VLAN_PROTOCOL_8021Q,
+		}
+	}
+	if err := m.backend.LinkAdd(created); err != nil {
+		return fmt.Errorf("create link %q: %w", wanted.Name, err)
+	}
+	return nil
+}
+
+// Configure attempts every available link without waiting for missing ones.
+//
+// MTU increases precede child changes; parent decreases follow them and refuse
+// to clamp any remaining oversized child. Partial setup is safe to retry.
+func (m *Reconciler) Configure(ctx context.Context, state desired.State) error {
+	existing, err := m.readLinks(ctx, state)
+	if err != nil {
+		return err
+	}
+	if m.sysctl == nil {
+		return errors.New("configure interfaces: sysctl backend is nil")
+	}
 	identities := map[string]LinkIdentity{}
+	var failures error
 	for _, wanted := range state.Links {
 		link := existing[wanted.Name]
-		if link == nil {
-			if wanted.Kind == netplan.LinkKindKNI || wanted.Kind == netplan.LinkKindLoopback {
-				return fmt.Errorf("kernel link %q is not available yet", wanted.Name)
-			}
+		if err := ValidateLink(wanted, link, existing[wanted.Parent]); err != nil {
+			failures = errors.Join(failures, fmt.Errorf("configure link %q: %w", wanted.Name, err))
 			continue
 		}
-		if err := ValidateLink(wanted, link, existing[wanted.Parent]); err != nil {
-			return err
+		if err := validateEffectiveMTU(wanted, state, existing); err != nil {
+			failures = errors.Join(failures, err)
+			continue
 		}
 		identities[wanted.Name], _ = IdentifyLink(link)
 	}
-	if err := validateEffectiveMTUs(state, existing); err != nil {
-		return err
-	}
-
-	// Parent increases precede VLAN creation and child MTU changes.
-	for _, wanted := range state.Links {
-		if wanted.Kind != netplan.LinkKindKNI || wanted.MTU == 0 {
-			continue
-		}
-		if existing[wanted.Name].Attrs().MTU < wanted.MTU {
-			if err := m.ensureMTU(ctx, wanted, identities); err != nil {
-				return err
-			}
-		}
-	}
-	for _, wanted := range state.Links {
-		if _, present := identities[wanted.Name]; present {
-			continue
-		}
-		attributes := vnetlink.LinkAttrs{Name: wanted.Name, MTU: wanted.MTU}
-		var created vnetlink.Link = &vnetlink.Dummy{LinkAttrs: attributes}
-		var parent vnetlink.Link
-		if wanted.Kind == netplan.LinkKindVLAN {
-			parent, err = m.resolve(ctx, identities[wanted.Parent])
-			if err != nil {
-				return err
-			}
-			attributes.ParentIndex = parent.Attrs().Index
-			if attributes.MTU == 0 {
-				attributes.MTU = parent.Attrs().MTU
-				for _, desiredParent := range state.Links {
-					if desiredParent.Name == wanted.Parent && desiredParent.MTU != 0 {
-						attributes.MTU = desiredParent.MTU
-						break
-					}
-				}
-			}
-			created = &vnetlink.Vlan{
-				LinkAttrs: attributes, VlanId: wanted.VLANID,
-				VlanProtocol: vnetlink.VLAN_PROTOCOL_8021Q,
-			}
-		}
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		if err := m.backend.LinkAdd(created); err != nil {
-			return fmt.Errorf("create link %q: %w", wanted.Name, err)
-		}
-		link, err := m.backend.LinkByName(wanted.Name)
-		if err != nil {
-			return fmt.Errorf("find created link %q: %w", wanted.Name, err)
-		}
-		if err := ValidateLink(wanted, link, parent); err != nil {
-			return err
-		}
-		identities[wanted.Name], err = IdentifyLink(link)
-		if err != nil {
-			return err
-		}
-	}
 	configurationOrder := slices.Clone(state.Links)
-	slices.SortStableFunc(configurationOrder, func(left, right netplan.Link) int {
-		leftVLAN, rightVLAN := left.Kind == netplan.LinkKindVLAN, right.Kind == netplan.LinkKindVLAN
+	slices.SortStableFunc(configurationOrder, func(left, right desired.Link) int {
+		leftVLAN, rightVLAN := left.Kind == desired.LinkKindVLAN, right.Kind == desired.LinkKindVLAN
 		if leftVLAN == rightVLAN {
 			return 0
 		}
@@ -161,50 +169,44 @@ func (m *Reconciler) Apply(ctx context.Context, state netplan.State) error {
 		return -1
 	})
 	for _, wanted := range configurationOrder {
-		if wanted.Kind != netplan.LinkKindKNI {
+		if _, present := identities[wanted.Name]; !present {
+			continue
+		}
+		if wanted.Kind != desired.LinkKindKNI || existing[wanted.Name].Attrs().MTU < wanted.MTU {
 			if err := m.ensureMTU(ctx, wanted, identities); err != nil {
-				return err
+				failures = errors.Join(failures, err)
+				continue
 			}
 		}
 		if err := m.configureLink(ctx, wanted, identities); err != nil {
-			return fmt.Errorf("configure link %q: %w", wanted.Name, err)
+			failures = errors.Join(failures, fmt.Errorf("configure link %q: %w", wanted.Name, err))
 		}
 	}
-	// Parent decreases follow all child restoration.
 	for _, wanted := range state.Links {
-		if wanted.Kind == netplan.LinkKindKNI {
-			if err := m.ensureMTU(ctx, wanted, identities); err != nil {
-				return err
-			}
+		if _, present := identities[wanted.Name]; present && wanted.Kind == desired.LinkKindKNI {
+			failures = errors.Join(failures, m.ensureMTU(ctx, wanted, identities))
 		}
 	}
-	return nil
+	return failures
 }
 
-func validateEffectiveMTUs(state netplan.State, existing map[string]vnetlink.Link) error {
-	desired := map[string]netplan.Link{}
-	for _, link := range state.Links {
-		desired[link.Name] = link
-		if link.MTU == 0 && existing[link.Name] != nil {
-			if err := netplan.ValidateMTU(existing[link.Name].Attrs().MTU); err != nil {
-				return fmt.Errorf("link %q: %w", link.Name, err)
+func validateEffectiveMTU(wanted desired.Link, state desired.State, existing map[string]vnetlink.Link) error {
+	mtu := wanted.MTU
+	if mtu == 0 {
+		mtu = existing[wanted.Name].Attrs().MTU
+	}
+	if err := desired.ValidateMTU(mtu); err != nil {
+		return fmt.Errorf("link %q: %w", wanted.Name, err)
+	}
+	if wanted.Kind == desired.LinkKindVLAN {
+		parentMTU := existing[wanted.Parent].Attrs().MTU
+		for _, parent := range state.Links {
+			if parent.Name == wanted.Parent && parent.MTU != 0 {
+				parentMTU = parent.MTU
 			}
 		}
-	}
-	for _, child := range state.Links {
-		if child.Kind != netplan.LinkKindVLAN {
-			continue
-		}
-		parentMTU := desired[child.Parent].MTU
-		if parentMTU == 0 {
-			parentMTU = existing[child.Parent].Attrs().MTU
-		}
-		childMTU := child.MTU
-		if childMTU == 0 && existing[child.Name] != nil {
-			childMTU = existing[child.Name].Attrs().MTU
-		}
-		if childMTU > parentMTU {
-			return fmt.Errorf("VLAN %q MTU %d exceeds parent MTU %d", child.Name, childMTU, parentMTU)
+		if mtu > parentMTU {
+			return fmt.Errorf("VLAN %q MTU %d exceeds parent MTU %d", wanted.Name, mtu, parentMTU)
 		}
 	}
 	return nil
@@ -226,13 +228,13 @@ func (m *Reconciler) resolve(ctx context.Context, expected LinkIdentity) (vnetli
 		return nil, err
 	}
 	if current != expected {
-		return nil, fmt.Errorf("link %q changed identity during restoration", expected.Name)
+		return nil, fmt.Errorf("link %q changed identity during setup", expected.Name)
 	}
 	return link, nil
 }
 
 func (m *Reconciler) resolveConfigured(
-	ctx context.Context, wanted netplan.Link, identities map[string]LinkIdentity,
+	ctx context.Context, wanted desired.Link, identities map[string]LinkIdentity,
 ) (vnetlink.Link, error) {
 	if wanted.Parent != "" {
 		if _, err := m.resolve(ctx, identities[wanted.Parent]); err != nil {
@@ -242,7 +244,7 @@ func (m *Reconciler) resolveConfigured(
 	return m.resolve(ctx, identities[wanted.Name])
 }
 
-func (m *Reconciler) ensureMTU(ctx context.Context, wanted netplan.Link, identities map[string]LinkIdentity) error {
+func (m *Reconciler) ensureMTU(ctx context.Context, wanted desired.Link, identities map[string]LinkIdentity) error {
 	if wanted.MTU == 0 {
 		return nil
 	}
@@ -253,7 +255,7 @@ func (m *Reconciler) ensureMTU(ctx context.Context, wanted netplan.Link, identit
 	if link.Attrs().MTU == wanted.MTU {
 		return nil
 	}
-	if wanted.Kind == netplan.LinkKindKNI && link.Attrs().MTU > wanted.MTU {
+	if wanted.Kind == desired.LinkKindKNI && link.Attrs().MTU > wanted.MTU {
 		links, err := m.backend.LinkList()
 		if err != nil {
 			return err
@@ -278,7 +280,7 @@ func (m *Reconciler) ensureMTU(ctx context.Context, wanted netplan.Link, identit
 	return nil
 }
 
-func (m *Reconciler) configureLink(ctx context.Context, wanted netplan.Link, identities map[string]LinkIdentity) error {
+func (m *Reconciler) configureLink(ctx context.Context, wanted desired.Link, identities map[string]LinkIdentity) error {
 	validate := func() error {
 		_, err := m.resolveConfigured(ctx, wanted, identities)
 		return err
@@ -368,13 +370,13 @@ func (m *Reconciler) configureLink(ctx context.Context, wanted netplan.Link, ide
 			return fmt.Errorf("desired IPv6 address %s has not completed duplicate address detection", address.IP)
 		}
 	}
-	if wanted.Kind != netplan.LinkKindLoopback && !wanted.IPv6LinkLocal {
+	if wanted.Kind != desired.LinkKindLoopback && !wanted.IPv6LinkLocal {
 		return m.removeUnlistedIPv6LL(ctx, wanted, identities)
 	}
 	return validate()
 }
 
-func (m *Reconciler) removeUnlistedIPv6LL(ctx context.Context, wanted netplan.Link, identities map[string]LinkIdentity) error {
+func (m *Reconciler) removeUnlistedIPv6LL(ctx context.Context, wanted desired.Link, identities map[string]LinkIdentity) error {
 	link, err := m.resolveConfigured(ctx, wanted, identities)
 	if err != nil {
 		return err

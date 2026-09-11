@@ -50,15 +50,20 @@ Remote input mode requires disabled local monitoring and explicit
 `gateway_devices` for every gateway. Set `readiness.remote_neighbour_table` to
 the sidecar's single table and `readiness.remote_neighbour_max_age` to a positive
 budget greater than the sidecar publication cadence, including transport/retry
-time. The receiver cannot infer the cadence of another process; deployment
-configuration must enforce this relationship.
+time. The default budget is **10 minutes**, allowing the default **5-minute**
+periodic refresh plus transport/retry time. The sidecar publishes its first full
+dump immediately, wakes on new-neighbour events, and defers deletion-only changes
+to the periodic refresh. A quiet network must not become stale before that
+refresh can arrive. The receiver cannot infer the cadence of another process;
+deployment configuration must enforce this relationship when overriding defaults.
 
 - Cold start: `STATE_NOT_READY`, reason `SYNCING`.
 - A complete expected-table replacement: `STATE_READY`, including unchanged and
   empty snapshots. Entry modification timestamps do not determine freshness.
 - No complete replacement within the budget: `STATE_NOT_READY`, reason `STALE`.
-- Invalid device/scope or incomplete replacement: last-good data and input age
-  are preserved. A new valid replacement recovers readiness.
+- Invalid device, duplicate canonical IP, oversized request or cancellation
+  observed before commit: last-good data and input age are preserved. A new valid
+  replacement recovers readiness.
 
 Required missing/stale input prevents new FIB snapshots; the dataplane retains
 its last applied table. Valid empty input may withdraw unresolved routes.
@@ -67,10 +72,24 @@ and its freshness. Superseded or expired snapshots cannot start new writes;
 already in-flight RPCs may complete. Incremental additions and removals are
 rejected for the configured remote table.
 An RPC acknowledgement confirms receiver commit, independently of FIB apply.
-For explicit route ifindices, the selected source retains the publisher's
-device binding beneath higher-priority static neighbour overrides. BIRD and
-sidecar must share a namespace. Missing explicit scope and ambiguous unscoped
-next hops stay unresolved; the receiver does not look up remote kernel indices.
+Each unary `ReplaceNeighbours` contains the complete table, with a technical cap
+of 15,252 entries and 4 MiB of protobuf before compression. A client timeout or
+lost response after commit does not undo replacement. Unchanged snapshots,
+including repeated empty snapshots, refresh input age without changing semantic
+generation. A semantic replacement (including clearing a nonempty table) or
+removal invalidates older captured generations.
+
+Neighbour identity and source-priority merge are by `IP.Unmap()`. Duplicate IPs
+within a remote snapshot, even on different devices, reject the whole snapshot.
+Device payload still supplies gateway filtering, not a compound key or publisher
+scope. Existing BIRD/FeedRIB/RIB `Route.ifindex` transport remains unchanged;
+scoped neighbour resolution is separate work in
+[issue #2612](https://github.com/yanet-platform/yanet2/issues/2612).
+
+Unary `List` independently limits each named or merged response to 4 MiB including
+metadata. Valid per-source publications do not guarantee that a merged view fits;
+an oversized read fails with `ResourceExhausted`, without partial data. Listing
+success or failure does not refresh remote input or acknowledge dataplane apply.
 
 ### `rib`
 

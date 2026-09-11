@@ -3,17 +3,17 @@ package operator
 import (
 	"time"
 
-	"github.com/vishvananda/netlink"
+	vnetlink "github.com/vishvananda/netlink"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 
 	commonoperator "github.com/yanet-platform/yanet2/common/go/operator"
+	"github.com/yanet-platform/yanet2/operators/netlink-dataplane-sidecar/internal/desired"
 	"github.com/yanet-platform/yanet2/operators/netlink-dataplane-sidecar/internal/neighbour"
 	netreconcile "github.com/yanet-platform/yanet2/operators/netlink-dataplane-sidecar/internal/netlink"
-	"github.com/yanet-platform/yanet2/operators/netlink-dataplane-sidecar/internal/netplan"
 )
 
-// NetlinkHandle is the shared kernel handle surface used by all reconcilers.
+// NetlinkHandle supports concurrent setup and observation in one namespace.
 type NetlinkHandle interface {
 	netreconcile.Backend
 	neighbour.Backend
@@ -33,13 +33,13 @@ type GatewayConnection interface {
 // GatewayDialer transfers one usable connection on success only.
 type GatewayDialer func(commonoperator.GatewayConfig) (GatewayConnection, error)
 
-// NetplanLoader reads and validates the desired configuration at startup.
-type NetplanLoader func(string) (netplan.State, error)
+// ConfigSourceFactory selects the startup adapter without loading it.
+type ConfigSourceFactory func(*Config) (desired.Source, error)
 
 type options struct {
 	NewNetlinkHandle    NetlinkHandleFactory
 	DialGateway         GatewayDialer
-	LoadNetplan         NetplanLoader
+	NewConfigSource     ConfigSourceFactory
 	SubscribeNeighbours NeighbourSubscriber
 	Log                 *zap.Logger
 }
@@ -60,8 +60,8 @@ func newOptions() *options {
 			}
 			return connection, nil
 		},
-		LoadNetplan:         netplan.ParseFile,
-		SubscribeNeighbours: netlink.NeighSubscribeWithOptions,
+		NewConfigSource:     newConfigSource,
+		SubscribeNeighbours: vnetlink.NeighSubscribeWithOptions,
 		Log:                 zap.NewNop(),
 	}
 }
@@ -92,14 +92,14 @@ func WithGatewayDialer(dialer GatewayDialer) Option {
 
 var _ NetlinkHandle = (*netreconcile.Handle)(nil)
 
-// WithNetplanLoader replaces startup configuration loading.
-func WithNetplanLoader(loader NetplanLoader) Option {
+// WithConfigSourceFactory replaces startup configuration adapter selection.
+func WithConfigSourceFactory(factory ConfigSourceFactory) Option {
 	return func(options *options) {
-		options.LoadNetplan = loader
+		options.NewConfigSource = factory
 	}
 }
 
-// WithNeighbourSubscriber replaces the event socket subscription.
+// WithNeighbourSubscriber replaces the kernel event subscription.
 func WithNeighbourSubscriber(subscribe NeighbourSubscriber) Option {
 	return func(options *options) {
 		options.SubscribeNeighbours = subscribe

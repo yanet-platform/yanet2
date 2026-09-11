@@ -4,17 +4,16 @@ import { useConfigListCache, useSearchParamHelpers, useListNavigation, usePageCo
 import { Button, Icon } from '@gravity-ui/uikit';
 import { Plus, Layers } from '@gravity-ui/icons';
 import { PageLayout, PageLoader, ConfigTabStrip, BulkBar, EmptyPagePlaceholder } from '@yanet/core/components';
-import { DeleteConfigModal, CommandPaletteHeader } from '@yanet/core/components';
+import { BulkDeleteModal, DeleteConfigModal, CommandPaletteHeader } from '@yanet/core/components';
 import type { Command, RowAdapter, ShortcutSection, PagePaletteContribution } from '@yanet/core/components/command-palette';
 import { stringToIPAddress } from '@yanet/core/utils/netip';
 import { parseIPAddress } from '@yanet/core/utils';
 import type { Neighbour, NeighbourTableInfo } from '@yanet/core/api/neighbours';
 import { NeighbourTable } from './NeighbourTable';
 import NeighbourPanel from './NeighbourPanel';
-import { NeighbourDeleteModal } from './NeighbourDeleteModal';
 import TableModal from './TableModal';
 import { useNeighbours } from './useNeighbours';
-import { getNeighbourId, getNeighbourNextHop, getIPWideRemovalRows, isSortableColumn, isSortDirection, sortComparators } from './utils';
+import { getNeighbourId, isSortableColumn, isSortDirection, sortComparators } from './utils';
 import { MERGED_TAB, DEFAULT_SORT } from './types';
 import type { SortState, SortableColumn } from './types';
 import { FamilyFilter, type IPFamily } from '@yanet/core/components/VirtualTable';
@@ -147,16 +146,6 @@ const NeighboursPage: React.FC = () => {
     }, [sortState, updateParams]);
 
     const allRows = cache.get(activeTab) || [];
-    const bulkRemovalRows = useMemo(() => {
-        if (!bulkRemoveOpen || selectedIds.size === 0) return [];
-        const selectedRows = allRows.filter((row) => selectedIds.has(getNeighbourId(row)));
-        return getIPWideRemovalRows(allRows, selectedRows);
-    }, [bulkRemoveOpen, allRows, selectedIds]);
-    const rowRemovalTable = isMergedView ? rowDeleteConfirm.neighbour?.source || 'static' : activeTab;
-    const rowRemovalRows = useMemo(() => {
-        if (!rowDeleteConfirm.open || !rowDeleteConfirm.neighbour) return [];
-        return getIPWideRemovalRows(cache.get(rowRemovalTable) || [], [rowDeleteConfirm.neighbour]);
-    }, [rowDeleteConfirm, cache, rowRemovalTable]);
 
     const visibleRows = useMemo(() => {
         let res = allRows;
@@ -223,7 +212,7 @@ const NeighboursPage: React.FC = () => {
 
     const handleDeleteNeighbour = useCallback(async (neighbour: Neighbour): Promise<void> => {
         const table = isMergedView ? (neighbour.source || 'static') : activeTab;
-        const wire = stringToIPAddress(getNeighbourNextHop(neighbour));
+        const wire = stringToIPAddress(getNeighbourId(neighbour));
         if (!wire) return;
         await removeNeighbours(table, [wire]);
         setSelectedIds(new Set());
@@ -244,12 +233,11 @@ const NeighboursPage: React.FC = () => {
 
     const handleBulkRemove = useCallback(async (): Promise<void> => {
         if (isMergedView || !activeTab) return;
-        const wires = allRows.filter((row) => selectedIds.has(getNeighbourId(row)))
-            .map((row) => stringToIPAddress(getNeighbourNextHop(row)));
+        const wires = Array.from(selectedIds).map((s) => stringToIPAddress(s));
         await removeNeighbours(activeTab, wires);
         setSelectedIds(new Set());
         setBulkRemoveOpen(false);
-    }, [isMergedView, activeTab, selectedIds, allRows, removeNeighbours]);
+    }, [isMergedView, activeTab, selectedIds, removeNeighbours]);
 
     const handleCreateTable = useCallback(async (name: string, priority: number): Promise<void> => {
         await createTable(name, priority);
@@ -450,8 +438,8 @@ const NeighboursPage: React.FC = () => {
             cmds.push({
                 id: '__bulk_delete',
                 icon: '✕',
-                label: 'Delete selected IPs across all devices',
-                sub: `${selectedIds.size} pairs selected; includes other devices sharing their IPs`,
+                label: 'Delete selected neighbours',
+                sub: `${selectedIds.size} selected`,
                 keywords: 'delete remove selected bulk',
                 onSelect: () => { setBulkRemoveOpen(true); },
             });
@@ -486,18 +474,18 @@ const NeighboursPage: React.FC = () => {
     const neighbourDynamicCommands = useCallback((q: string): Command[] => {
         if (!parseIPAddress(q.trim()).ok) return [];
         const ip = q.trim();
-        const existing = allRows.filter((row) => getNeighbourNextHop(row) === getNeighbourNextHop({ next_hop: ip }));
-        if (existing.length > 0) {
-            return existing.map((row) => {
-                const id = getNeighbourId(row);
-                return {
-                    id: `__jump_${id}`,
+        const existing = allRows.find((n) => n.next_hop === ip);
+        if (existing) {
+            const id = getNeighbourId(existing);
+            return [
+                {
+                    id: '__jump_ip',
                     icon: '⌖',
-                    label: `Jump to ${ip} on ${row.device || '(unscoped)'}`,
+                    label: `Jump to ${ip}`,
                     sub: 'Scroll to this neighbour in the table',
                     onSelect: () => { handleJumpToRow(id); },
-                };
-            });
+                },
+            ];
         }
         if (tables.length === 0) return [];
         return [
@@ -694,23 +682,25 @@ const NeighboursPage: React.FC = () => {
                     />
                 )}
 
-                {bulkRemoveOpen && (
-                    <NeighbourDeleteModal
-                        affected={bulkRemovalRows}
-                        table={activeTab}
-                        onClose={() => setBulkRemoveOpen(false)}
-                        onConfirm={handleBulkRemove}
-                    />
-                )}
+                <BulkDeleteModal
+                    open={bulkRemoveOpen}
+                    count={selectedIds.size}
+                    itemNoun="neighbour"
+                    configName={activeTab}
+                    onClose={() => setBulkRemoveOpen(false)}
+                    onConfirm={handleBulkRemove}
+                    immediate
+                />
 
-                {rowDeleteConfirm.open && (
-                    <NeighbourDeleteModal
-                        affected={rowRemovalRows}
-                        table={rowRemovalTable}
-                        onClose={() => setRowDeleteConfirm({ open: false, neighbour: null })}
-                        onConfirm={handleDeleteRowConfirm}
-                    />
-                )}
+                <BulkDeleteModal
+                    open={rowDeleteConfirm.open}
+                    count={1}
+                    itemNoun="neighbour"
+                    configName={activeTableInfo?.name || activeTab}
+                    onClose={() => setRowDeleteConfirm({ open: false, neighbour: null })}
+                    onConfirm={handleDeleteRowConfirm}
+                    immediate
+                />
 
                 <DeleteConfigModal
                     open={deleteTableOpen}

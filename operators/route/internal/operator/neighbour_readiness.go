@@ -2,6 +2,7 @@ package operator
 
 import (
 	"context"
+	"net/netip"
 	"sync"
 	"time"
 
@@ -37,7 +38,7 @@ func (m *NeighbourReadiness) ReplaceSnapshot(
 	neighbours *neigh.NeighTable,
 	table string,
 	priority uint32,
-	entries map[neigh.Key]neigh.NeighbourEntry,
+	entries map[netip.Addr]neigh.NeighbourEntry,
 ) (changed bool, recovered bool, err error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()

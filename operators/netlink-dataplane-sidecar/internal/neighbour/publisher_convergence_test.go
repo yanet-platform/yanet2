@@ -14,173 +14,157 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-// unavailableClient fails one transport without accessing the receiver table.
+// unavailableClient counts attempts without accessing receiver state.
 type unavailableClient struct{ Calls int }
 
-func (m *unavailableClient) ReplaceNeighbours(ctx context.Context, options ...grpc.CallOption) (grpc.ClientStreamingClient[operatorpb.ReplaceNeighboursRequest, operatorpb.ReplaceNeighboursResponse], error) {
+func (m *unavailableClient) ReplaceNeighbours(ctx context.Context, request *operatorpb.ReplaceNeighboursRequest, options ...grpc.CallOption) (*operatorpb.ReplaceNeighboursResponse, error) {
 	m.Calls++
 	return nil, status.Error(codes.Unavailable, "transport unavailable")
 }
 
-// Test_Publish_FallbackAndLostResponse verifies that an unknown commit outcome
-// can retry the same complete snapshot and stops after the first acknowledged success.
-func Test_Publish_FallbackAndLostResponse(t *testing.T) {
-	service, client := newPublicationService(t)
+// requestClient exposes the unary boundary without a second transport protocol.
+type requestClient func(context.Context, *operatorpb.ReplaceNeighboursRequest) (*operatorpb.ReplaceNeighboursResponse, error)
+
+func (m requestClient) ReplaceNeighbours(ctx context.Context, request *operatorpb.ReplaceNeighboursRequest, options ...grpc.CallOption) (*operatorpb.ReplaceNeighboursResponse, error) {
+	return m(ctx, request)
+}
+
+// Test_Publish_IndependentRequest verifies that fallback reuses the prepared
+// snapshot despite later caller mutations and stops at the first acknowledgement.
+func Test_Publish_IndependentRequest(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		err  error
+	}{
+		{name: "transport failure", err: status.Error(codes.Unavailable, "retry")},
+		{name: "missing acknowledgement"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			entries := []neighbour.Entry{testDesiredEntry("fe80::1", "logical0"), testDesiredEntry("::ffff:192.0.2.1", "logical1")}
+			var requests []*operatorpb.ReplaceNeighboursRequest
+			var expected *operatorpb.ReplaceNeighboursRequest
+			failed := requestClient(func(ctx context.Context, request *operatorpb.ReplaceNeighboursRequest) (*operatorpb.ReplaceNeighboursResponse, error) {
+				requests = append(requests, request)
+				expected = proto.Clone(request).(*operatorpb.ReplaceNeighboursRequest)
+				entries[0] = testDesiredEntry("2001:db8::5", "changed")
+				entries[1].HardwareRoute.DestinationMAC[5]++
+				return nil, tc.err
+			})
+			retry := requestClient(func(ctx context.Context, request *operatorpb.ReplaceNeighboursRequest) (*operatorpb.ReplaceNeighboursResponse, error) {
+				requests = append(requests, request)
+				return &operatorpb.ReplaceNeighboursResponse{}, nil
+			})
+			unused := &unavailableClient{}
+			targets := []neighbour.GatewayTarget{newPublisherTarget("first", failed), newPublisherTarget("retry", retry), newPublisherTarget("unused", unused)}
+			require.NoError(t, neighbour.Publish(t.Context(), entries, targets, publicationConfig()))
+			require.Len(t, requests, 2)
+			require.Same(t, requests[0], requests[1])
+			require.True(t, proto.Equal(expected, requests[1]))
+			require.Zero(t, unused.Calls)
+		})
+	}
+}
+
+// Test_Publish_NilResponse verifies that exhausting alternatives without an ACK
+// returns an error rather than accepting an unknown outcome.
+func Test_Publish_NilResponse(t *testing.T) {
+	empty := requestClient(func(ctx context.Context, request *operatorpb.ReplaceNeighboursRequest) (*operatorpb.ReplaceNeighboursResponse, error) {
+		return nil, nil
+	})
 	failed := &unavailableClient{}
-	unused := &unavailableClient{}
-	config := publicationConfig()
-	entries := []neighbour.Entry{testDesiredEntry("fe80::1", "logical0"), testDesiredEntry("fe80::1", "logical1")}
-	service.SetHook(func(call publicationCall) error {
-		if call.Method == "response" {
-			service.SetHook(nil)
-			return status.Error(codes.Unavailable, "response lost after commit")
-		}
-		return nil
-	})
-	targets := []neighbour.GatewayTarget{newPublisherTarget("unavailable", failed), newPublisherTarget("lost-response", client), newPublisherTarget("retry", client), newPublisherTarget("unused", unused)}
-	require.NoError(t, neighbour.Publish(t.Context(), entries, targets, config))
+	targets := []neighbour.GatewayTarget{newPublisherTarget("unavailable", failed), newPublisherTarget("missing-response", empty)}
+	require.ErrorContains(t, neighbour.Publish(t.Context(), nil, targets, publicationConfig()), "incomplete response")
 	require.Equal(t, 1, failed.Calls)
-	require.Zero(t, unused.Calls)
-	calls := service.Calls()
-	require.Len(t, calls, 6)
-	require.True(t, proto.Equal(calls[0].Chunk, calls[3].Chunk))
-	require.Len(t, service.Tables()[config.TableName].Entries, 2)
 }
 
-// Test_Publish_FailureKeepsSnapshot verifies that interrupted and refused streams
-// preserve last-good data and a later complete replacement recovers the table.
-func Test_Publish_FailureKeepsSnapshot(t *testing.T) {
-	service, client := newPublicationService(t)
-	config := publicationConfig()
-	service.Store(config.TableName, publicationTable{Priority: 7})
-	service.SetHook(func(call publicationCall) error {
-		if call.Method == "chunk" {
-			return status.Error(codes.Unavailable, "interrupted")
-		}
-		return nil
-	})
-	targets := []neighbour.GatewayTarget{newPublisherTarget("first", client), newPublisherTarget("second", client)}
-	require.Error(t, neighbour.Publish(t.Context(), nil, targets, config))
-	require.Equal(t, uint32(7), service.Tables()[config.TableName].Priority)
-	service.SetHook(nil)
-	require.NoError(t, neighbour.Publish(t.Context(), nil, targets, config))
-	require.Equal(t, config.DefaultPriority, service.Tables()[config.TableName].Priority)
-}
-
-// Test_Publish_DeadlineFallback verifies that each attempt has its own deadline
-// and expiration leaves enough parent budget to retry the same table.
+// Test_Publish_DeadlineFallback verifies that expiration of one attempt leaves
+// a fresh attempt and enough parent budget to retry the same request.
 func Test_Publish_DeadlineFallback(t *testing.T) {
-	service, client := newPublicationService(t)
-	service.SetHook(func(call publicationCall) error {
-		service.SetHook(nil)
-		<-call.Context.Done()
-		return status.FromContextError(call.Context.Err()).Err()
+	var attempts []context.Context
+	var first *operatorpb.ReplaceNeighboursRequest
+	client := requestClient(func(ctx context.Context, request *operatorpb.ReplaceNeighboursRequest) (*operatorpb.ReplaceNeighboursResponse, error) {
+		attempts = append(attempts, ctx)
+		if len(attempts) == 1 {
+			first = request
+			<-ctx.Done()
+			return nil, ctx.Err()
+		}
+		require.NoError(t, ctx.Err())
+		require.Same(t, first, request)
+		return &operatorpb.ReplaceNeighboursResponse{}, nil
 	})
 	config := publicationConfig()
 	config.Timeout = 100 * time.Millisecond
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
-	require.NoError(t, neighbour.Publish(ctx, nil, []neighbour.GatewayTarget{newPublisherTarget("timeout", client), newPublisherTarget("retry", client)}, config))
+	targets := []neighbour.GatewayTarget{newPublisherTarget("timeout", client), newPublisherTarget("retry", client)}
+	require.NoError(t, neighbour.Publish(ctx, nil, targets, config))
+	require.Len(t, attempts, 2)
+	require.ErrorIs(t, attempts[0].Err(), context.DeadlineExceeded)
 	require.NoError(t, ctx.Err())
-	require.Contains(t, service.Tables(), config.TableName)
 }
 
 // Test_Publish_ConfiguredDeadline verifies that a larger configured timeout
-// reaches the server instead of being capped by a hard-coded default.
+// reaches the client instead of being capped by a hard-coded default.
 func Test_Publish_ConfiguredDeadline(t *testing.T) {
-	service, client := newPublicationService(t)
-	remaining := make(chan time.Duration, 3)
-	service.SetHook(func(call publicationCall) error {
-		deadline, _ := call.Context.Deadline()
-		remaining <- time.Until(deadline)
-		return nil
+	var remaining time.Duration
+	client := requestClient(func(ctx context.Context, request *operatorpb.ReplaceNeighboursRequest) (*operatorpb.ReplaceNeighboursResponse, error) {
+		deadline, ok := ctx.Deadline()
+		require.True(t, ok)
+		remaining = time.Until(deadline)
+		return &operatorpb.ReplaceNeighboursResponse{}, nil
 	})
 	config := publicationConfig()
 	config.Timeout = 15 * time.Second
 	require.NoError(t, neighbour.Publish(t.Context(), nil, []neighbour.GatewayTarget{newPublisherTarget("first", client)}, config))
-	require.Greater(t, <-remaining, 10*time.Second)
+	require.Greater(t, remaining, 10*time.Second)
 }
 
-// Test_Publish_Cancellation verifies that cancellation prevents further attempts
-// and cannot turn an incomplete stream into a committed empty snapshot.
+// Test_Publish_Cancellation verifies that a cancelled parent prevents new
+// attempts, whether cancelled before publishing or during a failed call.
 func Test_Publish_Cancellation(t *testing.T) {
-	for _, method := range []string{"before", "chunk"} {
-		t.Run(method, func(t *testing.T) {
-			service, client := newPublicationService(t)
-			config := publicationConfig()
-			service.Store(config.TableName, publicationTable{Priority: 7})
+	for _, tc := range []struct {
+		name      string
+		before    bool
+		wantCalls int
+	}{
+		{name: "before first attempt", before: true},
+		{name: "during failed attempt", wantCalls: 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
 			ctx, cancel := context.WithCancel(t.Context())
 			defer cancel()
-			service.SetHook(func(call publicationCall) error {
-				if call.Method == method {
-					cancel()
-					<-call.Context.Done()
-				}
-				return nil
+			calls := 0
+			client := requestClient(func(ctx context.Context, request *operatorpb.ReplaceNeighboursRequest) (*operatorpb.ReplaceNeighboursResponse, error) {
+				calls++
+				cancel()
+				require.ErrorIs(t, ctx.Err(), context.Canceled)
+				return nil, ctx.Err()
 			})
-			if method == "before" {
+			if tc.before {
 				cancel()
 			}
 			unused := &unavailableClient{}
-			require.Error(t, neighbour.Publish(ctx, nil, []neighbour.GatewayTarget{newPublisherTarget("first", client), newPublisherTarget("unused", unused)}, config))
+			targets := []neighbour.GatewayTarget{newPublisherTarget("first", client), newPublisherTarget("unused", unused)}
+			require.ErrorIs(t, neighbour.Publish(ctx, nil, targets, publicationConfig()), context.Canceled)
+			require.Equal(t, tc.wantCalls, calls)
 			require.Zero(t, unused.Calls)
-			require.Equal(t, uint32(7), service.Tables()[config.TableName].Priority)
 		})
 	}
 }
 
-// acknowledgedClient cancels the caller immediately after a real server ACK.
-type acknowledgedClient struct {
-	Client neighbour.Client
-	Cancel context.CancelFunc
-}
-
-func (m *acknowledgedClient) ReplaceNeighbours(ctx context.Context, options ...grpc.CallOption) (grpc.ClientStreamingClient[operatorpb.ReplaceNeighboursRequest, operatorpb.ReplaceNeighboursResponse], error) {
-	stream, err := m.Client.ReplaceNeighbours(ctx, options...)
-	if err != nil {
-		return nil, err
-	}
-	return &acknowledgedStream{ClientStreamingClient: stream, Cancel: m.Cancel}, nil
-}
-
-// acknowledgedStream preserves the successful response across parent expiry.
-type acknowledgedStream struct {
-	grpc.ClientStreamingClient[operatorpb.ReplaceNeighboursRequest, operatorpb.ReplaceNeighboursResponse]
-	Cancel context.CancelFunc
-}
-
-func (m *acknowledgedStream) CloseAndRecv() (*operatorpb.ReplaceNeighboursResponse, error) {
-	response, err := m.ClientStreamingClient.CloseAndRecv()
-	if err == nil {
-		m.Cancel()
-	}
-	return response, err
-}
-
 // Test_Publish_AcknowledgementBeforeCancellation verifies that a successful ACK
-// remains success even when the parent expires before the call returns.
+// remains success even when the parent is cancelled before the call returns.
 func Test_Publish_AcknowledgementBeforeCancellation(t *testing.T) {
-	service, client := newPublicationService(t)
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
-	unneeded := &unavailableClient{}
-	targets := []neighbour.GatewayTarget{
-		newPublisherTarget("acknowledged", &acknowledgedClient{Client: client, Cancel: cancel}),
-		newPublisherTarget("unneeded", unneeded),
-	}
-	config := publicationConfig()
-	require.NoError(t, neighbour.Publish(ctx, nil, targets, config))
+	client := requestClient(func(ctx context.Context, request *operatorpb.ReplaceNeighboursRequest) (*operatorpb.ReplaceNeighboursResponse, error) {
+		cancel()
+		return &operatorpb.ReplaceNeighboursResponse{}, nil
+	})
+	unused := &unavailableClient{}
+	targets := []neighbour.GatewayTarget{newPublisherTarget("acknowledged", client), newPublisherTarget("unused", unused)}
+	require.NoError(t, neighbour.Publish(ctx, nil, targets, publicationConfig()))
 	require.ErrorIs(t, ctx.Err(), context.Canceled)
-	require.Contains(t, service.Tables(), config.TableName)
-	require.Zero(t, unneeded.Calls)
-}
-
-// Test_Publish_FirstSuccess verifies that later gateway alternatives are never
-// contacted after the first acknowledged complete snapshot.
-func Test_Publish_FirstSuccess(t *testing.T) {
-	_, client := newPublicationService(t)
-	unneeded := &unavailableClient{}
-	targets := []neighbour.GatewayTarget{newPublisherTarget("first", client), newPublisherTarget("unneeded", unneeded)}
-	require.NoError(t, neighbour.Publish(t.Context(), nil, targets, publicationConfig()))
-	require.Zero(t, unneeded.Calls)
+	require.Zero(t, unused.Calls)
 }

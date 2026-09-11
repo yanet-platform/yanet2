@@ -11,8 +11,8 @@ import (
 	vnetlink "github.com/vishvananda/netlink"
 
 	"github.com/yanet-platform/yanet2/modules/route/controlplane/hwroute"
+	"github.com/yanet-platform/yanet2/operators/netlink-dataplane-sidecar/internal/desired"
 	"github.com/yanet-platform/yanet2/operators/netlink-dataplane-sidecar/internal/neighbour"
-	"github.com/yanet-platform/yanet2/operators/netlink-dataplane-sidecar/internal/netplan"
 	operatorpb "github.com/yanet-platform/yanet2/operators/route/operatorpb/v1"
 )
 
@@ -29,7 +29,7 @@ func Test_ValidateManagedDevices_DeviceNameBoundary(t *testing.T) {
 		{name: "embedded NUL", device: "logical0\x00other"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			state := netplan.State{Links: []netplan.Link{{Name: "kni0"}}}
+			state := desired.State{Links: []desired.Link{{Name: "kni0"}}}
 			err := neighbour.ValidateManagedDevices(state, map[string]string{"kni0": test.device})
 			if test.valid {
 				require.NoError(t, err)
@@ -57,7 +57,7 @@ type generatedBackend struct {
 }
 
 func (m *generatedBackend) WalkNeighbours(ctx context.Context, visit func(vnetlink.Neigh) error) error {
-	entry := testKernelNeighbour(1, "192.0.2.1", 2, vnetlink.NUD_REACHABLE)
+	entry := testKernelNeighbour(99, "192.0.2.1", 2, vnetlink.NUD_REACHABLE)
 	for range m.Count {
 		m.Visited++
 		if m.Visited == m.CancelAt {
@@ -71,10 +71,10 @@ func (m *generatedBackend) WalkNeighbours(ctx context.Context, visit func(vnetli
 }
 
 // Test_Discover_EntryBound verifies that an oversized dump stops at the shared
-// limit even when every record would collapse into one canonical pair.
+// limit even when every record is outside the managed topology.
 func Test_Discover_EntryBound(t *testing.T) {
 	backend := &generatedBackend{fakeBackend: fakeBackend{links: []vnetlink.Link{testLink(1, "kni0", 1)}}, Count: operatorpb.NeighbourSnapshotEntries + 100}
-	entries, err := neighbour.Discover(t.Context(), backend, netplan.State{Links: []netplan.Link{{Name: "kni0"}}}, nil)
+	entries, err := neighbour.Discover(t.Context(), backend, desired.State{Links: []desired.Link{{Name: "kni0"}}}, nil)
 	require.ErrorContains(t, err, "entry limit")
 	require.Nil(t, entries)
 	require.Equal(t, operatorpb.NeighbourSnapshotEntries+1, backend.Visited)
@@ -86,14 +86,14 @@ func Test_Discover_CancelDuringScan(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 	backend := &generatedBackend{fakeBackend: fakeBackend{links: []vnetlink.Link{testLink(1, "kni0", 1)}}, Count: 1000, CancelAt: 3, Cancel: cancel}
-	entries, err := neighbour.Discover(ctx, backend, netplan.State{Links: []netplan.Link{{Name: "kni0"}}}, nil)
+	entries, err := neighbour.Discover(ctx, backend, desired.State{Links: []desired.Link{{Name: "kni0"}}}, nil)
 	require.ErrorIs(t, err, context.Canceled)
 	require.Nil(t, entries)
 	require.Equal(t, 3, backend.Visited)
 }
 
-// Test_Discover_CanonicalDuplicates verifies that NUD transitions and mapped
-// IPv4 representations collapse only when the published payload is identical.
+// Test_Discover_CanonicalDuplicates verifies that repeated canonical IPs fail
+// the dump even if NUD state differs or both payloads are identical.
 func Test_Discover_CanonicalDuplicates(t *testing.T) {
 	for _, test := range []struct {
 		name        string
@@ -109,15 +109,9 @@ func Test_Discover_CanonicalDuplicates(t *testing.T) {
 				second.HardwareAddr = testMAC(3)
 			}
 			backend := fakeBackend{links: []vnetlink.Link{testLink(1, "kni0", 1)}, neighbours: []vnetlink.Neigh{first, second}}
-			entries, err := neighbour.Discover(t.Context(), backend, netplan.State{Links: []netplan.Link{{Name: "kni0"}}}, nil)
-			if test.conflicting {
-				require.ErrorContains(t, err, "conflicting next hop/device")
-				require.Nil(t, entries)
-			} else {
-				require.NoError(t, err)
-				require.Len(t, entries, 1)
-				require.Equal(t, netip.MustParseAddr("192.0.2.1"), entries[0].NextHop)
-			}
+			entries, err := neighbour.Discover(t.Context(), backend, desired.State{Links: []desired.Link{{Name: "kni0"}}}, nil)
+			require.ErrorContains(t, err, "duplicate next hop")
+			require.Nil(t, entries)
 		})
 	}
 }
@@ -167,9 +161,9 @@ func walkNeighbours(ctx context.Context, entries []vnetlink.Neigh, visit func(vn
 // Test_Discover_ManagedIsolationAndLinkMapping verifies that only neighbours
 // on state-owned links are returned with mapped or fallback device names.
 func Test_Discover_ManagedIsolationAndLinkMapping(t *testing.T) {
-	state := netplan.State{Links: []netplan.Link{
+	state := desired.State{Links: []desired.Link{
 		{Name: "kni0"},
-		{Name: "tenant.100", Kind: netplan.LinkKindVLAN, Parent: "kni0", VLANID: 100},
+		{Name: "tenant.100", Kind: desired.LinkKindVLAN, Parent: "kni0", VLANID: 100},
 	}}
 	backend := fakeBackend{
 		links: []vnetlink.Link{
@@ -193,25 +187,9 @@ func Test_Discover_ManagedIsolationAndLinkMapping(t *testing.T) {
 		map[string]string{"tenant.100": "dataplane-vlan"},
 	)
 	require.NoError(t, err)
-	require.Equal(t, []neighbour.Entry{
-		{
-			NextHop: netip.MustParseAddr("192.0.2.10"),
-			HardwareRoute: hwroute.HardwareRoute{
-				SourceMAC:      testMACArray(1),
-				DestinationMAC: testMACArray(10),
-				Device:         "kni0",
-			},
-			Ifindex: 1,
-		},
-		{
-			NextHop: netip.MustParseAddr("192.0.2.20"),
-			HardwareRoute: hwroute.HardwareRoute{
-				SourceMAC:      testMACArray(2),
-				DestinationMAC: testMACArray(20),
-				Device:         "dataplane-vlan",
-			},
-			Ifindex: 2,
-		},
+	require.ElementsMatch(t, []neighbour.Entry{
+		testEntry("192.0.2.10", 1, 10, "kni0"),
+		testEntry("192.0.2.20", 2, 20, "dataplane-vlan"),
 	}, entries)
 }
 
@@ -221,7 +199,7 @@ func Test_Discover_RejectsMappedAndFallbackDeviceCollision(t *testing.T) {
 	entries, err := neighbour.Discover(
 		t.Context(),
 		fakeBackend{},
-		netplan.State{Links: []netplan.Link{{Name: "kni0"}, {Name: "kni1"}}},
+		desired.State{Links: []desired.Link{{Name: "kni0"}, {Name: "kni1"}}},
 		map[string]string{"kni0": "kni1"},
 	)
 
@@ -235,18 +213,18 @@ func Test_Discover_RejectsMappingForUnmanagedLink(t *testing.T) {
 	entries, err := neighbour.Discover(
 		t.Context(),
 		fakeBackend{},
-		netplan.State{Links: []netplan.Link{{Name: "kni0"}}},
+		desired.State{Links: []desired.Link{{Name: "kni0"}}},
 		map[string]string{"kni1": "logical1"},
 	)
 
-	require.ErrorContains(t, err, `link_map entry "kni1" is not a managed netplan link`)
+	require.ErrorContains(t, err, `link_map entry "kni1" is not a managed link`)
 	require.Nil(t, entries)
 }
 
 // Test_Discover_SkipsMalformedAddresses verifies that malformed IP and MAC
 // data is omitted without invalidating otherwise complete kernel dumps.
 func Test_Discover_SkipsMalformedAddresses(t *testing.T) {
-	state := netplan.State{Links: []netplan.Link{{Name: "kni0"}}}
+	state := desired.State{Links: []desired.Link{{Name: "kni0"}}}
 	backend := fakeBackend{
 		links: []vnetlink.Link{
 			testLink(1, "kni0", 1),
@@ -288,30 +266,17 @@ func Test_Discover_SkipsMalformedAddresses(t *testing.T) {
 
 	entries, err := neighbour.Discover(t.Context(), backend, state, nil)
 	require.NoError(t, err)
-	require.Equal(t, []neighbour.Entry{{
-		NextHop: netip.MustParseAddr("192.0.2.1"),
-		HardwareRoute: hwroute.HardwareRoute{
-			SourceMAC:      testMACArray(1),
-			DestinationMAC: testMACArray(1),
-			Device:         "kni0",
-		},
-		Ifindex: 1,
-	}}, entries)
+	require.Equal(t, []neighbour.Entry{testEntry("192.0.2.1", 1, 1, "kni0")}, entries)
 }
 
-// Test_Discover_RejectsMissingOrInvalidManagedLinks verifies that absent,
-// duplicate, or unusable managed links invalidate the entire neighbour snapshot.
-func Test_Discover_RejectsMissingOrInvalidManagedLinks(t *testing.T) {
+// Test_Discover_RejectsInvalidManagedLinks verifies that ambiguous or malformed
+// link identity invalidates the entire neighbour snapshot.
+func Test_Discover_RejectsInvalidManagedLinks(t *testing.T) {
 	tests := []struct {
 		name          string
 		links         []vnetlink.Link
 		errorContains string
 	}{
-		{
-			name:          "missing",
-			links:         []vnetlink.Link{testLink(2, "management0", 2)},
-			errorContains: `managed link "kni0" is missing`,
-		},
 		{
 			name: "invalid index",
 			links: []vnetlink.Link{&vnetlink.Device{LinkAttrs: vnetlink.LinkAttrs{
@@ -322,13 +287,9 @@ func Test_Discover_RejectsMissingOrInvalidManagedLinks(t *testing.T) {
 			errorContains: "invalid index",
 		},
 		{
-			name: "invalid source MAC",
-			links: []vnetlink.Link{&vnetlink.Device{LinkAttrs: vnetlink.LinkAttrs{
-				Name:         "kni0",
-				Index:        1,
-				HardwareAddr: make(net.HardwareAddr, 6),
-			}}},
-			errorContains: "unusable hardware address",
+			name:          "wrong type without MAC",
+			links:         []vnetlink.Link{&vnetlink.Dummy{LinkAttrs: vnetlink.LinkAttrs{Name: "kni0", Index: 1}}},
+			errorContains: "incompatible type",
 		},
 		{
 			name: "duplicate",
@@ -345,7 +306,7 @@ func Test_Discover_RejectsMissingOrInvalidManagedLinks(t *testing.T) {
 			entries, err := neighbour.Discover(
 				t.Context(),
 				fakeBackend{links: test.links},
-				netplan.State{Links: []netplan.Link{{Name: "kni0"}}},
+				desired.State{Links: []desired.Link{{Name: "kni0"}}},
 				nil,
 			)
 
@@ -394,9 +355,9 @@ func Test_Discover_RejectsInvalidManagedVLANIdentity(t *testing.T) {
 			errorContains: "incompatible",
 		},
 	}
-	state := netplan.State{Links: []netplan.Link{
+	state := desired.State{Links: []desired.Link{
 		{Name: "kni0"},
-		{Name: "tenant.100", Kind: netplan.LinkKindVLAN, Parent: "kni0", VLANID: 100},
+		{Name: "tenant.100", Kind: desired.LinkKindVLAN, Parent: "kni0", VLANID: 100},
 	}}
 
 	for _, test := range tests {
@@ -437,21 +398,13 @@ func Test_Discover_FiltersNUDStates(t *testing.T) {
 				neighbours: []vnetlink.Neigh{
 					testKernelNeighbour(1, "192.0.2.1", 2, test.state),
 				},
-			}, netplan.State{Links: []netplan.Link{{Name: "kni0"}}}, nil)
+			}, desired.State{Links: []desired.Link{{Name: "kni0"}}}, nil)
 			require.NoError(t, err)
 			if !test.usable {
 				require.Empty(t, entries)
 				return
 			}
-			require.Equal(t, []neighbour.Entry{{
-				NextHop: netip.MustParseAddr("192.0.2.1"),
-				HardwareRoute: hwroute.HardwareRoute{
-					SourceMAC:      testMACArray(1),
-					DestinationMAC: testMACArray(2),
-					Device:         "kni0",
-				},
-				Ifindex: 1,
-			}}, entries)
+			require.Equal(t, []neighbour.Entry{testEntry("192.0.2.1", 1, 2, "kni0")}, entries)
 		})
 	}
 }
@@ -492,7 +445,7 @@ func Test_Discover_DumpErrorsInvalidateSnapshot(t *testing.T) {
 			entries, err := neighbour.Discover(
 				t.Context(),
 				test.backend,
-				netplan.State{Links: []netplan.Link{{Name: "kni0"}}},
+				desired.State{Links: []desired.Link{{Name: "kni0"}}},
 				nil,
 			)
 			require.ErrorIs(t, err, vnetlink.ErrDumpInterrupted)
@@ -501,32 +454,34 @@ func Test_Discover_DumpErrorsInvalidateSnapshot(t *testing.T) {
 	}
 }
 
-// Test_Discover_RejectsLinkRecreationDuringNeighbourDump verifies that a link
-// replaced between dumps cannot publish neighbours tied to its old identity.
-func Test_Discover_RejectsLinkRecreationDuringNeighbourDump(t *testing.T) {
-	backend := &changingBackend{
-		linkSnapshots: [][]vnetlink.Link{
-			{testLink(1, "kni0", 1)},
-			{testLink(2, "kni0", 2)},
-		},
-		neighbours: []vnetlink.Neigh{
-			testKernelNeighbour(1, "192.0.2.1", 3, vnetlink.NUD_REACHABLE),
-		},
+// Test_Discover_RejectsLinkChangesDuringDump verifies that overlapping creation,
+// disappearance, replacement or MAC readiness cannot authorize a partial dump.
+func Test_Discover_RejectsLinkChangesDuringDump(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		before, after []vnetlink.Link
+	}{
+		{name: "created", after: []vnetlink.Link{testLink(1, "kni0", 1)}},
+		{name: "created without MAC", after: []vnetlink.Link{&vnetlink.Device{LinkAttrs: vnetlink.LinkAttrs{Name: "kni0", Index: 1}}}},
+		{name: "deleted", before: []vnetlink.Link{testLink(1, "kni0", 1)}},
+		{name: "replaced", before: []vnetlink.Link{testLink(1, "kni0", 1)}, after: []vnetlink.Link{testLink(2, "kni0", 2)}},
+		{name: "MAC became ready", before: []vnetlink.Link{&vnetlink.Device{LinkAttrs: vnetlink.LinkAttrs{Name: "kni0", Index: 1}}}, after: []vnetlink.Link{testLink(1, "kni0", 1)}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			backend := &changingBackend{
+				linkSnapshots: [][]vnetlink.Link{tc.before, tc.after},
+				neighbours:    []vnetlink.Neigh{testKernelNeighbour(1, "192.0.2.1", 3, vnetlink.NUD_REACHABLE)},
+			}
+			entries, err := neighbour.Discover(t.Context(), backend, desired.State{Links: []desired.Link{{Name: "kni0"}}}, nil)
+			require.ErrorContains(t, err, "managed links changed during dump")
+			require.Nil(t, entries)
+		})
 	}
-
-	entries, err := neighbour.Discover(
-		t.Context(),
-		backend,
-		netplan.State{Links: []netplan.Link{{Name: "kni0"}}},
-		nil,
-	)
-	require.ErrorContains(t, err, "managed links changed during dump")
-	require.Nil(t, entries)
 }
 
-// Test_Discover_DeterministicOrdering verifies that dump order and exact
-// duplicate records do not alter the ordered desired snapshot.
-func Test_Discover_DeterministicOrdering(t *testing.T) {
+// Test_Discover_DumpOrderIndependence verifies that dump order does not alter
+// the complete contents of the desired snapshot.
+func Test_Discover_DumpOrderIndependence(t *testing.T) {
 	links := []vnetlink.Link{
 		testLink(1, "kni0", 1),
 		testVLAN(2, "tenant.100", 1, 100, 2),
@@ -534,9 +489,9 @@ func Test_Discover_DeterministicOrdering(t *testing.T) {
 	firstNeighbour := testKernelNeighbour(1, "2001:db8::1", 1, vnetlink.NUD_STALE)
 	secondNeighbour := testKernelNeighbour(2, "192.0.2.20", 2, vnetlink.NUD_REACHABLE)
 	thirdNeighbour := testKernelNeighbour(1, "192.0.2.3", 3, vnetlink.NUD_DELAY)
-	state := netplan.State{Links: []netplan.Link{
+	state := desired.State{Links: []desired.Link{
 		{Name: "kni0"},
-		{Name: "tenant.100", Kind: netplan.LinkKindVLAN, Parent: "kni0", VLANID: 100},
+		{Name: "tenant.100", Kind: desired.LinkKindVLAN, Parent: "kni0", VLANID: 100},
 	}}
 
 	first, err := neighbour.Discover(t.Context(), fakeBackend{
@@ -545,7 +500,6 @@ func Test_Discover_DeterministicOrdering(t *testing.T) {
 			firstNeighbour,
 			secondNeighbour,
 			thirdNeighbour,
-			secondNeighbour,
 		},
 	}, state, nil)
 	require.NoError(t, err)
@@ -555,36 +509,125 @@ func Test_Discover_DeterministicOrdering(t *testing.T) {
 	}, state, nil)
 	require.NoError(t, err)
 
-	require.Equal(t, first, second)
-	require.Equal(t, []netip.Addr{
-		netip.MustParseAddr("192.0.2.3"),
-		netip.MustParseAddr("192.0.2.20"),
-		netip.MustParseAddr("2001:db8::1"),
-	}, entryNextHops(first))
+	require.ElementsMatch(t, first, second)
+	require.ElementsMatch(t, []neighbour.Entry{
+		testEntry("192.0.2.3", 1, 3, "kni0"),
+		testEntry("192.0.2.20", 2, 2, "tenant.100"),
+		testEntry("2001:db8::1", 1, 1, "kni0"),
+	}, first)
 }
 
-// Test_Discover_PreservesSameNextHopOnDifferentDevices verifies that
-// per-gateway filtering can distinguish identical link-local next hops.
-func Test_Discover_PreservesSameNextHopOnDifferentDevices(t *testing.T) {
-	nextHop := netip.MustParseAddr("192.0.2.1")
-	entries, err := neighbour.Discover(t.Context(), fakeBackend{
-		links: []vnetlink.Link{
-			testLink(1, "kni0", 1),
-			testLink(2, "kni1", 1),
-		},
-		neighbours: []vnetlink.Neigh{
-			testKernelNeighbour(1, nextHop.String(), 2, vnetlink.NUD_REACHABLE),
-			testKernelNeighbour(2, nextHop.String(), 2, vnetlink.NUD_REACHABLE),
-		},
-	}, netplan.State{Links: []netplan.Link{
-		{Name: "kni0"},
-		{Name: "kni1"},
-	}}, nil)
+// Test_Discover_ExcludesMulticast verifies that multicast neighbours shared by
+// managed devices neither enter the snapshot nor hide valid unicast neighbours.
+func Test_Discover_ExcludesMulticast(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		nextHop      string
+		hardwareAddr net.HardwareAddr
+		state        int
+	}{
+		{name: "IPv6 MLD NOARP", nextHop: "ff02::16", hardwareAddr: net.HardwareAddr{0x33, 0x33, 0, 0, 0, 0x16}, state: vnetlink.NUD_NOARP},
+		{name: "IPv6 global multicast permanent", nextHop: "ff0e::16", hardwareAddr: net.HardwareAddr{0x33, 0x33, 0, 0, 0, 0x16}, state: vnetlink.NUD_PERMANENT},
+		{name: "IPv4 multicast NOARP", nextHop: "224.0.0.22", hardwareAddr: net.HardwareAddr{0x01, 0, 0x5e, 0, 0, 0x16}, state: vnetlink.NUD_NOARP},
+		{name: "IPv4 multicast upper boundary reachable", nextHop: "239.255.255.255", hardwareAddr: net.HardwareAddr{0x01, 0, 0x5e, 0x7f, 0xff, 0xff}, state: vnetlink.NUD_REACHABLE},
+		{name: "mapped IPv4 multicast NOARP", nextHop: "::ffff:224.0.0.22", hardwareAddr: net.HardwareAddr{0x01, 0, 0x5e, 0, 0, 0x16}, state: vnetlink.NUD_NOARP},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			first := vnetlink.Neigh{
+				LinkIndex:    1,
+				IP:           net.IP(netip.MustParseAddr(tc.nextHop).AsSlice()),
+				HardwareAddr: tc.hardwareAddr,
+				State:        tc.state,
+			}
+			second := first
+			second.LinkIndex = 2
+			links := []vnetlink.Link{testLink(1, "kni0", 1), testLink(2, "kni1", 2)}
+			neighbours := []vnetlink.Neigh{first, second}
+			state := desired.State{Links: []desired.Link{{Name: "kni0"}, {Name: "kni1"}}}
+			entries, err := neighbour.Discover(t.Context(), fakeBackend{links: links, neighbours: neighbours}, state, nil)
+			require.NoError(t, err)
+			require.Empty(t, entries)
 
-	require.NoError(t, err)
-	require.Len(t, entries, 2)
-	require.Equal(t, "kni0", entries[0].HardwareRoute.Device)
-	require.Equal(t, "kni1", entries[1].HardwareRoute.Device)
+			neighbours = append(neighbours,
+				testKernelNeighbour(1, "fe80::1", 3, vnetlink.NUD_NOARP),
+				testKernelNeighbour(2, "192.0.2.1", 4, vnetlink.NUD_PERMANENT),
+			)
+			entries, err = neighbour.Discover(t.Context(), fakeBackend{links: links, neighbours: neighbours}, state, nil)
+			require.NoError(t, err)
+			require.ElementsMatch(t, []neighbour.Entry{
+				testEntry("192.0.2.1", 2, 4, "kni1"),
+				testEntry("fe80::1", 1, 3, "kni0"),
+			}, entries)
+
+			neighbours = append(neighbours, testKernelNeighbour(1, "::ffff:192.0.2.1", 4, vnetlink.NUD_NOARP))
+			entries, err = neighbour.Discover(t.Context(), fakeBackend{links: links, neighbours: neighbours}, state, nil)
+			require.ErrorContains(t, err, "duplicate next hop 192.0.2.1")
+			require.Nil(t, entries)
+		})
+	}
+}
+
+// Test_Discover_DuplicateIPRejected verifies that equal canonical unicast IPs on
+// different devices invalidate the entire dump before a winner can be chosen.
+func Test_Discover_DuplicateIPRejected(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		first  string
+		second string
+		state  int
+	}{
+		{name: "IPv4 on two devices", first: "192.0.2.1", second: "192.0.2.1", state: vnetlink.NUD_REACHABLE},
+		{name: "mapped IPv4 on another device", first: "192.0.2.1", second: "::ffff:192.0.2.1", state: vnetlink.NUD_PERMANENT},
+		{name: "link-local IPv6 on two devices", first: "fe80::1", second: "fe80::1", state: vnetlink.NUD_REACHABLE},
+		{name: "IPv4 NOARP on two devices", first: "192.0.2.1", second: "192.0.2.1", state: vnetlink.NUD_NOARP},
+		{name: "link-local IPv6 NOARP on two devices", first: "fe80::1", second: "fe80::1", state: vnetlink.NUD_NOARP},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			entries, err := neighbour.Discover(t.Context(), fakeBackend{
+				links: []vnetlink.Link{testLink(1, "kni0", 1), testLink(2, "kni1", 1)},
+				neighbours: []vnetlink.Neigh{
+					testKernelNeighbour(1, "2001:db8::1", 3, vnetlink.NUD_REACHABLE),
+					testKernelNeighbour(1, tc.first, 2, tc.state),
+					testKernelNeighbour(2, tc.second, 2, tc.state),
+				},
+			}, desired.State{Links: []desired.Link{{Name: "kni0"}, {Name: "kni1"}}}, nil)
+			require.ErrorContains(t, err, "duplicate next hop")
+			require.Nil(t, entries)
+		})
+	}
+}
+
+// Test_Discover_PendingSetupDoesNotGateEgress verifies that absent KNI/VLANs,
+// missing source MACs and unrelated configuration do not block healthy egress.
+func Test_Discover_PendingSetupDoesNotGateEgress(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		pending vnetlink.Link
+	}{
+		{name: "absent KNI"},
+		{name: "KNI without MAC", pending: &vnetlink.Device{LinkAttrs: vnetlink.LinkAttrs{Name: "kni1", Index: 2}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			links := []vnetlink.Link{testLink(1, "kni0", 1)}
+			if tc.pending != nil {
+				links = append(links, tc.pending)
+			}
+			state := desired.State{Links: []desired.Link{
+				{Name: "kni0", MTU: 9000, Addresses: []netip.Prefix{netip.MustParsePrefix("2001:db8::1/64")}},
+				{Name: "kni1"}, {Name: "vlan0", Kind: desired.LinkKindVLAN, Parent: "kni0", VLANID: 100},
+				{Name: "lo", Kind: desired.LinkKindLoopback}, {Name: "dummy0", Kind: desired.LinkKindDummy},
+			}}
+			entries, err := neighbour.Discover(t.Context(), fakeBackend{links: links, neighbours: []vnetlink.Neigh{
+				testKernelNeighbour(1, "192.0.2.1", 3, vnetlink.NUD_REACHABLE),
+				testKernelNeighbour(2, "192.0.2.2", 4, vnetlink.NUD_REACHABLE),
+			}}, state, nil)
+			require.NoError(t, err)
+			require.Equal(t, []neighbour.Entry{testEntry("192.0.2.1", 1, 3, "kni0")}, entries)
+			entries, err = neighbour.Discover(t.Context(), fakeBackend{}, state, nil)
+			require.NoError(t, err)
+			require.Empty(t, entries)
+		})
+	}
 }
 
 // testLink returns an Ethernet link with a usable, index-specific MAC.
@@ -631,18 +674,16 @@ func testMAC(addressByte byte) net.HardwareAddr {
 	return net.HardwareAddr{0x02, 0x00, 0x00, 0x00, 0x00, addressByte}
 }
 
-// testMACArray returns the fixed-width form of a test EUI-48 address.
-func testMACArray(addressByte byte) [6]byte {
-	return [6]byte(testMAC(addressByte))
-}
-
-// entryNextHops extracts next hops without changing their current order.
-func entryNextHops(entries []neighbour.Entry) []netip.Addr {
-	nextHops := make([]netip.Addr, 0, len(entries))
-	for _, entry := range entries {
-		nextHops = append(nextHops, entry.NextHop)
+// testEntry builds an expected route with distinct EUI-48 final octets.
+func testEntry(nextHop string, sourceMAC, destinationMAC byte, device string) neighbour.Entry {
+	return neighbour.Entry{
+		NextHop: netip.MustParseAddr(nextHop),
+		HardwareRoute: hwroute.HardwareRoute{
+			SourceMAC:      [6]byte{2, 0, 0, 0, 0, sourceMAC},
+			DestinationMAC: [6]byte{2, 0, 0, 0, 0, destinationMAC},
+			Device:         device,
+		},
 	}
-	return nextHops
 }
 
 // Test_Discover_ExcludesLoopbacks verifies that dummy MACs and irrelevant
@@ -658,8 +699,8 @@ func Test_Discover_ExcludesLoopbacks(t *testing.T) {
 			testKernelNeighbour(1, "fe80::1", 2, vnetlink.NUD_REACHABLE),
 			testKernelNeighbour(3, "fe80::2", 4, vnetlink.NUD_REACHABLE),
 		},
-	}, netplan.State{Links: []netplan.Link{
-		{Name: "kni0"}, {Name: "lo", Kind: netplan.LinkKindLoopback}, {Name: "loop1", Kind: netplan.LinkKindDummy},
+	}, desired.State{Links: []desired.Link{
+		{Name: "kni0"}, {Name: "lo", Kind: desired.LinkKindLoopback}, {Name: "loop1", Kind: desired.LinkKindDummy},
 	}}, map[string]string{"lo": "", "loop1": "kni0"})
 	require.NoError(t, err)
 	require.Len(t, entries, 1)

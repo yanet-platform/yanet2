@@ -181,7 +181,7 @@ func DefaultConfig() *Config {
 			DefaultPriority: 100,
 		},
 		Readiness: ReadinessConfig{
-			RemoteNeighbourMaxAge: 2 * time.Minute,
+			RemoteNeighbourMaxAge: 10 * time.Minute,
 			ExpectBird:            true,
 			RateThreshold:         defaultRateThreshold,
 			StabilityWindow:       defaultStabilityWindow,

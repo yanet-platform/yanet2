@@ -13,7 +13,7 @@ type routeSnapshot interface {
 }
 
 type neighbourSnapshot interface {
-	Snapshot() neigh.TableSnapshot
+	View() neigh.NexthopCacheView
 }
 
 // RouteSnapshot is the desired state for one reconcile pass: the
@@ -22,11 +22,9 @@ type neighbourSnapshot interface {
 type RouteSnapshot struct {
 	// RIBs maps each module config name to its route dump.
 	RIBs map[string]maptrie.MapTrie[netip.Prefix, netip.Addr, rib.RoutesList]
-	// Neighbours retains individual sources so gateways can filter by device
-	// before equal next hops are merged.
-	Neighbours           neigh.TableSnapshot
-	NeighbourScopeSource string
-	NeighbourGeneration  uint64
+	// Neighbours is an immutable merged view, keyed by canonical IP.
+	Neighbours          neigh.NexthopCacheView
+	NeighbourGeneration uint64
 }
 
 // RouteSource is the operator.StateSource[RouteSnapshot] used by the route
@@ -45,7 +43,6 @@ type RouteSource struct {
 	neighTable  neighbourSnapshot
 	wakeCh      chan struct{}
 	remoteInput *NeighbourReadiness
-	scopeSource string
 }
 
 // NewRouteSource constructs a RouteSource bound to the supplied
@@ -66,22 +63,20 @@ func NewRouteSource(
 		routeReader: ribReader,
 		neighTable:  neighTable,
 		wakeCh:      make(chan struct{}, 1),
-		scopeSource: opts.ScopeSource,
 		remoteInput: opts.RemoteInput,
 	}
 }
 
 type routeSourceOptions struct {
-	ScopeSource string
 	RemoteInput *NeighbourReadiness
 }
 
-// RouteSourceOption configures neighbour provenance and optional input gating.
+// RouteSourceOption configures optional remote input gating.
 type RouteSourceOption func(*routeSourceOptions)
 
-// WithRouteSourceNeighbours binds snapshots to the selected input namespace.
-func WithRouteSourceNeighbours(source string, input *NeighbourReadiness) RouteSourceOption {
-	return func(options *routeSourceOptions) { options.ScopeSource, options.RemoteInput = source, input }
+// WithRouteSourceRemoteInput gates snapshots on fresh remote input.
+func WithRouteSourceRemoteInput(input *NeighbourReadiness) RouteSourceOption {
+	return func(options *routeSourceOptions) { options.RemoteInput = input }
 }
 
 // Snapshot preserves the last dataplane state while required remote input is unknown or stale.
@@ -99,10 +94,10 @@ func (m *RouteSource) Snapshot() (RouteSnapshot, bool) {
 			return RouteSnapshot{}, false
 		}
 	}
-	neighbours := m.neighTable.Snapshot()
+	neighbours := m.neighTable.View()
 	if m.remoteInput != nil {
 		current, available := m.remoteInput.Generation()
-		if _, present := neighbours.SourceView(m.scopeSource); !present || !available || current != generation {
+		if !available || current != generation {
 			return RouteSnapshot{}, false
 		}
 	}
@@ -114,7 +109,7 @@ func (m *RouteSource) Snapshot() (RouteSnapshot, bool) {
 	}
 	return RouteSnapshot{
 		RIBs: dumps, Neighbours: neighbours,
-		NeighbourScopeSource: m.scopeSource, NeighbourGeneration: generation,
+		NeighbourGeneration: generation,
 	}, true
 }
 

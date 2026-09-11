@@ -15,11 +15,6 @@ import (
 	operatorpb "github.com/yanet-platform/yanet2/operators/route/operatorpb/v1"
 )
 
-// emptyRIBSnapshot provides a route reader with no configured routes.
-type emptyRIBSnapshot struct{}
-
-func (m emptyRIBSnapshot) Snapshot() map[string]*rib.RIB { return map[string]*rib.RIB{} }
-
 // neighbourScope reads the real tracker without depending on observer internals.
 func neighbourScope(tracker *readiness.Tracker) *readinesspb.Scope {
 	for _, scope := range tracker.Ready(&readinesspb.ReadyRequest{}).GetScopes() {
@@ -31,15 +26,16 @@ func neighbourScope(tracker *readiness.Tracker) *readinesspb.Scope {
 }
 
 // newReadinessFixture connects real snapshot commits to freshness and FIB capture.
-func newReadinessFixture(t *testing.T, maxAge time.Duration) (*neighbourServiceFixture, *operator.NeighbourReadiness, *operator.RouteSource, *readiness.Tracker) {
+func newReadinessFixture(t *testing.T, maxAge time.Duration, options ...operator.NeighbourServiceOption) (*neighbourServiceFixture, *operator.NeighbourReadiness, *operator.RouteSource, *readiness.Tracker) {
 	t.Helper()
 	tracker := readiness.NewTracker([]readiness.ScopeSpec{{Name: "neighbours"}, {Name: "fib:gateway:route0"}})
 	observer := operator.NewNeighbourReadiness("remote", maxAge, tracker)
-	fixture := newNeighbourServiceFixture(t,
+	options = append([]operator.NeighbourServiceOption{
 		operator.WithNeighbourServiceReadiness(observer),
 		operator.WithNeighbourServiceRemoteSource("remote", []string{"logical0", "logical1"}),
-	)
-	source := operator.NewRouteSource(fixture.Table, emptyRIBSnapshot{}, operator.WithRouteSourceNeighbours("remote", observer))
+	}, options...)
+	fixture := newNeighbourServiceFixture(t, options...)
+	source := operator.NewRouteSource(fixture.Table, gatewayRIBSnapshot{RIB: rib.NewRIB()}, operator.WithRouteSourceRemoteInput(observer))
 	return fixture, observer, source, tracker
 }
 
@@ -50,7 +46,7 @@ func Test_NeighbourReadiness_FirstSnapshot(t *testing.T) {
 	_, ready := source.Snapshot()
 	require.False(t, ready)
 	require.Equal(t, "SYNCING", neighbourScope(tracker).GetReasons()[0].GetCode())
-	require.NoError(t, sendNeighbourSnapshot(t.Context(), fixture.Client, replacementChunk("remote", 100)))
+	require.NoError(t, sendNeighbourSnapshot(t.Context(), fixture.Client, replacementRequest("remote", 100)))
 	require.True(t, observer.Available())
 	_, ready = source.Snapshot()
 	require.True(t, ready)
@@ -61,18 +57,18 @@ func Test_NeighbourReadiness_FirstSnapshot(t *testing.T) {
 // unlock the configured remote source.
 func Test_NeighbourReadiness_WrongTable(t *testing.T) {
 	fixture, observer, source, _ := newReadinessFixture(t, time.Minute)
-	require.NoError(t, sendNeighbourSnapshot(t.Context(), fixture.Client, replacementChunk("other", 100)))
+	require.NoError(t, sendNeighbourSnapshot(t.Context(), fixture.Client, replacementRequest("other", 100)))
 	require.False(t, observer.Available())
 	_, ready := source.Snapshot()
 	require.False(t, ready)
 }
 
 // Test_NeighbourReadiness_EquivalentHeartbeat verifies that fresh equivalent
-// commits retain timestamps and generation without waking another build.
+// reordered commits refresh input age but retain timestamps and generation
+// without waking another build.
 func Test_NeighbourReadiness_EquivalentHeartbeat(t *testing.T) {
 	fixture, observer, _, _ := newReadinessFixture(t, 200*time.Millisecond)
-	input := replacementChunk("remote", 100, "192.0.2.1")
-	input.Entries[0].Ifindex = 10
+	input := replacementRequest("remote", 100, "192.0.2.1", "2001:db8::1")
 	require.NoError(t, sendNeighbourSnapshot(t.Context(), fixture.Client, input))
 	before := sourceEntries(t, fixture.Table, "remote")
 	generation, available := observer.Generation()
@@ -80,6 +76,7 @@ func Test_NeighbourReadiness_EquivalentHeartbeat(t *testing.T) {
 	changes := fixture.Changes.Load()
 	for range 3 {
 		time.Sleep(90 * time.Millisecond)
+		input.Entries[0], input.Entries[1] = input.Entries[1], input.Entries[0]
 		require.NoError(t, sendNeighbourSnapshot(t.Context(), fixture.Client, input))
 		current, available := observer.Generation()
 		require.True(t, available)
@@ -93,7 +90,7 @@ func Test_NeighbourReadiness_EquivalentHeartbeat(t *testing.T) {
 // of the result of installing a FIB on the gateway.
 func Test_NeighbourReadiness_FIBFailure(t *testing.T) {
 	fixture, observer, _, tracker := newReadinessFixture(t, time.Minute)
-	require.NoError(t, sendNeighbourSnapshot(t.Context(), fixture.Client, replacementChunk("remote", 100)))
+	require.NoError(t, sendNeighbourSnapshot(t.Context(), fixture.Client, replacementRequest("remote", 100)))
 	tracker.Set("fib:gateway:route0", readinesspb.State_STATE_NOT_READY)
 	require.True(t, observer.Available())
 	require.Equal(t, readinesspb.State_STATE_READY, neighbourScope(tracker).GetState())
@@ -107,9 +104,9 @@ func Test_NeighbourReadiness_Expiry(t *testing.T) {
 	done := make(chan error, 1)
 	go func() { done <- observer.Run(ctx) }()
 	t.Cleanup(func() { cancel(); require.ErrorIs(t, <-done, context.Canceled) })
-	require.NoError(t, sendNeighbourSnapshot(t.Context(), fixture.Client, replacementChunk("remote", 100, "192.0.2.1")))
+	require.NoError(t, sendNeighbourSnapshot(t.Context(), fixture.Client, replacementRequest("remote", 100, "192.0.2.1")))
 	before := sourceEntries(t, fixture.Table, "remote")
-	invalid := replacementChunk("remote", 100, "192.0.2.2")
+	invalid := replacementRequest("remote", 100, "192.0.2.2")
 	invalid.Entries[0].Device = "unknown"
 	require.Error(t, sendNeighbourSnapshot(t.Context(), fixture.Client, invalid))
 	require.Eventually(t, func() bool {
@@ -127,7 +124,7 @@ func Test_NeighbourReadiness_Expiry(t *testing.T) {
 // after expiry wakes pending work without changing its content generation.
 func Test_NeighbourReadiness_RecoveryWake(t *testing.T) {
 	fixture, observer, source, tracker := newReadinessFixture(t, 100*time.Millisecond)
-	input := replacementChunk("remote", 100, "192.0.2.1")
+	input := replacementRequest("remote", 100, "192.0.2.1")
 	require.NoError(t, sendNeighbourSnapshot(t.Context(), fixture.Client, input))
 	generation, _ := observer.Generation()
 	changes := fixture.Changes.Load()
@@ -145,14 +142,8 @@ func Test_NeighbourReadiness_RecoveryWake(t *testing.T) {
 // Test_NeighbourReadiness_TableLifecycle verifies that deletion invalidates
 // old freshness and incremental additions cannot bypass remote input validation.
 func Test_NeighbourReadiness_TableLifecycle(t *testing.T) {
-	tracker := readiness.NewTracker([]readiness.ScopeSpec{{Name: "neighbours"}})
-	observer := operator.NewNeighbourReadiness("remote", time.Minute, tracker)
-	fixture := newNeighbourServiceFixture(t,
-		operator.WithNeighbourServiceReadiness(observer),
-		operator.WithNeighbourServiceRemoteSource("remote", []string{"logical0"}),
-	)
-	source := operator.NewRouteSource(fixture.Table, emptyRIBSnapshot{}, operator.WithRouteSourceNeighbours("remote", observer))
-	input := replacementChunk("remote", 100, "192.0.2.1")
+	fixture, observer, source, _ := newReadinessFixture(t, time.Minute)
+	input := replacementRequest("remote", 100, "192.0.2.1")
 	require.NoError(t, sendNeighbourSnapshot(t.Context(), fixture.Client, input))
 	_, err := fixture.Client.UpdateNeighbours(t.Context(), &operatorpb.UpdateNeighboursRequest{Table: "remote", Entries: input.Entries})
 	require.Error(t, err)
@@ -169,68 +160,70 @@ func Test_NeighbourReadiness_TableLifecycle(t *testing.T) {
 }
 
 // neighbourSnapshotFunc injects an intervening table generation during capture.
-type neighbourSnapshotFunc func() neigh.TableSnapshot
+type neighbourSnapshotFunc func() neigh.NexthopCacheView
 
-func (m neighbourSnapshotFunc) Snapshot() neigh.TableSnapshot { return m() }
+func (m neighbourSnapshotFunc) View() neigh.NexthopCacheView { return m() }
 
-// Test_RouteSource_RejectsMixedGenerations verifies that freshness from a later
-// replacement cannot authorize an earlier empty, merely recreated table.
-func Test_RouteSource_RejectsMixedGenerations(t *testing.T) {
-	tracker := readiness.NewTracker([]readiness.ScopeSpec{{Name: "neighbours"}})
-	observer := operator.NewNeighbourReadiness("remote", time.Minute, tracker)
-	fixture := newNeighbourServiceFixture(t,
-		operator.WithNeighbourServiceReadiness(observer),
-	)
-	input := replacementChunk("remote", 100, "192.0.2.1")
-	require.NoError(t, sendNeighbourSnapshot(t.Context(), fixture.Client, input))
-	intervened := false
-	reader := neighbourSnapshotFunc(func() neigh.TableSnapshot {
-		if intervened {
-			return fixture.Table.Snapshot()
-		}
-		intervened = true
-		_, err := fixture.Client.RemoveTable(t.Context(), &operatorpb.RemoveNeighbourTableRequest{Name: "remote"})
-		require.NoError(t, err)
-		_, err = fixture.Client.CreateTable(t.Context(), &operatorpb.CreateNeighbourTableRequest{Name: "remote", DefaultPriority: 100})
-		require.NoError(t, err)
-		captured := fixture.Table.Snapshot()
-		require.NoError(t, sendNeighbourSnapshot(t.Context(), fixture.Client, input))
-		return captured
-	})
-	source := operator.NewRouteSource(reader, emptyRIBSnapshot{}, operator.WithRouteSourceNeighbours("remote", observer))
-	_, ready := source.Snapshot()
-	require.False(t, ready)
-	snapshot, ready := source.Snapshot()
-	require.True(t, ready)
-	_, count := snapshot.Neighbours.ViewByDevices(nil).Entries()
-	require.Equal(t, 1, count)
-}
-
-// Test_NeighbourService_InconsistentRemoteScope verifies that a complete stream
-// cannot bind one index to two devices or one device to two observed indices.
-func Test_NeighbourService_InconsistentRemoteScope(t *testing.T) {
-	for _, sameDevice := range []bool{false, true} {
-		fixture := newNeighbourServiceFixture(t, operator.WithNeighbourServiceRemoteSource("remote", []string{"logical0", "logical1"}))
-		first := replacementChunk("remote", 100, "192.0.2.1")
-		first.Entries[0].Ifindex = 10
-		require.NoError(t, sendNeighbourSnapshot(t.Context(), fixture.Client, first))
-		before := sourceEntries(t, fixture.Table, "remote")
-		second := replacementChunk("remote", 100, "192.0.2.2")
-		second.Entries[0].Ifindex = 10
-		if sameDevice {
-			second.Entries[0].Ifindex = 20
-		} else {
-			second.Entries[0].Device = "logical1"
-		}
-		require.Error(t, sendNeighbourSnapshot(t.Context(), fixture.Client, first, second))
-		require.Equal(t, before, sourceEntries(t, fixture.Table, "remote"))
+// Test_RouteSource_CaptureFreshness verifies that content changes, removal and
+// expiry during view capture reject work, while an equivalent refresh is safe.
+//
+// A newly authorized replacement must not validate an earlier empty view
+// captured between table recreation and the complete replacement.
+func Test_RouteSource_CaptureFreshness(t *testing.T) {
+	for _, action := range []string{"replace", "clear", "remove", "recreate", "expire", "heartbeat"} {
+		t.Run(action, func(t *testing.T) {
+			fixture, input, _, _ := newReadinessFixture(t, 100*time.Millisecond)
+			request := replacementRequest("remote", 100, "192.0.2.1")
+			require.NoError(t, sendNeighbourSnapshot(t.Context(), fixture.Client, request))
+			intervened := false
+			reader := neighbourSnapshotFunc(func() neigh.NexthopCacheView {
+				captured := fixture.Table.View()
+				if intervened {
+					return captured
+				}
+				intervened = true
+				switch action {
+				case "replace":
+					require.NoError(t, sendNeighbourSnapshot(t.Context(), fixture.Client, replacementRequest("remote", 100, "192.0.2.2")))
+				case "clear":
+					require.NoError(t, sendNeighbourSnapshot(t.Context(), fixture.Client, replacementRequest("remote", 100)))
+				case "remove", "recreate":
+					_, err := fixture.Client.RemoveTable(t.Context(), &operatorpb.RemoveNeighbourTableRequest{Name: "remote"})
+					require.NoError(t, err)
+					if action == "recreate" {
+						_, err = fixture.Client.CreateTable(t.Context(), &operatorpb.CreateNeighbourTableRequest{Name: "remote", DefaultPriority: 100})
+						require.NoError(t, err)
+						captured = fixture.Table.View()
+						require.NoError(t, sendNeighbourSnapshot(t.Context(), fixture.Client, request))
+					}
+				case "expire":
+					require.Eventually(t, func() bool { return !input.Available() }, time.Second, time.Millisecond)
+				case "heartbeat":
+					require.NoError(t, sendNeighbourSnapshot(t.Context(), fixture.Client, request))
+				}
+				return captured
+			})
+			source := operator.NewRouteSource(reader, gatewayRIBSnapshot{RIB: rib.NewRIB()}, operator.WithRouteSourceRemoteInput(input))
+			_, available := source.Snapshot()
+			require.Equal(t, action == "heartbeat", available)
+			snapshot, available := source.Snapshot()
+			require.Equal(t, action != "remove" && action != "expire", available)
+			if available {
+				_, count := snapshot.Neighbours.Entries()
+				wanted := 1
+				if action == "clear" {
+					wanted = 0
+				}
+				require.Equal(t, wanted, count)
+			}
+		})
 	}
 }
 
 // Test_Config_RemoteNeighbourContract verifies that remote input requires one
 // explicit device owner, a positive age budget and disabled local monitoring.
 func Test_Config_RemoteNeighbourContract(t *testing.T) {
-	for _, test := range []struct {
+	for _, tc := range []struct {
 		name   string
 		mutate func(*operator.Config)
 	}{
@@ -244,14 +237,14 @@ func Test_Config_RemoteNeighbourContract(t *testing.T) {
 			config.GatewayDevices["second"] = []string{"logical0"}
 		}},
 	} {
-		t.Run(test.name, func(t *testing.T) {
+		t.Run(tc.name, func(t *testing.T) {
 			config := operator.DefaultConfig()
 			config.Gateways = []commonoperator.GatewayConfig{{Name: "first"}}
 			config.NetlinkMonitor.Disabled = true
 			config.Readiness.RemoteNeighbourTable = "remote"
 			config.GatewayDevices = map[string][]string{"first": {"logical0"}}
 			require.NoError(t, config.Validate())
-			test.mutate(config)
+			tc.mutate(config)
 			require.Error(t, config.Validate())
 		})
 	}

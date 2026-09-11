@@ -20,10 +20,37 @@ import (
 
 // NexthopCache is a cache of nexthops that is populated via neighbour
 // discovery.
-type NexthopCache = rcucache.Cache[Key, NeighbourEntry]
+type NexthopCache = rcucache.Cache[netip.Addr, NeighbourEntry]
 
 // NexthopCacheView is a read-only view of the nexthop cache.
-type NexthopCacheView = rcucache.CacheView[Key, NeighbourEntry]
+type NexthopCacheView = rcucache.CacheView[netip.Addr, NeighbourEntry]
+
+// FilterByDevices returns a view exposing only the entries whose hardware
+// route egresses through one of the named devices.
+//
+// An empty device list returns the original view unchanged, meaning the
+// caller accepts every neighbour regardless of egress device.
+func FilterByDevices(view NexthopCacheView, devices []string) NexthopCacheView {
+	set := make(map[string]struct{}, len(devices))
+	for _, d := range devices {
+		if d != "" {
+			set[d] = struct{}{}
+		}
+	}
+	if len(set) == 0 {
+		return view
+	}
+
+	entries, n := view.All()
+	filtered := make(map[netip.Addr]NeighbourEntry, n)
+	for addr, entry := range entries {
+		if _, ok := set[entry.HardwareRoute.Device]; ok {
+			filtered[addr] = entry
+		}
+	}
+
+	return rcucache.NewCache(filtered).View()
+}
 
 // Option is a function that configures the neighbour monitor.
 type Option func(*options)
@@ -359,7 +386,7 @@ func (m *NeighMonitor) updateNeighbours() error {
 	view := m.source.Cache.View()
 
 	// Create the new cache map with resolved hardware addresses.
-	nexthopCache := map[Key]NeighbourEntry{}
+	nexthopCache := map[netip.Addr]NeighbourEntry{}
 	for _, neigh := range neighs {
 		nexthopAddr, ok := netip.AddrFromSlice(neigh.IP)
 		if !ok {
@@ -413,7 +440,6 @@ func (m *NeighMonitor) updateNeighbours() error {
 		// Create the entry with resolved hardware addresses.
 		entry := NeighbourEntry{
 			NextHop: nexthopAddr.Unmap(),
-			Ifindex: uint32(neigh.LinkIndex),
 			HardwareRoute: HardwareRoute{
 				SourceMAC:      sourceMAC,
 				DestinationMAC: [6]byte(neigh.HardwareAddr),
@@ -423,8 +449,8 @@ func (m *NeighMonitor) updateNeighbours() error {
 			State:     NeighbourState(neigh.State),
 		}
 
-		if e, ok := view.Lookup(entry.Key()); ok {
-			if e.HardwareRoute == entry.HardwareRoute && e.State == entry.State && e.Ifindex == entry.Ifindex {
+		if e, ok := view.Lookup(entry.NextHop); ok {
+			if e.HardwareRoute == entry.HardwareRoute && e.State == entry.State {
 				entry.UpdatedAt = e.UpdatedAt
 			}
 		}
@@ -437,7 +463,7 @@ func (m *NeighMonitor) updateNeighbours() error {
 			zap.Stringer("state", entry.State),
 		)
 
-		nexthopCache[entry.Key()] = entry
+		nexthopCache[entry.NextHop] = entry
 	}
 
 	// Swap the source table and trigger a re-merge of the merged cache.

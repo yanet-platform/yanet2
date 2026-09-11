@@ -9,19 +9,9 @@ import "common/commonpb/v1/macaddr.proto";
 
 // NeighbourService is the operator-owned neighbour table surface.
 service NeighbourService {
-  // List returns a complete unary view up to 512 MiB; larger views fail with
-  // ResourceExhausted. Use the streaming list for arbitrary table sizes.
+  // List returns one complete immutable merged or named-table view up to 4 MiB.
+  // Larger responses fail with ResourceExhausted, without partial results.
   rpc List(ListNeighboursRequest) returns (ListNeighboursResponse);
-
-  // ListStream returns one immutable merged or named-table snapshot.
-  //
-  // Chunks contain at most 1,000 entries and 256 KiB, including receiver metadata.
-  // Only successful stream completion establishes a complete list. An empty
-  // snapshot yields one empty chunk. Ordering is unspecified.
-  // The default read budget is four concurrent streams and five minutes per
-  // stream, independent of client deadlines. Excess readers fail with
-  // ResourceExhausted; expired reads fail with DeadlineExceeded.
-  rpc ListStream(ListNeighboursRequest) returns (stream ListNeighboursResponse);
 
   // CreateTable creates a new user-defined neighbour table.
   rpc CreateTable(CreateNeighbourTableRequest) returns (CreateNeighbourTableResponse);
@@ -40,11 +30,12 @@ service NeighbourService {
 
   // ReplaceNeighbours atomically creates or replaces a user-defined table.
   //
-  // Only clean EOF commits entries and default priority together. Invalid or
-  // interrupted streams leave both unchanged. Concurrent replacements commit
-  // in completion order; the last complete snapshot wins. Built-ins are refused.
-  // Equivalent replacements preserve timestamps and do not wake reconciliation.
-  rpc ReplaceNeighbours(stream ReplaceNeighboursRequest) returns (ReplaceNeighboursResponse);
+  // The entire request is validated before entries and priority commit together.
+  // Cancellation observed before commit leaves the table unchanged; a lost
+  // response does not undo a commit. Built-in tables cannot be replaced.
+  // Equivalent replacements preserve entry timestamps and refresh input age;
+  // recovery from stale input wakes reconciliation. ACK does not mean FIB apply.
+  rpc ReplaceNeighbours(ReplaceNeighboursRequest) returns (ReplaceNeighboursResponse);
 }
 
 // ListNeighboursRequest is the request to list neighbors.
@@ -82,8 +73,6 @@ message NeighbourEntry {
   string source = 6;
   uint32 priority = 7;
   string device = 8;
-  // Observed interface index in the publisher's namespace; zero is unspecified.
-  uint32 ifindex = 9;
 }
 
 // CreateNeighbourTableRequest is the request to create a new neighbour
@@ -131,19 +120,17 @@ message RemoveNeighboursRequest {
 
 message RemoveNeighboursResponse {}
 
-// ReplaceNeighboursRequest carries one bounded chunk of a complete snapshot.
+// ReplaceNeighboursRequest carries one bounded complete snapshot.
 //
-// Repeat identical table and default_priority in every chunk. Send exactly one
-// empty chunk to clear a table; an empty stream or mixed empty/nonempty chunks
-// are invalid. Limits are 1,000 entries and 256 KiB serialized per chunk, with
-// defaults of 1,000,000 entries, 128 MiB total serialized data and four staged
-// streams per service. Resource exhaustion never commits a partial snapshot.
+// Empty entries explicitly clear only the named table. The technical caps are
+// 15,252 entries and 4 MiB of protobuf data before compression, including metadata
+// and unknown fields. Resource exhaustion never commits a partial snapshot.
 message ReplaceNeighboursRequest {
   // Table is 1..128 ASCII letters, digits, dots, underscores or hyphens, starting
   // with a letter or digit. It has no implicit default or built-in namespace.
   string table = 1;
   uint32 default_priority = 2;
-  // Entries have unique (canonical IP, device) pairs across the entire stream.
+  // Entries have unique canonical IPs, even when their devices differ.
   // IPv4-mapped IPv6 addresses are normalized to IPv4. IP addresses must
   // contain 4 or 16 bytes and both MAC addresses must be present EUI-48 values.
   // Device is at most 79 bytes. Source and updated_at must be unset; the server

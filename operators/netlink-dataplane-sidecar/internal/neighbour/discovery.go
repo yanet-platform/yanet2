@@ -11,8 +11,8 @@ import (
 	vnetlink "github.com/vishvananda/netlink"
 
 	"github.com/yanet-platform/yanet2/modules/route/controlplane/hwroute"
+	"github.com/yanet-platform/yanet2/operators/netlink-dataplane-sidecar/internal/desired"
 	netreconcile "github.com/yanet-platform/yanet2/operators/netlink-dataplane-sidecar/internal/netlink"
-	"github.com/yanet-platform/yanet2/operators/netlink-dataplane-sidecar/internal/netplan"
 	operatorpb "github.com/yanet-platform/yanet2/operators/route/operatorpb/v1"
 )
 
@@ -26,7 +26,6 @@ type Backend interface {
 type Entry struct {
 	NextHop       netip.Addr
 	HardwareRoute hwroute.HardwareRoute
-	Ifindex       uint32
 }
 
 type linkRoute struct {
@@ -34,15 +33,16 @@ type linkRoute struct {
 	SourceMAC [6]byte
 }
 
-// Discover returns a complete, deterministically ordered kernel snapshot.
+// Discover returns a complete kernel snapshot in dump order.
 //
-// Entries outside the managed netplan links, entries in unusable NUD states,
-// and entries without usable IP or EUI-48 addresses are omitted. Any backend
-// error invalidates the whole dump.
+// Entries outside the managed links, multicast destinations, entries in unusable
+// NUD states, and entries without usable IP or EUI-48 addresses are omitted.
+// Missing egress is absent, not a setup gate. Wrong identities, changing links,
+// duplicate unicast IPs and backend errors invalidate the whole dump.
 func Discover(
 	ctx context.Context,
 	backend Backend,
-	state netplan.State,
+	state desired.State,
 	linkMap map[string]string,
 ) ([]Entry, error) {
 	if err := ctx.Err(); err != nil {
@@ -65,11 +65,7 @@ func Discover(
 	if err != nil {
 		return nil, err
 	}
-	type entryKey struct {
-		NextHop netip.Addr
-		Device  string
-	}
-	seen := map[entryKey]Entry{}
+	seen := map[netip.Addr]Entry{}
 	entries := []Entry{}
 	count := 0
 	err = backend.WalkNeighbours(ctx, func(kernelNeighbour vnetlink.Neigh) error {
@@ -81,7 +77,7 @@ func Discover(
 			return errors.New("dump exceeds entry limit")
 		}
 		link, managed := linksByIndex[kernelNeighbour.LinkIndex]
-		if !managed {
+		if !managed || link.SourceMAC == [6]byte{} {
 			return nil
 		}
 		if !usableNeighbourState(kernelNeighbour.State) {
@@ -92,14 +88,17 @@ func Discover(
 		if !valid {
 			return nil
 		}
+		nextHop = nextHop.Unmap()
+		if nextHop.IsMulticast() {
+			return nil
+		}
 		destinationMAC, usable := hwroute.ParseMAC(kernelNeighbour.HardwareAddr)
 		if !usable {
 			return nil
 		}
 
 		entry := Entry{
-			NextHop: nextHop.Unmap(),
-			Ifindex: uint32(kernelNeighbour.LinkIndex),
+			NextHop: nextHop,
 			HardwareRoute: hwroute.HardwareRoute{
 				SourceMAC:      link.SourceMAC,
 				DestinationMAC: destinationMAC,
@@ -107,14 +106,10 @@ func Discover(
 			},
 		}
 
-		key := entryKey{NextHop: entry.NextHop, Device: entry.HardwareRoute.Device}
-		if previous, found := seen[key]; found {
-			if previous != entry {
-				return fmt.Errorf("conflicting next hop/device %s/%s", key.NextHop, key.Device)
-			}
-			return nil
+		if previous, found := seen[entry.NextHop]; found {
+			return fmt.Errorf("duplicate next hop %s on devices %q and %q", entry.NextHop, previous.HardwareRoute.Device, entry.HardwareRoute.Device)
 		}
-		seen[key] = entry
+		seen[entry.NextHop] = entry
 		entries = append(entries, entry)
 		return nil
 	})
@@ -136,16 +131,6 @@ func Discover(
 		return nil, errors.New("discover neighbours: managed links changed during dump")
 	}
 
-	sort.Slice(entries, func(first, second int) bool {
-		left, right := entries[first], entries[second]
-		if comparison := left.NextHop.Compare(right.NextHop); comparison != 0 {
-			return comparison < 0
-		}
-		if left.HardwareRoute.Device != right.HardwareRoute.Device {
-			return left.HardwareRoute.Device < right.HardwareRoute.Device
-		}
-		return false
-	})
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -153,10 +138,10 @@ func Discover(
 }
 
 func managedLinkConfiguration(
-	state netplan.State,
+	state desired.State,
 	linkMap map[string]string,
-) (map[string]netplan.Link, map[string]string, error) {
-	managedLinks := make(map[string]netplan.Link, len(state.Links))
+) (map[string]desired.Link, map[string]string, error) {
+	managedLinks := make(map[string]desired.Link, len(state.Links))
 	devicesByLink := make(map[string]string, len(state.Links))
 	linksByDevice := make(map[string]string, len(state.Links))
 	loopbacks := map[string]bool{}
@@ -198,7 +183,7 @@ func managedLinkConfiguration(
 			continue
 		}
 		if _, managed := managedLinks[linkName]; !managed {
-			return nil, nil, fmt.Errorf("link_map entry %q is not a managed netplan link", linkName)
+			return nil, nil, fmt.Errorf("link_map entry %q is not a managed link", linkName)
 		}
 	}
 	return managedLinks, devicesByLink, nil
@@ -207,7 +192,7 @@ func managedLinkConfiguration(
 func indexManagedLinks(
 	ctx context.Context,
 	links []vnetlink.Link,
-	managedLinks map[string]netplan.Link,
+	managedLinks map[string]desired.Link,
 ) (map[int]linkRoute, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -243,7 +228,7 @@ func indexManagedLinks(
 		wanted := managedLinks[name]
 		link, found := linksByName[name]
 		if !found {
-			return nil, fmt.Errorf("discover neighbours: managed link %q is missing", name)
+			continue
 		}
 		attributes := link.Attrs()
 		if attributes.Index <= 0 {
@@ -253,14 +238,6 @@ func indexManagedLinks(
 				attributes.Index,
 			)
 		}
-		sourceMAC, usable := hwroute.ParseMAC(attributes.HardwareAddr)
-		if !usable {
-			return nil, fmt.Errorf(
-				"discover neighbours: managed link %q has unusable hardware address",
-				attributes.Name,
-			)
-		}
-
 		if err := netreconcile.ValidateLink(wanted, link, linksByName[wanted.Parent]); err != nil {
 			return nil, fmt.Errorf("discover neighbours: %w", err)
 		}
@@ -268,6 +245,9 @@ func indexManagedLinks(
 		if err != nil {
 			return nil, err
 		}
+		// Retain unready identities so their appearance/change still invalidates
+		// an overlapping dump, without blocking healthy egress on later polls.
+		sourceMAC, _ := hwroute.ParseMAC(attributes.HardwareAddr)
 		candidate := linkRoute{LinkIdentity: identity, SourceMAC: sourceMAC}
 		if existing, found := linksByIndex[attributes.Index]; found {
 			return nil, fmt.Errorf(

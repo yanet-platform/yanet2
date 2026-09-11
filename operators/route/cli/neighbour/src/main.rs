@@ -29,7 +29,7 @@ use ync::{
 };
 
 use crate::operatorpb::{
-    CreateNeighbourTableRequest, ListNeighbourTablesRequest, ListNeighboursRequest, ListNeighboursResponse,
+    CreateNeighbourTableRequest, ListNeighbourTablesRequest, ListNeighboursRequest,
     NeighbourEntry as ProtoNeighbourEntry, NeighbourState, NeighbourTableInfo, RemoveNeighbourTableRequest,
     RemoveNeighboursRequest, UpdateNeighbourTableRequest, UpdateNeighboursRequest,
     neighbour_service_client::NeighbourServiceClient,
@@ -195,32 +195,20 @@ async fn run(cmd: Cmd) -> Result<(), Error> {
 
 type NeighbourService = Service<NeighbourServiceClient<LayeredChannel>>;
 
-/// Collects a complete snapshot; an interrupted read never returns partial
-/// data.
-async fn list_neighbours(service: &mut NeighbourService, table: Option<&str>) -> Result<ListNeighboursResponse, Error> {
-    let request = ListNeighboursRequest {
-        table: table.unwrap_or_default().to_owned(),
-    };
-    let resource = table.map(|table| format!("table '{table}'"));
-    let mut stream = service
-        .client()
-        .list_stream(request)
-        .await
-        .map_err(service.not_found("show", resource.as_deref().unwrap_or("requested table")))?
-        .into_inner();
-    let mut response = ListNeighboursResponse::default();
-    while let Some(chunk) = stream
-        .message()
-        .await
-        .map_err(service.not_found("show", resource.as_deref().unwrap_or("requested table")))?
-    {
-        response.neighbours.extend(chunk.neighbours);
-    }
-    Ok(response)
-}
-
 async fn show_neighbours(service: &mut NeighbourService, cmd: ShowCmd) -> Result<(), Error> {
-    let response = list_neighbours(service, cmd.table.as_deref()).await?;
+    let request = ListNeighboursRequest {
+        table: cmd.table.clone().unwrap_or_default(),
+    };
+    let resource = cmd.table.as_ref().map(|table| format!("table '{table}'"));
+
+    let response = service
+        .unary_with(
+            "show",
+            request,
+            service.not_found("show", resource.as_deref().unwrap_or("requested table")),
+            async |client, request| client.list(request).await,
+        )
+        .await?;
 
     output::data(
         || &response.neighbours,
@@ -391,9 +379,6 @@ async fn remove_table(service: &mut NeighbourService, cmd: RemoveTableCmd) -> Re
     Ok(())
 }
 
-#[cfg(test)]
-mod test;
-
 /// Returns the proto-defined name for a `NeighbourState` discriminant,
 /// stripped of its `NUD_` prefix (e.g. `"REACHABLE"`).
 ///
@@ -489,4 +474,31 @@ fn table_candidates() -> Vec<CompletionCandidate> {
             .map(|table| table.name)
             .collect())
     })
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    /// Pins the JSON shape of a serialized `NeighbourEntry`.
+    ///
+    /// `next_hop`/`link_addr` need no `serialize_with` override, since
+    /// commonpb's own `Serialize` impl already renders them as plain address
+    /// strings. `state` does need one, via `serialize_neighbour_state`.
+    #[test]
+    fn neighbour_entry_serializes_addresses_as_strings_and_state_as_its_name() {
+        let entry = ProtoNeighbourEntry {
+            next_hop: Some(IpAddress::from(IpAddr::V4(core::net::Ipv4Addr::new(192, 0, 2, 1)))),
+            link_addr: Some("aa:bb:cc:dd:ee:ff".parse::<MacAddress>().unwrap()),
+            state: NeighbourState::NudReachable as i32,
+            ..Default::default()
+        };
+
+        let json = serde_json::to_string(&entry).unwrap();
+
+        assert_eq!(
+            r#"{"next_hop":"192.0.2.1","link_addr":"aa:bb:cc:dd:ee:ff","hardware_addr":null,"state":"REACHABLE","updated_at":0,"source":"","priority":0,"device":""}"#,
+            json
+        );
+    }
 }

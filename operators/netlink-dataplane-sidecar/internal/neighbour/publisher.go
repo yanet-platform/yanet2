@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"slices"
 	"strings"
 	"time"
@@ -13,7 +12,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
-	"github.com/yanet-platform/yanet2/operators/netlink-dataplane-sidecar/internal/netplan"
+	"github.com/yanet-platform/yanet2/operators/netlink-dataplane-sidecar/internal/desired"
 	operatorpb "github.com/yanet-platform/yanet2/operators/route/operatorpb/v1"
 )
 
@@ -39,7 +38,7 @@ func ValidateTableName(tableName string) error {
 
 // Client can replace a snapshot but cannot enumerate or delete other tables.
 type Client interface {
-	ReplaceNeighbours(context.Context, ...grpc.CallOption) (grpc.ClientStreamingClient[operatorpb.ReplaceNeighboursRequest, operatorpb.ReplaceNeighboursResponse], error)
+	ReplaceNeighbours(context.Context, *operatorpb.ReplaceNeighboursRequest, ...grpc.CallOption) (*operatorpb.ReplaceNeighboursResponse, error)
 }
 
 // GatewayTarget is an alternate transport to the same route operator.
@@ -70,7 +69,7 @@ func (m PublicationConfig) Validate() error {
 }
 
 // ValidateManagedDevices checks the complete OS-to-logical egress mapping.
-func ValidateManagedDevices(state netplan.State, linkMap map[string]string) error {
+func ValidateManagedDevices(state desired.State, linkMap map[string]string) error {
 	_, _, err := managedLinkConfiguration(state, linkMap)
 	return err
 }
@@ -91,7 +90,7 @@ func Publish(ctx context.Context, entries []Entry, targets []GatewayTarget, conf
 			return errors.New("route neighbour client is nil")
 		}
 	}
-	desired, err := prepareEntries(ctx, entries, config)
+	request, err := prepareRequest(ctx, entries, config)
 	if err != nil {
 		return err
 	}
@@ -101,8 +100,11 @@ func Publish(ctx context.Context, entries []Entry, targets []GatewayTarget, conf
 			return errors.Join(failures, err)
 		}
 		attempt, cancel := context.WithTimeout(ctx, config.Timeout)
-		err := publishTarget(attempt, desired, config, target.Client)
+		response, err := target.Client.ReplaceNeighbours(attempt, request)
 		cancel()
+		if err == nil && response == nil {
+			err = errors.New("replace neighbours: incomplete response")
+		}
 		if err == nil {
 			return nil
 		}
@@ -111,7 +113,10 @@ func Publish(ctx context.Context, entries []Entry, targets []GatewayTarget, conf
 	return failures
 }
 
-func prepareEntries(ctx context.Context, entries []Entry, config PublicationConfig) ([]Entry, error) {
+func prepareRequest(ctx context.Context, entries []Entry, config PublicationConfig) (*operatorpb.ReplaceNeighboursRequest, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if len(entries) > operatorpb.NeighbourSnapshotEntries {
 		return nil, errors.New("neighbour snapshot exceeds entry limit")
 	}
@@ -128,92 +133,43 @@ func prepareEntries(ctx context.Context, entries []Entry, config PublicationConf
 		if err := operatorpb.ValidateNeighbourDevice(entry.HardwareRoute.Device); err != nil {
 			return nil, err
 		}
+		if entry.HardwareRoute.SourceMAC == [6]byte{} || entry.HardwareRoute.DestinationMAC == [6]byte{} {
+			return nil, fmt.Errorf("desired next hop %s has an unusable hardware address", entry.NextHop)
+		}
 	}
 	slices.SortFunc(desired, func(left, right Entry) int {
-		if order := left.NextHop.Compare(right.NextHop); order != 0 {
-			return order
-		}
-		return strings.Compare(left.HardwareRoute.Device, right.HardwareRoute.Device)
+		return left.NextHop.Compare(right.NextHop)
 	})
 	for idx := 1; idx < len(desired); idx++ {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
 		left, right := desired[idx-1], desired[idx]
-		if left.NextHop == right.NextHop && left.HardwareRoute.Device == right.HardwareRoute.Device {
-			return nil, fmt.Errorf("duplicate desired next hop/device %s/%s", right.NextHop, right.HardwareRoute.Device)
+		if left.NextHop == right.NextHop {
+			return nil, fmt.Errorf("duplicate desired next hop %s", right.NextHop)
 		}
 	}
-	totalBytes := 0
-	for start := 0; ; {
+	request := &operatorpb.ReplaceNeighboursRequest{
+		Table: config.TableName, DefaultPriority: config.DefaultPriority,
+		Entries: make([]*operatorpb.NeighbourEntry, 0, len(desired)),
+	}
+	for _, entry := range desired {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		end := min(start+operatorpb.NeighbourChunkEntries, len(desired))
-		request := replacementChunk(desired[start:end], config)
-		chunkBytes := proto.Size(request)
-		if chunkBytes > operatorpb.NeighbourChunkBytes || chunkBytes > operatorpb.NeighbourSnapshotBytes-totalBytes {
-			return nil, errors.New("neighbour snapshot exceeds byte limit")
-		}
-		totalBytes += chunkBytes
-		if end == len(desired) {
-			return desired, nil
-		}
-		start = end
-	}
-}
-
-func replacementChunk(entries []Entry, config PublicationConfig) *operatorpb.ReplaceNeighboursRequest {
-	request := &operatorpb.ReplaceNeighboursRequest{
-		Table: config.TableName, DefaultPriority: config.DefaultPriority,
-		Entries: make([]*operatorpb.NeighbourEntry, 0, len(entries)),
-	}
-	for _, entry := range entries {
 		request.Entries = append(request.Entries, &operatorpb.NeighbourEntry{
 			NextHop:      commonpb.NewIPAddressFromAddr(entry.NextHop),
 			LinkAddr:     commonpb.NewMACAddressEUI48(entry.HardwareRoute.DestinationMAC),
 			HardwareAddr: commonpb.NewMACAddressEUI48(entry.HardwareRoute.SourceMAC),
 			State:        operatorpb.NeighbourState_NUD_PERMANENT,
 			Device:       entry.HardwareRoute.Device,
-			Ifindex:      entry.Ifindex,
 		})
 	}
-	return request
-}
-
-func publishTarget(ctx context.Context, entries []Entry, config PublicationConfig, client Client) error {
-	stream, err := client.ReplaceNeighbours(ctx)
-	if err != nil {
-		return err
+	if proto.Size(request) > operatorpb.NeighbourSnapshotBytes {
+		return nil, errors.New("neighbour snapshot exceeds byte limit")
 	}
-	if stream == nil {
-		return errors.New("replace neighbours: incomplete stream")
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
-	for start := 0; ; {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		end := min(start+operatorpb.NeighbourChunkEntries, len(entries))
-		request := replacementChunk(entries[start:end], config)
-		if err := stream.Send(request); err != nil {
-			if errors.Is(err, io.EOF) {
-				if _, terminal := stream.CloseAndRecv(); terminal != nil {
-					return terminal
-				}
-			}
-			return err
-		}
-		if end == len(entries) {
-			break
-		}
-		start = end
-	}
-	response, err := stream.CloseAndRecv()
-	if err != nil {
-		return err
-	}
-	if response == nil {
-		return errors.New("replace neighbours: incomplete response")
-	}
-	return nil
+	return request, nil
 }

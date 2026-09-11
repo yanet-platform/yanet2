@@ -32,7 +32,6 @@ type FIBBuildStats struct {
 	TotalRoutes       int
 	SkippedPrefixes   int
 	NeighbourNotFound int
-	AmbiguousNextHops int
 	HardwareRoutes    int
 	PrefixesAdded     int
 	// FilteredRoutes counts eligible routes dropped because a better route
@@ -43,66 +42,16 @@ type FIBBuildStats struct {
 // BuildFIB resolves a RIB dump against the supplied neighbour view and
 // produces a deduplicated FIB.
 //
-// Neighbours are filtered by gateway ownership before equal next hops are
-// merged. The best routes per source are chosen
-// among the resolvable routes, so a gateway can fall back to a reachable path.
+// A route is eligible only when its nexthop resolves in the neighbour view;
+// pass a device-filtered view to restrict a gateway to its own egress
+// devices. The best routes per source are chosen among the eligible routes,
+// so a gateway can fall back to a lower-priority route it can actually reach
+// rather than a globally best one it cannot.
 func BuildFIB(
 	ribDump maptrie.MapTrie[netip.Prefix, netip.Addr, rib.RoutesList],
-	neighbours neigh.TableSnapshot,
-	devices []string,
-	options ...FIBBuildOption,
+	neighbours neigh.NexthopCacheView,
 ) (FIB, FIBBuildStats) {
-	configuration := fibBuildOptions{}
-	for _, option := range options {
-		option(&configuration)
-	}
 	var stats FIBBuildStats
-	view := neighbours.ViewByDevices(devices)
-	scopeView := view
-	if configuration.ScopeSource != "" {
-		scopeView, _ = neighbours.SourceView(configuration.ScopeSource)
-	}
-	type scopedKey struct {
-		Address netip.Addr
-		Ifindex uint32
-	}
-	bindings := map[scopedKey]string{}
-	conflicts := map[scopedKey]bool{}
-	scopeEntries, _ := scopeView.Entries()
-	for entry := range scopeEntries {
-		if entry.Ifindex == 0 {
-			continue
-		}
-		key := scopedKey{entry.NextHop.Unmap(), entry.Ifindex}
-		if device, found := bindings[key]; found && device != entry.HardwareRoute.Device {
-			conflicts[key] = true
-		}
-		bindings[key] = entry.HardwareRoute.Device
-	}
-	resolved := map[netip.Addr]neigh.NeighbourEntry{}
-	ambiguous := map[netip.Addr]bool{}
-	neighbourEntries, _ := view.Entries()
-	for entry := range neighbourEntries {
-		if _, duplicate := resolved[entry.NextHop]; duplicate {
-			ambiguous[entry.NextHop] = true
-		}
-		resolved[entry.NextHop] = entry
-	}
-	for address := range ambiguous {
-		delete(resolved, address)
-	}
-	resolve := func(route rib.Route) (neigh.NeighbourEntry, bool) {
-		if route.Ifindex != 0 {
-			key := scopedKey{route.NextHop.Unmap(), route.Ifindex}
-			device, found := bindings[key]
-			if !found || conflicts[key] {
-				return neigh.NeighbourEntry{}, false
-			}
-			return view.Lookup(neigh.NewKey(route.NextHop, device))
-		}
-		entry, found := resolved[route.NextHop.Unmap()]
-		return entry, found
-	}
 
 	entries := make([]FIBEntry, 0)
 
@@ -119,16 +68,13 @@ func BuildFIB(
 			stats.TotalRoutes += len(routesList.Routes)
 
 			local := make([]rib.Route, 0, len(routesList.Routes))
-			for _, route := range routesList.Routes {
-				if _, ok := resolve(route); !ok {
+			for _, r := range routesList.Routes {
+				if _, ok := neighbours.Lookup(r.NextHop.Unmap()); !ok {
 					stats.NeighbourNotFound++
-					if route.Ifindex == 0 && ambiguous[route.NextHop.Unmap()] {
-						stats.AmbiguousNextHops++
-					}
 					continue
 				}
 
-				local = append(local, route)
+				local = append(local, r)
 			}
 
 			if len(local) == 0 {
@@ -143,8 +89,8 @@ func BuildFIB(
 			stats.FilteredRoutes += len(local) - len(bestRoutes)
 
 			nexthops := make([]neigh.HardwareRoute, 0, len(bestRoutes))
-			for _, route := range bestRoutes {
-				entry, _ := resolve(route)
+			for _, r := range bestRoutes {
+				entry, _ := neighbours.Lookup(r.NextHop.Unmap())
 				nexthops = append(nexthops, entry.HardwareRoute)
 			}
 
@@ -161,14 +107,4 @@ func BuildFIB(
 	}
 
 	return FIB{Entries: entries}, stats
-}
-
-type fibBuildOptions struct{ ScopeSource string }
-
-// FIBBuildOption selects the namespace provenance used for explicit route scope.
-type FIBBuildOption func(*fibBuildOptions)
-
-// WithFIBScopeSource retains observed scope beneath static neighbour overrides.
-func WithFIBScopeSource(source string) FIBBuildOption {
-	return func(options *fibBuildOptions) { options.ScopeSource = source }
 }

@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"maps"
 	"net/netip"
-	"slices"
 	"sync"
 	"time"
 
@@ -54,30 +53,6 @@ type SourceInfo struct {
 	BuiltIn         bool
 }
 
-type tableSnapshotSource struct {
-	Name string
-	View NexthopCacheView
-}
-
-// TableSnapshot is an immutable snapshot of every neighbour source.
-//
-// Source provenance remains available independently of per-pair priority merges.
-type TableSnapshot []tableSnapshotSource
-
-// NewTableSnapshot wraps an already merged view in a snapshot.
-//
-// It is primarily useful for callers that already own an immutable neighbour
-// cache, such as focused FIB tests.
-func NewTableSnapshot(view NexthopCacheView) TableSnapshot {
-	return TableSnapshot{{View: view}}
-}
-
-// ViewByDevices filters every source by device before merging equal next hops.
-// An empty device list includes all entries.
-func (m TableSnapshot) ViewByDevices(devices []string) NexthopCacheView {
-	return rcucache.NewCache(mergeSnapshot(m, devices)).View()
-}
-
 // NeighTable merges multiple neighbour sources by per-entry priority.
 //
 // All mutations are serialized under mu. After every mutation the merged
@@ -95,21 +70,13 @@ type NeighTable struct {
 func NewNeighTable() *NeighTable {
 	return &NeighTable{
 		sources: map[string]*NeighSource{},
-		merged:  rcucache.NewEmptyCache[Key, NeighbourEntry](),
+		merged:  rcucache.NewEmptyCache[netip.Addr, NeighbourEntry](),
 	}
 }
 
 // View returns a lock-free snapshot of the merged table.
 func (m *NeighTable) View() NexthopCacheView {
 	return m.merged.View()
-}
-
-// Snapshot returns immutable views of all source tables.
-func (m *NeighTable) Snapshot() TableSnapshot {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	return m.snapshotLocked()
 }
 
 // SourceView returns a lock-free snapshot of a specific source table.
@@ -134,7 +101,7 @@ func (m *NeighTable) ReplaceSource(
 	ctx context.Context,
 	name string,
 	defaultPriority uint32,
-	entries map[Key]NeighbourEntry,
+	entries map[netip.Addr]NeighbourEntry,
 ) (bool, error) {
 	if err := ValidateSourceName(name); err != nil {
 		return false, err
@@ -156,24 +123,21 @@ func (m *NeighTable) ReplaceSource(
 		_, count := previous.Entries()
 		changed = changed || count != len(entries)
 	}
-	next := map[Key]NeighbourEntry{}
+	next := map[netip.Addr]NeighbourEntry{}
 	now := time.Now()
 	for key, entry := range entries {
-		key = NewKey(key.NextHop, key.Device)
-		if entry.HardwareRoute.Device != key.Device {
-			return false, errors.New("neighbour key and device differ")
-		}
+		key = key.Unmap()
 		if _, duplicate := next[key]; duplicate {
 			return false, errors.New("duplicate canonical neighbour key")
 		}
-		entry.NextHop = key.NextHop
+		entry.NextHop = key
 		entry.Source = ""
 		if entry.Priority == 0 {
 			entry.Priority = defaultPriority
 		}
 		old, found := previous.Lookup(key)
 		if found && old.HardwareRoute == entry.HardwareRoute &&
-			old.Priority == entry.Priority && old.State == entry.State && old.Ifindex == entry.Ifindex {
+			old.Priority == entry.Priority && old.State == entry.State {
 			entry.UpdatedAt = old.UpdatedAt
 		} else {
 			entry.UpdatedAt = now
@@ -188,15 +152,9 @@ func (m *NeighTable) ReplaceSource(
 		Name: name, DefaultPriority: defaultPriority,
 		Cache: rcucache.NewCache(next),
 	}
-	snapshot := m.snapshotLocked()
-	for idx, item := range snapshot {
-		if item.Name == name {
-			snapshot = slices.Delete(snapshot, idx, idx+1)
-			break
-		}
-	}
-	snapshot = append(snapshot, tableSnapshotSource{Name: name, View: replacement.Cache.View()})
-	merged := mergeSnapshot(snapshot, nil)
+	sources := maps.Clone(m.sources)
+	sources[name] = replacement
+	merged := mergeSources(sources)
 	if err := ctx.Err(); err != nil {
 		return false, err
 	}
@@ -220,7 +178,7 @@ func (m *NeighTable) CreateSource(name string, defaultPriority uint32, builtIn b
 	src := &NeighSource{
 		Name:            name,
 		DefaultPriority: defaultPriority,
-		Cache:           rcucache.NewEmptyCache[Key, NeighbourEntry](),
+		Cache:           rcucache.NewEmptyCache[netip.Addr, NeighbourEntry](),
 		BuiltIn:         builtIn,
 	}
 
@@ -307,7 +265,7 @@ func (m *NeighTable) Add(table string, entries []NeighbourEntry) error {
 		if entry.Priority == 0 {
 			entry.Priority = src.DefaultPriority
 		}
-		next[entry.Key()] = entry
+		next[entry.NextHop] = entry
 	}
 
 	src.Cache.Swap(next)
@@ -327,14 +285,8 @@ func (m *NeighTable) Remove(table string, addrs []netip.Addr) error {
 	}
 
 	next := copyView(src.Cache.View())
-	addresses := map[netip.Addr]bool{}
 	for _, address := range addrs {
-		addresses[address.Unmap()] = true
-	}
-	for key := range next {
-		if addresses[key.NextHop] {
-			delete(next, key)
-		}
+		delete(next, address.Unmap())
 	}
 
 	src.Cache.Swap(next)
@@ -346,7 +298,7 @@ func (m *NeighTable) Remove(table string, addrs []netip.Addr) error {
 // a re-merge.
 //
 // Entries with zero priority inherit the source's default priority.
-func (m *NeighTable) SwapSource(name string, entries map[Key]NeighbourEntry) error {
+func (m *NeighTable) SwapSource(name string, entries map[netip.Addr]NeighbourEntry) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -355,10 +307,10 @@ func (m *NeighTable) SwapSource(name string, entries map[Key]NeighbourEntry) err
 		return fmt.Errorf("source %q not found", name)
 	}
 
-	next := make(map[Key]NeighbourEntry, len(entries))
+	next := make(map[netip.Addr]NeighbourEntry, len(entries))
 	for key, entry := range entries {
-		key = NewKey(key.NextHop, key.Device)
-		entry.NextHop = key.NextHop
+		key = key.Unmap()
+		entry.NextHop = key
 		if entry.Priority == 0 {
 			entry.Priority = src.DefaultPriority
 		}
@@ -374,57 +326,16 @@ func (m *NeighTable) SwapSource(name string, entries map[Key]NeighbourEntry) err
 //
 // Must be called with m.mu held.
 func (m *NeighTable) rebuildMergedCacheLocked() {
-	m.merged.Swap(mergeSnapshot(m.snapshotLocked(), nil))
+	m.merged.Swap(mergeSources(m.sources))
 }
 
-func (m *NeighTable) snapshotLocked() TableSnapshot {
-	names := make([]string, 0, len(m.sources))
-	for name := range m.sources {
-		names = append(names, name)
-	}
-	slices.Sort(names)
-
-	snapshot := make(TableSnapshot, 0, len(names))
-	for _, name := range names {
-		snapshot = append(snapshot, tableSnapshotSource{
-			Name: name,
-			View: m.sources[name].Cache.View(),
-		})
-	}
-	return snapshot
-}
-
-// SourceView retrieves provenance before cross-source priority selection.
-func (m TableSnapshot) SourceView(name string) (NexthopCacheView, bool) {
-	for _, source := range m {
-		if source.Name == name {
-			return source.View, true
-		}
-	}
-	return NexthopCacheView{}, false
-}
-
-func mergeSnapshot(snapshot TableSnapshot, devices []string) map[Key]NeighbourEntry {
-	deviceSet := make(map[string]struct{}, len(devices))
-	for _, device := range devices {
-		if device != "" {
-			deviceSet[device] = struct{}{}
-		}
-	}
-
-	merged := map[Key]NeighbourEntry{}
-	for _, source := range snapshot {
-		entries, _ := source.View.All()
+func mergeSources(sources map[string]*NeighSource) map[netip.Addr]NeighbourEntry {
+	merged := map[netip.Addr]NeighbourEntry{}
+	for _, source := range sources {
+		entries, _ := source.Cache.View().All()
 		for key, entry := range entries {
-			if len(deviceSet) != 0 {
-				if _, allowed := deviceSet[entry.HardwareRoute.Device]; !allowed {
-					continue
-				}
-			}
-			entry.NextHop = key.NextHop
-			if source.Name != "" {
-				entry.Source = source.Name
-			}
+			entry.NextHop = key
+			entry.Source = source.Name
 			existing, ok := merged[key]
 			if !ok || entry.Priority < existing.Priority ||
 				(entry.Priority == existing.Priority && entry.Source < existing.Source) {
@@ -435,7 +346,7 @@ func mergeSnapshot(snapshot TableSnapshot, devices []string) map[Key]NeighbourEn
 	return merged
 }
 
-func copyView(view NexthopCacheView) map[Key]NeighbourEntry {
+func copyView(view NexthopCacheView) map[netip.Addr]NeighbourEntry {
 	entries, _ := view.All()
 	return maps.Collect(entries)
 }

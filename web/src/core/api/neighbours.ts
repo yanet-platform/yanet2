@@ -1,4 +1,4 @@
-import { createService, createStreamingService, type CallOptions } from './client';
+import { createService, type CallOptions } from './client';
 
 // commonpb.MACAddress, serialized by the gateway as a bare EUI-48 string
 // such as "3a:ac:26:9b:5b:f9".
@@ -32,15 +32,13 @@ export interface ListNeighbourTablesResponse {
 }
 
 const neighbourService = createService('operators.route.operatorpb.v1.NeighbourService');
-const neighbourStream = createStreamingService('operators.route.operatorpb.v1.NeighbourService');
 
 export const neighbours = {
-    list: async (table?: string, options?: CallOptions): Promise<ListNeighboursResponse> => {
-        const entries: Neighbour[] = [];
-        await neighbourStream.read<ListNeighboursResponse>('ListStream', { table: table ?? '' }, (chunk) => {
-            for (const entry of chunk.neighbours ?? []) entries.push(entry);
-        }, options?.signal);
-        return { neighbours: entries };
+    list: (table?: string, options?: CallOptions): Promise<ListNeighboursResponse> => {
+        if (table) {
+            return neighbourService.callWithBody<ListNeighboursResponse>('List', { table }, options);
+        }
+        return neighbourService.call<ListNeighboursResponse>('List', options);
     },
 
     listTables: (options?: CallOptions): Promise<ListNeighbourTablesResponse> => {

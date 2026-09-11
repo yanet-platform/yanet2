@@ -3,12 +3,10 @@ package operator
 import (
 	"context"
 	"errors"
-	"io"
 	"net/netip"
 	"sync"
 	"time"
 
-	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/encoding/protowire"
@@ -22,39 +20,17 @@ import (
 
 const defaultStaticTable = "static"
 
-// NeighbourReplacementLimits bounds memory retained by incomplete snapshots.
-//
-// Defaults are one million entries, 128 MiB of serialized requests per stream,
-// and four staged streams. Chunk limits remain 1,000 entries and 256 KiB.
-type NeighbourReplacementLimits struct {
-	MaxEntries           int
-	MaxBytes             int
-	MaxConcurrentStreams int
-}
-
-// NeighbourListLimits bounds readers retaining immutable cache generations.
-type NeighbourListLimits struct {
-	MaxConcurrentStreams int
-	MaxDuration          time.Duration
-}
-
 // NeighbourService implements the operator-owned NeighbourService
 // surface. Mutations wake the reconcile loop.
 type NeighbourService struct {
 	operatorpb.UnimplementedNeighbourServiceServer
 
-	neighTable         *neigh.NeighTable
-	onChanged          func()
-	limits             NeighbourReplacementLimits
-	staged             chan struct{}
-	listReads          chan struct{}
-	listMaxDuration    time.Duration
-	onSnapshotReceived func(string, bool) bool
-	onTableRemoved     func(string)
-	commitMu           sync.Mutex
-	readiness          *NeighbourReadiness
-	remoteTable        string
-	remoteDevices      map[string]bool
+	neighTable    *neigh.NeighTable
+	onChanged     func()
+	commitMu      sync.Mutex
+	readiness     *NeighbourReadiness
+	remoteTable   string
+	remoteDevices map[string]bool
 }
 
 // NewNeighbourService constructs a NeighbourService bound to the
@@ -73,155 +49,97 @@ func NewNeighbourService(
 		devices[device] = true
 	}
 	return &NeighbourService{
-		neighTable:         neighTable,
-		onChanged:          opts.OnChanged,
-		limits:             opts.ReplacementLimits,
-		staged:             make(chan struct{}, opts.ReplacementLimits.MaxConcurrentStreams),
-		listReads:          make(chan struct{}, opts.ListLimits.MaxConcurrentStreams),
-		listMaxDuration:    opts.ListLimits.MaxDuration,
-		onSnapshotReceived: opts.OnSnapshotReceived,
-		onTableRemoved:     opts.OnTableRemoved,
-		readiness:          opts.Readiness,
-		remoteTable:        opts.RemoteTable,
-		remoteDevices:      devices,
+		neighTable:    neighTable,
+		onChanged:     opts.OnChanged,
+		readiness:     opts.Readiness,
+		remoteTable:   opts.RemoteTable,
+		remoteDevices: devices,
 	}
 }
 
-// ReplaceNeighbours stages a bounded snapshot until a clean client half-close.
+// ReplaceNeighbours validates a bounded complete snapshot before atomic commit.
 func (m *NeighbourService) ReplaceNeighbours(
-	stream grpc.ClientStreamingServer[operatorpb.ReplaceNeighboursRequest, operatorpb.ReplaceNeighboursResponse],
-) error {
-	ctx := stream.Context()
+	ctx context.Context,
+	req *operatorpb.ReplaceNeighboursRequest,
+) (*operatorpb.ReplaceNeighboursResponse, error) {
 	if err := ctx.Err(); err != nil {
-		return status.FromContextError(err).Err()
+		return nil, status.FromContextError(err).Err()
 	}
-	select {
-	case m.staged <- struct{}{}:
-		defer func() { <-m.staged }()
-	default:
-		return status.Error(codes.ResourceExhausted, "too many staged neighbour replacements")
+	if len(req.GetEntries()) > operatorpb.NeighbourSnapshotEntries || proto.Size(req) > operatorpb.NeighbourSnapshotBytes {
+		return nil, status.Error(codes.ResourceExhausted, "neighbour replacement exceeds entry or byte limit")
 	}
-	var table string
-	var priority uint32
-	totalBytes := 0
-	entries := map[neigh.Key]neigh.NeighbourEntry{}
-	for {
-		request, err := stream.Recv()
-		if contextError := ctx.Err(); contextError != nil {
-			return status.FromContextError(contextError).Err()
+	table := req.GetTable()
+	if err := neigh.ValidateSourceName(table); err != nil {
+		return nil, status.Error(codes.InvalidArgument, err.Error())
+	}
+	entries := make(map[netip.Addr]neigh.NeighbourEntry, len(req.GetEntries()))
+	for _, wireEntry := range req.GetEntries() {
+		if err := ctx.Err(); err != nil {
+			return nil, status.FromContextError(err).Err()
 		}
-		if err == io.EOF {
-			break
+		if wireEntry.GetSource() != "" || wireEntry.GetUpdatedAt() != 0 {
+			return nil, status.Error(codes.InvalidArgument, "source and updated_at are server-owned")
 		}
+		entry, err := parseNeighbourEntry(wireEntry)
 		if err != nil {
-			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-				return status.FromContextError(err).Err()
-			}
-			return err
+			return nil, err
 		}
-		chunkBytes := proto.Size(request)
-		if len(request.GetEntries()) > operatorpb.NeighbourChunkEntries || chunkBytes > operatorpb.NeighbourChunkBytes ||
-			chunkBytes > m.limits.MaxBytes-totalBytes ||
-			len(request.GetEntries()) > m.limits.MaxEntries-len(entries) {
-			return status.Error(codes.ResourceExhausted, "neighbour replacement exceeds entry or byte limit")
+		if _, duplicate := entries[entry.NextHop]; duplicate {
+			return nil, status.Errorf(codes.InvalidArgument, "duplicate canonical next hop %s", entry.NextHop)
 		}
-		totalBytes += chunkBytes
-		if table == "" {
-			if err := neigh.ValidateSourceName(request.GetTable()); err != nil {
-				return status.Error(codes.InvalidArgument, err.Error())
+		if table == m.remoteTable {
+			device := entry.HardwareRoute.Device
+			if err := operatorpb.ValidateNeighbourDevice(device); err != nil {
+				return nil, status.Error(codes.InvalidArgument, err.Error())
 			}
-			table, priority = request.GetTable(), request.GetDefaultPriority()
-		} else if table != request.GetTable() || priority != request.GetDefaultPriority() {
-			return status.Error(codes.InvalidArgument, "replacement metadata must match across chunks")
-		} else if len(entries) == 0 || len(request.GetEntries()) == 0 {
-			return status.Error(codes.InvalidArgument, "empty snapshot must contain exactly one chunk")
+			if !m.remoteDevices[device] {
+				return nil, status.Errorf(codes.InvalidArgument, "unknown remote device %q", device)
+			}
 		}
-		for _, wireEntry := range request.GetEntries() {
-			if wireEntry.GetSource() != "" || wireEntry.GetUpdatedAt() != 0 {
-				return status.Error(codes.InvalidArgument, "source and updated_at are server-owned")
-			}
-			entry, err := parseNeighbourEntry(wireEntry)
-			if err != nil {
-				return err
-			}
-			if _, duplicate := entries[entry.Key()]; duplicate {
-				return status.Errorf(codes.InvalidArgument, "duplicate next hop/device %s/%s", entry.NextHop, entry.HardwareRoute.Device)
-			}
-			entries[entry.Key()] = entry
-		}
+		entries[entry.NextHop] = entry
 	}
-	if table == "" {
-		return status.Error(codes.InvalidArgument, "replacement requires at least one chunk")
-	}
-	if table == m.remoteTable {
-		if err := m.validateRemoteSnapshot(entries); err != nil {
-			return err
-		}
-	}
-	changed, err := m.replaceSnapshot(ctx, table, priority, entries)
+	changed, err := m.replaceSnapshot(ctx, table, req.GetDefaultPriority(), entries)
 	if err != nil {
 		if errors.Is(err, neigh.ErrBuiltInSource) {
-			return status.Error(codes.FailedPrecondition, err.Error())
+			return nil, status.Error(codes.FailedPrecondition, err.Error())
 		}
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-			return status.FromContextError(err).Err()
+			return nil, status.FromContextError(err).Err()
 		}
-		return status.Errorf(codes.Internal, "failed to replace neighbour table: %v", err)
+		return nil, status.Errorf(codes.Internal, "failed to replace neighbour table: %v", err)
 	}
 	if changed {
 		m.onChanged()
 	}
-	return stream.SendAndClose(&operatorpb.ReplaceNeighboursResponse{})
+	return &operatorpb.ReplaceNeighboursResponse{}, nil
 }
 
-func (m *NeighbourService) replaceSnapshot(ctx context.Context, table string, priority uint32, entries map[neigh.Key]neigh.NeighbourEntry) (bool, error) {
+func (m *NeighbourService) replaceSnapshot(ctx context.Context, table string, priority uint32, entries map[netip.Addr]neigh.NeighbourEntry) (bool, error) {
 	m.commitMu.Lock()
 	defer m.commitMu.Unlock()
-	var changed, recovered bool
-	var err error
 	if m.readiness == nil {
-		changed, err = m.neighTable.ReplaceSource(ctx, table, priority, entries)
-	} else {
-		changed, recovered, err = m.readiness.ReplaceSnapshot(ctx, m.neighTable, table, priority, entries)
+		return m.neighTable.ReplaceSource(ctx, table, priority, entries)
 	}
-	if err == nil {
-		changed = m.onSnapshotReceived(table, changed) || changed || recovered
-	}
-	return changed, err
-}
-
-func (m *NeighbourService) validateRemoteSnapshot(entries map[neigh.Key]neigh.NeighbourEntry) error {
-	byIndex := map[uint32]string{}
-	byDevice := map[string]uint32{}
-	for _, entry := range entries {
-		device := entry.HardwareRoute.Device
-		if err := operatorpb.ValidateNeighbourDevice(device); err != nil {
-			return status.Error(codes.InvalidArgument, err.Error())
-		}
-		if !m.remoteDevices[device] {
-			return status.Errorf(codes.InvalidArgument, "unknown remote device %q", device)
-		}
-		if entry.Ifindex == 0 {
-			continue
-		}
-		if previous, present := byIndex[entry.Ifindex]; present && previous != device {
-			return status.Error(codes.InvalidArgument, "remote ifindex maps to multiple devices")
-		}
-		if previous, present := byDevice[device]; present && previous != entry.Ifindex {
-			return status.Error(codes.InvalidArgument, "remote device maps to multiple ifindices")
-		}
-		byIndex[entry.Ifindex], byDevice[device] = device, entry.Ifindex
-	}
-	return nil
+	changed, recovered, err := m.readiness.ReplaceSnapshot(ctx, m.neighTable, table, priority, entries)
+	return changed || recovered, err
 }
 
 func (m *NeighbourService) List(
 	ctx context.Context,
 	req *operatorpb.ListNeighboursRequest,
 ) (*operatorpb.ListNeighboursResponse, error) {
-	view, err := m.listView(ctx, req.GetTable())
-	if err != nil {
-		return nil, err
+	if err := ctx.Err(); err != nil {
+		return nil, status.FromContextError(err).Err()
+	}
+	var view neigh.NexthopCacheView
+	if table := req.GetTable(); table == "" {
+		view = m.neighTable.View()
+	} else {
+		var found bool
+		view, found = m.neighTable.SourceView(table)
+		if !found {
+			return nil, status.Errorf(codes.NotFound, "table %q not found", table)
+		}
 	}
 	entries, size := view.Entries()
 	// Refuse oversized views before allocating the complete unary response.
@@ -233,7 +151,7 @@ func (m *NeighbourService) List(
 		wireEntry := listedNeighbour(entry, req.GetTable())
 		totalBytes += protowire.SizeTag(1) + protowire.SizeBytes(proto.Size(wireEntry))
 		if totalBytes > operatorpb.NeighbourListUnaryBytes {
-			return nil, status.Error(codes.ResourceExhausted, "neighbour list exceeds unary limit; use ListStream")
+			return nil, status.Error(codes.ResourceExhausted, "neighbour list exceeds unary limit")
 		}
 	}
 	response := &operatorpb.ListNeighboursResponse{Neighbours: make([]*operatorpb.NeighbourEntry, 0, size)}
@@ -244,93 +162,6 @@ func (m *NeighbourService) List(
 		response.Neighbours = append(response.Neighbours, listedNeighbour(entry, req.GetTable()))
 	}
 	return response, nil
-}
-
-// ListStream holds one immutable cache view for the lifetime of the read.
-//
-// Admission precedes view acquisition. A server deadline ends even a read stuck
-// in transport flow control; returning the handler cancels its blocked send.
-// The worker retains its admission slot until the view and send are released.
-func (m *NeighbourService) ListStream(
-	req *operatorpb.ListNeighboursRequest,
-	stream grpc.ServerStreamingServer[operatorpb.ListNeighboursResponse],
-) error {
-	ctx, cancel := context.WithTimeout(stream.Context(), m.listMaxDuration)
-	defer cancel()
-	if err := ctx.Err(); err != nil {
-		return status.FromContextError(err).Err()
-	}
-	select {
-	case m.listReads <- struct{}{}:
-	default:
-		return status.Error(codes.ResourceExhausted, "too many active neighbour list streams")
-	}
-	result := make(chan error, 1)
-	go func() {
-		defer func() { <-m.listReads }()
-		result <- m.listStream(ctx, req, stream)
-	}()
-	select {
-	case err := <-result:
-		if contextError := ctx.Err(); contextError != nil {
-			return status.FromContextError(contextError).Err()
-		}
-		return err
-	case <-ctx.Done():
-		return status.FromContextError(ctx.Err()).Err()
-	}
-}
-
-func (m *NeighbourService) listStream(
-	ctx context.Context,
-	req *operatorpb.ListNeighboursRequest,
-	stream grpc.ServerStreamingServer[operatorpb.ListNeighboursResponse],
-) error {
-	view, err := m.listView(ctx, req.GetTable())
-	if err != nil {
-		return err
-	}
-	entries, _ := view.Entries()
-	response := &operatorpb.ListNeighboursResponse{}
-	chunkBytes := 0
-	for entry := range entries {
-		if err := ctx.Err(); err != nil {
-			return status.FromContextError(err).Err()
-		}
-		wireEntry := listedNeighbour(entry, req.GetTable())
-		entryBytes := protowire.SizeTag(1) + protowire.SizeBytes(proto.Size(wireEntry))
-		if entryBytes > operatorpb.NeighbourListChunkBytes {
-			return status.Error(codes.ResourceExhausted, "neighbour entry exceeds list chunk limit")
-		}
-		if len(response.Neighbours) == operatorpb.NeighbourListChunkEntries ||
-			chunkBytes+entryBytes > operatorpb.NeighbourListChunkBytes {
-			if err := stream.Send(response); err != nil {
-				return err
-			}
-			response = &operatorpb.ListNeighboursResponse{}
-			chunkBytes = 0
-		}
-		response.Neighbours = append(response.Neighbours, wireEntry)
-		chunkBytes += entryBytes
-	}
-	if err := ctx.Err(); err != nil {
-		return status.FromContextError(err).Err()
-	}
-	return stream.Send(response)
-}
-
-func (m *NeighbourService) listView(ctx context.Context, table string) (neigh.NexthopCacheView, error) {
-	if err := ctx.Err(); err != nil {
-		return neigh.NexthopCacheView{}, status.FromContextError(err).Err()
-	}
-	if table == "" {
-		return m.neighTable.View(), nil
-	}
-	view, ok := m.neighTable.SourceView(table)
-	if !ok {
-		return neigh.NexthopCacheView{}, status.Errorf(codes.NotFound, "table %q not found", table)
-	}
-	return view, nil
 }
 
 func listedNeighbour(entry neigh.NeighbourEntry, table string) *operatorpb.NeighbourEntry {
@@ -347,7 +178,6 @@ func listedNeighbour(entry neigh.NeighbourEntry, table string) *operatorpb.Neigh
 		Source:       source,
 		Priority:     entry.Priority,
 		Device:       entry.HardwareRoute.Device,
-		Ifindex:      entry.Ifindex,
 	}
 }
 
@@ -368,6 +198,9 @@ func (m *NeighbourService) UpdateTable(
 	ctx context.Context,
 	req *operatorpb.UpdateNeighbourTableRequest,
 ) (*operatorpb.UpdateNeighbourTableResponse, error) {
+	if m.remoteTable != "" && req.GetName() == m.remoteTable {
+		return nil, status.Error(codes.FailedPrecondition, "configured remote source requires complete replacements")
+	}
 	if err := m.neighTable.UpdateSource(req.GetName(), req.GetDefaultPriority()); err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to update neighbour table: %v", err)
 	}
@@ -390,7 +223,6 @@ func (m *NeighbourService) RemoveTable(
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to remove neighbour table: %v", err)
 	}
-	m.onTableRemoved(req.GetName())
 	m.onChanged()
 	return &operatorpb.RemoveNeighbourTableResponse{}, nil
 }
@@ -459,7 +291,6 @@ func parseNeighbourEntry(entry *operatorpb.NeighbourEntry) (neigh.NeighbourEntry
 	}
 	return neigh.NeighbourEntry{
 		NextHop: address.Unmap(),
-		Ifindex: entry.GetIfindex(),
 		HardwareRoute: neigh.HardwareRoute{
 			SourceMAC:      entry.GetHardwareAddr().EUI48(),
 			DestinationMAC: entry.GetLinkAddr().EUI48(),

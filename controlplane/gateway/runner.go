@@ -96,7 +96,7 @@ func NewInProcessServiceRunner(
 		endpoint: endpoint,
 		server: grpc.NewServer(
 			grpc.ChainUnaryInterceptor(interceptors...),
-			grpc.MaxRecvMsgSize(maxRequestMessageBytes), grpc.MaxSendMsgSize(maxResponseMessageBytes),
+			grpc.MaxRecvMsgSize(1024*1024*256), grpc.MaxSendMsgSize(1024*1024*256),
 		),
 		ready: make(chan struct{}),
 		log:   log,

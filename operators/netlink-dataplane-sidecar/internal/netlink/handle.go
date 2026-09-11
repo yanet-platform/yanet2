@@ -15,6 +15,8 @@ import (
 //
 // All calls run in the process's private network namespace. A dump uses its own
 // socket so cancellation can interrupt reception without damaging mutation I/O.
+// The underlying handle serializes requests on its shared socket; setup and
+// link observation may use it concurrently without a whole-pass lock.
 type Handle struct {
 	*vnetlink.Handle
 	timeout time.Duration
