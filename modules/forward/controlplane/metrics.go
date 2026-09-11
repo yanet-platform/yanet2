@@ -56,11 +56,13 @@ func (m *ForwardService) Metrics(tags ...*commonpb.MetricTag) ([]*commonpb.Metri
 // per-module counter such as "rx" — leaves that config with nothing to
 // read.
 func (m *ForwardService) collectDataplaneMetrics(tags []*commonpb.MetricTag) ([]*commonpb.Metric, error) {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-
 	result := make([]*commonpb.Metric, 0)
-	for configName, config := range m.configs {
+	for _, configName := range m.configs.Names() {
+		// A config deleted since the listing has no counters to read.
+		config, ok := m.configs.Get(configName)
+		if !ok {
+			continue
+		}
 		names, read := metrics.Query(tags, metrics.WithEntryCounters(ruleCounterNames(config.Rules)))
 		if !read {
 			continue

@@ -3,15 +3,13 @@ package unrdup
 import (
 	"context"
 	"errors"
-	"slices"
 	"strings"
-	"sync"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
 	"github.com/yanet-platform/xnetip"
-	"github.com/yanet-platform/yanet2/controlplane/ffi"
+	"github.com/yanet-platform/yanet2/controlplane/configstore"
 	"github.com/yanet-platform/yanet2/modules/unrdup/bindings/go/cunrdup"
 	"github.com/yanet-platform/yanet2/modules/unrdup/controlplane/unrduppb/v1"
 )
@@ -62,39 +60,17 @@ type Backend interface {
 type UnrdupService struct {
 	unrduppb.UnimplementedUnrdupServiceServer
 
-	mu       sync.RWMutex
-	backend  Backend
-	configs  map[string]*config
-	deferred []ModuleHandle
+	backend Backend
+	configs *configstore.Store[*config]
 }
 
-// parkOrFree frees a superseded handle, keeping it for a later retry while a
-// live generation still references it. The caller must hold m.mu.
-func (m *UnrdupService) parkOrFree(handle ModuleHandle) {
-	if err := handle.Free(); errors.Is(err, ffi.ErrStillReferenced) {
-		m.deferred = append(m.deferred, handle)
-	}
-}
-
-// ReclaimDeferred retries every parked handle, dropping the ones whose
-// generations have drained and keeping the rest parked.
+// ReclaimDeferred retries every superseded config whose free was refused,
+// releasing the ones whose generations have drained.
+//
+// The service runs it after each successful publish, and anything else
+// may call it at any time.
 func (m *UnrdupService) ReclaimDeferred() {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.reclaimDeferred()
-}
-
-// reclaimDeferred is ReclaimDeferred without the lock. The caller must hold
-// m.mu.
-func (m *UnrdupService) reclaimDeferred() {
-	kept := m.deferred[:0]
-	for _, handle := range m.deferred {
-		if err := handle.Free(); errors.Is(err, ffi.ErrStillReferenced) {
-			kept = append(kept, handle)
-		}
-	}
-	clear(m.deferred[len(kept):])
-	m.deferred = kept
+	m.configs.ReclaimDeferred()
 }
 
 type config struct {
@@ -102,6 +78,16 @@ type config struct {
 	SourceV6 xnetip.Network
 	Services []cunrdup.Service
 	Module   ModuleHandle
+}
+
+// Free releases the module handle held by the config.
+//
+// It is safe to call even when no handle is held.
+func (m *config) Free() error {
+	if m.Module == nil {
+		return nil
+	}
+	return m.Module.Free()
 }
 
 func (m *config) Sources() []xnetip.Network {
@@ -119,7 +105,7 @@ func (m *config) Sources() []xnetip.Network {
 func NewUnrdupService(backend Backend) *UnrdupService {
 	return &UnrdupService{
 		backend: backend,
-		configs: map[string]*config{},
+		configs: configstore.NewStore[*config](),
 	}
 }
 
@@ -127,19 +113,7 @@ func (m *UnrdupService) ListConfigs(
 	ctx context.Context,
 	request *unrduppb.ListConfigsRequest,
 ) (*unrduppb.ListConfigsResponse, error) {
-	response := &unrduppb.ListConfigsResponse{
-		Configs: make([]string, 0),
-	}
-
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-
-	for name := range m.configs {
-		response.Configs = append(response.Configs, name)
-	}
-	slices.Sort(response.Configs)
-
-	return response, nil
+	return &unrduppb.ListConfigsResponse{Configs: m.configs.Names()}, nil
 }
 
 func (m *UnrdupService) ShowConfig(
@@ -151,10 +125,7 @@ func (m *UnrdupService) ShowConfig(
 		return nil, errConfigNameRequired
 	}
 
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-
-	current, ok := m.configs[name]
+	current, ok := m.configs.Get(name)
 	if !ok {
 		return nil, status.Errorf(codes.NotFound, "config %q is not found", name)
 	}
@@ -179,24 +150,19 @@ func (m *UnrdupService) UpdateConfig(
 		return nil, err
 	}
 
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	module, err := m.backend.UpdateModule(name, updated.Sources(), updated.Services)
+	err = m.configs.Update(name, func(*config, bool) (*config, error) {
+		module, err := m.backend.UpdateModule(name, updated.Sources(), updated.Services)
+		if err != nil {
+			return nil, err
+		}
+		updated.Module = module
+		return updated, nil
+	})
 	if err != nil {
 		return nil, status.Errorf(
 			codes.Internal, "failed to update config %q: %s", name, err,
 		)
 	}
-
-	m.reclaimDeferred()
-
-	if previous, ok := m.configs[name]; ok && previous.Module != nil {
-		m.parkOrFree(previous.Module)
-	}
-
-	updated.Module = module
-	m.configs[name] = updated
 
 	return &unrduppb.UpdateConfigResponse{}, nil
 }
@@ -212,26 +178,17 @@ func (m *UnrdupService) DeleteConfig(
 		return nil, errConfigNameRequired
 	}
 
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	current, ok := m.configs[name]
-	if !ok {
+	err := m.configs.Delete(name, func(*config) error {
+		return m.backend.DeleteModule(name)
+	})
+	if errors.Is(err, configstore.ErrNotFound) {
 		return nil, status.Errorf(codes.NotFound, "config %q is not found", name)
 	}
-
-	if err := m.backend.DeleteModule(name); err != nil {
+	if err != nil {
 		return nil, status.Errorf(
 			codes.Internal, "failed to delete config %q: %s", name, err,
 		)
 	}
-
-	// The delete retired the generation holding the published module.
-	// Retry the deferred ones, then retire this one.
-	m.reclaimDeferred()
-	m.parkOrFree(current.Module)
-
-	delete(m.configs, name)
 
 	return &unrduppb.DeleteConfigResponse{}, nil
 }

@@ -6,8 +6,6 @@ import (
 	"fmt"
 	"net/netip"
 	"slices"
-	"sort"
-	"sync"
 
 	"go.uber.org/zap"
 
@@ -18,7 +16,7 @@ import (
 	"github.com/yanet-platform/yanet2/bindings/go/filter"
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
 	"github.com/yanet-platform/yanet2/common/go/maptrie"
-	"github.com/yanet-platform/yanet2/controlplane/ffi"
+	"github.com/yanet-platform/yanet2/controlplane/configstore"
 	"github.com/yanet-platform/yanet2/modules/route-mpls/bindings/go/croutempls"
 	"github.com/yanet-platform/yanet2/modules/route-mpls/controlplane/routemplspb/v1"
 )
@@ -49,17 +47,7 @@ type RouteMPLSService struct {
 	routemplspb.UnimplementedRouteMPLSServiceServer
 
 	backend Backend
-
-	// deferred holds superseded module handles whose free was refused
-	// because a live configuration generation still referenced them.
-	// This service is their owner: it retries them on its next update,
-	// through ReclaimDeferred, and nothing else remembers them.
-	deferred []ModuleHandle
-
-	// shmLock serializes shared-memory mutations and protects the
-	// configs map.
-	shmLock sync.RWMutex
-	configs map[string]routeMPLSConfig
+	configs *configstore.Store[*routeMPLSConfig]
 
 	log *zap.Logger
 }
@@ -196,7 +184,7 @@ func NewRouteMPLSService(backend Backend, options ...RouteMPLSServiceOption) *Ro
 
 	return &RouteMPLSService{
 		backend: backend,
-		configs: map[string]routeMPLSConfig{},
+		configs: configstore.NewStore[*routeMPLSConfig](),
 		log:     opts.Log,
 	}
 }
@@ -207,17 +195,7 @@ func (m *RouteMPLSService) ListConfigs(
 	ctx context.Context,
 	request *routemplspb.ListConfigsRequest,
 ) (*routemplspb.ListConfigsResponse, error) {
-	m.shmLock.RLock()
-	defer m.shmLock.RUnlock()
-
-	response := &routemplspb.ListConfigsResponse{
-		Configs: make([]string, 0, len(m.configs)),
-	}
-	for name := range m.configs {
-		response.Configs = append(response.Configs, name)
-	}
-	sort.Strings(response.Configs)
-	return response, nil
+	return &routemplspb.ListConfigsResponse{Configs: m.configs.Names()}, nil
 }
 
 // ShowConfig returns the rules currently stored for the requested configuration.
@@ -230,10 +208,7 @@ func (m *RouteMPLSService) ShowConfig(
 		return nil, status.Error(codes.InvalidArgument, "module config name is required")
 	}
 
-	m.shmLock.RLock()
-	defer m.shmLock.RUnlock()
-
-	config, ok := m.configs[name]
+	config, ok := m.configs.Get(name)
 	if !ok {
 		return nil, status.Errorf(codes.NotFound, "config %q not found", name)
 	}
@@ -277,21 +252,15 @@ func (m *RouteMPLSService) DeleteConfig(
 		return nil, status.Error(codes.InvalidArgument, "module config name is required")
 	}
 
-	m.shmLock.Lock()
-	defer m.shmLock.Unlock()
-
-	config, ok := m.configs[name]
-	if !ok {
+	err := m.configs.Delete(name, func(*routeMPLSConfig) error {
+		return m.backend.DeleteModule(name)
+	})
+	if errors.Is(err, configstore.ErrNotFound) {
 		return nil, status.Error(codes.NotFound, "not found")
 	}
-
-	if err := m.backend.DeleteModule(name); err != nil {
+	if err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to delete module config %q: %v", name, err)
 	}
-
-	m.reclaimDeferred()
-	m.parkOrFree(config.Handle)
-	delete(m.configs, name)
 
 	return &routemplspb.DeleteConfigResponse{}, nil
 }
@@ -334,26 +303,21 @@ func (m *RouteMPLSService) CreateConfig(
 		)
 	}
 
-	config := routeMPLSConfig{
+	config := &routeMPLSConfig{
 		Prefixes: prefixes,
 	}
 
-	m.shmLock.Lock()
-	defer m.shmLock.Unlock()
-
-	handle, err := m.backend.UpdateModule(name, config.BuildRules())
+	err := m.configs.Update(name, func(*routeMPLSConfig, bool) (*routeMPLSConfig, error) {
+		handle, err := m.backend.UpdateModule(name, config.BuildRules())
+		if err != nil {
+			return nil, status.Errorf(codes.Internal, "failed to update module config: %v", err)
+		}
+		config.Handle = handle
+		return config, nil
+	})
 	if err != nil {
-		return nil, status.Errorf(codes.Internal, "failed to update module config: %v", err)
+		return nil, err
 	}
-
-	m.reclaimDeferred()
-
-	if old, ok := m.configs[name]; ok {
-		m.parkOrFree(old.Handle)
-	}
-
-	config.Handle = handle
-	m.configs[name] = config
 
 	return &routemplspb.CreateConfigResponse{}, nil
 }
@@ -369,79 +333,78 @@ func (m *RouteMPLSService) UpdateConfig(
 		return nil, status.Error(codes.InvalidArgument, "module config name is required")
 	}
 
-	m.shmLock.Lock()
-	defer m.shmLock.Unlock()
-
-	oldConfig, ok := m.configs[name]
-	if !ok {
-		oldConfig = routeMPLSConfig{
-			Prefixes: maptrie.NewMapTrie[netip.Prefix, netip.Addr, NextHopList](0),
+	err := m.configs.Update(name, func(current *routeMPLSConfig, ok bool) (*routeMPLSConfig, error) {
+		// Every mutation below copies the nexthop list it touches, since
+		// the trie clone shares the lists with the published config.
+		//
+		// Readers see the published config without a lock, and a failed
+		// publish keeps it live, so an in-place change would both race
+		// with them and corrupt what stays published.
+		prefixes := maptrie.NewMapTrie[netip.Prefix, netip.Addr, NextHopList](0)
+		if ok {
+			prefixes = current.Prefixes.Clone()
 		}
-	}
+		config := &routeMPLSConfig{Prefixes: prefixes}
 
-	config := routeMPLSConfig{
-		Prefixes: oldConfig.Prefixes.Clone(),
-	}
+		for _, update := range req.Updates {
+			if u := update.GetUpdate(); u != nil {
+				prefix, err := u.GetPrefix().ToPrefix()
+				if err != nil {
+					return nil, status.Errorf(codes.InvalidArgument, "failed to parse prefix: %v", err)
+				}
 
-	for _, update := range req.Updates {
-		if u := update.GetUpdate(); u != nil {
-			prefix, err := u.GetPrefix().ToPrefix()
-			if err != nil {
-				return nil, status.Errorf(codes.InvalidArgument, "failed to parse prefix: %v", err)
+				nextHop, err := makeNextHop(u.Nexthop)
+				if err != nil {
+					return nil, status.Errorf(codes.InvalidArgument, "failed to parse nexthop: %v", err)
+				}
+
+				config.Prefixes.InsertOrUpdate(
+					prefix,
+					func() NextHopList {
+						return NextHopList{
+							NextHops: append(make([]NextHop, 0, 1), nextHop),
+						}
+					},
+					func(list NextHopList) NextHopList {
+						list.NextHops = slices.Clone(list.NextHops)
+						list.Insert(nextHop)
+						return list
+					},
+				)
 			}
 
-			nextHop, err := makeNextHop(u.Nexthop)
-			if err != nil {
-				return nil, status.Errorf(codes.InvalidArgument, "failed to parse nexthop: %v", err)
-			}
+			if w := update.GetWithdraw(); w != nil {
+				prefix, err := w.GetPrefix().ToPrefix()
+				if err != nil {
+					return nil, status.Errorf(codes.InvalidArgument, "failed to parse prefix: %v", err)
+				}
 
-			config.Prefixes.InsertOrUpdate(
-				prefix,
-				func() NextHopList {
-					return NextHopList{
-						NextHops: append(make([]NextHop, 0, 1), nextHop),
-					}
-				},
-				func(list NextHopList) NextHopList {
-					list.Insert(nextHop)
-					return list
-				},
-			)
+				nextHop, err := makeWithdrawNextHop(w.Nexthop)
+				if err != nil {
+					return nil, status.Errorf(codes.InvalidArgument, "failed to parse nexthop: %v", err)
+				}
+
+				config.Prefixes.UpdateOrDelete(
+					prefix,
+					func(list NextHopList) (NextHopList, bool) {
+						list.NextHops = slices.Clone(list.NextHops)
+						list.Remove(nextHop)
+						return list, len(list.NextHops) == 0
+					},
+				)
+			}
 		}
 
-		if w := update.GetWithdraw(); w != nil {
-			prefix, err := w.GetPrefix().ToPrefix()
-			if err != nil {
-				return nil, status.Errorf(codes.InvalidArgument, "failed to parse prefix: %v", err)
-			}
-
-			nextHop, err := makeWithdrawNextHop(w.Nexthop)
-			if err != nil {
-				return nil, status.Errorf(codes.InvalidArgument, "failed to parse nexthop: %v", err)
-			}
-
-			config.Prefixes.UpdateOrDelete(
-				prefix,
-				func(list NextHopList) (NextHopList, bool) {
-					list.Remove(nextHop)
-					return list, len(list.NextHops) == 0
-				},
-			)
+		handle, err := m.backend.UpdateModule(name, config.BuildRules())
+		if err != nil {
+			return nil, status.Errorf(codes.Internal, "failed to update module config: %v", err)
 		}
-	}
-
-	handle, err := m.backend.UpdateModule(name, config.BuildRules())
+		config.Handle = handle
+		return config, nil
+	})
 	if err != nil {
-		return nil, status.Errorf(codes.Internal, "failed to update module config: %v", err)
+		return nil, err
 	}
-
-	m.reclaimDeferred()
-	if ok {
-		m.parkOrFree(oldConfig.Handle)
-	}
-
-	config.Handle = handle
-	m.configs[name] = config
 
 	return &routemplspb.UpdateConfigResponse{}, nil
 }
@@ -498,35 +461,11 @@ func makeWithdrawNextHop(nexthop *routemplspb.NextHop) (NextHop, error) {
 	}, nil
 }
 
-// parkOrFree frees the handle when it is dangling and parks it for
-// retry when a live generation still references it. The caller must
-// hold m.shmLock.
-func (m *RouteMPLSService) parkOrFree(handle ModuleHandle) {
-	if err := handle.Free(); errors.Is(err, ffi.ErrStillReferenced) {
-		m.deferred = append(m.deferred, handle)
-	}
-}
-
-// ReclaimDeferred retries every deferred handle, dropping the ones whose
-// generations have drained and keeping the rest deferred. It is the
-// reclamation handler for this module's superseded configs; the service
-// itself runs it after each successful publish, and anything else may
-// call it at any time.
+// ReclaimDeferred retries every superseded config whose free was refused,
+// releasing the ones whose generations have drained.
+//
+// The service runs it after each successful publish, and anything else
+// may call it at any time.
 func (m *RouteMPLSService) ReclaimDeferred() {
-	m.shmLock.Lock()
-	defer m.shmLock.Unlock()
-	m.reclaimDeferred()
-}
-
-// reclaimDeferred is ReclaimDeferred without the lock. The caller must
-// hold m.shmLock.
-func (m *RouteMPLSService) reclaimDeferred() {
-	kept := m.deferred[:0]
-	for _, handle := range m.deferred {
-		if err := handle.Free(); errors.Is(err, ffi.ErrStillReferenced) {
-			kept = append(kept, handle)
-		}
-	}
-	clear(m.deferred[len(kept):])
-	m.deferred = kept
+	m.configs.ReclaimDeferred()
 }
