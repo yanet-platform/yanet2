@@ -541,7 +541,7 @@ func Test_NAT64Service_DeleteConfig_ParksThenReclaims(t *testing.T) {
 	resp, err := service.DeleteConfig(ctx, &nat64pb.DeleteConfigRequest{Name: "nat64-0"})
 	require.NotNil(t, resp)
 	require.NoError(t, err)
-	require.Len(t, service.deferred, 1)
+	require.Equal(t, int64(1), backend.first.numCalls.Load())
 	require.Equal(t, int64(0), backend.first.freed.Load())
 
 	// A later successful update reclaims deferred handles first.
@@ -550,7 +550,7 @@ func Test_NAT64Service_DeleteConfig_ParksThenReclaims(t *testing.T) {
 		Prefix: mustIPv6Prefix(t, "64:ff9b::/96"),
 	})
 	require.NoError(t, err)
-	require.Empty(t, service.deferred)
+	require.Equal(t, int64(2), backend.first.numCalls.Load())
 	require.Equal(t, int64(1), backend.first.freed.Load())
 }
 
