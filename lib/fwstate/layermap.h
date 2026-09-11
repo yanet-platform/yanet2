@@ -1,7 +1,7 @@
 #pragma once
 
 #include "common/memory.h"
-#include "fwmap.h"
+#include "lib/statemap/fwmap.h"
 
 typedef struct layermap_list {
 	fwmap_t *layer;

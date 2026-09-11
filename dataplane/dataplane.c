@@ -542,6 +542,7 @@ dataplane_init(
 			"fwstate",
 			"route_mpls",
 			"blackhole",
+			"l3b",
 			"mirror",
 			"unrdup",
 		};
@@ -595,7 +596,10 @@ dataplane_init(
 		}
 
 		static const char *objects[] = {
-			"fwstate_map_v4", "fwstate_map_v6"
+			"fwstate_map_v4",
+			"fwstate_map_v6",
+			"l3b_virtual_service",
+			"l3b_session_table",
 		};
 		for (size_t i = 0; i < sizeof(objects) / sizeof(objects[0]);
 		     ++i) {

@@ -11,6 +11,7 @@ import (
 	dscp "github.com/yanet-platform/yanet2/modules/dscp/controlplane"
 	forward "github.com/yanet-platform/yanet2/modules/forward/controlplane"
 	fwstate "github.com/yanet-platform/yanet2/modules/fwstate/controlplane"
+	l3b "github.com/yanet-platform/yanet2/modules/l3b/controlplane"
 	mirror "github.com/yanet-platform/yanet2/modules/mirror/controlplane"
 	nat64 "github.com/yanet-platform/yanet2/modules/nat64/controlplane"
 	pdump "github.com/yanet-platform/yanet2/modules/pdump/controlplane"
@@ -41,6 +42,8 @@ type ModulesConfig struct {
 	ACL xcfg.Optional[acl.Config] `yaml:"acl"`
 	// FWState is the configuration for the fwstate module.
 	FWState xcfg.Optional[fwstate.Config] `yaml:"fwstate"`
+	// L3B is the configuration for the l3b module.
+	L3B xcfg.Optional[l3b.Config] `yaml:"l3b"`
 	// Blackhole is the configuration for the blackhole module.
 	Blackhole xcfg.Optional[blackhole.Config] `yaml:"blackhole"`
 	// Unrdup is the configuration for the unrdup module.

@@ -51,6 +51,13 @@ counter_registry_register(
 	yanet_error **err
 );
 
+// Resolve a counter's registry index by name, or (uint64_t)-1 when the
+// registry carries no counter of that name.
+uint64_t
+counter_registry_lookup_index(
+	struct counter_registry *registry, const char *name
+);
+
 void
 counter_registry_fini(struct counter_registry *registry);
 

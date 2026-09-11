@@ -18,6 +18,7 @@ import (
 	dscp "github.com/yanet-platform/yanet2/modules/dscp/controlplane"
 	forward "github.com/yanet-platform/yanet2/modules/forward/controlplane"
 	fwstate "github.com/yanet-platform/yanet2/modules/fwstate/controlplane"
+	l3b "github.com/yanet-platform/yanet2/modules/l3b/controlplane"
 	mirror "github.com/yanet-platform/yanet2/modules/mirror/controlplane"
 	nat64 "github.com/yanet-platform/yanet2/modules/nat64/controlplane"
 	pdump "github.com/yanet-platform/yanet2/modules/pdump/controlplane"
@@ -160,6 +161,13 @@ func buildServices(
 			Configured: modulesCfg.FWState.Unwrap() != nil,
 			New: func() (gateway.Service, error) {
 				return fwstate.NewFWStateModule(modulesCfg.FWState.Unwrap(), fwstate.WithLog(log))
+			},
+		},
+		{
+			Name:       "l3b module",
+			Configured: modulesCfg.L3B.Unwrap() != nil,
+			New: func() (gateway.Service, error) {
+				return l3b.NewL3BModule(modulesCfg.L3B.Unwrap(), l3b.WithLog(log))
 			},
 		},
 		{
