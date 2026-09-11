@@ -2,8 +2,6 @@ package fwstate
 
 import (
 	"context"
-	"errors"
-	"fmt"
 
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
@@ -23,8 +21,7 @@ const agentName = moduleType
 // generation, where module configs of any agent resolve them by name.
 type FWStateModule struct {
 	cfg                   *Config
-	shm                   *ffi.SharedMemory
-	agent                 *ffi.Agent
+	attachment            *ffi.Attachment
 	fwstateService        *FWStateService
 	fwstateMetricsService *MetricsService
 	mapService            *fwstatemap.FWStateMapService
@@ -39,23 +36,11 @@ func NewFWStateModule(cfg *Config, options ...Option) (*FWStateModule, error) {
 
 	log := opts.Log.With(zap.String("module", moduleType))
 
-	shm, err := ffi.AttachSharedMemory(cfg.MemoryPath.Unwrap())
+	attachment, err := ffi.Attach(cfg.AttachConfig, agentName, log)
 	if err != nil {
 		return nil, err
 	}
-
-	log.Debug("mapping shared memory",
-		zap.Uint32("instance_id", cfg.InstanceID.Unwrap()),
-		zap.Stringer("size", cfg.MemoryRequirements),
-	)
-
-	agent, err := shm.AgentAttach(agentName, cfg.InstanceID.Unwrap(), cfg.MemoryRequirements.Unwrap())
-	if err != nil {
-		return nil, errors.Join(
-			fmt.Errorf("failed to attach agent to shared memory: %w", err),
-			shm.Detach(),
-		)
-	}
+	agent := attachment.Agent
 
 	// The map service owns the fwstate-map objects both this module's
 	// configs and ACL configs link by name; a published object resolves
@@ -79,8 +64,7 @@ func NewFWStateModule(cfg *Config, options ...Option) (*FWStateModule, error) {
 
 	return &FWStateModule{
 		cfg:                   cfg,
-		shm:                   shm,
-		agent:                 agent,
+		attachment:            attachment,
 		fwstateService:        fwstateService,
 		fwstateMetricsService: fwstateMetricsService,
 		mapService:            mapService,
@@ -134,5 +118,5 @@ func (m *FWStateModule) Run(ctx context.Context) error {
 
 // Close closes the module.
 func (m *FWStateModule) Close() error {
-	return errors.Join(m.agent.Close(), m.shm.Detach())
+	return m.attachment.Close()
 }

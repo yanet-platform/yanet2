@@ -244,10 +244,14 @@ func validate(v reflect.Value, path string) error {
 				continue
 			}
 
-			name := yamlFieldName(f)
-			fieldPath := name
-			if path != "" {
-				fieldPath = path + "." + name
+			// An inline struct's fields live at the parent's level in
+			// the document, so its errors carry the parent's path.
+			fieldPath := path
+			if !isInlineTag(f.Tag.Get("yaml")) {
+				fieldPath = yamlFieldName(f)
+				if path != "" {
+					fieldPath = path + "." + fieldPath
+				}
 			}
 
 			if err := validate(v.Field(i), fieldPath); err != nil {

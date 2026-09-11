@@ -1,9 +1,6 @@
 package decap
 
 import (
-	"errors"
-	"fmt"
-
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 
@@ -35,8 +32,7 @@ func WithLog(log *zap.Logger) Option {
 // decapsulating various kinds of tunnels.
 type DecapModule struct {
 	cfg          *Config
-	shm          *ffi.SharedMemory
-	agent        *ffi.Agent
+	attachment   *ffi.Attachment
 	decapService *DecapService
 }
 
@@ -48,30 +44,17 @@ func NewDecapModule(cfg *Config, options ...Option) (*DecapModule, error) {
 
 	log := opts.Log.With(zap.String("module", "modules.decap.controlplane.decappb.v1.DecapService"))
 
-	shm, err := ffi.AttachSharedMemory(cfg.MemoryPath.Unwrap())
+	attachment, err := ffi.Attach(cfg.AttachConfig, "decap", log)
 	if err != nil {
 		return nil, err
 	}
-
-	log.Debug("mapping shared memory",
-		zap.Uint32("instance_id", cfg.InstanceID.Unwrap()),
-		zap.Stringer("size", cfg.MemoryRequirements),
-	)
-
-	agent, err := shm.AgentAttach("decap", cfg.InstanceID.Unwrap(), cfg.MemoryRequirements.Unwrap())
-	if err != nil {
-		return nil, errors.Join(
-			fmt.Errorf("failed to attach agent to shared memory: %w", err),
-			shm.Detach(),
-		)
-	}
+	agent := attachment.Agent
 
 	decapService := NewDecapService(NewBackend(agent))
 
 	return &DecapModule{
 		cfg:          cfg,
-		shm:          shm,
-		agent:        agent,
+		attachment:   attachment,
 		decapService: decapService,
 	}, nil
 }
@@ -94,5 +77,5 @@ func (m *DecapModule) RegisterService(server *grpc.Server) {
 
 // Close closes the module.
 func (m *DecapModule) Close() error {
-	return errors.Join(m.agent.Close(), m.shm.Detach())
+	return m.attachment.Close()
 }

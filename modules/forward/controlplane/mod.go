@@ -1,9 +1,6 @@
 package forward
 
 import (
-	"errors"
-	"fmt"
-
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 
@@ -41,8 +38,7 @@ func WithLog(log *zap.Logger) Option {
 // forwarding traffic between devices.
 type ForwardModule struct {
 	cfg            *Config
-	shm            *cpffi.SharedMemory
-	agent          *cpffi.Agent
+	attachment     *cpffi.Attachment
 	forwardService *ForwardService
 	metricsService *MetricsService
 }
@@ -55,31 +51,18 @@ func NewForwardModule(cfg *Config, options ...Option) (*ForwardModule, error) {
 
 	log := opts.Log.With(zap.String("module", serviceName))
 
-	shm, err := cpffi.AttachSharedMemory(cfg.MemoryPath.Unwrap())
+	attachment, err := cpffi.Attach(cfg.AttachConfig, agentName, log)
 	if err != nil {
 		return nil, err
 	}
-
-	log.Debug("mapping shared memory",
-		zap.Uint32("instance_id", cfg.InstanceID.Unwrap()),
-		zap.Stringer("size", cfg.MemoryRequirements),
-	)
-
-	agent, err := shm.AgentAttach(agentName, cfg.InstanceID.Unwrap(), cfg.MemoryRequirements.Unwrap())
-	if err != nil {
-		return nil, errors.Join(
-			fmt.Errorf("failed to attach agent to shared memory: %w", err),
-			shm.Detach(),
-		)
-	}
+	agent := attachment.Agent
 
 	forwardService := NewForwardService(NewBackend(agent))
 	metricsService := NewMetricsService(forwardService)
 
 	return &ForwardModule{
 		cfg:            cfg,
-		shm:            shm,
-		agent:          agent,
+		attachment:     attachment,
 		forwardService: forwardService,
 		metricsService: metricsService,
 	}, nil
@@ -104,5 +87,5 @@ func (m *ForwardModule) RegisterService(server *grpc.Server) {
 
 // Close closes the module.
 func (m *ForwardModule) Close() error {
-	return errors.Join(m.agent.Close(), m.shm.Detach())
+	return m.attachment.Close()
 }

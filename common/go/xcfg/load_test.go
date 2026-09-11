@@ -88,6 +88,28 @@ func Test_Load_RejectsNestedNull(t *testing.T) {
 	require.Equal(t, "inner.addr", pathErr.Path)
 }
 
+// Test_Load_InlineStructErrorsAtParentPath verifies that a field of an
+// inline struct reports its error at the parent's level, where the
+// document places the key.
+func Test_Load_InlineStructErrorsAtParentPath(t *testing.T) {
+	type Shared struct {
+		Addr NonEmptyString `yaml:"addr"`
+	}
+	type Inner struct {
+		Shared `yaml:",inline"`
+	}
+	type Outer struct {
+		Inner Inner `yaml:"inner"`
+	}
+
+	var cfg Outer
+	err := Decode([]byte("inner:\n  addr:"), &cfg)
+
+	var pathErr *PathError
+	require.ErrorAs(t, err, &pathErr)
+	require.Equal(t, "inner.addr", pathErr.Path)
+}
+
 func Test_Load_SkipsNilPointer(t *testing.T) {
 	type Inner struct {
 		Path NonEmptyString `yaml:"path"`

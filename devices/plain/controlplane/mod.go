@@ -1,9 +1,6 @@
 package plain
 
 import (
-	"errors"
-	"fmt"
-
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 
@@ -33,10 +30,9 @@ func WithLog(log *zap.Logger) Option {
 
 // DevicePlainDevice is a control-plane component responsible for plain devices
 type DevicePlainDevice struct {
-	cfg     *Config
-	shm     *ffi.SharedMemory
-	agent   *ffi.Agent
-	service *DevicePlainService
+	cfg        *Config
+	attachment *ffi.Attachment
+	service    *DevicePlainService
 }
 
 // NewDevicePlainDevice creates a new DevicePlain device instance
@@ -48,31 +44,18 @@ func NewDevicePlainDevice(cfg *Config, options ...Option) (*DevicePlainDevice, e
 
 	log := opts.Log.With(zap.String("module", "devices.plain.controlplane.plainpb.v1.DevicePlainService"))
 
-	shm, err := ffi.AttachSharedMemory(cfg.MemoryPath.Unwrap())
+	attachment, err := ffi.Attach(cfg.AttachConfig, "plain", log)
 	if err != nil {
 		return nil, err
 	}
-
-	log.Debug("mapping shared memory",
-		zap.Uint32("instance_id", cfg.InstanceID.Unwrap()),
-		zap.Stringer("size", cfg.MemoryRequirements),
-	)
-
-	agent, err := shm.AgentAttach("plain", cfg.InstanceID.Unwrap(), cfg.MemoryRequirements.Unwrap())
-	if err != nil {
-		return nil, errors.Join(
-			fmt.Errorf("failed to attach agent to shared memory: %w", err),
-			shm.Detach(),
-		)
-	}
+	agent := attachment.Agent
 
 	plainService := NewDevicePlainService(agent)
 
 	return &DevicePlainDevice{
-		cfg:     cfg,
-		shm:     shm,
-		agent:   agent,
-		service: plainService,
+		cfg:        cfg,
+		attachment: attachment,
+		service:    plainService,
 	}, nil
 }
 
@@ -94,5 +77,5 @@ func (m *DevicePlainDevice) RegisterService(server *grpc.Server) {
 
 // Close closes the device and releases all resources
 func (m *DevicePlainDevice) Close() error {
-	return errors.Join(m.agent.Close(), m.shm.Detach())
+	return m.attachment.Close()
 }

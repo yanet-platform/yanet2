@@ -1,9 +1,6 @@
 package route_mpls
 
 import (
-	"errors"
-	"fmt"
-
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 
@@ -39,10 +36,9 @@ func WithLog(log *zap.Logger) Option {
 // RouteMPLSModule is the controlplane part of the route-mpls module that owns
 // shared memory and exposes the routemplspb.RouteMPLSService gRPC surface.
 type RouteMPLSModule struct {
-	cfg     *Config
-	shm     *cpffi.SharedMemory
-	agent   *cpffi.Agent
-	service *RouteMPLSService
+	cfg        *Config
+	attachment *cpffi.Attachment
+	service    *RouteMPLSService
 }
 
 // NewRouteMPLSModule creates a new RouteMPLSModule.
@@ -54,31 +50,18 @@ func NewRouteMPLSModule(cfg *Config, options ...Option) (*RouteMPLSModule, error
 
 	log := opts.Log.With(zap.String("module", "modules.route_mpls.controlplane.routemplspb.v1.RouteMPLSService"))
 
-	shm, err := cpffi.AttachSharedMemory(cfg.MemoryPath.Unwrap())
+	attachment, err := cpffi.Attach(cfg.AttachConfig, agentName, log)
 	if err != nil {
-		return nil, fmt.Errorf("failed to attach to shared memory %q: %w", cfg.MemoryPath, err)
+		return nil, err
 	}
-
-	log.Debug("mapping shared memory",
-		zap.Uint32("instance_id", cfg.InstanceID.Unwrap()),
-		zap.Stringer("size", cfg.MemoryRequirements),
-	)
-
-	agent, err := shm.AgentAttach(agentName, cfg.InstanceID.Unwrap(), cfg.MemoryRequirements.Unwrap())
-	if err != nil {
-		return nil, errors.Join(
-			fmt.Errorf("failed to attach agent to shared memory: %w", err),
-			shm.Detach(),
-		)
-	}
+	agent := attachment.Agent
 
 	service := NewRouteMPLSService(NewBackend(agent), WithRouteMPLSServiceLog(log))
 
 	return &RouteMPLSModule{
-		cfg:     cfg,
-		shm:     shm,
-		agent:   agent,
-		service: service,
+		cfg:        cfg,
+		attachment: attachment,
+		service:    service,
 	}, nil
 }
 
@@ -106,5 +89,5 @@ func (m *RouteMPLSModule) RegisterService(server *grpc.Server) {
 
 // Close closes the module.
 func (m *RouteMPLSModule) Close() error {
-	return errors.Join(m.agent.Close(), m.shm.Detach())
+	return m.attachment.Close()
 }

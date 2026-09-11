@@ -1,9 +1,6 @@
 package vlan
 
 import (
-	"errors"
-	"fmt"
-
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 
@@ -33,10 +30,9 @@ func WithLog(log *zap.Logger) Option {
 
 // DeviceVlanDevice is a control-plane component responsible for vlan devices
 type DeviceVlanDevice struct {
-	cfg     *Config
-	shm     *ffi.SharedMemory
-	agent   *ffi.Agent
-	service *DeviceVlanService
+	cfg        *Config
+	attachment *ffi.Attachment
+	service    *DeviceVlanService
 }
 
 // NewDeviceVlanDevice creates a new DeviceVlan device instance
@@ -48,31 +44,18 @@ func NewDeviceVlanDevice(cfg *Config, options ...Option) (*DeviceVlanDevice, err
 
 	log := opts.Log.With(zap.String("module", "devices.vlan.controlplane.vlanpb.v1.DeviceVlanService"))
 
-	shm, err := ffi.AttachSharedMemory(cfg.MemoryPath.Unwrap())
+	attachment, err := ffi.Attach(cfg.AttachConfig, "vlan", log)
 	if err != nil {
 		return nil, err
 	}
-
-	log.Debug("mapping shared memory",
-		zap.Uint32("instance_id", cfg.InstanceID.Unwrap()),
-		zap.Stringer("size", cfg.MemoryRequirements),
-	)
-
-	agent, err := shm.AgentAttach("vlan", cfg.InstanceID.Unwrap(), cfg.MemoryRequirements.Unwrap())
-	if err != nil {
-		return nil, errors.Join(
-			fmt.Errorf("failed to attach agent to shared memory: %w", err),
-			shm.Detach(),
-		)
-	}
+	agent := attachment.Agent
 
 	vlanService := NewDeviceVlanService(agent)
 
 	return &DeviceVlanDevice{
-		cfg:     cfg,
-		shm:     shm,
-		agent:   agent,
-		service: vlanService,
+		cfg:        cfg,
+		attachment: attachment,
+		service:    vlanService,
 	}, nil
 }
 
@@ -94,5 +77,5 @@ func (m *DeviceVlanDevice) RegisterService(server *grpc.Server) {
 
 // Close closes the device and releases all resources
 func (m *DeviceVlanDevice) Close() error {
-	return errors.Join(m.agent.Close(), m.shm.Detach())
+	return m.attachment.Close()
 }
