@@ -2,6 +2,7 @@ package route_test
 
 import (
 	"errors"
+	"fmt"
 	"net/netip"
 	"sort"
 	"strings"
@@ -75,6 +76,8 @@ type fakeBackend struct {
 	// updateCalls records the range entries passed to UpdateModule on
 	// every call, in call order.
 	updateCalls [][]*routepb.FIBEntry
+	// updateErr, when set, is returned by UpdateModule instead of a handle.
+	updateErr error
 }
 
 func newFakeBackend() *fakeBackend {
@@ -90,6 +93,9 @@ func (m *fakeBackend) UpdateModule(name string, entries []*routepb.FIBEntry) (ro
 	defer m.mu.Unlock()
 
 	m.updateCalls = append(m.updateCalls, entries)
+	if m.updateErr != nil {
+		return nil, m.updateErr
+	}
 
 	names := map[string]struct{}{}
 	for _, entry := range entries {
@@ -560,6 +566,23 @@ func TestUpdateFIBDisabledRejectsExplicitCounter(t *testing.T) {
 	})
 	require.Equal(t, codes.InvalidArgument, status.Code(err))
 	require.Empty(t, backend.updateCalls, "the backend must not be called when validation rejects the request")
+}
+
+// Test_RouteService_UpdateFIB_TooManyNexthopsIsInvalidArgument verifies that
+// a FIB the backend refuses with ErrTooManyNexthops is reported as a request
+// error, not as an internal failure.
+func Test_RouteService_UpdateFIB_TooManyNexthopsIsInvalidArgument(t *testing.T) {
+	backend := newFakeBackend()
+	backend.updateErr = fmt.Errorf("wrapped: %w", route.ErrTooManyNexthops)
+	service := route.NewRouteService(backend)
+
+	entry := testFIBEntry(t, "10.0.0.0/32", testNexthop("eth0", ""))
+
+	_, err := service.UpdateFIB(t.Context(), &routepb.UpdateFIBRequest{
+		ModuleName: "cfg",
+		Entries:    []*routepb.FIBEntry{entry},
+	})
+	require.Equal(t, codes.InvalidArgument, status.Code(err))
 }
 
 // TestUpdateFIBDisabledAllowsEmptyCounter verifies that a nexthop leaving

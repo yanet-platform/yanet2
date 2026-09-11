@@ -1,6 +1,7 @@
 package route
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/yanet-platform/yanet2/common/go/bitset"
@@ -65,6 +66,10 @@ type Backend interface {
 	RuntimeModuleCounters(name string, counterNames []string) []CounterView
 }
 
+// ErrTooManyNexthops reports a FIB that resolves to more distinct hardware
+// nexthops than one route config can index.
+var ErrTooManyNexthops = errors.New("too many distinct nexthops")
+
 // backend is the real Backend implementation backed by shared memory.
 type backend struct {
 	agent *ffi.Agent
@@ -117,6 +122,12 @@ func (m *backend) UpdateModule(name string, entries []*routepb.FIBEntry) (Module
 
 			idx, ok := hardwareIndex[hardwareRoute]
 			if !ok {
+				if len(hardwareIndex) >= bitset.MaxBits {
+					if err := module.Free(); err != nil {
+						return nil, fmt.Errorf("failed to free abandoned config: %w", err)
+					}
+					return nil, fmt.Errorf("%w: a route config indexes at most %d", ErrTooManyNexthops, bitset.MaxBits)
+				}
 				// Read from nh, not hardwareRoute: RouteService already
 				// rejects two different counter names for one identity, so
 				// the first nexthop seen carries the name every later one
