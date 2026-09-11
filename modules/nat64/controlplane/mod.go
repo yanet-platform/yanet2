@@ -1,9 +1,6 @@
 package nat64
 
 import (
-	"errors"
-	"fmt"
-
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 
@@ -34,8 +31,7 @@ func WithLog(log *zap.Logger) Option {
 // NAT64Module is a control-plane component responsible for NAT64 translation
 type NAT64Module struct {
 	cfg          *Config
-	shm          *ffi.SharedMemory
-	agent        *ffi.Agent
+	attachment   *ffi.Attachment
 	nat64Service *NAT64Service
 }
 
@@ -48,30 +44,17 @@ func NewNAT64Module(cfg *Config, options ...Option) (*NAT64Module, error) {
 
 	log := opts.Log.With(zap.String("module", "modules.nat64.controlplane.nat64pb.v1.NAT64Service"))
 
-	shm, err := ffi.AttachSharedMemory(cfg.MemoryPath.Unwrap())
+	attachment, err := ffi.Attach(cfg.AttachConfig, "nat64", log)
 	if err != nil {
 		return nil, err
 	}
-
-	log.Debug("mapping shared memory",
-		zap.Uint32("instance_id", cfg.InstanceID.Unwrap()),
-		zap.Stringer("size", cfg.MemoryRequirements),
-	)
-
-	agent, err := shm.AgentAttach("nat64", cfg.InstanceID.Unwrap(), cfg.MemoryRequirements.Unwrap())
-	if err != nil {
-		return nil, errors.Join(
-			fmt.Errorf("failed to attach agent to shared memory: %w", err),
-			shm.Detach(),
-		)
-	}
+	agent := attachment.Agent
 
 	nat64Service := NewNAT64Service(NewBackend(agent), WithNAT64ServiceLog(log))
 
 	return &NAT64Module{
 		cfg:          cfg,
-		shm:          shm,
-		agent:        agent,
+		attachment:   attachment,
 		nat64Service: nat64Service,
 	}, nil
 }
@@ -94,5 +77,5 @@ func (m *NAT64Module) RegisterService(server *grpc.Server) {
 
 // Close closes the module and releases all resources
 func (m *NAT64Module) Close() error {
-	return errors.Join(m.agent.Close(), m.shm.Detach())
+	return m.attachment.Close()
 }

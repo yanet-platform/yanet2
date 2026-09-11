@@ -2,9 +2,6 @@
 package blackhole
 
 import (
-	"errors"
-	"fmt"
-
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	blackholepb "github.com/yanet-platform/yanet2/modules/blackhole/controlplane/blackholepb/v1"
 	"go.uber.org/zap"
@@ -40,8 +37,7 @@ func WithLog(log *zap.Logger) Option {
 // BlackholeModule is a controlplane component for blackhole module.
 type BlackholeModule struct {
 	cfg              *Config
-	shm              *ffi.SharedMemory
-	agent            *ffi.Agent
+	attachment       *ffi.Attachment
 	blackholeService *BlackholeService
 }
 
@@ -54,30 +50,17 @@ func NewBlackholeModule(cfg *Config, options ...Option) (*BlackholeModule, error
 
 	log := opts.Log.With(zap.String("module", serviceName))
 
-	shm, err := ffi.AttachSharedMemory(cfg.MemoryPath.Unwrap())
+	attachment, err := ffi.Attach(cfg.AttachConfig, agentName, log)
 	if err != nil {
-		return nil, fmt.Errorf("failed to attach shared memory: %w", err)
+		return nil, err
 	}
-
-	log.Debug("mapping shared memory",
-		zap.Uint32("instance_id", cfg.InstanceID.Unwrap()),
-		zap.Stringer("size", cfg.MemoryRequirements),
-	)
-
-	agent, err := shm.AgentAttach(agentName, cfg.InstanceID.Unwrap(), cfg.MemoryRequirements.Unwrap())
-	if err != nil {
-		return nil, errors.Join(
-			fmt.Errorf("failed to attach agent to shared memory: %w", err),
-			shm.Detach(),
-		)
-	}
+	agent := attachment.Agent
 
 	blackholeService := NewBlackholeService(NewBackend(agent))
 
 	return &BlackholeModule{
 		cfg:              cfg,
-		shm:              shm,
-		agent:            agent,
+		attachment:       attachment,
 		blackholeService: blackholeService,
 	}, nil
 }
@@ -104,5 +87,5 @@ func (m *BlackholeModule) RegisterService(server *grpc.Server) {
 
 // Close releases shared memory resources held by the module.
 func (m *BlackholeModule) Close() error {
-	return errors.Join(m.agent.Close(), m.shm.Detach())
+	return m.attachment.Close()
 }

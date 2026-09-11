@@ -1,9 +1,6 @@
 package acl
 
 import (
-	"errors"
-	"fmt"
-
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 
@@ -42,8 +39,7 @@ func WithModuleLog(log *zap.Logger) ModuleOption {
 // module.
 type ACLModule struct {
 	cfg            *Config
-	shm            *ffi.SharedMemory
-	agent          *ffi.Agent
+	attachment     *ffi.Attachment
 	aclService     *ACLService
 	metricsService *MetricsService
 }
@@ -57,23 +53,11 @@ func NewACLModule(cfg *Config, options ...ModuleOption) (*ACLModule, error) {
 
 	log := opts.Log.With(zap.String("module", serviceName))
 
-	shm, err := ffi.AttachSharedMemory(cfg.MemoryPath.Unwrap())
+	attachment, err := ffi.Attach(cfg.AttachConfig, agentName, log)
 	if err != nil {
-		return nil, fmt.Errorf("failed to attach shared memory: %w", err)
+		return nil, err
 	}
-
-	log.Debug("mapping shared memory",
-		zap.Uint32("instance_id", cfg.InstanceID.Unwrap()),
-		zap.Stringer("size", cfg.MemoryRequirements),
-	)
-
-	agent, err := shm.AgentAttach(agentName, cfg.InstanceID.Unwrap(), cfg.MemoryRequirements.Unwrap())
-	if err != nil {
-		return nil, errors.Join(
-			fmt.Errorf("failed to attach agent to shared memory: %w", err),
-			shm.Detach(),
-		)
-	}
+	agent := attachment.Agent
 
 	aclService := NewACLService(
 		NewBackend(agent),
@@ -87,8 +71,7 @@ func NewACLModule(cfg *Config, options ...ModuleOption) (*ACLModule, error) {
 
 	return &ACLModule{
 		cfg:            cfg,
-		shm:            shm,
-		agent:          agent,
+		attachment:     attachment,
 		aclService:     aclService,
 		metricsService: metricsService,
 	}, nil
@@ -127,5 +110,5 @@ func (m *ACLModule) Close() error {
 	// In-flight metric collections read the shared memory outside the
 	// drained request handlers; wait for them before releasing it.
 	m.aclService.DrainMetricsReads()
-	return errors.Join(m.agent.Close(), m.shm.Detach())
+	return m.attachment.Close()
 }

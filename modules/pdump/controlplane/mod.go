@@ -2,8 +2,6 @@ package pdump
 
 import (
 	"context"
-	"errors"
-	"fmt"
 
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
@@ -35,11 +33,10 @@ func WithLog(log *zap.Logger) Option {
 
 // PdumpModule is a control-plane component of a packet dump module.
 type PdumpModule struct {
-	cfg     *Config
-	shm     *ffi.SharedMemory
-	agent   *ffi.Agent
-	service *PdumpService
-	log     *zap.Logger
+	cfg        *Config
+	attachment *ffi.Attachment
+	service    *PdumpService
+	log        *zap.Logger
 }
 
 func NewPdumpModule(cfg *Config, options ...Option) (*PdumpModule, error) {
@@ -57,32 +54,19 @@ func NewPdumpModule(cfg *Config, options ...Option) (*PdumpModule, error) {
 	)
 	debugEBPF = cfg.DebugEBPF
 
-	shm, err := ffi.AttachSharedMemory(cfg.MemoryPath.Unwrap())
+	attachment, err := ffi.Attach(cfg.AttachConfig, moduleType, log)
 	if err != nil {
 		return nil, err
 	}
-
-	log.Debug("mapping shared memory",
-		zap.Uint32("instance_id", cfg.InstanceID.Unwrap()),
-		zap.Stringer("size", cfg.MemoryRequirements),
-	)
-
-	agent, err := shm.AgentAttach(moduleType, cfg.InstanceID.Unwrap(), cfg.MemoryRequirements.Unwrap())
-	if err != nil {
-		return nil, errors.Join(
-			fmt.Errorf("failed to attach agent to shared memory: %w", err),
-			shm.Detach(),
-		)
-	}
+	agent := attachment.Agent
 
 	service := NewPdumpService(agent, WithPdumpServiceLog(log))
 
 	return &PdumpModule{
-		cfg:     cfg,
-		shm:     shm,
-		agent:   agent,
-		service: service,
-		log:     log,
+		cfg:        cfg,
+		attachment: attachment,
+		service:    service,
+		log:        log,
 	}, nil
 }
 
@@ -113,5 +97,5 @@ func (m *PdumpModule) Run(ctx context.Context) error {
 
 // Close closes the module.
 func (m *PdumpModule) Close() error {
-	return errors.Join(m.agent.Close(), m.shm.Detach())
+	return m.attachment.Close()
 }

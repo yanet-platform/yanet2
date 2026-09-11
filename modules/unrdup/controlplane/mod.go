@@ -1,9 +1,6 @@
 package unrdup
 
 import (
-	"errors"
-	"fmt"
-
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 
@@ -34,8 +31,7 @@ func WithLog(log *zap.Logger) Option {
 // UnrdupModule is the control-plane component of the unrdup module.
 type UnrdupModule struct {
 	cfg           *Config
-	shm           *ffi.SharedMemory
-	agent         *ffi.Agent
+	attachment    *ffi.Attachment
 	unrdupService *UnrdupService
 }
 
@@ -47,29 +43,15 @@ func NewUnrdupModule(cfg *Config, options ...Option) (*UnrdupModule, error) {
 
 	log := opts.Log.With(zap.String("module", "unrdup"))
 
-	shm, err := ffi.AttachSharedMemory(cfg.MemoryPath.Unwrap())
+	attachment, err := ffi.Attach(cfg.AttachConfig, "unrdup", log)
 	if err != nil {
 		return nil, err
 	}
-
-	log.Debug(
-		"mapping shared memory",
-		zap.Uint32("instance_id", cfg.InstanceID.Unwrap()),
-		zap.Stringer("size", cfg.MemoryRequirements),
-	)
-
-	agent, err := shm.AgentAttach("unrdup", cfg.InstanceID.Unwrap(), cfg.MemoryRequirements.Unwrap())
-	if err != nil {
-		return nil, errors.Join(
-			fmt.Errorf("failed to attach agent to shared memory: %w", err),
-			shm.Detach(),
-		)
-	}
+	agent := attachment.Agent
 
 	return &UnrdupModule{
 		cfg:           cfg,
-		shm:           shm,
-		agent:         agent,
+		attachment:    attachment,
 		unrdupService: NewUnrdupService(newBackend(agent)),
 	}, nil
 }
@@ -92,5 +74,5 @@ func (m *UnrdupModule) RegisterService(server *grpc.Server) {
 
 // Close closes the module.
 func (m *UnrdupModule) Close() error {
-	return errors.Join(m.agent.Close(), m.shm.Detach())
+	return m.attachment.Close()
 }

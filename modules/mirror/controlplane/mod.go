@@ -1,9 +1,6 @@
 package mirror
 
 import (
-	"errors"
-	"fmt"
-
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 
@@ -40,8 +37,7 @@ func WithLog(log *zap.Logger) Option {
 // mirroring traffic between devices.
 type MirrorModule struct {
 	cfg           *Config
-	shm           *cpffi.SharedMemory
-	agent         *cpffi.Agent
+	attachment    *cpffi.Attachment
 	mirrorService *MirrorService
 }
 
@@ -53,30 +49,17 @@ func NewMirrorModule(cfg *Config, options ...Option) (*MirrorModule, error) {
 
 	log := opts.Log.With(zap.String("module", "modules.mirror.controlplane.mirrorpb.v1.MirrorService"))
 
-	shm, err := cpffi.AttachSharedMemory(cfg.MemoryPath.Unwrap())
+	attachment, err := cpffi.Attach(cfg.AttachConfig, agentName, log)
 	if err != nil {
 		return nil, err
 	}
-
-	log.Debug("mapping shared memory",
-		zap.Uint32("instance_id", cfg.InstanceID.Unwrap()),
-		zap.Stringer("size", cfg.MemoryRequirements),
-	)
-
-	agent, err := shm.AgentAttach(agentName, cfg.InstanceID.Unwrap(), cfg.MemoryRequirements.Unwrap())
-	if err != nil {
-		return nil, errors.Join(
-			fmt.Errorf("failed to attach agent to shared memory: %w", err),
-			shm.Detach(),
-		)
-	}
+	agent := attachment.Agent
 
 	mirrorService := NewMirrorService(NewBackend(agent))
 
 	return &MirrorModule{
 		cfg:           cfg,
-		shm:           shm,
-		agent:         agent,
+		attachment:    attachment,
 		mirrorService: mirrorService,
 	}, nil
 }
@@ -99,5 +82,5 @@ func (m *MirrorModule) RegisterService(server *grpc.Server) {
 
 // Close closes the module.
 func (m *MirrorModule) Close() error {
-	return errors.Join(m.agent.Close(), m.shm.Detach())
+	return m.attachment.Close()
 }

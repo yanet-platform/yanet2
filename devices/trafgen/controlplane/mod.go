@@ -2,9 +2,6 @@
 package trafgen
 
 import (
-	"errors"
-	"fmt"
-
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 
@@ -40,10 +37,9 @@ func WithLog(log *zap.Logger) Option {
 
 // TrafgenDevice is the control-plane component of the traffic generator device.
 type TrafgenDevice struct {
-	cfg     *Config
-	shm     *ffi.SharedMemory
-	agent   *ffi.Agent
-	service *TrafgenService
+	cfg        *Config
+	attachment *ffi.Attachment
+	service    *TrafgenService
 }
 
 // NewTrafgenDevice creates a new TrafgenDevice.
@@ -55,31 +51,18 @@ func NewTrafgenDevice(cfg *Config, options ...Option) (*TrafgenDevice, error) {
 
 	log := opts.Log.With(zap.String("device", deviceName))
 
-	shm, err := ffi.AttachSharedMemory(cfg.MemoryPath.Unwrap())
+	attachment, err := ffi.Attach(cfg.AttachConfig, agentName, log)
 	if err != nil {
-		return nil, fmt.Errorf("failed to attach shared memory: %w", err)
+		return nil, err
 	}
-
-	log.Debug("mapping shared memory",
-		zap.Uint32("instance_id", cfg.InstanceID.Unwrap()),
-		zap.Stringer("size", cfg.MemoryRequirements),
-	)
-
-	agent, err := shm.AgentAttach(agentName, cfg.InstanceID.Unwrap(), cfg.MemoryRequirements.Unwrap())
-	if err != nil {
-		return nil, errors.Join(
-			fmt.Errorf("failed to attach agent to shared memory: %w", err),
-			shm.Detach(),
-		)
-	}
+	agent := attachment.Agent
 
 	service := NewTrafgenService(NewBackend(agent))
 
 	return &TrafgenDevice{
-		cfg:     cfg,
-		shm:     shm,
-		agent:   agent,
-		service: service,
+		cfg:        cfg,
+		attachment: attachment,
+		service:    service,
 	}, nil
 }
 
@@ -105,5 +88,5 @@ func (m *TrafgenDevice) RegisterService(server *grpc.Server) {
 
 // Close releases shared memory resources held by the device.
 func (m *TrafgenDevice) Close() error {
-	return errors.Join(m.agent.Close(), m.shm.Detach())
+	return m.attachment.Close()
 }

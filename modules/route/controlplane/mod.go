@@ -1,9 +1,6 @@
 package route
 
 import (
-	"errors"
-	"fmt"
-
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 
@@ -45,8 +42,7 @@ func WithLog(log *zap.Logger) Option {
 // UpdateFIB.
 type RouteModule struct {
 	cfg            *Config
-	shm            *cpffi.SharedMemory
-	agent          *cpffi.Agent
+	attachment     *cpffi.Attachment
 	service        *RouteService
 	metricsService *MetricsService
 }
@@ -60,23 +56,11 @@ func NewRouteModule(cfg *Config, options ...Option) (*RouteModule, error) {
 
 	log := opts.Log.With(zap.String("module", "modules.route.controlplane.routepb.v1.RouteService"))
 
-	shm, err := cpffi.AttachSharedMemory(cfg.MemoryPath.Unwrap())
+	attachment, err := cpffi.Attach(cfg.AttachConfig, agentName, log)
 	if err != nil {
-		return nil, fmt.Errorf("failed to attach to shared memory %q: %w", cfg.MemoryPath, err)
+		return nil, err
 	}
-
-	log.Debug("mapping shared memory",
-		zap.Uint32("instance_id", cfg.InstanceID.Unwrap()),
-		zap.Stringer("size", cfg.MemoryRequirements),
-	)
-
-	agent, err := shm.AgentAttach(agentName, cfg.InstanceID.Unwrap(), cfg.MemoryRequirements.Unwrap())
-	if err != nil {
-		return nil, errors.Join(
-			fmt.Errorf("failed to attach agent to shared memory: %w", err),
-			shm.Detach(),
-		)
-	}
+	agent := attachment.Agent
 
 	serviceOptions := []RouteServiceOption{
 		WithMetrics(grpcmetrics.NewFactory(
@@ -93,8 +77,7 @@ func NewRouteModule(cfg *Config, options ...Option) (*RouteModule, error) {
 
 	return &RouteModule{
 		cfg:            cfg,
-		shm:            shm,
-		agent:          agent,
+		attachment:     attachment,
 		service:        service,
 		metricsService: metricsService,
 	}, nil
@@ -137,5 +120,5 @@ func (m *RouteModule) UnaryServerInterceptors() []grpc.UnaryServerInterceptor {
 
 // Close closes the module.
 func (m *RouteModule) Close() error {
-	return errors.Join(m.agent.Close(), m.shm.Detach())
+	return m.attachment.Close()
 }

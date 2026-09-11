@@ -3,20 +3,12 @@ package plain
 import (
 	"github.com/c2h5oh/datasize"
 	"github.com/yanet-platform/yanet2/common/go/xcfg"
+	"github.com/yanet-platform/yanet2/controlplane/ffi"
 )
 
 // Config represents plain device configuration
 type Config struct {
-	// InstanceID specifies which dataplane instance this device serves.
-	//
-	// Required: a listed device must set it explicitly, even to 0.
-	InstanceID xcfg.Required[uint32] `yaml:"instance_id"`
-
-	// MemoryPath is the path to the shared memory file
-	MemoryPath xcfg.NonEmptyString `yaml:"memory_path"`
-
-	// MemoryRequirements specifies memory requirements for the module
-	MemoryRequirements xcfg.NonZero[datasize.ByteSize] `yaml:"memory_requirements"`
+	ffi.AttachConfig `yaml:",inline"`
 
 	// Endpoint is the gRPC endpoint address
 	Endpoint xcfg.NonEmptyString `yaml:"endpoint"`
@@ -25,9 +17,8 @@ type Config struct {
 // DefaultConfig returns default configuration
 func DefaultConfig() *Config {
 	return &Config{
-		MemoryPath:         xcfg.MustNonEmptyString("/dev/hugepages/yanet"),
-		MemoryRequirements: xcfg.MustNonZero(16 * datasize.MB),
-		Endpoint:           xcfg.MustNonEmptyString("[::1]:0"),
+		AttachConfig: ffi.DefaultAttachConfig(16 * datasize.MB),
+		Endpoint:     xcfg.MustNonEmptyString("[::1]:0"),
 	}
 }
 
