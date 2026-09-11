@@ -66,7 +66,8 @@ jobs:
         timeout-minutes: 10
         with:
           packages: cmake protobuf-compiler
-      - run: cargo test --workspace
+      # --locked: a manifest change passes only with its regenerated Cargo.lock.
+      - run: cargo test --workspace --locked
 
   # Clippy runs the full compiler front end over the workspace, so a type
   # error fails it exactly as a dedicated cargo check job would, which is
@@ -88,4 +89,4 @@ jobs:
         timeout-minutes: 10
         with:
           packages: cmake protobuf-compiler
-      - run: cargo clippy --workspace -- -D warnings
+      - run: cargo clippy --workspace --locked -- -D warnings
