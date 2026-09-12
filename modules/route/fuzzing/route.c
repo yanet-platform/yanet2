@@ -43,25 +43,14 @@ route_test_config(struct cp_module **cp_module, yanet_error **err) {
 		    &config->cp_module.memory_context,
 		    0
 	    )) {
-		goto error_lpm_v4;
+		goto error_config;
 	}
 
 	struct memory_context *memory_context =
 		&config->cp_module.memory_context;
-	if (lpm_init(&config->lpm_v4, memory_context, "lpm_v4")) {
-		goto error_lpm_v4;
+	if (route_module_config_data_init(config, memory_context)) {
+		goto error_config;
 	}
-	if (lpm_init(&config->lpm_v6, memory_context, "lpm_v6")) {
-		goto error_lpm_v6;
-	}
-	config->route_count = 0;
-	config->routes = NULL;
-
-	config->route_list_count = 0;
-	config->route_lists = NULL;
-
-	config->route_index_count = 0;
-	config->route_indexes = NULL;
 
 	struct cp_module *rmc = &config->cp_module;
 
@@ -78,14 +67,14 @@ route_test_config(struct cp_module **cp_module, yanet_error **err) {
 		err
 	);
 	if (route_idx == -1) {
-		goto error_lpm_v6;
+		goto error_table;
 	}
 
 	int route_list_idx = route_module_config_add_route_list(
 		rmc, 1, (uint32_t[]){route_idx}
 	);
 	if (route_list_idx == -1) {
-		goto error_lpm_v6;
+		goto error_table;
 	}
 
 	// 127.0.0.0/24
@@ -96,7 +85,7 @@ route_test_config(struct cp_module **cp_module, yanet_error **err) {
 		route_list_idx
 	);
 	if (rc != 0) {
-		goto error_lpm_v6;
+		goto error_table;
 	}
 	// fe80::0/96
 	rc = route_module_config_add_prefix_v6(
@@ -108,26 +97,26 @@ route_test_config(struct cp_module **cp_module, yanet_error **err) {
 		route_list_idx
 	);
 	if (rc != 0) {
-		goto error_lpm_v6;
+		goto error_table;
 	}
 
 	// Set up counter storage, because route_handle_packets accesses
 	// counters on every outcome.
 	if (route_module_config_register_counters(config, err)) {
-		goto error_lpm_v6;
+		goto error_table;
 	}
 
 	if (counter_registry_link(
 		    &config->cp_module.counter_registry, NULL, err
 	    )) {
-		goto error_lpm_v6;
+		goto error_table;
 	}
 
 	struct counter_storage *cs = counter_storage_spawn(
 		&fuzz_params.mctx, NULL, &config->cp_module.counter_registry
 	);
 	if (cs == NULL) {
-		goto error_lpm_v6;
+		goto error_table;
 	}
 	SET_OFFSET_OF(&fuzz_params.module_ectx.counter_storage, cs);
 	fuzz_params.module_ectx.abs_counter_storage = cs;
@@ -135,10 +124,10 @@ route_test_config(struct cp_module **cp_module, yanet_error **err) {
 	*cp_module = (struct cp_module *)config;
 	return 0;
 
-error_lpm_v6:
-	lpm_free(&config->lpm_v4);
+error_table:
+	route_module_config_data_fini(config);
 
-error_lpm_v4:
+error_config:
 	memory_bfree(
 		&fuzz_params.mctx, config, sizeof(struct route_module_config)
 	);

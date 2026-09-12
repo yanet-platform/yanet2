@@ -40,6 +40,10 @@ route_module_config_data_init(
 	struct memory_context *memory_context
 );
 
+// Releases the table set up by route_module_config_data_init.
+void
+route_module_config_data_fini(struct route_module_config *config);
+
 // Registers the module-level counters and records their ids in the config.
 //
 // The counter registry must already be initialized. Callers that build a

@@ -9,6 +9,8 @@ includes = include_directories('../dataplane')
 
 sources = files(
   'controlplane.c',
+  'fib.c',
+  'fib_object.c',
 )
 
 lib_route_cp = static_library(
