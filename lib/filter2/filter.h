@@ -4,15 +4,18 @@
  *
  * The filter is a static classification tree built over an explicit, ordered
  * set of attributes (the “signature”). It is constructed with filter_init()
- * and queried with FILTER_QUERY() using helpers from compiler.h and query.h.
+ * and queried with filter_query() using helpers from compiler.h and query.h;
+ * the attribute lookups themselves are authored by the consumer module
+ * through FILTER_QUERY_ATTR, so the library carries no packet knowledge.
  *
  * Key concepts:
  * - struct filter:     owns the tree (vertices, registries, tables) and memory
  * - struct filter_vertex: a node (leaf or inner) of the classification tree
  *
  * Usage overview:
- *  1) Declare attribute signature with FILTER_COMPILER_DECLARE /
- * FILTER_QUERY_DECLARE 2) Build rules (array of struct filter_rule) 3)
+ *  1) Declare the compile attribute signature with FILTER_COMPILER_DECLARE
+ * and author the matching query lookups with FILTER_QUERY_ATTR
+ * 2) Build rules (array of struct filter_rule) 3)
  * filter_init(...) to build tree into struct filter 4) FILTER_QUERY(...) to
  * classify a packet and get actions 5) filter_free(...) to release resources
  *
@@ -34,9 +37,9 @@
 
 #define FILTER_RULE_INVALID (uint32_t)0xffffffff
 
-// Attribute count of a FILTER_COMPILER_DECLARE / FILTER_QUERY_DECLARE
-// signature array; valid only where the argument is still an array, not
-// a decayed function parameter.
+// Attribute count of a FILTER_COMPILER_DECLARE signature or a module
+// authored query array; valid only where the argument is still an
+// array, not a decayed function parameter.
 #define FILTER_SIGN_COUNT(sign) (sizeof(sign) / sizeof(*sign))
 
 struct filter_query_attr {};
