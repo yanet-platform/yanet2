@@ -23,41 +23,11 @@
 
 #include <lib/filter2/query.h>
 
+#include "filter_lookup.h"
+
 struct acl_module {
 	struct module module;
 };
-
-FILTER_QUERY_DECLARE(filter_vlan, device, vlan);
-
-FILTER_QUERY_DECLARE(
-	filter_ip4, device, vlan, net4_src, net4_dst, ip_frag, proto_range
-);
-
-FILTER_QUERY_DECLARE(
-	filter_ip4_port,
-	device,
-	vlan,
-	net4_src,
-	net4_dst,
-	proto_range,
-	port_src,
-	port_dst
-);
-
-FILTER_QUERY_DECLARE(
-	filter_ip6, device, vlan, net6_src, net6_dst, ip_frag, proto_range
-);
-
-FILTER_QUERY_DECLARE(
-	filter_ip6_port,
-	device,
-	vlan,
-	net6_src,
-	net6_dst,
-	proto_range,
-	port_src,
-	port_dst
-);
 
 static void
 acl_handle_packets(
@@ -213,7 +183,7 @@ acl_handle_packets(
 
 	filter_query(
 		&acl_config->filter_vlan,
-		filter_vlan,
+		acl_query_vlan,
 		vlan_packets,
 		vlan_result,
 		vlan_idx
@@ -221,7 +191,7 @@ acl_handle_packets(
 
 	filter_query(
 		&acl_config->filter_ip4,
-		filter_ip4,
+		acl_query_ip4,
 		ip4_packets,
 		ip4_result,
 		ip4_idx
@@ -229,7 +199,7 @@ acl_handle_packets(
 
 	filter_query(
 		&acl_config->filter_ip4_port,
-		filter_ip4_port,
+		acl_query_ip4_port,
 		ip4_port_packets,
 		ip4_port_result,
 		ip4_port_idx
@@ -237,7 +207,7 @@ acl_handle_packets(
 
 	filter_query(
 		&acl_config->filter_ip6,
-		filter_ip6,
+		acl_query_ip6,
 		ip6_packets,
 		ip6_result,
 		ip6_idx
@@ -245,7 +215,7 @@ acl_handle_packets(
 
 	filter_query(
 		&acl_config->filter_ip6_port,
-		filter_ip6_port,
+		acl_query_ip6_port,
 		ip6_port_packets,
 		ip6_port_result,
 		ip6_port_idx
@@ -288,8 +258,10 @@ acl_handle_packets(
 				}
 				++ip4_port_idx;
 			}
-		} else if (packet->network_header.type ==
-			   rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV6)) {
+		} else if (
+			packet->network_header.type ==
+			rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV6)
+		) {
 			state_table = fw6table;
 
 			if (ip6_result[ip6_idx] < action) {

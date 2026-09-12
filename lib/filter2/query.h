@@ -18,7 +18,7 @@
 #include <string.h>
 
 #include "filter.h"
-#include "query/attribute.h"
+#include "query/declare.h"
 #include "rule.h"
 
 ////////////////////////////////////////////////////////////////////////////////
