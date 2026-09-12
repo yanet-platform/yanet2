@@ -312,7 +312,7 @@ mod test {
 
     #[test]
     fn test_file_fields_default_when_omitted() {
-        let yaml = r#"
+        let document = r#"
 rules:
   - action:
       target: "01:00.0"
@@ -322,17 +322,30 @@ rules:
       - name: "01:00.0"
     sources4:
       - "0.0.0.0/0"
+  - action:
+      target: kni0
+      mode: 1
 "#;
+        let path = std::env::temp_dir().join(format!("fwd-cli-sparse-{}.yaml", std::process::id()));
+        std::fs::write(&path, document).expect("the fixture must be written");
 
-        let parsed: UpdateConfigRequest = serde_yaml::from_str(yaml).expect("a sparse file must parse");
+        let loaded: Result<UpdateConfigRequest, _> = yaml::load_document(&path);
+        std::fs::remove_file(&path).expect("the fixture must be removed");
+        let request = loaded.expect("a sparse file must load");
 
-        assert_eq!("", parsed.name);
+        assert_eq!("", request.name);
         assert_eq!(
             forwardpb::ForwardMode::Out as i32,
-            parsed.rules[0].action.as_ref().expect("action").mode
+            request.rules[0].action.as_ref().expect("action").mode
         );
-        assert!(parsed.rules[0].vlan_ranges.is_empty());
-        assert!(parsed.rules[0].sources6.is_empty());
+        assert_eq!(vec![v4_net("0.0.0.0/0")], request.rules[0].sources4);
+        assert!(request.rules[0].vlan_ranges.is_empty());
+        assert!(request.rules[0].sources6.is_empty());
+        assert_eq!(
+            forwardpb::ForwardMode::In as i32,
+            request.rules[1].action.as_ref().expect("action").mode
+        );
+        assert!(request.rules[1].devices.is_empty());
     }
 
     #[test]
