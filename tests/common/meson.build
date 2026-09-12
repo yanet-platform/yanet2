@@ -28,6 +28,15 @@ lpm_wide_test = executable(
 )
 test('lpm_wide', lpm_wide_test, suite: ['common'])
 
+lpm_merge_test = executable(
+  'lpm_merge_test',
+  ['lpm_merge_test.c',],
+  c_args: yanet_test_c_args,
+  link_args: yanet_link_args,
+  dependencies: dependencies,
+)
+test('lpm_merge', lpm_merge_test, suite: ['common'])
+
 radix_test = executable(
   'radix_test',
   ['radix_test.c',],
