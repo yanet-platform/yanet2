@@ -224,6 +224,121 @@ func Test_WorkerExecutionContext_Round_AcksAssignedGenerationOnThatWorkerOnly(t 
 	)
 }
 
+// Test_WorkerExecutionContext_InstallAfterRound_CompletesDespiteStaleAcknowledgement
+// verifies that an install issued after a completed round returns even
+// though the round left its worker acknowledging the generation it
+// processed.
+//
+// No later round exists to move that acknowledgement, so the switch
+// must not wait for one. This is the regression shape of a harness
+// hanging on its first update after driving packets (#1881).
+func Test_WorkerExecutionContext_InstallAfterRound_CompletesDespiteStaleAcknowledgement(t *testing.T) {
+	// Teardown is owned here rather than by the shared fixture.
+	//
+	// When the probe below times out, the install stays blocked
+	// inside the harness, and freeing the arena under it would turn
+	// the timeout into a use-after-free — the failing binary leaks it
+	// instead.
+	harness, err := NewHarness(Config{
+		CPMemory:    uint64(datasize.MB * 32),
+		DPMemory:    uint64(datasize.MB * 4),
+		WorkerCount: executionContextWorkers,
+	})
+	require.NoError(t, err)
+	installBlocked := false
+	t.Cleanup(func() {
+		if !installBlocked {
+			harness.Free()
+		}
+	})
+
+	require.NoError(t, harness.InstallEmptyPipeline("first"))
+
+	ethernet := layers.Ethernet{
+		SrcMAC:       xerror.Unwrap(net.ParseMAC("aa:bb:cc:dd:ee:ff")),
+		DstMAC:       xerror.Unwrap(net.ParseMAC("11:22:33:44:55:66")),
+		EthernetType: layers.EthernetTypeIPv4,
+	}
+	ipv4 := layers.IPv4{
+		Version:  4,
+		TTL:      64,
+		Protocol: layers.IPProtocolICMPv4,
+		SrcIP:    net.ParseIP("1.2.3.4"),
+		DstIP:    net.ParseIP("10.0.0.5"),
+	}
+	icmp := layers.ICMPv4{
+		TypeCode: layers.CreateICMPv4TypeCode(layers.ICMPv4TypeEchoRequest, 0),
+	}
+	packet := xpacket.LayersToPacket(t, &ethernet, &ipv4, &icmp)
+
+	// The topology wires no device, so the round drops the packet and
+	// leaves worker 0 acknowledging the generation it just processed.
+	result, err := harness.HandlePacketsOnWorker(0, packet)
+	require.NoError(t, err)
+	require.Len(t, result.Drop, 1)
+	roundGeneration, err := harness.WorkerGeneration(0)
+	require.NoError(t, err)
+	require.Equal(
+		t,
+		harness.PublishedGeneration(),
+		roundGeneration,
+		"worker 0 must acknowledge the generation its round processed",
+	)
+
+	// The install must complete on its own: nothing drives another
+	// round on this harness, so no further acknowledgement can arrive.
+	done := make(chan error, 1)
+	go func() {
+		done <- harness.InstallEmptyPipeline("second")
+	}()
+	select {
+	case err := <-done:
+		require.NoError(t, err)
+	case <-time.After(10 * time.Second):
+		installBlocked = true
+		t.Fatal("install after a completed round never returned")
+	}
+
+	require.Greater(
+		t,
+		harness.PublishedGeneration(),
+		roundGeneration,
+		"a generation newer than the round's must be published",
+	)
+
+	// Only a round moves an acknowledgement, and none has run since:
+	// completing the switch must not forge one.
+	acknowledged, err := harness.WorkerGeneration(0)
+	require.NoError(t, err)
+	require.Equal(
+		t,
+		roundGeneration,
+		acknowledged,
+		"worker 0's acknowledgement must stay at the generation its round processed",
+	)
+	idleAcknowledged, err := harness.WorkerGeneration(1)
+	require.NoError(t, err)
+	require.Zero(
+		t,
+		idleAcknowledged,
+		"worker 1 never ran a round and must keep acknowledging zero",
+	)
+
+	for workerIdx := range executionContextWorkers {
+		published, err := harness.PublishedExecutionContext(workerIdx)
+		require.NoError(t, err)
+		assigned, err := harness.WorkerExecutionContext(workerIdx)
+		require.NoError(t, err)
+		require.Equal(
+			t,
+			published,
+			assigned,
+			"worker %d's field must hold the context published after the round",
+			workerIdx,
+		)
+	}
+}
+
 // Test_WorkerExecutionContext_ConcurrentPublish_WaitsForInFlightRound
 // verifies that a publish running while a round holds the round lock
 // blocks until the round releases it, so no round can still touch the
