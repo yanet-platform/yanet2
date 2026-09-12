@@ -16,6 +16,10 @@ import (
 	"github.com/yanet-platform/yanet2/operators/route/internal/discovery/neigh"
 )
 
+type neighbourGeneration interface {
+	Generation() (uint64, bool)
+}
+
 // GatewayActuator applies route-operator state to a single Gateway via
 // the route module's UpdateFIB unary RPC.
 type GatewayActuator struct {
@@ -25,6 +29,7 @@ type GatewayActuator struct {
 	function         *ynpb.Function
 	functionActuator *operator.FunctionActuator
 	devices          []string
+	remoteInput      neighbourGeneration
 	onFIBBuilt       func(module string, stats FIBBuildStats)
 	log              *zap.Logger
 }
@@ -77,6 +82,7 @@ func NewGatewayActuator(
 		function:         function,
 		functionActuator: operator.NewFunctionActuator(ynpb.NewFunctionServiceClient(conn), actuatorOptions...),
 		devices:          opts.Devices,
+		remoteInput:      opts.RemoteInput,
 		onFIBBuilt:       opts.OnFIBBuilt,
 		log:              log.With(zap.String("function", fn.Name.Unwrap())),
 	}, nil
@@ -92,7 +98,12 @@ func (m *GatewayActuator) Close() error {
 //
 // Every FIB is attempted and the function is published even on a partial
 // failure — the joined errors let the reconcile loop retry under backoff.
+// Expired or superseded remote input prevents new writes, including retries
+// of a captured snapshot.
 func (m *GatewayActuator) Apply(ctx context.Context, snapshot RouteSnapshot) error {
+	if err := m.validateNeighbourInput(snapshot.NeighbourGeneration); err != nil {
+		return err
+	}
 	neighbours := neigh.FilterByDevices(snapshot.Neighbours, m.devices)
 
 	var err error
@@ -105,12 +116,25 @@ func (m *GatewayActuator) Apply(ctx context.Context, snapshot RouteSnapshot) err
 		fib, stats := BuildFIB(dump, neighbours)
 		fib.Name = name
 		m.onFIBBuilt(name, stats)
-		if e := m.pushFIB(ctx, fib); e != nil {
+		if e := m.pushFIB(ctx, fib, snapshot.NeighbourGeneration); e != nil {
 			err = errors.Join(err, fmt.Errorf("failed to push FIB to gateway %q: %w", m.name, e))
 		}
 	}
 
+	if e := m.validateNeighbourInput(snapshot.NeighbourGeneration); e != nil {
+		return errors.Join(err, e)
+	}
 	return errors.Join(err, m.applyFunction(ctx))
+}
+
+func (m *GatewayActuator) validateNeighbourInput(generation uint64) error {
+	if m.remoteInput != nil {
+		current, available := m.remoteInput.Generation()
+		if !available || current != generation {
+			return errors.New("remote neighbour snapshot is unavailable or superseded")
+		}
+	}
+	return nil
 }
 
 // applyFunction publishes the operator's single network-function definition to
@@ -124,7 +148,7 @@ func (m *GatewayActuator) applyFunction(ctx context.Context) error {
 }
 
 // pushFIB applies fib to the gateway via the UpdateFIB unary RPC.
-func (m *GatewayActuator) pushFIB(ctx context.Context, fib FIB) error {
+func (m *GatewayActuator) pushFIB(ctx context.Context, fib FIB, generation uint64) error {
 	entries := make([]*routepb.FIBEntry, len(fib.Entries))
 	for idx, entry := range fib.Entries {
 		e, err := fibEntryToProto(entry)
@@ -139,6 +163,9 @@ func (m *GatewayActuator) pushFIB(ctx context.Context, fib FIB) error {
 		Entries:    entries,
 	}
 
+	if err := m.validateNeighbourInput(generation); err != nil {
+		return err
+	}
 	if _, err := m.routes.UpdateFIB(ctx, req); err != nil {
 		return fmt.Errorf("failed to call UpdateFIB: %w", err)
 	}

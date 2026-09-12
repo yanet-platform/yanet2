@@ -18,6 +18,7 @@ import (
 	"github.com/yanet-platform/yanet2/common/go/metrics"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/modules/route/bindings/go/croute"
+	"github.com/yanet-platform/yanet2/modules/route/controlplane/hwroute"
 	"github.com/yanet-platform/yanet2/modules/route/controlplane/routepb/v1"
 )
 
@@ -399,6 +400,11 @@ func (m *RouteService) UpdateFIB(
 		}
 		if start.Compare(end) > 0 {
 			return nil, status.Errorf(codes.InvalidArgument, "invalid range: start %s is after end %s", start, end)
+		}
+		for _, nexthop := range entry.GetNexthops() {
+			if err := hwroute.ValidateDevice(nexthop.GetDevice()); err != nil {
+				return nil, status.Error(codes.InvalidArgument, err.Error())
+			}
 		}
 	}
 

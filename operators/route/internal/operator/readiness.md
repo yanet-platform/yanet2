@@ -1,6 +1,6 @@
 # Route operator readiness
 
-The route operator exposes four readiness dimensions, each as its own scope:
+The route operator exposes readiness dimensions as separate scopes:
 FIB programming per gateway, kernel neighbour resolution, the RIB content, and
 (optionally) the BIRD FeedRIB transport session.
 
@@ -43,8 +43,53 @@ Driven by the netlink neighbour monitor. When the monitor is enabled
 - Resync after an error episode: `STATE_READY`.
 - Refresh error: `STATE_DEGRADED`, reason `RESYNC`.
 
-When the monitor is disabled (`netlink_monitor.disabled: true`), the scope is
-latched to `STATE_READY` once at construction and never updated again.
+When the monitor is disabled and `readiness.remote_neighbour_table` is empty,
+the scope is latched to `STATE_READY` once at construction.
+
+Remote input mode requires disabled local monitoring and explicit
+`gateway_devices` for every gateway. Set `readiness.remote_neighbour_table` to
+the sidecar's single table and `readiness.remote_neighbour_max_age` to a positive
+budget greater than the sidecar publication cadence, including transport/retry
+time. The default budget is **10 minutes**, allowing the default **5-minute**
+periodic refresh plus transport/retry time. The sidecar publishes its first full
+dump immediately, wakes on new-neighbour events, and defers deletion-only changes
+to the periodic refresh. A quiet network must not become stale before that
+refresh can arrive. The receiver cannot infer the cadence of another process;
+deployment configuration must enforce this relationship when overriding defaults.
+
+- Cold start: `STATE_NOT_READY`, reason `SYNCING`.
+- A complete expected-table replacement: `STATE_READY`, including unchanged and
+  empty snapshots. Entry modification timestamps do not determine freshness.
+- No complete replacement within the budget: `STATE_NOT_READY`, reason `STALE`.
+- Invalid device, duplicate canonical IP, oversized request or cancellation
+  observed before commit: last-good data and input age are preserved. A new valid
+  replacement recovers readiness.
+
+Required missing/stale input prevents new FIB snapshots; the dataplane retains
+its last applied table. Valid empty input may withdraw unresolved routes.
+Each new FIB write, including retries, checks the captured remote generation
+and its freshness. Superseded or expired snapshots cannot start new writes;
+already in-flight RPCs may complete. Incremental additions and removals are
+rejected for the configured remote table.
+An RPC acknowledgement confirms receiver commit, independently of FIB apply.
+Each unary `ReplaceNeighbours` contains the complete table, with a technical cap
+of 15,252 entries and 4 MiB of protobuf before compression. A client timeout or
+lost response after commit does not undo replacement. Unchanged snapshots,
+including repeated empty snapshots, refresh input age without changing semantic
+generation. A semantic replacement (including clearing a nonempty table) or
+removal invalidates older captured generations.
+
+Neighbour identity and source-priority merge are by `IP.Unmap()`. Duplicate IPs
+within a remote snapshot, even on different devices, reject the whole snapshot.
+Device payload still supplies gateway filtering, not a compound key or publisher
+scope. Existing BIRD/FeedRIB/RIB `Route.ifindex` transport remains unchanged;
+scoped neighbour resolution is separate work in
+[issue #2612](https://github.com/yanet-platform/yanet2/issues/2612).
+
+Unary `List` independently limits each named or merged response to 4 MiB including
+metadata. Valid per-source publications do not guarantee that a merged view fits;
+an oversized read fails with `ResourceExhausted`, without partial data. Listing
+success or failure does not refresh remote input or acknowledge dataplane apply.
 
 ### `rib`
 
@@ -95,7 +140,7 @@ reconciler stops.
 ## `observed_at` freshness
 
 `observed_at` reflects how recently each scope's source was re-evaluated, not
-whether the evaluation succeeded — read `state` for outcome. The four scope
+whether the evaluation succeeded — read `state` for outcome. The scope
 families refresh on different clocks.
 
 Freshness checks must poll `Ready`, not `Watch`. `Watch` emits only on
@@ -107,7 +152,7 @@ without changing state.
 
 ### `fib:<gateway>:<module>`
 
-Advances on every reconcile apply attempt via `Observe`, regardless of success.
+Advances on every gateway apply attempt via `Observe`, regardless of success.
 
 Config parameters (under `reconcile:`):
 
@@ -147,7 +192,7 @@ A quiet network therefore shows up to ~5min of age. The scope publishes that
 5min periodic interval; a multiplier of 2-3 gives a 10-15min threshold. An
 active network stays near-real-time.
 
-When the monitor is disabled, the scope is set READY once and never refreshed,
+When the monitor is disabled with no remote table, the scope is set READY once and never refreshed,
 so a staleness check is **not applicable** (treat READY as fresh regardless of
 `observed_at`, as for the gateway scope).
 

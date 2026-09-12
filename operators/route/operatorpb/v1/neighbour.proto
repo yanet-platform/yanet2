@@ -9,7 +9,8 @@ import "common/commonpb/v1/macaddr.proto";
 
 // NeighbourService is the operator-owned neighbour table surface.
 service NeighbourService {
-  // List returns neighbors either merged view or from a specific table.
+  // List returns one complete immutable merged or named-table view up to 4 MiB.
+  // Larger responses fail with ResourceExhausted, without partial results.
   rpc List(ListNeighboursRequest) returns (ListNeighboursResponse);
 
   // CreateTable creates a new user-defined neighbour table.
@@ -26,6 +27,15 @@ service NeighbourService {
   rpc UpdateNeighbours(UpdateNeighboursRequest) returns (UpdateNeighboursResponse);
   // RemoveNeighbours deletes one or more neighbour entries.
   rpc RemoveNeighbours(RemoveNeighboursRequest) returns (RemoveNeighboursResponse);
+
+  // ReplaceNeighbours atomically creates or replaces a user-defined table.
+  //
+  // The entire request is validated before entries and priority commit together.
+  // Cancellation observed before commit leaves the table unchanged; a lost
+  // response does not undo a commit. Built-in tables cannot be replaced.
+  // Equivalent replacements preserve entry timestamps and refresh input age;
+  // recovery from stale input wakes reconciliation. ACK does not mean FIB apply.
+  rpc ReplaceNeighbours(ReplaceNeighboursRequest) returns (ReplaceNeighboursResponse);
 }
 
 // ListNeighboursRequest is the request to list neighbors.
@@ -109,3 +119,24 @@ message RemoveNeighboursRequest {
 }
 
 message RemoveNeighboursResponse {}
+
+// ReplaceNeighboursRequest carries one bounded complete snapshot.
+//
+// Empty entries explicitly clear only the named table. The technical caps are
+// 15,252 entries and 4 MiB of protobuf data before compression, including metadata
+// and unknown fields. Resource exhaustion never commits a partial snapshot.
+message ReplaceNeighboursRequest {
+  // Table is 1..128 ASCII letters, digits, dots, underscores or hyphens, starting
+  // with a letter or digit. It has no implicit default or built-in namespace.
+  string table = 1;
+  uint32 default_priority = 2;
+  // Entries have unique canonical IPs, even when their devices differ.
+  // IPv4-mapped IPv6 addresses are normalized to IPv4. IP addresses must
+  // contain 4 or 16 bytes and both MAC addresses must be present EUI-48 values.
+  // Device is at most 79 bytes. Source and updated_at must be unset; the server
+  // owns them and normalizes state to permanent, like unary updates. Zero entry
+  // priority inherits the table default.
+  repeated NeighbourEntry entries = 3;
+}
+
+message ReplaceNeighboursResponse {}

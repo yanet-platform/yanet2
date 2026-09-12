@@ -12,7 +12,24 @@ import (
 	"cmp"
 	"fmt"
 	"net"
+	"strings"
 )
+
+// DeviceNameMaxLen reserves the terminator in the dataplane's 80-byte name.
+const DeviceNameMaxLen = 79
+
+// ValidateDevice preserves logical device identity across the C ABI boundary.
+//
+// An empty name retains the legacy unscoped forwarding contract.
+func ValidateDevice(device string) error {
+	if len(device) > DeviceNameMaxLen {
+		return fmt.Errorf("device name exceeds %d bytes", DeviceNameMaxLen)
+	}
+	if strings.ContainsRune(device, '\x00') {
+		return fmt.Errorf("device name contains a NUL byte")
+	}
+	return nil
+}
 
 // HardwareRoute represents a route in the Layer 2 (L2) networking stack.
 //
@@ -29,6 +46,15 @@ type HardwareRoute struct {
 	DestinationMAC [6]byte
 	// Device is the interface name.
 	Device string
+}
+
+// ParseMAC converts a nonzero Ethernet address into forwarding identity.
+func ParseMAC(address net.HardwareAddr) ([6]byte, bool) {
+	if len(address) != 6 {
+		return [6]byte{}, false
+	}
+	value := [6]byte(address)
+	return value, value != [6]byte{}
 }
 
 // String renders the route as "<source MAC> -> <destination MAC>"; the

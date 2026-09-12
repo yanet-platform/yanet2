@@ -1,4 +1,4 @@
-package operator
+package operator_test
 
 import (
 	"net"
@@ -10,6 +10,7 @@ import (
 	"github.com/yanet-platform/yanet2/common/go/maptrie"
 	"github.com/yanet-platform/yanet2/common/go/rcucache"
 	"github.com/yanet-platform/yanet2/operators/route/internal/discovery/neigh"
+	"github.com/yanet-platform/yanet2/operators/route/internal/operator"
 	"github.com/yanet-platform/yanet2/operators/route/internal/rib"
 )
 
@@ -53,12 +54,16 @@ func Test_BuildFIB_BestPerSourceFiltersWorse(t *testing.T) {
 		},
 	}
 
-	fib, stats := BuildFIB(ribDump, cache.View())
+	fib, stats := operator.BuildFIB(ribDump, cache.View())
 
 	require.Equal(t, 2, stats.TotalRoutes)
 	require.Equal(t, 1, stats.FilteredRoutes)
 	require.Len(t, fib.Entries, 1)
-	require.Len(t, fib.Entries[0].Nexthops, 1)
+	require.Equal(t, []neigh.HardwareRoute{{
+		SourceMAC:      mustParseMAC(t, "0a:00:00:00:00:01"),
+		DestinationMAC: mustParseMAC(t, "0a:00:00:00:10:00"),
+		Device:         "eth1",
+	}}, fib.Entries[0].Nexthops)
 }
 
 // Test_BuildFIB_EqualCostECMPPreserved verifies that equal-cost routes from
@@ -90,7 +95,7 @@ func Test_BuildFIB_EqualCostECMPPreserved(t *testing.T) {
 		},
 	}
 
-	fib, stats := BuildFIB(ribDump, cache.View())
+	fib, stats := operator.BuildFIB(ribDump, cache.View())
 
 	require.Equal(t, 2, stats.TotalRoutes)
 	require.Equal(t, 0, stats.FilteredRoutes)
@@ -128,7 +133,7 @@ func Test_BuildFIB_StaticAndBirdBothInFIB(t *testing.T) {
 		},
 	}
 
-	fib, stats := BuildFIB(ribDump, cache.View())
+	fib, stats := operator.BuildFIB(ribDump, cache.View())
 
 	require.Equal(t, 2, stats.TotalRoutes)
 	require.Equal(t, 0, stats.FilteredRoutes, "static route is its own source's best — not filtered")
@@ -194,8 +199,7 @@ func Test_BuildFIB_PerGatewayDeviceFilter(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			view := neigh.FilterByDevices(cache.View(), tc.devices)
-			fib, _ := BuildFIB(ribDump, view)
+			fib, _ := operator.BuildFIB(ribDump, neigh.FilterByDevices(cache.View(), tc.devices))
 			require.Len(t, fib.Entries, 1)
 			require.Len(t, fib.Entries[0].Nexthops, 1)
 			require.Equal(t, tc.wantDevice, fib.Entries[0].Nexthops[0].Device)
@@ -222,8 +226,7 @@ func Test_BuildFIB_DeviceFilterStarvesPrefix(t *testing.T) {
 		},
 	}
 
-	view := neigh.FilterByDevices(cache.View(), []string{"eth2"})
-	fib, stats := BuildFIB(ribDump, view)
+	fib, stats := operator.BuildFIB(ribDump, neigh.FilterByDevices(cache.View(), []string{"eth2"}))
 	require.Empty(t, fib.Entries)
 	require.Equal(t, 1, stats.NeighbourNotFound)
 }
@@ -259,7 +262,7 @@ func Test_BuildFIB_FallsBackToLiveRouteWhenBestUnresolvable(t *testing.T) {
 		},
 	}
 
-	fib, stats := BuildFIB(ribDump, cache.View())
+	fib, stats := operator.BuildFIB(ribDump, cache.View())
 
 	require.Len(t, fib.Entries, 1)
 	require.Len(t, fib.Entries[0].Nexthops, 1)
@@ -306,8 +309,7 @@ func Test_BuildFIB_MultiSourceWithDeviceFilter(t *testing.T) {
 		},
 	}
 
-	view := neigh.FilterByDevices(cache.View(), []string{"eth1"})
-	fib, stats := BuildFIB(ribDump, view)
+	fib, stats := operator.BuildFIB(ribDump, neigh.FilterByDevices(cache.View(), []string{"eth1"}))
 
 	require.Len(t, fib.Entries, 1)
 	require.Len(t, fib.Entries[0].Nexthops, 2, "bird fallback and static, both on eth1")
@@ -362,13 +364,12 @@ func Test_BuildFIB_MultiPrefix(t *testing.T) {
 		},
 	}
 
-	view := neigh.FilterByDevices(cache.View(), []string{"eth1"})
-	fib, stats := BuildFIB(ribDump, view)
+	fib, stats := operator.BuildFIB(ribDump, neigh.FilterByDevices(cache.View(), []string{"eth1"}))
 
 	require.Len(t, fib.Entries, 2)
 	require.Equal(t, 1, stats.NeighbourNotFound, "only the eth2 route of the wider prefix is dropped")
 
-	byPrefix := map[string]FIBEntry{}
+	byPrefix := map[string]operator.FIBEntry{}
 	for _, entry := range fib.Entries {
 		byPrefix[entry.Prefix.String()] = entry
 	}
@@ -413,7 +414,7 @@ func Test_BuildFIB_DedupsNexthops(t *testing.T) {
 		},
 	}
 
-	fib, stats := BuildFIB(ribDump, cache.View())
+	fib, stats := operator.BuildFIB(ribDump, cache.View())
 
 	require.Len(t, fib.Entries, 1)
 	require.Equal(t, 1, stats.PrefixesAdded)
@@ -440,4 +441,29 @@ func Test_BuildFIB_DedupsNexthops(t *testing.T) {
 		},
 	}
 	require.Equal(t, expected, fib.Entries[0].Nexthops)
+}
+
+// Test_BuildFIB_IPLookup verifies that route interface metadata does not change
+// IP resolution and gateway filtering applies after source-priority merging.
+func Test_BuildFIB_IPLookup(t *testing.T) {
+	table := neigh.NewNeighTable()
+	address := netip.MustParseAddr("192.0.2.1")
+	entry := neigh.NeighbourEntry{NextHop: address, HardwareRoute: neigh.HardwareRoute{Device: "logical0"}}
+	_, err := table.ReplaceSource(t.Context(), "remote", 100, map[netip.Addr]neigh.NeighbourEntry{address: entry})
+	require.NoError(t, err)
+	_, err = table.CreateSource("static", 10, true)
+	require.NoError(t, err)
+	entry.HardwareRoute.Device = "logical1"
+	require.NoError(t, table.Add("static", []neigh.NeighbourEntry{entry}))
+	for _, index := range []uint32{0, 10, 999} {
+		dump := maptrie.NewMapTrie[netip.Prefix, netip.Addr, rib.RoutesList](1)
+		dump[24][netip.MustParsePrefix("203.0.113.0/24")] = rib.RoutesList{Routes: []rib.Route{
+			{NextHop: netip.MustParseAddr("::ffff:192.0.2.1"), Ifindex: index},
+		}}
+		fib, _ := operator.BuildFIB(dump, table.View())
+		require.Len(t, fib.Entries, 1)
+		require.Equal(t, []neigh.HardwareRoute{entry.HardwareRoute}, fib.Entries[0].Nexthops)
+		fib, _ = operator.BuildFIB(dump, neigh.FilterByDevices(table.View(), []string{"logical0"}))
+		require.Empty(t, fib.Entries)
+	}
 }

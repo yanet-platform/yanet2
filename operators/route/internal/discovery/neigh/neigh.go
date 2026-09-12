@@ -15,6 +15,7 @@ import (
 	"golang.org/x/sys/unix"
 
 	"github.com/yanet-platform/yanet2/common/go/rcucache"
+	"github.com/yanet-platform/yanet2/modules/route/controlplane/hwroute"
 )
 
 // NexthopCache is a cache of nexthops that is populated via neighbour
@@ -358,28 +359,6 @@ func (m *NeighMonitor) notifyResynced() {
 	m.onResyncedFn()
 }
 
-// isUsableSourceMAC reports whether a link's hardware address can serve as
-// the source MAC of a forwarded frame.
-//
-// An all-zero source MAC is not learnable and is dropped by many switches,
-// so it must be rejected rather than emitted. Links without an Ethernet
-// address of their own — tunnels and other point-to-point devices — report
-// a nil or short HardwareAddr, and the loopback device reports six genuine
-// zero bytes. Both fail this check. A true result also guarantees exactly
-// six bytes, which the caller relies on: its [6]byte(hardwareAddr) array
-// conversion panics on any other length.
-func isUsableSourceMAC(hardwareAddr net.HardwareAddr) bool {
-	if len(hardwareAddr) != 6 {
-		return false
-	}
-	for _, octet := range hardwareAddr {
-		if octet != 0 {
-			return true
-		}
-	}
-	return false
-}
-
 func (m *NeighMonitor) updateNeighbours() error {
 	neighs, err := m.kernelTable.NeighList()
 	if err != nil {
@@ -442,7 +421,8 @@ func (m *NeighMonitor) updateNeighbours() error {
 			)
 			continue
 		}
-		if !isUsableSourceMAC(hardwareAddr) {
+		sourceMAC, usable := hwroute.ParseMAC(hardwareAddr)
+		if !usable {
 			m.log.Warn("skipping entry with unusable source MAC address",
 				zap.String("link_name", linkIndexToName[neigh.LinkIndex]),
 				zap.Int("link_index", neigh.LinkIndex),
@@ -459,9 +439,9 @@ func (m *NeighMonitor) updateNeighbours() error {
 
 		// Create the entry with resolved hardware addresses.
 		entry := NeighbourEntry{
-			NextHop: nexthopAddr,
+			NextHop: nexthopAddr.Unmap(),
 			HardwareRoute: HardwareRoute{
-				SourceMAC:      [6]byte(hardwareAddr),
+				SourceMAC:      sourceMAC,
 				DestinationMAC: [6]byte(neigh.HardwareAddr),
 				Device:         device,
 			},
@@ -469,7 +449,7 @@ func (m *NeighMonitor) updateNeighbours() error {
 			State:     NeighbourState(neigh.State),
 		}
 
-		if e, ok := view.Lookup(nexthopAddr); ok {
+		if e, ok := view.Lookup(entry.NextHop); ok {
 			if e.HardwareRoute == entry.HardwareRoute && e.State == entry.State {
 				entry.UpdatedAt = e.UpdatedAt
 			}
@@ -483,7 +463,7 @@ func (m *NeighMonitor) updateNeighbours() error {
 			zap.Stringer("state", entry.State),
 		)
 
-		nexthopCache[nexthopAddr] = entry
+		nexthopCache[entry.NextHop] = entry
 	}
 
 	// Swap the source table and trigger a re-merge of the merged cache.

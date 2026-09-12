@@ -50,6 +50,11 @@ type Operator struct {
 
 // NewOperator constructs an Operator from the supplied configuration.
 func NewOperator(cfg *Config, options ...Option) (*Operator, error) {
+	if cfg.Readiness.RemoteNeighbourTable != "" {
+		if err := cfg.Validate(); err != nil {
+			return nil, err
+		}
+	}
 	opts := newOptions()
 	for _, o := range options {
 		o(opts)
@@ -79,9 +84,9 @@ func NewOperator(cfg *Config, options ...Option) (*Operator, error) {
 	// Propagate the neighbours scope based on netlink monitor config, and
 	// construct the monitor itself only when it is enabled.
 	var neighMonitor *neigh.NeighMonitor
-	if cfg.NetlinkMonitor.Disabled {
+	if cfg.NetlinkMonitor.Disabled && cfg.Readiness.RemoteNeighbourTable == "" {
 		tracker.Set("neighbours", readinesspb.State_STATE_READY)
-	} else {
+	} else if !cfg.NetlinkMonitor.Disabled {
 		// Seed the neighbours scope at NOT_READY(SYNCING) before the monitor starts.
 		tracker.SetWithReason("neighbours",
 			readinesspb.State_STATE_NOT_READY,
@@ -117,7 +122,11 @@ func NewOperator(cfg *Config, options ...Option) (*Operator, error) {
 		neighMonitor = monitor
 	}
 
-	source := NewRouteSource(neighTable, routeRIBStore)
+	var remoteInput *NeighbourReadiness
+	if cfg.Readiness.RemoteNeighbourTable != "" {
+		remoteInput = NewNeighbourReadiness(cfg.Readiness.RemoteNeighbourTable, cfg.Readiness.RemoteNeighbourMaxAge, tracker)
+	}
+	source := NewRouteSource(neighTable, routeRIBStore, WithRouteSourceRemoteInput(remoteInput))
 	wake := source.WakeFunc()
 	ribHelper := newRIBReadiness(cfg.Readiness, routeRIBStore, moduleName, tracker, withRIBReadinessLog(log))
 
@@ -142,10 +151,18 @@ func NewOperator(cfg *Config, options ...Option) (*Operator, error) {
 		}),
 	)
 
-	neighbourSvc := NewNeighbourService(
-		neighTable,
-		WithNeighbourServiceOnChanged(wake),
-	)
+	neighbourOptions := []NeighbourServiceOption{WithNeighbourServiceOnChanged(wake)}
+	if remoteInput != nil {
+		devices := []string{}
+		for _, gateway := range cfg.Gateways {
+			devices = append(devices, cfg.GatewayDevices[gateway.Name]...)
+		}
+		neighbourOptions = append(neighbourOptions,
+			WithNeighbourServiceRemoteSource(cfg.Readiness.RemoteNeighbourTable, devices),
+			WithNeighbourServiceReadiness(remoteInput),
+		)
+	}
+	neighbourSvc := NewNeighbourService(neighTable, neighbourOptions...)
 	metricsSvc := NewMetricsService(
 		WithMetricsServiceCollector(metrics),
 	)
@@ -155,13 +172,16 @@ func NewOperator(cfg *Config, options ...Option) (*Operator, error) {
 	for _, gw := range cfg.Gateways {
 		gatewayMetrics := metrics.Gateway(gw.Name)
 
-		actuator, err := NewGatewayActuator(
-			gw,
+		actuatorOptions := []GatewayActuatorOption{
 			WithGatewayActuatorLog(log),
 			WithGatewayActuatorFunction(cfg.Function),
 			WithGatewayActuatorDevices(cfg.GatewayDevices[gw.Name]),
 			WithGatewayActuatorOnFIBBuilt(gatewayMetrics.OnFIBBuilt),
-		)
+		}
+		if remoteInput != nil {
+			actuatorOptions = append(actuatorOptions, WithGatewayActuatorRemoteInput(remoteInput))
+		}
+		actuator, err := NewGatewayActuator(gw, actuatorOptions...)
 		if err != nil {
 			for _, a := range actuators {
 				_ = a.Close()
@@ -216,6 +236,9 @@ func NewOperator(cfg *Config, options ...Option) (*Operator, error) {
 	}
 	if !cfg.NetlinkMonitor.Disabled {
 		workers = append(workers, neighMonitor.Run)
+	}
+	if remoteInput != nil {
+		workers = append(workers, remoteInput.Run)
 	}
 
 	app := operator.NewOperator(

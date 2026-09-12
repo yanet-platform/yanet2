@@ -96,7 +96,7 @@ func TestNeighMonitorRejectsUnusableSourceMAC(t *testing.T) {
 				neigh.WithLog(zap.NewNop()),
 			)
 
-			entry, ok := table.View().Lookup(nexthop)
+			entry, ok := table.View().Lookup(nexthop.Unmap())
 			require.Equal(t, tt.wantPresent, ok)
 			if tt.wantPresent {
 				require.Equal(t, [6]byte(tt.linkHardwareAddr), entry.HardwareRoute.SourceMAC)
@@ -164,7 +164,7 @@ func TestNeighMonitorClassifiesMissingVsMalformedDestinationMAC(t *testing.T) {
 				neigh.WithLog(zap.New(core)),
 			)
 
-			_, ok := table.View().Lookup(nexthop)
+			_, ok := table.View().Lookup(nexthop.Unmap())
 			require.False(t, ok, "entry with a bad destination MAC must never enter the cache")
 
 			gotWarn := false

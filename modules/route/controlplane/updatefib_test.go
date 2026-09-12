@@ -2,6 +2,7 @@ package route_test
 
 import (
 	"net/netip"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -9,9 +10,53 @@ import (
 	"google.golang.org/grpc/status"
 
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
+	"github.com/yanet-platform/yanet2/modules/route/bindings/go/croute"
 	route "github.com/yanet-platform/yanet2/modules/route/controlplane"
+	"github.com/yanet-platform/yanet2/modules/route/controlplane/hwroute"
 	routepb "github.com/yanet-platform/yanet2/modules/route/controlplane/routepb/v1"
 )
+
+// Test_UpdateFIB_DeviceNameBoundary verifies that the C ABI and RPC agree on
+// byte length and reject identity truncation before replacing last-good state.
+func Test_UpdateFIB_DeviceNameBoundary(t *testing.T) {
+	require.Equal(t, croute.DeviceNameMaxLen, hwroute.DeviceNameMaxLen)
+	for _, test := range []struct {
+		name   string
+		device string
+		valid  bool
+	}{
+		{name: "79 ASCII bytes", device: strings.Repeat("d", 79), valid: true},
+		{name: "80 ASCII bytes", device: strings.Repeat("d", 80)},
+		{name: "79 UTF-8 bytes", device: strings.Repeat("é", 39) + "a", valid: true},
+		{name: "80 UTF-8 bytes", device: strings.Repeat("é", 40)},
+		{name: "embedded NUL", device: "logical0\x00other"},
+		{name: "logical name with whitespace", device: "logical \t\n\r\v\f1", valid: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			backend := newFakeBackend()
+			service := route.NewRouteService(backend)
+			baseline := testFIBEntry(t, "192.0.2.0/24", testNexthop("logical0", ""))
+			_, err := service.UpdateFIB(t.Context(), &routepb.UpdateFIBRequest{ModuleName: "cfg", Entries: []*routepb.FIBEntry{baseline}})
+			require.NoError(t, err)
+			entry := testFIBEntry(t, "192.0.2.0/24", testNexthop(test.device, ""))
+			_, err = service.UpdateFIB(t.Context(), &routepb.UpdateFIBRequest{ModuleName: "cfg", Entries: []*routepb.FIBEntry{entry}})
+			if test.valid {
+				require.NoError(t, err)
+			} else {
+				require.Equal(t, codes.InvalidArgument, status.Code(err))
+			}
+			want := "logical0"
+			count := 1
+			if test.valid {
+				want = test.device
+				count = 2
+			}
+			calls := backend.UpdateCalls()
+			require.Len(t, calls, count)
+			require.Equal(t, want, calls[count-1][0].GetNexthops()[0].GetDevice())
+		})
+	}
+}
 
 // mustRange builds a validated IPRange from two address strings.
 func mustRange(t *testing.T, start, end string) *commonpb.IPRange {

@@ -219,8 +219,6 @@ testpkg:modules/pdump/controlplane/ring_test.go:pdump:1  # white-box unit test o
 testpkg:modules/route-mpls/controlplane/service_test.go:route_mpls:1  # legacy: migrate to the external test package
 testpkg:operators/bird-adapter/internal/bird/layout_test.go:bird:1  # white-box guard on unsafe struct layout; an external test cannot observe Sizeof of the private union types
 testpkg:operators/pipeline/internal/operator/stage_source_test.go:operator:1  # legacy: migrate to the external test package
-testpkg:operators/route/internal/discovery/neigh/table_test.go:neigh:1  # legacy: migrate to the external test package
-testpkg:operators/route/internal/operator/fib_build_test.go:operator:1  # legacy: migrate to the external test package
 testpkg:operators/route/internal/operator/metrics_test.go:operator:1  # legacy: migrate to the external test package
 testpkg:operators/route/internal/operator/readiness_test.go:operator:1  # legacy: migrate to the external test package
 testpkg:operators/route/internal/operator/route_source_test.go:operator:1  # legacy: migrate to the external test package

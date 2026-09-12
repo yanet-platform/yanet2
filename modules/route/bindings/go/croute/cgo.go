@@ -5,6 +5,7 @@ package croute
 //
 //#include "api/agent.h"
 //#include "lib/counters/counters.h"
+//#include "lib/controlplane/config/defines.h"
 //#include "modules/route/api/controlplane.h"
 import "C"
 
@@ -21,6 +22,9 @@ import (
 // CounterNameMaxLen is the longest counter name the shared-memory counter
 // registry accepts.
 const CounterNameMaxLen = C.COUNTER_NAME_LEN - 1
+
+// DeviceNameMaxLen excludes the device name's terminating NUL byte.
+const DeviceNameMaxLen = C.CP_DEVICE_NAME_LEN - 1
 
 // ModuleConfig is an opaque handle to the route module configuration in shared
 // memory.

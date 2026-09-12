@@ -2,6 +2,7 @@ package operator
 
 import (
 	"errors"
+	"fmt"
 	"time"
 
 	"go.uber.org/zap/zapcore"
@@ -9,6 +10,9 @@ import (
 	"github.com/yanet-platform/yanet2/common/go/logging"
 	"github.com/yanet-platform/yanet2/common/go/operator"
 	"github.com/yanet-platform/yanet2/common/go/xcfg"
+	"github.com/yanet-platform/yanet2/modules/route/controlplane/hwroute"
+	"github.com/yanet-platform/yanet2/operators/route/internal/discovery/neigh"
+	operatorpb "github.com/yanet-platform/yanet2/operators/route/operatorpb/v1"
 )
 
 const (
@@ -58,6 +62,10 @@ type Config struct {
 
 // ReadinessConfig controls the operator's readiness reporting.
 type ReadinessConfig struct {
+	// RemoteNeighbourTable selects a required publisher namespace; empty retains local mode.
+	RemoteNeighbourTable string `yaml:"remote_neighbour_table"`
+	// RemoteNeighbourMaxAge must exceed the sidecar's publication cadence.
+	RemoteNeighbourMaxAge time.Duration `yaml:"remote_neighbour_max_age"`
 	// ExpectBird gates the rib scope on BIRD connectivity.
 	//
 	// When false (static-only deployments with no BIRD adapter running), the rib
@@ -103,6 +111,41 @@ func (m *Config) Validate() error {
 	if len(m.Gateways) == 0 {
 		return errors.New("at least one gateway must be configured")
 	}
+	for _, entry := range m.Static.Neighbours {
+		if err := hwroute.ValidateDevice(entry.Device); err != nil {
+			return fmt.Errorf("static neighbour device: %w", err)
+		}
+	}
+	if table := m.Readiness.RemoteNeighbourTable; table != "" {
+		if !m.NetlinkMonitor.Disabled {
+			return errors.New("remote neighbour input requires disabled local netlink monitoring")
+		}
+		if err := neigh.ValidateSourceName(table); err != nil {
+			return err
+		}
+		if table == "static" {
+			return errors.New("remote neighbour input cannot use the built-in static table")
+		}
+		if m.Readiness.RemoteNeighbourMaxAge <= 0 {
+			return errors.New("remote_neighbour_max_age must be positive and exceed the publication cadence")
+		}
+		owners := map[string]string{}
+		for _, gateway := range m.Gateways {
+			devices := m.GatewayDevices[gateway.Name]
+			if len(devices) == 0 {
+				return fmt.Errorf("gateway %q requires explicit devices for remote neighbour input", gateway.Name)
+			}
+			for _, device := range devices {
+				if err := operatorpb.ValidateNeighbourDevice(device); err != nil {
+					return err
+				}
+				if previous, exists := owners[device]; exists {
+					return fmt.Errorf("device %q has duplicate ownership by %q and %q", device, previous, gateway.Name)
+				}
+				owners[device] = gateway.Name
+			}
+		}
+	}
 
 	return nil
 }
@@ -138,11 +181,12 @@ func DefaultConfig() *Config {
 			DefaultPriority: 100,
 		},
 		Readiness: ReadinessConfig{
-			ExpectBird:      true,
-			RateThreshold:   defaultRateThreshold,
-			StabilityWindow: defaultStabilityWindow,
-			SampleInterval:  defaultSampleInterval,
-			ReconnectGrace:  defaultReconnectGrace,
+			RemoteNeighbourMaxAge: 10 * time.Minute,
+			ExpectBird:            true,
+			RateThreshold:         defaultRateThreshold,
+			StabilityWindow:       defaultStabilityWindow,
+			SampleInterval:        defaultSampleInterval,
+			ReconnectGrace:        defaultReconnectGrace,
 		},
 	}
 }

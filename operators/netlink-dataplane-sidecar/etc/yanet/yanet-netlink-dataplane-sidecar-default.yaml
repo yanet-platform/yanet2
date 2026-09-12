@@ -1,0 +1,45 @@
+# YANET netlink dataplane sidecar configuration
+---
+logging:
+  level: info
+
+# Alternate transport paths to the same route operator.
+gateways:
+  - name: numa0
+    endpoint: "[::1]:8080"
+    # TLS is optional. When present, an empty block uses system roots.
+    # tls:
+    #   ca_file: /etc/yanet2/tls/ca.pem
+    #   cert_file: /etc/yanet2/tls/sidecar.pem
+    #   key_file: /etc/yanet2/tls/sidecar.key
+    #   server_name: gateway.numa0
+
+# The operational metrics gRPC service. Port zero selects a free port; set
+# advertise_endpoint when gateways cannot reach the bound loopback address.
+server:
+  endpoint: "[::1]:0"
+  advertise_endpoint: ""
+
+register:
+  interval: 30s
+
+# Refresh neighbours initially, on RTM_NEWNEIGH, and periodically. Deletion
+# events do not trigger a refresh, avoiding immediate withdrawal on flaps.
+# Independent initial interface setup retries use the same backoff limits.
+reconcile:
+  interval: 5m
+  initial_backoff: 500ms
+  max_backoff: 30s
+
+# Read once at startup. A changed configuration requires a process restart.
+source: netplan
+netplan_path: /etc/netplan/00-interfaces.yaml
+
+# One stable source per sidecar namespace, shared by every transport attempt.
+neighbour_table: netlink-dataplane-default
+neighbour_priority: 100
+neighbour_publish_timeout: 5s
+
+# Maps managed Pod interface names to logical dataplane device names.
+# An omitted entry keeps the managed interface name.
+link_map: {}

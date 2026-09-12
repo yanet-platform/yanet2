@@ -5,12 +5,14 @@ on:
     branches: [main]
     paths:
       - "**/*.go"
+      - "operators/netlink-dataplane-sidecar/**"
       - ".github/workflows/go-race.yml"
   pull_request:
     # A stacked pull request has a non-main base, so a main-only filter would skip it.
     branches: ["**"]
     paths:
       - "**/*.go"
+      - "operators/netlink-dataplane-sidecar/**"
       - ".github/workflows/go-race.yml"
 
 concurrency:
@@ -31,7 +33,7 @@ jobs:
       - uses: ./.github/actions/apt-packages
         timeout-minutes: 10
         with:
-          packages: meson clang cmake python3-pyelftools libnuma-dev libpcap-dev git protobuf-compiler
+          packages: meson clang cmake python3-pyelftools libnuma-dev libpcap-dev git protobuf-compiler iproute2 util-linux kmod
 
       - uses: hendrikmuhs/ccache-action@v1.2.23
         name: ccache
@@ -62,3 +64,13 @@ jobs:
           set -euo pipefail
           packages=$(go list ./... | grep -v '^github.com/yanet-platform/yanet2/tests/functional/main')
           go test -race -count=1 $packages
+
+      - name: Run sidecar kernel integration
+        run: |
+          set -euo pipefail
+          sudo modprobe tun
+          go build -o build/yanet-route-operator-netns ./operators/route/cmd/yanet-route-operator
+          sudo env "PATH=$PATH" "HOME=$HOME" \
+            YANET_NETNS_TESTS=1 \
+            YANET_ROUTE_OPERATOR_BINARY="$PWD/build/yanet-route-operator-netns" \
+            unshare --net bash -c 'ip link set lo up && exec go test -race -count=1 -p 1 ./operators/netlink-dataplane-sidecar/...'

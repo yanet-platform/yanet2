@@ -1,12 +1,34 @@
 package neigh
 
 import (
+	"context"
+	"errors"
 	"fmt"
+	"maps"
 	"net/netip"
 	"sync"
+	"time"
 
 	"github.com/yanet-platform/yanet2/common/go/rcucache"
 )
+
+// ErrBuiltInSource indicates that a complete replacement targeted a built-in.
+var ErrBuiltInSource = errors.New("cannot replace built-in neighbour source")
+
+// ValidateSourceName checks the bounded namespace for complete replacements.
+func ValidateSourceName(name string) error {
+	if len(name) == 0 || len(name) > 128 {
+		return errors.New("table name must contain 1..128 bytes")
+	}
+	for idx, character := range name {
+		alphanumeric := character >= 'a' && character <= 'z' ||
+			character >= 'A' && character <= 'Z' || character >= '0' && character <= '9'
+		if !alphanumeric && (idx == 0 || character != '.' && character != '_' && character != '-') {
+			return errors.New("table name must start with an ASCII letter or digit and contain only letters, digits, '.', '_' or '-'")
+		}
+	}
+	return nil
+}
 
 // NeighSource represents a single source of neighbour entries.
 type NeighSource struct {
@@ -60,14 +82,85 @@ func (m *NeighTable) View() NexthopCacheView {
 // SourceView returns a lock-free snapshot of a specific source table.
 func (m *NeighTable) SourceView(name string) (NexthopCacheView, bool) {
 	m.mu.Lock()
+	defer m.mu.Unlock()
 	src := m.sources[name]
-	m.mu.Unlock()
 
 	if src == nil {
 		return NexthopCacheView{}, false
 	}
 
 	return src.Cache.View(), true
+}
+
+// ReplaceSource commits a complete user source and its priority together.
+//
+// The input is copied, and existing snapshots remain immutable. Equivalent
+// entries keep their timestamps; the result reports only semantic changes.
+// Cancellation observed before the commit leaves entries and metadata intact.
+func (m *NeighTable) ReplaceSource(
+	ctx context.Context,
+	name string,
+	defaultPriority uint32,
+	entries map[netip.Addr]NeighbourEntry,
+) (bool, error) {
+	if err := ValidateSourceName(name); err != nil {
+		return false, err
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+	source := m.sources[name]
+	if source != nil && source.BuiltIn {
+		return false, fmt.Errorf("%w: %q", ErrBuiltInSource, name)
+	}
+	var previous NexthopCacheView
+	changed := source == nil || source.DefaultPriority != defaultPriority
+	if source != nil {
+		previous = source.Cache.View()
+		_, count := previous.Entries()
+		changed = changed || count != len(entries)
+	}
+	next := map[netip.Addr]NeighbourEntry{}
+	now := time.Now()
+	for key, entry := range entries {
+		key = key.Unmap()
+		if _, duplicate := next[key]; duplicate {
+			return false, errors.New("duplicate canonical neighbour key")
+		}
+		entry.NextHop = key
+		entry.Source = ""
+		if entry.Priority == 0 {
+			entry.Priority = defaultPriority
+		}
+		old, found := previous.Lookup(key)
+		if found && old.HardwareRoute == entry.HardwareRoute &&
+			old.Priority == entry.Priority && old.State == entry.State {
+			entry.UpdatedAt = old.UpdatedAt
+		} else {
+			entry.UpdatedAt = now
+			changed = true
+		}
+		next[key] = entry
+	}
+	if !changed {
+		return false, ctx.Err()
+	}
+	replacement := &NeighSource{
+		Name: name, DefaultPriority: defaultPriority,
+		Cache: rcucache.NewCache(next),
+	}
+	sources := maps.Clone(m.sources)
+	sources[name] = replacement
+	merged := mergeSources(sources)
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+	m.sources[name] = replacement
+	m.merged.Swap(merged)
+	return true, nil
 }
 
 // CreateSource creates a new source with the given default priority.
@@ -166,13 +259,16 @@ func (m *NeighTable) Add(table string, entries []NeighbourEntry) error {
 		return fmt.Errorf("source %q not found", table)
 	}
 
+	next := copyView(src.Cache.View())
 	for _, entry := range entries {
+		entry.NextHop = entry.NextHop.Unmap()
 		if entry.Priority == 0 {
 			entry.Priority = src.DefaultPriority
 		}
-		src.Cache.Set(entry.NextHop, entry)
+		next[entry.NextHop] = entry
 	}
 
+	src.Cache.Swap(next)
 	m.rebuildMergedCacheLocked()
 	return nil
 }
@@ -188,10 +284,12 @@ func (m *NeighTable) Remove(table string, addrs []netip.Addr) error {
 		return fmt.Errorf("source %q not found", table)
 	}
 
-	for _, addr := range addrs {
-		src.Cache.Delete(addr)
+	next := copyView(src.Cache.View())
+	for _, address := range addrs {
+		delete(next, address.Unmap())
 	}
 
+	src.Cache.Swap(next)
 	m.rebuildMergedCacheLocked()
 	return nil
 }
@@ -209,14 +307,17 @@ func (m *NeighTable) SwapSource(name string, entries map[netip.Addr]NeighbourEnt
 		return fmt.Errorf("source %q not found", name)
 	}
 
-	for addr, entry := range entries {
+	next := make(map[netip.Addr]NeighbourEntry, len(entries))
+	for key, entry := range entries {
+		key = key.Unmap()
+		entry.NextHop = key
 		if entry.Priority == 0 {
 			entry.Priority = src.DefaultPriority
-			entries[addr] = entry
 		}
+		next[key] = entry
 	}
 
-	src.Cache.Swap(entries)
+	src.Cache.Swap(next)
 	m.rebuildMergedCacheLocked()
 	return nil
 }
@@ -225,20 +326,27 @@ func (m *NeighTable) SwapSource(name string, entries map[netip.Addr]NeighbourEnt
 //
 // Must be called with m.mu held.
 func (m *NeighTable) rebuildMergedCacheLocked() {
+	m.merged.Swap(mergeSources(m.sources))
+}
+
+func mergeSources(sources map[string]*NeighSource) map[netip.Addr]NeighbourEntry {
 	merged := map[netip.Addr]NeighbourEntry{}
-
-	for _, src := range m.sources {
-		view := src.Cache.View()
-		entries, _ := view.Entries()
-
-		for entry := range entries {
-			entry.Source = src.Name
-			existing, ok := merged[entry.NextHop]
-			if !ok || entry.Priority < existing.Priority {
-				merged[entry.NextHop] = entry
+	for _, source := range sources {
+		entries, _ := source.Cache.View().All()
+		for key, entry := range entries {
+			entry.NextHop = key
+			entry.Source = source.Name
+			existing, ok := merged[key]
+			if !ok || entry.Priority < existing.Priority ||
+				(entry.Priority == existing.Priority && entry.Source < existing.Source) {
+				merged[key] = entry
 			}
 		}
 	}
+	return merged
+}
 
-	m.merged.Swap(merged)
+func copyView(view NexthopCacheView) map[netip.Addr]NeighbourEntry {
+	entries, _ := view.All()
+	return maps.Collect(entries)
 }

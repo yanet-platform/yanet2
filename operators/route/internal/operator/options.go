@@ -144,7 +144,10 @@ func WithRouteServiceConfiguredModules(names ...string) RouteServiceOption {
 }
 
 type neighbourServiceOptions struct {
-	OnChanged func()
+	OnChanged     func()
+	Readiness     *NeighbourReadiness
+	RemoteTable   string
+	RemoteDevices []string
 }
 
 func newNeighbourServiceOptions() *neighbourServiceOptions {
@@ -161,6 +164,19 @@ type NeighbourServiceOption func(*neighbourServiceOptions)
 func WithNeighbourServiceOnChanged(fn func()) NeighbourServiceOption {
 	return func(o *neighbourServiceOptions) {
 		o.OnChanged = fn
+	}
+}
+
+// WithNeighbourServiceReadiness couples table commits to input authorization.
+func WithNeighbourServiceReadiness(input *NeighbourReadiness) NeighbourServiceOption {
+	return func(options *neighbourServiceOptions) { options.Readiness = input }
+}
+
+// WithNeighbourServiceRemoteSource restricts the expected source to known devices.
+func WithNeighbourServiceRemoteSource(table string, devices []string) NeighbourServiceOption {
+	return func(options *neighbourServiceOptions) {
+		options.RemoteTable = table
+		options.RemoteDevices = append([]string(nil), devices...)
 	}
 }
 
@@ -204,10 +220,18 @@ func newOperatorServiceOptions() *operatorServiceOptions {
 type OperatorServiceOption func(*operatorServiceOptions)
 
 type gatewayActuatorOptions struct {
-	Function   FunctionConfig
-	Devices    []string
-	OnFIBBuilt func(module string, stats FIBBuildStats)
-	Log        *zap.Logger
+	Function    FunctionConfig
+	Devices     []string
+	RemoteInput neighbourGeneration
+	OnFIBBuilt  func(module string, stats FIBBuildStats)
+	Log         *zap.Logger
+}
+
+// WithGatewayActuatorRemoteInput requires current input before each FIB write.
+func WithGatewayActuatorRemoteInput(input neighbourGeneration) GatewayActuatorOption {
+	return func(options *gatewayActuatorOptions) {
+		options.RemoteInput = input
+	}
 }
 
 func newGatewayActuatorOptions() *gatewayActuatorOptions {
