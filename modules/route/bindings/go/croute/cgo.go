@@ -6,6 +6,7 @@ package croute
 //#include "api/agent.h"
 //#include "lib/counters/counters.h"
 //#include "modules/route/api/controlplane.h"
+//#include "modules/route/api/fib_object.h"
 import "C"
 
 import (
@@ -24,8 +25,12 @@ const CounterNameMaxLen = C.COUNTER_NAME_LEN - 1
 
 // ModuleConfig is an opaque handle to the route module configuration in shared
 // memory.
+//
+// The config links the table object published under its own name and
+// holds the device table the object's nexthops index into.
 type ModuleConfig struct {
-	ptr ffi.ModuleConfig
+	ptr   ffi.ModuleConfig
+	agent *ffi.Agent
 }
 
 // NewModuleConfig allocates a new route module configuration via the C API.
@@ -40,7 +45,8 @@ func NewModuleConfig(agent *ffi.Agent, name string) (*ModuleConfig, error) {
 	}
 
 	return &ModuleConfig{
-		ptr: ffi.NewModuleConfig(unsafe.Pointer(ptr)),
+		ptr:   ffi.NewModuleConfig(unsafe.Pointer(ptr)),
+		agent: agent,
 	}, nil
 }
 
@@ -48,9 +54,12 @@ func (m *ModuleConfig) asRawPtr() *C.struct_cp_module {
 	return (*C.struct_cp_module)(m.ptr.AsRawPtr())
 }
 
-// AsFFIModule returns the underlying common module config handle.
-func (m *ModuleConfig) AsFFIModule() ffi.ModuleConfig {
-	return m.ptr
+// Publish upserts the module config into a new configuration generation.
+//
+// The object it links must already be published, or the generation is
+// refused.
+func (m *ModuleConfig) Publish() error {
+	return m.agent.UpdateModules([]ffi.ModuleConfig{m.ptr})
 }
 
 // Free destroys the module config, or reports ffi.ErrStillReferenced while a
@@ -63,15 +72,69 @@ func (m *ModuleConfig) Free() error {
 	})
 }
 
-// addRoute maps 1:1 to route_module_config_add_route.
-//
-// An empty counter reaches C as a nil pointer: route_module_config_add_route
-// treats a NULL counter_name the same as an empty one, and passing nil here
-// avoids allocating a zero-length CString for the common uncounted case.
-func (m *ModuleConfig) addRoute(dstMAC [6]byte, srcMAC [6]byte, device string, counter string) (int, error) {
+// linkDevice maps 1:1 to route_module_config_link_device.
+func (m *ModuleConfig) linkDevice(device string) (uint32, error) {
 	cName := C.CString(device)
 	defer C.free(unsafe.Pointer(cName))
 
+	var index C.uint32_t
+	var cErr *C.yanet_error
+	if rc := C.route_module_config_link_device(m.asRawPtr(), cName, &index, &cErr); rc != 0 {
+		return 0, fmt.Errorf("failed to link device %q: %w", device, cerrors.FromC(unsafe.Pointer(cErr)))
+	}
+	return uint32(index), nil
+}
+
+// FIBObject is an opaque handle to a forwarding table object in shared
+// memory, owned by the control plane until it is freed.
+type FIBObject struct {
+	ptr   ffi.ObjectConfig
+	agent *ffi.Agent
+}
+
+// NewFIBObject allocates an empty table object via the C API.
+func NewFIBObject(agent *ffi.Agent, name string) (*FIBObject, error) {
+	cName := C.CString(name)
+	defer C.free(unsafe.Pointer(cName))
+
+	var cErr *C.yanet_error
+	ptr := C.route_fib_object_new((*C.struct_agent)(agent.AsRawPtr()), cName, &cErr)
+	if ptr == nil {
+		return nil, fmt.Errorf("failed to initialize fib object: %w", cerrors.FromC(unsafe.Pointer(cErr)))
+	}
+
+	return &FIBObject{
+		ptr:   ffi.NewObjectConfig(unsafe.Pointer(ptr)),
+		agent: agent,
+	}, nil
+}
+
+func (m *FIBObject) asRawPtr() *C.struct_cp_object {
+	return (*C.struct_cp_object)(m.ptr.AsRawPtr())
+}
+
+// Publish upserts the object into a new configuration generation. A
+// module linking it by name follows it from then on.
+func (m *FIBObject) Publish() error {
+	return m.agent.UpdateObjects([]ffi.ObjectConfig{m.ptr})
+}
+
+// Free destroys the object, or reports ffi.ErrStillReferenced while a live
+// generation still holds it. Safe to call multiple times.
+func (m *FIBObject) Free() error {
+	return m.ptr.Free(func(ptr unsafe.Pointer) (int, unsafe.Pointer, error) {
+		var cErr *C.yanet_error
+		rc, errno := C.route_fib_object_free((*C.struct_cp_object)(ptr), &cErr)
+		return int(rc), unsafe.Pointer(cErr), errno
+	})
+}
+
+// addRoute maps 1:1 to route_fib_object_add_route.
+//
+// An empty counter reaches C as a nil pointer: route_fib_object_add_route
+// treats a NULL counter_name the same as an empty one, and passing nil here
+// avoids allocating a zero-length CString for the common uncounted case.
+func (m *FIBObject) addRoute(dstMAC [6]byte, srcMAC [6]byte, deviceIndex uint32, counter string) (int, error) {
 	var cCounter *C.char
 	if counter != "" {
 		cCounter = C.CString(counter)
@@ -79,11 +142,11 @@ func (m *ModuleConfig) addRoute(dstMAC [6]byte, srcMAC [6]byte, device string, c
 	}
 
 	var cErr *C.yanet_error
-	idx := C.route_module_config_add_route(
+	idx := C.route_fib_object_add_route(
 		m.asRawPtr(),
 		*(*C.struct_ether_addr)(unsafe.Pointer(&dstMAC)),
 		*(*C.struct_ether_addr)(unsafe.Pointer(&srcMAC)),
-		cName,
+		C.uint64_t(deviceIndex),
 		cCounter,
 		&cErr,
 	)
@@ -94,78 +157,78 @@ func (m *ModuleConfig) addRoute(dstMAC [6]byte, srcMAC [6]byte, device string, c
 	return int(idx), nil
 }
 
-// addRouteList maps 1:1 to route_module_config_add_route_list.
-func (m *ModuleConfig) addRouteList(indices []uint32) (int, error) {
+// addRouteList maps 1:1 to route_fib_object_add_route_list.
+func (m *FIBObject) addRouteList(indices []uint32) (int, error) {
 	cIndices := make([]C.uint32_t, len(indices))
-	for i, v := range indices {
-		cIndices[i] = C.uint32_t(v)
+	for idx, v := range indices {
+		cIndices[idx] = C.uint32_t(v)
 	}
 
-	idx, err := C.route_module_config_add_route_list(
+	idx, err := C.route_fib_object_add_route_list(
 		m.asRawPtr(),
 		C.size_t(len(indices)),
 		&cIndices[0],
 	)
 	if err != nil {
-		return -1, fmt.Errorf("route_module_config_add_route_list: %w", err)
+		return -1, fmt.Errorf("route_fib_object_add_route_list: %w", err)
 	}
 	if idx < 0 {
-		return -1, fmt.Errorf("route_module_config_add_route_list: unknown error")
+		return -1, fmt.Errorf("route_fib_object_add_route_list: unknown error")
 	}
 
 	return int(idx), nil
 }
 
-// addPrefixV4 maps 1:1 to route_module_config_add_prefix_v4.
-func (m *ModuleConfig) addPrefixV4(from [4]byte, to [4]byte, routeListIndex uint32) error {
-	if rc := C.route_module_config_add_prefix_v4(
+// addPrefixV4 maps 1:1 to route_fib_object_add_prefix_v4.
+func (m *FIBObject) addPrefixV4(from [4]byte, to [4]byte, routeListIndex uint32) error {
+	if rc := C.route_fib_object_add_prefix_v4(
 		m.asRawPtr(),
 		(*C.uint8_t)(&from[0]),
 		(*C.uint8_t)(&to[0]),
 		C.uint32_t(routeListIndex),
 	); rc != 0 {
-		return fmt.Errorf("route_module_config_add_prefix_v4: error code=%d", rc)
+		return fmt.Errorf("route_fib_object_add_prefix_v4: error code=%d", rc)
 	}
 	return nil
 }
 
-// addPrefixV6 maps 1:1 to route_module_config_add_prefix_v6.
-func (m *ModuleConfig) addPrefixV6(from [16]byte, to [16]byte, routeListIndex uint32) error {
-	if rc := C.route_module_config_add_prefix_v6(
+// addPrefixV6 maps 1:1 to route_fib_object_add_prefix_v6.
+func (m *FIBObject) addPrefixV6(from [16]byte, to [16]byte, routeListIndex uint32) error {
+	if rc := C.route_fib_object_add_prefix_v6(
 		m.asRawPtr(),
 		(*C.uint8_t)(&from[0]),
 		(*C.uint8_t)(&to[0]),
 		C.uint32_t(routeListIndex),
 	); rc != 0 {
-		return fmt.Errorf("route_module_config_add_prefix_v6: error code=%d", rc)
+		return fmt.Errorf("route_fib_object_add_prefix_v6: error code=%d", rc)
 	}
 	return nil
 }
 
 // RouteCount returns the number of distinct hardware nexthops held by the
-// config.
+// object.
 //
 // Despite the name, which mirrors the C symbol, this is not a route count
 // in the routing sense: it counts the resolved forwarding targets, each a
 // distinct (dst MAC, src MAC, device) triple, that prefixes point at.
-func (m *ModuleConfig) RouteCount() uint64 {
-	return uint64(C.route_module_config_route_count(m.asRawPtr()))
+func (m *FIBObject) RouteCount() uint64 {
+	return uint64(C.route_fib_object_route_count(m.asRawPtr()))
 }
 
 // FIBRangeCountV4 returns the number of IPv4 FIB ranges.
 //
 // The count is computed inside the C API without materializing any range,
 // which makes it cheap enough for a metrics scrape.
-func (m *ModuleConfig) FIBRangeCountV4() uint64 {
-	return uint64(C.route_module_config_fib_range_count_v4(m.asRawPtr()))
+func (m *FIBObject) FIBRangeCountV4() uint64 {
+	return uint64(C.route_fib_object_range_count_v4(m.asRawPtr()))
 }
 
 // FIBRangeCountV6 returns the number of IPv6 FIB ranges.
 //
 // The count is computed inside the C API without materializing any range,
 // which makes it cheap enough for a metrics scrape.
-func (m *ModuleConfig) FIBRangeCountV6() uint64 {
-	return uint64(C.route_module_config_fib_range_count_v6(m.asRawPtr()))
+func (m *FIBObject) FIBRangeCountV6() uint64 {
+	return uint64(C.route_fib_object_range_count_v6(m.asRawPtr()))
 }
 
 // fibIter wraps the C fib_iter handle.
@@ -173,9 +236,71 @@ type fibIter struct {
 	ptr *C.struct_fib_iter
 }
 
-// newFIBIter maps 1:1 to fib_iter_new.
-func newFIBIter(config *ModuleConfig) (*fibIter, error) {
-	ptr := C.fib_iter_new(config.asRawPtr())
+// Snapshot is a route config as one generation holds it, read in place
+// from shared memory. Unlike the handles above it owns nothing: it is a
+// view of what the dataplane runs, whoever published it.
+//
+// The generation stays pinned until Close, so a concurrent update cannot
+// free the module config or the table object underneath a read.
+type Snapshot struct {
+	ptr *C.struct_route_snapshot
+}
+
+// OpenSnapshot pins the generation publishing the named config.
+//
+// The error wraps ffi.ErrNotFound when no module config of that name is
+// published.
+func OpenSnapshot(agent *ffi.Agent, name string) (*Snapshot, error) {
+	cName := C.CString(name)
+	defer C.free(unsafe.Pointer(cName))
+
+	var cErr *C.yanet_error
+	ptr := C.route_snapshot_open((*C.struct_agent)(agent.AsRawPtr()), cName, &cErr)
+	if ptr == nil {
+		return nil, fmt.Errorf("failed to open a snapshot of %q: %w", name, cerrors.FromC(unsafe.Pointer(cErr)))
+	}
+	return &Snapshot{ptr: ptr}, nil
+}
+
+// Close releases the pin. Safe to call multiple times.
+func (m *Snapshot) Close() {
+	if m.ptr != nil {
+		C.route_snapshot_close(m.ptr)
+		m.ptr = nil
+	}
+}
+
+// HasFIB reports whether the generation holds a table object for the
+// config.
+func (m *Snapshot) HasFIB() bool {
+	return bool(C.route_snapshot_has_fib(m.ptr))
+}
+
+// Devices returns the module's device table by index, the index the
+// table's nexthops name a device by.
+func (m *Snapshot) Devices() []string {
+	count := int(C.route_snapshot_device_count(m.ptr))
+	devices := make([]string, count)
+	for idx := range count {
+		devices[idx] = C.GoString(C.route_snapshot_device_name(m.ptr, C.uint64_t(idx)))
+	}
+	return devices
+}
+
+// fibIter maps 1:1 to route_snapshot_fib_iter: the walk borrows the
+// handle's pin.
+func (m *Snapshot) fibIter() (*fibIter, error) {
+	var cErr *C.yanet_error
+	ptr := C.route_snapshot_fib_iter(m.ptr, &cErr)
+	if ptr == nil {
+		return nil, fmt.Errorf("failed to open the published table: %w", cerrors.FromC(unsafe.Pointer(cErr)))
+	}
+	return &fibIter{ptr: ptr}, nil
+}
+
+// newFIBIter maps 1:1 to fib_iter_new over an owned object.
+func newFIBIter(object *FIBObject) (*fibIter, error) {
+	ptr := C.fib_iter_new(object.asRawPtr())
 	if ptr == nil {
 		return nil, fmt.Errorf("fib_iter_new: allocation failure")
 	}

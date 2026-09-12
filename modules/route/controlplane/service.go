@@ -4,9 +4,10 @@ import (
 	"context"
 	"encoding/hex"
 	"errors"
-	"sort"
+	"fmt"
+	"maps"
+	"slices"
 	"strings"
-	"sync"
 	"time"
 
 	"google.golang.org/grpc"
@@ -16,6 +17,7 @@ import (
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
 	"github.com/yanet-platform/yanet2/common/go/grpcmetrics"
 	"github.com/yanet-platform/yanet2/common/go/metrics"
+	"github.com/yanet-platform/yanet2/controlplane/configstore"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/modules/route/bindings/go/croute"
 	"github.com/yanet-platform/yanet2/modules/route/controlplane/routepb/v1"
@@ -56,11 +58,20 @@ func WithNexthopCountersDisabled() RouteServiceOption {
 // the facts measured at the moment it was applied.
 //
 // A config's FIB is immutable once published: every update builds a fresh
-// handle and retires the previous one. The sizes are therefore measured
-// once here rather than walked out of the LPM keyspace on every scrape.
+// table object and retires the previous one, while the module config moves
+// from entry to entry until its device table has to grow, under the
+// store's write lock, the only place handles are read or written. The
+// sizes are therefore measured once here rather than walked out of the
+// LPM keyspace on every scrape.
 type configEntry struct {
-	// Handle owns the published shared-memory config generation.
-	Handle ModuleHandle
+	// Module is the published module config, nil when it was published
+	// by an earlier process and this one owns no handle for it, or once
+	// it moved to a later entry.
+	Module ModuleHandle
+	// FIB is the published table object, nil while only the module
+	// config is published or once it moved to a later entry.
+	FIB FIBHandle
+
 	// FIBRangeCountV4 is the number of IPv4 FIB ranges the config holds.
 	FIBRangeCountV4 uint64
 	// FIBRangeCountV6 is the number of IPv6 FIB ranges the config holds.
@@ -73,18 +84,23 @@ type configEntry struct {
 	// can query them without re-walking the FIB.
 	NexthopCounterNames []string
 	// UpdatedAt is when the FIB was applied to the dataplane, and backs
-	// the staleness gauge.
+	// the staleness gauge. Zero when this process did not apply it.
 	UpdatedAt time.Time
 }
 
-// Free releases the module handle held by the config.
-//
-// It is safe to call even when no handle is held.
+// Free releases the handles the entry still holds, the table object
+// first. A refused free leaves the entry retryable, each free being a
+// no-op once it succeeded.
 func (m *configEntry) Free() error {
-	if m.Handle == nil {
-		return nil
+	if m.FIB != nil {
+		if err := m.FIB.Free(); err != nil {
+			return err
+		}
 	}
-	return m.Handle.Free()
+	if m.Module != nil {
+		return m.Module.Free()
+	}
+	return nil
 }
 
 // RouteService is the gRPC service implementation backing the slim
@@ -94,16 +110,9 @@ type RouteService struct {
 
 	backend Backend
 
-	// deferred holds superseded module handles whose free was refused
-	// because a live configuration generation still referenced them.
-	// This service is their owner: it retries them on its next update,
-	// through ReclaimDeferred, and nothing else remembers them.
-	deferred []ModuleHandle
-
-	// shmLock serializes shared-memory mutations and protects the
-	// configs map.
-	shmLock sync.RWMutex
-	configs map[string]configEntry
+	// configs owns the published configs and retries the retired ones
+	// whose free was refused.
+	configs *configstore.Store[*configEntry]
 
 	metrics *grpcmetrics.ServerMetrics
 
@@ -122,7 +131,7 @@ func NewRouteService(backend Backend, options ...RouteServiceOption) *RouteServi
 
 	m := &RouteService{
 		backend:                backend,
-		configs:                map[string]configEntry{},
+		configs:                configstore.NewStore[*configEntry](),
 		disableNexthopCounters: opts.DisableNexthopCounters,
 	}
 	if opts.Metrics != nil {
@@ -145,12 +154,11 @@ func (m *RouteService) UnaryServerInterceptor() grpc.UnaryServerInterceptor {
 // retention snapshots the live route config names and returns a predicate
 // that keeps series whose "config" label is still live (or absent).
 func (m *RouteService) retention() func(metrics.MetricID) bool {
-	m.shmLock.RLock()
-	configNames := make(map[string]struct{}, len(m.configs))
-	for name := range m.configs {
+	names := m.configs.Names()
+	configNames := make(map[string]struct{}, len(names))
+	for _, name := range names {
 		configNames[name] = struct{}{}
 	}
-	m.shmLock.RUnlock()
 
 	return func(id metrics.MetricID) bool {
 		config := id.Labels["config"]
@@ -182,21 +190,16 @@ func (m *RouteService) ListConfigs(
 	ctx context.Context,
 	req *routepb.ListConfigsRequest,
 ) (*routepb.ListConfigsResponse, error) {
-	m.shmLock.RLock()
-	defer m.shmLock.RUnlock()
-
-	response := &routepb.ListConfigsResponse{
-		Configs: make([]string, 0, len(m.configs)),
-	}
-	for name := range m.configs {
-		response.Configs = append(response.Configs, name)
-	}
-	sort.Strings(response.Configs)
-	return response, nil
+	return &routepb.ListConfigsResponse{
+		Configs: m.configs.Names(),
+	}, nil
 }
 
 // ShowFIB returns the FIB entries currently applied in shared memory
 // for the requested configuration.
+//
+// The read pins the configuration generation it walks and takes no lock
+// of this service, so it neither waits for an update nor delays one.
 func (m *RouteService) ShowFIB(
 	ctx context.Context,
 	req *routepb.ShowFIBRequest,
@@ -206,17 +209,10 @@ func (m *RouteService) ShowFIB(
 		return nil, status.Error(codes.InvalidArgument, "module config name is required")
 	}
 
-	// Hold RLock for the entire DumpFIB call so a concurrent Free under
-	// shmLock.Lock cannot release the underlying shared memory.
-	m.shmLock.RLock()
-	defer m.shmLock.RUnlock()
-
-	entry, ok := m.configs[name]
-	if !ok {
+	entries, err := m.backend.DumpFIB(name)
+	if errors.Is(err, ffi.ErrNotFound) {
 		return nil, status.Errorf(codes.NotFound, "config %q not found", name)
 	}
-
-	entries, err := entry.Handle.DumpFIB()
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to dump FIB: %v", err)
 	}
@@ -265,20 +261,24 @@ func (m *RouteService) DeleteConfig(
 		return nil, status.Error(codes.InvalidArgument, "module config name is required")
 	}
 
-	m.shmLock.Lock()
-	defer m.shmLock.Unlock()
-
-	entry, ok := m.configs[name]
-	if !ok {
+	// The module goes first: it links the object, and a linked object
+	// refuses deletion. Either half may already be gone after a failed
+	// earlier attempt.
+	err := m.configs.Delete(name, func(current *configEntry) error {
+		if err := m.backend.DeleteModule(name); err != nil && !errors.Is(err, ffi.ErrNotFound) {
+			return fmt.Errorf("failed to delete module config: %w", err)
+		}
+		if err := m.backend.DeleteFIB(name); err != nil && !errors.Is(err, ffi.ErrNotFound) {
+			return fmt.Errorf("failed to delete fib object: %w", err)
+		}
+		return nil
+	})
+	if errors.Is(err, configstore.ErrNotFound) {
 		return nil, status.Errorf(codes.NotFound, "config %q not found", name)
 	}
-
-	if err := m.backend.DeleteModule(name); err != nil {
-		return nil, status.Errorf(codes.Internal, "failed to delete module config %q: %v", name, err)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to delete config %q: %v", name, err)
 	}
-	m.reclaimDeferred()
-	m.parkOrFree(entry.Handle)
-	delete(m.configs, name)
 
 	return &routepb.DeleteConfigResponse{}, nil
 }
@@ -297,7 +297,7 @@ func materializeNexthopCounter(device string, dstMAC [6]byte) string {
 // A generated name is never truncated on overflow: the trailing MAC is what
 // makes two nexthops distinct, so truncating would merge their counters.
 //
-// The conflict check spans the whole request: backend.UpdateModule keys a
+// The conflict check spans the whole request: the FIB build keys a
 // nexthop's route by hardware identity alone, so only the first entry for
 // an identity sets its counter, and a per-entry check could miss the clash.
 func (m *RouteService) resolveNexthopCounters(entries []*routepb.FIBEntry) error {
@@ -360,8 +360,8 @@ func (m *RouteService) resolveNexthopCounters(entries []*routepb.FIBEntry) error
 				)
 			}
 
-			// Identity-parse failures are left for backend.UpdateModule to
-			// reject — this check only needs the identity, not full validation.
+			// Identity-parse failures are left for the FIB build to
+			// reject, this check only needs the identity, not full validation.
 			if hardwareRoute, err := newHardwareRoute(nh); err == nil {
 				if prior, ok := identityCounters[hardwareRoute]; ok && prior != counter {
 					return status.Errorf(
@@ -400,6 +400,13 @@ func (m *RouteService) UpdateFIB(
 		if start.Compare(end) > 0 {
 			return nil, status.Errorf(codes.InvalidArgument, "invalid range: start %s is after end %s", start, end)
 		}
+		// A name the module's fixed-size device table cannot hold is a
+		// request error, rejected before anything is built.
+		for _, nh := range entry.GetNexthops() {
+			if err := ffi.ValidateDeviceName(nh.GetDevice()); err != nil {
+				return nil, status.Errorf(codes.InvalidArgument, "invalid device name %q: %v", nh.GetDevice(), err)
+			}
+		}
 	}
 
 	// Runs before the backend call: a disabled-but-set or over-long name is
@@ -409,49 +416,190 @@ func (m *RouteService) UpdateFIB(
 		return nil, err
 	}
 
-	m.shmLock.Lock()
-	defer m.shmLock.Unlock()
+	// A publish that fails halfway still advances the entry to what went
+	// out, so the error is carried past the store, which only stores on
+	// success.
+	var publishErr error
+	err := m.configs.Update(name, func(current *configEntry, ok bool) (*configEntry, error) {
+		published, err := m.backend.Published(name)
+		if err != nil && !errors.Is(err, ffi.ErrNotFound) {
+			return nil, fmt.Errorf("failed to read the published config %q: %w", name, err)
+		}
+		modulePublished := err == nil
+		devices, grown := extendDeviceTable(published.Devices, entries)
 
-	module, err := m.backend.UpdateModule(name, entries)
+		// The module moves along from the current entry unless the
+		// table needs a device it lacks, then a fresh one takes over.
+		entry := &configEntry{}
+		if ok {
+			entry.Module = current.Module
+		}
+		moduleNew := !modulePublished || grown
+		if moduleNew {
+			module, table, err := m.backend.NewModule(name, devices)
+			if err != nil {
+				return nil, fmt.Errorf("failed to build module config for %q: %w", name, err)
+			}
+			entry.Module = module
+			devices = table
+		}
+		fib, err := m.backend.NewFIB(name, devices, entries)
+		if err != nil {
+			if moduleNew {
+				m.discard(entry.Module)
+			}
+			return nil, fmt.Errorf("failed to build FIB for %q: %w", name, err)
+		}
+
+		// A first table goes out before its module, a grown one after.
+		//
+		// A module is refused until the object it links is published.
+		// Once one is, the module's append-only device table keeps it
+		// valid under the grown module, while the new object would not
+		// resolve on the old module.
+		moduleFirst := moduleNew && published.FIB
+		if moduleFirst {
+			if err := entry.Module.Publish(); err != nil {
+				m.discard(fib)
+				m.discard(entry.Module)
+				return nil, fmt.Errorf("failed to publish module config for %q: %w", name, err)
+			}
+		}
+		if err := fib.Publish(); err != nil {
+			m.discard(fib)
+			err = fmt.Errorf("failed to publish FIB for %q: %w", name, err)
+			if !moduleFirst {
+				if moduleNew {
+					m.discard(entry.Module)
+				}
+				return nil, err
+			}
+			// The grown module is out and the published object stays
+			// under it. The object moves along when this process owns
+			// it, an earlier process's object is not ours to hold, so
+			// its facts are read back off the dataplane and its apply
+			// time stays unknown.
+			publishErr = err
+			if ok {
+				entry.FIB = current.FIB
+				current.FIB = nil
+				entry.FIBRangeCountV4 = current.FIBRangeCountV4
+				entry.FIBRangeCountV6 = current.FIBRangeCountV6
+				entry.NexthopCount = current.NexthopCount
+				entry.NexthopCounterNames = current.NexthopCounterNames
+				entry.UpdatedAt = current.UpdatedAt
+			} else if dumped, err := m.backend.DumpFIB(name); err == nil {
+				entry.FIBRangeCountV4, entry.FIBRangeCountV6, entry.NexthopCount, entry.NexthopCounterNames = tableFacts(dumped)
+			}
+			return entry, nil
+		}
+		if moduleNew && !moduleFirst {
+			if err := entry.Module.Publish(); err != nil {
+				// The object is out, the module that was to run it is
+				// not, so the entry keeps whatever module ran before.
+				m.discard(entry.Module)
+				entry.Module = nil
+				if ok {
+					entry.Module = current.Module
+					current.Module = nil
+				}
+				publishErr = fmt.Errorf("failed to publish module config for %q: %w", name, err)
+			}
+		}
+		if ok && entry.Module == current.Module {
+			current.Module = nil
+		}
+
+		// The exported set is the reachable one, read back off the handle
+		// rather than the request: an entry a later one fully shadows never
+		// materializes a range here, so its counter name is not exported.
+		nexthopCounterNames, err := fib.ActiveNexthopCounterNames()
+		if err != nil {
+			// The table is live, so this must never free it here: workers
+			// may dereference it. The caller retries on error and resends
+			// the whole FIB, so surfacing this one would burn a fresh
+			// generation from the arena, the worst response to memory
+			// pressure.
+			nexthopCounterNames = nil
+		}
+
+		// The counts are read once, here, off the handle just published:
+		// the FIB never changes again for this object, and each read walks
+		// the LPM keyspace.
+		entry.FIB = fib
+		entry.FIBRangeCountV4 = fib.FIBRangeCountV4()
+		entry.FIBRangeCountV6 = fib.FIBRangeCountV6()
+		entry.NexthopCount = fib.RouteCount()
+		entry.NexthopCounterNames = nexthopCounterNames
+		entry.UpdatedAt = time.Now()
+		return entry, nil
+	})
+	if err == nil {
+		err = publishErr
+	}
 	if err != nil {
 		code := codes.Internal
 		if errors.Is(err, ErrTooManyNexthops) {
 			code = codes.InvalidArgument
 		}
-		return nil, status.Errorf(code, "failed to apply FIB for %q: %v", name, err)
-	}
-
-	// The exported set is the reachable one, read back off the handle
-	// rather than the request: an entry a later one fully shadows never
-	// materializes a range here, so its counter name is not exported.
-	nexthopCounterNames, err := module.ActiveNexthopCounterNames()
-	if err != nil {
-		// The module is live, so this must never free it here — workers may
-		// dereference it. The caller retries on error and resends the
-		// whole FIB, so surfacing this one would burn a fresh config
-		// generation from the arena, the worst response to memory pressure.
-		nexthopCounterNames = nil
-	}
-
-	m.reclaimDeferred()
-
-	if old, ok := m.configs[name]; ok {
-		m.parkOrFree(old.Handle)
-	}
-
-	// The counts are read once, here, off the handle just published: the
-	// FIB never changes again for this generation, and each read walks the
-	// LPM keyspace.
-	m.configs[name] = configEntry{
-		Handle:              module,
-		FIBRangeCountV4:     module.FIBRangeCountV4(),
-		FIBRangeCountV6:     module.FIBRangeCountV6(),
-		NexthopCount:        module.RouteCount(),
-		NexthopCounterNames: nexthopCounterNames,
-		UpdatedAt:           time.Now(),
+		return nil, status.Error(code, err.Error())
 	}
 
 	return &routepb.UpdateFIBResponse{}, nil
+}
+
+// discard frees a handle that never got published. Such a handle is
+// dangling, so the free cannot be refused.
+func (m *RouteService) discard(handle interface{ Free() error }) {
+	_ = handle.Free()
+}
+
+// tableFacts measures a dumped table: ranges per family, distinct
+// hardware nexthops reachable through them and the sorted set of counter
+// names in use.
+func tableFacts(entries []croute.FIBEntry) (rangesV4, rangesV6, nexthops uint64, counterNames []string) {
+	seen := map[HardwareRoute]struct{}{}
+	names := map[string]struct{}{}
+	for _, entry := range entries {
+		if entry.AddressFamily == croute.AddressFamilyIPv4 {
+			rangesV4++
+		} else {
+			rangesV6++
+		}
+		for _, nh := range entry.Nexthops {
+			seen[HardwareRoute{
+				SourceMAC:      [6]byte(nh.SrcMAC),
+				DestinationMAC: [6]byte(nh.DstMAC),
+				Device:         nh.Device,
+			}] = struct{}{}
+			if nh.Counter != "" {
+				names[nh.Counter] = struct{}{}
+			}
+		}
+	}
+	return rangesV4, rangesV6, uint64(len(seen)), slices.Sorted(maps.Keys(names))
+}
+
+// extendDeviceTable appends the devices the entries name that the table
+// lacks, in order of first appearance, and reports whether it grew.
+func extendDeviceTable(table []string, entries []*routepb.FIBEntry) ([]string, bool) {
+	known := make(map[string]struct{}, len(table))
+	for _, device := range table {
+		known[device] = struct{}{}
+	}
+
+	devices := table
+	for _, entry := range entries {
+		for _, nh := range entry.GetNexthops() {
+			device := nh.GetDevice()
+			if _, ok := known[device]; ok {
+				continue
+			}
+			known[device] = struct{}{}
+			devices = append(devices, device)
+		}
+	}
+	return devices, len(devices) != len(table)
 }
 
 // Metrics returns route module metrics matching tags: per-config FIB
@@ -494,11 +642,13 @@ func (m *RouteService) Metrics(tags ...*commonpb.MetricTag) ([]*commonpb.Metric,
 // derivable as a sum over the family label. Every value was measured when
 // the config was applied, so a scrape costs no shared-memory traversal.
 func (m *RouteService) collectConfigMetrics() []*commonpb.Metric {
-	m.shmLock.RLock()
-	defer m.shmLock.RUnlock()
-
-	result := make([]*commonpb.Metric, 0, 4*len(m.configs))
-	for name, entry := range m.configs {
+	names := m.configs.Names()
+	result := make([]*commonpb.Metric, 0, 4*len(names))
+	for _, name := range names {
+		entry, ok := m.configs.Get(name)
+		if !ok {
+			continue
+		}
 		configLabels := []*commonpb.Label{
 			{Name: "config", Value: name},
 		}
@@ -515,46 +665,25 @@ func (m *RouteService) collectConfigMetrics() []*commonpb.Metric {
 			commonpb.NewMetricGauge("route_fib_entries", float64(entry.FIBRangeCountV4), v4Labels...),
 			commonpb.NewMetricGauge("route_fib_entries", float64(entry.FIBRangeCountV6), v6Labels...),
 			commonpb.NewMetricGauge("route_nexthops", float64(entry.NexthopCount), configLabels...),
-			commonpb.NewMetricGauge(
+		)
+		// A table applied by an earlier process has no apply time to
+		// report.
+		if !entry.UpdatedAt.IsZero() {
+			result = append(result, commonpb.NewMetricGauge(
 				"route_config_updated_timestamp_seconds",
 				float64(entry.UpdatedAt.Unix()),
 				configLabels...,
-			),
-		)
+			))
+		}
 	}
 
 	return result
 }
 
-// parkOrFree frees the handle when it is dangling and parks it for
-// retry when a live generation still references it. The caller must
-// hold m.shmLock.
-func (m *RouteService) parkOrFree(handle ModuleHandle) {
-	if err := handle.Free(); errors.Is(err, ffi.ErrStillReferenced) {
-		m.deferred = append(m.deferred, handle)
-	}
-}
-
-// ReclaimDeferred retries every deferred handle, dropping the ones whose
-// generations have drained and keeping the rest deferred. It is the
-// reclamation handler for this module's superseded configs; the service
-// itself runs it after each successful publish, and anything else may
-// call it at any time.
+// ReclaimDeferred retries every retired config whose free was refused,
+// dropping the ones whose generations have drained. The store runs it
+// after each successful mutation, and anything else may call it at any
+// time.
 func (m *RouteService) ReclaimDeferred() {
-	m.shmLock.Lock()
-	defer m.shmLock.Unlock()
-	m.reclaimDeferred()
-}
-
-// reclaimDeferred is ReclaimDeferred without the lock. The caller must
-// hold m.shmLock.
-func (m *RouteService) reclaimDeferred() {
-	kept := m.deferred[:0]
-	for _, handle := range m.deferred {
-		if err := handle.Free(); errors.Is(err, ffi.ErrStillReferenced) {
-			kept = append(kept, handle)
-		}
-	}
-	clear(m.deferred[len(kept):])
-	m.deferred = kept
+	m.configs.ReclaimDeferred()
 }
