@@ -82,7 +82,7 @@ type configEntry struct {
 	// can query them without re-walking the FIB.
 	NexthopCounterNames []string
 	// UpdatedAt is when the FIB was applied to the dataplane, and backs
-	// the staleness gauge.
+	// the staleness gauge. Zero when this process did not apply it.
 	UpdatedAt time.Time
 }
 
@@ -467,9 +467,10 @@ func (m *RouteService) UpdateFIB(
 			}
 			// The grown module is out and the published object stays
 			// under it. The object moves along when this process owns
-			// it, an earlier process's object is not ours to hold.
+			// it, an earlier process's object is not ours to hold, so
+			// only its sizes are read back and its apply time stays
+			// unknown.
 			publishErr = err
-			entry.UpdatedAt = time.Now()
 			if ok {
 				entry.FIB = current.FIB
 				current.FIB = nil
@@ -478,6 +479,10 @@ func (m *RouteService) UpdateFIB(
 				entry.NexthopCount = current.NexthopCount
 				entry.NexthopCounterNames = current.NexthopCounterNames
 				entry.UpdatedAt = current.UpdatedAt
+			} else {
+				entry.FIBRangeCountV4 = published.FIBRangeCountV4
+				entry.FIBRangeCountV6 = published.FIBRangeCountV6
+				entry.NexthopCount = published.NexthopCount
 			}
 			return entry, nil
 		}
@@ -627,12 +632,16 @@ func (m *RouteService) collectConfigMetrics() []*commonpb.Metric {
 			commonpb.NewMetricGauge("route_fib_entries", float64(entry.FIBRangeCountV4), v4Labels...),
 			commonpb.NewMetricGauge("route_fib_entries", float64(entry.FIBRangeCountV6), v6Labels...),
 			commonpb.NewMetricGauge("route_nexthops", float64(entry.NexthopCount), configLabels...),
-			commonpb.NewMetricGauge(
+		)
+		// A table applied by an earlier process has no apply time to
+		// report.
+		if !entry.UpdatedAt.IsZero() {
+			result = append(result, commonpb.NewMetricGauge(
 				"route_config_updated_timestamp_seconds",
 				float64(entry.UpdatedAt.Unix()),
 				configLabels...,
-			),
-		)
+			))
+		}
 	}
 
 	return result

@@ -227,6 +227,30 @@ route_snapshot_has_fib(const struct route_snapshot *snapshot) {
 }
 
 uint64_t
+route_snapshot_route_count(const struct route_snapshot *snapshot) {
+	if (snapshot->object == NULL) {
+		return 0;
+	}
+	return route_fib_object_route_count(snapshot->object);
+}
+
+uint64_t
+route_snapshot_range_count_v4(const struct route_snapshot *snapshot) {
+	if (snapshot->object == NULL) {
+		return 0;
+	}
+	return route_fib_object_range_count_v4(snapshot->object);
+}
+
+uint64_t
+route_snapshot_range_count_v6(const struct route_snapshot *snapshot) {
+	if (snapshot->object == NULL) {
+		return 0;
+	}
+	return route_fib_object_range_count_v6(snapshot->object);
+}
+
+uint64_t
 route_snapshot_device_count(const struct route_snapshot *snapshot) {
 	return snapshot->module->device_count;
 }

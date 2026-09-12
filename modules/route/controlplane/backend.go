@@ -50,10 +50,14 @@ var (
 )
 
 // Published describes what the dataplane holds for a config name: the
-// module's device table by index and whether its table object is out.
+// module's device table by index, whether its table object is out and
+// the sizes of that table.
 type Published struct {
-	Devices []string
-	FIB     bool
+	Devices         []string
+	FIB             bool
+	FIBRangeCountV4 uint64
+	FIBRangeCountV6 uint64
+	NexthopCount    uint64
 }
 
 // CounterView is a single dataplane counter read back from one position at
@@ -126,8 +130,11 @@ func (m *backend) Published(name string) (Published, error) {
 	}
 	defer snapshot.Close()
 	return Published{
-		Devices: snapshot.Devices(),
-		FIB:     snapshot.HasFIB(),
+		Devices:         snapshot.Devices(),
+		FIB:             snapshot.HasFIB(),
+		FIBRangeCountV4: snapshot.FIBRangeCountV4(),
+		FIBRangeCountV6: snapshot.FIBRangeCountV6(),
+		NexthopCount:    snapshot.RouteCount(),
 	}, nil
 }
 

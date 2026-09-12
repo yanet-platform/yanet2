@@ -70,21 +70,35 @@ route_snapshot_open(struct agent *agent, const char *name, yanet_error **err);
 
 // Release the pin. Walks taken from the handle must be freed first.
 void
-route_snapshot_close(struct route_snapshot *published);
+route_snapshot_close(struct route_snapshot *snapshot);
 
 // Whether the generation holds a table object for the config.
 bool
-route_snapshot_has_fib(const struct route_snapshot *published);
+route_snapshot_has_fib(const struct route_snapshot *snapshot);
+
+// Nexthops the published table holds, 0 without a table object.
+uint64_t
+route_snapshot_route_count(const struct route_snapshot *snapshot);
+
+// IPv4 ranges a walk of the published table would yield, 0 without a
+// table object.
+uint64_t
+route_snapshot_range_count_v4(const struct route_snapshot *snapshot);
+
+// IPv6 ranges a walk of the published table would yield, 0 without a
+// table object.
+uint64_t
+route_snapshot_range_count_v6(const struct route_snapshot *snapshot);
 
 // Size of the module's device table.
 uint64_t
-route_snapshot_device_count(const struct route_snapshot *published);
+route_snapshot_device_count(const struct route_snapshot *snapshot);
 
 // Name at the given index of the module's device table, or an empty
 // string past its end.
 const char *
 route_snapshot_device_name(
-	const struct route_snapshot *published, uint64_t index
+	const struct route_snapshot *snapshot, uint64_t index
 );
 
 // Zero-copy walk over a table, reading shared memory in place.
@@ -95,7 +109,7 @@ struct fib_iter;
 // Fails with the not-found kind when the generation holds no table
 // object for the config.
 struct fib_iter *
-route_snapshot_fib_iter(struct route_snapshot *published, yanet_error **err);
+route_snapshot_fib_iter(struct route_snapshot *snapshot, yanet_error **err);
 
 // Open a walk over an owned object, or NULL on allocation failure.
 //

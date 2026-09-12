@@ -243,9 +243,14 @@ route_handle_packets(
 
 		struct route *route = ADDR_OF(&fib->routes) + route_index;
 
-		uint16_t device_id = module_ectx_encode_device(
-			module_ectx, route->device_id
-		);
+		// An index past the module's device table resolves nothing,
+		// the way a table built against a longer one would.
+		uint16_t device_id = (uint16_t)-1;
+		if (route->device_id < module_ectx->mc_index_size) {
+			device_id = module_ectx_encode_device(
+				module_ectx, route->device_id
+			);
+		}
 
 		if (device_id == (uint16_t)-1) {
 			route_count_packet(

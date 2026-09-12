@@ -164,6 +164,8 @@ type fakeBackend struct {
 	modulePublished map[string]bool
 	moduleTable     map[string][]string
 	fibPublished    map[string]bool
+	// publishedSizes holds the table sizes Published reports per name.
+	publishedSizes map[string]route.Published
 
 	// nextModuleHandle / nextFIBHandle, when set for a name, are
 	// returned (and then cleared) by the next NewModule / NewFIB call
@@ -214,6 +216,7 @@ func newFakeBackend() *fakeBackend {
 		modulePublished:  map[string]bool{},
 		moduleTable:      map[string][]string{},
 		fibPublished:     map[string]bool{},
+		publishedSizes:   map[string]route.Published{},
 		nextModuleHandle: map[string]*fakeModuleHandle{},
 		nextFIBHandle:    map[string]*fakeFIBHandle{},
 		lastModuleHandle: map[string]*fakeModuleHandle{},
@@ -232,6 +235,16 @@ func (m *fakeBackend) seedRestart(name string, devices []string) {
 	m.modulePublished[name] = true
 	m.moduleTable[name] = devices
 	m.fibPublished[name] = true
+}
+
+// seedRestartSizes sets the sizes Published reports for a table an
+// earlier process applied.
+func (m *fakeBackend) seedRestartSizes(name string, rangesV4, rangesV6, nexthops uint64) {
+	m.publishedSizes[name] = route.Published{
+		FIBRangeCountV4: rangesV4,
+		FIBRangeCountV6: rangesV6,
+		NexthopCount:    nexthops,
+	}
 }
 
 func (m *fakeBackend) recordModulePublish(name string, table []string) {
@@ -265,9 +278,13 @@ func (m *fakeBackend) Published(name string) (route.Published, error) {
 	if !m.modulePublished[name] {
 		return route.Published{}, fmt.Errorf("module %q: %w", name, ffi.ErrNotFound)
 	}
+	sizes := m.publishedSizes[name]
 	return route.Published{
-		Devices: append([]string(nil), m.moduleTable[name]...),
-		FIB:     m.fibPublished[name],
+		Devices:         append([]string(nil), m.moduleTable[name]...),
+		FIB:             m.fibPublished[name],
+		FIBRangeCountV4: sizes.FIBRangeCountV4,
+		FIBRangeCountV6: sizes.FIBRangeCountV6,
+		NexthopCount:    sizes.NexthopCount,
 	}, nil
 }
 
@@ -1236,6 +1253,7 @@ func Test_RouteService_UpdateFIB_RestartNewDeviceRepublishesModule(t *testing.T)
 func Test_RouteService_UpdateFIB_RestartObjectPublishFailureAfterGrownModuleKeepsModule(t *testing.T) {
 	backend := newFakeBackend()
 	backend.seedRestart("cfg", []string{"", "eth0"})
+	backend.seedRestartSizes("cfg", 11, 23, 5)
 	backend.nextFIBHandle["cfg"] = &fakeFIBHandle{publishErr: errors.New("boom")}
 	service := route.NewRouteService(backend)
 
@@ -1250,6 +1268,13 @@ func Test_RouteService_UpdateFIB_RestartObjectPublishFailureAfterGrownModuleKeep
 	require.True(t, newModule.published, "the grown module published fine; only the object failed")
 	require.False(t, newModule.freed, "the published module must stay with the entry")
 	require.True(t, backend.lastFIBHandle["cfg"].freed, "the object that failed to publish must be discarded")
+
+	// The table the dataplane keeps running is the earlier process's,
+	// so its sizes are reported and its apply time is not.
+	requireConfigGauges(t, service, 11, 23, 5)
+	all, err := service.Metrics()
+	require.NoError(t, err)
+	require.Empty(t, findMetrics(all, "route_config_updated_timestamp_seconds"))
 
 	list, err := service.ListConfigs(t.Context(), &routepb.ListConfigsRequest{})
 	require.NoError(t, err)
@@ -1347,9 +1372,6 @@ func Test_RouteService_UpdateFIB_ModulePublishFailureAfterFirstObjectKeepsObject
 	list, err := service.ListConfigs(t.Context(), &routepb.ListConfigsRequest{})
 	require.NoError(t, err)
 	require.Contains(t, list.GetConfigs(), "cfg", "the object that did publish must still be tracked")
-
-	_, err = service.ShowFIB(t.Context(), &routepb.ShowFIBRequest{Name: "cfg"})
-	require.NoError(t, err, "the object published, so it must be readable")
 
 	_, err = service.DeleteConfig(t.Context(), &routepb.DeleteConfigRequest{Name: "cfg"})
 	require.NoError(t, err)

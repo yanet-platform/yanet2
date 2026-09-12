@@ -49,7 +49,9 @@ func (m *ModuleConfig) LinkDevice(device string) (uint32, error) {
 // egress device in the linking module's table, and an optional
 // per-nexthop dataplane counter name.
 //
-// An empty counter leaves the nexthop uncounted.
+// An empty counter leaves the nexthop uncounted. The index is stored as
+// given, the dataplane drops packets of a nexthop whose index lies past
+// the table of the module running it.
 func (m *FIBObject) AddRoute(srcAddr net.HardwareAddr, dstAddr net.HardwareAddr, deviceIndex uint32, counter string) (int, error) {
 	if len(srcAddr) != 6 {
 		return -1, fmt.Errorf("unsupported source MAC address: must be EUI-48")
