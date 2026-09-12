@@ -92,17 +92,18 @@ var counterNames = slices.Sorted(maps.Keys(counterMappings))
 // that config with nothing to read — a module-level or foreign-config
 // counter can never surface under this family.
 func (m *RouteService) collectNexthopMetrics(tags []*commonpb.MetricTag) []*commonpb.Metric {
-	m.shmLock.RLock()
-	defer m.shmLock.RUnlock()
-
 	result := make([]*commonpb.Metric, 0)
-	for configName, entry := range m.configs {
+	for _, configName := range m.configs.Names() {
+		entry, ok := m.configs.Get(configName)
+		if !ok {
+			continue
+		}
 		names, ok := metrics.Query(tags, metrics.WithEntryCounters(entry.NexthopCounterNames))
 		if !ok {
 			continue
 		}
 
-		for _, counter := range m.backend.RuntimeModuleCounters(configName, names) {
+		for _, counter := range m.backend.NexthopCounters(configName, names) {
 			var packets, bytes uint64
 			for _, instance := range counter.Values {
 				if len(instance) > 0 {
@@ -142,16 +143,13 @@ func (m *RouteService) collectNexthopMetrics(tags []*commonpb.MetricTag) []*comm
 // route list counters are invariant canaries expected to read zero
 // forever, which only works if they are visible.
 func (m *RouteService) collectDataplaneMetrics(tags []*commonpb.MetricTag) []*commonpb.Metric {
-	m.shmLock.RLock()
-	defer m.shmLock.RUnlock()
-
 	names, read := metrics.Query(tags, metrics.WithStructuralCounters(counterNames))
 	if !read {
 		return []*commonpb.Metric{}
 	}
 
 	result := make([]*commonpb.Metric, 0)
-	for configName := range m.configs {
+	for _, configName := range m.configs.Names() {
 		for _, counter := range m.backend.ModuleCounters(configName, names) {
 			mapping, ok := counterMappings[counter.Name]
 			if !ok {

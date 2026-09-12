@@ -219,6 +219,44 @@ func (m *DPConfig) ModuleRuntimeCounters(
 	return counters, nil
 }
 
+// ModuleObjectLinkCounters returns the counters an object's link counter
+// registry spawns for one module link, e.g. the route module's per-nexthop
+// counters, optionally filtered by name.
+//
+// If counterQuery is nil or empty, returns all of the link's counters.
+func (m *DPConfig) ModuleObjectLinkCounters(
+	deviceName string,
+	pipelineName string,
+	functionName string,
+	chainName string,
+	moduleType string,
+	moduleName string,
+	objectType string,
+	objectName string,
+	counterQuery []string,
+) ([]CounterInfo, error) {
+	groups, err := m.CountersByTags([]CounterTag{
+		{Key: "device", Value: deviceName},
+		{Key: "pipeline", Value: pipelineName},
+		{Key: "function", Value: functionName},
+		{Key: "chain", Value: chainName},
+		{Key: "module_type", Value: moduleType},
+		{Key: "module_name", Value: moduleName},
+		{Key: "object_type", Value: objectType},
+		{Key: "object_name", Value: objectName},
+		{Key: "kind", Value: "module_object_link"},
+	}, counterQuery)
+	if err != nil {
+		return nil, err
+	}
+
+	counters := make([]CounterInfo, 0)
+	for _, group := range groups {
+		counters = append(counters, group.Counters...)
+	}
+	return counters, nil
+}
+
 // ObjectCounters returns the counters of an object identified by its
 // type and name, or nil when the read fails.
 func (m *DPConfig) ObjectCounters(

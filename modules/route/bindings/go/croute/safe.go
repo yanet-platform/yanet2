@@ -34,26 +34,34 @@ type FIBEntry struct {
 	Nexthops      []FIBNexthop
 }
 
-// AddRoute adds a hardware route with MAC addresses, egress device, and an
-// optional per-nexthop dataplane counter name.
+// LinkDevice links a device by name and returns its index in the module's
+// device table, the index a table object's nexthops name it by.
+//
+// A name already linked keeps its index.
+func (m *ModuleConfig) LinkDevice(device string) (uint32, error) {
+	if device == "" {
+		return 0, fmt.Errorf("device name is required")
+	}
+	return m.linkDevice(device)
+}
+
+// AddRoute adds a hardware route with MAC addresses, the index of the
+// egress device in the linking module's table, and an optional
+// per-nexthop dataplane counter name.
 //
 // An empty counter leaves the nexthop uncounted.
-func (m *ModuleConfig) AddRoute(srcAddr net.HardwareAddr, dstAddr net.HardwareAddr, device string, counter string) (int, error) {
+func (m *FIBObject) AddRoute(srcAddr net.HardwareAddr, dstAddr net.HardwareAddr, deviceIndex uint32, counter string) (int, error) {
 	if len(srcAddr) != 6 {
 		return -1, fmt.Errorf("unsupported source MAC address: must be EUI-48")
 	}
 	if len(dstAddr) != 6 {
 		return -1, fmt.Errorf("unsupported destination MAC address: must be EUI-48")
 	}
-	if device == "" {
-		return -1, fmt.Errorf("device name is required")
-	}
-
-	return m.addRoute([6]byte(dstAddr), [6]byte(srcAddr), device, counter)
+	return m.addRoute([6]byte(dstAddr), [6]byte(srcAddr), deviceIndex, counter)
 }
 
 // AddRouteList adds a list of route indices as an ECMP group.
-func (m *ModuleConfig) AddRouteList(routeIndices []uint32) (int, error) {
+func (m *FIBObject) AddRouteList(routeIndices []uint32) (int, error) {
 	if len(routeIndices) == 0 {
 		return -1, fmt.Errorf("routeIndices must not be empty")
 	}
@@ -67,7 +75,7 @@ func (m *ModuleConfig) AddRouteList(routeIndices []uint32) (int, error) {
 // start and end must both be valid, belong to the same address family, and
 // satisfy start <= end. An IPv4-mapped IPv6 address is treated as IPv6,
 // since Is4 returns false for it.
-func (m *ModuleConfig) AddRange(start, end netip.Addr, routeListIdx uint32) error {
+func (m *FIBObject) AddRange(start, end netip.Addr, routeListIdx uint32) error {
 	if !start.IsValid() || !end.IsValid() {
 		return fmt.Errorf("start and end must both be valid addresses")
 	}
@@ -77,21 +85,11 @@ func (m *ModuleConfig) AddRange(start, end netip.Addr, routeListIdx uint32) erro
 	if start.Compare(end) > 0 {
 		return fmt.Errorf("invalid range: start %s is after end %s", start, end)
 	}
+
 	if start.Is4() {
 		return m.addPrefixV4(start.As4(), end.As4(), routeListIdx)
 	}
 	return m.addPrefixV6(start.As16(), end.As16(), routeListIdx)
-}
-
-// DumpFIB reads the Forwarding Information Base from shared memory using a
-// zero-copy iterator.
-func (m *ModuleConfig) DumpFIB() ([]FIBEntry, error) {
-	iter, err := newFIBIter(m)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create FIB iterator: %w", err)
-	}
-
-	return iter.Entries(), nil
 }
 
 // ActiveNexthopCounterNames returns the deduplicated, sorted set of
@@ -100,11 +98,23 @@ func (m *ModuleConfig) DumpFIB() ([]FIBEntry, error) {
 // The iterator walks the LPM after overlap resolution, so a nexthop fully
 // shadowed by a later, overlapping entry is excluded here even though its
 // route and counter are still registered in shared memory.
-func (m *ModuleConfig) ActiveNexthopCounterNames() ([]string, error) {
+func (m *FIBObject) ActiveNexthopCounterNames() ([]string, error) {
 	iter, err := newFIBIter(m)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create FIB iterator: %w", err)
 	}
 
 	return slices.Sorted(maps.Keys(iter.ActiveCounterNames())), nil
+}
+
+// Entries reads the published table straight from shared memory.
+//
+// The error wraps ffi.ErrNotFound when the generation holds no table
+// object for the config.
+func (m *Snapshot) Entries() ([]FIBEntry, error) {
+	iter, err := m.fibIter()
+	if err != nil {
+		return nil, err
+	}
+	return iter.Entries(), nil
 }

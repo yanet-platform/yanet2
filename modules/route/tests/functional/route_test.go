@@ -2,6 +2,7 @@ package route_test
 
 import (
 	"encoding/hex"
+	"errors"
 	"net"
 	"net/netip"
 	"strings"
@@ -39,7 +40,7 @@ type FIBNexthop struct {
 	Device string
 	// Counter is the per-nexthop dataplane counter name.
 	//
-	// applyFIB passes this straight to backend.UpdateModule, bypassing
+	// applyFIB passes this straight to the backend, bypassing
 	// RouteService.UpdateFIB, so nothing on this path auto-fills an empty
 	// value.
 	Counter string
@@ -91,6 +92,7 @@ func setupRouteHarnessWithLimit(
 		Devices:           []string{deviceName},
 		Modules:           []string{"route"},
 		DevicesToLoad:     []string{"plain"},
+		ObjectsToLoad:     []string{fibObjectType},
 	}
 	h, err := dataplaneut.NewHarness(config)
 	require.NoError(tb, err)
@@ -110,12 +112,13 @@ func setupRouteHarnessWithLimit(
 //
 // Must be called after applyFIB so that the route module config named
 // configName is already present in shared memory when the pipeline resolves
-// its chain module references.
+// its chain module references. Returns the device handles the caller owns
+// from then on.
 func wirePipeline(
 	tb testing.TB,
 	agent *ffi.Agent,
 	deviceName, configName string,
-) {
+) []*plain.DeviceConfig {
 	tb.Helper()
 
 	require.NoError(tb, agent.UpdateFunction(ffi.FunctionConfig{
@@ -137,12 +140,13 @@ func wirePipeline(
 	require.NoError(tb, agent.UpdatePipeline(ffi.PipelineConfig{
 		Name: "dummy",
 	}))
-	_, err := plain.UpdateDevices(agent, []ffi.DeviceConfig{{
+	devices, err := plain.UpdateDevices(agent, []ffi.DeviceConfig{{
 		Name:   deviceName,
 		Input:  []ffi.DevicePipelineConfig{{Name: configName, Weight: 1}},
 		Output: []ffi.DevicePipelineConfig{{Name: "dummy", Weight: 1}},
 	}})
 	require.NoError(tb, err)
+	return devices
 }
 
 // toFIBEntries converts test-domain FIB entries to their wire form.
@@ -173,22 +177,94 @@ func toFIBEntries(tb testing.TB, entries []FIBEntry) []*routepb.FIBEntry {
 	return pbEntries
 }
 
-// applyFIB pushes entries via backend.UpdateModule and registers cleanup.
+// applyFIB mirrors RouteService.UpdateFIB's device-table and publish-order
+// bookkeeping against the real backend: it reads the module's
+// already-published device table, extends it with any device the entries
+// name that it lacks, rebuilds the module only when the table grew, then
+// always builds a fresh object under the given name. It publishes the
+// object first unless the table just grew and an object was already out,
+// in which case the module goes first — a module cannot go out before the
+// object it links exists. Cleanup frees both handles.
 //
-// Returns the route.ModuleHandle. The caller may inspect it. The handle is
-// freed via tb.Cleanup.
+// Returns the published FIBHandle; the module's device table is available
+// separately through backend.Published.
 func applyFIB(
 	tb testing.TB,
 	backend route.Backend,
 	name string,
 	entries []FIBEntry,
-) route.ModuleHandle {
+) route.FIBHandle {
 	tb.Helper()
 
-	handle, err := backend.UpdateModule(name, toFIBEntries(tb, entries))
+	pbEntries := toFIBEntries(tb, entries)
+
+	published, err := backend.Published(name)
+	if err != nil && !errors.Is(err, ffi.ErrNotFound) {
+		require.NoError(tb, err)
+	}
+	modulePublished := err == nil
+	devices, grown := extendTestDeviceTable(published.Devices, pbEntries)
+
+	moduleNew := !modulePublished || grown
+	var moduleHandle route.ModuleHandle
+	if moduleNew {
+		var table []string
+		var buildErr error
+		moduleHandle, table, buildErr = backend.NewModule(name, devices)
+		require.NoError(tb, buildErr)
+		tb.Cleanup(func() { freeTolerant(tb, moduleHandle.Free) })
+		devices = table
+	}
+
+	fibHandle, err := backend.NewFIB(name, devices, pbEntries)
 	require.NoError(tb, err)
-	tb.Cleanup(func() { _ = handle.Free() })
-	return handle
+	tb.Cleanup(func() { freeTolerant(tb, fibHandle.Free) })
+
+	moduleFirst := moduleNew && published.FIB
+	if moduleFirst {
+		require.NoError(tb, moduleHandle.Publish())
+	}
+	require.NoError(tb, fibHandle.Publish())
+	if moduleNew && !moduleFirst {
+		require.NoError(tb, moduleHandle.Publish())
+	}
+
+	return fibHandle
+}
+
+// extendTestDeviceTable is a test-local mirror of RouteService's
+// device-table growth: it appends the devices the entries name that table
+// lacks, in first-seen order, and reports whether it grew.
+func extendTestDeviceTable(table []string, entries []*routepb.FIBEntry) ([]string, bool) {
+	known := make(map[string]struct{}, len(table))
+	for _, device := range table {
+		known[device] = struct{}{}
+	}
+
+	devices := table
+	for _, entry := range entries {
+		for _, nh := range entry.GetNexthops() {
+			device := nh.GetDevice()
+			if _, ok := known[device]; ok {
+				continue
+			}
+			known[device] = struct{}{}
+			devices = append(devices, device)
+		}
+	}
+	return devices, len(devices) != len(table)
+}
+
+// freeTolerant frees a handle, accepting a refusal because a live
+// configuration generation still references it: nothing in these tests
+// supersedes that generation afterward, and the harness discards the
+// whole shared-memory arena on its own teardown regardless.
+func freeTolerant(tb testing.TB, free func() error) {
+	tb.Helper()
+
+	if err := free(); err != nil && !errors.Is(err, ffi.ErrStillReferenced) {
+		require.NoError(tb, err)
+	}
 }
 
 // testingEtherLayers returns a reusable set of Ethernet and IP layers for
@@ -520,6 +596,7 @@ func TestRoute_ECMP_HashSelection(t *testing.T) {
 		Devices:       []string{"port0", "port1"},
 		Modules:       []string{"route"},
 		DevicesToLoad: []string{"plain"},
+		ObjectsToLoad: []string{fibObjectType},
 	}
 	h, err := dataplaneut.NewHarness(cfg)
 	require.NoError(t, err)
@@ -1060,7 +1137,7 @@ func TestRoute_NexthopCounter(t *testing.T) {
 	}
 
 	h, agent, backend := setupRouteHarness(t, "port0")
-	handle := applyFIB(t, backend, "test", []FIBEntry{
+	applyFIB(t, backend, "test", []FIBEntry{
 		{Prefix: netip.MustParsePrefix("10.0.0.0/24"), Nexthops: []FIBNexthop{countedHop}},
 	})
 	wirePipeline(t, agent, "port0", "test")
@@ -1077,12 +1154,12 @@ func TestRoute_NexthopCounter(t *testing.T) {
 		Device: "port0", Pipeline: "test", Function: "test",
 		Chain: "test_chain", ModuleType: "route", ModuleName: "test",
 	}
-	dataplaneut.RequireRuleCounter(t, h, path, counterName, 1, pktSize)
+	requireNexthopCounter(t, agent, path, counterName, 1, pktSize)
 
 	// Close the round trip: ShowFIB's DumpFIB path must resolve the same
 	// name back out of the real C counter registry, not just accept it on
 	// write.
-	fib, err := handle.DumpFIB()
+	fib, err := backend.DumpFIB("test")
 	require.NoError(t, err)
 	require.Len(t, fib, 1)
 	require.Len(t, fib[0].Nexthops, 1)
@@ -1094,7 +1171,7 @@ func TestRoute_NexthopCounter(t *testing.T) {
 // counter name resolves to a single route-list member, not two.
 //
 // A duplicated member takes 2/N of the ECMP hash space instead of 1/N: this
-// exercises the real backend.UpdateModule dedup against shared memory and
+// exercises the real backend.NewFIB dedup against shared memory and
 // inspects the resulting nexthop set via DumpFIB, since a fake backend
 // cannot observe route-list membership at all.
 func TestRoute_ECMPSameIdentitySameCounterDedupesToOneMember(t *testing.T) {
@@ -1107,11 +1184,11 @@ func TestRoute_ECMPSameIdentitySameCounterDedupesToOneMember(t *testing.T) {
 	}
 
 	_, _, backend := setupRouteHarness(t, "port0")
-	handle := applyFIB(t, backend, "test", []FIBEntry{
+	applyFIB(t, backend, "test", []FIBEntry{
 		{Prefix: prefix, Nexthops: []FIBNexthop{hop, hop}},
 	})
 
-	fib, err := handle.DumpFIB()
+	fib, err := backend.DumpFIB("test")
 	require.NoError(t, err)
 	require.Len(t, fib, 1)
 	require.Len(t, fib[0].Nexthops, 1, "a duplicated hardware route must collapse to one route-list member")
@@ -1138,11 +1215,11 @@ func TestRoute_ECMPDistinctSourceMACRemainsSeparate(t *testing.T) {
 	}
 
 	_, _, backend := setupRouteHarness(t, "port0")
-	handle := applyFIB(t, backend, "test", []FIBEntry{
+	applyFIB(t, backend, "test", []FIBEntry{
 		{Prefix: prefix, Nexthops: []FIBNexthop{hopA, hopB}},
 	})
 
-	fib, err := handle.DumpFIB()
+	fib, err := backend.DumpFIB("test")
 	require.NoError(t, err)
 	require.Len(t, fib, 1)
 	require.Len(t, fib[0].Nexthops, 2, "nexthops differing only in src_mac must remain distinct routes")
@@ -1152,7 +1229,7 @@ func TestRoute_ECMPDistinctSourceMACRemainsSeparate(t *testing.T) {
 // distinct nexthops than one config can index is refused, not panicked on.
 //
 // Thirty refusals in a row on the 2 MB agent arena prove every refused
-// config is freed, since a leaked one would exhaust the arena. The fake
+// object is freed, since a leaked one would exhaust the arena. The fake
 // backend never builds the route-list key, so this runs on the real one.
 func Test_UpdateFIB_MoreThan1024DistinctNexthops(t *testing.T) {
 	const nexthopCount = bitset.MaxBits + 1
@@ -1172,12 +1249,12 @@ func Test_UpdateFIB_MoreThan1024DistinctNexthops(t *testing.T) {
 	}
 
 	for range 30 {
-		_, err := backend.UpdateModule("cfg", toFIBEntries(t, entries))
+		_, err := backend.NewFIB("cfg", []string{"port0"}, toFIBEntries(t, entries))
 		require.ErrorIs(t, err, route.ErrTooManyNexthops)
 	}
 
-	handle := applyFIB(t, backend, "cfg", entries[:bitset.MaxBits])
-	fib, err := handle.DumpFIB()
+	applyFIB(t, backend, "cfg", entries[:bitset.MaxBits])
+	fib, err := backend.DumpFIB("cfg")
 	require.NoError(t, err)
 	require.Len(t, fib, bitset.MaxBits)
 }
@@ -1186,7 +1263,7 @@ func Test_UpdateFIB_MoreThan1024DistinctNexthops(t *testing.T) {
 // UpdateFIBRequest doc comment's claim that an entry with no nexthops is
 // skipped rather than overwriting an earlier overlapping entry.
 //
-// It exercises the real backend.UpdateModule against shared memory, since
+// It exercises the real backend.NewFIB against shared memory, since
 // the fake backend used by the unit tests in modules/route/controlplane
 // only records the entries handed to it and cannot observe the
 // dataplane-visible skip.
@@ -1195,7 +1272,7 @@ func TestUpdateFIB_EmptyNexthopEntryDoesNotDisplaceEarlierEntry(t *testing.T) {
 
 	_, _, backend := setupRouteHarness(t, "port0")
 
-	handle := applyFIB(t, backend, "cfg", []FIBEntry{
+	applyFIB(t, backend, "cfg", []FIBEntry{
 		{Prefix: prefix, Nexthops: []FIBNexthop{routeNextHop}},
 		// Later entry covers the same range but carries no nexthops, so
 		// it must be skipped rather than blackholing or removing the
@@ -1203,7 +1280,7 @@ func TestUpdateFIB_EmptyNexthopEntryDoesNotDisplaceEarlierEntry(t *testing.T) {
 		{Prefix: prefix},
 	})
 
-	fib, err := handle.DumpFIB()
+	fib, err := backend.DumpFIB("cfg")
 	require.NoError(t, err)
 
 	require.Len(t, fib, 1, "expected the earlier nexthop-bearing entry to survive alone")
@@ -1277,6 +1354,62 @@ func TestUpdateFIB_ShadowedNexthopCounterExcludedFromMetrics(t *testing.T) {
 // without depending on it, so the generated-name check and the disabled
 // arm's "no per-nexthop counter registered" check cannot drift apart.
 const nexthopCounterPrefix = "nexthop_"
+
+// fibObjectType mirrors the unexported object-type constant in mod.go: the
+// table object a config's module links is always published under the
+// config's own name, of this type.
+const fibObjectType = "route_fib"
+
+// nexthopCounters reads the route module's per-nexthop counters at the
+// given path off its link to the "route_fib" object of the same name,
+// optionally filtered by name.
+//
+// An error is treated as no counters, mirroring backend.NexthopCounters:
+// the disabled counter arm never registers a link counter registry at
+// all, so the query legitimately has nothing to report.
+func nexthopCounters(tb testing.TB, agent *ffi.Agent, path dataplaneut.CounterPath, names []string) []ffi.CounterInfo {
+	tb.Helper()
+
+	infos, err := agent.DPConfig().ModuleObjectLinkCounters(
+		path.Device, path.Pipeline, path.Function, path.Chain,
+		path.ModuleType, path.ModuleName,
+		fibObjectType, path.ModuleName,
+		names,
+	)
+	if err != nil {
+		return nil
+	}
+	return infos
+}
+
+// requireNexthopCounter asserts that the named per-nexthop counter at the
+// given path holds wantPackets and wantBytes.
+//
+// The counter is expected to be size 2: [packets, bytes]. Reads worker 0.
+func requireNexthopCounter(
+	tb testing.TB,
+	agent *ffi.Agent,
+	path dataplaneut.CounterPath,
+	counterName string,
+	wantPackets, wantBytes uint64,
+) {
+	tb.Helper()
+
+	counters := nexthopCounters(tb, agent, path, []string{counterName})
+
+	byName := map[string][]uint64{}
+	for _, c := range counters {
+		if len(c.Values) > 0 {
+			byName[c.Name] = c.Values[0]
+		}
+	}
+
+	vals, ok := byName[counterName]
+	require.True(tb, ok, "counter %q not found in nexthop counters", counterName)
+	require.GreaterOrEqual(tb, len(vals), 2, "counter %q must have at least two values (packets, bytes)", counterName)
+	require.Equal(tb, wantPackets, vals[0], "counter %q packet count mismatch", counterName)
+	require.Equal(tb, wantBytes, vals[1], "counter %q byte count mismatch", counterName)
+}
 
 // nexthopCounterNames computes the per-nexthop counter names a counted arm
 // must materialize for fib, deduplicated since several nexthops can share
@@ -1382,7 +1515,7 @@ func TestRoute_NexthopCounterArms(t *testing.T) {
 						// Unfiltered on purpose: a filtered query would only
 						// prove the *expected* names are absent, not that no
 						// per-nexthop counter exists under any name.
-						for _, counter := range dataplaneut.RuleCounters(t, h, path, nil) {
+						for _, counter := range nexthopCounters(t, agent, path, nil) {
 							require.False(t, strings.HasPrefix(counter.Name, nexthopCounterPrefix),
 								"disabled arm must register no per-nexthop counter, found %q", counter.Name)
 						}
@@ -1393,7 +1526,7 @@ func TestRoute_NexthopCounterArms(t *testing.T) {
 					// query above: asserts the unfiltered result is a
 					// superset of names, so a nil sentinel that degraded to a
 					// filter excluding per-nexthop counters fails here.
-					unfiltered := dataplaneut.RuleCounters(t, h, path, nil)
+					unfiltered := nexthopCounters(t, agent, path, nil)
 					unfilteredNames := make(map[string]bool, len(unfiltered))
 					for _, counter := range unfiltered {
 						unfilteredNames[counter.Name] = true
@@ -1403,7 +1536,7 @@ func TestRoute_NexthopCounterArms(t *testing.T) {
 							"unfiltered query must include per-nexthop counter %q", name)
 					}
 
-					counters := dataplaneut.RuleCounters(t, h, path, names)
+					counters := nexthopCounters(t, agent, path, names)
 
 					var wantBytes uint64
 					for _, packet := range packets {

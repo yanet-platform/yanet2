@@ -71,7 +71,7 @@ func TestUpdateFIBInvalidRangesRejected(t *testing.T) {
 				Entries:    []*routepb.FIBEntry{test.entry},
 			})
 			require.Equal(t, codes.InvalidArgument, status.Code(err))
-			require.Empty(t, backend.updateCalls)
+			require.Empty(t, backend.calls)
 		})
 	}
 }
@@ -104,9 +104,9 @@ func TestUpdateFIBPreservesOrder(t *testing.T) {
 		Entries:    entries,
 	})
 	require.NoError(t, err)
-	require.Len(t, backend.updateCalls, 1)
+	require.Len(t, backend.newFIBCalls, 1)
 
-	got := backend.updateCalls[0]
+	got := backend.newFIBCalls[0].entries
 	require.Len(t, got, len(wantStarts))
 	for idx := range wantStarts {
 		gotStart, gotEnd, err := got[idx].GetRange().ToRange()

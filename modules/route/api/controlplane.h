@@ -6,22 +6,22 @@
 
 #include "common/network.h"
 
+#include "lib/controlplane/config/defines.h"
+#include "lib/counters/counters.h"
 #include "lib/errors/errors.h"
+
+#include "modules/route/dataplane/fib.h"
 
 struct agent;
 struct cp_module;
-struct memory_context;
+struct cp_object;
 struct route_module_config;
 
-// Zero-copy FIB iterator.
+// Allocate a module config linked to the table object published under the
+// same name.
 //
-// Walks IPv4 and IPv6 LPM trees sequentially. Each call to
-// fib_iter_next() advances to the next LPM range.
-//
-// Nexthop data (MAC addresses, device names) is resolved on demand directly
-// from shared memory without heap allocation.
-struct fib_iter;
-
+// A generation wiring the module into a chain installs only when the
+// object is published, so the object goes out first.
 struct cp_module *
 route_module_config_new(
 	struct agent *agent, const char *name, yanet_error **err
@@ -34,16 +34,6 @@ route_module_config_new(
 int
 route_module_config_free(struct cp_module *cp_module, yanet_error **err);
 
-int
-route_module_config_data_init(
-	struct route_module_config *config,
-	struct memory_context *memory_context
-);
-
-// Releases the table set up by route_module_config_data_init.
-void
-route_module_config_data_fini(struct route_module_config *config);
-
 // Registers the module-level counters and records their ids in the config.
 //
 // The counter registry must already be initialized. Callers that build a
@@ -54,66 +44,66 @@ route_module_config_register_counters(
 	struct route_module_config *config, yanet_error **err
 );
 
-// Appends a nexthop route to the config.
+// Link a device by name and return its index in the module's device table.
 //
-// A NULL or empty counter_name leaves the nexthop uncounted — otherwise it
-// names a per-nexthop packet/byte counter to register.
+// A name already linked keeps its index, so the table only ever grows and
+// a table object built against it stays valid across relinks.
 int
-route_module_config_add_route(
+route_module_config_link_device(
 	struct cp_module *cp_module,
-	struct ether_addr dst_addr,
-	struct ether_addr src_addr,
 	const char *device_name,
-	const char *counter_name,
+	uint32_t *index,
 	yanet_error **err
 );
 
-int
-route_module_config_add_route_list(
-	struct cp_module *cp_module, size_t count, const uint32_t *indexes
+// A route config as one generation holds it: the module config and, when
+// published, its table object, pinned for reading.
+struct route_snapshot;
+
+// Pin the generation publishing the named config.
+//
+// The pin keeps the module config and its table object alive until
+// route_snapshot_close. Fails with the not-found kind when no module
+// config of that name is published.
+struct route_snapshot *
+route_snapshot_open(struct agent *agent, const char *name, yanet_error **err);
+
+// Release the pin. Walks taken from the handle must be freed first.
+void
+route_snapshot_close(struct route_snapshot *published);
+
+// Whether the generation holds a table object for the config.
+bool
+route_snapshot_has_fib(const struct route_snapshot *published);
+
+// Size of the module's device table.
+uint64_t
+route_snapshot_device_count(const struct route_snapshot *published);
+
+// Name at the given index of the module's device table, or an empty
+// string past its end.
+const char *
+route_snapshot_device_name(
+	const struct route_snapshot *published, uint64_t index
 );
 
-int
-route_module_config_add_prefix_v4(
-	struct cp_module *cp_module,
-	const uint8_t *from,
-	const uint8_t *to,
-	uint32_t route_list_index
-);
+// Zero-copy walk over a table, reading shared memory in place.
+struct fib_iter;
 
-int
-route_module_config_add_prefix_v6(
-	struct cp_module *cp_module,
-	const uint8_t *from,
-	const uint8_t *to,
-	uint32_t route_list_index
-);
-
-// Returns the number of distinct hardware routes held by the config.
-uint64_t
-route_module_config_route_count(struct cp_module *cp_module);
-
-// Returns the number of IPv4 FIB ranges.
+// Open a walk over the published table, borrowing the handle's pin.
 //
-// Counts the same ranges a FIB iterator would yield for the IPv4 LPM, without
-// materializing any of them.
-uint64_t
-route_module_config_fib_range_count_v4(struct cp_module *cp_module);
-
-// Returns the number of IPv6 FIB ranges.
-//
-// Counts the same ranges a FIB iterator would yield for the IPv6 LPM, without
-// materializing any of them.
-uint64_t
-route_module_config_fib_range_count_v6(struct cp_module *cp_module);
-
-// Create a FIB iterator for the given module config.
-//
-// Returns NULL on allocation failure.
+// Fails with the not-found kind when the generation holds no table
+// object for the config.
 struct fib_iter *
-fib_iter_new(struct cp_module *cp_module);
+route_snapshot_fib_iter(struct route_snapshot *published, yanet_error **err);
 
-// Free a FIB iterator created by fib_iter_new.
+// Open a walk over an owned object, or NULL on allocation failure.
+//
+// Device names stay empty: they resolve through the module that runs the
+// table, which an owned object does not know.
+struct fib_iter *
+fib_iter_new(struct cp_object *cp_object);
+
 void
 fib_iter_free(struct fib_iter *it);
 

@@ -46,7 +46,7 @@ route_count_packet(
 
 static uint32_t
 route_handle_v4(
-	struct route_module_config *config,
+	const struct route_fib *fib,
 	struct packet *packet,
 	enum route_drop_reason *drop_reason
 ) {
@@ -73,12 +73,12 @@ route_handle_v4(
 
 	// Past the TTL check a miss is the only remaining way to fail.
 	*drop_reason = ROUTE_DROP_NO_ROUTE;
-	return lpm_lookup(&config->fib.lpm_v4, 4, (uint8_t *)&header->dst_addr);
+	return lpm_lookup(&fib->lpm_v4, 4, (uint8_t *)&header->dst_addr);
 }
 
 static uint32_t
 route_handle_v6(
-	struct route_module_config *config,
+	const struct route_fib *fib,
 	struct packet *packet,
 	enum route_drop_reason *drop_reason
 ) {
@@ -95,7 +95,7 @@ route_handle_v6(
 
 	// Past the hop limit check a miss is the only remaining way to fail.
 	*drop_reason = ROUTE_DROP_NO_ROUTE;
-	return lpm_lookup(&config->fib.lpm_v6, 16, header->dst_addr);
+	return lpm_lookup(&fib->lpm_v6, 16, header->dst_addr);
 }
 
 static void
@@ -161,11 +161,28 @@ route_handle_packets(
 
 	struct counter_storage *counter_storage =
 		module_ectx->abs_counter_storage;
-	// Per-route counters live in the "routes" runtime registry, resolved
-	// through its own per-worker storage.
-	struct counter_storage *routes_storage = module_ectx_counter_storage(
-		module_ectx, route_config->routes_registry_idx
+
+	// The table and its per-nexthop counters sit behind the module's
+	// object link, resolved once per batch.
+	struct module_object_link_ectx *link = object_link_get_address(
+		module_ectx, route_config->fib_link_idx
 	);
+	if (link == NULL) {
+		struct packet *packet;
+		while ((packet = packet_list_pop(&packet_front->input)) != NULL
+		) {
+			packet_front_drop(packet_front, packet);
+		}
+		return;
+	}
+	struct route_fib_object *fib_object = container_of(
+		link->abs_object_ectx->abs_cp_object,
+		struct route_fib_object,
+		cp_object
+	);
+	const struct route_fib *fib = &fib_object->fib;
+	struct counter_storage *routes_storage =
+		ADDR_OF(&link->counter_storage);
 
 	struct packet *packet;
 	while ((packet = packet_list_pop(&packet_front->input)) != NULL) {
@@ -177,15 +194,13 @@ route_handle_packets(
 
 		if (packet->network_header.type ==
 		    rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV4)) {
-			route_list_id = route_handle_v4(
-				route_config, packet, &drop_reason
-			);
+			route_list_id =
+				route_handle_v4(fib, packet, &drop_reason);
 			counters = &route_config->counters_v4;
 		} else if (packet->network_header.type ==
 			   rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV6)) {
-			route_list_id = route_handle_v6(
-				route_config, packet, &drop_reason
-			);
+			route_list_id =
+				route_handle_v6(fib, packet, &drop_reason);
 			counters = &route_config->counters_v6;
 		} else {
 			route_count_packet(
@@ -210,7 +225,7 @@ route_handle_packets(
 		}
 
 		struct route_list *route_list =
-			ADDR_OF(&route_config->fib.route_lists) + route_list_id;
+			ADDR_OF(&fib->route_lists) + route_list_id;
 		if (route_list->count == 0) {
 			route_count_packet(
 				counter_storage,
@@ -223,11 +238,10 @@ route_handle_packets(
 
 		// TODO: Route selection should be based on hash/NUMA/dp
 		// instance/etc
-		uint64_t route_index = ADDR_OF(&route_config->fib.route_indexes
+		uint64_t route_index = ADDR_OF(&fib->route_indexes
 		)[route_list->start + packet->hash % route_list->count];
 
-		struct route *route =
-			ADDR_OF(&route_config->fib.routes) + route_index;
+		struct route *route = ADDR_OF(&fib->routes) + route_index;
 
 		uint16_t device_id = module_ectx_encode_device(
 			module_ectx, route->device_id
