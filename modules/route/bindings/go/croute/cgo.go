@@ -276,24 +276,6 @@ func (m *Snapshot) HasFIB() bool {
 	return bool(C.route_snapshot_has_fib(m.ptr))
 }
 
-// RouteCount returns the number of distinct hardware nexthops the
-// published table holds, 0 without a table object.
-func (m *Snapshot) RouteCount() uint64 {
-	return uint64(C.route_snapshot_route_count(m.ptr))
-}
-
-// FIBRangeCountV4 returns the number of IPv4 ranges of the published
-// table, 0 without a table object.
-func (m *Snapshot) FIBRangeCountV4() uint64 {
-	return uint64(C.route_snapshot_range_count_v4(m.ptr))
-}
-
-// FIBRangeCountV6 returns the number of IPv6 ranges of the published
-// table, 0 without a table object.
-func (m *Snapshot) FIBRangeCountV6() uint64 {
-	return uint64(C.route_snapshot_range_count_v6(m.ptr))
-}
-
 // Devices returns the module's device table by index, the index the
 // table's nexthops name a device by.
 func (m *Snapshot) Devices() []string {

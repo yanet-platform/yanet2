@@ -1225,6 +1225,15 @@ func TestRoute_ECMPDistinctSourceMACRemainsSeparate(t *testing.T) {
 	require.Len(t, fib[0].Nexthops, 2, "nexthops differing only in src_mac must remain distinct routes")
 }
 
+// A device name the module's table entry cannot hold whole is rejected
+// instead of being stored truncated.
+func Test_NewModule_RejectsOverlongDeviceName(t *testing.T) {
+	_, _, backend := setupRouteHarness(t, "port0")
+
+	_, _, err := backend.NewModule("cfg", []string{strings.Repeat("p", ffi.MaxDeviceNameLen)})
+	require.ErrorContains(t, err, "exceeds the")
+}
+
 // Test_UpdateFIB_MoreThan1024DistinctNexthops verifies that a FIB with more
 // distinct nexthops than one config can index is refused, not panicked on.
 //

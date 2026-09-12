@@ -76,20 +76,6 @@ route_snapshot_close(struct route_snapshot *snapshot);
 bool
 route_snapshot_has_fib(const struct route_snapshot *snapshot);
 
-// Nexthops the published table holds, 0 without a table object.
-uint64_t
-route_snapshot_route_count(const struct route_snapshot *snapshot);
-
-// IPv4 ranges a walk of the published table would yield, 0 without a
-// table object.
-uint64_t
-route_snapshot_range_count_v4(const struct route_snapshot *snapshot);
-
-// IPv6 ranges a walk of the published table would yield, 0 without a
-// table object.
-uint64_t
-route_snapshot_range_count_v6(const struct route_snapshot *snapshot);
-
 // Size of the module's device table.
 uint64_t
 route_snapshot_device_count(const struct route_snapshot *snapshot);

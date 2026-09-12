@@ -6,6 +6,8 @@ import (
 	"net"
 	"net/netip"
 	"slices"
+
+	"github.com/yanet-platform/yanet2/controlplane/ffi"
 )
 
 const (
@@ -37,10 +39,15 @@ type FIBEntry struct {
 // LinkDevice links a device by name and returns its index in the module's
 // device table, the index a table object's nexthops name it by.
 //
-// A name already linked keeps its index.
+// A name already linked keeps its index. A name the fixed-size table
+// entry cannot hold whole is rejected rather than stored truncated, which
+// would alias it with its prefix.
 func (m *ModuleConfig) LinkDevice(device string) (uint32, error) {
 	if device == "" {
 		return 0, fmt.Errorf("device name is required")
+	}
+	if err := ffi.ValidateDeviceName(device); err != nil {
+		return 0, fmt.Errorf("device name %q: %w", device, err)
 	}
 	return m.linkDevice(device)
 }

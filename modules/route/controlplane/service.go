@@ -5,6 +5,8 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"maps"
+	"slices"
 	"strings"
 	"time"
 
@@ -468,8 +470,8 @@ func (m *RouteService) UpdateFIB(
 			// The grown module is out and the published object stays
 			// under it. The object moves along when this process owns
 			// it, an earlier process's object is not ours to hold, so
-			// only its sizes are read back and its apply time stays
-			// unknown.
+			// its facts are read back off the dataplane and its apply
+			// time stays unknown.
 			publishErr = err
 			if ok {
 				entry.FIB = current.FIB
@@ -479,10 +481,8 @@ func (m *RouteService) UpdateFIB(
 				entry.NexthopCount = current.NexthopCount
 				entry.NexthopCounterNames = current.NexthopCounterNames
 				entry.UpdatedAt = current.UpdatedAt
-			} else {
-				entry.FIBRangeCountV4 = published.FIBRangeCountV4
-				entry.FIBRangeCountV6 = published.FIBRangeCountV6
-				entry.NexthopCount = published.NexthopCount
+			} else if dumped, err := m.backend.DumpFIB(name); err == nil {
+				entry.FIBRangeCountV4, entry.FIBRangeCountV6, entry.NexthopCount, entry.NexthopCounterNames = tableFacts(dumped)
 			}
 			return entry, nil
 		}
@@ -545,6 +545,32 @@ func (m *RouteService) UpdateFIB(
 // dangling, so the free cannot be refused.
 func (m *RouteService) discard(handle interface{ Free() error }) {
 	_ = handle.Free()
+}
+
+// tableFacts measures a dumped table: ranges per family, distinct
+// hardware nexthops reachable through them and the sorted set of counter
+// names in use.
+func tableFacts(entries []croute.FIBEntry) (rangesV4, rangesV6, nexthops uint64, counterNames []string) {
+	seen := map[HardwareRoute]struct{}{}
+	names := map[string]struct{}{}
+	for _, entry := range entries {
+		if entry.AddressFamily == croute.AddressFamilyIPv4 {
+			rangesV4++
+		} else {
+			rangesV6++
+		}
+		for _, nh := range entry.Nexthops {
+			seen[HardwareRoute{
+				SourceMAC:      [6]byte(nh.SrcMAC),
+				DestinationMAC: [6]byte(nh.DstMAC),
+				Device:         nh.Device,
+			}] = struct{}{}
+			if nh.Counter != "" {
+				names[nh.Counter] = struct{}{}
+			}
+		}
+	}
+	return rangesV4, rangesV6, uint64(len(seen)), slices.Sorted(maps.Keys(names))
 }
 
 // extendDeviceTable appends the devices the entries name that the table

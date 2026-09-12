@@ -6,11 +6,14 @@ import (
 	"net"
 	"net/netip"
 	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/gopacket/gopacket/layers"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/yanet-platform/yanet2/common/go/xpacket"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
@@ -207,8 +210,10 @@ func TestRouteStress_ConcurrentUpdatesReadsAndPacketsLeaveNoLeak(t *testing.T) {
 	go writer(20)
 
 	// Readers: ShowFIB must never mix two versions' nexthops in one
-	// response. NotFound is tolerated — it only means a read landed in
-	// the gap a concurrent delete+republish opens.
+	// response. NotFound is the one tolerated error, a read that landed
+	// in the gap a concurrent delete+republish opens, and at least one
+	// read must come back whole for the check to mean anything.
+	var wholeReads atomic.Int64
 	showFIBReader := func() {
 		defer readers.Done()
 		for {
@@ -220,6 +225,7 @@ func TestRouteStress_ConcurrentUpdatesReadsAndPacketsLeaveNoLeak(t *testing.T) {
 
 			resp, err := service.ShowFIB(ctx, &routepb.ShowFIBRequest{Name: stressConfigName})
 			if err != nil {
+				assert.Equal(t, codes.NotFound, status.Code(err), "ShowFIB may only fail with NotFound: %v", err)
 				continue
 			}
 
@@ -240,6 +246,7 @@ func TestRouteStress_ConcurrentUpdatesReadsAndPacketsLeaveNoLeak(t *testing.T) {
 			if v4 == nil || v6 == nil {
 				continue
 			}
+			wholeReads.Add(1)
 			v4Version, v6Version := stressMACVersion(v4), stressMACVersion(v6)
 			assert.NotEqual(t, -1, v4Version, "v4 nexthop MAC must belong to a known version")
 			assert.Equal(t, v4Version, v6Version, "a single ShowFIB response must never mix two versions")
@@ -263,8 +270,9 @@ func TestRouteStress_ConcurrentUpdatesReadsAndPacketsLeaveNoLeak(t *testing.T) {
 	}
 
 	// The packet injector asserts every forwarded packet's dst MAC
-	// belongs to some version's set — never garbage, never a MAC no
-	// version ever carried.
+	// belongs to some version's set, never garbage, never a MAC no
+	// version ever carried, and that forwarding never stops altogether.
+	var forwarded atomic.Int64
 	packetInjector := func() {
 		defer readers.Done()
 		for {
@@ -280,6 +288,7 @@ func TestRouteStress_ConcurrentUpdatesReadsAndPacketsLeaveNoLeak(t *testing.T) {
 				continue
 			}
 			for _, out := range result.Output {
+				forwarded.Add(1)
 				resultPkt := xpacket.ParseEtherPacket(out.RawData)
 				ethLayer, ok := resultPkt.Layer(layers.LayerTypeEthernet).(*layers.Ethernet)
 				if !assert.True(t, ok) {
@@ -301,6 +310,8 @@ func TestRouteStress_ConcurrentUpdatesReadsAndPacketsLeaveNoLeak(t *testing.T) {
 	writers.Wait()
 	close(stop)
 	readers.Wait()
+	require.Positive(t, wholeReads.Load(), "no ShowFIB read came back whole, the torn-read check ran on nothing")
+	require.Positive(t, forwarded.Load(), "no packet was forwarded during the run")
 
 	devices = append(devices, unwireRouteInput(t, agent, "port0")...)
 

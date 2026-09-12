@@ -164,8 +164,6 @@ type fakeBackend struct {
 	modulePublished map[string]bool
 	moduleTable     map[string][]string
 	fibPublished    map[string]bool
-	// publishedSizes holds the table sizes Published reports per name.
-	publishedSizes map[string]route.Published
 
 	// nextModuleHandle / nextFIBHandle, when set for a name, are
 	// returned (and then cleared) by the next NewModule / NewFIB call
@@ -216,7 +214,6 @@ func newFakeBackend() *fakeBackend {
 		modulePublished:  map[string]bool{},
 		moduleTable:      map[string][]string{},
 		fibPublished:     map[string]bool{},
-		publishedSizes:   map[string]route.Published{},
 		nextModuleHandle: map[string]*fakeModuleHandle{},
 		nextFIBHandle:    map[string]*fakeFIBHandle{},
 		lastModuleHandle: map[string]*fakeModuleHandle{},
@@ -235,16 +232,6 @@ func (m *fakeBackend) seedRestart(name string, devices []string) {
 	m.modulePublished[name] = true
 	m.moduleTable[name] = devices
 	m.fibPublished[name] = true
-}
-
-// seedRestartSizes sets the sizes Published reports for a table an
-// earlier process applied.
-func (m *fakeBackend) seedRestartSizes(name string, rangesV4, rangesV6, nexthops uint64) {
-	m.publishedSizes[name] = route.Published{
-		FIBRangeCountV4: rangesV4,
-		FIBRangeCountV6: rangesV6,
-		NexthopCount:    nexthops,
-	}
 }
 
 func (m *fakeBackend) recordModulePublish(name string, table []string) {
@@ -278,13 +265,9 @@ func (m *fakeBackend) Published(name string) (route.Published, error) {
 	if !m.modulePublished[name] {
 		return route.Published{}, fmt.Errorf("module %q: %w", name, ffi.ErrNotFound)
 	}
-	sizes := m.publishedSizes[name]
 	return route.Published{
-		Devices:         append([]string(nil), m.moduleTable[name]...),
-		FIB:             m.fibPublished[name],
-		FIBRangeCountV4: sizes.FIBRangeCountV4,
-		FIBRangeCountV6: sizes.FIBRangeCountV6,
-		NexthopCount:    sizes.NexthopCount,
+		Devices: append([]string(nil), m.moduleTable[name]...),
+		FIB:     m.fibPublished[name],
 	}, nil
 }
 
@@ -1253,7 +1236,15 @@ func Test_RouteService_UpdateFIB_RestartNewDeviceRepublishesModule(t *testing.T)
 func Test_RouteService_UpdateFIB_RestartObjectPublishFailureAfterGrownModuleKeepsModule(t *testing.T) {
 	backend := newFakeBackend()
 	backend.seedRestart("cfg", []string{"", "eth0"})
-	backend.seedRestartSizes("cfg", 11, 23, 5)
+	// The table the earlier process applied: two IPv4 ranges and one
+	// IPv6 range over two counted nexthops, one of them shared.
+	nexthopA := croute.FIBNexthop{DstMAC: net.HardwareAddr{0, 0, 0, 0, 0, 0xa}, SrcMAC: net.HardwareAddr{0, 0, 0, 0, 0, 1}, Device: "eth0", Counter: "nexthop_a"}
+	nexthopB := croute.FIBNexthop{DstMAC: net.HardwareAddr{0, 0, 0, 0, 0, 0xb}, SrcMAC: net.HardwareAddr{0, 0, 0, 0, 0, 1}, Device: "eth0", Counter: "nexthop_b"}
+	backend.dumpEntries["cfg"] = []croute.FIBEntry{
+		{AddressFamily: croute.AddressFamilyIPv4, PrefixFrom: netip.MustParseAddr("10.0.0.0"), PrefixTo: netip.MustParseAddr("10.0.0.255"), Nexthops: []croute.FIBNexthop{nexthopA, nexthopB}},
+		{AddressFamily: croute.AddressFamilyIPv4, PrefixFrom: netip.MustParseAddr("10.0.1.0"), PrefixTo: netip.MustParseAddr("10.0.1.255"), Nexthops: []croute.FIBNexthop{nexthopA}},
+		{AddressFamily: croute.AddressFamilyIPv6, PrefixFrom: netip.MustParseAddr("fd00::"), PrefixTo: netip.MustParseAddr("fd00::ffff"), Nexthops: []croute.FIBNexthop{nexthopB}},
+	}
 	backend.nextFIBHandle["cfg"] = &fakeFIBHandle{publishErr: errors.New("boom")}
 	service := route.NewRouteService(backend)
 
@@ -1270,11 +1261,13 @@ func Test_RouteService_UpdateFIB_RestartObjectPublishFailureAfterGrownModuleKeep
 	require.True(t, backend.lastFIBHandle["cfg"].freed, "the object that failed to publish must be discarded")
 
 	// The table the dataplane keeps running is the earlier process's,
-	// so its sizes are reported and its apply time is not.
-	requireConfigGauges(t, service, 11, 23, 5)
+	// so its facts are read back off it and its apply time is not.
+	requireConfigGauges(t, service, 2, 1, 2)
 	all, err := service.Metrics()
 	require.NoError(t, err)
 	require.Empty(t, findMetrics(all, "route_config_updated_timestamp_seconds"))
+	require.Contains(t, backend.nexthopQueries, []string{"nexthop_a", "nexthop_b"},
+		"the counters of the table still running must keep being scraped")
 
 	list, err := service.ListConfigs(t.Context(), &routepb.ListConfigsRequest{})
 	require.NoError(t, err)
