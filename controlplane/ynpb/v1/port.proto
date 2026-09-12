@@ -1,0 +1,17 @@
+syntax = "proto3";
+
+package controlplane.ynpb.v1;
+
+option go_package = "github.com/yanet-platform/yanet2/controlplane/ynpb/v1;ynpb";
+
+import "common/commonpb/v1/metric.proto";
+
+// PortMetricsService exposes hardware port counters.
+//
+// A port counter describes the port, not a dataplane instance, so every
+// gateway returns the same values. Serving them apart from the instance
+// metrics keeps one series per port.
+service PortMetricsService {
+  // GetMetrics returns a snapshot of port metrics.
+  rpc GetMetrics(common.commonpb.v1.GetMetricsRequest) returns (common.commonpb.v1.GetMetricsResponse);
+}

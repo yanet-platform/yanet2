@@ -1,10 +1,22 @@
 # Metrics reference
 
 Operator-facing metrics exported by the built-in counters service and
-collected through the gateway metrics endpoint. All worker and port
+collected through the gateway metrics endpoints. All worker and port
 families come from the dataplane shared-memory counter storage; a family
 whose collection fails is omitted from the snapshot with a logged
 warning — values are never synthesized as zeros.
+
+The metrics are split across two gRPC services, one per scope. Worker
+metrics describe the dataplane instance behind the gateway that answers,
+and one gateway runs per instance, so a collector may record which
+gateway it scraped them from:
+
+    /controlplane.ynpb.v1.MetricsService/GetMetrics
+
+Port metrics describe the hardware itself and read the same from every
+gateway, so no gateway identity belongs on them:
+
+    /controlplane.ynpb.v1.PortMetricsService/GetMetrics
 
 ## Worker metrics
 
@@ -64,3 +76,20 @@ One series per DPDK port and xstat counter, cumulative:
 
 - `port_counter_value` (counter) — labels `port_id`, `port_name`,
   `counter`.
+
+Every gateway answers with the same values, so any one of them can be
+scraped and a gateway that is down costs nothing as long as another is.
+Scraping several is equally correct only where the collector attaches
+nothing that identifies the gateway it asked: a collector that labels a
+series by its scrape target must either take this endpoint from one
+gateway or drop that label, or a summed counter counts one port once per
+gateway. That is what divides the two scopes — a series an aggregator
+would sum belongs here.
+
+Only the port endpoint serves them. A collector configured against the
+instance endpoint alone gets no port series and no error saying so, and a
+deployment that grants metrics access per method has to grant this one.
+
+The same values are exposed per port through the
+`controlplane.ynpb.v1.CountersService/Ports` RPC, which reports every port
+from whichever instance is asked.
