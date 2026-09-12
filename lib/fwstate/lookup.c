@@ -7,7 +7,7 @@
 #include "lib/dataplane/packet/data.h"
 #include "lib/dataplane/packet/packet.h"
 
-#include "fwtable.h"
+#include "lib/statemap/fwtable.h"
 #include "lookup.h"
 #include "types.h"
 

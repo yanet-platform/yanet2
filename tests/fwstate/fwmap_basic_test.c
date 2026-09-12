@@ -7,7 +7,7 @@
  */
 
 #include "common/memory.h"
-#include "lib/fwstate/fwmap.h"
+#include "lib/statemap/fwmap.h"
 #include "test_utils.h"
 
 #include <assert.h>
