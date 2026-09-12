@@ -288,11 +288,8 @@ func (m *FWStateService) retention() func(metrics.MetricID) bool {
 }
 
 func (m *FWStateService) configNamesSet() map[string]struct{} {
-	m.stateMu.RLock()
-	defer m.stateMu.RUnlock()
-
-	configNames := make(map[string]struct{}, len(m.configs))
-	for name := range m.configs {
+	configNames := map[string]struct{}{}
+	for _, name := range m.configs.Names() {
 		configNames[name] = struct{}{}
 	}
 	return configNames

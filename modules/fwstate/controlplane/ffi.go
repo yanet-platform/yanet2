@@ -65,11 +65,17 @@ func maskedUpdate(old *FwStateConfig, req *fwstatepb.UpdateConfigRequest) (*fwst
 // FwStateConfig is a service-owned fwstate module config plus the names of
 // the fwstate-map objects it links, which the service needs for ShowConfig
 // and for stats and entry reads delegated to the map objects.
+//
+// The exposed snapshot — the map names and the sync settings — is
+// captured at construction and never read back from shared memory, so
+// readers may hold a config past its retirement: the Go values stay
+// valid even after the shared-memory handle is freed.
 type FwStateConfig struct {
 	*cfwstate.ModuleConfig
 
-	mapNameV4 string
-	mapNameV6 string
+	mapNameV4  string
+	mapNameV6  string
+	syncConfig cfwstate.SyncConfig
 }
 
 // NewFWStateModuleConfig builds the config in one step, ready to
@@ -128,6 +134,7 @@ func newFWStateModuleConfig(
 		ModuleConfig: moduleCfg,
 		mapNameV4:    fw4MapName,
 		mapNameV6:    fw6MapName,
+		syncConfig:   syncConfig,
 	}, nil
 }
 
@@ -217,5 +224,5 @@ func (m *FwStateConfig) MapNameV6() string {
 }
 
 func (m *FwStateConfig) GetSyncConfig() *fwstatepb.SyncConfig {
-	return fwstatepb.FromCSyncConfig(m.ModuleConfig.GetSyncConfig())
+	return fwstatepb.FromCSyncConfig(m.syncConfig)
 }
