@@ -19,7 +19,7 @@ use std::{
 use readinesspb::pb::{ReadyRequest, ReadyResponse, Scope};
 use serde::Serialize;
 use tokio::{sync::mpsc, task::AbortHandle};
-use ync::{client::Connection, discovery, errors::Error, output};
+use ync::{client::Connection, errors::Error, output};
 
 use crate::{
     Cmd, READINESS, ServiceReport, print_report, probe,
@@ -51,8 +51,8 @@ const REDISCOVER_INTERVAL: Duration = Duration::from_secs(10);
 /// the server's own contract) that repopulates it as first sightings. So
 /// this deliberately favours starting the watch promptly over a prettier
 /// first screen, which is why it is its own constant rather than a reuse of
-/// [`discovery::DISCOVERY_TIMEOUT`] — that one scopes only best-effort
-/// enrichment such as hints and shell completions.
+/// [`ync::discovery::DISCOVERY_TIMEOUT`] — that one scopes only
+/// best-effort enrichment such as hints and shell completions.
 const PROBE_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Runs aggregate `--watch`.
@@ -77,7 +77,7 @@ pub async fn run(cmd: &Cmd) -> Result<bool, Error> {
         reports.push(probe_bounded(&connection, service.clone()).await);
     }
 
-    let aliases = discovery::alias_map(&services);
+    let aliases = READINESS.alias_map(&services);
     let mut alias_width = render::name_width(aliases.values().map(String::as_str));
     let mut scope_width = render::name_width(
         reports
@@ -587,15 +587,15 @@ async fn rediscover(
 /// to its full name when the derived alias collides with one already
 /// assigned.
 ///
-/// Compares against every known service's own *derived* alias
-/// (`discovery::derive_alias`), not against `aliases`' assigned values: a
-/// pair of services that already collided has had both of its values
-/// rewritten to their FQNs, so comparing against values alone would miss a
-/// third service later deriving that same alias.
+/// Compares against every known service's own *derived* alias, not against
+/// the aliases already assigned: a pair of services that already collided
+/// has had both of its values rewritten to their full names, so comparing
+/// against values alone would miss a third service later deriving that same
+/// alias.
 fn assign_alias(service: &str, aliases: &BTreeMap<String, String>) -> String {
-    let candidate = discovery::derive_alias(service);
+    let candidate = READINESS.derive_alias(service);
 
-    let collides = aliases.keys().any(|known| discovery::derive_alias(known) == candidate);
+    let collides = aliases.keys().any(|known| READINESS.derive_alias(known) == candidate);
 
     if collides { service.to_owned() } else { candidate }
 }
