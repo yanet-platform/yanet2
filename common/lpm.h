@@ -160,6 +160,247 @@ lpm_free(struct lpm *lpm) {
 	memory_context_fini(memory_context);
 }
 
+/*
+ * Remap tables of a merged trie: one entry per merged leaf, holding the
+ * value each source trie returns over the leaf's span. Each table is a
+ * value line allocated under the merged trie's own memory context, so
+ * it is position independent and may live in shared memory next to the
+ * trie. Release the tables before the merged trie itself.
+ */
+struct lpm_merge_table {
+	struct vline a;
+	struct vline b;
+};
+
+static inline void
+lpm_merge_table_free(struct lpm_merge_table *table) {
+	vline_free(&table->a);
+	vline_free(&table->b);
+	memset(table, 0, sizeof(*table));
+}
+
+// Walk state: the merged trie under construction and host side scratch
+// the leaf emission grows in; the final tables are cut as value lines
+// once the leaf count is known.
+struct lpm_merge_ctx {
+	struct lpm *merged;
+	uint32_t *remap_a;
+	uint32_t *remap_b;
+	uint32_t count;
+	uint32_t capacity;
+};
+
+static inline int
+lpm_merge_grow(struct lpm_merge_ctx *ctx) {
+	if (ctx->count < ctx->capacity) {
+		return 0;
+	}
+	uint32_t new_capacity = ctx->capacity * 2 + 256;
+	uint32_t *remap_a = (uint32_t *)realloc(
+		ctx->remap_a, new_capacity * sizeof(uint32_t)
+	);
+	if (remap_a == NULL) {
+		return -1;
+	}
+	ctx->remap_a = remap_a;
+	uint32_t *remap_b = (uint32_t *)realloc(
+		ctx->remap_b, new_capacity * sizeof(uint32_t)
+	);
+	if (remap_b == NULL) {
+		return -1;
+	}
+	ctx->remap_b = remap_b;
+	ctx->capacity = new_capacity;
+	return 0;
+}
+
+// Emits a merged leaf carrying the pair of source values effective over
+// the span of the slot being filled.
+static inline int
+lpm_merge_leaf(
+	struct lpm_merge_ctx *ctx,
+	uint32_t value_a,
+	uint32_t value_b,
+	union lpm_value *slot
+) {
+	if (lpm_merge_grow(ctx)) {
+		return -1;
+	}
+	ctx->remap_a[ctx->count] = value_a;
+	ctx->remap_b[ctx->count] = value_b;
+	slot->value = LPM_VALUE_SET(ctx->count);
+	++ctx->count;
+	return 0;
+}
+
+// Lockstep walk of both source tries. Each source slot either holds a
+// terminal — the value effective for its whole span — or descends; the
+// merged trie subdivides a span exactly when either source descends
+// below it, so every merged leaf lies inside a region where both source
+// lookups are constant.
+static inline int
+lpm_merge_walk(
+	struct lpm_merge_ctx *ctx,
+	const struct lpm_page *page_a,
+	const struct lpm_page *page_b,
+	uint32_t inherited_a,
+	uint32_t inherited_b,
+	uint8_t key_size,
+	uint8_t depth,
+	struct lpm_page *page_m
+) {
+	for (uint32_t byte = 0; byte < 256; ++byte) {
+		uint32_t value_a = inherited_a;
+		uint32_t value_b = inherited_b;
+		const struct lpm_page *child_a = NULL;
+		const struct lpm_page *child_b = NULL;
+
+		if (page_a != NULL) {
+			union lpm_value slot = page_a->values[byte];
+			if (slot.value & LPM_VALUE_FLAG) {
+				value_a = LPM_VALUE_GET(slot.value);
+			} else {
+				// The child offset is relative to the slot
+				// itself, so it is resolved against the
+				// source page, never against the copy.
+				child_a = ADDR_OF(&page_a->values[byte].page);
+			}
+		}
+		if (page_b != NULL) {
+			union lpm_value slot = page_b->values[byte];
+			if (slot.value & LPM_VALUE_FLAG) {
+				value_b = LPM_VALUE_GET(slot.value);
+			} else {
+				child_b = ADDR_OF(&page_b->values[byte].page);
+			}
+		}
+
+		if (child_a == NULL && child_b == NULL) {
+			if (lpm_merge_leaf(
+				    ctx, value_a, value_b, page_m->values + byte
+			    )) {
+				return -1;
+			}
+			continue;
+		}
+
+		if (depth + 1 >= key_size) {
+			// Source tries never carry children at the last key
+			// byte; treat the impossible shape as a leaf.
+			if (lpm_merge_leaf(
+				    ctx, value_a, value_b, page_m->values + byte
+			    )) {
+				return -1;
+			}
+			continue;
+		}
+
+		// A fresh merged page has terminal slots, so the split
+		// below turns this slot into a descent and the recursion
+		// refills every slot of the child page.
+		if (lpm_new_page(ctx->merged, page_m->values + byte)) {
+			return -1;
+		}
+		struct lpm_page *child_m = ADDR_OF(&page_m->values[byte].page);
+		if (lpm_merge_walk(
+			    ctx,
+			    child_a,
+			    child_b,
+			    value_a,
+			    value_b,
+			    key_size,
+			    depth + 1,
+			    child_m
+		    )) {
+			return -1;
+		}
+	}
+	return 0;
+}
+
+/*
+ * Merges two tries over the same key size into one, whose leaves refine
+ * both source partitions, and produces the remap tables translating a
+ * merged leaf into the value each source returns over it:
+ *
+ *	remap_a[lpm_lookup(merged, key)] == lpm_lookup(a, key)
+ *	remap_b[lpm_lookup(merged, key)] == lpm_lookup(b, key)
+ *
+ * The merged trie is initialized by the routine; on failure it is
+ * released back to zero and the table stays empty. Values are carried
+ * opaquely, including the invalid sentinel of never inserted spans.
+ */
+static inline int
+lpm_merge(
+	struct lpm *merged,
+	struct memory_context *memory_context,
+	const char *name,
+	const struct lpm *a,
+	const struct lpm *b,
+	uint8_t key_size,
+	struct lpm_merge_table *table
+) {
+	memset(table, 0, sizeof(*table));
+	if (lpm_init(merged, memory_context, name)) {
+		return -1;
+	}
+
+	struct lpm_merge_ctx ctx = {
+		.merged = merged,
+		.remap_a = NULL,
+		.remap_b = NULL,
+		.count = 0,
+		.capacity = 0,
+	};
+
+	uint32_t invalid = LPM_VALUE_GET(0xffffffff);
+	int rc = lpm_merge_walk(
+		&ctx,
+		lpm_page(a, 0),
+		lpm_page(b, 0),
+		invalid,
+		invalid,
+		key_size,
+		0,
+		lpm_page(merged, 0)
+	);
+
+	if (rc == 0 && ctx.count > 0) {
+		if (vline_init(
+			    &table->a,
+			    &merged->memory_context,
+			    "lpm-merge:a",
+			    ctx.count
+		    ) ||
+		    vline_init(
+			    &table->b,
+			    &merged->memory_context,
+			    "lpm-merge:b",
+			    ctx.count
+		    )) {
+			rc = -1;
+		} else {
+			memcpy(vline_get_ptr(&table->a, 0),
+			       ctx.remap_a,
+			       ctx.count * sizeof(uint32_t));
+			memcpy(vline_get_ptr(&table->b, 0),
+			       ctx.remap_b,
+			       ctx.count * sizeof(uint32_t));
+		}
+	}
+
+	free(ctx.remap_a);
+	free(ctx.remap_b);
+
+	if (rc) {
+		lpm_merge_table_free(table);
+		lpm_free(merged);
+		memset(merged, 0, sizeof(*merged));
+		return -1;
+	}
+	return 0;
+}
+
 static inline int
 lpm_check_range_lo(
 	uint8_t key_size, const uint8_t *key, const uint8_t *from, uint8_t hop
