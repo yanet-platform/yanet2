@@ -24,5 +24,8 @@ lib_route_dp_dep = declare_dependency(
     '-Wl,--defsym',
     '-Wl,new_module_route=new_module_route',
     '-Wl,--export-dynamic-symbol=new_module_route',
+    '-Wl,--defsym',
+    '-Wl,new_object_route_fib=new_object_route_fib',
+    '-Wl,--export-dynamic-symbol=new_object_route_fib',
   ],
 )

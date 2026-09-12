@@ -13,6 +13,7 @@
 
 #include "lib/dataplane/module/module.h"
 #include "lib/dataplane/module/packet_front.h"
+#include "lib/dataplane/object/object.h"
 #include "lib/dataplane/packet/data.h"
 #include "lib/dataplane/packet/packet.h"
 #include "lib/dataplane/pipeline/econtext.h"
@@ -72,7 +73,7 @@ route_handle_v4(
 
 	// Past the TTL check a miss is the only remaining way to fail.
 	*drop_reason = ROUTE_DROP_NO_ROUTE;
-	return lpm_lookup(&config->lpm_v4, 4, (uint8_t *)&header->dst_addr);
+	return lpm_lookup(&config->fib.lpm_v4, 4, (uint8_t *)&header->dst_addr);
 }
 
 static uint32_t
@@ -94,7 +95,7 @@ route_handle_v6(
 
 	// Past the hop limit check a miss is the only remaining way to fail.
 	*drop_reason = ROUTE_DROP_NO_ROUTE;
-	return lpm_lookup(&config->lpm_v6, 16, header->dst_addr);
+	return lpm_lookup(&config->fib.lpm_v6, 16, header->dst_addr);
 }
 
 static void
@@ -209,7 +210,7 @@ route_handle_packets(
 		}
 
 		struct route_list *route_list =
-			ADDR_OF(&route_config->route_lists) + route_list_id;
+			ADDR_OF(&route_config->fib.route_lists) + route_list_id;
 		if (route_list->count == 0) {
 			route_count_packet(
 				counter_storage,
@@ -222,11 +223,11 @@ route_handle_packets(
 
 		// TODO: Route selection should be based on hash/NUMA/dp
 		// instance/etc
-		uint64_t route_index = ADDR_OF(&route_config->route_indexes
+		uint64_t route_index = ADDR_OF(&route_config->fib.route_indexes
 		)[route_list->start + packet->hash % route_list->count];
 
 		struct route *route =
-			ADDR_OF(&route_config->routes) + route_index;
+			ADDR_OF(&route_config->fib.routes) + route_index;
 
 		uint16_t device_id = module_ectx_encode_device(
 			module_ectx, route->device_id
@@ -260,6 +261,25 @@ static void
 route_module_commit(struct dp_config *dp_config, struct cp_module *cp_module) {
 	(void)dp_config;
 	(void)cp_module;
+}
+
+// The object factory shares the module factory's translation unit.
+//
+// An executable that loads the module links only its dataplane library
+// and pulls this unit for the module factory, so the object factory rides
+// along instead of needing a dependency of its own.
+struct object *
+new_object_route_fib() {
+	struct object *object = (struct object *)malloc(sizeof(struct object));
+	if (object == NULL) {
+		return NULL;
+	}
+
+	snprintf(
+		object->name, sizeof(object->name), "%s", ROUTE_FIB_OBJECT_TYPE
+	);
+
+	return object;
 }
 
 struct module *
