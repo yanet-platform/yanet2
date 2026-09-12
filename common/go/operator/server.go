@@ -11,6 +11,17 @@ import (
 	"github.com/yanet-platform/yanet2/common/go/xgrpc"
 )
 
+// Largest gRPC request an operator accepts.
+//
+// A bulk configuration push carries a whole table in one request, so the
+// four mebibytes gRPC defaults to would bound a legitimate update; the
+// gateway standing in front of the operators allows the same ceiling. Only
+// the request direction is capped: a reply repeats a table back with
+// everything the operator stamps on each entry, so it outgrows the request
+// that produced it and keeps the far larger ceiling gRPC gives it. A reply
+// travelling through the gateway is still bounded by the gateway.
+const maxRequestSize = 1024 * 1024 * 256
+
 type grpcServerOptions struct {
 	Log *zap.Logger
 }
@@ -49,7 +60,7 @@ func NewGRPCServer(
 		o(opts)
 	}
 
-	server := grpc.NewServer()
+	server := grpc.NewServer(grpc.MaxRecvMsgSize(maxRequestSize))
 	serviceNames := make([]string, len(services))
 	for idx, register := range services {
 		serviceNames[idx] = register(server)

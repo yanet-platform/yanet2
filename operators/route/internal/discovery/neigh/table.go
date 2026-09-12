@@ -2,6 +2,7 @@ package neigh
 
 import (
 	"fmt"
+	"maps"
 	"net/netip"
 	"sync"
 
@@ -155,8 +156,23 @@ func (m *NeighTable) Source(name string) (*NeighSource, bool) {
 	return src, ok
 }
 
+// copySourceEntries copies a source's entries into a fresh map sized for a
+// pending change.
+//
+// A view hands out the entry map itself and walks it without holding a
+// lock, so a change has to land as one whole new map; writing into the map
+// a reader may be walking crashes the process.
+func copySourceEntries(cache *NexthopCache, pendingCount int) map[netip.Addr]NeighbourEntry {
+	all, count := cache.View().All()
+
+	next := make(map[netip.Addr]NeighbourEntry, count+pendingCount)
+	maps.Insert(next, all)
+
+	return next
+}
+
 // Add inserts or updates entries in the specified source table and
-// triggers a single re-merge.
+// triggers a single re-merge; a reader sees the batch whole or not at all.
 func (m *NeighTable) Add(table string, entries []NeighbourEntry) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -166,19 +182,21 @@ func (m *NeighTable) Add(table string, entries []NeighbourEntry) error {
 		return fmt.Errorf("source %q not found", table)
 	}
 
+	next := copySourceEntries(src.Cache, len(entries))
 	for _, entry := range entries {
 		if entry.Priority == 0 {
 			entry.Priority = src.DefaultPriority
 		}
-		src.Cache.Set(entry.NextHop, entry)
+		next[entry.NextHop] = entry
 	}
+	src.Cache.Swap(next)
 
 	m.rebuildMergedCacheLocked()
 	return nil
 }
 
 // Remove deletes entries from the specified source table and triggers
-// a single re-merge.
+// a single re-merge; a reader sees the batch whole or not at all.
 func (m *NeighTable) Remove(table string, addrs []netip.Addr) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -188,9 +206,11 @@ func (m *NeighTable) Remove(table string, addrs []netip.Addr) error {
 		return fmt.Errorf("source %q not found", table)
 	}
 
+	next := copySourceEntries(src.Cache, 0)
 	for _, addr := range addrs {
-		src.Cache.Delete(addr)
+		delete(next, addr)
 	}
+	src.Cache.Swap(next)
 
 	m.rebuildMergedCacheLocked()
 	return nil
@@ -199,7 +219,10 @@ func (m *NeighTable) Remove(table string, addrs []netip.Addr) error {
 // SwapSource atomically replaces all entries in the named source and triggers
 // a re-merge.
 //
-// Entries with zero priority inherit the source's default priority.
+// Entries with zero priority inherit the source's default priority. The
+// supplied map becomes the published one, so a caller that keeps a
+// reference and writes through it later corrupts a listing already walking
+// it: hand over a map nothing else holds.
 func (m *NeighTable) SwapSource(name string, entries map[netip.Addr]NeighbourEntry) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
