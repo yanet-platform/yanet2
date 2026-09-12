@@ -400,6 +400,13 @@ func (m *RouteService) UpdateFIB(
 		if start.Compare(end) > 0 {
 			return nil, status.Errorf(codes.InvalidArgument, "invalid range: start %s is after end %s", start, end)
 		}
+		// A name the module's fixed-size device table cannot hold is a
+		// request error, rejected before anything is built.
+		for _, nh := range entry.GetNexthops() {
+			if err := ffi.ValidateDeviceName(nh.GetDevice()); err != nil {
+				return nil, status.Errorf(codes.InvalidArgument, "invalid device name %q: %v", nh.GetDevice(), err)
+			}
+		}
 	}
 
 	// Runs before the backend call: a disabled-but-set or over-long name is

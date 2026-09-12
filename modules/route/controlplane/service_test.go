@@ -1319,6 +1319,21 @@ func Test_RouteService_UpdateFIB_ObjectPublishFailureAfterGrownModuleKeepsOldObj
 	require.Equal(t, 1, oldObject.freeCount, "the old object, now the entry's, must be freed exactly once")
 }
 
+// A device name the module's table cannot hold is a request error and
+// builds nothing.
+func Test_RouteService_UpdateFIB_OverlongDeviceNameIsInvalidArgument(t *testing.T) {
+	backend := newFakeBackend()
+	service := route.NewRouteService(backend)
+
+	entry := testFIBEntry(t, "10.0.0.0/32", testNexthop(strings.Repeat("p", ffi.MaxDeviceNameLen), ""))
+	_, err := service.UpdateFIB(t.Context(), &routepb.UpdateFIBRequest{
+		ModuleName: "cfg",
+		Entries:    []*routepb.FIBEntry{entry},
+	})
+	require.Equal(t, codes.InvalidArgument, status.Code(err))
+	require.Empty(t, backend.events, "nothing may be built or published for a rejected request")
+}
+
 // A first object publish failing leaves nothing published and nothing
 // tracked.
 func Test_RouteService_UpdateFIB_FirstPublishFailurePublishesNothing(t *testing.T) {

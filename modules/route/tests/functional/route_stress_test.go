@@ -12,8 +12,6 @@ import (
 	"github.com/gopacket/gopacket/layers"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 
 	"github.com/yanet-platform/yanet2/common/go/xpacket"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
@@ -185,21 +183,17 @@ func TestRouteStress_ConcurrentUpdatesReadsAndPacketsLeaveNoLeak(t *testing.T) {
 	var readers sync.WaitGroup
 
 	// Writers: cycle UpdateFIB through every version. One of them also
-	// deletes and republishes every ~20 iterations, exercising the
-	// delete path concurrently with reads.
-	//
-	// The pipeline stays wired throughout this phase, so DeleteConfig is
-	// expected to refuse every one of these attempts — a live chain
-	// still names the module. The property under test is that the
-	// refusal leaves the store untouched, so the update right after it
-	// always still succeeds normally.
+	// asks for a delete every ~20 iterations, which the live chain naming
+	// the module must refuse, and the refusal must leave the store as it
+	// was, so the update right after it succeeds like any other.
 	const iterationsPerWriter = 150
 	writer := func(deleteEvery int) {
 		defer writers.Done()
 		for idx := range iterationsPerWriter {
 			version := versions[idx%stressVersions]
 			if deleteEvery > 0 && idx > 0 && idx%deleteEvery == 0 {
-				_, _ = service.DeleteConfig(ctx, &routepb.DeleteConfigRequest{Name: stressConfigName})
+				_, err := service.DeleteConfig(ctx, &routepb.DeleteConfigRequest{Name: stressConfigName})
+				assert.Error(t, err, "a config a live chain names must refuse to delete")
 			}
 			_, err := service.UpdateFIB(ctx, stressUpdateRequest(t, version))
 			assert.NoError(t, err)
@@ -209,10 +203,10 @@ func TestRouteStress_ConcurrentUpdatesReadsAndPacketsLeaveNoLeak(t *testing.T) {
 	go writer(0)
 	go writer(20)
 
-	// Readers: ShowFIB must never mix two versions' nexthops in one
-	// response. NotFound is the one tolerated error, a read that landed
-	// in the gap a concurrent delete+republish opens, and at least one
-	// read must come back whole for the check to mean anything.
+	// Readers: ShowFIB must never fail, the config is published for the
+	// whole run, and must never mix two versions' nexthops in one
+	// response. At least one read must come back whole for the check to
+	// mean anything.
 	var wholeReads atomic.Int64
 	showFIBReader := func() {
 		defer readers.Done()
@@ -224,8 +218,7 @@ func TestRouteStress_ConcurrentUpdatesReadsAndPacketsLeaveNoLeak(t *testing.T) {
 			}
 
 			resp, err := service.ShowFIB(ctx, &routepb.ShowFIBRequest{Name: stressConfigName})
-			if err != nil {
-				assert.Equal(t, codes.NotFound, status.Code(err), "ShowFIB may only fail with NotFound: %v", err)
+			if !assert.NoError(t, err) {
 				continue
 			}
 
