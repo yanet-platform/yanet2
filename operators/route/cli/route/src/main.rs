@@ -5,24 +5,32 @@
 //! has propagated) and drives the operator-owned RIB.
 
 use core::{
+    error::Error as StdError,
     fmt::{self, Display, Formatter},
     net::IpAddr,
+    slice,
 };
-use std::collections::HashMap;
+use std::{
+    collections::HashMap,
+    path::{Path, PathBuf},
+};
 
 use clap::{CommandFactory, Parser};
 use clap_complete::engine::{ArgValueCandidates, CompletionCandidate};
 use colored::Colorize;
-use commonpb::{pb::IpPrefix, serde_with};
+use commonpb::{
+    pb::{IpAddress, IpPrefix},
+    serde_with,
+};
 use netip::{Contiguous, IpNetwork};
 use tabled::Tabled;
 use tonic::codec::CompressionEncoding;
 use ync::{
     GlobalArgs,
-    client::{LayeredChannel, Service},
+    client::{self, LayeredChannel, Service},
     completion, display,
     errors::Error,
-    output,
+    output, yaml,
 };
 
 use crate::operatorpb::{
@@ -64,9 +72,11 @@ pub enum ModeCmd {
     /// Perform RIB route lookup.
     Lookup(RouteLookupCmd),
     /// Insert a unicast static route.
-    Insert(RouteInsertCmd),
+    Insert(RouteEditCmd),
     /// Remove a unicast static route.
-    Remove(RouteRemoveCmd),
+    Remove(RouteEditCmd),
+    /// Apply a whole file of routes in one run.
+    Batch(RouteBatchCmd),
     /// Flush RIB to FIB for a configuration.
     Flush(RouteFlushCmd),
 }
@@ -79,6 +89,10 @@ impl ModeCmd {
             Self::Lookup(..) => "lookup",
             Self::Insert(..) => "insert",
             Self::Remove(..) => "remove",
+            Self::Batch(cmd) => match cmd.action {
+                BatchAction::Insert(..) => "insert",
+                BatchAction::Remove(..) => "remove",
+            },
             Self::Flush(..) => "flush",
         }
     }
@@ -106,8 +120,12 @@ pub struct RouteLookupCmd {
     pub name: String,
 }
 
+/// One route named on the command line.
+///
+/// Insert and remove take the same route the same way, so they share this
+/// argument set; the two differ only in the request each builds from it.
 #[derive(Debug, Clone, Parser)]
-pub struct RouteInsertCmd {
+pub struct RouteEditCmd {
     /// Destination prefix in CIDR notation.
     pub prefix: Contiguous<IpNetwork>,
     /// Configuration name.
@@ -120,22 +138,47 @@ pub struct RouteInsertCmd {
     /// Route source type (static or bird). Defaults to static.
     #[arg(long = "source", default_value = "static")]
     pub source: RouteSource,
+    /// Skip the immediate flush; the operator still publishes the change on
+    /// its next reconcile pass.
+    #[arg(long = "no-flush")]
+    pub no_flush: bool,
 }
 
 #[derive(Debug, Clone, Parser)]
-pub struct RouteRemoveCmd {
-    /// Destination prefix in CIDR notation.
-    pub prefix: Contiguous<IpNetwork>,
+pub struct RouteBatchCmd {
+    #[clap(subcommand)]
+    pub action: BatchAction,
+}
+
+#[derive(Debug, Clone, Parser)]
+pub enum BatchAction {
+    /// Insert every route of a file.
+    Insert(RouteBatchFileCmd),
+    /// Remove every route of a file.
+    Remove(RouteBatchFileCmd),
+}
+
+impl BatchAction {
+    fn command(&self) -> &RouteBatchFileCmd {
+        match self {
+            Self::Insert(cmd) | Self::Remove(cmd) => cmd,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Parser)]
+#[command(after_long_help = BATCH_FILE_SCHEMA)]
+pub struct RouteBatchFileCmd {
     /// Configuration name.
     #[arg(long = "name", short = 'n', add = ArgValueCandidates::new(config_candidates))]
     pub name: String,
-    /// Next-hop IP address(es); repeat `--via` to specify multiple nexthops for
-    /// ECMP.
-    #[arg(long = "via", required = true)]
-    pub nexthop_addrs: Vec<IpAddr>,
-    /// Route source type (static or bird). Defaults to static.
-    #[arg(long = "source", default_value = "static")]
-    pub source: RouteSource,
+    /// Path to the YAML file of routes.
+    #[arg(value_name = "PATH")]
+    pub file: PathBuf,
+    /// Skip the immediate flush; the operator still publishes the change on
+    /// its next reconcile pass.
+    #[arg(long = "no-flush")]
+    pub no_flush: bool,
 }
 
 #[derive(Debug, Clone, Parser)]
@@ -145,14 +188,16 @@ pub struct RouteFlushCmd {
     pub name: String,
 }
 
-#[derive(Debug, Clone, clap::ValueEnum)]
+#[derive(Debug, Clone, Copy, Default, clap::ValueEnum, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum RouteSource {
+    #[default]
     Static,
     Bird,
 }
 
 impl RouteSource {
-    fn to_proto(&self) -> RouteSourceId {
+    fn to_proto(self) -> RouteSourceId {
         match self {
             Self::Static => RouteSourceId::Static,
             Self::Bird => RouteSourceId::Bird,
@@ -167,6 +212,177 @@ impl RouteSource {
     }
 }
 
+/// The batch file layout, appended to the long help of the commands that
+/// read one so the schema is discoverable without leaving the terminal.
+const BATCH_FILE_SCHEMA: &str = "\
+Batch file schema:
+  routes:
+    - prefix: 10.0.0.0/8      # destination, CIDR notation
+      via: [192.0.2.1]        # nexthop addresses, one for a bird route
+      source: static          # optional, 'static' (default) or 'bird'
+    - prefix: 2001:db8::/32
+      via:
+        - 2001:db8::1
+        - 2001:db8::2";
+
+/// A batch file that could not be turned into routes.
+type LoadError = Box<dyn StdError>;
+
+/// A batch of routes read from one file.
+///
+/// Every accepted key is spelled out, here and in each entry, so a
+/// misspelled or retired one fails the load instead of being dropped
+/// without a word.
+#[derive(Debug, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RoutesFile {
+    routes: Vec<RouteSpec>,
+}
+
+impl RoutesFile {
+    /// Rejects up front what the server would only refuse -- or silently
+    /// collapse -- one entry at a time, once part of the batch had already
+    /// reached the RIB.
+    fn validate(&self) -> Result<(), LoadError> {
+        if self.routes.is_empty() {
+            return Err("no routes to apply".into());
+        }
+
+        let mut bird = HashMap::new();
+        for (position, spec) in self.routes.iter().enumerate() {
+            let position = position + 1;
+            if spec.via.is_empty() {
+                return Err(format!("route {position}: no nexthop addresses").into());
+            }
+
+            // This API carries no peer, so the RIB tells two bird routes
+            // apart by prefix alone: a second nexthop, here or in a later
+            // entry, would replace the first instead of joining it in an
+            // ECMP group.
+            if matches!(spec.source, RouteSource::Bird) {
+                if spec.via.len() > 1 {
+                    return Err(
+                        format!("route {position}: multiple nexthops are only supported for static routes").into(),
+                    );
+                }
+                if let Some(first) = bird.insert(spec.prefix.to_string(), position) {
+                    return Err(format!("route {position}: bird prefix {} repeats route {first}", spec.prefix).into());
+                }
+            }
+        }
+
+        Ok(())
+    }
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RouteSpec {
+    prefix: IpPrefix,
+    via: Vec<IpAddress>,
+    #[serde(default)]
+    source: RouteSource,
+}
+
+impl RouteEditCmd {
+    fn spec(&self) -> RouteSpec {
+        RouteSpec {
+            prefix: IpPrefix::from(self.prefix),
+            via: self.nexthop_addrs.iter().copied().map(IpAddress::from).collect(),
+            source: self.source,
+        }
+    }
+}
+
+/// Every failure this returns opens with the path, so a caller can report
+/// it without knowing which of reading, parsing or checking produced it.
+fn load_batch(path: &Path) -> Result<Vec<RouteSpec>, LoadError> {
+    let file: RoutesFile = yaml::load(path)?;
+    file.validate().map_err(|err| format!("{}: {err}", path.display()))?;
+
+    Ok(file.routes)
+}
+
+/// The position in a run whose request asks for the flush, if any.
+///
+/// A run asks for one flush, riding the last route so a batch costs no
+/// extra round trip. Asking for none only drops the immediate rebuild:
+/// the operator reconciles on its own schedule and publishes whatever the
+/// RIB holds at the time, so a run is never atomic either way.
+fn flush_at(total: usize, no_flush: bool) -> Option<usize> {
+    if no_flush { None } else { total.checked_sub(1) }
+}
+
+fn flush_note(no_flush: bool) -> &'static str {
+    if no_flush { "; no immediate flush" } else { "" }
+}
+
+fn route_count(total: usize) -> String {
+    match total {
+        1 => "1 route".to_owned(),
+        total => format!("{total} routes"),
+    }
+}
+
+fn insert_request(name: &str, spec: &RouteSpec, do_flush: bool) -> InsertRouteRequest {
+    InsertRouteRequest {
+        name: name.to_owned(),
+        prefix: Some(spec.prefix),
+        nexthop_addrs: spec.via.clone(),
+        do_flush,
+        source_id: spec.source.to_proto().into(),
+    }
+}
+
+fn delete_request(name: &str, spec: &RouteSpec, do_flush: bool) -> DeleteRouteRequest {
+    DeleteRouteRequest {
+        name: name.to_owned(),
+        prefix: Some(spec.prefix),
+        nexthop_addrs: spec.via.clone(),
+        do_flush,
+        source_id: spec.source.to_proto().into(),
+    }
+}
+
+fn nexthops(spec: &RouteSpec) -> String {
+    spec.via.iter().map(ToString::to_string).collect::<Vec<_>>().join(", ")
+}
+
+/// Names the route a run stopped at, so a partial batch says how far it
+/// got.
+///
+/// The position goes in the message, which every output backend reports,
+/// and the consequence in the hint. A refused request is reported as
+/// unconfirmed rather than as undone: a lost response leaves the caller
+/// unable to tell whether the operator applied it.
+fn batch_context(err: Error, position: usize, total: usize) -> Error {
+    if total == 1 {
+        return err;
+    }
+
+    let consequence = match position {
+        1 => format!("route 1 is unconfirmed and routes 2 to {total} were never sent"),
+        position if position == total => {
+            format!(
+                "routes 1 to {} were applied without a flush and route {position} is unconfirmed",
+                position - 1
+            )
+        }
+        position => format!(
+            "routes 1 to {} were applied without a flush, route {position} is unconfirmed, and routes {} to {total} were never sent",
+            position - 1,
+            position + 1
+        ),
+    };
+    let hint = match err.hint() {
+        Some(hint) => format!("{consequence}\n{hint}"),
+        None => consequence,
+    };
+
+    err.with_context(format_args!("route {position} of {total}"))
+        .with_hint(hint)
+}
+
 fn main() -> std::process::ExitCode {
     ync::entrypoint(|cmd: &Cmd| cmd.globals.options(), run)
 }
@@ -179,10 +395,23 @@ fn config_candidates() -> Vec<CompletionCandidate> {
 
 /// Run the requested subcommand.
 ///
-/// Returns `Ok(())` when the RPC succeeded, `Err(_)` on transport or RPC
-/// failure.
+/// Fails on the first request the operator refuses or the transport drops.
 async fn run(cmd: Cmd) -> Result<(), Error> {
     let action = cmd.mode.action();
+
+    // The batch file is read before the connection, so a path the caller
+    // mistyped fails the same way with or without a reachable gateway.
+    let specs = match &cmd.mode {
+        ModeCmd::Batch(batch) => {
+            let endpoint = client::resolve_label(&cmd.globals.connection, action)?;
+            let specs = load_batch(&batch.action.command().file)
+                .map_err(|err| Error::invalid_argument(action, endpoint, err.to_string()))?;
+
+            Some(specs)
+        }
+        _ => None,
+    };
+
     let mut service = Service::connect_for(&cmd.globals.connection, action, SERVICE_NAME, client).await?;
 
     match cmd.mode {
@@ -191,6 +420,14 @@ async fn run(cmd: Cmd) -> Result<(), Error> {
         ModeCmd::Lookup(c) => lookup_route(&mut service, c).await,
         ModeCmd::Insert(c) => insert_route(&mut service, c).await,
         ModeCmd::Remove(c) => remove_route(&mut service, c).await,
+        ModeCmd::Batch(c) => {
+            let specs = specs.expect("prepared for the batch mode");
+
+            match c.action {
+                BatchAction::Insert(c) => insert_batch(&mut service, c, specs).await,
+                BatchAction::Remove(c) => remove_batch(&mut service, c, specs).await,
+            }
+        }
         ModeCmd::Flush(c) => flush_routes(&mut service, c).await,
     }
 }
@@ -265,11 +502,16 @@ async fn lookup_route(service: &mut RouteService, cmd: RouteLookupCmd) -> Result
         .await?;
 
     output::data(
-        || &response.routes,
+        || &response,
         || {
             if response.routes.is_empty() {
                 output::empty(format_args!("No routes found for {}.", cmd.addr));
                 return;
+            }
+
+            if let Some(prefix) = &response.prefix {
+                display::KeyValue::new().row("matched prefix", prefix).print();
+                println!();
             }
 
             let mut entries: Vec<RouteEntry> = response.routes.iter().cloned().map(RouteEntry::from).collect();
@@ -281,78 +523,118 @@ async fn lookup_route(service: &mut RouteService, cmd: RouteLookupCmd) -> Result
     Ok(())
 }
 
-async fn insert_route(service: &mut RouteService, cmd: RouteInsertCmd) -> Result<(), Error> {
-    let nexthop_addrs = cmd.nexthop_addrs.iter().copied().map(Into::into).collect();
+async fn insert_route(service: &mut RouteService, cmd: RouteEditCmd) -> Result<(), Error> {
+    let spec = cmd.spec();
 
-    let request = InsertRouteRequest {
-        name: cmd.name.clone(),
-        prefix: Some(IpPrefix::from(cmd.prefix)),
-        nexthop_addrs,
-        do_flush: true,
-        source_id: cmd.source.to_proto().into(),
-    };
-
-    service
-        .unary("insert", request, async |client, request| {
-            client.insert_route(request).await
-        })
-        .await?;
-
-    let via = cmd
-        .nexthop_addrs
-        .iter()
-        .map(|a| a.to_string())
-        .collect::<Vec<_>>()
-        .join(", ");
+    insert_specs(service, &cmd.name, slice::from_ref(&spec), cmd.no_flush).await?;
 
     output::success(
         "insert",
         format_args!(
-            "Inserted {} via {} in config '{}' (source: {}).",
-            cmd.prefix,
-            via,
+            "Inserted {} via {} in config '{}' (source: {}){}.",
+            spec.prefix,
+            nexthops(&spec),
             cmd.name,
-            cmd.source.as_str()
+            spec.source.as_str(),
+            flush_note(cmd.no_flush)
         ),
     );
 
     Ok(())
 }
 
-async fn remove_route(service: &mut RouteService, cmd: RouteRemoveCmd) -> Result<(), Error> {
-    let nexthop_addrs = cmd.nexthop_addrs.iter().copied().map(Into::into).collect();
+async fn insert_batch(service: &mut RouteService, cmd: RouteBatchFileCmd, specs: Vec<RouteSpec>) -> Result<(), Error> {
+    insert_specs(service, &cmd.name, &specs, cmd.no_flush).await?;
 
-    let request = DeleteRouteRequest {
-        name: cmd.name.clone(),
-        prefix: Some(IpPrefix::from(cmd.prefix)),
-        nexthop_addrs,
-        do_flush: true,
-        source_id: cmd.source.to_proto().into(),
-    };
+    output::success(
+        "insert",
+        format_args!(
+            "Inserted {} in config '{}'{}.",
+            route_count(specs.len()),
+            cmd.name,
+            flush_note(cmd.no_flush)
+        ),
+    );
 
-    service
-        .unary("remove", request, async |client, request| {
-            client.delete_route(request).await
-        })
-        .await?;
+    Ok(())
+}
 
-    let via = cmd
-        .nexthop_addrs
-        .iter()
-        .map(|a| a.to_string())
-        .collect::<Vec<_>>()
-        .join(", ");
+async fn insert_specs(
+    service: &mut RouteService,
+    name: &str,
+    specs: &[RouteSpec],
+    no_flush: bool,
+) -> Result<(), Error> {
+    let flush_index = flush_at(specs.len(), no_flush);
+
+    for (index, spec) in specs.iter().enumerate() {
+        let request = insert_request(name, spec, flush_index == Some(index));
+
+        service
+            .unary("insert", request, async |client, request| {
+                client.insert_route(request).await
+            })
+            .await
+            .map_err(|err| batch_context(err, index + 1, specs.len()))?;
+    }
+
+    Ok(())
+}
+
+async fn remove_route(service: &mut RouteService, cmd: RouteEditCmd) -> Result<(), Error> {
+    let spec = cmd.spec();
+
+    remove_specs(service, &cmd.name, slice::from_ref(&spec), cmd.no_flush).await?;
 
     output::success(
         "remove",
         format_args!(
-            "Removed {} via {} from config '{}' (source: {}).",
-            cmd.prefix,
-            via,
+            "Removed {} via {} from config '{}' (source: {}){}.",
+            spec.prefix,
+            nexthops(&spec),
             cmd.name,
-            cmd.source.as_str()
+            spec.source.as_str(),
+            flush_note(cmd.no_flush)
         ),
     );
+
+    Ok(())
+}
+
+async fn remove_batch(service: &mut RouteService, cmd: RouteBatchFileCmd, specs: Vec<RouteSpec>) -> Result<(), Error> {
+    remove_specs(service, &cmd.name, &specs, cmd.no_flush).await?;
+
+    output::success(
+        "remove",
+        format_args!(
+            "Removed {} from config '{}'{}.",
+            route_count(specs.len()),
+            cmd.name,
+            flush_note(cmd.no_flush)
+        ),
+    );
+
+    Ok(())
+}
+
+async fn remove_specs(
+    service: &mut RouteService,
+    name: &str,
+    specs: &[RouteSpec],
+    no_flush: bool,
+) -> Result<(), Error> {
+    let flush_index = flush_at(specs.len(), no_flush);
+
+    for (index, spec) in specs.iter().enumerate() {
+        let request = delete_request(name, spec, flush_index == Some(index));
+
+        service
+            .unary("remove", request, async |client, request| {
+                client.delete_route(request).await
+            })
+            .await
+            .map_err(|err| batch_context(err, index + 1, specs.len()))?;
+    }
 
     Ok(())
 }
@@ -584,32 +866,252 @@ where
 
 #[cfg(test)]
 mod test {
+    use std::{env, fs, process};
+
     use super::*;
 
-    /// `prefix`/`next_hop`/`peer` need no `serialize_with` override: plain
-    /// `Option<commonpb::pb::IpPrefix>` and
-    /// `Option<commonpb::pb::IpAddress>` fields already serialize as the
-    /// CIDR or plain address string, or `null` when absent, through those
-    /// types' own `Serialize` impls. This pins that output byte-for-byte,
-    /// including that the structured prefix still renders as the same
-    /// `"10.0.0.0/8"` string the wire string field used to produce.
-    #[test]
-    fn route_prefix_next_hop_and_peer_serialize_without_a_field_override() {
-        let route = operatorpb::Route {
-            prefix: Some("10.0.0.0/8".parse().unwrap()),
-            next_hop: Some(commonpb::pb::IpAddress::from(IpAddr::V4(core::net::Ipv4Addr::new(
-                192, 0, 2, 1,
-            )))),
-            peer: None,
-            ..Default::default()
-        };
+    /// Builds a batch file document from its YAML text, as the loader does
+    /// once the file has been read.
+    fn parse_batch_file(yaml: &str) -> Result<RoutesFile, serde_yaml::Error> {
+        serde_yaml::from_str(yaml)
+    }
 
-        let json = serde_json::to_string(&route).unwrap();
+    #[test]
+    fn test_batch_file_parses_every_key() {
+        let file = parse_batch_file(
+            "routes:\n  \
+               - prefix: 10.0.0.0/8\n    \
+                 via: [192.0.2.1]\n    \
+                 source: bird\n  \
+               - prefix: 2001:db8::/32\n    \
+                 via:\n      \
+                   - 2001:db8::1\n      \
+                   - 2001:db8::2\n",
+        )
+        .expect("the document matches the schema");
+        file.validate().expect("the document is one the operator can apply");
+
+        assert_eq!(2, file.routes.len());
+        assert_eq!("10.0.0.0/8", file.routes[0].prefix.to_string());
+        assert_eq!("bird", file.routes[0].source.as_str());
+        assert_eq!("static", file.routes[1].source.as_str());
+        assert_eq!(2, file.routes[1].via.len());
+    }
+
+    #[test]
+    fn test_batch_file_source_defaults_to_static() {
+        let file = parse_batch_file("routes:\n  - prefix: 10.0.0.0/8\n    via: [192.0.2.1]\n")
+            .expect("the document matches the schema");
+
+        assert_eq!("static", file.routes[0].source.as_str());
+    }
+
+    #[test]
+    fn test_batch_file_rejects_unknown_key() {
+        parse_batch_file("routes:\n  - prefix: 10.0.0.0/8\n    via: [192.0.2.1]\n    weight: 3\n")
+            .expect_err("'weight' is not part of the schema");
+    }
+
+    #[test]
+    fn test_batch_file_validate_rejects_empty_document() {
+        let file = parse_batch_file("routes: []\n").expect("an empty list still matches the schema");
+
+        file.validate().expect_err("a batch with no routes applies nothing");
+    }
+
+    #[test]
+    fn test_batch_file_validate_rejects_route_without_nexthops() {
+        let file = parse_batch_file("routes:\n  - prefix: 10.0.0.0/8\n    via: []\n")
+            .expect("an empty list still matches the schema");
+
+        let err = file.validate().expect_err("a route needs at least one nexthop");
+
+        assert_eq!("route 1: no nexthop addresses", err.to_string());
+    }
+
+    /// verifies that a document rejected by the checks rather than by the
+    /// parser is still reported against its path, which only the loader
+    /// knows.
+    #[test]
+    fn test_load_batch_names_the_path_of_a_rejected_document() {
+        let path = env::temp_dir().join(format!("yanet-cli-operator-route-batch-{}.yaml", process::id()));
+        fs::write(&path, "routes: []\n").expect("the scratch file must be writable");
+
+        let err = load_batch(&path).expect_err("a batch with no routes applies nothing");
+        fs::remove_file(&path).expect("the scratch file must be removable");
+
+        assert_eq!(format!("{}: no routes to apply", path.display()), err.to_string());
+    }
+
+    #[test]
+    fn test_batch_file_validate_rejects_a_bird_route_with_several_nexthops() {
+        let file = parse_batch_file(
+            "routes:\n  \
+               - prefix: 10.0.0.0/8\n    \
+                 via: [192.0.2.1, 192.0.2.2]\n    \
+                 source: bird\n",
+        )
+        .expect("the document matches the schema");
+
+        let err = file.validate().expect_err("the second nexthop would replace the first");
 
         assert_eq!(
-            r#"{"prefix":"10.0.0.0/8","next_hop":"192.0.2.1","peer":null,"route_distinguisher":0,"peer_as":0,"origin_as":0,"med":0,"pref":0,"as_path_len":0,"source":"unknown","large_communities":[],"is_best":false,"global_id":0,"ifindex":0}"#,
-            json
+            "route 1: multiple nexthops are only supported for static routes",
+            err.to_string()
         );
+    }
+
+    /// verifies that host bits are masked off before the check, so two
+    /// entries that spell one prefix differently still count as a repeat.
+    #[test]
+    fn test_batch_file_validate_rejects_a_repeated_bird_prefix() {
+        let file = parse_batch_file(
+            "routes:\n  \
+               - prefix: 10.0.0.0/8\n    \
+                 via: [192.0.2.1]\n    \
+                 source: bird\n  \
+               - prefix: 10.0.0.1/8\n    \
+                 via: [192.0.2.2]\n    \
+                 source: bird\n",
+        )
+        .expect("the document matches the schema");
+
+        let err = file.validate().expect_err("the second entry would replace the first");
+
+        assert_eq!("route 2: bird prefix 10.0.0.0/8 repeats route 1", err.to_string());
+    }
+
+    /// verifies that a static route keeps its nexthop in its RIB identity,
+    /// so two of them on one prefix are an ECMP pair rather than a repeat.
+    #[test]
+    fn test_batch_file_validate_accepts_a_repeated_static_prefix() {
+        let file = parse_batch_file(
+            "routes:\n  \
+               - prefix: 10.0.0.0/8\n    \
+                 via: [192.0.2.1]\n  \
+               - prefix: 10.0.0.0/8\n    \
+                 via: [192.0.2.2]\n",
+        )
+        .expect("the document matches the schema");
+
+        file.validate().expect("static routes are told apart by nexthop");
+    }
+
+    #[test]
+    fn test_flush_at_rides_the_last_route() {
+        assert_eq!(Some(0), flush_at(1, false));
+        assert_eq!(Some(4), flush_at(5, false));
+    }
+
+    #[test]
+    fn test_flush_at_deferred_run_never_flushes() {
+        assert_eq!(None, flush_at(1, true));
+        assert_eq!(None, flush_at(5, true));
+    }
+
+    /// Builds the error a refused request arrives as, before a batch adds
+    /// its position to it.
+    fn refused() -> Error {
+        Error::invalid_argument("insert", "grpc://[::1]:8080", "nexthop is not reachable")
+    }
+
+    /// verifies that the position survives into the machine-readable
+    /// rendering, which drops anything meant for a reader alone.
+    #[test]
+    fn test_batch_context_names_the_failing_route_in_the_message() {
+        let err = batch_context(refused(), 2, 3);
+
+        assert_eq!("route 2 of 3: nexthop is not reachable", err.message());
+        assert_eq!(
+            Some(
+                "routes 1 to 1 were applied without a flush, route 2 is unconfirmed, and routes 3 to 3 were never sent"
+            ),
+            err.hint()
+        );
+    }
+
+    /// verifies that the run that stops on its last route reports nothing
+    /// as unsent, since there is nothing after it to send.
+    #[test]
+    fn test_batch_context_reports_no_unsent_routes_when_the_last_one_fails() {
+        let err = batch_context(refused(), 3, 3);
+
+        assert_eq!("route 3 of 3: nexthop is not reachable", err.message());
+        assert_eq!(
+            Some("routes 1 to 2 were applied without a flush and route 3 is unconfirmed"),
+            err.hint()
+        );
+    }
+
+    /// verifies that a refused request is reported as unconfirmed rather
+    /// than as undone, since a lost response leaves the caller unable to
+    /// tell whether the operator applied it.
+    #[test]
+    fn test_batch_context_reports_a_first_route_failure_as_unconfirmed() {
+        let err = batch_context(refused(), 1, 3);
+
+        assert_eq!("route 1 of 3: nexthop is not reachable", err.message());
+        assert_eq!(
+            Some("route 1 is unconfirmed and routes 2 to 3 were never sent"),
+            err.hint()
+        );
+    }
+
+    #[test]
+    fn test_batch_context_leaves_a_single_route_run_untouched() {
+        let err = batch_context(refused(), 1, 1);
+
+        assert_eq!("nexthop is not reachable", err.message());
+        assert_eq!(None, err.hint());
+    }
+
+    /// Builds the command-line form of a route edit, the shape the parser
+    /// produces for a single route.
+    fn single_route_cmd(source: RouteSource) -> RouteEditCmd {
+        RouteEditCmd {
+            prefix: Contiguous::<IpNetwork>::parse("10.0.0.0/8").expect("must be valid prefix"),
+            name: "cfg".to_string(),
+            nexthop_addrs: vec![IpAddr::V4(core::net::Ipv4Addr::new(192, 0, 2, 1))],
+            source,
+            no_flush: false,
+        }
+    }
+
+    #[test]
+    fn test_spec_command_line_route_carries_every_argument() {
+        let spec = single_route_cmd(RouteSource::Bird).spec();
+
+        assert_eq!("10.0.0.0/8", spec.prefix.to_string());
+        assert_eq!(1, spec.via.len());
+        assert_eq!("192.0.2.1", spec.via[0].to_string());
+        assert_eq!("bird", spec.source.as_str());
+    }
+
+    #[test]
+    fn test_insert_request_carries_the_route_and_the_flush_decision() {
+        let spec = single_route_cmd(RouteSource::Bird).spec();
+
+        let flushing = insert_request("cfg", &spec, true);
+        assert_eq!("cfg", flushing.name);
+        assert_eq!("10.0.0.0/8", flushing.prefix.expect("prefix must be set").to_string());
+        assert_eq!(1, flushing.nexthop_addrs.len());
+        assert_eq!(RouteSourceId::Bird as i32, flushing.source_id);
+        assert!(flushing.do_flush);
+
+        assert!(!insert_request("cfg", &spec, false).do_flush);
+    }
+
+    #[test]
+    fn test_delete_request_carries_the_route_and_the_flush_decision() {
+        let spec = single_route_cmd(RouteSource::Static).spec();
+
+        let flushing = delete_request("cfg", &spec, true);
+        assert_eq!("cfg", flushing.name);
+        assert_eq!("10.0.0.0/8", flushing.prefix.expect("prefix must be set").to_string());
+        assert_eq!(RouteSourceId::Static as i32, flushing.source_id);
+        assert!(flushing.do_flush);
+
+        assert!(!delete_request("cfg", &spec, false).do_flush);
     }
 
     fn entry_with(prefix: PrefixValue, source: &str, is_best: bool) -> RouteEntry {
