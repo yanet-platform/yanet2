@@ -3030,7 +3030,7 @@ nat64_handle_v4(
 
 	char *nmbuf = NULL;
 	if (delta >= 0) {
-		nmbuf = rte_pktmbuf_prepend(mbuf, delta);
+		nmbuf = packet_headroom_prepend(mbuf, delta);
 	} else {
 		// RFC7915 1.2 ( -> .. -> RFC2765 1.1) does not translate any
 		// IPv4 options.

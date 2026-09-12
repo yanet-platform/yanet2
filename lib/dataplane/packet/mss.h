@@ -13,7 +13,7 @@ enum packet_set_mss_result {
 	 * data_off field. The packet is left untouched.
 	 */
 	packet_set_mss_malformed,
-	/* mbuf has no headroom at the front to prepend the new option. */
+	// No room above the packet descriptor to prepend the new option.
 	packet_set_mss_no_headroom,
 };
 
