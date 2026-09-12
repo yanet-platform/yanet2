@@ -95,7 +95,6 @@ maplit:controlplane/ffi/shm.go:DPConfig.AllModulePositions:map[string][]Chain:1 
 maplit:controlplane/ffi/shm.go:DPConfig.AllModulePositions:map[string][]string:1  # legacy: use T{} instead of make(map...)
 maplit:modules/acl/controlplane/metrics.go:ACLService.collectDataplaneMetrics:map[string]struct{}:1  # legacy: use T{} instead of make(map...)
 maplit:modules/acl/controlplane/metrics_snapshot.go:newACLMetricsState:map[string]cacl.AclConfigInfo:1  # legacy: use T{} instead of make(map...)
-maplit:modules/fwstate/controlplane/service.go:NewFWStateService:map[string]*FwStateConfig:1  # legacy: use T{} instead of make(map...)
 maplit:modules/pdump/controlplane/ring_test.go:TestRingBufferRunReaders:map[byte]bool:1  # legacy: use T{} instead of make(map...)
 maplit:operators/bird-adapter/internal/mpls/routes.go:Rib.Apply:map[mplsRouteKey][]rib.Route:1  # legacy: use T{} instead of make(map...)
 maplit:operators/bird-adapter/service.go:NewAdapterService:map[string]*importHolder:1  # legacy: use T{} instead of make(map...)

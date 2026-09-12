@@ -41,7 +41,7 @@ type mutationBlock struct {
 }
 
 // blockingObserver observes mutation lock events and can pause a mutation
-// right after it reports acquired, holding updateMu until released.
+// right after it reports acquired, holding the mutation lock until released.
 type blockingObserver struct {
 	blocks chan mutationBlock
 	events chan mutationEvent
