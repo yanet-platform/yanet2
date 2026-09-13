@@ -342,6 +342,10 @@ lpm_merge(
 ) {
 	memset(table, 0, sizeof(*table));
 	if (lpm_init(merged, memory_context, name)) {
+		// The trie context is already linked into the parent before
+		// the first page is requested, so unlink it before failing.
+		memory_context_fini(&merged->memory_context);
+		memset(merged, 0, sizeof(*merged));
 		return -1;
 	}
 

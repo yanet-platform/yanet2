@@ -9,6 +9,9 @@
 #include <endian.h>
 
 #define ARENA_SIZE (1 << 20)
+// Merge cases run three tries at once; the sanitizer build inflates
+// every block allocator bucket, so the merge arena needs headroom.
+#define MERGE_ARENA_SIZE (1 << 23)
 
 static uint32_t
 read_u32(const uint8_t *p) {
@@ -235,6 +238,476 @@ out:
 	return rc;
 }
 
+// Verifies the merge contract over a set of keys: the merged leaf
+// decoded through both remap tables equals each source lookup.
+static int
+merge_verify_keys(
+	const struct lpm *merged,
+	const struct lpm *a,
+	const struct lpm *b,
+	struct lpm_merge_table *table,
+	uint8_t key_size,
+	const uint8_t *keys,
+	uint32_t key_count
+) {
+	for (uint32_t idx = 0; idx < key_count; ++idx) {
+		const uint8_t *key = keys + idx * key_size;
+		uint32_t leaf = lpm_lookup(merged, key_size, key);
+		if (leaf >= table->a.size || leaf >= table->b.size) {
+			fprintf(stdout, "leaf %u out of table\n", leaf);
+			return -1;
+		}
+		uint32_t va = lpm_lookup(a, key_size, key);
+		uint32_t vb = lpm_lookup(b, key_size, key);
+		if (vline_get(&table->a, leaf) != va ||
+		    vline_get(&table->b, leaf) != vb) {
+			fprintf(stdout,
+				"mismatch at key %u: merged (%u, %u)"
+				" vs sources (%u, %u)\n",
+				idx,
+				vline_get(&table->a, leaf),
+				vline_get(&table->b, leaf),
+				va,
+				vb);
+			return -1;
+		}
+	}
+	return 0;
+}
+
+// Fills a trie with random overlapping ranges, recording both
+// endpoints of every range for boundary probes.
+static void
+merge_fill_random(
+	struct lpm *lpm,
+	uint64_t *rng,
+	uint8_t key_size,
+	uint32_t range_count,
+	uint32_t value_top,
+	uint8_t *ends
+) {
+	for (uint32_t idx = 0; idx < range_count; ++idx) {
+		uint8_t from[key_size];
+		uint8_t to[key_size];
+		for (uint8_t b = 0; b < key_size; ++b) {
+			from[b] = batch_test_rand(rng);
+			to[b] = batch_test_rand(rng);
+		}
+		for (uint8_t b = 0; b < key_size; ++b) {
+			if (from[b] != to[b]) {
+				if (from[b] > to[b]) {
+					uint8_t t = from[b];
+					from[b] = to[b];
+					to[b] = t;
+				}
+				break;
+			}
+		}
+		lpm_insert(
+			lpm,
+			key_size,
+			from,
+			to,
+			1 + batch_test_rand(rng) % value_top
+		);
+		memcpy(ends + idx * 2 * key_size, from, key_size);
+		memcpy(ends + (idx * 2 + 1) * key_size, to, key_size);
+	}
+}
+
+// Steps a big-endian key by one in either direction, reporting wrap
+// around the whole key domain.
+static int
+key_step(uint8_t *key, uint8_t key_size, int up) {
+	for (int b = key_size - 1; b >= 0; --b) {
+		if (up) {
+			if (key[b] != 0xff) {
+				++key[b];
+				return 0;
+			}
+			key[b] = 0x00;
+		} else {
+			if (key[b] != 0x00) {
+				--key[b];
+				return 0;
+			}
+			key[b] = 0xff;
+		}
+	}
+	return -1;
+}
+
+struct merge_fixture {
+	void *arena;
+	struct block_allocator allocator;
+	struct memory_context memory_context;
+	struct lpm a;
+	struct lpm b;
+	struct lpm merged;
+	struct lpm_merge_table table;
+};
+
+// Creates a fixture over a fresh arena with a root context and two
+// empty source tries.
+static int
+merge_fixture_init(struct merge_fixture *fx, size_t arena_size) {
+	fx->arena = malloc(arena_size);
+	if (fx->arena == NULL) {
+		return -1;
+	}
+	block_allocator_init(&fx->allocator);
+	block_allocator_put_arena(&fx->allocator, fx->arena, arena_size);
+	memory_context_init(&fx->memory_context, "lpm-merge", &fx->allocator);
+	memset(&fx->a, 0, sizeof(fx->a));
+	memset(&fx->b, 0, sizeof(fx->b));
+	memset(&fx->merged, 0, sizeof(fx->merged));
+	memset(&fx->table, 0, sizeof(fx->table));
+	if (lpm_init(&fx->a, &fx->memory_context, "a") ||
+	    lpm_init(&fx->b, &fx->memory_context, "b")) {
+		return -1;
+	}
+	return 0;
+}
+
+// Tears a fixture down; the tables must go before the merged trie
+// they hang off.
+//
+// A full run allocates and frees everything through the root context,
+// so the two counters must meet.
+static int
+merge_fixture_fini(struct merge_fixture *fx) {
+	lpm_merge_table_free(&fx->table);
+	if (fx->merged.page_count != 0) {
+		lpm_free(&fx->merged);
+	}
+	if (fx->a.page_count != 0) {
+		lpm_free(&fx->a);
+	}
+	if (fx->b.page_count != 0) {
+		lpm_free(&fx->b);
+	}
+	if (fx->memory_context.balloc_size != fx->memory_context.bfree_size) {
+		fprintf(stdout,
+			"leak: balloc %zu bfree %zu\n",
+			fx->memory_context.balloc_size,
+			fx->memory_context.bfree_size);
+		free(fx->arena);
+		return -1;
+	}
+	free(fx->arena);
+	return 0;
+}
+
+// Two randomly filled tries over a small key space, checked
+// exhaustively over every key.
+static int
+test_merge_random_small_exhaustive(void) {
+	enum { KEY_SIZE = 2, KEY_COUNT = 1 << (KEY_SIZE * 8), RANGES = 40 };
+	enum { ENDS_SIZE = RANGES * 2 * KEY_SIZE };
+
+	for (uint32_t round = 0; round < 8; ++round) {
+		uint64_t rng = 0x1234567 + round * 101;
+		uint8_t ends[2][ENDS_SIZE];
+		struct merge_fixture fx;
+		if (merge_fixture_init(&fx, MERGE_ARENA_SIZE)) {
+			return -1;
+		}
+		merge_fill_random(&fx.a, &rng, KEY_SIZE, RANGES, 50, ends[0]);
+		merge_fill_random(&fx.b, &rng, KEY_SIZE, RANGES, 50, ends[1]);
+
+		int rc = 0;
+		if (lpm_merge(
+			    &fx.merged,
+			    &fx.memory_context,
+			    "merged",
+			    &fx.a,
+			    &fx.b,
+			    KEY_SIZE,
+			    &fx.table
+		    )) {
+			fprintf(stdout, "merge failed at round %u\n", round);
+			rc = -1;
+		} else {
+			uint8_t keys[KEY_COUNT * KEY_SIZE];
+			for (uint32_t idx = 0; idx < KEY_COUNT; ++idx) {
+				keys[idx * KEY_SIZE] = idx >> 8;
+				keys[idx * KEY_SIZE + 1] = idx;
+			}
+			rc = merge_verify_keys(
+				&fx.merged,
+				&fx.a,
+				&fx.b,
+				&fx.table,
+				KEY_SIZE,
+				keys,
+				KEY_COUNT
+			);
+		}
+		if (merge_fixture_fini(&fx) || rc) {
+			return -1;
+		}
+	}
+	return 0;
+}
+
+// Wide keys: every endpoint of every source range is probed together
+// with both adjacent keys, so a boundary misplaced by one key is
+// caught, alongside random probes.
+static int
+test_merge_wide_keys_at_boundaries(void) {
+	enum { KEY_SIZE = 4, RANGES = 200, RANDOM_PROBES = 20000 };
+	enum { PER_TRIE_ENDS = RANGES * 2, END_COUNT = PER_TRIE_ENDS * 2 };
+	enum { BOUNDARY_PROBES = END_COUNT * 3 };
+	enum { PROBES = BOUNDARY_PROBES + RANDOM_PROBES };
+	enum { WIDE_MERGE_ARENA_SIZE = 1 << 26 };
+
+	uint64_t rng = 0xdeadbeef;
+	uint8_t ends[END_COUNT][KEY_SIZE];
+	struct merge_fixture fx;
+	if (merge_fixture_init(&fx, WIDE_MERGE_ARENA_SIZE)) {
+		return -1;
+	}
+	merge_fill_random(&fx.a, &rng, KEY_SIZE, RANGES, 1000, (uint8_t *)ends);
+	merge_fill_random(
+		&fx.b,
+		&rng,
+		KEY_SIZE,
+		RANGES,
+		1000,
+		(uint8_t *)ends + PER_TRIE_ENDS * KEY_SIZE
+	);
+
+	int rc = 0;
+	if (lpm_merge(
+		    &fx.merged,
+		    &fx.memory_context,
+		    "merged",
+		    &fx.a,
+		    &fx.b,
+		    KEY_SIZE,
+		    &fx.table
+	    )) {
+		fprintf(stdout, "merge failed\n");
+		rc = -1;
+	} else {
+		uint8_t keys[PROBES * KEY_SIZE];
+		uint32_t probe_count = 0;
+		for (uint32_t idx = 0; idx < END_COUNT; ++idx) {
+			const uint8_t *end = ends[idx];
+			memcpy(keys + probe_count * KEY_SIZE, end, KEY_SIZE);
+			++probe_count;
+			uint8_t step[KEY_SIZE];
+			memcpy(step, end, KEY_SIZE);
+			if (key_step(step, KEY_SIZE, 0) == 0) {
+				memcpy(keys + probe_count * KEY_SIZE,
+				       step,
+				       KEY_SIZE);
+				++probe_count;
+			}
+			memcpy(step, end, KEY_SIZE);
+			if (key_step(step, KEY_SIZE, 1) == 0) {
+				memcpy(keys + probe_count * KEY_SIZE,
+				       step,
+				       KEY_SIZE);
+				++probe_count;
+			}
+		}
+		while (probe_count < PROBES) {
+			for (uint8_t b = 0; b < KEY_SIZE; ++b) {
+				keys[probe_count * KEY_SIZE + b] =
+					batch_test_rand(&rng);
+			}
+			++probe_count;
+		}
+		rc = merge_verify_keys(
+			&fx.merged,
+			&fx.a,
+			&fx.b,
+			&fx.table,
+			KEY_SIZE,
+			keys,
+			PROBES
+		);
+	}
+	if (merge_fixture_fini(&fx) || rc) {
+		return -1;
+	}
+	return 0;
+}
+
+// Empty and one-sided sources: the merge still yields a working trie,
+// and a source without a span answers with the invalid sentinel.
+static int
+test_merge_empty_sources(void) {
+	enum { KEY_SIZE = 2 };
+
+	for (int variant = 0; variant < 3; ++variant) {
+		struct merge_fixture fx;
+		if (merge_fixture_init(&fx, MERGE_ARENA_SIZE)) {
+			return -1;
+		}
+		if (variant == 1 || variant == 2) {
+			uint8_t from[KEY_SIZE] = {10, 0};
+			uint8_t to[KEY_SIZE] = {10, 255};
+			lpm_insert(&fx.a, KEY_SIZE, from, to, 7);
+		}
+		if (variant == 2) {
+			uint8_t from[KEY_SIZE] = {20, 4};
+			uint8_t to[KEY_SIZE] = {20, 16};
+			lpm_insert(&fx.b, KEY_SIZE, from, to, 9);
+		}
+
+		int rc = 0;
+		if (lpm_merge(
+			    &fx.merged,
+			    &fx.memory_context,
+			    "merged",
+			    &fx.a,
+			    &fx.b,
+			    KEY_SIZE,
+			    &fx.table
+		    )) {
+			fprintf(stdout, "merge failed at variant %d\n", variant
+			);
+			rc = -1;
+		} else {
+			uint8_t keys[8 * KEY_SIZE];
+			uint32_t key_count = 0;
+			uint8_t probe[2];
+			for (probe[0] = 0; probe[0] < 4; ++probe[0]) {
+				for (probe[1] = 0; probe[1] < 2; ++probe[1]) {
+					memcpy(keys + key_count * KEY_SIZE,
+					       probe,
+					       KEY_SIZE);
+					++key_count;
+				}
+			}
+			rc = merge_verify_keys(
+				&fx.merged,
+				&fx.a,
+				&fx.b,
+				&fx.table,
+				KEY_SIZE,
+				keys,
+				key_count
+			);
+		}
+		if (merge_fixture_fini(&fx) || rc) {
+			return -1;
+		}
+	}
+	return 0;
+}
+
+// Identical sources: the merge collapses to the shared partition and
+// both remaps agree.
+static int
+test_merge_identical_sources(void) {
+	enum { KEY_SIZE = 2, RANGES = 30, PROBES = 512 };
+	enum { ENDS_SIZE = RANGES * 2 * KEY_SIZE };
+
+	uint64_t rng = 0xfeedface;
+	uint8_t ends[2][ENDS_SIZE];
+	struct merge_fixture fx;
+	if (merge_fixture_init(&fx, MERGE_ARENA_SIZE)) {
+		return -1;
+	}
+	// The trie has no clone, so the second source replays the same
+	// random stream.
+	merge_fill_random(&fx.a, &rng, KEY_SIZE, RANGES, 40, ends[0]);
+	rng = 0xfeedface;
+	merge_fill_random(&fx.b, &rng, KEY_SIZE, RANGES, 40, ends[1]);
+
+	int rc = 0;
+	if (lpm_merge(
+		    &fx.merged,
+		    &fx.memory_context,
+		    "merged",
+		    &fx.a,
+		    &fx.b,
+		    KEY_SIZE,
+		    &fx.table
+	    )) {
+		fprintf(stdout, "merge failed\n");
+		rc = -1;
+	} else {
+		uint8_t keys[PROBES * KEY_SIZE];
+		for (uint32_t idx = 0; idx < PROBES; ++idx) {
+			keys[idx * KEY_SIZE] = batch_test_rand(&rng);
+			keys[idx * KEY_SIZE + 1] = batch_test_rand(&rng);
+		}
+		rc = merge_verify_keys(
+			&fx.merged,
+			&fx.a,
+			&fx.b,
+			&fx.table,
+			KEY_SIZE,
+			keys,
+			PROBES
+		);
+	}
+	if (merge_fixture_fini(&fx) || rc) {
+		return -1;
+	}
+	return 0;
+}
+
+// A merge starved of memory must fail with the output trie and the
+// tables returned to zero, leaving the caller's accounting balanced.
+static int
+test_merge_oom_returns_merged_to_zero(void) {
+	enum { KEY_SIZE = 4 };
+
+	struct merge_fixture fx;
+	if (merge_fixture_init(&fx, ARENA_SIZE)) {
+		return -1;
+	}
+
+	// A random four-byte key almost always opens a new page, so
+	// single-key ranges hog the arena until it is exhausted.
+	struct lpm hog;
+	if (lpm_init(&hog, &fx.memory_context, "hog")) {
+		return -1;
+	}
+	uint64_t rng = 0xc0ffee;
+	do {
+		uint8_t key[KEY_SIZE];
+		for (uint8_t b = 0; b < KEY_SIZE; ++b) {
+			key[b] = batch_test_rand(&rng);
+		}
+		if (lpm_insert(&hog, KEY_SIZE, key, key, 1)) {
+			break;
+		}
+	} while (1);
+
+	static const struct lpm zero_lpm;
+	static const struct lpm_merge_table zero_table;
+	int rc = 0;
+	if (lpm_merge(
+		    &fx.merged,
+		    &fx.memory_context,
+		    "merged",
+		    &fx.a,
+		    &fx.b,
+		    KEY_SIZE,
+		    &fx.table
+	    ) == 0) {
+		fprintf(stdout,
+			"merge should have failed on exhausted arena\n");
+		rc = -1;
+	} else if (memcmp(&fx.merged, &zero_lpm, sizeof(zero_lpm)) != 0 ||
+		   memcmp(&fx.table, &zero_table, sizeof(zero_table)) != 0) {
+		fprintf(stdout, "failed merge left the output non-zero\n");
+		rc = -1;
+	}
+
+	lpm_free(&hog);
+	if (merge_fixture_fini(&fx) || rc) {
+		return -1;
+	}
+	return 0;
+}
+
 int
 main(int argc, char **argv) {
 	(void)argc;
@@ -247,6 +720,32 @@ main(int argc, char **argv) {
 
 	if (test_lookup_batch_matches_scalar()) {
 		fprintf(stdout, "test_lookup_batch_matches_scalar: FAILED\n");
+		return -1;
+	}
+
+	if (test_merge_random_small_exhaustive()) {
+		fprintf(stdout, "test_merge_random_small_exhaustive: FAILED\n");
+		return -1;
+	}
+
+	if (test_merge_wide_keys_at_boundaries()) {
+		fprintf(stdout, "test_merge_wide_keys_at_boundaries: FAILED\n");
+		return -1;
+	}
+
+	if (test_merge_empty_sources()) {
+		fprintf(stdout, "test_merge_empty_sources: FAILED\n");
+		return -1;
+	}
+
+	if (test_merge_identical_sources()) {
+		fprintf(stdout, "test_merge_identical_sources: FAILED\n");
+		return -1;
+	}
+
+	if (test_merge_oom_returns_merged_to_zero()) {
+		fprintf(stdout,
+			"test_merge_oom_returns_merged_to_zero: FAILED\n");
 		return -1;
 	}
 
