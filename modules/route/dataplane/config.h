@@ -18,16 +18,16 @@ struct route_family_counter_ids {
 	uint64_t drop_device_unresolved;
 };
 
-/*
- * Route module configuration. Handler lookups route list index using
- * corresponding lpm and retrieves start position and count of applicable
- * route indexes. Using packet hash randomization the handler chooses one route
- * index and fetches one route to be applied to a packet.
- */
+// The forwarding table lives in a shared object the module links by name,
+// so a table update publishes the object alone.
+//
+// The handler resolves the link once per batch and reads the table
+// through the object.
 struct route_module_config {
 	struct cp_module cp_module;
 
-	struct route_fib fib;
+	// Where the table sits among the module's object links.
+	uint64_t fib_link_idx;
 
 	// Module-level counters, registered by route_module_config_new
 	struct route_family_counter_ids counters_v4;
@@ -36,9 +36,4 @@ struct route_module_config {
 	// A non-IP packet has no address family, so its drop counter is
 	// shared rather than kept in a per-family set.
 	uint64_t drop_non_ip_counter_id;
-
-	// Index of the per-route "routes" counter registry within
-	// cp_module.runtime_counter_registries. Each per-route counter_id is
-	// resolved against this registry's per-worker storage.
-	uint64_t routes_registry_idx;
 };

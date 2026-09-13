@@ -2,6 +2,7 @@
 
 #include "config.h"
 #include "fib.h"
+#include "fib_object.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -9,11 +10,6 @@
 #include "common/container_of.h"
 
 #include "lib/controlplane/agent/agent.h"
-
-struct fib_iter {
-	struct route_module_config *config;
-	struct route_fib_iter it;
-};
 
 int
 route_module_config_register_counters(
@@ -73,7 +69,20 @@ route_module_config_register_counters(
 }
 
 static void
-route_module_config_destroy(struct cp_module *cp_module);
+route_module_config_destroy(struct cp_module *cp_module) {
+	struct route_module_config *config =
+		container_of(cp_module, struct route_module_config, cp_module);
+
+	struct agent *agent = ADDR_OF(&cp_module->agent);
+
+	cp_module_fini(cp_module);
+
+	memory_bfree(
+		&agent->memory_context,
+		config,
+		sizeof(struct route_module_config)
+	);
+}
 
 struct cp_module *
 route_module_config_new(
@@ -99,71 +108,27 @@ route_module_config_new(
 		return NULL;
 	}
 
-	if (route_module_config_data_init(
-		    config, &config->cp_module.memory_context
+	// From here on the module is dangling with nothing but its own
+	// resources, so the type destructor is the right teardown for every
+	// later failure.
+	if (cp_module_link_object(
+		    &config->cp_module,
+		    ROUTE_FIB_OBJECT_TYPE,
+		    name,
+		    &config->fib_link_idx,
+		    err
 	    )) {
-		yanet_error_add(err, "failed to init config data");
-		// Frees directly instead of going through the type destructor.
-		//
-		// A failed configuration-data setup never reaches a state its
-		// own teardown could safely walk. No reference beyond the
-		// caller's own has been taken, and no registry has observed
-		// the module yet, so nothing is lost by freeing the block
-		// here.
-		cp_module_fini(&config->cp_module);
-		memory_bfree(
-			&agent->memory_context,
-			config,
-			sizeof(struct route_module_config)
-		);
+		yanet_error_add(err, "failed to link the fib object");
+		route_module_config_destroy(&config->cp_module);
 		return NULL;
 	}
 
 	if (route_module_config_register_counters(config, err)) {
-		// Frees directly instead of going through the public free.
-		//
-		// Registering counters is the last construction step, so
-		// configuration data is already fully set up and the type's
-		// own destructor can safely walk it. No reference beyond the
-		// caller's own has been taken and no registry has observed
-		// the module yet, so it is dangling and either path
-		// destroys it identically.
 		route_module_config_destroy(&config->cp_module);
 		return NULL;
 	}
 
 	return &config->cp_module;
-}
-
-int
-route_module_config_data_init(
-	struct route_module_config *config,
-	struct memory_context *memory_context
-) {
-	return route_fib_init(&config->fib, memory_context);
-}
-
-void
-route_module_config_data_fini(struct route_module_config *config) {
-	route_fib_fini(&config->fib, &config->cp_module.memory_context);
-}
-
-static void
-route_module_config_destroy(struct cp_module *cp_module) {
-	struct route_module_config *config =
-		container_of(cp_module, struct route_module_config, cp_module);
-
-	route_module_config_data_fini(config);
-
-	struct agent *agent = ADDR_OF(&cp_module->agent);
-
-	cp_module_fini(cp_module);
-
-	memory_bfree(
-		&agent->memory_context,
-		config,
-		sizeof(struct route_module_config)
-	);
 }
 
 int
@@ -177,130 +142,145 @@ route_module_config_free(struct cp_module *cp_module, yanet_error **err) {
 }
 
 int
-route_module_config_add_route(
+route_module_config_link_device(
 	struct cp_module *cp_module,
-	struct ether_addr dst_addr,
-	struct ether_addr src_addr,
 	const char *device_name,
-	const char *counter_name,
+	uint32_t *index,
 	yanet_error **err
 ) {
-	struct route_module_config *config =
-		container_of(cp_module, struct route_module_config, cp_module);
-
 	uint64_t device_index;
 	if (cp_module_link_device(cp_module, device_name, &device_index, err)) {
 		return -1;
 	}
-
-	uint64_t counter_id = COUNTER_INVALID;
-	if (counter_name != NULL && counter_name[0] != '\0') {
-		// Per-route counters live in a dedicated "routes" registry so
-		// they are separated from the module's predefined counters in
-		// the per-worker storages and the counter storage registry.
-		struct counter_registry *routes_registry =
-			cp_module_counter_registry(
-				cp_module,
-				"routes",
-				&config->routes_registry_idx,
-				err
-			);
-		if (routes_registry == NULL) {
-			return -1;
-		}
-
-		counter_id = counter_registry_register(
-			routes_registry, counter_name, 2, err
+	if (device_index > UINT32_MAX) {
+		yanet_error_add(
+			err,
+			"device table of module '%s' is full",
+			cp_module->name
 		);
-		if (counter_id == COUNTER_INVALID) {
-			yanet_error_add(
-				err,
-				"failed to register counter '%s'",
-				counter_name
-			);
-			return -1;
-		}
+		return -1;
+	}
+	*index = (uint32_t)device_index;
+	return 0;
+}
+
+struct route_snapshot {
+	struct cp_config *cp_config;
+	struct cp_config_gen *config_gen;
+	const struct cp_module *module;
+	// The table object, NULL while the generation holds none.
+	const struct cp_object *object;
+};
+
+struct route_snapshot *
+route_snapshot_open(struct agent *agent, const char *name, yanet_error **err) {
+	struct route_snapshot *snapshot = calloc(1, sizeof(*snapshot));
+	if (snapshot == NULL) {
+		yanet_error_add(err, "failed to allocate the snapshot");
+		return NULL;
 	}
 
-	return route_fib_add_route(
-		&config->fib,
-		&config->cp_module.memory_context,
-		dst_addr,
-		src_addr,
-		device_index,
-		counter_id
+	struct cp_config *cp_config = ADDR_OF(&agent->cp_config);
+	cp_config_lock(cp_config);
+	struct cp_config_gen *config_gen = cp_config_gen_acquire(cp_config);
+	cp_config_unlock(cp_config);
+
+	struct cp_module *cp_module =
+		cp_config_gen_lookup_module(config_gen, "route", name);
+	if (cp_module == NULL) {
+		cp_config_lock(cp_config);
+		cp_config_gen_release(cp_config, config_gen);
+		cp_config_unlock(cp_config);
+		free(snapshot);
+		yanet_error_add_kind(
+			err,
+			YANET_ERROR_NOT_FOUND,
+			"route config '%s' is not snapshot",
+			name
+		);
+		return NULL;
+	}
+
+	snapshot->cp_config = cp_config;
+	snapshot->config_gen = config_gen;
+	snapshot->module = cp_module;
+	snapshot->object = cp_config_gen_lookup_object(
+		config_gen, ROUTE_FIB_OBJECT_TYPE, name
 	);
+	return snapshot;
 }
 
-int
-route_module_config_add_route_list(
-	struct cp_module *cp_module, size_t count, const uint32_t *indexes
-) {
-	struct route_module_config *config =
-		container_of(cp_module, struct route_module_config, cp_module);
-	return route_fib_add_route_list(
-		&config->fib, &config->cp_module.memory_context, count, indexes
-	);
+void
+route_snapshot_close(struct route_snapshot *snapshot) {
+	if (snapshot == NULL) {
+		return;
+	}
+	cp_config_lock(snapshot->cp_config);
+	cp_config_gen_release(snapshot->cp_config, snapshot->config_gen);
+	cp_config_unlock(snapshot->cp_config);
+	free(snapshot);
 }
 
-int
-route_module_config_add_prefix_v4(
-	struct cp_module *cp_module,
-	const uint8_t *from,
-	const uint8_t *to,
-	uint32_t route_list_index
-) {
-	struct route_module_config *config =
-		container_of(cp_module, struct route_module_config, cp_module);
-	return route_fib_add_prefix_v4(
-		&config->fib, from, to, route_list_index
-	);
-}
-
-int
-route_module_config_add_prefix_v6(
-	struct cp_module *cp_module,
-	const uint8_t *from,
-	const uint8_t *to,
-	uint32_t route_list_index
-) {
-	struct route_module_config *config =
-		container_of(cp_module, struct route_module_config, cp_module);
-	return route_fib_add_prefix_v6(
-		&config->fib, from, to, route_list_index
-	);
+bool
+route_snapshot_has_fib(const struct route_snapshot *snapshot) {
+	return snapshot->object != NULL;
 }
 
 uint64_t
-route_module_config_route_count(struct cp_module *cp_module) {
-	struct route_module_config *config =
-		container_of(cp_module, struct route_module_config, cp_module);
-	return config->fib.route_count;
+route_snapshot_device_count(const struct route_snapshot *snapshot) {
+	return snapshot->module->device_count;
 }
 
-uint64_t
-route_module_config_fib_range_count_v4(struct cp_module *cp_module) {
-	struct route_module_config *config =
-		container_of(cp_module, struct route_module_config, cp_module);
-	return route_fib_range_count_v4(&config->fib);
+const char *
+route_snapshot_device_name(
+	const struct route_snapshot *snapshot, uint64_t index
+) {
+	if (index >= snapshot->module->device_count) {
+		return "";
+	}
+	const struct cp_module_device *devices =
+		ADDR_OF(&snapshot->module->devices);
+	return devices[index].name;
 }
 
-uint64_t
-route_module_config_fib_range_count_v6(struct cp_module *cp_module) {
-	struct route_module_config *config =
-		container_of(cp_module, struct route_module_config, cp_module);
-	return route_fib_range_count_v6(&config->fib);
+struct fib_iter {
+	const struct cp_object *object;
+	// The module that resolves device names, NULL when unknown.
+	const struct cp_module *module;
+	struct route_fib_iter it;
+};
+
+struct fib_iter *
+route_snapshot_fib_iter(struct route_snapshot *snapshot, yanet_error **err) {
+	if (snapshot->object == NULL) {
+		yanet_error_add_kind(
+			err,
+			YANET_ERROR_NOT_FOUND,
+			"route config '%s' has no table snapshot",
+			snapshot->module->name
+		);
+		return NULL;
+	}
+
+	struct fib_iter *it = calloc(1, sizeof(*it));
+	if (it == NULL) {
+		yanet_error_add(err, "failed to allocate the table walk");
+		return NULL;
+	}
+	it->object = snapshot->object;
+	it->module = snapshot->module;
+	route_fib_iter_init(&it->it, route_fib_object_fib(snapshot->object));
+	return it;
 }
 
 struct fib_iter *
-fib_iter_new(struct cp_module *cp_module) {
+fib_iter_new(struct cp_object *cp_object) {
 	struct fib_iter *it = calloc(1, sizeof(*it));
 	if (it == NULL) {
 		return NULL;
 	}
-	it->config =
-		container_of(cp_module, struct route_module_config, cp_module);
-	route_fib_iter_init(&it->it, &it->config->fib);
+	it->object = cp_object;
+	route_fib_iter_init(&it->it, route_fib_object_fib(cp_object));
 	return it;
 }
 
@@ -332,7 +312,7 @@ fib_iter_prefix_to(const struct fib_iter *it) {
 uint64_t
 fib_iter_nexthop_count(const struct fib_iter *it) {
 	return route_fib_nexthop_count(
-		&it->config->fib, route_fib_iter_route_list_id(&it->it)
+		it->it.fib, route_fib_iter_route_list_id(&it->it)
 	);
 }
 
@@ -340,9 +320,7 @@ fib_iter_nexthop_count(const struct fib_iter *it) {
 static const struct route *
 fib_iter_resolve_route(const struct fib_iter *it, uint64_t nexthop_idx) {
 	return route_fib_resolve_route(
-		&it->config->fib,
-		route_fib_iter_route_list_id(&it->it),
-		nexthop_idx
+		it->it.fib, route_fib_iter_route_list_id(&it->it), nexthop_idx
 	);
 }
 
@@ -373,37 +351,19 @@ fib_iter_nexthop_src_mac(
 const char *
 fib_iter_nexthop_device_name(const struct fib_iter *it, uint64_t nexthop_idx) {
 	const struct route *r = fib_iter_resolve_route(it, nexthop_idx);
-	if (r == NULL) {
+	if (r == NULL || it->module == NULL ||
+	    r->device_id >= it->module->device_count) {
 		return "";
 	}
-
-	struct route_module_config *config = it->config;
-	struct cp_module_device *devices = ADDR_OF(&config->cp_module.devices);
-	if (r->device_id < config->cp_module.device_count) {
-		return devices[r->device_id].name;
-	}
-	return "";
+	const struct cp_module_device *devices = ADDR_OF(&it->module->devices);
+	return devices[r->device_id].name;
 }
 
 const char *
 fib_iter_nexthop_counter_name(const struct fib_iter *it, uint64_t nexthop_idx) {
 	const struct route *r = fib_iter_resolve_route(it, nexthop_idx);
-	if (r == NULL || r->counter_id == COUNTER_INVALID) {
+	if (r == NULL) {
 		return "";
 	}
-
-	struct route_module_config *config = it->config;
-	if (config->routes_registry_idx >=
-	    config->cp_module.runtime_counter_registry_count) {
-		return "";
-	}
-	struct cp_module_counter_registry **registries =
-		ADDR_OF(&config->cp_module.runtime_counter_registries);
-	struct cp_module_counter_registry *entry =
-		ADDR_OF(registries + config->routes_registry_idx);
-	struct counter_registry *registry = &entry->registry;
-	if (r->counter_id < registry->count) {
-		return ADDR_OF(&registry->names)[r->counter_id].name;
-	}
-	return "";
+	return route_fib_object_counter_name(it->object, r->counter_id);
 }

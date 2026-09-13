@@ -175,3 +175,18 @@ route_fib_object_counter_name(
 	}
 	return ADDR_OF(&registry->names)[counter_id].name;
 }
+
+uint64_t
+route_fib_object_route_count(const struct cp_object *cp_object) {
+	return route_fib_object_fib(cp_object)->route_count;
+}
+
+uint64_t
+route_fib_object_range_count_v4(const struct cp_object *cp_object) {
+	return route_fib_range_count_v4(route_fib_object_fib(cp_object));
+}
+
+uint64_t
+route_fib_object_range_count_v6(const struct cp_object *cp_object) {
+	return route_fib_range_count_v6(route_fib_object_fib(cp_object));
+}

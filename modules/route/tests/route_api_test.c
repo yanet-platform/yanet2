@@ -1,6 +1,6 @@
 /*
- * Tests that construction does not leak memory when the module's own data
- * setup fails partway through, at each of its fallible steps.
+ * Tests that construction of the table object does not leak memory when
+ * its own data setup fails partway through, at each of its fallible steps.
  *
  * Attaching an agent carves a private arena of exactly the given byte
  * limit from the shared allocator, and every allocation the module under
@@ -19,14 +19,14 @@
 #include "lib/dataplane_ut/dataplane_ut.h"
 #include "lib/errors/errors.h"
 #include "lib/logging/log.h"
-#include "modules/route/api/controlplane.h"
+#include "modules/route/api/fib_object.h"
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 /*
- * 16 KB: enough for cp_module_init's small allocations (empirically < 8 KB),
+ * 16 KB: enough for cp_object_init's small allocations (empirically < 8 KB),
  * but well below the 32 KB lpm_init page-chunk request.
  */
 #define ROUTE_TEST_MEMORY_LIMIT (16u * 1024u)
@@ -51,12 +51,14 @@ run_test(struct yanet_shm *shm) {
 
 	size_t baseline = block_allocator_free_size(&agent->block_allocator);
 
-	struct cp_module *cp = route_module_config_new(agent, "probe", &err);
+	struct cp_object *cp = route_fib_object_new(agent, "probe", &err);
 	TEST_ASSERT_NULL(cp, "create unexpectedly succeeded");
 
 	const char *errmsg = (err != NULL) ? yanet_error_message(err) : "";
 	TEST_ASSERT_STR_CONTAINS(
-		errmsg, "failed to init config data", "wrong failure path"
+		errmsg,
+		"failed to init route fib object data",
+		"wrong failure path"
 	);
 	yanet_error_reset(&err);
 
@@ -74,11 +76,11 @@ run_test(struct yanet_shm *shm) {
 }
 
 /*
- * Same shape as the first test, but sized to fail at the second routing
- * table's own setup instead of the first.
+ * Same shape as the first test, but sized to fail at the second tree's
+ * own setup instead of the first.
  *
- * This exercises the error path for a partially constructed module,
- * verifying it frees the first table's memory exactly once rather than
+ * This exercises the error path for a partially constructed object,
+ * verifying it frees the first tree's memory exactly once rather than
  * leaving that job to a teardown that would double free it.
  */
 static int
@@ -96,12 +98,14 @@ run_second_lpm_failure_test(struct yanet_shm *shm) {
 
 	size_t baseline = block_allocator_free_size(&agent->block_allocator);
 
-	struct cp_module *cp = route_module_config_new(agent, "probe", &err);
+	struct cp_object *cp = route_fib_object_new(agent, "probe", &err);
 	TEST_ASSERT_NULL(cp, "create unexpectedly succeeded");
 
 	const char *errmsg = (err != NULL) ? yanet_error_message(err) : "";
 	TEST_ASSERT_STR_CONTAINS(
-		errmsg, "failed to init config data", "wrong failure path"
+		errmsg,
+		"failed to init route fib object data",
+		"wrong failure path"
 	);
 	yanet_error_reset(&err);
 
@@ -125,6 +129,7 @@ main(void) {
 	const char *port_names[] = {"01:00.0"};
 	const char *modules[] = {"route"};
 	const char *devs_to_load[] = {"plain"};
+	const char *objects_to_load[] = {"route_fib"};
 
 	struct dataplane_ut_config cfg = {
 		.cp_memory = 1u << 25,
@@ -136,6 +141,8 @@ main(void) {
 		.module_count = 1,
 		.devices_to_load = devs_to_load,
 		.devices_to_load_count = 1,
+		.objects_to_load = objects_to_load,
+		.objects_to_load_count = 1,
 	};
 
 	struct dataplane_ut *ut = dataplane_ut_new(&cfg);

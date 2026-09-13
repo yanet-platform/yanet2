@@ -12,6 +12,9 @@ import (
 const (
 	moduleType = "route"
 	agentName  = moduleType
+	// fibObjectType is the shared-object type a config's table is
+	// published under, linked by the module config of the same name.
+	fibObjectType = "route_fib"
 )
 
 // Option configures the RouteModule constructor.

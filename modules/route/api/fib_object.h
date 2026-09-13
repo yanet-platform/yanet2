@@ -73,3 +73,15 @@ const char *
 route_fib_object_counter_name(
 	const struct cp_object *cp_object, uint64_t counter_id
 );
+
+// Number of nexthops the object holds.
+uint64_t
+route_fib_object_route_count(const struct cp_object *cp_object);
+
+// Number of IPv4 ranges a walk of the object's table would yield.
+uint64_t
+route_fib_object_range_count_v4(const struct cp_object *cp_object);
+
+// Number of IPv6 ranges a walk of the object's table would yield.
+uint64_t
+route_fib_object_range_count_v6(const struct cp_object *cp_object);
