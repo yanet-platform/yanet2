@@ -1,5 +1,7 @@
 #pragma once
 
+#include <stdint.h>
+
 #define MODULE_TYPE_LEN 80
 
 // Dataplane <-> module .so ABI version.
@@ -9,7 +11,7 @@
 //
 // The dataplane's plugin loader rejects a .so whose exported version does
 // not match this constant.
-#define YANET_MODULE_ABI_VERSION 29
+#define YANET_MODULE_ABI_VERSION 30
 
 // Symbol name a module .so exports carrying its compiled-against
 // YANET_MODULE_ABI_VERSION, as a uint32_t global.
@@ -59,10 +61,31 @@ typedef void (*module_commit_handler)(
 	struct dp_config *dp_config, struct cp_module *cp_module
 );
 
+// Execution-context commit handler: a per-worker derivation hook,
+// run once per module
+// execution context per published generation.
+//
+// Runs inside the dataplane address space during the per-worker
+// absolutization pass, which re-derives everything from the
+// authoritative fields, so a repeated pass rewrites the same values.
+// Writes only the module's own private per-context buffer reached
+// through the execution context; the shared module config and the
+// context's authoritative fields are read-only here. Values that vary
+// per worker belong in this hook, generation-invariant ones in the
+// commit handler.
+typedef void (*module_commit_ectx_handler)(
+	struct module_ectx *module_ectx, struct cp_module *cp_module
+);
+
 struct module {
 	char name[MODULE_TYPE_LEN];
 	module_handler handler;
 	module_commit_handler commit_handler;
+	module_commit_ectx_handler commit_ectx_handler;
+	// Size of the module's private per-context buffer, zero when the
+	// module needs none. The control plane allocates a zeroed buffer
+	// of this size for every module execution context it builds.
+	uint64_t prepared_size;
 };
 
 typedef struct module *(*module_load_handler)();

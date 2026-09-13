@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 #include "lib/dataplane/module/packet_front.h"
 #include "lib/dataplane/packet/packet.h"
@@ -36,6 +37,11 @@ new_module_blackhole() {
 	if (module == NULL) {
 		return NULL;
 	}
+
+	// The loader copies every field of the returned descriptor, so
+	// heap garbage must not survive in the ones this constructor
+	// leaves unset.
+	memset(module, 0, sizeof(*module));
 
 	snprintf(module->name, sizeof(module->name), "%s", "blackhole");
 	module->handler = blackhole_handle_packets;

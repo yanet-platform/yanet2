@@ -74,6 +74,8 @@ dp_load_module(
 	strtcpy(dp_module->name, module->name, sizeof(dp_module->name));
 	dp_module->handler = module->handler;
 	dp_module->commit_handler = module->commit_handler;
+	dp_module->commit_ectx_handler = module->commit_ectx_handler;
+	dp_module->prepared_size = module->prepared_size;
 
 	SET_OFFSET_OF(&dp_config->dp_modules, dp_modules);
 
