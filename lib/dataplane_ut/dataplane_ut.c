@@ -2,10 +2,13 @@
 
 #include <dlfcn.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/mman.h>
 #include <time.h>
+#include <unistd.h>
 
 #include "common/buildinfo.h"
 #include "common/memory.h"
@@ -35,10 +38,12 @@
 struct dataplane_ut {
 	void *arena;
 	size_t arena_size;
+	// Owned copy of the backing file path, NULL for a heap arena.
+	char *arena_path;
 	// Shared-memory handle over the arena, handed out to agents.
 	//
-	// Owned by the harness: it is never detached, because the arena is
-	// heap memory that the harness frees itself.
+	// Owned by the harness: it is never detached, because the harness
+	// releases the arena itself.
 	struct yanet_shm shm;
 	struct dp_config *dp_config;
 	struct cp_config *cp_config;
@@ -47,6 +52,30 @@ struct dataplane_ut {
 	uint64_t mock_time_ns;
 	struct plugin_registry plugins;
 };
+
+// Map a fresh shared arena file, returning NULL when it cannot be created.
+//
+// Exclusive creation makes a leftover file from an earlier run an error
+// rather than a silently reused arena. A failure leaves no file behind.
+static void *
+dataplane_ut_map_arena(const char *path, size_t size) {
+	int fd = open(path, O_CREAT | O_EXCL | O_RDWR | O_CLOEXEC, 0600);
+	if (fd < 0) {
+		return NULL;
+	}
+	void *arena = MAP_FAILED;
+	if (ftruncate(fd, (off_t)size) == 0) {
+		arena = mmap(
+			NULL, size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0
+		);
+	}
+	close(fd);
+	if (arena == MAP_FAILED) {
+		unlink(path);
+		return NULL;
+	}
+	return arena;
+}
 
 struct dataplane_ut *
 dataplane_ut_new(const struct dataplane_ut_config *cfg) {
@@ -83,15 +112,38 @@ dataplane_ut_new(const struct dataplane_ut_config *cfg) {
 	// Allocate the shared arena. calloc zeros the struct so every pointer
 	// field is NULL until explicitly set — partial-init free is safe.
 	ut->arena_size = cfg->cp_memory + cfg->dp_memory;
-	ut->arena = aligned_alloc(64, ut->arena_size);
-	if (ut->arena == NULL) {
-		LOG(ERROR,
-		    "dataplane_ut_new: failed to allocate %zu-byte arena",
-		    ut->arena_size);
-		dataplane_ut_free(ut);
-		return NULL;
+	if (cfg->arena_path != NULL) {
+		ut->arena_path = strdup(cfg->arena_path);
+		if (ut->arena_path == NULL) {
+			LOG(ERROR,
+			    "dataplane_ut_new: failed to copy the arena path");
+			dataplane_ut_free(ut);
+			return NULL;
+		}
+		// A fresh file reads as zeros, so no memset is needed.
+		ut->arena =
+			dataplane_ut_map_arena(ut->arena_path, ut->arena_size);
+		if (ut->arena == NULL) {
+			LOG(ERROR,
+			    "dataplane_ut_new: failed to map the %zu-byte "
+			    "arena file %s",
+			    ut->arena_size,
+			    ut->arena_path);
+			dataplane_ut_free(ut);
+			return NULL;
+		}
+	} else {
+		ut->arena = aligned_alloc(64, ut->arena_size);
+		if (ut->arena == NULL) {
+			LOG(ERROR,
+			    "dataplane_ut_new: failed to allocate the "
+			    "%zu-byte arena",
+			    ut->arena_size);
+			dataplane_ut_free(ut);
+			return NULL;
+		}
+		memset(ut->arena, 0, ut->arena_size);
 	}
-	memset(ut->arena, 0, ut->arena_size);
 	ut->shm.base = ut->arena;
 	ut->shm.size = ut->arena_size;
 
@@ -452,9 +504,16 @@ dataplane_ut_free(struct dataplane_ut *ut) {
 	}
 
 	if (ut->arena != NULL) {
-		free(ut->arena);
+		if (ut->arena_path != NULL) {
+			munmap(ut->arena, ut->arena_size);
+			unlink(ut->arena_path);
+		} else {
+			free(ut->arena);
+		}
 		ut->arena = NULL;
 	}
+	free(ut->arena_path);
+	ut->arena_path = NULL;
 
 	dp_unload_plugins(&ut->plugins);
 

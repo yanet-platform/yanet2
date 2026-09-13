@@ -56,6 +56,7 @@ package dataplaneut
 #include <string.h>
 #include <stdint.h>
 
+#include "lib/controlplane/agent/agent.h"
 #include "lib/dataplane_ut/dataplane_ut.h"
 #include "lib/dataplane/packet/packet.h"
 
@@ -204,6 +205,12 @@ type Config struct {
 	// its index — the harness's long-standing single-device behavior.
 	// When set, its length must equal WorkerCount.
 	Workers []WorkerSpec
+	// ArenaPath backs the arena with a file so another process can map
+	// the live dataplane state.
+	//
+	// Empty keeps the arena in private memory. The file is created
+	// exclusively and removed by Free.
+	ArenaPath string
 }
 
 // Result of one pipeline round.
@@ -331,6 +338,11 @@ func NewHarness(cfg Config) (*Harness, error) {
 		defer C.free(unsafe.Pointer(cPluginDir))
 		cCfg.plugin_dir = cPluginDir
 	}
+	if cfg.ArenaPath != "" {
+		cArenaPath := C.CString(cfg.ArenaPath)
+		defer C.free(unsafe.Pointer(cArenaPath))
+		cCfg.arena_path = cArenaPath
+	}
 	if len(cfg.Workers) > 0 {
 		cWorkers := make([]C.struct_dataplane_ut_worker_spec, len(cfg.Workers))
 		for idx, worker := range cfg.Workers {
@@ -356,6 +368,24 @@ func NewHarness(cfg Config) (*Harness, error) {
 func (m *Harness) Free() {
 	C.dataplane_ut_free(m.ptr)
 	m.ptr = nil
+}
+
+// Raw returns the C harness handle for packages that call the C harness
+// API directly, such as dataplane_ut_alloc_mbuf and dataplane_ut_run.
+//
+// The handle stays owned by the harness and dies with Free.
+func (m *Harness) Raw() unsafe.Pointer {
+	return unsafe.Pointer(m.ptr)
+}
+
+// arenaHandle wraps a caller-owned mapping of a file-backed arena as the
+// shared-memory handle a reader process attaches through.
+//
+// Test support: the mapping stays the caller's and the handle must never
+// be detached.
+func arenaHandle(base unsafe.Pointer, size uintptr) *ffi.SharedMemory {
+	shm := &C.struct_yanet_shm{base: base, size: C.size_t(size)}
+	return ffi.NewSharedMemoryFromRaw(unsafe.Pointer(shm))
 }
 
 // OutstandingMbufs returns mock-mempool allocations not yet reclaimed.

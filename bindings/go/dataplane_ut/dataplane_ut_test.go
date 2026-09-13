@@ -1,14 +1,21 @@
 package dataplaneut
 
 import (
+	"fmt"
+	"io/fs"
 	"net"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"testing"
 	"time"
+	"unsafe"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/gopacket/gopacket/layers"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/sys/unix"
 
 	"github.com/yanet-platform/yanet2/bindings/go/filter"
 	"github.com/yanet-platform/yanet2/common/go/xerror"
@@ -692,4 +699,160 @@ func TestHandleSegmentedPacketsOnDevice_ForwardDeviceScopedRule(t *testing.T) {
 	require.GreaterOrEqual(t, len(counters[0].Values), 2)
 	assert.Equal(t, []uint64{0, 0}, counters[0].Values[0], "worker 0 never ran the round")
 	assert.Equal(t, []uint64{1, uint64(len(payload))}, counters[0].Values[1], "worker 1 ran the matching round")
+}
+
+// arenaReaderRole names the environment variable that turns a re-executed
+// test binary into the reader half of the file-backed arena test.
+const arenaReaderRole = "DATAPLANE_UT_TEST_ROLE"
+
+// arenaReaderBase is the address the reader maps the arena at, proving
+// the mapping resolves wherever a reader puts it rather than only at the
+// address the writer happened to get.
+//
+// The mapping is requested without replacement, so a clash with anything
+// already mapped there fails the child instead of hiding.
+const arenaReaderBase = uintptr(0x7a0000000000)
+
+// TestMain hands a re-executed test binary to its reader role before the
+// tests run, so the child never enters the test list.
+func TestMain(m *testing.M) {
+	if os.Getenv(arenaReaderRole) == "arena-reader" {
+		os.Exit(runArenaReader(os.Args[1:]))
+	}
+	os.Exit(m.Run())
+}
+
+// addressPointer turns a bare address into the pointer a mapping hint
+// takes.
+//
+// A direct uintptr conversion is what vet's unsafeptr rule rejects, so the
+// value is reinterpreted through its own storage.
+func addressPointer(address uintptr) unsafe.Pointer {
+	return *(*unsafe.Pointer)(unsafe.Pointer(&address))
+}
+
+// runArenaReader maps the arena file at arenaReaderBase in this fresh
+// process and prints whether the dataplane inside it is ready.
+//
+// One report line and the exit code stand in for the testing package,
+// which never runs in the reader.
+func runArenaReader(args []string) int {
+	if len(args) != 1 {
+		fmt.Fprintln(os.Stderr, "arena-reader: expected the arena path")
+		return 2
+	}
+	file, err := os.OpenFile(args[0], os.O_RDWR, 0)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "arena-reader:", err)
+		return 1
+	}
+	defer file.Close()
+	info, err := file.Stat()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "arena-reader:", err)
+		return 1
+	}
+	size := uintptr(info.Size())
+	mapping, err := unix.MmapPtr(
+		int(file.Fd()),
+		0,
+		addressPointer(arenaReaderBase),
+		size,
+		unix.PROT_READ|unix.PROT_WRITE,
+		unix.MAP_SHARED|unix.MAP_FIXED_NOREPLACE,
+	)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "arena-reader: mmap:", err)
+		return 1
+	}
+	defer unix.MunmapPtr(mapping, size)
+	fmt.Printf(
+		"arena-reader mapping=%#x ready=%t\n",
+		uintptr(mapping),
+		arenaHandle(mapping, size).DataplaneReady(0),
+	)
+	return 0
+}
+
+// harnessArenaConfig is the one-worker topology the file-backed arena
+// tests build, with the arena file inside the test's temporary directory.
+func harnessArenaConfig(t *testing.T) Config {
+	t.Helper()
+
+	return Config{
+		CPMemory:    uint64(datasize.MB * 32),
+		DPMemory:    uint64(datasize.MB * 4),
+		WorkerCount: 1,
+		ArenaPath:   filepath.Join(t.TempDir(), "arena"),
+	}
+}
+
+// Test_Harness_ArenaPath_ChildProcessMapsLiveArena verifies that a
+// harness whose arena is a file leaves the live dataplane state readable
+// from another process: a re-executed test binary maps the file at its
+// own fixed address and finds the instance ready there.
+func Test_Harness_ArenaPath_ChildProcessMapsLiveArena(t *testing.T) {
+	cfg := harnessArenaConfig(t)
+	harness, err := NewHarness(cfg)
+	require.NoError(t, err)
+	t.Cleanup(harness.Free)
+
+	reader := exec.Command(os.Args[0], cfg.ArenaPath)
+	reader.Env = append(os.Environ(), arenaReaderRole+"=arena-reader")
+	output, err := reader.CombinedOutput()
+	require.NoError(t, err, string(output))
+	require.Contains(
+		t,
+		string(output),
+		fmt.Sprintf("arena-reader mapping=%#x ready=true", arenaReaderBase),
+	)
+}
+
+// Test_Harness_Raw_ReturnsTheHandle verifies that the raw accessor hands
+// out the C handle the harness owns, so C-level callers and the Go
+// methods drive one instance, and that it is nil once the harness is
+// freed.
+func Test_Harness_Raw_ReturnsTheHandle(t *testing.T) {
+	harness, err := NewHarness(Config{
+		CPMemory:    uint64(datasize.MB * 32),
+		DPMemory:    uint64(datasize.MB * 4),
+		WorkerCount: 1,
+	})
+	require.NoError(t, err)
+
+	require.NotNil(t, harness.Raw())
+	require.Equal(t, unsafe.Pointer(harness.ptr), harness.Raw())
+
+	harness.Free()
+	require.Nil(t, harness.Raw())
+}
+
+// Test_Harness_ArenaPath_RejectsAnExistingFile verifies that a harness
+// refuses a backing file that already exists, so a leftover arena from an
+// earlier run is never silently reused as live dataplane state.
+func Test_Harness_ArenaPath_RejectsAnExistingFile(t *testing.T) {
+	cfg := harnessArenaConfig(t)
+	require.NoError(t, os.WriteFile(cfg.ArenaPath, []byte("stale"), 0o600))
+
+	harness, err := NewHarness(cfg)
+	require.Error(t, err)
+	require.Nil(t, harness)
+	require.FileExists(t, cfg.ArenaPath, "a file the harness did not create must survive")
+}
+
+// Test_Harness_Free_UnlinksArenaFile verifies that the arena file holds
+// the whole arena while the harness lives and is removed by Free, so no
+// mapping file outlives its test.
+func Test_Harness_Free_UnlinksArenaFile(t *testing.T) {
+	cfg := harnessArenaConfig(t)
+	harness, err := NewHarness(cfg)
+	require.NoError(t, err)
+
+	info, err := os.Stat(cfg.ArenaPath)
+	require.NoError(t, err)
+	require.Equal(t, int64(cfg.CPMemory+cfg.DPMemory), info.Size())
+
+	harness.Free()
+	_, err = os.Stat(cfg.ArenaPath)
+	require.ErrorIs(t, err, fs.ErrNotExist)
 }

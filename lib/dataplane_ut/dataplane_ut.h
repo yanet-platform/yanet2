@@ -52,6 +52,14 @@ struct dataplane_ut_config {
 	// must point to exactly worker_count entries, and entry idx configures
 	// worker idx.
 	const struct dataplane_ut_worker_spec *workers;
+
+	// Optional file backing the arena, so another process can map the
+	// live dataplane state. NULL keeps the arena in private heap memory.
+	//
+	// The file is created exclusively with mode 0600, sized to
+	// cp_memory + dp_memory and mapped shared. Freeing the harness
+	// unmaps and unlinks it.
+	const char *arena_path;
 };
 
 // Construct an in-process dataplane harness.
