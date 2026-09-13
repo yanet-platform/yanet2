@@ -155,79 +155,11 @@ acl_handle_packets(
 	const bool net6_share =
 		net6_share_dir_is_built(&acl_config->net6_share_src);
 
-	// fwtables of the linked map objects, one per family. NULL when the
-	// config declared no link for the family, in which case CHECK_STATE
-	// finds no state for that family.
-	fwtable_t *fw4table = NULL;
-	fwtable_t *fw6table = NULL;
-	if (acl_config->v4_object_link_idx != ACL_OBJECT_LINK_NONE) {
-		struct module_object_link_ectx *link = object_link_get_address(
-			module_ectx, acl_config->v4_object_link_idx
-		);
-		if (link != NULL) {
-			struct object_ectx *oectx = link->abs_object_ectx;
-			struct cp_object *cp_obj = oectx->abs_cp_object;
-			fw4table = fwstate_map_v4_object_table(cp_obj);
-		}
-	}
-	if (acl_config->v6_object_link_idx != ACL_OBJECT_LINK_NONE) {
-		struct module_object_link_ectx *link = object_link_get_address(
-			module_ectx, acl_config->v6_object_link_idx
-		);
-		if (link != NULL) {
-			struct object_ectx *oectx = link->abs_object_ectx;
-			struct cp_object *cp_obj = oectx->abs_cp_object;
-			fw6table = fwstate_map_v6_object_table(cp_obj);
-		}
-	}
-
-	struct counter_storage *counter_storage =
-		module_ectx->abs_counter_storage;
-
-	struct counter_storage *rules_storage = module_ectx_counter_storage(
-		module_ectx, acl_config->rules_registry_idx
-	);
-
-	// Rule counters are resolved per matched target; hoisting the lookup
-	// array leaves a single hop per packet.
-	struct counter_value_handle **rules_handles =
-		ADDR_OF_NONNULL(&rules_storage->counter_value_handles);
-
-	uint64_t *pass_cnt = counter_get_address(
-		acl_config->action_allow_counter_id, counter_storage
-	);
-
-	uint64_t *deny_cnt = counter_get_address(
-		acl_config->action_deny_counter_id, counter_storage
-	);
-
-	uint64_t *create_cnt = counter_get_address(
-		acl_config->action_create_state_counter_id, counter_storage
-	);
-
-	uint64_t *check_pass_cnt = counter_get_address(
-		acl_config->action_check_pass_counter_id, counter_storage
-	);
-
-	uint64_t *check_miss_cnt = counter_get_address(
-		acl_config->action_check_miss_counter_id, counter_storage
-	);
-
-	uint64_t *sync_cnt = counter_get_address(
-		acl_config->sync_sent_counter_id, counter_storage
-	);
-
-	uint64_t *invalid_cnt = counter_get_address(
-		acl_config->action_invalid_counter_id, counter_storage
-	);
-
-	uint64_t *non_term_cnt = counter_get_address(
-		acl_config->action_non_term_counter_id, counter_storage
-	);
-
-	uint64_t *no_match_cnt = counter_get_address(
-		acl_config->no_match_counter_id, counter_storage
-	);
+	// Everything the burst loop needs that does not depend on the
+	// packets themselves — the module counters, the per-rule counter
+	// handle array and the linked state tables — is derived per
+	// worker by the execution-context commit handler.
+	struct acl_prepared *prepared = module_ectx->abs_module_prepared;
 
 	// Time in nanoseconds is sufficient for keeping state up to 500 years
 	uint64_t now = dp_worker->current_time;
@@ -490,7 +422,7 @@ acl_handle_packets(
 
 		if (packet->network_header.type ==
 		    rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV4)) {
-			state_table = fw4table;
+			state_table = prepared->fw4table;
 
 			if (ip4_result[ip4_idx] < action) {
 				action = ip4_result[ip4_idx];
@@ -508,7 +440,7 @@ acl_handle_packets(
 			}
 		} else if (packet->network_header.type ==
 			   rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV6)) {
-			state_table = fw6table;
+			state_table = prepared->fw6table;
 
 			if (ip6_result[ip6_idx] < action) {
 				action = ip6_result[ip6_idx];
@@ -527,7 +459,7 @@ acl_handle_packets(
 		}
 
 		if (action != FILTER_RULE_INVALID) {
-			target = ADDR_OF(&acl_config->targets) + action;
+			target = acl_config->abs_targets + action;
 		}
 
 		const uint64_t pkt_len = packet_data_len(packet);
@@ -548,13 +480,12 @@ acl_handle_packets(
 					goto apply;
 				}
 				case ACTION_COUNT: {
-					uint64_t *counters =
-						counter_handle_get_value(
-							ADDR_OF_NONNULL(
-								rules_handles +
-								target->counter_id
-							)
-						);
+					uint64_t *counters = counter_handle_get_value(
+						ADDR_OF_NONNULL(
+							prepared->rules_handles +
+							target->counter_id
+						)
+					);
 					counters[0] += 1;
 					counters[1] += pkt_len;
 
@@ -577,10 +508,12 @@ acl_handle_packets(
 						);
 					if (state_found) {
 						allow = true;
-						check_pass_cnt[0] += 1;
+						prepared->check_pass_cnt[0] +=
+							1;
 						goto apply;
 					} else {
-						check_miss_cnt[0] += 1;
+						prepared->check_miss_cnt[0] +=
+							1;
 					}
 					break;
 				}
@@ -588,7 +521,7 @@ acl_handle_packets(
 					break;
 				}
 				default: {
-					invalid_cnt[0] += 1;
+					prepared->invalid_cnt[0] += 1;
 					allow = false;
 					goto apply;
 				}
@@ -599,12 +532,12 @@ acl_handle_packets(
 			 * There is no terminting action - the packet is
 			 * going to be dropped.
 			 */
-			non_term_cnt[0] += 1;
+			prepared->non_term_cnt[0] += 1;
 
 		apply:
 
 			if (!allow) {
-				deny_cnt[0] += 1;
+				prepared->deny_cnt[0] += 1;
 				packet_front_drop(packet_front, packet);
 				continue;
 			}
@@ -614,11 +547,11 @@ acl_handle_packets(
 			 * state checking what is ok as this implies a packet
 			 * allowing.
 			 */
-			pass_cnt[0] += 1;
+			prepared->allow_cnt[0] += 1;
 			packet_front_output(packet_front, packet);
 
 			if (push_sync_packet != SYNC_NONE) {
-				create_cnt[0] += 1;
+				prepared->create_cnt[0] += 1;
 
 				struct packet *sync_pkt =
 					worker_packet_alloc(dp_worker);
@@ -642,12 +575,13 @@ acl_handle_packets(
 				sync_pkt->flags |=
 					1U << PACKET_FLAG_FWSTATE_SYNC_INTERNAL;
 
-				sync_cnt[0] += 1;
-				sync_cnt[1] += packet_data_len(sync_pkt);
+				prepared->sync_cnt[0] += 1;
+				prepared->sync_cnt[1] +=
+					packet_data_len(sync_pkt);
 				packet_front_output(packet_front, sync_pkt);
 			}
 		} else {
-			no_match_cnt[0] += 1;
+			prepared->no_match_cnt[0] += 1;
 
 			packet_front_drop(packet_front, packet);
 		}
@@ -655,9 +589,97 @@ acl_handle_packets(
 }
 
 static void
+acl_module_commit_ectx(
+	struct module_ectx *module_ectx, struct cp_module *cp_module
+) {
+	struct acl_module_config *acl_config =
+		container_of(cp_module, struct acl_module_config, cp_module);
+
+	// An absent or zeroed buffer leaves every value at its absent
+	// state: no state table, no rule counter handle array.
+	struct acl_prepared *prepared = module_ectx->abs_module_prepared;
+	if (prepared == NULL) {
+		return;
+	}
+
+	struct counter_storage *counter_storage =
+		module_ectx->abs_counter_storage;
+
+	prepared->allow_cnt = counter_get_address(
+		acl_config->action_allow_counter_id, counter_storage
+	);
+	prepared->deny_cnt = counter_get_address(
+		acl_config->action_deny_counter_id, counter_storage
+	);
+	prepared->create_cnt = counter_get_address(
+		acl_config->action_create_state_counter_id, counter_storage
+	);
+	prepared->check_pass_cnt = counter_get_address(
+		acl_config->action_check_pass_counter_id, counter_storage
+	);
+	prepared->check_miss_cnt = counter_get_address(
+		acl_config->action_check_miss_counter_id, counter_storage
+	);
+	prepared->sync_cnt = counter_get_address(
+		acl_config->sync_sent_counter_id, counter_storage
+	);
+	prepared->invalid_cnt = counter_get_address(
+		acl_config->action_invalid_counter_id, counter_storage
+	);
+	prepared->non_term_cnt = counter_get_address(
+		acl_config->action_non_term_counter_id, counter_storage
+	);
+	prepared->no_match_cnt = counter_get_address(
+		acl_config->no_match_counter_id, counter_storage
+	);
+
+	// Rule counters are resolved per matched target; hoisting the
+	// lookup array leaves a single hop per packet.
+	struct counter_storage *rules_storage = module_ectx_counter_storage(
+		module_ectx, acl_config->rules_registry_idx
+	);
+	prepared->rules_handles =
+		(rules_storage != NULL)
+			? ADDR_OF_NONNULL(&rules_storage->counter_value_handles)
+			: NULL;
+
+	// fwtables of the linked map objects, one per family. NULL when the
+	// config declared no link for the family, in which case CHECK_STATE
+	// finds no state for that family.
+	prepared->fw4table = NULL;
+	prepared->fw6table = NULL;
+	if (acl_config->v4_object_link_idx != ACL_OBJECT_LINK_NONE) {
+		struct module_object_link_ectx *link = object_link_get_address(
+			module_ectx, acl_config->v4_object_link_idx
+		);
+		if (link != NULL) {
+			struct object_ectx *oectx = link->abs_object_ectx;
+			struct cp_object *cp_obj = oectx->abs_cp_object;
+			prepared->fw4table =
+				fwstate_map_v4_object_table(cp_obj);
+		}
+	}
+	if (acl_config->v6_object_link_idx != ACL_OBJECT_LINK_NONE) {
+		struct module_object_link_ectx *link = object_link_get_address(
+			module_ectx, acl_config->v6_object_link_idx
+		);
+		if (link != NULL) {
+			struct object_ectx *oectx = link->abs_object_ectx;
+			struct cp_object *cp_obj = oectx->abs_cp_object;
+			prepared->fw6table =
+				fwstate_map_v6_object_table(cp_obj);
+		}
+	}
+}
+
+static void
 acl_module_commit(struct dp_config *dp_config, struct cp_module *cp_module) {
 	(void)dp_config;
-	(void)cp_module;
+
+	struct acl_module_config *acl_config =
+		container_of(cp_module, struct acl_module_config, cp_module);
+
+	acl_config->abs_targets = ADDR_OF(&acl_config->targets);
 }
 
 struct module *
@@ -669,9 +691,16 @@ new_module_acl() {
 		return NULL;
 	}
 
+	// The loader copies every field of the returned descriptor, so
+	// heap garbage must not survive in the ones this constructor
+	// leaves unset.
+	memset(module, 0, sizeof(*module));
+
 	snprintf(module->module.name, sizeof(module->module.name), "%s", "acl");
 	module->module.handler = acl_handle_packets;
 	module->module.commit_handler = acl_module_commit;
+	module->module.commit_ectx_handler = acl_module_commit_ectx;
+	module->module.prepared_size = sizeof(struct acl_prepared);
 
 	return &module->module;
 }

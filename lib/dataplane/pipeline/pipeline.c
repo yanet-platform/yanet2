@@ -6,6 +6,7 @@
 #include "lib/dataplane/config/zone.h"
 #include "lib/dataplane/module/packet_front.h"
 #include "lib/dataplane/packet/packet.h"
+#include "lib/logging/log.h"
 
 static inline void
 counter_add_packets_bytes(
@@ -149,6 +150,39 @@ module_ectx_resolve_absolutes(struct module_ectx *module_ectx) {
 	for (uint64_t idx = 0; idx < module_ectx->object_link_count; ++idx) {
 		object_links[idx].abs_object_ectx =
 			ADDR_OF(&object_links[idx].object_ectx);
+	}
+
+	module_ectx->abs_module_prepared =
+		ADDR_OF(&module_ectx->module_prepared);
+	if (module_ectx->abs_module_prepared == NULL) {
+		return;
+	}
+
+	// Filling the private buffer joins the derivations above: the
+	// single-writer pass re-derives from authoritative fields, so a
+	// repeated pass rewrites the same values. The skips are defensive
+	// only — the slot index is validated when the config is built.
+	struct dp_config *dp_config = module_ectx_dp_config(module_ectx);
+	if (dp_config == NULL) {
+		LOG(ERROR,
+		    "module context commit skipped for '%s:%s': no dataplane "
+		    "config",
+		    cp_module->type,
+		    cp_module->name);
+		return;
+	}
+	if (cp_module->dp_module_idx >= dp_config->module_count) {
+		LOG(ERROR,
+		    "module context commit skipped for '%s:%s': no dataplane "
+		    "module",
+		    cp_module->type,
+		    cp_module->name);
+		return;
+	}
+	struct dp_module *dp_module =
+		ADDR_OF(&dp_config->dp_modules) + cp_module->dp_module_idx;
+	if (dp_module->commit_ectx_handler != NULL) {
+		dp_module->commit_ectx_handler(module_ectx, cp_module);
 	}
 }
 
@@ -319,9 +353,11 @@ device_entry_ectx_resolve_absolutes(
 // Derive the absolute addresses the packet hot path runs on: the
 // counter pointers of every stage, resolved from the counter registry
 // ids and the stage counter storages; the stage hop addresses, copied
-// or recoded from the controlplane-owned relative arrays; and every
+// or recoded from the controlplane-owned relative arrays; every
 // object's controlplane counterpart, copied from the generation's
-// relative object array.
+// relative object array; and each module's private per-context
+// buffer, filled by its execution-context commit handler when one is
+// registered.
 //
 // Runs in the dataplane process before the context is released to the
 // worker, and recomputes everything from controlplane-owned data, so a

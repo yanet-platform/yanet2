@@ -1,5 +1,7 @@
 #include "config.h"
 
+#include <string.h>
+
 #include <rte_ether.h>
 #include <rte_ip.h>
 #include <rte_mbuf.h>
@@ -203,6 +205,11 @@ new_module_route_mpls() {
 	if (module == NULL) {
 		return NULL;
 	}
+
+	// The loader copies every field of the returned descriptor, so
+	// heap garbage must not survive in the ones this constructor
+	// leaves unset.
+	memset(module, 0, sizeof(*module));
 
 	snprintf(
 		module->module.name,
