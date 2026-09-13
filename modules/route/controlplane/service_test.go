@@ -1380,6 +1380,10 @@ func Test_RouteService_UpdateFIB_ModulePublishFailureAfterFirstObjectKeepsObject
 	list, err := service.ListConfigs(t.Context(), &routepb.ListConfigsRequest{})
 	require.NoError(t, err)
 	require.Contains(t, list.GetConfigs(), "cfg", "the object that did publish must still be tracked")
+	all, err := service.Metrics()
+	require.NoError(t, err)
+	require.Empty(t, findMetrics(all, "route_config_updated_timestamp_seconds"),
+		"nothing runs the object yet, so no apply time may be reported")
 
 	_, err = service.DeleteConfig(t.Context(), &routepb.DeleteConfigRequest{Name: "cfg"})
 	require.NoError(t, err)

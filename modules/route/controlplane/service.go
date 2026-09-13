@@ -531,7 +531,15 @@ func (m *RouteService) UpdateFIB(
 		entry.FIBRangeCountV6 = fib.FIBRangeCountV6()
 		entry.NexthopCount = fib.RouteCount()
 		entry.NexthopCounterNames = nexthopCounterNames
+		// An apply that failed halfway keeps the previous apply time,
+		// nothing new runs whole.
 		entry.UpdatedAt = time.Now()
+		if publishErr != nil {
+			entry.UpdatedAt = time.Time{}
+			if ok {
+				entry.UpdatedAt = current.UpdatedAt
+			}
+		}
 		return entry, nil
 	})
 	if err == nil {
