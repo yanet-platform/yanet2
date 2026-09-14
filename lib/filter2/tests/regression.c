@@ -26,20 +26,27 @@
 
 #include "lib/filter2/classifiers/net4.h"
 #include "lib/filter2/classifiers/net6.h"
+#include "lib/filter2/classifiers/port.h"
+#include "lib/filter2/classifiers/proto_range.h"
 #include "lib/filter2/compiler.h"
 #include "lib/filter2/filter.h"
 #include "lib/filter2/query.h"
 
 #include "lib/utils/packet.h"
 
+#include <rte_icmp.h>
 #include <rte_ip.h>
 #include <rte_mbuf.h>
+#include <rte_tcp.h>
+#include <rte_udp.h>
 
 #include <stdint.h>
 #include <string.h>
 
 FILTER_COMPILER_DECLARE(c_net4, net4_src, net4_dst);
 FILTER_COMPILER_DECLARE(c_net6, net6_src, net6_dst);
+FILTER_COMPILER_DECLARE(c_ports, port_src, port_dst);
+FILTER_COMPILER_DECLARE(c_port_proto, proto_range, port_src, port_dst);
 
 #define TEST_LOOKUP_NET4(variant, getter)                                      \
 	static inline void test_lookup_##variant(                              \
@@ -167,6 +174,133 @@ test_get_net6_dst_batch(
 TEST_LOOKUP_NET6(net6_src, test_get_net6_src_batch)
 TEST_LOOKUP_NET6(net6_dst, test_get_net6_dst_batch)
 
+#define TEST_LOOKUP_PORT(variant, getter)                                      \
+	static inline void test_lookup_##variant(                              \
+		const struct filter_query_attr *attr,                          \
+		const struct filter_query_attr_handlers *handlers,             \
+		const struct packet **packets,                                 \
+		uint32_t *results,                                             \
+		uint32_t packet_count                                          \
+	) {                                                                    \
+		(void)handlers;                                                \
+		const struct filter_query_attr_port *cls = container_of(       \
+			attr, const struct filter_query_attr_port, attr        \
+		);                                                             \
+		uint16_t ports[packet_count];                                  \
+		getter(packets, ports, packet_count);                          \
+		for (uint32_t idx = 0; idx < packet_count; ++idx) {            \
+			results[idx] = vline_get(&cls->line, ports[idx]);      \
+		}                                                              \
+	}                                                                      \
+	FILTER_QUERY_ATTR(test_attr_##variant, test_lookup_##variant)
+
+static inline void
+test_get_port_src_batch(
+	const struct packet **packets, uint16_t *ports, uint32_t packet_count
+) {
+	for (uint32_t idx = 0; idx < packet_count; ++idx) {
+		const struct packet *packet = packets[idx];
+		struct rte_mbuf *mbuf = packet_to_mbuf(packet);
+		if (packet->transport_header.type == IPPROTO_TCP) {
+			struct rte_tcp_hdr *tcp_hdr = rte_pktmbuf_mtod_offset(
+				mbuf,
+				struct rte_tcp_hdr *,
+				packet->transport_header.offset
+			);
+			ports[idx] = rte_be_to_cpu_16(tcp_hdr->src_port);
+		} else {
+			struct rte_udp_hdr *udp_hdr = rte_pktmbuf_mtod_offset(
+				mbuf,
+				struct rte_udp_hdr *,
+				packet->transport_header.offset
+			);
+			ports[idx] = rte_be_to_cpu_16(udp_hdr->src_port);
+		}
+	}
+}
+
+static inline void
+test_get_port_dst_batch(
+	const struct packet **packets, uint16_t *ports, uint32_t packet_count
+) {
+	for (uint32_t idx = 0; idx < packet_count; ++idx) {
+		const struct packet *packet = packets[idx];
+		struct rte_mbuf *mbuf = packet_to_mbuf(packet);
+		if (packet->transport_header.type == IPPROTO_TCP) {
+			struct rte_tcp_hdr *tcp_hdr = rte_pktmbuf_mtod_offset(
+				mbuf,
+				struct rte_tcp_hdr *,
+				packet->transport_header.offset
+			);
+			ports[idx] = rte_be_to_cpu_16(tcp_hdr->dst_port);
+		} else {
+			struct rte_udp_hdr *udp_hdr = rte_pktmbuf_mtod_offset(
+				mbuf,
+				struct rte_udp_hdr *,
+				packet->transport_header.offset
+			);
+			ports[idx] = rte_be_to_cpu_16(udp_hdr->dst_port);
+		}
+	}
+}
+
+TEST_LOOKUP_PORT(port_src, test_get_port_src_batch)
+TEST_LOOKUP_PORT(port_dst, test_get_port_dst_batch)
+
+static inline uint16_t
+test_get_proto_range(const struct packet *packet) {
+	uint16_t proto = packet->transport_header.type * 256;
+	if (packet->transport_header.type == IPPROTO_TCP) {
+		struct rte_tcp_hdr *tcp_header = rte_pktmbuf_mtod_offset(
+			packet_to_mbuf(packet),
+			struct rte_tcp_hdr *,
+			packet->transport_header.offset
+		);
+		proto += tcp_header->tcp_flags;
+	}
+	if (packet->transport_header.type == IPPROTO_ICMP) {
+		struct rte_icmp_hdr *icmp_header = rte_pktmbuf_mtod_offset(
+			packet_to_mbuf(packet),
+			struct rte_icmp_hdr *,
+			packet->transport_header.offset
+		);
+		proto += icmp_header->icmp_type;
+	}
+	return proto;
+}
+
+static inline void
+test_lookup_proto_range(
+	const struct filter_query_attr *attr,
+	const struct filter_query_attr_handlers *handlers,
+	const struct packet **packets,
+	uint32_t *results,
+	uint32_t packet_count
+) {
+	(void)handlers;
+	const struct filter_query_attr_proto_range *cls = container_of(
+		attr, const struct filter_query_attr_proto_range, attr
+	);
+	for (uint32_t idx = 0; idx < packet_count; ++idx) {
+		results[idx] = vline_get(
+			&cls->line, test_get_proto_range(packets[idx])
+		);
+	}
+}
+
+FILTER_QUERY_ATTR(test_attr_proto_range, test_lookup_proto_range)
+
+static const struct filter_query_attr_handlers *q_ports[] = {
+	&test_attr_port_src,
+	&test_attr_port_dst,
+};
+
+static const struct filter_query_attr_handlers *q_port_proto[] = {
+	&test_attr_proto_range,
+	&test_attr_port_src,
+	&test_attr_port_dst,
+};
+
 static const struct filter_query_attr_handlers *q_net4[] = {
 	&test_attr_net4_src,
 	&test_attr_net4_dst,
@@ -195,6 +329,100 @@ static const struct filter_query_attr_handlers *q_net6[] = {
 			return -1;                                             \
 		}                                                              \
 	} while (0)
+
+// One query against a port filter: classifies a single tcp packet with
+// the given ports and returns the rule index.
+static uint32_t
+query_port_one(struct filter *filter, uint16_t sport, uint16_t dport) {
+	uint8_t src[NET4_LEN] = {192, 0, 2, 1};
+	uint8_t dst[NET4_LEN] = {198, 51, 100, 7};
+	struct packet *packet = calloc(1, sizeof(*packet));
+	if (packet == NULL) {
+		return FILTER_RULE_INVALID;
+	}
+	if (fill_packet_net4(
+		    packet, src, dst, sport, dport, IPPROTO_TCP, 0x02
+	    ) != 0) {
+		free(packet);
+		return FILTER_RULE_INVALID;
+	}
+	const struct packet *packets[1] = {packet};
+	uint32_t results[1] = {FILTER_RULE_INVALID};
+	filter_query(filter, q_ports, packets, results, 1);
+	free_packet(packet);
+	free(packet);
+	return results[0];
+}
+
+// A query with explicit transport protocol and flag control.
+static uint32_t
+query_transport_one(
+	struct filter *filter,
+	uint8_t proto,
+	uint16_t sport,
+	uint16_t dport,
+	uint8_t flags
+) {
+	uint8_t src[NET4_LEN] = {192, 0, 2, 1};
+	uint8_t dst[NET4_LEN] = {198, 51, 100, 7};
+	struct packet *packet = calloc(1, sizeof(*packet));
+	if (packet == NULL) {
+		return FILTER_RULE_INVALID;
+	}
+	if (fill_packet_net4(packet, src, dst, sport, dport, proto, flags) !=
+	    0) {
+		free(packet);
+		return FILTER_RULE_INVALID;
+	}
+	const struct packet *packets[1] = {packet};
+	uint32_t results[1] = {FILTER_RULE_INVALID};
+	filter_query(filter, q_port_proto, packets, results, 1);
+	free_packet(packet);
+	free(packet);
+	return results[0];
+}
+
+static uint32_t
+query_tcp_one(
+	struct filter *filter, uint16_t sport, uint16_t dport, uint8_t flags
+) {
+	return query_transport_one(filter, IPPROTO_TCP, sport, dport, flags);
+}
+
+static uint32_t
+query_icmp_one(struct filter *filter, uint8_t icmp_type) {
+	uint8_t src[NET4_LEN] = {192, 0, 2, 1};
+	uint8_t dst[NET4_LEN] = {198, 51, 100, 7};
+	struct packet *packet = calloc(1, sizeof(*packet));
+	if (packet == NULL) {
+		return FILTER_RULE_INVALID;
+	}
+	if (fill_packet_net4(packet, src, dst, 0, 0, IPPROTO_ICMP, 0) != 0) {
+		free(packet);
+		return FILTER_RULE_INVALID;
+	}
+	// stamp the icmp type the getter reads
+	{
+		struct rte_mbuf *mbuf = packet_to_mbuf(packet);
+		struct rte_icmp_hdr *icmp_header = rte_pktmbuf_mtod_offset(
+			mbuf,
+			struct rte_icmp_hdr *,
+			packet->transport_header.offset
+		);
+		icmp_header->icmp_type = icmp_type;
+	}
+	const struct packet *packets[1] = {packet};
+	uint32_t results[1] = {FILTER_RULE_INVALID};
+	filter_query(filter, q_port_proto, packets, results, 1);
+	free_packet(packet);
+	free(packet);
+	return results[0];
+}
+
+static uint32_t
+query_udp_one(struct filter *filter, uint16_t sport, uint16_t dport) {
+	return query_transport_one(filter, IPPROTO_UDP, sport, dport, 0);
+}
 
 // One query against a compiled filter: classifies a single v4 or v6
 // packet built by the fill helpers and returns the rule index.
@@ -515,6 +743,135 @@ run_net6_mask_non_contiguous_rejected_test(void) {
 	return 0;
 }
 
+// A single value port range: the region machinery must still separate
+// the covered port from its neighbours.
+static int
+run_port_single_value_test(void) {
+	struct filter_port_range sp[1] = {{80, 80}};
+	struct filter_port_range dp[1] = {{0, 65535}};
+	struct filter_rule rule;
+	memset(&rule, 0, sizeof(rule));
+	rule.transport.srcs = sp;
+	rule.transport.src_count = 1;
+	rule.transport.dsts = dp;
+	rule.transport.dst_count = 1;
+	const struct filter_rule *ptrs[1] = {&rule};
+
+	void *arena = malloc(1 << 22);
+	struct block_allocator ba;
+	block_allocator_init(&ba);
+	block_allocator_put_arena(&ba, arena, 1 << 22);
+	struct memory_context mctx;
+	memory_context_init(&mctx, "filter2_regression", &ba);
+
+	struct filter filter;
+	memset(&filter, 0, sizeof(filter));
+	CHECK(filter_init(&filter, c_ports, ptrs, 1, &mctx) == 0);
+
+	CHECK(query_port_one(&filter, 80, 443) == 0);
+	CHECK(query_port_one(&filter, 79, 443) == FILTER_RULE_INVALID);
+	CHECK(query_port_one(&filter, 81, 443) == FILTER_RULE_INVALID);
+	CHECK(query_port_one(&filter, 80, 8080) == 0);
+	CHECK(query_port_one(&filter, 12345, 54321) == FILTER_RULE_INVALID);
+
+	filter_free(&filter, c_ports);
+	free(arena);
+	return 0;
+}
+
+// Many rules sharing one port spec (the content group path) and a
+// disjoint one-off spec; the classes of each must stay separate.
+static int
+run_port_group_test(void) {
+	enum { RULES = 256 };
+	struct filter_port_range sps[RULES];
+	struct filter_port_range dps[RULES];
+	struct filter_rule rules[RULES];
+	memset(rules, 0, sizeof(rules));
+	for (uint32_t idx = 0; idx < RULES; ++idx) {
+		sps[idx].from = 1024;
+		sps[idx].to = 2048;
+		dps[idx].from = 0;
+		dps[idx].to = 65535;
+		rules[idx].transport.srcs = sps + idx;
+		rules[idx].transport.src_count = 1;
+		rules[idx].transport.dsts = dps + idx;
+		rules[idx].transport.dst_count = 1;
+	}
+	// one odd rule at the end
+	sps[RULES - 1].from = 4096;
+	sps[RULES - 1].to = 4099;
+	const struct filter_rule *ptrs[RULES];
+	for (uint32_t idx = 0; idx < RULES; ++idx) {
+		ptrs[idx] = rules + idx;
+	}
+
+	void *arena = malloc(1 << 22);
+	struct block_allocator ba;
+	block_allocator_init(&ba);
+	block_allocator_put_arena(&ba, arena, 1 << 22);
+	struct memory_context mctx;
+	memory_context_init(&mctx, "filter2_regression", &ba);
+
+	struct filter filter;
+	memset(&filter, 0, sizeof(filter));
+	CHECK(filter_init(&filter, c_ports, ptrs, RULES, &mctx) == 0);
+
+	CHECK(query_port_one(&filter, 1500, 80) == 0);
+	CHECK(query_port_one(&filter, 1023, 80) == FILTER_RULE_INVALID);
+	CHECK(query_port_one(&filter, 2049, 80) == FILTER_RULE_INVALID);
+	CHECK(query_port_one(&filter, 4097, 999) == RULES - 1);
+	CHECK(query_port_one(&filter, 4100, 999) == FILTER_RULE_INVALID);
+
+	filter_free(&filter, c_ports);
+	free(arena);
+	return 0;
+}
+
+// Proto range region build: a tcp-only rule and a wide icmp block.
+static int
+run_proto_range_test(void) {
+	struct filter_proto_range protos[2] = {
+		{6 * 256, 6 * 256 + 255},
+		{1 * 256, 1 * 256 + 31},
+	};
+	struct filter_port_range sps[2] = {{0, 65535}, {0, 65535}};
+	struct filter_port_range dps[2] = {{0, 65535}, {0, 65535}};
+	struct filter_rule rules[2];
+	memset(rules, 0, sizeof(rules));
+	for (int idx = 0; idx < 2; ++idx) {
+		rules[idx].transport.protos = protos + idx;
+		rules[idx].transport.proto_count = 1;
+		rules[idx].transport.srcs = sps + idx;
+		rules[idx].transport.src_count = 1;
+		rules[idx].transport.dsts = dps + idx;
+		rules[idx].transport.dst_count = 1;
+	}
+	const struct filter_rule *ptrs[2] = {rules, rules + 1};
+
+	void *arena = malloc(1 << 22);
+	struct block_allocator ba;
+	block_allocator_init(&ba);
+	block_allocator_put_arena(&ba, arena, 1 << 22);
+	struct memory_context mctx;
+	memory_context_init(&mctx, "filter2_regression", &ba);
+
+	struct filter filter;
+	memset(&filter, 0, sizeof(filter));
+	CHECK(filter_init(&filter, c_port_proto, ptrs, 2, &mctx) == 0);
+
+	// tcp packet matches rule 0, icmp echo matches rule 1
+	CHECK(query_tcp_one(&filter, 443, 80, 0x02) == 0);
+	CHECK(query_tcp_one(&filter, 443, 80, 0x12) == 0);
+	CHECK(query_icmp_one(&filter, 8) == 1);
+	CHECK(query_icmp_one(&filter, 40) == FILTER_RULE_INVALID);
+	CHECK(query_udp_one(&filter, 5000, 53) == FILTER_RULE_INVALID);
+
+	filter_free(&filter, c_port_proto);
+	free(arena);
+	return 0;
+}
+
 int
 main(void) {
 	int failed = 0;
@@ -522,6 +879,9 @@ main(void) {
 	failed += run_net6_dedup_wide_rule_test() != 0;
 	failed += run_net4_dedup_large_fanout_test() != 0;
 	failed += run_net6_dedup_large_fanout_test() != 0;
+	failed += run_port_single_value_test() != 0;
+	failed += run_port_group_test() != 0;
+	failed += run_proto_range_test() != 0;
 	failed += run_net4_mask_non_contiguous_rejected_test() != 0;
 	failed += run_net6_mask_non_contiguous_rejected_test() != 0;
 	return failed;

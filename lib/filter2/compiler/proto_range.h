@@ -6,6 +6,7 @@
 #include "declare.h"
 #include "lib/filter2/classifiers/proto_range.h"
 #include "lib/filter2/rule.h"
+#include "u16_ranges.h"
 
 #include <stdint.h>
 
@@ -78,104 +79,6 @@ error_free:
 	return NULL;
 }
 
-static inline uint32_t
-filter_compile_attr_proto_size(const struct filter_compile_attr *attr) {
-	(void)attr;
-	return 65536;
-}
-
-static inline int
-filter_compile_attr_proto_iter(
-	struct filter_compile_attr *attr,
-	const struct filter_compile_attr_handlers *attr_handlers,
-	filter_compile_attr_iter_cb_func iter_cb_func,
-	void *cb_func_data
-) {
-	(void)attr_handlers;
-
-	struct filter_compile_attr_proto *proto_ranges_attr =
-		container_of(attr, struct filter_compile_attr_proto, attr);
-
-	struct filter_query_attr_proto_range *query_attr =
-		proto_ranges_attr->query_attr;
-
-	for (uint32_t idx = 0; idx < 65536; ++idx) {
-		if (iter_cb_func(
-			    vline_get_ptr(&query_attr->line, idx), cb_func_data
-		    ) < 0) {
-			return -1;
-		}
-	}
-	return 0;
-}
-
-static inline int
-filter_compile_attr_proto_rule_is_any(
-	const struct filter_compile_attr *attr,
-	const struct filter_compile_attr_handlers *attr_handlers,
-	const struct filter_rule *rule
-) {
-	struct filter_compile_attr_proto_handlers *proto_ranges_handlers =
-		container_of(
-			attr_handlers,
-			struct filter_compile_attr_proto_handlers,
-			attr_handlers
-		);
-	(void)attr;
-
-	struct filter_proto_ranges ranges;
-	proto_ranges_handlers->get_proto_ranges(rule, &ranges);
-
-	return ranges.count == 0 ||
-	       ranges.items[0].to - ranges.items[0].from == 65535;
-}
-
-static inline int
-filter_compile_attr_proto_rule_iter(
-	struct filter_compile_attr *attr,
-	const struct filter_compile_attr_handlers *attr_handlers,
-	const struct filter_rule *rule,
-	uint32_t rule_idx,
-	filter_compile_attr_iter_cb_func iter_cb_func,
-	void *cb_func_data
-) {
-	(void)rule_idx;
-	struct filter_compile_attr_proto_handlers *proto_ranges_handlers =
-		container_of(
-			attr_handlers,
-			struct filter_compile_attr_proto_handlers,
-			attr_handlers
-		);
-
-	struct filter_compile_attr_proto *proto_ranges_attr =
-		container_of(attr, struct filter_compile_attr_proto, attr);
-
-	struct filter_query_attr_proto_range *query_attr =
-		proto_ranges_attr->query_attr;
-
-	struct filter_proto_ranges ranges;
-	proto_ranges_handlers->get_proto_ranges(rule, &ranges);
-	const struct filter_proto_ranges *proto_ranges = &ranges;
-
-	for (uint32_t range_idx = 0; range_idx < proto_ranges->count;
-	     ++range_idx) {
-		const struct filter_proto_range *proto_range =
-			proto_ranges->items + range_idx;
-		for (uint32_t proto = proto_range->from;
-		     proto <= proto_range->to;
-		     ++proto) {
-			if (iter_cb_func(
-				    vline_get_ptr(&query_attr->line, proto),
-				    cb_func_data
-			    ) < 0) {
-				return -1;
-			}
-		}
-	}
-
-	return 0;
-}
-
 static inline void
 filter_compile_attr_proto_free(
 	struct memory_context *memory_context, struct filter_compile_attr *attr
@@ -224,7 +127,7 @@ filter_rule_get_proto_ranges(
 	proto_ranges->items = rule->transport.protos;
 }
 
-FILTER_COMPILE_ATTR_BUILD_AS_DECLARE(proto_range, filter_compile_attr_proto)
+FILTER_COMPILE_ATTR_U16_RANGES_BUILD_AS_DECLARE(proto_range)
 
 static const struct filter_compile_attr_handlers
 	filter_compile_proto_range_handlers = {
@@ -238,4 +141,9 @@ static const struct filter_compile_attr_proto_handlers
 		.get_proto_ranges = filter_rule_get_proto_ranges,
 };
 
-FILTER_COMPILE_ATTR_BUILD_AS(proto_range, filter_compile_attr_proto)
+FILTER_COMPILE_ATTR_U16_RANGES_BUILD_AS(
+	proto_range,
+	filter_compile_attr_proto,
+	struct filter_proto_ranges,
+	get_proto_ranges
+)

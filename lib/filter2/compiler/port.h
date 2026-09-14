@@ -6,6 +6,7 @@
 #include "declare.h"
 #include "lib/filter2/classifiers/port.h"
 #include "lib/filter2/rule.h"
+#include "u16_ranges.h"
 
 #include <stdint.h>
 
@@ -76,103 +77,6 @@ error_free:
 	return NULL;
 }
 
-static inline uint32_t
-filter_compile_attr_port_size(const struct filter_compile_attr *attr) {
-	(void)attr;
-	return 65536;
-}
-
-static inline int
-filter_compile_attr_port_iter(
-	struct filter_compile_attr *attr,
-	const struct filter_compile_attr_handlers *attr_handlers,
-	filter_compile_attr_iter_cb_func iter_cb_func,
-	void *cb_func_data
-) {
-	(void)attr_handlers;
-
-	struct filter_compile_attr_port *port_ranges_attr =
-		container_of(attr, struct filter_compile_attr_port, attr);
-
-	struct filter_query_attr_port *query_attr =
-		port_ranges_attr->query_attr;
-
-	for (uint32_t idx = 0; idx < 65536; ++idx) {
-		if (iter_cb_func(
-			    vline_get_ptr(&query_attr->line, idx), cb_func_data
-		    ) < 0) {
-			return -1;
-		}
-	}
-	return 0;
-}
-
-static inline int
-filter_compile_attr_port_rule_is_any(
-	const struct filter_compile_attr *attr,
-	const struct filter_compile_attr_handlers *attr_handlers,
-	const struct filter_rule *rule
-) {
-	struct filter_compile_attr_port_handlers *port_ranges_handlers =
-		container_of(
-			attr_handlers,
-			struct filter_compile_attr_port_handlers,
-			attr_handlers
-		);
-	(void)attr;
-
-	struct filter_port_ranges ranges;
-	port_ranges_handlers->get_port_ranges(rule, &ranges);
-
-	return ranges.count == 0 ||
-	       ranges.items[0].to - ranges.items[0].from == 65535;
-}
-
-static inline int
-filter_compile_attr_port_rule_iter(
-	struct filter_compile_attr *attr,
-	const struct filter_compile_attr_handlers *attr_handlers,
-	const struct filter_rule *rule,
-	uint32_t rule_idx,
-	filter_compile_attr_iter_cb_func iter_cb_func,
-	void *cb_func_data
-) {
-	(void)rule_idx;
-	struct filter_compile_attr_port_handlers *port_ranges_handlers =
-		container_of(
-			attr_handlers,
-			struct filter_compile_attr_port_handlers,
-			attr_handlers
-		);
-
-	struct filter_compile_attr_port *port_ranges_attr =
-		container_of(attr, struct filter_compile_attr_port, attr);
-
-	struct filter_query_attr_port *query_attr =
-		port_ranges_attr->query_attr;
-
-	struct filter_port_ranges ranges;
-	port_ranges_handlers->get_port_ranges(rule, &ranges);
-	const struct filter_port_ranges *port_ranges = &ranges;
-
-	for (uint32_t range_idx = 0; range_idx < port_ranges->count;
-	     ++range_idx) {
-		const struct filter_port_range *port_range =
-			port_ranges->items + range_idx;
-		for (uint32_t port = port_range->from; port <= port_range->to;
-		     ++port) {
-			if (iter_cb_func(
-				    vline_get_ptr(&query_attr->line, port),
-				    cb_func_data
-			    ) < 0) {
-				return -1;
-			}
-		}
-	}
-
-	return 0;
-}
-
 static inline void
 filter_compile_attr_port_free(
 	struct memory_context *memory_context, struct filter_compile_attr *attr
@@ -229,8 +133,8 @@ filter_rule_get_port_ranges_dst(
 	port_ranges->items = rule->transport.dsts;
 }
 
-FILTER_COMPILE_ATTR_BUILD_AS_DECLARE(port_src, filter_compile_attr_port)
-FILTER_COMPILE_ATTR_BUILD_AS_DECLARE(port_dst, filter_compile_attr_port)
+FILTER_COMPILE_ATTR_U16_RANGES_BUILD_AS_DECLARE(port_src)
+FILTER_COMPILE_ATTR_U16_RANGES_BUILD_AS_DECLARE(port_dst)
 
 static const struct filter_compile_attr_handlers
 	filter_compile_port_src_handlers = {
@@ -256,5 +160,15 @@ static const struct filter_compile_attr_port_handlers
 		.get_port_ranges = filter_rule_get_port_ranges_dst,
 };
 
-FILTER_COMPILE_ATTR_BUILD_AS(port_src, filter_compile_attr_port)
-FILTER_COMPILE_ATTR_BUILD_AS(port_dst, filter_compile_attr_port)
+FILTER_COMPILE_ATTR_U16_RANGES_BUILD_AS(
+	port_src,
+	filter_compile_attr_port,
+	struct filter_port_ranges,
+	get_port_ranges
+)
+FILTER_COMPILE_ATTR_U16_RANGES_BUILD_AS(
+	port_dst,
+	filter_compile_attr_port,
+	struct filter_port_ranges,
+	get_port_ranges
+)
