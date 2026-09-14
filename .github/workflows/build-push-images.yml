@@ -96,6 +96,9 @@ jobs:
           - component: route-operator
             image: ghcr.io/yanet-platform/yanet2/route-operator
             dockerfile: deploy/yanet-route-operator.Dockerfile
+          - component: neighbour-sidecar
+            image: ghcr.io/yanet-platform/yanet2/neighbour-sidecar
+            dockerfile: deploy/yanet-neighbour-sidecar.Dockerfile
     steps:
       - uses: actions/checkout@v5
 

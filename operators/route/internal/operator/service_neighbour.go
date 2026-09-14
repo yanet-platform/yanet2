@@ -209,3 +209,46 @@ func (m *NeighbourService) RemoveNeighbours(
 	m.onChanged()
 	return &operatorpb.RemoveNeighboursResponse{}, nil
 }
+
+// SwapNeighbours validates a complete observation before replacing its table.
+//
+// The response acknowledges the table replacement and a reconciliation wake;
+// FIB application follows asynchronously.
+func (m *NeighbourService) SwapNeighbours(
+	ctx context.Context,
+	req *operatorpb.SwapNeighboursRequest,
+) (*operatorpb.SwapNeighboursResponse, error) {
+	table := req.GetTable()
+	if table == "" {
+		return nil, status.Error(codes.InvalidArgument, "table is required")
+	}
+	entries := make(map[netip.Addr]neigh.NeighbourEntry, len(req.GetEntries()))
+	for _, entry := range req.GetEntries() {
+		address, err := entry.GetNextHop().ToAddr()
+		if err != nil {
+			return nil, status.Errorf(codes.InvalidArgument, "invalid next hop: %v", err)
+		}
+		if entry.GetHardwareAddr() == nil || entry.GetLinkAddr() == nil {
+			return nil, status.Errorf(codes.InvalidArgument, "neighbour %q requires both MAC addresses", address)
+		}
+		entries[address] = neigh.NeighbourEntry{
+			NextHop: address,
+			HardwareRoute: neigh.HardwareRoute{
+				SourceMAC:      entry.GetHardwareAddr().EUI48(),
+				DestinationMAC: entry.GetLinkAddr().EUI48(),
+				Device:         entry.GetDevice(),
+			},
+			UpdatedAt: time.Unix(entry.GetUpdatedAt(), 0),
+			State:     neigh.NeighbourState(entry.GetState()),
+			Priority:  entry.GetPriority(),
+		}
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, status.FromContextError(err).Err()
+	}
+	if err := m.neighTable.SwapSource(table, entries); err != nil {
+		return nil, status.Errorf(codes.NotFound, "failed to swap neighbours: %v", err)
+	}
+	m.onChanged()
+	return &operatorpb.SwapNeighboursResponse{}, nil
+}
