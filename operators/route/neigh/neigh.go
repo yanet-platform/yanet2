@@ -194,6 +194,9 @@ func (m netlinkKernelTable) NeighList() ([]netlink.Neigh, error) {
 // kernel source of the NeighTable via SwapSource, which triggers
 // a re-merge of the merged cache.
 type NeighMonitor struct {
+	// mu serializes refreshes so that a dump taken earlier can never
+	// replace one taken later.
+	mu             sync.Mutex
 	neighTable     *NeighTable
 	source         *NeighSource
 	kernelTable    KernelTable
@@ -381,6 +384,9 @@ func isUsableSourceMAC(hardwareAddr net.HardwareAddr) bool {
 }
 
 func (m *NeighMonitor) updateNeighbours() error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	neighs, err := m.kernelTable.NeighList()
 	if err != nil {
 		return fmt.Errorf("failed to list neighbours: %w", err)

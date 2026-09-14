@@ -30,7 +30,7 @@ type RouteSnapshot struct {
 // turns into its own FIB.
 //
 // Wake is signalled by the wake callbacks wired into RouteService and
-// NeighbourService whenever their state mutates — it preempts the
+// the neighbour table whenever their state mutates — it preempts the
 // reconcile loop's sleep so the next pass picks up the change without
 // waiting for the steady-state interval.
 type RouteSource struct {
@@ -83,7 +83,7 @@ func (m *RouteSource) Wake() <-chan struct{} {
 func (m *RouteSource) Advance(snapshot RouteSnapshot) {}
 
 // WakeFunc returns a non-blocking sender suitable for wiring into the
-// RouteService and NeighbourService OnChanged callbacks.
+// RouteService and neighbour table change callbacks.
 func (m *RouteSource) WakeFunc() func() {
 	wakeCh := m.wakeCh
 
