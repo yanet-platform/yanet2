@@ -41,7 +41,7 @@ FILTER_COMPILER_DECLARE(
 );
 
 FILTER_COMPILER_DECLARE(
-	ACL_FILTER_IP6_TAG,
+	ACL_FILTER_CORE6_TAG,
 	device,
 	vlan,
 	net6_src,
@@ -51,14 +51,7 @@ FILTER_COMPILER_DECLARE(
 );
 
 FILTER_COMPILER_DECLARE(
-	ACL_FILTER_IP6_PROTO_PORT_TAG,
-	device,
-	vlan,
-	net6_src,
-	net6_dst,
-	proto_range,
-	port_src,
-	port_dst
+	ACL_FILTER_SUF6_PORT_TAG, proto_range, port_src, port_dst
 );
 
 static void
@@ -75,8 +68,11 @@ acl_module_config_destroy(struct cp_module *cp_module) {
 	filter_free(&config->filter_vlan, ACL_FILTER_VLAN_TAG);
 	filter_free(&config->filter_ip4, ACL_FILTER_IP4_TAG);
 	filter_free(&config->filter_ip4_port, ACL_FILTER_IP4_PROTO_PORT_TAG);
-	filter_free(&config->filter_ip6, ACL_FILTER_IP6_TAG);
-	filter_free(&config->filter_ip6_port, ACL_FILTER_IP6_PROTO_PORT_TAG);
+	filter_free(&config->filter_core6, ACL_FILTER_CORE6_TAG);
+	filter_free(&config->filter_suf6_port, ACL_FILTER_SUF6_PORT_TAG);
+
+	vline_free(&config->ip6_decode);
+	value_table_free(&config->joint_ip6_port);
 
 	// Capture agent before fini zeroes it.
 	struct agent *agent = ADDR_OF(&cp_module->agent);
@@ -137,8 +133,10 @@ acl_module_config_init(
 	memset(&config->filter_ip4, 0, sizeof(config->filter_ip4));
 	memset(&config->filter_ip4_port, 0, sizeof(config->filter_ip4_port));
 
-	memset(&config->filter_ip6, 0, sizeof(config->filter_ip6));
-	memset(&config->filter_ip6_port, 0, sizeof(config->filter_ip6_port));
+	memset(&config->filter_core6, 0, sizeof(config->filter_core6));
+	memset(&config->filter_suf6_port, 0, sizeof(config->filter_suf6_port));
+	memset(&config->ip6_decode, 0, sizeof(config->ip6_decode));
+	memset(&config->joint_ip6_port, 0, sizeof(config->joint_ip6_port));
 
 	config->v4_object_link_idx = ACL_OBJECT_LINK_NONE;
 	config->v6_object_link_idx = ACL_OBJECT_LINK_NONE;
@@ -460,8 +458,15 @@ acl_module_init_ip4_port(
 	return rc;
 }
 
+// One shared v6 core: compiled to classes over the union of both v6
+// filters' rules, a packet's class there decodes into the port-unscoped
+// decision through a per-class minimum rule line, and into the
+// port-scoped decision through a joint with the transport suffix
+// classes. Both class registries live only until the two decodes are
+// built; a failure rejects the whole config apply like any other
+// filter build failure.
 static int
-acl_module_init_ip6(
+acl_module_init_ip6_family(
 	struct cp_module *cp_module,
 	struct acl_rule *acl_rules,
 	uint32_t acl_rule_count,
@@ -472,38 +477,28 @@ acl_module_init_ip6(
 	struct acl_module_config *config =
 		container_of(cp_module, struct acl_module_config, cp_module);
 
-	config->filter_rule_count_ip6 = filter_acl_rules(
+	uint32_t matched_core = filter_acl_rules(
 		acl_rules,
 		acl_rule_count,
 		filter_rules,
 		filter_rule_ptrs,
-		check_acl_rule_ip6
+		check_has_ip6
 	);
+	(void)matched_core;
 
-	int rc = filter_init(
-		&config->filter_ip6,
-		ACL_FILTER_IP6_TAG,
-		filter_rule_ptrs,
-		acl_rule_count,
-		&cp_module->memory_context
-	);
-	if (rc) {
-		yanet_error_add(err, "failed to init filter_ip6");
+	struct value_registry core_classes;
+	if (filter_init_classes(
+		    &config->filter_core6,
+		    ACL_FILTER_CORE6_TAG,
+		    filter_rule_ptrs,
+		    acl_rule_count,
+		    &cp_module->memory_context,
+		    &cp_module->memory_context,
+		    &core_classes
+	    )) {
+		yanet_error_add(err, "failed to init filter_core6");
+		return -1;
 	}
-	return rc;
-}
-
-static int
-acl_module_init_ip6_port(
-	struct cp_module *cp_module,
-	struct acl_rule *acl_rules,
-	uint32_t acl_rule_count,
-	struct filter_rule *filter_rules,
-	const struct filter_rule **filter_rule_ptrs,
-	yanet_error **err
-) {
-	struct acl_module_config *config =
-		container_of(cp_module, struct acl_module_config, cp_module);
 
 	config->filter_rule_count_ip6_port = filter_acl_rules(
 		acl_rules,
@@ -513,17 +508,87 @@ acl_module_init_ip6_port(
 		check_acl_rule_ip6_port
 	);
 
-	int rc = filter_init(
-		&config->filter_ip6_port,
-		ACL_FILTER_IP6_PROTO_PORT_TAG,
-		filter_rule_ptrs,
-		acl_rule_count,
-		&cp_module->memory_context
-	);
-	if (rc) {
-		yanet_error_add(err, "failed to init filter_ip6_port");
+	struct value_registry suffix_classes;
+	if (filter_init_classes(
+		    &config->filter_suf6_port,
+		    ACL_FILTER_SUF6_PORT_TAG,
+		    filter_rule_ptrs,
+		    acl_rule_count,
+		    &cp_module->memory_context,
+		    &cp_module->memory_context,
+		    &suffix_classes
+	    )) {
+		yanet_error_add(err, "failed to init filter_suf6_port");
+		value_registry_fini(&core_classes);
+		return -1;
 	}
-	return rc;
+
+	// The port-unscoped decision: the lowest ip6 projection rule
+	// covering each core class.
+	uint32_t class_count = value_registry_capacity(&core_classes);
+	if (vline_init(
+		    &config->ip6_decode,
+		    &cp_module->memory_context,
+		    "acl:ip6_decode",
+		    class_count
+	    )) {
+		yanet_error_add(err, "failed to init ip6 decode");
+		value_registry_fini(&core_classes);
+		value_registry_fini(&suffix_classes);
+		return -1;
+	}
+	for (uint32_t idx = 0; idx < class_count; ++idx) {
+		*vline_get_ptr(&config->ip6_decode, idx) = FILTER_RULE_INVALID;
+	}
+	config->filter_rule_count_ip6 = filter_acl_rules(
+		acl_rules,
+		acl_rule_count,
+		filter_rules,
+		filter_rule_ptrs,
+		check_acl_rule_ip6
+	);
+	// Second pass over the ip6 projection: for each rule, for each
+	// class it covers, keep the lowest rule index.
+	{
+		struct value_range *core_ranges = ADDR_OF(&core_classes.ranges);
+		for (uint32_t rule_idx = 0; rule_idx < acl_rule_count;
+		     ++rule_idx) {
+			if (filter_rule_ptrs[rule_idx] == NULL) {
+				continue;
+			}
+			struct value_range *range = core_ranges + rule_idx;
+			uint32_t *values = ADDR_OF(&range->values);
+			for (uint32_t idx = 0; idx < range->count; ++idx) {
+				uint32_t *cell = vline_get_ptr(
+					&config->ip6_decode, values[idx]
+				);
+				if (*cell == FILTER_RULE_INVALID ||
+				    rule_idx < *cell) {
+					*cell = rule_idx;
+				}
+			}
+		}
+	}
+
+	// The port-scoped decision: lowest port projection rule per
+	// (core class, suffix class) pair.
+	if (filter2_merge_and_set_registry_values(
+		    &cp_module->memory_context,
+		    &core_classes,
+		    &suffix_classes,
+		    &config->joint_ip6_port
+	    )) {
+		yanet_error_add(err, "failed to init joint of ip6_port");
+		vline_free(&config->ip6_decode);
+		memset(&config->ip6_decode, 0, sizeof(config->ip6_decode));
+		value_registry_fini(&core_classes);
+		value_registry_fini(&suffix_classes);
+		return -1;
+	}
+
+	value_registry_fini(&core_classes);
+	value_registry_fini(&suffix_classes);
+	return 0;
 }
 
 // Compile the ruleset into a freshly initialized ACL module config.
@@ -699,18 +764,7 @@ acl_module_compile_rules(
 		goto error_rule_ptrs;
 	}
 
-	if (acl_module_init_ip6(
-		    cp_module,
-		    acl_rules,
-		    rule_count,
-		    filter_rules,
-		    filter_rule_ptrs,
-		    err
-	    )) {
-		goto error_rule_ptrs;
-	}
-
-	if (acl_module_init_ip6_port(
+	if (acl_module_init_ip6_family(
 		    cp_module,
 		    acl_rules,
 		    rule_count,

@@ -23,6 +23,8 @@
 
 #include <lib/filter2/query.h>
 
+#include "common/value.h"
+
 #include "filter_lookup.h"
 
 struct acl_module {
@@ -147,9 +149,15 @@ acl_handle_packets(
 	struct packet *ip6_packets[count];
 	uint32_t ip6_result[count];
 	uint64_t ip6_idx = 0;
+	uint32_t core6_classes[count];
 
 	struct packet *ip6_port_packets[count];
 	uint32_t ip6_port_result[count];
+	uint32_t suffix_result[count];
+	// Position of each port batch packet within the v6 batch, so the
+	// joint decode reads the already classified core class of the same
+	// packet.
+	uint32_t ip6_port_pos[count];
 	uint64_t ip6_port_idx = 0;
 
 	for (struct packet *packet = packet_list_first(&packet_front->input);
@@ -176,6 +184,7 @@ acl_handle_packets(
 			if (packet->fragment_offset == 0 &&
 			    (packet->transport_header.type == IPPROTO_TCP ||
 			     packet->transport_header.type == IPPROTO_UDP)) {
+				ip6_port_pos[ip6_port_idx] = ip6_idx - 1;
 				ip6_port_packets[ip6_port_idx++] = packet;
 			}
 		}
@@ -205,21 +214,38 @@ acl_handle_packets(
 		ip4_port_idx
 	);
 
+	// The v6 family shares one classification: the core yields the
+	// class once per packet, the unscoped decision decodes it through
+	// the per-class minimum rule line, and the port-scoped decision
+	// through the joint with the transport suffix classes — which the
+	// port batch indexes back into the core row through its recorded
+	// positions.
 	filter_query(
-		&acl_config->filter_ip6,
+		&acl_config->filter_core6,
 		acl_query_ip6,
 		ip6_packets,
-		ip6_result,
+		core6_classes,
 		ip6_idx
 	);
+	for (uint64_t idx = 0; idx < ip6_idx; ++idx) {
+		ip6_result[idx] =
+			vline_get(&acl_config->ip6_decode, core6_classes[idx]);
+	}
 
 	filter_query(
-		&acl_config->filter_ip6_port,
-		acl_query_ip6_port,
+		&acl_config->filter_suf6_port,
+		acl_query_suf6_port,
 		ip6_port_packets,
-		ip6_port_result,
+		suffix_result,
 		ip6_port_idx
 	);
+	for (uint64_t idx = 0; idx < ip6_port_idx; ++idx) {
+		ip6_port_result[idx] = value_table_get(
+			&acl_config->joint_ip6_port,
+			core6_classes[ip6_port_pos[idx]],
+			suffix_result[idx]
+		);
+	}
 
 	vlan_idx = 0;
 	ip4_idx = 0;

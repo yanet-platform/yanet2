@@ -325,6 +325,219 @@ error:
 	return -1;
 }
 
+/*
+ * Class-compilation variant of filter_compile: every joint stage merges
+ * and collects, so the value the filter yields for a point of the
+ * definition area is a class identifier of the final joint space rather
+ * than a rule index — the class of the point's rule coverage set.
+ *
+ * The final stage registry — one range per rule listing the classes the
+ * rule covers — is copied into the caller-provided classes registry,
+ * initialized under classes_memory_context, so it outlives this compile
+ * and can drive per-consumer decoding: a decision table keyed by the
+ * class alone, or a joint against other class registries through
+ * filter2_merge_and_set_registry_values over the same rule index space.
+ */
+static inline int
+filter_compile_classes(
+	struct filter *filter,
+	struct memory_context *memory_context,
+	const struct filter_rule **rules,
+	uint32_t rule_count,
+	const struct filter_compile_attr_handlers *attr_handlers[],
+	uint32_t attr_handler_count,
+	struct memory_context *classes_memory_context,
+	struct value_registry *classes
+
+) {
+	if (!filter2_rules_masks_valid(rules, rule_count)) {
+		return -1;
+	}
+
+	if (memory_context_init_from(
+		    &filter->memory_context, memory_context, "filter"
+	    )) {
+		return -1;
+	}
+	memory_context = &filter->memory_context;
+
+	SET_OFFSET_OF(&filter->attrs, NULL);
+	SET_OFFSET_OF(&filter->joints, NULL);
+
+	struct filter_query_attr **query_attrs =
+		(struct filter_query_attr **)memory_balloc(
+			memory_context,
+			sizeof(struct filter_query_attr *) * attr_handler_count
+		);
+	if (query_attrs == NULL) {
+		goto error;
+	}
+	memset(query_attrs,
+	       0,
+	       sizeof(struct filter_query_attr *) * attr_handler_count);
+	SET_OFFSET_OF(&filter->attrs, query_attrs);
+
+	uint32_t joint_count = attr_handler_count - 1;
+	uint32_t single = attr_handler_count == 1;
+	joint_count += single;
+	/*
+	 * Layout: attribute registries, then the derivative registry of
+	 * every joint (all joints collect, the final one included), then
+	 * the dummy registry of the single-attribute join.
+	 */
+	uint32_t registry_count = attr_handler_count + joint_count + single;
+	struct value_registry *registries =
+		(struct value_registry *)memory_balloc(
+			memory_context,
+			sizeof(struct value_registry) * registry_count
+		);
+	memset(registries, 0, sizeof(struct value_registry) * registry_count);
+
+	for (uint32_t idx = 0; idx < attr_handler_count; ++idx) {
+		if (value_registry_init(
+			    registries + idx, memory_context, "filter:registry"
+		    )) {
+			goto error_free_registries;
+		}
+	}
+
+	struct value_table *joints = (struct value_table *)memory_balloc(
+		memory_context, sizeof(struct value_table) * joint_count
+	);
+	if (joints == NULL) {
+		goto error_free_attrs;
+	}
+	memset(joints, 0, sizeof(struct value_table) * joint_count);
+	SET_OFFSET_OF(&filter->joints, joints);
+
+	if (single) {
+		struct value_registry *dummy =
+			registries + attr_handler_count + joint_count;
+		if (value_registry_init(
+			    dummy, memory_context, "filter:dummy"
+		    )) {
+			goto error_free_registries;
+		}
+		for (uint32_t rule_idx = 0; rule_idx < rule_count; ++rule_idx) {
+			if (value_registry_start(dummy)) {
+				goto error_free_registries;
+			}
+			if (value_registry_collect(dummy, 0)) {
+				goto error_free_registries;
+			}
+		}
+	}
+
+	for (uint32_t attr_idx = 0; attr_idx < attr_handler_count; ++attr_idx) {
+		struct filter_query_attr *query_attr =
+			attr_handlers[attr_idx]->build(
+				registries + attr_idx,
+				rules,
+				rule_count,
+				memory_context
+			);
+		if (query_attr == NULL) {
+			goto error_free_attrs;
+		}
+		SET_OFFSET_OF(query_attrs + attr_idx, query_attr);
+	}
+
+	for (uint32_t joint_idx = 0; joint_idx < joint_count; ++joint_idx) {
+		if (filter2_merge_and_collect_registry(
+			    memory_context,
+			    registries + joint_idx * 2,
+			    registries + joint_idx * 2 + 1,
+			    joints + joint_idx,
+			    registries + attr_handler_count + joint_idx
+		    )) {
+			goto error_free_attrs;
+		}
+	}
+
+	if (value_registry_init(
+		    classes, classes_memory_context, "filter:classes"
+	    )) {
+		goto error_free_attrs;
+	}
+
+	struct value_registry *final_registry =
+		registries + attr_handler_count + joint_count - 1;
+	struct value_range *final_ranges = ADDR_OF(&final_registry->ranges);
+	for (uint32_t range_idx = 0; range_idx < final_registry->range_count;
+	     ++range_idx) {
+		struct value_range *range = final_ranges + range_idx;
+		uint32_t *values = ADDR_OF(&range->values);
+		if (value_registry_start(classes)) {
+			goto error_free_classes;
+		}
+		for (uint32_t idx = 0; idx < range->count; ++idx) {
+			if (value_registry_collect(classes, values[idx])) {
+				goto error_free_classes;
+			}
+		}
+	}
+
+	for (uint32_t idx = 0; idx < registry_count; ++idx) {
+		value_registry_fini(registries + idx);
+	}
+
+	memory_bfree(
+		memory_context,
+		registries,
+		sizeof(struct value_registry) * registry_count
+	);
+
+	return 0;
+
+error_free_classes:
+	value_registry_fini(classes);
+
+error_free_attrs:
+	for (uint32_t attr_idx = 0; attr_idx < attr_handler_count; ++attr_idx) {
+		struct filter_query_attr *query_attr =
+			ADDR_OF(query_attrs + attr_idx);
+		if (query_attr == NULL) {
+			continue;
+		}
+		attr_handlers[attr_idx]->free_query(memory_context, query_attr);
+	}
+
+	if (joints != NULL) {
+		for (uint32_t joint_idx = 0; joint_idx < joint_count;
+		     ++joint_idx) {
+			value_table_free(joints + joint_idx);
+		}
+
+		memory_bfree(
+			memory_context,
+			joints,
+			sizeof(struct value_table) * joint_count
+		);
+	}
+
+error_free_registries:
+	for (uint32_t idx = 0; idx < registry_count; ++idx) {
+		value_registry_fini(registries + idx);
+	}
+	memory_bfree(
+		memory_context,
+		registries,
+		sizeof(struct value_registry) * registry_count
+	);
+
+	SET_OFFSET_OF(&filter->attrs, NULL);
+	memory_bfree(
+		memory_context,
+		query_attrs,
+		sizeof(struct filter_query_attr *) * attr_handler_count
+	);
+
+error:
+	SET_OFFSET_OF(&filter->joints, NULL);
+
+	return -1;
+}
+
 static inline void
 filter_destroy(
 	struct filter *filter,
@@ -380,3 +593,17 @@ filter_destroy(
 
 #define filter_free(filter, sign)                                              \
 	filter_destroy(filter, sign, FILTER_SIGN_COUNT(sign))
+
+#define filter_init_classes(                                                   \
+	filter, sign, rules, count, mctx, classes_mctx, classes                \
+)                                                                              \
+	filter_compile_classes(                                                \
+		filter,                                                        \
+		mctx,                                                          \
+		rules,                                                         \
+		count,                                                         \
+		sign,                                                          \
+		FILTER_SIGN_COUNT(sign),                                       \
+		classes_mctx,                                                  \
+		classes                                                        \
+	)

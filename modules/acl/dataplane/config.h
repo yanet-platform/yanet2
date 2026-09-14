@@ -30,8 +30,25 @@ struct acl_module_config {
 
 	struct filter filter_ip4;
 	struct filter filter_ip4_port;
-	struct filter filter_ip6;
-	struct filter filter_ip6_port;
+
+	// The v6 family resolves through one shared core: (device, vlan,
+	// net6_src, net6_dst, ip_frag, proto_range) compiled to classes
+	// over the union of both v6 filters' rules, so a packet is
+	// classified once and both decisions decode from its class.
+	struct filter filter_core6;
+
+	// Transport suffix of the port-scoped v6 filter, compiled to
+	// classes over its own rule projection.
+	struct filter filter_suf6_port;
+
+	// Core class -> rule index for the port-unscoped v6 decision.
+	struct vline ip6_decode;
+
+	// (core class, suffix class) -> rule index for the port-scoped v6
+	// decision. All-zero (memory_context NULL) when the suffix compile
+	// was skipped or failed.
+	struct value_table joint_ip6_port;
+
 	struct filter filter_vlan;
 
 	uint64_t target_count;

@@ -405,11 +405,7 @@ static const struct filter_query_attr_handlers *acl_query_ip6[] = {
 	&acl_attr_proto_range,
 };
 
-static const struct filter_query_attr_handlers *acl_query_ip6_port[] = {
-	&acl_attr_device,
-	&acl_attr_vlan,
-	&acl_attr_net6_src,
-	&acl_attr_net6_dst,
+static const struct filter_query_attr_handlers *acl_query_suf6_port[] = {
 	&acl_attr_proto_range,
 	&acl_attr_port_src,
 	&acl_attr_port_dst,
