@@ -13,9 +13,8 @@ import (
 	netreconcile "github.com/yanet-platform/yanet2/operators/netlink-dataplane-sidecar/internal/netlink"
 )
 
-// NetlinkHandle supports concurrent setup and observation in one namespace.
+// NetlinkHandle permits read-only observation in one namespace.
 type NetlinkHandle interface {
-	netreconcile.Backend
 	neighbour.Backend
 	SetSocketTimeout(time.Duration) error
 	Close()

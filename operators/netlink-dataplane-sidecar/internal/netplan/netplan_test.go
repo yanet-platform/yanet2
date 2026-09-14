@@ -39,10 +39,11 @@ func Test_Parse_DataplaneFixture(t *testing.T) {
 // Test_Parse_ManagedBoundary verifies that unsupported managed input fails
 // while omitted sections, aliases and unrelated host configuration are accepted.
 func Test_Parse_ManagedBoundary(t *testing.T) {
-	for _, test := range []struct {
-		name  string
-		yaml  string
-		valid bool
+	for _, tc := range []struct {
+		name          string
+		yaml          string
+		valid         bool
+		errorContains string
 	}{
 		{name: "omitted sections", yaml: "network: {version: 2}", valid: true},
 		{name: "explicit empty sections", yaml: "network: {version: 2, ethernets: {}, vlans: {}, dummy-devices: {}}", valid: true},
@@ -64,8 +65,6 @@ func Test_Parse_ManagedBoundary(t *testing.T) {
 		{name: "null addresses", yaml: "network: {version: 2, ethernets: {kni0: {addresses: null}}}"},
 		{name: "invalid address", yaml: "network: {version: 2, ethernets: {kni0: {addresses: [invalid]}}}"},
 		{name: "IPv6 prefix conflict", yaml: "network: {version: 2, ethernets: {kni0: {addresses: ['fe80::1/64', 'fe80::1/128']}}}"},
-		{name: "DHCP4 enabled", yaml: "network: {version: 2, ethernets: {kni0: {dhcp4: true}}}"},
-		{name: "DHCP6 enabled", yaml: "network: {version: 2, dummy-devices: {loop1: {dhcp6: true}}}"},
 		{name: "IPv4LL enabled", yaml: "network: {version: 2, ethernets: {kni0: {link-local: [ipv4]}}}"},
 		{name: "unknown address family", yaml: "network: {version: 2, ethernets: {kni0: {link-local: [ipx]}}}"},
 		{name: "activation disabled", yaml: "network: {version: 2, ethernets: {kni0: {activation-mode: off}}}"},
@@ -80,17 +79,17 @@ func Test_Parse_ManagedBoundary(t *testing.T) {
 		{name: "missing VLAN parent", yaml: "network: {version: 2, vlans: {v100: {id: 100}}}"},
 		{name: "unknown VLAN parent", yaml: "network: {version: 2, vlans: {v100: {id: 100, link: unknown}}}"},
 		{name: "stacked VLAN", yaml: "network: {version: 2, ethernets: {kni0: {}}, vlans: {v100: {id: 100, link: kni0}, v200: {id: 200, link: v100}}}"},
-		{name: "duplicate name", yaml: "network: {version: 2, ethernets: {kni0: {}}, vlans: {kni0: {id: 100, link: kni0}}}"},
+		{name: "duplicate name", yaml: "network: {version: 2, ethernets: {kni0: {}}, dummy-devices: {shared0: {}}, vlans: {shared0: {id: 100, link: kni0}}}", errorContains: "duplicate managed link name"},
 		{name: "duplicate VLAN identity", yaml: "network: {version: 2, ethernets: {kni0: {}}, vlans: {a: {id: 100, link: kni0}, b: {id: 100, link: kni0}}}"},
 		{name: "invalid YAML", yaml: "network: ["},
 		{name: "multiple documents", yaml: "network: {version: 2}\n---\nnetwork: {version: 2}"},
 	} {
-		t.Run(test.name, func(t *testing.T) {
-			state, err := netplan.Parse([]byte(test.yaml))
-			if test.valid {
+		t.Run(tc.name, func(t *testing.T) {
+			state, err := netplan.Parse([]byte(tc.yaml))
+			if tc.valid {
 				require.NoError(t, err)
 			} else {
-				require.Error(t, err)
+				require.ErrorContains(t, err, tc.errorContains)
 				require.Equal(t, desired.State{}, state)
 			}
 		})

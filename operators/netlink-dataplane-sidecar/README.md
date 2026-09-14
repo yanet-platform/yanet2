@@ -1,27 +1,23 @@
 # Netlink dataplane sidecar
 
-The sidecar has three responsibilities in a private Pod network namespace:
+The sidecar reads kernel neighbours on KNI/VLAN egress in a private Pod network
+namespace and publishes complete atomic snapshots to one route-operator table
+through bounded alternative gateway transports. Its kernel access is read-only.
 
-- Create explicitly configured VLAN and dummy interfaces as their parents appear.
-- Configure KNI, KNI VLANs, kernel `lo` and dummy interfaces once, retrying initial
-  setup failures with bounded backoff.
-- Read kernel neighbours on KNI/VLAN egress and publish complete atomic snapshots
-  to one route-operator table through bounded alternative gateway transports.
-
-The dataplane creates KNI. The sidecar is the only interface configurator in this
-namespace. A Netplan or embedded native snapshot is loaded and validated before
+The dataplane creates KNI. Interface creation and configuration are performed by
+the separate [netconfig](https://github.com/yanet-platform/netconfig) process.
+A Netplan or embedded native snapshot is loaded and validated before
 runtime resources open. Desired state is immutable until process
 restart: editing, replacing or deleting either the sidecar config or the external
-Netplan file has no effect on neighbour collection or setup retries.
+Netplan file has no effect on neighbour collection.
 Invalid or missing input is checked again at the next process startup, not by the
 running instance. Host onboard interfaces are not managed.
 
-Creation and configuration run in a bootstrap worker independent of neighbour
-collection. It attempts existing links even when another link is missing or its
-setup fails. Successful partial setup is retained; idempotent passes retry until
-all interfaces are configured, then the worker stops. There is no ongoing drift
-repair: deleted or unexpectedly recreated interfaces, changed MTU/addresses,
-administrative state or IPv6 settings require a process restart for setup.
+The sidecar never creates links, applies MTUs/addresses, changes administrative
+state or writes IPv6 sysctls. Missing links are valid absence during discovery,
+so neighbour publication starts independently of netconfig and dataplane startup.
+Use the same declared topology for netconfig and this sidecar; native mappings
+are separate configuration input for each executable.
 
 Neighbours are collected immediately, on `RTM_NEWNEIGH`, and periodically using
 `reconcile.interval` (5m by default). `RTM_DELNEIGH` does not request an immediate
@@ -31,7 +27,7 @@ reconcile loop as the timer, not a separate collection worker or timer. Failures
 use reconciliation backoff; an event can wake the loop before that delay ends.
 After subscription opens, an extra refresh covers the initial dump/socket gap.
 Subscription errors or an unexpectedly closed event channel stop the operator
-for supervisor restart. None of this waits for or restarts interface bootstrap.
+for supervisor restart. None of this waits for or restarts netconfig.
 
 A kernel deletion operation can also emit `RTM_NEWNEIGH` with `NUD_FAILED`
 before `RTM_DELNEIGH`. That state change still triggers collection, matching the
@@ -40,29 +36,19 @@ route monitor; ignoring DEL does not suppress other update events.
 ## Routing and neighbour ownership
 
 The sidecar does not program Linux routes or neighbours, issue neighbour probes,
-import Netplan routes/policy/tables, or expose a reverse routing RPC. It configures
-specified addresses, MTU, administrative state and per-interface IPv6 settings.
-With automatic IPv6LL disabled, it removes only unlisted IPv6LL addresses from
-managed non-loopback links after explicit addresses are ensured. It leaves IPv6
-and NDP enabled. Existing incompatible objects are reported, not migrated.
+import Netplan routes/policy/tables, or expose a reverse routing RPC. It does not
+apply interface settings or remove addresses. Existing incompatible objects are
+reported during discovery, not migrated.
 
 Kernel connected/local/RA routes and normal ARP/ND learning are expected kernel
 behaviour. Routing remains BIRD export -> bird-adapter FeedRIB -> route-operator
 RIB/FIB -> dataplane. Existing route-operator static APIs and BIRD static exports
 remain available independently of sidecar routing RPCs.
 
-Explicit MTUs are configured, with parent increases before VLAN increases and
-parent decreases after child decreases. An omitted MTU preserves an existing
-link's value. A new VLAN inherits its parent's configured MTU, or the observed
-parent MTU when unspecified. An oversized existing child with no explicit MTU
-blocks a parent decrease; it is not silently resized. Unmanaged dependent links
-also block incompatible decreases. MTUs below 1280 are rejected to preserve IPv6.
-
-MTU preflight assumes the sidecar is the sole configurator of this namespace.
-The kernel can successfully lower a parent and clamp a VLAN created between
-preflight and the write. No other configurator may create or resize links
-concurrently. Creation of a VLAN that needs a larger parent MTU is retried after
-parent configuration; it does not hold up unrelated links or neighbour polling.
+The startup parsers retain the shared configuration schema and its validation,
+including address-family and MTU limits. Discovery uses link names, kinds, VLAN
+identity and logical device mapping; address/MTU/IPv6 settings are not applied.
+See netconfig for the interface setup, retry, restart and ownership contracts.
 
 ## Configuration
 
@@ -78,7 +64,7 @@ The installed example is `/etc/yanet2/yanet-netlink-dataplane-sidecar-default.ya
 | `neighbour_priority` | Positive default source priority; default 100, lower wins per canonical IP. |
 | `neighbour_publish_timeout` | Positive per-transport deadline, default 5s. |
 | `gateways` | Ordinary connection/TLS settings, alternate paths to the same route operator. |
-| `reconcile` | Periodic neighbour refresh interval (5m); event wakes share the same loop. Independent setup and publication retries use the initial/max backoff. |
+| `reconcile` | Periodic neighbour refresh interval (5m); event wakes share the same loop and publication retry backoff. |
 | `server`, `register` | Common operational metrics endpoint and registration. |
 
 The packaged default explicitly selects `source: netplan`. A Netplan source
@@ -86,11 +72,12 @@ rejects a `native` block; a native source rejects a configured `netplan_path` an
 never reads an external Netplan file. A missing or null native mapping is invalid.
 Both adapters implement `desired.Source.Load() (desired.State, error)` and load
 once at startup; the runtime `StateSource` holds a defensive copy, not a loader.
-This selector controls desired interfaces and addresses, not neighbour discovery:
-neighbours continue to be read from the kernel. It is also independent of the
+This selector supplies the managed topology; neighbours are always read from
+the kernel. It is also independent of the
 server-owned neighbour `source` field, which identifies a table.
 
 Both sources accept IPv4 and IPv6 address prefixes in their own address families.
+Unspecified addresses (`0.0.0.0` and `::`) are rejected at startup.
 IPv4-mapped IPv6 prefixes, such as `::ffff:192.0.2.1/120`, are rejected at startup
 before runtime resources open. Use an IPv4 prefix such as `192.0.2.1/24` instead.
 
@@ -196,6 +183,8 @@ legacy RA booleans such as `no`, or repeated `ipv6` entries in `link-local`.
 | `accept-ra` | Boolean; omission leaves the kernel setting unchanged. |
 | `dhcp4`, `dhcp6` | Optional booleans, only `false`; default disabled. |
 
+The table describes the accepted configuration schema, shared with netconfig;
+this sidecar validates these fields but does not apply them to interfaces.
 All three sections accept the common interface fields above; `id` and `link` are
 VLAN-only. There is no `network`/`version`/`renderer` wrapper, `state`/`up` field,
 routes, routing-policy, bridges, bonds, tunnels or arbitrary Ethernet support in
@@ -207,8 +196,8 @@ startup, as well as null, string or numeric DHCP values. Omission and boolean
 `false` are equivalent. This is configuration validation only: the sidecar does
 not start, stop or otherwise control DHCP clients, clear leases, or remove
 previously assigned DHCP addresses. Deployment must exclude competing DHCP
-clients/configurators. `accept-ra: false` separately controls the IPv6 RA sysctl;
-it does not replace `dhcp6: false` or disable IPv6/NDP.
+clients/configurators. Netconfig applies `accept-ra: false` to the IPv6 RA sysctl;
+the neighbour sidecar never writes that sysctl.
 
 ## Neighbour publication and listing
 
@@ -226,7 +215,7 @@ and DAD completion do not gate collection. An incompatible managed link type,
 VLAN parent/tag/protocol, incomplete dump or duplicate unicast IP rejects the
 whole snapshot. Identities are checked before and after the neighbour dump;
 overlapping link creation, removal, replacement or MAC changes require a retry.
-Successful publication proves complete observation, not completed bootstrap.
+Successful publication proves complete observation, not completed netconfig setup.
 
 Discovery also limits the raw namespace dump to 15,252 records **before filtering**.
 Unmanaged, multicast and unusable records count towards this limit even though
@@ -294,8 +283,7 @@ they do not provide scoped neighbour resolution here.
 ## Operational endpoint and deployment follow-up
 
 Only the common metrics service is registered by the sidecar. Neighbour collection
-metrics use the standard operator collector; setup retries and completion are
-logged separately. The Debian package
+metrics use the standard operator collector. The Debian package
 `yanet2-netlink-dataplane-sidecar` installs `/usr/bin/yanet-netlink-dataplane-sidecar`
 and the default config, and depends on CA trust for TLS transports. The
 [container recipe](../../deploy/yanet-netlink-dataplane-sidecar.Dockerfile) starts
@@ -305,15 +293,18 @@ package. Supply it for `source: netplan`, or replace the sidecar config with
 `source: native` and its embedded mapping. Either change takes effect only on
 process restart.
 
+Deploy netconfig as a separate interface configurator in the same private Pod
+network namespace. Interface setup is no longer included in this sidecar binary
+or package; restarting this sidecar does not reconfigure interfaces.
+
 Deployment configuration must remove reverse-routing clients, route tuple and
 static-interface generation, reverse-RPC probes and permissions. Retain the
 operational Service for metrics. Rollout is a separate migration step.
 
-Opt-in kernel integration requires `YANET_NETNS_TESTS=1` and a disposable network
-namespace with writable per-interface IPv6 sysctls. A container's read-only
-`/proc/sys` mount must be replaced in a disposable mount namespace for these
-tests. Missing namespace permissions, kernel support or packaging tools are
-unexecuted verification gates, not passing coverage.
+Opt-in kernel integration requires `YANET_NETNS_TESTS=1`, TAP support and a
+disposable network namespace. The fixtures create links and neighbours; the
+sidecar itself only observes them. Missing namespace permissions, kernel support
+or packaging tools are unexecuted verification gates, not passing coverage.
 
 The operator integration suite accepts `YANET_ROUTE_OPERATOR_BINARY` pointing to
 a freshly built route operator. `Test_Operator_NeighbourPipeline` uses real kernel
@@ -321,7 +312,8 @@ neighbours and a recording dataplane gateway for both sources, but supplies
 synthetic FeedRIB input. It does not validate a deployed BIRD exporter.
 `Test_Operator_ConfigFileRestart` runs both adapters in child processes with
 distinct Linux network namespaces, requiring permission to create namespaces in
-the test runner. It verifies independent polling and configuration while KNI is
-absent, completion after delayed KNI creation, no restoration after completed
-setup, continued polling after edits, atomic replacement, invalid YAML or file
-deletion, and consumption of new input only by a new process.
+the test runner. It verifies polling while KNI is absent, discovery after delayed
+KNI creation without interface mutations, continued polling with immutable
+topology after edits, atomic replacement, invalid YAML or file deletion, and
+consumption of new input only by a new process. Interface bootstrap integration
+tests are maintained in the netconfig repository.

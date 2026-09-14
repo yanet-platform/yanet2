@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -63,19 +64,19 @@ func (m *nativeRestartHandle) LinkList() ([]vnetlink.Link, error) {
 }
 
 // startupFileConfig supplies equivalent topology through either file adapter.
-func startupFileConfig(source, address string, mtu int) []byte {
+func startupFileConfig(source, egress, address string, mtu int) []byte {
 	header := "source: native\nnative:\n"
 	if source == "netplan" {
 		header = "network:\n  version: 2\n"
 	}
 	data := fmt.Appendf([]byte(header), `  ethernets:
-    kni9: {mtu: 1500, link-local: []}
+    %s: {mtu: 1500, link-local: []}
     lo: {mtu: %d, addresses: [%q], accept-ra: false}
   vlans:
-    vlan9: {id: 100, link: kni9, link-local: []}
+    vlan9: {id: 100, link: %s, link-local: []}
   dummy-devices:
     dummy0: {mtu: %d, addresses: [%q], link-local: [], dhcp4: false, dhcp6: false}
-`, mtu, address, mtu, address)
+`, egress, mtu, address, egress, mtu, address)
 	if source == "native" {
 		data = append(data, []byte("gateways: [{name: recording, endpoint: '127.0.0.1:9'}]\n")...)
 	}
@@ -95,66 +96,45 @@ func newKernelTAP(t *testing.T, name string) vnetlink.Link {
 	})
 	link, err := vnetlink.LinkByName(name)
 	require.NoError(t, err)
+	require.NoError(t, vnetlink.LinkSetUp(link))
 	return link
 }
 
-// nativeKernelMatches observes configured values without retaining kernel links.
-func nativeKernelMatches(address string, mtu int) bool {
-	for _, name := range []string{"lo", "dummy0"} {
-		link, err := vnetlink.LinkByName(name)
-		if err != nil || link.Attrs().MTU != mtu || link.Attrs().Flags&net.FlagUp == 0 {
-			return false
-		}
-		addresses, err := vnetlink.AddrList(link, vnetlink.FAMILY_V4)
-		if err != nil {
-			return false
-		}
-		found := false
-		for _, observed := range addresses {
-			found = found || observed.IPNet != nil && observed.IPNet.String() == address
-		}
-		if !found {
-			return false
-		}
-	}
-	return true
+// kernelLinkSnapshot records stable state that discovery must leave unchanged.
+type kernelLinkSnapshot struct {
+	Index      int
+	MTU        int
+	Flags      net.Flags
+	Addresses  []string
+	IPv6Policy map[string]string
 }
 
-// nativeKernelHasAddress detects unwanted replacement values on either link.
-func nativeKernelHasAddress(address string) bool {
-	for _, name := range []string{"lo", "dummy0"} {
-		link, err := vnetlink.LinkByName(name)
-		if err != nil {
-			continue
-		}
-		addresses, err := vnetlink.AddrList(link, vnetlink.FAMILY_V4)
-		if err != nil {
-			continue
-		}
-		for _, observed := range addresses {
-			if observed.IPNet != nil && observed.IPNet.String() == address {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-// driftNativeLinks removes initial addresses and changes MTU after bootstrap.
-func driftNativeLinks(t *testing.T, prefix string) {
+// readKernelLink requires complete observations before asserting read-only state.
+func readKernelLink(t *testing.T, name string) kernelLinkSnapshot {
 	t.Helper()
-	address, err := vnetlink.ParseAddr(prefix)
-	require.NoError(t, err)
-	for _, name := range []string{"lo", "dummy0"} {
-		link, err := vnetlink.LinkByName(name)
-		require.NoError(t, err)
-		require.NoError(t, vnetlink.AddrDel(link, address))
-		require.NoError(t, vnetlink.LinkSetMTU(link, 2000))
+	link, err := vnetlink.LinkByName(name)
+	require.NoError(t, err, name)
+	snapshot := kernelLinkSnapshot{
+		Index: link.Attrs().Index, MTU: link.Attrs().MTU, Flags: link.Attrs().Flags,
+		IPv6Policy: map[string]string{},
 	}
+	addresses, err := vnetlink.AddrList(link, vnetlink.FAMILY_ALL)
+	require.NoError(t, err, name)
+	for _, address := range addresses {
+		require.NotNil(t, address.IPNet, name)
+		snapshot.Addresses = append(snapshot.Addresses, address.IPNet.String())
+	}
+	slices.Sort(snapshot.Addresses)
+	for _, setting := range []string{"accept_ra", "addr_gen_mode", "disable_ipv6"} {
+		value, err := os.ReadFile(filepath.Join("/proc/sys/net/ipv6/conf", name, setting))
+		require.NoError(t, err, "%s/%s", name, setting)
+		snapshot.IPv6Policy[setting] = strings.TrimSpace(string(value))
+	}
+	return snapshot
 }
 
-// Test_Operator_ConfigFileRestart verifies that neither drift nor startup file
-// changes rerun completed setup, while periodic neighbour publication continues.
+// Test_Operator_ConfigFileRestart verifies that discovery retains its startup
+// topology across file edits without configuring any kernel interfaces.
 //
 // A separate process reads the replacement only after the original exits. Each
 // child owns a disposable namespace and uses the normal startup config loader.
@@ -170,7 +150,7 @@ func Test_Operator_ConfigFileRestart(t *testing.T) {
 		for _, source := range []string{"native", "netplan"} {
 			t.Run(source, func(t *testing.T) {
 				path := filepath.Join(t.TempDir(), "startup.yaml")
-				require.NoError(t, os.WriteFile(path, startupFileConfig(source, original, 1500), 0o600))
+				require.NoError(t, os.WriteFile(path, startupFileConfig(source, "kni9", original, 1500), 0o600))
 				for _, phase := range []string{"original", "replacement", "invalid", "missing"} {
 					if phase == "invalid" {
 						require.NoError(t, os.WriteFile(path, []byte("invalid: ["), 0o600))
@@ -210,13 +190,12 @@ func Test_Operator_ConfigFileRestart(t *testing.T) {
 	loopback, err := vnetlink.LinkByName("lo")
 	require.NoError(t, err)
 	require.NoError(t, vnetlink.LinkSetUp(loopback))
+	loopbackBefore := readKernelLink(t, "lo")
 	handle, err := netreconcile.NewHandle()
 	require.NoError(t, err)
 	backend := &nativeRestartHandle{NetlinkHandle: handle}
 	connection := &recordingConnection{}
-	core, logs := observer.New(zap.InfoLevel)
-	options := append(testRuntime(backend, connection), sidecaroperator.WithLog(zap.New(core)))
-	sidecar, err := sidecaroperator.NewOperator(config, options...)
+	sidecar, err := sidecaroperator.NewOperator(config, testRuntime(backend, connection)...)
 	if phase == "invalid" || phase == "missing" {
 		handle.Close()
 		require.Error(t, err)
@@ -237,33 +216,41 @@ func Test_Operator_ConfigFileRestart(t *testing.T) {
 		require.ErrorIs(t, <-stopped, context.Canceled)
 		require.NoError(t, sidecar.Close())
 	})
-	expected, mtu := original, 1500
+	expectedEgress := "kni9"
 	if phase == "replacement" {
-		expected, mtu = replacement, 3000
+		expectedEgress = "kni8"
 	}
 	require.Eventually(t, func() bool {
-		return nativeKernelMatches(expected, mtu) && connection.Publications.Load() > 0
+		return connection.Publications.Load() >= 3
 	}, 5*time.Second, 10*time.Millisecond)
-	require.Zero(t, logs.FilterMessage("configured startup interfaces").Len())
-	newKernelTAP(t, "kni9")
+	require.Equal(t, loopbackBefore, readKernelLink(t, "lo"))
+	_, err = vnetlink.LinkByName("dummy0")
+	require.Error(t, err, "discovery must not create configured dummy interfaces")
+	require.NoError(t, vnetlink.LinkAdd(&vnetlink.Dummy{LinkAttrs: vnetlink.LinkAttrs{Name: "dummy0", MTU: 2000}}))
+	require.NoError(t, vnetlink.LinkSetMTU(loopback, 2000))
+	loopbackBefore.MTU = 2000
+	expected := map[string]kernelLinkSnapshot{
+		"lo": loopbackBefore, "dummy0": readKernelLink(t, "dummy0"),
+	}
+	require.Equal(t, 2000, expected["dummy0"].MTU)
+	egress := newKernelTAP(t, expectedEgress)
+	require.NoError(t, vnetlink.NeighSet(&vnetlink.Neigh{
+		LinkIndex: egress.Attrs().Index, IP: net.IPv4(192, 0, 2, 1),
+		HardwareAddr: net.HardwareAddr{2, 0, 0, 0, 0, 1}, State: vnetlink.NUD_PERMANENT,
+	}))
 	require.Eventually(t, func() bool {
-		return logs.FilterMessage("configured startup interfaces").Len() == 1
+		request := connection.Latest.Load()
+		return len(request.GetEntries()) == 1 && request.GetEntries()[0].GetDevice() == expectedEgress
 	}, 5*time.Second, 10*time.Millisecond)
-	vlan, err := vnetlink.LinkByName("vlan9")
-	require.NoError(t, err)
-	require.NotZero(t, vlan.Attrs().Flags&net.FlagUp)
+	_, err = vnetlink.LinkByName("vlan9")
+	require.Error(t, err, "discovery must not create configured VLANs")
 	if phase == "original" {
-		driftNativeLinks(t, original)
-		dummy, err := vnetlink.LinkByName("dummy0")
-		require.NoError(t, err)
-		require.NoError(t, vnetlink.LinkDel(dummy))
-		require.NoError(t, vnetlink.LinkAdd(&vnetlink.Dummy{LinkAttrs: vnetlink.LinkAttrs{Name: "dummy0", MTU: 2000}}))
 		for _, mutation := range []string{"write", "rename", "invalid", "delete"} {
 			switch mutation {
 			case "write":
-				require.NoError(t, os.WriteFile(path, startupFileConfig(source, replacement, 3000), 0o600))
+				require.NoError(t, os.WriteFile(path, startupFileConfig(source, "kni8", replacement, 3000), 0o600))
 			case "rename":
-				require.NoError(t, os.WriteFile(path+".new", startupFileConfig(source, replacement, 3000), 0o600))
+				require.NoError(t, os.WriteFile(path+".new", startupFileConfig(source, "kni8", replacement, 3000), 0o600))
 				require.NoError(t, os.Rename(path+".new", path))
 			case "invalid":
 				require.NoError(t, os.WriteFile(path, []byte("native: ["), 0o600))
@@ -276,20 +263,18 @@ func Test_Operator_ConfigFileRestart(t *testing.T) {
 			require.Eventually(t, func() bool {
 				return backend.Failures.Load() > failures && connection.Publications.Load() >= previous+3
 			}, 5*time.Second, 10*time.Millisecond, mutation)
-			require.False(t, nativeKernelHasAddress(original), mutation)
-			require.False(t, nativeKernelHasAddress(replacement), mutation)
-			for _, name := range []string{"lo", "dummy0"} {
-				link, err := vnetlink.LinkByName(name)
-				require.NoError(t, err)
-				require.Equal(t, 2000, link.Attrs().MTU)
+			require.Len(t, connection.Latest.Load().GetEntries(), 1)
+			require.Equal(t, expectedEgress, connection.Latest.Load().GetEntries()[0].GetDevice())
+			for name, snapshot := range expected {
+				require.Equal(t, snapshot, readKernelLink(t, name), "%s/%s", mutation, name)
 			}
 		}
 		// Leave the replacement for a new process, never reload this instance.
-		require.NoError(t, os.WriteFile(path, startupFileConfig(source, replacement, 3000), 0o600))
-	} else {
-		require.False(t, nativeKernelHasAddress(original))
+		require.NoError(t, os.WriteFile(path, startupFileConfig(source, "kni8", replacement, 3000), 0o600))
 	}
-	require.Equal(t, 1, logs.FilterMessage("configured startup interfaces").Len())
+	for name, snapshot := range expected {
+		require.Equal(t, snapshot, readKernelLink(t, name), name)
+	}
 }
 
 func (m *pipelineGateway) UpdateFIB(ctx context.Context, request *routepb.UpdateFIBRequest) (*routepb.UpdateFIBResponse, error) {

@@ -7,13 +7,9 @@ import (
 	"slices"
 	"time"
 
-	"go.uber.org/zap"
-
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
 	commonoperator "github.com/yanet-platform/yanet2/common/go/operator"
-	"github.com/yanet-platform/yanet2/common/go/xbackoff"
 	"github.com/yanet-platform/yanet2/operators/netlink-dataplane-sidecar/internal/neighbour"
-	netreconcile "github.com/yanet-platform/yanet2/operators/netlink-dataplane-sidecar/internal/netlink"
 	operatorpb "github.com/yanet-platform/yanet2/operators/route/operatorpb/v1"
 )
 
@@ -53,7 +49,6 @@ func NewOperator(cfg *Config, options ...Option) (_ *commonoperator.Operator[Sta
 		return nil, fmt.Errorf("validate startup logical devices: %w", err)
 	}
 	source := NewSource(state)
-	state = state.Clone()
 
 	handle, err := opts.NewNetlinkHandle()
 	if err != nil {
@@ -74,7 +69,6 @@ func NewOperator(cfg *Config, options ...Option) (_ *commonoperator.Operator[Sta
 	if err := handle.SetSocketTimeout(netlinkSocketTimeout); err != nil {
 		return nil, fmt.Errorf("configure netlink socket timeout: %w", err)
 	}
-	linkReconciler := netreconcile.NewReconciler(handle, netreconcile.NewProcSysctl())
 
 	commonGateways := cfg.Gateways
 	targets := make([]neighbour.GatewayTarget, 0, len(cfg.Gateways))
@@ -102,22 +96,6 @@ func NewOperator(cfg *Config, options ...Option) (_ *commonoperator.Operator[Sta
 		connections,
 	)
 
-	backoff := xbackoff.New(cfg.Reconcile.InitialBackoff.Unwrap(),
-		xbackoff.WithMax(cfg.Reconcile.MaxBackoff.Unwrap()),
-		xbackoff.WithOnRetry(func(_ int, delay time.Duration, err error) {
-			opts.Log.Warn("interface setup failed; retrying", zap.Duration("backoff", delay), zap.Error(err))
-		}),
-	)
-	bootstrap := func(ctx context.Context) error {
-		err := backoff.RunContext(ctx, func() error {
-			// A missing parent must not prevent configuration of existing links.
-			return errors.Join(linkReconciler.Create(ctx, state), linkReconciler.Configure(ctx, state))
-		})
-		if err == nil {
-			opts.Log.Info("configured startup interfaces")
-		}
-		return nil
-	}
 	metrics := commonoperator.NewReconcilerMetrics(
 		"generic_operator",
 		commonpb.NewLabel("operator", "netlink-dataplane-sidecar"),
@@ -131,7 +109,7 @@ func NewOperator(cfg *Config, options ...Option) (_ *commonoperator.Operator[Sta
 		commonoperator.WithGateways(cfg.Register, commonGateways...),
 		commonoperator.WithReconcile(cfg.Reconcile),
 		commonoperator.WithMetrics(metrics),
-		commonoperator.WithWorkers(bootstrap, func(ctx context.Context) error {
+		commonoperator.WithWorkers(func(ctx context.Context) error {
 			return WatchNeighbours(ctx, source, opts.SubscribeNeighbours)
 		}),
 		commonoperator.WithLog(opts.Log),

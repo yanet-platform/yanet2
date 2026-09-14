@@ -25,13 +25,14 @@ register:
 
 # Refresh neighbours initially, on RTM_NEWNEIGH, and periodically. Deletion
 # events do not trigger a refresh, avoiding immediate withdrawal on flaps.
-# Independent initial interface setup retries use the same backoff limits.
+# Interface setup is performed by the separate netconfig process.
 reconcile:
   interval: 5m
   initial_backoff: 500ms
   max_backoff: 30s
 
-# Read once at startup. A changed configuration requires a process restart.
+# Read the managed topology once at startup for neighbour discovery.
+# A changed configuration requires a process restart.
 source: netplan
 netplan_path: /etc/netplan/00-interfaces.yaml
 

@@ -10,7 +10,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// Config contains only the interface subset configured at sidecar startup.
+// Config contains the interface subset validated for startup discovery.
 type Config struct {
 	Ethernets    map[string]LinkConfig `yaml:"ethernets"`
 	VLANs        map[string]LinkConfig `yaml:"vlans"`

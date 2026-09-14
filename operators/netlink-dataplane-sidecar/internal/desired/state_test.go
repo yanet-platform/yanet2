@@ -62,6 +62,9 @@ func Test_State_Validate(t *testing.T) {
 		{name: "MTU disables IPv6", links: []desired.Link{{Name: "kni0", MTU: 1279}}},
 		{name: "maximum MTU", valid: true, links: []desired.Link{{Name: "kni0", MTU: 2147483647}}},
 		{name: "invalid prefix", links: []desired.Link{{Name: "kni0", Addresses: []netip.Prefix{{}}}}},
+		{name: "unspecified IPv4", links: []desired.Link{{Name: "kni0", Addresses: []netip.Prefix{netip.MustParsePrefix("0.0.0.0/32")}}}},
+		{name: "unspecified IPv4 default prefix", links: []desired.Link{{Name: "kni0", Addresses: []netip.Prefix{netip.MustParsePrefix("0.0.0.0/0")}}}},
+		{name: "unspecified IPv6", links: []desired.Link{{Name: "kni0", Addresses: []netip.Prefix{netip.MustParsePrefix("::/128")}}}},
 		{name: "IPv6 prefix conflict", links: []desired.Link{{Name: "kni0", Addresses: []netip.Prefix{
 			netip.MustParsePrefix("fe80::1/64"), netip.MustParsePrefix("fe80::1/128"),
 		}}}},

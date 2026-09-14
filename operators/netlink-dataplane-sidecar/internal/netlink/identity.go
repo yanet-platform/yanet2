@@ -10,7 +10,7 @@ import (
 	"github.com/yanet-platform/yanet2/operators/netlink-dataplane-sidecar/internal/desired"
 )
 
-// LinkIdentity detects replacement during one setup or discovery pass.
+// LinkIdentity detects replacement during one discovery pass.
 type LinkIdentity struct {
 	Name            string
 	Index           int

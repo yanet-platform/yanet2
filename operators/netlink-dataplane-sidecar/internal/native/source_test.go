@@ -88,17 +88,18 @@ func Test_Source_DirectConfigValidation(t *testing.T) {
 	zero, invalidID := 0, 4095
 	ipv4, duplicate := []string{"ipv4"}, []string{"ipv6", "ipv6"}
 	for _, tc := range []struct {
-		name   string
-		config native.Config
+		name          string
+		config        native.Config
+		errorContains string
 	}{
 		{name: "enabled DHCP4", config: native.Config{Ethernets: map[string]native.LinkConfig{"kni0": {DHCP4: true}}}},
 		{name: "enabled DHCP6", config: native.Config{DummyDevices: map[string]native.LinkConfig{"dummy0": {DHCP6: true}}}},
-		{name: "enabled VLAN DHCP", config: native.Config{VLANs: map[string]native.LinkConfig{"v0": {ID: &zero, Link: "kni0", DHCP4: true}}}},
+		{name: "enabled VLAN DHCP", config: native.Config{Ethernets: map[string]native.LinkConfig{"kni0": {}}, VLANs: map[string]native.LinkConfig{"v0": {ID: &zero, Link: "kni0", DHCP4: true}}}, errorContains: "dhcp4 and dhcp6 must be disabled"},
 		{name: "onboard name", config: native.Config{Ethernets: map[string]native.LinkConfig{"eth0": {}}}},
 		{name: "unsupported Ethernet", config: native.Config{Ethernets: map[string]native.LinkConfig{"enp0": {}}}},
 		{name: "bad prefix", config: native.Config{Ethernets: map[string]native.LinkConfig{"kni0": {Addresses: []string{"invalid"}}}}},
 		{name: "IPv6 prefix conflict", config: native.Config{Ethernets: map[string]native.LinkConfig{"kni0": {Addresses: []string{"fe80::1/64", "fe80::1/128"}}}}},
-		{name: "duplicate link", config: native.Config{Ethernets: map[string]native.LinkConfig{"kni0": {}}, DummyDevices: map[string]native.LinkConfig{"kni0": {}}}},
+		{name: "duplicate link", config: native.Config{Ethernets: map[string]native.LinkConfig{"kni0": {}}, DummyDevices: map[string]native.LinkConfig{"shared0": {}}, VLANs: map[string]native.LinkConfig{"shared0": {ID: &zero, Link: "kni0"}}}, errorContains: "duplicate managed link name"},
 		{name: "missing VLAN ID", config: native.Config{VLANs: map[string]native.LinkConfig{"v0": {Link: "kni0"}}}},
 		{name: "missing VLAN link", config: native.Config{VLANs: map[string]native.LinkConfig{"v0": {ID: &zero}}}},
 		{name: "unknown parent", config: native.Config{VLANs: map[string]native.LinkConfig{"v0": {ID: &zero, Link: "kni0"}}}},
@@ -115,7 +116,7 @@ func Test_Source_DirectConfigValidation(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			var source desired.Source = &native.Source{Config: tc.config}
 			state, err := source.Load()
-			require.Error(t, err)
+			require.ErrorContains(t, err, tc.errorContains)
 			require.Equal(t, desired.State{}, state)
 		})
 	}

@@ -121,7 +121,7 @@ Depends: ${shlibs:Depends}
  , ${misc:Depends}
  , ca-certificates
 Description: YANET2 netlink dataplane sidecar
- Configures interfaces at startup from Netplan or native input and publishes observed
- Linux neighbours to the YANET2 route operator.
+ Reads the managed topology from Netplan or native input and publishes observed
+ Linux neighbours to the YANET2 route operator without configuring interfaces.
  .
  This package contains the sidecar binary and its default configuration.

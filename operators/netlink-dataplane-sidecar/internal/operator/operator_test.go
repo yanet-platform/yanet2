@@ -15,8 +15,6 @@ import (
 
 	"github.com/stretchr/testify/require"
 	vnetlink "github.com/vishvananda/netlink"
-	"go.uber.org/zap"
-	"go.uber.org/zap/zaptest/observer"
 	"golang.org/x/sys/unix"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
@@ -39,6 +37,7 @@ type fakeNetlinkHandle struct {
 	SocketTimeoutCalls int
 	SocketTimeoutErr   error
 	ListCalls          atomic.Int64
+	MutationCalls      atomic.Int64
 }
 
 func (m *fakeNetlinkHandle) LinkList() ([]vnetlink.Link, error) {
@@ -51,14 +50,17 @@ func (m *fakeNetlinkHandle) LinkByName(string) (vnetlink.Link, error) {
 }
 
 func (m *fakeNetlinkHandle) LinkAdd(vnetlink.Link) error {
+	m.MutationCalls.Add(1)
 	return nil
 }
 
 func (m *fakeNetlinkHandle) LinkSetMTU(vnetlink.Link, int) error {
+	m.MutationCalls.Add(1)
 	return nil
 }
 
 func (m *fakeNetlinkHandle) LinkSetUp(vnetlink.Link) error {
+	m.MutationCalls.Add(1)
 	return nil
 }
 
@@ -67,10 +69,12 @@ func (m *fakeNetlinkHandle) AddrList(vnetlink.Link, int) ([]vnetlink.Addr, error
 }
 
 func (m *fakeNetlinkHandle) AddrReplace(vnetlink.Link, *vnetlink.Addr) error {
+	m.MutationCalls.Add(1)
 	return nil
 }
 
 func (m *fakeNetlinkHandle) AddrDel(vnetlink.Link, *vnetlink.Addr) error {
+	m.MutationCalls.Add(1)
 	return nil
 }
 
@@ -558,7 +562,7 @@ func Test_NewOperator_RejectsNativeBeforeResources(t *testing.T) {
 	}
 }
 
-// pollingHandle fails setup before sysctl I/O but exposes healthy neighbours.
+// pollingHandle exposes healthy neighbours and records attempted mutations.
 type pollingHandle struct {
 	fakeNetlinkHandle
 	SetupCalls atomic.Int64
@@ -592,11 +596,13 @@ type recordingConnection struct {
 	fakeGatewayConnection
 	Publications atomic.Int64
 	Requests     chan *operatorpb.ReplaceNeighboursRequest
+	Latest       atomic.Pointer[operatorpb.ReplaceNeighboursRequest]
 	Stop         atomic.Bool
 	Cancel       context.CancelFunc
 }
 
 func (m *recordingConnection) Invoke(ctx context.Context, method string, request, response any, options ...grpc.CallOption) error {
+	m.Latest.Store(request.(*operatorpb.ReplaceNeighboursRequest))
 	m.Publications.Add(1)
 	select {
 	case m.Requests <- request.(*operatorpb.ReplaceNeighboursRequest):
@@ -617,9 +623,9 @@ func testRuntime(handle sidecaroperator.NetlinkHandle, connection sidecaroperato
 	}
 }
 
-// Test_Operator_IndependentBootstrap verifies that missing links and setup
-// failures neither cancel the watcher nor suppress healthy observed neighbours.
-func Test_Operator_IndependentBootstrap(t *testing.T) {
+// Test_Operator_ReadOnlyDiscovery verifies that missing links and unapplied
+// configuration cannot suppress healthy neighbours or trigger kernel mutations.
+func Test_Operator_ReadOnlyDiscovery(t *testing.T) {
 	config := twoGatewayConfig()
 	config.Reconcile.Interval = xcfg.MustNonZero(time.Hour)
 	config.Reconcile.InitialBackoff = xcfg.MustNonZero(time.Millisecond)
@@ -666,25 +672,25 @@ func Test_Operator_IndependentBootstrap(t *testing.T) {
 				events <- vnetlink.NeighUpdate{Type: unix.RTM_NEWNEIGH}
 			}
 		case <-ctx.Done():
-			t.Fatal("pending setup blocked neighbour publication")
+			t.Fatal("unapplied configuration blocked neighbour publication")
 		}
 	}
-	require.Eventually(t, func() bool { return handle.SetupCalls.Load() >= 2 }, time.Second, time.Millisecond)
+	require.Zero(t, handle.SetupCalls.Load())
+	require.Zero(t, handle.MutationCalls.Load())
 	require.Equal(t, int64(1), factories.Load())
 	require.Equal(t, int64(1), loads.Load())
 }
 
-// Test_Operator_BootstrapStops verifies that a completed worker does not cancel
-// the operator or rerun setup on subsequent neighbour timer ticks.
-func Test_Operator_BootstrapStops(t *testing.T) {
+// Test_Operator_PollingNeverConfigures verifies that startup and periodic
+// neighbour refreshes perform only the two discovery reads per publication.
+func Test_Operator_PollingNeverConfigures(t *testing.T) {
 	config := twoGatewayConfig()
 	config.Reconcile.Interval = xcfg.MustNonZero(5 * time.Millisecond)
 	handle := &fakeNetlinkHandle{}
 	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
 	defer cancel()
 	connection := &recordingConnection{Cancel: cancel}
-	core, logs := observer.New(zap.InfoLevel)
-	options := append(testRuntime(handle, connection), sidecaroperator.WithConfigSourceFactory(emptyConfigSource), sidecaroperator.WithLog(zap.New(core)))
+	options := append(testRuntime(handle, connection), sidecaroperator.WithConfigSourceFactory(emptyConfigSource))
 	runnable, err := sidecaroperator.NewOperator(config, options...)
 	require.NoError(t, err)
 	stopped := make(chan error, 1)
@@ -698,11 +704,12 @@ func Test_Operator_BootstrapStops(t *testing.T) {
 		require.NoError(t, runnable.Close())
 	})
 	require.Eventually(t, func() bool {
-		return connection.Publications.Load() >= 3 && logs.FilterMessage("configured startup interfaces").Len() == 1
+		return connection.Publications.Load() >= 3
 	}, time.Second, time.Millisecond)
 	connection.Stop.Store(true)
 	err = <-stopped
 	finished = true
 	require.ErrorIs(t, err, context.Canceled)
-	require.Equal(t, 2+2*connection.Publications.Load(), handle.ListCalls.Load(), "two bootstrap reads plus two per poll")
+	require.Equal(t, 2*connection.Publications.Load(), handle.ListCalls.Load(), "two discovery reads per poll")
+	require.Zero(t, handle.MutationCalls.Load())
 }

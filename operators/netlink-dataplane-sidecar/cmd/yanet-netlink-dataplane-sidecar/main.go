@@ -15,7 +15,7 @@ import (
 func main() {
 	err := operator.Run(
 		"yanet-netlink-dataplane-sidecar",
-		"YANET interface setup and neighbour publication sidecar",
+		"YANET read-only neighbour discovery and publication sidecar",
 		factory,
 		xcfg.WithKnownFields(),
 	)

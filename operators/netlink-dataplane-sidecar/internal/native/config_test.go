@@ -66,8 +66,6 @@ func Test_Config_StrictSchema(t *testing.T) {
 		{field: "addresses", value: "[192.0.2.1/24]"},
 		{field: "link-local", value: "[ipv6]"},
 		{field: "accept-ra", value: "false"},
-		{field: "dhcp4", value: "false"},
-		{field: "dhcp6", value: "false"},
 		{field: "id", value: "0"},
 		{field: "link", value: "kni0"},
 	} {

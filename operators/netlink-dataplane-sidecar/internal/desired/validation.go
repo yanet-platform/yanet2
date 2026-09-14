@@ -53,8 +53,8 @@ func ValidateMTU(mtu int) error {
 	return nil
 }
 
-// ValidateAddresses rejects invalid or IPv4-mapped prefixes and conflicting
-// IPv6 prefix lengths on one link. Identical repeated addresses are permitted.
+// ValidateAddresses rejects invalid, unspecified or IPv4-mapped prefixes and
+// conflicting IPv6 prefix lengths. Identical repeated addresses are permitted.
 func ValidateAddresses(addresses []netip.Prefix) error {
 	ipv6Prefixes := map[netip.Addr]int{}
 	for idx, prefix := range addresses {
@@ -62,6 +62,9 @@ func ValidateAddresses(addresses []netip.Prefix) error {
 			return fmt.Errorf("address %d is not a valid prefix", idx)
 		}
 		address := prefix.Addr()
+		if address.IsUnspecified() {
+			return fmt.Errorf("address %d: unspecified address %q is not supported", idx, prefix)
+		}
 		if address.Is4In6() {
 			return fmt.Errorf("address %d: IPv4-mapped IPv6 prefix %q is not supported", idx, prefix)
 		}
