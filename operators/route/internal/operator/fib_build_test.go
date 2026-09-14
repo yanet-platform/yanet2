@@ -9,8 +9,8 @@ import (
 
 	"github.com/yanet-platform/yanet2/common/go/maptrie"
 	"github.com/yanet-platform/yanet2/common/go/rcucache"
-	"github.com/yanet-platform/yanet2/operators/route/internal/discovery/neigh"
 	"github.com/yanet-platform/yanet2/operators/route/internal/rib"
+	"github.com/yanet-platform/yanet2/operators/route/neigh"
 )
 
 func mustParseMAC(t *testing.T, value string) [6]byte {

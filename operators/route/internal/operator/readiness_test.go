@@ -14,8 +14,8 @@ import (
 	"github.com/yanet-platform/yanet2/common/go/readiness"
 	"github.com/yanet-platform/yanet2/common/go/xcfg"
 	readinesspb "github.com/yanet-platform/yanet2/common/readinesspb/v1"
-	"github.com/yanet-platform/yanet2/operators/route/internal/discovery/neigh"
 	"github.com/yanet-platform/yanet2/operators/route/internal/rib"
+	"github.com/yanet-platform/yanet2/operators/route/neigh"
 )
 
 // requireScope fetches the named scope from the tracker. Fails the test when

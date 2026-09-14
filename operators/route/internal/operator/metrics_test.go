@@ -11,8 +11,8 @@ import (
 
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
 	"github.com/yanet-platform/yanet2/common/go/operator"
-	"github.com/yanet-platform/yanet2/operators/route/internal/discovery/neigh"
 	"github.com/yanet-platform/yanet2/operators/route/internal/rib"
+	"github.com/yanet-platform/yanet2/operators/route/neigh"
 )
 
 // findMetric returns the metric named name whose label set matches labels

@@ -11,7 +11,7 @@ import (
 	"go.uber.org/zap/zapcore"
 	"go.uber.org/zap/zaptest/observer"
 
-	"github.com/yanet-platform/yanet2/operators/route/internal/discovery/neigh"
+	"github.com/yanet-platform/yanet2/operators/route/neigh"
 )
 
 // fakeKernelTable is a neigh.KernelTable backed by fixed link and neighbour

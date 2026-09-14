@@ -13,7 +13,7 @@ import (
 	"github.com/yanet-platform/yanet2/common/go/operator"
 	ynpb "github.com/yanet-platform/yanet2/controlplane/ynpb/v1"
 	"github.com/yanet-platform/yanet2/modules/route/controlplane/routepb/v1"
-	"github.com/yanet-platform/yanet2/operators/route/internal/discovery/neigh"
+	"github.com/yanet-platform/yanet2/operators/route/neigh"
 )
 
 // GatewayActuator applies route-operator state to a single Gateway via
