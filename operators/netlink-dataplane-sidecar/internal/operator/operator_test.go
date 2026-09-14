@@ -467,6 +467,36 @@ func Test_NewOperator_RealConfigSources(t *testing.T) {
 	}
 }
 
+// Test_NewOperator_RejectsMappedPrefixesBeforeCreatingHandle verifies that both
+// startup sources reject mapped prefixes before opening kernel resources.
+func Test_NewOperator_RejectsMappedPrefixesBeforeCreatingHandle(t *testing.T) {
+	for _, source := range []string{"netplan", "native"} {
+		for _, prefix := range []string{"::ffff:192.0.2.1/120", "::ffff:192.0.2.2/24"} {
+			t.Run(source+"/"+prefix, func(t *testing.T) {
+				config := twoGatewayConfig()
+				data := "dummy-devices: {dummy0: {addresses: ['" + prefix + "']}}"
+				if source == "netplan" {
+					path := filepath.Join(t.TempDir(), "netplan.yaml")
+					require.NoError(t, os.WriteFile(path, []byte("network: {version: 2, "+data+"}\n"), 0o600))
+					config.NetplanPath = &path
+				} else {
+					input := []byte("source: native\nnative: {" + data + "}\n")
+					require.NoError(t, xcfg.Decode(input, config, xcfg.WithKnownFields()))
+				}
+				runnable, err := sidecaroperator.NewOperator(config,
+					sidecaroperator.WithNetlinkHandleFactory(func() (sidecaroperator.NetlinkHandle, error) {
+						t.Fatal("kernel handle opened for an IPv4-mapped prefix")
+						return nil, nil
+					}),
+				)
+				require.Nil(t, runnable)
+				require.ErrorContains(t, err, "IPv4-mapped IPv6 prefix")
+				require.ErrorContains(t, err, prefix)
+			})
+		}
+	}
+}
+
 // Test_NewOperator_DefaultNetplanPath verifies that only the Netplan adapter
 // resolves an omitted path, without mutating the decoded config.
 func Test_NewOperator_DefaultNetplanPath(t *testing.T) {

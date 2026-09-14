@@ -90,6 +90,10 @@ This selector controls desired interfaces and addresses, not neighbour discovery
 neighbours continue to be read from the kernel. It is also independent of the
 server-owned neighbour `source` field, which identifies a table.
 
+Both sources accept IPv4 and IPv6 address prefixes in their own address families.
+IPv4-mapped IPv6 prefixes, such as `::ffff:192.0.2.1/120`, are rejected at startup
+before runtime resources open. Use an IPv4 prefix such as `192.0.2.1/24` instead.
+
 ### Source examples
 
 These are source-specific fragments of the sidecar config. Retain the common
