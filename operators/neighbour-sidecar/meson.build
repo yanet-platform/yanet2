@@ -1,8 +1,3 @@
-install_data(
-    'etc/yanet/yanet-neighbour-sidecar-default.yaml',
-    install_dir: '/etc/yanet2',
-)
-
 if not get_option('fuzzing').enabled()
   custom_target(
       'yanet-neighbour-sidecar',
@@ -25,7 +20,5 @@ if not get_option('fuzzing').enabled()
           common_readiness_protoc_gen,
           route_operator_readiness_protoc_gen,
       ],
-      install: true,
-      install_dir: get_option('bindir'),
   )
 endif

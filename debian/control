@@ -114,12 +114,3 @@ Description: YANET2 generic operator
  One instance serves one module role, started as
  yanet2-generic-operator@<instance> with its configuration in
  /etc/yanet2/generic-operator.d/<instance>.yaml.
-
-Package: yanet2-neighbour-sidecar
-Architecture: amd64 arm64
-Depends: ${shlibs:Depends}
- , ${misc:Depends}
- , ca-certificates
-Description: YANET2 neighbour discovery sidecar
- Collects kernel neighbours in its network namespace and publishes complete
- neighbour tables to the YANET2 route operator.

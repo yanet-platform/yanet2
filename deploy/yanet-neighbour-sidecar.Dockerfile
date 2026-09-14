@@ -1,16 +1,33 @@
 # syntax=docker/dockerfile:1
 
-FROM ubuntu:24.04
+FROM golang:1.24.13-alpine AS build
 
-ENV DEBIAN_FRONTEND=noninteractive
+RUN apk add --no-cache make protobuf protobuf-dev
+RUN go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.36.11 \
+    && go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@v1.6.1
 
-RUN echo 'APT::Sandbox::User "root";' > /etc/apt/apt.conf.d/99sandbox
+WORKDIR /src
 
-COPY deploy/packages/yanet2-neighbour-sidecar_*.deb /tmp/
+COPY go.mod go.sum ./
+RUN go mod download
 
-RUN apt-get update -y \
-    && apt-get install -y --no-install-recommends /tmp/*.deb \
-    && rm -rf /tmp/*.deb /var/lib/apt/lists/*
+COPY Makefile ./
+COPY common/ common/
+COPY controlplane/ controlplane/
+COPY modules/route/controlplane/hwroute/ modules/route/controlplane/hwroute/
+COPY operators/route/ operators/route/
+COPY operators/neighbour-sidecar/ operators/neighbour-sidecar/
 
-ENTRYPOINT ["yanet-neighbour-sidecar"]
+RUN make proto-go \
+    && CGO_ENABLED=0 go build -trimpath -o /yanet-neighbour-sidecar \
+        ./operators/neighbour-sidecar/cmd/yanet-neighbour-sidecar
+
+FROM alpine:3.23
+
+RUN apk add --no-cache ca-certificates
+
+COPY --from=build /yanet-neighbour-sidecar /usr/local/bin/yanet-neighbour-sidecar
+COPY operators/neighbour-sidecar/etc/yanet/yanet-neighbour-sidecar-default.yaml /etc/yanet2/yanet-neighbour-sidecar-default.yaml
+
+ENTRYPOINT ["/usr/local/bin/yanet-neighbour-sidecar"]
 CMD ["-c", "/etc/yanet2/yanet-neighbour-sidecar-default.yaml"]

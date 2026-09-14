@@ -44,7 +44,14 @@ is asynchronous.
 
 ## Build and image
 
-Meson builds and installs `yanet-neighbour-sidecar`; the Debian package is
-`yanet2-neighbour-sidecar`. The dedicated image is built with
-`deploy/yanet-neighbour-sidecar.Dockerfile` from the package staged in
-`deploy/packages/`, following the repository's image-build workflow.
+The container image builds a static Go binary from source and runs it on Alpine
+with CA certificates. Its image-build job runs independently of Debian packaging.
+Meson also builds the binary for repository build artifacts.
+
+```sh
+docker build -f deploy/yanet-neighbour-sidecar.Dockerfile -t yanet-neighbour-sidecar .
+```
+
+Run the image as a sidecar in the Kubernetes Pod whose network namespace it should
+observe, and mount its configuration at
+`/etc/yanet2/yanet-neighbour-sidecar-default.yaml`.
