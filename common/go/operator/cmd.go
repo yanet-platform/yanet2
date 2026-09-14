@@ -42,7 +42,7 @@ func Run[C any](
 	use string,
 	short string,
 	factory func(*C, *zap.Logger) (Runnable, error),
-	configOptions ...xcfg.Option,
+	options ...xcfg.Option,
 ) error {
 	var path string
 
@@ -52,7 +52,7 @@ func Run[C any](
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			err := RunOperator(path, factory, configOptions...)
+			err := RunOperator(path, factory, options...)
 			if errors.Is(err, xcmd.Interrupted{}) {
 				return nil
 			}
@@ -77,10 +77,10 @@ func Run[C any](
 func RunOperator[C any](
 	path string,
 	factory func(*C, *zap.Logger) (Runnable, error),
-	configOptions ...xcfg.Option,
+	options ...xcfg.Option,
 ) error {
-	configOptions = append([]xcfg.Option{xcfg.WithEnv()}, configOptions...)
-	cfg, err := xcfg.LoadConfig[C](path, configOptions...)
+	options = append([]xcfg.Option{xcfg.WithEnv()}, options...)
+	cfg, err := xcfg.LoadConfig[C](path, options...)
 	if err != nil {
 		return fmt.Errorf("failed to load config: %w", err)
 	}

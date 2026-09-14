@@ -4,6 +4,7 @@ import (
 	"net"
 	"net/netip"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"github.com/vishvananda/netlink"
@@ -96,7 +97,7 @@ func TestNeighMonitorRejectsUnusableSourceMAC(t *testing.T) {
 				neigh.WithLog(zap.NewNop()),
 			)
 
-			entry, ok := table.View().Lookup(nexthop.Unmap())
+			entry, ok := table.View().Lookup(nexthop)
 			require.Equal(t, tt.wantPresent, ok)
 			if tt.wantPresent {
 				require.Equal(t, [6]byte(tt.linkHardwareAddr), entry.HardwareRoute.SourceMAC)
@@ -164,7 +165,7 @@ func TestNeighMonitorClassifiesMissingVsMalformedDestinationMAC(t *testing.T) {
 				neigh.WithLog(zap.New(core)),
 			)
 
-			_, ok := table.View().Lookup(nexthop.Unmap())
+			_, ok := table.View().Lookup(nexthop)
 			require.False(t, ok, "entry with a bad destination MAC must never enter the cache")
 
 			gotWarn := false
@@ -174,6 +175,70 @@ func TestNeighMonitorClassifiesMissingVsMalformedDestinationMAC(t *testing.T) {
 				}
 			}
 			require.Equal(t, tt.wantWarn, gotWarn)
+		})
+	}
+}
+
+// Test_NeighMonitor_CanonicalRefresh verifies that both IPv4 encodings and
+// native IPv6 refresh the existing neighbour without resetting its age.
+func Test_NeighMonitor_CanonicalRefresh(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		address netip.Addr
+		wireIP  net.IP
+	}{
+		{
+			name:    "four-byte IPv4",
+			address: netip.MustParseAddr("192.0.2.1"),
+			wireIP:  net.IP{192, 0, 2, 1},
+		},
+		{
+			name:    "mapped IPv4",
+			address: netip.MustParseAddr("192.0.2.1"),
+			wireIP:  net.ParseIP("192.0.2.1"),
+		},
+		{
+			name:    "native IPv6",
+			address: netip.MustParseAddr("2001:db8::1"),
+			wireIP:  net.ParseIP("2001:db8::1"),
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			table := neigh.NewNeighTable()
+			source, err := table.CreateSource("kernel", 100, true)
+			require.NoError(t, err)
+			entry := neigh.NeighbourEntry{
+				NextHop: test.address,
+				HardwareRoute: neigh.HardwareRoute{
+					SourceMAC:      [6]byte{2, 0, 0, 0, 0, 1},
+					DestinationMAC: [6]byte{2, 0, 0, 0, 0, 2},
+					Device:         "eth0",
+				},
+				State:     neigh.NeighbourState(netlink.NUD_REACHABLE),
+				Priority:  100,
+				UpdatedAt: time.Unix(1, 0),
+			}
+			require.NoError(t, table.SwapSource("kernel", map[netip.Addr]neigh.NeighbourEntry{
+				test.address: entry,
+			}))
+			kernel := fakeKernelTable{
+				links: []netlink.Link{&netlink.Device{LinkAttrs: netlink.LinkAttrs{
+					Index: 1, Name: "eth0", HardwareAddr: entry.HardwareRoute.SourceMAC[:],
+				}}},
+				neighs: []netlink.Neigh{{
+					LinkIndex: 1, IP: test.wireIP,
+					HardwareAddr: entry.HardwareRoute.DestinationMAC[:],
+					State:        netlink.NUD_REACHABLE,
+				}},
+			}
+			neigh.NewNeighMonitor(table, source, neigh.WithKernelTable(kernel))
+			view, found := table.SourceView("kernel")
+			require.True(t, found)
+			_, count := view.Entries()
+			require.Equal(t, 1, count)
+			actual, found := view.Lookup(test.address)
+			require.True(t, found)
+			require.Equal(t, entry, actual)
 		})
 	}
 }

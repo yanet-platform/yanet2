@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"maps"
 	"net/netip"
+	"regexp"
 	"sync"
 	"time"
 
@@ -15,17 +16,15 @@ import (
 // ErrBuiltInSource indicates that a complete replacement targeted a built-in.
 var ErrBuiltInSource = errors.New("cannot replace built-in neighbour source")
 
+var sourceNamePattern = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]*$`)
+
 // ValidateSourceName checks the bounded namespace for complete replacements.
 func ValidateSourceName(name string) error {
 	if len(name) == 0 || len(name) > 128 {
 		return errors.New("table name must contain 1..128 bytes")
 	}
-	for idx, character := range name {
-		alphanumeric := character >= 'a' && character <= 'z' ||
-			character >= 'A' && character <= 'Z' || character >= '0' && character <= '9'
-		if !alphanumeric && (idx == 0 || character != '.' && character != '_' && character != '-') {
-			return errors.New("table name must start with an ASCII letter or digit and contain only letters, digits, '.', '_' or '-'")
-		}
+	if !sourceNamePattern.MatchString(name) {
+		return errors.New("table name must start with an ASCII letter or digit and contain only letters, digits, '.', '_' or '-'")
 	}
 	return nil
 }
@@ -81,11 +80,8 @@ func (m *NeighTable) View() NexthopCacheView {
 
 // SourceView returns a lock-free snapshot of a specific source table.
 func (m *NeighTable) SourceView(name string) (NexthopCacheView, bool) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	src := m.sources[name]
-
-	if src == nil {
+	src, ok := m.Source(name)
+	if !ok {
 		return NexthopCacheView{}, false
 	}
 

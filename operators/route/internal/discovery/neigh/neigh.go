@@ -396,6 +396,10 @@ func (m *NeighMonitor) updateNeighbours() error {
 			continue
 		}
 
+		// Netlink may encode IPv4 as a mapped 16-byte address. Match the
+		// canonical keys used by the neighbour table and FIB lookups.
+		nexthopAddr = nexthopAddr.Unmap()
+
 		// An absent hardware address leaves nothing to forward to and is
 		// routine, so it is logged at debug level. A present but non-EUI-48
 		// address is rarer and still warrants a warning.
@@ -421,7 +425,7 @@ func (m *NeighMonitor) updateNeighbours() error {
 			)
 			continue
 		}
-		sourceMAC, usable := hwroute.ParseMAC(hardwareAddr)
+		sourceMAC, usable := hwroute.EthernetMAC(hardwareAddr)
 		if !usable {
 			m.log.Warn("skipping entry with unusable source MAC address",
 				zap.String("link_name", linkIndexToName[neigh.LinkIndex]),
@@ -439,7 +443,7 @@ func (m *NeighMonitor) updateNeighbours() error {
 
 		// Create the entry with resolved hardware addresses.
 		entry := NeighbourEntry{
-			NextHop: nexthopAddr.Unmap(),
+			NextHop: nexthopAddr,
 			HardwareRoute: HardwareRoute{
 				SourceMAC:      sourceMAC,
 				DestinationMAC: [6]byte(neigh.HardwareAddr),
@@ -449,7 +453,7 @@ func (m *NeighMonitor) updateNeighbours() error {
 			State:     NeighbourState(neigh.State),
 		}
 
-		if e, ok := view.Lookup(entry.NextHop); ok {
+		if e, ok := view.Lookup(nexthopAddr); ok {
 			if e.HardwareRoute == entry.HardwareRoute && e.State == entry.State {
 				entry.UpdatedAt = e.UpdatedAt
 			}
@@ -463,7 +467,7 @@ func (m *NeighMonitor) updateNeighbours() error {
 			zap.Stringer("state", entry.State),
 		)
 
-		nexthopCache[entry.NextHop] = entry
+		nexthopCache[nexthopAddr] = entry
 	}
 
 	// Swap the source table and trigger a re-merge of the merged cache.

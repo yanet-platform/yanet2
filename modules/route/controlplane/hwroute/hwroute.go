@@ -48,8 +48,9 @@ type HardwareRoute struct {
 	Device string
 }
 
-// ParseMAC converts a nonzero Ethernet address into forwarding identity.
-func ParseMAC(address net.HardwareAddr) ([6]byte, bool) {
+// EthernetMAC converts an Ethernet address to its fixed-size representation.
+// Non-Ethernet and all-zero addresses are rejected.
+func EthernetMAC(address net.HardwareAddr) ([6]byte, bool) {
 	if len(address) != 6 {
 		return [6]byte{}, false
 	}
