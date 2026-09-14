@@ -114,3 +114,14 @@ Description: YANET2 generic operator
  One instance serves one module role, started as
  yanet2-generic-operator@<instance> with its configuration in
  /etc/yanet2/generic-operator.d/<instance>.yaml.
+
+Package: yanet2-netlink-dataplane-sidecar
+Architecture: amd64 arm64
+Depends: ${shlibs:Depends}
+ , ${misc:Depends}
+ , ca-certificates
+Description: YANET2 netlink dataplane sidecar
+ Configures interfaces at startup from Netplan or native input and publishes observed
+ Linux neighbours to the YANET2 route operator.
+ .
+ This package contains the sidecar binary and its default configuration.

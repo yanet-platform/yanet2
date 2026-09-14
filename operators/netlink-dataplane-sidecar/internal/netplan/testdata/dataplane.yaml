@@ -1,0 +1,22 @@
+network:
+  version: 2
+  ethernets:
+    kni0: &base
+      mtu: 9000
+      addresses: []
+      accept-ra: false
+      link-local: []
+    kni1: *base
+    lo:
+      mtu: 9000
+      addresses: [192.0.2.241/32, '2001:db8::f1/128']
+  dummy-devices: {}
+  vlans:
+    kni0.1600: {link: kni0, id: 1600, mtu: 9000, addresses: ['fe80::f1/64'], link-local: []}
+    kni0.1619: {link: kni0, id: 1619, mtu: 9000, addresses: ['fe80::f1/64'], link-local: []}
+    kni0.2000: {link: kni0, id: 2000, mtu: 9000, addresses: ['fe80::f1/64'], link-local: []}
+    kni0.802: {link: kni0, id: 802, mtu: 9000, addresses: ['fe80::f1/64'], link-local: []}
+    kni1.1600: {link: kni1, id: 1600, mtu: 9000, addresses: ['fe80::1f1/64'], link-local: []}
+    kni1.1619: {link: kni1, id: 1619, mtu: 9000, addresses: ['fe80::1f1/64'], link-local: []}
+    kni1.2000: {link: kni1, id: 2000, mtu: 9000, addresses: ['fe80::1f1/64'], link-local: []}
+    kni1.802: {link: kni1, id: 802, mtu: 9000, addresses: ['fe80::1f1/64'], link-local: []}

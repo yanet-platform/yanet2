@@ -1,5 +1,5 @@
 subdir('bird-adapter')
+subdir('netlink-dataplane-sidecar')
 subdir('pipeline')
 subdir('route')
 subdir('generic')
-

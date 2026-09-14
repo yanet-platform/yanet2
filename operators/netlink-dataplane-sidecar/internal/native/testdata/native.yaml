@@ -1,0 +1,25 @@
+ethernets:
+  kni0:
+    dhcp4: false
+    dhcp6: false
+    mtu: 1500
+    link-local: [ipv6]
+    accept-ra: false
+  lo:
+    addresses: ["2001:db8::1/128"]
+vlans:
+  kni0.100:
+    id: 100
+    link: kni0
+    dhcp4: false
+    dhcp6: false
+    mtu: 1500
+    addresses: ["192.0.2.2/24", "2001:db8:100::2/64"]
+    link-local: [ipv6]
+    accept-ra: false
+dummy-devices:
+  dummy0:
+    dhcp4: false
+    dhcp6: false
+    addresses: ["198.51.100.1/32"]
+    link-local: []

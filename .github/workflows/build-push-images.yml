@@ -90,6 +90,9 @@ jobs:
           - component: generic-operator
             image: ghcr.io/yanet-platform/yanet2/generic-operator
             dockerfile: deploy/yanet-generic-operator.Dockerfile
+          - component: netlink-dataplane-sidecar
+            image: ghcr.io/yanet-platform/yanet2/netlink-dataplane-sidecar
+            dockerfile: deploy/yanet-netlink-dataplane-sidecar.Dockerfile
           - component: pipeline-operator
             image: ghcr.io/yanet-platform/yanet2/pipeline-operator
             dockerfile: deploy/yanet-pipeline-operator.Dockerfile
