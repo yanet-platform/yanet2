@@ -7,8 +7,8 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/yanet-platform/yanet2/operators/route/internal/discovery/neigh"
 	"github.com/yanet-platform/yanet2/operators/route/internal/rib"
+	"github.com/yanet-platform/yanet2/operators/route/neigh"
 )
 
 func Test_RouteSource_WakeFuncCoalesces(t *testing.T) {

@@ -5,8 +5,8 @@ import (
 	"slices"
 
 	"github.com/yanet-platform/yanet2/common/go/maptrie"
-	"github.com/yanet-platform/yanet2/operators/route/internal/discovery/neigh"
 	"github.com/yanet-platform/yanet2/operators/route/internal/rib"
+	"github.com/yanet-platform/yanet2/operators/route/neigh"
 )
 
 // FIBEntry describes a single FIB prefix and its ECMP nexthops.

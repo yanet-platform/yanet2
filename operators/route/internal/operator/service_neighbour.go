@@ -9,7 +9,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
-	"github.com/yanet-platform/yanet2/operators/route/internal/discovery/neigh"
+	"github.com/yanet-platform/yanet2/operators/route/neigh"
 	"github.com/yanet-platform/yanet2/operators/route/operatorpb/v1"
 )
 
