@@ -31,6 +31,32 @@ type SourceInfo struct {
 	BuiltIn         bool
 }
 
+// TableOption configures NewNeighTable.
+type TableOption func(*tableOptions)
+
+// WithTableOnChanged registers a callback fired after a change that
+// altered the hardware route of at least one merged nexthop.
+//
+// A change leaving the merged hardware routes intact, such as a state
+// refresh or one in a source shadowed by a higher-priority entry, does not
+// fire it. The callback runs outside the table lock and may read the
+// table, while changing it from there recurses.
+func WithTableOnChanged(fn func()) TableOption {
+	return func(o *tableOptions) {
+		o.OnChanged = fn
+	}
+}
+
+type tableOptions struct {
+	OnChanged func()
+}
+
+func newTableOptions() *tableOptions {
+	return &tableOptions{
+		OnChanged: func() {},
+	}
+}
+
 // NeighTable merges multiple neighbour sources by per-entry priority.
 //
 // All mutations are serialized under mu. After every mutation the merged
@@ -42,13 +68,21 @@ type NeighTable struct {
 	sources map[string]*NeighSource
 	// merged is the final merged cache that consumers read via View().
 	merged *NexthopCache
+	// onChanged fires after a mutation changed the merged hardware routes.
+	onChanged func()
 }
 
 // NewNeighTable creates a new empty NeighTable.
-func NewNeighTable() *NeighTable {
+func NewNeighTable(options ...TableOption) *NeighTable {
+	opts := newTableOptions()
+	for _, o := range options {
+		o(opts)
+	}
+
 	return &NeighTable{
-		sources: map[string]*NeighSource{},
-		merged:  rcucache.NewEmptyCache[netip.Addr, NeighbourEntry](),
+		sources:   map[string]*NeighSource{},
+		merged:    rcucache.NewEmptyCache[netip.Addr, NeighbourEntry](),
+		onChanged: opts.OnChanged,
 	}
 }
 
@@ -110,21 +144,19 @@ func (m *NeighTable) UpdateSource(name string, defaultPriority uint32) error {
 
 // DeleteSource removes a user-defined source and triggers a re-merge.
 func (m *NeighTable) DeleteSource(name string) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
+	return m.update(func() error {
+		src, ok := m.sources[name]
+		if !ok {
+			return fmt.Errorf("source %q not found", name)
+		}
 
-	src, ok := m.sources[name]
-	if !ok {
-		return fmt.Errorf("source %q not found", name)
-	}
+		if src.BuiltIn {
+			return fmt.Errorf("cannot delete built-in source %q", name)
+		}
 
-	if src.BuiltIn {
-		return fmt.Errorf("cannot delete built-in source %q", name)
-	}
-
-	delete(m.sources, name)
-	m.rebuildMergedCacheLocked()
-	return nil
+		delete(m.sources, name)
+		return nil
+	})
 }
 
 // ListSources returns metadata about all registered sources.
@@ -158,42 +190,36 @@ func (m *NeighTable) Source(name string) (*NeighSource, bool) {
 // Add inserts or updates entries in the specified source table and
 // triggers a single re-merge.
 func (m *NeighTable) Add(table string, entries []NeighbourEntry) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	src, ok := m.sources[table]
-	if !ok {
-		return fmt.Errorf("source %q not found", table)
-	}
-
-	for _, entry := range entries {
-		if entry.Priority == 0 {
-			entry.Priority = src.DefaultPriority
+	return m.update(func() error {
+		src, ok := m.sources[table]
+		if !ok {
+			return fmt.Errorf("source %q not found", table)
 		}
-		src.Cache.Set(entry.NextHop, entry)
-	}
 
-	m.rebuildMergedCacheLocked()
-	return nil
+		for _, entry := range entries {
+			if entry.Priority == 0 {
+				entry.Priority = src.DefaultPriority
+			}
+			src.Cache.Set(entry.NextHop, entry)
+		}
+		return nil
+	})
 }
 
 // Remove deletes entries from the specified source table and triggers
 // a single re-merge.
 func (m *NeighTable) Remove(table string, addrs []netip.Addr) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
+	return m.update(func() error {
+		src, ok := m.sources[table]
+		if !ok {
+			return fmt.Errorf("source %q not found", table)
+		}
 
-	src, ok := m.sources[table]
-	if !ok {
-		return fmt.Errorf("source %q not found", table)
-	}
-
-	for _, addr := range addrs {
-		src.Cache.Delete(addr)
-	}
-
-	m.rebuildMergedCacheLocked()
-	return nil
+		for _, addr := range addrs {
+			src.Cache.Delete(addr)
+		}
+		return nil
+	})
 }
 
 // SwapSource atomically replaces all entries in the named source and triggers
@@ -201,30 +227,57 @@ func (m *NeighTable) Remove(table string, addrs []netip.Addr) error {
 //
 // Entries with zero priority inherit the source's default priority.
 func (m *NeighTable) SwapSource(name string, entries map[netip.Addr]NeighbourEntry) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	src, ok := m.sources[name]
-	if !ok {
-		return fmt.Errorf("source %q not found", name)
-	}
-
-	for addr, entry := range entries {
-		if entry.Priority == 0 {
-			entry.Priority = src.DefaultPriority
-			entries[addr] = entry
+	return m.update(func() error {
+		src, ok := m.sources[name]
+		if !ok {
+			return fmt.Errorf("source %q not found", name)
 		}
+
+		for addr, entry := range entries {
+			if entry.Priority == 0 {
+				entry.Priority = src.DefaultPriority
+				entries[addr] = entry
+			}
+		}
+
+		src.Cache.Swap(entries)
+		return nil
+	})
+}
+
+// update applies a change to one source, re-merges, and fires the change
+// hook once the lock is released when the merged hardware routes differ.
+//
+// A failed change neither re-merges nor fires the hook.
+func (m *NeighTable) update(fn func() error) error {
+	changed, err := m.updateAndMerge(fn)
+	if err != nil {
+		return err
 	}
 
-	src.Cache.Swap(entries)
-	m.rebuildMergedCacheLocked()
+	if changed {
+		m.onChanged()
+	}
 	return nil
 }
 
-// rebuildMergedCacheLocked rebuilds the merged cache from all sources.
+// updateAndMerge holds the lock across both the change and the re-merge,
+// so the hook can fire without it.
+func (m *NeighTable) updateAndMerge(fn func() error) (bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if err := fn(); err != nil {
+		return false, err
+	}
+	return m.rebuildMergedCacheLocked(), nil
+}
+
+// rebuildMergedCacheLocked rebuilds the merged cache from all sources and
+// reports whether the hardware route of any merged nexthop changed.
 //
 // Must be called with m.mu held.
-func (m *NeighTable) rebuildMergedCacheLocked() {
+func (m *NeighTable) rebuildMergedCacheLocked() bool {
 	merged := map[netip.Addr]NeighbourEntry{}
 
 	for _, src := range m.sources {
@@ -240,5 +293,23 @@ func (m *NeighTable) rebuildMergedCacheLocked() {
 		}
 	}
 
+	changed := !sameHardwareRoutes(m.merged.View(), merged)
 	m.merged.Swap(merged)
+	return changed
+}
+
+// sameHardwareRoutes compares the only projection a forwarding table is
+// built from: which nexthops resolve, and to what hardware route.
+func sameHardwareRoutes(before NexthopCacheView, after map[netip.Addr]NeighbourEntry) bool {
+	if _, n := before.Entries(); n != len(after) {
+		return false
+	}
+
+	for addr, entry := range after {
+		previous, ok := before.Lookup(addr)
+		if !ok || previous.HardwareRoute != entry.HardwareRoute {
+			return false
+		}
+	}
+	return true
 }

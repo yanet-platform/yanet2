@@ -16,28 +16,21 @@ import (
 const defaultStaticTable = "static"
 
 // NeighbourService implements the operator-owned NeighbourService
-// surface. Mutations wake the reconcile loop.
+// surface.
+//
+// Mutations reach the reconcile loop through the neighbour table, which
+// wakes it only when the merged hardware routes changed.
 type NeighbourService struct {
 	operatorpb.UnimplementedNeighbourServiceServer
 
 	neighTable *neigh.NeighTable
-	onChanged  func()
 }
 
 // NewNeighbourService constructs a NeighbourService bound to the
 // supplied neighbour table.
-func NewNeighbourService(
-	neighTable *neigh.NeighTable,
-	options ...NeighbourServiceOption,
-) *NeighbourService {
-	opts := newNeighbourServiceOptions()
-	for _, o := range options {
-		o(opts)
-	}
-
+func NewNeighbourService(neighTable *neigh.NeighTable) *NeighbourService {
 	return &NeighbourService{
 		neighTable: neighTable,
-		onChanged:  opts.OnChanged,
 	}
 }
 
@@ -94,7 +87,6 @@ func (m *NeighbourService) CreateTable(
 	if _, err := m.neighTable.CreateSource(req.GetName(), req.GetDefaultPriority(), false); err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to create neighbour table: %v", err)
 	}
-	m.onChanged()
 	return &operatorpb.CreateNeighbourTableResponse{}, nil
 }
 
@@ -105,7 +97,6 @@ func (m *NeighbourService) UpdateTable(
 	if err := m.neighTable.UpdateSource(req.GetName(), req.GetDefaultPriority()); err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to update neighbour table: %v", err)
 	}
-	m.onChanged()
 	return &operatorpb.UpdateNeighbourTableResponse{}, nil
 }
 
@@ -116,7 +107,6 @@ func (m *NeighbourService) RemoveTable(
 	if err := m.neighTable.DeleteSource(req.GetName()); err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to remove neighbour table: %v", err)
 	}
-	m.onChanged()
 	return &operatorpb.RemoveNeighbourTableResponse{}, nil
 }
 
@@ -180,7 +170,6 @@ func (m *NeighbourService) UpdateNeighbours(
 		return nil, status.Errorf(codes.Internal, "failed to add neighbours: %v", err)
 	}
 
-	m.onChanged()
 	return &operatorpb.UpdateNeighboursResponse{}, nil
 }
 
@@ -206,6 +195,5 @@ func (m *NeighbourService) RemoveNeighbours(
 		return nil, status.Errorf(codes.Internal, "failed to remove neighbours: %v", err)
 	}
 
-	m.onChanged()
 	return &operatorpb.RemoveNeighboursResponse{}, nil
 }
