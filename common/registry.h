@@ -132,10 +132,6 @@ value_collector_check(struct value_collector *collector, uint32_t value) {
 			return -1;
 		}
 
-		memset(chunk,
-		       0xff,
-		       VALUE_COLLECTOR_CHUNK_SIZE * sizeof(uint32_t));
-
 		memset(chunk, 0, VALUE_COLLECTOR_CHUNK_SIZE * sizeof(uint32_t));
 
 		SET_OFFSET_OF(&use_map[chunk_idx], chunk);
