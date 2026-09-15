@@ -23,6 +23,10 @@ struct dp_module {
 	char name[80];
 	module_handler handler;
 	module_commit_handler commit_handler;
+	module_commit_ectx_handler commit_ectx_handler;
+	// Size of the module's private per-context buffer, zero when the
+	// module needs none; mirrors the loaded module's declaration.
+	uint64_t prepared_size;
 };
 
 struct dp_device {

@@ -87,6 +87,21 @@ module_ectx_free(
 		);
 	}
 
+	// The buffer is opaque here: only its size, read back from the
+	// module's dataplane slot, and its lifetime are known.
+	struct cp_module *cp_module = ADDR_OF(&module_ectx->cp_module);
+	struct dp_config *dp_config = ADDR_OF(&cp_config->dp_config);
+	struct dp_module *dp_module =
+		ADDR_OF(&dp_config->dp_modules) + cp_module->dp_module_idx;
+	void *module_prepared = ADDR_OF(&module_ectx->module_prepared);
+	if (module_prepared != NULL) {
+		memory_bfree(
+			memory_context,
+			module_prepared,
+			dp_module->prepared_size
+		);
+	}
+
 	memory_bfree(memory_context, module_ectx, sizeof(struct module_ectx));
 }
 
@@ -127,6 +142,25 @@ module_ectx_create(
 	struct dp_module *dp_module =
 		ADDR_OF(&dp_config->dp_modules) + cp_module->dp_module_idx;
 	module_ectx->handler = dp_module->handler;
+
+	// The buffer is opaque to the control plane: the module fills it
+	// in the dataplane during the absolutization pass.
+	if (dp_module->prepared_size > 0) {
+		void *module_prepared =
+			memory_balloc(memory_context, dp_module->prepared_size);
+		if (module_prepared == NULL) {
+			yanet_error_add(
+				err,
+				"failed to allocate the prepared buffer of "
+				"module '%s:%s'",
+				cp_module->type,
+				cp_module->name
+			);
+			goto error;
+		}
+		memset(module_prepared, 0, dp_module->prepared_size);
+		SET_OFFSET_OF(&module_ectx->module_prepared, module_prepared);
+	}
 
 	struct cp_device *cp_device = ADDR_OF(&device_ectx->cp_device);
 	struct cp_pipeline *cp_pipeline = ADDR_OF(&pipeline_ectx->cp_pipeline);

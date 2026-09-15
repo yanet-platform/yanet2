@@ -120,6 +120,18 @@ struct module_ectx {
 	// before the context is released to workers; it is zero until
 	// then.
 	struct module_object_link_ectx *abs_object_links;
+
+	// Offset pointer to the module's private per-context buffer,
+	// allocated zeroed by the control plane when the module declares a
+	// size. Opaque to the control plane; filled by the module's
+	// execution-context commit handler during the absolutization pass.
+	void *module_prepared;
+	// The same buffer, as an absolute address for the packet hot path.
+	//
+	// The publishing process copies it from the relative field above
+	// before the context is released to workers; it is zero until
+	// then.
+	void *abs_module_prepared;
 };
 
 // Per-worker, per-link state for a module's link to a cp_object.
