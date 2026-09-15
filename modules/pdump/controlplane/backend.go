@@ -62,11 +62,11 @@ func NewBackend(agent *ffi.Agent, options ...BackendOption) Backend {
 	}
 }
 
-// Publish builds a module config with fresh rings from the settings and
-// publishes it.
+// UpdateModule builds a module config with fresh rings from the settings
+// and publishes it.
 //
 // On error nothing stays allocated.
-func (m *backend) Publish(name string, settings Settings) (Module, error) {
+func (m *backend) UpdateModule(name string, settings Settings) (Module, error) {
 	config, err := NewModuleConfig(m.agent, name)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create %q module config: %w", name, err)
@@ -92,8 +92,8 @@ func (m *backend) Publish(name string, settings Settings) (Module, error) {
 	return &shmModule{config: config, rings: rings}, nil
 }
 
-// Unpublish removes the module config from the dataplane.
-func (m *backend) Unpublish(name string) error {
+// DeleteModule removes the module config from the dataplane.
+func (m *backend) DeleteModule(name string) error {
 	return m.agent.DeleteModuleConfig(moduleType, name)
 }
 

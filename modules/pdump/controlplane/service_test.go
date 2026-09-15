@@ -53,14 +53,14 @@ func (m *fakeModule) Free() error {
 }
 
 // fakeBackend publishes fakeModules and remembers every one it built and
-// every name it unpublished.
+// every name it deleted.
 type fakeBackend struct {
-	mu          sync.Mutex
-	modules     []*fakeModule
-	unpublished []string
+	mu      sync.Mutex
+	modules []*fakeModule
+	deleted []string
 }
 
-func (m *fakeBackend) Publish(name string, settings pdump.Settings) (pdump.Module, error) {
+func (m *fakeBackend) UpdateModule(name string, settings pdump.Settings) (pdump.Module, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -77,20 +77,20 @@ func (m *fakeBackend) Publish(name string, settings pdump.Settings) (pdump.Modul
 	return module, nil
 }
 
-func (m *fakeBackend) Unpublish(name string) error {
+func (m *fakeBackend) DeleteModule(name string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	m.unpublished = append(m.unpublished, name)
+	m.deleted = append(m.deleted, name)
 	return nil
 }
 
-// Unpublished returns the names unpublished so far, in order.
-func (m *fakeBackend) Unpublished() []string {
+// Deleted returns the names deleted so far, in order.
+func (m *fakeBackend) Deleted() []string {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	return append([]string(nil), m.unpublished...)
+	return append([]string(nil), m.deleted...)
 }
 
 // Last returns the module published most recently.
@@ -242,7 +242,7 @@ func Test_PdumpService_DeleteConfig_EndsStreamsAndFreesModule(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("the delete did not end the stream")
 	}
-	require.Equal(t, []string{"capture"}, backend.Unpublished())
+	require.Equal(t, []string{"capture"}, backend.Deleted())
 	require.True(t, module.freed.Load(), "the delete must free the module")
 
 	_, err = service.ShowConfig(t.Context(), &pdumppb.ShowConfigRequest{Name: "capture"})
