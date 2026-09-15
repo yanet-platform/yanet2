@@ -1028,7 +1028,7 @@ func Test_PdumpService_SetConfig_PreservesPublishedConfigDuringReaderDrain(t *te
 	close(readerDone)
 	select {
 	case err := <-updateDone:
-		require.ErrorContains(t, err, "pdump agent is required")
+		require.ErrorContains(t, err, "pdump backend is required")
 	case <-time.After(time.Second):
 		t.Fatal("config update did not complete")
 	}

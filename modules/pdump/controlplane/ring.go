@@ -89,6 +89,22 @@ type workerArea struct {
 	log         *zap.Logger // Logger for this worker area
 }
 
+// workerAreas builds a reader over every ring, each starting at the ring's
+// beginning.
+func workerAreas(rings []Ring, log *zap.Logger) []*workerArea {
+	workers := make([]*workerArea, 0, len(rings))
+	for idx, ring := range rings {
+		workers = append(workers, &workerArea{
+			writeIdx:    ring.WriteIdx,
+			readableIdx: ring.ReadableIdx,
+			data:        ring.Data,
+			mask:        uint64(len(ring.Data) - 1),
+			log:         log.With(zap.Int("ring_idx", idx)),
+		})
+	}
+	return workers
+}
+
 // spawnWakers creates notification channels for each worker and starts a background
 // goroutine that periodically checks for new data and notifies waiting readers.
 //
