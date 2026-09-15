@@ -454,7 +454,7 @@ func TestRingBufferSpawnWakers(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 		defer cancel()
 
-		wakers := rb.rb.spawnWakers(ctx)
+		wakers, _ := rb.rb.spawnWakers(ctx)
 		require.Len(t, wakers, 2)
 
 		// Add data to first worker
@@ -474,7 +474,7 @@ func TestRingBufferSpawnWakers(t *testing.T) {
 		rb := createTestRingBuffer(t, 1)
 		ctx, cancel := context.WithCancel(context.Background())
 
-		wakers := rb.rb.spawnWakers(ctx)
+		wakers, _ := rb.rb.spawnWakers(ctx)
 		require.Len(t, wakers, 1)
 
 		// Cancel context
@@ -494,6 +494,29 @@ func TestRingBufferSpawnWakers(t *testing.T) {
 			// Expected - no notification
 		}
 	})
+}
+
+// Test_RingBuffer_RunReaders_StopsReadingRingOnReturn verifies that no
+// goroutine started by the readers still reads the ring once they return.
+//
+// Every round ends with a plain write to the ring's write index, which
+// the race detector reports against any read still running.
+func Test_RingBuffer_RunReaders_StopsReadingRingOnReturn(t *testing.T) {
+	rb := createTestRingBuffer(t, 1)
+	recordCh := make(chan *pdumppb.Record, 1)
+
+	for range 100 {
+		ctx, cancel := context.WithCancel(t.Context())
+		done := make(chan error, 1)
+		go func() {
+			done <- rb.rb.RunReaders(ctx, recordCh)
+		}()
+		time.Sleep(time.Millisecond)
+		cancel()
+		<-done
+
+		*rb.rb.workers[0].writeIdx = 0
+	}
 }
 
 // TestRingBufferRunReaders tests the reader functionality
