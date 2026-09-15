@@ -5,7 +5,7 @@ import (
 	"fmt"
 )
 
-// Validate checks that a registration includes a backend descriptor.
+// Validate checks that a registration includes a valid backend descriptor.
 func (m *RegisterRequest) Validate() error {
 	backend := m.GetBackend()
 	if backend == nil {
