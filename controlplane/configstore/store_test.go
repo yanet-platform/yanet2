@@ -279,9 +279,8 @@ func Test_Store_Reads_DoNotWaitForPublish(t *testing.T) {
 	require.NoError(t, group.Wait())
 }
 
-// Test_Store_Writers_Serialize verifies that a second mutation does not
-// start its callback until the first mutation has finished, whatever the
-// names involved.
+// Test_Store_Writers_Serialize verifies that a second mutation of a name
+// does not start its callback until the first callback returns.
 func Test_Store_Writers_Serialize(t *testing.T) {
 	store := configstore.NewStore[*freeSequence]()
 
@@ -302,7 +301,7 @@ func Test_Store_Writers_Serialize(t *testing.T) {
 	secondLaunched := make(chan struct{})
 	group.Go(func() error {
 		close(secondLaunched)
-		return store.Update("b", func(*freeSequence, bool) (*freeSequence, error) {
+		return store.Update("a", func(*freeSequence, bool) (*freeSequence, error) {
 			close(secondStarted)
 			return newFreeSequence(), nil
 		})
@@ -319,7 +318,113 @@ func Test_Store_Writers_Serialize(t *testing.T) {
 	close(release)
 	require.NoError(t, group.Wait())
 	<-secondStarted
-	assert.Equal(t, []string{"a", "b"}, store.Names())
+	assert.Equal(t, []string{"a"}, store.Names())
+}
+
+// Test_Store_Writers_DifferentNamesRunConcurrently verifies that a
+// mutation of one name does not wait for another name's callback.
+func Test_Store_Writers_DifferentNamesRunConcurrently(t *testing.T) {
+	store := configstore.NewStore[*freeSequence]()
+
+	entered := make(chan struct{})
+	release := make(chan struct{})
+
+	var group errgroup.Group
+	group.Go(func() error {
+		return store.Update("a", func(*freeSequence, bool) (*freeSequence, error) {
+			close(entered)
+			<-release
+			return newFreeSequence(), nil
+		})
+	})
+	<-entered
+
+	otherDone := make(chan error, 1)
+	go func() {
+		if err := store.Update("b", publishing(newFreeSequence())); err != nil {
+			otherDone <- err
+			return
+		}
+		otherDone <- store.Delete("b", unpublishing(nil))
+	}()
+
+	select {
+	case err := <-otherDone:
+		require.NoError(t, err)
+	case <-time.After(5 * time.Second):
+		close(release)
+		t.Fatal("a mutation of another name waited for the in-flight update")
+	}
+
+	close(release)
+	require.NoError(t, group.Wait())
+}
+
+// Test_Store_Delete_WaitsBehindInFlightCreate verifies that a delete waits
+// for the first update of the name and acts on its outcome.
+func Test_Store_Delete_WaitsBehindInFlightCreate(t *testing.T) {
+	cases := []struct {
+		name          string
+		createOutcome error
+	}{
+		{name: "create succeeds", createOutcome: nil},
+		{name: "create fails", createOutcome: errInjected},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			store := configstore.NewStore[*freeSequence]()
+
+			entered := make(chan struct{})
+			release := make(chan struct{})
+			createDone := make(chan error, 1)
+			go func() {
+				createDone <- store.Update("a", func(*freeSequence, bool) (*freeSequence, error) {
+					close(entered)
+					<-release
+					if tc.createOutcome != nil {
+						return nil, tc.createOutcome
+					}
+					return newFreeSequence(), nil
+				})
+			}()
+			<-entered
+
+			_, ok := store.Get("a")
+			assert.False(t, ok, "an in-flight create must not be visible to readers")
+
+			deleteStarted := make(chan struct{})
+			deleteDone := make(chan error, 1)
+			go func() {
+				close(deleteStarted)
+				deleteDone <- store.Delete("a", unpublishing(nil))
+			}()
+			<-deleteStarted
+
+			select {
+			case err := <-deleteDone:
+				close(release)
+				t.Fatalf("delete returned %v before the create released", err)
+			case <-time.After(50 * time.Millisecond):
+			}
+
+			close(release)
+			createErr := <-createDone
+			deleteErr := <-deleteDone
+
+			if tc.createOutcome == nil {
+				require.NoError(t, createErr)
+				require.NoError(t, deleteErr)
+				assert.Empty(t, store.Names())
+			} else {
+				require.ErrorIs(t, createErr, tc.createOutcome)
+				require.ErrorIs(t, deleteErr, configstore.ErrNotFound)
+			}
+
+			require.NoError(t, store.Update("a", publishing(newFreeSequence())))
+			assert.Equal(t, []string{"a"}, store.Names())
+		})
+	}
 }
 
 // Test_Store_ConcurrentMutations verifies that interleaved updates,
@@ -346,7 +451,7 @@ func Test_Store_ConcurrentMutations(t *testing.T) {
 					}
 					continue
 				}
-				handle := newFreeSequence()
+				handle := newFreeSequence(ffi.ErrStillReferenced)
 				handles <- handle
 				if err := store.Update(name, publishing(handle)); err != nil {
 					return err
@@ -366,6 +471,7 @@ func Test_Store_ConcurrentMutations(t *testing.T) {
 		})
 	}
 	require.NoError(t, group.Wait())
+	store.ReclaimDeferred()
 	close(handles)
 	for handle := range handles {
 		minted = append(minted, handle)
