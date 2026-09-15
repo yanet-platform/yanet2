@@ -14,6 +14,134 @@ import (
 	forwardpb "github.com/yanet-platform/yanet2/modules/forward/controlplane/forwardpb/v1"
 )
 
+// Test_ShowConfigRequest_Validate verifies that an empty or nil request is
+// rejected while a named request passes.
+func Test_ShowConfigRequest_Validate(t *testing.T) {
+	cases := []struct {
+		name    string
+		request *forwardpb.ShowConfigRequest
+		message string
+	}{
+		{name: "empty name", request: &forwardpb.ShowConfigRequest{}, message: "name is required"},
+		{name: "name set", request: &forwardpb.ShowConfigRequest{Name: "forward0"}},
+		{name: "nil request", request: nil, message: "name is required"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := tc.request.Validate()
+			if tc.message == "" {
+				require.NoError(t, err)
+			} else {
+				require.EqualError(t, err, tc.message)
+			}
+		})
+	}
+}
+
+// Test_UpdateConfigRequest_Validate verifies that the request name is
+// required and that nested rule errors include the repeated field path.
+func Test_UpdateConfigRequest_Validate(t *testing.T) {
+	cases := []struct {
+		name    string
+		request *forwardpb.UpdateConfigRequest
+		message string
+	}{
+		{name: "empty name", request: &forwardpb.UpdateConfigRequest{}, message: "name is required"},
+		{name: "name set", request: &forwardpb.UpdateConfigRequest{Name: "forward0"}},
+		{
+			name: "missing action at repeated index",
+			request: &forwardpb.UpdateConfigRequest{
+				Name: "forward0",
+				Rules: []*forwardpb.Rule{
+					{Action: &forwardpb.Action{}},
+					{Action: &forwardpb.Action{}},
+					{Action: &forwardpb.Action{}},
+					{},
+				},
+			},
+			message: "rules[3]: action is required",
+		},
+		{
+			name: "nil rule at repeated index",
+			request: &forwardpb.UpdateConfigRequest{
+				Name:  "forward0",
+				Rules: []*forwardpb.Rule{nil},
+			},
+			message: "rules[0]: action is required",
+		},
+		{
+			name: "valid rule",
+			request: &forwardpb.UpdateConfigRequest{
+				Name:  "forward0",
+				Rules: []*forwardpb.Rule{{Action: &forwardpb.Action{}}},
+			},
+		},
+		{name: "nil request", request: nil, message: "name is required"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := tc.request.Validate()
+			if tc.message == "" {
+				require.NoError(t, err)
+			} else {
+				require.EqualError(t, err, tc.message)
+			}
+		})
+	}
+}
+
+// Test_DeleteConfigRequest_Validate verifies that an empty or nil request is
+// rejected while a named request passes.
+func Test_DeleteConfigRequest_Validate(t *testing.T) {
+	cases := []struct {
+		name    string
+		request *forwardpb.DeleteConfigRequest
+		message string
+	}{
+		{name: "empty name", request: &forwardpb.DeleteConfigRequest{}, message: "name is required"},
+		{name: "name set", request: &forwardpb.DeleteConfigRequest{Name: "forward0"}},
+		{name: "nil request", request: nil, message: "name is required"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := tc.request.Validate()
+			if tc.message == "" {
+				require.NoError(t, err)
+			} else {
+				require.EqualError(t, err, tc.message)
+			}
+		})
+	}
+}
+
+// Test_Rule_Validate verifies that an action is required and that a present
+// action passes.
+func Test_Rule_Validate(t *testing.T) {
+	cases := []struct {
+		name    string
+		rule    *forwardpb.Rule
+		message string
+	}{
+		{name: "missing action", rule: &forwardpb.Rule{}, message: "action is required"},
+		{name: "action set", rule: &forwardpb.Rule{Action: &forwardpb.Action{}}},
+		{name: "nil rule", rule: nil, message: "action is required"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := tc.rule.Validate()
+			if tc.message == "" {
+				require.NoError(t, err)
+			} else {
+				require.EqualError(t, err, tc.message)
+			}
+		})
+	}
+}
+
 // verifies that a mode travels by name on the JSON wire, that the zero mode
 // stays omitted, and that both a name and an older client's number read back.
 func Test_ForwardMode_JSONRoundTrip(t *testing.T) {
