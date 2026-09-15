@@ -35,13 +35,13 @@ type Module interface {
 
 // Backend publishes and removes pdump module configs in shared memory.
 type Backend interface {
-	// Publish builds a module config with fresh rings from the settings and
-	// publishes it.
+	// UpdateModule builds a module config with fresh rings from the settings
+	// and publishes it.
 	//
 	// On error nothing stays allocated.
-	Publish(name string, settings Settings) (Module, error)
-	// Unpublish removes the module config from the dataplane.
-	Unpublish(name string) error
+	UpdateModule(name string, settings Settings) (Module, error)
+	// DeleteModule removes the module config from the dataplane.
+	DeleteModule(name string) error
 }
 
 // PdumpService provides packet capture functionality through a gRPC interface.
@@ -226,7 +226,7 @@ func (m *PdumpService) DeleteConfig(
 		func() error {
 			// Delete the module config from the data plane if it exists.
 			if config.Module != nil {
-				if err := m.backend.Unpublish(name); err != nil {
+				if err := m.backend.DeleteModule(name); err != nil {
 					return status.Errorf(codes.Internal, "failed to delete module config %q: %v", name, err)
 				}
 
@@ -263,7 +263,7 @@ func (m *PdumpService) updateModuleConfig(
 
 	m.log.Debug("update config", zap.String("module", name))
 
-	module, err := m.backend.Publish(name, Settings{
+	module, err := m.backend.UpdateModule(name, Settings{
 		Filter:   modConfig.Filter,
 		Mode:     modConfig.DumpMode,
 		Snaplen:  modConfig.Snaplen,
