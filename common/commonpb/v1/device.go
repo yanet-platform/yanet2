@@ -6,14 +6,18 @@ import "fmt"
 // worker and occurrence in the execution graph.
 const MaxWeightSum = 65535
 
+// MaxDeviceNameLen mirrors the C device name buffer size, including the
+// terminating NUL.
+const MaxDeviceNameLen = 80
+
 // Validate checks the input and output weight sums independently.
 //
 // A nil device is an empty configuration. Zero weights disable entries.
 func (m *Device) Validate() error {
-	if err := validateDevicePipelines("device.input", m.GetInput()); err != nil {
+	if err := validateDevicePipelines("input", m.GetInput()); err != nil {
 		return err
 	}
-	return validateDevicePipelines("device.output", m.GetOutput())
+	return validateDevicePipelines("output", m.GetOutput())
 }
 
 func validateDevicePipelines(field string, pipelines []*DevicePipeline) error {

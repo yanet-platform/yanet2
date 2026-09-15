@@ -13,10 +13,10 @@ import (
 // Test_Device_Validate verifies that each direction has an independent budget
 // and validation preserves the supplied message, including absent entries.
 func Test_Device_Validate(t *testing.T) {
-	for _, test := range []struct {
-		name   string
-		device *commonpb.Device
-		field  string
+	for _, tc := range []struct {
+		name    string
+		device  *commonpb.Device
+		message string
 	}{
 		{name: "nil device"},
 		{name: "empty device", device: &commonpb.Device{}},
@@ -36,36 +36,35 @@ func Test_Device_Validate(t *testing.T) {
 			},
 		},
 		{
-			name:   "input above limit",
-			device: &commonpb.Device{Input: []*commonpb.DevicePipeline{{Weight: 65536}}},
-			field:  "device.input[0].weight",
+			name:    "input above limit",
+			device:  &commonpb.Device{Input: []*commonpb.DevicePipeline{{Weight: 65536}}},
+			message: "input[0].weight 65536 must be in range 0..65535",
 		},
 		{
-			name:   "input sum above limit",
-			device: &commonpb.Device{Input: []*commonpb.DevicePipeline{{Weight: 65535}, {Weight: 1}}},
-			field:  "device.input weight sum",
+			name:    "input sum above limit",
+			device:  &commonpb.Device{Input: []*commonpb.DevicePipeline{{Weight: 65535}, {Weight: 1}}},
+			message: "input weight sum 65536 must be in range 0..65535",
 		},
 		{
-			name:   "output sum above limit",
-			device: &commonpb.Device{Output: []*commonpb.DevicePipeline{{Weight: 65535}, {Weight: 1}}},
-			field:  "device.output weight sum",
+			name:    "output sum above limit",
+			device:  &commonpb.Device{Output: []*commonpb.DevicePipeline{{Weight: 65535}, {Weight: 1}}},
+			message: "output weight sum 65536 must be in range 0..65535",
 		},
 		{
-			name:   "overflowing input sum",
-			device: &commonpb.Device{Input: []*commonpb.DevicePipeline{{Weight: 1}, {Weight: math.MaxUint64}}},
-			field:  "device.input[1].weight",
+			name:    "overflowing input sum",
+			device:  &commonpb.Device{Input: []*commonpb.DevicePipeline{{Weight: 1}, {Weight: math.MaxUint64}}},
+			message: "input[1].weight 18446744073709551615 must be in range 0..65535",
 		},
 	} {
-		t.Run(test.name, func(t *testing.T) {
-			before := proto.Clone(test.device)
-			err := test.device.Validate()
-			if test.field == "" {
+		t.Run(tc.name, func(t *testing.T) {
+			before := proto.Clone(tc.device)
+			err := tc.device.Validate()
+			if tc.message == "" {
 				require.NoError(t, err)
 			} else {
-				require.ErrorContains(t, err, test.field)
-				require.ErrorContains(t, err, "0..65535")
+				require.EqualError(t, err, tc.message)
 			}
-			require.True(t, proto.Equal(before, test.device))
+			require.True(t, proto.Equal(before, tc.device))
 		})
 	}
 }

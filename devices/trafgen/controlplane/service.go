@@ -19,8 +19,6 @@ import (
 	trafgenpb "github.com/yanet-platform/yanet2/devices/trafgen/controlplane/trafgenpb/v1"
 )
 
-var errConfigNameRequired = status.Error(codes.InvalidArgument, "config name is required")
-
 // maxFrameLen is the largest replay frame the dataplane can emit.
 //
 // The dataplane reserves mbuf tailroom with a 16-bit length, so a frame above
@@ -88,16 +86,6 @@ func (m *TrafgenService) UpdateDevice(
 	req *trafgenpb.UpdateDeviceRequest,
 ) (*trafgenpb.UpdateDeviceResponse, error) {
 	name := req.GetName()
-	if name == "" {
-		return nil, errConfigNameRequired
-	}
-	if err := ffi.ValidateDeviceName(name); err != nil {
-		return nil, status.Error(codes.InvalidArgument, err.Error())
-	}
-	if err := req.GetDevice().Validate(); err != nil {
-		return nil, status.Error(codes.InvalidArgument, err.Error())
-	}
-
 	input := pipelinesFromProto(req.GetDevice().GetInput())
 	output := pipelinesFromProto(req.GetDevice().GetOutput())
 
@@ -136,10 +124,6 @@ func (m *TrafgenService) ShowConfig(
 	req *trafgenpb.ShowConfigRequest,
 ) (*trafgenpb.ShowConfigResponse, error) {
 	name := req.GetName()
-	if name == "" {
-		return nil, errConfigNameRequired
-	}
-
 	entry, ok := m.configs.Get(name)
 	if !ok {
 		return nil, status.Error(codes.NotFound, "no config found")
@@ -158,10 +142,6 @@ func (m *TrafgenService) ShowPackets(
 	req *trafgenpb.ShowPacketsRequest,
 ) (*trafgenpb.ShowPacketsResponse, error) {
 	name := req.GetName()
-	if name == "" {
-		return nil, errConfigNameRequired
-	}
-
 	entry, ok := m.configs.Get(name)
 	if !ok {
 		return nil, status.Error(codes.NotFound, "no config found")
@@ -180,13 +160,6 @@ func (m *TrafgenService) UploadPcap(
 	req *trafgenpb.UploadPcapRequest,
 ) (*trafgenpb.UploadPcapResponse, error) {
 	name := req.GetName()
-	if name == "" {
-		return nil, errConfigNameRequired
-	}
-	if err := ffi.ValidateDeviceName(name); err != nil {
-		return nil, status.Error(codes.InvalidArgument, err.Error())
-	}
-
 	packets, err := parsePcap(req.GetPcap())
 	if err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "failed to parse pcap: %v", err)
@@ -221,13 +194,6 @@ func (m *TrafgenService) SetRate(
 	req *trafgenpb.SetRateRequest,
 ) (*trafgenpb.SetRateResponse, error) {
 	name := req.GetName()
-	if name == "" {
-		return nil, errConfigNameRequired
-	}
-	if err := ffi.ValidateDeviceName(name); err != nil {
-		return nil, status.Error(codes.InvalidArgument, err.Error())
-	}
-
 	err := m.publish(name, func(current *config, ok bool) *config {
 		next := &config{RatePps: req.GetRatePps()}
 		if ok {

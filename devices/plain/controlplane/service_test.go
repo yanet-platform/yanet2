@@ -1,7 +1,6 @@
 package plain
 
 import (
-	"strings"
 	"testing"
 
 	"github.com/c2h5oh/datasize"
@@ -17,19 +16,6 @@ import (
 	vlan "github.com/yanet-platform/yanet2/devices/vlan/controlplane"
 	"github.com/yanet-platform/yanet2/devices/vlan/controlplane/vlanpb/v1"
 )
-
-// Test_DevicePlainService_UpdateDevice_RejectsInvalidWeights verifies that model
-// validation produces InvalidArgument before allocating a device through FFI.
-func Test_DevicePlainService_UpdateDevice_RejectsInvalidWeights(t *testing.T) {
-	service := NewDevicePlainService(nil)
-	_, err := service.UpdateDevice(t.Context(), &plainpb.UpdateDevicePlainRequest{
-		Name: "weights",
-		Device: &commonpb.Device{
-			Input: []*commonpb.DevicePipeline{{Name: "pipeline", Weight: 65536}},
-		},
-	})
-	require.Equal(t, codes.InvalidArgument, status.Code(err))
-}
 
 // TestUpdateDevice_ReclaimsSupersededDevice verifies that repeated
 // UpdateDevice calls do not leak shared-memory arena space.
@@ -134,70 +120,6 @@ func TestUpdateDevice_ReclaimsAcrossMultipleNames(t *testing.T) {
 			)
 		}
 		previousFreeBytes = freeBytes
-	}
-}
-
-// Test_DevicePlainService_UpdateDevice_RejectsOverlongName verifies that a name
-// the C-side fixed-size buffer cannot hold is rejected before the agent.
-func Test_DevicePlainService_UpdateDevice_RejectsOverlongName(t *testing.T) {
-	service := NewDevicePlainService(nil)
-
-	resp, err := service.UpdateDevice(t.Context(), &plainpb.UpdateDevicePlainRequest{
-		Name:   strings.Repeat("a", ffi.MaxDeviceNameLen),
-		Device: &commonpb.Device{},
-	})
-	require.Nil(t, resp)
-	require.Equal(t, codes.InvalidArgument, status.Code(err))
-}
-
-// Test_DevicePlainService_UpdateDevice_AcceptsNameAtLimit verifies that a name
-// exactly at the C-side buffer's usable length is published end to end.
-func Test_DevicePlainService_UpdateDevice_AcceptsNameAtLimit(t *testing.T) {
-	harness, err := dataplaneut.NewHarness(dataplaneut.Config{
-		CPMemory:      uint64(datasize.MB * 32),
-		DPMemory:      uint64(datasize.MB * 4),
-		WorkerCount:   1,
-		DevicesToLoad: []string{"plain"},
-	})
-	require.NoError(t, err)
-	t.Cleanup(harness.Free)
-
-	shm := harness.SharedMemory()
-	agent, err := shm.AgentAttach("plain", 0, datasize.MB*2)
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = agent.CleanUp() })
-
-	service := NewDevicePlainService(agent)
-
-	_, err = service.UpdateDevice(t.Context(), &plainpb.UpdateDevicePlainRequest{
-		Name:   strings.Repeat("a", ffi.MaxDeviceNameLen-1),
-		Device: &commonpb.Device{},
-	})
-	require.NoError(t, err)
-}
-
-// Test_DevicePlainService_ShowDevice_RejectsInvalidName verifies that
-// ShowDevice rejects a name that is empty, contains an interior NUL, or
-// exceeds the C-side buffer, before the agent is ever touched.
-func Test_DevicePlainService_ShowDevice_RejectsInvalidName(t *testing.T) {
-	cases := []struct {
-		name       string
-		deviceName string
-	}{
-		{name: "empty name", deviceName: ""},
-		{name: "interior NUL", deviceName: "extra\x00keep"},
-		{name: "overlong name", deviceName: strings.Repeat("d", ffi.MaxDeviceNameLen)},
-	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			service := NewDevicePlainService(nil)
-
-			resp, err := service.ShowDevice(t.Context(), &plainpb.ShowDevicePlainRequest{Name: tc.deviceName})
-
-			require.Nil(t, resp)
-			require.Equal(t, codes.InvalidArgument, status.Code(err))
-		})
 	}
 }
 

@@ -34,16 +34,6 @@ func (m *DevicePlainService) UpdateDevice(
 	request *plainpb.UpdateDevicePlainRequest,
 ) (*plainpb.UpdateDevicePlainResponse, error) {
 	name := request.GetName()
-	if name == "" {
-		return nil, status.Error(codes.InvalidArgument, "module config name is required")
-	}
-	if err := ffi.ValidateDeviceName(name); err != nil {
-		return nil, status.Error(codes.InvalidArgument, err.Error())
-	}
-	if err := request.GetDevice().Validate(); err != nil {
-		return nil, status.Error(codes.InvalidArgument, err.Error())
-	}
-
 	err := m.configs.Update(name, func(*DeviceConfig, bool) (*DeviceConfig, error) {
 		deviceConfig, err := NewDeviceConfig(m.agent, name, request.GetDevice())
 		if err != nil {
@@ -80,13 +70,6 @@ func (m *DevicePlainService) ShowDevice(
 	request *plainpb.ShowDevicePlainRequest,
 ) (*plainpb.ShowDevicePlainResponse, error) {
 	name := request.GetName()
-	if name == "" {
-		return nil, status.Error(codes.InvalidArgument, "device name is required")
-	}
-	if err := ffi.ValidateDeviceName(name); err != nil {
-		return nil, status.Error(codes.InvalidArgument, err.Error())
-	}
-
 	info, ok := m.agent.DPConfig().Device("plain", name)
 	if !ok {
 		return nil, status.Errorf(codes.NotFound, "plain device '%s' not found", name)
