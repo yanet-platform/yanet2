@@ -1,0 +1,11 @@
+logging:
+  level: info
+
+gateways:
+  - name: local
+    endpoint: "[::1]:50051"
+
+table_name: neighbour-sidecar
+default_priority: 100
+update_interval: 5m
+publish_timeout: 5s
