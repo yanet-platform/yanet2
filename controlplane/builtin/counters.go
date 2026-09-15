@@ -69,7 +69,9 @@ func (m *Counters) Name() string { return "counters" }
 func (m *Counters) Endpoint() string { return "" }
 
 // ServicesNames returns the gRPC service names served by this service.
-func (m *Counters) ServicesNames() []string { return []string{"controlplane.ynpb.v1.CountersService"} }
+func (m *Counters) ServicesNames() []string {
+	return []string{ynpb.CountersService_ServiceDesc.ServiceName}
+}
 
 // RegisterService registers the service on the given gRPC server.
 func (m *Counters) RegisterService(server *grpc.Server) {

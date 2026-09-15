@@ -48,7 +48,7 @@ func NewRouteMPLSModule(cfg *Config, options ...Option) (*RouteMPLSModule, error
 		o(opts)
 	}
 
-	log := opts.Log.With(zap.String("module", "modules.route_mpls.controlplane.routemplspb.v1.RouteMPLSService"))
+	log := opts.Log.With(zap.String("module", routemplspb.RouteMPLSService_ServiceDesc.ServiceName))
 
 	attachment, err := cpffi.Attach(cfg.AttachConfig, agentName, log)
 	if err != nil {
@@ -78,7 +78,7 @@ func (m *RouteMPLSModule) Endpoint() string {
 // ServicesNames returns the gRPC service names exposed by the module.
 func (m *RouteMPLSModule) ServicesNames() []string {
 	return []string{
-		"modules.route_mpls.controlplane.routemplspb.v1.RouteMPLSService",
+		routemplspb.RouteMPLSService_ServiceDesc.ServiceName,
 	}
 }
 

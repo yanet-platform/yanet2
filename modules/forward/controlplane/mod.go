@@ -9,9 +9,8 @@ import (
 )
 
 const (
-	moduleType  = "forward"
-	agentName   = moduleType
-	serviceName = "modules.forward.controlplane.forwardpb.v1.ForwardService"
+	moduleType = "forward"
+	agentName  = moduleType
 )
 
 // Option configures the ForwardModule constructor.
@@ -49,7 +48,7 @@ func NewForwardModule(cfg *Config, options ...Option) (*ForwardModule, error) {
 		o(opts)
 	}
 
-	log := opts.Log.With(zap.String("module", serviceName))
+	log := opts.Log.With(zap.String("module", forwardpb.ForwardService_ServiceDesc.ServiceName))
 
 	attachment, err := cpffi.Attach(cfg.AttachConfig, agentName, log)
 	if err != nil {
@@ -77,7 +76,10 @@ func (m *ForwardModule) Endpoint() string {
 }
 
 func (m *ForwardModule) ServicesNames() []string {
-	return []string{serviceName, forwardpb.MetricsService_ServiceDesc.ServiceName}
+	return []string{
+		forwardpb.ForwardService_ServiceDesc.ServiceName,
+		forwardpb.MetricsService_ServiceDesc.ServiceName,
+	}
 }
 
 func (m *ForwardModule) RegisterService(server *grpc.Server) {

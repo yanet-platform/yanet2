@@ -51,7 +51,9 @@ func (m *Device) Name() string { return "device" }
 func (m *Device) Endpoint() string { return "" }
 
 // ServicesNames returns the gRPC service names served by this service.
-func (m *Device) ServicesNames() []string { return []string{"controlplane.ynpb.v1.DeviceService"} }
+func (m *Device) ServicesNames() []string {
+	return []string{ynpb.DeviceService_ServiceDesc.ServiceName}
+}
 
 // RegisterService registers the service on the given gRPC server.
 func (m *Device) RegisterService(server *grpc.Server) {

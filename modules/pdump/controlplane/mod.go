@@ -45,7 +45,7 @@ func NewPdumpModule(cfg *Config, options ...Option) (*PdumpModule, error) {
 		o(opts)
 	}
 
-	log := opts.Log.With(zap.String("module", "modules.pdump.controlplane.pdumppb.v1.PdumpService"))
+	log := opts.Log.With(zap.String("module", pdumppb.PdumpService_ServiceDesc.ServiceName))
 
 	// setup CGO export logger
 	logger = log.WithOptions(
@@ -79,7 +79,7 @@ func (m *PdumpModule) Endpoint() string {
 }
 
 func (m *PdumpModule) ServicesNames() []string {
-	return []string{"modules.pdump.controlplane.pdumppb.v1.PdumpService"}
+	return []string{pdumppb.PdumpService_ServiceDesc.ServiceName}
 }
 
 func (m *PdumpModule) RegisterService(server *grpc.Server) {

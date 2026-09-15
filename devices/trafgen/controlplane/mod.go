@@ -10,9 +10,8 @@ import (
 )
 
 const (
-	agentName   = "trafgen"
-	deviceName  = "trafgen"
-	serviceName = "devices.trafgen.controlplane.trafgenpb.v1.TrafgenService"
+	agentName  = "trafgen"
+	deviceName = "trafgen"
 )
 
 // Option configures the TrafgenDevice constructor.
@@ -78,7 +77,7 @@ func (m *TrafgenDevice) Endpoint() string {
 
 // ServicesNames returns the gRPC service names exposed by the device.
 func (m *TrafgenDevice) ServicesNames() []string {
-	return []string{serviceName}
+	return []string{trafgenpb.TrafgenService_ServiceDesc.ServiceName}
 }
 
 // RegisterService registers the trafgen device's gRPC service.

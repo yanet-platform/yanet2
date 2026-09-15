@@ -57,7 +57,7 @@ func NewRouteModule(cfg *Config, options ...Option) (*RouteModule, error) {
 		o(opts)
 	}
 
-	log := opts.Log.With(zap.String("module", "modules.route.controlplane.routepb.v1.RouteService"))
+	log := opts.Log.With(zap.String("module", routepb.RouteService_ServiceDesc.ServiceName))
 
 	attachment, err := cpffi.Attach(cfg.AttachConfig, agentName, log)
 	if err != nil {
@@ -99,7 +99,7 @@ func (m *RouteModule) Endpoint() string {
 // ServicesNames returns the gRPC service names exposed by the module.
 func (m *RouteModule) ServicesNames() []string {
 	return []string{
-		"modules.route.controlplane.routepb.v1.RouteService",
+		routepb.RouteService_ServiceDesc.ServiceName,
 		routepb.MetricsService_ServiceDesc.ServiceName,
 	}
 }
