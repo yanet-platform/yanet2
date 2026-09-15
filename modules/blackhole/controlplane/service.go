@@ -136,12 +136,3 @@ func (m *BlackholeService) DeleteConfig(
 
 	return &blackholepb.DeleteConfigResponse{}, nil
 }
-
-// ReclaimDeferred retries every superseded config whose free was refused,
-// releasing the ones whose generations have drained.
-//
-// The service runs it after each successful publish, and anything else
-// may call it at any time.
-func (m *BlackholeService) ReclaimDeferred() {
-	m.configs.ReclaimDeferred()
-}
