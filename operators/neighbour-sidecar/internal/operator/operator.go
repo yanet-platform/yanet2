@@ -1,6 +1,7 @@
 package operator
 
 import (
+	"context"
 	"fmt"
 
 	"go.uber.org/zap"
@@ -57,6 +58,11 @@ func NewOperator(cfg *Config, options ...Option) (*operator.Operator[neigh.Nexth
 		source,
 		operator.WithLog(opts.Log),
 		operator.WithReconcile(cfg.Reconcile),
-		operator.WithWorkers(monitor.Run),
+		operator.WithWorkers(
+			monitor.Run,
+			func(ctx context.Context) error {
+				return runProbeServer(ctx, source.Ready)
+			},
+		),
 	), nil
 }

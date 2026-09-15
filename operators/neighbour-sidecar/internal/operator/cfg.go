@@ -21,7 +21,7 @@ type Config struct {
 	Reconcile       operator.ReconcileConfig `yaml:"reconcile"`
 	TableName       string                   `yaml:"table_name"`
 	DefaultPriority uint32                   `yaml:"default_priority"`
-	LinkMap         map[string]string        `yaml:"link_map"`
+	LinkMap         map[string]string        `yaml:"link_map,omitempty"`
 	UpdateInterval  time.Duration            `yaml:"update_interval"`
 	PublishTimeout  time.Duration            `yaml:"publish_timeout"`
 }

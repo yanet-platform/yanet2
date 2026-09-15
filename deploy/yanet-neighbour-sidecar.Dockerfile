@@ -11,12 +11,7 @@ WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
 
-COPY Makefile ./
-COPY common/ common/
-COPY controlplane/ controlplane/
-COPY modules/route/controlplane/hwroute/ modules/route/controlplane/hwroute/
-COPY operators/route/ operators/route/
-COPY operators/neighbour-sidecar/ operators/neighbour-sidecar/
+COPY . .
 
 RUN make proto-go \
     && CGO_ENABLED=0 go build -trimpath -o /yanet-neighbour-sidecar \
@@ -29,5 +24,7 @@ RUN apk add --no-cache ca-certificates
 COPY --from=build /yanet-neighbour-sidecar /usr/local/bin/yanet-neighbour-sidecar
 COPY operators/neighbour-sidecar/etc/yanet/yanet-neighbour-sidecar-default.yaml /etc/yanet2/yanet-neighbour-sidecar-default.yaml
 
+EXPOSE 9903
+
 ENTRYPOINT ["/usr/local/bin/yanet-neighbour-sidecar"]
-CMD ["-c", "/etc/yanet2/yanet-neighbour-sidecar-default.yaml"]
+CMD ["-c", "/etc/yanet2/yanet-neighbour-sidecar.yaml"]

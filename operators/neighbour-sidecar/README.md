@@ -18,10 +18,13 @@ link_map:
   eth1: dpdk0
 ```
 
-Run `yanet-neighbour-sidecar -c /etc/yanet2/yanet-neighbour-sidecar-default.yaml` in
-the namespace to observe. `link_map` maps Linux interface names to dataplane device
-names. Each namespace must own a distinct table. Gateway endpoints may address the
-route operator directly or proxy its neighbour service; multiple endpoints are
+Copy the example `yanet-neighbour-sidecar-default.yaml` to
+`/etc/yanet2/yanet-neighbour-sidecar.yaml` and adjust it for the deployment. Run
+`yanet-neighbour-sidecar -c /etc/yanet2/yanet-neighbour-sidecar.yaml` in the namespace
+to observe. The optional `link_map` maps Linux interface names to dataplane device
+names; unmapped interfaces retain their Linux names. Each namespace must own a
+distinct table. Gateway endpoints may address the route operator directly or proxy
+its neighbour service; multiple endpoints are
 alternative transports to the **same** route operator, tried in order.
 
 Set `netlink_monitor.disabled: true` in the receiving route operator when neighbour
@@ -42,6 +45,35 @@ observation, including after a route-operator restart. Its `reconcile` settings 
 the common operator defaults. The RPC acknowledges the table update; FIB application
 is asynchronous.
 
+## Health and readiness
+
+The sidecar serves HTTP probes on the fixed address `[::]:9903`:
+
+- `GET /healthz` returns HTTP 200 while the server is running, independently of
+  gateway availability.
+- `GET /readyz` returns HTTP 503 until the route operator acknowledges the first
+  complete neighbour-table publication, then HTTP 200. An empty observation also
+  counts as a successful publication. Later discovery or publication failures do
+  not reset readiness. During shutdown it returns HTTP 503 until the listener
+  closes.
+
+Readiness acknowledges initial table delivery; FIB application remains asynchronous.
+The HTTP worker shuts down with the process, allowing up to five seconds for active
+requests to finish.
+
+Configure Kubernetes probes on the sidecar container:
+
+```yaml
+livenessProbe:
+  httpGet:
+    path: /healthz
+    port: 9903
+readinessProbe:
+  httpGet:
+    path: /readyz
+    port: 9903
+```
+
 ## Build and image
 
 The container image builds a static Go binary from source and runs it on Alpine
@@ -54,4 +86,4 @@ docker build -f deploy/yanet-neighbour-sidecar.Dockerfile -t yanet-neighbour-sid
 
 Run the image as a sidecar in the Kubernetes Pod whose network namespace it should
 observe, and mount its configuration at
-`/etc/yanet2/yanet-neighbour-sidecar-default.yaml`.
+`/etc/yanet2/yanet-neighbour-sidecar.yaml`.

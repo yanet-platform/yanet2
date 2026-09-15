@@ -8,9 +8,10 @@ import (
 
 // NeighbourSource exposes successful observations to the common reconciler.
 type NeighbourSource struct {
-	table  *neigh.NeighTable
-	synced atomic.Bool
-	wake   chan struct{}
+	table     *neigh.NeighTable
+	synced    atomic.Bool
+	published atomic.Bool
+	wake      chan struct{}
 }
 
 // NewNeighbourSource remains idle until discovery completes its first dump.
@@ -40,5 +41,12 @@ func (m *NeighbourSource) Wake() <-chan struct{} {
 	return m.wake
 }
 
-// Advance retains the latest observation for periodic republication.
-func (m *NeighbourSource) Advance(neigh.NexthopCacheView) {}
+// Advance records an acknowledged publication and retains the latest observation.
+func (m *NeighbourSource) Advance(neigh.NexthopCacheView) {
+	m.published.Store(true)
+}
+
+// Ready reports whether the receiver has accepted at least one observation.
+func (m *NeighbourSource) Ready() bool {
+	return m.published.Load()
+}

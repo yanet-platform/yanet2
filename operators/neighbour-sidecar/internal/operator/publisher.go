@@ -55,21 +55,9 @@ func NewPublisher(cfg *Config) (*Publisher, error) {
 // The reconciler serializes calls and retries failed publications. Repeating
 // the whole snapshot also recovers from a lost response or receiver restart.
 func (m *Publisher) Apply(ctx context.Context, snapshot neigh.NexthopCacheView) error {
-	entries, count := snapshot.Entries()
 	request := &operatorpb.SwapNeighboursRequest{
 		Table:   m.tableName,
-		Entries: make([]*operatorpb.NeighbourEntry, 0, count),
-	}
-	for entry := range entries {
-		request.Entries = append(request.Entries, &operatorpb.NeighbourEntry{
-			NextHop:      commonpb.NewIPAddressFromAddr(entry.NextHop),
-			LinkAddr:     commonpb.NewMACAddressEUI48(entry.HardwareRoute.DestinationMAC),
-			HardwareAddr: commonpb.NewMACAddressEUI48(entry.HardwareRoute.SourceMAC),
-			State:        operatorpb.NeighbourState(entry.State),
-			UpdatedAt:    entry.UpdatedAt.Unix(),
-			Priority:     entry.Priority,
-			Device:       entry.HardwareRoute.Device,
-		})
+		Entries: neighbourEntriesToProto(snapshot),
 	}
 	var failures error
 	for _, target := range m.targets {
@@ -93,6 +81,26 @@ func (m *Publisher) Apply(ctx context.Context, snapshot neigh.NexthopCacheView) 
 		failures = errors.Join(failures, fmt.Errorf("gateway %q: %w", target.Name, err))
 	}
 	return failures
+}
+
+func neighbourEntriesToProto(snapshot neigh.NexthopCacheView) []*operatorpb.NeighbourEntry {
+	entries, count := snapshot.Entries()
+	neighbours := make([]*operatorpb.NeighbourEntry, 0, count)
+	for entry := range entries {
+		neighbours = append(
+			neighbours,
+			&operatorpb.NeighbourEntry{
+				NextHop:      commonpb.NewIPAddressFromAddr(entry.NextHop),
+				LinkAddr:     commonpb.NewMACAddressEUI48(entry.HardwareRoute.DestinationMAC),
+				HardwareAddr: commonpb.NewMACAddressEUI48(entry.HardwareRoute.SourceMAC),
+				State:        operatorpb.NeighbourState(entry.State),
+				UpdatedAt:    entry.UpdatedAt.Unix(),
+				Priority:     entry.Priority,
+				Device:       entry.HardwareRoute.Device,
+			},
+		)
+	}
+	return neighbours
 }
 
 // Close releases all outgoing connections.
