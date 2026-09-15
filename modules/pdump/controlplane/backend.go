@@ -23,7 +23,7 @@ type Ring struct {
 	Data        []byte
 }
 
-// BackendOption configures a ShmBackend.
+// BackendOption configures the shared-memory backend.
 type BackendOption func(*backendOptions)
 
 type backendOptions struct {
@@ -36,27 +36,27 @@ func newBackendOptions() *backendOptions {
 	}
 }
 
-// WithBackendLog sets the logger for a ShmBackend.
+// WithBackendLog sets the logger for the shared-memory backend.
 func WithBackendLog(log *zap.Logger) BackendOption {
 	return func(o *backendOptions) {
 		o.Log = log
 	}
 }
 
-// ShmBackend publishes pdump module configs to shared memory.
-type ShmBackend struct {
+// backend is the production Backend implementation backed by shared memory.
+type backend struct {
 	agent *ffi.Agent
 	log   *zap.Logger
 }
 
 // NewBackend creates a backend over the agent's shared memory.
-func NewBackend(agent *ffi.Agent, options ...BackendOption) *ShmBackend {
+func NewBackend(agent *ffi.Agent, options ...BackendOption) Backend {
 	opts := newBackendOptions()
 	for _, o := range options {
 		o(opts)
 	}
 
-	return &ShmBackend{
+	return &backend{
 		agent: agent,
 		log:   opts.Log,
 	}
@@ -66,7 +66,7 @@ func NewBackend(agent *ffi.Agent, options ...BackendOption) *ShmBackend {
 // publishes it.
 //
 // On error nothing stays allocated.
-func (m *ShmBackend) Publish(name string, settings Settings) (Module, error) {
+func (m *backend) Publish(name string, settings Settings) (Module, error) {
 	config, err := NewModuleConfig(m.agent, name)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create %q module config: %w", name, err)
@@ -93,13 +93,13 @@ func (m *ShmBackend) Publish(name string, settings Settings) (Module, error) {
 }
 
 // Unpublish removes the module config from the dataplane.
-func (m *ShmBackend) Unpublish(name string) error {
+func (m *backend) Unpublish(name string) error {
 	return m.agent.DeleteModuleConfig(moduleType, name)
 }
 
 // apply writes the settings into an unpublished module config and
 // allocates its rings.
-func (m *ShmBackend) apply(name string, config *ModuleConfig, settings Settings) ([]Ring, error) {
+func (m *backend) apply(name string, config *ModuleConfig, settings Settings) ([]Ring, error) {
 	m.log.Debug("set dump mode", zap.String("module", name))
 	if err := config.SetDumpMode(settings.Mode); err != nil {
 		return nil, fmt.Errorf("failed to set dump mode for %s: %w", name, err)
