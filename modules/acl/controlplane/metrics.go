@@ -281,7 +281,9 @@ func groupLocation(tags []ffi.CounterTag) map[string]string {
 }
 
 func (m *ACLService) collectDataplaneMetrics() ([]*commonpb.Metric, error) {
-	snapshot := m.metricsState.load()
+	// Taken before the dataplane config, so a config deleted while the
+	// scrape runs still reports the metadata it was published with.
+	infos := m.configInfos()
 
 	dpConfig := m.backend.DPConfig()
 	if dpConfig == nil {
@@ -416,7 +418,7 @@ func (m *ACLService) collectDataplaneMetrics() ([]*commonpb.Metric, error) {
 				{Name: "config", Value: configName},
 			}
 
-			if info, ok := snapshot.configInfo(configName); ok {
+			if info, ok := infos[configName]; ok {
 				result = append(
 					result,
 					commonpb.NewMetricGauge(
