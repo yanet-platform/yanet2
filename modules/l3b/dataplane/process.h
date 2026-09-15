@@ -741,11 +741,13 @@ l3b_virtual_service_process(
 
 	l3b_counter_add(counters, virtual_service->counter_incoming, packet);
 
-	// An echo request towards the service address is answered by the
-	// balancer itself, like the first-generation one did: no session, no
-	// scheduler, no real server, and no source filter — an echo message
-	// has no ports for it to match.
+	// Echo replies require configured reals, regardless of eligibility.
+	//
+	// The balancer bypasses sessions, scheduling, and source filtering.
 	if (l3b_packet_is_icmp_echo(packet)) {
+		if (virtual_service->real_server_count == 0) {
+			return -1;
+		}
 		if (l3b_icmp_echo_reply(packet) < 0) {
 			return -1;
 		}

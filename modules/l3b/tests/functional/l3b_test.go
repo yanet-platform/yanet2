@@ -23,6 +23,7 @@ import (
 	"github.com/yanet-platform/yanet2/modules/forward/bindings/go/cforward"
 	forward "github.com/yanet-platform/yanet2/modules/forward/controlplane"
 	"github.com/yanet-platform/yanet2/modules/l3b/bindings/go/cl3b"
+	l3b "github.com/yanet-platform/yanet2/modules/l3b/controlplane"
 	cl3bobject "github.com/yanet-platform/yanet2/objects/l3b/bindings/go/cl3bobject"
 	"github.com/yanet-platform/yanet2/tests/functional/framework"
 )
@@ -831,98 +832,150 @@ func TestL3b_ServiceAndRealCounters(t *testing.T) {
 	require.Equal(t, frameLen(pinnedFlow), real1Bytes)
 }
 
-// TestL3b_AnswersIcmpEchoForServiceAddress verifies that ICMP echo requests
-// matched by a destination rule are answered by the balancer in place —
-// reply type, swapped addresses and refreshed TTL — instead of being
-// dispatched to a real server, mirroring the first-generation balancer.
-func TestL3b_AnswersIcmpEchoForServiceAddress(t *testing.T) {
-	h, agent := setupL3bHarness(t, "port0", "test")
-	wirePipeline(t, agent, "port0", "test")
+// Test_L3b_ConfiguredRealsGateEcho verifies that matched Echo replies depend
+// on configured reals, not eligibility, with exact wire and counter accounting.
+func Test_L3b_ConfiguredRealsGateEcho(t *testing.T) {
+	for _, family := range []string{"IPv4", "IPv6"} {
+		t.Run(family, func(t *testing.T) {
+			for _, tc := range []struct {
+				name      string
+				weights   []uint32
+				disabled  bool
+				unmatched bool
+				wantDrop  bool
+				wantReply uint64
+				wantInput uint64
+			}{
+				{name: "empty configured list drops unchanged", wantDrop: true, wantInput: 1},
+				{name: "enabled configured reals reply", weights: []uint32{1, 1}, wantReply: 1, wantInput: 1},
+				{name: "all configured reals disabled reply", weights: []uint32{1, 1}, disabled: true, wantReply: 1, wantInput: 1},
+				{name: "all configured weights zero reply", weights: []uint32{0, 0}, wantReply: 1, wantInput: 1},
+				{name: "unmatched destination passes unchanged", weights: []uint32{1, 1}, unmatched: true},
+			} {
+				t.Run(tc.name, func(t *testing.T) {
+					harness, agent := setupL3bHarness(t, "port0", "test")
+					wirePipeline(t, agent, "port0", "test")
+					reals := []cl3bobject.RealServer{
+						{Type: cl3bobject.IPv4, DestinationAddress: netip.MustParseAddr("172.16.0.10"), SourceNet: xnetip.MustParseNetwork("192.0.2.0/24")},
+						{Type: cl3bobject.IPv4, DestinationAddress: netip.MustParseAddr("172.16.0.11"), SourceNet: xnetip.MustParseNetwork("192.0.2.0/24")},
+					}
+					if family == "IPv6" {
+						reals = []cl3bobject.RealServer{
+							{Type: cl3bobject.IPv6, DestinationAddress: netip.MustParseAddr("2001:db8:2::10"), SourceNet: xnetip.MustParseNetwork("2001:db8:3::/64")},
+							{Type: cl3bobject.IPv6, DestinationAddress: netip.MustParseAddr("2001:db8:2::11"), SourceNet: xnetip.MustParseNetwork("2001:db8:3::/64")},
+						}
+					}
+					reals = reals[:len(tc.weights)]
+					service, err := cl3bobject.CreateVirtualService(agent, "svc", 1,
+						cl3bobject.VirtualServiceConfig{
+							RealServers: reals, RingCapacity: 1000, SessionIndexSize: 4096,
+						}, nil,
+					)
+					require.NoError(t, err)
+					t.Cleanup(func() { _ = service.Free() })
+					for idx := range reals {
+						require.NoError(t, service.SetRealServerState(uint32(idx), !tc.disabled))
+					}
+					ring := l3b.RingFromWeights(tc.weights)
+					if tc.disabled {
+						ring = nil
+					}
+					require.NoError(t, service.UpdateRing(ring))
+					require.NoError(t, service.Publish(agent))
+					info, err := service.Inspect()
+					require.NoError(t, err)
+					require.Len(t, info.RealServers, len(reals))
+					for idx, real := range info.RealServers {
+						require.Equal(t, !tc.disabled, real.Enabled)
+						require.Equal(t, reals[idx].Type, real.Family)
+						require.Equal(t, reals[idx].DestinationAddress, real.DestinationAddress)
+						require.Equal(t, reals[idx].SourceNet, real.SourceNet)
+					}
 
-	service, err := cl3bobject.CreateVirtualService(
-		agent,
-		"svc",
-		1,
-		cl3bobject.VirtualServiceConfig{
-			SourceFilterRules: []cl3bobject.SourceFilterRule{{
-				Net4s:      []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
-				PortRanges: filter.PortRanges{{From: 1, To: 65535}},
-			}},
-			RealServers: []cl3bobject.RealServer{{
-				Type:               cl3bobject.IPv4,
-				DestinationAddress: xerror.Unwrap(netip.ParseAddr("172.16.0.10")),
-				SourceNet:          xnetip.MustParseNetwork("192.0.2.0/24"),
-			}},
-			HashMask:         0,
-			IndexMask:        0,
-			RingCapacity:     1000,
-			SessionIndexSize: 4096,
-		},
-		nil,
-	)
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = service.Free() })
-	require.NoError(t, service.UpdateRing([]uint32{0}))
-	require.NoError(t, service.Publish(agent))
+					module, err := cl3b.NewModuleConfig(agent, "test")
+					require.NoError(t, err)
+					t.Cleanup(func() { _ = module.Free() })
+					rules := []cl3b.DestinationFilterRule{{
+						Net4s:          []xnetip.Contiguous[xnetip.Network4]{xnetip.MustParseContiguous4("192.168.1.0/24")},
+						ProtoRanges:    filter.ProtoRanges{filter.NewProtoRange(1, filter.ExactSubtype(8))},
+						VirtualService: "svc",
+					}, {
+						Net6s:          []xnetip.BiContiguous{xnetip.MustParseBiContiguous("2001:db8:1::/64")},
+						ProtoRanges:    filter.ProtoRanges{filter.NewProtoRange(58, filter.ExactSubtype(128))},
+						VirtualService: "svc",
+					}}
+					require.NoError(t, module.Update(rules))
+					require.NoError(t, agent.UpdateModules([]ffi.ModuleConfig{module.AsFFIModule()}))
 
-	// The destination rule routes ICMP echo requests (proto 1, subtype 8)
-	// to the service.
-	module, err := cl3b.NewModuleConfig(agent, "test")
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = module.Free() })
-	rules := []cl3b.DestinationFilterRule{{
-		Net4s: []xnetip.Contiguous[xnetip.Network4]{
-			xnetip.MustParseContiguous4("192.168.1.0/24"),
-		},
-		ProtoRanges: filter.ProtoRanges{
-			filter.NewProtoRange(1, filter.ExactSubtype(8)),
-		},
-		VirtualService: "svc",
-	}}
-	require.NoError(t, module.Update(rules))
-	require.NoError(t, agent.UpdateModules([]ffi.ModuleConfig{module.AsFFIModule()}))
-
-	eth := layers.Ethernet{
-		SrcMAC:       xerror.Unwrap(net.ParseMAC("aa:bb:cc:dd:ee:ff")),
-		DstMAC:       xerror.Unwrap(net.ParseMAC("11:22:33:44:55:66")),
-		EthernetType: layers.EthernetTypeIPv4,
+					ethernet := layers.Ethernet{
+						SrcMAC:       xerror.Unwrap(net.ParseMAC("aa:bb:cc:dd:ee:ff")),
+						DstMAC:       xerror.Unwrap(net.ParseMAC("11:22:33:44:55:66")),
+						EthernetType: layers.EthernetTypeIPv4,
+					}
+					payload := gopacket.Payload("configured-real echo payload")
+					var request, reply gopacket.Packet
+					if family == "IPv4" {
+						destination := net.ParseIP("192.168.1.1")
+						if tc.unmatched {
+							destination = net.ParseIP("192.168.2.1")
+						}
+						request = xpacket.LayersToPacket(t, &ethernet,
+							&layers.IPv4{Version: 4, TTL: 1, Protocol: layers.IPProtocolICMPv4, SrcIP: net.ParseIP("10.0.0.1"), DstIP: destination},
+							&layers.ICMPv4{TypeCode: layers.CreateICMPv4TypeCode(layers.ICMPv4TypeEchoRequest, 0), Id: 0x1234, Seq: 7}, payload,
+						)
+						reply = xpacket.LayersToPacket(t, &ethernet,
+							&layers.IPv4{Version: 4, TTL: 64, Protocol: layers.IPProtocolICMPv4, SrcIP: destination, DstIP: net.ParseIP("10.0.0.1")},
+							&layers.ICMPv4{TypeCode: layers.CreateICMPv4TypeCode(layers.ICMPv4TypeEchoReply, 0), Id: 0x1234, Seq: 7}, payload,
+						)
+					} else {
+						ethernet.EthernetType = layers.EthernetTypeIPv6
+						destination := net.ParseIP("2001:db8:1::1")
+						if tc.unmatched {
+							destination = net.ParseIP("2001:db8:4::1")
+						}
+						requestIP := layers.IPv6{Version: 6, HopLimit: 1, NextHeader: layers.IPProtocolICMPv6, SrcIP: net.ParseIP("2001:db8::1"), DstIP: destination}
+						requestICMP := layers.ICMPv6{TypeCode: layers.CreateICMPv6TypeCode(layers.ICMPv6TypeEchoRequest, 0)}
+						require.NoError(t, requestICMP.SetNetworkLayerForChecksum(&requestIP))
+						request = xpacket.LayersToPacket(t, &ethernet, &requestIP, &requestICMP,
+							&layers.ICMPv6Echo{Identifier: 0x1234, SeqNumber: 7}, payload,
+						)
+						replyIP := layers.IPv6{Version: 6, HopLimit: 64, NextHeader: layers.IPProtocolICMPv6, SrcIP: destination, DstIP: net.ParseIP("2001:db8::1")}
+						replyICMP := layers.ICMPv6{TypeCode: layers.CreateICMPv6TypeCode(layers.ICMPv6TypeEchoReply, 0)}
+						require.NoError(t, replyICMP.SetNetworkLayerForChecksum(&replyIP))
+						reply = xpacket.LayersToPacket(t, &ethernet, &replyIP, &replyICMP,
+							&layers.ICMPv6Echo{Identifier: 0x1234, SeqNumber: 7}, payload,
+						)
+					}
+					original := bytes.Clone(request.Data())
+					result, err := harness.HandlePackets(request)
+					require.NoError(t, err)
+					if tc.wantDrop {
+						require.Empty(t, result.Output)
+						require.Len(t, result.Drop, 1)
+						require.Equal(t, original, result.Drop[0].RawData)
+					} else {
+						require.Empty(t, result.Drop)
+						require.Len(t, result.Output, 1)
+						expected := reply.Data()
+						if tc.unmatched {
+							expected = original
+						}
+						require.Equal(t, expected, result.Output[0].RawData)
+					}
+					executionContext, err := harness.PublishedExecutionContext(0)
+					require.NoError(t, err)
+					incoming, incomingBytes, err := cl3bobject.ReadServiceCounter(executionContext, "svc", "incoming")
+					require.NoError(t, err)
+					require.Equal(t, tc.wantInput, incoming)
+					require.Equal(t, tc.wantInput*uint64(len(original)), incomingBytes)
+					replied, repliedBytes, err := cl3bobject.ReadServiceCounter(executionContext, "svc", "icmp_replied")
+					require.NoError(t, err)
+					require.Equal(t, tc.wantReply, replied)
+					require.Equal(t, tc.wantReply*uint64(len(reply.Data())), repliedBytes)
+				})
+			}
+		})
 	}
-	ip4 := layers.IPv4{
-		Version:  4,
-		TTL:      1,
-		Protocol: layers.IPProtocolICMPv4,
-		SrcIP:    net.ParseIP("10.0.0.1"),
-		DstIP:    net.ParseIP("192.168.1.1"),
-	}
-	icmp := layers.ICMPv4{
-		TypeCode: layers.CreateICMPv4TypeCode(layers.ICMPv4TypeEchoRequest, 0),
-		Id:       0x1234,
-		Seq:      7,
-	}
-	pkt := xpacket.LayersToPacket(t, &eth, &ip4, &icmp)
-
-	result, err := h.HandlePackets(pkt)
-	require.NoError(t, err)
-	require.Empty(t, result.Drop, "echo requests must be answered, not dropped")
-	require.Len(t, result.Output, 1, "the reply must be forwarded")
-
-	info, err := framework.NewPacketParser().ParsePacket(result.Output[0].RawData)
-	require.NoError(t, err)
-	require.False(t, info.IsTunneled, "the reply comes from the balancer itself")
-	require.Equal(t, "192.168.1.1", info.SrcIP.String(),
-		"the reply's source is the service address")
-	require.Equal(t, "10.0.0.1", info.DstIP.String(),
-		"the reply returns to the requester")
-
-	// The generated counter pair must observe the reply.
-	ectx, err := h.PublishedExecutionContext(0)
-	require.NoError(t, err)
-	replied, _, err := cl3bobject.ReadServiceCounter(ectx, "svc", "icmp_replied")
-	require.NoError(t, err)
-	require.EqualValues(t, 1, replied)
-	incoming, _, err := cl3bobject.ReadServiceCounter(ectx, "svc", "incoming")
-	require.NoError(t, err)
-	require.EqualValues(t, 1, incoming)
 }
 
 // TestL3b_FixesMssAndAppliesSessionPolicy verifies the service flags and the
