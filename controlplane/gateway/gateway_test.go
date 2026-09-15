@@ -907,3 +907,50 @@ func Test_Gateway_ProxiedRPC_RejectsInvalidProbe(t *testing.T) {
 		t.Fatal("module interceptor did not observe the request")
 	}
 }
+
+// Test_GatewayService_Register_RejectsInvalidRequest verifies that malformed
+// registration requests receive InvalidArgument before reaching the handler.
+func Test_GatewayService_Register_RejectsInvalidRequest(t *testing.T) {
+	t.Parallel()
+
+	conn := startValidateProbeGateway(t, gateway.WithBuiltinService(&validateProbeGatewayService{
+		probe: &recordingValidateProbeServer{},
+	}))
+	client := ynpb.NewGatewayClient(conn)
+
+	cases := []struct {
+		name    string
+		request *ynpb.RegisterRequest
+		message string
+	}{
+		{
+			name:    "missing backend",
+			request: &ynpb.RegisterRequest{},
+			message: "backend is required",
+		},
+		{
+			name: "empty backend name",
+			request: &ynpb.RegisterRequest{Backend: &ynpb.BackendDesc{
+				Endpoint: "passthrough:test-endpoint",
+			}},
+			message: "backend: name is required",
+		},
+		{
+			name: "empty backend endpoint",
+			request: &ynpb.RegisterRequest{Backend: &ynpb.BackendDesc{
+				Name: "svc.InvalidEndpoint",
+			}},
+			message: "backend: endpoint is required",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := client.Register(t.Context(), tc.request)
+			statusErr, ok := status.FromError(err)
+			require.True(t, ok)
+			require.Equal(t, codes.InvalidArgument, statusErr.Code())
+			require.Equal(t, tc.message, statusErr.Message())
+		})
+	}
+}

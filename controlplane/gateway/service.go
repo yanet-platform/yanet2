@@ -4,9 +4,7 @@ import (
 	"context"
 
 	"go.uber.org/zap"
-	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
-	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	ynpb "github.com/yanet-platform/yanet2/controlplane/ynpb/v1"
@@ -110,18 +108,6 @@ func (m *GatewayService) Register(
 	req *ynpb.RegisterRequest,
 ) (*ynpb.RegisterResponse, error) {
 	backendDesc := req.GetBackend()
-	if backendDesc == nil {
-		return nil, status.Error(
-			codes.InvalidArgument,
-			"missing backend in register request",
-		)
-	}
-	if backendDesc.GetName() == "" || backendDesc.GetEndpoint() == "" {
-		return nil, status.Error(
-			codes.InvalidArgument,
-			"name and endpoint are required in register request backend",
-		)
-	}
 
 	// Every registrant that reaches this RPC runs outside the gateway
 	// process: in-process services register directly and never call it.
