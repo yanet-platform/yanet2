@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use tonic::codec::CompressionEncoding;
 use unrduppb::{
     Config, DeleteConfigRequest, Endpoint, ListConfigsRequest, Protocol, Service, ShowConfigRequest,
-    UpdateConfigRequest, unrdup_service_client::UnrdupServiceClient,
+    UpdateConfigRequest, unrdup_service_client::UnrdupServiceClient, unrdup_service_server::SERVICE_NAME,
 };
 use ync::{
     GlobalArgs,
@@ -208,8 +208,6 @@ impl TryFrom<Protocol> for TransportProto {
         }
     }
 }
-
-const SERVICE_NAME: &str = "modules.unrdup.controlplane.unrduppb.v1.UnrdupService";
 
 fn client(channel: LayeredChannel) -> UnrdupServiceClient<LayeredChannel> {
     UnrdupServiceClient::new(channel)

@@ -10,6 +10,7 @@ use ync::{
     output, yaml,
 };
 
+pub use crate::balancerpb::balancer_server::SERVICE_NAME;
 use crate::{
     ConfigCmd, MetricsCmd, ModeCmd, ShowCmd, UpdateCmd, VsId,
     balancerpb::{
@@ -22,9 +23,6 @@ use crate::{
     reals::{DisableRealCmd, EnableRealCmd, RealsMode},
     sessions::{SessionsMode, SessionsShowCmd, SessionsUpdateCmd},
 };
-
-/// The fully-qualified gRPC service name used in error messages.
-pub const SERVICE_NAME: &str = "modules.balancer2.controlplane.balancerpb.v1.Balancer";
 
 pub fn client(channel: LayeredChannel) -> BalancerClient<LayeredChannel> {
     BalancerClient::new(channel)

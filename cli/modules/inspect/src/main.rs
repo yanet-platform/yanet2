@@ -11,10 +11,10 @@ use ync::{
     errors::Error,
     output,
 };
-use ynpb::pb::{InspectRequest, InspectResponse, inspect_service_client::InspectServiceClient};
-
-/// The fully-qualified gRPC service name used in error messages.
-const INSPECT_SERVICE: &str = "controlplane.ynpb.v1.InspectService";
+use ynpb::pb::{
+    InspectRequest, InspectResponse, inspect_service_client::InspectServiceClient,
+    inspect_service_server::SERVICE_NAME as INSPECT_SERVICE,
+};
 
 /// Displays the dataplane introspection report.
 #[derive(Debug, Clone, Parser)]

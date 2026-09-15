@@ -1,6 +1,6 @@
 use blackholepb::{
     DeleteConfigRequest, ListConfigsRequest, ShowConfigRequest, UpdateConfigRequest,
-    blackhole_service_client::BlackholeServiceClient,
+    blackhole_service_client::BlackholeServiceClient, blackhole_service_server::SERVICE_NAME,
 };
 use clap::{CommandFactory, Parser};
 use clap_complete::engine::{ArgValueCandidates, CompletionCandidate};
@@ -72,9 +72,6 @@ pub struct DeleteConfigCmd {
     #[arg(long = "name", short = 'n', add = ArgValueCandidates::new(config_candidates))]
     pub config_name: String,
 }
-
-/// The fully-qualified gRPC service name used in error messages.
-const SERVICE_NAME: &str = "modules.blackhole.controlplane.blackholepb.v1.BlackholeService";
 
 fn client(channel: LayeredChannel) -> BlackholeServiceClient<LayeredChannel> {
     BlackholeServiceClient::new(channel)

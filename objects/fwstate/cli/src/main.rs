@@ -6,7 +6,7 @@ use clap_complete::engine::CompletionCandidate;
 use commonpb::pb::IpAddress;
 use fwstatemappb::{
     CreateMapRequest, DeleteMapRequest, Direction, GetMapStatsRequest, InsertLayerRequest, Kind, ListEntriesRequest,
-    ListMapsRequest, fw_state_map_service_client::FwStateMapServiceClient,
+    ListMapsRequest, fw_state_map_service_client::FwStateMapServiceClient, fw_state_map_service_server::SERVICE_NAME,
 };
 use serde::Serialize;
 use tonic::codec::CompressionEncoding;
@@ -24,9 +24,6 @@ mod args;
 pub mod fwstatemappb {
     tonic::include_proto!("objects.fwstate.controlplane.fwstatemappb.v1");
 }
-
-/// The fully-qualified gRPC service name used in error messages.
-const SERVICE_NAME: &str = "objects.fwstate.controlplane.fwstatemappb.v1.FWStateMapService";
 
 fn client(channel: LayeredChannel) -> FwStateMapServiceClient<LayeredChannel> {
     FwStateMapServiceClient::new(channel)

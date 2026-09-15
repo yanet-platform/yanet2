@@ -5,7 +5,7 @@ use clap_complete::engine::{ArgValueCandidates, CompletionCandidate};
 use commonpb::serde_with;
 use forwardpb::{
     DeleteConfigRequest, ListConfigsRequest, ShowConfigRequest, UpdateConfigRequest,
-    forward_service_client::ForwardServiceClient,
+    forward_service_client::ForwardServiceClient, forward_service_server::SERVICE_NAME,
 };
 use serde::{Deserializer, Serializer};
 use tonic::codec::CompressionEncoding;
@@ -103,9 +103,6 @@ fn serialize_forward_mode<S: Serializer>(mode: &i32, serializer: S) -> Result<S:
 fn deserialize_forward_mode<'de, D: Deserializer<'de>>(deserializer: D) -> Result<i32, D::Error> {
     serde_with::from_declared_name(deserializer, forwardpb::ForwardMode::from_str_name)
 }
-
-/// The fully-qualified gRPC service name used in error messages.
-const SERVICE_NAME: &str = "modules.forward.controlplane.forwardpb.v1.ForwardService";
 
 fn forward_client(channel: LayeredChannel) -> ForwardServiceClient<LayeredChannel> {
     ForwardServiceClient::new(channel)

@@ -13,10 +13,8 @@ use ync::{
 };
 use ynpb::pb::{
     DeleteFunctionRequest, Function, FunctionChain, GetFunctionRequest, ListFunctionsRequest, UpdateFunctionRequest,
-    function_service_client::FunctionServiceClient,
+    function_service_client::FunctionServiceClient, function_service_server::SERVICE_NAME as FUNCTION_SERVICE,
 };
-
-const FUNCTION_SERVICE: &str = "controlplane.ynpb.v1.FunctionService";
 
 fn client(channel: LayeredChannel) -> FunctionServiceClient<LayeredChannel> {
     FunctionServiceClient::new(channel)

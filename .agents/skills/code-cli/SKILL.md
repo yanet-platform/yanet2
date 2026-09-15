@@ -35,9 +35,9 @@ has the manifest, `build.rs`, skeleton and registration steps for a new binary.
   where `type <X>Service = Service<<X>ServiceClient<LayeredChannel>>`, each
   returning `Result<(), Error>`. A crate talking to several services keeps
   a local struct holding them.
-- `const SERVICE_NAME: &str = "<proto package>.<Service>";` with the doc
-  `/// The fully-qualified gRPC service name used in error messages.`. A crate
-  that builds its client at a single site keeps the builder inline:
+- The tonic build generates both client and server modules, so the CLI imports
+  `SERVICE_NAME` from the generated `<x>_service_server` module. A crate that
+  builds its client at a single site keeps the builder inline:
   `|channel| <X>ServiceClient::new(channel).send_compressed(Gzip)
   .accept_compressed(Gzip)`. Once the crate builds it at more than one site,
   pull it into `fn client(channel: LayeredChannel) ->

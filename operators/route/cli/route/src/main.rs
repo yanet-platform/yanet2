@@ -27,16 +27,13 @@ use ync::{
 
 use crate::operatorpb::{
     DeleteRouteRequest, FlushRoutesRequest, InsertRouteRequest, ListConfigsRequest, LookupRouteRequest, RouteSourceId,
-    ShowRoutesRequest, route_service_client::RouteServiceClient,
+    ShowRoutesRequest, route_service_client::RouteServiceClient, route_service_server::SERVICE_NAME,
 };
 
 #[allow(clippy::std_instead_of_core, non_snake_case)]
 pub mod operatorpb {
     tonic::include_proto!("operators.route.operatorpb.v1");
 }
-
-/// The fully-qualified gRPC service name used in error messages.
-const SERVICE_NAME: &str = "operators.route.operatorpb.v1.RouteService";
 
 fn client(channel: LayeredChannel) -> RouteServiceClient<LayeredChannel> {
     RouteServiceClient::new(channel)

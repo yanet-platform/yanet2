@@ -6,7 +6,7 @@ use clap_complete::engine::CompletionCandidate;
 use commonpb::pb::{IpAddress, MacAddress};
 use fwstatepb::{
     DeleteConfigRequest, ListConfigsRequest, ShowConfigRequest, ShowConfigResponse, SyncConfig, UpdateConfigRequest,
-    fw_state_service_client::FwStateServiceClient,
+    fw_state_service_client::FwStateServiceClient, fw_state_service_server::SERVICE_NAME,
 };
 use tonic::codec::CompressionEncoding;
 use ync::{
@@ -23,9 +23,6 @@ mod args;
 pub mod fwstatepb {
     tonic::include_proto!("modules.fwstate.controlplane.fwstatepb.v1");
 }
-
-/// The fully-qualified gRPC service name used in error messages.
-const SERVICE_NAME: &str = "modules.fwstate.controlplane.fwstatepb.v1.FWStateService";
 
 fn client(channel: LayeredChannel) -> FwStateServiceClient<LayeredChannel> {
     FwStateServiceClient::new(channel)
