@@ -28,6 +28,7 @@ import (
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/emptypb"
+	"google.golang.org/protobuf/types/known/wrapperspb"
 
 	"github.com/yanet-platform/yanet2/common/go/xcfg"
 	readinesspb "github.com/yanet-platform/yanet2/common/readinesspb/v1"
@@ -788,4 +789,121 @@ func hasService(services []*ynpb.RegisteredBackend, name string) bool {
 	}
 
 	return false
+}
+
+// validateProbeGatewayService is a builtin Service that registers the probe
+// service directly on the gateway's own gRPC server.
+//
+// It exercises the gateway's own validate interceptor chain.
+type validateProbeGatewayService struct {
+	probe *recordingValidateProbeServer
+}
+
+func (m *validateProbeGatewayService) Name() string     { return "validate-probe-builtin" }
+func (m *validateProbeGatewayService) Endpoint() string { return "" }
+
+func (m *validateProbeGatewayService) ServicesNames() []string {
+	return []string{validateProbeServiceName}
+}
+
+func (m *validateProbeGatewayService) RegisterService(server *grpc.Server) {
+	server.RegisterService(&validateProbeServiceDesc, m.probe)
+}
+
+// startValidateProbeGateway starts a gateway hosting the probe service
+// through the given registration option, returning a client connection.
+func startValidateProbeGateway(t *testing.T, serviceOption gateway.GatewayOption) *grpc.ClientConn {
+	t.Helper()
+
+	listener := NewTestListener(t)
+	gw, err := gateway.NewGateway(gateway.DefaultConfig(), gateway.WithListener(listener), serviceOption)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = gw.Close() })
+
+	ctx, cancel := context.WithCancel(t.Context())
+	var group errgroup.Group
+	group.Go(func() error { return gw.Run(ctx) })
+	t.Cleanup(func() {
+		cancel()
+		require.NoError(t, group.Wait())
+	})
+
+	conn, err := grpc.NewClient(listener.Addr().String(), grpc.WithTransportCredentials(insecure.NewCredentials()))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = conn.Close() })
+
+	return conn
+}
+
+// Test_Gateway_RejectsInvalidProbeUnary verifies that an invalid unary
+// request to a builtin service never reaches the handler.
+func Test_Gateway_RejectsInvalidProbeUnary(t *testing.T) {
+	t.Parallel()
+
+	probe := &recordingValidateProbeServer{}
+	conn := startValidateProbeGateway(t, gateway.WithBuiltinService(&validateProbeGatewayService{probe: probe}))
+
+	invokeErr := conn.Invoke(t.Context(), "/"+validateProbeServiceName+"/Unary", &wrapperspb.StringValue{}, &emptypb.Empty{})
+
+	statusErr, ok := status.FromError(invokeErr)
+	require.True(t, ok)
+	require.Equal(t, codes.InvalidArgument, statusErr.Code())
+	require.Equal(t, "value is required", statusErr.Message())
+	require.False(t, probe.unaryCalled.Load(), "handler must not run for an invalid probe request")
+}
+
+// Test_Gateway_RejectsInvalidProbeStream verifies that an invalid streamed
+// request to a builtin service never reaches the handler.
+func Test_Gateway_RejectsInvalidProbeStream(t *testing.T) {
+	t.Parallel()
+
+	probe := &recordingValidateProbeServer{}
+	conn := startValidateProbeGateway(t, gateway.WithBuiltinService(&validateProbeGatewayService{probe: probe}))
+
+	stream, err := conn.NewStream(t.Context(), &grpc.StreamDesc{StreamName: "Stream", ServerStreams: true}, "/"+validateProbeServiceName+"/Stream")
+	require.NoError(t, err)
+	require.NoError(t, stream.SendMsg(&wrapperspb.StringValue{}))
+	require.NoError(t, stream.CloseSend())
+
+	recvErr := stream.RecvMsg(&emptypb.Empty{})
+	statusErr, ok := status.FromError(recvErr)
+	require.True(t, ok)
+	require.Equal(t, codes.InvalidArgument, statusErr.Code())
+	require.Equal(t, "value is required", statusErr.Message())
+	require.False(t, probe.streamCalled.Load(), "handler must not run for an invalid probe request")
+}
+
+// Test_Gateway_ProxiedRPC_RejectsInvalidProbe verifies that an invalid
+// request proxied to an in-process module never reaches the handler.
+//
+// The module's own interceptor observes the rejection, so the request
+// crossed the gateway untouched and the module runner rejected it.
+func Test_Gateway_ProxiedRPC_RejectsInvalidProbe(t *testing.T) {
+	t.Parallel()
+
+	probe := &recordingValidateProbeServer{}
+	module := &validateProbeModuleService{probe: probe, observedCodes: make(chan codes.Code, 1)}
+
+	conn := startValidateProbeGateway(t, gateway.WithService(module))
+
+	// The runner registers the module asynchronously, so the call is retried
+	// while the service is still unknown.
+	var invokeErr error
+	require.Eventually(t, func() bool {
+		invokeErr = conn.Invoke(t.Context(), "/"+validateProbeServiceName+"/Unary", &wrapperspb.StringValue{}, &emptypb.Empty{})
+		return status.Code(invokeErr) != codes.NotFound
+	}, 5*time.Second, 50*time.Millisecond, "probe request did not reach the module")
+
+	statusErr, ok := status.FromError(invokeErr)
+	require.True(t, ok)
+	require.Equal(t, codes.InvalidArgument, statusErr.Code())
+	require.Equal(t, "value is required", statusErr.Message())
+	require.False(t, probe.unaryCalled.Load(), "handler must not run for an invalid probe request")
+
+	select {
+	case observed := <-module.observedCodes:
+		require.Equal(t, codes.InvalidArgument, observed, "module interceptor must observe the rejected request")
+	case <-time.After(5 * time.Second):
+		t.Fatal("module interceptor did not observe the request")
+	}
 }
