@@ -123,12 +123,11 @@ type FWStateService struct {
 
 	// configs owns the published configs and the superseded ones whose
 	// free was refused because a live configuration generation still
-	// referenced them; it retries those on the next update, through
-	// ReclaimDeferred, and nothing else remembers them. The store
-	// serializes whole mutations per name, publish included, while its
-	// read side guards the entries alone and is never held across a
-	// shared-memory call, so read paths stay responsive while a
-	// publish is slow.
+	// referenced them. It retries those on the next update, and nothing
+	// else remembers them. The store serializes whole mutations per name,
+	// publish included, while its read side guards the entries alone and
+	// is never held across a shared-memory call, so read paths stay
+	// responsive while a publish is slow.
 	configs *configstore.Store[*FwStateConfig]
 
 	agent    *ffi.Agent
@@ -382,13 +381,4 @@ func (m *FWStateService) observeMutation(operation, phase string) {
 	if m.observer != nil {
 		m.observer.ObserveFWStateMutation(operation, phase)
 	}
-}
-
-// ReclaimDeferred retries every deferred config, dropping the ones whose
-// generations have drained and keeping the rest deferred. It is the
-// reclamation handler for this module's superseded configs; the service
-// itself runs it after each successful publish, and anything else may
-// call it at any time.
-func (m *FWStateService) ReclaimDeferred() {
-	m.configs.ReclaimDeferred()
 }

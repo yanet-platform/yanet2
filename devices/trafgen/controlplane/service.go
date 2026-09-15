@@ -339,12 +339,3 @@ func parsePcap(pcap []byte) ([][]byte, error) {
 
 	return packets, nil
 }
-
-// ReclaimDeferred retries every superseded device whose free was refused,
-// releasing the ones whose generations have drained.
-//
-// The service runs it after each successful publish, and anything else
-// may call it at any time.
-func (m *TrafgenService) ReclaimDeferred() {
-	m.configs.ReclaimDeferred()
-}
