@@ -9,6 +9,7 @@ import (
 	"github.com/gopacket/gopacket/layers"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
@@ -318,6 +319,112 @@ func TestACL_EmptyRules_Rejected(t *testing.T) {
 	})
 	require.Error(t, err)
 	require.Equal(t, codes.InvalidArgument, status.Code(err))
+}
+
+// Test_ACLService_UpdateConfig_ConcurrentCompiles verifies that two configs
+// compiled at the same time on one agent each publish their own verdict.
+func Test_ACLService_UpdateConfig_ConcurrentCompiles(t *testing.T) {
+	udpRules := func(kind aclpb.ActionKind) []*aclpb.Rule {
+		return []*aclpb.Rule{{
+			Actions: []*aclpb.Action{{Kind: kind}},
+			Devices: []*filterpb.Device{{Name: "port0"}},
+			// 0.0.0.0/0.0.0.0: the explicit zero address and zero mask match all.
+			Sources4:      []*commonpb.IPv4Network{{Addr: &commonpb.IPv4Address{}, Mask: &commonpb.IPv4Address{}}},
+			Destinations4: []*commonpb.IPv4Network{{Addr: &commonpb.IPv4Address{}, Mask: &commonpb.IPv4Address{}}},
+			// UDP (17) with any subtype: proto in the high byte.
+			ProtoRanges:   []*filterpb.ProtoRange{{From: 17 << 8, To: 17<<8 | 0xFF}},
+			SrcPortRanges: []*filterpb.PortRange{{From: 0, To: 65535}},
+			DstPortRanges: []*filterpb.PortRange{{From: 0, To: 65535}},
+		}}
+	}
+	pass := udpRules(aclpb.ActionKind_ACTION_KIND_PASS)
+	deny := udpRules(aclpb.ActionKind_ACTION_KIND_DENY)
+
+	eth := layers.Ethernet{
+		SrcMAC:       xerror.Unwrap(net.ParseMAC("aa:bb:cc:dd:ee:ff")),
+		DstMAC:       xerror.Unwrap(net.ParseMAC("11:22:33:44:55:66")),
+		EthernetType: layers.EthernetTypeIPv4,
+	}
+	ip4 := layers.IPv4{
+		Version:  4,
+		TTL:      64,
+		Protocol: layers.IPProtocolUDP,
+		SrcIP:    net.ParseIP("192.0.2.1"),
+		DstIP:    net.ParseIP("10.0.0.1"),
+	}
+	udp := layers.UDP{SrcPort: 12345, DstPort: 80}
+	udp.SetNetworkLayerForChecksum(&ip4)
+	pkt := xpacket.LayersToPacket(t, &eth, &ip4, &udp)
+
+	// A round holds two published and two compiling configs, which the
+	// production default agent memory fits even with sanitizer red zones.
+	h, agent, backend := setupACLHarnessSized(t, []string{"port0"}, 128*datasize.MB, 64*datasize.MB)
+	svc := acl.NewACLService(backend)
+
+	verdictCounters := func(config string) map[string]uint64 {
+		path := aclCounterPath("port0", config)
+		return dataplaneut.SingleValueCounters(h.SharedMemory().DPConfig(0).ModuleCounters(
+			path.Device, path.Pipeline, path.Function, path.Chain,
+			path.ModuleType, path.ModuleName, []string{"acl_action_deny", "acl_no_match"},
+		))
+	}
+
+	for round := range 50 {
+		// Swapping the verdicts every round makes every update compile.
+		rulesA, rulesB := pass, deny
+		denyA := false
+		if round%2 == 1 {
+			rulesA, rulesB = deny, pass
+			denyA = true
+		}
+
+		var group errgroup.Group
+		group.Go(func() error {
+			_, err := svc.UpdateConfig(t.Context(), &aclpb.UpdateConfigRequest{Name: "a", Rules: rulesA})
+			return err
+		})
+		group.Go(func() error {
+			_, err := svc.UpdateConfig(t.Context(), &aclpb.UpdateConfigRequest{Name: "b", Rules: rulesB})
+			return err
+		})
+		require.NoError(t, group.Wait())
+
+		if round == 0 {
+			wireACLPipeline(t, agent, "port0", "a")
+			wireACLPipeline(t, agent, "port0", "b")
+		}
+
+		cases := []struct {
+			config string
+			denies bool
+		}{
+			{config: "a", denies: denyA},
+			{config: "b", denies: !denyA},
+		}
+		for _, tc := range cases {
+			_, err := plain.UpdateDevices(agent, []ffi.DeviceConfig{{
+				Name:   "port0",
+				Input:  []ffi.DevicePipelineConfig{{Name: tc.config, Weight: 1}},
+				Output: []ffi.DevicePipelineConfig{{Name: "dummy", Weight: 1}},
+			}})
+			require.NoError(t, err)
+
+			before := verdictCounters(tc.config)
+			result, err := h.HandlePackets(pkt)
+			require.NoError(t, err)
+			after := verdictCounters(tc.config)
+
+			wantOutputs, wantDenies := 1, uint64(0)
+			if tc.denies {
+				wantOutputs, wantDenies = 0, 1
+			}
+			require.Len(t, result.Output, wantOutputs, "round %d: config %q output", round, tc.config)
+			require.Equal(t, wantDenies, after["acl_action_deny"]-before["acl_action_deny"],
+				"round %d: config %q deny verdicts", round, tc.config)
+			require.Zero(t, after["acl_no_match"]-before["acl_no_match"],
+				"round %d: config %q must match its rule", round, tc.config)
+		}
+	}
 }
 
 // TestACL_TCP_SYNFlag verifies the proto subtype byte selects on TCP flags.
