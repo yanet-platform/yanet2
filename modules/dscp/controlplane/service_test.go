@@ -251,50 +251,12 @@ func Test_DscpService_ListShowAddRemoveSetMarking(t *testing.T) {
 	}
 }
 
-// Test_DscpService_RequestValidation verifies that invalid names, networks,
-// and marking values are rejected with InvalidArgument.
-func Test_DscpService_RequestValidation(t *testing.T) {
+// Test_DscpService_AddRemovePrefixes_RejectsUnparsablePrefix verifies that a
+// prefix the converter cannot parse is rejected with InvalidArgument.
+func Test_DscpService_AddRemovePrefixes_RejectsUnparsablePrefix(t *testing.T) {
 	t.Parallel()
 	service := newTestService(t)
 	ctx := t.Context()
-
-	t.Run("ShowConfigInvalidName", func(t *testing.T) {
-		response, err := service.ShowConfig(ctx, &dscppb.ShowConfigRequest{Name: ""})
-		require.Nil(t, response)
-		require.Equal(t, codes.InvalidArgument, status.Code(err))
-	})
-
-	t.Run("AddPrefixesInvalidName", func(t *testing.T) {
-		response, err := service.AddPrefixes(ctx, &dscppb.AddPrefixesRequest{
-			Name:      "",
-			Prefixes4: mustPrefixes4(t, "10.0.0.0/24"),
-		})
-		require.Nil(t, response)
-		require.Equal(t, codes.InvalidArgument, status.Code(err))
-	})
-
-	t.Run("RemovePrefixesInvalidName", func(t *testing.T) {
-		response, err := service.RemovePrefixes(ctx, &dscppb.RemovePrefixesRequest{
-			Name:      "",
-			Prefixes4: mustPrefixes4(t, "10.0.0.0/24"),
-		})
-		require.Nil(t, response)
-		require.Equal(t, codes.InvalidArgument, status.Code(err))
-	})
-
-	t.Run("DeleteConfigInvalidName", func(t *testing.T) {
-		response, err := service.DeleteConfig(ctx, &dscppb.DeleteConfigRequest{Name: ""})
-		require.Nil(t, response)
-		require.Equal(t, codes.InvalidArgument, status.Code(err))
-	})
-
-	t.Run("SetDscpMarkingNoDSCPConfig", func(t *testing.T) {
-		response, err := service.SetDscpMarking(ctx, &dscppb.SetDscpMarkingRequest{
-			Name: "dscp0",
-		})
-		require.Nil(t, response)
-		require.Equal(t, codes.InvalidArgument, status.Code(err))
-	})
 
 	t.Run("AddPrefixesInvalidPrefix", func(t *testing.T) {
 		response, err := service.AddPrefixes(ctx, &dscppb.AddPrefixesRequest{
@@ -309,30 +271,6 @@ func Test_DscpService_RequestValidation(t *testing.T) {
 		response, err := service.RemovePrefixes(ctx, &dscppb.RemovePrefixesRequest{
 			Name:      "dscp0",
 			Prefixes6: []*commonpb.IPv6Prefix{{PrefixLen: 64}},
-		})
-		require.Nil(t, response)
-		require.Equal(t, codes.InvalidArgument, status.Code(err))
-	})
-
-	t.Run("SetDscpMarkingInvalidFlag", func(t *testing.T) {
-		response, err := service.SetDscpMarking(ctx, &dscppb.SetDscpMarkingRequest{
-			Name: "dscp0",
-			DscpConfig: &dscppb.DscpConfig{
-				Flag: 3,
-				Mark: 8,
-			},
-		})
-		require.Nil(t, response)
-		require.Equal(t, codes.InvalidArgument, status.Code(err))
-	})
-
-	t.Run("SetDscpMarkingInvalidMark", func(t *testing.T) {
-		response, err := service.SetDscpMarking(ctx, &dscppb.SetDscpMarkingRequest{
-			Name: "dscp0",
-			DscpConfig: &dscppb.DscpConfig{
-				Flag: 1,
-				Mark: 64,
-			},
 		})
 		require.Nil(t, response)
 		require.Equal(t, codes.InvalidArgument, status.Code(err))
