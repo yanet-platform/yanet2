@@ -9,9 +9,8 @@ import (
 )
 
 const (
-	moduleName  = "blackhole"
-	agentName   = moduleName
-	serviceName = "modules.blackhole.controlplane.blackholepb.v1.BlackholeService"
+	moduleName = "blackhole"
+	agentName  = moduleName
 )
 
 // Option configures the BlackholeModule constructor.
@@ -48,7 +47,7 @@ func NewBlackholeModule(cfg *Config, options ...Option) (*BlackholeModule, error
 		o(opts)
 	}
 
-	log := opts.Log.With(zap.String("module", serviceName))
+	log := opts.Log.With(zap.String("module", blackholepb.BlackholeService_ServiceDesc.ServiceName))
 
 	attachment, err := ffi.Attach(cfg.AttachConfig, agentName, log)
 	if err != nil {
@@ -77,7 +76,7 @@ func (m *BlackholeModule) Endpoint() string {
 
 // ServicesNames returns the gRPC service names exposed by the module.
 func (m *BlackholeModule) ServicesNames() []string {
-	return []string{serviceName}
+	return []string{blackholepb.BlackholeService_ServiceDesc.ServiceName}
 }
 
 // RegisterService registers the blackhole module's gRPC service.

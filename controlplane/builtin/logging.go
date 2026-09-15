@@ -76,7 +76,9 @@ func (m *Logging) Name() string { return "logging" }
 func (m *Logging) Endpoint() string { return "" }
 
 // ServicesNames returns the gRPC service names served by this service.
-func (m *Logging) ServicesNames() []string { return []string{"controlplane.ynpb.v1.Logging"} }
+func (m *Logging) ServicesNames() []string {
+	return []string{ynpb.Logging_ServiceDesc.ServiceName}
+}
 
 // RegisterService registers the service on the given gRPC server.
 func (m *Logging) RegisterService(server *grpc.Server) {

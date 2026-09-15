@@ -389,8 +389,8 @@ func NewGateway(cfg Config, options ...GatewayOption) (*Gateway, error) {
 	}
 
 	for _, service := range []string{
-		"controlplane.ynpb.v1.Gateway",
-		"controlplane.ynpb.v1.Auth",
+		ynpb.Gateway_ServiceDesc.ServiceName,
+		ynpb.AuthService_ServiceDesc.ServiceName,
 		ynpb.ReadinessService_ServiceDesc.ServiceName,
 		ynpb.MetricsService_ServiceDesc.ServiceName,
 	} {

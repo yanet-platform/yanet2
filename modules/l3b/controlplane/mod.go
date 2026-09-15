@@ -84,7 +84,7 @@ func (m *L3BModule) Endpoint() string {
 }
 
 func (m *L3BModule) ServicesNames() []string {
-	return []string{"modules.l3b.controlplane.l3bpb.v1.L3bService"}
+	return []string{l3bpb.L3BService_ServiceDesc.ServiceName}
 }
 
 func (m *L3BModule) RegisterService(server *grpc.Server) {

@@ -65,7 +65,7 @@ func (m *UnrdupModule) Endpoint() string {
 }
 
 func (m *UnrdupModule) ServicesNames() []string {
-	return []string{"modules.unrdup.controlplane.unrduppb.v1.UnrdupService"}
+	return []string{unrduppb.UnrdupService_ServiceDesc.ServiceName}
 }
 
 func (m *UnrdupModule) RegisterService(server *grpc.Server) {

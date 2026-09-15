@@ -38,7 +38,9 @@ func (m *Memory) Name() string { return "memory" }
 func (m *Memory) Endpoint() string { return "" }
 
 // ServicesNames returns the gRPC service names served by this service.
-func (m *Memory) ServicesNames() []string { return []string{"controlplane.ynpb.v1.MemoryService"} }
+func (m *Memory) ServicesNames() []string {
+	return []string{ynpb.MemoryService_ServiceDesc.ServiceName}
+}
 
 // RegisterService registers the service on the given gRPC server.
 func (m *Memory) RegisterService(server *grpc.Server) {

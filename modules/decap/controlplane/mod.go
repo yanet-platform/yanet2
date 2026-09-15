@@ -42,7 +42,7 @@ func NewDecapModule(cfg *Config, options ...Option) (*DecapModule, error) {
 		o(opts)
 	}
 
-	log := opts.Log.With(zap.String("module", "modules.decap.controlplane.decappb.v1.DecapService"))
+	log := opts.Log.With(zap.String("module", decappb.DecapService_ServiceDesc.ServiceName))
 
 	attachment, err := ffi.Attach(cfg.AttachConfig, "decap", log)
 	if err != nil {
@@ -68,7 +68,7 @@ func (m *DecapModule) Endpoint() string {
 }
 
 func (m *DecapModule) ServicesNames() []string {
-	return []string{"modules.decap.controlplane.decappb.v1.DecapService"}
+	return []string{decappb.DecapService_ServiceDesc.ServiceName}
 }
 
 func (m *DecapModule) RegisterService(server *grpc.Server) {

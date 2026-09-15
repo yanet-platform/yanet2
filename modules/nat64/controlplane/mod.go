@@ -42,7 +42,7 @@ func NewNAT64Module(cfg *Config, options ...Option) (*NAT64Module, error) {
 		o(opts)
 	}
 
-	log := opts.Log.With(zap.String("module", "modules.nat64.controlplane.nat64pb.v1.NAT64Service"))
+	log := opts.Log.With(zap.String("module", nat64pb.NAT64Service_ServiceDesc.ServiceName))
 
 	attachment, err := ffi.Attach(cfg.AttachConfig, "nat64", log)
 	if err != nil {
@@ -68,7 +68,7 @@ func (m *NAT64Module) Endpoint() string {
 }
 
 func (m *NAT64Module) ServicesNames() []string {
-	return []string{"modules.nat64.controlplane.nat64pb.v1.NAT64Service"}
+	return []string{nat64pb.NAT64Service_ServiceDesc.ServiceName}
 }
 
 func (m *NAT64Module) RegisterService(server *grpc.Server) {

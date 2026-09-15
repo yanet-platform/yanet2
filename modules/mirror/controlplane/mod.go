@@ -47,7 +47,7 @@ func NewMirrorModule(cfg *Config, options ...Option) (*MirrorModule, error) {
 		o(opts)
 	}
 
-	log := opts.Log.With(zap.String("module", "modules.mirror.controlplane.mirrorpb.v1.MirrorService"))
+	log := opts.Log.With(zap.String("module", mirrorpb.MirrorService_ServiceDesc.ServiceName))
 
 	attachment, err := cpffi.Attach(cfg.AttachConfig, agentName, log)
 	if err != nil {
@@ -73,7 +73,7 @@ func (m *MirrorModule) Endpoint() string {
 }
 
 func (m *MirrorModule) ServicesNames() []string {
-	return []string{"modules.mirror.controlplane.mirrorpb.v1.MirrorService"}
+	return []string{mirrorpb.MirrorService_ServiceDesc.ServiceName}
 }
 
 func (m *MirrorModule) RegisterService(server *grpc.Server) {

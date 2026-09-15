@@ -81,7 +81,9 @@ func (m *Function) Name() string { return "function" }
 func (m *Function) Endpoint() string { return "" }
 
 // ServicesNames returns the gRPC service names served by this service.
-func (m *Function) ServicesNames() []string { return []string{"controlplane.ynpb.v1.FunctionService"} }
+func (m *Function) ServicesNames() []string {
+	return []string{ynpb.FunctionService_ServiceDesc.ServiceName}
+}
 
 // RegisterService registers the service on the given gRPC server.
 func (m *Function) RegisterService(server *grpc.Server) {

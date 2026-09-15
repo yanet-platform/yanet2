@@ -68,7 +68,7 @@ func (m *DscpModule) Endpoint() string {
 }
 
 func (m *DscpModule) ServicesNames() []string {
-	return []string{"modules.dscp.controlplane.dscppb.v1.DscpService"}
+	return []string{dscppb.DscpService_ServiceDesc.ServiceName}
 }
 
 func (m *DscpModule) RegisterService(server *grpc.Server) {
