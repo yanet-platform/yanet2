@@ -98,39 +98,9 @@ func (e *errorCallbackContext) Close() {
 
 type ModuleConfig struct {
 	ptr ffi.ModuleConfig
-	log *zap.Logger
 }
 
-// ModuleConfigOption configures a pdump module configuration.
-type ModuleConfigOption func(*moduleConfigOptions)
-
-type moduleConfigOptions struct {
-	Log *zap.Logger
-}
-
-func newModuleConfigOptions() *moduleConfigOptions {
-	return &moduleConfigOptions{
-		Log: zap.NewNop(),
-	}
-}
-
-// WithModuleConfigLog sets the logger for a pdump module configuration.
-func WithModuleConfigLog(log *zap.Logger) ModuleConfigOption {
-	return func(o *moduleConfigOptions) {
-		o.Log = log
-	}
-}
-
-func NewModuleConfig(
-	agent *ffi.Agent,
-	name string,
-	options ...ModuleConfigOption,
-) (*ModuleConfig, error) {
-	opts := newModuleConfigOptions()
-	for _, o := range options {
-		o(opts)
-	}
-
+func NewModuleConfig(agent *ffi.Agent, name string) (*ModuleConfig, error) {
 	cName := C.CString(name)
 	defer C.free(unsafe.Pointer(cName))
 
@@ -143,7 +113,6 @@ func NewModuleConfig(
 
 	return &ModuleConfig{
 		ptr: ffi.NewModuleConfig(unsafe.Pointer(ptr)),
-		log: opts.Log,
 	}, nil
 }
 
@@ -234,7 +203,8 @@ func (m *ModuleConfig) SetSnapLen(snaplen uint32) error {
 	return nil
 }
 
-func (m *ModuleConfig) SetupRing(ring *ringBuffer) error {
+// SetupRings allocates a capture ring of the given size for every worker.
+func (m *ModuleConfig) SetupRings(size uint32) ([]Ring, error) {
 	var workerCount C.uint64_t
 
 	errCtx := newErrorCallbackContext()
@@ -242,7 +212,7 @@ func (m *ModuleConfig) SetupRing(ring *ringBuffer) error {
 
 	addr, err := C.pdump_module_config_set_per_worker_ring(
 		m.asRawPtr(),
-		C.uint32_t(ring.PerWorkerSize),
+		C.uint32_t(size),
 		&workerCount,
 		errCtx.Handle(),
 	)
@@ -251,22 +221,17 @@ func (m *ModuleConfig) SetupRing(ring *ringBuffer) error {
 		if reason := errCtx.Reason(); reason != "" {
 			err = errors.Join(err, fmt.Errorf("reason=%s", reason))
 		}
-		return err
+		return nil, err
 	}
-	ring.workers = nil // Forget about old rings...
-	rings := unsafe.Slice(addr, workerCount)
-	for idx := range rings {
-		dataPtr := C.pdump_module_config_addr_of(&rings[idx].data)
-		log := m.log.With(zap.Int("ringIdx", idx))
-		worker := &workerArea{
-			writeIdx:    (*uint64)(&(rings[idx].write_idx)),
-			readableIdx: (*uint64)(&(rings[idx].readable_idx)),
-			readIdx:     0,
-			data:        unsafe.Slice((*byte)(dataPtr), rings[idx].size),
-			mask:        uint64(rings[idx].mask),
-			log:         log,
-		}
-		ring.workers = append(ring.workers, worker)
+	cRings := unsafe.Slice(addr, workerCount)
+	rings := make([]Ring, 0, len(cRings))
+	for idx := range cRings {
+		dataPtr := C.pdump_module_config_addr_of(&cRings[idx].data)
+		rings = append(rings, Ring{
+			WriteIdx:    (*uint64)(&(cRings[idx].write_idx)),
+			ReadableIdx: (*uint64)(&(cRings[idx].readable_idx)),
+			Data:        unsafe.Slice((*byte)(dataPtr), cRings[idx].size),
+		})
 	}
-	return nil
+	return rings, nil
 }
