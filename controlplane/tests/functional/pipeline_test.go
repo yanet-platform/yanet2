@@ -60,8 +60,8 @@ func publishACL(t *testing.T, agent *ffi.Agent, name string) {
 	t.Helper()
 
 	backend := acl.NewBackend(agent)
-	rule := cacl.AclRule{
-		Actions:       []cacl.AclAction{{Kind: cacl.ActionAllow}},
+	rule := cacl.ACLRule{
+		Actions:       []cacl.ACLAction{{Kind: cacl.ActionAllow}},
 		Devices:       filter.Devices{{Name: "port0"}},
 		Src4s:         []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
 		Dst4s:         []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
@@ -74,7 +74,7 @@ func publishACL(t *testing.T, agent *ffi.Agent, name string) {
 		},
 		Fragment: filter.FragmentAny,
 	}
-	handle, err := backend.NewModule(name, []cacl.AclRule{rule}, "", "")
+	handle, err := backend.NewModule(name, []cacl.ACLRule{rule}, "", "")
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = handle.Free() })
 	require.NoError(t, backend.UpdateModule(handle))

@@ -28,15 +28,15 @@ const (
 	FragmentAny  = C.FILTER_IP_FRAG_ANY
 )
 
-// AclAction is a single action applied to a matched packet.
-type AclAction struct {
+// ACLAction is a single action applied to a matched packet.
+type ACLAction struct {
 	Kind uint32
 }
 
-// AclRule describes a single ACL rule composed of match criteria and actions.
-type AclRule struct {
+// ACLRule describes a single ACL rule composed of match criteria and actions.
+type ACLRule struct {
 	// Actions is the ordered action list, the last one terminal.
-	Actions []AclAction
+	Actions []ACLAction
 	// Counter is the counter name for traffic accounting.
 	Counter string
 	// Devices is the device match set.
@@ -61,8 +61,8 @@ type AclRule struct {
 	Fragment filter.Fragment
 }
 
-// AclConfigInfo holds metadata about a compiled ACL configuration.
-type AclConfigInfo struct {
+// ACLConfigInfo holds metadata about a compiled ACL configuration.
+type ACLConfigInfo struct {
 	CompilationTimeNs      uint64
 	FilterRuleCountIp4     uint64
 	FilterRuleCountIp4Port uint64
@@ -72,10 +72,10 @@ type AclConfigInfo struct {
 }
 
 // GetInfo returns compiled configuration metadata for this ACL module.
-func (m *ModuleConfig) GetInfo() *AclConfigInfo {
+func (m *ModuleConfig) GetInfo() *ACLConfigInfo {
 	var cInfo C.struct_acl_config_info
 	C.acl_module_config_get_info(m.asRawPtr(), &cInfo)
-	return &AclConfigInfo{
+	return &ACLConfigInfo{
 		CompilationTimeNs:      uint64(cInfo.compilation_time_ns),
 		FilterRuleCountIp4:     uint64(cInfo.filter_rule_count_ip4),
 		FilterRuleCountIp4Port: uint64(cInfo.filter_rule_count_ip4_port),
@@ -85,8 +85,8 @@ func (m *ModuleConfig) GetInfo() *AclConfigInfo {
 	}
 }
 
-// cBuildActions writes the C representation of AclActions into dst.
-func cBuildActions(dst *C.struct_acl_rule, actions []AclAction, pinner *runtime.Pinner) {
+// cBuildActions writes packet actions into the C rule representation.
+func cBuildActions(dst *C.struct_acl_rule, actions []ACLAction, pinner *runtime.Pinner) {
 	if len(actions) == 0 {
 		return
 	}
@@ -102,7 +102,7 @@ func cBuildActions(dst *C.struct_acl_rule, actions []AclAction, pinner *runtime.
 	dst.action_count = C.uint64_t(len(cActions))
 }
 
-func (m *AclRule) cBuild(pinner *runtime.Pinner) C.struct_acl_rule {
+func (m *ACLRule) cBuild(pinner *runtime.Pinner) C.struct_acl_rule {
 	cRule := C.struct_acl_rule{}
 
 	cBuildActions(&cRule, m.Actions, pinner)

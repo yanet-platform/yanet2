@@ -19,7 +19,7 @@ func NewBackend(agent *ffi.Agent) Backend {
 
 func (m *backend) NewModule(
 	name string,
-	rules []cacl.AclRule,
+	rules []cacl.ACLRule,
 	fw4MapName, fw6MapName string,
 ) (ModuleHandle, error) {
 	handle, err := cacl.NewModuleConfig(

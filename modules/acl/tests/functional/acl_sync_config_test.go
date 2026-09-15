@@ -81,13 +81,13 @@ func Test_ACL_UpdateRules_CreatesNeutralSyncEvent(t *testing.T) {
 		[]xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
 		tcpProto,
 	)
-	rule.Actions = []cacl.AclAction{{Kind: cacl.ActionCreateState}, {Kind: cacl.ActionAllow}}
+	rule.Actions = []cacl.ACLAction{{Kind: cacl.ActionCreateState}, {Kind: cacl.ActionAllow}}
 
 	h, agent, backend := setupACLFWStateSyncHarness(t)
 	map4, map6 := publishSyncMaps(t, agent)
 
 	handle, err := backend.NewModule(
-		"sync-emit", []cacl.AclRule{rule}, map4.Name(), map6.Name(),
+		"sync-emit", []cacl.ACLRule{rule}, map4.Name(), map6.Name(),
 	)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = handle.Free() })
@@ -112,11 +112,11 @@ func Test_ACL_UpdateRules_WithoutStateMapCreatesNeutralSyncEvent(t *testing.T) {
 		[]xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
 		tcpProto,
 	)
-	rule.Actions = []cacl.AclAction{{Kind: cacl.ActionCreateState}, {Kind: cacl.ActionAllow}}
+	rule.Actions = []cacl.ACLAction{{Kind: cacl.ActionCreateState}, {Kind: cacl.ActionAllow}}
 
 	h, agent, backend := setupACLHarness(t, []string{"port0"})
 	handle, err := backend.NewModule(
-		"sync-without-state", []cacl.AclRule{rule}, "", "",
+		"sync-without-state", []cacl.ACLRule{rule}, "", "",
 	)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = handle.Free() })
@@ -199,9 +199,9 @@ func Test_ACL_FWState_InternalEventEmitsConfiguredDestinations(t *testing.T) {
 				[]xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
 				tcpProto,
 			)
-			rule.Actions = []cacl.AclAction{{Kind: cacl.ActionCreateState}, {Kind: cacl.ActionAllow}}
+			rule.Actions = []cacl.ACLAction{{Kind: cacl.ActionCreateState}, {Kind: cacl.ActionAllow}}
 			aclConfig, err := backend.NewModule(
-				"sync-acl", []cacl.AclRule{rule}, map4.Name(), map6.Name(),
+				"sync-acl", []cacl.ACLRule{rule}, map4.Name(), map6.Name(),
 			)
 			require.NoError(t, err)
 			t.Cleanup(func() { _ = aclConfig.Free() })

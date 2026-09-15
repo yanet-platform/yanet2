@@ -59,7 +59,7 @@ func setNet6ShareDisabled(t *testing.T, disabled bool) {
 // net6ShareEdgeCaseRules builds v6 rules chosen to stress the shared
 // classification mechanism rather than the ACL action logic: the specific
 // actions only need to be distinguishable, not meaningful.
-func net6ShareEdgeCaseRules() []cacl.AclRule {
+func net6ShareEdgeCaseRules() []cacl.ACLRule {
 	// The divergeBroad rule has no port constraint (filter_ip6). The
 	// divergeNested rule is a narrower network scoped to a destination port
 	// (filter_ip6_port).
@@ -83,10 +83,10 @@ func net6ShareEdgeCaseRules() []cacl.AclRule {
 	// shape the net6 compiler accepts and a union partition can obscure.
 	nonContiguous := xnetip.MustParseBiContiguous("bbbb:bbbb:bb00:0000:aaaa:aa00:0000:0000/ffff:ffff:ff00:0000:ffff:ff00:0000:0000")
 
-	return []cacl.AclRule{
+	return []cacl.ACLRule{
 		{
 			Counter:       "diverge_broad",
-			Actions:       []cacl.AclAction{{Kind: cacl.ActionAllow}},
+			Actions:       []cacl.ACLAction{{Kind: cacl.ActionAllow}},
 			Src6s:         []xnetip.BiContiguous{divergeBroad},
 			Dst6s:         []xnetip.BiContiguous{filter.UnspecifiedIPv6},
 			SrcPortRanges: allPorts,
@@ -95,7 +95,7 @@ func net6ShareEdgeCaseRules() []cacl.AclRule {
 		},
 		{
 			Counter:       "diverge_nested",
-			Actions:       []cacl.AclAction{{Kind: cacl.ActionCount}, {Kind: cacl.ActionDeny}},
+			Actions:       []cacl.ACLAction{{Kind: cacl.ActionCount}, {Kind: cacl.ActionDeny}},
 			Src6s:         []xnetip.BiContiguous{divergeNested},
 			Dst6s:         []xnetip.BiContiguous{filter.UnspecifiedIPv6},
 			SrcPortRanges: allPorts,
@@ -104,7 +104,7 @@ func net6ShareEdgeCaseRules() []cacl.AclRule {
 		},
 		{
 			Counter:       "deep_lo_a",
-			Actions:       []cacl.AclAction{{Kind: cacl.ActionCount}, {Kind: cacl.ActionAllow}},
+			Actions:       []cacl.ACLAction{{Kind: cacl.ActionCount}, {Kind: cacl.ActionAllow}},
 			Src6s:         []xnetip.BiContiguous{filter.UnspecifiedIPv6},
 			Dst6s:         []xnetip.BiContiguous{deepLoA},
 			SrcPortRanges: allPorts,
@@ -113,7 +113,7 @@ func net6ShareEdgeCaseRules() []cacl.AclRule {
 		},
 		{
 			Counter:       "deep_lo_b",
-			Actions:       []cacl.AclAction{{Kind: cacl.ActionCount}, {Kind: cacl.ActionAllow}},
+			Actions:       []cacl.ACLAction{{Kind: cacl.ActionCount}, {Kind: cacl.ActionAllow}},
 			Src6s:         []xnetip.BiContiguous{filter.UnspecifiedIPv6},
 			Dst6s:         []xnetip.BiContiguous{deepLoB},
 			SrcPortRanges: allPorts,
@@ -122,7 +122,7 @@ func net6ShareEdgeCaseRules() []cacl.AclRule {
 		},
 		{
 			Counter:       "non_contig_broad",
-			Actions:       []cacl.AclAction{{Kind: cacl.ActionAllow}},
+			Actions:       []cacl.ACLAction{{Kind: cacl.ActionAllow}},
 			Src6s:         []xnetip.BiContiguous{nonContiguous},
 			Dst6s:         []xnetip.BiContiguous{filter.UnspecifiedIPv6},
 			SrcPortRanges: allPorts,
@@ -131,7 +131,7 @@ func net6ShareEdgeCaseRules() []cacl.AclRule {
 		},
 		{
 			Counter:       "non_contig_port",
-			Actions:       []cacl.AclAction{{Kind: cacl.ActionCount}, {Kind: cacl.ActionAllow}},
+			Actions:       []cacl.ACLAction{{Kind: cacl.ActionCount}, {Kind: cacl.ActionAllow}},
 			Src6s:         []xnetip.BiContiguous{nonContiguous},
 			Dst6s:         []xnetip.BiContiguous{filter.UnspecifiedIPv6},
 			SrcPortRanges: allPorts,
@@ -246,7 +246,7 @@ func net6SharePacketKey(info *framework.PacketInfo) string {
 type net6ShareResult struct {
 	verdicts     map[string]string
 	ruleCounters map[string][]uint64
-	info         *cacl.AclConfigInfo
+	info         *cacl.ACLConfigInfo
 }
 
 // collectNet6ShareVerdicts compiles rules once under the given sharing
@@ -254,7 +254,7 @@ type net6ShareResult struct {
 // and the per-rule counter vectors read back from shared memory.
 func collectNet6ShareVerdicts(
 	t *testing.T,
-	rules []cacl.AclRule,
+	rules []cacl.ACLRule,
 	packets []gopacket.Packet,
 	shareDisabled bool,
 	cpMemory, agentMemory datasize.ByteSize,

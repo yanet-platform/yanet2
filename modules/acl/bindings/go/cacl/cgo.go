@@ -38,7 +38,7 @@ type ModuleConfig struct {
 func NewModuleConfig(
 	agent *ffi.Agent,
 	name string,
-	rules []AclRule,
+	rules []ACLRule,
 	fw4MapName, fw6MapName string,
 ) (*ModuleConfig, error) {
 	pinner := &runtime.Pinner{}
