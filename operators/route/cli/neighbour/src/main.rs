@@ -29,16 +29,13 @@ use crate::operatorpb::{
     CreateNeighbourTableRequest, ListNeighbourTablesRequest, ListNeighboursRequest,
     NeighbourEntry as ProtoNeighbourEntry, NeighbourState, NeighbourTableInfo, RemoveNeighbourTableRequest,
     RemoveNeighboursRequest, UpdateNeighbourTableRequest, UpdateNeighboursRequest,
-    neighbour_service_client::NeighbourServiceClient,
+    neighbour_service_client::NeighbourServiceClient, neighbour_service_server::SERVICE_NAME,
 };
 
 #[allow(clippy::std_instead_of_core, non_snake_case)]
 pub mod operatorpb {
     tonic::include_proto!("operators.route.operatorpb.v1");
 }
-
-/// The fully-qualified gRPC service name used in error messages.
-const SERVICE_NAME: &str = "operators.route.operatorpb.v1.NeighbourService";
 
 fn client(channel: LayeredChannel) -> NeighbourServiceClient<LayeredChannel> {
     NeighbourServiceClient::new(channel)

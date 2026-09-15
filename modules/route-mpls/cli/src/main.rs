@@ -12,7 +12,8 @@ use clap_complete::engine::{ArgValueCandidates, CompletionCandidate};
 use netip::{Contiguous, IpNetwork};
 use routemplspb::{
     CreateConfigRequest, DeleteConfigRequest, ListConfigsRequest, NextHop, Rule, ShowConfigRequest,
-    UpdateConfigRequest, UpdateEvent, route_mpls_service_client::RouteMplsServiceClient, update_event::Event,
+    UpdateConfigRequest, UpdateEvent, route_mpls_service_client::RouteMplsServiceClient,
+    route_mpls_service_server::SERVICE_NAME, update_event::Event,
 };
 use tonic::codec::CompressionEncoding;
 use ync::{
@@ -124,9 +125,6 @@ pub struct RouteWithdrawCmd {
     #[arg(long = "label", value_parser = clap::value_parser!(u32).range(0..=1_048_575))]
     pub mpls_label: u32,
 }
-
-/// The fully-qualified gRPC service name used in error messages.
-const SERVICE_NAME: &str = "modules.route_mpls.controlplane.routemplspb.v1.RouteMPLSService";
 
 fn client(channel: LayeredChannel) -> RouteMplsServiceClient<LayeredChannel> {
     RouteMplsServiceClient::new(channel)

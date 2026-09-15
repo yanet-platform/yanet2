@@ -286,12 +286,3 @@ func (m *DscpService) publish(name string, mutate func(cfg *config)) error {
 		return cfg, nil
 	})
 }
-
-// ReclaimDeferred retries every superseded config whose free was refused,
-// releasing the ones whose generations have drained.
-//
-// The service runs it after each successful publish, and anything else
-// may call it at any time.
-func (m *DscpService) ReclaimDeferred() {
-	m.configs.ReclaimDeferred()
-}

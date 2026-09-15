@@ -11,9 +11,10 @@ use ync::{
     errors::Error,
     humanfmt, output,
 };
-use ynpb::pb::{BackendKind, ListServicesRequest, RegisteredBackend, gateway_client::GatewayClient};
-
-const GATEWAY_SERVICE: &str = "controlplane.ynpb.v1.Gateway";
+use ynpb::pb::{
+    BackendKind, ListServicesRequest, RegisteredBackend, gateway_client::GatewayClient,
+    gateway_server::SERVICE_NAME as GATEWAY_SERVICE,
+};
 
 /// Inspects the gateway service registry.
 #[derive(Debug, Clone, Parser)]

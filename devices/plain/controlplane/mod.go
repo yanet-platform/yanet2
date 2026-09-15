@@ -42,7 +42,7 @@ func NewDevicePlainDevice(cfg *Config, options ...Option) (*DevicePlainDevice, e
 		o(opts)
 	}
 
-	log := opts.Log.With(zap.String("module", "devices.plain.controlplane.plainpb.v1.DevicePlainService"))
+	log := opts.Log.With(zap.String("module", plainpb.DevicePlainService_ServiceDesc.ServiceName))
 
 	attachment, err := ffi.Attach(cfg.AttachConfig, "plain", log)
 	if err != nil {
@@ -68,7 +68,7 @@ func (m *DevicePlainDevice) Endpoint() string {
 }
 
 func (m *DevicePlainDevice) ServicesNames() []string {
-	return []string{"devices.plain.controlplane.plainpb.v1.DevicePlainService"}
+	return []string{plainpb.DevicePlainService_ServiceDesc.ServiceName}
 }
 
 func (m *DevicePlainDevice) RegisterService(server *grpc.Server) {

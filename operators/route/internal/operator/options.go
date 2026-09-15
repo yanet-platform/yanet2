@@ -143,27 +143,6 @@ func WithRouteServiceConfiguredModules(names ...string) RouteServiceOption {
 	}
 }
 
-type neighbourServiceOptions struct {
-	OnChanged func()
-}
-
-func newNeighbourServiceOptions() *neighbourServiceOptions {
-	return &neighbourServiceOptions{
-		OnChanged: func() {},
-	}
-}
-
-// NeighbourServiceOption configures NewNeighbourService.
-type NeighbourServiceOption func(*neighbourServiceOptions)
-
-// WithNeighbourServiceOnChanged registers a callback fired whenever
-// neighbour state mutates so the reconcile loop can wake up.
-func WithNeighbourServiceOnChanged(fn func()) NeighbourServiceOption {
-	return func(o *neighbourServiceOptions) {
-		o.OnChanged = fn
-	}
-}
-
 // noopMetricsCollector is the default MetricsCollector wired into
 // metrics-service options when the caller does not pass a real one.
 type noopMetricsCollector struct{}

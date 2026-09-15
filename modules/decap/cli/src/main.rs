@@ -3,7 +3,7 @@ use clap_complete::engine::{ArgValueCandidates, CompletionCandidate};
 use commonpb::partition_prefixes;
 use decappb::{
     DeleteConfigRequest, ListConfigsRequest, ShowConfigRequest, ShowConfigResponse, UpdateConfigRequest,
-    decap_service_client::DecapServiceClient,
+    decap_service_client::DecapServiceClient, decap_service_server::SERVICE_NAME,
 };
 use netip::{Contiguous, IpNetwork};
 use tonic::codec::CompressionEncoding;
@@ -77,9 +77,6 @@ pub struct DeleteConfigCmd {
     #[arg(long = "name", short = 'n', add = ArgValueCandidates::new(config_candidates))]
     pub config_name: String,
 }
-
-/// The fully-qualified gRPC service name used in error messages.
-const SERVICE_NAME: &str = "modules.decap.controlplane.decappb.v1.DecapService";
 
 fn client(channel: LayeredChannel) -> DecapServiceClient<LayeredChannel> {
     DecapServiceClient::new(channel)

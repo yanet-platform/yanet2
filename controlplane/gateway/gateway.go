@@ -365,6 +365,9 @@ func NewGateway(cfg Config, options ...GatewayOption) (*Gateway, error) {
 	metricsService := NewMetricsService(append(metricsCollectors(serverMetrics, opts.Services), authManager)...)
 	ynpb.RegisterMetricsServiceServer(server, metricsService)
 
+	portMetricsService := NewPortMetricsService(portMetricsCollectors(opts.Services)...)
+	ynpb.RegisterPortMetricsServiceServer(server, portMetricsService)
+
 	// Gateway-hosted services are reached through one in-memory connection
 	// back into this server, a backend for the HTTP surface and the registry.
 	//
@@ -389,10 +392,11 @@ func NewGateway(cfg Config, options ...GatewayOption) (*Gateway, error) {
 	}
 
 	for _, service := range []string{
-		"controlplane.ynpb.v1.Gateway",
-		"controlplane.ynpb.v1.Auth",
+		ynpb.Gateway_ServiceDesc.ServiceName,
+		ynpb.AuthService_ServiceDesc.ServiceName,
 		ynpb.ReadinessService_ServiceDesc.ServiceName,
 		ynpb.MetricsService_ServiceDesc.ServiceName,
+		ynpb.PortMetricsService_ServiceDesc.ServiceName,
 	} {
 		registry.RegisterBackend(service, loopback, BackendKindBuiltin)
 		log.Info("registered service in registry",

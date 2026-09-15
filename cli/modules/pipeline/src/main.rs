@@ -13,10 +13,8 @@ use ync::{
 };
 use ynpb::pb::{
     DeletePipelineRequest, GetPipelineRequest, ListPipelinesRequest, Pipeline, UpdatePipelineRequest,
-    pipeline_service_client::PipelineServiceClient,
+    pipeline_service_client::PipelineServiceClient, pipeline_service_server::SERVICE_NAME as PIPELINE_SERVICE,
 };
-
-const PIPELINE_SERVICE: &str = "controlplane.ynpb.v1.PipelineService";
 
 fn client(channel: LayeredChannel) -> PipelineServiceClient<LayeredChannel> {
     PipelineServiceClient::new(channel)

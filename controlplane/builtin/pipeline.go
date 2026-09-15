@@ -81,7 +81,9 @@ func (m *Pipeline) Name() string { return "pipeline" }
 func (m *Pipeline) Endpoint() string { return "" }
 
 // ServicesNames returns the gRPC service names served by this service.
-func (m *Pipeline) ServicesNames() []string { return []string{"controlplane.ynpb.v1.PipelineService"} }
+func (m *Pipeline) ServicesNames() []string {
+	return []string{ynpb.PipelineService_ServiceDesc.ServiceName}
+}
 
 // RegisterService registers the service on the given gRPC server.
 func (m *Pipeline) RegisterService(server *grpc.Server) {

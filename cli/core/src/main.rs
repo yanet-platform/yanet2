@@ -18,12 +18,12 @@ use yanet_cli::{
     errors::Error,
     init, output,
 };
-use ynpb::pb::{IntrospectTokenRequest, Principal, auth_service_client::AuthServiceClient};
+use ynpb::pb::{
+    IntrospectTokenRequest, Principal, auth_service_client::AuthServiceClient,
+    auth_service_server::SERVICE_NAME as AUTH_SERVICE_NAME,
+};
 
 static ERROR: LazyLock<ColoredString> = LazyLock::new(|| "error".bold().bright_red());
-
-/// The fully-qualified gRPC service name used in error messages.
-const AUTH_SERVICE_NAME: &str = "controlplane.ynpb.v1.AuthService";
 
 const NAMESPACES: &[Namespace] = &[
     Namespace {

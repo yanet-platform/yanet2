@@ -65,10 +65,17 @@ func NewOperator(cfg *Config, options ...Option) (*Operator, error) {
 		readiness.WithLog(log.With(zap.String("operator", "route"))),
 	)
 
-	neighTable := neigh.NewNeighTable()
+	// The neighbour table wakes the reconcile loop and the loop's state
+	// source reads that table, so the sender is bound once both exist.
+	wakeOnNeighbours := func() {}
+	neighTable := neigh.NewNeighTable(neigh.WithTableOnChanged(func() { wakeOnNeighbours() }))
 	if _, err := neighTable.CreateSource("static", staticTablePriority, true); err != nil {
 		return nil, fmt.Errorf("failed to create static neighbour source: %w", err)
 	}
+
+	source := NewRouteSource(neighTable, routeRIBStore)
+	wake := source.WakeFunc()
+	wakeOnNeighbours = wake
 
 	metricsOptions := []MetricsOption{}
 	if !cfg.NetlinkMonitor.Disabled {
@@ -117,8 +124,6 @@ func NewOperator(cfg *Config, options ...Option) (*Operator, error) {
 		neighMonitor = monitor
 	}
 
-	source := NewRouteSource(neighTable, routeRIBStore)
-	wake := source.WakeFunc()
 	ribHelper := newRIBReadiness(cfg.Readiness, routeRIBStore, moduleName, tracker, withRIBReadinessLog(log))
 
 	routeSvc := NewRouteService(
@@ -142,10 +147,7 @@ func NewOperator(cfg *Config, options ...Option) (*Operator, error) {
 		}),
 	)
 
-	neighbourSvc := NewNeighbourService(
-		neighTable,
-		WithNeighbourServiceOnChanged(wake),
-	)
+	neighbourSvc := NewNeighbourService(neighTable)
 	metricsSvc := NewMetricsService(
 		WithMetricsServiceCollector(metrics),
 	)

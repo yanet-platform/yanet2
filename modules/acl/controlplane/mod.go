@@ -10,9 +10,8 @@ import (
 )
 
 const (
-	moduleType  = "acl"
-	agentName   = moduleType
-	serviceName = "modules.acl.controlplane.aclpb.v1.ACLService"
+	moduleType = "acl"
+	agentName  = moduleType
 )
 
 // ModuleOption configures the ACLModule constructor.
@@ -51,7 +50,7 @@ func NewACLModule(cfg *Config, options ...ModuleOption) (*ACLModule, error) {
 		o(opts)
 	}
 
-	log := opts.Log.With(zap.String("module", serviceName))
+	log := opts.Log.With(zap.String("module", aclpb.ACLService_ServiceDesc.ServiceName))
 
 	attachment, err := ffi.Attach(cfg.AttachConfig, agentName, log)
 	if err != nil {
@@ -87,7 +86,7 @@ func (m *ACLModule) Endpoint() string {
 
 func (m *ACLModule) ServicesNames() []string {
 	return []string{
-		serviceName,
+		aclpb.ACLService_ServiceDesc.ServiceName,
 		aclpb.MetricsService_ServiceDesc.ServiceName,
 	}
 }

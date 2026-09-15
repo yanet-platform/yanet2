@@ -64,15 +64,6 @@ type UnrdupService struct {
 	configs *configstore.Store[*config]
 }
 
-// ReclaimDeferred retries every superseded config whose free was refused,
-// releasing the ones whose generations have drained.
-//
-// The service runs it after each successful publish, and anything else
-// may call it at any time.
-func (m *UnrdupService) ReclaimDeferred() {
-	m.configs.ReclaimDeferred()
-}
-
 type config struct {
 	SourceV4 xnetip.Network
 	SourceV6 xnetip.Network

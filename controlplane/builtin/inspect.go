@@ -33,7 +33,9 @@ func (m *Inspect) Name() string { return "inspect" }
 func (m *Inspect) Endpoint() string { return "" }
 
 // ServicesNames returns the gRPC service names served by this service.
-func (m *Inspect) ServicesNames() []string { return []string{"controlplane.ynpb.v1.InspectService"} }
+func (m *Inspect) ServicesNames() []string {
+	return []string{ynpb.InspectService_ServiceDesc.ServiceName}
+}
 
 // RegisterService registers the service on the given gRPC server.
 func (m *Inspect) RegisterService(server *grpc.Server) {

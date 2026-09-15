@@ -7,6 +7,7 @@ use l3bpb::{
     CreateServiceRequest, DeleteServiceRequest, GetServiceRequest, ListModuleConfigsRequest, ListServicesRequest,
     ListSessionsRequest, ModuleConfig, UpdateModuleConfigRequest, UpdateRealServerStateRequest,
     UpdateRealServerWeightRequest, UpdateServiceRequest, VirtualService, l3b_service_client::L3bServiceClient,
+    l3b_service_server::SERVICE_NAME,
 };
 use serde::Deserialize;
 use tabled::Tabled;
@@ -528,9 +529,6 @@ impl From<&l3bpb::RealServerState> for RealServerRow {
         }
     }
 }
-
-/// The fully-qualified gRPC service name used in error messages.
-const SERVICE_NAME: &str = "modules.l3b.controlplane.l3bpb.v1.L3bService";
 
 #[tokio::main(flavor = "current_thread")]
 pub async fn main() {

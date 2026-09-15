@@ -2,7 +2,7 @@
 //!
 //! The gateway registry holds one entry per registered gRPC service name, so
 //! a family of services — readiness, metrics, and so on — is simply the
-//! entries whose name ends in that family's own trailing segment (e.g.
+//! entries whose last name segment ends with that family's name (e.g.
 //! `ReadinessService`, `MetricsService`): the built-in one plus one per
 //! running operator. That list is what a CLI probes when no service is
 //! named, what a short alias resolves against, and what an error hint
@@ -14,20 +14,13 @@ use std::collections::BTreeMap;
 use clap::Command;
 use clap_complete::engine::CompletionCandidate;
 use tonic::codec::CompressionEncoding;
-use ynpb::pb::{ListServicesRequest, gateway_client::GatewayClient};
+use ynpb::pb::{ListServicesRequest, gateway_client::GatewayClient, gateway_server::SERVICE_NAME as GATEWAY_SERVICE};
 
 use crate::{
     client::{Connection, ConnectionArgs, LayeredChannel, Service},
     completion, config,
     errors::{Error, ErrorKind},
 };
-
-/// Fully-qualified name of the gateway registry service.
-///
-/// Taken from the `Gateway` service declaration in
-/// `controlplane/ynpb/v1/gateway.proto`, the wire contract — not from the
-/// generated tonic module name, which is a Rust-side artefact.
-const GATEWAY_SERVICE: &str = "controlplane.ynpb.v1.Gateway";
 
 /// Budget for a best-effort gateway lookup: an error hint, a shell completion.
 ///
@@ -51,12 +44,12 @@ pub enum Resolution {
     Unknown,
 }
 
-/// A family of gRPC services sharing one trailing name segment (readiness,
+/// A family of gRPC services whose names share one ending (readiness,
 /// metrics, and so on), and the vocabulary a CLI needs to probe, resolve and
 /// hint about it.
 #[derive(Debug, Clone, Copy)]
 pub struct Family {
-    /// Trailing segment of every service's fully-qualified name (e.g.
+    /// Ending shared by every service name in this family (e.g.
     /// `ReadinessService`).
     suffix: &'static str,
     /// User-facing verb every error from this family carries (e.g.
@@ -213,7 +206,7 @@ impl Family {
 }
 
 /// Lists the fully-qualified names of the services registered with the
-/// gateway whose last dot-separated segment is `suffix`, sorted.
+/// gateway whose last name segment ends with the family name, sorted.
 ///
 /// The sort makes probing order — and hence rendered blocks — stable across
 /// runs, since the registry itself is unordered.
@@ -245,11 +238,14 @@ pub async fn list_services(connection: &Connection, suffix: &str) -> Result<Vec<
     Ok(services)
 }
 
-/// Reports whether `name`'s last dot-separated segment is exactly `suffix`,
-/// so that a service merely mentioning it elsewhere in its name is not
-/// mistaken for a match.
+/// Reports whether a registered service belongs to a family: its own name —
+/// the last segment of the fully-qualified one — ends with the family name.
+///
+/// A member may qualify that name to say what it reports on, such as a
+/// port-scoped metrics service alongside the instance-scoped one, and still
+/// answer for the family.
 fn has_suffix(name: &str, suffix: &str) -> bool {
-    name.rsplit('.').next() == Some(suffix)
+    name.rsplit('.').next().is_some_and(|service| service.ends_with(suffix))
 }
 
 /// Resolves a short alias (e.g. `route`) against the discovered `services`.
@@ -331,8 +327,8 @@ pub fn alias_map(services: &[String]) -> BTreeMap<String, String> {
     aliases
 }
 
-/// Connects to the gateway afresh and lists the services whose last segment
-/// is `suffix`, within `budget`.
+/// Connects to the gateway afresh and lists the services of the given
+/// family, within the given budget.
 ///
 /// This is the best-effort half of discovery, and the only half that has to
 /// establish its own connection: every caller reaches an endpoint nothing has
@@ -387,12 +383,12 @@ pub fn services_hint(caption: &str, empty_message: &str, services: &[String]) ->
     hint
 }
 
-/// Best-effort discovery for shell completion: the services whose last
-/// segment is `suffix`, or an empty list on any failure.
+/// Best-effort discovery for shell completion: the services of the given
+/// family, or an empty list on any failure.
 ///
 /// Strictly best-effort — a tab-completion must never print an error nor hang
 /// — so a gateway that is down, slow or refusing us auth yields no candidates
-/// at all, `budget` covering the slow case.
+/// at all, the budget covering the slow case.
 pub fn candidates(args: &ConnectionArgs, suffix: &str, budget: Duration) -> Vec<String> {
     let args = args.clone();
     let suffix = suffix.to_owned();
@@ -437,6 +433,11 @@ mod test {
             "operators.route.operatorpb.v1.MetricsService",
             "MetricsService"
         ));
+    }
+
+    #[test]
+    fn test_has_suffix_accepts_a_qualified_service_name() {
+        assert!(has_suffix("controlplane.ynpb.v1.PortMetricsService", "MetricsService"));
     }
 
     #[test]

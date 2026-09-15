@@ -2,7 +2,7 @@ use core::error::Error;
 
 fn main() -> Result<(), Box<dyn Error>> {
     tonic_prost_build::configure()
-        .build_server(false)
+        .build_server(true)
         .message_attribute(".", "#[derive(serde::Serialize)]")
         .field_attribute(
             ".controlplane.ynpb.v1.RegisteredBackend.last_seen_at",

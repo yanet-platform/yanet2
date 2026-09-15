@@ -5,7 +5,10 @@ use clap_complete::engine::{ArgValueCandidates, CompletionCandidate};
 use commonpb::pb::{Device, DevicePipeline};
 use tabled::Tabled;
 use tonic::codec::CompressionEncoding;
-use vlanpb::{ShowDeviceVlanRequest, UpdateDeviceVlanRequest, device_vlan_service_client::DeviceVlanServiceClient};
+use vlanpb::{
+    ShowDeviceVlanRequest, UpdateDeviceVlanRequest, device_vlan_service_client::DeviceVlanServiceClient,
+    device_vlan_service_server::SERVICE_NAME,
+};
 use ync::{
     GlobalArgs,
     client::{LayeredChannel, Service},
@@ -70,9 +73,6 @@ pub struct UpdateCmd {
     #[arg(long, value_parser = value_parser!(u16).range(0..=4094))]
     pub vlan: u16,
 }
-
-/// The fully-qualified gRPC service name used in error messages.
-const SERVICE_NAME: &str = "devices.vlan.controlplane.vlanpb.v1.DeviceVlanService";
 
 type DeviceVlanService = Service<DeviceVlanServiceClient<LayeredChannel>>;
 

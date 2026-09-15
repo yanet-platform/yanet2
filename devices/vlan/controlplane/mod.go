@@ -42,7 +42,7 @@ func NewDeviceVlanDevice(cfg *Config, options ...Option) (*DeviceVlanDevice, err
 		o(opts)
 	}
 
-	log := opts.Log.With(zap.String("module", "devices.vlan.controlplane.vlanpb.v1.DeviceVlanService"))
+	log := opts.Log.With(zap.String("module", vlanpb.DeviceVlanService_ServiceDesc.ServiceName))
 
 	attachment, err := ffi.Attach(cfg.AttachConfig, "vlan", log)
 	if err != nil {
@@ -68,7 +68,7 @@ func (m *DeviceVlanDevice) Endpoint() string {
 }
 
 func (m *DeviceVlanDevice) ServicesNames() []string {
-	return []string{"devices.vlan.controlplane.vlanpb.v1.DeviceVlanService"}
+	return []string{vlanpb.DeviceVlanService_ServiceDesc.ServiceName}
 }
 
 func (m *DeviceVlanDevice) RegisterService(server *grpc.Server) {

@@ -13,9 +13,10 @@ use ync::{
     errors::Error,
     output,
 };
-use ynpb::pb::{ListDevicesRequest, ListDevicesResponse, device_service_client::DeviceServiceClient};
-
-const DEVICE_SERVICE: &str = "controlplane.ynpb.v1.DeviceService";
+use ynpb::pb::{
+    ListDevicesRequest, ListDevicesResponse, device_service_client::DeviceServiceClient,
+    device_service_server::SERVICE_NAME as DEVICE_SERVICE,
+};
 
 /// Lists the configured devices with their registry indices.
 #[derive(Debug, Clone, Parser)]

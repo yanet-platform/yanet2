@@ -471,12 +471,3 @@ func adjustMappingsAfterPrefixRemove(mappings []Mapping, removed uint32) []Mappi
 	}
 	return out
 }
-
-// ReclaimDeferred retries every superseded config whose free was refused,
-// releasing the ones whose generations have drained.
-//
-// The service runs it after each successful publish, and anything else
-// may call it at any time.
-func (m *NAT64Service) ReclaimDeferred() {
-	m.configs.ReclaimDeferred()
-}

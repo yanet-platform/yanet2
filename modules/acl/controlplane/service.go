@@ -3,7 +3,6 @@ package acl
 import (
 	"context"
 	"errors"
-	"sync"
 
 	"github.com/yanet-platform/xnetip"
 	"go.uber.org/zap"
@@ -18,6 +17,7 @@ import (
 	filterpb "github.com/yanet-platform/yanet2/common/filterpb/v1"
 	"github.com/yanet-platform/yanet2/common/go/grpcmetrics"
 	"github.com/yanet-platform/yanet2/common/go/metrics"
+	"github.com/yanet-platform/yanet2/controlplane/configstore"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/modules/acl/bindings/go/cacl"
 	aclpb "github.com/yanet-platform/yanet2/modules/acl/controlplane/aclpb/v1"
@@ -84,11 +84,18 @@ func WithMetrics(factory grpcmetrics.Factory) Option {
 	}
 }
 
+// errUnchanged is reported by the update callback when the request matches
+// the published config, so nothing is compiled or published.
+var errUnchanged = errors.New("config unchanged")
+
 type aclConfig struct {
 	rules      []*aclpb.Rule
 	acl        ModuleHandle
 	fw4MapName string
 	fw6MapName string
+	// info is the compile metadata copied out of the module before it
+	// was published, so metrics never call into a handle.
+	info cacl.AclConfigInfo
 }
 
 // Rules returns the rules held by the config.
@@ -96,9 +103,9 @@ func (m *aclConfig) Rules() []*aclpb.Rule {
 	return m.rules
 }
 
-// Handle returns the module handle held by the config.
-func (m *aclConfig) Handle() ModuleHandle {
-	return m.acl
+// Info returns the compile metadata of the config's module.
+func (m *aclConfig) Info() cacl.AclConfigInfo {
+	return m.info
 }
 
 // Fw4MapName returns the name of the referenced v4 fwstate-map object.
@@ -121,109 +128,22 @@ func (m *aclConfig) Free() error {
 	return m.acl.Free()
 }
 
-// configEntry holds the per-name state that lives outside m.mu: the lock
-// serializing mutations of one config name, and the currently published
-// config for that name.
-//
-// UpdateConfig is the only mutation that can create an entry: it is the
-// only with*-calling RPC that ever reaches withEntry for a name with no
-// existing entry. DeleteConfig rejects an unknown name before it gets
-// there, so no other mutation path ever interns one. Once created, an
-// entry is never removed: DeleteConfig sets published to nil instead of
-// dropping the map entry, keeping it as the lock anchor. Every mutation
-// RPC is operator-driven, so the key set stays low-cardinality, and an
-// entry costs one idle mutex.
-//
-// Acquiring a name's lock is a two-step operation: a caller fetches the
-// entry pointer while holding m.mu, releases m.mu, and only then locks the
-// entry's updateMu. Between those two steps a goroutine holds a bare entry
-// pointer that no lock protects yet. If entries could be removed from the
-// map, another goroutine could delete that entry and insert a fresh one for
-// the same name during exactly that window. The first goroutine would then
-// go on to lock the orphaned entry while the second locks its replacement,
-// and both would believe they had serialized the same name when in fact
-// they had not. Keeping entries append-only removes that class of race by
-// construction, since the entry for a name stays the same object for the
-// whole life of the process.
-type configEntry struct {
-	// updateMu serializes mutations of this name for the entry's whole
-	// life, across the whole operation including a C compile: UpdateConfig
-	// and DeleteConfig both hold it for their duration.
-	updateMu sync.Mutex
-	// published is the currently active config for this name, or nil when
-	// the name is absent (a tombstone left by DeleteConfig or a name that
-	// was only ever touched by a failed mutation).
-	//
-	// It is written only while holding both updateMu and m.mu.Lock.
-	//
-	// An updateMu holder may read its own entry's published field without
-	// m.mu, since it is the only possible writer while updateMu is held.
-	published *aclConfig
-}
-
-// LockUpdate acquires the entry's update lock.
-func (m *configEntry) LockUpdate() {
-	m.updateMu.Lock()
-}
-
-// UnlockUpdate releases the entry's update lock.
-func (m *configEntry) UnlockUpdate() {
-	m.updateMu.Unlock()
-}
-
-// Published returns the config currently published for the entry.
-func (m *configEntry) Published() *aclConfig {
-	return m.published
-}
-
-// Publish stores the config currently published for the entry.
-func (m *configEntry) Publish(config *aclConfig) {
-	m.published = config
-}
-
 // ACLService implements the gRPC ACL service.
 type ACLService struct {
 	aclpb.UnimplementedACLServiceServer
 
-	// mu guards configs (including insertion of a fresh entry) and the
-	// metrics snapshot's ordering relative to it.
-	//
-	// A read-only critical section under mu.RLock is always a short map
-	// read: of configs itself, or of an entry's published field. A
-	// mutating critical section under mu.Lock is a map insert, a swap of
-	// an entry's published field, or both, followed by rebuilding and
-	// publishing the metrics snapshot from the state just installed —
-	// every mutation site does both under the same lock acquisition so
-	// snapshot publishes stay totally ordered with map mutations. The
-	// snapshot rebuild calls GetInfo, a cgo accessor that copies a handful
-	// of integers out of an already-compiled C module, so it is cheap to
-	// run under mu.Lock. The long-running work (backend.NewModule with
-	// its C compile, and backend.UpdateModule) runs under the target
-	// entry's updateMu instead, outside any mu section, so a compile for
-	// one config never blocks a read or a compile for another.
-	mu      sync.RWMutex
 	backend Backend
-	// configs maps a name to its entry. See configEntry for the entry
-	// lifecycle and locking rules.
-	configs map[string]*configEntry
+	configs *configstore.Store[*aclConfig]
 	metrics *grpcmetrics.ServerMetrics
-
-	metricsState *aclMetricsState
 
 	// moduleMetricsFlight coalesces concurrent structural counter
 	// scrapes into one shared collection of per-position reads, run
-	// outside the service mutex like every shared-memory read.
+	// without holding a config lock like every shared-memory read.
 	moduleMetricsFlight metricsFlight[[]*commonpb.Metric]
 	// ruleMetricsFlight coalesces concurrent per-rule counter reads of
-	// both rule RPCs into one shared-memory read, equally outside the
-	// service mutex.
+	// both rule RPCs into one shared-memory read, equally without
+	// holding a config lock.
 	ruleMetricsFlight metricsFlight[[]ffi.CounterGroup]
-
-	// deferred holds superseded acl configs whose free was refused
-	// because a live configuration generation still referenced them.
-	// This service is their owner: it retries them on its next update,
-	// through ReclaimDeferred, and nothing else remembers them.
-	deferred []*aclConfig
 
 	log *zap.Logger
 }
@@ -237,8 +157,7 @@ func NewACLService(backend Backend, options ...Option) *ACLService {
 
 	m := &ACLService{
 		backend:             backend,
-		configs:             map[string]*configEntry{},
-		metricsState:        newACLMetricsState(),
+		configs:             configstore.NewStore[*aclConfig](),
 		moduleMetricsFlight: newMetricsFlight[[]*commonpb.Metric]("module_metrics"),
 		ruleMetricsFlight:   newMetricsFlight[[]ffi.CounterGroup]("rule_metrics"),
 		log:                 opts.Log,
@@ -248,67 +167,6 @@ func NewACLService(backend Backend, options ...Option) *ACLService {
 	}
 
 	return m
-}
-
-// entry returns the configEntry for name, creating it under a brief write
-// lock the first time name is touched.
-//
-// The returned pointer is stable for the entry's whole life, so a caller
-// may keep it after releasing m.mu and use it to acquire updateMu.
-func (m *ACLService) entry(name string) *configEntry {
-	m.mu.RLock()
-	e, ok := m.configs[name]
-	m.mu.RUnlock()
-	if ok {
-		return e
-	}
-
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	if e, ok := m.configs[name]; ok {
-		return e
-	}
-	e = &configEntry{}
-	m.configs[name] = e
-	return e
-}
-
-// hasEntry reports whether name already has an entry in configs, regardless
-// of whether that entry's published config is live or tombstoned.
-//
-// It takes m.mu.RLock for the lookup. DeleteConfig uses it as a read-only
-// pre-check before withEntry, which would otherwise intern an entry for a
-// name regardless of whether one already exists. Existence alone is the
-// correct test for that pre-check: an entry is created only by UpdateConfig,
-// so one already being present means the name was created at some point, or
-// is being created right now by an UpdateConfig whose compile has not
-// finished. In either case falling through to the locked path below is the
-// right outcome, since it interns nothing for a name that already has an
-// entry and its check of published runs under the name's own lock, after any
-// in-flight compile for the name has finished. A name with no entry at all
-// can never reach that state through any other path, so rejecting it here
-// is exact, not an approximation refined later.
-func (m *ACLService) hasEntry(name string) bool {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-
-	_, ok := m.configs[name]
-	return ok
-}
-
-// withEntry fetches or creates the entry for name, holds its updateMu for
-// the duration of fn, then returns fn's error.
-//
-// Every mutation path acquires and releases the entry lock through the
-// LockUpdate and UnlockUpdate receiver methods. Keeping that pair here makes
-// serialization exhaustive, including backend work and C compilation.
-func (m *ACLService) withEntry(name string, fn func(*configEntry) error) error {
-	entry := m.entry(name)
-	entry.LockUpdate()
-	defer entry.UnlockUpdate()
-
-	return fn(entry)
 }
 
 // UnaryServerInterceptor returns the service's gRPC metrics interceptor, or nil
@@ -323,7 +181,11 @@ func (m *ACLService) UnaryServerInterceptor() grpc.UnaryServerInterceptor {
 
 // retention keeps metrics for active configs.
 func (m *ACLService) retention() func(metrics.MetricID) bool {
-	snapshot := m.metricsState.load()
+	names := m.configs.Names()
+	live := make(map[string]struct{}, len(names))
+	for _, name := range names {
+		live[name] = struct{}{}
+	}
 
 	return func(id metrics.MetricID) bool {
 		config := id.Labels["config"]
@@ -331,30 +193,22 @@ func (m *ACLService) retention() func(metrics.MetricID) bool {
 			return true
 		}
 
-		return snapshot.containsConfig(config)
+		_, ok := live[config]
+		return ok
 	}
 }
 
-// publishMetricsSnapshotLocked rebuilds metric metadata from configs and
-// publishes it.
-//
-// The caller must already hold m.mu.Lock and must call this before
-// unlocking, in the same critical section that just installed the map state
-// being snapshotted. That ordering is what keeps snapshot publishes totally
-// ordered with map mutations: a publish computed from an older map state can
-// never run after, and so can never overwrite, a publish computed from a
-// newer one. Calling it while holding only m.mu.RLock is a bug, since two
-// readers could then publish concurrently and race each other.
-func (m *ACLService) publishMetricsSnapshotLocked() {
-	configInfos := make(map[string]cacl.AclConfigInfo, len(m.configs))
-	for name, entry := range m.configs {
-		if entry.published == nil || entry.published.acl == nil {
-			continue
+// configInfos returns the compile metadata of every published config.
+func (m *ACLService) configInfos() map[string]cacl.AclConfigInfo {
+	names := m.configs.Names()
+	infos := make(map[string]cacl.AclConfigInfo, len(names))
+	for _, name := range names {
+		if config, ok := m.configs.Get(name); ok {
+			infos[name] = config.Info()
 		}
-		configInfos[name] = *entry.published.acl.GetInfo()
 	}
 
-	m.metricsState.publish(configInfos)
+	return infos
 }
 
 func labeler(fullMethod string, req any) metrics.Labels {
@@ -501,47 +355,42 @@ func (m *ACLService) UpdateConfig(
 	if len(req.GetRules()) == 0 {
 		return nil, status.Error(codes.InvalidArgument, "at least one rule is required, an empty ruleset would drop all traffic")
 	}
+	if req.GetSyncConfig() != nil {
+		return nil, status.Error(codes.InvalidArgument,
+			"sync_config belongs to fwstate")
+	}
 
-	var resp *aclpb.UpdateConfigResponse
-	err := m.withEntry(name, func(entry *configEntry) error {
-		oldConfig := entry.Published()
+	fw4MapName := req.GetFwtableNameV4()
+	fw6MapName := req.GetFwtableNameV6()
+	// A non-empty name must round-trip through the fixed-size C
+	// object registry: cp_module_link_object silently truncates
+	// longer ones, which could link an entirely different map than
+	// the one ShowConfig reports. An empty name stays valid: it
+	// declares no link for that family.
+	if err := validateMapNameOptional(fw4MapName); err != nil {
+		return nil, err
+	}
+	if err := validateMapNameOptional(fw6MapName); err != nil {
+		return nil, err
+	}
 
-		fw4MapName := req.GetFwtableNameV4()
-		fw6MapName := req.GetFwtableNameV6()
-		if req.GetSyncConfig() != nil {
-			return status.Error(codes.InvalidArgument,
-				"sync_config belongs to fwstate")
-		}
-
-		// A non-empty name must round-trip through the fixed-size C
-		// object registry: cp_module_link_object silently truncates
-		// longer ones, which could link an entirely different map than
-		// the one ShowConfig reports. An empty name stays valid: it
-		// declares no link for that family.
-		if err := validateMapNameOptional(fw4MapName); err != nil {
-			return err
-		}
-		if err := validateMapNameOptional(fw6MapName); err != nil {
-			return err
-		}
-
-		if oldConfig != nil && rulesEqual(oldConfig.Rules(), req.Rules) &&
-			oldConfig.Fw4MapName() == fw4MapName &&
-			oldConfig.Fw6MapName() == fw6MapName {
-			resp = &aclpb.UpdateConfigResponse{}
-			return nil
+	err := m.configs.Update(name, func(current *aclConfig, ok bool) (*aclConfig, error) {
+		if ok && rulesEqual(current.Rules(), req.Rules) &&
+			current.Fw4MapName() == fw4MapName &&
+			current.Fw6MapName() == fw6MapName {
+			return nil, errUnchanged
 		}
 
 		rules, err := convertRules(req.Rules)
 		if err != nil {
-			return err
+			return nil, err
 		}
 
 		handle, err := m.backend.NewModule(
 			name, rules, fw4MapName, fw6MapName,
 		)
 		if err != nil {
-			return status.Errorf(codes.Internal, "failed to create module config: %v", err)
+			return nil, status.Errorf(codes.Internal, "failed to create module config: %v", err)
 		}
 
 		if err := m.backend.UpdateModule(handle); err != nil {
@@ -550,56 +399,37 @@ func (m *ACLService) UpdateConfig(
 					zap.Error(err))
 			}
 			if errors.Is(err, ffi.ErrFailedPrecondition) {
-				return status.Errorf(codes.FailedPrecondition, "failed to update module: %v", err)
+				return nil, status.Errorf(codes.FailedPrecondition, "failed to update module: %v", err)
 			}
-			return status.Errorf(codes.Internal, "failed to update module: %v", err)
+			return nil, status.Errorf(codes.Internal, "failed to update module: %v", err)
 		}
 
-		m.mu.Lock()
-		entry.Publish(&aclConfig{
+		return &aclConfig{
 			rules:      req.Rules,
 			acl:        handle,
 			fw4MapName: fw4MapName,
 			fw6MapName: fw6MapName,
-		})
-		m.publishMetricsSnapshotLocked()
-		m.mu.Unlock()
-
-		// The publish retired the generations holding this service's
-		// deferred configs; retry them, then retire the displaced one.
-		m.ReclaimDeferred()
-		if oldConfig != nil {
-			m.parkOrFree(oldConfig)
-		}
-
-		resp = &aclpb.UpdateConfigResponse{}
-		return nil
+			info:       *handle.GetInfo(),
+		}, nil
 	})
-	if err != nil {
+	if err != nil && !errors.Is(err, errUnchanged) {
 		return nil, err
 	}
 
-	return resp, nil
+	return &aclpb.UpdateConfigResponse{}, nil
 }
 
 func (m *ACLService) ShowConfig(
 	ctx context.Context,
 	req *aclpb.ShowConfigRequest,
 ) (*aclpb.ShowConfigResponse, error) {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-
 	name := req.GetName()
 	if name == "" {
 		return nil, status.Error(codes.InvalidArgument, "module config name is required")
 	}
 
-	entry, ok := m.configs[name]
+	config, ok := m.configs.Get(name)
 	if !ok {
-		return nil, status.Errorf(codes.NotFound, "config %q not found", name)
-	}
-	config := entry.Published()
-	if config == nil {
 		return nil, status.Errorf(codes.NotFound, "config %q not found", name)
 	}
 
@@ -617,21 +447,7 @@ func (m *ACLService) ListConfigs(
 	ctx context.Context,
 	req *aclpb.ListConfigsRequest,
 ) (*aclpb.ListConfigsResponse, error) {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-
-	response := &aclpb.ListConfigsResponse{
-		Configs: make([]string, 0, len(m.configs)),
-	}
-
-	for name, entry := range m.configs {
-		if entry.Published() == nil {
-			continue
-		}
-		response.Configs = append(response.Configs, name)
-	}
-
-	return response, nil
+	return &aclpb.ListConfigsResponse{Configs: m.configs.Names()}, nil
 }
 
 func (m *ACLService) DeleteConfig(
@@ -643,45 +459,17 @@ func (m *ACLService) DeleteConfig(
 		return nil, status.Error(codes.InvalidArgument, "module config name is required")
 	}
 
-	// A read-only pre-check rejects a name with no entry at all before
-	// withEntry would create one for it. A name whose entry already exists,
-	// live or tombstoned or still being created by an in-flight
-	// UpdateConfig, falls through to the locked path below, whose
-	// authoritative re-check of published under the name's own lock decides
-	// the outcome once any in-flight compile for the name has finished.
-	// Skipping this pre-check entirely would still be correct, since that
-	// locked re-check catches every case on its own. But skipping it would
-	// also intern an entry for a name that never existed, and never remove
-	// it.
-	if !m.hasEntry(name) {
-		return nil, status.Errorf(codes.NotFound, "config %q not found", name)
-	}
-
-	err := m.withEntry(name, func(entry *configEntry) error {
-		config := entry.Published()
-		if config == nil {
-			return status.Errorf(codes.NotFound, "config %q not found", name)
+	err := m.configs.Delete(name, func(*aclConfig) error {
+		if err := m.backend.DeleteModule(name); err != nil {
+			return status.Errorf(codes.Internal, "could not delete acl module config '%s': %v", name, err)
 		}
-
-		if config.Handle() != nil {
-			if err := m.backend.DeleteModule(name); err != nil {
-				return status.Errorf(codes.Internal, "could not delete acl module config '%s': %v", name, err)
-			}
-			m.log.Info("successfully deleted ACL module config", zap.String("name", name))
-		}
-
-		m.mu.Lock()
-		entry.Publish(nil)
-		m.publishMetricsSnapshotLocked()
-		m.mu.Unlock()
-
-		// The delete retired the generation holding the published
-		// config; retry the deferred ones, then retire this one.
-		m.ReclaimDeferred()
-		m.parkOrFree(config)
+		m.log.Info("successfully deleted ACL module config", zap.String("name", name))
 
 		return nil
 	})
+	if errors.Is(err, configstore.ErrNotFound) {
+		return nil, status.Errorf(codes.NotFound, "config %q not found", name)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -703,10 +491,7 @@ func (m *ACLService) GetRulesCounters(
 	name := req.GetName()
 
 	if name != "" {
-		m.mu.RLock()
-		entry, ok := m.configs[name]
-		m.mu.RUnlock()
-		if !ok || entry.Published() == nil {
+		if _, ok := m.configs.Get(name); !ok {
 			return nil, status.Errorf(codes.NotFound, "config %q not found", name)
 		}
 	}
@@ -762,38 +547,4 @@ func (m *ACLService) GetRulesCounters(
 	}
 
 	return &aclpb.GetRulesCountersResponse{Counters: result}, nil
-}
-
-// parkOrFree frees the config when it is dangling and parks it for
-// retry when a live generation still references it.
-func (m *ACLService) parkOrFree(config *aclConfig) {
-	if err := config.Free(); errors.Is(err, ffi.ErrStillReferenced) {
-		m.mu.Lock()
-		m.deferred = append(m.deferred, config)
-		m.mu.Unlock()
-	}
-}
-
-// ReclaimDeferred retries every deferred config, dropping the ones whose
-// generations have drained and keeping the rest deferred. It is the
-// reclamation handler for this module's superseded configs; the service
-// itself runs it after each successful publish, and anything else may
-// call it at any time.
-func (m *ACLService) ReclaimDeferred() {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.reclaimDeferred()
-}
-
-// reclaimDeferred is ReclaimDeferred without the lock. The caller must
-// hold m.mu.
-func (m *ACLService) reclaimDeferred() {
-	kept := m.deferred[:0]
-	for _, config := range m.deferred {
-		if err := config.Free(); errors.Is(err, ffi.ErrStillReferenced) {
-			kept = append(kept, config)
-		}
-	}
-	clear(m.deferred[len(kept):])
-	m.deferred = kept
 }

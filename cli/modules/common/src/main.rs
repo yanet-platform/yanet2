@@ -15,12 +15,9 @@ use ync::{
 };
 use ynpb::pb::{
     ArenaInfo, ExtendAgentRequest, GetLevelRequest, ListArenasRequest, UpdateLevelRequest,
-    logging_client::LoggingClient, memory_service_client::MemoryServiceClient,
+    logging_client::LoggingClient, logging_server::SERVICE_NAME as LOGGING_SERVICE,
+    memory_service_client::MemoryServiceClient, memory_service_server::SERVICE_NAME as MEMORY_SERVICE,
 };
-
-const LOGGING_SERVICE: &str = "controlplane.ynpb.v1.Logging";
-
-const MEMORY_SERVICE: &str = "controlplane.ynpb.v1.MemoryService";
 
 fn memory_client(channel: LayeredChannel) -> MemoryServiceClient<LayeredChannel> {
     MemoryServiceClient::new(channel)

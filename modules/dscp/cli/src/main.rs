@@ -3,7 +3,7 @@ use clap_complete::engine::{ArgValueCandidates, CompletionCandidate};
 use commonpb::partition_prefixes;
 use dscppb::{
     AddPrefixesRequest, Config, DeleteConfigRequest, DscpConfig, RemovePrefixesRequest, SetDscpMarkingRequest,
-    ShowConfigRequest, dscp_service_client::DscpServiceClient,
+    ShowConfigRequest, dscp_service_client::DscpServiceClient, dscp_service_server::SERVICE_NAME,
 };
 use netip::{Contiguous, IpNetwork};
 use tonic::codec::CompressionEncoding;
@@ -129,9 +129,6 @@ pub struct DeleteConfigCmd {
     #[arg(long = "name", short = 'n', add = ArgValueCandidates::new(config_candidates))]
     pub config_name: String,
 }
-
-/// The fully-qualified gRPC service name used in error messages.
-const SERVICE_NAME: &str = "modules.dscp.controlplane.dscppb.v1.DscpService";
 
 fn client(channel: LayeredChannel) -> DscpServiceClient<LayeredChannel> {
     DscpServiceClient::new(channel)
