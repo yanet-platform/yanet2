@@ -124,10 +124,10 @@ type FWStateService struct {
 	// configs owns the published configs and the superseded ones whose
 	// free was refused because a live configuration generation still
 	// referenced them; it retries those on the next update, through
-	// ReclaimDeferred, and nothing else remembers them. The store's
-	// writer side serializes whole mutations, publish included, while
-	// its read side guards the entries alone and is never held across
-	// a shared-memory call, so read paths stay responsive while a
+	// ReclaimDeferred, and nothing else remembers them. The store
+	// serializes whole mutations per name, publish included, while its
+	// read side guards the entries alone and is never held across a
+	// shared-memory call, so read paths stay responsive while a
 	// publish is slow.
 	configs *configstore.Store[*FwStateConfig]
 
