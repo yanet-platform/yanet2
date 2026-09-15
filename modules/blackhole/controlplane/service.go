@@ -11,8 +11,6 @@ import (
 	blackholepb "github.com/yanet-platform/yanet2/modules/blackhole/controlplane/blackholepb/v1"
 )
 
-var errConfigNameRequired = status.Error(codes.InvalidArgument, "config name is required")
-
 // ModuleHandle is a handle to a module configuration.
 type ModuleHandle interface {
 	Free() error
@@ -71,10 +69,6 @@ func (m *BlackholeService) ShowConfig(
 	req *blackholepb.ShowConfigRequest,
 ) (*blackholepb.ShowConfigResponse, error) {
 	name := req.GetName()
-	if name == "" {
-		return nil, errConfigNameRequired
-	}
-
 	if _, ok := m.configs.Get(name); !ok {
 		return nil, status.Error(codes.NotFound, "no config found")
 	}
@@ -89,10 +83,6 @@ func (m *BlackholeService) UpdateConfig(
 	req *blackholepb.UpdateConfigRequest,
 ) (*blackholepb.UpdateConfigResponse, error) {
 	name := req.GetName()
-	if name == "" {
-		return nil, errConfigNameRequired
-	}
-
 	err := m.configs.Update(name, func(*config, bool) (*config, error) {
 		module, err := m.backend.UpdateModule(name)
 		if err != nil {
@@ -117,10 +107,6 @@ func (m *BlackholeService) DeleteConfig(
 	req *blackholepb.DeleteConfigRequest,
 ) (*blackholepb.DeleteConfigResponse, error) {
 	name := req.GetName()
-	if name == "" {
-		return nil, errConfigNameRequired
-	}
-
 	err := m.configs.Delete(name, func(*config) error {
 		return m.backend.DeleteModule(name)
 	})
