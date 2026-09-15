@@ -30,7 +30,7 @@ import (
 type ModuleHandle interface {
 	Free() error
 	AsFFIModule() ffi.ModuleConfig
-	GetInfo() *cacl.AclConfigInfo
+	GetInfo() *cacl.ACLConfigInfo
 }
 
 // Backend abstracts shared-memory operations for the ACL service.
@@ -40,7 +40,7 @@ type Backend interface {
 	// linked. The returned handle is not yet published to the dataplane.
 	NewModule(
 		name string,
-		rules []cacl.AclRule,
+		rules []cacl.ACLRule,
 		fw4MapName, fw6MapName string,
 	) (ModuleHandle, error)
 	// UpdateModule publishes handle to dp_config_gen so the dataplane
@@ -95,7 +95,7 @@ type aclConfig struct {
 	fw6MapName string
 	// info is the compile metadata copied out of the module before it
 	// was published, so metrics never call into a handle.
-	info cacl.AclConfigInfo
+	info cacl.ACLConfigInfo
 }
 
 // Rules returns the rules held by the config.
@@ -104,7 +104,7 @@ func (m *aclConfig) Rules() []*aclpb.Rule {
 }
 
 // Info returns the compile metadata of the config's module.
-func (m *aclConfig) Info() cacl.AclConfigInfo {
+func (m *aclConfig) Info() cacl.ACLConfigInfo {
 	return m.info
 }
 
@@ -199,9 +199,9 @@ func (m *ACLService) retention() func(metrics.MetricID) bool {
 }
 
 // configInfos returns the compile metadata of every published config.
-func (m *ACLService) configInfos() map[string]cacl.AclConfigInfo {
+func (m *ACLService) configInfos() map[string]cacl.ACLConfigInfo {
 	names := m.configs.Names()
-	infos := make(map[string]cacl.AclConfigInfo, len(names))
+	infos := make(map[string]cacl.ACLConfigInfo, len(names))
 	for _, name := range names {
 		if config, ok := m.configs.Get(name); ok {
 			infos[name] = config.Info()
@@ -254,8 +254,8 @@ func mergedNet6s(legacy []*filterpb.IPNet, typed []*commonpb.IPv6Network) ([]xne
 	return append(nets, typedNets...), nil
 }
 
-func convertRules(reqRules []*aclpb.Rule) ([]cacl.AclRule, error) {
-	rules := make([]cacl.AclRule, 0, len(reqRules))
+func convertRules(reqRules []*aclpb.Rule) ([]cacl.ACLRule, error) {
+	rules := make([]cacl.ACLRule, 0, len(reqRules))
 	for _, reqRule := range reqRules {
 		devices, err := filterpbconv.ToDevices(reqRule.Devices)
 		if err != nil {
@@ -301,7 +301,7 @@ func convertRules(reqRules []*aclpb.Rule) ([]cacl.AclRule, error) {
 		if err != nil {
 			return nil, err
 		}
-		rule := cacl.AclRule{
+		rule := cacl.ACLRule{
 			Actions:       actions,
 			Counter:       reqRule.GetCounter(),
 			Devices:       devices,

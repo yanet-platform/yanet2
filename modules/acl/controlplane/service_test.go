@@ -54,7 +54,7 @@ func waitOnChan(t *testing.T, ch <-chan struct{}, msg string) {
 type fakeHandle struct {
 	mu          sync.Mutex
 	name        string
-	rules       []cacl.AclRule
+	rules       []cacl.ACLRule
 	fw4MapName  string
 	fw6MapName  string
 	freeCount   int
@@ -87,19 +87,19 @@ func (m *fakeHandle) Name() string {
 }
 
 // Rules returns a copy of the rules the handle was constructed with.
-func (m *fakeHandle) Rules() []cacl.AclRule {
+func (m *fakeHandle) Rules() []cacl.ACLRule {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	return append([]cacl.AclRule(nil), m.rules...)
+	return append([]cacl.ACLRule(nil), m.rules...)
 }
 
 func (m *fakeHandle) AsFFIModule() ffi.ModuleConfig {
 	return ffi.ModuleConfig{}
 }
 
-func (m *fakeHandle) GetInfo() *cacl.AclConfigInfo {
-	return &cacl.AclConfigInfo{
+func (m *fakeHandle) GetInfo() *cacl.ACLConfigInfo {
+	return &cacl.ACLConfigInfo{
 		CompilationTimeNs:  42,
 		FilterRuleCountIp4: 7,
 	}
@@ -280,7 +280,7 @@ func newMetricsSnapshotHarness(testingTB testing.TB) (*dataplaneut.Harness, *ffi
 
 func (m *fakeBackend) NewModule(
 	name string,
-	rules []cacl.AclRule,
+	rules []cacl.ACLRule,
 	fw4MapName, fw6MapName string,
 ) (acl.ModuleHandle, error) {
 	m.mu.Lock()
@@ -471,7 +471,7 @@ func (m *compileBlockingBackend) entryOrder() []string {
 
 func (m *compileBlockingBackend) NewModule(
 	name string,
-	rules []cacl.AclRule,
+	rules []cacl.ACLRule,
 	fw4MapName, fw6MapName string,
 ) (acl.ModuleHandle, error) {
 	block := m.recordEntry(name)

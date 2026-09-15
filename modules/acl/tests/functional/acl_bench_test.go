@@ -28,7 +28,7 @@ var benchBatchSizes = []int{1, 2, 4, 8, 16, 32}
 //
 // Sub-benchmarks are named batch=N for each N in benchBatchSizes.
 func BenchmarkACLAllow(b *testing.B) {
-	rules := []cacl.AclRule{
+	rules := []cacl.ACLRule{
 		allow4Rule(
 			[]xnetip.Contiguous[xnetip.Network4]{xnetip.MustParseContiguous4("192.0.2.0/255.255.255.0")},
 			[]xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
@@ -74,7 +74,7 @@ func BenchmarkACLAllow(b *testing.B) {
 //
 // Sub-benchmarks are named batch=N for each N in benchBatchSizes.
 func BenchmarkACLDeny(b *testing.B) {
-	rules := []cacl.AclRule{
+	rules := []cacl.ACLRule{
 		deny4Rule(
 			[]xnetip.Contiguous[xnetip.Network4]{xnetip.MustParseContiguous4("192.0.2.0/255.255.255.0")},
 			[]xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
@@ -211,7 +211,7 @@ const benchRuleScaleBatch = 32
 func BenchmarkACLAllowRuleScale(b *testing.B) {
 	for _, n := range []int{1, 100, 1000, 10000} {
 		b.Run(fmt.Sprintf("rules=%d", n), func(b *testing.B) {
-			rules := make([]cacl.AclRule, n)
+			rules := make([]cacl.ACLRule, n)
 			for idx := range n {
 				hostIP := benchHostIP(idx)
 				addr, ok := netip.AddrFromSlice(hostIP.To4())
@@ -248,7 +248,7 @@ func BenchmarkACLAllowRuleScale(b *testing.B) {
 //
 // Sub-benchmarks are named batch=N for each N in benchBatchSizes.
 func BenchmarkACLAllowDiverseFlow(b *testing.B) {
-	rules := []cacl.AclRule{
+	rules := []cacl.ACLRule{
 		allow4Rule(
 			[]xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
 			[]xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},

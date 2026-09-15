@@ -124,15 +124,15 @@ func datasetNet6(t testing.TB, s string) xnetip.BiContiguous {
 	return typed
 }
 
-func convertDatasetRule(t testing.TB, raw datasetRule) cacl.AclRule {
-	rule := cacl.AclRule{
+func convertDatasetRule(t testing.TB, raw datasetRule) cacl.ACLRule {
+	rule := cacl.ACLRule{
 		Counter:  raw.Counter,
 		Fragment: filter.Fragment(raw.Fragment.Kind),
 	}
 	for _, action := range raw.Actions {
 		rule.Actions = append(
 			rule.Actions,
-			cacl.AclAction{Kind: datasetActionKind(t, action.Kind)},
+			cacl.ACLAction{Kind: datasetActionKind(t, action.Kind)},
 		)
 	}
 	for _, device := range raw.Devices {
@@ -183,14 +183,14 @@ func convertDatasetRule(t testing.TB, raw datasetRule) cacl.AclRule {
 	return rule
 }
 
-func loadDatasetRules(t testing.TB, path string) []cacl.AclRule {
+func loadDatasetRules(t testing.TB, path string) []cacl.ACLRule {
 	raw, err := os.ReadFile(path)
 	require.NoError(t, err)
 	var doc struct {
 		Rules []datasetRule `json:"rules"`
 	}
 	require.NoError(t, json.Unmarshal(raw, &doc))
-	rules := make([]cacl.AclRule, 0, len(doc.Rules))
+	rules := make([]cacl.ACLRule, 0, len(doc.Rules))
 	for _, raw := range doc.Rules {
 		rules = append(rules, convertDatasetRule(t, raw))
 	}
@@ -240,7 +240,7 @@ func randomNet4(r *rand.Rand) xnetip.Contiguous[xnetip.Network4] {
 // the vast majority are IPv6 rules with port constraints, sources are
 // far more diverse than destinations, prefixes nest inside a small set
 // of supernets, and a catch-all deny terminates the set.
-func generateDatasetRules(count int) []cacl.AclRule {
+func generateDatasetRules(count int) []cacl.ACLRule {
 	r := rand.New(rand.NewSource(42))
 
 	supernets := make([]netip.Addr, 64)
@@ -283,19 +283,19 @@ func generateDatasetRules(count int) []cacl.AclRule {
 		return datasetProtoUDP
 	}
 
-	action := func() []cacl.AclAction {
+	action := func() []cacl.ACLAction {
 		if r.Intn(100) < 70 {
-			return []cacl.AclAction{{Kind: uint32(cacl.ActionAllow)}}
+			return []cacl.ACLAction{{Kind: uint32(cacl.ActionAllow)}}
 		}
-		return []cacl.AclAction{
+		return []cacl.ACLAction{
 			{Kind: uint32(cacl.ActionCount)},
 			{Kind: uint32(cacl.ActionDeny)},
 		}
 	}
 
-	rules := make([]cacl.AclRule, 0, count+1)
+	rules := make([]cacl.ACLRule, 0, count+1)
 	for idx := range count {
-		rule := cacl.AclRule{
+		rule := cacl.ACLRule{
 			Counter: fmt.Sprintf("dataset_%d", idx),
 			Actions: action(),
 			VlanRanges: []filter.VlanRange{
@@ -334,9 +334,9 @@ func generateDatasetRules(count int) []cacl.AclRule {
 		rules = append(rules, rule)
 	}
 
-	rules = append(rules, cacl.AclRule{
+	rules = append(rules, cacl.ACLRule{
 		Counter: "dataset_catch_all",
-		Actions: []cacl.AclAction{
+		Actions: []cacl.ACLAction{
 			{Kind: uint32(cacl.ActionCount)},
 			{Kind: uint32(cacl.ActionDeny)},
 		},
@@ -479,7 +479,7 @@ func hostInNet(network flowNet, hostBits int) net.IP {
 // cells the way mixed real traffic does. Uniform sampling over rules is
 // a worst-case-ish cache workload — real traffic is more skewed.
 func synthesizeDatasetPackets(
-	tb testing.TB, rules []cacl.AclRule, limit int,
+	tb testing.TB, rules []cacl.ACLRule, limit int,
 ) []gopacket.Packet {
 	type flowSeed struct {
 		src flowNet
@@ -583,7 +583,7 @@ func synthesizeDatasetPackets(
 // synthesized production-shaped set.
 func datasetBenchRules(
 	b *testing.B,
-) ([]cacl.AclRule, datasize.ByteSize, datasize.ByteSize, error) {
+) ([]cacl.ACLRule, datasize.ByteSize, datasize.ByteSize, error) {
 	if path := os.Getenv("ACL_DATASET_RULES"); path != "" {
 		rules := loadDatasetRules(b, path)
 		return rules, 24 * datasize.GB, 16 * datasize.GB, nil
@@ -604,7 +604,7 @@ func datasetBenchRules(
 // datasetBenchPackets resolves the benchmark traffic: a real capture
 // from ACL_DATASET_PCAP or flows synthesized from the ruleset.
 func datasetBenchPackets(
-	b *testing.B, rules []cacl.AclRule,
+	b *testing.B, rules []cacl.ACLRule,
 ) ([]gopacket.Packet, error) {
 	if path := os.Getenv("ACL_DATASET_PCAP"); path != "" {
 		return loadDatasetPackets(path, 4096)
@@ -756,7 +756,7 @@ var (
 // production. The remaining replayed devices deliberately stay
 // rule-free: in the production dump they carry traffic but no rules,
 // so their share of the replay exercises the genuine no-match path.
-func assignDatasetTopoDevices(rules []cacl.AclRule) {
+func assignDatasetTopoDevices(rules []cacl.ACLRule) {
 	ruleBearing := []filter.Device{
 		{Name: "lp.kni0.1619"},
 		{Name: "lp.kni0.1600"},
