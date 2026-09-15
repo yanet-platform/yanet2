@@ -14,10 +14,8 @@ use ync::{
 use ynpb::pb::{
     CounterTag, CountersByTagsRequest, CountersByTagsResponse, PortCountersRequest, PortCountersResponse,
     WorkerCounter, WorkerCountersRequest, WorkerCountersResponse, WorkerRxMempool,
-    counters_service_client::CountersServiceClient,
+    counters_service_client::CountersServiceClient, counters_service_server::SERVICE_NAME as COUNTERS_SERVICE,
 };
-
-const COUNTERS_SERVICE: &str = "controlplane.ynpb.v1.CountersService";
 
 /// Displays dataplane counters.
 #[derive(Debug, Clone, Parser)]

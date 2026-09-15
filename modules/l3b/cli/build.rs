@@ -5,7 +5,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     tonic_prost_build::configure()
         .emit_rerun_if_changed(false)
-        .build_server(false)
+        .build_server(true)
         .extern_path(".common.filterpb.v1", "::filterpb::pb")
         .message_attribute(".", "#[derive(Serialize)]")
         .compile_protos(&["modules/l3b/controlplane/l3bpb/v1/l3b.proto"], &["../../.."])?;

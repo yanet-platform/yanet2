@@ -1,5 +1,5 @@
-//! Build-script helper for the yanet CLI crates: one client-only tonic
-//! build with the settings every crate shares.
+//! Build-script helper for the yanet CLI crates: one tonic build with the
+//! settings every crate shares.
 
 use core::error::Error;
 use std::path::{Path, PathBuf};
@@ -14,12 +14,14 @@ pub struct Build {
     builder: Builder,
 }
 
-/// Starts a client-only build with the shared packages mapped to their
-/// crates and no rerun-if-changed noise.
+/// Starts a tonic build with shared packages mapped to their crates and no
+/// rerun-if-changed noise.
+///
+/// Server modules are generated so CLIs can use tonic's service-name constants.
 pub fn client(root: impl AsRef<Path>, protos: &[&str]) -> Build {
     let builder = tonic_prost_build::configure()
         .emit_rerun_if_changed(false)
-        .build_server(false)
+        .build_server(true)
         .extern_path(".common.commonpb.v1", "::commonpb::pb")
         .extern_path(".common.filterpb.v1", "::filterpb::pb");
 

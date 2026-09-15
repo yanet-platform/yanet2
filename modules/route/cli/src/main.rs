@@ -20,7 +20,7 @@ use crate::{
     fib::render::print_fib,
     routepb::{
         DeleteConfigRequest, ListConfigsRequest, ShowFibRequest, UpdateFibRequest,
-        route_service_client::RouteServiceClient,
+        route_service_client::RouteServiceClient, route_service_server::SERVICE_NAME,
     },
 };
 
@@ -185,9 +185,6 @@ pub struct FibShowCmd {
     #[arg(long = "name", short = 'n', add = ArgValueCandidates::new(config_candidates))]
     pub config_name: String,
 }
-
-/// The fully-qualified gRPC service name used in error messages.
-const SERVICE_NAME: &str = "modules.route.controlplane.routepb.v1.RouteService";
 
 fn client(channel: LayeredChannel) -> RouteServiceClient<LayeredChannel> {
     RouteServiceClient::new(channel)

@@ -14,20 +14,13 @@ use std::collections::BTreeMap;
 use clap::Command;
 use clap_complete::engine::CompletionCandidate;
 use tonic::codec::CompressionEncoding;
-use ynpb::pb::{ListServicesRequest, gateway_client::GatewayClient};
+use ynpb::pb::{ListServicesRequest, gateway_client::GatewayClient, gateway_server::SERVICE_NAME as GATEWAY_SERVICE};
 
 use crate::{
     client::{Connection, ConnectionArgs, LayeredChannel, Service},
     completion, config,
     errors::{Error, ErrorKind},
 };
-
-/// Fully-qualified name of the gateway registry service.
-///
-/// Taken from the `Gateway` service declaration in
-/// `controlplane/ynpb/v1/gateway.proto`, the wire contract — not from the
-/// generated tonic module name, which is a Rust-side artefact.
-const GATEWAY_SERVICE: &str = "controlplane.ynpb.v1.Gateway";
 
 /// Budget for a best-effort gateway lookup: an error hint, a shell completion.
 ///

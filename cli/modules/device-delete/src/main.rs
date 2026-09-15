@@ -10,10 +10,10 @@ use ync::{
     errors::Error,
     output,
 };
-use ynpb::pb::{DeleteDeviceRequest, ListDevicesRequest, device_service_client::DeviceServiceClient};
-
-/// The fully-qualified gRPC service name used in error messages.
-const SERVICE_NAME: &str = "controlplane.ynpb.v1.DeviceService";
+use ynpb::pb::{
+    DeleteDeviceRequest, ListDevicesRequest, device_service_client::DeviceServiceClient,
+    device_service_server::SERVICE_NAME,
+};
 
 fn client(channel: LayeredChannel) -> DeviceServiceClient<LayeredChannel> {
     DeviceServiceClient::new(channel)

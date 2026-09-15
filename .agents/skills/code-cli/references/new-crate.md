@@ -76,9 +76,9 @@ fn main() -> Result<(), Box<dyn Error>> {
 }
 ```
 
-`ync_build::client` builds a client-only crate, `extern_path`s the shared
-packages (`common.commonpb.v1`, `common.filterpb.v1`) to their crates and
-watches the listed protos; a proto they import is not watched.
+`ync_build::client` builds the generated client and server modules, maps the
+shared packages (`common.commonpb.v1`, `common.filterpb.v1`) to their crates
+and watches the listed protos; a proto they import is not watched.
 
 ## src/main.rs
 
@@ -101,16 +101,13 @@ use ync::{
 
 use crate::<x>pb::{
     DeleteConfigRequest, ListConfigsRequest, ShowConfigRequest, UpdateConfigRequest,
-    <x>_service_client::<X>ServiceClient,
+    <x>_service_client::<X>ServiceClient, <x>_service_server::SERVICE_NAME,
 };
 
 #[allow(clippy::std_instead_of_core, non_snake_case)]
 pub mod <x>pb {
     tonic::include_proto!("<proto package>");
 }
-
-/// The fully-qualified gRPC service name used in error messages.
-const SERVICE_NAME: &str = "<proto package>.<X>Service";
 
 fn client(channel: LayeredChannel) -> <X>ServiceClient<LayeredChannel> {
     <X>ServiceClient::new(channel)

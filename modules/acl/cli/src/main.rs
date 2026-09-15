@@ -2,7 +2,8 @@ use std::collections::HashMap;
 
 use aclpb::{
     DeleteConfigRequest, GetMetricsRulesRequest, GetRulesCountersRequest, ListConfigsRequest, ShowConfigRequest,
-    UpdateConfigRequest, acl_service_client::AclServiceClient, metrics_service_client::MetricsServiceClient,
+    UpdateConfigRequest, acl_service_client::AclServiceClient, acl_service_server::SERVICE_NAME as ACL_SERVICE_NAME,
+    metrics_service_client::MetricsServiceClient, metrics_service_server::SERVICE_NAME as METRICS_SERVICE_NAME,
 };
 use args::{DeleteCmd, MetricsRulesCmd, ModeCmd, RuleCountersCmd, ShowCmd, UpdateCmd};
 use clap::{CommandFactory, Parser};
@@ -219,10 +220,6 @@ pub struct Cmd {
     pub globals: GlobalArgs,
 }
 
-/// The fully-qualified gRPC service name used in error messages.
-const SERVICE_NAME: &str = "modules.acl.controlplane.aclpb.v1.ACLService";
-const METRICS_SERVICE_NAME: &str = "modules.acl.controlplane.aclpb.v1.MetricsService";
-
 fn client(channel: LayeredChannel) -> AclServiceClient<LayeredChannel> {
     AclServiceClient::new(channel)
         .max_decoding_message_size(256 * 1024 * 1024)
@@ -247,7 +244,7 @@ pub struct ACLService {
 impl ACLService {
     pub async fn new(connection: &ConnectionArgs, action: &'static str) -> Result<Self, Error> {
         let conn = Connection::connect_for(connection, action).await?;
-        let service = Service::new(&conn, SERVICE_NAME, client);
+        let service = Service::new(&conn, ACL_SERVICE_NAME, client);
         let metrics = Service::new(&conn, METRICS_SERVICE_NAME, metrics_client);
 
         Ok(Self { service, metrics })

@@ -6,7 +6,7 @@ use commonpb::pb::{Device, DevicePipeline};
 use tonic::codec::CompressionEncoding;
 use trafgenpb::{
     ListConfigsRequest, SetRateRequest, ShowConfigRequest, UpdateDeviceRequest, UploadPcapRequest,
-    trafgen_service_client::TrafgenServiceClient,
+    trafgen_service_client::TrafgenServiceClient, trafgen_service_server::SERVICE_NAME,
 };
 use ync::{
     GlobalArgs,
@@ -97,9 +97,6 @@ pub struct SetRateCmd {
     #[arg(long, short = 'r')]
     pub rate: u64,
 }
-
-/// The fully-qualified gRPC service name used in error messages.
-const SERVICE_NAME: &str = "devices.trafgen.controlplane.trafgenpb.v1.TrafgenService";
 
 fn client(channel: LayeredChannel) -> TrafgenServiceClient<LayeredChannel> {
     TrafgenServiceClient::new(channel)

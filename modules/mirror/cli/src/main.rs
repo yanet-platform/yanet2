@@ -5,7 +5,7 @@ use clap_complete::engine::{ArgValueCandidates, CompletionCandidate};
 use commonpb::serde_with;
 use mirrorpb::{
     DeleteConfigRequest, ListConfigsRequest, ShowConfigRequest, UpdateConfigRequest,
-    mirror_service_client::MirrorServiceClient,
+    mirror_service_client::MirrorServiceClient, mirror_service_server::SERVICE_NAME,
 };
 use serde::{Deserializer, Serializer};
 use tonic::codec::CompressionEncoding;
@@ -102,9 +102,6 @@ fn serialize_mirror_mode<S: Serializer>(mode: &i32, serializer: S) -> Result<S::
 fn deserialize_mirror_mode<'de, D: Deserializer<'de>>(deserializer: D) -> Result<i32, D::Error> {
     serde_with::from_declared_name(deserializer, mirrorpb::MirrorMode::from_str_name)
 }
-
-/// The fully-qualified gRPC service name used in error messages.
-const SERVICE_NAME: &str = "modules.mirror.controlplane.mirrorpb.v1.MirrorService";
 
 fn client(channel: LayeredChannel) -> MirrorServiceClient<LayeredChannel> {
     MirrorServiceClient::new(channel)

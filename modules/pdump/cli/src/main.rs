@@ -3,7 +3,7 @@ use clap::{CommandFactory, Parser};
 use clap_complete::engine::CompletionCandidate;
 use pdumppb::{
     DeleteConfigRequest, ListConfigsRequest, ReadDumpRequest, ShowConfigRequest, ShowConfigResponse,
-    pdump_service_client::PdumpServiceClient,
+    pdump_service_client::PdumpServiceClient, pdump_service_server::SERVICE_NAME,
 };
 use tokio::{
     signal::{unix, unix::SignalKind},
@@ -54,9 +54,6 @@ async fn run(cmd: Cmd) -> Result<(), Error> {
         ModeCmd::Read(cmd) => read_dump(&mut service, cmd).await,
     }
 }
-
-/// The fully-qualified gRPC service name used in error messages.
-const SERVICE_NAME: &str = "modules.pdump.controlplane.pdumppb.v1.PdumpService";
 
 fn client(channel: LayeredChannel) -> PdumpServiceClient<LayeredChannel> {
     PdumpServiceClient::new(channel)

@@ -5,7 +5,7 @@ use clap_complete::engine::{ArgValueCandidates, CompletionCandidate};
 use nat64pb::{
     AddMappingRequest, AddPrefixRequest, Config, DeleteConfigRequest, ListConfigsRequest, RemoveMappingRequest,
     RemovePrefixRequest, SetDropUnknownRequest, SetMtuRequest, ShowConfigRequest,
-    nat64_service_client::Nat64ServiceClient,
+    nat64_service_client::Nat64ServiceClient, nat64_service_server::SERVICE_NAME,
 };
 use netip::{Contiguous, Ipv6Network};
 use tonic::codec::CompressionEncoding;
@@ -21,9 +21,6 @@ use ync::{
 pub mod nat64pb {
     tonic::include_proto!("modules.nat64.controlplane.nat64pb.v1");
 }
-
-/// The fully-qualified gRPC service name used in error messages.
-const SERVICE_NAME: &str = "modules.nat64.controlplane.nat64pb.v1.NAT64Service";
 
 fn client(channel: LayeredChannel) -> Nat64ServiceClient<LayeredChannel> {
     Nat64ServiceClient::new(channel)

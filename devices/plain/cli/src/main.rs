@@ -5,6 +5,7 @@ use clap_complete::engine::{ArgValueCandidates, CompletionCandidate};
 use commonpb::pb::{Device, DevicePipeline};
 use plainpb::{
     ShowDevicePlainRequest, UpdateDevicePlainRequest, device_plain_service_client::DevicePlainServiceClient,
+    device_plain_service_server::SERVICE_NAME,
 };
 use tabled::Tabled;
 use tonic::codec::CompressionEncoding;
@@ -69,9 +70,6 @@ pub struct UpdateCmd {
     #[arg(long, short = 'o')]
     pub output: Vec<DevicePipeline>,
 }
-
-/// The fully-qualified gRPC service name used in error messages.
-const SERVICE_NAME: &str = "devices.plain.controlplane.plainpb.v1.DevicePlainService";
 
 type DevicePlainService = Service<DevicePlainServiceClient<LayeredChannel>>;
 
