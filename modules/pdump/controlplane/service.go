@@ -1,24 +1,20 @@
 // Package pdump implements the control plane service for packet dumping.
 // This file defines PdumpService, which handles gRPC requests for configuring
 // and managing packet capture modules (identified by name).
-// It interacts with data plane agents via FFI (Foreign Function Interface)
-// to apply capture settings (filters, mode, snaplen, ring buffer size)
-// and to facilitate reading captured packets from shared ring buffers.
+// It keeps the published configuration of every name and serves the capture
+// streams reading it.
 package pdump
 
 import (
 	"context"
 	"errors"
-	"fmt"
-	"slices"
-	"sync"
 
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	"github.com/yanet-platform/yanet2/controlplane/ffi"
+	"github.com/yanet-platform/yanet2/controlplane/configstore"
 	"github.com/yanet-platform/yanet2/modules/pdump/controlplane/pdumppb/v1"
 )
 
@@ -49,48 +45,12 @@ type Backend interface {
 type PdumpService struct {
 	pdumppb.UnimplementedPdumpServiceServer
 
-	mu         sync.RWMutex            // Protects concurrent access to configs and ringReaders.
-	mutationMu sync.Mutex              // Serializes mutations and reader registration.
-	backend    Backend                 // Shared-memory operations of the module configs.
-	configs    map[string]*pdumpConfig // Map storing the active configuration for each pdump module, keyed by name.
-
-	// deferred holds superseded module handles whose free was refused
-	// because a live configuration generation still referenced them.
-	// This service is their owner: it retries them on its next update,
-	// through ReclaimDeferred, and nothing else remembers them.
-	deferred []*pdumpConfig
-	// Slice of active ring buffer readers, each corresponding to an ongoing ReadDump stream.
-	// Used to manage and terminate these readers during config updates or shutdown.
-	ringReaders []ringReader
-	quitCh      chan bool // Channel used to signal a graceful shutdown to all active ReadDump streams.
-	log         *zap.Logger
-}
-
-// pdumpConfig stores the configuration for a pdump module,
-// including packet filtering rules, capture mode, snapshot length, and ring buffer parameters.
-type pdumpConfig struct {
-	Filter   string      // libpcap expression string used to select packets for capture.
-	DumpMode uint32      // Bitmap that specifies the types of packets to capture (e.g., input, drops, ...).
-	Snaplen  uint32      // Snapshot length, the maximum number of bytes to capture from each packet.
-	Ring     *ringBuffer // Configuration for the shared ring buffer, including per-worker size.
-	Module   Module      // Published module config that needs to be freed when replaced
-}
-
-// Free releases the module handle held by the config.
-//
-// It is safe to call even when no handle is held.
-func (m *pdumpConfig) Free() error {
-	if m.Module == nil {
-		return nil
-	}
-	return m.Module.Free()
-}
-
-type ringReader struct {
-	Name   string
-	Ring   *ringBuffer
-	Cancel context.CancelCauseFunc
-	DoneCh chan bool
+	backend Backend
+	configs *configstore.Store[*capture]
+	// life ends every stream once the service shuts down.
+	life context.Context
+	stop context.CancelFunc
+	log  *zap.Logger
 }
 
 // PdumpServiceOption configures a packet capture service.
@@ -120,17 +80,23 @@ func NewPdumpService(backend Backend, options ...PdumpServiceOption) *PdumpServi
 		o(opts)
 	}
 
+	life, stop := context.WithCancel(context.Background())
+
 	return &PdumpService{
 		backend: backend,
-		configs: map[string]*pdumpConfig{},
-		quitCh:  make(chan bool),
+		configs: configstore.NewStore[*capture](),
+		life:    life,
+		stop:    stop,
 		log:     opts.Log,
 	}
 }
 
-// Shutdown signals a graceful shutdown to all active ReadDump streams.
+// Shutdown ends every active ReadDump stream.
+//
+// Each handler returns only after the readers it started have stopped, so
+// the shared memory may be released once the handlers have drained.
 func (m *PdumpService) Shutdown() {
-	close(m.quitCh)
+	m.stop()
 }
 
 // ListConfigs retrieves all configured packet capture modules.
@@ -138,19 +104,7 @@ func (m *PdumpService) ListConfigs(
 	ctx context.Context,
 	request *pdumppb.ListConfigsRequest,
 ) (*pdumppb.ListConfigsResponse, error) {
-
-	response := &pdumppb.ListConfigsResponse{
-		Configs: make([]string, 0),
-	}
-
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-
-	for name := range m.configs {
-		response.Configs = append(response.Configs, name)
-	}
-
-	return response, nil
+	return &pdumppb.ListConfigsResponse{Configs: m.configs.Names()}, nil
 }
 
 // ShowConfig retrieves the current configuration for a specific packet capture module.
@@ -160,22 +114,12 @@ func (m *PdumpService) ShowConfig(
 ) (*pdumppb.ShowConfigResponse, error) {
 	name := request.GetName()
 
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-
-	config, ok := m.configs[name]
+	current, ok := m.configs.Get(name)
 	if !ok {
 		return nil, status.Errorf(codes.NotFound, "config %q not found", name)
 	}
 
-	return &pdumppb.ShowConfigResponse{
-		Config: &pdumppb.Config{
-			Filter:   config.Filter,
-			Mode:     config.DumpMode,
-			Snaplen:  config.Snaplen,
-			RingSize: config.Ring.PerWorkerSize,
-		},
-	}, nil
+	return &pdumppb.ShowConfigResponse{Config: settingsProto(current.Settings())}, nil
 }
 
 // SetConfig updates or creates packet capture configuration.
@@ -186,16 +130,27 @@ func (m *PdumpService) SetConfig(
 ) (*pdumppb.SetConfigResponse, error) {
 	name := request.GetName()
 
-	m.mutationMu.Lock()
-	defer m.mutationMu.Unlock()
+	err := m.configs.Update(name, func(current *capture, ok bool) (*capture, error) {
+		settings := defaultSettings()
+		if ok {
+			settings = current.Settings()
+		}
+		settings = mergeSettings(settings, request)
 
-	err := m.updateConfig(
-		name,
-		request,
-		func(config *pdumpConfig) error {
-			return m.updateModuleConfig(name, config)
-		},
-	)
+		m.log.Debug("update config", zap.String("module", name))
+
+		module, err := m.backend.UpdateModule(name, settings)
+		if err != nil {
+			return nil, err
+		}
+
+		return &capture{
+			settings: settings,
+			module:   module,
+			readers:  newGate(),
+			log:      m.log,
+		}, nil
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -210,40 +165,17 @@ func (m *PdumpService) DeleteConfig(
 ) (*pdumppb.DeleteConfigResponse, error) {
 	name := request.GetName()
 
-	m.mutationMu.Lock()
-	defer m.mutationMu.Unlock()
+	err := m.configs.Delete(name, func(*capture) error {
+		if err := m.backend.DeleteModule(name); err != nil {
+			return status.Errorf(codes.Internal, "failed to delete module config %q: %v", name, err)
+		}
+		m.log.Info("deleted pdump config", zap.String("name", name))
 
-	m.mu.RLock()
-	config, ok := m.configs[name]
-	m.mu.RUnlock()
-	if !ok {
+		return nil
+	})
+	if errors.Is(err, configstore.ErrNotFound) {
 		return nil, status.Errorf(codes.NotFound, "config %q not found", name)
 	}
-
-	err := m.withReaderDrain(
-		name,
-		fmt.Errorf("terminated by config deletion"),
-		func() error {
-			// Delete the module config from the data plane if it exists.
-			if config.Module != nil {
-				if err := m.backend.DeleteModule(name); err != nil {
-					return status.Errorf(codes.Internal, "failed to delete module config %q: %v", name, err)
-				}
-
-				// The delete retired the generation holding this
-				// config; retry the deferred ones, then retire this
-				// one.
-				m.reclaimDeferred()
-				m.parkOrFree(config)
-			}
-
-			delete(m.configs, name)
-			m.log.Info("deleted pdump config",
-				zap.String("name", name),
-			)
-			return nil
-		},
-	)
 	if err != nil {
 		return nil, err
 	}
@@ -251,293 +183,82 @@ func (m *PdumpService) DeleteConfig(
 	return &pdumppb.DeleteConfigResponse{}, nil
 }
 
-// updateModuleConfig publishes the current configuration after all readers of
-// the previous ring have stopped and the state lock has been reacquired.
-func (m *PdumpService) updateModuleConfig(
-	name string,
-	modConfig *pdumpConfig,
-) error {
-	if m.backend == nil {
-		return fmt.Errorf("pdump backend is required")
-	}
-
-	m.log.Debug("update config", zap.String("module", name))
-
-	module, err := m.backend.UpdateModule(name, Settings{
-		Filter:   modConfig.Filter,
-		Mode:     modConfig.DumpMode,
-		Snaplen:  modConfig.Snaplen,
-		RingSize: modConfig.Ring.PerWorkerSize,
-	})
-	if err != nil {
-		return err
-	}
-
-	// The update retired the generation holding the old module, so
-	// retry this service's deferred handles, then retire the old module
-	// itself: freed outright when dangling, parked while a pinned
-	// generation still references it.
-	m.reclaimDeferred()
-	// Park a copy, since the config itself goes on to hold the new module.
-	replaced := *modConfig
-	m.parkOrFree(&replaced)
-
-	modConfig.Module = module
-
-	return nil
-}
-
 // ReadDump streams captured packets from the specified packet capture module.
-// This function establishes a continuous stream of packet data by:
-//  1. Validating the target module (name)
-//  2. Building readers over the published rings with their own read positions
-//  3. Spawning ring buffer readers that continuously monitor shared memory
-//  4. Forwarding captured packet records to the gRPC stream
 //
 // The stream continues until one of the following termination conditions occurs:
 //   - The client disconnects (context cancellation from the gRPC stream)
-//   - The service is shut down (signaled via m.quitCh)
+//   - The service is shut down
 //   - An error occurs while sending a packet record on the stream
-//   - The configuration of this module is updated (updateModuleConfig terminates matching readers)
+//   - The configuration of this module is updated or deleted
 //
-// Note: every request reads the rings through its own read positions, so
-// concurrent ReadDump requests do not interfere with each other.
+// Every request reads the rings through its own read positions, so
+// concurrent ReadDump requests do not interfere with each other. The handler
+// returns only after its readers have stopped reading those rings.
 func (m *PdumpService) ReadDump(req *pdumppb.ReadDumpRequest, stream grpc.ServerStreamingServer[pdumppb.Record]) error {
-	ctx := stream.Context()
-
 	name := req.GetName()
-	recordCh := make(chan *pdumppb.Record, 16)
-	cancel, err := m.registerRingReaders(ctx, name, recordCh)
-	if err != nil {
-		return err
-	}
-	defer cancel(fmt.Errorf("streaming completed"))
 
-	// Main streaming loop: forward packets from ring readers to gRPC client
+	ctx, cancel := context.WithCancel(stream.Context())
+	defer cancel()
+	defer context.AfterFunc(m.life, cancel)()
+
 	for {
-		select {
-		case rec, ok := <-recordCh:
-			if !ok {
-				// Ring readers have finished (likely due to context cancellation)
-				m.log.Info("ring buffer readers have exited, terminating stream...")
-				return nil
-			}
-			// Forward the packet record to the gRPC client
-			if err := stream.Send(rec); err != nil {
-				return err
-			}
-		case <-ctx.Done():
-			// Client disconnected or request was cancelled
-			return ctx.Err()
-		case <-m.quitCh:
-			// Service is shutting down gracefully
-			m.log.Info("pdump service shut down; closing ReadDump request")
-			return nil
+		current, ok := m.configs.Get(name)
+		if !ok {
+			return status.Errorf(codes.NotFound, "config %q not found", name)
+		}
+
+		// A capture retired between the lookup and the start of the
+		// stream is replaced by a newer one, or by nothing.
+		if err := current.Read(ctx, stream.Send); !errors.Is(err, errRetired) {
+			return err
 		}
 	}
 }
 
-// registerRingReaders validates the config and registers readers while
-// preventing a concurrent config lifecycle operation from publishing a new
-// ring buffer before registration completes.
-func (m *PdumpService) registerRingReaders(
-	ctx context.Context,
-	name string,
-	recordCh chan<- *pdumppb.Record,
-) (context.CancelCauseFunc, error) {
-	m.mutationMu.Lock()
-	defer m.mutationMu.Unlock()
-
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	config, ok := m.configs[name]
-	if !ok {
-		return nil, fmt.Errorf("config for %s does not exist", name)
-	}
-	if config.Module == nil {
-		return nil, fmt.Errorf("config for %s is not initialized properly", name)
-	}
-	rings := config.Module.Rings()
-	if len(rings) == 0 {
-		return nil, fmt.Errorf("config for %s is not initialized properly", name)
-	}
-	// Every ReadDump request reads the published rings through its own
-	// read positions, so concurrent requests do not interfere.
-	ring := &ringBuffer{
-		workers:       workerAreas(rings, m.log),
-		PerWorkerSize: config.Ring.PerWorkerSize,
-		ReadChunkSize: config.Ring.ReadChunkSize,
-	}
-
-	return m.spawnRingReaders(ctx, name, ring, recordCh), nil
-}
-
-func (m *PdumpService) updateConfig(
-	name string,
-	request *pdumppb.SetConfigRequest,
-	publish func(config *pdumpConfig) error,
-) error {
-	newConfig, err := m.prepareConfig(name, request)
-	if err != nil {
-		return err
-	}
-
-	return m.withReaderDrain(
-		name,
-		fmt.Errorf("terminated by config update"),
-		func() error {
-			if err := publish(newConfig); err != nil {
-				return err
-			}
-			m.configs[name] = newConfig
-
-			return nil
-		},
-	)
-}
-
-func (m *PdumpService) prepareConfig(name string, request *pdumppb.SetConfigRequest) (*pdumpConfig, error) {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-
-	newConfig := *defaultModuleConfig()
-	config, ok := m.configs[name]
-	if ok {
-		// Create a copy of the config to ensure atomic updates.
-		newRing := newConfig.Ring // Preserve the new ring.
-		newConfig = *config
-		newRing.PerWorkerSize = newConfig.Ring.PerWorkerSize
-		newRing.ReadChunkSize = newConfig.Ring.ReadChunkSize
-		newConfig.Ring = newRing // Restore the new ring.
-	}
-
-	if request.UpdateMask != nil && len(request.UpdateMask.Paths) > 0 {
-		for _, path := range request.UpdateMask.Paths {
-			switch path {
-			case "filter":
-				newConfig.Filter = request.Config.GetFilter()
-			case "mode":
-				mode := request.Config.GetMode()
-				if mode == 0 {
-					mode = defaultMode
-				}
-				newConfig.DumpMode = mode
-			case "snaplen":
-				newConfig.Snaplen = request.Config.GetSnaplen()
-			case "ring_size":
-				newConfig.Ring.PerWorkerSize = request.Config.GetRingSize()
-			}
-		}
-	}
-	return &newConfig, nil
-}
-
-func (m *PdumpService) stopRingReaders(name string, cause error) []chan bool {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	doneChannels := make([]chan bool, 0)
-	for _, rr := range m.ringReaders {
-		if rr.Name != name {
-			continue
-		}
-		rr.Cancel(cause)
-		doneChannels = append(doneChannels, rr.DoneCh)
-	}
-	m.ringReaders = slices.DeleteFunc(m.ringReaders, func(rr ringReader) bool {
-		return rr.Name == name
-	})
-	return doneChannels
-}
-
-// withReaderDrain waits for readers before publishing state while the caller
-// holds the lifecycle lock.
-func (m *PdumpService) withReaderDrain(name string, cause error, publish func() error) error {
-	doneChannels := m.stopRingReaders(name, cause)
-	m.waitRingReaders(name, doneChannels)
-
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return publish()
-}
-
-func (m *PdumpService) waitRingReaders(name string, doneChannels []chan bool) {
-	for _, doneChannel := range doneChannels {
-		m.log.Info("waiting for ring reader to complete", zap.String("name", name))
-		<-doneChannel
-	}
-}
-
-// spawnRingReaders initializes a new set of ring buffer readers for packet capture.
-// It launches a goroutine that continuously reads packets and forwards them to the record channel.
-// This function assumes m.mu is already locked by the caller.
-func (m *PdumpService) spawnRingReaders(ctx context.Context, name string, ring *ringBuffer, recordCh chan<- *pdumppb.Record) context.CancelCauseFunc {
-	ctx, cancel := context.WithCancelCause(ctx)
-	reader := ringReader{
-		Name:   name,
-		Ring:   ring,
-		Cancel: cancel,
-		DoneCh: make(chan bool),
-	}
-	m.ringReaders = append(m.ringReaders, reader)
-
-	m.log.Info("start ring readers", zap.Int("count", ring.WorkerCount()))
-	go func() {
-		info := ring.RunReaders(ctx, recordCh)
-		m.log.Info("ring readers stopped", zap.Any("info", info))
-		close(recordCh)
-		close(reader.DoneCh)
-	}()
-	return cancel
-}
-
-// defaultModuleConfig creates a new module configuration with default values:
-// - No packet filter (captures all packets)
-// - Input packet capture mode
-// - System default snapshot length
-// - Minimum ring buffer size
-func defaultModuleConfig() *pdumpConfig {
-	return &pdumpConfig{
-		Filter:   "",
-		DumpMode: defaultMode,
+// defaultSettings are the capture parameters of a config that was never
+// updated: every packet on input, the system snapshot length and the
+// smallest ring.
+func defaultSettings() Settings {
+	return Settings{
+		Mode:     defaultMode,
 		Snaplen:  defaultSnaplen,
-		Ring: &ringBuffer{
-			PerWorkerSize: uint32(minRingSize.Bytes()),
-			ReadChunkSize: uint32(defaultReadChunkSize.Bytes()),
-		},
+		RingSize: uint32(minRingSize.Bytes()),
 	}
 }
 
-// parkOrFree frees the config when it is dangling and parks it for
-// retry when a live generation still references it. The caller must
-// hold m.mu.
-func (m *PdumpService) parkOrFree(handle *pdumpConfig) {
-	if err := handle.Free(); errors.Is(err, ffi.ErrStillReferenced) {
-		m.deferred = append(m.deferred, handle)
+// mergeSettings applies the fields the request names to the settings.
+func mergeSettings(settings Settings, request *pdumppb.SetConfigRequest) Settings {
+	if request.UpdateMask == nil {
+		return settings
 	}
-}
 
-// ReclaimDeferred retries every deferred config, dropping the ones whose
-// generations have drained and keeping the rest deferred. It is the
-// reclamation handler for this module's superseded configs; the service
-// itself runs it after each successful publish, and anything else may
-// call it at any time.
-func (m *PdumpService) ReclaimDeferred() {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.reclaimDeferred()
-}
-
-// reclaimDeferred is ReclaimDeferred without the lock. The caller must
-// hold m.mu.
-func (m *PdumpService) reclaimDeferred() {
-	kept := m.deferred[:0]
-	for _, handle := range m.deferred {
-		if err := handle.Free(); errors.Is(err, ffi.ErrStillReferenced) {
-			kept = append(kept, handle)
+	for _, path := range request.UpdateMask.Paths {
+		switch path {
+		case "filter":
+			settings.Filter = request.Config.GetFilter()
+		case "mode":
+			mode := request.Config.GetMode()
+			if mode == 0 {
+				mode = defaultMode
+			}
+			settings.Mode = mode
+		case "snaplen":
+			settings.Snaplen = request.Config.GetSnaplen()
+		case "ring_size":
+			settings.RingSize = request.Config.GetRingSize()
 		}
 	}
-	clear(m.deferred[len(kept):])
-	m.deferred = kept
+
+	return settings
+}
+
+// settingsProto renders the settings as the configuration a client reads
+// back.
+func settingsProto(settings Settings) *pdumppb.Config {
+	return &pdumppb.Config{
+		Filter:   settings.Filter,
+		Mode:     settings.Mode,
+		Snaplen:  settings.Snaplen,
+		RingSize: settings.RingSize,
+	}
 }
