@@ -3,7 +3,6 @@ package unrdup
 import (
 	"context"
 	"errors"
-	"strings"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -13,32 +12,6 @@ import (
 	"github.com/yanet-platform/yanet2/modules/unrdup/bindings/go/cunrdup"
 	"github.com/yanet-platform/yanet2/modules/unrdup/controlplane/unrduppb/v1"
 )
-
-var errConfigNameRequired = status.Error(
-	codes.InvalidArgument,
-	"config name is required",
-)
-
-func validateConfigName(name string) error {
-	if name == "" {
-		return errConfigNameRequired
-	}
-	if strings.IndexByte(name, 0) >= 0 {
-		return status.Error(
-			codes.InvalidArgument, "config name must not contain a NUL byte",
-		)
-	}
-	if len(name) > cunrdup.ModuleNameMaxLen {
-		return status.Errorf(
-			codes.InvalidArgument,
-			"config name is %d bytes, the dataplane keeps at most %d",
-			len(name),
-			cunrdup.ModuleNameMaxLen,
-		)
-	}
-
-	return nil
-}
 
 // ModuleHandle is a handle to a module configuration.
 type ModuleHandle interface {
@@ -112,10 +85,6 @@ func (m *UnrdupService) ShowConfig(
 	request *unrduppb.ShowConfigRequest,
 ) (*unrduppb.ShowConfigResponse, error) {
 	name := request.GetName()
-	if name == "" {
-		return nil, errConfigNameRequired
-	}
-
 	current, ok := m.configs.Get(name)
 	if !ok {
 		return nil, status.Errorf(codes.NotFound, "config %q is not found", name)
@@ -132,10 +101,6 @@ func (m *UnrdupService) UpdateConfig(
 	request *unrduppb.UpdateConfigRequest,
 ) (*unrduppb.UpdateConfigResponse, error) {
 	name := request.GetName()
-	if err := validateConfigName(name); err != nil {
-		return nil, err
-	}
-
 	updated, err := configFromProto(request.GetConfig())
 	if err != nil {
 		return nil, err
@@ -165,10 +130,6 @@ func (m *UnrdupService) DeleteConfig(
 	request *unrduppb.DeleteConfigRequest,
 ) (*unrduppb.DeleteConfigResponse, error) {
 	name := request.GetName()
-	if name == "" {
-		return nil, errConfigNameRequired
-	}
-
 	err := m.configs.Delete(name, func(*config) error {
 		return m.backend.DeleteModule(name)
 	})

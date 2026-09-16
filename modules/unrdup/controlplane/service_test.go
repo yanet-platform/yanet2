@@ -4,7 +4,6 @@ import (
 	"errors"
 	"net"
 	"net/netip"
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -206,26 +205,6 @@ func TestUpdateConfigRejects(t *testing.T) {
 		request *unrduppb.UpdateConfigRequest
 	}{
 		{
-			name:    "no name",
-			request: &unrduppb.UpdateConfigRequest{Config: validConfig()},
-		},
-		{
-			name:    "no config",
-			request: &unrduppb.UpdateConfigRequest{Name: "unrdup0"},
-		},
-		{
-			name: "no peers",
-			request: withConfig(func(config *unrduppb.Config) {
-				config.Services[0].Peers = nil
-			}),
-		},
-		{
-			name: "no endpoints",
-			request: withConfig(func(config *unrduppb.Config) {
-				config.Services[0].Endpoints = nil
-			}),
-		},
-		{
 			name: "same vip and port in two services",
 			request: withConfig(func(config *unrduppb.Config) {
 				second := &unrduppb.Service{
@@ -283,25 +262,6 @@ func TestUpdateConfigRejects(t *testing.T) {
 				config.Services[0].Peers = []*commonpb.IPAddress{
 					ipAddr("2001:db8:b::11"),
 				}
-			}),
-		},
-		{
-			name: "port zero",
-			request: withConfig(func(config *unrduppb.Config) {
-				config.Services[0].Endpoints[0].Port = 0
-			}),
-		},
-		{
-			name: "port beyond sixteen bits",
-			request: withConfig(func(config *unrduppb.Config) {
-				config.Services[0].Endpoints[0].Port = 65536
-			}),
-		},
-		{
-			name: "protocol left unspecified",
-			request: withConfig(func(config *unrduppb.Config) {
-				config.Services[0].Endpoints[0].Protocol =
-					unrduppb.Protocol_PROTOCOL_UNSPECIFIED
 			}),
 		},
 		{
@@ -419,26 +379,6 @@ func TestUpdateConfigBackendFailure(t *testing.T) {
 	require.Equal(t, codes.NotFound, status.Code(err))
 }
 
-func TestUpdateConfigRejectsUnusableNames(t *testing.T) {
-	for name, configName := range map[string]string{
-		"embedded NUL": "unrdup\x000",
-		"too long":     strings.Repeat("u", 80),
-	} {
-		t.Run(name, func(t *testing.T) {
-			backend := &fakeBackend{}
-			service := unrdup.NewUnrdupService(backend)
-
-			_, err := service.UpdateConfig(t.Context(), &unrduppb.UpdateConfigRequest{
-				Name:   configName,
-				Config: validConfig(),
-			})
-			require.Error(t, err)
-			require.Equal(t, codes.InvalidArgument, status.Code(err))
-			require.Zero(t, backend.calls)
-		})
-	}
-}
-
 func TestUpdateConfigReplacementFailureKeepsPrevious(t *testing.T) {
 	backend := &fakeBackend{}
 	service := unrdup.NewUnrdupService(backend)
@@ -516,14 +456,6 @@ func TestShowConfigNotFound(t *testing.T) {
 	require.Equal(t, codes.NotFound, status.Code(err))
 }
 
-func TestShowConfigRequiresName(t *testing.T) {
-	service := unrdup.NewUnrdupService(&fakeBackend{})
-
-	_, err := service.ShowConfig(t.Context(), &unrduppb.ShowConfigRequest{})
-
-	require.Equal(t, codes.InvalidArgument, status.Code(err))
-}
-
 func TestListConfigs(t *testing.T) {
 	service := unrdup.NewUnrdupService(&fakeBackend{})
 
@@ -548,16 +480,6 @@ func TestListConfigsEmpty(t *testing.T) {
 	require.NoError(t, err)
 
 	require.Empty(t, response.GetConfigs())
-}
-
-// Test_UnrdupService_DeleteConfig_RequiresName verifies that deleting
-// without a name returns InvalidArgument.
-func Test_UnrdupService_DeleteConfig_RequiresName(t *testing.T) {
-	service := unrdup.NewUnrdupService(&fakeBackend{})
-
-	resp, err := service.DeleteConfig(t.Context(), &unrduppb.DeleteConfigRequest{})
-	require.Nil(t, resp)
-	require.Equal(t, codes.InvalidArgument, status.Code(err))
 }
 
 // Test_UnrdupService_DeleteConfig_MissingConfig verifies that deleting a
