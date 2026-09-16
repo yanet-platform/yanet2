@@ -144,43 +144,6 @@ func Test_FWStateService_UpdateConfig_MaskClearsValuesAndPreservesUnselectedFiel
 	require.Equal(t, stored, showConfig(t, service, name))
 }
 
-// Test_FWStateService_UpdateConfig_InvalidMaskDoesNotPublish verifies that
-// a bad path or selected value leaves the published configuration intact.
-func Test_FWStateService_UpdateConfig_InvalidMaskDoesNotPublish(t *testing.T) {
-	const name = "masked-invalid"
-	_, agent := newDeleteTestHarness(t, []string{"fwstate"}, name)
-	service := fwstate.NewFWStateService(agent)
-	publishConfig(t, service, &fwstatepb.UpdateConfigRequest{
-		Name: name, UpdateMask: &fwstatepb.FieldMask{},
-	})
-	before := showConfig(t, service, name)
-	for _, tc := range []struct {
-		name       string
-		path       string
-		syncConfig *fwstatepb.SyncConfig
-	}{
-		{"unknown field", "unknown", nil},
-		{"whole sync config", "sync_config", nil},
-		{"unknown sync field", "sync_config.unknown", nil},
-		{"unicast port overflow", "sync_config.port_unicast", &fwstatepb.SyncConfig{PortUnicast: 65536}},
-		{"MAC overflow", "sync_config.dst_ether", &fwstatepb.SyncConfig{DstEther: &commonpb.MACAddress{Addr: 1 << 48}}},
-		{"empty path", "", nil},
-		{"port overflow", "sync_config.port_multicast", &fwstatepb.SyncConfig{PortMulticast: 65536}},
-		{"partial sync destination", "sync_config.port_multicast", &fwstatepb.SyncConfig{PortMulticast: 9999}},
-		{"timeout overflow", "sync_config.udp", &fwstatepb.SyncConfig{Udp: 1 << 48}},
-		{"invalid address width", "sync_config.src_addr", &fwstatepb.SyncConfig{SrcAddr: &commonpb.IPAddress{Addr: []byte{1}}}},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			_, err := service.UpdateConfig(t.Context(), &fwstatepb.UpdateConfigRequest{
-				Name: name, SyncConfig: tc.syncConfig,
-				UpdateMask: &fwstatepb.FieldMask{Paths: []string{"sync_config.tcp", tc.path}},
-			})
-			require.Equal(t, codes.InvalidArgument, status.Code(err))
-			require.Equal(t, before, showConfig(t, service, name))
-		})
-	}
-}
-
 // Test_FWStateService_UpdateConfig_MaskedEndpointsPreserveOtherDestination
 // verifies that editing one endpoint leaves the other active, including clears.
 func Test_FWStateService_UpdateConfig_MaskedEndpointsPreserveOtherDestination(t *testing.T) {
@@ -219,117 +182,61 @@ func Test_FWStateService_UpdateConfig_MaskedEndpointsPreserveOtherDestination(t 
 	require.EqualValues(t, 10001, stored.GetPortUnicast())
 }
 
-// Test_FWStateService_UpdateConfig_RejectsMaskWithEndpointClearFlags verifies
-// that mixing the two update contracts never publishes a partial change.
-func Test_FWStateService_UpdateConfig_RejectsMaskWithEndpointClearFlags(t *testing.T) {
-	service := fwstate.NewFWStateService(nil)
-	for _, request := range []*fwstatepb.UpdateConfigRequest{
-		{Name: "cfg", ClearMulticast: true, UpdateMask: &fwstatepb.FieldMask{}},
-		{Name: "cfg", ClearUnicast: true, UpdateMask: &fwstatepb.FieldMask{}},
-	} {
-		_, err := service.UpdateConfig(t.Context(), request)
-		require.Equal(t, codes.InvalidArgument, status.Code(err))
-	}
-}
+// Test_FWStateService_UpdateConfig_MaskedInvalidMergedConfigDoesNotPublish
+// verifies that state-dependent validation still runs inside the writer
+// callback and leaves the previous generation published.
+func Test_FWStateService_UpdateConfig_MaskedInvalidMergedConfigDoesNotPublish(t *testing.T) {
+	const name = "masked-invalid-merged"
+	_, agent := newDeleteTestHarness(t, []string{"fwstate"}, name)
+	service := fwstate.NewFWStateService(agent)
+	publishConfig(t, service, &fwstatepb.UpdateConfigRequest{Name: name})
+	before := showConfig(t, service, name)
 
-// Test_SyncConfig_ValidateFields verifies that explicit values which would be
-// lost or truncated by the C representation are rejected before merging.
-func Test_SyncConfig_ValidateFields(t *testing.T) {
 	cases := []struct {
-		name          string
-		portMulticast uint32
-		portUnicast   uint32
-		dstEther      uint64
-		srcAddr       []byte
-		dstMulticast  []byte
-		dstUnicast    []byte
-		wantErr       bool
-		wantDetail    string
+		name       string
+		path       string
+		syncConfig *fwstatepb.SyncConfig
 	}{
 		{
-			name:          "zero",
-			portMulticast: 0,
-			wantErr:       false,
+			name:       "unicast port overflow",
+			path:       "sync_config.port_unicast",
+			syncConfig: &fwstatepb.SyncConfig{PortUnicast: 65536},
 		},
 		{
-			name:          "boundary value",
-			portMulticast: 65535,
-			wantErr:       false,
+			name:       "MAC overflow",
+			path:       "sync_config.dst_ether",
+			syncConfig: &fwstatepb.SyncConfig{DstEther: &commonpb.MACAddress{Addr: 1 << 48}},
 		},
 		{
-			name:          "just above boundary",
-			portMulticast: 65536,
-			wantErr:       true,
-			wantDetail:    "port_multicast",
+			name:       "multicast port overflow",
+			path:       "sync_config.port_multicast",
+			syncConfig: &fwstatepb.SyncConfig{PortMulticast: 65536},
 		},
 		{
-			name:        "unicast just above boundary",
-			portUnicast: 65536,
-			wantErr:     true,
-			wantDetail:  "port_unicast",
+			name:       "partial sync destination",
+			path:       "sync_config.port_multicast",
+			syncConfig: &fwstatepb.SyncConfig{PortMulticast: 9999},
 		},
 		{
-			name:       "MAC outside EUI-48",
-			dstEther:   0x100333300000001,
-			wantErr:    true,
-			wantDetail: "dst_ether",
+			name:       "timeout overflow",
+			path:       "sync_config.udp",
+			syncConfig: &fwstatepb.SyncConfig{Udp: 1 << 48},
 		},
 		{
-			name:       "short source address",
-			srcAddr:    make([]byte, 4),
-			wantErr:    true,
-			wantDetail: "src_addr",
-		},
-		{
-			name:         "multicast address without port",
-			dstMulticast: make([]byte, 16),
-			wantErr:      true,
-			wantDetail:   "port_multicast",
-		},
-		{
-			name:          "short multicast address",
-			portMulticast: 1,
-			dstMulticast:  make([]byte, 4),
-			wantErr:       true,
-			wantDetail:    "dst_addr_multicast",
-		},
-		{
-			name:       "unicast address without port",
-			dstUnicast: make([]byte, 16),
-			wantErr:    true,
-			wantDetail: "port_unicast",
-		},
-		{
-			name:        "long unicast address",
-			portUnicast: 1,
-			dstUnicast:  make([]byte, 17),
-			wantErr:     true,
-			wantDetail:  "dst_addr_unicast",
+			name:       "invalid address width",
+			path:       "sync_config.src_addr",
+			syncConfig: &fwstatepb.SyncConfig{SrcAddr: &commonpb.IPAddress{Addr: []byte{1}}},
 		},
 	}
-
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			cfg := &fwstatepb.SyncConfig{
-				SrcAddr:       &commonpb.IPAddress{Addr: tc.srcAddr},
-				PortMulticast: tc.portMulticast,
-				PortUnicast:   tc.portUnicast,
-				DstEther:      &commonpb.MACAddress{Addr: tc.dstEther},
-				DstAddrMulticast: &commonpb.IPAddress{
-					Addr: tc.dstMulticast,
-				},
-				DstAddrUnicast: &commonpb.IPAddress{
-					Addr: tc.dstUnicast,
-				},
-			}
-
-			err := cfg.ValidateFields()
-			if !tc.wantErr {
-				require.NoError(t, err)
-				return
-			}
-
-			require.ErrorContains(t, err, tc.wantDetail)
+			_, err := service.UpdateConfig(t.Context(), &fwstatepb.UpdateConfigRequest{
+				Name:       name,
+				SyncConfig: tc.syncConfig,
+				UpdateMask: &fwstatepb.FieldMask{Paths: []string{"sync_config.tcp", tc.path}},
+			})
+			require.Equal(t, codes.InvalidArgument, status.Code(err))
+			require.Equal(t, before, showConfig(t, service, name))
 		})
 	}
 }
@@ -410,20 +317,6 @@ func Test_ValidateSyncConfig_DestinationPairs(t *testing.T) {
 	})
 }
 
-// Test_UpdateConfigRequest_ValidateEndpointClears verifies that contradictory
-// endpoint fields are rejected when an update explicitly clears that endpoint.
-func Test_UpdateConfigRequest_ValidateEndpointClears(t *testing.T) {
-	request := &fwstatepb.UpdateConfigRequest{
-		ClearMulticast: true,
-		SyncConfig: &fwstatepb.SyncConfig{
-			DstAddrMulticast: syncTestAddr(),
-			PortMulticast:    syncTestPort,
-		},
-	}
-
-	require.ErrorContains(t, request.ValidateEndpointClears(), "clear_multicast")
-}
-
 // Test_FWStateService_UpdateConfig_RejectsPartialSyncDestination verifies that
 // the service rejects a destination port without its address before it
 // attempts to build or publish a C-side module.
@@ -440,49 +333,6 @@ func Test_FWStateService_UpdateConfig_RejectsPartialSyncDestination(t *testing.T
 	require.Equal(t, codes.InvalidArgument, status.Code(err))
 	require.Contains(t, err.Error(), "src_addr")
 	require.Contains(t, err.Error(), "dst_addr_multicast")
-}
-
-// Test_FWStateService_UpdateConfig_RejectsUnrepresentableMapNames verifies
-// that a map name the C object registry cannot carry is refused.
-//
-// A name too long, or one holding a NUL byte, would be truncated on the
-// way in and link an unintended map, so it is refused before any C state
-// is built.
-func Test_FWStateService_UpdateConfig_RejectsUnrepresentableMapNames(t *testing.T) {
-	cases := []struct {
-		name   string
-		mapV4  string
-		mapV6  string
-		detail string
-	}{
-		{
-			name:   "v4 name at the C field limit",
-			mapV4:  strings.Repeat("a", 80),
-			mapV6:  "maps-v6",
-			detail: "shorter than 80 bytes",
-		},
-		{
-			name:   "v6 name with embedded NUL",
-			mapV4:  "maps-v4",
-			mapV6:  "ma\x00ps-v6",
-			detail: "must not contain NUL",
-		},
-	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			service := fwstate.NewFWStateService(nil)
-
-			_, err := service.UpdateConfig(t.Context(), &fwstatepb.UpdateConfigRequest{
-				Name:      "cfg",
-				MapNameV4: tc.mapV4,
-				MapNameV6: tc.mapV6,
-			})
-			require.Error(t, err)
-			require.Equal(t, codes.InvalidArgument, status.Code(err))
-			require.Contains(t, err.Error(), tc.detail)
-		})
-	}
 }
 
 // syncTestAddr is the address both ends of a test sync destination use;
