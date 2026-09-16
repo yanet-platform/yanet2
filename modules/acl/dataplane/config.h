@@ -2,8 +2,7 @@
 
 #include "lib/controlplane/config/cp_module.h"
 
-#include "lib/filter/classifiers/net6.h"
-#include "lib/filter/filter.h"
+#include "lib/filter2/filter.h"
 
 #define ACTION_ALLOW 0
 #define ACTION_DENY 1
@@ -31,8 +30,25 @@ struct acl_module_config {
 
 	struct filter filter_ip4;
 	struct filter filter_ip4_port;
-	struct filter filter_ip6;
-	struct filter filter_ip6_port;
+
+	// The v6 family resolves through one shared core: (device, vlan,
+	// net6_src, net6_dst, ip_frag, proto_range) compiled to classes
+	// over the union of both v6 filters' rules, so a packet is
+	// classified once and both decisions decode from its class.
+	struct filter filter_core6;
+
+	// Transport suffix of the port-scoped v6 filter, compiled to
+	// classes over its own rule projection.
+	struct filter filter_suf6_port;
+
+	// Core class -> rule index for the port-unscoped v6 decision.
+	struct vline ip6_decode;
+
+	// (core class, suffix class) -> rule index for the port-scoped v6
+	// decision. All-zero (memory_context NULL) when the suffix compile
+	// was skipped or failed.
+	struct value_table joint_ip6_port;
+
 	struct filter filter_vlan;
 
 	uint64_t target_count;
@@ -68,14 +84,4 @@ struct acl_module_config {
 	uint64_t action_invalid_counter_id;
 	uint64_t action_non_term_counter_id;
 	uint64_t sync_sent_counter_id;
-
-	// Shared v6 half-address classification for the two v6 filters.
-	//
-	// Built only when both filter_ip6 and filter_ip6_port compiled
-	// non-empty, so a single union trie walk classifies the address
-	// halves for both of them. Left all-zero, including a NULL
-	// net6_share_src.remap_hi_a, when there is no shared classification
-	// to use.
-	struct net6_share_dir net6_share_src;
-	struct net6_share_dir net6_share_dst;
 };

@@ -8,7 +8,6 @@
 #include "../dataplane/config.h"
 #include "common/memory_address.h"
 #include "lib/errors/errors.h"
-#include "lib/logging/log.h"
 #include "objects/fwstate/api/fwstate_map_v4_object.h"
 #include "objects/fwstate/api/fwstate_map_v6_object.h"
 
@@ -16,7 +15,7 @@
 
 #include "lib/controlplane/agent/agent.h"
 
-#include <lib/filter/compiler.h>
+#include <lib/filter2/compiler.h>
 
 FILTER_COMPILER_DECLARE(ACL_FILTER_VLAN_TAG, device, vlan);
 
@@ -42,7 +41,7 @@ FILTER_COMPILER_DECLARE(
 );
 
 FILTER_COMPILER_DECLARE(
-	ACL_FILTER_IP6_TAG,
+	ACL_FILTER_CORE6_TAG,
 	device,
 	vlan,
 	net6_src,
@@ -52,23 +51,8 @@ FILTER_COMPILER_DECLARE(
 );
 
 FILTER_COMPILER_DECLARE(
-	ACL_FILTER_IP6_PROTO_PORT_TAG,
-	device,
-	vlan,
-	net6_src,
-	net6_dst,
-	proto_range,
-	port_src,
-	port_dst
+	ACL_FILTER_SUF6_PORT_TAG, proto_range, port_src, port_dst
 );
-
-// Position of net6_src/net6_dst within the attribute lists declared above:
-// both ACL_FILTER_IP6_TAG and ACL_FILTER_IP6_PROTO_PORT_TAG put them right
-// after device/vlan, at index 2 and 3. Keep these in sync with the two
-// FILTER_COMPILER_DECLARE calls — reordering either list moves the net6
-// leaf vertices that acl_module_init_net6_share reads.
-#define ACL_FILTER_NET6_SRC_POS 2
-#define ACL_FILTER_NET6_DST_POS 3
 
 static void
 acl_module_config_destroy(struct cp_module *cp_module) {
@@ -84,15 +68,11 @@ acl_module_config_destroy(struct cp_module *cp_module) {
 	filter_free(&config->filter_vlan, ACL_FILTER_VLAN_TAG);
 	filter_free(&config->filter_ip4, ACL_FILTER_IP4_TAG);
 	filter_free(&config->filter_ip4_port, ACL_FILTER_IP4_PROTO_PORT_TAG);
-	filter_free(&config->filter_ip6, ACL_FILTER_IP6_TAG);
-	filter_free(&config->filter_ip6_port, ACL_FILTER_IP6_PROTO_PORT_TAG);
+	filter_free(&config->filter_core6, ACL_FILTER_CORE6_TAG);
+	filter_free(&config->filter_suf6_port, ACL_FILTER_SUF6_PORT_TAG);
 
-	filter_net6_share_dir_free(
-		&cp_module->memory_context, &config->net6_share_src
-	);
-	filter_net6_share_dir_free(
-		&cp_module->memory_context, &config->net6_share_dst
-	);
+	vline_free(&config->ip6_decode);
+	value_table_free(&config->joint_ip6_port);
 
 	// Capture agent before fini zeroes it.
 	struct agent *agent = ADDR_OF(&cp_module->agent);
@@ -153,11 +133,10 @@ acl_module_config_init(
 	memset(&config->filter_ip4, 0, sizeof(config->filter_ip4));
 	memset(&config->filter_ip4_port, 0, sizeof(config->filter_ip4_port));
 
-	memset(&config->filter_ip6, 0, sizeof(config->filter_ip6));
-	memset(&config->filter_ip6_port, 0, sizeof(config->filter_ip6_port));
-
-	memset(&config->net6_share_src, 0, sizeof(config->net6_share_src));
-	memset(&config->net6_share_dst, 0, sizeof(config->net6_share_dst));
+	memset(&config->filter_core6, 0, sizeof(config->filter_core6));
+	memset(&config->filter_suf6_port, 0, sizeof(config->filter_suf6_port));
+	memset(&config->ip6_decode, 0, sizeof(config->ip6_decode));
+	memset(&config->joint_ip6_port, 0, sizeof(config->joint_ip6_port));
 
 	config->v4_object_link_idx = ACL_OBJECT_LINK_NONE;
 	config->v6_object_link_idx = ACL_OBJECT_LINK_NONE;
@@ -328,16 +307,6 @@ check_acl_rule_l2(const struct acl_rule *acl_rule) {
 }
 
 static int
-check_has_ip4(const struct acl_rule *acl_rule) {
-	return acl_rule->src_net4s.count && acl_rule->dst_net4s.count;
-}
-
-static int
-check_has_ip6(const struct acl_rule *acl_rule) {
-	return acl_rule->src_net6s.count && acl_rule->dst_net6s.count;
-}
-
-static int
 check_has_full_src_port_range(const struct acl_rule *acl_rule) {
 	return acl_rule->src_port_ranges.count == 0 ||
 	       (acl_rule->src_port_ranges.items[0].from == 0 &&
@@ -358,6 +327,16 @@ check_has_full_port_range(const struct acl_rule *acl_rule) {
 		check_has_full_src_port_range(acl_rule) &&
 		check_has_full_dst_port_range(acl_rule)) ||
 	       acl_rule->fragment == FILTER_IP_FRAG_FRAG;
+}
+
+static int
+check_has_ip4(const struct acl_rule *acl_rule) {
+	return acl_rule->src_net4s.count && acl_rule->dst_net4s.count;
+}
+
+static int
+check_has_ip6(const struct acl_rule *acl_rule) {
+	return acl_rule->src_net6s.count && acl_rule->dst_net6s.count;
 }
 
 static int
@@ -405,9 +384,7 @@ acl_module_init_l2(
 		ACL_FILTER_VLAN_TAG,
 		filter_rule_ptrs,
 		acl_rule_count,
-		&cp_module->memory_context,
-		"filter_vlan",
-		err
+		&cp_module->memory_context
 	);
 	if (rc) {
 		yanet_error_add(err, "failed to init filter_vlan");
@@ -440,9 +417,7 @@ acl_module_init_ip4(
 		ACL_FILTER_IP4_TAG,
 		filter_rule_ptrs,
 		acl_rule_count,
-		&cp_module->memory_context,
-		"filter_ip4",
-		err
+		&cp_module->memory_context
 	);
 	if (rc) {
 		yanet_error_add(err, "failed to init filter_ip4");
@@ -475,9 +450,7 @@ acl_module_init_ip4_port(
 		ACL_FILTER_IP4_PROTO_PORT_TAG,
 		filter_rule_ptrs,
 		acl_rule_count,
-		&cp_module->memory_context,
-		"filter_ip4_port",
-		err
+		&cp_module->memory_context
 	);
 	if (rc) {
 		yanet_error_add(err, "failed to init filter_ip4_port");
@@ -485,8 +458,15 @@ acl_module_init_ip4_port(
 	return rc;
 }
 
+// One shared v6 core: compiled to classes over the union of both v6
+// filters' rules, a packet's class there decodes into the port-unscoped
+// decision through a per-class minimum rule line, and into the
+// port-scoped decision through a joint with the transport suffix
+// classes. Both class registries live only until the two decodes are
+// built; a failure rejects the whole config apply like any other
+// filter build failure.
 static int
-acl_module_init_ip6(
+acl_module_init_ip6_family(
 	struct cp_module *cp_module,
 	struct acl_rule *acl_rules,
 	uint32_t acl_rule_count,
@@ -497,40 +477,28 @@ acl_module_init_ip6(
 	struct acl_module_config *config =
 		container_of(cp_module, struct acl_module_config, cp_module);
 
-	config->filter_rule_count_ip6 = filter_acl_rules(
+	uint32_t matched_core = filter_acl_rules(
 		acl_rules,
 		acl_rule_count,
 		filter_rules,
 		filter_rule_ptrs,
-		check_acl_rule_ip6
+		check_has_ip6
 	);
+	(void)matched_core;
 
-	int rc = filter_init(
-		&config->filter_ip6,
-		ACL_FILTER_IP6_TAG,
-		filter_rule_ptrs,
-		acl_rule_count,
-		&cp_module->memory_context,
-		"filter_ip6",
-		err
-	);
-	if (rc) {
-		yanet_error_add(err, "failed to init filter_ip6");
+	struct value_registry core_classes;
+	if (filter_init_classes(
+		    &config->filter_core6,
+		    ACL_FILTER_CORE6_TAG,
+		    filter_rule_ptrs,
+		    acl_rule_count,
+		    &cp_module->memory_context,
+		    &cp_module->memory_context,
+		    &core_classes
+	    )) {
+		yanet_error_add(err, "failed to init filter_core6");
+		return -1;
 	}
-	return rc;
-}
-
-static int
-acl_module_init_ip6_port(
-	struct cp_module *cp_module,
-	struct acl_rule *acl_rules,
-	uint32_t acl_rule_count,
-	struct filter_rule *filter_rules,
-	const struct filter_rule **filter_rule_ptrs,
-	yanet_error **err
-) {
-	struct acl_module_config *config =
-		container_of(cp_module, struct acl_module_config, cp_module);
 
 	config->filter_rule_count_ip6_port = filter_acl_rules(
 		acl_rules,
@@ -540,136 +508,86 @@ acl_module_init_ip6_port(
 		check_acl_rule_ip6_port
 	);
 
-	int rc = filter_init(
-		&config->filter_ip6_port,
-		ACL_FILTER_IP6_PROTO_PORT_TAG,
-		filter_rule_ptrs,
-		acl_rule_count,
-		&cp_module->memory_context,
-		"filter_ip6_port",
-		err
-	);
-	if (rc) {
-		yanet_error_add(err, "failed to init filter_ip6_port");
-	}
-	return rc;
-}
-
-// Builds the shared net6 half-classification, the sole production path for
-// classifying v6 addresses once both v6 filters compile non-empty.
-//
-// A build failure is an ordinary config-apply error, exactly like a failure
-// to build filter_ip6 or filter_ip6_port: it is logged and propagated to
-// the caller, and net6_share_src / net6_share_dst are left all-zero.
-static int
-acl_module_init_net6_share(
-	struct cp_module *cp_module,
-	struct acl_rule *acl_rules,
-	uint32_t acl_rule_count,
-	struct filter_rule *filter_rules,
-	const struct filter_rule **filter_rule_ptrs,
-	yanet_error **err
-) {
-	struct acl_module_config *config =
-		container_of(cp_module, struct acl_module_config, cp_module);
-
-	memset(&config->net6_share_src, 0, sizeof(config->net6_share_src));
-	memset(&config->net6_share_dst, 0, sizeof(config->net6_share_dst));
-
-	// Sharing pays off only when both v6 filters are populated.
-	if (config->filter_rule_count_ip6 == 0 ||
-	    config->filter_rule_count_ip6_port == 0) {
-		return 0;
+	struct value_registry suffix_classes;
+	if (filter_init_classes(
+		    &config->filter_suf6_port,
+		    ACL_FILTER_SUF6_PORT_TAG,
+		    filter_rule_ptrs,
+		    acl_rule_count,
+		    &cp_module->memory_context,
+		    &cp_module->memory_context,
+		    &suffix_classes
+	    )) {
+		yanet_error_add(err, "failed to init filter_suf6_port");
+		value_registry_fini(&core_classes);
+		return -1;
 	}
 
-	// Kill switch, read once per ACL config compile. Flipping it takes a
-	// control-plane process restart plus a full ruleset reapply — it
-	// does nothing to a config already published to shared memory, so
-	// it is not an operational lever an incident responder can pull.
-	// It is one of several ways the dataplane's unshared classification
-	// path gets reached in a running config — the v6-population guard
-	// just above is the far more common one; see the enumeration on the
-	// dataplane side.
-	if (getenv("YANET_ACL_NET6_SHARE_DISABLE") != NULL) {
-		return 0;
+	// The port-unscoped decision: the lowest ip6 projection rule
+	// covering each core class.
+	uint32_t class_count = value_registry_capacity(&core_classes);
+	if (vline_init(
+		    &config->ip6_decode,
+		    &cp_module->memory_context,
+		    "acl:ip6_decode",
+		    class_count
+	    )) {
+		yanet_error_add(err, "failed to init ip6 decode");
+		value_registry_fini(&core_classes);
+		value_registry_fini(&suffix_classes);
+		return -1;
 	}
-
-	// The union projection is every v6 rule, which is exactly the two
-	// disjoint per-filter projections taken together.
-	filter_acl_rules(
+	for (uint32_t idx = 0; idx < class_count; ++idx) {
+		*vline_get_ptr(&config->ip6_decode, idx) = FILTER_RULE_INVALID;
+	}
+	config->filter_rule_count_ip6 = filter_acl_rules(
 		acl_rules,
 		acl_rule_count,
 		filter_rules,
 		filter_rule_ptrs,
-		check_has_ip6
+		check_acl_rule_ip6
 	);
+	// Second pass over the ip6 projection: for each rule, for each
+	// class it covers, keep the lowest rule index.
+	{
+		struct value_range *core_ranges = ADDR_OF(&core_classes.ranges);
+		for (uint32_t rule_idx = 0; rule_idx < acl_rule_count;
+		     ++rule_idx) {
+			if (filter_rule_ptrs[rule_idx] == NULL) {
+				continue;
+			}
+			struct value_range *range = core_ranges + rule_idx;
+			uint32_t *values = ADDR_OF(&range->values);
+			for (uint32_t idx = 0; idx < range->count; ++idx) {
+				uint32_t *cell = vline_get_ptr(
+					&config->ip6_decode, values[idx]
+				);
+				if (*cell == FILTER_RULE_INVALID ||
+				    rule_idx < *cell) {
+					*cell = rule_idx;
+				}
+			}
+		}
+	}
 
-	// The local half-classifiers live in the leaf vertices of the two
-	// v6 filters, at the slots of their net6 attributes.
-	const size_t ip6_src_leaf =
-		ACL_FILTER_IP6_TAG->lookup_count + ACL_FILTER_NET6_SRC_POS;
-	const size_t ip6_dst_leaf =
-		ACL_FILTER_IP6_TAG->lookup_count + ACL_FILTER_NET6_DST_POS;
-	const size_t ip6_port_src_leaf =
-		ACL_FILTER_IP6_PROTO_PORT_TAG->lookup_count +
-		ACL_FILTER_NET6_SRC_POS;
-	const size_t ip6_port_dst_leaf =
-		ACL_FILTER_IP6_PROTO_PORT_TAG->lookup_count +
-		ACL_FILTER_NET6_DST_POS;
-
-	const struct net6_classifier *ip6_src = (const struct net6_classifier *)
-		ADDR_OF(&config->filter_ip6.v[ip6_src_leaf].data);
-	const struct net6_classifier *ip6_dst = (const struct net6_classifier *)
-		ADDR_OF(&config->filter_ip6.v[ip6_dst_leaf].data);
-	const struct net6_classifier *ip6_port_src =
-		(const struct net6_classifier *)ADDR_OF(
-			&config->filter_ip6_port.v[ip6_port_src_leaf].data
-		);
-	const struct net6_classifier *ip6_port_dst =
-		(const struct net6_classifier *)ADDR_OF(
-			&config->filter_ip6_port.v[ip6_port_dst_leaf].data
-		);
-
-	if (filter_net6_share_init(
+	// The port-scoped decision: lowest port projection rule per
+	// (core class, suffix class) pair.
+	if (filter2_merge_and_set_registry_values(
 		    &cp_module->memory_context,
-		    filter_rule_ptrs,
-		    acl_rule_count,
-		    1,
-		    ip6_src,
-		    ip6_port_src,
-		    &config->net6_share_src,
-		    err
+		    &core_classes,
+		    &suffix_classes,
+		    &config->joint_ip6_port
 	    )) {
-		LOG(ERROR,
-		    "module '%s': failed to init shared net6 src",
-		    cp_module->name);
-		yanet_error_add(err, "failed to init shared net6 src");
+		yanet_error_add(err, "failed to init joint of ip6_port");
+		vline_free(&config->ip6_decode);
+		memset(&config->ip6_decode, 0, sizeof(config->ip6_decode));
+		value_registry_fini(&core_classes);
+		value_registry_fini(&suffix_classes);
 		return -1;
 	}
 
-	if (filter_net6_share_init(
-		    &cp_module->memory_context,
-		    filter_rule_ptrs,
-		    acl_rule_count,
-		    0,
-		    ip6_dst,
-		    ip6_port_dst,
-		    &config->net6_share_dst,
-		    err
-	    )) {
-		filter_net6_share_dir_free(
-			&cp_module->memory_context, &config->net6_share_src
-		);
-		memset(&config->net6_share_src,
-		       0,
-		       sizeof(config->net6_share_src));
-		LOG(ERROR,
-		    "module '%s': failed to init shared net6 dst",
-		    cp_module->name);
-		yanet_error_add(err, "failed to init shared net6 dst");
-		return -1;
-	}
-
+	value_registry_fini(&core_classes);
+	value_registry_fini(&suffix_classes);
 	return 0;
 }
 
@@ -846,29 +764,7 @@ acl_module_compile_rules(
 		goto error_rule_ptrs;
 	}
 
-	if (acl_module_init_ip6(
-		    cp_module,
-		    acl_rules,
-		    rule_count,
-		    filter_rules,
-		    filter_rule_ptrs,
-		    err
-	    )) {
-		goto error_rule_ptrs;
-	}
-
-	if (acl_module_init_ip6_port(
-		    cp_module,
-		    acl_rules,
-		    rule_count,
-		    filter_rules,
-		    filter_rule_ptrs,
-		    err
-	    )) {
-		goto error_rule_ptrs;
-	}
-
-	if (acl_module_init_net6_share(
+	if (acl_module_init_ip6_family(
 		    cp_module,
 		    acl_rules,
 		    rule_count,
