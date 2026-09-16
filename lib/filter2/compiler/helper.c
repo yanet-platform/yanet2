@@ -29,69 +29,45 @@ init_dummy_registry(
 
 ////////////////////////////////////////////////////////////////////////////////
 
-struct value_set_ctx {
-	struct value_table *table;
-};
-
-static int
-value_table_set_action(uint32_t v1, uint32_t v2, uint32_t idx, void *data) {
-	struct value_set_ctx *set_ctx = (struct value_set_ctx *)data;
-	uint32_t *value = value_table_get_ptr(set_ctx->table, v1, v2);
-	if (*value != FILTER_RULE_INVALID)
-		return 0;
-	*value = idx;
-
-	return 0;
-}
-
 int
-merge_and_set_registry_values(
+collect_rule_map(
 	struct memory_context *memory_context,
-	struct value_registry *registry1,
-	struct value_registry *registry2,
-	struct value_table *table
+	struct value_registry *registry,
+	struct vline *rule_map
 ) {
-	if (value_table_init(
-		    table,
+	if (vline_init(
+		    rule_map,
 		    memory_context,
-		    "filter:joint",
-		    value_registry_capacity(registry1),
-		    value_registry_capacity(registry2)
+		    "filter:rules",
+		    value_registry_capacity(registry)
 	    )) {
 		return -1;
 	}
 
-	for (uint64_t v_idx = 0; v_idx < value_registry_capacity(registry1);
-	     ++v_idx) {
-		for (uint64_t h_idx = 0;
-		     h_idx < value_registry_capacity(registry2);
-		     ++h_idx) {
-			*value_table_get_ptr(table, v_idx, h_idx) =
-				FILTER_RULE_INVALID;
+	for (uint32_t idx = 0; idx < rule_map->size; ++idx) {
+		*vline_get_ptr(rule_map, idx) = FILTER_RULE_INVALID;
+	}
+
+	/*
+	 * The same class may be produced by several rules, the first one
+	 * wins to preserve the rule ordering.
+	 */
+	struct value_range *ranges = ADDR_OF(&registry->ranges);
+	for (uint32_t range_idx = 0; range_idx < registry->range_count;
+	     ++range_idx) {
+		struct value_range *range = ranges + range_idx;
+		uint32_t *values = ADDR_OF(&range->values);
+
+		for (uint32_t idx = 0; idx < range->count; ++idx) {
+			uint32_t *rule_idx =
+				vline_get_ptr(rule_map, values[idx]);
+			if (*rule_idx == FILTER_RULE_INVALID) {
+				*rule_idx = range_idx;
+			}
 		}
 	}
 
-	struct value_set_ctx set_ctx;
-	set_ctx.table = table;
-
-	for (uint32_t range_idx = 0; range_idx < registry1->range_count;
-	     ++range_idx) {
-		if (value_registry_join_range(
-			    registry1,
-			    registry2,
-			    range_idx,
-			    value_table_set_action,
-			    &set_ctx
-		    ))
-			goto error_join;
-	}
-
 	return 0;
-
-error_join:
-	value_table_free(table);
-
-	return -1;
 }
 
 struct collect_ctx {

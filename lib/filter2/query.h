@@ -46,8 +46,9 @@ filter_lookup(
 	uint32_t *results,
 	uint32_t packet_count
 ) {
-	if (packet_count == 0)
+	if (packet_count == 0) {
 		return;
+	}
 	uint32_t joint_count = attr_handler_count - 1;
 	uint32_t values[packet_count * (attr_handler_count + joint_count)];
 	uint32_t values_pos = 0;
@@ -70,9 +71,19 @@ filter_lookup(
 		values_pos += packet_count;
 	}
 
+	if (joint_count == 0) {
+		/*
+		 * Special case of a single attribute filter - the attribute
+		 * lookup returns the rule index instead of identifier of a
+		 * rule combination.
+		 */
+		memcpy(results, values, sizeof(uint32_t) * packet_count);
+		return;
+	}
+
 	/*
 	 * Combine pair of values to get a next one value. The last of the
-	 * values for each packet is a rule index.
+	 * values for each packet is a final class identifier.
 	 */
 	struct value_table *joints = ADDR_OF(&filter->joints);
 	for (uint32_t joint_idx = 0; joint_idx < joint_count; ++joint_idx) {
@@ -86,9 +97,14 @@ filter_lookup(
 		values_pos += packet_count;
 	}
 
-	memcpy(results,
-	       values + values_pos - packet_count,
-	       sizeof(uint32_t) * packet_count);
+	/*
+	 * Translate the final class identifiers into rule indices.
+	 */
+	const uint32_t *class_ids = values + values_pos - packet_count;
+	struct vline *rule_map = ADDR_OF(&filter->rule_map);
+	for (uint32_t idx = 0; idx < packet_count; ++idx) {
+		results[idx] = vline_get(rule_map, class_ids[idx]);
+	}
 }
 
 #define filter_query(filter, sign, packets, results, count)                    \

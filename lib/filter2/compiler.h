@@ -19,8 +19,9 @@ filter_set_cb(uint32_t *value, void *data) {
 
 static inline int
 filter_set_rule_cb(uint32_t *value, void *data) {
-	if (*value != FILTER_RULE_INVALID)
+	if (*value != FILTER_RULE_INVALID) {
 		return 0;
+	}
 
 	uint32_t *rule_idx = (uint32_t *)data;
 	*value = *rule_idx;
@@ -63,8 +64,9 @@ filter_compile_single_attr(
 		(struct filter_query_attr **)memory_balloc(
 			memory_context, sizeof(struct filter_query_attr *)
 		);
-	if (query_attrs == NULL)
+	if (query_attrs == NULL) {
 		return -1;
+	}
 	memset(query_attrs, 0, sizeof(struct filter_query_attr *));
 	SET_OFFSET_OF(&filter->attrs, query_attrs);
 
@@ -89,8 +91,9 @@ filter_compile_single_attr(
 	 */
 	for (uint32_t rule_idx = 0; rule_idx < rule_count; ++rule_idx) {
 		const struct filter_rule *rule = rules[rule_idx];
-		if (rule == NULL)
+		if (rule == NULL) {
 			continue;
+		}
 
 		attr_handlers->rule_iter(
 			attr, attr_handlers, rule, filter_set_rule_cb, &rule_idx
@@ -125,21 +128,23 @@ error_free_attrs:
  *   rule set corresponding to the region
  * - each rule gets a list of region identifiers for each attribute
  * - combine pairs of attributes into sets of next level identifiers
- * - the last stage resolves corresponding rule index
+ * - the last stage produces a final class identifier for each rule set
+ *   combination and a map of the final class identifiers to rule indices
  *
  * So in case of 5 attributes compilation schema for a rule looks like
  * a0, a1, a2, a3, a4 -> sets of range identifiers matching to the rule
  * produce a5 = a0 * a1, a6 = a2 * a3, a7 = a4 * a5 where ai * aj if s full
  * join of containing values
- * after then we set rule index for each pair in set of a6 * a7.
+ * after then each value of a6 * a7 is a final class identifier mapped to
+ * a rule index.
  *
  * The logic consist of three stages
  * - initialize all the attributes and touch regions for all rules. The stage
  *   result in enumerate all regions with values defining of unique rule set
  *   identifier. Also we collect region values for each rule into registries.
  * - merge pairs of values into a new ones
- * - after only two set of identifiers remained - the last one merge will set
- *   a rule index into corresponding table.
+ * - map the final class identifiers produced by the last merge to rule
+ *   indices
  */
 
 static inline int
@@ -161,8 +166,9 @@ filter_compile(
 
 	SET_OFFSET_OF(&filter->attrs, NULL);
 	SET_OFFSET_OF(&filter->joints, NULL);
+	SET_OFFSET_OF(&filter->rule_map, NULL);
 
-	if (attr_handler_count == 1)
+	if (attr_handler_count == 1) {
 		return filter_compile_single_attr(
 			filter,
 			memory_context,
@@ -170,21 +176,23 @@ filter_compile(
 			rule_count,
 			attr_handlers[0]
 		);
+	}
 
 	struct filter_query_attr **query_attrs =
 		(struct filter_query_attr **)memory_balloc(
 			memory_context,
 			sizeof(struct filter_query_attr *) * attr_handler_count
 		);
-	if (query_attrs == NULL)
+	if (query_attrs == NULL) {
 		goto error;
+	}
 	memset(query_attrs,
 	       0,
 	       sizeof(struct filter_query_attr *) * attr_handler_count);
 	SET_OFFSET_OF(&filter->attrs, query_attrs);
 
 	uint32_t joint_count = attr_handler_count - 1;
-	uint32_t registry_count = attr_handler_count + joint_count - 1;
+	uint32_t registry_count = attr_handler_count + joint_count;
 	struct value_registry *registries =
 		(struct value_registry *)memory_balloc(
 			memory_context,
@@ -231,38 +239,44 @@ filter_compile(
 	}
 
 	for (uint32_t joint_idx = 0; joint_idx < joint_count; ++joint_idx) {
-		if (joint_idx < joint_count - 1) {
-			/*
-			 * Join the rule values pair and produce a new set
-			 * of derivative values
-			 */
-			if (merge_and_collect_registry(
-				    memory_context,
-				    registries + joint_idx * 2,
-				    registries + joint_idx * 2 + 1,
-				    joints + joint_idx,
-				    registries + attr_handler_count + joint_idx
-			    )) {
-				goto error_free_attrs;
-			}
-		} else {
-			/*
-			 * The last stage - set rule index for the last one
-			 * pair of values.
-			 */
-			if (merge_and_set_registry_values(
-				    memory_context,
-				    registries + joint_idx * 2,
-				    registries + joint_idx * 2 + 1,
-				    joints + joint_idx
-			    )) {
-				goto error_free_attrs;
-			}
+		/*
+		 * Join the rule values pair and produce a new set of
+		 * derivative values
+		 */
+		if (merge_and_collect_registry(
+			    memory_context,
+			    registries + joint_idx * 2,
+			    registries + joint_idx * 2 + 1,
+			    joints + joint_idx,
+			    registries + attr_handler_count + joint_idx
+		    )) {
+			goto error_free_attrs;
 		}
 	}
 
-	for (uint32_t idx = 0; idx < registry_count; ++idx)
+	/*
+	 * The last joint resolves a final class identifier for each packet;
+	 * the map translates the identifiers into rule indices.
+	 */
+	struct vline *rule_map = (struct vline *)memory_balloc(
+		memory_context, sizeof(struct vline)
+	);
+	if (rule_map == NULL) {
+		goto error_free_attrs;
+	}
+	SET_OFFSET_OF(&filter->rule_map, rule_map);
+
+	if (collect_rule_map(
+		    memory_context, registries + registry_count - 1, rule_map
+	    )) {
+		memory_bfree(memory_context, rule_map, sizeof(struct vline));
+		SET_OFFSET_OF(&filter->rule_map, NULL);
+		goto error_free_attrs;
+	}
+
+	for (uint32_t idx = 0; idx < registry_count; ++idx) {
 		value_registry_fini(registries + idx);
+	}
 
 	memory_bfree(
 		memory_context,
@@ -276,8 +290,9 @@ error_free_attrs:
 	for (uint32_t attr_idx = 0; attr_idx < attr_handler_count; ++attr_idx) {
 		struct filter_query_attr *query_attr =
 			ADDR_OF(query_attrs + attr_idx);
-		if (query_attr == NULL)
+		if (query_attr == NULL) {
 			continue;
+		}
 		attr_handlers[attr_idx]->free_query(memory_context, query_attr);
 	}
 
@@ -290,8 +305,9 @@ error_free_attrs:
 	);
 
 error_free_registries:
-	for (uint32_t idx = 0; idx < registry_count; ++idx)
+	for (uint32_t idx = 0; idx < registry_count; ++idx) {
 		value_registry_fini(registries + idx);
+	}
 	memory_bfree(
 		memory_context,
 		registries,
@@ -326,8 +342,9 @@ filter_destroy(
 		     ++attr_idx) {
 			struct filter_query_attr *query_attr =
 				ADDR_OF(query_attrs + attr_idx);
-			if (query_attr == NULL)
+			if (query_attr == NULL) {
 				continue;
+			}
 			attr_handlers[attr_idx]->free_query(
 				memory_context, query_attr
 			);
@@ -352,6 +369,13 @@ filter_destroy(
 			sizeof(struct value_table) * joint_count
 		);
 	}
+
+	struct vline *rule_map = ADDR_OF(&filter->rule_map);
+	if (rule_map != NULL) {
+		vline_free(rule_map);
+		memory_bfree(memory_context, rule_map, sizeof(struct vline));
+	}
+
 	// Unlink the embedded context from the parent tree before the storage
 	// goes away: a dangling child link would corrupt later tree walks.
 	memory_context_fini(memory_context);

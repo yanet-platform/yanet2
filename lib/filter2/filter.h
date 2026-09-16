@@ -7,7 +7,8 @@
  * and queried with FILTER_QUERY() using helpers from compiler.h and query.h.
  *
  * Key concepts:
- * - struct filter:     owns the tree (vertices, registries, tables) and memory
+ * - struct filter:     owns the tree (vertices, registries, tables), the
+ *                      final class to rule map and memory
  * - struct filter_vertex: a node (leaf or inner) of the classification tree
  *
  * Usage overview:
@@ -39,6 +40,9 @@ struct filter_query_attr {};
 struct filter {
 	struct filter_query_attr **attrs;
 	struct value_table *joints;
+	// Maps the final class identifier resolved by the last joint to the
+	// index of the first rule producing the class.
+	struct vline *rule_map;
 	struct memory_context memory_context;
 };
 
