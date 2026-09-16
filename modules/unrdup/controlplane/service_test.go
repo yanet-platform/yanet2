@@ -333,6 +333,7 @@ func TestUpdateConfigRejects(t *testing.T) {
 
 			require.Error(t, err)
 			require.Equal(t, codes.InvalidArgument, status.Code(err))
+			require.NotContains(t, status.Convert(err).Message(), "rpc error", "a status must not nest another")
 			require.Zero(t, backend.calls, "nothing may reach shared memory")
 		})
 	}

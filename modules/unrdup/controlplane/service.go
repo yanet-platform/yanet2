@@ -104,7 +104,7 @@ func (m *UnrdupService) UpdateConfig(
 	name := request.GetName()
 	updated, err := configFromProto(request.GetConfig())
 	if err != nil {
-		return nil, err
+		return nil, status.Error(codes.InvalidArgument, err.Error())
 	}
 
 	err = m.configs.Update(name, func(*config, bool) (*config, error) {

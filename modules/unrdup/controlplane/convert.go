@@ -1,10 +1,9 @@
 package unrdup
 
 import (
+	"errors"
+	"fmt"
 	"net/netip"
-
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 
 	"github.com/yanet-platform/xnetip"
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
@@ -45,9 +44,7 @@ func configFromProto(request *unrduppb.Config) (*config, error) {
 	for idx, service := range request.GetServices() {
 		converted, err := serviceFromProto(service, sourceV4, sourceV6)
 		if err != nil {
-			return nil, status.Errorf(
-				codes.InvalidArgument, "service %d: %s", idx, err,
-			)
+			return nil, fmt.Errorf("service %d: %w", idx, err)
 		}
 
 		for _, endpoint := range converted.Endpoints {
@@ -57,8 +54,7 @@ func configFromProto(request *unrduppb.Config) (*config, error) {
 			}
 
 			if owner, ok := served[key]; ok && owner != idx {
-				return nil, status.Errorf(
-					codes.InvalidArgument,
+				return nil, fmt.Errorf(
 					"service %d: %s:%d is already served by service %d",
 					idx, converted.VIP, endpoint.Port, owner,
 				)
@@ -84,16 +80,12 @@ func serviceFromProto(
 ) (cunrdup.Service, error) {
 	vip, err := service.GetVip().ToAddr()
 	if err != nil {
-		return cunrdup.Service{}, status.Errorf(
-			codes.InvalidArgument, "vip: %s", err,
-		)
+		return cunrdup.Service{}, fmt.Errorf("vip: %w", err)
 	}
 
 	vip = vip.Unmap()
 	if vip.IsUnspecified() {
-		return cunrdup.Service{}, status.Error(
-			codes.InvalidArgument, "vip must not be unspecified",
-		)
+		return cunrdup.Service{}, errors.New("vip must not be unspecified")
 	}
 
 	peers := make([]netip.Addr, 0, len(service.GetPeers()))
@@ -101,39 +93,24 @@ func serviceFromProto(
 	for _, peer := range service.GetPeers() {
 		addr, err := peer.ToAddr()
 		if err != nil {
-			return cunrdup.Service{}, status.Errorf(
-				codes.InvalidArgument, "peer: %s", err,
-			)
+			return cunrdup.Service{}, fmt.Errorf("peer: %w", err)
 		}
 
 		addr = addr.Unmap()
 		if addr.IsUnspecified() {
-			return cunrdup.Service{}, status.Error(
-				codes.InvalidArgument,
-				"peer address must not be unspecified",
-			)
+			return cunrdup.Service{}, errors.New("peer address must not be unspecified")
 		}
 
 		if _, ok := seen[addr]; ok {
-			return cunrdup.Service{}, status.Errorf(
-				codes.InvalidArgument, "peer %s is listed twice", addr,
-			)
+			return cunrdup.Service{}, fmt.Errorf("peer %s is listed twice", addr)
 		}
 		seen[addr] = struct{}{}
 
 		if addr.Is4() && !sourceIsSet(sourceV4) {
-			return cunrdup.Service{}, status.Errorf(
-				codes.InvalidArgument,
-				"peer %s needs source_v4 to be set",
-				addr,
-			)
+			return cunrdup.Service{}, fmt.Errorf("peer %s needs source_v4 to be set", addr)
 		}
 		if addr.Is6() && !sourceIsSet(sourceV6) {
-			return cunrdup.Service{}, status.Errorf(
-				codes.InvalidArgument,
-				"peer %s needs source_v6 to be set",
-				addr,
-			)
+			return cunrdup.Service{}, fmt.Errorf("peer %s needs source_v6 to be set", addr)
 		}
 
 		peers = append(peers, addr)
@@ -145,11 +122,7 @@ func serviceFromProto(
 		converted := endpointFromProto(endpoint)
 
 		if _, ok := seenEndpoints[converted]; ok {
-			return cunrdup.Service{}, status.Errorf(
-				codes.InvalidArgument,
-				"endpoint %d is listed twice",
-				converted.Port,
-			)
+			return cunrdup.Service{}, fmt.Errorf("endpoint %d is listed twice", converted.Port)
 		}
 		seenEndpoints[converted] = struct{}{}
 
@@ -185,8 +158,7 @@ func netFromProto(source *filterpb.IPNet, addrLen int) (xnetip.Network, error) {
 
 	addr, ok := netip.AddrFromSlice(source.GetAddr())
 	if !ok {
-		return xnetip.Network{}, status.Errorf(
-			codes.InvalidArgument,
+		return xnetip.Network{}, fmt.Errorf(
 			"source address must be 4 or 16 bytes, got %d",
 			len(source.GetAddr()),
 		)
@@ -194,23 +166,19 @@ func netFromProto(source *filterpb.IPNet, addrLen int) (xnetip.Network, error) {
 
 	addr = addr.Unmap()
 	if addr.BitLen() != addrLen*8 {
-		return xnetip.Network{}, status.Errorf(
-			codes.InvalidArgument,
+		return xnetip.Network{}, fmt.Errorf(
 			"source %s does not match the family of its field",
 			addr,
 		)
 	}
 
 	if addr.IsUnspecified() {
-		return xnetip.Network{}, status.Error(
-			codes.InvalidArgument, "source address must not be unspecified",
-		)
+		return xnetip.Network{}, errors.New("source address must not be unspecified")
 	}
 
 	mask, ok := netip.AddrFromSlice(source.GetMask())
 	if !ok || mask.Unmap().BitLen() != addr.BitLen() {
-		return xnetip.Network{}, status.Errorf(
-			codes.InvalidArgument,
+		return xnetip.Network{}, fmt.Errorf(
 			"source mask must match the address family, got %d bytes",
 			len(source.GetMask()),
 		)
@@ -218,22 +186,15 @@ func netFromProto(source *filterpb.IPNet, addrLen int) (xnetip.Network, error) {
 
 	result, err := xnetip.NetworkFrom(addr, mask.Unmap())
 	if err != nil {
-		return xnetip.Network{}, status.Errorf(
-			codes.InvalidArgument, "source: %s", err,
-		)
+		return xnetip.Network{}, fmt.Errorf("source: %w", err)
 	}
 
 	prefix, ok := result.Prefix()
 	if !ok {
-		return xnetip.Network{}, status.Error(
-			codes.InvalidArgument, "source mask must be contiguous",
-		)
+		return xnetip.Network{}, errors.New("source mask must be contiguous")
 	}
 	if prefix.Bits() == 0 {
-		return xnetip.Network{}, status.Error(
-			codes.InvalidArgument,
-			"source mask must not leave the whole address free",
-		)
+		return xnetip.Network{}, errors.New("source mask must not leave the whole address free")
 	}
 
 	return result, nil
