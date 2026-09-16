@@ -110,15 +110,16 @@ func newTestService(t *testing.T) *DecapService {
 	return NewDecapService(&mockBackend{})
 }
 
-// refusingDeleteBackend updates like mockBackend but refuses every delete,
-// modeling a config still referenced by a live generation.
+// refusingDeleteBackend updates like mockBackend but refuses every delete
+// with err.
 type refusingDeleteBackend struct {
 	mockBackend
+	err error
 }
 
 func (m *refusingDeleteBackend) DeleteModule(name string) error {
 	m.deletedName = name
-	return errInjectedBackend
+	return m.err
 }
 
 // parkingBackend refuses to release the first handle it mints, then releases
@@ -348,31 +349,52 @@ func Test_DecapService_DeleteConfig_RemovesConfig(t *testing.T) {
 	require.Equal(t, codes.NotFound, status.Code(err))
 }
 
-// Test_DecapService_DeleteConfig_Referenced verifies that a backend refusal
-// surfaces as Internal and leaves the config in place.
-func Test_DecapService_DeleteConfig_Referenced(t *testing.T) {
-	backend := &refusingDeleteBackend{}
-	svc := NewDecapService(backend)
-	ctx := t.Context()
+// Test_DecapService_DeleteConfig_Refused verifies that a refused delete maps
+// its error kind to the status code and leaves the config in place.
+func Test_DecapService_DeleteConfig_Refused(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+		code codes.Code
+	}{
+		{
+			name: "referenced by a chain",
+			err:  fmt.Errorf("module 'decap:decap0' not found in chain 'chain0': %w", ffi.ErrFailedPrecondition),
+			code: codes.FailedPrecondition,
+		},
+		{
+			name: "backend failure",
+			err:  errInjectedBackend,
+			code: codes.Internal,
+		},
+	}
 
-	_, err := svc.UpdateConfig(ctx, &decappb.UpdateConfigRequest{
-		Name:      "decap0",
-		Prefixes4: mustPrefixes4(t, "10.0.0.0/24"),
-	})
-	require.NoError(t, err)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			backend := &refusingDeleteBackend{err: tc.err}
+			svc := NewDecapService(backend)
+			ctx := t.Context()
 
-	resp, err := svc.DeleteConfig(ctx, &decappb.DeleteConfigRequest{Name: "decap0"})
-	require.Nil(t, resp)
-	require.Equal(t, codes.Internal, status.Code(err))
-	assert.Equal(t, "decap0", backend.deletedName)
+			_, err := svc.UpdateConfig(ctx, &decappb.UpdateConfigRequest{
+				Name:      "decap0",
+				Prefixes4: mustPrefixes4(t, "10.0.0.0/24"),
+			})
+			require.NoError(t, err)
 
-	list, err := svc.ListConfigs(ctx, &decappb.ListConfigsRequest{})
-	require.NoError(t, err)
-	assert.Equal(t, []string{"decap0"}, list.Configs)
+			resp, err := svc.DeleteConfig(ctx, &decappb.DeleteConfigRequest{Name: "decap0"})
+			require.Nil(t, resp)
+			require.Equal(t, tc.code, status.Code(err))
+			assert.Equal(t, "decap0", backend.deletedName)
 
-	show, err := svc.ShowConfig(ctx, &decappb.ShowConfigRequest{Name: "decap0"})
-	require.NotNil(t, show)
-	require.NoError(t, err)
+			list, err := svc.ListConfigs(ctx, &decappb.ListConfigsRequest{})
+			require.NoError(t, err)
+			assert.Equal(t, []string{"decap0"}, list.Configs)
+
+			show, err := svc.ShowConfig(ctx, &decappb.ShowConfigRequest{Name: "decap0"})
+			require.NotNil(t, show)
+			require.NoError(t, err)
+		})
+	}
 }
 
 // Test_DecapService_DeleteConfig_ParksThenReclaims verifies that a handle

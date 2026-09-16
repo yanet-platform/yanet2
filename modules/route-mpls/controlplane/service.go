@@ -17,6 +17,7 @@ import (
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
 	"github.com/yanet-platform/yanet2/common/go/maptrie"
 	"github.com/yanet-platform/yanet2/controlplane/configstore"
+	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/modules/route-mpls/bindings/go/croutempls"
 	"github.com/yanet-platform/yanet2/modules/route-mpls/controlplane/routemplspb/v1"
 )
@@ -251,7 +252,12 @@ func (m *RouteMPLSService) DeleteConfig(
 		return nil, status.Error(codes.NotFound, "not found")
 	}
 	if err != nil {
-		return nil, status.Errorf(codes.Internal, "failed to delete module config %q: %v", name, err)
+		code := codes.Internal
+		if errors.Is(err, ffi.ErrFailedPrecondition) {
+			// A chain still references the config.
+			code = codes.FailedPrecondition
+		}
+		return nil, status.Errorf(code, "failed to delete module config %q: %v", name, err)
 	}
 
 	return &routemplspb.DeleteConfigResponse{}, nil

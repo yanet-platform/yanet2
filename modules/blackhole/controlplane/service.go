@@ -8,6 +8,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/yanet-platform/yanet2/controlplane/configstore"
+	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	blackholepb "github.com/yanet-platform/yanet2/modules/blackhole/controlplane/blackholepb/v1"
 )
 
@@ -114,10 +115,12 @@ func (m *BlackholeService) DeleteConfig(
 		return nil, status.Error(codes.NotFound, "no config found")
 	}
 	if err != nil {
-		return nil, status.Errorf(
-			codes.Internal,
-			"failed to delete module config %q: %v", name, err,
-		)
+		code := codes.Internal
+		if errors.Is(err, ffi.ErrFailedPrecondition) {
+			// A chain still references the config.
+			code = codes.FailedPrecondition
+		}
+		return nil, status.Errorf(code, "failed to delete module config %q: %v", name, err)
 	}
 
 	return &blackholepb.DeleteConfigResponse{}, nil

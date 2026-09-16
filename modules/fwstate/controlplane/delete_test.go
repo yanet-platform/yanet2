@@ -11,6 +11,7 @@ import (
 	dataplaneut "github.com/yanet-platform/yanet2/bindings/go/dataplane_ut"
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
+	plain "github.com/yanet-platform/yanet2/devices/plain/controlplane"
 	"github.com/yanet-platform/yanet2/modules/acl/bindings/go/cacl"
 	fwstate "github.com/yanet-platform/yanet2/modules/fwstate/controlplane"
 	"github.com/yanet-platform/yanet2/modules/fwstate/controlplane/fwstatepb/v1"
@@ -36,7 +37,7 @@ func newDeleteTestHarness(
 		DPMemory:      uint64(deleteTestDPMemory),
 		WorkerCount:   1,
 		Modules:       modules,
-		DevicesToLoad: []string{},
+		DevicesToLoad: []string{"plain"},
 		ObjectsToLoad: []string{"fwstate_map_v4", "fwstate_map_v6"},
 	})
 	require.NoError(testingTB, err)
@@ -137,6 +138,44 @@ func TestFWStateDeleteKeepsSameNamedACLConfig(t *testing.T) {
 	configs := agent.DPConfig().CPConfigs()
 	require.True(t, hasCPConfig(configs, "acl", configName))
 	require.False(t, hasCPConfig(configs, fwstateModuleType, configName))
+}
+
+// TestFWStateDeleteReferencedConfigRefused checks that deleting a config a
+// chain still references fails with FailedPrecondition and keeps it published.
+func TestFWStateDeleteReferencedConfigRefused(t *testing.T) {
+	const configName = "fwstate-referenced"
+
+	_, agent := newDeleteTestHarness(t, []string{"fwstate"}, "fwstate-referenced")
+	maps := newFWStateTestMaps(t, agent, configName, 1024)
+	service := fwstate.NewFWStateService(agent)
+	_, err := service.UpdateConfig(t.Context(), validDeleteTestUpdateRequest(
+		configName, maps.v4Name(), maps.v6Name(),
+	))
+	require.NoError(t, err)
+
+	require.NoError(t, agent.UpdateFunction(ffi.FunctionConfig{
+		Name: "function0",
+		Chains: []ffi.FunctionChainConfig{{
+			Weight: 1,
+			Chain: ffi.ChainConfig{
+				Name:    "chain0",
+				Modules: []ffi.ChainModuleConfig{{Type: fwstateModuleType, Name: configName}},
+			},
+		}},
+	}))
+	require.NoError(t, agent.UpdatePipeline(ffi.PipelineConfig{
+		Name:      "pipeline0",
+		Functions: []string{"function0"},
+	}))
+	_, err = plain.UpdateDevices(agent, []ffi.DeviceConfig{{
+		Name:  "port0",
+		Input: []ffi.DevicePipelineConfig{{Name: "pipeline0", Weight: 1}},
+	}})
+	require.NoError(t, err)
+
+	_, err = service.DeleteConfig(t.Context(), &fwstatepb.DeleteConfigRequest{Name: configName})
+	require.Equal(t, codes.FailedPrecondition, status.Code(err))
+	require.True(t, hasCPConfig(agent.DPConfig().CPConfigs(), fwstateModuleType, configName))
 }
 
 // TestFWStateUpdateUnknownMapNameRejected checks that an update naming a

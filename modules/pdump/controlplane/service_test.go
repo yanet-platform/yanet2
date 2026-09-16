@@ -2,6 +2,8 @@ package pdump_test
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -64,6 +66,8 @@ type fakeBackend struct {
 	modules []*fakeModule
 	deleted []string
 	blocks  map[string]*updateBlock
+	// deleteErr, when set, is returned by every delete.
+	deleteErr error
 }
 
 // updateBlock holds an update of one name inside the backend.
@@ -118,7 +122,7 @@ func (m *fakeBackend) DeleteModule(name string) error {
 	defer m.mu.Unlock()
 
 	m.deleted = append(m.deleted, name)
-	return nil
+	return m.deleteErr
 }
 
 // Deleted returns the names deleted so far, in order.
@@ -270,6 +274,41 @@ func Test_PdumpService_DeleteConfig_EndsStreamsAndFreesModule(t *testing.T) {
 
 	_, err = service.ShowConfig(t.Context(), &pdumppb.ShowConfigRequest{Name: "capture"})
 	require.Equal(t, codes.NotFound, status.Code(err))
+}
+
+// Test_PdumpService_DeleteConfig_Refused verifies that a refused delete maps
+// its error kind to the status code and leaves the config in place.
+func Test_PdumpService_DeleteConfig_Refused(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+		code codes.Code
+	}{
+		{
+			name: "referenced by a chain",
+			err:  fmt.Errorf("module 'pdump:capture' not found in chain 'chain0': %w", ffi.ErrFailedPrecondition),
+			code: codes.FailedPrecondition,
+		},
+		{
+			name: "backend failure",
+			err:  errors.New("dp_config_wait_for_gen timed out"),
+			code: codes.Internal,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			backend := &fakeBackend{deleteErr: tc.err}
+			service := pdump.NewPdumpService(backend)
+			setFilter(t, service, "capture", "udp")
+
+			_, err := service.DeleteConfig(t.Context(), &pdumppb.DeleteConfigRequest{Name: "capture"})
+			require.Equal(t, tc.code, status.Code(err))
+
+			_, err = service.ShowConfig(t.Context(), &pdumppb.ShowConfigRequest{Name: "capture"})
+			require.NoError(t, err)
+		})
+	}
 }
 
 // Test_PdumpService_SetConfig_RefusedFreeReleasesReplacedModuleLater verifies

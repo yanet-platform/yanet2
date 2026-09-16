@@ -12,6 +12,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	blackholepb "github.com/yanet-platform/yanet2/modules/blackhole/controlplane/blackholepb/v1"
 )
 
@@ -113,6 +114,56 @@ func Test_BlackholeService_DeleteMissing(t *testing.T) {
 	resp, err := svc.DeleteConfig(t.Context(), &blackholepb.DeleteConfigRequest{Name: "absent"})
 	require.Nil(t, resp)
 	require.Equal(t, codes.NotFound, status.Code(err))
+}
+
+// refusingDeleteBackend updates like mockBackend but refuses every delete
+// with err.
+type refusingDeleteBackend struct {
+	mockBackend
+	err error
+}
+
+func (m *refusingDeleteBackend) DeleteModule(name string) error {
+	return m.err
+}
+
+// Test_BlackholeService_DeleteConfig_Refused verifies that a refused delete
+// maps its error kind to the status code and leaves the config in place.
+func Test_BlackholeService_DeleteConfig_Refused(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+		code codes.Code
+	}{
+		{
+			name: "referenced by a chain",
+			err:  fmt.Errorf("module 'blackhole:blackhole0' not found in chain 'chain0': %w", ffi.ErrFailedPrecondition),
+			code: codes.FailedPrecondition,
+		},
+		{
+			name: "backend failure",
+			err:  errInjectedBackend,
+			code: codes.Internal,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			svc := NewBlackholeService(&refusingDeleteBackend{err: tc.err})
+			ctx := t.Context()
+
+			_, err := svc.UpdateConfig(ctx, &blackholepb.UpdateConfigRequest{Name: "blackhole0"})
+			require.NoError(t, err)
+
+			resp, err := svc.DeleteConfig(ctx, &blackholepb.DeleteConfigRequest{Name: "blackhole0"})
+			require.Nil(t, resp)
+			require.Equal(t, tc.code, status.Code(err))
+
+			show, err := svc.ShowConfig(ctx, &blackholepb.ShowConfigRequest{Name: "blackhole0"})
+			require.NoError(t, err)
+			require.NotNil(t, show)
+		})
+	}
 }
 
 // Test_BlackholeService_UpdateFailureAtomic verifies that a failed update

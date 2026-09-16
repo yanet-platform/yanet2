@@ -178,6 +178,9 @@ type fakeBackend struct {
 	// (a build failure) instead of a handle, then cleared.
 	newFIBErr error
 
+	// deleteModuleErr, when set, is returned by every DeleteModule call.
+	deleteModuleErr error
+
 	// dumpEntries holds the injected DumpFIB result per name; a fib
 	// handle's Publish never derives it from the entries it was built
 	// from, so a test wanting ShowFIB to render something sets it
@@ -366,6 +369,9 @@ func (m *fakeBackend) DeleteModule(name string) error {
 	m.calls[name] = append(m.calls[name], "delete_module")
 	m.deleteModuleCalls = append(m.deleteModuleCalls, name)
 
+	if m.deleteModuleErr != nil {
+		return m.deleteModuleErr
+	}
 	if !m.modulePublished[name] {
 		return fmt.Errorf("module %q: %w", name, ffi.ErrNotFound)
 	}
@@ -750,6 +756,41 @@ func TestDeleteConfigUnknownConfig(t *testing.T) {
 
 	_, err := service.DeleteConfig(t.Context(), &routepb.DeleteConfigRequest{Name: "missing"})
 	require.Equal(t, codes.NotFound, status.Code(err))
+}
+
+// TestDeleteConfigRefused verifies that a refused module delete maps its
+// error kind to the status code and leaves the config in place.
+func TestDeleteConfigRefused(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+		code codes.Code
+	}{
+		{
+			name: "referenced by a chain",
+			err:  fmt.Errorf("module 'route:cfg' not found in chain 'chain0': %w", ffi.ErrFailedPrecondition),
+			code: codes.FailedPrecondition,
+		},
+		{
+			name: "backend failure",
+			err:  errors.New("dp_config_wait_for_gen timed out"),
+			code: codes.Internal,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			backend := newFakeBackend()
+			service := newServiceWithConfig(t, backend)
+			backend.deleteModuleErr = tc.err
+
+			_, err := service.DeleteConfig(t.Context(), &routepb.DeleteConfigRequest{Name: "cfg"})
+			require.Equal(t, tc.code, status.Code(err))
+
+			_, err = service.ShowFIB(t.Context(), &routepb.ShowFIBRequest{Name: "cfg"})
+			require.NoError(t, err)
+		})
+	}
 }
 
 // TestShowFIBEmptyConfig verifies that a registered config with no FIB

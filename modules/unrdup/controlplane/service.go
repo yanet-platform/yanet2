@@ -9,6 +9,7 @@ import (
 
 	"github.com/yanet-platform/xnetip"
 	"github.com/yanet-platform/yanet2/controlplane/configstore"
+	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/modules/unrdup/bindings/go/cunrdup"
 	"github.com/yanet-platform/yanet2/modules/unrdup/controlplane/unrduppb/v1"
 )
@@ -137,9 +138,12 @@ func (m *UnrdupService) DeleteConfig(
 		return nil, status.Errorf(codes.NotFound, "config %q is not found", name)
 	}
 	if err != nil {
-		return nil, status.Errorf(
-			codes.Internal, "failed to delete config %q: %s", name, err,
-		)
+		code := codes.Internal
+		if errors.Is(err, ffi.ErrFailedPrecondition) {
+			// A chain still references the config.
+			code = codes.FailedPrecondition
+		}
+		return nil, status.Errorf(code, "failed to delete config %q: %s", name, err)
 	}
 
 	return &unrduppb.DeleteConfigResponse{}, nil
