@@ -219,7 +219,10 @@ func buildFIB(fib *croute.FIBObject, devices []string, entries []*routepb.FIBEnt
 
 		key := bitset.TinyBitset{}
 		for _, nh := range entry.GetNexthops() {
-			hardwareRoute := newHardwareRoute(nh)
+			hardwareRoute, err := newHardwareRoute(nh)
+			if err != nil {
+				return fmt.Errorf("failed to parse nexthop %v: %w", nh, err)
+			}
 
 			idx, ok := hardwareIndex[hardwareRoute]
 			if !ok {
@@ -334,10 +337,23 @@ func (m *backend) counters(
 // stack behind this package; the alias keeps this package's public API intact.
 type HardwareRoute = hwroute.HardwareRoute
 
-func newHardwareRoute(nh *routepb.FIBNexthop) HardwareRoute {
-	return HardwareRoute{
-		SourceMAC:      nh.GetSrcMac().EUI48(),
-		DestinationMAC: nh.GetDstMac().EUI48(),
-		Device:         nh.GetDevice(),
+func newHardwareRoute(nh *routepb.FIBNexthop) (HardwareRoute, error) {
+	src := nh.GetSrcMac()
+	if src == nil {
+		return HardwareRoute{}, fmt.Errorf("src_mac is required")
 	}
+	dst := nh.GetDstMac()
+	if dst == nil {
+		return HardwareRoute{}, fmt.Errorf("dst_mac is required")
+	}
+	device := nh.GetDevice()
+	if device == "" {
+		return HardwareRoute{}, fmt.Errorf("device is required")
+	}
+
+	return HardwareRoute{
+		SourceMAC:      src.EUI48(),
+		DestinationMAC: dst.EUI48(),
+		Device:         device,
+	}, nil
 }
