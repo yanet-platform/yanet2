@@ -124,6 +124,16 @@ func Test_UpdateFunctionRequest_Validate(t *testing.T) {
 			message: "function: chains[0].chain.modules[0] is required",
 		},
 		{
+			name: "module name with NUL",
+			request: &ynpb.UpdateFunctionRequest{Function: &ynpb.Function{
+				Id: &commonpb.FunctionId{Name: "function0"},
+				Chains: []*ynpb.FunctionChain{{
+					Chain: &ynpb.Chain{Modules: []*commonpb.ModuleId{{Type: "forward", Name: "fwd0\x00fwd1"}}},
+				}},
+			}},
+			message: "function: chains[0].chain.modules[0]: name must not contain NUL",
+		},
+		{
 			name: "invalid chain weight",
 			request: &ynpb.UpdateFunctionRequest{Function: &ynpb.Function{
 				Id:     &commonpb.FunctionId{Name: "function0"},

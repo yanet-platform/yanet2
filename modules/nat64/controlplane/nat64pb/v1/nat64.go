@@ -3,22 +3,20 @@ package nat64pb
 import (
 	"errors"
 	"fmt"
+
+	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
 )
 
 // MaxMTU is the largest MTU accepted by the NAT64 dataplane.
 const MaxMTU = 1<<16 - 1
 
 func (m *ShowConfigRequest) Validate() error {
-	if m.GetName() == "" {
-		return errors.New("name is required")
-	}
-
-	return nil
+	return commonpb.ValidateModuleName("name", m.GetName())
 }
 
 func (m *AddPrefixRequest) Validate() error {
-	if m.GetName() == "" {
-		return errors.New("name is required")
+	if err := commonpb.ValidateModuleName("name", m.GetName()); err != nil {
+		return err
 	}
 	if m.GetPrefix() == nil {
 		return errors.New("prefix is required")
@@ -28,8 +26,8 @@ func (m *AddPrefixRequest) Validate() error {
 }
 
 func (m *RemovePrefixRequest) Validate() error {
-	if m.GetName() == "" {
-		return errors.New("name is required")
+	if err := commonpb.ValidateModuleName("name", m.GetName()); err != nil {
+		return err
 	}
 	if m.GetPrefix() == nil {
 		return errors.New("prefix is required")
@@ -39,8 +37,8 @@ func (m *RemovePrefixRequest) Validate() error {
 }
 
 func (m *AddMappingRequest) Validate() error {
-	if m.GetName() == "" {
-		return errors.New("name is required")
+	if err := commonpb.ValidateModuleName("name", m.GetName()); err != nil {
+		return err
 	}
 	if m.GetIpv4() == nil {
 		return errors.New("ipv4 is required")
@@ -53,8 +51,8 @@ func (m *AddMappingRequest) Validate() error {
 }
 
 func (m *RemoveMappingRequest) Validate() error {
-	if m.GetName() == "" {
-		return errors.New("name is required")
+	if err := commonpb.ValidateModuleName("name", m.GetName()); err != nil {
+		return err
 	}
 	if m.GetIpv4() == nil {
 		return errors.New("ipv4 is required")
@@ -64,8 +62,8 @@ func (m *RemoveMappingRequest) Validate() error {
 }
 
 func (m *SetMTURequest) Validate() error {
-	if m.GetName() == "" {
-		return errors.New("name is required")
+	if err := commonpb.ValidateModuleName("name", m.GetName()); err != nil {
+		return err
 	}
 	if m.GetMtu() == nil {
 		return errors.New("mtu is required")
@@ -97,17 +95,9 @@ func (m *MTUConfig) Validate() error {
 }
 
 func (m *SetDropUnknownRequest) Validate() error {
-	if m.GetName() == "" {
-		return errors.New("name is required")
-	}
-
-	return nil
+	return commonpb.ValidateModuleName("name", m.GetName())
 }
 
 func (m *DeleteConfigRequest) Validate() error {
-	if m.GetName() == "" {
-		return errors.New("name is required")
-	}
-
-	return nil
+	return commonpb.ValidateModuleName("name", m.GetName())
 }

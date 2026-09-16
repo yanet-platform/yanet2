@@ -14,16 +14,12 @@ const MaxCounterNameLen = 127
 const nexthopCounterPrefix = "nexthop_"
 
 func (m *DeleteConfigRequest) Validate() error {
-	if m.GetName() == "" {
-		return errors.New("name is required")
-	}
-
-	return nil
+	return commonpb.ValidateModuleName("name", m.GetName())
 }
 
 func (m *ShowFIBRequest) Validate() error {
-	if m.GetName() == "" {
-		return errors.New("name is required")
+	if err := commonpb.ValidateModuleName("name", m.GetName()); err != nil {
+		return err
 	}
 	if m.GetIpv4Only() && m.GetIpv6Only() {
 		return errors.New("ipv4_only and ipv6_only must not both be set")
@@ -85,8 +81,8 @@ func (m *FIBEntry) Validate() error {
 }
 
 func (m *UpdateFIBRequest) Validate() error {
-	if m.GetModuleName() == "" {
-		return errors.New("module_name is required")
+	if err := commonpb.ValidateModuleName("module_name", m.GetModuleName()); err != nil {
+		return err
 	}
 
 	for idx, entry := range m.GetEntries() {

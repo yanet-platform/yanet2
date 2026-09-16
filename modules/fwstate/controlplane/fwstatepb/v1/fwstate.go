@@ -7,6 +7,8 @@ import (
 
 	"github.com/yanet-platform/yanet2/modules/fwstate/bindings/go/cfwstate"
 	fwstatemappb "github.com/yanet-platform/yanet2/objects/fwstate/controlplane/fwstatemappb/v1"
+
+	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
 )
 
 const (
@@ -21,8 +23,8 @@ const (
 
 // Validate checks that an update contains only request-local values.
 func (m *UpdateConfigRequest) Validate() error {
-	if m.GetName() == "" {
-		return errors.New("name is required")
+	if err := commonpb.ValidateModuleName("name", m.GetName()); err != nil {
+		return err
 	}
 
 	updateMask := m.GetUpdateMask()
@@ -75,20 +77,12 @@ func (m *UpdateConfigRequest) Validate() error {
 
 // Validate checks that a show request names a configuration.
 func (m *ShowConfigRequest) Validate() error {
-	if m.GetName() == "" {
-		return errors.New("name is required")
-	}
-
-	return nil
+	return commonpb.ValidateModuleName("name", m.GetName())
 }
 
 // Validate checks that a delete request names a configuration.
 func (m *DeleteConfigRequest) Validate() error {
-	if m.GetName() == "" {
-		return errors.New("name is required")
-	}
-
-	return nil
+	return commonpb.ValidateModuleName("name", m.GetName())
 }
 
 func validateOptionalMapName(field, name string) error {

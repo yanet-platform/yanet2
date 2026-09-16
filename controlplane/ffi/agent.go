@@ -167,6 +167,10 @@ const MaxPipelineNameLen = C.CP_PIPELINE_NAME_LEN
 // The largest usable name is one byte shorter than this bound.
 const MaxObjectNameLen = C.CP_OBJECT_NAME_LEN
 
+// MaxModuleNameLen is the size of the C-side module config name buffer,
+// including the terminating NUL.
+const MaxModuleNameLen = C.CP_MODULE_NAME_LEN
+
 // ValidateDeviceName rejects a name the C-side fixed-size device name
 // buffer cannot round-trip: one with a NUL byte, or one that does not fit.
 func ValidateDeviceName(name string) error {

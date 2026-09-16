@@ -53,6 +53,9 @@ func (m *Function) Validate() error {
 					moduleIndex,
 				)
 			}
+			if err := commonpb.ValidateModuleName("name", module.GetName()); err != nil {
+				return fmt.Errorf("chains[%d].chain.modules[%d]: %w", idx, moduleIndex, err)
+			}
 		}
 
 		weight := functionChain.GetWeight()

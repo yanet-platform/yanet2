@@ -7,21 +7,18 @@ import (
 
 	"go.uber.org/zap/zapcore"
 
+	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
 	ynpb "github.com/yanet-platform/yanet2/controlplane/ynpb/v1"
 	fwstatemappb "github.com/yanet-platform/yanet2/objects/fwstate/controlplane/fwstatemappb/v1"
 )
 
 func (m *ShowConfigRequest) Validate() error {
-	if m.GetName() == "" {
-		return errors.New("name is required")
-	}
-
-	return nil
+	return commonpb.ValidateModuleName("name", m.GetName())
 }
 
 func (m *UpdateConfigRequest) Validate() error {
-	if m.GetName() == "" {
-		return errors.New("name is required")
+	if err := commonpb.ValidateModuleName("name", m.GetName()); err != nil {
+		return err
 	}
 	if len(m.GetRules()) == 0 {
 		return errors.New("rules must contain at least one rule")
@@ -46,11 +43,16 @@ func (m *UpdateConfigRequest) Validate() error {
 }
 
 func (m *DeleteConfigRequest) Validate() error {
+	return commonpb.ValidateModuleName("name", m.GetName())
+}
+
+// Validate accepts an empty name, which asks for the counters of every config.
+func (m *GetRulesCountersRequest) Validate() error {
 	if m.GetName() == "" {
-		return errors.New("name is required")
+		return nil
 	}
 
-	return nil
+	return commonpb.ValidateModuleName("name", m.GetName())
 }
 
 func (m *GetMetricsRulesRequest) Validate() error {
