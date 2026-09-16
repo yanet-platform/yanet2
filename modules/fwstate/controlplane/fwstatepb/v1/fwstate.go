@@ -224,14 +224,14 @@ func endpointFieldsSet(addr []byte, port uint32) bool {
 	return len(addr) != 0 || port != 0
 }
 
-// Validate reports whether the settings are installable as they stand,
+// ValidateMerged reports whether the settings are installable as they stand,
 // which is what the request merged over the config it replaces must be.
 //
 // Synchronization is optional. A config naming no destination leaves external
 // traffic in ordinary processing, while trusted internal events are consumed
 // and dropped. Naming only part of an endpoint is refused because it cannot
 // be matched or emitted safely.
-func (m *SyncConfig) Validate() error {
+func (m *SyncConfig) ValidateMerged() error {
 	if m == nil {
 		return nil
 	}
