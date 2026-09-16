@@ -3,7 +3,6 @@ package mirror
 import (
 	"context"
 	"errors"
-	"fmt"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -151,7 +150,7 @@ func (m *MirrorService) UpdateConfig(
 		return &mirrorConfig{Rules: reqRules, Module: module}, nil
 	})
 	if err != nil {
-		return nil, fmt.Errorf("failed to update module config: %w", err)
+		return nil, status.Errorf(codes.Internal, "failed to update module config: %v", err)
 	}
 
 	return &mirrorpb.UpdateConfigResponse{}, nil
@@ -169,7 +168,7 @@ func (m *MirrorService) DeleteConfig(
 		return nil, status.Errorf(codes.NotFound, "config %q not found", name)
 	}
 	if err != nil {
-		return nil, fmt.Errorf("failed to delete module config %q: %w", name, err)
+		return nil, status.Errorf(codes.Internal, "failed to delete module config %q: %v", name, err)
 	}
 
 	return &mirrorpb.DeleteConfigResponse{}, nil

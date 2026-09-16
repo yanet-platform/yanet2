@@ -3,7 +3,6 @@ package forward
 import (
 	"context"
 	"errors"
-	"fmt"
 	"unicode/utf8"
 
 	"google.golang.org/grpc/codes"
@@ -182,7 +181,7 @@ func (m *ForwardService) UpdateConfig(ctx context.Context, req *forwardpb.Update
 		return &forwardConfig{Rules: reqRules, Module: module}, nil
 	})
 	if err != nil {
-		return nil, fmt.Errorf("failed to update module config: %w", err)
+		return nil, status.Errorf(codes.Internal, "failed to update module config: %v", err)
 	}
 
 	return &forwardpb.UpdateConfigResponse{}, nil
@@ -197,7 +196,7 @@ func (m *ForwardService) DeleteConfig(ctx context.Context, req *forwardpb.Delete
 		return nil, status.Errorf(codes.NotFound, "config %q not found", name)
 	}
 	if err != nil {
-		return nil, fmt.Errorf("failed to delete module config %q: %w", name, err)
+		return nil, status.Errorf(codes.Internal, "failed to delete module config %q: %v", name, err)
 	}
 
 	return &forwardpb.DeleteConfigResponse{}, nil
