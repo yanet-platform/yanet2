@@ -2,6 +2,7 @@ package operator
 
 import (
 	"context"
+	"errors"
 	"net/netip"
 	"time"
 
@@ -85,7 +86,11 @@ func (m *NeighbourService) CreateTable(
 	req *operatorpb.CreateNeighbourTableRequest,
 ) (*operatorpb.CreateNeighbourTableResponse, error) {
 	if _, err := m.neighTable.CreateSource(req.GetName(), req.GetDefaultPriority(), false); err != nil {
-		return nil, status.Errorf(codes.Internal, "failed to create neighbour table: %v", err)
+		code := codes.Internal
+		if errors.Is(err, neigh.ErrSourceExists) {
+			code = codes.AlreadyExists
+		}
+		return nil, status.Errorf(code, "failed to create neighbour table: %v", err)
 	}
 	return &operatorpb.CreateNeighbourTableResponse{}, nil
 }
@@ -95,7 +100,11 @@ func (m *NeighbourService) UpdateTable(
 	req *operatorpb.UpdateNeighbourTableRequest,
 ) (*operatorpb.UpdateNeighbourTableResponse, error) {
 	if err := m.neighTable.UpdateSource(req.GetName(), req.GetDefaultPriority()); err != nil {
-		return nil, status.Errorf(codes.Internal, "failed to update neighbour table: %v", err)
+		code := codes.Internal
+		if errors.Is(err, neigh.ErrSourceNotFound) {
+			code = codes.NotFound
+		}
+		return nil, status.Errorf(code, "failed to update neighbour table: %v", err)
 	}
 	return &operatorpb.UpdateNeighbourTableResponse{}, nil
 }
@@ -105,7 +114,14 @@ func (m *NeighbourService) RemoveTable(
 	req *operatorpb.RemoveNeighbourTableRequest,
 ) (*operatorpb.RemoveNeighbourTableResponse, error) {
 	if err := m.neighTable.DeleteSource(req.GetName()); err != nil {
-		return nil, status.Errorf(codes.Internal, "failed to remove neighbour table: %v", err)
+		code := codes.Internal
+		switch {
+		case errors.Is(err, neigh.ErrSourceNotFound):
+			code = codes.NotFound
+		case errors.Is(err, neigh.ErrBuiltInSource):
+			code = codes.FailedPrecondition
+		}
+		return nil, status.Errorf(code, "failed to remove neighbour table: %v", err)
 	}
 	return &operatorpb.RemoveNeighbourTableResponse{}, nil
 }
@@ -161,7 +177,11 @@ func (m *NeighbourService) UpdateNeighbours(
 	}
 
 	if err := m.neighTable.Add(table, entries); err != nil {
-		return nil, status.Errorf(codes.Internal, "failed to add neighbours: %v", err)
+		code := codes.Internal
+		if errors.Is(err, neigh.ErrSourceNotFound) {
+			code = codes.NotFound
+		}
+		return nil, status.Errorf(code, "failed to add neighbours: %v", err)
 	}
 
 	return &operatorpb.UpdateNeighboursResponse{}, nil
@@ -186,7 +206,11 @@ func (m *NeighbourService) RemoveNeighbours(
 	}
 
 	if err := m.neighTable.Remove(table, addrs); err != nil {
-		return nil, status.Errorf(codes.Internal, "failed to remove neighbours: %v", err)
+		code := codes.Internal
+		if errors.Is(err, neigh.ErrSourceNotFound) {
+			code = codes.NotFound
+		}
+		return nil, status.Errorf(code, "failed to remove neighbours: %v", err)
 	}
 
 	return &operatorpb.RemoveNeighboursResponse{}, nil
