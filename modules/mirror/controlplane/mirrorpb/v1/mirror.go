@@ -1,6 +1,54 @@
 package mirrorpb
 
-import "github.com/yanet-platform/yanet2/common/go/xproto"
+import (
+	"errors"
+	"fmt"
+
+	"github.com/yanet-platform/yanet2/common/go/xproto"
+)
+
+func (m *ShowConfigRequest) Validate() error {
+	if m.GetName() == "" {
+		return errors.New("name is required")
+	}
+
+	return nil
+}
+
+func (m *UpdateConfigRequest) Validate() error {
+	if m.GetName() == "" {
+		return errors.New("name is required")
+	}
+
+	rules := m.GetRules()
+	if len(rules) == 0 {
+		return errors.New("rules must contain at least one rule")
+	}
+
+	for idx, rule := range rules {
+		if err := rule.Validate(); err != nil {
+			return fmt.Errorf("rules[%d]: %w", idx, err)
+		}
+	}
+
+	return nil
+}
+
+func (m *DeleteConfigRequest) Validate() error {
+	if m.GetName() == "" {
+		return errors.New("name is required")
+	}
+
+	return nil
+}
+
+func (m *Rule) Validate() error {
+	if m.GetAction() == nil {
+		return errors.New("action is required")
+	}
+
+	return nil
+}
 
 // MarshalJSON renders the mode by its declared name, or by its number when
 // the value is not declared.
