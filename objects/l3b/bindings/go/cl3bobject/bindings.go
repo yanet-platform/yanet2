@@ -65,7 +65,7 @@ package cl3bobject
 //
 //// cl3bobject_sessions_read resolves the service's session table and pages
 //// its records through the l3state cursor.
-//static inline int
+//static inline uint32_t
 //cl3bobject_sessions_read(
 //	struct cp_object *service,
 //	uint64_t now,
@@ -75,15 +75,12 @@ package cl3bobject
 //) {
 //	struct l3b_session_table_object *table =
 //		l3b_virtual_service_session_table(service);
-//	if (table == NULL) {
-//		return -1;
-//	}
 //	l3s_cursor_t l3s_cursor = {.token = *cursor};
 //	uint32_t count = l3s_table_read(
 //		&table->table, now, &l3s_cursor, sessions, capacity
 //	);
 //	*cursor = l3s_cursor.token;
-//	return (int)count;
+//	return count;
 //}
 import "C"
 
@@ -134,9 +131,6 @@ type VirtualServiceConfig struct {
 	HashMask          uint32
 	IndexMask         uint32
 	RingCapacity      uint32
-	// Hash index size of the service's session table; zero selects the
-	// default.
-	SessionIndexSize uint32
 	// Scheduling mode bits; SchedulerCounter selects one-packet
 	// scheduling from the module link's per-worker packet counter.
 	SchedulerFlags uint32
@@ -199,20 +193,96 @@ func DSCPFlagsOf(mode uint32, dscp uint8) uint32 {
 // instead of the packet hash.
 const SchedulerCounter = uint32(C.L3B_SCHEDULER_COUNTER)
 
-// VirtualServiceObject is an opaque handle to a named virtual service and
-// its session table, published as standalone cp_objects in shared memory.
+// SessionTableObject is an opaque handle to a named session table published
+// as a standalone cp_object, with a lifetime of its own: the services pinning
+// flows into it come and go while the table outlives them.
+type SessionTableObject struct {
+	ptr *C.struct_cp_object
+}
+
+func (m *SessionTableObject) asRawPtr() *C.struct_cp_object {
+	if m == nil {
+		return nil
+	}
+	return m.ptr
+}
+
+// CreateSessionTable allocates a named session table object in the agent's
+// shared memory.
+//
+// The worker count must cover every worker that will pin sessions; a zero
+// index size selects the default. The returned object is not yet visible to
+// the dataplane; it reaches one through the publish of a service pointing at
+// it.
+func CreateSessionTable(
+	agent *ffi.Agent,
+	name string,
+	workerCount uint16,
+	indexSize uint32,
+) (*SessionTableObject, error) {
+	cName := C.CString(name)
+	defer C.free(unsafe.Pointer(cName))
+
+	var cErr *C.yanet_error
+	ptr := C.l3b_session_table_object_create(
+		(*C.struct_agent)(agent.AsRawPtr()),
+		cName,
+		C.uint16_t(workerCount),
+		C.uint32_t(indexSize),
+		0,
+		&cErr,
+	)
+	if ptr == nil {
+		return nil, fmt.Errorf(
+			"failed to create session table object: %w",
+			cerrors.FromC(unsafe.Pointer(cErr)),
+		)
+	}
+
+	return &SessionTableObject{ptr: ptr}, nil
+}
+
+// Free destroys the session table object once it is dangling — referenced by
+// no live configuration generation — and reports nil. While a live generation
+// still references it the free is refused with ffi.ErrStillReferenced and the
+// handle stays usable: the caller must free it again once those generations
+// drain. Safe to call multiple times: subsequent calls are no-ops reporting
+// nil.
+func (m *SessionTableObject) Free() error {
+	ptr := m.asRawPtr()
+	if ptr == nil {
+		return nil
+	}
+	var cErr *C.yanet_error
+	rc, errno := C.l3b_session_table_object_free(ptr, &cErr)
+	if rc == 0 {
+		m.ptr = nil
+		return nil
+	}
+	if errors.Is(errno, syscall.EAGAIN) {
+		C.yanet_error_free(cErr)
+		return ffi.ErrStillReferenced
+	}
+	return fmt.Errorf(
+		"failed to free session table object: %w",
+		cerrors.FromC(unsafe.Pointer(cErr)),
+	)
+}
+
+// VirtualServiceObject is an opaque handle to a named virtual service,
+// published as a standalone cp_object in shared memory.
 type VirtualServiceObject struct {
 	name string
 	ptr  *C.struct_cp_object
-	// The session table object born with the service; published and
-	// destroyed together with it.
-	sessionTable *C.struct_cp_object
 	// Number of real servers the service was configured with; indexes
 	// crossing into C arrays are validated against it on the Go side.
 	realServerCount uint32
 }
 
 func (m *VirtualServiceObject) asRawPtr() *C.struct_cp_object {
+	if m == nil {
+		return nil
+	}
 	return m.ptr
 }
 
@@ -221,22 +291,26 @@ func (m *VirtualServiceObject) Name() string {
 	return m.name
 }
 
-// CreateVirtualService allocates a named virtual service object together with
-// its session table object in the agent's shared memory, from its descriptor.
-// workerCount must cover every worker that will pin sessions. A non-nil
-// previous makes the new service adopt that handle's session table, so every
-// pinned flow keeps its real server across the update; the previous handle
-// must then be retired through RetireService, not freed.
+// CreateVirtualService allocates a named virtual service object in the
+// agent's shared memory, from its descriptor and the session table the
+// service is to pin flows into.
 //
-// The returned object is not yet visible to the dataplane; call Publish to
-// install it into a configuration generation.
+// The table is a caller-supplied input the service only points at; it is
+// neither created nor owned here, so a service abandoned before installation
+// leaves the flows already pinned in that table untouched. The returned
+// object is not yet visible to the dataplane; call Publish to install it into
+// a configuration generation.
 func CreateVirtualService(
 	agent *ffi.Agent,
 	name string,
-	workerCount uint16,
 	config VirtualServiceConfig,
-	previous *VirtualServiceObject,
+	sessionTable *SessionTableObject,
 ) (*VirtualServiceObject, error) {
+	cSessionTable := sessionTable.asRawPtr()
+	if cSessionTable == nil {
+		return nil, fmt.Errorf("session table object is nil")
+	}
+
 	pinner := &runtime.Pinner{}
 	defer pinner.Unpin()
 
@@ -248,23 +322,16 @@ func CreateVirtualService(
 	// descriptor itself must live in pinned memory for the call.
 	pinner.Pin(&cConfig)
 
-	var adopt *C.struct_cp_object
-	if previous != nil {
-		adopt = previous.sessionTable
-	}
-
 	cCreate := C.struct_l3b_virtual_service_create_config{
-		agent:               (*C.struct_agent)(agent.AsRawPtr()),
-		name:                cName,
-		worker_count:        C.uint16_t(workerCount),
-		adopt_session_table: adopt,
-		virtual_service:     &cConfig,
+		agent:           (*C.struct_agent)(agent.AsRawPtr()),
+		name:            cName,
+		session_table:   cSessionTable,
+		virtual_service: &cConfig,
 	}
 	pinner.Pin(&cCreate)
 
 	var cErr *C.yanet_error
-	var sessionTable *C.struct_cp_object
-	ptr := C.l3b_virtual_service_create(&cCreate, &sessionTable, &cErr)
+	ptr := C.l3b_virtual_service_create(&cCreate, &cErr)
 	if ptr == nil {
 		return nil, fmt.Errorf(
 			"failed to create virtual service: %w",
@@ -272,34 +339,27 @@ func CreateVirtualService(
 		)
 	}
 
-	// Adoption moves the table's ownership: the previous handle stops
-	// referencing it so a later Free on it cannot destroy the table the
-	// new handle now owns.
-	if previous != nil {
-		previous.sessionTable = nil
-	}
-
 	return &VirtualServiceObject{
 		name:            name,
 		ptr:             ptr,
-		sessionTable:    sessionTable,
 		realServerCount: uint32(len(config.RealServers)),
 	}, nil
 }
 
-// Publish upserts the object into a new dataplane configuration generation
-// through agent_update_objects and blocks until every worker has advanced to
-// it. Re-upserting a replacement object under the same name swaps the service
-// atomically.
+// Publish upserts the service and the session table it points at into a new
+// dataplane configuration generation and blocks until every worker has
+// advanced to it. Re-upserting a replacement object under the same name swaps
+// the service atomically.
+//
+// The table is taken from the service rather than from the caller: a
+// generation that carried the service without its table would leave the table
+// referenced by nobody and destroyable while the dataplane still reaches it.
 func (m *VirtualServiceObject) Publish(agent *ffi.Agent) error {
 	if m.ptr == nil {
 		return fmt.Errorf("virtual service object is nil")
 	}
-
-	objects := []*C.struct_cp_object{m.ptr}
-	if m.sessionTable != nil {
-		objects = append(objects, m.sessionTable)
-	}
+	table := C.l3b_virtual_service_session_table(m.ptr)
+	objects := []*C.struct_cp_object{m.ptr, &table.cp_object}
 	var cErr *C.yanet_error
 	rc := C.agent_update_objects(
 		(*C.struct_agent)(agent.AsRawPtr()),
@@ -316,14 +376,13 @@ func (m *VirtualServiceObject) Publish(agent *ffi.Agent) error {
 	return nil
 }
 
-// RetireService destroys only the service object, once it is dangling —
-// referenced by no live configuration generation — and reports nil. The
-// session table is deliberately left alive: it survives service updates, and
-// an updating caller passes its handle to CreateVirtualService as previous.
-// While a live generation still references the service the free is refused
-// with ffi.ErrStillReferenced. Safe to call multiple times: subsequent calls
-// are no-ops reporting nil.
-func (m *VirtualServiceObject) RetireService() error {
+// Free destroys the service object once it is dangling — referenced by no
+// live configuration generation — and reports nil. The session table the
+// service pointed at is left alone: it is a separate object with its own
+// handle and its own lifetime. While a live generation still references the
+// service the free is refused with ffi.ErrStillReferenced. Safe to call
+// multiple times: subsequent calls are no-ops reporting nil.
+func (m *VirtualServiceObject) Free() error {
 	ptr := m.asRawPtr()
 	if ptr == nil {
 		return nil
@@ -342,36 +401,6 @@ func (m *VirtualServiceObject) RetireService() error {
 	}
 	return fmt.Errorf(
 		"failed to free virtual service object: %w",
-		cerrors.FromC(unsafe.Pointer(cErr)),
-	)
-}
-
-// Free destroys the service object and its session table once both are
-// dangling — referenced by no live configuration generation — and reports
-// nil. While a live generation still references either object the free stops
-// at the refusal with ffi.ErrStillReferenced and the caller must retry: the
-// already-destroyed part stays destroyed. Safe to call multiple times:
-// subsequent calls are no-ops reporting nil.
-func (m *VirtualServiceObject) Free() error {
-	if err := m.RetireService(); err != nil {
-		return err
-	}
-
-	if m.sessionTable == nil {
-		return nil
-	}
-	var cErr *C.yanet_error
-	rc, errno := C.l3b_session_table_object_free(m.sessionTable, &cErr)
-	if rc == 0 {
-		m.sessionTable = nil
-		return nil
-	}
-	if errors.Is(errno, syscall.EAGAIN) {
-		C.yanet_error_free(cErr)
-		return ffi.ErrStillReferenced
-	}
-	return fmt.Errorf(
-		"failed to free session table object: %w",
 		cerrors.FromC(unsafe.Pointer(cErr)),
 	)
 }
@@ -537,9 +566,6 @@ func (m *VirtualServiceObject) ReadSessions(
 		C.uint32_t(limit),
 	)
 	_ = errno
-	if count < 0 {
-		return nil, 0, 0, fmt.Errorf("failed to read sessions: the service carries no session table")
-	}
 
 	out := make([]Session, 0, count)
 	for idx := uint32(0); idx < uint32(count); idx++ {
@@ -584,10 +610,14 @@ func (m *VirtualServiceObject) ReadSessions(
 	return out, next, nowNs, nil
 }
 
-// DeleteVirtualService removes the named service object and its session table
-// from the agent's registry; a replacement generation published afterwards
-// drops them from the dataplane. The caller remains the objects' owner and
-// must still free its handle separately.
+// DeleteVirtualService removes the named service object and the session table
+// it points at from the agent's registry; a replacement generation published
+// afterwards drops them from the dataplane. The caller remains the objects'
+// owner and must still free both handles separately.
+//
+// The service entry is removed before the table's, and that order is
+// load-bearing: it is what keeps the table referenced for as long as any live
+// configuration generation still carries a service reaching into it.
 func DeleteVirtualService(agent *ffi.Agent, name string) error {
 	cName := C.CString(name)
 	defer C.free(unsafe.Pointer(cName))
@@ -723,13 +753,12 @@ func (m *VirtualServiceConfig) cBuild(
 	pinner *runtime.Pinner,
 ) C.struct_l3b_virtual_service {
 	c := C.struct_l3b_virtual_service{
-		hash_mask:          C.uint32_t(m.HashMask),
-		index_mask:         C.uint32_t(m.IndexMask),
-		ring_capacity:      C.uint32_t(m.RingCapacity),
-		session_index_size: C.uint32_t(m.SessionIndexSize),
-		scheduler_flags:    C.uint32_t(m.SchedulerFlags),
-		dscp_flags:         C.uint32_t(m.DSCPFlags),
-		flags:              C.uint32_t(m.Flags),
+		hash_mask:       C.uint32_t(m.HashMask),
+		index_mask:      C.uint32_t(m.IndexMask),
+		ring_capacity:   C.uint32_t(m.RingCapacity),
+		scheduler_flags: C.uint32_t(m.SchedulerFlags),
+		dscp_flags:      C.uint32_t(m.DSCPFlags),
+		flags:           C.uint32_t(m.Flags),
 		session_timeouts: C.struct_l3b_session_timeouts{
 			tcp:         C.uint32_t(m.SessionTimeouts.TCP),
 			tcp_syn:     C.uint32_t(m.SessionTimeouts.TCPSyn),

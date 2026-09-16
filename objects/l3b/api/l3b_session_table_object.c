@@ -68,7 +68,7 @@ l3b_session_table_object_create(
 
 // Release every layer and the object struct itself; internal to the l3b
 // object pair, run by the owner once cp_object_try_destroy granted the
-// exclusive right (directly here, or through l3b_virtual_service_free).
+// exclusive right.
 void
 l3b_session_table_object_destroy(struct cp_object *cp_object) {
 	struct l3b_session_table_object *object = container_of(

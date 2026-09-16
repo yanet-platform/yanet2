@@ -61,6 +61,9 @@ type freeable interface {
 
 type managedService struct {
 	object *cl3bobject.VirtualServiceObject
+	// The table outlives every generation published under this name and
+	// is destroyed only when the named service is deleted.
+	sessionTable *cl3bobject.SessionTableObject
 	// weights[i] is the configured weight of real server i.
 	weights []uint32
 	// enabled[i] is whether real server i takes traffic; disabled servers
@@ -81,18 +84,7 @@ func (m *managedService) Replace(
 	}
 }
 
-// serviceFreeable retires only the service object of a handle, leaving its
-// session table alive for the handle that adopted it.
-type serviceFreeable struct {
-	object *cl3bobject.VirtualServiceObject
-}
-
-// Free implements the deferred-handle contract.
-func (m serviceFreeable) Free() error {
-	return m.object.RetireService()
-}
-
-// PublishTarget returns the handle whose session table an update adopts.
+// PublishTarget returns the service object currently serving traffic.
 func (m *managedService) PublishTarget() *cl3bobject.VirtualServiceObject {
 	return m.object
 }
@@ -107,9 +99,15 @@ func (m *managedService) Weight(realServerIndex int) uint32 {
 }
 
 // Retire returns the currently published service for deferred destruction;
-// its session table stays alive, adopted by the replacement handle.
+// the session table it borrows stays alive.
 func (m *managedService) Retire() freeable {
-	return serviceFreeable{object: m.object}
+	return m.object
+}
+
+// SessionTable returns the table every service published under this name pins
+// flows into.
+func (m *managedService) SessionTable() *cl3bobject.SessionTableObject {
+	return m.sessionTable
 }
 
 var errRealServerIndexOutOfRange = errors.New("real server index out of range")
@@ -240,12 +238,30 @@ func (m *backend) CreateService(service *l3bpb.VirtualService) error {
 
 	m.reclaimDeferred()
 
-	object, weights, err := m.publishService(service, name, nil)
+	// The descriptor is validated before any shared memory is taken, so a
+	// rejected request costs the agent's arena nothing.
+	config, err := buildVirtualServiceConfig(service)
 	if err != nil {
 		return err
 	}
 
-	managed := &managedService{}
+	workerCount := m.agent.DPConfig().WorkerCount()
+	table, err := cl3bobject.CreateSessionTable(
+		m.agent, name, uint16(workerCount), service.GetSessionIndexSize(),
+	)
+	if err != nil {
+		return fmt.Errorf("failed to create session table %q: %w", name, err)
+	}
+
+	object, weights, err := m.publishService(config, name, table)
+	if err != nil {
+		// A table that never reached a configuration generation is
+		// dangling, so its destruction cannot be refused.
+		_ = table.Free()
+		return err
+	}
+
+	managed := &managedService{sessionTable: table}
 	managed.Replace(object, weights)
 	m.services[name] = managed
 	return nil
@@ -264,16 +280,20 @@ func (m *backend) UpdateService(service *l3bpb.VirtualService) error {
 
 	m.reclaimDeferred()
 
-	// The replacement adopts the published session table, so pinned flows
-	// keep their real servers across the update.
-	object, weights, err := m.publishService(service, name, existing.PublishTarget())
+	config, err := buildVirtualServiceConfig(service)
+	if err != nil {
+		return err
+	}
+
+	// The replacement borrows the live session table, so pinned flows keep
+	// their real servers across the update.
+	object, weights, err := m.publishService(config, name, existing.SessionTable())
 	if err != nil {
 		return err
 	}
 
 	// The upsert swapped the registry slot atomically; the superseded
-	// service object stays alive until its generations drain, while its
-	// session table lives on in the replacement handle.
+	// service object stays alive until its generations drain.
 	m.deferOrFree(existing.Retire())
 
 	existing.Replace(object, weights)
@@ -281,24 +301,17 @@ func (m *backend) UpdateService(service *l3bpb.VirtualService) error {
 }
 
 // publishService builds a fresh virtual service object under the given name,
-// installs its default scheduler ring and upserts it into the dataplane. On an
-// update (previous non-nil) the new service adopts the existing session
-// table, so every pinned flow keeps its real server. The caller must hold the
-// backend mutex.
+// installs its default scheduler ring and upserts it into the dataplane.
+//
+// The service only borrows the session table, so a candidate discarded here
+// leaves it untouched for whoever is serving traffic. The caller must hold
+// the backend mutex.
 func (m *backend) publishService(
-	service *l3bpb.VirtualService,
+	config cl3bobject.VirtualServiceConfig,
 	name string,
-	previous *cl3bobject.VirtualServiceObject,
+	table *cl3bobject.SessionTableObject,
 ) (*cl3bobject.VirtualServiceObject, []uint32, error) {
-	config, err := buildVirtualServiceConfig(service)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	// The session table's per-worker sizing must cover every worker.
-	workerCount := m.agent.DPConfig().WorkerCount()
-
-	object, err := cl3bobject.CreateVirtualService(m.agent, name, uint16(workerCount), config, previous)
+	object, err := cl3bobject.CreateVirtualService(m.agent, name, config, table)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to create virtual service %q: %w", name, err)
 	}
@@ -331,9 +344,11 @@ func (m *backend) DeleteService(name string) error {
 	}
 
 	// The delete retired the generation holding the published object;
-	// retry the deferred ones, then retire this one.
+	// retry the deferred ones, then release this service and the table no
+	// service reaches any more.
 	m.reclaimDeferred()
 	m.deferOrFree(existing.Retire())
+	m.deferOrFree(existing.SessionTable())
 
 	delete(m.services, name)
 	return nil
@@ -730,7 +745,6 @@ func buildVirtualServiceConfig(
 		HashMask:          service.GetHashMask(),
 		IndexMask:         service.GetIndexMask(),
 		RingCapacity:      uint32(len(realServers)) * maxRealServerWeight,
-		SessionIndexSize:  service.GetSessionIndexSize(),
 		SchedulerFlags:    service.GetSchedulerFlags(),
 		Flags:             service.GetFlags(),
 		DSCPFlags:         service.GetDscpFlags(),

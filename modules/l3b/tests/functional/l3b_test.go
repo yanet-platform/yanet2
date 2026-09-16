@@ -220,6 +220,30 @@ func TestL3b_DropsTcpWithoutVirtualService(t *testing.T) {
 // encapsulated inner packet with the original frame.
 const ethHeaderLen = 14
 
+// newVirtualService creates a session table and a virtual service borrowing
+// it, leaving the scheduler ring and the publish to the caller.
+//
+// Tearndown is wired so cleanup attempts to free the service before the table
+// it borrows.
+func newVirtualService(
+	t *testing.T,
+	agent *ffi.Agent,
+	name string,
+	config cl3bobject.VirtualServiceConfig,
+) (*cl3bobject.VirtualServiceObject, *cl3bobject.SessionTableObject) {
+	t.Helper()
+
+	table, err := cl3bobject.CreateSessionTable(agent, name, 1, 4096)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = table.Free() })
+
+	service, err := cl3bobject.CreateVirtualService(agent, name, config, table)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = service.Free() })
+
+	return service, table
+}
+
 // publishVirtualService creates a named virtual service object with a single
 // IPv4 real server, installs a one-slot scheduler ring and publishes it into
 // the dataplane. The real server tunnels towards realDst deriving the outer
@@ -243,15 +267,12 @@ func publishVirtualService(
 			DestinationAddress: xerror.Unwrap(netip.ParseAddr(realDst)),
 			SourceNet:          xnetip.MustParseNetwork(sourceNet),
 		}},
-		HashMask:         0,
-		IndexMask:        0,
-		RingCapacity:     1 * 1000,
-		SessionIndexSize: 4096,
+		HashMask:     0,
+		IndexMask:    0,
+		RingCapacity: 1 * 1000,
 	}
 
-	object, err := cl3bobject.CreateVirtualService(agent, name, 1, serviceConfig, nil)
-	require.NoError(t, err)
-
+	object, _ := newVirtualService(t, agent, name, serviceConfig)
 	require.NoError(t, object.UpdateRing([]uint32{0}))
 	require.NoError(t, object.Publish(agent))
 	return object
@@ -405,15 +426,12 @@ func TestL3b_SessionSticksFlowToReal(t *testing.T) {
 				SourceNet:          xnetip.MustParseNetwork("192.0.2.0/24"),
 			},
 		},
-		HashMask:         0,
-		IndexMask:        0,
-		RingCapacity:     2 * 1000,
-		SessionIndexSize: 4096,
+		HashMask:     0,
+		IndexMask:    0,
+		RingCapacity: 2 * 1000,
 	}
 
-	service, err := cl3bobject.CreateVirtualService(agent, "svc", 1, serviceConfig, nil)
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = service.Free() })
+	service, _ := newVirtualService(t, agent, "svc", serviceConfig)
 	require.NoError(t, service.UpdateRing([]uint32{0}))
 	require.NoError(t, service.Publish(agent))
 
@@ -469,7 +487,7 @@ func TestL3b_SessionSticksFlowToReal(t *testing.T) {
 }
 
 // TestL3b_SessionSurvivesServiceUpdate verifies that replacing a virtual
-// service object keeps its session table: flows pinned before the update keep
+// service object keeps the table it pins into: flows pinned before the update keep
 // their real servers while new flows follow the replacement's ring.
 func TestL3b_SessionSurvivesServiceUpdate(t *testing.T) {
 	h, agent := setupL3bHarness(t, "port0", "test")
@@ -492,15 +510,12 @@ func TestL3b_SessionSurvivesServiceUpdate(t *testing.T) {
 				SourceNet:          xnetip.MustParseNetwork("192.0.2.0/24"),
 			},
 		},
-		HashMask:         0,
-		IndexMask:        0,
-		RingCapacity:     2 * 1000,
-		SessionIndexSize: 4096,
+		HashMask:     0,
+		IndexMask:    0,
+		RingCapacity: 2 * 1000,
 	}
 
-	service, err := cl3bobject.CreateVirtualService(agent, "svc", 1, serviceConfig, nil)
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = service.Free() })
+	service, table := newVirtualService(t, agent, "svc", serviceConfig)
 	require.NoError(t, service.UpdateRing([]uint32{0}))
 	require.NoError(t, service.Publish(agent))
 
@@ -544,14 +559,14 @@ func TestL3b_SessionSurvivesServiceUpdate(t *testing.T) {
 	flowA := packetOf("10.0.0.1", 12345)
 	require.Equal(t, "172.16.0.10", outerDstOf(flowA))
 
-	// Replace the service under the same name, adopting the session table
-	// and retargeting the ring at real 1.
-	replacement, err := cl3bobject.CreateVirtualService(agent, "svc", 1, serviceConfig, service)
+	// Replace the service under the same name over the live session table,
+	// retargeting the ring at real 1.
+	replacement, err := cl3bobject.CreateVirtualService(agent, "svc", serviceConfig, table)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = replacement.Free() })
 	require.NoError(t, replacement.UpdateRing([]uint32{1}))
 	require.NoError(t, replacement.Publish(agent))
-	require.NoError(t, service.RetireService())
+	require.NoError(t, service.Free())
 
 	require.Equal(t, "172.16.0.10", outerDstOf(flowA),
 		"a session pinned before the update must keep its real")
@@ -601,15 +616,139 @@ func TestL3b_SessionSurvivesServiceUpdate(t *testing.T) {
 		},
 	}
 
-	relisted, err := cl3bobject.CreateVirtualService(agent, "svc", 1, replacementConfig, replacement)
+	relisted, err := cl3bobject.CreateVirtualService(agent, "svc", replacementConfig, table)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = relisted.Free() })
 	require.NoError(t, relisted.UpdateRing([]uint32{0}))
 	require.NoError(t, relisted.Publish(agent))
-	require.NoError(t, replacement.RetireService())
+	require.NoError(t, replacement.Free())
 
 	require.Equal(t, "172.16.0.20", outerDstOf(flowA),
 		"a session whose backend left the list must re-pin onto the new ring")
+}
+
+// TestL3b_FailedReplacementKeepsSessionTable verifies the session table's
+// independence from any single generation of a service: a replacement
+// candidate discarded before it is published leaves the table of the live
+// service intact, and the retry over that same table keeps every pinned flow.
+func TestL3b_FailedReplacementKeepsSessionTable(t *testing.T) {
+	h, agent := setupL3bHarness(t, "port0", "test")
+	wirePipeline(t, agent, "port0", "test")
+
+	serviceConfig := cl3bobject.VirtualServiceConfig{
+		SourceFilterRules: []cl3bobject.SourceFilterRule{{
+			Net4s:      []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
+			PortRanges: filter.PortRanges{{From: 1, To: 65535}},
+		}},
+		RealServers: []cl3bobject.RealServer{
+			{
+				Type:               cl3bobject.IPv4,
+				DestinationAddress: xerror.Unwrap(netip.ParseAddr("172.16.0.10")),
+				SourceNet:          xnetip.MustParseNetwork("192.0.2.0/24"),
+			},
+			{
+				Type:               cl3bobject.IPv4,
+				DestinationAddress: xerror.Unwrap(netip.ParseAddr("172.16.0.11")),
+				SourceNet:          xnetip.MustParseNetwork("192.0.2.0/24"),
+			},
+		},
+		HashMask:     0,
+		IndexMask:    0,
+		RingCapacity: 2 * 1000,
+	}
+
+	service, table := newVirtualService(t, agent, "svc", serviceConfig)
+	require.NoError(t, service.UpdateRing([]uint32{0}))
+	require.NoError(t, service.Publish(agent))
+
+	module := publishModuleConfig(t, agent, "test", "svc")
+	t.Cleanup(func() { _ = module.Free() })
+
+	eth := layers.Ethernet{
+		SrcMAC:       xerror.Unwrap(net.ParseMAC("aa:bb:cc:dd:ee:ff")),
+		DstMAC:       xerror.Unwrap(net.ParseMAC("11:22:33:44:55:66")),
+		EthernetType: layers.EthernetTypeIPv4,
+	}
+	packetOf := func(srcIP string, srcPort uint16) gopacket.Packet {
+		ip4 := layers.IPv4{
+			Version:  4,
+			TTL:      64,
+			Protocol: layers.IPProtocolTCP,
+			SrcIP:    net.ParseIP(srcIP),
+			DstIP:    net.ParseIP("192.168.1.1"),
+		}
+		tcp := layers.TCP{
+			SrcPort: layers.TCPPort(srcPort),
+			DstPort: 80,
+			Seq:     1,
+			Window:  1024,
+		}
+		tcp.SetNetworkLayerForChecksum(&ip4)
+		return xpacket.LayersToPacket(t, &eth, &ip4, &tcp)
+	}
+	outerDstOf := func(packet gopacket.Packet) string {
+		result, err := h.HandlePackets(packet)
+		require.NoError(t, err)
+		require.Empty(t, result.Drop)
+		require.Len(t, result.Output, 1)
+		info, err := framework.NewPacketParser().ParsePacket(result.Output[0].RawData)
+		require.NoError(t, err)
+		require.True(t, info.IsTunneled)
+		return info.DstIP.String()
+	}
+
+	// Pin the first flow to real 0 by the initial ring.
+	flowA := packetOf("10.0.0.1", 12345)
+	require.Equal(t, "172.16.0.10", outerDstOf(flowA))
+
+	// An update that fails before its candidate reaches the dataplane:
+	// the candidate borrows the live table and is then discarded exactly
+	// the way the control plane discards one.
+	candidate, err := cl3bobject.CreateVirtualService(agent, "svc", serviceConfig, table)
+	require.NoError(t, err)
+	require.NoError(t, candidate.UpdateRing([]uint32{1}))
+	require.NoError(t, candidate.Free(),
+		"a candidate no generation ever referenced must be destroyable at once")
+
+	require.ErrorIs(t, table.Free(), ffi.ErrStillReferenced,
+		"the live generation must still hold the session table")
+
+	require.Equal(t, "172.16.0.10", outerDstOf(flowA),
+		"a discarded candidate must leave the serving flow untouched")
+
+	sessions, next, _, err := service.ReadSessions(agent, 0, 100)
+	require.NoError(t, err)
+	require.Zero(t, next, "the listing must be complete")
+	require.Len(t, sessions, 1)
+	require.Equal(t, "10.0.0.1", sessions[0].SourceAddress.String())
+	require.EqualValues(t, 12345, sessions[0].SourcePort)
+	require.Equal(t, "172.16.0.10", sessions[0].RealAddress.String())
+
+	// The retry over the surviving table, retargeting the ring at real 1.
+	replacement, err := cl3bobject.CreateVirtualService(agent, "svc", serviceConfig, table)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = replacement.Free() })
+	require.NoError(t, replacement.UpdateRing([]uint32{1}))
+	require.NoError(t, replacement.Publish(agent))
+	require.NoError(t, service.Free())
+
+	require.Equal(t, "172.16.0.10", outerDstOf(flowA),
+		"a session pinned before the failure must survive it and the retry")
+	require.Equal(t, "172.16.0.11", outerDstOf(packetOf("10.0.0.2", 54321)),
+		"a new session must follow the retried ring")
+
+	sessions, next, _, err = replacement.ReadSessions(agent, 0, 100)
+	require.NoError(t, err)
+	require.Zero(t, next, "the listing must be complete")
+	bySource := map[string]string{}
+	for _, session := range sessions {
+		bySource[fmt.Sprintf("%s:%d", session.SourceAddress, session.SourcePort)] =
+			session.RealAddress.String()
+	}
+	require.Equal(t, map[string]string{
+		"10.0.0.1:12345": "172.16.0.10",
+		"10.0.0.2:54321": "172.16.0.11",
+	}, bySource, "one table must carry the pins across the failure and the retry")
 }
 
 // TestL3b_OnePacketSchedulingFromLinkCounter verifies one-packet scheduling:
@@ -637,16 +776,13 @@ func TestL3b_OnePacketSchedulingFromLinkCounter(t *testing.T) {
 				SourceNet:          xnetip.MustParseNetwork("192.0.2.0/24"),
 			},
 		},
-		HashMask:         0,
-		IndexMask:        1,
-		RingCapacity:     2 * 1000,
-		SessionIndexSize: 4096,
-		SchedulerFlags:   cl3bobject.SchedulerCounter,
+		HashMask:       0,
+		IndexMask:      1,
+		RingCapacity:   2 * 1000,
+		SchedulerFlags: cl3bobject.SchedulerCounter,
 	}
 
-	service, err := cl3bobject.CreateVirtualService(agent, "svc", 1, serviceConfig, nil)
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = service.Free() })
+	service, _ := newVirtualService(t, agent, "svc", serviceConfig)
 	require.NoError(t, service.UpdateRing([]uint32{0, 1}))
 	require.NoError(t, service.Publish(agent))
 
@@ -722,15 +858,12 @@ func TestL3b_ServiceAndRealCounters(t *testing.T) {
 				SourceNet:          xnetip.MustParseNetwork("192.0.2.0/24"),
 			},
 		},
-		HashMask:         0,
-		IndexMask:        0,
-		RingCapacity:     2 * 1000,
-		SessionIndexSize: 4096,
+		HashMask:     0,
+		IndexMask:    0,
+		RingCapacity: 2 * 1000,
 	}
 
-	service, err := cl3bobject.CreateVirtualService(agent, "svc", 1, serviceConfig, nil)
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = service.Free() })
+	service, _ := newVirtualService(t, agent, "svc", serviceConfig)
 	require.NoError(t, service.UpdateRing([]uint32{0, 1}))
 	require.NoError(t, service.Publish(agent))
 
@@ -866,13 +999,11 @@ func Test_L3b_ConfiguredRealsGateEcho(t *testing.T) {
 						}
 					}
 					reals = reals[:len(tc.weights)]
-					service, err := cl3bobject.CreateVirtualService(agent, "svc", 1,
+					service, _ := newVirtualService(t, agent, "svc",
 						cl3bobject.VirtualServiceConfig{
-							RealServers: reals, RingCapacity: 1000, SessionIndexSize: 4096,
-						}, nil,
+							RealServers: reals, RingCapacity: 1000,
+						},
 					)
-					require.NoError(t, err)
-					t.Cleanup(func() { _ = service.Free() })
 					for idx := range reals {
 						require.NoError(t, service.SetRealServerState(uint32(idx), !tc.disabled))
 					}
@@ -986,30 +1117,21 @@ func TestL3b_FixesMssAndAppliesSessionPolicy(t *testing.T) {
 	h, agent := setupL3bHarness(t, "port0", "test")
 	wirePipeline(t, agent, "port0", "test")
 
-	service, err := cl3bobject.CreateVirtualService(
-		agent,
-		"svc",
-		1,
-		cl3bobject.VirtualServiceConfig{
-			SourceFilterRules: []cl3bobject.SourceFilterRule{{
-				Net4s:      []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
-				PortRanges: filter.PortRanges{{From: 1, To: 65535}},
-			}},
-			RealServers: []cl3bobject.RealServer{{
-				Type:               cl3bobject.IPv4,
-				DestinationAddress: xerror.Unwrap(netip.ParseAddr("172.16.0.10")),
-				SourceNet:          xnetip.MustParseNetwork("192.0.2.0/24"),
-			}},
-			HashMask:         0,
-			IndexMask:        0,
-			RingCapacity:     1000,
-			SessionIndexSize: 4096,
-			Flags:            cl3bobject.FixMSS,
-		},
-		nil,
-	)
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = service.Free() })
+	service, _ := newVirtualService(t, agent, "svc", cl3bobject.VirtualServiceConfig{
+		SourceFilterRules: []cl3bobject.SourceFilterRule{{
+			Net4s:      []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
+			PortRanges: filter.PortRanges{{From: 1, To: 65535}},
+		}},
+		RealServers: []cl3bobject.RealServer{{
+			Type:               cl3bobject.IPv4,
+			DestinationAddress: xerror.Unwrap(netip.ParseAddr("172.16.0.10")),
+			SourceNet:          xnetip.MustParseNetwork("192.0.2.0/24"),
+		}},
+		HashMask:     0,
+		IndexMask:    0,
+		RingCapacity: 1000,
+		Flags:        cl3bobject.FixMSS,
+	})
 	require.NoError(t, service.UpdateRing([]uint32{0}))
 	require.NoError(t, service.Publish(agent))
 
@@ -1085,41 +1207,32 @@ func TestL3b_PureL3SharesOnePinPerSource(t *testing.T) {
 	h, agent := setupL3bHarness(t, "port0", "test")
 	wirePipeline(t, agent, "port0", "test")
 
-	service, err := cl3bobject.CreateVirtualService(
-		agent,
-		"svc",
-		1,
-		cl3bobject.VirtualServiceConfig{
-			SourceFilterRules: []cl3bobject.SourceFilterRule{{
-				// Pure L3 classification: the full port range.
-				Net4s:      []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
-				PortRanges: filter.PortRanges{{From: 0, To: 65535}},
-			}},
-			RealServers: []cl3bobject.RealServer{
-				{
-					Type:               cl3bobject.IPv4,
-					DestinationAddress: xerror.Unwrap(netip.ParseAddr("172.16.0.10")),
-					SourceNet:          xnetip.MustParseNetwork("192.0.2.0/24"),
-				},
-				{
-					Type:               cl3bobject.IPv4,
-					DestinationAddress: xerror.Unwrap(netip.ParseAddr("172.16.0.11")),
-					SourceNet:          xnetip.MustParseNetwork("192.0.2.0/24"),
-				},
+	service, _ := newVirtualService(t, agent, "svc", cl3bobject.VirtualServiceConfig{
+		SourceFilterRules: []cl3bobject.SourceFilterRule{{
+			// Pure L3 classification: the full port range.
+			Net4s:      []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
+			PortRanges: filter.PortRanges{{From: 0, To: 65535}},
+		}},
+		RealServers: []cl3bobject.RealServer{
+			{
+				Type:               cl3bobject.IPv4,
+				DestinationAddress: xerror.Unwrap(netip.ParseAddr("172.16.0.10")),
+				SourceNet:          xnetip.MustParseNetwork("192.0.2.0/24"),
 			},
-			HashMask:         0,
-			IndexMask:        1,
-			RingCapacity:     2 * 1000,
-			SessionIndexSize: 4096,
-			Flags:            cl3bobject.PureL3,
-			// One-packet scheduling rotates per packet, so only the
-			// shared session keeps both flows on one real.
-			SchedulerFlags: cl3bobject.SchedulerCounter,
+			{
+				Type:               cl3bobject.IPv4,
+				DestinationAddress: xerror.Unwrap(netip.ParseAddr("172.16.0.11")),
+				SourceNet:          xnetip.MustParseNetwork("192.0.2.0/24"),
+			},
 		},
-		nil,
-	)
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = service.Free() })
+		HashMask:     0,
+		IndexMask:    1,
+		RingCapacity: 2 * 1000,
+		Flags:        cl3bobject.PureL3,
+		// One-packet scheduling rotates per packet, so only the shared
+		// session keeps both flows on one real.
+		SchedulerFlags: cl3bobject.SchedulerCounter,
+	})
 	require.NoError(t, service.UpdateRing([]uint32{0, 1}))
 	require.NoError(t, service.Publish(agent))
 
@@ -1188,23 +1301,14 @@ func TestL3b_MarksOuterDscp(t *testing.T) {
 	}
 
 	publish := func(name string, dscpFlags uint32) {
-		service, err := cl3bobject.CreateVirtualService(
-			agent,
-			name,
-			1,
-			cl3bobject.VirtualServiceConfig{
-				SourceFilterRules: []cl3bobject.SourceFilterRule{sourceRule},
-				RealServers:       []cl3bobject.RealServer{realServer},
-				HashMask:          0,
-				IndexMask:         0,
-				RingCapacity:      1000,
-				SessionIndexSize:  4096,
-				DSCPFlags:         dscpFlags,
-			},
-			nil,
-		)
-		require.NoError(t, err)
-		t.Cleanup(func() { _ = service.Free() })
+		service, _ := newVirtualService(t, agent, name, cl3bobject.VirtualServiceConfig{
+			SourceFilterRules: []cl3bobject.SourceFilterRule{sourceRule},
+			RealServers:       []cl3bobject.RealServer{realServer},
+			HashMask:          0,
+			IndexMask:         0,
+			RingCapacity:      1000,
+			DSCPFlags:         dscpFlags,
+		})
 		require.NoError(t, service.UpdateRing([]uint32{0}))
 		require.NoError(t, service.Publish(agent))
 

@@ -93,26 +93,17 @@ func (m *compatEnv) compatService(
 		weights = append(weights, real.weight)
 	}
 
-	service, err := cl3bobject.CreateVirtualService(
-		m.agent,
-		name,
-		1,
-		cl3bobject.VirtualServiceConfig{
-			SourceFilterRules: []cl3bobject.SourceFilterRule{{
-				Net6s:      []xnetip.BiContiguous{filter.UnspecifiedIPv6},
-				Net4s:      []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
-				PortRanges: filter.PortRanges{{From: vport, To: vport}},
-			}},
-			RealServers:      realServers,
-			RingCapacity:     uint32(len(reals)) * maxCompatWeight,
-			SessionIndexSize: 4096,
-			SchedulerFlags:   cl3bobject.SchedulerCounter,
-			IndexMask:        0xFFFFFFFF,
-		},
-		nil,
-	)
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = service.Free() })
+	service, _ := newVirtualService(t, m.agent, name, cl3bobject.VirtualServiceConfig{
+		SourceFilterRules: []cl3bobject.SourceFilterRule{{
+			Net6s:      []xnetip.BiContiguous{filter.UnspecifiedIPv6},
+			Net4s:      []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
+			PortRanges: filter.PortRanges{{From: vport, To: vport}},
+		}},
+		RealServers:    realServers,
+		RingCapacity:   uint32(len(reals)) * maxCompatWeight,
+		SchedulerFlags: cl3bobject.SchedulerCounter,
+		IndexMask:      0xFFFFFFFF,
+	})
 	require.NoError(t, service.UpdateRing(controlplane.RingFromWeights(weights)))
 	require.NoError(t, service.Publish(m.agent))
 	return service
@@ -390,27 +381,18 @@ func Test_CompatBalancerRealIpv4(t *testing.T) {
 func Test_CompatBalancerOuterSourceNetwork(t *testing.T) {
 	env := setupCompatEnv(t)
 
-	service, err := cl3bobject.CreateVirtualService(
-		env.agent,
-		"fixedsrc",
-		1,
-		cl3bobject.VirtualServiceConfig{
-			SourceFilterRules: []cl3bobject.SourceFilterRule{{
-				Net4s:      []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
-				PortRanges: filter.PortRanges{{From: 80, To: 80}},
-			}},
-			RealServers: []cl3bobject.RealServer{{
-				Type:               cl3bobject.IPv4,
-				DestinationAddress: xerror.Unwrap(netip.ParseAddr("100.0.0.42")),
-				SourceNet:          xnetip.MustParseNetwork("123.0.0.12/32"),
-			}},
-			RingCapacity:     1000,
-			SessionIndexSize: 4096,
-		},
-		nil,
-	)
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = service.Free() })
+	service, _ := newVirtualService(t, env.agent, "fixedsrc", cl3bobject.VirtualServiceConfig{
+		SourceFilterRules: []cl3bobject.SourceFilterRule{{
+			Net4s:      []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
+			PortRanges: filter.PortRanges{{From: 80, To: 80}},
+		}},
+		RealServers: []cl3bobject.RealServer{{
+			Type:               cl3bobject.IPv4,
+			DestinationAddress: xerror.Unwrap(netip.ParseAddr("100.0.0.42")),
+			SourceNet:          xnetip.MustParseNetwork("123.0.0.12/32"),
+		}},
+		RingCapacity: 1000,
+	})
 	require.NoError(t, service.UpdateRing([]uint32{0}))
 	require.NoError(t, service.Publish(env.agent))
 
