@@ -5,8 +5,17 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
+	ynpb "github.com/yanet-platform/yanet2/controlplane/ynpb/v1"
 )
+
+// Test_CounterTagLengths_MatchC verifies that the pure-Go counter-tag
+// bounds match the fixed-size C buffers, including their terminating bytes.
+func Test_CounterTagLengths_MatchC(t *testing.T) {
+	require.Equal(t, ynpb.MaxCounterTagKeyLen, ffi.CounterTagKeyLen)
+	require.Equal(t, ynpb.MaxCounterTagValueLen, ffi.CounterTagValueLen)
+}
 
 func zeroCounter(name string, instances, size int) ffi.CounterInfo {
 	values := make([][]uint64, 0, instances)

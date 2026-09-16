@@ -2,7 +2,6 @@ package builtin
 
 import (
 	"context"
-	"fmt"
 
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
@@ -94,10 +93,7 @@ func (m *Logging) UpdateLevel(
 		return nil, status.Errorf(codes.Unimplemented, "service doesn't support setting log level dynamically")
 	}
 
-	level, err := convertLevel(req.GetLevel())
-	if err != nil {
-		return nil, fmt.Errorf("failed to convert logging level: %w", err)
-	}
+	level := convertLevel(req.GetLevel())
 
 	// The observer drives an external gate that must never be stricter
 	// than zap, even momentarily, or a line it drops never reaches zap
@@ -138,18 +134,18 @@ func (m *Logging) GetLevel(
 	return &ynpb.GetLevelResponse{Level: level}, nil
 }
 
-func convertLevel(v ynpb.LogLevel) (zapcore.Level, error) {
+func convertLevel(v ynpb.LogLevel) zapcore.Level {
 	switch v {
 	case ynpb.LogLevel_DEBUG:
-		return zapcore.DebugLevel, nil
+		return zapcore.DebugLevel
 	case ynpb.LogLevel_INFO:
-		return zapcore.InfoLevel, nil
+		return zapcore.InfoLevel
 	case ynpb.LogLevel_WARN:
-		return zapcore.WarnLevel, nil
+		return zapcore.WarnLevel
 	case ynpb.LogLevel_ERROR:
-		return zapcore.ErrorLevel, nil
+		return zapcore.ErrorLevel
 	default:
-		return zapcore.InvalidLevel, fmt.Errorf("unexpected value: %v", v)
+		panic("logging level was not validated")
 	}
 }
 

@@ -1,7 +1,6 @@
 package builtin_test
 
 import (
-	"fmt"
 	"maps"
 	"strings"
 	"testing"
@@ -10,8 +9,6 @@ import (
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	"go.uber.org/zap/zaptest/observer"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 
 	dataplaneut "github.com/yanet-platform/yanet2/bindings/go/dataplane_ut"
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
@@ -40,23 +37,6 @@ func newCountersHarness(t *testing.T, workers uint64) *dataplaneut.Harness {
 	t.Cleanup(harness.Free)
 
 	return harness
-}
-
-// An oversized query is refused before any shared memory is touched.
-func TestCountersByTagsRejectsOversizedQuery(t *testing.T) {
-	svc := builtin.NewCounters(0, nil)
-
-	query := make([]string, 65)
-	for idx := range query {
-		query[idx] = fmt.Sprintf("counter_%d", idx)
-	}
-
-	response, err := svc.ByTags(t.Context(), &ynpb.CountersByTagsRequest{
-		Query: query,
-	})
-
-	require.Nil(t, response)
-	require.Equal(t, codes.InvalidArgument, status.Code(err))
 }
 
 // metricByExactLabels finds the metric carrying exactly the given name

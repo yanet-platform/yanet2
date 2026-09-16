@@ -117,10 +117,6 @@ func (m *Pipeline) Get(
 	request *ynpb.GetPipelineRequest,
 ) (*ynpb.GetPipelineResponse, error) {
 	reqId := request.GetId()
-	if reqId == nil {
-		return nil, status.Error(codes.InvalidArgument, "pipeline id is required")
-	}
-
 	dpConfig := m.shm.DPConfig(m.instanceID)
 
 	pipelines := dpConfig.Pipelines()
@@ -155,27 +151,13 @@ func (m *Pipeline) Update(
 	request *ynpb.UpdatePipelineRequest,
 ) (*ynpb.UpdatePipelineResponse, error) {
 	reqPipeline := request.GetPipeline()
-	if reqPipeline == nil {
-		return nil, status.Error(codes.InvalidArgument, "pipeline is required")
-	}
-
-	reqPipelineId := reqPipeline.GetId()
-	if reqPipelineId == nil {
-		return nil, status.Error(codes.InvalidArgument, "pipeline id is required")
-	}
-	if reqPipelineId.Name == "" {
-		return nil, status.Error(codes.InvalidArgument, "pipeline name is required")
-	}
-
+	pipelineID := reqPipeline.GetId()
 	pipeline := ffi.PipelineConfig{
-		Name:      reqPipelineId.Name,
+		Name:      pipelineID.Name,
 		Functions: make([]string, len(reqPipeline.Functions)),
 	}
 
 	for idx, reqFunctionId := range reqPipeline.Functions {
-		if reqFunctionId == nil {
-			return nil, status.Error(codes.InvalidArgument, "function id is required")
-		}
 		pipeline.Functions[idx] = reqFunctionId.Name
 	}
 
@@ -204,12 +186,6 @@ func (m *Pipeline) Delete(
 	request *ynpb.DeletePipelineRequest,
 ) (*ynpb.DeletePipelineResponse, error) {
 	reqId := request.GetId()
-	if reqId == nil {
-		return nil, status.Error(codes.InvalidArgument, "pipeline id is required")
-	}
-	if reqId.Name == "" {
-		return nil, status.Error(codes.InvalidArgument, "pipeline name is required")
-	}
 	pipelineName := reqId.Name
 
 	m.mu.Lock()

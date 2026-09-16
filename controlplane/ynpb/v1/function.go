@@ -10,40 +10,80 @@ import (
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
 )
 
+func (m *GetFunctionRequest) Validate() error {
+	return validateFunctionID(m.GetId())
+}
+
+func (m *UpdateFunctionRequest) Validate() error {
+	if m.GetFunction() == nil {
+		return errors.New("function is required")
+	}
+	if err := m.GetFunction().Validate(); err != nil {
+		return fmt.Errorf("function: %w", err)
+	}
+
+	return nil
+}
+
+func (m *DeleteFunctionRequest) Validate() error {
+	return validateFunctionID(m.GetId())
+}
+
 // Validate checks the function identity, required nested messages, and chain
 // weights.
 func (m *Function) Validate() error {
 	if m == nil {
 		return errors.New("function is required")
 	}
-	if m.GetId() == nil {
-		return errors.New("function id is required")
-	}
-	if m.GetId().GetName() == "" {
-		return errors.New("function name is required")
+	if err := validateFunctionID(m.GetId()); err != nil {
+		return err
 	}
 
 	var sum uint64
 	for idx, functionChain := range m.GetChains() {
 		chain := functionChain.GetChain()
 		if chain == nil {
-			return errors.New("function chain is required")
+			return fmt.Errorf("chains[%d].chain is required", idx)
 		}
-		for _, module := range chain.GetModules() {
+		for moduleIndex, module := range chain.GetModules() {
 			if module == nil {
-				return errors.New("module id is required")
+				return fmt.Errorf(
+					"chains[%d].chain.modules[%d] is required",
+					idx,
+					moduleIndex,
+				)
 			}
 		}
 
 		weight := functionChain.GetWeight()
 		if weight > commonpb.MaxWeightSum {
-			return fmt.Errorf("function.chains[%d].weight %d must be in range 0..%d", idx, weight, commonpb.MaxWeightSum)
+			return fmt.Errorf(
+				"chains[%d].weight %d must be in range 0..%d",
+				idx,
+				weight,
+				commonpb.MaxWeightSum,
+			)
 		}
 		if weight > commonpb.MaxWeightSum-sum {
-			return fmt.Errorf("function.chains weight sum %d must be in range 0..%d", sum+weight, commonpb.MaxWeightSum)
+			return fmt.Errorf(
+				"chains weight sum %d must be in range 0..%d",
+				sum+weight,
+				commonpb.MaxWeightSum,
+			)
 		}
 		sum += weight
 	}
+	return nil
+}
+
+func validateFunctionID(id *commonpb.FunctionId) error {
+	if id == nil {
+		return errors.New("id is required")
+	}
+	if id.GetName() == "" {
+		return errors.New("id.name is required")
+	}
+
 	return nil
 }
 
