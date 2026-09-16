@@ -37,30 +37,66 @@ func (m *fakeModule) Rings() []pdump.Ring {
 	return m.rings
 }
 
-// Free refuses while refusals remain, then writes the rings without
-// synchronization, which the race detector reports against a reader still
-// running.
+// Free refuses while refusals remain, then poisons the rings.
 func (m *fakeModule) Free() error {
 	if m.refusals.Add(-1) >= 0 {
 		return ffi.ErrStillReferenced
 	}
-	for _, ring := range m.rings {
-		*ring.WriteIdx = 0
-		*ring.ReadableIdx = 0
-	}
+	m.poison()
 	m.freed.Store(true)
 	return nil
 }
 
+// poison writes the rings without synchronization, which the race detector
+// reports against a reader still running.
+func (m *fakeModule) poison() {
+	for _, ring := range m.rings {
+		*ring.WriteIdx = 0
+		*ring.ReadableIdx = 0
+	}
+}
+
 // fakeBackend publishes fakeModules and remembers every one it built and
-// every name it deleted.
+// every name it deleted. An update of a blocked name waits until the test
+// releases it.
 type fakeBackend struct {
 	mu      sync.Mutex
 	modules []*fakeModule
 	deleted []string
+	blocks  map[string]*updateBlock
+}
+
+// updateBlock holds an update of one name inside the backend.
+type updateBlock struct {
+	entered chan struct{}
+	release chan struct{}
+}
+
+// blockUpdate makes the next update of the name wait, and returns the
+// channel closed once it entered the backend together with its release.
+func (m *fakeBackend) blockUpdate(name string) (<-chan struct{}, func()) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if m.blocks == nil {
+		m.blocks = map[string]*updateBlock{}
+	}
+	block := &updateBlock{entered: make(chan struct{}), release: make(chan struct{})}
+	m.blocks[name] = block
+
+	return block.entered, sync.OnceFunc(func() { close(block.release) })
 }
 
 func (m *fakeBackend) UpdateModule(name string, settings pdump.Settings) (pdump.Module, error) {
+	m.mu.Lock()
+	block := m.blocks[name]
+	delete(m.blocks, name)
+	m.mu.Unlock()
+	if block != nil {
+		close(block.entered)
+		<-block.release
+	}
+
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -171,14 +207,14 @@ func setFilter(t *testing.T, service *pdump.PdumpService, name, filter string) {
 	require.NoError(t, err)
 }
 
-// openStream starts a ReadDump of the name and returns once it reads the
-// module's rings, with the channel its result arrives on.
-func openStream(t *testing.T, service *pdump.PdumpService, name string, module *fakeModule) <-chan error {
+// openStream starts a ReadDump of the name on the context and returns once
+// it reads the module's rings, with the channel its result arrives on.
+func openStream(t *testing.T, ctx context.Context, service *pdump.PdumpService, name string, module *fakeModule) <-chan error {
 	t.Helper()
 
 	done := make(chan error, 1)
 	go func() {
-		done <- service.ReadDump(&pdumppb.ReadDumpRequest{Name: name}, &fakeStream{ctx: t.Context()})
+		done <- service.ReadDump(&pdumppb.ReadDumpRequest{Name: name}, &fakeStream{ctx: ctx})
 	}()
 
 	select {
@@ -197,7 +233,7 @@ func Test_PdumpService_SetConfig_EndsStreamsBeforeFreeingReplacedModule(t *testi
 	service := pdump.NewPdumpService(backend)
 	setFilter(t, service, "capture", "udp")
 	replaced := backend.Last()
-	stream := openStream(t, service, "capture", replaced)
+	stream := openStream(t, t.Context(), service, "capture", replaced)
 
 	setFilter(t, service, "capture", "tcp")
 
@@ -218,7 +254,7 @@ func Test_PdumpService_DeleteConfig_EndsStreamsAndFreesModule(t *testing.T) {
 	service := pdump.NewPdumpService(backend)
 	setFilter(t, service, "capture", "udp")
 	module := backend.Last()
-	stream := openStream(t, service, "capture", module)
+	stream := openStream(t, t.Context(), service, "capture", module)
 
 	_, err := service.DeleteConfig(t.Context(), &pdumppb.DeleteConfigRequest{Name: "capture"})
 	require.NoError(t, err)
@@ -254,4 +290,118 @@ func Test_PdumpService_SetConfig_RefusedFreeReleasesReplacedModuleLater(t *testi
 
 	require.True(t, replaced.freed.Load(), "a later update must free the replaced module")
 	require.False(t, published.freed.Load(), "the published module must stay live")
+}
+
+// Test_PdumpService_Shutdown_StopsReadersBeforeStreamsReturn verifies that a
+// stream ended by a shutdown stops reading the rings before its handler
+// returns, so the module can release them.
+func Test_PdumpService_Shutdown_StopsReadersBeforeStreamsReturn(t *testing.T) {
+	backend := &fakeBackend{}
+	service := pdump.NewPdumpService(backend)
+	setFilter(t, service, "capture", "udp")
+	module := backend.Last()
+	stream := openStream(t, t.Context(), service, "capture", module)
+
+	service.Shutdown()
+
+	select {
+	case err := <-stream:
+		require.NoError(t, err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("the shutdown did not end the stream")
+	}
+	module.poison()
+}
+
+// updateFilter applies a filter-only update to the named config and reports
+// its result on the returned channel.
+func updateFilter(ctx context.Context, service *pdump.PdumpService, name, filter string) <-chan error {
+	done := make(chan error, 1)
+	go func() {
+		_, err := service.SetConfig(ctx, &pdumppb.SetConfigRequest{
+			Name:       name,
+			Config:     &pdumppb.Config{Filter: filter},
+			UpdateMask: &pdumppb.FieldMask{Paths: []string{"filter"}},
+		})
+		done <- err
+	}()
+	return done
+}
+
+// Test_PdumpService_ShowConfig_DoesNotWaitForPublish verifies that reading a
+// config does not wait while an update of that name is inside the backend.
+func Test_PdumpService_ShowConfig_DoesNotWaitForPublish(t *testing.T) {
+	backend := &fakeBackend{}
+	service := pdump.NewPdumpService(backend)
+	setFilter(t, service, "capture", "udp")
+
+	entered, release := backend.blockUpdate("capture")
+	t.Cleanup(release)
+	update := updateFilter(t.Context(), service, "capture", "tcp")
+	<-entered
+
+	ctx := t.Context()
+	type shownConfig struct {
+		response *pdumppb.ShowConfigResponse
+		err      error
+	}
+	shown := make(chan shownConfig, 1)
+	go func() {
+		response, err := service.ShowConfig(ctx, &pdumppb.ShowConfigRequest{Name: "capture"})
+		shown <- shownConfig{response: response, err: err}
+	}()
+
+	select {
+	case result := <-shown:
+		require.NoError(t, result.err)
+		require.Equal(t, "udp", result.response.Config.Filter, "the blocked update must stay unpublished")
+	case <-time.After(5 * time.Second):
+		t.Fatal("ShowConfig waited for the blocked update")
+	}
+
+	release()
+	require.NoError(t, <-update)
+}
+
+// Test_PdumpService_SetConfig_DoesNotSerializeNames verifies that an update of
+// one name runs while an update of another name is inside the backend.
+func Test_PdumpService_SetConfig_DoesNotSerializeNames(t *testing.T) {
+	backend := &fakeBackend{}
+	service := pdump.NewPdumpService(backend)
+
+	entered, release := backend.blockUpdate("blocked")
+	t.Cleanup(release)
+	blocked := updateFilter(t.Context(), service, "blocked", "udp")
+	<-entered
+
+	other := updateFilter(t.Context(), service, "other", "tcp")
+	select {
+	case err := <-other:
+		require.NoError(t, err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("an update of another name waited for the blocked one")
+	}
+
+	release()
+	require.NoError(t, <-blocked)
+}
+
+// Test_PdumpService_ReadDump_ReportsClientCancellation verifies that a stream
+// its client abandons ends with the client's cancellation.
+func Test_PdumpService_ReadDump_ReportsClientCancellation(t *testing.T) {
+	backend := &fakeBackend{}
+	service := pdump.NewPdumpService(backend)
+	setFilter(t, service, "capture", "udp")
+
+	ctx, cancel := context.WithCancel(t.Context())
+	stream := openStream(t, ctx, service, "capture", backend.Last())
+
+	cancel()
+
+	select {
+	case err := <-stream:
+		require.ErrorIs(t, err, context.Canceled)
+	case <-time.After(5 * time.Second):
+		t.Fatal("the cancelled client did not end the stream")
+	}
 }
