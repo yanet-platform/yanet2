@@ -98,13 +98,7 @@ func (m *TrafgenService) UpdateDevice(
 		return next
 	})
 	if err != nil {
-		code := codes.Internal
-		if errors.Is(err, ffi.ErrFailedPrecondition) {
-			// The device names an entity of the graph it runs that the
-			// configuration cannot resolve.
-			code = codes.FailedPrecondition
-		}
-		return nil, status.Errorf(code, "failed to update device config %q: %v", name, err)
+		return nil, err
 	}
 
 	return &trafgenpb.UpdateDeviceResponse{}, nil
@@ -178,10 +172,7 @@ func (m *TrafgenService) UploadPcap(
 		return next
 	})
 	if err != nil {
-		return nil, status.Errorf(
-			codes.Internal,
-			"failed to update device config %q: %v", name, err,
-		)
+		return nil, err
 	}
 
 	return &trafgenpb.UploadPcapResponse{}, nil
@@ -204,10 +195,7 @@ func (m *TrafgenService) SetRate(
 		return next
 	})
 	if err != nil {
-		return nil, status.Errorf(
-			codes.Internal,
-			"failed to update device config %q: %v", name, err,
-		)
+		return nil, err
 	}
 
 	return &trafgenpb.SetRateResponse{}, nil
@@ -217,7 +205,8 @@ func (m *TrafgenService) SetRate(
 // to the dataplane, attaching the published handle and frame statistics.
 //
 // The caller's builder returns the packets, rate and pipelines of the new
-// state and may carry any of them over from the current config.
+// state and may carry any of them over from the current config. A refused
+// write is returned as a gRPC status.
 func (m *TrafgenService) publish(name string, next func(current *config, ok bool) *config) error {
 	return m.configs.Update(name, func(current *config, ok bool) (*config, error) {
 		cfg := next(current, ok)
@@ -225,7 +214,13 @@ func (m *TrafgenService) publish(name string, next func(current *config, ok bool
 
 		handle, err := m.backend.UpdateDevice(name, cfg.Input, cfg.Output, frames, lengths, cfg.RatePps)
 		if err != nil {
-			return nil, fmt.Errorf("failed to update device config %q: %w", name, err)
+			code := codes.Internal
+			if errors.Is(err, ffi.ErrFailedPrecondition) {
+				// The device names an entity of the graph it runs that the
+				// configuration cannot resolve.
+				code = codes.FailedPrecondition
+			}
+			return nil, status.Errorf(code, "failed to update device config %q: %v", name, err)
 		}
 
 		cfg.FrameCount = uint32(len(cfg.Packets))
