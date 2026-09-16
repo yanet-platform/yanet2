@@ -14,13 +14,6 @@ import (
 	"github.com/yanet-platform/yanet2/devices/vlan/controlplane/vlanpb/v1"
 )
 
-// maxVlanID is the highest VLAN id the dataplane accepts.
-//
-// 802.1Q reserves VID 4095. The dataplane also writes the id straight
-// into the tag's 16-bit TCI unmasked, so anything above 4095 would spill
-// into the adjacent PCP/DEI bits too.
-const maxVlanID = 4094
-
 // DeviceVlanService implements the DeviceVlan gRPC service.
 type DeviceVlanService struct {
 	vlanpb.UnimplementedDeviceVlanServiceServer
@@ -41,21 +34,7 @@ func (m *DeviceVlanService) UpdateDevice(
 	request *vlanpb.UpdateDeviceVlanRequest,
 ) (*vlanpb.UpdateDeviceVlanResponse, error) {
 	name := request.GetName()
-	if name == "" {
-		return nil, status.Error(codes.InvalidArgument, "module config name is required")
-	}
-	if err := ffi.ValidateDeviceName(name); err != nil {
-		return nil, status.Error(codes.InvalidArgument, err.Error())
-	}
-	if err := request.GetDevice().Validate(); err != nil {
-		return nil, status.Error(codes.InvalidArgument, err.Error())
-	}
-
 	vlan := request.GetVlan()
-	if vlan > maxVlanID {
-		return nil, status.Errorf(codes.InvalidArgument, "vlan %d exceeds maximum allowed value %d", vlan, maxVlanID)
-	}
-
 	err := m.configs.Update(name, func(*DeviceConfig, bool) (*DeviceConfig, error) {
 		deviceConfig, err := NewDeviceConfig(m.agent, name, request.GetDevice(), uint16(vlan))
 		if err != nil {
@@ -92,13 +71,6 @@ func (m *DeviceVlanService) ShowDevice(
 	request *vlanpb.ShowDeviceVlanRequest,
 ) (*vlanpb.ShowDeviceVlanResponse, error) {
 	name := request.GetName()
-	if name == "" {
-		return nil, status.Error(codes.InvalidArgument, "device name is required")
-	}
-	if err := ffi.ValidateDeviceName(name); err != nil {
-		return nil, status.Error(codes.InvalidArgument, err.Error())
-	}
-
 	vlan, err := LookupVlan(m.agent, name)
 	if err != nil {
 		if errors.Is(err, ffi.ErrNotFound) {

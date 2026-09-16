@@ -125,6 +125,15 @@ func (m *BIRDConfig) Validate() error {
 	return nil
 }
 
+// newGRPCServer constructs the adapter's gRPC server with its validate-only
+// interceptor chains.
+func newGRPCServer() *grpc.Server {
+	return grpc.NewServer(
+		grpc.ChainUnaryInterceptor(xgrpc.ValidateUnaryInterceptor()),
+		grpc.ChainStreamInterceptor(xgrpc.ValidateStreamInterceptor()),
+	)
+}
+
 func runServer() error {
 	cfg, err := xcfg.LoadConfig[ServerConfig](serverCmdArgs.ConfigPath, xcfg.WithKnownFields(), xcfg.WithEnv())
 	if err != nil {
@@ -155,7 +164,7 @@ func runServer() error {
 	)
 
 	// Create gRPC server
-	grpcServer := grpc.NewServer()
+	grpcServer := newGRPCServer()
 	adapterpb.RegisterAdapterServiceServer(grpcServer, adapterService)
 
 	// Listen on the configured address

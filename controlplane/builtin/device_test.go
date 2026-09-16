@@ -1,7 +1,6 @@
 package builtin_test
 
 import (
-	"strings"
 	"testing"
 
 	"github.com/c2h5oh/datasize"
@@ -43,39 +42,6 @@ func deviceNames(devices []ffi.DeviceInfo) []string {
 		names[idx] = device.Name
 	}
 	return names
-}
-
-// Test_Device_Delete_RejectsInvalidName verifies that Delete rejects a
-// name that is empty, contains an interior NUL, or exceeds the C-side
-// buffer, before any shared memory is touched.
-func Test_Device_Delete_RejectsInvalidName(t *testing.T) {
-	cases := []struct {
-		name       string
-		deviceName string
-	}{
-		{
-			name:       "empty name",
-			deviceName: "",
-		},
-		{
-			name:       "interior NUL",
-			deviceName: "extra\x00keep",
-		},
-		{
-			name:       "overlong name",
-			deviceName: strings.Repeat("d", ffi.MaxDeviceNameLen),
-		},
-	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			svc := builtin.NewDevice(0, nil)
-
-			_, err := svc.Delete(t.Context(), &ynpb.DeleteDeviceRequest{Name: tc.deviceName})
-
-			require.Equal(t, codes.InvalidArgument, status.Code(err))
-		})
-	}
 }
 
 // Test_Device_Delete_RemovesDevice verifies that Delete removes a

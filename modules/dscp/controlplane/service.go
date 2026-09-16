@@ -90,10 +90,6 @@ func (m *DscpService) ShowConfig(
 	ctx context.Context,
 	request *dscppb.ShowConfigRequest,
 ) (*dscppb.ShowConfigResponse, error) {
-	if err := request.Validate(); err != nil {
-		return nil, err
-	}
-
 	name := request.GetName()
 	response := &dscppb.ShowConfigResponse{}
 
@@ -127,10 +123,6 @@ func (m *DscpService) AddPrefixes(
 	ctx context.Context,
 	request *dscppb.AddPrefixesRequest,
 ) (*dscppb.AddPrefixesResponse, error) {
-	if err := request.Validate(); err != nil {
-		return nil, err
-	}
-
 	name := request.GetName()
 	toAdd4, err := commonpb.PrefixesFromNetworks(request.GetPrefixes4())
 	if err != nil {
@@ -174,10 +166,6 @@ func (m *DscpService) RemovePrefixes(
 	ctx context.Context,
 	request *dscppb.RemovePrefixesRequest,
 ) (*dscppb.RemovePrefixesResponse, error) {
-	if err := request.Validate(); err != nil {
-		return nil, err
-	}
-
 	name := request.GetName()
 	toRemove4, err := commonpb.PrefixesFromNetworks(request.GetPrefixes4())
 	if err != nil {
@@ -213,10 +201,6 @@ func (m *DscpService) SetDscpMarking(
 	ctx context.Context,
 	request *dscppb.SetDscpMarkingRequest,
 ) (*dscppb.SetDscpMarkingResponse, error) {
-	if err := request.Validate(); err != nil {
-		return nil, err
-	}
-
 	name := request.GetName()
 	flag := uint8(request.GetDscpConfig().GetFlag())
 	mark := uint8(request.GetDscpConfig().GetMark())
@@ -240,10 +224,6 @@ func (m *DscpService) DeleteConfig(
 	ctx context.Context,
 	request *dscppb.DeleteConfigRequest,
 ) (*dscppb.DeleteConfigResponse, error) {
-	if err := request.Validate(); err != nil {
-		return nil, err
-	}
-
 	name := request.GetName()
 
 	err := m.configs.Delete(name, func(*config) error {

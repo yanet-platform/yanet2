@@ -197,6 +197,17 @@ yanet_go_env += {
   'CGO_CPPFLAGS': yanet_cache_line_arg,
 }
 
+if not dataplane_only and (b_sanitize.contains('address') or get_option('fuzzing').enabled())
+  # Select pure-Go limits that match the address-sanitized C allocator.
+  yanet_asan_go_flags = run_command(
+    'sh',
+    join_paths(meson.project_source_root(), 'scripts', 'go-flags.sh'),
+    'yanet_asan',
+    check: true,
+  ).stdout().strip()
+  yanet_go_env += {'GOFLAGS': yanet_asan_go_flags}
+endif
+
 # gRPC-only operators never touch shared memory and link no cgo.
 #
 # Building them with cgo disabled turns a stray import of a module control

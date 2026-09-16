@@ -14,6 +14,13 @@ BINDIR ?= $(PREFIX)/bin
 TARGET_DIR ?= target
 RELEASE_DIR := $(TARGET_DIR)/release
 
+# Keep inherited flags as data when make exports them to recipes and submakes.
+# Leave GOFLAGS undefined otherwise so Go can use persisted GOENV settings.
+ifneq ($(origin GOFLAGS), undefined)
+override GOFLAGS := $(value GOFLAGS)
+export GOFLAGS
+endif
+
 # Core CLI packages/binaries that live in cli workspace.
 CLI_CORE_MODULES := \
 	common \
@@ -347,6 +354,7 @@ test-asan:
 	$(MAKE) go-cache-clean
 	$(MAKE) test-asan-only
 
+# Set a default sanitizer policy while preserving inherited Go flags and tags.
 test-asan-only:
 	@if [ ! -d "build" ]; then \
 		$(MAKE) setup-asan; \
@@ -354,10 +362,13 @@ test-asan-only:
 		meson configure -Dbuildtype=debug -Doptimization=0 -Dfuzzing=disabled -Db_sanitize=address,undefined $(EXTRA_MODULES_FLAG) build; \
 	fi
 	meson compile -C build
-# Set as a default only, mirroring the same if-absent condition meson uses for
-# its own injection: without it, a recoverable diagnostic would go unseen and
-# the package would still pass.
-	CGO_CPPFLAGS="$(strip $(CGO_CPPFLAGS) $(YANET_CACHE_LINE_CPPFLAG))" CGO_CFLAGS="-fsanitize=address,undefined" CGO_LDFLAGS="-fsanitize=address,undefined" UBSAN_OPTIONS="$${UBSAN_OPTIONS:-halt_on_error=1:abort_on_error=1:print_summary=1:print_stacktrace=1}" go test -count=1 $$(go list ./... | grep -v '^github.com/yanet-platform/yanet2/tests/functional/main')
+	@set -eu; \
+	export GOFLAGS="$$(sh scripts/go-flags.sh yanet_asan)"; \
+	export CGO_CPPFLAGS="$(strip $(CGO_CPPFLAGS) $(YANET_CACHE_LINE_CPPFLAG))"; \
+	export CGO_CFLAGS="-fsanitize=address,undefined"; \
+	export CGO_LDFLAGS="-fsanitize=address,undefined"; \
+	export UBSAN_OPTIONS="$${UBSAN_OPTIONS:-halt_on_error=1:abort_on_error=1:print_summary=1:print_stacktrace=1}"; \
+	go test -count=1 $$(go list ./... | grep -v '^github.com/yanet-platform/yanet2/tests/functional/main')
 	meson test -C build
 
 test-tsan:
@@ -382,6 +393,7 @@ bench:
 	$(MAKE) dataplane
 	CGO_CPPFLAGS="$(strip $(CGO_CPPFLAGS) $(YANET_CACHE_LINE_CPPFLAG))" go test -run='^$$' -bench=. -benchmem ./bindings/go/dataplane_ut/... ./modules/acl/tests/functional/...
 
+# Reconfigure an existing fuzz build so its Go targets keep current flags.
 fuzz:
 	@if [ -d build ] && ! meson introspect build --buildoptions | jq -er '.[] | select(.name=="fuzzing") | .value' | grep -q enabled; then \
 		echo "Wiping build for fuzzing..."; \
@@ -389,6 +401,8 @@ fuzz:
 	fi
 	@if [ ! -d build ]; then \
 		env CC=clang CXX=clang++ meson setup -Dbuildtype=debug -Doptimization=0 -Dfuzzing=enabled $(EXTRA_MODULES_FLAG) build; \
+	else \
+		env CC=clang CXX=clang++ meson setup -Dbuildtype=debug -Doptimization=0 -Dfuzzing=enabled $(EXTRA_MODULES_FLAG) --reconfigure build; \
 	fi
 	env CC=clang CXX=clang++ meson compile -C build
 	@echo "Ready to fuzz the following modules:"

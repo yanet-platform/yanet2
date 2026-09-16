@@ -204,10 +204,6 @@ func (m *RouteMPLSService) ShowConfig(
 	req *routemplspb.ShowConfigRequest,
 ) (*routemplspb.ShowConfigResponse, error) {
 	name := req.GetName()
-	if name == "" {
-		return nil, status.Error(codes.InvalidArgument, "module config name is required")
-	}
-
 	config, ok := m.configs.Get(name)
 	if !ok {
 		return nil, status.Errorf(codes.NotFound, "config %q not found", name)
@@ -248,10 +244,6 @@ func (m *RouteMPLSService) DeleteConfig(
 	req *routemplspb.DeleteConfigRequest,
 ) (*routemplspb.DeleteConfigResponse, error) {
 	name := req.GetName()
-	if name == "" {
-		return nil, status.Error(codes.InvalidArgument, "module config name is required")
-	}
-
 	err := m.configs.Delete(name, func(*routeMPLSConfig) error {
 		return m.backend.DeleteModule(name)
 	})
@@ -272,10 +264,6 @@ func (m *RouteMPLSService) CreateConfig(
 	req *routemplspb.CreateConfigRequest,
 ) (*routemplspb.CreateConfigResponse, error) {
 	name := req.Name
-	if name == "" {
-		return nil, status.Error(codes.InvalidArgument, "module config name is required")
-	}
-
 	prefixes := maptrie.NewMapTrie[netip.Prefix, netip.Addr, NextHopList](0)
 
 	for _, rule := range req.Rules {
@@ -329,10 +317,6 @@ func (m *RouteMPLSService) UpdateConfig(
 	req *routemplspb.UpdateConfigRequest,
 ) (*routemplspb.UpdateConfigResponse, error) {
 	name := req.Name
-	if name == "" {
-		return nil, status.Error(codes.InvalidArgument, "module config name is required")
-	}
-
 	err := m.configs.Update(name, func(current *routeMPLSConfig, ok bool) (*routeMPLSConfig, error) {
 		// Every mutation below copies the nexthop list it touches, since
 		// the trie clone shares the lists with the published config.
@@ -409,19 +393,6 @@ func (m *RouteMPLSService) UpdateConfig(
 	return &routemplspb.UpdateConfigResponse{}, nil
 }
 
-// maxMPLSLabel is the highest value the dataplane's 20-bit MPLS label field
-// can hold.
-const maxMPLSLabel = 1048575
-
-// validateMPLSLabel rejects a label that would not fit the dataplane's
-// 20-bit MPLS label field.
-func validateMPLSLabel(label uint32) error {
-	if label > maxMPLSLabel {
-		return fmt.Errorf("nexthop label %d exceeds maximum allowed value %d", label, maxMPLSLabel)
-	}
-	return nil
-}
-
 func makeNextHop(nexthop *routemplspb.NextHop) (NextHop, error) {
 	src, err := nexthop.GetSourceIp().ToAddr()
 	if err != nil {
@@ -430,9 +401,6 @@ func makeNextHop(nexthop *routemplspb.NextHop) (NextHop, error) {
 	dst, err := nexthop.GetDestinationIp().ToAddr()
 	if err != nil {
 		return NextHop{}, fmt.Errorf("invalid destination_ip (bytes=%x): %w", nexthop.GetDestinationIp().GetAddr(), err)
-	}
-	if err := validateMPLSLabel(nexthop.GetLabel()); err != nil {
-		return NextHop{}, err
 	}
 
 	return NextHop{
@@ -450,9 +418,6 @@ func makeWithdrawNextHop(nexthop *routemplspb.NextHop) (NextHop, error) {
 	destination, err := nexthop.GetDestinationIp().ToAddr()
 	if err != nil {
 		return NextHop{}, fmt.Errorf("invalid destination_ip (bytes=%x): %w", nexthop.GetDestinationIp().GetAddr(), err)
-	}
-	if err := validateMPLSLabel(nexthop.GetLabel()); err != nil {
-		return NextHop{}, err
 	}
 
 	return NextHop{

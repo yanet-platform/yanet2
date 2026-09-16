@@ -6,7 +6,6 @@ import (
 	"net"
 	"net/netip"
 	"sort"
-	"strings"
 	"sync"
 	"testing"
 
@@ -884,65 +883,6 @@ func TestUpdateFIBDisabledAllowsEmptyCounter(t *testing.T) {
 	require.Empty(t, got.GetCounter())
 }
 
-// TestUpdateFIBRejectsOverlongCounter verifies the accepted counter-name
-// length boundary directly against literal byte counts, rather than through
-// croute.CounterNameMaxLen, so an off-by-one in the constant itself cannot
-// hide the regression.
-func TestUpdateFIBRejectsOverlongCounter(t *testing.T) {
-	backend := newFakeBackend()
-	service := route.NewRouteService(backend)
-
-	okEntry := testFIBEntry(t, "10.0.0.0/32", testNexthop("eth0", "nexthop_"+strings.Repeat("a", 127-len("nexthop_"))))
-	_, err := service.UpdateFIB(t.Context(), &routepb.UpdateFIBRequest{
-		ModuleName: "cfg",
-		Entries:    []*routepb.FIBEntry{okEntry},
-	})
-	require.NoError(t, err, "a 127-byte counter name must be accepted")
-
-	tooLongEntry := testFIBEntry(t, "10.0.0.1/32", testNexthop("eth0", "nexthop_"+strings.Repeat("a", 128-len("nexthop_"))))
-	_, err = service.UpdateFIB(t.Context(), &routepb.UpdateFIBRequest{
-		ModuleName: "cfg",
-		Entries:    []*routepb.FIBEntry{tooLongEntry},
-	})
-	require.Equal(t, codes.InvalidArgument, status.Code(err), "a 128-byte counter name must be rejected")
-}
-
-// TestUpdateFIBRejectsCounterWithNULByte verifies that a counter name
-// carrying an embedded NUL byte is rejected, rather than silently
-// truncated at the C boundary where it would diverge from the name
-// registered later.
-func TestUpdateFIBRejectsCounterWithNULByte(t *testing.T) {
-	backend := newFakeBackend()
-	service := route.NewRouteService(backend)
-
-	entry := testFIBEntry(t, "10.0.0.0/32", testNexthop("eth0", "nexthop_ab\x00cd"))
-
-	_, err := service.UpdateFIB(t.Context(), &routepb.UpdateFIBRequest{
-		ModuleName: "cfg",
-		Entries:    []*routepb.FIBEntry{entry},
-	})
-	require.Equal(t, codes.InvalidArgument, status.Code(err))
-	require.Empty(t, backend.calls, "the backend must not be called when validation rejects the request")
-}
-
-// TestUpdateFIBRejectsCounterWithoutPrefix verifies that an explicit
-// counter name not starting with "nexthop_" is rejected, rather than being
-// accepted and risking a future collision with a route-specific or generic
-// module-level counter name.
-func TestUpdateFIBRejectsCounterWithoutPrefix(t *testing.T) {
-	backend := newFakeBackend()
-	service := route.NewRouteService(backend)
-
-	entry := testFIBEntry(t, "10.0.0.0/32", testNexthop("eth0", "route_forwarded_v4"))
-
-	_, err := service.UpdateFIB(t.Context(), &routepb.UpdateFIBRequest{
-		ModuleName: "cfg",
-		Entries:    []*routepb.FIBEntry{entry},
-	})
-	require.Equal(t, codes.InvalidArgument, status.Code(err))
-	require.Empty(t, backend.calls, "the backend must not be called when validation rejects the request")
-}
-
 // TestUpdateFIBRejectsConflictingCounterNamesWithinEntry verifies that
 // listing the same forwarding identity twice in one entry under two
 // different counter names is rejected as InvalidArgument naming both
@@ -1317,21 +1257,6 @@ func Test_RouteService_UpdateFIB_ObjectPublishFailureAfterGrownModuleKeepsOldObj
 	require.NoError(t, err)
 	require.Equal(t, 1, newModule.freeCount, "the new module must be freed exactly once")
 	require.Equal(t, 1, oldObject.freeCount, "the old object, now the entry's, must be freed exactly once")
-}
-
-// A device name the module's table cannot hold is a request error and
-// builds nothing.
-func Test_RouteService_UpdateFIB_OverlongDeviceNameIsInvalidArgument(t *testing.T) {
-	backend := newFakeBackend()
-	service := route.NewRouteService(backend)
-
-	entry := testFIBEntry(t, "10.0.0.0/32", testNexthop(strings.Repeat("p", ffi.MaxDeviceNameLen), ""))
-	_, err := service.UpdateFIB(t.Context(), &routepb.UpdateFIBRequest{
-		ModuleName: "cfg",
-		Entries:    []*routepb.FIBEntry{entry},
-	})
-	require.Equal(t, codes.InvalidArgument, status.Code(err))
-	require.Empty(t, backend.events, "nothing may be built or published for a rejected request")
 }
 
 // A first object publish failing leaves nothing published and nothing

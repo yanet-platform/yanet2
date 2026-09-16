@@ -9,22 +9,50 @@ import (
 	"github.com/yanet-platform/yanet2/operators/route/neigh"
 )
 
-// ToNeighbourEntries validates the complete snapshot before returning its entries.
+func (m *NeighbourEntry) Validate() error {
+	if m.GetHardwareAddr() == nil {
+		return errors.New("hardware_addr is required")
+	}
+	if m.GetLinkAddr() == nil {
+		return errors.New("link_addr is required")
+	}
+
+	return nil
+}
+
+func (m *UpdateNeighboursRequest) Validate() error {
+	for idx, entry := range m.GetEntries() {
+		if err := entry.Validate(); err != nil {
+			return fmt.Errorf("entries[%d]: %w", idx, err)
+		}
+	}
+
+	return nil
+}
+
+// Validate requires an explicit table and complete neighbour entries.
+func (m *SwapNeighboursRequest) Validate() error {
+	if m.GetTable() == "" {
+		return errors.New("table is required")
+	}
+	for idx, entry := range m.GetEntries() {
+		if err := entry.Validate(); err != nil {
+			return fmt.Errorf("entries[%d]: %w", idx, err)
+		}
+	}
+	return nil
+}
+
+// ToNeighbourEntries converts a validated snapshot, rejecting malformed next hops.
 //
 // An invalid entry rejects the entire observation. Repeated next hops retain
 // the last entry in the request.
 func (m *SwapNeighboursRequest) ToNeighbourEntries() (map[netip.Addr]neigh.NeighbourEntry, error) {
-	if m.GetTable() == "" {
-		return nil, errors.New("table is required")
-	}
 	entries := make(map[netip.Addr]neigh.NeighbourEntry, len(m.GetEntries()))
 	for _, entry := range m.GetEntries() {
 		address, err := entry.GetNextHop().ToAddr()
 		if err != nil {
 			return nil, fmt.Errorf("invalid next hop: %w", err)
-		}
-		if entry.GetHardwareAddr() == nil || entry.GetLinkAddr() == nil {
-			return nil, fmt.Errorf("neighbour %q requires both MAC addresses", address)
 		}
 		entries[address] = neigh.NeighbourEntry{
 			NextHop: address,

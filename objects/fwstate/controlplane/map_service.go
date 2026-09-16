@@ -12,7 +12,6 @@ import (
 	"context"
 	"errors"
 	"math"
-	"strings"
 	"sync"
 	"time"
 
@@ -32,8 +31,6 @@ import (
 // maxWorkerCount is the highest value accepted for worker_count, matching
 // the width of the C-side uint16 parameter of fwstate_map insert_layer.
 const maxWorkerCount uint32 = 65535
-
-const maxMapNameLen = 80
 
 const (
 	// DefaultListEntriesBatchSize is the batch size used when the caller
@@ -318,17 +315,10 @@ func (m *FWStateMapService) CreateMap(
 	req *fwstatemappb.CreateMapRequest,
 ) (*fwstatemappb.CreateMapResponse, error) {
 	name := req.GetName()
-	if err := ValidateMapName(name); err != nil {
-		return nil, err
-	}
-
+	kind := kindFromProto(req.GetKind())
 	workerCount, err := ResolveCreateWorkerCount(
 		req.GetWorkerCount(), m.dpWorkerCountOf(),
 	)
-	if err != nil {
-		return nil, err
-	}
-	kind, err := kindFromProto(req.GetKind())
 	if err != nil {
 		return nil, err
 	}
@@ -398,9 +388,6 @@ func (m *FWStateMapService) DeleteMap(
 	req *fwstatemappb.DeleteMapRequest,
 ) (*fwstatemappb.DeleteMapResponse, error) {
 	name := req.GetName()
-	if name == "" {
-		return nil, status.Error(codes.InvalidArgument, "map name is required")
-	}
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -474,9 +461,6 @@ func (m *FWStateMapService) GetMapStats(
 	req *fwstatemappb.GetMapStatsRequest,
 ) (*fwstatemappb.GetMapStatsResponse, error) {
 	name := req.GetName()
-	if name == "" {
-		return nil, status.Error(codes.InvalidArgument, "map name is required")
-	}
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -505,9 +489,6 @@ func (m *FWStateMapService) InsertLayer(
 	req *fwstatemappb.InsertLayerRequest,
 ) (*fwstatemappb.InsertLayerResponse, error) {
 	name := req.GetName()
-	if name == "" {
-		return nil, status.Error(codes.InvalidArgument, "map name is required")
-	}
 	workerCount, err := ResolveCreateWorkerCount(
 		req.GetWorkerCount(), m.dpWorkerCountOf(),
 	)
@@ -555,23 +536,11 @@ func (m *FWStateMapService) ListEntries(
 	req *fwstatemappb.ListEntriesRequest,
 ) (*fwstatemappb.ListEntriesResponse, error) {
 	mapName := req.GetMapName()
-	if mapName == "" {
-		return nil, status.Error(codes.InvalidArgument, "map_name is required")
-	}
-
 	count := ClampBatchSize(req.GetBatchSize())
-	var backward bool
-	if req.GetDirection() == fwstatemappb.Direction_BACKWARD {
-		backward = true
-	} else if req.GetDirection() == fwstatemappb.Direction_FORWARD {
-		backward = false
-	} else {
-		return nil, status.Error(codes.InvalidArgument, "invalid direction")
-	}
-
-	index, err := ResolveReadIndex(backward, req.GetIndex())
-	if err != nil {
-		return nil, err
+	backward := req.GetDirection() == fwstatemappb.Direction_BACKWARD
+	index := req.GetIndex()
+	if backward && index == 0 {
+		index = math.MaxInt64
 	}
 
 	// Every entry the walk returns carries whether it has expired, so the
@@ -596,6 +565,7 @@ func (m *FWStateMapService) ListEntries(
 	var entries []cfwstate.CursorEntry
 	var newIndex int64
 	var hasMore bool
+	var err error
 
 	if backward {
 		entries, newIndex, hasMore, err = mapCfg.ReadBackward(
@@ -881,34 +851,6 @@ func ResolveCreateWorkerCount(
 	return uint16(workerCount), nil
 }
 
-// ValidateMapName rejects names that cannot round-trip through the fixed-size C object registry.
-func ValidateMapName(name string) error {
-	if name == "" {
-		return status.Error(codes.InvalidArgument, "map name is required")
-	}
-	if len(name) >= maxMapNameLen {
-		return status.Errorf(codes.InvalidArgument, "map name must be shorter than %d bytes", maxMapNameLen)
-	}
-	if strings.IndexByte(name, 0) != -1 {
-		return status.Error(codes.InvalidArgument, "map name must not contain NUL bytes")
-	}
-	return nil
-}
-
-// ResolveReadIndex rejects negative forward cursors and maps a zero backward cursor to the scan's upper bound.
-func ResolveReadIndex(backward bool, index int64) (int64, error) {
-	if backward {
-		if index == 0 {
-			return math.MaxInt64, nil
-		}
-		return index, nil
-	}
-	if index < 0 {
-		return 0, status.Error(codes.InvalidArgument, "index must not be negative for forward reads")
-	}
-	return index, nil
-}
-
 // MapStatsToProto converts bindings-level map stats into the proto form.
 //
 // The values here describe the active head layer only (one layer is
@@ -930,19 +872,13 @@ func MapStatsToProto(stats mapStats) *fwstatemappb.MapStats {
 	}
 }
 
-// kindFromProto converts the proto Kind enum to the cfwstate.Kind used
-// by the C API. An unknown discriminant is rejected: defaulting it to
-// IPv4 would silently provision an object of the wrong family, like an
-// unknown entry direction is rejected rather than guessed.
-func kindFromProto(kind fwstatemappb.Kind) (cfwstate.Kind, error) {
-	switch kind {
-	case fwstatemappb.Kind_V4:
-		return cfwstate.KindV4, nil
-	case fwstatemappb.Kind_V6:
-		return cfwstate.KindV6, nil
-	default:
-		return 0, status.Errorf(codes.InvalidArgument, "unknown map kind %d", kind)
+// kindFromProto converts a validated proto Kind to the cfwstate.Kind used
+// by the C API.
+func kindFromProto(kind fwstatemappb.Kind) cfwstate.Kind {
+	if kind == fwstatemappb.Kind_V6 {
+		return cfwstate.KindV6
 	}
+	return cfwstate.KindV4
 }
 
 // NewFWStateMapServiceForTest creates an FWStateMapService without a live

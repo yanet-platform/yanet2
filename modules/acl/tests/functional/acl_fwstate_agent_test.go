@@ -71,7 +71,7 @@ func TestACL_FWStateAgentSharing_TypedDestroyIsolatedPerModule(t *testing.T) {
 	// An ACL update on the shared agent must not touch anything but its
 	// own acl modules: destruction runs only through each owner's own
 	// free path.
-	rules := []cacl.AclRule{
+	rules := []cacl.ACLRule{
 		allow4Rule(
 			[]xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
 			[]xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},

@@ -14,7 +14,6 @@ import (
 	"github.com/yanet-platform/yanet2/controlplane/configstore"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/modules/fwstate/controlplane/fwstatepb/v1"
-	fwstatemap "github.com/yanet-platform/yanet2/objects/fwstate/controlplane"
 )
 
 // Option configures an FWStateService.
@@ -191,9 +190,6 @@ func (m *FWStateService) UpdateConfig(
 	req *fwstatepb.UpdateConfigRequest,
 ) (*fwstatepb.UpdateConfigResponse, error) {
 	name := req.GetName()
-	if name == "" {
-		return nil, status.Error(codes.InvalidArgument, "module config name is required")
-	}
 
 	m.log.Debug("update fwstate config", zap.String("config", name))
 
@@ -242,32 +238,14 @@ func (m *FWStateService) prepareUpdate(
 	oldConfig *FwStateConfig,
 	req *fwstatepb.UpdateConfigRequest,
 ) (*FwStateConfig, error) {
-	if req.UpdateMask != nil {
-		merged, err := maskedUpdate(oldConfig, req)
-		if err != nil {
-			return nil, status.Error(codes.InvalidArgument, err.Error())
-		}
-		req = merged
+	if req.GetUpdateMask() != nil {
+		req = maskedUpdate(oldConfig, req)
 	} else {
-		// Validate before conversion can narrow a legacy numeric value.
-		if err := req.GetSyncConfig().ValidateFields(); err != nil {
-			return nil, status.Errorf(codes.InvalidArgument, "invalid sync config: %v", err)
-		}
-		if err := req.ValidateEndpointClears(); err != nil {
-			return nil, status.Errorf(codes.InvalidArgument, "invalid sync endpoint update: %v", err)
-		}
 		mapNameV4, mapNameV6 := mergedMapNames(oldConfig, req)
 		req = &fwstatepb.UpdateConfigRequest{
 			MapNameV4:  mapNameV4,
 			MapNameV6:  mapNameV6,
 			SyncConfig: mergedSyncConfigWithClears(oldConfig, req.SyncConfig, req.GetClearMulticast(), req.GetClearUnicast()),
-		}
-	}
-	for _, mapName := range []string{req.MapNameV4, req.MapNameV6} {
-		if mapName != "" {
-			if err := fwstatemap.ValidateMapName(mapName); err != nil {
-				return nil, err
-			}
 		}
 	}
 	if err := req.SyncConfig.ValidateFields(); err != nil {
@@ -304,9 +282,6 @@ func (m *FWStateService) ShowConfig(
 	req *fwstatepb.ShowConfigRequest,
 ) (*fwstatepb.ShowConfigResponse, error) {
 	name := req.GetName()
-	if name == "" {
-		return nil, status.Error(codes.InvalidArgument, "module config name is required")
-	}
 
 	mapNameV4, mapNameV6, syncConfig, ok := m.configSnapshot(name)
 	if !ok {
@@ -351,9 +326,6 @@ func (m *FWStateService) DeleteConfig(
 	req *fwstatepb.DeleteConfigRequest,
 ) (*fwstatepb.DeleteConfigResponse, error) {
 	name := req.GetName()
-	if name == "" {
-		return nil, status.Error(codes.InvalidArgument, "module config name is required")
-	}
 
 	m.observeMutation("delete", mutationWaiting)
 	err := m.configs.Delete(name, func(*FwStateConfig) error {

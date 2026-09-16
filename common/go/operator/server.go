@@ -49,7 +49,10 @@ func NewGRPCServer(
 		o(opts)
 	}
 
-	server := grpc.NewServer()
+	server := grpc.NewServer(
+		grpc.ChainUnaryInterceptor(xgrpc.ValidateUnaryInterceptor()),
+		grpc.ChainStreamInterceptor(xgrpc.ValidateStreamInterceptor()),
+	)
 	serviceNames := make([]string, len(services))
 	for idx, register := range services {
 		serviceNames[idx] = register(server)

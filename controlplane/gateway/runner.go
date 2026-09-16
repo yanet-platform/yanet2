@@ -20,6 +20,9 @@ import (
 //
 // InProcessServiceRunner appends these after the framework access-log
 // interceptor.
+//
+// They run before request validation, so a module interceptor still
+// observes a rejected request.
 type UnaryInterceptedService interface {
 	UnaryServerInterceptors() []grpc.UnaryServerInterceptor
 }
@@ -89,6 +92,7 @@ func NewInProcessServiceRunner(
 	if provider, ok := module.(UnaryInterceptedService); ok {
 		interceptors = append(interceptors, provider.UnaryServerInterceptors()...)
 	}
+	interceptors = append(interceptors, commonxgrpc.ValidateUnaryInterceptor())
 
 	return &InProcessServiceRunner{
 		module:   module,
@@ -96,6 +100,7 @@ func NewInProcessServiceRunner(
 		endpoint: endpoint,
 		server: grpc.NewServer(
 			grpc.ChainUnaryInterceptor(interceptors...),
+			grpc.ChainStreamInterceptor(commonxgrpc.ValidateStreamInterceptor()),
 			grpc.MaxRecvMsgSize(1024*1024*256), grpc.MaxSendMsgSize(1024*1024*256),
 		),
 		ready: make(chan struct{}),

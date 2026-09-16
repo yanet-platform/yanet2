@@ -87,13 +87,6 @@ func (m *Device) Delete(
 	request *ynpb.DeleteDeviceRequest,
 ) (*ynpb.DeleteDeviceResponse, error) {
 	name := request.GetName()
-	if name == "" {
-		return nil, status.Error(codes.InvalidArgument, "device name is required")
-	}
-	if err := ffi.ValidateDeviceName(name); err != nil {
-		return nil, status.Error(codes.InvalidArgument, err.Error())
-	}
-
 	m.mu.Lock()
 	defer m.mu.Unlock()
 

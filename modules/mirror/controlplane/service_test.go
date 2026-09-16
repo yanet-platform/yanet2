@@ -97,35 +97,6 @@ func TestDeleteConfigUnknownConfig(t *testing.T) {
 	require.Equal(t, codes.NotFound, status.Code(err))
 }
 
-// Test_MirrorService_UpdateConfigEmptyRules verifies that empty rule lists are
-// reported as invalid client input with an actionable error.
-func Test_MirrorService_UpdateConfigEmptyRules(t *testing.T) {
-	tests := []struct {
-		name  string
-		rules []*mirrorpb.Rule
-	}{
-		{name: "nil rules"},
-		{name: "empty rules", rules: []*mirrorpb.Rule{}},
-	}
-
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			service := mirror.NewMirrorService(&mockBackend{})
-
-			_, err := service.UpdateConfig(t.Context(), &mirrorpb.UpdateConfigRequest{
-				Name:  "config",
-				Rules: test.rules,
-			})
-			require.Equal(t, codes.InvalidArgument, status.Code(err))
-			require.Equal(
-				t,
-				"mirror config must contain at least one rule",
-				status.Convert(err).Message(),
-			)
-		})
-	}
-}
-
 // TestUpdateConfigReplacesConfigWithoutHandle verifies that replacing a
 // config that holds no module handle releases it without panicking.
 func TestUpdateConfigReplacesConfigWithoutHandle(t *testing.T) {

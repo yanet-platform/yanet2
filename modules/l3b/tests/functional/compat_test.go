@@ -439,15 +439,14 @@ func Test_CompatBalancerOuterSourceNetwork(t *testing.T) {
 	}
 }
 
-// Test_CompatAclBalancerRoute ports 048_acl_balancer_route: four services
-// sharing reals across v4 and v6 vips, real enable/disable flips steering the
-// traffic between the shared reals, everything dropping once no real is
-// enabled, and per-service/per-real counters accounting the run. The old
-// pipeline's acl half is l3b's destination rules; the route module after the
-// balancer is represented by asserting the encapsulated outer header is the
-// routable one the old expect pcaps carried (outer destination = real, outer
-// source derived from the real's source network).
-func Test_CompatAclBalancerRoute(t *testing.T) {
+// Test_CompatACLBalancerRoute verifies shared backend selection, drop behavior,
+// and per-service and per-backend traffic counters.
+//
+// Ports 048_acl_balancer_route: four IPv4 and IPv6 services share backends;
+// enablement changes steer traffic, and disabling all backends drops it.
+// Destination rules provide the ACL stage. Encapsulated outer headers preserve
+// the routable destinations and source networks from the original captures.
+func Test_CompatACLBalancerRoute(t *testing.T) {
 	env := setupCompatEnv(t)
 
 	// The old services.conf: reals 2000::1-4 shared between the 80-port

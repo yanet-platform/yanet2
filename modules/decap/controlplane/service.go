@@ -15,10 +15,6 @@ import (
 	"github.com/yanet-platform/yanet2/modules/decap/controlplane/decappb/v1"
 )
 
-var (
-	errConfigNameRequired = status.Error(codes.InvalidArgument, "config name is required")
-)
-
 // ModuleHandle is a handle to a module configuration.
 type ModuleHandle interface {
 	Free() error
@@ -84,10 +80,6 @@ func (m *DecapService) ShowConfig(
 	req *decappb.ShowConfigRequest,
 ) (*decappb.ShowConfigResponse, error) {
 	name := req.GetName()
-	if name == "" {
-		return nil, errConfigNameRequired
-	}
-
 	entry, ok := m.configs.Get(name)
 	if !ok {
 		return nil, status.Error(codes.NotFound, "no config found")
@@ -111,10 +103,6 @@ func (m *DecapService) UpdateConfig(
 	req *decappb.UpdateConfigRequest,
 ) (*decappb.UpdateConfigResponse, error) {
 	name := req.GetName()
-	if name == "" {
-		return nil, errConfigNameRequired
-	}
-
 	prefixes4, err := commonpb.PrefixesFromNetworks(req.GetPrefixes4())
 	if err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "failed to convert prefixes: %v", err)
@@ -150,10 +138,6 @@ func (m *DecapService) DeleteConfig(
 	req *decappb.DeleteConfigRequest,
 ) (*decappb.DeleteConfigResponse, error) {
 	name := req.GetName()
-	if name == "" {
-		return nil, errConfigNameRequired
-	}
-
 	err := m.configs.Delete(name, func(*config) error {
 		return m.backend.DeleteModule(name)
 	})

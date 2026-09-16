@@ -11,6 +11,9 @@ struct cp_module;
 struct memory_context;
 struct nat64_module_config;
 
+// NAT64_MTU_MAX is the largest value accepted by the module's MTU fields.
+enum { NAT64_MTU_MAX = UINT16_MAX };
+
 /**
  * @brief Initializes NAT64 module configuration
  *

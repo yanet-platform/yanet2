@@ -1,8 +1,6 @@
 package fwstate
 
 import (
-	"fmt"
-
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/modules/fwstate/bindings/go/cfwstate"
 	"github.com/yanet-platform/yanet2/modules/fwstate/controlplane/fwstatepb/v1"
@@ -12,10 +10,7 @@ import (
 //
 // The caller holds the mutation lock until publication, so independent
 // updates preserve one another regardless of their arrival order.
-func maskedUpdate(old *FwStateConfig, req *fwstatepb.UpdateConfigRequest) (*fwstatepb.UpdateConfigRequest, error) {
-	if req.ClearMulticast || req.ClearUnicast {
-		return nil, fmt.Errorf("endpoint clear flags cannot be combined with an update mask")
-	}
+func maskedUpdate(old *FwStateConfig, req *fwstatepb.UpdateConfigRequest) *fwstatepb.UpdateConfigRequest {
 	merged := &fwstatepb.UpdateConfigRequest{
 		SyncConfig: mergedSyncConfig(old, nil),
 	}
@@ -23,7 +18,7 @@ func maskedUpdate(old *FwStateConfig, req *fwstatepb.UpdateConfigRequest) (*fwst
 		merged.MapNameV4 = old.MapNameV4()
 		merged.MapNameV6 = old.MapNameV6()
 	}
-	for _, path := range req.UpdateMask.Paths {
+	for _, path := range req.GetUpdateMask().GetPaths() {
 		switch path {
 		case "map_name_v4":
 			merged.MapNameV4 = req.MapNameV4
@@ -55,11 +50,9 @@ func maskedUpdate(old *FwStateConfig, req *fwstatepb.UpdateConfigRequest) (*fwst
 			merged.SyncConfig.Default = req.GetSyncConfig().GetDefault()
 		case "sync_config.sync_suppress_timeout":
 			merged.SyncConfig.SyncSuppressTimeout = req.GetSyncConfig().GetSyncSuppressTimeout()
-		default:
-			return nil, fmt.Errorf("unknown update mask path %q", path)
 		}
 	}
-	return merged, nil
+	return merged
 }
 
 // FwStateConfig is a service-owned fwstate module config plus the names of

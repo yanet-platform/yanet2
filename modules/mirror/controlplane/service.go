@@ -72,10 +72,6 @@ func (m *MirrorService) ShowConfig(
 	req *mirrorpb.ShowConfigRequest,
 ) (*mirrorpb.ShowConfigResponse, error) {
 	name := req.GetName()
-	if name == "" {
-		return nil, status.Error(codes.InvalidArgument, "module config name is required")
-	}
-
 	config, ok := m.configs.Get(name)
 	if !ok {
 		return nil, status.Errorf(codes.NotFound, "config %q not found", name)
@@ -94,24 +90,11 @@ func (m *MirrorService) UpdateConfig(
 	req *mirrorpb.UpdateConfigRequest,
 ) (*mirrorpb.UpdateConfigResponse, error) {
 	name := req.GetName()
-	if name == "" {
-		return nil, status.Error(codes.InvalidArgument, "module config name is required")
-	}
-
 	reqRules := req.GetRules()
-	if len(reqRules) == 0 {
-		return nil, status.Error(
-			codes.InvalidArgument,
-			"mirror config must contain at least one rule",
-		)
-	}
 
 	rules := make([]cmirror.MirrorRule, 0, len(reqRules))
 	for _, reqRule := range reqRules {
 		action := reqRule.GetAction()
-		if action == nil {
-			return nil, status.Error(codes.InvalidArgument, "rule action is required")
-		}
 
 		devices, err := filterpbconv.ToDevices(reqRule.Devices)
 		if err != nil {
@@ -179,10 +162,6 @@ func (m *MirrorService) DeleteConfig(
 	req *mirrorpb.DeleteConfigRequest,
 ) (*mirrorpb.DeleteConfigResponse, error) {
 	name := req.GetName()
-	if name == "" {
-		return nil, status.Error(codes.InvalidArgument, "module config name is required")
-	}
-
 	err := m.configs.Delete(name, func(*mirrorConfig) error {
 		return m.backend.DeleteModule(name)
 	})

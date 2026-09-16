@@ -240,32 +240,6 @@ func Test_DecapService_ListUpdateList(t *testing.T) {
 	assert.Equal(t, []string{"decap0"}, list.Configs)
 }
 
-func Test_DecapService_EmptyConfigName(t *testing.T) {
-	svc := newTestService(t)
-	ctx := t.Context()
-
-	t.Run("UpdateConfig", func(t *testing.T) {
-		resp, err := svc.UpdateConfig(ctx, &decappb.UpdateConfigRequest{
-			Name:      "",
-			Prefixes4: mustPrefixes4(t, "10.0.0.0/24"),
-		})
-		require.Nil(t, resp)
-		require.Equal(t, codes.InvalidArgument, status.Code(err))
-	})
-
-	t.Run("ShowConfig", func(t *testing.T) {
-		resp, err := svc.ShowConfig(ctx, &decappb.ShowConfigRequest{})
-		require.Nil(t, resp)
-		require.Equal(t, codes.InvalidArgument, status.Code(err))
-	})
-
-	t.Run("DeleteConfig", func(t *testing.T) {
-		resp, err := svc.DeleteConfig(ctx, &decappb.DeleteConfigRequest{})
-		require.Nil(t, resp)
-		require.Equal(t, codes.InvalidArgument, status.Code(err))
-	})
-}
-
 func Test_DecapService_InvalidPrefix(t *testing.T) {
 	tests := []struct {
 		name    string

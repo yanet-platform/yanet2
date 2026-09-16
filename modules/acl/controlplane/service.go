@@ -21,7 +21,6 @@ import (
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/modules/acl/bindings/go/cacl"
 	aclpb "github.com/yanet-platform/yanet2/modules/acl/controlplane/aclpb/v1"
-	fwstatemap "github.com/yanet-platform/yanet2/objects/fwstate/controlplane"
 )
 
 // ModuleHandle is a handle to an ACL module configuration written to
@@ -30,7 +29,7 @@ import (
 type ModuleHandle interface {
 	Free() error
 	AsFFIModule() ffi.ModuleConfig
-	GetInfo() *cacl.AclConfigInfo
+	GetInfo() *cacl.ACLConfigInfo
 }
 
 // Backend abstracts shared-memory operations for the ACL service.
@@ -40,7 +39,7 @@ type Backend interface {
 	// linked. The returned handle is not yet published to the dataplane.
 	NewModule(
 		name string,
-		rules []cacl.AclRule,
+		rules []cacl.ACLRule,
 		fw4MapName, fw6MapName string,
 	) (ModuleHandle, error)
 	// UpdateModule publishes handle to dp_config_gen so the dataplane
@@ -95,7 +94,7 @@ type aclConfig struct {
 	fw6MapName string
 	// info is the compile metadata copied out of the module before it
 	// was published, so metrics never call into a handle.
-	info cacl.AclConfigInfo
+	info cacl.ACLConfigInfo
 }
 
 // Rules returns the rules held by the config.
@@ -104,7 +103,7 @@ func (m *aclConfig) Rules() []*aclpb.Rule {
 }
 
 // Info returns the compile metadata of the config's module.
-func (m *aclConfig) Info() cacl.AclConfigInfo {
+func (m *aclConfig) Info() cacl.ACLConfigInfo {
 	return m.info
 }
 
@@ -199,9 +198,9 @@ func (m *ACLService) retention() func(metrics.MetricID) bool {
 }
 
 // configInfos returns the compile metadata of every published config.
-func (m *ACLService) configInfos() map[string]cacl.AclConfigInfo {
+func (m *ACLService) configInfos() map[string]cacl.ACLConfigInfo {
 	names := m.configs.Names()
-	infos := make(map[string]cacl.AclConfigInfo, len(names))
+	infos := make(map[string]cacl.ACLConfigInfo, len(names))
 	for _, name := range names {
 		if config, ok := m.configs.Get(name); ok {
 			infos[name] = config.Info()
@@ -254,8 +253,8 @@ func mergedNet6s(legacy []*filterpb.IPNet, typed []*commonpb.IPv6Network) ([]xne
 	return append(nets, typedNets...), nil
 }
 
-func convertRules(reqRules []*aclpb.Rule) ([]cacl.AclRule, error) {
-	rules := make([]cacl.AclRule, 0, len(reqRules))
+func convertRules(reqRules []*aclpb.Rule) ([]cacl.ACLRule, error) {
+	rules := make([]cacl.ACLRule, 0, len(reqRules))
 	for _, reqRule := range reqRules {
 		devices, err := filterpbconv.ToDevices(reqRule.Devices)
 		if err != nil {
@@ -301,7 +300,7 @@ func convertRules(reqRules []*aclpb.Rule) ([]cacl.AclRule, error) {
 		if err != nil {
 			return nil, err
 		}
-		rule := cacl.AclRule{
+		rule := cacl.ACLRule{
 			Actions:       actions,
 			Counter:       reqRule.GetCounter(),
 			Devices:       devices,
@@ -332,47 +331,13 @@ func rulesEqual(a, b []*aclpb.Rule) bool {
 	return true
 }
 
-// validateMapNameOptional applies the C-side round-trip rules to a map
-// link name; the empty name declares no link and stays valid.
-func validateMapNameOptional(name string) error {
-	if name == "" {
-		return nil
-	}
-	return fwstatemap.ValidateMapName(name)
-}
-
 func (m *ACLService) UpdateConfig(
 	ctx context.Context,
 	req *aclpb.UpdateConfigRequest,
 ) (*aclpb.UpdateConfigResponse, error) {
 	name := req.GetName()
-	if name == "" {
-		return nil, status.Error(codes.InvalidArgument, "module config name is required")
-	}
-	// Rejecting an empty ruleset is enforced here in the Go control plane by
-	// design, not in the C shared-memory load path. A matching C-side guard
-	// can be added later if a non-Go caller ever needs the same protection.
-	if len(req.GetRules()) == 0 {
-		return nil, status.Error(codes.InvalidArgument, "at least one rule is required, an empty ruleset would drop all traffic")
-	}
-	if req.GetSyncConfig() != nil {
-		return nil, status.Error(codes.InvalidArgument,
-			"sync_config belongs to fwstate")
-	}
-
 	fw4MapName := req.GetFwtableNameV4()
 	fw6MapName := req.GetFwtableNameV6()
-	// A non-empty name must round-trip through the fixed-size C
-	// object registry: cp_module_link_object silently truncates
-	// longer ones, which could link an entirely different map than
-	// the one ShowConfig reports. An empty name stays valid: it
-	// declares no link for that family.
-	if err := validateMapNameOptional(fw4MapName); err != nil {
-		return nil, err
-	}
-	if err := validateMapNameOptional(fw6MapName); err != nil {
-		return nil, err
-	}
 
 	err := m.configs.Update(name, func(current *aclConfig, ok bool) (*aclConfig, error) {
 		if ok && rulesEqual(current.Rules(), req.Rules) &&
@@ -424,10 +389,6 @@ func (m *ACLService) ShowConfig(
 	req *aclpb.ShowConfigRequest,
 ) (*aclpb.ShowConfigResponse, error) {
 	name := req.GetName()
-	if name == "" {
-		return nil, status.Error(codes.InvalidArgument, "module config name is required")
-	}
-
 	config, ok := m.configs.Get(name)
 	if !ok {
 		return nil, status.Errorf(codes.NotFound, "config %q not found", name)
@@ -455,10 +416,6 @@ func (m *ACLService) DeleteConfig(
 	req *aclpb.DeleteConfigRequest,
 ) (*aclpb.DeleteConfigResponse, error) {
 	name := req.GetName()
-	if name == "" {
-		return nil, status.Error(codes.InvalidArgument, "module config name is required")
-	}
-
 	err := m.configs.Delete(name, func(*aclConfig) error {
 		if err := m.backend.DeleteModule(name); err != nil {
 			return status.Errorf(codes.Internal, "could not delete acl module config '%s': %v", name, err)

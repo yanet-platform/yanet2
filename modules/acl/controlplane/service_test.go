@@ -54,7 +54,7 @@ func waitOnChan(t *testing.T, ch <-chan struct{}, msg string) {
 type fakeHandle struct {
 	mu          sync.Mutex
 	name        string
-	rules       []cacl.AclRule
+	rules       []cacl.ACLRule
 	fw4MapName  string
 	fw6MapName  string
 	freeCount   int
@@ -87,19 +87,19 @@ func (m *fakeHandle) Name() string {
 }
 
 // Rules returns a copy of the rules the handle was constructed with.
-func (m *fakeHandle) Rules() []cacl.AclRule {
+func (m *fakeHandle) Rules() []cacl.ACLRule {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	return append([]cacl.AclRule(nil), m.rules...)
+	return append([]cacl.ACLRule(nil), m.rules...)
 }
 
 func (m *fakeHandle) AsFFIModule() ffi.ModuleConfig {
 	return ffi.ModuleConfig{}
 }
 
-func (m *fakeHandle) GetInfo() *cacl.AclConfigInfo {
-	return &cacl.AclConfigInfo{
+func (m *fakeHandle) GetInfo() *cacl.ACLConfigInfo {
+	return &cacl.ACLConfigInfo{
 		CompilationTimeNs:  42,
 		FilterRuleCountIp4: 7,
 	}
@@ -280,7 +280,7 @@ func newMetricsSnapshotHarness(testingTB testing.TB) (*dataplaneut.Harness, *ffi
 
 func (m *fakeBackend) NewModule(
 	name string,
-	rules []cacl.AclRule,
+	rules []cacl.ACLRule,
 	fw4MapName, fw6MapName string,
 ) (acl.ModuleHandle, error) {
 	m.mu.Lock()
@@ -471,7 +471,7 @@ func (m *compileBlockingBackend) entryOrder() []string {
 
 func (m *compileBlockingBackend) NewModule(
 	name string,
-	rules []cacl.AclRule,
+	rules []cacl.ACLRule,
 	fw4MapName, fw6MapName string,
 ) (acl.ModuleHandle, error) {
 	block := m.recordEntry(name)
@@ -653,22 +653,6 @@ func TestUpdateConfigClassifiesUpdateError(t *testing.T) {
 	})
 }
 
-// Test_ACLService_UpdateConfig_RejectsDeprecatedSyncConfig verifies that old
-// clients cannot silently install emission settings on the wrong module.
-func Test_ACLService_UpdateConfig_RejectsDeprecatedSyncConfig(t *testing.T) {
-	backend := newFakeBackend()
-	service := newTestService(backend)
-
-	_, err := service.UpdateConfig(t.Context(), &aclpb.UpdateConfigRequest{
-		Name:       "acl0",
-		Rules:      []*aclpb.Rule{{Actions: []*aclpb.Action{{Kind: aclpb.ActionKind_ACTION_KIND_PASS}}}},
-		SyncConfig: &aclpb.SyncConfig{},
-	})
-	require.Error(t, err)
-	assert.Equal(t, codes.InvalidArgument, status.Code(err))
-	assert.Contains(t, err.Error(), "fwstate")
-}
-
 // TestUpdateConfig_ErrorPropagation verifies that a backend failure from
 // NewModule returns codes.Internal and leaves the service config unchanged.
 func TestUpdateConfig_ErrorPropagation(t *testing.T) {
@@ -705,36 +689,6 @@ func TestUpdateConfig_ErrorPropagation(t *testing.T) {
 	require.Len(t, resp.Rules, len(initialRules))
 	for idx := range initialRules {
 		assert.True(t, proto.Equal(initialRules[idx], resp.Rules[idx]), "config rules must not have changed after failed update")
-	}
-}
-
-// TestUpdateConfig_RejectsEmptyRuleset verifies that an empty ruleset is
-// rejected with codes.InvalidArgument before reaching the backend, for both
-// a nil and an explicitly empty rule slice.
-func TestUpdateConfig_RejectsEmptyRuleset(t *testing.T) {
-	tests := []struct {
-		name  string
-		rules []*aclpb.Rule
-	}{
-		{name: "nil rules", rules: nil},
-		{name: "empty rules", rules: []*aclpb.Rule{}},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			b := newFakeBackend()
-			svc := newTestService(b)
-
-			_, err := svc.UpdateConfig(t.Context(), &aclpb.UpdateConfigRequest{
-				Name:  "acl0",
-				Rules: tc.rules,
-			})
-			require.Error(t, err)
-			assert.Equal(t, codes.InvalidArgument, status.Code(err))
-			assert.Equal(t, 0, b.PublishCalls(), "backend must not be asked to publish")
-			assert.Len(t, b.CreatedHandles(), 0, "backend must not allocate a module")
-			assert.Equal(t, 0, b.ModuleCount(), "no module must be created")
-		})
 	}
 }
 

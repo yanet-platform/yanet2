@@ -8,7 +8,10 @@ import (
 	"unsafe"
 
 	"github.com/stretchr/testify/require"
+
+	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
+	fwstatemappb "github.com/yanet-platform/yanet2/objects/fwstate/controlplane/fwstatemappb/v1"
 )
 
 // TestValidateDeviceName pins the two rejection classes: a name the C-side
@@ -17,6 +20,18 @@ func TestValidateDeviceName(t *testing.T) {
 	require.NoError(t, ffi.ValidateDeviceName(strings.Repeat("a", ffi.MaxDeviceNameLen-1)))
 	require.Error(t, ffi.ValidateDeviceName(strings.Repeat("a", ffi.MaxDeviceNameLen)))
 	require.Error(t, ffi.ValidateDeviceName("edge\x00backup"))
+}
+
+// Test_MaxMapNameLen_MatchesC verifies that the pure-Go object-name buffer
+// bound matches the C object-name buffer size, including its terminating byte.
+func Test_MaxMapNameLen_MatchesC(t *testing.T) {
+	require.Equal(t, fwstatemappb.MaxMapNameLen, ffi.MaxObjectNameLen)
+}
+
+// Test_MaxDeviceNameLen_MatchesC verifies that the pure-Go bound matches the
+// C device-name buffer size, including its terminating byte.
+func Test_MaxDeviceNameLen_MatchesC(t *testing.T) {
+	require.Equal(t, commonpb.MaxDeviceNameLen, ffi.MaxDeviceNameLen)
 }
 
 var errInjectedFree = errors.New("injected free failure")

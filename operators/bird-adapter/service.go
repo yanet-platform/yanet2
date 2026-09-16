@@ -144,18 +144,6 @@ func (m *AdapterService) SetupConfig(
 	ctx context.Context,
 	req *adapterpb.SetupConfigRequest,
 ) (*adapterpb.SetupConfigResponse, error) {
-	if req.GetConfig() == nil {
-		return nil, fmt.Errorf("no import config provided")
-	}
-
-	// The typed sources decode totally: an omitted field is otherwise
-	// indistinguishable from the zero address, so check presence here.
-	if req.GetSourceV4() == nil {
-		return nil, fmt.Errorf("no v4 source address provided")
-	}
-	if req.GetSourceV6() == nil {
-		return nil, fmt.Errorf("no v6 source address provided")
-	}
 	mplsV4Src := req.GetSourceV4().ToAddr()
 	mplsV6Src := req.GetSourceV6().ToAddr()
 

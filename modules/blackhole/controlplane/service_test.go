@@ -115,31 +115,6 @@ func Test_BlackholeService_DeleteMissing(t *testing.T) {
 	require.Equal(t, codes.NotFound, status.Code(err))
 }
 
-// Test_BlackholeService_EmptyConfigName verifies that creating, reading, and
-// deleting all reject an empty name as InvalidArgument.
-func Test_BlackholeService_EmptyConfigName(t *testing.T) {
-	svc := newTestService(t)
-	ctx := t.Context()
-
-	t.Run("UpdateConfig", func(t *testing.T) {
-		resp, err := svc.UpdateConfig(ctx, &blackholepb.UpdateConfigRequest{})
-		require.Nil(t, resp)
-		require.Equal(t, codes.InvalidArgument, status.Code(err))
-	})
-
-	t.Run("ShowConfig", func(t *testing.T) {
-		resp, err := svc.ShowConfig(ctx, &blackholepb.ShowConfigRequest{})
-		require.Nil(t, resp)
-		require.Equal(t, codes.InvalidArgument, status.Code(err))
-	})
-
-	t.Run("DeleteConfig", func(t *testing.T) {
-		resp, err := svc.DeleteConfig(ctx, &blackholepb.DeleteConfigRequest{})
-		require.Nil(t, resp)
-		require.Equal(t, codes.InvalidArgument, status.Code(err))
-	})
-}
-
 // Test_BlackholeService_UpdateFailureAtomic verifies that a failed update
 // leaves the previously applied config intact and queryable.
 func Test_BlackholeService_UpdateFailureAtomic(t *testing.T) {

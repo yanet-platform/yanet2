@@ -119,8 +119,8 @@ func (m *ACLService) Metrics(ctx context.Context, tags ...*commonpb.MetricTag) (
 // These are the counters Metrics leaves out, read from the runtime-kind
 // storages it never touches. An empty request field matches every value.
 // One read serves every position, and each metric's position comes from
-// the tags its counter group carries. A selector value the counter-tag
-// fields cannot carry is rejected as an invalid argument. Counter
+// the tags its counter group carries. Requests received over gRPC reject
+// selector values the fixed-size counter-tag fields cannot carry. Counter
 // metrics are omitted when all worker values are zero to reduce output
 // noise.
 //
@@ -135,10 +135,6 @@ func (m *ACLService) RuleMetrics(ctx context.Context, req *aclpb.GetMetricsRules
 	dpConfig := m.backend.DPConfig()
 	if dpConfig == nil {
 		return []*commonpb.Metric{}, nil
-	}
-
-	if err := validateRuleSelectors(req); err != nil {
-		return nil, status.Error(codes.InvalidArgument, err.Error())
 	}
 
 	groups, err := m.readRuleCounterGroups(ctx, dpConfig)
@@ -222,23 +218,6 @@ func (m *ACLService) readRuleCounterGroups(ctx context.Context, dpConfig *ffi.DP
 		}
 		return dpConfig.CountersByTags(ruleCounterBaseTags(), nil)
 	})
-}
-
-// validateRuleSelectors rejects request selectors the fixed-size
-// counter-tag fields cannot carry, before any shared-memory read.
-func validateRuleSelectors(req *aclpb.GetMetricsRulesRequest) error {
-	for _, selector := range requestSelectors(req) {
-		key, value := selector[0], selector[1]
-		if value == "" || value == "*" {
-			continue
-		}
-
-		if err := ffi.ValidateTag(ffi.CounterTag{Key: key, Value: value}); err != nil {
-			return err
-		}
-	}
-
-	return nil
 }
 
 // ruleCounterBaseTags returns the fixed tag set every per-rule counter

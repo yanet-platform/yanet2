@@ -60,7 +60,10 @@ func NewPdumpModule(cfg *Config, options ...Option) (*PdumpModule, error) {
 	}
 	agent := attachment.Agent
 
-	service := NewPdumpService(agent, WithPdumpServiceLog(log))
+	service := NewPdumpService(
+		NewBackend(agent, WithBackendLog(log)),
+		WithPdumpServiceLog(log),
+	)
 
 	return &PdumpModule{
 		cfg:        cfg,

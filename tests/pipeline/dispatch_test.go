@@ -111,8 +111,8 @@ func setupACLBackend(
 func publishMatchAllACL(t *testing.T, backend acl.Backend, name string, action uint32) {
 	t.Helper()
 
-	rule := cacl.AclRule{
-		Actions:       []cacl.AclAction{{Kind: action}},
+	rule := cacl.ACLRule{
+		Actions:       []cacl.ACLAction{{Kind: action}},
 		Devices:       filter.Devices{{Name: "port0"}},
 		Src4s:         []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
 		Dst4s:         []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
@@ -125,7 +125,7 @@ func publishMatchAllACL(t *testing.T, backend acl.Backend, name string, action u
 		},
 		Fragment: filter.FragmentAny,
 	}
-	handle, err := backend.NewModule(name, []cacl.AclRule{rule}, "", "")
+	handle, err := backend.NewModule(name, []cacl.ACLRule{rule}, "", "")
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = handle.Free() })
 	require.NoError(t, backend.UpdateModule(handle))

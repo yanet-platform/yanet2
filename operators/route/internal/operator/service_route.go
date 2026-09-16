@@ -127,10 +127,6 @@ func (m *RouteService) ShowRoutes(
 	req *operatorpb.ShowRoutesRequest,
 ) (*operatorpb.ShowRoutesResponse, error) {
 	name := req.GetName()
-	if name == "" {
-		return nil, status.Error(codes.InvalidArgument, "module config name is required")
-	}
-
 	holder, ok := m.getRib(name)
 	if !ok {
 		if m.isConfigured(name) {
@@ -174,10 +170,6 @@ func (m *RouteService) LookupRoute(
 	req *operatorpb.LookupRouteRequest,
 ) (*operatorpb.LookupRouteResponse, error) {
 	name := req.GetName()
-	if name == "" {
-		return nil, status.Error(codes.InvalidArgument, "module config name is required")
-	}
-
 	addr, err := req.GetIpAddr().ToAddr()
 	if err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "invalid ip_addr (bytes=%x): %v", req.GetIpAddr().GetAddr(), err)
@@ -223,20 +215,12 @@ func (m *RouteService) InsertRoute(
 	req *operatorpb.InsertRouteRequest,
 ) (*operatorpb.InsertRouteResponse, error) {
 	name := req.GetName()
-	if name == "" {
-		return nil, status.Error(codes.InvalidArgument, "module config name is required")
-	}
-
 	prefix, err := req.GetPrefix().ToPrefix()
 	if err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "invalid prefix: %v", err)
 	}
 
 	addrs := req.GetNexthopAddrs()
-	if len(addrs) == 0 {
-		return nil, status.Error(codes.InvalidArgument, "at least one nexthop address is required")
-	}
-
 	nexthops := make([]netip.Addr, 0, len(addrs))
 	for _, a := range addrs {
 		nexthop, parseErr := a.ToAddr()
@@ -247,15 +231,6 @@ func (m *RouteService) InsertRoute(
 	}
 
 	sourceID := req.RouteSourceID()
-
-	// Non-static sources use peer identity to distinguish routes: the unary
-	// InsertRoute API carries no peer, so consecutive AddUnicastRoute calls
-	// for the same (prefix, source) would silently replace one another.
-	// Reject the ambiguous case early rather than keeping only the last nexthop.
-	if sourceID != rib.RouteSourceStatic && len(nexthops) > 1 {
-		return nil, status.Error(codes.InvalidArgument, "multiple nexthops are only supported for static routes")
-	}
-
 	holder := m.getOrCreateRib(name)
 
 	for _, nexthopAddr := range nexthops {
@@ -278,20 +253,12 @@ func (m *RouteService) DeleteRoute(
 	req *operatorpb.DeleteRouteRequest,
 ) (*operatorpb.DeleteRouteResponse, error) {
 	name := req.GetName()
-	if name == "" {
-		return nil, status.Error(codes.InvalidArgument, "module config name is required")
-	}
-
 	prefix, err := req.GetPrefix().ToPrefix()
 	if err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "invalid prefix: %v", err)
 	}
 
 	addrs := req.GetNexthopAddrs()
-	if len(addrs) == 0 {
-		return nil, status.Error(codes.InvalidArgument, "at least one nexthop address is required")
-	}
-
 	nexthops := make([]netip.Addr, 0, len(addrs))
 	for _, a := range addrs {
 		nexthop, parseErr := a.ToAddr()
@@ -327,9 +294,6 @@ func (m *RouteService) FlushRoutes(
 	req *operatorpb.FlushRoutesRequest,
 ) (*operatorpb.FlushRoutesResponse, error) {
 	name := req.GetName()
-	if name == "" {
-		return nil, status.Error(codes.InvalidArgument, "module config name is required")
-	}
 	if _, ok := m.getRib(name); !ok {
 		return &operatorpb.FlushRoutesResponse{}, nil
 	}
@@ -364,10 +328,6 @@ func (m *RouteService) FeedRIB(stream operatorpb.RouteService_FeedRIBServer) err
 
 		if ribRef == nil {
 			name = update.GetName()
-			if name == "" {
-				err = status.Error(codes.InvalidArgument, "module config name is required")
-				break
-			}
 			ribRef = m.getOrCreateRib(name)
 			sessionID, terminated = ribRef.NewSession()
 			m.log.Info("started FeedRIB session",

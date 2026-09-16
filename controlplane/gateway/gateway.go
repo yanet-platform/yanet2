@@ -321,10 +321,12 @@ func NewGateway(cfg Config, options ...GatewayOption) (*Gateway, error) {
 			serverMetrics.UnaryServerInterceptor(),
 			auth.UnaryServerInterceptor(authManager, log),
 			xgrpc.AccessLogInterceptor(log),
+			commonxgrpc.ValidateUnaryInterceptor(),
 		),
 		grpc.ChainStreamInterceptor(
 			serverMetrics.StreamServerInterceptor(),
 			auth.StreamServerInterceptor(authManager, log),
+			commonxgrpc.ValidateStreamInterceptor(),
 		),
 		grpc.MaxRecvMsgSize(1024 * 1024 * 256),
 		grpc.MaxSendMsgSize(1024 * 1024 * 256),

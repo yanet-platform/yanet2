@@ -89,17 +89,37 @@ type workerArea struct {
 	log         *zap.Logger // Logger for this worker area
 }
 
+// workerAreas builds a reader over every ring, each starting at the ring's
+// beginning.
+func workerAreas(rings []Ring, log *zap.Logger) []*workerArea {
+	workers := make([]*workerArea, 0, len(rings))
+	for idx, ring := range rings {
+		workers = append(workers, &workerArea{
+			writeIdx:    ring.WriteIdx,
+			readableIdx: ring.ReadableIdx,
+			data:        ring.Data,
+			mask:        uint64(len(ring.Data) - 1),
+			log:         log.With(zap.Int("ring_idx", idx)),
+		})
+	}
+	return workers
+}
+
 // spawnWakers creates notification channels for each worker and starts a background
 // goroutine that periodically checks for new data and notifies waiting readers.
-func (m *ringBuffer) spawnWakers(ctx context.Context) []chan bool {
+//
+// The returned done channel closes once that goroutine has returned.
+func (m *ringBuffer) spawnWakers(ctx context.Context) ([]chan bool, <-chan struct{}) {
 	wakers := make([]chan bool, 0, len(m.workers))
 	for range m.workers {
 		wakers = append(wakers, make(chan bool, 1))
 	}
 
 	ticker := time.NewTicker(1 * time.Millisecond)
+	done := make(chan struct{})
 
 	go func() {
+		defer close(done)
 		for {
 			// Check each worker for new data and notify if available
 			for idx, worker := range m.workers {
@@ -118,13 +138,13 @@ func (m *ringBuffer) spawnWakers(ctx context.Context) []chan bool {
 		}
 	}()
 
-	return wakers
+	return wakers, done
 }
 
 // RunReaders starts reader goroutines for all workers and processes ring buffer data
 // into protobuf records, sending them to the provided channel.
 func (m *ringBuffer) RunReaders(ctx context.Context, recordCh chan<- *pdumppb.Record) error {
-	wakers := m.spawnWakers(ctx)
+	wakers, wakersDone := m.spawnWakers(ctx)
 	wg, _ := errgroup.WithContext(ctx)
 	for idx, worker := range m.workers {
 		wg.Go(func() error {
@@ -155,7 +175,10 @@ func (m *ringBuffer) RunReaders(ctx context.Context, recordCh chan<- *pdumppb.Re
 			}
 		})
 	}
-	return wg.Wait()
+	err := wg.Wait()
+	// The waker reads the ring too, so the readers return after it.
+	<-wakersDone
+	return err
 }
 
 // hasMore checks if there's unread data available in the worker's ring buffer.

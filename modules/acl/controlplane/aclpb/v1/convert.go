@@ -8,14 +8,14 @@ import (
 	"github.com/yanet-platform/yanet2/modules/acl/bindings/go/cacl"
 )
 
-// ToActions converts proto actions into backend cacl.AclAction values.
+// ToActions converts proto actions into backend ACL actions.
 //
 // Returns an error if any action carries an unrecognized kind so the caller
 // can reject the request rather than silently mapping the action to ALLOW.
-func ToActions(protoActions []*Action) ([]cacl.AclAction, error) {
-	out := make([]cacl.AclAction, len(protoActions))
+func ToActions(protoActions []*Action) ([]cacl.ACLAction, error) {
+	out := make([]cacl.ACLAction, len(protoActions))
 	for idx, action := range protoActions {
-		kind, err := action.ToCAclKind()
+		kind, err := action.ToCACLKind()
 		if err != nil {
 			return nil, fmt.Errorf("action %d: %w", idx, err)
 		}
@@ -26,21 +26,21 @@ func ToActions(protoActions []*Action) ([]cacl.AclAction, error) {
 	return out, nil
 }
 
-// FromActions converts backend cacl.AclAction values into proto actions.
+// FromActions converts backend ACL actions into proto actions.
 //
 // Inverse of ToActions. Unknown kinds map to ACTION_KIND_PASS (zero).
-func FromActions(actions []cacl.AclAction) []*Action {
+func FromActions(actions []cacl.ACLAction) []*Action {
 	result := make([]*Action, len(actions))
 	for idx, a := range actions {
 		result[idx] = &Action{}
-		result[idx].SetFromCAclKind(a.Kind)
+		result[idx].SetFromCACLKind(a.Kind)
 	}
 
 	return result
 }
 
-// FromRule converts a backend cacl.AclRule into its proto representation.
-func FromRule(rule cacl.AclRule) *Rule {
+// FromRule converts a backend ACL rule into its proto representation.
+func FromRule(rule cacl.ACLRule) *Rule {
 	actions := FromActions(rule.Actions)
 
 	devices := make([]*filterpb.Device, len(rule.Devices))
@@ -104,7 +104,7 @@ func FromRule(rule cacl.AclRule) *Rule {
 }
 
 // FromRules is the slice-level wrapper of FromRule.
-func FromRules(rules []cacl.AclRule) []*Rule {
+func FromRules(rules []cacl.ACLRule) []*Rule {
 	out := make([]*Rule, len(rules))
 	for idx := range rules {
 		out[idx] = FromRule(rules[idx])
@@ -113,13 +113,10 @@ func FromRules(rules []cacl.AclRule) []*Rule {
 	return out
 }
 
-// SetFromCAclKind sets m.Kind to the proto enum value corresponding
-// to the given cacl action kind.
+// SetFromCACLKind maps a backend action kind to its proto representation.
 //
-// Unrecognized cacl kinds map to ActionKind_ACTION_KIND_PASS (the proto
-// zero value). FromActions does not surface an error in this direction
-// because input comes from a typed Go value, not the wire.
-func (m *Action) SetFromCAclKind(kind uint32) {
+// Unrecognized kinds map to the zero value, which permits the packet.
+func (m *Action) SetFromCACLKind(kind uint32) {
 	switch kind {
 	case uint32(cacl.ActionAllow):
 		m.Kind = ActionKind_ACTION_KIND_PASS
@@ -139,8 +136,8 @@ func (m *Action) SetFromCAclKind(kind uint32) {
 	}
 }
 
-// ToCAclKind maps the proto kind enum to the cacl action kind.
-func (m *Action) ToCAclKind() (uint32, error) {
+// ToCACLKind maps the proto kind enum to the backend action kind.
+func (m *Action) ToCACLKind() (uint32, error) {
 	switch m.GetKind() {
 	case ActionKind_ACTION_KIND_PASS:
 		return uint32(cacl.ActionAllow), nil
