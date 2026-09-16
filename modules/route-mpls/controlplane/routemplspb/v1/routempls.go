@@ -3,6 +3,8 @@ package routemplspb
 import (
 	"errors"
 	"fmt"
+
+	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
 )
 
 // maxMPLSLabel is the highest value representable by the dataplane's 20-bit
@@ -10,8 +12,8 @@ import (
 const maxMPLSLabel = 1<<20 - 1
 
 func (m *CreateConfigRequest) Validate() error {
-	if m.GetName() == "" {
-		return errors.New("name is required")
+	if err := commonpb.ValidateModuleName("name", m.GetName()); err != nil {
+		return err
 	}
 
 	for idx, rule := range m.GetRules() {
@@ -24,8 +26,8 @@ func (m *CreateConfigRequest) Validate() error {
 }
 
 func (m *UpdateConfigRequest) Validate() error {
-	if m.GetName() == "" {
-		return errors.New("name is required")
+	if err := commonpb.ValidateModuleName("name", m.GetName()); err != nil {
+		return err
 	}
 
 	for idx, update := range m.GetUpdates() {
@@ -55,19 +57,11 @@ func (m *UpdateEvent) Validate() error {
 }
 
 func (m *ShowConfigRequest) Validate() error {
-	if m.GetName() == "" {
-		return errors.New("name is required")
-	}
-
-	return nil
+	return commonpb.ValidateModuleName("name", m.GetName())
 }
 
 func (m *DeleteConfigRequest) Validate() error {
-	if m.GetName() == "" {
-		return errors.New("name is required")
-	}
-
-	return nil
+	return commonpb.ValidateModuleName("name", m.GetName())
 }
 
 func (m *Rule) Validate() error {

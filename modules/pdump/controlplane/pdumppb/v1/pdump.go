@@ -3,6 +3,8 @@ package pdumppb
 import (
 	"errors"
 	"fmt"
+
+	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
 )
 
 // MaxMode mirrors the largest bitmap accepted by the pdump dataplane.
@@ -11,16 +13,12 @@ const MaxMode = 3
 const minRingSize = 1 << 20
 
 func (m *ShowConfigRequest) Validate() error {
-	if m.GetName() == "" {
-		return errors.New("name is required")
-	}
-
-	return nil
+	return commonpb.ValidateModuleName("name", m.GetName())
 }
 
 func (m *SetConfigRequest) Validate() error {
-	if m.GetName() == "" {
-		return errors.New("name is required")
+	if err := commonpb.ValidateModuleName("name", m.GetName()); err != nil {
+		return err
 	}
 
 	config := m.GetConfig()
@@ -65,17 +63,9 @@ func (m *SetConfigRequest) Validate() error {
 }
 
 func (m *DeleteConfigRequest) Validate() error {
-	if m.GetName() == "" {
-		return errors.New("name is required")
-	}
-
-	return nil
+	return commonpb.ValidateModuleName("name", m.GetName())
 }
 
 func (m *ReadDumpRequest) Validate() error {
-	if m.GetName() == "" {
-		return errors.New("name is required")
-	}
-
-	return nil
+	return commonpb.ValidateModuleName("name", m.GetName())
 }

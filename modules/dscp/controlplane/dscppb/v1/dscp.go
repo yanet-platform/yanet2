@@ -3,6 +3,8 @@ package dscppb
 import (
 	"errors"
 	"fmt"
+
+	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
 )
 
 // MaxFlag mirrors the largest C DSCP marking flag.
@@ -12,41 +14,25 @@ const MaxFlag = 2
 const MaxMark = 63
 
 func (m *ShowConfigRequest) Validate() error {
-	if m.GetName() == "" {
-		return errors.New("name is required")
-	}
-
-	return nil
+	return commonpb.ValidateModuleName("name", m.GetName())
 }
 
 func (m *AddPrefixesRequest) Validate() error {
-	if m.GetName() == "" {
-		return errors.New("name is required")
-	}
-
-	return nil
+	return commonpb.ValidateModuleName("name", m.GetName())
 }
 
 func (m *RemovePrefixesRequest) Validate() error {
-	if m.GetName() == "" {
-		return errors.New("name is required")
-	}
-
-	return nil
+	return commonpb.ValidateModuleName("name", m.GetName())
 }
 
 // Validate checks that the request names the config to delete.
 func (m *DeleteConfigRequest) Validate() error {
-	if m.GetName() == "" {
-		return errors.New("name is required")
-	}
-
-	return nil
+	return commonpb.ValidateModuleName("name", m.GetName())
 }
 
 func (m *SetDscpMarkingRequest) Validate() error {
-	if m.GetName() == "" {
-		return errors.New("name is required")
+	if err := commonpb.ValidateModuleName("name", m.GetName()); err != nil {
+		return err
 	}
 
 	if m.GetDscpConfig() == nil {

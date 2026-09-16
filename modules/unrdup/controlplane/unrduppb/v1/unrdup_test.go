@@ -31,13 +31,13 @@ func Test_ShowConfigRequest_Validate(t *testing.T) {
 		{
 			name: "name at usable limit",
 			request: &unrduppb.ShowConfigRequest{
-				Name: strings.Repeat("u", unrduppb.MaxModuleNameLen),
+				Name: strings.Repeat("u", commonpb.MaxModuleNameLen-1),
 			},
 		},
 		{
 			name: "name exceeds usable limit",
 			request: &unrduppb.ShowConfigRequest{
-				Name: strings.Repeat("u", unrduppb.MaxModuleNameLen+1),
+				Name: strings.Repeat("u", commonpb.MaxModuleNameLen),
 			},
 			message: "name must be shorter than 80 bytes",
 		},
@@ -88,7 +88,7 @@ func Test_UpdateConfigRequest_Validate(t *testing.T) {
 		{
 			name: "name exceeds usable limit",
 			request: &unrduppb.UpdateConfigRequest{
-				Name: strings.Repeat("u", unrduppb.MaxModuleNameLen+1),
+				Name: strings.Repeat("u", commonpb.MaxModuleNameLen),
 			},
 			message: "name must be shorter than 80 bytes",
 		},
@@ -191,7 +191,7 @@ func Test_DeleteConfigRequest_Validate(t *testing.T) {
 		{
 			name: "name exceeds usable limit",
 			request: &unrduppb.DeleteConfigRequest{
-				Name: strings.Repeat("u", unrduppb.MaxModuleNameLen+1),
+				Name: strings.Repeat("u", commonpb.MaxModuleNameLen),
 			},
 			message: "name must be shorter than 80 bytes",
 		},

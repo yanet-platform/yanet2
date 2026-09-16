@@ -3,21 +3,18 @@ package unrduppb
 import (
 	"errors"
 	"fmt"
-	"strings"
-)
 
-// MaxModuleNameLen is the largest module name that fits in the C module-name
-// buffer.
-const MaxModuleNameLen = 79
+	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
+)
 
 const maxPort = 65535
 
 func (m *ShowConfigRequest) Validate() error {
-	return validateConfigName(m.GetName())
+	return commonpb.ValidateModuleName("name", m.GetName())
 }
 
 func (m *UpdateConfigRequest) Validate() error {
-	if err := validateConfigName(m.GetName()); err != nil {
+	if err := commonpb.ValidateModuleName("name", m.GetName()); err != nil {
 		return err
 	}
 	if m.GetConfig() == nil {
@@ -31,7 +28,7 @@ func (m *UpdateConfigRequest) Validate() error {
 }
 
 func (m *DeleteConfigRequest) Validate() error {
-	return validateConfigName(m.GetName())
+	return commonpb.ValidateModuleName("name", m.GetName())
 }
 
 func (m *Config) Validate() error {
@@ -72,18 +69,4 @@ func (m *Endpoint) Validate() error {
 	default:
 		return fmt.Errorf("protocol unknown value %d", m.GetProtocol())
 	}
-}
-
-func validateConfigName(name string) error {
-	if name == "" {
-		return errors.New("name is required")
-	}
-	if strings.IndexByte(name, 0) != -1 {
-		return errors.New("name must not contain NUL")
-	}
-	if len(name) > MaxModuleNameLen {
-		return fmt.Errorf("name must be shorter than %d bytes", MaxModuleNameLen+1)
-	}
-
-	return nil
 }

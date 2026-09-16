@@ -23,6 +23,12 @@ func TestValidateDeviceName(t *testing.T) {
 	require.Error(t, ffi.ValidateDeviceName("edge\x00backup"))
 }
 
+// Test_MaxModuleNameLen_MatchesC verifies that the pure-Go bound matches the
+// C module-name buffer size, including its terminating byte.
+func Test_MaxModuleNameLen_MatchesC(t *testing.T) {
+	require.Equal(t, commonpb.MaxModuleNameLen, ffi.MaxModuleNameLen)
+}
+
 // Test_MaxMapNameLen_MatchesC verifies that the pure-Go object-name buffer
 // bound matches the C object-name buffer size, including its terminating byte.
 func Test_MaxMapNameLen_MatchesC(t *testing.T) {

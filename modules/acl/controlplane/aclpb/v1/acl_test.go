@@ -158,6 +158,35 @@ func Test_DeleteConfigRequest_Validate(t *testing.T) {
 	}
 }
 
+// Test_GetRulesCountersRequest_Validate verifies that an empty name selects
+// every config while a set name obeys the module config name rules.
+func Test_GetRulesCountersRequest_Validate(t *testing.T) {
+	cases := []struct {
+		name    string
+		request *aclpb.GetRulesCountersRequest
+		message string
+	}{
+		{name: "every config", request: &aclpb.GetRulesCountersRequest{}},
+		{name: "named config", request: &aclpb.GetRulesCountersRequest{Name: "acl0"}},
+		{
+			name:    "name with NUL",
+			request: &aclpb.GetRulesCountersRequest{Name: "acl0\x00acl1"},
+			message: "name must not contain NUL",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := tc.request.Validate()
+			if tc.message == "" {
+				require.NoError(t, err)
+			} else {
+				require.EqualError(t, err, tc.message)
+			}
+		})
+	}
+}
+
 // Test_GetMetricsRulesRequest_Validate verifies that each selector rejects
 // values that cannot fit in its fixed counter-tag value field.
 func Test_GetMetricsRulesRequest_Validate(t *testing.T) {
