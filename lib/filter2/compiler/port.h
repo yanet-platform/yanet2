@@ -46,11 +46,16 @@ filter_compile_attr_port_create(
 	attr->query_attr = (struct filter_query_attr_port *)memory_balloc(
 		memory_context, sizeof(struct filter_query_attr_port)
 	);
-	if (attr->query_attr == NULL)
+	if (attr->query_attr == NULL) {
 		goto error_free;
+	}
 
 	if (value_table_init(
-		    &attr->query_attr->value_table, memory_context, 1, 65536
+		    &attr->query_attr->value_table,
+		    memory_context,
+		    "filter:port",
+		    1,
+		    65536
 	    )) {
 		goto error_free_attr;
 	}
@@ -93,14 +98,16 @@ filter_compile_attr_port_iter(
 	struct filter_query_attr_port *query_attr =
 		port_ranges_attr->query_attr;
 
-	for (uint32_t idx = 0; idx < 65536; ++idx)
+	for (uint32_t idx = 0; idx < 65536; ++idx) {
 		if (iter_cb_func(
 			    value_table_get_ptr(
 				    &query_attr->value_table, 0, idx
 			    ),
 			    cb_func_data
-		    ))
+		    ) < 0) {
 			return -1;
+		}
+	}
 	return 0;
 }
 
@@ -161,7 +168,7 @@ filter_compile_attr_port_rule_iter(
 					    &query_attr->value_table, 0, port
 				    ),
 				    cb_func_data
-			    )) {
+			    ) < 0) {
 				return -1;
 			}
 		}

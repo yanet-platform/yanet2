@@ -196,7 +196,9 @@ filter_compile(
 	 * Initialize all registries.
 	 */
 	for (uint32_t idx = 0; idx < registry_count; ++idx) {
-		if (value_registry_init(registries + idx, memory_context)) {
+		if (value_registry_init(
+			    registries + idx, memory_context, "filter:registry"
+		    )) {
 			goto error_free_registries;
 		}
 	}
@@ -350,6 +352,9 @@ filter_destroy(
 			sizeof(struct value_table) * joint_count
 		);
 	}
+	// Unlink the embedded context from the parent tree before the storage
+	// goes away: a dangling child link would corrupt later tree walks.
+	memory_context_fini(memory_context);
 	memset(filter, 0, sizeof(struct filter));
 }
 

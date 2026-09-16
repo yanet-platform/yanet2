@@ -52,6 +52,7 @@ filter_compile_attr_ipfrag_create(
 	if (value_table_init(
 		    &attr->query_attr->value_table,
 		    memory_context,
+		    "filter:ipfrag",
 		    1,
 		    FILTER_IPFRAG_REGION_COUNT
 	    )) {
@@ -101,7 +102,7 @@ filter_compile_attr_ipfrag_iter(
 				    &query_attr->value_table, 0, idx
 			    ),
 			    cb_func_data
-		    )) {
+		    ) < 0) {
 			return -1;
 		}
 	}
@@ -139,13 +140,13 @@ filter_compile_attr_ipfrag_rule_iter(
 		if (iter_cb_func(
 			    value_table_get_ptr(&query_attr->value_table, 0, 0),
 			    cb_func_data
-		    )) {
+		    ) < 0) {
 			return -1;
 		}
 		if (iter_cb_func(
 			    value_table_get_ptr(&query_attr->value_table, 0, 1),
 			    cb_func_data
-		    )) {
+		    ) < 0) {
 			return -1;
 		}
 		break;
@@ -153,7 +154,7 @@ filter_compile_attr_ipfrag_rule_iter(
 		if (iter_cb_func(
 			    value_table_get_ptr(&query_attr->value_table, 0, 0),
 			    cb_func_data
-		    )) {
+		    ) < 0) {
 			return -1;
 		}
 		break;
@@ -161,7 +162,7 @@ filter_compile_attr_ipfrag_rule_iter(
 		if (iter_cb_func(
 			    value_table_get_ptr(&query_attr->value_table, 0, 1),
 			    cb_func_data
-		    )) {
+		    ) < 0) {
 			return -1;
 		}
 		break;

@@ -53,14 +53,16 @@ filter_compile_attr_device_create(
 		memory_context, sizeof(struct filter_query_attr_device)
 	);
 
-	if (attr->query_attr == NULL)
+	if (attr->query_attr == NULL) {
 		goto error_free;
+	}
 
 	uint32_t max_device_id = 0;
 	for (uint32_t rule_idx = 0; rule_idx < rule_count; ++rule_idx) {
 		const struct filter_rule *rule = rules[rule_idx];
-		if (rule == NULL)
+		if (rule == NULL) {
 			continue;
+		}
 
 		struct filter_devices devices;
 		device_handlers->get_devices(rule, &devices);
@@ -75,6 +77,7 @@ filter_compile_attr_device_create(
 	if (value_table_init(
 		    &attr->query_attr->value_table,
 		    memory_context,
+		    "filter:device",
 		    1,
 		    max_device_id + 1
 	    )) {
@@ -128,7 +131,7 @@ filter_compile_attr_device_iter(
 				    &query_attr->value_table, 0, h_idx
 			    ),
 			    cb_func_data
-		    )) {
+		    ) < 0) {
 			return -1;
 		}
 	}
@@ -187,7 +190,7 @@ filter_compile_attr_device_rule_iter(
 				    devices.items[idx].id
 			    ),
 			    cb_func_data
-		    )) {
+		    ) < 0) {
 			return -1;
 		}
 	}

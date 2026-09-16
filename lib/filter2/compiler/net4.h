@@ -48,13 +48,15 @@ filter_compile_attr_net_create(
 	}
 
 	struct range_collector collector;
-	if (range_collector_init(&collector, memory_context))
+	if (range_collector_init(&collector, memory_context)) {
 		goto error_free;
+	}
 
 	for (uint32_t rule_idx = 0; rule_idx < rule_count; ++rule_idx) {
 		const struct filter_rule *rule = rules[rule_idx];
-		if (rule == NULL)
+		if (rule == NULL) {
 			continue;
+		}
 
 		struct filter_net4s nets;
 		net_handlers->get_net4s(rule, &nets);
@@ -71,8 +73,8 @@ filter_compile_attr_net_create(
 			if (range4_collector_add(
 				    &collector,
 				    from,
-				    __builtin_popcountll(*(uint32_t *)net4->mask
-				    )
+				    __builtin_popcountll(*(uint32_t *)
+								  net4->mask)
 			    )) {
 				goto error_collector;
 			}
@@ -86,22 +88,31 @@ filter_compile_attr_net_create(
 	attr->query_attr = (struct filter_query_attr_net4 *)memory_balloc(
 		memory_context, sizeof(struct filter_query_attr_net4)
 	);
-	if (attr->query_attr == NULL)
+	if (attr->query_attr == NULL) {
 		goto error_range_index;
+	}
 
 	// FIXME lpm should be built while commit
-	if (lpm_init(&attr->query_attr->lpm, memory_context)) {
+	if (lpm_init(&attr->query_attr->lpm, memory_context, "filter:net4")) {
 		goto error_query;
 	}
 
-	if (range_collector_collect(
-		    &collector, 4, &attr->query_attr->lpm, &attr->range_index
+	if (range_collector_collect(&collector, 4, &attr->range_index)) {
+		goto error_collect;
+	}
+
+	if (range_index_build_lpm(
+		    &attr->range_index, 4, &attr->query_attr->lpm
 	    )) {
 		goto error_collect;
 	}
 
 	if (value_table_init(
-		    &attr->value_table, memory_context, 1, collector.count
+		    &attr->value_table,
+		    memory_context,
+		    "filter:net4",
+		    1,
+		    collector.count
 	    )) {
 		goto error_collect;
 	}
@@ -219,7 +230,7 @@ filter_compile_attr_net_iterate(
 					    range_index_values[idx]
 				    ),
 				    cb_func_data
-			    )) {
+			    ) < 0) {
 				return -1;
 			}
 		}
@@ -244,7 +255,7 @@ filter_compile_attr_net_iterate_any(
 		if (iter_cb_func(
 			    value_table_get_ptr(&net_attr->value_table, 0, idx),
 			    cb_func_data
-		    )) {
+		    ) < 0) {
 			return -1;
 		}
 	}

@@ -8,7 +8,7 @@ init_dummy_registry(
 	uint32_t actions,
 	struct value_registry *registry
 ) {
-	int res = value_registry_init(registry, memory_context);
+	int res = value_registry_init(registry, memory_context, "filter:dummy");
 	if (res < 0) {
 		return res;
 	}
@@ -54,6 +54,7 @@ merge_and_set_registry_values(
 	if (value_table_init(
 		    table,
 		    memory_context,
+		    "filter:joint",
 		    value_registry_capacity(registry1),
 		    value_registry_capacity(registry2)
 	    )) {
@@ -104,8 +105,9 @@ value_table_touch_action(uint32_t v1, uint32_t v2, uint32_t idx, void *data) {
 	struct collect_ctx *collect_ctx = (struct collect_ctx *)data;
 
 	uint32_t *value = value_table_get_ptr(collect_ctx->value_table, v1, v2);
-	if (remap_table_touch(&collect_ctx->remap_table, *value, value))
+	if (remap_table_touch(&collect_ctx->remap_table, *value, value) < 0) {
 		return -1;
+	}
 	return 0;
 }
 
@@ -119,6 +121,7 @@ merge_registry_values(
 	if (value_table_init(
 		    table,
 		    memory_context,
+		    "filter:joint",
 		    value_registry_capacity(registry1),
 		    value_registry_capacity(registry2)
 	    )) {
@@ -139,13 +142,15 @@ merge_registry_values(
 	for (uint32_t range_idx = 0; range_idx < registry1->range_count;
 	     ++range_idx) {
 		remap_table_new_gen(&collect_ctx.remap_table);
-		value_registry_join_range(
-			registry1,
-			registry2,
-			range_idx,
-			value_table_touch_action,
-			&collect_ctx
-		);
+		if (value_registry_join_range(
+			    registry1,
+			    registry2,
+			    range_idx,
+			    value_table_touch_action,
+			    &collect_ctx
+		    )) {
+			goto error_remap_table;
+		}
 	}
 
 	remap_table_compact(&collect_ctx.remap_table);
@@ -186,7 +191,7 @@ collect_registry_values(
 	struct value_table *table,
 	struct value_registry *registry
 ) {
-	if (value_registry_init(registry, memory_context)) {
+	if (value_registry_init(registry, memory_context, "filter:joint")) {
 		return -1;
 	}
 
@@ -197,13 +202,15 @@ collect_registry_values(
 	for (uint32_t range_idx = 0; range_idx < registry1->range_count;
 	     ++range_idx) {
 		value_registry_start(registry);
-		value_registry_join_range(
-			registry1,
-			registry2,
-			range_idx,
-			value_table_collect_action,
-			&collect_ctx
-		);
+		if (value_registry_join_range(
+			    registry1,
+			    registry2,
+			    range_idx,
+			    value_table_collect_action,
+			    &collect_ctx
+		    )) {
+			return -1;
+		}
 	}
 
 	return 0;

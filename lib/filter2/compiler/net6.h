@@ -47,8 +47,9 @@ static inline void
 net6_normalize(const struct net6 *src, struct net6 *dst) {
 	memcpy(dst->addr, src->addr, 16);
 	memcpy(dst->mask, src->mask, 16);
-	for (uint8_t idx = 0; idx < 16; ++idx)
+	for (uint8_t idx = 0; idx < 16; ++idx) {
 		dst->addr[idx] &= src->mask[idx];
+	}
 }
 
 static inline int
@@ -62,14 +63,16 @@ create_net6_range(
 	struct range_index *ri
 ) {
 	struct range_collector collector;
-	if (range_collector_init(&collector, memory_context))
+	if (range_collector_init(&collector, memory_context)) {
 		goto error;
+	}
 
 	for (uint32_t rule_idx = 0; rule_idx < rule_count; ++rule_idx) {
 		const struct filter_rule *rule = rules[rule_idx];
 
-		if (rule == NULL)
+		if (rule == NULL) {
 			continue;
+		}
 
 		struct filter_net6s net6s;
 		get_net6(rule, &net6s);
@@ -90,11 +93,12 @@ create_net6_range(
 				    &collector,
 				    addr,
 				    __builtin_popcountll(*(uint64_t *)mask)
-			    ))
+			    )) {
 				goto error_collector;
+			}
 		}
 	}
-	if (lpm_init(lpm, memory_context)) {
+	if (lpm_init(lpm, memory_context, "filter:net6")) {
 		goto error_lpm;
 	}
 
@@ -103,7 +107,11 @@ create_net6_range(
 		goto error_collector;
 	}
 
-	if (range_collector_collect(&collector, 8, lpm, ri)) {
+	if (range_collector_collect(&collector, 8, ri)) {
+		goto error_collector;
+	}
+
+	if (range_index_build_lpm(ri, 8, lpm)) {
 		goto error_collector;
 	}
 
@@ -143,8 +151,9 @@ filter_compile_attr_net6s_create(
 	attr->query_attr = (struct filter_query_attr_net6 *)memory_balloc(
 		memory_context, sizeof(struct filter_query_attr_net6)
 	);
-	if (attr->query_attr == NULL)
+	if (attr->query_attr == NULL) {
 		goto error_query;
+	}
 
 	create_net6_range(
 		memory_context,
@@ -169,6 +178,7 @@ filter_compile_attr_net6s_create(
 	value_table_init(
 		&attr->query_attr->comb,
 		memory_context,
+		"filter:net6",
 		attr->ri_hi.max_value + 1,
 		attr->ri_lo.max_value + 1
 	);
@@ -212,7 +222,7 @@ filter_compile_attr_net6s_iter(
 					    value_table, v_idx, h_idx
 				    ),
 				    cb_func_data
-			    )) {
+			    ) < 0) {
 				return -1;
 			}
 		}
@@ -240,8 +250,9 @@ filter_compile_attr_net6s_rule_is_any(
 	struct filter_net6s nets;
 	net6s_handlers->get_net6s(rule, &nets);
 
-	if (nets.count == 0)
+	if (nets.count == 0) {
 		return 1;
+	}
 
 	struct net6 net6_normalized;
 	net6_normalize(nets.items + 0, &net6_normalized);
@@ -331,7 +342,7 @@ filter_compile_attr_net6s_rule_iter(
 						    values_lo[idx_lo]
 					    ),
 					    cb_func_data
-				    )) {
+				    ) < 0) {
 					return -1;
 				}
 			}
