@@ -332,6 +332,10 @@ const CounterTagKeyLen = C.COUNTER_TAG_KEY_LEN
 // its terminating NUL.
 const CounterTagValueLen = C.COUNTER_TAG_VALUE_LEN
 
+// CounterNameLen is the size of the C counter name buffer, including its
+// terminating NUL.
+const CounterNameLen = C.COUNTER_NAME_LEN
+
 // ErrInvalidTag reports a counter tag the fixed-size C counter_tag fields
 // cannot carry.
 var ErrInvalidTag = errors.New("invalid counter tag")

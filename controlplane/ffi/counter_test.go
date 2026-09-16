@@ -6,6 +6,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	ynpb "github.com/yanet-platform/yanet2/controlplane/ynpb/v1"
 )
@@ -15,6 +16,12 @@ import (
 func Test_CounterTagLengths_MatchC(t *testing.T) {
 	require.Equal(t, ynpb.MaxCounterTagKeyLen, ffi.CounterTagKeyLen)
 	require.Equal(t, ynpb.MaxCounterTagValueLen, ffi.CounterTagValueLen)
+}
+
+// Test_CounterNameLen_MatchesC verifies that the pure-Go counter name bound
+// matches the fixed-size C buffer, including its terminating byte.
+func Test_CounterNameLen_MatchesC(t *testing.T) {
+	require.Equal(t, commonpb.MaxCounterNameLen, ffi.CounterNameLen)
 }
 
 func zeroCounter(name string, instances, size int) ffi.CounterInfo {

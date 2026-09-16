@@ -2,6 +2,7 @@ package forwardpb_test
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -119,6 +120,8 @@ func Test_DeleteConfigRequest_Validate(t *testing.T) {
 
 // Test_Rule_Validate verifies that an action is required and that a present
 // action passes.
+//
+// An invalid action is reported under the action field.
 func Test_Rule_Validate(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -127,12 +130,73 @@ func Test_Rule_Validate(t *testing.T) {
 	}{
 		{name: "missing action", rule: &forwardpb.Rule{}, message: "action is required"},
 		{name: "action set", rule: &forwardpb.Rule{Action: &forwardpb.Action{}}},
+		{
+			name:    "invalid action",
+			rule:    &forwardpb.Rule{Action: &forwardpb.Action{Mode: 3}},
+			message: "action: mode unknown value 3",
+		},
 		{name: "nil rule", rule: nil, message: "action is required"},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			err := tc.rule.Validate()
+			if tc.message == "" {
+				require.NoError(t, err)
+			} else {
+				require.EqualError(t, err, tc.message)
+			}
+		})
+	}
+}
+
+// Test_Action_Validate verifies that the target and counter obey the
+// fixed-size buffer and NUL rules and that the mode is a declared value.
+func Test_Action_Validate(t *testing.T) {
+	cases := []struct {
+		name    string
+		action  *forwardpb.Action
+		message string
+	}{
+		{name: "empty action", action: &forwardpb.Action{}},
+		{
+			name: "longest target and counter",
+			action: &forwardpb.Action{
+				Target:  strings.Repeat("t", commonpb.MaxDeviceNameLen-1),
+				Counter: strings.Repeat("c", commonpb.MaxCounterNameLen-1),
+				Mode:    forwardpb.ForwardMode_OUT,
+			},
+		},
+		{
+			name:    "target with NUL",
+			action:  &forwardpb.Action{Target: "eth0\x00eth1"},
+			message: "target must not contain NUL",
+		},
+		{
+			name:    "target of the buffer size",
+			action:  &forwardpb.Action{Target: strings.Repeat("t", commonpb.MaxDeviceNameLen)},
+			message: "target must be shorter than 80 bytes",
+		},
+		{
+			name:    "counter with NUL",
+			action:  &forwardpb.Action{Counter: "to_eth0\x00"},
+			message: "counter must not contain NUL",
+		},
+		{
+			name:    "counter of the buffer size",
+			action:  &forwardpb.Action{Counter: strings.Repeat("c", commonpb.MaxCounterNameLen)},
+			message: "counter must be shorter than 128 bytes",
+		},
+		{
+			name:    "undeclared mode",
+			action:  &forwardpb.Action{Mode: 3},
+			message: "mode unknown value 3",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := tc.action.Validate()
 			if tc.message == "" {
 				require.NoError(t, err)
 			} else {
