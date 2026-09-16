@@ -1,10 +1,12 @@
 package fwstatepb
 
 import (
+	"errors"
 	"fmt"
 	"net/netip"
 
 	"github.com/yanet-platform/yanet2/modules/fwstate/bindings/go/cfwstate"
+	fwstatemappb "github.com/yanet-platform/yanet2/objects/fwstate/controlplane/fwstatemappb/v1"
 )
 
 const (
@@ -16,6 +18,85 @@ const (
 	// module matches and stamps IPv6 addresses only.
 	syncAddrLen = 16
 )
+
+// Validate checks that an update contains only request-local values.
+func (m *UpdateConfigRequest) Validate() error {
+	if m.GetName() == "" {
+		return errors.New("name is required")
+	}
+
+	updateMask := m.GetUpdateMask()
+	mapNameV4Selected := false
+	mapNameV6Selected := false
+	if updateMask == nil {
+		if err := m.GetSyncConfig().ValidateFields(); err != nil {
+			return fmt.Errorf("sync_config: %w", err)
+		}
+		if err := m.ValidateEndpointClears(); err != nil {
+			return fmt.Errorf("invalid sync endpoint update: %w", err)
+		}
+	} else {
+		if m.GetClearMulticast() || m.GetClearUnicast() {
+			return errors.New("endpoint clear flags cannot be combined with an update mask")
+		}
+
+		for _, path := range updateMask.GetPaths() {
+			switch path {
+			case "map_name_v4":
+				mapNameV4Selected = true
+			case "map_name_v6":
+				mapNameV6Selected = true
+			case "sync_config.dst_ether", "sync_config.dst_addr_unicast",
+				"sync_config.port_unicast", "sync_config.src_addr",
+				"sync_config.dst_addr_multicast", "sync_config.port_multicast",
+				"sync_config.tcp_syn_ack", "sync_config.tcp_syn",
+				"sync_config.tcp_fin", "sync_config.tcp",
+				"sync_config.udp", "sync_config.default",
+				"sync_config.sync_suppress_timeout":
+			default:
+				return fmt.Errorf("unknown update mask path %q", path)
+			}
+		}
+	}
+
+	if updateMask == nil || mapNameV4Selected {
+		if err := validateOptionalMapName("map_name_v4", m.GetMapNameV4()); err != nil {
+			return err
+		}
+	}
+	if updateMask == nil || mapNameV6Selected {
+		if err := validateOptionalMapName("map_name_v6", m.GetMapNameV6()); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// Validate checks that a show request names a configuration.
+func (m *ShowConfigRequest) Validate() error {
+	if m.GetName() == "" {
+		return errors.New("name is required")
+	}
+
+	return nil
+}
+
+// Validate checks that a delete request names a configuration.
+func (m *DeleteConfigRequest) Validate() error {
+	if m.GetName() == "" {
+		return errors.New("name is required")
+	}
+
+	return nil
+}
+
+func validateOptionalMapName(field, name string) error {
+	if name == "" {
+		return nil
+	}
+	return fwstatemappb.ValidateMapNameField(field, name)
+}
 
 // ValidateTimeouts rejects timeout values that do not fit in
 // fw_state_value::last_ttl.
@@ -118,19 +199,20 @@ func (m *SyncConfig) ValidateFields() error {
 // ValidateEndpointClears rejects an update that asks to clear an endpoint
 // while also supplying fields for that same endpoint.
 func (m *UpdateConfigRequest) ValidateEndpointClears() error {
-	if m == nil || m.SyncConfig == nil {
+	syncConfig := m.GetSyncConfig()
+	if m == nil || syncConfig == nil {
 		return nil
 	}
 
 	if m.GetClearMulticast() && endpointFieldsSet(
-		m.GetSyncConfig().GetDstAddrMulticast().GetAddr(),
-		m.GetSyncConfig().GetPortMulticast(),
+		syncConfig.GetDstAddrMulticast().GetAddr(),
+		syncConfig.GetPortMulticast(),
 	) {
 		return fmt.Errorf("clear_multicast cannot be combined with multicast endpoint fields")
 	}
 	if m.GetClearUnicast() && endpointFieldsSet(
-		m.GetSyncConfig().GetDstAddrUnicast().GetAddr(),
-		m.GetSyncConfig().GetPortUnicast(),
+		syncConfig.GetDstAddrUnicast().GetAddr(),
+		syncConfig.GetPortUnicast(),
 	) {
 		return fmt.Errorf("clear_unicast cannot be combined with unicast endpoint fields")
 	}
