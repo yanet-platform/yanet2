@@ -349,6 +349,62 @@ func TestShowRoutesAndLookupRoute_UndeclaredConfig_NotFound(t *testing.T) {
 	require.Equal(t, codes.NotFound, status.Code(err))
 }
 
+// Test_RouteService_DeleteAndFlush_UnknownConfig verifies that deleting or
+// flushing an undeclared config is NotFound while a declared one stays a success.
+func Test_RouteService_DeleteAndFlush_UnknownConfig(t *testing.T) {
+	operations := []struct {
+		name string
+		call func(t *testing.T, service *RouteService, config string) error
+	}{
+		{
+			name: "DeleteRoute",
+			call: func(t *testing.T, service *RouteService, config string) error {
+				_, err := service.DeleteRoute(t.Context(), &operatorpb.DeleteRouteRequest{
+					Name:    config,
+					Prefix:  mustNetwork(t, "10.0.0.0/24"),
+					DoFlush: true,
+				})
+				return err
+			},
+		},
+		{
+			name: "FlushRoutes",
+			call: func(t *testing.T, service *RouteService, config string) error {
+				_, err := service.FlushRoutes(t.Context(), &operatorpb.FlushRoutesRequest{Name: config})
+				return err
+			},
+		},
+	}
+	cases := []struct {
+		name   string
+		config string
+		code   codes.Code
+	}{
+		{name: "configured module without RIB", config: "route0", code: codes.OK},
+		{name: "undeclared config", config: "other", code: codes.NotFound},
+	}
+
+	for _, operation := range operations {
+		for _, tc := range cases {
+			t.Run(operation.name+"/"+tc.name, func(t *testing.T) {
+				var onChangedCount int
+				service := NewRouteService(
+					neigh.NewNeighTable(),
+					WithRouteServiceConfiguredModules("route0"),
+					WithRouteServiceOnChanged(func() { onChangedCount++ }),
+				)
+
+				err := operation.call(t, service, tc.config)
+				require.Equal(t, tc.code, status.Code(err))
+
+				_, ok := service.ribs.Get(tc.config)
+				require.False(t, ok, "a delete or flush must not create a RIB")
+				require.Zero(t, onChangedCount, "a delete or flush without a RIB must not wake the reconcile loop")
+			})
+		}
+	}
+}
+
 // TestNewOperator_ConfiguredModuleNoRIBYet_ReadsSucceedWithoutCreatingRIB
 // verifies that an Operator built by NewOperator answers ShowRoutes and
 // LookupRoute for its configured module with an empty success before any

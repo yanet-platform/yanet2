@@ -271,7 +271,10 @@ func (m *RouteService) DeleteRoute(
 	sourceID := req.RouteSourceID()
 	holder, ok := m.getRib(name)
 	if !ok {
-		return &operatorpb.DeleteRouteResponse{}, nil
+		if m.isConfigured(name) {
+			return &operatorpb.DeleteRouteResponse{}, nil
+		}
+		return nil, status.Errorf(codes.NotFound, "config %q not found", name)
 	}
 
 	for _, nexthopAddr := range nexthops {
@@ -295,7 +298,10 @@ func (m *RouteService) FlushRoutes(
 ) (*operatorpb.FlushRoutesResponse, error) {
 	name := req.GetName()
 	if _, ok := m.getRib(name); !ok {
-		return &operatorpb.FlushRoutesResponse{}, nil
+		if m.isConfigured(name) {
+			return &operatorpb.FlushRoutesResponse{}, nil
+		}
+		return nil, status.Errorf(codes.NotFound, "config %q not found", name)
 	}
 
 	m.onChanged()
