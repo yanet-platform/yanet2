@@ -253,7 +253,7 @@ func (m *FWStateService) prepareUpdate(
 	}
 	// Validate the merged sync config before any C state is touched.
 	syncConfig := req.SyncConfig
-	if err := syncConfig.Validate(); err != nil {
+	if err := syncConfig.ValidateMerged(); err != nil {
 		m.log.Error("invalid sync config", zap.String("config", name), zap.Error(err))
 		return nil, status.Errorf(codes.InvalidArgument, "invalid sync config: %v", err)
 	}

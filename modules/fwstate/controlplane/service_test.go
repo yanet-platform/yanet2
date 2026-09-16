@@ -253,7 +253,7 @@ func Test_ValidateSyncConfig_DestinationPairs(t *testing.T) {
 	}
 
 	t.Run("missing multicast address", func(t *testing.T) {
-		err := newConfig().Validate()
+		err := newConfig().ValidateMerged()
 		require.Error(t, err)
 		require.True(t, strings.Contains(err.Error(), "dst_addr_multicast"))
 	})
@@ -263,7 +263,7 @@ func Test_ValidateSyncConfig_DestinationPairs(t *testing.T) {
 		cfg.DstAddrMulticast = &commonpb.IPAddress{Addr: []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}}
 		cfg.PortMulticast = 0
 
-		err := cfg.Validate()
+		err := cfg.ValidateMerged()
 		require.Error(t, err)
 		require.True(t, strings.Contains(err.Error(), "port_multicast"))
 	})
@@ -272,7 +272,7 @@ func Test_ValidateSyncConfig_DestinationPairs(t *testing.T) {
 		cfg := newConfig()
 		cfg.DstAddrMulticast = &commonpb.IPAddress{Addr: []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}}
 
-		err := cfg.Validate()
+		err := cfg.ValidateMerged()
 		require.NoError(t, err)
 	})
 
@@ -282,7 +282,7 @@ func Test_ValidateSyncConfig_DestinationPairs(t *testing.T) {
 		cfg.DstAddrUnicast = &commonpb.IPAddress{Addr: []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}}
 		cfg.PortUnicast = 2
 
-		require.NoError(t, cfg.Validate())
+		require.NoError(t, cfg.ValidateMerged())
 	})
 
 	t.Run("unicast address without port", func(t *testing.T) {
@@ -290,7 +290,7 @@ func Test_ValidateSyncConfig_DestinationPairs(t *testing.T) {
 		cfg.PortMulticast = 0
 		cfg.DstAddrUnicast = &commonpb.IPAddress{Addr: []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}}
 
-		err := cfg.Validate()
+		err := cfg.ValidateMerged()
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "port_unicast")
 	})
@@ -300,7 +300,7 @@ func Test_ValidateSyncConfig_DestinationPairs(t *testing.T) {
 		cfg.PortMulticast = 0
 		cfg.PortUnicast = 2
 
-		err := cfg.Validate()
+		err := cfg.ValidateMerged()
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "dst_addr_unicast")
 	})
@@ -311,7 +311,7 @@ func Test_ValidateSyncConfig_DestinationPairs(t *testing.T) {
 		cfg.DstAddrUnicast = &commonpb.IPAddress{Addr: []byte{0xff, 0x02, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}}
 		cfg.PortUnicast = 2
 
-		err := cfg.Validate()
+		err := cfg.ValidateMerged()
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "dst_addr_unicast")
 	})
