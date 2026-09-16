@@ -18,15 +18,11 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	"github.com/c2h5oh/datasize"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/modules/pdump/controlplane/pdumppb/v1"
 )
 
-const (
-	errMsgConfigNameRequired = "module config name is required"
-	moduleType               = "pdump"
-)
+const moduleType = "pdump"
 
 // PdumpService provides packet capture functionality through a gRPC interface.
 // It manages packet capture configurations and ring buffers.
@@ -143,9 +139,6 @@ func (m *PdumpService) ShowConfig(
 	request *pdumppb.ShowConfigRequest,
 ) (*pdumppb.ShowConfigResponse, error) {
 	name := request.GetName()
-	if name == "" {
-		return nil, status.Error(codes.InvalidArgument, errMsgConfigNameRequired)
-	}
 
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -172,13 +165,6 @@ func (m *PdumpService) SetConfig(
 	request *pdumppb.SetConfigRequest,
 ) (*pdumppb.SetConfigResponse, error) {
 	name := request.GetName()
-	if name == "" {
-		return nil, status.Error(codes.InvalidArgument, errMsgConfigNameRequired)
-	}
-
-	if request.Config == nil {
-		return nil, fmt.Errorf("config is required")
-	}
 
 	m.mutationMu.Lock()
 	defer m.mutationMu.Unlock()
@@ -203,9 +189,6 @@ func (m *PdumpService) DeleteConfig(
 	request *pdumppb.DeleteConfigRequest,
 ) (*pdumppb.DeleteConfigResponse, error) {
 	name := request.GetName()
-	if name == "" {
-		return nil, status.Error(codes.InvalidArgument, errMsgConfigNameRequired)
-	}
 
 	m.mutationMu.Lock()
 	defer m.mutationMu.Unlock()
@@ -349,9 +332,6 @@ func (m *PdumpService) ReadDump(req *pdumppb.ReadDumpRequest, stream grpc.Server
 	ctx := stream.Context()
 
 	name := req.GetName()
-	if name == "" {
-		return status.Error(codes.InvalidArgument, errMsgConfigNameRequired)
-	}
 	recordCh := make(chan *pdumppb.Record, 16)
 	cancel, err := m.registerRingReaders(ctx, name, recordCh)
 	if err != nil {
@@ -458,28 +438,14 @@ func (m *PdumpService) prepareConfig(name string, request *pdumppb.SetConfigRequ
 				newConfig.Filter = request.Config.GetFilter()
 			case "mode":
 				mode := request.Config.GetMode()
-				if mode > maxMode {
-					return nil, fmt.Errorf("unknown pdump mode %b (max known %b)", mode, maxMode)
-				}
 				if mode == 0 {
 					mode = defaultMode
 				}
 				newConfig.DumpMode = mode
 			case "snaplen":
-				snaplen := request.Config.GetSnaplen()
-				if snaplen == 0 {
-					return nil, status.Error(codes.InvalidArgument, "snaplen must be greater than zero")
-				}
-				newConfig.Snaplen = snaplen
+				newConfig.Snaplen = request.Config.GetSnaplen()
 			case "ring_size":
-				size := request.Config.GetRingSize()
-				if size < uint32(minRingSize.Bytes()) || size > maxRingSize {
-					return nil, fmt.Errorf("ring size %s not in range [%s, %s]",
-						datasize.ByteSize(size), minRingSize, datasize.ByteSize(maxRingSize))
-				}
-				newConfig.Ring.PerWorkerSize = size
-			default:
-				return nil, fmt.Errorf("unknown path '%s'", path)
+				newConfig.Ring.PerWorkerSize = request.Config.GetRingSize()
 			}
 		}
 	}
