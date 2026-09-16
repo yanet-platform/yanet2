@@ -29,14 +29,17 @@ func networksFromPrefixes[T any](prefixes []netip.Prefix, newNetwork func(netip.
 // PrefixesFromNetworks converts contiguous network messages of any one
 // message type to masked netip.Prefix values.
 //
-// Returns an error naming the offending index if any network is
+// Returns an error naming the field and the offending index if any network is
 // malformed.
-func PrefixesFromNetworks[T interface{ ToPrefix() (netip.Prefix, error) }](networks []T) ([]netip.Prefix, error) {
+func PrefixesFromNetworks[T interface{ ToPrefix() (netip.Prefix, error) }](
+	field string,
+	networks []T,
+) ([]netip.Prefix, error) {
 	prefixes := make([]netip.Prefix, 0, len(networks))
 	for idx, network := range networks {
 		prefix, err := network.ToPrefix()
 		if err != nil {
-			return nil, fmt.Errorf("prefixes[%d]: %w", idx, err)
+			return nil, fmt.Errorf("%s[%d]: %w", field, idx, err)
 		}
 		prefixes = append(prefixes, prefix)
 	}

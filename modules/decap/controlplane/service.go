@@ -104,11 +104,11 @@ func (m *DecapService) UpdateConfig(
 	req *decappb.UpdateConfigRequest,
 ) (*decappb.UpdateConfigResponse, error) {
 	name := req.GetName()
-	prefixes4, err := commonpb.PrefixesFromNetworks(req.GetPrefixes4())
+	prefixes4, err := commonpb.PrefixesFromNetworks("prefixes4", req.GetPrefixes4())
 	if err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "failed to convert prefixes: %v", err)
 	}
-	prefixes6, err := commonpb.PrefixesFromNetworks(req.GetPrefixes6())
+	prefixes6, err := commonpb.PrefixesFromNetworks("prefixes6", req.GetPrefixes6())
 	if err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "failed to convert prefixes: %v", err)
 	}

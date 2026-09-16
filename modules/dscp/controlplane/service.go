@@ -125,11 +125,11 @@ func (m *DscpService) AddPrefixes(
 	request *dscppb.AddPrefixesRequest,
 ) (*dscppb.AddPrefixesResponse, error) {
 	name := request.GetName()
-	toAdd4, err := commonpb.PrefixesFromNetworks(request.GetPrefixes4())
+	toAdd4, err := commonpb.PrefixesFromNetworks("prefixes4", request.GetPrefixes4())
 	if err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "failed to convert prefixes: %v", err)
 	}
-	toAdd6, err := commonpb.PrefixesFromNetworks(request.GetPrefixes6())
+	toAdd6, err := commonpb.PrefixesFromNetworks("prefixes6", request.GetPrefixes6())
 	if err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "failed to convert prefixes: %v", err)
 	}
@@ -168,11 +168,11 @@ func (m *DscpService) RemovePrefixes(
 	request *dscppb.RemovePrefixesRequest,
 ) (*dscppb.RemovePrefixesResponse, error) {
 	name := request.GetName()
-	toRemove4, err := commonpb.PrefixesFromNetworks(request.GetPrefixes4())
+	toRemove4, err := commonpb.PrefixesFromNetworks("prefixes4", request.GetPrefixes4())
 	if err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "failed to convert prefixes: %v", err)
 	}
-	toRemove6, err := commonpb.PrefixesFromNetworks(request.GetPrefixes6())
+	toRemove6, err := commonpb.PrefixesFromNetworks("prefixes6", request.GetPrefixes6())
 	if err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "failed to convert prefixes: %v", err)
 	}
