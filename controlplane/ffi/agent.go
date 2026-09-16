@@ -12,6 +12,7 @@ package ffi
 //
 //#include "api/agent.h"
 //#include "api/config.h"
+//#include "lib/controlplane/config/defines.h"
 //#include "devices/plain/api/controlplane.h"
 //#include "devices/vlan/api/controlplane.h"
 //
@@ -151,6 +152,12 @@ func freeFailure(cErr unsafe.Pointer, errno error) error {
 //
 // The largest usable name is one byte shorter than this bound.
 const MaxDeviceNameLen = C.CP_DEVICE_NAME_LEN
+
+// MaxObjectNameLen is the size of the C-side object name buffer, including
+// the terminating NUL.
+//
+// The largest usable name is one byte shorter than this bound.
+const MaxObjectNameLen = C.CP_OBJECT_NAME_LEN
 
 // ValidateDeviceName rejects a name the C-side fixed-size device name
 // buffer cannot round-trip: one with a NUL byte, or one that does not fit.

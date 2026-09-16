@@ -14,7 +14,7 @@ import (
 	"github.com/yanet-platform/yanet2/controlplane/configstore"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/modules/fwstate/controlplane/fwstatepb/v1"
-	fwstatemap "github.com/yanet-platform/yanet2/objects/fwstate/controlplane"
+	fwstatemappb "github.com/yanet-platform/yanet2/objects/fwstate/controlplane/fwstatemappb/v1"
 )
 
 // Option configures an FWStateService.
@@ -263,11 +263,16 @@ func (m *FWStateService) prepareUpdate(
 			SyncConfig: mergedSyncConfigWithClears(oldConfig, req.SyncConfig, req.GetClearMulticast(), req.GetClearUnicast()),
 		}
 	}
-	for _, mapName := range []string{req.MapNameV4, req.MapNameV6} {
-		if mapName != "" {
-			if err := fwstatemap.ValidateMapName(mapName); err != nil {
-				return nil, err
-			}
+	mapFields := []string{"map_name_v4", "map_name_v6"}
+	mapNames := []string{req.GetMapNameV4(), req.GetMapNameV6()}
+	for idx, mapName := range mapNames {
+		if mapName == "" {
+			continue
+		}
+		if err := fwstatemappb.ValidateMapNameField(
+			mapFields[idx], mapName,
+		); err != nil {
+			return nil, status.Error(codes.InvalidArgument, err.Error())
 		}
 	}
 	if err := req.SyncConfig.ValidateFields(); err != nil {

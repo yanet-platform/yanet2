@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"math"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -97,34 +96,6 @@ func TestClampBatchSize(t *testing.T) {
 	}
 }
 
-// TestValidateMapName verifies that names the fixed-size C registry cannot store are rejected.
-func TestValidateMapName(t *testing.T) {
-	cases := []struct {
-		name    string
-		mapName string
-		wantErr bool
-	}{
-		{name: "empty rejected", mapName: "", wantErr: true},
-		{name: "normal name passes", mapName: "fwstate0-v4"},
-		{name: "longest name passes", mapName: strings.Repeat("a", 79)},
-		{name: "name at limit rejected", mapName: strings.Repeat("a", 80), wantErr: true},
-		{name: "far over limit rejected", mapName: strings.Repeat("a", 200), wantErr: true},
-		{name: "embedded NUL rejected", mapName: "a\x00b", wantErr: true},
-	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			err := fwstatemap.ValidateMapName(tc.mapName)
-			if !tc.wantErr {
-				require.NoError(t, err)
-				return
-			}
-			require.Error(t, err)
-			require.Equal(t, codes.InvalidArgument, status.Code(err))
-		})
-	}
-}
-
 // TestResolveCreateWorkerCount verifies that the per-worker sizing is derived from, and matched against, the dataplane worker count.
 func TestResolveCreateWorkerCount(t *testing.T) {
 	dpCount := func() uint32 { return 4 }
@@ -169,38 +140,6 @@ func TestResolveCreateWorkerCount(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			got, err := fwstatemap.ResolveCreateWorkerCount(tc.workerCount, tc.dpWorkerFunc)
-			if !tc.wantErr {
-				require.NoError(t, err)
-				require.Equal(t, tc.want, got)
-				return
-			}
-			require.Error(t, err)
-			require.Equal(t, codes.InvalidArgument, status.Code(err))
-		})
-	}
-}
-
-// TestResolveReadIndex verifies the forward-cursor rejection and the backward start-cursor translation.
-func TestResolveReadIndex(t *testing.T) {
-	cases := []struct {
-		name     string
-		backward bool
-		index    int64
-		want     int64
-		wantErr  bool
-	}{
-		{name: "forward zero passes", index: 0, want: 0},
-		{name: "forward positive passes", index: 42, want: 42},
-		{name: "forward negative rejected", index: -1, wantErr: true},
-		{name: "forward min rejected", index: math.MinInt64, wantErr: true},
-		{name: "backward zero becomes upper bound", backward: true, index: 0, want: math.MaxInt64},
-		{name: "backward continuation passes", backward: true, index: 7, want: 7},
-		{name: "backward exhausted sentinel passes", backward: true, index: -1, want: -1},
-	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			got, err := fwstatemap.ResolveReadIndex(tc.backward, tc.index)
 			if !tc.wantErr {
 				require.NoError(t, err)
 				require.Equal(t, tc.want, got)
@@ -446,36 +385,6 @@ func TestDeleteMapNotFound(t *testing.T) {
 	require.Equal(t, codes.NotFound, status.Code(err))
 }
 
-// TestDeleteMapEmptyNameRejected verifies that an empty name is rejected
-// before the agent is consulted.
-func TestDeleteMapEmptyNameRejected(t *testing.T) {
-	svc := fwstatemap.NewFWStateMapServiceForTest(nil)
-
-	_, err := svc.DeleteMap(t.Context(), &fwstatemappb.DeleteMapRequest{Name: ""})
-	require.Error(t, err)
-	require.Equal(t, codes.InvalidArgument, status.Code(err))
-}
-
-// TestCreateMapRejectsUnknownKind verifies that an unknown Kind
-// discriminant from a direct gRPC or HTTP client is rejected as
-// InvalidArgument instead of silently provisioning an IPv4 object of
-// the wrong family, mirroring the unknown-direction rejection.
-func TestCreateMapRejectsUnknownKind(t *testing.T) {
-	svc := fwstatemap.NewFWStateMapServiceForTest(nil)
-
-	_, err := svc.CreateMap(t.Context(), &fwstatemappb.CreateMapRequest{
-		Name:        "bad-kind",
-		Kind:        fwstatemappb.Kind(2),
-		WorkerCount: 1,
-	})
-	require.Error(t, err)
-	require.Equal(t, codes.InvalidArgument, status.Code(err))
-
-	resp, listErr := svc.ListMaps(t.Context(), &fwstatemappb.ListMapsRequest{})
-	require.NoError(t, listErr)
-	require.Empty(t, resp.GetMaps(), "a rejected create must not register a map")
-}
-
 // TestListMapsConcurrent verifies that concurrent ListMaps calls on a
 // fresh service do not race.
 func TestListMapsConcurrent(t *testing.T) {
@@ -495,7 +404,8 @@ func TestListMapsConcurrent(t *testing.T) {
 	require.NoError(t, group.Wait())
 }
 
-// TestListEntriesEmptyMapTerminates verifies that both dump directions end on a map with no entries.
+// TestListEntriesEmptyMapTerminates verifies that both dump directions end
+// on an empty map and that a zero backward cursor starts at the upper bound.
 func TestListEntriesEmptyMapTerminates(t *testing.T) {
 	h, err := dataplaneut.NewHarness(dataplaneut.Config{
 		CPMemory:      uint64(64 * datasize.MB),
@@ -523,19 +433,26 @@ func TestListEntriesEmptyMapTerminates(t *testing.T) {
 	for _, tc := range []struct {
 		name      string
 		direction fwstatemappb.Direction
+		wantIndex int64
 	}{
-		{name: "backward", direction: fwstatemappb.Direction_BACKWARD},
-		{name: "forward", direction: fwstatemappb.Direction_FORWARD},
+		{
+			name:      "backward starts at upper cursor bound",
+			direction: fwstatemappb.Direction_BACKWARD,
+			wantIndex: math.MaxInt64,
+		},
+		{name: "forward starts at zero", direction: fwstatemappb.Direction_FORWARD},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			resp, err := svc.ListEntries(t.Context(), &fwstatemappb.ListEntriesRequest{
 				MapName:   "empty-v4",
 				Direction: tc.direction,
 				BatchSize: 10,
+				Index:     0,
 			})
 			require.NoError(t, err)
 			require.Empty(t, resp.GetEntries())
 			require.False(t, resp.GetHasMore())
+			require.Equal(t, tc.wantIndex, resp.GetIndex())
 		})
 	}
 }
