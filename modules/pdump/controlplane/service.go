@@ -142,7 +142,7 @@ func (m *PdumpService) SetConfig(
 
 		module, err := m.backend.UpdateModule(name, settings)
 		if err != nil {
-			return nil, err
+			return nil, status.Errorf(codes.Internal, "failed to update module config %q: %v", name, err)
 		}
 
 		return &capture{

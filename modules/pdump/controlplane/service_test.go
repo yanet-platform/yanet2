@@ -66,8 +66,9 @@ type fakeBackend struct {
 	modules []*fakeModule
 	deleted []string
 	blocks  map[string]*updateBlock
-	// deleteErr, when set, is returned by every delete.
+
 	deleteErr error
+	updateErr error
 }
 
 // updateBlock holds an update of one name inside the backend.
@@ -103,6 +104,10 @@ func (m *fakeBackend) UpdateModule(name string, settings pdump.Settings) (pdump.
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
+
+	if m.updateErr != nil {
+		return nil, m.updateErr
+	}
 
 	module := &fakeModule{
 		settings: settings,
@@ -197,6 +202,20 @@ func (m *fakeStream) Context() context.Context {
 
 func (m *fakeStream) Send(*pdumppb.Record) error {
 	return nil
+}
+
+// Test_PdumpService_SetConfig_BackendFailure verifies that a refused module
+// update is reported as Internal.
+func Test_PdumpService_SetConfig_BackendFailure(t *testing.T) {
+	backend := &fakeBackend{updateErr: errors.New("failed to compile filter")}
+	service := pdump.NewPdumpService(backend)
+
+	_, err := service.SetConfig(t.Context(), &pdumppb.SetConfigRequest{
+		Name:       "capture",
+		Config:     &pdumppb.Config{Filter: "not a filter"},
+		UpdateMask: &pdumppb.FieldMask{Paths: []string{"filter"}},
+	})
+	require.Equal(t, codes.Internal, status.Code(err))
 }
 
 // setFilter applies a filter-only update to the named config.
