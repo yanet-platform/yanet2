@@ -11,6 +11,7 @@ import (
 
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
+	ynpb "github.com/yanet-platform/yanet2/controlplane/ynpb/v1"
 	fwstatemappb "github.com/yanet-platform/yanet2/objects/fwstate/controlplane/fwstatemappb/v1"
 )
 
@@ -32,6 +33,12 @@ func Test_MaxMapNameLen_MatchesC(t *testing.T) {
 // C device-name buffer size, including its terminating byte.
 func Test_MaxDeviceNameLen_MatchesC(t *testing.T) {
 	require.Equal(t, commonpb.MaxDeviceNameLen, ffi.MaxDeviceNameLen)
+}
+
+// Test_MaxAgentNameLen_MatchesC verifies that the pure-Go bound matches the
+// C agent-name buffer size, including its terminating byte.
+func Test_MaxAgentNameLen_MatchesC(t *testing.T) {
+	require.Equal(t, ynpb.MaxAgentNameLen, ffi.MaxAgentNameLen)
 }
 
 var errInjectedFree = errors.New("injected free failure")
