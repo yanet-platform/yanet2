@@ -354,9 +354,8 @@ func (m *RouteService) UpdateFIB(
 		}
 	}
 
-	// Runs before the backend call: a disabled-but-set counter is rejected
-	// before anything is applied, and the generated name written onto
-	// nh.Counter is what the backend and the FIBEntry list agree on.
+	// Materialize generated counter names before the backend call so the
+	// backend and the request use the same identity-to-counter mapping.
 	if err := m.resolveNexthopCounters(entries); err != nil {
 		return nil, err
 	}
