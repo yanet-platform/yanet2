@@ -207,10 +207,16 @@ func (m *PdumpService) ReadDump(req *pdumppb.ReadDumpRequest, stream grpc.Server
 			return status.Errorf(codes.NotFound, "config %q not found", name)
 		}
 
-		// A capture retired between the lookup and the start of the
-		// stream is replaced by a newer one, or by nothing.
-		if err := current.Read(ctx, stream.Send); !errors.Is(err, errRetired) {
+		switch err := current.Read(ctx, stream.Send); {
+		case errors.Is(err, errRetired):
+			// A capture retired between the lookup and the start of
+			// the stream is replaced by a newer one, or by nothing.
+		case err != nil:
 			return err
+		default:
+			// A client that abandoned the stream gets its own error,
+			// while a shutdown or a config change ends it without one.
+			return stream.Context().Err()
 		}
 	}
 }

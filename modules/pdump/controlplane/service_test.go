@@ -207,14 +207,14 @@ func setFilter(t *testing.T, service *pdump.PdumpService, name, filter string) {
 	require.NoError(t, err)
 }
 
-// openStream starts a ReadDump of the name and returns once it reads the
-// module's rings, with the channel its result arrives on.
-func openStream(t *testing.T, service *pdump.PdumpService, name string, module *fakeModule) <-chan error {
+// openStream starts a ReadDump of the name on the context and returns once
+// it reads the module's rings, with the channel its result arrives on.
+func openStream(t *testing.T, ctx context.Context, service *pdump.PdumpService, name string, module *fakeModule) <-chan error {
 	t.Helper()
 
 	done := make(chan error, 1)
 	go func() {
-		done <- service.ReadDump(&pdumppb.ReadDumpRequest{Name: name}, &fakeStream{ctx: t.Context()})
+		done <- service.ReadDump(&pdumppb.ReadDumpRequest{Name: name}, &fakeStream{ctx: ctx})
 	}()
 
 	select {
@@ -233,7 +233,7 @@ func Test_PdumpService_SetConfig_EndsStreamsBeforeFreeingReplacedModule(t *testi
 	service := pdump.NewPdumpService(backend)
 	setFilter(t, service, "capture", "udp")
 	replaced := backend.Last()
-	stream := openStream(t, service, "capture", replaced)
+	stream := openStream(t, t.Context(), service, "capture", replaced)
 
 	setFilter(t, service, "capture", "tcp")
 
@@ -254,7 +254,7 @@ func Test_PdumpService_DeleteConfig_EndsStreamsAndFreesModule(t *testing.T) {
 	service := pdump.NewPdumpService(backend)
 	setFilter(t, service, "capture", "udp")
 	module := backend.Last()
-	stream := openStream(t, service, "capture", module)
+	stream := openStream(t, t.Context(), service, "capture", module)
 
 	_, err := service.DeleteConfig(t.Context(), &pdumppb.DeleteConfigRequest{Name: "capture"})
 	require.NoError(t, err)
@@ -300,7 +300,7 @@ func Test_PdumpService_Shutdown_StopsReadersBeforeStreamsReturn(t *testing.T) {
 	service := pdump.NewPdumpService(backend)
 	setFilter(t, service, "capture", "udp")
 	module := backend.Last()
-	stream := openStream(t, service, "capture", module)
+	stream := openStream(t, t.Context(), service, "capture", module)
 
 	service.Shutdown()
 
@@ -384,4 +384,24 @@ func Test_PdumpService_SetConfig_DoesNotSerializeNames(t *testing.T) {
 
 	release()
 	require.NoError(t, <-blocked)
+}
+
+// Test_PdumpService_ReadDump_ReportsClientCancellation verifies that a stream
+// its client abandons ends with the client's cancellation.
+func Test_PdumpService_ReadDump_ReportsClientCancellation(t *testing.T) {
+	backend := &fakeBackend{}
+	service := pdump.NewPdumpService(backend)
+	setFilter(t, service, "capture", "udp")
+
+	ctx, cancel := context.WithCancel(t.Context())
+	stream := openStream(t, ctx, service, "capture", backend.Last())
+
+	cancel()
+
+	select {
+	case err := <-stream:
+		require.ErrorIs(t, err, context.Canceled)
+	case <-time.After(5 * time.Second):
+		t.Fatal("the cancelled client did not end the stream")
+	}
 }
