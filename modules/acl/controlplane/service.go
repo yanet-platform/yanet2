@@ -21,7 +21,7 @@ import (
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/modules/acl/bindings/go/cacl"
 	aclpb "github.com/yanet-platform/yanet2/modules/acl/controlplane/aclpb/v1"
-	fwstatemap "github.com/yanet-platform/yanet2/objects/fwstate/controlplane"
+	fwstatemappb "github.com/yanet-platform/yanet2/objects/fwstate/controlplane/fwstatemappb/v1"
 )
 
 // ModuleHandle is a handle to an ACL module configuration written to
@@ -332,13 +332,16 @@ func rulesEqual(a, b []*aclpb.Rule) bool {
 	return true
 }
 
-// validateMapNameOptional applies the C-side round-trip rules to a map
-// link name; the empty name declares no link and stays valid.
-func validateMapNameOptional(name string) error {
+// validateMapNameOptional applies the C-side round-trip rules to an optional
+// map link name while preserving the link's proto field in errors.
+func validateMapNameOptional(field, name string) error {
 	if name == "" {
 		return nil
 	}
-	return fwstatemap.ValidateMapName(name)
+	if err := fwstatemappb.ValidateMapNameField(field, name); err != nil {
+		return status.Error(codes.InvalidArgument, err.Error())
+	}
+	return nil
 }
 
 func (m *ACLService) UpdateConfig(
@@ -367,10 +370,10 @@ func (m *ACLService) UpdateConfig(
 	// longer ones, which could link an entirely different map than
 	// the one ShowConfig reports. An empty name stays valid: it
 	// declares no link for that family.
-	if err := validateMapNameOptional(fw4MapName); err != nil {
+	if err := validateMapNameOptional("fwtable_name_v4", fw4MapName); err != nil {
 		return nil, err
 	}
-	if err := validateMapNameOptional(fw6MapName); err != nil {
+	if err := validateMapNameOptional("fwtable_name_v6", fw6MapName); err != nil {
 		return nil, err
 	}
 
