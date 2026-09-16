@@ -238,21 +238,9 @@ func (m *FWStateService) prepareUpdate(
 	oldConfig *FwStateConfig,
 	req *fwstatepb.UpdateConfigRequest,
 ) (*FwStateConfig, error) {
-	if req.GetUpdateMask() != nil {
-		req = maskedUpdate(oldConfig, req)
-	} else {
-		mapNameV4, mapNameV6 := mergedMapNames(oldConfig, req)
-		req = &fwstatepb.UpdateConfigRequest{
-			MapNameV4:  mapNameV4,
-			MapNameV6:  mapNameV6,
-			SyncConfig: mergedSyncConfigWithClears(oldConfig, req.SyncConfig, req.GetClearMulticast(), req.GetClearUnicast()),
-		}
-	}
-	if err := req.SyncConfig.ValidateFields(); err != nil {
-		return nil, status.Errorf(codes.InvalidArgument, "invalid sync config: %v", err)
-	}
+	mapNameV4, mapNameV6 := mergedMapNames(oldConfig, req)
 	// Validate the merged sync config before any C state is touched.
-	syncConfig := req.SyncConfig
+	syncConfig := mergedSyncConfig(oldConfig, req.GetSyncConfig())
 	if err := syncConfig.ValidateMerged(); err != nil {
 		m.log.Error("invalid sync config", zap.String("config", name), zap.Error(err))
 		return nil, status.Errorf(codes.InvalidArgument, "invalid sync config: %v", err)
@@ -266,8 +254,8 @@ func (m *FWStateService) prepareUpdate(
 		m.agent,
 		name,
 		syncConfig.ToC(),
-		req.MapNameV4,
-		req.MapNameV6,
+		mapNameV4,
+		mapNameV6,
 	)
 	if err != nil {
 		m.log.Error("failed to build fwstate config", zap.String("config", name), zap.Error(err))

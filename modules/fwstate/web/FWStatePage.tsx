@@ -1430,15 +1430,14 @@ const FWStatePage: React.FC = () => {
             return;
         }
         const requestName = currentName;
-        const clearMulticast = current.dstAddrMulticast.trim() === '' && current.portMulticast === 0;
-        const clearUnicast = current.dstAddrUnicast.trim() === '' && current.portUnicast === 0;
+        // An endpoint left empty in the form carries a zero port, which disables it.
         const syncConfig = {
             src_addr: stringToIPAddress(current.srcAddr),
             dst_ether: normalizeMAC(current.dstEther),
             dst_addr_multicast: current.dstAddrMulticast ? stringToIPAddress(current.dstAddrMulticast) : undefined,
-            port_multicast: current.portMulticast || undefined,
+            port_multicast: current.portMulticast,
             dst_addr_unicast: current.dstAddrUnicast ? stringToIPAddress(current.dstAddrUnicast) : undefined,
-            port_unicast: current.portUnicast || undefined,
+            port_unicast: current.portUnicast,
             tcp_syn_ack: parseDurationToNs(current.tcpSynAck) ?? undefined,
             tcp_syn: parseDurationToNs(current.tcpSyn) ?? undefined,
             tcp_fin: parseDurationToNs(current.tcpFin) ?? undefined,
@@ -1452,8 +1451,6 @@ const FWStatePage: React.FC = () => {
                 map_name_v4: current.mapNameV4.trim(),
                 map_name_v6: current.mapNameV6.trim(),
                 sync_config: syncConfig,
-                clear_multicast: clearMulticast,
-                clear_unicast: clearUnicast,
             });
             toaster.success('fwstate-save', `Config "${requestName}" saved.`);
             setDirtyConfigs((prev) => {
