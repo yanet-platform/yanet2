@@ -501,3 +501,20 @@ func Test_FWStateService_UpdateConfig_KeepsUnnamedLinksAndUntouchedSync(t *testi
 	require.EqualValues(t, syncTestPort, stored.GetSyncConfig().GetPortMulticast())
 	require.Equal(t, syncTestAddr().GetAddr(), stored.GetSyncConfig().GetDstAddrMulticast().GetAddr())
 }
+
+// Test_FWStateService_ShowConfig_MissingConfig verifies that a missing config
+// is NotFound unless the request tolerates it with an empty response.
+func Test_FWStateService_ShowConfig_MissingConfig(t *testing.T) {
+	service := fwstate.NewFWStateService(nil)
+
+	_, err := service.ShowConfig(t.Context(), &fwstatepb.ShowConfigRequest{Name: "missing"})
+	require.Equal(t, codes.NotFound, status.Code(err))
+
+	response, err := service.ShowConfig(t.Context(), &fwstatepb.ShowConfigRequest{
+		Name:         "missing",
+		OkIfNotFound: true,
+	})
+	require.NoError(t, err)
+	require.NotNil(t, response)
+	require.Empty(t, response.GetName())
+}
