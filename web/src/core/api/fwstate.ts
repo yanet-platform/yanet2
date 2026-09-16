@@ -36,8 +36,6 @@ export interface UpdateConfigRequest {
     map_name_v4?: string;
     map_name_v6?: string;
     sync_config?: SyncConfig;
-    clear_multicast?: boolean;
-    clear_unicast?: boolean;
 }
 
 export interface DeleteConfigRequest {

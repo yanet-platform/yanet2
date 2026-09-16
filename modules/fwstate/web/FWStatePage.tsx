@@ -61,7 +61,7 @@ const BACKWARD_RESET_CURSOR = Number.MAX_SAFE_INTEGER;
 const STATES_CURSORBAR_HEIGHT = 41;
 
 const formatDurationNsAsSeconds = (value: number): string => {
-    if (!Number.isFinite(value) || value <= 0) return '';
+    if (!Number.isFinite(value) || value < 0) return '';
     const seconds = value / 1_000_000_000;
     if (Number.isInteger(seconds)) return String(seconds);
     return seconds.toFixed(9).replace(/\.?0+$/, '');
@@ -73,13 +73,13 @@ const parseDurationToNs = (value: string): number | null => {
     const numberOnly = trimmed.match(/^\d+(?:\.\d+)?$/);
     if (numberOnly) {
         const seconds = Number(trimmed);
-        if (!Number.isFinite(seconds) || seconds <= 0) return null;
+        if (!Number.isFinite(seconds) || seconds < 0) return null;
         return Math.round(seconds * 1_000_000_000);
     }
     const unitMatch = trimmed.match(/^(\d+(?:\.\d+)?)(ns|ms|s|m|h)$/);
     if (!unitMatch) return null;
     const amount = Number(unitMatch[1]);
-    if (!Number.isFinite(amount) || amount <= 0) return null;
+    if (!Number.isFinite(amount) || amount < 0) return null;
     const unit = unitMatch[2];
     if (unit === 'ns') return Math.round(amount);
     if (unit === 'ms') return Math.round(amount * 1_000_000);
@@ -1430,15 +1430,14 @@ const FWStatePage: React.FC = () => {
             return;
         }
         const requestName = currentName;
-        const clearMulticast = current.dstAddrMulticast.trim() === '' && current.portMulticast === 0;
-        const clearUnicast = current.dstAddrUnicast.trim() === '' && current.portUnicast === 0;
+        // An endpoint left empty in the form carries a zero port, which disables it.
         const syncConfig = {
             src_addr: stringToIPAddress(current.srcAddr),
             dst_ether: normalizeMAC(current.dstEther),
             dst_addr_multicast: current.dstAddrMulticast ? stringToIPAddress(current.dstAddrMulticast) : undefined,
-            port_multicast: current.portMulticast || undefined,
+            port_multicast: current.portMulticast,
             dst_addr_unicast: current.dstAddrUnicast ? stringToIPAddress(current.dstAddrUnicast) : undefined,
-            port_unicast: current.portUnicast || undefined,
+            port_unicast: current.portUnicast,
             tcp_syn_ack: parseDurationToNs(current.tcpSynAck) ?? undefined,
             tcp_syn: parseDurationToNs(current.tcpSyn) ?? undefined,
             tcp_fin: parseDurationToNs(current.tcpFin) ?? undefined,
@@ -1452,8 +1451,6 @@ const FWStatePage: React.FC = () => {
                 map_name_v4: current.mapNameV4.trim(),
                 map_name_v6: current.mapNameV6.trim(),
                 sync_config: syncConfig,
-                clear_multicast: clearMulticast,
-                clear_unicast: clearUnicast,
             });
             toaster.success('fwstate-save', `Config "${requestName}" saved.`);
             setDirtyConfigs((prev) => {
@@ -1796,27 +1793,27 @@ const FWStatePage: React.FC = () => {
                     <div className="fwstate-field-grid fwstate-field-grid--timeouts">
                         <label className="fwstate-field">
                             <Text variant="caption-2" color="secondary">TCP SYN+ACK</Text>
-                            <TextInput type="number" value={current.tcpSynAck} onUpdate={(tcpSynAck) => updateCurrent({ tcpSynAck })} error={parseDurationToNs(current.tcpSynAck) ? undefined : 'Enter seconds'} endContent={<Text className="fwstate-timeout-unit" variant="caption-2" color="secondary">s</Text>} />
+                            <TextInput type="number" value={current.tcpSynAck} onUpdate={(tcpSynAck) => updateCurrent({ tcpSynAck })} error={parseDurationToNs(current.tcpSynAck) !== null ? undefined : 'Enter seconds'} endContent={<Text className="fwstate-timeout-unit" variant="caption-2" color="secondary">s</Text>} />
                         </label>
                         <label className="fwstate-field">
                             <Text variant="caption-2" color="secondary">TCP SYN</Text>
-                            <TextInput type="number" value={current.tcpSyn} onUpdate={(tcpSyn) => updateCurrent({ tcpSyn })} error={parseDurationToNs(current.tcpSyn) ? undefined : 'Enter seconds'} endContent={<Text className="fwstate-timeout-unit" variant="caption-2" color="secondary">s</Text>} />
+                            <TextInput type="number" value={current.tcpSyn} onUpdate={(tcpSyn) => updateCurrent({ tcpSyn })} error={parseDurationToNs(current.tcpSyn) !== null ? undefined : 'Enter seconds'} endContent={<Text className="fwstate-timeout-unit" variant="caption-2" color="secondary">s</Text>} />
                         </label>
                         <label className="fwstate-field">
                             <Text variant="caption-2" color="secondary">TCP FIN</Text>
-                            <TextInput type="number" value={current.tcpFin} onUpdate={(tcpFin) => updateCurrent({ tcpFin })} error={parseDurationToNs(current.tcpFin) ? undefined : 'Enter seconds'} endContent={<Text className="fwstate-timeout-unit" variant="caption-2" color="secondary">s</Text>} />
+                            <TextInput type="number" value={current.tcpFin} onUpdate={(tcpFin) => updateCurrent({ tcpFin })} error={parseDurationToNs(current.tcpFin) !== null ? undefined : 'Enter seconds'} endContent={<Text className="fwstate-timeout-unit" variant="caption-2" color="secondary">s</Text>} />
                         </label>
                         <label className="fwstate-field">
                             <Text variant="caption-2" color="secondary">TCP established</Text>
-                            <TextInput type="number" value={current.tcp} onUpdate={(tcp) => updateCurrent({ tcp })} error={parseDurationToNs(current.tcp) ? undefined : 'Enter seconds'} endContent={<Text className="fwstate-timeout-unit" variant="caption-2" color="secondary">s</Text>} />
+                            <TextInput type="number" value={current.tcp} onUpdate={(tcp) => updateCurrent({ tcp })} error={parseDurationToNs(current.tcp) !== null ? undefined : 'Enter seconds'} endContent={<Text className="fwstate-timeout-unit" variant="caption-2" color="secondary">s</Text>} />
                         </label>
                         <label className="fwstate-field">
                             <Text variant="caption-2" color="secondary">UDP</Text>
-                            <TextInput type="number" value={current.udp} onUpdate={(udp) => updateCurrent({ udp })} error={parseDurationToNs(current.udp) ? undefined : 'Enter seconds'} endContent={<Text className="fwstate-timeout-unit" variant="caption-2" color="secondary">s</Text>} />
+                            <TextInput type="number" value={current.udp} onUpdate={(udp) => updateCurrent({ udp })} error={parseDurationToNs(current.udp) !== null ? undefined : 'Enter seconds'} endContent={<Text className="fwstate-timeout-unit" variant="caption-2" color="secondary">s</Text>} />
                         </label>
                         <label className="fwstate-field">
                             <Text variant="caption-2" color="secondary">Default</Text>
-                            <TextInput type="number" value={current.defaultTimeout} onUpdate={(defaultTimeout) => updateCurrent({ defaultTimeout })} error={parseDurationToNs(current.defaultTimeout) ? undefined : 'Enter seconds'} endContent={<Text className="fwstate-timeout-unit" variant="caption-2" color="secondary">s</Text>} />
+                            <TextInput type="number" value={current.defaultTimeout} onUpdate={(defaultTimeout) => updateCurrent({ defaultTimeout })} error={parseDurationToNs(current.defaultTimeout) !== null ? undefined : 'Enter seconds'} endContent={<Text className="fwstate-timeout-unit" variant="caption-2" color="secondary">s</Text>} />
                         </label>
                     </div>
                 </div>

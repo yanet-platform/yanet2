@@ -21,55 +21,22 @@ const (
 	syncAddrLen = 16
 )
 
-// Validate checks that an update contains only request-local values.
+// Validate checks the values an update carries.
+//
+// Whether the merged config is usable depends on the stored one and is
+// checked by the service.
 func (m *UpdateConfigRequest) Validate() error {
 	if err := commonpb.ValidateModuleName("name", m.GetName()); err != nil {
 		return err
 	}
-
-	updateMask := m.GetUpdateMask()
-	mapNameV4Selected := false
-	mapNameV6Selected := false
-	if updateMask == nil {
-		if err := m.GetSyncConfig().ValidateFields(); err != nil {
-			return fmt.Errorf("sync_config: %w", err)
-		}
-		if err := m.ValidateEndpointClears(); err != nil {
-			return fmt.Errorf("invalid sync endpoint update: %w", err)
-		}
-	} else {
-		if m.GetClearMulticast() || m.GetClearUnicast() {
-			return errors.New("endpoint clear flags cannot be combined with an update mask")
-		}
-
-		for _, path := range updateMask.GetPaths() {
-			switch path {
-			case "map_name_v4":
-				mapNameV4Selected = true
-			case "map_name_v6":
-				mapNameV6Selected = true
-			case "sync_config.dst_ether", "sync_config.dst_addr_unicast",
-				"sync_config.port_unicast", "sync_config.src_addr",
-				"sync_config.dst_addr_multicast", "sync_config.port_multicast",
-				"sync_config.tcp_syn_ack", "sync_config.tcp_syn",
-				"sync_config.tcp_fin", "sync_config.tcp",
-				"sync_config.udp", "sync_config.default",
-				"sync_config.sync_suppress_timeout":
-			default:
-				return fmt.Errorf("unknown update mask path %q", path)
-			}
-		}
+	if err := validateOptionalMapName("map_name_v4", m.GetMapNameV4()); err != nil {
+		return err
 	}
-
-	if updateMask == nil || mapNameV4Selected {
-		if err := validateOptionalMapName("map_name_v4", m.GetMapNameV4()); err != nil {
-			return err
-		}
+	if err := validateOptionalMapName("map_name_v6", m.GetMapNameV6()); err != nil {
+		return err
 	}
-	if updateMask == nil || mapNameV6Selected {
-		if err := validateOptionalMapName("map_name_v6", m.GetMapNameV6()); err != nil {
-			return err
-		}
+	if err := m.GetSyncConfig().ValidateFields(); err != nil {
+		return fmt.Errorf("sync_config: %w", err)
 	}
 
 	return nil
@@ -143,11 +110,11 @@ func (m *SyncConfig) ValidateTimeouts() error {
 	return nil
 }
 
-// ValidateFields rejects sync values stated in a form the config cannot store.
+// ValidateFields rejects sync values an update states in a form the config
+// cannot store.
 //
-// Empty endpoints are representable. Whether they preserve existing values
-// or clear them depends on the update contract. A stated destination address
-// requires a port; the merged configuration must also be usable.
+// A zero port clears its endpoint, so it cannot come with an address for
+// that endpoint.
 func (m *SyncConfig) ValidateFields() error {
 	if m == nil {
 		return nil
@@ -178,44 +145,14 @@ func (m *SyncConfig) ValidateFields() error {
 		return fmt.Errorf("dst_ether must be an EUI-48 address")
 	}
 
-	// A supplied destination address needs a port. Masked requests reach
-	// this check after merging, so the port may come from the stored config.
-	if len(m.GetDstAddrMulticast().GetAddr()) != 0 && m.GetPortMulticast() == 0 {
-		return fmt.Errorf("port_multicast is required with dst_addr_multicast")
+	if m.PortMulticast != nil && m.GetPortMulticast() == 0 && len(m.GetDstAddrMulticast().GetAddr()) != 0 {
+		return errors.New("dst_addr_multicast cannot be combined with a zero port_multicast")
 	}
-	if len(m.GetDstAddrUnicast().GetAddr()) != 0 && m.GetPortUnicast() == 0 {
-		return fmt.Errorf("port_unicast is required with dst_addr_unicast")
+	if m.PortUnicast != nil && m.GetPortUnicast() == 0 && len(m.GetDstAddrUnicast().GetAddr()) != 0 {
+		return errors.New("dst_addr_unicast cannot be combined with a zero port_unicast")
 	}
 
 	return nil
-}
-
-// ValidateEndpointClears rejects an update that asks to clear an endpoint
-// while also supplying fields for that same endpoint.
-func (m *UpdateConfigRequest) ValidateEndpointClears() error {
-	syncConfig := m.GetSyncConfig()
-	if m == nil || syncConfig == nil {
-		return nil
-	}
-
-	if m.GetClearMulticast() && endpointFieldsSet(
-		syncConfig.GetDstAddrMulticast().GetAddr(),
-		syncConfig.GetPortMulticast(),
-	) {
-		return fmt.Errorf("clear_multicast cannot be combined with multicast endpoint fields")
-	}
-	if m.GetClearUnicast() && endpointFieldsSet(
-		syncConfig.GetDstAddrUnicast().GetAddr(),
-		syncConfig.GetPortUnicast(),
-	) {
-		return fmt.Errorf("clear_unicast cannot be combined with unicast endpoint fields")
-	}
-
-	return nil
-}
-
-func endpointFieldsSet(addr []byte, port uint32) bool {
-	return len(addr) != 0 || port != 0
 }
 
 // ValidateMerged reports whether the settings are installable as they stand,

@@ -4,6 +4,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
+
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
 	"github.com/yanet-platform/yanet2/modules/fwstate/bindings/go/cfwstate"
 )
@@ -20,96 +22,18 @@ func Test_SyncConfig_EmitFieldsRoundTrip(t *testing.T) {
 		SrcAddr:          &commonpb.IPAddress{Addr: make([]byte, 16)},
 		DstEther:         commonpb.NewMACAddressEUI48(dstEther),
 		DstAddrMulticast: &commonpb.IPAddress{Addr: make([]byte, 16)},
-		PortMulticast:    portMulticast,
+		PortMulticast:    proto.Uint32(portMulticast),
 		DstAddrUnicast:   &commonpb.IPAddress{Addr: dstUnicast},
-		PortUnicast:      portUnicast,
+		PortUnicast:      proto.Uint32(portUnicast),
 	}
 
 	cCfg := pb.ToC()
 	got := FromCSyncConfig(cCfg)
 
-	require.Equal(t, portMulticast, got.PortMulticast)
+	require.Equal(t, portMulticast, got.GetPortMulticast())
 	require.Equal(t, dstEther, got.DstEther.EUI48())
 	require.Equal(t, dstUnicast, got.DstAddrUnicast.Addr)
-	require.Equal(t, portUnicast, got.PortUnicast)
-}
-
-// Test_SyncConfig_ToCWithDefaults_DestinationsReplaceBothPairs verifies that
-// omitting one destination from an explicit destination set disables it.
-func Test_SyncConfig_ToCWithDefaults_DestinationsReplaceBothPairs(t *testing.T) {
-	current := cfwstate.SyncConfig{
-		DstAddrMulticast: [16]byte{0xff, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1},
-		PortMulticast:    9999,
-		DstAddrUnicast:   [16]byte{0x20, 1, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2},
-		PortUnicast:      10000,
-	}
-	pb := &SyncConfig{
-		DstAddrUnicast: &commonpb.IPAddress{Addr: current.DstAddrUnicast[:]},
-		PortUnicast:    uint32(current.PortUnicast),
-	}
-
-	cfg := pb.ToCWithDefaults(current)
-
-	require.Equal(t, [16]byte{}, cfg.DstAddrMulticast)
-	require.Zero(t, cfg.PortMulticast)
-	require.Equal(t, current.DstAddrUnicast, cfg.DstAddrUnicast)
-	require.Equal(t, current.PortUnicast, cfg.PortUnicast)
-}
-
-// Test_SyncConfig_ToCWithDefaults_MulticastOnlyClearsUnicast verifies that a
-// multicast-only replacement does not restore the current unicast endpoint.
-func Test_SyncConfig_ToCWithDefaults_MulticastOnlyClearsUnicast(t *testing.T) {
-	current := cfwstate.SyncConfig{
-		DstAddrMulticast: [16]byte{0xff, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1},
-		PortMulticast:    9999,
-		DstAddrUnicast:   [16]byte{0x20, 1, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2},
-		PortUnicast:      10000,
-	}
-	pb := &SyncConfig{
-		DstAddrMulticast: &commonpb.IPAddress{Addr: current.DstAddrMulticast[:]},
-		PortMulticast:    uint32(current.PortMulticast),
-	}
-
-	cfg := pb.ToCWithDefaults(current)
-
-	require.Equal(t, current.DstAddrMulticast, cfg.DstAddrMulticast)
-	require.Equal(t, current.PortMulticast, cfg.PortMulticast)
-	require.Zero(t, cfg.DstAddrUnicast)
-	require.Zero(t, cfg.PortUnicast)
-}
-
-// Test_SyncConfig_ToCWithDefaultsAndClears_ClearsSelectedEndpoint verifies
-// that an explicit clear can disable one endpoint while retaining the other.
-func Test_SyncConfig_ToCWithDefaultsAndClears_ClearsSelectedEndpoint(t *testing.T) {
-	current := cfwstate.SyncConfig{
-		DstAddrMulticast: [16]byte{0xff, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1},
-		PortMulticast:    9999,
-		DstAddrUnicast:   [16]byte{0x20, 1, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2},
-		PortUnicast:      10000,
-	}
-
-	cfg := (&SyncConfig{}).ToCWithDefaultsAndClears(current, true, false)
-
-	require.Zero(t, cfg.DstAddrMulticast)
-	require.Zero(t, cfg.PortMulticast)
-	require.Equal(t, current.DstAddrUnicast, cfg.DstAddrUnicast)
-	require.Equal(t, current.PortUnicast, cfg.PortUnicast)
-}
-
-// Test_SyncConfig_ToCWithDefaultsAndClears_ClearsWithoutSyncConfig verifies
-// that a clear-only request can disable an endpoint while retaining settings.
-func Test_SyncConfig_ToCWithDefaultsAndClears_ClearsWithoutSyncConfig(t *testing.T) {
-	current := cfwstate.SyncConfig{
-		DstAddrMulticast:    [16]byte{0xff, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1},
-		PortMulticast:       9999,
-		SyncSuppressTimeout: 8e9,
-	}
-
-	cfg := (*SyncConfig)(nil).ToCWithDefaultsAndClears(current, true, false)
-
-	require.Zero(t, cfg.DstAddrMulticast)
-	require.Zero(t, cfg.PortMulticast)
-	require.Equal(t, current.SyncSuppressTimeout, cfg.SyncSuppressTimeout)
+	require.Equal(t, portUnicast, got.GetPortUnicast())
 }
 
 // Test_SyncConfig_SingleDestinationRoundTrip verifies that conversion retains
@@ -168,50 +92,96 @@ func Test_SyncConfig_SingleDestinationRoundTrip(t *testing.T) {
 	}
 }
 
-func TestSyncConfig_ToCWithDefaults(t *testing.T) {
-	t.Run("omitted", func(t *testing.T) {
-		current := cfwstate.SyncConfig{
-			SrcAddr:             [16]byte{1},
-			DstAddrMulticast:    [16]byte{0xff, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1},
-			PortMulticast:       9999,
-			SyncSuppressTimeout: 1,
+// Test_SyncConfig_Merge verifies that an update overwrites only the settings
+// it carries and that a zero port clears its endpoint address.
+func Test_SyncConfig_Merge(t *testing.T) {
+	multicast := func() *commonpb.IPAddress {
+		return &commonpb.IPAddress{Addr: []byte{0xff, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}}
+	}
+	unicast := func() *commonpb.IPAddress {
+		return &commonpb.IPAddress{Addr: []byte{0x20, 1, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2}}
+	}
+	stored := func() *SyncConfig {
+		return &SyncConfig{
+			DstAddrMulticast:    multicast(),
+			PortMulticast:       proto.Uint32(9999),
+			DstAddrUnicast:      unicast(),
+			PortUnicast:         proto.Uint32(10000),
+			Tcp:                 proto.Uint64(120e9),
+			SyncSuppressTimeout: proto.Uint64(8e9),
 		}
-		pb := &SyncConfig{}
+	}
 
-		cfg := pb.ToCWithDefaults(current)
+	cases := []struct {
+		name   string
+		update *SyncConfig
+		want   *SyncConfig
+	}{
+		{
+			name:   "nil update keeps every setting",
+			update: nil,
+			want:   stored(),
+		},
+		{
+			name:   "empty update keeps every setting",
+			update: &SyncConfig{},
+			want:   stored(),
+		},
+		{
+			name:   "explicit zero timeout overwrites the stored one",
+			update: &SyncConfig{SyncSuppressTimeout: proto.Uint64(0)},
+			want: func() *SyncConfig {
+				cfg := stored()
+				cfg.SyncSuppressTimeout = proto.Uint64(0)
+				return cfg
+			}(),
+		},
+		{
+			name:   "address replaces the stored address and keeps the port",
+			update: &SyncConfig{DstAddrMulticast: unicast()},
+			want: func() *SyncConfig {
+				cfg := stored()
+				cfg.DstAddrMulticast = unicast()
+				return cfg
+			}(),
+		},
+		{
+			name:   "zero multicast port clears the multicast endpoint only",
+			update: &SyncConfig{PortMulticast: proto.Uint32(0)},
+			want: func() *SyncConfig {
+				cfg := stored()
+				cfg.DstAddrMulticast = nil
+				cfg.PortMulticast = proto.Uint32(0)
+				return cfg
+			}(),
+		},
+		{
+			name:   "zero unicast port clears the unicast endpoint only",
+			update: &SyncConfig{PortUnicast: proto.Uint32(0)},
+			want: func() *SyncConfig {
+				cfg := stored()
+				cfg.DstAddrUnicast = nil
+				cfg.PortUnicast = proto.Uint32(0)
+				return cfg
+			}(),
+		},
+	}
 
-		require.Equal(t, current.SrcAddr, cfg.SrcAddr)
-		require.Equal(t, current.DstAddrMulticast, cfg.DstAddrMulticast)
-		require.Equal(t, current.PortMulticast, cfg.PortMulticast)
-	})
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := stored()
+			cfg.Merge(tc.update)
+			require.True(t, proto.Equal(tc.want, cfg), "want %v, got %v", tc.want, cfg)
+		})
+	}
 }
 
 // TestSyncSuppressTimeoutRoundTrip verifies that sync_suppress_timeout
-// behaves correctly through the Pb->C->Pb round-trip and the
-// ToCWithDefaults merge: a non-zero value overrides, while a zero value
-// inherits the current window.
+// survives the Pb->C->Pb round-trip.
 func TestSyncSuppressTimeoutRoundTrip(t *testing.T) {
 	const suppress uint64 = 8e9
 
-	t.Run("round_trip", func(t *testing.T) {
-		pb := &SyncConfig{SyncSuppressTimeout: suppress}
-		got := FromCSyncConfig(pb.ToC())
-		require.Equal(t, suppress, got.GetSyncSuppressTimeout())
-	})
-
-	t.Run("zero_inherits", func(t *testing.T) {
-		// Zero is indistinguishable from omitted and inherits the current
-		// window, like every other scalar in the merge.
-		current := cfwstate.SyncConfig{SyncSuppressTimeout: suppress}
-		pb := &SyncConfig{}
-		cfg := pb.ToCWithDefaults(current)
-		require.Equal(t, suppress, cfg.SyncSuppressTimeout)
-	})
-
-	t.Run("explicit_override", func(t *testing.T) {
-		current := cfwstate.SyncConfig{SyncSuppressTimeout: suppress}
-		pb := &SyncConfig{SyncSuppressTimeout: 1e9}
-		cfg := pb.ToCWithDefaults(current)
-		require.Equal(t, uint64(1e9), cfg.SyncSuppressTimeout)
-	})
+	pb := &SyncConfig{SyncSuppressTimeout: proto.Uint64(suppress)}
+	got := FromCSyncConfig(pb.ToC())
+	require.Equal(t, suppress, got.GetSyncSuppressTimeout())
 }
