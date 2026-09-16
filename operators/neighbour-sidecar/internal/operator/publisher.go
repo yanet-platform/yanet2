@@ -33,9 +33,9 @@ type Publisher struct {
 // NewPublisher opens lazy connections using the common gateway TLS settings.
 func NewPublisher(cfg *Config) (*Publisher, error) {
 	m := &Publisher{
-		tableName:       cfg.TableName,
+		tableName:       cfg.TableName.Unwrap(),
 		defaultPriority: cfg.DefaultPriority,
-		timeout:         cfg.PublishTimeout,
+		timeout:         cfg.PublishTimeout.Unwrap(),
 	}
 	for _, gateway := range cfg.Gateways {
 		connection, err := operator.DialGateway(gateway)

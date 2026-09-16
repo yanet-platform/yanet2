@@ -3,20 +3,24 @@ package operator
 import (
 	"sync/atomic"
 
+	"github.com/yanet-platform/yanet2/common/go/readiness"
+	readinesspb "github.com/yanet-platform/yanet2/common/readinesspb/v1"
 	"github.com/yanet-platform/yanet2/operators/route/neigh"
 )
 
+const publicationScope = "publication"
+
 // NeighbourSource exposes successful observations to the common reconciler.
 type NeighbourSource struct {
-	table     *neigh.NeighTable
-	synced    atomic.Bool
-	published atomic.Bool
-	wake      chan struct{}
+	table   *neigh.NeighTable
+	tracker *readiness.Tracker
+	synced  atomic.Bool
+	wake    chan struct{}
 }
 
 // NewNeighbourSource remains idle until discovery completes its first dump.
-func NewNeighbourSource(table *neigh.NeighTable) *NeighbourSource {
-	return &NeighbourSource{table: table, wake: make(chan struct{}, 1)}
+func NewNeighbourSource(table *neigh.NeighTable, tracker *readiness.Tracker) *NeighbourSource {
+	return &NeighbourSource{table: table, tracker: tracker, wake: make(chan struct{}, 1)}
 }
 
 // OnHealthy wakes publication after the monitor commits a complete observation.
@@ -43,10 +47,5 @@ func (m *NeighbourSource) Wake() <-chan struct{} {
 
 // Advance records an acknowledged publication and retains the latest observation.
 func (m *NeighbourSource) Advance(neigh.NexthopCacheView) {
-	m.published.Store(true)
-}
-
-// Ready reports whether the receiver has accepted at least one observation.
-func (m *NeighbourSource) Ready() bool {
-	return m.published.Load()
+	m.tracker.Set(publicationScope, readinesspb.State_STATE_READY)
 }

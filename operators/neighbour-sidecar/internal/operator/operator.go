@@ -7,6 +7,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/yanet-platform/yanet2/common/go/operator"
+	"github.com/yanet-platform/yanet2/common/go/readiness"
 	"github.com/yanet-platform/yanet2/operators/route/neigh"
 )
 
@@ -38,7 +39,7 @@ func NewOperator(cfg *Config, options ...Option) (*operator.Operator[neigh.Nexth
 		return nil, err
 	}
 	table := neigh.NewNeighTable()
-	kernel, err := table.CreateSource(cfg.TableName, cfg.DefaultPriority, true)
+	kernel, err := table.CreateSource(cfg.TableName.Unwrap(), cfg.DefaultPriority, true)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create neighbour source: %w", err)
 	}
@@ -46,11 +47,19 @@ func NewOperator(cfg *Config, options ...Option) (*operator.Operator[neigh.Nexth
 	if err != nil {
 		return nil, err
 	}
-	source := NewNeighbourSource(table)
+	tracker := readiness.NewTracker(
+		[]readiness.ScopeSpec{{
+			Name:                        publicationScope,
+			ExpectedObservationInterval: cfg.Reconcile.Interval.Unwrap(),
+		}},
+		readiness.WithDrainLatch(),
+		readiness.WithLog(opts.Log),
+	)
+	source := NewNeighbourSource(table, tracker)
 	monitor := neigh.NewNeighMonitor(table, kernel,
 		neigh.WithLog(opts.Log),
 		neigh.WithLinkMap(cfg.LinkMap),
-		neigh.WithUpdateInterval(cfg.UpdateInterval),
+		neigh.WithUpdateInterval(cfg.UpdateInterval.Unwrap()),
 		neigh.WithOnHealthy(source.OnHealthy),
 	)
 	return operator.NewOperator(
@@ -58,10 +67,16 @@ func NewOperator(cfg *Config, options ...Option) (*operator.Operator[neigh.Nexth
 		source,
 		operator.WithLog(opts.Log),
 		operator.WithReconcile(cfg.Reconcile),
+		operator.WithGRPCServer(
+			cfg.Server,
+			operator.NewReadinessServiceRegistrar("neighbour_sidecar", tracker),
+		),
 		operator.WithWorkers(
 			monitor.Run,
 			func(ctx context.Context) error {
-				return runProbeServer(ctx, source.Ready)
+				<-ctx.Done()
+				tracker.Drain()
+				return nil
 			},
 		),
 	), nil

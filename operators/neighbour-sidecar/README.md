@@ -7,6 +7,8 @@ Interface provisioning belongs to the separate network-configuration container.
 ## Configuration
 
 ```yaml
+server:
+  endpoint: "[::]:9903"
 gateways:
   - name: route
     endpoint: "[::1]:50051"
@@ -45,34 +47,31 @@ observation, including after a route-operator restart. Its `reconcile` settings 
 the common operator defaults. The RPC acknowledges the table update; FIB application
 is asynchronous.
 
-## Health and readiness
+## Readiness contract
 
-The sidecar serves HTTP probes on the fixed address `[::]:9903`:
+Kubernetes supervises the process lifecycle without application health or readiness
+probes. The announcer evaluates forwarding readiness through the YANET gRPC
+readiness APIs. A running sidecar or an acknowledged neighbour update alone does
+not establish that FIB application or forwarding has completed.
 
-- `GET /healthz` returns HTTP 200 while the server is running, independently of
-  gateway availability.
-- `GET /readyz` returns HTTP 503 until the route operator acknowledges the first
-  complete neighbour-table publication, then HTTP 200. An empty observation also
-  counts as a successful publication. Later discovery or publication failures do
-  not reset readiness. During shutdown it returns HTTP 503 until the listener
-  closes.
+The sidecar exposes `operators.neighbour_sidecar.operatorpb.v1.ReadinessService`
+with the shared YANET `Ready` and `Watch` messages on `server.endpoint`, defaulting
+to `[::]:9903`. The common environment override is `YANET_SERVER_ENDPOINT`.
+The server uses the common operator lifecycle and does not register with gateways;
+clients query its endpoint directly. Kubernetes-operator consumption of this API
+is a future integration.
 
-Readiness acknowledges initial table delivery; FIB application remains asynchronous.
-The HTTP worker shuts down with the process, allowing up to five seconds for active
-requests to finish.
+The `publication` scope starts at `STATE_UNKNOWN` and becomes `STATE_READY` after
+the receiver acknowledges the first complete snapshot, including an empty one.
+Later discovery or publication failures do not reset that state. `observed_at`
+records the latest acknowledged publication, with `reconcile.interval` advertised
+as the expected cadence. Consumers checking freshness must poll `Ready`: `Watch`
+reports state or reason changes, not timestamp-only refreshes. On shutdown the
+scope becomes `STATE_NOT_READY` with reason `SHUTTING_DOWN`; a late acknowledgement
+cannot make it ready again.
 
-Configure Kubernetes probes on the sidecar container:
-
-```yaml
-livenessProbe:
-  httpGet:
-    path: /healthz
-    port: 9903
-readinessProbe:
-  httpGet:
-    path: /readyz
-    port: 9903
-```
+This API uses the YANET readiness protocol, not `grpc.health.v1.Health`. There is
+no HTTP probe server.
 
 ## Build and image
 

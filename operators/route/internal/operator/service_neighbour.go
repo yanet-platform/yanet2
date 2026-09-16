@@ -206,35 +206,14 @@ func (m *NeighbourService) SwapNeighbours(
 	ctx context.Context,
 	req *operatorpb.SwapNeighboursRequest,
 ) (*operatorpb.SwapNeighboursResponse, error) {
-	table := req.GetTable()
-	if table == "" {
-		return nil, status.Error(codes.InvalidArgument, "table is required")
-	}
-	entries := make(map[netip.Addr]neigh.NeighbourEntry, len(req.GetEntries()))
-	for _, entry := range req.GetEntries() {
-		address, err := entry.GetNextHop().ToAddr()
-		if err != nil {
-			return nil, status.Errorf(codes.InvalidArgument, "invalid next hop: %v", err)
-		}
-		if entry.GetHardwareAddr() == nil || entry.GetLinkAddr() == nil {
-			return nil, status.Errorf(codes.InvalidArgument, "neighbour %q requires both MAC addresses", address)
-		}
-		entries[address] = neigh.NeighbourEntry{
-			NextHop: address,
-			HardwareRoute: neigh.HardwareRoute{
-				SourceMAC:      entry.GetHardwareAddr().EUI48(),
-				DestinationMAC: entry.GetLinkAddr().EUI48(),
-				Device:         entry.GetDevice(),
-			},
-			UpdatedAt: time.Unix(entry.GetUpdatedAt(), 0),
-			State:     neigh.NeighbourState(entry.GetState()),
-			Priority:  entry.GetPriority(),
-		}
+	entries, err := req.ToNeighbourEntries()
+	if err != nil {
+		return nil, status.Error(codes.InvalidArgument, err.Error())
 	}
 	if err := ctx.Err(); err != nil {
 		return nil, status.FromContextError(err).Err()
 	}
-	if err := m.neighTable.SwapSource(table, entries); err != nil {
+	if err := m.neighTable.SwapSource(req.GetTable(), entries); err != nil {
 		return nil, status.Errorf(codes.NotFound, "failed to swap neighbours: %v", err)
 	}
 	return &operatorpb.SwapNeighboursResponse{}, nil

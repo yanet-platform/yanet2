@@ -1,6 +1,9 @@
 logging:
   level: info
 
+server:
+  endpoint: "[::]:9903"
+
 gateways:
   - name: local
     endpoint: "[::1]:50051"
