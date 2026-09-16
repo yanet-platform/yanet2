@@ -3,7 +3,6 @@ package forward
 import (
 	"context"
 	"errors"
-	"fmt"
 	"unicode/utf8"
 
 	"google.golang.org/grpc/codes"
@@ -11,6 +10,7 @@ import (
 
 	filterpbconv "github.com/yanet-platform/yanet2/bindings/go/filterpbconv/v1"
 	"github.com/yanet-platform/yanet2/controlplane/configstore"
+	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/modules/forward/bindings/go/cforward"
 	forwardpb "github.com/yanet-platform/yanet2/modules/forward/controlplane/forwardpb/v1"
 )
@@ -182,7 +182,7 @@ func (m *ForwardService) UpdateConfig(ctx context.Context, req *forwardpb.Update
 		return &forwardConfig{Rules: reqRules, Module: module}, nil
 	})
 	if err != nil {
-		return nil, fmt.Errorf("failed to update module config: %w", err)
+		return nil, status.Errorf(codes.Internal, "failed to update module config: %v", err)
 	}
 
 	return &forwardpb.UpdateConfigResponse{}, nil
@@ -197,7 +197,11 @@ func (m *ForwardService) DeleteConfig(ctx context.Context, req *forwardpb.Delete
 		return nil, status.Errorf(codes.NotFound, "config %q not found", name)
 	}
 	if err != nil {
-		return nil, fmt.Errorf("failed to delete module config %q: %w", name, err)
+		code := codes.Internal
+		if errors.Is(err, ffi.ErrFailedPrecondition) {
+			code = codes.FailedPrecondition
+		}
+		return nil, status.Errorf(code, "failed to delete module config %q: %v", name, err)
 	}
 
 	return &forwardpb.DeleteConfigResponse{}, nil
