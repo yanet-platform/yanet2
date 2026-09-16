@@ -19,9 +19,8 @@ func validNexthop() *routepb.FIBNexthop {
 	}
 }
 
-// Test_DeleteConfigRequest_Validate verifies that deletion requires a
-// configuration name while a named request and nil receiver follow the
-// expected validation contract.
+// Test_DeleteConfigRequest_Validate verifies that deletion requires a name
+// and preserves the named-request and nil-receiver validation contract.
 func Test_DeleteConfigRequest_Validate(t *testing.T) {
 	cases := []struct {
 		name    string
