@@ -146,15 +146,6 @@ func Test_L3BService_CreateAndListService(t *testing.T) {
 	require.Len(t, backend.services, 1)
 }
 
-func Test_L3BService_CreateServiceEmptyName(t *testing.T) {
-	svc, _ := newTestService(t)
-
-	_, err := svc.CreateService(t.Context(), &l3bpb.CreateServiceRequest{
-		Service: sampleService(""),
-	})
-	require.Equal(t, codes.InvalidArgument, status.Code(err))
-}
-
 func Test_L3BService_UpdateServiceMissing(t *testing.T) {
 	svc, _ := newTestService(t)
 

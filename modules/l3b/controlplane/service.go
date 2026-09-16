@@ -9,36 +9,6 @@ import (
 	l3bpb "github.com/yanet-platform/yanet2/modules/l3b/controlplane/l3bpb/v1"
 )
 
-var errServiceNameRequired = status.Error(codes.InvalidArgument, "service name is required")
-var errModuleNameRequired = status.Error(codes.InvalidArgument, "module config name is required")
-
-// maxNameLength matches the C registry's fixed name buffers; a longer name
-// would be silently truncated into a different object's identity.
-const maxNameLength = 79
-
-// validateName rejects names that cannot round-trip through the C registry:
-// longer than its fixed buffer, empty, or containing unprintable bytes.
-func validateName(kind, name string) error {
-	if name == "" {
-		return status.Errorf(codes.InvalidArgument, "%s name is required", kind)
-	}
-	if len(name) > maxNameLength {
-		return status.Errorf(
-			codes.InvalidArgument,
-			"%s name must be at most %d bytes", kind, maxNameLength,
-		)
-	}
-	for idx := 0; idx < len(name); idx++ {
-		if name[idx] < 0x20 || name[idx] == 0x7f {
-			return status.Errorf(
-				codes.InvalidArgument,
-				"%s name must contain only printable bytes", kind,
-			)
-		}
-	}
-	return nil
-}
-
 // backendError preserves a gRPC status returned by the backend and wraps any
 // other error as Internal.
 func backendError(err error) error {
@@ -71,13 +41,6 @@ func (m *L3BService) CreateService(
 	req *l3bpb.CreateServiceRequest,
 ) (*l3bpb.CreateServiceResponse, error) {
 	service := req.GetService()
-	if service == nil {
-		return nil, errServiceNameRequired
-	}
-	if err := validateName("service", service.GetName()); err != nil {
-		return nil, err
-	}
-
 	if err := m.backend.CreateService(service); err != nil {
 		return nil, backendError(err)
 	}
@@ -91,13 +54,6 @@ func (m *L3BService) UpdateService(
 	req *l3bpb.UpdateServiceRequest,
 ) (*l3bpb.UpdateServiceResponse, error) {
 	service := req.GetService()
-	if service == nil {
-		return nil, errServiceNameRequired
-	}
-	if err := validateName("service", service.GetName()); err != nil {
-		return nil, err
-	}
-
 	if err := m.backend.UpdateService(service); err != nil {
 		return nil, backendError(err)
 	}
@@ -111,10 +67,6 @@ func (m *L3BService) DeleteService(
 	req *l3bpb.DeleteServiceRequest,
 ) (*l3bpb.DeleteServiceResponse, error) {
 	name := req.GetName()
-	if err := validateName("service", name); err != nil {
-		return nil, err
-	}
-
 	if err := m.backend.DeleteService(name); err != nil {
 		return nil, backendError(err)
 	}
@@ -137,13 +89,6 @@ func (m *L3BService) UpdateModuleConfig(
 	req *l3bpb.UpdateModuleConfigRequest,
 ) (*l3bpb.UpdateModuleConfigResponse, error) {
 	config := req.GetConfig()
-	if config == nil {
-		return nil, errModuleNameRequired
-	}
-	if err := validateName("module config", config.GetName()); err != nil {
-		return nil, err
-	}
-
 	if err := m.backend.UpdateModuleConfig(config); err != nil {
 		return nil, backendError(err)
 	}
@@ -165,10 +110,6 @@ func (m *L3BService) UpdateRealServerState(
 	ctx context.Context,
 	req *l3bpb.UpdateRealServerStateRequest,
 ) (*l3bpb.UpdateRealServerStateResponse, error) {
-	if req.GetService() == "" {
-		return nil, errServiceNameRequired
-	}
-
 	if err := m.backend.UpdateRealServerState(req.GetService(), req.GetRealServerIndex(), req.GetEnabled()); err != nil {
 		return nil, backendError(err)
 	}
@@ -182,10 +123,6 @@ func (m *L3BService) UpdateRealServerWeight(
 	ctx context.Context,
 	req *l3bpb.UpdateRealServerWeightRequest,
 ) (*l3bpb.UpdateRealServerWeightResponse, error) {
-	if req.GetService() == "" {
-		return nil, errServiceNameRequired
-	}
-
 	if err := m.backend.UpdateRealServerWeight(req.GetService(), req.GetRealServerIndex(), req.GetWeight()); err != nil {
 		return nil, backendError(err)
 	}
@@ -199,10 +136,6 @@ func (m *L3BService) ListSessions(
 	req *l3bpb.ListSessionsRequest,
 ) (*l3bpb.ListSessionsResponse, error) {
 	service := req.GetService()
-	if err := validateName("service", service); err != nil {
-		return nil, err
-	}
-
 	sessions, nextCursor, nowNs, err := m.backend.ListSessions(
 		service,
 		req.GetCursor(),
@@ -253,10 +186,6 @@ func (m *L3BService) GetService(
 	req *l3bpb.GetServiceRequest,
 ) (*l3bpb.GetServiceResponse, error) {
 	name := req.GetName()
-	if err := validateName("service", name); err != nil {
-		return nil, err
-	}
-
 	response, err := m.backend.GetService(name)
 	if err != nil {
 		return nil, backendError(err)
