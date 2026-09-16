@@ -1,10 +1,15 @@
 package cnat64
 
+//#include <stdint.h>
+import "C"
+
 import (
 	"fmt"
-	"math"
 	"net/netip"
 )
+
+// MaxMTU is the largest value accepted by the uint16_t MTU fields.
+const MaxMTU = C.UINT16_MAX
 
 // AddMapping adds a new IPv4-IPv6 address mapping
 func (m *ModuleConfig) AddMapping(ipv4 netip.Addr, ipv6 netip.Addr, prefixIndex uint32) error {
@@ -37,11 +42,11 @@ func (m *ModuleConfig) SetDropUnknown(dropUnknownPrefix bool, dropUnknownMapping
 
 // SetMTU sets IPv4/IPv6 MTU limits.
 func (m *ModuleConfig) SetMTU(ipv4MTU uint32, ipv6MTU uint32) error {
-	if ipv4MTU > math.MaxUint16 {
-		return fmt.Errorf("invalid IPv4 MTU: got %d, max %d", ipv4MTU, math.MaxUint16)
+	if ipv4MTU > uint32(MaxMTU) {
+		return fmt.Errorf("invalid IPv4 MTU: got %d, max %d", ipv4MTU, MaxMTU)
 	}
-	if ipv6MTU > math.MaxUint16 {
-		return fmt.Errorf("invalid IPv6 MTU: got %d, max %d", ipv6MTU, math.MaxUint16)
+	if ipv6MTU > uint32(MaxMTU) {
+		return fmt.Errorf("invalid IPv6 MTU: got %d, max %d", ipv6MTU, MaxMTU)
 	}
 
 	return m.setMTU(uint16(ipv4MTU), uint16(ipv6MTU))

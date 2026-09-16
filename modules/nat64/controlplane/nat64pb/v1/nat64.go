@@ -3,8 +3,10 @@ package nat64pb
 import (
 	"errors"
 	"fmt"
-	"math"
 )
+
+// MaxMTU is the largest MTU accepted by the NAT64 dataplane.
+const MaxMTU = 1<<16 - 1
 
 func (m *ShowConfigRequest) Validate() error {
 	if m.GetName() == "" {
@@ -76,18 +78,18 @@ func (m *SetMTURequest) Validate() error {
 }
 
 func (m *MTUConfig) Validate() error {
-	if m.GetIpv4Mtu() > math.MaxUint16 {
+	if m.GetIpv4Mtu() > MaxMTU {
 		return fmt.Errorf(
 			"ipv4_mtu %d must be in range 0..%d",
 			m.GetIpv4Mtu(),
-			math.MaxUint16,
+			MaxMTU,
 		)
 	}
-	if m.GetIpv6Mtu() > math.MaxUint16 {
+	if m.GetIpv6Mtu() > MaxMTU {
 		return fmt.Errorf(
 			"ipv6_mtu %d must be in range 0..%d",
 			m.GetIpv6Mtu(),
-			math.MaxUint16,
+			MaxMTU,
 		)
 	}
 
