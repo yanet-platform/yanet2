@@ -41,6 +41,12 @@ func Test_MaxAgentNameLen_MatchesC(t *testing.T) {
 	require.Equal(t, ynpb.MaxAgentNameLen, ffi.MaxAgentNameLen)
 }
 
+// Test_MaxPipelineNameLen_MatchesC verifies that the pure-Go bound matches the
+// C pipeline-name buffer size, including its terminating byte.
+func Test_MaxPipelineNameLen_MatchesC(t *testing.T) {
+	require.Equal(t, commonpb.MaxPipelineNameLen, ffi.MaxPipelineNameLen)
+}
+
 var errInjectedFree = errors.New("injected free failure")
 
 // fakeObject returns a pointer the wrappers may cast to their C config

@@ -2,6 +2,7 @@ package commonpb_test
 
 import (
 	"math"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -54,6 +55,24 @@ func Test_Device_Validate(t *testing.T) {
 			name:    "overflowing input sum",
 			device:  &commonpb.Device{Input: []*commonpb.DevicePipeline{{Weight: 1}, {Weight: math.MaxUint64}}},
 			message: "input[1].weight 18446744073709551615 must be in range 0..65535",
+		},
+		{
+			name: "longest pipeline name",
+			device: &commonpb.Device{
+				Input: []*commonpb.DevicePipeline{{Name: strings.Repeat("p", commonpb.MaxPipelineNameLen-1), Weight: 1}},
+			},
+		},
+		{
+			name:    "input pipeline name with NUL",
+			device:  &commonpb.Device{Input: []*commonpb.DevicePipeline{{Name: "p0\x00p1", Weight: 1}}},
+			message: "input[0].name must not contain NUL",
+		},
+		{
+			name: "output pipeline name of the buffer size",
+			device: &commonpb.Device{
+				Output: []*commonpb.DevicePipeline{{Name: "p0"}, {Name: strings.Repeat("p", commonpb.MaxPipelineNameLen)}},
+			},
+			message: "output[1].name must be shorter than 80 bytes",
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

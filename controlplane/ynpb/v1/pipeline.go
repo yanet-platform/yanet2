@@ -3,6 +3,7 @@ package ynpb
 import (
 	"errors"
 	"fmt"
+	"strings"
 
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
 )
@@ -46,8 +47,15 @@ func validatePipelineID(id *commonpb.PipelineId) error {
 	if id == nil {
 		return errors.New("id is required")
 	}
-	if id.GetName() == "" {
+	name := id.GetName()
+	if name == "" {
 		return errors.New("id.name is required")
+	}
+	if strings.IndexByte(name, 0) != -1 {
+		return errors.New("id.name must not contain NUL")
+	}
+	if len(name) >= commonpb.MaxPipelineNameLen {
+		return fmt.Errorf("id.name must be shorter than %d bytes", commonpb.MaxPipelineNameLen)
 	}
 
 	return nil
