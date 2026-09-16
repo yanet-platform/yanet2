@@ -112,6 +112,8 @@ func (m *managedService) Retire() freeable {
 	return serviceFreeable{object: m.object}
 }
 
+var errRealServerIndexOutOfRange = errors.New("real server index out of range")
+
 // SetRealServerState enables or disables a single real server, mirrors the
 // state into the service object and rebuilds the ring over the enabled
 // servers only.
@@ -120,7 +122,7 @@ func (m *managedService) SetRealServerState(
 	enabled bool,
 ) error {
 	if int(realServerIndex) >= len(m.enabled) {
-		return fmt.Errorf("real server index %d out of range", realServerIndex)
+		return fmt.Errorf("%w: %d", errRealServerIndexOutOfRange, realServerIndex)
 	}
 
 	if err := m.object.SetRealServerState(realServerIndex, enabled); err != nil {
@@ -138,7 +140,7 @@ func (m *managedService) SetRealServerWeight(
 	weight uint32,
 ) error {
 	if int(realServerIndex) >= len(m.weights) {
-		return fmt.Errorf("real server index %d out of range", realServerIndex)
+		return fmt.Errorf("%w: %d", errRealServerIndexOutOfRange, realServerIndex)
 	}
 
 	if weight > maxRealServerWeight {
@@ -451,9 +453,13 @@ func (m *backend) UpdateRealServerState(
 	m.reclaimDeferred()
 
 	if err := existing.SetRealServerState(realServerIndex, enabled); err != nil {
+		code := codes.Internal
+		if errors.Is(err, errRealServerIndexOutOfRange) {
+			code = codes.InvalidArgument
+		}
 		return status.Errorf(
-			codes.InvalidArgument,
-			"invalid real server index %d of %q: %v", realServerIndex, service, err,
+			code,
+			"failed to set the state of real server %d of %q: %v", realServerIndex, service, err,
 		)
 	}
 	return nil
@@ -475,9 +481,13 @@ func (m *backend) UpdateRealServerWeight(
 	m.reclaimDeferred()
 
 	if err := existing.SetRealServerWeight(realServerIndex, weight); err != nil {
+		code := codes.Internal
+		if errors.Is(err, errRealServerIndexOutOfRange) {
+			code = codes.InvalidArgument
+		}
 		return status.Errorf(
-			codes.InvalidArgument,
-			"invalid real server weight update %d of %q: %v", realServerIndex, service, err,
+			code,
+			"failed to set the weight of real server %d of %q: %v", realServerIndex, service, err,
 		)
 	}
 	return nil
