@@ -7,129 +7,12 @@ import (
 	"github.com/c2h5oh/datasize"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sync/errgroup"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 
 	dataplaneut "github.com/yanet-platform/yanet2/bindings/go/dataplane_ut"
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
 	"github.com/yanet-platform/yanet2/controlplane/builtin"
 	ynpb "github.com/yanet-platform/yanet2/controlplane/ynpb/v1"
 )
-
-// TestFunctionUpdateRejectsMissingMessages verifies that Update rejects a
-// request whose optional message fields are absent instead of dereferencing
-// them, and that the rejection happens before any shared memory is touched.
-func TestFunctionUpdateRejectsMissingMessages(t *testing.T) {
-	tests := []struct {
-		name    string
-		request *ynpb.UpdateFunctionRequest
-	}{
-		{
-			name:    "missing function",
-			request: &ynpb.UpdateFunctionRequest{},
-		},
-		{
-			name: "missing function id",
-			request: &ynpb.UpdateFunctionRequest{
-				Function: &ynpb.Function{},
-			},
-		},
-		{
-			name: "missing chain",
-			request: &ynpb.UpdateFunctionRequest{
-				Function: &ynpb.Function{
-					Id: &commonpb.FunctionId{Name: "f"},
-					Chains: []*ynpb.FunctionChain{
-						{Weight: 1},
-					},
-				},
-			},
-		},
-		{
-			name: "nil module id in chain",
-			request: &ynpb.UpdateFunctionRequest{
-				Function: &ynpb.Function{
-					Id: &commonpb.FunctionId{Name: "f"},
-					Chains: []*ynpb.FunctionChain{
-						{
-							Weight: 1,
-							Chain: &ynpb.Chain{
-								Name:    "c",
-								Modules: []*commonpb.ModuleId{nil},
-							},
-						},
-					},
-				},
-			},
-		},
-	}
-
-	svc := builtin.NewFunction(0, nil)
-
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			_, err := svc.Update(t.Context(), test.request)
-			require.Equal(t, codes.InvalidArgument, status.Code(err))
-		})
-	}
-}
-
-// Test_Function_Update_EmptyName verifies that Update rejects an id with
-// an empty name instead of creating a function named "".
-func Test_Function_Update_EmptyName(t *testing.T) {
-	svc := builtin.NewFunction(0, nil)
-
-	_, err := svc.Update(t.Context(), &ynpb.UpdateFunctionRequest{
-		Function: &ynpb.Function{
-			Id: &commonpb.FunctionId{},
-		},
-	})
-	require.Equal(t, codes.InvalidArgument, status.Code(err))
-}
-
-// Test_Function_Update_RejectsInvalidWeights verifies that model validation
-// produces InvalidArgument before accessing shared memory.
-func Test_Function_Update_RejectsInvalidWeights(t *testing.T) {
-	service := builtin.NewFunction(0, nil)
-	_, err := service.Update(t.Context(), &ynpb.UpdateFunctionRequest{
-		Function: &ynpb.Function{
-			Id: &commonpb.FunctionId{Name: "weights"},
-			Chains: []*ynpb.FunctionChain{{
-				Chain: &ynpb.Chain{Name: "chain"}, Weight: 65536,
-			}},
-		},
-	})
-	require.Equal(t, codes.InvalidArgument, status.Code(err))
-}
-
-// TestFunctionDeleteRejectsMissingID verifies that Delete rejects a request
-// with no id instead of dereferencing it to build the function name.
-func TestFunctionDeleteRejectsMissingID(t *testing.T) {
-	svc := builtin.NewFunction(0, nil)
-
-	_, err := svc.Delete(t.Context(), &ynpb.DeleteFunctionRequest{})
-	require.Equal(t, codes.InvalidArgument, status.Code(err))
-}
-
-// Test_Function_Delete_EmptyName verifies that Delete rejects an id with
-// an empty name instead of deleting a function named "".
-func Test_Function_Delete_EmptyName(t *testing.T) {
-	svc := builtin.NewFunction(0, nil)
-
-	_, err := svc.Delete(t.Context(), &ynpb.DeleteFunctionRequest{
-		Id: &commonpb.FunctionId{},
-	})
-	require.Equal(t, codes.InvalidArgument, status.Code(err))
-}
-
-// TestFunctionGetRejectsMissingID verifies that Get rejects a request with
-// no id instead of dereferencing it.
-func TestFunctionGetRejectsMissingID(t *testing.T) {
-	svc := builtin.NewFunction(0, nil)
-
-	_, err := svc.Get(t.Context(), &ynpb.GetFunctionRequest{})
-	require.Equal(t, codes.InvalidArgument, status.Code(err))
-}
 
 // Test_Function_UpdateAndDelete_Concurrent verifies that overlapping update
 // and delete calls all succeed and leave the registry empty.

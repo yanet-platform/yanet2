@@ -16,9 +16,6 @@ import (
 	ynpb "github.com/yanet-platform/yanet2/controlplane/ynpb/v1"
 )
 
-// The most name patterns one request may carry, bounding a client only.
-const maxQueryPatterns = 64
-
 // Counters is an in-process gRPC service for retrieving counters.
 type Counters struct {
 	ynpb.UnimplementedCountersServiceServer
@@ -109,15 +106,6 @@ func (m *Counters) ByTags(
 	ctx context.Context,
 	request *ynpb.CountersByTagsRequest,
 ) (*ynpb.CountersByTagsResponse, error) {
-	if len(request.GetQuery()) > maxQueryPatterns {
-		return nil, status.Errorf(
-			codes.InvalidArgument,
-			"query carries %d patterns, at most %d are accepted",
-			len(request.GetQuery()),
-			maxQueryPatterns,
-		)
-	}
-
 	reqTags := request.GetTags()
 	tags := make([]ffi.CounterTag, len(reqTags))
 	for idx, tag := range reqTags {

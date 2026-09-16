@@ -324,10 +324,13 @@ func ValidateQuery(query []string) error {
 	return nil
 }
 
-const (
-	counterTagKeyLen   = C.COUNTER_TAG_KEY_LEN
-	counterTagValueLen = C.COUNTER_TAG_VALUE_LEN
-)
+// CounterTagKeyLen is the size of the C counter-tag key buffer, including
+// its terminating NUL.
+const CounterTagKeyLen = C.COUNTER_TAG_KEY_LEN
+
+// CounterTagValueLen is the size of the C counter-tag value buffer, including
+// its terminating NUL.
+const CounterTagValueLen = C.COUNTER_TAG_VALUE_LEN
 
 // ErrInvalidTag reports a counter tag the fixed-size C counter_tag fields
 // cannot carry.
@@ -339,18 +342,18 @@ func ValidateTag(tag CounterTag) error {
 	if strings.ContainsRune(tag.Key, 0) || strings.ContainsRune(tag.Value, 0) {
 		return fmt.Errorf("%w: key or value contains a NUL byte", ErrInvalidTag)
 	}
-	if len(tag.Key) >= counterTagKeyLen {
+	if len(tag.Key) >= CounterTagKeyLen {
 		return fmt.Errorf(
 			"%w: key exceeds %d bytes",
 			ErrInvalidTag,
-			counterTagKeyLen-1,
+			CounterTagKeyLen-1,
 		)
 	}
-	if len(tag.Value) >= counterTagValueLen {
+	if len(tag.Value) >= CounterTagValueLen {
 		return fmt.Errorf(
 			"%w: value exceeds %d bytes",
 			ErrInvalidTag,
-			counterTagValueLen-1,
+			CounterTagValueLen-1,
 		)
 	}
 

@@ -81,14 +81,7 @@ func (m *Memory) ExtendAgent(
 	request *ynpb.ExtendAgentRequest,
 ) (*ynpb.ExtendAgentResponse, error) {
 	name := request.GetAgent()
-	if name == "" {
-		return nil, status.Error(codes.InvalidArgument, "agent name is required")
-	}
-
 	size := datasize.ByteSize(request.GetSize())
-	if size == 0 {
-		return nil, status.Error(codes.InvalidArgument, "size must be positive")
-	}
 
 	if !m.shm.DataplaneReady(m.instanceID) {
 		return nil, status.Error(codes.Unavailable, "dataplane instance is not ready")

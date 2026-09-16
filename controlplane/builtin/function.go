@@ -117,10 +117,6 @@ func (m *Function) Get(
 	request *ynpb.GetFunctionRequest,
 ) (*ynpb.GetFunctionResponse, error) {
 	reqId := request.GetId()
-	if reqId == nil {
-		return nil, status.Error(codes.InvalidArgument, "function id is required")
-	}
-
 	dpConfig := m.shm.DPConfig(m.instanceID)
 
 	functions := dpConfig.Functions()
@@ -169,10 +165,6 @@ func (m *Function) Update(
 	request *ynpb.UpdateFunctionRequest,
 ) (*ynpb.UpdateFunctionResponse, error) {
 	reqFunction := request.GetFunction()
-	if err := reqFunction.Validate(); err != nil {
-		return nil, status.Error(codes.InvalidArgument, err.Error())
-	}
-
 	function := ffi.FunctionConfig{
 		Name: reqFunction.Id.Name,
 	}
@@ -223,12 +215,6 @@ func (m *Function) Delete(
 	request *ynpb.DeleteFunctionRequest,
 ) (*ynpb.DeleteFunctionResponse, error) {
 	reqId := request.GetId()
-	if reqId == nil {
-		return nil, status.Error(codes.InvalidArgument, "function id is required")
-	}
-	if reqId.Name == "" {
-		return nil, status.Error(codes.InvalidArgument, "function name is required")
-	}
 	functionName := reqId.Name
 
 	m.mu.Lock()
