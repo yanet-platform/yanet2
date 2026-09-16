@@ -97,6 +97,14 @@ func Test_UpdateFIBRequest_Validate(t *testing.T) {
 			message: "entries[0]: nexthops[0]: src_mac is required",
 		},
 		{
+			name: "nil entry at repeated index",
+			request: &routepb.UpdateFIBRequest{
+				ModuleName: "route0",
+				Entries:    []*routepb.FIBEntry{nil},
+			},
+			message: "entries[0] is required",
+		},
+		{
 			name: "valid request",
 			request: &routepb.UpdateFIBRequest{
 				ModuleName: "route0",

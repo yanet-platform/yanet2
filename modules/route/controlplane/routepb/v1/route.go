@@ -81,6 +81,9 @@ func (m *UpdateFIBRequest) Validate() error {
 	}
 
 	for idx, entry := range m.GetEntries() {
+		if entry == nil {
+			return fmt.Errorf("entries[%d] is required", idx)
+		}
 		if err := entry.Validate(); err != nil {
 			return fmt.Errorf("entries[%d]: %w", idx, err)
 		}
