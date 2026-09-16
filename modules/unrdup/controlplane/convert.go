@@ -18,8 +18,6 @@ const (
 	ipprotoUDP uint8 = 17
 )
 
-const maxPort = 65535
-
 type endpointKey struct {
 	vip  netip.Addr
 	port uint16
@@ -31,10 +29,6 @@ func sourceIsSet(source xnetip.Network) bool {
 }
 
 func configFromProto(request *unrduppb.Config) (*config, error) {
-	if request == nil {
-		return nil, status.Error(codes.InvalidArgument, "config is required")
-	}
-
 	sourceV4, err := netFromProto(request.GetSourceV4(), 4)
 	if err != nil {
 		return nil, err
@@ -148,10 +142,7 @@ func serviceFromProto(
 	endpoints := make([]cunrdup.Endpoint, 0, len(service.GetEndpoints()))
 	seenEndpoints := map[cunrdup.Endpoint]struct{}{}
 	for _, endpoint := range service.GetEndpoints() {
-		converted, err := endpointFromProto(endpoint)
-		if err != nil {
-			return cunrdup.Service{}, err
-		}
+		converted := endpointFromProto(endpoint)
 
 		if _, ok := seenEndpoints[converted]; ok {
 			return cunrdup.Service{}, status.Errorf(
@@ -165,17 +156,6 @@ func serviceFromProto(
 		endpoints = append(endpoints, converted)
 	}
 
-	if len(peers) == 0 {
-		return cunrdup.Service{}, status.Error(
-			codes.InvalidArgument, "at least one peer is required",
-		)
-	}
-	if len(endpoints) == 0 {
-		return cunrdup.Service{}, status.Error(
-			codes.InvalidArgument, "at least one endpoint is required",
-		)
-	}
-
 	return cunrdup.Service{
 		VIP:       vip,
 		Peers:     peers,
@@ -183,32 +163,19 @@ func serviceFromProto(
 	}, nil
 }
 
-func endpointFromProto(endpoint *unrduppb.Endpoint) (cunrdup.Endpoint, error) {
-	port := endpoint.GetPort()
-	if port == 0 || port > maxPort {
-		return cunrdup.Endpoint{}, status.Errorf(
-			codes.InvalidArgument, "port %d out of range", port,
-		)
-	}
-
+func endpointFromProto(endpoint *unrduppb.Endpoint) cunrdup.Endpoint {
 	var proto uint8
 	switch endpoint.GetProtocol() {
 	case unrduppb.Protocol_PROTOCOL_TCP:
 		proto = ipprotoTCP
 	case unrduppb.Protocol_PROTOCOL_UDP:
 		proto = ipprotoUDP
-	default:
-		return cunrdup.Endpoint{}, status.Errorf(
-			codes.InvalidArgument,
-			"protocol %s is not served",
-			endpoint.GetProtocol(),
-		)
 	}
 
 	return cunrdup.Endpoint{
-		Port:  uint16(port),
+		Port:  uint16(endpoint.GetPort()),
 		Proto: proto,
-	}, nil
+	}
 }
 
 func netFromProto(source *filterpb.IPNet, addrLen int) (xnetip.Network, error) {
