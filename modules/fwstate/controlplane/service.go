@@ -285,8 +285,8 @@ func (m *FWStateService) ShowConfig(
 
 	mapNameV4, mapNameV6, syncConfig, ok := m.configSnapshot(name)
 	if !ok {
-		if req.OkIfNotFound {
-			return nil, nil
+		if req.GetOkIfNotFound() {
+			return &fwstatepb.ShowConfigResponse{}, nil
 		}
 		return nil, status.Errorf(codes.NotFound, "config %q not found", name)
 	}
