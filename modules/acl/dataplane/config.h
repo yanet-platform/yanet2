@@ -4,7 +4,7 @@
 
 #include "lib/filter/classifiers/net6.h"
 #include "lib/filter/filter.h"
-#include "lib/fwstate/fwtable.h"
+#include "lib/statemap/fwtable.h"
 
 struct counter_value_handle;
 
