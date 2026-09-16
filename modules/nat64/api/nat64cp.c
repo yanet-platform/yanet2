@@ -20,6 +20,15 @@
 #include "lib/controlplane/agent/agent.h"
 #include "lib/dataplane/config/zone.h"
 
+_Static_assert(
+	sizeof(((struct nat64_module_config *)0)->mtu.ipv4) == sizeof(uint16_t),
+	"NAT64 MTU storage must remain uint16_t"
+);
+_Static_assert(
+	sizeof(((struct nat64_module_config *)0)->mtu.ipv6) == sizeof(uint16_t),
+	"NAT64 MTU storage must remain uint16_t"
+);
+
 static void
 nat64_module_config_destroy(struct cp_module *cp_module) {
 	struct nat64_module_config *config =

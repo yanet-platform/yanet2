@@ -1,6 +1,7 @@
 package cnat64
 
 //#include <stdint.h>
+//#include "modules/nat64/api/nat64cp.h"
 import "C"
 
 import (
@@ -8,8 +9,8 @@ import (
 	"net/netip"
 )
 
-// MaxMTU is the largest value accepted by the uint16_t MTU fields.
-const MaxMTU = C.UINT16_MAX
+// MaxMTU is the largest value accepted by the NAT64 module's MTU fields.
+const MaxMTU = C.NAT64_MTU_MAX
 
 // AddMapping adds a new IPv4-IPv6 address mapping
 func (m *ModuleConfig) AddMapping(ipv4 netip.Addr, ipv6 netip.Addr, prefixIndex uint32) error {
