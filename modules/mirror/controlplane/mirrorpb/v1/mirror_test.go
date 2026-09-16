@@ -2,10 +2,12 @@ package mirrorpb_test
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
+	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
 	mirrorpb "github.com/yanet-platform/yanet2/modules/mirror/controlplane/mirrorpb/v1"
 )
 
@@ -130,6 +132,8 @@ func Test_DeleteConfigRequest_Validate(t *testing.T) {
 
 // Test_Rule_Validate verifies that a missing action is rejected, a present
 // action passes, and a nil rule receiver returns the missing-action error.
+//
+// An invalid action is reported under the action field.
 func Test_Rule_Validate(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -138,12 +142,73 @@ func Test_Rule_Validate(t *testing.T) {
 	}{
 		{name: "missing action", rule: &mirrorpb.Rule{}, message: "action is required"},
 		{name: "action set", rule: &mirrorpb.Rule{Action: &mirrorpb.Action{}}},
+		{
+			name:    "invalid action",
+			rule:    &mirrorpb.Rule{Action: &mirrorpb.Action{Mode: 3}},
+			message: "action: mode unknown value 3",
+		},
 		{name: "nil rule", rule: nil, message: "action is required"},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			err := tc.rule.Validate()
+			if tc.message == "" {
+				require.NoError(t, err)
+			} else {
+				require.EqualError(t, err, tc.message)
+			}
+		})
+	}
+}
+
+// Test_Action_Validate verifies that the target and counter obey the
+// fixed-size buffer and NUL rules and that the mode is a declared value.
+func Test_Action_Validate(t *testing.T) {
+	cases := []struct {
+		name    string
+		action  *mirrorpb.Action
+		message string
+	}{
+		{name: "empty action", action: &mirrorpb.Action{}},
+		{
+			name: "longest target and counter",
+			action: &mirrorpb.Action{
+				Target:  strings.Repeat("t", commonpb.MaxDeviceNameLen-1),
+				Counter: strings.Repeat("c", commonpb.MaxCounterNameLen-1),
+				Mode:    mirrorpb.MirrorMode_OUT,
+			},
+		},
+		{
+			name:    "target with NUL",
+			action:  &mirrorpb.Action{Target: "eth0\x00eth1"},
+			message: "target must not contain NUL",
+		},
+		{
+			name:    "target of the buffer size",
+			action:  &mirrorpb.Action{Target: strings.Repeat("t", commonpb.MaxDeviceNameLen)},
+			message: "target must be shorter than 80 bytes",
+		},
+		{
+			name:    "counter with NUL",
+			action:  &mirrorpb.Action{Counter: "to_eth0\x00"},
+			message: "counter must not contain NUL",
+		},
+		{
+			name:    "counter of the buffer size",
+			action:  &mirrorpb.Action{Counter: strings.Repeat("c", commonpb.MaxCounterNameLen)},
+			message: "counter must be shorter than 128 bytes",
+		},
+		{
+			name:    "undeclared mode",
+			action:  &mirrorpb.Action{Mode: 3},
+			message: "mode unknown value 3",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := tc.action.Validate()
 			if tc.message == "" {
 				require.NoError(t, err)
 			} else {
