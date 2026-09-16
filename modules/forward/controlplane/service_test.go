@@ -129,9 +129,9 @@ func TestDeleteConfigUnknownConfig(t *testing.T) {
 // that a backend update failure returns Internal before publication.
 func Test_ForwardService_UpdateConfig_BackendFailureReturnsInternal(t *testing.T) {
 	backendError := errors.New("shared memory unavailable")
-	svc := forward.NewForwardService(&mockBackend{updateError: backendError})
+	service := forward.NewForwardService(&mockBackend{updateError: backendError})
 
-	_, err := svc.UpdateConfig(t.Context(), &forwardpb.UpdateConfigRequest{
+	_, err := service.UpdateConfig(t.Context(), &forwardpb.UpdateConfigRequest{
 		Name: "config",
 		Rules: []*forwardpb.Rule{
 			{Action: &forwardpb.Action{Target: "device0"}},
@@ -140,7 +140,7 @@ func Test_ForwardService_UpdateConfig_BackendFailureReturnsInternal(t *testing.T
 	require.Equal(t, codes.Internal, status.Code(err))
 	require.ErrorContains(t, err, "failed to update module config: shared memory unavailable")
 
-	_, err = svc.ShowConfig(t.Context(), &forwardpb.ShowConfigRequest{Name: "config"})
+	_, err = service.ShowConfig(t.Context(), &forwardpb.ShowConfigRequest{Name: "config"})
 	require.Equal(t, codes.NotFound, status.Code(err))
 }
 
@@ -148,9 +148,9 @@ func Test_ForwardService_UpdateConfig_BackendFailureReturnsInternal(t *testing.T
 // that a failed replacement returns Internal without changing current state.
 func Test_ForwardService_UpdateConfig_BackendFailurePreservesState(t *testing.T) {
 	backend := &mockBackend{}
-	svc := forward.NewForwardService(backend)
+	service := forward.NewForwardService(backend)
 
-	_, err := svc.UpdateConfig(t.Context(), &forwardpb.UpdateConfigRequest{
+	_, err := service.UpdateConfig(t.Context(), &forwardpb.UpdateConfigRequest{
 		Name: "config",
 		Rules: []*forwardpb.Rule{
 			{Action: &forwardpb.Action{Target: "device0"}},
@@ -159,7 +159,7 @@ func Test_ForwardService_UpdateConfig_BackendFailurePreservesState(t *testing.T)
 	require.NoError(t, err)
 
 	backend.updateError = errors.New("shared memory unavailable")
-	_, err = svc.UpdateConfig(t.Context(), &forwardpb.UpdateConfigRequest{
+	_, err = service.UpdateConfig(t.Context(), &forwardpb.UpdateConfigRequest{
 		Name: "config",
 		Rules: []*forwardpb.Rule{
 			{Action: &forwardpb.Action{Target: "device1"}},
@@ -167,7 +167,7 @@ func Test_ForwardService_UpdateConfig_BackendFailurePreservesState(t *testing.T)
 	})
 	require.Equal(t, codes.Internal, status.Code(err))
 
-	response, err := svc.ShowConfig(t.Context(), &forwardpb.ShowConfigRequest{Name: "config"})
+	response, err := service.ShowConfig(t.Context(), &forwardpb.ShowConfigRequest{Name: "config"})
 	require.NoError(t, err)
 	require.Equal(t, "device0", response.GetRules()[0].GetAction().GetTarget())
 }
@@ -176,9 +176,9 @@ func Test_ForwardService_UpdateConfig_BackendFailurePreservesState(t *testing.T)
 // that a backend delete failure leaves the published configuration available.
 func Test_ForwardService_DeleteConfig_BackendFailureReturnsInternal(t *testing.T) {
 	backendError := errors.New("shared memory unavailable")
-	svc := forward.NewForwardService(&mockBackend{deleteError: backendError})
+	service := forward.NewForwardService(&mockBackend{deleteError: backendError})
 
-	_, err := svc.UpdateConfig(t.Context(), &forwardpb.UpdateConfigRequest{
+	_, err := service.UpdateConfig(t.Context(), &forwardpb.UpdateConfigRequest{
 		Name: "config",
 		Rules: []*forwardpb.Rule{
 			{Action: &forwardpb.Action{Target: "device0"}},
@@ -186,11 +186,11 @@ func Test_ForwardService_DeleteConfig_BackendFailureReturnsInternal(t *testing.T
 	})
 	require.NoError(t, err)
 
-	_, err = svc.DeleteConfig(t.Context(), &forwardpb.DeleteConfigRequest{Name: "config"})
+	_, err = service.DeleteConfig(t.Context(), &forwardpb.DeleteConfigRequest{Name: "config"})
 	require.Equal(t, codes.Internal, status.Code(err))
 	require.ErrorContains(t, err, "failed to delete module config \"config\": shared memory unavailable")
 
-	response, err := svc.ShowConfig(t.Context(), &forwardpb.ShowConfigRequest{Name: "config"})
+	response, err := service.ShowConfig(t.Context(), &forwardpb.ShowConfigRequest{Name: "config"})
 	require.NoError(t, err)
 	require.Equal(t, "device0", response.GetRules()[0].GetAction().GetTarget())
 }
@@ -199,9 +199,9 @@ func Test_ForwardService_DeleteConfig_BackendFailureReturnsInternal(t *testing.T
 // that state refusal returns FailedPrecondition without unpublishing.
 func Test_ForwardService_DeleteConfig_FailedPreconditionPreservesState(t *testing.T) {
 	backendError := fmt.Errorf("module is still referenced: %w", ffi.ErrFailedPrecondition)
-	svc := forward.NewForwardService(&mockBackend{deleteError: backendError})
+	service := forward.NewForwardService(&mockBackend{deleteError: backendError})
 
-	_, err := svc.UpdateConfig(t.Context(), &forwardpb.UpdateConfigRequest{
+	_, err := service.UpdateConfig(t.Context(), &forwardpb.UpdateConfigRequest{
 		Name: "config",
 		Rules: []*forwardpb.Rule{
 			{Action: &forwardpb.Action{Target: "device0"}},
@@ -209,10 +209,10 @@ func Test_ForwardService_DeleteConfig_FailedPreconditionPreservesState(t *testin
 	})
 	require.NoError(t, err)
 
-	_, err = svc.DeleteConfig(t.Context(), &forwardpb.DeleteConfigRequest{Name: "config"})
+	_, err = service.DeleteConfig(t.Context(), &forwardpb.DeleteConfigRequest{Name: "config"})
 	require.Equal(t, codes.FailedPrecondition, status.Code(err))
 
-	response, err := svc.ShowConfig(t.Context(), &forwardpb.ShowConfigRequest{Name: "config"})
+	response, err := service.ShowConfig(t.Context(), &forwardpb.ShowConfigRequest{Name: "config"})
 	require.NoError(t, err)
 	require.Equal(t, "device0", response.GetRules()[0].GetAction().GetTarget())
 }
