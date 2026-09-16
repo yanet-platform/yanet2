@@ -9,6 +9,8 @@ import (
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	"go.uber.org/zap/zaptest/observer"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	dataplaneut "github.com/yanet-platform/yanet2/bindings/go/dataplane_ut"
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
@@ -162,7 +164,7 @@ func TestCountersWorkersRejectsInvalidPoolSnapshot(t *testing.T) {
 	response, err := svc.Workers(t.Context(), &ynpb.WorkerCountersRequest{})
 
 	require.Nil(t, response)
-	require.Error(t, err)
+	require.Equal(t, codes.Internal, status.Code(err))
 	require.Contains(t, err.Error(), "worker 0")
 }
 

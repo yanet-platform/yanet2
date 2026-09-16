@@ -122,7 +122,7 @@ func (m *Counters) ByTags(
 			errors.Is(err, ffi.ErrInvalidTag) {
 			return nil, status.Error(codes.InvalidArgument, err.Error())
 		}
-		return nil, err
+		return nil, status.Error(codes.Internal, err.Error())
 	}
 
 	response := &ynpb.CountersByTagsResponse{
@@ -154,7 +154,7 @@ func (m *Counters) Workers(
 	dpConfig := m.shm.DPConfig(m.instanceID)
 	workers, err := dpConfig.WorkerCounters()
 	if err != nil {
-		return nil, err
+		return nil, status.Error(codes.Internal, err.Error())
 	}
 
 	response := &ynpb.WorkerCountersResponse{
@@ -200,7 +200,7 @@ func (m *Counters) Ports(
 	dpConfig := m.shm.DPConfig(m.instanceID)
 	counters, err := dpConfig.PortCounters()
 	if err != nil {
-		return nil, err
+		return nil, status.Error(codes.Internal, err.Error())
 	}
 
 	response := &ynpb.PortCountersResponse{
