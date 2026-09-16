@@ -784,6 +784,8 @@ l3b_virtual_service_process(
 
 	struct real_server *real_servers =
 		ADDR_OF(&virtual_service->real_servers);
+	uint64_t *real_counter_ids =
+		ADDR_OF(&virtual_service->real_counter_ids);
 
 	// An existing session keeps its backend while that backend is still
 	// listed — matched by address, so the session survives service
@@ -824,9 +826,7 @@ l3b_virtual_service_process(
 			);
 
 			l3b_counter_add(
-				counters,
-				virtual_service->real_counter_ids[pinned_index],
-				packet
+				counters, real_counter_ids[pinned_index], packet
 			);
 			l3b_service_flags_apply(virtual_service, packet);
 			return l3b_real_server_process(
@@ -880,9 +880,7 @@ l3b_virtual_service_process(
 		);
 	}
 
-	l3b_counter_add(
-		counters, virtual_service->real_counter_ids[real_index], packet
-	);
+	l3b_counter_add(counters, real_counter_ids[real_index], packet);
 	l3b_service_flags_apply(virtual_service, packet);
 	return l3b_real_server_process(
 		virtual_service, &real_servers[real_index], packet
