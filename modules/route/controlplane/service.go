@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"maps"
 	"slices"
-	"strings"
 	"time"
 
 	"google.golang.org/grpc"
@@ -205,10 +204,6 @@ func (m *RouteService) ShowFIB(
 	req *routepb.ShowFIBRequest,
 ) (*routepb.ShowFIBResponse, error) {
 	name := req.GetName()
-	if name == "" {
-		return nil, status.Error(codes.InvalidArgument, "module config name is required")
-	}
-
 	entries, err := m.backend.DumpFIB(name)
 	if errors.Is(err, ffi.ErrNotFound) {
 		return nil, status.Errorf(codes.NotFound, "config %q not found", name)
@@ -257,9 +252,6 @@ func (m *RouteService) DeleteConfig(
 	req *routepb.DeleteConfigRequest,
 ) (*routepb.DeleteConfigResponse, error) {
 	name := req.GetName()
-	if name == "" {
-		return nil, status.Error(codes.InvalidArgument, "module config name is required")
-	}
 
 	// The module goes first: it links the object, and a linked object
 	// refuses deletion. Either half may already be gone after a failed
@@ -319,62 +311,23 @@ func (m *RouteService) resolveNexthopCounters(entries []*routepb.FIBEntry) error
 				continue
 			}
 
-			generated := counter == ""
-			if generated {
+			if counter == "" {
 				counter = materializeNexthopCounter(nh.GetDevice(), nh.GetDstMac().EUI48())
 				nh.Counter = counter
-			} else if !strings.HasPrefix(counter, nexthopCounterPrefix) {
-				return status.Errorf(
-					codes.InvalidArgument,
-					"nexthop counter %q must start with %q",
-					counter,
-					nexthopCounterPrefix,
-				)
 			}
 
-			// Rejected rather than silently truncated at the C strnlen
-			// boundary, which would diverge from the name registered later.
-			if strings.IndexByte(counter, 0) >= 0 {
+			hardwareRoute := newHardwareRoute(nh)
+			if prior, ok := identityCounters[hardwareRoute]; ok && prior != counter {
 				return status.Errorf(
 					codes.InvalidArgument,
-					"nexthop counter %q must not contain a NUL byte",
+					"nexthop %s (device %q) carries conflicting counter names %q and %q",
+					hardwareRoute,
+					hardwareRoute.Device,
+					prior,
 					counter,
 				)
 			}
-
-			if len(counter) > croute.CounterNameMaxLen {
-				if generated {
-					return status.Errorf(
-						codes.InvalidArgument,
-						"generated nexthop counter %q for device %q exceeds the maximum length of %d",
-						counter,
-						nh.GetDevice(),
-						croute.CounterNameMaxLen,
-					)
-				}
-				return status.Errorf(
-					codes.InvalidArgument,
-					"nexthop counter %q exceeds the maximum length of %d",
-					counter,
-					croute.CounterNameMaxLen,
-				)
-			}
-
-			// Identity-parse failures are left for the FIB build to
-			// reject, this check only needs the identity, not full validation.
-			if hardwareRoute, err := newHardwareRoute(nh); err == nil {
-				if prior, ok := identityCounters[hardwareRoute]; ok && prior != counter {
-					return status.Errorf(
-						codes.InvalidArgument,
-						"nexthop %s (device %q) carries conflicting counter names %q and %q",
-						hardwareRoute,
-						hardwareRoute.Device,
-						prior,
-						counter,
-					)
-				}
-				identityCounters[hardwareRoute] = counter
-			}
+			identityCounters[hardwareRoute] = counter
 		}
 	}
 
@@ -387,10 +340,6 @@ func (m *RouteService) UpdateFIB(
 	req *routepb.UpdateFIBRequest,
 ) (*routepb.UpdateFIBResponse, error) {
 	name := req.GetModuleName()
-	if name == "" {
-		return nil, status.Error(codes.InvalidArgument, "module_name is required")
-	}
-
 	entries := req.GetEntries()
 	for _, entry := range entries {
 		start, end, err := entry.GetRange().ToRange()
@@ -400,18 +349,11 @@ func (m *RouteService) UpdateFIB(
 		if start.Compare(end) > 0 {
 			return nil, status.Errorf(codes.InvalidArgument, "invalid range: start %s is after end %s", start, end)
 		}
-		// A name the module's fixed-size device table cannot hold is a
-		// request error, rejected before anything is built.
-		for _, nh := range entry.GetNexthops() {
-			if err := ffi.ValidateDeviceName(nh.GetDevice()); err != nil {
-				return nil, status.Errorf(codes.InvalidArgument, "invalid device name %q: %v", nh.GetDevice(), err)
-			}
-		}
 	}
 
-	// Runs before the backend call: a disabled-but-set or over-long name is
-	// rejected before anything is applied, and the generated name written
-	// onto nh.Counter is what the backend and the FIBEntry list agree on.
+	// Runs before the backend call: a disabled-but-set counter is rejected
+	// before anything is applied, and the generated name written onto
+	// nh.Counter is what the backend and the FIBEntry list agree on.
 	if err := m.resolveNexthopCounters(entries); err != nil {
 		return nil, err
 	}
