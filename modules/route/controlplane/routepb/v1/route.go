@@ -25,6 +25,9 @@ func (m *ShowFIBRequest) Validate() error {
 	if m.GetName() == "" {
 		return errors.New("name is required")
 	}
+	if m.GetIpv4Only() && m.GetIpv6Only() {
+		return errors.New("ipv4_only and ipv6_only must not both be set")
+	}
 
 	return nil
 }
@@ -35,6 +38,12 @@ func (m *FIBNexthop) Validate() error {
 	}
 	if m.GetDstMac() == nil {
 		return errors.New("dst_mac is required")
+	}
+	if m.GetSrcMac().GetAddr()>>48 != 0 {
+		return errors.New("src_mac must be an EUI-48 address")
+	}
+	if m.GetDstMac().GetAddr()>>48 != 0 {
+		return errors.New("dst_mac must be an EUI-48 address")
 	}
 
 	device := m.GetDevice()

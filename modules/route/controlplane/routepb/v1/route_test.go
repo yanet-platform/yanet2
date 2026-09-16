@@ -46,6 +46,8 @@ func Test_DeleteConfigRequest_Validate(t *testing.T) {
 
 // Test_ShowFIBRequest_Validate verifies that FIB inspection requires a
 // configuration name while a named request passes unchanged.
+//
+// Both family filters together are rejected.
 func Test_ShowFIBRequest_Validate(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -54,6 +56,13 @@ func Test_ShowFIBRequest_Validate(t *testing.T) {
 	}{
 		{name: "empty name", request: &routepb.ShowFIBRequest{}, message: "name is required"},
 		{name: "named request", request: &routepb.ShowFIBRequest{Name: "route0"}},
+		{name: "IPv4 only", request: &routepb.ShowFIBRequest{Name: "route0", Ipv4Only: true}},
+		{name: "IPv6 only", request: &routepb.ShowFIBRequest{Name: "route0", Ipv6Only: true}},
+		{
+			name:    "both family filters",
+			request: &routepb.ShowFIBRequest{Name: "route0", Ipv4Only: true, Ipv6Only: true},
+			message: "ipv4_only and ipv6_only must not both be set",
+		},
 		{name: "nil request", request: nil, message: "name is required"},
 	}
 
@@ -165,6 +174,8 @@ func Test_FIBEntry_Validate(t *testing.T) {
 
 // Test_FIBNexthop_Validate verifies that required fields and C-bound device
 // and explicit counter rules are reported with the field that failed.
+//
+// A MAC address wider than EUI-48 is rejected.
 func Test_FIBNexthop_Validate(t *testing.T) {
 	counterPrefix := "nexthop_"
 
@@ -189,6 +200,33 @@ func Test_FIBNexthop_Validate(t *testing.T) {
 				Device: "eth0",
 			},
 			message: "dst_mac is required",
+		},
+		{
+			name: "broadcast MACs",
+			nexthop: func() *routepb.FIBNexthop {
+				result := validNexthop()
+				result.SrcMac = &commonpb.MACAddress{Addr: 0xFFFF_FFFF_FFFF}
+				result.DstMac = &commonpb.MACAddress{Addr: 0xFFFF_FFFF_FFFF}
+				return result
+			}(),
+		},
+		{
+			name: "source MAC wider than EUI-48",
+			nexthop: func() *routepb.FIBNexthop {
+				result := validNexthop()
+				result.SrcMac = &commonpb.MACAddress{Addr: 1 << 48}
+				return result
+			}(),
+			message: "src_mac must be an EUI-48 address",
+		},
+		{
+			name: "destination MAC wider than EUI-48",
+			nexthop: func() *routepb.FIBNexthop {
+				result := validNexthop()
+				result.DstMac = &commonpb.MACAddress{Addr: 1 << 48}
+				return result
+			}(),
+			message: "dst_mac must be an EUI-48 address",
 		},
 		{
 			name:    "missing device",

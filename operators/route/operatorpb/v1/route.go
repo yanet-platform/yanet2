@@ -6,6 +6,9 @@ func (m *ShowRoutesRequest) Validate() error {
 	if m.GetName() == "" {
 		return errors.New("name is required")
 	}
+	if m.GetIpv4Only() && m.GetIpv6Only() {
+		return errors.New("ipv4_only and ipv6_only must not both be set")
+	}
 
 	return nil
 }

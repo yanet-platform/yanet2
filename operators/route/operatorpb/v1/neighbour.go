@@ -12,6 +12,12 @@ func (m *NeighbourEntry) Validate() error {
 	if m.GetLinkAddr() == nil {
 		return errors.New("link_addr is required")
 	}
+	if m.GetHardwareAddr().GetAddr()>>48 != 0 {
+		return errors.New("hardware_addr must be an EUI-48 address")
+	}
+	if m.GetLinkAddr().GetAddr()>>48 != 0 {
+		return errors.New("link_addr must be an EUI-48 address")
+	}
 
 	return nil
 }
