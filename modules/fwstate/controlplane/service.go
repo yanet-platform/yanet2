@@ -342,7 +342,12 @@ func (m *FWStateService) DeleteConfig(
 		return nil, status.Error(codes.NotFound, "config not found")
 	}
 	if err != nil {
-		return nil, status.Errorf(codes.Internal, "could not delete fwstate module config '%s': %v", name, err)
+		code := codes.Internal
+		if errors.Is(err, ffi.ErrFailedPrecondition) {
+			// A chain still references the config.
+			code = codes.FailedPrecondition
+		}
+		return nil, status.Errorf(code, "could not delete fwstate module config '%s': %v", name, err)
 	}
 
 	m.log.Info("successfully deleted FWState module config", zap.String("name", name))

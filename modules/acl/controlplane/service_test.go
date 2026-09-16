@@ -368,6 +368,14 @@ func (m *fakeBackend) SetUpdateErr(err error) {
 	m.updateErr = err
 }
 
+// SetDeleteErr makes every DeleteModule call return err.
+func (m *fakeBackend) SetDeleteErr(err error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	m.deleteErr = err
+}
+
 // ModuleCount returns the number of currently registered module handles.
 func (m *fakeBackend) ModuleCount() int {
 	m.mu.Lock()
@@ -880,6 +888,47 @@ func TestDeleteConfig_LiveNameTombstones(t *testing.T) {
 
 	_, err = svc.DeleteConfig(t.Context(), &aclpb.DeleteConfigRequest{Name: name})
 	require.Equal(t, codes.NotFound, status.Code(err), "deleting an already-deleted name must report NotFound")
+}
+
+// TestDeleteConfig_Refused verifies that a refused delete maps its error kind
+// to the status code and leaves the config in place.
+func TestDeleteConfig_Refused(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+		code codes.Code
+	}{
+		{
+			name: "referenced by a chain",
+			err:  fmt.Errorf("module 'acl:acl0' not found in chain 'chain0': %w", ffi.ErrFailedPrecondition),
+			code: codes.FailedPrecondition,
+		},
+		{
+			name: "backend failure",
+			err:  errors.New("dp_config_wait_for_gen timed out"),
+			code: codes.Internal,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			backend := newFakeBackend()
+			svc := newTestService(backend)
+
+			_, err := svc.UpdateConfig(t.Context(), &aclpb.UpdateConfigRequest{
+				Name:  "acl0",
+				Rules: []*aclpb.Rule{{Actions: []*aclpb.Action{{Kind: aclpb.ActionKind_ACTION_KIND_PASS}}}},
+			})
+			require.NoError(t, err)
+
+			backend.SetDeleteErr(tc.err)
+			_, err = svc.DeleteConfig(t.Context(), &aclpb.DeleteConfigRequest{Name: "acl0"})
+			require.Equal(t, tc.code, status.Code(err))
+
+			_, err = svc.ShowConfig(t.Context(), &aclpb.ShowConfigRequest{Name: "acl0"})
+			require.NoError(t, err)
+		})
+	}
 }
 
 // TestDeleteConfig_WaitsBehindInFlightCreate verifies that a DeleteConfig

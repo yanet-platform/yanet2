@@ -15,6 +15,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/yanet-platform/yanet2/controlplane/configstore"
+	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/modules/pdump/controlplane/pdumppb/v1"
 )
 
@@ -167,7 +168,12 @@ func (m *PdumpService) DeleteConfig(
 
 	err := m.configs.Delete(name, func(*capture) error {
 		if err := m.backend.DeleteModule(name); err != nil {
-			return status.Errorf(codes.Internal, "failed to delete module config %q: %v", name, err)
+			code := codes.Internal
+			if errors.Is(err, ffi.ErrFailedPrecondition) {
+				// A chain still references the config.
+				code = codes.FailedPrecondition
+			}
+			return status.Errorf(code, "failed to delete module config %q: %v", name, err)
 		}
 		m.log.Info("deleted pdump config", zap.String("name", name))
 

@@ -2,6 +2,7 @@ package nat64
 
 import (
 	"errors"
+	"fmt"
 	"net/netip"
 	"sync/atomic"
 	"testing"
@@ -74,15 +75,16 @@ func (m *mockBackend) DeleteModule(name string) error {
 	return nil
 }
 
-// refusingDeleteBackend updates like mockBackend but refuses every delete,
-// modeling a config still referenced by a live generation.
+// refusingDeleteBackend updates like mockBackend but refuses every delete
+// with err.
 type refusingDeleteBackend struct {
 	mockBackend
+	err error
 }
 
 func (m *refusingDeleteBackend) DeleteModule(name string) error {
 	m.deletedName = name
-	return errInjectedBackend
+	return m.err
 }
 
 // parkingBackend updates like mockBackend but refuses to release the first
@@ -467,31 +469,52 @@ func Test_NAT64Service_DeleteConfig_RemovesConfig(t *testing.T) {
 	require.Equal(t, codes.NotFound, status.Code(err))
 }
 
-// Test_NAT64Service_DeleteConfig_Referenced verifies that a backend refusal
-// surfaces as Internal and leaves the config in place.
-func Test_NAT64Service_DeleteConfig_Referenced(t *testing.T) {
-	backend := &refusingDeleteBackend{}
-	service := NewNAT64Service(backend)
-	ctx := t.Context()
+// Test_NAT64Service_DeleteConfig_Refused verifies that a refused delete maps
+// its error kind to the status code and leaves the config in place.
+func Test_NAT64Service_DeleteConfig_Refused(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+		code codes.Code
+	}{
+		{
+			name: "referenced by a chain",
+			err:  fmt.Errorf("module 'nat64:nat64-0' not found in chain 'chain0': %w", ffi.ErrFailedPrecondition),
+			code: codes.FailedPrecondition,
+		},
+		{
+			name: "backend failure",
+			err:  errInjectedBackend,
+			code: codes.Internal,
+		},
+	}
 
-	_, err := service.AddPrefix(ctx, &nat64pb.AddPrefixRequest{
-		Name:   "nat64-0",
-		Prefix: mustIPv6Prefix(t, "64:ff9b::/96"),
-	})
-	require.NoError(t, err)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			backend := &refusingDeleteBackend{err: tc.err}
+			service := NewNAT64Service(backend)
+			ctx := t.Context()
 
-	resp, err := service.DeleteConfig(ctx, &nat64pb.DeleteConfigRequest{Name: "nat64-0"})
-	require.Nil(t, resp)
-	require.Equal(t, codes.Internal, status.Code(err))
-	require.Equal(t, "nat64-0", backend.deletedName)
+			_, err := service.AddPrefix(ctx, &nat64pb.AddPrefixRequest{
+				Name:   "nat64-0",
+				Prefix: mustIPv6Prefix(t, "64:ff9b::/96"),
+			})
+			require.NoError(t, err)
 
-	list, err := service.ListConfigs(ctx, &nat64pb.ListConfigsRequest{})
-	require.NoError(t, err)
-	require.Equal(t, []string{"nat64-0"}, list.Configs)
+			resp, err := service.DeleteConfig(ctx, &nat64pb.DeleteConfigRequest{Name: "nat64-0"})
+			require.Nil(t, resp)
+			require.Equal(t, tc.code, status.Code(err))
+			require.Equal(t, "nat64-0", backend.deletedName)
 
-	show, err := service.ShowConfig(ctx, &nat64pb.ShowConfigRequest{Name: "nat64-0"})
-	require.NotNil(t, show)
-	require.NoError(t, err)
+			list, err := service.ListConfigs(ctx, &nat64pb.ListConfigsRequest{})
+			require.NoError(t, err)
+			require.Equal(t, []string{"nat64-0"}, list.Configs)
+
+			show, err := service.ShowConfig(ctx, &nat64pb.ShowConfigRequest{Name: "nat64-0"})
+			require.NotNil(t, show)
+			require.NoError(t, err)
+		})
+	}
 }
 
 // Test_NAT64Service_DeleteConfig_ParksThenReclaims verifies a handle whose

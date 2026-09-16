@@ -418,7 +418,12 @@ func (m *ACLService) DeleteConfig(
 	name := req.GetName()
 	err := m.configs.Delete(name, func(*aclConfig) error {
 		if err := m.backend.DeleteModule(name); err != nil {
-			return status.Errorf(codes.Internal, "could not delete acl module config '%s': %v", name, err)
+			code := codes.Internal
+			if errors.Is(err, ffi.ErrFailedPrecondition) {
+				// A chain still references the config.
+				code = codes.FailedPrecondition
+			}
+			return status.Errorf(code, "could not delete acl module config '%s': %v", name, err)
 		}
 		m.log.Info("successfully deleted ACL module config", zap.String("name", name))
 

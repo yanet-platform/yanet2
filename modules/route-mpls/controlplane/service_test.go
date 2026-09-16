@@ -14,6 +14,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
+	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/modules/route-mpls/bindings/go/croutempls"
 	routemplspb "github.com/yanet-platform/yanet2/modules/route-mpls/controlplane/routemplspb/v1"
 )
@@ -333,6 +334,59 @@ func Test_RouteMPLSService_DeleteConfig_HappyPath(t *testing.T) {
 	list, err := svc.ListConfigs(ctx, &routemplspb.ListConfigsRequest{})
 	require.NoError(t, err)
 	assert.Empty(t, list.Configs)
+}
+
+// refusingDeleteBackend updates like mockBackend but refuses every delete
+// with err.
+type refusingDeleteBackend struct {
+	mockBackend
+	err error
+}
+
+func (m *refusingDeleteBackend) DeleteModule(name string) error {
+	return m.err
+}
+
+// Test_RouteMPLSService_DeleteConfig_Refused verifies that a refused delete
+// maps its error kind to the status code and leaves the config in place.
+func Test_RouteMPLSService_DeleteConfig_Refused(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+		code codes.Code
+	}{
+		{
+			name: "referenced by a chain",
+			err:  fmt.Errorf("module 'route-mpls:mpls0' not found in chain 'chain0': %w", ffi.ErrFailedPrecondition),
+			code: codes.FailedPrecondition,
+		},
+		{
+			name: "backend failure",
+			err:  errInjectedBackend,
+			code: codes.Internal,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			svc := NewRouteMPLSService(&refusingDeleteBackend{err: tc.err})
+			ctx := t.Context()
+
+			_, err := svc.CreateConfig(ctx, &routemplspb.CreateConfigRequest{
+				Name:  "mpls0",
+				Rules: []*routemplspb.Rule{makeRule(t, "10.0.0.0/24", "203.0.113.1", 100)},
+			})
+			require.NoError(t, err)
+
+			resp, err := svc.DeleteConfig(ctx, &routemplspb.DeleteConfigRequest{Name: "mpls0"})
+			require.Nil(t, resp)
+			require.Equal(t, tc.code, status.Code(err))
+
+			list, err := svc.ListConfigs(ctx, &routemplspb.ListConfigsRequest{})
+			require.NoError(t, err)
+			assert.Equal(t, []string{"mpls0"}, list.Configs)
+		})
+	}
 }
 
 func Test_RouteMPLSService_CreateConfig_BackendFailure(t *testing.T) {
