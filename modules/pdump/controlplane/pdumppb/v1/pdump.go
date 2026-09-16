@@ -27,6 +27,9 @@ func (m *SetConfigRequest) Validate() error {
 	if config == nil {
 		return errors.New("config is required")
 	}
+	if m.GetUpdateMask() == nil {
+		return errors.New("update_mask is required")
+	}
 
 	for _, path := range m.GetUpdateMask().GetPaths() {
 		switch path {

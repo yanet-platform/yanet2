@@ -71,6 +71,19 @@ func Test_SetConfigRequest_Validate(t *testing.T) {
 			message: "config is required",
 		},
 		{
+			name:    "missing update mask",
+			request: &pdumppb.SetConfigRequest{Name: "pdump0", Config: &pdumppb.Config{Filter: "udp"}},
+			message: "update_mask is required",
+		},
+		{
+			name: "update mask without paths",
+			request: &pdumppb.SetConfigRequest{
+				Name:       "pdump0",
+				Config:     &pdumppb.Config{Filter: "udp"},
+				UpdateMask: &pdumppb.FieldMask{},
+			},
+		},
+		{
 			name: "zero mode is accepted",
 			request: &pdumppb.SetConfigRequest{
 				Name:       "pdump0",
@@ -189,13 +202,6 @@ func Test_SetConfigRequest_Validate(t *testing.T) {
 				Name:       "pdump0",
 				Config:     &pdumppb.Config{Filter: "tcp"},
 				UpdateMask: &pdumppb.FieldMask{Paths: []string{"filter"}},
-			},
-		},
-		{
-			name: "empty update mask",
-			request: &pdumppb.SetConfigRequest{
-				Name:   "pdump0",
-				Config: &pdumppb.Config{},
 			},
 		},
 	}
