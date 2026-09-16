@@ -125,9 +125,9 @@ func TestDeleteConfigUnknownConfig(t *testing.T) {
 	require.Equal(t, codes.NotFound, status.Code(err))
 }
 
-// TestUpdateConfigBackendFailureReturnsInternal verifies that a backend
-// update failure returns Internal without publishing a configuration.
-func TestUpdateConfigBackendFailureReturnsInternal(t *testing.T) {
+// Test_ForwardService_UpdateConfig_BackendFailureReturnsInternal verifies
+// that a backend update failure returns Internal before publication.
+func Test_ForwardService_UpdateConfig_BackendFailureReturnsInternal(t *testing.T) {
 	backendError := errors.New("shared memory unavailable")
 	svc := forward.NewForwardService(&mockBackend{updateError: backendError})
 
@@ -144,9 +144,9 @@ func TestUpdateConfigBackendFailureReturnsInternal(t *testing.T) {
 	require.Equal(t, codes.NotFound, status.Code(err))
 }
 
-// TestUpdateConfigBackendFailurePreservesExistingConfig verifies that a
-// failed replacement returns Internal without changing the current config.
-func TestUpdateConfigBackendFailurePreservesExistingConfig(t *testing.T) {
+// Test_ForwardService_UpdateConfig_BackendFailurePreservesState verifies
+// that a failed replacement returns Internal without changing current state.
+func Test_ForwardService_UpdateConfig_BackendFailurePreservesState(t *testing.T) {
 	backend := &mockBackend{}
 	svc := forward.NewForwardService(backend)
 
@@ -172,7 +172,9 @@ func TestUpdateConfigBackendFailurePreservesExistingConfig(t *testing.T) {
 	require.Equal(t, "device0", response.GetRules()[0].GetAction().GetTarget())
 }
 
-func TestDeleteConfigBackendFailureReturnsInternalAndPreservesConfig(t *testing.T) {
+// Test_ForwardService_DeleteConfig_BackendFailureReturnsInternal verifies
+// that a backend delete failure leaves the published configuration available.
+func Test_ForwardService_DeleteConfig_BackendFailureReturnsInternal(t *testing.T) {
 	backendError := errors.New("shared memory unavailable")
 	svc := forward.NewForwardService(&mockBackend{deleteError: backendError})
 
@@ -193,9 +195,9 @@ func TestDeleteConfigBackendFailureReturnsInternalAndPreservesConfig(t *testing.
 	require.Equal(t, "device0", response.GetRules()[0].GetAction().GetTarget())
 }
 
-// TestDeleteConfigFailedPreconditionReturnsFailedPrecondition verifies that
-// the store keeps a referenced configuration available after refusal.
-func TestDeleteConfigFailedPreconditionReturnsFailedPrecondition(t *testing.T) {
+// Test_ForwardService_DeleteConfig_FailedPreconditionPreservesState verifies
+// that state refusal returns FailedPrecondition without unpublishing.
+func Test_ForwardService_DeleteConfig_FailedPreconditionPreservesState(t *testing.T) {
 	backendError := fmt.Errorf("module is still referenced: %w", ffi.ErrFailedPrecondition)
 	svc := forward.NewForwardService(&mockBackend{deleteError: backendError})
 
