@@ -1,3 +1,7 @@
+.git
+.agent-state/
+.claude/
+**/node_modules/
 build/
 build-*/
 target/

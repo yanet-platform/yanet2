@@ -215,3 +215,24 @@ func (m *NeighbourService) RemoveNeighbours(
 
 	return &operatorpb.RemoveNeighboursResponse{}, nil
 }
+
+// SwapNeighbours validates a complete observation before replacing its table.
+//
+// The response acknowledges the table replacement; FIB application follows
+// asynchronously when the merged hardware routes change.
+func (m *NeighbourService) SwapNeighbours(
+	ctx context.Context,
+	req *operatorpb.SwapNeighboursRequest,
+) (*operatorpb.SwapNeighboursResponse, error) {
+	entries, err := req.ToNeighbourEntries()
+	if err != nil {
+		return nil, status.Error(codes.InvalidArgument, err.Error())
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, status.FromContextError(err).Err()
+	}
+	if err := m.neighTable.SwapSource(req.GetTable(), entries); err != nil {
+		return nil, status.Errorf(codes.NotFound, "failed to swap neighbours: %v", err)
+	}
+	return &operatorpb.SwapNeighboursResponse{}, nil
+}
