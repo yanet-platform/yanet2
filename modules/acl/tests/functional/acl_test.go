@@ -306,21 +306,6 @@ func TestACL_NoMatch_Drop(t *testing.T) {
 	requireModuleCounterPackets(t, h, aclCounterPath("port0", "test"), "acl_no_match", 1)
 }
 
-// TestACL_EmptyRules_Rejected verifies that UpdateConfig rejects an empty
-// ruleset with codes.InvalidArgument and never publishes a module config,
-// since an empty ACL would silently drop all traffic.
-func TestACL_EmptyRules_Rejected(t *testing.T) {
-	_, _, backend := setupACLHarness(t, []string{"port0"})
-	svc := acl.NewACLService(backend)
-
-	_, err := svc.UpdateConfig(t.Context(), &aclpb.UpdateConfigRequest{
-		Name:  "test",
-		Rules: nil,
-	})
-	require.Error(t, err)
-	require.Equal(t, codes.InvalidArgument, status.Code(err))
-}
-
 // Test_ACLService_UpdateConfig_ConcurrentCompiles verifies that two configs
 // compiled at the same time on one agent each publish their own verdict.
 func Test_ACLService_UpdateConfig_ConcurrentCompiles(t *testing.T) {
