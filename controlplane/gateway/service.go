@@ -4,7 +4,9 @@ import (
 	"context"
 
 	"go.uber.org/zap"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	ynpb "github.com/yanet-platform/yanet2/controlplane/ynpb/v1"
@@ -132,7 +134,7 @@ func (m *GatewayService) Register(
 
 	b, err := dialBackend(backendDesc.GetEndpoint(), insecure.NewCredentials())
 	if err != nil {
-		return nil, err
+		return nil, status.Error(codes.Internal, err.Error())
 	}
 
 	regStatus := m.registry.RegisterBackend(backendDesc.GetName(), b, kind)
