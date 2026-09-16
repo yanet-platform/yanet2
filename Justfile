@@ -61,6 +61,8 @@ fuzz MODULE="":
     fi
     if [ ! -d build ]; then
         env CC=clang CXX=clang++ meson setup -Dbuildtype=debug -Doptimization=0 -Dfuzzing=enabled build
+    else
+        env CC=clang CXX=clang++ meson setup -Dbuildtype=debug -Doptimization=0 -Dfuzzing=enabled --reconfigure build
     fi
     env CC=clang CXX=clang++ meson compile -C build
     echo "Ready to fuzz the following modules:"

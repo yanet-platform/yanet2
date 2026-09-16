@@ -83,6 +83,8 @@ jobs:
           # test still passes.
           UBSAN_OPTIONS: halt_on_error=1:abort_on_error=1:print_summary=1:print_stacktrace=1
         run: |
+          # Merge the ASAN tag with any inherited Go tags before every Go call.
+          export GOFLAGS="$(scripts/go-flags.sh yanet_asan)"
           # Listing targets executes TestMain, and this suite's TestMain
           # boots a VM from an image never staged in this job.
           excluded_pkg="github.com/yanet-platform/yanet2/tests/functional/main"

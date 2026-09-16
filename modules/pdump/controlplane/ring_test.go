@@ -19,7 +19,18 @@ import (
 	"github.com/yanet-platform/yanet2/modules/pdump/controlplane/pdumppb/v1"
 )
 
-// Test constants and helpers
+// Test_MaxMode_MatchesC verifies that the pure-Go mode bound matches the
+// dataplane bitmap bound.
+func Test_MaxMode_MatchesC(t *testing.T) {
+	require.Equal(t, uint32(pdumppb.MaxMode), maxMode)
+}
+
+// Test_MaxRingSize_MatchesC verifies that the pure-Go ring limit matches the
+// allocator's build-specific usable limit.
+func Test_MaxRingSize_MatchesC(t *testing.T) {
+	require.Equal(t, uint32(pdumppb.MaxRingSize), maxRingSize)
+}
+
 const (
 	testRingSize      = 1024
 	testReadChunkSize = 512
