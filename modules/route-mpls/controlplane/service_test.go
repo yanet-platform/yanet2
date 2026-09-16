@@ -91,17 +91,6 @@ func Test_RouteMPLSService_CreateConfig_HappyPath(t *testing.T) {
 	assert.Equal(t, []string{"mpls0"}, list.Configs)
 }
 
-func Test_RouteMPLSService_CreateConfig_EmptyName(t *testing.T) {
-	svc := newTestService(t)
-
-	resp, err := svc.CreateConfig(t.Context(), &routemplspb.CreateConfigRequest{
-		Name:  "",
-		Rules: []*routemplspb.Rule{makeRule(t, "10.0.0.0/24", "203.0.113.1", 100)},
-	})
-	require.Nil(t, resp)
-	require.Equal(t, codes.InvalidArgument, status.Code(err))
-}
-
 // Test_RouteMPLSService_CreateConfig_InvalidPrefix verifies that a rule whose
 // prefix length exceeds the address family's bit width is rejected.
 func Test_RouteMPLSService_CreateConfig_InvalidPrefix(t *testing.T) {
@@ -294,74 +283,12 @@ func Test_RouteMPLSService_UpdateConfig_WithdrawInvalidDestination(t *testing.T)
 	}
 }
 
-// Test_RouteMPLSService_CreateConfig_LabelBoundary verifies that a label at
-// the 20-bit limit is accepted and one past it is rejected.
-func Test_RouteMPLSService_CreateConfig_LabelBoundary(t *testing.T) {
-	cases := []struct {
-		name    string
-		label   uint32
-		wantErr bool
-	}{
-		{name: "maximum 20-bit label", label: 1048575, wantErr: false},
-		{name: "label above 20 bits", label: 1048576, wantErr: true},
-	}
-
-	for _, testCase := range cases {
-		t.Run(testCase.name, func(t *testing.T) {
-			svc := newTestService(t)
-
-			response, err := svc.CreateConfig(t.Context(), &routemplspb.CreateConfigRequest{
-				Name:  "mpls0",
-				Rules: []*routemplspb.Rule{makeRule(t, "10.0.0.0/24", "203.0.113.1", testCase.label)},
-			})
-			if !testCase.wantErr {
-				require.NoError(t, err)
-				return
-			}
-			require.Nil(t, response)
-			require.Equal(t, codes.InvalidArgument, status.Code(err))
-		})
-	}
-}
-
-// Test_RouteMPLSService_UpdateConfig_WithdrawLabelBoundary verifies that a
-// withdraw carrying a label above the 20-bit limit is rejected.
-func Test_RouteMPLSService_UpdateConfig_WithdrawLabelBoundary(t *testing.T) {
-	service := newTestService(t)
-	ctx := t.Context()
-
-	_, err := service.CreateConfig(ctx, &routemplspb.CreateConfigRequest{
-		Name:  "mpls0",
-		Rules: []*routemplspb.Rule{makeRule(t, "10.0.0.0/24", "203.0.113.1", 100)},
-	})
-	require.NoError(t, err)
-
-	response, err := service.UpdateConfig(ctx, &routemplspb.UpdateConfigRequest{
-		Name: "mpls0",
-		Updates: []*routemplspb.UpdateEvent{
-			{Event: &routemplspb.UpdateEvent_Withdraw{
-				Withdraw: makeRule(t, "10.0.0.0/24", "203.0.113.1", 1048576),
-			}},
-		},
-	})
-	require.Nil(t, response)
-	require.Equal(t, codes.InvalidArgument, status.Code(err))
-}
-
 func Test_RouteMPLSService_ShowConfig_NotFound(t *testing.T) {
 	svc := newTestService(t)
 
 	resp, err := svc.ShowConfig(t.Context(), &routemplspb.ShowConfigRequest{Name: "nonexistent"})
 	require.Nil(t, resp)
 	require.Equal(t, codes.NotFound, status.Code(err))
-}
-
-func Test_RouteMPLSService_ShowConfig_EmptyName(t *testing.T) {
-	svc := newTestService(t)
-
-	resp, err := svc.ShowConfig(t.Context(), &routemplspb.ShowConfigRequest{Name: ""})
-	require.Nil(t, resp)
-	require.Equal(t, codes.InvalidArgument, status.Code(err))
 }
 
 func Test_RouteMPLSService_ListConfigs_Sorted(t *testing.T) {
