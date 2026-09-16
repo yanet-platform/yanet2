@@ -1,7 +1,7 @@
 import { useCallback, useRef, useState, useEffect } from 'react';
 import { useAsyncData } from '@yanet/core/hooks/useAsyncData';
 import { useConfigListCache } from '@yanet/core/hooks/useConfigListCache';
-import { pdumpApi, type PdumpConfig, type PdumpRecord } from '@yanet/core/api/pdump';
+import { pdumpApi, type PdumpRecord } from '@yanet/core/api/pdump';
 import { base64ToUint8Array, parsePacket, toaster } from '@yanet/core/utils';
 import type { PdumpConfigInfo, CapturedPacket } from './types';
 
@@ -69,17 +69,6 @@ export const usePdumpConfigs = () => {
         refetch,
         deleteConfig,
     };
-};
-
-export const usePdumpConfig = (configName: string) => {
-    const updateConfig = useCallback(
-        async (config: PdumpConfig) => {
-            await pdumpApi.setConfig(configName, config);
-        },
-        [configName]
-    );
-
-    return { updateConfig };
 };
 
 interface CaptureState {

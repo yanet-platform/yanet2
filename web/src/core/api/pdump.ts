@@ -56,7 +56,7 @@ export const pdumpApi = {
     setConfig: (
         name: string,
         config: PdumpConfig,
-        update_mask?: FieldMask,
+        update_mask: FieldMask,
         options?: CallOptions
     ): Promise<void> => {
         return pdumpService.callWithBody<void>(
