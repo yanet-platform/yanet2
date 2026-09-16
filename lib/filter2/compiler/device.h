@@ -236,12 +236,68 @@ filter_compile_attr_device_commit(
 	return &query_attr->attr;
 }
 
+static inline uint32_t
+filter_compile_attr_device_hash(
+	const struct filter_compile_attr_handlers *attr_handlers,
+	const struct filter_rule *rule
+) {
+	const struct filter_compile_attr_device_handlers *device_handlers =
+		container_of(
+			attr_handlers,
+			struct filter_compile_attr_device_handlers,
+			attr_handlers
+		);
+
+	struct filter_devices devices;
+	device_handlers->get_devices(rule, &devices);
+
+	uint32_t hash = devices.count;
+	for (uint32_t idx = 0; idx < devices.count; ++idx) {
+		hash = hash * 31 + devices.items[idx].id;
+	}
+	return hash;
+}
+
+static inline int
+filter_compile_attr_device_compare(
+	const struct filter_compile_attr_handlers *attr_handlers,
+	const struct filter_rule *first,
+	const struct filter_rule *second
+) {
+	const struct filter_compile_attr_device_handlers *device_handlers =
+		container_of(
+			attr_handlers,
+			struct filter_compile_attr_device_handlers,
+			attr_handlers
+		);
+
+	struct filter_devices first_devices;
+	struct filter_devices second_devices;
+	device_handlers->get_devices(first, &first_devices);
+	device_handlers->get_devices(second, &second_devices);
+
+	if (first_devices.count != second_devices.count) {
+		return 1;
+	}
+
+	for (uint32_t idx = 0; idx < first_devices.count; ++idx) {
+		if (first_devices.items[idx].id !=
+		    second_devices.items[idx].id) {
+			return 1;
+		}
+	}
+
+	return 0;
+}
+
 static const struct filter_compile_attr_handlers filter_compile_get_devices = {
 	.create = filter_compile_attr_device_create,
 	.size = filter_compile_attr_device_size,
 	.iter = filter_compile_attr_device_iter,
 	.rule_iter = filter_compile_attr_device_rule_iter,
 	.rule_is_any = filter_compile_attr_device_rule_is_any,
+	.hash = filter_compile_attr_device_hash,
+	.compare = filter_compile_attr_device_compare,
 	.commit = filter_compile_attr_device_commit,
 	.free_compile = filter_compile_attr_device_free,
 	.free_query = filter_query_attr_device_free,

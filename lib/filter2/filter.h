@@ -35,6 +35,12 @@
 
 #define FILTER_RULE_INVALID (uint32_t)0xffffffff
 
+/*
+ * Group of rules sharing the exact same attribute value inside one
+ * attribute; identifies no group.
+ */
+#define FILTER_GROUP_INVALID (uint32_t)0xffffffff
+
 struct filter_query_attr {};
 
 struct filter {

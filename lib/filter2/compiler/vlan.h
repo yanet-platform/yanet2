@@ -217,12 +217,64 @@ filter_compile_attr_vlan_commit(
 	return &query_attr->attr;
 }
 
+static inline uint32_t
+filter_compile_attr_vlan_hash(
+	const struct filter_compile_attr_handlers *attr_handlers,
+	const struct filter_rule *rule
+) {
+	const struct filter_compile_attr_vlan_handlers *vlan_handlers =
+		container_of(
+			attr_handlers,
+			struct filter_compile_attr_vlan_handlers,
+			attr_handlers
+		);
+
+	struct filter_vlan_ranges ranges;
+	vlan_handlers->get_vlan_ranges(rule, &ranges);
+
+	uint32_t hash = ranges.count;
+	for (uint32_t idx = 0; idx < ranges.count; ++idx) {
+		hash = hash * 31 + ranges.items[idx].from;
+		hash = hash * 31 + ranges.items[idx].to;
+	}
+	return hash;
+}
+
+static inline int
+filter_compile_attr_vlan_compare(
+	const struct filter_compile_attr_handlers *attr_handlers,
+	const struct filter_rule *first,
+	const struct filter_rule *second
+) {
+	const struct filter_compile_attr_vlan_handlers *vlan_handlers =
+		container_of(
+			attr_handlers,
+			struct filter_compile_attr_vlan_handlers,
+			attr_handlers
+		);
+
+	struct filter_vlan_ranges first_ranges;
+	struct filter_vlan_ranges second_ranges;
+	vlan_handlers->get_vlan_ranges(first, &first_ranges);
+	vlan_handlers->get_vlan_ranges(second, &second_ranges);
+
+	if (first_ranges.count != second_ranges.count) {
+		return 1;
+	}
+
+	return memcmp(first_ranges.items,
+		      second_ranges.items,
+		      first_ranges.count * sizeof(*first_ranges.items)) != 0;
+}
+
 static const struct filter_compile_attr_handlers
 	filter_compile_attr_vlan_handlers = {
 		.create = filter_compile_attr_vlan_create,
 		.size = filter_compile_attr_vlan_size,
 		.iter = filter_compile_attr_vlan_iter,
 		.rule_is_any = filter_compile_attr_vlan_rule_is_any,
+		.hash = filter_compile_attr_vlan_hash,
+		.compare = filter_compile_attr_vlan_compare,
 		.rule_iter = filter_compile_attr_vlan_rule_iter,
 		.commit = filter_compile_attr_vlan_commit,
 		.free_compile = filter_compile_attr_vlan_free,

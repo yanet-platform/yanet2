@@ -209,12 +209,33 @@ filter_compile_attr_ipfrag_commit(
 	return &query_attr->attr;
 }
 
+static inline uint32_t
+filter_compile_attr_ipfrag_hash(
+	const struct filter_compile_attr_handlers *attr_handlers,
+	const struct filter_rule *rule
+) {
+	(void)attr_handlers;
+	return (uint32_t)rule->fragment;
+}
+
+static inline int
+filter_compile_attr_ipfrag_compare(
+	const struct filter_compile_attr_handlers *attr_handlers,
+	const struct filter_rule *first,
+	const struct filter_rule *second
+) {
+	(void)attr_handlers;
+	return first->fragment != second->fragment;
+}
+
 static const struct filter_compile_attr_handlers
 	filter_compile_attr_ipfrag_handlers = {
 		.create = filter_compile_attr_ipfrag_create,
 		.size = filter_compile_attr_ipfrag_size,
 		.iter = filter_compile_attr_ipfrag_iter,
 		.rule_is_any = filter_compile_attr_ipfrag_rule_is_any,
+		.hash = filter_compile_attr_ipfrag_hash,
+		.compare = filter_compile_attr_ipfrag_compare,
 		.rule_iter = filter_compile_attr_ipfrag_rule_iter,
 		.commit = filter_compile_attr_ipfrag_commit,
 		.free_compile = filter_compile_attr_ipfrag_free,

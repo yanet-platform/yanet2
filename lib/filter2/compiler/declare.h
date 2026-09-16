@@ -1,9 +1,12 @@
 #pragma once
 
+#include "common/hash_index.h"
 #include "common/registry.h"
 #include "common/remap.h"
 
 #include "common/for_each.h"
+
+#include "lib/filter2/filter.h"
 
 #define FILTER_ATTR_COMPILE(name) &filter_compile_attr_##name.attr_handlers
 
@@ -84,6 +87,25 @@ typedef int (*filter_compile_attr_rule_is_any_func)(
 );
 
 /*
+ * Hash of the rule attribute value - the part of the rule the attribute
+ * is responsible for. Rules with equal values fall into the same group.
+ */
+typedef uint32_t (*filter_compile_attr_rule_hash_func)(
+	const struct filter_compile_attr_handlers *handlers,
+	const struct filter_rule *rule
+);
+
+/*
+ * Compares the attribute values of two rules, zero means the values are
+ * the same and the rules belong to the same group.
+ */
+typedef int (*filter_compile_attr_rule_compare_func)(
+	const struct filter_compile_attr_handlers *handlers,
+	const struct filter_rule *first,
+	const struct filter_rule *second
+);
+
+/*
  * A callback with pointer to a region value and associated custom pointer
  */
 typedef int (*filter_compile_attr_iter_cb_func)(uint32_t *value, void *data);
@@ -140,6 +162,8 @@ struct filter_compile_attr_handlers {
 	filter_compile_attr_create_func create;
 	filter_compile_attr_size_func size;
 	filter_compile_attr_rule_is_any_func rule_is_any;
+	filter_compile_attr_rule_hash_func hash;
+	filter_compile_attr_rule_compare_func compare;
 	filter_compile_attr_rule_iter_func rule_iter;
 	filter_compile_attr_iter_func iter;
 	filter_compile_attr_commit_func commit;
@@ -166,16 +190,41 @@ filter_compile_attr_compact(uint32_t *value, void *data) {
 	return 0;
 }
 
+struct filter_compile_attr_group_ctx {
+	const struct filter_compile_attr_handlers *attr_handlers;
+	const struct filter_rule **rules;
+	const uint32_t *group_first_rule;
+	const struct filter_rule *rule;
+};
+
+static inline int
+filter_compile_attr_group_eq(uint32_t value, const void *data) {
+	const struct filter_compile_attr_group_ctx *group_ctx =
+		(const struct filter_compile_attr_group_ctx *)data;
+	return group_ctx->attr_handlers->compare(
+		group_ctx->attr_handlers,
+		group_ctx->rules[group_ctx->group_first_rule[value]],
+		group_ctx->rule
+	);
+}
+
 /*
- * The routine provides the backward compatibility with the current
- * compilation procedure and defined attributes.
+ * Builds the attribute classifier for the provided ruleset.
+ *
+ * Rules holding the exact same attribute value are grouped together, so
+ * the region enumeration and the registry ranges operate on distinct
+ * values instead of all rules. On success the routine returns the
+ * classifier, initializes the registry with one range per group holding
+ * the group matching region values, and fills the rule to group mapping;
+ * a rule without a value (a NULL rule) keeps the invalid group mark.
  */
 static inline struct filter_query_attr *
 filter_compile_attr_build(
 	const struct filter_compile_attr_handlers *attr_handlers,
 	struct value_registry *registry,
 	const struct filter_rule **rules,
-	size_t rule_count,
+	uint32_t rule_count,
+	uint32_t *rule_to_group,
 	struct memory_context *memory_context
 ) {
 	/*
@@ -185,13 +234,67 @@ filter_compile_attr_build(
 	struct filter_compile_attr *attr = attr_handlers->create(
 		memory_context, attr_handlers, rules, rule_count
 	);
-	if (attr == NULL)
+	if (attr == NULL) {
 		return NULL;
+	}
 
 	/*
-	 * `remap_table is used to enumerate regions - each rule touch its
+	 * Collect the distinct attribute values into groups: the first rule
+	 * a group was seen at and a hash index over group indices.
+	 */
+	uint32_t group_alloc_count = rule_count ? rule_count : 1;
+	uint32_t *group_first_rule = (uint32_t *)memory_balloc(
+		memory_context, sizeof(uint32_t) * group_alloc_count
+	);
+	if (group_first_rule == NULL) {
+		goto error_free_attr;
+	}
+
+	struct hash_index group_index;
+	if (hash_index_init(&group_index, memory_context, rule_count)) {
+		goto error_free_group_first_rule;
+	}
+
+	struct filter_compile_attr_group_ctx group_ctx = {
+		attr_handlers,
+		rules,
+		group_first_rule,
+		NULL,
+	};
+
+	uint32_t group_count = 0;
+	for (uint32_t rule_idx = 0; rule_idx < rule_count; ++rule_idx) {
+		rule_to_group[rule_idx] = FILTER_GROUP_INVALID;
+
+		const struct filter_rule *rule = rules[rule_idx];
+		if (rule == NULL) {
+			continue;
+		}
+
+		group_ctx.rule = rule;
+		uint32_t hash = attr_handlers->hash(attr_handlers, rule);
+		uint32_t group = hash_index_lookup(
+			&group_index,
+			hash,
+			filter_compile_attr_group_eq,
+			&group_ctx
+		);
+		if (group == HASH_INDEX_INVALID) {
+			group = group_count;
+			if (hash_index_insert(&group_index, hash, group)) {
+				goto error;
+			}
+			group_first_rule[group] = rule_idx;
+			++group_count;
+		}
+
+		rule_to_group[rule_idx] = group;
+	}
+
+	/*
+	 * `remap_table is used to enumerate regions - each group touch its
 	 * regions so each region gains a value specific to matching set of
-	 * rules.
+	 * groups.
 	 */
 	struct remap_table remap_table;
 	if (remap_table_init(
@@ -200,24 +303,25 @@ filter_compile_attr_build(
 		goto error;
 	}
 
-	for (uint32_t idx = 0; idx < rule_count; ++idx) {
-		if (rules[idx] == NULL)
-			continue;
+	for (uint32_t group_idx = 0; group_idx < group_count; ++group_idx) {
+		const struct filter_rule *rule =
+			rules[group_first_rule[group_idx]];
 		/*
-		 * If a rule covers the whole area there is no meaning to
+		 * If a group covers the whole area there is no meaning to
 		 * touch values - all of them just gain update without any
 		 * distinction result.
 		 */
-		if (attr_handlers->rule_is_any(attr, attr_handlers, rules[idx]))
+		if (attr_handlers->rule_is_any(attr, attr_handlers, rule)) {
 			continue;
+		}
 
 		remap_table_new_gen(&remap_table);
 
-		// Touch the rule matching values
+		// Touch the group matching values
 		if (attr_handlers->rule_iter(
 			    attr,
 			    attr_handlers,
-			    rules[idx],
+			    rule,
 			    filter_compile_attr_touch,
 			    &remap_table
 		    )) {
@@ -250,49 +354,74 @@ filter_compile_attr_build(
 
 	remap_table_free(&remap_table);
 
-	for (uint32_t idx = 0; idx < rule_count; ++idx) {
-		if (value_registry_start(registry))
+	if (value_registry_init(registry, memory_context, "filter:registry")) {
+		goto error;
+	}
+
+	/*
+	 * Collect the group matching values into the registry - there are
+	 * two options:
+	 *  - collect all known values in case if the group matches any
+	 *  - collect the group specific values
+	 */
+	for (uint32_t group_idx = 0; group_idx < group_count; ++group_idx) {
+		if (value_registry_start(registry)) {
 			goto error;
-		if (rules[idx] == NULL)
-			continue;
-		/*
-		 * Collect rule matching values - there are two options:
-		 *  - collect all known values in case if rule is matching any
-		 *  - collect rule specific attributes
-		 * In the first case we could collect all the values only
-		 * once which is the subject of further investigation.
-		 */
-		if (attr_handlers->rule_is_any(
-			    attr, attr_handlers, rules[idx]
-		    )) {
+		}
+
+		const struct filter_rule *rule =
+			rules[group_first_rule[group_idx]];
+		if (attr_handlers->rule_is_any(attr, attr_handlers, rule)) {
 			if (attr_handlers->iter(
 				    attr,
 				    attr_handlers,
 				    filter_compile_attr_collect,
 				    registry
-			    ))
+			    )) {
 				goto error;
+			}
 
 		} else {
 			if (attr_handlers->rule_iter(
 				    attr,
 				    attr_handlers,
-				    rules[idx],
+				    rule,
 				    filter_compile_attr_collect,
 				    registry
-			    ))
+			    )) {
 				goto error;
+			}
 		}
 	}
 
 	struct filter_query_attr *query_attr =
 		attr_handlers->commit(memory_context, attr);
-	if (query_attr == NULL)
+	if (query_attr == NULL) {
 		goto error;
+	}
+
+	hash_index_fini(&group_index);
+	memory_bfree(
+		memory_context,
+		group_first_rule,
+		sizeof(uint32_t) * group_alloc_count
+	);
 
 	return query_attr;
 
 error:
+	value_registry_fini(registry);
+	memset(registry, 0, sizeof(*registry));
+	hash_index_fini(&group_index);
+
+error_free_group_first_rule:
+	memory_bfree(
+		memory_context,
+		group_first_rule,
+		sizeof(uint32_t) * group_alloc_count
+	);
+
+error_free_attr:
 	attr_handlers->free_compile(memory_context, attr);
 	return NULL;
 }

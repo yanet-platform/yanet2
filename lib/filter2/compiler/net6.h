@@ -395,12 +395,89 @@ filter_compile_attr_net6s_commit(
 	return &query_attr->attr;
 }
 
+static inline uint32_t
+filter_compile_attr_net6_hash(
+	const struct filter_compile_attr_handlers *attr_handlers,
+	const struct filter_rule *rule
+) {
+	const struct filter_compile_attr_net6s_handlers *net6s_handlers =
+		container_of(
+			attr_handlers,
+			struct filter_compile_attr_net6s_handlers,
+			attr_handlers
+		);
+
+	struct filter_net6s nets;
+	net6s_handlers->get_net6s(rule, &nets);
+
+	uint32_t hash = nets.count;
+	for (uint32_t idx = 0; idx < nets.count; ++idx) {
+		struct net6 net6_normalized;
+		net6_normalize(nets.items + idx, &net6_normalized);
+
+		for (uint32_t byte_idx = 0; byte_idx < 16; ++byte_idx) {
+			hash = hash * 31 + net6_normalized.addr[byte_idx];
+		}
+		for (uint32_t byte_idx = 0; byte_idx < 16; ++byte_idx) {
+			hash = hash * 31 + net6_normalized.mask[byte_idx];
+		}
+	}
+	return hash;
+}
+
+static inline int
+filter_compile_attr_net6_compare(
+	const struct filter_compile_attr_handlers *attr_handlers,
+	const struct filter_rule *first,
+	const struct filter_rule *second
+) {
+	const struct filter_compile_attr_net6s_handlers *net6s_handlers =
+		container_of(
+			attr_handlers,
+			struct filter_compile_attr_net6s_handlers,
+			attr_handlers
+		);
+
+	struct filter_net6s first_nets;
+	struct filter_net6s second_nets;
+	net6s_handlers->get_net6s(first, &first_nets);
+	net6s_handlers->get_net6s(second, &second_nets);
+
+	if (first_nets.count != second_nets.count) {
+		return 1;
+	}
+
+	for (uint32_t idx = 0; idx < first_nets.count; ++idx) {
+		struct net6 first_net6_normalized;
+		struct net6 second_net6_normalized;
+		net6_normalize(first_nets.items + idx, &first_net6_normalized);
+		net6_normalize(
+			second_nets.items + idx, &second_net6_normalized
+		);
+
+		if (memcmp(first_net6_normalized.addr,
+			   second_net6_normalized.addr,
+			   sizeof(first_net6_normalized.addr)) != 0) {
+			return 1;
+		}
+		if (memcmp(first_net6_normalized.mask,
+			   second_net6_normalized.mask,
+			   sizeof(first_net6_normalized.mask)) != 0) {
+			return 1;
+		}
+	}
+
+	return 0;
+}
+
 static const struct filter_compile_attr_handlers filter_compile_get_net6s = {
 	.create = filter_compile_attr_net6s_create,
 	.size = filter_compile_attr_net6s_size,
 	.iter = filter_compile_attr_net6s_iter,
 	.rule_iter = filter_compile_attr_net6s_rule_iter,
 	.rule_is_any = filter_compile_attr_net6s_rule_is_any,
+	.hash = filter_compile_attr_net6_hash,
+	.compare = filter_compile_attr_net6_compare,
 	.commit = filter_compile_attr_net6s_commit,
 	.free_compile = filter_compile_attr_net6s_free,
 	.free_query = filter_query_attr_net6_free,

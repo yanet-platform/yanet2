@@ -308,11 +308,85 @@ filter_compile_attr_net_commit(
 	return &query_attr->attr;
 }
 
+static inline uint32_t
+filter_compile_attr_net4_hash(
+	const struct filter_compile_attr_handlers *attr_handlers,
+	const struct filter_rule *rule
+) {
+	const struct filter_compile_attr_net4_handlers *net_handlers =
+		container_of(
+			attr_handlers,
+			struct filter_compile_attr_net4_handlers,
+			attr_handlers
+		);
+
+	struct filter_net4s nets;
+	net_handlers->get_net4s(rule, &nets);
+
+	uint32_t hash = nets.count;
+	for (uint32_t idx = 0; idx < nets.count; ++idx) {
+		const struct net4 *net = nets.items + idx;
+		for (uint32_t byte_idx = 0; byte_idx < 4; ++byte_idx) {
+			hash = hash * 31 +
+			       (net->addr[byte_idx] & net->mask[byte_idx]);
+		}
+		for (uint32_t byte_idx = 0; byte_idx < 4; ++byte_idx) {
+			hash = hash * 31 + net->mask[byte_idx];
+		}
+	}
+	return hash;
+}
+
+static inline int
+filter_compile_attr_net4_compare(
+	const struct filter_compile_attr_handlers *attr_handlers,
+	const struct filter_rule *first,
+	const struct filter_rule *second
+) {
+	const struct filter_compile_attr_net4_handlers *net_handlers =
+		container_of(
+			attr_handlers,
+			struct filter_compile_attr_net4_handlers,
+			attr_handlers
+		);
+
+	struct filter_net4s first_nets;
+	struct filter_net4s second_nets;
+	net_handlers->get_net4s(first, &first_nets);
+	net_handlers->get_net4s(second, &second_nets);
+
+	if (first_nets.count != second_nets.count) {
+		return 1;
+	}
+
+	for (uint32_t idx = 0; idx < first_nets.count; ++idx) {
+		const struct net4 *first_net = first_nets.items + idx;
+		const struct net4 *second_net = second_nets.items + idx;
+
+		for (uint32_t byte_idx = 0; byte_idx < 4; ++byte_idx) {
+			if ((first_net->addr[byte_idx] &
+			     first_net->mask[byte_idx]) !=
+			    (second_net->addr[byte_idx] &
+			     second_net->mask[byte_idx])) {
+				return 1;
+			}
+			if (first_net->mask[byte_idx] !=
+			    second_net->mask[byte_idx]) {
+				return 1;
+			}
+		}
+	}
+
+	return 0;
+}
+
 static const struct filter_compile_attr_handlers filter_compile_get_net = {
 	.create = filter_compile_attr_net_create,
 	.size = filter_compile_attr_net_size,
 	.rule_iter = filter_compile_attr_net_iterate,
 	.rule_is_any = filter_compile_attr_net_rule_is_any,
+	.hash = filter_compile_attr_net4_hash,
+	.compare = filter_compile_attr_net4_compare,
 	.iter = filter_compile_attr_net_iterate_any,
 	.commit = filter_compile_attr_net_commit,
 	.free_compile = filter_compile_attr_net_free,

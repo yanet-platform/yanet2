@@ -10,27 +10,20 @@ int
 merge_and_collect_registry(
 	struct memory_context *memory_context,
 	struct value_registry *registry1,
+	const uint32_t *rule_to_group1,
 	struct value_registry *registry2,
+	const uint32_t *rule_to_group2,
+	uint32_t rule_count,
 	struct value_table *table,
-	struct value_registry *registry
+	struct value_registry *registry,
+	uint32_t *rule_to_group
 );
 
 int
 collect_rule_map(
 	struct memory_context *memory_context,
 	struct value_registry *registry,
+	const uint32_t *rule_to_group,
+	uint32_t rule_count,
 	struct vline *rule_map
 );
-
-int
-init_dummy_registry(
-	struct memory_context *memory_context,
-	uint32_t actions,
-	struct value_registry *registry
-);
-
-static inline int
-lpm_collect_registry_iterator(uint32_t value, void *data) {
-	struct value_registry *registry = (struct value_registry *)data;
-	return value_registry_collect(registry, value);
-}

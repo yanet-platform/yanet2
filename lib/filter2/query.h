@@ -71,16 +71,6 @@ filter_lookup(
 		values_pos += packet_count;
 	}
 
-	if (joint_count == 0) {
-		/*
-		 * Special case of a single attribute filter - the attribute
-		 * lookup returns the rule index instead of identifier of a
-		 * rule combination.
-		 */
-		memcpy(results, values, sizeof(uint32_t) * packet_count);
-		return;
-	}
-
 	/*
 	 * Combine pair of values to get a next one value. The last of the
 	 * values for each packet is a final class identifier.
