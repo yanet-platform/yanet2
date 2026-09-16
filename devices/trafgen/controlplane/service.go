@@ -120,7 +120,7 @@ func (m *TrafgenService) ShowConfig(
 	name := req.GetName()
 	entry, ok := m.configs.Get(name)
 	if !ok {
-		return nil, status.Error(codes.NotFound, "no config found")
+		return nil, status.Errorf(codes.NotFound, "config %q not found", name)
 	}
 
 	return &trafgenpb.ShowConfigResponse{
@@ -138,7 +138,7 @@ func (m *TrafgenService) ShowPackets(
 	name := req.GetName()
 	entry, ok := m.configs.Get(name)
 	if !ok {
-		return nil, status.Error(codes.NotFound, "no config found")
+		return nil, status.Errorf(codes.NotFound, "config %q not found", name)
 	}
 
 	out := make([][]byte, len(entry.Packets))

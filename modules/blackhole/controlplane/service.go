@@ -71,7 +71,7 @@ func (m *BlackholeService) ShowConfig(
 ) (*blackholepb.ShowConfigResponse, error) {
 	name := req.GetName()
 	if _, ok := m.configs.Get(name); !ok {
-		return nil, status.Error(codes.NotFound, "no config found")
+		return nil, status.Errorf(codes.NotFound, "config %q not found", name)
 	}
 
 	return &blackholepb.ShowConfigResponse{Name: name}, nil
@@ -112,7 +112,7 @@ func (m *BlackholeService) DeleteConfig(
 		return m.backend.DeleteModule(name)
 	})
 	if errors.Is(err, configstore.ErrNotFound) {
-		return nil, status.Error(codes.NotFound, "no config found")
+		return nil, status.Errorf(codes.NotFound, "config %q not found", name)
 	}
 	if err != nil {
 		code := codes.Internal
