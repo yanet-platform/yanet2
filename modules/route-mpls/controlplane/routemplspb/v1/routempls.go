@@ -48,9 +48,10 @@ func (m *UpdateEvent) Validate() error {
 		if err := withdraw.Validate(); err != nil {
 			return fmt.Errorf("withdraw: %w", err)
 		}
+		return nil
 	}
 
-	return nil
+	return errors.New("event is required")
 }
 
 func (m *ShowConfigRequest) Validate() error {
