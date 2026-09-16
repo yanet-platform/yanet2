@@ -4,6 +4,7 @@ package cdscp
 //#cgo LDFLAGS: -L../../../../../build/modules/dscp/api -ldscp_cp
 //
 //#include <stdlib.h>
+//#include "lib/dataplane/packet/dscp.h"
 //#include "modules/dscp/api/controlplane.h"
 import "C"
 
@@ -14,6 +15,12 @@ import (
 	"github.com/yanet-platform/yanet2/bindings/go/cerrors"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 )
+
+// MaxMarkFlag is the largest C DSCP marking flag.
+const MaxMarkFlag = C.DSCP_MARK_ALWAYS
+
+// MaxMark is the largest six-bit DSCP value of the C marking.
+const MaxMark = C.DSCP_MARK_MASK >> C.DSCP_MARK_SHIFT
 
 type ModuleConfig struct {
 	ptr ffi.ModuleConfig

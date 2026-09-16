@@ -5,6 +5,12 @@ import (
 	"fmt"
 )
 
+// MaxFlag mirrors the largest C DSCP marking flag.
+const MaxFlag = 2
+
+// MaxMark mirrors the largest six-bit DSCP value of the C marking.
+const MaxMark = 63
+
 func (m *ShowConfigRequest) Validate() error {
 	if m.GetName() == "" {
 		return errors.New("name is required")
@@ -56,11 +62,11 @@ func (m *SetDscpMarkingRequest) Validate() error {
 // Validate checks that the flag and mark values are within their valid
 // ranges.
 func (m *DscpConfig) Validate() error {
-	if m.GetFlag() > 2 {
-		return fmt.Errorf("flag %d must be in range 0..2", m.GetFlag())
+	if m.GetFlag() > MaxFlag {
+		return fmt.Errorf("flag %d must be in range 0..%d", m.GetFlag(), MaxFlag)
 	}
-	if m.GetMark() > 63 {
-		return fmt.Errorf("mark %d must be in range 0..63", m.GetMark())
+	if m.GetMark() > MaxMark {
+		return fmt.Errorf("mark %d must be in range 0..%d", m.GetMark(), MaxMark)
 	}
 
 	return nil
