@@ -96,7 +96,7 @@ func (m *DscpService) ShowConfig(
 
 	config, ok := m.configs.Get(name)
 	if !ok {
-		return nil, status.Error(codes.NotFound, "config not found")
+		return nil, status.Errorf(codes.NotFound, "config %q not found", name)
 	}
 
 	prefixes4, err := commonpb.NewIPv4PrefixesFromPrefixes(config.Prefixes4)
@@ -231,7 +231,7 @@ func (m *DscpService) DeleteConfig(
 		return m.backend.DeleteModule(name)
 	})
 	if errors.Is(err, configstore.ErrNotFound) {
-		return nil, status.Error(codes.NotFound, "config not found")
+		return nil, status.Errorf(codes.NotFound, "config %q not found", name)
 	}
 	if err != nil {
 		code := codes.Internal

@@ -88,7 +88,7 @@ func (m *UnrdupService) ShowConfig(
 	name := request.GetName()
 	current, ok := m.configs.Get(name)
 	if !ok {
-		return nil, status.Errorf(codes.NotFound, "config %q is not found", name)
+		return nil, status.Errorf(codes.NotFound, "config %q not found", name)
 	}
 
 	return &unrduppb.ShowConfigResponse{
@@ -135,7 +135,7 @@ func (m *UnrdupService) DeleteConfig(
 		return m.backend.DeleteModule(name)
 	})
 	if errors.Is(err, configstore.ErrNotFound) {
-		return nil, status.Errorf(codes.NotFound, "config %q is not found", name)
+		return nil, status.Errorf(codes.NotFound, "config %q not found", name)
 	}
 	if err != nil {
 		code := codes.Internal

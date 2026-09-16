@@ -83,7 +83,7 @@ func (m *DecapService) ShowConfig(
 	name := req.GetName()
 	entry, ok := m.configs.Get(name)
 	if !ok {
-		return nil, status.Error(codes.NotFound, "no config found")
+		return nil, status.Errorf(codes.NotFound, "config %q not found", name)
 	}
 
 	prefixes4, err := commonpb.NewIPv4PrefixesFromPrefixes(entry.Prefixes4)
@@ -143,7 +143,7 @@ func (m *DecapService) DeleteConfig(
 		return m.backend.DeleteModule(name)
 	})
 	if errors.Is(err, configstore.ErrNotFound) {
-		return nil, status.Error(codes.NotFound, "no config found")
+		return nil, status.Errorf(codes.NotFound, "config %q not found", name)
 	}
 	if err != nil {
 		code := codes.Internal

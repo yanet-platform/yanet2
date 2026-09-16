@@ -144,7 +144,7 @@ func (m *NAT64Service) ShowConfig(ctx context.Context, req *nat64pb.ShowConfigRe
 
 	inst, ok := m.configs.Get(name)
 	if !ok {
-		return nil, status.Error(codes.NotFound, "config not found")
+		return nil, status.Errorf(codes.NotFound, "config %q not found", name)
 	}
 
 	cfg := inst.Config
@@ -373,7 +373,7 @@ func (m *NAT64Service) DeleteConfig(ctx context.Context, req *nat64pb.DeleteConf
 		return m.backend.DeleteModule(name)
 	})
 	if errors.Is(err, configstore.ErrNotFound) {
-		return nil, status.Error(codes.NotFound, "config not found")
+		return nil, status.Errorf(codes.NotFound, "config %q not found", name)
 	}
 	if err != nil {
 		code := codes.Internal

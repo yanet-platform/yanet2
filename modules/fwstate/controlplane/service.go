@@ -339,7 +339,7 @@ func (m *FWStateService) DeleteConfig(
 		return m.agent.DeleteModuleConfig(moduleType, name)
 	})
 	if errors.Is(err, configstore.ErrNotFound) {
-		return nil, status.Error(codes.NotFound, "config not found")
+		return nil, status.Errorf(codes.NotFound, "config %q not found", name)
 	}
 	if err != nil {
 		code := codes.Internal
