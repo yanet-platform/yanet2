@@ -100,9 +100,9 @@ func (m *Device) Delete(
 		switch {
 		case errors.Is(err, ffi.ErrNotFound):
 			return nil, status.Error(codes.NotFound, err.Error())
-		case errors.Is(err, ffi.ErrInvalidArgument):
+		case errors.Is(err, ffi.ErrFailedPrecondition):
 			// A predefined topology device cannot be deleted.
-			return nil, status.Error(codes.InvalidArgument, err.Error())
+			return nil, status.Error(codes.FailedPrecondition, err.Error())
 		}
 		return nil, status.Error(codes.Internal, err.Error())
 	}

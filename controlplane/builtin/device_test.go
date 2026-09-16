@@ -82,7 +82,7 @@ func Test_Device_Delete_RefusesTopologyDevice(t *testing.T) {
 
 	_, err := svc.Delete(t.Context(), &ynpb.DeleteDeviceRequest{Name: "d0"})
 
-	require.Equal(t, codes.InvalidArgument, status.Code(err))
+	require.Equal(t, codes.FailedPrecondition, status.Code(err))
 	require.Contains(t, deviceNames(shm.DPConfig(0).Devices()), "d0")
 }
 

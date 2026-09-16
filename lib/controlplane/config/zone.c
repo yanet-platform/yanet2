@@ -827,7 +827,7 @@ cp_config_delete_device(
 		if (strncmp(port->device_name, name, CP_DEVICE_NAME_LEN) == 0) {
 			yanet_error_add_kind(
 				err,
-				YANET_ERROR_INVALID_ARGUMENT,
+				YANET_ERROR_FAILED_PRECONDITION,
 				"device '%s' is a predefined topology device "
 				"and cannot be deleted",
 				name
