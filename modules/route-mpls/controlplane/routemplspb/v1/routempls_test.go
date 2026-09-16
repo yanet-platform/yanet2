@@ -185,6 +185,8 @@ func Test_DeleteConfigRequest_Validate(t *testing.T) {
 
 // Test_UpdateEvent_Validate verifies that each oneof branch reports invalid
 // labels without rejecting an event whose parser-owned fields are absent.
+//
+// An event without a branch is rejected.
 func Test_UpdateEvent_Validate(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -205,8 +207,16 @@ func Test_UpdateEvent_Validate(t *testing.T) {
 			}},
 			message: "withdraw: nexthop: label 1048576 must be in range 0..1048575",
 		},
-		{name: "event without a branch", event: &routemplspb.UpdateEvent{}},
-		{name: "nil event"},
+		{
+			name:  "valid update",
+			event: &routemplspb.UpdateEvent{Event: &routemplspb.UpdateEvent_Update{Update: &routemplspb.Rule{}}},
+		},
+		{
+			name:  "valid withdraw",
+			event: &routemplspb.UpdateEvent{Event: &routemplspb.UpdateEvent_Withdraw{Withdraw: &routemplspb.Rule{}}},
+		},
+		{name: "event without a branch", event: &routemplspb.UpdateEvent{}, message: "event is required"},
+		{name: "nil event", message: "event is required"},
 	}
 
 	for _, tc := range cases {
