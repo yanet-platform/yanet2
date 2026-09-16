@@ -18,6 +18,7 @@ import (
 
 	"github.com/yanet-platform/xnetip"
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
+	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/modules/forward/bindings/go/cforward"
 	forward "github.com/yanet-platform/yanet2/modules/forward/controlplane"
 	forwardpb "github.com/yanet-platform/yanet2/modules/forward/controlplane/forwardpb/v1"
@@ -171,8 +172,6 @@ func TestUpdateConfigBackendFailurePreservesExistingConfig(t *testing.T) {
 	require.Equal(t, "device0", response.GetRules()[0].GetAction().GetTarget())
 }
 
-// TestDeleteConfigBackendFailureReturnsInternalAndPreservesConfig verifies
-// that a failed deletion returns Internal and retains the configuration.
 func TestDeleteConfigBackendFailureReturnsInternalAndPreservesConfig(t *testing.T) {
 	backendError := errors.New("shared memory unavailable")
 	svc := forward.NewForwardService(&mockBackend{deleteError: backendError})
@@ -188,6 +187,28 @@ func TestDeleteConfigBackendFailureReturnsInternalAndPreservesConfig(t *testing.
 	_, err = svc.DeleteConfig(t.Context(), &forwardpb.DeleteConfigRequest{Name: "config"})
 	require.Equal(t, codes.Internal, status.Code(err))
 	require.ErrorContains(t, err, "failed to delete module config \"config\": shared memory unavailable")
+
+	response, err := svc.ShowConfig(t.Context(), &forwardpb.ShowConfigRequest{Name: "config"})
+	require.NoError(t, err)
+	require.Equal(t, "device0", response.GetRules()[0].GetAction().GetTarget())
+}
+
+// TestDeleteConfigFailedPreconditionReturnsFailedPrecondition verifies that
+// the store keeps a referenced configuration available after refusal.
+func TestDeleteConfigFailedPreconditionReturnsFailedPrecondition(t *testing.T) {
+	backendError := fmt.Errorf("module is still referenced: %w", ffi.ErrFailedPrecondition)
+	svc := forward.NewForwardService(&mockBackend{deleteError: backendError})
+
+	_, err := svc.UpdateConfig(t.Context(), &forwardpb.UpdateConfigRequest{
+		Name: "config",
+		Rules: []*forwardpb.Rule{
+			{Action: &forwardpb.Action{Target: "device0"}},
+		},
+	})
+	require.NoError(t, err)
+
+	_, err = svc.DeleteConfig(t.Context(), &forwardpb.DeleteConfigRequest{Name: "config"})
+	require.Equal(t, codes.FailedPrecondition, status.Code(err))
 
 	response, err := svc.ShowConfig(t.Context(), &forwardpb.ShowConfigRequest{Name: "config"})
 	require.NoError(t, err)

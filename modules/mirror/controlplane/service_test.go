@@ -13,6 +13,7 @@ import (
 
 	"github.com/yanet-platform/xnetip"
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
+	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/modules/mirror/bindings/go/cmirror"
 	mirror "github.com/yanet-platform/yanet2/modules/mirror/controlplane"
 	mirrorpb "github.com/yanet-platform/yanet2/modules/mirror/controlplane/mirrorpb/v1"
@@ -151,8 +152,6 @@ func TestUpdateConfigBackendFailurePreservesExistingConfig(t *testing.T) {
 	require.Equal(t, "device0", response.GetRules()[0].GetAction().GetTarget())
 }
 
-// TestDeleteConfigBackendFailureReturnsInternalAndPreservesConfig verifies
-// that a failed deletion returns Internal and retains the configuration.
 func TestDeleteConfigBackendFailureReturnsInternalAndPreservesConfig(t *testing.T) {
 	backendError := errors.New("shared memory unavailable")
 	svc := mirror.NewMirrorService(&mockBackend{deleteError: backendError})
@@ -168,6 +167,28 @@ func TestDeleteConfigBackendFailureReturnsInternalAndPreservesConfig(t *testing.
 	_, err = svc.DeleteConfig(t.Context(), &mirrorpb.DeleteConfigRequest{Name: "config"})
 	require.Equal(t, codes.Internal, status.Code(err))
 	require.ErrorContains(t, err, "failed to delete module config \"config\": shared memory unavailable")
+
+	response, err := svc.ShowConfig(t.Context(), &mirrorpb.ShowConfigRequest{Name: "config"})
+	require.NoError(t, err)
+	require.Equal(t, "device0", response.GetRules()[0].GetAction().GetTarget())
+}
+
+// TestDeleteConfigFailedPreconditionReturnsFailedPrecondition verifies that
+// the store keeps a referenced configuration available after refusal.
+func TestDeleteConfigFailedPreconditionReturnsFailedPrecondition(t *testing.T) {
+	backendError := fmt.Errorf("module is still referenced: %w", ffi.ErrFailedPrecondition)
+	svc := mirror.NewMirrorService(&mockBackend{deleteError: backendError})
+
+	_, err := svc.UpdateConfig(t.Context(), &mirrorpb.UpdateConfigRequest{
+		Name: "config",
+		Rules: []*mirrorpb.Rule{
+			{Action: &mirrorpb.Action{Target: "device0"}},
+		},
+	})
+	require.NoError(t, err)
+
+	_, err = svc.DeleteConfig(t.Context(), &mirrorpb.DeleteConfigRequest{Name: "config"})
+	require.Equal(t, codes.FailedPrecondition, status.Code(err))
 
 	response, err := svc.ShowConfig(t.Context(), &mirrorpb.ShowConfigRequest{Name: "config"})
 	require.NoError(t, err)

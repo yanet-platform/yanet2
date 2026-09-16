@@ -10,6 +10,7 @@ import (
 
 	filterpbconv "github.com/yanet-platform/yanet2/bindings/go/filterpbconv/v1"
 	"github.com/yanet-platform/yanet2/controlplane/configstore"
+	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/modules/forward/bindings/go/cforward"
 	forwardpb "github.com/yanet-platform/yanet2/modules/forward/controlplane/forwardpb/v1"
 )
@@ -196,7 +197,11 @@ func (m *ForwardService) DeleteConfig(ctx context.Context, req *forwardpb.Delete
 		return nil, status.Errorf(codes.NotFound, "config %q not found", name)
 	}
 	if err != nil {
-		return nil, status.Errorf(codes.Internal, "failed to delete module config %q: %v", name, err)
+		code := codes.Internal
+		if errors.Is(err, ffi.ErrFailedPrecondition) {
+			code = codes.FailedPrecondition
+		}
+		return nil, status.Errorf(code, "failed to delete module config %q: %v", name, err)
 	}
 
 	return &forwardpb.DeleteConfigResponse{}, nil
