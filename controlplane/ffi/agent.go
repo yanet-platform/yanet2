@@ -157,6 +157,10 @@ const MaxDeviceNameLen = C.CP_DEVICE_NAME_LEN
 // terminating NUL.
 const MaxAgentNameLen = C.AGENT_NAME_LEN
 
+// MaxPipelineNameLen is the size of the C-side pipeline name buffer, including
+// the terminating NUL.
+const MaxPipelineNameLen = C.CP_PIPELINE_NAME_LEN
+
 // MaxObjectNameLen is the size of the C-side object name buffer, including
 // the terminating NUL.
 //

@@ -1,6 +1,7 @@
 package ynpb_test
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -55,6 +56,8 @@ func Test_Pipeline_Validate(t *testing.T) {
 
 // Test_GetPipelineRequest_Validate verifies that both pipeline identifier
 // presence and its name are checked before a state lookup.
+//
+// The name obeys the fixed-size buffer and NUL rules.
 func Test_GetPipelineRequest_Validate(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -71,6 +74,24 @@ func Test_GetPipelineRequest_Validate(t *testing.T) {
 		{
 			name:    "named id",
 			request: &ynpb.GetPipelineRequest{Id: &commonpb.PipelineId{Name: "pipeline0"}},
+		},
+		{
+			name:    "id name with NUL",
+			request: &ynpb.GetPipelineRequest{Id: &commonpb.PipelineId{Name: "pipeline0\x00other"}},
+			message: "id.name must not contain NUL",
+		},
+		{
+			name: "id name of the buffer size",
+			request: &ynpb.GetPipelineRequest{
+				Id: &commonpb.PipelineId{Name: strings.Repeat("p", commonpb.MaxPipelineNameLen)},
+			},
+			message: "id.name must be shorter than 80 bytes",
+		},
+		{
+			name: "longest id name",
+			request: &ynpb.GetPipelineRequest{
+				Id: &commonpb.PipelineId{Name: strings.Repeat("p", commonpb.MaxPipelineNameLen-1)},
+			},
 		},
 	}
 
