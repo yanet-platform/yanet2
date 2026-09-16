@@ -1,11 +1,12 @@
 package operator
 
 import (
-	"context"
+	"io"
 	"net/netip"
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
@@ -23,6 +24,28 @@ func mustNetwork(t *testing.T, s string) *commonpb.IPPrefix {
 	require.NoError(t, err)
 
 	return network
+}
+
+// feedRIBTestStream supplies a finite sequence of updates and accepts the
+// summary sent when the stream reaches its end.
+type feedRIBTestStream struct {
+	grpc.ServerStream
+	updates []*operatorpb.Update
+	index   int
+}
+
+func (m *feedRIBTestStream) Recv() (*operatorpb.Update, error) {
+	if m.index == len(m.updates) {
+		return nil, io.EOF
+	}
+
+	update := m.updates[m.index]
+	m.index++
+	return update, nil
+}
+
+func (m *feedRIBTestStream) SendAndClose(*operatorpb.UpdateSummary) error {
+	return nil
 }
 
 // TestShowRoutes_StaticECMP_BothBest verifies that two static ECMP nexthops
@@ -153,24 +176,37 @@ func TestLookupRoute_ThreeWay(t *testing.T) {
 	})
 }
 
-func TestInsertRoute_NonStaticMultipleNexthops_InvalidArgument(t *testing.T) {
+// Test_RouteService_FeedRIB_FirstNameOwnsSession verifies that the first
+// update selects the RIB and later names do not redirect the session.
+func Test_RouteService_FeedRIB_FirstNameOwnsSession(t *testing.T) {
 	svc := NewRouteService(neigh.NewNeighTable())
 
-	req := &operatorpb.InsertRouteRequest{
-		Name:   "route0",
-		Prefix: mustNetwork(t, "10.0.0.0/24"),
-		NexthopAddrs: []*commonpb.IPAddress{
-			commonpb.NewIPAddressFromAddr(netip.MustParseAddr("192.168.1.1")),
-			commonpb.NewIPAddressFromAddr(netip.MustParseAddr("192.168.1.2")),
+	stream := &feedRIBTestStream{updates: []*operatorpb.Update{
+		{
+			Name: "route0",
+			Route: &operatorpb.Route{
+				Prefix:  mustNetwork(t, "10.0.0.0/24"),
+				NextHop: commonpb.NewIPAddressFromAddr(netip.MustParseAddr("192.0.2.1")),
+				Peer:    commonpb.NewIPAddressFromAddr(netip.MustParseAddr("198.51.100.1")),
+			},
 		},
-		SourceId: operatorpb.RouteSourceID_ROUTE_SOURCE_ID_BIRD,
-	}
+		{
+			Name: "other",
+			Route: &operatorpb.Route{
+				Prefix:  mustNetwork(t, "10.1.0.0/24"),
+				NextHop: commonpb.NewIPAddressFromAddr(netip.MustParseAddr("192.0.2.2")),
+				Peer:    commonpb.NewIPAddressFromAddr(netip.MustParseAddr("198.51.100.2")),
+			},
+		},
+	}}
 
-	_, err := svc.InsertRoute(context.Background(), req)
-	require.Error(t, err)
-	st, ok := status.FromError(err)
-	require.True(t, ok)
-	require.Equal(t, codes.InvalidArgument, st.Code())
+	require.NoError(t, svc.FeedRIB(stream))
+
+	response, err := svc.ShowRoutes(t.Context(), &operatorpb.ShowRoutesRequest{Name: "route0"})
+	require.NoError(t, err)
+	require.Len(t, response.GetRoutes(), 2)
+	_, ok := svc.ribs.Get("other")
+	require.False(t, ok, "a later update name must not create another session RIB")
 }
 
 // TestInsertRoute_MalformedPrefix_InvalidArgument verifies that a prefix

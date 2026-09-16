@@ -146,12 +146,6 @@ func (m *NeighbourService) UpdateNeighbours(
 		if err != nil {
 			return nil, status.Errorf(codes.InvalidArgument, "invalid nexthop (bytes=%x): %v", e.GetNextHop().GetAddr(), err)
 		}
-		if e.GetHardwareAddr() == nil {
-			return nil, status.Errorf(codes.InvalidArgument, "neighbour entry %q is missing hardware_addr", addr)
-		}
-		if e.GetLinkAddr() == nil {
-			return nil, status.Errorf(codes.InvalidArgument, "neighbour entry %q is missing link_addr", addr)
-		}
 
 		entries = append(entries, neigh.NeighbourEntry{
 			NextHop: addr,
