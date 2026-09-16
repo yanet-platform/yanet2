@@ -368,15 +368,15 @@ func (m *backend) UpdateModuleConfig(config *l3bpb.ModuleConfig) error {
 
 		net6s, err := filterpbconv.ToNet6s(rule.GetNet6S())
 		if err != nil {
-			return status.Errorf(codes.InvalidArgument, "invalid net6s: %v", err)
+			return status.Errorf(codes.InvalidArgument, "invalid net6s: %s", status.Convert(err).Message())
 		}
 		net4s, err := filterpbconv.ToNet4s(rule.GetNet4S())
 		if err != nil {
-			return status.Errorf(codes.InvalidArgument, "invalid net4s: %v", err)
+			return status.Errorf(codes.InvalidArgument, "invalid net4s: %s", status.Convert(err).Message())
 		}
 		protoRanges, err := filterpbconv.ToProtoRanges(rule.GetProtoRanges())
 		if err != nil {
-			return status.Errorf(codes.InvalidArgument, "invalid proto ranges: %v", err)
+			return status.Errorf(codes.InvalidArgument, "invalid proto ranges: %s", status.Convert(err).Message())
 		}
 
 		rules = append(rules, cl3b.DestinationFilterRule{
@@ -706,15 +706,15 @@ func buildVirtualServiceConfig(
 	for _, rule := range service.GetSourceFilterRules() {
 		net6s, err := filterpbconv.ToNet6s(rule.GetNet6S())
 		if err != nil {
-			return cl3bobject.VirtualServiceConfig{}, invalid(fmt.Sprintf("invalid source net6s: %v", err))
+			return cl3bobject.VirtualServiceConfig{}, invalid(fmt.Sprintf("invalid source net6s: %s", status.Convert(err).Message()))
 		}
 		net4s, err := filterpbconv.ToNet4s(rule.GetNet4S())
 		if err != nil {
-			return cl3bobject.VirtualServiceConfig{}, invalid(fmt.Sprintf("invalid source net4s: %v", err))
+			return cl3bobject.VirtualServiceConfig{}, invalid(fmt.Sprintf("invalid source net4s: %s", status.Convert(err).Message()))
 		}
 		portRanges, err := filterpbconv.ToPortRanges(rule.GetPortRanges())
 		if err != nil {
-			return cl3bobject.VirtualServiceConfig{}, invalid(fmt.Sprintf("invalid source port ranges: %v", err))
+			return cl3bobject.VirtualServiceConfig{}, invalid(fmt.Sprintf("invalid source port ranges: %s", status.Convert(err).Message()))
 		}
 
 		sourceFilterRules = append(sourceFilterRules, cl3bobject.SourceFilterRule{
