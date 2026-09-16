@@ -153,6 +153,10 @@ func freeFailure(cErr unsafe.Pointer, errno error) error {
 // The largest usable name is one byte shorter than this bound.
 const MaxDeviceNameLen = C.CP_DEVICE_NAME_LEN
 
+// MaxAgentNameLen is the size of the C-side agent name buffer, including the
+// terminating NUL.
+const MaxAgentNameLen = C.AGENT_NAME_LEN
+
 // MaxObjectNameLen is the size of the C-side object name buffer, including
 // the terminating NUL.
 //
