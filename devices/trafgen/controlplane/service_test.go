@@ -2,6 +2,8 @@ package trafgen
 
 import (
 	"bytes"
+	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -14,6 +16,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
+	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/devices/trafgen/bindings/go/ctrafgen"
 	trafgenpb "github.com/yanet-platform/yanet2/devices/trafgen/controlplane/trafgenpb/v1"
 )
@@ -26,6 +29,7 @@ type recordingBackend struct {
 	input   []Pipeline
 	output  []Pipeline
 	calls   int
+	err     error
 }
 
 func (m *recordingBackend) UpdateDevice(
@@ -41,7 +45,7 @@ func (m *recordingBackend) UpdateDevice(
 	m.ratePps = ratePps
 	m.input = input
 	m.output = output
-	return nil, nil
+	return nil, m.err
 }
 
 // buildPcap encodes the given ethernet frames into an in-memory pcap file.
@@ -279,4 +283,63 @@ func Test_TrafgenService_EmptyPcap(t *testing.T) {
 	})
 	require.Nil(t, resp)
 	require.Equal(t, codes.InvalidArgument, status.Code(err))
+}
+
+// Test_TrafgenService_RefusedWrite verifies that every RPC writing the device
+// maps a refused write by its error kind to the status code.
+func Test_TrafgenService_RefusedWrite(t *testing.T) {
+	pcap := buildPcap(t, [][]byte{bytes.Repeat([]byte{0x01}, 64)})
+	operations := []struct {
+		name string
+		call func(t *testing.T, service *TrafgenService) error
+	}{
+		{
+			name: "UpdateDevice",
+			call: func(t *testing.T, service *TrafgenService) error {
+				_, err := service.UpdateDevice(t.Context(), &trafgenpb.UpdateDeviceRequest{Name: "trafgen0"})
+				return err
+			},
+		},
+		{
+			name: "UploadPcap",
+			call: func(t *testing.T, service *TrafgenService) error {
+				_, err := service.UploadPcap(t.Context(), &trafgenpb.UploadPcapRequest{Name: "trafgen0", Pcap: pcap})
+				return err
+			},
+		},
+		{
+			name: "SetRate",
+			call: func(t *testing.T, service *TrafgenService) error {
+				_, err := service.SetRate(t.Context(), &trafgenpb.SetRateRequest{Name: "trafgen0", RatePps: 42})
+				return err
+			},
+		},
+	}
+	cases := []struct {
+		name string
+		err  error
+		code codes.Code
+	}{
+		{
+			name: "unresolved pipeline",
+			err:  fmt.Errorf("pipeline 'p0' not found in device entry: %w", ffi.ErrFailedPrecondition),
+			code: codes.FailedPrecondition,
+		},
+		{
+			name: "backend failure",
+			err:  errors.New("dp_config_wait_for_gen timed out"),
+			code: codes.Internal,
+		},
+	}
+
+	for _, operation := range operations {
+		for _, tc := range cases {
+			t.Run(operation.name+"/"+tc.name, func(t *testing.T) {
+				service := NewTrafgenService(&recordingBackend{err: tc.err})
+
+				err := operation.call(t, service)
+				require.Equal(t, tc.code, status.Code(err))
+			})
+		}
+	}
 }
