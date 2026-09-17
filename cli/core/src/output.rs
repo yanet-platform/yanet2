@@ -12,6 +12,8 @@ use colored::{Color, Colorize};
 use erased_serde::Serialize as ErasedSerialize;
 use serde::Serialize;
 
+#[cfg(unix)]
+use crate::pager::Pager;
 use crate::{
     display,
     errors::{Error, ErrorKind},
@@ -64,6 +66,12 @@ pub trait Output: Send + Sync {
     fn serializes(&self) -> bool {
         false
     }
+
+    /// Output result data a reader scrolls through, as [`Output::data`] unless
+    /// the backend pages it.
+    fn paged<'a>(&self, payload: &dyn Fn() -> Box<dyn ErasedSerialize + 'a>, render: Box<dyn FnOnce() + 'a>) {
+        self.data(payload, render);
+    }
 }
 
 /// Human-readable output backend.
@@ -72,12 +80,17 @@ pub trait Output: Send + Sync {
 /// is not set, and the locale advertises UTF-8.
 pub struct HumanOutput {
     is_colored: bool,
+    #[cfg_attr(not(unix), allow(dead_code))]
+    pager: bool,
 }
 
 impl HumanOutput {
     /// Detect terminal capability from the environment.
     pub fn detect() -> Self {
-        Self { is_colored: is_colored() }
+        Self {
+            is_colored: is_colored(),
+            pager: false,
+        }
     }
 }
 
@@ -133,6 +146,15 @@ impl Output for HumanOutput {
     }
 
     fn data<'a>(&self, _payload: &dyn Fn() -> Box<dyn ErasedSerialize + 'a>, render: Box<dyn FnOnce() + 'a>) {
+        render();
+    }
+
+    #[cfg(unix)]
+    fn paged<'a>(&self, _payload: &dyn Fn() -> Box<dyn ErasedSerialize + 'a>, render: Box<dyn FnOnce() + 'a>) {
+        // The terminal check memoizes before stdout turns into the pipe and the
+        // pager keeps the terminal width, so renderers see the terminal.
+        let _pager = (self.pager && stdout_is_terminal()).then(Pager::start).flatten();
+
         render();
     }
 }
@@ -211,6 +233,26 @@ impl Format for CommonFormat {
     }
 }
 
+/// The output format and pager switch of the global flags.
+#[derive(Debug, Clone, Copy)]
+pub struct GlobalFormat {
+    pub format: CommonFormat,
+    /// Whether a human render of [`paged`] data may start a pager.
+    pub pager: bool,
+}
+
+impl Format for GlobalFormat {
+    fn build(self) -> Box<dyn Output> {
+        match self.format {
+            CommonFormat::Human => Box::new(HumanOutput {
+                pager: self.pager,
+                ..HumanOutput::detect()
+            }),
+            CommonFormat::Json => Box::new(JsonOutput),
+        }
+    }
+}
+
 static OUTPUT: OnceLock<Box<dyn Output>> = OnceLock::new();
 
 /// Initialise the logger and selected output backend.
@@ -266,6 +308,19 @@ where
     let payload = move || -> Box<dyn ErasedSerialize + '_> { Box::new(make_payload()) };
 
     current().data(&payload, Box::new(render));
+}
+
+/// Output result data like [`data`], paging a human render on a terminal
+/// unless `--no-pager` is given.
+pub fn paged<P, MakePayload, Render>(make_payload: MakePayload, render: Render)
+where
+    MakePayload: Fn() -> P,
+    P: Serialize,
+    Render: FnOnce(),
+{
+    let payload = move || -> Box<dyn ErasedSerialize + '_> { Box::new(make_payload()) };
+
+    current().paged(&payload, Box::new(render));
 }
 
 /// Opens a stream of rows, see [`Rows`].

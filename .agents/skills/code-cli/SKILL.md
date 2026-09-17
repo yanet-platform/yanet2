@@ -24,8 +24,8 @@ has the manifest, `build.rs`, skeleton and registration steps for a new binary.
 - `Cmd`: `#[derive(Debug, Clone, Parser)]`, `#[command(version, about)]`,
   `#[command(flatten_help = true)]`, fields `#[clap(subcommand)] mode: ModeCmd`
   and `#[command(flatten)] globals: GlobalArgs`. `ync::GlobalArgs` carries
-  the connection flags, `--format` and `-v` for every binary, a crate never
-  declares them itself.
+  the connection flags, `--format`, `-v` and `--no-pager` for every binary,
+  a crate never declares them itself.
 - `fn main() -> std::process::ExitCode` delegates the lifecycle to
   `ync::entrypoint(|cmd: &Cmd| cmd.globals.options(), run)`. The scaffold
   owns completion before Tokio, parsing, output initialisation, the
@@ -151,6 +151,10 @@ no `--yes`, no `--dry-run`.
   render)`: `push` per row, `finish(empty)` at the end; under `--format json`
   every row is one JSON line. Wrapped text under a prefix with a hanging
   indent is `display::print_hanging`, a histogram is `display::print_bars`.
+- Data a reader scrolls through (a ruleset, a long listing) leaves through
+  `output::paged(|| payload, || render)`: a human render on a terminal goes
+  through `YANET_PAGER`, `PAGER` or `less` (`LESS=FRSX` when unset), and the
+  global `--no-pager` prints it directly.
 - Empty results: inside the render closure, `output::empty(…)` or
   `output::empty_with_hint(…, "create one with '<full command>'")` and an
   early return; never bare printing or a call-site guard. The primitive owns
