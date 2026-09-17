@@ -5,10 +5,10 @@
 //! signatures. Each CLI implements [`Format`] for its supported choices;
 //! [`CommonFormat`] provides the usual human and JSON pair.
 
-use core::fmt::Arguments;
+use core::fmt::{self, Arguments, Display, Formatter};
 use std::{io::IsTerminal, sync::OnceLock};
 
-use colored::Colorize;
+use colored::{Color, Colorize};
 use erased_serde::Serialize as ErasedSerialize;
 use serde::Serialize;
 
@@ -501,6 +501,71 @@ pub fn paint_ok(text: &str) -> String {
 /// Paints red text after the caller has checked terminal colour support.
 pub fn paint_error(text: &str) -> String {
     text.red().to_string()
+}
+
+/// A colour of the CLI palette, written by [`Painted`] with the escape codes
+/// of `colored` and without a string per value.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Paint {
+    /// The secondary grey of [`paint_dim`].
+    Dim,
+    /// The yellow of [`paint_warning`].
+    Warning,
+    /// A muted 256-colour green for an accepted state inside dense text.
+    SoftOk,
+    /// A muted 256-colour red for a refused state inside dense text.
+    SoftError,
+}
+
+impl Paint {
+    /// Wraps a value in this colour when colour is on.
+    pub fn when<T>(self, colored: bool, value: T) -> Painted<T> {
+        Painted::new(colored.then_some(self), value)
+    }
+
+    /// Returns the escape sequence opening this colour, built once so the
+    /// truecolor fallback follows `COLORTERM` as `colored` does.
+    fn prefix(self) -> &'static str {
+        static PREFIXES: OnceLock<[String; 4]> = OnceLock::new();
+
+        let prefixes = PREFIXES.get_or_init(|| {
+            let open = |color: Color| format!("\x1B[{}m", color.to_fg_str());
+
+            [
+                open(Color::TrueColor { r: 127, g: 127, b: 127 }),
+                open(Color::Yellow),
+                open(Color::AnsiColor(108)),
+                open(Color::AnsiColor(131)),
+            ]
+        });
+
+        &prefixes[self as usize]
+    }
+}
+
+/// A value written inside the escape codes of a [`Paint`], or plain.
+#[derive(Debug, Clone, Copy)]
+pub struct Painted<T> {
+    paint: Option<Paint>,
+    value: T,
+}
+
+impl<T> Painted<T> {
+    pub fn new(paint: Option<Paint>, value: T) -> Self {
+        Self { paint, value }
+    }
+}
+
+impl<T: Display> Display for Painted<T> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), fmt::Error> {
+        let Some(paint) = self.paint else {
+            return self.value.fmt(f);
+        };
+
+        f.write_str(paint.prefix())?;
+        self.value.fmt(f)?;
+        f.write_str("\x1B[0m")
+    }
 }
 
 /// Returns `true` if the current locale advertises UTF-8 encoding.
