@@ -13,7 +13,7 @@ use tabled::Tabled;
 use tonic::codec::CompressionEncoding;
 use ync::{
     GlobalArgs,
-    client::{Connection, ConnectionArgs, LayeredChannel, Service},
+    client::{Connection, ConnectionArgs, LayeredChannel, Service, resolve_label},
     completion, display,
     errors::Error,
     metrics, output, yaml,
@@ -191,6 +191,8 @@ fn print_rule_counter_groups(rows: &[RuleCounterRow]) {
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ACLConfig {
+    #[serde(default)]
+    name: String,
     rules: Vec<aclpb::Rule>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     fwtable_name_v4: Option<String>,
@@ -334,8 +336,7 @@ impl ACLService {
         Ok(())
     }
 
-    pub async fn update_config(&mut self, cmd: UpdateCmd) -> Result<(), Error> {
-        let config: ACLConfig = yaml::load(&cmd.file).map_err(|err| self.service.invalid("update", err.to_string()))?;
+    pub async fn update_config(&mut self, cmd: UpdateCmd, config: ACLConfig) -> Result<(), Error> {
         let rule_count = config.rules.len();
 
         // A flag wins for that field whenever it is passed, even as an
@@ -457,11 +458,29 @@ impl ACLService {
 
 async fn run(cmd: Cmd) -> Result<(), Error> {
     let action = cmd.mode.action();
+
+    // The update file is read and bound before the connection, so bad local
+    // input fails the same with or without a reachable gateway.
+    let update = match &cmd.mode {
+        ModeCmd::Update(update) => {
+            let endpoint = resolve_label(&cmd.globals.connection, action)?;
+            let mut config: ACLConfig = yaml::load(&update.file)
+                .map_err(|err| Error::invalid_argument("update", endpoint.clone(), err.to_string()))?;
+            yaml::bind_name(&mut config.name, &update.config_name)
+                .map_err(|err| Error::invalid_argument("update", endpoint, err))?;
+            Some(config)
+        }
+        _ => None,
+    };
+
     let mut service = ACLService::new(&cmd.globals.connection, action).await?;
     match cmd.mode {
         ModeCmd::List => service.list_configs().await,
         ModeCmd::Delete(cmd) => service.delete_config(cmd).await,
-        ModeCmd::Update(cmd) => service.update_config(cmd).await,
+        ModeCmd::Update(cmd) => {
+            let config = update.expect("prepared for the update mode");
+            service.update_config(cmd, config).await
+        }
         ModeCmd::Show(cmd) => service.show_config(cmd).await,
         ModeCmd::MetricsRules(cmd) => service.metrics_rules(cmd).await,
         ModeCmd::RuleCounters(cmd) => service.rule_counters(cmd).await,
