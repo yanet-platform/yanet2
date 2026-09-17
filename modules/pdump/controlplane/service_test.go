@@ -14,6 +14,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	pdump "github.com/yanet-platform/yanet2/modules/pdump/controlplane"
@@ -155,29 +156,27 @@ func TestShowConfigUnknownConfig(t *testing.T) {
 	require.Equal(t, codes.NotFound, status.Code(err))
 }
 
-// Test_PdumpService_SetConfig_MergesMaskedFieldsOverPublishedConfig verifies
-// that a masked update keeps the fields it does not name and publishes the
-// merged settings.
-func Test_PdumpService_SetConfig_MergesMaskedFieldsOverPublishedConfig(t *testing.T) {
+// Test_PdumpService_SetConfig_MergesCarriedFieldsOverPublishedConfig verifies
+// that an update keeps the fields it does not carry and publishes the merged
+// settings.
+func Test_PdumpService_SetConfig_MergesCarriedFieldsOverPublishedConfig(t *testing.T) {
 	backend := &fakeBackend{}
 	service := pdump.NewPdumpService(backend)
 
 	_, err := service.SetConfig(t.Context(), &pdumppb.SetConfigRequest{
 		Name: "capture",
 		Config: &pdumppb.Config{
-			Filter:   "udp",
-			Mode:     2,
-			Snaplen:  256,
-			RingSize: uint32(2 * datasize.MB),
+			Filter:   proto.String("udp"),
+			Mode:     proto.Uint32(2),
+			Snaplen:  proto.Uint32(256),
+			RingSize: proto.Uint32(uint32(2 * datasize.MB)),
 		},
-		UpdateMask: &pdumppb.FieldMask{Paths: []string{"filter", "mode", "snaplen", "ring_size"}},
 	})
 	require.NoError(t, err)
 
 	_, err = service.SetConfig(t.Context(), &pdumppb.SetConfigRequest{
-		Name:       "capture",
-		Config:     &pdumppb.Config{Filter: "tcp"},
-		UpdateMask: &pdumppb.FieldMask{Paths: []string{"filter"}},
+		Name:   "capture",
+		Config: &pdumppb.Config{Filter: proto.String("tcp")},
 	})
 	require.NoError(t, err)
 
@@ -186,7 +185,45 @@ func Test_PdumpService_SetConfig_MergesMaskedFieldsOverPublishedConfig(t *testin
 
 	response, err := service.ShowConfig(t.Context(), &pdumppb.ShowConfigRequest{Name: "capture"})
 	require.NoError(t, err)
-	require.Equal(t, &pdumppb.Config{Filter: "tcp", Mode: 2, Snaplen: 256, RingSize: uint32(2 * datasize.MB)}, response.Config)
+	wantConfig := &pdumppb.Config{
+		Filter:   proto.String("tcp"),
+		Mode:     proto.Uint32(2),
+		Snaplen:  proto.Uint32(256),
+		RingSize: proto.Uint32(uint32(2 * datasize.MB)),
+	}
+	require.True(t, proto.Equal(wantConfig, response.Config), "got %v", response.Config)
+}
+
+// Test_PdumpService_SetConfig_AppliesCarriedEmptyAndZeroValues verifies that a
+// carried empty filter clears the stored one and a carried zero mode restores
+// the default mode.
+func Test_PdumpService_SetConfig_AppliesCarriedEmptyAndZeroValues(t *testing.T) {
+	service := pdump.NewPdumpService(&fakeBackend{})
+
+	_, err := service.SetConfig(t.Context(), &pdumppb.SetConfigRequest{
+		Name:   "defaults",
+		Config: &pdumppb.Config{},
+	})
+	require.NoError(t, err)
+	defaults, err := service.ShowConfig(t.Context(), &pdumppb.ShowConfigRequest{Name: "defaults"})
+	require.NoError(t, err)
+
+	_, err = service.SetConfig(t.Context(), &pdumppb.SetConfigRequest{
+		Name:   "capture",
+		Config: &pdumppb.Config{Filter: proto.String("udp"), Mode: proto.Uint32(2)},
+	})
+	require.NoError(t, err)
+	_, err = service.SetConfig(t.Context(), &pdumppb.SetConfigRequest{
+		Name:   "capture",
+		Config: &pdumppb.Config{Filter: proto.String(""), Mode: proto.Uint32(0)},
+	})
+	require.NoError(t, err)
+
+	response, err := service.ShowConfig(t.Context(), &pdumppb.ShowConfigRequest{Name: "capture"})
+	require.NoError(t, err)
+	require.Empty(t, response.GetConfig().GetFilter())
+	require.NotEqual(t, uint32(2), defaults.GetConfig().GetMode())
+	require.Equal(t, defaults.GetConfig().GetMode(), response.GetConfig().GetMode())
 }
 
 // fakeStream is a ReadDump stream that drops every record.
@@ -211,9 +248,8 @@ func Test_PdumpService_SetConfig_BackendFailure(t *testing.T) {
 	service := pdump.NewPdumpService(backend)
 
 	_, err := service.SetConfig(t.Context(), &pdumppb.SetConfigRequest{
-		Name:       "capture",
-		Config:     &pdumppb.Config{Filter: "not a filter"},
-		UpdateMask: &pdumppb.FieldMask{Paths: []string{"filter"}},
+		Name:   "capture",
+		Config: &pdumppb.Config{Filter: proto.String("not a filter")},
 	})
 	require.Equal(t, codes.Internal, status.Code(err))
 }
@@ -223,9 +259,8 @@ func setFilter(t *testing.T, service *pdump.PdumpService, name, filter string) {
 	t.Helper()
 
 	_, err := service.SetConfig(t.Context(), &pdumppb.SetConfigRequest{
-		Name:       name,
-		Config:     &pdumppb.Config{Filter: filter},
-		UpdateMask: &pdumppb.FieldMask{Paths: []string{"filter"}},
+		Name:   name,
+		Config: &pdumppb.Config{Filter: proto.String(filter)},
 	})
 	require.NoError(t, err)
 }
@@ -377,9 +412,8 @@ func updateFilter(ctx context.Context, service *pdump.PdumpService, name, filter
 	done := make(chan error, 1)
 	go func() {
 		_, err := service.SetConfig(ctx, &pdumppb.SetConfigRequest{
-			Name:       name,
-			Config:     &pdumppb.Config{Filter: filter},
-			UpdateMask: &pdumppb.FieldMask{Paths: []string{"filter"}},
+			Name:   name,
+			Config: &pdumppb.Config{Filter: proto.String(filter)},
 		})
 		done <- err
 	}()
@@ -412,7 +446,7 @@ func Test_PdumpService_ShowConfig_DoesNotWaitForPublish(t *testing.T) {
 	select {
 	case result := <-shown:
 		require.NoError(t, result.err)
-		require.Equal(t, "udp", result.response.Config.Filter, "the blocked update must stay unpublished")
+		require.Equal(t, "udp", result.response.GetConfig().GetFilter(), "the blocked update must stay unpublished")
 	case <-time.After(5 * time.Second):
 		t.Fatal("ShowConfig waited for the blocked update")
 	}

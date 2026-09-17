@@ -37,10 +37,6 @@ export interface PdumpRecord {
     data?: string; // base64 encoded
 }
 
-export interface FieldMask {
-    paths?: string[];
-}
-
 const pdumpService = createService('modules.pdump.controlplane.pdumppb.v1.PdumpService');
 const pdumpStreamService = createStreamingService('modules.pdump.controlplane.pdumppb.v1.PdumpService');
 
@@ -56,12 +52,11 @@ export const pdumpApi = {
     setConfig: (
         name: string,
         config: PdumpConfig,
-        update_mask: FieldMask,
         options?: CallOptions
     ): Promise<void> => {
         return pdumpService.callWithBody<void>(
             'SetConfig',
-            { name, config, update_mask },
+            { name, config },
             options
         );
     },

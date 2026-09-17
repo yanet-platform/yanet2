@@ -91,15 +91,7 @@ export const ConfigDialog: React.FC<ConfigDialogProps> = ({
                 ring_size: ringSize ? parseInt(ringSize, 10) : undefined,
             };
 
-            const paths: string[] = ['filter', 'mode'];
-            if (config.snaplen !== undefined) {
-                paths.push('snaplen');
-            }
-            if (config.ring_size !== undefined) {
-                paths.push('ring_size');
-            }
-
-            await pdumpApi.setConfig(targetConfigName, config, { paths });
+            await pdumpApi.setConfig(targetConfigName, config);
             pushRecentFilter(filter);
             toaster.success('pdump-config-saved', isCreate ? 'Configuration created' : 'Configuration saved');
             onSaved();

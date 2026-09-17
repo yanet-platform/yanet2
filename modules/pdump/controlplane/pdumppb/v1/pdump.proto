@@ -64,25 +64,27 @@ message ShowConfigRequest { string name = 1; }
 // Config contains the pdump module configuration.
 message Config {
   // Pcap style filter.
-  string filter = 1;
+  optional string filter = 1;
   // Mode specifies a bitmap of queues that should be dumped.
   // For now available queues are INPUT, OUTPUT, DROP.
-  uint32 mode = 2;
+  optional uint32 mode = 2;
   // Snaplen specifies maximum packet length to capture. Must be greater
   // than zero.
-  uint32 snaplen = 3;
+  optional uint32 snaplen = 3;
   // Ring_size specifies per worker ring buffer size.
-  uint32 ring_size = 4;
+  optional uint32 ring_size = 4;
 }
 
 // ShowConfigResponse contains the configuration details of the pdump module.
 message ShowConfigResponse { Config config = 1; }
 
 // SetConfigRequest contains new configuration for the pdump module
+//
+// Only the config fields it carries change. An absent field keeps the stored
+// value, and a config that does not exist yet starts from the defaults.
 message SetConfigRequest {
   string name = 1;
   Config config = 2;
-  FieldMask update_mask = 3;
 }
 
 message SetConfigResponse {}
@@ -91,10 +93,3 @@ message SetConfigResponse {}
 message DeleteConfigRequest { string name = 1; }
 
 message DeleteConfigResponse {}
-
-// Copy pasted from import "google/protobuf/field_mask.proto";
-// for integrity purposes.
-message FieldMask {
-  // The set of field mask paths.
-  repeated string paths = 1;
-}
