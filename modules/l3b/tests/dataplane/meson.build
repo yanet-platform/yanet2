@@ -26,7 +26,4 @@ l3b_test = executable(
   dependencies: dependencies,
 )
 
-test('l3b', l3b_test, suite: 'l3b', env: [
-  'UBSAN_OPTIONS=halt_on_error=0:print_stacktrace=0',
-  'LSAN_OPTIONS=detect_leaks=0',
-])
+test('l3b', l3b_test, suite: 'l3b')
