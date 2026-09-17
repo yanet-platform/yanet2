@@ -24,7 +24,11 @@
  * combined regions of the address domain, and a dense high by low value
  * table carries the join for the query side: a packet address resolves
  * to one high and one low region value through the per half longest
- * prefix match, and the table holds the combined region of the pair.
+ * prefix match, and the table holds the combined region of the pair. A
+ * high region row without any low half distinction carries its combined
+ * region in a uniform value line over the rows instead - the query
+ * skips the low half lookup for it and the enumeration below touches
+ * the single line value instead of every cell of the row.
  *
  * The builder runs in three layers. The networks repeat across the
  * rules, so the first layer groups the unique normalized networks with
@@ -54,6 +58,12 @@ struct filter_compile_net6s_attr {
 
 	struct range_index ri_hi;
 	struct range_index ri_lo;
+
+	// Rows of the join table with a low half distinction; the compile
+	// time map drives the region enumeration and the commit, the query
+	// reads the two dimensional mark from the uniform line instead.
+	uint8_t *row_split;
+	uint32_t row_count;
 
 	struct hash_index net_index;
 	struct net6 *nets;
@@ -301,9 +311,34 @@ filter_net6_part_bounds(
 	}
 }
 
+// Resolves both half region index ranges of a normalized network at
+// once.
+static inline void
+filter_net6_net_bounds(
+	struct filter_compile_net6s_attr *attr,
+	const struct net6 *net,
+	uint32_t bounds[4]
+) {
+	filter_net6_part_bounds(
+		&attr->ri_hi, net->addr, net->mask, &bounds[0], &bounds[1]
+	);
+	filter_net6_part_bounds(
+		&attr->ri_lo,
+		net->addr + 8,
+		net->mask + 8,
+		&bounds[2],
+		&bounds[3]
+	);
+}
+
 /*
- * Iterates the combined cells of a network: the cross of its high region
- * range with its low region range.
+ * Iterates the combined regions of a network: the cross of its high
+ * region range with its low region range.
+ *
+ * A high region row without any low half distinction carries its value
+ * in the uniform value line instead of the join table cells, so a
+ * network covering whole rows through a wildcard low half iterates the
+ * single line value of every uniform row of its range.
  */
 static inline int
 filter_net6_net_regions_iter(
@@ -312,29 +347,34 @@ filter_net6_net_regions_iter(
 	filter_compile_attr_iter_cb_func iter_cb_func,
 	void *cb_func_data
 ) {
-	uint32_t start_hi;
-	uint32_t stop_hi;
-	filter_net6_part_bounds(
-		&attr->ri_hi, net->addr, net->mask, &start_hi, &stop_hi
-	);
-
-	uint32_t start_lo;
-	uint32_t stop_lo;
-	filter_net6_part_bounds(
-		&attr->ri_lo, net->addr + 8, net->mask + 8, &start_lo, &stop_lo
-	);
+	uint32_t bounds[4];
+	filter_net6_net_bounds(attr, net, bounds);
 
 	const uint32_t *values_hi = ADDR_OF(&attr->ri_hi.values);
 	const uint32_t *values_lo = ADDR_OF(&attr->ri_lo.values);
 	struct value_table *comb = &attr->query_attr->comb;
+	const uint8_t *row_split = attr->row_split;
+	struct vline *uniform = &attr->query_attr->uniform;
 
-	for (uint32_t idx_hi = start_hi; idx_hi < stop_hi; ++idx_hi) {
-		for (uint32_t idx_lo = start_lo; idx_lo < stop_lo; ++idx_lo) {
+	const int full_lo = bounds[2] == 0 && bounds[3] == attr->ri_lo.count;
+
+	for (uint32_t idx_hi = bounds[0]; idx_hi < bounds[1]; ++idx_hi) {
+		const uint32_t row = values_hi[idx_hi];
+
+		if (full_lo && !row_split[row]) {
+			if (iter_cb_func(
+				    vline_get_ptr(uniform, row), cb_func_data
+			    ) < 0) {
+				return -1;
+			}
+			continue;
+		}
+
+		for (uint32_t idx_lo = bounds[2]; idx_lo < bounds[3];
+		     ++idx_lo) {
 			if (iter_cb_func(
 				    value_table_get_ptr(
-					    comb,
-					    values_hi[idx_hi],
-					    values_lo[idx_lo]
+					    comb, row, values_lo[idx_lo]
 				    ),
 				    cb_func_data
 			    ) < 0) {
@@ -513,7 +553,10 @@ filter_compile_attr_net6s_create(
 
 	/*
 	 * The dense high by low value table carries the join of the half
-	 * region values into the combined regions.
+	 * region values into the combined regions. A high region row
+	 * without any low half distinction carries its value in the
+	 * uniform value line instead, so the line joins the same
+	 * enumeration below as one more value of the domain.
 	 */
 	if (value_table_init(
 		    &attr->query_attr->comb,
@@ -525,11 +568,56 @@ filter_compile_attr_net6s_create(
 		goto error_free_parts;
 	}
 
+	attr->row_count = attr->query_attr->comb.v_dim;
+	if (vline_init(
+		    &attr->query_attr->uniform,
+		    memory_context,
+		    "filter:net6:rows",
+		    attr->row_count
+	    )) {
+		goto error_free_comb;
+	}
+
+	attr->row_split = memory_balloc(memory_context, attr->row_count);
+	if (attr->row_split == NULL) {
+		goto error_free_uniform;
+	}
+	memset(attr->row_split, 0, attr->row_count);
+
+	/*
+	 * A row keeps the whole row value only while no network ever
+	 * covers a strict sub range of the low half within the row; the
+	 * marking pass visits the high range of every such network once,
+	 * before any region enumeration.
+	 */
+	{
+		const uint32_t *values_hi = ADDR_OF(&attr->ri_hi.values);
+
+		for (uint32_t net_idx = 0; net_idx < attr->net_count;
+		     ++net_idx) {
+			const struct net6 *net = attr->nets + net_idx;
+			if (net6_is_any(net)) {
+				continue;
+			}
+
+			uint32_t bounds[4];
+			filter_net6_net_bounds(attr, net, bounds);
+			if (bounds[2] == 0 && bounds[3] == attr->ri_lo.count) {
+				continue;
+			}
+
+			for (uint32_t idx_hi = bounds[0]; idx_hi < bounds[1];
+			     ++idx_hi) {
+				attr->row_split[values_hi[idx_hi]] = 1;
+			}
+		}
+	}
+
 	/*
 	 * Enumerate the combined regions once per unique network: the
-	 * network touches the cells of its cross, so every cell gains a
-	 * value specific to the set of networks covering it; compaction
-	 * removes the gaps of unused values.
+	 * network touches the values of its cross, so every covered value
+	 * gains a class specific to the set of networks covering it;
+	 * compaction removes the gaps of unused values.
 	 */
 	{
 		struct remap_table remap_table;
@@ -537,9 +625,10 @@ filter_compile_attr_net6s_create(
 			    &remap_table,
 			    memory_context,
 			    attr->query_attr->comb.v_dim *
-				    attr->query_attr->comb.h_dim
+					    attr->query_attr->comb.h_dim +
+				    attr->row_count
 		    )) {
-			goto error_free_comb;
+			goto error_free_row_split;
 		}
 
 		for (uint32_t net_idx = 0; net_idx < attr->net_count;
@@ -558,7 +647,7 @@ filter_compile_attr_net6s_create(
 				    &remap_table
 			    )) {
 				remap_table_free(&remap_table);
-				goto error_free_comb;
+				goto error_free_row_split;
 			}
 		}
 
@@ -577,7 +666,7 @@ filter_compile_attr_net6s_create(
 	if (value_registry_init(
 		    &attr->net_registry, memory_context, "filter:net6:nets"
 	    )) {
-		goto error_free_comb;
+		goto error_free_row_split;
 	}
 
 	{
@@ -802,6 +891,14 @@ error_free_region:
 error_free_net_registry:
 	value_registry_fini(&attr->net_registry);
 
+error_free_row_split:
+	if (attr->row_split != NULL) {
+		memory_bfree(memory_context, attr->row_split, attr->row_count);
+	}
+
+error_free_uniform:
+	vline_free(&attr->query_attr->uniform);
+
 error_free_comb:
 	value_table_free(&attr->query_attr->comb);
 
@@ -995,10 +1092,19 @@ filter_compile_attr_net6s_free(
 	);
 	hash_index_fini(&net6s_attr->net_index);
 
+	if (net6s_attr->row_split != NULL) {
+		memory_bfree(
+			memory_context,
+			net6s_attr->row_split,
+			net6s_attr->row_count
+		);
+	}
+
 	if (net6s_attr->query_attr != NULL) {
 		lpm_free(&net6s_attr->query_attr->hi);
 		lpm_free(&net6s_attr->query_attr->lo);
 		value_table_free(&net6s_attr->query_attr->comb);
+		vline_free(&net6s_attr->query_attr->uniform);
 
 		memory_bfree(
 			memory_context,
@@ -1022,10 +1128,15 @@ filter_compile_attr_net6s_commit(
 
 	/*
 	 * The compile stages assign the final class values to the combined
-	 * regions; the join table cells still hold the region identifiers
-	 * and resolve through the region storage.
+	 * regions; the join table cells and the uniform row values still
+	 * hold the region identifiers and resolve through the region
+	 * storage. A row of a low half distinction takes the two
+	 * dimensional mark instead, so the lookup finishes with the line
+	 * alone for every other row. Cells of a uniform row keep the
+	 * initial region and are never read.
 	 */
-	struct value_table *comb = &net6s_attr->query_attr->comb;
+	struct filter_query_attr_net6 *query_attr = net6s_attr->query_attr;
+	struct value_table *comb = &query_attr->comb;
 	for (uint32_t v_idx = 0; v_idx < comb->v_dim; ++v_idx) {
 		for (uint32_t h_idx = 0; h_idx < comb->h_dim; ++h_idx) {
 			uint32_t *value =
@@ -1034,7 +1145,16 @@ filter_compile_attr_net6s_commit(
 		}
 	}
 
-	struct filter_query_attr_net6 *query_attr = net6s_attr->query_attr;
+	for (uint32_t row = 0; row < net6s_attr->row_count; ++row) {
+		uint32_t *value = vline_get_ptr(&query_attr->uniform, row);
+		if (net6s_attr->row_split[row]) {
+			*value = FILTER_NET6_ROW_2D;
+			continue;
+		}
+
+		*value = net6s_attr->region_values[*value];
+	}
+
 	net6s_attr->query_attr = NULL;
 
 	filter_compile_attr_net6s_free(memory_context, attr);

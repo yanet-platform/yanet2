@@ -37,9 +37,22 @@ filter_query_attr_net6_lookup(
 	struct filter_query_attr_net6 *attr_net6 =
 		container_of(attr, struct filter_query_attr_net6, attr);
 
+	// A high half region without any low half distinction carries its
+	// result class in the uniform line and the lookup finishes with
+	// the single line read; the two dimensional mark falls through to
+	// the low half lookup and the join table read.
+	struct vline *uniform = (struct vline *)&attr_net6->uniform;
+
 	for (uint32_t idx = 0; idx < packet_count; ++idx) {
 		const uint8_t *addr = net6_handlers->get_net6(packets[idx]);
 		uint32_t hi = lpm8_lookup(&attr_net6->hi, addr);
+
+		uint32_t scalar = vline_get(uniform, hi);
+		if (scalar != FILTER_NET6_ROW_2D) {
+			results[idx] = scalar;
+			continue;
+		}
+
 		uint32_t lo = lpm8_lookup(&attr_net6->lo, addr + 8);
 		results[idx] = *value_table_get_ptr(&attr_net6->comb, hi, lo);
 	}
