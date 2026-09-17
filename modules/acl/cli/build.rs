@@ -16,6 +16,12 @@ fn main() -> Result<(), Box<dyn Error>> {
                     ".modules.acl.controlplane.aclpb.v1.ShowConfigResponse",
                     "#[derive(serde::Serialize)]",
                 )
+                // The deprecated sync config is never set. Leaving it out lets
+                // update read the JSON of show.
+                .field_attribute(
+                    ".modules.acl.controlplane.aclpb.v1.ShowConfigResponse.sync_config",
+                    "#[serde(skip_serializing_if = \"Option::is_none\")]",
+                )
                 .message_attribute(
                     ".modules.acl.controlplane.aclpb.v1.RuleCounter",
                     "#[derive(serde::Serialize)]",
