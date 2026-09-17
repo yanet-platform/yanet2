@@ -14,57 +14,13 @@
 
 #include "lib/filter2/classifiers/port.h"
 
-static inline uint16_t
-packet_src_port(const struct packet *packet) {
-	struct rte_mbuf *mbuf = packet_to_mbuf(packet);
-	if (packet->transport_header.type == IPPROTO_TCP) {
-		struct rte_tcp_hdr *tcp_hdr = rte_pktmbuf_mtod_offset(
-			mbuf,
-			struct rte_tcp_hdr *,
-			packet->transport_header.offset
-		);
-		return rte_be_to_cpu_16(tcp_hdr->src_port);
-	} else if (packet->transport_header.type == IPPROTO_UDP) {
-		struct rte_udp_hdr *udp_hdr = rte_pktmbuf_mtod_offset(
-			mbuf,
-			struct rte_udp_hdr *,
-			packet->transport_header.offset
-		);
-		return rte_be_to_cpu_16(udp_hdr->src_port);
-	} else {
-		// non tcp/udp
-		return 0;
-	}
-}
-
-static inline uint16_t
-packet_dst_port(const struct packet *packet) {
-	struct rte_mbuf *mbuf = packet_to_mbuf(packet);
-	if (packet->transport_header.type == IPPROTO_TCP) {
-		struct rte_tcp_hdr *tcp_hdr = rte_pktmbuf_mtod_offset(
-			mbuf,
-			struct rte_tcp_hdr *,
-			packet->transport_header.offset
-		);
-		return rte_be_to_cpu_16(tcp_hdr->dst_port);
-	} else if (packet->transport_header.type == IPPROTO_UDP) {
-		struct rte_udp_hdr *udp_hdr = rte_pktmbuf_mtod_offset(
-			mbuf,
-			struct rte_udp_hdr *,
-			packet->transport_header.offset
-		);
-		return rte_be_to_cpu_16(udp_hdr->dst_port);
-	} else {
-		// non tcp/udp
-		return 0;
-	}
-}
-
-typedef uint16_t (*packet_get_port_func)(const struct packet *packet);
+typedef void (*packet_get_port_batch_func)(
+	const struct packet **packets, uint16_t *ports, uint32_t packet_count
+);
 
 struct filter_query_attr_port_handlers {
 	struct filter_query_attr_handlers attr_handlers;
-	packet_get_port_func get_port;
+	packet_get_port_batch_func get_port;
 };
 
 static inline void
@@ -85,57 +41,71 @@ filter_query_attr_port_lookup(
 	const struct filter_query_attr_port *port_attr =
 		container_of(attr, struct filter_query_attr_port, attr);
 
+	// The ports are gathered in one batched call, so the per packet
+	// getter dispatch amortizes over the batch.
+	uint16_t ports[packet_count];
+	port_handlers->get_port(packets, ports, packet_count);
+
 	for (uint32_t idx = 0; idx < packet_count; ++idx) {
-		const uint16_t port = port_handlers->get_port(packets[idx]);
 		results[idx] =
-			vline_get((struct vline *)&port_attr->line, port);
+			vline_get((struct vline *)&port_attr->line, ports[idx]);
 	}
 }
 
-static inline uint16_t
-filter_packet_get_port_src(const struct packet *packet) {
-	struct rte_mbuf *mbuf = packet_to_mbuf(packet);
+static inline void
+filter_packet_get_port_src_batch(
+	const struct packet **packets, uint16_t *ports, uint32_t packet_count
+) {
+	for (uint32_t idx = 0; idx < packet_count; ++idx) {
+		const struct packet *packet = packets[idx];
+		struct rte_mbuf *mbuf = packet_to_mbuf(packet);
 
-	if (packet->transport_header.type == IPPROTO_TCP) {
-		struct rte_tcp_hdr *tcp_hdr = rte_pktmbuf_mtod_offset(
-			mbuf,
-			struct rte_tcp_hdr *,
-			packet->transport_header.offset
-		);
-		return rte_be_to_cpu_16(tcp_hdr->src_port);
-	} else if (packet->transport_header.type == IPPROTO_UDP) {
-		struct rte_udp_hdr *udp_hdr = rte_pktmbuf_mtod_offset(
-			mbuf,
-			struct rte_udp_hdr *,
-			packet->transport_header.offset
-		);
-		return rte_be_to_cpu_16(udp_hdr->src_port);
+		if (packet->transport_header.type == IPPROTO_TCP) {
+			struct rte_tcp_hdr *tcp_hdr = rte_pktmbuf_mtod_offset(
+				mbuf,
+				struct rte_tcp_hdr *,
+				packet->transport_header.offset
+			);
+			ports[idx] = rte_be_to_cpu_16(tcp_hdr->src_port);
+		} else if (packet->transport_header.type == IPPROTO_UDP) {
+			struct rte_udp_hdr *udp_hdr = rte_pktmbuf_mtod_offset(
+				mbuf,
+				struct rte_udp_hdr *,
+				packet->transport_header.offset
+			);
+			ports[idx] = rte_be_to_cpu_16(udp_hdr->src_port);
+		} else {
+			ports[idx] = 0;
+		}
 	}
-	// unreachable
-	return 0;
 }
 
-static inline uint16_t
-filter_packet_get_port_dst(const struct packet *packet) {
-	struct rte_mbuf *mbuf = packet_to_mbuf(packet);
+static inline void
+filter_packet_get_port_dst_batch(
+	const struct packet **packets, uint16_t *ports, uint32_t packet_count
+) {
+	for (uint32_t idx = 0; idx < packet_count; ++idx) {
+		const struct packet *packet = packets[idx];
+		struct rte_mbuf *mbuf = packet_to_mbuf(packet);
 
-	if (packet->transport_header.type == IPPROTO_TCP) {
-		struct rte_tcp_hdr *tcp_hdr = rte_pktmbuf_mtod_offset(
-			mbuf,
-			struct rte_tcp_hdr *,
-			packet->transport_header.offset
-		);
-		return rte_be_to_cpu_16(tcp_hdr->dst_port);
-	} else if (packet->transport_header.type == IPPROTO_UDP) {
-		struct rte_udp_hdr *udp_hdr = rte_pktmbuf_mtod_offset(
-			mbuf,
-			struct rte_udp_hdr *,
-			packet->transport_header.offset
-		);
-		return rte_be_to_cpu_16(udp_hdr->dst_port);
+		if (packet->transport_header.type == IPPROTO_TCP) {
+			struct rte_tcp_hdr *tcp_hdr = rte_pktmbuf_mtod_offset(
+				mbuf,
+				struct rte_tcp_hdr *,
+				packet->transport_header.offset
+			);
+			ports[idx] = rte_be_to_cpu_16(tcp_hdr->dst_port);
+		} else if (packet->transport_header.type == IPPROTO_UDP) {
+			struct rte_udp_hdr *udp_hdr = rte_pktmbuf_mtod_offset(
+				mbuf,
+				struct rte_udp_hdr *,
+				packet->transport_header.offset
+			);
+			ports[idx] = rte_be_to_cpu_16(udp_hdr->dst_port);
+		} else {
+			ports[idx] = 0;
+		}
 	}
-	// unreachable
-	return 0;
 }
 
 static const struct filter_query_attr_handlers filter_query_port = {
@@ -145,11 +115,11 @@ static const struct filter_query_attr_handlers filter_query_port = {
 static const struct filter_query_attr_port_handlers filter_query_attr_port_src =
 	{
 		.attr_handlers = filter_query_port,
-		.get_port = filter_packet_get_port_src,
+		.get_port = filter_packet_get_port_src_batch,
 };
 
 static const struct filter_query_attr_port_handlers filter_query_attr_port_dst =
 	{
 		.attr_handlers = filter_query_port,
-		.get_port = filter_packet_get_port_dst,
+		.get_port = filter_packet_get_port_dst_batch,
 };

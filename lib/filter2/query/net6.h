@@ -1,6 +1,7 @@
 #pragma once
 
 #include "common/container_of.h"
+#include "common/network.h"
 
 #include "lib/dataplane/packet/packet.h"
 #include "lib/filter2/classifiers/net6.h"
@@ -11,12 +12,15 @@
 #include <rte_mbuf.h>
 
 #include <stdint.h>
+#include <string.h>
 
-typedef const uint8_t *(*packet_get_net6_func)(const struct packet *packet);
+typedef void (*packet_get_net6_batch_func)(
+	const struct packet **packets, uint8_t *addrs, uint32_t packet_count
+);
 
 struct filter_query_attr_net6_handlers {
 	struct filter_query_attr_handlers attr_handlers;
-	packet_get_net6_func get_net6;
+	packet_get_net6_batch_func get_net6;
 };
 
 static inline void
@@ -37,6 +41,12 @@ filter_query_attr_net6_lookup(
 	struct filter_query_attr_net6 *attr_net6 =
 		container_of(attr, struct filter_query_attr_net6, attr);
 
+	// The addresses are gathered in one batched call, so the per packet
+	// getter dispatch amortizes over the batch and the trie walks read
+	// contiguous keys instead of scattered mbuf headers.
+	uint8_t addrs[packet_count][NET6_LEN];
+	net6_handlers->get_net6(packets, addrs[0], packet_count);
+
 	// A high half region without any low half distinction carries its
 	// result class in the uniform line and the lookup finishes with
 	// the single line read; the two dimensional mark falls through to
@@ -44,7 +54,7 @@ filter_query_attr_net6_lookup(
 	struct vline *uniform = (struct vline *)&attr_net6->uniform;
 
 	for (uint32_t idx = 0; idx < packet_count; ++idx) {
-		const uint8_t *addr = net6_handlers->get_net6(packets[idx]);
+		const uint8_t *addr = addrs[idx];
 		uint32_t hi = lpm8_lookup(&attr_net6->hi, addr);
 
 		uint32_t scalar = vline_get(uniform, hi);
@@ -58,24 +68,36 @@ filter_query_attr_net6_lookup(
 	}
 }
 
-static inline const uint8_t *
-filter_packet_get_net6_src(const struct packet *packet) {
-	struct rte_mbuf *mbuf = packet_to_mbuf(packet);
-	struct rte_ipv6_hdr *ipv6_hdr = rte_pktmbuf_mtod_offset(
-		mbuf, struct rte_ipv6_hdr *, packet->network_header.offset
-	);
-
-	return (const uint8_t *)ipv6_hdr->src_addr;
+static inline void
+filter_packet_get_net6_src_batch(
+	const struct packet **packets, uint8_t *addrs, uint32_t packet_count
+) {
+	for (uint32_t idx = 0; idx < packet_count; ++idx) {
+		const struct packet *packet = packets[idx];
+		struct rte_mbuf *mbuf = packet_to_mbuf(packet);
+		struct rte_ipv6_hdr *ipv6_hdr = rte_pktmbuf_mtod_offset(
+			mbuf,
+			struct rte_ipv6_hdr *,
+			packet->network_header.offset
+		);
+		memcpy(addrs + idx * NET6_LEN, ipv6_hdr->src_addr, NET6_LEN);
+	}
 }
 
-static inline const uint8_t *
-filter_packet_get_net6_dst(const struct packet *packet) {
-	struct rte_mbuf *mbuf = packet_to_mbuf(packet);
-	struct rte_ipv6_hdr *ipv6_hdr = rte_pktmbuf_mtod_offset(
-		mbuf, struct rte_ipv6_hdr *, packet->network_header.offset
-	);
-
-	return (const uint8_t *)ipv6_hdr->dst_addr;
+static inline void
+filter_packet_get_net6_dst_batch(
+	const struct packet **packets, uint8_t *addrs, uint32_t packet_count
+) {
+	for (uint32_t idx = 0; idx < packet_count; ++idx) {
+		const struct packet *packet = packets[idx];
+		struct rte_mbuf *mbuf = packet_to_mbuf(packet);
+		struct rte_ipv6_hdr *ipv6_hdr = rte_pktmbuf_mtod_offset(
+			mbuf,
+			struct rte_ipv6_hdr *,
+			packet->network_header.offset
+		);
+		memcpy(addrs + idx * NET6_LEN, ipv6_hdr->dst_addr, NET6_LEN);
+	}
 }
 
 static const struct filter_query_attr_handlers filter_query_net6 = {
@@ -85,11 +107,11 @@ static const struct filter_query_attr_handlers filter_query_net6 = {
 static const struct filter_query_attr_net6_handlers filter_query_attr_net6_src =
 	{
 		.attr_handlers = filter_query_net6,
-		.get_net6 = filter_packet_get_net6_src,
+		.get_net6 = filter_packet_get_net6_src_batch,
 };
 
 static const struct filter_query_attr_net6_handlers filter_query_attr_net6_dst =
 	{
 		.attr_handlers = filter_query_net6,
-		.get_net6 = filter_packet_get_net6_dst,
+		.get_net6 = filter_packet_get_net6_dst_batch,
 };
