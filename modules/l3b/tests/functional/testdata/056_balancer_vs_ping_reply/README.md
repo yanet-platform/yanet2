@@ -69,8 +69,9 @@ Counter baselines are taken after final publication for each packet.
 Incoming/replied packet and byte deltas are checked; filter rejection,
 empty-ring, disabled-real, and all real counters remain unchanged. Counter
 reset or inheritance across publication is not asserted. The permissive
-final source-port filter preserves the collision test but does not exercise
-the source-filter branch for correctly handled Echo packets.
+destination-port range in the final source filter preserves the collision
+test but does not exercise the source-filter branch for correctly handled
+Echo packets.
 
 This is bounded Echo coverage, not complete source-scenario parity: routing,
 CLI/flush behavior, full per-protocol accounting, and health/readiness remain
