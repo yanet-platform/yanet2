@@ -19,3 +19,15 @@ filter2_smoke = executable(
 )
 
 test('filter2_smoke', filter2_smoke, suite: ['filter'])
+
+filter2_net6 = executable(
+  'filter2_net6',
+  ['net6.c'],
+  c_args: yanet_test_c_args,
+  link_args: yanet_link_args,
+  dependencies: test_deps,
+  link_language: 'c',
+  include_directories: yanet_rootdir,
+)
+
+test('filter2_net6', filter2_net6, suite: ['filter'])
