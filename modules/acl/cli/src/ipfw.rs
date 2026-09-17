@@ -89,6 +89,16 @@ impl<'a> RuleLine<'a> {
         }
     }
 
+    /// Returns whether the rule reaches a count action, the only one that
+    /// moves its counter.
+    pub fn counts(&self) -> bool {
+        self.rule
+            .actions
+            .iter()
+            .enumerate()
+            .any(|(idx, action)| action.kind == ActionKind::Count as i32 && self.reachable(idx))
+    }
+
     fn reachable(&self, idx: usize) -> bool {
         self.terminal.is_none_or(|terminal| idx < terminal)
     }
