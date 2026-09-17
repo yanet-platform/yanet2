@@ -12,6 +12,8 @@ use tabled::{
 use terminal_size::terminal_size_of;
 
 use crate::output;
+#[cfg(unix)]
+use crate::pager;
 
 /// Prints `names` one per line, sorted and escaped, or reports an empty
 /// list with `empty` through [`output::empty`].
@@ -154,13 +156,11 @@ pub fn print_table(mut table: Table) {
 ///
 /// Width is detected from stdout. When stdout is not a TTY (piped or
 /// redirected) the width is unknown and the table is left unconstrained.
+///
+/// Under a pager the table fits the terminal the pager took stdout from.
 pub fn fit_terminal_width(table: &mut Table) {
-    if let Some((terminal_size::Width(cols), _)) = terminal_size_of(std::io::stdout()) {
-        table.with(
-            Width::wrap(cols as usize)
-                .priority(Priority::max(false))
-                .keep_words(true),
-        );
+    if let Some(cols) = terminal_width() {
+        table.with(Width::wrap(cols).priority(Priority::max(false)).keep_words(true));
     }
 }
 
@@ -169,7 +169,14 @@ pub fn fit_terminal_width(table: &mut Table) {
 /// Returns `None` when stdout is not a TTY (piped or redirected), matching
 /// the same detection [`fit_terminal_width`] uses. See [`stderr_width`] for
 /// the stderr counterpart.
+///
+/// A running pager keeps the width of the terminal it took stdout from.
 pub fn terminal_width() -> Option<usize> {
+    #[cfg(unix)]
+    if let Some(cols) = pager::width() {
+        return Some(cols);
+    }
+
     terminal_size_of(std::io::stdout()).map(|(terminal_size::Width(cols), _)| cols as usize)
 }
 
