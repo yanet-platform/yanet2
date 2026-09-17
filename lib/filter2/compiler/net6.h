@@ -26,16 +26,22 @@
  * to one high and one low region value through the per half longest
  * prefix match, and the table holds the combined region of the pair.
  *
- * The networks repeat across the rules, so the builder groups the unique
- * normalized networks with a hash index and runs the same classification
- * the whole filter runs on rules: every unique network touches the
- * combined cells of its cross, the touch enumerates the combined
- * regions, and a registry with one range per network holds the region
- * values associated with the network. Rule iteration resolves the rule
- * networks through the hash index and walks the prebuilt ranges instead
- * of walking the crosses again. A network without a mask covers the
- * whole domain and contributes no distinction on its own, so it skips
- * the touch and its registry range holds every region.
+ * The builder runs in three layers. The networks repeat across the
+ * rules, so the first layer groups the unique normalized networks with
+ * a hash index and runs the classification once per network: the
+ * network touches the combined cells of its cross, the touch enumerates
+ * the combined regions, and a registry with one range per network holds
+ * the region values assigned to the network. A network without a mask
+ * covers the whole domain and contributes no distinction on its own, so
+ * it skips the touch and its range holds every region.
+ *
+ * The second layer groups the rules by their network list as authored -
+ * the bytes are hashed and compared as stored, with no sorting or
+ * normalization: canonicalizing the lists is a preparation stage
+ * outside the library. Every group unions the value ranges of its
+ * member networks into one range of its own, so the rule iteration
+ * resolves the rule list through the hash index and replays the values
+ * assigned to its networks instead of walking the crosses again.
  */
 
 typedef void (*filter_rule_get_net6s_func)(
@@ -56,6 +62,18 @@ struct filter_compile_net6s_attr {
 	struct value_registry net_registry;
 	uint32_t *region_values;
 	uint32_t region_count;
+
+	struct hash_index set_index;
+	// Authored list bytes of every group representative: the grouping
+	// probes compare against them, so the rule iteration resolves its
+	// group without the rules array.
+	const uint8_t **set_data;
+	uint32_t *set_len;
+	uint32_t *set_reps;
+	uint32_t set_count;
+	uint32_t set_alloc_count;
+
+	struct value_registry set_registry;
 };
 
 struct filter_compile_attr_net6s_handlers {
@@ -94,6 +112,34 @@ net6_is_any(const struct net6 *net) {
 	       *(const uint64_t *)(net->mask + 8) == 0;
 }
 
+// A list without networks, or holding a network without a mask, covers
+// the whole address domain.
+static inline int
+net6s_is_any(const struct filter_net6s *nets) {
+	if (nets->count == 0) {
+		return 1;
+	}
+	for (uint32_t idx = 0; idx < nets->count; ++idx) {
+		if (net6_is_any(nets->items + idx)) {
+			return 1;
+		}
+	}
+	return 0;
+}
+
+static inline void
+net6s_get_set(
+	filter_rule_get_net6s_func get_net6s,
+	const struct filter_rule *rule,
+	const uint8_t **data,
+	uint32_t *len
+) {
+	struct filter_net6s net6s;
+	get_net6s(rule, &net6s);
+	*data = (const uint8_t *)net6s.items;
+	*len = net6s.count * sizeof(*net6s.items);
+}
+
 static inline uint32_t
 net6_hash(const struct net6 *net) {
 	uint32_t hash = 0;
@@ -118,6 +164,31 @@ filter_net6_group_eq(uint32_t value, const void *data) {
 
 	return memcmp(group_net->addr, group_ctx->net->addr, NET6_LEN) != 0 ||
 	       memcmp(group_net->mask, group_ctx->net->mask, NET6_LEN) != 0;
+}
+
+static inline uint32_t
+filter_net6_set_hash(const uint8_t *data, uint32_t len) {
+	uint32_t hash = 2166136261u;
+	for (uint32_t idx = 0; idx < len; ++idx) {
+		hash = (hash ^ data[idx]) * 16777619u;
+	}
+	return hash ? hash : 1;
+}
+
+struct filter_net6_set_ctx {
+	const uint8_t *data;
+	uint32_t len;
+	const uint8_t **set_data;
+	const uint32_t *set_len;
+};
+
+static inline int
+filter_net6_set_eq(uint32_t value, const void *data) {
+	const struct filter_net6_set_ctx *set_ctx = data;
+
+	return set_ctx->set_len[value] != set_ctx->len ||
+	       memcmp(set_ctx->set_data[value], set_ctx->data, set_ctx->len) !=
+		       0;
 }
 
 static inline int
@@ -294,6 +365,33 @@ filter_net6_collect(uint32_t *value, void *data) {
 	return 0;
 }
 
+// Resolves the network of a rule into its registry range of assigned
+// region values through the network hash index.
+static inline int
+filter_net6_net_range(
+	struct filter_compile_net6s_attr *attr,
+	const struct net6 *net,
+	const struct value_range **range
+) {
+	struct filter_net6_group_ctx group_ctx = {
+		attr,
+		net,
+	};
+	uint32_t group = hash_index_lookup(
+		&attr->net_index,
+		net6_hash(net),
+		filter_net6_group_eq,
+		&group_ctx
+	);
+	if (group == HASH_INDEX_INVALID) {
+		return -1;
+	}
+
+	const struct value_range *ranges = ADDR_OF(&attr->net_registry.ranges);
+	*range = ranges + group;
+	return 0;
+}
+
 static inline struct filter_compile_attr *
 filter_compile_attr_net6s_create(
 	struct memory_context *memory_context,
@@ -316,6 +414,14 @@ filter_compile_attr_net6s_create(
 	}
 	memset(attr, 0, sizeof(struct filter_compile_net6s_attr));
 
+	attr->query_attr = (struct filter_query_attr_net6 *)memory_balloc(
+		memory_context, sizeof(struct filter_query_attr_net6)
+	);
+	if (attr->query_attr == NULL) {
+		goto error_free;
+	}
+	memset(attr->query_attr, 0, sizeof(struct filter_query_attr_net6));
+
 	/*
 	 * Collect the unique normalized networks of the ruleset: the first
 	 * occurrence extends the network array, the hash index holds the
@@ -334,7 +440,7 @@ filter_compile_attr_net6s_create(
 	}
 
 	if (hash_index_init(&attr->net_index, memory_context, net_total)) {
-		goto error_free;
+		goto error_free_query;
 	}
 
 	for (uint32_t rule_idx = 0; rule_idx < rule_count; ++rule_idx) {
@@ -383,14 +489,6 @@ filter_compile_attr_net6s_create(
 	 * networks, and the longest prefix match of every half resolves a
 	 * packet address half into its half region value.
 	 */
-	attr->query_attr = (struct filter_query_attr_net6 *)memory_balloc(
-		memory_context, sizeof(struct filter_query_attr_net6)
-	);
-	if (attr->query_attr == NULL) {
-		goto error_free_nets;
-	}
-	memset(attr->query_attr, 0, sizeof(struct filter_query_attr_net6));
-
 	if (filter_net6_build_part(
 		    memory_context,
 		    attr->nets,
@@ -399,7 +497,7 @@ filter_compile_attr_net6s_create(
 		    &attr->query_attr->hi,
 		    &attr->ri_hi
 	    )) {
-		goto error_free_query;
+		goto error_free_nets;
 	}
 
 	if (filter_net6_build_part(
@@ -428,10 +526,10 @@ filter_compile_attr_net6s_create(
 	}
 
 	/*
-	 * Enumerate the combined regions: every unique network with a mask
-	 * touches the cells of its cross, so every cell gains a value
-	 * specific to the set of networks covering it; compaction removes
-	 * the gaps of unused values.
+	 * Enumerate the combined regions once per unique network: the
+	 * network touches the cells of its cross, so every cell gains a
+	 * value specific to the set of networks covering it; compaction
+	 * removes the gaps of unused values.
 	 */
 	{
 		struct remap_table remap_table;
@@ -470,11 +568,11 @@ filter_compile_attr_net6s_create(
 	}
 
 	/*
-	 * Collect the combined region values of every network into a
+	 * Assign the combined region values of every network into a
 	 * registry, one range per network. A network without a mask covers
 	 * the whole domain, so its range holds every region - the region
 	 * count is known only after the masked networks are collected, and
-	 * the masked ranges are filled first.
+	 * their ranges are filled first.
 	 */
 	if (value_registry_init(
 		    &attr->net_registry, memory_context, "filter:net6:nets"
@@ -491,7 +589,7 @@ filter_compile_attr_net6s_create(
 		for (uint32_t net_idx = 0; net_idx < attr->net_count;
 		     ++net_idx) {
 			if (value_registry_start(&attr->net_registry)) {
-				goto error_free_registry;
+				goto error_free_net_registry;
 			}
 
 			const struct net6 *net = attr->nets + net_idx;
@@ -502,7 +600,7 @@ filter_compile_attr_net6s_create(
 			if (filter_net6_net_regions_iter(
 				    attr, net, filter_net6_collect, &collect_ctx
 			    )) {
-				goto error_free_registry;
+				goto error_free_net_registry;
 			}
 		}
 
@@ -529,7 +627,7 @@ filter_compile_attr_net6s_create(
 					    ranges + net_idx,
 					    region_idx
 				    )) {
-					goto error_free_registry;
+					goto error_free_net_registry;
 				}
 			}
 		}
@@ -539,13 +637,169 @@ filter_compile_attr_net6s_create(
 		memory_context, sizeof(uint32_t) * attr->region_count
 	);
 	if (attr->region_values == NULL) {
-		goto error_free_registry;
+		goto error_free_net_registry;
 	}
 	memset(attr->region_values, 0, sizeof(uint32_t) * attr->region_count);
 
+	/*
+	 * Group the rules by their network list as authored: the hash index
+	 * holds the probe table over the group indexes, the representative
+	 * array holds the first rule of every group.
+	 */
+	uint32_t rule_present = 0;
+	for (uint32_t rule_idx = 0; rule_idx < rule_count; ++rule_idx) {
+		if (rules[rule_idx] != NULL) {
+			++rule_present;
+		}
+	}
+
+	if (hash_index_init(&attr->set_index, memory_context, rule_present)) {
+		goto error_free_region;
+	}
+
+	attr->set_alloc_count = rule_present ? rule_present : 1;
+	attr->set_reps = (uint32_t *)memory_balloc(
+		memory_context, sizeof(uint32_t) * attr->set_alloc_count
+	);
+	attr->set_data = (const uint8_t **)memory_balloc(
+		memory_context, sizeof(const uint8_t *) * attr->set_alloc_count
+	);
+	attr->set_len = (uint32_t *)memory_balloc(
+		memory_context, sizeof(uint32_t) * attr->set_alloc_count
+	);
+	if (attr->set_reps == NULL || attr->set_data == NULL ||
+	    attr->set_len == NULL) {
+		goto error_free_sets;
+	}
+
+	for (uint32_t rule_idx = 0; rule_idx < rule_count; ++rule_idx) {
+		const struct filter_rule *rule = rules[rule_idx];
+		if (rule == NULL) {
+			continue;
+		}
+
+		const uint8_t *data;
+		uint32_t len;
+		net6s_get_set(net6s_handlers->get_net6s, rule, &data, &len);
+
+		struct filter_net6_set_ctx set_ctx = {
+			data,
+			len,
+			attr->set_data,
+			attr->set_len,
+		};
+		uint32_t hash = filter_net6_set_hash(data, len);
+		uint32_t set = hash_index_lookup(
+			&attr->set_index, hash, filter_net6_set_eq, &set_ctx
+		);
+		if (set == HASH_INDEX_INVALID) {
+			if (hash_index_insert(
+				    &attr->set_index, hash, attr->set_count
+			    )) {
+				goto error_free_sets;
+			}
+			attr->set_reps[attr->set_count] = rule_idx;
+			attr->set_data[attr->set_count] = data;
+			attr->set_len[attr->set_count] = len;
+			++attr->set_count;
+		}
+	}
+
+	/*
+	 * Union the value ranges of the member networks of every group into
+	 * a registry with one range per group: a group without networks
+	 * covers the whole domain and takes every region directly, a group
+	 * with a network without a mask reaches every region through the
+	 * range of that network.
+	 */
+	if (value_registry_init(
+		    &attr->set_registry, memory_context, "filter:net6:groups"
+	    )) {
+		goto error_free_sets;
+	}
+
+	for (uint32_t set_idx = 0; set_idx < attr->set_count; ++set_idx) {
+		if (value_registry_start(&attr->set_registry)) {
+			goto error_free_set_registry;
+		}
+
+		struct filter_net6s nets;
+		net6s_handlers->get_net6s(
+			rules[attr->set_reps[set_idx]], &nets
+		);
+
+		if (nets.count == 0) {
+			for (uint32_t region_idx = 0;
+			     region_idx < attr->region_count;
+			     ++region_idx) {
+				if (value_registry_collect(
+					    &attr->set_registry, region_idx
+				    )) {
+					goto error_free_set_registry;
+				}
+			}
+			continue;
+		}
+
+		for (uint32_t net_idx = 0; net_idx < nets.count; ++net_idx) {
+			struct net6 net6;
+			net6_normalize(nets.items + net_idx, &net6);
+
+			const struct value_range *range;
+			if (filter_net6_net_range(attr, &net6, &range)) {
+				goto error_free_set_registry;
+			}
+
+			const uint32_t *values = ADDR_OF(&range->values);
+			for (uint32_t idx = 0; idx < range->count; ++idx) {
+				if (value_registry_collect(
+					    &attr->set_registry, values[idx]
+				    )) {
+					goto error_free_set_registry;
+				}
+			}
+		}
+	}
+
 	return &attr->attr;
 
-error_free_registry:
+error_free_set_registry:
+	value_registry_fini(&attr->set_registry);
+
+error_free_sets:
+	if (attr->set_reps != NULL) {
+		memory_bfree(
+			memory_context,
+			attr->set_reps,
+			sizeof(uint32_t) * attr->set_alloc_count
+		);
+	}
+	if (attr->set_data != NULL) {
+		memory_bfree(
+			memory_context,
+			attr->set_data,
+			sizeof(const uint8_t *) * attr->set_alloc_count
+		);
+	}
+	if (attr->set_len != NULL) {
+		memory_bfree(
+			memory_context,
+			attr->set_len,
+			sizeof(uint32_t) * attr->set_alloc_count
+		);
+	}
+	hash_index_fini(&attr->set_index);
+
+error_free_region:
+	if (attr->region_values != NULL) {
+		memory_bfree(
+			memory_context,
+			attr->region_values,
+			sizeof(uint32_t) * attr->region_count
+		);
+	}
+
+error_free_net_registry:
 	value_registry_fini(&attr->net_registry);
 
 error_free_comb:
@@ -559,18 +813,18 @@ error_free_part_hi:
 	range_index_free(&attr->ri_hi);
 	lpm_free(&attr->query_attr->hi);
 
+error_free_nets:
+	mem_array_free_exp(
+		memory_context, attr->nets, sizeof(struct net6), attr->net_count
+	);
+	hash_index_fini(&attr->net_index);
+
 error_free_query:
 	memory_bfree(
 		memory_context,
 		attr->query_attr,
 		sizeof(struct filter_query_attr_net6)
 	);
-
-error_free_nets:
-	mem_array_free_exp(
-		memory_context, attr->nets, sizeof(struct net6), attr->net_count
-	);
-	hash_index_fini(&attr->net_index);
 
 error_free:
 	memory_bfree(
@@ -617,6 +871,7 @@ filter_compile_attr_net6s_rule_is_any(
 	const struct filter_compile_attr_handlers *attr_handlers,
 	const struct filter_rule *rule
 ) {
+	(void)attr;
 
 	struct filter_compile_attr_net6s_handlers *net6s_handlers =
 		container_of(
@@ -625,20 +880,10 @@ filter_compile_attr_net6s_rule_is_any(
 			attr_handlers
 		);
 
-	(void)attr;
-
 	struct filter_net6s nets;
 	net6s_handlers->get_net6s(rule, &nets);
 
-	if (nets.count == 0) {
-		return 1;
-	}
-
-	struct net6 net6_normalized;
-	net6_normalize(nets.items + 0, &net6_normalized);
-
-	return *(uint64_t *)(net6_normalized.mask + 0) == 0 &&
-	       *(uint64_t *)(net6_normalized.mask + 8) == 0;
+	return net6s_is_any(&nets);
 }
 
 static inline int
@@ -659,44 +904,42 @@ filter_compile_attr_net6s_rule_iter(
 	struct filter_compile_net6s_attr *net6s_attr =
 		container_of(attr, struct filter_compile_net6s_attr, attr);
 
-	struct filter_net6s nets;
-	net6s_handlers->get_net6s(rule, &nets);
-
 	/*
-	 * Every rule network is grouped at creation, so each one resolves
-	 * through the hash index into its registry range of prebuilt
-	 * region values.
+	 * Every rule list is grouped at creation, so the authored bytes of
+	 * the list resolve through the hash index into the range of values
+	 * assigned to the networks of the group.
 	 */
-	for (uint32_t net_idx = 0; net_idx < nets.count; ++net_idx) {
-		struct net6 net6;
-		net6_normalize(nets.items + net_idx, &net6);
+	const uint8_t *data;
+	uint32_t len;
+	net6s_get_set(net6s_handlers->get_net6s, rule, &data, &len);
 
-		struct filter_net6_group_ctx group_ctx = {
-			net6s_attr,
-			&net6,
-		};
-		uint32_t group = hash_index_lookup(
-			&net6s_attr->net_index,
-			net6_hash(&net6),
-			filter_net6_group_eq,
-			&group_ctx
-		);
-		if (group == HASH_INDEX_INVALID) {
+	struct filter_net6_set_ctx set_ctx = {
+		data,
+		len,
+		net6s_attr->set_data,
+		net6s_attr->set_len,
+	};
+	uint32_t set = hash_index_lookup(
+		&net6s_attr->set_index,
+		filter_net6_set_hash(data, len),
+		filter_net6_set_eq,
+		&set_ctx
+	);
+	if (set == HASH_INDEX_INVALID) {
+		return -1;
+	}
+
+	const struct value_range *ranges =
+		ADDR_OF(&net6s_attr->set_registry.ranges);
+	const struct value_range *range = ranges + set;
+	const uint32_t *values = ADDR_OF(&range->values);
+
+	for (uint32_t idx = 0; idx < range->count; ++idx) {
+		if (iter_cb_func(
+			    net6s_attr->region_values + values[idx],
+			    cb_func_data
+		    ) < 0) {
 			return -1;
-		}
-
-		const struct value_range *ranges =
-			ADDR_OF(&net6s_attr->net_registry.ranges);
-		const struct value_range *range = ranges + group;
-		const uint32_t *values = ADDR_OF(&range->values);
-
-		for (uint32_t idx = 0; idx < range->count; ++idx) {
-			if (iter_cb_func(
-				    net6s_attr->region_values + values[idx],
-				    cb_func_data
-			    ) < 0) {
-				return -1;
-			}
 		}
 	}
 
@@ -709,6 +952,27 @@ filter_compile_attr_net6s_free(
 ) {
 	struct filter_compile_net6s_attr *net6s_attr =
 		container_of(attr, struct filter_compile_net6s_attr, attr);
+
+	value_registry_fini(&net6s_attr->set_registry);
+
+	if (net6s_attr->set_alloc_count != 0) {
+		memory_bfree(
+			memory_context,
+			net6s_attr->set_reps,
+			sizeof(uint32_t) * net6s_attr->set_alloc_count
+		);
+		memory_bfree(
+			memory_context,
+			net6s_attr->set_data,
+			sizeof(const uint8_t *) * net6s_attr->set_alloc_count
+		);
+		memory_bfree(
+			memory_context,
+			net6s_attr->set_len,
+			sizeof(uint32_t) * net6s_attr->set_alloc_count
+		);
+	}
+	hash_index_fini(&net6s_attr->set_index);
 
 	range_index_free(&net6s_attr->ri_hi);
 	range_index_free(&net6s_attr->ri_lo);
@@ -790,16 +1054,11 @@ filter_compile_attr_net6_hash(
 			attr_handlers
 		);
 
-	struct filter_net6s nets;
-	net6s_handlers->get_net6s(rule, &nets);
+	const uint8_t *data;
+	uint32_t len;
+	net6s_get_set(net6s_handlers->get_net6s, rule, &data, &len);
 
-	uint32_t hash = nets.count;
-	for (uint32_t idx = 0; idx < nets.count; ++idx) {
-		struct net6 net6_normalized;
-		net6_normalize(nets.items + idx, &net6_normalized);
-		hash = hash * 31 + net6_hash(&net6_normalized);
-	}
-	return hash;
+	return filter_net6_set_hash(data, len);
 }
 
 static inline int
@@ -815,36 +1074,19 @@ filter_compile_attr_net6_compare(
 			attr_handlers
 		);
 
-	struct filter_net6s first_nets;
-	struct filter_net6s second_nets;
-	net6s_handlers->get_net6s(first, &first_nets);
-	net6s_handlers->get_net6s(second, &second_nets);
+	const uint8_t *first_data;
+	uint32_t first_len;
+	const uint8_t *second_data;
+	uint32_t second_len;
+	net6s_get_set(
+		net6s_handlers->get_net6s, first, &first_data, &first_len
+	);
+	net6s_get_set(
+		net6s_handlers->get_net6s, second, &second_data, &second_len
+	);
 
-	if (first_nets.count != second_nets.count) {
-		return 1;
-	}
-
-	for (uint32_t idx = 0; idx < first_nets.count; ++idx) {
-		struct net6 first_net6_normalized;
-		struct net6 second_net6_normalized;
-		net6_normalize(first_nets.items + idx, &first_net6_normalized);
-		net6_normalize(
-			second_nets.items + idx, &second_net6_normalized
-		);
-
-		if (memcmp(first_net6_normalized.addr,
-			   second_net6_normalized.addr,
-			   sizeof(first_net6_normalized.addr)) != 0) {
-			return 1;
-		}
-		if (memcmp(first_net6_normalized.mask,
-			   second_net6_normalized.mask,
-			   sizeof(first_net6_normalized.mask)) != 0) {
-			return 1;
-		}
-	}
-
-	return 0;
+	return first_len != second_len ||
+	       memcmp(first_data, second_data, first_len) != 0;
 }
 
 static const struct filter_compile_attr_handlers filter_compile_get_net6s = {
