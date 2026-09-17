@@ -21,7 +21,7 @@ rules:
   # ===== BASIC ALLOW/DENY RULES =====
   # Allow UDP 192.0.2.2 -> 192.0.3.1 ports 150-450,600
   # 1
-  # add allow udp from 192.0.2.2 to 192.0.3.1 150-450,600
+  # add pass udp from 192.0.2.2 to 192.0.3.1 150-450,600
   - actions:
       - kind: ACTION_KIND_PASS
     devices: []
@@ -66,7 +66,7 @@ rules:
   # ===== PROTOCOL-SPECIFIC RULES =====
   # Allow TCP SYN (setup flag)
   # 3
-  # add allow tcp from 192.0.2.2 to 192.0.3.1 600 tcpflags syn
+  # add pass tcp from 192.0.2.2 to 192.0.3.1 600 tcpflags syn
   - actions:
       - kind: ACTION_KIND_PASS
     devices:
@@ -302,7 +302,7 @@ rules:
 
   # Allow ICMP Echo
   # 5
-  # add allow icmp from 192.0.2.2 to 192.0.3.1 icmptypes 8
+  # add pass icmp from 192.0.2.2 to 192.0.3.1 icmptypes 8
   - actions:
       - kind: ACTION_KIND_PASS
     devices:
@@ -325,7 +325,7 @@ rules:
   # ===== SUBNET VALIDATION =====
   # Allow subnet 192.0.2.0/24
   # 6
-  # add allow udp from 192.0.2.0/24 to 192.0.3.1 600
+  # add pass udp from 192.0.2.0/24 to 192.0.3.1 600
   - actions:
       - kind: ACTION_KIND_PASS
     devices:
@@ -372,7 +372,7 @@ rules:
   # ===== IPv6 RULES =====
   # Allow TCPv6
   # 8
-  # add allow tcp from 2001:db8::1 to 2001:db8::2 600
+  # add pass tcp from 2001:db8::1 to 2001:db8::2 600
   - actions:
       - kind: ACTION_KIND_PASS
     devices:
@@ -394,7 +394,7 @@ rules:
 
   # Allow ICMPv6 Echo
   # 9
-  # add allow ipv6-icmp from 2001:db8::1 to 2001:db8::2 icmp6types 128,129
+  # add pass ipv6-icmp from 2001:db8::1 to 2001:db8::2 icmp6types 128,129
   - actions:
       - kind: ACTION_KIND_PASS
     devices:
@@ -441,7 +441,7 @@ rules:
   # ===== OVERLAPPING RULES =====
   # Rule pyramid (ordered from most specific to most general)
   # 11
-  # add allow udp from 192.0.2.0/31 to any 100-200
+  # add pass udp from 192.0.2.0/31 to any 100-200
   - actions:
       - kind: ACTION_KIND_PASS
     devices:
@@ -487,7 +487,7 @@ rules:
     vlan_ranges: []
 
   # 13
-  # add allow udp from 192.0.2.0/24 to any
+  # add pass udp from 192.0.2.0/24 to any
   - actions:
       - kind: ACTION_KIND_PASS
     devices:
