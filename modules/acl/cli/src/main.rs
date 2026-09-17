@@ -1,16 +1,19 @@
+use core::fmt::Write;
 use std::collections::HashMap;
 
 use aclpb::{
-    DeleteConfigRequest, GetMetricsRulesRequest, GetRulesCountersRequest, ListConfigsRequest, Rule, ShowConfigRequest,
-    UpdateConfigRequest, acl_service_client::AclServiceClient, acl_service_server::SERVICE_NAME as ACL_SERVICE_NAME,
-    metrics_service_client::MetricsServiceClient, metrics_service_server::SERVICE_NAME as METRICS_SERVICE_NAME,
+    DeleteConfigRequest, GetMetricsRulesRequest, GetRulesCountersRequest, ListConfigsRequest, Rule, RuleCounter,
+    ShowConfigRequest, UpdateConfigRequest, acl_service_client::AclServiceClient,
+    acl_service_server::SERVICE_NAME as ACL_SERVICE_NAME, metrics_service_client::MetricsServiceClient,
+    metrics_service_server::SERVICE_NAME as METRICS_SERVICE_NAME,
 };
-use args::{DeleteCmd, MetricsRulesCmd, ModeCmd, RuleCountersCmd, ShowCmd, UpdateCmd};
-use clap::{CommandFactory, Parser};
+use args::{CountersMode, DeleteCmd, MetricsRulesCmd, ModeCmd, RuleCountersCmd, ShowCmd, UpdateCmd};
+use clap::{CommandFactory, Parser, error::ErrorKind};
 use clap_complete::engine::CompletionCandidate;
 use ipfw::RuleLine;
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
 use tabled::Tabled;
+use tokio::try_join;
 use tonic::codec::CompressionEncoding;
 use ync::{
     GlobalArgs,
@@ -18,7 +21,7 @@ use ync::{
     completion, display,
     errors::Error,
     metrics,
-    output::{self, Paint},
+    output::{self, CommonFormat, Paint, Painted},
     yaml,
 };
 
@@ -204,17 +207,92 @@ pub struct ACLConfig {
     fwtable_name_v6: Option<String>,
 }
 
-/// Prints the rules as numbered `add` lines.
-fn print_rules(rules: &[Rule]) {
+/// Prints numbered `add` lines, with counters summed over positions: `-` for
+/// a rule no count action moves, only counted rules in the nonzero mode.
+fn print_rules(rules: &[Rule], counters: Option<(&[RuleCounter], CountersMode)>) {
     let colored = output::is_colored() && output::stdout_is_terminal();
     let width = digits(rules.len().saturating_sub(1) as u64);
 
-    for (idx, rule) in rules.iter().enumerate() {
-        println!(
-            "{:>width$}  {}",
-            Paint::Dim.when(colored, idx),
-            RuleLine::new(rule, colored)
-        );
+    let Some((counters, mode)) = counters else {
+        for (idx, rule) in rules.iter().enumerate() {
+            println!(
+                "{:>width$}  {}",
+                Paint::Dim.when(colored, idx),
+                RuleLine::new(rule, colored)
+            );
+        }
+        return;
+    };
+
+    let mut totals: HashMap<&str, (u64, u64)> = HashMap::new();
+    for counter in counters {
+        let total = totals.entry(counter.counter.as_str()).or_default();
+        total.0 = total.0.saturating_add(counter.packets);
+        total.1 = total.1.saturating_add(counter.bytes);
+    }
+
+    let mut implicit = String::new();
+    let cells = rules
+        .iter()
+        .enumerate()
+        .map(|(idx, rule)| {
+            let cell = RuleLine::new(rule, colored).counts().then(|| {
+                let name = if rule.counter.is_empty() {
+                    implicit.clear();
+                    write!(implicit, "rule {idx}").expect("writing to a string does not fail");
+                    implicit.as_str()
+                } else {
+                    rule.counter.as_str()
+                };
+                totals.get(name).copied().unwrap_or_default()
+            });
+            (idx, rule, cell)
+        })
+        .filter(|(_, _, cell)| mode == CountersMode::All || cell.is_some_and(|(packets, _)| packets > 0))
+        .collect::<Vec<_>>();
+
+    if cells.is_empty() {
+        output::empty(format_args!("No rule has counted a packet."));
+        return;
+    }
+
+    let packets_width = cells
+        .iter()
+        .filter_map(|(_, _, cell)| *cell)
+        .map(|(packets, _)| digits(packets))
+        .fold("packets".len(), usize::max);
+    let bytes_width = cells
+        .iter()
+        .filter_map(|(_, _, cell)| *cell)
+        .map(|(_, bytes)| digits(bytes))
+        .fold("bytes".len(), usize::max);
+
+    println!(
+        "{:>width$}  {:>packets_width$}  {:>bytes_width$}  {}",
+        Paint::Dim.when(colored, "#"),
+        Paint::Dim.when(colored, "packets"),
+        Paint::Dim.when(colored, "bytes"),
+        Paint::Dim.when(colored, "rule"),
+    );
+    for (idx, rule, cell) in cells {
+        let line = RuleLine::new(rule, colored);
+        match cell {
+            None => println!(
+                "{:>width$}  {:>packets_width$}  {:>bytes_width$}  {line}",
+                Paint::Dim.when(colored, idx),
+                Paint::Dim.when(colored, "-"),
+                Paint::Dim.when(colored, "-"),
+            ),
+            Some((packets, bytes)) => {
+                let paint = (colored && packets == 0).then_some(Paint::Dim);
+                println!(
+                    "{:>width$}  {:>packets_width$}  {:>bytes_width$}  {line}",
+                    Paint::Dim.when(colored, idx),
+                    Painted::new(paint, packets),
+                    Painted::new(paint, bytes),
+                );
+            }
+        }
     }
 }
 
@@ -251,6 +329,9 @@ fn metrics_client(channel: LayeredChannel) -> MetricsServiceClient<LayeredChanne
 
 pub struct ACLService {
     service: Service<AclServiceClient<LayeredChannel>>,
+    /// A second client over the same channel, for a call running concurrently
+    /// with the first.
+    concurrent: Service<AclServiceClient<LayeredChannel>>,
     metrics: Service<MetricsServiceClient<LayeredChannel>>,
 }
 
@@ -258,9 +339,10 @@ impl ACLService {
     pub async fn new(connection: &ConnectionArgs, action: &'static str) -> Result<Self, Error> {
         let conn = Connection::connect_for(connection, action).await?;
         let service = Service::new(&conn, ACL_SERVICE_NAME, client);
+        let concurrent = Service::new(&conn, ACL_SERVICE_NAME, client);
         let metrics = Service::new(&conn, METRICS_SERVICE_NAME, metrics_client);
 
-        Ok(Self { service, metrics })
+        Ok(Self { service, concurrent, metrics })
     }
 
     pub async fn list_configs(&mut self) -> Result<(), Error> {
@@ -286,20 +368,43 @@ impl ACLService {
     }
 
     pub async fn show_config(&mut self, cmd: ShowCmd) -> Result<(), Error> {
-        let progress = output::progress(format_args!("Loading config '{}'", cmd.config_name));
+        let progress = if cmd.counters.is_some() {
+            output::progress(format_args!(
+                "Loading config '{}' and its rule counters",
+                cmd.config_name
+            ))
+        } else {
+            output::progress(format_args!("Loading config '{}'", cmd.config_name))
+        };
 
-        let request = ShowConfigRequest { name: cmd.config_name.clone() };
-        let response = self
-            .service
-            .unary_with(
-                "show",
-                request,
-                self.service.not_found("show", &format!("config '{}'", cmd.config_name)),
-                async |client, request| client.show_config(request).await,
-            )
-            .await?;
+        // The rules and their counters load at once, as a large config
+        // takes seconds for each.
+        let (service, concurrent) = (&mut self.service, &mut self.concurrent);
+        let not_found = service.not_found("show", &format!("config '{}'", cmd.config_name));
+        let config = service.unary_with(
+            "show",
+            ShowConfigRequest { name: cmd.config_name.clone() },
+            not_found,
+            async |client, request| client.show_config(request).await,
+        );
+        let counters = async {
+            if cmd.counters.is_none() {
+                return Ok(None);
+            }
 
+            let request = GetRulesCountersRequest { name: cmd.config_name.clone() };
+            let not_found = concurrent.not_found("show", &format!("config '{}'", cmd.config_name));
+            concurrent
+                .unary_with("show", request, not_found, async |client, request| {
+                    client.get_rules_counters(request).await
+                })
+                .await
+                .map(|response| Some(response.counters))
+        };
+
+        let loaded = try_join!(config, counters);
         drop(progress);
+        let (response, counters) = loaded?;
 
         output::paged(
             || &response,
@@ -312,7 +417,7 @@ impl ACLService {
                     return;
                 }
 
-                print_rules(&response.rules);
+                print_rules(&response.rules, counters.as_deref().zip(cmd.counters));
             },
         );
 
@@ -458,6 +563,20 @@ impl ACLService {
 
 async fn run(cmd: Cmd) -> Result<(), Error> {
     let action = cmd.mode.action();
+
+    // Counters are columns of the human rules, the JSON of show stays the
+    // config document update reads.
+    if let ModeCmd::Show(show) = &cmd.mode
+        && show.counters.is_some()
+        && cmd.globals.format == CommonFormat::Json
+    {
+        Cmd::command()
+            .error(
+                ErrorKind::ArgumentConflict,
+                "--counters cannot be used with '--format json', use 'yanet-cli-acl rule-counters --format json'",
+            )
+            .exit();
+    }
 
     // The update file is read and bound before the connection, so bad local
     // input fails the same with or without a reachable gateway.
