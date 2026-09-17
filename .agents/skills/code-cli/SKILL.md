@@ -160,7 +160,9 @@ no `--yes`, no `--dry-run`.
   CLI's kind).
 - Colour and glyphs only via `output::is_colored()`, `output::dim`,
   `output::paint_dim` / `paint_bold` / `paint_ok` / `paint_warning` /
-  `paint_error`, and a
+  `paint_error`, dense text written token by token through
+  `output::Paint::when(colored, value)` and `output::Painted`, which
+  allocate nothing per token, and a
   bracketed status mark with a Unicode and an ASCII face is a
   `display::Mark`; no `colored` dependency in a CLI crate (#2377).
   `ync::init`, called by `entrypoint`, decides colour once for the process; a
