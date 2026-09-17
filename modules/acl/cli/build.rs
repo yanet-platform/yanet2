@@ -34,8 +34,8 @@ fn main() -> Result<(), Box<dyn Error>> {
                     ".modules.acl.controlplane.aclpb.v1.Action.kind",
                     "#[serde(serialize_with = \"crate::serialize_action_kind\", deserialize_with = \"crate::deserialize_action_kind\")]",
                 )
-                // The typed network lists stay out of the YAML output while empty,
-                // so show rendering of a legacy-schema config is unchanged.
+                // The typed network lists stay out of the JSON while empty, so show
+                // of a legacy-schema config reads as before.
                 .field_attribute(
                     ".modules.acl.controlplane.aclpb.v1.Rule.sources4",
                     "#[serde(skip_serializing_if = \"Vec::is_empty\")]",

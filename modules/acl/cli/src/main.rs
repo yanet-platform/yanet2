@@ -1,13 +1,14 @@
 use std::collections::HashMap;
 
 use aclpb::{
-    DeleteConfigRequest, GetMetricsRulesRequest, GetRulesCountersRequest, ListConfigsRequest, ShowConfigRequest,
+    DeleteConfigRequest, GetMetricsRulesRequest, GetRulesCountersRequest, ListConfigsRequest, Rule, ShowConfigRequest,
     UpdateConfigRequest, acl_service_client::AclServiceClient, acl_service_server::SERVICE_NAME as ACL_SERVICE_NAME,
     metrics_service_client::MetricsServiceClient, metrics_service_server::SERVICE_NAME as METRICS_SERVICE_NAME,
 };
 use args::{DeleteCmd, MetricsRulesCmd, ModeCmd, RuleCountersCmd, ShowCmd, UpdateCmd};
 use clap::{CommandFactory, Parser};
 use clap_complete::engine::CompletionCandidate;
+use ipfw::RuleLine;
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
 use tabled::Tabled;
 use tonic::codec::CompressionEncoding;
@@ -16,10 +17,13 @@ use ync::{
     client::{Connection, ConnectionArgs, LayeredChannel, Service, resolve_label},
     completion, display,
     errors::Error,
-    metrics, output, yaml,
+    metrics,
+    output::{self, Paint},
+    yaml,
 };
 
 mod args;
+mod ipfw;
 
 use ::commonpb::{pb as commonpb, serde_with};
 
@@ -200,16 +204,23 @@ pub struct ACLConfig {
     fwtable_name_v6: Option<String>,
 }
 
-/// Display view of an ACL config returned by the show command.
-///
-/// Map names are omitted when absent.
-#[derive(Debug, Serialize)]
-struct ShowConfig {
-    rules: Vec<aclpb::Rule>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    fwtable_name_v4: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    fwtable_name_v6: Option<String>,
+/// Prints the rules as numbered `add` lines.
+fn print_rules(rules: &[Rule]) {
+    let colored = output::is_colored() && output::stdout_is_terminal();
+    let width = digits(rules.len().saturating_sub(1) as u64);
+
+    for (idx, rule) in rules.iter().enumerate() {
+        println!(
+            "{:>width$}  {}",
+            Paint::Dim.when(colored, idx),
+            RuleLine::new(rule, colored)
+        );
+    }
+}
+
+/// Returns the number of decimal digits of a value.
+fn digits(value: u64) -> usize {
+    value.checked_ilog10().map_or(1, |log| log as usize + 1)
 }
 
 /// Manages acl module configs.
@@ -275,6 +286,8 @@ impl ACLService {
     }
 
     pub async fn show_config(&mut self, cmd: ShowCmd) -> Result<(), Error> {
+        let progress = output::progress(format_args!("Loading config '{}'", cmd.config_name));
+
         let request = ShowConfigRequest { name: cmd.config_name.clone() };
         let response = self
             .service
@@ -286,33 +299,20 @@ impl ACLService {
             )
             .await?;
 
-        output::data(
+        drop(progress);
+
+        output::paged(
             || &response,
             || {
-                let display = ShowConfig {
-                    rules: response.rules.clone(),
-                    fwtable_name_v4: if response.fwtable_name_v4.is_empty() {
-                        None
-                    } else {
-                        Some(response.fwtable_name_v4.clone())
-                    },
-                    fwtable_name_v6: if response.fwtable_name_v6.is_empty() {
-                        None
-                    } else {
-                        Some(response.fwtable_name_v6.clone())
-                    },
-                };
-                print!(
-                    "{}",
-                    serde_yaml::to_string(&display).expect("ACL config YAML serialization must not fail")
-                );
-
                 if response.rules.is_empty() {
                     output::empty_with_hint(
                         format_args!("No ACL rules found for '{}'.", cmd.config_name),
                         format_args!("create one with 'yanet-cli-acl update --name <name> <path>'"),
                     );
+                    return;
                 }
+
+                print_rules(&response.rules);
             },
         );
 
