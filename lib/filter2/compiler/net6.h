@@ -653,6 +653,15 @@ filter_compile_attr_net6s_create(
 
 		remap_table_compact(&remap_table);
 		value_table_compact(&attr->query_attr->comb, &remap_table);
+		// The line values join the cells in one region space, so the
+		// compaction must renumber them through the same table: a raw
+		// line key left beside the compacted cell ids would collide
+		// with an unrelated cell region.
+		for (uint32_t row = 0; row < attr->row_count; ++row) {
+			uint32_t *value =
+				vline_get_ptr(&attr->query_attr->uniform, row);
+			*value = remap_table_compacted(&remap_table, *value);
+		}
 		remap_table_free(&remap_table);
 	}
 
