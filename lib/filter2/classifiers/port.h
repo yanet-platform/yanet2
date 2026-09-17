@@ -1,12 +1,13 @@
 #pragma once
 
 #include "common/container_of.h"
+#include "common/value.h"
 
 #include "lib/filter2/filter.h"
 
 struct filter_query_attr_port {
 	struct filter_query_attr attr;
-	struct value_table value_table;
+	struct vline line;
 };
 
 static inline void
@@ -16,7 +17,7 @@ filter_query_attr_port_free(
 	struct filter_query_attr_port *port_attr =
 		container_of(attr, struct filter_query_attr_port, attr);
 
-	value_table_free(&port_attr->value_table);
+	vline_free(&port_attr->line);
 	memory_bfree(
 		memory_context, port_attr, sizeof(struct filter_query_attr_port)
 	);

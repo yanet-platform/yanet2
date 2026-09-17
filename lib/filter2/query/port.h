@@ -88,7 +88,7 @@ filter_query_attr_port_lookup(
 	for (uint32_t idx = 0; idx < packet_count; ++idx) {
 		const uint16_t port = port_handlers->get_port(packets[idx]);
 		results[idx] =
-			*value_table_get_ptr(&port_attr->value_table, 0, port);
+			vline_get((struct vline *)&port_attr->line, port);
 	}
 }
 

@@ -139,9 +139,10 @@ struct range_collector_stack_item {
 
 static inline struct range_collector_stack_item
 range_collector_stack_last(struct range_collector_ctx *ctx, uint8_t key_size) {
-	return (struct range_collector_stack_item
-	){ctx->values + (ctx->stack_depth - 1),
-	  ctx->to + (ctx->stack_depth - 1) * key_size};
+	return (struct range_collector_stack_item){
+		ctx->values + (ctx->stack_depth - 1),
+		ctx->to + (ctx->stack_depth - 1) * key_size
+	};
 }
 
 static inline void
@@ -322,4 +323,11 @@ range4_collector_add(
 	struct range_collector *collector, const uint8_t *from, uint8_t prefix
 ) {
 	return range_collector_add(collector, 4, from, prefix);
+}
+
+static inline int
+range2_collector_add(
+	struct range_collector *collector, const uint8_t *from, uint8_t prefix
+) {
+	return range_collector_add(collector, 2, from, prefix);
 }

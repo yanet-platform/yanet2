@@ -59,8 +59,8 @@ filter_query_attr_proto_range_lookup(
 	for (uint32_t idx = 0; idx < packet_count; ++idx) {
 		const uint16_t proto_range =
 			filter_packet_get_proto_range(packets[idx]);
-		results[idx] = *value_table_get_ptr(
-			&proto_range_attr->value_table, 0, proto_range
+		results[idx] = vline_get(
+			(struct vline *)&proto_range_attr->line, proto_range
 		);
 	}
 }
