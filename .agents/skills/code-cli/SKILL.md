@@ -155,6 +155,10 @@ no `--yes`, no `--dry-run`.
   `output::paged(|| payload, || render)`: a human render on a terminal goes
   through `YANET_PAGER`, `PAGER` or `less` (`LESS=FRSX` when unset), and the
   global `--no-pager` prints it directly.
+- A wait on a large unary response starts
+  `output::progress(format_args!("Loading …"))` before the calls and drops it
+  before printing: a human on a terminal sees the downloaded bytes of the calls
+  made while it lives.
 - Empty results: inside the render closure, `output::empty(…)` or
   `output::empty_with_hint(…, "create one with '<full command>'")` and an
   early return; never bare printing or a call-site guard. The primitive owns

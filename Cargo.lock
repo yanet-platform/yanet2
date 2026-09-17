@@ -2606,6 +2606,7 @@ dependencies = [
  "colored",
  "erased-serde",
  "http",
+ "http-body",
  "humantime",
  "libc",
  "log",

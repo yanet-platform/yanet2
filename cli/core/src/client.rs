@@ -42,6 +42,7 @@ use crate::{
     auth::{self, AuthArgs, interceptor::AuthService},
     config::{self, Settings},
     errors::{Error, map_not_found, root_cause},
+    progress::ProgressService,
     timeout::{TimeoutLayer, TimeoutService},
 };
 
@@ -49,7 +50,7 @@ use crate::{
 ///
 /// Use this as the type parameter for tonic-generated clients, e.g.
 /// `MyServiceClient<LayeredChannel>`.
-pub type LayeredChannel = TimeoutService<AuthService<Channel>>;
+pub type LayeredChannel = ProgressService<TimeoutService<AuthService<Channel>>>;
 
 /// TLS material supplied explicitly by the user.
 #[derive(Debug, Clone, Default, clap::Args)]
@@ -248,7 +249,9 @@ async fn establish(settings: &Settings) -> Result<LayeredChannel, ConnectionErro
         None => attempt.await?,
     };
 
-    Ok(TimeoutLayer::new(settings.timeout.value).layer(auth_service))
+    Ok(ProgressService::new(
+        TimeoutLayer::new(settings.timeout.value).layer(auth_service),
+    ))
 }
 
 /// Resolves the label for an error raised before any RPC is attempted.

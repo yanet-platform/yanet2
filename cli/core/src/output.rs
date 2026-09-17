@@ -6,7 +6,10 @@
 //! [`CommonFormat`] provides the usual human and JSON pair.
 
 use core::fmt::{self, Arguments, Display, Formatter};
-use std::{io::IsTerminal, sync::OnceLock};
+use std::{
+    io::{self, IsTerminal},
+    sync::OnceLock,
+};
 
 use colored::{Color, Colorize};
 use erased_serde::Serialize as ErasedSerialize;
@@ -18,6 +21,7 @@ use crate::{
     display,
     errors::{Error, ErrorKind},
     logging,
+    progress::Progress,
 };
 
 /// A user-selectable output format that knows how to build its backend.
@@ -321,6 +325,18 @@ where
     let payload = move || -> Box<dyn ErasedSerialize + '_> { Box::new(make_payload()) };
 
     current().paged(&payload, Box::new(render));
+}
+
+/// Starts a [`Progress`] line for a human on a terminal stderr, to drop
+/// before printing the data.
+///
+/// Verbose runs draw nothing, so the line never interleaves with log lines.
+pub fn progress(message: impl Display) -> Progress {
+    if current().serializes() || !io::stderr().is_terminal() || log::log_enabled!(log::Level::Debug) {
+        return Progress::hidden();
+    }
+
+    Progress::start(message.to_string())
 }
 
 /// Opens a stream of rows, see [`Rows`].
