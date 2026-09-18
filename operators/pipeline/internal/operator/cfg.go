@@ -30,6 +30,11 @@ func (m *Config) LoggingConfig() *logging.Config {
 	return &m.Logging
 }
 
+// GatewayConfigs exposes named transports to the deployment override contract.
+func (m *Config) GatewayConfigs() *[]operator.GatewayConfig {
+	return &m.Gateways
+}
+
 func (m *Config) Validate() error {
 	if len(m.Gateways) == 0 {
 		return errors.New("at least one gateway must be configured")

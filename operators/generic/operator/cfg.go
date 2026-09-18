@@ -46,6 +46,11 @@ func (m *Config) LoggingConfig() *logging.Config {
 	return &m.Logging
 }
 
+// GatewayConfigs exposes named transports to the deployment override contract.
+func (m *Config) GatewayConfigs() *[]operator.GatewayConfig {
+	return &m.Gateways
+}
+
 // Validate checks that the config is structurally sound.
 func (m *Config) Validate() error {
 	if len(m.Gateways) == 0 {
