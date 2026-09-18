@@ -258,17 +258,22 @@ publish_service(void) {
 	descriptor.real_servers = &real_server;
 	descriptor.real_server_count = 1;
 	descriptor.ring_capacity = 64;
-	descriptor.session_index_size = 4096;
+
+	struct cp_object *session_table =
+		l3b_session_table_object_create(agent, "svc", 1, 4096, 0, &err);
+	if (session_table == NULL) {
+		log_error(&err, "failed to create the session table");
+		return -1;
+	}
 
 	struct l3b_virtual_service_create_config config = {
 		.agent = agent,
 		.name = "svc",
-		.worker_count = 1,
-		.adopt_session_table = NULL,
+		.session_table = session_table,
 		.virtual_service = &descriptor,
 	};
 
-	service_object = l3b_virtual_service_create(&config, NULL, &err);
+	service_object = l3b_virtual_service_create(&config, &err);
 	if (service_object == NULL) {
 		log_error(&err, "failed to create the virtual service");
 		return -1;
