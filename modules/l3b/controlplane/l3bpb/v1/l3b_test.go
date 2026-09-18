@@ -6,6 +6,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
 	filterpb "github.com/yanet-platform/yanet2/common/filterpb/v1"
 	l3bpb "github.com/yanet-platform/yanet2/modules/l3b/controlplane/l3bpb/v1"
 )
@@ -50,7 +51,7 @@ func Test_CreateServiceRequest_Validate(t *testing.T) {
 				Service: &l3bpb.VirtualService{
 					Name: "vs0",
 					SourceFilterRules: []*l3bpb.SourceFilterRule{{
-						Net6S: []*filterpb.IPNet{nil},
+						Net6S: []*commonpb.IPv6Network{nil},
 					}},
 				},
 			},
@@ -328,7 +329,7 @@ func Test_GetServiceRequest_Validate(t *testing.T) {
 	}
 }
 
-// Test_SourceFilterRule_Validate verifies that nil IPNet and port range
+// Test_SourceFilterRule_Validate verifies that nil network and port range
 // elements receive their repeated-field paths instead of reaching conversion.
 func Test_SourceFilterRule_Validate(t *testing.T) {
 	cases := []struct {
@@ -338,12 +339,12 @@ func Test_SourceFilterRule_Validate(t *testing.T) {
 	}{
 		{
 			name:    "nil IPv6 network",
-			rule:    &l3bpb.SourceFilterRule{Net6S: []*filterpb.IPNet{nil}},
+			rule:    &l3bpb.SourceFilterRule{Net6S: []*commonpb.IPv6Network{nil}},
 			message: "net6s[0] is required",
 		},
 		{
 			name:    "nil IPv4 network",
-			rule:    &l3bpb.SourceFilterRule{Net4S: []*filterpb.IPNet{nil}},
+			rule:    &l3bpb.SourceFilterRule{Net4S: []*commonpb.IPv4Network{nil}},
 			message: "net4s[0] is required",
 		},
 		{
@@ -354,8 +355,8 @@ func Test_SourceFilterRule_Validate(t *testing.T) {
 		{
 			name: "non-nil ranges",
 			rule: &l3bpb.SourceFilterRule{
-				Net6S:      []*filterpb.IPNet{{}},
-				Net4S:      []*filterpb.IPNet{{}},
+				Net6S:      []*commonpb.IPv6Network{{}},
+				Net4S:      []*commonpb.IPv4Network{{}},
 				PortRanges: []*filterpb.PortRange{{}},
 			},
 		},
@@ -373,7 +374,7 @@ func Test_SourceFilterRule_Validate(t *testing.T) {
 	}
 }
 
-// Test_DestinationFilterRule_Validate verifies that nil IPNet and protocol
+// Test_DestinationFilterRule_Validate verifies that nil network and protocol
 // range elements receive their repeated-field paths before conversion.
 func Test_DestinationFilterRule_Validate(t *testing.T) {
 	cases := []struct {
@@ -383,12 +384,12 @@ func Test_DestinationFilterRule_Validate(t *testing.T) {
 	}{
 		{
 			name:    "nil IPv6 network",
-			rule:    &l3bpb.DestinationFilterRule{Net6S: []*filterpb.IPNet{nil}},
+			rule:    &l3bpb.DestinationFilterRule{Net6S: []*commonpb.IPv6Network{nil}},
 			message: "net6s[0] is required",
 		},
 		{
 			name:    "nil IPv4 network",
-			rule:    &l3bpb.DestinationFilterRule{Net4S: []*filterpb.IPNet{nil}},
+			rule:    &l3bpb.DestinationFilterRule{Net4S: []*commonpb.IPv4Network{nil}},
 			message: "net4s[0] is required",
 		},
 		{
@@ -399,8 +400,8 @@ func Test_DestinationFilterRule_Validate(t *testing.T) {
 		{
 			name: "non-nil ranges",
 			rule: &l3bpb.DestinationFilterRule{
-				Net6S:       []*filterpb.IPNet{{}},
-				Net4S:       []*filterpb.IPNet{{}},
+				Net6S:       []*commonpb.IPv6Network{{}},
+				Net4S:       []*commonpb.IPv4Network{{}},
 				ProtoRanges: []*filterpb.ProtoRange{{}},
 			},
 		},
@@ -432,7 +433,7 @@ func Test_VirtualService_Validate(t *testing.T) {
 			service: &l3bpb.VirtualService{
 				Name: "vs0",
 				SourceFilterRules: []*l3bpb.SourceFilterRule{{
-					Net4S: []*filterpb.IPNet{nil},
+					Net4S: []*commonpb.IPv4Network{nil},
 				}},
 			},
 			message: "source_filter_rules[0]: net4s[0] is required",
@@ -466,7 +467,7 @@ func Test_ModuleConfig_Validate(t *testing.T) {
 			config: &l3bpb.ModuleConfig{
 				Name: "l3b0",
 				DestinationFilterRules: []*l3bpb.DestinationFilterRule{{
-					Net6S: []*filterpb.IPNet{nil},
+					Net6S: []*commonpb.IPv6Network{nil},
 				}},
 			},
 			message: "destination_filter_rules[0]: net6s[0] is required",
