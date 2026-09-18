@@ -1,10 +1,14 @@
 package fwstatepb
 
 import (
+	"errors"
 	"fmt"
 	"net/netip"
 
 	"github.com/yanet-platform/yanet2/modules/fwstate/bindings/go/cfwstate"
+	fwstatemappb "github.com/yanet-platform/yanet2/objects/fwstate/controlplane/fwstatemappb/v1"
+
+	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
 )
 
 const (
@@ -16,6 +20,44 @@ const (
 	// module matches and stamps IPv6 addresses only.
 	syncAddrLen = 16
 )
+
+// Validate checks the values an update carries.
+//
+// Whether the merged config is usable depends on the stored one and is
+// checked by the service.
+func (m *UpdateConfigRequest) Validate() error {
+	if err := commonpb.ValidateModuleName("name", m.GetName()); err != nil {
+		return err
+	}
+	if err := validateOptionalMapName("map_name_v4", m.GetMapNameV4()); err != nil {
+		return err
+	}
+	if err := validateOptionalMapName("map_name_v6", m.GetMapNameV6()); err != nil {
+		return err
+	}
+	if err := m.GetSyncConfig().ValidateFields(); err != nil {
+		return fmt.Errorf("sync_config: %w", err)
+	}
+
+	return nil
+}
+
+// Validate checks that a show request names a configuration.
+func (m *ShowConfigRequest) Validate() error {
+	return commonpb.ValidateModuleName("name", m.GetName())
+}
+
+// Validate checks that a delete request names a configuration.
+func (m *DeleteConfigRequest) Validate() error {
+	return commonpb.ValidateModuleName("name", m.GetName())
+}
+
+func validateOptionalMapName(field, name string) error {
+	if name == "" {
+		return nil
+	}
+	return fwstatemappb.ValidateMapNameField(field, name)
+}
 
 // ValidateTimeouts rejects timeout values that do not fit in
 // fw_state_value::last_ttl.
@@ -68,11 +110,11 @@ func (m *SyncConfig) ValidateTimeouts() error {
 	return nil
 }
 
-// ValidateFields rejects sync values stated in a form the config cannot store.
+// ValidateFields rejects sync values an update states in a form the config
+// cannot store.
 //
-// Empty endpoints are representable. Whether they preserve existing values
-// or clear them depends on the update contract. A stated destination address
-// requires a port; the merged configuration must also be usable.
+// A zero port clears its endpoint, so it cannot come with an address for
+// that endpoint.
 func (m *SyncConfig) ValidateFields() error {
 	if m == nil {
 		return nil
@@ -103,53 +145,24 @@ func (m *SyncConfig) ValidateFields() error {
 		return fmt.Errorf("dst_ether must be an EUI-48 address")
 	}
 
-	// A supplied destination address needs a port. Masked requests reach
-	// this check after merging, so the port may come from the stored config.
-	if len(m.GetDstAddrMulticast().GetAddr()) != 0 && m.GetPortMulticast() == 0 {
-		return fmt.Errorf("port_multicast is required with dst_addr_multicast")
+	if m.PortMulticast != nil && m.GetPortMulticast() == 0 && len(m.GetDstAddrMulticast().GetAddr()) != 0 {
+		return errors.New("dst_addr_multicast cannot be combined with a zero port_multicast")
 	}
-	if len(m.GetDstAddrUnicast().GetAddr()) != 0 && m.GetPortUnicast() == 0 {
-		return fmt.Errorf("port_unicast is required with dst_addr_unicast")
+	if m.PortUnicast != nil && m.GetPortUnicast() == 0 && len(m.GetDstAddrUnicast().GetAddr()) != 0 {
+		return errors.New("dst_addr_unicast cannot be combined with a zero port_unicast")
 	}
 
 	return nil
 }
 
-// ValidateEndpointClears rejects an update that asks to clear an endpoint
-// while also supplying fields for that same endpoint.
-func (m *UpdateConfigRequest) ValidateEndpointClears() error {
-	if m == nil || m.SyncConfig == nil {
-		return nil
-	}
-
-	if m.GetClearMulticast() && endpointFieldsSet(
-		m.GetSyncConfig().GetDstAddrMulticast().GetAddr(),
-		m.GetSyncConfig().GetPortMulticast(),
-	) {
-		return fmt.Errorf("clear_multicast cannot be combined with multicast endpoint fields")
-	}
-	if m.GetClearUnicast() && endpointFieldsSet(
-		m.GetSyncConfig().GetDstAddrUnicast().GetAddr(),
-		m.GetSyncConfig().GetPortUnicast(),
-	) {
-		return fmt.Errorf("clear_unicast cannot be combined with unicast endpoint fields")
-	}
-
-	return nil
-}
-
-func endpointFieldsSet(addr []byte, port uint32) bool {
-	return len(addr) != 0 || port != 0
-}
-
-// Validate reports whether the settings are installable as they stand,
+// ValidateMerged reports whether the settings are installable as they stand,
 // which is what the request merged over the config it replaces must be.
 //
 // Synchronization is optional. A config naming no destination leaves external
 // traffic in ordinary processing, while trusted internal events are consumed
 // and dropped. Naming only part of an endpoint is refused because it cannot
 // be matched or emitted safely.
-func (m *SyncConfig) Validate() error {
+func (m *SyncConfig) ValidateMerged() error {
 	if m == nil {
 		return nil
 	}

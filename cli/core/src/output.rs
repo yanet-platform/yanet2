@@ -5,17 +5,23 @@
 //! signatures. Each CLI implements [`Format`] for its supported choices;
 //! [`CommonFormat`] provides the usual human and JSON pair.
 
-use core::fmt::Arguments;
-use std::{io::IsTerminal, sync::OnceLock};
+use core::fmt::{self, Arguments, Display, Formatter};
+use std::{
+    io::{self, IsTerminal},
+    sync::OnceLock,
+};
 
-use colored::Colorize;
+use colored::{Color, Colorize};
 use erased_serde::Serialize as ErasedSerialize;
 use serde::Serialize;
 
+#[cfg(unix)]
+use crate::pager::Pager;
 use crate::{
     display,
     errors::{Error, ErrorKind},
     logging,
+    progress::Progress,
 };
 
 /// A user-selectable output format that knows how to build its backend.
@@ -64,6 +70,12 @@ pub trait Output: Send + Sync {
     fn serializes(&self) -> bool {
         false
     }
+
+    /// Output result data a reader scrolls through, as [`Output::data`] unless
+    /// the backend pages it.
+    fn paged<'a>(&self, payload: &dyn Fn() -> Box<dyn ErasedSerialize + 'a>, render: Box<dyn FnOnce() + 'a>) {
+        self.data(payload, render);
+    }
 }
 
 /// Human-readable output backend.
@@ -72,12 +84,17 @@ pub trait Output: Send + Sync {
 /// is not set, and the locale advertises UTF-8.
 pub struct HumanOutput {
     is_colored: bool,
+    #[cfg_attr(not(unix), allow(dead_code))]
+    pager: bool,
 }
 
 impl HumanOutput {
     /// Detect terminal capability from the environment.
     pub fn detect() -> Self {
-        Self { is_colored: is_colored() }
+        Self {
+            is_colored: is_colored(),
+            pager: false,
+        }
     }
 }
 
@@ -133,6 +150,15 @@ impl Output for HumanOutput {
     }
 
     fn data<'a>(&self, _payload: &dyn Fn() -> Box<dyn ErasedSerialize + 'a>, render: Box<dyn FnOnce() + 'a>) {
+        render();
+    }
+
+    #[cfg(unix)]
+    fn paged<'a>(&self, _payload: &dyn Fn() -> Box<dyn ErasedSerialize + 'a>, render: Box<dyn FnOnce() + 'a>) {
+        // The terminal check memoizes before stdout turns into the pipe and the
+        // pager keeps the terminal width, so renderers see the terminal.
+        let _pager = (self.pager && stdout_is_terminal()).then(Pager::start).flatten();
+
         render();
     }
 }
@@ -211,6 +237,26 @@ impl Format for CommonFormat {
     }
 }
 
+/// The output format and pager switch of the global flags.
+#[derive(Debug, Clone, Copy)]
+pub struct GlobalFormat {
+    pub format: CommonFormat,
+    /// Whether a human render of [`paged`] data may start a pager.
+    pub pager: bool,
+}
+
+impl Format for GlobalFormat {
+    fn build(self) -> Box<dyn Output> {
+        match self.format {
+            CommonFormat::Human => Box::new(HumanOutput {
+                pager: self.pager,
+                ..HumanOutput::detect()
+            }),
+            CommonFormat::Json => Box::new(JsonOutput),
+        }
+    }
+}
+
 static OUTPUT: OnceLock<Box<dyn Output>> = OnceLock::new();
 
 /// Initialise the logger and selected output backend.
@@ -266,6 +312,31 @@ where
     let payload = move || -> Box<dyn ErasedSerialize + '_> { Box::new(make_payload()) };
 
     current().data(&payload, Box::new(render));
+}
+
+/// Output result data like [`data`], paging a human render on a terminal
+/// unless `--no-pager` is given.
+pub fn paged<P, MakePayload, Render>(make_payload: MakePayload, render: Render)
+where
+    MakePayload: Fn() -> P,
+    P: Serialize,
+    Render: FnOnce(),
+{
+    let payload = move || -> Box<dyn ErasedSerialize + '_> { Box::new(make_payload()) };
+
+    current().paged(&payload, Box::new(render));
+}
+
+/// Starts a [`Progress`] line for a human on a terminal stderr, to drop
+/// before printing the data.
+///
+/// Verbose runs draw nothing, so the line never interleaves with log lines.
+pub fn progress(message: impl Display) -> Progress {
+    if current().serializes() || !io::stderr().is_terminal() || log::log_enabled!(log::Level::Debug) {
+        return Progress::hidden();
+    }
+
+    Progress::start(message.to_string())
 }
 
 /// Opens a stream of rows, see [`Rows`].
@@ -501,6 +572,71 @@ pub fn paint_ok(text: &str) -> String {
 /// Paints red text after the caller has checked terminal colour support.
 pub fn paint_error(text: &str) -> String {
     text.red().to_string()
+}
+
+/// A colour of the CLI palette, written by [`Painted`] with the escape codes
+/// of `colored` and without a string per value.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Paint {
+    /// The secondary grey of [`paint_dim`].
+    Dim,
+    /// The yellow of [`paint_warning`].
+    Warning,
+    /// A muted 256-colour green for an accepted state inside dense text.
+    SoftOk,
+    /// A muted 256-colour red for a refused state inside dense text.
+    SoftError,
+}
+
+impl Paint {
+    /// Wraps a value in this colour when colour is on.
+    pub fn when<T>(self, colored: bool, value: T) -> Painted<T> {
+        Painted::new(colored.then_some(self), value)
+    }
+
+    /// Returns the escape sequence opening this colour, built once so the
+    /// truecolor fallback follows `COLORTERM` as `colored` does.
+    fn prefix(self) -> &'static str {
+        static PREFIXES: OnceLock<[String; 4]> = OnceLock::new();
+
+        let prefixes = PREFIXES.get_or_init(|| {
+            let open = |color: Color| format!("\x1B[{}m", color.to_fg_str());
+
+            [
+                open(Color::TrueColor { r: 127, g: 127, b: 127 }),
+                open(Color::Yellow),
+                open(Color::AnsiColor(108)),
+                open(Color::AnsiColor(131)),
+            ]
+        });
+
+        &prefixes[self as usize]
+    }
+}
+
+/// A value written inside the escape codes of a [`Paint`], or plain.
+#[derive(Debug, Clone, Copy)]
+pub struct Painted<T> {
+    paint: Option<Paint>,
+    value: T,
+}
+
+impl<T> Painted<T> {
+    pub fn new(paint: Option<Paint>, value: T) -> Self {
+        Self { paint, value }
+    }
+}
+
+impl<T: Display> Display for Painted<T> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), fmt::Error> {
+        let Some(paint) = self.paint else {
+            return self.value.fmt(f);
+        };
+
+        f.write_str(paint.prefix())?;
+        self.value.fmt(f)?;
+        f.write_str("\x1B[0m")
+    }
 }
 
 /// Returns `true` if the current locale advertises UTF-8 encoding.

@@ -2,6 +2,7 @@ package mirror_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"testing"
 
@@ -12,6 +13,7 @@ import (
 
 	"github.com/yanet-platform/xnetip"
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
+	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/modules/mirror/bindings/go/cmirror"
 	mirror "github.com/yanet-platform/yanet2/modules/mirror/controlplane"
 	mirrorpb "github.com/yanet-platform/yanet2/modules/mirror/controlplane/mirrorpb/v1"
@@ -23,17 +25,23 @@ func (m *mockModuleHandle) Free() error {
 	return nil
 }
 
-type mockBackend struct{}
+type mockBackend struct {
+	updateError error
+	deleteError error
+}
 
 func (m *mockBackend) UpdateModule(
 	name string,
 	rules []cmirror.MirrorRule,
 ) (mirror.ModuleHandle, error) {
+	if m.updateError != nil {
+		return nil, m.updateError
+	}
 	return &mockModuleHandle{}, nil
 }
 
 func (m *mockBackend) DeleteModule(name string) error {
-	return nil
+	return m.deleteError
 }
 
 // nilHandleBackend is a Backend whose UpdateModule publishes a config
@@ -95,6 +103,98 @@ func TestDeleteConfigUnknownConfig(t *testing.T) {
 
 	_, err := svc.DeleteConfig(t.Context(), &mirrorpb.DeleteConfigRequest{Name: "missing"})
 	require.Equal(t, codes.NotFound, status.Code(err))
+}
+
+// Test_MirrorService_UpdateConfig_BackendFailureReturnsInternal verifies
+// that a backend update failure returns Internal before publication.
+func Test_MirrorService_UpdateConfig_BackendFailureReturnsInternal(t *testing.T) {
+	backendError := errors.New("shared memory unavailable")
+	service := mirror.NewMirrorService(&mockBackend{updateError: backendError})
+
+	_, err := service.UpdateConfig(t.Context(), &mirrorpb.UpdateConfigRequest{
+		Name: "config",
+		Rules: []*mirrorpb.Rule{
+			{Action: &mirrorpb.Action{Target: "device0"}},
+		},
+	})
+	require.Equal(t, codes.Internal, status.Code(err))
+	require.ErrorContains(t, err, "failed to update module config: shared memory unavailable")
+
+	_, err = service.ShowConfig(t.Context(), &mirrorpb.ShowConfigRequest{Name: "config"})
+	require.Equal(t, codes.NotFound, status.Code(err))
+}
+
+// Test_MirrorService_UpdateConfig_BackendFailurePreservesState verifies
+// that a failed replacement returns Internal without changing current state.
+func Test_MirrorService_UpdateConfig_BackendFailurePreservesState(t *testing.T) {
+	backend := &mockBackend{}
+	service := mirror.NewMirrorService(backend)
+
+	_, err := service.UpdateConfig(t.Context(), &mirrorpb.UpdateConfigRequest{
+		Name: "config",
+		Rules: []*mirrorpb.Rule{
+			{Action: &mirrorpb.Action{Target: "device0"}},
+		},
+	})
+	require.NoError(t, err)
+
+	backend.updateError = errors.New("shared memory unavailable")
+	_, err = service.UpdateConfig(t.Context(), &mirrorpb.UpdateConfigRequest{
+		Name: "config",
+		Rules: []*mirrorpb.Rule{
+			{Action: &mirrorpb.Action{Target: "device1"}},
+		},
+	})
+	require.Equal(t, codes.Internal, status.Code(err))
+
+	response, err := service.ShowConfig(t.Context(), &mirrorpb.ShowConfigRequest{Name: "config"})
+	require.NoError(t, err)
+	require.Equal(t, "device0", response.GetRules()[0].GetAction().GetTarget())
+}
+
+// Test_MirrorService_DeleteConfig_BackendFailureReturnsInternal verifies
+// that backend refusal leaves the published configuration available.
+func Test_MirrorService_DeleteConfig_BackendFailureReturnsInternal(t *testing.T) {
+	backendError := errors.New("shared memory unavailable")
+	service := mirror.NewMirrorService(&mockBackend{deleteError: backendError})
+
+	_, err := service.UpdateConfig(t.Context(), &mirrorpb.UpdateConfigRequest{
+		Name: "config",
+		Rules: []*mirrorpb.Rule{
+			{Action: &mirrorpb.Action{Target: "device0"}},
+		},
+	})
+	require.NoError(t, err)
+
+	_, err = service.DeleteConfig(t.Context(), &mirrorpb.DeleteConfigRequest{Name: "config"})
+	require.Equal(t, codes.Internal, status.Code(err))
+	require.ErrorContains(t, err, "failed to delete module config \"config\": shared memory unavailable")
+
+	response, err := service.ShowConfig(t.Context(), &mirrorpb.ShowConfigRequest{Name: "config"})
+	require.NoError(t, err)
+	require.Equal(t, "device0", response.GetRules()[0].GetAction().GetTarget())
+}
+
+// Test_MirrorService_DeleteConfig_FailedPreconditionPreservesState verifies
+// that state refusal returns FailedPrecondition without unpublishing.
+func Test_MirrorService_DeleteConfig_FailedPreconditionPreservesState(t *testing.T) {
+	backendError := fmt.Errorf("module is still referenced: %w", ffi.ErrFailedPrecondition)
+	service := mirror.NewMirrorService(&mockBackend{deleteError: backendError})
+
+	_, err := service.UpdateConfig(t.Context(), &mirrorpb.UpdateConfigRequest{
+		Name: "config",
+		Rules: []*mirrorpb.Rule{
+			{Action: &mirrorpb.Action{Target: "device0"}},
+		},
+	})
+	require.NoError(t, err)
+
+	_, err = service.DeleteConfig(t.Context(), &mirrorpb.DeleteConfigRequest{Name: "config"})
+	require.Equal(t, codes.FailedPrecondition, status.Code(err))
+
+	response, err := service.ShowConfig(t.Context(), &mirrorpb.ShowConfigRequest{Name: "config"})
+	require.NoError(t, err)
+	require.Equal(t, "device0", response.GetRules()[0].GetAction().GetTarget())
 }
 
 // TestUpdateConfigReplacesConfigWithoutHandle verifies that replacing a

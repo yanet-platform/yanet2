@@ -14,7 +14,6 @@ import (
 	"github.com/yanet-platform/yanet2/controlplane/configstore"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/modules/fwstate/controlplane/fwstatepb/v1"
-	fwstatemappb "github.com/yanet-platform/yanet2/objects/fwstate/controlplane/fwstatemappb/v1"
 )
 
 // Option configures an FWStateService.
@@ -191,9 +190,6 @@ func (m *FWStateService) UpdateConfig(
 	req *fwstatepb.UpdateConfigRequest,
 ) (*fwstatepb.UpdateConfigResponse, error) {
 	name := req.GetName()
-	if name == "" {
-		return nil, status.Error(codes.InvalidArgument, "module config name is required")
-	}
 
 	m.log.Debug("update fwstate config", zap.String("config", name))
 
@@ -242,45 +238,10 @@ func (m *FWStateService) prepareUpdate(
 	oldConfig *FwStateConfig,
 	req *fwstatepb.UpdateConfigRequest,
 ) (*FwStateConfig, error) {
-	if req.UpdateMask != nil {
-		merged, err := maskedUpdate(oldConfig, req)
-		if err != nil {
-			return nil, status.Error(codes.InvalidArgument, err.Error())
-		}
-		req = merged
-	} else {
-		// Validate before conversion can narrow a legacy numeric value.
-		if err := req.GetSyncConfig().ValidateFields(); err != nil {
-			return nil, status.Errorf(codes.InvalidArgument, "invalid sync config: %v", err)
-		}
-		if err := req.ValidateEndpointClears(); err != nil {
-			return nil, status.Errorf(codes.InvalidArgument, "invalid sync endpoint update: %v", err)
-		}
-		mapNameV4, mapNameV6 := mergedMapNames(oldConfig, req)
-		req = &fwstatepb.UpdateConfigRequest{
-			MapNameV4:  mapNameV4,
-			MapNameV6:  mapNameV6,
-			SyncConfig: mergedSyncConfigWithClears(oldConfig, req.SyncConfig, req.GetClearMulticast(), req.GetClearUnicast()),
-		}
-	}
-	mapFields := []string{"map_name_v4", "map_name_v6"}
-	mapNames := []string{req.GetMapNameV4(), req.GetMapNameV6()}
-	for idx, mapName := range mapNames {
-		if mapName == "" {
-			continue
-		}
-		if err := fwstatemappb.ValidateMapNameField(
-			mapFields[idx], mapName,
-		); err != nil {
-			return nil, status.Error(codes.InvalidArgument, err.Error())
-		}
-	}
-	if err := req.SyncConfig.ValidateFields(); err != nil {
-		return nil, status.Errorf(codes.InvalidArgument, "invalid sync config: %v", err)
-	}
+	mapNameV4, mapNameV6 := mergedMapNames(oldConfig, req)
 	// Validate the merged sync config before any C state is touched.
-	syncConfig := req.SyncConfig
-	if err := syncConfig.Validate(); err != nil {
+	syncConfig := mergedSyncConfig(oldConfig, req.GetSyncConfig())
+	if err := syncConfig.ValidateMerged(); err != nil {
 		m.log.Error("invalid sync config", zap.String("config", name), zap.Error(err))
 		return nil, status.Errorf(codes.InvalidArgument, "invalid sync config: %v", err)
 	}
@@ -293,8 +254,8 @@ func (m *FWStateService) prepareUpdate(
 		m.agent,
 		name,
 		syncConfig.ToC(),
-		req.MapNameV4,
-		req.MapNameV6,
+		mapNameV4,
+		mapNameV6,
 	)
 	if err != nil {
 		m.log.Error("failed to build fwstate config", zap.String("config", name), zap.Error(err))
@@ -309,14 +270,11 @@ func (m *FWStateService) ShowConfig(
 	req *fwstatepb.ShowConfigRequest,
 ) (*fwstatepb.ShowConfigResponse, error) {
 	name := req.GetName()
-	if name == "" {
-		return nil, status.Error(codes.InvalidArgument, "module config name is required")
-	}
 
 	mapNameV4, mapNameV6, syncConfig, ok := m.configSnapshot(name)
 	if !ok {
-		if req.OkIfNotFound {
-			return nil, nil
+		if req.GetOkIfNotFound() {
+			return &fwstatepb.ShowConfigResponse{}, nil
 		}
 		return nil, status.Errorf(codes.NotFound, "config %q not found", name)
 	}
@@ -356,9 +314,6 @@ func (m *FWStateService) DeleteConfig(
 	req *fwstatepb.DeleteConfigRequest,
 ) (*fwstatepb.DeleteConfigResponse, error) {
 	name := req.GetName()
-	if name == "" {
-		return nil, status.Error(codes.InvalidArgument, "module config name is required")
-	}
 
 	m.observeMutation("delete", mutationWaiting)
 	err := m.configs.Delete(name, func(*FwStateConfig) error {
@@ -372,10 +327,15 @@ func (m *FWStateService) DeleteConfig(
 		return m.agent.DeleteModuleConfig(moduleType, name)
 	})
 	if errors.Is(err, configstore.ErrNotFound) {
-		return nil, status.Error(codes.NotFound, "config not found")
+		return nil, status.Errorf(codes.NotFound, "config %q not found", name)
 	}
 	if err != nil {
-		return nil, status.Errorf(codes.Internal, "could not delete fwstate module config '%s': %v", name, err)
+		code := codes.Internal
+		if errors.Is(err, ffi.ErrFailedPrecondition) {
+			// A chain still references the config.
+			code = codes.FailedPrecondition
+		}
+		return nil, status.Errorf(code, "could not delete fwstate module config '%s': %v", name, err)
 	}
 
 	m.log.Info("successfully deleted FWState module config", zap.String("name", name))

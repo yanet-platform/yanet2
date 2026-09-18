@@ -142,7 +142,7 @@ func (m *Pipeline) Get(
 		}
 	}
 
-	return nil, status.Error(codes.NotFound, "not found")
+	return nil, status.Errorf(codes.NotFound, "pipeline %q not found", reqId.GetName())
 }
 
 // Update updates or inserts a pipeline.

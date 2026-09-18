@@ -10,6 +10,7 @@ import (
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
 
 	fwstate "github.com/yanet-platform/yanet2/modules/fwstate/controlplane"
 	fwstatepb "github.com/yanet-platform/yanet2/modules/fwstate/controlplane/fwstatepb/v1"
@@ -92,7 +93,7 @@ func concurrencyUpdateRequest(
 	port uint32,
 ) *fwstatepb.UpdateConfigRequest {
 	request := validDeleteTestUpdateRequest(name, maps.v4Name(), maps.v6Name())
-	request.SyncConfig.PortMulticast = port
+	request.SyncConfig.PortMulticast = proto.Uint32(port)
 	return request
 }
 
@@ -180,7 +181,7 @@ func TestFWStateUpdateRollbackKeepsPublishedConfig(t *testing.T) {
 	// at the generation install with FailedPrecondition naming the map,
 	// leaving the previous config in place.
 	failing := concurrencyUpdateRequest(name, mapsB, 10000)
-	failing.MapNameV4 = "no-such-map"
+	failing.MapNameV4 = proto.String("no-such-map")
 	_, err := service.UpdateConfig(t.Context(), failing)
 	require.Equal(t, codes.FailedPrecondition, status.Code(err))
 	require.Contains(t, err.Error(), "no-such-map")

@@ -3,21 +3,19 @@ package forwardpb
 import (
 	"errors"
 	"fmt"
+	"strings"
 
+	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
 	"github.com/yanet-platform/yanet2/common/go/xproto"
 )
 
 func (m *ShowConfigRequest) Validate() error {
-	if m.GetName() == "" {
-		return errors.New("name is required")
-	}
-
-	return nil
+	return commonpb.ValidateModuleName("name", m.GetName())
 }
 
 func (m *UpdateConfigRequest) Validate() error {
-	if m.GetName() == "" {
-		return errors.New("name is required")
+	if err := commonpb.ValidateModuleName("name", m.GetName()); err != nil {
+		return err
 	}
 
 	for idx, rule := range m.GetRules() {
@@ -30,16 +28,39 @@ func (m *UpdateConfigRequest) Validate() error {
 }
 
 func (m *DeleteConfigRequest) Validate() error {
-	if m.GetName() == "" {
-		return errors.New("name is required")
-	}
-
-	return nil
+	return commonpb.ValidateModuleName("name", m.GetName())
 }
 
 func (m *Rule) Validate() error {
 	if m.GetAction() == nil {
 		return errors.New("action is required")
+	}
+	if err := m.GetAction().Validate(); err != nil {
+		return fmt.Errorf("action: %w", err)
+	}
+
+	return nil
+}
+
+func (m *Action) Validate() error {
+	target := m.GetTarget()
+	if strings.IndexByte(target, 0) != -1 {
+		return errors.New("target must not contain NUL")
+	}
+	if len(target) >= commonpb.MaxDeviceNameLen {
+		return fmt.Errorf("target must be shorter than %d bytes", commonpb.MaxDeviceNameLen)
+	}
+
+	if _, ok := ForwardMode_name[int32(m.GetMode())]; !ok {
+		return fmt.Errorf("mode unknown value %d", m.GetMode())
+	}
+
+	counter := m.GetCounter()
+	if strings.IndexByte(counter, 0) != -1 {
+		return errors.New("counter must not contain NUL")
+	}
+	if len(counter) >= commonpb.MaxCounterNameLen {
+		return fmt.Errorf("counter must be shorter than %d bytes", commonpb.MaxCounterNameLen)
 	}
 
 	return nil

@@ -1,5 +1,7 @@
 #include "config.h"
 
+#include <string.h>
+
 #include <rte_ether.h>
 #include <rte_ip.h>
 
@@ -199,6 +201,11 @@ new_module_mirror() {
 	if (module == NULL) {
 		return NULL;
 	}
+
+	// The loader copies every field of the returned descriptor, so
+	// heap garbage must not survive in the ones this constructor
+	// leaves unset.
+	memset(module, 0, sizeof(*module));
 
 	snprintf(
 		module->module.name, sizeof(module->module.name), "%s", "mirror"

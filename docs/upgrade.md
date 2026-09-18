@@ -3,26 +3,27 @@
 Manual steps required when upgrading an existing deployment. The packaging
 does not perform these automatically.
 
-## FWState CLI partial updates
+## FWState updates carry field presence
 
-Upgrade the fwstate control plane before using the new CLI. The CLI now sends
-only explicitly supplied settings with an update mask, without reading the
-stored configuration first. The service merges these settings under its
-mutation lock, so updates to different fields preserve each other; writes to
-the same field use the last successfully published value.
+Upgrade the fwstate control plane and the web UI before using the new CLI.
+`UpdateConfigRequest` no longer has `update_mask`, `clear_multicast` or
+`clear_unicast`. The map names, sync ports and timeouts are `optional` fields
+instead. A request changes only the fields it carries, zero and empty values
+included, and an absent field keeps the stored value. The service merges the
+carried fields under its mutation lock, so updates to different fields
+preserve each other. A request naming only the config creates a missing one
+with defaults.
 
-An omitted flag preserves its field. An explicit zero timeout writes zero;
-an empty map-name flag unlinks that family. The resulting configuration must
-still pass validation. A present empty mask preserves every field and creates
-a missing configuration with defaults.
+An explicit zero port disables its endpoint and clears the endpoint address.
+The CLI encodes `--no-multicast` and `--no-unicast` this way. A request that
+carries an endpoint address together with a zero port for the same endpoint
+is rejected. `ShowConfig` JSON now includes zero ports and timeouts.
 
-Requests without a mask retain their legacy merging, destination-set replacement
-and endpoint-clear flags. Masked updates preserve the unselected endpoint;
-the CLI encodes `--no-multicast` and `--no-unicast` as masked clears.
-Do not combine a mask with the legacy endpoint-clear flags.
-Older servers ignore the new mask, so clears and endpoint updates can behave
-incorrectly. Older clients and the web configuration editor still send stored
-values and do not gain protection against stale-document overwrites.
+Mixed versions misbehave. An older CLI talking to the new service loses
+explicit zeros, so `--no-multicast`, `--no-unicast` and zero timeouts do
+nothing. The new CLI talking to an older service gets the legacy merge, where
+supplying one endpoint disables the other and a zero port keeps the stored
+one.
 
 ## Controlplane systemd unit became a template
 

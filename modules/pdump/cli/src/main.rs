@@ -118,35 +118,15 @@ async fn show_config(service: &mut PdumpService, cmd: ShowConfigCmd) -> Result<(
 }
 
 async fn set_config(service: &mut PdumpService, cmd: SetConfigCmd) -> Result<(), Error> {
-    let mut request = SetConfigRequest {
+    let request = SetConfigRequest {
         name: cmd.config_name.clone(),
-        ..Default::default()
+        config: Some(pdumppb::Config {
+            filter: cmd.filter,
+            mode: cmd.mode.map(Into::into),
+            snaplen: cmd.snaplen,
+            ring_size: cmd.ring_size.map(|ring_size| ring_size.get()),
+        }),
     };
-    let mut cfg = request.config.unwrap_or_default();
-    let mut mask = request.update_mask.unwrap_or_default();
-
-    if let Some(filter) = &cmd.filter {
-        cfg.filter = filter.to_string();
-        mask.paths.push("filter".to_string());
-    }
-
-    if let Some(mode) = cmd.mode {
-        cfg.mode = mode.into();
-        mask.paths.push("mode".to_string());
-    }
-
-    if let Some(snaplen) = cmd.snaplen {
-        cfg.snaplen = snaplen;
-        mask.paths.push("snaplen".to_string());
-    }
-
-    if let Some(ring_size) = cmd.ring_size {
-        cfg.ring_size = ring_size.get();
-        mask.paths.push("ring_size".to_string());
-    }
-
-    request.config = Some(cfg);
-    request.update_mask = Some(mask);
     service
         .unary("set", request, async |client, request| client.set_config(request).await)
         .await?;
@@ -207,7 +187,7 @@ async fn read_dump(service: &mut PdumpService, cmd: ReadCmd) -> Result<(), Error
     // Opened once the capture is granted, so that a rejected request
     // leaves an existing file alone.
     let output = cmd.output.clone().unwrap_or_else(|| "-".to_owned());
-    let dump_writer = PdumpWriter::new(cmd.dump_format, &output, config.snaplen)
+    let dump_writer = PdumpWriter::new(cmd.dump_format, &output, config.snaplen.unwrap_or_default())
         .map_err(|err| service.invalid("read", format!("cannot write to '{output}': {err}")))?;
 
     reader_set.spawn(writer::pdump_stream_reader(stream, tx.clone(), done.clone()));
@@ -271,10 +251,10 @@ fn write_failed(service: &PdumpService, message: String) -> Error {
 
 fn config_block(config: &pdumppb::Config) -> display::KeyValue {
     display::KeyValue::new()
-        .row("filter", &config.filter)
-        .row("mode", dump_mode::to_str(config.mode))
-        .row("snaplen", config.snaplen)
-        .row("ring size", config.ring_size)
+        .row("filter", config.filter.as_deref().unwrap_or_default())
+        .row("mode", dump_mode::to_str(config.mode.unwrap_or_default()))
+        .row("snaplen", config.snaplen.unwrap_or_default())
+        .row("ring size", config.ring_size.unwrap_or_default())
 }
 
 fn main() -> std::process::ExitCode {

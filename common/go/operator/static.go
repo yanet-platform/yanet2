@@ -135,7 +135,7 @@ func NewStaticModuleOperator(
 		newStaticSource(state),
 		WithGRPCServer(
 			cfg.Server,
-			staticReadinessRegistrar(name, tracker),
+			NewReadinessServiceRegistrar(name, tracker),
 			NewMetricsServiceRegistrar(name, metricsCollectors...),
 		),
 		WithGateways(cfg.Register, cfg.Gateways...),
@@ -378,9 +378,9 @@ func (m *readinessService) Watch(
 	return m.tracker.Watch(stream.Context(), req, stream.Send)
 }
 
-// staticReadinessRegistrar registers the readiness service under the
-// operator's own name, so several operators can share one gateway.
-func staticReadinessRegistrar(name string, tracker *readiness.Tracker) ServiceRegistrar {
+// NewReadinessServiceRegistrar serves the shared readiness contract under
+// the operator's own name.
+func NewReadinessServiceRegistrar(name string, tracker *readiness.Tracker) ServiceRegistrar {
 	return func(server *grpc.Server) string {
 		desc := ynpb.ReadinessService_ServiceDesc
 		desc.ServiceName = ReadinessServiceName(name)
@@ -389,8 +389,7 @@ func staticReadinessRegistrar(name string, tracker *readiness.Tracker) ServiceRe
 	}
 }
 
-// ReadinessServiceName is the gRPC service name under which the operator
-// called name reports readiness through a gateway.
+// ReadinessServiceName identifies an operator's scoped readiness API.
 func ReadinessServiceName(name string) string {
 	return "operators." + name + ".operatorpb.v1.ReadinessService"
 }

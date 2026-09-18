@@ -12,6 +12,7 @@ import (
 
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
 	"github.com/yanet-platform/yanet2/controlplane/configstore"
+	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/modules/decap/controlplane/decappb/v1"
 )
 
@@ -82,7 +83,7 @@ func (m *DecapService) ShowConfig(
 	name := req.GetName()
 	entry, ok := m.configs.Get(name)
 	if !ok {
-		return nil, status.Error(codes.NotFound, "no config found")
+		return nil, status.Errorf(codes.NotFound, "config %q not found", name)
 	}
 
 	prefixes4, err := commonpb.NewIPv4PrefixesFromPrefixes(entry.Prefixes4)
@@ -103,11 +104,11 @@ func (m *DecapService) UpdateConfig(
 	req *decappb.UpdateConfigRequest,
 ) (*decappb.UpdateConfigResponse, error) {
 	name := req.GetName()
-	prefixes4, err := commonpb.PrefixesFromNetworks(req.GetPrefixes4())
+	prefixes4, err := commonpb.PrefixesFromNetworks("prefixes4", req.GetPrefixes4())
 	if err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "failed to convert prefixes: %v", err)
 	}
-	prefixes6, err := commonpb.PrefixesFromNetworks(req.GetPrefixes6())
+	prefixes6, err := commonpb.PrefixesFromNetworks("prefixes6", req.GetPrefixes6())
 	if err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "failed to convert prefixes: %v", err)
 	}
@@ -142,13 +143,15 @@ func (m *DecapService) DeleteConfig(
 		return m.backend.DeleteModule(name)
 	})
 	if errors.Is(err, configstore.ErrNotFound) {
-		return nil, status.Error(codes.NotFound, "no config found")
+		return nil, status.Errorf(codes.NotFound, "config %q not found", name)
 	}
 	if err != nil {
-		return nil, status.Errorf(
-			codes.Internal,
-			"failed to delete module config %q: %v", name, err,
-		)
+		code := codes.Internal
+		if errors.Is(err, ffi.ErrFailedPrecondition) {
+			// A chain still references the config.
+			code = codes.FailedPrecondition
+		}
+		return nil, status.Errorf(code, "failed to delete module config %q: %v", name, err)
 	}
 
 	return &decappb.DeleteConfigResponse{}, nil

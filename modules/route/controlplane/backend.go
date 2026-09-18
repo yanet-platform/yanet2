@@ -350,6 +350,7 @@ func newHardwareRoute(nh *routepb.FIBNexthop) (HardwareRoute, error) {
 	if device == "" {
 		return HardwareRoute{}, fmt.Errorf("device is required")
 	}
+
 	return HardwareRoute{
 		SourceMAC:      src.EUI48(),
 		DestinationMAC: dst.EUI48(),

@@ -21,7 +21,6 @@ import (
 
 	dataplaneut "github.com/yanet-platform/yanet2/bindings/go/dataplane_ut"
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
-	filterpb "github.com/yanet-platform/yanet2/common/filterpb/v1"
 	"github.com/yanet-platform/yanet2/common/go/grpcmetrics"
 	"github.com/yanet-platform/yanet2/common/go/metrics"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
@@ -368,6 +367,14 @@ func (m *fakeBackend) SetUpdateErr(err error) {
 	m.updateErr = err
 }
 
+// SetDeleteErr makes every DeleteModule call return err.
+func (m *fakeBackend) SetDeleteErr(err error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	m.deleteErr = err
+}
+
 // ModuleCount returns the number of currently registered module handles.
 func (m *fakeBackend) ModuleCount() int {
 	m.mu.Lock()
@@ -653,22 +660,6 @@ func TestUpdateConfigClassifiesUpdateError(t *testing.T) {
 	})
 }
 
-// Test_ACLService_UpdateConfig_RejectsDeprecatedSyncConfig verifies that old
-// clients cannot silently install emission settings on the wrong module.
-func Test_ACLService_UpdateConfig_RejectsDeprecatedSyncConfig(t *testing.T) {
-	backend := newFakeBackend()
-	service := newTestService(backend)
-
-	_, err := service.UpdateConfig(t.Context(), &aclpb.UpdateConfigRequest{
-		Name:       "acl0",
-		Rules:      []*aclpb.Rule{{Actions: []*aclpb.Action{{Kind: aclpb.ActionKind_ACTION_KIND_PASS}}}},
-		SyncConfig: &aclpb.SyncConfig{},
-	})
-	require.Error(t, err)
-	assert.Equal(t, codes.InvalidArgument, status.Code(err))
-	assert.Contains(t, err.Error(), "fwstate")
-}
-
 // TestUpdateConfig_ErrorPropagation verifies that a backend failure from
 // NewModule returns codes.Internal and leaves the service config unchanged.
 func TestUpdateConfig_ErrorPropagation(t *testing.T) {
@@ -708,36 +699,6 @@ func TestUpdateConfig_ErrorPropagation(t *testing.T) {
 	}
 }
 
-// TestUpdateConfig_RejectsEmptyRuleset verifies that an empty ruleset is
-// rejected with codes.InvalidArgument before reaching the backend, for both
-// a nil and an explicitly empty rule slice.
-func TestUpdateConfig_RejectsEmptyRuleset(t *testing.T) {
-	tests := []struct {
-		name  string
-		rules []*aclpb.Rule
-	}{
-		{name: "nil rules", rules: nil},
-		{name: "empty rules", rules: []*aclpb.Rule{}},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			b := newFakeBackend()
-			svc := newTestService(b)
-
-			_, err := svc.UpdateConfig(t.Context(), &aclpb.UpdateConfigRequest{
-				Name:  "acl0",
-				Rules: tc.rules,
-			})
-			require.Error(t, err)
-			assert.Equal(t, codes.InvalidArgument, status.Code(err))
-			assert.Equal(t, 0, b.PublishCalls(), "backend must not be asked to publish")
-			assert.Len(t, b.CreatedHandles(), 0, "backend must not allocate a module")
-			assert.Equal(t, 0, b.ModuleCount(), "no module must be created")
-		})
-	}
-}
-
 // TestConvertRules_RejectsUnknownActionKind ensures unrecognized action kinds
 // become a client error rather than silently mapping to ALLOW.
 func TestConvertRules_RejectsUnknownActionKind(t *testing.T) {
@@ -746,30 +707,6 @@ func TestConvertRules_RejectsUnknownActionKind(t *testing.T) {
 		Name:  "acl0",
 		Rules: []*aclpb.Rule{{Actions: []*aclpb.Action{{Kind: aclpb.ActionKind(999)}}}},
 	})
-	require.Error(t, err)
-	require.Equal(t, codes.InvalidArgument, status.Code(err))
-}
-
-// TestUpdateConfig_RejectsNonContiguousMask verifies that a rule with a
-// non-contiguous network mask is rejected before reaching the backend.
-func TestUpdateConfig_RejectsNonContiguousMask(t *testing.T) {
-	svc := newTestService(newFakeBackend())
-
-	req := &aclpb.UpdateConfigRequest{
-		Name: "acl0",
-		Rules: []*aclpb.Rule{
-			{
-				Srcs: []*filterpb.IPNet{
-					{
-						Addr: []byte{192, 0, 2, 0},
-						Mask: []byte{0xff, 0x00, 0xff, 0x00},
-					},
-				},
-			},
-		},
-	}
-
-	_, err := svc.UpdateConfig(t.Context(), req)
 	require.Error(t, err)
 	require.Equal(t, codes.InvalidArgument, status.Code(err))
 }
@@ -821,37 +758,6 @@ func TestUpdateConfig_TypedNetworkLists(t *testing.T) {
 	assert.Equal(t, []xnetip.BiContiguous{xnetip.MustParseBiContiguous("2001:db8::/32")}, rules[0].Src6s)
 	assert.Equal(t, []xnetip.Contiguous[xnetip.Network4]{xnetip.MustParseContiguous4("198.51.100.0/24")}, rules[0].Dst4s)
 	assert.Equal(t, []xnetip.BiContiguous{xnetip.MustParseBiContiguous("2001:db8:1::/ffff:ffff:ffff:0:ffff::")}, rules[0].Dst6s)
-}
-
-// TestUpdateConfig_MergesLegacyAndTypedNetworks verifies that legacy and
-// typed lists merge into one match set, legacy entries first.
-func TestUpdateConfig_MergesLegacyAndTypedNetworks(t *testing.T) {
-	backend := newFakeBackend()
-	svc := newTestService(backend)
-
-	typed := mustV4Network("198.51.100.0/24")
-
-	_, err := svc.UpdateConfig(t.Context(), &aclpb.UpdateConfigRequest{
-		Name: "acl0",
-		Rules: []*aclpb.Rule{{
-			Actions: []*aclpb.Action{{Kind: aclpb.ActionKind_ACTION_KIND_PASS}},
-			Srcs: []*filterpb.IPNet{{
-				Addr: []byte{192, 0, 2, 0},
-				Mask: []byte{255, 255, 255, 0},
-			}},
-			Sources4: []*commonpb.IPv4Network{typed},
-		}},
-	})
-	require.NoError(t, err)
-
-	handles := backend.CreatedHandles()
-	require.Len(t, handles, 1)
-	rules := handles[0].Rules()
-	require.Len(t, rules, 1)
-	assert.Equal(t, []xnetip.Contiguous[xnetip.Network4]{
-		xnetip.MustParseContiguous4("192.0.2.0/24"),
-		xnetip.MustParseContiguous4("198.51.100.0/24"),
-	}, rules[0].Src4s)
 }
 
 // TestUpdateConfig_RejectsTypedOutOfClassMasks verifies that masks outside
@@ -926,6 +832,47 @@ func TestDeleteConfig_LiveNameTombstones(t *testing.T) {
 
 	_, err = svc.DeleteConfig(t.Context(), &aclpb.DeleteConfigRequest{Name: name})
 	require.Equal(t, codes.NotFound, status.Code(err), "deleting an already-deleted name must report NotFound")
+}
+
+// TestDeleteConfig_Refused verifies that a refused delete maps its error kind
+// to the status code and leaves the config in place.
+func TestDeleteConfig_Refused(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+		code codes.Code
+	}{
+		{
+			name: "referenced by a chain",
+			err:  fmt.Errorf("module 'acl:acl0' not found in chain 'chain0': %w", ffi.ErrFailedPrecondition),
+			code: codes.FailedPrecondition,
+		},
+		{
+			name: "backend failure",
+			err:  errors.New("dp_config_wait_for_gen timed out"),
+			code: codes.Internal,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			backend := newFakeBackend()
+			svc := newTestService(backend)
+
+			_, err := svc.UpdateConfig(t.Context(), &aclpb.UpdateConfigRequest{
+				Name:  "acl0",
+				Rules: []*aclpb.Rule{{Actions: []*aclpb.Action{{Kind: aclpb.ActionKind_ACTION_KIND_PASS}}}},
+			})
+			require.NoError(t, err)
+
+			backend.SetDeleteErr(tc.err)
+			_, err = svc.DeleteConfig(t.Context(), &aclpb.DeleteConfigRequest{Name: "acl0"})
+			require.Equal(t, tc.code, status.Code(err))
+
+			_, err = svc.ShowConfig(t.Context(), &aclpb.ShowConfigRequest{Name: "acl0"})
+			require.NoError(t, err)
+		})
+	}
 }
 
 // TestDeleteConfig_WaitsBehindInFlightCreate verifies that a DeleteConfig

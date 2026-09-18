@@ -1,11 +1,21 @@
 package neigh
 
 import (
+	"errors"
 	"fmt"
 	"net/netip"
 	"sync"
 
 	"github.com/yanet-platform/yanet2/common/go/rcucache"
+)
+
+var (
+	// ErrSourceExists is reported when creating a source whose name is taken.
+	ErrSourceExists = errors.New("source already exists")
+	// ErrSourceNotFound is reported when no source has the given name.
+	ErrSourceNotFound = errors.New("source not found")
+	// ErrBuiltInSource is reported when deleting a built-in source.
+	ErrBuiltInSource = errors.New("built-in source cannot be deleted")
 )
 
 // NeighSource represents a single source of neighbour entries.
@@ -113,7 +123,7 @@ func (m *NeighTable) CreateSource(name string, defaultPriority uint32, builtIn b
 	defer m.mu.Unlock()
 
 	if _, ok := m.sources[name]; ok {
-		return nil, fmt.Errorf("source %q already exists", name)
+		return nil, fmt.Errorf("%w: %q", ErrSourceExists, name)
 	}
 
 	src := &NeighSource{
@@ -135,7 +145,7 @@ func (m *NeighTable) UpdateSource(name string, defaultPriority uint32) error {
 
 	src, ok := m.sources[name]
 	if !ok {
-		return fmt.Errorf("source %q not found", name)
+		return fmt.Errorf("%w: %q", ErrSourceNotFound, name)
 	}
 
 	src.DefaultPriority = defaultPriority
@@ -147,11 +157,11 @@ func (m *NeighTable) DeleteSource(name string) error {
 	return m.update(func() error {
 		src, ok := m.sources[name]
 		if !ok {
-			return fmt.Errorf("source %q not found", name)
+			return fmt.Errorf("%w: %q", ErrSourceNotFound, name)
 		}
 
 		if src.BuiltIn {
-			return fmt.Errorf("cannot delete built-in source %q", name)
+			return fmt.Errorf("%w: %q", ErrBuiltInSource, name)
 		}
 
 		delete(m.sources, name)
@@ -193,7 +203,7 @@ func (m *NeighTable) Add(table string, entries []NeighbourEntry) error {
 	return m.update(func() error {
 		src, ok := m.sources[table]
 		if !ok {
-			return fmt.Errorf("source %q not found", table)
+			return fmt.Errorf("%w: %q", ErrSourceNotFound, table)
 		}
 
 		for _, entry := range entries {
@@ -212,7 +222,7 @@ func (m *NeighTable) Remove(table string, addrs []netip.Addr) error {
 	return m.update(func() error {
 		src, ok := m.sources[table]
 		if !ok {
-			return fmt.Errorf("source %q not found", table)
+			return fmt.Errorf("%w: %q", ErrSourceNotFound, table)
 		}
 
 		for _, addr := range addrs {
@@ -230,7 +240,7 @@ func (m *NeighTable) SwapSource(name string, entries map[netip.Addr]NeighbourEnt
 	return m.update(func() error {
 		src, ok := m.sources[name]
 		if !ok {
-			return fmt.Errorf("source %q not found", name)
+			return fmt.Errorf("%w: %q", ErrSourceNotFound, name)
 		}
 
 		for addr, entry := range entries {

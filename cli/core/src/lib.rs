@@ -7,7 +7,7 @@ use clap_complete::CompleteEnv;
 use crate::{
     client::ConnectionArgs,
     errors::Error,
-    output::{CommonFormat, Format},
+    output::{CommonFormat, Format, GlobalFormat},
 };
 
 pub mod auth;
@@ -22,13 +22,18 @@ pub mod humanfmt;
 pub mod logging;
 pub mod metrics;
 pub mod output;
+pub mod progress;
 pub mod timeout;
 pub mod yaml;
 
+#[cfg(unix)]
+mod pager;
 mod signal;
 
 /// The flags every yanet CLI carries: the connection, the output format and
 /// the verbosity.
+///
+/// They also carry the switch that turns the pager off.
 #[derive(Debug, Clone, Args)]
 pub struct GlobalArgs {
     #[command(flatten)]
@@ -39,13 +44,21 @@ pub struct GlobalArgs {
     /// Be verbose: shows debug log lines and raw gRPC error details.
     #[arg(short, action = ArgAction::Count, global = true)]
     pub verbose: u8,
+    /// Print long output directly instead of through the pager.
+    #[arg(long, global = true)]
+    pub no_pager: bool,
 }
 
 impl GlobalArgs {
     /// The verbosity and format pair [`entrypoint`] initialises the output
     /// with.
-    pub fn options(&self) -> (u8, CommonFormat) {
-        (self.verbose, self.format)
+    pub fn options(&self) -> (u8, GlobalFormat) {
+        let format = GlobalFormat {
+            format: self.format,
+            pager: !self.no_pager,
+        };
+
+        (self.verbose, format)
     }
 }
 

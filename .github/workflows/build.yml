@@ -282,6 +282,7 @@ jobs:
             build/operators/route/yanet-route-operator \
             build/operators/generic/yanet-generic-operator \
             build/operators/pipeline/yanet-pipeline-operator \
+            build/operators/neighbour-sidecar/yanet-neighbour-sidecar \
             build/operators/bird-adapter/yanet-bird-adapter; do
             test -x "$path"
             cp "$path" "$(basename "$path")"
@@ -297,6 +298,7 @@ jobs:
             target/release/yanet-cli*
             yanet-*-operator
             yanet-bird-adapter
+            yanet-neighbour-sidecar
 
   functional-tests:
     name: Run Functional Tests

@@ -11,6 +11,8 @@
 
 # Modules.
 /modules/balancer2/                     @yanet-platform/yanet-module-balancer
+/modules/l3b/                           @yanet-platform/yanet-module-balancer
+/objects/l3b/                           @yanet-platform/yanet-module-balancer
 /modules/route/                         @yanet-platform/yanet-module-route
 /modules/route-mpls/                    @yanet-platform/yanet-module-route
 /modules/acl/                           @yanet-platform/yanet-module-acl

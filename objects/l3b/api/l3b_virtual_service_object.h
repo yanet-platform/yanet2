@@ -183,15 +183,16 @@ struct virtual_service {
 	uint64_t counter_ring_empty;
 	uint64_t counter_real_disabled;
 	uint64_t counter_icmp_replied;
-	// Per-real throughput counter id per real server entry.
+	// Per-real throughput counter id per real server entry, a relative
+	// pointer into object shared memory (NULL without real servers).
 	uint64_t *real_counter_ids;
 
 	// Per-family classification of incoming packets.
 	struct filter filter_ip6;
 	struct filter filter_ip4;
 
-	// Hash index of client flows pinned to real servers; created and
-	// owned together with the service object.
+	// Hash index of client flows pinned to real servers; supplied at
+	// creation and owned outside the service object.
 	struct l3b_session_table_object *session_table;
 };
 
@@ -265,47 +266,37 @@ struct l3b_virtual_service {
 	// Capacity of the real server ring; set at configuration time. The ring
 	// starts empty and is populated via l3b_virtual_service_update_ring.
 	uint32_t ring_capacity;
-
-	// Hash index size of the service's session table; zero selects the
-	// default.
-	uint32_t session_index_size;
 };
 
 /*
  * Creation parameters of a virtual service object.
  *
- * adopt_session_table names the table object of the service being replaced:
- * the new service points at it, so every pinned flow survives the update with
- * its real server. NULL creates a fresh, empty table; the descriptor's
- * session_index_size then sizes it (and is ignored on adoption).
+ * The session table is supplied by the caller and required: the service
+ * neither creates nor owns it, so one table carries every pinned flow, with
+ * its real server, across a service replacement.
  */
 struct l3b_virtual_service_create_config {
 	struct agent *agent;
 	const char *name;
-	// Worker count covering every worker that will pin sessions.
-	uint16_t worker_count;
-	// Session table to adopt on an update; NULL for a fresh one.
-	struct cp_object *adopt_session_table;
+	// Session table the service points at; required.
+	struct cp_object *session_table;
 	// Control-plane descriptor of the service.
 	const struct l3b_virtual_service *virtual_service;
 };
 
 // Allocate a named virtual service object from the creation parameters.
 //
-// The service (and, when created, its session table) are registered under the
-// given name and published to the dataplane through agent_update_objects;
-// module configurations reference the service by name via
-// cp_module_link_object. *session_table receives the table's cp_object for
-// publishing — the table the service adopted on an update, or the fresh one.
+// The service is registered under the given name and published to the
+// dataplane through agent_update_objects; module configurations reference the
+// service by name via cp_module_link_object.
 struct cp_object *
 l3b_virtual_service_create(
 	const struct l3b_virtual_service_create_config *config,
-	struct cp_object **session_table,
 	yanet_error **err
 );
 
-// Return the session table the service reads and writes, or NULL while the
-// service carries none.
+// Return the session table the service reads and writes; every service is
+// created over one.
 struct l3b_session_table_object *
 l3b_virtual_service_session_table(const struct cp_object *cp_object);
 
@@ -319,9 +310,8 @@ l3b_virtual_service_counter_read(
 );
 
 // Destroy the virtual service object once it is dangling — referenced by no
-// live configuration generation. The session table is left alone: it is owned
-// by the caller's handle, survives service updates and is destroyed through
-// l3b_session_table_object_free when the service is deleted.
+// live configuration generation. The session table is left alone: it belongs
+// to the caller's handle and outlives the services built over it.
 int
 l3b_virtual_service_free(struct cp_object *cp_object, yanet_error **err);
 

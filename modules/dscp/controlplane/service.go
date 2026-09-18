@@ -12,6 +12,7 @@ import (
 
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
 	"github.com/yanet-platform/yanet2/controlplane/configstore"
+	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/modules/dscp/controlplane/dscppb/v1"
 )
 
@@ -95,7 +96,7 @@ func (m *DscpService) ShowConfig(
 
 	config, ok := m.configs.Get(name)
 	if !ok {
-		return nil, status.Error(codes.NotFound, "config not found")
+		return nil, status.Errorf(codes.NotFound, "config %q not found", name)
 	}
 
 	prefixes4, err := commonpb.NewIPv4PrefixesFromPrefixes(config.Prefixes4)
@@ -124,11 +125,11 @@ func (m *DscpService) AddPrefixes(
 	request *dscppb.AddPrefixesRequest,
 ) (*dscppb.AddPrefixesResponse, error) {
 	name := request.GetName()
-	toAdd4, err := commonpb.PrefixesFromNetworks(request.GetPrefixes4())
+	toAdd4, err := commonpb.PrefixesFromNetworks("prefixes4", request.GetPrefixes4())
 	if err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "failed to convert prefixes: %v", err)
 	}
-	toAdd6, err := commonpb.PrefixesFromNetworks(request.GetPrefixes6())
+	toAdd6, err := commonpb.PrefixesFromNetworks("prefixes6", request.GetPrefixes6())
 	if err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "failed to convert prefixes: %v", err)
 	}
@@ -167,11 +168,11 @@ func (m *DscpService) RemovePrefixes(
 	request *dscppb.RemovePrefixesRequest,
 ) (*dscppb.RemovePrefixesResponse, error) {
 	name := request.GetName()
-	toRemove4, err := commonpb.PrefixesFromNetworks(request.GetPrefixes4())
+	toRemove4, err := commonpb.PrefixesFromNetworks("prefixes4", request.GetPrefixes4())
 	if err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "failed to convert prefixes: %v", err)
 	}
-	toRemove6, err := commonpb.PrefixesFromNetworks(request.GetPrefixes6())
+	toRemove6, err := commonpb.PrefixesFromNetworks("prefixes6", request.GetPrefixes6())
 	if err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "failed to convert prefixes: %v", err)
 	}
@@ -230,13 +231,15 @@ func (m *DscpService) DeleteConfig(
 		return m.backend.DeleteModule(name)
 	})
 	if errors.Is(err, configstore.ErrNotFound) {
-		return nil, status.Error(codes.NotFound, "config not found")
+		return nil, status.Errorf(codes.NotFound, "config %q not found", name)
 	}
 	if err != nil {
-		return nil, status.Errorf(
-			codes.Internal,
-			"failed to delete module config %q: %v", name, err,
-		)
+		code := codes.Internal
+		if errors.Is(err, ffi.ErrFailedPrecondition) {
+			// A chain still references the config.
+			code = codes.FailedPrecondition
+		}
+		return nil, status.Errorf(code, "failed to delete module config %q: %v", name, err)
 	}
 
 	return &dscppb.DeleteConfigResponse{}, nil

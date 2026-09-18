@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
 
 	pdumppb "github.com/yanet-platform/yanet2/modules/pdump/controlplane/pdumppb/v1"
 )
@@ -34,8 +35,8 @@ func Test_ShowConfigRequest_Validate(t *testing.T) {
 	}
 }
 
-// Test_SetConfigRequest_Validate verifies that the request-only mask rules
-// report their exact field and rule text before configuration is applied.
+// Test_SetConfigRequest_Validate verifies that the rules for the config fields
+// a request carries report their exact field and rule text.
 func Test_SetConfigRequest_Validate(t *testing.T) {
 	maxRingSizeMessage := ""
 	if pdumppb.MaxRingSize&(pdumppb.MaxRingSize-1) != 0 {
@@ -71,53 +72,58 @@ func Test_SetConfigRequest_Validate(t *testing.T) {
 			message: "config is required",
 		},
 		{
+			name:    "config without fields",
+			request: &pdumppb.SetConfigRequest{Name: "pdump0", Config: &pdumppb.Config{}},
+		},
+		{
+			name: "absent snaplen is not checked",
+			request: &pdumppb.SetConfigRequest{
+				Name:   "pdump0",
+				Config: &pdumppb.Config{Filter: proto.String("tcp")},
+			},
+		},
+		{
 			name: "zero mode is accepted",
 			request: &pdumppb.SetConfigRequest{
-				Name:       "pdump0",
-				Config:     &pdumppb.Config{},
-				UpdateMask: &pdumppb.FieldMask{Paths: []string{"mode"}},
+				Name:   "pdump0",
+				Config: &pdumppb.Config{Mode: proto.Uint32(0)},
 			},
 		},
 		{
 			name: "maximum mode is accepted",
 			request: &pdumppb.SetConfigRequest{
-				Name:       "pdump0",
-				Config:     &pdumppb.Config{Mode: pdumppb.MaxMode},
-				UpdateMask: &pdumppb.FieldMask{Paths: []string{"mode"}},
+				Name:   "pdump0",
+				Config: &pdumppb.Config{Mode: proto.Uint32(pdumppb.MaxMode)},
 			},
 		},
 		{
 			name: "mode above maximum",
 			request: &pdumppb.SetConfigRequest{
-				Name:       "pdump0",
-				Config:     &pdumppb.Config{Mode: pdumppb.MaxMode + 1},
-				UpdateMask: &pdumppb.FieldMask{Paths: []string{"mode"}},
+				Name:   "pdump0",
+				Config: &pdumppb.Config{Mode: proto.Uint32(pdumppb.MaxMode + 1)},
 			},
 			message: "mode 4 must be in range 0..3",
 		},
 		{
 			name: "zero snaplen",
 			request: &pdumppb.SetConfigRequest{
-				Name:       "pdump0",
-				Config:     &pdumppb.Config{},
-				UpdateMask: &pdumppb.FieldMask{Paths: []string{"snaplen"}},
+				Name:   "pdump0",
+				Config: &pdumppb.Config{Snaplen: proto.Uint32(0)},
 			},
 			message: "snaplen must be greater than zero",
 		},
 		{
 			name: "positive snaplen",
 			request: &pdumppb.SetConfigRequest{
-				Name:       "pdump0",
-				Config:     &pdumppb.Config{Snaplen: 1},
-				UpdateMask: &pdumppb.FieldMask{Paths: []string{"snaplen"}},
+				Name:   "pdump0",
+				Config: &pdumppb.Config{Snaplen: proto.Uint32(1)},
 			},
 		},
 		{
 			name: "ring size below minimum",
 			request: &pdumppb.SetConfigRequest{
-				Name:       "pdump0",
-				Config:     &pdumppb.Config{RingSize: 1 << 19},
-				UpdateMask: &pdumppb.FieldMask{Paths: []string{"ring_size"}},
+				Name:   "pdump0",
+				Config: &pdumppb.Config{RingSize: proto.Uint32(1 << 19)},
 			},
 			message: fmt.Sprintf(
 				"ring_size %d must be in range %d..%d",
@@ -129,43 +135,38 @@ func Test_SetConfigRequest_Validate(t *testing.T) {
 		{
 			name: "minimum ring size",
 			request: &pdumppb.SetConfigRequest{
-				Name:       "pdump0",
-				Config:     &pdumppb.Config{RingSize: 1048576},
-				UpdateMask: &pdumppb.FieldMask{Paths: []string{"ring_size"}},
+				Name:   "pdump0",
+				Config: &pdumppb.Config{RingSize: proto.Uint32(1048576)},
 			},
 		},
 		{
 			name: "largest ASAN power-of-two ring size",
 			request: &pdumppb.SetConfigRequest{
-				Name:       "pdump0",
-				Config:     &pdumppb.Config{RingSize: 1 << 25},
-				UpdateMask: &pdumppb.FieldMask{Paths: []string{"ring_size"}},
+				Name:   "pdump0",
+				Config: &pdumppb.Config{RingSize: proto.Uint32(1 << 25)},
 			},
 		},
 		{
 			name: "allocator maximum ring size",
 			request: &pdumppb.SetConfigRequest{
-				Name:       "pdump0",
-				Config:     &pdumppb.Config{RingSize: pdumppb.MaxRingSize},
-				UpdateMask: &pdumppb.FieldMask{Paths: []string{"ring_size"}},
+				Name:   "pdump0",
+				Config: &pdumppb.Config{RingSize: proto.Uint32(pdumppb.MaxRingSize)},
 			},
 			message: maxRingSizeMessage,
 		},
 		{
 			name: "normal allocator maximum ring size",
 			request: &pdumppb.SetConfigRequest{
-				Name:       "pdump0",
-				Config:     &pdumppb.Config{RingSize: 1 << 26},
-				UpdateMask: &pdumppb.FieldMask{Paths: []string{"ring_size"}},
+				Name:   "pdump0",
+				Config: &pdumppb.Config{RingSize: proto.Uint32(1 << 26)},
 			},
 			message: normalMaxRingSizeMessage,
 		},
 		{
 			name: "ring size above maximum",
 			request: &pdumppb.SetConfigRequest{
-				Name:       "pdump0",
-				Config:     &pdumppb.Config{RingSize: 1 << 27},
-				UpdateMask: &pdumppb.FieldMask{Paths: []string{"ring_size"}},
+				Name:   "pdump0",
+				Config: &pdumppb.Config{RingSize: proto.Uint32(1 << 27)},
 			},
 			message: fmt.Sprintf(
 				"ring_size %d must be in range %d..%d",
@@ -173,30 +174,6 @@ func Test_SetConfigRequest_Validate(t *testing.T) {
 				1<<20,
 				pdumppb.MaxRingSize,
 			),
-		},
-		{
-			name: "unknown mask path",
-			request: &pdumppb.SetConfigRequest{
-				Name:       "pdump0",
-				Config:     &pdumppb.Config{},
-				UpdateMask: &pdumppb.FieldMask{Paths: []string{"unknown"}},
-			},
-			message: "unknown path 'unknown'",
-		},
-		{
-			name: "filter mask path",
-			request: &pdumppb.SetConfigRequest{
-				Name:       "pdump0",
-				Config:     &pdumppb.Config{Filter: "tcp"},
-				UpdateMask: &pdumppb.FieldMask{Paths: []string{"filter"}},
-			},
-		},
-		{
-			name: "empty update mask",
-			request: &pdumppb.SetConfigRequest{
-				Name:   "pdump0",
-				Config: &pdumppb.Config{},
-			},
 		},
 	}
 

@@ -1,5 +1,7 @@
 #include "config.h"
 
+#include <string.h>
+
 #include <bpf_impl.h>
 #include <rte_bpf.h>
 
@@ -125,6 +127,11 @@ new_module_pdump() {
 	if (module == NULL) {
 		return NULL;
 	}
+
+	// The loader copies every field of the returned descriptor, so
+	// heap garbage must not survive in the ones this constructor
+	// leaves unset.
+	memset(module, 0, sizeof(*module));
 
 	snprintf(
 		module->module.name, sizeof(module->module.name), "%s", "pdump"

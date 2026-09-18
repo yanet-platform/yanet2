@@ -114,15 +114,16 @@ func newTestService(t *testing.T) *DscpService {
 	return NewDscpService(&mockBackend{})
 }
 
-// refusingDeleteBackend updates like mockBackend but refuses every delete,
-// modeling a config still referenced by a live generation.
+// refusingDeleteBackend updates like mockBackend but refuses every delete
+// with err.
 type refusingDeleteBackend struct {
 	mockBackend
+	err error
 }
 
 func (m *refusingDeleteBackend) DeleteModule(name string) error {
 	m.deletedName = name
-	return errBackendFailure
+	return m.err
 }
 
 // parkingBackend refuses to release the first handle it mints, then releases
@@ -349,32 +350,55 @@ func Test_DscpService_DeleteConfig_RemovesConfig(t *testing.T) {
 	require.Equal(t, codes.NotFound, status.Code(err))
 }
 
-// Test_DscpService_DeleteConfig_Referenced verifies that a backend refusal
-// surfaces as Internal and leaves the config in place.
-func Test_DscpService_DeleteConfig_Referenced(t *testing.T) {
+// Test_DscpService_DeleteConfig_Refused verifies that a refused delete maps
+// its error kind to the status code and leaves the config in place.
+func Test_DscpService_DeleteConfig_Refused(t *testing.T) {
 	t.Parallel()
-	backend := &refusingDeleteBackend{}
-	service := NewDscpService(backend)
-	ctx := t.Context()
 
-	_, err := service.AddPrefixes(ctx, &dscppb.AddPrefixesRequest{
-		Name:      "dscp0",
-		Prefixes4: mustPrefixes4(t, "10.0.0.0/24"),
-	})
-	require.NoError(t, err)
+	cases := []struct {
+		name string
+		err  error
+		code codes.Code
+	}{
+		{
+			name: "referenced by a chain",
+			err:  fmt.Errorf("module 'dscp:dscp0' not found in chain 'chain0': %w", ffi.ErrFailedPrecondition),
+			code: codes.FailedPrecondition,
+		},
+		{
+			name: "backend failure",
+			err:  errBackendFailure,
+			code: codes.Internal,
+		},
+	}
 
-	response, err := service.DeleteConfig(ctx, &dscppb.DeleteConfigRequest{Name: "dscp0"})
-	require.Nil(t, response)
-	require.Equal(t, codes.Internal, status.Code(err))
-	assert.Equal(t, "dscp0", backend.deletedName)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			backend := &refusingDeleteBackend{err: tc.err}
+			service := NewDscpService(backend)
+			ctx := t.Context()
 
-	list, err := service.ListConfigs(ctx, &dscppb.ListConfigsRequest{})
-	require.NoError(t, err)
-	assert.Equal(t, []string{"dscp0"}, list.Configs)
+			_, err := service.AddPrefixes(ctx, &dscppb.AddPrefixesRequest{
+				Name:      "dscp0",
+				Prefixes4: mustPrefixes4(t, "10.0.0.0/24"),
+			})
+			require.NoError(t, err)
 
-	show, err := service.ShowConfig(ctx, &dscppb.ShowConfigRequest{Name: "dscp0"})
-	require.NotNil(t, show)
-	require.NoError(t, err)
+			response, err := service.DeleteConfig(ctx, &dscppb.DeleteConfigRequest{Name: "dscp0"})
+			require.Nil(t, response)
+			require.Equal(t, tc.code, status.Code(err))
+			assert.Equal(t, "dscp0", backend.deletedName)
+
+			list, err := service.ListConfigs(ctx, &dscppb.ListConfigsRequest{})
+			require.NoError(t, err)
+			assert.Equal(t, []string{"dscp0"}, list.Configs)
+
+			show, err := service.ShowConfig(ctx, &dscppb.ShowConfigRequest{Name: "dscp0"})
+			require.NotNil(t, show)
+			require.NoError(t, err)
+		})
+	}
 }
 
 // Test_DscpService_DeleteConfig_ParksThenReclaims verifies that a handle

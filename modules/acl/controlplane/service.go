@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 
-	"github.com/yanet-platform/xnetip"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -14,14 +13,12 @@ import (
 
 	filterpbconv "github.com/yanet-platform/yanet2/bindings/go/filterpbconv/v1"
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
-	filterpb "github.com/yanet-platform/yanet2/common/filterpb/v1"
 	"github.com/yanet-platform/yanet2/common/go/grpcmetrics"
 	"github.com/yanet-platform/yanet2/common/go/metrics"
 	"github.com/yanet-platform/yanet2/controlplane/configstore"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/modules/acl/bindings/go/cacl"
 	aclpb "github.com/yanet-platform/yanet2/modules/acl/controlplane/aclpb/v1"
-	fwstatemappb "github.com/yanet-platform/yanet2/objects/fwstate/controlplane/fwstatemappb/v1"
 )
 
 // ModuleHandle is a handle to an ACL module configuration written to
@@ -224,36 +221,6 @@ func labeler(fullMethod string, req any) metrics.Labels {
 	}
 }
 
-// mergedNet4s decodes the IPv4 networks a rule carries in the legacy
-// mixed-family list and the typed list, legacy entries first.
-func mergedNet4s(legacy []*filterpb.IPNet, typed []*commonpb.IPv4Network) ([]xnetip.Contiguous[xnetip.Network4], error) {
-	nets, err := filterpbconv.ToNet4s(legacy)
-	if err != nil {
-		return nil, err
-	}
-	typedNets, err := filterpbconv.ToNet4sFromNetworks(typed)
-	if err != nil {
-		return nil, err
-	}
-
-	return append(nets, typedNets...), nil
-}
-
-// mergedNet6s decodes the IPv6 networks a rule carries in the legacy
-// mixed-family list and the typed list, legacy entries first.
-func mergedNet6s(legacy []*filterpb.IPNet, typed []*commonpb.IPv6Network) ([]xnetip.BiContiguous, error) {
-	nets, err := filterpbconv.ToNet6s(legacy)
-	if err != nil {
-		return nil, err
-	}
-	typedNets, err := filterpbconv.ToNet6sFromNetworks(typed)
-	if err != nil {
-		return nil, err
-	}
-
-	return append(nets, typedNets...), nil
-}
-
 func convertRules(reqRules []*aclpb.Rule) ([]cacl.ACLRule, error) {
 	rules := make([]cacl.ACLRule, 0, len(reqRules))
 	for _, reqRule := range reqRules {
@@ -265,19 +232,19 @@ func convertRules(reqRules []*aclpb.Rule) ([]cacl.ACLRule, error) {
 		if err != nil {
 			return nil, err
 		}
-		src4s, err := mergedNet4s(reqRule.Srcs, reqRule.Sources4)
+		src4s, err := filterpbconv.ToNet4sFromNetworks(reqRule.Sources4)
 		if err != nil {
 			return nil, err
 		}
-		dst4s, err := mergedNet4s(reqRule.Dsts, reqRule.Destinations4)
+		dst4s, err := filterpbconv.ToNet4sFromNetworks(reqRule.Destinations4)
 		if err != nil {
 			return nil, err
 		}
-		src6s, err := mergedNet6s(reqRule.Srcs, reqRule.Sources6)
+		src6s, err := filterpbconv.ToNet6sFromNetworks(reqRule.Sources6)
 		if err != nil {
 			return nil, err
 		}
-		dst6s, err := mergedNet6s(reqRule.Dsts, reqRule.Destinations6)
+		dst6s, err := filterpbconv.ToNet6sFromNetworks(reqRule.Destinations6)
 		if err != nil {
 			return nil, err
 		}
@@ -332,50 +299,13 @@ func rulesEqual(a, b []*aclpb.Rule) bool {
 	return true
 }
 
-// validateMapNameOptional applies the C-side round-trip rules to an optional
-// map link name while preserving the link's proto field in errors.
-func validateMapNameOptional(field, name string) error {
-	if name == "" {
-		return nil
-	}
-	if err := fwstatemappb.ValidateMapNameField(field, name); err != nil {
-		return status.Error(codes.InvalidArgument, err.Error())
-	}
-	return nil
-}
-
 func (m *ACLService) UpdateConfig(
 	ctx context.Context,
 	req *aclpb.UpdateConfigRequest,
 ) (*aclpb.UpdateConfigResponse, error) {
 	name := req.GetName()
-	if name == "" {
-		return nil, status.Error(codes.InvalidArgument, "module config name is required")
-	}
-	// Rejecting an empty ruleset is enforced here in the Go control plane by
-	// design, not in the C shared-memory load path. A matching C-side guard
-	// can be added later if a non-Go caller ever needs the same protection.
-	if len(req.GetRules()) == 0 {
-		return nil, status.Error(codes.InvalidArgument, "at least one rule is required, an empty ruleset would drop all traffic")
-	}
-	if req.GetSyncConfig() != nil {
-		return nil, status.Error(codes.InvalidArgument,
-			"sync_config belongs to fwstate")
-	}
-
 	fw4MapName := req.GetFwtableNameV4()
 	fw6MapName := req.GetFwtableNameV6()
-	// A non-empty name must round-trip through the fixed-size C
-	// object registry: cp_module_link_object silently truncates
-	// longer ones, which could link an entirely different map than
-	// the one ShowConfig reports. An empty name stays valid: it
-	// declares no link for that family.
-	if err := validateMapNameOptional("fwtable_name_v4", fw4MapName); err != nil {
-		return nil, err
-	}
-	if err := validateMapNameOptional("fwtable_name_v6", fw6MapName); err != nil {
-		return nil, err
-	}
 
 	err := m.configs.Update(name, func(current *aclConfig, ok bool) (*aclConfig, error) {
 		if ok && rulesEqual(current.Rules(), req.Rules) &&
@@ -427,10 +357,6 @@ func (m *ACLService) ShowConfig(
 	req *aclpb.ShowConfigRequest,
 ) (*aclpb.ShowConfigResponse, error) {
 	name := req.GetName()
-	if name == "" {
-		return nil, status.Error(codes.InvalidArgument, "module config name is required")
-	}
-
 	config, ok := m.configs.Get(name)
 	if !ok {
 		return nil, status.Errorf(codes.NotFound, "config %q not found", name)
@@ -458,13 +384,14 @@ func (m *ACLService) DeleteConfig(
 	req *aclpb.DeleteConfigRequest,
 ) (*aclpb.DeleteConfigResponse, error) {
 	name := req.GetName()
-	if name == "" {
-		return nil, status.Error(codes.InvalidArgument, "module config name is required")
-	}
-
 	err := m.configs.Delete(name, func(*aclConfig) error {
 		if err := m.backend.DeleteModule(name); err != nil {
-			return status.Errorf(codes.Internal, "could not delete acl module config '%s': %v", name, err)
+			code := codes.Internal
+			if errors.Is(err, ffi.ErrFailedPrecondition) {
+				// A chain still references the config.
+				code = codes.FailedPrecondition
+			}
+			return status.Errorf(code, "could not delete acl module config '%s': %v", name, err)
 		}
 		m.log.Info("successfully deleted ACL module config", zap.String("name", name))
 

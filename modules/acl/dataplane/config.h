@@ -4,6 +4,9 @@
 
 #include "lib/filter/classifiers/net6.h"
 #include "lib/filter/filter.h"
+#include "lib/statemap/fwtable.h"
+
+struct counter_value_handle;
 
 #define ACTION_ALLOW 0
 #define ACTION_DENY 1
@@ -26,6 +29,29 @@ struct acl_target {
 	uint64_t counter_id;
 };
 
+// Per-worker absolutes for the packet hot path, derived once per
+// module execution context by the module's execution-context commit
+// handler.
+//
+// The module counter addresses, the per-rule counter handle array and
+// the linked state tables; the state tables are NULL for a family
+// with no object link, in which case CHECK_STATE finds no state for
+// that family.
+struct acl_prepared {
+	uint64_t *allow_cnt;
+	uint64_t *deny_cnt;
+	uint64_t *check_pass_cnt;
+	uint64_t *check_miss_cnt;
+	uint64_t *create_cnt;
+	uint64_t *sync_cnt;
+	uint64_t *invalid_cnt;
+	uint64_t *non_term_cnt;
+	uint64_t *no_match_cnt;
+	struct counter_value_handle **rules_handles;
+	fwtable_t *fw4table;
+	fwtable_t *fw6table;
+};
+
 struct acl_module_config {
 	struct cp_module cp_module;
 
@@ -37,6 +63,14 @@ struct acl_module_config {
 
 	uint64_t target_count;
 	struct acl_target *targets;
+	// The targets array, as an absolute address for the packet hot
+	// path.
+	//
+	// The commit handler copies it from the relative field above once
+	// per published generation; the array is the config's own memory,
+	// so the derivation is generation-invariant. It is zero until
+	// then.
+	struct acl_target *abs_targets;
 
 	// Index of the per-rule "rules" counter registry within
 	// cp_module.runtime_counter_registries. Each per-rule counter_id is

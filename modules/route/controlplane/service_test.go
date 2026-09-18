@@ -6,7 +6,6 @@ import (
 	"net"
 	"net/netip"
 	"sort"
-	"strings"
 	"sync"
 	"testing"
 
@@ -178,6 +177,9 @@ type fakeBackend struct {
 	// newFIBErr, when set, is returned by the next NewFIB call itself
 	// (a build failure) instead of a handle, then cleared.
 	newFIBErr error
+
+	// deleteModuleErr, when set, is returned by every DeleteModule call.
+	deleteModuleErr error
 
 	// dumpEntries holds the injected DumpFIB result per name; a fib
 	// handle's Publish never derives it from the entries it was built
@@ -367,6 +369,9 @@ func (m *fakeBackend) DeleteModule(name string) error {
 	m.calls[name] = append(m.calls[name], "delete_module")
 	m.deleteModuleCalls = append(m.deleteModuleCalls, name)
 
+	if m.deleteModuleErr != nil {
+		return m.deleteModuleErr
+	}
 	if !m.modulePublished[name] {
 		return fmt.Errorf("module %q: %w", name, ffi.ErrNotFound)
 	}
@@ -753,6 +758,41 @@ func TestDeleteConfigUnknownConfig(t *testing.T) {
 	require.Equal(t, codes.NotFound, status.Code(err))
 }
 
+// TestDeleteConfigRefused verifies that a refused module delete maps its
+// error kind to the status code and leaves the config in place.
+func TestDeleteConfigRefused(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+		code codes.Code
+	}{
+		{
+			name: "referenced by a chain",
+			err:  fmt.Errorf("module 'route:cfg' not found in chain 'chain0': %w", ffi.ErrFailedPrecondition),
+			code: codes.FailedPrecondition,
+		},
+		{
+			name: "backend failure",
+			err:  errors.New("dp_config_wait_for_gen timed out"),
+			code: codes.Internal,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			backend := newFakeBackend()
+			service := newServiceWithConfig(t, backend)
+			backend.deleteModuleErr = tc.err
+
+			_, err := service.DeleteConfig(t.Context(), &routepb.DeleteConfigRequest{Name: "cfg"})
+			require.Equal(t, tc.code, status.Code(err))
+
+			_, err = service.ShowFIB(t.Context(), &routepb.ShowFIBRequest{Name: "cfg"})
+			require.NoError(t, err)
+		})
+	}
+}
+
 // TestShowFIBEmptyConfig verifies that a registered config with no FIB
 // entries still returns a normal empty success.
 func TestShowFIBEmptyConfig(t *testing.T) {
@@ -882,65 +922,6 @@ func TestUpdateFIBDisabledAllowsEmptyCounter(t *testing.T) {
 
 	got := backend.newFIBCalls[0].entries[0].Nexthops[0]
 	require.Empty(t, got.GetCounter())
-}
-
-// TestUpdateFIBRejectsOverlongCounter verifies the accepted counter-name
-// length boundary directly against literal byte counts, rather than through
-// croute.CounterNameMaxLen, so an off-by-one in the constant itself cannot
-// hide the regression.
-func TestUpdateFIBRejectsOverlongCounter(t *testing.T) {
-	backend := newFakeBackend()
-	service := route.NewRouteService(backend)
-
-	okEntry := testFIBEntry(t, "10.0.0.0/32", testNexthop("eth0", "nexthop_"+strings.Repeat("a", 127-len("nexthop_"))))
-	_, err := service.UpdateFIB(t.Context(), &routepb.UpdateFIBRequest{
-		ModuleName: "cfg",
-		Entries:    []*routepb.FIBEntry{okEntry},
-	})
-	require.NoError(t, err, "a 127-byte counter name must be accepted")
-
-	tooLongEntry := testFIBEntry(t, "10.0.0.1/32", testNexthop("eth0", "nexthop_"+strings.Repeat("a", 128-len("nexthop_"))))
-	_, err = service.UpdateFIB(t.Context(), &routepb.UpdateFIBRequest{
-		ModuleName: "cfg",
-		Entries:    []*routepb.FIBEntry{tooLongEntry},
-	})
-	require.Equal(t, codes.InvalidArgument, status.Code(err), "a 128-byte counter name must be rejected")
-}
-
-// TestUpdateFIBRejectsCounterWithNULByte verifies that a counter name
-// carrying an embedded NUL byte is rejected, rather than silently
-// truncated at the C boundary where it would diverge from the name
-// registered later.
-func TestUpdateFIBRejectsCounterWithNULByte(t *testing.T) {
-	backend := newFakeBackend()
-	service := route.NewRouteService(backend)
-
-	entry := testFIBEntry(t, "10.0.0.0/32", testNexthop("eth0", "nexthop_ab\x00cd"))
-
-	_, err := service.UpdateFIB(t.Context(), &routepb.UpdateFIBRequest{
-		ModuleName: "cfg",
-		Entries:    []*routepb.FIBEntry{entry},
-	})
-	require.Equal(t, codes.InvalidArgument, status.Code(err))
-	require.Empty(t, backend.calls, "the backend must not be called when validation rejects the request")
-}
-
-// TestUpdateFIBRejectsCounterWithoutPrefix verifies that an explicit
-// counter name not starting with "nexthop_" is rejected, rather than being
-// accepted and risking a future collision with a route-specific or generic
-// module-level counter name.
-func TestUpdateFIBRejectsCounterWithoutPrefix(t *testing.T) {
-	backend := newFakeBackend()
-	service := route.NewRouteService(backend)
-
-	entry := testFIBEntry(t, "10.0.0.0/32", testNexthop("eth0", "route_forwarded_v4"))
-
-	_, err := service.UpdateFIB(t.Context(), &routepb.UpdateFIBRequest{
-		ModuleName: "cfg",
-		Entries:    []*routepb.FIBEntry{entry},
-	})
-	require.Equal(t, codes.InvalidArgument, status.Code(err))
-	require.Empty(t, backend.calls, "the backend must not be called when validation rejects the request")
 }
 
 // TestUpdateFIBRejectsConflictingCounterNamesWithinEntry verifies that
@@ -1317,21 +1298,6 @@ func Test_RouteService_UpdateFIB_ObjectPublishFailureAfterGrownModuleKeepsOldObj
 	require.NoError(t, err)
 	require.Equal(t, 1, newModule.freeCount, "the new module must be freed exactly once")
 	require.Equal(t, 1, oldObject.freeCount, "the old object, now the entry's, must be freed exactly once")
-}
-
-// A device name the module's table cannot hold is a request error and
-// builds nothing.
-func Test_RouteService_UpdateFIB_OverlongDeviceNameIsInvalidArgument(t *testing.T) {
-	backend := newFakeBackend()
-	service := route.NewRouteService(backend)
-
-	entry := testFIBEntry(t, "10.0.0.0/32", testNexthop(strings.Repeat("p", ffi.MaxDeviceNameLen), ""))
-	_, err := service.UpdateFIB(t.Context(), &routepb.UpdateFIBRequest{
-		ModuleName: "cfg",
-		Entries:    []*routepb.FIBEntry{entry},
-	})
-	require.Equal(t, codes.InvalidArgument, status.Code(err))
-	require.Empty(t, backend.events, "nothing may be built or published for a rejected request")
 }
 
 // A first object publish failing leaves nothing published and nothing

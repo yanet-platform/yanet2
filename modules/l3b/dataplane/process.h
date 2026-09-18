@@ -784,6 +784,8 @@ l3b_virtual_service_process(
 
 	struct real_server *real_servers =
 		ADDR_OF(&virtual_service->real_servers);
+	uint64_t *real_counter_ids =
+		ADDR_OF(&virtual_service->real_counter_ids);
 
 	// An existing session keeps its backend while that backend is still
 	// listed — matched by address, so the session survives service
@@ -801,12 +803,12 @@ l3b_virtual_service_process(
 
 	struct l3b_session_table_object *session_table =
 		ADDR_OF(&virtual_service->session_table);
-	if (session_table != NULL && l3s_table_lookup(
-					     &session_table->table,
-					     dp_worker->current_time,
-					     &key,
-					     &pinned
-				     ) == 0) {
+	if (l3s_table_lookup(
+		    &session_table->table,
+		    dp_worker->current_time,
+		    &key,
+		    &pinned
+	    ) == 0) {
 		bool disabled = false;
 		int pinned_index = l3b_real_by_destination(
 			virtual_service, &pinned, &disabled
@@ -824,9 +826,7 @@ l3b_virtual_service_process(
 			);
 
 			l3b_counter_add(
-				counters,
-				virtual_service->real_counter_ids[pinned_index],
-				packet
+				counters, real_counter_ids[pinned_index], packet
 			);
 			l3b_service_flags_apply(virtual_service, packet);
 			return l3b_real_server_process(
@@ -868,21 +868,17 @@ l3b_virtual_service_process(
 		return -1;
 	}
 
-	if (session_table != NULL) {
-		l3b_session_value_of_real(&real_servers[real_index], &pinned);
-		l3s_table_insert(
-			&session_table->table,
-			dp_worker->idx,
-			dp_worker->current_time,
-			l3b_session_ttl(virtual_service, packet),
-			&key,
-			&pinned
-		);
-	}
-
-	l3b_counter_add(
-		counters, virtual_service->real_counter_ids[real_index], packet
+	l3b_session_value_of_real(&real_servers[real_index], &pinned);
+	l3s_table_insert(
+		&session_table->table,
+		dp_worker->idx,
+		dp_worker->current_time,
+		l3b_session_ttl(virtual_service, packet),
+		&key,
+		&pinned
 	);
+
+	l3b_counter_add(counters, real_counter_ids[real_index], packet);
 	l3b_service_flags_apply(virtual_service, packet);
 	return l3b_real_server_process(
 		virtual_service, &real_servers[real_index], packet

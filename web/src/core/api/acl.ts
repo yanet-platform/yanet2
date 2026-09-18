@@ -3,8 +3,8 @@ import { createService, type CallOptions } from './client';
 // Types matching aclpb/acl.proto and filterpb/filter.proto exactly.
 // No Action.counter, no keep_state, no MapConfig, no DUMP kind.
 
-import type { IPNet, VlanRange, Device, ListConfigsResponse } from './shared';
-export type { IPNet, VlanRange, Device, ListConfigsResponse };
+import type { VlanRange, Device, ListConfigsResponse } from './shared';
+export type { VlanRange, Device, ListConfigsResponse };
 
 export interface PortRange {
     from?: number;
@@ -44,18 +44,16 @@ export interface Rule {
     counter?: string;
     devices?: Device[];
     vlan_ranges?: VlanRange[];
-    srcs?: IPNet[];
-    dsts?: IPNet[];
-    proto_ranges?: ProtoRange[];
-    src_port_ranges?: PortRange[];
-    dst_port_ranges?: PortRange[];
     // Family-typed network lists (commonpb.IPv4Network and
     // commonpb.IPv6Network), serialized by the gateway as bare network
-    // strings. They merge with the legacy srcs/dsts lists.
+    // strings.
     sources4?: string[];
     sources6?: string[];
     destinations4?: string[];
     destinations6?: string[];
+    proto_ranges?: ProtoRange[];
+    src_port_ranges?: PortRange[];
+    dst_port_ranges?: PortRange[];
 }
 
 export interface ShowConfigRequest {

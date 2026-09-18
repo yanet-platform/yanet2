@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use clap::Parser;
+use clap::{Parser, ValueEnum};
 use clap_complete::engine::ArgValueCandidates;
 
 #[allow(clippy::large_enum_variant)]
@@ -63,6 +63,25 @@ pub struct ShowCmd {
     /// ACL config name.
     #[arg(long = "name", short = 'n', add = ArgValueCandidates::new(crate::config_candidates))]
     pub config_name: String,
+    /// Also show the packet and byte counters of the rules in human output.
+    #[arg(
+        long,
+        value_enum,
+        value_name = "RULES",
+        num_args = 0..=1,
+        require_equals = true,
+        default_missing_value = "all"
+    )]
+    pub counters: Option<CountersMode>,
+}
+
+/// Which rules show with their counters.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum CountersMode {
+    /// Every rule.
+    All,
+    /// Only the rules whose counter has seen a packet.
+    Nonzero,
 }
 
 #[derive(Debug, Clone, Parser, Default)]

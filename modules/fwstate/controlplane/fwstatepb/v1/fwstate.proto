@@ -26,36 +26,21 @@ service MetricsService {
   rpc GetMetrics(common.commonpb.v1.GetMetricsRequest) returns (common.commonpb.v1.GetMetricsResponse);
 }
 
+// UpdateConfigRequest changes only the fields it carries, zero values included.
+//
+// An absent field keeps the stored value, and a missing config starts from
+// the defaults. A zero sync port disables its endpoint and clears the endpoint
+// address. The merged config must pass validation.
 message UpdateConfigRequest {
   string name = 1;
   // Names of the published fwstate_map_v4 / fwstate_map_v6 objects whose
   // fwtables receive the synced state.
   //
-  // The module owns neither family's table itself. Without a mask, an empty
-  // name keeps the existing link. A selected empty name unlinks that family.
-  // A config without a link inserts no state for that family.
-  string map_name_v4 = 2;
-  string map_name_v6 = 3;
+  // The module owns neither family's table itself. An empty name unlinks that
+  // family. A config without a link inserts no state for that family.
+  optional string map_name_v4 = 2;
+  optional string map_name_v6 = 3;
   SyncConfig sync_config = 4;
-  // Explicitly disables the corresponding synchronization endpoint. The
-  // flags distinguish an explicit clear from an update carrying no
-  // destination pair. The latter keeps both current pairs; supplying a pair
-  // replaces the destination set and disables any other omitted pair.
-  bool clear_multicast = 5;
-  bool clear_unicast = 6;
-  // When present, only the named fields change, including zero and empty values.
-  //
-  // An empty mask preserves all fields; a missing config starts from defaults.
-  // Paths are map_name_v4, map_name_v6 and individual
-  // sync_config fields. Unknown paths fail. Endpoint clear flags cannot be
-  // combined with a mask; select both endpoint fields with empty values instead.
-  // Without a mask, legacy merging and destination-set replacement apply.
-  FieldMask update_mask = 7;
-}
-
-// FieldMask selects fields using their protobuf names.
-message FieldMask {
-  repeated string paths = 1;
 }
 
 message UpdateConfigResponse {}
@@ -99,22 +84,22 @@ message SyncConfig {
   common.commonpb.v1.IPAddress src_addr = 1; // IPv6 source stamped on emitted internal frames;
   common.commonpb.v1.MACAddress dst_ether = 2; // Ethernet destination MAC for emitted frames;
   common.commonpb.v1.IPAddress dst_addr_multicast = 3; // Multicast address matched on wire and emitted;
-  uint32 port_multicast = 4; // Multicast port, 1..65535;
+  optional uint32 port_multicast = 4; // Multicast port, 1..65535;
   common.commonpb.v1.IPAddress dst_addr_unicast = 5; // Unicast address used for emission only;
-  uint32 port_unicast = 6; // Unicast port, 1..65535;
+  optional uint32 port_unicast = 6; // Unicast port, 1..65535;
 
   // Connection timeouts
-  uint64 tcp_syn_ack = 7; // TCP SYN-ACK timeout in nanoseconds;
-  uint64 tcp_syn = 8; // TCP SYN timeout in nanoseconds;
-  uint64 tcp_fin = 9; // TCP FIN timeout in nanoseconds;
-  uint64 tcp = 10; // TCP established timeout in nanoseconds;
-  uint64 udp = 11; // UDP timeout in nanoseconds;
-  uint64 default = 12; // Default timeout in nanoseconds;
+  optional uint64 tcp_syn_ack = 7; // TCP SYN-ACK timeout in nanoseconds;
+  optional uint64 tcp_syn = 8; // TCP SYN timeout in nanoseconds;
+  optional uint64 tcp_fin = 9; // TCP FIN timeout in nanoseconds;
+  optional uint64 tcp = 10; // TCP established timeout in nanoseconds;
+  optional uint64 udp = 11; // UDP timeout in nanoseconds;
+  optional uint64 default = 12; // Default timeout in nanoseconds;
 
   // Sync suppression window in nanoseconds. A sync frame for an alive entry
   // whose new expiry lands within this window of the current one is discarded
   // (the fwmap record is left untouched), debouncing refreshes for busy
   // sessions. Every entry TTL is inflated by this value so the effective
   // keep-alive never falls below the configured timeout.
-  uint64 sync_suppress_timeout = 13;
+  optional uint64 sync_suppress_timeout = 13;
 }

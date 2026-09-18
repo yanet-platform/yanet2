@@ -156,7 +156,7 @@ func (m *Function) Get(
 		}
 	}
 
-	return nil, status.Error(codes.NotFound, "not found")
+	return nil, status.Errorf(codes.NotFound, "function %q not found", reqId.GetName())
 }
 
 // Update updates or inserts a function.

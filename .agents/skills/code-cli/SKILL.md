@@ -24,8 +24,8 @@ has the manifest, `build.rs`, skeleton and registration steps for a new binary.
 - `Cmd`: `#[derive(Debug, Clone, Parser)]`, `#[command(version, about)]`,
   `#[command(flatten_help = true)]`, fields `#[clap(subcommand)] mode: ModeCmd`
   and `#[command(flatten)] globals: GlobalArgs`. `ync::GlobalArgs` carries
-  the connection flags, `--format` and `-v` for every binary, a crate never
-  declares them itself.
+  the connection flags, `--format`, `-v` and `--no-pager` for every binary,
+  a crate never declares them itself.
 - `fn main() -> std::process::ExitCode` delegates the lifecycle to
   `ync::entrypoint(|cmd: &Cmd| cmd.globals.options(), run)`. The scaffold
   owns completion before Tokio, parsing, output initialisation, the
@@ -151,6 +151,14 @@ no `--yes`, no `--dry-run`.
   render)`: `push` per row, `finish(empty)` at the end; under `--format json`
   every row is one JSON line. Wrapped text under a prefix with a hanging
   indent is `display::print_hanging`, a histogram is `display::print_bars`.
+- Data a reader scrolls through (a ruleset, a long listing) leaves through
+  `output::paged(|| payload, || render)`: a human render on a terminal goes
+  through `YANET_PAGER`, `PAGER` or `less` (`LESS=FRSX` when unset), and the
+  global `--no-pager` prints it directly.
+- A wait on a large unary response starts
+  `output::progress(format_args!("Loading …"))` before the calls and drops it
+  before printing: a human on a terminal sees the downloaded bytes of the calls
+  made while it lives.
 - Empty results: inside the render closure, `output::empty(…)` or
   `output::empty_with_hint(…, "create one with '<full command>'")` and an
   early return; never bare printing or a call-site guard. The primitive owns
@@ -160,7 +168,9 @@ no `--yes`, no `--dry-run`.
   CLI's kind).
 - Colour and glyphs only via `output::is_colored()`, `output::dim`,
   `output::paint_dim` / `paint_bold` / `paint_ok` / `paint_warning` /
-  `paint_error`, and a
+  `paint_error`, dense text written token by token through
+  `output::Paint::when(colored, value)` and `output::Painted`, which
+  allocate nothing per token, and a
   bracketed status mark with a Unicode and an ASCII face is a
   `display::Mark`; no `colored` dependency in a CLI crate (#2377).
   `ync::init`, called by `entrypoint`, decides colour once for the process; a

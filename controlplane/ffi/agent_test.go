@@ -11,6 +11,7 @@ import (
 
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
+	ynpb "github.com/yanet-platform/yanet2/controlplane/ynpb/v1"
 	fwstatemappb "github.com/yanet-platform/yanet2/objects/fwstate/controlplane/fwstatemappb/v1"
 )
 
@@ -20,6 +21,12 @@ func TestValidateDeviceName(t *testing.T) {
 	require.NoError(t, ffi.ValidateDeviceName(strings.Repeat("a", ffi.MaxDeviceNameLen-1)))
 	require.Error(t, ffi.ValidateDeviceName(strings.Repeat("a", ffi.MaxDeviceNameLen)))
 	require.Error(t, ffi.ValidateDeviceName("edge\x00backup"))
+}
+
+// Test_MaxModuleNameLen_MatchesC verifies that the pure-Go bound matches the
+// C module-name buffer size, including its terminating byte.
+func Test_MaxModuleNameLen_MatchesC(t *testing.T) {
+	require.Equal(t, commonpb.MaxModuleNameLen, ffi.MaxModuleNameLen)
 }
 
 // Test_MaxMapNameLen_MatchesC verifies that the pure-Go object-name buffer
@@ -32,6 +39,18 @@ func Test_MaxMapNameLen_MatchesC(t *testing.T) {
 // C device-name buffer size, including its terminating byte.
 func Test_MaxDeviceNameLen_MatchesC(t *testing.T) {
 	require.Equal(t, commonpb.MaxDeviceNameLen, ffi.MaxDeviceNameLen)
+}
+
+// Test_MaxAgentNameLen_MatchesC verifies that the pure-Go bound matches the
+// C agent-name buffer size, including its terminating byte.
+func Test_MaxAgentNameLen_MatchesC(t *testing.T) {
+	require.Equal(t, ynpb.MaxAgentNameLen, ffi.MaxAgentNameLen)
+}
+
+// Test_MaxPipelineNameLen_MatchesC verifies that the pure-Go bound matches the
+// C pipeline-name buffer size, including its terminating byte.
+func Test_MaxPipelineNameLen_MatchesC(t *testing.T) {
+	require.Equal(t, commonpb.MaxPipelineNameLen, ffi.MaxPipelineNameLen)
 }
 
 var errInjectedFree = errors.New("injected free failure")

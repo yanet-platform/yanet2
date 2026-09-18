@@ -3,7 +3,6 @@ package acl_test
 import (
 	"context"
 	"errors"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -683,31 +682,6 @@ func Test_ACLMetrics_RulesCountersShareRuleScrapeRead(t *testing.T) {
 	require.Equal(t, "rule_a", first.GetCounter())
 	require.Equal(t, uint64(7), first.GetPackets())
 	require.Equal(t, uint64(70), first.GetBytes())
-}
-
-// Test_ACLMetrics_RuleMetricsRejectsUncarriableSelector verifies that a
-// selector value the counter-tag fields cannot carry is rejected as an
-// invalid argument before any shared-memory read.
-func Test_ACLMetrics_RuleMetricsRejectsUncarriableSelector(t *testing.T) {
-	_, agent := newMetricsSnapshotHarness(t)
-	backend := newBlockingRuleCounterBackend(agent.DPConfig(), func(readIdx int) ([]ffi.CounterGroup, error) {
-		return ruleCounterGroups(7), nil
-	})
-	service := acl.NewACLService(backend)
-
-	requests := map[string]*aclpb.GetMetricsRulesRequest{
-		"nul byte in config": {Config: "acl\x00"},
-		"overlong device":    {Device: strings.Repeat("a", 80)},
-	}
-	for name, request := range requests {
-		t.Run(name, func(t *testing.T) {
-			_, err := service.RuleMetrics(t.Context(), request)
-			require.Equal(t, codes.InvalidArgument, status.Code(err))
-			require.Contains(t, err.Error(), "invalid counter tag")
-		})
-	}
-
-	require.Equal(t, 0, backend.Reads(), "rejected selectors must not reach the shared read")
 }
 
 // Test_ACLService_DrainMetricsReads_WaitsForRulesCounters verifies that

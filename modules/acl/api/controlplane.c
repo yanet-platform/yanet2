@@ -146,6 +146,7 @@ acl_module_config_init(
 	}
 
 	SET_OFFSET_OF(&config->targets, NULL);
+	config->abs_targets = NULL;
 	config->target_count = 0;
 
 	memset(&config->filter_vlan, 0, sizeof(config->filter_vlan));

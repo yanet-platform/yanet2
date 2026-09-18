@@ -10,7 +10,7 @@ import (
 )
 
 // Test_ShowRoutesRequest_Validate verifies that route listing requires a
-// config name while leaving the route filters to the handler.
+// config name and rejects both family filters together.
 func Test_ShowRoutesRequest_Validate(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -19,6 +19,13 @@ func Test_ShowRoutesRequest_Validate(t *testing.T) {
 	}{
 		{name: "empty name", request: &operatorpb.ShowRoutesRequest{}, message: "name is required"},
 		{name: "name set", request: &operatorpb.ShowRoutesRequest{Name: "route0"}},
+		{name: "IPv4 only", request: &operatorpb.ShowRoutesRequest{Name: "route0", Ipv4Only: true}},
+		{name: "IPv6 only", request: &operatorpb.ShowRoutesRequest{Name: "route0", Ipv6Only: true}},
+		{
+			name:    "both family filters",
+			request: &operatorpb.ShowRoutesRequest{Name: "route0", Ipv4Only: true, Ipv6Only: true},
+			message: "ipv4_only and ipv6_only must not both be set",
+		},
 		{name: "nil request", request: nil, message: "name is required"},
 	}
 

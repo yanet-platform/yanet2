@@ -3,44 +3,36 @@ package dscppb
 import (
 	"errors"
 	"fmt"
+
+	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
 )
 
-func (m *ShowConfigRequest) Validate() error {
-	if m.GetName() == "" {
-		return errors.New("name is required")
-	}
+// MaxFlag mirrors the largest C DSCP marking flag.
+const MaxFlag = 2
 
-	return nil
+// MaxMark mirrors the largest six-bit DSCP value of the C marking.
+const MaxMark = 63
+
+func (m *ShowConfigRequest) Validate() error {
+	return commonpb.ValidateModuleName("name", m.GetName())
 }
 
 func (m *AddPrefixesRequest) Validate() error {
-	if m.GetName() == "" {
-		return errors.New("name is required")
-	}
-
-	return nil
+	return commonpb.ValidateModuleName("name", m.GetName())
 }
 
 func (m *RemovePrefixesRequest) Validate() error {
-	if m.GetName() == "" {
-		return errors.New("name is required")
-	}
-
-	return nil
+	return commonpb.ValidateModuleName("name", m.GetName())
 }
 
 // Validate checks that the request names the config to delete.
 func (m *DeleteConfigRequest) Validate() error {
-	if m.GetName() == "" {
-		return errors.New("name is required")
-	}
-
-	return nil
+	return commonpb.ValidateModuleName("name", m.GetName())
 }
 
 func (m *SetDscpMarkingRequest) Validate() error {
-	if m.GetName() == "" {
-		return errors.New("name is required")
+	if err := commonpb.ValidateModuleName("name", m.GetName()); err != nil {
+		return err
 	}
 
 	if m.GetDscpConfig() == nil {
@@ -56,11 +48,11 @@ func (m *SetDscpMarkingRequest) Validate() error {
 // Validate checks that the flag and mark values are within their valid
 // ranges.
 func (m *DscpConfig) Validate() error {
-	if m.GetFlag() > 2 {
-		return fmt.Errorf("flag %d must be in range 0..2", m.GetFlag())
+	if m.GetFlag() > MaxFlag {
+		return fmt.Errorf("flag %d must be in range 0..%d", m.GetFlag(), MaxFlag)
 	}
-	if m.GetMark() > 63 {
-		return fmt.Errorf("mark %d must be in range 0..63", m.GetMark())
+	if m.GetMark() > MaxMark {
+		return fmt.Errorf("mark %d must be in range 0..%d", m.GetMark(), MaxMark)
 	}
 
 	return nil

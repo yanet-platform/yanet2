@@ -2,6 +2,8 @@ package pdump_test
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -12,6 +14,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	pdump "github.com/yanet-platform/yanet2/modules/pdump/controlplane"
@@ -64,6 +67,9 @@ type fakeBackend struct {
 	modules []*fakeModule
 	deleted []string
 	blocks  map[string]*updateBlock
+
+	deleteErr error
+	updateErr error
 }
 
 // updateBlock holds an update of one name inside the backend.
@@ -100,6 +106,10 @@ func (m *fakeBackend) UpdateModule(name string, settings pdump.Settings) (pdump.
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	if m.updateErr != nil {
+		return nil, m.updateErr
+	}
+
 	module := &fakeModule{
 		settings: settings,
 		rings: []pdump.Ring{{
@@ -118,7 +128,7 @@ func (m *fakeBackend) DeleteModule(name string) error {
 	defer m.mu.Unlock()
 
 	m.deleted = append(m.deleted, name)
-	return nil
+	return m.deleteErr
 }
 
 // Deleted returns the names deleted so far, in order.
@@ -146,29 +156,27 @@ func TestShowConfigUnknownConfig(t *testing.T) {
 	require.Equal(t, codes.NotFound, status.Code(err))
 }
 
-// Test_PdumpService_SetConfig_MergesMaskedFieldsOverPublishedConfig verifies
-// that a masked update keeps the fields it does not name and publishes the
-// merged settings.
-func Test_PdumpService_SetConfig_MergesMaskedFieldsOverPublishedConfig(t *testing.T) {
+// Test_PdumpService_SetConfig_MergesCarriedFieldsOverPublishedConfig verifies
+// that an update keeps the fields it does not carry and publishes the merged
+// settings.
+func Test_PdumpService_SetConfig_MergesCarriedFieldsOverPublishedConfig(t *testing.T) {
 	backend := &fakeBackend{}
 	service := pdump.NewPdumpService(backend)
 
 	_, err := service.SetConfig(t.Context(), &pdumppb.SetConfigRequest{
 		Name: "capture",
 		Config: &pdumppb.Config{
-			Filter:   "udp",
-			Mode:     2,
-			Snaplen:  256,
-			RingSize: uint32(2 * datasize.MB),
+			Filter:   proto.String("udp"),
+			Mode:     proto.Uint32(2),
+			Snaplen:  proto.Uint32(256),
+			RingSize: proto.Uint32(uint32(2 * datasize.MB)),
 		},
-		UpdateMask: &pdumppb.FieldMask{Paths: []string{"filter", "mode", "snaplen", "ring_size"}},
 	})
 	require.NoError(t, err)
 
 	_, err = service.SetConfig(t.Context(), &pdumppb.SetConfigRequest{
-		Name:       "capture",
-		Config:     &pdumppb.Config{Filter: "tcp"},
-		UpdateMask: &pdumppb.FieldMask{Paths: []string{"filter"}},
+		Name:   "capture",
+		Config: &pdumppb.Config{Filter: proto.String("tcp")},
 	})
 	require.NoError(t, err)
 
@@ -177,7 +185,45 @@ func Test_PdumpService_SetConfig_MergesMaskedFieldsOverPublishedConfig(t *testin
 
 	response, err := service.ShowConfig(t.Context(), &pdumppb.ShowConfigRequest{Name: "capture"})
 	require.NoError(t, err)
-	require.Equal(t, &pdumppb.Config{Filter: "tcp", Mode: 2, Snaplen: 256, RingSize: uint32(2 * datasize.MB)}, response.Config)
+	wantConfig := &pdumppb.Config{
+		Filter:   proto.String("tcp"),
+		Mode:     proto.Uint32(2),
+		Snaplen:  proto.Uint32(256),
+		RingSize: proto.Uint32(uint32(2 * datasize.MB)),
+	}
+	require.True(t, proto.Equal(wantConfig, response.Config), "got %v", response.Config)
+}
+
+// Test_PdumpService_SetConfig_AppliesCarriedEmptyAndZeroValues verifies that a
+// carried empty filter clears the stored one and a carried zero mode restores
+// the default mode.
+func Test_PdumpService_SetConfig_AppliesCarriedEmptyAndZeroValues(t *testing.T) {
+	service := pdump.NewPdumpService(&fakeBackend{})
+
+	_, err := service.SetConfig(t.Context(), &pdumppb.SetConfigRequest{
+		Name:   "defaults",
+		Config: &pdumppb.Config{},
+	})
+	require.NoError(t, err)
+	defaults, err := service.ShowConfig(t.Context(), &pdumppb.ShowConfigRequest{Name: "defaults"})
+	require.NoError(t, err)
+
+	_, err = service.SetConfig(t.Context(), &pdumppb.SetConfigRequest{
+		Name:   "capture",
+		Config: &pdumppb.Config{Filter: proto.String("udp"), Mode: proto.Uint32(2)},
+	})
+	require.NoError(t, err)
+	_, err = service.SetConfig(t.Context(), &pdumppb.SetConfigRequest{
+		Name:   "capture",
+		Config: &pdumppb.Config{Filter: proto.String(""), Mode: proto.Uint32(0)},
+	})
+	require.NoError(t, err)
+
+	response, err := service.ShowConfig(t.Context(), &pdumppb.ShowConfigRequest{Name: "capture"})
+	require.NoError(t, err)
+	require.Empty(t, response.GetConfig().GetFilter())
+	require.NotEqual(t, uint32(2), defaults.GetConfig().GetMode())
+	require.Equal(t, defaults.GetConfig().GetMode(), response.GetConfig().GetMode())
 }
 
 // fakeStream is a ReadDump stream that drops every record.
@@ -195,14 +241,26 @@ func (m *fakeStream) Send(*pdumppb.Record) error {
 	return nil
 }
 
+// Test_PdumpService_SetConfig_BackendFailure verifies that a refused module
+// update is reported as Internal.
+func Test_PdumpService_SetConfig_BackendFailure(t *testing.T) {
+	backend := &fakeBackend{updateErr: errors.New("failed to compile filter")}
+	service := pdump.NewPdumpService(backend)
+
+	_, err := service.SetConfig(t.Context(), &pdumppb.SetConfigRequest{
+		Name:   "capture",
+		Config: &pdumppb.Config{Filter: proto.String("not a filter")},
+	})
+	require.Equal(t, codes.Internal, status.Code(err))
+}
+
 // setFilter applies a filter-only update to the named config.
 func setFilter(t *testing.T, service *pdump.PdumpService, name, filter string) {
 	t.Helper()
 
 	_, err := service.SetConfig(t.Context(), &pdumppb.SetConfigRequest{
-		Name:       name,
-		Config:     &pdumppb.Config{Filter: filter},
-		UpdateMask: &pdumppb.FieldMask{Paths: []string{"filter"}},
+		Name:   name,
+		Config: &pdumppb.Config{Filter: proto.String(filter)},
 	})
 	require.NoError(t, err)
 }
@@ -272,6 +330,41 @@ func Test_PdumpService_DeleteConfig_EndsStreamsAndFreesModule(t *testing.T) {
 	require.Equal(t, codes.NotFound, status.Code(err))
 }
 
+// Test_PdumpService_DeleteConfig_Refused verifies that a refused delete maps
+// its error kind to the status code and leaves the config in place.
+func Test_PdumpService_DeleteConfig_Refused(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+		code codes.Code
+	}{
+		{
+			name: "referenced by a chain",
+			err:  fmt.Errorf("module 'pdump:capture' not found in chain 'chain0': %w", ffi.ErrFailedPrecondition),
+			code: codes.FailedPrecondition,
+		},
+		{
+			name: "backend failure",
+			err:  errors.New("dp_config_wait_for_gen timed out"),
+			code: codes.Internal,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			backend := &fakeBackend{deleteErr: tc.err}
+			service := pdump.NewPdumpService(backend)
+			setFilter(t, service, "capture", "udp")
+
+			_, err := service.DeleteConfig(t.Context(), &pdumppb.DeleteConfigRequest{Name: "capture"})
+			require.Equal(t, tc.code, status.Code(err))
+
+			_, err = service.ShowConfig(t.Context(), &pdumppb.ShowConfigRequest{Name: "capture"})
+			require.NoError(t, err)
+		})
+	}
+}
+
 // Test_PdumpService_SetConfig_RefusedFreeReleasesReplacedModuleLater verifies
 // that a replaced module whose free was refused is freed by a later update,
 // while the module published in its place stays live.
@@ -319,9 +412,8 @@ func updateFilter(ctx context.Context, service *pdump.PdumpService, name, filter
 	done := make(chan error, 1)
 	go func() {
 		_, err := service.SetConfig(ctx, &pdumppb.SetConfigRequest{
-			Name:       name,
-			Config:     &pdumppb.Config{Filter: filter},
-			UpdateMask: &pdumppb.FieldMask{Paths: []string{"filter"}},
+			Name:   name,
+			Config: &pdumppb.Config{Filter: proto.String(filter)},
 		})
 		done <- err
 	}()
@@ -354,7 +446,7 @@ func Test_PdumpService_ShowConfig_DoesNotWaitForPublish(t *testing.T) {
 	select {
 	case result := <-shown:
 		require.NoError(t, result.err)
-		require.Equal(t, "udp", result.response.Config.Filter, "the blocked update must stay unpublished")
+		require.Equal(t, "udp", result.response.GetConfig().GetFilter(), "the blocked update must stay unpublished")
 	case <-time.After(5 * time.Second):
 		t.Fatal("ShowConfig waited for the blocked update")
 	}

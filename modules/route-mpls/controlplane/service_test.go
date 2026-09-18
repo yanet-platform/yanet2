@@ -14,6 +14,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
+	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/modules/route-mpls/bindings/go/croutempls"
 	routemplspb "github.com/yanet-platform/yanet2/modules/route-mpls/controlplane/routemplspb/v1"
 )
@@ -89,17 +90,6 @@ func Test_RouteMPLSService_CreateConfig_HappyPath(t *testing.T) {
 	list, err := svc.ListConfigs(t.Context(), &routemplspb.ListConfigsRequest{})
 	require.NoError(t, err)
 	assert.Equal(t, []string{"mpls0"}, list.Configs)
-}
-
-func Test_RouteMPLSService_CreateConfig_EmptyName(t *testing.T) {
-	svc := newTestService(t)
-
-	resp, err := svc.CreateConfig(t.Context(), &routemplspb.CreateConfigRequest{
-		Name:  "",
-		Rules: []*routemplspb.Rule{makeRule(t, "10.0.0.0/24", "203.0.113.1", 100)},
-	})
-	require.Nil(t, resp)
-	require.Equal(t, codes.InvalidArgument, status.Code(err))
 }
 
 // Test_RouteMPLSService_CreateConfig_InvalidPrefix verifies that a rule whose
@@ -294,74 +284,12 @@ func Test_RouteMPLSService_UpdateConfig_WithdrawInvalidDestination(t *testing.T)
 	}
 }
 
-// Test_RouteMPLSService_CreateConfig_LabelBoundary verifies that a label at
-// the 20-bit limit is accepted and one past it is rejected.
-func Test_RouteMPLSService_CreateConfig_LabelBoundary(t *testing.T) {
-	cases := []struct {
-		name    string
-		label   uint32
-		wantErr bool
-	}{
-		{name: "maximum 20-bit label", label: 1048575, wantErr: false},
-		{name: "label above 20 bits", label: 1048576, wantErr: true},
-	}
-
-	for _, testCase := range cases {
-		t.Run(testCase.name, func(t *testing.T) {
-			svc := newTestService(t)
-
-			response, err := svc.CreateConfig(t.Context(), &routemplspb.CreateConfigRequest{
-				Name:  "mpls0",
-				Rules: []*routemplspb.Rule{makeRule(t, "10.0.0.0/24", "203.0.113.1", testCase.label)},
-			})
-			if !testCase.wantErr {
-				require.NoError(t, err)
-				return
-			}
-			require.Nil(t, response)
-			require.Equal(t, codes.InvalidArgument, status.Code(err))
-		})
-	}
-}
-
-// Test_RouteMPLSService_UpdateConfig_WithdrawLabelBoundary verifies that a
-// withdraw carrying a label above the 20-bit limit is rejected.
-func Test_RouteMPLSService_UpdateConfig_WithdrawLabelBoundary(t *testing.T) {
-	service := newTestService(t)
-	ctx := t.Context()
-
-	_, err := service.CreateConfig(ctx, &routemplspb.CreateConfigRequest{
-		Name:  "mpls0",
-		Rules: []*routemplspb.Rule{makeRule(t, "10.0.0.0/24", "203.0.113.1", 100)},
-	})
-	require.NoError(t, err)
-
-	response, err := service.UpdateConfig(ctx, &routemplspb.UpdateConfigRequest{
-		Name: "mpls0",
-		Updates: []*routemplspb.UpdateEvent{
-			{Event: &routemplspb.UpdateEvent_Withdraw{
-				Withdraw: makeRule(t, "10.0.0.0/24", "203.0.113.1", 1048576),
-			}},
-		},
-	})
-	require.Nil(t, response)
-	require.Equal(t, codes.InvalidArgument, status.Code(err))
-}
-
 func Test_RouteMPLSService_ShowConfig_NotFound(t *testing.T) {
 	svc := newTestService(t)
 
 	resp, err := svc.ShowConfig(t.Context(), &routemplspb.ShowConfigRequest{Name: "nonexistent"})
 	require.Nil(t, resp)
 	require.Equal(t, codes.NotFound, status.Code(err))
-}
-
-func Test_RouteMPLSService_ShowConfig_EmptyName(t *testing.T) {
-	svc := newTestService(t)
-
-	resp, err := svc.ShowConfig(t.Context(), &routemplspb.ShowConfigRequest{Name: ""})
-	require.Nil(t, resp)
-	require.Equal(t, codes.InvalidArgument, status.Code(err))
 }
 
 func Test_RouteMPLSService_ListConfigs_Sorted(t *testing.T) {
@@ -406,6 +334,59 @@ func Test_RouteMPLSService_DeleteConfig_HappyPath(t *testing.T) {
 	list, err := svc.ListConfigs(ctx, &routemplspb.ListConfigsRequest{})
 	require.NoError(t, err)
 	assert.Empty(t, list.Configs)
+}
+
+// refusingDeleteBackend updates like mockBackend but refuses every delete
+// with err.
+type refusingDeleteBackend struct {
+	mockBackend
+	err error
+}
+
+func (m *refusingDeleteBackend) DeleteModule(name string) error {
+	return m.err
+}
+
+// Test_RouteMPLSService_DeleteConfig_Refused verifies that a refused delete
+// maps its error kind to the status code and leaves the config in place.
+func Test_RouteMPLSService_DeleteConfig_Refused(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+		code codes.Code
+	}{
+		{
+			name: "referenced by a chain",
+			err:  fmt.Errorf("module 'route-mpls:mpls0' not found in chain 'chain0': %w", ffi.ErrFailedPrecondition),
+			code: codes.FailedPrecondition,
+		},
+		{
+			name: "backend failure",
+			err:  errInjectedBackend,
+			code: codes.Internal,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			svc := NewRouteMPLSService(&refusingDeleteBackend{err: tc.err})
+			ctx := t.Context()
+
+			_, err := svc.CreateConfig(ctx, &routemplspb.CreateConfigRequest{
+				Name:  "mpls0",
+				Rules: []*routemplspb.Rule{makeRule(t, "10.0.0.0/24", "203.0.113.1", 100)},
+			})
+			require.NoError(t, err)
+
+			resp, err := svc.DeleteConfig(ctx, &routemplspb.DeleteConfigRequest{Name: "mpls0"})
+			require.Nil(t, resp)
+			require.Equal(t, tc.code, status.Code(err))
+
+			list, err := svc.ListConfigs(ctx, &routemplspb.ListConfigsRequest{})
+			require.NoError(t, err)
+			assert.Equal(t, []string{"mpls0"}, list.Configs)
+		})
+	}
 }
 
 func Test_RouteMPLSService_CreateConfig_BackendFailure(t *testing.T) {

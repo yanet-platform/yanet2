@@ -1,6 +1,5 @@
 package cunrdup
 
-//#include "controlplane/config/defines.h"
 //#include "modules/unrdup/api/controlplane.h"
 import "C"
 
@@ -12,9 +11,6 @@ import (
 
 	"github.com/yanet-platform/xnetip"
 )
-
-// ModuleNameMaxLen is the longest module name the controlplane registry keeps.
-const ModuleNameMaxLen = C.CP_MODULE_NAME_LEN - 1
 
 // Endpoint is a served transport endpoint; its port is in host byte order.
 type Endpoint struct {

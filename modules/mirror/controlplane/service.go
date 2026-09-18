@@ -3,13 +3,13 @@ package mirror
 import (
 	"context"
 	"errors"
-	"fmt"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
 	filterpbconv "github.com/yanet-platform/yanet2/bindings/go/filterpbconv/v1"
 	"github.com/yanet-platform/yanet2/controlplane/configstore"
+	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/modules/mirror/bindings/go/cmirror"
 	mirrorpb "github.com/yanet-platform/yanet2/modules/mirror/controlplane/mirrorpb/v1"
 )
@@ -151,7 +151,7 @@ func (m *MirrorService) UpdateConfig(
 		return &mirrorConfig{Rules: reqRules, Module: module}, nil
 	})
 	if err != nil {
-		return nil, fmt.Errorf("failed to update module config: %w", err)
+		return nil, status.Errorf(codes.Internal, "failed to update module config: %v", err)
 	}
 
 	return &mirrorpb.UpdateConfigResponse{}, nil
@@ -169,7 +169,11 @@ func (m *MirrorService) DeleteConfig(
 		return nil, status.Errorf(codes.NotFound, "config %q not found", name)
 	}
 	if err != nil {
-		return nil, fmt.Errorf("failed to delete module config %q: %w", name, err)
+		code := codes.Internal
+		if errors.Is(err, ffi.ErrFailedPrecondition) {
+			code = codes.FailedPrecondition
+		}
+		return nil, status.Errorf(code, "failed to delete module config %q: %v", name, err)
 	}
 
 	return &mirrorpb.DeleteConfigResponse{}, nil

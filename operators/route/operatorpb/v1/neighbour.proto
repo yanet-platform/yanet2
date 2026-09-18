@@ -26,6 +26,8 @@ service NeighbourService {
   rpc UpdateNeighbours(UpdateNeighboursRequest) returns (UpdateNeighboursResponse);
   // RemoveNeighbours deletes one or more neighbour entries.
   rpc RemoveNeighbours(RemoveNeighboursRequest) returns (RemoveNeighboursResponse);
+  // SwapNeighbours replaces all entries in one existing table.
+  rpc SwapNeighbours(SwapNeighboursRequest) returns (SwapNeighboursResponse);
 }
 
 // ListNeighboursRequest is the request to list neighbors.
@@ -109,3 +111,14 @@ message RemoveNeighboursRequest {
 }
 
 message RemoveNeighboursResponse {}
+
+// SwapNeighboursRequest carries a complete observation of one source.
+//
+// Entries retain their observed state and timestamp. An empty snapshot clears
+// the named table. Other tables and source metadata are preserved.
+message SwapNeighboursRequest {
+  string table = 1;
+  repeated NeighbourEntry entries = 2;
+}
+
+message SwapNeighboursResponse {}

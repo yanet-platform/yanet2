@@ -2,6 +2,7 @@ package unrdup_test
 
 import (
 	"errors"
+	"fmt"
 	"net"
 	"net/netip"
 	"testing"
@@ -332,6 +333,7 @@ func TestUpdateConfigRejects(t *testing.T) {
 
 			require.Error(t, err)
 			require.Equal(t, codes.InvalidArgument, status.Code(err))
+			require.NotContains(t, status.Convert(err).Message(), "rpc error", "a status must not nest another")
 			require.Zero(t, backend.calls, "nothing may reach shared memory")
 		})
 	}
@@ -524,31 +526,52 @@ func Test_UnrdupService_DeleteConfig_RemovesConfig(t *testing.T) {
 	require.Equal(t, codes.NotFound, status.Code(err))
 }
 
-// Test_UnrdupService_DeleteConfig_Referenced verifies that a backend
-// refusal surfaces as Internal and leaves the config in place.
-func Test_UnrdupService_DeleteConfig_Referenced(t *testing.T) {
-	backend := &fakeBackend{deleteErr: errBackendFailure}
-	service := unrdup.NewUnrdupService(backend)
-	ctx := t.Context()
+// Test_UnrdupService_DeleteConfig_Refused verifies that a refused delete maps
+// its error kind to the status code and leaves the config in place.
+func Test_UnrdupService_DeleteConfig_Refused(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+		code codes.Code
+	}{
+		{
+			name: "referenced by a chain",
+			err:  fmt.Errorf("module 'unrdup:unrdup0' not found in chain 'chain0': %w", ffi.ErrFailedPrecondition),
+			code: codes.FailedPrecondition,
+		},
+		{
+			name: "backend failure",
+			err:  errBackendFailure,
+			code: codes.Internal,
+		},
+	}
 
-	_, err := service.UpdateConfig(ctx, &unrduppb.UpdateConfigRequest{
-		Name:   "unrdup0",
-		Config: validConfig(),
-	})
-	require.NoError(t, err)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			backend := &fakeBackend{deleteErr: tc.err}
+			service := unrdup.NewUnrdupService(backend)
+			ctx := t.Context()
 
-	resp, err := service.DeleteConfig(ctx, &unrduppb.DeleteConfigRequest{Name: "unrdup0"})
-	require.Nil(t, resp)
-	require.Equal(t, codes.Internal, status.Code(err))
-	require.Equal(t, "unrdup0", backend.deletedName)
+			_, err := service.UpdateConfig(ctx, &unrduppb.UpdateConfigRequest{
+				Name:   "unrdup0",
+				Config: validConfig(),
+			})
+			require.NoError(t, err)
 
-	list, err := service.ListConfigs(ctx, &unrduppb.ListConfigsRequest{})
-	require.NoError(t, err)
-	require.Equal(t, []string{"unrdup0"}, list.GetConfigs())
+			resp, err := service.DeleteConfig(ctx, &unrduppb.DeleteConfigRequest{Name: "unrdup0"})
+			require.Nil(t, resp)
+			require.Equal(t, tc.code, status.Code(err))
+			require.Equal(t, "unrdup0", backend.deletedName)
 
-	show, err := service.ShowConfig(ctx, &unrduppb.ShowConfigRequest{Name: "unrdup0"})
-	require.NoError(t, err)
-	require.NotNil(t, show)
+			list, err := service.ListConfigs(ctx, &unrduppb.ListConfigsRequest{})
+			require.NoError(t, err)
+			require.Equal(t, []string{"unrdup0"}, list.GetConfigs())
+
+			show, err := service.ShowConfig(ctx, &unrduppb.ShowConfigRequest{Name: "unrdup0"})
+			require.NoError(t, err)
+			require.NotNil(t, show)
+		})
+	}
 }
 
 // Test_UnrdupService_DeleteConfig_ParksThenReclaims verifies that a handle

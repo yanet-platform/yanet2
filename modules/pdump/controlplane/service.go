@@ -13,8 +13,10 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/yanet-platform/yanet2/controlplane/configstore"
+	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/modules/pdump/controlplane/pdumppb/v1"
 )
 
@@ -123,7 +125,7 @@ func (m *PdumpService) ShowConfig(
 }
 
 // SetConfig updates or creates packet capture configuration.
-// Supports partial updates via UpdateMask.
+// Only the config fields the request carries change.
 func (m *PdumpService) SetConfig(
 	ctx context.Context,
 	request *pdumppb.SetConfigRequest,
@@ -135,13 +137,13 @@ func (m *PdumpService) SetConfig(
 		if ok {
 			settings = current.Settings()
 		}
-		settings = mergeSettings(settings, request)
+		settings = mergeSettings(settings, request.GetConfig())
 
 		m.log.Debug("update config", zap.String("module", name))
 
 		module, err := m.backend.UpdateModule(name, settings)
 		if err != nil {
-			return nil, err
+			return nil, status.Errorf(codes.Internal, "failed to update module config %q: %v", name, err)
 		}
 
 		return &capture{
@@ -167,7 +169,12 @@ func (m *PdumpService) DeleteConfig(
 
 	err := m.configs.Delete(name, func(*capture) error {
 		if err := m.backend.DeleteModule(name); err != nil {
-			return status.Errorf(codes.Internal, "failed to delete module config %q: %v", name, err)
+			code := codes.Internal
+			if errors.Is(err, ffi.ErrFailedPrecondition) {
+				// A chain still references the config.
+				code = codes.FailedPrecondition
+			}
+			return status.Errorf(code, "failed to delete module config %q: %v", name, err)
 		}
 		m.log.Info("deleted pdump config", zap.String("name", name))
 
@@ -232,27 +239,27 @@ func defaultSettings() Settings {
 	}
 }
 
-// mergeSettings applies the fields the request names to the settings.
-func mergeSettings(settings Settings, request *pdumppb.SetConfigRequest) Settings {
-	if request.UpdateMask == nil {
+// mergeSettings applies the fields the config carries to the settings.
+func mergeSettings(settings Settings, config *pdumppb.Config) Settings {
+	if config == nil {
 		return settings
 	}
 
-	for _, path := range request.UpdateMask.Paths {
-		switch path {
-		case "filter":
-			settings.Filter = request.Config.GetFilter()
-		case "mode":
-			mode := request.Config.GetMode()
-			if mode == 0 {
-				mode = defaultMode
-			}
-			settings.Mode = mode
-		case "snaplen":
-			settings.Snaplen = request.Config.GetSnaplen()
-		case "ring_size":
-			settings.RingSize = request.Config.GetRingSize()
+	if config.Filter != nil {
+		settings.Filter = config.GetFilter()
+	}
+	if config.Mode != nil {
+		mode := config.GetMode()
+		if mode == 0 {
+			mode = defaultMode
 		}
+		settings.Mode = mode
+	}
+	if config.Snaplen != nil {
+		settings.Snaplen = config.GetSnaplen()
+	}
+	if config.RingSize != nil {
+		settings.RingSize = config.GetRingSize()
 	}
 
 	return settings
@@ -262,9 +269,9 @@ func mergeSettings(settings Settings, request *pdumppb.SetConfigRequest) Setting
 // back.
 func settingsProto(settings Settings) *pdumppb.Config {
 	return &pdumppb.Config{
-		Filter:   settings.Filter,
-		Mode:     settings.Mode,
-		Snaplen:  settings.Snaplen,
-		RingSize: settings.RingSize,
+		Filter:   proto.String(settings.Filter),
+		Mode:     proto.Uint32(settings.Mode),
+		Snaplen:  proto.Uint32(settings.Snaplen),
+		RingSize: proto.Uint32(settings.RingSize),
 	}
 }

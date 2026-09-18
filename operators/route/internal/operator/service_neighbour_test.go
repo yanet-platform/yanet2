@@ -5,6 +5,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
 	"github.com/yanet-platform/yanet2/operators/route/internal/operator"
@@ -80,4 +82,77 @@ func Test_NeighbourService_RemoveNeighbours_WakesOnlyWhenAnEntryGoesAway(t *test
 	})
 	require.NoError(t, err)
 	require.Equal(t, 2, *fired, "withdrawing a configured neighbour must reach the reconcile loop")
+}
+
+// Test_NeighbourService_TableErrorCodes verifies that each refusal of the
+// neighbour table reaches the client with its own status code.
+func Test_NeighbourService_TableErrorCodes(t *testing.T) {
+	cases := []struct {
+		name string
+		call func(t *testing.T, service *operator.NeighbourService) error
+		code codes.Code
+	}{
+		{
+			name: "create an existing table",
+			call: func(t *testing.T, service *operator.NeighbourService) error {
+				_, err := service.CreateTable(t.Context(), &operatorpb.CreateNeighbourTableRequest{Name: "static"})
+				return err
+			},
+			code: codes.AlreadyExists,
+		},
+		{
+			name: "update a missing table",
+			call: func(t *testing.T, service *operator.NeighbourService) error {
+				_, err := service.UpdateTable(t.Context(), &operatorpb.UpdateNeighbourTableRequest{Name: "missing"})
+				return err
+			},
+			code: codes.NotFound,
+		},
+		{
+			name: "remove a missing table",
+			call: func(t *testing.T, service *operator.NeighbourService) error {
+				_, err := service.RemoveTable(t.Context(), &operatorpb.RemoveNeighbourTableRequest{Name: "missing"})
+				return err
+			},
+			code: codes.NotFound,
+		},
+		{
+			name: "remove a built-in table",
+			call: func(t *testing.T, service *operator.NeighbourService) error {
+				_, err := service.RemoveTable(t.Context(), &operatorpb.RemoveNeighbourTableRequest{Name: "static"})
+				return err
+			},
+			code: codes.FailedPrecondition,
+		},
+		{
+			name: "update neighbours of a missing table",
+			call: func(t *testing.T, service *operator.NeighbourService) error {
+				request := entryRequest("10.0.0.1", [6]byte{0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF}, "eth0")
+				request.Table = "missing"
+				_, err := service.UpdateNeighbours(t.Context(), request)
+				return err
+			},
+			code: codes.NotFound,
+		},
+		{
+			name: "remove neighbours of a missing table",
+			call: func(t *testing.T, service *operator.NeighbourService) error {
+				_, err := service.RemoveNeighbours(t.Context(), &operatorpb.RemoveNeighboursRequest{
+					Table:    "missing",
+					NextHops: []*commonpb.IPAddress{commonpb.NewIPAddressFromAddr(netip.MustParseAddr("10.0.0.1"))},
+				})
+				return err
+			},
+			code: codes.NotFound,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			service, _ := newNeighbourFixture(t)
+
+			err := tc.call(t, service)
+			require.Equal(t, tc.code, status.Code(err))
+		})
+	}
 }

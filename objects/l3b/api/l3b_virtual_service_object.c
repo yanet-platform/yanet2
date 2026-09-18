@@ -150,9 +150,13 @@ out:
 struct cp_object *
 l3b_virtual_service_create(
 	const struct l3b_virtual_service_create_config *config,
-	struct cp_object **session_table,
 	yanet_error **err
 ) {
+	if (config->session_table == NULL) {
+		yanet_error_add(err, "missing session table");
+		return NULL;
+	}
+
 	struct agent *agent = config->agent;
 	const struct l3b_virtual_service *virtual_service =
 		config->virtual_service;
@@ -268,23 +272,29 @@ l3b_virtual_service_create(
 	);
 	vs->real_counter_ids = NULL;
 	if (vs->real_server_count > 0) {
-		vs->real_counter_ids = (uint64_t *)memory_balloc(
+		uint64_t *real_counter_ids = (uint64_t *)memory_balloc(
 			memory_context, sizeof(uint64_t) * vs->real_server_count
 		);
-		if (vs->real_counter_ids == NULL) {
+		if (real_counter_ids == NULL) {
 			yanet_error_add(
 				err, "failed to allocate real counters"
 			);
 			goto error_object;
 		}
-	}
-	for (uint32_t real_idx = 0; real_idx < vs->real_server_count;
-	     ++real_idx) {
-		char name[COUNTER_NAME_LEN] = {0};
-		snprintf(name, sizeof(name), "real/%" PRIu32, real_idx);
-		vs->real_counter_ids[real_idx] = counter_registry_register(
-			&object->cp_object.counter_registry, name, 2, err
-		);
+
+		for (uint32_t real_idx = 0; real_idx < vs->real_server_count;
+		     ++real_idx) {
+			char name[COUNTER_NAME_LEN] = {0};
+			snprintf(name, sizeof(name), "real/%" PRIu32, real_idx);
+			real_counter_ids[real_idx] = counter_registry_register(
+				&object->cp_object.counter_registry,
+				name,
+				2,
+				err
+			);
+		}
+
+		SET_OFFSET_OF(&vs->real_counter_ids, real_counter_ids);
 	}
 
 	// Backends.
@@ -344,35 +354,16 @@ l3b_virtual_service_create(
 		goto error_ring;
 	}
 
-	// Session table: adopted from the service being replaced so every
-	// pinned flow keeps its real server across the update, or created
-	// fresh under the service's name and own object type. Either way the
-	// dataplane reaches it through the embedded relative pointer.
-	struct cp_object *table = config->adopt_session_table;
-	if (table == NULL) {
-		table = l3b_session_table_object_create(
-			agent,
-			config->name,
-			config->worker_count,
-			virtual_service->session_index_size,
-			0,
-			err
-		);
-		if (table == NULL) {
-			yanet_error_add(
-				err, "failed to create session table object"
-			);
-			goto error_filters;
-		}
-	}
+	// The dataplane reaches the table through this pointer; the object
+	// itself stays the caller's.
 	SET_OFFSET_OF(
 		&vs->session_table,
-		container_of(table, struct l3b_session_table_object, cp_object)
+		container_of(
+			config->session_table,
+			struct l3b_session_table_object,
+			cp_object
+		)
 	);
-
-	if (session_table != NULL) {
-		*session_table = table;
-	}
 
 	return &object->cp_object;
 
@@ -384,10 +375,6 @@ error_object:
 		sizeof(struct l3b_virtual_service_object)
 	);
 	return NULL;
-
-error_filters:
-	filter_free(&vs->filter_ip4, L3B_SOURCE_FILTER_IP4_TAG);
-	filter_free(&vs->filter_ip6, L3B_SOURCE_FILTER_IP6_TAG);
 
 error_ring:
 	if (vs->real_ring.capacity > 0) {
@@ -402,7 +389,7 @@ error_real_servers:
 	if (vs->real_counter_ids != NULL) {
 		memory_bfree(
 			memory_context,
-			vs->real_counter_ids,
+			ADDR_OF(&vs->real_counter_ids),
 			sizeof(uint64_t) * vs->real_server_count
 		);
 	}
@@ -447,7 +434,7 @@ l3b_virtual_service_object_destroy(struct cp_object *cp_object) {
 	if (vs->real_counter_ids != NULL) {
 		memory_bfree(
 			memory_context,
-			vs->real_counter_ids,
+			ADDR_OF(&vs->real_counter_ids),
 			sizeof(uint64_t) * vs->real_server_count
 		);
 	}
@@ -477,8 +464,8 @@ l3b_virtual_service_free(struct cp_object *cp_object, yanet_error **err) {
 		return -1;
 	}
 
-	// The session table is deliberately not touched: it survives service
-	// updates and is destroyed by its owner once the service is deleted.
+	// The session table outlives the service and is destroyed through its
+	// own handle.
 	l3b_virtual_service_object_destroy(cp_object);
 	return 0;
 }

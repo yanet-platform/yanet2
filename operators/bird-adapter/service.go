@@ -13,10 +13,12 @@ import (
 	"go.uber.org/zap/zapcore"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/connectivity"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/encoding/gzip"
+	"google.golang.org/grpc/status"
 
 	"github.com/yanet-platform/yanet2/modules/route-mpls/controlplane/routemplspb/v1"
 	adapterpb "github.com/yanet-platform/yanet2/operators/bird-adapter/adapterpb/v1"
@@ -150,14 +152,23 @@ func (m *AdapterService) SetupConfig(
 	cfg := bird.DefaultConfig()
 	req.GetConfig().ToConfig(cfg)
 
-	if err := m.SetupImport(ImportParams{
+	params := ImportParams{
 		Name:     req.GetName(),
 		Config:   cfg,
 		SourceV4: mplsV4Src,
 		SourceV6: mplsV6Src,
 		LogLevel: req.GetConfig().GetLogLevel(),
-	}); err != nil {
-		return nil, err
+	}
+	if err := validateImportParams(params); err != nil {
+		return nil, status.Error(codes.InvalidArgument, err.Error())
+	}
+	if err := m.SetupImport(params); err != nil {
+		code := codes.Internal
+		if status.Code(err) == codes.Unavailable {
+			// The route operator is not reachable yet, so the client may retry.
+			code = codes.Unavailable
+		}
+		return nil, status.Error(code, err.Error())
 	}
 
 	return &adapterpb.SetupConfigResponse{}, nil
@@ -172,6 +183,22 @@ type ImportParams struct {
 	LogLevel string
 }
 
+// validateImportParams returns an error when the parameters cannot describe an
+// import.
+func validateImportParams(params ImportParams) error {
+	if !params.SourceV4.Is4() {
+		return fmt.Errorf("v4 source %q is not an IPv4 address", params.SourceV4)
+	}
+	if !params.SourceV6.Is6() || params.SourceV6.Is4In6() {
+		return fmt.Errorf("v6 source %q is not a pure IPv6 address", params.SourceV6)
+	}
+	if len(params.Config.Sockets) == 0 {
+		return fmt.Errorf("no export sockets provided")
+	}
+
+	return nil
+}
+
 // SetupImport configures and starts a BIRD import, bypassing SetupConfig's
 // protobuf decoding.
 //
@@ -179,11 +206,8 @@ type ImportParams struct {
 // stream from context.Background() so it outlives whatever call started it,
 // and a caller context here would misleadingly suggest otherwise.
 func (m *AdapterService) SetupImport(params ImportParams) error {
-	if !params.SourceV4.Is4() {
-		return fmt.Errorf("v4 source %q is not an IPv4 address", params.SourceV4)
-	}
-	if !params.SourceV6.Is6() || params.SourceV6.Is4In6() {
-		return fmt.Errorf("v6 source %q is not a pure IPv6 address", params.SourceV6)
+	if err := validateImportParams(params); err != nil {
+		return err
 	}
 
 	m.log.Info("setting up the configuration",
@@ -192,10 +216,6 @@ func (m *AdapterService) SetupImport(params ImportParams) error {
 	)
 
 	cfg := params.Config
-	if len(cfg.Sockets) == 0 {
-		// We do not need this connection if there is no background stream for import
-		return fmt.Errorf("no export sockets provided")
-	}
 
 	// Create per-client logger based on requested log level
 	var clientLog *zap.Logger

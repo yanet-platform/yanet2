@@ -9,18 +9,19 @@
 
 struct agent;
 
-// Shared-memory object type under which per-service session tables are
-// registered. A session table carries the same name as its virtual service;
-// the distinct type keeps the two registry entries apart.
+// Shared-memory object type under which session tables are registered. A
+// table is conventionally named after the service built over it; the distinct
+// type keeps the two registry entries apart.
 #define L3B_SESSION_TABLE_OBJECT_TYPE "l3b_session_table"
 
 /*
- * A per-service session table: a layered statemap table pinning client flows
- * to real servers (see lib/l3state).
+ * A session table: a layered statemap table pinning client flows to real
+ * servers (see lib/l3state).
  *
  * The cp_object header carries the (type, name) identity and the generation
- * accounting; the owning virtual service object holds the relative pointer
- * through which the dataplane reaches the table.
+ * accounting. The table is an object in its own right, outliving the virtual
+ * services built over it; each of them holds the relative pointer through
+ * which the dataplane reaches it.
  */
 struct l3b_session_table_object {
 	struct cp_object cp_object;
@@ -51,6 +52,6 @@ l3b_session_table_object_free(struct cp_object *cp_object, yanet_error **err);
 
 // Release the table's layers and the object struct itself. Internal to the
 // l3b objects: run only after cp_object_try_destroy granted the exclusive
-// right (l3b_virtual_service_free drives it for service-owned tables).
+// right.
 void
 l3b_session_table_object_destroy(struct cp_object *cp_object);

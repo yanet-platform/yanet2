@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math"
 	"net/netip"
 	"slices"
 
@@ -15,6 +14,7 @@ import (
 
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
 	"github.com/yanet-platform/yanet2/controlplane/configstore"
+	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	nat64pb "github.com/yanet-platform/yanet2/modules/nat64/controlplane/nat64pb/v1"
 )
 
@@ -140,15 +140,11 @@ func (m *NAT64Service) ListConfigs(ctx context.Context, req *nat64pb.ListConfigs
 
 func (m *NAT64Service) ShowConfig(ctx context.Context, req *nat64pb.ShowConfigRequest) (*nat64pb.ShowConfigResponse, error) {
 	name := req.GetName()
-	if name == "" {
-		return nil, status.Error(codes.InvalidArgument, "module config name is required")
-	}
-
 	response := &nat64pb.ShowConfigResponse{}
 
 	inst, ok := m.configs.Get(name)
 	if !ok {
-		return nil, status.Error(codes.NotFound, "config not found")
+		return nil, status.Errorf(codes.NotFound, "config %q not found", name)
 	}
 
 	cfg := inst.Config
@@ -189,10 +185,6 @@ func (m *NAT64Service) AddPrefix(ctx context.Context, req *nat64pb.AddPrefixRequ
 	}
 
 	name := req.GetName()
-	if name == "" {
-		return nil, status.Error(codes.InvalidArgument, "module config name is required")
-	}
-
 	err = m.configs.Update(name, func(current *config, ok bool) (*config, error) {
 		next := nextConfig(current, ok)
 		if slices.ContainsFunc(next.Config.Prefixes, func(existing []byte) bool { return bytes.Equal(existing, prefix) }) {
@@ -216,10 +208,6 @@ func (m *NAT64Service) RemovePrefix(ctx context.Context, req *nat64pb.RemovePref
 	}
 
 	name := req.GetName()
-	if name == "" {
-		return nil, status.Error(codes.InvalidArgument, "module config name is required")
-	}
-
 	err = m.configs.Update(name, func(current *config, ok bool) (*config, error) {
 		if !ok {
 			return nil, status.Errorf(codes.NotFound, "config %q not found", name)
@@ -250,12 +238,6 @@ func (m *NAT64Service) RemovePrefix(ctx context.Context, req *nat64pb.RemovePref
 }
 
 func (m *NAT64Service) AddMapping(ctx context.Context, req *nat64pb.AddMappingRequest) (*nat64pb.AddMappingResponse, error) {
-	if req.GetIpv4() == nil {
-		return nil, status.Error(codes.InvalidArgument, "ipv4 address is required")
-	}
-	if req.GetIpv6() == nil {
-		return nil, status.Error(codes.InvalidArgument, "ipv6 address is required")
-	}
 	ipv4 := req.GetIpv4().ToAddr()
 	ipv6 := req.GetIpv6().ToAddr()
 	if ipv6.Is4In6() {
@@ -263,10 +245,6 @@ func (m *NAT64Service) AddMapping(ctx context.Context, req *nat64pb.AddMappingRe
 	}
 
 	name := req.GetName()
-	if name == "" {
-		return nil, status.Error(codes.InvalidArgument, "module config name is required")
-	}
-
 	err := m.configs.Update(name, func(current *config, ok bool) (*config, error) {
 		next := nextConfig(current, ok)
 		if req.PrefixIndex >= uint32(len(next.Config.Prefixes)) {
@@ -294,16 +272,9 @@ func (m *NAT64Service) AddMapping(ctx context.Context, req *nat64pb.AddMappingRe
 }
 
 func (m *NAT64Service) RemoveMapping(ctx context.Context, req *nat64pb.RemoveMappingRequest) (*nat64pb.RemoveMappingResponse, error) {
-	if req.GetIpv4() == nil {
-		return nil, status.Error(codes.InvalidArgument, "ipv4 address is required")
-	}
 	ipv4 := req.GetIpv4().ToAddr()
 
 	name := req.GetName()
-	if name == "" {
-		return nil, status.Error(codes.InvalidArgument, "module config name is required")
-	}
-
 	err := m.configs.Update(name, func(current *config, ok bool) (*config, error) {
 		if !ok {
 			return nil, status.Errorf(codes.NotFound, "config %q not found", name)
@@ -327,21 +298,7 @@ func (m *NAT64Service) RemoveMapping(ctx context.Context, req *nat64pb.RemoveMap
 }
 
 func (m *NAT64Service) SetMTU(ctx context.Context, req *nat64pb.SetMTURequest) (*nat64pb.SetMTUResponse, error) {
-	if req.Mtu == nil {
-		return nil, status.Error(codes.InvalidArgument, "mtu config is required")
-	}
-	if req.Mtu.Ipv4Mtu > math.MaxUint16 {
-		return nil, status.Errorf(codes.InvalidArgument, "invalid IPv4 MTU: got %d, max %d", req.Mtu.Ipv4Mtu, math.MaxUint16)
-	}
-	if req.Mtu.Ipv6Mtu > math.MaxUint16 {
-		return nil, status.Errorf(codes.InvalidArgument, "invalid IPv6 MTU: got %d, max %d", req.Mtu.Ipv6Mtu, math.MaxUint16)
-	}
-
 	name := req.GetName()
-	if name == "" {
-		return nil, status.Error(codes.InvalidArgument, "module config name is required")
-	}
-
 	err := m.configs.Update(name, func(current *config, ok bool) (*config, error) {
 		next := nextConfig(current, ok)
 		next.Config.MTU = MTUConfig{
@@ -360,10 +317,6 @@ func (m *NAT64Service) SetMTU(ctx context.Context, req *nat64pb.SetMTURequest) (
 
 func (m *NAT64Service) SetDropUnknown(ctx context.Context, req *nat64pb.SetDropUnknownRequest) (*nat64pb.SetDropUnknownResponse, error) {
 	name := req.GetName()
-	if name == "" {
-		return nil, status.Error(codes.InvalidArgument, "module config name is required")
-	}
-
 	err := m.configs.Update(name, func(current *config, ok bool) (*config, error) {
 		next := nextConfig(current, ok)
 		next.Config.DropUnknownPrefix = req.DropUnknownPrefix
@@ -379,10 +332,6 @@ func (m *NAT64Service) SetDropUnknown(ctx context.Context, req *nat64pb.SetDropU
 }
 
 func decodeNAT64Prefix(prefix *commonpb.IPv6Prefix) ([]byte, error) {
-	if prefix == nil {
-		return nil, fmt.Errorf("prefix is required")
-	}
-
 	network, err := prefix.ToPrefix()
 	if err != nil {
 		return nil, fmt.Errorf("invalid prefix: %w", err)
@@ -420,18 +369,19 @@ func encodeNAT64Prefix(prefix []byte) (*commonpb.IPv6Prefix, error) {
 // by any pipeline.
 func (m *NAT64Service) DeleteConfig(ctx context.Context, req *nat64pb.DeleteConfigRequest) (*nat64pb.DeleteConfigResponse, error) {
 	name := req.GetName()
-	if name == "" {
-		return nil, status.Error(codes.InvalidArgument, "module config name is required")
-	}
-
 	err := m.configs.Delete(name, func(*config) error {
 		return m.backend.DeleteModule(name)
 	})
 	if errors.Is(err, configstore.ErrNotFound) {
-		return nil, status.Error(codes.NotFound, "config not found")
+		return nil, status.Errorf(codes.NotFound, "config %q not found", name)
 	}
 	if err != nil {
-		return nil, status.Errorf(codes.Internal, "failed to delete module config: %v", err)
+		code := codes.Internal
+		if errors.Is(err, ffi.ErrFailedPrecondition) {
+			// A chain still references the config.
+			code = codes.FailedPrecondition
+		}
+		return nil, status.Errorf(code, "failed to delete module config: %v", err)
 	}
 
 	return &nat64pb.DeleteConfigResponse{}, nil

@@ -7,10 +7,12 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
 
 	dataplaneut "github.com/yanet-platform/yanet2/bindings/go/dataplane_ut"
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
+	plain "github.com/yanet-platform/yanet2/devices/plain/controlplane"
 	"github.com/yanet-platform/yanet2/modules/acl/bindings/go/cacl"
 	fwstate "github.com/yanet-platform/yanet2/modules/fwstate/controlplane"
 	"github.com/yanet-platform/yanet2/modules/fwstate/controlplane/fwstatepb/v1"
@@ -36,7 +38,7 @@ func newDeleteTestHarness(
 		DPMemory:      uint64(deleteTestDPMemory),
 		WorkerCount:   1,
 		Modules:       modules,
-		DevicesToLoad: []string{},
+		DevicesToLoad: []string{"plain"},
 		ObjectsToLoad: []string{"fwstate_map_v4", "fwstate_map_v6"},
 	})
 	require.NoError(testingTB, err)
@@ -139,6 +141,44 @@ func TestFWStateDeleteKeepsSameNamedACLConfig(t *testing.T) {
 	require.False(t, hasCPConfig(configs, fwstateModuleType, configName))
 }
 
+// TestFWStateDeleteReferencedConfigRefused checks that deleting a config a
+// chain still references fails with FailedPrecondition and keeps it published.
+func TestFWStateDeleteReferencedConfigRefused(t *testing.T) {
+	const configName = "fwstate-referenced"
+
+	_, agent := newDeleteTestHarness(t, []string{"fwstate"}, "fwstate-referenced")
+	maps := newFWStateTestMaps(t, agent, configName, 1024)
+	service := fwstate.NewFWStateService(agent)
+	_, err := service.UpdateConfig(t.Context(), validDeleteTestUpdateRequest(
+		configName, maps.v4Name(), maps.v6Name(),
+	))
+	require.NoError(t, err)
+
+	require.NoError(t, agent.UpdateFunction(ffi.FunctionConfig{
+		Name: "function0",
+		Chains: []ffi.FunctionChainConfig{{
+			Weight: 1,
+			Chain: ffi.ChainConfig{
+				Name:    "chain0",
+				Modules: []ffi.ChainModuleConfig{{Type: fwstateModuleType, Name: configName}},
+			},
+		}},
+	}))
+	require.NoError(t, agent.UpdatePipeline(ffi.PipelineConfig{
+		Name:      "pipeline0",
+		Functions: []string{"function0"},
+	}))
+	_, err = plain.UpdateDevices(agent, []ffi.DeviceConfig{{
+		Name:  "port0",
+		Input: []ffi.DevicePipelineConfig{{Name: "pipeline0", Weight: 1}},
+	}})
+	require.NoError(t, err)
+
+	_, err = service.DeleteConfig(t.Context(), &fwstatepb.DeleteConfigRequest{Name: configName})
+	require.Equal(t, codes.FailedPrecondition, status.Code(err))
+	require.True(t, hasCPConfig(agent.DPConfig().CPConfigs(), fwstateModuleType, configName))
+}
+
 // TestFWStateUpdateUnknownMapNameRejected checks that an update naming a
 // map object that is not published fails with FailedPrecondition carrying
 // the C-side generation-install error naming the object, and that nothing
@@ -151,7 +191,7 @@ func TestFWStateUpdateUnknownMapNameRejected(t *testing.T) {
 	service := fwstate.NewFWStateService(agent)
 
 	request := validDeleteTestUpdateRequest(configName, maps.v4Name(), maps.v6Name())
-	request.MapNameV6 = "no-such-map"
+	request.MapNameV6 = proto.String("no-such-map")
 
 	_, err := service.UpdateConfig(t.Context(), request)
 	require.Equal(t, codes.FailedPrecondition, status.Code(err))
@@ -186,13 +226,13 @@ func TestDeleteModuleConfigUsesRegisteredType(t *testing.T) {
 func validDeleteTestUpdateRequest(name, fw4MapName, fw6MapName string) *fwstatepb.UpdateConfigRequest {
 	return &fwstatepb.UpdateConfigRequest{
 		Name:      name,
-		MapNameV4: fw4MapName,
-		MapNameV6: fw6MapName,
+		MapNameV4: proto.String(fw4MapName),
+		MapNameV6: proto.String(fw6MapName),
 		SyncConfig: &fwstatepb.SyncConfig{
 			SrcAddr:          &commonpb.IPAddress{Addr: []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}},
 			DstEther:         &commonpb.MACAddress{Addr: 0x333300000001},
 			DstAddrMulticast: &commonpb.IPAddress{Addr: []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}},
-			PortMulticast:    9999,
+			PortMulticast:    proto.Uint32(9999),
 		},
 	}
 }
