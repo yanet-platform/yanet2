@@ -3,7 +3,7 @@ import { ActionKind } from '@yanet/core/api/acl';
 import { formatRange } from '@yanet/core/utils';
 import type { RuleDraft, RuleItem } from './types';
 import { parseRangesRaw, parseProtoRangesRaw, partitionCidrsToTyped } from './parseHelpers';
-export { parseCidrsToIPNets, parseRangesRaw, parseProtoRangesRaw } from './parseHelpers';
+export { parseRangesRaw, parseProtoRangesRaw } from './parseHelpers';
 
 /**
  * Normalize a wire-shape Action.kind into a concrete ActionKind.
