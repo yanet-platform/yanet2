@@ -8,6 +8,7 @@ collect_rule_map(
 	struct memory_context *memory_context,
 	struct value_registry *registry,
 	const uint32_t *rule_to_group,
+	const struct filter_rule **rules,
 	uint32_t rule_count,
 	struct vline *rule_map
 ) {
@@ -30,6 +31,13 @@ collect_rule_map(
 	 */
 	struct value_range *ranges = ADDR_OF(&registry->ranges);
 	for (uint32_t rule_idx = 0; rule_idx < rule_count; ++rule_idx) {
+		// A rule absent from the ruleset this map belongs to holds no
+		// group even when the classes were enumerated over a wider
+		// shared ruleset.
+		if (rules[rule_idx] == NULL) {
+			continue;
+		}
+
 		uint32_t group_idx = rule_to_group[rule_idx];
 		if (group_idx == FILTER_GROUP_INVALID) {
 			continue;

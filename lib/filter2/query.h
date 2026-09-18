@@ -76,11 +76,13 @@ filter_lookup(
 	 * values for each packet is a final class identifier.
 	 */
 	struct value_table *joints = ADDR_OF(&filter->joints);
+	const uint32_t *joint_sides = ADDR_OF(&filter->joint_sides);
 	for (uint32_t joint_idx = 0; joint_idx < joint_count; ++joint_idx) {
 		filter_process_joint(
 			joints + joint_idx,
-			values + joint_idx * 2 * packet_count,
-			values + (joint_idx * 2 + 1) * packet_count,
+			values + joint_sides[joint_idx * 2] * packet_count,
+			values +
+				joint_sides[joint_idx * 2 + 1] * packet_count,
 			values + values_pos,
 			packet_count
 		);

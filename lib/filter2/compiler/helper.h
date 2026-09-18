@@ -24,6 +24,7 @@ collect_rule_map(
 	struct memory_context *memory_context,
 	struct value_registry *registry,
 	const uint32_t *rule_to_group,
+	const struct filter_rule **rules,
 	uint32_t rule_count,
 	struct vline *rule_map
 );

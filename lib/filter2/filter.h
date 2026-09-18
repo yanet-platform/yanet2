@@ -46,9 +46,19 @@ struct filter_query_attr {};
 struct filter {
 	struct filter_query_attr **attrs;
 	struct value_table *joints;
+	// Input value slots of every joint, two indexes per joint: the
+	// value array positions the joint combines. A plain compile pairs
+	// the positions 2j and 2j + 1, a derived filter expresses its own
+	// tree over the shared core outputs.
+	uint32_t *joint_sides;
 	// Maps the final class identifier resolved by the last joint to the
 	// index of the first rule producing the class.
 	struct vline *rule_map;
+	// Derived filters borrow the leading classifiers and join tables
+	// from a shared core; the counts below mark the borrowed prefixes
+	// and a plain compiled filter leaves them zero.
+	uint32_t shared_attr_count;
+	uint32_t shared_joint_count;
 	struct memory_context memory_context;
 };
 
