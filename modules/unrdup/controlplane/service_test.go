@@ -3,7 +3,6 @@ package unrdup_test
 import (
 	"errors"
 	"fmt"
-	"net"
 	"net/netip"
 	"testing"
 
@@ -13,7 +12,6 @@ import (
 
 	"github.com/yanet-platform/xnetip"
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
-	filterpb "github.com/yanet-platform/yanet2/common/filterpb/v1"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/modules/unrdup/bindings/go/cunrdup"
 	unrdup "github.com/yanet-platform/yanet2/modules/unrdup/controlplane"
@@ -99,20 +97,18 @@ func ipAddr(addr string) *commonpb.IPAddress {
 	return commonpb.NewIPAddressFromAddr(netip.MustParseAddr(addr))
 }
 
-func ipNet(prefix string) *filterpb.IPNet {
-	parsed := netip.MustParsePrefix(prefix)
-	addr := parsed.Addr()
+func ipv4Net(network string) *commonpb.IPv4Network {
+	return commonpb.NewIPv4NetworkFrom4(xnetip.MustParseNetwork4(network))
+}
 
-	return &filterpb.IPNet{
-		Addr: addr.AsSlice(),
-		Mask: net.CIDRMask(parsed.Bits(), addr.BitLen()),
-	}
+func ipv6Net(network string) *commonpb.IPv6Network {
+	return commonpb.NewIPv6NetworkFrom6(xnetip.MustParseNetwork6(network))
 }
 
 func validConfig() *unrduppb.Config {
 	return &unrduppb.Config{
-		SourceV4: ipNet("10.0.0.1/32"),
-		SourceV6: ipNet("2001:db8:a::/96"),
+		SourceV4: ipv4Net("10.0.0.1/32"),
+		SourceV6: ipv6Net("2001:db8:a::/96"),
 		Services: []*unrduppb.Service{
 			{
 				Vip:   ipAddr("192.0.2.1"),
@@ -274,39 +270,32 @@ func TestUpdateConfigRejects(t *testing.T) {
 		{
 			name: "source address unspecified",
 			request: withConfig(func(config *unrduppb.Config) {
-				config.SourceV4 = ipNet("0.0.0.0/32")
+				config.SourceV4 = ipv4Net("0.0.0.0/32")
 			}),
 		},
 		{
-			name: "source of the wrong family for its field",
+			name: "source of the other family mapped into its field",
 			request: withConfig(func(config *unrduppb.Config) {
-				config.SourceV4 = ipNet("2001:db8:a::/96")
+				config.SourceV6 = ipv6Net("::ffff:10.0.0.0/120")
 			}),
 		},
 		{
 			name: "source mask scattered",
 			request: withConfig(func(config *unrduppb.Config) {
-				config.SourceV4 = &filterpb.IPNet{
-					Addr: []byte{10, 0, 0, 1},
-					Mask: []byte{255, 0, 255, 0},
-				}
+				config.SourceV4 = ipv4Net("10.0.0.1/255.0.255.0")
 			}),
 		},
 		{
 			name: "source mask frees the whole address",
 			request: withConfig(func(config *unrduppb.Config) {
-				config.SourceV4 = &filterpb.IPNet{
-					Addr: []byte{10, 0, 0, 1},
-					Mask: []byte{0, 0, 0, 0},
-				}
+				config.SourceV4 = ipv4Net("10.0.0.1/0.0.0.0")
 			}),
 		},
 		{
-			name: "source mask of the wrong length",
+			name: "source mask missing",
 			request: withConfig(func(config *unrduppb.Config) {
-				config.SourceV4 = &filterpb.IPNet{
-					Addr: []byte{10, 0, 0, 1},
-					Mask: []byte{255, 255},
+				config.SourceV4 = &commonpb.IPv4Network{
+					Addr: commonpb.NewIPv4Address([4]byte{10, 0, 0, 1}),
 				}
 			}),
 		},
@@ -433,8 +422,12 @@ func TestShowConfig(t *testing.T) {
 	require.Equal(t, "unrdup0", response.GetName())
 
 	config := response.GetConfig()
-	require.Equal(t, []byte{10, 0, 0, 1}, config.GetSourceV4().GetAddr())
-	require.Equal(t, net.CIDRMask(32, 32), net.IPMask(config.GetSourceV4().GetMask()))
+	sourceV4, err := config.GetSourceV4().ToNetwork4()
+	require.NoError(t, err)
+	require.Equal(t, xnetip.MustParseNetwork4("10.0.0.1/32"), sourceV4)
+	sourceV6, err := config.GetSourceV6().ToNetwork6()
+	require.NoError(t, err)
+	require.Equal(t, xnetip.MustParseNetwork6("2001:db8:a::/96"), sourceV6)
 	require.Len(t, config.GetServices(), 1)
 
 	stored := config.GetServices()[0]
