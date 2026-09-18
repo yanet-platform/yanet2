@@ -25,7 +25,7 @@ func validateName(field, name string) error {
 	return nil
 }
 
-func validateIPNetList(field string, networks []*filterpb.IPNet) error {
+func validateNetworkList[T any](field string, networks []*T) error {
 	for idx := range networks {
 		if networks[idx] == nil {
 			return fmt.Errorf("%s[%d] is required", field, idx)
@@ -67,10 +67,10 @@ func (m *VirtualService) Validate() error {
 
 // Validate checks source filter lists for missing range messages.
 func (m *SourceFilterRule) Validate() error {
-	if err := validateIPNetList("net6s", m.GetNet6S()); err != nil {
+	if err := validateNetworkList("net6s", m.GetNet6S()); err != nil {
 		return err
 	}
-	if err := validateIPNetList("net4s", m.GetNet4S()); err != nil {
+	if err := validateNetworkList("net4s", m.GetNet4S()); err != nil {
 		return err
 	}
 	return validatePortRangeList("port_ranges", m.GetPortRanges())
@@ -78,10 +78,10 @@ func (m *SourceFilterRule) Validate() error {
 
 // Validate checks destination filter lists for missing range messages.
 func (m *DestinationFilterRule) Validate() error {
-	if err := validateIPNetList("net6s", m.GetNet6S()); err != nil {
+	if err := validateNetworkList("net6s", m.GetNet6S()); err != nil {
 		return err
 	}
-	if err := validateIPNetList("net4s", m.GetNet4S()); err != nil {
+	if err := validateNetworkList("net4s", m.GetNet4S()); err != nil {
 		return err
 	}
 	return validateProtoRangeList("proto_ranges", m.GetProtoRanges())

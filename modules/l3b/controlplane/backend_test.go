@@ -5,11 +5,12 @@ import (
 
 	"github.com/c2h5oh/datasize"
 	"github.com/stretchr/testify/require"
+	"github.com/yanet-platform/xnetip"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
 	dataplaneut "github.com/yanet-platform/yanet2/bindings/go/dataplane_ut"
-	filterpb "github.com/yanet-platform/yanet2/common/filterpb/v1"
+	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
 	controlplane "github.com/yanet-platform/yanet2/modules/l3b/controlplane"
 	l3bpb "github.com/yanet-platform/yanet2/modules/l3b/controlplane/l3bpb/v1"
 )
@@ -55,7 +56,7 @@ func Test_Backend_CreateService_FilterErrorNotNested(t *testing.T) {
 	backend := newTestBackend(t)
 	service := sampleService("vs0")
 	service.SourceFilterRules = []*l3bpb.SourceFilterRule{{
-		Net6S: []*filterpb.IPNet{{Addr: []byte{1, 2, 3}, Mask: []byte{255, 255, 255}}},
+		Net6S: []*commonpb.IPv6Network{commonpb.NewIPv6NetworkFrom6(xnetip.MustParseNetwork6("2001:db8::/ffff:0:ffff::"))},
 	}}
 
 	err := backend.CreateService(service)

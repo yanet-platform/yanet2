@@ -2,6 +2,9 @@ syntax = "proto3";
 
 package modules.l3b.controlplane.l3bpb.v1;
 
+import "common/commonpb/v1/ipnetwork.proto";
+import "common/commonpb/v1/ipv4network.proto";
+import "common/commonpb/v1/ipv6network.proto";
 import "common/filterpb/v1/filter.proto";
 
 option go_package = "github.com/yanet-platform/yanet2/modules/l3b/controlplane/l3bpb/v1;l3bpb";
@@ -52,20 +55,20 @@ service L3bService {
 // 16 for IPv6).
 message RealServer {
   bytes destination_address = 1;
-  common.filterpb.v1.IPNet source_network = 2;
+  common.commonpb.v1.IPNetwork source_network = 2;
 }
 
 // SourceFilterRule is the source-side match criteria of a service.
 message SourceFilterRule {
-  repeated common.filterpb.v1.IPNet net6s = 1;
-  repeated common.filterpb.v1.IPNet net4s = 2;
+  repeated common.commonpb.v1.IPv6Network net6s = 1;
+  repeated common.commonpb.v1.IPv4Network net4s = 2;
   repeated common.filterpb.v1.PortRange port_ranges = 3;
 }
 
 // DestinationFilterRule routes matching packets to a named virtual service.
 message DestinationFilterRule {
-  repeated common.filterpb.v1.IPNet net6s = 1;
-  repeated common.filterpb.v1.IPNet net4s = 2;
+  repeated common.commonpb.v1.IPv6Network net6s = 1;
+  repeated common.commonpb.v1.IPv4Network net4s = 2;
   repeated common.filterpb.v1.ProtoRange proto_ranges = 3;
   string service = 4;
 }
@@ -190,7 +193,7 @@ message RealServerState {
   // Destination address of the real server tunnel; 4 or 16 bytes.
   bytes destination_address = 1;
   // Source network the outer source address is derived from.
-  common.filterpb.v1.IPNet source_network = 2;
+  common.commonpb.v1.IPNetwork source_network = 2;
   // Current scheduler weight of the real server.
   uint32 weight = 3;
   // Whether the real server currently takes traffic.

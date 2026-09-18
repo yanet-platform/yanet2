@@ -2928,6 +2928,7 @@ dependencies = [
  "tonic-prost",
  "tonic-prost-build",
  "yanet-cli",
+ "yanet-commonpb",
  "yanet-filterpb",
 ]
 

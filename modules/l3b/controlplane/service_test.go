@@ -5,10 +5,11 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"github.com/yanet-platform/xnetip"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	filterpb "github.com/yanet-platform/yanet2/common/filterpb/v1"
+	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
 	controlplane "github.com/yanet-platform/yanet2/modules/l3b/controlplane"
 	l3bpb "github.com/yanet-platform/yanet2/modules/l3b/controlplane/l3bpb/v1"
 	cl3bobject "github.com/yanet-platform/yanet2/objects/l3b/bindings/go/cl3bobject"
@@ -271,7 +272,7 @@ func Test_L3BService_GetService(t *testing.T) {
 		IndexMask: 3,
 		RealServers: []*l3bpb.RealServerState{{
 			DestinationAddress: []byte{172, 16, 0, 10},
-			SourceNetwork:      &filterpb.IPNet{Addr: []byte{192, 0, 2, 0}, Mask: []byte{255, 255, 255, 0}},
+			SourceNetwork:      commonpb.NewIPNetworkFrom(xnetip.MustParseNetwork("192.0.2.0/24")),
 			Weight:             500,
 			Enabled:            true,
 		}},

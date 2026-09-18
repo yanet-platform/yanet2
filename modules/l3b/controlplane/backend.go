@@ -7,12 +7,11 @@ import (
 	"sort"
 	"sync"
 
-	"github.com/yanet-platform/xnetip"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
 	"github.com/yanet-platform/yanet2/bindings/go/filterpbconv/v1"
-	filterpb "github.com/yanet-platform/yanet2/common/filterpb/v1"
+	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/modules/l3b/bindings/go/cl3b"
 	l3bpb "github.com/yanet-platform/yanet2/modules/l3b/controlplane/l3bpb/v1"
@@ -366,11 +365,11 @@ func (m *backend) UpdateModuleConfig(config *l3bpb.ModuleConfig) error {
 			return status.Errorf(codes.NotFound, "unknown virtual service %q", serviceName)
 		}
 
-		net6s, err := filterpbconv.ToNet6s(rule.GetNet6S())
+		net6s, err := filterpbconv.ToNet6sFromNetworks(rule.GetNet6S())
 		if err != nil {
 			return status.Errorf(codes.InvalidArgument, "invalid net6s: %s", status.Convert(err).Message())
 		}
-		net4s, err := filterpbconv.ToNet4s(rule.GetNet4S())
+		net4s, err := filterpbconv.ToNet4sFromNetworks(rule.GetNet4S())
 		if err != nil {
 			return status.Errorf(codes.InvalidArgument, "invalid net4s: %s", status.Convert(err).Message())
 		}
@@ -539,21 +538,6 @@ func (m *backend) GetService(service string) (*l3bpb.GetServiceResponse, error) 
 
 	realServers := make([]*l3bpb.RealServerState, 0, len(info.RealServers))
 	for idx, real := range info.RealServers {
-		var sourceBytes, maskBytes []byte
-		sourceAddr := real.SourceNet.Addr()
-		sourceMask := real.SourceNet.Mask()
-		if sourceAddr.Is4() {
-			addrOctets := sourceAddr.As4()
-			maskOctets := sourceMask.As4()
-			sourceBytes = addrOctets[:]
-			maskBytes = maskOctets[:]
-		} else {
-			addrOctets := sourceAddr.As16()
-			maskOctets := sourceMask.As16()
-			sourceBytes = addrOctets[:]
-			maskBytes = maskOctets[:]
-		}
-
 		var destinationBytes []byte
 		if real.DestinationAddress.Is4() {
 			octets := real.DestinationAddress.As4()
@@ -567,12 +551,9 @@ func (m *backend) GetService(service string) (*l3bpb.GetServiceResponse, error) 
 
 		realServers = append(realServers, &l3bpb.RealServerState{
 			DestinationAddress: destinationBytes,
-			SourceNetwork: &filterpb.IPNet{
-				Addr: sourceBytes,
-				Mask: maskBytes,
-			},
-			Weight:  weight,
-			Enabled: real.Enabled,
+			SourceNetwork:      commonpb.NewIPNetworkFrom(real.SourceNet),
+			Weight:             weight,
+			Enabled:            real.Enabled,
 		})
 	}
 
@@ -641,23 +622,6 @@ func RingFromWeights(weights []uint32) []uint32 {
 	return ring
 }
 
-// sourceNetworkFromIPNet decodes a legacy filter IPNet message into a
-// family-agnostic network; the mask may be non-contiguous.
-func sourceNetworkFromIPNet(pb *filterpb.IPNet) (xnetip.Network, error) {
-	addr, ok := netip.AddrFromSlice(pb.GetAddr())
-	if !ok {
-		return xnetip.Network{}, fmt.Errorf("invalid address")
-	}
-	mask, ok := netip.AddrFromSlice(pb.GetMask())
-	if !ok {
-		return xnetip.Network{}, fmt.Errorf("invalid mask")
-	}
-	if addr.Is4() != mask.Is4() {
-		return xnetip.Network{}, fmt.Errorf("address and mask must be the same IP family")
-	}
-	return xnetip.NetworkFrom(addr, mask)
-}
-
 func buildVirtualServiceConfig(
 	service *l3bpb.VirtualService,
 ) (cl3bobject.VirtualServiceConfig, error) {
@@ -674,7 +638,7 @@ func buildVirtualServiceConfig(
 			return cl3bobject.VirtualServiceConfig{}, invalid("real server destination address is not a valid 4- or 16-byte IP address")
 		}
 
-		sourceNet, err := sourceNetworkFromIPNet(server.GetSourceNetwork())
+		sourceNet, err := server.GetSourceNetwork().ToNetwork()
 		if err != nil {
 			return cl3bobject.VirtualServiceConfig{}, invalid(fmt.Sprintf("invalid real server source network: %v", err))
 		}
@@ -704,11 +668,11 @@ func buildVirtualServiceConfig(
 
 	sourceFilterRules := make([]cl3bobject.SourceFilterRule, 0, len(service.GetSourceFilterRules()))
 	for _, rule := range service.GetSourceFilterRules() {
-		net6s, err := filterpbconv.ToNet6s(rule.GetNet6S())
+		net6s, err := filterpbconv.ToNet6sFromNetworks(rule.GetNet6S())
 		if err != nil {
 			return cl3bobject.VirtualServiceConfig{}, invalid(fmt.Sprintf("invalid source net6s: %s", status.Convert(err).Message()))
 		}
-		net4s, err := filterpbconv.ToNet4s(rule.GetNet4S())
+		net4s, err := filterpbconv.ToNet4sFromNetworks(rule.GetNet4S())
 		if err != nil {
 			return cl3bobject.VirtualServiceConfig{}, invalid(fmt.Sprintf("invalid source net4s: %s", status.Convert(err).Message()))
 		}

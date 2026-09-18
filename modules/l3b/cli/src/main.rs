@@ -239,16 +239,16 @@ struct RealServerDoc {
     /// Tunnel destination address of the real server.
     destination_address: IpAddr,
     /// Source network the outer source address is derived from.
-    source_network: filterpb::pb::IpNet,
+    source_network: commonpb::pb::IpNetwork,
 }
 
 /// One source-side match rule.
 #[derive(Debug, Deserialize)]
 struct SourceFilterRuleDoc {
     /// IPv6 source networks the rule accepts.
-    net6s: Vec<filterpb::pb::IpNet>,
+    net6s: Vec<commonpb::pb::IPv6Network>,
     /// IPv4 source networks the rule accepts.
-    net4s: Vec<filterpb::pb::IpNet>,
+    net4s: Vec<commonpb::pb::IPv4Network>,
     /// Destination port ranges the rule accepts.
     port_ranges: Vec<RangeDoc>,
 }
@@ -296,9 +296,9 @@ impl ModuleConfigDocument {
 #[derive(Debug, Deserialize)]
 struct DestinationRuleDoc {
     /// IPv6 destination networks the rule matches.
-    net6s: Vec<filterpb::pb::IpNet>,
+    net6s: Vec<commonpb::pb::IPv6Network>,
     /// IPv4 destination networks the rule matches.
-    net4s: Vec<filterpb::pb::IpNet>,
+    net4s: Vec<commonpb::pb::IPv4Network>,
     /// Transport protocol ranges the rule matches.
     proto_ranges: Vec<ProtoRangeDoc>,
     /// Name of the virtual service matched traffic is routed to.
@@ -395,7 +395,7 @@ impl From<&RealServerDoc> for l3bpb::RealServer {
         };
         Self {
             destination_address: address,
-            source_network: Some(server.source_network.clone()),
+            source_network: Some(server.source_network),
         }
     }
 }
@@ -510,16 +510,7 @@ impl From<&l3bpb::RealServerState> for RealServerRow {
         let source_net = real
             .source_network
             .as_ref()
-            .map(|net| {
-                let addr = ip_address(&net.addr)
-                    .map(|address| address.to_string())
-                    .unwrap_or_else(|| "?".to_string());
-                let mask = ip_address(&net.mask)
-                    .map(|address| address.to_string())
-                    .unwrap_or_else(|| "?".to_string());
-                format!("{addr}/{mask}")
-            })
-            .unwrap_or_else(|| "-".to_string());
+            .map_or_else(|| "-".to_string(), ToString::to_string);
 
         Self {
             destination,
