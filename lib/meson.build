@@ -6,7 +6,7 @@ subdir('controlplane')
 subdir('utils')
 subdir('filter') # depends on dataplane and utils libs
 subdir('statemap') # generic layered hash map core
-subdir('filter2') # region-based redesign, parallel to filter (no consumers yet)
+subdir('classify') # compositional classification library, parallel to filter
 subdir('fwstate') # depends on dataplane and statemap libs
 subdir('l3state') # depends on the statemap lib
 subdir('fuzzing')
