@@ -3,7 +3,6 @@ import { Button, Icon, Label, TextInput } from '@gravity-ui/uikit';
 import { Funnel, Pause, Play, Plus } from '@gravity-ui/icons';
 import { PageLayout, PageLoader, ConfigTabStrip, BulkBar, SearchInput, EmptyPagePlaceholder, RowCountDisplay } from '@yanet/core/components';
 import { useConfigListCache, useListNavigation, usePageContribution } from '@yanet/core/hooks';
-import { extractBytes } from '@yanet/core/utils';
 import { useAclDraft } from './useAclDraft';
 import type { Rule } from '@yanet/core/api/acl';
 import { ActionKind } from '@yanet/core/api/acl';
@@ -42,13 +41,8 @@ const statefulRuleRequiredFamilies = (rules: Rule[]): Set<'v4' | 'v6'> => {
         if (!stateful) {
             continue;
         }
-        let hasV4 = false;
-        let hasV6 = false;
-        for (const net of [...(rule.srcs ?? []), ...(rule.dsts ?? [])]) {
-            const len = extractBytes(net.addr)?.length ?? 0;
-            if (len === 4) hasV4 = true;
-            else if (len === 16) hasV6 = true;
-        }
+        const hasV4 = (rule.sources4?.length ?? 0) > 0 || (rule.destinations4?.length ?? 0) > 0;
+        const hasV6 = (rule.sources6?.length ?? 0) > 0 || (rule.destinations6?.length ?? 0) > 0;
         if (hasV4 || hasV6) {
             if (hasV4) required.add('v4');
             if (hasV6) required.add('v6');

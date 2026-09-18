@@ -116,7 +116,7 @@ const RuleDrawer = React.forwardRef<RuleDrawerHandle, RuleDrawerProps>(({
     const hasNoTerminal = draft.actions.length > 0 && terminalIdx === -1;
     const hasUnreachable = terminalIdx !== -1 && terminalIdx < draft.actions.length - 1;
 
-    // Compute classification from draft on every render (cheap — a few extractBytes calls).
+    // Compute classification from draft on every render (cheap).
     const draftClassification = (() => {
         const rule = draftToRule(draft);
         const { isL2, isDead, isDeadIp, isDeadProto } = expandRule(rule);
