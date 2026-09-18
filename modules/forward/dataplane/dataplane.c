@@ -5,7 +5,7 @@
 #include <rte_ether.h>
 #include <rte_ip.h>
 
-#include <lib/filter/query.h>
+#include <lib/classify/query.h>
 
 #include "lib/controlplane/config/econtext.h"
 
@@ -15,11 +15,11 @@
 #include "lib/dataplane/packet/packet.h"
 #include "lib/dataplane/pipeline/pipeline.h"
 
-FILTER_QUERY_DECLARE(filter_vlan, device, vlan);
+CLASSIFY_QUERY_DECLARE(filter_vlan, device, vlan);
 
-FILTER_QUERY_DECLARE(filter_ip4, device, vlan, net4_src, net4_dst);
+CLASSIFY_QUERY_DECLARE(filter_ip4, device, vlan, net4_src, net4_dst);
 
-FILTER_QUERY_DECLARE(filter_ip6, device, vlan, net6_src, net6_dst);
+CLASSIFY_QUERY_DECLARE(filter_ip6, device, vlan, net6_src, net6_dst);
 
 static void
 forward_handle_packets(
@@ -74,7 +74,7 @@ forward_handle_packets(
 		}
 	}
 
-	filter_query(
+	classify_query(
 		&forward_config->filter_vlan,
 		filter_vlan,
 		vlan_packets,
@@ -82,7 +82,7 @@ forward_handle_packets(
 		vlan_idx
 	);
 
-	filter_query(
+	classify_query(
 		&forward_config->filter_ip4,
 		filter_ip4,
 		ip4_packets,
@@ -90,7 +90,7 @@ forward_handle_packets(
 		ip4_idx
 	);
 
-	filter_query(
+	classify_query(
 		&forward_config->filter_ip6,
 		filter_ip6,
 		ip6_packets,
@@ -115,8 +115,10 @@ forward_handle_packets(
 				action = ip4_result[ip4_idx];
 			}
 			++ip4_idx;
-		} else if (packet->network_header.type ==
-			   rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV6)) {
+		} else if (
+			packet->network_header.type ==
+			rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV6)
+		) {
 			if (ip6_result[ip6_idx] < action) {
 				action = ip6_result[ip6_idx];
 			}

@@ -7,7 +7,7 @@
 #include "lib/classify/rule.h"
 
 int
-merge_and_collect_registry(
+classify_merge_and_collect(
 	struct memory_context *memory_context,
 	struct value_registry *registry1,
 	const uint32_t *rule_to_group1,
@@ -20,7 +20,7 @@ merge_and_collect_registry(
 );
 
 int
-collect_rule_map(
+classify_collect_rule_map(
 	struct memory_context *memory_context,
 	struct value_registry *registry,
 	const uint32_t *rule_to_group,

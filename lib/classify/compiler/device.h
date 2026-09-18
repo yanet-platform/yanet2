@@ -33,12 +33,11 @@ classify_attr_device_create(
 	const struct filter_rule **rules,
 	uint32_t rule_count
 ) {
-	struct classify_attr_device_handlers *device_handlers =
-		container_of(
-			attr_handlers,
-			struct classify_attr_device_handlers,
-			attr_handlers
-		);
+	struct classify_attr_device_handlers *device_handlers = container_of(
+		attr_handlers,
+		struct classify_attr_device_handlers,
+		attr_handlers
+	);
 
 	struct filter_compile_device_attr *attr =
 		(struct filter_compile_device_attr *)memory_balloc(
@@ -145,12 +144,11 @@ classify_attr_device_rule_is_any(
 	const struct classify_attr_handlers *attr_handlers,
 	const struct filter_rule *rule
 ) {
-	struct classify_attr_device_handlers *device_handlers =
-		container_of(
-			attr_handlers,
-			struct classify_attr_device_handlers,
-			attr_handlers
-		);
+	struct classify_attr_device_handlers *device_handlers = container_of(
+		attr_handlers,
+		struct classify_attr_device_handlers,
+		attr_handlers
+	);
 
 	(void)attr;
 
@@ -167,12 +165,11 @@ classify_attr_device_rule_iter(
 	classify_attr_iter_cb_func iter_cb_func,
 	void *cb_func_data
 ) {
-	struct classify_attr_device_handlers *device_handlers =
-		container_of(
-			attr_handlers,
-			struct classify_attr_device_handlers,
-			attr_handlers
-		);
+	struct classify_attr_device_handlers *device_handlers = container_of(
+		attr_handlers,
+		struct classify_attr_device_handlers,
+		attr_handlers
+	);
 
 	struct filter_compile_device_attr *device_attr =
 		container_of(attr, struct filter_compile_device_attr, attr);
@@ -311,8 +308,7 @@ filter_rule_get_devices(
 	devices->items = rule->devices;
 }
 
-static const struct classify_attr_device_handlers
-	classify_attr_device = {
-		.attr_handlers = filter_compile_get_devices,
-		.get_devices = filter_rule_get_devices,
+static const struct classify_attr_device_handlers classify_attr_device = {
+	.attr_handlers = filter_compile_get_devices,
+	.get_devices = filter_rule_get_devices,
 };

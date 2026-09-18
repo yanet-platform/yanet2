@@ -112,16 +112,15 @@ filter_u16_commit_iterate(
 }
 
 #define FILTER_U16_RANGES_DECLARE(tag, query_type, query_free)                 \
-	struct classify_attr_##tag {                                     \
-		struct classify_attr attr;                               \
+	struct classify_attr_##tag {                                           \
+		struct classify_attr attr;                                     \
 		struct range_index range_index;                                \
 		struct value_table value_table;                                \
 	};                                                                     \
                                                                                \
-	static inline struct classify_attr *                             \
-	classify_attr_##tag##_create(                                    \
+	static inline struct classify_attr *classify_attr_##tag##_create(      \
 		struct memory_context *memory_context,                         \
-		const struct classify_attr_handlers *attr_handlers,      \
+		const struct classify_attr_handlers *attr_handlers,            \
 		const struct filter_rule **rules,                              \
 		uint32_t rule_count                                            \
 	) {                                                                    \
@@ -132,10 +131,10 @@ filter_u16_commit_iterate(
 				attr_handlers                                  \
 			);                                                     \
                                                                                \
-		struct classify_attr_##tag *attr =                       \
-			(struct classify_attr_##tag *)memory_balloc(     \
+		struct classify_attr_##tag *attr =                             \
+			(struct classify_attr_##tag *)memory_balloc(           \
 				memory_context,                                \
-				sizeof(struct classify_attr_##tag)       \
+				sizeof(struct classify_attr_##tag)             \
 			);                                                     \
 		if (attr == NULL) {                                            \
 			return NULL;                                           \
@@ -200,26 +199,25 @@ filter_u16_commit_iterate(
 		memory_bfree(                                                  \
 			memory_context,                                        \
 			attr,                                                  \
-			sizeof(struct classify_attr_##tag)               \
+			sizeof(struct classify_attr_##tag)                     \
 		);                                                             \
                                                                                \
 		return NULL;                                                   \
 	}                                                                      \
                                                                                \
-	static inline uint32_t classify_attr_##tag##_size(               \
-		const struct classify_attr *attr                         \
+	static inline uint32_t classify_attr_##tag##_size(                     \
+		const struct classify_attr *attr                               \
 	) {                                                                    \
-		struct classify_attr_##tag *u16_attr = container_of(     \
-			attr, struct classify_attr_##tag, attr           \
-		);                                                             \
+		struct classify_attr_##tag *u16_attr =                         \
+			container_of(attr, struct classify_attr_##tag, attr);  \
                                                                                \
 		return u16_attr->value_table.v_dim *                           \
 		       u16_attr->value_table.h_dim;                            \
 	}                                                                      \
                                                                                \
-	static inline int classify_attr_##tag##_rule_is_any(             \
-		const struct classify_attr *attr,                        \
-		const struct classify_attr_handlers *attr_handlers,      \
+	static inline int classify_attr_##tag##_rule_is_any(                   \
+		const struct classify_attr *attr,                              \
+		const struct classify_attr_handlers *attr_handlers,            \
 		const struct filter_rule *rule                                 \
 	) {                                                                    \
 		(void)attr;                                                    \
@@ -237,8 +235,8 @@ filter_u16_commit_iterate(
 		       ranges.items[0].to - ranges.items[0].from == 65535;     \
 	}                                                                      \
                                                                                \
-	static inline uint32_t classify_attr_##tag##_hash(               \
-		const struct classify_attr_handlers *attr_handlers,      \
+	static inline uint32_t classify_attr_##tag##_hash(                     \
+		const struct classify_attr_handlers *attr_handlers,            \
 		const struct filter_rule *rule                                 \
 	) {                                                                    \
 		const struct filter_compile_u16_handlers *u16_handlers =       \
@@ -259,8 +257,8 @@ filter_u16_commit_iterate(
 		return hash;                                                   \
 	}                                                                      \
                                                                                \
-	static inline int classify_attr_##tag##_compare(                 \
-		const struct classify_attr_handlers *attr_handlers,      \
+	static inline int classify_attr_##tag##_compare(                       \
+		const struct classify_attr_handlers *attr_handlers,            \
 		const struct filter_rule *first,                               \
 		const struct filter_rule *second                               \
 	) {                                                                    \
@@ -286,11 +284,11 @@ filter_u16_commit_iterate(
 				      sizeof(*first_ranges.items)) != 0;       \
 	}                                                                      \
                                                                                \
-	static inline int classify_attr_##tag##_rule_iter(               \
-		struct classify_attr *attr,                              \
-		const struct classify_attr_handlers *attr_handlers,      \
+	static inline int classify_attr_##tag##_rule_iter(                     \
+		struct classify_attr *attr,                                    \
+		const struct classify_attr_handlers *attr_handlers,            \
 		const struct filter_rule *rule,                                \
-		classify_attr_iter_cb_func iter_cb_func,                 \
+		classify_attr_iter_cb_func iter_cb_func,                       \
 		void *cb_func_data                                             \
 	) {                                                                    \
 		const struct filter_compile_u16_handlers *u16_handlers =       \
@@ -300,9 +298,8 @@ filter_u16_commit_iterate(
 				attr_handlers                                  \
 			);                                                     \
                                                                                \
-		struct classify_attr_##tag *u16_attr = container_of(     \
-			attr, struct classify_attr_##tag, attr           \
-		);                                                             \
+		struct classify_attr_##tag *u16_attr =                         \
+			container_of(attr, struct classify_attr_##tag, attr);  \
                                                                                \
 		struct filter_u16_ranges ranges;                               \
 		u16_handlers->get_ranges(rule, &ranges);                       \
@@ -349,17 +346,16 @@ filter_u16_commit_iterate(
 		return 0;                                                      \
 	}                                                                      \
                                                                                \
-	static inline int classify_attr_##tag##_iter(                    \
-		struct classify_attr *attr,                              \
-		const struct classify_attr_handlers *attr_handlers,      \
-		classify_attr_iter_cb_func iter_cb_func,                 \
+	static inline int classify_attr_##tag##_iter(                          \
+		struct classify_attr *attr,                                    \
+		const struct classify_attr_handlers *attr_handlers,            \
+		classify_attr_iter_cb_func iter_cb_func,                       \
 		void *cb_func_data                                             \
 	) {                                                                    \
 		(void)attr_handlers;                                           \
                                                                                \
-		struct classify_attr_##tag *u16_attr = container_of(     \
-			attr, struct classify_attr_##tag, attr           \
-		);                                                             \
+		struct classify_attr_##tag *u16_attr =                         \
+			container_of(attr, struct classify_attr_##tag, attr);  \
                                                                                \
 		for (uint32_t idx = 0; idx < u16_attr->value_table.h_dim;      \
 		     ++idx) {                                                  \
@@ -376,13 +372,12 @@ filter_u16_commit_iterate(
 		return 0;                                                      \
 	}                                                                      \
                                                                                \
-	static inline void classify_attr_##tag##_free(                   \
+	static inline void classify_attr_##tag##_free(                         \
 		struct memory_context *memory_context,                         \
-		struct classify_attr *attr                               \
+		struct classify_attr *attr                                     \
 	) {                                                                    \
-		struct classify_attr_##tag *u16_attr = container_of(     \
-			attr, struct classify_attr_##tag, attr           \
-		);                                                             \
+		struct classify_attr_##tag *u16_attr =                         \
+			container_of(attr, struct classify_attr_##tag, attr);  \
                                                                                \
 		range_index_free(&u16_attr->range_index);                      \
 		value_table_free(&u16_attr->value_table);                      \
@@ -390,18 +385,17 @@ filter_u16_commit_iterate(
 		memory_bfree(                                                  \
 			memory_context,                                        \
 			u16_attr,                                              \
-			sizeof(struct classify_attr_##tag)               \
+			sizeof(struct classify_attr_##tag)                     \
 		);                                                             \
 	}                                                                      \
                                                                                \
-	static inline struct classify_query_attr *                               \
-	classify_attr_##tag##_commit(                                    \
+	static inline struct classify_query_attr *                             \
+	classify_attr_##tag##_commit(                                          \
 		struct memory_context *memory_context,                         \
-		struct classify_attr *attr                               \
+		struct classify_attr *attr                                     \
 	) {                                                                    \
-		struct classify_attr_##tag *u16_attr = container_of(     \
-			attr, struct classify_attr_##tag, attr           \
-		);                                                             \
+		struct classify_attr_##tag *u16_attr =                         \
+			container_of(attr, struct classify_attr_##tag, attr);  \
                                                                                \
 		query_type *query_attr = (query_type *)memory_balloc(          \
 			memory_context, sizeof(query_type)                     \
@@ -446,22 +440,21 @@ filter_u16_commit_iterate(
 				commit_ctx.value;                              \
 		}                                                              \
                                                                                \
-		classify_attr_##tag##_free(memory_context, attr);        \
+		classify_attr_##tag##_free(memory_context, attr);              \
                                                                                \
 		return &query_attr->attr;                                      \
 	}                                                                      \
                                                                                \
-	static const struct classify_attr_handlers                       \
-		classify_attr_##tag##_handlers = {                       \
-			.create = classify_attr_##tag##_create,          \
-			.size = classify_attr_##tag##_size,              \
-			.iter = classify_attr_##tag##_iter,              \
-			.rule_is_any =                                         \
-				classify_attr_##tag##_rule_is_any,       \
-			.hash = classify_attr_##tag##_hash,              \
-			.compare = classify_attr_##tag##_compare,        \
-			.rule_iter = classify_attr_##tag##_rule_iter,    \
-			.commit = classify_attr_##tag##_commit,          \
-			.free_compile = classify_attr_##tag##_free,      \
+	static const struct classify_attr_handlers                             \
+		classify_attr_##tag##_handlers = {                             \
+			.create = classify_attr_##tag##_create,                \
+			.size = classify_attr_##tag##_size,                    \
+			.iter = classify_attr_##tag##_iter,                    \
+			.rule_is_any = classify_attr_##tag##_rule_is_any,      \
+			.hash = classify_attr_##tag##_hash,                    \
+			.compare = classify_attr_##tag##_compare,              \
+			.rule_iter = classify_attr_##tag##_rule_iter,          \
+			.commit = classify_attr_##tag##_commit,                \
+			.free_compile = classify_attr_##tag##_free,            \
 			.free_query = query_free,                              \
 	};

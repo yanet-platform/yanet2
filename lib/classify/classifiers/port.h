@@ -19,6 +19,8 @@ classify_query_attr_port_free(
 
 	vline_free(&port_attr->line);
 	memory_bfree(
-		memory_context, port_attr, sizeof(struct classify_query_attr_port)
+		memory_context,
+		port_attr,
+		sizeof(struct classify_query_attr_port)
 	);
 }

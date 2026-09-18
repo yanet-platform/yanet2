@@ -35,6 +35,8 @@ classify_query_attr_net6_free(
 	value_table_free(&net6_attr->comb);
 
 	memory_bfree(
-		memory_context, net6_attr, sizeof(struct classify_query_attr_net6)
+		memory_context,
+		net6_attr,
+		sizeof(struct classify_query_attr_net6)
 	);
 }

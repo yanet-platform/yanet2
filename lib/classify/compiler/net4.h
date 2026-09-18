@@ -35,9 +35,7 @@ classify_attr_net_create(
 	uint32_t rule_count
 ) {
 	struct classify_attr_net4_handlers *net_handlers = container_of(
-		attr_handlers,
-		struct classify_attr_net4_handlers,
-		attr_handlers
+		attr_handlers, struct classify_attr_net4_handlers, attr_handlers
 	);
 
 	struct filter_compile_net_attr *attr = memory_balloc(
@@ -161,9 +159,7 @@ classify_attr_net_rule_is_any(
 ) {
 
 	struct classify_attr_net4_handlers *net_handlers = container_of(
-		attr_handlers,
-		struct classify_attr_net4_handlers,
-		attr_handlers
+		attr_handlers, struct classify_attr_net4_handlers, attr_handlers
 	);
 
 	(void)attr;
@@ -185,9 +181,7 @@ classify_attr_net_iterate(
 	void *cb_func_data
 ) {
 	struct classify_attr_net4_handlers *net_handlers = container_of(
-		attr_handlers,
-		struct classify_attr_net4_handlers,
-		attr_handlers
+		attr_handlers, struct classify_attr_net4_handlers, attr_handlers
 	);
 
 	struct filter_compile_net_attr *net_attr =
@@ -313,12 +307,9 @@ classify_attr_net4_hash(
 	const struct classify_attr_handlers *attr_handlers,
 	const struct filter_rule *rule
 ) {
-	const struct classify_attr_net4_handlers *net_handlers =
-		container_of(
-			attr_handlers,
-			struct classify_attr_net4_handlers,
-			attr_handlers
-		);
+	const struct classify_attr_net4_handlers *net_handlers = container_of(
+		attr_handlers, struct classify_attr_net4_handlers, attr_handlers
+	);
 
 	struct filter_net4s nets;
 	net_handlers->get_net4s(rule, &nets);
@@ -343,12 +334,9 @@ classify_attr_net4_compare(
 	const struct filter_rule *first,
 	const struct filter_rule *second
 ) {
-	const struct classify_attr_net4_handlers *net_handlers =
-		container_of(
-			attr_handlers,
-			struct classify_attr_net4_handlers,
-			attr_handlers
-		);
+	const struct classify_attr_net4_handlers *net_handlers = container_of(
+		attr_handlers, struct classify_attr_net4_handlers, attr_handlers
+	);
 
 	struct filter_net4s first_nets;
 	struct filter_net4s second_nets;
@@ -405,14 +393,12 @@ get_net_dst(const struct filter_rule *rule, struct filter_net4s *net) {
 	net->items = rule->net4.dsts;
 }
 
-static const struct classify_attr_net4_handlers
-	classify_attr_net4_src = {
-		.attr_handlers = filter_compile_get_net,
-		.get_net4s = get_net_src,
+static const struct classify_attr_net4_handlers classify_attr_net4_src = {
+	.attr_handlers = filter_compile_get_net,
+	.get_net4s = get_net_src,
 };
 
-static const struct classify_attr_net4_handlers
-	classify_attr_net4_dst = {
-		.attr_handlers = filter_compile_get_net,
-		.get_net4s = get_net_dst,
+static const struct classify_attr_net4_handlers classify_attr_net4_dst = {
+	.attr_handlers = filter_compile_get_net,
+	.get_net4s = get_net_dst,
 };

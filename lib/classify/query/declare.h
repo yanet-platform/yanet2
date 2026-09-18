@@ -8,9 +8,9 @@
 
 #define CLASSIFY_ATTR_QUERY(name) &classify_query_attr_##name.attr_handlers
 
-#define CLASSIFY_QUERY_DECLARE(tag, ...)                                         \
-	static const struct classify_query_attr_handlers *tag[] = {              \
-		FOR_EACH(CLASSIFY_ATTR_QUERY, __VA_ARGS__),                      \
+#define CLASSIFY_QUERY_DECLARE(tag, ...)                                       \
+	static const struct classify_query_attr_handlers *tag[] = {            \
+		FOR_EACH(CLASSIFY_ATTR_QUERY, __VA_ARGS__),                    \
 	};
 
 struct packet;

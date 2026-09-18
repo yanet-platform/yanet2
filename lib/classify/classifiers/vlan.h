@@ -18,6 +18,8 @@ classify_query_attr_vlan_free(
 
 	value_table_free(&vlan_attr->value_table);
 	memory_bfree(
-		memory_context, vlan_attr, sizeof(struct classify_query_attr_vlan)
+		memory_context,
+		vlan_attr,
+		sizeof(struct classify_query_attr_vlan)
 	);
 }

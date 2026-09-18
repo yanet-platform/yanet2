@@ -70,9 +70,7 @@ error_free_attr:
 	);
 
 error_free:
-	memory_bfree(
-		memory_context, attr, sizeof(struct classify_attr_vlan)
-	);
+	memory_bfree(memory_context, attr, sizeof(struct classify_attr_vlan));
 
 	return NULL;
 }
@@ -117,12 +115,9 @@ classify_attr_vlan_rule_is_any(
 	const struct classify_attr_handlers *attr_handlers,
 	const struct filter_rule *rule
 ) {
-	struct classify_attr_vlan_handlers *vlan_ranges_handlers =
-		container_of(
-			attr_handlers,
-			struct classify_attr_vlan_handlers,
-			attr_handlers
-		);
+	struct classify_attr_vlan_handlers *vlan_ranges_handlers = container_of(
+		attr_handlers, struct classify_attr_vlan_handlers, attr_handlers
+	);
 	(void)attr;
 
 	struct filter_vlan_ranges ranges;
@@ -140,12 +135,9 @@ classify_attr_vlan_rule_iter(
 	classify_attr_iter_cb_func iter_cb_func,
 	void *cb_func_data
 ) {
-	struct classify_attr_vlan_handlers *vlan_ranges_handlers =
-		container_of(
-			attr_handlers,
-			struct classify_attr_vlan_handlers,
-			attr_handlers
-		);
+	struct classify_attr_vlan_handlers *vlan_ranges_handlers = container_of(
+		attr_handlers, struct classify_attr_vlan_handlers, attr_handlers
+	);
 
 	struct classify_attr_vlan *vlan_ranges_attr =
 		container_of(attr, struct classify_attr_vlan, attr);
@@ -222,12 +214,9 @@ classify_attr_vlan_hash(
 	const struct classify_attr_handlers *attr_handlers,
 	const struct filter_rule *rule
 ) {
-	const struct classify_attr_vlan_handlers *vlan_handlers =
-		container_of(
-			attr_handlers,
-			struct classify_attr_vlan_handlers,
-			attr_handlers
-		);
+	const struct classify_attr_vlan_handlers *vlan_handlers = container_of(
+		attr_handlers, struct classify_attr_vlan_handlers, attr_handlers
+	);
 
 	struct filter_vlan_ranges ranges;
 	vlan_handlers->get_vlan_ranges(rule, &ranges);
@@ -246,12 +235,9 @@ classify_attr_vlan_compare(
 	const struct filter_rule *first,
 	const struct filter_rule *second
 ) {
-	const struct classify_attr_vlan_handlers *vlan_handlers =
-		container_of(
-			attr_handlers,
-			struct classify_attr_vlan_handlers,
-			attr_handlers
-		);
+	const struct classify_attr_vlan_handlers *vlan_handlers = container_of(
+		attr_handlers, struct classify_attr_vlan_handlers, attr_handlers
+	);
 
 	struct filter_vlan_ranges first_ranges;
 	struct filter_vlan_ranges second_ranges;
@@ -267,18 +253,17 @@ classify_attr_vlan_compare(
 		      first_ranges.count * sizeof(*first_ranges.items)) != 0;
 }
 
-static const struct classify_attr_handlers
-	classify_attr_vlan_handlers = {
-		.create = classify_attr_vlan_create,
-		.size = classify_attr_vlan_size,
-		.iter = classify_attr_vlan_iter,
-		.rule_is_any = classify_attr_vlan_rule_is_any,
-		.hash = classify_attr_vlan_hash,
-		.compare = classify_attr_vlan_compare,
-		.rule_iter = classify_attr_vlan_rule_iter,
-		.commit = classify_attr_vlan_commit,
-		.free_compile = classify_attr_vlan_free,
-		.free_query = classify_query_attr_vlan_free,
+static const struct classify_attr_handlers classify_attr_vlan_handlers = {
+	.create = classify_attr_vlan_create,
+	.size = classify_attr_vlan_size,
+	.iter = classify_attr_vlan_iter,
+	.rule_is_any = classify_attr_vlan_rule_is_any,
+	.hash = classify_attr_vlan_hash,
+	.compare = classify_attr_vlan_compare,
+	.rule_iter = classify_attr_vlan_rule_iter,
+	.commit = classify_attr_vlan_commit,
+	.free_compile = classify_attr_vlan_free,
+	.free_query = classify_query_attr_vlan_free,
 };
 
 static inline void
@@ -289,8 +274,7 @@ filter_rule_get_vlan_ranges(
 	vlan_ranges->items = rule->vlan_ranges;
 }
 
-static const struct classify_attr_vlan_handlers classify_attr_vlan =
-	{
-		.attr_handlers = classify_attr_vlan_handlers,
-		.get_vlan_ranges = filter_rule_get_vlan_ranges,
+static const struct classify_attr_vlan_handlers classify_attr_vlan = {
+	.attr_handlers = classify_attr_vlan_handlers,
+	.get_vlan_ranges = filter_rule_get_vlan_ranges,
 };

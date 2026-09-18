@@ -10,9 +10,9 @@
 
 #define CLASSIFY_ATTR(name) &classify_attr_##name.attr_handlers
 
-#define CLASSIFY_DECLARE(tag, ...)                                      \
-	static const struct classify_attr_handlers *tag[] = {            \
-		FOR_EACH(CLASSIFY_ATTR, __VA_ARGS__),                    \
+#define CLASSIFY_DECLARE(tag, ...)                                             \
+	static const struct classify_attr_handlers *tag[] = {                  \
+		FOR_EACH(CLASSIFY_ATTR, __VA_ARGS__),                          \
 	};
 
 /*
@@ -73,9 +73,7 @@ typedef struct classify_attr *(*classify_attr_create_func)(
 /*
  * Retrieves count of regions of an attribute
  */
-typedef uint32_t (*classify_attr_size_func)(
-	const struct classify_attr *attr
-);
+typedef uint32_t (*classify_attr_size_func)(const struct classify_attr *attr);
 
 /*
  * Checks if a rule covers the whole definition area
@@ -274,10 +272,7 @@ classify_attr_build(
 		group_ctx.rule = rule;
 		uint32_t hash = attr_handlers->hash(attr_handlers, rule);
 		uint32_t group = hash_index_lookup(
-			&group_index,
-			hash,
-			classify_attr_group_eq,
-			&group_ctx
+			&group_index, hash, classify_attr_group_eq, &group_ctx
 		);
 		if (group == HASH_INDEX_INVALID) {
 			group = group_count;
@@ -343,10 +338,7 @@ classify_attr_build(
 	 */
 
 	if (attr_handlers->iter(
-		    attr,
-		    attr_handlers,
-		    classify_attr_compact,
-		    &remap_table
+		    attr, attr_handlers, classify_attr_compact, &remap_table
 	    )) {
 		remap_table_free(&remap_table);
 		goto error;

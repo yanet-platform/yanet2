@@ -122,10 +122,7 @@ classify_leaf(
 	cls->leaf_handlers = leaf_handlers;
 	cls->rule_groups = rule_groups;
 
-	if (value_registry_init(&cls->registry, memory_context, "classify")) {
-		goto error;
-	}
-
+	// The registry is initialized by the attribute build itself.
 	{
 		struct classify_query_attr *attr = classify_attr_build(
 			handlers,
@@ -273,9 +270,7 @@ classify_join(
 	cls->joint_sides = joint_sides;
 	cls->rule_groups = rule_groups;
 
-	if (value_registry_init(&cls->registry, memory_context, "classify")) {
-		goto error;
-	}
+	// The registry is initialized by the join collection itself.
 
 	// The leaf tapes concatenate: the entries borrow the attribute
 	// classifiers of the inputs.
@@ -365,7 +360,7 @@ classify_join(
 		joint_sides[(cls->joint_count - 1) * 2 + 1] = right_final;
 	}
 
-	if (merge_and_collect_registry(
+	if (classify_merge_and_collect(
 		    memory_context,
 		    &left->registry,
 		    left->rule_groups,
@@ -484,7 +479,7 @@ classify_decode(
 		return NULL;
 	}
 
-	if (collect_rule_map(
+	if (classify_collect_rule_map(
 		    memory_context,
 		    &cls->registry,
 		    cls->rule_groups,
@@ -685,12 +680,22 @@ classify_free(struct classifier *cls) {
 }
 
 /*
- * Releases the filter; the classifier tree and decoder it was built
- * from are released separately, after every filter built from them.
+ * Releases the filter with its decoder; the classifier tree it was
+ * built from is released separately, after every filter built from it.
  */
 static inline void
 classify_filter_free(struct classify_filter *filter) {
 	struct memory_context *memory_context = &filter->memory_context;
+
+	// The decoder was allocated from the parent of the filter context,
+	// so it is released through the same parent.
+	struct memory_context *parent = ADDR_OF(&filter->memory_context.parent);
+	struct vline *rule_map = ADDR_OF(&filter->rule_map);
+	if (rule_map != NULL) {
+		vline_free(rule_map);
+		memory_bfree(parent, rule_map, sizeof(struct vline));
+		SET_OFFSET_OF(&filter->rule_map, NULL);
+	}
 
 	if (ADDR_OF(&filter->attrs) != NULL) {
 		memory_bfree(

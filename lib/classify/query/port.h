@@ -112,14 +112,14 @@ static const struct classify_query_attr_handlers filter_query_port = {
 	.lookup = classify_query_attr_port_lookup,
 };
 
-static const struct classify_query_attr_port_handlers classify_query_attr_port_src =
-	{
+static const struct classify_query_attr_port_handlers
+	classify_query_attr_port_src = {
 		.attr_handlers = filter_query_port,
 		.get_port = filter_packet_get_port_src_batch,
 };
 
-static const struct classify_query_attr_port_handlers classify_query_attr_port_dst =
-	{
+static const struct classify_query_attr_port_handlers
+	classify_query_attr_port_dst = {
 		.attr_handlers = filter_query_port,
 		.get_port = filter_packet_get_port_dst_batch,
 };

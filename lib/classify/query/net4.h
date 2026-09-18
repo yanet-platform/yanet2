@@ -89,14 +89,14 @@ static const struct classify_query_attr_handlers filter_query_net4 = {
 	.lookup = classify_query_attr_net4_lookup,
 };
 
-static const struct classify_query_attr_net4_handlers classify_query_attr_net4_src =
-	{
+static const struct classify_query_attr_net4_handlers
+	classify_query_attr_net4_src = {
 		.attr_handlers = filter_query_net4,
 		.get_net4 = filter_packet_get_net4_src_batch,
 };
 
-static const struct classify_query_attr_net4_handlers classify_query_attr_net4_dst =
-	{
+static const struct classify_query_attr_net4_handlers
+	classify_query_attr_net4_dst = {
 		.attr_handlers = filter_query_net4,
 		.get_net4 = filter_packet_get_net4_dst_batch,
 };

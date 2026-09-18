@@ -4,7 +4,7 @@
 #include "lib/classify/classify.h"
 
 int
-collect_rule_map(
+classify_collect_rule_map(
 	struct memory_context *memory_context,
 	struct value_registry *registry,
 	const uint32_t *rule_to_group,
@@ -126,7 +126,7 @@ value_table_collect_action(uint32_t v1, uint32_t v2, uint32_t idx, void *data) {
  * a rule without a value on either side keeps the invalid group mark.
  */
 int
-merge_and_collect_registry(
+classify_merge_and_collect(
 	struct memory_context *memory_context,
 	struct value_registry *registry1,
 	const uint32_t *rule_to_group1,

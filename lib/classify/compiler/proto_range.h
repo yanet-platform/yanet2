@@ -26,8 +26,7 @@ filter_rule_get_u16_ranges_proto(
 	ranges->items = (const struct filter_u16_span *)rule->transport.protos;
 }
 
-static const struct filter_compile_u16_handlers
-	classify_attr_proto_range = {
-		.attr_handlers = classify_attr_proto_handlers,
-		.get_ranges = filter_rule_get_u16_ranges_proto,
+static const struct filter_compile_u16_handlers classify_attr_proto_range = {
+	.attr_handlers = classify_attr_proto_handlers,
+	.get_ranges = filter_rule_get_u16_ranges_proto,
 };

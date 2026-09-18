@@ -49,7 +49,8 @@ static const struct classify_query_attr_handlers filter_query_vlan_handlers = {
 	.lookup = classify_query_attr_vlan_lookup,
 };
 
-static const struct classify_query_attr_vlan_handlers classify_query_attr_vlan = {
-	.attr_handlers = filter_query_vlan_handlers,
-	.get_vlan = filter_packet_get_vlan,
+static const struct classify_query_attr_vlan_handlers classify_query_attr_vlan =
+	{
+		.attr_handlers = filter_query_vlan_handlers,
+		.get_vlan = filter_packet_get_vlan,
 };

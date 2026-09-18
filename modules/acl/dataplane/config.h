@@ -2,9 +2,10 @@
 
 #include "lib/controlplane/config/cp_module.h"
 
-#include "lib/filter/classifiers/net6.h"
-#include "lib/filter/filter.h"
+#include "lib/classify/classify.h"
 #include "lib/statemap/fwtable.h"
+
+struct classifier;
 
 struct counter_value_handle;
 
@@ -55,11 +56,22 @@ struct acl_prepared {
 struct acl_module_config {
 	struct cp_module cp_module;
 
-	struct filter filter_ip4;
-	struct filter filter_ip4_port;
-	struct filter filter_ip6;
-	struct filter filter_ip6_port;
-	struct filter filter_vlan;
+	struct classify_filter filter_ip4;
+	struct classify_filter filter_ip4_port;
+	struct classify_filter filter_ip6;
+	struct classify_filter filter_ip6_port;
+	struct classify_filter filter_vlan;
+	// Control plane only: the classifier trees the filters borrow their
+	// tapes from, released after the filters at config destroy. The two
+	// network cores are shared between the ip and the ip port filters of
+	// their family and stay alive through the reference the joins hold.
+	struct classifier *classifier_vlan;
+	struct classifier *classifier_v4_core;
+	struct classifier *classifier_ip4;
+	struct classifier *classifier_ip4_port;
+	struct classifier *classifier_v6_core;
+	struct classifier *classifier_ip6;
+	struct classifier *classifier_ip6_port;
 
 	uint64_t target_count;
 	struct acl_target *targets;
@@ -102,14 +114,4 @@ struct acl_module_config {
 	uint64_t action_invalid_counter_id;
 	uint64_t action_non_term_counter_id;
 	uint64_t sync_sent_counter_id;
-
-	// Shared v6 half-address classification for the two v6 filters.
-	//
-	// Built only when both filter_ip6 and filter_ip6_port compiled
-	// non-empty, so a single union trie walk classifies the address
-	// halves for both of them. Left all-zero, including a NULL
-	// net6_share_src.remap_hi_a, when there is no shared classification
-	// to use.
-	struct net6_share_dir net6_share_src;
-	struct net6_share_dir net6_share_dst;
 };

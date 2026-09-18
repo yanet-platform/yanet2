@@ -3,8 +3,8 @@
 #include "common/container_of.h"
 #include "common/network.h"
 
-#include "lib/dataplane/packet/packet.h"
 #include "lib/classify/classifiers/net6.h"
+#include "lib/dataplane/packet/packet.h"
 
 #include "declare.h"
 
@@ -102,14 +102,14 @@ static const struct classify_query_attr_handlers filter_query_net6 = {
 	.lookup = classify_query_attr_net6_lookup,
 };
 
-static const struct classify_query_attr_net6_handlers classify_query_attr_net6_src =
-	{
+static const struct classify_query_attr_net6_handlers
+	classify_query_attr_net6_src = {
 		.attr_handlers = filter_query_net6,
 		.get_net6 = filter_packet_get_net6_src_batch,
 };
 
-static const struct classify_query_attr_net6_handlers classify_query_attr_net6_dst =
-	{
+static const struct classify_query_attr_net6_handlers
+	classify_query_attr_net6_dst = {
 		.attr_handlers = filter_query_net6,
 		.get_net6 = filter_packet_get_net6_dst_batch,
 };

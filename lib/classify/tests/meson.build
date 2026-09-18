@@ -57,7 +57,7 @@ bench_common_deps = [
   libdpdk_dep,
 ]
 
-bench_acl_production = executable(
+executable(
   'bench_acl_production',
   ['bench/bench_acl_production.c'],
   c_args: yanet_c_args,
@@ -67,9 +67,30 @@ bench_acl_production = executable(
   include_directories: include_directories('.'),
 )
 
-bench_acl_core = executable(
+executable(
   'bench_acl_core',
   ['bench/bench_acl_core.c'],
+  c_args: yanet_c_args,
+  link_args: yanet_link_args,
+  dependencies: [bench_common_deps, lib_classify_compiler_dep],
+  link_language: 'c',
+  include_directories: include_directories('.'),
+)
+
+# forward module benchmarks, same shape as the acl pair above.
+executable(
+  'bench_forward_production',
+  ['bench/bench_forward_production.c'],
+  c_args: yanet_c_args,
+  link_args: yanet_link_args,
+  dependencies: [bench_common_deps, lib_filter_compiler_dep],
+  link_language: 'c',
+  include_directories: include_directories('.'),
+)
+
+executable(
+  'bench_forward_classify',
+  ['bench/bench_forward_classify.c'],
   c_args: yanet_c_args,
   link_args: yanet_link_args,
   dependencies: [bench_common_deps, lib_classify_compiler_dep],

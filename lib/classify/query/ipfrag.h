@@ -28,17 +28,18 @@ classify_query_attr_ipfrag_lookup(
 	}
 }
 
-static const struct classify_query_attr_handlers filter_query_ipfrag_handlers = {
-	.lookup = classify_query_attr_ipfrag_lookup,
+static const struct classify_query_attr_handlers filter_query_ipfrag_handlers =
+	{
+		.lookup = classify_query_attr_ipfrag_lookup,
 };
 
-// Wrapper so CLASSIFY_ATTR_QUERY can reference classify_query_attr_ipfrag via its
-// attr_handlers member, matching the other attributes' instance shape.
+// Wrapper so CLASSIFY_ATTR_QUERY can reference classify_query_attr_ipfrag via
+// its attr_handlers member, matching the other attributes' instance shape.
 struct classify_query_attr_ipfrag_handlers {
 	struct classify_query_attr_handlers attr_handlers;
 };
 
-static const struct classify_query_attr_ipfrag_handlers classify_query_attr_ipfrag =
-	{
+static const struct classify_query_attr_ipfrag_handlers
+	classify_query_attr_ipfrag = {
 		.attr_handlers = filter_query_ipfrag_handlers,
 };

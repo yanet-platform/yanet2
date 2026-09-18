@@ -19,6 +19,8 @@ classify_query_attr_net4_free(
 
 	lpm_free(&net4_attr->lpm);
 	memory_bfree(
-		memory_context, net4_attr, sizeof(struct classify_query_attr_net4)
+		memory_context,
+		net4_attr,
+		sizeof(struct classify_query_attr_net4)
 	);
 }

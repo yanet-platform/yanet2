@@ -35,8 +35,7 @@ classify_attr_ipfrag_create(
 
 	struct classify_attr_ipfrag *attr =
 		(struct classify_attr_ipfrag *)memory_balloc(
-			memory_context,
-			sizeof(struct classify_attr_ipfrag)
+			memory_context, sizeof(struct classify_attr_ipfrag)
 		);
 	if (attr == NULL) {
 		return NULL;
@@ -69,9 +68,7 @@ error_free_attr:
 	);
 
 error_free:
-	memory_bfree(
-		memory_context, attr, sizeof(struct classify_attr_ipfrag)
-	);
+	memory_bfree(memory_context, attr, sizeof(struct classify_attr_ipfrag));
 
 	return NULL;
 }
@@ -188,9 +185,7 @@ classify_attr_ipfrag_free(
 	}
 
 	memory_bfree(
-		memory_context,
-		ipfrag_attr,
-		sizeof(struct classify_attr_ipfrag)
+		memory_context, ipfrag_attr, sizeof(struct classify_attr_ipfrag)
 	);
 }
 
@@ -228,18 +223,17 @@ classify_attr_ipfrag_compare(
 	return first->fragment != second->fragment;
 }
 
-static const struct classify_attr_handlers
-	classify_attr_ipfrag_handlers = {
-		.create = classify_attr_ipfrag_create,
-		.size = classify_attr_ipfrag_size,
-		.iter = classify_attr_ipfrag_iter,
-		.rule_is_any = classify_attr_ipfrag_rule_is_any,
-		.hash = classify_attr_ipfrag_hash,
-		.compare = classify_attr_ipfrag_compare,
-		.rule_iter = classify_attr_ipfrag_rule_iter,
-		.commit = classify_attr_ipfrag_commit,
-		.free_compile = classify_attr_ipfrag_free,
-		.free_query = classify_query_attr_ipfrag_free,
+static const struct classify_attr_handlers classify_attr_ipfrag_handlers = {
+	.create = classify_attr_ipfrag_create,
+	.size = classify_attr_ipfrag_size,
+	.iter = classify_attr_ipfrag_iter,
+	.rule_is_any = classify_attr_ipfrag_rule_is_any,
+	.hash = classify_attr_ipfrag_hash,
+	.compare = classify_attr_ipfrag_compare,
+	.rule_iter = classify_attr_ipfrag_rule_iter,
+	.commit = classify_attr_ipfrag_commit,
+	.free_compile = classify_attr_ipfrag_free,
+	.free_query = classify_query_attr_ipfrag_free,
 };
 
 // Wrapper so CLASSIFY_ATTR can reference classify_attr_ipfrag via
@@ -248,7 +242,6 @@ struct classify_attr_ipfrag_handlers {
 	struct classify_attr_handlers attr_handlers;
 };
 
-static const struct classify_attr_ipfrag_handlers
-	classify_attr_ipfrag = {
-		.attr_handlers = classify_attr_ipfrag_handlers,
+static const struct classify_attr_ipfrag_handlers classify_attr_ipfrag = {
+	.attr_handlers = classify_attr_ipfrag_handlers,
 };

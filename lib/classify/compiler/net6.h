@@ -443,12 +443,11 @@ classify_attr_net6s_create(
 	const struct filter_rule **rules,
 	uint32_t rule_count
 ) {
-	struct classify_attr_net6s_handlers *net6s_handlers =
-		container_of(
-			attr_handlers,
-			struct classify_attr_net6s_handlers,
-			attr_handlers
-		);
+	struct classify_attr_net6s_handlers *net6s_handlers = container_of(
+		attr_handlers,
+		struct classify_attr_net6s_handlers,
+		attr_handlers
+	);
 
 	struct filter_compile_net6s_attr *attr = memory_balloc(
 		memory_context, sizeof(struct filter_compile_net6s_attr)
@@ -645,10 +644,7 @@ classify_attr_net6s_create(
 			remap_table_new_gen(&remap_table);
 
 			if (filter_net6_net_regions_iter(
-				    attr,
-				    net,
-				    classify_attr_touch,
-				    &remap_table
+				    attr, net, classify_attr_touch, &remap_table
 			    )) {
 				remap_table_free(&remap_table);
 				goto error_free_row_split;
@@ -982,12 +978,11 @@ classify_attr_net6s_rule_is_any(
 ) {
 	(void)attr;
 
-	struct classify_attr_net6s_handlers *net6s_handlers =
-		container_of(
-			attr_handlers,
-			struct classify_attr_net6s_handlers,
-			attr_handlers
-		);
+	struct classify_attr_net6s_handlers *net6s_handlers = container_of(
+		attr_handlers,
+		struct classify_attr_net6s_handlers,
+		attr_handlers
+	);
 
 	struct filter_net6s nets;
 	net6s_handlers->get_net6s(rule, &nets);
@@ -1003,12 +998,11 @@ classify_attr_net6s_rule_iter(
 	classify_attr_iter_cb_func iter_cb_func,
 	void *cb_func_data
 ) {
-	struct classify_attr_net6s_handlers *net6s_handlers =
-		container_of(
-			attr_handlers,
-			struct classify_attr_net6s_handlers,
-			attr_handlers
-		);
+	struct classify_attr_net6s_handlers *net6s_handlers = container_of(
+		attr_handlers,
+		struct classify_attr_net6s_handlers,
+		attr_handlers
+	);
 
 	struct filter_compile_net6s_attr *net6s_attr =
 		container_of(attr, struct filter_compile_net6s_attr, attr);
@@ -1112,11 +1106,14 @@ classify_attr_net6s_free(
 		);
 	}
 
+	// The uniform line is compile side scratch: it is released here in
+	// every path, including the commit one where the query side survives.
+	vline_free(&net6s_attr->uniform);
+
 	if (net6s_attr->query_attr != NULL) {
 		lpm_free(&net6s_attr->query_attr->hi);
 		lpm_free(&net6s_attr->query_attr->lo);
 		value_table_free(&net6s_attr->query_attr->comb);
-		vline_free(&net6s_attr->uniform);
 
 		memory_bfree(
 			memory_context,
@@ -1406,14 +1403,12 @@ get_net6s_dst(const struct filter_rule *rule, struct filter_net6s *net6s) {
 	net6s->items = rule->net6.dsts;
 }
 
-static const struct classify_attr_net6s_handlers
-	classify_attr_net6_src = {
-		.attr_handlers = filter_compile_get_net6s,
-		.get_net6s = get_net6s_src,
+static const struct classify_attr_net6s_handlers classify_attr_net6_src = {
+	.attr_handlers = filter_compile_get_net6s,
+	.get_net6s = get_net6s_src,
 };
 
-static const struct classify_attr_net6s_handlers
-	classify_attr_net6_dst = {
-		.attr_handlers = filter_compile_get_net6s,
-		.get_net6s = get_net6s_dst,
+static const struct classify_attr_net6s_handlers classify_attr_net6_dst = {
+	.attr_handlers = filter_compile_get_net6s,
+	.get_net6s = get_net6s_dst,
 };
