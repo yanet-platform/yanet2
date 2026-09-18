@@ -183,7 +183,8 @@ struct virtual_service {
 	uint64_t counter_ring_empty;
 	uint64_t counter_real_disabled;
 	uint64_t counter_icmp_replied;
-	// Per-real throughput counter id per real server entry.
+	// Per-real throughput counter id per real server entry, a relative
+	// pointer into object shared memory (NULL without real servers).
 	uint64_t *real_counter_ids;
 
 	// Per-family classification of incoming packets.

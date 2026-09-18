@@ -918,21 +918,25 @@ func TestL3b_ServiceAndRealCounters(t *testing.T) {
 	send(accepted1)
 	send(accepted2)
 
+	// A repeat of the first flow rides the session pin straight to its
+	// real: the pinned path counts on real 0 without consulting the ring.
+	send(accepted1)
+
 	// A flow outside the source filter's port range is rejected by it.
 	filtered := packetOf("10.0.0.3", 3333, 80)
 	send(filtered)
 
 	inPackets, inBytes := counter("incoming")
-	require.EqualValues(t, 3, inPackets)
-	require.Equal(t, frameLen(accepted1)*2+frameLen(filtered), inBytes)
+	require.EqualValues(t, 4, inPackets)
+	require.Equal(t, frameLen(accepted1)*3+frameLen(filtered), inBytes)
 
 	filterPackets, filterBytes := counter("filter_rejected")
 	require.EqualValues(t, 1, filterPackets)
 	require.Equal(t, frameLen(filtered), filterBytes)
 
 	realPackets, realBytes := counter("real/0")
-	require.EqualValues(t, 2, realPackets)
-	require.Equal(t, frameLen(accepted1)*2, realBytes)
+	require.EqualValues(t, 3, realPackets)
+	require.Equal(t, frameLen(accepted1)*3, realBytes)
 
 	otherPackets, _ := counter("real/1")
 	require.EqualValues(t, 0, otherPackets)

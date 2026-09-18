@@ -272,23 +272,29 @@ l3b_virtual_service_create(
 	);
 	vs->real_counter_ids = NULL;
 	if (vs->real_server_count > 0) {
-		vs->real_counter_ids = (uint64_t *)memory_balloc(
+		uint64_t *real_counter_ids = (uint64_t *)memory_balloc(
 			memory_context, sizeof(uint64_t) * vs->real_server_count
 		);
-		if (vs->real_counter_ids == NULL) {
+		if (real_counter_ids == NULL) {
 			yanet_error_add(
 				err, "failed to allocate real counters"
 			);
 			goto error_object;
 		}
-	}
-	for (uint32_t real_idx = 0; real_idx < vs->real_server_count;
-	     ++real_idx) {
-		char name[COUNTER_NAME_LEN] = {0};
-		snprintf(name, sizeof(name), "real/%" PRIu32, real_idx);
-		vs->real_counter_ids[real_idx] = counter_registry_register(
-			&object->cp_object.counter_registry, name, 2, err
-		);
+
+		for (uint32_t real_idx = 0; real_idx < vs->real_server_count;
+		     ++real_idx) {
+			char name[COUNTER_NAME_LEN] = {0};
+			snprintf(name, sizeof(name), "real/%" PRIu32, real_idx);
+			real_counter_ids[real_idx] = counter_registry_register(
+				&object->cp_object.counter_registry,
+				name,
+				2,
+				err
+			);
+		}
+
+		SET_OFFSET_OF(&vs->real_counter_ids, real_counter_ids);
 	}
 
 	// Backends.
@@ -383,7 +389,7 @@ error_real_servers:
 	if (vs->real_counter_ids != NULL) {
 		memory_bfree(
 			memory_context,
-			vs->real_counter_ids,
+			ADDR_OF(&vs->real_counter_ids),
 			sizeof(uint64_t) * vs->real_server_count
 		);
 	}
@@ -428,7 +434,7 @@ l3b_virtual_service_object_destroy(struct cp_object *cp_object) {
 	if (vs->real_counter_ids != NULL) {
 		memory_bfree(
 			memory_context,
-			vs->real_counter_ids,
+			ADDR_OF(&vs->real_counter_ids),
 			sizeof(uint64_t) * vs->real_server_count
 		);
 	}
