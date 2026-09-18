@@ -60,10 +60,14 @@ struct filter_compile_net6s_attr {
 	struct range_index ri_lo;
 
 	// Rows of the join table with a low half distinction; the compile
-	// time map drives the region enumeration and the commit, the query
-	// reads the two dimensional mark from the uniform line instead.
+	// time map drives the region enumeration and the commit packing.
 	uint8_t *row_split;
 	uint32_t row_count;
+	// Whole row values of the enumeration: a network covering whole
+	// rows through a wildcard low half touches the single line value
+	// instead of every cell of the row. The line dies at commit, the
+	// resolved classes move into the high half trie values.
+	struct vline uniform;
 
 	struct hash_index net_index;
 	struct net6 *nets;
@@ -354,7 +358,7 @@ filter_net6_net_regions_iter(
 	const uint32_t *values_lo = ADDR_OF(&attr->ri_lo.values);
 	struct value_table *comb = &attr->query_attr->comb;
 	const uint8_t *row_split = attr->row_split;
-	struct vline *uniform = &attr->query_attr->uniform;
+	struct vline *uniform = &attr->uniform;
 
 	const int full_lo = bounds[2] == 0 && bounds[3] == attr->ri_lo.count;
 
@@ -570,7 +574,7 @@ filter_compile_attr_net6s_create(
 
 	attr->row_count = attr->query_attr->comb.v_dim;
 	if (vline_init(
-		    &attr->query_attr->uniform,
+		    &attr->uniform,
 		    memory_context,
 		    "filter:net6:rows",
 		    attr->row_count
@@ -658,8 +662,7 @@ filter_compile_attr_net6s_create(
 		// line key left beside the compacted cell ids would collide
 		// with an unrelated cell region.
 		for (uint32_t row = 0; row < attr->row_count; ++row) {
-			uint32_t *value =
-				vline_get_ptr(&attr->query_attr->uniform, row);
+			uint32_t *value = vline_get_ptr(&attr->uniform, row);
 			*value = remap_table_compacted(&remap_table, *value);
 		}
 		remap_table_free(&remap_table);
@@ -906,7 +909,7 @@ error_free_row_split:
 	}
 
 error_free_uniform:
-	vline_free(&attr->query_attr->uniform);
+	vline_free(&attr->uniform);
 
 error_free_comb:
 	value_table_free(&attr->query_attr->comb);
@@ -1113,7 +1116,7 @@ filter_compile_attr_net6s_free(
 		lpm_free(&net6s_attr->query_attr->hi);
 		lpm_free(&net6s_attr->query_attr->lo);
 		value_table_free(&net6s_attr->query_attr->comb);
-		vline_free(&net6s_attr->query_attr->uniform);
+		vline_free(&net6s_attr->uniform);
 
 		memory_bfree(
 			memory_context,
@@ -1127,41 +1130,201 @@ filter_compile_attr_net6s_free(
 	);
 }
 
+// Rebuild helper of the commit below: the high half trie value walk
+// over the region boundaries with the values resolved per region.
+struct net6_lpm_revalue_ctx {
+	struct lpm *lpm;
+	const uint32_t *values;
+	uint8_t prev_from[LPM_KEY_SIZE_MAX];
+	uint32_t prev_value;
+};
+
+static inline int
+net6_lpm_revalue_cb(
+	uint8_t key_size, const uint8_t *from, uint32_t index, void *data
+) {
+	struct net6_lpm_revalue_ctx *ctx = data;
+
+	if (ctx->prev_value != LPM_VALUE_INVALID) {
+		uint8_t to[key_size];
+		memcpy(to, from, key_size);
+		filter_key_dec(key_size, to);
+		if (lpm_insert(
+			    ctx->lpm,
+			    key_size,
+			    ctx->prev_from,
+			    to,
+			    ctx->prev_value
+		    )) {
+			return -1;
+		}
+	}
+
+	memcpy(ctx->prev_from, from, key_size);
+	ctx->prev_value = ctx->values[index];
+	return 0;
+}
+
+// Overwrites the high half trie values in place: every region interval
+// receives its resolved value, a uniform region its final class, a
+// split region its marked dense row.
+static inline int
+net6_lpm_revalue(
+	struct lpm *lpm, const struct range_index *ri, const uint32_t *values
+) {
+	struct net6_lpm_revalue_ctx ctx;
+	ctx.lpm = lpm;
+	ctx.values = values;
+	ctx.prev_value = LPM_VALUE_INVALID;
+
+	if (radix_walk(&ri->radix, 8, net6_lpm_revalue_cb, &ctx)) {
+		return -1;
+	}
+
+	if (ctx.prev_value != LPM_VALUE_INVALID) {
+		uint8_t to[8];
+		memset(to, 0xff, 8);
+		if (lpm_insert(lpm, 8, ctx.prev_from, to, ctx.prev_value)) {
+			return -1;
+		}
+	}
+
+	return 0;
+}
+
 static inline struct filter_query_attr *
 filter_compile_attr_net6s_commit(
 	struct memory_context *memory_context, struct filter_compile_attr *attr
 ) {
-	(void)memory_context;
 	struct filter_compile_net6s_attr *net6s_attr =
 		container_of(attr, struct filter_compile_net6s_attr, attr);
 
 	/*
 	 * The compile stages assign the final class values to the combined
-	 * regions; the join table cells and the uniform row values still
-	 * hold the region identifiers and resolve through the region
-	 * storage. A row of a low half distinction takes the two
-	 * dimensional mark instead, so the lookup finishes with the line
-	 * alone for every other row. Cells of a uniform row keep the
-	 * initial region and are never read.
+	 * regions; the cells and the whole row values still hold the
+	 * region identifiers. A row without any low half distinction
+	 * resolves into its final class carried by the high half trie
+	 * value itself, so the lookup finishes after the high half walk;
+	 * the rows of a low half distinction pack densely into a rebuilt
+	 * join table referenced from the marked trie values, and the cells
+	 * of the uniform rows are never read again.
 	 */
 	struct filter_query_attr_net6 *query_attr = net6s_attr->query_attr;
 	struct value_table *comb = &query_attr->comb;
-	for (uint32_t v_idx = 0; v_idx < comb->v_dim; ++v_idx) {
-		for (uint32_t h_idx = 0; h_idx < comb->h_dim; ++h_idx) {
-			uint32_t *value =
-				value_table_get_ptr(comb, v_idx, h_idx);
-			*value = net6s_attr->region_values[*value];
+
+	// The trie walk below delivers region ordinals, so the resolved
+	// values are indexed by ordinal and reach the row of every ordinal
+	// through the region values of the partition.
+	const uint32_t *hi_values = ADDR_OF(&net6s_attr->ri_hi.values);
+	uint32_t hi_count = net6s_attr->ri_hi.count;
+
+	uint32_t *dense_of_row = (uint32_t *)memory_balloc(
+		memory_context, sizeof(uint32_t) * net6s_attr->row_count
+	);
+	uint32_t *lpm_values = (uint32_t *)memory_balloc(
+		memory_context, sizeof(uint32_t) * (hi_count ? hi_count : 1)
+	);
+	if (dense_of_row == NULL || lpm_values == NULL) {
+		if (dense_of_row != NULL) {
+			memory_bfree(
+				memory_context,
+				dense_of_row,
+				sizeof(uint32_t) * net6s_attr->row_count
+			);
 		}
+		return NULL;
 	}
 
-	for (uint32_t row = 0; row < net6s_attr->row_count; ++row) {
-		uint32_t *value = vline_get_ptr(&query_attr->uniform, row);
+	// A region value repeats across the ordinals of the deduplicated
+	// partition, so a dense row is assigned per row and every ordinal
+	// of the row shares the assigned one.
+	memset(dense_of_row, 0xff, sizeof(uint32_t) * net6s_attr->row_count);
+
+	uint32_t dense_count = 0;
+	for (uint32_t idx = 0; idx < hi_count; ++idx) {
+		uint32_t row = hi_values[idx];
 		if (net6s_attr->row_split[row]) {
-			*value = FILTER_NET6_ROW_2D;
+			if (dense_of_row[row] == 0xffffffffu) {
+				dense_of_row[row] = dense_count;
+				++dense_count;
+			}
+			lpm_values[idx] =
+				FILTER_NET6_ROW_MARK | dense_of_row[row];
 			continue;
 		}
 
-		*value = net6s_attr->region_values[*value];
+		lpm_values[idx] = net6s_attr->region_values[vline_get(
+			&net6s_attr->uniform, row
+		)];
+	}
+
+	if (dense_count != 0) {
+		struct value_table dense;
+		if (value_table_init(
+			    &dense,
+			    memory_context,
+			    "filter:net6",
+			    dense_count,
+			    comb->h_dim
+		    )) {
+			memory_bfree(
+				memory_context,
+				dense_of_row,
+				sizeof(uint32_t) * net6s_attr->row_count
+			);
+			memory_bfree(
+				memory_context,
+				lpm_values,
+				sizeof(uint32_t) * (hi_count ? hi_count : 1)
+			);
+			return NULL;
+		}
+
+		for (uint32_t row = 0; row < net6s_attr->row_count; ++row) {
+			if (!net6s_attr->row_split[row]) {
+				continue;
+			}
+
+			uint32_t dense_row = dense_of_row[row];
+			for (uint32_t h_idx = 0; h_idx < comb->h_dim; ++h_idx) {
+				*value_table_get_ptr(&dense, dense_row, h_idx) =
+					net6s_attr->region_values
+						[*value_table_get_ptr(
+							comb, row, h_idx
+						)];
+			}
+		}
+
+		value_table_free(comb);
+		// Field by field: the table carries relative pointers that a
+		// struct copy would strand.
+		comb->v_dim = dense.v_dim;
+		comb->h_dim = dense.h_dim;
+		SET_OFFSET_OF(&comb->values, ADDR_OF(&dense.values));
+		SET_OFFSET_OF(
+			&comb->memory_context, ADDR_OF(&dense.memory_context)
+		);
+	} else {
+		value_table_free(comb);
+	}
+
+	int revalue_rc = net6_lpm_revalue(
+		&query_attr->hi, &net6s_attr->ri_hi, lpm_values
+	);
+
+	memory_bfree(
+		memory_context,
+		dense_of_row,
+		sizeof(uint32_t) * net6s_attr->row_count
+	);
+	memory_bfree(
+		memory_context,
+		lpm_values,
+		sizeof(uint32_t) * (hi_count ? hi_count : 1)
+	);
+
+	if (revalue_rc) {
+		return NULL;
 	}
 
 	net6s_attr->query_attr = NULL;

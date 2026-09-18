@@ -47,24 +47,22 @@ filter_query_attr_net6_lookup(
 	uint8_t addrs[packet_count][NET6_LEN];
 	net6_handlers->get_net6(packets, addrs[0], packet_count);
 
-	// A high half region without any low half distinction carries its
-	// result class in the uniform line and the lookup finishes with
-	// the single line read; the two dimensional mark falls through to
-	// the low half lookup and the join table read.
-	struct vline *uniform = (struct vline *)&attr_net6->uniform;
-
+	// The high half value carries the result class of a row without
+	// any low half distinction by itself; a marked value carries the
+	// dense join table row behind the mark and only then the low half
+	// walk and the table read happen.
 	for (uint32_t idx = 0; idx < packet_count; ++idx) {
 		const uint8_t *addr = addrs[idx];
 		uint32_t hi = lpm8_lookup(&attr_net6->hi, addr);
-
-		uint32_t scalar = vline_get(uniform, hi);
-		if (scalar != FILTER_NET6_ROW_2D) {
-			results[idx] = scalar;
+		if (!(hi & FILTER_NET6_ROW_MARK)) {
+			results[idx] = hi;
 			continue;
 		}
 
 		uint32_t lo = lpm8_lookup(&attr_net6->lo, addr + 8);
-		results[idx] = *value_table_get_ptr(&attr_net6->comb, hi, lo);
+		results[idx] = *value_table_get_ptr(
+			&attr_net6->comb, hi & ~FILTER_NET6_ROW_MARK, lo
+		);
 	}
 }
 

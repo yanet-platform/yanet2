@@ -5,21 +5,22 @@
 #include "common/value.h"
 #include "lib/filter2/filter.h"
 
-// Marks a high half region whose row needs the two dimensional join
-// table lookup; every other entry of the uniform line below carries the
-// row result class directly.
-#define FILTER_NET6_ROW_2D 0xffffffffu
+// Marks a high half region whose row needs the two dimensional lookup:
+// the high half trie value carries the final result class directly for
+// every other region, a marked value carries the dense row of the join
+// table behind the mark. The trie stores its values shifted left by
+// one, so the mark lives in the top value bit the trie preserves and
+// the classes and dense rows stay below it.
+#define FILTER_NET6_ROW_MARK 0x40000000u
 
 struct filter_query_attr_net6 {
 	struct filter_query_attr attr;
+	// The high half trie value is the final result class, or the dense
+	// join table row behind FILTER_NET6_ROW_MARK; the table itself
+	// holds only the rows referenced from the marked values.
 	struct lpm hi;
 	struct lpm lo;
 	struct value_table comb;
-	// Value line over the high half regions: a row of the join table
-	// without any low half distinction carries its result class here
-	// and the lookup finishes with the single line read; the row of a
-	// low half distinction carries the two dimensional mark.
-	struct vline uniform;
 };
 
 static inline void
@@ -32,7 +33,6 @@ filter_query_attr_net6_free(
 	lpm_free(&net6_attr->hi);
 	lpm_free(&net6_attr->lo);
 	value_table_free(&net6_attr->comb);
-	vline_free(&net6_attr->uniform);
 
 	memory_bfree(
 		memory_context, net6_attr, sizeof(struct filter_query_attr_net6)
