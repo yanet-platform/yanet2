@@ -3,6 +3,21 @@
 Manual steps required when upgrading an existing deployment. The packaging
 does not perform these automatically.
 
+## Balancer2 scaffold and CLI removed
+
+The unused `modules/balancer2` scaffold, the
+`modules.balancer2.controlplane.balancerpb.v1.Balancer` protobuf service,
+`yanet-cli-balancer2`, and the unsupported root `balancer.yaml` example
+have been removed. The generic operator no longer links those request
+descriptors. Configurations targeting the removed service are rejected.
+
+Remove references to the old CLI and service from automation before
+upgrading. The existing `l3b` module and `yanet-cli-l3b` remain unchanged,
+but are not wire- or YAML-compatible aliases for Balancer2. Translate only
+operations supported by their actual API; renaming the binary or module
+does not convert a configuration. This removal does not establish complete
+feature parity between the two surfaces.
+
 ## FWState updates carry field presence
 
 Upgrade the fwstate control plane and the web UI before using the new CLI.
@@ -146,7 +161,7 @@ upgrade the `yanet2-cli` package together with the control plane.
 
 ## CLI flags follow one dictionary
 
-The file a command consumes is its positional argument now. Six flags are
+The file a command consumes is its positional argument now. Five flags are
 gone without an alias:
 
 ```bash
@@ -154,7 +169,6 @@ yanet-cli-acl update --name acl0 acl0.yaml                    # was --rules
 yanet-cli-mirror update --name mirror0 mirror0.yaml           # was --rules
 yanet-cli-route fib update --name route0 route0.yaml          # was --rules
 yanet-cli-unrdup update --name unrdup0 unrdup0.yaml           # was --config
-yanet-cli-balancer2 update --name lb0 --sessions s0 lb0.yaml  # was --config
 yanet-cli-device-trafgen upload --name gen0 replay.pcap       # was --pcap
 ```
 
@@ -165,12 +179,9 @@ instead of `0`, `1`, `2`.
 
 Every short letter means one thing in every binary: `-n` name, `-d`
 device, `-p` pipeline or prefix, `-f` function, `-c` chain, `-t` tag.
-Two commands reuse a letter for another flag, so check scripts that pass
-them: `yanet-cli-acl metrics-rules -c` selects a chain now, the config is
-`--name`, and `yanet-cli-balancer2 show -d` expects a device name, the
-old switch is `--detail`. The other displaced letters (`-s` and `-a` in
-balancer2, `-c` in `sessions update`, `-t` in counters, `-f` and `-s` in
-pdump) and the spellings `--config` on `acl metrics-rules` and
+Check scripts that pass `yanet-cli-acl metrics-rules -c`: it selects a chain
+now, and the config is `--name`. The other displaced letters (`-t` in
+counters, `-f` and `-s` in pdump) and the spellings `--config` on `acl metrics-rules` and
 `--prefixes` on `decap update` keep working as hidden aliases for one
 release.
 

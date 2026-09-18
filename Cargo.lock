@@ -2652,28 +2652,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "yanet-cli-balancer2"
-version = "0.1.0"
-dependencies = [
- "clap",
- "clap_complete",
- "log",
- "netip",
- "prost",
- "prost-types",
- "serde",
- "serde_json",
- "serde_yaml",
- "tabled",
- "tonic",
- "tonic-prost",
- "yanet-cli",
- "yanet-cli-build",
- "yanet-commonpb",
- "yanet-filterpb",
-]
-
-[[package]]
 name = "yanet-cli-blackhole"
 version = "0.1.0"
 dependencies = [

@@ -78,11 +78,8 @@ func bindRequestName(request proto.Message, config ModuleConfig) error {
 	return nil
 }
 
-// configNameField finds the request's config-naming field, ok=false when
-// the message declares none.
-//
-// The tree spells it as name in module update requests, module_name in
-// the route FIB request and config_name in the balancer one.
+// configNameField finds a supported top-level, singular string naming field,
+// reporting absence when the request declares none.
 func configNameField(descriptor protoreflect.MessageDescriptor) (protoreflect.FieldDescriptor, bool) {
 	for _, field := range []protoreflect.Name{"name", "module_name", "config_name"} {
 		found := descriptor.Fields().ByName(field)

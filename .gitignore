@@ -189,7 +189,6 @@ deploy/packages/
 /modules/*
 !/modules/meson.build
 !/modules/acl/
-!/modules/balancer2/
 !/modules/blackhole/
 !/modules/decap/
 !/modules/dscp/

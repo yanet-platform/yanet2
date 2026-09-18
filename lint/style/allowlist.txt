@@ -55,14 +55,6 @@ loopindex:controlplane/ffi/agent.go:Agent.UpdateDevices:i:1  # legacy: rename to
 loopindex:controlplane/ffi/agent.go:Agent.UpdateModules:i:1  # legacy: rename to idx
 loopindex:controlplane/internal/xgrpc/interceptor.go:protoMarshaler.MarshalLogObject:i:1  # legacy: rename to idx
 loopindex:controlplane/internal/xgrpc/interceptor.go:protoMarshaler.MarshalLogObject:i:2  # legacy: rename to idx
-loopindex:modules/balancer2/bindings/go/cbalancer2/cgo.go:Balancer.UpdateVSRealStates:i:1  # legacy: rename to idx
-loopindex:modules/balancer2/bindings/go/cbalancer2/cgo.go:Balancer.UpdateVSRealWeights:i:1  # legacy: rename to idx
-loopindex:modules/balancer2/bindings/go/cbalancer2/cgo.go:VSConfig.cBuild:i:1  # legacy: rename to idx
-loopindex:modules/balancer2/bindings/go/cbalancer2/cgo.go:VSConfig.cBuild:i:2  # legacy: rename to idx
-loopindex:modules/balancer2/bindings/go/cbalancer2/cgo.go:cVSConfig.free:i:1  # legacy: rename to idx
-loopindex:modules/balancer2/bindings/go/cbalancer2/cgo.go:cVSConfig.free:i:2  # legacy: rename to idx
-loopindex:modules/balancer2/bindings/go/cbalancer2/cgo.go:createBalancer:i:1  # legacy: rename to idx
-loopindex:modules/balancer2/bindings/go/cbalancer2/cgo.go:createBalancer:i:2  # legacy: rename to idx
 loopindex:modules/dscp/controlplane/service_test.go:Test_DscpService_ConcurrentAccess:i:1  # legacy: rename to idx
 loopindex:modules/forward/controlplane/service_test.go:TestForwardServiceConcurrentAccess:i:1  # legacy: rename to idx
 loopindex:modules/forward/controlplane/service_test.go:TestForwardServiceConcurrentAccess:i:2  # legacy: rename to idx

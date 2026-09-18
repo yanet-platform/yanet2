@@ -21,7 +21,6 @@ export const MODULE_DESCRIPTIONS: Record<string, string> = {
     pdump: 'Packet dump',
     fwstate: 'Stateful firewall',
     'route-mpls': 'MPLS routing',
-    balancer2: 'Load balancer',
 };
 
 export const normalizeModuleName = (name: string): string => name.toLowerCase();

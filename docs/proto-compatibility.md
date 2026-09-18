@@ -37,7 +37,7 @@ The following versioned package families are covered by the breaking gate.
   (`common/go/operator`), not as proto packages
 - `operators.bird_adapter.adapterpb.v1` (directory `bird-adapter`, package `bird_adapter` — see Exclusions)
 
-`modules/balancer2` (`modules.balancer2.controlplane.balancerpb.v1`) is **pre-v1** and explicitly excluded from the breaking gate. See Freeze Status.
+The unused pre-v1 `modules.balancer2.controlplane.balancerpb.v1` package and its CLI were intentionally removed. Its breaking-gate exclusion remains for comparisons against revisions that contain it. See [Upgrade notes](upgrade.md#balancer2-scaffold-and-cli-removed).
 
 ## Package and Layout Conventions
 
@@ -106,7 +106,7 @@ The following entries in `buf.yaml` intentionally deviate from the defaults. Eac
 - `.claude` — agent worktree directories; not source files.
 
 **`breaking.ignore`**
-- `modules/balancer2` — pre-v1 rewrite in flight; API shape is not yet stable. Remove this line from `buf.yaml` when balancer2 reaches v1.
+- `modules/balancer2` — the unused pre-v1 declarations and clients were intentionally removed. Keep the exclusion while comparisons can target revisions containing the package; this is not a freeze of the deleted API.
 - `modules/nat64/controlplane/nat64pb/v1/nat64.proto` — the #2197 migration intentionally replaces all three NAT64 prefix byte fields with the shared family-typed IPv6 prefix message in one cutover. Remove this line after the new wire shape reaches `main`.
 - `controlplane/ynpb/v1/module.proto` — removed intentionally because no gateway ever registered or exposed its service, so no runtime route existed.
 - `operators/forward/operatorpb` and `operators/decap/operatorpb` — the readiness packages of the forward and decap operators were deleted on purpose. The static module operator preserves `/operators.<name>.operatorpb.v1.ReadinessService/Ready` and also registers `/operators.<name>.operatorpb.v1.MetricsService/GetMetrics` as runtime routes using the shared readiness and metrics messages. These runtime names do not recreate proto packages, and no generated client of the deleted packages existed outside the operators themselves.
@@ -127,7 +127,7 @@ The following entries in `buf.yaml` intentionally deviate from the defaults. Eac
 
 All surfaces listed in the API Surface Inventory are frozen as of the `buf breaking` gate landing. The CI gate prevents regressions from that point forward.
 
-`modules/balancer2` is explicitly **pre-v1**: its proto package exists but is excluded from the breaking gate while its rewrite is in flight. The concrete milestone that marks balancer2 reaching v1 is removing the `modules/balancer2` line from `breaking.ignore` in `buf.yaml`.
+The former `modules/balancer2` API was removed before v1 freeze. Its retained `breaking.ignore` entry covers intentional deletion, not an active API or a compatibility promise for the separate `l3b` service.
 
 ## Running the Checks Locally
 

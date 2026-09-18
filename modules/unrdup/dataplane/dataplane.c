@@ -766,11 +766,10 @@ unrdup_handle_packets(
 			continue;
 		}
 
-		// TODO: ask the balancer session table whether this balancer
-		// holds the offending flow and drop the clone when it does
-		// not, instead of passing every one on. Blocked until
-		// balancer2 exposes a shared session table. unrdup has to run
-		// ahead of decap for a clone to arrive here still tunnelled.
+		// TODO: query balancer session ownership and drop unowned
+		// clones once a read-only ownership interface is available.
+		//
+		// Run ahead of decap so a clone arrives here still tunnelled.
 		if (unrdup_is_tunneled_icmp_error(packet, outer_end)) {
 			unrdup_count_packet(
 				counter_storage,
