@@ -3,8 +3,7 @@ use std::path::PathBuf;
 
 use clap::{CommandFactory, Parser};
 use clap_complete::engine::{ArgValueCandidates, CompletionCandidate};
-use commonpb::pb::IpAddress;
-use filterpb::pb::IpNet;
+use commonpb::pb::{IPv4Network, IPv6Network, IpAddress};
 use serde::{Deserialize, Serialize};
 use tonic::codec::CompressionEncoding;
 use unrduppb::{
@@ -116,9 +115,9 @@ pub struct ServiceConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UnrdupConfig {
     #[serde(default)]
-    pub source_v4: Option<IpNet>,
+    pub source_v4: Option<IPv4Network>,
     #[serde(default)]
-    pub source_v6: Option<IpNet>,
+    pub source_v6: Option<IPv6Network>,
     #[serde(default)]
     pub services: Vec<ServiceConfig>,
 }
@@ -347,12 +346,10 @@ services:
         let config = Config::from(parsed);
 
         let source_v4 = config.source_v4.expect("source_v4 must be set");
-        assert_eq!(vec![10, 0, 0, 0], source_v4.addr);
-        assert_eq!(vec![255, 255, 255, 252], source_v4.mask);
+        assert_eq!("10.0.0.0/30", source_v4.to_string());
 
         let source_v6 = config.source_v6.expect("source_v6 must be set");
-        assert_eq!(16, source_v6.addr.len());
-        assert_eq!(12, source_v6.mask.iter().filter(|byte| **byte == 0xff).count());
+        assert_eq!("2001:db8:a::/96", source_v6.to_string());
 
         assert_eq!(1, config.services.len());
         let service = &config.services[0];

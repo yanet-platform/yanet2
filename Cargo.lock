@@ -3120,7 +3120,6 @@ dependencies = [
  "yanet-cli",
  "yanet-cli-build",
  "yanet-commonpb",
- "yanet-filterpb",
 ]
 
 [[package]]

@@ -3,7 +3,8 @@ syntax = "proto3";
 package modules.unrdup.controlplane.unrduppb.v1;
 
 import "common/commonpb/v1/ipaddr.proto";
-import "common/filterpb/v1/filter.proto";
+import "common/commonpb/v1/ipv4network.proto";
+import "common/commonpb/v1/ipv6network.proto";
 
 option go_package = "github.com/yanet-platform/yanet2/modules/unrdup/controlplane/unrduppb/v1;unrduppb";
 
@@ -45,8 +46,8 @@ message Service {
 
 // A peer's family selects its source, so each family in use needs one.
 message Config {
-  common.filterpb.v1.IPNet source_v4 = 1;
-  common.filterpb.v1.IPNet source_v6 = 2;
+  common.commonpb.v1.IPv4Network source_v4 = 1;
+  common.commonpb.v1.IPv6Network source_v6 = 2;
   repeated Service services = 3;
 }
 

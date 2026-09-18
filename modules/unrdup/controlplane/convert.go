@@ -7,7 +7,6 @@ import (
 
 	"github.com/yanet-platform/xnetip"
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
-	filterpb "github.com/yanet-platform/yanet2/common/filterpb/v1"
 	"github.com/yanet-platform/yanet2/modules/unrdup/bindings/go/cunrdup"
 	"github.com/yanet-platform/yanet2/modules/unrdup/controlplane/unrduppb/v1"
 )
@@ -28,12 +27,12 @@ func sourceIsSet(source xnetip.Network) bool {
 }
 
 func configFromProto(request *unrduppb.Config) (*config, error) {
-	sourceV4, err := netFromProto(request.GetSourceV4(), 4)
+	sourceV4, err := sourceV4FromProto(request.GetSourceV4())
 	if err != nil {
 		return nil, err
 	}
 
-	sourceV6, err := netFromProto(request.GetSourceV6(), 16)
+	sourceV6, err := sourceV6FromProto(request.GetSourceV6())
 	if err != nil {
 		return nil, err
 	}
@@ -151,53 +150,48 @@ func endpointFromProto(endpoint *unrduppb.Endpoint) cunrdup.Endpoint {
 	}
 }
 
-func netFromProto(source *filterpb.IPNet, addrLen int) (xnetip.Network, error) {
+func sourceV4FromProto(source *commonpb.IPv4Network) (xnetip.Network, error) {
 	if source == nil {
 		return xnetip.Network{}, nil
 	}
 
-	addr, ok := netip.AddrFromSlice(source.GetAddr())
-	if !ok {
-		return xnetip.Network{}, fmt.Errorf(
-			"source address must be 4 or 16 bytes, got %d",
-			len(source.GetAddr()),
-		)
-	}
-
-	addr = addr.Unmap()
-	if addr.BitLen() != addrLen*8 {
-		return xnetip.Network{}, fmt.Errorf(
-			"source %s does not match the family of its field",
-			addr,
-		)
-	}
-
-	if addr.IsUnspecified() {
-		return xnetip.Network{}, errors.New("source address must not be unspecified")
-	}
-
-	mask, ok := netip.AddrFromSlice(source.GetMask())
-	if !ok || mask.Unmap().BitLen() != addr.BitLen() {
-		return xnetip.Network{}, fmt.Errorf(
-			"source mask must match the address family, got %d bytes",
-			len(source.GetMask()),
-		)
-	}
-
-	result, err := xnetip.NetworkFrom(addr, mask.Unmap())
+	net, err := source.ToNetwork4()
 	if err != nil {
 		return xnetip.Network{}, fmt.Errorf("source: %w", err)
 	}
 
-	prefix, ok := result.Prefix()
+	return checkSource(xnetip.NetworkFrom4(net))
+}
+
+func sourceV6FromProto(source *commonpb.IPv6Network) (xnetip.Network, error) {
+	if source == nil {
+		return xnetip.Network{}, nil
+	}
+
+	net, err := source.ToNetwork6()
+	if err != nil {
+		return xnetip.Network{}, fmt.Errorf("source: %w", err)
+	}
+	if net.Addr().Is4In6() {
+		return xnetip.Network{}, fmt.Errorf("source %s must not be IPv4-mapped", net)
+	}
+
+	return checkSource(xnetip.NetworkFrom6(net))
+}
+
+func checkSource(source xnetip.Network) (xnetip.Network, error) {
+	prefix, ok := source.Prefix()
 	if !ok {
 		return xnetip.Network{}, errors.New("source mask must be contiguous")
 	}
 	if prefix.Bits() == 0 {
 		return xnetip.Network{}, errors.New("source mask must not leave the whole address free")
 	}
+	if source.Addr().IsUnspecified() {
+		return xnetip.Network{}, errors.New("source address must not be unspecified")
+	}
 
-	return result, nil
+	return source, nil
 }
 
 func (m *config) ToProto() *unrduppb.Config {
@@ -207,8 +201,8 @@ func (m *config) ToProto() *unrduppb.Config {
 	}
 
 	return &unrduppb.Config{
-		SourceV4: netToProto(m.SourceV4),
-		SourceV6: netToProto(m.SourceV6),
+		SourceV4: sourceV4ToProto(m.SourceV4),
+		SourceV6: sourceV6ToProto(m.SourceV6),
 		Services: services,
 	}
 }
@@ -242,15 +236,20 @@ func serviceToProto(service *cunrdup.Service) *unrduppb.Service {
 	}
 }
 
-func netToProto(source xnetip.Network) *filterpb.IPNet {
-	if !sourceIsSet(source) {
+func sourceV4ToProto(source xnetip.Network) *commonpb.IPv4Network {
+	net, ok := source.IPv4()
+	if !ok || !sourceIsSet(source) {
 		return nil
 	}
 
-	addr := source.Addr().Unmap()
+	return commonpb.NewIPv4NetworkFrom4(net)
+}
 
-	return &filterpb.IPNet{
-		Addr: addr.AsSlice(),
-		Mask: source.Mask().Unmap().AsSlice(),
+func sourceV6ToProto(source xnetip.Network) *commonpb.IPv6Network {
+	net, ok := source.IPv6()
+	if !ok || !sourceIsSet(source) {
+		return nil
 	}
+
+	return commonpb.NewIPv6NetworkFrom6(net)
 }
