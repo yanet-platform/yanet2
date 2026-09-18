@@ -564,7 +564,10 @@ classify_filter_init(
 		memory_context_fini(&filter->memory_context);
 		return -1;
 	}
-	memset(joints, 0, sizeof(struct value_table) * cls->joint_count);
+	if (joints != NULL) {
+		memset(joints, 0, sizeof(struct value_table) * cls->joint_count
+		);
+	}
 	SET_OFFSET_OF(&filter->attrs, attrs);
 	SET_OFFSET_OF(&filter->joints, joints);
 	SET_OFFSET_OF(&filter->joint_sides, joint_sides);
