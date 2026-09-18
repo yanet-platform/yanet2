@@ -6,7 +6,7 @@ use core::{
 };
 
 use commonpb::pb::{IPv4Network, IPv6Network};
-use filterpb::pb::{FragmentKind, IpNet, PortRange, ProtoRange, VlanRange};
+use filterpb::pb::{FragmentKind, PortRange, ProtoRange, VlanRange};
 use ync::output::{Paint, Painted};
 
 use crate::aclpb::{ActionKind, Rule};
@@ -57,9 +57,8 @@ impl<'a> RuleLine<'a> {
             .iter()
             .position(|action| action.kind == ActionKind::Pass as i32 || action.kind == ActionKind::Deny as i32);
 
-        let (srcs, dsts) = legacy_networks(rule);
-        let src = Side::new(&rule.sources4, &rule.sources6, srcs, true, true);
-        let dst = Side::new(&rule.destinations4, &rule.destinations6, dsts, true, true);
+        let src = Side::new(&rule.sources4, &rule.sources6, true, true);
+        let dst = Side::new(&rule.destinations4, &rule.destinations6, true, true);
         let (src4, src6) = (src.nets().any(|net| net.is_v4()), src.nets().any(|net| !net.is_v4()));
         let (dst4, dst6) = (dst.nets().any(|net| net.is_v4()), dst.nets().any(|net| !net.is_v4()));
 
@@ -178,9 +177,8 @@ impl Display for RuleLine<'_> {
         // matches.
         let with4 = self.has4 || self.dead;
         let with6 = self.has6 || self.dead;
-        let (srcs, dsts) = legacy_networks(rule);
-        let src = Side::new(&rule.sources4, &rule.sources6, srcs, with4, with6);
-        let dst = Side::new(&rule.destinations4, &rule.destinations6, dsts, with4, with6);
+        let src = Side::new(&rule.sources4, &rule.sources6, with4, with6);
+        let dst = Side::new(&rule.destinations4, &rule.destinations6, with4, with6);
 
         // A single-family rule open on both sides would read as matching
         // both families, so the family is spelled out.
@@ -396,46 +394,29 @@ impl Display for ActionName {
     }
 }
 
-/// Returns the deprecated mixed-family sources and destinations, which a
-/// config written through them shows back.
-#[allow(deprecated)]
-fn legacy_networks(rule: &Rule) -> (&[IpNet], &[IpNet]) {
-    (&rule.srcs, &rule.dsts)
-}
-
 /// One side of a rule, `from` or `to`, limited to the families shown.
 #[derive(Clone, Copy)]
 struct Side<'a> {
     nets4: &'a [IPv4Network],
     nets6: &'a [IPv6Network],
-    legacy: &'a [IpNet],
     with4: bool,
     with6: bool,
 }
 
 impl<'a> Side<'a> {
-    fn new(nets4: &'a [IPv4Network], nets6: &'a [IPv6Network], legacy: &'a [IpNet], with4: bool, with6: bool) -> Self {
-        Self { nets4, nets6, legacy, with4, with6 }
+    fn new(nets4: &'a [IPv4Network], nets6: &'a [IPv6Network], with4: bool, with6: bool) -> Self {
+        Self { nets4, nets6, with4, with6 }
     }
 
-    /// Returns the networks of the shown families: typed IPv4, deprecated
-    /// IPv4, typed IPv6, deprecated IPv6.
+    /// Returns the networks of the shown families, IPv4 first.
     fn nets(&self) -> impl Iterator<Item = Net> + Clone + 'a {
-        let Self { nets4, nets6, legacy, with4, with6 } = *self;
-        let legacy = legacy.iter().filter_map(Net::legacy);
+        let Self { nets4, nets6, with4, with6 } = *self;
 
         nets4
             .iter()
             .map(Net::v4)
-            .chain(legacy.clone().filter(|net| net.is_v4()))
             .filter(move |_| with4)
-            .chain(
-                nets6
-                    .iter()
-                    .map(Net::v6)
-                    .chain(legacy.filter(|net| !net.is_v4()))
-                    .filter(move |_| with6),
-            )
+            .chain(nets6.iter().map(Net::v6).filter(move |_| with6))
     }
 
     /// Returns whether every shown family holds a zero-mask network.
@@ -478,20 +459,6 @@ impl Net {
             net.addr.as_ref().map_or(Ipv6Addr::UNSPECIFIED, Ipv6Addr::from),
             net.mask.as_ref().map_or(Ipv6Addr::from(u128::MAX), Ipv6Addr::from),
         )
-    }
-
-    /// Reads a deprecated network, `None` for a malformed one.
-    fn legacy(net: &IpNet) -> Option<Self> {
-        let (addr, mask) = (net.addr.as_slice(), net.mask.as_slice());
-
-        if let (Ok(addr), Ok(mask)) = (<[u8; 4]>::try_from(addr), <[u8; 4]>::try_from(mask)) {
-            return Some(Self::V4(addr.into(), mask.into()));
-        }
-        if let (Ok(addr), Ok(mask)) = (<[u8; 16]>::try_from(addr), <[u8; 16]>::try_from(mask)) {
-            return Some(Self::V6(addr.into(), mask.into()));
-        }
-
-        None
     }
 
     fn is_v4(&self) -> bool {

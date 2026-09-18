@@ -6,7 +6,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             builder
                 .message_attribute(
                     ".modules.acl.controlplane.aclpb.v1.Rule",
-                    "#[derive(serde::Serialize, serde::Deserialize)] #[serde(default)]",
+                    "#[derive(serde::Serialize, serde::Deserialize)] #[serde(default, deny_unknown_fields)]",
                 )
                 .message_attribute(
                     ".modules.acl.controlplane.aclpb.v1.Action",
@@ -33,24 +33,6 @@ fn main() -> Result<(), Box<dyn Error>> {
                 .field_attribute(
                     ".modules.acl.controlplane.aclpb.v1.Action.kind",
                     "#[serde(serialize_with = \"crate::serialize_action_kind\", deserialize_with = \"crate::deserialize_action_kind\")]",
-                )
-                // The typed network lists stay out of the JSON while empty, so show
-                // of a legacy-schema config reads as before.
-                .field_attribute(
-                    ".modules.acl.controlplane.aclpb.v1.Rule.sources4",
-                    "#[serde(skip_serializing_if = \"Vec::is_empty\")]",
-                )
-                .field_attribute(
-                    ".modules.acl.controlplane.aclpb.v1.Rule.sources6",
-                    "#[serde(skip_serializing_if = \"Vec::is_empty\")]",
-                )
-                .field_attribute(
-                    ".modules.acl.controlplane.aclpb.v1.Rule.destinations4",
-                    "#[serde(skip_serializing_if = \"Vec::is_empty\")]",
-                )
-                .field_attribute(
-                    ".modules.acl.controlplane.aclpb.v1.Rule.destinations6",
-                    "#[serde(skip_serializing_if = \"Vec::is_empty\")]",
                 )
         })
         .compile()
