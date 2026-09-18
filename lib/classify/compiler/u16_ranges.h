@@ -280,8 +280,8 @@ filter_u16_commit_iterate(
                                                                                \
 		return memcmp(first_ranges.items,                              \
 			      second_ranges.items,                             \
-			      first_ranges.count *                             \
-				      sizeof(*first_ranges.items)) != 0;       \
+			      first_ranges.count * sizeof(*first_ranges.items) \
+		       ) != 0;                                                 \
 	}                                                                      \
                                                                                \
 	static inline int classify_attr_##tag##_rule_iter(                     \
@@ -389,11 +389,11 @@ filter_u16_commit_iterate(
 		);                                                             \
 	}                                                                      \
                                                                                \
-	static inline struct classify_query_attr *                             \
-	classify_attr_##tag##_commit(                                          \
-		struct memory_context *memory_context,                         \
-		struct classify_attr *attr                                     \
-	) {                                                                    \
+	static inline struct classify_query_attr                               \
+		*classify_attr_##tag##_commit(                                 \
+			struct memory_context *memory_context,                 \
+			struct classify_attr *attr                             \
+		) {                                                            \
 		struct classify_attr_##tag *u16_attr =                         \
 			container_of(attr, struct classify_attr_##tag, attr);  \
                                                                                \

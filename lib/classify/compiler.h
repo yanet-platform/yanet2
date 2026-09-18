@@ -342,8 +342,8 @@ classify_join(
 						? s + left->leaf_count
 						: cls->leaf_count +
 							  left->joint_count +
-							  (s -
-							   right->leaf_count);
+							  (s - right->leaf_count
+							  );
 			}
 		}
 

@@ -71,8 +71,8 @@ classify_attr_net_create(
 			if (range4_collector_add(
 				    &collector,
 				    from,
-				    __builtin_popcountll(*(uint32_t *)
-								  net4->mask)
+				    __builtin_popcountll(*(uint32_t *)net4->mask
+				    )
 			    )) {
 				goto error_collector;
 			}
