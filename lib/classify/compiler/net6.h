@@ -1374,8 +1374,14 @@ classify_attr_net6_compare(
 		net6s_handlers->get_net6s, second, &second_data, &second_len
 	);
 
-	return first_len != second_len ||
-	       memcmp(first_data, second_data, first_len) != 0;
+	if (first_len != second_len) {
+		return 1;
+	}
+	if (first_len == 0) {
+		return 0;
+	}
+
+	return memcmp(first_data, second_data, first_len) != 0;
 }
 
 static const struct classify_attr_handlers filter_compile_get_net6s = {

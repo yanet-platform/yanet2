@@ -247,6 +247,9 @@ classify_attr_vlan_compare(
 	if (first_ranges.count != second_ranges.count) {
 		return 1;
 	}
+	if (first_ranges.count == 0) {
+		return 0;
+	}
 
 	return memcmp(first_ranges.items,
 		      second_ranges.items,
