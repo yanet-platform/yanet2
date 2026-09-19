@@ -187,6 +187,7 @@ classify_join(
 	}
 	memset(cls, 0, sizeof(struct classifier));
 
+	struct memory_context *parent_context = memory_context;
 	if (memory_context_init_from(
 		    &cls->memory_context, memory_context, "classify:joint"
 	    )) {
@@ -409,13 +410,27 @@ error:
 
 error_ctx:
 	memory_context_fini(&cls->memory_context);
-	memory_bfree(memory_context, cls, sizeof(struct classifier));
+	// The node block belongs to the parent of its embedded context;
+	// freeing it through the just finished child would walk a zeroed
+	// allocator.
+	memory_bfree(parent_context, cls, sizeof(struct classifier));
 	return NULL;
 }
 
 /*
- * Builds a classifier over a flat attribute signature as a left spine
- * tree: the first attribute joins the classification of the rest.
+ * Builds a classifier over a flat attribute signature as a pairwise
+ * reductive tree: adjacent attributes join first and the results
+ * combine level by level, in the signature order.
+ *
+ * The join cost is the product of the per rule ranges of both sides,
+ * and a range grows with every attribute joined into its subtree. The
+ * pairwise reduction joins the big region attributes of a signature
+ * leaf to leaf - the region cross happens once, between sides of
+ * comparable, not yet multiplied size - while every later level
+ * multiplies the already compacted class spaces. A left spine or an
+ * even split of the same signature instead crosses a region attribute
+ * with a subtree that already carries the small attributes, paying the
+ * region product against the multiplied range.
  */
 static inline struct classifier *
 classify_build(
@@ -425,38 +440,49 @@ classify_build(
 	const struct filter_rule **rules,
 	uint32_t rule_count
 ) {
-	struct classifier *rest = NULL;
-	if (attr_handler_count > 1) {
-		rest = classify_build(
-			memory_context,
-			attr_handlers + 1,
-			attr_handler_count - 1,
-			rules,
-			rule_count
+	// A signature carries a handful of attributes; the fixed cap keeps
+	// the level array a plain stack slot the compiler can bound.
+	assert(attr_handler_count <= 16);
+	struct classifier *level[16];
+	for (uint32_t idx = 0; idx < attr_handler_count; ++idx) {
+		level[idx] = classify_leaf(
+			memory_context, attr_handlers[idx], rules, rule_count
 		);
-		if (rest == NULL) {
+		if (level[idx] == NULL) {
+			while (idx > 0) {
+				classify_free(level[--idx]);
+			}
 			return NULL;
 		}
 	}
 
-	struct classifier *leaf = classify_leaf(
-		memory_context, attr_handlers[0], rules, rule_count
-	);
-	if (leaf == NULL) {
-		classify_free(rest);
-		return NULL;
+	uint32_t count = attr_handler_count;
+	while (count > 1) {
+		uint32_t out = 0;
+		for (uint32_t idx = 0; idx + 1 < count; idx += 2) {
+			struct classifier *joined = classify_join(
+				memory_context, level[idx], level[idx + 1]
+			);
+			// The pair releases its own references; the joined node
+			// holds the ones for the lifetime of the tree.
+			classify_free(level[idx]);
+			classify_free(level[idx + 1]);
+			if (joined == NULL) {
+				for (uint32_t rest = idx + 2; rest < count;
+				     ++rest) {
+					classify_free(level[rest]);
+				}
+				return NULL;
+			}
+			level[out++] = joined;
+		}
+		if (count & 1) {
+			level[out++] = level[count - 1];
+		}
+		count = out;
 	}
 
-	if (rest == NULL) {
-		return leaf;
-	}
-
-	struct classifier *joined = classify_join(memory_context, leaf, rest);
-	// The spine releases its own references; the joined node holds
-	// ones for the lifetime of the tree.
-	classify_free(leaf);
-	classify_free(rest);
-	return joined;
+	return level[0];
 }
 
 /*
