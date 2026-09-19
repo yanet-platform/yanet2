@@ -197,18 +197,41 @@ main(int argc, char **argv) {
 	uint32_t *rf = malloc(sizeof(uint32_t) * cap.count);
 	uint32_t *merged = malloc(sizeof(uint32_t) * cap.count);
 
+	// The family filters follow the production dispatch: the ip6
+	// filter sees IPv6 packets only.
+	struct packet **ip6_packets = malloc(sizeof(*ip6_packets) * cap.count);
+	uint32_t *ip6_pos = malloc(sizeof(*ip6_pos) * cap.count);
+	uint32_t ip6_count = 0;
+	for (uint32_t idx = 0; idx < cap.count; ++idx) {
+		if (bench_packet_is_ip6(cap.packets + idx)) {
+			ip6_pos[ip6_count] = idx;
+			ip6_packets[ip6_count++] = cap.ptrs[idx];
+		}
+	}
+	printf("capture: ip6 %u/%u\n", ip6_count, cap.count);
+
 	for (uint32_t off = 0; off < cap.count; off += BATCH) {
 		uint32_t n = cap.count - off < BATCH ? cap.count - off : BATCH;
 		classify_query(
 			&flt_vlan, q_fwd_vlan, cap.ptrs + off, rv + off, n
 		);
+	}
+	for (uint32_t off = 0; off < ip6_count; off += BATCH) {
+		uint32_t n = ip6_count - off < BATCH ? ip6_count - off : BATCH;
 		classify_query(
-			&flt_ip6, q_fwd_ip6, cap.ptrs + off, rf + off, n
+			&flt_ip6, q_fwd_ip6, ip6_packets + off, rf + off, n
 		);
 	}
-	uint32_t matched = 0;
+
 	for (uint32_t idx = 0; idx < cap.count; ++idx) {
-		merged[idx] = merge_first(rv[idx], rf[idx]);
+		merged[idx] = rv[idx];
+	}
+	uint32_t matched = 0;
+	for (uint32_t idx = 0; idx < ip6_count; ++idx) {
+		uint32_t pos = ip6_pos[idx];
+		merged[pos] = merge_first(merged[pos], rf[idx]);
+	}
+	for (uint32_t idx = 0; idx < cap.count; ++idx) {
 		matched += merged[idx] != CLASSIFY_RULE_INVALID;
 	}
 	printf("new v6 lookup: matched %u/%u (%.1f%%) fnv=%llx\n",
@@ -235,14 +258,25 @@ main(int argc, char **argv) {
 				rv + off,
 				n
 			);
+		}
+		for (uint32_t off = 0; off < ip6_count; off += BATCH) {
+			uint32_t n = ip6_count - off < BATCH ? ip6_count - off
+							     : BATCH;
 			classify_query(
-				&flt_ip6, q_fwd_ip6, cap.ptrs + off, rf + off, n
+				&flt_ip6,
+				q_fwd_ip6,
+				ip6_packets + off,
+				rf + off,
+				n
 			);
 		}
 	}
 	clock_gettime(CLOCK_MONOTONIC, &t1);
 	printf("new v6 steady: %.1f ns/pkt (vlan plus ip6)\n",
 	       bench_ms(&t0, &t1) * 1e6 / ((double)passes * cap.count));
+
+	free(ip6_packets);
+	free(ip6_pos);
 
 	classify_filter_free(&flt_ip6);
 	classify_free(cls_ip6);

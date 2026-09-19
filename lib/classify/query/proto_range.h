@@ -17,28 +17,39 @@ static inline uint16_t
 filter_packet_get_proto_range(const struct packet *packet) {
 	uint16_t proto = packet->transport_header.type * 256;
 	if (packet->transport_header.type == IPPROTO_TCP) {
-		struct rte_tcp_hdr *tcp_header = rte_pktmbuf_mtod_offset(
-			packet_to_mbuf(packet),
-			struct rte_tcp_hdr *,
-			packet->transport_header.offset
-		);
-		proto += tcp_header->tcp_flags;
+		// The parser validates the transport header against the
+		// whole packet length, so a chained packet can carry it
+		// past the head segment; the flag and type bytes are read
+		// only when the header fits the head segment.
+		struct rte_mbuf *mbuf = packet_to_mbuf(packet);
+		if (rte_pktmbuf_data_len(mbuf) >=
+		    packet->transport_header.offset +
+			    sizeof(struct rte_tcp_hdr)) {
+			struct rte_tcp_hdr *tcp_header =
+				rte_pktmbuf_mtod_offset(
+					mbuf,
+					struct rte_tcp_hdr *,
+					packet->transport_header.offset
+				);
+			proto += tcp_header->tcp_flags;
+		}
 	}
-	if (packet->transport_header.type == IPPROTO_ICMP) {
-		struct rte_icmp_hdr *icmp_header = rte_pktmbuf_mtod_offset(
-			packet_to_mbuf(packet),
-			struct rte_icmp_hdr *,
-			packet->transport_header.offset
-		);
-		proto += icmp_header->icmp_type;
-	}
-	if (packet->transport_header.type == IPPROTO_ICMPV6) {
-		struct rte_icmp_hdr *icmp_header = rte_pktmbuf_mtod_offset(
-			packet_to_mbuf(packet),
-			struct rte_icmp_hdr *,
-			packet->transport_header.offset
-		);
-		proto += icmp_header->icmp_type;
+	if (packet->transport_header.type == IPPROTO_ICMP ||
+	    packet->transport_header.type == IPPROTO_ICMPV6) {
+		// Only the leading type byte of the message is classified;
+		// a bare echo header carries it without the rest of the
+		// full struct.
+		struct rte_mbuf *mbuf = packet_to_mbuf(packet);
+		if (rte_pktmbuf_data_len(mbuf) >
+		    packet->transport_header.offset) {
+			struct rte_icmp_hdr *icmp_header =
+				rte_pktmbuf_mtod_offset(
+					mbuf,
+					struct rte_icmp_hdr *,
+					packet->transport_header.offset
+				);
+			proto += icmp_header->icmp_type;
+		}
 	}
 	return proto;
 }

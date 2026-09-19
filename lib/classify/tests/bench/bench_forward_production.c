@@ -22,7 +22,6 @@ FILTER_COMPILER_DECLARE(FWD_FILTER_VLAN_TAG, device, vlan);
 FILTER_QUERY_DECLARE(q_fwd_vlan, device, vlan);
 
 FILTER_COMPILER_DECLARE(FWD_FILTER_IP4_TAG, device, vlan, net4_src, net4_dst);
-FILTER_QUERY_DECLARE(q_fwd_ip4, device, vlan, net4_src, net4_dst);
 
 FILTER_COMPILER_DECLARE(FWD_FILTER_IP6_TAG, device, vlan, net6_src, net6_dst);
 FILTER_QUERY_DECLARE(q_fwd_ip6, device, vlan, net6_src, net6_dst);
@@ -146,16 +145,41 @@ main(int argc, char **argv) {
 	uint32_t *rf = malloc(sizeof(uint32_t) * cap.count);
 	uint32_t *merged = malloc(sizeof(uint32_t) * cap.count);
 
+	// The family filters follow the production dispatch: the ip6
+	// filter sees IPv6 packets only.
+	struct packet **ip6_packets = malloc(sizeof(*ip6_packets) * cap.count);
+	uint32_t *ip6_pos = malloc(sizeof(*ip6_pos) * cap.count);
+	uint32_t ip6_count = 0;
+	for (uint32_t idx = 0; idx < cap.count; ++idx) {
+		if (bench_packet_is_ip6(cap.packets + idx)) {
+			ip6_pos[ip6_count] = idx;
+			ip6_packets[ip6_count++] = cap.ptrs[idx];
+		}
+	}
+	printf("capture: ip6 %u/%u\n", ip6_count, cap.count);
+
 	for (uint32_t off = 0; off < cap.count; off += BATCH) {
 		uint32_t n = cap.count - off < BATCH ? cap.count - off : BATCH;
 		filter_query(
 			&flt_vlan, q_fwd_vlan, cap.ptrs + off, rv + off, n
 		);
-		filter_query(&flt_ip6, q_fwd_ip6, cap.ptrs + off, rf + off, n);
+	}
+	for (uint32_t off = 0; off < ip6_count; off += BATCH) {
+		uint32_t n = ip6_count - off < BATCH ? ip6_count - off : BATCH;
+		filter_query(
+			&flt_ip6, q_fwd_ip6, ip6_packets + off, rf + off, n
+		);
+	}
+
+	for (uint32_t idx = 0; idx < cap.count; ++idx) {
+		merged[idx] = rv[idx];
 	}
 	uint32_t matched = 0;
+	for (uint32_t idx = 0; idx < ip6_count; ++idx) {
+		uint32_t pos = ip6_pos[idx];
+		merged[pos] = merge_first(merged[pos], rf[idx]);
+	}
 	for (uint32_t idx = 0; idx < cap.count; ++idx) {
-		merged[idx] = merge_first(rv[idx], rf[idx]);
 		matched += merged[idx] != FILTER_RULE_INVALID;
 	}
 	printf("old v6 lookup: matched %u/%u (%.1f%%) fnv=%llx\n",
@@ -182,8 +206,16 @@ main(int argc, char **argv) {
 				rv + off,
 				n
 			);
+		}
+		for (uint32_t off = 0; off < ip6_count; off += BATCH) {
+			uint32_t n = ip6_count - off < BATCH ? ip6_count - off
+							     : BATCH;
 			filter_query(
-				&flt_ip6, q_fwd_ip6, cap.ptrs + off, rf + off, n
+				&flt_ip6,
+				q_fwd_ip6,
+				ip6_packets + off,
+				rf + off,
+				n
 			);
 		}
 	}
@@ -191,8 +223,9 @@ main(int argc, char **argv) {
 	printf("old v6 steady: %.1f ns/pkt (vlan plus ip6)\n",
 	       bench_ms(&t0, &t1) * 1e6 / ((double)passes * cap.count));
 
-	(void)flt_ip4;
-	(void)q_fwd_ip4;
+	free(ip6_packets);
+	free(ip6_pos);
+
 	filter_free(&flt_ip6, FWD_FILTER_IP6_TAG);
 	filter_free(&flt_ip4, FWD_FILTER_IP4_TAG);
 	filter_free(&flt_vlan, FWD_FILTER_VLAN_TAG);

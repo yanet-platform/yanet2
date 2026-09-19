@@ -227,16 +227,60 @@ main(int argc, char **argv) {
 	uint32_t *r6p = malloc(sizeof(uint32_t) * cap.count);
 	uint32_t *merged = malloc(sizeof(uint32_t) * cap.count);
 
-	for (uint32_t off = 0; off < cap.count; off += BATCH) {
-		uint32_t n = cap.count - off < BATCH ? cap.count - off : BATCH;
-		filter_query(&flt_ip6, q_ip6, cap.ptrs + off, r6 + off, n);
+	// The batch partitioning follows the production dataplane: the ip6
+	// filters see IPv6 packets only, the port scoped filter sees offset
+	// zero TCP or UDP among them.
+	struct packet **ip6_packets = malloc(sizeof(*ip6_packets) * cap.count);
+	struct packet **ip6_port_packets =
+		malloc(sizeof(*ip6_port_packets) * cap.count);
+	uint32_t *ip6_pos = malloc(sizeof(*ip6_pos) * cap.count);
+	uint32_t *ip6_port_pos = malloc(sizeof(*ip6_port_pos) * cap.count);
+	uint32_t ip6_count = 0;
+	uint32_t ip6_port_count = 0;
+	for (uint32_t idx = 0; idx < cap.count; ++idx) {
+		if (!bench_packet_is_ip6(cap.packets + idx)) {
+			continue;
+		}
+		ip6_pos[ip6_count] = idx;
+		ip6_packets[ip6_count++] = cap.ptrs[idx];
+		if (bench_packet_is_ip6_port(cap.packets + idx)) {
+			ip6_port_pos[ip6_port_count] = idx;
+			ip6_port_packets[ip6_port_count++] = cap.ptrs[idx];
+		}
+	}
+	printf("capture: ip6 %u/%u, port scoped %u\n",
+	       ip6_count,
+	       cap.count,
+	       ip6_port_count);
+
+	for (uint32_t off = 0; off < ip6_count; off += BATCH) {
+		uint32_t n = ip6_count - off < BATCH ? ip6_count - off : BATCH;
+		filter_query(&flt_ip6, q_ip6, ip6_packets + off, r6 + off, n);
+	}
+	for (uint32_t off = 0; off < ip6_port_count; off += BATCH) {
+		uint32_t n = ip6_port_count - off < BATCH ? ip6_port_count - off
+							  : BATCH;
 		filter_query(
-			&flt_ip6p, q_ip6_port, cap.ptrs + off, r6p + off, n
+			&flt_ip6p,
+			q_ip6_port,
+			ip6_port_packets + off,
+			r6p + off,
+			n
 		);
 	}
-	uint32_t matched = 0;
+
 	for (uint32_t idx = 0; idx < cap.count; ++idx) {
-		merged[idx] = merge_first(r6[idx], r6p[idx]);
+		merged[idx] = FILTER_RULE_INVALID;
+	}
+	uint32_t matched = 0;
+	for (uint32_t idx = 0; idx < ip6_count; ++idx) {
+		merged[ip6_pos[idx]] = r6[idx];
+	}
+	for (uint32_t idx = 0; idx < ip6_port_count; ++idx) {
+		uint32_t pos = ip6_port_pos[idx];
+		merged[pos] = merge_first(merged[pos], r6p[idx]);
+	}
+	for (uint32_t idx = 0; idx < cap.count; ++idx) {
 		matched += merged[idx] != FILTER_RULE_INVALID;
 	}
 	printf("old v6 lookup: matched %u/%u (%.1f%%) fnv=%llx\n",
@@ -253,16 +297,21 @@ main(int argc, char **argv) {
 	const uint32_t passes = 50;
 	clock_gettime(CLOCK_MONOTONIC, &t0);
 	for (uint32_t pass = 0; pass < passes; ++pass) {
-		for (uint32_t off = 0; off < cap.count; off += BATCH) {
-			uint32_t n = cap.count - off < BATCH ? cap.count - off
+		for (uint32_t off = 0; off < ip6_count; off += BATCH) {
+			uint32_t n = ip6_count - off < BATCH ? ip6_count - off
 							     : BATCH;
 			filter_query(
-				&flt_ip6, q_ip6, cap.ptrs + off, r6 + off, n
+				&flt_ip6, q_ip6, ip6_packets + off, r6 + off, n
 			);
+		}
+		for (uint32_t off = 0; off < ip6_port_count; off += BATCH) {
+			uint32_t n = ip6_port_count - off < BATCH
+					     ? ip6_port_count - off
+					     : BATCH;
 			filter_query(
 				&flt_ip6p,
 				q_ip6_port,
-				cap.ptrs + off,
+				ip6_port_packets + off,
 				r6p + off,
 				n
 			);
@@ -271,6 +320,11 @@ main(int argc, char **argv) {
 	clock_gettime(CLOCK_MONOTONIC, &t1);
 	printf("old v6 steady: %.1f ns/pkt (both filters)\n",
 	       bench_ms(&t0, &t1) * 1e6 / ((double)passes * cap.count));
+
+	free(ip6_packets);
+	free(ip6_port_packets);
+	free(ip6_pos);
+	free(ip6_port_pos);
 
 	filter_free(&flt_ip6p, f_ip6_port);
 	filter_free(&flt_ip6, f_ip6);

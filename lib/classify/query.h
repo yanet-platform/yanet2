@@ -8,10 +8,9 @@
  *    signature
  *
  * Notes:
- *  - CLASSIFY_QUERY returns a pointer to an actions array stored inside filter
- *    memory; it must not be freed by the caller.
- *  - Action iteration preserves order and stops at the first terminal action
- *    (i.e. without ACTION_NON_TERMINATE).
+ *  - CLASSIFY_QUERY writes one rule index per packet into the caller
+ *    supplied result array; CLASSIFY_RULE_INVALID marks a packet no
+ *    rule of the filter projection matches.
  */
 #pragma once
 

@@ -52,6 +52,10 @@ classify_query_attr_port_lookup(
 	}
 }
 
+// The parser admits a transport header validated against the whole
+// packet length, so a chained packet can carry the header past the
+// head segment; the getter reads the ports only when the header fits
+// the head segment and reports an unset port otherwise.
 static inline void
 filter_packet_get_port_src_batch(
 	const struct packet **packets, uint16_t *ports, uint32_t packet_count
@@ -59,8 +63,16 @@ filter_packet_get_port_src_batch(
 	for (uint32_t idx = 0; idx < packet_count; ++idx) {
 		const struct packet *packet = packets[idx];
 		struct rte_mbuf *mbuf = packet_to_mbuf(packet);
+		ports[idx] = 0;
 
 		if (packet->transport_header.type == IPPROTO_TCP) {
+			// The port pair occupies the first four bytes
+			// of the segment; the rest of the header can sit
+			// in a later segment of a chained packet.
+			if (rte_pktmbuf_data_len(mbuf) <
+			    packet->transport_header.offset + 4) {
+				continue;
+			}
 			struct rte_tcp_hdr *tcp_hdr = rte_pktmbuf_mtod_offset(
 				mbuf,
 				struct rte_tcp_hdr *,
@@ -68,14 +80,16 @@ filter_packet_get_port_src_batch(
 			);
 			ports[idx] = rte_be_to_cpu_16(tcp_hdr->src_port);
 		} else if (packet->transport_header.type == IPPROTO_UDP) {
+			if (rte_pktmbuf_data_len(mbuf) <
+			    packet->transport_header.offset + 4) {
+				continue;
+			}
 			struct rte_udp_hdr *udp_hdr = rte_pktmbuf_mtod_offset(
 				mbuf,
 				struct rte_udp_hdr *,
 				packet->transport_header.offset
 			);
 			ports[idx] = rte_be_to_cpu_16(udp_hdr->src_port);
-		} else {
-			ports[idx] = 0;
 		}
 	}
 }
@@ -87,8 +101,16 @@ filter_packet_get_port_dst_batch(
 	for (uint32_t idx = 0; idx < packet_count; ++idx) {
 		const struct packet *packet = packets[idx];
 		struct rte_mbuf *mbuf = packet_to_mbuf(packet);
+		ports[idx] = 0;
 
 		if (packet->transport_header.type == IPPROTO_TCP) {
+			// The port pair occupies the first four bytes
+			// of the segment; the rest of the header can sit
+			// in a later segment of a chained packet.
+			if (rte_pktmbuf_data_len(mbuf) <
+			    packet->transport_header.offset + 4) {
+				continue;
+			}
 			struct rte_tcp_hdr *tcp_hdr = rte_pktmbuf_mtod_offset(
 				mbuf,
 				struct rte_tcp_hdr *,
@@ -96,14 +118,16 @@ filter_packet_get_port_dst_batch(
 			);
 			ports[idx] = rte_be_to_cpu_16(tcp_hdr->dst_port);
 		} else if (packet->transport_header.type == IPPROTO_UDP) {
+			if (rte_pktmbuf_data_len(mbuf) <
+			    packet->transport_header.offset + 4) {
+				continue;
+			}
 			struct rte_udp_hdr *udp_hdr = rte_pktmbuf_mtod_offset(
 				mbuf,
 				struct rte_udp_hdr *,
 				packet->transport_header.offset
 			);
 			ports[idx] = rte_be_to_cpu_16(udp_hdr->dst_port);
-		} else {
-			ports[idx] = 0;
 		}
 	}
 }

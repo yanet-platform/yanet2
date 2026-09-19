@@ -20,6 +20,7 @@
 #include "lib/dataplane/packet/packet.h"
 #include "lib/utils/packet.h"
 
+#include <rte_ether.h>
 #include <rte_mbuf.h>
 
 #include <stdint.h>
@@ -33,6 +34,26 @@ struct bench_capture {
 	uint32_t count;
 	uint32_t parse_failures;
 };
+
+// Network family of a parsed packet, mirroring the production dispatch:
+// the acl and forward dataplanes feed a packet into the ip6 batch only
+// for an IPv6 ethertype, and into the port scoped batch only for an
+// offset zero TCP or UDP transport.
+static inline int
+bench_packet_is_ip6(const struct packet *packet) {
+	return packet->network_header.type ==
+	       rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV6);
+}
+
+static inline int
+bench_packet_is_ip6_port(const struct packet *packet) {
+	if (!bench_packet_is_ip6(packet)) {
+		return 0;
+	}
+	return packet->fragment_offset == 0 &&
+	       (packet->transport_header.type == IPPROTO_TCP ||
+		packet->transport_header.type == IPPROTO_UDP);
+}
 
 static uint16_t
 bench_vlan_device(uint16_t vlan) {
