@@ -137,10 +137,12 @@ acl_handle_packets(
 	// classes are computed once per family batch, the fragment and
 	// ports suffixes are evaluated on their own and combined with the
 	// core classes through the root joints of the final filters.
-	uint32_t core4_classes[ip4_idx];
-	uint32_t frag4_classes[ip4_idx];
-	uint32_t core4_port_classes[ip4_port_idx];
-	uint32_t port4_classes[ip4_port_idx];
+	// A family batch can be empty; the class scratch arrays are
+	// guarded against zero sized declarations.
+	uint32_t core4_classes[ip4_idx ? ip4_idx : 1];
+	uint32_t frag4_classes[ip4_idx ? ip4_idx : 1];
+	uint32_t core4_port_classes[ip4_port_idx ? ip4_port_idx : 1];
+	uint32_t port4_classes[ip4_port_idx ? ip4_port_idx : 1];
 
 	classify_classify(
 		&acl_config->filter_ip4_core,
@@ -186,10 +188,10 @@ acl_handle_packets(
 		ip4_port_idx
 	);
 
-	uint32_t core6_classes[ip6_idx];
-	uint32_t frag6_classes[ip6_idx];
-	uint32_t core6_port_classes[ip6_port_idx];
-	uint32_t port6_classes[ip6_port_idx];
+	uint32_t core6_classes[ip6_idx ? ip6_idx : 1];
+	uint32_t frag6_classes[ip6_idx ? ip6_idx : 1];
+	uint32_t core6_port_classes[ip6_port_idx ? ip6_port_idx : 1];
+	uint32_t port6_classes[ip6_port_idx ? ip6_port_idx : 1];
 
 	classify_classify(
 		&acl_config->filter_ip6_core,
