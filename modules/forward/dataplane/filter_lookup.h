@@ -20,11 +20,11 @@
 #include "common/network.h"
 #include "common/value.h"
 
-#include "lib/classify/classify.h"
 #include "lib/classify/classifiers/device.h"
 #include "lib/classify/classifiers/net4.h"
 #include "lib/classify/classifiers/net6.h"
 #include "lib/classify/classifiers/vlan.h"
+#include "lib/classify/classify.h"
 
 #include "lib/classify/query.h"
 
@@ -83,7 +83,9 @@ fwd_packet_get_net4_src_batch(
 		const struct packet *packet = packets[idx];
 		struct rte_mbuf *mbuf = packet_to_mbuf(packet);
 		struct rte_ipv4_hdr *ipv4_hdr = rte_pktmbuf_mtod_offset(
-			mbuf, struct rte_ipv4_hdr *, packet->network_header.offset
+			mbuf,
+			struct rte_ipv4_hdr *,
+			packet->network_header.offset
 		);
 		memcpy(addrs + idx * NET4_LEN, &ipv4_hdr->src_addr, NET4_LEN);
 	}
@@ -97,7 +99,9 @@ fwd_packet_get_net4_dst_batch(
 		const struct packet *packet = packets[idx];
 		struct rte_mbuf *mbuf = packet_to_mbuf(packet);
 		struct rte_ipv4_hdr *ipv4_hdr = rte_pktmbuf_mtod_offset(
-			mbuf, struct rte_ipv4_hdr *, packet->network_header.offset
+			mbuf,
+			struct rte_ipv4_hdr *,
+			packet->network_header.offset
 		);
 		memcpy(addrs + idx * NET4_LEN, &ipv4_hdr->dst_addr, NET4_LEN);
 	}
@@ -109,17 +113,18 @@ fwd_packet_get_net4_dst_batch(
 		const struct classify_query_attr_handlers *handlers,           \
 		const struct packet **packets,                                 \
 		uint32_t *results,                                             \
-		uint32_t packet_count                                           \
+		uint32_t packet_count                                          \
 	) {                                                                    \
 		(void)handlers;                                                \
 		const struct classify_query_attr_net4 *attr_net4 =             \
 			container_of(                                          \
-				attr, struct classify_query_attr_net4, attr     \
+				attr, struct classify_query_attr_net4, attr    \
 			);                                                     \
 		uint8_t addrs[packet_count][NET4_LEN];                         \
 		getter(packets, addrs[0], packet_count);                       \
 		for (uint32_t idx = 0; idx < packet_count; ++idx) {            \
-			results[idx] = lpm4_lookup(&attr_net4->lpm, addrs[idx]); \
+			results[idx] =                                         \
+				lpm4_lookup(&attr_net4->lpm, addrs[idx]);      \
 		}                                                              \
 	}
 
@@ -134,7 +139,9 @@ fwd_packet_get_net6_src_batch(
 		const struct packet *packet = packets[idx];
 		struct rte_mbuf *mbuf = packet_to_mbuf(packet);
 		struct rte_ipv6_hdr *ipv6_hdr = rte_pktmbuf_mtod_offset(
-			mbuf, struct rte_ipv6_hdr *, packet->network_header.offset
+			mbuf,
+			struct rte_ipv6_hdr *,
+			packet->network_header.offset
 		);
 		memcpy(addrs + idx * NET6_LEN, ipv6_hdr->src_addr, NET6_LEN);
 	}
@@ -148,7 +155,9 @@ fwd_packet_get_net6_dst_batch(
 		const struct packet *packet = packets[idx];
 		struct rte_mbuf *mbuf = packet_to_mbuf(packet);
 		struct rte_ipv6_hdr *ipv6_hdr = rte_pktmbuf_mtod_offset(
-			mbuf, struct rte_ipv6_hdr *, packet->network_header.offset
+			mbuf,
+			struct rte_ipv6_hdr *,
+			packet->network_header.offset
 		);
 		memcpy(addrs + idx * NET6_LEN, ipv6_hdr->dst_addr, NET6_LEN);
 	}
@@ -160,12 +169,12 @@ fwd_packet_get_net6_dst_batch(
 		const struct classify_query_attr_handlers *handlers,           \
 		const struct packet **packets,                                 \
 		uint32_t *results,                                             \
-		uint32_t packet_count                                           \
+		uint32_t packet_count                                          \
 	) {                                                                    \
 		(void)handlers;                                                \
 		const struct classify_query_attr_net6 *attr_net6 =             \
 			container_of(                                          \
-				attr, struct classify_query_attr_net6, attr     \
+				attr, struct classify_query_attr_net6, attr    \
 			);                                                     \
 		uint8_t addrs[packet_count][NET6_LEN];                         \
 		getter(packets, addrs[0], packet_count);                       \
@@ -176,10 +185,10 @@ fwd_packet_get_net6_dst_batch(
 				results[idx] = hi;                             \
 				continue;                                      \
 			}                                                      \
-			uint32_t lo = lpm8_lookup(&attr_net6->lo, addr + 8);  \
+			uint32_t lo = lpm8_lookup(&attr_net6->lo, addr + 8);   \
 			results[idx] = *value_table_get_ptr(                   \
-				&attr_net6->comb,                               \
-				hi & ~FILTER_NET6_ROW_MARK,                     \
+				&attr_net6->comb,                              \
+				hi & ~FILTER_NET6_ROW_MARK,                    \
 				lo                                             \
 			);                                                     \
 		}                                                              \
