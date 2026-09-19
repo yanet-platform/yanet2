@@ -12,11 +12,8 @@
 #include "lib/classify/query.h"
 
 CLASSIFY_DECLARE(sign_compile, device, vlan, ipfrag);
-CLASSIFY_QUERY_DECLARE(sign_query, ipfrag);
-
 int
 main(void) {
 	(void)sign_compile;
-	(void)sign_query;
 	return 0;
 }

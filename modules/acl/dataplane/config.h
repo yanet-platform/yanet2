@@ -68,8 +68,10 @@ struct acl_module_config {
 	// ports classifier onto them; the joins hold their own references.
 	struct classifier *classifier_vlan;
 	struct classifier *classifier_ip4;
+	struct classifier *classifier_ip4_frag;
 	struct classifier *classifier_ip4_port;
 	struct classifier *classifier_ip6;
+	struct classifier *classifier_ip6_frag;
 	struct classifier *classifier_ip6_port;
 
 	uint64_t target_count;

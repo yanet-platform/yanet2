@@ -21,45 +21,11 @@
 #include "objects/fwstate/api/fwstate_map_v4_object.h"
 #include "objects/fwstate/api/fwstate_map_v6_object.h"
 
-#include <lib/classify/query.h>
+#include "filter_lookup.h"
 
 struct acl_module {
 	struct module module;
 };
-
-CLASSIFY_QUERY_DECLARE(filter_vlan, device, vlan);
-
-CLASSIFY_QUERY_DECLARE(
-	filter_ip4, device, vlan, net4_src, net4_dst, ipfrag, proto_range
-);
-
-CLASSIFY_QUERY_DECLARE(
-	filter_ip4_port,
-	device,
-	vlan,
-	net4_src,
-	net4_dst,
-	ipfrag,
-	proto_range,
-	port_src,
-	port_dst
-);
-
-CLASSIFY_QUERY_DECLARE(
-	filter_ip6, device, vlan, net6_src, net6_dst, ipfrag, proto_range
-);
-
-CLASSIFY_QUERY_DECLARE(
-	filter_ip6_port,
-	device,
-	vlan,
-	net6_src,
-	net6_dst,
-	ipfrag,
-	proto_range,
-	port_src,
-	port_dst
-);
 
 static void
 acl_handle_packets(
@@ -147,7 +113,7 @@ acl_handle_packets(
 
 	classify_query(
 		&acl_config->filter_vlan,
-		filter_vlan,
+		acl_query_vlan,
 		vlan_packets,
 		vlan_result,
 		vlan_idx
@@ -155,7 +121,7 @@ acl_handle_packets(
 
 	classify_query(
 		&acl_config->filter_ip4,
-		filter_ip4,
+		acl_query_ip4,
 		ip4_packets,
 		ip4_result,
 		ip4_idx
@@ -163,7 +129,7 @@ acl_handle_packets(
 
 	classify_query(
 		&acl_config->filter_ip4_port,
-		filter_ip4_port,
+		acl_query_ip4_port,
 		ip4_port_packets,
 		ip4_port_result,
 		ip4_port_idx
@@ -171,7 +137,7 @@ acl_handle_packets(
 
 	classify_query(
 		&acl_config->filter_ip6,
-		filter_ip6,
+		acl_query_ip6,
 		ip6_packets,
 		ip6_result,
 		ip6_idx
@@ -179,7 +145,7 @@ acl_handle_packets(
 
 	classify_query(
 		&acl_config->filter_ip6_port,
-		filter_ip6_port,
+		acl_query_ip6_port,
 		ip6_port_packets,
 		ip6_port_result,
 		ip6_port_idx

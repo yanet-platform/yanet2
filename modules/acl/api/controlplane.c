@@ -28,8 +28,11 @@ static const struct classify_attr_handlers *ACL_FILTER_IP4_FULL[] = {
 	CLASSIFY_ATTR(vlan),
 	CLASSIFY_ATTR(net4_src),
 	CLASSIFY_ATTR(net4_dst),
-	CLASSIFY_ATTR(ipfrag),
 	CLASSIFY_ATTR(proto_range),
+};
+
+static const struct classify_attr_handlers *ACL_FILTER_IPFRAG[] = {
+	CLASSIFY_ATTR(ipfrag),
 };
 
 static const struct classify_attr_handlers *ACL_FILTER_IP6_FULL[] = {
@@ -37,7 +40,6 @@ static const struct classify_attr_handlers *ACL_FILTER_IP6_FULL[] = {
 	CLASSIFY_ATTR(vlan),
 	CLASSIFY_ATTR(net6_src),
 	CLASSIFY_ATTR(net6_dst),
-	CLASSIFY_ATTR(ipfrag),
 	CLASSIFY_ATTR(proto_range),
 };
 
@@ -65,8 +67,10 @@ acl_module_config_destroy(struct cp_module *cp_module) {
 	// The joined classifiers go first, the shared network cores stay
 	// alive until the joins built from them go away.
 	classify_free(config->classifier_ip4_port);
+	classify_free(config->classifier_ip4_frag);
 	classify_free(config->classifier_ip4);
 	classify_free(config->classifier_ip6_port);
+	classify_free(config->classifier_ip6_frag);
 	classify_free(config->classifier_ip6);
 	classify_free(config->classifier_vlan);
 
@@ -133,8 +137,10 @@ acl_module_config_init(
 
 	config->classifier_vlan = NULL;
 	config->classifier_ip4 = NULL;
+	config->classifier_ip4_frag = NULL;
 	config->classifier_ip4_port = NULL;
 	config->classifier_ip6 = NULL;
+	config->classifier_ip6_frag = NULL;
 	config->classifier_ip6_port = NULL;
 
 	config->v4_object_link_idx = ACL_OBJECT_LINK_NONE;
@@ -398,16 +404,18 @@ acl_module_build_filter(
 	return 0;
 }
 
-// Builds the ip family classifier - the full ip signature - over the
-// union of both family projections and freezes the plain family filter
-// from it, decoded over the plain projection of the family: the
-// classes of the rules absent from the plain projection resolve to no
-// rule. The classifier stays owned by the config: the port joint of
-// the family is built from it.
+// Builds the ip family classifier - the family core signature without
+// the fragment attribute - over the union of both family projections.
+// The plain family filter joins the module side fragment leaf onto it
+// and decodes over the plain projection of the family: the classes of
+// the rules absent from the plain projection resolve to no rule. The
+// classifier stays owned by the config: the fragment and port joints
+// of the family are built from it.
 static int
 acl_module_build_ip_classifier(
 	struct cp_module *cp_module,
 	struct classifier **classifier,
+	struct classifier **plain_classifier,
 	uint64_t *plain_rule_count,
 	const struct classify_attr_handlers *full_sign[],
 	uint32_t full_count,
@@ -446,21 +454,41 @@ acl_module_build_ip_classifier(
 		plain_check
 	);
 
+	struct classifier *frag = classify_leaf(
+		&cp_module->memory_context,
+		ACL_FILTER_IPFRAG[0],
+		filter_rule_ptrs,
+		acl_rule_count
+	);
+	if (frag == NULL) {
+		classify_free(cls);
+		return -1;
+	}
+
+	struct classifier *plain =
+		classify_join(&cp_module->memory_context, cls, frag);
+	classify_free(frag);
+	if (plain == NULL) {
+		classify_free(cls);
+		return -1;
+	}
+
 	struct vline *decoder = classify_decode(
-		cls, &cp_module->memory_context, filter_rule_ptrs
+		plain, &cp_module->memory_context, filter_rule_ptrs
 	);
 	if (decoder == NULL) {
-		classify_free(cls);
+		classify_free(plain);
 		return -1;
 	}
 
 	if (classify_filter_init(
-		    filter, &cp_module->memory_context, cls, decoder
+		    filter, &cp_module->memory_context, plain, decoder
 	    )) {
-		classify_free(cls);
+		classify_free(plain);
 		return -1;
 	}
 
+	*plain_classifier = plain;
 	*classifier = cls;
 	return 0;
 }
@@ -717,9 +745,10 @@ acl_module_compile_rules(
 	if (acl_module_build_ip_classifier(
 		    cp_module,
 		    &config->classifier_ip4,
+		    &config->classifier_ip4_frag,
 		    &config->filter_rule_count_ip4,
 		    ACL_FILTER_IP4_FULL,
-		    6,
+		    5,
 		    acl_rules,
 		    rule_count,
 		    filter_rules,
@@ -751,9 +780,10 @@ acl_module_compile_rules(
 	if (acl_module_build_ip_classifier(
 		    cp_module,
 		    &config->classifier_ip6,
+		    &config->classifier_ip6_frag,
 		    &config->filter_rule_count_ip6,
 		    ACL_FILTER_IP6_FULL,
-		    6,
+		    5,
 		    acl_rules,
 		    rule_count,
 		    filter_rules,

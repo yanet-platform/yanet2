@@ -14,6 +14,8 @@
 #include "lib/classify/compiler.h"
 #include "lib/classify/query.h"
 
+#include "modules/forward/dataplane/filter_lookup.h"
+
 #include "bench_acl_common.h"
 #include "bench_pcap.h"
 
@@ -35,9 +37,6 @@ static const struct classify_attr_handlers *sign_fwd_ip6[] = {
 	CLASSIFY_ATTR(net6_src),
 	CLASSIFY_ATTR(net6_dst),
 };
-
-CLASSIFY_QUERY_DECLARE(q_fwd_vlan, device, vlan);
-CLASSIFY_QUERY_DECLARE(q_fwd_ip6, device, vlan, net6_src, net6_dst);
 
 #define BATCH 64
 
@@ -99,6 +98,8 @@ main(int argc, char **argv) {
 	const char *pcap_path = argv[2];
 	size_t arena_mb = argc > 3 ? (size_t)atol(argv[3]) : 40000;
 	const char *result_path = argc > 4 ? argv[4] : NULL;
+
+	(void)fwd_query_ip4;
 
 	struct filter_rule *rules;
 	const struct filter_rule **all;
@@ -213,13 +214,13 @@ main(int argc, char **argv) {
 	for (uint32_t off = 0; off < cap.count; off += BATCH) {
 		uint32_t n = cap.count - off < BATCH ? cap.count - off : BATCH;
 		classify_query(
-			&flt_vlan, q_fwd_vlan, cap.ptrs + off, rv + off, n
+			&flt_vlan, fwd_query_vlan, cap.ptrs + off, rv + off, n
 		);
 	}
 	for (uint32_t off = 0; off < ip6_count; off += BATCH) {
 		uint32_t n = ip6_count - off < BATCH ? ip6_count - off : BATCH;
 		classify_query(
-			&flt_ip6, q_fwd_ip6, ip6_packets + off, rf + off, n
+			&flt_ip6, fwd_query_ip6, ip6_packets + off, rf + off, n
 		);
 	}
 
@@ -253,7 +254,7 @@ main(int argc, char **argv) {
 							     : BATCH;
 			classify_query(
 				&flt_vlan,
-				q_fwd_vlan,
+				fwd_query_vlan,
 				cap.ptrs + off,
 				rv + off,
 				n
@@ -264,7 +265,7 @@ main(int argc, char **argv) {
 							     : BATCH;
 			classify_query(
 				&flt_ip6,
-				q_fwd_ip6,
+				fwd_query_ip6,
 				ip6_packets + off,
 				rf + off,
 				n

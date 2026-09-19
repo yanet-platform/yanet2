@@ -17,8 +17,7 @@
 #include <stdint.h>
 
 #include "classify.h"
-#include "query/attribute.h"
-#include "rule.h"
+#include "query/declare.h"
 
 ////////////////////////////////////////////////////////////////////////////////
 

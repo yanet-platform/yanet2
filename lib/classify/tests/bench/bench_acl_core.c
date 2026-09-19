@@ -14,6 +14,8 @@
 #include "lib/classify/compiler.h"
 #include "lib/classify/query.h"
 
+#include "modules/acl/dataplane/filter_lookup.h"
+
 #include "bench_acl_common.h"
 #include "bench_pcap.h"
 
@@ -44,21 +46,6 @@ static const struct classify_attr_handlers *sign_ports[] = {
 	CLASSIFY_ATTR(port_src),
 	CLASSIFY_ATTR(port_dst),
 };
-
-CLASSIFY_QUERY_DECLARE(
-	q_ip6, device, vlan, net6_src, net6_dst, ipfrag, proto_range
-);
-CLASSIFY_QUERY_DECLARE(
-	q_ip6_port,
-	device,
-	vlan,
-	net6_src,
-	net6_dst,
-	ipfrag,
-	proto_range,
-	port_src,
-	port_dst
-);
 
 #define BATCH 64
 
@@ -161,6 +148,10 @@ main(int argc, char **argv) {
 	const char *pcap_path = argv[2];
 	size_t arena_mb = argc > 3 ? (size_t)atol(argv[3]) : 40000;
 	const char *result_path = argc > 4 ? argv[4] : NULL;
+
+	(void)acl_query_vlan;
+	(void)acl_query_ip4;
+	(void)acl_query_ip4_port;
 
 	struct filter_rule *rules;
 	const struct filter_rule **all;
@@ -336,14 +327,16 @@ main(int argc, char **argv) {
 
 	for (uint32_t off = 0; off < ip6_count; off += BATCH) {
 		uint32_t n = ip6_count - off < BATCH ? ip6_count - off : BATCH;
-		classify_query(&flt_ip6, q_ip6, ip6_packets + off, r6 + off, n);
+		classify_query(
+			&flt_ip6, acl_query_ip6, ip6_packets + off, r6 + off, n
+		);
 	}
 	for (uint32_t off = 0; off < ip6_port_count; off += BATCH) {
 		uint32_t n = ip6_port_count - off < BATCH ? ip6_port_count - off
 							  : BATCH;
 		classify_query(
 			&flt_ip6p,
-			q_ip6_port,
+			acl_query_ip6_port,
 			ip6_port_packets + off,
 			r6p + off,
 			n
@@ -382,7 +375,11 @@ main(int argc, char **argv) {
 			uint32_t n = ip6_count - off < BATCH ? ip6_count - off
 							     : BATCH;
 			classify_query(
-				&flt_ip6, q_ip6, ip6_packets + off, r6 + off, n
+				&flt_ip6,
+				acl_query_ip6,
+				ip6_packets + off,
+				r6 + off,
+				n
 			);
 		}
 		for (uint32_t off = 0; off < ip6_port_count; off += BATCH) {
@@ -391,7 +388,7 @@ main(int argc, char **argv) {
 					     : BATCH;
 			classify_query(
 				&flt_ip6p,
-				q_ip6_port,
+				acl_query_ip6_port,
 				ip6_port_packets + off,
 				r6p + off,
 				n

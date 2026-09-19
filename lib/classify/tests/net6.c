@@ -12,6 +12,117 @@
 #include "lib/classify/compiler.h"
 #include "lib/classify/query.h"
 
+#include "common/lpm.h"
+#include "common/network.h"
+
+#include "lib/classify/classifiers/net6.h"
+#include "lib/dataplane/packet/data.h"
+#include "lib/dataplane/packet/packet.h"
+
+#include <rte_ip.h>
+#include <rte_mbuf.h>
+#include <string.h>
+
+static inline void
+test_get_net6_dst_batch(
+	const struct packet **packets, uint8_t *addrs, uint32_t packet_count
+) {
+	for (uint32_t idx = 0; idx < packet_count; ++idx) {
+		const struct packet *packet = packets[idx];
+		struct rte_mbuf *mbuf = packet_to_mbuf(packet);
+		struct rte_ipv6_hdr *ipv6_hdr = rte_pktmbuf_mtod_offset(
+			mbuf,
+			struct rte_ipv6_hdr *,
+			packet->network_header.offset
+		);
+		memcpy(addrs + idx * NET6_LEN, ipv6_hdr->dst_addr, NET6_LEN);
+	}
+}
+
+static inline void
+test_lookup_net6_dst(
+	const struct classify_query_attr *attr,
+	const struct classify_query_attr_handlers *handlers,
+	const struct packet **packets,
+	uint32_t *results,
+	uint32_t packet_count
+) {
+	(void)handlers;
+	struct classify_query_attr_net6 *attr_net6 =
+		container_of(attr, struct classify_query_attr_net6, attr);
+
+	uint8_t addrs[packet_count][NET6_LEN];
+	test_get_net6_dst_batch(packets, addrs[0], packet_count);
+	for (uint32_t idx = 0; idx < packet_count; ++idx) {
+		const uint8_t *addr = addrs[idx];
+		uint32_t hi = lpm8_lookup(&attr_net6->hi, addr);
+		if (!(hi & FILTER_NET6_ROW_MARK)) {
+			results[idx] = hi;
+			continue;
+		}
+		uint32_t lo = lpm8_lookup(&attr_net6->lo, addr + 8);
+		results[idx] = *value_table_get_ptr(
+			&attr_net6->comb, hi & ~FILTER_NET6_ROW_MARK, lo
+		);
+	}
+}
+
+static inline void
+test_get_net6_src_batch(
+	const struct packet **packets, uint8_t *addrs, uint32_t packet_count
+) {
+	for (uint32_t idx = 0; idx < packet_count; ++idx) {
+		const struct packet *packet = packets[idx];
+		struct rte_mbuf *mbuf = packet_to_mbuf(packet);
+		struct rte_ipv6_hdr *ipv6_hdr = rte_pktmbuf_mtod_offset(
+			mbuf,
+			struct rte_ipv6_hdr *,
+			packet->network_header.offset
+		);
+		memcpy(addrs + idx * NET6_LEN, ipv6_hdr->src_addr, NET6_LEN);
+	}
+}
+
+static inline void
+test_lookup_net6_src(
+	const struct classify_query_attr *attr,
+	const struct classify_query_attr_handlers *handlers,
+	const struct packet **packets,
+	uint32_t *results,
+	uint32_t packet_count
+) {
+	(void)handlers;
+	struct classify_query_attr_net6 *attr_net6 =
+		container_of(attr, struct classify_query_attr_net6, attr);
+
+	uint8_t addrs[packet_count][NET6_LEN];
+	test_get_net6_src_batch(packets, addrs[0], packet_count);
+	for (uint32_t idx = 0; idx < packet_count; ++idx) {
+		const uint8_t *addr = addrs[idx];
+		uint32_t hi = lpm8_lookup(&attr_net6->hi, addr);
+		if (!(hi & FILTER_NET6_ROW_MARK)) {
+			results[idx] = hi;
+			continue;
+		}
+		uint32_t lo = lpm8_lookup(&attr_net6->lo, addr + 8);
+		results[idx] = *value_table_get_ptr(
+			&attr_net6->comb, hi & ~FILTER_NET6_ROW_MARK, lo
+		);
+	}
+}
+
+CLASSIFY_QUERY_ATTR(test_attr_net6_dst, test_lookup_net6_dst)
+CLASSIFY_QUERY_ATTR(test_attr_net6_src, test_lookup_net6_src)
+
+static const struct classify_query_attr_handlers *sign_query_dst[] = {
+	&test_attr_net6_dst,
+};
+
+static const struct classify_query_attr_handlers *sign_query_both[] = {
+	&test_attr_net6_src,
+	&test_attr_net6_dst,
+};
+
 #include "lib/utils/packet.h"
 
 #include "common/memory.h"
@@ -23,11 +134,7 @@
 #include <string.h>
 
 CLASSIFY_DECLARE(sign_compile_dst, net6_dst);
-CLASSIFY_QUERY_DECLARE(sign_query_dst, net6_dst);
-
 CLASSIFY_DECLARE(sign_compile_both, net6_src, net6_dst);
-CLASSIFY_QUERY_DECLARE(sign_query_both, net6_src, net6_dst);
-
 // Builds a network of the given address with a mask of hi_bytes leading
 // bytes in the high half and lo_bytes leading bytes in the low one.
 static struct net6

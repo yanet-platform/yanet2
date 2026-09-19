@@ -14,6 +14,8 @@
 #include "lib/classify/compiler.h"
 #include "lib/classify/query.h"
 
+#include "modules/acl/dataplane/filter_lookup.h"
+
 #include "lib/utils/packet.h"
 
 #include "common/memory.h"
@@ -35,20 +37,6 @@ static const struct classify_attr_handlers *sign_ports[] = {
 	CLASSIFY_ATTR(port_src),
 	CLASSIFY_ATTR(port_dst),
 };
-
-CLASSIFY_QUERY_DECLARE(
-	sign_ip6_q, device, vlan, net6_src, net6_dst, proto_range
-);
-CLASSIFY_QUERY_DECLARE(
-	sign_ip6_ports_q,
-	device,
-	vlan,
-	net6_src,
-	net6_dst,
-	proto_range,
-	port_src,
-	port_dst
-);
 
 static void
 put16(uint8_t *p, uint32_t g, uint16_t v) {
@@ -122,8 +110,15 @@ make_rule(
 		classify_result;                                               \
 	})
 
+// The v6 signatures come from the module lookup header; the rest of
+// its arrays are referenced so the header stays warning clean.
+#define classify_use(q) (void)(q)
+
 int
 main(void) {
+	classify_use(acl_query_vlan);
+	classify_use(acl_query_ip4);
+	classify_use(acl_query_ip4_port);
 	uint8_t net_a[NET6_LEN] = {0};
 	put16(net_a, 0, 0x2a02);
 	uint8_t net_b[NET6_LEN] = {0};
@@ -216,24 +211,36 @@ main(void) {
 
 	// The ip6 filter resolves through the network classifier alone and
 	// sees the full port rule only.
-	assert(classify(&filter_ip6, sign_ip6_q, net_a, net_b, 150, 1000) == 0);
-	assert(classify(&filter_ip6, sign_ip6_q, net_a, net_b, 500, 1000) == 0);
-	assert(classify(&filter_ip6, sign_ip6_q, net_b, net_a, 150, 150) ==
+	assert(classify(&filter_ip6, acl_query_ip6, net_a, net_b, 150, 1000) ==
+	       0);
+	assert(classify(&filter_ip6, acl_query_ip6, net_a, net_b, 500, 1000) ==
+	       0);
+	assert(classify(&filter_ip6, acl_query_ip6, net_b, net_a, 150, 150) ==
 	       CLASSIFY_RULE_INVALID);
 
 	// The port scoped filter resolves through the joined classifier and
 	// never sees the full port rule.
 	assert(classify(
-		       &filter_ports, sign_ip6_ports_q, net_a, net_b, 150, 1000
+		       &filter_ports,
+		       acl_query_ip6_port,
+		       net_a,
+		       net_b,
+		       150,
+		       1000
 	       ) == 1);
 	assert(classify(
-		       &filter_ports, sign_ip6_ports_q, net_a, net_b, 500, 1000
+		       &filter_ports,
+		       acl_query_ip6_port,
+		       net_a,
+		       net_b,
+		       500,
+		       1000
 	       ) == CLASSIFY_RULE_INVALID);
 	assert(classify(
-		       &filter_ports, sign_ip6_ports_q, net_b, net_a, 150, 150
+		       &filter_ports, acl_query_ip6_port, net_b, net_a, 150, 150
 	       ) == 2);
 	assert(classify(
-		       &filter_ports, sign_ip6_ports_q, net_b, net_a, 150, 300
+		       &filter_ports, acl_query_ip6_port, net_b, net_a, 150, 300
 	       ) == CLASSIFY_RULE_INVALID);
 
 	// A plain build of the joined signature agrees with the composed
@@ -261,7 +268,7 @@ main(void) {
 
 		assert(classify(
 			       &flat_flt,
-			       sign_ip6_ports_q,
+			       acl_query_ip6_port,
 			       net_a,
 			       net_b,
 			       150,
@@ -269,7 +276,7 @@ main(void) {
 		       ) == 1);
 		assert(classify(
 			       &flat_flt,
-			       sign_ip6_ports_q,
+			       acl_query_ip6_port,
 			       net_a,
 			       net_b,
 			       500,
@@ -277,7 +284,7 @@ main(void) {
 		       ) == CLASSIFY_RULE_INVALID);
 		assert(classify(
 			       &flat_flt,
-			       sign_ip6_ports_q,
+			       acl_query_ip6_port,
 			       net_b,
 			       net_a,
 			       150,
