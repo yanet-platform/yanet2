@@ -38,7 +38,6 @@ if not get_option('fuzzing').enabled()
           common_protoc_gen,
           common_readiness_protoc_gen,
           filter_protoc_gen,
-          balancer_protoc_gen,
           blackhole_protoc_gen,
           decap_protoc_gen,
           dscp_protoc_gen,

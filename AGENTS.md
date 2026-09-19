@@ -53,7 +53,7 @@ modules/<name>/
   tests/  fuzzing/  [internal/]
 ```
 
-Active modules: `route, acl, balancer2, blackhole, forward, decap, nat64, fwstate, dscp, pdump, route-mpls, mirror`. Legacy shape: `pdump` (CGO in `controlplane/ffi.go`, no `bindings/`); `fwstate` partially migrated; `balancer2` early-stage (`controlplane/` = protos only). Dataplane symbols are exported via meson `--defsym new_module_<name>`.
+Active modules: `route, acl, l3b, blackhole, forward, decap, nat64, fwstate, dscp, pdump, route-mpls, mirror`. Legacy shape: `pdump` (CGO in `controlplane/ffi.go`, no `bindings/`); `fwstate` partially migrated. The `l3b` module links virtual-service and session-table objects under `objects/l3b/`. Dataplane symbols are exported via meson `--defsym new_module_<name>`.
 
 Shared-memory pattern: `ffi.SharedMemory` → `shm.AgentAttach(name, instanceIdx, size)` → write the C config through FFI (`<name>_module_config_update()`) with Go memory pinned by `runtime.Pinner` → the dataplane reads it atomically. Exported Go APIs whose arguments index C arrays (device IDs, queue/worker indices) validate the range on the Go side.
 
