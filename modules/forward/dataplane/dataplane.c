@@ -5,7 +5,7 @@
 #include <rte_ether.h>
 #include <rte_ip.h>
 
-#include <lib/filter/query.h>
+#include "filter_lookup.h"
 
 #include "lib/controlplane/config/econtext.h"
 
@@ -14,12 +14,6 @@
 #include "lib/dataplane/module/packet_front.h"
 #include "lib/dataplane/packet/packet.h"
 #include "lib/dataplane/pipeline/pipeline.h"
-
-FILTER_QUERY_DECLARE(filter_vlan, device, vlan);
-
-FILTER_QUERY_DECLARE(filter_ip4, device, vlan, net4_src, net4_dst);
-
-FILTER_QUERY_DECLARE(filter_ip6, device, vlan, net6_src, net6_dst);
 
 static void
 forward_handle_packets(
@@ -74,25 +68,25 @@ forward_handle_packets(
 		}
 	}
 
-	filter_query(
+	classify_query(
 		&forward_config->filter_vlan,
-		filter_vlan,
+		fwd_query_vlan,
 		vlan_packets,
 		vlan_result,
 		vlan_idx
 	);
 
-	filter_query(
+	classify_query(
 		&forward_config->filter_ip4,
-		filter_ip4,
+		fwd_query_ip4,
 		ip4_packets,
 		ip4_result,
 		ip4_idx
 	);
 
-	filter_query(
+	classify_query(
 		&forward_config->filter_ip6,
-		filter_ip6,
+		fwd_query_ip6,
 		ip6_packets,
 		ip6_result,
 		ip6_idx

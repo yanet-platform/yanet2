@@ -4,7 +4,7 @@
 
 #include "config.h"
 
-#include <lib/filter/compiler.h>
+#include <lib/classify/compiler.h>
 
 #include "common/container_of.h"
 #include "lib/errors/errors.h"
@@ -12,11 +12,24 @@
 #include "lib/controlplane/agent/agent.h"
 #include "lib/controlplane/config/cp_module.h"
 
-FILTER_COMPILER_DECLARE(FWD_FILTER_VLAN_TAG, device, vlan);
+static const struct classify_attr_handlers *FWD_FILTER_VLAN_TAG[] = {
+	CLASSIFY_ATTR(device),
+	CLASSIFY_ATTR(vlan),
+};
 
-FILTER_COMPILER_DECLARE(FWD_FILTER_IP4_TAG, device, vlan, net4_src, net4_dst);
+static const struct classify_attr_handlers *FWD_FILTER_IP4_TAG[] = {
+	CLASSIFY_ATTR(device),
+	CLASSIFY_ATTR(vlan),
+	CLASSIFY_ATTR(net4_src),
+	CLASSIFY_ATTR(net4_dst),
+};
 
-FILTER_COMPILER_DECLARE(FWD_FILTER_IP6_TAG, device, vlan, net6_src, net6_dst);
+static const struct classify_attr_handlers *FWD_FILTER_IP6_TAG[] = {
+	CLASSIFY_ATTR(device),
+	CLASSIFY_ATTR(vlan),
+	CLASSIFY_ATTR(net6_src),
+	CLASSIFY_ATTR(net6_dst),
+};
 
 static void
 forward_module_config_destroy(struct cp_module *cp_module) {
@@ -30,9 +43,12 @@ forward_module_config_destroy(struct cp_module *cp_module) {
 		sizeof(struct forward_target) * config->target_count
 	);
 
-	filter_free(&config->filter_vlan, FWD_FILTER_VLAN_TAG);
-	filter_free(&config->filter_ip4, FWD_FILTER_IP4_TAG);
-	filter_free(&config->filter_ip6, FWD_FILTER_IP6_TAG);
+	classify_filter_free(&config->filter_vlan);
+	classify_filter_free(&config->filter_ip4);
+	classify_filter_free(&config->filter_ip6);
+	classify_free(config->classifier_vlan);
+	classify_free(config->classifier_ip4);
+	classify_free(config->classifier_ip6);
 
 	// Capture agent before fini zeroes it.
 	struct agent *agent = ADDR_OF(&cp_module->agent);
@@ -74,10 +90,11 @@ forward_module_config_init(
 	config->target_count = 0;
 
 	memset(&config->filter_vlan, 0, sizeof(config->filter_vlan));
-
 	memset(&config->filter_ip4, 0, sizeof(config->filter_ip4));
-
 	memset(&config->filter_ip6, 0, sizeof(config->filter_ip6));
+	config->classifier_vlan = NULL;
+	config->classifier_ip4 = NULL;
+	config->classifier_ip6 = NULL;
 
 	return &config->cp_module;
 }
@@ -180,6 +197,47 @@ check_forward_rule_ip6(const struct forward_rule *forward_rule) {
 	return check_has_ip6(forward_rule);
 }
 
+// Builds the classifier of a filter signature over the rule
+// projection, decodes it and freezes both into the filter; the
+// classifier tree stays owned by the config and is released after the
+// filter.
+static int
+forward_module_build_filter(
+	struct classify_filter *filter,
+	struct classifier **classifier,
+	const struct classify_attr_handlers *attr_handlers[],
+	uint32_t attr_handler_count,
+	const struct filter_rule **filter_rule_ptrs,
+	uint32_t forward_rule_count,
+	struct memory_context *memory_context
+) {
+	struct classifier *cls = classify_build(
+		memory_context,
+		attr_handlers,
+		attr_handler_count,
+		filter_rule_ptrs,
+		forward_rule_count
+	);
+	if (cls == NULL) {
+		return -1;
+	}
+
+	struct vline *decoder =
+		classify_decode(cls, memory_context, filter_rule_ptrs);
+	if (decoder == NULL) {
+		classify_free(cls);
+		return -1;
+	}
+
+	if (classify_filter_init(filter, memory_context, cls, decoder)) {
+		classify_free(cls);
+		return -1;
+	}
+
+	*classifier = cls;
+	return 0;
+}
+
 static int
 forward_module_init_l2(
 	struct cp_module *cp_module,
@@ -201,14 +259,14 @@ forward_module_init_l2(
 		check_forward_rule_l2
 	);
 
-	int rc = filter_init(
+	int rc = forward_module_build_filter(
 		&config->filter_vlan,
+		&config->classifier_vlan,
 		FWD_FILTER_VLAN_TAG,
+		2,
 		filter_rule_ptrs,
 		forward_rule_count,
-		&cp_module->memory_context,
-		"filter_vlan",
-		err
+		&cp_module->memory_context
 	);
 	if (rc) {
 		yanet_error_add(err, "failed to init filter_vlan");
@@ -237,14 +295,14 @@ forward_module_init_ip4(
 		check_forward_rule_ip4
 	);
 
-	int rc = filter_init(
+	int rc = forward_module_build_filter(
 		&config->filter_ip4,
+		&config->classifier_ip4,
 		FWD_FILTER_IP4_TAG,
+		4,
 		filter_rule_ptrs,
 		forward_rule_count,
-		&cp_module->memory_context,
-		"filter_ip4",
-		err
+		&cp_module->memory_context
 	);
 	if (rc) {
 		yanet_error_add(err, "failed to init filter_ip4");
@@ -273,14 +331,14 @@ forward_module_init_ip6(
 		check_forward_rule_ip6
 	);
 
-	int rc = filter_init(
+	int rc = forward_module_build_filter(
 		&config->filter_ip6,
+		&config->classifier_ip6,
 		FWD_FILTER_IP6_TAG,
+		4,
 		filter_rule_ptrs,
 		forward_rule_count,
-		&cp_module->memory_context,
-		"filter_ip6",
-		err
+		&cp_module->memory_context
 	);
 	if (rc) {
 		yanet_error_add(err, "failed to init filter_ip6");

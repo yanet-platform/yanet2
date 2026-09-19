@@ -1,6 +1,8 @@
 #pragma once
 
-#include <lib/filter/filter.h>
+#include <lib/classify/classify.h>
+
+struct classifier;
 
 #include "lib/controlplane/config/cp_module.h"
 
@@ -17,9 +19,14 @@ struct forward_target {
 struct forward_module_config {
 	struct cp_module cp_module;
 
-	struct filter filter_ip4;
-	struct filter filter_ip6;
-	struct filter filter_vlan;
+	struct classify_filter filter_ip4;
+	struct classify_filter filter_ip6;
+	struct classify_filter filter_vlan;
+	// Control plane only: the classifier trees the filters borrow their
+	// tapes from, released after the filters at config destroy.
+	struct classifier *classifier_ip4;
+	struct classifier *classifier_ip6;
+	struct classifier *classifier_vlan;
 
 	uint64_t target_count;
 	struct forward_target *targets;
