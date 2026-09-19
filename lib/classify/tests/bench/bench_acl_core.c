@@ -22,38 +22,25 @@ static const struct classify_attr_handlers *sign_vlan[] = {
 	CLASSIFY_ATTR(vlan),
 };
 
-static const struct classify_attr_handlers *sign_v4_core[] = {
+static const struct classify_attr_handlers *sign_v4_full[] = {
 	CLASSIFY_ATTR(device),
 	CLASSIFY_ATTR(vlan),
 	CLASSIFY_ATTR(net4_src),
 	CLASSIFY_ATTR(net4_dst),
-};
-
-static const struct classify_attr_handlers *sign_v4_ip4[] = {
 	CLASSIFY_ATTR(ipfrag),
 	CLASSIFY_ATTR(proto_range),
 };
 
-static const struct classify_attr_handlers *sign_v4_ip4_port[] = {
-	CLASSIFY_ATTR(proto_range),
-	CLASSIFY_ATTR(port_src),
-	CLASSIFY_ATTR(port_dst),
-};
-
-static const struct classify_attr_handlers *sign_v6_core[] = {
+static const struct classify_attr_handlers *sign_v6_full[] = {
 	CLASSIFY_ATTR(device),
 	CLASSIFY_ATTR(vlan),
 	CLASSIFY_ATTR(net6_src),
 	CLASSIFY_ATTR(net6_dst),
-};
-
-static const struct classify_attr_handlers *sign_v6_ip6[] = {
 	CLASSIFY_ATTR(ipfrag),
 	CLASSIFY_ATTR(proto_range),
 };
 
-static const struct classify_attr_handlers *sign_v6_ip6_port[] = {
-	CLASSIFY_ATTR(proto_range),
+static const struct classify_attr_handlers *sign_ports[] = {
 	CLASSIFY_ATTR(port_src),
 	CLASSIFY_ATTR(port_dst),
 };
@@ -67,6 +54,7 @@ CLASSIFY_QUERY_DECLARE(
 	vlan,
 	net6_src,
 	net6_dst,
+	ipfrag,
 	proto_range,
 	port_src,
 	port_dst
@@ -85,36 +73,28 @@ merge_first(uint32_t a, uint32_t b) {
 	return a < b ? a : b;
 }
 
-// Builds one filter of the composition: a classifier over the tail
-// signature joined onto the shared core, decoded over the projection
-// and frozen into a filter. The join consumes the tail classifier; it
-// is freed with the joined root.
+// Builds the ip family classifier over the union of both family
+// projections and freezes the plain family filter from it, decoded
+// over the plain projection. Mirrors acl_module_build_ip_classifier.
 static int
-compose_filter(
+build_ip_filter(
 	struct classify_filter *filter,
 	struct memory_context *mctx,
-	struct classifier *core,
-	const struct classify_attr_handlers *tail_sign[],
-	uint32_t tail_count,
-	const struct filter_rule **projection,
+	const struct classify_attr_handlers *full_sign[],
+	uint32_t full_count,
+	const struct filter_rule **union_proj,
+	const struct filter_rule **plain_proj,
 	uint32_t rule_count,
-	struct classifier **out_cls,
-	struct vline **out_decoder
+	struct classifier **out_cls
 ) {
-	struct classifier *tail = classify_build(
-		mctx, tail_sign, tail_count, projection, rule_count
+	struct classifier *cls = classify_build(
+		mctx, full_sign, full_count, union_proj, rule_count
 	);
-	if (tail == NULL) {
-		return -1;
-	}
-
-	struct classifier *cls = classify_join(mctx, core, tail);
-	classify_free(tail);
 	if (cls == NULL) {
 		return -1;
 	}
 
-	struct vline *decoder = classify_decode(cls, mctx, projection);
+	struct vline *decoder = classify_decode(cls, mctx, plain_proj);
 	if (decoder == NULL) {
 		classify_free(cls);
 		return -1;
@@ -126,7 +106,45 @@ compose_filter(
 	}
 
 	*out_cls = cls;
-	*out_decoder = decoder;
+	return 0;
+}
+
+// Builds the port scoped filter: a ports classifier over the port
+// scoped projection joined with the family classifier, decoded over
+// the same projection. Mirrors acl_module_build_port_filter.
+static int
+build_port_filter(
+	struct classify_filter *filter,
+	struct memory_context *mctx,
+	struct classifier *ip_cls,
+	const struct filter_rule **port_proj,
+	uint32_t rule_count,
+	struct classifier **out_cls
+) {
+	struct classifier *ports =
+		classify_build(mctx, sign_ports, 2, port_proj, rule_count);
+	if (ports == NULL) {
+		return -1;
+	}
+
+	struct classifier *cls = classify_join(mctx, ip_cls, ports);
+	classify_free(ports);
+	if (cls == NULL) {
+		return -1;
+	}
+
+	struct vline *decoder = classify_decode(cls, mctx, port_proj);
+	if (decoder == NULL) {
+		classify_free(cls);
+		return -1;
+	}
+
+	if (classify_filter_init(filter, mctx, cls, decoder)) {
+		classify_free(cls);
+		return -1;
+	}
+
+	*out_cls = cls;
 	return 0;
 }
 
@@ -201,12 +219,10 @@ main(int argc, char **argv) {
 	struct classify_filter flt_vlan;
 	struct classifier *cls_vlan = NULL;
 	struct vline *dec_vlan = NULL;
-	struct classifier *core4 = NULL, *cls_ip4 = NULL, *cls_ip4p = NULL;
+	struct classifier *cls_ip4 = NULL, *cls_ip4p = NULL;
 	struct classify_filter flt_ip4, flt_ip4p;
-	struct vline *dec_ip4 = NULL, *dec_ip4p = NULL;
-	struct classifier *core6 = NULL, *cls_ip6 = NULL, *cls_ip6p = NULL;
+	struct classifier *cls_ip6 = NULL, *cls_ip6p = NULL;
 	struct classify_filter flt_ip6, flt_ip6p;
-	struct vline *dec_ip6 = NULL, *dec_ip6p = NULL;
 	memset(&flt_vlan, 0, sizeof(flt_vlan));
 	memset(&flt_ip4, 0, sizeof(flt_ip4));
 	memset(&flt_ip4p, 0, sizeof(flt_ip4p));
@@ -224,77 +240,53 @@ main(int argc, char **argv) {
 	printf("new vlan:      %8.1f ms rc=%d\n", bench_ms(&t0, &t1), rc);
 
 	clock_gettime(CLOCK_MONOTONIC, &t0);
-	core4 = classify_build(
-		&mctx, sign_v4_core, 4, v4_union, stats.rule_count
-	);
-	rc |= core4 == NULL;
-	clock_gettime(CLOCK_MONOTONIC, &t1);
-	printf("new v4 core:   %8.1f ms rc=%d\n", bench_ms(&t0, &t1), rc);
-
-	clock_gettime(CLOCK_MONOTONIC, &t0);
-	rc |= compose_filter(
+	rc |= build_ip_filter(
 		&flt_ip4,
 		&mctx,
-		core4,
-		sign_v4_ip4,
-		2,
+		sign_v4_full,
+		6,
+		v4_union,
 		proj + stats.rule_count,
 		stats.rule_count,
-		&cls_ip4,
-		&dec_ip4
+		&cls_ip4
 	);
 	clock_gettime(CLOCK_MONOTONIC, &t1);
 	printf("new ip4:       %8.1f ms rc=%d\n", bench_ms(&t0, &t1), rc);
 
 	clock_gettime(CLOCK_MONOTONIC, &t0);
-	rc |= compose_filter(
+	rc |= build_port_filter(
 		&flt_ip4p,
 		&mctx,
-		core4,
-		sign_v4_ip4_port,
-		3,
+		cls_ip4,
 		proj + 2 * stats.rule_count,
 		stats.rule_count,
-		&cls_ip4p,
-		&dec_ip4p
+		&cls_ip4p
 	);
 	clock_gettime(CLOCK_MONOTONIC, &t1);
 	printf("new ip4_port:  %8.1f ms rc=%d\n", bench_ms(&t0, &t1), rc);
 
 	clock_gettime(CLOCK_MONOTONIC, &t0);
-	core6 = classify_build(
-		&mctx, sign_v6_core, 4, v6_union, stats.rule_count
-	);
-	rc |= core6 == NULL;
-	clock_gettime(CLOCK_MONOTONIC, &t1);
-	printf("new v6 core:   %8.1f ms rc=%d\n", bench_ms(&t0, &t1), rc);
-
-	clock_gettime(CLOCK_MONOTONIC, &t0);
-	rc |= compose_filter(
+	rc |= build_ip_filter(
 		&flt_ip6,
 		&mctx,
-		core6,
-		sign_v6_ip6,
-		2,
+		sign_v6_full,
+		6,
+		v6_union,
 		proj + 3 * stats.rule_count,
 		stats.rule_count,
-		&cls_ip6,
-		&dec_ip6
+		&cls_ip6
 	);
 	clock_gettime(CLOCK_MONOTONIC, &t1);
 	printf("new ip6:       %8.1f ms rc=%d\n", bench_ms(&t0, &t1), rc);
 
 	clock_gettime(CLOCK_MONOTONIC, &t0);
-	rc |= compose_filter(
+	rc |= build_port_filter(
 		&flt_ip6p,
 		&mctx,
-		core6,
-		sign_v6_ip6_port,
-		3,
+		cls_ip6,
 		proj + 4 * stats.rule_count,
 		stats.rule_count,
-		&cls_ip6p,
-		&dec_ip6p
+		&cls_ip6p
 	);
 	clock_gettime(CLOCK_MONOTONIC, &t1);
 	printf("new ip6_port:  %8.1f ms rc=%d\n", bench_ms(&t0, &t1), rc);
@@ -316,17 +308,61 @@ main(int argc, char **argv) {
 	uint32_t *r6p = malloc(sizeof(uint32_t) * cap.count);
 	uint32_t *merged = malloc(sizeof(uint32_t) * cap.count);
 
-	for (uint32_t off = 0; off < cap.count; off += BATCH) {
-		uint32_t n = cap.count - off < BATCH ? cap.count - off : BATCH;
-		classify_query(&flt_ip6, q_ip6, cap.ptrs + off, r6 + off, n);
+	// The batch partitioning follows the production dataplane: the ip6
+	// filters see IPv6 packets only, the port scoped filter sees offset
+	// zero TCP or UDP among them.
+	struct packet **ip6_packets = malloc(sizeof(*ip6_packets) * cap.count);
+	struct packet **ip6_port_packets =
+		malloc(sizeof(*ip6_port_packets) * cap.count);
+	uint32_t *ip6_pos = malloc(sizeof(*ip6_pos) * cap.count);
+	uint32_t *ip6_port_pos = malloc(sizeof(*ip6_port_pos) * cap.count);
+	uint32_t ip6_count = 0;
+	uint32_t ip6_port_count = 0;
+	for (uint32_t idx = 0; idx < cap.count; ++idx) {
+		if (!bench_packet_is_ip6(cap.packets + idx)) {
+			continue;
+		}
+		ip6_pos[ip6_count] = idx;
+		ip6_packets[ip6_count++] = cap.ptrs[idx];
+		if (bench_packet_is_ip6_port(cap.packets + idx)) {
+			ip6_port_pos[ip6_port_count] = idx;
+			ip6_port_packets[ip6_port_count++] = cap.ptrs[idx];
+		}
+	}
+	printf("capture: ip6 %u/%u, port scoped %u\n",
+	       ip6_count,
+	       cap.count,
+	       ip6_port_count);
+
+	for (uint32_t off = 0; off < ip6_count; off += BATCH) {
+		uint32_t n = ip6_count - off < BATCH ? ip6_count - off : BATCH;
+		classify_query(&flt_ip6, q_ip6, ip6_packets + off, r6 + off, n);
+	}
+	for (uint32_t off = 0; off < ip6_port_count; off += BATCH) {
+		uint32_t n = ip6_port_count - off < BATCH ? ip6_port_count - off
+							  : BATCH;
 		classify_query(
-			&flt_ip6p, q_ip6_port, cap.ptrs + off, r6p + off, n
+			&flt_ip6p,
+			q_ip6_port,
+			ip6_port_packets + off,
+			r6p + off,
+			n
 		);
 	}
-	uint32_t matched = 0;
+
 	for (uint32_t idx = 0; idx < cap.count; ++idx) {
-		merged[idx] = merge_first(r6[idx], r6p[idx]);
-		matched += merged[idx] != CLASSIFY_RULE_INVALID;
+		merged[idx] = FILTER_RULE_INVALID;
+	}
+	uint32_t matched = 0;
+	for (uint32_t idx = 0; idx < ip6_count; ++idx) {
+		merged[ip6_pos[idx]] = r6[idx];
+	}
+	for (uint32_t idx = 0; idx < ip6_port_count; ++idx) {
+		uint32_t pos = ip6_port_pos[idx];
+		merged[pos] = merge_first(merged[pos], r6p[idx]);
+	}
+	for (uint32_t idx = 0; idx < cap.count; ++idx) {
+		matched += merged[idx] != FILTER_RULE_INVALID;
 	}
 	printf("new v6 lookup: matched %u/%u (%.1f%%) fnv=%llx\n",
 	       matched,
@@ -342,16 +378,21 @@ main(int argc, char **argv) {
 	const uint32_t passes = 50;
 	clock_gettime(CLOCK_MONOTONIC, &t0);
 	for (uint32_t pass = 0; pass < passes; ++pass) {
-		for (uint32_t off = 0; off < cap.count; off += BATCH) {
-			uint32_t n = cap.count - off < BATCH ? cap.count - off
+		for (uint32_t off = 0; off < ip6_count; off += BATCH) {
+			uint32_t n = ip6_count - off < BATCH ? ip6_count - off
 							     : BATCH;
 			classify_query(
-				&flt_ip6, q_ip6, cap.ptrs + off, r6 + off, n
+				&flt_ip6, q_ip6, ip6_packets + off, r6 + off, n
 			);
+		}
+		for (uint32_t off = 0; off < ip6_port_count; off += BATCH) {
+			uint32_t n = ip6_port_count - off < BATCH
+					     ? ip6_port_count - off
+					     : BATCH;
 			classify_query(
 				&flt_ip6p,
 				q_ip6_port,
-				cap.ptrs + off,
+				ip6_port_packets + off,
 				r6p + off,
 				n
 			);
@@ -360,6 +401,11 @@ main(int argc, char **argv) {
 	clock_gettime(CLOCK_MONOTONIC, &t1);
 	printf("new v6 steady: %.1f ns/pkt (both filters)\n",
 	       bench_ms(&t0, &t1) * 1e6 / ((double)passes * cap.count));
+
+	free(ip6_packets);
+	free(ip6_port_packets);
+	free(ip6_pos);
+	free(ip6_port_pos);
 
 	classify_filter_free(&flt_ip6p);
 	classify_free(cls_ip6p);
@@ -371,8 +417,6 @@ main(int argc, char **argv) {
 	classify_free(cls_ip4);
 	classify_filter_free(&flt_vlan);
 	classify_free(cls_vlan);
-	classify_free(core6);
-	classify_free(core4);
 	bench_capture_free(&cap);
 	return 0;
 }

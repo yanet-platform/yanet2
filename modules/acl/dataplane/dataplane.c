@@ -39,6 +39,7 @@ CLASSIFY_QUERY_DECLARE(
 	vlan,
 	net4_src,
 	net4_dst,
+	ipfrag,
 	proto_range,
 	port_src,
 	port_dst
@@ -54,6 +55,7 @@ CLASSIFY_QUERY_DECLARE(
 	vlan,
 	net6_src,
 	net6_dst,
+	ipfrag,
 	proto_range,
 	port_src,
 	port_dst

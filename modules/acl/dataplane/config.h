@@ -62,14 +62,13 @@ struct acl_module_config {
 	struct classify_filter filter_ip6_port;
 	struct classify_filter filter_vlan;
 	// Control plane only: the classifier trees the filters borrow their
-	// tapes from, released after the filters at config destroy. The two
-	// network cores are shared between the ip and the ip port filters of
-	// their family and stay alive through the reference the joins hold.
+	// tapes from, released after the filters at config destroy. The ip
+	// classifiers cover the full ip signature over the union of both
+	// projections of their family, and the port scoped filters join a
+	// ports classifier onto them; the joins hold their own references.
 	struct classifier *classifier_vlan;
-	struct classifier *classifier_v4_core;
 	struct classifier *classifier_ip4;
 	struct classifier *classifier_ip4_port;
-	struct classifier *classifier_v6_core;
 	struct classifier *classifier_ip6;
 	struct classifier *classifier_ip6_port;
 

@@ -23,38 +23,25 @@ static const struct classify_attr_handlers *ACL_FILTER_VLAN_TAG[] = {
 	CLASSIFY_ATTR(vlan),
 };
 
-static const struct classify_attr_handlers *ACL_FILTER_NET4_CORE[] = {
+static const struct classify_attr_handlers *ACL_FILTER_IP4_FULL[] = {
 	CLASSIFY_ATTR(device),
 	CLASSIFY_ATTR(vlan),
 	CLASSIFY_ATTR(net4_src),
 	CLASSIFY_ATTR(net4_dst),
-};
-
-static const struct classify_attr_handlers *ACL_FILTER_IP4_EXTRA[] = {
 	CLASSIFY_ATTR(ipfrag),
 	CLASSIFY_ATTR(proto_range),
 };
 
-static const struct classify_attr_handlers *ACL_FILTER_IP4_PORT_EXTRA[] = {
-	CLASSIFY_ATTR(proto_range),
-	CLASSIFY_ATTR(port_src),
-	CLASSIFY_ATTR(port_dst),
-};
-
-static const struct classify_attr_handlers *ACL_FILTER_NET6_CORE[] = {
+static const struct classify_attr_handlers *ACL_FILTER_IP6_FULL[] = {
 	CLASSIFY_ATTR(device),
 	CLASSIFY_ATTR(vlan),
 	CLASSIFY_ATTR(net6_src),
 	CLASSIFY_ATTR(net6_dst),
-};
-
-static const struct classify_attr_handlers *ACL_FILTER_IP6_EXTRA[] = {
 	CLASSIFY_ATTR(ipfrag),
 	CLASSIFY_ATTR(proto_range),
 };
 
-static const struct classify_attr_handlers *ACL_FILTER_IP6_PORT_EXTRA[] = {
-	CLASSIFY_ATTR(proto_range),
+static const struct classify_attr_handlers *ACL_FILTER_PORTS[] = {
 	CLASSIFY_ATTR(port_src),
 	CLASSIFY_ATTR(port_dst),
 };
@@ -77,12 +64,10 @@ acl_module_config_destroy(struct cp_module *cp_module) {
 	classify_filter_free(&config->filter_ip6_port);
 	// The joined classifiers go first, the shared network cores stay
 	// alive until the joins built from them go away.
-	classify_free(config->classifier_ip4);
 	classify_free(config->classifier_ip4_port);
-	classify_free(config->classifier_v4_core);
-	classify_free(config->classifier_ip6);
+	classify_free(config->classifier_ip4);
 	classify_free(config->classifier_ip6_port);
-	classify_free(config->classifier_v6_core);
+	classify_free(config->classifier_ip6);
 	classify_free(config->classifier_vlan);
 
 	// Capture agent before fini zeroes it.
@@ -147,10 +132,8 @@ acl_module_config_init(
 	memset(&config->filter_ip6_port, 0, sizeof(config->filter_ip6_port));
 
 	config->classifier_vlan = NULL;
-	config->classifier_v4_core = NULL;
 	config->classifier_ip4 = NULL;
 	config->classifier_ip4_port = NULL;
-	config->classifier_v6_core = NULL;
 	config->classifier_ip6 = NULL;
 	config->classifier_ip6_port = NULL;
 
@@ -415,52 +398,133 @@ acl_module_build_filter(
 	return 0;
 }
 
-// Builds one net family filter of the composition: the shared network
-// core classifier of the family joined with the tail signature of the
-// filter built over its own projection, decoded over the same
-// projection and frozen into the filter. The tail tree is released
-// right after the join; the join holds its own reference.
+// Builds the ip family classifier - the full ip signature - over the
+// union of both family projections and freezes the plain family filter
+// from it, decoded over the plain projection of the family: the
+// classes of the rules absent from the plain projection resolve to no
+// rule. The classifier stays owned by the config: the port joint of
+// the family is built from it.
 static int
-acl_module_build_family_filter(
-	struct classify_filter *filter,
+acl_module_build_ip_classifier(
+	struct cp_module *cp_module,
 	struct classifier **classifier,
-	struct classifier *core,
-	const struct classify_attr_handlers *extra_sign[],
-	uint32_t extra_count,
-	const struct filter_rule **filter_rule_ptrs,
+	uint64_t *plain_rule_count,
+	const struct classify_attr_handlers *full_sign[],
+	uint32_t full_count,
+	struct acl_rule *acl_rules,
 	uint32_t acl_rule_count,
-	struct memory_context *memory_context
+	struct filter_rule *filter_rules,
+	const struct filter_rule **filter_rule_ptrs,
+	struct classify_filter *filter,
+	acl_rule_check_func union_check,
+	acl_rule_check_func plain_check
 ) {
-	struct classifier *tail = classify_build(
-		memory_context,
-		extra_sign,
-		extra_count,
+	filter_acl_rules(
+		acl_rules,
+		acl_rule_count,
+		filter_rules,
+		filter_rule_ptrs,
+		union_check
+	);
+
+	struct classifier *cls = classify_build(
+		&cp_module->memory_context,
+		full_sign,
+		full_count,
 		filter_rule_ptrs,
 		acl_rule_count
 	);
-	if (tail == NULL) {
-		return -1;
-	}
-
-	struct classifier *cls = classify_join(memory_context, core, tail);
-	classify_free(tail);
 	if (cls == NULL) {
 		return -1;
 	}
 
-	struct vline *decoder =
-		classify_decode(cls, memory_context, filter_rule_ptrs);
+	*plain_rule_count = filter_acl_rules(
+		acl_rules,
+		acl_rule_count,
+		filter_rules,
+		filter_rule_ptrs,
+		plain_check
+	);
+
+	struct vline *decoder = classify_decode(
+		cls, &cp_module->memory_context, filter_rule_ptrs
+	);
 	if (decoder == NULL) {
 		classify_free(cls);
 		return -1;
 	}
 
-	if (classify_filter_init(filter, memory_context, cls, decoder)) {
+	if (classify_filter_init(
+		    filter, &cp_module->memory_context, cls, decoder
+	    )) {
 		classify_free(cls);
 		return -1;
 	}
 
 	*classifier = cls;
+	return 0;
+}
+
+// Builds the port scoped filter of a family: the ports classifier over
+// the port scoped projection, joined with the family classifier built
+// over the union, decoded over the same projection and frozen into the
+// filter. The ports classifier is released right after the join; the
+// join holds its own reference.
+static int
+acl_module_build_port_filter(
+	struct cp_module *cp_module,
+	struct classifier **joint_classifier,
+	struct classifier *ip_classifier,
+	struct classify_filter *filter,
+	struct acl_rule *acl_rules,
+	uint32_t acl_rule_count,
+	struct filter_rule *filter_rules,
+	const struct filter_rule **filter_rule_ptrs,
+	acl_rule_check_func port_check,
+	uint64_t *rule_count_out
+) {
+	*rule_count_out = filter_acl_rules(
+		acl_rules,
+		acl_rule_count,
+		filter_rules,
+		filter_rule_ptrs,
+		port_check
+	);
+
+	struct classifier *ports = classify_build(
+		&cp_module->memory_context,
+		ACL_FILTER_PORTS,
+		2,
+		filter_rule_ptrs,
+		acl_rule_count
+	);
+	if (ports == NULL) {
+		return -1;
+	}
+
+	struct classifier *cls =
+		classify_join(&cp_module->memory_context, ip_classifier, ports);
+	classify_free(ports);
+	if (cls == NULL) {
+		return -1;
+	}
+
+	struct vline *decoder = classify_decode(
+		cls, &cp_module->memory_context, filter_rule_ptrs
+	);
+	if (decoder == NULL) {
+		classify_free(cls);
+		return -1;
+	}
+
+	if (classify_filter_init(
+		    filter, &cp_module->memory_context, cls, decoder
+	    )) {
+		classify_free(cls);
+		return -1;
+	}
+
+	*joint_classifier = cls;
 	return 0;
 }
 
@@ -495,186 +559,6 @@ acl_module_init_l2(
 	);
 	if (rc) {
 		yanet_error_add(err, "failed to init filter_vlan");
-	}
-	return rc;
-}
-
-static int
-acl_module_init_net(
-	struct cp_module *cp_module,
-	struct classifier **core_classifier,
-	const struct classify_attr_handlers *core_sign[],
-	struct acl_rule *acl_rules,
-	uint32_t acl_rule_count,
-	struct filter_rule *filter_rules,
-	const struct filter_rule **filter_rule_ptrs,
-	acl_rule_check_func union_check
-) {
-	// The network core of a family is built over the union of the two
-	// projections of the family, so both of its filters classify
-	// through the same network classifiers.
-	filter_acl_rules(
-		acl_rules,
-		acl_rule_count,
-		filter_rules,
-		filter_rule_ptrs,
-		union_check
-	);
-
-	*core_classifier = classify_build(
-		&cp_module->memory_context,
-		core_sign,
-		4,
-		filter_rule_ptrs,
-		acl_rule_count
-	);
-	return *core_classifier == NULL ? -1 : 0;
-}
-
-static int
-acl_module_init_ip4(
-	struct cp_module *cp_module,
-	struct classifier *core,
-	struct acl_rule *acl_rules,
-	uint32_t acl_rule_count,
-	struct filter_rule *filter_rules,
-	const struct filter_rule **filter_rule_ptrs,
-	yanet_error **err
-) {
-	struct acl_module_config *config =
-		container_of(cp_module, struct acl_module_config, cp_module);
-
-	config->filter_rule_count_ip4 = filter_acl_rules(
-		acl_rules,
-		acl_rule_count,
-		filter_rules,
-		filter_rule_ptrs,
-		check_acl_rule_ip4
-	);
-
-	int rc = acl_module_build_family_filter(
-		&config->filter_ip4,
-		&config->classifier_ip4,
-		core,
-		ACL_FILTER_IP4_EXTRA,
-		2,
-		filter_rule_ptrs,
-		acl_rule_count,
-		&cp_module->memory_context
-	);
-	if (rc) {
-		yanet_error_add(err, "failed to init filter_ip4");
-	}
-	return rc;
-}
-
-static int
-acl_module_init_ip4_port(
-	struct cp_module *cp_module,
-	struct classifier *core,
-	struct acl_rule *acl_rules,
-	uint32_t acl_rule_count,
-	struct filter_rule *filter_rules,
-	const struct filter_rule **filter_rule_ptrs,
-	yanet_error **err
-) {
-	struct acl_module_config *config =
-		container_of(cp_module, struct acl_module_config, cp_module);
-
-	config->filter_rule_count_ip4_port = filter_acl_rules(
-		acl_rules,
-		acl_rule_count,
-		filter_rules,
-		filter_rule_ptrs,
-		check_acl_rule_ip4_port
-	);
-
-	int rc = acl_module_build_family_filter(
-		&config->filter_ip4_port,
-		&config->classifier_ip4_port,
-		core,
-		ACL_FILTER_IP4_PORT_EXTRA,
-		3,
-		filter_rule_ptrs,
-		acl_rule_count,
-		&cp_module->memory_context
-	);
-	if (rc) {
-		yanet_error_add(err, "failed to init filter_ip4_port");
-	}
-	return rc;
-}
-
-static int
-acl_module_init_ip6(
-	struct cp_module *cp_module,
-	struct classifier *core,
-	struct acl_rule *acl_rules,
-	uint32_t acl_rule_count,
-	struct filter_rule *filter_rules,
-	const struct filter_rule **filter_rule_ptrs,
-	yanet_error **err
-) {
-	struct acl_module_config *config =
-		container_of(cp_module, struct acl_module_config, cp_module);
-
-	config->filter_rule_count_ip6 = filter_acl_rules(
-		acl_rules,
-		acl_rule_count,
-		filter_rules,
-		filter_rule_ptrs,
-		check_acl_rule_ip6
-	);
-
-	int rc = acl_module_build_family_filter(
-		&config->filter_ip6,
-		&config->classifier_ip6,
-		core,
-		ACL_FILTER_IP6_EXTRA,
-		2,
-		filter_rule_ptrs,
-		acl_rule_count,
-		&cp_module->memory_context
-	);
-	if (rc) {
-		yanet_error_add(err, "failed to init filter_ip6");
-	}
-	return rc;
-}
-
-static int
-acl_module_init_ip6_port(
-	struct cp_module *cp_module,
-	struct classifier *core,
-	struct acl_rule *acl_rules,
-	uint32_t acl_rule_count,
-	struct filter_rule *filter_rules,
-	const struct filter_rule **filter_rule_ptrs,
-	yanet_error **err
-) {
-	struct acl_module_config *config =
-		container_of(cp_module, struct acl_module_config, cp_module);
-
-	config->filter_rule_count_ip6_port = filter_acl_rules(
-		acl_rules,
-		acl_rule_count,
-		filter_rules,
-		filter_rule_ptrs,
-		check_acl_rule_ip6_port
-	);
-
-	int rc = acl_module_build_family_filter(
-		&config->filter_ip6_port,
-		&config->classifier_ip6_port,
-		core,
-		ACL_FILTER_IP6_PORT_EXTRA,
-		3,
-		filter_rule_ptrs,
-		acl_rule_count,
-		&cp_module->memory_context
-	);
-	if (rc) {
-		yanet_error_add(err, "failed to init filter_ip6_port");
 	}
 	return rc;
 }
@@ -830,79 +714,71 @@ acl_module_compile_rules(
 		goto error_rule_ptrs;
 	}
 
-	if (acl_module_init_net(
+	if (acl_module_build_ip_classifier(
 		    cp_module,
-		    &config->classifier_v4_core,
-		    ACL_FILTER_NET4_CORE,
+		    &config->classifier_ip4,
+		    &config->filter_rule_count_ip4,
+		    ACL_FILTER_IP4_FULL,
+		    6,
 		    acl_rules,
 		    rule_count,
 		    filter_rules,
 		    filter_rule_ptrs,
-		    check_has_ip4
+		    &config->filter_ip4,
+		    check_has_ip4,
+		    check_acl_rule_ip4
 	    )) {
-		yanet_error_add(err, "failed to init v4 network core");
+		yanet_error_add(err, "failed to init filter_ip4");
 		goto error_rule_ptrs;
 	}
 
-	if (acl_module_init_ip4(
+	if (acl_module_build_port_filter(
 		    cp_module,
-		    config->classifier_v4_core,
+		    &config->classifier_ip4_port,
+		    config->classifier_ip4,
+		    &config->filter_ip4_port,
 		    acl_rules,
 		    rule_count,
 		    filter_rules,
 		    filter_rule_ptrs,
-		    err
+		    check_acl_rule_ip4_port,
+		    &config->filter_rule_count_ip4_port
 	    )) {
+		yanet_error_add(err, "failed to init filter_ip4_port");
 		goto error_rule_ptrs;
 	}
 
-	if (acl_module_init_ip4_port(
+	if (acl_module_build_ip_classifier(
 		    cp_module,
-		    config->classifier_v4_core,
+		    &config->classifier_ip6,
+		    &config->filter_rule_count_ip6,
+		    ACL_FILTER_IP6_FULL,
+		    6,
 		    acl_rules,
 		    rule_count,
 		    filter_rules,
 		    filter_rule_ptrs,
-		    err
+		    &config->filter_ip6,
+		    check_has_ip6,
+		    check_acl_rule_ip6
 	    )) {
+		yanet_error_add(err, "failed to init filter_ip6");
 		goto error_rule_ptrs;
 	}
 
-	if (acl_module_init_net(
+	if (acl_module_build_port_filter(
 		    cp_module,
-		    &config->classifier_v6_core,
-		    ACL_FILTER_NET6_CORE,
+		    &config->classifier_ip6_port,
+		    config->classifier_ip6,
+		    &config->filter_ip6_port,
 		    acl_rules,
 		    rule_count,
 		    filter_rules,
 		    filter_rule_ptrs,
-		    check_has_ip6
+		    check_acl_rule_ip6_port,
+		    &config->filter_rule_count_ip6_port
 	    )) {
-		yanet_error_add(err, "failed to init v6 network core");
-		goto error_rule_ptrs;
-	}
-
-	if (acl_module_init_ip6(
-		    cp_module,
-		    config->classifier_v6_core,
-		    acl_rules,
-		    rule_count,
-		    filter_rules,
-		    filter_rule_ptrs,
-		    err
-	    )) {
-		goto error_rule_ptrs;
-	}
-
-	if (acl_module_init_ip6_port(
-		    cp_module,
-		    config->classifier_v6_core,
-		    acl_rules,
-		    rule_count,
-		    filter_rules,
-		    filter_rule_ptrs,
-		    err
-	    )) {
+		yanet_error_add(err, "failed to init filter_ip6_port");
 		goto error_rule_ptrs;
 	}
 
