@@ -233,7 +233,7 @@ l3b_counter_add(
 	uint64_t counter_id,
 	const struct packet *packet
 ) {
-	if (counters == NULL || counter_id == COUNTER_INVALID) {
+	if (counters == NULL) {
 		return;
 	}
 
