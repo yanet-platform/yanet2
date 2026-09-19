@@ -12,7 +12,7 @@ use unrduppb::{
 };
 use ync::{
     GlobalArgs,
-    client::{LayeredChannel, Service as GrpcService},
+    client::{LayeredChannel, Service as GrpcService, resolve_label},
     completion, display,
     errors::Error,
     output, yaml,
@@ -220,12 +220,28 @@ fn main() -> std::process::ExitCode {
 
 async fn run(cmd: Cmd) -> Result<(), Error> {
     let action = cmd.mode.action();
+
+    // The update file is read before the connection, so bad local input
+    // fails the same with or without a reachable gateway.
+    let update = match &cmd.mode {
+        ModeCmd::Update(update) => {
+            let endpoint = resolve_label(&cmd.globals.connection, action)?;
+            let config: UnrdupConfig =
+                yaml::load(&update.file).map_err(|err| Error::invalid_argument("update", endpoint, err.to_string()))?;
+            Some(config)
+        }
+        _ => None,
+    };
+
     let mut service = GrpcService::connect_for(&cmd.globals.connection, action, SERVICE_NAME, client).await?;
 
     match cmd.mode {
         ModeCmd::List => list_configs(&mut service).await,
         ModeCmd::Show(cmd) => show_config(&mut service, cmd).await,
-        ModeCmd::Update(cmd) => update_config(&mut service, cmd).await,
+        ModeCmd::Update(cmd) => {
+            let config = update.expect("prepared for the update mode");
+            update_config(&mut service, cmd, config).await
+        }
         ModeCmd::Delete(cmd) => delete_config(&mut service, cmd).await,
     }
 }
@@ -283,9 +299,7 @@ async fn show_config(service: &mut UnrdupService, cmd: ShowConfigCmd) -> Result<
     Ok(())
 }
 
-async fn update_config(service: &mut UnrdupService, cmd: UpdateConfigCmd) -> Result<(), Error> {
-    let config: UnrdupConfig = yaml::load(&cmd.file).map_err(|err| service.invalid("update", err.to_string()))?;
-
+async fn update_config(service: &mut UnrdupService, cmd: UpdateConfigCmd, config: UnrdupConfig) -> Result<(), Error> {
     let request = UpdateConfigRequest {
         name: cmd.config_name.clone(),
         config: Some(Config::from(config)),
