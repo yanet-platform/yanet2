@@ -447,3 +447,31 @@ static const struct classify_query_attr_handlers *acl_query_ip6_port[] = {
 	&acl_attr_port_src,
 	&acl_attr_port_dst,
 };
+
+// Class source signatures of the shared dataplane classification: the
+// family cores, the fragment leaf and the ports pair, evaluated once
+// per family batch and combined through the filter root joints.
+static const struct classify_query_attr_handlers *acl_query_core4[] = {
+	&acl_attr_device,
+	&acl_attr_vlan,
+	&acl_attr_net4_src,
+	&acl_attr_net4_dst,
+	&acl_attr_proto,
+};
+
+static const struct classify_query_attr_handlers *acl_query_frag[] = {
+	&acl_attr_ipfrag,
+};
+
+static const struct classify_query_attr_handlers *acl_query_ports[] = {
+	&acl_attr_port_src,
+	&acl_attr_port_dst,
+};
+
+static const struct classify_query_attr_handlers *acl_query_core6[] = {
+	&acl_attr_device,
+	&acl_attr_vlan,
+	&acl_attr_net6_src,
+	&acl_attr_net6_dst,
+	&acl_attr_proto,
+};

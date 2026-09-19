@@ -64,13 +64,23 @@ acl_module_config_destroy(struct cp_module *cp_module) {
 	classify_filter_free(&config->filter_ip4_port);
 	classify_filter_free(&config->filter_ip6);
 	classify_filter_free(&config->filter_ip6_port);
+	classify_filter_free(&config->filter_ip4_core);
+	classify_filter_free(&config->filter_ip4_frag);
+	classify_filter_free(&config->filter_ports4);
+	classify_filter_free(&config->filter_ip6_core);
+	classify_filter_free(&config->filter_ip6_frag);
+	classify_filter_free(&config->filter_ports6);
 	// The joined classifiers go first, the shared network cores stay
 	// alive until the joins built from them go away.
 	classify_free(config->classifier_ip4_port);
+	classify_free(config->classifier_ports4);
 	classify_free(config->classifier_ip4_frag);
+	classify_free(config->classifier_ip4_frag_leaf);
 	classify_free(config->classifier_ip4);
 	classify_free(config->classifier_ip6_port);
+	classify_free(config->classifier_ports6);
 	classify_free(config->classifier_ip6_frag);
+	classify_free(config->classifier_ip6_frag_leaf);
 	classify_free(config->classifier_ip6);
 	classify_free(config->classifier_vlan);
 
@@ -138,10 +148,14 @@ acl_module_config_init(
 	config->classifier_vlan = NULL;
 	config->classifier_ip4 = NULL;
 	config->classifier_ip4_frag = NULL;
+	config->classifier_ip4_frag_leaf = NULL;
 	config->classifier_ip4_port = NULL;
+	config->classifier_ports4 = NULL;
 	config->classifier_ip6 = NULL;
 	config->classifier_ip6_frag = NULL;
+	config->classifier_ip6_frag_leaf = NULL;
 	config->classifier_ip6_port = NULL;
+	config->classifier_ports6 = NULL;
 
 	config->v4_object_link_idx = ACL_OBJECT_LINK_NONE;
 	config->v6_object_link_idx = ACL_OBJECT_LINK_NONE;
@@ -416,6 +430,7 @@ acl_module_build_ip_classifier(
 	struct cp_module *cp_module,
 	struct classifier **classifier,
 	struct classifier **plain_classifier,
+	struct classifier **frag_classifier,
 	uint64_t *plain_rule_count,
 	const struct classify_attr_handlers *full_sign[],
 	uint32_t full_count,
@@ -424,6 +439,8 @@ acl_module_build_ip_classifier(
 	struct filter_rule *filter_rules,
 	const struct filter_rule **filter_rule_ptrs,
 	struct classify_filter *filter,
+	struct classify_filter *core_filter,
+	struct classify_filter *frag_filter,
 	acl_rule_check_func union_check,
 	acl_rule_check_func plain_check
 ) {
@@ -465,10 +482,23 @@ acl_module_build_ip_classifier(
 		return -1;
 	}
 
+	// The core and the fragment leaf double as the class sources of
+	// the shared dataplane classification, frozen without decoders.
+	if (classify_filter_init(
+		    core_filter, &cp_module->memory_context, cls, NULL
+	    ) ||
+	    classify_filter_init(
+		    frag_filter, &cp_module->memory_context, frag, NULL
+	    )) {
+		classify_free(frag);
+		classify_free(cls);
+		return -1;
+	}
+
 	struct classifier *plain =
 		classify_join(&cp_module->memory_context, cls, frag);
-	classify_free(frag);
 	if (plain == NULL) {
+		classify_free(frag);
 		classify_free(cls);
 		return -1;
 	}
@@ -490,6 +520,7 @@ acl_module_build_ip_classifier(
 
 	*plain_classifier = plain;
 	*classifier = cls;
+	*frag_classifier = frag;
 	return 0;
 }
 
@@ -502,8 +533,10 @@ static int
 acl_module_build_port_filter(
 	struct cp_module *cp_module,
 	struct classifier **joint_classifier,
+	struct classifier **ports_classifier,
 	struct classifier *ip_classifier,
 	struct classify_filter *filter,
+	struct classify_filter *ports_filter,
 	struct acl_rule *acl_rules,
 	uint32_t acl_rule_count,
 	struct filter_rule *filter_rules,
@@ -530,10 +563,19 @@ acl_module_build_port_filter(
 		return -1;
 	}
 
+	// The ports pair doubles as the class source of the shared
+	// dataplane classification, frozen without a decoder.
+	if (classify_filter_init(
+		    ports_filter, &cp_module->memory_context, ports, NULL
+	    )) {
+		classify_free(ports);
+		return -1;
+	}
+
 	struct classifier *cls =
 		classify_join(&cp_module->memory_context, ip_classifier, ports);
-	classify_free(ports);
 	if (cls == NULL) {
+		classify_free(ports);
 		return -1;
 	}
 
@@ -553,6 +595,7 @@ acl_module_build_port_filter(
 	}
 
 	*joint_classifier = cls;
+	*ports_classifier = ports;
 	return 0;
 }
 
@@ -746,6 +789,7 @@ acl_module_compile_rules(
 		    cp_module,
 		    &config->classifier_ip4,
 		    &config->classifier_ip4_frag,
+		    &config->classifier_ip4_frag_leaf,
 		    &config->filter_rule_count_ip4,
 		    ACL_FILTER_IP4_FULL,
 		    5,
@@ -754,6 +798,8 @@ acl_module_compile_rules(
 		    filter_rules,
 		    filter_rule_ptrs,
 		    &config->filter_ip4,
+		    &config->filter_ip4_core,
+		    &config->filter_ip4_frag,
 		    check_has_ip4,
 		    check_acl_rule_ip4
 	    )) {
@@ -764,8 +810,10 @@ acl_module_compile_rules(
 	if (acl_module_build_port_filter(
 		    cp_module,
 		    &config->classifier_ip4_port,
+		    &config->classifier_ports4,
 		    config->classifier_ip4,
 		    &config->filter_ip4_port,
+		    &config->filter_ports4,
 		    acl_rules,
 		    rule_count,
 		    filter_rules,
@@ -781,6 +829,7 @@ acl_module_compile_rules(
 		    cp_module,
 		    &config->classifier_ip6,
 		    &config->classifier_ip6_frag,
+		    &config->classifier_ip6_frag_leaf,
 		    &config->filter_rule_count_ip6,
 		    ACL_FILTER_IP6_FULL,
 		    5,
@@ -789,6 +838,8 @@ acl_module_compile_rules(
 		    filter_rules,
 		    filter_rule_ptrs,
 		    &config->filter_ip6,
+		    &config->filter_ip6_core,
+		    &config->filter_ip6_frag,
 		    check_has_ip6,
 		    check_acl_rule_ip6
 	    )) {
@@ -799,8 +850,10 @@ acl_module_compile_rules(
 	if (acl_module_build_port_filter(
 		    cp_module,
 		    &config->classifier_ip6_port,
+		    &config->classifier_ports6,
 		    config->classifier_ip6,
 		    &config->filter_ip6_port,
+		    &config->filter_ports6,
 		    acl_rules,
 		    rule_count,
 		    filter_rules,

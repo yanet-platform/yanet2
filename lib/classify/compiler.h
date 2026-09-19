@@ -524,7 +524,9 @@ classify_decode(
  * Freezes a classifier and its decoder into a filter: the tape of the
  * tree and the rule map move into the filter, which borrows the leaf
  * classifiers and join tables of the tree - the classifiers are freed
- * after the filters built from them.
+ * after the filters built from them. A NULL decoder freezes a class
+ * source: such a filter serves classify_classify only, its tape
+ * yields classes no decoder resolves.
  */
 static inline int
 classify_filter_init(
@@ -620,7 +622,9 @@ classify_filter_init(
 		}
 	}
 
-	SET_OFFSET_OF(&filter->rule_map, rule_map);
+	if (rule_map != NULL) {
+		SET_OFFSET_OF(&filter->rule_map, rule_map);
+	}
 
 	return 0;
 }

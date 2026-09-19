@@ -72,6 +72,7 @@ acl_handle_packets(
 
 	struct packet *ip4_port_packets[count];
 	uint32_t ip4_port_result[count];
+	uint32_t ip4_port_pos[count];
 	uint64_t ip4_port_idx = 0;
 
 	struct packet *ip6_packets[count];
@@ -80,6 +81,7 @@ acl_handle_packets(
 
 	struct packet *ip6_port_packets[count];
 	uint32_t ip6_port_result[count];
+	uint32_t ip6_port_pos[count];
 	uint64_t ip6_port_idx = 0;
 
 	for (struct packet *packet = packet_list_first(&packet_front->input);
@@ -95,6 +97,10 @@ acl_handle_packets(
 			if (packet->fragment_offset == 0 &&
 			    (packet->transport_header.type == IPPROTO_TCP ||
 			     packet->transport_header.type == IPPROTO_UDP)) {
+				// The position of the port scoped packet
+				// inside the family batch: the shared core
+				// classes are gathered through it.
+				ip4_port_pos[ip4_port_idx] = ip4_idx - 1;
 				ip4_port_packets[ip4_port_idx++] = packet;
 			}
 		}
@@ -106,6 +112,7 @@ acl_handle_packets(
 			if (packet->fragment_offset == 0 &&
 			    (packet->transport_header.type == IPPROTO_TCP ||
 			     packet->transport_header.type == IPPROTO_UDP)) {
+				ip6_port_pos[ip6_port_idx] = ip6_idx - 1;
 				ip6_port_packets[ip6_port_idx++] = packet;
 			}
 		}
@@ -119,34 +126,111 @@ acl_handle_packets(
 		vlan_idx
 	);
 
-	classify_query(
+	// The full tape signatures stay referenced for the plain query
+	// path; the shared flow below walks the class sources instead.
+	(void)acl_query_ip4;
+	(void)acl_query_ip4_port;
+	(void)acl_query_ip6;
+	(void)acl_query_ip6_port;
+
+	// The family filters share their core classification: the core
+	// classes are computed once per family batch, the fragment and
+	// ports suffixes are evaluated on their own and combined with the
+	// core classes through the root joints of the final filters.
+	uint32_t core4_classes[ip4_idx];
+	uint32_t frag4_classes[ip4_idx];
+	uint32_t core4_port_classes[ip4_port_idx];
+	uint32_t port4_classes[ip4_port_idx];
+
+	classify_classify(
+		&acl_config->filter_ip4_core,
+		acl_query_core4,
+		(const struct packet **)ip4_packets,
+		core4_classes,
+		ip4_idx
+	);
+
+	classify_classify(
+		&acl_config->filter_ip4_frag,
+		acl_query_frag,
+		(const struct packet **)ip4_packets,
+		frag4_classes,
+		ip4_idx
+	);
+
+	classify_combine(
 		&acl_config->filter_ip4,
-		acl_query_ip4,
-		ip4_packets,
+		core4_classes,
+		frag4_classes,
 		ip4_result,
 		ip4_idx
 	);
 
-	classify_query(
+	for (uint64_t idx = 0; idx < ip4_port_idx; ++idx) {
+		core4_port_classes[idx] = core4_classes[ip4_port_pos[idx]];
+	}
+
+	classify_classify(
+		&acl_config->filter_ports4,
+		acl_query_ports,
+		(const struct packet **)ip4_port_packets,
+		port4_classes,
+		ip4_port_idx
+	);
+
+	classify_combine(
 		&acl_config->filter_ip4_port,
-		acl_query_ip4_port,
-		ip4_port_packets,
+		core4_port_classes,
+		port4_classes,
 		ip4_port_result,
 		ip4_port_idx
 	);
 
-	classify_query(
+	uint32_t core6_classes[ip6_idx];
+	uint32_t frag6_classes[ip6_idx];
+	uint32_t core6_port_classes[ip6_port_idx];
+	uint32_t port6_classes[ip6_port_idx];
+
+	classify_classify(
+		&acl_config->filter_ip6_core,
+		acl_query_core6,
+		(const struct packet **)ip6_packets,
+		core6_classes,
+		ip6_idx
+	);
+
+	classify_classify(
+		&acl_config->filter_ip6_frag,
+		acl_query_frag,
+		(const struct packet **)ip6_packets,
+		frag6_classes,
+		ip6_idx
+	);
+
+	classify_combine(
 		&acl_config->filter_ip6,
-		acl_query_ip6,
-		ip6_packets,
+		core6_classes,
+		frag6_classes,
 		ip6_result,
 		ip6_idx
 	);
 
-	classify_query(
+	for (uint64_t idx = 0; idx < ip6_port_idx; ++idx) {
+		core6_port_classes[idx] = core6_classes[ip6_port_pos[idx]];
+	}
+
+	classify_classify(
+		&acl_config->filter_ports6,
+		acl_query_ports,
+		(const struct packet **)ip6_port_packets,
+		port6_classes,
+		ip6_port_idx
+	);
+
+	classify_combine(
 		&acl_config->filter_ip6_port,
-		acl_query_ip6_port,
-		ip6_port_packets,
+		core6_port_classes,
+		port6_classes,
 		ip6_port_result,
 		ip6_port_idx
 	);

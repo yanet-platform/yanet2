@@ -61,6 +61,15 @@ struct acl_module_config {
 	struct classify_filter filter_ip6;
 	struct classify_filter filter_ip6_port;
 	struct classify_filter filter_vlan;
+	// Class sources of the shared dataplane classification: the family
+	// cores and the fragment and ports suffixes, frozen without
+	// decoders and evaluated once per family batch.
+	struct classify_filter filter_ip4_core;
+	struct classify_filter filter_ip4_frag;
+	struct classify_filter filter_ports4;
+	struct classify_filter filter_ip6_core;
+	struct classify_filter filter_ip6_frag;
+	struct classify_filter filter_ports6;
 	// Control plane only: the classifier trees the filters borrow their
 	// tapes from, released after the filters at config destroy. The ip
 	// classifiers cover the full ip signature over the union of both
@@ -69,10 +78,14 @@ struct acl_module_config {
 	struct classifier *classifier_vlan;
 	struct classifier *classifier_ip4;
 	struct classifier *classifier_ip4_frag;
+	struct classifier *classifier_ip4_frag_leaf;
 	struct classifier *classifier_ip4_port;
+	struct classifier *classifier_ports4;
 	struct classifier *classifier_ip6;
 	struct classifier *classifier_ip6_frag;
+	struct classifier *classifier_ip6_frag_leaf;
 	struct classifier *classifier_ip6_port;
+	struct classifier *classifier_ports6;
 
 	uint64_t target_count;
 	struct acl_target *targets;

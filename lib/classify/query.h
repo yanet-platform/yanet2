@@ -36,12 +36,22 @@ classify_process_joint(
 	}
 }
 
+/*
+ * Walks the whole tape of the filter and writes the final class of
+ * every packet; the decoder of the filter is not consulted.
+ *
+ * A filter frozen from a subtree of a bigger composition serves as a
+ * class source here: the dataplane evaluates the shared subtree once
+ * and combines the classes with the classes of the suffix subtrees
+ * through classify_combine, instead of walking the shared part once
+ * per final filter.
+ */
 static inline void
-classify_lookup(
+classify_classify(
 	struct classify_filter *filter,
 	const struct classify_query_attr_handlers *attr_handlers[],
 	const struct packet **packets,
-	uint32_t *results,
+	uint32_t *classes,
 	uint32_t packet_count
 ) {
 	if (packet_count == 0) {
@@ -87,13 +97,66 @@ classify_lookup(
 		values_pos += packet_count;
 	}
 
+	const uint32_t *class_ids = values + values_pos - packet_count;
+	for (uint32_t idx = 0; idx < packet_count; ++idx) {
+		classes[idx] = class_ids[idx];
+	}
+}
+
+/*
+ * Combines the final classes of two subtrees through the root joint
+ * of the filter and resolves the joint classes through its decoder.
+ *
+ * The filter must be the frozen joint of exactly the two subtrees the
+ * classes came from - the left classes of the first subtree, the
+ * right ones of the second - so the root joint table indexes match.
+ */
+static inline void
+classify_combine(
+	struct classify_filter *filter,
+	const uint32_t *left_classes,
+	const uint32_t *right_classes,
+	uint32_t *results,
+	uint32_t packet_count
+) {
+	if (packet_count == 0) {
+		return;
+	}
+
+	struct value_table *joints = ADDR_OF(&filter->joints);
+	struct vline *rule_map = ADDR_OF(&filter->rule_map);
+	struct value_table *root = joints + (filter->joint_count - 1);
+
+	for (uint32_t idx = 0; idx < packet_count; ++idx) {
+		uint32_t cls = value_table_get(
+			root, left_classes[idx], right_classes[idx]
+		);
+		results[idx] = vline_get(rule_map, cls);
+	}
+}
+
+static inline void
+classify_lookup(
+	struct classify_filter *filter,
+	const struct classify_query_attr_handlers *attr_handlers[],
+	const struct packet **packets,
+	uint32_t *results,
+	uint32_t packet_count
+) {
+	if (packet_count == 0) {
+		return;
+	}
+	uint32_t slot_count = filter->attr_count + filter->joint_count;
+	uint32_t values[packet_count * slot_count];
+
+	classify_classify(filter, attr_handlers, packets, values, packet_count);
+
 	/*
 	 * Translate the final class identifiers into rule indices.
 	 */
-	const uint32_t *class_ids = values + values_pos - packet_count;
 	struct vline *rule_map = ADDR_OF(&filter->rule_map);
 	for (uint32_t idx = 0; idx < packet_count; ++idx) {
-		results[idx] = vline_get(rule_map, class_ids[idx]);
+		results[idx] = vline_get(rule_map, values[idx]);
 	}
 }
 

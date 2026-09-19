@@ -119,6 +119,10 @@ main(void) {
 	classify_use(acl_query_vlan);
 	classify_use(acl_query_ip4);
 	classify_use(acl_query_ip4_port);
+	classify_use(acl_query_core4);
+	classify_use(acl_query_frag);
+	classify_use(acl_query_ports);
+	classify_use(acl_query_core6);
 	uint8_t net_a[NET6_LEN] = {0};
 	put16(net_a, 0, 0x2a02);
 	uint8_t net_b[NET6_LEN] = {0};
@@ -242,6 +246,62 @@ main(void) {
 	assert(classify(
 		       &filter_ports, acl_query_ip6_port, net_b, net_a, 150, 300
 	       ) == CLASSIFY_RULE_INVALID);
+
+	// The shared classification path - the subtree classes evaluated
+	// once and combined through the root joint of the joint filter -
+	// agrees with the full tape query on the same filter.
+	{
+		struct classify_filter core_src;
+		struct classify_filter ports_src;
+		assert(classify_filter_init(&core_src, &mctx, ip6, NULL) == 0);
+		assert(classify_filter_init(&ports_src, &mctx, ports, NULL) == 0
+		);
+
+		struct packet probe = {0};
+		assert(fill_packet_net6(
+			       &probe, net_a, net_b, 150, 1000, IPPROTO_UDP, 0
+		       ) == 0);
+		struct packet *probe_ptr = &probe;
+
+		uint32_t core_classes[1];
+		uint32_t port_classes[1];
+		uint32_t shared_result[1];
+		uint32_t full_result[1];
+
+		classify_classify(
+			&core_src,
+			acl_query_core6,
+			(const struct packet **)&probe_ptr,
+			core_classes,
+			1
+		);
+		classify_classify(
+			&ports_src,
+			acl_query_ports,
+			(const struct packet **)&probe_ptr,
+			port_classes,
+			1
+		);
+		classify_combine(
+			&filter_ports,
+			core_classes,
+			port_classes,
+			shared_result,
+			1
+		);
+		classify_query(
+			&filter_ports,
+			acl_query_ip6_port,
+			&probe_ptr,
+			full_result,
+			1
+		);
+		assert(shared_result[0] == full_result[0]);
+
+		free_packet(&probe);
+		classify_filter_free(&core_src);
+		classify_filter_free(&ports_src);
+	}
 
 	// A plain build of the joined signature agrees with the composed
 	// classifier on every case above.

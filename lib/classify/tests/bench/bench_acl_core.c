@@ -29,7 +29,6 @@ static const struct classify_attr_handlers *sign_v4_full[] = {
 	CLASSIFY_ATTR(vlan),
 	CLASSIFY_ATTR(net4_src),
 	CLASSIFY_ATTR(net4_dst),
-	CLASSIFY_ATTR(ipfrag),
 	CLASSIFY_ATTR(proto_range),
 };
 
@@ -38,13 +37,16 @@ static const struct classify_attr_handlers *sign_v6_full[] = {
 	CLASSIFY_ATTR(vlan),
 	CLASSIFY_ATTR(net6_src),
 	CLASSIFY_ATTR(net6_dst),
-	CLASSIFY_ATTR(ipfrag),
 	CLASSIFY_ATTR(proto_range),
 };
 
 static const struct classify_attr_handlers *sign_ports[] = {
 	CLASSIFY_ATTR(port_src),
 	CLASSIFY_ATTR(port_dst),
+};
+
+static const struct classify_attr_handlers *sign_ipfrag[] = {
+	CLASSIFY_ATTR(ipfrag),
 };
 
 #define BATCH 64
@@ -72,7 +74,10 @@ build_ip_filter(
 	const struct filter_rule **union_proj,
 	const struct filter_rule **plain_proj,
 	uint32_t rule_count,
-	struct classifier **out_cls
+	struct classifier **out_cls,
+	struct classify_filter *core_src,
+	struct classify_filter *frag_src,
+	struct classifier **frag_cls
 ) {
 	struct classifier *cls = classify_build(
 		mctx, full_sign, full_count, union_proj, rule_count
@@ -81,17 +86,47 @@ build_ip_filter(
 		return -1;
 	}
 
-	struct vline *decoder = classify_decode(cls, mctx, plain_proj);
+	struct classifier *frag =
+		classify_leaf(mctx, sign_ipfrag[0], union_proj, rule_count);
+	if (frag == NULL) {
+		classify_free(cls);
+		return -1;
+	}
+
+	struct classifier *plain = classify_join(mctx, cls, frag);
+	if (plain == NULL) {
+		classify_free(frag);
+		classify_free(cls);
+		return -1;
+	}
+
+	struct vline *decoder = classify_decode(plain, mctx, plain_proj);
 	if (decoder == NULL) {
+		classify_free(plain);
+		classify_free(frag);
 		classify_free(cls);
 		return -1;
 	}
 
-	if (classify_filter_init(filter, mctx, cls, decoder)) {
+	if (classify_filter_init(filter, mctx, plain, decoder)) {
+		classify_free(plain);
+		classify_free(frag);
 		classify_free(cls);
 		return -1;
 	}
 
+	// The core and the fragment leaf double as the class sources of
+	// the shared lookup path.
+	if (classify_filter_init(core_src, mctx, cls, NULL) ||
+	    classify_filter_init(frag_src, mctx, frag, NULL)) {
+		classify_filter_free(filter);
+		classify_free(plain);
+		classify_free(frag);
+		classify_free(cls);
+		return -1;
+	}
+
+	*frag_cls = frag;
 	*out_cls = cls;
 	return 0;
 }
@@ -106,7 +141,9 @@ build_port_filter(
 	struct classifier *ip_cls,
 	const struct filter_rule **port_proj,
 	uint32_t rule_count,
-	struct classifier **out_cls
+	struct classifier **out_cls,
+	struct classify_filter *ports_src,
+	struct classifier **ports_cls
 ) {
 	struct classifier *ports =
 		classify_build(mctx, sign_ports, 2, port_proj, rule_count);
@@ -115,22 +152,34 @@ build_port_filter(
 	}
 
 	struct classifier *cls = classify_join(mctx, ip_cls, ports);
-	classify_free(ports);
 	if (cls == NULL) {
+		classify_free(ports);
 		return -1;
 	}
 
 	struct vline *decoder = classify_decode(cls, mctx, port_proj);
 	if (decoder == NULL) {
 		classify_free(cls);
+		classify_free(ports);
 		return -1;
 	}
 
 	if (classify_filter_init(filter, mctx, cls, decoder)) {
 		classify_free(cls);
+		classify_free(ports);
 		return -1;
 	}
 
+	// The ports pair doubles as the class source of the shared lookup
+	// path.
+	if (classify_filter_init(ports_src, mctx, ports, NULL)) {
+		classify_filter_free(filter);
+		classify_free(cls);
+		classify_free(ports);
+		return -1;
+	}
+
+	*ports_cls = ports;
 	*out_cls = cls;
 	return 0;
 }
@@ -152,6 +201,10 @@ main(int argc, char **argv) {
 	(void)acl_query_vlan;
 	(void)acl_query_ip4;
 	(void)acl_query_ip4_port;
+	(void)acl_query_core4;
+	(void)acl_query_frag;
+	(void)acl_query_ports;
+	(void)acl_query_core6;
 
 	struct filter_rule *rules;
 	const struct filter_rule **all;
@@ -211,9 +264,13 @@ main(int argc, char **argv) {
 	struct classifier *cls_vlan = NULL;
 	struct vline *dec_vlan = NULL;
 	struct classifier *cls_ip4 = NULL, *cls_ip4p = NULL;
+	struct classifier *cls_frag4 = NULL, *cls_ports4 = NULL;
 	struct classify_filter flt_ip4, flt_ip4p;
+	struct classify_filter src_ip4_core, src_frag4, src_ports4;
 	struct classifier *cls_ip6 = NULL, *cls_ip6p = NULL;
+	struct classifier *cls_frag6 = NULL, *cls_ports6 = NULL;
 	struct classify_filter flt_ip6, flt_ip6p;
+	struct classify_filter src_ip6_core, src_frag6, src_ports6;
 	memset(&flt_vlan, 0, sizeof(flt_vlan));
 	memset(&flt_ip4, 0, sizeof(flt_ip4));
 	memset(&flt_ip4p, 0, sizeof(flt_ip4p));
@@ -235,11 +292,14 @@ main(int argc, char **argv) {
 		&flt_ip4,
 		&mctx,
 		sign_v4_full,
-		6,
+		5,
 		v4_union,
 		proj + stats.rule_count,
 		stats.rule_count,
-		&cls_ip4
+		&cls_ip4,
+		&src_ip4_core,
+		&src_frag4,
+		&cls_frag4
 	);
 	clock_gettime(CLOCK_MONOTONIC, &t1);
 	printf("new ip4:       %8.1f ms rc=%d\n", bench_ms(&t0, &t1), rc);
@@ -251,7 +311,9 @@ main(int argc, char **argv) {
 		cls_ip4,
 		proj + 2 * stats.rule_count,
 		stats.rule_count,
-		&cls_ip4p
+		&cls_ip4p,
+		&src_ports4,
+		&cls_ports4
 	);
 	clock_gettime(CLOCK_MONOTONIC, &t1);
 	printf("new ip4_port:  %8.1f ms rc=%d\n", bench_ms(&t0, &t1), rc);
@@ -261,11 +323,14 @@ main(int argc, char **argv) {
 		&flt_ip6,
 		&mctx,
 		sign_v6_full,
-		6,
+		5,
 		v6_union,
 		proj + 3 * stats.rule_count,
 		stats.rule_count,
-		&cls_ip6
+		&cls_ip6,
+		&src_ip6_core,
+		&src_frag6,
+		&cls_frag6
 	);
 	clock_gettime(CLOCK_MONOTONIC, &t1);
 	printf("new ip6:       %8.1f ms rc=%d\n", bench_ms(&t0, &t1), rc);
@@ -277,7 +342,9 @@ main(int argc, char **argv) {
 		cls_ip6,
 		proj + 4 * stats.rule_count,
 		stats.rule_count,
-		&cls_ip6p
+		&cls_ip6p,
+		&src_ports6,
+		&cls_ports6
 	);
 	clock_gettime(CLOCK_MONOTONIC, &t1);
 	printf("new ip6_port:  %8.1f ms rc=%d\n", bench_ms(&t0, &t1), rc);
@@ -405,12 +472,22 @@ main(int argc, char **argv) {
 	free(ip6_port_pos);
 
 	classify_filter_free(&flt_ip6p);
+	classify_filter_free(&src_ports6);
+	classify_free(cls_ports6);
 	classify_free(cls_ip6p);
 	classify_filter_free(&flt_ip6);
+	classify_filter_free(&src_ip6_core);
+	classify_filter_free(&src_frag6);
+	classify_free(cls_frag6);
 	classify_free(cls_ip6);
 	classify_filter_free(&flt_ip4p);
+	classify_filter_free(&src_ports4);
+	classify_free(cls_ports4);
 	classify_free(cls_ip4p);
 	classify_filter_free(&flt_ip4);
+	classify_filter_free(&src_ip4_core);
+	classify_filter_free(&src_frag4);
+	classify_free(cls_frag4);
 	classify_free(cls_ip4);
 	classify_filter_free(&flt_vlan);
 	classify_free(cls_vlan);
