@@ -78,6 +78,15 @@ packet_decap(struct packet *packet) {
 		return -1;
 	}
 
+	// A non-initial fragment inside the tunnel carries flow payload
+	// where its transport header should be, so normalize it like the
+	// direct parse path does; no reader may consume its payload bytes
+	// through a tunnel.
+	if ((packet->flags & (1 << PACKET_FLAG_FRAGMENTED)) != 0 &&
+	    packet->fragment_offset != 0) {
+		next_transport = PACKET_HEADER_TYPE_UNKNOWN;
+	}
+
 	struct rte_mbuf *mbuf = packet_to_mbuf(packet);
 
 	// Remove tunnel headers

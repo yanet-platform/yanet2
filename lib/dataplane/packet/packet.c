@@ -187,8 +187,18 @@ parse_ipv6_header(struct packet *packet, uint16_t *type, uint16_t *offset) {
 					RTE_IPV6_EHDR_FO_MASK;
 			}
 
-			ext_type = ext->next_header;
 			*offset += RTE_IPV6_FRAG_HDR_SIZE;
+
+			// Bytes after a non-initial fragment are flow
+			// payload, not extension headers, so traversal ends
+			// here; the non-initial guard in parse_packet then
+			// leaves the packet without transport metadata.
+			if (packet->fragment_offset != 0) {
+				ext_type = IPPROTO_FRAGMENT;
+				break;
+			}
+
+			ext_type = ext->next_header;
 
 			// FIXME: packet->network_flags |=
 			// NETWORK_FLAG_HAS_EXTENSION;
@@ -247,6 +257,19 @@ parse_packet(struct packet *packet) {
 	// FIXME: separate routines for transport level parsing
 	packet->transport_header.type = type;
 	packet->transport_header.offset = offset;
+
+	// A non-initial fragment carries flow payload where transport
+	// headers should be, so recording one would let port and session
+	// readers consume arbitrary bytes. Leave no transport metadata and
+	// skip the port hash: the hash stays the address-only one computed
+	// from the IP headers, so it is payload-independent. Initial
+	// fragments of the same datagram extend the hash with ports and
+	// therefore do not share it.
+	if ((packet->flags & (1 << PACKET_FLAG_FRAGMENTED)) != 0 &&
+	    packet->fragment_offset != 0) {
+		packet->transport_header.type = PACKET_HEADER_TYPE_UNKNOWN;
+		return 0;
+	}
 
 	// TODO: should tcp/udp data be added to packet hash?
 	struct rte_mbuf *mbuf = packet_to_mbuf(packet);

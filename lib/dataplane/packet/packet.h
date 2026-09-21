@@ -53,6 +53,9 @@ struct packet {
 
 	uint32_t flow_label; // 12 unused bits + 20 bits of the label
 
+	// Fragment offset in the header's own units: the IPv4 field counts
+	// 8-byte blocks, the IPv6 Fragment extension reports a byte offset.
+	// Only nonzero-ness is load-bearing for parser decisions.
 	uint16_t fragment_offset;
 
 	// Cached first-segment byte length; mirrors the mbuf so packet_front
