@@ -2,9 +2,6 @@
 package l3b
 
 import (
-	"errors"
-	"fmt"
-
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 
@@ -35,8 +32,7 @@ func WithLog(log *zap.Logger) Option {
 // L3BModule is the control-plane component of the l3b module.
 type L3BModule struct {
 	cfg        *Config
-	shm        *ffi.SharedMemory
-	agent      *ffi.Agent
+	attachment *ffi.Attachment
 	l3bService *L3BService
 }
 
@@ -48,30 +44,15 @@ func NewL3BModule(cfg *Config, options ...Option) (*L3BModule, error) {
 
 	log := opts.Log.With(zap.String("module", "l3b"))
 
-	shm, err := ffi.AttachSharedMemory(cfg.MemoryPath.Unwrap())
+	attachment, err := ffi.Attach(cfg.AttachConfig, "l3b", log)
 	if err != nil {
 		return nil, err
 	}
 
-	log.Debug(
-		"mapping shared memory",
-		zap.Uint32("instance_id", cfg.InstanceID.Unwrap()),
-		zap.Stringer("size", cfg.MemoryRequirements),
-	)
-
-	agent, err := shm.AgentAttach("l3b", cfg.InstanceID.Unwrap(), cfg.MemoryRequirements.Unwrap())
-	if err != nil {
-		return nil, errors.Join(
-			fmt.Errorf("failed to attach agent to shared memory: %w", err),
-			shm.Detach(),
-		)
-	}
-
 	return &L3BModule{
 		cfg:        cfg,
-		shm:        shm,
-		agent:      agent,
-		l3bService: NewL3BService(NewBackend(agent)),
+		attachment: attachment,
+		l3bService: NewL3BService(NewBackend(attachment.Agent)),
 	}, nil
 }
 
@@ -93,5 +74,5 @@ func (m *L3BModule) RegisterService(server *grpc.Server) {
 
 // Close closes the module.
 func (m *L3BModule) Close() error {
-	return errors.Join(m.agent.Close(), m.shm.Detach())
+	return m.attachment.Close()
 }
