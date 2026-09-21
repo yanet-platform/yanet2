@@ -1,9 +1,15 @@
 package ffi_test
 
 import (
+	"bytes"
+	"context"
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strconv"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -61,4 +67,64 @@ func Test_SharedMemory_Attach_MissingFile(t *testing.T) {
 	shm, err := ffi.AttachSharedMemory(path)
 	require.Error(t, err)
 	require.Nil(t, shm)
+}
+
+// Test_SharedMemory_TruncatedStorage_ExitsOnSIGBUS verifies that a fault in a
+// mapped segment terminates the process without running shared-memory cleanup.
+func Test_SharedMemory_TruncatedStorage_ExitsOnSIGBUS(t *testing.T) {
+	const storageEnv = "YANET_TEST_SIGBUS_STORAGE"
+	const closeStderrEnv = "YANET_TEST_SIGBUS_CLOSE_STDERR"
+	if path := os.Getenv(storageEnv); path != "" {
+		sharedMemory, err := ffi.AttachSharedMemory(path)
+		require.NoError(t, err)
+		require.False(t, sharedMemory.DataplaneReady(0))
+		defer func() {
+			fmt.Fprintln(os.Stdout, "cleanup ran")
+		}()
+		if os.Getenv(closeStderrEnv) == "true" {
+			require.NoError(t, os.Stderr.Close())
+		}
+
+		require.NoError(t, os.Truncate(path, 0))
+		sharedMemory.DataplaneReady(0)
+		t.Fatal("access to truncated storage returned")
+	}
+
+	for _, tc := range []struct {
+		name        string
+		closeStderr bool
+	}{
+		{name: "logs SIGBUS to stderr before exiting"},
+		{name: "exits even when stderr is closed", closeStderr: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path := createStorageFile(t, 2<<20)
+			executable, err := os.Executable()
+			require.NoError(t, err)
+			ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+			defer cancel()
+			command := exec.CommandContext(ctx,
+				executable,
+				"-test.run=^Test_SharedMemory_TruncatedStorage_ExitsOnSIGBUS$",
+			)
+			command.Env = append(os.Environ(),
+				storageEnv+"="+path,
+				closeStderrEnv+"="+strconv.FormatBool(tc.closeStderr),
+			)
+			var stdout, stderr bytes.Buffer
+			command.Stdout = &stdout
+			command.Stderr = &stderr
+			err = command.Run()
+			require.NoError(t, ctx.Err(), "faulting process did not exit")
+			var exitError *exec.ExitError
+			require.ErrorAs(t, err, &exitError)
+			require.Equal(t, 135, exitError.ExitCode())
+			require.Empty(t, stdout.String(), "cleanup must not run after SIGBUS")
+			if tc.closeStderr {
+				require.Empty(t, stderr.String())
+			} else {
+				require.Contains(t, stderr.String(), "SIGBUS")
+			}
+		})
+	}
 }
