@@ -39,7 +39,16 @@ func NewSharedMemoryFromRaw(ptr unsafe.Pointer) *SharedMemory {
 }
 
 // AttachSharedMemory attaches to YANET shared memory segment.
+//
+// The first attachment installs a process-wide SIGBUS handler. A bus error
+// attempts a nonblocking diagnostic to pipe/socket stderr and exits with
+// status 135 without cleanup. Full streams and other stderr destinations are
+// skipped; the supervisor must restart the process to attach to the new arena.
 func AttachSharedMemory(path string) (*SharedMemory, error) {
+	if err := installSIGBUSHandler(); err != nil {
+		return nil, err
+	}
+
 	cPath := C.CString(path)
 	defer C.free(unsafe.Pointer(cPath))
 
