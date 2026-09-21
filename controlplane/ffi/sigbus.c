@@ -24,8 +24,11 @@ exit_on_sigbus(int signum) {
 		fcntl(STDERR_FILENO, F_DUPFD_CLOEXEC, STDERR_FILENO + 1);
 	// Only pipes and sockets offer nonblocking output. Other destinations
 	// are skipped because nonblocking flags cannot prevent file I/O waits.
-	ssize_t written = send(descriptor, message, sizeof(message) - 1,
-			       MSG_DONTWAIT | MSG_NOSIGNAL);
+	ssize_t written =
+		send(descriptor,
+		     message,
+		     sizeof(message) - 1,
+		     MSG_DONTWAIT | MSG_NOSIGNAL);
 	if (written < 0 && errno == ENOTSOCK &&
 	    fcntl(descriptor, F_GETPIPE_SZ) != -1) {
 		int flags = fcntl(descriptor, F_GETFL);
