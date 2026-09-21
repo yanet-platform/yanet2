@@ -1221,7 +1221,7 @@ func Test_L3b_ConfiguredRealsGateEcho(t *testing.T) {
 					}
 					require.NoError(t, service.UpdateRing(ring))
 					require.NoError(t, service.Publish(agent))
-					require.NoError(t, seedService.RetireService())
+					require.NoError(t, seedService.Free())
 					replacementSessions, replacementCursors := readEchoSessions(t, agent, service, harness.CurrentTime())
 					require.Equal(t, seedSessions, replacementSessions)
 					require.Equal(t, seedCursors, replacementCursors)

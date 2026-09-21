@@ -41,7 +41,7 @@ denotes two subcases, one per send/expect pair.
 | 5 | Inspect enabled VIP `10.0.0.21` | API setup and UDP/session assertions prove the seed enabled; enabled CLI inspection remains untested. Final inspection observes disabled state, not this step. |
 | 6 | Send batch 001 | `IPv4/enabled_configured_reals_reply/legacy_001_packet_1/2`: two exact IPv4 Echo replies, VIP `10.0.0.20`, real `101.0.0.1`. |
 | 7 | Send batch 002 | `IPv6/enabled_configured_reals_reply/legacy_002_packet_1/2`: two exact IPv6 Echo replies, VIP `2005:dead:beef::1`, real `2010::2`. |
-| 8 | Disable the TCP real for `10.0.0.21` and flush | Adapted: replacement state and empty ring are configured before publication; publication adopts the seeded session table. No live state/ring mutation or CLI/flush parity. |
+| 8 | Disable the TCP real for `10.0.0.21` and flush | Adapted: replacement state and empty ring are configured before publication; seed and replacement services borrow the same independent session table. No live state/ring mutation or CLI/flush parity. |
 | 9 | Inspect disabled real | Final inspection asserts disabled state; Echo leaves real counters unchanged. No absolute-zero display assertion after UDP seeding. |
 | 10 | Send batch 003 | `IPv4/disabled_ipv6_real_replies_to_legacy_echo/legacy_003_packet_1`: exact IPv4 Echo reply from `10.0.0.21` to `1.1.0.2` with IPv6 real `2010::1` disabled. This is not IPv6 Echo coverage. |
 
@@ -61,7 +61,7 @@ for IPv6. The first aliases Echo type/code if session lookup is incorrectly
 reached; the second is a same-source sentinel. Mock time starts at
 1700000000, with UDP timeout 600 seconds and Other timeout 37 seconds.
 Page-size-one reads check all records, expiries, cursor progression, the
-empty terminal page, and dataplane time after seeding, after adoption, and
+empty terminal page, and dataplane time after seeding, after replacement, and
 before/after each Echo. Time advances one second before each Echo; seeded
 expiries remain unchanged and in the future.
 
