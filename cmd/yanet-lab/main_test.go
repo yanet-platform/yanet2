@@ -756,6 +756,185 @@ func TestSerialDimensionsUseTerminalHeightAndWidth(t *testing.T) {
 	}
 }
 
+// heldReplyConnection delivers the response but holds its writer until cleanup.
+type heldReplyConnection struct {
+	net.Conn
+	release <-chan struct{}
+}
+
+func (m *heldReplyConnection) Write(data []byte) (int, error) {
+	written, err := m.Conn.Write(data)
+	if err == nil {
+		<-m.release
+	}
+	return written, err
+}
+
+// startHandlerConnection runs a guest-free handler and joins it during cleanup.
+func startHandlerConnection(
+	t *testing.T,
+	state *supervisor,
+	directory string,
+	restore func() error,
+	holdReply bool,
+) (net.Conn, <-chan struct{}) {
+	t.Helper()
+	server, client := net.Pipe()
+	release := make(chan struct{})
+	done := make(chan struct{})
+	t.Cleanup(func() {
+		close(release)
+		_ = client.Close()
+		_ = server.Close()
+		select {
+		case <-done:
+		case <-time.After(5 * time.Second):
+			t.Error("connection handler did not finish")
+		}
+	})
+	var connection net.Conn = server
+	if holdReply {
+		connection = &heldReplyConnection{Conn: server, release: release}
+	}
+	go func() {
+		defer close(done)
+		handleConnection(connection, nil, directory, state, restore, nil, func() {})
+	}()
+	require.NoError(t, client.SetDeadline(time.Now().Add(5*time.Second)))
+	return client, done
+}
+
+// Test_HandleConnection_ReplyReleasesOperationBeforeNextRequest verifies that
+// a delivered final response permits new work before its writer returns.
+func Test_HandleConnection_ReplyReleasesOperationBeforeNextRequest(t *testing.T) {
+	savedProbe, savedStatus, savedManifest := baselineReadyProbe, checkOperatorStatus, runManifest
+	t.Cleanup(func() {
+		baselineReadyProbe, checkOperatorStatus, runManifest = savedProbe, savedStatus, savedManifest
+	})
+	baselineReadyProbe = func() bool { return true }
+	checkOperatorStatus = func(*framework.TestFramework) ([]lab.ScopeResult, error) {
+		return readyScopes(), nil
+	}
+	runManifest = func(lab.ManifestRuntime, string) lab.RunReport {
+		return lab.RunReport{Success: true}
+	}
+	for _, testCase := range []struct {
+		name       string
+		first      string
+		next       string
+		restoreErr error
+		wantError  string
+	}{
+		{name: "reset followed by status", first: "reset", next: "status"},
+		{name: "status followed by manifest", first: "status", next: "manifest"},
+		{
+			name: "failed reset followed by status", first: "reset", next: "status",
+			restoreErr: errors.New("restore failed"), wantError: "restore failed",
+		},
+		{
+			name: "unknown action followed by status", first: "unknown", next: "status",
+			wantError: "unknown action: unknown",
+		},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			state := &supervisor{}
+			directory := t.TempDir()
+			first, firstDone := startHandlerConnection(t, state, directory, func() error {
+				return testCase.restoreErr
+			}, true)
+			require.NoError(t, json.NewEncoder(first).Encode(request{Action: testCase.first}))
+			var firstReply response
+			require.NoError(t, json.NewDecoder(first).Decode(&firstReply))
+			require.Equal(t, testCase.wantError == "", firstReply.OK)
+			require.Equal(t, testCase.wantError, firstReply.Error)
+			if testCase.first == "status" {
+				require.Equal(t, statusReady, firstReply.Status)
+			}
+			select {
+			case <-firstDone:
+				t.Fatal("first handler returned before its response write was released")
+			default:
+			}
+
+			next, _ := startHandlerConnection(t, state, directory, nil, false)
+			require.NoError(t, json.NewEncoder(next).Encode(request{Action: testCase.next}))
+			var nextReply response
+			require.NoError(t, json.NewDecoder(next).Decode(&nextReply))
+			require.True(t, nextReply.OK, "next request failed: %s", nextReply.Error)
+			if testCase.next == "status" {
+				require.Equal(t, statusReady, nextReply.Status)
+			} else {
+				require.NotNil(t, nextReply.Report)
+				require.True(t, nextReply.Report.Success)
+				data, err := os.ReadFile(filepath.Join(directory, "last-report.json"))
+				require.NoError(t, err)
+				var persisted lab.RunReport
+				require.NoError(t, json.Unmarshal(data, &persisted))
+				require.Equal(t, *nextReply.Report, persisted)
+			}
+		})
+	}
+}
+
+// Test_HandleConnection_ActiveResetRejectsConcurrentReset verifies that work
+// remains exclusive until the restore callback finishes.
+func Test_HandleConnection_ActiveResetRejectsConcurrentReset(t *testing.T) {
+	savedProbe := baselineReadyProbe
+	t.Cleanup(func() { baselineReadyProbe = savedProbe })
+	baselineReadyProbe = func() bool { return true }
+	state := &supervisor{}
+	directory := t.TempDir()
+	started, release := make(chan struct{}), make(chan struct{})
+	first, _ := startHandlerConnection(t, state, directory, func() error {
+		close(started)
+		<-release
+		return nil
+	}, false)
+	t.Cleanup(func() { close(release) })
+	require.NoError(t, json.NewEncoder(first).Encode(request{Action: "reset"}))
+	select {
+	case <-started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("restore did not start")
+	}
+	var concurrentRestore atomic.Bool
+	next, _ := startHandlerConnection(t, state, directory, func() error {
+		concurrentRestore.Store(true)
+		return nil
+	}, false)
+	require.NoError(t, json.NewEncoder(next).Encode(request{Action: "reset"}))
+	var reply response
+	require.NoError(t, json.NewDecoder(next).Decode(&reply))
+	require.False(t, reply.OK)
+	require.Equal(t, labBusyError, reply.Error)
+	require.False(t, concurrentRestore.Load())
+}
+
+// Test_HandleConnection_SerialAckKeepsOperationExclusive verifies that a serial
+// acknowledgement retains ownership until the client disconnects.
+func Test_HandleConnection_SerialAckKeepsOperationExclusive(t *testing.T) {
+	state := &supervisor{}
+	directory := t.TempDir()
+	serial, serialDone := startHandlerConnection(t, state, directory, nil, false)
+	require.NoError(t, json.NewEncoder(serial).Encode(request{Action: "serial"}))
+	var reply response
+	require.NoError(t, json.NewDecoder(serial).Decode(&reply))
+	require.True(t, reply.OK)
+	next, _ := startHandlerConnection(t, state, directory, nil, false)
+	require.NoError(t, json.NewEncoder(next).Encode(request{Action: "status"}))
+	require.NoError(t, json.NewDecoder(next).Decode(&reply))
+	require.False(t, reply.OK)
+	require.Equal(t, labBusyError, reply.Error)
+	require.NoError(t, serial.Close())
+	select {
+	case <-serialDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("serial handler did not finish after disconnect")
+	}
+	require.True(t, state.TryOperation())
+	state.ReleaseOperation()
+}
+
 func TestHandleConnectionReturnsBusy(t *testing.T) {
 	for _, action := range []string{"status", "reset", "exec", "shell", "serial", "report", "manifest"} {
 		t.Run(action, func(t *testing.T) {

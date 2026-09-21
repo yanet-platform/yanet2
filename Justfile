@@ -129,10 +129,22 @@ _docker_run IT *COMMAND:
     # Add working directory to safe list to avoid it.
 
     set -euo pipefail
+    docker_mounts=(-v "{{ ROOT_DIR }}:/yanet2")
+    if [ -f "{{ ROOT_DIR }}/.git" ]; then
+        # Linked worktrees reference Git metadata outside the source mount.
+        git_common_dir="$(git -C "{{ ROOT_DIR }}" rev-parse --path-format=absolute --git-common-dir)"
+        docker_mounts+=(-v "${git_common_dir}:${git_common_dir}:ro")
+        # Relative gitfiles must remain resolvable after relocation to /yanet2.
+        git_dir="$(git -C "{{ ROOT_DIR }}" rev-parse --absolute-git-dir)"
+        gitfile="$(mktemp)"
+        trap 'rm -f "$gitfile"' EXIT
+        printf 'gitdir: %s\n' "$git_dir" > "$gitfile"
+        docker_mounts+=(-v "${gitfile}:/yanet2/.git:ro")
+    fi
     docker run {{ IT }} --rm \
         --platform linux/amd64 \
         --network=host \
-        -v {{ ROOT_DIR }}:/yanet2 \
+        "${docker_mounts[@]}" \
         -v {{ DOCKER_CACHE_DIR }}/gomodcache:/tmp/gomodcache:rw \
         -v {{ DOCKER_CACHE_DIR }}/gocache:/tmp/gocache:rw \
         {{ TAG }} \
