@@ -1,6 +1,13 @@
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE
+#endif
+
 #include "sigbus.h"
 
+#include <errno.h>
+#include <fcntl.h>
 #include <signal.h>
+#include <sys/socket.h>
 #include <unistd.h>
 
 // A faulting shared-memory client must exit without touching the arena again.
@@ -12,8 +19,23 @@ static void
 exit_on_sigbus(int signum) {
 	static const char message[] =
 		"SIGBUS: terminating YANET controlplane\n";
-	ssize_t written = write(STDERR_FILENO, message, sizeof(message) - 1);
-	(void)written;
+	// Pin the destination while other threads may still change descriptors.
+	int descriptor =
+		fcntl(STDERR_FILENO, F_DUPFD_CLOEXEC, STDERR_FILENO + 1);
+	// Only pipes and sockets offer nonblocking output. Other destinations
+	// are skipped because nonblocking flags cannot prevent file I/O waits.
+	ssize_t written = send(descriptor, message, sizeof(message) - 1,
+			       MSG_DONTWAIT | MSG_NOSIGNAL);
+	if (written < 0 && errno == ENOTSOCK &&
+	    fcntl(descriptor, F_GETPIPE_SZ) != -1) {
+		int flags = fcntl(descriptor, F_GETFL);
+		if (flags != -1 &&
+		    fcntl(descriptor, F_SETFL, flags | O_NONBLOCK) != -1) {
+			written =
+				write(descriptor, message, sizeof(message) - 1);
+			(void)written;
+		}
+	}
 	_exit(128 + signum);
 }
 

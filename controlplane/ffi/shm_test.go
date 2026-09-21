@@ -3,7 +3,9 @@ package ffi_test
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -12,6 +14,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"golang.org/x/sys/unix"
 
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 )
@@ -92,10 +95,18 @@ func Test_SharedMemory_TruncatedStorage_ExitsOnSIGBUS(t *testing.T) {
 
 	for _, tc := range []struct {
 		name        string
-		closeStderr bool
+		destination string
+		full        bool
+		closeReader bool
 	}{
-		{name: "logs SIGBUS to stderr before exiting"},
-		{name: "exits even when stderr is closed", closeStderr: true},
+		{name: "logs SIGBUS to stderr before exiting", destination: "capture"},
+		{name: "logs SIGBUS to socket stderr", destination: "socket"},
+		{name: "exits even when stderr is closed", destination: "closed"},
+		{name: "exits without draining a full blocking pipe", destination: "pipe", full: true},
+		{name: "exits without draining a full blocking socket", destination: "socket", full: true},
+		{name: "exits when the stderr pipe reader is closed", destination: "pipe", closeReader: true},
+		{name: "exits when the stderr socket reader is closed", destination: "socket", closeReader: true},
+		{name: "skips potentially blocking file output", destination: "file"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			path := createStorageFile(t, 2<<20)
@@ -109,22 +120,86 @@ func Test_SharedMemory_TruncatedStorage_ExitsOnSIGBUS(t *testing.T) {
 			)
 			command.Env = append(os.Environ(),
 				storageEnv+"="+path,
-				closeStderrEnv+"="+strconv.FormatBool(tc.closeStderr),
+				closeStderrEnv+"="+strconv.FormatBool(tc.destination == "closed"),
 			)
 			var stdout, stderr bytes.Buffer
 			command.Stdout = &stdout
 			command.Stderr = &stderr
+			var reader, writer *os.File
+			switch tc.destination {
+			case "pipe", "socket":
+				reader, writer = blockingStderrStream(t, tc.destination, tc.full)
+				if tc.closeReader {
+					require.NoError(t, reader.Close())
+				}
+				command.Stderr = writer
+			case "file":
+				writer, err = os.CreateTemp(t.TempDir(), "stderr")
+				require.NoError(t, err)
+				t.Cleanup(func() { _ = writer.Close() })
+				command.Stderr = writer
+			}
 			err = command.Run()
+			info, statError := os.Stat(path)
+			require.NoError(t, statError)
+			require.Zero(t, info.Size(), "child must reach the truncated mapping")
 			require.NoError(t, ctx.Err(), "faulting process did not exit")
 			var exitError *exec.ExitError
 			require.ErrorAs(t, err, &exitError)
 			require.Equal(t, 135, exitError.ExitCode())
 			require.Empty(t, stdout.String(), "cleanup must not run after SIGBUS")
-			if tc.closeStderr {
+			switch {
+			case tc.full || tc.closeReader:
+				// No reader drains the stream before the process exits.
+			case tc.destination == "closed":
 				require.Empty(t, stderr.String())
-			} else {
+			case tc.destination == "file":
+				info, err := writer.Stat()
+				require.NoError(t, err)
+				require.Zero(t, info.Size())
+			case tc.destination == "socket":
+				require.NoError(t, writer.Close())
+				diagnostic, err := io.ReadAll(reader)
+				require.NoError(t, err)
+				require.Contains(t, string(diagnostic), "SIGBUS")
+			default:
 				require.Contains(t, stderr.String(), "SIGBUS")
 			}
 		})
 	}
+}
+
+// blockingStderrStream returns a blocking pipe or socket pair, optionally
+// filled until the next write would wait for a reader.
+func blockingStderrStream(t *testing.T, destination string, full bool) (*os.File, *os.File) {
+	t.Helper()
+	var reader, writer *os.File
+	if destination == "socket" {
+		descriptors, err := unix.Socketpair(unix.AF_UNIX, unix.SOCK_STREAM|unix.SOCK_CLOEXEC, 0)
+		require.NoError(t, err)
+		reader = os.NewFile(uintptr(descriptors[0]), "stderr-reader")
+		writer = os.NewFile(uintptr(descriptors[1]), "stderr-writer")
+	} else {
+		var err error
+		reader, writer, err = os.Pipe()
+		require.NoError(t, err)
+	}
+	t.Cleanup(func() {
+		_ = reader.Close()
+		_ = writer.Close()
+	})
+	if full {
+		descriptor := int(writer.Fd())
+		require.NoError(t, unix.SetNonblock(descriptor, true))
+		payload := make([]byte, 4096)
+		for {
+			_, err := unix.Write(descriptor, payload)
+			if errors.Is(err, unix.EAGAIN) {
+				break
+			}
+			require.NoError(t, err)
+		}
+		require.NoError(t, unix.SetNonblock(descriptor, false))
+	}
+	return reader, writer
 }
