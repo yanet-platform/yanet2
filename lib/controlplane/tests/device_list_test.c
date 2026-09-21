@@ -79,6 +79,7 @@ __wrap_malloc(size_t size) {
 	return fail ? NULL : __real_malloc(size);
 }
 
+// Close both allocation stops and clear failure injection for a fresh read.
 static void
 allocation_pause_arm(size_t size) {
 	pthread_mutex_lock(&device_info_pause.mutex);
@@ -91,6 +92,9 @@ allocation_pause_arm(size_t size) {
 	pthread_mutex_unlock(&device_info_pause.mutex);
 }
 
+// Wait until the reader reaches the requested allocation stop.
+//
+// The bounded wait turns a missing stop into a test failure instead of a hang.
 static bool
 allocation_pause_wait(unsigned count) {
 	struct timespec deadline;
@@ -111,6 +115,7 @@ allocation_pause_wait(unsigned count) {
 	return reached;
 }
 
+// Open an allocation stop, optionally making that allocation fail.
 static void
 allocation_pause_release(unsigned count, bool fail) {
 	pthread_mutex_lock(&device_info_pause.mutex);
@@ -174,6 +179,7 @@ new_device(
 	return device;
 }
 
+// Accept only a complete two-device snapshot from one expected generation.
 static bool
 device_snapshot_has_weights(
 	struct cp_device_list_info *list, uint64_t expected_weight
@@ -228,6 +234,7 @@ struct device_list_reader_args {
 	struct cp_device_list_info *list;
 };
 
+// Read one snapshot with both device allocations controlled by the test gate.
 static void *
 device_list_reader(void *arg) {
 	struct device_list_reader_args *args =
