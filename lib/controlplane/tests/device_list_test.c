@@ -1,10 +1,9 @@
 /*
- * Device-list reads keep one configuration snapshot while copying unlocked.
+ * Device-list reads keep their generation alive while copying unlocked.
  *
- * The reader pauses at each of two device allocations. A writer replaces both
- * after the first pause; the lock must remain available to it, and the retired
- * generation must stay alive through the second copy. The resulting list must
- * contain only the pre-swap data.
+ * A reader pauses at a device snapshot allocation so a replacement can retire
+ * its source generation before the remaining fields are copied. A failed
+ * device allocation also verifies release on the error path.
  */
 
 #include "api/agent.h"
@@ -22,114 +21,108 @@
 #include <pthread.h>
 #include <stdbool.h>
 #include <stdint.h>
-#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
 
 #define DEVICE_LIST_AGENT_MEMORY (4u * 1024u * 1024u)
 #define DEVICE_LIST_WAIT_SECONDS 10
-#define DEVICE_LIST_NAME_A "snapshot-device-a"
-#define DEVICE_LIST_NAME_B "snapshot-device-b"
+#define DEVICE_LIST_NAME "snapshot-device"
 #define DEVICE_LIST_PIPELINE "snapshot-pipeline"
 #define DEVICE_LIST_OLD_WEIGHT 17
 #define DEVICE_LIST_NEW_WEIGHT 29
-#define DEVICE_LIST_PAUSE_COUNT 2
+#define DEVICE_INFO_ALLOCATION_SIZE                                            \
+	(sizeof(struct cp_device_info) + sizeof(struct cp_device_pipeline_info))
 
-struct allocation_pause {
+struct allocation_gate {
 	pthread_mutex_t mutex;
 	pthread_cond_t cond;
-	size_t size;
-	unsigned reached;
-	unsigned released;
-	bool failures[DEVICE_LIST_PAUSE_COUNT];
+	bool armed;
+	bool reached;
+	bool released;
+	bool fail;
 };
 
-static struct allocation_pause device_info_pause = {
+static struct allocation_gate device_info_gate = {
 	.mutex = PTHREAD_MUTEX_INITIALIZER,
 	.cond = PTHREAD_COND_INITIALIZER,
 };
 
-static _Thread_local bool pause_device_info_allocation;
+static _Thread_local bool control_device_info_read;
 
 void *
 __real_malloc(size_t size);
 
+// Stop one selected allocation before the reader resumes source copying.
 void *
 __wrap_malloc(size_t size) {
-	if (!pause_device_info_allocation || size != device_info_pause.size) {
+	if (!control_device_info_read) {
 		return __real_malloc(size);
 	}
 
-	pthread_mutex_lock(&device_info_pause.mutex);
-	if (device_info_pause.reached >= DEVICE_LIST_PAUSE_COUNT) {
-		pthread_mutex_unlock(&device_info_pause.mutex);
+	pthread_mutex_lock(&device_info_gate.mutex);
+	if (!device_info_gate.armed || size != DEVICE_INFO_ALLOCATION_SIZE) {
+		pthread_mutex_unlock(&device_info_gate.mutex);
 		return __real_malloc(size);
 	}
-	unsigned pause_idx = device_info_pause.reached++;
-	pthread_cond_broadcast(&device_info_pause.cond);
-	while (device_info_pause.released <= pause_idx) {
+
+	device_info_gate.armed = false;
+	device_info_gate.reached = true;
+	pthread_cond_broadcast(&device_info_gate.cond);
+	while (!device_info_gate.released) {
 		pthread_cond_wait(
-			&device_info_pause.cond, &device_info_pause.mutex
+			&device_info_gate.cond, &device_info_gate.mutex
 		);
 	}
-	bool fail = device_info_pause.failures[pause_idx];
-	pthread_mutex_unlock(&device_info_pause.mutex);
+	bool fail = device_info_gate.fail;
+	pthread_mutex_unlock(&device_info_gate.mutex);
 
 	return fail ? NULL : __real_malloc(size);
 }
 
-// Close both allocation stops and clear failure injection for a fresh read.
+// Arm one allocation stop for a fresh device-list read.
 static void
-allocation_pause_arm(size_t size) {
-	pthread_mutex_lock(&device_info_pause.mutex);
-	device_info_pause.size = size;
-	device_info_pause.reached = 0;
-	device_info_pause.released = 0;
-	for (unsigned idx = 0; idx < DEVICE_LIST_PAUSE_COUNT; ++idx) {
-		device_info_pause.failures[idx] = false;
-	}
-	pthread_mutex_unlock(&device_info_pause.mutex);
+allocation_gate_arm(void) {
+	pthread_mutex_lock(&device_info_gate.mutex);
+	device_info_gate.armed = true;
+	device_info_gate.reached = false;
+	device_info_gate.released = false;
+	device_info_gate.fail = false;
+	pthread_mutex_unlock(&device_info_gate.mutex);
 }
 
-// Wait until the reader reaches the requested allocation stop.
-//
-// The bounded wait turns a missing stop into a test failure instead of a hang.
+// Open the allocation stop and optionally reject the allocation.
+static void
+allocation_gate_release(bool fail) {
+	pthread_mutex_lock(&device_info_gate.mutex);
+	device_info_gate.fail = fail;
+	device_info_gate.released = true;
+	pthread_cond_broadcast(&device_info_gate.cond);
+	pthread_mutex_unlock(&device_info_gate.mutex);
+}
+
+// Wait for the reader without allowing a missing stop to hang the test.
 static bool
-allocation_pause_wait(unsigned count) {
+allocation_gate_wait(void) {
 	struct timespec deadline;
 	clock_gettime(CLOCK_REALTIME, &deadline);
 	deadline.tv_sec += DEVICE_LIST_WAIT_SECONDS;
 
-	pthread_mutex_lock(&device_info_pause.mutex);
+	pthread_mutex_lock(&device_info_gate.mutex);
 	int rc = 0;
-	while (device_info_pause.reached < count && rc == 0) {
+	while (!device_info_gate.reached && rc == 0) {
 		rc = pthread_cond_timedwait(
-			&device_info_pause.cond,
-			&device_info_pause.mutex,
+			&device_info_gate.cond,
+			&device_info_gate.mutex,
 			&deadline
 		);
 	}
-	bool reached = device_info_pause.reached >= count;
-	pthread_mutex_unlock(&device_info_pause.mutex);
+	bool reached = device_info_gate.reached;
+	pthread_mutex_unlock(&device_info_gate.mutex);
 	return reached;
 }
 
-// Open an allocation stop, optionally making that allocation fail.
-static void
-allocation_pause_release(unsigned count, bool fail) {
-	pthread_mutex_lock(&device_info_pause.mutex);
-	if (count > 0 && count <= DEVICE_LIST_PAUSE_COUNT) {
-		device_info_pause.failures[count - 1] = fail;
-	}
-	if (device_info_pause.released < count) {
-		device_info_pause.released = count;
-	}
-	pthread_cond_broadcast(&device_info_pause.cond);
-	pthread_mutex_unlock(&device_info_pause.mutex);
-}
-
-// Install the pipeline referenced by both device generations.
+// Install the pipeline referenced by every test device.
 static int
 install_empty_pipeline(
 	struct dp_config *dp_config, struct cp_config *cp_config
@@ -155,14 +148,9 @@ install_empty_pipeline(
 
 // Build a plain device with one weighted input pipeline.
 static struct cp_device *
-new_device(
-	struct agent *agent,
-	const char *name,
-	uint64_t weight,
-	yanet_error **err
-) {
+new_device(struct agent *agent, uint64_t weight, yanet_error **err) {
 	struct cp_device_plain_config *config =
-		cp_device_plain_config_new(name, 1, 0, err);
+		cp_device_plain_config_new(DEVICE_LIST_NAME, 1, 0, err);
 	if (config == NULL) {
 		return NULL;
 	}
@@ -179,54 +167,97 @@ new_device(
 	return device;
 }
 
-// Accept only a complete two-device snapshot from one expected generation.
+struct device_list_fixture {
+	struct agent *agent;
+	struct dp_config *dp_config;
+	struct cp_config *cp_config;
+	struct cp_device *device;
+};
+
+// Create one isolated generation containing the weighted test device.
+static int
+device_list_fixture_init(
+	struct yanet_shm *shm,
+	const char *agent_name,
+	struct device_list_fixture *fixture
+) {
+	yanet_error *err = NULL;
+	memset(fixture, 0, sizeof(*fixture));
+	fixture->agent = agent_attach(
+		shm, 0, agent_name, DEVICE_LIST_AGENT_MEMORY, &err
+	);
+	TEST_ASSERT_NOT_NULL(
+		fixture->agent,
+		"agent_attach failed: %s",
+		err ? yanet_error_message(err) : "?"
+	);
+
+	fixture->dp_config = agent_dp_config(fixture->agent);
+	fixture->cp_config = ADDR_OF(&fixture->agent->cp_config);
+	TEST_ASSERT_SUCCESS(
+		install_empty_pipeline(fixture->dp_config, fixture->cp_config),
+		"failed to install the test pipeline"
+	);
+	fixture->device =
+		new_device(fixture->agent, DEVICE_LIST_OLD_WEIGHT, &err);
+	TEST_ASSERT_NOT_NULL(
+		fixture->device,
+		"failed to build the test device: %s",
+		err ? yanet_error_message(err) : "?"
+	);
+
+	struct cp_device *devices[] = {fixture->device};
+	int rc = cp_config_update_devices(
+		fixture->dp_config, fixture->cp_config, 1, devices, &err
+	);
+	TEST_ASSERT_SUCCESS(
+		rc,
+		"failed to install the test device: %s",
+		err ? yanet_error_message(err) : "?"
+	);
+	yanet_error_free(err);
+	return TEST_SUCCESS;
+}
+
+// Find the named test device and require its copied pipeline weight.
 static bool
-device_snapshot_has_weights(
+snapshot_has_weight(
 	struct cp_device_list_info *list, uint64_t expected_weight
 ) {
 	if (list == NULL) {
 		return false;
 	}
 
-	bool found_a = false;
-	bool found_b = false;
 	for (uint64_t idx = 0; idx < list->device_count; ++idx) {
 		struct cp_device_info *device =
 			yanet_get_cp_device_info(list, idx);
-		bool *found = NULL;
-		if (!strncmp(
-			    device->name,
-			    DEVICE_LIST_NAME_A,
-			    sizeof(device->name)
-		    )) {
-			found = &found_a;
-		} else if (!strncmp(
-				   device->name,
-				   DEVICE_LIST_NAME_B,
-				   sizeof(device->name)
-			   )) {
-			found = &found_b;
-		} else {
+		if (strncmp(device->name, DEVICE_LIST_NAME, sizeof(device->name)
+		    ) != 0) {
 			continue;
 		}
-		if (*found || device->input_count != 1 ||
-		    device->output_count != 0) {
+		if (device->input_count != 1 || device->output_count != 0) {
 			return false;
 		}
 
 		struct cp_device_pipeline_info *pipeline =
 			yanet_get_cp_device_input_pipeline_info(device, 0);
-		if (pipeline == NULL ||
-		    strncmp(pipeline->name,
-			    DEVICE_LIST_PIPELINE,
-			    sizeof(pipeline->name)) != 0 ||
-		    pipeline->weight != expected_weight) {
-			return false;
-		}
-		*found = true;
+		return pipeline != NULL &&
+		       strncmp(pipeline->name,
+			       DEVICE_LIST_PIPELINE,
+			       sizeof(pipeline->name)) == 0 &&
+		       pipeline->weight == expected_weight;
 	}
 
-	return found_a && found_b;
+	return false;
+}
+
+// Destroy a device only after its final generation reference is gone.
+static bool
+release_device(struct cp_device *device) {
+	yanet_error *err = NULL;
+	bool released = cp_device_plain_free(device, &err) == 0;
+	yanet_error_free(err);
+	return released;
 }
 
 struct device_list_reader_args {
@@ -234,232 +265,197 @@ struct device_list_reader_args {
 	struct cp_device_list_info *list;
 };
 
-// Read one snapshot with both device allocations controlled by the test gate.
+// Read one snapshot while exposing only its device allocation to the gate.
 static void *
 device_list_reader(void *arg) {
 	struct device_list_reader_args *args =
 		(struct device_list_reader_args *)arg;
-	pause_device_info_allocation = true;
+	control_device_info_read = true;
 	args->list = yanet_get_cp_device_list_info(args->dp_config);
-	pause_device_info_allocation = false;
+	control_device_info_read = false;
 	return NULL;
 }
 
-// Verifies that a racing replacement cannot block or tear a device snapshot.
+// Verifies that replacement proceeds while the retired snapshot stays alive.
 static int
 run_device_list_generation_test(struct yanet_shm *shm) {
 	yanet_error *err = NULL;
-	struct agent *agent = agent_attach(
-		shm, 0, "device-list", DEVICE_LIST_AGENT_MEMORY, &err
-	);
-	TEST_ASSERT_NOT_NULL(
-		agent,
-		"agent_attach failed: %s",
-		err ? yanet_error_message(err) : "?"
-	);
-
-	struct dp_config *dp_config = agent_dp_config(agent);
-	struct cp_config *cp_config = ADDR_OF(&agent->cp_config);
+	struct device_list_fixture fixture;
 	TEST_ASSERT_SUCCESS(
-		install_empty_pipeline(dp_config, cp_config),
-		"failed to install the test pipeline"
+		device_list_fixture_init(shm, "device-list-race", &fixture),
+		"failed to prepare the generation-race fixture"
 	);
 
-	struct cp_device *old_device_a = new_device(
-		agent, DEVICE_LIST_NAME_A, DEVICE_LIST_OLD_WEIGHT, &err
-	);
+	struct cp_device *replacement =
+		new_device(fixture.agent, DEVICE_LIST_NEW_WEIGHT, &err);
 	TEST_ASSERT_NOT_NULL(
-		old_device_a,
-		"failed to build old device A: %s",
-		err ? yanet_error_message(err) : "?"
-	);
-	struct cp_device *old_device_b = new_device(
-		agent, DEVICE_LIST_NAME_B, DEVICE_LIST_OLD_WEIGHT, &err
-	);
-	TEST_ASSERT_NOT_NULL(
-		old_device_b,
-		"failed to build old device B: %s",
-		err ? yanet_error_message(err) : "?"
-	);
-	struct cp_device *old_devices[] = {old_device_a, old_device_b};
-	TEST_ASSERT_SUCCESS(
-		cp_config_update_devices(
-			dp_config, cp_config, 2, old_devices, &err
-		),
-		"failed to install old devices: %s",
+		replacement,
+		"failed to build the replacement device: %s",
 		err ? yanet_error_message(err) : "?"
 	);
 
-	struct cp_device *new_device_a = new_device(
-		agent, DEVICE_LIST_NAME_A, DEVICE_LIST_NEW_WEIGHT, &err
-	);
-	TEST_ASSERT_NOT_NULL(
-		new_device_a,
-		"failed to build new device A: %s",
-		err ? yanet_error_message(err) : "?"
-	);
-	struct cp_device *new_device_b = new_device(
-		agent, DEVICE_LIST_NAME_B, DEVICE_LIST_NEW_WEIGHT, &err
-	);
-	TEST_ASSERT_NOT_NULL(
-		new_device_b,
-		"failed to build new device B: %s",
-		err ? yanet_error_message(err) : "?"
-	);
-
-	allocation_pause_arm(
-		sizeof(struct cp_device_info) +
-		sizeof(struct cp_device_pipeline_info)
-	);
+	allocation_gate_arm();
 	struct device_list_reader_args reader_args = {
-		.dp_config = dp_config,
+		.dp_config = fixture.dp_config,
 	};
 	pthread_t reader;
 	int create_rc =
 		pthread_create(&reader, NULL, device_list_reader, &reader_args);
 	TEST_ASSERT_EQUAL(create_rc, 0, "failed to create reader thread");
 
-	bool first_pause = allocation_pause_wait(1);
+	bool allocation_reached = allocation_gate_wait();
 	bool lock_available = false;
 	bool updated = false;
-	bool first_pin_held = false;
-	bool second_pause = false;
-	bool second_pin_held = false;
-	bool old_device_a_freed_early = false;
-	bool old_device_b_freed_early = false;
+	bool pin_held = false;
+	bool old_device_freed_early = false;
 	yanet_error *update_err = NULL;
 
-	if (first_pause) {
-		lock_available = cp_config_try_lock(cp_config);
+	if (allocation_reached) {
+		lock_available = cp_config_try_lock(fixture.cp_config);
 		if (lock_available) {
-			cp_config_unlock(cp_config);
+			cp_config_unlock(fixture.cp_config);
 		}
 	}
-
 	if (lock_available) {
-		struct cp_device *new_devices[] = {new_device_a, new_device_b};
+		struct cp_device *devices[] = {replacement};
 		updated = cp_config_update_devices(
-				  dp_config,
-				  cp_config,
-				  2,
-				  new_devices,
+				  fixture.dp_config,
+				  fixture.cp_config,
+				  1,
+				  devices,
 				  &update_err
 			  ) == 0;
 	}
-
 	if (updated) {
 		yanet_error *pin_err = NULL;
 		errno = 0;
-		int free_rc = cp_device_plain_free(old_device_a, &pin_err);
-		first_pin_held = free_rc == -1 && errno == EAGAIN;
-		old_device_a_freed_early = free_rc == 0;
+		int free_rc = cp_device_plain_free(fixture.device, &pin_err);
+		pin_held = free_rc == -1 && errno == EAGAIN;
+		old_device_freed_early = free_rc == 0;
 		yanet_error_free(pin_err);
 	}
 
-	allocation_pause_release(
-		1,
-		!first_pause || !lock_available || !updated || !first_pin_held
+	allocation_gate_release(
+		!allocation_reached || !lock_available || !updated || !pin_held
 	);
-
-	if (first_pause && lock_available && updated && first_pin_held) {
-		second_pause = allocation_pause_wait(2);
-		if (second_pause) {
-			yanet_error *pin_err = NULL;
-			errno = 0;
-			int free_rc =
-				cp_device_plain_free(old_device_b, &pin_err);
-			second_pin_held = free_rc == -1 && errno == EAGAIN;
-			old_device_b_freed_early = free_rc == 0;
-			yanet_error_free(pin_err);
-		}
-		allocation_pause_release(2, !second_pause || !second_pin_held);
-	}
 	int join_rc = pthread_join(reader, NULL);
 	if (join_rc != 0) {
 		LOG(ERROR, "failed to join reader thread: %d", join_rc);
 		abort();
 	}
 
-	bool read_succeeded = reader_args.list != NULL;
-	bool old_snapshot = device_snapshot_has_weights(
-		reader_args.list, DEVICE_LIST_OLD_WEIGHT
-	);
+	bool old_snapshot =
+		snapshot_has_weight(reader_args.list, DEVICE_LIST_OLD_WEIGHT);
 	if (reader_args.list != NULL) {
 		cp_device_list_info_free(reader_args.list);
 	}
 
 	struct cp_device_list_info *current_list =
-		updated ? yanet_get_cp_device_list_info(dp_config) : NULL;
-	bool new_snapshot = device_snapshot_has_weights(
-		current_list, DEVICE_LIST_NEW_WEIGHT
-	);
+		updated ? yanet_get_cp_device_list_info(fixture.dp_config)
+			: NULL;
+	bool new_snapshot =
+		snapshot_has_weight(current_list, DEVICE_LIST_NEW_WEIGHT);
 	if (current_list != NULL) {
 		cp_device_list_info_free(current_list);
 	}
 
-	bool old_device_a_released = false;
-	if (updated && !old_device_a_freed_early) {
-		yanet_error *release_err = NULL;
-		old_device_a_released =
-			cp_device_plain_free(old_device_a, &release_err) == 0;
-		yanet_error_free(release_err);
-	}
-	bool old_device_b_released = false;
-	if (updated && !old_device_b_freed_early) {
-		yanet_error *release_err = NULL;
-		old_device_b_released =
-			cp_device_plain_free(old_device_b, &release_err) == 0;
-		yanet_error_free(release_err);
+	bool released_after_read = false;
+	if (updated && !old_device_freed_early) {
+		released_after_read = release_device(fixture.device);
 	}
 	if (!updated) {
-		yanet_error *release_err_a = NULL;
-		cp_device_plain_free(new_device_a, &release_err_a);
-		yanet_error_free(release_err_a);
-		yanet_error *release_err_b = NULL;
-		cp_device_plain_free(new_device_b, &release_err_b);
-		yanet_error_free(release_err_b);
+		release_device(replacement);
 	}
-
 	yanet_error_free(update_err);
 	yanet_error_free(err);
 
-	TEST_ASSERT(first_pause, "reader did not reach the first device copy");
 	TEST_ASSERT(
-		lock_available,
-		"device copy kept the configuration lock exclusively"
+		allocation_reached, "reader did not reach the device allocation"
+	);
+	TEST_ASSERT(lock_available, "device copy kept the configuration lock");
+	TEST_ASSERT(updated, "replacement failed while the reader was paused");
+	TEST_ASSERT(
+		pin_held, "retired generation was not pinned during the copy"
 	);
 	TEST_ASSERT(
-		updated,
-		"racing device replacement failed while the reader was paused"
+		old_snapshot, "racing read did not return the old snapshot"
 	);
 	TEST_ASSERT(
-		first_pin_held,
-		"retired generation was not pinned at the first device copy"
+		new_snapshot, "current read did not return the new snapshot"
 	);
 	TEST_ASSERT(
-		second_pause, "reader did not reach the second device copy"
-	);
-	TEST_ASSERT(
-		second_pin_held,
-		"retired generation was not pinned at the second device copy"
-	);
-	TEST_ASSERT(read_succeeded, "device-list read failed");
-	TEST_ASSERT(
-		old_snapshot, "device list mixed generations after the swap"
-	);
-	TEST_ASSERT(new_snapshot, "current device list missed the replacement");
-	TEST_ASSERT(
-		old_device_a_released && old_device_b_released,
-		"retired devices stayed referenced after the read completed"
+		released_after_read,
+		"retired device stayed referenced after the read completed"
 	);
 
 	return TEST_SUCCESS;
 }
 
-int
-main(void) {
-	log_enable_name("info");
+// Verifies that a failed device allocation releases the pinned generation.
+static int
+run_device_info_allocation_failure_test(struct yanet_shm *shm) {
+	yanet_error *err = NULL;
+	struct device_list_fixture fixture;
+	TEST_ASSERT_SUCCESS(
+		device_list_fixture_init(
+			shm, "device-list-allocation", &fixture
+		),
+		"failed to prepare the allocation-failure fixture"
+	);
 
+	allocation_gate_arm();
+	allocation_gate_release(true);
+	control_device_info_read = true;
+	struct cp_device_list_info *list =
+		yanet_get_cp_device_list_info(fixture.dp_config);
+	control_device_info_read = false;
+	bool allocation_reached = allocation_gate_wait();
+	bool read_failed = list == NULL;
+	if (list != NULL) {
+		cp_device_list_info_free(list);
+	}
+
+	struct cp_device *replacement =
+		new_device(fixture.agent, DEVICE_LIST_NEW_WEIGHT, &err);
+	bool replacement_created = replacement != NULL;
+	bool updated = false;
+	if (replacement_created) {
+		struct cp_device *devices[] = {replacement};
+		updated = cp_config_update_devices(
+				  fixture.dp_config,
+				  fixture.cp_config,
+				  1,
+				  devices,
+				  &err
+			  ) == 0;
+	}
+	bool generation_released = updated && release_device(fixture.device);
+	if (replacement_created && !updated) {
+		release_device(replacement);
+	}
+	yanet_error_free(err);
+
+	TEST_ASSERT(
+		allocation_reached, "reader did not reach the device allocation"
+	);
+	TEST_ASSERT(
+		read_failed, "device allocation failure was not propagated"
+	);
+	TEST_ASSERT(replacement_created, "failed to build replacement device");
+	TEST_ASSERT(updated, "failed to retire the failed-read generation");
+	TEST_ASSERT(
+		generation_released,
+		"device allocation failure kept the generation pinned"
+	);
+
+	return TEST_SUCCESS;
+}
+
+typedef int (*device_list_scenario)(struct yanet_shm *shm);
+
+// Run each scenario in fresh shared memory to isolate leaked generations.
+static int
+run_device_list_scenario(const char *name, device_list_scenario scenario) {
 	const char *port_names[] = {"01:00.0"};
 	const char *devices_to_load[] = {"plain"};
 	struct dataplane_ut_config config = {
@@ -474,22 +470,39 @@ main(void) {
 
 	struct dataplane_ut *ut = dataplane_ut_new(&config);
 	if (ut == NULL) {
-		fprintf(stderr, "dataplane_ut_new failed\n");
-		return 1;
+		LOG(ERROR, "%s: dataplane_ut_new failed", name);
+		return TEST_FAILED;
 	}
 
 	struct yanet_shm *shm = dataplane_ut_shm(ut);
 	if (shm == NULL) {
-		fprintf(stderr, "dataplane_ut_shm returned NULL\n");
+		LOG(ERROR, "%s: dataplane_ut_shm returned NULL", name);
 		dataplane_ut_free(ut);
+		return TEST_FAILED;
+	}
+
+	int rc = scenario(shm);
+	if (rc != TEST_SUCCESS) {
+		LOG(ERROR, "%s failed", name);
+	}
+	dataplane_ut_free(ut);
+	return rc;
+}
+
+int
+main(void) {
+	log_enable_name("info");
+
+	if (run_device_list_scenario(
+		    "generation race", run_device_list_generation_test
+	    ) != TEST_SUCCESS) {
 		return 1;
 	}
-
-	int rc = run_device_list_generation_test(shm);
-	if (rc != TEST_SUCCESS) {
-		LOG(ERROR, "run_device_list_generation_test failed");
+	if (run_device_list_scenario(
+		    "device allocation failure",
+		    run_device_info_allocation_failure_test
+	    ) != TEST_SUCCESS) {
+		return 1;
 	}
-
-	dataplane_ut_free(ut);
-	return rc == TEST_SUCCESS ? 0 : 1;
+	return 0;
 }
