@@ -1320,8 +1320,8 @@ struct cp_device_list_info *
 yanet_get_cp_device_list_info(struct dp_config *dp_config) {
 	struct cp_config *cp_config = ADDR_OF(&dp_config->cp_config);
 	cp_config_lock(cp_config);
-	struct cp_config_gen *cp_config_gen =
-		ADDR_OF(&cp_config->cp_config_gen);
+	struct cp_config_gen *cp_config_gen = cp_config_gen_acquire(cp_config);
+	cp_config_unlock(cp_config);
 
 	struct cp_device_registry *device_registry =
 		&cp_config_gen->device_registry;
@@ -1333,7 +1333,7 @@ yanet_get_cp_device_list_info(struct dp_config *dp_config) {
 	struct cp_device_list_info *device_list_info =
 		(struct cp_device_list_info *)malloc(device_list_info_size);
 	if (device_list_info == NULL) {
-		goto unlock;
+		goto release;
 	}
 
 	memset(device_list_info, 0, device_list_info_size);
@@ -1350,7 +1350,7 @@ yanet_get_cp_device_list_info(struct dp_config *dp_config) {
 		if (device_info == NULL) {
 			cp_device_list_info_free(device_list_info);
 			device_list_info = NULL;
-			goto unlock;
+			goto release;
 		}
 
 		device_list_info->devices[device_list_info->device_count] =
@@ -1358,7 +1358,9 @@ yanet_get_cp_device_list_info(struct dp_config *dp_config) {
 		device_list_info->device_count++;
 	}
 
-unlock:
+release:
+	cp_config_lock(cp_config);
+	cp_config_gen_release(cp_config, cp_config_gen);
 	cp_config_unlock(cp_config);
 
 	return device_list_info;

@@ -97,6 +97,37 @@ loaded_counts_test = executable(
 
 test('loaded_counts', loaded_counts_test, suite: ['lib'])
 
+device_list_thread_dep = dependency('threads')
+
+device_list_test = executable(
+  'device_list_test',
+  ['device_list_test.c'],
+  c_args: yanet_c_args,
+  link_args: yanet_link_args + [
+    '-Wl,-E',
+    '-Wl,--undefined=new_device_plain',
+    '-Wl,--export-dynamic-symbol=new_device_plain',
+    '-Wl,--wrap=malloc',
+  ],
+  dependencies: [
+    lib_dataplane_ut_dep,
+    lib_logging_dep,
+    lib_errors_dep,
+    lib_dev_plain_api,
+    libdpdk_dep,
+    device_list_thread_dep,
+  ],
+  link_with: [lib_dev_plain_dp],
+  include_directories: yanet_rootdir,
+)
+
+test(
+  'device_list',
+  device_list_test,
+  suite: ['lib'],
+  timeout: 30,
+)
+
 module_registry_fini_guard_test = executable(
   'module_registry_fini_guard_test',
   ['module_registry_fini_guard_test.c'],
