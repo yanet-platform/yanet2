@@ -67,10 +67,15 @@ void
 worker_pipeline_round(
 	struct dp_worker *dp_worker,
 	struct cp_config_gen *cp_config_gen,
-	struct config_gen_ectx *config_gen_ectx,
-	struct packet_front *packet_front
+	struct config_gen_ectx *config_gen_ectx
 ) {
 	(void)cp_config_gen;
+
+	// The round runs on the generation context's scratch front: it is
+	// also the final drop list the chains splice their finished drop
+	// lists into, so the caller must be the context's owner and drain
+	// the front before the next round.
+	struct packet_front *packet_front = &config_gen_ectx->packet_front;
 
 	// The untouched list holds every entry no packet reached this
 	// round: the round drains the home list onto it at constant

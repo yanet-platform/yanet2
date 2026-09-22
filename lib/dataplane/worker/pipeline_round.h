@@ -3,7 +3,6 @@
 struct dp_worker;
 struct cp_config_gen;
 struct config_gen_ectx;
-struct packet_front;
 
 // Drain the device entry schedules through the pipeline.
 //
@@ -13,13 +12,15 @@ struct packet_front;
 // recirculation) directly onto the target device entry schedules.
 // config_gen_ectx must be non-NULL.
 //
-// On return, packet_front->output holds packets that should be written
-// out (or onward), packet_front->drop holds packets the pipeline rejected,
-// and every device entry schedule is left empty.
+// The round runs on the generation context's scratch front: on return its
+// output holds packets that should be written out (or onward), its drop
+// list holds every packet the pipeline rejected — the finished chain drop
+// lists are spliced into it directly during processing — and every device
+// entry schedule is left empty. The caller owns draining the front before
+// the next round.
 void
 worker_pipeline_round(
 	struct dp_worker *dp_worker,
 	struct cp_config_gen *cp_config_gen,
-	struct config_gen_ectx *config_gen_ectx,
-	struct packet_front *packet_front
+	struct config_gen_ectx *config_gen_ectx
 );
