@@ -1741,8 +1741,8 @@ func TestACL_IPv4Fragment_FirstFragment(t *testing.T) {
 }
 
 // TestACL_IPv4Fragment_LaterFragment_PortRule asserts that a non-first IPv4
-// fragment does NOT match a port-based rule, because the fragment has no
-// L4 header and its "ports" are undefined.
+// fragment does NOT match a port-based rule, because the fragment carries no
+// transport header and therefore no readable ports.
 func TestACL_IPv4Fragment_LaterFragment_PortRule(t *testing.T) {
 	eth := layers.Ethernet{
 		SrcMAC:       xerror.Unwrap(net.ParseMAC("aa:bb:cc:dd:ee:ff")),
@@ -1762,8 +1762,8 @@ func TestACL_IPv4Fragment_LaterFragment_PortRule(t *testing.T) {
 	ip4.Flags = 0
 	ip4.FragOffset = 8
 
-	// Payload bytes at offset 0-1 will be read as src-port, bytes 2-3 as
-	// dst-port. We place 0x00 0x00 0x00 0x50 so dst-port reads as 80 (0x0050).
+	// The fragment carries only flow payload; a port rule cannot match
+	// because no UDP header is available to read ports from.
 	payload := gopacket.Payload([]byte{0x00, 0x00, 0x00, 0x50, 0xAA, 0xBB, 0xCC, 0xDD})
 
 	pkt := serializeFragPacket(t, &eth, &ip4, payload)
@@ -1791,14 +1791,13 @@ func TestACL_IPv4Fragment_LaterFragment_PortRule(t *testing.T) {
 	requireModuleCounterPackets(t, h, aclCounterPath("port0", "test"), "acl_no_match", 1)
 }
 
-// TestACL_IPv4Fragment_LaterFragment_ProtoOnlyRule verifies that a non-first
-// IPv4 fragment does not match a rule that restricts only the transport
-// protocol.
+// TestACL_IPv4Fragment_LaterFragment_NoPortRule verifies that a non-first
+// IPv4 fragment matches a rule that uses only IP-level and protocol criteria.
 //
-// The fragment carries flow payload where its transport header should be, so
-// transport-derived classification cannot identify its protocol: the packet
-// is dropped instead of being matched from payload bytes.
-func TestACL_IPv4Fragment_LaterFragment_ProtoOnlyRule(t *testing.T) {
+// The fragment keeps its declared protocol, so a protocol-range rule matches
+// it even though no UDP header is present: the fragment passes through
+// unchanged.
+func TestACL_IPv4Fragment_LaterFragment_NoPortRule(t *testing.T) {
 	eth := layers.Ethernet{
 		SrcMAC:       xerror.Unwrap(net.ParseMAC("aa:bb:cc:dd:ee:ff")),
 		DstMAC:       xerror.Unwrap(net.ParseMAC("11:22:33:44:55:66")),
@@ -1831,10 +1830,12 @@ func TestACL_IPv4Fragment_LaterFragment_ProtoOnlyRule(t *testing.T) {
 
 	result, err := h.HandlePackets(pkt)
 	require.NoError(t, err)
-	assert.Empty(t, result.Output, "non-first fragment must not match a proto-only rule")
-	require.Len(t, result.Drop, 1, "non-first fragment must be dropped")
+	assert.Len(t, result.Output, 1, "non-first fragment must be allowed by IP-only rule")
+	assert.Empty(t, result.Drop)
+	assert.True(t, bytes.Equal(result.Output[0].RawData, pkt.Data()),
+		"an allowed fragment must pass through byte-identical")
 
-	requireModuleCounterPackets(t, h, aclCounterPath("port0", "test"), "acl_no_match", 1)
+	requireModuleCounterPackets(t, h, aclCounterPath("port0", "test"), "acl_action_allow", 1)
 }
 
 // TestACL_IPv6Fragment_FirstFragment documents the parser's behavior for the
@@ -1897,8 +1898,9 @@ func TestACL_IPv6Fragment_FirstFragment(t *testing.T) {
 }
 
 // TestACL_IPv6Fragment_LaterFragment asserts that a non-first IPv6 fragment
-// does NOT match a port-based rule, because the fragment has no L4 header
-// and its "ports" are undefined.
+// does NOT match a port-based rule, because the fragment carries no transport
+// header and therefore no readable ports. A few payload bytes are enough:
+// the fragment parses regardless of the missing transport header.
 func TestACL_IPv6Fragment_LaterFragment(t *testing.T) {
 	eth := layers.Ethernet{
 		SrcMAC:       xerror.Unwrap(net.ParseMAC("aa:bb:cc:dd:ee:ff")),
@@ -1921,17 +1923,8 @@ func TestACL_IPv6Fragment_LaterFragment(t *testing.T) {
 		Identification: 0x12345678,
 	}
 
-	// Bytes 0-1 = src-port = 0x0000, bytes 2-3 = dst-port = 0x01BB (443).
-	// The payload must be at least sizeof(rte_tcp_hdr)=20 bytes so that
-	// parse_packet's length check does not reject the packet before the
-	// ACL handler is reached.
-	payload := gopacket.Payload([]byte{
-		0x00, 0x00, 0x01, 0xBB, // src-port=0, dst-port=443 (0x01BB)
-		0x00, 0x00, 0x00, 0x00, // seq number
-		0x00, 0x00, 0x00, 0x00, // ack number
-		0x50, 0x00, 0x00, 0x00, // data offset + flags
-		0x00, 0x00, 0x00, 0x00, // window + checksum
-	})
+	// Flow payload only: deliberately shorter than any TCP header.
+	payload := gopacket.Payload([]byte{0x00, 0x01, 0xBB, 0x00, 0x00, 0x00, 0x00, 0x50})
 
 	pkt := serializeFragPacket(t, &eth, &ip6, &frag, payload)
 
@@ -1958,11 +1951,16 @@ func TestACL_IPv6Fragment_LaterFragment(t *testing.T) {
 	requireModuleCounterPackets(t, h, aclCounterPath("port0", "test"), "acl_no_match", 1)
 }
 
-// rawIPv4TcpFrame builds an unpadded Ethernet frame carrying an IPv4 TCP
-// header set from the given DF/MF flags and 8-byte-unit fragment offset,
-// followed by the payload verbatim. No serializer padding is added, so a
-// short fragment stays short.
-func rawIPv4TcpFrame(df, mf bool, offsetUnits uint16, payload []byte) []byte {
+// rawIPv4Frame builds an unpadded Ethernet frame carrying an IPv4 header set
+// from the given DF/MF flags, 8-byte-unit fragment offset and protocol
+// number, followed by the payload verbatim. No serializer padding is added,
+// so a short fragment stays short.
+func rawIPv4Frame(
+	dontFragment, moreFragments bool,
+	offsetUnits uint16,
+	proto layers.IPProtocol,
+	payload []byte,
+) []byte {
 	frame := make([]byte, 14+20+len(payload))
 	copy(frame[0:6], []byte{0x11, 0x22, 0x33, 0x44, 0x55, 0x66})
 	copy(frame[6:12], []byte{0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff})
@@ -1970,26 +1968,26 @@ func rawIPv4TcpFrame(df, mf bool, offsetUnits uint16, payload []byte) []byte {
 	frame[14] = 0x45
 	binary.BigEndian.PutUint16(frame[16:18], uint16(20+len(payload)))
 	fragmentField := offsetUnits
-	if mf {
+	if moreFragments {
 		fragmentField |= 1 << 13
 	}
-	if df {
+	if dontFragment {
 		fragmentField |= 1 << 14
 	}
 	binary.BigEndian.PutUint16(frame[20:22], fragmentField)
 	frame[22] = 64
-	frame[23] = 6
+	frame[23] = byte(proto)
 	copy(frame[26:30], net.IP{192, 0, 2, 1}.To4())
 	copy(frame[30:34], net.IP{10, 0, 0, 1}.To4())
 	copy(frame[34:], payload)
 	return frame
 }
 
-// TestACL_Fragment_ProtoRuleClassification verifies that a proto-based TCP
-// rule classifies a non-initial fragment by its fragment state rather than
-// its payload bytes: the fragment does not match the rule while an
-// unfragmented DF-only packet with the same addresses does.
-func TestACL_Fragment_ProtoRuleClassification(t *testing.T) {
+// TestACL_Fragment_ProtoRuleDeclaredProtocol verifies that a proto-based TCP
+// rule classifies a non-initial fragment by its declared protocol: the
+// fragment matches the rule without any transport header being read, and an
+// unfragmented DF-only packet with the same addresses matches as before.
+func TestACL_Fragment_ProtoRuleDeclaredProtocol(t *testing.T) {
 	rules := []cacl.ACLRule{{
 		Actions:       []cacl.ACLAction{{Kind: cacl.ActionAllow}},
 		Devices:       filter.Devices{{Name: "port0"}},
@@ -2006,14 +2004,16 @@ func TestACL_Fragment_ProtoRuleClassification(t *testing.T) {
 	applyACLRules(t, backend, "test", rules)
 	wireACLPipeline(t, agent, "port0", "test")
 
-	fragment := rawIPv4TcpFrame(true, true, 1, make([]byte, 8))
+	fragment := rawIPv4Frame(true, true, 1, layers.IPProtocolTCP, make([]byte, 8))
 	result, err := h.HandleSegmentedPackets([][]byte{fragment})
 	require.NoError(t, err)
-	assert.Empty(t, result.Output, "a non-initial fragment must not match a proto rule")
-	require.Len(t, result.Drop, 1, "a non-initial fragment must be dropped")
-	requireModuleCounterPackets(t, h, aclCounterPath("port0", "test"), "acl_no_match", 1)
+	require.Len(t, result.Output, 1,
+		"a non-initial fragment must match the rule by its declared protocol")
+	assert.Empty(t, result.Drop)
+	assert.True(t, bytes.Equal(result.Output[0], fragment),
+		"an allowed fragment must pass through byte-identical")
 
-	dfOnly := rawIPv4TcpFrame(true, false, 0, bytes.Repeat([]byte{0x51}, 20))
+	dfOnly := rawIPv4Frame(true, false, 0, layers.IPProtocolTCP, bytes.Repeat([]byte{0x51}, 20))
 	result, err = h.HandleSegmentedPackets([][]byte{dfOnly})
 	require.NoError(t, err)
 	require.Len(t, result.Output, 1, "an unfragmented DF-only packet must match the proto rule")
@@ -2021,5 +2021,109 @@ func TestACL_Fragment_ProtoRuleClassification(t *testing.T) {
 	assert.True(t, bytes.Equal(result.Output[0], dfOnly),
 		"an allowed packet must pass through byte-identical")
 
+	requireModuleCounterPackets(t, h, aclCounterPath("port0", "test"), "acl_action_allow", 2)
+}
+
+// TestACL_Fragment_TCPFragRuleDeny verifies that an explicit deny rule for
+// fragmented TCP catches a non-initial TCP fragment while the same fragment
+// of a UDP flow and unfragmented TCP traffic fall through to the allow rule:
+// the fragmentation condition keeps its offset-based meaning, and the
+// protocol condition keeps its declared-protocol meaning.
+func TestACL_Fragment_TCPFragRuleDeny(t *testing.T) {
+	allProtos := filter.ProtoRanges{{From: 0, To: 65535}}
+	deny := allow4Rule(
+		[]xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
+		[]xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
+		tcpProto,
+	)
+	deny.Actions = []cacl.ACLAction{{Kind: cacl.ActionDeny}}
+	deny.Fragment = filter.FragmentFrag
+	rules := []cacl.ACLRule{
+		deny,
+		allow4Rule(
+			[]xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
+			[]xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
+			allProtos,
+		),
+	}
+
+	h, agent, backend := setupACLHarness(t, []string{"port0"})
+	applyACLRules(t, backend, "test", rules)
+	wireACLPipeline(t, agent, "port0", "test")
+
+	tcpFragment := rawIPv4Frame(false, true, 1, layers.IPProtocolTCP, make([]byte, 8))
+	result, err := h.HandleSegmentedPackets([][]byte{tcpFragment})
+	require.NoError(t, err)
+	assert.Empty(t, result.Output, "a non-initial TCP fragment must be denied by the TCP FRAG rule")
+	require.Len(t, result.Drop, 1, "a non-initial TCP fragment must be dropped")
+
+	udpFragment := rawIPv4Frame(false, true, 1, layers.IPProtocolUDP, make([]byte, 8))
+	result, err = h.HandleSegmentedPackets([][]byte{udpFragment})
+	require.NoError(t, err)
+	require.Len(t, result.Output, 1,
+		"a non-initial UDP fragment must fall through to the allow rule")
+	assert.Empty(t, result.Drop)
+
+	dfOnly := rawIPv4Frame(true, false, 0, layers.IPProtocolTCP, bytes.Repeat([]byte{0x51}, 20))
+	result, err = h.HandleSegmentedPackets([][]byte{dfOnly})
+	require.NoError(t, err)
+	require.Len(t, result.Output, 1,
+		"unfragmented TCP must not be denied by the FRAG rule")
+	assert.Empty(t, result.Drop)
+
+	mfFirst := rawIPv4Frame(false, true, 0, layers.IPProtocolTCP, bytes.Repeat([]byte{0x51}, 20))
+	result, err = h.HandleSegmentedPackets([][]byte{mfFirst})
+	require.NoError(t, err)
+	require.Len(t, result.Output, 1,
+		"a first TCP fragment must not be denied by the offset-based FRAG rule")
+	assert.Empty(t, result.Drop)
+
+	requireModuleCounterPackets(t, h, aclCounterPath("port0", "test"), "acl_action_deny", 1)
+	requireModuleCounterPackets(t, h, aclCounterPath("port0", "test"), "acl_action_allow", 3)
+}
+
+// TestACL_Fragment_ProtoZeroRuleSkipsFragments verifies that a rule for
+// protocol 0 does not catch fragments of other protocols: the declared
+// protocol of a non-initial fragment never collapses into the protocol-0
+// class, while a real protocol-0 packet still matches the rule.
+func TestACL_Fragment_ProtoZeroRuleSkipsFragments(t *testing.T) {
+	protoZero := filter.ProtoRanges{{From: 0, To: 255}}
+	allProtos := filter.ProtoRanges{{From: 0, To: 65535}}
+	zeroDeny := allow4Rule(
+		[]xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
+		[]xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
+		protoZero,
+	)
+	zeroDeny.Actions = []cacl.ACLAction{{Kind: cacl.ActionDeny}}
+	rules := []cacl.ACLRule{
+		zeroDeny,
+		allow4Rule(
+			[]xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
+			[]xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
+			allProtos,
+		),
+	}
+
+	h, agent, backend := setupACLHarness(t, []string{"port0"})
+	applyACLRules(t, backend, "test", rules)
+	wireACLPipeline(t, agent, "port0", "test")
+
+	tcpFragment := rawIPv4Frame(true, true, 1, layers.IPProtocolTCP, make([]byte, 8))
+	result, err := h.HandleSegmentedPackets([][]byte{tcpFragment})
+	require.NoError(t, err)
+	require.Len(t, result.Output, 1,
+		"a non-initial TCP fragment must not match the protocol-0 rule")
+	assert.Empty(t, result.Drop)
+	assert.True(t, bytes.Equal(result.Output[0], tcpFragment),
+		"the fragment must pass through byte-identical")
+
+	protoZeroPacket := rawIPv4Frame(true, false, 0, 0x00, bytes.Repeat([]byte{0x51}, 20))
+	result, err = h.HandleSegmentedPackets([][]byte{protoZeroPacket})
+	require.NoError(t, err)
+	assert.Empty(t, result.Output,
+		"a real protocol-0 packet must still match the protocol-0 rule")
+	require.Len(t, result.Drop, 1, "a real protocol-0 packet must be denied")
+
+	requireModuleCounterPackets(t, h, aclCounterPath("port0", "test"), "acl_action_deny", 1)
 	requireModuleCounterPackets(t, h, aclCounterPath("port0", "test"), "acl_action_allow", 1)
 }

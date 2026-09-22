@@ -492,7 +492,15 @@ acl_handle_packets(
 					break;
 				}
 				case ACTION_CREATE_STATE: {
-					push_sync_packet = SYNC_INGRESS;
+					// A non-initial fragment has no
+					// transport header to derive the
+					// state from; creation waits for the
+					// fragment carrying the header.
+					if ((packet->transport_header.type &
+					     PACKET_TRANSPORT_HEADER_UNAVAILABLE
+					    ) == 0) {
+						push_sync_packet = SYNC_INGRESS;
+					}
 					break;
 				}
 				case ACTION_CHECK_STATE: {

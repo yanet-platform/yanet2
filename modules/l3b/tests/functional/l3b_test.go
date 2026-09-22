@@ -382,7 +382,7 @@ var l3bTestCounterPath = dataplaneut.CounterPath{
 // set with the given DF and MF flags and the given 8-byte-unit fragment
 // offset. The payload follows the IP header verbatim, so the frame length
 // never hides a short fragment behind serializer padding.
-func ipv4TestFrame(df, mf bool, offsetUnits uint16, payload []byte) []byte {
+func ipv4TestFrame(dontFragment, moreFragments bool, offsetUnits uint16, payload []byte) []byte {
 	frame := make([]byte, ethHeaderLen+20+len(payload))
 	copy(frame[0:6], []byte{0x11, 0x22, 0x33, 0x44, 0x55, 0x66})
 	copy(frame[6:12], []byte{0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff})
@@ -390,10 +390,10 @@ func ipv4TestFrame(df, mf bool, offsetUnits uint16, payload []byte) []byte {
 	frame[14] = 0x45
 	binary.BigEndian.PutUint16(frame[16:18], uint16(20+len(payload)))
 	fragmentField := offsetUnits
-	if mf {
+	if moreFragments {
 		fragmentField |= 1 << 13
 	}
-	if df {
+	if dontFragment {
 		fragmentField |= 1 << 14
 	}
 	binary.BigEndian.PutUint16(frame[20:22], fragmentField)
@@ -410,7 +410,7 @@ func ipv4TestFrame(df, mf bool, offsetUnits uint16, payload []byte) []byte {
 // and 8-byte-unit offset, and the payload verbatim.
 func ipv6TestFrame(
 	nextHeader byte,
-	mf bool,
+	moreFragments bool,
 	offsetUnits uint16,
 	payload []byte,
 ) []byte {
@@ -429,7 +429,7 @@ func ipv6TestFrame(
 	copy(frame[38:54], dst6)
 	frame[54] = nextHeader
 	offsetFlag := offsetUnits << 3
-	if mf {
+	if moreFragments {
 		offsetFlag |= 1
 	}
 	binary.BigEndian.PutUint16(frame[56:58], offsetFlag)

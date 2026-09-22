@@ -163,13 +163,18 @@ func TestPacketFront(t *testing.T) {
 // TCP flow.
 const ipProtoTCP uint16 = 6
 
+// transportHeaderUnavailable is the high tag of a transport type whose
+// header was not parsed: the packet carries a non-initial fragment, so the
+// low byte only keeps the declared protocol.
+const transportHeaderUnavailable uint16 = 0x100
+
 // ipv6FragmentFrame builds an unpadded Ethernet frame carrying an IPv6
 // header, a Fragment extension header with the given next header, More
 // Fragments bit and 8-byte-unit offset, and the payload verbatim. No
 // serializer padding is added, so a short fragment stays short.
 func ipv6FragmentFrame(
 	nextHeader byte,
-	mf bool,
+	moreFragments bool,
 	offsetUnits uint16,
 	payload []byte,
 ) []byte {
@@ -185,7 +190,7 @@ func ipv6FragmentFrame(
 	copy(frame[38:54], net.ParseIP("2001:db8::2").To16())
 	frame[54] = nextHeader
 	offsetFlag := offsetUnits << 3
-	if mf {
+	if moreFragments {
 		offsetFlag |= 1
 	}
 	binary.BigEndian.PutUint16(frame[56:58], offsetFlag)
@@ -196,7 +201,11 @@ func ipv6FragmentFrame(
 // ipv4FragmentFrame builds an unpadded Ethernet frame carrying an IPv4 TCP
 // header set with the given DF and MF flags and the given 8-byte-unit
 // fragment offset, followed by the payload verbatim.
-func ipv4FragmentFrame(df, mf bool, offsetUnits uint16, payload []byte) []byte {
+func ipv4FragmentFrame(
+	dontFragment, moreFragments bool,
+	offsetUnits uint16,
+	payload []byte,
+) []byte {
 	frame := make([]byte, 14+20+len(payload))
 	copy(frame[0:6], []byte{0x11, 0x22, 0x33, 0x44, 0x55, 0x66})
 	copy(frame[6:12], []byte{0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff})
@@ -204,10 +213,10 @@ func ipv4FragmentFrame(df, mf bool, offsetUnits uint16, payload []byte) []byte {
 	frame[14] = 0x45
 	binary.BigEndian.PutUint16(frame[16:18], uint16(20+len(payload)))
 	fragmentField := offsetUnits
-	if mf {
+	if moreFragments {
 		fragmentField |= 1 << 13
 	}
-	if df {
+	if dontFragment {
 		fragmentField |= 1 << 14
 	}
 	binary.BigEndian.PutUint16(frame[20:22], fragmentField)
@@ -236,8 +245,8 @@ func newFragmentPacket(t *testing.T, pinner *runtime.Pinner, frame []byte) *Pack
 
 // TestPacket_NonInitialFragmentSegmented verifies that a non-initial
 // fragment whose transport-header region crosses a segment boundary parses
-// without reading payload as ports: the fragment metadata is recorded and no
-// transport header is exposed.
+// without reading payload as ports: the fragment keeps its declared protocol
+// tagged as header-unavailable.
 func TestPacket_NonInitialFragmentSegmented(t *testing.T) {
 	frame := ipv6FragmentFrame(6, false, 1, make([]byte, 8))
 	require.Equal(t, 70, len(frame))
@@ -251,8 +260,8 @@ func TestPacket_NonInitialFragmentSegmented(t *testing.T) {
 	fragmented, offset, transportType, _ := packet.fragmentMetadata()
 	assert.True(t, fragmented, "the fragment must be flagged")
 	assert.Equal(t, uint16(8), offset, "the byte offset must be reported")
-	assert.Equal(t, uint16(0), transportType,
-		"no transport header may be exposed for fragment payload")
+	assert.Equal(t, ipProtoTCP|transportHeaderUnavailable, transportType,
+		"the declared protocol must be kept and tagged unavailable")
 }
 
 // TestPacket_InitialAndAtomicFragmentsKeepTransport verifies that fragment
@@ -311,8 +320,8 @@ func TestPacket_NonInitialFragmentHashPayloadIndependent(t *testing.T) {
 
 	firstFragmented, _, firstTransport, firstHash := first.fragmentMetadata()
 	assert.True(t, firstFragmented, "the fragment must be flagged")
-	assert.Equal(t, uint16(0), firstTransport,
-		"no transport header may be exposed for unsegmented fragment payload")
+	assert.Equal(t, ipProtoTCP|transportHeaderUnavailable, firstTransport,
+		"the declared protocol must be kept and tagged unavailable")
 	assert.NotZero(t, firstHash,
 		"a non-initial fragment keeps the address-only flow hash")
 

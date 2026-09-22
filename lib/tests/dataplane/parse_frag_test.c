@@ -23,8 +23,8 @@
 #define DEFAULT_HEADROOM 128
 #define DEFAULT_TAILROOM 256
 
-// Room for a UDP header plus a few bytes, so parse_packet reaches the
-// transport layer instead of bailing out on a truncated header.
+// Room for a UDP header plus a few bytes, so the frame parses through the
+// transport layer instead of failing on a truncated header.
 #define PAYLOAD_LEN (sizeof(struct rte_udp_hdr) + 8)
 
 #define TTL 64
@@ -47,8 +47,8 @@ static const uint8_t dst6[NET6_LEN] = {
 	0xfe, 0x80, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2
 };
 
-// Builds eth + IPv4 carrying the given raw fragment field and a payload of the
-// given size, and runs parse_packet on it.
+// Builds eth + IPv4 carrying the given raw fragment field and a payload of
+// the given size, then parses the frame.
 static int
 build_ip4_payload(
 	struct packet *p, uint16_t fragment_offset_host, uint16_t payload_len
@@ -79,15 +79,15 @@ build_ip4_payload(
 	return parse_packet(p);
 }
 
-// Builds eth + IPv4 + UDP-sized payload carrying the given raw fragment field
-// and runs parse_packet on it.
+// Builds eth + IPv4 with a UDP-sized payload carrying the given raw fragment
+// field, then parses the frame.
 static int
 build_ip4(struct packet *p, uint16_t fragment_offset_host) {
 	return build_ip4_payload(p, fragment_offset_host, PAYLOAD_LEN);
 }
 
-// Builds eth + IPv6 + optional fragment extension + a payload of the given
-// size and runs parse_packet on it.
+// Builds eth + IPv6 with an optional fragment extension and a payload of the
+// given size, then parses the frame.
 static int
 build_ip6_payload(
 	struct packet *p,
@@ -130,8 +130,8 @@ build_ip6_payload(
 	return parse_packet(p);
 }
 
-// Builds eth + IPv6 + optional fragment extension + UDP-sized payload and runs
-// parse_packet on it.
+// Builds eth + IPv6 with an optional fragment extension and a UDP-sized
+// payload, then parses the frame.
 static int
 build_ip6(struct packet *p, bool with_fragment, uint16_t offset_flag_host) {
 	return build_ip6_payload(
@@ -249,11 +249,14 @@ test_ip4_mf_only(void) {
 }
 
 // Verifies that a nonzero IPv4 fragment offset marks a packet as fragmented,
-// is reported in the header's own eight-byte units, and leaves no transport
-// header for readers to consume payload through.
+// is reported in the header's own eight-byte units, and keeps its declared
+// protocol under the unavailable-header tag instead of exposing a transport
+// header readers could consume payload through.
 static int
 test_ip4_offset_only(void) {
-	return run_ip4_case(185, 1, 185, PACKET_HEADER_TYPE_UNKNOWN);
+	return run_ip4_case(
+		185, 1, 185, IPPROTO_UDP | PACKET_TRANSPORT_HEADER_UNAVAILABLE
+	);
 }
 
 // Verifies that the IPv4 Don't Fragment bit is excluded from the reported
@@ -261,7 +264,10 @@ test_ip4_offset_only(void) {
 static int
 test_ip4_df_and_offset(void) {
 	return run_ip4_case(
-		RTE_IPV4_HDR_DF_FLAG | 185, 1, 185, PACKET_HEADER_TYPE_UNKNOWN
+		RTE_IPV4_HDR_DF_FLAG | 185,
+		1,
+		185,
+		IPPROTO_UDP | PACKET_TRANSPORT_HEADER_UNAVAILABLE
 	);
 }
 
@@ -277,7 +283,7 @@ test_ip4_short_noninitial_parses(void) {
 	);
 	TEST_ASSERT_EQUAL(
 		p.transport_header.type,
-		PACKET_HEADER_TYPE_UNKNOWN,
+		IPPROTO_UDP | PACKET_TRANSPORT_HEADER_UNAVAILABLE,
 		"transport type"
 	);
 	free_packet(&p);
@@ -347,12 +353,16 @@ test_ip6_mf_only(void) {
 
 // Verifies that a nonzero IPv6 fragment offset marks a packet as fragmented,
 // is reported shifted in place as a byte offset, and stops extension
-// traversal instead of reading the payload as further headers: no usable
-// transport header is recorded.
+// traversal while keeping the Fragment header's declared protocol under the
+// unavailable-header tag.
 static int
 test_ip6_offset_only(void) {
 	return run_ip6_case(
-		true, 0x0BD0, 1, 0x0BD0, PACKET_HEADER_TYPE_UNKNOWN
+		true,
+		0x0BD0,
+		1,
+		0x0BD0,
+		IPPROTO_UDP | PACKET_TRANSPORT_HEADER_UNAVAILABLE
 	);
 }
 
@@ -372,7 +382,8 @@ test_ip6_reserved_only(void) {
 }
 
 // Verifies that a non-initial IPv6 fragment too short to hold its transport
-// header parses successfully instead of failing.
+// header parses successfully instead of failing, keeping its declared
+// protocol under the unavailable-header tag.
 static int
 test_ip6_short_noninitial_parses(void) {
 	struct packet p;
@@ -382,8 +393,105 @@ test_ip6_short_noninitial_parses(void) {
 	);
 	TEST_ASSERT_EQUAL(
 		p.transport_header.type,
-		PACKET_HEADER_TYPE_UNKNOWN,
+		IPPROTO_UDP | PACKET_TRANSPORT_HEADER_UNAVAILABLE,
 		"transport type"
+	);
+	free_packet(&p);
+	return TEST_SUCCESS;
+}
+
+// Verifies that a non-initial fragment declaring Destination Options keeps
+// the declared protocol without reading the fragment payload as the options
+// header.
+static int
+test_ip6_fragment_dstopts_noninitial(void) {
+	struct packet p;
+	uint16_t opts_len = 8;
+	uint16_t frag_len = sizeof(struct yanet_ipv6_ext_fragment);
+	uint16_t total_payload = frag_len + opts_len + 4;
+	uint16_t pkt_len = sizeof(struct rte_ether_hdr) +
+			   sizeof(struct rte_ipv6_hdr) + total_payload;
+	memset(&p, 0, sizeof(p));
+	p.mbuf = alloc_mbuf(DEFAULT_HEADROOM, pkt_len, DEFAULT_TAILROOM);
+	TEST_ASSERT_NOT_NULL(p.mbuf, "mbuf");
+
+	struct rte_ether_hdr *eth =
+		rte_pktmbuf_mtod(p.mbuf, struct rte_ether_hdr *);
+	eth->ether_type = rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV6);
+
+	struct rte_ipv6_hdr *ip6 = (struct rte_ipv6_hdr *)(eth + 1);
+	ip6->vtc_flow = rte_cpu_to_be_32(0x6u << 28);
+	ip6->payload_len = rte_cpu_to_be_16(total_payload);
+	ip6->proto = IPPROTO_FRAGMENT;
+	ip6->hop_limits = TTL;
+	memcpy(ip6->src_addr, src6, NET6_LEN);
+	memcpy(ip6->dst_addr, dst6, NET6_LEN);
+
+	struct yanet_ipv6_ext_fragment *frag =
+		(struct yanet_ipv6_ext_fragment *)(ip6 + 1);
+	frag->next_header = IPPROTO_DSTOPTS;
+	frag->reserved = 0;
+	frag->offset_flag = rte_cpu_to_be_16(0x0BD0);
+	frag->identification = rte_cpu_to_be_32(0xdeadbeef);
+
+	uint8_t *opts = (uint8_t *)(frag + 1);
+	memset(opts, 0, opts_len);
+	opts[0] = IPPROTO_UDP;
+
+	TEST_ASSERT_SUCCESS(parse_packet(&p), "parse");
+	TEST_ASSERT_SUCCESS(
+		assert_fragment_state(&p, 1, 0x0BD0), "fragment state"
+	);
+	TEST_ASSERT_EQUAL(
+		p.transport_header.type,
+		IPPROTO_DSTOPTS | PACKET_TRANSPORT_HEADER_UNAVAILABLE,
+		"transport type"
+	);
+	free_packet(&p);
+	return TEST_SUCCESS;
+}
+
+// Verifies that an initial fragment declaring Destination Options continues
+// extension traversal into the options header.
+static int
+test_ip6_fragment_dstopts_initial(void) {
+	struct packet p;
+	uint16_t opts_len = 8;
+	uint16_t frag_len = sizeof(struct yanet_ipv6_ext_fragment);
+	uint16_t total_payload = frag_len + opts_len + 8;
+	uint16_t pkt_len = sizeof(struct rte_ether_hdr) +
+			   sizeof(struct rte_ipv6_hdr) + total_payload;
+	memset(&p, 0, sizeof(p));
+	p.mbuf = alloc_mbuf(DEFAULT_HEADROOM, pkt_len, DEFAULT_TAILROOM);
+	TEST_ASSERT_NOT_NULL(p.mbuf, "mbuf");
+
+	struct rte_ether_hdr *eth =
+		rte_pktmbuf_mtod(p.mbuf, struct rte_ether_hdr *);
+	eth->ether_type = rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV6);
+
+	struct rte_ipv6_hdr *ip6 = (struct rte_ipv6_hdr *)(eth + 1);
+	ip6->vtc_flow = rte_cpu_to_be_32(0x6u << 28);
+	ip6->payload_len = rte_cpu_to_be_16(total_payload);
+	ip6->proto = IPPROTO_FRAGMENT;
+	ip6->hop_limits = TTL;
+	memcpy(ip6->src_addr, src6, NET6_LEN);
+	memcpy(ip6->dst_addr, dst6, NET6_LEN);
+
+	struct yanet_ipv6_ext_fragment *frag =
+		(struct yanet_ipv6_ext_fragment *)(ip6 + 1);
+	frag->next_header = IPPROTO_DSTOPTS;
+	frag->reserved = 0;
+	frag->offset_flag = rte_cpu_to_be_16(RTE_IPV6_EHDR_MF_MASK);
+	frag->identification = rte_cpu_to_be_32(0xdeadbeef);
+
+	uint8_t *opts = (uint8_t *)(frag + 1);
+	memset(opts, 0, opts_len);
+	opts[0] = IPPROTO_UDP;
+
+	TEST_ASSERT_SUCCESS(parse_packet(&p), "parse");
+	TEST_ASSERT_SUCCESS(assert_fragment_state(&p, 1, 0), "fragment state");
+	TEST_ASSERT_EQUAL(
+		p.transport_header.type, IPPROTO_UDP, "transport type"
 	);
 	free_packet(&p);
 	return TEST_SUCCESS;
@@ -433,7 +541,7 @@ test_ip6_hbh_then_noninitial_parses(void) {
 	);
 	TEST_ASSERT_EQUAL(
 		p.transport_header.type,
-		PACKET_HEADER_TYPE_UNKNOWN,
+		IPPROTO_UDP | PACKET_TRANSPORT_HEADER_UNAVAILABLE,
 		"transport type"
 	);
 	free_packet(&p);
@@ -582,8 +690,8 @@ test_gre_inner_noninitial_fragment(void) {
 	TEST_ASSERT_SUCCESS(assert_fragment_state(&p, 1, 185), "inner state");
 	TEST_ASSERT_EQUAL(
 		p.transport_header.type,
-		PACKET_HEADER_TYPE_UNKNOWN,
-		"inner transport normalized"
+		IPPROTO_UDP | PACKET_TRANSPORT_HEADER_UNAVAILABLE,
+		"inner transport tagged"
 	);
 	free_packet(&p);
 	return TEST_SUCCESS;
@@ -670,6 +778,10 @@ main(void) {
 		{"ip6_atomic", test_ip6_atomic},
 		{"ip6_reserved_only", test_ip6_reserved_only},
 		{"ip6_short_noninitial", test_ip6_short_noninitial_parses},
+		{"ip6_fragment_dstopts_noninitial",
+		 test_ip6_fragment_dstopts_noninitial},
+		{"ip6_fragment_dstopts_initial",
+		 test_ip6_fragment_dstopts_initial},
 		{"ip6_hbh_then_noninitial", test_ip6_hbh_then_noninitial_parses
 		},
 		{"gre_accepted", test_gre_accepted},

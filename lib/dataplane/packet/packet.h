@@ -6,6 +6,14 @@
 
 #define PACKET_HEADER_TYPE_UNKNOWN 0
 
+// Marks in the transport type that no usable transport header was parsed:
+// the packet carries a non-initial fragment, so everything at the transport
+// offset is flow payload. The low byte keeps the declared protocol from the
+// IP header for protocol-only classification. Equality dispatch on untagged
+// protocol constants never matches a tagged value, which is what keeps
+// header readers away from fragment payload.
+#define PACKET_TRANSPORT_HEADER_UNAVAILABLE 0x100
+
 #define PACKET_RECIRC_LIMIT_DEFAULT UINT16_C(64)
 #define PACKET_RECIRC_LIMIT_MIN UINT16_C(4)
 #define PACKET_RECIRC_LIMIT_MAX UINT16_C(256)
@@ -65,6 +73,14 @@ struct packet {
 	struct network_header network_header;
 	struct transport_header transport_header;
 };
+
+// Declared transport protocol of a packet: the protocol number from the IP
+// header, meaningful even when the transport header itself is unavailable
+// inside a non-initial fragment.
+static inline uint8_t
+packet_transport_protocol(const struct packet *packet) {
+	return (uint8_t)(packet->transport_header.type & UINT8_C(0xff));
+}
 
 // Initialize a packet lineage's redirect credits once. Lazy because packets
 // enter a pipeline before its module execution context supplies the configured

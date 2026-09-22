@@ -150,8 +150,9 @@ func (packet *Packet) Next() *Packet {
 
 // fragmentMetadata reports how the parser classified the packet: whether it
 // carries real fragmentation, the fragment offset in the header's own units
-// (IPv4: eight-byte blocks, IPv6: a byte offset), whether a usable transport
-// header was recorded, and the packet hash.
+// (IPv4: eight-byte blocks, IPv6: a byte offset), the transport type — the
+// declared protocol with an unavailable-header tag for non-initial
+// fragments — and the packet hash.
 //
 // It lives here because cgo is unavailable in _test.go files, and lets tests
 // pin the parser's fragment contract through the CGO boundary without
