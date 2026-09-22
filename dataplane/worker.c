@@ -324,7 +324,7 @@ worker_loop_round(struct dataplane_worker *worker) {
 	worker_process_staged(worker, config_gen_ectx);
 
 	worker_pipeline_round(
-		worker->dp_worker, cp_config_gen, config_gen_ectx, packet_front
+		worker->dp_worker, cp_config_gen, config_gen_ectx
 	);
 
 	// Poll the next batch and warm its lines just before the transmit:

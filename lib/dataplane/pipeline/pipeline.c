@@ -187,10 +187,16 @@ module_ectx_resolve_absolutes(struct module_ectx *module_ectx) {
 }
 
 static void
-chain_ectx_resolve_absolutes(struct chain_ectx *chain_ectx) {
+chain_ectx_resolve_absolutes(
+	struct chain_ectx *chain_ectx, struct config_gen_ectx *config_gen_ectx
+) {
 	struct cp_chain *cp_chain = ADDR_OF(&chain_ectx->cp_chain);
 	struct counter_storage *counter_storage =
 		ADDR_OF(&chain_ectx->counter_storage);
+
+	// Finished chain drop lists bypass the per-stage merges and land
+	// directly in the final drop list of this worker's round.
+	chain_ectx->abs_drop_sink = &config_gen_ectx->packet_front.drop;
 
 	chain_ectx->abs_counter_packet_pending_input = counter_get_value_handle(
 		cp_chain->counter_packet_pending_input, counter_storage
@@ -209,7 +215,10 @@ chain_ectx_resolve_absolutes(struct chain_ectx *chain_ectx) {
 }
 
 static void
-function_ectx_resolve_absolutes(struct function_ectx *function_ectx) {
+function_ectx_resolve_absolutes(
+	struct function_ectx *function_ectx,
+	struct config_gen_ectx *config_gen_ectx
+) {
 	struct cp_function *cp_function = ADDR_OF(&function_ectx->cp_function);
 	struct counter_storage *counter_storage =
 		ADDR_OF(&function_ectx->counter_storage);
@@ -239,7 +248,7 @@ function_ectx_resolve_absolutes(struct function_ectx *function_ectx) {
 	function_ectx->abs_chains = chains;
 	for (uint64_t idx = 0; idx < function_ectx->chain_count; ++idx) {
 		chains[idx] = ADDR_OF(chain_ptrs + idx);
-		chain_ectx_resolve_absolutes(chains[idx]);
+		chain_ectx_resolve_absolutes(chains[idx], config_gen_ectx);
 	}
 
 	// Recode the chain map to absolute addresses in place.
@@ -261,7 +270,10 @@ function_ectx_resolve_absolutes(struct function_ectx *function_ectx) {
 }
 
 static void
-pipeline_ectx_resolve_absolutes(struct pipeline_ectx *pipeline_ectx) {
+pipeline_ectx_resolve_absolutes(
+	struct pipeline_ectx *pipeline_ectx,
+	struct config_gen_ectx *config_gen_ectx
+) {
 	struct cp_pipeline *cp_pipeline = ADDR_OF(&pipeline_ectx->cp_pipeline);
 	struct counter_storage *counter_storage =
 		ADDR_OF(&pipeline_ectx->counter_storage);
@@ -290,7 +302,9 @@ pipeline_ectx_resolve_absolutes(struct pipeline_ectx *pipeline_ectx) {
 		ADDR_OF(&pipeline_ectx->function_ptrs);
 	for (uint64_t idx = 0; idx < pipeline_ectx->length; ++idx) {
 		pipeline_ectx->functions[idx] = ADDR_OF(function_ptrs + idx);
-		function_ectx_resolve_absolutes(pipeline_ectx->functions[idx]);
+		function_ectx_resolve_absolutes(
+			pipeline_ectx->functions[idx], config_gen_ectx
+		);
 	}
 }
 
@@ -298,7 +312,8 @@ static void
 device_entry_ectx_resolve_absolutes(
 	struct device_entry_ectx *entry_ectx,
 	struct cp_device_entry *cp_device_entry,
-	struct counter_storage *counter_storage
+	struct counter_storage *counter_storage,
+	struct config_gen_ectx *config_gen_ectx
 ) {
 	entry_ectx->counter_packet_rx = counter_get_value_handle(
 		cp_device_entry->counter_packet_rx, counter_storage
@@ -329,7 +344,9 @@ device_entry_ectx_resolve_absolutes(
 	entry_ectx->abs_pipelines = pipelines;
 	for (uint64_t idx = 0; idx < entry_ectx->pipeline_count; ++idx) {
 		pipelines[idx] = ADDR_OF(pipeline_ptrs + idx);
-		pipeline_ectx_resolve_absolutes(pipelines[idx]);
+		pipeline_ectx_resolve_absolutes(
+			pipelines[idx], config_gen_ectx
+		);
 	}
 
 	// Recode the pipeline map to absolute addresses in place.
@@ -394,7 +411,8 @@ config_gen_ectx_resolve_counters(struct config_gen_ectx *config_gen_ectx) {
 			device_entry_ectx_resolve_absolutes(
 				input,
 				ADDR_OF(&cp_device->input_pipelines),
-				counter_storage
+				counter_storage,
+				config_gen_ectx
 			);
 		}
 
@@ -405,7 +423,8 @@ config_gen_ectx_resolve_counters(struct config_gen_ectx *config_gen_ectx) {
 			device_entry_ectx_resolve_absolutes(
 				output,
 				ADDR_OF(&cp_device->output_pipelines),
-				counter_storage
+				counter_storage,
+				config_gen_ectx
 			);
 		}
 	}
@@ -433,6 +452,12 @@ chain_ectx_process(
 			dp_worker, chain_ectx->modules[idx], packet_front
 		);
 	}
+
+	// A finished drop list is terminal: splice it straight into the
+	// final drop list of the round and leave only the drop counters on
+	// this front, so the merges upward account the drops without
+	// carrying the packets.
+	packet_list_concat(chain_ectx->abs_drop_sink, &packet_front->drop);
 
 	counter_add_packets_bytes(
 		chain_ectx->abs_counter_packet_pending_input,
