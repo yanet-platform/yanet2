@@ -613,9 +613,6 @@ dataplane_ut_run(
 	struct cp_config_gen *cp_config_gen = round.cp_config_gen;
 	struct config_gen_ectx *config_gen_ectx = round.config_gen_ectx;
 
-	struct packet_front packet_front;
-	packet_front_init(&packet_front);
-
 	packet_list_init(&result->output);
 	packet_list_init(&result->drop);
 
@@ -625,10 +622,17 @@ dataplane_ut_run(
 		while ((packet = packet_list_pop(input)) != NULL) {
 			packet_list_add(&result->drop, packet);
 		}
-		pthread_mutex_unlock(dp_config_external_round_lock(ut->dp_config
-		));
+		pthread_mutex_unlock(
+			dp_config_external_round_lock(ut->dp_config)
+		);
 		return;
 	}
+
+	// The round runs on the generation context's scratch front, exactly
+	// like the worker loop: the finished chain drop lists are spliced
+	// into its drop list directly, so the result must be drained out of
+	// that front and the front reset for the next round.
+	struct packet_front *packet_front = &config_gen_ectx->packet_front;
 
 	// Feed input straight onto each packet's target device input entry,
 	// the same way the worker deposits its staged RX batch into the
@@ -639,7 +643,7 @@ dataplane_ut_run(
 			config_gen_ectx, packet->tx_device_id
 		);
 		if (device_ectx == NULL) {
-			packet_front_drop(&packet_front, packet);
+			packet_front_drop(packet_front, packet);
 			continue;
 		}
 		device_entry_ectx_schedule(
@@ -649,12 +653,11 @@ dataplane_ut_run(
 		);
 	}
 
-	worker_pipeline_round(
-		dp_worker, cp_config_gen, config_gen_ectx, &packet_front
-	);
+	worker_pipeline_round(dp_worker, cp_config_gen, config_gen_ectx);
 
-	packet_list_concat(&result->output, &packet_front.output);
-	packet_list_concat(&result->drop, &packet_front.drop);
+	packet_list_concat(&result->output, &packet_front->output);
+	packet_list_concat(&result->drop, &packet_front->drop);
+	packet_front_init(packet_front);
 
 	pthread_mutex_unlock(dp_config_external_round_lock(ut->dp_config));
 }

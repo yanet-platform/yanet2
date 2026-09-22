@@ -201,6 +201,14 @@ struct chain_ectx {
 	struct module_ectx **module_ptrs;
 	uint64_t length;
 	struct packet_front schedule;
+	// The final drop list of the owning worker's round, as an absolute
+	// address for the packet hot path.
+	//
+	// The publishing process derives it from the worker's generation
+	// context before the context is released to workers; it is zero
+	// until then. Finished chain drop lists are spliced straight there,
+	// so the packets never travel the per-stage front merges upward.
+	struct packet_list *abs_drop_sink;
 	// Absolute addresses of the chain's module contexts.
 	//
 	// The publishing process copies them from the module_ptrs array
@@ -436,7 +444,10 @@ struct config_gen_ectx {
 	//
 	// Initialized once when the ectx is created and left clean at the
 	// end of every worker round, so the worker loop reuses it in place
-	// instead of reinitializing a fresh front on each iteration.
+	// instead of reinitializing a fresh front on each iteration. The
+	// drop list doubles as the round's final drop list: finished chain
+	// drop lists are spliced into it directly, bypassing the per-stage
+	// front merges.
 	struct packet_front packet_front;
 
 	// The device-entry home list.
