@@ -504,9 +504,11 @@ function_ectx_run_chains(
 	struct function_ectx *function_ectx,
 	struct packet_front *packet_front
 ) {
+	uint64_t map_size = function_ectx->chain_map_size;
+
 	struct packet *packet = packet_list_pop(&packet_front->output);
 	while (packet != NULL) {
-		uint64_t map_idx = packet->hash % function_ectx->chain_map_size;
+		uint64_t map_idx = ((uint64_t)packet->hash * map_size) >> 32;
 
 		struct chain_ectx *chain_ectx =
 			function_ectx->chain_map[map_idx];
@@ -686,11 +688,13 @@ device_entry_ectx_dispatch_many(
 ) {
 	struct pipeline_ectx **pipelines = entry_ectx->abs_pipelines;
 
+	struct pipeline_ectx **pipeline_map = entry_ectx->pipeline_map;
+	uint64_t map_size = entry_ectx->pipeline_map_size;
+
 	struct packet *packet = packet_list_pop(&packet_front->output);
 	while (packet != NULL) {
-		struct pipeline_ectx *pipeline_ectx =
-			entry_ectx->pipeline_map
-				[packet->hash % entry_ectx->pipeline_map_size];
+		uint64_t map_idx = ((uint64_t)packet->hash * map_size) >> 32;
+		struct pipeline_ectx *pipeline_ectx = pipeline_map[map_idx];
 		packet_front_output(&pipeline_ectx->schedule, packet);
 
 		packet = packet_list_pop(&packet_front->output);
@@ -715,7 +719,7 @@ device_entry_ectx_dispatch_many(
 // zero-weight, they are still scheduled on now-empty fronts so the worker keeps
 // force-polling every module once per tick for periodic work; reusing the demux
 // is safe once the output list is empty, since its per-packet loop never runs
-// and the modulo by the zero pipeline-map size is never reached. An entry with
+// and the zero-sized pipeline map is never indexed. An entry with
 // no pipelines at all has nothing to poll, so the demux — which would size a
 // zero-length scheduling array — is skipped.
 static inline void
