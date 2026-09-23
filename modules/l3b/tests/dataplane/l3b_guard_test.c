@@ -184,8 +184,9 @@ int
 main(void) {
 	log_enable_name("info");
 
-	// This test exercises the in-place readers only; the query declares
-	// carried in by process.h stay unreferenced by design.
+	// The in-place readers under test do not reference the filter
+	// queries declared alongside them; these casts keep the unused
+	// declarations from failing the build.
 	(void)l3b_source_filter_ip4;
 	(void)l3b_source_filter_ip6;
 	(void)l3b_destination_filter_ip4;
