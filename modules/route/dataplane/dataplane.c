@@ -240,8 +240,12 @@ route_handle_packets(
 
 		// TODO: Route selection should be based on hash/NUMA/dp
 		// instance/etc
+		//
+		// The high word of the 32-bit packet hash scaled by the list
+		// size spreads the hash uniformly over the list.
 		uint64_t route_index = ADDR_OF(&fib->route_indexes
-		)[route_list->start + packet->hash % route_list->count];
+		)[route_list->start +
+		  (((uint64_t)packet->hash * route_list->count) >> 32)];
 
 		struct route *route = ADDR_OF(&fib->routes) + route_index;
 

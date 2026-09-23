@@ -564,15 +564,16 @@ func TestRoute_NonIP_Drop(t *testing.T) {
 // TestRoute_ECMP_HashSelection verifies ECMP nexthop selection based on
 // per-packet hash values.
 //
-// Two nexthops share one prefix. Packets with hash=0 select slot 0 (hop0)
-// and packets with hash=1 select slot 1 (hop1), because the route module
-// picks route_list[packet->hash % count].
+// Two nexthops share one prefix. The route module scales the 32-bit packet
+// hash by the nexthop count and takes the high word of the product, so a
+// hash in the lower half of the 32-bit space selects hop0 and a hash in
+// the upper half selects hop1.
 func TestRoute_ECMP_HashSelection(t *testing.T) {
 	const (
-		// hashForFirstHop selects route_list[0 % 2] = hop0.
+		// hashForFirstHop has the high bit clear: (0 * 2) >> 32 = 0.
 		hashForFirstHop uint32 = 0
-		// hashForSecondHop selects route_list[1 % 2] = hop1.
-		hashForSecondHop uint32 = 1
+		// hashForSecondHop has the high bit set: (0x80000000 * 2) >> 32 = 1.
+		hashForSecondHop uint32 = 0x80000000
 	)
 
 	hop0 := FIBNexthop{
@@ -652,7 +653,8 @@ func TestRoute_ECMP_HashSelection(t *testing.T) {
 	require.NoError(t, err)
 
 	// Build four identical packets and inject explicit hashes: two packets
-	// with hash=0 must hit hop0 and two with hash=1 must hit hop1.
+	// with a lower-half hash must hit hop0 and two with an upper-half hash
+	// must hit hop1.
 	eth, ip4, _, icmp := testingEtherLayers()
 	pkt := xpacket.LayersToPacket(t, &eth, &ip4, &icmp)
 	hashes := []uint32{hashForFirstHop, hashForSecondHop, hashForFirstHop, hashForSecondHop}
@@ -675,8 +677,8 @@ func TestRoute_ECMP_HashSelection(t *testing.T) {
 		}
 	}
 	t.Logf("ECMP distribution: hop0=%d hop1=%d", hop0Count, hop1Count)
-	require.Equal(t, 2, hop0Count, "hop0 must be selected for hash=0 packets")
-	require.Equal(t, 2, hop1Count, "hop1 must be selected for hash=1 packets")
+	require.Equal(t, 2, hop0Count, "hop0 must be selected for lower-half hashes")
+	require.Equal(t, 2, hop1Count, "hop1 must be selected for upper-half hashes")
 }
 
 // TestRoute_Counters verifies that the pipeline increments per-direction packet
