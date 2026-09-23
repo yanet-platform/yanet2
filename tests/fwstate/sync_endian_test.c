@@ -394,6 +394,42 @@ test_udp_sync_frame_ports(void) {
 	printf("  UDP sync frame port endianness: PASSED\n");
 }
 
+/*
+ * Verifies that crafting refuses a packet whose transport header is marked
+ * unavailable: no sync frame may be fabricated from fragment payload bytes,
+ * and the output mbuf must stay untouched.
+ */
+static void
+test_craft_refuses_unavailable_header(void) {
+	printf("\n--- Craft Refuses Unavailable Transport Header ---\n");
+
+	struct packet src_pkt = {};
+	int rc = build_test_packet(
+		&src_pkt, IPPROTO_UDP, TEST_SRC_PORT, TEST_DST_PORT
+	);
+	assert(rc == 0);
+	src_pkt.transport_header.type |= PACKET_TRANSPORT_HEADER_UNAVAILABLE;
+
+	struct rte_mbuf *sync_mbuf = rte_pktmbuf_alloc(test_pool);
+	assert(sync_mbuf != NULL);
+	struct packet sync_pkt = {.mbuf = sync_mbuf};
+	uint16_t pkt_len_before = sync_mbuf->pkt_len;
+	uint16_t data_len_before = sync_mbuf->data_len;
+
+	rc = fwstate_craft_state_sync_packet(&src_pkt, SYNC_INGRESS, &sync_pkt);
+	assert(rc == -1 &&
+	       "crafting must refuse a packet without a transport header");
+	assert(sync_mbuf->pkt_len == pkt_len_before &&
+	       "refused crafting must leave the output mbuf untouched");
+	assert(sync_mbuf->data_len == data_len_before &&
+	       "refused crafting must leave the output mbuf untouched");
+
+	rte_pktmbuf_free(src_pkt.mbuf);
+	rte_pktmbuf_free(sync_mbuf);
+
+	printf("  Craft refusal for unavailable transport header: PASSED\n");
+}
+
 int
 main(void) {
 	printf("=== Sync Frame Endianness Test ===\n");
@@ -411,6 +447,8 @@ main(void) {
 
 	/* UDP test (will fail if endianness bug is present) */
 	test_udp_sync_frame_ports();
+
+	test_craft_refuses_unavailable_header();
 
 	printf("\n=== All sync frame endianness tests PASSED ===\n");
 	return EXIT_SUCCESS;

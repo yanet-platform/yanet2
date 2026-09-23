@@ -221,12 +221,221 @@ run_ip6_case(
 }
 
 static int
-assert_decap_failure_preserves_recirc(struct packet *packet);
+assert_decap_failure_preserves_recirc(struct packet *packet) {
+	packet->recirc_remaining = 57;
+	packet->recirc_initialized = 1;
+	int rc = packet_decap(packet);
+	TEST_ASSERT_EQUAL(rc, -1, "rc");
+	TEST_ASSERT_EQUAL(
+		packet->recirc_remaining,
+		57,
+		"failed decap preserves remaining recirculation budget"
+	);
+	TEST_ASSERT_EQUAL(
+		packet->recirc_initialized,
+		1,
+		"failed decap preserves recirculation initialization state"
+	);
+	return TEST_SUCCESS;
+}
 
-// Verifies that a non-initial fragment is not decapsulated as a tunnel: its
-// transport position holds flow payload, not a tunnel header.
+// Writes an unfragmented inner IPv4 header carrying a UDP-sized payload and
+// returns the position after it, so the encapsulated frame parses as a
+// complete inner datagram when the fragmentation guard lets decap proceed.
+static uint8_t *
+write_inner_ip4(uint8_t *at) {
+	struct rte_ipv4_hdr *inner = (struct rte_ipv4_hdr *)at;
+	inner->version_ihl = 0x45;
+	inner->total_length = rte_cpu_to_be_16(sizeof(*inner) + PAYLOAD_LEN);
+	inner->fragment_offset = 0;
+	inner->time_to_live = TTL;
+	inner->next_proto_id = IPPROTO_UDP;
+	memcpy(&inner->src_addr, src4, NET4_LEN);
+	memcpy(&inner->dst_addr, dst4, NET4_LEN);
+	inner->hdr_checksum = 0;
+	inner->hdr_checksum = rte_ipv4_cksum(inner);
+	return (uint8_t *)(inner + 1);
+}
+
+// Builds eth + IPv4 with the given next-protocol and raw fragment field,
+// followed by a minimal GRE header when the protocol is GRE and a complete
+// unfragmented IPv4 datagram, so decap would fully succeed on a well-formed
+// frame whenever a guard does not stop it first.
 static int
-test_ip4_noninitial_decap_rejected(void);
+build_ip4_tunnel_fragment(
+	struct packet *p, uint8_t outer_proto, uint16_t fragment_field_raw
+) {
+	uint16_t gre_len =
+		outer_proto == IPPROTO_GRE ? sizeof(struct rte_gre_hdr) : 0;
+	uint16_t inner_len = sizeof(struct rte_ipv4_hdr) + PAYLOAD_LEN;
+	uint16_t pkt_len = sizeof(struct rte_ether_hdr) +
+			   sizeof(struct rte_ipv4_hdr) + gre_len + inner_len;
+	memset(p, 0, sizeof(*p));
+	// No tailroom: any read past the declared frame length must not be
+	// silently absorbed by spare buffer space.
+	p->mbuf = alloc_mbuf(DEFAULT_HEADROOM, pkt_len, 0);
+	if (p->mbuf == NULL) {
+		return -1;
+	}
+
+	struct rte_ether_hdr *eth =
+		rte_pktmbuf_mtod(p->mbuf, struct rte_ether_hdr *);
+	eth->ether_type = rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV4);
+
+	struct rte_ipv4_hdr *outer = (struct rte_ipv4_hdr *)(eth + 1);
+	outer->version_ihl = 0x45;
+	outer->total_length =
+		rte_cpu_to_be_16(sizeof(*outer) + gre_len + inner_len);
+	outer->fragment_offset = rte_cpu_to_be_16(fragment_field_raw);
+	outer->time_to_live = TTL;
+	outer->next_proto_id = outer_proto;
+	memcpy(&outer->src_addr, outer_src4, NET4_LEN);
+	memcpy(&outer->dst_addr, outer_dst4, NET4_LEN);
+	outer->hdr_checksum = 0;
+	outer->hdr_checksum = rte_ipv4_cksum(outer);
+
+	uint8_t *inner = (uint8_t *)(outer + 1);
+	if (gre_len != 0) {
+		struct rte_gre_hdr *gre = (struct rte_gre_hdr *)inner;
+		gre->proto = rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV4);
+		inner += sizeof(*gre);
+	}
+	write_inner_ip4(inner);
+
+	return parse_packet(p);
+}
+
+// Verifies that an initial outer fragment, More Fragments set with offset
+// zero, declaring a GRE tunnel is refused: the tunnel header lives in the
+// fragment payload and the inner datagram it begins is incomplete.
+static int
+test_ip4_fragmented_outer_gre_refused(void) {
+	struct packet p;
+	TEST_ASSERT_SUCCESS(
+		build_ip4_tunnel_fragment(
+			&p, IPPROTO_GRE, RTE_IPV4_HDR_MF_FLAG
+		),
+		"build"
+	);
+	TEST_ASSERT_SUCCESS(
+		assert_decap_failure_preserves_recirc(&p),
+		"decap on fragmented outer"
+	);
+	free_packet(&p);
+	return TEST_SUCCESS;
+}
+
+// Verifies that an initial outer fragment declaring IPv4-in-IPv4 directly is
+// refused for the same reason as a GRE tunnel, without passing through the
+// GRE helper first.
+static int
+test_ip4_fragmented_outer_ipip_refused(void) {
+	struct packet p;
+	TEST_ASSERT_SUCCESS(
+		build_ip4_tunnel_fragment(
+			&p, IPPROTO_IPIP, RTE_IPV4_HDR_MF_FLAG
+		),
+		"build"
+	);
+	TEST_ASSERT_SUCCESS(
+		assert_decap_failure_preserves_recirc(&p),
+		"decap on fragmented outer"
+	);
+	free_packet(&p);
+	return TEST_SUCCESS;
+}
+
+// Verifies that a non-initial fragment declaring a supported GRE tunnel is
+// refused and keeps its declared protocol under the unavailable-header tag,
+// so refusal is not confused with the unknown-tunnel branch.
+static int
+test_ip4_noninitial_gre_outer_refused(void) {
+	struct packet p;
+	TEST_ASSERT_SUCCESS(
+		build_ip4_tunnel_fragment(&p, IPPROTO_GRE, 185), "build"
+	);
+	TEST_ASSERT_EQUAL(
+		p.transport_header.type,
+		IPPROTO_GRE | PACKET_TRANSPORT_HEADER_UNAVAILABLE,
+		"transport type"
+	);
+	TEST_ASSERT_SUCCESS(
+		assert_decap_failure_preserves_recirc(&p),
+		"decap on non-initial fragment"
+	);
+	free_packet(&p);
+	return TEST_SUCCESS;
+}
+
+// Builds eth + IPv6 with Hop-by-Hop and Fragment extensions, the latter
+// marking an initial fragment, followed by a minimal GRE header and a
+// complete unfragmented IPv4 datagram.
+//
+// An initial fragment keeps extension traversal running past the Fragment
+// header, so the parser names GRE as the transport and only a
+// fragmented-outer guard can stop decap.
+static int
+build_ip6_fragmented_gre_outer(struct packet *p) {
+	uint16_t hbh_len = 8;
+	uint16_t frag_len = sizeof(struct yanet_ipv6_ext_fragment);
+	uint16_t gre_len = sizeof(struct rte_gre_hdr);
+	uint16_t inner_len = sizeof(struct rte_ipv4_hdr) + PAYLOAD_LEN;
+	uint16_t total_payload = hbh_len + frag_len + gre_len + inner_len;
+	uint16_t pkt_len = sizeof(struct rte_ether_hdr) +
+			   sizeof(struct rte_ipv6_hdr) + total_payload;
+	memset(p, 0, sizeof(*p));
+	p->mbuf = alloc_mbuf(DEFAULT_HEADROOM, pkt_len, 0);
+	if (p->mbuf == NULL) {
+		return -1;
+	}
+
+	struct rte_ether_hdr *eth =
+		rte_pktmbuf_mtod(p->mbuf, struct rte_ether_hdr *);
+	eth->ether_type = rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV6);
+
+	struct rte_ipv6_hdr *ip6 = (struct rte_ipv6_hdr *)(eth + 1);
+	ip6->vtc_flow = rte_cpu_to_be_32(0x6u << 28);
+	ip6->payload_len = rte_cpu_to_be_16(total_payload);
+	ip6->proto = IPPROTO_HOPOPTS;
+	ip6->hop_limits = TTL;
+	memcpy(ip6->src_addr, src6, NET6_LEN);
+	memcpy(ip6->dst_addr, dst6, NET6_LEN);
+
+	uint8_t *hbh = (uint8_t *)(ip6 + 1);
+	memset(hbh, 0, hbh_len);
+	hbh[0] = IPPROTO_FRAGMENT;
+
+	struct yanet_ipv6_ext_fragment *frag =
+		(struct yanet_ipv6_ext_fragment *)(hbh + hbh_len);
+	frag->next_header = IPPROTO_GRE;
+	frag->reserved = 0;
+	frag->offset_flag = rte_cpu_to_be_16(RTE_IPV6_EHDR_MF_MASK);
+	frag->identification = rte_cpu_to_be_32(0xdeadbeef);
+
+	struct rte_gre_hdr *gre = (struct rte_gre_hdr *)(frag + 1);
+	gre->proto = rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV4);
+	write_inner_ip4((uint8_t *)(gre + 1));
+
+	return parse_packet(p);
+}
+
+// Verifies that an initial fragment behind Hop-by-Hop and Fragment extensions
+// declaring GRE is refused like a direct one: the fragmented-outer guard must
+// apply wherever the Fragment extension sits in the chain.
+static int
+test_ip6_fragmented_outer_gre_refused(void) {
+	struct packet p;
+	TEST_ASSERT_SUCCESS(build_ip6_fragmented_gre_outer(&p), "build");
+	TEST_ASSERT_EQUAL(
+		p.transport_header.type, IPPROTO_GRE, "transport type"
+	);
+	TEST_ASSERT_SUCCESS(
+		assert_decap_failure_preserves_recirc(&p),
+		"decap on fragmented outer"
+	);
+	free_packet(&p);
+	return TEST_SUCCESS;
+}
 
 // Verifies that an IPv4 packet with an empty fragment field is not fragmented.
 static int
@@ -321,20 +530,6 @@ test_ip4_noninitial_hash_payload_independent(void) {
 	free_packet(&first);
 	free_packet(&second);
 	free_packet(&third);
-	return TEST_SUCCESS;
-}
-
-// Verifies that a non-initial fragment is not decapsulated as a tunnel: its
-// transport position holds flow payload, not a tunnel header.
-static int
-test_ip4_noninitial_decap_rejected(void) {
-	struct packet p;
-	TEST_ASSERT_SUCCESS(build_ip4(&p, 185), "build");
-	TEST_ASSERT_SUCCESS(
-		assert_decap_failure_preserves_recirc(&p),
-		"decap on non-initial fragment"
-	);
-	free_packet(&p);
 	return TEST_SUCCESS;
 }
 
@@ -601,21 +796,138 @@ run_gre_accepted_case(bool inner_v6, uint16_t expect_ether_type) {
 	return TEST_SUCCESS;
 }
 
+// Builds eth + IPv4 carrying a minimal GRE header and an inner IPv4 packet
+// declaring the given transport protocol with a header shorter than the
+// bytes its length field promises, so only the inner IP header itself is
+// fully present.
 static int
-assert_decap_failure_preserves_recirc(struct packet *packet) {
-	packet->recirc_remaining = 57;
-	packet->recirc_initialized = 1;
-	TEST_ASSERT_EQUAL(packet_decap(packet), -1, "rc");
-	TEST_ASSERT_EQUAL(
-		packet->recirc_remaining,
-		57,
-		"failed decap preserves remaining recirculation budget"
+build_gre_inner_truncated_transport(struct packet *p, uint8_t inner_proto) {
+	uint16_t gre_size = sizeof(struct rte_gre_hdr);
+	uint16_t inner_transport = 2;
+	uint16_t inner_pkt_len = sizeof(struct rte_ipv4_hdr) + inner_transport;
+	uint16_t pkt_len = sizeof(struct rte_ether_hdr) +
+			   sizeof(struct rte_ipv4_hdr) + gre_size +
+			   inner_pkt_len;
+	memset(p, 0, sizeof(*p));
+	p->mbuf = alloc_mbuf(DEFAULT_HEADROOM, pkt_len, 0);
+	if (p->mbuf == NULL) {
+		return -1;
+	}
+
+	struct rte_ether_hdr *eth =
+		rte_pktmbuf_mtod(p->mbuf, struct rte_ether_hdr *);
+	eth->ether_type = rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV4);
+
+	struct rte_ipv4_hdr *outer = (struct rte_ipv4_hdr *)(eth + 1);
+	outer->version_ihl = 0x45;
+	outer->total_length =
+		rte_cpu_to_be_16(sizeof(*outer) + gre_size + inner_pkt_len);
+	outer->time_to_live = TTL;
+	outer->next_proto_id = IPPROTO_GRE;
+	memcpy(&outer->src_addr, outer_src4, NET4_LEN);
+	memcpy(&outer->dst_addr, outer_dst4, NET4_LEN);
+	outer->hdr_checksum = 0;
+	outer->hdr_checksum = rte_ipv4_cksum(outer);
+
+	struct rte_gre_hdr *gre = (struct rte_gre_hdr *)(outer + 1);
+	gre->proto = rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV4);
+
+	struct rte_ipv4_hdr *inner = (struct rte_ipv4_hdr *)(gre + 1);
+	inner->version_ihl = 0x45;
+	inner->total_length = rte_cpu_to_be_16(inner_pkt_len);
+	inner->time_to_live = TTL;
+	inner->next_proto_id = inner_proto;
+	memcpy(&inner->src_addr, src4, NET4_LEN);
+	memcpy(&inner->dst_addr, dst4, NET4_LEN);
+	inner->hdr_checksum = 0;
+	inner->hdr_checksum = rte_ipv4_cksum(inner);
+
+	return parse_packet(p);
+}
+
+// Verifies that a GRE header carrying the key-present bit is rejected: the
+// optional fields inflate the header size the mask computes, so decap would
+// parse an inner packet starting four bytes past the real one, over bytes
+// that belong to the inner Ethernet and IPv4 headers.
+static int
+test_gre_reject_optional_fields(void) {
+	struct packet p;
+	TEST_ASSERT_SUCCESS(build_gre_encapped(&p, false), "build");
+	pkt_gre(&p)->k = 1;
+	TEST_ASSERT_SUCCESS(
+		assert_decap_failure_preserves_recirc(&p),
+		"decap on key-present GRE header"
 	);
-	TEST_ASSERT_EQUAL(
-		packet->recirc_initialized,
-		1,
-		"failed decap preserves recirculation initialization state"
+	free_packet(&p);
+	return TEST_SUCCESS;
+}
+
+// Verifies that a decapsulation whose inner packet declares a TCP or UDP
+// header shorter than the bytes present is refused: the direct parse path
+// validates transport length, and port or flag readers below decap would
+// read past the packet.
+static int
+test_gre_inner_truncated_transport_refused(void) {
+	const uint8_t inner_protos[2] = {IPPROTO_TCP, IPPROTO_UDP};
+	for (size_t i = 0; i < 2; i++) {
+		struct packet p;
+		TEST_ASSERT_SUCCESS(
+			build_gre_inner_truncated_transport(
+				&p, inner_protos[i]
+			),
+			"build"
+		);
+		TEST_ASSERT_SUCCESS(
+			assert_decap_failure_preserves_recirc(&p),
+			"decap on truncated inner transport"
+		);
+		free_packet(&p);
+	}
+	return TEST_SUCCESS;
+}
+
+// Builds eth + IPv4 declaring GRE with a transport region shorter than the
+// four-byte GRE header, unfragmented, so only the length guard stands
+// between decap and a read past the frame.
+static int
+build_gre_outer_truncated(struct packet *p, uint16_t transport_bytes) {
+	uint16_t pkt_len = sizeof(struct rte_ether_hdr) +
+			   sizeof(struct rte_ipv4_hdr) + transport_bytes;
+	memset(p, 0, sizeof(*p));
+	p->mbuf = alloc_mbuf(DEFAULT_HEADROOM, pkt_len, 0);
+	if (p->mbuf == NULL) {
+		return -1;
+	}
+
+	struct rte_ether_hdr *eth =
+		rte_pktmbuf_mtod(p->mbuf, struct rte_ether_hdr *);
+	eth->ether_type = rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV4);
+
+	struct rte_ipv4_hdr *outer = (struct rte_ipv4_hdr *)(eth + 1);
+	outer->version_ihl = 0x45;
+	outer->total_length =
+		rte_cpu_to_be_16(sizeof(*outer) + transport_bytes);
+	outer->time_to_live = TTL;
+	outer->next_proto_id = IPPROTO_GRE;
+	memcpy(&outer->src_addr, outer_src4, NET4_LEN);
+	memcpy(&outer->dst_addr, outer_dst4, NET4_LEN);
+	outer->hdr_checksum = 0;
+	outer->hdr_checksum = rte_ipv4_cksum(outer);
+
+	return parse_packet(p);
+}
+
+// Verifies that an unfragmented frame declaring GRE with a truncated GRE
+// header is refused instead of reading the header from beyond the frame.
+static int
+test_gre_outer_truncated_refused(void) {
+	struct packet p;
+	TEST_ASSERT_SUCCESS(build_gre_outer_truncated(&p, 2), "build");
+	TEST_ASSERT_SUCCESS(
+		assert_decap_failure_preserves_recirc(&p),
+		"decap on truncated GRE header"
 	);
+	free_packet(&p);
 	return TEST_SUCCESS;
 }
 
@@ -771,7 +1083,14 @@ main(void) {
 		{"ip4_short_noninitial", test_ip4_short_noninitial_parses},
 		{"ip4_noninitial_hash",
 		 test_ip4_noninitial_hash_payload_independent},
-		{"ip4_noninitial_decap", test_ip4_noninitial_decap_rejected},
+		{"ip4_fragmented_outer_gre",
+		 test_ip4_fragmented_outer_gre_refused},
+		{"ip4_fragmented_outer_ipip",
+		 test_ip4_fragmented_outer_ipip_refused},
+		{"ip4_noninitial_gre_outer",
+		 test_ip4_noninitial_gre_outer_refused},
+		{"ip6_fragmented_outer_gre",
+		 test_ip6_fragmented_outer_gre_refused},
 		{"ip6_no_extension", test_ip6_no_extension},
 		{"ip6_mf_only", test_ip6_mf_only},
 		{"ip6_offset_only", test_ip6_offset_only},
@@ -790,8 +1109,12 @@ main(void) {
 		{"gre_reject_res1", test_gre_reject_res1},
 		{"gre_reject_res2", test_gre_reject_res2},
 		{"gre_reject_res3", test_gre_reject_res3},
+		{"gre_reject_optional_fields", test_gre_reject_optional_fields},
+		{"gre_outer_truncated", test_gre_outer_truncated_refused},
 		{"gre_inner_noninitial_fragment",
 		 test_gre_inner_noninitial_fragment},
+		{"gre_inner_truncated_transport",
+		 test_gre_inner_truncated_transport_refused},
 	};
 
 	size_t total = sizeof(tests) / sizeof(tests[0]);

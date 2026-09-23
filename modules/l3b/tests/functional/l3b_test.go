@@ -146,6 +146,41 @@ func wirePipeline(
 	require.NoError(t, err)
 }
 
+// TestL3b_ForwardsShortIcmpPackets verifies that an ICMP packet whose
+// transport region holds no bytes at all passes through the module
+// unchanged: the type byte cannot be read, so the packet is not eligible
+// for load balancing, and nothing reads beyond the frame.
+func TestL3b_ForwardsShortIcmpPackets(t *testing.T) {
+	h, agent := setupL3bHarness(t, "port0", "test")
+	wirePipeline(t, agent, "port0", "test")
+
+	eth := layers.Ethernet{
+		SrcMAC:       xerror.Unwrap(net.ParseMAC("aa:bb:cc:dd:ee:ff")),
+		DstMAC:       xerror.Unwrap(net.ParseMAC("11:22:33:44:55:66")),
+		EthernetType: layers.EthernetTypeIPv4,
+	}
+	ip4 := layers.IPv4{
+		Version:  4,
+		TTL:      64,
+		Protocol: layers.IPProtocolICMPv4,
+		SrcIP:    net.ParseIP("10.0.0.1"),
+		DstIP:    net.ParseIP("192.168.1.1"),
+	}
+
+	packetCount := 3
+	pkt := xpacket.LayersToPacket(t, &eth, &ip4)
+	packets := make([]gopacket.Packet, 0, packetCount)
+	for range packetCount {
+		packets = append(packets, pkt)
+	}
+
+	result, err := h.HandlePackets(packets...)
+	require.NoError(t, err)
+	require.Len(t, result.Output, packetCount,
+		"a headerless ICMP packet is not eligible and must pass through")
+	require.Empty(t, result.Drop)
+}
+
 // TestL3b_ForwardsNonTcpUdpPackets verifies that packets which are neither
 // TCP nor UDP (here ICMPv4) pass through the module unchanged: they are not
 // eligible for load balancing and reach the output via the sink.

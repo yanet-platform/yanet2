@@ -4,6 +4,7 @@
 #include "declare.h"
 #include "lib/dataplane/packet/packet.h"
 
+#include <stddef.h>
 #include <stdint.h>
 
 #include <netinet/in.h>
@@ -24,14 +25,26 @@ FILTER_ATTR_QUERY_FUNC(proto_range)(
 		uint16_t transport_type = packet->transport_header.type;
 		uint32_t proto = packet_transport_protocol(packet);
 
+		// Every byte this query reads must be inside the packet:
+		// TCP flags sit at the fourteenth header byte, the ICMP and
+		// ICMPv6 type at the first one. Whatever is shorter joins
+		// the unavailable path below.
+		uint32_t read_size = 1;
+		if (transport_type == IPPROTO_TCP) {
+			read_size = offsetof(struct rte_tcp_hdr, tcp_flags) + 1;
+		}
+
 		if ((transport_type & PACKET_TRANSPORT_HEADER_UNAVAILABLE) !=
-		    0) {
+			    0 ||
+		    rte_pktmbuf_pkt_len(packet_to_mbuf(packet)
+		    ) < (uint32_t)packet->transport_header.offset + read_size) {
 			// The declared protocol is known but its header is
-			// fragment payload: match only rules covering the
+			// fragment payload, or too short to hold the bytes
+			// this query reads: match only rules covering the
 			// whole protocol block, never a fabricated subtype.
 			// The dedicated classes carry their result directly,
-			// while other protocols never read a subtype and keep
-			// their plain slot.
+			// while other protocols never read a subtype and
+			// keep their plain slot.
 			switch (proto) {
 			case IPPROTO_TCP:
 				result[idx] = c->unavailable_classes
