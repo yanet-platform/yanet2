@@ -271,7 +271,8 @@ cp_config_gen_acquire(struct cp_config *cp_config) {
 //
 // MUST be called with the config lock held. A generation that lost its
 // current-published status while pinned is freed here instead of at
-// publish time, once its last pin drops.
+// publish time, once its last pin drops. Teardown also reclaims superseded
+// agents made unreferenced by that generation.
 void
 cp_config_gen_release(
 	struct cp_config *cp_config, struct cp_config_gen *config_gen
