@@ -16,7 +16,7 @@
 
 #include "lib/dataplane/config/zone.h"
 
-#include "lib/controlplane/agent/agent.h"
+#include "lib/controlplane/config/reclaim.h"
 
 __thread struct cp_config *cp_config_locked_by_thread = NULL;
 
@@ -250,6 +250,7 @@ cp_config_gen_release(
 
 	if (--config_gen->refcnt == 0) {
 		cp_config_gen_free(cp_config, config_gen);
+		cp_config_reclaim_unused_agents_locked(cp_config);
 	}
 }
 

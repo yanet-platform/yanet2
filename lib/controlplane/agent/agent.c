@@ -20,6 +20,7 @@
 
 #include "lib/controlplane/config/cp_module.h"
 #include "lib/controlplane/config/cp_object.h"
+#include "lib/controlplane/config/reclaim.h"
 #include "lib/controlplane/config/zone.h"
 #include "lib/dataplane/config/zone.h"
 #include "lib/dataplane/pipeline/econtext.h"
@@ -155,11 +156,6 @@ dataplane_instance_current_time(
 	*time_ns = latest;
 	return 0;
 }
-
-// Body of agent_free_unused_agents for a caller that already holds
-// cp_config_lock. See the definition further down for details.
-static void
-agent_free_unused_agents_locked(struct agent *agent);
 
 static int
 allocate_arenas(
@@ -388,7 +384,7 @@ agent_attach(
 		SET_OFFSET_OF(&cp_config->agent_registry, new_registry);
 	}
 
-	agent_free_unused_agents_locked(new_agent);
+	cp_config_reclaim_unused_agents_locked(cp_config);
 
 unlock:
 	cp_config_unlock(cp_config);
@@ -517,46 +513,6 @@ agent_extend(struct agent *agent, uint64_t size, yanet_error **err) {
 	return ret;
 }
 
-void
-agent_cleanup(struct agent *agent) {
-	struct cp_config *cp_config = ADDR_OF(&agent->cp_config);
-
-	// Finalize the agent context before freeing the arenas that back any
-	// child contexts (e.g. module contexts), so the detach walk in
-	// memory_context_fini never touches freed arena memory.
-	memory_context_fini(&agent->memory_context);
-
-	struct agent_arena *arenas = ADDR_OF(&agent->arenas);
-	if (arenas) {
-		for (uint64_t arena_idx = 0; arena_idx < agent->arena_count;
-		     ++arena_idx) {
-			memory_bfree(
-				&cp_config->memory_context,
-				ADDR_OF(&arenas[arena_idx].data),
-				arenas[arena_idx].size
-			);
-		}
-		memory_bfree(
-			&cp_config->memory_context,
-			arenas,
-			sizeof(struct agent_arena) * agent->arena_count
-		);
-	}
-
-	struct agent_storage *storage = ADDR_OF(&agent->storage);
-	while (storage != NULL) {
-		struct agent_storage *next = ADDR_OF(&storage->next);
-		memory_bfree(
-			&cp_config->memory_context,
-			storage,
-			sizeof(struct agent_storage) + storage->size
-		);
-		storage = next;
-	}
-
-	memory_bfree(&cp_config->memory_context, agent, sizeof(struct agent));
-}
-
 int
 agent_detach(struct agent *agent) {
 	(void)agent;
@@ -583,8 +539,6 @@ agent_update_modules(
 		return -1;
 	}
 
-	agent_free_unused_agents(agent);
-
 	return 0;
 }
 
@@ -605,8 +559,6 @@ agent_delete_module(
 	if (ret != 0) {
 		return -1;
 	}
-
-	agent_free_unused_agents(agent);
 
 	return 0;
 }
@@ -826,8 +778,6 @@ agent_update_devices(
 		return -1;
 	}
 
-	agent_free_unused_agents(agent);
-
 	return 0;
 }
 
@@ -844,8 +794,6 @@ agent_delete_device(
 	if (ret != 0) {
 		return -1;
 	}
-
-	agent_free_unused_agents(agent);
 
 	return 0;
 }
@@ -869,8 +817,6 @@ agent_update_objects(
 		return -1;
 	}
 
-	agent_free_unused_agents(agent);
-
 	return 0;
 }
 
@@ -891,8 +837,6 @@ agent_delete_object(
 	if (ret != 0) {
 		return -1;
 	}
-
-	agent_free_unused_agents(agent);
 
 	return 0;
 }
@@ -1713,50 +1657,17 @@ cp_device_config_set_output_pipeline(
 	return 0;
 }
 
-// Unlocked body shared by agent_free_unused_agents and the agent_attach call
-// site, which already holds cp_config_lock itself.
-//
-// Depends on a precondition it does not itself enforce: within one shared
-// memory instance, a live agent name has at most one process still holding
-// it. Only a reference kind that cannot outlive its owning process may gate
-// this reclaim, since nothing here can tell a dead owner from a live one
-// across a restart. A second live holder of the same name sharing that gate
-// would instead have its arena freed out from under it. Mechanically
-// proving this precondition is tracked separately as issue #2001.
-static void
-agent_free_unused_agents_locked(struct agent *agent) {
-	if (agent == NULL) {
-		return;
-	}
-
-	while (ADDR_OF(&agent->prev) != NULL) {
-		struct agent *prev_agent = ADDR_OF(&agent->prev);
-
-		if (prev_agent->loaded_module_count == 0 &&
-		    prev_agent->loaded_device_count == 0 &&
-		    prev_agent->loaded_object_count == 0) {
-			SET_OFFSET_OF(&agent->prev, ADDR_OF(&prev_agent->prev));
-			agent_cleanup(prev_agent);
-			continue;
-		}
-
-		agent = ADDR_OF(&agent->prev);
-	}
-}
-
 void
 agent_free_unused_agents(struct agent *agent) {
 	if (agent == NULL) {
 		return;
 	}
 
-	// This walks and splices the agent->prev chain and calls agent_cleanup,
-	// which frees the superseded agent into cp_config->memory_context. It
-	// must run under cp_config_lock now that Go-side callers are no longer
-	// serialized by a global mutex.
+	// Registry-wide reclamation mutates predecessor chains and returns
+	// whole arenas, so the sweep runs under the configuration lock.
 	struct cp_config *cp_config = ADDR_OF(&agent->cp_config);
 	cp_config_lock(cp_config);
-	agent_free_unused_agents_locked(agent);
+	cp_config_reclaim_unused_agents_locked(cp_config);
 	cp_config_unlock(cp_config);
 }
 

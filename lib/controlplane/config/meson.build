@@ -14,6 +14,7 @@ sources = files(
   'cp_object.c',
   'cp_counter.c',
   'econtext.c',
+  'reclaim.c',
   'zone.c',
 )
 
