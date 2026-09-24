@@ -17,8 +17,10 @@ behaviour. An empty runtime is not evidence that enabled real servers are safe.
   The same instruction assigned remaining deadline, cancellation, trust and
   release qualification to @moonug. This is session provenance, not an invented
   issue comment or GitHub review.
-- No commit, push, GitHub write, deployment or traffic admission accompanies this
-  record. Fresh independent full review of the final candidate remains a gate.
+- At the original evidence-capture stage, no commit, push, GitHub write,
+  deployment or traffic admission accompanied this record, and fresh independent
+  full review was pending. Subsequent reviews and publication results are
+  recorded in [PR #2801](https://github.com/yanet-platform/yanet2/pull/2801).
 
 ## Layout Comparison
 
@@ -248,8 +250,11 @@ That approval is historical context, not approval of this final-baseline patch.
 Only its admission delta was transferred; final documentation records the
 merged prerequisite and the newly executed gates. Old evidence remains intact.
 
-Independent fresh-context full review has not run for this candidate. The lead
-must provide Blind Hunter, Edge Case Hunter, Verification Gap Reviewer and
-Acceptance Auditor results, resolve confirmed blockers and rerun affected gates
-before publication. This record establishes bounded implementation evidence,
-not full release qualification or permission to enable traffic.
+At the original evidence-capture stage, independent fresh-context full review
+had not run for this candidate. Blind Hunter, Edge Case Hunter, Verification Gap
+Reviewer and Acceptance Auditor results were still required before publication.
+This is historical gate status, not the current review verdict. Subsequent
+complete-candidate review identities, resolved findings and repeated gate results
+are recorded in [PR #2801](https://github.com/yanet-platform/yanet2/pull/2801).
+This record establishes bounded implementation evidence, not full release
+qualification or permission to enable traffic.
