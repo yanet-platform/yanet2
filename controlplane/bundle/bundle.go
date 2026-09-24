@@ -1,7 +1,9 @@
 package bundle
 
 import (
+	"errors"
 	"fmt"
+	"io"
 
 	"go.uber.org/zap"
 
@@ -217,7 +219,13 @@ func buildServices(
 
 		service, err := factory.New()
 		if err != nil {
-			return nil, fmt.Errorf("failed to initialize %s: %w", factory.Name, err)
+			err = fmt.Errorf("failed to initialize %s: %w", factory.Name, err)
+			for _, service := range services {
+				if closer, ok := service.(io.Closer); ok {
+					err = errors.Join(err, closer.Close())
+				}
+			}
+			return nil, err
 		}
 
 		services = append(services, service)
