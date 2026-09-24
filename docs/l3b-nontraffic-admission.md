@@ -67,8 +67,9 @@ Object constructors here allocate only inert type descriptors, which the loader
 copies and frees. They do not construct live virtual services or session tables.
 The helper is under `common/go/testutils/shm`; production loaders,
 dataplane/parser code and functional/dataplane_ut harnesses are unchanged.
-The Go FFI attachment boundary now rejects an instance index outside the count
-read from the first mapped header before calling the unsafe C attachment path.
+The Go FFI attachment boundary first acquires readiness of instance zero, then
+rejects an instance index outside its published count before calling the unsafe
+C attachment path. Unpublished storage fails immediately without waiting.
 The public method signature and successful attachment/cleanup path are unchanged.
 
 ## Review Correction
@@ -79,14 +80,22 @@ completed all four layers but returned REQUEST_CHANGES for F1. The existing
 invalid-instance test could reach a C read beyond its one-instance mapping;
 previous passing tests and Go race instrumentation did not prove that safe.
 
-The correction in `controlplane/ffi/shm.go` uses the existing count API, which
-reads instance zero without traversing the requested index. The Go comparison
+The correction in `controlplane/ffi/shm.go` acquires the first instance's readiness
+before the existing count API reads its header, without traversing the requested
+index. This orders the count and layout reads after initialization publication;
+the C attachment still checks readiness of the requested instance. The Go comparison
 returns an attributable attachment error before allocating the C name or
 calling the C attachment routine. No C implementation or storage sizing changes
 are needed. `controlplane/ffi/shm_test.go` exercises the public method
 with the last valid index (zero), the first invalid index (one) and MaxUint32,
 and verifies that rejected attachments leave the agent inventory unchanged.
 The existing L3B invalid-instance regression remains intact.
+
+A later review added the readiness acquire and a fail-fast regression on a
+zero-filled mapping for index zero and MaxUint32. This test verifies rejection
+without traversal, not an ARM weak-memory reproduction or the fixed 60-second
+readiness timeout. Subsequent gate results and review identities are recorded in
+the publication record; the measured run below is retained as historical evidence.
 
 The unguarded out-of-bounds path was not deliberately executed again. The
 source establishes the unchecked traversal; the new tests pin the range error

@@ -75,6 +75,31 @@ func Test_SharedMemory_Attach_MissingFile(t *testing.T) {
 	require.Nil(t, shm)
 }
 
+// Test_SharedMemory_AgentAttach_UninitialisedSegment verifies that unpublished
+// storage fails before trusting its instance range or traversing its layout.
+func Test_SharedMemory_AgentAttach_UninitialisedSegment(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		instance uint32
+	}{
+		{name: "first instance before publication", instance: 0},
+		{name: "maximum index before publication", instance: math.MaxUint32},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path := createStorageFile(t, 2<<20)
+			memory, err := ffi.AttachSharedMemory(path)
+			require.NoError(t, err)
+			t.Cleanup(func() { require.NoError(t, memory.Detach()) })
+			agent, err := memory.AgentAttach("uninitialised", tc.instance, 64*datasize.MB)
+			if agent != nil {
+				t.Cleanup(func() { require.NoError(t, agent.Close()) })
+			}
+			require.Nil(t, agent)
+			require.ErrorContains(t, err, "dataplane shared memory is not ready")
+		})
+	}
+}
+
 // Test_SharedMemory_AgentAttach_InstanceBounds verifies that the last real
 // instance attaches and invalid indices fail before traversing unmapped storage.
 func Test_SharedMemory_AgentAttach_InstanceBounds(t *testing.T) {
