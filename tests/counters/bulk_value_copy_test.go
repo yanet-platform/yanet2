@@ -82,16 +82,19 @@ func bulkCopyProbe(t *testing.T, workerCount uint64) (allocs uint64, matched int
 
 	dp := bulkCopyHarness(t, workerCount)
 
-	before := allocCount()
+	probeArmRead()
+	before := probeSnapshot()
 	groups, err := dp.CountersByTags(nil, nil)
-	after := allocCount()
+	after := probeSnapshot()
+	requireProbeComplete(t, before, after)
+	require.Equal(t, before.outstanding, after.outstanding)
 	require.NoError(t, err)
 
 	for _, group := range groups {
 		matched += len(group.Counters)
 	}
 
-	return after - before, matched
+	return after.allocations - before.allocations, matched
 }
 
 // TestCountersByTagsPerWorkerAllocationsAreBounded pins the allocation
@@ -139,12 +142,8 @@ func TestCountersByTagsPerWorkerAllocationsAreBounded(t *testing.T) {
 	)
 }
 
-// TestCountersByTagsRepeatedReadsDoNotAccumulate verifies that a full
-// read cycle leaves nothing behind: after each call the number of
-// outstanding tracked allocations and the bytes they retain return to
-// the level the first cycle settled at. A cycle that leaks one of the
-// per-worker lists, tag copies, or value blocks leaves its blocks
-// outstanding and raises every later cycle's floor.
+// TestCountersByTagsRepeatedReadsDoNotAccumulate verifies that every read,
+// including the first, releases all owned allocations and requested bytes.
 //
 // The probe only observes this binary's own allocations: memory
 // allocated inside a precompiled shared library stays invisible here.
@@ -153,34 +152,27 @@ func TestCountersByTagsRepeatedReadsDoNotAccumulate(t *testing.T) {
 
 	dp := bulkCopyHarness(t, workerCount)
 
-	// Prime every lazy one-time allocation the first call makes, so the
-	// baseline the later cycles are compared against is steady state.
-	_, err := dp.CountersByTags(nil, nil)
-	require.NoError(t, err)
-
-	var baseline outstandingAllocs
 	var firstDelta uint64
 	deltas := make([]uint64, 0, bulkCopyCycles-1)
 	for idx := range bulkCopyCycles {
-		allocsBefore := allocCount()
+		probeArmRead()
+		before := probeSnapshot()
 		groups, err := dp.CountersByTags(nil, nil)
-		after := liveOutstanding()
+		after := probeSnapshot()
+		requireProbeComplete(t, before, after)
+		require.Equal(t, before.outstanding, after.outstanding,
+			"cycle %d must release every owned allocation", idx,
+		)
 		require.NoError(t, err)
 		require.NotEmpty(t, groups, "read must keep matching counters")
 
-		delta := allocCount() - allocsBefore
+		delta := after.allocations - before.allocations
+		require.NotZero(t, delta)
 		if idx == 0 {
-			baseline = after
 			firstDelta = delta
 			continue
 		}
 		deltas = append(deltas, delta)
-		require.Equal(t, baseline, after,
-			"cycle %d left %d allocations outstanding, the first "+
-				"cycle settled at %d; a completed read must "+
-				"not retain allocations",
-			idx, after.count, baseline.count,
-		)
 	}
 
 	for idx, delta := range deltas {
