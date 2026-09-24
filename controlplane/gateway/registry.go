@@ -122,8 +122,29 @@ func (m *backendRef) Release() bool {
 // BackendRegistry is a registry of backends for Gateway API.
 type BackendRegistry struct {
 	mu       sync.RWMutex
-	backends map[string]BackendEntry
+	backends map[string]backendRecord
 	refs     map[Backend]*backendRef
+	now      func() (time.Time, time.Duration)
+}
+
+type backendRecord struct {
+	BackendEntry
+	LastSeenElapsed time.Duration
+}
+
+// RegistryOption configures a backend registry.
+type RegistryOption func(*BackendRegistry)
+
+// WithRegistryClock supplies wall time and monotonic elapsed time for a registry.
+//
+// Elapsed readings must be nondecreasing and share a fixed origin. Calls are
+// serialized by the registry; the clock must not call back into the registry.
+// Wall readings are normalized to UTC and used only for reporting and absolute
+// cutoff eviction.
+func WithRegistryClock(now func() (time.Time, time.Duration)) RegistryOption {
+	return func(m *BackendRegistry) {
+		m.now = now
+	}
 }
 
 func newBackendEntry(service string, backend Backend, kind BackendKind, lastSeenAt time.Time) BackendEntry {
@@ -131,16 +152,25 @@ func newBackendEntry(service string, backend Backend, kind BackendKind, lastSeen
 		service:    service,
 		backend:    backend,
 		kind:       kind,
-		lastSeenAt: lastSeenAt,
+		lastSeenAt: lastSeenAt.UTC(),
 	}
 }
 
 // NewBackendRegistry creates a new BackendRegistry.
-func NewBackendRegistry() *BackendRegistry {
-	return &BackendRegistry{
-		backends: map[string]BackendEntry{},
+func NewBackendRegistry(options ...RegistryOption) *BackendRegistry {
+	origin := time.Now()
+	m := &BackendRegistry{
+		backends: map[string]backendRecord{},
 		refs:     map[Backend]*backendRef{},
+		now: func() (time.Time, time.Duration) {
+			sample := time.Now()
+			return sample, sample.Sub(origin)
+		},
 	}
+	for _, option := range options {
+		option(m)
+	}
+	return m
 }
 
 // GetBackend returns a leased backend for the given service, plus a release
@@ -241,24 +271,29 @@ func (m *BackendRegistry) RegisterBackend(service string, b Backend, kind Backen
 // retained, so closing it would tear down every other entry still
 // resolving to it.
 func (m *BackendRegistry) registerBackend(service string, b Backend, kind BackendKind) (RegistrationStatus, Backend) {
-	now := time.Now().UTC()
-
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	now, elapsed := m.now()
 	existing, ok := m.backends[service]
 	switch {
-	case ok && m.renewLocked(service, b.Endpoint(), now):
+	case ok && m.renewLocked(service, b.Endpoint(), now, elapsed):
 		if _, tracked := m.refs[b]; tracked {
 			return RegistrationRenewed, nil
 		}
 		return RegistrationRenewed, b
 	case ok:
-		m.backends[service] = newBackendEntry(service, b, kind, now)
+		m.backends[service] = backendRecord{
+			BackendEntry:    newBackendEntry(service, b, kind, now),
+			LastSeenElapsed: elapsed,
+		}
 		m.retainLocked(b)
 		return RegistrationUpdated, m.releaseLocked(existing.GetBackend())
 	default:
-		m.backends[service] = newBackendEntry(service, b, kind, now)
+		m.backends[service] = backendRecord{
+			BackendEntry:    newBackendEntry(service, b, kind, now),
+			LastSeenElapsed: elapsed,
+		}
 		m.retainLocked(b)
 		return RegistrationRegistered, nil
 	}
@@ -316,24 +351,23 @@ func (m *BackendRegistry) Renew(service, endpoint string) bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	return m.renewLocked(service, endpoint, time.Now().UTC())
+	now, elapsed := m.now()
+	return m.renewLocked(service, endpoint, now, elapsed)
 }
 
 // renewLocked refreshes the matching entry and reports whether it exists.
 //
 // Must be called with m.mu held for writing.
-func (m *BackendRegistry) renewLocked(service, endpoint string, now time.Time) bool {
+func (m *BackendRegistry) renewLocked(service, endpoint string, now time.Time, elapsed time.Duration) bool {
 	entry, ok := m.backends[service]
 	if !ok || entry.Endpoint() != endpoint {
 		return false
 	}
 
-	m.backends[service] = newBackendEntry(
-		entry.Service(),
-		entry.GetBackend(),
-		entry.Kind(),
-		now,
-	)
+	m.backends[service] = backendRecord{
+		BackendEntry:    newBackendEntry(entry.Service(), entry.GetBackend(), entry.Kind(), now),
+		LastSeenElapsed: elapsed,
+	}
 	return true
 }
 
@@ -384,7 +418,7 @@ func (m *BackendRegistry) evictStale(before time.Time) ([]BackendEntry, []Backen
 	var closable []Backend
 	for service, entry := range m.backends {
 		if entry.Kind() == BackendKindExternal && entry.LastSeenAt().Before(before) {
-			evicted = append(evicted, entry)
+			evicted = append(evicted, entry.BackendEntry)
 			delete(m.backends, service)
 			if b := m.releaseLocked(entry.GetBackend()); b != nil {
 				closable = append(closable, b)
@@ -395,14 +429,46 @@ func (m *BackendRegistry) evictStale(before time.Time) ([]BackendEntry, []Backen
 	return evicted, closable
 }
 
+// EvictExpired removes external backends whose elapsed age exceeds ttl.
+//
+// Wall-clock corrections do not affect expiry. An age equal to the TTL is
+// retained. Built-in and in-process backends are exempt, and connections are
+// closed outside the registry lock only after their last lease is released.
+func (m *BackendRegistry) EvictExpired(ttl time.Duration) []BackendEntry {
+	evicted, closable := m.evictExpired(ttl)
+	for _, backend := range closable {
+		_ = backend.Close()
+	}
+	return evicted
+}
+
+func (m *BackendRegistry) evictExpired(ttl time.Duration) ([]BackendEntry, []Backend) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	_, elapsed := m.now()
+	var evicted []BackendEntry
+	var closable []Backend
+	for service, entry := range m.backends {
+		if entry.Kind() == BackendKindExternal && elapsed-entry.LastSeenElapsed > ttl {
+			evicted = append(evicted, entry.BackendEntry)
+			delete(m.backends, service)
+			if backend := m.releaseLocked(entry.GetBackend()); backend != nil {
+				closable = append(closable, backend)
+			}
+		}
+	}
+	return evicted, closable
+}
+
 // takeBackends atomically returns the registered backends and clears the
 // registry, including its refcount bookkeeping.
-func (m *BackendRegistry) takeBackends() map[string]BackendEntry {
+func (m *BackendRegistry) takeBackends() map[string]backendRecord {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	backends := m.backends
-	m.backends = map[string]BackendEntry{}
+	m.backends = map[string]backendRecord{}
 	m.refs = map[Backend]*backendRef{}
 	return backends
 }
@@ -414,7 +480,7 @@ func (m *BackendRegistry) ListBackends() []BackendEntry {
 
 	services := make([]BackendEntry, 0, len(m.backends))
 	for _, entry := range m.backends {
-		services = append(services, entry)
+		services = append(services, entry.BackendEntry)
 	}
 
 	sort.Slice(services, func(i int, j int) bool {

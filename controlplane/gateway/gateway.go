@@ -77,10 +77,11 @@ const errorReasonMetadataKey = "x-yanet-error-reason"
 const errorReasonServiceUnregistered = "service-unregistered"
 
 type gatewayOptions struct {
-	Services []serviceEntry
-	Log      *zap.Logger
-	LogLevel *zap.AtomicLevel
-	Listener net.Listener
+	Services        []serviceEntry
+	Log             *zap.Logger
+	LogLevel        *zap.AtomicLevel
+	Listener        net.Listener
+	RegistryOptions []RegistryOption
 }
 
 func newGatewayOptions() *gatewayOptions {
@@ -132,6 +133,13 @@ func WithListener(listener net.Listener) GatewayOption {
 	}
 }
 
+// WithRegistryOptions configures the gateway-owned backend registry.
+func WithRegistryOptions(options ...RegistryOption) GatewayOption {
+	return func(optionsTarget *gatewayOptions) {
+		optionsTarget.RegistryOptions = append(optionsTarget.RegistryOptions, options...)
+	}
+}
+
 // serviceRunner runs one hosted Service for the gateway's lifetime.
 //
 // The gateway starts every runner, waits for every runner to become ready
@@ -180,7 +188,7 @@ func NewGateway(cfg Config, options ...GatewayOption) (*Gateway, error) {
 		o(opts)
 	}
 	log := opts.Log
-	registry := NewBackendRegistry()
+	registry := NewBackendRegistry(opts.RegistryOptions...)
 
 	// Every backend hosted inside this process is labeled with the address it
 	// is reachable at from outside: the injected listener's, else the configured.
@@ -611,8 +619,7 @@ func (m *Gateway) runRegistrySweeper(ctx context.Context) error {
 		case <-ctx.Done():
 			return nil
 		case <-ticker.C:
-			before := time.Now().UTC().Add(-ttl)
-			for _, entry := range m.registry.EvictStale(before) {
+			for _, entry := range m.registry.EvictExpired(ttl) {
 				m.log.Info("evicted stale service from registry",
 					zap.String("service", entry.Service()),
 					zap.String("endpoint", entry.Endpoint()),
