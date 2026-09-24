@@ -125,7 +125,7 @@ func NewStorage(t *testing.T) string {
 		mappings, err := os.ReadFile("/proc/self/maps")
 		require.NoError(t, err)
 		var leaked []string
-		for _, mapping := range strings.Split(string(mappings), "\n") {
+		for mapping := range strings.SplitSeq(string(mappings), "\n") {
 			if strings.Contains(mapping, path) {
 				leaked = append(leaked, mapping)
 			}
