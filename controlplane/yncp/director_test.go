@@ -45,10 +45,10 @@ func newL3BDirectorConfig(t *testing.T) *yncp.Config {
 // Test_Director_L3BNontrafficAdmission verifies that the production constructor
 // admits one L3B backend and joins shutdown before releasing shared memory.
 func Test_Director_L3BNontrafficAdmission(t *testing.T) {
-	for _, name := range []string{"empty read-only runtime", "canceled before startup", "occupied listener"} {
-		t.Run(name, func(t *testing.T) {
+	for _, tc := range []string{"empty read-only runtime", "canceled before startup", "occupied listener"} {
+		t.Run(tc, func(t *testing.T) {
 			config := newL3BDirectorConfig(t)
-			if name == "occupied listener" {
+			if tc == "occupied listener" {
 				listener, err := net.Listen("tcp", "127.0.0.1:0")
 				require.NoError(t, err)
 				t.Cleanup(func() { require.NoError(t, listener.Close()) })
@@ -68,7 +68,7 @@ func Test_Director_L3BNontrafficAdmission(t *testing.T) {
 			director, err := yncp.NewDirector(config, yncp.WithLog(log))
 			require.NoError(t, err)
 			ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
-			if name == "canceled before startup" {
+			if tc == "canceled before startup" {
 				cancel()
 			}
 			var group errgroup.Group
@@ -84,7 +84,7 @@ func Test_Director_L3BNontrafficAdmission(t *testing.T) {
 					runErr := group.Wait()
 					closeErr := director.Close()
 					require.NoError(t, closeErr)
-					if name == "occupied listener" {
+					if tc == "occupied listener" {
 						require.ErrorContains(t, runErr, "failed to initialize gRPC listener")
 					} else {
 						require.NoError(t, runErr)
@@ -93,7 +93,7 @@ func Test_Director_L3BNontrafficAdmission(t *testing.T) {
 					t.Fatal("director did not join before shared-memory cleanup")
 				}
 			})
-			if name != "empty read-only runtime" {
+			if tc != "empty read-only runtime" {
 				select {
 				case <-joined:
 				case <-time.After(5 * time.Second):

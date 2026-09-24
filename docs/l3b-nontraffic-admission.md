@@ -83,7 +83,7 @@ The correction in `controlplane/ffi/shm.go` uses the existing count API, which
 reads instance zero without traversing the requested index. The Go comparison
 returns an attributable attachment error before allocating the C name or
 calling the C attachment routine. No C implementation or storage sizing changes
-are needed. `controlplane/ffi/agent_attach_test.go` exercises the public method
+are needed. `controlplane/ffi/shm_test.go` exercises the public method
 with the last valid index (zero), the first invalid index (one) and MaxUint32,
 and verifies that rejected attachments leave the agent inventory unchanged.
 The existing L3B invalid-instance regression remains intact.
