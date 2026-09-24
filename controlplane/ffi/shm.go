@@ -113,6 +113,11 @@ func (m *SharedMemory) AgentAttach(
 	instanceIdx uint32,
 	size datasize.ByteSize,
 ) (*Agent, error) {
+	// Acquire the first instance's publication before reading its count.
+	if !m.DataplaneReady(0) {
+		return nil, fmt.Errorf("failed to attach agent %q: dataplane shared memory is not ready", name)
+	}
+
 	instanceCount := uint32(C.yanet_shm_instance_count(m.ptr))
 	if instanceIdx >= instanceCount {
 		return nil, fmt.Errorf(
