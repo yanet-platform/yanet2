@@ -68,138 +68,50 @@ func (m *fakeBackend) CloseCount() int {
 var _ proxy.Backend = (*fakeBackend)(nil)
 var _ gateway.Backend = (*fakeBackend)(nil)
 
-// Test_BackendRegistry_ElapsedExpiry verifies that only elapsed age drives TTL
-// expiry, even when wall time moves independently in either direction.
-func Test_BackendRegistry_ElapsedExpiry(t *testing.T) {
-	const ttl = 5 * time.Minute
-	for _, tc := range []struct {
-		name      string
-		wallStep  time.Duration
-		elapsed   time.Duration
-		wantEvict bool
-	}{
-		{name: "forward wall jump preserves live backend", wallStep: 6 * time.Minute, elapsed: time.Second},
-		{name: "backward wall jump does not preserve stale backend", wallStep: -6 * time.Minute, elapsed: ttl + time.Second, wantEvict: true},
-		{name: "stopped wall clock does not prevent expiry", elapsed: ttl + time.Second, wantEvict: true},
-		{name: "ordinary stale backend expires", wallStep: ttl + time.Second, elapsed: ttl + time.Second, wantEvict: true},
-		{name: "exact TTL remains registered", wallStep: 6 * time.Minute, elapsed: ttl},
-		{name: "below TTL remains registered", wallStep: ttl - time.Nanosecond, elapsed: ttl - time.Nanosecond},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			wall := time.Date(2026, 1, 1, 12, 0, 0, 0, time.FixedZone("offset", 3600))
-			registeredAt := wall.UTC()
-			elapsed := time.Hour
-			registry := gateway.NewBackendRegistry(gateway.WithRegistryClock(func() (time.Time, time.Duration) {
-				return wall, elapsed
-			}))
+// Test_BackendRegistry_PreservesMonotonicTimestamp verifies that every update
+// path retains the monotonic reading needed for elapsed-time expiry.
+func Test_BackendRegistry_PreservesMonotonicTimestamp(t *testing.T) {
+	for _, tc := range []string{"initial registration", "same-endpoint registration", "renewal", "replacement"} {
+		t.Run(tc, func(t *testing.T) {
+			registry := gateway.NewBackendRegistry()
 			t.Cleanup(func() { require.NoError(t, registry.Close()) })
 			backend := &fakeBackend{endpoint: "127.0.0.1:9000"}
 			registry.RegisterBackend("svc.Foo", backend, gateway.BackendKindExternal)
-			require.Equal(t, registeredAt, getBackendEntry(t, registry, "svc.Foo").LastSeenAt())
-
-			wall = wall.Add(tc.wallStep)
-			elapsed += tc.elapsed
-			evicted := registry.EvictExpired(ttl)
-			require.Equal(t, tc.wantEvict, !registry.HasBackend("svc.Foo"))
-			require.Equal(t, tc.wantEvict, backend.Closed())
-			if tc.wantEvict {
-				require.Len(t, evicted, 1)
-				require.Equal(t, registeredAt, evicted[0].LastSeenAt())
-			} else {
-				require.Empty(t, evicted)
-			}
-		})
-	}
-}
-
-// Test_BackendRegistry_ElapsedExpiryRefresh verifies that renewal and replacement
-// each start a full TTL, independently of the reporting clock.
-func Test_BackendRegistry_ElapsedExpiryRefresh(t *testing.T) {
-	for _, operation := range []string{"renew", "reregister", "replace"} {
-		t.Run(operation, func(t *testing.T) {
-			wall := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-			elapsed := time.Duration(0)
-			registry := gateway.NewBackendRegistry(gateway.WithRegistryClock(func() (time.Time, time.Duration) {
-				return wall, elapsed
-			}))
-			t.Cleanup(func() { require.NoError(t, registry.Close()) })
-			original := &fakeBackend{endpoint: "127.0.0.1:9000"}
-			registry.RegisterBackend("svc.Foo", original, gateway.BackendKindExternal)
-			elapsed = 6 * time.Minute
-			wall = wall.Add(-time.Hour)
-			switch operation {
-			case "renew":
-				require.True(t, registry.Renew("svc.Foo", original.Endpoint()))
-			case "reregister":
-				redundant := &fakeBackend{endpoint: original.Endpoint()}
+			switch tc {
+			case "same-endpoint registration":
+				redundant := &fakeBackend{endpoint: backend.Endpoint()}
 				require.Equal(t, gateway.RegistrationRenewed, registry.RegisterBackend("svc.Foo", redundant, gateway.BackendKindExternal))
-				require.True(t, redundant.Closed())
-			case "replace":
+			case "renewal":
+				require.True(t, registry.Renew("svc.Foo", backend.Endpoint()))
+			case "replacement":
 				replacement := &fakeBackend{endpoint: "127.0.0.1:9001"}
 				require.Equal(t, gateway.RegistrationUpdated, registry.RegisterBackend("svc.Foo", replacement, gateway.BackendKindExternal))
-				require.True(t, original.Closed())
 			}
-			require.Equal(t, wall, getBackendEntry(t, registry, "svc.Foo").LastSeenAt())
-			elapsed += 5 * time.Minute
-			require.Empty(t, registry.EvictExpired(5*time.Minute))
-			elapsed += time.Nanosecond
-			require.Len(t, registry.EvictExpired(5*time.Minute), 1)
+			seen := getBackendEntry(t, registry, "svc.Foo").LastSeenAt()
+			// Round(0) strips only the monotonic reading; Time.Equal ignores it.
+			require.True(t, seen != seen.Round(0), "registration timestamp lost its monotonic reading")
 		})
 	}
 }
 
-// Test_BackendRegistry_ElapsedExpiryPreservesKindsAndLeases verifies that elapsed
-// expiry exempts local services and preserves a lease held by another goroutine.
-func Test_BackendRegistry_ElapsedExpiryPreservesKindsAndLeases(t *testing.T) {
-	elapsed := time.Duration(0)
-	registry := gateway.NewBackendRegistry(gateway.WithRegistryClock(func() (time.Time, time.Duration) {
-		return time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), elapsed
-	}))
-	t.Cleanup(func() { require.NoError(t, registry.Close()) })
-	shared := &fakeBackend{endpoint: "127.0.0.1:8080"}
-	external := &fakeBackend{endpoint: "127.0.0.1:9000"}
-	registry.RegisterBackend("svc.Builtin", shared, gateway.BackendKindBuiltin)
-	registry.RegisterBackend("svc.InProcess", shared, gateway.BackendKindInProcess)
-	registry.RegisterBackend("svc.External", external, gateway.BackendKindExternal)
-	backend, release, ok := registry.GetBackend("svc.External")
-	require.True(t, ok)
-	t.Cleanup(release)
-	elapsed = time.Hour
-	result := make(chan []gateway.BackendEntry, 1)
-	go func() {
-		result <- registry.EvictExpired(5 * time.Minute)
-	}()
-	var evicted []gateway.BackendEntry
-	select {
-	case evicted = <-result:
-	case <-time.After(time.Second):
-		t.Fatal("elapsed expiry blocked on an outstanding lease")
+// Test_BackendRegistry_EvictStaleStrictCutoff verifies that an equal cutoff
+// retains an entry and a later cutoff removes it, with either clock domain.
+func Test_BackendRegistry_EvictStaleStrictCutoff(t *testing.T) {
+	for _, tc := range []string{"monotonic cutoff", "wall-only cutoff"} {
+		t.Run(tc, func(t *testing.T) {
+			registry := gateway.NewBackendRegistry()
+			t.Cleanup(func() { require.NoError(t, registry.Close()) })
+			registry.RegisterBackend("svc.Foo", &fakeBackend{endpoint: "127.0.0.1:9000"}, gateway.BackendKindExternal)
+			cutoff := getBackendEntry(t, registry, "svc.Foo").LastSeenAt()
+			if tc == "wall-only cutoff" {
+				cutoff = cutoff.UTC()
+			}
+			require.Empty(t, registry.EvictStale(cutoff))
+			require.True(t, registry.HasBackend("svc.Foo"))
+			require.Len(t, registry.EvictStale(cutoff.Add(time.Nanosecond)), 1)
+			require.False(t, registry.HasBackend("svc.Foo"))
+		})
 	}
-	require.Len(t, evicted, 1)
-	require.Equal(t, "svc.External", evicted[0].Service())
-	require.True(t, registry.HasBackend("svc.Builtin"))
-	require.True(t, registry.HasBackend("svc.InProcess"))
-	require.False(t, shared.Closed())
-	require.Same(t, external, backend)
-	require.False(t, external.Closed())
-	release()
-	release()
-	require.Equal(t, 1, external.CloseCount())
-}
-
-// Test_BackendRegistry_AbsoluteEvictionIgnoresElapsed verifies that absolute
-// cutoff callers retain wall-time semantics regardless of elapsed age.
-func Test_BackendRegistry_AbsoluteEvictionIgnoresElapsed(t *testing.T) {
-	wall := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	elapsed := time.Duration(0)
-	registry := gateway.NewBackendRegistry(gateway.WithRegistryClock(func() (time.Time, time.Duration) {
-		return wall, elapsed
-	}))
-	t.Cleanup(func() { require.NoError(t, registry.Close()) })
-	registry.RegisterBackend("svc.Foo", &fakeBackend{endpoint: "127.0.0.1:9000"}, gateway.BackendKindExternal)
-	elapsed = time.Hour
-	require.Empty(t, registry.EvictStale(wall))
-	require.Len(t, registry.EvictStale(wall.Add(time.Nanosecond)), 1)
 }
 
 func getBackendEntry(t *testing.T, registry *gateway.BackendRegistry, service string) *gateway.BackendEntry {

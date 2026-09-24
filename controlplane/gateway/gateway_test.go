@@ -16,7 +16,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -714,90 +713,6 @@ func TestGateway_RunRegistrySweeper_EvictsStaleExternal(t *testing.T) {
 
 	cancel()
 	require.NoError(t, group.Wait())
-}
-
-// Test_Gateway_RunRegistrySweeper_UsesElapsedExpiry verifies that a real sweep
-// removes an old registration while preserving a younger one across wall jumps.
-func Test_Gateway_RunRegistrySweeper_UsesElapsedExpiry(t *testing.T) {
-	const ttl = 5 * time.Minute
-	for _, tc := range []struct {
-		name     string
-		wallStep time.Duration
-	}{
-		{name: "forward wall jump", wallStep: 6 * time.Minute},
-		{name: "backward wall jump", wallStep: -6 * time.Minute},
-		{name: "stationary wall clock"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			var clockMutex sync.Mutex
-			wall := time.Now().UTC()
-			registeredAt := wall
-			elapsed := time.Duration(0)
-			clock := func() (time.Time, time.Duration) {
-				clockMutex.Lock()
-				defer clockMutex.Unlock()
-				return wall, elapsed
-			}
-			config := gateway.DefaultConfig()
-			config.Registry.TTL = xcfg.MustNonZero(ttl)
-			config.Registry.SweepInterval = xcfg.MustNonZero(5 * time.Millisecond)
-			listener := NewTestListener(t)
-			instance, err := gateway.NewGateway(config,
-				gateway.WithListener(listener),
-				gateway.WithRegistryOptions(gateway.WithRegistryClock(clock)),
-			)
-			require.NoError(t, err)
-			t.Cleanup(func() { require.NoError(t, instance.Close()) })
-			ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
-			var group errgroup.Group
-			group.Go(func() error { return instance.Run(ctx) })
-			t.Cleanup(func() {
-				cancel()
-				require.NoError(t, group.Wait())
-			})
-			connection, err := grpc.NewClient(listener.Addr().String(), grpc.WithTransportCredentials(insecure.NewCredentials()))
-			require.NoError(t, err)
-			t.Cleanup(func() { require.NoError(t, connection.Close()) })
-			client := ynpb.NewGatewayClient(connection)
-			require.Eventually(t, func() bool {
-				_, err := client.ListServices(ctx, &ynpb.ListServicesRequest{})
-				return err == nil
-			}, 5*time.Second, 5*time.Millisecond)
-
-			_, err = client.Register(ctx, &ynpb.RegisterRequest{Backend: &ynpb.BackendDesc{
-				Name: "svc.Stale", Endpoint: "127.0.0.1:9000",
-			}})
-			require.NoError(t, err)
-			clockMutex.Lock()
-			elapsed = ttl - time.Second
-			clockMutex.Unlock()
-			_, err = client.Register(ctx, &ynpb.RegisterRequest{Backend: &ynpb.BackendDesc{
-				Name: "svc.Live", Endpoint: "127.0.0.1:9001",
-			}})
-			require.NoError(t, err)
-			response, err := client.ListServices(ctx, &ynpb.ListServicesRequest{})
-			require.NoError(t, err)
-			require.True(t, hasService(response.GetServices(), "svc.Stale"))
-			require.True(t, hasService(response.GetServices(), "svc.Live"))
-
-			clockMutex.Lock()
-			wall = wall.Add(tc.wallStep)
-			elapsed = ttl + time.Second
-			clockMutex.Unlock()
-			// Sentinel removal proves a sweep finished before checking survival.
-			require.Eventually(t, func() bool {
-				var listErr error
-				response, listErr = client.ListServices(ctx, &ynpb.ListServicesRequest{})
-				return listErr == nil && !hasService(response.GetServices(), "svc.Stale")
-			}, time.Second, 5*time.Millisecond, "elapsed-expired sentinel must be removed")
-			require.True(t, hasService(response.GetServices(), "svc.Live"), "the same sweep must retain the younger registration")
-			for _, entry := range response.GetServices() {
-				if entry.GetBackend().GetName() == "svc.Live" {
-					require.True(t, registeredAt.Equal(entry.GetLastSeenAt().AsTime()))
-				}
-			}
-		})
-	}
 }
 
 // TestGateway_RunRegistrySweeper_ZeroSweepIntervalFallsBack verifies that a
