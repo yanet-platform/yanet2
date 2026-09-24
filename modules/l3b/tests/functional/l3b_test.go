@@ -2,14 +2,20 @@ package l3b_test
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/binary"
 	"fmt"
+	"io"
 	"net"
 	"net/netip"
+	"os"
 	"testing"
+	"time"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/gopacket/gopacket"
 	"github.com/gopacket/gopacket/layers"
+	"github.com/gopacket/gopacket/pcapgo"
 	"github.com/stretchr/testify/require"
 
 	"github.com/yanet-platform/xnetip"
@@ -969,26 +975,129 @@ func TestL3b_ServiceAndRealCounters(t *testing.T) {
 	require.Equal(t, frameLen(pinnedFlow), real1Bytes)
 }
 
-// Test_L3b_ConfiguredRealsGateEcho verifies that matched Echo replies depend
-// on configured reals, not eligibility, with exact wire and counter accounting.
+type echoPCAPPair struct {
+	name    string
+	request gopacket.Packet
+	reply   gopacket.Packet
+}
+
+// loadEchoPCAPPairs adapts pinned Ethernet fixtures without rewriting L3 bytes.
+//
+// VLAN tags are removed; reply MACs follow the request in the local harness.
+// The captures, not the upstream generator, define identifiers and payloads.
+func loadEchoPCAPPairs(t *testing.T, batch string) []echoPCAPPair {
+	t.Helper()
+	fixture, ok := map[string]struct {
+		lengths []int
+		hashes  [2]string
+	}{
+		"001": {[]int{46, 82}, [2]string{
+			"ba89034ae9c285a27e34c188f7dc0286f86b207ffe0fa109afb215ac0e02d1ce",
+			"a271a431ec9f26099f18086de34c82c80b3009ddf83d1b86db3bb6f6170d9b3c",
+		}},
+		"002": {[]int{66, 102}, [2]string{
+			"b216bdc0b291864cd4e714a7ed74b2b0fd004671e8fdf904d99b9fdce0516de3",
+			"ba3dac9c4d206895e38411b113a11fef99011942b867cc379a9398f63efc611c",
+		}},
+		"003": {[]int{82}, [2]string{
+			"d9e5883cbbfc5f147923a5e641e2e1fdf2a515e55a2ecfcbf25d4bee8b725bad",
+			"a2be6d70d08e21c642403582bff4fb793eacb7bb1a618b00b06b4e293362ddaf",
+		}},
+	}[batch]
+	require.True(t, ok, "unknown Echo fixture batch %q", batch)
+	pairs := make([]echoPCAPPair, len(fixture.lengths))
+	for direction, suffix := range []string{"send", "expect"} {
+		data, err := os.ReadFile("testdata/056_balancer_vs_ping_reply/" + batch + "-" + suffix + ".pcap")
+		require.NoError(t, err)
+		require.Equal(t, fixture.hashes[direction], fmt.Sprintf("%x", sha256.Sum256(data)))
+		reader, err := pcapgo.NewReader(bytes.NewReader(data))
+		require.NoError(t, err)
+		require.Equal(t, layers.LinkTypeEthernet, reader.LinkType())
+		for idx, length := range fixture.lengths {
+			frame, capture, err := reader.ReadPacketData()
+			require.NoError(t, err)
+			require.Len(t, frame, length)
+			require.Equal(t, length, capture.CaptureLength)
+			require.Equal(t, length, capture.Length)
+			require.EqualValues(t, 0x8100, binary.BigEndian.Uint16(frame[12:14]))
+			require.EqualValues(t, 100*(direction+1), binary.BigEndian.Uint16(frame[14:16]))
+			adapted := append(bytes.Clone(frame[:12]), frame[16:]...)
+			require.Len(t, adapted, length-4)
+			if direction == 1 {
+				copy(adapted[:12], pairs[idx].request.Data()[:12])
+			}
+			require.Equal(t, frame[18:], adapted[14:])
+			packet := gopacket.NewPacket(adapted, layers.LayerTypeEthernet, gopacket.Default)
+			require.Nil(t, packet.ErrorLayer())
+			if direction == 0 {
+				pairs[idx].name = fmt.Sprintf("legacy_%s_packet_%d", batch, idx+1)
+				pairs[idx].request = packet
+			} else {
+				pairs[idx].reply = packet
+			}
+		}
+		_, _, err = reader.ReadPacketData()
+		require.ErrorIs(t, err, io.EOF)
+	}
+	return pairs
+}
+
+// readEchoSessions returns every record and continuation token at a fixed time.
+func readEchoSessions(t *testing.T, agent *ffi.Agent, service *cl3bobject.VirtualServiceObject, now time.Time) ([]cl3bobject.Session, []uint64) {
+	t.Helper()
+	var sessions []cl3bobject.Session
+	var cursors []uint64
+	seen := map[uint64]bool{}
+	var cursor uint64
+	for {
+		page, next, dataplaneNow, err := service.ReadSessions(agent, cursor, 1)
+		require.NoError(t, err)
+		require.Equal(t, uint64(now.UnixNano()), dataplaneNow)
+		sessions = append(sessions, page...)
+		cursors = append(cursors, next)
+		if next == 0 {
+			require.Empty(t, page, "page size one requires an empty terminal page")
+			return sessions, cursors
+		}
+		require.False(t, seen[next], "repeated nonterminal cursor %d", next)
+		seen[next] = true
+		cursor = next
+	}
+}
+
+// Test_L3b_ConfiguredRealsGateEcho verifies that configured reals gate Echo
+// replies without changing seeded sessions or scheduling counters.
 func Test_L3b_ConfiguredRealsGateEcho(t *testing.T) {
 	for _, family := range []string{"IPv4", "IPv6"} {
 		t.Run(family, func(t *testing.T) {
-			for _, tc := range []struct {
+			enabledBatch := "001"
+			if family == "IPv6" {
+				enabledBatch = "002"
+			}
+			type stateCase struct {
 				name      string
 				weights   []uint32
+				legacy    string
 				disabled  bool
 				unmatched bool
 				wantDrop  bool
 				wantReply uint64
 				wantInput uint64
-			}{
+			}
+			cases := []stateCase{
 				{name: "empty configured list drops unchanged", wantDrop: true, wantInput: 1},
-				{name: "enabled configured reals reply", weights: []uint32{1, 1}, wantReply: 1, wantInput: 1},
+				{name: "enabled configured reals reply", weights: []uint32{1}, legacy: enabledBatch, wantReply: 1, wantInput: 1},
 				{name: "all configured reals disabled reply", weights: []uint32{1, 1}, disabled: true, wantReply: 1, wantInput: 1},
 				{name: "all configured weights zero reply", weights: []uint32{0, 0}, wantReply: 1, wantInput: 1},
 				{name: "unmatched destination passes unchanged", weights: []uint32{1, 1}, unmatched: true},
-			} {
+			}
+			if family == "IPv4" {
+				cases = append(cases, stateCase{
+					name: "disabled_ipv6_real_replies_to_legacy_echo", weights: []uint32{1},
+					legacy: "003", disabled: true, wantReply: 1, wantInput: 1,
+				})
+			}
+			for _, tc := range cases {
 				t.Run(tc.name, func(t *testing.T) {
 					harness, agent := setupL3bHarness(t, "port0", "test")
 					wirePipeline(t, agent, "port0", "test")
@@ -1002,12 +1111,107 @@ func Test_L3b_ConfiguredRealsGateEcho(t *testing.T) {
 							{Type: cl3bobject.IPv6, DestinationAddress: netip.MustParseAddr("2001:db8:2::11"), SourceNet: xnetip.MustParseNetwork("2001:db8:3::/64")},
 						}
 					}
+					var pairs []echoPCAPPair
+					if tc.legacy != "" {
+						pairs = loadEchoPCAPPairs(t, tc.legacy)
+						switch tc.legacy {
+						case "001":
+							reals = []cl3bobject.RealServer{{Type: cl3bobject.IPv4, DestinationAddress: netip.MustParseAddr("101.0.0.1"), SourceNet: xnetip.MustParseNetwork("192.0.2.0/24")}}
+						case "002":
+							reals = []cl3bobject.RealServer{{Type: cl3bobject.IPv6, DestinationAddress: netip.MustParseAddr("2010::2"), SourceNet: xnetip.MustParseNetwork("2001:db8:3::/64")}}
+						case "003":
+							reals = []cl3bobject.RealServer{{Type: cl3bobject.IPv6, DestinationAddress: netip.MustParseAddr("2010::1"), SourceNet: xnetip.MustParseNetwork("2001:db8:3::/64")}}
+						}
+					}
+					initialTime := time.Unix(1700000000, 0)
+					harness.SetCurrentTime(initialTime)
+					serviceConfig := cl3bobject.VirtualServiceConfig{
+						RealServers: reals, RingCapacity: 1000,
+						SourceFilterRules: []cl3bobject.SourceFilterRule{{
+							Net4s:      []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
+							Net6s:      []xnetip.BiContiguous{filter.UnspecifiedIPv6},
+							PortRanges: filter.PortRanges{{From: 80, To: 80}},
+						}},
+						SessionTimeouts: cl3bobject.SessionTimeouts{UDP: 600, Other: 37},
+					}
+					seedService, table := newVirtualService(t, agent, "svc", serviceConfig)
+					for idx := range reals {
+						require.NoError(t, seedService.SetRealServerState(uint32(idx), true))
+					}
+					require.NoError(t, seedService.UpdateRing([]uint32{0}))
+					require.NoError(t, seedService.Publish(agent))
+					seedModule, err := cl3b.NewModuleConfig(agent, "test")
+					require.NoError(t, err)
+					t.Cleanup(func() { _ = seedModule.Free() })
+					require.NoError(t, seedModule.Update([]cl3b.DestinationFilterRule{{
+						Net4s:          []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
+						Net6s:          []xnetip.BiContiguous{filter.UnspecifiedIPv6},
+						ProtoRanges:    filter.ProtoRanges{filter.NewProtoRange(17, filter.AnySubtype())},
+						VirtualService: "svc",
+					}}))
+					require.NoError(t, agent.UpdateModules([]ffi.ModuleConfig{seedModule.AsFFIModule()}))
+					// ICMP type/code aliases this UDP port if Echo reaches session lookup.
+					generatedSource := netip.MustParseAddr("10.0.0.1")
+					sourcePort := uint16(2048)
+					if family == "IPv6" {
+						generatedSource = netip.MustParseAddr("2001:db8::1")
+						sourcePort = 32768
+					}
+					var sources []netip.Addr
+					seenSources := map[netip.Addr]bool{}
+					if tc.legacy != "003" {
+						sources = append(sources, generatedSource)
+						seenSources[generatedSource] = true
+					}
+					for _, pair := range pairs {
+						source, ok := netip.AddrFromSlice(pair.request.NetworkLayer().NetworkFlow().Src().Raw())
+						require.True(t, ok)
+						if !seenSources[source] {
+							sources = append(sources, source)
+							seenSources[source] = true
+						}
+					}
+					var expectedSessions []cl3bobject.Session
+					for _, source := range sources {
+						for _, port := range []uint16{sourcePort, sourcePort + 1} {
+							seedEthernet := layers.Ethernet{
+								SrcMAC:       xerror.Unwrap(net.ParseMAC("aa:bb:cc:dd:ee:ff")),
+								DstMAC:       xerror.Unwrap(net.ParseMAC("11:22:33:44:55:66")),
+								EthernetType: layers.EthernetTypeIPv4,
+							}
+							udp := layers.UDP{SrcPort: layers.UDPPort(port), DstPort: 80}
+							var seed gopacket.Packet
+							if family == "IPv4" {
+								network := layers.IPv4{Version: 4, TTL: 64, Protocol: layers.IPProtocolUDP, SrcIP: net.IP(source.AsSlice()), DstIP: net.ParseIP("192.168.1.1")}
+								require.NoError(t, udp.SetNetworkLayerForChecksum(&network))
+								seed = xpacket.LayersToPacket(t, &seedEthernet, &network, &udp, gopacket.Payload("session seed"))
+							} else {
+								seedEthernet.EthernetType = layers.EthernetTypeIPv6
+								network := layers.IPv6{Version: 6, HopLimit: 64, NextHeader: layers.IPProtocolUDP, SrcIP: net.IP(source.AsSlice()), DstIP: net.ParseIP("2001:db8:1::1")}
+								require.NoError(t, udp.SetNetworkLayerForChecksum(&network))
+								seed = xpacket.LayersToPacket(t, &seedEthernet, &network, &udp, gopacket.Payload("session seed"))
+							}
+							result, err := harness.HandlePackets(seed)
+							require.NoError(t, err)
+							require.Empty(t, result.Drop)
+							require.Len(t, result.Output, 1)
+							expectedSessions = append(expectedSessions, cl3bobject.Session{
+								SourceAddress: source, SourcePort: port, RealAddress: reals[0].DestinationAddress,
+								ExpiresAt: uint64(initialTime.Add(600 * time.Second).UnixNano()),
+							})
+						}
+					}
+					seedSessions, seedCursors := readEchoSessions(t, agent, seedService, harness.CurrentTime())
+					require.GreaterOrEqual(t, len(seedSessions), 2)
+					require.ElementsMatch(t, expectedSessions, seedSessions)
 					reals = reals[:len(tc.weights)]
-					service, _ := newVirtualService(t, agent, "svc",
-						cl3bobject.VirtualServiceConfig{
-							RealServers: reals, RingCapacity: 1000,
-						},
+					serviceConfig.RealServers = reals
+					serviceConfig.SourceFilterRules[0].PortRanges = filter.PortRanges{{From: 0, To: 65535}}
+					service, err := cl3bobject.CreateVirtualService(agent, "svc",
+						serviceConfig, table,
 					)
+					require.NoError(t, err)
+					t.Cleanup(func() { _ = service.Free() })
 					for idx := range reals {
 						require.NoError(t, service.SetRealServerState(uint32(idx), !tc.disabled))
 					}
@@ -1017,6 +1221,10 @@ func Test_L3b_ConfiguredRealsGateEcho(t *testing.T) {
 					}
 					require.NoError(t, service.UpdateRing(ring))
 					require.NoError(t, service.Publish(agent))
+					require.NoError(t, seedService.Free())
+					replacementSessions, replacementCursors := readEchoSessions(t, agent, service, harness.CurrentTime())
+					require.Equal(t, seedSessions, replacementSessions)
+					require.Equal(t, seedCursors, replacementCursors)
 					info, err := service.Inspect()
 					require.NoError(t, err)
 					require.Len(t, info.RealServers, len(reals))
@@ -1039,74 +1247,126 @@ func Test_L3b_ConfiguredRealsGateEcho(t *testing.T) {
 						ProtoRanges:    filter.ProtoRanges{filter.NewProtoRange(58, filter.ExactSubtype(128))},
 						VirtualService: "svc",
 					}}
+					switch tc.legacy {
+					case "001", "003":
+						vip := "10.0.0.20/32"
+						if tc.legacy == "003" {
+							vip = "10.0.0.21/32"
+						}
+						rules = append(rules, cl3b.DestinationFilterRule{
+							Net4s:          []xnetip.Contiguous[xnetip.Network4]{xnetip.MustParseContiguous4(vip)},
+							ProtoRanges:    filter.ProtoRanges{filter.NewProtoRange(1, filter.ExactSubtype(8))},
+							VirtualService: "svc",
+						})
+					case "002":
+						rules = append(rules, cl3b.DestinationFilterRule{
+							Net6s:          []xnetip.BiContiguous{xnetip.MustParseBiContiguous("2005:dead:beef::1/128")},
+							ProtoRanges:    filter.ProtoRanges{filter.NewProtoRange(58, filter.ExactSubtype(128))},
+							VirtualService: "svc",
+						})
+					}
 					require.NoError(t, module.Update(rules))
 					require.NoError(t, agent.UpdateModules([]ffi.ModuleConfig{module.AsFFIModule()}))
 
-					ethernet := layers.Ethernet{
-						SrcMAC:       xerror.Unwrap(net.ParseMAC("aa:bb:cc:dd:ee:ff")),
-						DstMAC:       xerror.Unwrap(net.ParseMAC("11:22:33:44:55:66")),
-						EthernetType: layers.EthernetTypeIPv4,
-					}
-					payload := gopacket.Payload("configured-real echo payload")
-					var request, reply gopacket.Packet
-					if family == "IPv4" {
-						destination := net.ParseIP("192.168.1.1")
-						if tc.unmatched {
-							destination = net.ParseIP("192.168.2.1")
+					if tc.legacy != "003" {
+						ethernet := layers.Ethernet{
+							SrcMAC:       xerror.Unwrap(net.ParseMAC("aa:bb:cc:dd:ee:ff")),
+							DstMAC:       xerror.Unwrap(net.ParseMAC("11:22:33:44:55:66")),
+							EthernetType: layers.EthernetTypeIPv4,
 						}
-						request = xpacket.LayersToPacket(t, &ethernet,
-							&layers.IPv4{Version: 4, TTL: 1, Protocol: layers.IPProtocolICMPv4, SrcIP: net.ParseIP("10.0.0.1"), DstIP: destination},
-							&layers.ICMPv4{TypeCode: layers.CreateICMPv4TypeCode(layers.ICMPv4TypeEchoRequest, 0), Id: 0x1234, Seq: 7}, payload,
-						)
-						reply = xpacket.LayersToPacket(t, &ethernet,
-							&layers.IPv4{Version: 4, TTL: 64, Protocol: layers.IPProtocolICMPv4, SrcIP: destination, DstIP: net.ParseIP("10.0.0.1")},
-							&layers.ICMPv4{TypeCode: layers.CreateICMPv4TypeCode(layers.ICMPv4TypeEchoReply, 0), Id: 0x1234, Seq: 7}, payload,
-						)
-					} else {
-						ethernet.EthernetType = layers.EthernetTypeIPv6
-						destination := net.ParseIP("2001:db8:1::1")
-						if tc.unmatched {
-							destination = net.ParseIP("2001:db8:4::1")
+						payload := gopacket.Payload("configured-real echo payload")
+						var request, reply gopacket.Packet
+						if family == "IPv4" {
+							destination := net.ParseIP("192.168.1.1")
+							if tc.unmatched {
+								destination = net.ParseIP("192.168.2.1")
+							}
+							request = xpacket.LayersToPacket(t, &ethernet,
+								&layers.IPv4{Version: 4, TTL: 1, Protocol: layers.IPProtocolICMPv4, SrcIP: net.ParseIP("10.0.0.1"), DstIP: destination},
+								&layers.ICMPv4{TypeCode: layers.CreateICMPv4TypeCode(layers.ICMPv4TypeEchoRequest, 0), Id: 0x1234, Seq: 7}, payload,
+							)
+							reply = xpacket.LayersToPacket(t, &ethernet,
+								&layers.IPv4{Version: 4, TTL: 64, Protocol: layers.IPProtocolICMPv4, SrcIP: destination, DstIP: net.ParseIP("10.0.0.1")},
+								&layers.ICMPv4{TypeCode: layers.CreateICMPv4TypeCode(layers.ICMPv4TypeEchoReply, 0), Id: 0x1234, Seq: 7}, payload,
+							)
+						} else {
+							ethernet.EthernetType = layers.EthernetTypeIPv6
+							destination := net.ParseIP("2001:db8:1::1")
+							if tc.unmatched {
+								destination = net.ParseIP("2001:db8:4::1")
+							}
+							requestIP := layers.IPv6{Version: 6, HopLimit: 1, NextHeader: layers.IPProtocolICMPv6, SrcIP: net.ParseIP("2001:db8::1"), DstIP: destination}
+							requestICMP := layers.ICMPv6{TypeCode: layers.CreateICMPv6TypeCode(layers.ICMPv6TypeEchoRequest, 0)}
+							require.NoError(t, requestICMP.SetNetworkLayerForChecksum(&requestIP))
+							request = xpacket.LayersToPacket(t, &ethernet, &requestIP, &requestICMP,
+								&layers.ICMPv6Echo{Identifier: 0x1234, SeqNumber: 7}, payload,
+							)
+							replyIP := layers.IPv6{Version: 6, HopLimit: 64, NextHeader: layers.IPProtocolICMPv6, SrcIP: destination, DstIP: net.ParseIP("2001:db8::1")}
+							replyICMP := layers.ICMPv6{TypeCode: layers.CreateICMPv6TypeCode(layers.ICMPv6TypeEchoReply, 0)}
+							require.NoError(t, replyICMP.SetNetworkLayerForChecksum(&replyIP))
+							reply = xpacket.LayersToPacket(t, &ethernet, &replyIP, &replyICMP,
+								&layers.ICMPv6Echo{Identifier: 0x1234, SeqNumber: 7}, payload,
+							)
 						}
-						requestIP := layers.IPv6{Version: 6, HopLimit: 1, NextHeader: layers.IPProtocolICMPv6, SrcIP: net.ParseIP("2001:db8::1"), DstIP: destination}
-						requestICMP := layers.ICMPv6{TypeCode: layers.CreateICMPv6TypeCode(layers.ICMPv6TypeEchoRequest, 0)}
-						require.NoError(t, requestICMP.SetNetworkLayerForChecksum(&requestIP))
-						request = xpacket.LayersToPacket(t, &ethernet, &requestIP, &requestICMP,
-							&layers.ICMPv6Echo{Identifier: 0x1234, SeqNumber: 7}, payload,
-						)
-						replyIP := layers.IPv6{Version: 6, HopLimit: 64, NextHeader: layers.IPProtocolICMPv6, SrcIP: destination, DstIP: net.ParseIP("2001:db8::1")}
-						replyICMP := layers.ICMPv6{TypeCode: layers.CreateICMPv6TypeCode(layers.ICMPv6TypeEchoReply, 0)}
-						require.NoError(t, replyICMP.SetNetworkLayerForChecksum(&replyIP))
-						reply = xpacket.LayersToPacket(t, &ethernet, &replyIP, &replyICMP,
-							&layers.ICMPv6Echo{Identifier: 0x1234, SeqNumber: 7}, payload,
-						)
+						pairs = append([]echoPCAPPair{{name: "generated", request: request, reply: reply}}, pairs...)
 					}
-					original := bytes.Clone(request.Data())
-					result, err := harness.HandlePackets(request)
-					require.NoError(t, err)
-					if tc.wantDrop {
-						require.Empty(t, result.Output)
-						require.Len(t, result.Drop, 1)
-						require.Equal(t, original, result.Drop[0].RawData)
-					} else {
-						require.Empty(t, result.Drop)
-						require.Len(t, result.Output, 1)
-						expected := reply.Data()
-						if tc.unmatched {
-							expected = original
-						}
-						require.Equal(t, expected, result.Output[0].RawData)
+					for _, pair := range pairs {
+						t.Run(pair.name, func(t *testing.T) {
+							request, reply := pair.request, pair.reply
+							original := bytes.Clone(request.Data())
+							executionContext, err := harness.PublishedExecutionContext(0)
+							require.NoError(t, err)
+							counterNames := []string{"incoming", "icmp_replied", "filter_rejected", "ring_empty", "real_disabled"}
+							for idx := range reals {
+								counterNames = append(counterNames, fmt.Sprintf("real/%d", idx))
+							}
+							baseline := map[string][2]uint64{}
+							for _, name := range counterNames {
+								packets, bytes, err := cl3bobject.ReadServiceCounter(executionContext, "svc", name)
+								require.NoError(t, err)
+								baseline[name] = [2]uint64{packets, bytes}
+							}
+							harness.AdvanceTime(time.Second)
+							beforeSessions, beforeCursors := readEchoSessions(t, agent, service, harness.CurrentTime())
+							require.Equal(t, seedSessions, beforeSessions)
+							require.Equal(t, seedCursors, beforeCursors)
+							for _, session := range beforeSessions {
+								require.Greater(t, session.ExpiresAt, uint64(harness.CurrentTime().UnixNano()))
+							}
+							// Raw output preserves short captures without parser-added padding.
+							result, err := harness.HandleSegmentedPackets([][]byte{original})
+							require.NoError(t, err)
+							if tc.wantDrop {
+								require.Empty(t, result.Output)
+								require.Len(t, result.Drop, 1)
+								require.Equal(t, original, result.Drop[0])
+							} else {
+								require.Empty(t, result.Drop)
+								require.Len(t, result.Output, 1)
+								expected := reply.Data()
+								if tc.unmatched {
+									expected = original
+								}
+								require.Equal(t, expected, result.Output[0])
+							}
+							afterSessions, afterCursors := readEchoSessions(t, agent, service, harness.CurrentTime())
+							require.Equal(t, beforeSessions, afterSessions)
+							require.Equal(t, beforeCursors, afterCursors)
+							incoming, incomingBytes, err := cl3bobject.ReadServiceCounter(executionContext, "svc", "incoming")
+							require.NoError(t, err)
+							require.Equal(t, tc.wantInput, incoming-baseline["incoming"][0])
+							require.Equal(t, tc.wantInput*uint64(len(original)), incomingBytes-baseline["incoming"][1])
+							replied, repliedBytes, err := cl3bobject.ReadServiceCounter(executionContext, "svc", "icmp_replied")
+							require.NoError(t, err)
+							require.Equal(t, tc.wantReply, replied-baseline["icmp_replied"][0])
+							require.Equal(t, tc.wantReply*uint64(len(reply.Data())), repliedBytes-baseline["icmp_replied"][1])
+							for _, name := range counterNames[2:] {
+								packets, bytes, err := cl3bobject.ReadServiceCounter(executionContext, "svc", name)
+								require.NoError(t, err)
+								require.Equal(t, baseline[name], [2]uint64{packets, bytes}, name)
+							}
+						})
 					}
-					executionContext, err := harness.PublishedExecutionContext(0)
-					require.NoError(t, err)
-					incoming, incomingBytes, err := cl3bobject.ReadServiceCounter(executionContext, "svc", "incoming")
-					require.NoError(t, err)
-					require.Equal(t, tc.wantInput, incoming)
-					require.Equal(t, tc.wantInput*uint64(len(original)), incomingBytes)
-					replied, repliedBytes, err := cl3bobject.ReadServiceCounter(executionContext, "svc", "icmp_replied")
-					require.NoError(t, err)
-					require.Equal(t, tc.wantReply, replied)
-					require.Equal(t, tc.wantReply*uint64(len(reply.Data())), repliedBytes)
 				})
 			}
 		})
