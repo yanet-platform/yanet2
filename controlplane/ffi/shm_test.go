@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -13,9 +14,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/c2h5oh/datasize"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sys/unix"
 
+	testshm "github.com/yanet-platform/yanet2/common/go/testutils/shm"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 )
 
@@ -70,6 +73,40 @@ func Test_SharedMemory_Attach_MissingFile(t *testing.T) {
 	shm, err := ffi.AttachSharedMemory(path)
 	require.Error(t, err)
 	require.Nil(t, shm)
+}
+
+// Test_SharedMemory_AgentAttach_InstanceBounds verifies that the last real
+// instance attaches and invalid indices fail before traversing unmapped storage.
+func Test_SharedMemory_AgentAttach_InstanceBounds(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		instance uint32
+		valid    bool
+	}{
+		{name: "last valid instance", instance: 0, valid: true},
+		{name: "first index beyond the single instance", instance: 1},
+		{name: "maximum index cannot traverse the mapping", instance: math.MaxUint32},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path := testshm.NewStorage(t)
+			memory, err := ffi.AttachSharedMemory(path)
+			require.NoError(t, err)
+			t.Cleanup(func() { require.NoError(t, memory.Detach()) })
+			agents := memory.DPConfig(0).Agents()
+			agent, err := memory.AgentAttach("boundary", tc.instance, 64*datasize.MB)
+			if agent != nil {
+				t.Cleanup(func() { require.NoError(t, agent.Close()) })
+			}
+			if tc.valid {
+				require.NoError(t, err)
+				require.NotNil(t, agent)
+				return
+			}
+			require.Nil(t, agent)
+			require.ErrorContains(t, err, "out of range [0, 1)")
+			require.Equal(t, agents, memory.DPConfig(0).Agents())
+		})
+	}
 }
 
 // Test_SharedMemory_TruncatedStorage_ExitsOnSIGBUS verifies that a fault in a

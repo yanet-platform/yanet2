@@ -30,21 +30,21 @@ func Test_Storage_L3BInventory(t *testing.T) {
 // Test_Storage_MissingTypePreservesInventory verifies that unresolved dynamic
 // symbols fail without adding, removing or replacing existing type entries.
 func Test_Storage_MissingTypePreservesInventory(t *testing.T) {
-	for _, scenario := range []struct {
+	for _, tc := range []struct {
 		name   string
 		object bool
 	}{
 		{name: "missing module"},
 		{name: "missing object", object: true},
 	} {
-		t.Run(scenario.name, func(t *testing.T) {
+		t.Run(tc.name, func(t *testing.T) {
 			path := testshm.NewStorage(t)
 			memory, err := ffi.AttachSharedMemory(path)
 			require.NoError(t, err)
 			t.Cleanup(func() { require.NoError(t, memory.Detach()) })
 			modules := memory.DPConfig(0).Modules()
 			objects := testshm.ObjectTypes(memory)
-			require.ErrorContains(t, testshm.LoadType(memory, "missing_l3b_admission", scenario.object), "missing_l3b_admission")
+			require.ErrorContains(t, testshm.LoadType(memory, "missing_l3b_admission", tc.object), "missing_l3b_admission")
 			require.Equal(t, modules, memory.DPConfig(0).Modules())
 			require.Equal(t, objects, testshm.ObjectTypes(memory))
 		})

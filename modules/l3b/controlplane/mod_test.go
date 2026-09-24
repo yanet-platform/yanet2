@@ -148,11 +148,11 @@ func Test_L3BModule_NontrafficAdmission(t *testing.T) {
 // Test_L3BModule_NontrafficConstructorErrors verifies that a failed attachment
 // returns no module and leaves no mapping of the test-owned storage.
 func Test_L3BModule_NontrafficConstructorErrors(t *testing.T) {
-	for _, name := range []string{"missing memory file", "invalid instance"} {
-		t.Run(name, func(t *testing.T) {
+	for _, tc := range []string{"missing memory file", "invalid instance"} {
+		t.Run(tc, func(t *testing.T) {
 			config := l3b.DefaultConfig()
 			config.InstanceID = xcfg.NewRequired(uint32(0))
-			if name == "missing memory file" {
+			if tc == "missing memory file" {
 				config.MemoryPath = xcfg.MustNonEmptyString(filepath.Join(t.TempDir(), "missing"))
 			} else {
 				config.MemoryPath = xcfg.MustNonEmptyString(testshm.NewStorage(t))
@@ -164,7 +164,7 @@ func Test_L3BModule_NontrafficConstructorErrors(t *testing.T) {
 			}
 			require.Nil(t, module)
 			require.Error(t, err)
-			if name == "missing memory file" {
+			if tc == "missing memory file" {
 				require.ErrorIs(t, err, os.ErrNotExist)
 			} else {
 				require.ErrorContains(t, err, "failed to attach agent")
