@@ -1075,14 +1075,16 @@ func Test_L3b_ConfiguredRealsGateEcho(t *testing.T) {
 				enabledBatch = "002"
 			}
 			type stateCase struct {
-				name      string
-				weights   []uint32
-				legacy    string
-				disabled  bool
-				unmatched bool
-				wantDrop  bool
-				wantReply uint64
-				wantInput uint64
+				name                    string
+				restrictiveSourceFilter bool
+				sessionFill             string
+				weights                 []uint32
+				legacy                  string
+				disabled                bool
+				unmatched               bool
+				wantDrop                bool
+				wantReply               uint64
+				wantInput               uint64
 			}
 			cases := []stateCase{
 				{name: "empty configured list drops unchanged", wantDrop: true, wantInput: 1},
@@ -1090,6 +1092,9 @@ func Test_L3b_ConfiguredRealsGateEcho(t *testing.T) {
 				{name: "all configured reals disabled reply", weights: []uint32{1, 1}, disabled: true, wantReply: 1, wantInput: 1},
 				{name: "all configured weights zero reply", weights: []uint32{0, 0}, wantReply: 1, wantInput: 1},
 				{name: "unmatched destination passes unchanged", weights: []uint32{1, 1}, unmatched: true},
+				{name: "restrictive_source_filter_does_not_block_echo", weights: []uint32{1}, restrictiveSourceFilter: true, wantReply: 1, wantInput: 1},
+				{name: "empty_session_table_does_not_block_echo", weights: []uint32{1}, sessionFill: "empty", wantReply: 1, wantInput: 1},
+				{name: "missing_session_key_does_not_block_echo", weights: []uint32{1}, sessionFill: "unrelated", wantReply: 1, wantInput: 1},
 			}
 			if family == "IPv4" {
 				cases = append(cases, stateCase{
@@ -1171,6 +1176,18 @@ func Test_L3b_ConfiguredRealsGateEcho(t *testing.T) {
 							seenSources[source] = true
 						}
 					}
+					switch tc.sessionFill {
+					case "", "collision":
+					case "empty":
+						sources = nil
+					case "unrelated":
+						sources = []netip.Addr{netip.MustParseAddr("10.0.0.2")}
+						if family == "IPv6" {
+							sources = []netip.Addr{netip.MustParseAddr("2001:db8::2")}
+						}
+					default:
+						t.Fatalf("unknown session fill mode %q", tc.sessionFill)
+					}
 					var expectedSessions []cl3bobject.Session
 					for _, source := range sources {
 						for _, port := range []uint16{sourcePort, sourcePort + 1} {
@@ -1202,11 +1219,27 @@ func Test_L3b_ConfiguredRealsGateEcho(t *testing.T) {
 						}
 					}
 					seedSessions, seedCursors := readEchoSessions(t, agent, seedService, harness.CurrentTime())
-					require.GreaterOrEqual(t, len(seedSessions), 2)
+					if tc.sessionFill == "empty" {
+						require.Len(t, seedSessions, 0)
+						require.Equal(t, []uint64{0}, seedCursors)
+					} else {
+						require.GreaterOrEqual(t, len(seedSessions), 2)
+					}
 					require.ElementsMatch(t, expectedSessions, seedSessions)
+					if tc.sessionFill == "unrelated" {
+						for _, session := range seedSessions {
+							require.False(t, session.SourceAddress == generatedSource && session.SourcePort == sourcePort, "Echo session key must be absent")
+							require.Equal(t, sources[0], session.SourceAddress)
+						}
+					}
 					reals = reals[:len(tc.weights)]
 					serviceConfig.RealServers = reals
-					serviceConfig.SourceFilterRules[0].PortRanges = filter.PortRanges{{From: 0, To: 65535}}
+					if tc.restrictiveSourceFilter {
+						serviceConfig.SourceFilterRules[0].Net4s = []xnetip.Contiguous[xnetip.Network4]{xnetip.MustParseContiguous4("192.0.2.0/24")}
+						serviceConfig.SourceFilterRules[0].Net6s = []xnetip.BiContiguous{xnetip.MustParseBiContiguous("2001:db8:ffff::/64")}
+					} else {
+						serviceConfig.SourceFilterRules[0].PortRanges = filter.PortRanges{{From: 0, To: 65535}}
+					}
 					service, err := cl3bobject.CreateVirtualService(agent, "svc",
 						serviceConfig, table,
 					)
@@ -1330,6 +1363,10 @@ func Test_L3b_ConfiguredRealsGateEcho(t *testing.T) {
 							beforeSessions, beforeCursors := readEchoSessions(t, agent, service, harness.CurrentTime())
 							require.Equal(t, seedSessions, beforeSessions)
 							require.Equal(t, seedCursors, beforeCursors)
+							if tc.sessionFill == "empty" {
+								require.Len(t, beforeSessions, 0)
+								require.Equal(t, []uint64{0}, beforeCursors)
+							}
 							for _, session := range beforeSessions {
 								require.Greater(t, session.ExpiresAt, uint64(harness.CurrentTime().UnixNano()))
 							}
@@ -1352,6 +1389,10 @@ func Test_L3b_ConfiguredRealsGateEcho(t *testing.T) {
 							afterSessions, afterCursors := readEchoSessions(t, agent, service, harness.CurrentTime())
 							require.Equal(t, beforeSessions, afterSessions)
 							require.Equal(t, beforeCursors, afterCursors)
+							if tc.sessionFill == "empty" {
+								require.Len(t, afterSessions, 0)
+								require.Equal(t, []uint64{0}, afterCursors)
+							}
 							incoming, incomingBytes, err := cl3bobject.ReadServiceCounter(executionContext, "svc", "incoming")
 							require.NoError(t, err)
 							require.Equal(t, tc.wantInput, incoming-baseline["incoming"][0])
