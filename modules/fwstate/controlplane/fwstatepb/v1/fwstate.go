@@ -19,6 +19,21 @@ const (
 	// syncAddrLen is the width every sync address is stored at: the
 	// module matches and stamps IPv6 addresses only.
 	syncAddrLen = 16
+
+	// ipv6HeaderLen and udpHeaderLen are the wire headers the sync MTU
+	// counts in front of the frames.
+	ipv6HeaderLen uint32 = 40
+	udpHeaderLen  uint32 = 8
+
+	// syncFrameLen is the wire size of one sync frame.
+	syncFrameLen uint32 = 56
+
+	// MinSyncMTU is the smallest nonzero sync MTU: the IPv6 and UDP
+	// headers plus one frame. It mirrors the C FWSTATE_SYNC_MIN_MTU.
+	MinSyncMTU = ipv6HeaderLen + udpHeaderLen + syncFrameLen
+
+	// maxSyncMTU matches the width of the C-side uint16 sync_mtu field.
+	maxSyncMTU uint32 = 65535
 )
 
 // Validate checks the values an update carries.
@@ -159,9 +174,9 @@ func (m *SyncConfig) ValidateFields() error {
 // which is what the request merged over the config it replaces must be.
 //
 // Synchronization is optional. A config naming no destination leaves external
-// traffic in ordinary processing, while trusted internal events are consumed
-// and dropped. Naming only part of an endpoint is refused because it cannot
-// be matched or emitted safely.
+// traffic in ordinary processing, while locally stashed events are applied
+// without emission. Naming only part of an endpoint is refused because it
+// cannot be matched or emitted safely.
 func (m *SyncConfig) ValidateMerged() error {
 	if m == nil {
 		return nil
@@ -180,6 +195,10 @@ func (m *SyncConfig) ValidateMerged() error {
 		return fmt.Errorf("dst_ether must be an EUI-48 address")
 	}
 
+	if err := validateSyncMTU(m.GetSyncMtu()); err != nil {
+		return err
+	}
+
 	srcAddrSet := isAddrSet(m.GetSrcAddr().GetAddr())
 	multicastAddrSet := isAddrSet(m.GetDstAddrMulticast().GetAddr())
 	multicastPortSet := m.GetPortMulticast() != 0
@@ -188,8 +207,8 @@ func (m *SyncConfig) ValidateMerged() error {
 
 	// A zero address and zero port mean that endpoint is disabled. This is
 	// also the representation produced for a config created without sync
-	// settings, so external traffic remains ordinary while trusted internal
-	// events are consumed and dropped.
+	// settings, so external traffic remains ordinary while locally stashed
+	// events are applied without emission.
 	multicastConfigured := multicastAddrSet || multicastPortSet
 	unicastConfigured := unicastAddrSet || unicastPortSet
 	if !multicastConfigured && !unicastConfigured {
@@ -234,6 +253,21 @@ func (m *SyncConfig) ValidateMerged() error {
 }
 
 const macAddrMask uint64 = (1 << 48) - 1
+
+// validateSyncMTU accepts zero, which selects the default, and any value
+// that holds one frame and fits the C field.
+func validateSyncMTU(mtu uint32) error {
+	if mtu == 0 {
+		return nil
+	}
+	if mtu < MinSyncMTU {
+		return fmt.Errorf("sync_mtu %d is below the minimum %d", mtu, MinSyncMTU)
+	}
+	if mtu > maxSyncMTU {
+		return fmt.Errorf("sync_mtu %d exceeds maximum allowed value %d", mtu, maxSyncMTU)
+	}
+	return nil
+}
 
 // validateAddrWidth accepts empty addresses and full-width IPv6 addresses.
 func validateAddrWidth(field string, addr []byte) error {

@@ -158,4 +158,10 @@ pub struct UpdateCmd {
     /// Omitted keeps the current window; zero disables suppression.
     #[arg(long, value_parser = parse_duration)]
     pub sync_suppress_timeout: Option<Duration>,
+
+    /// Largest emitted sync packet in bytes, IPv6 and UDP headers included;
+    /// it bounds how many frames one packet batches, as does the mbuf data
+    /// room. Zero selects 1500; a nonzero value must be at least 104.
+    #[arg(long)]
+    pub sync_mtu: Option<u16>,
 }

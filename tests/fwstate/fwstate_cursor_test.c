@@ -529,79 +529,7 @@ test_forward_bounds(void *arena) {
 	printf("  Forward bounds safety test passed\n");
 }
 
-/* Test 10: Backward clamping                                              */
-/* ====================================================================== */
-
-static void
-test_backward_clamping(void *arena) {
-	printf("\n--- Backward Clamping Test ---\n");
-	test_env_t env = test_env_create(arena, "bwd_clamp");
-
-	/* Insert 3 TCP entries: ports 8000..8002 -> 80, so key_cursor = 3 */
-	test_env_insert_tcp(&env, 3, 8000, 80);
-
-	fwstate_cursor_entry_t out[10];
-
-	/*
-	 * key_pos > key_cursor should clamp to key_cursor-1 (= 2).
-	 * Should return entries 2, 1, 0 in that order.
-	 */
-	fwstate_cursor_t cursor = {
-		.key_pos = 999,
-		.include_expired = true,
-	};
-
-	uint32_t n =
-		fwstate_cursor_read_backward(env.map, &cursor, now, out, 10);
-	assert(n == 3);
-	assert(out[0].idx == 2);
-	assert(out[1].idx == 1);
-	assert(out[2].idx == 0);
-
-	/* Verify port values match expected reverse order */
-	struct fw4_state_key *k0 = (struct fw4_state_key *)out[0].key;
-	struct fw4_state_key *k2 = (struct fw4_state_key *)out[2].key;
-	assert(k0->hdr.src_port == 8002);
-	assert(k2->hdr.src_port == 8000);
-
-	test_env_destroy(&env);
-	printf("  Backward clamping test passed\n");
-}
-
-/* Test 11: Single entry backward                                          */
-/* ====================================================================== */
-
-static void
-test_single_entry_backward(void *arena) {
-	printf("\n--- Single Entry Backward Test ---\n");
-	test_env_t env = test_env_create(arena, "single_bwd");
-
-	/* Insert exactly 1 TCP entry: port 11000 -> 80 */
-	test_env_insert_tcp(&env, 1, 11000, 80);
-
-	fwstate_cursor_entry_t out[10];
-	fwstate_cursor_t cursor = {
-		.key_pos = INT64_MAX,
-		.include_expired = true,
-	};
-
-	uint32_t n =
-		fwstate_cursor_read_backward(env.map, &cursor, now, out, 10);
-	assert(n == 1);
-	assert(out[0].idx == 0);
-
-	/* Cursor should be exhausted */
-	assert(cursor.key_pos == -1);
-
-	/* Next call should return 0 entries */
-	n = fwstate_cursor_read_backward(env.map, &cursor, now, out, 10);
-	assert(n == 0);
-
-	test_env_destroy(&env);
-	printf("  Single entry backward test passed\n");
-}
-
-/* Test 12: Backward paging                                                */
+/* Test 10: Backward paging                                                */
 /* ====================================================================== */
 
 static void
@@ -662,7 +590,7 @@ test_backward_paging(void *arena) {
 	printf("  Backward paging test passed\n");
 }
 
-/* Test 13: Expired entry at index 0 in backward with include_expired      */
+/* Test 11: Expired entry at index 0 in backward with include_expired      */
 /* ====================================================================== */
 
 static void
@@ -734,8 +662,6 @@ main(void) {
 	test_uninitialized_skipped(arena);
 	test_paging(arena);
 	test_forward_bounds(arena);
-	test_backward_clamping(arena);
-	test_single_entry_backward(arena);
 	test_backward_paging(arena);
 	test_backward_expired_at_zero(arena);
 

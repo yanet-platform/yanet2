@@ -185,3 +185,11 @@ func TestSyncSuppressTimeoutRoundTrip(t *testing.T) {
 	got := FromCSyncConfig(pb.ToC())
 	require.Equal(t, suppress, got.GetSyncSuppressTimeout())
 }
+
+// Test_SyncConfig_SyncMTURoundTrip verifies that the sync MTU survives the
+// Pb->C->Pb conversion.
+func Test_SyncConfig_SyncMTURoundTrip(t *testing.T) {
+	got := FromCSyncConfig((&SyncConfig{SyncMtu: proto.Uint32(9000)}).ToC())
+
+	require.Equal(t, uint32(9000), got.GetSyncMtu())
+}

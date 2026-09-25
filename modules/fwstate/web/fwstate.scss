@@ -863,6 +863,11 @@
         min-width: 0;
     }
 
+    &__stash {
+        width: 84px;
+        flex-shrink: 0;
+    }
+
     &__actions {
         display: flex;
         gap: 6px;
@@ -881,7 +886,7 @@
     grid-template-columns: repeat(3, minmax(180px, 1fr));
     gap: 10px;
 
-    &__src, &__mac, &__mode { grid-column: span 1; }
+    &__src, &__mac, &__mtu, &__mode { grid-column: span 1; }
     &__endpoint { grid-column: span 3; }
 }
 

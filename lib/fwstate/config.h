@@ -54,4 +54,9 @@ struct fwstate_sync_config {
 	// Every entry TTL is inflated by this value so the effective keep-alive
 	// never falls below the configured timeout. Zero disables suppression.
 	uint64_t sync_suppress_timeout;
+
+	// Largest IPv6 packet, headers included, of one locally emitted sync
+	// packet; it bounds how many frames a packet batches. Zero selects
+	// the default of 1500.
+	uint16_t sync_mtu;
 };

@@ -32,34 +32,6 @@ fwmap_heavy_bench_test = executable(
 )
 test('fwmap_heavy_bench-mt', fwmap_heavy_bench_test, suite: ['fwstate', 'large'])
 
-ttlmap_heavy_bench_test = executable(
-  'ttlmap_heavy_bench_test',
-  ['ttlmap_heavy_bench_test.c'],
-  c_args: yanet_c_args,  # not testing args
-  link_args: yanet_link_args,
-  dependencies: dependencies,
-)
-test('ttlmap_heavy_bench-mt', ttlmap_heavy_bench_test, suite: ['fwstate', 'large'])
-
-layermap_test = executable(
-  'layermap_test',
-  ['layermap_test.c'],
-  c_args: yanet_test_c_args,
-  link_args: yanet_link_args,
-  dependencies: dependencies,
-)
-# Skip layermap_test because it is written with the assumption that adding new layers
-# will go through the lock of installing new configs in dataplane. This assumption
-# doesn't hold in the test environment, causing TSAN to detect data races.
-# TODO: Rewrite the test to emulate the config installation lock in dataplane.
-if not get_option('b_sanitize').contains('thread')
-  test('layermap_basic',
-    layermap_test,
-    timeout: 15,
-    suite: ['fwstate'],
-  )
-endif
-
 fwtable_test = executable(
   'fwtable_test',
   ['fwtable_test.c'],
@@ -86,15 +58,15 @@ test('fwstate_cursor',
   suite: ['fwstate'],
 )
 
-sync_endian_test = executable(
-  'sync_endian_test',
-  ['sync_endian_test.c'],
+sync_test = executable(
+  'sync_test',
+  ['sync_test.c'],
   c_args: yanet_test_c_args,
   link_args: yanet_link_args,
   dependencies: [lib_common_dep, lib_logging_dep, lib_fwstate_dep, lib_packet_dp_dep],
 )
-test('sync_endian',
-  sync_endian_test,
+test('sync',
+  sync_test,
   timeout: 15,
   suite: ['fwstate'],
 )

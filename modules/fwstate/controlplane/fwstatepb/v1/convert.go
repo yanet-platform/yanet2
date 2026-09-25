@@ -28,6 +28,7 @@ func (m *SyncConfig) ToC() cfwstate.SyncConfig {
 	cfg.Udp = m.GetUdp()
 	cfg.Default = m.GetDefault()
 	cfg.SyncSuppressTimeout = m.GetSyncSuppressTimeout()
+	cfg.SyncMTU = uint16(m.GetSyncMtu())
 	return cfg
 }
 
@@ -61,6 +62,7 @@ func FromCSyncConfig(cfg cfwstate.SyncConfig) *SyncConfig {
 		Udp:                 proto.Uint64(cfg.Udp),
 		Default:             proto.Uint64(cfg.Default),
 		SyncSuppressTimeout: proto.Uint64(cfg.SyncSuppressTimeout),
+		SyncMtu:             proto.Uint32(uint32(cfg.SyncMTU)),
 	}
 	if cfg.PortMulticast != 0 {
 		pb.DstAddrMulticast = &commonpb.IPAddress{Addr: append([]byte(nil), cfg.DstAddrMulticast[:]...)}

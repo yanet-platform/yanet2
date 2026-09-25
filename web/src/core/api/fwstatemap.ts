@@ -25,6 +25,9 @@ export enum MapKind {
 export interface CreateMapRequest {
     name: string;
     kind: MapKind;
+    // Sync stash buffer per worker in bytes; 0 or omitted selects room for 64
+    // records.
+    stash_size?: number;
 }
 
 export interface CreateMapResponse {}
@@ -101,10 +104,15 @@ export const fwstatemap = {
     listMaps: (options?: CallOptions): Promise<ListMapsResponse> =>
         fwStateMapService.callWithBody<ListMapsResponse>('ListMaps', {}, options),
 
-    // Only the name and the family are sent: leaving the sizing fields at
-    // zero makes the service create the map with its default dimensions.
+    // Only the name, the family, and an optional stash size are sent:
+    // leaving a sizing field at zero makes the service create the map with
+    // its default dimensions.
     createMap: (request: CreateMapRequest, options?: CallOptions): Promise<CreateMapResponse> =>
-        fwStateMapService.callWithBody<CreateMapResponse>('CreateMap', { name: request.name, kind: request.kind }, options),
+        fwStateMapService.callWithBody<CreateMapResponse>(
+            'CreateMap',
+            { name: request.name, kind: request.kind, stash_size: request.stash_size },
+            options,
+        ),
 
     deleteMap: (request: DeleteMapRequest, options?: CallOptions): Promise<DeleteMapResponse> =>
         fwStateMapService.callWithBody<DeleteMapResponse>('DeleteMap', { name: request.name }, options),

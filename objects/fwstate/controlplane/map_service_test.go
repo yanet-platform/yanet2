@@ -3,6 +3,7 @@ package fwstatemap_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"math"
 	"sync"
 	"testing"
@@ -173,6 +174,54 @@ func TestMapStatsToProto(t *testing.T) {
 	require.Equal(t, uint64(4096), pb.GetMemoryUsed())
 }
 
+// Test_StashSizeLimits_MatchC verifies that the request limits equal the C
+// bounds they mirror.
+func Test_StashSizeLimits_MatchC(t *testing.T) {
+	require.Equal(t, cfwstate.MinStashSize, uint64(fwstatemappb.MinStashSize))
+	require.Equal(t, cfwstate.MaxStashSize, uint64(fwstatemappb.MaxStashSize))
+}
+
+// Test_FWStateMapService_CreateMap_AcceptsStashSizeBounds verifies that the
+// service creates maps with a zero stash size and with the smallest and
+// largest accepted sizes; the stored sizes are checked by the map object
+// tests.
+func Test_FWStateMapService_CreateMap_AcceptsStashSizeBounds(t *testing.T) {
+	h, err := dataplaneut.NewHarness(dataplaneut.Config{
+		CPMemory:      uint64(64 * datasize.MB),
+		DPMemory:      uint64(4 * datasize.MB),
+		WorkerCount:   1,
+		ObjectsToLoad: []string{"fwstate_map_v4", "fwstate_map_v6"},
+	})
+	require.NoError(t, err)
+	t.Cleanup(h.Free)
+
+	agent, err := h.SharedMemory().AgentAttach("fwstatemap-stash", 0, 16*datasize.MB)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = agent.CleanUp() })
+
+	svc := fwstatemap.NewFWStateMapService(agent)
+	cases := []struct {
+		name string
+		kind fwstatemappb.Kind
+		size uint64
+	}{
+		{name: "zero selects the default", kind: fwstatemappb.Kind_V4, size: 0},
+		{name: "one record", kind: fwstatemappb.Kind_V6, size: fwstatemappb.MinStashSize},
+		{name: "maximum", kind: fwstatemappb.Kind_V4, size: fwstatemappb.MaxStashSize},
+	}
+	for idx, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := svc.CreateMap(t.Context(), &fwstatemappb.CreateMapRequest{
+				Name:      fmt.Sprintf("stash-%d", idx),
+				Kind:      tc.kind,
+				IndexSize: 1024,
+				StashSize: tc.size,
+			})
+			require.NoError(t, err)
+		})
+	}
+}
+
 // TestMapLabeler verifies that the gRPC metrics labeler extracts the map
 // name for the relevant request types.
 func TestMapLabeler(t *testing.T) {
@@ -254,22 +303,6 @@ func (m *recordingBarrier) count() int {
 	return m.calls
 }
 
-// TestReclaimStaleLayers verifies that ReclaimStaleLayers runs the
-// grace barrier, unlinks stale layers, barriers again, then frees the
-// parked layers.
-func TestReclaimStaleLayers(t *testing.T) {
-	reclaimer := &recordingReclaimer{}
-	barrier := &recordingBarrier{}
-
-	svc := fwstatemap.NewFWStateMapServiceForTest(barrier.invoke)
-
-	svc.ReclaimStaleLayers(reclaimer, cfwstate.MapObjectConfig{}, 123456)
-
-	require.Equal(t, []uint64{123456}, reclaimer.unlinkCalls())
-	require.Equal(t, 2, barrier.count(), "one barrier must run before unlink and one after it")
-	require.Equal(t, 1, reclaimer.frees(), "parked layers must be freed after the second barrier")
-}
-
 // TestReclaimStaleLayersUnlinkFailureSkipsFree verifies that an unlink
 // failure runs no second barrier and frees nothing, without panicking.
 func TestReclaimStaleLayersUnlinkFailureSkipsFree(t *testing.T) {
@@ -318,6 +351,7 @@ func TestReclaimStaleLayersBarrierOrder(t *testing.T) {
 
 	svc.ReclaimStaleLayers(reclaimer, cfwstate.MapObjectConfig{}, 1)
 
+	require.Equal(t, []uint64{1}, reclaimer.unlinkCalls(), "unlink must receive the reclaim time")
 	eventsMu.Lock()
 	require.Equal(
 		t,

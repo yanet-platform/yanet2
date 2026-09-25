@@ -12,6 +12,7 @@ package cfwstate
 //#include "lib/fwstate/config.h"
 //#include "lib/statemap/fwmap.h"
 //#include "lib/fwstate/fwstate_cursor.h"
+//#include "lib/fwstate/stash.h"
 //#include "lib/statemap/fwtable.h"
 //#include "objects/fwstate/api/fwstate_map_v4_object.h"
 //#include "objects/fwstate/api/fwstate_map_v6_object.h"
@@ -52,6 +53,23 @@ package cfwstate
 //		layer = (fwmap_t *)ADDR_OF(&layer->next);
 //	}
 //	return layer;
+//}
+//
+//// cfwstate_stash_worker_count reports how many worker slots the object's
+//// stash holds, zero without a stash.
+//static inline uint16_t
+//cfwstate_stash_worker_count(struct cp_object *cp_object, int is_ipv6) {
+//	if (is_ipv6) {
+//		return fwstate_map_v6_from_cp_object(cp_object)->stash.worker_count;
+//	}
+//	return fwstate_map_v4_from_cp_object(cp_object)->stash.worker_count;
+//}
+//
+//// cfwstate_stash_record returns one record of a stash slot, resolving
+//// the slot's buffer offset pointer, which cgo cannot follow.
+//static inline struct fwstate_sync_record *
+//cfwstate_stash_record(struct fwstate_stash_slot *slot, uint32_t idx) {
+//	return fwstate_stash_slot_records(slot) + idx;
 //}
 import "C"
 
@@ -228,13 +246,129 @@ func (m *MapObjectConfig) insertLayer(
 	return nil
 }
 
-// CreateMap installs the first fwtable layer for this map's address family.
-func (m *MapObjectConfig) CreateMap(
-	indexSize uint32,
-	extraBucketCount uint32,
-	workerCount uint16,
-) error {
-	return m.insertLayer(indexSize, extraBucketCount, workerCount)
+// Per-worker stash buffer bounds in bytes, matching the C
+// FWSTATE_STASH_DEFAULT_SIZE, FWSTATE_STASH_MIN_SIZE and
+// FWSTATE_STASH_MAX_SIZE.
+const (
+	// DefaultStashSize is the stash size a zero MapConfig.StashSize
+	// selects.
+	DefaultStashSize = uint64(C.FWSTATE_STASH_DEFAULT_SIZE)
+	// MinStashSize is the smallest stash size: one sync record.
+	MinStashSize = uint64(C.FWSTATE_STASH_MIN_SIZE)
+	// MaxStashSize is the largest stash size.
+	MaxStashSize = uint64(C.FWSTATE_STASH_MAX_SIZE)
+)
+
+// MapConfig sizes a map at creation: its first table layer and its
+// per-worker sync stash.
+type MapConfig struct {
+	// IndexSize and ExtraBucketCount size the first layer; zero selects
+	// the defaults.
+	IndexSize        uint32
+	ExtraBucketCount uint32
+	// WorkerCount is the number of dataplane workers the layer and the
+	// stash serve.
+	WorkerCount uint16
+	// StashSize is each worker's stash buffer in bytes; zero selects
+	// DefaultStashSize.
+	StashSize uint64
+}
+
+// CreateMap allocates the per-worker sync stash and installs the first
+// fwtable layer for this map's address family.
+//
+// A failure leaves the object without a stash or layer.
+func (m *MapObjectConfig) CreateMap(config MapConfig) error {
+	cConfig := C.struct_fwstate_map_create_config{
+		index_size:         C.uint32_t(config.IndexSize),
+		extra_bucket_count: C.uint32_t(config.ExtraBucketCount),
+		worker_count:       C.uint16_t(config.WorkerCount),
+		stash_size:         C.uint64_t(config.StashSize),
+	}
+	var rc C.int
+	var errno error
+	if m.kind == KindV6 {
+		rc, errno = C.fwstate_map_v6_object_create(
+			C.fwstate_map_v6_from_cp_object(m.asRawPtr()), &cConfig,
+		)
+	} else {
+		rc, errno = C.fwstate_map_v4_object_create(
+			C.fwstate_map_v4_from_cp_object(m.asRawPtr()), &cConfig,
+		)
+	}
+	if rc != 0 {
+		return fmt.Errorf("failed to create fwstate-map: %w", errno)
+	}
+	return nil
+}
+
+// SyncFrameSize is the wire size of one sync frame.
+const SyncFrameSize = int(C.sizeof_struct_fw_state_sync_frame)
+
+// StashRecordSize is the stash bytes one sync record takes.
+const StashRecordSize = int(C.sizeof_struct_fwstate_sync_record)
+
+// StashRecord is a copy of one sync record of a worker's stash slot.
+type StashRecord struct {
+	// Frame is the wire form of the sync frame.
+	Frame []byte
+	// RxDeviceID and TxDeviceID are the device ids captured from the
+	// original packet.
+	RxDeviceID uint16
+	TxDeviceID uint16
+	// Status is the decision state: StashRecordPending, StashRecordApplied
+	// or StashRecordSuppressed.
+	Status uint8
+}
+
+// Decision states of a stashed sync record, matching the C
+// fwstate_sync_record_status values.
+const (
+	StashRecordPending    = uint8(C.FWSTATE_SYNC_RECORD_PENDING)
+	StashRecordApplied    = uint8(C.FWSTATE_SYNC_RECORD_APPLIED)
+	StashRecordSuppressed = uint8(C.FWSTATE_SYNC_RECORD_SUPPRESSED)
+)
+
+// StashRecords copies the records of one worker's stash slot as that
+// worker last left them.
+//
+// The slot belongs to the worker and is reused every round, so the copy is
+// meaningful only while the worker is idle, as between test rounds.
+func (m *MapObjectConfig) StashRecords(workerIdx uint16) ([]StashRecord, error) {
+	if m.ptr == nil {
+		return nil, errors.New("fwstate-map object is freed")
+	}
+	isIPv6 := C.int(0)
+	if m.kind == KindV6 {
+		isIPv6 = 1
+	}
+	workerCount := uint16(C.cfwstate_stash_worker_count(m.ptr, isIPv6))
+	if workerIdx >= workerCount {
+		return nil, fmt.Errorf("worker index %d out of range [0, %d)", workerIdx, workerCount)
+	}
+
+	var slot *C.struct_fwstate_stash_slot
+	if m.kind == KindV6 {
+		slot = C.fwstate_map_v6_object_stash(m.ptr, C.uint16_t(workerIdx))
+	} else {
+		slot = C.fwstate_map_v4_object_stash(m.ptr, C.uint16_t(workerIdx))
+	}
+
+	count := uint32(slot.count)
+	records := make([]StashRecord, 0, count)
+	for idx := range count {
+		record := C.cfwstate_stash_record(slot, C.uint32_t(idx))
+		records = append(records, StashRecord{
+			Frame: C.GoBytes(
+				unsafe.Pointer(&record.frame),
+				C.int(C.sizeof_struct_fw_state_sync_frame),
+			),
+			RxDeviceID: uint16(record.rx_device_id),
+			TxDeviceID: uint16(record.tx_device_id),
+			Status:     uint8(record.status),
+		})
+	}
+	return records, nil
 }
 
 // InsertLayer inserts a new layer into the fwtable chain of this map.
