@@ -5,6 +5,8 @@
 #include <time.h>
 
 #include "common/strutils.h"
+#include "lib/dataplane_ut/pool.h"
+#include "lib/fwstate/stash.h"
 
 // Allocate and initialize a stand-in agent for a test that needs the real
 // structure behind it, not just a bare memory context, such as one that
@@ -55,6 +57,9 @@ fwstate_test_agent_new(struct memory_context *parent, const char *name) {
 		sizeof(dp_objects[1].name));
 	SET_OFFSET_OF(&dp_config->dp_objects, dp_objects);
 	dp_config->object_count = 2;
+	// Module configs size their per-worker state by the dataplane's
+	// worker count.
+	dp_config->worker_count = FWSTATE_TEST_WORKER_COUNT;
 
 	// Register the fwstate module type so a construction resolving its
 	// dataplane module index succeeds as it would against a loaded
@@ -138,6 +143,140 @@ fwstate_test_counter_storage_free(struct counter_storage *storage) {
 	counter_storage_free(storage);
 }
 
+struct dp_worker *
+fwstate_test_worker(uint16_t worker_idx) {
+	static struct dp_worker workers[FWSTATE_TEST_WORKER_COUNT];
+	static uint64_t iterations[FWSTATE_TEST_WORKER_COUNT];
+	static struct rte_mempool *mempool;
+
+	if (worker_idx >= FWSTATE_TEST_WORKER_COUNT) {
+		return NULL;
+	}
+	if (mempool == NULL) {
+		mempool = dataplane_ut_pool_new();
+		if (mempool == NULL) {
+			return NULL;
+		}
+	}
+
+	struct dp_worker *worker = &workers[worker_idx];
+	worker->idx = worker_idx;
+	worker->iterations = &iterations[worker_idx];
+	worker->rx_mempool = mempool;
+	return worker;
+}
+
+uint64_t
+fwstate_test_pool_outstanding(struct dp_worker *dp_worker) {
+	return dataplane_ut_pool_outstanding(dp_worker->rx_mempool);
+}
+
+void
+fwstate_test_pool_limit(struct dp_worker *dp_worker, uint32_t extra) {
+	size_t outstanding =
+		dataplane_ut_pool_outstanding(dp_worker->rx_mempool);
+	dataplane_ut_pool_set_capacity(
+		dp_worker->rx_mempool, (uint32_t)outstanding + extra
+	);
+}
+
+void
+fwstate_test_pool_unlimit(struct dp_worker *dp_worker) {
+	dataplane_ut_pool_set_capacity(
+		dp_worker->rx_mempool, DATAPLANE_UT_POOL_DEFAULT_CAPACITY
+	);
+}
+
+void
+fwstate_test_next_round(struct dp_worker *dp_worker) {
+	*dp_worker->iterations += 1;
+}
+
+// Resolve the map object linked for one family, or NULL.
+static struct cp_object *
+fwstate_test_object(struct cp_module *cp_module, bool is_ipv6);
+
+struct fwstate_stash_slot *
+fwstate_test_stash_slot(
+	struct cp_module *cp_module, bool is_ipv6, uint16_t worker_idx
+) {
+	struct cp_object *cp_object = fwstate_test_object(cp_module, is_ipv6);
+	if (cp_object == NULL) {
+		return NULL;
+	}
+	return is_ipv6 ? fwstate_map_v6_object_stash(cp_object, worker_idx)
+		       : fwstate_map_v4_object_stash(cp_object, worker_idx);
+}
+
+int
+fwstate_test_stash_push(
+	struct cp_module *cp_module,
+	struct dp_worker *dp_worker,
+	const struct fw_state_sync_frame *frame,
+	uint16_t rx_device_id,
+	uint16_t tx_device_id
+) {
+	bool is_ipv6 = frame->addr_type == FW_STATE_ADDR_TYPE_IP6;
+	struct cp_object *cp_object = fwstate_test_object(cp_module, is_ipv6);
+	if (cp_object == NULL) {
+		return -1;
+	}
+	uint16_t worker_idx = (uint16_t)dp_worker->idx;
+	struct fwstate_stash_slot *slot =
+		is_ipv6 ? fwstate_map_v6_object_stash(cp_object, worker_idx)
+			: fwstate_map_v4_object_stash(cp_object, worker_idx);
+	uint32_t capacity = fwstate_stash_capacity(
+		is_ipv6 ? fwstate_map_v6_object_stash_size(cp_object)
+			: fwstate_map_v4_object_stash_size(cp_object)
+	);
+	if (slot == NULL) {
+		return -1;
+	}
+
+	fwstate_stash_slot_sync_round(slot, *dp_worker->iterations);
+	struct fwstate_sync_record *record = fwstate_stash_slot_next(
+		slot, fwstate_stash_slot_records(slot), capacity
+	);
+	if (record == NULL) {
+		return -1;
+	}
+	memcpy(&record->frame, frame, sizeof(record->frame));
+	record->rx_device_id = rx_device_id;
+	record->tx_device_id = tx_device_id;
+	record->status = FWSTATE_SYNC_RECORD_PENDING;
+	fwstate_stash_slot_commit(slot);
+	return 0;
+}
+
+uint64_t
+fwstate_test_counter(
+	struct cp_module *cp_module,
+	struct counter_storage *storage,
+	const char *name,
+	uint64_t value_idx
+) {
+	uint64_t id = counter_registry_lookup_index(
+		&cp_module->counter_registry, name
+	);
+	if (id == (uint64_t)-1) {
+		return UINT64_MAX;
+	}
+	return counter_get_address(id, storage)[value_idx];
+}
+
+uint64_t
+fwstate_test_free_bytes(struct agent *agent) {
+	struct block_allocator *allocator =
+		ADDR_OF(&agent->memory_context.block_allocator);
+	uint64_t free_bytes = 0;
+	for (size_t idx = 0; idx < MEMORY_BLOCK_ALLOCATOR_EXP; ++idx) {
+		free_bytes +=
+			allocator->pools[idx].free *
+			((uint64_t)MEMORY_BLOCK_ALLOCATOR_MIN_SIZE << idx);
+	}
+	return free_bytes;
+}
+
 void
 fwstate_test_mark_internal(struct packet_front *packet_front) {
 	for (struct packet *packet = packet_list_first(&packet_front->input);
@@ -147,12 +286,92 @@ fwstate_test_mark_internal(struct packet_front *packet_front) {
 	}
 }
 
+// Harness-owned prepared buffers, one per module config, context and
+// worker, found by config address.
+#define FWSTATE_TEST_PREPARED_CONFIGS 32
+
+static struct {
+	struct cp_module *cp_module;
+	struct fwstate_prepared prepared[FWSTATE_TEST_CONTEXT_COUNT]
+					[FWSTATE_TEST_WORKER_COUNT];
+} fwstate_test_prepared_table[FWSTATE_TEST_PREPARED_CONFIGS];
+
+struct fwstate_prepared *
+fwstate_test_prepared(
+	struct cp_module *cp_module, uint16_t context, uint16_t worker_idx
+) {
+	if (worker_idx >= FWSTATE_TEST_WORKER_COUNT ||
+	    context >= FWSTATE_TEST_CONTEXT_COUNT) {
+		return NULL;
+	}
+	for (size_t idx = 0; idx < FWSTATE_TEST_PREPARED_CONFIGS; ++idx) {
+		if (fwstate_test_prepared_table[idx].cp_module == cp_module) {
+			return &fwstate_test_prepared_table[idx]
+					.prepared[context][worker_idx];
+		}
+	}
+	for (size_t idx = 0; idx < FWSTATE_TEST_PREPARED_CONFIGS; ++idx) {
+		if (fwstate_test_prepared_table[idx].cp_module == NULL) {
+			fwstate_test_prepared_table[idx].cp_module = cp_module;
+			return &fwstate_test_prepared_table[idx]
+					.prepared[context][worker_idx];
+		}
+	}
+	return NULL;
+}
+
 void
-test_fwstate_handle_packets(
+fwstate_test_prepared_reset(struct cp_module *cp_module) {
+	for (size_t idx = 0; idx < FWSTATE_TEST_PREPARED_CONFIGS; ++idx) {
+		if (fwstate_test_prepared_table[idx].cp_module == cp_module) {
+			memset(&fwstate_test_prepared_table[idx],
+			       0,
+			       sizeof(fwstate_test_prepared_table[idx]));
+		}
+	}
+}
+
+// Stand-in configuration generation with one execution context per
+// harness worker, so a module's commit handler finds its worker the way it
+// does in a published generation.
+static struct cp_config_gen fwstate_test_gen;
+static struct config_gen_ectx fwstate_test_gen_ectxs[FWSTATE_TEST_WORKER_COUNT];
+static struct config_gen_ectx
+	*fwstate_test_gen_ectx_ptrs[FWSTATE_TEST_WORKER_COUNT];
+
+static struct config_gen_ectx *
+fwstate_test_worker_ectx(uint64_t worker_idx) {
+	if (fwstate_test_gen.config_gen_ectx_count == 0) {
+		for (size_t idx = 0; idx < FWSTATE_TEST_WORKER_COUNT; ++idx) {
+			SET_OFFSET_OF(
+				&fwstate_test_gen_ectxs[idx].cp_config_gen,
+				&fwstate_test_gen
+			);
+			SET_OFFSET_OF(
+				&fwstate_test_gen_ectx_ptrs[idx],
+				&fwstate_test_gen_ectxs[idx]
+			);
+		}
+		SET_OFFSET_OF(
+			&fwstate_test_gen.config_gen_ectxs,
+			&fwstate_test_gen_ectx_ptrs[0]
+		);
+		fwstate_test_gen.config_gen_ectx_count =
+			FWSTATE_TEST_WORKER_COUNT;
+	}
+	if (worker_idx >= FWSTATE_TEST_WORKER_COUNT) {
+		return NULL;
+	}
+	return &fwstate_test_gen_ectxs[worker_idx];
+}
+
+void
+test_fwstate_handle_packets_in_context(
 	struct dp_worker *dp_worker,
 	struct cp_module *cp_module,
 	struct counter_storage *counter_storage,
-	struct packet_front *packet_front
+	struct packet_front *packet_front,
+	uint16_t context
 ) {
 	struct module_ectx module_ectx = {};
 	SET_OFFSET_OF(&module_ectx.cp_module, cp_module);
@@ -204,6 +423,24 @@ test_fwstate_handle_packets(
 		module_ectx.abs_object_links = &links[0];
 	}
 
+	// The prepared buffer persists across calls, as the context's own
+	// does across rounds, and is re-linked on every call the way the
+	// commit handler links it for the context's worker.
+	struct fwstate_prepared *prepared = fwstate_test_prepared(
+		cp_module, context, (uint16_t)dp_worker->idx
+	);
+	if (prepared != NULL) {
+		static struct module *module;
+		if (module == NULL) {
+			module = new_module_fwstate();
+		}
+		SET_OFFSET_OF(&module_ectx.module_prepared, prepared);
+		module_ectx.abs_module_prepared = prepared;
+		module_ectx.abs_config_gen_ectx =
+			fwstate_test_worker_ectx(dp_worker->idx);
+		module->commit_ectx_handler(&module_ectx, cp_module);
+	}
+
 	fwstate_handle_packets(dp_worker, &module_ectx, packet_front);
 }
 
@@ -222,14 +459,14 @@ clock_get_time_ns(struct tsc_clock *clock) {
 	return ts.tv_sec * (uint64_t)1e9 + ts.tv_nsec;
 }
 
-// Resolve the module config's linked table for one family: read the
+// Resolve the module config's linked map object for one family: read the
 // link declaration at the family's slot and look its (type, name) up in
 // the harness agent's object registry.
 //
 // Returns NULL when the slot holds no link (the sentinel), the index is
 // out of range, or the declaration matches no registered object.
-static fwtable_t *
-fwstate_test_table(struct cp_module *cp_module, bool is_ipv6) {
+static struct cp_object *
+fwstate_test_object(struct cp_module *cp_module, bool is_ipv6) {
 	struct fwstate_module_config *config = container_of(
 		cp_module, struct fwstate_module_config, cp_module
 	);
@@ -247,11 +484,17 @@ fwstate_test_table(struct cp_module *cp_module, bool is_ipv6) {
 	struct cp_config *cp_config = ADDR_OF(&agent->cp_config);
 	struct cp_config_gen *config_gen = ADDR_OF(&cp_config->cp_config_gen);
 
-	struct cp_object *cp_object = cp_object_registry_lookup(
+	return cp_object_registry_lookup(
 		&config_gen->object_registry,
 		objects[link_idx].type,
 		objects[link_idx].name
 	);
+}
+
+// Resolve the module config's linked table for one family, or NULL.
+static fwtable_t *
+fwstate_test_table(struct cp_module *cp_module, bool is_ipv6) {
+	struct cp_object *cp_object = fwstate_test_object(cp_module, is_ipv6);
 	if (cp_object == NULL) {
 		return NULL;
 	}
@@ -265,30 +508,42 @@ fwstate_test_linked_table(struct cp_module *cp_module, bool is_ipv6) {
 	return fwstate_test_table(cp_module, is_ipv6);
 }
 
-// Append one layer to a map object's table, picking the family from the
-// cp_object type.
+// Create a map object with a stash of stash_size bytes per worker for
+// FWSTATE_TEST_WORKER_COUNT workers and one layer, picking the family from
+// the cp_object type.
 static int
-fwstate_test_object_insert_layer(struct cp_object *cp_object) {
+fwstate_test_object_create(struct cp_object *cp_object, uint64_t stash_size) {
+	struct fwstate_map_create_config config = {
+		.index_size = 1024,
+		.extra_bucket_count = 64,
+		.worker_count = FWSTATE_TEST_WORKER_COUNT,
+		.stash_size = stash_size,
+	};
 	if (!strncmp(
 		    cp_object->type,
 		    FWSTATE_MAP_V6_OBJECT_TYPE,
 		    sizeof(cp_object->type)
 	    )) {
-		struct fwstate_map_v6_object *object = container_of(
-			cp_object, struct fwstate_map_v6_object, cp_object
+		return fwstate_map_v6_object_create(
+			container_of(
+				cp_object,
+				struct fwstate_map_v6_object,
+				cp_object
+			),
+			&config
 		);
-		return fwstate_map_v6_object_insert_layer(object, 1024, 64, 1);
 	}
-
-	struct fwstate_map_v4_object *object = container_of(
-		cp_object, struct fwstate_map_v4_object, cp_object
+	return fwstate_map_v4_object_create(
+		container_of(
+			cp_object, struct fwstate_map_v4_object, cp_object
+		),
+		&config
 	);
-	return fwstate_map_v4_object_insert_layer(object, 1024, 64, 1);
 }
 
 struct cp_object *
 fwstate_test_map_object_new(
-	struct agent *agent, bool is_ipv6, const char *name
+	struct agent *agent, bool is_ipv6, const char *name, uint64_t stash_size
 ) {
 	yanet_error *err = NULL;
 	struct cp_object *cp_object =
@@ -299,7 +554,7 @@ fwstate_test_map_object_new(
 		return NULL;
 	}
 
-	if (fwstate_test_object_insert_layer(cp_object)) {
+	if (fwstate_test_object_create(cp_object, stash_size)) {
 		return NULL;
 	}
 

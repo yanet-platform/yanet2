@@ -98,8 +98,9 @@ func Test_ValidateMapNameField(t *testing.T) {
 	}
 }
 
-// Test_CreateMapRequest_Validate verifies that the map name and address-family
-// enum are validated before a create request can reach stateful work.
+// Test_CreateMapRequest_Validate verifies that the map name, address-family
+// enum and stash size are validated before a create request can reach
+// stateful work.
 func Test_CreateMapRequest_Validate(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -132,6 +133,24 @@ func Test_CreateMapRequest_Validate(t *testing.T) {
 				Kind: fwstatemappb.Kind(2),
 			},
 			message: "kind unknown value 2",
+		},
+		{
+			name:    "stash size below one record",
+			request: &fwstatemappb.CreateMapRequest{Name: "map", StashSize: 61},
+			message: "stash_size 61 is below the minimum 62",
+		},
+		{
+			name:    "stash size of one record",
+			request: &fwstatemappb.CreateMapRequest{Name: "map", StashSize: 62},
+		},
+		{
+			name:    "stash size at the maximum",
+			request: &fwstatemappb.CreateMapRequest{Name: "map", StashSize: 1 << 20},
+		},
+		{
+			name:    "stash size above the maximum",
+			request: &fwstatemappb.CreateMapRequest{Name: "map", StashSize: 1<<20 + 1},
+			message: "stash_size 1048577 exceeds maximum allowed value 1048576",
 		},
 		{
 			name:    "valid IPv4 request",

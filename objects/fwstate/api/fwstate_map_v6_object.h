@@ -8,6 +8,9 @@
 
 #include "lib/errors/errors.h"
 #include "lib/fwstate/fwstate_cursor.h"
+#include "lib/fwstate/stash.h"
+
+#include "fwstate_map_object.h"
 #include "lib/statemap/fwmap.h"
 #include "lib/statemap/fwtable.h"
 
@@ -30,6 +33,10 @@ struct fwstate_map_v6_object {
 	// batching over the table can detect that the chain it is walking
 	// changed under it.
 	uint64_t generation;
+
+	// Per-worker sync records ACL appends and fwstate consumes, created
+	// once with the map and freed with the object.
+	struct fwstate_stash stash;
 };
 
 // RAII lifecycle for struct fwstate_map_v6_object.
@@ -83,6 +90,43 @@ fwstate_map_v6_object_table(const struct cp_object *cp_object);
 // and stale-layer trim.
 uint64_t
 fwstate_map_v6_object_generation(const struct cp_object *cp_object);
+
+// Create the map: allocate the per-worker sync stash and install the first
+// table layer.
+//
+// Called once, before the object is published. Returns 0 on success or -1
+// with errno set: EINVAL for a zero worker count or a stash size below one
+// record or above the maximum, EEXIST when the map was already created,
+// ENOMEM or the layer error when an allocation fails.
+// A failure leaves the object without a stash or layer.
+int
+fwstate_map_v6_object_create(
+	struct fwstate_map_v6_object *self,
+	const struct fwstate_map_create_config *config
+);
+
+// Return the stash slot header of one worker, or NULL when the object has
+// no stash. worker_idx must be below the worker count the stash was
+// created with; it is not checked.
+struct fwstate_stash_slot *
+fwstate_map_v6_object_stash(
+	const struct cp_object *cp_object, uint16_t worker_idx
+);
+
+// Return the size in bytes of each worker's stash buffer, zero without a
+// stash.
+uint64_t
+fwstate_map_v6_object_stash_size(const struct cp_object *cp_object);
+
+// Link a map object's table and one worker's stash for a module's
+// execution context. A NULL cp_object links neither; the stash stays empty
+// when the object has no stash or worker_idx is outside its workers.
+void
+fwstate_map_v6_object_link(
+	const struct cp_object *cp_object,
+	uint64_t worker_idx,
+	struct fwstate_map_link *link
+);
 
 // Insert a new layer into the object's table chain.
 int

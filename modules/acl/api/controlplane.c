@@ -185,6 +185,7 @@ acl_module_config_init(
 		{"acl_action_non_term", 1, &config->action_non_term_counter_id},
 
 		{"acl_sync_sent", 2, &config->sync_sent_counter_id},
+		{"acl_sync_overflow", 1, &config->sync_overflow_counter_id},
 	};
 
 	for (size_t i = 0; i < sizeof(counters) / sizeof(counters[0]); ++i) {

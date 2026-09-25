@@ -1,8 +1,11 @@
 /*
- * FWState sync packet crafting regression tests.
+ * FWState sync record and packet builder regression tests.
  *
- * Verifies transport-port byte order in the payload and configurable outer
- * destinations without changing the crafted packet metadata.
+ * Verifies transport-port byte order in the captured frame, the refusal to
+ * capture a packet without a transport header, and that the multi-frame
+ * builder packs frames byte-identically, clamps to the mbuf tailroom and
+ * keeps configurable outer destinations without changing the packet
+ * metadata.
  */
 
 #include <assert.h>
@@ -127,17 +130,24 @@ build_test_packet(
 }
 
 /*
- * Extract the sync frame from a crafted sync packet.
- * Returns pointer to the sync frame within the mbuf.
+ * Capture the source packet into a record and build a one-frame sync
+ * packet from it, the shape a single stashed event produces.
  */
-static struct fw_state_sync_frame *
-extract_sync_frame(struct rte_mbuf *mbuf) {
-	uint16_t payload_offset =
-		sizeof(struct rte_ether_hdr) + sizeof(struct rte_vlan_hdr) +
-		sizeof(struct rte_ipv6_hdr) + sizeof(struct rte_udp_hdr);
-	return rte_pktmbuf_mtod_offset(
-		mbuf, struct fw_state_sync_frame *, payload_offset
+static int
+craft_single_sync_packet(
+	const struct packet *src_pkt,
+	enum sync_packet_direction direction,
+	struct fwstate_sync_record *record,
+	struct packet *sync_pkt
+) {
+	if (fwstate_fill_sync_record(src_pkt, direction, record) != 0) {
+		return -1;
+	}
+	const struct fw_state_sync_frame *frames[] = {&record->frame};
+	int written = fwstate_build_sync_packet(
+		frames, 1, record->rx_device_id, record->tx_device_id, sync_pkt
 	);
+	return written == 1 ? 0 : -1;
 }
 
 static void
@@ -173,7 +183,10 @@ test_sync_packet_destination(void) {
 	};
 	const uint16_t dst_port = rte_cpu_to_be_16(10000);
 
-	rc = fwstate_craft_state_sync_packet(&src_pkt, SYNC_INGRESS, &sync_pkt);
+	struct fwstate_sync_record record;
+	rc = craft_single_sync_packet(
+		&src_pkt, SYNC_INGRESS, &record, &sync_pkt
+	);
 	assert(rc == 0);
 	fwstate_sync_set_destination(
 		&sync_pkt, &test_dst_ether, dst_addr, dst_port
@@ -228,16 +241,13 @@ test_tcp_sync_frame_ports(void) {
 	);
 	assert(rc == 0);
 
-	/* Create sync packet */
-	struct rte_mbuf *sync_mbuf = rte_pktmbuf_alloc(test_pool);
-	assert(sync_mbuf != NULL);
-	struct packet sync_pkt = {.mbuf = sync_mbuf};
-
-	rc = fwstate_craft_state_sync_packet(&src_pkt, SYNC_INGRESS, &sync_pkt);
+	/* Capture the sync record */
+	struct fwstate_sync_record record;
+	rc = fwstate_fill_sync_record(&src_pkt, SYNC_INGRESS, &record);
 	assert(rc == 0);
 
-	/* Extract and verify sync frame ports */
-	struct fw_state_sync_frame *frame = extract_sync_frame(sync_mbuf);
+	/* Verify sync frame ports */
+	struct fw_state_sync_frame *frame = &record.frame;
 
 	printf("  TCP INGRESS: src_port=%u (expected %u), dst_port=%u "
 	       "(expected %u)\n",
@@ -253,7 +263,6 @@ test_tcp_sync_frame_ports(void) {
 	assert(frame->proto == IPPROTO_TCP);
 
 	rte_pktmbuf_free(src_pkt.mbuf);
-	rte_pktmbuf_free(sync_mbuf);
 
 	/* Test EGRESS direction (ports should be swapped) */
 	rc = build_test_packet(
@@ -261,14 +270,8 @@ test_tcp_sync_frame_ports(void) {
 	);
 	assert(rc == 0);
 
-	sync_mbuf = rte_pktmbuf_alloc(test_pool);
-	assert(sync_mbuf != NULL);
-	sync_pkt.mbuf = sync_mbuf;
-
-	rc = fwstate_craft_state_sync_packet(&src_pkt, SYNC_EGRESS, &sync_pkt);
+	rc = fwstate_fill_sync_record(&src_pkt, SYNC_EGRESS, &record);
 	assert(rc == 0);
-
-	frame = extract_sync_frame(sync_mbuf);
 
 	printf("  TCP EGRESS:  src_port=%u (expected %u), dst_port=%u "
 	       "(expected %u)\n",
@@ -286,7 +289,6 @@ test_tcp_sync_frame_ports(void) {
 	       "order");
 
 	rte_pktmbuf_free(src_pkt.mbuf);
-	rte_pktmbuf_free(sync_mbuf);
 
 	printf("  TCP sync frame port endianness: PASSED\n");
 }
@@ -306,16 +308,13 @@ test_udp_sync_frame_ports(void) {
 	);
 	assert(rc == 0);
 
-	/* Create sync packet */
-	struct rte_mbuf *sync_mbuf = rte_pktmbuf_alloc(test_pool);
-	assert(sync_mbuf != NULL);
-	struct packet sync_pkt = {.mbuf = sync_mbuf};
-
-	rc = fwstate_craft_state_sync_packet(&src_pkt, SYNC_INGRESS, &sync_pkt);
+	/* Capture the sync record */
+	struct fwstate_sync_record record;
+	rc = fwstate_fill_sync_record(&src_pkt, SYNC_INGRESS, &record);
 	assert(rc == 0);
 
-	/* Extract and verify sync frame ports */
-	struct fw_state_sync_frame *frame = extract_sync_frame(sync_mbuf);
+	/* Verify sync frame ports */
+	struct fw_state_sync_frame *frame = &record.frame;
 
 	uint16_t be_src_port = rte_cpu_to_be_16(TEST_SRC_PORT);
 	uint16_t be_dst_port = rte_cpu_to_be_16(TEST_DST_PORT);
@@ -346,7 +345,6 @@ test_udp_sync_frame_ports(void) {
 	assert(frame->proto == IPPROTO_UDP);
 
 	rte_pktmbuf_free(src_pkt.mbuf);
-	rte_pktmbuf_free(sync_mbuf);
 
 	/* Test EGRESS direction (ports should be swapped) */
 	rc = build_test_packet(
@@ -354,14 +352,8 @@ test_udp_sync_frame_ports(void) {
 	);
 	assert(rc == 0);
 
-	sync_mbuf = rte_pktmbuf_alloc(test_pool);
-	assert(sync_mbuf != NULL);
-	sync_pkt.mbuf = sync_mbuf;
-
-	rc = fwstate_craft_state_sync_packet(&src_pkt, SYNC_EGRESS, &sync_pkt);
+	rc = fwstate_fill_sync_record(&src_pkt, SYNC_EGRESS, &record);
 	assert(rc == 0);
-
-	frame = extract_sync_frame(sync_mbuf);
 
 	be_src_port = rte_cpu_to_be_16(TEST_DST_PORT);
 	be_dst_port = rte_cpu_to_be_16(TEST_SRC_PORT);
@@ -389,19 +381,18 @@ test_udp_sync_frame_ports(void) {
 	       "order");
 
 	rte_pktmbuf_free(src_pkt.mbuf);
-	rte_pktmbuf_free(sync_mbuf);
 
 	printf("  UDP sync frame port endianness: PASSED\n");
 }
 
 /*
- * Verifies that crafting refuses a packet whose transport header is marked
+ * Verifies that capture refuses a packet whose transport header is marked
  * unavailable: no sync frame may be fabricated from fragment payload bytes,
- * and the output mbuf must stay untouched.
+ * and the record must stay untouched.
  */
 static void
-test_craft_refuses_unavailable_header(void) {
-	printf("\n--- Craft Refuses Unavailable Transport Header ---\n");
+test_record_refuses_unavailable_header(void) {
+	printf("\n--- Record Refuses Unavailable Transport Header ---\n");
 
 	struct packet src_pkt = {};
 	int rc = build_test_packet(
@@ -410,24 +401,199 @@ test_craft_refuses_unavailable_header(void) {
 	assert(rc == 0);
 	src_pkt.transport_header.type |= PACKET_TRANSPORT_HEADER_UNAVAILABLE;
 
+	struct fwstate_sync_record record;
+	memset(&record, 0xA5, sizeof(record));
+	struct fwstate_sync_record before = record;
+
+	rc = fwstate_fill_sync_record(&src_pkt, SYNC_INGRESS, &record);
+	assert(rc == -1 &&
+	       "capture must refuse a packet without a transport header");
+	assert(memcmp(&record, &before, sizeof(record)) == 0 &&
+	       "refused capture must leave the record untouched");
+
+	rte_pktmbuf_free(src_pkt.mbuf);
+
+	printf("  Record refusal for unavailable transport header: PASSED\n");
+}
+
+/*
+ * Verifies that the builder packs several frames after one header stack,
+ * each byte-identical to the frame of its record and in record order, and
+ * takes the device ids it is given.
+ */
+static void
+test_build_packs_frames(void) {
+	printf("\n--- Build Packs Several Frames ---\n");
+
+	struct fwstate_sync_record records[3];
+	const uint16_t src_ports[3] = {1000, 2000, 3000};
+	for (size_t idx = 0; idx < 3; ++idx) {
+		struct packet src_pkt = {};
+		int rc = build_test_packet(
+			&src_pkt, IPPROTO_TCP, src_ports[idx], TEST_DST_PORT
+		);
+		assert(rc == 0);
+		rc = fwstate_fill_sync_record(
+			&src_pkt, SYNC_INGRESS, &records[idx]
+		);
+		assert(rc == 0);
+		rte_pktmbuf_free(src_pkt.mbuf);
+	}
+
+	const struct fw_state_sync_frame *frames[3] = {
+		&records[0].frame, &records[1].frame, &records[2].frame
+	};
 	struct rte_mbuf *sync_mbuf = rte_pktmbuf_alloc(test_pool);
 	assert(sync_mbuf != NULL);
 	struct packet sync_pkt = {.mbuf = sync_mbuf};
-	uint16_t pkt_len_before = sync_mbuf->pkt_len;
-	uint16_t data_len_before = sync_mbuf->data_len;
 
-	rc = fwstate_craft_state_sync_packet(&src_pkt, SYNC_INGRESS, &sync_pkt);
-	assert(rc == -1 &&
-	       "crafting must refuse a packet without a transport header");
-	assert(sync_mbuf->pkt_len == pkt_len_before &&
-	       "refused crafting must leave the output mbuf untouched");
-	assert(sync_mbuf->data_len == data_len_before &&
-	       "refused crafting must leave the output mbuf untouched");
+	int written = fwstate_build_sync_packet(frames, 3, 4, 5, &sync_pkt);
+	assert(written == 3);
 
-	rte_pktmbuf_free(src_pkt.mbuf);
+	const uint16_t ipv6_offset =
+		sizeof(struct rte_ether_hdr) + sizeof(struct rte_vlan_hdr);
+	const uint16_t udp_offset = ipv6_offset + sizeof(struct rte_ipv6_hdr);
+	const uint16_t payload_offset = udp_offset + sizeof(struct rte_udp_hdr);
+	const uint16_t payload_len = 3 * sizeof(struct fw_state_sync_frame);
+	struct rte_ipv6_hdr *ipv6_hdr = rte_pktmbuf_mtod_offset(
+		sync_mbuf, struct rte_ipv6_hdr *, ipv6_offset
+	);
+	struct rte_udp_hdr *udp_hdr = rte_pktmbuf_mtod_offset(
+		sync_mbuf, struct rte_udp_hdr *, udp_offset
+	);
+	assert(ipv6_hdr->payload_len ==
+	       rte_cpu_to_be_16(sizeof(struct rte_udp_hdr) + payload_len));
+	assert(udp_hdr->dgram_len ==
+	       rte_cpu_to_be_16(sizeof(struct rte_udp_hdr) + payload_len));
+	assert(sync_pkt.data_len == payload_offset + payload_len);
+	assert(sync_pkt.rx_device_id == 4);
+	assert(sync_pkt.tx_device_id == 5);
+
+	for (size_t idx = 0; idx < 3; ++idx) {
+		const struct fw_state_sync_frame *packed =
+			rte_pktmbuf_mtod_offset(
+				sync_mbuf,
+				struct fw_state_sync_frame *,
+				payload_offset +
+					idx * sizeof(struct fw_state_sync_frame)
+			);
+		assert(memcmp(packed,
+			      &records[idx].frame,
+			      sizeof(struct fw_state_sync_frame)) == 0 &&
+		       "a packed frame must equal its record's frame");
+	}
+
 	rte_pktmbuf_free(sync_mbuf);
 
-	printf("  Craft refusal for unavailable transport header: PASSED\n");
+	printf("  Build packs several frames: PASSED\n");
+}
+
+/*
+ * Verifies that the builder zeroes every header byte it does not set, the
+ * Ethernet source and the VLAN tag among them, even over a dirty mbuf.
+ */
+static void
+test_build_zeroes_unset_header_bytes(void) {
+	printf("\n--- Build Zeroes Unset Header Bytes ---\n");
+
+	struct packet src_pkt = {};
+	int rc = build_test_packet(
+		&src_pkt, IPPROTO_UDP, TEST_SRC_PORT, TEST_DST_PORT
+	);
+	assert(rc == 0);
+	struct fwstate_sync_record record;
+	rc = fwstate_fill_sync_record(&src_pkt, SYNC_INGRESS, &record);
+	assert(rc == 0);
+	rte_pktmbuf_free(src_pkt.mbuf);
+
+	test_mempool_poison(test_pool, 1);
+	struct rte_mbuf *sync_mbuf = rte_pktmbuf_alloc(test_pool);
+	test_mempool_poison(test_pool, 0);
+	assert(sync_mbuf != NULL);
+	struct packet sync_pkt = {.mbuf = sync_mbuf};
+
+	const struct fw_state_sync_frame *frames[] = {&record.frame};
+	int written = fwstate_build_sync_packet(frames, 1, 0, 0, &sync_pkt);
+	assert(written == 1);
+
+	const struct rte_ether_hdr *ether_hdr =
+		rte_pktmbuf_mtod(sync_mbuf, struct rte_ether_hdr *);
+	const struct rte_vlan_hdr *vlan_hdr = rte_pktmbuf_mtod_offset(
+		sync_mbuf, struct rte_vlan_hdr *, sizeof(struct rte_ether_hdr)
+	);
+	static const uint8_t zero_mac[RTE_ETHER_ADDR_LEN] = {0};
+	assert(memcmp(ether_hdr->src_addr.addr_bytes, zero_mac, sizeof(zero_mac)
+	       ) == 0 &&
+	       "the Ethernet source must be zero");
+	assert(vlan_hdr->vlan_tci == 0 && "the VLAN tag must be zero");
+
+	rte_pktmbuf_free(sync_mbuf);
+
+	printf("  Build zeroes unset header bytes: PASSED\n");
+}
+
+/*
+ * Verifies that the builder writes only as many frames as the mbuf
+ * tailroom holds and reports that count.
+ */
+static void
+test_build_clamps_to_tailroom(void) {
+	printf("\n--- Build Clamps To Tailroom ---\n");
+
+	struct packet src_pkt = {};
+	int rc = build_test_packet(
+		&src_pkt, IPPROTO_UDP, TEST_SRC_PORT, TEST_DST_PORT
+	);
+	assert(rc == 0);
+	struct fwstate_sync_record record;
+	rc = fwstate_fill_sync_record(&src_pkt, SYNC_INGRESS, &record);
+	assert(rc == 0);
+	rte_pktmbuf_free(src_pkt.mbuf);
+
+	struct rte_mbuf *sync_mbuf = rte_pktmbuf_alloc(test_pool);
+	assert(sync_mbuf != NULL);
+	struct packet sync_pkt = {.mbuf = sync_mbuf};
+
+	const uint32_t header_len =
+		sizeof(struct rte_ether_hdr) + sizeof(struct rte_vlan_hdr) +
+		sizeof(struct rte_ipv6_hdr) + sizeof(struct rte_udp_hdr);
+	const uint32_t fit = (rte_pktmbuf_tailroom(sync_mbuf) - header_len) /
+			     sizeof(struct fw_state_sync_frame);
+	const uint32_t count = fit + 5;
+	const struct fw_state_sync_frame **frames =
+		malloc(count * sizeof(*frames));
+	assert(frames != NULL);
+	for (uint32_t idx = 0; idx < count; ++idx) {
+		frames[idx] = &record.frame;
+	}
+
+	int written = fwstate_build_sync_packet(frames, count, 0, 0, &sync_pkt);
+	assert(written == (int)fit &&
+	       "the builder must stop at the frames the tailroom holds");
+	assert(sync_pkt.data_len ==
+	       header_len + fit * sizeof(struct fw_state_sync_frame));
+
+	free(frames);
+	rte_pktmbuf_free(sync_mbuf);
+
+	printf("  Build clamps to tailroom: PASSED\n");
+}
+
+/*
+ * Verifies the frames-per-packet bound: 25 at the default MTU, zero
+ * selecting the default, and at least one frame below the minimum.
+ */
+static void
+test_frames_per_packet(void) {
+	printf("\n--- Frames Per Packet ---\n");
+
+	assert(fwstate_sync_frames_per_packet(1500) == 25);
+	assert(fwstate_sync_frames_per_packet(0) == 25);
+	assert(fwstate_sync_frames_per_packet(FWSTATE_SYNC_MIN_MTU) == 1);
+	assert(fwstate_sync_frames_per_packet(FWSTATE_SYNC_MIN_MTU - 1) == 1);
+	assert(fwstate_sync_frames_per_packet(9000) == (9000 - 48) / 56);
+
+	printf("  Frames per packet: PASSED\n");
 }
 
 int
@@ -448,8 +614,16 @@ main(void) {
 	/* UDP test (will fail if endianness bug is present) */
 	test_udp_sync_frame_ports();
 
-	test_craft_refuses_unavailable_header();
+	test_record_refuses_unavailable_header();
 
-	printf("\n=== All sync frame endianness tests PASSED ===\n");
+	test_build_packs_frames();
+
+	test_build_clamps_to_tailroom();
+
+	test_build_zeroes_unset_header_bytes();
+
+	test_frames_per_packet();
+
+	printf("\n=== All sync tests PASSED ===\n");
 	return EXIT_SUCCESS;
 }

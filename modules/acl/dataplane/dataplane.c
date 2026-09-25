@@ -16,6 +16,8 @@
 #include "lib/dataplane/time/clock.h"
 #include "lib/dataplane/worker/worker.h"
 #include "lib/fwstate/lookup.h"
+#include "lib/fwstate/stash.h"
+#include "lib/fwstate/stash_ectx.h"
 #include "lib/fwstate/sync.h"
 #include "lib/logging/log.h"
 #include "objects/fwstate/api/fwstate_map_v4_object.h"
@@ -66,6 +68,43 @@ FILTER_QUERY_DECLARE(
 // classification path reads.
 #define ACL_FILTER_NET6_SRC_POS 2
 #define ACL_FILTER_NET6_DST_POS 3
+
+// Link of a packet with no state family: no table and no stash.
+static const struct fwstate_map_link acl_no_state = {0};
+
+// Append a sync record for an allowed packet to the executing worker's
+// stash slot of the family map.
+//
+// Nothing is written without a linked map. A full slot discards the record
+// and counts the overflow; the verdict does not depend on either outcome.
+static inline void
+acl_stash_sync_record(
+	struct dp_worker *dp_worker,
+	struct acl_prepared *prepared,
+	const struct fwstate_stash_link *stash,
+	const struct packet *packet,
+	enum sync_packet_direction direction
+) {
+	if (stash->slot == NULL) {
+		return;
+	}
+
+	struct fwstate_stash_slot *slot = stash->slot;
+	fwstate_stash_slot_sync_round(slot, *dp_worker->iterations);
+	struct fwstate_sync_record *record =
+		fwstate_stash_slot_next(slot, stash->records, stash->capacity);
+	if (record == NULL) {
+		prepared->sync_overflow_cnt[0] += 1;
+		return;
+	}
+	if (fwstate_fill_sync_record(packet, direction, record) != 0) {
+		return;
+	}
+	fwstate_stash_slot_commit(slot);
+
+	prepared->sync_cnt[0] += 1;
+	prepared->sync_cnt[1] += sizeof(struct fw_state_sync_frame);
+}
 
 // Runs the filter_query classification pass with two leaf rows injected.
 //
@@ -415,14 +454,13 @@ acl_handle_packets(
 
 		++vlan_idx;
 
-		// State table for this packet: the linked object's fwtable for
-		// its family, NULL for a non-IP packet or a family with no
-		// link.
-		fwtable_t *state_table = NULL;
+		// State table and stash for this packet: the linked map of the
+		// packet's family, an empty link for a non-IP packet.
+		const struct fwstate_map_link *state = &acl_no_state;
 
 		if (packet->network_header.type ==
 		    rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV4)) {
-			state_table = prepared->fw4table;
+			state = &prepared->fw4;
 
 			if (ip4_result[ip4_idx] < action) {
 				action = ip4_result[ip4_idx];
@@ -440,7 +478,7 @@ acl_handle_packets(
 			}
 		} else if (packet->network_header.type ==
 			   rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV6)) {
-			state_table = prepared->fw6table;
+			state = &prepared->fw6;
 
 			if (ip6_result[ip6_idx] < action) {
 				action = ip6_result[ip6_idx];
@@ -509,7 +547,7 @@ acl_handle_packets(
 					// no state.
 					bool state_found =
 						fwstate_check_state_table(
-							state_table,
+							state->table,
 							packet,
 							now,
 							&push_sync_packet
@@ -560,33 +598,13 @@ acl_handle_packets(
 
 			if (push_sync_packet != SYNC_NONE) {
 				prepared->create_cnt[0] += 1;
-
-				struct packet *sync_pkt =
-					worker_packet_alloc(dp_worker);
-				if (unlikely(sync_pkt == NULL)) {
-					LOG(ERROR,
-					    "failed to allocate sync packet");
-					continue;
-				}
-				if (unlikely(
-					    fwstate_craft_state_sync_packet(
-						    packet,
-						    push_sync_packet,
-						    sync_pkt
-					    ) == -1
-				    )) {
-					worker_packet_free(sync_pkt);
-					LOG(ERROR,
-					    "failed to craft sync packet");
-					continue;
-				}
-				sync_pkt->flags |=
-					1U << PACKET_FLAG_FWSTATE_SYNC_INTERNAL;
-
-				prepared->sync_cnt[0] += 1;
-				prepared->sync_cnt[1] +=
-					packet_data_len(sync_pkt);
-				packet_front_output(packet_front, sync_pkt);
+				acl_stash_sync_record(
+					dp_worker,
+					prepared,
+					&state->stash,
+					packet,
+					push_sync_packet
+				);
 			}
 		} else {
 			prepared->no_match_cnt[0] += 1;
@@ -596,10 +614,14 @@ acl_handle_packets(
 	}
 }
 
+// Fill the execution context's prepared buffer for the worker that runs
+// the context. An unknown worker links no stash, so no sync record is
+// written on that context.
 static void
 acl_module_commit_ectx(
 	struct module_ectx *module_ectx, struct cp_module *cp_module
 ) {
+	uint64_t worker_idx = fwstate_stash_worker_idx(module_ectx);
 	struct acl_module_config *acl_config =
 		container_of(cp_module, struct acl_module_config, cp_module);
 
@@ -631,6 +653,9 @@ acl_module_commit_ectx(
 	prepared->sync_cnt = counter_get_address(
 		acl_config->sync_sent_counter_id, counter_storage
 	);
+	prepared->sync_overflow_cnt = counter_get_address(
+		acl_config->sync_overflow_counter_id, counter_storage
+	);
 	prepared->invalid_cnt = counter_get_address(
 		acl_config->action_invalid_counter_id, counter_storage
 	);
@@ -651,20 +676,18 @@ acl_module_commit_ectx(
 			? ADDR_OF_NONNULL(&rules_storage->counter_value_handles)
 			: NULL;
 
-	// fwtables of the linked map objects, one per family. NULL when the
-	// config declared no link for the family, in which case CHECK_STATE
-	// finds no state for that family.
-	prepared->fw4table = NULL;
-	prepared->fw6table = NULL;
+	// Linked map objects' fwtables and stashes, one per family. NULL when
+	// the config declared no link for the family, in which case
+	// CHECK_STATE finds no state and no sync record is written for that
+	// family.
+	struct cp_object *fw4object = NULL;
+	struct cp_object *fw6object = NULL;
 	if (acl_config->v4_object_link_idx != ACL_OBJECT_LINK_NONE) {
 		struct module_object_link_ectx *link = object_link_get_address(
 			module_ectx, acl_config->v4_object_link_idx
 		);
 		if (link != NULL) {
-			struct object_ectx *oectx = link->abs_object_ectx;
-			struct cp_object *cp_obj = oectx->abs_cp_object;
-			prepared->fw4table =
-				fwstate_map_v4_object_table(cp_obj);
+			fw4object = link->abs_object_ectx->abs_cp_object;
 		}
 	}
 	if (acl_config->v6_object_link_idx != ACL_OBJECT_LINK_NONE) {
@@ -672,12 +695,11 @@ acl_module_commit_ectx(
 			module_ectx, acl_config->v6_object_link_idx
 		);
 		if (link != NULL) {
-			struct object_ectx *oectx = link->abs_object_ectx;
-			struct cp_object *cp_obj = oectx->abs_cp_object;
-			prepared->fw6table =
-				fwstate_map_v6_object_table(cp_obj);
+			fw6object = link->abs_object_ectx->abs_cp_object;
 		}
 	}
+	fwstate_map_v4_object_link(fw4object, worker_idx, &prepared->fw4);
+	fwstate_map_v6_object_link(fw6object, worker_idx, &prepared->fw6);
 }
 
 static void

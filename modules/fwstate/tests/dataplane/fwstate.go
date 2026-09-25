@@ -1,6 +1,7 @@
 package fwstate
 
 //#cgo CFLAGS: -I../../../.. -I../../../../lib
+//#cgo LDFLAGS: -L../../../../build/lib/dataplane_ut -ldataplane_ut
 //#cgo LDFLAGS: -L../../../../build/modules/fwstate/dataplane -lfwstate_dp
 //#cgo LDFLAGS: -L../../../../build/modules/fwstate/api -lfwstate_cp
 //#cgo LDFLAGS: -L../../../../build/lib/statemap -lstatemap
@@ -22,6 +23,7 @@ import "C"
 import (
 	"encoding/binary"
 	"fmt"
+	"net"
 	"net/netip"
 	"runtime"
 	"unsafe"
@@ -40,6 +42,12 @@ import (
 // fwstateHandlePackets calls so that counter values accumulate. The returned
 // storage must be freed with [fwstateCounterStorageFree] (the caller owns it).
 func fwstateModuleConfig(memCtx testutils.MemoryContext) (*C.struct_cp_module, *C.struct_counter_storage) {
+	return fwstateModuleConfigWithStashSize(memCtx, 0)
+}
+
+// fwstateModuleConfigWithStashSize is fwstateModuleConfig with maps whose
+// per-worker stash buffer is stashSize bytes, zero selecting the default.
+func fwstateModuleConfigWithStashSize(memCtx testutils.MemoryContext, stashSize uint64) (*C.struct_cp_module, *C.struct_counter_storage) {
 	// Allocate the stand-in agent through the harness constructor, which zeroes
 	// the whole structure, not just the memory context, and wires the object
 	// registry the harness's own link-name lookups resolve against.
@@ -65,7 +73,7 @@ func fwstateModuleConfig(memCtx testutils.MemoryContext) (*C.struct_cp_module, *
 	// them so the module construction can resolve the names.
 	cName4 := C.CString("fw4")
 	defer C.free(unsafe.Pointer(cName4))
-	obj4 := C.fwstate_test_map_object_new(agent, C.bool(false), cName4)
+	obj4 := C.fwstate_test_map_object_new(agent, C.bool(false), cName4, C.uint64_t(stashSize))
 	if obj4 == nil {
 		panic("failed to create fwstate-map v4 object")
 	}
@@ -75,7 +83,7 @@ func fwstateModuleConfig(memCtx testutils.MemoryContext) (*C.struct_cp_module, *
 
 	cName6 := C.CString("fw6")
 	defer C.free(unsafe.Pointer(cName6))
-	obj6 := C.fwstate_test_map_object_new(agent, C.bool(true), cName6)
+	obj6 := C.fwstate_test_map_object_new(agent, C.bool(true), cName6, C.uint64_t(stashSize))
 	if obj6 == nil {
 		panic("failed to create fwstate-map v6 object")
 	}
@@ -90,8 +98,8 @@ func fwstateModuleConfig(memCtx testutils.MemoryContext) (*C.struct_cp_module, *
 	syncCfg.dst_ether.addr[1] = 0x33
 	syncCfg.dst_ether.addr[5] = 0x01
 	multicastAddr := [16]C.uint8_t{0xff, 0x02, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x01}
-	for i := range 16 {
-		syncCfg.dst_addr_multicast[i] = multicastAddr[i]
+	for idx := range 16 {
+		syncCfg.dst_addr_multicast[idx] = multicastAddr[idx]
 	}
 	syncCfg.port_multicast = C.uint16_t(0x0f27) // 9999 in network byte order
 
@@ -115,6 +123,7 @@ func fwstateModuleConfig(memCtx testutils.MemoryContext) (*C.struct_cp_module, *
 	if cpModule == nil {
 		panic(fmt.Sprintf("failed to initialize fwstate module config: %v", cerrors.FromC(unsafe.Pointer(cErr))))
 	}
+	C.fwstate_test_prepared_reset(cpModule)
 
 	// Link the counter registry and spawn a per-worker counter storage once,
 	// so counter values accumulate across fwstateHandlePackets calls.
@@ -168,38 +177,184 @@ func SetSyncTCPTimeouts(cpModule *C.struct_cp_module, tcp, tcpFin uint64) {
 	m.sync_config.timeouts.tcp_fin = C.uint64_t(tcpFin)
 }
 
-func fwstateHandlePackets(cpModule *C.struct_cp_module, storage *C.struct_counter_storage, packets ...gopacket.Packet) (*dataplane.PacketFrontPayload, error) {
-	return fwstateHandlePacketsWithOrigin(cpModule, storage, true, packets...)
+// SetSyncMTU sets the sync MTU on a module config produced by
+// fwstateModuleConfig. Zero selects the default.
+func SetSyncMTU(cpModule *C.struct_cp_module, mtu uint16) {
+	m := (*C.struct_fwstate_module_config)(unsafe.Pointer(cpModule))
+	m.sync_config.sync_mtu = C.uint16_t(mtu)
 }
 
-// fwstateHandleWirePackets dispatches packets as externally received events.
-func fwstateHandleWirePackets(cpModule *C.struct_cp_module, storage *C.struct_counter_storage, packets ...gopacket.Packet) (*dataplane.PacketFrontPayload, error) {
-	return fwstateHandlePacketsWithOrigin(cpModule, storage, false, packets...)
+// localEvent is one stashed sync record: the frame bytes and the device
+// ids ACL would capture from the original packet.
+type localEvent struct {
+	frame      []byte
+	rxDeviceID uint16
+	txDeviceID uint16
 }
 
-// fwstateHandlePacketsWithOrigin marks local batches before shared dispatch.
-func fwstateHandlePacketsWithOrigin(cpModule *C.struct_cp_module, storage *C.struct_counter_storage, internal bool, packets ...gopacket.Packet) (*dataplane.PacketFrontPayload, error) {
+// roundResult is what one handler call left in the packet front, with the
+// output device ids kept alongside the raw output.
+type roundResult struct {
+	dataplane.PacketFrontPayload
+	OutputData []dataplane.PacketData
+}
+
+// testWorker returns the harness worker of the given index.
+func testWorker(workerIdx uint16) *C.struct_dp_worker {
+	worker := C.fwstate_test_worker(C.uint16_t(workerIdx))
+	if worker == nil {
+		panic(fmt.Sprintf("no harness worker %d", workerIdx))
+	}
+	return worker
+}
+
+// nextRound starts a new round on the harness worker.
+func nextRound(worker *C.struct_dp_worker) {
+	C.fwstate_test_next_round(worker)
+}
+
+// stashEvents appends pending records to the worker's stash slots in its
+// current round and reports how many fit.
+func stashEvents(cpModule *C.struct_cp_module, worker *C.struct_dp_worker, events ...localEvent) int {
+	stashed := 0
+	for _, event := range events {
+		frame := (*C.struct_fw_state_sync_frame)(C.CBytes(event.frame))
+		rc := C.fwstate_test_stash_push(
+			cpModule, worker, frame,
+			C.uint16_t(event.rxDeviceID), C.uint16_t(event.txDeviceID),
+		)
+		C.free(unsafe.Pointer(frame))
+		if rc == 0 {
+			stashed++
+		}
+	}
+	return stashed
+}
+
+// runHandler dispatches the packets as ordinary input to the handler in
+// the worker's current round, marking them as local fwstate emissions
+// when flagged is set.
+func runHandler(
+	cpModule *C.struct_cp_module,
+	storage *C.struct_counter_storage,
+	worker *C.struct_dp_worker,
+	flagged bool,
+	packets ...gopacket.Packet,
+) *roundResult {
+	return runHandlerInContext(cpModule, storage, worker, 0, flagged, packets...)
+}
+
+// runHandlerInContext is runHandler through the given one of the config's
+// stand-in execution contexts on the worker.
+func runHandlerInContext(
+	cpModule *C.struct_cp_module,
+	storage *C.struct_counter_storage,
+	worker *C.struct_dp_worker,
+	context uint16,
+	flagged bool,
+	packets ...gopacket.Packet,
+) *roundResult {
 	pinner := runtime.Pinner{}
 	defer pinner.Unpin()
 
-	pf, err := dataplane.NewPacketFrontFromPackets(&pinner, packets...)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create packet front: %w", err)
+	var pf *dataplane.PacketFront
+	if len(packets) == 0 {
+		pf = dataplane.NewPacketFront(&pinner, nil, nil, nil)
+	} else {
+		var err error
+		pf, err = dataplane.NewPacketFrontFromPackets(&pinner, packets...)
+		if err != nil {
+			panic(fmt.Sprintf("failed to create packet front: %v", err))
+		}
 	}
 
 	cPacketFront := (*C.struct_packet_front)(unsafe.Pointer(pf))
-	if internal {
+	if flagged {
 		C.fwstate_test_mark_internal(cPacketFront)
 	}
 
-	// Create a dummy dp_worker
-	dpWorker := &C.struct_dp_worker{
-		idx:          0,
-		current_time: C.clock_get_time_ns(nil),
+	worker.current_time = C.clock_get_time_ns(nil)
+	C.test_fwstate_handle_packets_in_context(worker, cpModule, storage, cPacketFront, C.uint16_t(context))
+	return &roundResult{
+		PacketFrontPayload: pf.Payload(),
+		OutputData:         pf.OutputList().Data(),
 	}
-	C.test_fwstate_handle_packets(dpWorker, cpModule, storage, cPacketFront)
-	result := pf.Payload()
-	return &result, nil
+}
+
+// syncFrameOf returns the first sync frame carried by a sync packet built
+// with createSyncPacket.
+func syncFrameOf(packet gopacket.Packet) []byte {
+	udp, ok := packet.Layer(layers.LayerTypeUDP).(*layers.UDP)
+	if !ok {
+		panic("sync packet carries no UDP layer")
+	}
+	return append([]byte(nil), udp.Payload[:C.sizeof_struct_fw_state_sync_frame]...)
+}
+
+// fwstateHandleLocalEvents starts a new round on worker 0, stashes the
+// frame of every sync packet as ACL would, and runs the handler with no
+// ordinary input.
+func fwstateHandleLocalEvents(cpModule *C.struct_cp_module, storage *C.struct_counter_storage, packets ...gopacket.Packet) (*dataplane.PacketFrontPayload, error) {
+	worker := testWorker(0)
+	nextRound(worker)
+	events := make([]localEvent, 0, len(packets))
+	for _, packet := range packets {
+		events = append(events, localEvent{frame: syncFrameOf(packet)})
+	}
+	if stashed := stashEvents(cpModule, worker, events...); stashed != len(events) {
+		return nil, fmt.Errorf("stashed %d of %d events", stashed, len(events))
+	}
+	result := runHandler(cpModule, storage, worker, false)
+	return &result.PacketFrontPayload, nil
+}
+
+// fwstateHandleWirePackets dispatches packets as ordinary input in a new
+// round on worker 0.
+func fwstateHandleWirePackets(cpModule *C.struct_cp_module, storage *C.struct_counter_storage, packets ...gopacket.Packet) (*dataplane.PacketFrontPayload, error) {
+	worker := testWorker(0)
+	nextRound(worker)
+	result := runHandler(cpModule, storage, worker, false, packets...)
+	return &result.PacketFrontPayload, nil
+}
+
+// fwstateHandleFlaggedPackets dispatches packets marked as emitted by an
+// upstream fwstate in a new round on worker 0.
+func fwstateHandleFlaggedPackets(cpModule *C.struct_cp_module, storage *C.struct_counter_storage, packets ...gopacket.Packet) (*dataplane.PacketFrontPayload, error) {
+	worker := testWorker(0)
+	nextRound(worker)
+	result := runHandler(cpModule, storage, worker, true, packets...)
+	return &result.PacketFrontPayload, nil
+}
+
+// stashSlotCount reports the record count of the worker's stash slot for
+// one family, or -1 without a linked map.
+func stashSlotCount(cpModule *C.struct_cp_module, isIPv6 bool, workerIdx uint16) int {
+	slot := C.fwstate_test_stash_slot(cpModule, C.bool(isIPv6), C.uint16_t(workerIdx))
+	if slot == nil {
+		return -1
+	}
+	return int(slot.count)
+}
+
+// stashRecordStatus reports the decision status of one record in the
+// worker's stash slot for one family.
+func stashRecordStatus(cpModule *C.struct_cp_module, isIPv6 bool, workerIdx uint16, idx int) uint8 {
+	slot := C.fwstate_test_stash_slot(cpModule, C.bool(isIPv6), C.uint16_t(workerIdx))
+	return uint8(C.fwstate_test_slot_record(slot, C.uint32_t(idx)).status)
+}
+
+// Record status values of the stash.
+const (
+	recordPending    = uint8(C.FWSTATE_SYNC_RECORD_PENDING)
+	recordApplied    = uint8(C.FWSTATE_SYNC_RECORD_APPLIED)
+	recordSuppressed = uint8(C.FWSTATE_SYNC_RECORD_SUPPRESSED)
+)
+
+// moduleCounter reads the first value of a module counter by name.
+func moduleCounter(cpModule *C.struct_cp_module, storage *C.struct_counter_storage, name string) uint64 {
+	cName := C.CString(name)
+	defer C.free(unsafe.Pointer(cName))
+	return uint64(C.fwstate_test_counter(cpModule, storage, cName, 0))
 }
 
 // fwstateTable resolves the module config's linked fwtable for one family,
@@ -444,4 +599,116 @@ func TrimStaleLayers(cpModule *C.struct_cp_module, now uint64) error {
 		return fmt.Errorf("failed to trim stale layers: rc=%d", rc)
 	}
 	return nil
+}
+
+// fwstateSiblingModuleConfig creates a second module config on the agent of
+// cpModule, linked to the same two map objects and emitting only to the
+// unicast endpoint [2001:db8::3]:10000, with its own counter storage.
+func fwstateSiblingModuleConfig(cpModule *C.struct_cp_module, name string) (*C.struct_cp_module, *C.struct_counter_storage) {
+	agent := (*C.struct_agent)(C.addr_of((*unsafe.Pointer)(unsafe.Pointer(&cpModule.agent))))
+
+	cName := C.CString(name)
+	defer C.free(unsafe.Pointer(cName))
+	cName4 := C.CString("fw4")
+	defer C.free(unsafe.Pointer(cName4))
+	cName6 := C.CString("fw6")
+	defer C.free(unsafe.Pointer(cName6))
+
+	source := (*C.struct_fwstate_module_config)(unsafe.Pointer(cpModule))
+	syncCfg := source.sync_config
+
+	var cErr *C.yanet_error
+	sibling := C.fwstate_module_config_new(
+		agent,
+		cName,
+		&syncCfg,
+		cName4,
+		cName6,
+		&cErr,
+	)
+	if sibling == nil {
+		panic(fmt.Sprintf("failed to initialize sibling fwstate module config: %v", cerrors.FromC(unsafe.Pointer(cErr))))
+	}
+	C.fwstate_test_prepared_reset(sibling)
+	ClearSyncDestination(sibling)
+	SetSyncUnicastDestination(sibling)
+
+	storage := C.fwstate_test_counter_storage_setup(sibling)
+	if storage == nil {
+		panic("failed to spawn sibling counter storage")
+	}
+	return sibling, storage
+}
+
+// v6Event builds a stashed IPv6 TCP event from 2001:db8::1 to 2001:db8::2
+// whose source port tells events apart.
+func v6Event(srcPort uint16, rxDeviceID, txDeviceID uint16) localEvent {
+	return localEvent{
+		frame: createSyncFrame(
+			layers.IPProtocolTCP, 6, srcPort, 80,
+			net.ParseIP("2001:db8::2"), net.ParseIP("2001:db8::1"),
+		),
+		rxDeviceID: rxDeviceID,
+		txDeviceID: txDeviceID,
+	}
+}
+
+// v4Event builds a stashed IPv4 UDP event whose source port tells events
+// apart.
+func v4Event(srcPort uint16) localEvent {
+	return localEvent{frame: createSyncFrame(layers.IPProtocolUDP, 4, srcPort, 53, nil, nil)}
+}
+
+// syncPayload returns the destination and UDP payload of an emitted sync
+// packet.
+func syncPayload(raw []byte) (net.IP, uint16, []byte) {
+	packet := gopacket.NewPacket(raw, layers.LayerTypeEthernet, gopacket.Default)
+	ip6, ok := packet.Layer(layers.LayerTypeIPv6).(*layers.IPv6)
+	if !ok {
+		panic("emitted sync packet carries no IPv6 layer")
+	}
+	udp, ok := packet.Layer(layers.LayerTypeUDP).(*layers.UDP)
+	if !ok {
+		panic("emitted sync packet carries no UDP layer")
+	}
+	return ip6.DstIP, uint16(udp.DstPort), append([]byte(nil), udp.Payload...)
+}
+
+// frameSize is the wire size of one sync frame.
+const frameSize = int(C.sizeof_struct_fw_state_sync_frame)
+
+// stashDefaultSize is the stash bytes each harness map has per worker.
+const stashDefaultSize = int(C.FWSTATE_STASH_DEFAULT_SIZE)
+
+// syncRecordSize is the size of one stashed record.
+const syncRecordSize = int(C.sizeof_struct_fwstate_sync_record)
+
+// stashSlotAddr returns the address of the worker's stash slot for one
+// family.
+func stashSlotAddr(cpModule *C.struct_cp_module, isIPv6 bool, workerIdx uint16) uintptr {
+	return uintptr(unsafe.Pointer(C.fwstate_test_stash_slot(cpModule, C.bool(isIPv6), C.uint16_t(workerIdx))))
+}
+
+// stashRecordsAddr returns the address of the worker's records array for
+// one family.
+func stashRecordsAddr(cpModule *C.struct_cp_module, isIPv6 bool, workerIdx uint16) uintptr {
+	slot := C.fwstate_test_stash_slot(cpModule, C.bool(isIPv6), C.uint16_t(workerIdx))
+	return uintptr(unsafe.Pointer(C.fwstate_test_slot_record(slot, 0)))
+}
+
+// poolOutstanding reports how many mock-pool mbufs the harness workers
+// hold outside the pool.
+func poolOutstanding(worker *C.struct_dp_worker) uint64 {
+	return uint64(C.fwstate_test_pool_outstanding(worker))
+}
+
+// limitPool lets the harness mock pool hand out only extra more mbufs than
+// it has outstanding now, until unlimitPool restores the default.
+func limitPool(worker *C.struct_dp_worker, extra uint32) {
+	C.fwstate_test_pool_limit(worker, C.uint32_t(extra))
+}
+
+// unlimitPool restores the default capacity of the harness mock pool.
+func unlimitPool(worker *C.struct_dp_worker) {
+	C.fwstate_test_pool_unlimit(worker)
 }

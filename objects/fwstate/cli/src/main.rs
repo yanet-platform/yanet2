@@ -71,6 +71,7 @@ async fn map_create(service: &mut FWStateMapService, cmd: CreateCmd) -> Result<(
         index_size: cmd.index_size.unwrap_or(0),
         extra_bucket_count: cmd.extra_bucket_count.unwrap_or(0),
         worker_count: cmd.worker_count.unwrap_or(0),
+        stash_size: cmd.stash_size.unwrap_or(0),
     };
     service
         .unary("create", request, async |client, request| {
@@ -389,6 +390,19 @@ fn map_candidates() -> Vec<CompletionCandidate> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_parse_stash_size_accepts_suffixes_and_plain_bytes() {
+        assert_eq!(Ok(4096), args::parse_stash_size("4KiB"));
+        assert_eq!(Ok(1 << 20), args::parse_stash_size("1MiB"));
+        assert_eq!(Ok(0), args::parse_stash_size("0"));
+        assert_eq!(Ok(62), args::parse_stash_size("62"));
+    }
+
+    #[test]
+    fn test_parse_stash_size_rejects_garbage() {
+        assert!(args::parse_stash_size("lots").is_err());
+    }
 
     #[test]
     fn format_endpoint_brackets_ipv6_only() {

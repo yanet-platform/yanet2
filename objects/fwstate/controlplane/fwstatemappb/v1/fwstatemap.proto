@@ -88,6 +88,10 @@ message CreateMapRequest {
   uint32 extra_bucket_count = 4;
   // worker_count sizes the per-worker state; zero derives the dataplane's current worker count.
   uint32 worker_count = 5;
+  // stash_size is the per-worker sync stash buffer in bytes; zero selects
+  // room for 64 sync records (3968 bytes). A nonzero size must hold one
+  // sync record (62 bytes) and must not exceed 1 MiB.
+  uint64 stash_size = 6;
 }
 
 message CreateMapResponse {}

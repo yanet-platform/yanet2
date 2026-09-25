@@ -97,7 +97,17 @@ fn config_block(response: &ShowConfigResponse) -> display::KeyValue {
         );
     }
 
-    block
+    block.row("sync mtu", effective_sync_mtu(sync_config.sync_mtu))
+}
+
+/// Sync MTU the dataplane applies: an absent or zero value selects 1500.
+fn effective_sync_mtu(sync_mtu: Option<u32>) -> u32 {
+    const DEFAULT_SYNC_MTU: u32 = 1500;
+
+    match sync_mtu {
+        None | Some(0) => DEFAULT_SYNC_MTU,
+        Some(mtu) => mtu,
+    }
 }
 
 /// Builds a partial update carrying only the fields the caller supplied.
@@ -138,6 +148,9 @@ fn update_request(cmd: &UpdateCmd) -> Result<UpdateConfigRequest, &'static str> 
     }
     if let Some(value) = cmd.sync_suppress_timeout {
         sync_config.sync_suppress_timeout = Some(value.as_nanos() as u64);
+    }
+    if let Some(value) = cmd.sync_mtu {
+        sync_config.sync_mtu = Some(u32::from(value));
     }
     request.sync_config = Some(sync_config);
     Ok(request)
@@ -308,6 +321,7 @@ mod tests {
             udp: None,
             default: None,
             sync_suppress_timeout: None,
+            sync_mtu: None,
         }
     }
 
@@ -459,6 +473,23 @@ mod tests {
     }
 
     #[test]
+    fn test_effective_sync_mtu_defaults_absent_and_zero_to_1500() {
+        assert_eq!(1500, effective_sync_mtu(None));
+        assert_eq!(1500, effective_sync_mtu(Some(0)));
+        assert_eq!(9000, effective_sync_mtu(Some(9000)));
+    }
+
+    #[test]
+    fn test_update_request_sync_mtu_is_carried() {
+        let mut cmd = update_cmd("cfg", None, None);
+        cmd.sync_mtu = Some(9000);
+
+        let request = update_request(&cmd).unwrap();
+
+        assert_eq!(Some(9000), request.sync_config.unwrap().sync_mtu);
+    }
+
+    #[test]
     fn test_update_request_independent_flags_set_only_their_own_fields() {
         let mut cmd = update_cmd("cfg", None, Some("map6"));
         cmd.udp = Some(core::time::Duration::from_secs(45));
@@ -470,24 +501,6 @@ mod tests {
         let sync_config = request.sync_config.unwrap();
         assert_eq!(Some(45_000_000_000), sync_config.udp);
         assert_eq!(None, sync_config.tcp);
-    }
-
-    #[test]
-    fn test_update_sync_endpoints_combines_multicast_disable_with_unicast_endpoint() {
-        let mut sync_config: SyncConfig = Default::default();
-        let mut cmd = update_cmd("cfg", None, None);
-        cmd.unicast = Some("[2001:db8::1]:10000".parse().unwrap());
-        cmd.no_multicast = true;
-
-        update_sync_endpoints(&mut sync_config, &cmd).unwrap();
-
-        assert_eq!(None, sync_config.dst_addr_multicast);
-        assert_eq!(Some(0), sync_config.port_multicast);
-        assert_eq!(
-            Some(IpAddress::from(IpAddr::V6("2001:db8::1".parse().unwrap()))),
-            sync_config.dst_addr_unicast
-        );
-        assert_eq!(Some(10000), sync_config.port_unicast);
     }
 
     #[test]

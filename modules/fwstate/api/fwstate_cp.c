@@ -5,8 +5,11 @@
 #include "common/container_of.h"
 #include "lib/controlplane/agent/agent.h"
 #include "lib/controlplane/config/zone.h"
+#include "lib/dataplane/config/zone.h"
 #include "lib/errors/errors.h"
 #include "lib/fwstate/config.h"
+#include "lib/fwstate/stash.h"
+#include "lib/fwstate/sync.h"
 #include "modules/fwstate/dataplane/config.h"
 #include "objects/fwstate/api/fwstate_map_v4_object.h"
 #include "objects/fwstate/api/fwstate_map_v6_object.h"
@@ -21,10 +24,49 @@ fwstate_config_set_defaults(struct fwstate_sync_config *config) {
 	config->timeouts.tcp = FW_STATE_DEFAULT_TIMEOUT;
 	config->timeouts.udp = 30e9;	  // 30 seconds
 	config->timeouts.default_ = 16e9; // 16 seconds
+	config->sync_mtu = FWSTATE_SYNC_DEFAULT_MTU;
 }
 
 static void
 fwstate_module_config_destroy(struct cp_module *cp_module);
+
+// Allocate one zeroed stash read position per dataplane worker.
+static int
+fwstate_module_positions_new(
+	struct fwstate_module_config *config, struct agent *agent
+) {
+	struct dp_config *dp_config = ADDR_OF(&agent->dp_config);
+	uint64_t worker_count = dp_config != NULL ? dp_config->worker_count : 0;
+	if (worker_count == 0) {
+		return 0;
+	}
+	struct fwstate_stash_position *positions = fwstate_stash_zalloc(
+		&config->cp_module.memory_context,
+		sizeof(struct fwstate_stash_position) * worker_count
+	);
+	if (positions == NULL) {
+		return -1;
+	}
+	config->worker_count = worker_count;
+	SET_OFFSET_OF(&config->positions, positions);
+	return 0;
+}
+
+// Return the read positions to the module's memory context.
+static void
+fwstate_module_positions_free(struct fwstate_module_config *config) {
+	struct fwstate_stash_position *positions = ADDR_OF(&config->positions);
+	if (positions != NULL) {
+		fwstate_stash_zfree(
+			&config->cp_module.memory_context,
+			positions,
+			sizeof(struct fwstate_stash_position) *
+				config->worker_count
+		);
+	}
+	SET_OFFSET_OF(&config->positions, NULL);
+	config->worker_count = 0;
+}
 
 // Declare the module's link to one family's fwstate-map object and
 // record the link index.
@@ -128,6 +170,8 @@ fwstate_module_config_new(
 	// must see both slots marked absent.
 	config->v4_object_link_idx = FWSTATE_OBJECT_LINK_NONE;
 	config->v6_object_link_idx = FWSTATE_OBJECT_LINK_NONE;
+	config->worker_count = 0;
+	SET_OFFSET_OF(&config->positions, NULL);
 	fwstate_config_set_defaults(&config->sync_config);
 
 	// Register module-level counters.
@@ -164,6 +208,9 @@ fwstate_module_config_new(
 		{"fwstate_internal_forwarded",
 		 2,
 		 &config->internal_forwarded_counter_id},
+		{"fwstate_sync_alloc_failed",
+		 1,
+		 &config->sync_alloc_failed_counter_id},
 	};
 
 	for (size_t i = 0; i < sizeof(counters) / sizeof(counters[0]); ++i) {
@@ -198,11 +245,17 @@ fwstate_module_config_new(
 		*counters[i].dst = id;
 	}
 
+	if (fwstate_module_positions_new(config, agent)) {
+		yanet_error_add(err, "failed to allocate stash read positions");
+		fwstate_module_config_destroy(&config->cp_module);
+		return NULL;
+	}
+
 	// A config handle is built exactly once: the sync config is
 	// installed and the map-object links declared before the module is
-	// ever visible to a registry. A failure tears the whole module down;
-	// the config owns no table memory, so nothing beyond the module
-	// itself is freed here.
+	// ever visible to a registry. A failure tears the whole module down,
+	// including the per-worker read positions; the config owns no table
+	// memory.
 	if (fwstate_module_setup(
 		    config, sync_config, fw4_map_name, fw6_map_name, err
 	    )) {
@@ -222,8 +275,9 @@ fwstate_module_config_destroy(struct cp_module *cp_module) {
 	// Capture agent before fini zeroes it.
 	struct agent *agent = ADDR_OF(&cp_module->agent);
 
-	// The linked fwstate-map objects own the tables and the config holds
-	// only link indices, so there is no table memory to free here.
+	// The linked fwstate-map objects own the tables and the stashes; the
+	// config owns only its read positions.
+	fwstate_module_positions_free(config);
 	cp_module_fini(cp_module);
 
 	memory_bfree(

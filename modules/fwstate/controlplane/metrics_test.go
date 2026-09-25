@@ -92,6 +92,12 @@ func TestEmitCounterMetricsKnownCounters(t *testing.T) {
 			wantNames:   []string{"fwstate_internal_forwarded_packets", "fwstate_internal_forwarded_bytes"},
 		},
 		{
+			name:        "fwstate_sync_alloc_failed one-dimensional packets",
+			counterName: "fwstate_sync_alloc_failed",
+			packets:     2,
+			wantNames:   []string{"fwstate_sync_alloc_failed_packets"},
+		},
+		{
 			name:        "fwstate_sync_v4_inserted one-dimensional entries",
 			counterName: "fwstate_sync_v4_inserted",
 			packets:     42,

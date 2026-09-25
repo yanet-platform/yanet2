@@ -96,7 +96,7 @@ func newPublishedFWStateMaps(
 		objectName := name + "-" + kind.String()
 		mapObject, err := objfwstate.NewMapObjectConfig(agent, objectName, kind)
 		require.NoError(t, err)
-		require.NoError(t, mapObject.CreateMap(indexSize, 64, 1))
+		require.NoError(t, mapObject.CreateMap(objfwstate.MapConfig{IndexSize: indexSize, ExtraBucketCount: 64, WorkerCount: 1}))
 		require.NoError(t, mapObject.Publish(agent))
 		t.Cleanup(func() { _ = mapObject.Free() })
 		return mapObject
@@ -289,7 +289,6 @@ func buildSyncHeaderBytes(srcIP6 net.IP, payloadLen uint16) []byte {
 // passes them to output unchanged.
 func TestFWStateSyncPacketOOBGuard(t *testing.T) {
 	externalSrc := net.IP{0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x01}
-	internalSrc := net.IPv6zero
 	syncFrame := buildSyncFrame(externalSrc, syncMulticastAddr)
 
 	t.Run("well_formed_external", func(t *testing.T) {
@@ -326,25 +325,5 @@ func TestFWStateSyncPacketOOBGuard(t *testing.T) {
 		// Post-fix: packet is rejected as non-contiguous-sync and passed through.
 		require.Len(t, rawResult.Output, 1, "multi-segment external sync must be passed through post-fix")
 		require.Empty(t, rawResult.Drop, "multi-segment external sync must not be dropped post-fix")
-	})
-
-	t.Run("multiseg_internal", func(t *testing.T) {
-		// Same two-segment split but with an all-zero IPv6 source (internal
-		// originator). Post-fix, the rte_pktmbuf_data_len bound rejects it
-		// before the internal/external check, so the packet reaches output.
-		h, agent := setupFWStateHarness(t)
-		configureFWState(t, agent, "test")
-		wireFWSPipeline(t, agent, "test")
-
-		internalFrame := buildSyncFrame(internalSrc, syncMulticastAddr)
-		seg0 := buildSyncHeaderBytes(internalSrc, uint16(len(internalFrame)))
-		seg1 := make([]byte, len(internalFrame))
-		copy(seg1, internalFrame)
-
-		rawResult, err := h.HandleSegmentedPackets([][]byte{seg0, seg1})
-		require.NoError(t, err)
-		// Post-fix: non-contiguous packet is passed through regardless of source.
-		require.Len(t, rawResult.Output, 1, "multi-segment internal sync must be passed through post-fix")
-		require.Empty(t, rawResult.Drop, "multi-segment internal sync must not be dropped post-fix")
 	})
 }

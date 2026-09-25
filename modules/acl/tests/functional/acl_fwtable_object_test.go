@@ -91,13 +91,13 @@ func TestACL_FWTableObjectStateLookup(t *testing.T) {
 
 	map4, err := objfwstate.NewMapObjectConfig(agent, "obj4", objfwstate.KindV4)
 	require.NoError(t, err)
-	require.NoError(t, map4.CreateMap(1024, 0, 1))
+	require.NoError(t, map4.CreateMap(objfwstate.MapConfig{IndexSize: 1024, WorkerCount: 1}))
 	require.NoError(t, map4.Publish(agent))
 	t.Cleanup(func() { _ = map4.Free() })
 
 	map6, err := objfwstate.NewMapObjectConfig(agent, "obj6", objfwstate.KindV6)
 	require.NoError(t, err)
-	require.NoError(t, map6.CreateMap(1024, 0, 1))
+	require.NoError(t, map6.CreateMap(objfwstate.MapConfig{IndexSize: 1024, WorkerCount: 1}))
 	require.NoError(t, map6.Publish(agent))
 	t.Cleanup(func() { _ = map6.Free() })
 
@@ -167,13 +167,13 @@ func Test_ACL_FWTableObject_FragmentStateLookupMiss(t *testing.T) {
 
 	map4, err := objfwstate.NewMapObjectConfig(agent, "obj4", objfwstate.KindV4)
 	require.NoError(t, err)
-	require.NoError(t, map4.CreateMap(1024, 0, 1))
+	require.NoError(t, map4.CreateMap(objfwstate.MapConfig{IndexSize: 1024, WorkerCount: 1}))
 	require.NoError(t, map4.Publish(agent))
 	t.Cleanup(func() { _ = map4.Free() })
 
 	map6, err := objfwstate.NewMapObjectConfig(agent, "obj6", objfwstate.KindV6)
 	require.NoError(t, err)
-	require.NoError(t, map6.CreateMap(1024, 0, 1))
+	require.NoError(t, map6.CreateMap(objfwstate.MapConfig{IndexSize: 1024, WorkerCount: 1}))
 	require.NoError(t, map6.Publish(agent))
 	t.Cleanup(func() { _ = map6.Free() })
 
@@ -309,13 +309,13 @@ func TestACL_FWTableObjectDeleteRefusedWhileLinked(t *testing.T) {
 
 	map4, err := objfwstate.NewMapObjectConfig(agent, "obj4", objfwstate.KindV4)
 	require.NoError(t, err)
-	require.NoError(t, map4.CreateMap(1024, 0, 1))
+	require.NoError(t, map4.CreateMap(objfwstate.MapConfig{IndexSize: 1024, WorkerCount: 1}))
 	require.NoError(t, map4.Publish(agent))
 	t.Cleanup(func() { _ = map4.Free() })
 
 	map6, err := objfwstate.NewMapObjectConfig(agent, "obj6", objfwstate.KindV6)
 	require.NoError(t, err)
-	require.NoError(t, map6.CreateMap(1024, 0, 1))
+	require.NoError(t, map6.CreateMap(objfwstate.MapConfig{IndexSize: 1024, WorkerCount: 1}))
 	require.NoError(t, map6.Publish(agent))
 	t.Cleanup(func() { _ = map6.Free() })
 

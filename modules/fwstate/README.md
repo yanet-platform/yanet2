@@ -2,20 +2,20 @@
 
 ## Synchronization pipeline placement
 
-An ACL module whose rules can create state must be immediately followed by the
-fwstate module that consumes its synchronization events:
+ACL writes a sync record for every allowed packet that creates or refreshes
+state into a per-worker stash of the linked fwstate map. Each round, a
+fwstate config on the same map must run after that ACL, anywhere later in the
+chain:
 
 ```text
-acl:<producer> -> fwstate:<consumer> -> ...
+acl:<producer> -> ... -> fwstate:<consumer> -> ...
 ```
 
-Do not place another packet-processing module between this ACL and fwstate.
-Internally generated synchronization events carry a trusted metadata flag, but
-their destination address and UDP port remain unset until fwstate applies its
-configured synchronization destination. The flag identifies the event to the
-adjacent fwstate consumer; it does not make the event bypass intervening
-modules.
+Records a round leaves unprocessed are dropped. The first fwstate config to
+reach a record inserts or suppresses it; every fwstate config on the map then
+sends the applied records to its own destinations once per round, packed up
+to `sync_mtu`. A downstream fwstate passes these packets through.
 
-Pipelines that violate this ordering are unsupported and may silently lose
-synchronization events. Pipeline configuration is user-controlled, so users
-are responsible for preserving this adjacency.
+The stash size is set when the map is created: 0 selects room for 64 records,
+at most 1 MiB. Records past it are dropped and counted in
+`acl_sync_overflow`; the packet verdict does not change.

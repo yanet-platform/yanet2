@@ -4,7 +4,7 @@
 
 #include "lib/filter/classifiers/net6.h"
 #include "lib/filter/filter.h"
-#include "lib/statemap/fwtable.h"
+#include "objects/fwstate/api/fwstate_map_object.h"
 
 struct counter_value_handle;
 
@@ -33,10 +33,10 @@ struct acl_target {
 // module execution context by the module's execution-context commit
 // handler.
 //
-// The module counter addresses, the per-rule counter handle array and
-// the linked state tables; the state tables are NULL for a family
-// with no object link, in which case CHECK_STATE finds no state for
-// that family.
+// The module counter addresses, the per-rule counter handle array, the
+// linked state tables and the stashes of their map objects; a family with
+// no object link has a NULL table and stash, so CHECK_STATE finds no state
+// and no sync record is written for it.
 struct acl_prepared {
 	uint64_t *allow_cnt;
 	uint64_t *deny_cnt;
@@ -44,12 +44,13 @@ struct acl_prepared {
 	uint64_t *check_miss_cnt;
 	uint64_t *create_cnt;
 	uint64_t *sync_cnt;
+	uint64_t *sync_overflow_cnt;
 	uint64_t *invalid_cnt;
 	uint64_t *non_term_cnt;
 	uint64_t *no_match_cnt;
 	struct counter_value_handle **rules_handles;
-	fwtable_t *fw4table;
-	fwtable_t *fw6table;
+	struct fwstate_map_link fw4;
+	struct fwstate_map_link fw6;
 };
 
 struct acl_module_config {
@@ -102,6 +103,7 @@ struct acl_module_config {
 	uint64_t action_invalid_counter_id;
 	uint64_t action_non_term_counter_id;
 	uint64_t sync_sent_counter_id;
+	uint64_t sync_overflow_counter_id;
 
 	// Shared v6 half-address classification for the two v6 filters.
 	//

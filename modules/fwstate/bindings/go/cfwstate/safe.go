@@ -2,6 +2,7 @@ package cfwstate
 
 //#include "lib/fwstate/config.h"
 //#include "lib/fwstate/fwstate_cursor.h"
+//#include "lib/fwstate/sync.h"
 //#include "modules/fwstate/api/fwstate_cp.h"
 import "C"
 
@@ -30,7 +31,13 @@ type SyncConfig struct {
 	Udp                 uint64
 	Default             uint64
 	SyncSuppressTimeout uint64
+	// SyncMTU bounds the size of one emitted sync packet, IPv6 and UDP
+	// headers included; zero selects the default.
+	SyncMTU uint16
 }
+
+// MinSyncMTU is the smallest sync MTU that carries one frame.
+const MinSyncMTU = uint16(C.FWSTATE_SYNC_MIN_MTU)
 
 func newSyncConfigFromC(cCfg *C.struct_fwstate_sync_config) SyncConfig {
 	var syncCfg SyncConfig
@@ -47,6 +54,7 @@ func newSyncConfigFromC(cCfg *C.struct_fwstate_sync_config) SyncConfig {
 	syncCfg.Udp = uint64(cCfg.timeouts.udp)
 	syncCfg.Default = uint64(cCfg.timeouts.default_)
 	syncCfg.SyncSuppressTimeout = uint64(cCfg.sync_suppress_timeout)
+	syncCfg.SyncMTU = uint16(cCfg.sync_mtu)
 	return syncCfg
 }
 
@@ -65,6 +73,7 @@ func (m SyncConfig) toC() C.struct_fwstate_sync_config {
 	cSyncConfig.timeouts.udp = C.uint64_t(m.Udp)
 	cSyncConfig.timeouts.default_ = C.uint64_t(m.Default)
 	cSyncConfig.sync_suppress_timeout = C.uint64_t(m.SyncSuppressTimeout)
+	cSyncConfig.sync_mtu = C.uint16_t(m.SyncMTU)
 
 	return cSyncConfig
 }

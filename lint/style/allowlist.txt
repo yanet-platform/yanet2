@@ -59,17 +59,9 @@ loopindex:modules/dscp/controlplane/service_test.go:Test_DscpService_ConcurrentA
 loopindex:modules/forward/controlplane/service_test.go:TestForwardServiceConcurrentAccess:i:1  # legacy: rename to idx
 loopindex:modules/forward/controlplane/service_test.go:TestForwardServiceConcurrentAccess:i:2  # legacy: rename to idx
 loopindex:modules/forward/controlplane/service_test.go:TestForwardServiceConcurrentAccess:i:3  # legacy: rename to idx
-loopindex:modules/fwstate/tests/dataplane/cursor_test.go:TestCursorBackwardRead:i:1  # legacy: rename to idx
-loopindex:modules/fwstate/tests/dataplane/cursor_test.go:TestCursorBackwardRead:i:2  # legacy: rename to idx
-loopindex:modules/fwstate/tests/dataplane/cursor_test.go:TestCursorForwardRead:i:1  # legacy: rename to idx
-loopindex:modules/fwstate/tests/dataplane/cursor_test.go:TestCursorForwardRead:i:2  # legacy: rename to idx
-loopindex:modules/fwstate/tests/dataplane/cursor_test.go:TestCursorPaging:i:1  # legacy: rename to idx
-loopindex:modules/fwstate/tests/dataplane/cursor_test.go:TestCursorPaging:i:2  # legacy: rename to idx
-loopindex:modules/fwstate/tests/dataplane/cursor_test_helper.go:readCursorBackward:i:1  # legacy: rename to idx
 loopindex:modules/fwstate/tests/dataplane/cursor_test_helper.go:readCursorForward:i:1  # legacy: rename to idx
 loopindex:modules/fwstate/tests/dataplane/fwstate.go:createSyncFrame:i:1  # legacy: rename to idx
 loopindex:modules/fwstate/tests/dataplane/fwstate.go:createSyncFrame:i:2  # legacy: rename to idx
-loopindex:modules/fwstate/tests/dataplane/fwstate.go:fwstateModuleConfig:i:1  # legacy: rename to idx
 loopindex:modules/mirror/controlplane/service_test.go:TestMirrorServiceConcurrentAccess:i:1  # legacy: rename to idx
 loopindex:modules/mirror/controlplane/service_test.go:TestMirrorServiceConcurrentAccess:i:2  # legacy: rename to idx
 loopindex:modules/mirror/controlplane/service_test.go:TestMirrorServiceConcurrentAccess:i:3  # legacy: rename to idx

@@ -14,6 +14,9 @@ export interface SyncConfig {
     tcp?: number;
     udp?: number;
     default?: number;
+    // Largest emitted sync packet in bytes, IPv6+UDP headers included; 0
+    // selects the service default of 1500.
+    sync_mtu?: number;
 }
 
 export interface ShowConfigResponse {
