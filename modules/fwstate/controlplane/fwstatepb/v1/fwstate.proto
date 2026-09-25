@@ -75,8 +75,8 @@ message ListConfigsResponse {
 // emission; the unicast endpoint is emission-only.
 //
 // Synchronization is optional: a config naming no destination does not claim
-// external sync traffic; trusted internal events are still consumed and
-// dropped so their neutral outer headers cannot leak into the pipeline. Each
+// external sync traffic; state events ACL stashes in the linked maps are still
+// applied, only nothing is emitted for them. Each
 // destination needs both an address and a port in the resulting config.
 // The source address and destination MAC are required whenever an endpoint
 // is configured because fwstate stamps emitted frames.
@@ -102,4 +102,11 @@ message SyncConfig {
   // sessions. Every entry TTL is inflated by this value so the effective
   // keep-alive never falls below the configured timeout.
   optional uint64 sync_suppress_timeout = 13;
+
+  // Largest IPv6 packet, headers included, of one emitted sync packet; it
+  // bounds how many frames a packet batches. The mbuf data room bounds the
+  // packet as well, so a sync_mtu above it yields smaller packets. Zero
+  // selects 1500; a nonzero value must hold one frame (at least 104) and fit
+  // in 16 bits.
+  optional uint32 sync_mtu = 14;
 }

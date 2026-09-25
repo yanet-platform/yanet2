@@ -70,8 +70,8 @@ func (m *MetricsService) GetMetricsRules(ctx context.Context, req *aclpb.GetMetr
 var aclStructuralCounters = []string{
 	"acl_no_match", "acl_action_allow", "acl_action_deny", "acl_action_count",
 	"acl_action_check_state", "acl_action_create_state", "acl_action_unknown",
-	"acl_state_miss", "acl_sync_sent", "rx", "tx", "drop", "pending_input",
-	"pending_output",
+	"acl_state_miss", "acl_sync_sent", "acl_sync_overflow", "rx", "tx", "drop",
+	"pending_input", "pending_output",
 }
 
 // Metrics returns ACL module metrics matching tags: per-pipeline packet
@@ -361,6 +361,12 @@ func (m *ACLService) collectDataplaneMetrics() ([]*commonpb.Metric, error) {
 				result = append(result,
 					commonpb.NewMetricCounter("acl_sync_sent_packets", packets, baseLabels...),
 					commonpb.NewMetricCounter("acl_sync_sent_bytes", bytes, baseLabels...),
+				)
+			case "acl_sync_overflow":
+				// Counts sync records discarded because the worker's
+				// stash slot was full; it carries no bytes.
+				result = append(result,
+					commonpb.NewMetricCounter("acl_sync_overflow_records", packets, baseLabels...),
 				)
 			case "rx":
 				result = append(result,

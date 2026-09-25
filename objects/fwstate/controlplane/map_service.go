@@ -342,11 +342,12 @@ func (m *FWStateMapService) CreateMap(
 		return nil, status.Errorf(codes.Internal, "failed to create fwstate-map config: %v", err)
 	}
 
-	if err := mapConfig.CreateMap(
-		req.GetIndexSize(),
-		req.GetExtraBucketCount(),
-		workerCount,
-	); err != nil {
+	if err := mapConfig.CreateMap(cfwstate.MapConfig{
+		IndexSize:        req.GetIndexSize(),
+		ExtraBucketCount: req.GetExtraBucketCount(),
+		WorkerCount:      workerCount,
+		StashSize:        req.GetStashSize(),
+	}); err != nil {
 		if err := mapConfig.Free(); err != nil {
 			m.log.Error("failed to free unpublished fwstate-map",
 				zap.String("map", name), zap.Error(err))

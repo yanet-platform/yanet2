@@ -13,11 +13,12 @@
 #include "lib/dataplane/time/clock.h"
 #include "lib/errors/errors.h"	// IWYU pragma: export
 #include "lib/fwstate/config.h" // IWYU pragma: export
-#include "lib/fwstate/layermap.h"
+#include "lib/fwstate/stash.h"
 #include "lib/fwstate/types.h"	// IWYU pragma: export
 #include "lib/statemap/fwmap.h" // IWYU pragma: export
 #include "modules/fwstate/api/fwstate_cp.h"
 #include "modules/fwstate/dataplane/config.h" // IWYU pragma: export
+#include "modules/fwstate/dataplane/dataplane.h"
 #include "objects/fwstate/api/fwstate_map_v4_object.h"
 #include "objects/fwstate/api/fwstate_map_v6_object.h"
 
@@ -52,20 +53,109 @@ fwstate_test_counter_storage_setup(struct cp_module *cp_module);
 void
 fwstate_test_counter_storage_free(struct counter_storage *storage);
 
-// Test wrapper for fwstate_handle_packets that constructs module_ectx
-// from cp_module and a pre-spawned counter storage, wiring the module's
-// declared object links through the agent's object registry the way the
-// production execution-context build does. The storage is owned by the
-// caller and reused across calls so counters accumulate.
+// Execution contexts per module config and worker the harness can stand
+// in for, as one config placed at several points of a pipeline has.
+#define FWSTATE_TEST_CONTEXT_COUNT 2
+
+// Return the harness-owned prepared buffer of one execution context of a
+// module config on one worker, zeroed on first use, or NULL past the
+// harness limits or when its table is full.
+struct fwstate_prepared *
+fwstate_test_prepared(
+	struct cp_module *cp_module, uint16_t context, uint16_t worker_idx
+);
+
+// Forget the prepared buffers of a module config, so a config allocated at
+// the address of an earlier one does not inherit its stale stash links.
 void
-test_fwstate_handle_packets(
+fwstate_test_prepared_reset(struct cp_module *cp_module);
+
+// Test wrapper for fwstate_handle_packets that runs the given one of the
+// config's stand-in execution contexts on the worker. It constructs the
+// module context from cp_module and a pre-spawned counter storage, wiring
+// the module's declared object links through the agent's object registry
+// the way the production execution-context build does. The storage is
+// owned by the caller and reused across calls so counters accumulate.
+void
+test_fwstate_handle_packets_in_context(
 	struct dp_worker *dp_worker,
 	struct cp_module *cp_module,
 	struct counter_storage *counter_storage,
-	struct packet_front *packet_front
+	struct packet_front *packet_front,
+	uint16_t context
 );
 
-// Mark every queued packet as an internally generated synchronization event.
+// Workers every harness map stash and module config's per-worker read
+// positions are sized for.
+#define FWSTATE_TEST_WORKER_COUNT 2
+
+// Return the stand-in worker of the given index: a valid round counter and
+// a mock mbuf pool for emitted sync packets. Workers persist for the whole
+// process. Returns NULL for an index at or past FWSTATE_TEST_WORKER_COUNT.
+struct dp_worker *
+fwstate_test_worker(uint16_t worker_idx);
+
+// Number of mock-pool mbufs the harness workers hold outside the pool.
+uint64_t
+fwstate_test_pool_outstanding(struct dp_worker *dp_worker);
+
+// Let the harness workers' mock pool hand out only extra more mbufs than
+// it currently has outstanding; every later allocation past that fails.
+void
+fwstate_test_pool_limit(struct dp_worker *dp_worker, uint32_t extra);
+
+// Restore the default capacity of the harness workers' mock pool.
+void
+fwstate_test_pool_unlimit(struct dp_worker *dp_worker);
+
+// Start a new round on the worker, as the worker loop does before every
+// packet pass.
+void
+fwstate_test_next_round(struct dp_worker *dp_worker);
+
+// Append a pending record to the worker's stash slot of the map linked for
+// the frame's family, as ACL does. Returns 0, or -1 when the family has no
+// linked map or the slot is full.
+int
+fwstate_test_stash_push(
+	struct cp_module *cp_module,
+	struct dp_worker *dp_worker,
+	const struct fw_state_sync_frame *frame,
+	uint16_t rx_device_id,
+	uint16_t tx_device_id
+);
+
+// Return the worker's stash slot of the map linked for one family, or
+// NULL without a linked map.
+struct fwstate_stash_slot *
+fwstate_test_stash_slot(
+	struct cp_module *cp_module, bool is_ipv6, uint16_t worker_idx
+);
+
+// Read one value of a module counter of worker storage by counter name,
+// or UINT64_MAX when the module registers no such counter.
+uint64_t
+fwstate_test_counter(
+	struct cp_module *cp_module,
+	struct counter_storage *storage,
+	const char *name,
+	uint64_t value_idx
+);
+
+// Return one record of a stash slot, resolving the slot's buffer offset
+// pointer, which cgo cannot follow.
+static inline struct fwstate_sync_record *
+fwstate_test_slot_record(struct fwstate_stash_slot *slot, uint32_t idx) {
+	return fwstate_stash_slot_records(slot) + idx;
+}
+
+// Sum the free bytes of the block allocator behind the agent's memory
+// context: a full create-and-destroy cycle that frees everything leaves
+// the sum unchanged.
+uint64_t
+fwstate_test_free_bytes(struct agent *agent);
+
+// Mark every queued packet as emitted by a local fwstate.
 void
 fwstate_test_mark_internal(struct packet_front *packet_front);
 
@@ -73,15 +163,15 @@ fwstate_test_mark_internal(struct packet_front *packet_front);
 void *
 addr_of(void **field);
 
-// Create a standalone fwstate-map object of the requested family with one
-// table layer, using the real object constructors. The dp_config built by
-// fwstate_test_agent_new carries the object types, so cp_object_init
-// resolves them exactly as in production.
+// Create a standalone fwstate-map object of the requested family with a
+// stash of stash_size bytes per worker (zero selecting the default) for
+// FWSTATE_TEST_WORKER_COUNT workers and one table layer, using the real
+// object constructors.
 //
 // Returns NULL on failure.
 struct cp_object *
 fwstate_test_map_object_new(
-	struct agent *agent, bool is_ipv6, const char *name
+	struct agent *agent, bool is_ipv6, const char *name, uint64_t stash_size
 );
 
 // Upsert a map object into the harness agent's current

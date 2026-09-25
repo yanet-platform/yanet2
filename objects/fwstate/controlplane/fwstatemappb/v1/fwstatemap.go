@@ -10,6 +10,13 @@ import (
 // NUL. The longest accepted name is one byte shorter than this bound.
 const MaxMapNameLen = 80
 
+// Per-worker stash buffer bounds a map accepts, in bytes. They mirror the C
+// FWSTATE_STASH_MIN_SIZE (one sync record) and FWSTATE_STASH_MAX_SIZE.
+const (
+	MinStashSize = 62
+	MaxStashSize = 1 << 20
+)
+
 // ValidateMapName validates a standalone map request name and keeps the
 // historical generic map-name field text.
 func ValidateMapName(name string) error {
@@ -37,6 +44,18 @@ func (m *CreateMapRequest) Validate() error {
 	}
 	if kind := m.GetKind(); kind != Kind_V4 && kind != Kind_V6 {
 		return fmt.Errorf("kind unknown value %d", kind)
+	}
+	if size := m.GetStashSize(); size != 0 && size < MinStashSize {
+		return fmt.Errorf(
+			"stash_size %d is below the minimum %d",
+			size, MinStashSize,
+		)
+	}
+	if size := m.GetStashSize(); size > MaxStashSize {
+		return fmt.Errorf(
+			"stash_size %d exceeds maximum allowed value %d",
+			size, MaxStashSize,
+		)
 	}
 	return nil
 }

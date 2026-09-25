@@ -36,7 +36,12 @@ benchmark_performance(void *arena) {
 		.key_equal_fn_id = FWMAP_KEY_EQUAL_DEFAULT,
 		.rand_fn_id = FWMAP_RAND_DEFAULT,
 		.index_size = index_size,
-		.extra_bucket_count = index_size >> 8,
+		// The benchmark fills all index_size keys, but the map has only
+		// index_size / FWMAP_BUCKET_ENTRIES primary buckets, so the
+		// mean load is FWMAP_BUCKET_ENTRIES keys per bucket. With a
+		// Poisson spread about 0.39 overflow buckets are needed per
+		// primary one; index_size / 8 gives 0.5 per primary bucket.
+		.extra_bucket_count = index_size / 8,
 	};
 
 	fwmap_t *map = fwmap_new(&config, ctx);

@@ -13,6 +13,7 @@
 #include "lib/dataplane/object/object.h"
 #include "lib/fwstate/config.h"
 #include "lib/fwstate/ops.h"
+#include "lib/fwstate/stash.h"
 #include "lib/fwstate/types.h"
 #include "lib/statemap/fwtable.h"
 
@@ -120,6 +121,131 @@ map_insert_layer(
 	return fwtable_insert_layer_cp(table, &config, ctx);
 }
 
+// Free every allocated buffer and the header array of a stash and forget
+// it. Headers whose buffer was never allocated are skipped, so it also
+// unwinds a partially created stash.
+static void
+map_stash_free(struct fwstate_stash *stash, struct memory_context *ctx) {
+	struct fwstate_stash_slot *slots = ADDR_OF(&stash->slots);
+	if (slots != NULL) {
+		for (uint16_t idx = 0; idx < stash->worker_count; ++idx) {
+			void *buffer = ADDR_OF(&slots[idx].buffer);
+			if (buffer != NULL) {
+				fwstate_stash_zfree(ctx, buffer, stash->size);
+			}
+		}
+		fwstate_stash_zfree(
+			ctx,
+			slots,
+			sizeof(struct fwstate_stash_slot) * stash->worker_count
+		);
+	}
+	memset(stash, 0, sizeof(*stash));
+}
+
+// Allocate a stash of worker_count zeroed slot headers, each with its own
+// zeroed buffer of size bytes, from the object's memory context. A failed
+// allocation frees what was allocated and leaves the stash empty.
+static int
+map_stash_create(
+	struct fwstate_stash *stash,
+	struct memory_context *ctx,
+	uint16_t worker_count,
+	uint64_t size
+) {
+	if (size == 0) {
+		size = FWSTATE_STASH_DEFAULT_SIZE;
+	}
+	if (worker_count == 0 || size < FWSTATE_STASH_MIN_SIZE ||
+	    size > FWSTATE_STASH_MAX_SIZE) {
+		errno = EINVAL;
+		return -1;
+	}
+
+	// Bounded by the checks above: at most 65535 headers, so the header
+	// array size does not overflow a size_t.
+	struct fwstate_stash_slot *slots = fwstate_stash_zalloc(
+		ctx, sizeof(struct fwstate_stash_slot) * worker_count
+	);
+	if (slots == NULL) {
+		errno = ENOMEM;
+		return -1;
+	}
+	stash->worker_count = worker_count;
+	stash->size = size;
+	SET_OFFSET_OF(&stash->slots, slots);
+
+	for (uint16_t idx = 0; idx < worker_count; ++idx) {
+		void *buffer = fwstate_stash_zalloc(ctx, size);
+		if (buffer == NULL) {
+			map_stash_free(stash, ctx);
+			errno = ENOMEM;
+			return -1;
+		}
+		SET_OFFSET_OF(&slots[idx].buffer, buffer);
+	}
+	return 0;
+}
+
+// Create a map: its stash, then its first layer. A failure unwinds
+// whatever the call allocated.
+static int
+map_create(
+	fwtable_t *table,
+	struct fwstate_stash *stash,
+	struct memory_context *ctx,
+	map_init_keys_fn init_keys,
+	const struct fwstate_map_create_config *config
+) {
+	if (ADDR_OF(&stash->slots) != NULL || ADDR_OF(&table->head) != NULL) {
+		errno = EEXIST;
+		return -1;
+	}
+	if (map_stash_create(
+		    stash, ctx, config->worker_count, config->stash_size
+	    )) {
+		return -1;
+	}
+	if (map_insert_layer(
+		    table,
+		    ctx,
+		    init_keys,
+		    config->index_size,
+		    config->extra_bucket_count,
+		    config->worker_count
+	    )) {
+		int saved_errno = errno;
+		map_stash_free(stash, ctx);
+		errno = saved_errno;
+		return -1;
+	}
+	return 0;
+}
+
+static struct fwstate_stash_slot *
+map_stash_slot(const struct fwstate_stash *stash, uint16_t worker_idx) {
+	struct fwstate_stash_slot *slots = ADDR_OF(&stash->slots);
+	if (slots == NULL) {
+		return NULL;
+	}
+	return slots + worker_idx;
+}
+
+static void
+map_stash_link(
+	const struct fwstate_stash *stash,
+	uint64_t worker_idx,
+	struct fwstate_stash_link *link
+) {
+	if (worker_idx >= stash->worker_count) {
+		fwstate_stash_link_set(link, NULL, 0);
+		return;
+	}
+	fwstate_stash_link_set(
+		link, map_stash_slot(stash, (uint16_t)worker_idx), stash->size
+	);
+}
+
 // --- IPv4 object -------------------------------------------------------------
 
 // Typed destructor: tears the object down and returns its storage to the
@@ -173,6 +299,7 @@ fwstate_map_v4_object_fini(struct fwstate_map_v4_object *self) {
 		// Runs before the common teardown zeroes the object's memory
 		// context, which the table free must still charge.
 		map_free_table(&self->table, &self->cp_object.memory_context);
+		map_stash_free(&self->stash, &self->cp_object.memory_context);
 	}
 	cp_object_fini(&self->cp_object);
 }
@@ -240,6 +367,62 @@ fwstate_map_v4_object_generation(const struct cp_object *cp_object) {
 	);
 
 	return self->generation;
+}
+
+int
+fwstate_map_v4_object_create(
+	struct fwstate_map_v4_object *self,
+	const struct fwstate_map_create_config *config
+) {
+	int rc = map_create(
+		&self->table,
+		&self->stash,
+		&self->cp_object.memory_context,
+		map_v4_init_keys,
+		config
+	);
+	if (rc == 0) {
+		self->generation += 1;
+	}
+	return rc;
+}
+
+struct fwstate_stash_slot *
+fwstate_map_v4_object_stash(
+	const struct cp_object *cp_object, uint16_t worker_idx
+) {
+	struct fwstate_map_v4_object *self = container_of(
+		cp_object, struct fwstate_map_v4_object, cp_object
+	);
+
+	return map_stash_slot(&self->stash, worker_idx);
+}
+
+uint64_t
+fwstate_map_v4_object_stash_size(const struct cp_object *cp_object) {
+	struct fwstate_map_v4_object *self = container_of(
+		cp_object, struct fwstate_map_v4_object, cp_object
+	);
+
+	return self->stash.size;
+}
+
+void
+fwstate_map_v4_object_link(
+	const struct cp_object *cp_object,
+	uint64_t worker_idx,
+	struct fwstate_map_link *link
+) {
+	if (cp_object == NULL) {
+		link->table = NULL;
+		fwstate_stash_link_set(&link->stash, NULL, 0);
+		return;
+	}
+	struct fwstate_map_v4_object *self = container_of(
+		cp_object, struct fwstate_map_v4_object, cp_object
+	);
+	link->table = &self->table;
+	map_stash_link(&self->stash, worker_idx, &link->stash);
 }
 
 int
@@ -343,6 +526,7 @@ fwstate_map_v6_object_fini(struct fwstate_map_v6_object *self) {
 		// Runs before the common teardown zeroes the object's memory
 		// context, which the table free must still charge.
 		map_free_table(&self->table, &self->cp_object.memory_context);
+		map_stash_free(&self->stash, &self->cp_object.memory_context);
 	}
 	cp_object_fini(&self->cp_object);
 }
@@ -410,6 +594,62 @@ fwstate_map_v6_object_generation(const struct cp_object *cp_object) {
 	);
 
 	return self->generation;
+}
+
+int
+fwstate_map_v6_object_create(
+	struct fwstate_map_v6_object *self,
+	const struct fwstate_map_create_config *config
+) {
+	int rc = map_create(
+		&self->table,
+		&self->stash,
+		&self->cp_object.memory_context,
+		map_v6_init_keys,
+		config
+	);
+	if (rc == 0) {
+		self->generation += 1;
+	}
+	return rc;
+}
+
+struct fwstate_stash_slot *
+fwstate_map_v6_object_stash(
+	const struct cp_object *cp_object, uint16_t worker_idx
+) {
+	struct fwstate_map_v6_object *self = container_of(
+		cp_object, struct fwstate_map_v6_object, cp_object
+	);
+
+	return map_stash_slot(&self->stash, worker_idx);
+}
+
+uint64_t
+fwstate_map_v6_object_stash_size(const struct cp_object *cp_object) {
+	struct fwstate_map_v6_object *self = container_of(
+		cp_object, struct fwstate_map_v6_object, cp_object
+	);
+
+	return self->stash.size;
+}
+
+void
+fwstate_map_v6_object_link(
+	const struct cp_object *cp_object,
+	uint64_t worker_idx,
+	struct fwstate_map_link *link
+) {
+	if (cp_object == NULL) {
+		link->table = NULL;
+		fwstate_stash_link_set(&link->stash, NULL, 0);
+		return;
+	}
+	struct fwstate_map_v6_object *self = container_of(
+		cp_object, struct fwstate_map_v6_object, cp_object
+	);
+	link->table = &self->table;
+	map_stash_link(&self->stash, worker_idx, &link->stash);
 }
 
 int

@@ -14,6 +14,7 @@
 #include "lib/counters/counters.h"
 #include "lib/dataplane/time/clock.h"
 #include "lib/fwstate/config.h"
+#include "lib/fwstate/stash.h"
 #include "lib/fwstate/types.h"
 #include "lib/statemap/fwmap.h"
 #include "lib/statemap/fwtable.h"
@@ -39,6 +40,42 @@ static struct fwstate_map_v4_object fuzz_map_v4;
 static struct fwstate_map_v6_object fuzz_map_v6;
 static struct object_ectx fuzz_object_ectxs[2];
 static struct module_object_link_ectx fuzz_object_links[2];
+
+// Records each stand-in map stashes per round; below the nine frames a
+// 512-byte sync input carries, so the full-slot path is reachable.
+#define FUZZ_STASH_CAPACITY 4
+
+// Static one-worker stash slots and records of the stand-in maps and the
+// context's prepared buffer, so the handler's stash path runs without
+// arena allocations.
+static struct fwstate_stash_slot fuzz_slot_v4;
+static struct fwstate_stash_slot fuzz_slot_v6;
+static struct fwstate_sync_record fuzz_records_v4[FUZZ_STASH_CAPACITY]
+	__attribute__((__aligned__(64)));
+static struct fwstate_sync_record fuzz_records_v6[FUZZ_STASH_CAPACITY]
+	__attribute__((__aligned__(64)));
+static struct fwstate_prepared fuzz_prepared;
+// Stand-in generation holding the context as its only worker's.
+static struct cp_config_gen fuzz_gen;
+static struct config_gen_ectx fuzz_gen_ectx;
+static struct config_gen_ectx *fuzz_gen_ectx_ptr;
+static struct fwstate_stash_position fuzz_positions[1];
+static uint64_t fuzz_iterations;
+
+// Point a stand-in map's stash at one static worker slot and its records.
+static void
+fwstate_fuzz_stash_init(
+	struct fwstate_stash *stash,
+	struct fwstate_stash_slot *slot,
+	struct fwstate_sync_record *records
+) {
+	memset(slot, 0, sizeof(*slot));
+	memset(records, 0, sizeof(*records) * FUZZ_STASH_CAPACITY);
+	SET_OFFSET_OF(&slot->buffer, (void *)records);
+	stash->worker_count = 1;
+	stash->size = sizeof(*records) * FUZZ_STASH_CAPACITY;
+	SET_OFFSET_OF(&stash->slots, slot);
+}
 
 // Free every layer of a table's head chain. Single-threaded teardown, so
 // no reader can be mid-walk and no generation barrier is needed.
@@ -154,6 +191,9 @@ fwstate_test_config(struct cp_module **cp_module) {
 		{"fwstate_internal_forwarded",
 		 2,
 		 &config->internal_forwarded_counter_id},
+		{"fwstate_sync_alloc_failed",
+		 1,
+		 &config->sync_alloc_failed_counter_id},
 	};
 
 	for (size_t i = 0; i < sizeof(counters) / sizeof(counters[0]); ++i) {
@@ -256,6 +296,34 @@ fwstate_test_config(struct cp_module **cp_module) {
 	config->v4_object_link_idx = 0;
 	config->v6_object_link_idx = 1;
 
+	fwstate_fuzz_stash_init(
+		&fuzz_map_v4.stash, &fuzz_slot_v4, &fuzz_records_v4[0]
+	);
+	fwstate_fuzz_stash_init(
+		&fuzz_map_v6.stash, &fuzz_slot_v6, &fuzz_records_v6[0]
+	);
+
+	// One worker: its read position is the config's only one.
+	memset(fuzz_positions, 0, sizeof(fuzz_positions));
+	config->worker_count = 1;
+	SET_OFFSET_OF(&config->positions, &fuzz_positions[0]);
+
+	// Place the context as worker 0's in a stand-in generation and let the
+	// module's commit handler link its prepared buffer.
+	memset(&fuzz_prepared, 0, sizeof(fuzz_prepared));
+	SET_OFFSET_OF(&fuzz_params.module_ectx.module_prepared, &fuzz_prepared);
+	fuzz_params.module_ectx.abs_module_prepared = &fuzz_prepared;
+	memset(&fuzz_gen, 0, sizeof(fuzz_gen));
+	memset(&fuzz_gen_ectx, 0, sizeof(fuzz_gen_ectx));
+	SET_OFFSET_OF(&fuzz_gen_ectx.cp_config_gen, &fuzz_gen);
+	SET_OFFSET_OF(&fuzz_gen_ectx_ptr, &fuzz_gen_ectx);
+	SET_OFFSET_OF(&fuzz_gen.config_gen_ectxs, &fuzz_gen_ectx_ptr);
+	fuzz_gen.config_gen_ectx_count = 1;
+	fuzz_params.module_ectx.abs_config_gen_ectx = &fuzz_gen_ectx;
+	fuzz_params.module->commit_ectx_handler(
+		&fuzz_params.module_ectx, &config->cp_module
+	);
+
 	// Configure sync settings
 	uint8_t multicast_addr[16] = {
 		0xff, 0x02, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x01
@@ -315,6 +383,8 @@ fuzz_setup() {
 	}
 	memset(fuzz_params.worker, 0, sizeof(struct dp_worker));
 	fuzz_params.worker->idx = 0;
+	fuzz_params.worker->iterations = &fuzz_iterations;
+	fuzz_params.worker->rx_mempool = fuzz_params.mempool;
 
 	// Initialize TSC frequency (DPDK internal, needed for rte_get_tsc_hz())
 	set_tsc_freq();
@@ -410,6 +480,38 @@ LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) { // NOLINT
 					sizeof(struct rte_ipv6_hdr) +
 					sizeof(struct rte_udp_hdr);
 
+		// Each input is one round. Its frames are also stashed as
+		// local events into the family map their address type names,
+		// so the stash consumer and batched emission run on them.
+		fuzz_iterations += 1;
+		for (size_t off = 0; off < size;
+		     off += sizeof(struct fw_state_sync_frame)) {
+			const struct fw_state_sync_frame *frame =
+				(const struct fw_state_sync_frame *)(data + off
+				);
+			struct fwstate_stash *stash =
+				frame->addr_type == FW_STATE_ADDR_TYPE_IP6
+					? &fuzz_map_v6.stash
+					: &fuzz_map_v4.stash;
+			struct fwstate_stash_slot *slot =
+				ADDR_OF(&stash->slots);
+			fwstate_stash_slot_sync_round(slot, fuzz_iterations);
+			struct fwstate_sync_record *record =
+				fwstate_stash_slot_next(
+					slot,
+					fwstate_stash_slot_records(slot),
+					fwstate_stash_capacity(stash->size)
+				);
+			if (record == NULL) {
+				break;
+			}
+			memcpy(&record->frame, frame, sizeof(record->frame));
+			record->rx_device_id = frame->fib;
+			record->tx_device_id = frame->proto & 1;
+			record->status = FWSTATE_SYNC_RECORD_PENDING;
+			fwstate_stash_slot_commit(slot);
+		}
+
 		uint8_t packet_buffer[MBUF_MAX_SIZE];
 		build_sync_packet(packet_buffer, data, size);
 
@@ -418,6 +520,7 @@ LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) { // NOLINT
 		);
 	} else {
 		// Use raw fuzzer input for other packet types
+		fuzz_iterations += 1;
 		return fuzzing_process_packet(&fuzz_params, data, size);
 	}
 }

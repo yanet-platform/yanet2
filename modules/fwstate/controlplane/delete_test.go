@@ -90,7 +90,7 @@ func newFWStateTestMaps(
 
 		mapObject, err := objfwstate.NewMapObjectConfig(agent, name+"-"+kind.String(), kind)
 		require.NoError(testingTB, err)
-		require.NoError(testingTB, mapObject.CreateMap(indexSize, 64, 1))
+		require.NoError(testingTB, mapObject.CreateMap(objfwstate.MapConfig{IndexSize: indexSize, ExtraBucketCount: 64, WorkerCount: 1}))
 		require.NoError(testingTB, mapObject.Publish(agent))
 		testingTB.Cleanup(func() { _ = mapObject.Free() })
 		return mapObject

@@ -11,6 +11,7 @@
 #include "lib/dataplane/packet/data.h"
 #include "lib/dataplane/packet/packet.h"
 #include "lib/dataplane/worker/worker.h"
+#include "stash.h"
 #include "sync.h"
 #include "types.h"
 
@@ -130,10 +131,10 @@ fwstate_fill_sync_frame(
 }
 
 int
-fwstate_craft_state_sync_packet(
+fwstate_fill_sync_record(
 	const struct packet *packet,
 	const enum sync_packet_direction direction,
-	struct packet *sync_pkt
+	struct fwstate_sync_record *record
 ) {
 	if ((packet->transport_header.type & PACKET_TRANSPORT_HEADER_UNAVAILABLE
 	    ) != 0) {
@@ -142,33 +143,55 @@ fwstate_craft_state_sync_packet(
 		return -1;
 	}
 
+	fwstate_fill_sync_frame(packet, direction, &record->frame);
+	record->rx_device_id = packet->rx_device_id;
+	record->tx_device_id = packet->tx_device_id;
+	record->status = FWSTATE_SYNC_RECORD_PENDING;
+	return 0;
+}
+
+int
+fwstate_build_sync_packet(
+	const struct fw_state_sync_frame *const *frames,
+	uint32_t count,
+	uint16_t rx_device_id,
+	uint16_t tx_device_id,
+	struct packet *sync_pkt
+) {
 	struct rte_mbuf *sync_mbuf = packet_to_mbuf(sync_pkt);
 
-	// Prepare the sync packet mbuf with the sync frame as payload
-	// The packet structure will be: Ethernet + VLAN + IPv6 + UDP +
-	// fw_state_sync_frame
-
+	// The packet structure is: Ethernet + VLAN + IPv6 + UDP + frames.
 	const uint16_t eth_offset = 0;
 	const uint16_t vlan_offset = sizeof(struct rte_ether_hdr);
 	const uint16_t ipv6_offset = vlan_offset + sizeof(struct rte_vlan_hdr);
 	const uint16_t udp_offset = ipv6_offset + sizeof(struct rte_ipv6_hdr);
 	const uint16_t payload_offset = udp_offset + sizeof(struct rte_udp_hdr);
+	const uint32_t frame_size = sizeof(struct fw_state_sync_frame);
 
-	// Allocate space for the entire packet
-	char *pkt_data = rte_pktmbuf_append(
-		sync_mbuf, payload_offset + sizeof(struct fw_state_sync_frame)
-	);
+	uint32_t tailroom = rte_pktmbuf_tailroom(sync_mbuf);
+	if (count == 0 || tailroom < payload_offset + frame_size) {
+		return -1;
+	}
+	uint32_t fit = (tailroom - payload_offset) / frame_size;
+	if (count > fit) {
+		count = fit;
+	}
+	const uint16_t payload_len = (uint16_t)(count * frame_size);
+
+	char *pkt_data =
+		rte_pktmbuf_append(sync_mbuf, payload_offset + payload_len);
 	if (pkt_data == NULL) {
 		return -1;
 	}
+	// Every header byte not set below, the Ethernet source and the VLAN
+	// tag among them, is zero rather than stale mbuf contents.
+	memset(pkt_data, 0, payload_offset);
 
 	// Fill Ethernet header
 	struct rte_ether_hdr *eth_hdr = rte_pktmbuf_mtod_offset(
 		sync_mbuf, struct rte_ether_hdr *, eth_offset
 	);
 	eth_hdr->ether_type = rte_cpu_to_be_16(RTE_ETHER_TYPE_VLAN);
-	struct ether_addr *ether_dst = (struct ether_addr *)&eth_hdr->dst_addr;
-	memset(ether_dst, 0, sizeof(*ether_dst));
 
 	// Fill VLAN header
 	struct rte_vlan_hdr *vlan_hdr = rte_pktmbuf_mtod_offset(
@@ -182,36 +205,28 @@ fwstate_craft_state_sync_packet(
 		sync_mbuf, struct rte_ipv6_hdr *, ipv6_offset
 	);
 	ipv6_hdr->vtc_flow = rte_cpu_to_be_32(0x6 << 28); // IPv6 version
-	ipv6_hdr->payload_len = rte_cpu_to_be_16(
-		sizeof(struct rte_udp_hdr) + sizeof(struct fw_state_sync_frame)
-	);
+	ipv6_hdr->payload_len =
+		rte_cpu_to_be_16(sizeof(struct rte_udp_hdr) + payload_len);
 	ipv6_hdr->proto = IPPROTO_UDP;
 	ipv6_hdr->hop_limits = 64;
-	// Outer addressing stays neutral until fwstate accepts the event.
-	memset(ipv6_hdr->src_addr, 0, 16);
-	memset(ipv6_hdr->dst_addr, 0, 16);
+	// Outer addressing stays neutral until fwstate assigns a destination.
 
 	// Fill UDP header
 	struct rte_udp_hdr *udp_hdr = rte_pktmbuf_mtod_offset(
 		sync_mbuf, struct rte_udp_hdr *, udp_offset
 	);
-	udp_hdr->src_port = 0;
-	udp_hdr->dst_port = 0;
-	udp_hdr->dgram_len = rte_cpu_to_be_16(
-		sizeof(struct rte_udp_hdr) + sizeof(struct fw_state_sync_frame)
-	);
+	udp_hdr->dgram_len =
+		rte_cpu_to_be_16(sizeof(struct rte_udp_hdr) + payload_len);
 	// NOTE: Checksum will be calculated by the fwstate module
-	udp_hdr->dgram_cksum = 0;
 
-	// Fill sync frame payload
-	struct fw_state_sync_frame *sync_frame = rte_pktmbuf_mtod_offset(
-		sync_mbuf, struct fw_state_sync_frame *, payload_offset
-	);
-	fwstate_fill_sync_frame(packet, direction, sync_frame);
+	uint8_t *payload =
+		rte_pktmbuf_mtod_offset(sync_mbuf, uint8_t *, payload_offset);
+	for (uint32_t idx = 0; idx < count; ++idx) {
+		rte_memcpy(payload + idx * frame_size, frames[idx], frame_size);
+	}
 
-	// Initialize the sync packet metadata
-	sync_pkt->rx_device_id = packet->rx_device_id;
-	sync_pkt->tx_device_id = packet->tx_device_id;
+	sync_pkt->rx_device_id = rx_device_id;
+	sync_pkt->tx_device_id = tx_device_id;
 
 	// Set packet header offsets directly (we know the structure)
 	sync_pkt->network_header.type = rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV6);
@@ -220,7 +235,7 @@ fwstate_craft_state_sync_packet(
 	sync_pkt->transport_header.offset = udp_offset;
 	packet_refresh_data_len(sync_pkt);
 
-	return 0;
+	return (int)count;
 }
 
 void
