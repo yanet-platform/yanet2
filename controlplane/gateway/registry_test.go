@@ -88,7 +88,7 @@ func Test_BackendRegistry_PreservesMonotonicTimestamp(t *testing.T) {
 				require.Equal(t, gateway.RegistrationUpdated, registry.RegisterBackend("svc.Foo", replacement, gateway.BackendKindExternal))
 			}
 			seen := getBackendEntry(t, registry, "svc.Foo").LastSeenAt()
-			// Round(0) strips only the monotonic reading; Time.Equal ignores it.
+			// The timestamp must retain a monotonic reading for elapsed-time expiry.
 			require.True(t, seen != seen.Round(0), "registration timestamp lost its monotonic reading")
 		})
 	}
