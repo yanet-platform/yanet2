@@ -20,6 +20,8 @@
 
 enum packet_flag {
 	PACKET_FLAG_FRAGMENTED,
+	// A sync packet emitted by a local fwstate; a downstream fwstate
+	// passes it through instead of applying it as external sync.
 	PACKET_FLAG_FWSTATE_SYNC_INTERNAL,
 };
 

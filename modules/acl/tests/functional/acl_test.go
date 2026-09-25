@@ -227,6 +227,31 @@ func requireModuleCounterPackets(
 	require.Equal(t, wantPackets, vals[0], "counter %q packet count mismatch", counterName)
 }
 
+// requireModuleCounterBytes asserts that the named size-2 module counter
+// holds wantBytes in its byte slot at worker 0.
+func requireModuleCounterBytes(
+	t *testing.T,
+	h *dataplaneut.Harness,
+	path dataplaneut.CounterPath,
+	counterName string,
+	wantBytes uint64,
+) {
+	t.Helper()
+
+	counters := h.SharedMemory().DPConfig(0).ModuleCounters(
+		path.Device, path.Pipeline, path.Function, path.Chain,
+		path.ModuleType, path.ModuleName, []string{counterName},
+	)
+	for _, counter := range counters {
+		if counter.Name == counterName && len(counter.Values) > 0 {
+			require.GreaterOrEqual(t, len(counter.Values[0]), 2)
+			require.Equal(t, wantBytes, counter.Values[0][1], "counter %q byte count mismatch", counterName)
+			return
+		}
+	}
+	require.Failf(t, "counter not found", "counter %q not found", counterName)
+}
+
 // allow4Rule builds an IPv4 ALLOW rule for the given source and destination host
 // addresses and protocol range.
 func allow4Rule(src4, dst4 []xnetip.Contiguous[xnetip.Network4], protos filter.ProtoRanges) cacl.ACLRule {

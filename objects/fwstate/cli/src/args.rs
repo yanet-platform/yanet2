@@ -30,6 +30,14 @@ impl ModeCmd {
     }
 }
 
+/// Parses a stash size such as 4KiB or 4096 into bytes; the service checks
+/// the range.
+pub(crate) fn parse_stash_size(raw: &str) -> Result<u64, String> {
+    raw.parse::<bytesize::ByteSize>()
+        .map(|size| size.as_u64())
+        .map_err(|_| format!("expected a size such as 4KiB, got {raw:?}"))
+}
+
 /// Address family of a fwstate-map object.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
 pub enum MapKind {
@@ -60,6 +68,12 @@ pub struct CreateCmd {
     /// Per-worker state sizing (0 derives the dataplane worker count).
     #[arg(long)]
     pub worker_count: Option<u32>,
+
+    /// Sync stash buffer per worker, for example 4KiB (0 selects room for 64
+    /// sync records, 3968 bytes; otherwise at least 62 bytes and at most
+    /// 1MiB).
+    #[arg(long, value_parser = parse_stash_size)]
+    pub stash_size: Option<u64>,
 }
 
 /// Rotates a live map: the new layer becomes the active head and expired

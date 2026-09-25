@@ -2852,6 +2852,7 @@ dependencies = [
 name = "yanet-cli-fwstatemap"
 version = "0.1.0"
 dependencies = [
+ "bytesize",
  "clap",
  "clap_complete",
  "log",

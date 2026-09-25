@@ -1,7 +1,6 @@
 package fwstate_test
 
 import (
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -29,6 +28,7 @@ func Test_FWStateService_UpdateConfig_SetsAllFieldsAndClearsSync(t *testing.T) {
 		PortMulticast: proto.Uint32(9999), TcpSynAck: proto.Uint64(11), TcpSyn: proto.Uint64(12),
 		TcpFin: proto.Uint64(13), Tcp: proto.Uint64(14), Udp: proto.Uint64(15),
 		Default: proto.Uint64(16), SyncSuppressTimeout: proto.Uint64(17),
+		SyncMtu: proto.Uint32(9000),
 	}
 	publishConfig(t, service, &fwstatepb.UpdateConfigRequest{
 		Name:       name,
@@ -186,6 +186,10 @@ func Test_FWStateService_UpdateConfig_InvalidMergedConfigDoesNotPublish(t *testi
 			name:       "timeout overflow",
 			syncConfig: &fwstatepb.SyncConfig{Udp: proto.Uint64(1 << 48)},
 		},
+		{
+			name:       "sync mtu below one frame",
+			syncConfig: &fwstatepb.SyncConfig{SyncMtu: proto.Uint32(103)},
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -197,100 +201,6 @@ func Test_FWStateService_UpdateConfig_InvalidMergedConfigDoesNotPublish(t *testi
 			require.True(t, proto.Equal(before, showConfig(t, service, name)))
 		})
 	}
-}
-
-// Test_ValidateSyncConfig_DestinationPairs verifies that every configured
-// destination is complete and unicast rejects multicast addresses.
-func Test_ValidateSyncConfig_DestinationPairs(t *testing.T) {
-	newConfig := func() *fwstatepb.SyncConfig {
-		return &fwstatepb.SyncConfig{
-			SrcAddr:       &commonpb.IPAddress{Addr: []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}},
-			DstEther:      &commonpb.MACAddress{Addr: 0x333300000001},
-			PortMulticast: proto.Uint32(1),
-		}
-	}
-
-	t.Run("missing multicast address", func(t *testing.T) {
-		err := newConfig().ValidateMerged()
-		require.Error(t, err)
-		require.True(t, strings.Contains(err.Error(), "dst_addr_multicast"))
-	})
-
-	t.Run("zero multicast port", func(t *testing.T) {
-		cfg := newConfig()
-		cfg.DstAddrMulticast = &commonpb.IPAddress{Addr: []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}}
-		cfg.PortMulticast = proto.Uint32(0)
-
-		err := cfg.ValidateMerged()
-		require.Error(t, err)
-		require.True(t, strings.Contains(err.Error(), "port_multicast"))
-	})
-
-	t.Run("valid", func(t *testing.T) {
-		cfg := newConfig()
-		cfg.DstAddrMulticast = &commonpb.IPAddress{Addr: []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}}
-
-		err := cfg.ValidateMerged()
-		require.NoError(t, err)
-	})
-
-	t.Run("unicast only", func(t *testing.T) {
-		cfg := newConfig()
-		cfg.PortMulticast = proto.Uint32(0)
-		cfg.DstAddrUnicast = &commonpb.IPAddress{Addr: []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}}
-		cfg.PortUnicast = proto.Uint32(2)
-
-		require.NoError(t, cfg.ValidateMerged())
-	})
-
-	t.Run("unicast address without port", func(t *testing.T) {
-		cfg := newConfig()
-		cfg.PortMulticast = proto.Uint32(0)
-		cfg.DstAddrUnicast = &commonpb.IPAddress{Addr: []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}}
-
-		err := cfg.ValidateMerged()
-		require.Error(t, err)
-		require.Contains(t, err.Error(), "port_unicast")
-	})
-
-	t.Run("unicast port without address", func(t *testing.T) {
-		cfg := newConfig()
-		cfg.PortMulticast = proto.Uint32(0)
-		cfg.PortUnicast = proto.Uint32(2)
-
-		err := cfg.ValidateMerged()
-		require.Error(t, err)
-		require.Contains(t, err.Error(), "dst_addr_unicast")
-	})
-
-	t.Run("multicast address in unicast destination", func(t *testing.T) {
-		cfg := newConfig()
-		cfg.PortMulticast = proto.Uint32(0)
-		cfg.DstAddrUnicast = &commonpb.IPAddress{Addr: []byte{0xff, 0x02, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}}
-		cfg.PortUnicast = proto.Uint32(2)
-
-		err := cfg.ValidateMerged()
-		require.Error(t, err)
-		require.Contains(t, err.Error(), "dst_addr_unicast")
-	})
-}
-
-// Test_FWStateService_UpdateConfig_RejectsPartialSyncDestination verifies that
-// the service rejects a destination port without its address before it
-// attempts to build or publish a C-side module.
-func Test_FWStateService_UpdateConfig_RejectsPartialSyncDestination(t *testing.T) {
-	service := fwstate.NewFWStateService(nil)
-
-	_, err := service.UpdateConfig(t.Context(), &fwstatepb.UpdateConfigRequest{
-		Name: "cfg",
-		SyncConfig: &fwstatepb.SyncConfig{
-			PortMulticast: proto.Uint32(9999),
-		},
-	})
-	require.Error(t, err)
-	require.Equal(t, codes.InvalidArgument, status.Code(err))
-	require.Contains(t, err.Error(), "src_addr")
-	require.Contains(t, err.Error(), "dst_addr_multicast")
 }
 
 // syncTestAddr is the address both ends of a test sync destination use;
@@ -456,6 +366,17 @@ func Test_FWStateService_UpdateConfig_KeepsUnnamedLinksAndUntouchedSync(t *testi
 	require.EqualValues(t, udpTimeout, stored.GetSyncConfig().GetUdp())
 	require.EqualValues(t, syncTestPort, stored.GetSyncConfig().GetPortMulticast())
 	require.Equal(t, syncTestAddr().GetAddr(), stored.GetSyncConfig().GetDstAddrMulticast().GetAddr())
+}
+
+// Test_FWStateService_UpdateConfig_DefaultSyncMTU verifies that a config
+// created without a sync MTU reports the default of 1500.
+func Test_FWStateService_UpdateConfig_DefaultSyncMTU(t *testing.T) {
+	const name = "update-default-mtu"
+	_, agent := newDeleteTestHarness(t, []string{"fwstate"}, name)
+	service := fwstate.NewFWStateService(agent)
+	publishConfig(t, service, &fwstatepb.UpdateConfigRequest{Name: name})
+
+	require.Equal(t, uint32(1500), showConfig(t, service, name).GetSyncConfig().GetSyncMtu())
 }
 
 // Test_FWStateService_ShowConfig_MissingConfig verifies that a missing config

@@ -41,6 +41,8 @@ interface DraftConfig {
     tcp: string;
     udp: string;
     defaultTimeout: string;
+    // Raw Sync MTU input; empty leaves the stored value unchanged.
+    syncMtu: string;
     isLocalOnly: boolean;
 }
 
@@ -114,6 +116,34 @@ const isValidPort = (value: number): boolean => {
     return Number.isInteger(value) && value >= 0 && value <= 65535;
 };
 
+// Parse the Sync MTU input: undefined for an empty input, which leaves the
+// stored value unchanged, null for anything but a plain decimal 16-bit
+// integer. The service checks the accepted range.
+const parseSyncMtuInput = (value: string): number | undefined | null => {
+    const trimmed = value.trim();
+    if (trimmed === '') return undefined;
+    if (!/^\d+$/.test(trimmed)) return null;
+    const parsed = Number(trimmed);
+    return parsed <= 65535 ? parsed : null;
+};
+
+const isValidSyncMtuInput = (value: string): boolean => parseSyncMtuInput(value) !== null;
+
+// An empty string keeps the field unset (the server default applies);
+// anything else must be a plain decimal byte count. The service checks the
+// accepted range.
+const isValidStashSizeInput = (value: string): boolean => {
+    const trimmed = value.trim();
+    if (trimmed === '') return true;
+    return /^\d+$/.test(trimmed) && Number.isSafeInteger(Number(trimmed));
+};
+
+const parseStashSizeInput = (value: string): number | undefined => {
+    const trimmed = value.trim();
+    if (trimmed === '' || !isValidStashSizeInput(trimmed)) return undefined;
+    return Number(trimmed);
+};
+
 const toDraftConfig = (config: Awaited<ReturnType<typeof API.fwstate.showConfig>> | null, isLocalOnly: boolean): DraftConfig => {
     const sync = config?.sync_config;
     return {
@@ -131,6 +161,7 @@ const toDraftConfig = (config: Awaited<ReturnType<typeof API.fwstate.showConfig>
         tcp: formatDurationNsAsSeconds(sync?.tcp ?? DEFAULT_NS.tcp),
         udp: formatDurationNsAsSeconds(sync?.udp ?? DEFAULT_NS.udp),
         defaultTimeout: formatDurationNsAsSeconds(sync?.default ?? DEFAULT_NS.defaultTimeout),
+        syncMtu: String(sync?.sync_mtu ?? 1500),
         isLocalOnly,
     };
 };
@@ -1055,7 +1086,10 @@ interface MapNameFieldProps {
     error?: string;
     placeholder: string;
     onUpdate: (value: string) => void;
-    onCreate: (name: string, kind: MapKind) => void;
+    /** Stash size in bytes; empty selects the service default. */
+    stashSize: string;
+    onStashSizeUpdate: (value: string) => void;
+    onCreate: (name: string, kind: MapKind, stashSize?: number) => void;
     onDeleteRequest: (name: string, kind: MapKind) => void;
 }
 
@@ -1076,10 +1110,13 @@ const MapNameField: React.FC<MapNameFieldProps> = ({
     error,
     placeholder,
     onUpdate,
+    stashSize,
+    onStashSizeUpdate,
     onCreate,
     onDeleteRequest,
 }) => {
     const trimmed = value.trim();
+    const stashSizeError = isValidStashSizeInput(stashSize) ? undefined : 'a byte count';
     const knownKind = trimmed !== '' ? mapKinds[trimmed] : undefined;
     const exists = knownKind === kind;
     const existsOtherFamily = knownKind !== undefined && knownKind !== kind;
@@ -1120,14 +1157,29 @@ const MapNameField: React.FC<MapNameFieldProps> = ({
                         ))}
                     </datalist>
                 </div>
+                <div className="fwstate-map-field__stash">
+                    <TextInput
+                        type="number"
+                        size="s"
+                        value={stashSize}
+                        onUpdate={onStashSizeUpdate}
+                        error={stashSizeError}
+                        placeholder="3968"
+                        disabled={busy || knownKind !== undefined}
+                        controlProps={{
+                            'aria-label': 'Stash size in bytes of the new map',
+                            title: 'Stash size in bytes used only when the create button makes a new map: each worker\'s sync stash buffer, one 62-byte record per stateful packet per round. Empty or 0 selects room for 64 records (3968 bytes); at most 1048576. An existing map keeps the size it was created with.',
+                        }}
+                    />
+                </div>
                 <div className="fwstate-map-field__actions">
                     <button
                         type="button"
                         className="yn-table-action-btn"
                         title={createTitle}
                         aria-label={createTitle}
-                        disabled={busy || trimmed === '' || knownKind !== undefined}
-                        onClick={() => onCreate(trimmed, kind)}
+                        disabled={busy || trimmed === '' || knownKind !== undefined || !isValidStashSizeInput(stashSize)}
+                        onClick={() => onCreate(trimmed, kind, parseStashSizeInput(stashSize))}
                     >
                         <Icon data={Plus} size={16} />
                     </button>
@@ -1168,6 +1220,10 @@ const FWStatePage: React.FC = () => {
     const [mapKinds, setMapKinds] = useState<Record<string, MapKind>>({});
     const [mapMutationBusy, setMapMutationBusy] = useState(false);
     const [deleteMapTarget, setDeleteMapTarget] = useState<{ name: string; kind: MapKind } | null>(null);
+    // Per-family draft for the optional stash-size input beside each
+    // map-name field; it only feeds the next create call, never a saved config.
+    const [stashSizeDraftV4, setStashSizeDraftV4] = useState('');
+    const [stashSizeDraftV6, setStashSizeDraftV6] = useState('');
 
     const configsRef = useRef(configs);
     const dirtyConfigsRef = useRef(dirtyConfigs);
@@ -1347,11 +1403,17 @@ const FWStatePage: React.FC = () => {
 
     // Creating a map provisions the object only: the name field already
     // holds the value, so the config draft stays clean until saved apart.
-    const handleCreateMap = async (name: string, kind: MapKind): Promise<void> => {
+    const handleCreateMap = async (name: string, kind: MapKind, stashSize?: number): Promise<void> => {
         setMapMutationBusy(true);
         try {
-            await API.fwstatemap.createMap({ name, kind });
-            toaster.success('fwstate-map-create', `Map "${name}" created with default sizing.`);
+            await API.fwstatemap.createMap({ name, kind, stash_size: stashSize });
+            toaster.success(
+                'fwstate-map-create',
+                stashSize
+                    ? `Map "${name}" created with a ${stashSize}-byte stash.`
+                    : `Map "${name}" created with default sizing.`,
+            );
+            if (kind === MapKind.V4) setStashSizeDraftV4(''); else setStashSizeDraftV6('');
             await refreshMapNames();
         } catch (err) {
             toaster.error('fwstate-map-create', `Failed to create map "${name}"`, err);
@@ -1416,6 +1478,7 @@ const FWStatePage: React.FC = () => {
         if (multicastConfigured && (!isValidNonzeroIPv6Address(current.dstAddrMulticast) || current.portMulticast === 0)) return false;
         if (unicastConfigured && (!isValidNonzeroUnicastIPv6Address(current.dstAddrUnicast) || current.portUnicast === 0)) return false;
         if (durationFields.some((value) => parseDurationToNs(value) === null)) return false;
+        if (!isValidSyncMtuInput(current.syncMtu)) return false;
         return true;
     };
 
@@ -1444,6 +1507,7 @@ const FWStatePage: React.FC = () => {
             tcp: parseDurationToNs(current.tcp) ?? undefined,
             udp: parseDurationToNs(current.udp) ?? undefined,
             default: parseDurationToNs(current.defaultTimeout) ?? undefined,
+            sync_mtu: parseSyncMtuInput(current.syncMtu) ?? undefined,
         };
         try {
             await API.fwstate.updateConfig({
@@ -1689,6 +1753,7 @@ const FWStatePage: React.FC = () => {
         const multicastPortError = !isValidPort(current.portMulticast) ? 'Integer 0..65535' : multicastConfigured && current.portMulticast === 0 ? 'Port required' : undefined;
         const unicastAddrError = unicastConfigured && !isValidNonzeroUnicastIPv6Address(current.dstAddrUnicast) ? 'Non-zero unicast IPv6 required' : undefined;
         const unicastPortError = !isValidPort(current.portUnicast) ? 'Integer 0..65535' : unicastConfigured && current.portUnicast === 0 ? 'Port required' : undefined;
+        const syncMtuError = !isValidSyncMtuInput(current.syncMtu) ? 'Integer 0..65535' : undefined;
 
         return (
             <div className="fwstate-config-panel">
@@ -1710,6 +1775,8 @@ const FWStatePage: React.FC = () => {
                                 error={mapNameV4Error}
                                 placeholder="fwstate-map-v4"
                                 onUpdate={(mapNameV4) => updateCurrent({ mapNameV4 })}
+                                stashSize={stashSizeDraftV4}
+                                onStashSizeUpdate={setStashSizeDraftV4}
                                 onCreate={handleCreateMap}
                                 onDeleteRequest={requestDeleteMap}
                             />
@@ -1725,6 +1792,8 @@ const FWStatePage: React.FC = () => {
                                 error={mapNameV6Error}
                                 placeholder="fwstate-map-v6"
                                 onUpdate={(mapNameV6) => updateCurrent({ mapNameV6 })}
+                                stashSize={stashSizeDraftV6}
+                                onStashSizeUpdate={setStashSizeDraftV6}
                                 onCreate={handleCreateMap}
                                 onDeleteRequest={requestDeleteMap}
                             />
@@ -1733,9 +1802,10 @@ const FWStatePage: React.FC = () => {
                             The state tables live in standalone fwstate-map objects referenced here by name.
                             Maps can be provisioned from this page — type a new name and use the create
                             button next to the field, existing names appear as suggestions — or via{' '}
-                            <code>yanet-cli-fwstatemap</code>. New maps are created with the service default
-                            sizing; a linked map can be replaced but not detached, and it cannot be deleted
-                            while a published module config still links it.
+                            <code>yanet-cli-fwstatemap</code>. New maps take the service default sizing
+                            except for the optional stash size entered beside the create button; a
+                            linked map can be replaced but not detached, and it cannot be deleted while a
+                            published module config still links it.
                         </p>
                     </div>
 
@@ -1751,6 +1821,23 @@ const FWStatePage: React.FC = () => {
                             <label className="fwstate-field fwstate-sync-grid__mac">
                                 <Text variant="caption-2" color="secondary">Destination MAC</Text>
                                 <TextInput value={current.dstEther} onUpdate={(dstEther) => updateCurrent({ dstEther })} error={dstEtherError} placeholder="aa:bb:cc:dd:ee:ff" />
+                            </label>
+                            <label className="fwstate-field fwstate-sync-grid__mtu">
+                                <Text variant="caption-2" color="secondary">Sync MTU</Text>
+                                <TextInput
+                                    type="number"
+                                    value={current.syncMtu}
+                                    onUpdate={(syncMtu) => updateCurrent({ syncMtu })}
+                                    error={syncMtuError}
+                                    placeholder="1500"
+                                    endContent={<Text className="fwstate-timeout-unit" variant="caption-2" color="secondary">B</Text>}
+                                />
+                                <span className="yn-field__hint">
+                                    Largest sync packet, IPv6+UDP headers included; together with the
+                                    mbuf data room it bounds how many state records batch into one packet.
+                                    0 selects the default of 1500, empty keeps the stored value. Valid: 0,
+                                    or 104..65535.
+                                </span>
                             </label>
                             <div className="fwstate-sync-grid__endpoint">
                                 <div className="fwstate-field">

@@ -62,6 +62,7 @@ var fwstateStructuralCounters = []string{
 	"fwstate_sync_v4_insert_failed", "fwstate_sync_v6_insert_failed",
 	"fwstate_sync_v4_suppressed", "fwstate_sync_v6_suppressed",
 	"fwstate_external_dropped", "fwstate_internal_forwarded",
+	"fwstate_sync_alloc_failed",
 	"rx", "tx", "drop", "pending_input", "pending_output",
 }
 
@@ -224,6 +225,10 @@ func emitCounterMetrics(counter ffi.CounterInfo, baseLabels []*commonpb.Label) [
 		return []*commonpb.Metric{
 			commonpb.NewMetricCounter("fwstate_internal_forwarded_packets", packets, baseLabels...),
 			commonpb.NewMetricCounter("fwstate_internal_forwarded_bytes", bytes, baseLabels...),
+		}
+	case "fwstate_sync_alloc_failed":
+		return []*commonpb.Metric{
+			commonpb.NewMetricCounter("fwstate_sync_alloc_failed_packets", packets, baseLabels...),
 		}
 	// Generic per-module counters registered by cp_module_init for every
 	// module.

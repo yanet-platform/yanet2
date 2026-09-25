@@ -310,6 +310,18 @@ func Test_SyncConfig_ValidateMerged_DestinationIsAllOrNothing(t *testing.T) {
 		}).ValidateMerged())
 	})
 
+	t.Run("unicast address without port", func(t *testing.T) {
+		config := &SyncConfig{SrcAddr: addr(), DstAddrUnicast: addr()}
+
+		require.ErrorContains(t, config.ValidateMerged(), "port_unicast")
+	})
+
+	t.Run("unicast port without address", func(t *testing.T) {
+		config := &SyncConfig{SrcAddr: addr(), PortUnicast: proto.Uint32(2)}
+
+		require.ErrorContains(t, config.ValidateMerged(), "dst_addr_unicast")
+	})
+
 	t.Run("unicast multicast address", func(t *testing.T) {
 		require.ErrorContains(t, (&SyncConfig{
 			SrcAddr:        addr(),
@@ -318,4 +330,37 @@ func Test_SyncConfig_ValidateMerged_DestinationIsAllOrNothing(t *testing.T) {
 			PortUnicast:    proto.Uint32(1),
 		}).ValidateMerged(), "dst_addr_unicast")
 	})
+}
+
+// Test_SyncConfig_ValidateMerged_SyncMTU verifies that the merged config
+// accepts a zero sync MTU and any value holding one frame that fits 16 bits,
+// and rejects the rest.
+func Test_SyncConfig_ValidateMerged_SyncMTU(t *testing.T) {
+	cases := []struct {
+		name    string
+		mtu     uint32
+		message string
+	}{
+		{name: "zero selects the default", mtu: 0},
+		{name: "one frame", mtu: 104},
+		{name: "boundary", mtu: 65535},
+		{name: "below one frame", mtu: 103, message: "sync_mtu 103 is below the minimum 104"},
+		{name: "above the boundary", mtu: 65536, message: "sync_mtu 65536 exceeds maximum allowed value 65535"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := (&SyncConfig{SyncMtu: proto.Uint32(tc.mtu)}).ValidateMerged()
+			if tc.message == "" {
+				require.NoError(t, err)
+				return
+			}
+			require.EqualError(t, err, tc.message)
+		})
+	}
+}
+
+// Test_MinSyncMTU_MatchesC verifies that the Go minimum sync MTU equals the
+// C bound it mirrors.
+func Test_MinSyncMTU_MatchesC(t *testing.T) {
+	require.Equal(t, uint32(cfwstate.MinSyncMTU), MinSyncMTU)
 }

@@ -86,6 +86,7 @@ func Test_ACLMetrics_UntaggedScrapeUsesBoundedGenericCounters(t *testing.T) {
 			{Name: "pending_output", Values: [][]uint64{{9, 900}, {10, 1000}}},
 			{Name: "hist_0", Values: [][]uint64{{11, 1100, 11000}}},
 			{Name: "rule_counter", Values: [][]uint64{{12, 1200}}},
+			{Name: "acl_sync_overflow", Values: [][]uint64{{13}, {14}}},
 		},
 	})
 	service := acl.NewACLService(backend)
@@ -96,8 +97,8 @@ func Test_ACLMetrics_UntaggedScrapeUsesBoundedGenericCounters(t *testing.T) {
 	expectedQuery := []string{
 		"acl_no_match", "acl_action_allow", "acl_action_deny", "acl_action_count",
 		"acl_action_check_state", "acl_action_create_state", "acl_action_unknown",
-		"acl_state_miss", "acl_sync_sent", "rx", "tx", "drop", "pending_input",
-		"pending_output",
+		"acl_state_miss", "acl_sync_sent", "acl_sync_overflow", "rx", "tx", "drop",
+		"pending_input", "pending_output",
 	}
 	reads := backend.CounterReads()
 	require.Len(t, reads, 5)
@@ -117,6 +118,7 @@ func Test_ACLMetrics_UntaggedScrapeUsesBoundedGenericCounters(t *testing.T) {
 		"acl_pending_input_bytes":    1500,
 		"acl_pending_output_packets": 19,
 		"acl_pending_output_bytes":   1900,
+		"acl_sync_overflow_records":  27,
 	}
 	actualMetrics := map[string]uint64{}
 	for _, metric := range collected {
