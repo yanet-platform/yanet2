@@ -156,6 +156,90 @@ func TestACL_FWTableObjectStateLookup(t *testing.T) {
 	requireModuleCounterPackets(t, h, aclCounterPath("port0", "acl0"), "acl_action_check_miss", 1)
 }
 
+// Test_ACL_FWTableObject_FragmentStateLookupMiss verifies that a
+// non-initial fragment cannot pass CHECK_STATE by carrying the real
+// transport ports as payload bytes: the unavailable-transport tag keeps
+// the state key from being derived, so the fragment is denied even when
+// its payload ports equal the ports of a seeded state, while the
+// unfragmented twin with the same ports is allowed.
+func Test_ACL_FWTableObject_FragmentStateLookupMiss(t *testing.T) {
+	h, agent, backend := setupACLFWTableHarness(t)
+
+	map4, err := objfwstate.NewMapObjectConfig(agent, "obj4", objfwstate.KindV4)
+	require.NoError(t, err)
+	require.NoError(t, map4.CreateMap(1024, 0, 1))
+	require.NoError(t, map4.Publish(agent))
+	t.Cleanup(func() { _ = map4.Free() })
+
+	map6, err := objfwstate.NewMapObjectConfig(agent, "obj6", objfwstate.KindV6)
+	require.NoError(t, err)
+	require.NoError(t, map6.CreateMap(1024, 0, 1))
+	require.NoError(t, map6.Publish(agent))
+	t.Cleanup(func() { _ = map6.Free() })
+
+	handle, err := backend.NewModule(
+		"acl0", []cacl.ACLRule{checkStateDeny4Rule()}, "obj4", "obj6",
+	)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = handle.Free() })
+	require.NoError(t, backend.UpdateModule(handle))
+
+	wireACLPipeline(t, agent, "port0", "acl0")
+
+	now := time.Now()
+	h.SetCurrentTime(now)
+	const ttl = 60 * uint64(time.Second)
+
+	srcIP := net.ParseIP("192.0.2.1")
+	dstIP := net.ParseIP("10.0.0.1")
+	// CHECK_STATE looks up the reverse of the packet's tuple, so the
+	// state entry is seeded for the opposite direction.
+	require.True(t, fwtable.InsertV4State(
+		map4, 0, uint64(now.UnixNano()), ttl,
+		uint16(layers.IPProtocolUDP), dstIP, 80, srcIP, 12345,
+	), "failed to insert state into v4 fwtable")
+
+	// Control: the unfragmented packet with the real header passes.
+	eth := layers.Ethernet{
+		EthernetType: layers.EthernetTypeIPv4,
+		SrcMAC:       net.HardwareAddr{0x02, 0, 0, 0, 0, 1},
+		DstMAC:       net.HardwareAddr{0x02, 0, 0, 0, 0, 2},
+	}
+	ip4 := layers.IPv4{
+		Version:  4,
+		TTL:      64,
+		Protocol: layers.IPProtocolUDP,
+		SrcIP:    srcIP,
+		DstIP:    dstIP,
+	}
+	udp := layers.UDP{SrcPort: 12345, DstPort: 80}
+	udp.SetNetworkLayerForChecksum(&ip4)
+	stateful := xpacket.LayersToPacket(t, &eth, &ip4, &udp)
+
+	result, err := h.HandlePackets(stateful)
+	require.NoError(t, err)
+	require.Len(t, result.Output, 1,
+		"the unfragmented packet must pass the state check")
+	requireModuleCounterPackets(
+		t, h, aclCounterPath("port0", "acl0"), "acl_action_check_pass", 1,
+	)
+
+	// The fragment carries the same ports as payload bytes, ordered so the
+	// unguarded state-key derivation would swap them into the seeded
+	// tuple: a pass here would prove payload reached the state lookup.
+	fragment := rawIPv4Frame(false, false, 1, layers.IPProtocolUDP,
+		[]byte{0x30, 0x39, 0x00, 0x50})
+
+	fragmentResult, err := h.HandleSegmentedPackets([][]byte{fragment})
+	require.NoError(t, err)
+	require.Len(t, fragmentResult.Drop, 1,
+		"a fragment must miss the state check and be denied")
+	require.Empty(t, fragmentResult.Output)
+	requireModuleCounterPackets(
+		t, h, aclCounterPath("port0", "acl0"), "acl_action_check_miss", 1,
+	)
+}
+
 // TestACL_FWTableObjectFallbackWithoutNames verifies that a config with no
 // map-object names keeps the pre-object behavior: CHECK_STATE finds no
 // state anywhere and the packet is denied.

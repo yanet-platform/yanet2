@@ -135,6 +135,12 @@ fwstate_craft_state_sync_packet(
 	const enum sync_packet_direction direction,
 	struct packet *sync_pkt
 ) {
+	if ((packet->transport_header.type & PACKET_TRANSPORT_HEADER_UNAVAILABLE
+	    ) != 0) {
+		// There is no transport header to copy ports and flags
+		// from; refuse to fabricate a sync frame from payload.
+		return -1;
+	}
 
 	struct rte_mbuf *sync_mbuf = packet_to_mbuf(sync_pkt);
 

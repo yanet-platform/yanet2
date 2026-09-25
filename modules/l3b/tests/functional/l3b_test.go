@@ -146,6 +146,41 @@ func wirePipeline(
 	require.NoError(t, err)
 }
 
+// TestL3b_ForwardsShortIcmpPackets verifies that an ICMP packet whose
+// transport region holds no bytes at all passes through the module
+// unchanged: the type byte cannot be read, so the packet is not eligible
+// for load balancing, and nothing reads beyond the frame.
+func TestL3b_ForwardsShortIcmpPackets(t *testing.T) {
+	h, agent := setupL3bHarness(t, "port0", "test")
+	wirePipeline(t, agent, "port0", "test")
+
+	eth := layers.Ethernet{
+		SrcMAC:       xerror.Unwrap(net.ParseMAC("aa:bb:cc:dd:ee:ff")),
+		DstMAC:       xerror.Unwrap(net.ParseMAC("11:22:33:44:55:66")),
+		EthernetType: layers.EthernetTypeIPv4,
+	}
+	ip4 := layers.IPv4{
+		Version:  4,
+		TTL:      64,
+		Protocol: layers.IPProtocolICMPv4,
+		SrcIP:    net.ParseIP("10.0.0.1"),
+		DstIP:    net.ParseIP("192.168.1.1"),
+	}
+
+	packetCount := 3
+	pkt := xpacket.LayersToPacket(t, &eth, &ip4)
+	packets := make([]gopacket.Packet, 0, packetCount)
+	for range packetCount {
+		packets = append(packets, pkt)
+	}
+
+	result, err := h.HandlePackets(packets...)
+	require.NoError(t, err)
+	require.Len(t, result.Output, packetCount,
+		"a headerless ICMP packet is not eligible and must pass through")
+	require.Empty(t, result.Drop)
+}
+
 // TestL3b_ForwardsNonTcpUdpPackets verifies that packets which are neither
 // TCP nor UDP (here ICMPv4) pass through the module unchanged: they are not
 // eligible for load balancing and reach the output via the sink.
@@ -367,11 +402,153 @@ func TestL3b_EncapsulatesTcpIntoIpip(t *testing.T) {
 		"the inner packet must be carried byte-identical")
 }
 
-// TestL3b_ForwardsNonInitialFragments verifies that a non-initial TCP
-// fragment — which carries the flow's protocol number but no transport
-// header — passes through the module untouched instead of being classified
-// from payload bytes.
-func TestL3b_ForwardsNonInitialFragments(t *testing.T) {
+// l3bTestCounterPath is the module-counter location of the "test" l3b
+// configuration wired by wirePipeline.
+var l3bTestCounterPath = dataplaneut.CounterPath{
+	Device:     "port0",
+	Pipeline:   "test",
+	Function:   "test",
+	Chain:      "test_chain",
+	ModuleType: "l3b",
+	ModuleName: "test",
+}
+
+// ipv4TestFrame builds an unpadded Ethernet frame carrying an IPv4 TCP header
+// set with the given DF and MF flags and the given 8-byte-unit fragment
+// offset. The payload follows the IP header verbatim, so the frame length
+// never hides a short fragment behind serializer padding.
+func ipv4TestFrame(dontFragment, moreFragments bool, offsetUnits uint16, payload []byte) []byte {
+	frame := make([]byte, ethHeaderLen+20+len(payload))
+	copy(frame[0:6], []byte{0x11, 0x22, 0x33, 0x44, 0x55, 0x66})
+	copy(frame[6:12], []byte{0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff})
+	binary.BigEndian.PutUint16(frame[12:14], 0x0800)
+	frame[14] = 0x45
+	binary.BigEndian.PutUint16(frame[16:18], uint16(20+len(payload)))
+	fragmentField := offsetUnits
+	if moreFragments {
+		fragmentField |= 1 << 13
+	}
+	if dontFragment {
+		fragmentField |= 1 << 14
+	}
+	binary.BigEndian.PutUint16(frame[20:22], fragmentField)
+	frame[22] = 64
+	frame[23] = 6
+	copy(frame[26:30], net.ParseIP("10.0.0.1").To4())
+	copy(frame[30:34], net.ParseIP("192.168.1.1").To4())
+	copy(frame[34:], payload)
+	return frame
+}
+
+// ipv6TestFrame builds an unpadded Ethernet frame carrying an IPv6 header, a
+// Fragment extension header with the given next header, More Fragments bit
+// and 8-byte-unit offset, and the payload verbatim.
+func ipv6TestFrame(
+	nextHeader byte,
+	moreFragments bool,
+	offsetUnits uint16,
+	payload []byte,
+) []byte {
+	src6 := net.ParseIP("2001:db8::1").To16()
+	dst6 := net.ParseIP("2001:db8::2").To16()
+
+	frame := make([]byte, ethHeaderLen+40+8+len(payload))
+	copy(frame[0:6], []byte{0x11, 0x22, 0x33, 0x44, 0x55, 0x66})
+	copy(frame[6:12], []byte{0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff})
+	binary.BigEndian.PutUint16(frame[12:14], 0x86dd)
+	frame[14] = 0x60
+	binary.BigEndian.PutUint16(frame[18:20], uint16(8+len(payload)))
+	frame[20] = 44
+	frame[21] = 64
+	copy(frame[22:38], src6)
+	copy(frame[38:54], dst6)
+	frame[54] = nextHeader
+	offsetFlag := offsetUnits << 3
+	if moreFragments {
+		offsetFlag |= 1
+	}
+	binary.BigEndian.PutUint16(frame[56:58], offsetFlag)
+	copy(frame[62:], payload)
+	return frame
+}
+
+// TestL3b_DropsRealFragments verifies that every real fragment — any packet
+// with the More Fragments bit set or a nonzero offset, in both families — is
+// counted and dropped before virtual-service lookup, with the frame bytes
+// preserved in the drop list.
+func TestL3b_DropsRealFragments(t *testing.T) {
+	h, agent := setupL3bHarness(t, "port0", "test")
+	wirePipeline(t, agent, "port0", "test")
+
+	service := publishVirtualService(t, agent, "svc", "192.0.2.0/24", "172.16.0.10")
+	t.Cleanup(func() { _ = service.Free() })
+	module := publishModuleConfig(t, agent, "test", "svc")
+	t.Cleanup(func() { _ = module.Free() })
+
+	tcpPayload := bytes.Repeat([]byte{0xAB}, 20)
+	cases := []struct {
+		name  string
+		frame []byte
+	}{
+		{"ipv4 initial fragment", ipv4TestFrame(false, true, 0, tcpPayload)},
+		{"ipv4 non-initial fragment", ipv4TestFrame(false, true, 1, make([]byte, 8))},
+		{"ipv4 last fragment", ipv4TestFrame(false, false, 1, make([]byte, 8))},
+		{"ipv4 DF+MF fragment", ipv4TestFrame(true, true, 0, tcpPayload)},
+		{"ipv4 DF+offset fragment", ipv4TestFrame(true, false, 1, make([]byte, 8))},
+		{"ipv6 initial fragment", ipv6TestFrame(6, true, 0, tcpPayload)},
+		{"ipv6 non-initial fragment", ipv6TestFrame(6, true, 1, make([]byte, 8))},
+		{"ipv6 last fragment", ipv6TestFrame(6, false, 1, make([]byte, 8))},
+	}
+
+	var wantPackets, wantBytes uint64
+	for _, tc := range cases {
+		result, err := h.HandleSegmentedPackets([][]byte{tc.frame})
+		require.NoError(t, err)
+		require.Empty(t, result.Output, "%s must not be forwarded", tc.name)
+		require.Len(t, result.Drop, 1, "%s must be dropped", tc.name)
+		require.True(t, bytes.Equal(result.Drop[0], tc.frame),
+			"%s must be dropped byte-identical", tc.name)
+		wantPackets += 1
+		wantBytes += uint64(len(tc.frame))
+	}
+
+	dataplaneut.RequireModuleCounter(
+		t, h, l3bTestCounterPath, "drop", wantPackets, wantBytes,
+	)
+}
+
+// TestL3b_DropsSegmentedFragment verifies that a non-initial fragment whose
+// transport-header region spans an mbuf segment boundary is counted and
+// dropped. The drop byte count reports head-segment bytes only, matching the
+// packet_front data_len convention; tail-segment bytes are not counted.
+func TestL3b_DropsSegmentedFragment(t *testing.T) {
+	h, agent := setupL3bHarness(t, "port0", "test")
+	wirePipeline(t, agent, "port0", "test")
+
+	service := publishVirtualService(t, agent, "svc", "192.0.2.0/24", "172.16.0.10")
+	t.Cleanup(func() { _ = service.Free() })
+	module := publishModuleConfig(t, agent, "test", "svc")
+	t.Cleanup(func() { _ = module.Free() })
+
+	frame := ipv6TestFrame(6, false, 1, make([]byte, 8))
+	require.Equal(t, 70, len(frame), "fixture frame length")
+
+	result, err := h.HandleSegmentedPackets(
+		[][]byte{frame[:64], frame[64:]},
+	)
+	require.NoError(t, err)
+	require.Empty(t, result.Output, "the segmented fragment must not be forwarded")
+	require.Len(t, result.Drop, 1, "the segmented fragment must be dropped")
+
+	dataplaneut.RequireModuleCounter(t, h, l3bTestCounterPath, "drop", 1, 64)
+}
+
+// TestL3b_ForwardsUnfragmentedControls verifies that unfragmented traffic
+// keeps ordinary processing: a DF-only TCP packet is encapsulated towards the
+// virtual service real, an unmatched TCP destination is dropped as before,
+// and an atomic IPv6 echo request is forwarded untouched, with no fragment
+// policy drop counted.
+func TestL3b_ForwardsUnfragmentedControls(t *testing.T) {
 	h, agent := setupL3bHarness(t, "port0", "test")
 	wirePipeline(t, agent, "port0", "test")
 
@@ -385,27 +562,91 @@ func TestL3b_ForwardsNonInitialFragments(t *testing.T) {
 		DstMAC:       xerror.Unwrap(net.ParseMAC("11:22:33:44:55:66")),
 		EthernetType: layers.EthernetTypeIPv4,
 	}
-	ip4 := layers.IPv4{
-		Version:    4,
-		TTL:        64,
-		Protocol:   layers.IPProtocolTCP,
-		SrcIP:      net.ParseIP("10.0.0.1"),
-		DstIP:      net.ParseIP("192.168.1.1"),
-		FragOffset: 1,
-		Flags:      layers.IPv4MoreFragments,
+	dfOnly := layers.IPv4{
+		Version:  4,
+		TTL:      64,
+		Protocol: layers.IPProtocolTCP,
+		SrcIP:    net.ParseIP("10.0.0.1"),
+		DstIP:    net.ParseIP("192.168.1.1"),
+		Flags:    layers.IPv4DontFragment,
 	}
+	tcp := layers.TCP{
+		SrcPort: 12345,
+		DstPort: 80,
+		Seq:     1,
+		Window:  1024,
+	}
+	tcp.SetNetworkLayerForChecksum(&dfOnly)
 
-	pkt := xpacket.LayersToPacket(t, &eth, &ip4)
+	pkt := xpacket.LayersToPacket(t, &eth, &dfOnly, &tcp)
 	result, err := h.HandlePackets(pkt)
 	require.NoError(t, err)
-	require.Empty(t, result.Drop, "non-initial fragments must not be dropped")
-	require.Len(t, result.Output, 1, "non-initial fragments must pass through")
+	require.Empty(t, result.Drop, "a DF-only TCP packet must not be dropped")
+	require.Len(t, result.Output, 1, "a DF-only TCP packet must reach the virtual service")
 
 	info, err := framework.NewPacketParser().ParsePacket(result.Output[0].RawData)
 	require.NoError(t, err)
-	require.False(t, info.IsTunneled, "the fragment must not be encapsulated")
-	require.Equal(t, "10.0.0.1", info.SrcIP.String())
-	require.Equal(t, "192.168.1.1", info.DstIP.String())
+	require.True(t, info.IsTunneled, "the DF-only TCP packet must be encapsulated")
+	require.Equal(t, "172.16.0.10", info.DstIP.String())
+
+	unmatched := layers.IPv4{
+		Version:  4,
+		TTL:      64,
+		Protocol: layers.IPProtocolTCP,
+		SrcIP:    net.ParseIP("10.0.0.1"),
+		DstIP:    net.ParseIP("10.9.9.9"),
+	}
+	tcpUnmatched := layers.TCP{
+		SrcPort: 12345,
+		DstPort: 80,
+		Seq:     1,
+		Window:  1024,
+	}
+	tcpUnmatched.SetNetworkLayerForChecksum(&unmatched)
+
+	pkt = xpacket.LayersToPacket(t, &eth, &unmatched, &tcpUnmatched)
+	result, err = h.HandlePackets(pkt)
+	require.NoError(t, err)
+	require.Empty(t, result.Output, "an unmatched TCP destination must not be forwarded")
+	require.Len(t, result.Drop, 1, "an unmatched TCP destination must be dropped as before")
+
+	atomicEcho := ipv6TestFrame(58, false, 0, []byte{0x80, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00})
+	result2, err := h.HandleSegmentedPackets([][]byte{atomicEcho})
+	require.NoError(t, err)
+	require.Empty(t, result2.Drop, "an atomic IPv6 echo request must not be dropped")
+	require.Len(t, result2.Output, 1, "an atomic IPv6 echo request must be forwarded")
+	require.True(t, bytes.Equal(result2.Output[0], atomicEcho),
+		"an atomic IPv6 echo request must be forwarded byte-identical")
+
+	dataplaneut.RequireModuleCounter(t, h, l3bTestCounterPath, "drop", 1, uint64(len(result.Drop[0].RawData)))
+}
+
+// TestL3b_DropsFragmentInMixedBatch verifies that a fragment is counted and
+// dropped inside a mixed batch while unfragmented packets of the same batch
+// keep their ordinary dispositions.
+func TestL3b_DropsFragmentInMixedBatch(t *testing.T) {
+	h, agent := setupL3bHarness(t, "port0", "test")
+	wirePipeline(t, agent, "port0", "test")
+
+	service := publishVirtualService(t, agent, "svc", "192.0.2.0/24", "172.16.0.10")
+	t.Cleanup(func() { _ = service.Free() })
+	module := publishModuleConfig(t, agent, "test", "svc")
+	t.Cleanup(func() { _ = module.Free() })
+
+	fragment := ipv4TestFrame(false, true, 1, make([]byte, 8))
+	dfTcp := ipv4TestFrame(true, false, 0, bytes.Repeat([]byte{0x51}, 20))
+	atomicEcho := ipv6TestFrame(58, false, 0, []byte{0x80, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00})
+
+	result, err := h.HandleSegmentedPackets(
+		[][]byte{fragment}, [][]byte{dfTcp}, [][]byte{atomicEcho},
+	)
+	require.NoError(t, err)
+	require.Len(t, result.Drop, 1, "only the fragment must be dropped")
+	require.True(t, bytes.Equal(result.Drop[0], fragment),
+		"the dropped packet must be the fragment, byte-identical")
+	require.Len(t, result.Output, 2, "unfragmented packets must keep their dispositions")
+
+	dataplaneut.RequireModuleCounter(t, h, l3bTestCounterPath, "drop", 1, uint64(len(fragment)))
 }
 
 // TestL3b_SessionSticksFlowToReal verifies the session table semantics: a

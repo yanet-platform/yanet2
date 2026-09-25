@@ -5,18 +5,61 @@
 #include "declare.h"
 #include "lib/filter/rule.h"
 
+#include <stdbool.h>
 #include <stdint.h>
+#include <string.h>
 
 #define PROTO_RANGE_CLASSIFIER_MAX_VALUE ((1 << 16))
+
+// The protocols whose classification reads a subtype byte and therefore
+// need a dedicated class for packets with an unavailable transport header.
+static const uint8_t unavailable_class_protos[] = {
+	IPPROTO_TCP,
+	IPPROTO_ICMP,
+	IPPROTO_ICMPV6,
+};
+
+// Whether the rule's protocol ranges collectively cover every subtype of
+// one protocol block, independent of range order, overlap or boundary
+// crossings.
+static bool
+rule_covers_proto_block(const struct filter_rule *rule, uint8_t proto) {
+	bool covered[256];
+	uint32_t base = (uint32_t)proto * 256;
+
+	memset(covered, 0, sizeof(covered));
+	for (const struct filter_proto_range *range = rule->transport.protos;
+	     range < rule->transport.protos + rule->transport.proto_count;
+	     ++range) {
+		uint32_t from = range->from;
+		uint32_t to = range->to;
+		if (from < base) {
+			from = base;
+		}
+		if (to > base + 255) {
+			to = base + 255;
+		}
+		for (uint32_t value = from; value <= to; ++value) {
+			covered[value - base] = true;
+		}
+	}
+	for (uint32_t idx = 0; idx < 256; ++idx) {
+		if (!covered[idx]) {
+			return false;
+		}
+	}
+	return true;
+}
 
 static int
 collect_proto_values(
 	struct memory_context *memory_context,
 	const struct filter_rule **rules,
 	uint32_t count,
-	struct vline *line,
+	struct proto_range_classifier *classifier,
 	struct value_registry *registry
 ) {
+	struct vline *line = &classifier->line;
 	if (vline_init(
 		    line,
 		    memory_context,
@@ -30,7 +73,8 @@ collect_proto_values(
 	if (remap_table_init(
 		    &remap_table,
 		    memory_context,
-		    PROTO_RANGE_CLASSIFIER_MAX_VALUE
+		    PROTO_RANGE_CLASSIFIER_MAX_VALUE +
+			    PROTO_UNAVAILABLE_CLASS_COUNT
 	    )) {
 		goto error_remap_table;
 	}
@@ -63,10 +107,35 @@ collect_proto_values(
 				}
 			}
 		}
+
+		for (uint32_t class_idx = 0;
+		     class_idx < PROTO_UNAVAILABLE_CLASS_COUNT;
+		     ++class_idx) {
+			if (rule_covers_proto_block(
+				    rule, unavailable_class_protos[class_idx]
+			    )) {
+				uint32_t *value =
+					&classifier->unavailable_classes
+						 [class_idx];
+				if (remap_table_touch(
+					    &remap_table, *value, value
+				    ) < 0) {
+					goto error_touch;
+				}
+			}
+		}
 	}
 
 	remap_table_compact(&remap_table);
 	vline_compact(line, &remap_table);
+	for (uint32_t class_idx = 0; class_idx < PROTO_UNAVAILABLE_CLASS_COUNT;
+	     ++class_idx) {
+		classifier->unavailable_classes[class_idx] =
+			remap_table_compacted(
+				&remap_table,
+				classifier->unavailable_classes[class_idx]
+			);
+	}
 	remap_table_free(&remap_table);
 
 	for (const struct filter_rule **rule_ptr = rules;
@@ -99,6 +168,22 @@ collect_proto_values(
 				}
 			}
 		}
+
+		for (uint32_t class_idx = 0;
+		     class_idx < PROTO_UNAVAILABLE_CLASS_COUNT;
+		     ++class_idx) {
+			if (rule_covers_proto_block(
+				    rule, unavailable_class_protos[class_idx]
+			    )) {
+				if (value_registry_collect(
+					    registry,
+					    classifier->unavailable_classes
+						    [class_idx]
+				    )) {
+					goto error_collect;
+				}
+			}
+		}
 	}
 
 	return 0;
@@ -126,9 +211,13 @@ FILTER_ATTR_COMPILER_INIT_FUNC(proto_range)(
 	if (classifier == NULL) {
 		return -1;
 	}
+	for (uint32_t class_idx = 0; class_idx < PROTO_UNAVAILABLE_CLASS_COUNT;
+	     ++class_idx) {
+		classifier->unavailable_classes[class_idx] = 0;
+	}
 	SET_OFFSET_OF(data, classifier);
 	if (collect_proto_values(
-		    mctx, rules, rule_count, &classifier->line, registry
+		    mctx, rules, rule_count, classifier, registry
 	    )) {
 		SET_OFFSET_OF(data, NULL);
 		memory_bfree(mctx, classifier, sizeof(*classifier));

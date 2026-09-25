@@ -1,6 +1,7 @@
 package acl_test
 
 import (
+	"bytes"
 	"encoding/binary"
 	"net"
 	"net/netip"
@@ -9,6 +10,7 @@ import (
 
 	"github.com/gopacket/gopacket"
 	"github.com/gopacket/gopacket/layers"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/yanet-platform/xnetip"
 
@@ -130,6 +132,53 @@ func Test_ACL_UpdateRules_WithoutStateMapCreatesNeutralSyncEvent(t *testing.T) {
 	require.Equal(t, net.HardwareAddr{0, 0, 0, 0, 0, 0}, ether.DstMAC)
 	require.True(t, ip6.DstIP.Equal(net.IPv6zero))
 	require.Zero(t, udp.DstPort)
+}
+
+// Test_ACL_Fragment_ShortNonInitialSkipsStateCreation verifies that a short
+// non-initial TCP fragment matched by a state-creation rule is allowed
+// without creating state or emitting a sync: there is no transport header to
+// derive the state from, while an unfragmented packet under the same rule
+// creates both.
+func Test_ACL_Fragment_ShortNonInitialSkipsStateCreation(t *testing.T) {
+	rule := allow4Rule(
+		[]xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
+		[]xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
+		tcpProto,
+	)
+	rule.Actions = []cacl.ACLAction{{Kind: cacl.ActionCreateState}, {Kind: cacl.ActionAllow}}
+
+	h, agent, backend := setupACLFWStateSyncHarness(t)
+	map4, map6 := publishSyncMaps(t, agent)
+
+	handle, err := backend.NewModule(
+		"fragment-state", []cacl.ACLRule{rule}, map4.Name(), map6.Name(),
+	)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = handle.Free() })
+
+	require.NoError(t, backend.UpdateModule(handle))
+	wireACLPipeline(t, agent, "port0", "fragment-state")
+
+	fragment := rawIPv4Frame(false, true, 1, layers.IPProtocolTCP, make([]byte, 8))
+	result, err := h.HandleSegmentedPackets([][]byte{fragment})
+	require.NoError(t, err)
+	require.Len(t, result.Output, 1,
+		"a non-initial fragment must be allowed without a sync packet")
+	assert.True(t, bytes.Equal(result.Output[0], fragment),
+		"an allowed fragment must pass through byte-identical")
+	requireModuleCounterPackets(t, h, aclCounterPath("port0", "fragment-state"), "acl_sync_sent", 0)
+
+	entries, _, _, err := map4.ReadForward(0, 0, true, 0, 10)
+	require.NoError(t, err)
+	require.Empty(t, entries, "no state may be created from fragment payload")
+
+	dfOnly := rawIPv4Frame(true, false, 0, layers.IPProtocolTCP, bytes.Repeat([]byte{0x51}, 20))
+	result, err = h.HandleSegmentedPackets([][]byte{dfOnly})
+	require.NoError(t, err)
+	require.Len(t, result.Output, 2,
+		"an unfragmented packet under the same rule creates the sync event")
+
+	requireModuleCounterPackets(t, h, aclCounterPath("port0", "fragment-state"), "acl_sync_sent", 1)
 }
 
 // Test_ACL_FWState_InternalEventEmitsConfiguredDestinations verifies that one

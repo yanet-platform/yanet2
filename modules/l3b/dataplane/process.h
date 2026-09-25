@@ -8,6 +8,8 @@
 
 #include <rte_ether.h>
 #include <rte_icmp.h>
+
+#include "lib/dataplane/packet/icmp.h"
 #include <rte_ip.h>
 #include <rte_tcp.h>
 #include <rte_udp.h>
@@ -40,24 +42,42 @@ FILTER_QUERY_DECLARE(l3b_destination_filter_ip4, net4_dst, proto_range);
 FILTER_QUERY_DECLARE(l3b_destination_filter_ip6, net6_dst, proto_range);
 
 // The ICMP type byte of an initial packet, or -1 when the packet carries
-// no ICMP header.
+// no complete ICMP header.
+//
+// The transport region must hold the full header, not just the type byte:
+// an echo request classified by this predicate gets answered in place,
+// which rewrites the type, code and checksum bytes of the same header.
 static inline int
 l3b_packet_icmp_type(const struct packet *packet) {
 	if (packet->fragment_offset != 0) {
 		return -1;
 	}
 
+	struct rte_mbuf *mbuf = packet_to_mbuf((struct packet *)packet);
+
 	if (packet->transport_header.type == IPPROTO_ICMP) {
+		if (rte_pktmbuf_pkt_len(mbuf) <
+		    (uint32_t)packet->transport_header.offset +
+			    sizeof(struct yanet_icmp_hdr)) {
+			// The transport region holds no complete header
+			// to classify or rewrite.
+			return -1;
+		}
 		const struct yanet_icmp_hdr *icmp = rte_pktmbuf_mtod_offset(
-			packet_to_mbuf((struct packet *)packet),
+			mbuf,
 			const struct yanet_icmp_hdr *,
 			packet->transport_header.offset
 		);
 		return icmp->icmp_type;
 	}
 	if (packet->transport_header.type == IPPROTO_ICMPV6) {
+		if (rte_pktmbuf_pkt_len(mbuf) <
+		    (uint32_t)packet->transport_header.offset +
+			    sizeof(struct yanet_icmp6_hdr)) {
+			return -1;
+		}
 		const struct yanet_icmp6_hdr *icmp6 = rte_pktmbuf_mtod_offset(
-			packet_to_mbuf((struct packet *)packet),
+			mbuf,
 			const struct yanet_icmp6_hdr *,
 			packet->transport_header.offset
 		);
@@ -301,6 +321,13 @@ l3b_fix_mss(struct packet *packet) {
 
 	const uint16_t data_offset = (tcp->data_off >> 4) * 4;
 	if (data_offset < sizeof(struct rte_tcp_hdr)) {
+		return;
+	}
+
+	if (rte_pktmbuf_pkt_len(packet_to_mbuf(packet)) <
+	    (uint32_t)packet->transport_header.offset + data_offset) {
+		// The declared TCP header and its options extend past the
+		// frame; nothing may be read or rewritten from beyond it.
 		return;
 	}
 

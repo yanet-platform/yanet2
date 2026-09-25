@@ -1,6 +1,8 @@
 #include <netinet/in.h>
 #include <rte_ether.h>
 #include <rte_gre.h>
+#include <rte_tcp.h>
+#include <rte_udp.h>
 
 #include "decap.h"
 #include "packet.h"
@@ -26,6 +28,13 @@
 /// https://datatracker.ietf.org/doc/html/rfc2890#section-2
 static int
 packet_skip_gre(struct packet *packet, uint16_t *type, uint16_t *offset) {
+	if (rte_pktmbuf_pkt_len(packet->mbuf) <
+	    packet->transport_header.offset + sizeof(struct rte_gre_hdr)) {
+		// The frame ends inside the GRE header; nothing may be
+		// read from beyond it.
+		return -1;
+	}
+
 	struct rte_gre_hdr *gre_hdr = rte_pktmbuf_mtod_offset(
 		packet->mbuf,
 		struct rte_gre_hdr *,
@@ -52,6 +61,17 @@ packet_skip_gre(struct packet *packet, uint16_t *type, uint16_t *offset) {
 
 int
 packet_decap(struct packet *packet) {
+	// Refuse to decapsulate a fragmented outer packet.
+	//
+	// Only the first fragment carries the tunnel header, and the inner
+	// datagram it begins is incomplete until reassembly, so removing
+	// the tunnel headers would publish a truncated packet as if it
+	// were whole.
+
+	if ((packet->flags & (1 << PACKET_FLAG_FRAGMENTED)) != 0) {
+		return -1;
+	}
+
 	uint16_t next_transport = packet->transport_header.type;
 	uint16_t next_offset = packet->transport_header.offset;
 	uint16_t next_ether_type = packet->network_header.type;
@@ -75,6 +95,30 @@ packet_decap(struct packet *packet) {
 		}
 	} else {
 		// unknown tunnel
+		return -1;
+	}
+
+	// A non-initial fragment inside the tunnel carries flow payload
+	// where its transport header should be, so tag it like the direct
+	// parse path does; no reader may consume its payload bytes through
+	// a tunnel.
+	if ((packet->flags & (1 << PACKET_FLAG_FRAGMENTED)) != 0 &&
+	    packet->fragment_offset != 0) {
+		next_transport |= PACKET_TRANSPORT_HEADER_UNAVAILABLE;
+	}
+
+	// The inner parse validates only the inner IP header, so a TCP or
+	// UDP transport header it names can still be truncated: the direct
+	// parse path refuses exactly those two below the fixed header size,
+	// and port or flag readers below would read past the packet.
+	if (next_transport == IPPROTO_TCP &&
+	    rte_pktmbuf_pkt_len(packet_to_mbuf(packet)) <
+		    next_offset + sizeof(struct rte_tcp_hdr)) {
+		return -1;
+	}
+	if (next_transport == IPPROTO_UDP &&
+	    rte_pktmbuf_pkt_len(packet_to_mbuf(packet)) <
+		    next_offset + sizeof(struct rte_udp_hdr)) {
 		return -1;
 	}
 

@@ -11,7 +11,7 @@
 //
 // The dataplane's plugin loader rejects a .so whose exported version does
 // not match this constant.
-#define YANET_MODULE_ABI_VERSION 30
+#define YANET_MODULE_ABI_VERSION 31
 
 // Symbol name a module .so exports carrying its compiled-against
 // YANET_MODULE_ABI_VERSION, as a uint32_t global.

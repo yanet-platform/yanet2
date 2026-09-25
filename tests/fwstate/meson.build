@@ -98,3 +98,16 @@ test('sync_endian',
   timeout: 15,
   suite: ['fwstate'],
 )
+
+check_state_fragment_test = executable(
+  'check_state_fragment_test',
+  ['check_state_fragment_test.c'],
+  c_args: yanet_test_c_args,
+  link_args: yanet_link_args,
+  dependencies: [lib_common_dep, lib_logging_dep, lib_fwstate_dep, lib_packet_dp_dep, lib_lib_utils_dep],
+)
+test('check_state_fragment',
+  check_state_fragment_test,
+  timeout: 15,
+  suite: ['fwstate'],
+)

@@ -148,6 +148,15 @@ fwstate_check_state_table(
 		return false;
 	}
 
+	if ((packet->transport_header.type & PACKET_TRANSPORT_HEADER_UNAVAILABLE
+	    ) != 0) {
+		// A non-initial fragment carries flow payload where its
+		// transport header should be, so no state key can be derived
+		// from it; report no state without emitting a sync.
+		*sync_required = SYNC_NONE;
+		return false;
+	}
+
 	struct rte_mbuf *mbuf = packet_to_mbuf(packet);
 
 	uint64_t deadline = now;

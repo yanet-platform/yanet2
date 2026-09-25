@@ -18,18 +18,16 @@
 #include "dataplane.h"
 #include "process.h"
 
-// Whether the packet carries a usable header for the source and destination
+// Whether the packet is classifiable by the source and destination
 // classifiers: a TCP or UDP segment, or an ICMP echo request the service
-// answers on its address's behalf. Non-initial fragments keep the protocol
-// number of their flow but hold arbitrary payload where the ports or the
-// type byte should be, so they are forwarded untouched instead of being
-// classified.
+// answers on its address's behalf. The handler counted-drops every packet
+// the parser marked fragmented before classification, so this predicate
+// only sees unfragmented traffic.
 static bool
 l3b_packet_has_transport(const struct packet *packet) {
-	return packet->fragment_offset == 0 &&
-	       (packet->transport_header.type == IPPROTO_TCP ||
-		packet->transport_header.type == IPPROTO_UDP ||
-		l3b_packet_is_icmp_echo(packet));
+	return packet->transport_header.type == IPPROTO_TCP ||
+	       packet->transport_header.type == IPPROTO_UDP ||
+	       l3b_packet_is_icmp_echo(packet);
 }
 
 static void
@@ -65,6 +63,13 @@ l3b_handle_packets(
 	for (struct packet *packet = packet_list_first(&packet_front->input);
 	     packet != NULL;
 	     packet = packet->next) {
+		// Real fragments never reach the classifiers or the virtual
+		// services: they are dropped in the consuming loop below,
+		// before any lookup.
+		if ((packet->flags & (1 << PACKET_FLAG_FRAGMENTED)) != 0) {
+			continue;
+		}
+
 		if (!l3b_packet_has_transport(packet)) {
 			continue;
 		}
@@ -109,13 +114,22 @@ l3b_handle_packets(
 	struct packet *packet;
 	while ((packet = packet_list_pop(&packet_front->input)) != NULL) {
 		uint16_t type = packet->network_header.type;
+		bool fragmented =
+			(packet->flags & (1 << PACKET_FLAG_FRAGMENTED)) != 0;
 		bool classified =
+			!fragmented &&
 			(type == rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV4) ||
 			 type == rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV6)) &&
 			l3b_packet_has_transport(packet);
 
 		if (!classified) {
-			packet_front_output(packet_front, packet);
+			if (fragmented) {
+				// Counted drop before any destination or
+				// source lookup touches the packet.
+				packet_front_drop(packet_front, packet);
+			} else {
+				packet_front_output(packet_front, packet);
+			}
 			continue;
 		}
 

@@ -148,6 +148,29 @@ func (packet *Packet) Next() *Packet {
 	return (*Packet)((*C.struct_packet)(packet).next)
 }
 
+// fragmentMetadata reports how the parser classified the packet: whether it
+// carries real fragmentation, the fragment offset in the header's own units
+// (IPv4: eight-byte blocks, IPv6: a byte offset), the transport type — the
+// declared protocol with an unavailable-header tag for non-initial
+// fragments — and the packet hash.
+//
+// It lives here because cgo is unavailable in _test.go files, and lets tests
+// pin the parser's fragment contract through the CGO boundary without
+// re-parsing frames independently.
+func (m *Packet) fragmentMetadata() (
+	fragmented bool,
+	offset uint16,
+	transportType uint16,
+	hash uint32,
+) {
+	cPacket := (*C.struct_packet)(m)
+	fragmented = cPacket.flags&(1<<C.PACKET_FLAG_FRAGMENTED) != 0
+	offset = uint16(cPacket.fragment_offset)
+	transportType = uint16(cPacket.transport_header._type)
+	hash = uint32(cPacket.hash)
+	return fragmented, offset, transportType, hash
+}
+
 func (packet *Packet) Free() {
 	C.free_packet((*C.struct_packet)(packet))
 }

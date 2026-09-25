@@ -11,6 +11,8 @@
 #include <errno.h>
 #include <string.h>
 
+#include <rte_tcp.h>
+
 #include "common/strutils.h"
 #include "devices/plain/api/controlplane.h"
 #include "lib/controlplane/agent/agent.h"
@@ -396,9 +398,10 @@ run_rounds_geometry_mismatch_test(void) {
 	memset(packet, 0, sizeof(*packet));
 	packet->mbuf = mbuf;
 
-	// ether + outer IPv4 (GRE) + 4-byte GRE header + inner IPv4
+	// ether + outer IPv4 (GRE) + 4-byte GRE header + inner IPv4 + TCP
 	const size_t payload_len = sizeof(struct rte_ether_hdr) +
-				   2 * sizeof(struct rte_ipv4_hdr) + 4;
+				   2 * sizeof(struct rte_ipv4_hdr) + 4 +
+				   sizeof(struct rte_tcp_hdr);
 	uint8_t *data = (uint8_t *)rte_pktmbuf_append(mbuf, payload_len);
 	TEST_ASSERT_NOT_NULL(data, "packet payload allocation failed");
 	memset(data, 0, payload_len);
@@ -415,7 +418,9 @@ run_rounds_geometry_mismatch_test(void) {
 	gre->proto = rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV4);
 	struct rte_ipv4_hdr *inner = (struct rte_ipv4_hdr *)(gre + 1);
 	inner->version_ihl = RTE_IPV4_VHL_DEF;
-	inner->total_length = rte_cpu_to_be_16(sizeof(struct rte_ipv4_hdr));
+	inner->total_length = rte_cpu_to_be_16(
+		sizeof(struct rte_ipv4_hdr) + sizeof(struct rte_tcp_hdr)
+	);
 	inner->next_proto_id = IPPROTO_TCP;
 	TEST_ASSERT_SUCCESS(parse_packet(packet), "parse_packet failed");
 
