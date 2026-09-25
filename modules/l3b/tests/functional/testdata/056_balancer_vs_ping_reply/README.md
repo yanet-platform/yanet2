@@ -81,8 +81,11 @@ Counter baselines are taken after final publication for each packet.
 Incoming/replied packet and byte deltas are checked; filter rejection,
 empty-ring, disabled-real, and all real counters remain unchanged. Counter
 reset or inheritance across publication is not asserted. The restrictive
-source-filter cases retain destination port 80 in the final filter and both
-collision/sentinel UDP seeds: Echo must still reply without filter rejection.
+source-filter cases restrict the final source networks to `192.0.2.0/24` and
+`2001:db8:ffff::/64`, excluding generated Echo sources `10.0.0.1` and
+`2001:db8::1`. The retained destination port 80 independently excludes Echo's
+filter port 0. Both collision/sentinel UDP sessions are seeded before these
+network restrictions: Echo must still reply without filter rejection.
 All other cases use a permissive final destination-port range, isolating the
 empty-table and missing-key contracts from source filtering. Correct Echo
 handling bypasses both source filtering and session lookup.

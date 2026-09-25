@@ -1234,7 +1234,10 @@ func Test_L3b_ConfiguredRealsGateEcho(t *testing.T) {
 					}
 					reals = reals[:len(tc.weights)]
 					serviceConfig.RealServers = reals
-					if !tc.restrictiveSourceFilter {
+					if tc.restrictiveSourceFilter {
+						serviceConfig.SourceFilterRules[0].Net4s = []xnetip.Contiguous[xnetip.Network4]{xnetip.MustParseContiguous4("192.0.2.0/24")}
+						serviceConfig.SourceFilterRules[0].Net6s = []xnetip.BiContiguous{xnetip.MustParseBiContiguous("2001:db8:ffff::/64")}
+					} else {
 						serviceConfig.SourceFilterRules[0].PortRanges = filter.PortRanges{{From: 0, To: 65535}}
 					}
 					service, err := cl3bobject.CreateVirtualService(agent, "svc",
