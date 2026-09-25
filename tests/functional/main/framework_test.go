@@ -1,11 +1,15 @@
 package functional
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/gopacket/gopacket"
+	"github.com/gopacket/gopacket/layers"
 	"github.com/stretchr/testify/require"
 	"github.com/yanet-platform/yanet2/tests/functional/framework"
 )
@@ -136,6 +140,85 @@ func TestFramework(t *testing.T) {
 	t.Parallel()
 	withBootedVM(t, func(fw *framework.TestFramework) {
 		testFrameworkSuite(t, fw)
+	})
+}
+
+// Test_CommonConfigCommands_ReconcilesKniMACBeforeNeighbours verifies that a
+// mismatched kernel MAC is repaired without losing neighbours or restarting.
+func Test_CommonConfigCommands_ReconcilesKniMACBeforeNeighbours(t *testing.T) {
+	withBootedVM(t, func(fw *framework.TestFramework) {
+		_, err := fw.ExecuteCommands(
+			"udevadm settle",
+			"ip link set dev kni0 address 02:00:00:00:00:01",
+			"ip neigh replace "+framework.VMIPv4Gateway+" lladdr "+framework.SrcMAC+" nud permanent dev kni0",
+			"ip neigh replace "+framework.VMIPv6Gateway+" lladdr "+framework.SrcMAC+" nud permanent dev kni0",
+		)
+		require.NoError(t, err, "prepare mismatched MAC and permanent neighbours")
+
+		for _, name := range []string{"repair", "repeat"} {
+			if !t.Run(name, func(t *testing.T) {
+				_, err := fw.ExecuteCommands(fw.CommonConfigCommands()...)
+				require.NoError(t, err, "apply normal setup")
+				output, err := fw.ExecuteCommand("cat /sys/class/net/kni0/address")
+				require.NoError(t, err)
+				require.Equal(t, framework.DstMAC, strings.TrimSpace(output), "kernel MAC after setup")
+
+				for _, gateway := range []string{framework.VMIPv4Gateway, framework.VMIPv6Gateway} {
+					output, err := fw.ExecuteCommand("ip -j neigh show to " + gateway + " dev kni0")
+					require.NoError(t, err)
+					var neighbours []struct {
+						Dst    string   `json:"dst"`
+						LLAddr string   `json:"lladdr"`
+						State  []string `json:"state"`
+					}
+					require.NoError(t, json.Unmarshal([]byte(output), &neighbours))
+					require.Len(t, neighbours, 1, "permanent neighbour for %s after setup", gateway)
+					require.Equal(t, gateway, neighbours[0].Dst)
+					require.Equal(t, framework.SrcMAC, neighbours[0].LLAddr)
+					require.Contains(t, neighbours[0].State, "PERMANENT")
+				}
+
+				output, err = fw.ExecuteCommand("ip -j -6 addr show dev kni0")
+				require.NoError(t, err)
+				var interfaces []struct {
+					Addresses []struct {
+						Local     string `json:"local"`
+						Tentative bool   `json:"tentative"`
+						DADFailed bool   `json:"dadfailed"`
+					} `json:"addr_info"`
+				}
+				require.NoError(t, json.Unmarshal([]byte(output), &interfaces))
+				require.Len(t, interfaces, 1)
+				found := false
+				for _, address := range interfaces[0].Addresses {
+					if address.Local == framework.VMIPv6Host {
+						found = true
+						require.False(t, address.Tentative, "IPv6 host address must be ready")
+						require.False(t, address.DADFailed, "IPv6 host address must pass DAD")
+					}
+				}
+				require.True(t, found, "expected IPv6 host address after setup")
+
+				packet, err := framework.NewPacket(nil,
+					framework.Ether(framework.EtherSrc(framework.SrcMAC), framework.EtherDst(framework.DstMAC)),
+					framework.IPv4(framework.IPSrc(framework.VMIPv4Gateway), framework.IPDst(framework.VMIPv4Host)),
+					framework.ICMP(framework.ICMPTypeCode(8, 0), framework.ICMPId(1), framework.ICMPSeq(1)),
+					framework.Raw([]byte("hb")),
+				)
+				require.NoError(t, err)
+				response, err := fw.SendPacketAndCapture(0, 0, packet.Data(), 500*time.Millisecond)
+				require.NoError(t, err, "single heartbeat without restart")
+				reply := gopacket.NewPacket(response, layers.LayerTypeEthernet, gopacket.Default)
+				icmp, ok := reply.Layer(layers.LayerTypeICMPv4).(*layers.ICMPv4)
+				require.True(t, ok, "heartbeat response must be ICMPv4")
+				require.Equal(t, layers.CreateICMPv4TypeCode(layers.ICMPv4TypeEchoReply, 0), icmp.TypeCode)
+				require.Equal(t, uint16(1), icmp.Id)
+				require.Equal(t, uint16(1), icmp.Seq)
+				require.Equal(t, []byte("hb"), icmp.Payload)
+			}) {
+				return
+			}
+		}
 	})
 }
 
