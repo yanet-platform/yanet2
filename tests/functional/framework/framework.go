@@ -1358,49 +1358,26 @@ func (f *TestFramework) GetSocketPaths() []string {
 	return f.qemu.SocketPaths
 }
 
-// Run executes a subtest with the given name and function. This method wraps
-// t.Run() and automatically creates a new TestFramework instance with the
-// correct test name. This ensures that all framework operations within the
-// subtest are properly tracked and logged.
+// Run executes a sequential dependent subtest with a child-bound framework.
 //
-// The callback function receives two parameters:
-//   - fw: A new *TestFramework instance with the correct test name set
-//   - t: The *testing.T instance for the subtest
-//
-// This design separates framework operations (via fw) from test assertions (via t),
-// making the code more explicit and preventing accidental use of the wrong test context.
-//
-// Parameters:
-//   - name: The name of the subtest
-//   - fn: The test function that receives fw and t
-//
-// Returns:
-//   - bool: True if the test passed, false otherwise (same as t.Run)
-//
-// Example:
-//
-//	func TestMyFeature(t *testing.T) {
-//	    fw := globalFramework.ForTest(t)
-//
-//	    fw.Run("BasicTest", func(fw *TestFramework, t *testing.T) {
-//	        input, output, err := fw.SendPacketAndParse(0, 0, packet, timeout)
-//	        require.NoError(t, err)
-//	    })
-//
-//	    fw.Run("AdvancedTest", func(fw *TestFramework, t *testing.T) {
-//	        _, err := fw.ExecuteCommand("some command")
-//	        require.NoError(t, err)
-//	    })
-//	}
+// A failed bound parent skips the child before connection resets or callback
+// execution. Ordinary skips do not gate later children. Dependent children must
+// not run in parallel. The result follows t.Run: false for a failed child, true
+// for a passed or skipped child; true does not prove the callback executed.
+// RunWith remains independent and restores a snapshot.
 func (f *TestFramework) Run(name string, fn func(fw *TestFramework, t *testing.T)) bool {
 	if f.t == nil {
 		panic("Run() can only be called on TestFramework created via ForTest()")
 	}
 
-	f.log.Debugf("Resetting socket connections before test '%s'", name)
-	f.ResetConnections()
-
 	return f.t.Run(name, func(t *testing.T) {
+		if f.t.Failed() {
+			t.Skip("parent failed; skipping dependent step")
+		}
+
+		f.log.Debugf("Resetting socket connections before test '%s'", name)
+		f.ResetConnections()
+
 		// Create a new TestFramework with the subtest's full name
 		subFw := f.withTestName(t.Name())
 		subFw.t = t
