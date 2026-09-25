@@ -9,7 +9,6 @@ import (
 	"github.com/yanet-platform/yanet2/common/go/xcfg"
 	"github.com/yanet-platform/yanet2/operators/generic/operator"
 
-	_ "github.com/yanet-platform/yanet2/modules/balancer2/controlplane/balancerpb/v1"
 	_ "github.com/yanet-platform/yanet2/modules/route/controlplane/routepb/v1"
 )
 
@@ -88,23 +87,49 @@ configs:
 	require.ErrorContains(t, err, `names config "route1", but the entry is named "route0"`)
 }
 
-// Test_NewOperator_ReadsConfigNameField verifies that a request naming its
-// config through config_name, the balancer spelling, binds and checks too.
+// Test_NewOperator_ReadsConfigNameField verifies that an explicit config name
+// must match the entry's name for construction to succeed.
 func Test_NewOperator_ReadsConfigNameField(t *testing.T) {
-	path := writeModuleConfig(t, "config_name: balancer1\n")
-	raw := `
-name: balancer
+	cases := []struct {
+		name       string
+		configName string
+		wantErr    string
+	}{
+		{
+			name:       "mismatched config name is rejected",
+			configName: "fixture1",
+			wantErr:    `names config "fixture1", but the entry is named "fixture0"`,
+		},
+		{
+			name:       "matching config name is accepted",
+			configName: "fixture0",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			path := writeModuleConfig(t, "config_name: "+tc.configName+"\n")
+			raw := fmt.Sprintf(`
+name: fixture
 gateways:
   - name: gw0
     endpoint: "[::1]:0"
 configs:
-  - name: balancer0
-    method: modules.balancer2.controlplane.balancerpb.v1.Balancer/UpdateConfig
-    file: ` + path + `
-`
-	cfg := decodeConfig(t, raw)
+  - name: fixture0
+    method: %s
+    file: %s
+`, configNameMethod, path,
+			)
+			cfg := decodeConfig(t, raw)
 
-	_, err := operator.NewOperator(cfg)
-
-	require.ErrorContains(t, err, `names config "balancer1", but the entry is named "balancer0"`)
+			runnable, err := operator.NewOperator(cfg)
+			if runnable != nil {
+				t.Cleanup(func() { require.NoError(t, runnable.Close()) })
+			}
+			if tc.wantErr != "" {
+				require.ErrorContains(t, err, tc.wantErr)
+				return
+			}
+			require.NoError(t, err)
+		})
+	}
 }

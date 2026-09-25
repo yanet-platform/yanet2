@@ -26,7 +26,6 @@ members = [
     "cli/modules/device",
     "cli/modules/device-delete",
     "modules/acl/cli",
-    "modules/balancer2/cli",
     "modules/blackhole/cli",
     "modules/decap/cli",
     "modules/dscp/cli",

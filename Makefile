@@ -42,7 +42,6 @@ CLI_CORE_BINARIES := yanet-cli $(addprefix yanet-cli-,$(CLI_CORE_MODULES))
 # If a new module CLI appears, add its module name here.
 CLI_MODULES := \
 	acl \
-	balancer2 \
 	blackhole \
 	decap \
 	device-plain \
@@ -69,7 +68,6 @@ CLI_MODULES := \
 # module (see modules/meson.build's extra_modules option).
 PUBLIC_MODULES := \
 	acl \
-	balancer2 \
 	blackhole \
 	decap \
 	dscp \

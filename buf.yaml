@@ -25,6 +25,7 @@ breaking:
   use:
     - PACKAGE
   ignore:
+    # The unused pre-v1 package was intentionally removed with its clients.
     - modules/balancer2
     # No gateway registration ever exposed this service.
     - controlplane/ynpb/v1/module.proto
