@@ -69,6 +69,7 @@ func (m *BackendEntry) Endpoint() string {
 }
 
 // LastSeenAt returns the time the entry was last registered.
+// It retains the monotonic reading; convert to UTC only for presentation.
 func (m *BackendEntry) LastSeenAt() time.Time {
 	return m.lastSeenAt
 }
@@ -241,11 +242,10 @@ func (m *BackendRegistry) RegisterBackend(service string, b Backend, kind Backen
 // retained, so closing it would tear down every other entry still
 // resolving to it.
 func (m *BackendRegistry) registerBackend(service string, b Backend, kind BackendKind) (RegistrationStatus, Backend) {
-	now := time.Now().UTC()
-
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	now := time.Now()
 	existing, ok := m.backends[service]
 	switch {
 	case ok && m.renewLocked(service, b.Endpoint(), now):
@@ -316,7 +316,7 @@ func (m *BackendRegistry) Renew(service, endpoint string) bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	return m.renewLocked(service, endpoint, time.Now().UTC())
+	return m.renewLocked(service, endpoint, time.Now())
 }
 
 // renewLocked refreshes the matching entry and reports whether it exists.
@@ -354,6 +354,9 @@ func (m *BackendRegistry) Close() error {
 
 // EvictStale removes external backends not refreshed since before and
 // returns the entries it removed.
+//
+// A cutoff with a monotonic reading uses elapsed time for comparison;
+// a cutoff without one uses wall time.
 //
 // Only BackendKindExternal entries are eligible. That is the sole kind that
 // heartbeats — builtin and in-process entries are registered once and never

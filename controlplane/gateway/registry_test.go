@@ -68,6 +68,52 @@ func (m *fakeBackend) CloseCount() int {
 var _ proxy.Backend = (*fakeBackend)(nil)
 var _ gateway.Backend = (*fakeBackend)(nil)
 
+// Test_BackendRegistry_PreservesMonotonicTimestamp verifies that every update
+// path retains the monotonic reading needed for elapsed-time expiry.
+func Test_BackendRegistry_PreservesMonotonicTimestamp(t *testing.T) {
+	for _, tc := range []string{"initial registration", "same-endpoint registration", "renewal", "replacement"} {
+		t.Run(tc, func(t *testing.T) {
+			registry := gateway.NewBackendRegistry()
+			t.Cleanup(func() { require.NoError(t, registry.Close()) })
+			backend := &fakeBackend{endpoint: "127.0.0.1:9000"}
+			registry.RegisterBackend("svc.Foo", backend, gateway.BackendKindExternal)
+			switch tc {
+			case "same-endpoint registration":
+				redundant := &fakeBackend{endpoint: backend.Endpoint()}
+				require.Equal(t, gateway.RegistrationRenewed, registry.RegisterBackend("svc.Foo", redundant, gateway.BackendKindExternal))
+			case "renewal":
+				require.True(t, registry.Renew("svc.Foo", backend.Endpoint()))
+			case "replacement":
+				replacement := &fakeBackend{endpoint: "127.0.0.1:9001"}
+				require.Equal(t, gateway.RegistrationUpdated, registry.RegisterBackend("svc.Foo", replacement, gateway.BackendKindExternal))
+			}
+			seen := getBackendEntry(t, registry, "svc.Foo").LastSeenAt()
+			// The timestamp must retain a monotonic reading for elapsed-time expiry.
+			require.True(t, seen != seen.Round(0), "registration timestamp lost its monotonic reading")
+		})
+	}
+}
+
+// Test_BackendRegistry_EvictStaleStrictCutoff verifies that an equal cutoff
+// retains an entry and a later cutoff removes it, with either clock domain.
+func Test_BackendRegistry_EvictStaleStrictCutoff(t *testing.T) {
+	for _, tc := range []string{"monotonic cutoff", "wall-only cutoff"} {
+		t.Run(tc, func(t *testing.T) {
+			registry := gateway.NewBackendRegistry()
+			t.Cleanup(func() { require.NoError(t, registry.Close()) })
+			registry.RegisterBackend("svc.Foo", &fakeBackend{endpoint: "127.0.0.1:9000"}, gateway.BackendKindExternal)
+			cutoff := getBackendEntry(t, registry, "svc.Foo").LastSeenAt()
+			if tc == "wall-only cutoff" {
+				cutoff = cutoff.UTC()
+			}
+			require.Empty(t, registry.EvictStale(cutoff))
+			require.True(t, registry.HasBackend("svc.Foo"))
+			require.Len(t, registry.EvictStale(cutoff.Add(time.Nanosecond)), 1)
+			require.False(t, registry.HasBackend("svc.Foo"))
+		})
+	}
+}
+
 func getBackendEntry(t *testing.T, registry *gateway.BackendRegistry, service string) *gateway.BackendEntry {
 	t.Helper()
 

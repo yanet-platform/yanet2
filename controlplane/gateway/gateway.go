@@ -611,12 +611,13 @@ func (m *Gateway) runRegistrySweeper(ctx context.Context) error {
 		case <-ctx.Done():
 			return nil
 		case <-ticker.C:
-			before := time.Now().UTC().Add(-ttl)
+			// Keep the monotonic reading for TTL comparisons.
+			before := time.Now().Add(-ttl)
 			for _, entry := range m.registry.EvictStale(before) {
 				m.log.Info("evicted stale service from registry",
 					zap.String("service", entry.Service()),
 					zap.String("endpoint", entry.Endpoint()),
-					zap.Time("last_seen_at", entry.LastSeenAt()),
+					zap.Time("last_seen_at", entry.LastSeenAt().UTC()),
 					zap.Stringer("kind", entry.Kind()),
 				)
 			}
