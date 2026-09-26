@@ -2,7 +2,8 @@
 
 #include <stdint.h>
 
-#include <lib/filter/rule.h>
+#include <lib/classify/classify.h>
+#include <lib/classify/rule.h>
 
 #include "lib/counters/counters.h"
 
@@ -30,13 +31,17 @@ int
 forward_module_config_free(struct cp_module *cp_module, yanet_error **err);
 
 struct forward_rule {
+	struct classifier_rule rule;
+
 	char target[CP_DEVICE_NAME_LEN];
 	char counter[COUNTER_NAME_LEN];
 
 	uint8_t mode;
 
 	struct filter_devices devices;
-	struct filter_vlan_ranges vlan_ranges;
+	// The VLAN line intervals widened out of the authored VLAN
+	// ranges by the control plane that authors the rules.
+	struct classify_line_ranges vlan_ranges;
 
 	struct filter_net4s src_net4s;
 	struct filter_net4s dst_net4s;

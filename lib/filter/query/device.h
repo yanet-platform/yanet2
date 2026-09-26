@@ -12,7 +12,9 @@ FILTER_ATTR_QUERY_FUNC(device)(
 ) {
 	struct vline *l = (struct vline *)data;
 	for (uint32_t idx = 0; idx < count; ++idx) {
-		uint64_t device_id = packets[idx]->module_device_id;
+		// Keyed by the packet tx device: the standalone attribute
+		// carries no module mapping of its own.
+		uint64_t device_id = packets[idx]->tx_device_id;
 		if (device_id >= l->size) {
 			device_id = 0;
 		}

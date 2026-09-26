@@ -93,7 +93,7 @@ func (m *ForwardRule) cBuild(pinner *runtime.Pinner) C.struct_forward_rule {
 	cRule.mode = m.Mode.toC()
 
 	filter.CBuildDevices(&cRule.devices, m.Devices, pinner)
-	filter.CBuildVlanRanges(&cRule.vlan_ranges, m.VlanRanges, pinner)
+	filter.CBuildVlanLineRanges(&cRule.vlan_ranges, m.VlanRanges, pinner)
 	filter.CBuildNet4s(&cRule.src_net4s, m.Src4s, pinner)
 	filter.CBuildNet4s(&cRule.dst_net4s, m.Dst4s, pinner)
 	filter.CBuildNet6s(&cRule.src_net6s, m.Src6s, pinner)

@@ -123,20 +123,23 @@ value_table_init(
 
 static inline uint32_t *
 value_table_get_ptr(
-	struct value_table *value_table, uint32_t v_idx, uint32_t h_idx
+	const struct value_table *value_table, uint32_t v_idx, uint32_t h_idx
 ) {
+	// Cast away const for the offset-pointer access: lookup is a read-only
+	// operation and the value table is immutable after compilation.
+	struct value_table *table = (struct value_table *)value_table;
 	// values and the chunk pointers are set at init and cleared only by
 	// value_table_free, which never races a lookup — so on the query path
 	// they are never NULL and the NULL test in ADDR_OF is pure per-lookup
 	// overhead. The chunk is indexed by v_idx and the h_idx stays
 	// in-chunk, so the lookup adds and never multiplies or divides.
-	uint32_t **values = ADDR_OF_NONNULL(&value_table->values);
+	uint32_t **values = ADDR_OF_NONNULL(&table->values);
 	return ADDR_OF_NONNULL(values + v_idx) + h_idx;
 }
 
 static inline uint32_t
 value_table_get(
-	struct value_table *value_table, uint32_t v_idx, uint32_t h_idx
+	const struct value_table *value_table, uint32_t v_idx, uint32_t h_idx
 ) {
 	return *value_table_get_ptr(value_table, v_idx, h_idx);
 }

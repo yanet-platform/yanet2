@@ -18,9 +18,16 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#include "common/filter_views.h"
 #include "common/network.h"
 
-#define ACL_DEVICE_NAME_LEN 80
+/*
+ * The rule format of the legacy filter. The shared value views above
+ * (nets, ports, protocols, devices, vlans, the fragmentation
+ * constraint) moved to common/filter_views.h, shared with the
+ * lib/classify attribute compilers; the structures below are the
+ * format this library compiles its rule arrays from.
+ */
 
 struct filter_net6 {
 	uint32_t src_count;
@@ -38,26 +45,6 @@ struct filter_net4 {
 	struct net4 *dsts;
 };
 
-struct filter_net6s {
-	struct net6 *items;
-	uint32_t count;
-};
-
-struct filter_net4s {
-	struct net4 *items;
-	uint32_t count;
-};
-
-struct filter_port_range {
-	uint16_t from;
-	uint16_t to;
-};
-
-struct filter_proto_range {
-	uint16_t from;
-	uint16_t to;
-};
-
 struct filter_transport {
 	uint16_t proto_count;
 	struct filter_proto_range *protos;
@@ -67,42 +54,6 @@ struct filter_transport {
 
 	uint16_t dst_count;
 	struct filter_port_range *dsts;
-};
-
-struct filter_device {
-	char name[ACL_DEVICE_NAME_LEN];
-	uint64_t id;
-};
-
-struct filter_devices {
-	struct filter_device *items;
-	uint32_t count;
-};
-
-struct filter_vlan_range {
-	uint16_t from;
-	uint16_t to;
-};
-
-struct filter_vlan_ranges {
-	struct filter_vlan_range *items;
-	uint32_t count;
-};
-
-struct filter_proto_ranges {
-	struct filter_proto_range *items;
-	uint32_t count;
-};
-
-struct filter_port_ranges {
-	struct filter_port_range *items;
-	uint32_t count;
-};
-
-enum filter_ip_fragment {
-	FILTER_IP_FRAG_ANY = 0,
-	FILTER_IP_FRAG_NONE = 1,
-	FILTER_IP_FRAG_FRAG = 2,
 };
 
 #define VLAN_UNSPEC ((uint16_t)-1)

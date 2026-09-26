@@ -329,12 +329,12 @@ func runNet6ShareVerdictParity(
 		shared = collectNet6ShareVerdicts(t, rules, packets, false, cpMemory, agentMemory)
 		require.True(
 			t,
-			shared.info.FilterRuleCountIp6 > 0 && shared.info.FilterRuleCountIp6Port > 0,
-			"ruleset has filter_rule_count_ip6=%d filter_rule_count_ip6_port=%d; "+
+			shared.info.FilterRuleCountIp6 > 0 && shared.info.FilterRuleCountIp6Tcp > 0,
+			"ruleset has filter_rule_count_ip6=%d filter_rule_count_ip6_tcp=%d; "+
 				"acl_module_init_net6_share returns without building the "+
 				"shared trie when either is zero, so this subtest would be "+
 				"comparing the unshared path against itself",
-			shared.info.FilterRuleCountIp6, shared.info.FilterRuleCountIp6Port,
+			shared.info.FilterRuleCountIp6, shared.info.FilterRuleCountIp6Tcp,
 		)
 	})
 
@@ -473,12 +473,12 @@ func TestACL_Net6Share_EmptyRoundForcePoll(t *testing.T) {
 	info := handle.GetInfo()
 	require.True(
 		t,
-		info.FilterRuleCountIp6 > 0 && info.FilterRuleCountIp6Port > 0,
-		"ruleset has filter_rule_count_ip6=%d filter_rule_count_ip6_port=%d; "+
+		info.FilterRuleCountIp6 > 0 && info.FilterRuleCountIp6Tcp > 0,
+		"ruleset has filter_rule_count_ip6=%d filter_rule_count_ip6_tcp=%d; "+
 			"acl_module_init_net6_share returns without building the shared "+
 			"trie when either is zero, so this test would exercise only the "+
 			"unshared main-body arrays",
-		info.FilterRuleCountIp6, info.FilterRuleCountIp6Port,
+		info.FilterRuleCountIp6, info.FilterRuleCountIp6Tcp,
 	)
 
 	result, err := harness.HandlePackets()

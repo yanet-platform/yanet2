@@ -36,3 +36,9 @@ func CBuildProtoRanges[T any](dst *T, m ProtoRanges, pinner *runtime.Pinner) {
 func CBuildVlanRanges[T any](dst *T, m VlanRanges, pinner *runtime.Pinner) {
 	*dst = *(*T)(unsafe.Pointer(m.cBuild(pinner)))
 }
+
+// CBuildVlanLineRanges writes the widened line interval view of
+// VlanRanges into dst.
+func CBuildVlanLineRanges[T any](dst *T, m VlanRanges, pinner *runtime.Pinner) {
+	*dst = *(*T)(unsafe.Pointer(m.cBuildLineRanges(pinner)))
+}

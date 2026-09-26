@@ -5,7 +5,7 @@
 #include <rte_ether.h>
 #include <rte_ip.h>
 
-#include <lib/filter/query.h>
+#include "filter_lookup.h"
 
 #include "lib/controlplane/config/econtext.h"
 
@@ -14,12 +14,6 @@
 #include "lib/dataplane/module/packet_front.h"
 #include "lib/dataplane/packet/packet.h"
 #include "lib/dataplane/pipeline/pipeline.h"
-
-FILTER_QUERY_DECLARE(filter_vlan, device, vlan);
-
-FILTER_QUERY_DECLARE(filter_ip4, device, vlan, net4_src, net4_dst);
-
-FILTER_QUERY_DECLARE(filter_ip6, device, vlan, net6_src, net6_dst);
 
 static void
 forward_handle_packets(
@@ -51,10 +45,12 @@ forward_handle_packets(
 
 	struct packet *ip4_packets[count];
 	uint32_t ip4_result[count];
+	uint32_t ip4_pos[count];
 	uint64_t ip4_idx = 0;
 
 	struct packet *ip6_packets[count];
 	uint32_t ip6_result[count];
+	uint32_t ip6_pos[count];
 	uint64_t ip6_idx = 0;
 
 	for (struct packet *packet = packet_list_first(&packet_front->input);
@@ -65,35 +61,77 @@ forward_handle_packets(
 
 		if (packet->network_header.type ==
 		    rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV4)) {
+			// The position of the family packet inside the
+			// batch: the shared core classes are gathered
+			// through it.
+			ip4_pos[ip4_idx] = vlan_idx - 1;
 			ip4_packets[ip4_idx++] = packet;
 		}
 
 		if (packet->network_header.type ==
 		    rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV6)) {
+			ip6_pos[ip6_idx] = vlan_idx - 1;
 			ip6_packets[ip6_idx++] = packet;
 		}
 	}
 
-	filter_query(
-		&forward_config->filter_vlan,
-		filter_vlan,
-		vlan_packets,
+	// The family filters share the core classification: the core
+	// classes are computed once per batch, the vlan filter resolves
+	// them through its decoder and the family results combine them
+	// with the network pair classes through the root joints.
+	// A family batch can be empty; the class scratch arrays are
+	// guarded against zero sized declarations.
+	uint32_t core_classes[vlan_idx ? vlan_idx : 1];
+	fwd_classify_core(
+		&forward_config->classifier_core,
+		module_ectx->abs_cm_index,
+		(const struct packet **)vlan_packets,
+		core_classes,
+		vlan_idx
+	);
+	classify_resolve(
+		&forward_config->filter_vlan.rule_map,
+		core_classes,
 		vlan_result,
 		vlan_idx
 	);
 
-	filter_query(
-		&forward_config->filter_ip4,
-		filter_ip4,
-		ip4_packets,
+	uint32_t core4_classes[ip4_idx ? ip4_idx : 1];
+	uint32_t net4_classes[ip4_idx ? ip4_idx : 1];
+	for (uint64_t idx = 0; idx < ip4_idx; ++idx) {
+		core4_classes[idx] = core_classes[ip4_pos[idx]];
+	}
+	fwd_classify_net4(
+		&forward_config->classifier_net4,
+		(const struct packet **)ip4_packets,
+		net4_classes,
+		ip4_idx
+	);
+	classify_combine(
+		&forward_config->filter_ip4.root_joint,
+		&forward_config->filter_ip4.rule_map,
+		core4_classes,
+		net4_classes,
 		ip4_result,
 		ip4_idx
 	);
 
-	filter_query(
-		&forward_config->filter_ip6,
-		filter_ip6,
-		ip6_packets,
+	uint32_t core6_classes[ip6_idx ? ip6_idx : 1];
+	uint32_t net6_classes[ip6_idx ? ip6_idx : 1];
+	for (uint64_t idx = 0; idx < ip6_idx; ++idx) {
+		core6_classes[idx] = core_classes[ip6_pos[idx]];
+	}
+	fwd_classify_net6(
+		&forward_config->classifier_net6,
+		(const struct packet **)ip6_packets,
+		net6_classes,
+		ip6_idx
+	);
+	classify_combine(
+		&forward_config->filter_ip6.root_joint,
+		&forward_config->filter_ip6.rule_map,
+		core6_classes,
+		net6_classes,
 		ip6_result,
 		ip6_idx
 	);
@@ -123,7 +161,7 @@ forward_handle_packets(
 			++ip6_idx;
 		}
 
-		if (action != FILTER_RULE_INVALID) {
+		if (action != CLASSIFY_RULE_INVALID) {
 			target = ADDR_OF(&forward_config->targets) + action;
 		}
 
@@ -173,6 +211,14 @@ struct forward_module {
 };
 
 static void
+forward_module_commit_ectx(
+	struct module_ectx *module_ectx, struct cp_module *cp_module
+) {
+	(void)module_ectx;
+	(void)cp_module;
+}
+
+static void
 forward_module_commit(
 	struct dp_config *dp_config, struct cp_module *cp_module
 ) {
@@ -202,6 +248,8 @@ new_module_forward() {
 	);
 	module->module.handler = forward_handle_packets;
 	module->module.commit_handler = forward_module_commit;
+	module->module.commit_ectx_handler = forward_module_commit_ectx;
+	module->module.prepared_size = sizeof(struct forward_prepared);
 
 	return &module->module;
 }

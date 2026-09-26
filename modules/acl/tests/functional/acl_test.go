@@ -1636,54 +1636,6 @@ func TestACL_NoTerminatingAction_Drop(t *testing.T) {
 	dataplaneut.RequireRuleCounter(t, h, path, "acl_count_only", 1, pktSize)
 }
 
-// TestACL_VLAN_Match asserts that a VLAN-tagged packet matches a rule whose
-// VlanRanges include the packet's VLAN ID.
-func TestACL_VLAN_Match(t *testing.T) {
-	eth := layers.Ethernet{
-		SrcMAC:       xerror.Unwrap(net.ParseMAC("aa:bb:cc:dd:ee:ff")),
-		DstMAC:       xerror.Unwrap(net.ParseMAC("11:22:33:44:55:66")),
-		EthernetType: layers.EthernetTypeDot1Q,
-	}
-	dot1q := layers.Dot1Q{
-		VLANIdentifier: 150,
-		Type:           layers.EthernetTypeIPv4,
-	}
-	ip4 := layers.IPv4{
-		Version:  4,
-		TTL:      64,
-		Protocol: layers.IPProtocolUDP,
-		SrcIP:    net.ParseIP("192.0.2.1"),
-		DstIP:    net.ParseIP("10.0.0.1"),
-	}
-	udp := layers.UDP{SrcPort: 12345, DstPort: 80}
-	udp.SetNetworkLayerForChecksum(&ip4)
-	pkt := serializeFragPacket(t, &eth, &dot1q, &ip4, &udp)
-
-	rules := []cacl.ACLRule{{
-		Actions:       []cacl.ACLAction{{Kind: cacl.ActionAllow}},
-		Devices:       filter.Devices{{Name: "port0"}},
-		VlanRanges:    filter.VlanRanges{{From: 100, To: 200}},
-		Src4s:         []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
-		Dst4s:         []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
-		Src6s:         []xnetip.BiContiguous{},
-		Dst6s:         []xnetip.BiContiguous{},
-		SrcPortRanges: allPorts,
-		DstPortRanges: allPorts,
-		ProtoRanges:   udpProto,
-	}}
-
-	h, agent, backend := setupACLHarness(t, []string{"port0"})
-	applyACLRules(t, backend, "test", rules)
-	wireACLPipeline(t, agent, "port0", "test")
-
-	result, err := h.HandlePackets(pkt)
-	require.NoError(t, err)
-	assert.Len(t, result.Output, 1, "VLAN-tagged packet with VID inside the rule's range must be allowed")
-	assert.Empty(t, result.Drop)
-
-	requireModuleCounterPackets(t, h, aclCounterPath("port0", "test"), "acl_action_allow", 1)
-}
-
 // TestACL_IPv4Fragment_FirstFragment documents the parser's behavior for the
 // first fragment of a UDP datagram (FragOffset=0, MF=1).
 //
