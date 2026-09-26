@@ -5,8 +5,6 @@
 #include <rte_ether.h>
 #include <rte_ip.h>
 
-#include <lib/filter/query.h>
-
 #include "lib/controlplane/config/econtext.h"
 
 #include "lib/dataplane/config/zone.h"
@@ -17,11 +15,7 @@
 #include "lib/dataplane/pipeline/pipeline.h"
 #include "lib/dataplane/worker/worker.h"
 
-FILTER_QUERY_DECLARE(filter_vlan, device, vlan);
-
-FILTER_QUERY_DECLARE(filter_ip4, device, vlan, net4_src, net4_dst);
-
-FILTER_QUERY_DECLARE(filter_ip6, device, vlan, net6_src, net6_dst);
+#include "filter_lookup.h"
 
 static void
 mirror_clone(
@@ -91,26 +85,26 @@ mirror_handle_packets(
 		}
 	}
 
-	filter_query(
-		&mirror_config->filter_vlan,
-		filter_vlan,
-		vlan_packets,
+	mirror_classify_vlan(
+		&mirror_config->classifier_vlan,
+		module_ectx->abs_cm_index,
+		(const struct packet **)vlan_packets,
 		vlan_result,
 		vlan_idx
 	);
 
-	filter_query(
-		&mirror_config->filter_ip4,
-		filter_ip4,
-		ip4_packets,
+	mirror_classify_ip4(
+		&mirror_config->classifier_ip4,
+		module_ectx->abs_cm_index,
+		(const struct packet **)ip4_packets,
 		ip4_result,
 		ip4_idx
 	);
 
-	filter_query(
-		&mirror_config->filter_ip6,
-		filter_ip6,
-		ip6_packets,
+	mirror_classify_ip6(
+		&mirror_config->classifier_ip6,
+		module_ectx->abs_cm_index,
+		(const struct packet **)ip6_packets,
 		ip6_result,
 		ip6_idx
 	);
@@ -140,7 +134,7 @@ mirror_handle_packets(
 			++ip6_idx;
 		}
 
-		if (action != FILTER_RULE_INVALID) {
+		if (action != CLASSIFY_RULE_INVALID) {
 			target = ADDR_OF(&mirror_config->targets) + action;
 		}
 
@@ -188,6 +182,14 @@ struct mirror_module {
 };
 
 static void
+mirror_module_commit_ectx(
+	struct module_ectx *module_ectx, struct cp_module *cp_module
+) {
+	(void)module_ectx;
+	(void)cp_module;
+}
+
+static void
 mirror_module_commit(struct dp_config *dp_config, struct cp_module *cp_module) {
 	(void)dp_config;
 	(void)cp_module;
@@ -212,6 +214,8 @@ new_module_mirror() {
 	);
 	module->module.handler = mirror_handle_packets;
 	module->module.commit_handler = mirror_module_commit;
+	module->module.commit_ectx_handler = mirror_module_commit_ectx;
+	module->module.prepared_size = sizeof(struct mirror_prepared);
 
 	return &module->module;
 }
