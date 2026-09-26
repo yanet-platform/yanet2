@@ -8,6 +8,7 @@
 #include "modules/forward/dataplane/config.h"
 #include "modules/forward/dataplane/dataplane.h"
 
+#include "lib/classify/classifiers/device.h"
 #include "lib/fuzzing/fuzzing.h"
 
 // Forward module filter compilation needs more memory than the default 1 MB
@@ -166,6 +167,20 @@ forward_test_config(struct cp_module **cp_module, yanet_error **err) {
 	fuzz_params.module_ectx.mc_index_size = 2;
 	SET_OFFSET_OF(&fuzz_params.module_ectx.mc_index, mc_index);
 	fuzz_params.module_ectx.abs_mc_index = mc_index;
+
+	// The device lookups resolve through the mapping bound into the
+	// classifiers; the hand-built module context never runs the
+	// execution-context commit, so bind an identity mapping directly.
+	uint64_t *cm_index =
+		memory_balloc(&fuzz_params.mctx, sizeof(uint64_t) * 2);
+	if (cm_index == NULL) {
+		goto fail;
+	}
+	cm_index[0] = 0;
+	cm_index[1] = 0;
+	fuzz_params.module_ectx.cm_index_size = 2;
+	SET_OFFSET_OF(&fuzz_params.module_ectx.cm_index, cm_index);
+	fuzz_params.module_ectx.abs_cm_index = cm_index;
 
 	*cp_module = (struct cp_module *)config;
 	return 0;
