@@ -32,6 +32,18 @@ classify_net6 = executable(
 
 test('classify_net6', classify_net6, suite: ['filter'])
 
+classify_core = executable(
+  'classify_core',
+  ['core.c'],
+  c_args: yanet_test_c_args,
+  link_args: yanet_link_args,
+  dependencies: test_deps,
+  link_language: 'c',
+  include_directories: yanet_rootdir,
+)
+
+test('classify_core', classify_core, suite: ['filter'])
+
 classify_fragment = executable(
   'classify_fragment',
   ['fragment.c'],

@@ -711,8 +711,6 @@ func TestConvertRules_RejectsUnknownActionKind(t *testing.T) {
 	require.Equal(t, codes.InvalidArgument, status.Code(err))
 }
 
-// mustV4Network builds an IPv4Network from a test literal in the CIDR or
-// address/mask form.
 func mustV4Network(s string) *commonpb.IPv4Network {
 	return commonpb.NewIPv4NetworkFrom4(xnetip.MustParseNetwork4(s))
 }

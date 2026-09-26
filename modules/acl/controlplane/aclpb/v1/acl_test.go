@@ -6,6 +6,9 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
+	filterpb "github.com/yanet-platform/yanet2/common/filterpb/v1"
+
 	ynpb "github.com/yanet-platform/yanet2/controlplane/ynpb/v1"
 	aclpb "github.com/yanet-platform/yanet2/modules/acl/controlplane/aclpb/v1"
 	fwstatemappb "github.com/yanet-platform/yanet2/objects/fwstate/controlplane/fwstatemappb/v1"
@@ -68,8 +71,11 @@ func Test_UpdateConfigRequest_Validate(t *testing.T) {
 		{
 			name: "deprecated sync config",
 			request: &aclpb.UpdateConfigRequest{
-				Name:       "acl0",
-				Rules:      []*aclpb.Rule{{}},
+				Name: "acl0",
+				Rules: []*aclpb.Rule{{
+					Sources4:      []*commonpb.IPv4Network{{}},
+					Destinations4: []*commonpb.IPv4Network{{}},
+				}},
 				SyncConfig: &aclpb.SyncConfig{},
 			},
 			message: "sync_config belongs to fwstate",
@@ -77,8 +83,11 @@ func Test_UpdateConfigRequest_Validate(t *testing.T) {
 		{
 			name: "v4 map name contains NUL",
 			request: &aclpb.UpdateConfigRequest{
-				Name:          "acl0",
-				Rules:         []*aclpb.Rule{{}},
+				Name: "acl0",
+				Rules: []*aclpb.Rule{{
+					Sources4:      []*commonpb.IPv4Network{{}},
+					Destinations4: []*commonpb.IPv4Network{{}},
+				}},
 				FwtableNameV4: "map\x00name",
 			},
 			message: "fwtable_name_v4 must not contain NUL",
@@ -86,8 +95,11 @@ func Test_UpdateConfigRequest_Validate(t *testing.T) {
 		{
 			name: "v4 map name reaches byte limit",
 			request: &aclpb.UpdateConfigRequest{
-				Name:          "acl0",
-				Rules:         []*aclpb.Rule{{}},
+				Name: "acl0",
+				Rules: []*aclpb.Rule{{
+					Sources4:      []*commonpb.IPv4Network{{}},
+					Destinations4: []*commonpb.IPv4Network{{}},
+				}},
 				FwtableNameV4: strings.Repeat("a", fwstatemappb.MaxMapNameLen),
 			},
 			message: "fwtable_name_v4 must be shorter than 80 bytes",
@@ -95,8 +107,11 @@ func Test_UpdateConfigRequest_Validate(t *testing.T) {
 		{
 			name: "v6 map name contains NUL",
 			request: &aclpb.UpdateConfigRequest{
-				Name:          "acl0",
-				Rules:         []*aclpb.Rule{{}},
+				Name: "acl0",
+				Rules: []*aclpb.Rule{{
+					Sources4:      []*commonpb.IPv4Network{{}},
+					Destinations4: []*commonpb.IPv4Network{{}},
+				}},
 				FwtableNameV6: "map\x00name",
 			},
 			message: "fwtable_name_v6 must not contain NUL",
@@ -104,17 +119,41 @@ func Test_UpdateConfigRequest_Validate(t *testing.T) {
 		{
 			name: "v6 map name reaches byte limit",
 			request: &aclpb.UpdateConfigRequest{
-				Name:          "acl0",
-				Rules:         []*aclpb.Rule{{}},
+				Name: "acl0",
+				Rules: []*aclpb.Rule{{
+					Sources4:      []*commonpb.IPv4Network{{}},
+					Destinations4: []*commonpb.IPv4Network{{}},
+				}},
 				FwtableNameV6: strings.Repeat("a", fwstatemappb.MaxMapNameLen),
 			},
 			message: "fwtable_name_v6 must be shorter than 80 bytes",
 		},
 		{
+			name: "rule without networks accepted",
+			request: &aclpb.UpdateConfigRequest{
+				Name:  "acl0",
+				Rules: []*aclpb.Rule{{}},
+			},
+		},
+		{
+			name: "vlan ranges from old clients are ignored",
+			request: &aclpb.UpdateConfigRequest{
+				Name: "acl0",
+				Rules: []*aclpb.Rule{{
+					Sources4:      []*commonpb.IPv4Network{{}},
+					Destinations4: []*commonpb.IPv4Network{{}},
+					VlanRanges:    []*filterpb.VlanRange{{From: 0, To: 4095}},
+				}},
+			},
+		},
+		{
 			name: "valid request at map name boundary",
 			request: &aclpb.UpdateConfigRequest{
-				Name:          "acl0",
-				Rules:         []*aclpb.Rule{{}},
+				Name: "acl0",
+				Rules: []*aclpb.Rule{{
+					Sources4:      []*commonpb.IPv4Network{{}},
+					Destinations4: []*commonpb.IPv4Network{{}},
+				}},
 				FwtableNameV4: strings.Repeat("a", fwstatemappb.MaxMapNameLen-1),
 				FwtableNameV6: strings.Repeat("b", fwstatemappb.MaxMapNameLen-1),
 			},

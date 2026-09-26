@@ -405,24 +405,40 @@ func (m *ACLService) collectDataplaneMetrics() ([]*commonpb.Metric, error) {
 						float64(info.CompilationTimeNs),
 						configLabels...),
 					commonpb.NewMetricGauge(
-						"acl_filter_rule_count_vlan",
-						float64(info.FilterRuleCountVlan),
+						"acl_filter_rule_count_l2",
+						float64(info.FilterRuleCountL2),
 						configLabels...),
 					commonpb.NewMetricGauge(
 						"acl_filter_rule_count_ip4",
 						float64(info.FilterRuleCountIp4),
 						configLabels...),
 					commonpb.NewMetricGauge(
-						"acl_filter_rule_count_ip4_port",
-						float64(info.FilterRuleCountIp4Port),
+						"acl_filter_rule_count_ip4_tcp",
+						float64(info.FilterRuleCountIp4Tcp),
+						configLabels...),
+					commonpb.NewMetricGauge(
+						"acl_filter_rule_count_ip4_udp",
+						float64(info.FilterRuleCountIp4Udp),
+						configLabels...),
+					commonpb.NewMetricGauge(
+						"acl_filter_rule_count_ip4_icmp",
+						float64(info.FilterRuleCountIp4Icmp),
 						configLabels...),
 					commonpb.NewMetricGauge(
 						"acl_filter_rule_count_ip6",
 						float64(info.FilterRuleCountIp6),
 						configLabels...),
 					commonpb.NewMetricGauge(
-						"acl_filter_rule_count_ip6_port",
-						float64(info.FilterRuleCountIp6Port),
+						"acl_filter_rule_count_ip6_tcp",
+						float64(info.FilterRuleCountIp6Tcp),
+						configLabels...),
+					commonpb.NewMetricGauge(
+						"acl_filter_rule_count_ip6_udp",
+						float64(info.FilterRuleCountIp6Udp),
+						configLabels...),
+					commonpb.NewMetricGauge(
+						"acl_filter_rule_count_ip6_icmp",
+						float64(info.FilterRuleCountIp6Icmp),
 						configLabels...),
 				)
 			}

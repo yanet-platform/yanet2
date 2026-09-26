@@ -1,9 +1,15 @@
 #pragma once
 
-#include "lib/controlplane/config/cp_module.h"
+#include "common/value.h"
 
-#include "lib/filter/classifiers/net6.h"
-#include "lib/filter/filter.h"
+#include "lib/classify/classifiers/device.h"
+#include "lib/classify/classifiers/ipfrag.h"
+#include "lib/classify/classifiers/line.h"
+#include "lib/classify/classifiers/net4.h"
+#include "lib/classify/classifiers/net6.h"
+#include "lib/classify/classifiers/port.h"
+
+#include "lib/controlplane/config/cp_module.h"
 #include "lib/statemap/fwtable.h"
 
 struct counter_value_handle;
@@ -52,14 +58,159 @@ struct acl_prepared {
 	fwtable_t *fw6table;
 };
 
+// Leaf classifier: the fragment condition alone, no joint.
+struct acl_classifier_frag {
+	struct classify_attr_ipfrag frag_attr;
+};
+
+/*
+ * L2 classifier of the rules without networks: the device attribute
+ * alone, so a network-less rule matches every packet of its devices
+ * regardless of the protocol family.
+ */
+struct acl_classifier_l2 {
+	struct classify_attr_device dev_attr;
+};
+
+/*
+ * The ports pair classifier is shared by the tcp and the udp paths of
+ * a family: both compile it once over the union of their projections
+ * and join its classes through their own root joints.
+ */
+struct acl_classifier_ports {
+	struct classify_attr_port src_attr;
+	struct classify_attr_port dst_attr;
+	struct value_table joint;
+};
+
+// Leaf classifiers of the transport specific paths: the TCP flags byte
+// and the ICMP message type, plain lines over the byte domains - the
+// path selection guarantees the header is present, so the lines carry
+// no absent mark.
+struct acl_classifier_tcp {
+	struct classify_attr_line flags_attr;
+	struct value_table flags_joint;
+};
+
+struct acl_classifier_icmp {
+	struct classify_attr_line type_attr;
+};
+
+/*
+ * Family core classifier over the union of every projection of the
+ * family: four attributes joined in the pairwise order - the network
+ * pair first, the device attribute joining their classes, then the
+ * protocol attribute closing the root - so the region-heavy network
+ * cross happens between the compact sides instead of against a
+ * subtree already carrying the small attributes.
+ *
+ * The core carries no transport specific attribute: every packet
+ * enters exactly one protocol path beside the plain filter, and the
+ * path implies the transport header the path attribute reads.
+ */
+struct acl_classifier_core4 {
+	struct classify_attr_device dev_attr;
+	struct classify_attr_net4 net4_src_attr;
+	struct classify_attr_net4 net4_dst_attr;
+	struct classify_attr_line ipproto_attr;
+	struct value_table nets_joint;
+	struct value_table mid_joint;
+	struct value_table proto_joint;
+};
+
+struct acl_classifier_core6 {
+	struct classify_attr_device dev_attr;
+	struct classify_attr_net6 net6_src_attr;
+	struct classify_attr_net6 net6_dst_attr;
+	struct classify_attr_line ipproto_attr;
+	struct value_table nets_joint;
+	struct value_table mid_joint;
+	struct value_table proto_joint;
+};
+
+/*
+ * Final filters: the l2 decoder over the device classes, the plain
+ * family root joint joining the core classes with the fragment suffix
+ * classes, and the protocol path root joints joining the core classes
+ * with the path suffix classes, each with its own projection decoder.
+ */
+struct acl_filter_l2 {
+	struct vline rule_map;
+};
+
+struct acl_filter_ip4 {
+	struct value_table root_joint;
+	struct vline rule_map;
+};
+
+struct acl_filter_ip4_tcp {
+	struct value_table root_joint;
+	struct vline rule_map;
+};
+
+struct acl_filter_ip4_udp {
+	struct value_table root_joint;
+	struct vline rule_map;
+};
+
+struct acl_filter_ip4_icmp {
+	struct value_table root_joint;
+	struct vline rule_map;
+};
+
+struct acl_filter_ip6 {
+	struct value_table root_joint;
+	struct vline rule_map;
+};
+
+struct acl_filter_ip6_tcp {
+	struct value_table root_joint;
+	struct vline rule_map;
+};
+
+struct acl_filter_ip6_udp {
+	struct value_table root_joint;
+	struct vline rule_map;
+};
+
+struct acl_filter_ip6_icmp {
+	struct value_table root_joint;
+	struct vline rule_map;
+};
+
+/*
+ * Ownership: the classifiers are built once per config update and
+ * embedded by value, the filters hold only their own joints and
+ * decoders; nothing is borrowed across the structs. The destroy frees
+ * the filters first, then the classifiers - the joins go before the
+ * class sources they were built from; every free is safe on a zeroed
+ * struct, so a partially built config of a failed update walks the
+ * same total destroy.
+ */
 struct acl_module_config {
 	struct cp_module cp_module;
 
-	struct filter filter_ip4;
-	struct filter filter_ip4_port;
-	struct filter filter_ip6;
-	struct filter filter_ip6_port;
-	struct filter filter_vlan;
+	struct acl_classifier_l2 classifier_l2;
+	struct acl_classifier_core4 classifier_core4;
+	struct acl_classifier_frag classifier_frag4;
+	struct acl_classifier_ports classifier_ports4;
+	struct acl_classifier_tcp classifier_tcp4;
+	struct acl_classifier_icmp classifier_icmp4;
+	struct acl_classifier_core6 classifier_core6;
+	struct acl_classifier_frag classifier_frag6;
+	struct acl_classifier_ports classifier_ports6;
+	struct acl_classifier_tcp classifier_tcp6;
+	struct acl_classifier_icmp classifier_icmp6;
+
+	struct acl_filter_l2 filter_l2;
+	struct acl_filter_ip4 filter_ip4;
+	struct acl_filter_ip4_tcp filter_ip4_tcp;
+	struct acl_filter_ip4_udp filter_ip4_udp;
+	struct acl_filter_ip4_icmp filter_ip4_icmp;
+	struct acl_filter_ip6 filter_ip6;
+	struct acl_filter_ip6_tcp filter_ip6_tcp;
+	struct acl_filter_ip6_udp filter_ip6_udp;
+	struct acl_filter_ip6_icmp filter_ip6_icmp;
 
 	uint64_t target_count;
 	struct acl_target *targets;
@@ -86,11 +237,15 @@ struct acl_module_config {
 	uint64_t v6_object_link_idx;
 	// Metrics
 	uint64_t compilation_time_ns;
+	uint64_t filter_rule_count_l2;
 	uint64_t filter_rule_count_ip4;
-	uint64_t filter_rule_count_ip4_port;
+	uint64_t filter_rule_count_ip4_tcp;
+	uint64_t filter_rule_count_ip4_udp;
+	uint64_t filter_rule_count_ip4_icmp;
 	uint64_t filter_rule_count_ip6;
-	uint64_t filter_rule_count_ip6_port;
-	uint64_t filter_rule_count_vlan;
+	uint64_t filter_rule_count_ip6_tcp;
+	uint64_t filter_rule_count_ip6_udp;
+	uint64_t filter_rule_count_ip6_icmp;
 
 	// Module-level counters, registered by acl_module_config_init
 	uint64_t no_match_counter_id;
@@ -102,14 +257,4 @@ struct acl_module_config {
 	uint64_t action_invalid_counter_id;
 	uint64_t action_non_term_counter_id;
 	uint64_t sync_sent_counter_id;
-
-	// Shared v6 half-address classification for the two v6 filters.
-	//
-	// Built only when both filter_ip6 and filter_ip6_port compiled
-	// non-empty, so a single union trie walk classifies the address
-	// halves for both of them. Left all-zero, including a NULL
-	// net6_share_src.remap_hi_a, when there is no shared classification
-	// to use.
-	struct net6_share_dir net6_share_src;
-	struct net6_share_dir net6_share_dst;
 };

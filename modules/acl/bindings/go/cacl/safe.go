@@ -41,8 +41,6 @@ type ACLRule struct {
 	Counter string
 	// Devices is the device match set.
 	Devices filter.Devices
-	// VlanRanges is the VLAN range match set.
-	VlanRanges filter.VlanRanges
 	// Src4s is the contiguous IPv4 source match set.
 	Src4s []xnetip.Contiguous[xnetip.Network4]
 	// Dst4s is the contiguous IPv4 destination match set.
@@ -64,11 +62,15 @@ type ACLRule struct {
 // ACLConfigInfo holds metadata about a compiled ACL configuration.
 type ACLConfigInfo struct {
 	CompilationTimeNs      uint64
+	FilterRuleCountL2      uint64
 	FilterRuleCountIp4     uint64
-	FilterRuleCountIp4Port uint64
+	FilterRuleCountIp4Tcp  uint64
+	FilterRuleCountIp4Udp  uint64
+	FilterRuleCountIp4Icmp uint64
 	FilterRuleCountIp6     uint64
-	FilterRuleCountIp6Port uint64
-	FilterRuleCountVlan    uint64
+	FilterRuleCountIp6Tcp  uint64
+	FilterRuleCountIp6Udp  uint64
+	FilterRuleCountIp6Icmp uint64
 }
 
 // GetInfo returns compiled configuration metadata for this ACL module.
@@ -77,12 +79,38 @@ func (m *ModuleConfig) GetInfo() *ACLConfigInfo {
 	C.acl_module_config_get_info(m.asRawPtr(), &cInfo)
 	return &ACLConfigInfo{
 		CompilationTimeNs:      uint64(cInfo.compilation_time_ns),
+		FilterRuleCountL2:      uint64(cInfo.filter_rule_count_l2),
 		FilterRuleCountIp4:     uint64(cInfo.filter_rule_count_ip4),
-		FilterRuleCountIp4Port: uint64(cInfo.filter_rule_count_ip4_port),
+		FilterRuleCountIp4Tcp:  uint64(cInfo.filter_rule_count_ip4_tcp),
+		FilterRuleCountIp4Udp:  uint64(cInfo.filter_rule_count_ip4_udp),
+		FilterRuleCountIp4Icmp: uint64(cInfo.filter_rule_count_ip4_icmp),
 		FilterRuleCountIp6:     uint64(cInfo.filter_rule_count_ip6),
-		FilterRuleCountIp6Port: uint64(cInfo.filter_rule_count_ip6_port),
-		FilterRuleCountVlan:    uint64(cInfo.filter_rule_count_vlan),
+		FilterRuleCountIp6Tcp:  uint64(cInfo.filter_rule_count_ip6_tcp),
+		FilterRuleCountIp6Udp:  uint64(cInfo.filter_rule_count_ip6_udp),
+		FilterRuleCountIp6Icmp: uint64(cInfo.filter_rule_count_ip6_icmp),
 	}
+}
+
+// cBuildLineRanges writes the derived line intervals into the C rule
+// view: the pinned slice stays alive through the compile call.
+func cBuildLineRanges(
+	dst *C.struct_classify_line_ranges,
+	intervals []LineRange,
+	pinner *runtime.Pinner,
+) {
+	if len(intervals) == 0 {
+		return
+	}
+
+	cIntervals := make([]C.struct_classify_line_range, len(intervals))
+	for idx, interval := range intervals {
+		cIntervals[idx].from = C.uint32_t(interval.From)
+		cIntervals[idx].to = C.uint32_t(interval.To)
+	}
+
+	pinner.Pin(&cIntervals[0])
+	dst.items = &cIntervals[0]
+	dst.count = C.uint32_t(len(cIntervals))
 }
 
 // cBuildActions writes packet actions into the C rule representation.
@@ -111,12 +139,22 @@ func (m *ACLRule) cBuild(pinner *runtime.Pinner) C.struct_acl_rule {
 	copy(counter, m.Counter)
 
 	filter.CBuildDevices(&cRule.devices, m.Devices, pinner)
-	filter.CBuildVlanRanges(&cRule.vlan_ranges, m.VlanRanges, pinner)
 	filter.CBuildNet4s(&cRule.src_net4s, m.Src4s, pinner)
 	filter.CBuildNet4s(&cRule.dst_net4s, m.Dst4s, pinner)
 	filter.CBuildNet6s(&cRule.src_net6s, m.Src6s, pinner)
 	filter.CBuildNet6s(&cRule.dst_net6s, m.Dst6s, pinner)
-	filter.CBuildProtoRanges(&cRule.proto_ranges, m.ProtoRanges, pinner)
+	split := SplitProtoRanges(m.ProtoRanges)
+	cBuildLineRanges(&cRule.ipproto_ranges, split.IpProto, pinner)
+	cBuildLineRanges(&cRule.tcp_flags_ranges, split.TCPFlags, pinner)
+	cBuildLineRanges(&cRule.icmp_type_ranges, split.ICMPTypes, pinner)
+
+	flags := RulePathMembership(
+		m.ProtoRanges, m.SrcPortRanges, m.DstPortRanges, m.Fragment,
+	)
+	cRule.path_plain = C.bool(flags.Plain)
+	cRule.path_tcp = C.bool(flags.TCP)
+	cRule.path_udp = C.bool(flags.UDP)
+	cRule.path_icmp = C.bool(flags.ICMP)
 	filter.CBuildPortRanges(&cRule.src_port_ranges, m.SrcPortRanges, pinner)
 	filter.CBuildPortRanges(&cRule.dst_port_ranges, m.DstPortRanges, pinner)
 

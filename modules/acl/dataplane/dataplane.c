@@ -21,111 +21,11 @@
 #include "objects/fwstate/api/fwstate_map_v4_object.h"
 #include "objects/fwstate/api/fwstate_map_v6_object.h"
 
-#include <lib/filter/query.h>
+#include "filter_lookup.h"
 
 struct acl_module {
 	struct module module;
 };
-
-FILTER_QUERY_DECLARE(filter_vlan, device, vlan);
-
-FILTER_QUERY_DECLARE(
-	filter_ip4, device, vlan, net4_src, net4_dst, ip_frag, proto_range
-);
-
-FILTER_QUERY_DECLARE(
-	filter_ip4_port,
-	device,
-	vlan,
-	net4_src,
-	net4_dst,
-	proto_range,
-	port_src,
-	port_dst
-);
-
-FILTER_QUERY_DECLARE(
-	filter_ip6, device, vlan, net6_src, net6_dst, ip_frag, proto_range
-);
-
-FILTER_QUERY_DECLARE(
-	filter_ip6_port,
-	device,
-	vlan,
-	net6_src,
-	net6_dst,
-	proto_range,
-	port_src,
-	port_dst
-);
-
-// Position of net6_src/net6_dst within the attribute lists declared above:
-// both filter_ip6 and filter_ip6_port put them right after device/vlan, at
-// index 2 and 3. Keep these in sync with the two FILTER_QUERY_DECLARE
-// calls — reordering either list moves the net6 leaf vertices the shared
-// classification path reads.
-#define ACL_FILTER_NET6_SRC_POS 2
-#define ACL_FILTER_NET6_DST_POS 3
-
-// Runs the filter_query classification pass with two leaf rows injected.
-//
-// Behaves exactly like filter_query, except that the leaf slot rows of the
-// ext_src_lookup and ext_dst_lookup attributes are copied from the
-// caller-supplied arrays instead of being computed by the per-filter leaf
-// lookups. This intentionally duplicates filter_query's own inner-vertex
-// reduction (lib/filter/query.h) rather than generalizing it to accept
-// injected leaves — that header is shared by every module, and widening it
-// is out of scope here. Keep the two reduction loops in sync by hand.
-static void
-acl_filter_query_ext(
-	struct filter *filter,
-	const struct filter_query *fq,
-	struct packet **packets,
-	uint32_t *results,
-	uint32_t count,
-	size_t ext_src_lookup,
-	const uint32_t *ext_src_slots,
-	size_t ext_dst_lookup,
-	const uint32_t *ext_dst_slots
-) {
-	uint32_t slots[2 * MAX_ATTRIBUTES * count + 1];
-
-	for (size_t ai = 0; ai < fq->lookup_count; ++ai) {
-		size_t vtx = fq->lookup_count + ai;
-		uint32_t *row = slots + vtx * count;
-		if (ai == ext_src_lookup) {
-			memcpy(row, ext_src_slots, sizeof(uint32_t) * count);
-			continue;
-		}
-		if (ai == ext_dst_lookup) {
-			memcpy(row, ext_dst_slots, sizeof(uint32_t) * count);
-			continue;
-		}
-		const struct filter_vertex *v = &filter->v[vtx];
-		fq->lookups[ai](ADDR_OF(&v->data), packets, row, count);
-	}
-
-	for (size_t vtx = fq->lookup_count - 1; vtx >= 2; --vtx) {
-		struct filter_vertex *v = &filter->v[vtx];
-		for (uint32_t idx = 0; idx < count; ++idx) {
-			slots[vtx * count + idx] = value_table_get(
-				&v->table,
-				slots[(vtx << 1) * count + idx],
-				slots[(vtx << 1 | 1) * count + idx]
-			);
-		}
-	}
-
-	const size_t root = fq->lookup_count > 1;
-	struct filter_vertex *r = &filter->v[root];
-	for (uint32_t idx = 0; idx < count; ++idx) {
-		results[idx] = value_table_get(
-			&r->table,
-			root == 0 ? 0 : slots[(root << 1) * count + idx],
-			slots[(root << 1 | 1) * count + idx]
-		);
-	}
-}
 
 static void
 acl_handle_packets(
@@ -136,24 +36,6 @@ acl_handle_packets(
 	struct acl_module_config *acl_config = container_of(
 		module_ectx->abs_cp_module, struct acl_module_config, cp_module
 	);
-
-	// When the compile side built the union tries, both v6 filters are
-	// queried through them: each address half is classified once and the
-	// union classes are translated per filter via the remap arrays.
-	//
-	// net6_share_src is left unbuilt in an ordinary running config
-	// whenever the v6 ruleset does not split across both filter_ip6 and
-	// filter_ip6_port — no v6 rules at all, every v6 rule port-scoped, or
-	// every v6 rule left unscoped by port — and also when the
-	// YANET_ACL_NET6_SHARE_DISABLE kill switch was set at control-plane
-	// startup. A build failure inside acl_module_init_net6_share instead
-	// rejects the whole config apply, exactly like a filter_ip6 or
-	// filter_ip6_port build failure, so it is never one of the reasons a
-	// running config reaches this point unbuilt. The else branch below is
-	// therefore an ordinary production path, not dead code kept only for
-	// the differential test.
-	const bool net6_share =
-		net6_share_dir_is_built(&acl_config->net6_share_src);
 
 	// Everything the burst loop needs that does not depend on the
 	// packets themselves — the module counters, the per-rule counter
@@ -180,45 +62,87 @@ acl_handle_packets(
 		return;
 	}
 
-	struct packet *vlan_packets[count];
-	uint32_t vlan_result[count];
-	uint64_t vlan_idx = 0;
+	struct packet *l2_packets[count];
+	uint32_t l2_result[count];
+	uint64_t l2_idx = 0;
 
 	struct packet *ip4_packets[count];
 	uint32_t ip4_result[count];
 	uint64_t ip4_idx = 0;
 
-	struct packet *ip4_port_packets[count];
-	uint32_t ip4_port_result[count];
-	uint64_t ip4_port_idx = 0;
+	struct packet *ip4_tcp_packets[count];
+	uint32_t ip4_tcp_result[count];
+	uint32_t ip4_tcp_pos[count];
+	uint64_t ip4_tcp_idx = 0;
+
+	struct packet *ip4_udp_packets[count];
+	uint32_t ip4_udp_result[count];
+	uint32_t ip4_udp_pos[count];
+	uint64_t ip4_udp_idx = 0;
+
+	struct packet *ip4_icmp_packets[count];
+	uint32_t ip4_icmp_result[count];
+	uint32_t ip4_icmp_pos[count];
+	uint64_t ip4_icmp_idx = 0;
 
 	struct packet *ip6_packets[count];
 	uint32_t ip6_result[count];
 	uint64_t ip6_idx = 0;
 
-	struct packet *ip6_port_packets[count];
-	uint32_t ip6_port_result[count];
-	uint64_t ip6_port_idx = 0;
+	struct packet *ip6_tcp_packets[count];
+	uint32_t ip6_tcp_result[count];
+	uint32_t ip6_tcp_pos[count];
+	uint64_t ip6_tcp_idx = 0;
 
-	// Position of each ip6_port batch packet within the ip6 batch, filled
-	// only on the shared-classification path where every ip6_port packet
-	// is by construction also an ip6 packet.
-	uint32_t ip6_port_pos[count];
+	struct packet *ip6_udp_packets[count];
+	uint32_t ip6_udp_result[count];
+	uint32_t ip6_udp_pos[count];
+	uint64_t ip6_udp_idx = 0;
+
+	struct packet *ip6_icmp_packets[count];
+	uint32_t ip6_icmp_result[count];
+	uint32_t ip6_icmp_pos[count];
+	uint64_t ip6_icmp_idx = 0;
 
 	for (struct packet *packet = packet_list_first(&packet_front->input);
 	     packet != NULL;
 	     packet = packet->next) {
 
-		vlan_packets[vlan_idx++] = packet;
+		l2_packets[l2_idx++] = packet;
 
 		if (packet->network_header.type ==
 		    rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV4)) {
 			ip4_packets[ip4_idx++] = packet;
 
-			if (packet->fragment_offset == 0 &&
-			    (packet->transport_header.type == IPPROTO_TCP ||
-			     packet->transport_header.type == IPPROTO_UDP)) {
-				ip4_port_packets[ip4_port_idx++] = packet;
+			if (packet->fragment_offset == 0) {
+				// The position of the path packet inside
+				// the family batch: the shared core
+				// classes are gathered through it.
+				uint32_t *pos;
+				struct packet **pkts;
+				uint64_t *idx;
+				if (packet->transport_header.type ==
+				    IPPROTO_TCP) {
+					pos = ip4_tcp_pos;
+					pkts = ip4_tcp_packets;
+					idx = &ip4_tcp_idx;
+				} else if (packet->transport_header.type ==
+					   IPPROTO_UDP) {
+					pos = ip4_udp_pos;
+					pkts = ip4_udp_packets;
+					idx = &ip4_udp_idx;
+				} else if (packet->transport_header.type ==
+						   IPPROTO_ICMP ||
+					   packet->transport_header.type ==
+						   IPPROTO_ICMPV6) {
+					pos = ip4_icmp_pos;
+					pkts = ip4_icmp_packets;
+					idx = &ip4_icmp_idx;
+				} else {
+					continue;
+				}
+				pos[*idx] = ip4_idx - 1;
+				pkts[(*idx)++] = packet;
 			}
 		}
 
@@ -226,194 +150,203 @@ acl_handle_packets(
 		    rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV6)) {
 			ip6_packets[ip6_idx++] = packet;
 
-			if (packet->fragment_offset == 0 &&
-			    (packet->transport_header.type == IPPROTO_TCP ||
-			     packet->transport_header.type == IPPROTO_UDP)) {
-				if (net6_share) {
-					ip6_port_pos[ip6_port_idx] =
-						ip6_idx - 1;
+			if (packet->fragment_offset == 0) {
+				uint32_t *pos;
+				struct packet **pkts;
+				uint64_t *idx;
+				if (packet->transport_header.type ==
+				    IPPROTO_TCP) {
+					pos = ip6_tcp_pos;
+					pkts = ip6_tcp_packets;
+					idx = &ip6_tcp_idx;
+				} else if (packet->transport_header.type ==
+					   IPPROTO_UDP) {
+					pos = ip6_udp_pos;
+					pkts = ip6_udp_packets;
+					idx = &ip6_udp_idx;
+				} else if (packet->transport_header.type ==
+						   IPPROTO_ICMP ||
+					   packet->transport_header.type ==
+						   IPPROTO_ICMPV6) {
+					pos = ip6_icmp_pos;
+					pkts = ip6_icmp_packets;
+					idx = &ip6_icmp_idx;
+				} else {
+					continue;
 				}
-				ip6_port_packets[ip6_port_idx++] = packet;
+				pos[*idx] = ip6_idx - 1;
+				pkts[(*idx)++] = packet;
 			}
 		}
 	}
 
-	filter_query(
-		&acl_config->filter_vlan,
-		filter_vlan,
-		vlan_packets,
-		vlan_result,
-		vlan_idx
+	// The l2 filter sees the whole burst: a rule without networks
+	// matches every packet of its devices regardless of the protocol
+	// family, so its result is the base the family results merge into.
+	acl_classify_l2(
+		&acl_config->classifier_l2,
+		module_ectx->abs_cm_index,
+		&acl_config->filter_l2.rule_map,
+		(const struct packet **)l2_packets,
+		l2_result,
+		l2_idx
 	);
 
-	filter_query(
-		&acl_config->filter_ip4,
-		filter_ip4,
-		ip4_packets,
+	// The family filters share their core classification: the core
+	// classes are computed once per family batch, the fragment and
+	// ports suffixes are evaluated on their own and combined with the
+	// core classes through the root joints of the final filters.
+	// A family batch can be empty; the class scratch arrays are
+	// guarded against zero sized declarations.
+	uint32_t core4_classes[ip4_idx ? ip4_idx : 1];
+	uint32_t frag4_classes[ip4_idx ? ip4_idx : 1];
+	uint32_t core4_path_classes[ip4_idx ? ip4_idx : 1];
+
+	acl_classify_core4(
+		&acl_config->classifier_core4,
+		module_ectx->abs_cm_index,
+		(const struct packet **)ip4_packets,
+		core4_classes,
+		ip4_idx
+	);
+
+	acl_classify_frag(
+		&acl_config->classifier_frag4,
+		(const struct packet **)ip4_packets,
+		frag4_classes,
+		ip4_idx
+	);
+
+	classify_combine(
+		&acl_config->filter_ip4.root_joint,
+		&acl_config->filter_ip4.rule_map,
+		core4_classes,
+		frag4_classes,
 		ip4_result,
 		ip4_idx
 	);
 
-	filter_query(
-		&acl_config->filter_ip4_port,
-		filter_ip4_port,
-		ip4_port_packets,
-		ip4_port_result,
-		ip4_port_idx
+	for (uint64_t idx = 0; idx < ip4_tcp_idx; ++idx) {
+		core4_path_classes[idx] = core4_classes[ip4_tcp_pos[idx]];
+	}
+	acl_classify_tcp4(
+		&acl_config->classifier_ports4,
+		&acl_config->classifier_tcp4,
+		&acl_config->filter_ip4_tcp,
+		core4_path_classes,
+		(const struct packet **)ip4_tcp_packets,
+		ip4_tcp_result,
+		ip4_tcp_idx
 	);
 
-	if (net6_share) {
-		struct net6_share_dir *share_src = &acl_config->net6_share_src;
-		struct net6_share_dir *share_dst = &acl_config->net6_share_dst;
-
-		// Classify each v6 address half once on the union tries.
-		uint32_t src_hi[count];
-		uint32_t src_lo[count];
-		uint32_t dst_hi[count];
-		uint32_t dst_lo[count];
-
-		for (uint64_t idx = 0; idx < ip6_idx; ++idx) {
-			struct rte_mbuf *mbuf =
-				packet_to_mbuf(ip6_packets[idx]);
-			struct rte_ipv6_hdr *ipv6_hdr = rte_pktmbuf_mtod_offset(
-				mbuf,
-				struct rte_ipv6_hdr *,
-				ip6_packets[idx]->network_header.offset
-			);
-			const uint8_t *saddr =
-				(const uint8_t *)ipv6_hdr->src_addr;
-			const uint8_t *daddr =
-				(const uint8_t *)ipv6_hdr->dst_addr;
-
-			src_hi[idx] = lpm8_lookup(&share_src->hi, saddr);
-			src_lo[idx] = lpm8_lookup(&share_src->lo, saddr + 8);
-			dst_hi[idx] = lpm8_lookup(&share_dst->hi, daddr);
-			dst_lo[idx] = lpm8_lookup(&share_dst->lo, daddr + 8);
-		}
-
-		const uint32_t *src_hi_a = ADDR_OF(&share_src->remap_hi_a);
-		const uint32_t *src_lo_a = ADDR_OF(&share_src->remap_lo_a);
-		const uint32_t *dst_hi_a = ADDR_OF(&share_dst->remap_hi_a);
-		const uint32_t *dst_lo_a = ADDR_OF(&share_dst->remap_lo_a);
-		const uint32_t *src_hi_b = ADDR_OF(&share_src->remap_hi_b);
-		const uint32_t *src_lo_b = ADDR_OF(&share_src->remap_lo_b);
-		const uint32_t *dst_hi_b = ADDR_OF(&share_dst->remap_hi_b);
-		const uint32_t *dst_lo_b = ADDR_OF(&share_dst->remap_lo_b);
-
-		// Translate the union classes into the leaf classes of each
-		// filter and combine them in the filter's own comb table.
-		const size_t ip6_src_leaf =
-			filter_ip6->lookup_count + ACL_FILTER_NET6_SRC_POS;
-		const size_t ip6_dst_leaf =
-			filter_ip6->lookup_count + ACL_FILTER_NET6_DST_POS;
-		struct net6_classifier *ip6_src_cls = (struct net6_classifier *)
-			ADDR_OF(&acl_config->filter_ip6.v[ip6_src_leaf].data);
-		struct net6_classifier *ip6_dst_cls = (struct net6_classifier *)
-			ADDR_OF(&acl_config->filter_ip6.v[ip6_dst_leaf].data);
-
-		uint32_t ip6_src_slots[count];
-		uint32_t ip6_dst_slots[count];
-
-		for (uint64_t idx = 0; idx < ip6_idx; ++idx) {
-			ip6_src_slots[idx] = value_table_get(
-				&ip6_src_cls->comb,
-				src_hi_a[src_hi[idx]],
-				src_lo_a[src_lo[idx]]
-			);
-			ip6_dst_slots[idx] = value_table_get(
-				&ip6_dst_cls->comb,
-				dst_hi_a[dst_hi[idx]],
-				dst_lo_a[dst_lo[idx]]
-			);
-		}
-
-		const size_t ip6_port_src_leaf =
-			filter_ip6_port->lookup_count + ACL_FILTER_NET6_SRC_POS;
-		const size_t ip6_port_dst_leaf =
-			filter_ip6_port->lookup_count + ACL_FILTER_NET6_DST_POS;
-		struct net6_classifier *ip6_port_src_cls =
-			(struct net6_classifier *)ADDR_OF(
-				&acl_config->filter_ip6_port
-					 .v[ip6_port_src_leaf]
-					 .data
-			);
-		struct net6_classifier *ip6_port_dst_cls =
-			(struct net6_classifier *)ADDR_OF(
-				&acl_config->filter_ip6_port
-					 .v[ip6_port_dst_leaf]
-					 .data
-			);
-
-		uint32_t ip6_port_src_slots[count];
-		uint32_t ip6_port_dst_slots[count];
-
-		for (uint64_t idx = 0; idx < ip6_port_idx; ++idx) {
-			uint32_t pos = ip6_port_pos[idx];
-			ip6_port_src_slots[idx] = value_table_get(
-				&ip6_port_src_cls->comb,
-				src_hi_b[src_hi[pos]],
-				src_lo_b[src_lo[pos]]
-			);
-			ip6_port_dst_slots[idx] = value_table_get(
-				&ip6_port_dst_cls->comb,
-				dst_hi_b[dst_hi[pos]],
-				dst_lo_b[dst_lo[pos]]
-			);
-		}
-
-		acl_filter_query_ext(
-			&acl_config->filter_ip6,
-			filter_ip6,
-			ip6_packets,
-			ip6_result,
-			ip6_idx,
-			ACL_FILTER_NET6_SRC_POS,
-			ip6_src_slots,
-			ACL_FILTER_NET6_DST_POS,
-			ip6_dst_slots
-		);
-		acl_filter_query_ext(
-			&acl_config->filter_ip6_port,
-			filter_ip6_port,
-			ip6_port_packets,
-			ip6_port_result,
-			ip6_port_idx,
-			ACL_FILTER_NET6_SRC_POS,
-			ip6_port_src_slots,
-			ACL_FILTER_NET6_DST_POS,
-			ip6_port_dst_slots
-		);
-	} else {
-		filter_query(
-			&acl_config->filter_ip6,
-			filter_ip6,
-			ip6_packets,
-			ip6_result,
-			ip6_idx
-		);
-
-		filter_query(
-			&acl_config->filter_ip6_port,
-			filter_ip6_port,
-			ip6_port_packets,
-			ip6_port_result,
-			ip6_port_idx
-		);
+	for (uint64_t idx = 0; idx < ip4_udp_idx; ++idx) {
+		core4_path_classes[idx] = core4_classes[ip4_udp_pos[idx]];
 	}
+	acl_classify_udp4(
+		&acl_config->classifier_ports4,
+		&acl_config->filter_ip4_udp,
+		core4_path_classes,
+		(const struct packet **)ip4_udp_packets,
+		ip4_udp_result,
+		ip4_udp_idx
+	);
 
-	vlan_idx = 0;
+	for (uint64_t idx = 0; idx < ip4_icmp_idx; ++idx) {
+		core4_path_classes[idx] = core4_classes[ip4_icmp_pos[idx]];
+	}
+	acl_classify_icmp4(
+		&acl_config->classifier_icmp4,
+		&acl_config->filter_ip4_icmp,
+		core4_path_classes,
+		(const struct packet **)ip4_icmp_packets,
+		ip4_icmp_result,
+		ip4_icmp_idx
+	);
+
+	uint32_t core6_classes[ip6_idx ? ip6_idx : 1];
+	uint32_t frag6_classes[ip6_idx ? ip6_idx : 1];
+	uint32_t core6_path_classes[ip6_idx ? ip6_idx : 1];
+
+	acl_classify_core6(
+		&acl_config->classifier_core6,
+		module_ectx->abs_cm_index,
+		(const struct packet **)ip6_packets,
+		core6_classes,
+		ip6_idx
+	);
+
+	acl_classify_frag(
+		&acl_config->classifier_frag6,
+		(const struct packet **)ip6_packets,
+		frag6_classes,
+		ip6_idx
+	);
+
+	classify_combine(
+		&acl_config->filter_ip6.root_joint,
+		&acl_config->filter_ip6.rule_map,
+		core6_classes,
+		frag6_classes,
+		ip6_result,
+		ip6_idx
+	);
+
+	for (uint64_t idx = 0; idx < ip6_tcp_idx; ++idx) {
+		core6_path_classes[idx] = core6_classes[ip6_tcp_pos[idx]];
+	}
+	acl_classify_tcp6(
+		&acl_config->classifier_ports6,
+		&acl_config->classifier_tcp6,
+		&acl_config->filter_ip6_tcp,
+		core6_path_classes,
+		(const struct packet **)ip6_tcp_packets,
+		ip6_tcp_result,
+		ip6_tcp_idx
+	);
+
+	for (uint64_t idx = 0; idx < ip6_udp_idx; ++idx) {
+		core6_path_classes[idx] = core6_classes[ip6_udp_pos[idx]];
+	}
+	acl_classify_udp6(
+		&acl_config->classifier_ports6,
+		&acl_config->filter_ip6_udp,
+		core6_path_classes,
+		(const struct packet **)ip6_udp_packets,
+		ip6_udp_result,
+		ip6_udp_idx
+	);
+
+	for (uint64_t idx = 0; idx < ip6_icmp_idx; ++idx) {
+		core6_path_classes[idx] = core6_classes[ip6_icmp_pos[idx]];
+	}
+	acl_classify_icmp6(
+		&acl_config->classifier_icmp6,
+		&acl_config->filter_ip6_icmp,
+		core6_path_classes,
+		(const struct packet **)ip6_icmp_packets,
+		ip6_icmp_result,
+		ip6_icmp_idx
+	);
+
+	l2_idx = 0;
 	ip4_idx = 0;
-	ip4_port_idx = 0;
+	ip4_tcp_idx = 0;
+	ip4_udp_idx = 0;
+	ip4_icmp_idx = 0;
 	ip6_idx = 0;
-	ip6_port_idx = 0;
+	ip6_tcp_idx = 0;
+	ip6_udp_idx = 0;
+	ip6_icmp_idx = 0;
 
 	struct packet *packet;
 	while ((packet = packet_list_pop(&packet_front->input)) != NULL) {
 		struct acl_target *target = NULL;
 
-		uint32_t action = vlan_result[vlan_idx];
+		// The action resolves to the first matching rule across the l2
+		// filter and the family filters of the packet.
+		uint32_t action = l2_result[l2_idx];
 
-		++vlan_idx;
+		++l2_idx;
 
 		// State table for this packet: the linked object's fwtable for
 		// its family, NULL for a non-IP packet or a family with no
@@ -430,13 +363,33 @@ acl_handle_packets(
 
 			++ip4_idx;
 
-			if (packet->fragment_offset == 0 &&
-			    (packet->transport_header.type == IPPROTO_TCP ||
-			     packet->transport_header.type == IPPROTO_UDP)) {
-				if (ip4_port_result[ip4_port_idx] < action) {
-					action = ip4_port_result[ip4_port_idx];
+			if (packet->fragment_offset == 0) {
+				const uint32_t *path_result;
+				uint64_t *path_idx;
+				if (packet->transport_header.type ==
+				    IPPROTO_TCP) {
+					path_result = ip4_tcp_result;
+					path_idx = &ip4_tcp_idx;
+				} else if (packet->transport_header.type ==
+					   IPPROTO_UDP) {
+					path_result = ip4_udp_result;
+					path_idx = &ip4_udp_idx;
+				} else if (packet->transport_header.type ==
+						   IPPROTO_ICMP ||
+					   packet->transport_header.type ==
+						   IPPROTO_ICMPV6) {
+					path_result = ip4_icmp_result;
+					path_idx = &ip4_icmp_idx;
+				} else {
+					path_idx = NULL;
 				}
-				++ip4_port_idx;
+				if (path_idx != NULL &&
+				    path_result[*path_idx] < action) {
+					action = path_result[*path_idx];
+				}
+				if (path_idx != NULL) {
+					++(*path_idx);
+				}
 			}
 		} else if (packet->network_header.type ==
 			   rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV6)) {
@@ -448,17 +401,37 @@ acl_handle_packets(
 
 			++ip6_idx;
 
-			if (packet->fragment_offset == 0 &&
-			    (packet->transport_header.type == IPPROTO_TCP ||
-			     packet->transport_header.type == IPPROTO_UDP)) {
-				if (ip6_port_result[ip6_port_idx] < action) {
-					action = ip6_port_result[ip6_port_idx];
+			if (packet->fragment_offset == 0) {
+				const uint32_t *path_result;
+				uint64_t *path_idx;
+				if (packet->transport_header.type ==
+				    IPPROTO_TCP) {
+					path_result = ip6_tcp_result;
+					path_idx = &ip6_tcp_idx;
+				} else if (packet->transport_header.type ==
+					   IPPROTO_UDP) {
+					path_result = ip6_udp_result;
+					path_idx = &ip6_udp_idx;
+				} else if (packet->transport_header.type ==
+						   IPPROTO_ICMP ||
+					   packet->transport_header.type ==
+						   IPPROTO_ICMPV6) {
+					path_result = ip6_icmp_result;
+					path_idx = &ip6_icmp_idx;
+				} else {
+					path_idx = NULL;
 				}
-				++ip6_port_idx;
+				if (path_idx != NULL &&
+				    path_result[*path_idx] < action) {
+					action = path_result[*path_idx];
+				}
+				if (path_idx != NULL) {
+					++(*path_idx);
+				}
 			}
 		}
 
-		if (action != FILTER_RULE_INVALID) {
+		if (action != CLASSIFY_RULE_INVALID) {
 			target = acl_config->abs_targets + action;
 		}
 

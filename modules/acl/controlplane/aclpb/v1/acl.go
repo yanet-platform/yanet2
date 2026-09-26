@@ -23,6 +23,9 @@ func (m *UpdateConfigRequest) Validate() error {
 	if len(m.GetRules()) == 0 {
 		return errors.New("rules must contain at least one rule")
 	}
+	// A rule without networks matches through the l2 device filter, so
+	// the ruleset takes both kinds; vlan ranges from older clients are
+	// accepted and ignored.
 	if m.GetSyncConfig() != nil {
 		return errors.New("sync_config belongs to fwstate")
 	}
