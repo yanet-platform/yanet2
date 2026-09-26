@@ -323,3 +323,10 @@ range4_collector_add(
 ) {
 	return range_collector_add(collector, 4, from, prefix);
 }
+
+static inline int
+range2_collector_add(
+	struct range_collector *collector, const uint8_t *from, uint8_t prefix
+) {
+	return range_collector_add(collector, 2, from, prefix);
+}

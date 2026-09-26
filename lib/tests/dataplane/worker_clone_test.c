@@ -201,11 +201,6 @@ test_packet_alloc_resets_metadata(struct rte_mempool *pool) {
 	TEST_ASSERT_EQUAL(
 		packet->tx_device_id, 0, "new packet tx device must be zero"
 	);
-	TEST_ASSERT_EQUAL(
-		packet->module_device_id,
-		0,
-		"new packet module device must be zero"
-	);
 	TEST_ASSERT_EQUAL(packet->flags, 0, "new packet flags must be zero");
 	TEST_ASSERT_EQUAL(packet->vlan, 0, "new packet vlan must be zero");
 	TEST_ASSERT_EQUAL(

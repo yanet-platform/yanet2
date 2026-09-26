@@ -176,11 +176,6 @@ module_ectx_encode_device(struct module_ectx *module_ectx, uint64_t index) {
 	return module_ectx->abs_mc_index[index];
 }
 
-static inline uint64_t
-module_ectx_decode_device(struct module_ectx *module_ectx, uint64_t index) {
-	return module_ectx->abs_cm_index[index];
-}
-
 struct chain_ectx {
 	struct cp_chain *cp_chain;
 	struct counter_storage *counter_storage;

@@ -74,7 +74,8 @@ run_round_restore_test(void) {
 	struct cp_module *forward =
 		forward_module_config_init(agent, "loop", &err);
 	TEST_ASSERT_NOT_NULL(forward, "forward_module_config_init failed");
-	struct forward_rule forward_rule = {0};
+	struct forward_rule forward_rule;
+	memset(&forward_rule, 0, sizeof(forward_rule));
 	strtcpy(forward_rule.target, "dev0", sizeof(forward_rule.target));
 	strtcpy(forward_rule.counter, "loop", sizeof(forward_rule.counter));
 	forward_rule.mode = FORWARD_MODE_IN;

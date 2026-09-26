@@ -43,13 +43,6 @@ module_ectx_process(
 
 	const size_t packets_count = packet_front_input_count(packet_front);
 
-	for (struct packet *packet = packet_front->input.first; packet != NULL;
-	     packet = packet->next) {
-		packet->module_device_id = module_ectx_decode_device(
-			module_ectx, packet->tx_device_id
-		);
-	}
-
 	const uint64_t input_bytes = packet_front_input_bytes(packet_front);
 	counter_add_packets_bytes(
 		module_ectx->rx_counter, packets_count, input_bytes

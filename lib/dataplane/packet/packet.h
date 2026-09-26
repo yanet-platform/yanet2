@@ -51,7 +51,6 @@ struct packet {
 
 	uint16_t rx_device_id;
 	uint16_t tx_device_id;
-	uint16_t module_device_id;
 
 	uint16_t flags;
 	uint16_t vlan;

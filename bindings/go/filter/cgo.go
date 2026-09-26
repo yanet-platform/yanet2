@@ -4,6 +4,7 @@ package filter
 //#include <stdlib.h>
 //#include <string.h>
 //#include "lib/filter/rule.h"
+//#include "lib/classify/rule.h"
 import "C"
 
 import (
@@ -193,5 +194,27 @@ func (m VlanRanges) cBuild(pinner *runtime.Pinner) *C.struct_filter_vlan_ranges 
 	return &C.struct_filter_vlan_ranges{
 		items: (*C.struct_filter_vlan_range)(&cVlanRanges[0]),
 		count: C.uint32_t(len(cVlanRanges)),
+	}
+}
+
+// cBuildLineRanges widens the VLAN ranges into the derived line
+// interval view the classification library consumes.
+func (m VlanRanges) cBuildLineRanges(
+	pinner *runtime.Pinner,
+) *C.struct_classify_line_ranges {
+	if len(m) == 0 {
+		return &C.struct_classify_line_ranges{}
+	}
+
+	cRanges := make([]C.struct_classify_line_range, len(m))
+	for idx, r := range m {
+		cRanges[idx].from = C.uint32_t(r.From)
+		cRanges[idx].to = C.uint32_t(r.To)
+	}
+
+	pinner.Pin(&cRanges[0])
+	return &C.struct_classify_line_ranges{
+		items: (*C.struct_classify_line_range)(&cRanges[0]),
+		count: C.uint32_t(len(cRanges)),
 	}
 }

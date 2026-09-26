@@ -18,9 +18,9 @@
 #include <stdlib.h>
 #include <string.h>
 
-FILTER_COMPILER_DECLARE(sign_small_compile, device, vlan, port_src, port_dst);
+FILTER_COMPILER_DECLARE(sign_small_compile, vlan, port_src, port_dst);
 FILTER_COMPILER_DECLARE(
-	sign_large_compile, device, vlan, port_src, port_dst, proto_range
+	sign_large_compile, vlan, port_src, port_dst, proto_range, ip_frag
 );
 FILTER_COMPILER_DECLARE(sign_net6_compile, net6_src, net6_dst);
 
@@ -211,7 +211,7 @@ test_leaf_named_after_attribute(void *arena) {
 		"failed to build small filter"
 	);
 
-	static const char *names[] = {"device", "vlan", "port_src", "port_dst"};
+	static const char *names[] = {"vlan", "port_src", "port_dst"};
 	for (size_t i = 0; i < sizeof(names) / sizeof(names[0]); ++i) {
 		TEST_ASSERT_EQUAL(
 			direct_child_count(&filter.memory_context, names[i]),
