@@ -140,12 +140,8 @@ func convertDatasetRule(t testing.TB, raw datasetRule) cacl.ACLRule {
 			rule.Devices, filter.Device{Name: device.Name},
 		)
 	}
-	for _, vlanRange := range raw.VlanRanges {
-		rule.VlanRanges = append(
-			rule.VlanRanges,
-			filter.VlanRange{From: vlanRange.From, To: vlanRange.To},
-		)
-	}
+	// Vlan ranges from older clients are ignored: the module classifies
+	// IP traffic only.
 	for _, address := range raw.Srcs {
 		if strings.Contains(address, ":") {
 			rule.Src6s = append(rule.Src6s, datasetNet6(t, address))
@@ -296,11 +292,8 @@ func generateDatasetRules(count int) []cacl.ACLRule {
 	rules := make([]cacl.ACLRule, 0, count+1)
 	for idx := range count {
 		rule := cacl.ACLRule{
-			Counter: fmt.Sprintf("dataset_%d", idx),
-			Actions: action(),
-			VlanRanges: []filter.VlanRange{
-				{From: 0, To: 4095},
-			},
+			Counter:     fmt.Sprintf("dataset_%d", idx),
+			Actions:     action(),
 			ProtoRanges: []filter.ProtoRange{proto()},
 		}
 

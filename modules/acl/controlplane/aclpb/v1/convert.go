@@ -48,11 +48,6 @@ func FromRule(rule cacl.ACLRule) *Rule {
 		devices[idx] = &filterpb.Device{Name: d.Name}
 	}
 
-	vlanRanges := make([]*filterpb.VlanRange, len(rule.VlanRanges))
-	for idx, v := range rule.VlanRanges {
-		vlanRanges[idx] = &filterpb.VlanRange{From: uint32(v.From), To: uint32(v.To)}
-	}
-
 	sources4 := make([]*commonpb.IPv4Network, len(rule.Src4s))
 	for idx, n := range rule.Src4s {
 		sources4[idx] = commonpb.NewIPv4NetworkFrom4(n.Network())
@@ -92,7 +87,6 @@ func FromRule(rule cacl.ACLRule) *Rule {
 		Actions:       actions,
 		Counter:       rule.Counter,
 		Devices:       devices,
-		VlanRanges:    vlanRanges,
 		Sources4:      sources4,
 		Sources6:      sources6,
 		Destinations4: destinations4,

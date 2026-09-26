@@ -228,10 +228,6 @@ func convertRules(reqRules []*aclpb.Rule) ([]cacl.ACLRule, error) {
 		if err != nil {
 			return nil, err
 		}
-		vlanRanges, err := filterpbconv.ToVlanRanges(reqRule.VlanRanges)
-		if err != nil {
-			return nil, err
-		}
 		src4s, err := filterpbconv.ToNet4sFromNetworks(reqRule.Sources4)
 		if err != nil {
 			return nil, err
@@ -272,7 +268,6 @@ func convertRules(reqRules []*aclpb.Rule) ([]cacl.ACLRule, error) {
 			Actions:       actions,
 			Counter:       reqRule.GetCounter(),
 			Devices:       devices,
-			VlanRanges:    vlanRanges,
 			Src4s:         src4s,
 			Dst4s:         dst4s,
 			Src6s:         src6s,

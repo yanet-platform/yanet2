@@ -57,17 +57,13 @@ message ShowConfigResponse {
   SyncConfig sync_config = 5;
 }
 
-message DeleteConfigRequest {
-  string name = 1;
-}
+message DeleteConfigRequest { string name = 1; }
 
 message DeleteConfigResponse {}
 
 message ListConfigsRequest {}
 
-message ListConfigsResponse {
-  repeated string configs = 1;
-}
+message ListConfigsResponse { repeated string configs = 1; }
 
 // SyncConfig carries receive matching and local emission parameters:
 // incoming-packet matching, state updates, connection timeouts and the
@@ -81,20 +77,20 @@ message ListConfigsResponse {
 // The source address and destination MAC are required whenever an endpoint
 // is configured because fwstate stamps emitted frames.
 message SyncConfig {
-  common.commonpb.v1.IPAddress src_addr = 1; // IPv6 source stamped on emitted internal frames;
-  common.commonpb.v1.MACAddress dst_ether = 2; // Ethernet destination MAC for emitted frames;
+  common.commonpb.v1.IPAddress src_addr = 1;           // IPv6 source stamped on emitted internal frames;
+  common.commonpb.v1.MACAddress dst_ether = 2;         // Ethernet destination MAC for emitted frames;
   common.commonpb.v1.IPAddress dst_addr_multicast = 3; // Multicast address matched on wire and emitted;
-  optional uint32 port_multicast = 4; // Multicast port, 1..65535;
-  common.commonpb.v1.IPAddress dst_addr_unicast = 5; // Unicast address used for emission only;
-  optional uint32 port_unicast = 6; // Unicast port, 1..65535;
+  optional uint32 port_multicast = 4;                  // Multicast port, 1..65535;
+  common.commonpb.v1.IPAddress dst_addr_unicast = 5;   // Unicast address used for emission only;
+  optional uint32 port_unicast = 6;                    // Unicast port, 1..65535;
 
   // Connection timeouts
   optional uint64 tcp_syn_ack = 7; // TCP SYN-ACK timeout in nanoseconds;
-  optional uint64 tcp_syn = 8; // TCP SYN timeout in nanoseconds;
-  optional uint64 tcp_fin = 9; // TCP FIN timeout in nanoseconds;
-  optional uint64 tcp = 10; // TCP established timeout in nanoseconds;
-  optional uint64 udp = 11; // UDP timeout in nanoseconds;
-  optional uint64 default = 12; // Default timeout in nanoseconds;
+  optional uint64 tcp_syn = 8;     // TCP SYN timeout in nanoseconds;
+  optional uint64 tcp_fin = 9;     // TCP FIN timeout in nanoseconds;
+  optional uint64 tcp = 10;        // TCP established timeout in nanoseconds;
+  optional uint64 udp = 11;        // UDP timeout in nanoseconds;
+  optional uint64 default = 12;    // Default timeout in nanoseconds;
 
   // Sync suppression window in nanoseconds. A sync frame for an alive entry
   // whose new expiry lands within this window of the current one is discarded
