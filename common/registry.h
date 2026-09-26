@@ -367,7 +367,7 @@ value_registry_fini(struct value_registry *registry) {
 }
 
 static inline uint32_t
-value_registry_capacity(struct value_registry *registry) {
+value_registry_capacity(const struct value_registry *registry) {
 	return registry->max_value + 1;
 }
 
@@ -382,6 +382,40 @@ typedef int (*value_registry_join_func)(
 );
 
 /*
+ * Joins a range of the first registry with a range of the second one,
+ * the callback is called for each value pair combined from the ranges.
+ */
+static inline int
+value_registry_join_ranges(
+	const struct value_registry *registry1,
+	uint32_t range_idx1,
+	const struct value_registry *registry2,
+	uint32_t range_idx2,
+	value_registry_join_func join_func,
+	void *join_func_data
+) {
+	const struct value_range *range1 =
+		ADDR_OF(&registry1->ranges) + range_idx1;
+	const uint32_t *values1 = ADDR_OF(&range1->values);
+	const struct value_range *range2 =
+		ADDR_OF(&registry2->ranges) + range_idx2;
+	const uint32_t *values2 = ADDR_OF(&range2->values);
+
+	for (uint32_t idx1 = 0; idx1 < range1->count; ++idx1) {
+		for (uint32_t idx2 = 0; idx2 < range2->count; ++idx2) {
+
+			uint32_t v1 = values1[idx1];
+			uint32_t v2 = values2[idx2];
+
+			if (join_func(v1, v2, range_idx1, join_func_data) < 0) {
+				return -1;
+			}
+		}
+	}
+	return 0;
+}
+
+/*
  * Merges two value registry iteration through registry keys and its values.
  * NOTE: both registry keys should be exact the same.
  */
@@ -393,21 +427,12 @@ value_registry_join_range(
 	value_registry_join_func join_func,
 	void *join_func_data
 ) {
-	struct value_range *range1 = ADDR_OF(&registry1->ranges) + range_idx;
-	uint32_t *values1 = ADDR_OF(&range1->values);
-	struct value_range *range2 = ADDR_OF(&registry2->ranges) + range_idx;
-	uint32_t *values2 = ADDR_OF(&range2->values);
-
-	for (uint32_t idx1 = 0; idx1 < range1->count; ++idx1) {
-		for (uint32_t idx2 = 0; idx2 < range2->count; ++idx2) {
-
-			uint32_t v1 = values1[idx1];
-			uint32_t v2 = values2[idx2];
-
-			if (join_func(v1, v2, range_idx, join_func_data) < 0) {
-				return -1;
-			}
-		}
-	}
-	return 0;
+	return value_registry_join_ranges(
+		registry1,
+		range_idx,
+		registry2,
+		range_idx,
+		join_func,
+		join_func_data
+	);
 }

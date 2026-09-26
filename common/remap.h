@@ -34,6 +34,9 @@
  * - reference count
  * - last tocuh generation
  * - remap value valid if the item generation is equal to the current one
+ * - free chain link valid while the item sits on the free chain; kept
+ *   apart from the remap value so a re-touch of the key still reads the
+ *   last rekey target
  */
 struct remap_item {
 	uint32_t count;
@@ -149,7 +152,7 @@ remap_table_new_key(struct remap_table *table, uint32_t *key) {
 	/*		if (table->free_list != REMAP_TABLE_INVALID) {
 				*key = table->free_list;
 				struct remap_item *free_item =
-	   remap_table_item(table, *key); table->free_list = free_item->value;
+	   remap_table_item(table, *key); table->free_list = free_item->pad;
 
 				*free_item = (struct remap_item){0, 0, 0, 0};
 				return 0;
@@ -236,8 +239,10 @@ remap_table_touch(struct remap_table *table, uint32_t key, uint32_t *value) {
 	*value = item->value;
 
 	if (item->count == 0) {
-		// Move zero-referenced value into free item chain
-		item->value = table->free_list;
+		// Move zero-referenced item into the free chain. The link
+		// goes to pad: value must keep the rekey target, a same
+		// generation re-touch of the key still reads it.
+		item->pad = table->free_list;
 		table->free_list = key;
 	}
 
