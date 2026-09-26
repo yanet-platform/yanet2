@@ -2,8 +2,10 @@ package operator
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 
 	"github.com/spf13/cobra"
 	"go.uber.org/zap"
@@ -26,6 +28,11 @@ type Runnable interface {
 // logging.
 type loggingConfig interface {
 	LoggingConfig() *logging.Config
+}
+
+// gatewayConfig opts a runtime into deployment-specific named transports.
+type gatewayConfig interface {
+	GatewayConfigs() *[]GatewayConfig
 }
 
 // Run is the generic entry point for an operator binary.
@@ -80,6 +87,20 @@ func RunOperator[C any](
 	cfg, err := xcfg.LoadConfig[C](path, xcfg.WithEnv())
 	if err != nil {
 		return fmt.Errorf("failed to load config: %w", err)
+	}
+	if provider, ok := any(cfg).(gatewayConfig); ok {
+		if value, present := os.LookupEnv("YANET_KUBERNETES_GATEWAYS"); present {
+			var overrides []GatewayEndpointOverride
+			if err := json.Unmarshal([]byte(value), &overrides); err != nil {
+				return fmt.Errorf("YANET_KUBERNETES_GATEWAYS: %w", err)
+			}
+			gateways := provider.GatewayConfigs()
+			selected, err := ApplyGatewayOverrides(*gateways, overrides)
+			if err != nil {
+				return fmt.Errorf("YANET_KUBERNETES_GATEWAYS: %w", err)
+			}
+			*gateways = selected
+		}
 	}
 
 	log, err := initLogging(cfg)

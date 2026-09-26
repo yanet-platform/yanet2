@@ -50,6 +50,11 @@ func (m *Config) LoggingConfig() *logging.Config {
 	return &m.Logging
 }
 
+// GatewayConfigs exposes named transports to the deployment override contract.
+func (m *Config) GatewayConfigs() *[]operator.GatewayConfig {
+	return &m.Gateways
+}
+
 // Validate requires a destination and rejects negative scheduling intervals.
 func (m *Config) Validate() error {
 	if len(m.Gateways) == 0 {
