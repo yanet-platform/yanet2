@@ -154,7 +154,10 @@ func (f *TestFramework) CommonConfigCommands() []string {
 		// exposure window or misses it, so a green run is weak evidence it
 		// is gone.
 
-		// Configure kni0 network interface
+		// Finish udev initialization before fixing the MAC; MAC changes flush
+		// neighbours, so install them only after the final address is assigned.
+		"udevadm settle",
+		"ip link set dev kni0 address " + DstMAC,
 		"ip link set kni0 up",
 		"ip nei replace " + VMIPv6Gateway + " lladdr " + SrcMAC + " dev kni0",
 		"ip nei replace " + VMIPv4Gateway + " lladdr " + SrcMAC + " dev kni0",
