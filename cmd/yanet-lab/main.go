@@ -1456,7 +1456,6 @@ func handleConnection(connection net.Conn, fw *framework.TestFramework, dir stri
 			_ = json.NewEncoder(connection).Encode(reply)
 			return
 		}
-		defer state.ReleaseOperation()
 	}
 	switch value.Action {
 	case "status":
@@ -1574,6 +1573,9 @@ func handleConnection(connection net.Conn, fw *framework.TestFramework, dir stri
 		reply.OK = false
 		reply.Error = "unknown action: " + value.Action
 	}
+	// Completed work must release exclusivity before the client can act on its
+	// reply. Serial sessions and shutdown return through their own paths above.
+	state.ReleaseOperation()
 	_ = json.NewEncoder(connection).Encode(reply)
 }
 
