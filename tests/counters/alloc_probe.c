@@ -250,7 +250,8 @@ __wrap_yanet_get_counters_by_tags_per_worker(
 			config, tags, count, query, error
 		);
 	admission = previous;
-	/* Later allocations on this thread stay untracked, even after errors. */
+	/* Later allocations on this thread stay untracked, even after errors.
+	 */
 	if (noisy) {
 		noise(NULL);
 	}
