@@ -172,7 +172,9 @@ classify_attr_compile(
 
 	struct hash_index group_index;
 	if (hash_index_init(&group_index, memory_context, rule_count)) {
-		goto error_free_group_first_rule;
+		// The failed init empties the index, so the common unwind
+		// releases it safely.
+		goto error;
 	}
 
 	struct classify_attr_group_ctx group_ctx = {
@@ -323,7 +325,6 @@ error:
 	cls->rule_groups = NULL;
 	hash_index_fini(&group_index);
 
-error_free_group_first_rule:
 	memory_bfree(
 		memory_context,
 		group_first_rule,
