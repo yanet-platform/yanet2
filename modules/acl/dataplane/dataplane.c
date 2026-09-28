@@ -241,6 +241,11 @@ acl_handle_packets(
 	uint32_t frag4_classes[ip4_idx ? ip4_idx : 1];
 	uint32_t core4_path_classes[ip4_idx ? ip4_idx : 1];
 
+	// Each path span overwrites exactly the scratch its classifier
+	// reads, but no compiler proves that; zero the declaration once so
+	// the whole array stays defined.
+	memset(core4_path_classes, 0, sizeof(core4_path_classes));
+
 	acl_classify_core4(
 		&acl_config->classifier_core4,
 		module_ectx->abs_cm_index,
@@ -305,6 +310,8 @@ acl_handle_packets(
 	uint32_t core6_classes[ip6_idx ? ip6_idx : 1];
 	uint32_t frag6_classes[ip6_idx ? ip6_idx : 1];
 	uint32_t core6_path_classes[ip6_idx ? ip6_idx : 1];
+
+	memset(core6_path_classes, 0, sizeof(core6_path_classes));
 
 	acl_classify_core6(
 		&acl_config->classifier_core6,
