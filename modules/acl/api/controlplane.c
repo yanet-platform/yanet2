@@ -817,6 +817,7 @@ error:
 	classifier_fini(&stage_n4_dst, memory_context, acl_rule_count);
 	classifier_fini(&stage_nets, memory_context, acl_rule_count);
 	classifier_fini(&stage_mid, memory_context, acl_rule_count);
+	classifier_fini(&stage_ipproto, memory_context, acl_rule_count);
 	classifier_fini(&stage_frag, memory_context, acl_rule_count);
 	free(rule_ptrs);
 	return rc;
@@ -1003,6 +1004,7 @@ error:
 	classifier_fini(&stage_n6_dst, memory_context, acl_rule_count);
 	classifier_fini(&stage_nets, memory_context, acl_rule_count);
 	classifier_fini(&stage_mid, memory_context, acl_rule_count);
+	classifier_fini(&stage_ipproto, memory_context, acl_rule_count);
 	classifier_fini(&stage_frag, memory_context, acl_rule_count);
 	free(rule_ptrs);
 	return rc;
@@ -1568,6 +1570,24 @@ acl_module_compile_rules(
 			    acl_rules,
 			    rule_count
 		    )) {
+			// The path stages are owned here, so the failure
+			// releases whatever the steps already filled; the
+			// release of an already consumed stage is a no-op.
+			classifier_fini(
+				&tcp4_stage,
+				&cp_module->memory_context,
+				rule_count
+			);
+			classifier_fini(
+				&udp4_stage,
+				&cp_module->memory_context,
+				rule_count
+			);
+			classifier_fini(
+				&icmp4_stage,
+				&cp_module->memory_context,
+				rule_count
+			);
 			yanet_error_add(err, "failed to init the ip4 paths");
 			goto error_target;
 		}
@@ -1624,6 +1644,24 @@ acl_module_compile_rules(
 			    acl_rules,
 			    rule_count
 		    )) {
+			// The path stages are owned here, so the failure
+			// releases whatever the steps already filled; the
+			// release of an already consumed stage is a no-op.
+			classifier_fini(
+				&tcp6_stage,
+				&cp_module->memory_context,
+				rule_count
+			);
+			classifier_fini(
+				&udp6_stage,
+				&cp_module->memory_context,
+				rule_count
+			);
+			classifier_fini(
+				&icmp6_stage,
+				&cp_module->memory_context,
+				rule_count
+			);
 			yanet_error_add(err, "failed to init the ip6 paths");
 			goto error_target;
 		}

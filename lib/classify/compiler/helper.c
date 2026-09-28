@@ -147,6 +147,15 @@ classify_join(
 		return -1;
 	}
 	rule_to_group = out->rule_groups;
+
+	// Pair collection scratch, emptied here so a failure of the table
+	// below unwinds through the common exit.
+	uint32_t pair_alloc_count = rule_count ? rule_count : 1;
+	uint32_t *pair_group1 = NULL;
+	uint32_t *pair_group2 = NULL;
+	struct hash_index pair_index = {0};
+	bool pair_index_live = false;
+
 	if (value_table_init(
 		    table,
 		    memory_context,
@@ -154,7 +163,7 @@ classify_join(
 		    value_registry_capacity(registry1),
 		    value_registry_capacity(registry2)
 	    )) {
-		return -1;
+		goto error_free_pairs;
 	}
 
 	/*
@@ -162,12 +171,6 @@ classify_join(
 	 * the first registry and the group of the second one each rule
 	 * references.
 	 */
-	uint32_t pair_alloc_count = rule_count ? rule_count : 1;
-	uint32_t *pair_group1 = NULL;
-	uint32_t *pair_group2 = NULL;
-	struct hash_index pair_index = {0};
-	bool pair_index_live = false;
-
 	pair_group1 = (uint32_t *)memory_balloc(
 		memory_context, sizeof(uint32_t) * pair_alloc_count
 	);
