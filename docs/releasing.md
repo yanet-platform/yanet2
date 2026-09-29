@@ -79,7 +79,9 @@ seven pushes succeed, it copies those exact image manifests to the `X.Y.Z`
 tags and creates the GitHub Release with the verified DEBs. The workflow
 refuses to replace an existing final tag with a different digest. There are
 no moving `X.Y`, `X`, or `latest` aliases. A failed preflight publishes nothing.
-The GitHub Release body names the source SHA; it does not generate notes from
+Releases made with this workflow list each final image, digest, manifest size
+in bytes, and a `docker pull` command in the GitHub Release description. The
+Release body names the source SHA; it does not generate notes from
 the previous global release, which may belong to another release line.
 
 Review [upgrade notes](upgrade.md) before rolling out packages. Versioned
