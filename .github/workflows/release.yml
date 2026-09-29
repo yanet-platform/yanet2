@@ -167,10 +167,21 @@ jobs:
 
       - name: Write release description
         env:
+          GH_TOKEN: ${{ github.token }}
           SOURCE_SHA: ${{ needs.preflight.outputs.source_sha }}
         run: |
           set -euo pipefail
+          # The message of an annotated tag opens the description as release notes.
+          notes=
+          ref=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$RELEASE_TAG" \
+            --jq '"\(.object.type) \(.object.sha)"')
+          read -r ref_type ref_sha <<< "$ref"
+          if [[ $ref_type == tag ]]; then
+            notes=$(gh api "repos/$GITHUB_REPOSITORY/git/tags/$ref_sha" --jq '.message' |
+              sed '/^-----BEGIN [A-Z ]*SIGNATURE-----$/,$d')
+          fi
           {
+            [[ -z $notes ]] || printf '%s\n\n' "$notes"
             printf 'Release %s from commit %s.\n\n## Docker images\n\n' "$RELEASE_TAG" "$SOURCE_SHA"
             while IFS=$'\t' read -r image digest manifest_size; do
               printf -- '- `%s` (digest: `%s`; manifest: %s bytes)\n' \

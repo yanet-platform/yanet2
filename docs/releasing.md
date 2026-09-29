@@ -92,6 +92,13 @@ Releases made with this workflow list each final image, digest, manifest size
 in bytes, and a `docker pull` command in the GitHub Release description. The
 Release body names the source SHA; it does not generate notes from
 the previous global release, which may belong to another release line.
+The message of an annotated tag opens the description as the release notes.
+Keep Markdown headings in it with `--cleanup=verbatim`, otherwise Git strips
+lines starting with `#`:
+
+```bash
+git tag -a --cleanup=verbatim -F release-notes.md vX.Y.Z <release-commit-sha>
+```
 
 Review [upgrade notes](upgrade.md) before rolling out packages. Versioned
 releases are not created from `release/alpha`, and candidate builds do not
