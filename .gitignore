@@ -160,6 +160,7 @@ deploy/packages/
 !.agents/skills/bmad-*/
 !.agents/skills/autopilot
 !.agents/skills/better-comment
+!.agents/skills/bump-version
 !.agents/skills/code-cli
 !.agents/skills/issue-create
 !.agents/skills/review-change
@@ -168,6 +169,7 @@ deploy/packages/
 !.claude/skills/bmad-*
 !.claude/skills/autopilot
 !.claude/skills/better-comment
+!.claude/skills/bump-version
 !.claude/skills/code-cli
 !.claude/skills/issue-create
 !.claude/skills/review-change
