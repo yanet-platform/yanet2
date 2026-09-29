@@ -301,10 +301,54 @@ func testForward(t *testing.T, fw *framework.TestFramework) {
 
 }
 
-// verifies that the YAML limit reaches live module execution.
+// counterDelta subtracts two counter snapshots of packet and byte values
+// summed across worker instances, to log traffic inside a counter window.
+func counterDelta(before, after []uint64) []uint64 {
+	delta := make([]uint64, 0, len(after))
+	for idx, value := range after {
+		delta = append(delta, value-before[idx])
+	}
+	return delta
+}
+
+// Test_PacketRecircLimit_FromDataplaneConfig verifies that the
+// packet-recirculation limit from the dataplane YAML reaches live module
+// execution and that kernel traffic stays off the physical counters.
 func Test_PacketRecircLimit_FromDataplaneConfig(t *testing.T) {
 	withBootedVM(t, func(testFramework *framework.TestFramework) {
-		const device = "01:00.0"
+		const (
+			device    = "01:00.0"
+			kniDevice = "virtio_user_kni0"
+		)
+
+		// The first four payload bytes become the echo identifier and
+		// sequence, so the answer can be matched byte for byte.
+		echoPayload := []byte{0xca, 0xfe, 0x00, 0x07, 'r', 'e', 'c', 'i', 'r', 'c', '6'}
+		echoRequest := createICMPv6Packet(
+			net.ParseIP(framework.VMIPv6Gateway),
+			net.ParseIP(framework.VMIPv6Host),
+			echoPayload,
+		)
+
+		controlReply, err := testFramework.SendPacketAndCapture(
+			0, 0, echoRequest, 500*time.Millisecond,
+		)
+		require.NoError(t, err, "echo path must answer before the mapping")
+		reply := gopacket.NewPacket(controlReply, layers.LayerTypeEthernet, gopacket.Default)
+		ip6, ok := reply.Layer(layers.LayerTypeIPv6).(*layers.IPv6)
+		require.True(t, ok, "reply must carry an IPv6 layer")
+		require.Equal(t, framework.VMIPv6Host, ip6.SrcIP.String(), "reply source must be the request destination")
+		require.Equal(t, framework.VMIPv6Gateway, ip6.DstIP.String(), "reply destination must be the request source")
+		icmp6, ok := reply.Layer(layers.LayerTypeICMPv6).(*layers.ICMPv6)
+		require.True(t, ok, "reply must carry an ICMPv6 layer")
+		require.Equal(
+			t,
+			layers.CreateICMPv6TypeCode(layers.ICMPv6TypeEchoReply, 0),
+			icmp6.TypeCode,
+			"reply must be an ICMPv6 echo reply",
+		)
+		require.Equal(t, echoPayload, icmp6.Payload, "reply must echo the request payload")
+
 		require.NoError(t, testFramework.CreateConfigFile("recirc-forward.yaml", `
 rules:
   - action:
@@ -323,7 +367,11 @@ rules:
 `))
 
 		paths := testFramework.Paths
-		_, err := testFramework.ExecuteCommands(
+		_, err = testFramework.ExecuteCommands(
+			// The omitted input drops kernel ingress at the
+			// interface; the output stays to the kernel.
+			paths.CLI("yanet-cli-device-plain")+
+				" update --name=virtio_user_kni0 --output dummy:1",
 			paths.CLI("yanet-cli-forward")+
 				" update --name=recirc "+
 				"/mnt/config/recirc-forward.yaml",
@@ -337,9 +385,13 @@ rules:
 		)
 		require.NoError(t, err)
 
-		before := deviceCounterValues(
+		physicalBefore := deviceCounterValues(
 			t, testFramework, device, "output_rx", "output_recirc_drop",
 		)
+		kniBefore := deviceCounterValues(
+			t, testFramework, kniDevice, "input_rx", "input_drop",
+		)
+
 		packet := framework.CreateTCPIPv4Packet(
 			net.ParseIP("192.0.2.1"),
 			net.ParseIP("198.51.100.1"),
@@ -353,21 +405,52 @@ rules:
 		require.NotNil(t, input)
 		require.Nil(t, output)
 
-		after := deviceCounterValues(
+		// The same echo request inside the counter window. The capture
+		// outcome is stored and asserted only after the exact counter
+		// checks, so an unisolated run fails on the counters first.
+		_, echoErr := testFramework.SendPacketAndCapture(
+			0, 0, echoRequest, 200*time.Millisecond,
+		)
+
+		physicalAfter := deviceCounterValues(
 			t, testFramework, device, "output_rx", "output_recirc_drop",
 		)
+		kniAfter := deviceCounterValues(
+			t, testFramework, kniDevice, "input_rx", "input_drop",
+		)
+
+		for _, name := range []string{"output_rx", "output_recirc_drop"} {
+			t.Logf("physical %s delta %v", name, counterDelta(physicalBefore[name], physicalAfter[name]))
+		}
+		for _, name := range []string{"input_rx", "input_drop"} {
+			t.Logf("kni %s delta %v", name, counterDelta(kniBefore[name], kniAfter[name]))
+		}
+
 		packetSize := uint64(len(packet))
-		expectedOutputPasses := uint64(testPacketRecircLimit)
-		require.Equal(
+		recircLimit := uint64(testPacketRecircLimit)
+		requireCounterDelta(
 			t,
-			expectedOutputPasses,
-			after["output_rx"][0]-before["output_rx"][0],
+			physicalBefore["output_rx"],
+			physicalAfter["output_rx"],
+			[]uint64{recircLimit, recircLimit * packetSize},
 		)
 		requireCounterDelta(
 			t,
-			before["output_recirc_drop"],
-			after["output_recirc_drop"],
+			physicalBefore["output_recirc_drop"],
+			physicalAfter["output_recirc_drop"],
 			[]uint64{1, packetSize},
 		)
+
+		require.ErrorIs(t, echoErr, framework.ErrCaptureTimeout)
+
+		// The kernel interface counters aggregate all kernel traffic
+		// and cannot identify the probe answer.
+		for _, name := range []string{"input_rx", "input_drop"} {
+			require.Positive(
+				t,
+				kniAfter[name][0]-kniBefore[name][0],
+				"kernel-interface %s must count kernel traffic", name,
+			)
+		}
 	})
 }
