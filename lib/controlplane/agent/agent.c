@@ -81,13 +81,24 @@ yanet_shm_dp_config(struct yanet_shm *shm, uint32_t instance_idx) {
 
 int
 agent_dp_config_ready(struct yanet_shm *shm, uint32_t instance_idx) {
-	uint32_t count = __atomic_load_n(
-		&((struct dp_config *)shm->base)->instance_count,
-		__ATOMIC_ACQUIRE
-	);
+	// Acquire the first publication before consulting the shared instance
+	// count.
+	struct dp_config *first = (struct dp_config *)shm->base;
+	uint64_t first_magic =
+		__atomic_load_n(&first->ready_magic, __ATOMIC_ACQUIRE);
+	if (first_magic != DP_CONFIG_READY_MAGIC) {
+		return 0;
+	}
+
+	uint32_t count =
+		__atomic_load_n(&first->instance_count, __ATOMIC_ACQUIRE);
 	if (instance_idx >= count) {
 		return 0;
 	}
+	if (instance_idx == 0) {
+		return 1;
+	}
+
 	struct dp_config *dp_config = yanet_shm_dp_config(shm, instance_idx);
 	return __atomic_load_n(&dp_config->ready_magic, __ATOMIC_ACQUIRE) ==
 	       DP_CONFIG_READY_MAGIC;
