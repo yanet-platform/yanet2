@@ -7,6 +7,7 @@ package testutils
 #cgo LDFLAGS: -Wl,--start-group
 #cgo LDFLAGS: -L../../../../build/modules/l3b/dataplane -ll3b_dp
 #cgo LDFLAGS: -L../../../../build/objects/l3b/api -ll3b_objects
+#cgo LDFLAGS: -L../../../../build/lib/classify -lclassify_compiler
 #cgo LDFLAGS: -L../../../../build/lib/dataplane/config -lconfig_dp
 #cgo LDFLAGS: -L../../../../build/lib/dataplane/module -lmodule
 #cgo LDFLAGS: -L../../../../build/lib/dataplane/packet -lpacket
