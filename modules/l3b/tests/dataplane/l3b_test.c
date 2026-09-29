@@ -505,11 +505,6 @@ test_pinned_path_counts_through_second_mapping(void) {
 
 int
 main(void) {
-	// The module-level destination queries stay in the shared header, but
-	// the narrow service entry point tested here never consults them.
-	(void)l3b_destination_filter_ip4;
-	(void)l3b_destination_filter_ip6;
-
 	log_enable_name("info");
 
 	LOG(INFO, "=== Starting l3b shm test suite ===");
