@@ -107,4 +107,11 @@ jobs:
           STAGE_TAG: ${{ inputs.image_tag }}
           RELEASE_TAG: ${{ inputs.release_tag }}
         run: |
-          bash .github/scripts/release-images.sh "$STAGE_TAG" "$RELEASE_TAG"
+          bash .github/scripts/release-images.sh "$STAGE_TAG" "$RELEASE_TAG" images.tsv
+
+      - uses: actions/upload-artifact@v5
+        with:
+          name: release-images
+          overwrite: true
+          if-no-files-found: error
+          path: images.tsv

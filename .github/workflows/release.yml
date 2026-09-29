@@ -97,6 +97,11 @@ jobs:
           name: verified-debs
           path: outdeb
 
+      - uses: actions/download-artifact@v5
+        with:
+          name: release-images
+          path: image-metadata
+
       - name: Check existing release assets
         env:
           GH_TOKEN: ${{ github.token }}
@@ -111,12 +116,30 @@ jobs:
             [[ $digest == "$expected" ]] || { echo "Release asset differs: $name" >&2; exit 1; }
           done <<< "$assets"
 
+      - name: Write release description
+        env:
+          SOURCE_SHA: ${{ needs.preflight.outputs.source_sha }}
+        run: |
+          set -euo pipefail
+          {
+            printf 'Release %s from commit %s.\n\n## Docker images\n\n' "$GITHUB_REF_NAME" "$SOURCE_SHA"
+            while IFS=$'\t' read -r image digest manifest_size; do
+              printf -- '- `%s` (digest: `%s`; manifest: %s bytes)\n' \
+                "$image" "$digest" "$manifest_size"
+            done < image-metadata/images.tsv
+            printf '\n## Verification\n\n```bash\n'
+            while IFS=$'\t' read -r image _; do
+              printf 'docker pull %s\n' "$image"
+            done < image-metadata/images.tsv
+            printf '```\n'
+          } > release-body.md
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ github.ref_name }}
           target_commitish: ${{ needs.preflight.outputs.source_sha }}
-          body: Release ${{ github.ref_name }} from commit ${{ needs.preflight.outputs.source_sha }}.
+          body_path: release-body.md
           fail_on_unmatched_files: true
           overwrite_files: false
           files: |
