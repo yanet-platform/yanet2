@@ -2,8 +2,7 @@
 
 mod fib;
 
-use core::error::Error as StdError;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use clap::{CommandFactory, Parser};
 use clap_complete::engine::{ArgValueCandidates, CompletionCandidate};
@@ -29,9 +28,6 @@ pub mod routepb {
     tonic::include_proto!("modules.route.controlplane.routepb.v1");
 }
 
-/// Errors of the local YAML loader, reported to the user as invalid input.
-type LoadError = Box<dyn StdError>;
-
 /// The FIB rules file, deserialized straight into the wire's
 /// [`routepb::FibEntry`] -- `range` is range-native, matching the wire, so
 /// there is no CIDR-to-range conversion here either.
@@ -45,67 +41,12 @@ type LoadError = Box<dyn StdError>;
 /// that key, or any other stray one at this level, into a load error.
 /// `FIBEntry`/`FIBNexthop` carry the same attribute (see `build.rs`), so a
 /// stray or retired key inside an entry fails to load the same way. A
-/// required key simply missing (rather than stray) is a different
-/// failure mode `deny_unknown_fields` does not cover -- see
-/// [`FibConfig::validate`].
+/// required key missing from the file is left to the server.
 #[derive(Debug, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 struct FibConfig {
     #[serde(default)]
     entries: Vec<routepb::FibEntry>,
-}
-
-impl FibConfig {
-    /// Loads and validates the file, naming it in every failure.
-    fn load<P>(path: P) -> Result<Self, LoadError>
-    where
-        P: AsRef<Path>,
-    {
-        let path = path.as_ref();
-        let config: Self = yaml::load(path)?;
-        config.validate().map_err(|err| format!("{}: {err}", path.display()))?;
-        Ok(config)
-    }
-
-    /// Rejects an entry the server would otherwise bounce back as an
-    /// opaque `Internal` RPC error with no file, line, or entry index.
-    ///
-    /// Every message field `FibEntry`/`FibNexthop` carry deserializes as
-    /// an `Option` (`nexthops` defaults to empty instead -- see
-    /// `build.rs`), so `deny_unknown_fields` alone does not catch a
-    /// required one simply missing from the file; this fills that gap.
-    /// It mirrors exactly what `modules/route/controlplane/service.go`'s
-    /// `UpdateFIB` and `backend.go`'s `newHardwareRoute` already reject on
-    /// the server -- range presence, and nexthop MAC/device presence --
-    /// and leaves the range semantics the server owns (address family
-    /// match, `start <= end` ordering) to the server's own error.
-    fn validate(&self) -> Result<(), LoadError> {
-        for (idx, entry) in self.entries.iter().enumerate() {
-            let range = entry
-                .range
-                .as_ref()
-                .ok_or_else(|| format!("entry {idx}: missing range"))?;
-            if range.start.is_none() {
-                return Err(format!("entry {idx}: range missing start address").into());
-            }
-            if range.end.is_none() {
-                return Err(format!("entry {idx}: range missing end address").into());
-            }
-
-            for (nidx, nexthop) in entry.nexthops.iter().enumerate() {
-                if nexthop.dst_mac.is_none() {
-                    return Err(format!("entry {idx}: nexthop {nidx}: missing dst_mac").into());
-                }
-                if nexthop.src_mac.is_none() {
-                    return Err(format!("entry {idx}: nexthop {nidx}: missing src_mac").into());
-                }
-                if nexthop.device.is_empty() {
-                    return Err(format!("entry {idx}: nexthop {nidx}: empty device").into());
-                }
-            }
-        }
-        Ok(())
-    }
 }
 
 /// Manages route module configs.
@@ -219,7 +160,7 @@ async fn run(cmd: Cmd) -> Result<(), Error> {
 type RouteService = Service<RouteServiceClient<LayeredChannel>>;
 
 async fn update_fib(service: &mut RouteService, cmd: FibUpdateCmd) -> Result<(), Error> {
-    let config = FibConfig::load(&cmd.file).map_err(|err| service.invalid("update", err.to_string()))?;
+    let config: FibConfig = yaml::load(&cmd.file).map_err(|err| service.invalid("update", err.to_string()))?;
     let entry_count = config.entries.len();
     let request = UpdateFibRequest {
         module_name: cmd.config_name.clone(),
@@ -309,7 +250,6 @@ async fn show_fib(service: &mut RouteService, cmd: FibShowCmd) -> Result<(), Err
 #[cfg(test)]
 mod test {
     use core::net::IpAddr;
-    use std::{env, fs};
 
     use commonpb::pb::{IpRange, MacAddress};
     use netip::MacAddr;
@@ -566,144 +506,5 @@ entries:
 "#;
         let err = serde_yaml::from_str::<FibConfig>(yaml).unwrap_err();
         assert!(err.to_string().contains("prefix"), "unexpected error: {err}");
-    }
-
-    /// A rules file omitting `range` entirely still deserializes -- `range`
-    /// is `Option<routepb::IpRange>`, and serde treats a missing key for an
-    /// `Option` field as `None` rather than a load error -- so catching
-    /// this is `FibConfig::validate`'s job, not `deny_unknown_fields`'s.
-    #[test]
-    fn fib_config_validate_rejects_missing_range() {
-        let yaml = "
-entries:
-  - nexthops: []
-";
-        let config: FibConfig = serde_yaml::from_str(yaml).unwrap();
-        let err = config.validate().unwrap_err();
-        assert_eq!("entry 0: missing range", err.to_string());
-    }
-
-    #[test]
-    fn fib_config_validate_rejects_range_missing_start() {
-        let yaml = "
-entries:
-  - range:
-      end: 10.0.0.255
-";
-        let config: FibConfig = serde_yaml::from_str(yaml).unwrap();
-        let err = config.validate().unwrap_err();
-        assert_eq!("entry 0: range missing start address", err.to_string());
-    }
-
-    #[test]
-    fn fib_config_validate_rejects_range_missing_end() {
-        let yaml = "
-entries:
-  - range:
-      start: 10.0.0.0
-";
-        let config: FibConfig = serde_yaml::from_str(yaml).unwrap();
-        let err = config.validate().unwrap_err();
-        assert_eq!("entry 0: range missing end address", err.to_string());
-    }
-
-    #[test]
-    fn fib_config_validate_rejects_nexthop_missing_dst_mac() {
-        let yaml = "
-entries:
-  - range:
-      start: 10.0.0.0
-      end: 10.0.0.255
-    nexthops:
-      - src_mac: 11:22:33:44:55:66
-        device: eth0
-";
-        let config: FibConfig = serde_yaml::from_str(yaml).unwrap();
-        let err = config.validate().unwrap_err();
-        assert_eq!("entry 0: nexthop 0: missing dst_mac", err.to_string());
-    }
-
-    #[test]
-    fn fib_config_validate_rejects_nexthop_missing_src_mac() {
-        let yaml = "
-entries:
-  - range:
-      start: 10.0.0.0
-      end: 10.0.0.255
-    nexthops:
-      - dst_mac: aa:bb:cc:dd:ee:ff
-        device: eth0
-";
-        let config: FibConfig = serde_yaml::from_str(yaml).unwrap();
-        let err = config.validate().unwrap_err();
-        assert_eq!("entry 0: nexthop 0: missing src_mac", err.to_string());
-    }
-
-    #[test]
-    fn fib_config_validate_rejects_nexthop_empty_device() {
-        let yaml = r#"
-entries:
-  - range:
-      start: 10.0.0.0
-      end: 10.0.0.255
-    nexthops:
-      - dst_mac: aa:bb:cc:dd:ee:ff
-        src_mac: 11:22:33:44:55:66
-        device: ""
-"#;
-        let config: FibConfig = serde_yaml::from_str(yaml).unwrap();
-        let err = config.validate().unwrap_err();
-        assert_eq!("entry 0: nexthop 0: empty device", err.to_string());
-    }
-
-    /// A fully-specified entry passes validation untouched.
-    #[test]
-    fn fib_config_validate_accepts_fully_specified_entry() {
-        let config = FibConfig {
-            entries: vec![routepb::FibEntry {
-                range: Some(ip_range("10.0.0.0", "10.0.0.255")),
-                nexthops: vec![routepb::FibNexthop {
-                    dst_mac: Some(mac("aa:bb:cc:dd:ee:ff")),
-                    src_mac: Some(mac("11:22:33:44:55:66")),
-                    device: "eth0".to_owned(),
-                    counter: "nexthop_custom-counter".to_owned(),
-                }],
-            }],
-        };
-        assert!(config.validate().is_ok());
-    }
-
-    /// An entry with no nexthops at all is a legitimate no-op entry -- see
-    /// `UpdateFibRequest`'s proto doc comment -- and still passes
-    /// validation.
-    #[test]
-    fn fib_config_validate_accepts_entry_without_nexthops() {
-        let config = FibConfig {
-            entries: vec![routepb::FibEntry {
-                range: Some(ip_range("10.0.0.0", "10.0.0.255")),
-                nexthops: Vec::new(),
-            }],
-        };
-        assert!(config.validate().is_ok());
-    }
-
-    #[test]
-    fn test_fib_config_load_missing_file_names_the_path() {
-        let path = env::temp_dir().join(format!("yanet-cli-route-missing-fib-{}.yaml", std::process::id()));
-
-        let err = FibConfig::load(&path).unwrap_err();
-
-        assert!(err.to_string().starts_with(&path.display().to_string()), "{err}");
-    }
-
-    #[test]
-    fn test_fib_config_load_invalid_entry_names_the_path() {
-        let path = env::temp_dir().join(format!("yanet-cli-route-invalid-fib-{}.yaml", std::process::id()));
-        fs::write(&path, "entries:\n  - nexthops: []\n").unwrap();
-
-        let err = FibConfig::load(&path).unwrap_err();
-        fs::remove_file(&path).unwrap();
-
-        assert_eq!(format!("{}: entry 0: missing range", path.display()), err.to_string());
     }
 }

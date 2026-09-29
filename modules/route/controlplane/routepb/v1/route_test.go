@@ -1,6 +1,7 @@
 package routepb_test
 
 import (
+	"net/netip"
 	"strings"
 	"testing"
 
@@ -16,6 +17,14 @@ func validNexthop() *routepb.FIBNexthop {
 		DstMac: commonpb.NewMACAddressEUI48([6]byte{0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0x01}),
 		SrcMac: commonpb.NewMACAddressEUI48([6]byte{0x00, 0x11, 0x22, 0x33, 0x44, 0x55}),
 		Device: "eth0",
+	}
+}
+
+// validRange returns a complete IPv4 range.
+func validRange() *commonpb.IPRange {
+	return &commonpb.IPRange{
+		Start: commonpb.NewIPAddressFromAddr(netip.MustParseAddr("10.0.0.0")),
+		End:   commonpb.NewIPAddressFromAddr(netip.MustParseAddr("10.0.0.255")),
 	}
 }
 
@@ -96,6 +105,7 @@ func Test_UpdateFIBRequest_Validate(t *testing.T) {
 			request: &routepb.UpdateFIBRequest{
 				ModuleName: "route0",
 				Entries: []*routepb.FIBEntry{{
+					Range: validRange(),
 					Nexthops: []*routepb.FIBNexthop{{
 						DstMac: commonpb.NewMACAddressEUI48([6]byte{}),
 						Device: "eth0",
@@ -113,12 +123,21 @@ func Test_UpdateFIBRequest_Validate(t *testing.T) {
 			message: "entries[0] is required",
 		},
 		{
+			name: "entry without range at repeated index",
+			request: &routepb.UpdateFIBRequest{
+				ModuleName: "route0",
+				Entries:    []*routepb.FIBEntry{{Range: validRange()}, {}},
+			},
+			message: "entries[1]: range is required",
+		},
+		{
 			name: "valid request",
 			request: &routepb.UpdateFIBRequest{
 				ModuleName: "route0",
-				Entries: []*routepb.FIBEntry{{Nexthops: []*routepb.FIBNexthop{
-					validNexthop(),
-				}}},
+				Entries: []*routepb.FIBEntry{{
+					Range:    validRange(),
+					Nexthops: []*routepb.FIBNexthop{validNexthop()},
+				}},
 			},
 		},
 		{name: "nil request", request: nil, message: "module_name is required"},
@@ -136,18 +155,35 @@ func Test_UpdateFIBRequest_Validate(t *testing.T) {
 	}
 }
 
-// Test_FIBEntry_Validate verifies that nexthop errors retain their repeated
-// field index while empty and valid entries pass.
+// Test_FIBEntry_Validate verifies that the range and its bounds are required,
+// nexthop errors retain their repeated field index and valid entries pass.
 func Test_FIBEntry_Validate(t *testing.T) {
 	cases := []struct {
 		name    string
 		entry   *routepb.FIBEntry
 		message string
 	}{
-		{name: "empty entry", entry: &routepb.FIBEntry{}},
+		{name: "nil entry", entry: nil, message: "range is required"},
+		{name: "missing range", entry: &routepb.FIBEntry{}, message: "range is required"},
+		{
+			name: "missing range start",
+			entry: &routepb.FIBEntry{
+				Range: &commonpb.IPRange{End: validRange().GetEnd()},
+			},
+			message: "range.start is required",
+		},
+		{
+			name: "missing range end",
+			entry: &routepb.FIBEntry{
+				Range: &commonpb.IPRange{Start: validRange().GetStart()},
+			},
+			message: "range.end is required",
+		},
+		{name: "entry without nexthops", entry: &routepb.FIBEntry{Range: validRange()}},
 		{
 			name: "nil nexthop at repeated index",
 			entry: &routepb.FIBEntry{
+				Range:    validRange(),
 				Nexthops: []*routepb.FIBNexthop{validNexthop(), nil},
 			},
 			message: "nexthops[1]: src_mac is required",
@@ -155,6 +191,7 @@ func Test_FIBEntry_Validate(t *testing.T) {
 		{
 			name: "valid entry",
 			entry: &routepb.FIBEntry{
+				Range:    validRange(),
 				Nexthops: []*routepb.FIBNexthop{validNexthop()},
 			},
 		},
