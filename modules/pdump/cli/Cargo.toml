@@ -18,7 +18,7 @@ tokio = { version = "1", features = ["rt", "macros", "signal"] }
 tonic = { version = "0.14", features = ["gzip"] }
 tonic-prost = "0.14"
 prost = "0.14"
-ync = { path = "../../../cli/core", version = "0.1", package = "yanet-cli" }
+ync = { path = "../../../cli/core", package = "yanet-cli" }
 bytesize = "2"
 # Pinned exactly: semver sorts rc.2 below rc1, so a caret requirement
 # resolves back to rc1, and rc.3 needs Rust 1.93 above the 1.88 MSRV.
@@ -27,5 +27,5 @@ tokio-util = "0.7"
 pnet_packet = "0.35"
 
 [build-dependencies]
-ync-build = { path = "../../../cli/ync-build", version = "0.1", package = "yanet-cli-build" }
+ync-build = { path = "../../../cli/ync-build", package = "yanet-cli-build" }
 bindgen = "0.72"
