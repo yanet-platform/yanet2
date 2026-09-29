@@ -4,53 +4,87 @@ on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag (vX.Y.Z)
+        type: string
+        required: true
 
 permissions:
   contents: read
 
 concurrency:
-  group: publish-release-${{ github.ref }}
+  group: publish-release-${{ inputs.tag && format('refs/tags/{0}', inputs.tag) || github.ref }}
   cancel-in-progress: false
 
 jobs:
   preflight:
     runs-on: ubuntu-latest
+    environment: release-branch-updater
     permissions:
-      contents: write
+      contents: read
     outputs:
       source_sha: ${{ steps.check.outputs.source_sha }}
       package_version: ${{ steps.check.outputs.package_version }}
       image_tag: ${{ steps.check.outputs.image_tag }}
       stage_tag: ${{ steps.check.outputs.stage_tag }}
+      release_tag: ${{ steps.check.outputs.release_tag }}
     steps:
+      - name: Validate manual release tag
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          REQUESTED_TAG: ${{ inputs.tag }}
+        run: |
+          [[ $GITHUB_REF == refs/heads/main ]] ||
+            { echo "Run manual releases from main" >&2; exit 1; }
+          [[ $REQUESTED_TAG =~ ^v(0|[1-9][0-9]{0,8})\.(0|[1-9][0-9]{0,8})\.(0|[1-9][0-9]{0,8})$ ]] ||
+            { echo "Invalid release tag: $REQUESTED_TAG" >&2; exit 1; }
+
       - uses: actions/checkout@v5
         with:
-          ref: ${{ github.ref }}
+          ref: ${{ inputs.tag && format('refs/tags/{0}', inputs.tag) || github.ref }}
           fetch-depth: 0
+          ssh-key: ${{ secrets.RELEASE_BRANCH_DEPLOY_KEY }}
+
+      - uses: actions/checkout@v5
+        if: github.event_name == 'workflow_dispatch'
+        with:
+          ref: ${{ github.sha }}
+          path: release-tools
 
       - name: Check release tag and patch order
         id: check
         env:
           GH_TOKEN: ${{ github.token }}
+          REQUESTED_TAG: ${{ inputs.tag }}
         run: |
           set -euo pipefail
-          [[ $GITHUB_REF =~ ^refs/tags/v(0|[1-9][0-9]{0,8})\.(0|[1-9][0-9]{0,8})\.(0|[1-9][0-9]{0,8})$ ]] ||
-            { echo "Invalid release tag: $GITHUB_REF" >&2; exit 1; }
+          release_ref=$GITHUB_REF
+          release_helper=.github/scripts/release-ref.sh
+          if [[ $GITHUB_EVENT_NAME == workflow_dispatch ]]; then
+            release_ref="refs/tags/$REQUESTED_TAG"
+            release_helper=release-tools/.github/scripts/release-ref.sh
+          fi
+          [[ $release_ref =~ ^refs/tags/v(0|[1-9][0-9]{0,8})\.(0|[1-9][0-9]{0,8})\.(0|[1-9][0-9]{0,8})$ ]] ||
+            { echo "Invalid release tag: $release_ref" >&2; exit 1; }
           major=${BASH_REMATCH[1]} minor=${BASH_REMATCH[2]} patch=${BASH_REMATCH[3]}
           branch="release/$major.$minor"
-          sha=$(git rev-parse "$GITHUB_SHA^{commit}")
+          sha=$(git rev-parse "$release_ref^{commit}")
           if ((patch > 0)); then
             previous="v$major.$minor.$((patch - 1))"
             draft=$(gh release view "$previous" --json isDraft --jq '.isDraft')
             [[ $draft == false ]] ||
               { echo "Previous release is not published: $previous" >&2; exit 1; }
           fi
+          while IFS= read -r tag; do
+            [[ $tag =~ ^v${major}\.${minor}\.(0|[1-9][0-9]{0,8})$ ]] || continue
+            ((BASH_REMATCH[1] > patch)) || continue
+            newer_sha=$(git rev-parse "refs/tags/$tag^{commit}")
+            git rev-list --first-parent "$newer_sha" | grep -Fx "$sha" >/dev/null ||
+              { echo "Newer release tag does not descend from $release_ref: $tag" >&2; exit 1; }
+          done < <(git tag --list "v$major.$minor.*")
           if ! git show-ref --verify --quiet "refs/remotes/origin/$branch"; then
-            while IFS= read -r tag; do
-              [[ $tag =~ ^v${major}\.${minor}\.(0|[1-9][0-9]{0,8})$ ]] || continue
-              ((BASH_REMATCH[1] <= patch)) ||
-                { echo "Newer release tag exists: $tag" >&2; exit 1; }
-            done < <(git tag --list "v$major.$minor.*")
             if ((patch == 0)); then
               git rev-list --first-parent refs/remotes/origin/main | grep -Fx "$sha" >/dev/null ||
                 { echo "$sha is not on main's first-parent history" >&2; exit 1; }
@@ -59,13 +93,26 @@ jobs:
               git rev-list --first-parent "$sha" | grep -Fx "$previous_sha" >/dev/null ||
                 { echo "$sha does not descend from $previous on its first-parent history" >&2; exit 1; }
             fi
-            gh api -X POST "repos/$GITHUB_REPOSITORY/git/refs" \
-              -f ref="refs/heads/$branch" -f sha="$sha" >/dev/null
+            git push origin "$sha:refs/heads/$branch"
+            git fetch origin "refs/heads/$branch:refs/remotes/origin/$branch"
+          elif ! git rev-list --first-parent "refs/remotes/origin/$branch" | grep -Fx "$sha" >/dev/null; then
+            git rev-list --first-parent refs/remotes/origin/main | grep -Fx "$sha" >/dev/null ||
+              { echo "$sha is not on main's first-parent history" >&2; exit 1; }
+            branch_sha=$(git rev-parse "refs/remotes/origin/$branch")
+            git rev-list --first-parent "$sha" | grep -Fx "$branch_sha" >/dev/null ||
+              { echo "$branch is not on $sha's first-parent history" >&2; exit 1; }
+            if ((patch > 0)); then
+              previous_sha=$(git rev-parse "refs/tags/$previous^{commit}")
+              git rev-list --first-parent "$sha" | grep -Fx "$previous_sha" >/dev/null ||
+                { echo "$sha does not descend from $previous on its first-parent history" >&2; exit 1; }
+            fi
+            git push origin "$sha:refs/heads/$branch"
             git fetch origin "refs/heads/$branch:refs/remotes/origin/$branch"
           fi
-          bash .github/scripts/release-ref.sh stable \
-            "$GITHUB_REF" "$sha" >> "$GITHUB_OUTPUT"
-          echo "stage_tag=${GITHUB_REF_NAME#v}-stage-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
+          bash "$release_helper" stable \
+            "$release_ref" "$sha" >> "$GITHUB_OUTPUT"
+          echo "stage_tag=$major.$minor.$patch-stage-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
+          echo "release_tag=v$major.$minor.$patch" >> "$GITHUB_OUTPUT"
 
   packages:
     needs: preflight
@@ -91,6 +138,8 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+    env:
+      RELEASE_TAG: ${{ needs.preflight.outputs.release_tag }}
     steps:
       - uses: actions/download-artifact@v5
         with:
@@ -108,7 +157,7 @@ jobs:
         run: |
           set -euo pipefail
           assets=$(gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" --paginate \
-            --jq '.[] | select(.tag_name == env.GITHUB_REF_NAME) | .assets[] | [.name, .digest] | @tsv')
+            --jq '.[] | select(.tag_name == env.RELEASE_TAG) | .assets[] | [.name, .digest] | @tsv')
           while IFS=$'\t' read -r name digest; do
             [[ -n $name ]] || continue
             [[ $name != */ && -f outdeb/$name ]] || { echo "Unexpected release asset: $name" >&2; exit 1; }
@@ -122,7 +171,7 @@ jobs:
         run: |
           set -euo pipefail
           {
-            printf 'Release %s from commit %s.\n\n## Docker images\n\n' "$GITHUB_REF_NAME" "$SOURCE_SHA"
+            printf 'Release %s from commit %s.\n\n## Docker images\n\n' "$RELEASE_TAG" "$SOURCE_SHA"
             while IFS=$'\t' read -r image digest manifest_size; do
               printf -- '- `%s` (digest: `%s`; manifest: %s bytes)\n' \
                 "$image" "$digest" "$manifest_size"
@@ -137,8 +186,7 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v3
         with:
-          tag_name: ${{ github.ref_name }}
-          target_commitish: ${{ needs.preflight.outputs.source_sha }}
+          tag_name: ${{ needs.preflight.outputs.release_tag }}
           body_path: release-body.md
           fail_on_unmatched_files: true
           overwrite_files: false

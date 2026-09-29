@@ -88,6 +88,12 @@ jobs:
         with:
           ref: ${{ inputs.source_sha }}
 
+      - uses: actions/checkout@v5
+        if: github.event_name == 'workflow_dispatch'
+        with:
+          ref: ${{ github.sha }}
+          path: release-tools
+
       - uses: actions/setup-go@v6
         with:
           go-version: '1.24.x'
@@ -107,7 +113,11 @@ jobs:
           STAGE_TAG: ${{ inputs.image_tag }}
           RELEASE_TAG: ${{ inputs.release_tag }}
         run: |
-          bash .github/scripts/release-images.sh "$STAGE_TAG" "$RELEASE_TAG" images.tsv
+          helper=.github/scripts/release-images.sh
+          if [[ $GITHUB_EVENT_NAME == workflow_dispatch ]]; then
+            helper=release-tools/.github/scripts/release-images.sh
+          fi
+          bash "$helper" "$STAGE_TAG" "$RELEASE_TAG" images.tsv
 
       - uses: actions/upload-artifact@v5
         with:
