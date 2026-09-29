@@ -19,12 +19,12 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/status"
 
-	testshm "github.com/yanet-platform/yanet2/common/go/testutils/shm"
 	"github.com/yanet-platform/yanet2/common/go/xcfg"
 	"github.com/yanet-platform/yanet2/controlplane/gateway"
 	ynpb "github.com/yanet-platform/yanet2/controlplane/ynpb/v1"
 	l3b "github.com/yanet-platform/yanet2/modules/l3b/controlplane"
 	l3bpb "github.com/yanet-platform/yanet2/modules/l3b/controlplane/l3bpb/v1"
+	l3btestutils "github.com/yanet-platform/yanet2/modules/l3b/internal/testutils"
 )
 
 // Test_NewL3BModule_MissingMemoryFile verifies that attachment failure reports
@@ -45,10 +45,10 @@ func Test_NewL3BModule_MissingMemoryFile(t *testing.T) {
 }
 
 // Test_L3BModule_NontrafficAdmission verifies that direct construction exposes
-// exactly one service through the Gateway and releases its mapping on shutdown.
+// exactly one service through the production proxy and releases its mapping.
 func Test_L3BModule_NontrafficAdmission(t *testing.T) {
 	config := l3b.DefaultConfig()
-	config.MemoryPath = xcfg.MustNonEmptyString(testshm.NewStorage(t))
+	config.MemoryPath = xcfg.MustNonEmptyString(l3btestutils.NewStorage(t))
 	config.InstanceID = xcfg.NewRequired(uint32(0))
 	module, err := l3b.NewL3BModule(config)
 	require.NoError(t, err)
@@ -155,7 +155,7 @@ func Test_L3BModule_NontrafficConstructorErrors(t *testing.T) {
 			if tc == "missing memory file" {
 				config.MemoryPath = xcfg.MustNonEmptyString(filepath.Join(t.TempDir(), "missing"))
 			} else {
-				config.MemoryPath = xcfg.MustNonEmptyString(testshm.NewStorage(t))
+				config.MemoryPath = xcfg.MustNonEmptyString(l3btestutils.NewStorage(t))
 				config.InstanceID = xcfg.NewRequired(uint32(1))
 			}
 			module, err := l3b.NewL3BModule(config)

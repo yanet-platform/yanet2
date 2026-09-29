@@ -38,11 +38,10 @@ func createStorageFile(t *testing.T, size int64) string {
 	return path
 }
 
-// verifies that a segment attached before the dataplane has written its
-// header reports not ready and still detaches cleanly.
+// Test_SharedMemory_Detach_UninitialisedSegment verifies that an unpublished
+// segment reports not ready and still detaches cleanly.
 //
-// This is the path the director's readiness backoff takes on a startup
-// timeout.
+// Readiness may fail immediately while startup is still in progress.
 func Test_SharedMemory_Detach_UninitialisedSegment(t *testing.T) {
 	path := createStorageFile(t, 2<<20)
 
@@ -100,24 +99,64 @@ func Test_SharedMemory_AgentAttach_UninitialisedSegment(t *testing.T) {
 	}
 }
 
-// Test_SharedMemory_AgentAttach_InstanceBounds verifies that the last real
-// instance attaches and invalid indices fail before traversing unmapped storage.
+// Test_SharedMemory_AgentAttach_InitializedSegmentBeforePublication verifies
+// that an initialized header is not read before readiness is published.
+func Test_SharedMemory_AgentAttach_InitializedSegmentBeforePublication(t *testing.T) {
+	readyInstanceCount := uint32(0)
+	path := testshm.NewStorage(t, testshm.StorageTypes{
+		InstanceCount:      2,
+		ReadyInstanceCount: &readyInstanceCount,
+	})
+	memory, err := ffi.AttachSharedMemory(path)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, memory.Detach()) })
+	require.False(t, memory.DataplaneReady(0))
+
+	agent, err := memory.AgentAttach("unpublished", 0, 64*datasize.MB)
+	if agent != nil {
+		t.Cleanup(func() { require.NoError(t, agent.Close()) })
+	}
+	require.Nil(t, agent)
+	require.ErrorContains(t, err, "dataplane shared memory is not ready")
+}
+
+// Test_SharedMemory_DataplaneReady_RejectsLaterReadyBeforeFirstPublication
+// verifies that a later-ready instance cannot bypass publication of the first
+// instance.
+func Test_SharedMemory_DataplaneReady_RejectsLaterReadyBeforeFirstPublication(t *testing.T) {
+	readyInstanceCount := uint32(0)
+	path := testshm.NewStorage(t, testshm.StorageTypes{
+		InstanceCount:      2,
+		ReadyInstanceCount: &readyInstanceCount,
+	})
+	memory, err := ffi.AttachSharedMemory(path)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, memory.Detach()) })
+	require.NoError(t, testshm.MarkInstanceReady(memory, 1))
+
+	require.False(t, memory.DataplaneReady(1))
+}
+
+// Test_SharedMemory_AgentAttach_InstanceBounds verifies that the last valid
+// instance attaches and out-of-range indices fail before memory traversal.
 func Test_SharedMemory_AgentAttach_InstanceBounds(t *testing.T) {
 	for _, tc := range []struct {
 		name     string
 		instance uint32
 		valid    bool
 	}{
-		{name: "last valid instance", instance: 0, valid: true},
-		{name: "first index beyond the single instance", instance: 1},
+		{name: "last valid instance", instance: 1, valid: true},
+		{name: "first index beyond the two instances", instance: 2},
 		{name: "maximum index cannot traverse the mapping", instance: math.MaxUint32},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			path := testshm.NewStorage(t)
+			path := testshm.NewStorage(t, testshm.StorageTypes{InstanceCount: 2})
 			memory, err := ffi.AttachSharedMemory(path)
 			require.NoError(t, err)
 			t.Cleanup(func() { require.NoError(t, memory.Detach()) })
-			agents := memory.DPConfig(0).Agents()
+			require.True(t, memory.DataplaneReady(1))
+			agents0 := memory.DPConfig(0).Agents()
+			agents1 := memory.DPConfig(1).Agents()
 			agent, err := memory.AgentAttach("boundary", tc.instance, 64*datasize.MB)
 			if agent != nil {
 				t.Cleanup(func() { require.NoError(t, agent.Close()) })
@@ -125,13 +164,76 @@ func Test_SharedMemory_AgentAttach_InstanceBounds(t *testing.T) {
 			if tc.valid {
 				require.NoError(t, err)
 				require.NotNil(t, agent)
+				require.Equal(t, agents0, memory.DPConfig(0).Agents())
+				attached := memory.DPConfig(1).Agents()
+				require.Len(t, attached, 1)
+				require.Equal(t, "boundary", attached[0].Name)
 				return
 			}
 			require.Nil(t, agent)
-			require.ErrorContains(t, err, "out of range [0, 1)")
-			require.Equal(t, agents, memory.DPConfig(0).Agents())
+			require.ErrorContains(t, err, "out of range [0, 2)")
+			require.Equal(t, agents0, memory.DPConfig(0).Agents())
+			require.Equal(t, agents1, memory.DPConfig(1).Agents())
 		})
 	}
+}
+
+// Test_SharedMemory_AgentAttach_RejectsUnreadyTarget verifies that an
+// unpublished target instance is rejected after the shared count is available.
+func Test_SharedMemory_AgentAttach_RejectsUnreadyTarget(t *testing.T) {
+	readyInstanceCount := uint32(1)
+	path := testshm.NewStorage(t, testshm.StorageTypes{
+		InstanceCount:      2,
+		ReadyInstanceCount: &readyInstanceCount,
+	})
+	memory, err := ffi.AttachSharedMemory(path)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, memory.Detach()) })
+	require.True(t, memory.DataplaneReady(0))
+	require.False(t, memory.DataplaneReady(1))
+	agents0 := memory.DPConfig(0).Agents()
+	agents1 := memory.DPConfig(1).Agents()
+
+	agent, err := memory.AgentAttach("unready-target", 1, 64*datasize.MB)
+	if agent != nil {
+		t.Cleanup(func() { require.NoError(t, agent.Close()) })
+	}
+	require.Nil(t, agent)
+	require.ErrorContains(t, err, "not yet initialised")
+	require.Equal(t, agents0, memory.DPConfig(0).Agents())
+	require.Equal(t, agents1, memory.DPConfig(1).Agents())
+}
+
+// Test_SharedMemory_AgentAttach_RejectsNULName verifies that a NUL byte in the
+// agent name is rejected before crossing the C string boundary.
+func Test_SharedMemory_AgentAttach_RejectsNULName(t *testing.T) {
+	path := testshm.NewStorage(t, testshm.StorageTypes{})
+	memory, err := ffi.AttachSharedMemory(path)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, memory.Detach()) })
+
+	agent, err := memory.AgentAttach("boundary\x00suffix", 0, 64*datasize.MB)
+	if agent != nil {
+		t.Cleanup(func() { require.NoError(t, agent.Close()) })
+	}
+	require.Nil(t, agent)
+	require.ErrorContains(t, err, "name contains NUL byte")
+}
+
+// Test_SharedMemory_ExtendAgent_RejectsNULName verifies that a NUL byte in an
+// agent name is rejected before crossing the C string boundary.
+func Test_SharedMemory_ExtendAgent_RejectsNULName(t *testing.T) {
+	path := testshm.NewStorage(t, testshm.StorageTypes{})
+	memory, err := ffi.AttachSharedMemory(path)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, memory.Detach()) })
+	agent, err := memory.AgentAttach("boundary", 0, datasize.MB)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, agent.Close()) })
+
+	size, err := memory.ExtendAgent(0, "boundary\x00suffix", 2*datasize.MB)
+	require.Zero(t, size)
+	require.ErrorContains(t, err, "name contains NUL byte")
 }
 
 // Test_SharedMemory_TruncatedStorage_ExitsOnSIGBUS verifies that a fault in a

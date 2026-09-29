@@ -9,44 +9,50 @@ import (
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 )
 
-// Test_Storage_L3BInventory verifies that production loaders admit exactly one
-// module and two inert object types without workers or activated configuration.
-func Test_Storage_L3BInventory(t *testing.T) {
-	path := testshm.NewStorage(t)
+// Test_Storage_Empty verifies that the generic fixture publishes no module or
+// object types, workers, or active configuration by default.
+func Test_Storage_Empty(t *testing.T) {
+	path := testshm.NewStorage(t, testshm.StorageTypes{})
 	memory, err := ffi.AttachSharedMemory(path)
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, memory.Detach()) })
 	config := memory.DPConfig(0)
-	modules := config.Modules()
-	require.Len(t, modules, 1)
-	require.Equal(t, "l3b", modules[0].Name())
-	require.ElementsMatch(t, []string{"l3b_virtual_service", "l3b_session_table"}, testshm.ObjectTypes(memory))
+	require.Empty(t, config.Modules())
+	require.Empty(t, testshm.LoadedObjectTypes(memory))
 	require.Zero(t, config.WorkerCount())
 	require.Empty(t, config.CPConfigs())
 	require.Empty(t, config.Functions())
 	require.Empty(t, config.Pipelines())
 }
 
-// Test_Storage_MissingTypePreservesInventory verifies that unresolved dynamic
-// symbols fail without adding, removing or replacing existing type entries.
-func Test_Storage_MissingTypePreservesInventory(t *testing.T) {
-	for _, tc := range []struct {
-		name   string
-		object bool
-	}{
-		{name: "missing module"},
-		{name: "missing object", object: true},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			path := testshm.NewStorage(t)
-			memory, err := ffi.AttachSharedMemory(path)
-			require.NoError(t, err)
-			t.Cleanup(func() { require.NoError(t, memory.Detach()) })
-			modules := memory.DPConfig(0).Modules()
-			objects := testshm.ObjectTypes(memory)
-			require.ErrorContains(t, testshm.LoadType(memory, "missing_l3b_admission", tc.object), "missing_l3b_admission")
-			require.Equal(t, modules, memory.DPConfig(0).Modules())
-			require.Equal(t, objects, testshm.ObjectTypes(memory))
-		})
-	}
+// Test_Storage_MarkInstanceReady_RejectsOutOfRange verifies that the fixture
+// refuses to publish readiness for an unallocated instance.
+func Test_Storage_MarkInstanceReady_RejectsOutOfRange(t *testing.T) {
+	readyInstanceCount := uint32(0)
+	path := testshm.NewStorage(t, testshm.StorageTypes{
+		InstanceCount:      2,
+		ReadyInstanceCount: &readyInstanceCount,
+	})
+	memory, err := ffi.AttachSharedMemory(path)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, memory.Detach()) })
+
+	require.ErrorContains(
+		t,
+		testshm.MarkInstanceReady(memory, 2),
+		"out of range [0, 2)",
+	)
+	require.False(t, memory.DataplaneReady(1))
+}
+
+// Test_Storage_LoadersRejectNULNames verifies that type names with embedded NUL
+// bytes are rejected before they cross the C string boundary.
+func Test_Storage_LoadersRejectNULNames(t *testing.T) {
+	path := testshm.NewStorage(t, testshm.StorageTypes{})
+	memory, err := ffi.AttachSharedMemory(path)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, memory.Detach()) })
+
+	require.ErrorContains(t, testshm.LoadModule(memory, "module\x00suffix"), "NUL")
+	require.ErrorContains(t, testshm.LoadObject(memory, "object\x00suffix"), "NUL")
 }
