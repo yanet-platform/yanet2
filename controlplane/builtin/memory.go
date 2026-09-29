@@ -91,6 +91,10 @@ func (m *Memory) ExtendAgent(
 	switch {
 	case errors.Is(err, ffi.ErrAgentNotFound):
 		return nil, status.Errorf(codes.NotFound, "agent %q is not attached", name)
+	case errors.Is(err, ffi.ErrFailedPrecondition):
+		return nil, status.Error(codes.FailedPrecondition, err.Error())
+	case errors.Is(err, ffi.ErrInvalidArgument):
+		return nil, status.Error(codes.InvalidArgument, err.Error())
 	case errors.Is(err, ffi.ErrResourceExhausted):
 		return nil, status.Error(codes.ResourceExhausted, err.Error())
 	case err != nil:

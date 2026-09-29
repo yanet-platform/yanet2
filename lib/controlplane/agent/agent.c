@@ -411,11 +411,12 @@ agent_extend_locked(struct agent *agent, uint64_t size, yanet_error **err) {
 	// An agent that draws straight from the controlplane pool owns no
 	// arena of its own and cannot be grown here.
 	//
-	// Built-in services are set up that way.
+	// The dataplane's own system agent is set up that way.
 	if (ADDR_OF(&agent->memory_context.block_allocator) !=
 	    &agent->block_allocator) {
-		yanet_error_add(
+		yanet_error_add_kind(
 			err,
+			YANET_ERROR_FAILED_PRECONDITION,
 			"agent \"%s\" draws memory from the controlplane "
 			"pool and cannot be extended",
 			agent->name
@@ -428,8 +429,11 @@ agent_extend_locked(struct agent *agent, uint64_t size, yanet_error **err) {
 	if (misaligned != 0) {
 		uint64_t pad = MEMORY_BLOCK_ALLOCATOR_MIN_SIZE - misaligned;
 		if (needed > UINT64_MAX - pad) {
-			yanet_error_add(
-				err, "agent cannot grow by %lu bytes", size
+			yanet_error_add_kind(
+				err,
+				YANET_ERROR_INVALID_ARGUMENT,
+				"agent cannot grow by %lu bytes",
+				size
 			);
 			return -1;
 		}
