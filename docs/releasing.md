@@ -10,8 +10,9 @@ for later patches. Merge each backport only after its existing PR CI passes.
 An administrator must configure these GitHub settings before the first release:
 
 - Protect `release/*` branches, excluding `release/alpha`: require pull requests,
-  require passing PR CI, and block force pushes and deletion. Use the existing
-  PR workflows; the release flow adds no separate branch gate or CI-run lookup.
+  require Commit Lint and Agents Lint, which run on every PR, and block force
+  pushes and deletion. Check other CI results before merging backports.
+  The release flow adds no separate branch gate or CI-run lookup.
 - Protect `v*` tags: restrict creation to release maintainers and block updates
   and deletion. The tag is the human promotion action. It must point to a commit
   on the first-parent history of its matching release line.
@@ -24,11 +25,16 @@ No staging signoff is required by this flow.
 
 ## Open a release line and backport
 
-Create `release/X.Y` from a tested commit on `main` when the line is ready.
-Open a pull request for each selected backport. Cherry-pick from `main` with
-`git cherry-pick -x <commit>` on a branch based on `release/X.Y`, then target
-that release branch with the pull request. Merge it only after the existing CI
-checks pass. Keep the release branch for `vX.Y.1`, `vX.Y.2`, and later patches.
+For an optional candidate, create `release/X.Y` from a tested commit on `main`
+before running it. Otherwise, the first stable tag creates the missing branch
+at the tagged commit, which must be on `main`'s first-parent history. A later
+patch tag can recreate a missing branch only when its commit descends from the
+previous published patch on its first-parent history. A historical tag does
+not recreate the branch after a newer tag exists. Keep the branch for
+future patches. Open a pull request for each selected backport. Cherry-pick
+from `main` with `git cherry-pick -x <commit>` on a branch based on
+`release/X.Y`, then target that release branch with the pull request. Merge it
+only after the existing CI checks pass.
 
 ## Build a candidate (optional)
 
@@ -50,7 +56,11 @@ validation is desired. Candidate builds do not gate publication.
 
 ## Publish a version
 
-Create `vX.Y.Z` at the intended commit on the release branch and push the tag.
+Create `vX.Y.Z` at the intended commit and push the tag. The first tag may
+point to a tested commit on `main` if the release branch does not exist yet;
+later tags normally point to commits on the release branch.
+Automatic branch creation requires a tagged commit that contains this workflow.
+For an older commit, create the release branch manually before pushing the tag.
 If you built a candidate, use its exact commit. For example:
 
 ```bash
