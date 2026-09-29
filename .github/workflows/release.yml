@@ -15,6 +15,8 @@ concurrency:
 jobs:
   preflight:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     outputs:
       source_sha: ${{ steps.check.outputs.source_sha }}
       package_version: ${{ steps.check.outputs.package_version }}
@@ -32,16 +34,37 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          bash .github/scripts/release-ref.sh stable \
-            "$GITHUB_REF" "$(git rev-parse "$GITHUB_SHA^{commit}")" >> "$GITHUB_OUTPUT"
-          version=${GITHUB_REF_NAME#v}
-          patch=${version##*.}
+          [[ $GITHUB_REF =~ ^refs/tags/v(0|[1-9][0-9]{0,8})\.(0|[1-9][0-9]{0,8})\.(0|[1-9][0-9]{0,8})$ ]] ||
+            { echo "Invalid release tag: $GITHUB_REF" >&2; exit 1; }
+          major=${BASH_REMATCH[1]} minor=${BASH_REMATCH[2]} patch=${BASH_REMATCH[3]}
+          branch="release/$major.$minor"
+          sha=$(git rev-parse "$GITHUB_SHA^{commit}")
           if ((patch > 0)); then
-            previous="v${version%.*}.$((patch - 1))"
+            previous="v$major.$minor.$((patch - 1))"
             draft=$(gh release view "$previous" --json isDraft --jq '.isDraft')
             [[ $draft == false ]] ||
               { echo "Previous release is not published: $previous" >&2; exit 1; }
           fi
+          if ! git show-ref --verify --quiet "refs/remotes/origin/$branch"; then
+            while IFS= read -r tag; do
+              [[ $tag =~ ^v${major}\.${minor}\.(0|[1-9][0-9]{0,8})$ ]] || continue
+              ((BASH_REMATCH[1] <= patch)) ||
+                { echo "Newer release tag exists: $tag" >&2; exit 1; }
+            done < <(git tag --list "v$major.$minor.*")
+            if ((patch == 0)); then
+              git rev-list --first-parent refs/remotes/origin/main | grep -Fx "$sha" >/dev/null ||
+                { echo "$sha is not on main's first-parent history" >&2; exit 1; }
+            else
+              previous_sha=$(git rev-parse "refs/tags/$previous^{commit}")
+              git rev-list --first-parent "$sha" | grep -Fx "$previous_sha" >/dev/null ||
+                { echo "$sha does not descend from $previous on its first-parent history" >&2; exit 1; }
+            fi
+            gh api -X POST "repos/$GITHUB_REPOSITORY/git/refs" \
+              -f ref="refs/heads/$branch" -f sha="$sha" >/dev/null
+            git fetch origin "refs/heads/$branch:refs/remotes/origin/$branch"
+          fi
+          bash .github/scripts/release-ref.sh stable \
+            "$GITHUB_REF" "$sha" >> "$GITHUB_OUTPUT"
           echo "stage_tag=${GITHUB_REF_NAME#v}-stage-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
 
   packages:
