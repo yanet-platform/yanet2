@@ -230,6 +230,12 @@ jobs:
         with:
           ref: ${{ inputs.source_sha }}
 
+      - uses: actions/checkout@v5
+        if: github.event_name == 'workflow_dispatch'
+        with:
+          ref: ${{ github.sha }}
+          path: release-tools
+
       - uses: actions/download-artifact@v5
         with:
           pattern: debs-*
@@ -250,7 +256,11 @@ jobs:
           if [[ "$INCLUDE_2204" == true ]]; then
             args+=(--include-2204)
           fi
-          bash .github/scripts/release-deb-artifacts.sh "${args[@]}"
+          helper=.github/scripts/release-deb-artifacts.sh
+          if [[ $GITHUB_EVENT_NAME == workflow_dispatch ]]; then
+            helper=release-tools/.github/scripts/release-deb-artifacts.sh
+          fi
+          bash "$helper" "${args[@]}"
 
       - uses: actions/upload-artifact@v5
         with:
