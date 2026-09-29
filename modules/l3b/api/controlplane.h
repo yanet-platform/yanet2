@@ -1,8 +1,10 @@
 #pragma once
 
-#include <lib/filter/rule.h>
-
+#include "common/filter_views.h"
 #include "common/network.h"
+
+#include "lib/classify/classify.h"
+
 #include "lib/errors/errors.h"
 
 struct cp_module;
@@ -22,6 +24,8 @@ struct agent;
  * to.
  */
 struct l3b_destination_filter_rule {
+	struct classifier_rule rule;
+
 	struct filter_net6s net6s;
 	struct filter_net4s net4s;
 	struct filter_proto_ranges proto_ranges;

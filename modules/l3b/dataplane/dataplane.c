@@ -5,8 +5,6 @@
 
 #include <rte_ether.h>
 
-#include <lib/filter/query.h>
-
 #include "common/container_of.h"
 #include "lib/controlplane/config/econtext.h"
 #include "lib/dataplane/module/module.h"
@@ -16,6 +14,7 @@
 
 #include "config.h"
 #include "dataplane.h"
+#include "filter_lookup.h"
 #include "process.h"
 
 // Whether the packet is classifiable by the source and destination
@@ -85,24 +84,22 @@ l3b_handle_packets(
 		}
 	}
 
-	// The module-level filters stay zeroed until the first destination
-	// rule is installed; querying a zeroed filter is undefined
+	// The module-level classifiers stay zeroed until the first destination
+	// rule is installed; querying a zeroed classifier is undefined
 	// (value_table_get dereferences a relative pointer via
 	// ADDR_OF_NONNULL). Skip the query and treat every TCP/UDP packet as
 	// unmatched while there are no rules.
 	if (config->destination_filter_rule_count > 0) {
-		filter_query(
-			&config->filter_ip4,
-			l3b_destination_filter_ip4,
-			ip4_packets,
+		l3b_classify_destination_ip4(
+			&config->classifier_ip4,
+			(const struct packet **)ip4_packets,
 			ip4_result,
 			ip4_idx
 		);
 
-		filter_query(
-			&config->filter_ip6,
-			l3b_destination_filter_ip6,
-			ip6_packets,
+		l3b_classify_destination_ip6(
+			&config->classifier_ip6,
+			(const struct packet **)ip6_packets,
 			ip6_result,
 			ip6_idx
 		);
@@ -133,7 +130,7 @@ l3b_handle_packets(
 			continue;
 		}
 
-		uint32_t rule_index = FILTER_RULE_INVALID;
+		uint32_t rule_index = CLASSIFY_RULE_INVALID;
 		if (config->destination_filter_rule_count > 0) {
 			if (type == rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV4)) {
 				rule_index = ip4_result[ip4_idx];
@@ -151,7 +148,7 @@ l3b_handle_packets(
 		// An echo request no rule claims is a ping to some other
 		// address: forward it untouched, like the first-generation
 		// balancer's ACL did by never routing it here.
-		if (rule_index == FILTER_RULE_INVALID &&
+		if (rule_index == CLASSIFY_RULE_INVALID &&
 		    l3b_packet_is_icmp_echo(packet)) {
 			packet_front_output(packet_front, packet);
 			continue;
@@ -159,7 +156,7 @@ l3b_handle_packets(
 
 		// Each rule carries the object link of the virtual service it
 		// routes to.
-		if (rule_index != FILTER_RULE_INVALID &&
+		if (rule_index != CLASSIFY_RULE_INVALID &&
 		    rule_index < config->destination_filter_rule_count) {
 			uint64_t *rule_object_links =
 				ADDR_OF(&config->rule_object_links);
