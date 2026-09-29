@@ -3,7 +3,9 @@ package acl_test
 import (
 	"bytes"
 	"encoding/binary"
+	"fmt"
 	"net"
+	"strings"
 	"testing"
 
 	"github.com/c2h5oh/datasize"
@@ -106,6 +108,53 @@ func setupACLHarnessSized(
 
 	backend := acl.NewBackend(agent)
 	return h, agent, backend
+}
+
+// Test_ACLModuleConfig_OverlongCounterReturnsErrorAndAllowsRetry verifies that
+// repeated counter registration failures leave a valid config compilable.
+func Test_ACLModuleConfig_OverlongCounterReturnsErrorAndAllowsRetry(t *testing.T) {
+	_, agent, _ := setupACLHarness(t, []string{"port0"})
+	rule := cacl.ACLRule{
+		Actions: []cacl.ACLAction{{Kind: cacl.ActionAllow}},
+		Counter: strings.Repeat("a", 128),
+	}
+
+	for range 20 {
+		config, err := cacl.NewModuleConfig(agent, "counter-boundary", []cacl.ACLRule{rule}, "", "")
+		require.ErrorContains(t, err, "name length exceeds max")
+		require.Nil(t, config)
+
+		validRule := rule
+		validRule.Counter = strings.Repeat("a", 127)
+		config, err = cacl.NewModuleConfig(agent, "counter-boundary", []cacl.ACLRule{validRule}, "", "")
+		require.NoError(t, err)
+		require.NoError(t, config.Free())
+	}
+}
+
+// Test_ACLModuleConfig_CounterAllocationFailureAllowsRetry verifies that
+// counter allocation failures leave a smaller configuration compilable.
+func Test_ACLModuleConfig_CounterAllocationFailureAllowsRetry(t *testing.T) {
+	// Recovery compiles need sanitizer headroom, while the full ruleset
+	// must still exhaust counter storage.
+	_, agent, _ := setupACLHarnessSized(t, []string{"port0"}, aclCPSize, 8*datasize.MB)
+	rules := make([]cacl.ACLRule, 16384)
+	for idx := range rules {
+		rules[idx] = cacl.ACLRule{
+			Actions: []cacl.ACLAction{{Kind: cacl.ActionAllow}},
+			Counter: fmt.Sprintf("counter-%d", idx),
+		}
+	}
+
+	for range 20 {
+		config, err := cacl.NewModuleConfig(agent, "counter-allocation", rules, "", "")
+		require.ErrorContains(t, err, "failed to allocate counter names")
+		require.Nil(t, config)
+
+		config, err = cacl.NewModuleConfig(agent, "counter-allocation", rules[:1], "", "")
+		require.NoError(t, err)
+		require.NoError(t, config.Free())
+	}
 }
 
 // applyACLRules pushes rules into a new ACL module config and publishes it to
