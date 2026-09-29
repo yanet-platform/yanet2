@@ -1,180 +1,110 @@
 name: Build and push images
 
 on:
-  workflow_dispatch:
+  workflow_call:
     inputs:
-      tag:
-        description: 'Image tag (leave empty for latest)'
-        required: false
-        default: ''
+      source_sha:
         type: string
-  push:
-    tags:
-      - 'v*'
+        required: true
+      image_tag:
+        type: string
+        required: true
+      stable:
+        type: boolean
+        required: true
+      release_tag:
+        type: string
+        required: false
 
 jobs:
-  build-deb:
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v5
-        with:
-          submodules: true
-
-      - uses: ./.github/actions/apt-failover
-
-      - name: Fetch git history for versioning
-        run: |
-          git fetch --prune --unshallow --tags --filter=blob:none origin \
-            || git fetch --tags --filter=blob:none origin \
-            || true
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@1.88.0
-
-      # Only the cargo home is cached. Debuild removes the target directory
-      # before the build starts, so an entry holding it would be wasted.
-      - name: Cache rust
-        uses: Swatinem/rust-cache@v2.9.2
-        with:
-          shared-key: deb-24.04-amd64
-          cache-targets: false
-
-      - name: Install packaging tools
-        timeout-minutes: 10
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends devscripts
-
-      - uses: actions/setup-go@v6
-        with:
-          go-version: "1.24.x"
-          cache: false
-          check-latest: true
-
-      - name: Restore Go module cache
-        uses: ./.github/actions/go-modcache
-
-      - name: Install Go Protobuf Plugins
-        uses: ./.github/actions/protoc-plugins
-
-      - name: Build packages
-        run: |
-          sudo -E env "PATH=$PATH" ./scripts/build-deb.sh
-          sudo chown -R $(id -u) ~/.cargo
-
-      - uses: actions/upload-artifact@v5
-        with:
-          name: debs-24.04-amd64
-          path: |
-            outdeb/*.deb
-            outdeb/*.ddeb
-
   build-images:
-    needs: build-deb
+    name: Build ${{ matrix.component }} image
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
     strategy:
+      fail-fast: false
       matrix:
         include:
           - component: dataplane
-            image: ghcr.io/yanet-platform/yanet2/dataplane
             dockerfile: deploy/dataplane.Dockerfile
           - component: controlplane
-            image: ghcr.io/yanet-platform/yanet2/controlplane
             dockerfile: deploy/controlplane.Dockerfile
           - component: bird-adapter
-            image: ghcr.io/yanet-platform/yanet2/bird-adapter
             dockerfile: deploy/bird-adapter.Dockerfile
           - component: generic-operator
-            image: ghcr.io/yanet-platform/yanet2/generic-operator
             dockerfile: deploy/yanet-generic-operator.Dockerfile
           - component: pipeline-operator
-            image: ghcr.io/yanet-platform/yanet2/pipeline-operator
             dockerfile: deploy/yanet-pipeline-operator.Dockerfile
           - component: route-operator
-            image: ghcr.io/yanet-platform/yanet2/route-operator
             dockerfile: deploy/yanet-route-operator.Dockerfile
+          - component: neighbour-sidecar
+            dockerfile: deploy/yanet-neighbour-sidecar.Dockerfile
     steps:
       - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.source_sha }}
 
-      - name: Download deb packages
-        uses: actions/download-artifact@v5
+      - env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        run: test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+
+      - uses: actions/download-artifact@v5
+        if: matrix.component != 'neighbour-sidecar'
         with:
           name: debs-24.04-amd64
           path: deploy/packages/
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
+      - uses: docker/setup-buildx-action@v4
 
-      - name: Login to GHCR
-        uses: docker/login-action@v4
+      - uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Extract metadata
-        id: meta
-        uses: docker/metadata-action@v6
-        with:
-          images: ${{ matrix.image }}
-          tags: |
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=semver,pattern={{major}}
-            type=raw,value=${{ inputs.tag }},enable=${{ github.event_name == 'workflow_dispatch' && inputs.tag != '' }}
-            type=raw,value=latest,enable=${{ github.event_name == 'workflow_dispatch' && inputs.tag == '' }}
-
-      - name: Build and push
+      - name: Build and push image
         uses: docker/build-push-action@v7
         with:
           context: .
           file: ${{ matrix.dockerfile }}
           push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
+          tags: ghcr.io/yanet-platform/yanet2/${{ matrix.component }}:${{ inputs.image_tag }}
+          labels: org.opencontainers.image.revision=${{ inputs.source_sha }}
           cache-from: type=gha,scope=${{ matrix.component }}
           cache-to: type=gha,mode=max,scope=${{ matrix.component }}
 
-  build-neighbour-sidecar:
+  promote-images:
+    name: Promote staged images
+    if: inputs.stable
+    needs: build-images
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
     steps:
       - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.source_sha }}
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.24.x'
+          cache: false
 
-      - name: Login to GHCR
-        uses: docker/login-action@v4
+      - name: Install registry copy tool
+        run: go install github.com/google/go-containerregistry/cmd/crane@v0.20.3
+
+      - uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Extract metadata
-        id: meta
-        uses: docker/metadata-action@v6
-        with:
-          images: ghcr.io/yanet-platform/yanet2/neighbour-sidecar
-          tags: |
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=semver,pattern={{major}}
-            type=raw,value=${{ inputs.tag }},enable=${{ github.event_name == 'workflow_dispatch' && inputs.tag != '' }}
-            type=raw,value=latest,enable=${{ github.event_name == 'workflow_dispatch' && inputs.tag == '' }}
-
-      - name: Build and push
-        uses: docker/build-push-action@v7
-        with:
-          context: .
-          file: deploy/yanet-neighbour-sidecar.Dockerfile
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha,scope=neighbour-sidecar
-          cache-to: type=gha,mode=max,scope=neighbour-sidecar
+      - name: Promote exact staged manifests
+        env:
+          STAGE_TAG: ${{ inputs.image_tag }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          bash .github/scripts/release-images.sh "$STAGE_TAG" "$RELEASE_TAG"
