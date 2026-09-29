@@ -8,6 +8,7 @@ protoc_gen = custom_target(
   input: proto_files,
   command: [
     protoc,
+    '--experimental_allow_proto3_optional',
     '-I', proto_dir,
     '-I', root_dir,
     '--go_out=paths=source_relative:' + proto_dir,

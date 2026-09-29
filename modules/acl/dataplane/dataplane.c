@@ -265,18 +265,21 @@ acl_handle_packets(
 		ip4_idx
 	);
 
-	for (uint64_t idx = 0; idx < ip4_tcp_idx; ++idx) {
-		core4_path_classes[idx] = core4_classes[ip4_tcp_pos[idx]];
+	if (ip4_tcp_idx != 0) {
+		for (uint64_t idx = 0; idx < ip4_tcp_idx; ++idx) {
+			core4_path_classes[idx] =
+				core4_classes[ip4_tcp_pos[idx]];
+		}
+		acl_classify_tcp4(
+			&acl_config->classifier_ports4,
+			&acl_config->classifier_tcp4,
+			&acl_config->filter_ip4_tcp,
+			core4_path_classes,
+			(const struct packet **)ip4_tcp_packets,
+			ip4_tcp_result,
+			ip4_tcp_idx
+		);
 	}
-	acl_classify_tcp4(
-		&acl_config->classifier_ports4,
-		&acl_config->classifier_tcp4,
-		&acl_config->filter_ip4_tcp,
-		core4_path_classes,
-		(const struct packet **)ip4_tcp_packets,
-		ip4_tcp_result,
-		ip4_tcp_idx
-	);
 
 	for (uint64_t idx = 0; idx < ip4_udp_idx; ++idx) {
 		core4_path_classes[idx] = core4_classes[ip4_udp_pos[idx]];

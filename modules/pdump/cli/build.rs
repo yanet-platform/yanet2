@@ -3,6 +3,7 @@ use std::{env, path::PathBuf};
 
 fn main() -> Result<(), Box<dyn Error>> {
     ync_build::client("../../..", &["modules/pdump/controlplane/pdumppb/v1/pdump.proto"])
+        .with(|builder| builder.protoc_arg("--experimental_allow_proto3_optional"))
         .serialize()
         .compile()?;
 
