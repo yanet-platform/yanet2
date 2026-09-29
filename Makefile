@@ -181,7 +181,7 @@ proto-go:
 		-o -name '*.proto' -print \
 		| sort); \
 		test -n "$$protos"; \
-		protoc -I . \
+		protoc --experimental_allow_proto3_optional -I . \
 			--go_out=paths=source_relative:. \
 			--go-grpc_out=paths=source_relative:. \
 			$$protos

@@ -17,6 +17,7 @@
 #include <netinet/in.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/mman.h>
@@ -171,9 +172,12 @@ register_object_types(struct dp_config *dp_config) {
 	}
 
 	for (size_t idx = 0; idx < count; ++idx) {
-		strtcpy(dp_objects[idx].name,
-			types[idx],
-			sizeof(dp_objects[idx].name));
+		snprintf(
+			dp_objects[idx].name,
+			sizeof(dp_objects[idx].name),
+			"%s",
+			types[idx]
+		);
 	}
 	SET_OFFSET_OF(&dp_config->dp_objects, dp_objects);
 	dp_config->object_count = count;
