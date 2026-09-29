@@ -31,10 +31,10 @@ rust-version = "1.88"
 workspace = true
 
 [dependencies]
-commonpb = { path = "../../../common/rust/commonpb", version = "0.1", package = "yanet-commonpb" }
+commonpb = { path = "../../../common/rust/commonpb", package = "yanet-commonpb" }
 # Only when the proto imports common/filterpb.
-filterpb = { path = "../../../common/rust/filterpb", version = "0.1", package = "yanet-filterpb" }
-ync = { path = "../../../cli/core", version = "0.1", package = "yanet-cli" }
+filterpb = { path = "../../../common/rust/filterpb", package = "yanet-filterpb" }
+ync = { path = "../../../cli/core", package = "yanet-cli" }
 clap = { version = "4.5", features = ["derive", "wrap_help"] }
 clap_complete = { version = "4.5", features = ["unstable-dynamic"] }
 netip = "0.3"
@@ -44,7 +44,7 @@ tonic = { version = "0.14", features = ["gzip"] }
 tonic-prost = "0.14"
 
 [build-dependencies]
-ync-build = { path = "../../../cli/ync-build", version = "0.1", package = "yanet-cli-build" }
+ync-build = { path = "../../../cli/ync-build", package = "yanet-cli-build" }
 ```
 
 Add a dependency only when the code uses it; `netip` is listed because

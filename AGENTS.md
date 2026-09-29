@@ -57,7 +57,7 @@ Active modules: `route, acl, l3b, blackhole, forward, decap, nat64, fwstate, dsc
 
 Shared-memory pattern: `ffi.SharedMemory` → `shm.AgentAttach(name, instanceIdx, size)` → write the C config through FFI (`<name>_module_config_update()`) with Go memory pinned by `runtime.Pinner` → the dataplane reads it atomically. Exported Go APIs whose arguments index C arrays (device IDs, queue/worker indices) validate the range on the Go side.
 
-Rust CLI: binaries `yanet-cli`, `yanet-cli-<module>`; dependency `ync = { path = "../../../cli/core", version = "0.1", package = "yanet-cli" }`; shared protos via `common/rust` `extern_path`. A CLI is registered in THREE places that move together: root `Cargo.toml` members, root `Makefile` (`CLI_CORE_MODULES` / `CLI_MODULES`), `debian/yanet2-cli.install` — a miss in the last two builds green and is never installed. Private (gitignored) CLIs are standalone workspaces, not root members.
+Rust CLI: binaries `yanet-cli`, `yanet-cli-<module>`; dependency `ync = { path = "../../../cli/core", package = "yanet-cli" }`; shared protos via `common/rust` `extern_path`. A CLI is registered in THREE places that move together: root `Cargo.toml` members, root `Makefile` (`CLI_CORE_MODULES` / `CLI_MODULES`), `debian/yanet2-cli.install` — a miss in the last two builds green and is never installed. Private (gitignored) CLIs are standalone workspaces, not root members.
 
 Agents: charters are authored in `.rulesync/subagents/*.md` (`make ai/agents` generates the gitignored client trees); public skills live in `.agents/skills/<name>/`, symlinked from `.claude/skills/`.
 

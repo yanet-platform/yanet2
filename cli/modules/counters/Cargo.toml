@@ -10,8 +10,8 @@ rust-version = "1.88"
 workspace = true
 
 [dependencies]
-ynpb = { path = "../../../common/rust/ynpb", version = "0.1", package = "yanet-ynpb" }
-ync = { path = "../../core", version = "0.1", package = "yanet-cli" }
+ynpb = { path = "../../../common/rust/ynpb", package = "yanet-ynpb" }
+ync = { path = "../../core", package = "yanet-cli" }
 clap = { version = "4.5", features = ["derive", "wrap_help"] }
 tonic = { version = "0.14", features = ["gzip"] }
 bytesize = "2"
