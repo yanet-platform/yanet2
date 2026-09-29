@@ -3,15 +3,20 @@ package bundle_test
 import (
 	"testing"
 
+	"github.com/c2h5oh/datasize"
 	"github.com/stretchr/testify/require"
 
 	"github.com/yanet-platform/yanet2/common/go/xcfg"
 	"github.com/yanet-platform/yanet2/controlplane/bundle"
+	"github.com/yanet-platform/yanet2/controlplane/ffi"
+	decap "github.com/yanet-platform/yanet2/modules/decap/controlplane"
 	l3b "github.com/yanet-platform/yanet2/modules/l3b/controlplane"
 )
 
-// Test_Decode_OnlyListedModulesArePresent verifies that only named modules are
-// populated and omitted options retain their defaults.
+// Test_Decode_OnlyListedModulesArePresent asserts that decoding a document
+// listing only two modules leaves the other nine nil, that the listed ones
+// carry the instance_id given in the document, and that a listed module
+// omitting an optional field keeps its DefaultConfig value.
 func Test_Decode_OnlyListedModulesArePresent(t *testing.T) {
 	var cfg bundle.ModulesConfig
 	err := xcfg.Decode([]byte(`
@@ -51,8 +56,6 @@ func Test_Decode_L3BPresence(t *testing.T) {
 	require.Equal(t, l3b.DefaultConfig().MemoryRequirements, config.L3B.Unwrap().MemoryRequirements)
 }
 
-// Test_Decode_UnrdupKeepsDefaults verifies that omitted options retain their
-// defaults.
 func Test_Decode_UnrdupKeepsDefaults(t *testing.T) {
 	var cfg bundle.ModulesConfig
 	err := xcfg.Decode([]byte(`
@@ -68,8 +71,38 @@ unrdup:
 	require.Equal(t, "[::1]:0", unrdup.Endpoint.Unwrap())
 }
 
-// Test_Decode_NullModuleBlock_Rejected verifies that an empty module entry
-// reports its full configuration path.
+// Test_NewBundle_EmptyConfig_NoServicesNoAgents asserts that a bundle built
+// from all-nil module and device config attaches no agent: it constructs no
+// service at all, so it never reaches ffi.AttachSharedMemory.
+func Test_NewBundle_EmptyConfig_NoServicesNoAgents(t *testing.T) {
+	b, err := bundle.NewBundle(bundle.ModulesConfig{}, bundle.DevicesConfig{})
+	require.NoError(t, err)
+	require.Empty(t, b.Services())
+}
+
+// Test_NewBundle_ConfiguredModuleWithBadPath_FailsNamingModule is a
+// positive control for the nil-skip in buildServices: a single configured
+// module still reaches its constructor and a bad memory_path surfaces as an
+// error naming that module, proving the skip isn't silently dropping every
+// module.
+func Test_NewBundle_ConfiguredModuleWithBadPath_FailsNamingModule(t *testing.T) {
+	cfg := bundle.ModulesConfig{
+		Decap: xcfg.NewOptional(decap.Config{
+			AttachConfig: ffi.AttachConfig{
+				InstanceID:         xcfg.NewRequired(uint32(0)),
+				MemoryPath:         xcfg.MustNonEmptyString("/nonexistent/path/for/bundle/cfg/test"),
+				MemoryRequirements: xcfg.MustNonZero(16 * datasize.MB),
+			},
+			Endpoint: xcfg.MustNonEmptyString("[::1]:0"),
+		}),
+	}
+
+	_, err := bundle.NewBundle(cfg, bundle.DevicesConfig{})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "decap module")
+}
+
+// Test_Decode_NullModuleBlock_Rejected asserts that a null module block is rejected naming the module.
 func Test_Decode_NullModuleBlock_Rejected(t *testing.T) {
 	var cfg struct {
 		Modules bundle.ModulesConfig `yaml:"modules"`
@@ -79,8 +112,7 @@ func Test_Decode_NullModuleBlock_Rejected(t *testing.T) {
 	require.Contains(t, err.Error(), "modules.route")
 }
 
-// Test_Decode_NullDeviceBlock_Rejected verifies that an empty device entry
-// reports its full configuration path.
+// Test_Decode_NullDeviceBlock_Rejected asserts that a null device block is rejected naming the device.
 func Test_Decode_NullDeviceBlock_Rejected(t *testing.T) {
 	var cfg struct {
 		Devices bundle.DevicesConfig `yaml:"devices"`

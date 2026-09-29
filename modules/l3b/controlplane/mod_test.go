@@ -45,7 +45,7 @@ func Test_NewL3BModule_MissingMemoryFile(t *testing.T) {
 }
 
 // Test_L3BModule_NontrafficAdmission verifies that direct construction exposes
-// exactly one service through the production proxy and releases its mapping.
+// exactly one service through the Gateway and releases its mapping on shutdown.
 func Test_L3BModule_NontrafficAdmission(t *testing.T) {
 	config := l3b.DefaultConfig()
 	config.MemoryPath = xcfg.MustNonEmptyString(l3btestutils.NewStorage(t))
