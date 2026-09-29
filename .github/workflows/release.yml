@@ -1,0 +1,101 @@
+name: Publish Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    outputs:
+      source_sha: ${{ steps.check.outputs.source_sha }}
+      package_version: ${{ steps.check.outputs.package_version }}
+      image_tag: ${{ steps.check.outputs.image_tag }}
+      stage_tag: ${{ steps.check.outputs.stage_tag }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.ref }}
+          fetch-depth: 0
+
+      - name: Check release tag and patch order
+        id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          bash .github/scripts/release-ref.sh stable \
+            "$GITHUB_REF" "$(git rev-parse "$GITHUB_SHA^{commit}")" >> "$GITHUB_OUTPUT"
+          version=${GITHUB_REF_NAME#v}
+          patch=${version##*.}
+          if ((patch > 0)); then
+            previous="v${version%.*}.$((patch - 1))"
+            draft=$(gh release view "$previous" --json isDraft --jq '.isDraft')
+            [[ $draft == false ]] ||
+              { echo "Previous release is not published: $previous" >&2; exit 1; }
+          fi
+          echo "stage_tag=${GITHUB_REF_NAME#v}-stage-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
+
+  packages:
+    needs: preflight
+    uses: ./.github/workflows/build-deb.yml
+    with:
+      source_sha: ${{ needs.preflight.outputs.source_sha }}
+      pkg_version: ${{ needs.preflight.outputs.package_version }}
+
+  images:
+    needs: [preflight, packages]
+    uses: ./.github/workflows/build-push-images.yml
+    permissions:
+      contents: read
+      packages: write
+    with:
+      source_sha: ${{ needs.preflight.outputs.source_sha }}
+      image_tag: ${{ needs.preflight.outputs.stage_tag }}
+      stable: true
+      release_tag: ${{ needs.preflight.outputs.image_tag }}
+
+  release:
+    needs: [preflight, images]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v5
+        with:
+          name: verified-debs
+          path: outdeb
+
+      - name: Check existing release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          assets=$(gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" --paginate \
+            --jq '.[] | select(.tag_name == env.GITHUB_REF_NAME) | .assets[] | [.name, .digest] | @tsv')
+          while IFS=$'\t' read -r name digest; do
+            [[ -n $name ]] || continue
+            [[ $name != */ && -f outdeb/$name ]] || { echo "Unexpected release asset: $name" >&2; exit 1; }
+            expected="sha256:$(sha256sum "outdeb/$name" | cut -d' ' -f1)"
+            [[ $digest == "$expected" ]] || { echo "Release asset differs: $name" >&2; exit 1; }
+          done <<< "$assets"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ github.ref_name }}
+          target_commitish: ${{ needs.preflight.outputs.source_sha }}
+          body: Release ${{ github.ref_name }} from commit ${{ needs.preflight.outputs.source_sha }}.
+          fail_on_unmatched_files: true
+          overwrite_files: false
+          files: |
+            outdeb/*.deb
+            outdeb/*.ddeb

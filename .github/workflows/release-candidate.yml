@@ -1,0 +1,63 @@
+name: Release Candidate
+run-name: Candidate v${{ inputs.version }} at ${{ github.sha }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Target stable version (X.Y.Z)
+        type: string
+        required: true
+      include_2204:
+        description: Validate Ubuntu 22.04 amd64 packages as well
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-candidate-${{ github.ref }}-${{ inputs.version }}
+  cancel-in-progress: false
+
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    outputs:
+      source_sha: ${{ steps.check.outputs.source_sha }}
+      package_version: ${{ steps.check.outputs.package_version }}
+      image_tag: ${{ steps.check.outputs.image_tag }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+
+      - name: Check release ref and patch order
+        id: check
+        env:
+          TARGET_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          bash .github/scripts/release-ref.sh candidate \
+            "$GITHUB_REF" "$TARGET_VERSION" "$GITHUB_SHA" \
+            "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
+
+  packages:
+    needs: preflight
+    uses: ./.github/workflows/build-deb.yml
+    with:
+      source_sha: ${{ needs.preflight.outputs.source_sha }}
+      pkg_version: ${{ needs.preflight.outputs.package_version }}
+      include_2204: ${{ inputs.include_2204 }}
+
+  images:
+    needs: [preflight, packages]
+    uses: ./.github/workflows/build-push-images.yml
+    permissions:
+      contents: read
+      packages: write
+    with:
+      source_sha: ${{ needs.preflight.outputs.source_sha }}
+      image_tag: ${{ needs.preflight.outputs.image_tag }}
+      stable: false

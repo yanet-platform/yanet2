@@ -1,9 +1,20 @@
 name: Build DEB Packages
 
 on:
+  workflow_call:
+    inputs:
+      source_sha:
+        type: string
+        required: true
+      pkg_version:
+        type: string
+        required: true
+      include_2204:
+        type: boolean
+        required: false
+        default: false
   push:
     branches: ["main"]
-    tags: ["v*"]
     # Keep this list identical to the pull_request paths below.
     paths:
       - "dataplane/**"
@@ -93,7 +104,7 @@ jobs:
     steps:
       - id: set
         run: |
-          if [[ "${{ github.event_name }}" == "workflow_dispatch" && "${{ github.event.inputs.include_2204 }}" == "true" ]]; then
+          if [[ "${{ inputs.include_2204 }}" == "true" ]]; then
             echo 'matrix={"include":[{"unbtver":"24.04","arch":"amd64","runner":"ubuntu-24.04","artifact":"debs-24.04-amd64"},{"unbtver":"24.04","arch":"arm64","runner":"ubuntu-24.04-arm","artifact":"debs-24.04-arm64"},{"unbtver":"22.04","arch":"amd64","runner":"ubuntu-22.04","artifact":"debs-22.04-amd64"}]}' >> "$GITHUB_OUTPUT"
           else
             echo 'matrix={"include":[{"unbtver":"24.04","arch":"amd64","runner":"ubuntu-24.04","artifact":"debs-24.04-amd64"},{"unbtver":"24.04","arch":"arm64","runner":"ubuntu-24.04-arm","artifact":"debs-24.04-arm64"}]}' >> "$GITHUB_OUTPUT"
@@ -110,14 +121,14 @@ jobs:
           set -euo pipefail
           bash -n scripts/verify-deb-artifacts.sh \
             .github/scripts/release-deb-artifacts.sh \
-            .github/scripts/verify-deb-artifacts_test.sh \
-            .github/scripts/release-deb-artifacts_test.sh
+            .github/scripts/verify-deb-artifacts_test.sh
           .github/scripts/verify-deb-artifacts_test.sh
-          .github/scripts/release-deb-artifacts_test.sh
 
   build-deb:
     name: Build DEB (${{ matrix.unbtver }}, ${{ matrix.arch }})
     needs: [set-matrix, test-deb-artifacts]
+    env:
+      PKG_VERSION: ${{ inputs.pkg_version }}
     strategy:
       fail-fast: false
       matrix: ${{ fromJson(needs.set-matrix.outputs.matrix) }}
@@ -126,7 +137,12 @@ jobs:
     steps:
       - uses: actions/checkout@v5
         with:
+          ref: ${{ inputs.source_sha || github.sha }}
           submodules: true
+
+      - env:
+          SOURCE_SHA: ${{ inputs.source_sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
 
       - uses: ./.github/actions/apt-failover
 
@@ -178,7 +194,7 @@ jobs:
 
       - name: Build packages
         run: |
-          sudo -E env "PATH=$PATH" ./scripts/build-deb.sh
+          sudo -E env "PATH=$PATH" "PKG_VERSION=$PKG_VERSION" ./scripts/build-deb.sh
           sudo chown -R $(id -u) ~/.cargo  # fix caching for Rust
 
       - name: Verify package artifacts
@@ -198,23 +214,25 @@ jobs:
         uses: actions/upload-artifact@v5
         with:
           name: ${{ matrix.artifact }}
+          overwrite: true
           path: |
             outdeb/*.changes
             outdeb/*.buildinfo
             outdeb/*.deb
             outdeb/*.ddeb
 
-  release:
+  verify-release:
+    if: inputs.pkg_version != ''
     needs: build-deb
-    if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
-
     steps:
       - uses: actions/checkout@v5
-
-      - name: Download all artifacts
-        uses: actions/download-artifact@v5
         with:
+          ref: ${{ inputs.source_sha }}
+
+      - uses: actions/download-artifact@v5
+        with:
+          pattern: debs-*
           path: artifacts
 
       - name: Install Debian verification tools
@@ -223,21 +241,21 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends devscripts
 
-      # Normal tag pushes validate and publish the two 24.04 architectures. A
-      # manual dispatch on a tag with include_2204=true additionally validates
-      # the optional Ubuntu 22.04 amd64 set, but does not publish it.
-      - name: Verify and flatten Debian artifacts
+      - name: Verify release packages
+        env:
+          EXPECTED_VERSION: ${{ inputs.pkg_version }}
+          INCLUDE_2204: ${{ inputs.include_2204 }}
         run: |
-          set -euo pipefail
-          helper_args=(artifacts outdeb)
-          if [[ "${{ github.event_name }}" == 'workflow_dispatch' && "${{ github.event.inputs.include_2204 }}" == 'true' ]]; then
-            helper_args+=(--include-2204)
+          args=(artifacts outdeb --expected-version "$EXPECTED_VERSION")
+          if [[ "$INCLUDE_2204" == true ]]; then
+            args+=(--include-2204)
           fi
-          .github/scripts/release-deb-artifacts.sh "${helper_args[@]}"
+          bash .github/scripts/release-deb-artifacts.sh "${args[@]}"
 
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v3
+      - uses: actions/upload-artifact@v5
         with:
-          files: |
+          name: verified-debs
+          overwrite: true
+          path: |
             outdeb/*.deb
             outdeb/*.ddeb

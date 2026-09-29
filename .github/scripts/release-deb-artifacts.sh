@@ -8,17 +8,30 @@ fail() {
     exit 1
 }
 
-if [[ $# -lt 2 || $# -gt 3 ]]; then
-    fail "usage: $0 <artifact-directory> <output-directory> [--include-2204]"
+if [[ $# -lt 2 ]]; then
+    fail "usage: $0 <artifact-directory> <output-directory> [--include-2204] [--expected-version <version>]"
 fi
 
 artifact_dir=$1
 output_dir=$2
+shift 2
 include_2204=false
-if [[ $# -eq 3 ]]; then
-    [[ $3 == --include-2204 ]] || fail "unknown option: $3"
-    include_2204=true
-fi
+expected_version=
+while (($# > 0)); do
+    case $1 in
+        --include-2204)
+            include_2204=true
+            shift
+            ;;
+        --expected-version)
+            (($# >= 2)) || fail "--expected-version requires a value"
+            [[ -n $2 ]] || fail "--expected-version requires a non-empty value"
+            expected_version=$2
+            shift 2
+            ;;
+        *) fail "unknown option: $1" ;;
+    esac
+done
 [[ -d $artifact_dir ]] || fail "artifact directory does not exist: $artifact_dir"
 artifact_dir=$(cd -- "$artifact_dir" && pwd -P)
 
@@ -41,7 +54,7 @@ fi
 artifact_version=
 for artifact_set in "${artifact_sets[@]}"; do
     case $artifact_set in
-        debs-24.04-amd64|debs-22.04-amd64)
+        debs-24.04-amd64 | debs-22.04-amd64)
             expected_arch=amd64
             ;;
         debs-24.04-arm64)
@@ -55,10 +68,13 @@ for artifact_set in "${artifact_sets[@]}"; do
     mapfile -t changes_files < <(
         find "$artifact_dir/$artifact_set" -maxdepth 1 -type f -name '*.changes' -print | sort
     )
-    (( ${#changes_files[@]} == 1 )) ||
+    ((${#changes_files[@]} == 1)) ||
         fail "expected exactly one .changes file in $artifact_set"
     changes_version=$(awk -F': ' '$1 == "Version" { print $2; exit }' "${changes_files[0]}")
     [[ -n $changes_version ]] || fail "missing Version in ${changes_files[0]}"
+    if [[ -n $expected_version && $changes_version != "$expected_version" ]]; then
+        fail "unexpected release version: $changes_version (expected $expected_version)"
+    fi
     if [[ -z $artifact_version ]]; then
         artifact_version=$changes_version
     elif [[ $changes_version != "$artifact_version" ]]; then
