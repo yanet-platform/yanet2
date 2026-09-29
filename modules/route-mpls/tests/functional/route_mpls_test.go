@@ -888,9 +888,10 @@ func Test_RouteMPLS_MixedBurst_KeepsOrderAndPerFamilyLookups(t *testing.T) {
 // Test_RouteMPLS_EmptyRound verifies that a force-poll round with no packets
 // passes through the handler harmlessly and leaves every counter at zero.
 //
-// The worker invokes the handler on every tick even with an empty front;
-// the handler sizes its per-family batches from the front length, so this
-// round pins the zero-length path that #2065 made safe.
+// The worker force-polls the handler on the periodic sweep, at most once
+// per sweep interval, even with an empty front; the handler sizes its
+// per-family batches from the front length, so this round pins the
+// zero-length path that #2065 made safe.
 func Test_RouteMPLS_EmptyRound(t *testing.T) {
 	harness := deployRules(t, []croutempls.Rule{
 		rule4("10.0.0.0/8", tunnel4.nexthop(1)),

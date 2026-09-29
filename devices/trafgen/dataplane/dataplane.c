@@ -80,13 +80,13 @@ trafgen_emit_frame(
 
 // Replay the loaded frames on the device input path, pacing to the target rate.
 //
-// The device registry force-polls every device input handler once per worker
-// tick, so the generator sources fresh traffic even when no packet arrives from
-// a NIC. The emitted packets land in packet_front->output and are demultiplexed
-// into the device's configured input pipelines by the pipeline runtime. A
-// per-worker token bucket accrues elapsed_ns * rate_pps and releases one packet
-// per 1e9 * worker_count credit, which divides rate_pps evenly across all
-// workers.
+// The device registry force-polls every device input handler on the periodic
+// sweep — at most once per sweep interval — so the generator sources fresh
+// traffic even when no packet arrives from a NIC. The emitted packets land in
+// packet_front->output and are demultiplexed into the device's configured input
+// pipelines by the pipeline runtime. A per-worker token bucket accrues
+// elapsed_ns * rate_pps and releases one packet per 1e9 * worker_count credit,
+// which divides rate_pps evenly across all workers.
 static void
 trafgen_input_handle(
 	struct dp_worker *dp_worker,

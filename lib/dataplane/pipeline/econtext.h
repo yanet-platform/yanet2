@@ -450,19 +450,30 @@ struct config_gen_ectx {
 	// At rest every entry is linked onto it. The first build links
 	// each device's input entry before its output one; a round that
 	// runs entries leaves them parked in run order instead. A
-	// round drains the list onto its local untouched list and works
-	// entries back home through the ready list, so the home list is
-	// empty while a round runs. Links are raw pointers built only by
-	// the owning worker, which also raises the ready flag on first
-	// build; the control plane leaves these fields zeroed.
+	// round drains the list onto its local untouched list and
+	// returns every entry home — through the ready list when it runs
+	// them, directly when the periodic sweep is not yet due — so the
+	// home list is empty while a round runs. Links are raw pointers
+	// built only by the owning worker, which also raises the ready
+	// flag on first build; the control plane leaves these fields
+	// zeroed.
 	struct rlist entry_list;
 	// The queue of entries a packet was scheduled onto.
 	//
-	// Filled by the scheduling path and drained by the round, which
-	// moves each processed entry back to the home list; empty
-	// between rounds. Shares the link contract of the home list.
+	// Filled by the scheduling path and by the round's periodic
+	// sweep, and drained by the round, which moves each processed
+	// entry back to the home list; empty between rounds. Shares the
+	// link contract of the home list.
 	struct rlist ready_list;
 	uint8_t schedules_ready;
+	// Deadline the periodic sweep of untouched entries waits for.
+	//
+	// Zero at creation leaves the deadline already expired, so a
+	// fresh generation's first round always sweeps and every new
+	// configuration gets one immediate full tick. Afterwards a
+	// round admits the sweep at most once per interval, keeping an
+	// idle worker's round cost independent of the device count.
+	uint64_t next_sweep_ns;
 
 	// Offset pointer to an array of per-slot offset pointers to the
 	// devices, mirroring the tail below.

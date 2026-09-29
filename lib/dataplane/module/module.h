@@ -13,7 +13,9 @@
 // not match this constant.
 //
 // 32: struct packet dropped the module_device_id field (56 -> 48 bytes).
-#define YANET_MODULE_ABI_VERSION 32
+// 33: struct config_gen_ectx gained the periodic sweep deadline field
+// (224 -> 232 bytes).
+#define YANET_MODULE_ABI_VERSION 33
 
 // Symbol name a module .so exports carrying its compiled-against
 // YANET_MODULE_ABI_VERSION, as a uint32_t global.

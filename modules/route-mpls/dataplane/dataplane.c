@@ -42,11 +42,11 @@ route_mpls_handle_packets(
 		module_ectx->abs_cp_module, struct module_config, cp_module
 	);
 
-	// The worker's per-tick force-poll can reach this handler with an empty
-	// front, and the arrays below would then be declared with zero length,
-	// which is undefined behavior. The early return is only safe because
-	// nothing in this handler runs after its final packet loop — any code
-	// added after that loop must run before the return.
+	// The worker's periodic sweep can force-poll this handler with an
+	// empty front, and the arrays below would then be declared with zero
+	// length, which is undefined behavior. The early return is only safe
+	// because nothing in this handler runs after its final packet loop —
+	// any code added after that loop must run before the return.
 	uint64_t count = packet_front_input_count(packet_front);
 	if (count == 0) {
 		return;

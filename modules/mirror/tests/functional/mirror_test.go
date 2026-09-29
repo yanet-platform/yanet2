@@ -630,7 +630,7 @@ func TestMirror_MinAction(t *testing.T) {
 // TestMirror_EmptyRound verifies that a force-poll round with no packets at
 // all passes through mirror_handle_packets harmlessly.
 //
-// The empty round models a force-poll tick with no traffic: the worker
+// The empty round models a force-poll sweep with no traffic: the worker
 // invokes mirror_handle_packets even though the input front is empty. This
 // cannot observe any sanitizer diagnostic on its own, so it only checks that
 // the round completes cleanly and leaves the module's state untouched.

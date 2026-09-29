@@ -480,6 +480,20 @@ func (m *Harness) WorkerGeneration(workerIdx int) (uint64, error) {
 	return uint64(C.dataplane_ut_worker_gen(m.ptr, C.size_t(workerIdx))), nil
 }
 
+// WorkerSweepDeadline returns the periodic-sweep deadline of the given
+// worker's currently assigned context, zero when no context is assigned.
+//
+// A fresh context also reports zero — its deadline starts expired, so the
+// first round on a new generation always sweeps.
+func (m *Harness) WorkerSweepDeadline(workerIdx int) (uint64, error) {
+	if err := m.validateWorkerIdx(workerIdx); err != nil {
+		return 0, err
+	}
+	return uint64(
+		C.dataplane_ut_sweep_deadline_ns(m.ptr, C.size_t(workerIdx)),
+	), nil
+}
+
 // PublishedGeneration returns the generation number of the currently
 // published generation, zero when no generation was published.
 func (m *Harness) PublishedGeneration() uint64 {

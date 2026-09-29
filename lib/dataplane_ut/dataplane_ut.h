@@ -216,6 +216,14 @@ dataplane_ut_published_ectx(struct dataplane_ut *ut, size_t worker_idx);
 uint64_t
 dataplane_ut_worker_gen(struct dataplane_ut *ut, size_t worker_idx);
 
+// The periodic-sweep deadline of the worker's currently assigned context,
+// 0 when the worker index is out of range or no context is assigned.
+//
+// Zero is also a fresh context's value — the deadline starts expired — so
+// a caller distinguishing the two must check the assignment separately.
+uint64_t
+dataplane_ut_sweep_deadline_ns(struct dataplane_ut *ut, size_t worker_idx);
+
 // Generation number of the currently published generation, 0 when no
 // generation is published.
 uint64_t

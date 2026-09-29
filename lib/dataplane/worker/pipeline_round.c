@@ -93,6 +93,25 @@ worker_pipeline_round(
 		return;
 	}
 
+	// The periodic force-poll of the untouched entries runs at most
+	// once per sweep interval, so an idle worker's round cost stays
+	// independent of the device count.
+	//
+	// The untouched list is stack storage, so a skipped sweep must
+	// park its entries back home before returning; they never left
+	// the home schedule state, so the concatenation needs no
+	// per-entry updates and keeps home order behind the entries the
+	// ready pass already parked. A fresh generation starts with an
+	// expired deadline, so its first round always sweeps. Entries a
+	// packet reached never wait on the gate: scheduling pulls an
+	// entry onto the ready list from any list it sits on.
+	if (dp_worker->current_time < config_gen_ectx->next_sweep_ns) {
+		rlist_concat(&config_gen_ectx->entry_list, &untouched);
+		return;
+	}
+	config_gen_ectx->next_sweep_ns =
+		dp_worker->current_time + WORKER_PIPELINE_SWEEP_INTERVAL_NS;
+
 	rlist_concat(&config_gen_ectx->ready_list, &untouched);
 
 	worker_pipeline_round_process_ready(

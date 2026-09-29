@@ -29,11 +29,12 @@ forward_handle_packets(
 		cp_module
 	);
 
-	// A force-polled tick can hand this module an empty front, and sizing
-	// the arrays below directly by that count would then declare them with
-	// zero length, which is undefined behavior. The early return is only
-	// safe because nothing runs after this handler's final packet loop —
-	// any code added after that loop must run before the return.
+	// A force-poll from the periodic sweep can hand this module an empty
+	// front, and sizing the arrays below directly by that count would
+	// then declare them with zero length, which is undefined behavior.
+	// The early return is only safe because nothing runs after this
+	// handler's final packet loop — any code added after that loop must
+	// run before the return.
 	uint64_t count = packet_front_input_count(packet_front);
 	if (count == 0) {
 		return;
