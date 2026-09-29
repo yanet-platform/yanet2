@@ -734,6 +734,11 @@ test_extend_rejects_borrowing_agent() {
 	TEST_ASSERT(rc == -1, "a borrowing agent must not be extended");
 	TEST_ASSERT_NOT_NULL(err, "a rejected extend must set an error");
 	TEST_ASSERT_EQUAL(
+		yanet_error_kind(err),
+		YANET_ERROR_FAILED_PRECONDITION,
+		"a borrowing agent must be told apart from a server fault"
+	);
+	TEST_ASSERT_EQUAL(
 		sys_agent->arena_count,
 		(uint64_t)0,
 		"a rejected extend must not record an arena"
