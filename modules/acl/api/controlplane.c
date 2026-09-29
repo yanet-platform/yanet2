@@ -1425,6 +1425,13 @@ acl_module_compile_rules(
 	SET_OFFSET_OF(&config->targets, targets);
 	config->target_count = rule_count;
 
+	// Core stages must be zeroed before counter registration can fail.
+	//
+	// Each family build fills its core stage through the root joint, then
+	// the port-scoped build joins onto it before the stage is released.
+	struct classifier core4_stage = {0};
+	struct classifier core6_stage = {0};
+
 	// Per-rule counters live in a dedicated "rules" registry so they are
 	// separated from the module's predefined counters in the per-worker
 	// storages and the counter storage registry.
@@ -1493,13 +1500,7 @@ acl_module_compile_rules(
 		}
 	}
 
-	// The core class stages of the two families: every family build
-	// fills the stage of its family through its root joint, and the
-	// port scoped build of the same family joins onto it before the
-	// stage is released.
-	struct classifier core4_stage = {0};
 	struct classifier plain4_stage = {0};
-	struct classifier core6_stage = {0};
 	struct classifier plain6_stage = {0};
 
 	struct timespec ts_start, ts_end;
