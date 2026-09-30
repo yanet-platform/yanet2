@@ -1255,10 +1255,9 @@ acl_module_build_paths(
 		    &stage_ports,
 		    acl_rules,
 		    acl_rule_count,
-		    &(struct acl_final_build
-		    ){build->udp_root_joint,
-		      build->udp_rule_count,
-		      check_acl_rule_udp}
+		    &(struct acl_final_build){build->udp_root_joint,
+					      build->udp_rule_count,
+					      check_acl_rule_udp}
 	    )) {
 		goto error;
 	}
@@ -1303,10 +1302,9 @@ acl_module_build_paths(
 		    &stage_tcp_mid,
 		    acl_rules,
 		    acl_rule_count,
-		    &(struct acl_final_build
-		    ){build->tcp_root_joint,
-		      build->tcp_rule_count,
-		      check_acl_rule_tcp}
+		    &(struct acl_final_build){build->tcp_root_joint,
+					      build->tcp_rule_count,
+					      check_acl_rule_tcp}
 	    )) {
 		goto error;
 	}
@@ -1339,10 +1337,9 @@ acl_module_build_paths(
 		    &stage_type,
 		    acl_rules,
 		    acl_rule_count,
-		    &(struct acl_final_build
-		    ){build->icmp_root_joint,
-		      build->icmp_rule_count,
-		      check_acl_rule_icmp}
+		    &(struct acl_final_build){build->icmp_root_joint,
+					      build->icmp_rule_count,
+					      check_acl_rule_icmp}
 	    )) {
 		goto error;
 	}
