@@ -326,9 +326,6 @@ sweep_signature(
 	result = TEST_SUCCESS;
 
 out:
-	// The last iteration leaves the arena ASan-poisoned; the allocator
-	// requires manually poisoned memory to be unpoisoned before free.
-	asan_unpoison_memory_region(arena, SWEEP_ARENA_SIZE);
 	free(arena);
 
 	return result;

@@ -549,9 +549,6 @@ main() {
 		LOG(INFO, "%s passed", cases[i].name);
 	}
 
-	// The last case leaves the arena poisoned. The call to free below
-	// requires it unpoisoned first.
-	asan_unpoison_memory_region(arena, CTX_NAMES_ARENA_SIZE);
 	free(arena);
 
 	if (failed) {
