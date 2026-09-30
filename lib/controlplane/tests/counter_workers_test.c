@@ -10,7 +10,9 @@
  *
  * Divergence is produced by writing distinct values into the two workers'
  * pipeline storages and by registering an extra tagged storage in only
- * one worker's registry.
+ * one worker's registry. The same live registry also exercises the
+ * exact-resolution index: growth, rehash stability, duplicate rejection
+ * and the split from the pattern query.
  */
 
 #include "api/agent.h"
@@ -640,6 +642,185 @@ test_worker_rx_mempool_gauges(struct dp_config *dp_config) {
 	return TEST_SUCCESS;
 }
 
+#define CW_GROWTH_ITEMS 20
+
+// Verifies that the registry's exact resolution stays correct across
+// item growth: every inserted tag set resolves to its own storage, sets
+// from before the growth still resolve, and unknown, partial or
+// predicate sets do not.
+//
+// The growth loop pushes the registry past its preallocation several
+// times, so every resolution after it exercises the rehashed index. A
+// duplicate insert must stay rejected, and the pattern query must keep
+// matching every growth item the exact path cannot express.
+static int
+test_registry_exact_lookup(struct cp_config *cp_config) {
+	yanet_error *err = NULL;
+	struct memory_context *memory_context =
+		&cp_config->counter_storage_memory_context;
+
+	struct counter_registry *extra_registry = (struct counter_registry *)
+		memory_balloc(memory_context, sizeof(*extra_registry));
+	TEST_ASSERT_NOT_NULL(
+		extra_registry, "failed to allocate the growth counter registry"
+	);
+	memset(extra_registry, 0, sizeof(*extra_registry));
+	TEST_ASSERT_SUCCESS(
+		counter_registry_init(extra_registry, memory_context, 0),
+		"failed to init the growth counter registry"
+	);
+	TEST_ASSERT_SUCCESS(
+		counter_registry_link(extra_registry, NULL, &err),
+		"failed to link the growth counter registry: %s",
+		err ? yanet_error_message(err) : "?"
+	);
+
+	struct counter_storage *storage =
+		counter_storage_spawn(memory_context, NULL, extra_registry);
+	TEST_ASSERT_NOT_NULL(storage, "failed to spawn the growth storage");
+
+	cp_config_lock(cp_config);
+	struct cp_config_gen *config_gen = cp_config_gen_acquire(cp_config);
+	cp_config_unlock(cp_config);
+
+	struct config_gen_ectx *ectx = cp_config_gen_worker_ectx(config_gen, 1);
+	TEST_ASSERT_NOT_NULL(ectx, "worker 1 has no execution context");
+	struct cp_config_counter_storage_registry *registry =
+		ADDR_OF(&ectx->counter_storage_registry);
+
+	// A pre-existing item must resolve to the very same storage once
+	// the growth loop has rehashed the index under it.
+	struct counter_storage *pipeline_before =
+		cp_config_counter_storage_registry_lookup_pipeline(
+			registry, "dev0", "pipe0"
+		);
+	TEST_ASSERT_NOT_NULL(
+		pipeline_before, "no pipeline storage before the growth loop"
+	);
+
+	char item_value[COUNTER_TAG_VALUE_LEN];
+	for (unsigned i = 0; i < CW_GROWTH_ITEMS; ++i) {
+		snprintf(item_value, sizeof(item_value), "item%02u", i);
+		struct counter_tag tags[] = {
+			counter_tag_init("batch", "growth"),
+			counter_tag_init("item", item_value),
+			counter_tag_init("kind", "test_growth"),
+		};
+		TEST_ASSERT_SUCCESS(
+			cp_config_counter_storage_registry_insert(
+				registry, tags, 3, storage, &err
+			),
+			"failed to insert growth item %u: %s",
+			i,
+			err ? yanet_error_message(err) : "?"
+		);
+
+		// A different tag order resolves to the same set.
+		struct counter_tag shuffled[] = {
+			counter_tag_init("kind", "test_growth"),
+			counter_tag_init("batch", "growth"),
+			counter_tag_init("item", item_value),
+		};
+		TEST_ASSERT(
+			cp_config_counter_storage_registry_lookup_exact(
+				registry, shuffled, 3
+			) == storage,
+			"growth item %u does not resolve exactly",
+			i
+		);
+	}
+
+	TEST_ASSERT(
+		cp_config_counter_storage_registry_lookup_pipeline(
+			registry, "dev0", "pipe0"
+		) == pipeline_before,
+		"the pre-existing pipeline storage changed after the growth "
+		"loop"
+	);
+
+	struct counter_tag unknown[] = {
+		counter_tag_init("batch", "growth"),
+		counter_tag_init("item", "nope"),
+		counter_tag_init("kind", "test_growth"),
+	};
+	TEST_ASSERT_NULL(
+		cp_config_counter_storage_registry_lookup_exact(
+			registry, unknown, 3
+		),
+		"an unknown tag set must not resolve"
+	);
+
+	struct counter_tag partial[] = {
+		counter_tag_init("batch", "growth"),
+		counter_tag_init("kind", "test_growth"),
+	};
+	TEST_ASSERT_NULL(
+		cp_config_counter_storage_registry_lookup_exact(
+			registry, partial, 2
+		),
+		"a partial tag set must not resolve exactly"
+	);
+
+	struct counter_tag superset[] = {
+		counter_tag_init("batch", "growth"),
+		counter_tag_init("item", "item00"),
+		counter_tag_init("kind", "test_growth"),
+		counter_tag_init("extra", "tag"),
+	};
+	TEST_ASSERT_NULL(
+		cp_config_counter_storage_registry_lookup_exact(
+			registry, superset, 4
+		),
+		"a superset tag set must not resolve exactly"
+	);
+
+	struct counter_tag duplicate[] = {
+		counter_tag_init("item", "item00"),
+		counter_tag_init("kind", "test_growth"),
+		counter_tag_init("batch", "growth"),
+	};
+	TEST_ASSERT(
+		cp_config_counter_storage_registry_insert(
+			registry, duplicate, 3, storage, &err
+		) != 0,
+		"a duplicate tag set must be rejected"
+	);
+	TEST_ASSERT_STR_CONTAINS(
+		err ? yanet_error_message(err) : "",
+		"already exists",
+		"a duplicate insert must report its reason"
+	);
+	yanet_error_free(err);
+	err = NULL;
+
+	// The predicate the exact path cannot express still matches every
+	// growth item through the pattern query.
+	struct counter_tag predicate[] = {
+		counter_tag_init("batch", "*"),
+		counter_tag_init("kind", "test_growth"),
+	};
+	struct cp_counter_storage **matched =
+		cp_config_counter_storage_registry_find(
+			registry, predicate, 2, NULL
+		);
+	TEST_ASSERT_NOT_NULL(matched, "the pattern query returned NULL");
+	size_t matched_count = 0;
+	while (matched[matched_count] != NULL) {
+		++matched_count;
+	}
+	free(matched);
+	TEST_ASSERT_EQUAL(
+		CW_GROWTH_ITEMS,
+		matched_count,
+		"the pattern query must match every growth item"
+	);
+
+	cp_config_lock(cp_config);
+	cp_config_gen_release(cp_config, config_gen);
+	cp_config_unlock(cp_config);
+	return TEST_SUCCESS;
+}
+
 int
 main(void) {
 	log_enable_name("debug");
@@ -696,6 +877,9 @@ main(void) {
 	}
 	if (res == TEST_SUCCESS) {
 		res = test_worker_rx_mempool_gauges(dp_config);
+	}
+	if (res == TEST_SUCCESS) {
+		res = test_registry_exact_lookup(cp_config);
 	}
 
 	agent_detach(agent);
