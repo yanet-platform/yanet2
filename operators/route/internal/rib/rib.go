@@ -13,14 +13,13 @@ import (
 )
 
 type RIB struct {
-	mu               sync.RWMutex
-	routes           maptrie.MapTrie[netip.Prefix, netip.Addr, RoutesList]
-	stats            *RIBStats
-	currentSessionId *atomic.Uint64 // Monotonically increasing ID for BIRD import sessions
-	// sessionTerminator points to a flag signaling the active FeedRIB stream to terminate;
-	// swapped on NewSession to invalidate the previous stream.
-	sessionTerminator *atomic.Pointer[atomic.Bool]
-	log               *zap.Logger
+	mu     sync.RWMutex
+	routes maptrie.MapTrie[netip.Prefix, netip.Addr, RoutesList]
+	stats  *RIBStats
+	// sessionID is the id of the active BIRD import stream: the greatest id
+	// NewSession has handed out, or zero before the first stream.
+	sessionID atomic.Uint64
+	log       *zap.Logger
 }
 
 // Option configures the NewRIB constructor.
@@ -49,15 +48,10 @@ func NewRIB(options ...Option) *RIB {
 		o(opts)
 	}
 
-	sessionTerminator := &atomic.Pointer[atomic.Bool]{}
-	sessionTerminator.Store(&atomic.Bool{})
-
 	return &RIB{
-		routes:            maptrie.NewMapTrie[netip.Prefix, netip.Addr, RoutesList](1024),
-		stats:             NewRIBStats(),
-		currentSessionId:  &atomic.Uint64{},
-		sessionTerminator: sessionTerminator,
-		log:               opts.Log,
+		routes: maptrie.NewMapTrie[netip.Prefix, netip.Addr, RoutesList](1024),
+		stats:  NewRIBStats(),
+		log:    opts.Log,
 	}
 }
 
@@ -179,21 +173,40 @@ func (m *RIB) LongestMatch(addr netip.Addr) (netip.Prefix, RoutesList, bool) {
 	return prefix, list, ok
 }
 
-func (m *RIB) Update(routes ...Route) {
+// Update stamps each route with sessionID and applies it to the RIB,
+// reporting whether the write was accepted.
+//
+// Only the active session's id is accepted, never zero; a rejected write
+// leaves the RIB unmutated. The check and the mutation share one locked
+// section, so a supersession landing right after the check still passed is
+// harmless: the successor's own write must take the same lock, so this write
+// always linearizes before any route the successor applies — which then
+// either overwrites the same identity or is removed by a later cleanup pass.
+func (m *RIB) Update(sessionID uint64, routes ...Route) bool {
 	m.mu.Lock()
-	m.update(routes...)
+	if !m.IsActive(sessionID) {
+		m.mu.Unlock()
+		return false
+	}
+	m.update(sessionID, routes...)
 	m.mu.Unlock()
+
 	m.stats.OnChanged()
+	return true
 }
 
 // update applies the given routes to the RIB, inserting each one or removing
 // it when it is marked as withdrawn. The caller must hold the write lock.
 //
-// The routes must not share storage with anything the RIB already holds: a
-// removal rewrites the path list of the affected entry, and a caller passing
-// that same list would have it change underneath the walk.
-func (m *RIB) update(routes ...Route) {
+// Each route is stamped with sessionID before it is stored or matched for
+// removal, so the RIB's own bookkeeping — not whatever the caller happened
+// to set — is the source of truth for which session a stored route belongs
+// to. The routes must not share storage with anything the RIB already
+// holds: a removal rewrites the path list of the affected entry, and a
+// caller passing that same list would have it change underneath the walk.
+func (m *RIB) update(sessionID uint64, routes ...Route) {
 	for _, route := range routes {
+		route.SessionID = sessionID
 		if route.ToRemove {
 			m.routes.UpdateOrDelete(
 				route.Prefix,
@@ -234,17 +247,28 @@ func (m *RIB) Stats() RIBStatsSnapshot {
 	return m.stats.Snapshot()
 }
 
-// NewSession generates a unique ID for a new BIRD import stream and provides its termination flag.
-// Crucially, it also signals the *previous* stream (if any) to terminate by setting its flag.
-// This ensures only one import stream actively updates a RIB for a given source.
-func (m *RIB) NewSession() (uint64, *atomic.Bool) {
-	id := m.currentSessionId.Add(1)
-	newSessionTerminator := &atomic.Bool{}
-	// Atomically replace the RIB's sessionTerminator with the new one, getting the old.
-	oldSessionTerminator := m.sessionTerminator.Swap(newSessionTerminator)
-	// Signal the previous stream, identified by oldSessionTerminator, to stop.
-	oldSessionTerminator.Store(true)
-	return id, newSessionTerminator
+// NewSession starts a BIRD import stream and returns its id, superseding the
+// previous stream.
+//
+// Allocating the id and making it the active one is a single atomic
+// increment, so the active id is always the greatest id handed out, however
+// the calls interleave, and starting a stream never waits behind a cleanup or
+// dump pass holding the write lock. A superseded stream is never signaled
+// directly; it learns its fate only when Update or IsActive later reports
+// that id as no longer active.
+func (m *RIB) NewSession() uint64 {
+	return m.sessionID.Add(1)
+}
+
+// IsActive reports whether sessionID currently names the active BIRD
+// import stream, never true for id zero.
+//
+// It is advisory only, a lock-free early exit for a cheap liveness check
+// such as a flush event: whether a route write actually lands is decided
+// solely by Update's own fence, under the write lock, which this method
+// never takes.
+func (m *RIB) IsActive(sessionID uint64) bool {
+	return sessionID != 0 && m.sessionID.Load() == sessionID
 }
 
 // CleanupTask removes stale BIRD routes (those with sessionID <= provided sessionID) after a TTL.
