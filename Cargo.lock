@@ -3051,6 +3051,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "yanet-cli-ring"
+version = "0.1.0"
+dependencies = [
+ "bytesize",
+ "clap",
+ "clap_complete",
+ "prost",
+ "serde",
+ "tabled",
+ "tonic",
+ "tonic-prost",
+ "yanet-cli",
+ "yanet-cli-build",
+]
+
+[[package]]
 name = "yanet-cli-route"
 version = "0.1.0"
 dependencies = [

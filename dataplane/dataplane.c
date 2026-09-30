@@ -601,6 +601,7 @@ dataplane_init(
 			"route_fib",
 			"l3b_virtual_service",
 			"l3b_session_table",
+			"ring",
 		};
 		for (size_t i = 0; i < sizeof(objects) / sizeof(objects[0]);
 		     ++i) {

@@ -57,6 +57,7 @@ CLI_MODULES := \
 	forward \
 	nat64 \
 	pdump \
+	ring \
 	unrdup \
 	operator-neighbour \
 	operator-pipeline \
