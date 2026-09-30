@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"golang.org/x/sync/errgroup"
 )
 
 // newTestRIB constructs a RIB suitable for unit tests.
@@ -86,11 +87,13 @@ func TestRemoveUnicastRoute_BGPPeerIsolation(t *testing.T) {
 	peer2 := netip.MustParseAddr("10.1.1.2")
 
 	r := newTestRIB(t)
+	sessionID := r.NewSession()
 
-	r.Update(
+	require.True(t, r.Update(
+		sessionID,
 		Route{Prefix: pfx, NextHop: nh, Peer: peer1, SourceID: RouteSourceBird},
 		Route{Prefix: pfx, NextHop: nh, Peer: peer2, SourceID: RouteSourceBird},
-	)
+	))
 
 	routes := routesForPrefix(t, r, pfx)
 	require.Len(t, routes, 2, "setup: both BGP routes must be present before removal attempt")
@@ -155,18 +158,26 @@ func Test_RIB_CleanupTask_MultiPathPrefixPartiallyStale(t *testing.T) {
 	fresh := netip.MustParseAddr("2001:db8::d")
 
 	r := newTestRIB(t)
-	r.Update(
-		birdRoute(pfx, "2001:db8::a", 1, 1),
-		birdRoute(pfx, "2001:db8::b", 2, 1),
-		birdRoute(pfx, "2001:db8::c", 3, 1),
-		birdRoute(pfx, fresh.String(), 4, 2),
-	)
+
+	// Two real sessions, so the earlier three paths and the later one carry
+	// the session ids their own Update call actually fenced on.
+	oldSession := r.NewSession()
+	require.True(t, r.Update(
+		oldSession,
+		birdRoute(pfx, "2001:db8::a", 1, oldSession),
+		birdRoute(pfx, "2001:db8::b", 2, oldSession),
+		birdRoute(pfx, "2001:db8::c", 3, oldSession),
+	))
+
+	newSession := r.NewSession()
+	require.True(t, r.Update(newSession, birdRoute(pfx, fresh.String(), 4, newSession)))
+
 	require.Len(t, routesForPrefix(t, r, pfx), 4, "setup: all four paths must be present")
 
-	runCleanup(t, r, 1)
+	runCleanup(t, r, oldSession)
 
 	require.Equal(t, []netip.Addr{fresh}, peersForPrefix(t, r, pfx),
-		"only the path of the later session may survive a cleanup of session 1")
+		"only the path of the later session may survive a cleanup of the earlier one")
 }
 
 // Test_RIB_CleanupTask_MultiPathPrefixFullyStale verifies that a cleanup pass
@@ -175,11 +186,13 @@ func Test_RIB_CleanupTask_MultiPathPrefixFullyStale(t *testing.T) {
 	pfx := netip.MustParsePrefix("2001:db8::/64")
 
 	r := newTestRIB(t)
-	r.Update(
+	sessionID := r.NewSession()
+	require.True(t, r.Update(
+		sessionID,
 		birdRoute(pfx, "2001:db8::a", 1, 1),
 		birdRoute(pfx, "2001:db8::b", 2, 1),
 		birdRoute(pfx, "2001:db8::c", 3, 1),
-	)
+	))
 	require.Len(t, routesForPrefix(t, r, pfx), 3, "setup: all three paths must be present")
 
 	runCleanup(t, r, 1)
@@ -198,10 +211,12 @@ func Test_RIB_CleanupTask_KeepsStaticRoute(t *testing.T) {
 	nh := netip.MustParseAddr("2001:db8::ffff")
 
 	r := newTestRIB(t)
-	r.Update(
+	sessionID := r.NewSession()
+	require.True(t, r.Update(
+		sessionID,
 		birdRoute(pfx, "2001:db8::a", 1, 1),
 		birdRoute(pfx, "2001:db8::b", 2, 1),
-	)
+	))
 	require.NoError(t, r.AddUnicastRoute(pfx, nh, RouteSourceStatic))
 
 	runCleanup(t, r, 1)
@@ -219,17 +234,199 @@ func Test_RIB_CleanupTask_StatsMatchContents(t *testing.T) {
 	mixed := netip.MustParsePrefix("2001:db8:2::/64")
 
 	r := newTestRIB(t)
-	r.Update(
-		birdRoute(stale, "2001:db8::a", 1, 1),
-		birdRoute(stale, "2001:db8::b", 2, 1),
-		birdRoute(mixed, "2001:db8::a", 3, 1),
-		birdRoute(mixed, "2001:db8::b", 4, 2),
-	)
 
-	runCleanup(t, r, 1)
+	// Two real sessions, so the earlier three routes and the later one carry
+	// the session ids their own Update call actually fenced on.
+	oldSession := r.NewSession()
+	require.True(t, r.Update(
+		oldSession,
+		birdRoute(stale, "2001:db8::a", 1, oldSession),
+		birdRoute(stale, "2001:db8::b", 2, oldSession),
+		birdRoute(mixed, "2001:db8::a", 3, oldSession),
+	))
+
+	newSession := r.NewSession()
+	require.True(t, r.Update(newSession, birdRoute(mixed, "2001:db8::b", 4, newSession)))
+
+	runCleanup(t, r, oldSession)
 
 	prefixes, routes := countDump(t, r)
 	stats := r.Stats()
 	require.Equal(t, prefixes, stats.Prefixes, "prefix counter must match the stored prefixes")
 	require.Equal(t, routes, stats.Routes, "route counter must match the stored routes")
+}
+
+// Test_RIB_NewSession_ConcurrentOrdering verifies that every round of
+// concurrent NewSession calls hands out unique, contiguous ids where only
+// the round's greatest id can still write.
+//
+// A write tagged with any other id in the round is rejected without
+// mutating the RIB. Allocating an id and publishing it as active must be
+// one atomic step — a counter increment followed by a separate store could
+// let two concurrent callers finish with a smaller id published last,
+// leaving the greatest id unable to write. This is a logic assertion, not
+// a data race: it is observed, not detected, under concurrent scheduling,
+// so the round and goroutine counts are sized to make the defect show up
+// reliably.
+func Test_RIB_NewSession_ConcurrentOrdering(t *testing.T) {
+	const goroutines = 16
+	const rounds = 500
+
+	pfx := netip.MustParsePrefix("2001:db8::/64")
+	peer := "2001:db8::a"
+
+	r := newTestRIB(t)
+	// LongestMatch copies only the matched list, keeping each round's check
+	// cheap across many rounds.
+	activeRoutes := func() []Route {
+		_, list, ok := r.LongestMatch(netip.MustParseAddr("2001:db8::1"))
+		require.True(t, ok)
+		return list.Routes
+	}
+
+	var prevMax uint64
+	for range rounds {
+		ids := make([]uint64, goroutines)
+
+		var g errgroup.Group
+		for idx := range goroutines {
+			g.Go(func() error {
+				ids[idx] = r.NewSession()
+				return nil
+			})
+		}
+		require.NoError(t, g.Wait())
+
+		seen := make(map[uint64]bool, goroutines)
+		maxID := uint64(0)
+		for _, id := range ids {
+			require.False(t, seen[id], "each id handed out in a round must be unique")
+			seen[id] = true
+			if id > maxID {
+				maxID = id
+			}
+		}
+		for offset := uint64(1); offset <= goroutines; offset++ {
+			require.True(t, seen[prevMax+offset],
+				"a round's ids must be contiguous with the previous round's greatest id")
+		}
+
+		require.True(t, r.Update(maxID, birdRoute(pfx, peer, 1, maxID)),
+			"the round's greatest id must still be able to write")
+
+		for _, id := range ids {
+			if id == maxID {
+				continue
+			}
+			require.False(t, r.Update(id, birdRoute(pfx, peer, 1, id)),
+				"any id other than the round's greatest must be rejected")
+		}
+
+		routes := activeRoutes()
+		require.Len(t, routes, 1, "a rejected write must never mutate the RIB")
+		require.Equal(t, maxID, routes[0].SessionID,
+			"the stored route must still carry the round's greatest id")
+
+		prevMax = maxID
+	}
+}
+
+// Test_RIB_Update_SupersededSessionRejected verifies that an announce or
+// withdraw tagged with a superseded session id is rejected.
+//
+// The active session's same-identity route is left untouched by it, and a
+// cleanup pass targeting the superseded id still leaves that route in
+// place.
+func Test_RIB_Update_SupersededSessionRejected(t *testing.T) {
+	pfx := netip.MustParsePrefix("2001:db8::/64")
+	peer := "2001:db8::a"
+
+	cases := []struct {
+		name string
+		// lateUpdate builds the superseded session's late send, tagged with
+		// sessionA, for the same identity as the active session's route.
+		lateUpdate func(sessionA uint64) Route
+	}{
+		{
+			name: "announce",
+			lateUpdate: func(sessionA uint64) Route {
+				stale := birdRoute(pfx, peer, 1, sessionA)
+				stale.Pref = 100
+				return stale
+			},
+		},
+		{
+			name: "withdraw",
+			lateUpdate: func(sessionA uint64) Route {
+				stale := birdRoute(pfx, peer, 1, sessionA)
+				stale.ToRemove = true
+				return stale
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			r := newTestRIB(t)
+			sessionA := r.NewSession()
+			sessionB := r.NewSession()
+
+			active := birdRoute(pfx, peer, 1, sessionB)
+			active.Pref = 200
+			require.True(t, r.Update(sessionB, active))
+
+			require.False(t, r.Update(sessionA, tc.lateUpdate(sessionA)),
+				"a write tagged with a superseded session must be rejected")
+
+			routes := routesForPrefix(t, r, pfx)
+			require.Len(t, routes, 1)
+			require.Equal(t, sessionB, routes[0].SessionID, "the active session's route must keep its own session id")
+			require.Equal(t, uint32(200), routes[0].Pref, "the active session's route must keep its own attributes")
+
+			runCleanup(t, r, sessionA)
+
+			routes = routesForPrefix(t, r, pfx)
+			require.Len(t, routes, 1, "cleanup targeting the superseded session must not remove the active session's route")
+		})
+	}
+}
+
+// Test_RIB_Update_SessionZeroRejected verifies that a write tagged with
+// session id zero is always rejected, whether the RIB has never started a
+// session or currently has one active.
+func Test_RIB_Update_SessionZeroRejected(t *testing.T) {
+	pfx := netip.MustParsePrefix("2001:db8::/64")
+
+	t.Run("fresh RIB", func(t *testing.T) {
+		r := newTestRIB(t)
+		require.False(t, r.Update(0, birdRoute(pfx, "2001:db8::a", 1, 0)))
+		require.Empty(t, routesForPrefix(t, r, pfx))
+	})
+
+	t.Run("active RIB", func(t *testing.T) {
+		r := newTestRIB(t)
+		r.NewSession()
+		require.False(t, r.Update(0, birdRoute(pfx, "2001:db8::a", 1, 0)))
+		require.Empty(t, routesForPrefix(t, r, pfx))
+	})
+}
+
+// Test_RIB_IsActive verifies that IsActive reports the currently active
+// session id true, a superseded id false, and id zero false whether the RIB
+// has never started a session or currently has one active.
+func Test_RIB_IsActive(t *testing.T) {
+	t.Run("fresh RIB", func(t *testing.T) {
+		r := newTestRIB(t)
+		require.False(t, r.IsActive(0), "id zero must never be reported active")
+	})
+
+	r := newTestRIB(t)
+	sessionA := r.NewSession()
+	require.True(t, r.IsActive(sessionA), "the only session so far must be active")
+	require.False(t, r.IsActive(0), "id zero must never be reported active")
+
+	sessionB := r.NewSession()
+	require.True(t, r.IsActive(sessionB), "the newest session must be active")
+	require.False(t, r.IsActive(sessionA), "a superseded session must not be reported active")
+	require.False(t, r.IsActive(0), "id zero must never be reported active")
 }

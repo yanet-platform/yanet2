@@ -213,7 +213,6 @@ zapmsg:operators/bird-adapter/service.go:AdapterService.runBirdImportLoop:Info:B
 zapmsg:operators/bird-adapter/service.go:AdapterService.runBirdImportLoop:Warn:BIRD export reader context cancelled, terminating loop:1  # legacy: lowercase the first letter of the log message
 zapmsg:operators/bird-adapter/service.go:AdapterService.runBirdImportLoop:Warn:BIRD export reader stopped with error:1  # legacy: lowercase the first letter of the log message
 zapmsg:operators/route/internal/operator/service_route.go:RouteService.FeedRIB:Info:FeedRIB session ended; scheduling cleanup:1  # legacy: lowercase the first letter of the log message
-zapmsg:operators/route/internal/operator/service_route.go:RouteService.FeedRIB:Warn:FeedRIB session terminated by a newer session:1  # legacy: lowercase the first letter of the log message
 zapmsg:operators/route/internal/rib/rib.go:RIB.AddUnicastRoute:Info:RIB: added unicast route:1  # legacy: lowercase the first letter of the log message
 zapmsg:operators/route/internal/rib/rib.go:RIB.CleanupTask:Info:RIB: cleanup task cancelled before timeout:1  # legacy: lowercase the first letter of the log message
 zapmsg:operators/route/internal/rib/rib.go:RIB.CleanupTask:Info:RIB: cleanup task completed:1  # legacy: lowercase the first letter of the log message

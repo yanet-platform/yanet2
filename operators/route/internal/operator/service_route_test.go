@@ -3,9 +3,13 @@ package operator
 import (
 	"io"
 	"net/netip"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
+	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -45,6 +49,31 @@ func (m *feedRIBTestStream) Recv() (*operatorpb.Update, error) {
 }
 
 func (m *feedRIBTestStream) SendAndClose(*operatorpb.UpdateSummary) error {
+	return nil
+}
+
+// channelFeedRIBStream serves updates pushed onto a channel, blocking Recv
+// until one arrives or the channel is closed, so a test can interleave two
+// concurrent FeedRIB calls in a controlled order.
+//
+// recvCount counts completed Recv calls, so a test can assert that an
+// update already sent to the channel was never consumed.
+type channelFeedRIBStream struct {
+	grpc.ServerStream
+	updates   chan *operatorpb.Update
+	recvCount int
+}
+
+func (m *channelFeedRIBStream) Recv() (*operatorpb.Update, error) {
+	update, ok := <-m.updates
+	if !ok {
+		return nil, io.EOF
+	}
+	m.recvCount++
+	return update, nil
+}
+
+func (m *channelFeedRIBStream) SendAndClose(*operatorpb.UpdateSummary) error {
 	return nil
 }
 
@@ -90,15 +119,17 @@ func TestShowRoutes_BirdDifferentPref_OnlyBetterIsBest(t *testing.T) {
 	// Use the RIB directly to insert two bird routes with distinct Prefs via
 	// the operator's RIB, accessed through the service internals.
 	ribRef := svc.getOrCreateRib("route0")
+	sessionID := ribRef.NewSession()
 
 	p1 := netip.MustParseAddr("192.0.2.1")
 	p2 := netip.MustParseAddr("192.0.2.2")
 	pfx := netip.MustParsePrefix("10.1.0.0/24")
 
-	ribRef.Update(
+	require.True(t, ribRef.Update(
+		sessionID,
 		rib.Route{Prefix: pfx, NextHop: netip.MustParseAddr("10.0.0.10"), Peer: p1, SourceID: rib.RouteSourceBird, Pref: 200},
 		rib.Route{Prefix: pfx, NextHop: netip.MustParseAddr("10.0.0.20"), Peer: p2, SourceID: rib.RouteSourceBird, Pref: 100},
-	)
+	))
 
 	resp, err := svc.ShowRoutes(t.Context(), &operatorpb.ShowRoutesRequest{Name: "route0"})
 	require.NoError(t, err)
@@ -207,6 +238,281 @@ func Test_RouteService_FeedRIB_FirstNameOwnsSession(t *testing.T) {
 	require.Len(t, response.GetRoutes(), 2)
 	_, ok := svc.ribs.Get("other")
 	require.False(t, ok, "a later update name must not create another session RIB")
+}
+
+// Test_RouteService_FeedRIB_SupersededSessionUpdateRejected verifies that
+// a superseded stream's late announce or withdraw is rejected.
+//
+// The route keeps the newer stream's attributes; the rejected write is not
+// counted by the update callback, and the stream stops reading and ends
+// cleanly instead of hanging or erroring. A cleanup pass targeting the
+// superseded session afterward still leaves the route in place.
+func Test_RouteService_FeedRIB_SupersededSessionUpdateRejected(t *testing.T) {
+	const syncTimeout = 5 * time.Second
+
+	cases := []struct {
+		name     string
+		isDelete bool
+	}{
+		{name: "announce"},
+		{name: "withdraw", isDelete: true},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			sessionStarted := make(chan uint64, 2)
+			routeApplied := make(chan struct{}, 2)
+			var onUpdateCount atomic.Int64
+			svc := NewRouteService(
+				neigh.NewNeighTable(),
+				// A long TTL keeps the service's own scheduled cleanup
+				// pending instead of running during the test; Close cancels
+				// the pending cleanup once the assertions below are done.
+				WithRouteServiceRIBTTL(time.Hour),
+				WithRouteServiceOnRIBSessionStart(func(name string, sessionID uint64) {
+					sessionStarted <- sessionID
+				}),
+				WithRouteServiceOnRIBUpdate(func(int) {
+					onUpdateCount.Add(1)
+					routeApplied <- struct{}{}
+				}),
+			)
+			defer func() {
+				require.NoError(t, svc.Close())
+			}()
+
+			peer := commonpb.NewIPAddressFromAddr(netip.MustParseAddr("198.51.100.1"))
+			fromA := &operatorpb.Route{
+				Prefix:  mustNetwork(t, "10.0.0.0/24"),
+				NextHop: commonpb.NewIPAddressFromAddr(netip.MustParseAddr("192.0.2.1")),
+				Peer:    peer,
+				Source:  operatorpb.RouteSourceID_ROUTE_SOURCE_ID_BIRD,
+			}
+			fromB := &operatorpb.Route{
+				Prefix:  mustNetwork(t, "10.0.0.0/24"),
+				NextHop: commonpb.NewIPAddressFromAddr(netip.MustParseAddr("192.0.2.2")),
+				Peer:    peer,
+				Source:  operatorpb.RouteSourceID_ROUTE_SOURCE_ID_BIRD,
+			}
+
+			// streamA is buffered so the update queued after the rejected
+			// one — which FeedRIB must never read — can be sent without
+			// blocking the test itself.
+			streamA := &channelFeedRIBStream{updates: make(chan *operatorpb.Update, 3)}
+			streamB := &channelFeedRIBStream{updates: make(chan *operatorpb.Update)}
+
+			// Closing is idempotent and also runs at cleanup, so a failed
+			// require partway through cannot leave either FeedRIB call
+			// blocked in Recv forever.
+			closeStreamA := sync.OnceFunc(func() { close(streamA.updates) })
+			closeStreamB := sync.OnceFunc(func() { close(streamB.updates) })
+			t.Cleanup(closeStreamA)
+			t.Cleanup(closeStreamB)
+
+			// A and B are waited on independently, since B's stream must
+			// stay open past A's own end for the assertions below.
+			var groupA, groupB errgroup.Group
+			groupA.Go(func() error { return svc.FeedRIB(streamA) })
+			streamA.updates <- &operatorpb.Update{Name: "route0", Route: fromA}
+
+			var sessionA uint64
+			select {
+			case sessionA = <-sessionStarted:
+			case <-time.After(syncTimeout):
+				t.Fatal("timed out waiting for A's session to start")
+			}
+			require.Equal(t, uint64(1), sessionA, "setup: A's session must start first")
+
+			select {
+			case <-routeApplied: // A's route is committed before B can supersede it
+			case <-time.After(syncTimeout):
+				t.Fatal("timed out waiting for A's route to be applied")
+			}
+
+			groupB.Go(func() error { return svc.FeedRIB(streamB) })
+			streamB.updates <- &operatorpb.Update{Name: "route0", Route: fromB}
+
+			var sessionB uint64
+			select {
+			case sessionB = <-sessionStarted:
+			case <-time.After(syncTimeout):
+				t.Fatal("timed out waiting for B's session to start")
+			}
+			require.Equal(t, uint64(2), sessionB, "setup: B's session must supersede A's")
+
+			select {
+			case <-routeApplied: // B's route is committed before the late send below
+			case <-time.After(syncTimeout):
+				t.Fatal("timed out waiting for B's route to be applied")
+			}
+
+			// A's session is already superseded by the time this reaches the
+			// service, so this send is rejected by the RIB's own fence.
+			streamA.updates <- &operatorpb.Update{Name: "route0", Route: fromA, IsDelete: tc.isDelete}
+			// Queued after the rejected send; FeedRIB must never read it,
+			// since the rejection ends the stream immediately.
+			streamA.updates <- &operatorpb.Update{Name: "route0", Route: fromA}
+			closeStreamA()
+			require.NoError(t, groupA.Wait(), "A's FeedRIB call must end cleanly despite the rejection")
+
+			require.Equal(t, 2, streamA.recvCount,
+				"A must stop reading once its write is rejected, never reaching the queued update after it")
+
+			ribRef, ribExists := svc.getRib("route0")
+			require.True(t, ribExists, "the RIB must already exist after FeedRIB created it")
+			// Run the superseded session's cleanup synchronously, standing
+			// in for the service's own long-TTL scheduled pass so the
+			// outcome below does not depend on winning a background race.
+			ribRef.CleanupTask(sessionA, make(chan bool), 0)
+
+			_, routes, ok := ribRef.LongestMatch(netip.MustParseAddr("10.0.0.1"))
+			require.True(t, ok, "the prefix must still be present after A's rejected send and cleanup")
+			require.Len(t, routes.Routes, 1,
+				"A's rejected send must not change the route set, and cleanup of the superseded session must not remove B's route")
+			require.Equal(t, sessionB, routes.Routes[0].SessionID, "the surviving route must keep B's session id")
+			require.Equal(t, netip.MustParseAddr("192.0.2.2"), routes.Routes[0].NextHop,
+				"the surviving route must keep B's attributes")
+
+			closeStreamB()
+			require.NoError(t, groupB.Wait(), "B's FeedRIB call must end cleanly")
+
+			require.Equal(t, int64(2), onUpdateCount.Load(),
+				"A's rejected write must not be counted by the update callback")
+		})
+	}
+}
+
+// Test_RouteService_FeedRIB_SupersededSessionNonWritingUpdateRejected
+// verifies that a superseded stream's late non-writing message — a flush or
+// a route the converter rejects — is rejected.
+//
+// The rejection mirrors how a route write is rejected by the fence in
+// Update: the stream ends cleanly without waking the reconcile loop, a
+// further queued update on that stream is never read, and the second
+// stream's own FeedRIB call still ends cleanly too.
+func Test_RouteService_FeedRIB_SupersededSessionNonWritingUpdateRejected(t *testing.T) {
+	const syncTimeout = 5 * time.Second
+
+	cases := []struct {
+		name          string
+		unconvertible bool
+	}{
+		{name: "flush"},
+		{name: "unconvertible route", unconvertible: true},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			sessionStarted := make(chan uint64, 2)
+			routeApplied := make(chan struct{}, 2)
+			var onChangedCount atomic.Int64
+			svc := NewRouteService(
+				neigh.NewNeighTable(),
+				WithRouteServiceRIBTTL(time.Hour),
+				WithRouteServiceOnRIBSessionStart(func(name string, sessionID uint64) {
+					sessionStarted <- sessionID
+				}),
+				WithRouteServiceOnRIBUpdate(func(int) {
+					routeApplied <- struct{}{}
+				}),
+				WithRouteServiceOnChanged(func() { onChangedCount.Add(1) }),
+			)
+			defer func() {
+				require.NoError(t, svc.Close())
+			}()
+
+			peer := commonpb.NewIPAddressFromAddr(netip.MustParseAddr("198.51.100.1"))
+			fromA := &operatorpb.Route{
+				Prefix:  mustNetwork(t, "10.0.0.0/24"),
+				NextHop: commonpb.NewIPAddressFromAddr(netip.MustParseAddr("192.0.2.1")),
+				Peer:    peer,
+				Source:  operatorpb.RouteSourceID_ROUTE_SOURCE_ID_BIRD,
+			}
+			fromB := &operatorpb.Route{
+				Prefix:  mustNetwork(t, "10.0.0.0/24"),
+				NextHop: commonpb.NewIPAddressFromAddr(netip.MustParseAddr("192.0.2.2")),
+				Peer:    peer,
+				Source:  operatorpb.RouteSourceID_ROUTE_SOURCE_ID_BIRD,
+			}
+
+			lateUpdate := &operatorpb.Update{Name: "route0"}
+			if tc.unconvertible {
+				// NextHop is left unset, which ToRIBRoute rejects.
+				lateUpdate.Route = &operatorpb.Route{
+					Prefix: mustNetwork(t, "10.0.0.0/24"),
+					Peer:   peer,
+					Source: operatorpb.RouteSourceID_ROUTE_SOURCE_ID_BIRD,
+				}
+			}
+
+			// streamA is buffered so the update queued after the rejected
+			// one — which FeedRIB must never read — can be sent without
+			// blocking the test itself.
+			streamA := &channelFeedRIBStream{updates: make(chan *operatorpb.Update, 3)}
+			streamB := &channelFeedRIBStream{updates: make(chan *operatorpb.Update)}
+
+			closeStreamA := sync.OnceFunc(func() { close(streamA.updates) })
+			closeStreamB := sync.OnceFunc(func() { close(streamB.updates) })
+			t.Cleanup(closeStreamA)
+			t.Cleanup(closeStreamB)
+
+			var groupA, groupB errgroup.Group
+			groupA.Go(func() error { return svc.FeedRIB(streamA) })
+			streamA.updates <- &operatorpb.Update{Name: "route0", Route: fromA}
+
+			var sessionA uint64
+			select {
+			case sessionA = <-sessionStarted:
+			case <-time.After(syncTimeout):
+				t.Fatal("timed out waiting for A's session to start")
+			}
+			require.Equal(t, uint64(1), sessionA, "setup: A's session must start first")
+
+			select {
+			case <-routeApplied:
+			case <-time.After(syncTimeout):
+				t.Fatal("timed out waiting for A's route to be applied")
+			}
+
+			groupB.Go(func() error { return svc.FeedRIB(streamB) })
+			streamB.updates <- &operatorpb.Update{Name: "route0", Route: fromB}
+
+			var sessionB uint64
+			select {
+			case sessionB = <-sessionStarted:
+			case <-time.After(syncTimeout):
+				t.Fatal("timed out waiting for B's session to start")
+			}
+			require.Equal(t, uint64(2), sessionB, "setup: B's session must supersede A's")
+
+			select {
+			case <-routeApplied:
+			case <-time.After(syncTimeout):
+				t.Fatal("timed out waiting for B's route to be applied")
+			}
+
+			// From here on, onChanged must increase by exactly one: A's own
+			// stream-end epilogue.
+			onChangedBefore := onChangedCount.Load()
+
+			// A's session is already superseded by the time this reaches
+			// the service, so this send is the late non-writing message
+			// under test.
+			streamA.updates <- lateUpdate
+			// Queued after the rejected send; FeedRIB must never read it.
+			streamA.updates <- &operatorpb.Update{Name: "route0", Route: fromA}
+			closeStreamA()
+			require.NoError(t, groupA.Wait(), "A's FeedRIB call must end cleanly despite the rejected message")
+
+			require.Equal(t, 2, streamA.recvCount,
+				"A must stop reading once its message is rejected, never reaching the queued update after it")
+			require.Equal(t, onChangedBefore+1, onChangedCount.Load(),
+				"A's rejected message must not wake the reconcile loop itself, only its own stream-end epilogue may")
+
+			closeStreamB()
+			require.NoError(t, groupB.Wait(), "B's FeedRIB call must end cleanly")
+		})
+	}
 }
 
 // TestInsertRoute_MalformedPrefix_InvalidArgument verifies that a prefix
