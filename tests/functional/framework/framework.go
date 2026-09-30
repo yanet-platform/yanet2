@@ -46,6 +46,7 @@ const (
 	CLIDevicePlain = CLIBasePath + "/yanet-cli-device-plain"
 	CLIDecap       = CLIBasePath + "/yanet-cli-decap"
 	CLIForward     = CLIBasePath + "/yanet-cli-forward"
+	CLIRing        = CLIBasePath + "/yanet-cli-ring"
 	CLIGeneric     = CLIBasePath + "/yanet-cli"
 
 	globalName = "global"
@@ -59,7 +60,8 @@ var CLIBinaryNames = []string{
 	"yanet-cli",
 	"yanet-cli-route", "yanet-cli-route-mpls",
 	"yanet-cli-nat64", "yanet-cli-acl", "yanet-cli-blackhole",
-	"yanet-cli-fwstate", "yanet-cli-fwstatemap", "yanet-cli-pipeline", "yanet-cli-function",
+	"yanet-cli-fwstate", "yanet-cli-fwstatemap", "yanet-cli-ring",
+	"yanet-cli-pipeline", "yanet-cli-function",
 	"yanet-cli-device-plain", "yanet-cli-device-vlan",
 	"yanet-cli-decap", "yanet-cli-forward",
 	"yanet-cli-common", "yanet-cli-dscp", "yanet-cli-counters",
