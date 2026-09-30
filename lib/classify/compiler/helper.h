@@ -17,6 +17,16 @@ classify_join(
 );
 
 int
+classify_join_rules(
+	struct memory_context *memory_context,
+	const struct classifier *left,
+	const struct classifier *right,
+	const struct classifier_rule *const *rules,
+	uint32_t rule_count,
+	struct value_table *table
+);
+
+int
 classify_decode(
 	struct memory_context *memory_context,
 	const struct classifier *cls,
