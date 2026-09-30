@@ -68,8 +68,9 @@ type fakeBackend struct {
 	deleted []string
 	blocks  map[string]*updateBlock
 
-	deleteErr error
-	updateErr error
+	updateCalls int
+	deleteErr   error
+	updateErr   error
 }
 
 // updateBlock holds an update of one name inside the backend.
@@ -95,6 +96,7 @@ func (m *fakeBackend) blockUpdate(name string) (<-chan struct{}, func()) {
 
 func (m *fakeBackend) UpdateModule(name string, settings pdump.Settings) (pdump.Module, error) {
 	m.mu.Lock()
+	m.updateCalls++
 	block := m.blocks[name]
 	delete(m.blocks, name)
 	m.mu.Unlock()
@@ -147,6 +149,14 @@ func (m *fakeBackend) Last() *fakeModule {
 	return m.modules[len(m.modules)-1]
 }
 
+// UpdateCalls returns backend entries, including updates that fail.
+func (m *fakeBackend) UpdateCalls() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	return m.updateCalls
+}
+
 // TestShowConfigUnknownConfig verifies that ShowConfig reports NotFound for
 // a config name that was never set.
 func TestShowConfigUnknownConfig(t *testing.T) {
@@ -169,7 +179,7 @@ func Test_PdumpService_SetConfig_MergesCarriedFieldsOverPublishedConfig(t *testi
 			Filter:   proto.String("udp"),
 			Mode:     proto.Uint32(2),
 			Snaplen:  proto.Uint32(256),
-			RingSize: proto.Uint32(uint32(2 * datasize.MB)),
+			RingSize: proto.Uint32(uint32(32 * datasize.MB)),
 		},
 	})
 	require.NoError(t, err)
@@ -180,7 +190,7 @@ func Test_PdumpService_SetConfig_MergesCarriedFieldsOverPublishedConfig(t *testi
 	})
 	require.NoError(t, err)
 
-	want := pdump.Settings{Filter: "tcp", Mode: 2, Snaplen: 256, RingSize: uint32(2 * datasize.MB)}
+	want := pdump.Settings{Filter: "tcp", Mode: 2, Snaplen: 256, RingSize: uint32(32 * datasize.MB)}
 	require.Equal(t, want, backend.Last().settings)
 
 	response, err := service.ShowConfig(t.Context(), &pdumppb.ShowConfigRequest{Name: "capture"})
@@ -189,9 +199,95 @@ func Test_PdumpService_SetConfig_MergesCarriedFieldsOverPublishedConfig(t *testi
 		Filter:   proto.String("tcp"),
 		Mode:     proto.Uint32(2),
 		Snaplen:  proto.Uint32(256),
-		RingSize: proto.Uint32(uint32(2 * datasize.MB)),
+		RingSize: proto.Uint32(uint32(32 * datasize.MB)),
 	}
 	require.True(t, proto.Equal(wantConfig, response.Config), "got %v", response.Config)
+}
+
+// Test_PdumpService_SetConfig_UsesNativeRingLimit verifies that protocol-valid
+// rings are published only when the linked allocator can hold them.
+func Test_PdumpService_SetConfig_UsesNativeRingLimit(t *testing.T) {
+	maximumCode := codes.OK
+	if pdump.NativeMaxRingSizeForTest() < pdumppb.MaxRingSize {
+		maximumCode = codes.InvalidArgument
+	}
+	cases := []struct {
+		name     string
+		ringSize uint32
+		code     codes.Code
+	}{
+		{name: "32 MiB ring is accepted", ringSize: 1 << 25, code: codes.OK},
+		{name: "64 MiB follows native capacity", ringSize: 1 << 26, code: maximumCode},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			backend := &fakeBackend{}
+			service := pdump.NewPdumpService(backend)
+			request := &pdumppb.SetConfigRequest{
+				Name:   "capture",
+				Config: &pdumppb.Config{RingSize: proto.Uint32(tc.ringSize)},
+			}
+			require.NoError(t, request.Validate())
+
+			response, err := service.SetConfig(t.Context(), request)
+			require.Equal(t, tc.code, status.Code(err))
+			if tc.code != codes.OK {
+				require.Nil(t, response)
+				require.Zero(t, backend.UpdateCalls())
+				_, err := service.ShowConfig(t.Context(), &pdumppb.ShowConfigRequest{Name: "capture"})
+				require.Equal(t, codes.NotFound, status.Code(err))
+				return
+			}
+
+			require.NoError(t, err)
+			require.NotNil(t, response)
+			require.Equal(t, 1, backend.UpdateCalls())
+			require.Equal(t, tc.ringSize, backend.Last().settings.RingSize)
+			shown, err := service.ShowConfig(t.Context(), &pdumppb.ShowConfigRequest{Name: "capture"})
+			require.NoError(t, err)
+			require.Equal(t, tc.ringSize, shown.GetConfig().GetRingSize())
+		})
+	}
+}
+
+// Test_PdumpService_SetConfig_RefusedRingKeepsPublishedModule verifies that a
+// native-capacity refusal preserves the backend, settings and module lifetime.
+func Test_PdumpService_SetConfig_RefusedRingKeepsPublishedModule(t *testing.T) {
+	backend := &fakeBackend{}
+	service := pdump.NewPdumpService(backend)
+	_, err := service.SetConfig(t.Context(), &pdumppb.SetConfigRequest{
+		Name: "capture",
+		Config: &pdumppb.Config{
+			Filter:   proto.String("udp"),
+			RingSize: proto.Uint32(1 << 25),
+		},
+	})
+	require.NoError(t, err)
+	original := backend.Last()
+	before, err := service.ShowConfig(t.Context(), &pdumppb.ShowConfigRequest{Name: "capture"})
+	require.NoError(t, err)
+
+	ringSize := uint32(1 << 27)
+	if pdump.NativeMaxRingSizeForTest() < pdumppb.MaxRingSize {
+		ringSize = pdumppb.MaxRingSize
+	}
+	response, err := service.SetConfig(t.Context(), &pdumppb.SetConfigRequest{
+		Name: "capture",
+		Config: &pdumppb.Config{
+			Filter:   proto.String("tcp"),
+			RingSize: proto.Uint32(ringSize),
+		},
+	})
+	require.Equal(t, codes.InvalidArgument, status.Code(err))
+	require.Nil(t, response)
+	require.Equal(t, 1, backend.UpdateCalls())
+	require.Same(t, original, backend.Last())
+	require.False(t, original.freed.Load())
+
+	after, err := service.ShowConfig(t.Context(), &pdumppb.ShowConfigRequest{Name: "capture"})
+	require.NoError(t, err)
+	require.True(t, proto.Equal(before.GetConfig(), after.GetConfig()), "got %v", after.GetConfig())
 }
 
 // Test_PdumpService_SetConfig_AppliesCarriedEmptyAndZeroValues verifies that a

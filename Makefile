@@ -361,7 +361,6 @@ test-asan-only:
 	fi
 	meson compile -C build
 	@set -eu; \
-	export GOFLAGS="$$(sh scripts/go-flags.sh yanet_asan)"; \
 	export CGO_CPPFLAGS="$(strip $(CGO_CPPFLAGS) $(YANET_CACHE_LINE_CPPFLAG))"; \
 	export CGO_CFLAGS="-fsanitize=address,undefined"; \
 	export CGO_LDFLAGS="-fsanitize=address,undefined"; \

@@ -25,9 +25,20 @@ func Test_MaxMode_MatchesC(t *testing.T) {
 }
 
 // Test_MaxRingSize_MatchesC verifies that the pure-Go ring limit matches the
-// allocator's build-specific usable limit.
+// allocator's internal pool capacity.
 func Test_MaxRingSize_MatchesC(t *testing.T) {
-	require.Equal(t, uint32(pdumppb.MaxRingSize), maxRingSize)
+	require.Equal(t, uint32(pdumppb.MaxRingSize), maxRingCapacity)
+}
+
+// Test_MaxRingSize_MatchesCGOBuildProfile verifies that the linked ring bound
+// agrees with the usable capacity compiled into the Go bridge.
+func Test_MaxRingSize_MatchesCGOBuildProfile(t *testing.T) {
+	require.Equal(t, compiledMaxRingSize, maxRingSize)
+}
+
+// NativeMaxRingSizeForTest returns the linked allocator's usable ring limit.
+func NativeMaxRingSizeForTest() uint32 {
+	return maxRingSize
 }
 
 const (

@@ -138,6 +138,14 @@ func (m *PdumpService) SetConfig(
 			settings = current.Settings()
 		}
 		settings = mergeSettings(settings, request.GetConfig())
+		if settings.RingSize > maxRingSize {
+			return nil, status.Errorf(
+				codes.InvalidArgument,
+				"ring_size %d exceeds native allocator limit %d",
+				settings.RingSize,
+				maxRingSize,
+			)
+		}
 
 		m.log.Debug("update config", zap.String("module", name))
 
