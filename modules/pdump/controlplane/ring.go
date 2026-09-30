@@ -1,5 +1,6 @@
 package pdump
 
+//#include "common/memory_block.h"
 //#include "modules/pdump/api/controlplane.h"
 import "C"
 
@@ -21,9 +22,11 @@ type ringMsgHdr C.struct_ring_msg_hdr
 type cRingBuffer C.struct_ring_buffer
 
 const (
-	minRingSize     = datasize.MB
-	hdrSizeSize     = int(unsafe.Sizeof(ringMsgHdr{}.total_len))
-	cRingMsgHdrSize = unsafe.Sizeof(ringMsgHdr{})
+	minRingSize         = datasize.MB
+	maxRingCapacity     = uint32(C.MEMORY_BLOCK_ALLOCATOR_MAX_SIZE_INTERNAL)
+	compiledMaxRingSize = uint32(C.MEMORY_BLOCK_ALLOCATOR_MAX_SIZE)
+	hdrSizeSize         = int(unsafe.Sizeof(ringMsgHdr{}.total_len))
+	cRingMsgHdrSize     = unsafe.Sizeof(ringMsgHdr{})
 )
 
 var (

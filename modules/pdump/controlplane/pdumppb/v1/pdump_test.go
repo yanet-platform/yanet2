@@ -38,23 +38,6 @@ func Test_ShowConfigRequest_Validate(t *testing.T) {
 // Test_SetConfigRequest_Validate verifies that the rules for the config fields
 // a request carries report their exact field and rule text.
 func Test_SetConfigRequest_Validate(t *testing.T) {
-	maxRingSizeMessage := ""
-	if pdumppb.MaxRingSize&(pdumppb.MaxRingSize-1) != 0 {
-		maxRingSizeMessage = fmt.Sprintf(
-			"ring_size %d must be a power of two",
-			pdumppb.MaxRingSize,
-		)
-	}
-	normalMaxRingSizeMessage := ""
-	if pdumppb.MaxRingSize < 1<<26 {
-		normalMaxRingSizeMessage = fmt.Sprintf(
-			"ring_size %d must be in range %d..%d",
-			1<<26,
-			1<<20,
-			pdumppb.MaxRingSize,
-		)
-	}
-
 	cases := []struct {
 		name    string
 		request *pdumppb.SetConfigRequest
@@ -140,27 +123,26 @@ func Test_SetConfigRequest_Validate(t *testing.T) {
 			},
 		},
 		{
-			name: "largest ASAN power-of-two ring size",
+			name: "32 MiB ring size",
 			request: &pdumppb.SetConfigRequest{
 				Name:   "pdump0",
 				Config: &pdumppb.Config{RingSize: proto.Uint32(1 << 25)},
 			},
 		},
 		{
-			name: "allocator maximum ring size",
-			request: &pdumppb.SetConfigRequest{
-				Name:   "pdump0",
-				Config: &pdumppb.Config{RingSize: proto.Uint32(pdumppb.MaxRingSize)},
-			},
-			message: maxRingSizeMessage,
-		},
-		{
-			name: "normal allocator maximum ring size",
+			name: "64 MiB protocol maximum ring size",
 			request: &pdumppb.SetConfigRequest{
 				Name:   "pdump0",
 				Config: &pdumppb.Config{RingSize: proto.Uint32(1 << 26)},
 			},
-			message: normalMaxRingSizeMessage,
+		},
+		{
+			name: "ring size is not a power of two",
+			request: &pdumppb.SetConfigRequest{
+				Name:   "pdump0",
+				Config: &pdumppb.Config{RingSize: proto.Uint32(1<<20 + 1)},
+			},
+			message: "ring_size 1048577 must be a power of two",
 		},
 		{
 			name: "ring size above maximum",
