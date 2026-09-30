@@ -1,5 +1,7 @@
 #pragma once
 
+#include "common/hash_index.h"
+
 #include "api/counter.h"
 #include "lib/counters/counters.h"
 
@@ -18,11 +20,22 @@ struct cp_counter_storage {
 	struct counter_storage *storage;
 };
 
+// Items are addressed by their position in the items array; the index
+// stores those positions, so growing the array never invalidates it.
 struct cp_config_counter_storage_registry {
 	struct memory_context *memory_context;
 	struct cp_counter_storage *items;
 	size_t count;
 	size_t capacity;
+
+	// Hash index over each item's exact normalized tag set, serving
+	// duplicate rejection on insert and exact lookups in constant time.
+	//
+	// Entries hold item positions, so growing the items array never
+	// invalidates them. The index stays in lockstep with the array —
+	// capacity and count equal the array's, and both grow together —
+	// while pattern queries with predicate values still walk the array.
+	struct hash_index tag_index;
 };
 
 int
@@ -47,6 +60,20 @@ cp_config_counter_storage_registry_find(
 	const struct counter_tag *tags,
 	size_t tag_count,
 	yanet_error **err
+);
+
+// Resolve the storage registered under exactly the passed tag list, or
+// NULL when no item carries precisely that tag set.
+//
+// The tags are normalized the same way insert normalizes them, so any
+// permutation of a stored set resolves to its storage; a set that is a
+// subset or superset of a stored one does not match. Predicate values
+// cannot match: stored tag sets never carry them.
+struct counter_storage *
+cp_config_counter_storage_registry_lookup_exact(
+	struct cp_config_counter_storage_registry *registry,
+	const struct counter_tag *tags,
+	size_t tag_count
 );
 
 void
