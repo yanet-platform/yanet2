@@ -147,11 +147,19 @@ struct acl_filter_ip4 {
 struct acl_filter_ip4_tcp {
 	struct value_table root_joint;
 	struct vline rule_map;
+	// The without-ports decoding: rules whose port predicates are
+	// vacuous resolve through the core classes joined with the tcp
+	// flags classes alone, combined with the root decoding by rule
+	// order at lookup time.
+	struct value_table vac_joint;
+	struct vline vac_rule_map;
 };
 
 struct acl_filter_ip4_udp {
 	struct value_table root_joint;
 	struct vline rule_map;
+	// The without-ports decoding over the core classes alone.
+	struct vline vac_rule_map;
 };
 
 struct acl_filter_ip4_icmp {
@@ -167,11 +175,14 @@ struct acl_filter_ip6 {
 struct acl_filter_ip6_tcp {
 	struct value_table root_joint;
 	struct vline rule_map;
+	struct value_table vac_joint;
+	struct vline vac_rule_map;
 };
 
 struct acl_filter_ip6_udp {
 	struct value_table root_joint;
 	struct vline rule_map;
+	struct vline vac_rule_map;
 };
 
 struct acl_filter_ip6_icmp {

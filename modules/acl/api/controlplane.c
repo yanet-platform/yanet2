@@ -52,10 +52,13 @@ acl_module_config_destroy(struct cp_module *cp_module) {
 
 	value_table_free(&config->filter_ip4_tcp.root_joint);
 	vline_free(&config->filter_ip4_tcp.rule_map);
+	value_table_free(&config->filter_ip4_tcp.vac_joint);
+	vline_free(&config->filter_ip4_tcp.vac_rule_map);
 	memset(&config->filter_ip4_tcp, 0, sizeof(config->filter_ip4_tcp));
 
 	value_table_free(&config->filter_ip4_udp.root_joint);
 	vline_free(&config->filter_ip4_udp.rule_map);
+	vline_free(&config->filter_ip4_udp.vac_rule_map);
 	memset(&config->filter_ip4_udp, 0, sizeof(config->filter_ip4_udp));
 
 	value_table_free(&config->filter_ip4_icmp.root_joint);
@@ -68,10 +71,13 @@ acl_module_config_destroy(struct cp_module *cp_module) {
 
 	value_table_free(&config->filter_ip6_tcp.root_joint);
 	vline_free(&config->filter_ip6_tcp.rule_map);
+	value_table_free(&config->filter_ip6_tcp.vac_joint);
+	vline_free(&config->filter_ip6_tcp.vac_rule_map);
 	memset(&config->filter_ip6_tcp, 0, sizeof(config->filter_ip6_tcp));
 
 	value_table_free(&config->filter_ip6_udp.root_joint);
 	vline_free(&config->filter_ip6_udp.rule_map);
+	vline_free(&config->filter_ip6_udp.vac_rule_map);
 	memset(&config->filter_ip6_udp, 0, sizeof(config->filter_ip6_udp));
 
 	value_table_free(&config->filter_ip6_icmp.root_joint);
@@ -547,11 +553,41 @@ check_acl_rule_udp(const struct acl_rule *acl_rule) {
 	return acl_rule->path_udp;
 }
 
-// The union of the tcp and the udp projections: the rules the shared
-// ports pair compiles over.
+// A port side is vacuous when it carries no ranges at all or its
+// first range spans the whole u16 domain, matching the notion of any
+// the u16 compiler applies when it builds the groups.
+static bool
+acl_rule_port_side_any(const struct filter_port_ranges *ranges) {
+	return ranges->count == 0 ||
+	       ranges->items[0].to - ranges->items[0].from == 65535;
+}
+
+// The ports pair compiles only over the rules that actually restrict
+// a port side; the rules with both sides vacuous resolve through the
+// without-ports decodings instead. A vacuous pair would paint its
+// whole core footprint across every port class of the root joint,
+// which is what makes large rulesets with catch-all port rules
+// explode.
+static bool
+acl_rule_ports_restricted(const struct acl_rule *acl_rule) {
+	return !acl_rule_port_side_any(&acl_rule->src_port_ranges) ||
+	       !acl_rule_port_side_any(&acl_rule->dst_port_ranges);
+}
+
 static int
-acl_rule_has_ports_path(const struct acl_rule *acl_rule) {
-	return acl_rule->path_tcp || acl_rule->path_udp;
+check_acl_rule_ports_restricted(const struct acl_rule *acl_rule) {
+	return (acl_rule->path_tcp || acl_rule->path_udp) &&
+	       acl_rule_ports_restricted(acl_rule);
+}
+
+static int
+check_acl_rule_tcp_vacuous(const struct acl_rule *acl_rule) {
+	return acl_rule->path_tcp && !acl_rule_ports_restricted(acl_rule);
+}
+
+static int
+check_acl_rule_udp_vacuous(const struct acl_rule *acl_rule) {
+	return acl_rule->path_udp && !acl_rule_ports_restricted(acl_rule);
 }
 
 static int
@@ -1077,31 +1113,30 @@ struct acl_path_filters_build {
 	struct value_table *icmp_root_joint;
 	struct vline *icmp_rule_map;
 	uint64_t *icmp_rule_count;
+
+	// The without-ports decodings of the vacuous port rules - the tcp
+	// side keeps the flags constraint through a core join, the udp
+	// side resolves on the core classes alone.
+	struct value_table *tcp_vac_joint;
+	struct vline *tcp_vac_rule_map;
+
+	struct vline *udp_vac_rule_map;
 };
 
 /*
- * Compiles the port scoped filter of a family: the ports pair over
- * the port scoped projection, the family root joint joining the ports
- * classes onto the core classes of the core stage argument, and the
- * decoder of the same projection.
- *
- * The core groups come from the union projection of the family while
- * the ports groups come from the port scoped one, so a rule absent
- * from either side keeps no group there and the join skips it. The
- * stages write straight into the targets of the build descriptor, and
- * a failed stage leaves its own outputs zeroed or released, so the
- * destroy walk finishes a partially built config without per stage
- * cleanup here; the registries and the rule group mappings are the
- * only scratch, released on the common exit of both success and
- * failure.
- */
-/*
  * Compiles the protocol paths of one family: the ports pair over the
- * union of the tcp and the udp projections - both paths join its
- * classes through their own root joints - the TCP flags leaf over the
- * tcp projection, and the ICMP type leaf over the icmp projection,
- * each path root joint joining the path suffix classes onto the core
- * classes of the stage argument and handing its stage out.
+ * port restricted subset of the tcp and the udp projections - both
+ * paths join its classes through their own root joints - the TCP
+ * flags leaf over the tcp projection, and the ICMP type leaf over the
+ * icmp projection, each path root joint joining the path suffix
+ * classes onto the core classes of the stage argument and handing its
+ * stage out.
+ *
+ * The rules with both port sides vacuous take no ports groups at all:
+ * they resolve through the without-ports decodings below, joined by
+ * rule order with the path roots at lookup time. The core groups come
+ * from the union projection of the family, so a rule absent from a
+ * path projection keeps no group there and its join skips it.
  *
  * Every stage writes straight into the classifiers and the filters
  * embedded in the config, and a failed stage leaves its own outputs
@@ -1132,13 +1167,16 @@ acl_module_build_paths(
 
 	int rc = -1;
 
-	// The ports pair over the union of both port carrying paths.
+	// The ports pair over the rules restricting a port side only: the
+	// both-vacuous rules join the without-ports decodings below
+	// instead of painting their whole core footprint across every
+	// port class of the root joints.
 	{
 		const struct classifier_rule **rule_ptrs =
 			acl_rule_ptrs_project(
 				acl_rules,
 				acl_rule_count,
-				acl_rule_has_ports_path
+				check_acl_rule_ports_restricted
 			);
 		if (rule_ptrs == NULL) {
 			return -1;
@@ -1267,6 +1305,90 @@ acl_module_build_paths(
 		    icmp_stage
 	    )) {
 		goto error;
+	}
+
+	// The without-ports decodings. The tcp side
+	// keeps the flags constraint: the core classes join the flags
+	// classes over the shared flags stage, and the vacuous tcp
+	// projection decodes the joint. The udp side needs no port or
+	// transport attribute at all: the vacuous udp projection decodes
+	// the core classes directly. A ruleset without vacuous port rules
+	// builds neither: the zeroed maps read empty and the lookups
+	// skip them.
+	{
+		const struct classifier_rule **rule_ptrs =
+			acl_rule_ptrs_project(
+				acl_rules,
+				acl_rule_count,
+				check_acl_rule_tcp_vacuous
+			);
+		if (rule_ptrs == NULL) {
+			goto error;
+		}
+
+		bool failed = false;
+		if (project_acl_rules(
+			    acl_rules,
+			    acl_rule_count,
+			    rule_ptrs,
+			    check_acl_rule_tcp_vacuous
+		    ) > 0) {
+			struct classifier tcp_vac_stage = {0};
+			if (classify_join(
+				    memory_context,
+				    core_stage,
+				    &stage_flags,
+				    acl_rule_count,
+				    build->tcp_vac_joint,
+				    &tcp_vac_stage
+			    ) ||
+			    classify_decode(
+				    memory_context,
+				    &tcp_vac_stage,
+				    rule_ptrs,
+				    acl_rule_count,
+				    build->tcp_vac_rule_map
+			    )) {
+				failed = true;
+			}
+			classifier_fini(
+				&tcp_vac_stage, memory_context, acl_rule_count
+			);
+		}
+		free(rule_ptrs);
+		if (failed) {
+			goto error;
+		}
+	}
+
+	{
+		const struct classifier_rule **rule_ptrs =
+			acl_rule_ptrs_project(
+				acl_rules,
+				acl_rule_count,
+				check_acl_rule_udp_vacuous
+			);
+		if (rule_ptrs == NULL) {
+			goto error;
+		}
+
+		bool failed = project_acl_rules(
+				      acl_rules,
+				      acl_rule_count,
+				      rule_ptrs,
+				      check_acl_rule_udp_vacuous
+			      ) > 0 &&
+			      classify_decode(
+				      memory_context,
+				      core_stage,
+				      rule_ptrs,
+				      acl_rule_count,
+				      build->udp_vac_rule_map
+			      );
+		free(rule_ptrs);
+		if (failed) {
+			goto error;
+		}
 	}
 
 	rc = 0;
@@ -1548,6 +1670,11 @@ acl_module_compile_rules(
 			.icmp_root_joint = &config->filter_ip4_icmp.root_joint,
 			.icmp_rule_map = &config->filter_ip4_icmp.rule_map,
 			.icmp_rule_count = &config->filter_rule_count_ip4_icmp,
+			.tcp_vac_joint = &config->filter_ip4_tcp.vac_joint,
+			.tcp_vac_rule_map =
+				&config->filter_ip4_tcp.vac_rule_map,
+			.udp_vac_rule_map =
+				&config->filter_ip4_udp.vac_rule_map,
 		};
 		struct classifier tcp4_stage = {0};
 		struct classifier udp4_stage = {0};
@@ -1622,6 +1749,11 @@ acl_module_compile_rules(
 			.icmp_root_joint = &config->filter_ip6_icmp.root_joint,
 			.icmp_rule_map = &config->filter_ip6_icmp.rule_map,
 			.icmp_rule_count = &config->filter_rule_count_ip6_icmp,
+			.tcp_vac_joint = &config->filter_ip6_tcp.vac_joint,
+			.tcp_vac_rule_map =
+				&config->filter_ip6_tcp.vac_rule_map,
+			.udp_vac_rule_map =
+				&config->filter_ip6_udp.vac_rule_map,
 		};
 		struct classifier tcp6_stage = {0};
 		struct classifier udp6_stage = {0};
