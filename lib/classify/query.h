@@ -80,3 +80,21 @@ classify_resolve(
 			vline_get((struct vline *)rule_map, classes[idx]);
 	}
 }
+
+/*
+ * Merges a second decoding into the results, keeping the first match
+ * by rule order: each decoder resolves its own projection to the
+ * first rule covering the packet, so the global first match is the
+ * smaller of the two rule indices. An invalid mark on either side
+ * leaves the other untouched.
+ */
+static inline void
+classify_results_min(uint32_t *results, const uint32_t *extra, uint32_t count) {
+	for (uint32_t idx = 0; idx < count; ++idx) {
+		if (extra[idx] != FILTER_RULE_INVALID &&
+		    (results[idx] == FILTER_RULE_INVALID ||
+		     extra[idx] < results[idx])) {
+			results[idx] = extra[idx];
+		}
+	}
+}

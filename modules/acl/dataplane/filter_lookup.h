@@ -559,6 +559,21 @@ acl_classify_tcp4(
 			results + off,
 			count
 		);
+		// The without-ports decoding of the vacuous port rules: the
+		// core classes joined with the flags classes alone, merged by
+		// rule order. A ruleset without such rules leaves the map
+		// empty and skips the lookups.
+		if (flt->vac_rule_map.size != 0) {
+			classify_combine(
+				&flt->vac_joint,
+				&flt->vac_rule_map,
+				core_classes + off,
+				flags,
+				mid,
+				count
+			);
+			classify_results_min(results + off, mid, count);
+		}
 	}
 }
 
@@ -599,6 +614,18 @@ acl_classify_udp4(
 			results + off,
 			count
 		);
+		// The without-ports decoding resolves on the core classes
+		// alone, merged by rule order; skipped when the ruleset has
+		// no vacuous port rules.
+		if (flt->vac_rule_map.size != 0) {
+			classify_resolve(
+				&flt->vac_rule_map,
+				core_classes + off,
+				src,
+				count
+			);
+			classify_results_min(results + off, src, count);
+		}
 	}
 }
 
@@ -678,6 +705,19 @@ acl_classify_tcp6(
 			results + off,
 			count
 		);
+		// The without-ports decoding of the vacuous port rules,
+		// skipped when the ruleset has no such rules.
+		if (flt->vac_rule_map.size != 0) {
+			classify_combine(
+				&flt->vac_joint,
+				&flt->vac_rule_map,
+				core_classes + off,
+				flags,
+				mid,
+				count
+			);
+			classify_results_min(results + off, mid, count);
+		}
 	}
 }
 
@@ -718,6 +758,18 @@ acl_classify_udp6(
 			results + off,
 			count
 		);
+		// The without-ports decoding resolves on the core classes
+		// alone, merged by rule order; skipped when the ruleset has
+		// no vacuous port rules.
+		if (flt->vac_rule_map.size != 0) {
+			classify_resolve(
+				&flt->vac_rule_map,
+				core_classes + off,
+				src,
+				count
+			);
+			classify_results_min(results + off, src, count);
+		}
 	}
 }
 
