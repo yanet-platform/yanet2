@@ -25,6 +25,7 @@ typedef void (*classify_device_get_devices_func)(
  */
 struct classify_compile_device {
 	classify_device_get_devices_func get_devices;
+	const char *name;
 	struct value_table value_table;
 };
 
@@ -33,7 +34,8 @@ classify_compile_device_create(
 	struct memory_context *memory_context,
 	const struct classifier_rule *const *rules,
 	uint32_t rule_count,
-	classify_device_get_devices_func get_devices
+	classify_device_get_devices_func get_devices,
+	const char *name
 ) {
 	struct classify_compile_device *compile =
 		(struct classify_compile_device *)memory_balloc(
@@ -44,6 +46,7 @@ classify_compile_device_create(
 	}
 
 	compile->get_devices = get_devices;
+	compile->name = name;
 
 	uint32_t max_device_id = 0;
 	for (uint32_t rule_idx = 0; rule_idx < rule_count; ++rule_idx) {
@@ -62,10 +65,12 @@ classify_compile_device_create(
 		}
 	}
 
+	char table_name[MEMORY_CONTEXT_NAME_SIZE];
+	classify_leaf_name(table_name, sizeof(table_name), name, "table");
 	if (value_table_init(
 		    &compile->value_table,
 		    memory_context,
-		    "filter:device",
+		    table_name,
 		    1,
 		    max_device_id + 1
 	    )) {
@@ -177,10 +182,14 @@ classify_compile_device_commit(
 	 * The classes are committed into a value line indexed by the raw
 	 * device identifier, one flat read on the query path.
 	 */
+	char line_name[MEMORY_CONTEXT_NAME_SIZE];
+	classify_leaf_name(
+		line_name, sizeof(line_name), device_compile->name, "line"
+	);
 	if (vline_init(
 		    &device_attr->line,
 		    memory_context,
-		    "filter:device",
+		    line_name,
 		    device_compile->value_table.h_dim
 	    )) {
 		memset(device_attr, 0, sizeof(*device_attr));
@@ -244,6 +253,10 @@ classify_compile_device_compare(
  * Compiles the device classifier of a ruleset into an embedded
  * attribute.
  *
+ * The name scopes the memory contexts of the compile - the attribute
+ * line and the stage registry - each titled with the name and its own
+ * artifact leaf, in the memory tree.
+ *
  * On success the attribute and the stage - the registry with the rule
  * group row - are owned by the caller, released through
  * classifier_fini; on failure every partial state is freed, the
@@ -252,6 +265,7 @@ classify_compile_device_compare(
 static inline int
 classify_device_compile(
 	struct memory_context *memory_context,
+	const char *name,
 	const struct classifier_rule *const *rules,
 	uint32_t rule_count,
 	classify_device_get_devices_func get_devices,
@@ -260,7 +274,7 @@ classify_device_compile(
 ) {
 	struct classify_compile_device *compile =
 		classify_compile_device_create(
-			memory_context, rules, rule_count, get_devices
+			memory_context, rules, rule_count, get_devices, name
 		);
 	if (compile == NULL) {
 		memset(attr, 0, sizeof(*attr));
@@ -280,7 +294,14 @@ classify_device_compile(
 	};
 
 	return classify_attr_compile(
-		memory_context, &ops, compile, rules, rule_count, attr, cls
+		memory_context,
+		name,
+		&ops,
+		compile,
+		rules,
+		rule_count,
+		attr,
+		cls
 	);
 }
 
@@ -289,12 +310,13 @@ classify_device_compile(
  * the module rule type to the rule agnostic core, and the entry takes
  * the module rule array the consumer owns.
  *
- * The name must carry the consumer prefix, so the generated symbols
+ * The tag must carry the consumer prefix, so the generated symbols
  * never collide with the library ones.
  */
-#define CLASSIFY_DEVICE_COMPILE(name, get_devices)                             \
-	static inline int classify_##name##_compile(                           \
+#define CLASSIFY_DEVICE_COMPILE(tag, get_devices)                              \
+	static inline int classify_##tag##_compile(                            \
 		struct memory_context *memory_context,                         \
+		const char *name,                                              \
 		const struct classifier_rule **rules,                          \
 		uint32_t rule_count,                                           \
 		struct classify_attr_device *attr,                             \
@@ -302,6 +324,7 @@ classify_device_compile(
 	) {                                                                    \
 		return classify_device_compile(                                \
 			memory_context,                                        \
+			name,                                                  \
 			rules,                                                 \
 			rule_count,                                            \
 			get_devices,                                           \

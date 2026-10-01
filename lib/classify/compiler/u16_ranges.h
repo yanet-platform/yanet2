@@ -112,6 +112,7 @@ filter_u16_commit_iterate(
 #define CLASSIFY_U16_RANGES_COMPILE(tag, attr_type, get_ranges)                \
 	struct classify_compile_##tag {                                        \
 		classify_u16_get_ranges_func get_ranges;                       \
+		const char *name;                                              \
 		struct range_index range_index;                                \
 		struct value_table value_table;                                \
 	};                                                                     \
@@ -121,7 +122,8 @@ filter_u16_commit_iterate(
 			struct memory_context *memory_context,                 \
 			const struct classifier_rule *const *rules,            \
 			uint32_t rule_count,                                   \
-			classify_u16_get_ranges_func adapted_get_ranges        \
+			classify_u16_get_ranges_func adapted_get_ranges,       \
+			const char *name                                       \
 		) {                                                            \
 		struct classify_compile_##tag *compile =                       \
 			(struct classify_compile_##tag *)memory_balloc(        \
@@ -133,6 +135,7 @@ filter_u16_commit_iterate(
 		}                                                              \
                                                                                \
 		compile->get_ranges = adapted_get_ranges;                      \
+		compile->name = name;                                          \
                                                                                \
 		struct range_collector collector;                              \
 		if (range_collector_init(&collector, memory_context)) {        \
@@ -169,10 +172,14 @@ filter_u16_commit_iterate(
 			goto error_range_index;                                \
 		}                                                              \
                                                                                \
+		char table_name[MEMORY_CONTEXT_NAME_SIZE];                     \
+		classify_leaf_name(                                            \
+			table_name, sizeof(table_name), name, "table"          \
+		);                                                             \
 		if (value_table_init(                                          \
 			    &compile->value_table,                             \
 			    memory_context,                                    \
-			    "filter:" #tag,                                    \
+			    table_name,                                        \
 			    1,                                                 \
 			    compile->range_index.count                         \
 		    )) {                                                       \
@@ -362,9 +369,14 @@ filter_u16_commit_iterate(
 		attr_type *tag_attr = attr;                                    \
                                                                                \
 		struct vline staging;                                          \
-		if (vline_init(                                                \
-			    &staging, memory_context, "filter:" #tag, 65536    \
-		    )) {                                                       \
+		char line_name[MEMORY_CONTEXT_NAME_SIZE];                      \
+		classify_leaf_name(                                            \
+			line_name,                                             \
+			sizeof(line_name),                                     \
+			tag_compile->name,                                     \
+			"line"                                                 \
+		);                                                             \
+		if (vline_init(&staging, memory_context, line_name, 65536)) {  \
 			memset(tag_attr, 0, sizeof(*tag_attr));                \
 			return -1;                                             \
 		}                                                              \
@@ -412,6 +424,7 @@ filter_u16_commit_iterate(
                                                                                \
 	static inline int classify_##tag##_compile(                            \
 		struct memory_context *memory_context,                         \
+		const char *name,                                              \
 		const struct classifier_rule **rules,                          \
 		uint32_t rule_count,                                           \
 		attr_type *attr,                                               \
@@ -419,7 +432,11 @@ filter_u16_commit_iterate(
 	) {                                                                    \
 		struct classify_compile_##tag *compile =                       \
 			classify_compile_##tag##_create(                       \
-				memory_context, rules, rule_count, get_ranges  \
+				memory_context,                                \
+				rules,                                         \
+				rule_count,                                    \
+				get_ranges,                                    \
+				name                                           \
 			);                                                     \
 		if (compile == NULL) {                                         \
 			memset(attr, 0, sizeof(*attr));                        \
@@ -440,6 +457,7 @@ filter_u16_commit_iterate(
                                                                                \
 		return classify_attr_compile(                                  \
 			memory_context,                                        \
+			name,                                                  \
 			&ops,                                                  \
 			compile,                                               \
 			rules,                                                 \

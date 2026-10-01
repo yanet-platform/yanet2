@@ -55,3 +55,15 @@ classify_fragment = executable(
 )
 
 test('classify_fragment', classify_fragment, suite: ['filter'])
+
+classify_context_names = executable(
+  'classify_context_names',
+  ['context_names.c'],
+  c_args: yanet_test_c_args,
+  link_args: yanet_link_args,
+  dependencies: test_deps,
+  link_language: 'c',
+  include_directories: yanet_rootdir,
+)
+
+test('classify_context_names', classify_context_names, suite: ['filter'])

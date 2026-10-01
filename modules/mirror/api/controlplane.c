@@ -302,6 +302,7 @@ mirror_module_init_l2(
 
 	if (classify_mirror_device_compile(
 		    memory_context,
+		    "l2:device",
 		    rule_ptrs,
 		    mirror_rule_count,
 		    &cls->dev_attr,
@@ -311,6 +312,7 @@ mirror_module_init_l2(
 	}
 	if (classify_mirror_vlan_compile(
 		    memory_context,
+		    "l2:vlan",
 		    rule_ptrs,
 		    mirror_rule_count,
 		    &cls->vlan_attr,
@@ -320,6 +322,7 @@ mirror_module_init_l2(
 	}
 	if (classify_join(
 		    memory_context,
+		    "l2:joint",
 		    &stage_dev,
 		    &stage_vlan,
 		    mirror_rule_count,
@@ -330,6 +333,7 @@ mirror_module_init_l2(
 	}
 	if (classify_decode(
 		    memory_context,
+		    "l2:rules",
 		    &stage_l2,
 		    rule_ptrs,
 		    mirror_rule_count,
@@ -400,6 +404,7 @@ mirror_module_init_ip4(
 
 	if (classify_mirror_device_compile(
 		    memory_context,
+		    "ip4:device",
 		    rule_ptrs,
 		    mirror_rule_count,
 		    &cls->dev_attr,
@@ -409,6 +414,7 @@ mirror_module_init_ip4(
 	}
 	if (classify_mirror_vlan_compile(
 		    memory_context,
+		    "ip4:vlan",
 		    rule_ptrs,
 		    mirror_rule_count,
 		    &cls->vlan_attr,
@@ -418,6 +424,7 @@ mirror_module_init_ip4(
 	}
 	if (classify_join(
 		    memory_context,
+		    "ip4:dev_vlan_joint",
 		    &stage_dev,
 		    &stage_vlan,
 		    mirror_rule_count,
@@ -428,6 +435,7 @@ mirror_module_init_ip4(
 	}
 	if (classify_mirror_net4_src_compile(
 		    memory_context,
+		    "ip4:net4_src",
 		    rule_ptrs,
 		    mirror_rule_count,
 		    &cls->net4_src_attr,
@@ -437,6 +445,7 @@ mirror_module_init_ip4(
 	}
 	if (classify_mirror_net4_dst_compile(
 		    memory_context,
+		    "ip4:net4_dst",
 		    rule_ptrs,
 		    mirror_rule_count,
 		    &cls->net4_dst_attr,
@@ -446,6 +455,7 @@ mirror_module_init_ip4(
 	}
 	if (classify_join(
 		    memory_context,
+		    "ip4:nets_joint",
 		    &stage_n4_src,
 		    &stage_n4_dst,
 		    mirror_rule_count,
@@ -456,6 +466,7 @@ mirror_module_init_ip4(
 	}
 	if (classify_join(
 		    memory_context,
+		    "ip4:root_joint",
 		    &stage_dev_vlan,
 		    &stage_nets,
 		    mirror_rule_count,
@@ -466,6 +477,7 @@ mirror_module_init_ip4(
 	}
 	if (classify_decode(
 		    memory_context,
+		    "ip4:rules",
 		    &stage_ip4,
 		    rule_ptrs,
 		    mirror_rule_count,
@@ -540,6 +552,7 @@ mirror_module_init_ip6(
 
 	if (classify_mirror_device_compile(
 		    memory_context,
+		    "ip6:device",
 		    rule_ptrs,
 		    mirror_rule_count,
 		    &cls->dev_attr,
@@ -549,6 +562,7 @@ mirror_module_init_ip6(
 	}
 	if (classify_mirror_vlan_compile(
 		    memory_context,
+		    "ip6:vlan",
 		    rule_ptrs,
 		    mirror_rule_count,
 		    &cls->vlan_attr,
@@ -558,6 +572,7 @@ mirror_module_init_ip6(
 	}
 	if (classify_join(
 		    memory_context,
+		    "ip6:dev_vlan_joint",
 		    &stage_dev,
 		    &stage_vlan,
 		    mirror_rule_count,
@@ -568,6 +583,7 @@ mirror_module_init_ip6(
 	}
 	if (classify_mirror_net6_src_compile(
 		    memory_context,
+		    "ip6:net6_src",
 		    rule_ptrs,
 		    mirror_rule_count,
 		    &cls->net6_src_attr,
@@ -577,6 +593,7 @@ mirror_module_init_ip6(
 	}
 	if (classify_mirror_net6_dst_compile(
 		    memory_context,
+		    "ip6:net6_dst",
 		    rule_ptrs,
 		    mirror_rule_count,
 		    &cls->net6_dst_attr,
@@ -586,6 +603,7 @@ mirror_module_init_ip6(
 	}
 	if (classify_join(
 		    memory_context,
+		    "ip6:nets_joint",
 		    &stage_n6_src,
 		    &stage_n6_dst,
 		    mirror_rule_count,
@@ -596,6 +614,7 @@ mirror_module_init_ip6(
 	}
 	if (classify_join(
 		    memory_context,
+		    "ip6:root_joint",
 		    &stage_dev_vlan,
 		    &stage_nets,
 		    mirror_rule_count,
@@ -606,6 +625,7 @@ mirror_module_init_ip6(
 	}
 	if (classify_decode(
 		    memory_context,
+		    "ip6:rules",
 		    &stage_ip6,
 		    rule_ptrs,
 		    mirror_rule_count,

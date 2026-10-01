@@ -173,10 +173,20 @@ test_filter_net6_dst_compile(
 	struct classifier stage_dst = {0};
 
 	assert(classify_test_net6_dst_compile(
-		       mctx, rules, rule_count, &flt->dst_attr, &stage_dst
+		       mctx,
+		       "test_net6_dst",
+		       rules,
+		       rule_count,
+		       &flt->dst_attr,
+		       &stage_dst
 	       ) == 0);
 	assert(classify_decode(
-		       mctx, &stage_dst, rules, rule_count, &flt->rule_map
+		       mctx,
+		       "rule_map",
+		       &stage_dst,
+		       rules,
+		       rule_count,
+		       &flt->rule_map
 	       ) == 0);
 
 	classifier_fini(&stage_dst, mctx, rule_count);
@@ -246,13 +256,24 @@ test_filter_net6_both_compile(
 	struct classifier stage_pair = {0};
 
 	assert(classify_test_net6_src_compile(
-		       mctx, rules, rule_count, &flt->cls.src_attr, &stage_src
+		       mctx,
+		       "test_net6_src",
+		       rules,
+		       rule_count,
+		       &flt->cls.src_attr,
+		       &stage_src
 	       ) == 0);
 	assert(classify_test_net6_dst_compile(
-		       mctx, rules, rule_count, &flt->cls.dst_attr, &stage_dst
+		       mctx,
+		       "test_net6_dst",
+		       rules,
+		       rule_count,
+		       &flt->cls.dst_attr,
+		       &stage_dst
 	       ) == 0);
 	assert(classify_join(
 		       mctx,
+		       "joint",
 		       &stage_src,
 		       &stage_dst,
 		       rule_count,
@@ -260,7 +281,12 @@ test_filter_net6_both_compile(
 		       &stage_pair
 	       ) == 0);
 	assert(classify_decode(
-		       mctx, &stage_pair, rules, rule_count, &flt->rule_map
+		       mctx,
+		       "rule_map",
+		       &stage_pair,
+		       rules,
+		       rule_count,
+		       &flt->rule_map
 	       ) == 0);
 
 	classifier_fini(&stage_src, mctx, rule_count);

@@ -7,6 +7,8 @@
 #include "lib/classify/classify.h"
 #include "lib/classify/rule.h"
 
+#include <stdio.h>
+
 /*
  * Compilation contracts shared by every attribute variant.
  *
@@ -130,7 +132,30 @@ classifier_init(
 }
 
 /*
+ * Composes the title of one memory context of a named compile or join
+ * entry: the entry name scoped to the consumer and the leaf naming the
+ * one artifact the context belongs to.
+ *
+ * An entry creates several sibling contexts under the caller's memory
+ * context - the artifacts it commits and the stage registry - so the
+ * entry name alone would leave the siblings indistinguishable in the
+ * memory tree. The buffer holds a full context title; an entry name
+ * long enough to crowd the leaf out truncates like the context init
+ * truncates the title itself.
+ */
+static inline void
+classify_leaf_name(char *buf, size_t size, const char *name, const char *leaf) {
+	snprintf(buf, size, "%s:%s", name, leaf);
+}
+
+/*
  * Runs the shared region enumeration of an attribute over the ruleset.
+ *
+ * The name scopes the memory contexts of the compile - the stage
+ * registry below and the attribute owned contexts the callbacks create
+ * - each titled with the name and its own artifact leaf, so every
+ * context of one compile pass is identified in the memory tree instead
+ * of sharing a library wide name.
  *
  * Rules holding the exact same attribute value are grouped together,
  * so the region enumeration and the registry ranges operate on
@@ -145,6 +170,7 @@ classifier_init(
 static inline int
 classify_attr_compile(
 	struct memory_context *memory_context,
+	const char *name,
 	const struct classify_attr_ops *ops,
 	void *compile,
 	const struct classifier_rule *const *rules,
@@ -265,7 +291,11 @@ classify_attr_compile(
 
 	remap_table_free(&remap_table);
 
-	if (value_registry_init(registry, memory_context, "filter:registry")) {
+	char registry_name[MEMORY_CONTEXT_NAME_SIZE];
+	classify_leaf_name(
+		registry_name, sizeof(registry_name), name, "registry"
+	);
+	if (value_registry_init(registry, memory_context, registry_name)) {
 		goto error;
 	}
 
