@@ -51,17 +51,14 @@ acl_module_config_destroy(struct cp_module *cp_module) {
 	memset(&config->filter_ip4, 0, sizeof(config->filter_ip4));
 
 	value_table_free(&config->filter_ip4_tcp.root_joint);
-	vline_free(&config->filter_ip4_tcp.rule_map);
 	value_table_free(&config->filter_ip4_tcp.vac_joint);
 	memset(&config->filter_ip4_tcp, 0, sizeof(config->filter_ip4_tcp));
 
 	value_table_free(&config->filter_ip4_udp.root_joint);
-	vline_free(&config->filter_ip4_udp.rule_map);
 	vline_free(&config->filter_ip4_udp.vac_rule_map);
 	memset(&config->filter_ip4_udp, 0, sizeof(config->filter_ip4_udp));
 
 	value_table_free(&config->filter_ip4_icmp.root_joint);
-	vline_free(&config->filter_ip4_icmp.rule_map);
 	memset(&config->filter_ip4_icmp, 0, sizeof(config->filter_ip4_icmp));
 
 	value_table_free(&config->filter_ip6.root_joint);
@@ -69,17 +66,14 @@ acl_module_config_destroy(struct cp_module *cp_module) {
 	memset(&config->filter_ip6, 0, sizeof(config->filter_ip6));
 
 	value_table_free(&config->filter_ip6_tcp.root_joint);
-	vline_free(&config->filter_ip6_tcp.rule_map);
 	value_table_free(&config->filter_ip6_tcp.vac_joint);
 	memset(&config->filter_ip6_tcp, 0, sizeof(config->filter_ip6_tcp));
 
 	value_table_free(&config->filter_ip6_udp.root_joint);
-	vline_free(&config->filter_ip6_udp.rule_map);
 	vline_free(&config->filter_ip6_udp.vac_rule_map);
 	memset(&config->filter_ip6_udp, 0, sizeof(config->filter_ip6_udp));
 
 	value_table_free(&config->filter_ip6_icmp.root_joint);
-	vline_free(&config->filter_ip6_icmp.rule_map);
 	memset(&config->filter_ip6_icmp, 0, sizeof(config->filter_ip6_icmp));
 
 	struct acl_classifier_l2 *l2 = &config->classifier_l2;

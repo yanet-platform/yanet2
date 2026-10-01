@@ -15,6 +15,8 @@
 #include "memory.h"
 #include "remap.h"
 
+#define VALUE_TABLE_SLAB_TARGET_SIZE (1u << 20)
+
 struct value_table_slab {
 	struct value_table_slab *next;
 	uint32_t *data;
@@ -129,7 +131,8 @@ value_table_alloc_row(struct value_table *table) {
 	size_t row_size = (size_t)table->h_dim * sizeof(uint32_t);
 	if (slab == NULL || slab->used == slab->capacity) {
 		size_t size = row_size * (table->v_dim - table->row_count);
-		size_t limit = (1u << 20) - 2 * ASAN_RED_ZONE;
+		// Keep allocator red zones within the 1 MiB size class.
+		size_t limit = VALUE_TABLE_SLAB_TARGET_SIZE - 2 * ASAN_RED_ZONE;
 		if (row_size > limit) {
 			limit = row_size;
 		}
