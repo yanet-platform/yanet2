@@ -223,6 +223,14 @@ func (m *ModuleConfig) SetSnapLen(snaplen uint32) error {
 	return nil
 }
 
+func (m *ModuleConfig) SetRate(ratePPS uint64) error {
+	rc, err := C.pdump_module_config_set_rate(m.asRawPtr(), C.uint64_t(ratePPS))
+	if rc != 0 {
+		return errors.Join(fmt.Errorf("error code=%d", rc), err)
+	}
+	return nil
+}
+
 // LinkRing records the ring this config captures into, by name.
 //
 // The dataplane resolves the link to a ring object when it next rebuilds

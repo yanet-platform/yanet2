@@ -99,6 +99,9 @@ pdump_module_config_data_init(
 	config->mode = PDUMP_INPUT;
 	config->snaplen = default_snaplen;
 	config->ring_link_idx = PDUMP_RING_LINK_NONE;
+	config->rate_pps = 0;
+	config->worker_count = 0;
+	config->rate_states = NULL;
 	return 0;
 }
 
@@ -108,6 +111,14 @@ pdump_module_config_destroy(struct cp_module *module) {
 		container_of(module, struct pdump_module_config, cp_module);
 
 	struct agent *agent = ADDR_OF(&module->agent);
+	struct pdump_rate_state *rate_states = ADDR_OF(&config->rate_states);
+	if (rate_states != NULL) {
+		memory_bfree(
+			&agent->memory_context,
+			rate_states,
+			config->worker_count * sizeof(*rate_states)
+		);
+	}
 	char *filter = ADDR_OF(&config->filter);
 	if (filter != NULL) {
 		memory_bfree(
@@ -172,6 +183,27 @@ pdump_module_config_new(
 			sizeof(struct pdump_module_config)
 		);
 		return NULL;
+	}
+
+	struct dp_config *dp_config = ADDR_OF(&agent->dp_config);
+	config->worker_count = dp_config->worker_count;
+	if (config->worker_count > SIZE_MAX / sizeof(struct pdump_rate_state)) {
+		yanet_error_add(err, "too many workers for capture rate state");
+		pdump_module_config_destroy(&config->cp_module);
+		return NULL;
+	}
+	if (config->worker_count != 0) {
+		size_t state_size =
+			config->worker_count * sizeof(struct pdump_rate_state);
+		struct pdump_rate_state *rate_states =
+			memory_balloc(&agent->memory_context, state_size);
+		if (rate_states == NULL) {
+			yanet_error_add(err, "failed to allocate capture rate state");
+			pdump_module_config_destroy(&config->cp_module);
+			return NULL;
+		}
+		memset(rate_states, 0, state_size);
+		SET_OFFSET_OF(&config->rate_states, rate_states);
 	}
 
 	return &config->cp_module;
@@ -290,6 +322,14 @@ pdump_module_config_set_mode(struct cp_module *module, enum pdump_mode mode) {
 
 	config->mode = mode;
 
+	return 0;
+}
+
+int
+pdump_module_config_set_rate(struct cp_module *module, uint64_t rate_pps) {
+	struct pdump_module_config *config =
+		container_of(module, struct pdump_module_config, cp_module);
+	config->rate_pps = rate_pps;
 	return 0;
 }
 

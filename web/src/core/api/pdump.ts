@@ -15,6 +15,7 @@ export interface PdumpConfig {
     // Required on create; absent on an update keeps the bound ring, an
     // explicit empty string is rejected.
     ring_name?: string;
+    rate_pps?: number;
 }
 
 export interface ListConfigsResponse {

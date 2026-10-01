@@ -84,6 +84,11 @@ message Config {
   // currently bound ring; explicitly empty is invalid. Deleting a config
   // never deletes its ring.
   optional string ring_name = 5;
+  // Aggregate capture rate in packets per second; zero disables limiting.
+  //
+  // Each worker receives an equal share; unused shares are not transferred.
+  // Bursts of up to 32 records per worker are permitted.
+  optional uint64 rate_pps = 6;
 }
 
 // ShowConfigResponse contains the configuration details of the pdump module.

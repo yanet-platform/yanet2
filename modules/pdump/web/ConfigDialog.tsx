@@ -58,8 +58,11 @@ export const ConfigDialog: React.FC<ConfigDialogProps> = ({
     // omits ring_name on save so the binding is kept.
     const [boundRingName, setBoundRingName] = useState('');
     const [selectedRing, setSelectedRing] = useState('');
+    const [ratePps, setRatePps] = useState('');
     const [loading, setLoading] = useState(false);
     const [recent, setRecent] = useState<string[]>([]);
+    const initialRatePps = initialConfig?.rate_pps;
+    const rateExceedsWebRange = !isCreate && initialRatePps !== undefined && !Number.isSafeInteger(initialRatePps);
 
     const ringOptions = useMemo(
         () => buildRingOptions(rings, isCreate, boundRingName),
@@ -76,6 +79,7 @@ export const ConfigDialog: React.FC<ConfigDialogProps> = ({
                 setSnaplen('');
                 setBoundRingName('');
                 setSelectedRing('');
+                setRatePps('');
             } else if (initialConfig) {
                 setConfigName(initialConfigName ?? '');
                 setFilter(initialConfig.filter ?? '');
@@ -83,6 +87,7 @@ export const ConfigDialog: React.FC<ConfigDialogProps> = ({
                 setSnaplen(initialConfig.snaplen?.toString() ?? '');
                 setBoundRingName(initialConfig.ring_name ?? '');
                 setSelectedRing(initialConfig.ring_name ?? '');
+                setRatePps(initialRatePps !== undefined && Number.isSafeInteger(initialRatePps) ? initialRatePps.toString() : '');
             } else {
                 setConfigName(initialConfigName ?? '');
                 setFilter('');
@@ -90,9 +95,10 @@ export const ConfigDialog: React.FC<ConfigDialogProps> = ({
                 setSnaplen('');
                 setBoundRingName('');
                 setSelectedRing('');
+                setRatePps('');
             }
         }
-    }, [open, initialConfig, initialConfigName, isCreate]);
+    }, [open, initialConfig, initialConfigName, isCreate, initialRatePps]);
 
     useEffect(() => {
         if (open) {
@@ -119,11 +125,17 @@ export const ConfigDialog: React.FC<ConfigDialogProps> = ({
 
         setLoading(true);
         try {
+            if (ratePps !== '' && (!/^(0|[1-9]\d*)$/.test(ratePps) || !Number.isSafeInteger(Number(ratePps)))) {
+                toaster.error('pdump-config-error', `Rate must be an integer between 0 and ${Number.MAX_SAFE_INTEGER}`, new Error('Invalid rate'));
+                return;
+            }
+
             const config: PdumpConfig = {
                 filter: filter || '',
                 mode: modeFlagsToNumber(modes),
                 snaplen: snaplen ? parseInt(snaplen, 10) : undefined,
                 ring_name: resolveRingNameForSubmit(isCreate, selectedRing, boundRingName),
+                rate_pps: ratePps === '' ? undefined : Number(ratePps),
             };
 
             await pdumpApi.setConfig(targetConfigName, config);
@@ -284,6 +296,22 @@ export const ConfigDialog: React.FC<ConfigDialogProps> = ({
                             : 'Leave unchanged to keep the bound ring'}
                     </span>
                 </div>
+            </div>
+            <div className="pdump-field">
+                <label className="pdump-field__label">Capture limit (pps)</label>
+                <input
+                    className="pdump-input pdump-input--mono"
+                    type="text"
+                    inputMode="numeric"
+                    value={ratePps}
+                    placeholder={rateExceedsWebRange ? 'Keep existing limit' : '0'}
+                    onChange={e => setRatePps(e.target.value)}
+                />
+                <span className="pdump-field__hint">
+                    Total configured rate, divided equally between workers. Zero disables the limit.
+                    {' '}Web input supports up to {Number.MAX_SAFE_INTEGER} pps; use CLI/API for larger values.
+                    {rateExceedsWebRange && ' The existing limit exceeds this range. Leave blank to preserve it.'}
+                </span>
             </div>
         </PdumpModal>
     );

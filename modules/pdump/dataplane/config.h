@@ -4,6 +4,7 @@
 
 #include "lib/controlplane/config/cp_module.h"
 
+#include "limit.h"
 #include "mode.h"
 
 struct rte_bpf;
@@ -20,6 +21,9 @@ struct pdump_module_config {
 	struct rte_bpf *ebpf_program;
 	enum pdump_mode mode;
 	uint32_t snaplen;
+	uint64_t rate_pps;
+	uint64_t worker_count;
+	struct pdump_rate_state *rate_states;
 
 	// Object link index of the ring this config captures into.
 	//

@@ -539,6 +539,33 @@ func recvRecord(t *testing.T, records <-chan *pdumppb.Record) *pdumppb.Record {
 	}
 }
 
+// Test_PdumpService_RateLimit_PreservesAbsentAndAcceptsExplicitZero verifies
+// that partial updates retain the limit and an explicit zero disables it.
+func Test_PdumpService_RateLimit_PreservesAbsentAndAcceptsExplicitZero(t *testing.T) {
+	service, backend, _, _ := newTestService(t)
+	for _, tc := range []struct {
+		name   string
+		config *pdumppb.Config
+		want   uint64
+	}{
+		{name: "new config is unlimited", config: &pdumppb.Config{RingName: proto.String("A")}, want: 0},
+		{name: "sets capture rate", config: &pdumppb.Config{RatePps: proto.Uint64(10000)}, want: 10000},
+		{name: "absent rate preserves limit", config: &pdumppb.Config{Filter: proto.String("udp")}, want: 10000},
+		{name: "accepts full uint64 range", config: &pdumppb.Config{RatePps: proto.Uint64(^uint64(0))}, want: ^uint64(0)},
+		{name: "explicit zero disables limit", config: &pdumppb.Config{RatePps: proto.Uint64(0)}, want: 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := service.SetConfig(t.Context(), &pdumppb.SetConfigRequest{Name: "capture", Config: tc.config})
+			require.NoError(t, err)
+			require.Equal(t, tc.want, backend.Last().settings.RatePPS)
+			response, err := service.ShowConfig(t.Context(), &pdumppb.ShowConfigRequest{Name: "capture"})
+			require.NoError(t, err)
+			require.NotNil(t, response.Config.RatePps)
+			require.Equal(t, tc.want, response.Config.GetRatePps())
+		})
+	}
+}
+
 // Test_PdumpService_ShowConfig_UnknownName verifies that showing a name
 // that was never configured reports NotFound.
 func Test_PdumpService_ShowConfig_UnknownName(t *testing.T) {
@@ -1025,6 +1052,7 @@ func Test_PdumpService_SetConfig_MergesCarriedFieldsOverPublishedConfig(t *testi
 		Mode:     proto.Uint32(2),
 		Snaplen:  proto.Uint32(256),
 		RingName: proto.String("A"),
+		RatePps:  proto.Uint64(0),
 	}
 	require.True(t, proto.Equal(wantConfig, response.Config), "got %v", response.Config)
 }

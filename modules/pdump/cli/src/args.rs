@@ -64,6 +64,11 @@ pub struct SetConfigCmd {
     /// update.
     #[arg(long = "ring-name", add = ArgValueCandidates::new(crate::ring_candidates))]
     pub ring_name: Option<String>,
+
+    /// Aggregate packet capture rate in packets per second; zero disables the
+    /// limit.
+    #[arg(long = "rate", short = 'r')]
+    pub rate_pps: Option<u64>,
 }
 
 #[derive(Debug, Clone, Parser)]

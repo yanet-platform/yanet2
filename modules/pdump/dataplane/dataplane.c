@@ -19,6 +19,7 @@
 
 #include "objects/ring/api/ring_object.h"
 
+#include "limit.h"
 #include "record.h"
 
 // Per-worker state of one execution context, set by the context commit
@@ -31,6 +32,8 @@ struct pdump_prepared {
 	struct ring_worker *ring;
 	uint8_t *ring_data;
 	struct rte_bpf bpf;
+	struct pdump_rate rate;
+	struct pdump_rate_state *rate_state;
 };
 
 // Worker index of an execution context whose worker is not known.
@@ -101,9 +104,7 @@ pdump_ring_write_msg(
 static inline void
 process_queue(
 	struct packet *first_pkt,
-	const struct rte_bpf *bpf,
-	struct ring_worker *ring,
-	uint8_t *ring_data,
+	const struct pdump_prepared *prepared,
 	const struct dp_worker *dp_worker,
 	uint32_t snaplen,
 	enum pdump_mode queue
@@ -117,8 +118,13 @@ process_queue(
 	for (struct packet *pkt = first_pkt; pkt != NULL; pkt = pkt->next) {
 		struct rte_mbuf *mbuf = packet_to_mbuf(pkt);
 
-		int rc = rte_bpf_exec(bpf, (void *)mbuf);
+		int rc = rte_bpf_exec(&prepared->bpf, (void *)mbuf);
 		if (!rc) {
+			continue;
+		}
+		if (!pdump_rate_allow(
+			    prepared->rate_state, timestamp, &prepared->rate
+		    )) {
 			continue;
 		}
 
@@ -140,8 +146,8 @@ process_queue(
 		};
 
 		pdump_ring_write_msg(
-			ring,
-			ring_data,
+			prepared->ring,
+			prepared->ring_data,
 			&hdr,
 			rte_pktmbuf_mtod(mbuf, uint8_t *),
 			capture_len
@@ -167,17 +173,12 @@ pdump_handle_packets(
 		module_ectx->abs_module_prepared;
 	struct ring_worker *ring = prepared->ring;
 	if (likely(ring != NULL)) {
-		uint8_t *ring_data = prepared->ring_data;
-		const struct rte_bpf *bpf = &prepared->bpf;
-
 		// First, process dropped packets.
 		if (config->mode & PDUMP_DROPS &&
 		    packet_front->drop.first != NULL) {
 			process_queue(
 				packet_front->drop.first,
-				bpf,
-				ring,
-				ring_data,
+				prepared,
 				dp_worker,
 				config->snaplen,
 				PDUMP_DROPS
@@ -189,9 +190,7 @@ pdump_handle_packets(
 		    packet_front->input.first != NULL) {
 			process_queue(
 				packet_front->input.first,
-				bpf,
-				ring,
-				ring_data,
+				prepared,
 				dp_worker,
 				config->snaplen,
 				PDUMP_INPUT
@@ -249,6 +248,15 @@ pdump_resolve_prepared(
 	struct ring_worker *ring = ring_object_worker(ring_object, worker_idx);
 	if (ring == NULL) {
 		return result;
+	}
+	result.rate = pdump_rate_init(config->rate_pps, config->worker_count);
+	if (config->rate_pps != 0) {
+		struct pdump_rate_state *rate_states =
+			ADDR_OF(&config->rate_states);
+		if (rate_states == NULL || worker_idx >= config->worker_count) {
+			return result;
+		}
+		result.rate_state = rate_states + worker_idx;
 	}
 
 	result.bpf = *bpf;

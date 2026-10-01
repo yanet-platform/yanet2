@@ -332,6 +332,9 @@ func mergeSettings(settings Settings, config *pdumppb.Config) Settings {
 		// rather than silently keeping the old binding.
 		settings.RingName = config.GetRingName()
 	}
+	if config.RatePps != nil {
+		settings.RatePPS = config.GetRatePps()
+	}
 
 	return settings
 }
@@ -344,5 +347,6 @@ func settingsProto(settings Settings) *pdumppb.Config {
 		Mode:     proto.Uint32(settings.Mode),
 		Snaplen:  proto.Uint32(settings.Snaplen),
 		RingName: proto.String(settings.RingName),
+		RatePps:  proto.Uint64(settings.RatePPS),
 	}
 }

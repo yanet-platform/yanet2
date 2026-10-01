@@ -53,3 +53,11 @@ pdump_bench_exe = executable(
 )
 
 benchmark('pdump_bench', pdump_bench_exe, timeout: 300)
+
+limit_test_exe = executable(
+  'pdump_limit_test',
+  sources: files('limit_test.c'),
+  include_directories: yanet_rootdir,
+)
+
+test('pdump_limit', limit_test_exe, timeout: 30)
