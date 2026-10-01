@@ -43,6 +43,16 @@ jobs:
             "$GITHUB_REF" "$TARGET_VERSION" "$GITHUB_SHA" \
             "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
 
+  neighbour-sidecar:
+    needs: preflight
+    uses: ./.github/workflows/build-push-neighbour-sidecar.yml
+    permissions:
+      contents: read
+      packages: write
+    with:
+      source_sha: ${{ needs.preflight.outputs.source_sha }}
+      image_tag: ${{ needs.preflight.outputs.image_tag }}
+
   packages:
     needs: preflight
     uses: ./.github/workflows/build-deb.yml
@@ -52,7 +62,7 @@ jobs:
       include_2204: ${{ inputs.include_2204 }}
 
   images:
-    needs: [preflight, packages]
+    needs: [preflight, packages, neighbour-sidecar]
     uses: ./.github/workflows/build-push-images.yml
     permissions:
       contents: read
@@ -61,3 +71,4 @@ jobs:
       source_sha: ${{ needs.preflight.outputs.source_sha }}
       image_tag: ${{ needs.preflight.outputs.image_tag }}
       stable: false
+      neighbour_sidecar_prebuilt: true
