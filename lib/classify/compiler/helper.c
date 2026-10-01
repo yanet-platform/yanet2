@@ -72,8 +72,9 @@ value_table_touch_action(uint32_t v1, uint32_t v2, uint32_t idx, void *data) {
 	(void)idx;
 	struct touch_ctx *touch_ctx = (struct touch_ctx *)data;
 
-	uint32_t *value = value_table_get_ptr(touch_ctx->value_table, v1, v2);
-	if (remap_table_touch(touch_ctx->remap_table, *value, value) < 0) {
+	if (value_table_touch(
+		    touch_ctx->value_table, v1, v2, touch_ctx->remap_table
+	    )) {
 		return -1;
 	}
 	return 0;
@@ -156,7 +157,7 @@ classify_join(
 	struct hash_index pair_index = {0};
 	bool pair_index_live = false;
 
-	if (value_table_init(
+	if (value_table_init_auto(
 		    table,
 		    memory_context,
 		    "filter:joint",
@@ -231,11 +232,17 @@ classify_join(
 	 * the matching set of pairs.
 	 */
 	struct remap_table remap_table;
+	// The remap zero class holds one reference per cell of the
+	// rectangle. A product above the uint32 domain saturates: such a
+	// table only miscounts when its touched cells alone would
+	// overflow the value domain, which the uint32 classes cannot
+	// express anyway.
+	uint64_t cell_count = (uint64_t)value_registry_capacity(registry1) *
+			      value_registry_capacity(registry2);
 	if (remap_table_init(
 		    &remap_table,
 		    memory_context,
-		    value_registry_capacity(registry1) *
-			    value_registry_capacity(registry2)
+		    cell_count > UINT32_MAX ? UINT32_MAX : (uint32_t)cell_count
 	    )) {
 		goto error_free_pairs;
 	}
