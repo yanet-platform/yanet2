@@ -22,6 +22,7 @@
 #include "lib/controlplane/config/cp_pipeline.h"
 
 #include "lib/controlplane/config/cp_counter.h"
+#include "lib/controlplane/config/lock_stats.h"
 
 #include "lib/errors/errors.h"
 
@@ -130,6 +131,13 @@ struct cp_config {
 	 * memory zone.
 	 */
 	struct cp_agent_registry *agent_registry;
+
+	/*
+	 * Instrumentation of the configuration lock itself: per API site
+	 * acquisition counts with wait and hold durations, updated by every
+	 * process attached to the zone. See lock_stats.h.
+	 */
+	struct cp_config_lock_stats lock_stats;
 };
 
 _Static_assert(
@@ -147,11 +155,28 @@ bool
 cp_config_try_lock(struct cp_config *cp_config);
 
 /*
+ * Try to lock controlplane configuration, attributing the acquisition
+ * (and its wait) to the given API site in the lock instrumentation.
+ */
+bool
+cp_config_try_lock_site(
+	struct cp_config *cp_config, enum cp_config_lock_site site
+);
+
+/*
  * Wait until controplane is locked by the current process.
  * The function does not support recursive locking.
  */
 void
 cp_config_lock(struct cp_config *cp_config);
+
+/*
+ * Wait until controplane is locked by the current process, attributing
+ * the acquisition (and its wait) to the given API site in the lock
+ * instrumentation.
+ */
+void
+cp_config_lock_site(struct cp_config *cp_config, enum cp_config_lock_site site);
 
 /*
  * Unlock controplane configuration.

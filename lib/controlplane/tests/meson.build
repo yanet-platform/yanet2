@@ -266,3 +266,34 @@ dangling_objects_test = executable(
 )
 
 test('dangling_objects', dangling_objects_test, suite: ['lib'])
+
+config_lock_stats_thread_dep = dependency('threads')
+
+config_lock_stats_test = executable(
+  'config_lock_stats_test',
+  ['config_lock_stats_test.c'],
+  c_args: yanet_c_args,
+  link_args: yanet_link_args + [
+    '-Wl,-E',
+    '-Wl,--undefined=new_device_plain',
+    '-Wl,--export-dynamic-symbol=new_device_plain',
+  ],
+  dependencies: [
+    lib_dataplane_ut_dep,
+    lib_agent_counters_dep,
+    lib_logging_dep,
+    lib_errors_dep,
+    lib_dev_plain_api,
+    libdpdk_dep,
+    config_lock_stats_thread_dep,
+  ],
+  link_with: [lib_dev_plain_dp],
+  include_directories: yanet_rootdir,
+)
+
+test(
+  'config_lock_stats',
+  config_lock_stats_test,
+  suite: ['lib'],
+  timeout: 60,
+)

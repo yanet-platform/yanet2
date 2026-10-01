@@ -20,11 +20,33 @@
 
 __thread struct cp_config *cp_config_locked_by_thread = NULL;
 
+// Instrumentation state of the acquisition the calling thread currently
+// holds: the site to account the hold to, the wait it took, and the time
+// the hold started. Valid between the successful lock (or try-lock) and
+// the matching unlock, mirroring cp_config_locked_by_thread.
+static __thread enum cp_config_lock_site cp_config_lock_site_held =
+	CP_CONFIG_LOCK_SITE_OTHER;
+static __thread uint64_t cp_config_lock_wait_ns;
+static __thread uint64_t cp_config_hold_start_ns;
+
+// Remember the just-granted acquisition on the calling thread; its hold
+// is accounted in cp_config_unlock.
+static inline void
+cp_config_lock_acquired(enum cp_config_lock_site site, uint64_t wait_ns) {
+	cp_config_lock_site_held = site;
+	cp_config_lock_wait_ns = wait_ns;
+	cp_config_hold_start_ns = cp_config_lock_now_ns();
+}
+
 bool
-cp_config_try_lock(struct cp_config *cp_config) {
+cp_config_try_lock_site(
+	struct cp_config *cp_config, enum cp_config_lock_site site
+) {
 	// A thread locks at most one configuration at a time; acquiring a
 	// second one, or the same one again, is a discipline violation.
 	assert(cp_config_locked_by_thread == NULL);
+
+	uint64_t start_ns = cp_config_lock_now_ns();
 
 	pid_t pid = getpid();
 	pid_t zero = 0;
@@ -37,17 +59,29 @@ cp_config_try_lock(struct cp_config *cp_config) {
 		    __ATOMIC_RELAXED
 	    )) {
 		cp_config_locked_by_thread = cp_config;
+		cp_config_lock_acquired(
+			site, cp_config_lock_now_ns() - start_ns
+		);
 		return true;
 	}
 
 	return false;
 }
 
+bool
+cp_config_try_lock(struct cp_config *cp_config) {
+	return cp_config_try_lock_site(cp_config, CP_CONFIG_LOCK_SITE_OTHER);
+}
+
 void
-cp_config_lock(struct cp_config *cp_config) {
+cp_config_lock_site(
+	struct cp_config *cp_config, enum cp_config_lock_site site
+) {
 	// A thread locks at most one configuration at a time; acquiring a
 	// second one, or the same one again, is a discipline violation.
 	assert(cp_config_locked_by_thread == NULL);
+
+	uint64_t start_ns = cp_config_lock_now_ns();
 
 	pid_t pid = getpid();
 	int spins = 0;
@@ -62,6 +96,9 @@ cp_config_lock(struct cp_config *cp_config) {
 			    __ATOMIC_RELAXED
 		    )) {
 			cp_config_locked_by_thread = cp_config;
+			cp_config_lock_acquired(
+				site, cp_config_lock_now_ns() - start_ns
+			);
 			return;
 		}
 
@@ -78,12 +115,25 @@ cp_config_lock(struct cp_config *cp_config) {
 }
 
 void
+cp_config_lock(struct cp_config *cp_config) {
+	cp_config_lock_site(cp_config, CP_CONFIG_LOCK_SITE_OTHER);
+}
+
+void
 cp_config_unlock(struct cp_config *cp_config) {
 	// Abort in debug builds when the calling thread does not own the
 	// acquisition: releasing on another thread's behalf would leave
 	// that thread's record stale, letting a later unlocked mutation
 	// pass the debug assert.
 	assert(cp_config_locked_by_thread == cp_config);
+
+	// Timestamp and snapshot the instrumentation state before releasing:
+	// accounting into shared memory happens after the release, so the
+	// bookkeeping never runs inside a critical section and cannot extend
+	// the next waiter's wait.
+	uint64_t hold_ns = cp_config_lock_now_ns() - cp_config_hold_start_ns;
+	enum cp_config_lock_site site = cp_config_lock_site_held;
+	uint64_t wait_ns = cp_config_lock_wait_ns;
 
 	pid_t pid = getpid();
 	pid_t zero = 0;
@@ -96,7 +146,42 @@ cp_config_unlock(struct cp_config *cp_config) {
 		__ATOMIC_RELAXED
 	);
 	cp_config_locked_by_thread = NULL;
+
+	cp_config_lock_stats_record(
+		&cp_config->lock_stats, site, wait_ns, hold_ns
+	);
 }
+
+const char *const cp_config_lock_site_names[CP_CONFIG_LOCK_SITE_COUNT] = {
+	[CP_CONFIG_LOCK_SITE_OTHER] = "other",
+	[CP_CONFIG_LOCK_SITE_UPDATE_MODULES] = "cp_config_update_modules",
+	[CP_CONFIG_LOCK_SITE_DELETE_MODULE] = "cp_config_delete_module",
+	[CP_CONFIG_LOCK_SITE_UPDATE_FUNCTIONS] = "cp_config_update_functions",
+	[CP_CONFIG_LOCK_SITE_DELETE_FUNCTION] = "cp_config_delete_function",
+	[CP_CONFIG_LOCK_SITE_UPDATE_PIPELINES] = "cp_config_update_pipelines",
+	[CP_CONFIG_LOCK_SITE_DELETE_PIPELINE] = "cp_config_delete_pipeline",
+	[CP_CONFIG_LOCK_SITE_UPDATE_DEVICES] = "cp_config_update_devices",
+	[CP_CONFIG_LOCK_SITE_DELETE_DEVICE] = "cp_config_delete_device",
+	[CP_CONFIG_LOCK_SITE_UPDATE_OBJECTS] = "cp_config_update_objects",
+	[CP_CONFIG_LOCK_SITE_DELETE_OBJECT] = "cp_config_delete_object",
+	[CP_CONFIG_LOCK_SITE_AGENT_ATTACH] = "agent_attach",
+	[CP_CONFIG_LOCK_SITE_AGENT_MEMORY_LIMIT] = "agent_memory_limit",
+	[CP_CONFIG_LOCK_SITE_AGENT_EXTEND] = "agent_extend",
+	[CP_CONFIG_LOCK_SITE_SHM_EXTEND_AGENT] = "yanet_shm_extend_agent",
+	[CP_CONFIG_LOCK_SITE_AGENT_FREE_UNUSED] = "agent_free_unused_agents",
+	[CP_CONFIG_LOCK_SITE_ITEM_TRY_DESTROY] = "cp_item_try_destroy",
+	[CP_CONFIG_LOCK_SITE_GET_MODULES] = "yanet_get_cp_module_list_info",
+	[CP_CONFIG_LOCK_SITE_GET_FUNCTIONS] = "yanet_get_cp_function_list_info",
+	[CP_CONFIG_LOCK_SITE_GET_PIPELINES] = "yanet_get_cp_pipeline_list_info",
+	[CP_CONFIG_LOCK_SITE_GET_DEVICES] = "yanet_get_cp_device_list_info",
+	[CP_CONFIG_LOCK_SITE_GET_AGENTS] = "yanet_get_cp_agent_list_info",
+	[CP_CONFIG_LOCK_SITE_GET_COUNTERS] =
+		"yanet_get_counters_by_tags_per_worker",
+	[CP_CONFIG_LOCK_SITE_GET_VLAN] = "cp_device_vlan_get_vlan",
+	[CP_CONFIG_LOCK_SITE_ROUTE_SNAPSHOT_OPEN] = "route_snapshot_open",
+	[CP_CONFIG_LOCK_SITE_ROUTE_SNAPSHOT_CLOSE] = "route_snapshot_close",
+	[CP_CONFIG_LOCK_SITE_DP_INIT] = "dp_init",
+};
 
 static inline void
 cp_config_gen_free(
@@ -307,7 +392,7 @@ cp_config_delete_module(
 	const char *module_name,
 	yanet_error **err
 ) {
-	cp_config_lock(cp_config);
+	cp_config_lock_site(cp_config, CP_CONFIG_LOCK_SITE_DELETE_MODULE);
 
 	struct cp_config_gen *old_config_gen =
 		ADDR_OF(&cp_config->cp_config_gen);
@@ -354,7 +439,7 @@ cp_config_update_modules(
 	struct cp_module **cp_modules,
 	yanet_error **err
 ) {
-	cp_config_lock(cp_config);
+	cp_config_lock_site(cp_config, CP_CONFIG_LOCK_SITE_UPDATE_MODULES);
 
 	struct cp_config_gen *old_config_gen =
 		ADDR_OF(&cp_config->cp_config_gen);
@@ -446,7 +531,7 @@ cp_config_update_functions(
 	struct cp_function_config **cp_function_configs,
 	yanet_error **err
 ) {
-	cp_config_lock(cp_config);
+	cp_config_lock_site(cp_config, CP_CONFIG_LOCK_SITE_UPDATE_FUNCTIONS);
 
 	struct cp_config_gen *old_config_gen =
 		ADDR_OF(&cp_config->cp_config_gen);
@@ -522,7 +607,7 @@ cp_config_delete_function(
 	const char *name,
 	yanet_error **err
 ) {
-	cp_config_lock(cp_config);
+	cp_config_lock_site(cp_config, CP_CONFIG_LOCK_SITE_DELETE_FUNCTION);
 
 	struct cp_config_gen *old_config_gen =
 		ADDR_OF(&cp_config->cp_config_gen);
@@ -576,7 +661,7 @@ cp_config_update_pipelines(
 	struct cp_pipeline_config **cp_pipeline_configs,
 	yanet_error **err
 ) {
-	cp_config_lock(cp_config);
+	cp_config_lock_site(cp_config, CP_CONFIG_LOCK_SITE_UPDATE_PIPELINES);
 
 	struct cp_config_gen *old_config_gen =
 		ADDR_OF(&cp_config->cp_config_gen);
@@ -652,7 +737,7 @@ cp_config_delete_pipeline(
 	const char *name,
 	yanet_error **err
 ) {
-	cp_config_lock(cp_config);
+	cp_config_lock_site(cp_config, CP_CONFIG_LOCK_SITE_DELETE_PIPELINE);
 
 	struct cp_config_gen *old_config_gen =
 		ADDR_OF(&cp_config->cp_config_gen);
@@ -772,7 +857,7 @@ cp_config_update_devices(
 	yanet_error **err
 ) {
 	// TODO weight clamp
-	cp_config_lock(cp_config);
+	cp_config_lock_site(cp_config, CP_CONFIG_LOCK_SITE_UPDATE_DEVICES);
 
 	struct cp_config_gen *old_config_gen =
 		ADDR_OF(&cp_config->cp_config_gen);
@@ -837,7 +922,7 @@ cp_config_delete_device(
 		}
 	}
 
-	cp_config_lock(cp_config);
+	cp_config_lock_site(cp_config, CP_CONFIG_LOCK_SITE_DELETE_DEVICE);
 
 	struct cp_config_gen *old_config_gen =
 		ADDR_OF(&cp_config->cp_config_gen);
@@ -880,7 +965,7 @@ cp_config_update_objects(
 	struct cp_object *objects[],
 	yanet_error **err
 ) {
-	cp_config_lock(cp_config);
+	cp_config_lock_site(cp_config, CP_CONFIG_LOCK_SITE_UPDATE_OBJECTS);
 
 	struct cp_config_gen *old_config_gen =
 		ADDR_OF(&cp_config->cp_config_gen);
@@ -930,7 +1015,7 @@ cp_config_delete_object(
 	const char *object_name,
 	yanet_error **err
 ) {
-	cp_config_lock(cp_config);
+	cp_config_lock_site(cp_config, CP_CONFIG_LOCK_SITE_DELETE_OBJECT);
 
 	struct cp_config_gen *old_config_gen =
 		ADDR_OF(&cp_config->cp_config_gen);

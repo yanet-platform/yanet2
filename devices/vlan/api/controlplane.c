@@ -71,7 +71,7 @@ cp_device_vlan_get_vlan(
 	struct agent *agent, const char *name, uint16_t *vlan, yanet_error **err
 ) {
 	struct cp_config *cp_config = ADDR_OF(&agent->cp_config);
-	cp_config_lock(cp_config);
+	cp_config_lock_site(cp_config, CP_CONFIG_LOCK_SITE_GET_VLAN);
 
 	struct cp_config_gen *cp_config_gen =
 		ADDR_OF(&cp_config->cp_config_gen);

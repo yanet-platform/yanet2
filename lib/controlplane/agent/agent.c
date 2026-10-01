@@ -245,6 +245,18 @@ agent_attach(
 	uint64_t magic =
 		__atomic_load_n(&dp_config->ready_magic, __ATOMIC_ACQUIRE);
 	if (magic != DP_CONFIG_READY_MAGIC) {
+		if (magic != 0) {
+			yanet_error_add(
+				err,
+				"shared memory of instance %u was initialised "
+				"by an incompatible build (magic %#lx); "
+				"restart the dataplane and the control planes "
+				"together",
+				instance_idx,
+				magic
+			);
+			return NULL;
+		}
 		yanet_error_add(
 			err,
 			"dataplane shared memory instance %u is not yet "
@@ -256,7 +268,7 @@ agent_attach(
 
 	struct cp_config *cp_config = ADDR_OF(&dp_config->cp_config);
 
-	cp_config_lock(cp_config);
+	cp_config_lock_site(cp_config, CP_CONFIG_LOCK_SITE_AGENT_ATTACH);
 
 	struct agent *new_agent = (struct agent *)memory_balloc(
 		&cp_config->memory_context, sizeof(struct agent)
@@ -396,7 +408,7 @@ uint64_t
 agent_memory_limit(struct agent *agent) {
 	struct cp_config *cp_config = ADDR_OF(&agent->cp_config);
 
-	cp_config_lock(cp_config);
+	cp_config_lock_site(cp_config, CP_CONFIG_LOCK_SITE_AGENT_MEMORY_LIMIT);
 	uint64_t memory_limit = agent->memory_limit;
 	cp_config_unlock(cp_config);
 
@@ -510,7 +522,7 @@ int
 agent_extend(struct agent *agent, uint64_t size, yanet_error **err) {
 	struct cp_config *cp_config = ADDR_OF(&agent->cp_config);
 
-	cp_config_lock(cp_config);
+	cp_config_lock_site(cp_config, CP_CONFIG_LOCK_SITE_AGENT_EXTEND);
 	int ret = agent_extend_locked(agent, size, err);
 	cp_config_unlock(cp_config);
 
@@ -902,7 +914,7 @@ cp_module_list_info_free(struct cp_module_list_info *module_list_info) {
 struct cp_module_list_info *
 yanet_get_cp_module_list_info(struct dp_config *dp_config) {
 	struct cp_config *cp_config = ADDR_OF(&dp_config->cp_config);
-	cp_config_lock(cp_config);
+	cp_config_lock_site(cp_config, CP_CONFIG_LOCK_SITE_GET_MODULES);
 
 	struct cp_config_gen *config_gen = ADDR_OF(&cp_config->cp_config_gen);
 	struct cp_module_registry *module_registry =
@@ -980,7 +992,7 @@ cp_function_list_info_free(struct cp_function_list_info *function_list_info) {
 struct cp_function_list_info *
 yanet_get_cp_function_list_info(struct dp_config *dp_config) {
 	struct cp_config *cp_config = ADDR_OF(&dp_config->cp_config);
-	cp_config_lock(cp_config);
+	cp_config_lock_site(cp_config, CP_CONFIG_LOCK_SITE_GET_FUNCTIONS);
 
 	struct cp_config_gen *config_gen = ADDR_OF(&cp_config->cp_config_gen);
 	struct cp_function_registry *function_registry =
@@ -1129,7 +1141,7 @@ cp_pipeline_list_info_free(struct cp_pipeline_list_info *pipeline_list_info) {
 struct cp_pipeline_list_info *
 yanet_get_cp_pipeline_list_info(struct dp_config *dp_config) {
 	struct cp_config *cp_config = ADDR_OF(&dp_config->cp_config);
-	cp_config_lock(cp_config);
+	cp_config_lock_site(cp_config, CP_CONFIG_LOCK_SITE_GET_PIPELINES);
 
 	struct cp_config_gen *config_gen = ADDR_OF(&cp_config->cp_config_gen);
 	struct registry *pipeline_registry =
@@ -1267,7 +1279,7 @@ yanet_build_device_info(struct cp_device *device, uint64_t index) {
 struct cp_device_list_info *
 yanet_get_cp_device_list_info(struct dp_config *dp_config) {
 	struct cp_config *cp_config = ADDR_OF(&dp_config->cp_config);
-	cp_config_lock(cp_config);
+	cp_config_lock_site(cp_config, CP_CONFIG_LOCK_SITE_GET_DEVICES);
 	struct cp_config_gen *cp_config_gen =
 		ADDR_OF(&cp_config->cp_config_gen);
 
@@ -1503,7 +1515,7 @@ cp_agent_list_info_free(struct cp_agent_list_info *agent_list_info) {
 struct cp_agent_list_info *
 yanet_get_cp_agent_list_info(struct dp_config *dp_config) {
 	struct cp_config *cp_config = ADDR_OF(&dp_config->cp_config);
-	cp_config_lock(cp_config);
+	cp_config_lock_site(cp_config, CP_CONFIG_LOCK_SITE_GET_AGENTS);
 
 	struct cp_agent_registry *agent_registry =
 		ADDR_OF(&cp_config->agent_registry);
@@ -1568,6 +1580,65 @@ yanet_get_cp_agent_list_info(struct dp_config *dp_config) {
 unlock:
 	cp_config_unlock(cp_config);
 	return agent_list_info;
+}
+
+void
+cp_config_lock_stats_info_free(struct cp_config_lock_stats_info *stats_info) {
+	if (stats_info == NULL) {
+		return;
+	}
+	free(stats_info);
+}
+
+struct cp_config_lock_stats_info *
+yanet_get_cp_config_lock_stats(struct dp_config *dp_config) {
+	struct cp_config *cp_config = ADDR_OF(&dp_config->cp_config);
+
+	struct cp_config_lock_stats_info *stats_info =
+		(struct cp_config_lock_stats_info *)malloc(
+			sizeof(struct cp_config_lock_stats_info) +
+			sizeof(struct cp_config_lock_site_info) *
+				CP_CONFIG_LOCK_SITE_COUNT
+		);
+	if (stats_info == NULL) {
+		return NULL;
+	}
+	stats_info->site_count = CP_CONFIG_LOCK_SITE_COUNT;
+
+	for (uint64_t site = 0; site < CP_CONFIG_LOCK_SITE_COUNT; ++site) {
+		const struct cp_config_lock_site_stats *slot =
+			&cp_config->lock_stats.sites[site];
+		struct cp_config_lock_site_info *site_info =
+			&stats_info->sites[site];
+		strtcpy(site_info->name,
+			cp_config_lock_site_names[site],
+			sizeof(site_info->name));
+		site_info->acquisitions =
+			__atomic_load_n(&slot->acquisitions, __ATOMIC_RELAXED);
+		site_info->wait_ns =
+			__atomic_load_n(&slot->wait_ns, __ATOMIC_RELAXED);
+		site_info->wait_max_ns =
+			__atomic_load_n(&slot->wait_max_ns, __ATOMIC_RELAXED);
+		site_info->hold_ns =
+			__atomic_load_n(&slot->hold_ns, __ATOMIC_RELAXED);
+		site_info->hold_max_ns =
+			__atomic_load_n(&slot->hold_max_ns, __ATOMIC_RELAXED);
+	}
+
+	return stats_info;
+}
+
+int
+yanet_get_cp_config_lock_site_info(
+	struct cp_config_lock_stats_info *stats_info,
+	uint64_t index,
+	struct cp_config_lock_site_info *site_info
+) {
+	if (stats_info == NULL || index >= stats_info->site_count) {
+		return -1;
+	}
+	*site_info = stats_info->sites[index];
+	return 0;
 }
 
 struct cp_device_config *
@@ -1670,7 +1741,7 @@ agent_free_unused_agents(struct agent *agent) {
 	// Registry-wide reclamation mutates predecessor chains and returns
 	// whole arenas, so the sweep runs under the configuration lock.
 	struct cp_config *cp_config = ADDR_OF(&agent->cp_config);
-	cp_config_lock(cp_config);
+	cp_config_lock_site(cp_config, CP_CONFIG_LOCK_SITE_AGENT_FREE_UNUSED);
 	cp_config_reclaim_unused_agents_locked(cp_config);
 	cp_config_unlock(cp_config);
 }
@@ -1775,7 +1846,7 @@ yanet_shm_extend_agent(
 		return -1;
 	}
 
-	cp_config_lock(cp_config);
+	cp_config_lock_site(cp_config, CP_CONFIG_LOCK_SITE_SHM_EXTEND_AGENT);
 
 	int ret = 1;
 	struct agent *agent = find_agent_locked(cp_config, name);

@@ -259,3 +259,41 @@ cp_agent_list_info_free(struct cp_agent_list_info *agent_list_info);
 
 struct cp_agent_list_info *
 yanet_get_cp_agent_list_info(struct dp_config *dp_config);
+
+// Snapshot of one site's configuration-lock instrumentation: how many
+// acquisitions that API entry point made, and the total and maximum
+// time spent waiting for the lock and holding it.
+struct cp_config_lock_site_info {
+	char name[48];
+	uint64_t acquisitions;
+	uint64_t wait_ns;
+	uint64_t wait_max_ns;
+	uint64_t hold_ns;
+	uint64_t hold_max_ns;
+};
+
+struct cp_config_lock_stats_info {
+	uint64_t site_count;
+	struct cp_config_lock_site_info sites[];
+};
+
+void
+cp_config_lock_stats_info_free(struct cp_config_lock_stats_info *stats_info);
+
+// Snapshot the per-site configuration-lock instrumentation counters.
+//
+// The lock itself is not taken: the counters are advisory relaxed
+// atomics, and reading them under the lock would pollute the very
+// numbers being read.
+struct cp_config_lock_stats_info *
+yanet_get_cp_config_lock_stats(struct dp_config *dp_config);
+
+// Copy the site at index into site_info.
+//
+// @return 0 on success, -1 when index is out of range.
+int
+yanet_get_cp_config_lock_site_info(
+	struct cp_config_lock_stats_info *stats_info,
+	uint64_t index,
+	struct cp_config_lock_site_info *site_info
+);

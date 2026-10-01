@@ -1,5 +1,7 @@
 #include "bootstrap.h"
 
+#include <string.h>
+
 #include "common/memory.h"
 #include "common/memory_address.h"
 #include "lib/controlplane/config/zone.h"
@@ -51,11 +53,16 @@ dp_storage_init(
 	struct cp_config *cp_config =
 		(struct cp_config *)((uintptr_t)storage + dp_memory);
 
+	// Start the lock instrumentation from a clean slate before the first
+	// acquisition below can account into it, so a zone recreated over
+	// non-fresh storage does not begin with stale counters.
+	memset(&cp_config->lock_stats, 0, sizeof(cp_config->lock_stats));
+
 	// The lock is taken and released inside this routine: callers pair
 	// their own control-plane mutations themselves. Nobody else can
 	// reach the zone before readiness is published, so the pair is
 	// uncontended discipline rather than exclusion.
-	cp_config_lock(cp_config);
+	cp_config_lock_site(cp_config, CP_CONFIG_LOCK_SITE_DP_INIT);
 
 	block_allocator_init(&cp_config->block_allocator);
 	block_allocator_put_arena(
@@ -85,6 +92,13 @@ dp_storage_init(
 			&cp_config->memory_context,
 			sizeof(struct cp_agent_registry)
 		);
+	if (cp_agent_registry == NULL) {
+		// The control-plane zone holds its header but not even the
+		// mandatory bootstrap allocation. Fail the instance instead
+		// of faulting on the NULL.
+		cp_config_unlock(cp_config);
+		return -1;
+	}
 	cp_agent_registry->count = 0;
 	SET_OFFSET_OF(&cp_config->agent_registry, cp_agent_registry);
 

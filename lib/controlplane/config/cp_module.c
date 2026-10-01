@@ -390,7 +390,9 @@ cp_module_try_destroy(struct cp_module *cp_module, yanet_error **err) {
 		(agent != NULL) ? ADDR_OF(&agent->cp_config) : NULL;
 
 	if (cp_config != NULL) {
-		cp_config_lock(cp_config);
+		cp_config_lock_site(
+			cp_config, CP_CONFIG_LOCK_SITE_ITEM_TRY_DESTROY
+		);
 	}
 
 	uint64_t refcnt = cp_module->config_item.refcnt;

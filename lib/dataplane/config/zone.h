@@ -127,7 +127,12 @@ struct dp_worker {
 // The writer uses release ordering; readers use acquire ordering before
 // attempting to attach, so observing this value guarantees the instance is
 // ready and its cp_config lock is free.
-#define DP_CONFIG_READY_MAGIC UINT64_C(0xDEAD10CC00000001)
+//
+// The trailing counter versions the shared-memory layout: bump it whenever
+// struct dp_config or struct cp_config changes size or layout, so a process
+// built from the other side of that change refuses to attach to the segment
+// instead of reading and writing it at stale offsets.
+#define DP_CONFIG_READY_MAGIC UINT64_C(0xDEAD10CC00000002)
 
 struct dp_config {
 	uint32_t instance_count;

@@ -181,14 +181,16 @@ route_snapshot_open(struct agent *agent, const char *name, yanet_error **err) {
 	}
 
 	struct cp_config *cp_config = ADDR_OF(&agent->cp_config);
-	cp_config_lock(cp_config);
+	cp_config_lock_site(cp_config, CP_CONFIG_LOCK_SITE_ROUTE_SNAPSHOT_OPEN);
 	struct cp_config_gen *config_gen = cp_config_gen_acquire(cp_config);
 	cp_config_unlock(cp_config);
 
 	struct cp_module *cp_module =
 		cp_config_gen_lookup_module(config_gen, "route", name);
 	if (cp_module == NULL) {
-		cp_config_lock(cp_config);
+		cp_config_lock_site(
+			cp_config, CP_CONFIG_LOCK_SITE_ROUTE_SNAPSHOT_OPEN
+		);
 		cp_config_gen_release(cp_config, config_gen);
 		cp_config_unlock(cp_config);
 		free(snapshot);
@@ -215,7 +217,9 @@ route_snapshot_close(struct route_snapshot *snapshot) {
 	if (snapshot == NULL) {
 		return;
 	}
-	cp_config_lock(snapshot->cp_config);
+	cp_config_lock_site(
+		snapshot->cp_config, CP_CONFIG_LOCK_SITE_ROUTE_SNAPSHOT_CLOSE
+	);
 	cp_config_gen_release(snapshot->cp_config, snapshot->config_gen);
 	cp_config_unlock(snapshot->cp_config);
 	free(snapshot);

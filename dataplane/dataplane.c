@@ -473,6 +473,24 @@ dataplane_init(
 			return -1;
 		}
 
+		// Each zone places its header structure at its start and hands
+		// the remainder to the block allocator, so a zone smaller than
+		// its header would underflow the arena size and let
+		// initialization write past the zone.
+		if (instance_config->dp_memory < sizeof(struct dp_config) ||
+		    instance_config->cp_memory < sizeof(struct cp_config)) {
+			LOG(ERROR,
+			    "instance %u zone sizes (%zu dataplane, %zu "
+			    "controlplane) are smaller than their zone headers "
+			    "(%zu and %zu bytes)",
+			    instance_idx,
+			    instance_config->dp_memory,
+			    instance_config->cp_memory,
+			    sizeof(struct dp_config),
+			    sizeof(struct cp_config));
+			return -1;
+		}
+
 		LOG(INFO, "initialize storage for instance %u", instance_idx);
 
 		yanet_error *err = NULL;
@@ -619,7 +637,9 @@ dataplane_init(
 		//
 		// FIXME: not paired with a free: released only when shm is torn
 		// down.
-		cp_config_lock(instance->cp_config);
+		cp_config_lock_site(
+			instance->cp_config, CP_CONFIG_LOCK_SITE_DP_INIT
+		);
 
 		struct agent *agent = dp_system_agent_new(
 			instance->cp_config, instance->dp_config, "dataplane"
