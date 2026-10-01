@@ -35,6 +35,7 @@ typedef void (*classify_net4_get_net4s_func)(
  */
 struct classify_compile_net4 {
 	classify_net4_get_net4s_func get_net4s;
+	const char *name;
 
 	struct range_index range_index;
 	struct value_table value_table;
@@ -45,7 +46,8 @@ classify_compile_net4_create(
 	struct memory_context *memory_context,
 	const struct classifier_rule *const *rules,
 	uint32_t rule_count,
-	classify_net4_get_net4s_func get_net4s
+	classify_net4_get_net4s_func get_net4s,
+	const char *name
 ) {
 	struct classify_compile_net4 *compile =
 		(struct classify_compile_net4 *)memory_balloc(
@@ -56,6 +58,7 @@ classify_compile_net4_create(
 	}
 
 	compile->get_net4s = get_net4s;
+	compile->name = name;
 
 	struct range_collector collector;
 	if (range_collector_init(&collector, memory_context)) {
@@ -99,10 +102,12 @@ classify_compile_net4_create(
 		goto error_range_index;
 	}
 
+	char table_name[MEMORY_CONTEXT_NAME_SIZE];
+	classify_leaf_name(table_name, sizeof(table_name), name, "table");
 	if (value_table_init(
 		    &compile->value_table,
 		    memory_context,
-		    "filter:net4",
+		    table_name,
 		    1,
 		    collector.count
 	    )) {
@@ -256,7 +261,11 @@ classify_compile_net4_commit(
 	 * tree cannot move in. The region identifiers of the partition are
 	 * remapped through the compacted class table in one pass.
 	 */
-	if (lpm_init(&net4_attr->lpm, memory_context, "filter:net4")) {
+	char lpm_name[MEMORY_CONTEXT_NAME_SIZE];
+	classify_leaf_name(
+		lpm_name, sizeof(lpm_name), net4_compile->name, "lpm"
+	);
+	if (lpm_init(&net4_attr->lpm, memory_context, lpm_name)) {
 		// The init links the embedded context into its parent before
 		// the root page allocates, so the zeroing goes through the
 		// free to unlink it first.
@@ -360,6 +369,10 @@ classify_compile_net4_compare(
  * Compiles the IPv4 network classifier of a ruleset into an embedded
  * attribute.
  *
+ * The name scopes the memory contexts of the compile - the attribute
+ * match and the stage registry - each titled with the name and its own
+ * artifact leaf, in the memory tree.
+ *
  * On success the attribute and the stage - the registry with the rule
  * group row - are owned by the caller, released through
  * classifier_fini; on failure every partial state is freed, the
@@ -368,6 +381,7 @@ classify_compile_net4_compare(
 static inline int
 classify_net4_compile(
 	struct memory_context *memory_context,
+	const char *name,
 	const struct classifier_rule *const *rules,
 	uint32_t rule_count,
 	classify_net4_get_net4s_func get_net4s,
@@ -375,7 +389,7 @@ classify_net4_compile(
 	struct classifier *cls
 ) {
 	struct classify_compile_net4 *compile = classify_compile_net4_create(
-		memory_context, rules, rule_count, get_net4s
+		memory_context, rules, rule_count, get_net4s, name
 	);
 	if (compile == NULL) {
 		memset(attr, 0, sizeof(*attr));
@@ -395,7 +409,14 @@ classify_net4_compile(
 	};
 
 	return classify_attr_compile(
-		memory_context, &ops, compile, rules, rule_count, attr, cls
+		memory_context,
+		name,
+		&ops,
+		compile,
+		rules,
+		rule_count,
+		attr,
+		cls
 	);
 }
 
@@ -405,12 +426,13 @@ classify_net4_compile(
  * rule and adapts them to the rule agnostic core, and the entry takes
  * the module rule array the consumer owns.
  *
- * The name must carry the consumer prefix, so the generated symbols
+ * The tag must carry the consumer prefix, so the generated symbols
  * never collide with the library ones.
  */
-#define CLASSIFY_NET4_COMPILE(name, get_net4s)                                 \
-	static inline int classify_##name##_compile(                           \
+#define CLASSIFY_NET4_COMPILE(tag, get_net4s)                                  \
+	static inline int classify_##tag##_compile(                            \
 		struct memory_context *memory_context,                         \
+		const char *name,                                              \
 		const struct classifier_rule **rules,                          \
 		uint32_t rule_count,                                           \
 		struct classify_attr_net4 *attr,                               \
@@ -418,6 +440,7 @@ classify_net4_compile(
 	) {                                                                    \
 		return classify_net4_compile(                                  \
 			memory_context,                                        \
+			name,                                                  \
 			rules,                                                 \
 			rule_count,                                            \
 			get_net4s,                                             \

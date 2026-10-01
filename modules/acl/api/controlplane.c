@@ -633,6 +633,7 @@ acl_module_build_l2(
 
 	if (classify_acl_device_compile(
 		    memory_context,
+		    "l2:device",
 		    rule_ptrs,
 		    acl_rule_count,
 		    &cls->dev_attr,
@@ -682,6 +683,7 @@ acl_module_derive_l2(
 	);
 	if (classify_decode(
 		    memory_context,
+		    "l2:rules",
 		    dev_stage,
 		    rule_ptrs,
 		    acl_rule_count,
@@ -752,6 +754,7 @@ acl_module_build_ip4_classifier(
 
 	if (classify_acl_device_compile(
 		    memory_context,
+		    "ip4:device",
 		    rule_ptrs,
 		    acl_rule_count,
 		    &cls->dev_attr,
@@ -761,6 +764,7 @@ acl_module_build_ip4_classifier(
 	}
 	if (classify_acl_net4_src_compile(
 		    memory_context,
+		    "ip4:net4_src",
 		    rule_ptrs,
 		    acl_rule_count,
 		    &cls->net4_src_attr,
@@ -770,6 +774,7 @@ acl_module_build_ip4_classifier(
 	}
 	if (classify_acl_net4_dst_compile(
 		    memory_context,
+		    "ip4:net4_dst",
 		    rule_ptrs,
 		    acl_rule_count,
 		    &cls->net4_dst_attr,
@@ -779,6 +784,7 @@ acl_module_build_ip4_classifier(
 	}
 	if (classify_join(
 		    memory_context,
+		    "ip4:nets_joint",
 		    &stage_n4_src,
 		    &stage_n4_dst,
 		    acl_rule_count,
@@ -789,6 +795,7 @@ acl_module_build_ip4_classifier(
 	}
 	if (classify_join(
 		    memory_context,
+		    "ip4:mid_joint",
 		    &stage_dev,
 		    &stage_nets,
 		    acl_rule_count,
@@ -799,6 +806,7 @@ acl_module_build_ip4_classifier(
 	}
 	if (classify_acl_ipproto_compile(
 		    memory_context,
+		    "ip4:ipproto",
 		    rule_ptrs,
 		    acl_rule_count,
 		    &cls->ipproto_attr,
@@ -808,6 +816,7 @@ acl_module_build_ip4_classifier(
 	}
 	if (classify_join(
 		    memory_context,
+		    "ip4:proto_joint",
 		    &stage_mid,
 		    &stage_ipproto,
 		    acl_rule_count,
@@ -827,6 +836,7 @@ acl_module_build_ip4_classifier(
 
 	if (classify_acl_ipfrag_compile(
 		    memory_context,
+		    "ip4:ipfrag",
 		    rule_ptrs,
 		    acl_rule_count,
 		    &config->classifier_frag4.frag_attr,
@@ -836,6 +846,7 @@ acl_module_build_ip4_classifier(
 	}
 	if (classify_join(
 		    memory_context,
+		    "ip4:root_joint",
 		    core_stage,
 		    &stage_frag,
 		    acl_rule_count,
@@ -888,6 +899,7 @@ acl_module_derive_ip4(
 	);
 	if (classify_decode(
 		    memory_context,
+		    "ip4:rules",
 		    plain_stage,
 		    rule_ptrs,
 		    acl_rule_count,
@@ -939,6 +951,7 @@ acl_module_build_ip6_classifier(
 
 	if (classify_acl_device_compile(
 		    memory_context,
+		    "ip6:device",
 		    rule_ptrs,
 		    acl_rule_count,
 		    &cls->dev_attr,
@@ -948,6 +961,7 @@ acl_module_build_ip6_classifier(
 	}
 	if (classify_acl_net6_src_compile(
 		    memory_context,
+		    "ip6:net6_src",
 		    rule_ptrs,
 		    acl_rule_count,
 		    &cls->net6_src_attr,
@@ -957,6 +971,7 @@ acl_module_build_ip6_classifier(
 	}
 	if (classify_acl_net6_dst_compile(
 		    memory_context,
+		    "ip6:net6_dst",
 		    rule_ptrs,
 		    acl_rule_count,
 		    &cls->net6_dst_attr,
@@ -966,6 +981,7 @@ acl_module_build_ip6_classifier(
 	}
 	if (classify_join(
 		    memory_context,
+		    "ip6:nets_joint",
 		    &stage_n6_src,
 		    &stage_n6_dst,
 		    acl_rule_count,
@@ -976,6 +992,7 @@ acl_module_build_ip6_classifier(
 	}
 	if (classify_join(
 		    memory_context,
+		    "ip6:mid_joint",
 		    &stage_dev,
 		    &stage_nets,
 		    acl_rule_count,
@@ -986,6 +1003,7 @@ acl_module_build_ip6_classifier(
 	}
 	if (classify_acl_ipproto_compile(
 		    memory_context,
+		    "ip6:ipproto",
 		    rule_ptrs,
 		    acl_rule_count,
 		    &cls->ipproto_attr,
@@ -995,6 +1013,7 @@ acl_module_build_ip6_classifier(
 	}
 	if (classify_join(
 		    memory_context,
+		    "ip6:proto_joint",
 		    &stage_mid,
 		    &stage_ipproto,
 		    acl_rule_count,
@@ -1014,6 +1033,7 @@ acl_module_build_ip6_classifier(
 
 	if (classify_acl_ipfrag_compile(
 		    memory_context,
+		    "ip6:ipfrag",
 		    rule_ptrs,
 		    acl_rule_count,
 		    &config->classifier_frag6.frag_attr,
@@ -1023,6 +1043,7 @@ acl_module_build_ip6_classifier(
 	}
 	if (classify_join(
 		    memory_context,
+		    "ip6:root_joint",
 		    core_stage,
 		    &stage_frag,
 		    acl_rule_count,
@@ -1074,6 +1095,7 @@ acl_module_derive_ip6(
 	);
 	if (classify_decode(
 		    memory_context,
+		    "ip6:rules",
 		    plain_stage,
 		    rule_ptrs,
 		    acl_rule_count,
@@ -1098,6 +1120,9 @@ acl_module_derive_ip6(
  * derivations.
  */
 struct acl_path_filters_build {
+	// The family the paths belong to - "ip4" or "ip6" - prefixing the
+	// memory context names of the compile below.
+	const char *family;
 	struct acl_classifier_ports *ports;
 	struct acl_classifier_tcp *tcp;
 	struct acl_classifier_icmp *icmp;
@@ -1122,6 +1147,18 @@ struct acl_path_filters_build {
 
 	struct vline *udp_vac_rule_map;
 };
+
+// Composes the memory context name of one object of the paths compile:
+// the family prefix of the build with the role of the object.
+static void
+acl_path_name(
+	char *name,
+	size_t size,
+	const struct acl_path_filters_build *build,
+	const char *role
+) {
+	snprintf(name, size, "%s:%s", build->family, role);
+}
 
 /*
  * Compiles the protocol paths of one family: the ports pair over the
@@ -1158,6 +1195,10 @@ acl_module_build_paths(
 ) {
 	struct memory_context *memory_context = &cp_module->memory_context;
 
+	// The memory context names of the compile below: the family prefix
+	// of the build with the role of each object.
+	char name[64];
+
 	struct classifier stage_src = {0};
 	struct classifier stage_dst = {0};
 	struct classifier stage_ports = {0};
@@ -1182,8 +1223,10 @@ acl_module_build_paths(
 			return -1;
 		}
 
+		acl_path_name(name, sizeof(name), build, "src_port");
 		if (classify_acl_src_port_compile(
 			    memory_context,
+			    name,
 			    rule_ptrs,
 			    acl_rule_count,
 			    &build->ports->src_attr,
@@ -1192,8 +1235,10 @@ acl_module_build_paths(
 			free(rule_ptrs);
 			goto error;
 		}
+		acl_path_name(name, sizeof(name), build, "dst_port");
 		if (classify_acl_dst_port_compile(
 			    memory_context,
+			    name,
 			    rule_ptrs,
 			    acl_rule_count,
 			    &build->ports->dst_attr,
@@ -1202,8 +1247,10 @@ acl_module_build_paths(
 			free(rule_ptrs);
 			goto error;
 		}
+		acl_path_name(name, sizeof(name), build, "ports_joint");
 		if (classify_join(
 			    memory_context,
+			    name,
 			    &stage_src,
 			    &stage_dst,
 			    acl_rule_count,
@@ -1218,8 +1265,10 @@ acl_module_build_paths(
 
 	// The udp path: the ports classes join onto the core classes
 	// directly, the path has no transport specific leaf.
+	acl_path_name(name, sizeof(name), build, "udp_root_joint");
 	if (classify_join(
 		    memory_context,
+		    name,
 		    core_stage,
 		    &stage_ports,
 		    acl_rule_count,
@@ -1241,8 +1290,10 @@ acl_module_build_paths(
 			goto error;
 		}
 
+		acl_path_name(name, sizeof(name), build, "tcp_flags");
 		if (classify_acl_tcp_flags_compile(
 			    memory_context,
+			    name,
 			    rule_ptrs,
 			    acl_rule_count,
 			    &build->tcp->flags_attr,
@@ -1253,8 +1304,10 @@ acl_module_build_paths(
 		}
 		free(rule_ptrs);
 	}
+	acl_path_name(name, sizeof(name), build, "flags_joint");
 	if (classify_join(
 		    memory_context,
+		    name,
 		    &stage_ports,
 		    &stage_flags,
 		    acl_rule_count,
@@ -1263,8 +1316,10 @@ acl_module_build_paths(
 	    )) {
 		goto error;
 	}
+	acl_path_name(name, sizeof(name), build, "tcp_root_joint");
 	if (classify_join(
 		    memory_context,
+		    name,
 		    core_stage,
 		    &stage_tcp_mid,
 		    acl_rule_count,
@@ -1284,8 +1339,10 @@ acl_module_build_paths(
 			goto error;
 		}
 
+		acl_path_name(name, sizeof(name), build, "icmp_type");
 		if (classify_acl_icmp_type_compile(
 			    memory_context,
+			    name,
 			    rule_ptrs,
 			    acl_rule_count,
 			    &build->icmp->type_attr,
@@ -1296,8 +1353,10 @@ acl_module_build_paths(
 		}
 		free(rule_ptrs);
 	}
+	acl_path_name(name, sizeof(name), build, "icmp_root_joint");
 	if (classify_join(
 		    memory_context,
+		    name,
 		    core_stage,
 		    &stage_type,
 		    acl_rule_count,
@@ -1334,22 +1393,36 @@ acl_module_build_paths(
 			    check_acl_rule_tcp_vacuous
 		    ) > 0) {
 			struct classifier tcp_vac_stage = {0};
+			acl_path_name(
+				name, sizeof(name), build, "tcp_vac_joint"
+			);
 			if (classify_join(
 				    memory_context,
+				    name,
 				    core_stage,
 				    &stage_flags,
 				    acl_rule_count,
 				    build->tcp_vac_joint,
 				    &tcp_vac_stage
-			    ) ||
-			    classify_decode(
-				    memory_context,
-				    &tcp_vac_stage,
-				    rule_ptrs,
-				    acl_rule_count,
-				    build->tcp_vac_rule_map
 			    )) {
 				failed = true;
+			} else {
+				acl_path_name(
+					name,
+					sizeof(name),
+					build,
+					"tcp_vac_rules"
+				);
+				if (classify_decode(
+					    memory_context,
+					    name,
+					    &tcp_vac_stage,
+					    rule_ptrs,
+					    acl_rule_count,
+					    build->tcp_vac_rule_map
+				    )) {
+					failed = true;
+				}
 			}
 			classifier_fini(
 				&tcp_vac_stage, memory_context, acl_rule_count
@@ -1372,6 +1445,7 @@ acl_module_build_paths(
 			goto error;
 		}
 
+		acl_path_name(name, sizeof(name), build, "udp_vac_rules");
 		bool failed = project_acl_rules(
 				      acl_rules,
 				      acl_rule_count,
@@ -1380,6 +1454,7 @@ acl_module_build_paths(
 			      ) > 0 &&
 			      classify_decode(
 				      memory_context,
+				      name,
 				      core_stage,
 				      rule_ptrs,
 				      acl_rule_count,
@@ -1417,6 +1492,10 @@ struct acl_path_stages {
 	struct vline *rule_map;
 	uint64_t *rule_count;
 	acl_rule_check_func check;
+
+	// The rule role of the path - "tcp_rules", "udp_rules" or
+	// "icmp_rules" - prefixed with the family by the derivation.
+	const char *rules_role;
 };
 
 // Releases the stages a failed derivation leaves behind: the path
@@ -1448,19 +1527,26 @@ acl_module_derive_paths(
 ) {
 	struct memory_context *memory_context = &cp_module->memory_context;
 
+	// The memory context names of the decodes below: the family prefix
+	// of the build with the rule role of the path.
+	char name[64];
+
 	struct acl_path_stages paths[3] = {
 		{tcp_stage,
 		 build->tcp_rule_map,
 		 build->tcp_rule_count,
-		 check_acl_rule_tcp},
+		 check_acl_rule_tcp,
+		 "tcp_rules"},
 		{udp_stage,
 		 build->udp_rule_map,
 		 build->udp_rule_count,
-		 check_acl_rule_udp},
+		 check_acl_rule_udp,
+		 "udp_rules"},
 		{icmp_stage,
 		 build->icmp_rule_map,
 		 build->icmp_rule_count,
-		 check_acl_rule_icmp},
+		 check_acl_rule_icmp,
+		 "icmp_rules"},
 	};
 
 	for (uint32_t path = 0; path < 3; ++path) {
@@ -1478,8 +1564,12 @@ acl_module_derive_paths(
 		*paths[path].rule_count = project_acl_rules(
 			acl_rules, acl_rule_count, rule_ptrs, paths[path].check
 		);
+		acl_path_name(
+			name, sizeof(name), build, paths[path].rules_role
+		);
 		if (classify_decode(
 			    memory_context,
+			    name,
 			    paths[path].stage,
 			    rule_ptrs,
 			    acl_rule_count,
@@ -1658,6 +1748,7 @@ acl_module_compile_rules(
 
 	{
 		struct acl_path_filters_build path4_build = {
+			.family = "ip4",
 			.ports = &config->classifier_ports4,
 			.tcp = &config->classifier_tcp4,
 			.icmp = &config->classifier_icmp4,
@@ -1737,6 +1828,7 @@ acl_module_compile_rules(
 
 	{
 		struct acl_path_filters_build path6_build = {
+			.family = "ip6",
 			.ports = &config->classifier_ports6,
 			.tcp = &config->classifier_tcp6,
 			.icmp = &config->classifier_icmp6,

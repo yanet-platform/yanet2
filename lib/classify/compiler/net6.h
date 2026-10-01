@@ -72,6 +72,7 @@ typedef void (*classify_net6_get_net6s_func)(
  */
 struct classify_compile_net6 {
 	classify_net6_get_net6s_func get_net6s;
+	const char *name;
 
 	struct range_index ri_hi;
 	struct range_index ri_lo;
@@ -406,7 +407,8 @@ classify_compile_net6_create(
 	struct memory_context *memory_context,
 	const struct classifier_rule *const *rules,
 	uint32_t rule_count,
-	classify_net6_get_net6s_func get_net6s
+	classify_net6_get_net6s_func get_net6s,
+	const char *name
 ) {
 	struct classify_compile_net6 *compile =
 		(struct classify_compile_net6 *)memory_balloc(
@@ -418,6 +420,7 @@ classify_compile_net6_create(
 	memset(compile, 0, sizeof(struct classify_compile_net6));
 
 	compile->get_net6s = get_net6s;
+	compile->name = name;
 
 	/*
 	 * Collect the unique normalized networks of the ruleset: the first
@@ -513,10 +516,12 @@ classify_compile_net6_create(
 	 * uniform value line instead, so the line joins the same
 	 * enumeration below as one more value of the domain.
 	 */
+	char comb_name[MEMORY_CONTEXT_NAME_SIZE];
+	classify_leaf_name(comb_name, sizeof(comb_name), name, "comb");
 	if (value_table_init(
 		    &compile->comb,
 		    memory_context,
-		    "filter:net6",
+		    comb_name,
 		    compile->ri_hi.max_value + 1,
 		    compile->ri_lo.max_value + 1
 	    )) {
@@ -524,10 +529,12 @@ classify_compile_net6_create(
 	}
 
 	compile->row_count = compile->comb.v_dim;
+	char rows_name[MEMORY_CONTEXT_NAME_SIZE];
+	classify_leaf_name(rows_name, sizeof(rows_name), name, "rows");
 	if (vline_init(
 		    &compile->uniform,
 		    memory_context,
-		    "filter:net6:rows",
+		    rows_name,
 		    compile->row_count
 	    )) {
 		goto error_free_comb;
@@ -626,8 +633,10 @@ classify_compile_net6_create(
 	 * count is known only after the masked networks are collected, and
 	 * their ranges are filled first.
 	 */
+	char nets_name[MEMORY_CONTEXT_NAME_SIZE];
+	classify_leaf_name(nets_name, sizeof(nets_name), name, "nets");
 	if (value_registry_init(
-		    &compile->net_registry, memory_context, "filter:net6:nets"
+		    &compile->net_registry, memory_context, nets_name
 	    )) {
 		goto error_free_row_split;
 	}
@@ -963,13 +972,17 @@ classify_compile_net6_commit(
 	 * their pages are addressed through relative pointers, so trees
 	 * built elsewhere cannot move in.
 	 */
-	if (lpm_init(&net6_attr->hi, memory_context, "filter:net6")) {
+	char hi_name[MEMORY_CONTEXT_NAME_SIZE];
+	classify_leaf_name(hi_name, sizeof(hi_name), net6_compile->name, "hi");
+	if (lpm_init(&net6_attr->hi, memory_context, hi_name)) {
 		goto error;
 	}
 	if (range_index_build_lpm(&net6_compile->ri_hi, 8, &net6_attr->hi)) {
 		goto error;
 	}
-	if (lpm_init(&net6_attr->lo, memory_context, "filter:net6")) {
+	char lo_name[MEMORY_CONTEXT_NAME_SIZE];
+	classify_leaf_name(lo_name, sizeof(lo_name), net6_compile->name, "lo");
+	if (lpm_init(&net6_attr->lo, memory_context, lo_name)) {
 		goto error;
 	}
 	if (range_index_build_lpm(&net6_compile->ri_lo, 8, &net6_attr->lo)) {
@@ -1043,10 +1056,17 @@ classify_compile_net6_commit(
 
 	if (dense_count != 0) {
 		struct value_table dense;
+		char dense_name[MEMORY_CONTEXT_NAME_SIZE];
+		classify_leaf_name(
+			dense_name,
+			sizeof(dense_name),
+			net6_compile->name,
+			"comb"
+		);
 		if (value_table_init(
 			    &dense,
 			    memory_context,
-			    "filter:net6",
+			    dense_name,
 			    dense_count,
 			    comb->h_dim
 		    )) {
@@ -1202,6 +1222,10 @@ classify_compile_net6_compare(
  * Compiles the IPv6 network classifier of a ruleset into an embedded
  * attribute.
  *
+ * The name scopes the memory contexts of the compile - the attribute
+ * half matches, the join table and the stage registry - each titled
+ * with the name and its own artifact leaf, in the memory tree.
+ *
  * On success the attribute and the stage - the registry with the rule
  * group row - are owned by the caller, released through
  * classifier_fini; on failure every partial state is freed, the
@@ -1210,6 +1234,7 @@ classify_compile_net6_compare(
 static inline int
 classify_net6_compile(
 	struct memory_context *memory_context,
+	const char *name,
 	const struct classifier_rule *const *rules,
 	uint32_t rule_count,
 	classify_net6_get_net6s_func get_net6s,
@@ -1217,7 +1242,7 @@ classify_net6_compile(
 	struct classifier *cls
 ) {
 	struct classify_compile_net6 *compile = classify_compile_net6_create(
-		memory_context, rules, rule_count, get_net6s
+		memory_context, rules, rule_count, get_net6s, name
 	);
 	if (compile == NULL) {
 		memset(attr, 0, sizeof(*attr));
@@ -1237,7 +1262,14 @@ classify_net6_compile(
 	};
 
 	return classify_attr_compile(
-		memory_context, &ops, compile, rules, rule_count, attr, cls
+		memory_context,
+		name,
+		&ops,
+		compile,
+		rules,
+		rule_count,
+		attr,
+		cls
 	);
 }
 
@@ -1247,12 +1279,13 @@ classify_net6_compile(
  * rule and adapts them to the rule agnostic core, and the entry takes
  * the module rule array the consumer owns.
  *
- * The name must carry the consumer prefix, so the generated symbols
+ * The tag must carry the consumer prefix, so the generated symbols
  * never collide with the library ones.
  */
-#define CLASSIFY_NET6_COMPILE(name, get_net6s)                                 \
-	static inline int classify_##name##_compile(                           \
+#define CLASSIFY_NET6_COMPILE(tag, get_net6s)                                  \
+	static inline int classify_##tag##_compile(                            \
 		struct memory_context *memory_context,                         \
+		const char *name,                                              \
 		const struct classifier_rule **rules,                          \
 		uint32_t rule_count,                                           \
 		struct classify_attr_net6 *attr,                               \
@@ -1260,6 +1293,7 @@ classify_net6_compile(
 	) {                                                                    \
 		return classify_net6_compile(                                  \
 			memory_context,                                        \
+			name,                                                  \
 			rules,                                                 \
 			rule_count,                                            \
 			get_net6s,                                             \

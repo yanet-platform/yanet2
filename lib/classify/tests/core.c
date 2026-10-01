@@ -249,6 +249,7 @@ test_composed_compile(
 	// classes, and the protocol attribute closes the root.
 	assert(classify_test_device_compile(
 		       mctx,
+		       "test_device",
 		       union_rules,
 		       rule_count,
 		       &core->dev_attr,
@@ -256,6 +257,7 @@ test_composed_compile(
 	       ) == 0);
 	assert(classify_test_net6_src_compile(
 		       mctx,
+		       "test_net6_src",
 		       union_rules,
 		       rule_count,
 		       &core->net6_src_attr,
@@ -263,6 +265,7 @@ test_composed_compile(
 	       ) == 0);
 	assert(classify_test_net6_dst_compile(
 		       mctx,
+		       "test_net6_dst",
 		       union_rules,
 		       rule_count,
 		       &core->net6_dst_attr,
@@ -270,6 +273,7 @@ test_composed_compile(
 	       ) == 0);
 	assert(classify_join(
 		       mctx,
+		       "nets_joint",
 		       &stage_n6_src,
 		       &stage_n6_dst,
 		       rule_count,
@@ -278,6 +282,7 @@ test_composed_compile(
 	       ) == 0);
 	assert(classify_join(
 		       mctx,
+		       "mid_joint",
 		       &stage_dev,
 		       &stage_nets,
 		       rule_count,
@@ -286,6 +291,7 @@ test_composed_compile(
 	       ) == 0);
 	assert(classify_test_ipproto_compile(
 		       mctx,
+		       "test_ipproto",
 		       union_rules,
 		       rule_count,
 		       &core->ipproto_attr,
@@ -293,6 +299,7 @@ test_composed_compile(
 	       ) == 0);
 	assert(classify_join(
 		       mctx,
+		       "proto_joint",
 		       &stage_mid,
 		       &stage_ipproto,
 		       rule_count,
@@ -301,6 +308,7 @@ test_composed_compile(
 	       ) == 0);
 	assert(classify_join(
 		       mctx,
+		       "proto_joint",
 		       &stage_mid,
 		       &stage_ipproto,
 		       rule_count,
@@ -312,6 +320,7 @@ test_composed_compile(
 	// classes.
 	assert(classify_decode(
 		       mctx,
+		       "rule_map",
 		       &stage_proto,
 		       ip6_rules,
 		       rule_count,
@@ -322,6 +331,7 @@ test_composed_compile(
 	// with the core classes through the family root joint.
 	assert(classify_test_src_port_compile(
 		       mctx,
+		       "test_src_port",
 		       port_rules,
 		       rule_count,
 		       &ports->src_attr,
@@ -329,6 +339,7 @@ test_composed_compile(
 	       ) == 0);
 	assert(classify_test_dst_port_compile(
 		       mctx,
+		       "test_dst_port",
 		       port_rules,
 		       rule_count,
 		       &ports->dst_attr,
@@ -336,6 +347,7 @@ test_composed_compile(
 	       ) == 0);
 	assert(classify_join(
 		       mctx,
+		       "joint",
 		       &stage_psrc,
 		       &stage_pdst,
 		       rule_count,
@@ -344,6 +356,7 @@ test_composed_compile(
 	       ) == 0);
 	assert(classify_join(
 		       mctx,
+		       "root_joint",
 		       &stage_proto,
 		       &stage_ports,
 		       rule_count,
@@ -352,6 +365,7 @@ test_composed_compile(
 	       ) == 0);
 	assert(classify_decode(
 		       mctx,
+		       "rule_map",
 		       &stage_family,
 		       port_rules,
 		       rule_count,
@@ -425,10 +439,16 @@ test_flat_compile(
 	struct classifier stage_family = {0};
 
 	assert(classify_test_device_compile(
-		       mctx, union_rules, rule_count, &cls->dev_attr, &stage_dev
+		       mctx,
+		       "test_device",
+		       union_rules,
+		       rule_count,
+		       &cls->dev_attr,
+		       &stage_dev
 	       ) == 0);
 	assert(classify_test_net6_src_compile(
 		       mctx,
+		       "test_net6_src",
 		       union_rules,
 		       rule_count,
 		       &cls->net6_src_attr,
@@ -436,6 +456,7 @@ test_flat_compile(
 	       ) == 0);
 	assert(classify_test_net6_dst_compile(
 		       mctx,
+		       "test_net6_dst",
 		       union_rules,
 		       rule_count,
 		       &cls->net6_dst_attr,
@@ -443,6 +464,7 @@ test_flat_compile(
 	       ) == 0);
 	assert(classify_join(
 		       mctx,
+		       "nets_joint",
 		       &stage_n6_src,
 		       &stage_n6_dst,
 		       rule_count,
@@ -451,6 +473,7 @@ test_flat_compile(
 	       ) == 0);
 	assert(classify_join(
 		       mctx,
+		       "mid_joint",
 		       &stage_dev,
 		       &stage_nets,
 		       rule_count,
@@ -459,6 +482,7 @@ test_flat_compile(
 	       ) == 0);
 	assert(classify_test_ipproto_compile(
 		       mctx,
+		       "test_ipproto",
 		       union_rules,
 		       rule_count,
 		       &cls->ipproto_attr,
@@ -466,6 +490,7 @@ test_flat_compile(
 	       ) == 0);
 	assert(classify_join(
 		       mctx,
+		       "proto_joint",
 		       &stage_mid,
 		       &stage_ipproto,
 		       rule_count,
@@ -475,6 +500,7 @@ test_flat_compile(
 
 	assert(classify_test_src_port_compile(
 		       mctx,
+		       "test_src_port",
 		       union_rules,
 		       rule_count,
 		       &cls->port_src_attr,
@@ -482,6 +508,7 @@ test_flat_compile(
 	       ) == 0);
 	assert(classify_test_dst_port_compile(
 		       mctx,
+		       "test_dst_port",
 		       union_rules,
 		       rule_count,
 		       &cls->port_dst_attr,
@@ -489,6 +516,7 @@ test_flat_compile(
 	       ) == 0);
 	assert(classify_join(
 		       mctx,
+		       "ports_joint",
 		       &stage_psrc,
 		       &stage_pdst,
 		       rule_count,
@@ -497,6 +525,7 @@ test_flat_compile(
 	       ) == 0);
 	assert(classify_join(
 		       mctx,
+		       "family_joint",
 		       &stage_proto,
 		       &stage_ports,
 		       rule_count,
@@ -504,7 +533,12 @@ test_flat_compile(
 		       &stage_family
 	       ) == 0);
 	assert(classify_decode(
-		       mctx, &stage_family, port_rules, rule_count, rule_map
+		       mctx,
+		       "rule_map",
+		       &stage_family,
+		       port_rules,
+		       rule_count,
+		       rule_map
 	       ) == 0);
 
 	classifier_fini(&stage_dev, mctx, rule_count);

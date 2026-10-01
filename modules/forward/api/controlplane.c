@@ -311,6 +311,7 @@ forward_module_build_core(
 	}
 	if (classify_fwd_device_compile(
 		    memory_context,
+		    "l2:device",
 		    rule_ptrs,
 		    forward_rule_count,
 		    &cls->dev_attr,
@@ -320,6 +321,7 @@ forward_module_build_core(
 	}
 	if (classify_fwd_vlan_compile(
 		    memory_context,
+		    "l2:vlan",
 		    rule_ptrs,
 		    forward_rule_count,
 		    &cls->vlan_attr,
@@ -329,6 +331,7 @@ forward_module_build_core(
 	}
 	if (classify_join(
 		    memory_context,
+		    "l2:joint",
 		    &stage_dev,
 		    &stage_vlan,
 		    forward_rule_count,
@@ -380,6 +383,7 @@ forward_module_derive_l2(
 
 	if (classify_decode(
 		    memory_context,
+		    "l2:rules",
 		    core_stage,
 		    rule_ptrs,
 		    forward_rule_count,
@@ -442,6 +446,7 @@ forward_module_build_net4(
 
 	if (classify_fwd_net4_src_compile(
 		    memory_context,
+		    "ip4:net4_src",
 		    rule_ptrs,
 		    forward_rule_count,
 		    &cls->src_attr,
@@ -451,6 +456,7 @@ forward_module_build_net4(
 	}
 	if (classify_fwd_net4_dst_compile(
 		    memory_context,
+		    "ip4:net4_dst",
 		    rule_ptrs,
 		    forward_rule_count,
 		    &cls->dst_attr,
@@ -460,6 +466,7 @@ forward_module_build_net4(
 	}
 	if (classify_join(
 		    memory_context,
+		    "ip4:nets_joint",
 		    &stage_src,
 		    &stage_dst,
 		    forward_rule_count,
@@ -470,6 +477,7 @@ forward_module_build_net4(
 	}
 	if (classify_join(
 		    memory_context,
+		    "ip4:root_joint",
 		    core_stage,
 		    &stage_nets,
 		    forward_rule_count,
@@ -521,6 +529,7 @@ forward_module_derive_net4(
 	}
 	if (classify_decode(
 		    memory_context,
+		    "ip4:rules",
 		    ip4_stage,
 		    rule_ptrs,
 		    forward_rule_count,
@@ -569,6 +578,7 @@ forward_module_build_net6(
 
 	if (classify_fwd_net6_src_compile(
 		    memory_context,
+		    "ip6:net6_src",
 		    rule_ptrs,
 		    forward_rule_count,
 		    &cls->src_attr,
@@ -578,6 +588,7 @@ forward_module_build_net6(
 	}
 	if (classify_fwd_net6_dst_compile(
 		    memory_context,
+		    "ip6:net6_dst",
 		    rule_ptrs,
 		    forward_rule_count,
 		    &cls->dst_attr,
@@ -587,6 +598,7 @@ forward_module_build_net6(
 	}
 	if (classify_join(
 		    memory_context,
+		    "ip6:nets_joint",
 		    &stage_src,
 		    &stage_dst,
 		    forward_rule_count,
@@ -597,6 +609,7 @@ forward_module_build_net6(
 	}
 	if (classify_join(
 		    memory_context,
+		    "ip6:root_joint",
 		    core_stage,
 		    &stage_nets,
 		    forward_rule_count,
@@ -648,6 +661,7 @@ forward_module_derive_net6(
 	}
 	if (classify_decode(
 		    memory_context,
+		    "ip6:rules",
 		    ip6_stage,
 		    rule_ptrs,
 		    forward_rule_count,

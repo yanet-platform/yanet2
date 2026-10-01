@@ -7,6 +7,7 @@
 int
 classify_decode(
 	struct memory_context *memory_context,
+	const char *name,
 	const struct classifier *cls,
 	const struct classifier_rule *const *rules,
 	uint32_t rule_count,
@@ -17,7 +18,7 @@ classify_decode(
 	if (vline_init(
 		    rule_map,
 		    memory_context,
-		    "filter:rules",
+		    name,
 		    value_registry_capacity(registry)
 	    )) {
 		return -1;
@@ -120,6 +121,11 @@ value_table_collect_action(uint32_t v1, uint32_t v2, uint32_t idx, void *data) {
 /*
  * Joins two group registries into a joint stage of the classification.
  *
+ * The name scopes the memory contexts of the join - the value table and
+ * the stage registry - each titled with the name and its own artifact
+ * leaf, so every context of one join of one classifier composition is
+ * identified in the memory tree.
+ *
  * Rules referencing the same group pair on both sides produce the same
  * touched cell joins, so the stage operates on distinct pairs instead of
  * all rules. On success the routine initializes the value table holding
@@ -130,6 +136,7 @@ value_table_collect_action(uint32_t v1, uint32_t v2, uint32_t idx, void *data) {
 int
 classify_join(
 	struct memory_context *memory_context,
+	const char *name,
 	const struct classifier *left,
 	const struct classifier *right,
 	uint32_t rule_count,
@@ -156,10 +163,12 @@ classify_join(
 	struct hash_index pair_index = {0};
 	bool pair_index_live = false;
 
+	char table_name[MEMORY_CONTEXT_NAME_SIZE];
+	classify_leaf_name(table_name, sizeof(table_name), name, "table");
 	if (value_table_init(
 		    table,
 		    memory_context,
-		    "filter:joint",
+		    table_name,
 		    value_registry_capacity(registry1),
 		    value_registry_capacity(registry2)
 	    )) {
@@ -270,7 +279,11 @@ classify_join(
 	value_table_compact(table, &remap_table);
 	remap_table_free(&remap_table);
 
-	if (value_registry_init(registry, memory_context, "filter:joint")) {
+	char registry_name[MEMORY_CONTEXT_NAME_SIZE];
+	classify_leaf_name(
+		registry_name, sizeof(registry_name), name, "registry"
+	);
+	if (value_registry_init(registry, memory_context, registry_name)) {
 		goto error_free_pairs;
 	}
 
