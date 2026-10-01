@@ -15,8 +15,23 @@ on:
       release_tag:
         type: string
         required: false
+      neighbour_sidecar_prebuilt:
+        description: The neighbour sidecar succeeded in this run for the same source SHA and image tag.
+        type: boolean
+        required: false
+        default: false
 
 jobs:
+  build-neighbour-sidecar:
+    if: ${{ !inputs.neighbour_sidecar_prebuilt }}
+    uses: ./.github/workflows/build-push-neighbour-sidecar.yml
+    permissions:
+      contents: read
+      packages: write
+    with:
+      source_sha: ${{ inputs.source_sha }}
+      image_tag: ${{ inputs.image_tag }}
+
   build-images:
     name: Build ${{ matrix.component }} image
     runs-on: ubuntu-latest
@@ -39,8 +54,6 @@ jobs:
             dockerfile: deploy/yanet-pipeline-operator.Dockerfile
           - component: route-operator
             dockerfile: deploy/yanet-route-operator.Dockerfile
-          - component: neighbour-sidecar
-            dockerfile: deploy/yanet-neighbour-sidecar.Dockerfile
     steps:
       - uses: actions/checkout@v5
         with:
@@ -51,7 +64,6 @@ jobs:
         run: test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
 
       - uses: actions/download-artifact@v5
-        if: matrix.component != 'neighbour-sidecar'
         with:
           name: debs-24.04-amd64
           path: deploy/packages/
@@ -77,8 +89,11 @@ jobs:
 
   promote-images:
     name: Promote staged images
-    if: inputs.stable
-    needs: build-images
+    if: >-
+      ${{ !cancelled() && inputs.stable && needs.build-images.result == 'success' &&
+          (needs.build-neighbour-sidecar.result == 'success' ||
+           (inputs.neighbour_sidecar_prebuilt && needs.build-neighbour-sidecar.result == 'skipped')) }}
+    needs: [build-images, build-neighbour-sidecar]
     runs-on: ubuntu-latest
     permissions:
       contents: read

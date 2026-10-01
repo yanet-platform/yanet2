@@ -114,6 +114,16 @@ jobs:
           echo "stage_tag=$major.$minor.$patch-stage-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
           echo "release_tag=v$major.$minor.$patch" >> "$GITHUB_OUTPUT"
 
+  neighbour-sidecar:
+    needs: preflight
+    uses: ./.github/workflows/build-push-neighbour-sidecar.yml
+    permissions:
+      contents: read
+      packages: write
+    with:
+      source_sha: ${{ needs.preflight.outputs.source_sha }}
+      image_tag: ${{ needs.preflight.outputs.stage_tag }}
+
   packages:
     needs: preflight
     uses: ./.github/workflows/build-deb.yml
@@ -122,7 +132,7 @@ jobs:
       pkg_version: ${{ needs.preflight.outputs.package_version }}
 
   images:
-    needs: [preflight, packages]
+    needs: [preflight, packages, neighbour-sidecar]
     uses: ./.github/workflows/build-push-images.yml
     permissions:
       contents: read
@@ -132,6 +142,7 @@ jobs:
       image_tag: ${{ needs.preflight.outputs.stage_tag }}
       stable: true
       release_tag: ${{ needs.preflight.outputs.image_tag }}
+      neighbour_sidecar_prebuilt: true
 
   release:
     needs: [preflight, images]

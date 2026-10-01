@@ -51,10 +51,12 @@ patch tag on the same ancestry. Optionally enable the Ubuntu 22.04 amd64
 validation build.
 
 Preflight rejects an invalid branch or version, a commit outside the branch's
-first-parent history, and a missing predecessor or stale patch tag. The run
-builds Ubuntu 24.04 amd64 and arm64 packages at `X.Y.Z~rcN`, verifies both
-sets and their exact version, then builds and publishes all seven GHCR images
-with the unique `X.Y.Z-rcN` tag.
+first-parent history, and a missing predecessor or stale patch tag. After
+preflight, the source-built neighbour-sidecar image builds and publishes with
+the unique `X.Y.Z-rcN` tag while Ubuntu 24.04 amd64 and arm64 packages build at
+`X.Y.Z~rcN`. After package verification and the sidecar build succeed, the six
+package-backed GHCR images build and publish with the same tag. A successful
+run builds each of the seven images once from the validated source commit.
 `N` incorporates the GitHub run ID and attempt, so a rerun gets a new tag.
 The optional Ubuntu 22.04 set is validated but is not included in release
 assets. Download the candidate DEBs from the run artifacts if deployment
@@ -82,9 +84,12 @@ commit and that the patch order is increasing. It advances the branch before
 building when a validated tag comes from `main`. It builds the DEBs at final
 version `X.Y.Z`. If a candidate was built, its DEBs have a different version;
 the SHA links the two builds.
-After both 24.04 architecture sets pass artifact and exact-version checks, it
-builds each of the seven images once under a unique staging tag. Once all
-seven pushes succeed, it copies those exact image manifests to the `X.Y.Z`
+After preflight, the source-built neighbour-sidecar image builds and pushes
+under a unique staging tag while the DEBs build. After both 24.04 architecture
+sets pass artifact and exact-version checks and the sidecar build succeeds,
+the six package-backed images build and push under the same staging tag.
+Each of the seven images builds once. Once all seven pushes succeed,
+it copies those exact image manifests to the `X.Y.Z`
 tags and creates the GitHub Release with the verified DEBs. The workflow
 refuses to replace an existing final tag with a different digest. There are
 no moving `X.Y`, `X`, or `latest` aliases. A failed preflight publishes nothing.
@@ -115,15 +120,17 @@ missing or unpublished predecessor blocks stable publication. Every newer tag
 must descend from the tag being published on its first-parent history.
 
 Rerun a failed candidate after fixing its cause. Every run attempt uses a new
-candidate version and image tag. A failed candidate can leave partial images
-under its own tag; use only tags from successful runs.
+candidate version and image tag. A later package failure can leave the early
+sidecar image under that candidate's tag. Other failures can also leave
+partial images; use only tags from successful runs.
 
 If a stable run fails, rerun the workflow for the same protected tag. A failed
 tag run whose commit predates a workflow fix can instead use the updated
 workflow on `main`: `gh workflow run release.yml --ref main -f tag=vX.Y.Z`.
 The manual run uses the selected `main` revision's release helpers while
-building from the unchanged tag commit. A failed build can leave partial
-staging images, but no final image tags. A failed promotion can leave some
+building from the unchanged tag commit. A later package failure can leave the
+early sidecar staging image. A failed build can leave partial staging images,
+but no final image tags. A failed promotion can leave some
 final `X.Y.Z` tags without a GitHub Release. A retry
 uses new staging tags and accepts an existing final tag only when its digest
 matches the new staged image. If the digest differs, promotion stops rather
