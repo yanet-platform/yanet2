@@ -97,6 +97,8 @@ pdump_module_config_data_init(
 	config->ebpf_program = NULL;
 	config->mode = PDUMP_INPUT;
 	config->snaplen = default_snaplen;
+	config->rate_pps = 0;
+	config->worker_count = 0;
 	config->rings = NULL;
 	return 0;
 }
@@ -314,6 +316,14 @@ pdump_module_config_set_mode(struct cp_module *module, enum pdump_mode mode) {
 }
 
 int
+pdump_module_config_set_rate(struct cp_module *module, uint64_t rate_pps) {
+	struct pdump_module_config *config =
+		container_of(module, struct pdump_module_config, cp_module);
+	config->rate_pps = rate_pps;
+	return 0;
+}
+
+int
 pdump_module_config_set_snaplen(
 	struct cp_module *module, uint32_t snaplen, uintptr_t cb
 ) {
@@ -420,6 +430,7 @@ pdump_module_config_set_per_worker_ring(
 	}
 
 	*worker_count = dp_config->worker_count;
+	config->worker_count = dp_config->worker_count;
 	SET_OFFSET_OF(&config->rings, rings);
 
 	return rings;

@@ -13,6 +13,7 @@
 
 #include "lib/controlplane/config/econtext.h"
 
+#include "limit.h"
 #include "ring.h"
 
 static inline void
@@ -22,6 +23,7 @@ process_queue(
 	struct ring_buffer *ring,
 	const struct dp_worker *dp_worker,
 	uint32_t snaplen,
+	const struct pdump_rate *rate,
 	enum pdump_mode queue
 ) {
 	// Stamp every record from the worker clock, which is the same time
@@ -36,7 +38,7 @@ process_queue(
 		struct rte_mbuf *mbuf = packet_to_mbuf(pkt);
 
 		int rc = rte_bpf_exec(bpf, (void *)mbuf);
-		if (rc) {
+		if (rc && pdump_rate_allow(ring, timestamp, rate)) {
 			// NOTE: We do not support multi-segment mbuf;
 			// therefore, data_len must equal pkt_len.
 			uint16_t packet_len = rte_pktmbuf_data_len(mbuf);
@@ -74,6 +76,8 @@ pdump_handle_packets(
 	);
 
 	struct ring_buffer *ring = ADDR_OF(&config->rings) + dp_worker->idx;
+	struct pdump_rate rate =
+		pdump_rate_init(config->rate_pps, config->worker_count);
 
 	struct rte_bpf *bpf_shm = ADDR_OF(&config->ebpf_program);
 	struct rte_bpf bpf = *bpf_shm;
@@ -90,6 +94,7 @@ pdump_handle_packets(
 			ring,
 			dp_worker,
 			config->snaplen,
+			&rate,
 			PDUMP_DROPS
 		);
 	}
@@ -102,6 +107,7 @@ pdump_handle_packets(
 			ring,
 			dp_worker,
 			config->snaplen,
+			&rate,
 			PDUMP_INPUT
 		);
 	}

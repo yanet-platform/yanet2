@@ -14,6 +14,8 @@ struct pdump_module_config {
 	struct rte_bpf *ebpf_program;
 	enum pdump_mode mode;
 	uint32_t snaplen;
+	uint64_t rate_pps;
+	uint64_t worker_count;
 
 	struct ring_buffer *rings;
 };

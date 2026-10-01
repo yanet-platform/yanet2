@@ -61,6 +61,10 @@ pdump_module_config_set_filter(
 int
 pdump_module_config_set_mode(struct cp_module *module, enum pdump_mode mode);
 
+// Set the aggregate packet capture rate; zero leaves capture unlimited.
+int
+pdump_module_config_set_rate(struct cp_module *module, uint64_t rate_pps);
+
 // Set the maximum packet length to be captured by the pdump module.
 // If a filter is already set, setting the snaplen will trigger filter
 // recompilation. This triggers a call to pdump_module_config_set_filter.
