@@ -882,7 +882,6 @@ main(void) {
 	// The filters are freed before the classifiers they reference, in
 	// the order of the module destroy.
 	value_table_free(&composed.flt_ip6_port.root_joint);
-	vline_free(&composed.flt_ip6_port.rule_map);
 	vline_free(&composed.flt_ip6.rule_map);
 
 	classify_attr_device_free(&mctx, &core6->dev_attr);
