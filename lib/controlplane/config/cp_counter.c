@@ -464,48 +464,6 @@ cp_config_counter_storage_registry_fini(
 	memset(registry, 0, sizeof(*registry));
 }
 
-// Whether any tag carries a predicate value: the empty value demands the
-// key's absence, the star its presence with any value.
-static bool
-tags_have_predicate(const struct counter_tag *tags, size_t tag_count) {
-	for (size_t i = 0; i < tag_count; ++i) {
-		if (tags[i].value[0] == '\0' ||
-		    strcmp(tags[i].value, "*") == 0) {
-			return true;
-		}
-	}
-	return false;
-}
-
-// Resolve one storage for a typed lookup.
-//
-// Typed lookups pass a full stored tag set, so they resolve exactly
-// through the index. A predicate value has no exact counterpart —
-// stored sets never carry one — so such a query, like any other partial
-// set, falls back to the pattern scan and its first match.
-static struct counter_storage *
-get_one(struct cp_config_counter_storage_registry *registry,
-	struct counter_tag *tags,
-	size_t tag_count) {
-	if (!tags_have_predicate(tags, tag_count)) {
-		return cp_config_counter_storage_registry_lookup_exact(
-			registry, tags, tag_count
-		);
-	}
-
-	struct cp_counter_storage **storages =
-		cp_config_counter_storage_registry_find(
-			registry, tags, tag_count, NULL
-		);
-	if (storages == NULL || storages[0] == NULL) {
-		free(storages);
-		return NULL;
-	}
-	struct counter_storage *result = ADDR_OF(&storages[0]->storage);
-	free(storages);
-	return result;
-}
-
 struct counter_storage *
 cp_config_counter_storage_registry_lookup_device(
 	struct cp_config_counter_storage_registry *registry,
@@ -515,7 +473,9 @@ cp_config_counter_storage_registry_lookup_device(
 		counter_tag_init("device", device_name),
 		counter_tag_init("kind", "device")
 	};
-	return get_one(registry, tags, 2);
+	return cp_config_counter_storage_registry_lookup_exact(
+		registry, tags, 2
+	);
 }
 
 int
@@ -545,7 +505,9 @@ cp_config_counter_storage_registry_lookup_pipeline(
 		counter_tag_init("pipeline", pipeline_name),
 		counter_tag_init("kind", "pipeline")
 	};
-	return get_one(registry, tags, 3);
+	return cp_config_counter_storage_registry_lookup_exact(
+		registry, tags, 3
+	);
 }
 
 int
@@ -579,7 +541,9 @@ cp_config_counter_storage_registry_lookup_function(
 		counter_tag_init("function", function_name),
 		counter_tag_init("kind", "function")
 	};
-	return get_one(registry, tags, 4);
+	return cp_config_counter_storage_registry_lookup_exact(
+		registry, tags, 4
+	);
 }
 
 int
@@ -617,7 +581,9 @@ cp_config_counter_storage_registry_lookup_chain(
 		counter_tag_init("chain", chain_name),
 		counter_tag_init("kind", "chain")
 	};
-	return get_one(registry, tags, 5);
+	return cp_config_counter_storage_registry_lookup_exact(
+		registry, tags, 5
+	);
 }
 
 int
@@ -661,7 +627,9 @@ cp_config_counter_storage_registry_lookup_module(
 		counter_tag_init("module_name", module_name),
 		counter_tag_init("kind", "module"),
 	};
-	return get_one(registry, tags, 7);
+	return cp_config_counter_storage_registry_lookup_exact(
+		registry, tags, 7
+	);
 }
 
 int
@@ -711,7 +679,9 @@ cp_config_counter_storage_registry_lookup_module_tagged(
 		counter_tag_init("kind", "runtime"),
 		counter_tag_init("config", registry_tag),
 	};
-	return get_one(registry, tags, 8);
+	return cp_config_counter_storage_registry_lookup_exact(
+		registry, tags, 8
+	);
 }
 
 int
@@ -753,7 +723,9 @@ cp_config_counter_storage_registry_lookup_object(
 		counter_tag_init("object_name", object_name),
 		counter_tag_init("kind", "object")
 	};
-	return get_one(registry, tags, 3);
+	return cp_config_counter_storage_registry_lookup_exact(
+		registry, tags, 3
+	);
 }
 
 int
@@ -797,7 +769,9 @@ cp_config_counter_storage_registry_lookup_module_object_link(
 		counter_tag_init("object_name", object_name),
 		counter_tag_init("kind", "module_object_link")
 	};
-	return get_one(registry, tags, 9);
+	return cp_config_counter_storage_registry_lookup_exact(
+		registry, tags, 9
+	);
 }
 
 int
