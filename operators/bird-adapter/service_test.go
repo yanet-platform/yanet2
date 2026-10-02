@@ -31,11 +31,6 @@ func Test_AdapterService_SetupConfig_Codes(t *testing.T) {
 		code     codes.Code
 	}{
 		{
-			name:     "no export sockets",
-			sourceV6: sourceV6,
-			code:     codes.InvalidArgument,
-		},
-		{
 			name:     "IPv4-mapped v6 source",
 			sockets:  []string{filepath.Join(t.TempDir(), "bird.sock")},
 			sourceV6: mappedV6,

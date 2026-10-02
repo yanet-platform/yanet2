@@ -192,9 +192,6 @@ func validateImportParams(params ImportParams) error {
 	if !params.SourceV6.Is6() || params.SourceV6.Is4In6() {
 		return fmt.Errorf("v6 source %q is not a pure IPv6 address", params.SourceV6)
 	}
-	if len(params.Config.Sockets) == 0 {
-		return fmt.Errorf("no export sockets provided")
-	}
 
 	return nil
 }
