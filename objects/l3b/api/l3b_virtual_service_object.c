@@ -6,7 +6,10 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include <lib/filter/compiler.h>
+#include "lib/classify/compiler/helper.h"
+#include "lib/classify/compiler/net4.h"
+#include "lib/classify/compiler/net6.h"
+#include "lib/classify/compiler/u16_ranges.h"
 
 #include "l3b_session_table_object.h"
 
@@ -30,121 +33,255 @@ l3b_session_timeouts_defaults(void) {
 #include "lib/controlplane/config/zone.h"
 #include "lib/dataplane/object/object.h"
 
-// Compiler counterpart of the dataplane query signature (see the l3b module
-// process header). Source filter: source network + destination (service)
-// port.
-FILTER_COMPILER_DECLARE(L3B_SOURCE_FILTER_IP4_TAG, net4_src, port_dst);
-FILTER_COMPILER_DECLARE(L3B_SOURCE_FILTER_IP6_TAG, net6_src, port_dst);
-
-// Translate the source filter rules into classifier filter_rule descriptors.
-static void
-make_source_filter_rules(
-	const struct l3b_source_filter_rule *source_filter_rules,
-	uint32_t source_filter_rule_count,
-	struct filter_rule *filter_rules
+/*
+ * Field selectors of the source rule: the module rule is handed to the
+ * classify compilers directly, every attribute through its getter.
+ */
+static inline void
+l3b_rule_get_net4_srcs(
+	const struct classifier_rule *rule, struct filter_net4s *nets
 ) {
-	for (uint32_t idx = 0; idx < source_filter_rule_count; ++idx) {
-		const struct l3b_source_filter_rule *rule =
-			&source_filter_rules[idx];
-		struct filter_rule *filter_rule = &filter_rules[idx];
-
-		filter_rule->net6.src_count = rule->net6s.count;
-		filter_rule->net6.srcs = rule->net6s.items;
-		filter_rule->net4.src_count = rule->net4s.count;
-		filter_rule->net4.srcs = rule->net4s.items;
-		filter_rule->transport.dst_count = rule->port_ranges.count;
-		filter_rule->transport.dsts = rule->port_ranges.items;
-		filter_rule->action = 0;
-	}
+	const struct l3b_source_filter_rule *source_rule =
+		container_of(rule, struct l3b_source_filter_rule, rule);
+	*nets = source_rule->net4s;
 }
 
-// Build a heap array of pointers to filter_rules for filter_init. Returns NULL
-// when count is zero (filter_init accepts a NULL rule list).
-static const struct filter_rule **
-make_filter_rule_ptrs(
-	const struct filter_rule *filter_rules, uint32_t rule_count
+static inline void
+l3b_rule_get_net6_srcs(
+	const struct classifier_rule *rule, struct filter_net6s *nets
 ) {
-	if (rule_count == 0) {
-		return NULL;
-	}
+	const struct l3b_source_filter_rule *source_rule =
+		container_of(rule, struct l3b_source_filter_rule, rule);
+	*nets = source_rule->net6s;
+}
 
-	const struct filter_rule **filter_rule_ptrs =
-		calloc(rule_count, sizeof(struct filter_rule *));
-	if (filter_rule_ptrs == NULL) {
+static inline void
+l3b_rule_get_port_ranges(
+	const struct classifier_rule *rule, struct filter_u16_ranges *ranges
+) {
+	const struct l3b_source_filter_rule *source_rule =
+		container_of(rule, struct l3b_source_filter_rule, rule);
+	ranges->count = source_rule->port_ranges.count;
+	ranges->items =
+		(const struct filter_u16_span *)source_rule->port_ranges.items;
+}
+
+CLASSIFY_NET4_COMPILE(l3b_net4_src, l3b_rule_get_net4_srcs)
+CLASSIFY_NET6_COMPILE(l3b_net6_src, l3b_rule_get_net6_srcs)
+CLASSIFY_U16_RANGES_COMPILE(
+	l3b_port, struct classify_attr_port, l3b_rule_get_port_ranges
+)
+
+// Spells a projection of the source ruleset through a fresh array: one
+// slot per rule, NULL for the rules the family projection cannot match —
+// the ones without networks of the family, and the ones without port
+// ranges, which no port satisfies. Returns NULL when the array cannot be
+// allocated.
+static const struct classifier_rule **
+l3b_rule_ptrs_project(
+	const struct l3b_source_filter_rule *source_filter_rules,
+	uint32_t rule_count,
+	bool family_is_ip4
+) {
+	const struct classifier_rule **rule_ptrs =
+		(const struct classifier_rule **)malloc(
+			sizeof(struct classifier_rule *) *
+			(rule_count ? rule_count : 1)
+		);
+	if (rule_ptrs == NULL) {
 		return NULL;
 	}
 
 	for (uint32_t idx = 0; idx < rule_count; ++idx) {
-		filter_rule_ptrs[idx] = &filter_rules[idx];
+		if (source_filter_rules[idx].port_ranges.count == 0) {
+			rule_ptrs[idx] = NULL;
+		} else if (family_is_ip4) {
+			rule_ptrs[idx] =
+				source_filter_rules[idx].net4s.count > 0
+					? &source_filter_rules[idx].rule
+					: NULL;
+		} else {
+			rule_ptrs[idx] =
+				source_filter_rules[idx].net6s.count > 0
+					? &source_filter_rules[idx].rule
+					: NULL;
+		}
 	}
-	return filter_rule_ptrs;
+
+	return rule_ptrs;
 }
 
+// Releases one family source classifier; safe on a zeroed one.
+static void
+l3b_source_classifier_ip4_free(
+	struct memory_context *memory_context,
+	struct l3b_source_classifier_ip4 *cls
+) {
+	classify_attr_net4_free(memory_context, &cls->src_attr);
+	classify_attr_port_free(memory_context, &cls->port_attr);
+	value_table_free(&cls->root_joint);
+	vline_free(&cls->rule_map);
+	memset(cls, 0, sizeof(*cls));
+}
+
+static void
+l3b_source_classifier_ip6_free(
+	struct memory_context *memory_context,
+	struct l3b_source_classifier_ip6 *cls
+) {
+	classify_attr_net6_free(memory_context, &cls->src_attr);
+	classify_attr_port_free(memory_context, &cls->port_attr);
+	value_table_free(&cls->root_joint);
+	vline_free(&cls->rule_map);
+	memset(cls, 0, sizeof(*cls));
+}
+
+/*
+ * Compiles the source classifier of one family: the source network
+ * attribute joined with the service port attribute over the rules holding
+ * networks of the family, decoded over the same projection.
+ *
+ * The stages write straight into the classifier embedded in the service,
+ * and a failed stage leaves its own outputs zeroed or released, so the
+ * destroy walk finishes a partially built service without per stage
+ * cleanup here; the registries and the rule group mappings are the only
+ * scratch, released on the common exit of both success and failure.
+ */
 static int
-build_source_filters(
+l3b_module_init_source(
+	struct virtual_service *virtual_service,
+	const struct l3b_source_filter_rule *source_filter_rules,
+	uint32_t rule_count,
+	bool family_is_ip4,
+	struct memory_context *memory_context,
+	yanet_error **err
+) {
+	const struct classifier_rule **rule_ptrs = l3b_rule_ptrs_project(
+		source_filter_rules, rule_count, family_is_ip4
+	);
+
+	struct classifier stage_net = {0};
+	struct classifier stage_port = {0};
+	struct classifier stage_source = {0};
+
+	int rc = -1;
+
+	if (rule_ptrs == NULL) {
+		yanet_error_add(err, "failed to allocate source rule ptrs");
+		return -1;
+	}
+
+	if (family_is_ip4) {
+		struct l3b_source_classifier_ip4 *cls =
+			&virtual_service->classifier_ip4;
+		if (classify_l3b_net4_src_compile(
+			    memory_context,
+			    rule_ptrs,
+			    rule_count,
+			    &cls->src_attr,
+			    &stage_net
+		    )) {
+			goto error;
+		}
+	} else {
+		struct l3b_source_classifier_ip6 *cls =
+			&virtual_service->classifier_ip6;
+		if (classify_l3b_net6_src_compile(
+			    memory_context,
+			    rule_ptrs,
+			    rule_count,
+			    &cls->src_attr,
+			    &stage_net
+		    )) {
+			goto error;
+		}
+	}
+
+	if (classify_l3b_port_compile(
+		    memory_context,
+		    rule_ptrs,
+		    rule_count,
+		    family_is_ip4 ? &virtual_service->classifier_ip4.port_attr
+				  : &virtual_service->classifier_ip6.port_attr,
+		    &stage_port
+	    )) {
+		goto error;
+	}
+
+	if (classify_join(
+		    memory_context,
+		    &stage_net,
+		    &stage_port,
+		    rule_count,
+		    family_is_ip4 ? &virtual_service->classifier_ip4.root_joint
+				  : &virtual_service->classifier_ip6.root_joint,
+		    &stage_source
+	    )) {
+		goto error;
+	}
+
+	if (classify_decode(
+		    memory_context,
+		    &stage_source,
+		    rule_ptrs,
+		    rule_count,
+		    family_is_ip4 ? &virtual_service->classifier_ip4.rule_map
+				  : &virtual_service->classifier_ip6.rule_map
+	    )) {
+		goto error;
+	}
+
+	rc = 0;
+
+error:
+	classifier_fini(&stage_net, memory_context, rule_count);
+	classifier_fini(&stage_port, memory_context, rule_count);
+	classifier_fini(&stage_source, memory_context, rule_count);
+	free(rule_ptrs);
+
+	if (rc != 0) {
+		yanet_error_add(err, "failed to compile source classifier");
+	}
+	return rc;
+}
+
+// Builds both per-family source classifiers of the service; a ruleset
+// without rules leaves them zeroed, and the dataplane admits nothing
+// while the rule count is zero.
+static int
+build_source_classifiers(
 	struct virtual_service *virtual_service,
 	const struct l3b_source_filter_rule *source_filter_rules,
 	uint32_t source_filter_rule_count,
 	struct memory_context *memory_context,
 	yanet_error **err
 ) {
-	struct filter_rule *filter_rules =
-		calloc(source_filter_rule_count, sizeof(struct filter_rule));
-	if (filter_rules == NULL && source_filter_rule_count > 0) {
-		yanet_error_add(err, "failed to allocate source filter rules");
+	if (source_filter_rule_count == 0) {
+		virtual_service->source_filter_rule_count = 0;
+		return 0;
+	}
+
+	if (l3b_module_init_source(
+		    virtual_service,
+		    source_filter_rules,
+		    source_filter_rule_count,
+		    true,
+		    memory_context,
+		    err
+	    ) ||
+	    l3b_module_init_source(
+		    virtual_service,
+		    source_filter_rules,
+		    source_filter_rule_count,
+		    false,
+		    memory_context,
+		    err
+	    )) {
 		return -1;
 	}
 
-	make_source_filter_rules(
-		source_filter_rules, source_filter_rule_count, filter_rules
-	);
-
-	const struct filter_rule **filter_rule_ptrs =
-		make_filter_rule_ptrs(filter_rules, source_filter_rule_count);
-
-	int rc = -1;
-	if (filter_rule_ptrs == NULL && source_filter_rule_count > 0) {
-		yanet_error_add(
-			err, "failed to allocate source filter rule ptrs"
-		);
-		goto out;
-	}
-
-	if (filter_init(
-		    &virtual_service->filter_ip4,
-		    L3B_SOURCE_FILTER_IP4_TAG,
-		    filter_rule_ptrs,
-		    source_filter_rule_count,
-		    memory_context,
-		    "source_filter_ip4",
-		    err
-	    )) {
-		yanet_error_add(err, "failed to init source filter_ip4");
-		goto out;
-	}
-
-	if (filter_init(
-		    &virtual_service->filter_ip6,
-		    L3B_SOURCE_FILTER_IP6_TAG,
-		    filter_rule_ptrs,
-		    source_filter_rule_count,
-		    memory_context,
-		    "source_filter_ip6",
-		    err
-	    )) {
-		yanet_error_add(err, "failed to init source filter_ip6");
-		filter_free(
-			&virtual_service->filter_ip4, L3B_SOURCE_FILTER_IP4_TAG
-		);
-		goto out;
-	}
-
-	rc = 0;
-
-out:
-	free(filter_rule_ptrs);
-	free(filter_rules);
-	return rc;
+	virtual_service->source_filter_rule_count = source_filter_rule_count;
+	return 0;
 }
 
 struct cp_object *
@@ -206,6 +343,13 @@ l3b_virtual_service_create(
 	struct memory_context *memory_context =
 		&object->cp_object.memory_context;
 	struct virtual_service *vs = &object->virtual_service;
+
+	// The object allocation is not zeroed, and a service without source
+	// rules never compiles its classifiers in: zero them here so the
+	// destroy walk frees them as empty rather than as arena garbage.
+	memset(&vs->classifier_ip6, 0, sizeof(vs->classifier_ip6));
+	memset(&vs->classifier_ip4, 0, sizeof(vs->classifier_ip4));
+	vs->source_filter_rule_count = 0;
 
 	vs->scheduler_hash_mask = virtual_service->hash_mask;
 	vs->scheduler_index_mask = virtual_service->index_mask;
@@ -343,8 +487,8 @@ l3b_virtual_service_create(
 	vs->real_ring.count = 0;
 	vs->real_ring.sequence = 0;
 
-	// Per-service source filters.
-	if (build_source_filters(
+	// Per-service source classifiers.
+	if (build_source_classifiers(
 		    vs,
 		    virtual_service->source_filter_rules,
 		    virtual_service->source_filter_rule_count,
@@ -377,6 +521,13 @@ error_object:
 	return NULL;
 
 error_ring:
+	// The context teardown below only unlinks the accounting tree, so a
+	// partially compiled classifier must release its own allocations
+	// here; the frees are safe on the zeroed classifiers of an earlier
+	// failure.
+	l3b_source_classifier_ip4_free(memory_context, &vs->classifier_ip4);
+	l3b_source_classifier_ip6_free(memory_context, &vs->classifier_ip6);
+
 	if (vs->real_ring.capacity > 0) {
 		memory_bfree(
 			memory_context,
@@ -420,8 +571,10 @@ l3b_virtual_service_object_destroy(struct cp_object *cp_object) {
 	struct virtual_service *vs = &object->virtual_service;
 	struct memory_context *memory_context = &cp_object->memory_context;
 
-	filter_free(&vs->filter_ip4, L3B_SOURCE_FILTER_IP4_TAG);
-	filter_free(&vs->filter_ip6, L3B_SOURCE_FILTER_IP6_TAG);
+	// Every free below is safe on a zeroed struct, so a partially built
+	// service of a failed create walks the same total destroy.
+	l3b_source_classifier_ip4_free(memory_context, &vs->classifier_ip4);
+	l3b_source_classifier_ip6_free(memory_context, &vs->classifier_ip6);
 
 	if (vs->real_ring.capacity > 0) {
 		memory_bfree(
