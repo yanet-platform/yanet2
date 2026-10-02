@@ -2,7 +2,7 @@ project(
   'yanet',
   'c',
   meson_version: '>= 0.61',
-  version: '0.0.1',
+  version: '0.0.0',
   default_options: [
     'buildtype=release',
     'warning_level=2',
