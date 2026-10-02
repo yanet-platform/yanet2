@@ -342,20 +342,13 @@ test_composed_compile(
 		       &ports->joint,
 		       &stage_ports
 	       ) == 0);
-	assert(classify_join(
+	assert(classify_join_rules(
 		       mctx,
 		       &stage_proto,
 		       &stage_ports,
-		       rule_count,
-		       &flt_ip6_port->root_joint,
-		       &stage_family
-	       ) == 0);
-	assert(classify_decode(
-		       mctx,
-		       &stage_family,
 		       port_rules,
 		       rule_count,
-		       &flt_ip6_port->rule_map
+		       &flt_ip6_port->root_joint
 	       ) == 0);
 
 	classifier_fini(&stage_dev, mctx, rule_count);
@@ -602,13 +595,8 @@ classify_ip6_port(
 	acl_classify_ports(
 		ports, (const struct packet **)&packet_ptr, port_classes, 1
 	);
-	classify_combine(
-		&flt->root_joint,
-		&flt->rule_map,
-		core_classes,
-		port_classes,
-		results,
-		1
+	classify_joint_lookup(
+		&flt->root_joint, core_classes, port_classes, results, 1
 	);
 
 	free_packet(&packet);
@@ -894,7 +882,6 @@ main(void) {
 	// The filters are freed before the classifiers they reference, in
 	// the order of the module destroy.
 	value_table_free(&composed.flt_ip6_port.root_joint);
-	vline_free(&composed.flt_ip6_port.rule_map);
 	vline_free(&composed.flt_ip6.rule_map);
 
 	classify_attr_device_free(&mctx, &core6->dev_attr);

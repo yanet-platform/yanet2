@@ -4,8 +4,8 @@
  * Rectangular value table allowing one to touch each key pair using
  * remap table.
  *
- * The values are chunked by v index: the values array holds one chunk
- * pointer per v index, and each chunk stores that row's h_dim entries,
+ * The values are indexed by v: the values array holds one row
+ * pointer per v index, and each row stores h_dim entries,
  * so a lookup indexes the chunk by v_idx directly and never multiplies
  * or divides.
  */
@@ -15,13 +15,24 @@
 #include "memory.h"
 #include "remap.h"
 
+#define VALUE_TABLE_SLAB_TARGET_SIZE (1u << 20)
+
+struct value_table_slab {
+	struct value_table_slab *next;
+	uint32_t *data;
+	size_t size;
+	uint32_t used;
+	uint32_t capacity;
+};
+
 struct value_table {
 	struct memory_context *memory_context;
 	uint32_t v_dim;
 	uint32_t h_dim;
-	// Offset pointer to an array of v_dim chunk pointers, one chunk
-	// of h_dim entries per v index.
+	// Row pointers may alias after immutable final-row canonicalization.
 	uint32_t **values;
+	struct value_table_slab *slabs;
+	uint32_t row_count;
 };
 
 // Releases a value table, including its own memory-tree node.
@@ -39,18 +50,6 @@ value_table_free(struct value_table *value_table) {
 
 	uint32_t **values = ADDR_OF(&value_table->values);
 	if (values != NULL) {
-		for (uint32_t v_idx = 0; v_idx < value_table->v_dim; ++v_idx) {
-			uint32_t *chunk = ADDR_OF(values + v_idx);
-			if (chunk == NULL) {
-				continue;
-			}
-			memory_bfree(
-				memory_context,
-				chunk,
-				value_table->h_dim * sizeof(uint32_t)
-			);
-			SET_OFFSET_OF(values + v_idx, NULL);
-		}
 		memory_bfree(
 			memory_context,
 			values,
@@ -58,6 +57,15 @@ value_table_free(struct value_table *value_table) {
 		);
 		SET_OFFSET_OF(&value_table->values, NULL);
 	}
+	struct value_table_slab *slab = ADDR_OF(&value_table->slabs);
+	while (slab != NULL) {
+		struct value_table_slab *next = ADDR_OF(&slab->next);
+		memory_bfree(memory_context, ADDR_OF(&slab->data), slab->size);
+		memory_bfree(memory_context, slab, sizeof(*slab));
+		slab = next;
+	}
+	SET_OFFSET_OF(&value_table->slabs, NULL);
+	value_table->row_count = 0;
 
 	// The memory_context was balloc'd out of its parent in
 	// value_table_init, so it is released the same way. Read the parent
@@ -69,13 +77,17 @@ value_table_free(struct value_table *value_table) {
 }
 
 static inline int
-value_table_init(
+value_table_init_rows(
 	struct value_table *value_table,
 	struct memory_context *parent_context,
 	const char *name,
 	uint32_t v_dim,
 	uint32_t h_dim
 ) {
+	memset(value_table, 0, sizeof(*value_table));
+	if (v_dim == 0 || h_dim == 0) {
+		return -1;
+	}
 	// Balloc'd rather than embedded: a table lives inside a tree vertex,
 	// and that tree is itself embedded by value inside shared-memory
 	// configs the dataplane reads, so an inline context here would
@@ -106,18 +118,73 @@ value_table_init(
 	memset(values, 0, v_dim * sizeof(uint32_t *));
 	SET_OFFSET_OF(&value_table->values, values);
 
-	for (uint32_t v_idx = 0; v_idx < v_dim; ++v_idx) {
-		uint32_t *chunk = (uint32_t *)memory_balloc(
-			memory_context, h_dim * sizeof(uint32_t)
-		);
-		if (chunk == NULL) {
-			value_table_free(value_table);
+	return 0;
+}
+
+// Allocates an owned row without changing the lookup directory.
+//
+// Slabs pack whole rows; row pointers never own interior allocations.
+static inline uint32_t *
+value_table_alloc_row(struct value_table *table) {
+	struct memory_context *ctx = ADDR_OF(&table->memory_context);
+	struct value_table_slab *slab = ADDR_OF(&table->slabs);
+	size_t row_size = (size_t)table->h_dim * sizeof(uint32_t);
+	if (slab == NULL || slab->used == slab->capacity) {
+		size_t size = row_size * (table->v_dim - table->row_count);
+		// Keep allocator red zones within the 1 MiB size class.
+		size_t limit = VALUE_TABLE_SLAB_TARGET_SIZE - 2 * ASAN_RED_ZONE;
+		if (row_size > limit) {
+			limit = row_size;
+		}
+		if (size > limit) {
+			size = limit;
+		}
+		struct value_table_slab *next =
+			memory_balloc(ctx, sizeof(*next));
+		if (next == NULL) {
+			return NULL;
+		}
+		memset(next, 0, sizeof(*next));
+		uint32_t *data = memory_balloc(ctx, size);
+		if (data == NULL) {
+			memory_bfree(ctx, next, sizeof(*next));
+			return NULL;
+		}
+		SET_OFFSET_OF(&next->next, slab);
+		SET_OFFSET_OF(&next->data, data);
+		next->size = size;
+		next->capacity = size / row_size;
+		SET_OFFSET_OF(&table->slabs, next);
+		slab = next;
+	}
+	uint32_t *row =
+		ADDR_OF(&slab->data) + (size_t)slab->used * table->h_dim;
+	++slab->used;
+	++table->row_count;
+	return row;
+}
+
+static inline int
+value_table_init(
+	struct value_table *table,
+	struct memory_context *parent,
+	const char *name,
+	uint32_t v_dim,
+	uint32_t h_dim
+) {
+	if (value_table_init_rows(table, parent, name, v_dim, h_dim)) {
+		return -1;
+	}
+	uint32_t **values = ADDR_OF(&table->values);
+	for (uint32_t v = 0; v < v_dim; ++v) {
+		uint32_t *row = value_table_alloc_row(table);
+		if (row == NULL) {
+			value_table_free(table);
 			return -1;
 		}
-		memset(chunk, 0, h_dim * sizeof(uint32_t));
-		SET_OFFSET_OF(values + v_idx, chunk);
+		memset(row, 0, (size_t)h_dim * sizeof(uint32_t));
+		SET_OFFSET_OF(values + v, row);
 	}
-
 	return 0;
 }
 

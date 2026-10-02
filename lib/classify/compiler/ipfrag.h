@@ -189,6 +189,12 @@ classify_compile_ipfrag_commit(
 	 */
 	ipfrag_attr->value_table.v_dim = ipfrag_compile->value_table.v_dim;
 	ipfrag_attr->value_table.h_dim = ipfrag_compile->value_table.h_dim;
+	ipfrag_attr->value_table.row_count =
+		ipfrag_compile->value_table.row_count;
+	SET_OFFSET_OF(
+		&ipfrag_attr->value_table.slabs,
+		ADDR_OF(&ipfrag_compile->value_table.slabs)
+	);
 	SET_OFFSET_OF(
 		&ipfrag_attr->value_table.values,
 		ADDR_OF(&ipfrag_compile->value_table.values)
