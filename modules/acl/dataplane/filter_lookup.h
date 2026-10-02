@@ -551,10 +551,13 @@ acl_classify_tcp4(
 		classify_joint_lookup(
 			&tcp->flags_joint, src, flags, mid, count
 		);
+		classify_compact_classes(
+			&flt->root_compact, core_classes + off, dst, count
+		);
 		classify_combine(
 			&flt->root_joint,
 			&flt->rule_map,
-			core_classes + off,
+			dst,
 			mid,
 			results + off,
 			count
@@ -606,10 +609,15 @@ acl_classify_udp4(
 		);
 
 		classify_joint_lookup(&ports->joint, src, dst, src, count);
+		// The root joint spans the coverage classes of this path's
+		// projection; uncovered core classes read the empty row.
+		classify_compact_classes(
+			&flt->root_compact, core_classes + off, dst, count
+		);
 		classify_combine(
 			&flt->root_joint,
 			&flt->rule_map,
-			core_classes + off,
+			dst,
 			src,
 			results + off,
 			count
@@ -697,10 +705,13 @@ acl_classify_tcp6(
 		classify_joint_lookup(
 			&tcp->flags_joint, src, flags, mid, count
 		);
+		classify_compact_classes(
+			&flt->root_compact, core_classes + off, dst, count
+		);
 		classify_combine(
 			&flt->root_joint,
 			&flt->rule_map,
-			core_classes + off,
+			dst,
 			mid,
 			results + off,
 			count
@@ -750,10 +761,15 @@ acl_classify_udp6(
 		);
 
 		classify_joint_lookup(&ports->joint, src, dst, src, count);
+		// The root joint spans the coverage classes of this path's
+		// projection; uncovered core classes read the empty row.
+		classify_compact_classes(
+			&flt->root_compact, core_classes + off, dst, count
+		);
 		classify_combine(
 			&flt->root_joint,
 			&flt->rule_map,
-			core_classes + off,
+			dst,
 			src,
 			results + off,
 			count
