@@ -30,9 +30,8 @@ const (
 	// counter.
 	bulkCopyPipelineCount = 20
 
-	// bulkCopyCycles is the number of repeated read cycles the leak
-	// guard measures; a cycle that leaks tracked allocations or bytes
-	// raises every later cycle's floor above the first cycle's.
+	// Every read, including the first, must restore its own pre-read
+	// balance of tracked allocations and requested bytes.
 	bulkCopyCycles = 10
 )
 
@@ -73,10 +72,10 @@ func bulkCopyHarness(t *testing.T, workerCount uint64) *ffi.DPConfig {
 	return h.SharedMemory().DPConfig(0)
 }
 
-// bulkCopyProbe runs one CountersByTags call at the given worker count,
-// snapshots the wrapped allocator count immediately around it, and
-// returns the number of allocations it performed together with the
-// number of counters it matched.
+// bulkCopyProbe measures wrapped allocations inside the C reader and returns
+// their count together with the matched counter count.
+//
+// Snapshots bracket the public call, but only the C reader is measured.
 func bulkCopyProbe(t *testing.T, workerCount uint64) (allocs uint64, matched int) {
 	t.Helper()
 
@@ -97,11 +96,11 @@ func bulkCopyProbe(t *testing.T, workerCount uint64) (allocs uint64, matched int
 	return after.allocations - before.allocations, matched
 }
 
-// TestCountersByTagsPerWorkerAllocationsAreBounded pins the allocation
-// shape of the per-worker counter read: every counter's value block and
-// tag copy is carved from its list's own allocation, so the read scales
-// with the worker and storage counts only — no per-counter allocation
-// in the per-worker copy or anywhere else in the read.
+// TestCountersByTagsPerWorkerAllocationsAreBounded verifies that wrapped
+// allocations inside the C reader scale with workers and storages, not counters.
+//
+// Value blocks and tag copies share their list's allocation. The measurement
+// excludes allocations elsewhere in the public call and shared-library internals.
 func TestCountersByTagsPerWorkerAllocationsAreBounded(t *testing.T) {
 	const (
 		lowWorkers  = 2

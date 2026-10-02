@@ -8,8 +8,8 @@ import (
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 )
 
-// Test_CountersByTags_ProbeIgnoresForeignAllocations verifies that completed
-// foreign allocator traffic cannot change the cost of a public read.
+// Test_CountersByTags_ProbeIgnoresForeignAllocations verifies that unselected
+// reads and foreign allocator traffic cannot change measured allocations.
 func Test_CountersByTags_ProbeIgnoresForeignAllocations(t *testing.T) {
 	config := bulkCopyHarness(t, 2)
 	t.Cleanup(func() { require.Zero(t, probeResetControls()) })
@@ -23,6 +23,11 @@ func Test_CountersByTags_ProbeIgnoresForeignAllocations(t *testing.T) {
 	require.NoError(t, err)
 	require.NotEmpty(t, groups)
 	require.NotZero(t, ordinary)
+	unmeasuredGroups, err := config.CountersByTags(nil, nil)
+	unmeasured := probeSnapshot()
+	require.NoError(t, err)
+	require.Equal(t, groups, unmeasuredGroups)
+	require.Equal(t, after, unmeasured)
 	completed := after.noiseCompleted
 	probeArmNoise()
 	probeArmRead()
@@ -108,6 +113,7 @@ func Test_CountersByTags_ProbeErrorRestoresScope(t *testing.T) {
 	requireProbeComplete(t, before, after)
 	require.Equal(t, before.outstanding, after.outstanding)
 	ordinary := after.allocations - before.allocations
+	require.NotZero(t, ordinary)
 	probeArmNoise()
 	probeArmRead()
 	before = probeSnapshot()
