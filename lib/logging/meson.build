@@ -15,3 +15,5 @@ lib_logging_dep = declare_dependency(
   link_with: lib_logging,
   include_directories: yanet_rootdir,
 )
+
+subdir('tests')
