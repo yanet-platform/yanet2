@@ -34,6 +34,7 @@ const ConfigStrip: React.FC<ConfigStripProps> = ({
     const modes = config.config?.mode ? parseModeFlags(config.config.mode) : [];
     const snaplen = config.config?.snaplen;
     const ringSize = config.config?.ring_size;
+    const ratePps = config.config?.rate_pps;
 
     const currentPps = ppsHistory.length > 0 ? (ppsHistory[ppsHistory.length - 1] ?? 0) : 0;
 
@@ -63,6 +64,14 @@ const ConfigStrip: React.FC<ConfigStripProps> = ({
                     <span className="pdump-strip__param">
                         <span className="pdump-strip__param-label">Ring</span>
                         <span className="pdump-strip__param-value">{ringSize}</span>
+                    </span>
+                )}
+                {ratePps !== undefined && ratePps > 0 && (
+                    <span className="pdump-strip__param">
+                        <span className="pdump-strip__param-label">Limit</span>
+                        <span className="pdump-strip__param-value">
+                            {Number.isSafeInteger(ratePps) ? ratePps : `> ${Number.MAX_SAFE_INTEGER}`} pps
+                        </span>
                     </span>
                 )}
             </div>

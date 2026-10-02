@@ -203,6 +203,14 @@ func (m *ModuleConfig) SetSnapLen(snaplen uint32) error {
 	return nil
 }
 
+func (m *ModuleConfig) SetRate(ratePPS uint64) error {
+	rc, err := C.pdump_module_config_set_rate(m.asRawPtr(), C.uint64_t(ratePPS))
+	if rc != 0 {
+		return errors.Join(fmt.Errorf("error code=%d", rc), err)
+	}
+	return nil
+}
+
 // SetupRings allocates a capture ring of the given size for every worker.
 func (m *ModuleConfig) SetupRings(size uint32) ([]Ring, error) {
 	var workerCount C.uint64_t

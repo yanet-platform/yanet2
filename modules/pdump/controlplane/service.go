@@ -269,6 +269,9 @@ func mergeSettings(settings Settings, config *pdumppb.Config) Settings {
 	if config.RingSize != nil {
 		settings.RingSize = config.GetRingSize()
 	}
+	if config.RatePps != nil {
+		settings.RatePPS = config.GetRatePps()
+	}
 
 	return settings
 }
@@ -281,5 +284,6 @@ func settingsProto(settings Settings) *pdumppb.Config {
 		Mode:     proto.Uint32(settings.Mode),
 		Snaplen:  proto.Uint32(settings.Snaplen),
 		RingSize: proto.Uint32(settings.RingSize),
+		RatePps:  proto.Uint64(settings.RatePPS),
 	}
 }
