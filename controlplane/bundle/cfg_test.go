@@ -10,6 +10,7 @@ import (
 	"github.com/yanet-platform/yanet2/controlplane/bundle"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	decap "github.com/yanet-platform/yanet2/modules/decap/controlplane"
+	l3b "github.com/yanet-platform/yanet2/modules/l3b/controlplane"
 )
 
 // Test_Decode_OnlyListedModulesArePresent asserts that decoding a document
@@ -37,11 +38,22 @@ acl:
 	require.Nil(t, cfg.Pdump.Unwrap())
 	require.Nil(t, cfg.Blackhole.Unwrap())
 	require.Nil(t, cfg.Unrdup.Unwrap())
+	require.Nil(t, cfg.L3B.Unwrap())
 
 	require.Equal(t, uint32(2), cfg.Route.Unwrap().InstanceID.Unwrap())
 	require.Equal(t, uint32(3), cfg.ACL.Unwrap().InstanceID.Unwrap())
 
 	require.Equal(t, "/dev/hugepages/yanet", cfg.Route.Unwrap().MemoryPath.Unwrap())
+}
+
+// Test_Decode_L3BPresence verifies that an explicit L3B block survives decoding
+// with its required instance and the module's default memory budget.
+func Test_Decode_L3BPresence(t *testing.T) {
+	var config bundle.ModulesConfig
+	require.NoError(t, xcfg.Decode([]byte("l3b:\n  instance_id: 0\n"), &config))
+	require.NotNil(t, config.L3B.Unwrap())
+	require.Equal(t, uint32(0), config.L3B.Unwrap().InstanceID.Unwrap())
+	require.Equal(t, l3b.DefaultConfig().MemoryRequirements, config.L3B.Unwrap().MemoryRequirements)
 }
 
 func Test_Decode_UnrdupKeepsDefaults(t *testing.T) {

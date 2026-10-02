@@ -18,6 +18,7 @@ import (
 	"errors"
 	"fmt"
 	"iter"
+	"strings"
 	"unsafe"
 
 	"github.com/c2h5oh/datasize"
@@ -113,6 +114,23 @@ func (m *SharedMemory) AgentAttach(
 	instanceIdx uint32,
 	size datasize.ByteSize,
 ) (*Agent, error) {
+	if strings.IndexByte(name, 0) >= 0 {
+		return nil, fmt.Errorf("failed to attach agent %q: name contains NUL byte", name)
+	}
+
+	// Acquire the first instance's publication before reading its count.
+	if !m.DataplaneReady(0) {
+		return nil, fmt.Errorf("failed to attach agent %q: dataplane shared memory is not ready", name)
+	}
+
+	instanceCount := uint32(C.yanet_shm_instance_count(m.ptr))
+	if instanceIdx >= instanceCount {
+		return nil, fmt.Errorf(
+			"failed to attach agent %q: instance index %d out of range [0, %d)",
+			name, instanceIdx, instanceCount,
+		)
+	}
+
 	cName := C.CString(name)
 	defer C.free(unsafe.Pointer(cName))
 
@@ -141,6 +159,10 @@ func (m *SharedMemory) ExtendAgent(
 	name string,
 	size datasize.ByteSize,
 ) (datasize.ByteSize, error) {
+	if strings.IndexByte(name, 0) >= 0 {
+		return 0, fmt.Errorf("failed to extend agent %q: name contains NUL byte", name)
+	}
+
 	cName := C.CString(name)
 	defer C.free(unsafe.Pointer(cName))
 
