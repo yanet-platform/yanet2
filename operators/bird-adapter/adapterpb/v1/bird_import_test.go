@@ -12,8 +12,10 @@ import (
 
 // Test_SetupConfigRequest_Validate verifies that the import configuration and
 // both source addresses are required before setup can proceed.
+//
+// The name and a valid configuration are required as well.
 func Test_SetupConfigRequest_Validate(t *testing.T) {
-	validConfig := &adapterpb.ImportConfig{}
+	validConfig := &adapterpb.ImportConfig{Sockets: []string{"bird.sock"}}
 	validV4 := commonpb.NewIPv4Address(netip.MustParseAddr("10.0.0.1").As4())
 	validV6 := commonpb.NewIPv6Address(netip.MustParseAddr("2001:db8::1").As16())
 
@@ -25,6 +27,7 @@ func Test_SetupConfigRequest_Validate(t *testing.T) {
 		{
 			name: "missing config",
 			request: &adapterpb.SetupConfigRequest{
+				Name:     "bird0",
 				SourceV4: validV4,
 				SourceV6: validV6,
 			},
@@ -33,6 +36,7 @@ func Test_SetupConfigRequest_Validate(t *testing.T) {
 		{
 			name: "missing source_v4",
 			request: &adapterpb.SetupConfigRequest{
+				Name:     "bird0",
 				Config:   validConfig,
 				SourceV6: validV6,
 			},
@@ -41,18 +45,56 @@ func Test_SetupConfigRequest_Validate(t *testing.T) {
 		{
 			name: "missing source_v6",
 			request: &adapterpb.SetupConfigRequest{
+				Name:     "bird0",
 				Config:   validConfig,
 				SourceV4: validV4,
 			},
 			message: "source_v6 is required",
 		},
 		{
+			name: "no sockets",
+			request: &adapterpb.SetupConfigRequest{
+				Name:     "bird0",
+				Config:   &adapterpb.ImportConfig{},
+				SourceV4: validV4,
+				SourceV6: validV6,
+			},
+			message: "config: sockets must contain at least one socket",
+		},
+		{
+			name: "negative dump_threshold",
+			request: &adapterpb.SetupConfigRequest{
+				Name: "bird0",
+				Config: &adapterpb.ImportConfig{
+					Sockets:       []string{"bird.sock"},
+					DumpThreshold: -1,
+				},
+				SourceV4: validV4,
+				SourceV6: validV6,
+			},
+			message: "config: dump_threshold -1 must not be negative",
+		},
+		{
+			name: "negative dump_timeout",
+			request: &adapterpb.SetupConfigRequest{
+				Name: "bird0",
+				Config: &adapterpb.ImportConfig{
+					Sockets:     []string{"bird.sock"},
+					DumpTimeout: -1,
+				},
+				SourceV4: validV4,
+				SourceV6: validV6,
+			},
+			message: "config: dump_timeout -1 must not be negative",
+		},
+		{
 			name:    "nil request",
-			message: "config is required",
+			message: "name is required",
 		},
 		{
 			name: "all required fields present",
 			request: &adapterpb.SetupConfigRequest{
+				Name:     "bird0",
 				Config:   validConfig,
 				SourceV4: validV4,
 				SourceV6: validV6,
