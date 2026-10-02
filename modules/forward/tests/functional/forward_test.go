@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/gopacket/gopacket"
 	"github.com/gopacket/gopacket/layers"
 	"github.com/stretchr/testify/require"
 
@@ -1166,4 +1167,161 @@ func (m *modulePark) retry() {
 	}
 	clear((*m)[len(kept):])
 	*m = kept
+}
+
+// The burst kinds cycle through the ip4 and ip6 family filters and the
+// device-only L2 filter, plus a source only the L2 rule covers.
+const (
+	fwdKindEcho4 = iota
+	fwdKindEcho6
+	fwdKindARP
+	fwdKindOther4
+	fwdKindCount
+)
+
+// fwdMultibatchCount exceeds three full handler batches and leaves the last
+// batch partial, so both the batch boundary crossing and the tail are
+// exercised in a single burst.
+const fwdMultibatchCount = 3*64 + 5
+
+// fwdMultibatchPacket builds one burst packet of the given kind; idx keeps
+// every packet's addresses distinct.
+func fwdMultibatchPacket(t *testing.T, kind, idx int) gopacket.Packet {
+	t.Helper()
+
+	srcLast := byte(1 + idx%200)
+	switch kind {
+	case fwdKindEcho4, fwdKindOther4:
+		srcFmt := "192.0.2.%d"
+		if kind == fwdKindOther4 {
+			srcFmt = "198.51.100.%d"
+		}
+		eth := layers.Ethernet{
+			SrcMAC:       xerror.Unwrap(net.ParseMAC("aa:bb:cc:dd:ee:ff")),
+			DstMAC:       xerror.Unwrap(net.ParseMAC("11:22:33:44:55:66")),
+			EthernetType: layers.EthernetTypeIPv4,
+		}
+		ip4 := layers.IPv4{
+			Version: 4, TTL: 64,
+			Protocol: layers.IPProtocolICMPv4,
+			SrcIP:    net.ParseIP(fmt.Sprintf(srcFmt, srcLast)),
+			DstIP:    net.ParseIP("10.0.0.5"),
+		}
+		icmp := layers.ICMPv4{
+			TypeCode: layers.CreateICMPv4TypeCode(layers.ICMPv4TypeEchoRequest, 0),
+		}
+		return xpacket.LayersToPacket(t, &eth, &ip4, &icmp)
+	case fwdKindEcho6:
+		eth := layers.Ethernet{
+			SrcMAC:       xerror.Unwrap(net.ParseMAC("aa:bb:cc:dd:ee:ff")),
+			DstMAC:       xerror.Unwrap(net.ParseMAC("11:22:33:44:55:66")),
+			EthernetType: layers.EthernetTypeIPv6,
+		}
+		ip6 := layers.IPv6{
+			Version: 6, HopLimit: 64,
+			NextHeader: layers.IPProtocolICMPv6,
+			SrcIP:      net.ParseIP(fmt.Sprintf("2001:db8::%x", srcLast)),
+			DstIP:      net.ParseIP("2001:db8:1::1"),
+		}
+		icmp6 := layers.ICMPv6{
+			TypeCode: layers.CreateICMPv6TypeCode(layers.ICMPv6TypeEchoRequest, 0),
+		}
+		icmp6.SetNetworkLayerForChecksum(&ip6)
+		return xpacket.LayersToPacket(t, &eth, &ip6, &icmp6)
+	case fwdKindARP:
+		eth := layers.Ethernet{
+			SrcMAC:       xerror.Unwrap(net.ParseMAC("aa:bb:cc:dd:ee:ff")),
+			DstMAC:       net.HardwareAddr{0xff, 0xff, 0xff, 0xff, 0xff, 0xff},
+			EthernetType: layers.EthernetTypeARP,
+		}
+		arp := layers.ARP{
+			AddrType:          layers.LinkTypeEthernet,
+			Protocol:          layers.EthernetTypeIPv4,
+			HwAddressSize:     6,
+			ProtAddressSize:   4,
+			Operation:         layers.ARPRequest,
+			SourceHwAddress:   eth.SrcMAC,
+			SourceProtAddress: net.ParseIP(fmt.Sprintf("10.0.0.%d", srcLast)).To4(),
+			DstHwAddress:      net.HardwareAddr{0, 0, 0, 0, 0, 0},
+			DstProtAddress:    net.ParseIP("10.0.0.2").To4(),
+		}
+		return xpacket.LayersToPacket(t, &eth, &arp)
+	}
+	t.Fatalf("unknown burst kind %d", kind)
+	return nil
+}
+
+// Test_Forward_MultiBatchBurst verifies that a burst spanning several
+// handler batches keeps every packet's verdict bound to its own packet:
+// the output holds every burst packet exactly once by content, each rule
+// counter holds exactly the packets and bytes of its kind, and nothing is
+// dropped across the batch boundaries.
+func Test_Forward_MultiBatchBurst(t *testing.T) {
+	rule4 := cforward.ForwardRule{
+		Target:  "port1",
+		Mode:    cforward.ModeOut,
+		Counter: "rule4",
+		Src4s:   []xnetip.Contiguous[xnetip.Network4]{xnetip.MustParseContiguous4("192.0.2.0/255.255.255.0")},
+		Dst4s:   []xnetip.Contiguous[xnetip.Network4]{xnetip.MustParseContiguous4("10.0.0.0/24")},
+	}
+	rule6 := cforward.ForwardRule{
+		Target:  "port1",
+		Mode:    cforward.ModeOut,
+		Counter: "rule6",
+		Src6s:   []xnetip.BiContiguous{xnetip.MustParseBiContiguous("2001:db8::/ffff:ffff::")},
+		Dst6s:   []xnetip.BiContiguous{filter.UnspecifiedIPv6},
+	}
+	ruleL2 := cforward.ForwardRule{
+		Target:  "port0",
+		Mode:    cforward.ModeNone,
+		Counter: "rule_l2",
+		Devices: filter.Devices{{Name: "port0"}},
+	}
+
+	h, agent, backend := setupForwardHarness(t, []string{"port0", "port1"})
+	applyRules(t, backend, "multibatch", []cforward.ForwardRule{rule4, rule6, ruleL2})
+	wireForwardPipeline(t, agent, "port0", "multibatch", []string{"port1"})
+
+	counts := make([]int, fwdKindCount)
+	sizes := make([]int, fwdKindCount)
+	packets := make([]gopacket.Packet, fwdMultibatchCount)
+	wantOutput := map[string]int{}
+	for idx := range packets {
+		kind := idx % fwdKindCount
+		packets[idx] = fwdMultibatchPacket(t, kind, idx)
+		counts[kind]++
+		sizes[kind] = len(packets[idx].Data())
+		wantOutput[string(packets[idx].Data())]++
+	}
+
+	result, err := h.HandlePackets(packets...)
+	require.NoError(t, err)
+	require.Len(t, result.Output, fwdMultibatchCount, "every burst packet must reach output")
+	require.Empty(t, result.Drop, "no burst packet may be dropped")
+
+	gotOutput := map[string]int{}
+	for _, pkt := range result.Output {
+		gotOutput[string(pkt.RawData)]++
+	}
+	require.Equal(t, wantOutput, gotOutput, "output must hold every burst packet exactly once by content")
+
+	path := dataplaneut.CounterPath{
+		Device:     "port0",
+		Pipeline:   "multibatch",
+		Function:   "multibatch",
+		Chain:      "multibatch_chain",
+		ModuleType: "forward",
+		ModuleName: "multibatch",
+	}
+	dataplaneut.RequireModuleCounter(
+		t, h, path, "rule4",
+		uint64(counts[fwdKindEcho4]), uint64(counts[fwdKindEcho4]*sizes[fwdKindEcho4]),
+	)
+	dataplaneut.RequireModuleCounter(
+		t, h, path, "rule6",
+		uint64(counts[fwdKindEcho6]), uint64(counts[fwdKindEcho6]*sizes[fwdKindEcho6]),
+	)
+	l2Packets := counts[fwdKindARP] + counts[fwdKindOther4]
+	l2Bytes := counts[fwdKindARP]*sizes[fwdKindARP] + counts[fwdKindOther4]*sizes[fwdKindOther4]
+	dataplaneut.RequireModuleCounter(t, h, path, "rule_l2", uint64(l2Packets), uint64(l2Bytes))
 }
