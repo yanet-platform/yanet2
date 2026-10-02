@@ -32,6 +32,9 @@ struct acl_module {
 // Link of a packet with no state family: no table and no stash.
 static const struct fwstate_map_link acl_no_state = {0};
 
+// One fixed batch of the input front processed by the handler.
+#define ACL_HANDLE_MAX_BATCH 64
+
 // Append a sync record for an allowed packet to the executing worker's
 // stash slot of the family map.
 //
@@ -92,181 +95,193 @@ acl_handle_packets(
 	 * For the second option we have to split v4 and v6 processing.
 	 */
 
-	// A force-polled tick can reach this handler with an empty front, and
-	// zero-sizing every variable-length array declared below is undefined
-	// behavior. The early return is only safe because everything below is
-	// per-packet — trailing work added later must go above the guard.
-	uint64_t count = packet_front_input_count(packet_front);
-	if (count == 0) {
-		return;
-	}
+	// The scratch holds one fixed batch of the input front.
+	//
+	// A front handed to the handler has no size ceiling: routed fronts
+	// accumulate packets from other entries and cloning modules grow
+	// them further. The burst is processed batch by batch: each batch
+	// is classified, then its verdict consumes exactly the packets the
+	// classification covered, so the remainder of the input list stays
+	// listed for the next iteration. The l2 stage runs over the batch
+	// itself and needs no separate pointer array.
+	struct packet *packets[ACL_HANDLE_MAX_BATCH];
+	uint32_t l2_result[ACL_HANDLE_MAX_BATCH];
 
-	struct packet *l2_packets[count];
-	uint32_t l2_result[count];
-	uint64_t l2_idx = 0;
+	struct packet *ip4_packets[ACL_HANDLE_MAX_BATCH];
+	uint32_t ip4_result[ACL_HANDLE_MAX_BATCH];
 
-	struct packet *ip4_packets[count];
-	uint32_t ip4_result[count];
-	uint64_t ip4_idx = 0;
+	struct packet *ip4_tcp_packets[ACL_HANDLE_MAX_BATCH];
+	uint32_t ip4_tcp_result[ACL_HANDLE_MAX_BATCH];
+	uint32_t ip4_tcp_pos[ACL_HANDLE_MAX_BATCH];
 
-	struct packet *ip4_tcp_packets[count];
-	uint32_t ip4_tcp_result[count];
-	uint32_t ip4_tcp_pos[count];
-	uint64_t ip4_tcp_idx = 0;
+	struct packet *ip4_udp_packets[ACL_HANDLE_MAX_BATCH];
+	uint32_t ip4_udp_result[ACL_HANDLE_MAX_BATCH];
+	uint32_t ip4_udp_pos[ACL_HANDLE_MAX_BATCH];
 
-	struct packet *ip4_udp_packets[count];
-	uint32_t ip4_udp_result[count];
-	uint32_t ip4_udp_pos[count];
-	uint64_t ip4_udp_idx = 0;
+	struct packet *ip4_icmp_packets[ACL_HANDLE_MAX_BATCH];
+	uint32_t ip4_icmp_result[ACL_HANDLE_MAX_BATCH];
+	uint32_t ip4_icmp_pos[ACL_HANDLE_MAX_BATCH];
 
-	struct packet *ip4_icmp_packets[count];
-	uint32_t ip4_icmp_result[count];
-	uint32_t ip4_icmp_pos[count];
-	uint64_t ip4_icmp_idx = 0;
+	struct packet *ip6_packets[ACL_HANDLE_MAX_BATCH];
+	uint32_t ip6_result[ACL_HANDLE_MAX_BATCH];
 
-	struct packet *ip6_packets[count];
-	uint32_t ip6_result[count];
-	uint64_t ip6_idx = 0;
+	struct packet *ip6_tcp_packets[ACL_HANDLE_MAX_BATCH];
+	uint32_t ip6_tcp_result[ACL_HANDLE_MAX_BATCH];
+	uint32_t ip6_tcp_pos[ACL_HANDLE_MAX_BATCH];
 
-	struct packet *ip6_tcp_packets[count];
-	uint32_t ip6_tcp_result[count];
-	uint32_t ip6_tcp_pos[count];
-	uint64_t ip6_tcp_idx = 0;
+	struct packet *ip6_udp_packets[ACL_HANDLE_MAX_BATCH];
+	uint32_t ip6_udp_result[ACL_HANDLE_MAX_BATCH];
+	uint32_t ip6_udp_pos[ACL_HANDLE_MAX_BATCH];
 
-	struct packet *ip6_udp_packets[count];
-	uint32_t ip6_udp_result[count];
-	uint32_t ip6_udp_pos[count];
-	uint64_t ip6_udp_idx = 0;
+	struct packet *ip6_icmp_packets[ACL_HANDLE_MAX_BATCH];
+	uint32_t ip6_icmp_result[ACL_HANDLE_MAX_BATCH];
+	uint32_t ip6_icmp_pos[ACL_HANDLE_MAX_BATCH];
 
-	struct packet *ip6_icmp_packets[count];
-	uint32_t ip6_icmp_result[count];
-	uint32_t ip6_icmp_pos[count];
-	uint64_t ip6_icmp_idx = 0;
+	uint32_t core4_classes[ACL_HANDLE_MAX_BATCH];
+	uint32_t frag4_classes[ACL_HANDLE_MAX_BATCH];
+	uint32_t core4_path_classes[ACL_HANDLE_MAX_BATCH];
 
-	for (struct packet *packet = packet_list_first(&packet_front->input);
-	     packet != NULL;
-	     packet = packet->next) {
+	uint32_t core6_classes[ACL_HANDLE_MAX_BATCH];
+	uint32_t frag6_classes[ACL_HANDLE_MAX_BATCH];
+	uint32_t core6_path_classes[ACL_HANDLE_MAX_BATCH];
 
-		l2_packets[l2_idx++] = packet;
+	struct packet *packet;
+	uint32_t count;
+	while ((count = packet_front_collect_input(
+			packet_front, packets, ACL_HANDLE_MAX_BATCH
+		)) != 0) {
+		uint32_t ip4_idx = 0;
+		uint32_t ip4_tcp_idx = 0;
+		uint32_t ip4_udp_idx = 0;
+		uint32_t ip4_icmp_idx = 0;
+		uint32_t ip6_idx = 0;
+		uint32_t ip6_tcp_idx = 0;
+		uint32_t ip6_udp_idx = 0;
+		uint32_t ip6_icmp_idx = 0;
 
-		if (packet->network_header.type ==
-		    rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV4)) {
-			ip4_packets[ip4_idx++] = packet;
+		for (uint32_t idx = 0; idx < count; ++idx) {
+			packet = packets[idx];
 
-			if (packet->fragment_offset == 0) {
-				// The position of the path packet inside
-				// the family batch: the shared core
-				// classes are gathered through it.
-				uint32_t *pos;
-				struct packet **pkts;
-				uint64_t *idx;
-				if (packet->transport_header.type ==
-				    IPPROTO_TCP) {
-					pos = ip4_tcp_pos;
-					pkts = ip4_tcp_packets;
-					idx = &ip4_tcp_idx;
-				} else if (packet->transport_header.type ==
-					   IPPROTO_UDP) {
-					pos = ip4_udp_pos;
-					pkts = ip4_udp_packets;
-					idx = &ip4_udp_idx;
-				} else if (packet->transport_header.type ==
-						   IPPROTO_ICMP ||
-					   packet->transport_header.type ==
-						   IPPROTO_ICMPV6) {
-					pos = ip4_icmp_pos;
-					pkts = ip4_icmp_packets;
-					idx = &ip4_icmp_idx;
-				} else {
-					continue;
+			if (packet->network_header.type ==
+			    rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV4)) {
+				ip4_packets[ip4_idx++] = packet;
+
+				if (packet->fragment_offset == 0) {
+					// The position of the path packet
+					// inside the family batch: the shared
+					// core classes are gathered through
+					// it.
+					uint32_t *pos;
+					struct packet **pkts;
+					uint32_t *idx;
+					if (packet->transport_header.type ==
+					    IPPROTO_TCP) {
+						pos = ip4_tcp_pos;
+						pkts = ip4_tcp_packets;
+						idx = &ip4_tcp_idx;
+					} else if (packet->transport_header
+							   .type ==
+						   IPPROTO_UDP) {
+						pos = ip4_udp_pos;
+						pkts = ip4_udp_packets;
+						idx = &ip4_udp_idx;
+					} else if (packet->transport_header
+								   .type ==
+							   IPPROTO_ICMP ||
+						   packet->transport_header
+								   .type ==
+							   IPPROTO_ICMPV6) {
+						pos = ip4_icmp_pos;
+						pkts = ip4_icmp_packets;
+						idx = &ip4_icmp_idx;
+					} else {
+						continue;
+					}
+					pos[*idx] = ip4_idx - 1;
+					pkts[(*idx)++] = packet;
 				}
-				pos[*idx] = ip4_idx - 1;
-				pkts[(*idx)++] = packet;
+			}
+
+			if (packet->network_header.type ==
+			    rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV6)) {
+				ip6_packets[ip6_idx++] = packet;
+
+				if (packet->fragment_offset == 0) {
+					uint32_t *pos;
+					struct packet **pkts;
+					uint32_t *idx;
+					if (packet->transport_header.type ==
+					    IPPROTO_TCP) {
+						pos = ip6_tcp_pos;
+						pkts = ip6_tcp_packets;
+						idx = &ip6_tcp_idx;
+					} else if (packet->transport_header
+							   .type ==
+						   IPPROTO_UDP) {
+						pos = ip6_udp_pos;
+						pkts = ip6_udp_packets;
+						idx = &ip6_udp_idx;
+					} else if (packet->transport_header
+								   .type ==
+							   IPPROTO_ICMP ||
+						   packet->transport_header
+								   .type ==
+							   IPPROTO_ICMPV6) {
+						pos = ip6_icmp_pos;
+						pkts = ip6_icmp_packets;
+						idx = &ip6_icmp_idx;
+					} else {
+						continue;
+					}
+					pos[*idx] = ip6_idx - 1;
+					pkts[(*idx)++] = packet;
+				}
 			}
 		}
 
-		if (packet->network_header.type ==
-		    rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV6)) {
-			ip6_packets[ip6_idx++] = packet;
+		// The l2 filter sees the whole batch: a rule without networks
+		// matches every packet of its devices regardless of the
+		// protocol family, so its result is the base the family
+		// results merge into.
+		acl_classify_l2(
+			&acl_config->classifier_l2,
+			module_ectx->abs_cm_index,
+			&acl_config->filter_l2.rule_map,
+			(const struct packet **)packets,
+			l2_result,
+			count
+		);
 
-			if (packet->fragment_offset == 0) {
-				uint32_t *pos;
-				struct packet **pkts;
-				uint64_t *idx;
-				if (packet->transport_header.type ==
-				    IPPROTO_TCP) {
-					pos = ip6_tcp_pos;
-					pkts = ip6_tcp_packets;
-					idx = &ip6_tcp_idx;
-				} else if (packet->transport_header.type ==
-					   IPPROTO_UDP) {
-					pos = ip6_udp_pos;
-					pkts = ip6_udp_packets;
-					idx = &ip6_udp_idx;
-				} else if (packet->transport_header.type ==
-						   IPPROTO_ICMP ||
-					   packet->transport_header.type ==
-						   IPPROTO_ICMPV6) {
-					pos = ip6_icmp_pos;
-					pkts = ip6_icmp_packets;
-					idx = &ip6_icmp_idx;
-				} else {
-					continue;
-				}
-				pos[*idx] = ip6_idx - 1;
-				pkts[(*idx)++] = packet;
-			}
-		}
-	}
+		// The family filters share their core classification: the core
+		// classes are computed once per family batch, the fragment and
+		// ports suffixes are evaluated on their own and combined with
+		// the core classes through the root joints of the final
+		// filters.
+		acl_classify_core4(
+			&acl_config->classifier_core4,
+			module_ectx->abs_cm_index,
+			(const struct packet **)ip4_packets,
+			core4_classes,
+			ip4_idx
+		);
 
-	// The l2 filter sees the whole burst: a rule without networks
-	// matches every packet of its devices regardless of the protocol
-	// family, so its result is the base the family results merge into.
-	acl_classify_l2(
-		&acl_config->classifier_l2,
-		module_ectx->abs_cm_index,
-		&acl_config->filter_l2.rule_map,
-		(const struct packet **)l2_packets,
-		l2_result,
-		l2_idx
-	);
+		acl_classify_frag(
+			&acl_config->classifier_frag4,
+			(const struct packet **)ip4_packets,
+			frag4_classes,
+			ip4_idx
+		);
 
-	// The family filters share their core classification: the core
-	// classes are computed once per family batch, the fragment and
-	// ports suffixes are evaluated on their own and combined with the
-	// core classes through the root joints of the final filters.
-	// A family batch can be empty; the class scratch arrays are
-	// guarded against zero sized declarations.
-	uint32_t core4_classes[ip4_idx ? ip4_idx : 1];
-	uint32_t frag4_classes[ip4_idx ? ip4_idx : 1];
-	uint32_t core4_path_classes[ip4_idx ? ip4_idx : 1];
+		classify_combine(
+			&acl_config->filter_ip4.root_joint,
+			&acl_config->filter_ip4.rule_map,
+			core4_classes,
+			frag4_classes,
+			ip4_result,
+			ip4_idx
+		);
 
-	acl_classify_core4(
-		&acl_config->classifier_core4,
-		module_ectx->abs_cm_index,
-		(const struct packet **)ip4_packets,
-		core4_classes,
-		ip4_idx
-	);
-
-	acl_classify_frag(
-		&acl_config->classifier_frag4,
-		(const struct packet **)ip4_packets,
-		frag4_classes,
-		ip4_idx
-	);
-
-	classify_combine(
-		&acl_config->filter_ip4.root_joint,
-		&acl_config->filter_ip4.rule_map,
-		core4_classes,
-		frag4_classes,
-		ip4_result,
-		ip4_idx
-	);
-
-	if (ip4_tcp_idx != 0) {
-		for (uint64_t idx = 0; idx < ip4_tcp_idx; ++idx) {
+		for (uint32_t idx = 0; idx < ip4_tcp_idx; ++idx) {
 			core4_path_classes[idx] =
 				core4_classes[ip4_tcp_pos[idx]];
 		}
@@ -279,313 +294,325 @@ acl_handle_packets(
 			ip4_tcp_result,
 			ip4_tcp_idx
 		);
-	}
 
-	for (uint64_t idx = 0; idx < ip4_udp_idx; ++idx) {
-		core4_path_classes[idx] = core4_classes[ip4_udp_pos[idx]];
-	}
-	acl_classify_udp4(
-		&acl_config->classifier_ports4,
-		&acl_config->filter_ip4_udp,
-		core4_path_classes,
-		(const struct packet **)ip4_udp_packets,
-		ip4_udp_result,
-		ip4_udp_idx
-	);
-
-	for (uint64_t idx = 0; idx < ip4_icmp_idx; ++idx) {
-		core4_path_classes[idx] = core4_classes[ip4_icmp_pos[idx]];
-	}
-	acl_classify_icmp4(
-		&acl_config->classifier_icmp4,
-		&acl_config->filter_ip4_icmp,
-		core4_path_classes,
-		(const struct packet **)ip4_icmp_packets,
-		ip4_icmp_result,
-		ip4_icmp_idx
-	);
-
-	uint32_t core6_classes[ip6_idx ? ip6_idx : 1];
-	uint32_t frag6_classes[ip6_idx ? ip6_idx : 1];
-	uint32_t core6_path_classes[ip6_idx ? ip6_idx : 1];
-
-	acl_classify_core6(
-		&acl_config->classifier_core6,
-		module_ectx->abs_cm_index,
-		(const struct packet **)ip6_packets,
-		core6_classes,
-		ip6_idx
-	);
-
-	acl_classify_frag(
-		&acl_config->classifier_frag6,
-		(const struct packet **)ip6_packets,
-		frag6_classes,
-		ip6_idx
-	);
-
-	classify_combine(
-		&acl_config->filter_ip6.root_joint,
-		&acl_config->filter_ip6.rule_map,
-		core6_classes,
-		frag6_classes,
-		ip6_result,
-		ip6_idx
-	);
-
-	for (uint64_t idx = 0; idx < ip6_tcp_idx; ++idx) {
-		core6_path_classes[idx] = core6_classes[ip6_tcp_pos[idx]];
-	}
-	acl_classify_tcp6(
-		&acl_config->classifier_ports6,
-		&acl_config->classifier_tcp6,
-		&acl_config->filter_ip6_tcp,
-		core6_path_classes,
-		(const struct packet **)ip6_tcp_packets,
-		ip6_tcp_result,
-		ip6_tcp_idx
-	);
-
-	for (uint64_t idx = 0; idx < ip6_udp_idx; ++idx) {
-		core6_path_classes[idx] = core6_classes[ip6_udp_pos[idx]];
-	}
-	acl_classify_udp6(
-		&acl_config->classifier_ports6,
-		&acl_config->filter_ip6_udp,
-		core6_path_classes,
-		(const struct packet **)ip6_udp_packets,
-		ip6_udp_result,
-		ip6_udp_idx
-	);
-
-	for (uint64_t idx = 0; idx < ip6_icmp_idx; ++idx) {
-		core6_path_classes[idx] = core6_classes[ip6_icmp_pos[idx]];
-	}
-	acl_classify_icmp6(
-		&acl_config->classifier_icmp6,
-		&acl_config->filter_ip6_icmp,
-		core6_path_classes,
-		(const struct packet **)ip6_icmp_packets,
-		ip6_icmp_result,
-		ip6_icmp_idx
-	);
-
-	l2_idx = 0;
-	ip4_idx = 0;
-	ip4_tcp_idx = 0;
-	ip4_udp_idx = 0;
-	ip4_icmp_idx = 0;
-	ip6_idx = 0;
-	ip6_tcp_idx = 0;
-	ip6_udp_idx = 0;
-	ip6_icmp_idx = 0;
-
-	struct packet *packet;
-	while ((packet = packet_list_pop(&packet_front->input)) != NULL) {
-		struct acl_target *target = NULL;
-
-		// The action resolves to the first matching rule across the l2
-		// filter and the family filters of the packet.
-		uint32_t action = l2_result[l2_idx];
-
-		++l2_idx;
-
-		// State table and stash for this packet: the linked map of the
-		// packet's family, an empty link for a non-IP packet.
-		const struct fwstate_map_link *state = &acl_no_state;
-
-		if (packet->network_header.type ==
-		    rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV4)) {
-			state = &prepared->fw4;
-
-			if (ip4_result[ip4_idx] < action) {
-				action = ip4_result[ip4_idx];
-			}
-
-			++ip4_idx;
-
-			if (packet->fragment_offset == 0) {
-				const uint32_t *path_result;
-				uint64_t *path_idx;
-				if (packet->transport_header.type ==
-				    IPPROTO_TCP) {
-					path_result = ip4_tcp_result;
-					path_idx = &ip4_tcp_idx;
-				} else if (packet->transport_header.type ==
-					   IPPROTO_UDP) {
-					path_result = ip4_udp_result;
-					path_idx = &ip4_udp_idx;
-				} else if (packet->transport_header.type ==
-						   IPPROTO_ICMP ||
-					   packet->transport_header.type ==
-						   IPPROTO_ICMPV6) {
-					path_result = ip4_icmp_result;
-					path_idx = &ip4_icmp_idx;
-				} else {
-					path_idx = NULL;
-				}
-				if (path_idx != NULL &&
-				    path_result[*path_idx] < action) {
-					action = path_result[*path_idx];
-				}
-				if (path_idx != NULL) {
-					++(*path_idx);
-				}
-			}
-		} else if (packet->network_header.type ==
-			   rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV6)) {
-			state = &prepared->fw6;
-
-			if (ip6_result[ip6_idx] < action) {
-				action = ip6_result[ip6_idx];
-			}
-
-			++ip6_idx;
-
-			if (packet->fragment_offset == 0) {
-				const uint32_t *path_result;
-				uint64_t *path_idx;
-				if (packet->transport_header.type ==
-				    IPPROTO_TCP) {
-					path_result = ip6_tcp_result;
-					path_idx = &ip6_tcp_idx;
-				} else if (packet->transport_header.type ==
-					   IPPROTO_UDP) {
-					path_result = ip6_udp_result;
-					path_idx = &ip6_udp_idx;
-				} else if (packet->transport_header.type ==
-						   IPPROTO_ICMP ||
-					   packet->transport_header.type ==
-						   IPPROTO_ICMPV6) {
-					path_result = ip6_icmp_result;
-					path_idx = &ip6_icmp_idx;
-				} else {
-					path_idx = NULL;
-				}
-				if (path_idx != NULL &&
-				    path_result[*path_idx] < action) {
-					action = path_result[*path_idx];
-				}
-				if (path_idx != NULL) {
-					++(*path_idx);
-				}
-			}
+		for (uint32_t idx = 0; idx < ip4_udp_idx; ++idx) {
+			core4_path_classes[idx] =
+				core4_classes[ip4_udp_pos[idx]];
 		}
+		acl_classify_udp4(
+			&acl_config->classifier_ports4,
+			&acl_config->filter_ip4_udp,
+			core4_path_classes,
+			(const struct packet **)ip4_udp_packets,
+			ip4_udp_result,
+			ip4_udp_idx
+		);
 
-		if (action != CLASSIFY_RULE_INVALID) {
-			target = acl_config->abs_targets + action;
+		for (uint32_t idx = 0; idx < ip4_icmp_idx; ++idx) {
+			core4_path_classes[idx] =
+				core4_classes[ip4_icmp_pos[idx]];
 		}
+		acl_classify_icmp4(
+			&acl_config->classifier_icmp4,
+			&acl_config->filter_ip4_icmp,
+			core4_path_classes,
+			(const struct packet **)ip4_icmp_packets,
+			ip4_icmp_result,
+			ip4_icmp_idx
+		);
 
-		const uint64_t pkt_len = packet_data_len(packet);
+		acl_classify_core6(
+			&acl_config->classifier_core6,
+			module_ectx->abs_cm_index,
+			(const struct packet **)ip6_packets,
+			core6_classes,
+			ip6_idx
+		);
 
-		if (target != NULL) {
-			enum sync_packet_direction push_sync_packet = SYNC_NONE;
-			bool allow = false;
+		acl_classify_frag(
+			&acl_config->classifier_frag6,
+			(const struct packet **)ip6_packets,
+			frag6_classes,
+			ip6_idx
+		);
 
-			for (uint64_t action_idx = 0;
-			     action_idx < target->action_count;
-			     ++action_idx) {
-				switch (target->actions[action_idx]) {
-				case ACTION_ALLOW: {
-					allow = true;
-					goto apply;
-				}
-				case ACTION_DENY: {
-					goto apply;
-				}
-				case ACTION_COUNT: {
-					uint64_t *counters = counter_handle_get_value(
-						ADDR_OF_NONNULL(
-							prepared->rules_handles +
-							target->counter_id
-						)
-					);
-					counters[0] += 1;
-					counters[1] += pkt_len;
+		classify_combine(
+			&acl_config->filter_ip6.root_joint,
+			&acl_config->filter_ip6.rule_map,
+			core6_classes,
+			frag6_classes,
+			ip6_result,
+			ip6_idx
+		);
 
-					break;
+		for (uint32_t idx = 0; idx < ip6_tcp_idx; ++idx) {
+			core6_path_classes[idx] =
+				core6_classes[ip6_tcp_pos[idx]];
+		}
+		acl_classify_tcp6(
+			&acl_config->classifier_ports6,
+			&acl_config->classifier_tcp6,
+			&acl_config->filter_ip6_tcp,
+			core6_path_classes,
+			(const struct packet **)ip6_tcp_packets,
+			ip6_tcp_result,
+			ip6_tcp_idx
+		);
+
+		for (uint32_t idx = 0; idx < ip6_udp_idx; ++idx) {
+			core6_path_classes[idx] =
+				core6_classes[ip6_udp_pos[idx]];
+		}
+		acl_classify_udp6(
+			&acl_config->classifier_ports6,
+			&acl_config->filter_ip6_udp,
+			core6_path_classes,
+			(const struct packet **)ip6_udp_packets,
+			ip6_udp_result,
+			ip6_udp_idx
+		);
+
+		for (uint32_t idx = 0; idx < ip6_icmp_idx; ++idx) {
+			core6_path_classes[idx] =
+				core6_classes[ip6_icmp_pos[idx]];
+		}
+		acl_classify_icmp6(
+			&acl_config->classifier_icmp6,
+			&acl_config->filter_ip6_icmp,
+			core6_path_classes,
+			(const struct packet **)ip6_icmp_packets,
+			ip6_icmp_result,
+			ip6_icmp_idx
+		);
+
+		ip4_idx = 0;
+		ip4_tcp_idx = 0;
+		ip4_udp_idx = 0;
+		ip4_icmp_idx = 0;
+		ip6_idx = 0;
+		ip6_tcp_idx = 0;
+		ip6_udp_idx = 0;
+		ip6_icmp_idx = 0;
+
+		for (uint32_t idx = 0; idx < count; ++idx) {
+			packet = packet_list_pop(&packet_front->input);
+			struct acl_target *target = NULL;
+
+			// The action resolves to the first matching rule
+			// across the l2 filter and the family filters of the
+			// packet.
+			uint32_t action = l2_result[idx];
+
+			// State table and stash for this packet: the linked
+			// map of the packet's family, an empty link for a
+			// non-IP packet.
+			const struct fwstate_map_link *state = &acl_no_state;
+
+			if (packet->network_header.type ==
+			    rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV4)) {
+				state = &prepared->fw4;
+
+				if (ip4_result[ip4_idx] < action) {
+					action = ip4_result[ip4_idx];
 				}
-				case ACTION_CREATE_STATE: {
-					// A non-initial fragment has no
-					// transport header to derive the
-					// state from; creation waits for the
-					// fragment carrying the header.
-					if ((packet->transport_header.type &
-					     PACKET_TRANSPORT_HEADER_UNAVAILABLE
-					    ) == 0) {
-						push_sync_packet = SYNC_INGRESS;
-					}
-					break;
-				}
-				case ACTION_CHECK_STATE: {
-					// A NULL table (non-IP packet, or a
-					// family with no link) simply reports
-					// no state.
-					bool state_found =
-						fwstate_check_state_table(
-							state->table,
-							packet,
-							now,
-							&push_sync_packet
-						);
-					if (state_found) {
-						allow = true;
-						prepared->check_pass_cnt[0] +=
-							1;
-						goto apply;
+
+				++ip4_idx;
+
+				if (packet->fragment_offset == 0) {
+					const uint32_t *path_result;
+					uint32_t *path_idx;
+					if (packet->transport_header.type ==
+					    IPPROTO_TCP) {
+						path_result = ip4_tcp_result;
+						path_idx = &ip4_tcp_idx;
+					} else if (packet->transport_header
+							   .type ==
+						   IPPROTO_UDP) {
+						path_result = ip4_udp_result;
+						path_idx = &ip4_udp_idx;
+					} else if (packet->transport_header
+								   .type ==
+							   IPPROTO_ICMP ||
+						   packet->transport_header
+								   .type ==
+							   IPPROTO_ICMPV6) {
+						path_result = ip4_icmp_result;
+						path_idx = &ip4_icmp_idx;
 					} else {
-						prepared->check_miss_cnt[0] +=
-							1;
+						path_idx = NULL;
 					}
-					break;
+					if (path_idx != NULL &&
+					    path_result[*path_idx] < action) {
+						action = path_result[*path_idx];
+					}
+					if (path_idx != NULL) {
+						++(*path_idx);
+					}
 				}
-				case ACTION_LOG: {
-					break;
+			} else if (packet->network_header.type ==
+				   rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV6)) {
+				state = &prepared->fw6;
+
+				if (ip6_result[ip6_idx] < action) {
+					action = ip6_result[ip6_idx];
 				}
-				default: {
-					prepared->invalid_cnt[0] += 1;
-					allow = false;
-					goto apply;
-				}
+
+				++ip6_idx;
+
+				if (packet->fragment_offset == 0) {
+					const uint32_t *path_result;
+					uint32_t *path_idx;
+					if (packet->transport_header.type ==
+					    IPPROTO_TCP) {
+						path_result = ip6_tcp_result;
+						path_idx = &ip6_tcp_idx;
+					} else if (packet->transport_header
+							   .type ==
+						   IPPROTO_UDP) {
+						path_result = ip6_udp_result;
+						path_idx = &ip6_udp_idx;
+					} else if (packet->transport_header
+								   .type ==
+							   IPPROTO_ICMP ||
+						   packet->transport_header
+								   .type ==
+							   IPPROTO_ICMPV6) {
+						path_result = ip6_icmp_result;
+						path_idx = &ip6_icmp_idx;
+					} else {
+						path_idx = NULL;
+					}
+					if (path_idx != NULL &&
+					    path_result[*path_idx] < action) {
+						action = path_result[*path_idx];
+					}
+					if (path_idx != NULL) {
+						++(*path_idx);
+					}
 				}
 			}
 
-			/*
-			 * There is no terminting action - the packet is
-			 * going to be dropped.
-			 */
-			prepared->non_term_cnt[0] += 1;
+			if (action != CLASSIFY_RULE_INVALID) {
+				target = acl_config->abs_targets + action;
+			}
 
-		apply:
+			const uint64_t pkt_len = packet_data_len(packet);
 
-			if (!allow) {
-				prepared->deny_cnt[0] += 1;
+			if (target != NULL) {
+				enum sync_packet_direction push_sync_packet =
+					SYNC_NONE;
+				bool allow = false;
+
+				for (uint64_t action_idx = 0;
+				     action_idx < target->action_count;
+				     ++action_idx) {
+					switch (target->actions[action_idx]) {
+					case ACTION_ALLOW: {
+						allow = true;
+						goto apply;
+					}
+					case ACTION_DENY: {
+						goto apply;
+					}
+					case ACTION_COUNT: {
+						uint64_t *counters = counter_handle_get_value(
+							ADDR_OF_NONNULL(
+								prepared->rules_handles +
+								target->counter_id
+							)
+						);
+						counters[0] += 1;
+						counters[1] += pkt_len;
+
+						break;
+					}
+					case ACTION_CREATE_STATE: {
+						// A non-initial fragment has
+						// no transport header to
+						// derive the state from;
+						// creation waits for the
+						// fragment carrying the
+						// header.
+						if ((packet->transport_header
+							     .type &
+						     PACKET_TRANSPORT_HEADER_UNAVAILABLE
+						    ) == 0) {
+							push_sync_packet =
+								SYNC_INGRESS;
+						}
+						break;
+					}
+					case ACTION_CHECK_STATE: {
+						// A NULL table (non-IP
+						// packet, or a family with
+						// no link) simply reports
+						// no state.
+						bool state_found =
+							fwstate_check_state_table(
+								state->table,
+								packet,
+								now,
+								&push_sync_packet
+							);
+						if (state_found) {
+							allow = true;
+							prepared->check_pass_cnt
+								[0] += 1;
+							goto apply;
+						} else {
+							prepared->check_miss_cnt
+								[0] += 1;
+						}
+						break;
+					}
+					case ACTION_LOG: {
+						break;
+					}
+					default: {
+						prepared->invalid_cnt[0] += 1;
+						allow = false;
+						goto apply;
+					}
+					}
+				}
+
+				/*
+				 * There is no terminting action - the packet is
+				 * going to be dropped.
+				 */
+				prepared->non_term_cnt[0] += 1;
+
+			apply:
+
+				if (!allow) {
+					prepared->deny_cnt[0] += 1;
+					packet_front_drop(packet_front, packet);
+					continue;
+				}
+
+				/*
+				 * Pass counter is increased in case of
+				 * successful state checking what is ok as this
+				 * implies a packet allowing.
+				 */
+				prepared->allow_cnt[0] += 1;
+				packet_front_output(packet_front, packet);
+
+				if (push_sync_packet != SYNC_NONE) {
+					prepared->create_cnt[0] += 1;
+					acl_stash_sync_record(
+						dp_worker,
+						prepared,
+						&state->stash,
+						packet,
+						push_sync_packet
+					);
+				}
+			} else {
+				prepared->no_match_cnt[0] += 1;
+
 				packet_front_drop(packet_front, packet);
-				continue;
 			}
-
-			/*
-			 * Pass counter is increased in case of successful
-			 * state checking what is ok as this implies a packet
-			 * allowing.
-			 */
-			prepared->allow_cnt[0] += 1;
-			packet_front_output(packet_front, packet);
-
-			if (push_sync_packet != SYNC_NONE) {
-				prepared->create_cnt[0] += 1;
-				acl_stash_sync_record(
-					dp_worker,
-					prepared,
-					&state->stash,
-					packet,
-					push_sync_packet
-				);
-			}
-		} else {
-			prepared->no_match_cnt[0] += 1;
-
-			packet_front_drop(packet_front, packet);
 		}
 	}
 }

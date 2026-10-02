@@ -2153,3 +2153,225 @@ func TestACL_Fragment_ProtoZeroRuleSkipsFragments(t *testing.T) {
 	requireModuleCounterPackets(t, h, aclCounterPath("port0", "test"), "acl_action_deny", 1)
 	requireModuleCounterPackets(t, h, aclCounterPath("port0", "test"), "acl_action_allow", 1)
 }
+
+// The burst kinds cycle through every family and protocol path of the
+// module, plus a source no rule covers.
+const (
+	kindUDP4Allow = iota
+	kindTCP4Deny
+	kindICMP4Allow
+	kindUDP6Allow
+	kindTCP6Deny
+	kindICMP6Deny
+	kindNoMatch
+	kindCount
+)
+
+// multibatchCount exceeds three full handler batches and leaves the last
+// batch partial, so both the batch boundary crossing and the tail are
+// exercised in a single burst.
+const multibatchCount = 3*64 + 5
+
+// multibatchEth returns Ethernet templates for both families.
+func multibatchEth(v6 bool) layers.Ethernet {
+	ethType := layers.EthernetTypeIPv4
+	if v6 {
+		ethType = layers.EthernetTypeIPv6
+	}
+	return layers.Ethernet{
+		SrcMAC:       xerror.Unwrap(net.ParseMAC("aa:bb:cc:dd:ee:ff")),
+		DstMAC:       xerror.Unwrap(net.ParseMAC("11:22:33:44:55:66")),
+		EthernetType: ethType,
+	}
+}
+
+// multibatchPacket builds one burst packet of the given kind; idx keeps
+// every packet's addresses distinct.
+func multibatchPacket(t *testing.T, kind, idx int) gopacket.Packet {
+	t.Helper()
+
+	srcLast := byte(1 + idx%200)
+
+	switch kind {
+	case kindUDP4Allow, kindNoMatch:
+		srcFmt := "192.0.2.%d"
+		if kind == kindNoMatch {
+			srcFmt = "198.51.100.%d"
+		}
+		eth := multibatchEth(false)
+		ip4 := layers.IPv4{
+			Version: 4, TTL: 64,
+			Protocol: layers.IPProtocolUDP,
+			SrcIP:    net.ParseIP(fmt.Sprintf(srcFmt, srcLast)),
+			DstIP:    net.ParseIP("10.0.0.1"),
+		}
+		udp := layers.UDP{SrcPort: 1024, DstPort: 53}
+		require.NoError(t, udp.SetNetworkLayerForChecksum(&ip4))
+		return xpacket.LayersToPacket(t, &eth, &ip4, &udp)
+	case kindTCP4Deny:
+		eth := multibatchEth(false)
+		ip4 := layers.IPv4{
+			Version: 4, TTL: 64,
+			Protocol: layers.IPProtocolTCP,
+			SrcIP:    net.ParseIP(fmt.Sprintf("192.0.2.%d", srcLast)),
+			DstIP:    net.ParseIP("10.0.0.1"),
+		}
+		tcp := layers.TCP{SrcPort: 1024, DstPort: 80, SYN: true}
+		require.NoError(t, tcp.SetNetworkLayerForChecksum(&ip4))
+		return xpacket.LayersToPacket(t, &eth, &ip4, &tcp)
+	case kindICMP4Allow:
+		eth := multibatchEth(false)
+		ip4 := layers.IPv4{
+			Version: 4, TTL: 64,
+			Protocol: layers.IPProtocolICMPv4,
+			SrcIP:    net.ParseIP(fmt.Sprintf("192.0.2.%d", srcLast)),
+			DstIP:    net.ParseIP("10.0.0.1"),
+		}
+		icmp := layers.ICMPv4{
+			TypeCode: layers.CreateICMPv4TypeCode(layers.ICMPv4TypeEchoRequest, 0),
+		}
+		return xpacket.LayersToPacket(t, &eth, &ip4, &icmp)
+	case kindUDP6Allow:
+		eth := multibatchEth(true)
+		ip6 := layers.IPv6{
+			Version: 6, HopLimit: 64,
+			NextHeader: layers.IPProtocolUDP,
+			SrcIP:      net.ParseIP(fmt.Sprintf("2001:db8::%x", srcLast)),
+			DstIP:      net.ParseIP("2001:db8:1::1"),
+		}
+		udp := layers.UDP{SrcPort: 1024, DstPort: 53}
+		require.NoError(t, udp.SetNetworkLayerForChecksum(&ip6))
+		return xpacket.LayersToPacket(t, &eth, &ip6, &udp)
+	case kindTCP6Deny:
+		eth := multibatchEth(true)
+		ip6 := layers.IPv6{
+			Version: 6, HopLimit: 64,
+			NextHeader: layers.IPProtocolTCP,
+			SrcIP:      net.ParseIP(fmt.Sprintf("2001:db8::%x", srcLast)),
+			DstIP:      net.ParseIP("2001:db8:1::1"),
+		}
+		tcp := layers.TCP{SrcPort: 1024, DstPort: 80, SYN: true}
+		require.NoError(t, tcp.SetNetworkLayerForChecksum(&ip6))
+		return xpacket.LayersToPacket(t, &eth, &ip6, &tcp)
+	case kindICMP6Deny:
+		eth := multibatchEth(true)
+		ip6 := layers.IPv6{
+			Version: 6, HopLimit: 64,
+			NextHeader: layers.IPProtocolICMPv6,
+			SrcIP:      net.ParseIP(fmt.Sprintf("2001:db8::%x", srcLast)),
+			DstIP:      net.ParseIP("2001:db8:1::1"),
+		}
+		icmp6 := layers.ICMPv6{
+			TypeCode: layers.CreateICMPv6TypeCode(layers.ICMPv6TypeEchoRequest, 0),
+		}
+		icmp6.SetNetworkLayerForChecksum(&ip6)
+		return xpacket.LayersToPacket(t, &eth, &ip6, &icmp6)
+	}
+	t.Fatalf("unknown burst kind %d", kind)
+	return nil
+}
+
+// Test_ACL_MultiBatchBurst verifies that a burst spanning several handler
+// batches keeps every packet's verdict bound to its own packet: the output
+// and drop sets hold exactly the allowed and denied packets by content, and
+// each rule counter holds exactly the packets and bytes of its kind.
+func Test_ACL_MultiBatchBurst(t *testing.T) {
+	v6Net := xnetip.MustParseBiContiguous("2001:db8::/ffff:ffff::")
+	allow4 := []xnetip.Contiguous[xnetip.Network4]{
+		xnetip.MustParseContiguous4("192.0.2.0/255.255.255.0"),
+	}
+
+	udp4 := allow4Rule(allow4, []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4}, udpProto)
+	udp4.Actions = []cacl.ACLAction{{Kind: cacl.ActionCount}, {Kind: cacl.ActionAllow}}
+	udp4.Counter = "udp4"
+	tcp4 := deny4Rule(allow4, []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4}, tcpProto)
+	tcp4.Actions = []cacl.ACLAction{{Kind: cacl.ActionCount}, {Kind: cacl.ActionDeny}}
+	tcp4.Counter = "tcp4"
+	icmp4 := allow4Rule(allow4, []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4}, icmp4Proto)
+	icmp4.Actions = []cacl.ACLAction{{Kind: cacl.ActionCount}, {Kind: cacl.ActionAllow}}
+	icmp4.Counter = "icmp4"
+
+	udp6 := allow6Rule(
+		[]xnetip.BiContiguous{v6Net},
+		[]xnetip.BiContiguous{filter.UnspecifiedIPv6},
+		udpProto,
+	)
+	udp6.Actions = []cacl.ACLAction{{Kind: cacl.ActionCount}, {Kind: cacl.ActionAllow}}
+	udp6.Counter = "udp6"
+	tcp6 := allow6Rule(
+		[]xnetip.BiContiguous{v6Net},
+		[]xnetip.BiContiguous{filter.UnspecifiedIPv6},
+		tcpProto,
+	)
+	tcp6.Actions = []cacl.ACLAction{{Kind: cacl.ActionCount}, {Kind: cacl.ActionDeny}}
+	tcp6.Counter = "tcp6"
+	icmp6 := allow6Rule(
+		[]xnetip.BiContiguous{v6Net},
+		[]xnetip.BiContiguous{filter.UnspecifiedIPv6},
+		icmp6Proto,
+	)
+	icmp6.Actions = []cacl.ACLAction{{Kind: cacl.ActionCount}, {Kind: cacl.ActionDeny}}
+	icmp6.Counter = "icmp6"
+
+	h, agent, backend := setupACLHarness(t, []string{"port0"})
+	applyACLRules(t, backend, "multibatch", []cacl.ACLRule{
+		udp4, tcp4, icmp4, udp6, tcp6, icmp6,
+	})
+	wireACLPipeline(t, agent, "port0", "multibatch")
+
+	counts := make([]int, kindCount)
+	sizes := make([]int, kindCount)
+	packets := make([]gopacket.Packet, multibatchCount)
+	wantOutput := map[string]int{}
+	wantDrop := map[string]int{}
+	for idx := range packets {
+		kind := idx % kindCount
+		packets[idx] = multibatchPacket(t, kind, idx)
+		counts[kind]++
+		sizes[kind] = len(packets[idx].Data())
+
+		switch kind {
+		case kindUDP4Allow, kindICMP4Allow, kindUDP6Allow:
+			wantOutput[string(packets[idx].Data())]++
+		default:
+			wantDrop[string(packets[idx].Data())]++
+		}
+	}
+
+	result, err := h.HandlePackets(packets...)
+	require.NoError(t, err)
+
+	allowed := counts[kindUDP4Allow] + counts[kindICMP4Allow] + counts[kindUDP6Allow]
+	require.Len(t, result.Output, allowed, "allowed kinds must survive")
+	require.Len(t, result.Drop, multibatchCount-allowed, "denied kinds must be dropped")
+
+	gotOutput := map[string]int{}
+	for _, pkt := range result.Output {
+		gotOutput[string(pkt.RawData)]++
+	}
+	require.Equal(t, wantOutput, gotOutput, "output must hold exactly the allowed packets by content")
+	gotDrop := map[string]int{}
+	for _, pkt := range result.Drop {
+		gotDrop[string(pkt.RawData)]++
+	}
+	require.Equal(t, wantDrop, gotDrop, "drop must hold exactly the denied packets by content")
+
+	path := aclCounterPath("port0", "multibatch")
+	for _, kind := range []struct {
+		name string
+		kind int
+	}{
+		{"udp4", kindUDP4Allow},
+		{"tcp4", kindTCP4Deny},
+		{"icmp4", kindICMP4Allow},
+		{"udp6", kindUDP6Allow},
+		{"tcp6", kindTCP6Deny},
+		{"icmp6", kindICMP6Deny},
+	} {
+		dataplaneut.RequireRuleCounter(
+			t, h, path, kind.name,
+			uint64(counts[kind.kind]), uint64(counts[kind.kind]*sizes[kind.kind]),
+		)
+	}
+	requireModuleCounterPackets(t, h, path, "acl_no_match", uint64(counts[kindNoMatch]))
+}
