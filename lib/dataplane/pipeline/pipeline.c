@@ -529,8 +529,8 @@ function_ectx_run_chains(
 //
 // There is no chain to route packets to, so the output is dropped. The chains
 // are still scheduled on now-empty fronts so the worker keeps force-polling
-// every module once per tick for periodic work, exactly as the demux path did
-// for a function with no packets to route.
+// every module for periodic work — at most once per sweep interval — exactly
+// as the demux path did for a function with no packets to route.
 static void
 function_ectx_drain(
 	struct dp_worker *dp_worker,
@@ -710,11 +710,11 @@ device_entry_ectx_dispatch_many(
 //
 // The unroutable output is dropped. If the entry has pipelines but they are all
 // zero-weight, they are still scheduled on now-empty fronts so the worker keeps
-// force-polling every module once per tick for periodic work; reusing the demux
-// is safe once the output list is empty, since its per-packet loop never runs
-// and the zero-sized pipeline map is never indexed. An entry with
-// no pipelines at all has nothing to poll, so the demux — which would size a
-// zero-length scheduling array — is skipped.
+// force-polling every module for periodic work — at most once per sweep
+// interval; reusing the demux is safe once the output list is empty, since its
+// per-packet loop never runs and the zero-sized pipeline map is never indexed.
+// An entry with no pipelines at all has nothing to poll, so the demux — which
+// would size a zero-length scheduling array — is skipped.
 static inline void
 device_entry_ectx_drain(
 	struct dp_worker *dp_worker,

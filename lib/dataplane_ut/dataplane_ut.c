@@ -926,6 +926,23 @@ dataplane_ut_worker_gen(struct dataplane_ut *ut, size_t worker_idx) {
 }
 
 uint64_t
+dataplane_ut_sweep_deadline_ns(struct dataplane_ut *ut, size_t worker_idx) {
+	struct dp_worker *worker = dataplane_ut_worker(ut, worker_idx);
+	if (worker == NULL) {
+		return 0;
+	}
+
+	// Resolved like the round preparation resolves it, so the value a
+	// test reads is the one the worker's next round gates on.
+	struct config_gen_ectx *config_gen_ectx =
+		ATOMIC_ADDR_OF(&worker->config_gen_ectx);
+	if (config_gen_ectx == NULL) {
+		return 0;
+	}
+	return config_gen_ectx->next_sweep_ns;
+}
+
+uint64_t
 dataplane_ut_published_gen(struct dataplane_ut *ut) {
 	struct cp_config_gen *config_gen =
 		ADDR_OF(&ut->cp_config->cp_config_gen);

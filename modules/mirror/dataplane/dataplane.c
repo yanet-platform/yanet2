@@ -49,8 +49,9 @@ mirror_handle_packets(
 		cp_module
 	);
 
-	// The worker force-polls every module each tick, so an empty front here
-	// is normal. Zero-sizing the arrays below is undefined behavior.
+	// The worker's periodic sweep force-polls every module, so an empty
+	// front here is normal. Zero-sizing the arrays below is undefined
+	// behavior.
 	uint64_t count = packet_front_input_count(packet_front);
 	if (count == 0) {
 		return;

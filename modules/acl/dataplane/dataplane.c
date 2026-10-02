@@ -92,10 +92,11 @@ acl_handle_packets(
 	 * For the second option we have to split v4 and v6 processing.
 	 */
 
-	// A force-polled tick can reach this handler with an empty front, and
-	// zero-sizing every variable-length array declared below is undefined
-	// behavior. The early return is only safe because everything below is
-	// per-packet — trailing work added later must go above the guard.
+	// A force-poll from the periodic sweep can reach this handler with
+	// an empty front, and zero-sizing every variable-length array
+	// declared below is undefined behavior. The early return is only
+	// safe because everything below is per-packet — trailing work
+	// added later must go above the guard.
 	uint64_t count = packet_front_input_count(packet_front);
 	if (count == 0) {
 		return;
