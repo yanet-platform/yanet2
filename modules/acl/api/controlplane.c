@@ -52,12 +52,14 @@ acl_module_config_destroy(struct cp_module *cp_module) {
 
 	value_table_free(&config->filter_ip4_tcp.root_joint);
 	vline_free(&config->filter_ip4_tcp.rule_map);
+	vline_free(&config->filter_ip4_tcp.root_compact);
 	value_table_free(&config->filter_ip4_tcp.vac_joint);
 	vline_free(&config->filter_ip4_tcp.vac_rule_map);
 	memset(&config->filter_ip4_tcp, 0, sizeof(config->filter_ip4_tcp));
 
 	value_table_free(&config->filter_ip4_udp.root_joint);
 	vline_free(&config->filter_ip4_udp.rule_map);
+	vline_free(&config->filter_ip4_udp.root_compact);
 	vline_free(&config->filter_ip4_udp.vac_rule_map);
 	memset(&config->filter_ip4_udp, 0, sizeof(config->filter_ip4_udp));
 
@@ -71,12 +73,14 @@ acl_module_config_destroy(struct cp_module *cp_module) {
 
 	value_table_free(&config->filter_ip6_tcp.root_joint);
 	vline_free(&config->filter_ip6_tcp.rule_map);
+	vline_free(&config->filter_ip6_tcp.root_compact);
 	value_table_free(&config->filter_ip6_tcp.vac_joint);
 	vline_free(&config->filter_ip6_tcp.vac_rule_map);
 	memset(&config->filter_ip6_tcp, 0, sizeof(config->filter_ip6_tcp));
 
 	value_table_free(&config->filter_ip6_udp.root_joint);
 	vline_free(&config->filter_ip6_udp.rule_map);
+	vline_free(&config->filter_ip6_udp.root_compact);
 	vline_free(&config->filter_ip6_udp.vac_rule_map);
 	memset(&config->filter_ip6_udp, 0, sizeof(config->filter_ip6_udp));
 
@@ -1130,10 +1134,12 @@ struct acl_path_filters_build {
 	struct value_table *tcp_root_joint;
 	struct vline *tcp_rule_map;
 	uint64_t *tcp_rule_count;
+	struct vline *tcp_compact_map;
 
 	struct value_table *udp_root_joint;
 	struct vline *udp_rule_map;
 	uint64_t *udp_rule_count;
+	struct vline *udp_compact_map;
 
 	struct value_table *icmp_root_joint;
 	struct vline *icmp_rule_map;
@@ -1265,13 +1271,43 @@ acl_module_build_paths(
 
 	// The udp path: the ports classes join onto the core classes
 	// directly, the path has no transport specific leaf.
+	// The join runs over the core classes compacted to the coverage
+	// classes of this path's port restricted projection: every rule
+	// outside the projection - the vacuous port rules, the plain
+	// family rules and the other paths' rules - stops
+	// distinguishing, so its classes share one row, and the classes
+	// no projected rule covers read the empty zero row.
+	{
+		uint8_t *mask = (uint8_t *)calloc(acl_rule_count, 1);
+		if (mask == NULL) {
+			goto error;
+		}
+		for (uint32_t idx = 0; idx < acl_rule_count; ++idx) {
+			const struct acl_rule *rule = acl_rules + idx;
+			mask[idx] = rule->path_udp &&
+				    acl_rule_ports_restricted(rule);
+		}
+		int map_rc = classify_coverage_map(
+			memory_context,
+			core_stage,
+			acl_rule_count,
+			mask,
+			build->udp_compact_map
+		);
+		free(mask);
+		if (map_rc) {
+			goto error;
+		}
+	}
+
 	acl_path_name(name, sizeof(name), build, "udp_root_joint");
-	if (classify_join(
+	if (classify_join_compact(
 		    memory_context,
 		    name,
 		    core_stage,
 		    &stage_ports,
 		    acl_rule_count,
+		    build->udp_compact_map,
 		    build->udp_root_joint,
 		    udp_stage
 	    )) {
@@ -1316,13 +1352,37 @@ acl_module_build_paths(
 	    )) {
 		goto error;
 	}
+	{
+		uint8_t *mask = (uint8_t *)calloc(acl_rule_count, 1);
+		if (mask == NULL) {
+			goto error;
+		}
+		for (uint32_t idx = 0; idx < acl_rule_count; ++idx) {
+			const struct acl_rule *rule = acl_rules + idx;
+			mask[idx] = rule->path_tcp &&
+				    acl_rule_ports_restricted(rule);
+		}
+		int map_rc = classify_coverage_map(
+			memory_context,
+			core_stage,
+			acl_rule_count,
+			mask,
+			build->tcp_compact_map
+		);
+		free(mask);
+		if (map_rc) {
+			goto error;
+		}
+	}
+
 	acl_path_name(name, sizeof(name), build, "tcp_root_joint");
-	if (classify_join(
+	if (classify_join_compact(
 		    memory_context,
 		    name,
 		    core_stage,
 		    &stage_tcp_mid,
 		    acl_rule_count,
+		    build->tcp_compact_map,
 		    build->tcp_root_joint,
 		    tcp_stage
 	    )) {
@@ -1755,9 +1815,11 @@ acl_module_compile_rules(
 			.tcp_root_joint = &config->filter_ip4_tcp.root_joint,
 			.tcp_rule_map = &config->filter_ip4_tcp.rule_map,
 			.tcp_rule_count = &config->filter_rule_count_ip4_tcp,
+			.tcp_compact_map = &config->filter_ip4_tcp.root_compact,
 			.udp_root_joint = &config->filter_ip4_udp.root_joint,
 			.udp_rule_map = &config->filter_ip4_udp.rule_map,
 			.udp_rule_count = &config->filter_rule_count_ip4_udp,
+			.udp_compact_map = &config->filter_ip4_udp.root_compact,
 			.icmp_root_joint = &config->filter_ip4_icmp.root_joint,
 			.icmp_rule_map = &config->filter_ip4_icmp.rule_map,
 			.icmp_rule_count = &config->filter_rule_count_ip4_icmp,
@@ -1835,9 +1897,11 @@ acl_module_compile_rules(
 			.tcp_root_joint = &config->filter_ip6_tcp.root_joint,
 			.tcp_rule_map = &config->filter_ip6_tcp.rule_map,
 			.tcp_rule_count = &config->filter_rule_count_ip6_tcp,
+			.tcp_compact_map = &config->filter_ip6_tcp.root_compact,
 			.udp_root_joint = &config->filter_ip6_udp.root_joint,
 			.udp_rule_map = &config->filter_ip6_udp.rule_map,
 			.udp_rule_count = &config->filter_rule_count_ip6_udp,
+			.udp_compact_map = &config->filter_ip6_udp.root_compact,
 			.icmp_root_joint = &config->filter_ip6_icmp.root_joint,
 			.icmp_rule_map = &config->filter_ip6_icmp.rule_map,
 			.icmp_rule_count = &config->filter_rule_count_ip6_icmp,

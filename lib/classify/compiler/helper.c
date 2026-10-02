@@ -1,8 +1,11 @@
 #include "lib/classify/compiler/helper.h"
+
 #include "common/hash_index.h"
 #include "common/registry.h"
 #include "lib/classify/classify.h"
 #include "lib/classify/compiler/declare.h"
+#include <stdint.h>
+#include <stdlib.h>
 
 int
 classify_decode(
@@ -59,6 +62,271 @@ classify_decode(
 	}
 
 	return 0;
+}
+
+/*
+ * The rule coverage classes of a stage's value space over a rule
+ * projection.
+ *
+ * Every value covered by the same set of projected rules gains one
+ * class id, numbered from one; zero stays the not covered mark. The
+ * map lands in shared memory as a value line over the stage's value
+ * space.
+ *
+ * The stage must be a join output: its classes are numbered from
+ * one, so zero never carries coverage. An attribute side may hold
+ * class zero inside a range, and this routine would drop that
+ * coverage silently.
+ */
+int
+classify_coverage_map(
+	struct memory_context *memory_context,
+	const struct classifier *stage,
+	uint32_t rule_count,
+	const uint8_t *rule_mask,
+	struct vline *map
+) {
+	const struct value_registry *registry = &stage->registry;
+	const uint32_t *rule_to_group = stage->rule_groups;
+	uint32_t value_space = value_registry_capacity(registry);
+	const struct value_range *ranges = ADDR_OF(&registry->ranges);
+
+	if (value_space <= 1) {
+		return vline_init(map, memory_context, "filter:compact", 1);
+	}
+
+	uint32_t *counts = (uint32_t *)calloc(value_space, sizeof(uint32_t));
+	uint32_t *gen = (uint32_t *)calloc(value_space, sizeof(uint32_t));
+	if (counts == NULL || gen == NULL) {
+		free(counts);
+		free(gen);
+		return -1;
+	}
+
+	// Per projected rule coverage marks over the group ranges; the
+	// generation stamp keeps a rule covering a value through
+	// duplicate range entries counted once, and the ascending rule
+	// order sorts the lists.
+	uint32_t cur_gen = 0;
+	uint32_t *offsets = NULL;
+	uint32_t *filled = NULL;
+	uint32_t *lists = NULL;
+	for (uint32_t pass = 0; pass < 2; ++pass) {
+		for (uint32_t rule_idx = 0; rule_idx < rule_count; ++rule_idx) {
+			uint32_t group = rule_to_group[rule_idx];
+			if (group == FILTER_GROUP_INVALID) {
+				continue;
+			}
+			if (rule_mask != NULL && !rule_mask[rule_idx]) {
+				continue;
+			}
+			const struct value_range *range = ranges + group;
+			uint32_t *values = ADDR_OF(&range->values);
+			++cur_gen;
+			for (uint32_t idx = 0; idx < range->count; ++idx) {
+				uint32_t value = values[idx];
+				if (gen[value] == cur_gen) {
+					continue;
+				}
+				gen[value] = cur_gen;
+				if (pass == 0) {
+					++counts[value];
+				} else {
+					uint32_t slot =
+						offsets[value] + filled[value];
+					lists[slot] = rule_idx;
+					++filled[value];
+				}
+			}
+		}
+		if (pass == 1) {
+			break;
+		}
+		uint64_t total = 0;
+		for (uint32_t value = 0; value < value_space; ++value) {
+			total += counts[value];
+		}
+		if (total > UINT32_MAX) {
+			goto error_free;
+		}
+		offsets = (uint32_t *)calloc(value_space + 1, sizeof(uint32_t));
+		filled = (uint32_t *)calloc(value_space, sizeof(uint32_t));
+		lists = (uint32_t *)malloc(
+			sizeof(uint32_t) * (total ? total : 1)
+		);
+		if (offsets == NULL || filled == NULL || lists == NULL) {
+			goto error_free;
+		}
+		for (uint32_t value = 0; value < value_space; ++value) {
+			offsets[value + 1] = offsets[value] + counts[value];
+		}
+	}
+
+	if (vline_init(map, memory_context, "filter:compact", value_space)) {
+		goto error_free;
+	}
+
+	// Hash-cons the sorted rule lists into the class ids.
+	uint32_t tbl_cap = 4;
+	while (tbl_cap < value_space * 2) {
+		tbl_cap <<= 1;
+	}
+	uint64_t *keys = (uint64_t *)calloc(tbl_cap, sizeof(uint64_t));
+	uint32_t *slot_rep = (uint32_t *)calloc(tbl_cap, sizeof(uint32_t));
+	if (keys == NULL || slot_rep == NULL) {
+		free(keys);
+		free(slot_rep);
+		goto error_free;
+	}
+
+	uint32_t new_count = 0;
+	for (uint32_t value = 1; value < value_space; ++value) {
+		if (counts[value] == 0) {
+			continue;
+		}
+		const uint32_t *list = lists + offsets[value];
+		uint32_t n = counts[value];
+
+		uint64_t hash = 1469598103934665603ULL;
+		for (uint32_t idx = 0; idx < n; ++idx) {
+			hash ^= list[idx];
+			hash *= 1099511628211ULL;
+		}
+		if (hash == 0) {
+			hash = 1;
+		}
+
+		uint32_t slot = (uint32_t)hash & (tbl_cap - 1);
+		uint32_t match = 0;
+		while (keys[slot] != 0) {
+			if (keys[slot] == hash) {
+				uint32_t other = slot_rep[slot];
+				if (counts[other] == n &&
+				    memcmp(lists + offsets[other],
+					   list,
+					   n * sizeof(uint32_t)) == 0) {
+					match = other;
+					break;
+				}
+			}
+			slot = (slot + 1) & (tbl_cap - 1);
+		}
+		if (match != 0) {
+			*vline_get_ptr(map, value) = *vline_get_ptr(map, match);
+			continue;
+		}
+		keys[slot] = hash;
+		slot_rep[slot] = value;
+		*vline_get_ptr(map, value) = ++new_count;
+	}
+
+	free(keys);
+	free(slot_rep);
+	free(lists);
+	free(offsets);
+	free(filled);
+	free(counts);
+	free(gen);
+	return 0;
+
+error_free:
+	free(lists);
+	free(offsets);
+	free(filled);
+	free(counts);
+	free(gen);
+	return -1;
+}
+
+/*
+ * Join with the left classes compacted by a coverage map.
+ *
+ * The left registry is cloned with its range values mapped through
+ * the map, the joint table spans the compacted classes (plus the
+ * zero row for the uncovered rest), and the map is handed out for
+ * the runtime class translation.
+ */
+int
+classify_join_compact(
+	struct memory_context *memory_context,
+	const char *name,
+	const struct classifier *left,
+	const struct classifier *right,
+	uint32_t rule_count,
+	const struct vline *compact_map,
+	struct value_table *table,
+	struct classifier *out
+) {
+	const struct value_registry *registry1 = &left->registry;
+	uint32_t group_count = registry1->range_count;
+
+	struct classifier left_compact = {0};
+	struct value_registry *compact_registry = &left_compact.registry;
+	int rc = -1;
+
+	uint32_t *compact_groups = (uint32_t *)memory_balloc(
+		memory_context, sizeof(uint32_t) * (rule_count ? rule_count : 1)
+	);
+	if (compact_groups == NULL) {
+		return -1;
+	}
+	memcpy(compact_groups, left->rule_groups, sizeof(uint32_t) * rule_count
+	);
+	left_compact.rule_groups = compact_groups;
+
+	if (value_registry_init(
+		    compact_registry, memory_context, "filter:compact"
+	    )) {
+		memory_bfree(
+			memory_context,
+			compact_groups,
+			sizeof(uint32_t) * (rule_count ? rule_count : 1)
+		);
+		return -1;
+	}
+
+	const struct value_range *ranges = ADDR_OF(&registry1->ranges);
+	for (uint32_t group_idx = 0; group_idx < group_count; ++group_idx) {
+		if (value_registry_start(compact_registry)) {
+			goto error_free_compact;
+		}
+		const uint32_t *values = ADDR_OF(&ranges[group_idx].values);
+		for (uint32_t idx = 0; idx < ranges[group_idx].count; ++idx) {
+			uint32_t compact_value = vline_get(
+				(struct vline *)compact_map, values[idx]
+			);
+			if (compact_value == 0) {
+				continue;
+			}
+			if (value_registry_collect(
+				    compact_registry, compact_value
+			    )) {
+				goto error_free_compact;
+			}
+		}
+	}
+
+	if (classify_join(
+		    memory_context,
+		    name,
+		    &left_compact,
+		    right,
+		    rule_count,
+		    table,
+		    out
+	    )) {
+		goto error_free_compact;
+	}
+	rc = 0;
+
+error_free_compact:
+	value_registry_fini(compact_registry);
+	memory_bfree(
+		memory_context,
+		left_compact.rule_groups,
+		sizeof(uint32_t) * (rule_count ? rule_count : 1)
+	);
+	return rc;
 }
 
 //////////////////////////////////////////////////////////////////////////////

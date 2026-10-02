@@ -98,3 +98,21 @@ classify_results_min(uint32_t *results, const uint32_t *extra, uint32_t count) {
 		}
 	}
 }
+
+/*
+ * Translates the classes of one side into the compacted identifiers
+ * of a joint built over coverage classes: uncovered classes read the
+ * zero row, which the joint leaves at the empty value.
+ */
+static inline void
+classify_compact_classes(
+	const struct vline *compact_map,
+	const uint32_t *classes,
+	uint32_t *compacted,
+	uint32_t count
+) {
+	for (uint32_t idx = 0; idx < count; ++idx) {
+		compacted[idx] =
+			vline_get((struct vline *)compact_map, classes[idx]);
+	}
+}

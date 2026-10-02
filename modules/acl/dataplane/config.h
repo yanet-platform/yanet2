@@ -147,6 +147,10 @@ struct acl_filter_ip4 {
 struct acl_filter_ip4_tcp {
 	struct value_table root_joint;
 	struct vline rule_map;
+	// The core classes compacted to the coverage classes of this
+	// path's port restricted projection; uncovered classes read the
+	// zero row of the joint.
+	struct vline root_compact;
 	// The without-ports decoding: rules whose port predicates are
 	// vacuous resolve through the core classes joined with the tcp
 	// flags classes alone, combined with the root decoding by rule
@@ -158,6 +162,10 @@ struct acl_filter_ip4_tcp {
 struct acl_filter_ip4_udp {
 	struct value_table root_joint;
 	struct vline rule_map;
+	// The core classes compacted to the coverage classes of this
+	// path's port restricted projection; uncovered classes read the
+	// zero row of the joint.
+	struct vline root_compact;
 	// The without-ports decoding over the core classes alone.
 	struct vline vac_rule_map;
 };
@@ -175,6 +183,10 @@ struct acl_filter_ip6 {
 struct acl_filter_ip6_tcp {
 	struct value_table root_joint;
 	struct vline rule_map;
+	// The core classes compacted to the coverage classes of this
+	// path's port restricted projection; uncovered classes read the
+	// zero row of the joint.
+	struct vline root_compact;
 	struct value_table vac_joint;
 	struct vline vac_rule_map;
 };
@@ -182,6 +194,10 @@ struct acl_filter_ip6_tcp {
 struct acl_filter_ip6_udp {
 	struct value_table root_joint;
 	struct vline rule_map;
+	// The core classes compacted to the coverage classes of this
+	// path's port restricted projection; uncovered classes read the
+	// zero row of the joint.
+	struct vline root_compact;
 	struct vline vac_rule_map;
 };
 
