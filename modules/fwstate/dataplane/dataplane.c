@@ -339,12 +339,8 @@ fwstate_process_sync_v4(
 	);
 
 	if (result < 0) {
-		LOG_RATE(
-			ERROR,
-			1,
-			"failed to insert IPv4 state: %s",
-			strerror(errno)
-		);
+		// FIXME: ratelimit this errors
+		LOG(ERROR, "failed to insert IPv4 state: %s", strerror(errno));
 		insert_failed_cnt[0] += 1;
 	} else {
 		inserted_cnt[0] += 1;
@@ -434,12 +430,8 @@ fwstate_process_sync_v6(
 	);
 
 	if (result < 0) {
-		LOG_RATE(
-			ERROR,
-			1,
-			"failed to insert IPv6 state: %s",
-			strerror(errno)
-		);
+		// FIXME: ratelimit this errors
+		LOG(ERROR, "failed to insert IPv6 state: %s", strerror(errno));
 		insert_failed_cnt[0] += 1;
 	} else {
 		inserted_cnt[0] += 1;
@@ -510,7 +502,8 @@ fwstate_emit_sync_packet(
 			emitter->module_ectx->packet_recirc_limit
 		);
 		if (unlikely(sync_copy == NULL)) {
-			LOG_RATE(ERROR, 1, "failed to clone sync packet");
+			// FIXME: ratelimit this errors
+			LOG(ERROR, "failed to clone sync packet");
 			emitter->counters->sync_alloc_failed[0] += 1;
 		}
 	}
@@ -554,7 +547,8 @@ fwstate_sync_batch_flush(struct fwstate_emitter *emitter) {
 	while (done < batch->count) {
 		struct packet *packet = worker_packet_alloc(emitter->dp_worker);
 		if (unlikely(packet == NULL)) {
-			LOG_RATE(ERROR, 1, "failed to allocate sync packet");
+			// FIXME: ratelimit this errors
+			LOG(ERROR, "failed to allocate sync packet");
 			emitter->counters->sync_alloc_failed[0] += 1;
 			break;
 		}
