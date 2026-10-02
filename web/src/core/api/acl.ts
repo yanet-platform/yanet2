@@ -16,6 +16,29 @@ export interface ProtoRange {
     to?: number;
 }
 
+/** TCP flag match: a packet matches when the flags byte read through
+ * mask equals flags; bits outside the mask are ignored. */
+export interface TcpFlags {
+    flags?: number;
+    mask?: number;
+}
+
+/** An ICMP or ICMPv6 type range [from; to]. */
+export interface IcmpTypeRange {
+    from?: number;
+    to?: number;
+}
+
+/** One protocol of a rule with its transport specific conditions: TCP
+ * flags for number 6, types for 1 (ICMP) and 58 (ICMPv6); an entry
+ * without conditions matches every subtype byte. */
+export interface Protocol {
+    number?: number;
+    tcp?: TcpFlags;
+    icmp_types?: IcmpTypeRange[];
+    icmp6_types?: IcmpTypeRange[];
+}
+
 export enum ActionKind {
     ACTION_KIND_PASS = 0,
     ACTION_KIND_DENY = 1,
@@ -51,6 +74,9 @@ export interface Rule {
     sources6?: string[];
     destinations4?: string[];
     destinations6?: string[];
+    // Structured protocol match, one entry per protocol with its
+    // transport specific conditions; unioned with proto_ranges.
+    protocols?: Protocol[];
     proto_ranges?: ProtoRange[];
     src_port_ranges?: PortRange[];
     dst_port_ranges?: PortRange[];

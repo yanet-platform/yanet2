@@ -6,7 +6,7 @@ use core::{
 };
 
 use commonpb::pb::{IPv4Network, IPv6Network};
-use filterpb::pb::{FragmentKind, PortRange, ProtoRange, VlanRange};
+use filterpb::pb::{FragmentKind, PortRange, Protocol, VlanRange};
 use ync::output::{Paint, Painted};
 
 use crate::aclpb::{ActionKind, Rule};
@@ -48,6 +48,8 @@ pub struct RuleLine<'a> {
     layer2: bool,
     /// The rule matches no packet and is dimmed as a whole.
     dead: bool,
+    /// The protocol set of both authoring forms of the rule.
+    protocols: Protocols,
 }
 
 impl<'a> RuleLine<'a> {
@@ -68,13 +70,13 @@ impl<'a> RuleLine<'a> {
         let fragment = rule.fragment.as_ref().map_or(FragmentKind::Any, |fragment| {
             FragmentKind::try_from(fragment.kind).unwrap_or(FragmentKind::Any)
         });
-        let no_protocols = !protocols_matchable(&rule.proto_ranges);
+        let protocols = Protocols::from_rule(rule);
+        let no_protocols = !protocols.matchable();
         // A fragment rule leaves port matching, so its ports restrict nothing.
         let ports =
             fragment != FragmentKind::Frag && (has_ports(&rule.src_port_ranges) || has_ports(&rule.dst_port_ranges));
         let no_vlans = !rule.vlan_ranges.is_empty() && rule.vlan_ranges.iter().all(|r| r.from > r.to);
-        let dead = no_vlans
-            || (!layer2 && (!(has4 || has6) || no_protocols || (ports && !protocols_with_ports(&rule.proto_ranges))));
+        let dead = no_vlans || (!layer2 && (!(has4 || has6) || no_protocols || (ports && !protocols.with_ports())));
 
         Self {
             rule,
@@ -85,6 +87,7 @@ impl<'a> RuleLine<'a> {
             has6,
             layer2,
             dead,
+            protocols,
         }
     }
 
@@ -188,7 +191,7 @@ impl Display for RuleLine<'_> {
             _ => None,
         };
 
-        let protocols = Protocols::new(&rule.proto_ranges);
+        let protocols = &self.protocols;
         let class = protocols.class();
         match family {
             Some(family) if class == Class::All => out.token(Tone::Plain, family)?,
@@ -258,45 +261,6 @@ impl Tokens<'_, '_> {
 
         write!(self.f, "{}", Painted::new(paint.filter(|_| self.colored), value))
     }
-}
-
-/// Returns whether the ranges hold a protocol value a packet can carry.
-///
-/// A packet builds the value from its protocol and, for TCP, ICMP and
-/// ICMPv6, the flags or type byte, every other protocol carrying a zero
-/// byte.
-fn protocols_matchable(ranges: &[ProtoRange]) -> bool {
-    protocols_any(ranges, |proto, low, high| match proto {
-        1 | 6 | 58 => low <= high,
-        _ => low == 0,
-    })
-}
-
-/// Returns whether the ranges hold TCP or UDP, the protocols the port
-/// matching sees.
-fn protocols_with_ports(ranges: &[ProtoRange]) -> bool {
-    protocols_any(ranges, |proto, low, high| match proto {
-        6 => low <= high,
-        17 => low == 0,
-        _ => false,
-    })
-}
-
-/// Returns whether any protocol of the ranges holds bytes the test accepts.
-fn protocols_any(ranges: &[ProtoRange], test: impl Fn(u32, u32, u32) -> bool) -> bool {
-    ranges.iter().any(|r| {
-        if r.from > 0xffff || r.from > r.to {
-            return false;
-        }
-        let (from, to) = (r.from, r.to.min(0xffff));
-
-        ((from >> 8)..=(to >> 8)).any(|proto| {
-            let low = if proto == from >> 8 { from & 0xff } else { 0 };
-            let high = if proto == to >> 8 { to & 0xff } else { 0xff };
-
-            test(proto, low, high)
-        })
-    })
 }
 
 /// Returns whether the ranges restrict the ports, which the dataplane reads
@@ -524,10 +488,12 @@ struct Protocols {
 }
 
 impl Protocols {
-    fn new(ranges: &[ProtoRange]) -> Self {
+    /// Folds both authoring forms of a rule into one byte set: the
+    /// encoded ranges and the structured protocol entries.
+    fn from_rule(rule: &Rule) -> Self {
         let mut bytes = [[0u64; 4]; 256];
 
-        for r in ranges {
+        for r in &rule.proto_ranges {
             if r.from > 0xffff || r.from > r.to {
                 continue;
             }
@@ -548,7 +514,37 @@ impl Protocols {
             }
         }
 
+        for entry in &rule.protocols {
+            if let Some(proto) = entry_proto(entry) {
+                let set = &mut bytes[usize::from(proto)];
+                for (word, bits) in set.iter_mut().zip(entry_bytes(entry)) {
+                    *word |= bits;
+                }
+            }
+        }
+
         Self { bytes }
+    }
+
+    /// Returns whether some protocol holds bytes a packet can build: the
+    /// whole flag or type byte for TCP, ICMP and ICMPv6, the zero byte
+    /// for every other protocol.
+    fn matchable(&self) -> bool {
+        (0..=255u8).any(|proto| match proto {
+            1 | 6 | 58 => *self.set(proto) != [0; 4],
+            _ => self.contains(proto, 0),
+        })
+    }
+
+    /// Returns whether the set holds TCP or UDP, the protocols the port
+    /// matching sees.
+    fn with_ports(&self) -> bool {
+        *self.set(6) != [0; 4] || self.contains(17, 0)
+    }
+
+    fn contains(&self, proto: u8, byte: u8) -> bool {
+        let set = self.set(proto);
+        set[usize::from(byte / 64)] & (1 << (byte % 64)) != 0
     }
 
     fn set(&self, proto: u8) -> &[u64; 4] {
@@ -621,6 +617,57 @@ impl Protocols {
             Class::None | Class::All | Class::Names | Class::Raw => Ok(()),
         }
     }
+}
+
+/// Returns the protocol one structured entry constrains: the one its
+/// specific conditions belong to, else the declared number, `None`
+/// when the number carries no protocol byte.
+fn entry_proto(entry: &Protocol) -> Option<u8> {
+    if entry.tcp.is_some() {
+        return Some(6);
+    }
+    if !entry.icmp_types.is_empty() {
+        return Some(1);
+    }
+    if !entry.icmp6_types.is_empty() {
+        return Some(58);
+    }
+    u8::try_from(entry.number).ok()
+}
+
+/// Returns the low byte set of one structured entry: the flag bytes a
+/// TCP mask admits, the covered ICMP or ICMPv6 types, every byte for
+/// an unconstrained entry.
+fn entry_bytes(entry: &Protocol) -> [u64; 4] {
+    if let Some(tcp) = &entry.tcp {
+        let (flags, mask) = (tcp.flags as u8, tcp.mask as u8);
+        let mut set = [0u64; 4];
+        for byte in 0..=255u8 {
+            if byte & mask == flags & mask {
+                set[usize::from(byte / 64)] |= 1 << (byte % 64);
+            }
+        }
+        return set;
+    }
+
+    let type_ranges = if entry.icmp_types.is_empty() {
+        &entry.icmp6_types
+    } else {
+        &entry.icmp_types
+    };
+    if type_ranges.is_empty() {
+        return [u64::MAX; 4];
+    }
+
+    let mut set = [0u64; 4];
+    for range in type_ranges {
+        for byte in range.from..=range.to {
+            if let Ok(byte) = u8::try_from(byte) {
+                set[usize::from(byte / 64)] |= 1 << (byte % 64);
+            }
+        }
+    }
+    set
 }
 
 /// The protocol set as merged encoded ranges.
@@ -762,5 +809,62 @@ impl Display for TcpFlags {
         }
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use commonpb::pb::IPv4Network;
+
+    use super::RuleLine;
+    use crate::aclpb::{ActionKind, Rule};
+
+    /// A rule with family-matched networks and a plain structured UDP
+    /// entry, the form an unconstrained protocol entry renders from.
+    fn udp_rule() -> Rule {
+        Rule {
+            actions: vec![crate::aclpb::Action { kind: ActionKind::Pass as i32 }],
+            sources4: vec![IPv4Network::default()],
+            destinations4: vec![IPv4Network::default()],
+            protocols: vec![filterpb::pb::Protocol { number: 17, ..Default::default() }],
+            ..Default::default()
+        }
+    }
+
+    fn line(rule: &Rule) -> String {
+        RuleLine::new(rule, false).to_string()
+    }
+
+    #[test]
+    fn test_rule_line_renders_unconstrained_protocol_entry_alive() {
+        let rendered = line(&udp_rule());
+
+        assert!(
+            rendered.contains(" udp "),
+            "a plain entry renders its protocol: {rendered}"
+        );
+        assert!(
+            !rendered.contains("none"),
+            "a live entry never renders as none: {rendered}"
+        );
+    }
+
+    #[test]
+    fn test_rule_line_renders_structured_tcp_flags_entry() {
+        let rule = Rule {
+            protocols: vec![filterpb::pb::Protocol {
+                number: 6,
+                tcp: Some(filterpb::pb::TcpFlags { flags: 0x02, mask: 0x02 }),
+                ..Default::default()
+            }],
+            ..udp_rule()
+        };
+
+        let rendered = line(&rule);
+        assert!(rendered.contains("tcp"), "a TCP entry renders its protocol: {rendered}");
+        assert!(
+            rendered.contains("tcpflags"),
+            "the flag entry renders its condition: {rendered}"
+        );
     }
 }
