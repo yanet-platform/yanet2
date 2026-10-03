@@ -83,6 +83,15 @@ packet_transport_protocol(const struct packet *packet) {
 	return (uint8_t)(packet->transport_header.type & UINT8_C(0xff));
 }
 
+// Reports whether the unavailable transport-header tag is absent.
+//
+// A true result does not guarantee readable bytes; callers must check lengths.
+static inline bool
+packet_transport_header_available(const struct packet *packet) {
+	return (packet->transport_header.type &
+		PACKET_TRANSPORT_HEADER_UNAVAILABLE) == 0;
+}
+
 // Initialize a packet lineage's redirect credits once. Lazy because packets
 // enter a pipeline before its module execution context supplies the configured
 // limit, and the field is treated as "full budget" by every reader until the
