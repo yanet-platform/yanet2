@@ -50,7 +50,11 @@ supervisor; inspect it with `status`, `report`, or `down`.
   to detach without stopping the VM.
 - `reset` restores the known-good operator baseline QEMU snapshot.
 - `report` records process and `kni0` state in the session directory.
-- `down` stops the VM and supervisor.
+- `down` stops the VM and supervisor and returns once the supervisor has
+  exited, so a following `up` can start at once. It fails if the shutdown
+  fails or the supervisor has not exited within two minutes; a `down` issued
+  while `up` is still starting the lab can outlast that wait, and the
+  supervisor then exits once startup has finished.
 - `scenario list|run` discovers and runs the built-in guided scenarios.
 - `manifest validate|run` checks or executes a custom manifest.
 

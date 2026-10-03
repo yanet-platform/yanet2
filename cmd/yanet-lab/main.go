@@ -303,7 +303,7 @@ func (m *application) command() *cobra.Command {
 		m.statusCommand(),
 		&cobra.Command{Use: "reset", Short: "Restore the baseline snapshot", RunE: func(*cobra.Command, []string) error { return m.simple("reset", nil) }},
 		&cobra.Command{Use: "report", Short: "Collect an inspect and readiness report", RunE: func(*cobra.Command, []string) error { return m.simple("report", nil) }},
-		&cobra.Command{Use: "down", Short: "Stop the lab VM", RunE: func(*cobra.Command, []string) error { return m.simple("down", nil) }},
+		&cobra.Command{Use: "down", Short: "Stop the lab VM", RunE: func(*cobra.Command, []string) error { return m.down() }},
 		m.execCommand(), m.shellCommand(), m.serialCommand(), m.manifestCommand(), m.scenarioCommand(), m.serveCommand(),
 	)
 	return root
@@ -1031,6 +1031,101 @@ func (m *application) shutdownStaleSupervisor() (*response, int, error) {
 		return nil, noStaleTeardown, fmt.Errorf("stale lab supervisor did not shut down within %s; stop it manually", supervisorRequestTimeout)
 	}
 	return nil, staleVersion, nil
+}
+
+// supervisorExitTimeout bounds how long down waits for the supervisor process
+// to exit after it acknowledged the request.
+var supervisorExitTimeout = supervisorShutdownTimeout
+
+// supervisorExitPollInterval is how often down re-checks the session lock.
+const supervisorExitPollInterval = 50 * time.Millisecond
+
+// down stops the session and returns only once its supervisor has exited.
+//
+// The supervisor acknowledges down before it stops the VM and holds the
+// session lock until its process exits; the session is free for the next up
+// only once that lock is released.
+func (m *application) down() error {
+	directory, _, err := sessionPaths(m.session)
+	if err != nil {
+		return err
+	}
+	// A failed shutdown leaves the supervisor running, so the marker it writes
+	// ends the wait early; a marker from an earlier failed down is ignored.
+	priorMarker, _ := os.Lstat(filepath.Join(directory, shutdownMarkerName))
+	reply, err := m.call(request{Action: "down"})
+	if err != nil {
+		return err
+	}
+	if reply.OK {
+		if err := waitForSupervisorExit(directory, priorMarker, supervisorExitTimeout); err != nil {
+			reply.OK = false
+			reply.Output = ""
+			reply.Error = err.Error()
+		}
+	}
+	return m.printResponse(reply)
+}
+
+// waitForSupervisorExit polls until the session lock is free, which the
+// supervisor holds until after its VM has stopped.
+//
+// A shutdown marker that is not the prior one reports a failed shutdown at
+// once. A marker left once the lock is free would block the next up, so it
+// fails the wait too. Otherwise the wait fails after the timeout, naming the
+// log to inspect.
+func waitForSupervisorExit(directory string, priorMarker os.FileInfo, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	for {
+		err := probeSessionLock(directory)
+		if err == nil {
+			return downShutdownMarkerError(directory)
+		}
+		if !errors.Is(err, errLabBusy) {
+			return err
+		}
+		if markerErr := freshShutdownMarkerError(directory, priorMarker); markerErr != nil {
+			return markerErr
+		}
+		if !time.Now().Before(deadline) {
+			return fmt.Errorf(
+				"lab supervisor did not exit within %s; it may still be finishing startup or shutdown; see %s",
+				timeout,
+				filepath.Join(directory, "supervisor.log"),
+			)
+		}
+		time.Sleep(supervisorExitPollInterval)
+	}
+}
+
+// freshShutdownMarkerError reports the shutdown marker only when it was
+// written after the prior snapshot was taken.
+func freshShutdownMarkerError(directory string, priorMarker os.FileInfo) error {
+	current, err := os.Lstat(filepath.Join(directory, shutdownMarkerName))
+	if err != nil {
+		return nil
+	}
+	if priorMarker != nil && os.SameFile(priorMarker, current) {
+		return nil
+	}
+	return downShutdownMarkerError(directory)
+}
+
+// downShutdownMarkerError reports the shutdown marker in the session directory
+// as the failure of the down in progress; an absent marker reports nothing.
+func downShutdownMarkerError(directory string) error {
+	marker, err := readShutdownMarker(directory)
+	if err != nil {
+		return err
+	}
+	if marker == nil {
+		return nil
+	}
+	return fmt.Errorf(
+		"lab shutdown failed at step %q: %s; run 'yanet-lab down' to retry cleanup",
+		marker.Step,
+		marker.Reason,
+	)
 }
 
 func (m *application) simple(action string, argv []string) error {
@@ -1922,7 +2017,7 @@ func openPrivateFile(path string, flags int) (*os.File, error) {
 // explicit successful down retry removes it (AC5/AC6).
 const shutdownMarkerName = "shutdown-failed.json"
 
-// maxShutdownMarkerBytes bounds how much of the marker file checkShutdownMarker
+// maxShutdownMarkerBytes bounds how much of the marker file readShutdownMarker
 // reads; any well-formed marker is tiny.
 const maxShutdownMarkerBytes = 4096
 
@@ -1944,54 +2039,74 @@ var baselineReadyProbe = framework.HasBaselineSnapshot
 // status="FAILED", non-empty step and reason is treated as an unknown shutdown
 // state so cleanup stays with an explicit down retry.
 func checkShutdownMarker(directory string) error {
+	marker, err := readShutdownMarker(directory)
+	if err != nil {
+		return err
+	}
+	if marker == nil {
+		return nil
+	}
+	return fmt.Errorf("previous down failed at step %q: %s; run 'yanet-lab down' to retry cleanup", marker.Step, marker.Reason)
+}
+
+// shutdownMarker is the failing step and reason a failed down recorded.
+type shutdownMarker struct {
+	Step   string
+	Reason string
+}
+
+// readShutdownMarker returns the valid marker in the session runtime
+// directory, or nothing when it is absent.
+//
+// Any deviation from the marker contract is reported as an unknown shutdown
+// state.
+func readShutdownMarker(directory string) (*shutdownMarker, error) {
 	path := filepath.Join(directory, shutdownMarkerName)
 	if _, err := os.Lstat(path); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return nil
+			return nil, nil
 		}
-		return unknownShutdownState(fmt.Errorf("inspect marker: %w", err))
+		return nil, unknownShutdownState(fmt.Errorf("inspect marker: %w", err))
 	}
 	file, err := openPrivateFile(path, os.O_RDONLY)
 	if err != nil {
-		return unknownShutdownState(err)
+		return nil, unknownShutdownState(err)
 	}
 	defer file.Close()
 	data, err := io.ReadAll(io.LimitReader(file, maxShutdownMarkerBytes+1))
 	if err != nil {
-		return unknownShutdownState(fmt.Errorf("read marker: %w", err))
+		return nil, unknownShutdownState(fmt.Errorf("read marker: %w", err))
 	}
 	if len(data) > maxShutdownMarkerBytes {
-		return unknownShutdownState(fmt.Errorf("marker exceeds %d bytes", maxShutdownMarkerBytes))
+		return nil, unknownShutdownState(fmt.Errorf("marker exceeds %d bytes", maxShutdownMarkerBytes))
 	}
 	fields := map[string]any{}
 	if err := json.Unmarshal(data, &fields); err != nil {
-		return unknownShutdownState(fmt.Errorf("marker is not a JSON object: %w", err))
+		return nil, unknownShutdownState(fmt.Errorf("marker is not a JSON object: %w", err))
 	}
 	if len(fields) != 3 {
-		return unknownShutdownState(fmt.Errorf("marker has %d fields, want exactly status, step, reason", len(fields)))
+		return nil, unknownShutdownState(fmt.Errorf("marker has %d fields, want exactly status, step, reason", len(fields)))
 	}
 	for _, key := range []string{"status", "step", "reason"} {
 		value, present := fields[key]
 		if !present {
-			return unknownShutdownState(fmt.Errorf("marker missing field %q", key))
+			return nil, unknownShutdownState(fmt.Errorf("marker missing field %q", key))
 		}
 		stringValue, ok := value.(string)
 		if !ok {
-			return unknownShutdownState(fmt.Errorf("marker field %q is not a string", key))
+			return nil, unknownShutdownState(fmt.Errorf("marker field %q is not a string", key))
 		}
 		if stringValue == "" {
-			return unknownShutdownState(fmt.Errorf("marker field %q is empty", key))
+			return nil, unknownShutdownState(fmt.Errorf("marker field %q is empty", key))
 		}
 	}
 	if status := fields["status"].(string); status != "FAILED" {
-		return unknownShutdownState(fmt.Errorf("marker status is %q, want FAILED", status))
+		return nil, unknownShutdownState(fmt.Errorf("marker status is %q, want FAILED", status))
 	}
-	step := fields["step"].(string)
-	reason := fields["reason"].(string)
-	return fmt.Errorf("previous down failed at step %q: %s; run 'yanet-lab down' to retry cleanup", step, reason)
+	return &shutdownMarker{Step: fields["step"].(string), Reason: fields["reason"].(string)}, nil
 }
 
-// unknownShutdownState formats the uniform error checkShutdownMarker returns
+// unknownShutdownState formats the uniform error readShutdownMarker returns
 // for every deviation from the contract (AC6).
 func unknownShutdownState(err error) error {
 	return fmt.Errorf("shutdown state unknown: %w; run 'yanet-lab down' to retry cleanup", err)
