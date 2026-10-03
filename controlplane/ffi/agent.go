@@ -161,6 +161,18 @@ const MaxAgentNameLen = C.AGENT_NAME_LEN
 // the terminating NUL.
 const MaxPipelineNameLen = C.CP_PIPELINE_NAME_LEN
 
+// MaxFunctionNameLen is the size of the C-side function name buffer, including
+// the terminating NUL.
+const MaxFunctionNameLen = C.CP_FUNCTION_NAME_LEN
+
+// MaxChainNameLen is the size of the C-side chain name buffer, including the
+// terminating NUL.
+const MaxChainNameLen = C.CP_CHAIN_NAME_LEN
+
+// MaxModuleTypeLen is the size of the C-side module type buffer, including
+// the terminating NUL.
+const MaxModuleTypeLen = C.CP_MODULE_TYPE_LEN
+
 // MaxObjectNameLen is the size of the C-side object name buffer, including
 // the terminating NUL.
 //

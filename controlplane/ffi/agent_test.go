@@ -53,6 +53,24 @@ func Test_MaxPipelineNameLen_MatchesC(t *testing.T) {
 	require.Equal(t, commonpb.MaxPipelineNameLen, ffi.MaxPipelineNameLen)
 }
 
+// Test_MaxFunctionNameLen_MatchesC verifies that the pure-Go bound matches the
+// C function-name buffer size, including its terminating byte.
+func Test_MaxFunctionNameLen_MatchesC(t *testing.T) {
+	require.Equal(t, commonpb.MaxFunctionNameLen, ffi.MaxFunctionNameLen)
+}
+
+// Test_MaxChainNameLen_MatchesC verifies that the pure-Go bound matches the C
+// chain-name buffer size, including its terminating byte.
+func Test_MaxChainNameLen_MatchesC(t *testing.T) {
+	require.Equal(t, ynpb.MaxChainNameLen, ffi.MaxChainNameLen)
+}
+
+// Test_MaxModuleTypeLen_MatchesC verifies that the pure-Go bound matches the
+// C module-type buffer size, including its terminating byte.
+func Test_MaxModuleTypeLen_MatchesC(t *testing.T) {
+	require.Equal(t, commonpb.MaxModuleTypeLen, ffi.MaxModuleTypeLen)
+}
+
 var errInjectedFree = errors.New("injected free failure")
 
 // fakeObject returns a pointer the wrappers may cast to their C config
