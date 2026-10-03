@@ -42,6 +42,7 @@ members = [
     "devices/vlan/cli",
     "devices/trafgen/cli",
     "objects/fwstate/cli",
+    "objects/ring/cli",
     "operators/pipeline/cli",
     "operators/route/cli/route",
     "operators/route/cli/neighbour",
