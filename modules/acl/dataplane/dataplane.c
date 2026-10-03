@@ -533,10 +533,9 @@ acl_handle_packets(
 						// creation waits for the
 						// fragment carrying the
 						// header.
-						if ((packet->transport_header
-							     .type &
-						     PACKET_TRANSPORT_HEADER_UNAVAILABLE
-						    ) == 0) {
+						if (packet_transport_header_available(
+							    packet
+						    )) {
 							push_sync_packet =
 								SYNC_INGRESS;
 						}
