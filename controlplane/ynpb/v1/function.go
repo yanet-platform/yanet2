@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 
 	"google.golang.org/protobuf/proto"
 
@@ -32,41 +33,17 @@ func (m *DeleteFunctionRequest) Validate() error {
 // Validate checks the function identity, required nested messages, and chain
 // weights.
 func (m *Function) Validate() error {
-	if m == nil {
-		return errors.New("function is required")
-	}
 	if err := validateFunctionID(m.GetId()); err != nil {
 		return err
 	}
 
 	var sum uint64
 	for idx, functionChain := range m.GetChains() {
-		chain := functionChain.GetChain()
-		if chain == nil {
-			return fmt.Errorf("chains[%d].chain is required", idx)
-		}
-		for moduleIndex, module := range chain.GetModules() {
-			if module == nil {
-				return fmt.Errorf(
-					"chains[%d].chain.modules[%d] is required",
-					idx,
-					moduleIndex,
-				)
-			}
-			if err := commonpb.ValidateModuleName("name", module.GetName()); err != nil {
-				return fmt.Errorf("chains[%d].chain.modules[%d]: %w", idx, moduleIndex, err)
-			}
+		if err := functionChain.Validate(); err != nil {
+			return fmt.Errorf("chains[%d]: %w", idx, err)
 		}
 
 		weight := functionChain.GetWeight()
-		if weight > commonpb.MaxWeightSum {
-			return fmt.Errorf(
-				"chains[%d].weight %d must be in range 0..%d",
-				idx,
-				weight,
-				commonpb.MaxWeightSum,
-			)
-		}
 		if weight > commonpb.MaxWeightSum-sum {
 			return fmt.Errorf(
 				"chains weight sum %d must be in range 0..%d",
@@ -79,12 +56,62 @@ func (m *Function) Validate() error {
 	return nil
 }
 
+// Validate checks the chain definition and its individual weight.
+func (m *FunctionChain) Validate() error {
+	chain := m.GetChain()
+	if chain == nil {
+		return errors.New("chain is required")
+	}
+	if err := chain.Validate(); err != nil {
+		return fmt.Errorf("chain: %w", err)
+	}
+
+	weight := m.GetWeight()
+	if weight > commonpb.MaxWeightSum {
+		return fmt.Errorf(
+			"weight %d must be in range 0..%d",
+			weight,
+			commonpb.MaxWeightSum,
+		)
+	}
+
+	return nil
+}
+
 func validateFunctionID(id *commonpb.FunctionId) error {
 	if id == nil {
 		return errors.New("id is required")
 	}
-	if id.GetName() == "" {
-		return errors.New("id.name is required")
+	if err := id.Validate(); err != nil {
+		return fmt.Errorf("id: %w", err)
+	}
+
+	return nil
+}
+
+// MaxChainNameLen mirrors the C chain name buffer size, including the
+// terminating NUL.
+const MaxChainNameLen = 80
+
+func (m *Chain) Validate() error {
+	name := m.GetName()
+	if name == "" {
+		return errors.New("name is required")
+	}
+	if strings.IndexByte(name, 0) != -1 {
+		return errors.New("name must not contain NUL")
+	}
+	if len(name) >= MaxChainNameLen {
+		return fmt.Errorf("name must be shorter than %d bytes", MaxChainNameLen)
+	}
+
+	for idx, module := range m.GetModules() {
+		if module == nil {
+			return fmt.Errorf("modules[%d] is required", idx)
+		}
+		if err := module.Validate(); err != nil {
+			return fmt.Errorf("modules[%d]: %w", idx, err)
+		}
 	}
 
 	return nil
