@@ -121,8 +121,7 @@ func Test_SharedMemory_AgentAttach_InitializedSegmentBeforePublication(t *testin
 }
 
 // Test_SharedMemory_DataplaneReady_RejectsLaterReadyBeforeFirstPublication
-// verifies that a later-ready instance cannot bypass publication of the first
-// instance.
+// verifies that readiness requires the first instance's publication.
 func Test_SharedMemory_DataplaneReady_RejectsLaterReadyBeforeFirstPublication(t *testing.T) {
 	readyInstanceCount := uint32(0)
 	path := testshm.NewStorage(t, testshm.StorageTypes{

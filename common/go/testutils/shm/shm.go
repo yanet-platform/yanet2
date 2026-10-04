@@ -303,8 +303,9 @@ func LoadedObjectTypes(memory *ffi.SharedMemory) []string {
 }
 
 // LoadModule invokes the production module loader against an attached,
-// quiescent fixture. Callers must not load types concurrently with another
-// consumer of the segment.
+// quiescent fixture.
+//
+// Callers must not load types concurrently with another consumer of the segment.
 func LoadModule(memory *ffi.SharedMemory, name string) error {
 	if strings.IndexByte(name, 0) >= 0 {
 		return fmt.Errorf("module type name contains NUL byte")
@@ -318,8 +319,9 @@ func LoadModule(memory *ffi.SharedMemory, name string) error {
 }
 
 // LoadObject invokes the production object loader against an attached,
-// quiescent fixture. Callers must not load types concurrently with another
-// consumer of the segment.
+// quiescent fixture.
+//
+// Callers must not load types concurrently with another consumer of the segment.
 func LoadObject(memory *ffi.SharedMemory, name string) error {
 	if strings.IndexByte(name, 0) >= 0 {
 		return fmt.Errorf("object type name contains NUL byte")
