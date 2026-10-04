@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
+	filterpb "github.com/yanet-platform/yanet2/common/filterpb/v1"
 	mirrorpb "github.com/yanet-platform/yanet2/modules/mirror/controlplane/mirrorpb/v1"
 )
 
@@ -82,6 +83,23 @@ func Test_UpdateConfigRequest_Validate(t *testing.T) {
 				Rules: []*mirrorpb.Rule{nil},
 			},
 			message: "rules[0]: action is required",
+		},
+		{
+			name: "device name reaches byte limit at repeated indices",
+			request: &mirrorpb.UpdateConfigRequest{
+				Name: "mirror0",
+				Rules: []*mirrorpb.Rule{
+					{Action: &mirrorpb.Action{}},
+					{
+						Action: &mirrorpb.Action{},
+						Devices: []*filterpb.Device{
+							{Name: "eth0"},
+							{Name: strings.Repeat("e", filterpb.MaxDeviceNameLen)},
+						},
+					},
+				},
+			},
+			message: "rules[1]: devices[1]: name must be shorter than 80 bytes",
 		},
 		{
 			name: "valid rule",

@@ -12,6 +12,9 @@ import (
 	fwstatemappb "github.com/yanet-platform/yanet2/objects/fwstate/controlplane/fwstatemappb/v1"
 )
 
+// MaxActions mirrors the C per-rule action storage capacity.
+const MaxActions = 8
+
 func (m *ShowConfigRequest) Validate() error {
 	return commonpb.ValidateModuleName("name", m.GetName())
 }
@@ -40,6 +43,32 @@ func (m *UpdateConfigRequest) Validate() error {
 		m.GetFwtableNameV6(),
 	); err != nil {
 		return err
+	}
+	for idx, rule := range m.GetRules() {
+		if err := rule.Validate(); err != nil {
+			return fmt.Errorf("rules[%d]: %w", idx, err)
+		}
+	}
+
+	return nil
+}
+
+func (m *Rule) Validate() error {
+	for idx, device := range m.GetDevices() {
+		if err := device.Validate(); err != nil {
+			return fmt.Errorf("devices[%d]: %w", idx, err)
+		}
+	}
+
+	counter := m.GetCounter()
+	if strings.IndexByte(counter, 0) != -1 {
+		return errors.New("counter must not contain NUL")
+	}
+	if len(counter) >= commonpb.MaxCounterNameLen {
+		return fmt.Errorf("counter must be shorter than %d bytes", commonpb.MaxCounterNameLen)
+	}
+	if len(m.GetActions()) > MaxActions {
+		return fmt.Errorf("actions must contain at most %d actions", MaxActions)
 	}
 
 	return nil
