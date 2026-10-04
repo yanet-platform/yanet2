@@ -9,6 +9,7 @@ package cacl
 //
 //#include "api/agent.h"
 //#include "modules/acl/api/controlplane.h"
+//#include "modules/acl/dataplane/config.h"
 import "C"
 
 import (
@@ -19,6 +20,9 @@ import (
 	"github.com/yanet-platform/yanet2/bindings/go/cerrors"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 )
+
+// MaxActions is the capacity of the C per-rule action storage.
+const MaxActions = C.ACL_MAX_ACTIONS
 
 // ModuleConfig is an opaque handle to the ACL module configuration in
 // shared memory.

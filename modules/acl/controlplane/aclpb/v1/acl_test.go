@@ -42,6 +42,11 @@ func Test_ShowConfigRequest_Validate(t *testing.T) {
 // Test_UpdateConfigRequest_Validate verifies that update-only request rules
 // report their own field-level errors.
 func Test_UpdateConfigRequest_Validate(t *testing.T) {
+	excessActions := make([]*aclpb.Action, 9)
+	for idx := range excessActions {
+		excessActions[idx] = &aclpb.Action{Kind: aclpb.ActionKind_ACTION_KIND_COUNT}
+	}
+
 	cases := []struct {
 		name    string
 		request *aclpb.UpdateConfigRequest
@@ -127,6 +132,55 @@ func Test_UpdateConfigRequest_Validate(t *testing.T) {
 				FwtableNameV6: strings.Repeat("a", fwstatemappb.MaxMapNameLen),
 			},
 			message: "fwtable_name_v6 must be shorter than 80 bytes",
+		},
+		{
+			name: "device name contains NUL at repeated indices",
+			request: &aclpb.UpdateConfigRequest{
+				Name: "acl0",
+				Rules: []*aclpb.Rule{
+					{},
+					{
+						Devices: []*filterpb.Device{
+							{Name: "eth0"},
+							{Name: "eth0\x00suffix"},
+						},
+					},
+				},
+			},
+			message: "rules[1]: devices[1]: name must not contain NUL",
+		},
+		{
+			name: "counter contains NUL at repeated index",
+			request: &aclpb.UpdateConfigRequest{
+				Name: "acl0",
+				Rules: []*aclpb.Rule{
+					{},
+					{Counter: "allow\x00suffix"},
+				},
+			},
+			message: "rules[1]: counter must not contain NUL",
+		},
+		{
+			name: "counter reaches byte limit at repeated index",
+			request: &aclpb.UpdateConfigRequest{
+				Name: "acl0",
+				Rules: []*aclpb.Rule{
+					{},
+					{Counter: strings.Repeat("c", commonpb.MaxCounterNameLen)},
+				},
+			},
+			message: "rules[1]: counter must be shorter than 128 bytes",
+		},
+		{
+			name: "nine valid actions exceed storage at repeated index",
+			request: &aclpb.UpdateConfigRequest{
+				Name: "acl0",
+				Rules: []*aclpb.Rule{
+					{},
+					{Actions: excessActions},
+				},
+			},
+			message: "rules[1]: actions must contain at most 8 actions",
 		},
 		{
 			name: "rule without networks accepted",
