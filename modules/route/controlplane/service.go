@@ -321,10 +321,7 @@ func (m *RouteService) resolveNexthopCounters(entries []*routepb.FIBEntry) error
 				nh.Counter = counter
 			}
 
-			hardwareRoute, err := newHardwareRoute(nh)
-			if err != nil {
-				continue
-			}
+			hardwareRoute := newHardwareRoute(nh)
 			if prior, ok := identityCounters[hardwareRoute]; ok && prior != counter {
 				return status.Errorf(
 					codes.InvalidArgument,
