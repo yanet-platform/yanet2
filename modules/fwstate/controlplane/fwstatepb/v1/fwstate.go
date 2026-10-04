@@ -5,13 +5,15 @@ import (
 	"fmt"
 	"net/netip"
 
-	"github.com/yanet-platform/yanet2/modules/fwstate/bindings/go/cfwstate"
 	fwstatemappb "github.com/yanet-platform/yanet2/objects/fwstate/controlplane/fwstatemappb/v1"
 
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
 )
 
 const (
+	// TTL48Max is the largest timeout value storable in the 48-bit field.
+	TTL48Max uint64 = (1 << 48) - 1
+
 	// maxSyncPort is the highest value accepted for either sync port,
 	// matching the width of the C-side uint16 port fields.
 	maxSyncPort uint32 = 65535
@@ -104,13 +106,9 @@ func (m *SyncConfig) ValidateTimeouts() error {
 
 	var invalid []string
 	for _, field := range fields {
-		if field.Value > cfwstate.TTL48Max {
-			invalid = append(invalid, field.Name)
-			continue
-		}
 		// Guard against uint64 wraparound: compare the delta instead of
 		// summing, so a huge suppress window cannot slip past the limit.
-		if suppress > cfwstate.TTL48Max-field.Value {
+		if suppress > TTL48Max || field.Value > TTL48Max-suppress {
 			invalid = append(
 				invalid,
 				fmt.Sprintf("%s+sync_suppress_timeout", field.Name),
@@ -133,6 +131,31 @@ func (m *SyncConfig) ValidateTimeouts() error {
 func (m *SyncConfig) ValidateFields() error {
 	if m == nil {
 		return nil
+	}
+
+	if err := validateSyncMTU(m.GetSyncMtu()); err != nil {
+		return err
+	}
+
+	timeoutFields := []struct {
+		Name  string
+		Value uint64
+	}{
+		{"tcp_syn_ack", m.GetTcpSynAck()},
+		{"tcp_syn", m.GetTcpSyn()},
+		{"tcp_fin", m.GetTcpFin()},
+		{"tcp", m.GetTcp()},
+		{"udp", m.GetUdp()},
+		{"default", m.GetDefault()},
+		{"sync_suppress_timeout", m.GetSyncSuppressTimeout()},
+	}
+	for _, field := range timeoutFields {
+		if field.Value > TTL48Max {
+			return fmt.Errorf(
+				"%s %d exceeds maximum allowed value %d",
+				field.Name, field.Value, TTL48Max,
+			)
+		}
 	}
 
 	if portMulticast := m.GetPortMulticast(); portMulticast > maxSyncPort {
@@ -193,10 +216,6 @@ func (m *SyncConfig) ValidateMerged() error {
 	}
 	if dstEther := m.GetDstEther(); dstEther != nil && dstEther.GetAddr()>>48 != 0 {
 		return fmt.Errorf("dst_ether must be an EUI-48 address")
-	}
-
-	if err := validateSyncMTU(m.GetSyncMtu()); err != nil {
-		return err
 	}
 
 	srcAddrSet := isAddrSet(m.GetSrcAddr().GetAddr())
