@@ -140,8 +140,8 @@ func (m *managedService) SetRealServerWeight(
 		return fmt.Errorf("%w: %d", errRealServerIndexOutOfRange, realServerIndex)
 	}
 
-	if weight > maxRealServerWeight {
-		weight = maxRealServerWeight
+	if weight > l3bpb.MaxRealServerWeight {
+		weight = l3bpb.MaxRealServerWeight
 	}
 
 	m.weights[realServerIndex] = weight
@@ -588,10 +588,6 @@ const (
 	maxSessionPageLimit = 100000
 )
 
-// maxRealServerWeight is the upper bound on a real server weight; the per-ring
-// capacity is sized so every server could max out at once.
-const maxRealServerWeight uint32 = 1000
-
 // defaultWeights returns one weight per real server, defaulting to 1.
 func defaultWeights(realServerCount int) []uint32 {
 	weights := make([]uint32, realServerCount)
@@ -708,7 +704,7 @@ func buildVirtualServiceConfig(
 		RealServers:       realServers,
 		HashMask:          service.GetHashMask(),
 		IndexMask:         service.GetIndexMask(),
-		RingCapacity:      uint32(len(realServers)) * maxRealServerWeight,
+		RingCapacity:      uint32(len(realServers)) * l3bpb.MaxRealServerWeight,
 		SchedulerFlags:    service.GetSchedulerFlags(),
 		Flags:             service.GetFlags(),
 		DSCPFlags:         service.GetDscpFlags(),

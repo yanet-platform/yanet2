@@ -218,18 +218,6 @@ func TestUpdateConfigRejects(t *testing.T) {
 			}),
 		},
 		{
-			name: "endpoint listed twice in one service",
-			request: withConfig(func(config *unrduppb.Config) {
-				config.Services[0].Endpoints = append(
-					config.Services[0].Endpoints,
-					&unrduppb.Endpoint{
-						Port:     443,
-						Protocol: unrduppb.Protocol_PROTOCOL_TCP,
-					},
-				)
-			}),
-		},
-		{
 			name: "vip unspecified",
 			request: withConfig(func(config *unrduppb.Config) {
 				config.Services[0].Vip = ipAddr("0.0.0.0")

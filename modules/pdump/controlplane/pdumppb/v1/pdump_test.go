@@ -85,7 +85,7 @@ func Test_SetConfigRequest_Validate(t *testing.T) {
 				Name:   "pdump0",
 				Config: &pdumppb.Config{Mode: proto.Uint32(pdumppb.MaxMode + 1)},
 			},
-			message: "mode 4 must be in range 0..3",
+			message: "config: mode 4 must be in range 0..3",
 		},
 		{
 			name: "zero snaplen",
@@ -93,7 +93,7 @@ func Test_SetConfigRequest_Validate(t *testing.T) {
 				Name:   "pdump0",
 				Config: &pdumppb.Config{Snaplen: proto.Uint32(0)},
 			},
-			message: "snaplen must be greater than zero",
+			message: "config: snaplen must be greater than zero",
 		},
 		{
 			name: "positive snaplen",
@@ -109,7 +109,7 @@ func Test_SetConfigRequest_Validate(t *testing.T) {
 				Config: &pdumppb.Config{RingSize: proto.Uint32(1 << 19)},
 			},
 			message: fmt.Sprintf(
-				"ring_size %d must be in range %d..%d",
+				"config: ring_size %d must be in range %d..%d",
 				1<<19,
 				1<<20,
 				pdumppb.MaxRingSize,
@@ -142,7 +142,7 @@ func Test_SetConfigRequest_Validate(t *testing.T) {
 				Name:   "pdump0",
 				Config: &pdumppb.Config{RingSize: proto.Uint32(1<<20 + 1)},
 			},
-			message: "ring_size 1048577 must be a power of two",
+			message: "config: ring_size 1048577 must be a power of two",
 		},
 		{
 			name: "ring size above maximum",
@@ -151,11 +151,19 @@ func Test_SetConfigRequest_Validate(t *testing.T) {
 				Config: &pdumppb.Config{RingSize: proto.Uint32(1 << 27)},
 			},
 			message: fmt.Sprintf(
-				"ring_size %d must be in range %d..%d",
+				"config: ring_size %d must be in range %d..%d",
 				1<<27,
 				1<<20,
 				pdumppb.MaxRingSize,
 			),
+		},
+		{
+			name: "filter contains NUL",
+			request: &pdumppb.SetConfigRequest{
+				Name:   "pdump0",
+				Config: &pdumppb.Config{Filter: proto.String("tcp\x00udp")},
+			},
+			message: "config: filter must not contain NUL",
 		},
 	}
 
