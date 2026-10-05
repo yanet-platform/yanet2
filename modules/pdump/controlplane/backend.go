@@ -9,18 +9,15 @@ import (
 )
 
 // Settings are the capture parameters a module config is built from.
+//
+// Settings carry the name of the pre-existing ring object the module
+// captures into. It is always set on a published config: a config update
+// fills it in before the backend ever sees an empty value.
 type Settings struct {
 	Filter   string
 	Mode     uint32
 	Snaplen  uint32
-	RingSize uint32
-}
-
-// Ring is one worker's capture ring inside the module config memory.
-type Ring struct {
-	WriteIdx    *uint64
-	ReadableIdx *uint64
-	Data        []byte
+	RingName string
 }
 
 // BackendOption configures the shared-memory backend.
@@ -62,18 +59,19 @@ func NewBackend(agent *ffi.Agent, options ...BackendOption) Backend {
 	}
 }
 
-// UpdateModule builds a module config with fresh rings from the settings
-// and publishes it.
+// UpdateModule builds a module config from the settings, links its ring by
+// name and publishes it.
 //
-// On error nothing stays allocated.
+// The caller resolves and leases the ring before this call, so
+// this only records the link; it does not check the ring exists or fits a
+// record. On error nothing stays allocated.
 func (m *backend) UpdateModule(name string, settings Settings) (Module, error) {
 	config, err := NewModuleConfig(m.agent, name)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create %q module config: %w", name, err)
 	}
 
-	rings, err := m.apply(name, config, settings)
-	if err != nil {
+	if err := m.apply(name, config, settings); err != nil {
 		if err := config.Free(); err != nil {
 			m.log.Error("failed to free unpublished pdump module",
 				zap.String("name", name), zap.Error(err))
@@ -89,49 +87,45 @@ func (m *backend) UpdateModule(name string, settings Settings) (Module, error) {
 		return nil, fmt.Errorf("failed to update module %s: %w", name, err)
 	}
 
-	return &shmModule{config: config, rings: rings}, nil
+	return &shmModule{config: config}, nil
 }
 
 // DeleteModule removes the module config from the dataplane.
+//
+// It never touches the ring the config was linked to.
 func (m *backend) DeleteModule(name string) error {
 	return m.agent.DeleteModuleConfig(moduleType, name)
 }
 
-// apply writes the settings into an unpublished module config and
-// allocates its rings.
-func (m *backend) apply(name string, config *ModuleConfig, settings Settings) ([]Ring, error) {
+// apply writes the settings into an unpublished module config and links
+// its ring.
+func (m *backend) apply(name string, config *ModuleConfig, settings Settings) error {
 	m.log.Debug("set dump mode", zap.String("module", name))
 	if err := config.SetDumpMode(settings.Mode); err != nil {
-		return nil, fmt.Errorf("failed to set dump mode for %s: %w", name, err)
+		return fmt.Errorf("failed to set dump mode for %s: %w", name, err)
 	}
 
 	m.log.Debug("set snaplen", zap.String("module", name))
 	if err := config.SetSnapLen(settings.Snaplen); err != nil {
-		return nil, fmt.Errorf("failed to set snaplen for %s: %w", name, err)
+		return fmt.Errorf("failed to set snaplen for %s: %w", name, err)
 	}
 
 	m.log.Debug("set filter", zap.String("module", name))
 	if err := config.SetFilter(settings.Filter); err != nil {
-		return nil, fmt.Errorf("failed to set pdump filter for %s: %w", name, err)
+		return fmt.Errorf("failed to set pdump filter for %s: %w", name, err)
 	}
 
-	m.log.Debug("setup ring", zap.String("module", name))
-	rings, err := config.SetupRings(settings.RingSize)
-	if err != nil {
-		return nil, fmt.Errorf("failed to setup ring buffers for %s: %w", name, err)
+	m.log.Debug("link ring", zap.String("module", name), zap.String("ring", settings.RingName))
+	if err := config.LinkRing(settings.RingName); err != nil {
+		return fmt.Errorf("failed to link ring for %s: %w", name, err)
 	}
 
-	return rings, nil
+	return nil
 }
 
-// shmModule is a published module config with its rings.
+// shmModule is a published module config.
 type shmModule struct {
 	config *ModuleConfig
-	rings  []Ring
-}
-
-func (m *shmModule) Rings() []Ring {
-	return m.rings
 }
 
 func (m *shmModule) Free() error {

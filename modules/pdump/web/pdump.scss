@@ -156,6 +156,78 @@
     margin-bottom: 4px;
 }
 
+// Rings panel — list of named ring objects with inline create/delete.
+//
+// Shown above the config tab strip so a ring can be provisioned before a
+// config is bound to it.
+.pdump-rings-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 8px 16px;
+    background: var(--yn-panel);
+    border: 1px solid var(--yn-line-2);
+    border-radius: var(--yn-r-md, 6px);
+    margin-bottom: 8px;
+    flex-shrink: 0;
+}
+
+.pdump-rings-panel__header {
+    display: flex;
+    align-items: center;
+}
+
+.pdump-rings-panel__title {
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--yn-text-2);
+}
+
+.pdump-rings-panel__create {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.pdump-rings-panel__empty {
+    color: var(--yn-text-3);
+    font-style: italic;
+    font-size: 13px;
+}
+
+.pdump-rings-panel__list {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+
+.pdump-rings-panel__row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 4px 0;
+}
+
+.pdump-rings-panel__name {
+    font-family: var(--yn-font-mono, monospace);
+    font-size: 13px;
+    min-width: 140px;
+}
+
+.pdump-rings-panel__meta {
+    color: var(--yn-text-2);
+    font-size: 12px;
+}
+
+.pdump-rings-panel__meta--warn {
+    color: var(--yn-danger);
+}
+
 // Config strip — one-row meta + live stats + actions for the active config.
 .pdump-strip {
     display: flex;

@@ -17,7 +17,7 @@ interface ConfigStripProps {
 }
 
 /**
- * Single-row strip showing mode chips, snaplen, ring size, live stats and action buttons
+ * Single-row strip showing mode chips, snaplen, bound ring, live stats and action buttons
  * for the currently active pdump config.
  */
 const ConfigStrip: React.FC<ConfigStripProps> = ({
@@ -33,7 +33,7 @@ const ConfigStrip: React.FC<ConfigStripProps> = ({
 }) => {
     const modes = config.config?.mode ? parseModeFlags(config.config.mode) : [];
     const snaplen = config.config?.snaplen;
-    const ringSize = config.config?.ring_size;
+    const ringName = config.config?.ring_name;
 
     const currentPps = ppsHistory.length > 0 ? (ppsHistory[ppsHistory.length - 1] ?? 0) : 0;
 
@@ -59,10 +59,10 @@ const ConfigStrip: React.FC<ConfigStripProps> = ({
                         <span className="pdump-strip__param-value">{snaplen}</span>
                     </span>
                 )}
-                {ringSize !== undefined && (
+                {ringName && (
                     <span className="pdump-strip__param">
                         <span className="pdump-strip__param-label">Ring</span>
-                        <span className="pdump-strip__param-value">{ringSize}</span>
+                        <span className="pdump-strip__param-value">{ringName}</span>
                     </span>
                 )}
             </div>

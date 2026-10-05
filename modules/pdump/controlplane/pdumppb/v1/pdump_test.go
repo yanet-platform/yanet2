@@ -2,12 +2,14 @@ package pdumppb_test
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 
 	pdumppb "github.com/yanet-platform/yanet2/modules/pdump/controlplane/pdumppb/v1"
+	ringpb "github.com/yanet-platform/yanet2/objects/ring/controlplane/ringpb/v1"
 )
 
 // Test_ShowConfigRequest_Validate verifies that an empty or nil request is
@@ -103,59 +105,49 @@ func Test_SetConfigRequest_Validate(t *testing.T) {
 			},
 		},
 		{
-			name: "ring size below minimum",
+			name: "ring_name is absent",
 			request: &pdumppb.SetConfigRequest{
 				Name:   "pdump0",
-				Config: &pdumppb.Config{RingSize: proto.Uint32(1 << 19)},
-			},
-			message: fmt.Sprintf(
-				"config: ring_size %d must be in range %d..%d",
-				1<<19,
-				1<<20,
-				pdumppb.MaxRingSize,
-			),
-		},
-		{
-			name: "minimum ring size",
-			request: &pdumppb.SetConfigRequest{
-				Name:   "pdump0",
-				Config: &pdumppb.Config{RingSize: proto.Uint32(1048576)},
+				Config: &pdumppb.Config{Snaplen: proto.Uint32(1)},
 			},
 		},
 		{
-			name: "32 MiB ring size",
+			name: "ring_name is empty",
 			request: &pdumppb.SetConfigRequest{
 				Name:   "pdump0",
-				Config: &pdumppb.Config{RingSize: proto.Uint32(1 << 25)},
+				Config: &pdumppb.Config{RingName: proto.String("")},
+			},
+			message: "config: ring_name is required",
+		},
+		{
+			name: "ring_name contains NUL",
+			request: &pdumppb.SetConfigRequest{
+				Name:   "pdump0",
+				Config: &pdumppb.Config{RingName: proto.String("ring\x00a")},
+			},
+			message: "config: ring_name must not contain NUL",
+		},
+		{
+			name: "ring_name is overlong",
+			request: &pdumppb.SetConfigRequest{
+				Name:   "pdump0",
+				Config: &pdumppb.Config{RingName: proto.String(strings.Repeat("r", ringpb.MaxRingNameLen))},
+			},
+			message: fmt.Sprintf("config: ring_name must be shorter than %d bytes", ringpb.MaxRingNameLen),
+		},
+		{
+			name: "ring_name at the longest accepted length",
+			request: &pdumppb.SetConfigRequest{
+				Name:   "pdump0",
+				Config: &pdumppb.Config{RingName: proto.String(strings.Repeat("r", ringpb.MaxRingNameLen-1))},
 			},
 		},
 		{
-			name: "64 MiB protocol maximum ring size",
+			name: "ring_name is valid",
 			request: &pdumppb.SetConfigRequest{
 				Name:   "pdump0",
-				Config: &pdumppb.Config{RingSize: proto.Uint32(1 << 26)},
+				Config: &pdumppb.Config{RingName: proto.String("ring0")},
 			},
-		},
-		{
-			name: "ring size is not a power of two",
-			request: &pdumppb.SetConfigRequest{
-				Name:   "pdump0",
-				Config: &pdumppb.Config{RingSize: proto.Uint32(1<<20 + 1)},
-			},
-			message: "config: ring_size 1048577 must be a power of two",
-		},
-		{
-			name: "ring size above maximum",
-			request: &pdumppb.SetConfigRequest{
-				Name:   "pdump0",
-				Config: &pdumppb.Config{RingSize: proto.Uint32(1 << 27)},
-			},
-			message: fmt.Sprintf(
-				"config: ring_size %d must be in range %d..%d",
-				1<<27,
-				1<<20,
-				pdumppb.MaxRingSize,
-			),
 		},
 		{
 			name: "filter contains NUL",

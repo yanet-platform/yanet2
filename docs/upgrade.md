@@ -3,6 +3,66 @@
 Manual steps required when upgrading an existing deployment. The packaging
 does not perform these automatically.
 
+## Pdump capture moved onto named ring objects
+
+Pdump no longer sizes a private per-worker ring. A config captures into a
+pre-existing ring object instead, created once and named.
+
+The record layout and the shared-memory config it lives in changed
+together, so upgrade the dataplane and the control plane in the same
+maintenance window — a dataplane still running the old private-ring code
+cannot read a config the new control plane writes, and vice versa. Clear
+any stale `/dev/hugepages/yanet*` files from before the upgrade.
+
+1. Create the ring before creating or updating any pdump config that
+   captures into it:
+
+   ```bash
+   yanet-cli-ring create --name captures --capacity 1MiB
+   ```
+
+   The pdump web page can create a ring from its own UI as well. Pdump
+   binds only to a ring of at least 128 KiB per worker, so every record
+   fits whatever the snaplen; a smaller ring is refused
+   (`InvalidArgument`).
+
+2. Pass the ring's name instead of a size. `ring_size` and `--ring-size`
+   are gone, along with the web ring-size input; `ring_name` /
+   `--ring-name` (the web config dialog's ring field) replaces them. It
+   is required when a config is created. An update that omits it keeps
+   the config's currently bound ring; passing it explicitly empty is
+   rejected.
+
+   Rings allocate in the pdump module's own agent arena, not a separate
+   reserve. A deployment that overrides pdump's `memory_requirements`
+   (16 MiB by default before this change) must raise it to cover its
+   rings; the packaged default is now 128 MiB.
+
+Old automation that still passes `--ring-size`, or that creates a config
+without naming a ring, now fails: an absent or empty ring name is
+rejected (`InvalidArgument`), and a name that does not match a published
+ring is rejected (`NotFound`). Nothing is created on either failure.
+
+A ring linked by a published pdump config cannot be deleted — delete the
+config first. As before, deleting a config ends its capture streams; open
+readers do not keep the ring from being deleted. Deleting a config never
+deletes the ring it captured into.
+
+A capture stream no longer replays the records a ring already held
+before the stream started — including a stream reopened after rebinding
+a config to another ring. It starts at the ring's current position. A
+same-object config update (filter, snaplen or mode, ring kept) still
+carries its stream and cursor forward without a reset.
+
+PCAP and PCAPNG files pdump's CLI writes always carry a 65535 header
+snaplen now, independent of the configured capture snaplen.
+
+Field 4 is removed and reserved, not renumbered: a new control plane
+simply ignores an old CLI's `ring_size` as an unknown field, and since an
+old CLI cannot send `ring_name`, its create fails with
+`InvalidArgument`; an old CLI's `show` just lacks the ring. Upgrade
+`yanet2-cli` together with the control plane.
+
 ## Balancer2 scaffold and CLI removed
 
 The unused `modules/balancer2` scaffold, the

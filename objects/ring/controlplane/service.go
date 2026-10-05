@@ -32,6 +32,14 @@ import (
 // the new ring.
 type Handle uint64
 
+// ErrHandleGone is wrapped by Acquire's error when the name no longer maps
+// to the given handle: the ring was deleted, possibly recreated under the
+// same name with a new handle, between a caller's lookup and its acquire.
+//
+// A caller distinguishes this race, which it may treat as "the ring is
+// gone", from any other reason Acquire could fail.
+var ErrHandleGone = errors.New("ring handle no longer exists")
+
 // Lease blocks the delete of one ring handle until Release.
 //
 // A lease comes from RingService.Acquire. Release is the only way to
@@ -39,6 +47,7 @@ type Handle uint64
 // handle the lease was taken for.
 type Lease struct {
 	handle  Handle
+	object  *cring.Object
 	once    sync.Once
 	release func()
 }
@@ -46,6 +55,15 @@ type Lease struct {
 // Handle returns the handle this lease pins.
 func (m *Lease) Handle() Handle {
 	return m.handle
+}
+
+// Object returns the ring object this lease pins.
+//
+// It is valid while the lease is held. A consumer that holds the lease
+// past Release must not keep using the value Object returned: the ring
+// may be freed as soon as no lease pins it any more.
+func (m *Lease) Object() *cring.Object {
+	return m.object
 }
 
 // Release removes this lease's block on delete.
@@ -317,13 +335,15 @@ func (m *RingService) Acquire(name string, handle Handle) (*Lease, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	if entry, ok := m.rings[name]; !ok || entry.Handle != handle {
-		return nil, fmt.Errorf("ring %q handle %d no longer exists", name, handle)
+	entry, ok := m.rings[name]
+	if !ok || entry.Handle != handle {
+		return nil, fmt.Errorf("ring %q handle %d no longer exists: %w", name, handle, ErrHandleGone)
 	}
 
 	m.leases[handle]++
 	return &Lease{
 		handle: handle,
+		object: entry.Object,
 		release: func() {
 			m.mu.Lock()
 			defer m.mu.Unlock()

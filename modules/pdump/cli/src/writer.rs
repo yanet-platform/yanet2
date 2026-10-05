@@ -74,8 +74,17 @@ pub enum PdumpWriter {
     PcapNg(PcapNg),
 }
 
+/// Header snaplen advertised to PCAP and PCAPNG readers, independent of the
+/// configured capture snaplen.
+///
+/// The producer bounds the captured length of every record to 16 bits, so a
+/// record never exceeds it. The PCAP writer refuses an oversized record
+/// instead of truncating it; the PCAPNG writer relies on the producer's
+/// bound alone.
+const HEADER_SNAPLEN: u32 = u16::MAX as u32;
+
 impl PdumpWriter {
-    pub fn new(fmt: DumpOutputFormat, dst: &str, snaplen: u32) -> Result<Self, Box<dyn Error>> {
+    pub fn new(fmt: DumpOutputFormat, dst: &str) -> Result<Self, Box<dyn Error>> {
         let output = PdumpOutput::new(dst)?;
 
         let writer = match fmt {
@@ -91,7 +100,7 @@ impl PdumpWriter {
             }),
             DumpOutputFormat::Pcap => {
                 let header = PcapHeader {
-                    snaplen,
+                    snaplen: HEADER_SNAPLEN,
                     ts_resolution: pcap_file::TsResolution::NanoSecond,
                     endianness: Endianness::Little,
                     ..Default::default()
@@ -105,7 +114,7 @@ impl PdumpWriter {
                 // Create and write an Interface Description Block
                 let interface_block = InterfaceDescriptionBlock {
                     linktype: DataLink::ETHERNET,
-                    snaplen,
+                    snaplen: HEADER_SNAPLEN,
                     options: vec![InterfaceDescriptionOption::IfTsResol(TsResolution::NANO.to_raw())],
                 };
 
@@ -287,11 +296,68 @@ pub async fn pdump_stream_reader(
 
 #[cfg(test)]
 mod test {
+    use pcap_file::{pcap::PcapReader, pcapng::PcapNgReader};
+    use tempfile::NamedTempFile;
+
     use super::*;
+
+    /// Writes a 60-byte and a 1500-byte record in the given format to a fresh
+    /// temporary file and returns the file with the payloads written.
+    ///
+    /// The file is removed when the returned handle is dropped.
+    fn write_two_records(fmt: DumpOutputFormat) -> (NamedTempFile, Vec<Vec<u8>>) {
+        let file = NamedTempFile::new().expect("must create a temp file");
+        let path = file.path().to_str().expect("temp path must be valid UTF-8");
+        let mut writer = PdumpWriter::new(fmt, path).expect("must open");
+
+        let mut payloads = Vec::new();
+        for len in [60, 1500] {
+            let record = pdumppb::Record {
+                meta: Some(pdumppb::RecordMeta {
+                    packet_len: len as u32,
+                    ..Default::default()
+                }),
+                data: vec![0xAB; len],
+            };
+            payloads.push(record.data.clone());
+            writer.write(record).expect("must write the record");
+        }
+        writer.flush().expect("must flush");
+        (file, payloads)
+    }
+
+    #[test]
+    fn test_pcap_has_fixed_header_snaplen_and_keeps_records_intact() {
+        let (file, payloads) = write_two_records(DumpOutputFormat::Pcap);
+
+        let mut reader = PcapReader::new(file.reopen().expect("must reopen")).expect("must parse the pcap header");
+        assert_eq!(reader.header().snaplen, HEADER_SNAPLEN);
+
+        let mut packets = Vec::new();
+        while let Some(packet) = reader.next_packet() {
+            packets.push(packet.expect("must parse the record").data().to_vec());
+        }
+        assert_eq!(packets, payloads);
+    }
+
+    #[test]
+    fn test_pcapng_has_fixed_header_snaplen_and_keeps_records_intact() {
+        let (file, payloads) = write_two_records(DumpOutputFormat::PcapNg);
+
+        let mut reader = PcapNgReader::new(file.reopen().expect("must reopen")).expect("must parse the pcapng header");
+        let mut packets = Vec::new();
+        while let Some(block) = reader.next_block() {
+            if let Block::EnhancedPacket(packet) = block.expect("must parse block") {
+                packets.push(packet.data.into_owned());
+            }
+        }
+        assert_eq!(reader.interfaces()[0].snaplen, HEADER_SNAPLEN);
+        assert_eq!(packets, payloads);
+    }
 
     #[test]
     fn test_pdump_write_reports_an_output_that_cannot_take_records() {
-        let writer = PdumpWriter::new(DumpOutputFormat::Text, "/dev/full", 65535).expect("must open");
+        let writer = PdumpWriter::new(DumpOutputFormat::Text, "/dev/full").expect("must open");
         let (tx, rx) = mpsc::channel(1);
         tx.try_send(pdumppb::Record {
             meta: Some(pdumppb::RecordMeta::default()),
@@ -318,7 +384,7 @@ mod test {
     /// an error instead of a log line.
     #[test]
     fn test_pdump_write_reports_a_failed_record() {
-        let writer = PdumpWriter::new(DumpOutputFormat::Pcap, "/dev/null", 65535).expect("must open");
+        let writer = PdumpWriter::new(DumpOutputFormat::Pcap, "/dev/null").expect("must open");
         let (tx, rx) = mpsc::channel(1);
         tx.try_send(pdumppb::Record { meta: None, data: Vec::new() })
             .expect("must accept the record");

@@ -10,7 +10,11 @@ export interface PdumpConfig {
     filter?: string;
     mode?: number;
     snaplen?: number;
-    ring_size?: number;
+    // Name of the ring object this config captures into.
+    //
+    // Required on create; absent on an update keeps the bound ring, an
+    // explicit empty string is rejected.
+    ring_name?: string;
 }
 
 export interface ListConfigsResponse {
