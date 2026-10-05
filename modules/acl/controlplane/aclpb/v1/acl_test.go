@@ -183,6 +183,16 @@ func Test_UpdateConfigRequest_Validate(t *testing.T) {
 			message: "rules[1]: actions must contain at most 8 actions",
 		},
 		{
+			name: "unknown action kind",
+			request: &aclpb.UpdateConfigRequest{
+				Name: "acl0",
+				Rules: []*aclpb.Rule{{
+					Actions: []*aclpb.Action{{Kind: aclpb.ActionKind(3)}},
+				}},
+			},
+			message: "rules[0]: actions[0]: kind unknown value 3",
+		},
+		{
 			name: "rule without networks accepted",
 			request: &aclpb.UpdateConfigRequest{
 				Name:  "acl0",
