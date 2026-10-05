@@ -70,6 +70,19 @@ func (m *Rule) Validate() error {
 	if len(m.GetActions()) > MaxActions {
 		return fmt.Errorf("actions must contain at most %d actions", MaxActions)
 	}
+	for idx, action := range m.GetActions() {
+		if err := action.Validate(); err != nil {
+			return fmt.Errorf("actions[%d]: %w", idx, err)
+		}
+	}
+
+	return nil
+}
+
+func (m *Action) Validate() error {
+	if _, ok := ActionKind_name[int32(m.GetKind())]; !ok {
+		return fmt.Errorf("kind unknown value %d", m.GetKind())
+	}
 
 	return nil
 }
