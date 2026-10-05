@@ -3,6 +3,7 @@ package pdumppb
 import (
 	"errors"
 	"fmt"
+	"strings"
 
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
 )
@@ -25,14 +26,22 @@ func (m *SetConfigRequest) Validate() error {
 	if config == nil {
 		return errors.New("config is required")
 	}
-	if config.Mode != nil && config.GetMode() > MaxMode {
-		return fmt.Errorf("mode %d must be in range 0..%d", config.GetMode(), MaxMode)
+	if err := config.Validate(); err != nil {
+		return fmt.Errorf("config: %w", err)
 	}
-	if config.Snaplen != nil && config.GetSnaplen() == 0 {
+
+	return nil
+}
+
+func (m *Config) Validate() error {
+	if m.Mode != nil && m.GetMode() > MaxMode {
+		return fmt.Errorf("mode %d must be in range 0..%d", m.GetMode(), MaxMode)
+	}
+	if m.Snaplen != nil && m.GetSnaplen() == 0 {
 		return errors.New("snaplen must be greater than zero")
 	}
-	if config.RingSize != nil {
-		ringSize := config.GetRingSize()
+	if m.RingSize != nil {
+		ringSize := m.GetRingSize()
 		if ringSize&(ringSize-1) != 0 {
 			return fmt.Errorf("ring_size %d must be a power of two", ringSize)
 		}
@@ -44,6 +53,9 @@ func (m *SetConfigRequest) Validate() error {
 				MaxRingSize,
 			)
 		}
+	}
+	if strings.ContainsRune(m.GetFilter(), '\x00') {
+		return errors.New("filter must not contain NUL")
 	}
 
 	return nil

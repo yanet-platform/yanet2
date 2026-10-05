@@ -116,15 +116,8 @@ func serviceFromProto(
 	}
 
 	endpoints := make([]cunrdup.Endpoint, 0, len(service.GetEndpoints()))
-	seenEndpoints := map[cunrdup.Endpoint]struct{}{}
 	for _, endpoint := range service.GetEndpoints() {
 		converted := endpointFromProto(endpoint)
-
-		if _, ok := seenEndpoints[converted]; ok {
-			return cunrdup.Service{}, fmt.Errorf("endpoint %d is listed twice", converted.Port)
-		}
-		seenEndpoints[converted] = struct{}{}
-
 		endpoints = append(endpoints, converted)
 	}
 
