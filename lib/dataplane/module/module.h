@@ -13,7 +13,9 @@
 // not match this constant.
 //
 // 32: struct packet dropped the module_device_id field (56 -> 48 bytes).
-#define YANET_MODULE_ABI_VERSION 32
+// 33: struct module_ectx replaced the device index tables with the
+// per-device routing targets and the module device id.
+#define YANET_MODULE_ABI_VERSION 33
 
 // Symbol name a module .so exports carrying its compiled-against
 // YANET_MODULE_ABI_VERSION, as a uint32_t global.
