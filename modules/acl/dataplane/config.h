@@ -12,7 +12,7 @@
 #include "lib/controlplane/config/cp_module.h"
 #include "objects/fwstate/api/fwstate_map_object.h"
 
-struct counter_value_handle;
+struct counter_storage;
 
 #define ACTION_ALLOW 0
 #define ACTION_DENY 1
@@ -39,7 +39,7 @@ struct acl_target {
 // module execution context by the module's execution-context commit
 // handler.
 //
-// The module counter addresses, the per-rule counter handle array, the
+// The module counter addresses, the per-rule absolute counter array, the
 // linked state tables and the stashes of their map objects; a family with
 // no object link has a NULL table and stash, so CHECK_STATE finds no state
 // and no sync record is written for it.
@@ -54,7 +54,17 @@ struct acl_prepared {
 	uint64_t *invalid_cnt;
 	uint64_t *non_term_cnt;
 	uint64_t *no_match_cnt;
-	struct counter_value_handle **rules_handles;
+	// Rule counter value addresses of this worker and the rule
+	// registry's storage they resolve from; NULL when the config
+	// declares no rule registry.
+	//
+	// The addresses are filled by the worker's own first burst, not by
+	// the publishing pass: a generation that reuses an unchanged
+	// registry shares the storage with the running one, and the worker
+	// is the only thread that ever touches a storage's cache.
+	struct counter_storage *rule_counters_storage;
+	uint64_t **rule_counters;
+	bool rule_counters_resolved;
 	struct fwstate_map_link fw4;
 	struct fwstate_map_link fw6;
 };

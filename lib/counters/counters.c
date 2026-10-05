@@ -464,6 +464,24 @@ counter_storage_spawn(
 		counter_value_handles
 	);
 
+	uint64_t **abs_counter_values = (uint64_t **)memory_balloc(
+		memory_context, sizeof(uint64_t *) * counter_registry->count
+	);
+	if (abs_counter_values == NULL && counter_registry->count > 0) {
+		goto error;
+	}
+	// The cache carries per-process addresses, so it starts blank and
+	// the process that serves the packets fills it. Zeroed memory keeps
+	// an unresolved entry a NULL dereference rather than a wrong one.
+	if (abs_counter_values != NULL) {
+		memset(abs_counter_values,
+		       0,
+		       sizeof(uint64_t *) * counter_registry->count);
+	}
+	SET_OFFSET_OF(
+		&new_counter_storage->abs_counter_values, abs_counter_values
+	);
+
 	return new_counter_storage;
 
 error:
@@ -530,6 +548,11 @@ counter_storage_free(struct counter_storage *storage) {
 			ADDR_OF(&storage->counter_value_handles),
 			sizeof(struct counter_structure_handle *) *
 				counter_registry->count
+		);
+		memory_bfree(
+			memory_context,
+			ADDR_OF(&storage->abs_counter_values),
+			sizeof(uint64_t *) * counter_registry->count
 		);
 	}
 

@@ -1,6 +1,9 @@
-// verifies that exhausted counter arenas fail without corrupting cleanup.
+// verifies that spawned storages survive exhausted arenas and resolve
+// a usable absolute value-address cache.
 //
-// Poisoned single-block and zeroed multi-block sweeps reach both unsafe paths.
+// Poisoned single-block and zeroed multi-block sweeps reach both unsafe
+// OOM paths; the cache scenario covers blank-at-spawn, the offset-walk
+// agreement, idempotent re-resolve and same-registry reuse.
 
 #include "common/asan.h"
 #include "common/memory.h"
@@ -43,8 +46,15 @@ struct registry_fixture {
 };
 
 // Builds a linked registry in an arena outside the allocation sweep.
+//
+// A null size table registers every counter at the sweep's uniform
+// size; a table registers one counter per entry at that entry's size.
 static int
-registry_fixture_init(struct registry_fixture *fixture, size_t counter_count) {
+registry_fixture_init(
+	struct registry_fixture *fixture,
+	const uint64_t *counter_sizes,
+	size_t counter_count
+) {
 	memset(fixture, 0, sizeof(*fixture));
 	fixture->arena = aligned_alloc(ARENA_BUFFER_SIZE, ARENA_BUFFER_SIZE);
 	TEST_ASSERT_NOT_NULL(
@@ -75,7 +85,8 @@ registry_fixture_init(struct registry_fixture *fixture, size_t counter_count) {
 			counter_registry_register(
 				&fixture->registry,
 				name,
-				TEST_COUNTER_SIZE,
+				counter_sizes != NULL ? counter_sizes[idx]
+						      : TEST_COUNTER_SIZE,
 				&err
 			) != COUNTER_INVALID,
 			"failed to register counter"
@@ -131,7 +142,7 @@ run_oom_sweep(
 ) {
 	struct registry_fixture fixture;
 	TEST_ASSERT_SUCCESS(
-		registry_fixture_init(&fixture, counter_count),
+		registry_fixture_init(&fixture, NULL, counter_count),
 		"failed to initialize registry fixture"
 	);
 
@@ -235,6 +246,138 @@ run_oom_scenario(
 	return TEST_SUCCESS;
 }
 
+// One counter per size class, sizes chosen to land in every pool.
+static const uint64_t abs_counter_sizes[COUNTER_POOL_SIZE] = {
+	1, 2, 3, 5, 8, 21, 64
+};
+
+// Checks the resolved cache against the offset walk and a write
+// through it.
+static int
+check_resolved_cache(struct counter_storage *storage) {
+	uint64_t **abs_values = ADDR_OF(&storage->abs_counter_values);
+	TEST_ASSERT_NOT_NULL(abs_values, "storage carries no cache");
+
+	for (uint64_t idx = 0; idx < COUNTER_POOL_SIZE; ++idx) {
+		uint64_t *via_cache = abs_values[idx];
+		uint64_t *via_offsets = counter_get_address(idx, storage);
+		TEST_ASSERT_EQUAL(
+			(uintptr_t)via_cache,
+			(uintptr_t)via_offsets,
+			"cache entry %lu disagrees with the offset walk",
+			idx
+		);
+
+		uint64_t before = via_offsets[0];
+		via_cache[0] += 1;
+		TEST_ASSERT_EQUAL(
+			via_offsets[0],
+			before + 1,
+			"write through cache entry %lu is invisible to the "
+			"offset walk",
+			idx
+		);
+	}
+
+	return TEST_SUCCESS;
+}
+
+// Exercises the absolute value-address cache a spawned storage carries.
+//
+// The cache must start blank, match the offset walk once resolved,
+// stay idempotent under a repeated resolve, and survive the
+// same-registry reuse of the storage.
+static int
+run_abs_cache_test(void) {
+	struct registry_fixture fixture;
+	TEST_ASSERT_SUCCESS(
+		registry_fixture_init(
+			&fixture, abs_counter_sizes, COUNTER_POOL_SIZE
+		),
+		"failed to build fixture"
+	);
+
+	void *arena = aligned_alloc(ARENA_BUFFER_SIZE, ARENA_BUFFER_SIZE);
+	TEST_ASSERT_NOT_NULL(arena, "failed to allocate storage arena");
+	struct block_allocator allocator;
+	block_allocator_init(&allocator);
+	block_allocator_put_arena(&allocator, arena, ARENA_BUFFER_SIZE);
+	struct memory_context memory_context;
+	memory_context_init(&memory_context, "counter-storage", &allocator);
+
+	struct counter_storage *storage =
+		counter_storage_spawn(&memory_context, NULL, &fixture.registry);
+	TEST_ASSERT_NOT_NULL(storage, "failed to spawn storage");
+
+	// A fresh cache is blank: resolving is the dataplane's job, and an
+	// unresolved entry must be NULL rather than a stale address.
+	uint64_t **abs_values = ADDR_OF(&storage->abs_counter_values);
+	TEST_ASSERT_NOT_NULL(abs_values, "spawn left no cache behind");
+	for (uint64_t idx = 0; idx < COUNTER_POOL_SIZE; ++idx) {
+		TEST_ASSERT_NULL(
+			abs_values[idx],
+			"fresh cache entry %lu is not blank",
+			idx
+		);
+	}
+
+	counter_storage_resolve_absolutes(storage);
+	TEST_ASSERT_SUCCESS(
+		check_resolved_cache(storage), "first resolve is wrong"
+	);
+
+	// A repeated resolve rewrites the same addresses, so a republished
+	// generation cannot inherit another pass's corruption.
+	counter_storage_resolve_absolutes(storage);
+	TEST_ASSERT_SUCCESS(
+		check_resolved_cache(storage), "second resolve is wrong"
+	);
+
+	// The same-registry reuse returns the same storage; its cache still
+	// resolves for the generation that reused it.
+	struct counter_storage *reused = counter_storage_spawn(
+		&memory_context, storage, &fixture.registry
+	);
+	TEST_ASSERT_EQUAL(
+		(uintptr_t)reused,
+		(uintptr_t)storage,
+		"same-registry spawn did not reuse the storage"
+	);
+	counter_storage_resolve_absolutes(reused);
+	TEST_ASSERT_SUCCESS(
+		check_resolved_cache(reused), "resolve after reuse is wrong"
+	);
+
+	counter_storage_free(reused);
+	counter_storage_free(storage);
+
+	memory_context_fini(&memory_context);
+	block_allocator_fini(&allocator);
+	free(arena);
+	registry_fixture_fini(&fixture);
+	return TEST_SUCCESS;
+}
+
+// Isolates one cache scenario so a crash is reported as a test failure.
+static int
+run_abs_cache_scenario(void) {
+	pid_t pid = fork();
+	TEST_ASSERT(pid >= 0, "fork failed");
+	if (pid == 0) {
+		_exit(run_abs_cache_test() == TEST_SUCCESS ? EXIT_SUCCESS
+							   : EXIT_FAILURE);
+	}
+
+	int child_status = 0;
+	TEST_ASSERT(waitpid(pid, &child_status, 0) == pid, "waitpid failed");
+	TEST_ASSERT(
+		WIFEXITED(child_status) && WEXITSTATUS(child_status) == 0,
+		"cache scenario failed with status %d",
+		child_status
+	);
+	return TEST_SUCCESS;
+}
+
 int
 main(void) {
 	log_enable_name("debug");
@@ -249,8 +392,10 @@ main(void) {
 		ZEROED_ARENA_FILL,
 		EXPECTED_MULTI_BLOCK_COUNT
 	);
+	int abs_cache_result = run_abs_cache_scenario();
 	if (poisoned_single_block_result != TEST_SUCCESS ||
-	    zeroed_multi_block_result != TEST_SUCCESS) {
+	    zeroed_multi_block_result != TEST_SUCCESS ||
+	    abs_cache_result != TEST_SUCCESS) {
 		return EXIT_FAILURE;
 	}
 	return EXIT_SUCCESS;
