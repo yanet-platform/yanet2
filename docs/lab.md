@@ -27,7 +27,10 @@ produced by the Meson build.
 The first `up` can take several minutes because the functional harness may need
 to prepare its booted template, baseline snapshot, and pinned
 `yanet-bird2 2.15.1.1785924912.af804ec4-1` package. Later starts and `reset`
-reuse the snapshot. Set `YANET_QEMU_IMAGE` to use a non-default image. If an
+reuse the snapshot. Set `YANET_QEMU_IMAGE` to use a non-default image. Set
+`YANET_VM_CPUS` and `YANET_VM_MEMORY` (QEMU `-m` syntax, e.g. `16G`) to size
+the VM; a non-default size caches its own booted and baseline templates, so
+the first `up` with a new size pays the full preparation cost again. If an
 existing session is unhealthy, `up` returns its status instead of replacing its
 supervisor; inspect it with `status`, `report`, or `down`.
 
