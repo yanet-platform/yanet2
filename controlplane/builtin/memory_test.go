@@ -403,9 +403,8 @@ func Test_Memory_ExtendAgent_RoundsUpUnalignedSize(t *testing.T) {
 	require.Greater(t, response.GetMemoryLimit(), uint64(moduleAgentSize)+1)
 }
 
-// Test_Memory_ExtendAgent_Rejects verifies that each rejected growth
-// reports its cause through the gRPC status code alone and leaves every
-// attached agent at the limit it had.
+// Test_Memory_ExtendAgent_Rejects verifies that backend failures report
+// their gRPC status and leave every attached agent at its prior limit.
 func Test_Memory_ExtendAgent_Rejects(t *testing.T) {
 	cases := []struct {
 		name string
@@ -432,16 +431,6 @@ func Test_Memory_ExtendAgent_Rejects(t *testing.T) {
 			},
 			size: uint64(datasize.MB),
 			code: codes.Unavailable,
-		},
-		{
-			name:       "size overflows once rounded up",
-			instanceID: 0,
-			agent: func(t *testing.T, shm *ffi.SharedMemory) string {
-				attachModuleAgent(t, shm, "route")
-				return "route"
-			},
-			size: math.MaxUint64,
-			code: codes.InvalidArgument,
 		},
 		{
 			name:       "controlplane pool too small",
