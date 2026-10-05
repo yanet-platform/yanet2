@@ -249,16 +249,13 @@ route_handle_packets(
 
 		struct route *route = ADDR_OF(&fib->routes) + route_index;
 
-		// An index past the module's device table resolves nothing,
-		// the way a table built against a longer one would.
-		uint16_t device_id = (uint16_t)-1;
-		if (route->device_id < module_ectx->mc_index_size) {
-			device_id = module_ectx_encode_device(
+		// An index past the module's device table, or a device absent
+		// from this generation, resolves nothing.
+		struct module_device_target *device_target =
+			module_ectx_device_target(
 				module_ectx, route->device_id
 			);
-		}
-
-		if (device_id == (uint16_t)-1) {
+		if (device_target == NULL) {
 			route_count_packet(
 				counter_storage,
 				counters->drop_device_unresolved,
@@ -269,7 +266,7 @@ route_handle_packets(
 		}
 
 		route_set_packet_destination(packet, route);
-		packet->tx_device_id = device_id;
+		packet->tx_device_id = device_target->device_id;
 		route_count_packet(
 			counter_storage, counters->forwarded, packet
 		);
@@ -278,7 +275,12 @@ route_handle_packets(
 				routes_storage, route->counter_id, packet
 			);
 		}
-		module_ectx_route_output(module_ectx, packet_front, packet);
+		module_ectx_route_output(
+			module_ectx,
+			packet_front,
+			device_target->abs_output_entry,
+			packet
+		);
 	}
 }
 

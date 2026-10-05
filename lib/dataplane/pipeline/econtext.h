@@ -22,6 +22,26 @@ struct cp_config_gen;
 struct cp_config_counter_storage_registry;
 struct dp_config;
 
+struct device_entry_ectx;
+
+// One routing target of a module device, joining the generation-global
+// device id with the target device's entries so the packet hot path
+// routes with a single table load.
+//
+// A device absent from the generation keeps the invalid id and null
+// entries; a present device always carries both entries, because its
+// context is created as an input/output pair. The entry fields follow
+// the offset/absolute pairing of the context structs: linking fills the
+// offset twins, the publishing process derives the absolute ones, and
+// the packet hot path loads only those.
+struct module_device_target {
+	uint16_t device_id;
+	struct device_entry_ectx *input_entry;
+	struct device_entry_ectx *output_entry;
+	struct device_entry_ectx *abs_input_entry;
+	struct device_entry_ectx *abs_output_entry;
+};
+
 struct module_ectx {
 	module_handler handler;
 	struct cp_module *cp_module;
@@ -88,25 +108,27 @@ struct module_ectx {
 	struct config_gen_ectx *abs_config_gen_ectx;
 	uint16_t packet_recirc_limit;
 
-	uint64_t mc_index_size;
-	// Offset pointer to the module-to-config device index table,
-	// owned by the control plane.
-	uint64_t *mc_index;
-	// The same table, as an absolute address for the packet hot path.
-	//
-	// The publishing process copies it from the relative field before
-	// the context is released to workers; it is zero until then.
-	uint64_t *abs_mc_index;
+	// The module device id of the device whose entry this context
+	// executes under, resolved when the context is linked. Packets
+	// scheduled onto the entry name this device, so the module's
+	// per-device classification reads the id here instead of
+	// translating each packet's device; a packet a module injected
+	// into its own front with a foreign device (an fwstate sync copy,
+	// for one) classifies by this device too. Zero when the device
+	// names no device of the module — the classifiers' fallback id.
+	uint32_t module_device_id;
 
-	uint64_t cm_index_size;
-	// Offset pointer to the config-to-module device index table,
-	// owned by the control plane.
-	uint64_t *cm_index;
+	uint64_t device_target_count;
+	// Offset pointer to the module's per-device routing targets,
+	// parallel to the module's device list, owned by the control
+	// plane.
+	struct module_device_target *device_targets;
 	// The same table, as an absolute address for the packet hot path.
 	//
-	// The publishing process copies it from the relative field before
-	// the context is released to workers; it is zero until then.
-	uint64_t *abs_cm_index;
+	// The publishing process copies it from the relative field above
+	// before the context is released to workers; it is zero until
+	// then.
+	struct module_device_target *abs_device_targets;
 
 	// One entry per object this module links to. Each entry owns a counter
 	// storage spawned from the linked object's link counter registry and
@@ -171,9 +193,19 @@ module_ectx_counter_storage(struct module_ectx *module_ectx, uint64_t index) {
 	return module_ectx->abs_runtime_counter_storages_base[index];
 }
 
-static inline uint64_t
-module_ectx_encode_device(struct module_ectx *module_ectx, uint64_t index) {
-	return module_ectx->abs_mc_index[index];
+// Return the routing target of a module device, or NULL when the index
+// is out of range or the device is absent from this generation.
+static inline struct module_device_target *
+module_ectx_device_target(struct module_ectx *module_ectx, uint64_t index) {
+	if (index >= module_ectx->device_target_count) {
+		return NULL;
+	}
+	struct module_device_target *target =
+		module_ectx->abs_device_targets + index;
+	if (target->device_id == (uint16_t)-1) {
+		return NULL;
+	}
+	return target;
 }
 
 struct chain_ectx {

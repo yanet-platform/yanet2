@@ -50,21 +50,14 @@ module_ectx_free(
 		);
 	}
 
-	uint64_t *cm_index = ADDR_OF(&module_ectx->cm_index);
-	if (cm_index != NULL) {
+	struct module_device_target *device_targets =
+		ADDR_OF(&module_ectx->device_targets);
+	if (device_targets != NULL) {
 		memory_bfree(
 			memory_context,
-			cm_index,
-			sizeof(uint64_t) * module_ectx->cm_index_size
-		);
-	}
-
-	uint64_t *mc_index = ADDR_OF(&module_ectx->mc_index);
-	if (mc_index != NULL) {
-		memory_bfree(
-			memory_context,
-			mc_index,
-			sizeof(uint64_t) * module_ectx->mc_index_size
+			device_targets,
+			sizeof(struct module_device_target) *
+				module_ectx->device_target_count
 		);
 	}
 
@@ -1587,7 +1580,6 @@ link_module_ectx(
 	struct module_ectx *module_ectx,
 	yanet_error **err
 ) {
-	(void)device_ectx;
 	(void)device_entry_ectx;
 	(void)pipeline_ectx;
 	(void)function_ectx;
@@ -1600,65 +1592,73 @@ link_module_ectx(
 
 	struct cp_module *cp_module = ADDR_OF(&module_ectx->cp_module);
 
-	uint64_t *cm_index = (uint64_t *)memory_balloc(
-		memory_context, sizeof(uint64_t) * config_gen_ectx->device_count
-	);
-	if (config_gen_ectx->device_count && cm_index == NULL) {
-		yanet_error_add(
-			err,
-			"failed to allocate memory for cm_index in module "
-			"'%s:%s'",
-			cp_module->type,
-			cp_module->name
+	// Every device context of the generation exists by the time the
+	// link pass runs, so each module device resolves to the entries of
+	// its named device directly; a device absent from the generation
+	// keeps the invalid target. The owning device's id rides the
+	// context for the classifiers.
+	struct module_device_target *device_targets =
+		(struct module_device_target *)memory_balloc(
+			memory_context,
+			sizeof(struct module_device_target) *
+				cp_module->device_count
 		);
-		goto error;
-	}
-	for (uint64_t idx = 0; idx < config_gen_ectx->device_count; ++idx) {
-		cm_index[idx] = 0;
-	}
-	SET_OFFSET_OF(&module_ectx->cm_index, cm_index);
-	module_ectx->cm_index_size = config_gen_ectx->device_count;
-
-	uint64_t *mc_index = (uint64_t *)memory_balloc(
-		memory_context, sizeof(uint64_t) * cp_module->device_count
-	);
-	if (cp_module->device_count && mc_index == NULL) {
+	if (cp_module->device_count && device_targets == NULL) {
 		yanet_error_add(
 			err,
-			"failed to allocate memory for mc_index in module "
-			"'%s:%s'",
+			"failed to allocate memory for the device targets of "
+			"module '%s:%s'",
 			cp_module->type,
 			cp_module->name
 		);
 		goto error;
 	}
 	for (uint64_t idx = 0; idx < cp_module->device_count; ++idx) {
-		mc_index[idx] = -1;
+		device_targets[idx].device_id = (uint16_t)-1;
+		SET_OFFSET_OF(&device_targets[idx].input_entry, NULL);
+		SET_OFFSET_OF(&device_targets[idx].output_entry, NULL);
 	}
-	SET_OFFSET_OF(&module_ectx->mc_index, mc_index);
-	module_ectx->mc_index_size = cp_module->device_count;
+	SET_OFFSET_OF(&module_ectx->device_targets, device_targets);
+	module_ectx->device_target_count = cp_module->device_count;
 
 	struct cp_module_device *m_devices = ADDR_OF(&cp_module->devices);
+	struct cp_device *owning_cp_device = ADDR_OF(&device_ectx->cp_device);
+	struct device_ectx **device_ptrs =
+		ADDR_OF(&config_gen_ectx->device_ptrs);
 
 	for (uint64_t m_idx = 0; m_idx < cp_module->device_count; ++m_idx) {
+		if (!strncmp(
+			    owning_cp_device->name,
+			    m_devices[m_idx].name,
+			    CP_DEVICE_NAME_LEN
+		    )) {
+			module_ectx->module_device_id = m_idx;
+		}
+
 		for (uint64_t c_idx = 0; c_idx < config_gen_ectx->device_count;
 		     ++c_idx) {
-			struct device_ectx *device_ectx =
-				ADDR_OF(ADDR_OF(&config_gen_ectx->device_ptrs) +
-					c_idx);
-			if (device_ectx == NULL) {
+			struct device_ectx *target_device_ectx =
+				ADDR_OF(device_ptrs + c_idx);
+			if (target_device_ectx == NULL) {
 				continue;
 			}
 			struct cp_device *cp_device =
-				ADDR_OF(&device_ectx->cp_device);
-			if (!strncmp(
-				    m_devices[m_idx].name,
+				ADDR_OF(&target_device_ectx->cp_device);
+			if (strncmp(m_devices[m_idx].name,
 				    cp_device->name,
-				    CP_DEVICE_NAME_LEN
-			    )) {
-				mc_index[m_idx] = c_idx;
-				cm_index[c_idx] = m_idx;
+				    CP_DEVICE_NAME_LEN)) {
+				continue;
 			}
+
+			device_targets[m_idx].device_id = c_idx;
+			SET_OFFSET_OF(
+				&device_targets[m_idx].input_entry,
+				ADDR_OF(&target_device_ectx->input_pipelines)
+			);
+			SET_OFFSET_OF(
+				&device_targets[m_idx].output_entry,
+				ADDR_OF(&target_device_ectx->output_pipelines)
+			);
 		}
 	}
 

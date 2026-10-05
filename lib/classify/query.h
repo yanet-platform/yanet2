@@ -38,6 +38,28 @@ classify_joint_lookup(
 }
 
 /*
+ * Joins one constant class of a classifier field with the classes of
+ * another through one value table.
+ *
+ * Some attributes resolve once for a whole execution context — the
+ * device attribute of a module, for one — so one side of the join is a
+ * single class for the entire batch.
+ */
+static inline void
+classify_joint_lookup_const(
+	const struct value_table *joint,
+	uint32_t left_class,
+	const uint32_t *right_classes,
+	uint32_t *classes,
+	uint32_t count
+) {
+	for (uint32_t idx = 0; idx < count; ++idx) {
+		classes[idx] =
+			value_table_get(joint, left_class, right_classes[idx]);
+	}
+}
+
+/*
  * Joins the classes of two classifier fields and resolves the joint
  * classes into rule indices.
  *

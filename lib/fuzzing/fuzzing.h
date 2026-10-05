@@ -9,7 +9,6 @@
 #include <rte_mbuf.h>
 #include <rte_mempool.h>
 
-#include "common/lpm.h"
 #include "common/memory.h"
 #include "lib/controlplane/config/econtext.h"
 #include "lib/dataplane/module/module.h"
@@ -39,11 +38,6 @@ struct fuzzing_params {
 
 	// Module execution context - can be customized per module
 	struct module_ectx module_ectx;
-
-	// Stubs for route module (to avoid -Werror=address warnings)
-	uint64_t mc_index_stub; /**< Stub mc_index for route module */
-	struct config_gen_ectx config_gen_ectx_stub; /**< Stub config_gen_ectx
-							for route module */
 };
 
 /**
@@ -91,17 +85,11 @@ fuzzing_params_init(
 	params->worker = NULL;
 
 	// Initialize module_ectx to zero
+	//
+	// The zeroed context keeps the routing modules safe: every device
+	// target resolves to nothing, so the routed packets are dropped.
 	memset(&params->module_ectx, 0, sizeof(params->module_ectx));
 	params->module_ectx.packet_recirc_limit = PACKET_RECIRC_LIMIT_DEFAULT;
-
-	// Initialize stubs for route module
-	// Route module uses module_ectx_encode_device which accesses mc_index
-	// We provide a stub that returns LPM_VALUE_INVALID to drop packets
-	params->mc_index_stub = LPM_VALUE_INVALID;
-
-	// Route module uses config_gen_ectx_get_device to get device context
-	// We provide a stub with device_count=0 so all packets are dropped
-	params->config_gen_ectx_stub.device_count = 0;
 
 	LOG(INFO, "Fuzzing parameters initialized for: %s", name);
 	return 0;

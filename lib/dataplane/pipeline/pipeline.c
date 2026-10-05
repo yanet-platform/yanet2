@@ -117,8 +117,19 @@ module_ectx_resolve_absolutes(struct module_ectx *module_ectx) {
 		cp_module->pending_output_counter_id, counter_storage
 	);
 
-	module_ectx->abs_mc_index = ADDR_OF(&module_ectx->mc_index);
-	module_ectx->abs_cm_index = ADDR_OF(&module_ectx->cm_index);
+	struct module_device_target *device_targets =
+		ADDR_OF(&module_ectx->device_targets);
+	module_ectx->abs_device_targets = device_targets;
+	if (device_targets != NULL) {
+		for (uint64_t idx = 0; idx < module_ectx->device_target_count;
+		     ++idx) {
+			device_targets[idx].abs_input_entry =
+				ADDR_OF(&device_targets[idx].input_entry);
+			device_targets[idx].abs_output_entry =
+				ADDR_OF(&device_targets[idx].output_entry);
+		}
+	}
+
 	module_ectx->abs_counter_storage =
 		ADDR_OF(&module_ectx->counter_storage);
 	module_ectx->abs_config_gen_ectx =
