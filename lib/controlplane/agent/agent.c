@@ -981,8 +981,9 @@ struct cp_function_list_info *
 yanet_get_cp_function_list_info(struct dp_config *dp_config) {
 	struct cp_config *cp_config = ADDR_OF(&dp_config->cp_config);
 	cp_config_lock(cp_config);
+	struct cp_config_gen *config_gen = cp_config_gen_acquire(cp_config);
+	cp_config_unlock(cp_config);
 
-	struct cp_config_gen *config_gen = ADDR_OF(&cp_config->cp_config_gen);
 	struct cp_function_registry *function_registry =
 		&config_gen->function_registry;
 
@@ -993,7 +994,7 @@ yanet_get_cp_function_list_info(struct dp_config *dp_config) {
 				function_registry->registry.capacity
 		);
 	if (function_list_info == NULL) {
-		goto unlock;
+		goto release;
 	}
 
 	function_list_info->function_count = 0;
@@ -1069,15 +1070,15 @@ yanet_get_cp_function_list_info(struct dp_config *dp_config) {
 		function_list_info->function_count += 1;
 	}
 
-	cp_config_unlock(cp_config);
-
-	return function_list_info;
+	goto release;
 
 error_free:
 	cp_function_list_info_free(function_list_info);
 	function_list_info = NULL;
 
-unlock:
+release:
+	cp_config_lock(cp_config);
+	cp_config_gen_release(cp_config, config_gen);
 	cp_config_unlock(cp_config);
 
 	return function_list_info;
@@ -1130,8 +1131,9 @@ struct cp_pipeline_list_info *
 yanet_get_cp_pipeline_list_info(struct dp_config *dp_config) {
 	struct cp_config *cp_config = ADDR_OF(&dp_config->cp_config);
 	cp_config_lock(cp_config);
+	struct cp_config_gen *config_gen = cp_config_gen_acquire(cp_config);
+	cp_config_unlock(cp_config);
 
-	struct cp_config_gen *config_gen = ADDR_OF(&cp_config->cp_config_gen);
 	struct registry *pipeline_registry =
 		&config_gen->pipeline_registry.registry;
 
@@ -1142,7 +1144,7 @@ yanet_get_cp_pipeline_list_info(struct dp_config *dp_config) {
 				pipeline_registry->capacity
 		);
 	if (pipeline_list_info == NULL) {
-		goto unlock;
+		goto release;
 	}
 
 	memset(pipeline_list_info,
@@ -1166,7 +1168,7 @@ yanet_get_cp_pipeline_list_info(struct dp_config *dp_config) {
 		if (pipeline_info == NULL) {
 			cp_pipeline_list_info_free(pipeline_list_info);
 			pipeline_list_info = NULL;
-			goto unlock;
+			goto release;
 		}
 
 		strtcpy(pipeline_info->name,
@@ -1182,7 +1184,9 @@ yanet_get_cp_pipeline_list_info(struct dp_config *dp_config) {
 			pipeline_info;
 	}
 
-unlock:
+release:
+	cp_config_lock(cp_config);
+	cp_config_gen_release(cp_config, config_gen);
 	cp_config_unlock(cp_config);
 
 	return pipeline_list_info;
