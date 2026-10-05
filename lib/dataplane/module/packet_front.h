@@ -10,17 +10,17 @@
  * push (packet_front_input) sets the input counters directly — the only
  * switch is the inter-module handoff turning module N's output into
  * module N+1's input.
+ *
+ * The counters are the tallies the stage boundaries around a handler
+ * read: rx/tx/drop per module inside a chain, and the entry tallies
+ * around a device handler. Everywhere else the pipeline moves bare
+ * packet lists and credits the per-stage counters directly, so a front
+ * lives only where a handler runs.
  */
 struct packet_front {
 	struct packet_list input;
 	struct packet_list output;
 	struct packet_list drop;
-
-	uint64_t pending_input_count;
-	uint64_t pending_input_bytes;
-
-	uint64_t pending_output_count;
-	uint64_t pending_output_bytes;
 
 	uint64_t input_count;
 	uint64_t input_bytes;
@@ -38,61 +38,12 @@ packet_front_init(struct packet_front *packet_front) {
 	packet_list_init(&packet_front->output);
 	packet_list_init(&packet_front->drop);
 
-	packet_front->pending_input_count = 0;
-	packet_front->pending_input_bytes = 0;
-	packet_front->pending_output_count = 0;
-	packet_front->pending_output_bytes = 0;
 	packet_front->input_count = 0;
 	packet_front->input_bytes = 0;
 	packet_front->output_count = 0;
 	packet_front->output_bytes = 0;
 	packet_front->drop_count = 0;
 	packet_front->drop_bytes = 0;
-}
-
-// Resets a fully-drained front to a clean reusable state.
-//
-// Only valid on a front whose input and output lists have already been
-// drained to empty by a completed worker round. Resets the spent drop
-// list (its mbufs were already freed by the caller, so only the head needs
-// resetting) and the stale pending/drop accumulator counters, so the front
-// can be handed to the next round without a full packet_front_init.
-static inline void
-packet_front_recycle(struct packet_front *packet_front) {
-	packet_list_init(&packet_front->drop);
-
-	packet_front->drop_count = 0;
-	packet_front->drop_bytes = 0;
-	packet_front->pending_input_count = 0;
-	packet_front->pending_input_bytes = 0;
-	packet_front->pending_output_count = 0;
-	packet_front->pending_output_bytes = 0;
-}
-
-// Move the whole output and drop lists from src into dst, transferring the
-// counters, and leave src empty.
-//
-// Pending packets are routed straight to their target device's schedule, so
-// src never holds pending lists; only the pending tallies are folded into
-// dst so per-level accounting still attributes them to the right entry.
-// Zeroing src lets a scratch front be reused across rounds without a
-// separate per-round reset: merge moves every packet and counter out, so
-// nothing stale survives into the next round.
-static inline void
-packet_front_merge(struct packet_front *dst, struct packet_front *src) {
-	packet_list_concat(&dst->output, &src->output);
-	packet_list_concat(&dst->drop, &src->drop);
-
-	dst->pending_input_count += src->pending_input_count;
-	dst->pending_input_bytes += src->pending_input_bytes;
-	dst->pending_output_count += src->pending_output_count;
-	dst->pending_output_bytes += src->pending_output_bytes;
-	dst->output_count += src->output_count;
-	dst->output_bytes += src->output_bytes;
-	dst->drop_count += src->drop_count;
-	dst->drop_bytes += src->drop_bytes;
-
-	packet_front_init(src);
 }
 
 static inline void
@@ -137,6 +88,25 @@ packet_front_collect_input(
 	return count;
 }
 
+// Sum the packets and first-segment bytes of a bare list in one walk.
+//
+// The only producer handing a bare list to a front is the device entry
+// detach: the inbox carries no counters, so the active front tallies
+// its input here. The walk touches the packet heads the device handler
+// is about to read anyway.
+static inline void
+packet_list_tally(struct packet_list *list, uint64_t *count, uint64_t *bytes) {
+	uint64_t total_count = 0;
+	uint64_t total_bytes = 0;
+	for (struct packet *packet = packet_list_first(list); packet != NULL;
+	     packet = packet->next) {
+		total_count += 1;
+		total_bytes += packet->data_len;
+	}
+	*count = total_count;
+	*bytes = total_bytes;
+}
+
 // Inter-module handoff: move output into input for the next module. Stage
 // entry is by packet_front_input, not a switch.
 static inline void
@@ -157,36 +127,6 @@ packet_front_pass(struct packet_front *packet_front) {
 	packet_front->output_bytes += packet_front->input_bytes;
 	packet_front->input_count = 0;
 	packet_front->input_bytes = 0;
-}
-
-// Move the whole output list of src into dst, transferring the output
-// counters.
-//
-// Used by the single-pipeline fast path that schedules a front on a fresh
-// packet_front for a stage that reads output.
-static inline void
-packet_front_take_output(struct packet_front *dst, struct packet_front *src) {
-	packet_list_concat(&dst->output, &src->output);
-
-	dst->output_count = src->output_count;
-	dst->output_bytes = src->output_bytes;
-	src->output_count = 0;
-	src->output_bytes = 0;
-}
-
-// Move src's output list into dst's input, copying src's output counters to
-// dst's input counters.
-//
-// Used by the single-chain fast path that schedules a front on a fresh
-// packet_front so module 0 reads input directly without a prior switch.
-static inline void
-packet_front_take_input(struct packet_front *dst, struct packet_front *src) {
-	packet_list_concat(&dst->input, &src->output);
-
-	dst->input_count = src->output_count;
-	dst->input_bytes = src->output_bytes;
-	src->output_count = 0;
-	src->output_bytes = 0;
 }
 
 // Move the whole output list into the drop list, transferring the counters.
@@ -230,24 +170,4 @@ packet_front_drop_count(struct packet_front *packet_front) {
 static inline uint64_t
 packet_front_drop_bytes(struct packet_front *packet_front) {
 	return packet_front->drop_bytes;
-}
-
-static inline uint64_t
-packet_front_pending_input_count(struct packet_front *packet_front) {
-	return packet_front->pending_input_count;
-}
-
-static inline uint64_t
-packet_front_pending_input_bytes(struct packet_front *packet_front) {
-	return packet_front->pending_input_bytes;
-}
-
-static inline uint64_t
-packet_front_pending_output_count(struct packet_front *packet_front) {
-	return packet_front->pending_output_count;
-}
-
-static inline uint64_t
-packet_front_pending_output_bytes(struct packet_front *packet_front) {
-	return packet_front->pending_output_bytes;
 }
