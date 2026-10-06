@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"time"
 
 	"go.uber.org/zap"
@@ -171,7 +172,13 @@ func NewDirector(cfg *Config, options ...DirectorOption) (*Director, error) {
 
 	gw, err := gateway.NewGateway(cfg.Gateway, gatewayOptions...)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create gateway: %w", err)
+		err = fmt.Errorf("failed to create gateway: %w", err)
+		for _, service := range bundle.Services() {
+			if closer, ok := service.(io.Closer); ok {
+				err = errors.Join(err, closer.Close())
+			}
+		}
+		return nil, err
 	}
 
 	releaseShm = false
