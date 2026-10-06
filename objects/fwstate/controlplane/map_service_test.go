@@ -162,11 +162,12 @@ func TestMapStatsToProto(t *testing.T) {
 	require.Equal(t, uint64(4096), pb.GetMemoryUsed())
 }
 
-// Test_StashSizeLimits_MatchC verifies that the request limits equal the C
-// bounds they mirror.
-func Test_StashSizeLimits_MatchC(t *testing.T) {
+// Test_FWStateMapSizingLimits_MatchC verifies that request sizing limits equal
+// the C bounds they mirror.
+func Test_FWStateMapSizingLimits_MatchC(t *testing.T) {
 	require.Equal(t, cfwstate.MinStashSize, uint64(fwstatemappb.MinStashSize))
 	require.Equal(t, cfwstate.MaxStashSize, uint64(fwstatemappb.MaxStashSize))
+	require.Equal(t, cfwstate.MaxIndexSize, fwstatemappb.MaxIndexSize)
 }
 
 // Test_FWStateMapService_CreateMap_AcceptsStashSizeBounds verifies that the

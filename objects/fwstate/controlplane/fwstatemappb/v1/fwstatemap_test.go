@@ -98,8 +98,8 @@ func Test_ValidateMapNameField(t *testing.T) {
 	}
 }
 
-// Test_CreateMapRequest_Validate verifies that the map name, address-family
-// enum, stash size, and raw worker count are validated before stateful work.
+// Test_CreateMapRequest_Validate verifies that request-only map fields and
+// structural sizing limits are validated before stateful work.
 func Test_CreateMapRequest_Validate(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -159,6 +159,15 @@ func Test_CreateMapRequest_Validate(t *testing.T) {
 				WorkerCount: 65536,
 			},
 			message: "worker_count 65536 exceeds maximum 65535",
+		},
+		{
+			name: "index size above the structural maximum",
+			request: &fwstatemappb.CreateMapRequest{
+				Name:      "map",
+				Kind:      fwstatemappb.Kind_V4,
+				IndexSize: 1073741825,
+			},
+			message: "index_size 1073741825 must be in range 0..1073741824",
 		},
 		{
 			name:    "valid IPv4 request",
@@ -253,8 +262,8 @@ func Test_GetMapStatsRequest_Validate(t *testing.T) {
 	}
 }
 
-// Test_InsertLayerRequest_Validate verifies that layer insertion validates the
-// name and raw worker count before stateful worker-count resolution.
+// Test_InsertLayerRequest_Validate verifies that layer insertion validates
+// the name and structural sizing limits before stateful work.
 func Test_InsertLayerRequest_Validate(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -279,6 +288,14 @@ func Test_InsertLayerRequest_Validate(t *testing.T) {
 				WorkerCount: 1 << 20,
 			},
 			message: "worker_count 1048576 exceeds maximum 65535",
+		},
+		{
+			name: "index size above the structural maximum",
+			request: &fwstatemappb.InsertLayerRequest{
+				Name:      "map",
+				IndexSize: 1073741825,
+			},
+			message: "index_size 1073741825 must be in range 0..1073741824",
 		},
 		{name: "valid name", request: &fwstatemappb.InsertLayerRequest{Name: "map"}},
 		{name: "nil request", request: nil, message: "name is required"},
