@@ -213,6 +213,11 @@ manual save; the framework handles this for its standard snapshot helpers.
 Environment variables:
 
 - `YANET_QEMU_IMAGE` overrides the base image path.
+- `YANET_VM_CPUS` and `YANET_VM_MEMORY` (megabytes, optionally with an `M`
+  or `G` suffix, e.g. `2048` or `16G`) override the VM's vCPUs and RAM; unset
+  keeps today's 2 vCPUs and 1G. A non-default size names its own cached booted
+  and baseline templates, since a saved snapshot only loads into the machine
+  shape it was taken on.
 - `YANET_VM_POOL_SIZE` sets the number of pool slots.
 - `YANET_VM_READY_TIMEOUT` overrides readiness timeout with a Go duration such
   as `5m`.

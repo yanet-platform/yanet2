@@ -2,14 +2,20 @@ package framework
 
 import (
 	"crypto/sha256"
+	"encoding/hex"
 	"errors"
+	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"sort"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
 )
 
 func TestBaselineTemplatePath(t *testing.T) {
@@ -51,6 +57,52 @@ func TestBootedTemplatePath(t *testing.T) {
 	if got := BootedImagePath("/tmp/yanet-test.qcow2"); got != want {
 		t.Errorf("BootedImagePath() = %q, want %q", got, want)
 	}
+}
+
+// Test_BaselineTemplatePathFor_SeparatesVMSizes verifies that a non-default
+// size names its own baseline file.
+//
+// The suffix sits outside the fingerprint segment that pruning wildcards,
+// while the default size keeps today's exact name.
+func Test_BaselineTemplatePathFor_SeparatesVMSizes(t *testing.T) {
+	custom := VMSize{CPUs: 4, Memory: "2G"}
+
+	require.Equal(t, "/tmp/yanet-test-baseline-1111111111111111-v8-c4-m2G.qcow2",
+		baselineTemplatePathFor("/tmp/yanet-test.qcow2", baselineSnapshotName+"-1111111111111111", custom))
+	require.Equal(t, "/tmp/yanet-test-baseline-1111111111111111-v8.qcow2",
+		baselineTemplatePathFor("/tmp/yanet-test.qcow2", baselineSnapshotName+"-1111111111111111", DefaultVMSize()))
+}
+
+// Test_PruneSupersededBaselines_KeepsOtherVMSizes verifies that pruning
+// one VM size's stale baselines never removes another size's cached one.
+//
+// A resized "up" must not evict the default-size baseline, and a default
+// "up" must not evict one built for a resized VM, since each loads only
+// into a machine of the vCPU and RAM shape it was taken on.
+func Test_PruneSupersededBaselines_KeepsOtherVMSizes(t *testing.T) {
+	dir := t.TempDir()
+	qemuImage := filepath.Join(dir, "yanet-test.qcow2")
+	log := zap.NewNop().Sugar()
+	customSize := VMSize{CPUs: 4, Memory: "2G"}
+
+	staleDefault := baselineTemplatePathFor(qemuImage, baselineSnapshotName+"-1111111111111111", DefaultVMSize())
+	staleCustom := baselineTemplatePathFor(qemuImage, baselineSnapshotName+"-2222222222222222", customSize)
+	writeFingerprintTestFile(t, staleDefault)
+	writeFingerprintTestFile(t, staleCustom)
+
+	freshDefault := baselineTemplatePathFor(qemuImage, baselineSnapshotName+"-3333333333333333", DefaultVMSize())
+	writeFingerprintTestFile(t, freshDefault)
+	pruneSupersededBaselines(freshDefault, "3333333333333333", DefaultVMSize(), log)
+
+	require.NoFileExists(t, staleDefault)
+	require.FileExists(t, staleCustom)
+
+	freshCustom := baselineTemplatePathFor(qemuImage, baselineSnapshotName+"-4444444444444444", customSize)
+	writeFingerprintTestFile(t, freshCustom)
+	pruneSupersededBaselines(freshCustom, "4444444444444444", customSize, log)
+
+	require.NoFileExists(t, staleCustom)
+	require.FileExists(t, freshDefault)
 }
 
 // TestDefaultRouteConfig verifies that the baseline route0.yaml uses the
@@ -137,6 +189,100 @@ func Test_InvalidateFingerprint_MakesCachedBaselineInvalid(t *testing.T) {
 	require.NoError(t, invalidateFingerprint(baselineTemplate))
 	require.False(t, fingerprintMatches(baselineTemplate, "fingerprint"))
 	require.NoError(t, invalidateFingerprint(baselineTemplate))
+}
+
+// Test_BaselineFingerprint_IncludesVMSize verifies that a non-default VM
+// size changes the baseline fingerprint.
+//
+// The lab must never reuse a cached baseline snapshot taken on a machine of
+// a different shape; a caller that never set a VM size override must still
+// see the same fingerprint it saw before the override existed, checked
+// against a hash computed with no VM size input at all.
+func Test_BaselineFingerprint_IncludesVMSize(t *testing.T) {
+	root := t.TempDir()
+	image := filepath.Join(root, "image.qcow2")
+	for _, path := range []string{
+		image,
+		filepath.Join(root, "build", "dataplane", "yanet-dataplane"),
+		filepath.Join(root, "build", "controlplane", "yanet-controlplane"),
+		filepath.Join(root, "subprojects", "dpdk", "usertools", "dpdk-devbind.py"),
+	} {
+		writeFingerprintTestFile(t, path)
+	}
+	for _, name := range CLIBinaryNames {
+		writeFingerprintTestFile(t, filepath.Join(root, "target", "release", name))
+	}
+	fingerprint := func(size VMSize) string {
+		value, err := baselineFingerprint(root, image, "dp", "cp", "fwd", "route", nil, false, size)
+		require.NoError(t, err)
+		return value
+	}
+	legacyFingerprint, err := legacyBaselineFingerprint(root, image, "dp", "cp", "fwd", "route", nil, false)
+	require.NoError(t, err)
+
+	require.Equal(t, legacyFingerprint, fingerprint(DefaultVMSize()))
+	require.NotEqual(t, legacyFingerprint, fingerprint(VMSize{CPUs: 8, Memory: "16G"}))
+}
+
+// legacyBaselineFingerprint reproduces baselineFingerprint's hash with no
+// VM size input at all, exactly as it was before the size became
+// configurable.
+//
+// Test_BaselineFingerprint_IncludesVMSize pins the default size to this,
+// since a diverging hash would silently invalidate every cache key a
+// caller relied on before the override existed.
+func legacyBaselineFingerprint(projectRoot, qemuImage, dataplane, controlplane, forward, route string, extraFiles []string, skipCommonConfig bool) (string, error) {
+	hash := sha256.New()
+	for _, value := range []string{"dataplane", dataplane, "controlplane", controlplane, "forward", forward, "route", route, "skipCommonConfig", strconv.FormatBool(skipCommonConfig)} {
+		_, _ = io.WriteString(hash, value)
+		_, _ = io.WriteString(hash, "\x00")
+	}
+
+	image, err := os.Stat(qemuImage)
+	if err != nil {
+		return "", err
+	}
+	imagePath, err := filepath.EvalSymlinks(qemuImage)
+	if err != nil {
+		return "", err
+	}
+	_, _ = io.WriteString(hash, imagePath)
+	_, _ = io.WriteString(hash, fmt.Sprintf("\x00%d\x00%d", image.Size(), image.ModTime().UnixNano()))
+
+	paths := []string{
+		filepath.Join(projectRoot, "build", "dataplane", "yanet-dataplane"),
+		filepath.Join(projectRoot, "build", "controlplane", "yanet-controlplane"),
+		filepath.Join(projectRoot, "subprojects", "dpdk", "usertools", "dpdk-devbind.py"),
+	}
+	for _, path := range extraFiles {
+		if !filepath.IsAbs(path) {
+			path = filepath.Join(projectRoot, path)
+		}
+		paths = append(paths, path)
+	}
+	for _, name := range CLIBinaryNames {
+		paths = append(paths, filepath.Join(projectRoot, "target", "release", name))
+	}
+	plugins, err := filepath.Glob(filepath.Join(projectRoot, "build", "modules", "*", "dataplane", "*_dp_plugin.so"))
+	if err != nil {
+		return "", err
+	}
+	paths = append(paths, plugins...)
+	sort.Strings(paths)
+	for _, path := range paths {
+		if err := statFingerprint(hash, path); err != nil {
+			return "", err
+		}
+	}
+	return hex.EncodeToString(hash.Sum(nil)), nil
+}
+
+// writeFingerprintTestFile creates a small file at path, including its
+// parent directories, as a stat-based fingerprint input.
+func writeFingerprintTestFile(t *testing.T, path string) {
+	t.Helper()
+	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
+	require.NoError(t, os.WriteFile(path, []byte("x"), 0o600))
 }
 
 func TestRunProfileHooks(t *testing.T) {

@@ -24,10 +24,22 @@ const (
 )
 
 // baselineTemplatePath returns the versioned overlay path for a baseline
-// snapshot. Bumping the version invalidates locally cached templates when
-// any captured guest state stops matching what this harness configures.
+// snapshot of a VM of the default size.
+//
+// Bumping the version invalidates locally cached templates when any
+// captured guest state stops matching what this harness configures.
 func baselineTemplatePath(qemuImage, baselineTag string) string {
-	return SnapshotImagePath(qemuImage, baselineTag+"-"+baselineTemplateVersion)
+	return baselineTemplatePathFor(qemuImage, baselineTag, DefaultVMSize())
+}
+
+// baselineTemplatePathFor returns the versioned overlay path for a
+// baseline snapshot of a VM of size.
+//
+// The size suffix sits outside the fingerprinted part of the name, so a
+// baseline built for a different vCPU and RAM shape never shares a prune
+// glob with this one.
+func baselineTemplatePathFor(qemuImage, baselineTag string, vmSize VMSize) string {
+	return SnapshotImagePath(qemuImage, baselineTag+"-"+baselineTemplateVersion+vmSize.machineSuffix())
 }
 
 // DataplaneOptions customizes the baseline dataplane configuration a Harness
@@ -400,12 +412,17 @@ func SetupHarness(config HarnessConfig) (_ *Harness, cleanup func(), err error) 
 		baselineTag = baselineSnapshotName
 	}
 
-	bootedTemplate := BootedImagePath(qemuImage)
-	fingerprint, err := baselineFingerprint(projectRoot, qemuImage, dataplane, controlplane, forward, route, config.FingerprintFiles, config.SkipCommonConfig)
+	vmSize, err := VMSizeFromEnv()
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to set up harness: %w", err)
+	}
+
+	bootedTemplate := BootedImagePathFor(qemuImage, vmSize)
+	fingerprint, err := baselineFingerprint(projectRoot, qemuImage, dataplane, controlplane, forward, route, config.FingerprintFiles, config.SkipCommonConfig, vmSize)
 	if err != nil {
 		return nil, nil, fmt.Errorf("fingerprint baseline: %w", err)
 	}
-	baselineTemplate := baselineTemplatePath(qemuImage, baselineTag+"-"+fingerprint[:16])
+	baselineTemplate := baselineTemplatePathFor(qemuImage, baselineTag+"-"+fingerprint[:16], vmSize)
 
 	baseline := &baselineSetup{
 		dataplane:        dataplane,
@@ -414,6 +431,7 @@ func SetupHarness(config HarnessConfig) (_ *Harness, cleanup func(), err error) 
 		route:            route,
 		poolName:         config.PoolName,
 		fingerprint:      fingerprint,
+		vmSize:           vmSize,
 		projectRoot:      projectRoot,
 		log:              logger,
 		prepare:          config.Prepare,
@@ -581,6 +599,7 @@ type baselineSetup struct {
 	route            string
 	poolName         string
 	fingerprint      string
+	vmSize           VMSize
 	log              *zap.SugaredLogger
 	prepare          func(*TestFramework) error
 	afterStart       func(*TestFramework) error
@@ -663,25 +682,38 @@ func (m *baselineSetup) ensureTemplate(qemuImage, bootedTemplate, baselineTempla
 
 	m.log.Infof("Baseline template cached at %s", baselineTemplate)
 
-	// Prune superseded fingerprinted templates with the same baseline tag
-	// to avoid unbounded overlay accumulation.
+	pruneSupersededBaselines(baselineTemplate, m.fingerprint, m.vmSize, m.log)
+	return nil
+}
+
+// pruneSupersededBaselines removes every cached baseline that shares
+// the new template's tag and VM size but not its fingerprint.
+//
+// A failed listing or removal is left for the next prune, since a stale
+// template is harmless beyond disk use. The size suffix sits outside the
+// wildcarded fingerprint segment, so this never matches a baseline built
+// for a different vCPU and RAM shape: a resized "up" must not evict the
+// default-size baseline, or a concurrent one of another size, between
+// this call and the pool copying it.
+func pruneSupersededBaselines(baselineTemplate, fingerprint string, vmSize VMSize, log *zap.SugaredLogger) {
+	sizeSuffix := vmSize.machineSuffix()
 	dir := filepath.Dir(baselineTemplate)
 	base := filepath.Base(baselineTemplate)
-	prefix := strings.TrimSuffix(base, "-"+m.fingerprint[:16]+"-"+baselineTemplateVersion+".qcow2")
-	if prefix != base {
-		matches, err := filepath.Glob(filepath.Join(dir, prefix+"-*-"+baselineTemplateVersion+".qcow2"))
-		if err != nil {
-			return nil
-		}
-		for _, old := range matches {
-			if old != baselineTemplate {
-				_ = os.Remove(old)
-				_ = os.Remove(old + ".sha256")
-				m.log.Infof("Pruned stale baseline template %s", old)
-			}
+	prefix := strings.TrimSuffix(base, "-"+fingerprint[:16]+"-"+baselineTemplateVersion+sizeSuffix+".qcow2")
+	if prefix == base {
+		return
+	}
+	matches, err := filepath.Glob(filepath.Join(dir, prefix+"-*-"+baselineTemplateVersion+sizeSuffix+".qcow2"))
+	if err != nil {
+		return
+	}
+	for _, old := range matches {
+		if old != baselineTemplate {
+			_ = os.Remove(old)
+			_ = os.Remove(old + ".sha256")
+			log.Infof("Pruned stale baseline template %s", old)
 		}
 	}
-	return nil
 }
 
 func acquireBaselineLock(baselineTemplate string) (*os.File, error) {
@@ -696,11 +728,16 @@ func acquireBaselineLock(baselineTemplate string) (*os.File, error) {
 	return lock, nil
 }
 
-func baselineFingerprint(projectRoot, qemuImage, dataplane, controlplane, forward, route string, extraFiles []string, skipCommonConfig bool) (string, error) {
+func baselineFingerprint(projectRoot, qemuImage, dataplane, controlplane, forward, route string, extraFiles []string, skipCommonConfig bool, vmSize VMSize) (string, error) {
 	hash := sha256.New()
 	for _, value := range []string{"dataplane", dataplane, "controlplane", controlplane, "forward", forward, "route", route, "skipCommonConfig", strconv.FormatBool(skipCommonConfig)} {
 		_, _ = io.WriteString(hash, value)
 		_, _ = io.WriteString(hash, "\x00")
+	}
+	// The default size adds nothing, so default fingerprints stay as they
+	// were before the size became configurable.
+	if sizeFingerprint := vmSize.fingerprint(); sizeFingerprint != "" {
+		_, _ = io.WriteString(hash, "vmSize\x00"+sizeFingerprint+"\x00")
 	}
 
 	image, err := os.Stat(qemuImage)
