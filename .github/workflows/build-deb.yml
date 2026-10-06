@@ -129,6 +129,7 @@ jobs:
     needs: [set-matrix, test-deb-artifacts]
     env:
       PKG_VERSION: ${{ inputs.pkg_version }}
+      DEB_BUILD_PROFILES: ${{ matrix.unbtver == '22.04' && 'pkg.yanet2.nocp-lock' || '' }}
     strategy:
       fail-fast: false
       matrix: ${{ fromJson(needs.set-matrix.outputs.matrix) }}

@@ -1,0 +1,6 @@
+/.deps/
+/*.o
+/setup
+/yanet-cp-lock
+/selftest/*.o
+/bpftime

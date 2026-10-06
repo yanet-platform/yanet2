@@ -74,12 +74,16 @@ dch --newversion "$PKG_VERSION" --distribution unstable --force-bad-version "Aut
 apt-get update
 apt-get -o Debug::pkgProblemResolver=yes --no-install-recommends -y --allow-downgrades --allow-remove-essential --allow-change-held-packages build-dep . 2>&1 | tee build-deps.log
 
+if [[ $(dpkg --print-architecture) == amd64 && " ${DEB_BUILD_PROFILES:-} " != *" pkg.yanet2.nocp-lock "* ]]; then
+    ./scripts/bpftime/cp-lock/prepare.sh
+fi
+
 echo "Current PATH during build: $PATH" > build-path.log
 # Build binary-only, skipping the source package. Nothing downstream consumes
 # it, and every path takes only the resulting .deb and .ddeb files. Skipping
 # it also avoids xz-compressing the whole working tree, DPDK submodule included.
 # Preserve environment variables for cargo (order matters in dpkg-buildpackage)
-echo y | debuild --preserve-envvar=PATH -us -uc -b 2>&1 | tee build.log
+echo y | debuild --preserve-envvar=PATH --preserve-envvar=DEB_BUILD_PROFILES -us -uc -b 2>&1 | tee build.log
 
 mkdir -p outdeb
 dcmd cp ../*.changes outdeb/
