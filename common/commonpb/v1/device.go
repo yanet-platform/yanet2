@@ -17,6 +17,22 @@ const MaxDeviceNameLen = 80
 // terminating NUL.
 const MaxPipelineNameLen = 80
 
+// ValidateDeviceName checks that a device name is present and fits the C name
+// buffer.
+func ValidateDeviceName(field, name string) error {
+	if name == "" {
+		return fmt.Errorf("%s is required", field)
+	}
+	if strings.IndexByte(name, 0) != -1 {
+		return fmt.Errorf("%s must not contain NUL", field)
+	}
+	if len(name) >= MaxDeviceNameLen {
+		return fmt.Errorf("%s must be shorter than %d bytes", field, MaxDeviceNameLen)
+	}
+
+	return nil
+}
+
 // Validate checks the input and output weight sums independently.
 //
 // A nil device is an empty configuration. Zero weights disable entries. Each

@@ -6,6 +6,7 @@ import (
 
 	"go.uber.org/zap/zapcore"
 
+	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
 	"github.com/yanet-platform/yanet2/common/go/logging"
 	"github.com/yanet-platform/yanet2/common/go/operator"
 	"github.com/yanet-platform/yanet2/common/go/xcfg"
@@ -201,6 +202,10 @@ type StaticNeighbourConfig struct {
 	Device string `yaml:"device"`
 	// Priority overrides the table default priority when non-zero.
 	Priority uint32 `yaml:"priority"`
+}
+
+func (m *StaticNeighbourConfig) Validate() error {
+	return commonpb.ValidateDeviceName("device", m.Device)
 }
 
 // NetlinkMonitorConfig configures the kernel neighbour discovery via

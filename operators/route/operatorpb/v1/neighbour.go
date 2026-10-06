@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"net/netip"
-	"strings"
 	"time"
 
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
@@ -25,18 +24,7 @@ func (m *NeighbourEntry) Validate() error {
 		return errors.New("link_addr must be an EUI-48 address")
 	}
 
-	device := m.GetDevice()
-	if device == "" {
-		return errors.New("device is required")
-	}
-	if strings.IndexByte(device, 0) != -1 {
-		return errors.New("device must not contain NUL")
-	}
-	if len(device) >= commonpb.MaxDeviceNameLen {
-		return fmt.Errorf("device must be shorter than %d bytes", commonpb.MaxDeviceNameLen)
-	}
-
-	return nil
+	return commonpb.ValidateDeviceName("device", m.GetDevice())
 }
 
 func (m *CreateNeighbourTableRequest) Validate() error {
