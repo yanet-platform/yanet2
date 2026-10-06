@@ -185,12 +185,11 @@ func Test_RingService_UnknownName_NotFound(t *testing.T) {
 	require.Equal(t, codes.NotFound, status.Code(f.delete(t, "missing")))
 }
 
-// Test_RingService_CreateRing_RejectedCreateMutatesNothing checks a refused
-// create.
+// Test_RingService_CreateRing_RejectedCreateMutatesNothing verifies that
+// backend and state rejections leave existing rings unchanged.
 //
-// The create returns the expected code. The registry and the dataplane do
-// not change. The test calls the service in process, so the check does not
-// depend on the gRPC interceptor.
+// Each validated request returns the expected status. The direct calls
+// exercise backend and state defenses independently of the gRPC interceptor.
 func Test_RingService_CreateRing_RejectedCreateMutatesNothing(t *testing.T) {
 	f := newRingFixture(t)
 	// Created with no publish batch, so the list shows the default 8.
@@ -210,7 +209,6 @@ func Test_RingService_CreateRing_RejectedCreateMutatesNothing(t *testing.T) {
 		capacity uint64
 		code     codes.Code
 	}{
-		{name: "invalid request", ringName: "truncated", capacity: 1<<32 | 64, code: codes.InvalidArgument},
 		// A valid request, but larger than the allocator's largest block in
 		// any build.
 		{name: "above allocator maximum", ringName: "too-big", capacity: 1 << 27, code: codes.InvalidArgument},

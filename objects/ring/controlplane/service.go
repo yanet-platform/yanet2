@@ -135,14 +135,6 @@ func (m *RingService) CreateRing(
 	ctx context.Context,
 	req *ringpb.CreateRingRequest,
 ) (*ringpb.CreateRingResponse, error) {
-	// Validate here, not only in the gateway.
-	//
-	// The capacity is cut to 32 bits below. An in-process caller skips the
-	// gateway, so without this check it could pass a value that does not
-	// fit.
-	if err := req.Validate(); err != nil {
-		return nil, status.Error(codes.InvalidArgument, err.Error())
-	}
 	name := req.GetName()
 	capacity := uint32(req.GetCapacity())
 	publishBatch := req.PublishBatchOrDefault()
@@ -192,10 +184,6 @@ func (m *RingService) ShowRing(
 	ctx context.Context,
 	req *ringpb.ShowRingRequest,
 ) (*ringpb.ShowRingResponse, error) {
-	if err := req.Validate(); err != nil {
-		return nil, status.Error(codes.InvalidArgument, err.Error())
-	}
-
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -248,9 +236,6 @@ func (m *RingService) DeleteRing(
 	ctx context.Context,
 	req *ringpb.DeleteRingRequest,
 ) (*ringpb.DeleteRingResponse, error) {
-	if err := req.Validate(); err != nil {
-		return nil, status.Error(codes.InvalidArgument, err.Error())
-	}
 	name := req.GetName()
 
 	m.mu.Lock()

@@ -65,6 +65,12 @@ func Test_CreateRingRequest_Validate(t *testing.T) {
 			capacity: 1 << 32,
 			message:  "capacity 4294967296 exceeds the maximum representable value 4294967295",
 		},
+		{
+			name:     "invalid request",
+			ringName: "truncated",
+			capacity: 1<<32 | 64,
+			message:  "capacity 4294967360 exceeds the maximum representable value 4294967295",
+		},
 		{name: "exactly one record frame", capacity: 8},
 		{name: "large power of two", capacity: 1 << 30},
 		{name: "unset publish batch", capacity: 64, batch: 0},
