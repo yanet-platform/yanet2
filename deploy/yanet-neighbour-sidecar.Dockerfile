@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 
-FROM golang:1.24.13-alpine AS build
+FROM golang:1.27.1-alpine AS build
 
 RUN apk add --no-cache make protobuf protobuf-dev
 RUN go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.36.11 \

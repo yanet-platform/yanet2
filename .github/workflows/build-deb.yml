@@ -184,7 +184,7 @@ jobs:
           sudo apt-get install -y --no-install-recommends devscripts
       - uses: actions/setup-go@v6
         with:
-          go-version: "1.24.x"
+          go-version: "1.27.x"
           cache: false
           check-latest: true
       - name: Restore Go module cache
