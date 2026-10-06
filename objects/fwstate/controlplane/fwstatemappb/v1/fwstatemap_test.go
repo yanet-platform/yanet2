@@ -99,8 +99,7 @@ func Test_ValidateMapNameField(t *testing.T) {
 }
 
 // Test_CreateMapRequest_Validate verifies that the map name, address-family
-// enum and stash size are validated before a create request can reach
-// stateful work.
+// enum, stash size, and raw worker count are validated before stateful work.
 func Test_CreateMapRequest_Validate(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -151,6 +150,15 @@ func Test_CreateMapRequest_Validate(t *testing.T) {
 			name:    "stash size above the maximum",
 			request: &fwstatemappb.CreateMapRequest{Name: "map", StashSize: 1<<20 + 1},
 			message: "stash_size 1048577 exceeds maximum allowed value 1048576",
+		},
+		{
+			name: "worker count above the maximum",
+			request: &fwstatemappb.CreateMapRequest{
+				Name:        "map",
+				Kind:        fwstatemappb.Kind_V4,
+				WorkerCount: 65536,
+			},
+			message: "worker_count 65536 exceeds maximum 65535",
 		},
 		{
 			name:    "valid IPv4 request",
@@ -245,8 +253,8 @@ func Test_GetMapStatsRequest_Validate(t *testing.T) {
 	}
 }
 
-// Test_InsertLayerRequest_Validate verifies that layer insertion applies the
-// complete map-name rule before worker-count resolution.
+// Test_InsertLayerRequest_Validate verifies that layer insertion validates the
+// name and raw worker count before stateful worker-count resolution.
 func Test_InsertLayerRequest_Validate(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -263,6 +271,14 @@ func Test_InsertLayerRequest_Validate(t *testing.T) {
 			name:    "name at byte limit",
 			request: &fwstatemappb.InsertLayerRequest{Name: strings.Repeat("a", 80)},
 			message: "name must be shorter than 80 bytes",
+		},
+		{
+			name: "worker count above the maximum",
+			request: &fwstatemappb.InsertLayerRequest{
+				Name:        "map",
+				WorkerCount: 1 << 20,
+			},
+			message: "worker_count 1048576 exceeds maximum 65535",
 		},
 		{name: "valid name", request: &fwstatemappb.InsertLayerRequest{Name: "map"}},
 		{name: "nil request", request: nil, message: "name is required"},
