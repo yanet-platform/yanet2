@@ -2,10 +2,12 @@ package operator
 
 import (
 	"errors"
+	"fmt"
 	"time"
 
 	"go.uber.org/zap/zapcore"
 
+	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
 	"github.com/yanet-platform/yanet2/common/go/logging"
 	"github.com/yanet-platform/yanet2/common/go/operator"
 	"github.com/yanet-platform/yanet2/common/go/xcfg"
@@ -50,7 +52,8 @@ func (m *Config) LoggingConfig() *logging.Config {
 	return &m.Logging
 }
 
-// Validate requires a destination and rejects negative scheduling intervals.
+// Validate requires a destination, rejects negative scheduling intervals and
+// validates explicit mapped devices.
 func (m *Config) Validate() error {
 	if len(m.Gateways) == 0 {
 		return errors.New("at least one gateway must be configured")
@@ -66,5 +69,13 @@ func (m *Config) Validate() error {
 			return errors.New("update, publish and reconcile intervals must be positive")
 		}
 	}
-	return m.Reconcile.Validate()
+	if err := m.Reconcile.Validate(); err != nil {
+		return err
+	}
+	for key, device := range m.LinkMap {
+		if err := commonpb.ValidateDeviceName(fmt.Sprintf("link_map[%q]", key), device); err != nil {
+			return err
+		}
+	}
+	return nil
 }

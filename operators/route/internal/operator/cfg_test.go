@@ -32,6 +32,21 @@ func Test_ShippedDefaultConfig_OmittedServerEndpointUsesEphemeralPort(t *testing
 	require.Equal(t, "[::1]:0", config.Server.Endpoint.Unwrap())
 }
 
+// Test_Config_LoadRejectsEmptyLinkMapDevice verifies that an explicit empty
+// mapped device fails configuration loading with a field-labelled error.
+func Test_Config_LoadRejectsEmptyLinkMapDevice(t *testing.T) {
+	data := fmt.Sprintf(`gateways:
+  - name: numa0
+    endpoint: "[::1]:8080"
+link_map:
+  eth0: %q
+`, "")
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	require.NoError(t, os.WriteFile(path, []byte(data), 0o600))
+	_, err := xcfg.LoadConfig[operator.Config](path)
+	require.EqualError(t, err, `failed to parse config file: link_map["eth0"] is required`)
+}
+
 // Test_Config_LoadRejectsInvalidStaticNeighbourDevice verifies that invalid
 // static egress devices fail configuration loading with indexed field errors.
 func Test_Config_LoadRejectsInvalidStaticNeighbourDevice(t *testing.T) {

@@ -2,6 +2,7 @@ package operator
 
 import (
 	"errors"
+	"fmt"
 	"time"
 
 	"go.uber.org/zap/zapcore"
@@ -103,6 +104,11 @@ func (m *Config) LoggingConfig() *logging.Config {
 func (m *Config) Validate() error {
 	if len(m.Gateways) == 0 {
 		return errors.New("at least one gateway must be configured")
+	}
+	for key, device := range m.LinkMap {
+		if err := commonpb.ValidateDeviceName(fmt.Sprintf("link_map[%q]", key), device); err != nil {
+			return err
+		}
 	}
 
 	return nil
