@@ -28,10 +28,6 @@ import (
 	fwstatemappb "github.com/yanet-platform/yanet2/objects/fwstate/controlplane/fwstatemappb/v1"
 )
 
-// maxWorkerCount is the highest value accepted for worker_count, matching
-// the width of the C-side uint16 parameter of fwstate_map insert_layer.
-const maxWorkerCount uint32 = 65535
-
 const (
 	// DefaultListEntriesBatchSize is the batch size used when the caller
 	// sends zero in the request.
@@ -806,8 +802,12 @@ func ValidateWorkerCount(workerCount uint32) error {
 	if workerCount == 0 {
 		return status.Error(codes.InvalidArgument, "worker_count must be greater than zero")
 	}
-	if workerCount > maxWorkerCount {
-		return status.Errorf(codes.InvalidArgument, "worker_count %d exceeds maximum %d", workerCount, maxWorkerCount)
+	if workerCount > fwstatemappb.MaxWorkerCount {
+		return status.Errorf(
+			codes.InvalidArgument,
+			"worker_count %d exceeds maximum %d",
+			workerCount, fwstatemappb.MaxWorkerCount,
+		)
 	}
 	return nil
 }
