@@ -56,6 +56,8 @@ modules/<name>/
 
 Active modules: `route, acl, l3b, blackhole, forward, decap, nat64, fwstate, dscp, pdump, route-mpls, mirror`. Legacy shape: `pdump` (CGO in `controlplane/ffi.go`, no `bindings/`); `fwstate` partially migrated. The `l3b` module links virtual-service and session-table objects under `objects/l3b/`. Dataplane symbols are exported via meson `--defsym new_module_<name>`.
 
+Rust dataplanes: `common/rust/{packet,shm,dp}` is the module SDK (`yanet-dp` wraps the C ABI; module code stays unsafe-free) and `modules/rblackhole` is the opt-in reference module, built only with `-Dwith_rust_modules=true` (see `docs/rust-dataplane-modules.md`); its control-plane api stays in C, only the dataplane is Rust.
+
 Shared-memory pattern: `ffi.SharedMemory` → `shm.AgentAttach(name, instanceIdx, size)` → write the C config through FFI (`<name>_module_config_update()`) with Go memory pinned by `runtime.Pinner` → the dataplane reads it atomically. Exported Go APIs whose arguments index C arrays (device IDs, queue/worker indices) validate the range on the Go side.
 
 Rust CLI: binaries `yanet-cli`, `yanet-cli-<module>`; dependency `ync = { path = "../../../cli/core", package = "yanet-cli" }`; shared protos via `common/rust` `extern_path`. A CLI is registered in THREE places that move together: root `Cargo.toml` members, root `Makefile` (`CLI_CORE_MODULES` / `CLI_MODULES`), `debian/yanet2-cli.install` — a miss in the last two builds green and is never installed. Private (gitignored) CLIs are standalone workspaces, not root members.
