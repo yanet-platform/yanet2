@@ -145,7 +145,18 @@ classifier_init(
  */
 static inline void
 classify_leaf_name(char *buf, size_t size, const char *name, const char *leaf) {
+	// The title truncates by design (see above), but GCC 16's range
+	// analysis flags the possible truncation even when the return value
+	// is consumed. Clang does not know -Wformat-truncation, so the
+	// pragma is gcc-only, like the one in memory.h.
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wformat-truncation"
+#endif
 	snprintf(buf, size, "%s:%s", name, leaf);
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic pop
+#endif
 }
 
 /*
