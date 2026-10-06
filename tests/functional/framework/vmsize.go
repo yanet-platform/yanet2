@@ -15,7 +15,8 @@ import (
 const (
 	// EnvVMCPUs is the number of vCPUs of the VM.
 	EnvVMCPUs = "YANET_VM_CPUS"
-	// EnvVMMemory is the RAM of the VM in QEMU's -m syntax, e.g. "16G".
+	// EnvVMMemory is the RAM of the VM in QEMU's -m syntax: megabytes,
+	// optionally suffixed with M or G, e.g. "2048" or "16G".
 	EnvVMMemory = "YANET_VM_MEMORY"
 )
 
@@ -25,7 +26,7 @@ const (
 	maxVMCPUs       = 256
 )
 
-var qemuMemoryPattern = regexp.MustCompile(`^([1-9][0-9]*)([MG])$`)
+var qemuMemoryPattern = regexp.MustCompile(`^[1-9][0-9]*[MG]?$`)
 
 // VMSize is the size of the functional-test VM.
 type VMSize struct {
@@ -57,7 +58,7 @@ func vmSizeFrom(lookup func(string) (string, bool)) (VMSize, error) {
 	}
 	if raw, ok := lookup(EnvVMMemory); ok && raw != "" {
 		if !qemuMemoryPattern.MatchString(raw) {
-			return VMSize{}, fmt.Errorf("%s=%q: want a size such as 1024M or 16G", EnvVMMemory, raw)
+			return VMSize{}, fmt.Errorf("%s=%q: want a size such as 2048, 1024M or 16G", EnvVMMemory, raw)
 		}
 		size.Memory = raw
 	}

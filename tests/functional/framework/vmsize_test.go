@@ -39,6 +39,15 @@ func Test_VMSizeFromEnv_ReadsOverrides(t *testing.T) {
 	require.NotEmpty(t, size.fingerprint())
 }
 
+// Test_VMSizeFromEnv_AcceptsUnitlessMemory verifies that a bare number is
+// accepted as megabytes, as QEMU's "-m" flag treats it.
+func Test_VMSizeFromEnv_AcceptsUnitlessMemory(t *testing.T) {
+	size, err := vmSizeFrom(lookupFrom(map[string]string{EnvVMMemory: "2048"}))
+
+	require.NoError(t, err)
+	require.Equal(t, VMSize{CPUs: defaultVMCPUs, Memory: "2048"}, size)
+}
+
 // Test_VMSizeFromEnv_RejectsInvalidCPUs verifies that an invalid CPU count
 // fails naming the variable, instead of silently keeping the default.
 func Test_VMSizeFromEnv_RejectsInvalidCPUs(t *testing.T) {
@@ -68,7 +77,7 @@ func Test_VMSizeFromEnv_RejectsInvalidMemory(t *testing.T) {
 		value string
 	}{
 		{"unit suffix the -m flag rejects", "16GB"},
-		{"no unit suffix", "1024"},
+		{"unknown unit suffix", "16X"},
 		{"zero amount", "0G"},
 		{"leading zero", "016M"},
 	}
