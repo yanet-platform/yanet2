@@ -8,11 +8,19 @@ resolver = "2"
 # workspace member necessarily lands in the tracked `Cargo.lock`. Contract:
 # an out-of-tree module's CLI crate is not a workspace member, so it carries
 # its own `[workspace]` table and is built through its own manifest path.
+#
+# The Rust dataplane SDK crates and the rblackhole reference module follow
+# the same explicit-membership rule; a private Rust module joins the
+# workspace by listing itself here, like any CLI crate.
 members = [
     "common/rust/commonpb",
     "common/rust/filterpb",
     "common/rust/readinesspb",
     "common/rust/ynpb",
+    "common/rust/packet",
+    "common/rust/shm",
+    "common/rust/dp",
+    "modules/rblackhole/rust",
     "cli/ync-build",
     "cli/core",
     "cli/modules/common",
