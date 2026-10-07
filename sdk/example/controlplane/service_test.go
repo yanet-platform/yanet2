@@ -1,4 +1,4 @@
-package example
+package example_test
 
 import (
 	"errors"
@@ -13,6 +13,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
+	example "github.com/yanet-platform/yanet2/sdk/example/controlplane"
 	examplepb "github.com/yanet-platform/yanet2/sdk/example/controlplane/examplepb/v1"
 )
 
@@ -26,7 +27,7 @@ func (m *mockModuleHandle) Free() error {
 
 type mockBackend struct{}
 
-func (m *mockBackend) UpdateModule(name string) (ModuleHandle, error) {
+func (m *mockBackend) UpdateModule(name string) (example.ModuleHandle, error) {
 	return &mockModuleHandle{}, nil
 }
 
@@ -34,9 +35,9 @@ func (m *mockBackend) DeleteModule(name string) error {
 	return nil
 }
 
-func newTestService(t *testing.T) *ExampleService {
+func newTestService(t *testing.T) *example.ExampleService {
 	t.Helper()
-	return NewExampleService(&mockBackend{})
+	return example.NewExampleService(&mockBackend{})
 }
 
 // flakyBackend succeeds on the first update call and fails thereafter.
@@ -44,7 +45,7 @@ type flakyBackend struct {
 	numCalls atomic.Int64
 }
 
-func (m *flakyBackend) UpdateModule(name string) (ModuleHandle, error) {
+func (m *flakyBackend) UpdateModule(name string) (example.ModuleHandle, error) {
 	if m.numCalls.Add(1) >= 2 {
 		return nil, errInjectedBackend
 	}
@@ -149,7 +150,7 @@ func Test_ExampleService_DeleteConfig_Refused(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			svc := NewExampleService(&refusingDeleteBackend{err: tc.err})
+			svc := example.NewExampleService(&refusingDeleteBackend{err: tc.err})
 			ctx := t.Context()
 
 			_, err := svc.UpdateConfig(ctx, &examplepb.UpdateConfigRequest{Name: "example0"})
@@ -169,7 +170,7 @@ func Test_ExampleService_DeleteConfig_Refused(t *testing.T) {
 // Test_ExampleService_UpdateFailureAtomic verifies that a failed update
 // leaves the previously applied config intact and queryable.
 func Test_ExampleService_UpdateFailureAtomic(t *testing.T) {
-	svc := NewExampleService(&flakyBackend{})
+	svc := example.NewExampleService(&flakyBackend{})
 	ctx := t.Context()
 	name := "example0"
 

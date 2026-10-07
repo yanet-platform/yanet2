@@ -37,5 +37,5 @@ func buildDaemon(cfg *Config, log *zap.Logger) (operator.Runnable, error) {
 		return nil, err
 	}
 
-	return newDaemon(cfg, module, log)
+	return newDaemon(cfg, module, WithLog(log))
 }

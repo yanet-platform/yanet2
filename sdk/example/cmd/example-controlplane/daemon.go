@@ -24,11 +24,36 @@ type daemon struct {
 	log    *zap.Logger
 }
 
+// Option configures the daemon constructor.
+type Option func(*daemonOptions)
+
+type daemonOptions struct {
+	Log *zap.Logger
+}
+
+func newDaemonOptions() *daemonOptions {
+	return &daemonOptions{
+		Log: zap.NewNop(),
+	}
+}
+
+// WithLog sets the logger for the daemon.
+func WithLog(log *zap.Logger) Option {
+	return func(o *daemonOptions) {
+		o.Log = log
+	}
+}
+
 func newDaemon(
 	cfg *Config,
 	module *example.ExampleModule,
-	log *zap.Logger,
+	options ...Option,
 ) (*daemon, error) {
+	opts := newDaemonOptions()
+	for _, o := range options {
+		o(opts)
+	}
+
 	registrar := func(server *grpc.Server) string {
 		module.RegisterService(server)
 		return examplepb.ExampleService_ServiceDesc.ServiceName
@@ -36,14 +61,14 @@ func newDaemon(
 	server, _ := operator.NewGRPCServer(
 		cfg.Server,
 		[]operator.ServiceRegistrar{registrar},
-		operator.WithGRPCLog(log),
+		operator.WithGRPCLog(opts.Log),
 	)
 
 	return &daemon{
 		server: server,
 		module: module,
 		cfg:    cfg,
-		log:    log,
+		log:    opts.Log,
 	}, nil
 }
 
