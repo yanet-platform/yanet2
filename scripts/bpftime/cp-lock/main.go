@@ -28,8 +28,9 @@ import (
 )
 
 const recordMagic = 0x43504c4f434b3033
-const runtimeLabel = "v0.9.0@sha256:6e315ea561d08e482159385a4775ee6564fc4a6f416f24ae40bfccb176191ed9"
 const offsetABI = 0x02000000
+
+var runtimeLabel string
 
 type Record struct {
 	Magic, Inode, Start, Session uint64
@@ -228,6 +229,7 @@ func (m *Coordinator) setup(pid int, replace bool, debugFile string) {
 	resident := oldLive && m.Record.Active >= 0
 	check(exists || !resident, "owned shared memory is missing while its CP agent remains resident; an operator-managed CP exit is required before setup")
 	m.residentCompatible()
+	check(runtimeLabel != "", "missing bundled runtime identity; build with make")
 	if exists && oldLive && m.Record.Active == 1 && int(m.Record.PID) == pid && !replace {
 		m.owned()
 		m.compatible()

@@ -3,6 +3,7 @@
 // clang-format on
 
 #include "cp_lock.h"
+#include <asm/ptrace.h>
 #include <bpf/bpf_helpers.h>
 #include <bpf/bpf_tracing.h>
 #include <linux/bpf.h>
@@ -95,8 +96,13 @@ entry(struct pt_regs *ctx) {
 	}
 
 	struct cp_lock_state state = {.start_ns = bpf_ktime_get_ns()};
-	// A userspace entry hook retains its live caller return slot on stack.
+	// Userspace entry hooks retain the caller's link register or stack
+	// slot.
+#if defined(__TARGET_ARCH_arm64)
+	state.ret = PT_REGS_RET(ctx);
+#else
 	state.ret = *(const __u64 *)PT_REGS_SP(ctx);
+#endif
 
 	if (bpf_map_update_elem(&cp_lock_state, &thread, &state, BPF_ANY)) {
 		bpf_map_delete_elem(&cp_lock_state, &thread);

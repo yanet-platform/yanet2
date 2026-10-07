@@ -45,3 +45,8 @@ Requires Go 1.27.1, clang with BPF support and libbpf development files.
 Packaging needs access to a Docker daemon to extract the pinned prebuilt runtime.
 `make selftest` checks real locks and session lifecycle using the project's
 configured DPDK build. Installed hosts need no Docker or build tools.
+
+To build ARM64 bpftime on a native GitHub Actions VM, run:
+`gh workflow run build-deb.yml -f build_bpftime_arm64=true`.
+This manual mode builds upstream v0.9.0, runs `make selftest`, and publishes a
+runtime archive with checksums as a prerelease. Ordinary CI never builds bpftime.

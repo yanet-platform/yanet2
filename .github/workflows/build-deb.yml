@@ -84,6 +84,10 @@ on:
       - "!operators/**/web/**"
   workflow_dispatch:
     inputs:
+      build_bpftime_arm64:
+        description: "Build and test ARM64 bpftime instead of Debian packages"
+        type: boolean
+        default: false
       include_2204:
         description: "Include Ubuntu 22.04 build"
         type: boolean
@@ -97,7 +101,66 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  build-bpftime-arm64:
+    if: github.event_name == 'workflow_dispatch' && inputs.build_bpftime_arm64
+    name: Build ARM64 bpftime runtime (manual)
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 45
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: true
+          persist-credentials: false
+
+      - uses: actions/checkout@v5
+        with:
+          repository: eunomia-bpf/bpftime
+          ref: 6bde654abce3649fe8e6943b16419dfdf71ebf38
+          path: scripts/bpftime/cp-lock/.deps/upstream
+          submodules: recursive
+          persist-credentials: false
+
+      - uses: ./.github/actions/apt-failover
+      - uses: actions/setup-go@v6
+        with:
+          go-version: "1.27.1"
+          cache: false
+
+      - name: Install runtime build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            clang-19 clang-16 llvm-16-dev cmake make libboost-dev \
+            libelf-dev zlib1g-dev libncurses-dev libbpf-dev \
+            meson ninja-build pkg-config python3-pyelftools \
+            libnuma-dev libpcap-dev libyaml-dev libibverbs-dev
+
+      - name: Build runtime and test userspace lock probes
+        shell: bash
+        run: .github/scripts/build-bpftime-arm64.sh 2>&1 | tee bpftime-arm64.log
+
+      - uses: actions/upload-artifact@v5
+        if: always()
+        with:
+          name: bpftime-arm64
+          path: |
+            bpftime-arm64.log
+            scripts/bpftime/cp-lock/.deps/bpftime-arm64.tar.gz*
+
+      - name: Publish tested runtime
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "bpftime-v0.9.0-arm64-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" \
+            scripts/bpftime/cp-lock/.deps/bpftime-arm64.tar.gz* \
+            --target "$GITHUB_SHA" --prerelease --latest=false \
+            --title "bpftime v0.9.0 ARM64 runtime" \
+            --notes 'Pinned upstream v0.9.0 (6bde654), LLVM JIT; validated with cp-lock userspace probes. See bundled notices.'
+
   set-matrix:
+    if: inputs.build_bpftime_arm64 != true
     runs-on: ubuntu-latest
     outputs:
       matrix: ${{ steps.set.outputs.matrix }}
@@ -111,6 +174,7 @@ jobs:
           fi
 
   test-deb-artifacts:
+    if: inputs.build_bpftime_arm64 != true
     name: Test Debian artifact scripts
     runs-on: ubuntu-latest
     steps:
