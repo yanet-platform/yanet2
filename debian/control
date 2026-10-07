@@ -18,10 +18,12 @@ Build-Depends: debhelper (>= 12)
  , python3-dev
  , python3-setuptools
  , python3-pyelftools
- , clang-19 [amd64] <!pkg.yanet2.nocp-lock> | clang-15 [amd64] <!pkg.yanet2.nocp-lock>
- , libbpf-dev [amd64] <!pkg.yanet2.nocp-lock>
- , libncurses6 [amd64] <!pkg.yanet2.nocp-lock>
+ , clang-19 [amd64 arm64] <!pkg.yanet2.nocp-lock> | clang-15 [amd64 arm64] <!pkg.yanet2.nocp-lock>
+ , libbpf-dev [amd64 arm64] <!pkg.yanet2.nocp-lock>
+ , libncurses6 [amd64 arm64] <!pkg.yanet2.nocp-lock>
  , docker.io [amd64] <!pkg.yanet2.nocp-lock> | docker-ce-cli [amd64] <!pkg.yanet2.nocp-lock>
+ , curl [arm64] <!pkg.yanet2.nocp-lock>
+ , ca-certificates [arm64] <!pkg.yanet2.nocp-lock>
 
 Package: yanet2-dataplane
 Architecture: amd64 arm64
@@ -120,7 +122,7 @@ Description: YANET2 generic operator
  /etc/yanet2/generic-operator.d/<instance>.yaml.
 
 Package: yanet2-cp-lock-bpftime
-Architecture: amd64
+Architecture: amd64 arm64
 Build-Profiles: <!pkg.yanet2.nocp-lock>
 Depends: yanet2-controlplane-dbgsym (= ${binary:Version})
  , binutils

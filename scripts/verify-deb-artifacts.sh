@@ -187,7 +187,7 @@ for package_name in "${package_names[@]}"; do
 done
 
 build_profiles=$(sed -n 's/^Built-For-Profiles: //p' "$changes_file")
-if [[ ${package_file[yanet2-controlplane]+present} == present && $(read_field Architecture "${package_file[yanet2-controlplane]}") == amd64 && " $build_profiles " != *" pkg.yanet2.nocp-lock "* ]]; then
+if [[ ${package_file[yanet2-controlplane]+present} == present && " $build_profiles " != *" pkg.yanet2.nocp-lock "* ]]; then
     diagnostic=yanet2-cp-lock-bpftime
     [[ ${package_file[$diagnostic]+present} == present ]] || fail "missing $diagnostic"
     [[ ${package_file[yanet2-controlplane-dbgsym]+present} == present ]] || fail "missing target dbgsym"

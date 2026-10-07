@@ -1,7 +1,7 @@
 # Control-plane lock profiling
 
 Install `yanet2-cp-lock-bpftime` and its exact-version dependency
-`yanet2-controlplane-dbgsym` on Ubuntu 24.04 amd64. The package includes
+`yanet2-controlplane-dbgsym` on Ubuntu 24.04 amd64 or arm64. The package includes
 [bpftime v0.9.0](https://github.com/eunomia-bpf/bpftime/tree/v0.9.0).
 Userspace probes measure acquisitions, failed try-locks, wait/hold times and
 hold histograms per caller in one CP process.
@@ -42,7 +42,8 @@ stale samples.
 
 Local build: `cd scripts/bpftime/cp-lock && ./prepare.sh && make`.
 Requires Go 1.27.1, clang with BPF support and libbpf development files.
-Packaging needs access to a Docker daemon to extract the pinned prebuilt runtime.
+amd64 packaging extracts the pinned official runtime through Docker; arm64
+downloads our pinned, tested runtime archive. Neither compiles bpftime.
 `make selftest` checks real locks and session lifecycle using the project's
 configured DPDK build. Installed hosts need no Docker or build tools.
 
