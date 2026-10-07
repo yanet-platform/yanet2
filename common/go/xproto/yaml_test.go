@@ -234,7 +234,13 @@ func Test_Unmarshal_RejectsMalformedDocuments(t *testing.T) {
 			name:    "non-string mapping key",
 			input:   "443: allow\n",
 			message: &wrapperspb.StringValue{},
-			wantErr: "such as a non-string mapping key",
+			wantErr: "the document has a non-string mapping key",
+		},
+		{
+			name:    "non-string key in a nested mapping",
+			input:   "ports: {443: allow}\n",
+			message: &structpb.Struct{},
+			wantErr: "ports has a non-string mapping key",
 		},
 		{
 			name:    "value JSON cannot represent",

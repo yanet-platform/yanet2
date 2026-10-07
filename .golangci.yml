@@ -7,6 +7,16 @@ linters:
   default: none
   enable:
     - modernize
+  settings:
+    modernize:
+      # Rewrites first reported after the move to Go 1.27 stay off
+      # until the code adopts them in a change of its own.
+      disable:
+        - embedlit
+        - newexpr
+        - reflecttypeassert
+        - stditerators
+        - waitgroupgo
   exclusions:
     paths:
       - \.pb\.go$

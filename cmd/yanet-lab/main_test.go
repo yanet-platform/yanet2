@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"crypto/sha256"
@@ -543,7 +544,7 @@ func TestHandleRuntimeConnectionReturnsBusyWhileStarting(t *testing.T) {
 			go handleRuntimeConnection(server, t.TempDir(), runtime, func() {})
 			require.NoError(t, json.NewEncoder(client).Encode(request{Action: action}))
 			var reply response
-			require.NoError(t, json.NewDecoder(client).Decode(&reply))
+			require.NoError(t, decodeReply(client, &reply))
 			require.False(t, reply.OK)
 			require.Equal(t, labBusyError, reply.Error)
 		})
@@ -557,7 +558,7 @@ func TestHandleRuntimeConnectionIncludesProtocolVersion(t *testing.T) {
 	go handleRuntimeConnection(server, t.TempDir(), runtime, func() {})
 	require.NoError(t, json.NewEncoder(client).Encode(request{Action: "status"}))
 	var reply response
-	require.NoError(t, json.NewDecoder(client).Decode(&reply))
+	require.NoError(t, decodeReply(client, &reply))
 	require.Equal(t, supervisorProtocolVersion, reply.SupervisorProtocolVersion)
 	require.Equal(t, 0, reply.Protocol)
 }
@@ -631,7 +632,7 @@ func Test_HandleConnection_ManifestUsesDeadlineRuntime(t *testing.T) {
 	})
 	require.NoError(t, json.NewEncoder(client).Encode(request{Action: "manifest", Manifest: "unused"}))
 	var reply response
-	require.NoError(t, json.NewDecoder(client).Decode(&reply))
+	require.NoError(t, decodeReply(client, &reply))
 	require.NoError(t, handlers.Wait())
 
 	runtime, ok := (<-runtimeSeen).(*deadlineManifestRuntime)
@@ -658,7 +659,7 @@ func Test_HandleConnection_ExecUsesActionBudget(t *testing.T) {
 	go handleConnection(server, nil, t.TempDir(), &supervisor{}, nil, nil, func() {})
 	require.NoError(t, json.NewEncoder(client).Encode(request{Action: "exec", Argv: []string{"sleep", "31"}}))
 	var reply response
-	require.NoError(t, json.NewDecoder(client).Decode(&reply))
+	require.NoError(t, decodeReply(client, &reply))
 
 	require.Equal(t, "'sleep' '31'", command)
 	require.Equal(t, supervisorExecTimeout, timeout)
@@ -689,7 +690,7 @@ func Test_HandleConnection_ReportUsesFullProcessPatterns(t *testing.T) {
 	})
 	require.NoError(t, json.NewEncoder(client).Encode(request{Action: "report"}))
 	var reply response
-	require.NoError(t, json.NewDecoder(client).Decode(&reply))
+	require.NoError(t, decodeReply(client, &reply))
 	require.NoError(t, handlers.Wait())
 
 	require.True(t, reply.OK)
@@ -770,6 +771,18 @@ func (m *heldReplyConnection) Write(data []byte) (int, error) {
 	return written, err
 }
 
+// decodeReply reads one newline-terminated reply in full.
+//
+// A pipe write blocks until every byte is read, so the reply is consumed
+// through its newline for the handler to finish.
+func decodeReply(connection io.Reader, reply any) error {
+	line, err := bufio.NewReader(connection).ReadBytes('\n')
+	if err != nil {
+		return err
+	}
+	return json.Unmarshal(line, reply)
+}
+
 // startHandlerConnection runs a guest-free handler and joins it during cleanup.
 func startHandlerConnection(
 	t *testing.T,
@@ -844,7 +857,7 @@ func Test_HandleConnection_ReplyReleasesOperationBeforeNextRequest(t *testing.T)
 			}, true)
 			require.NoError(t, json.NewEncoder(first).Encode(request{Action: testCase.first}))
 			var firstReply response
-			require.NoError(t, json.NewDecoder(first).Decode(&firstReply))
+			require.NoError(t, decodeReply(first, &firstReply))
 			require.Equal(t, testCase.wantError == "", firstReply.OK)
 			require.Equal(t, testCase.wantError, firstReply.Error)
 			if testCase.first == "status" {
@@ -859,7 +872,7 @@ func Test_HandleConnection_ReplyReleasesOperationBeforeNextRequest(t *testing.T)
 			next, _ := startHandlerConnection(t, state, directory, nil, false)
 			require.NoError(t, json.NewEncoder(next).Encode(request{Action: testCase.next}))
 			var nextReply response
-			require.NoError(t, json.NewDecoder(next).Decode(&nextReply))
+			require.NoError(t, decodeReply(next, &nextReply))
 			require.True(t, nextReply.OK, "next request failed: %s", nextReply.Error)
 			if testCase.next == "status" {
 				require.Equal(t, statusReady, nextReply.Status)
@@ -904,7 +917,7 @@ func Test_HandleConnection_ActiveResetRejectsConcurrentReset(t *testing.T) {
 	}, false)
 	require.NoError(t, json.NewEncoder(next).Encode(request{Action: "reset"}))
 	var reply response
-	require.NoError(t, json.NewDecoder(next).Decode(&reply))
+	require.NoError(t, decodeReply(next, &reply))
 	require.False(t, reply.OK)
 	require.Equal(t, labBusyError, reply.Error)
 	require.False(t, concurrentRestore.Load())
@@ -918,11 +931,11 @@ func Test_HandleConnection_SerialAckKeepsOperationExclusive(t *testing.T) {
 	serial, serialDone := startHandlerConnection(t, state, directory, nil, false)
 	require.NoError(t, json.NewEncoder(serial).Encode(request{Action: "serial"}))
 	var reply response
-	require.NoError(t, json.NewDecoder(serial).Decode(&reply))
+	require.NoError(t, decodeReply(serial, &reply))
 	require.True(t, reply.OK)
 	next, _ := startHandlerConnection(t, state, directory, nil, false)
 	require.NoError(t, json.NewEncoder(next).Encode(request{Action: "status"}))
-	require.NoError(t, json.NewDecoder(next).Decode(&reply))
+	require.NoError(t, decodeReply(next, &reply))
 	require.False(t, reply.OK)
 	require.Equal(t, labBusyError, reply.Error)
 	require.NoError(t, serial.Close())
@@ -951,7 +964,7 @@ func TestHandleConnectionReturnsBusy(t *testing.T) {
 			})
 			require.NoError(t, json.NewEncoder(client).Encode(request{Action: action}))
 			var reply response
-			require.NoError(t, json.NewDecoder(client).Decode(&reply))
+			require.NoError(t, decodeReply(client, &reply))
 			require.False(t, reply.OK)
 			require.Equal(t, labBusyError, reply.Error)
 			require.Equal(t, supervisorProtocolVersion, reply.SupervisorProtocolVersion)
@@ -985,7 +998,7 @@ func TestDownWaitsForActiveOperation(t *testing.T) {
 
 	require.NoError(t, json.NewEncoder(client).Encode(request{Action: "down"}))
 	var reply response
-	require.NoError(t, json.NewDecoder(client).Decode(&reply))
+	require.NoError(t, decodeReply(client, &reply))
 	require.True(t, reply.OK)
 	require.Equal(t, "lab stopped", reply.Output)
 	require.Eventually(t, func() bool {
@@ -1002,7 +1015,7 @@ func TestDownWaitsForActiveOperation(t *testing.T) {
 	})
 	require.NoError(t, json.NewEncoder(busyClient).Encode(request{Action: "status"}))
 	var busyReply response
-	require.NoError(t, json.NewDecoder(busyClient).Decode(&busyReply))
+	require.NoError(t, decodeReply(busyClient, &busyReply))
 	require.False(t, busyReply.OK)
 	require.Equal(t, labBusyError, busyReply.Error)
 	require.NoError(t, busyHandlers.Wait())
@@ -1044,7 +1057,7 @@ func TestSupervisorOperationCanRetryAfterRelease(t *testing.T) {
 	})
 	require.NoError(t, json.NewEncoder(busyClient).Encode(request{Action: "reset"}))
 	var busyReply response
-	require.NoError(t, json.NewDecoder(busyClient).Decode(&busyReply))
+	require.NoError(t, decodeReply(busyClient, &busyReply))
 	require.False(t, busyReply.OK)
 	require.Equal(t, labBusyError, busyReply.Error)
 	require.NoError(t, busyHandlers.Wait())
@@ -1071,7 +1084,7 @@ func TestSupervisorOperationCanRetryAfterRelease(t *testing.T) {
 	})
 	require.NoError(t, json.NewEncoder(client).Encode(request{Action: "reset"}))
 	var reply response
-	require.NoError(t, json.NewDecoder(client).Decode(&reply))
+	require.NoError(t, decodeReply(client, &reply))
 	require.True(t, reply.OK)
 	require.Equal(t, "baseline restored", reply.Output)
 	require.NoError(t, handlers.Wait())
@@ -1097,7 +1110,7 @@ func TestHandleConnectionDownAcksBeforeShutdown(t *testing.T) {
 	})
 	require.NoError(t, json.NewEncoder(client).Encode(request{Action: "down"}))
 	var reply response
-	require.NoError(t, json.NewDecoder(client).Decode(&reply))
+	require.NoError(t, decodeReply(client, &reply))
 	require.True(t, reply.OK)
 	require.Equal(t, "lab stopped", reply.Output)
 	require.Equal(t, supervisorProtocolVersion, reply.SupervisorProtocolVersion)
@@ -1298,7 +1311,7 @@ func Test_HandleConnection_DownFailureKeepsSupervisorForRetry(t *testing.T) {
 		}()
 		require.NoError(t, json.NewEncoder(client).Encode(request{Action: "down"}))
 		var reply response
-		require.NoError(t, json.NewDecoder(client).Decode(&reply))
+		require.NoError(t, decodeReply(client, &reply))
 		require.NoError(t, client.Close())
 		<-done
 		return reply
@@ -1794,7 +1807,7 @@ func TestStatusHandlerPopulatesScopes(t *testing.T) {
 			})
 			require.NoError(t, json.NewEncoder(client).Encode(request{Action: "status"}))
 			var reply response
-			require.NoError(t, json.NewDecoder(client).Decode(&reply))
+			require.NoError(t, decodeReply(client, &reply))
 			require.Equal(t, tc.wantOK, reply.OK)
 			require.Equal(t, tc.wantStatus, reply.Status)
 			require.Equal(t, tc.wantError, reply.Error)
@@ -2605,7 +2618,7 @@ func TestResetHappyPath(t *testing.T) {
 
 	require.NoError(t, json.NewEncoder(client).Encode(request{Action: "reset"}))
 	var reply response
-	require.NoError(t, json.NewDecoder(client).Decode(&reply))
+	require.NoError(t, decodeReply(client, &reply))
 	require.True(t, reply.OK)
 	require.Equal(t, "baseline restored", reply.Output)
 	require.Equal(t, supervisorProtocolVersion, reply.SupervisorProtocolVersion)
@@ -2637,7 +2650,7 @@ func TestResetRejectsMissingBaseline(t *testing.T) {
 
 	require.NoError(t, json.NewEncoder(client).Encode(request{Action: "reset"}))
 	var reply response
-	require.NoError(t, json.NewDecoder(client).Decode(&reply))
+	require.NoError(t, decodeReply(client, &reply))
 	require.False(t, reply.OK)
 	require.Equal(t, "baseline snapshot missing; run up again", reply.Error)
 	require.Equal(t, supervisorProtocolVersion, reply.SupervisorProtocolVersion)
@@ -2683,7 +2696,7 @@ func TestDownWritesShutdownMarkerOnError(t *testing.T) {
 
 	require.NoError(t, json.NewEncoder(client).Encode(request{Action: "down"}))
 	var reply response
-	require.NoError(t, json.NewDecoder(client).Decode(&reply))
+	require.NoError(t, decodeReply(client, &reply))
 	require.True(t, reply.OK)
 	require.Equal(t, "lab stopped", reply.Output)
 	require.NoError(t, handlers.Wait())
@@ -2731,7 +2744,7 @@ func TestDownRemovesPriorMarkerOnSuccess(t *testing.T) {
 
 	require.NoError(t, json.NewEncoder(client).Encode(request{Action: "down"}))
 	var reply response
-	require.NoError(t, json.NewDecoder(client).Decode(&reply))
+	require.NoError(t, decodeReply(client, &reply))
 	require.True(t, reply.OK)
 
 	select {
