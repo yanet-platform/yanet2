@@ -21,7 +21,7 @@ Build-Depends: debhelper (>= 12)
  , clang-19 [amd64] <!pkg.yanet2.nocp-lock> | clang-15 [amd64] <!pkg.yanet2.nocp-lock>
  , libbpf-dev [amd64] <!pkg.yanet2.nocp-lock>
  , libncurses6 [amd64] <!pkg.yanet2.nocp-lock>
- , docker.io [amd64] <!pkg.yanet2.nocp-lock>
+ , docker.io [amd64] <!pkg.yanet2.nocp-lock> | docker-ce-cli [amd64] <!pkg.yanet2.nocp-lock>
 
 Package: yanet2-dataplane
 Architecture: amd64 arm64
