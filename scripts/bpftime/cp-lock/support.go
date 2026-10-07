@@ -62,6 +62,24 @@ func control(pid int, request string) (bool, error) {
 		return false, err
 	}
 	defer connection.Close()
+	descriptor, err := connection.(*net.UnixConn).SyscallConn()
+	if err != nil {
+		return false, err
+	}
+	var peer *syscall.Ucred
+	var peerError error
+	err = descriptor.Control(func(descriptor uintptr) {
+		peer, peerError = syscall.GetsockoptUcred(int(descriptor), syscall.SOL_SOCKET, syscall.SO_PEERCRED)
+	})
+	if err != nil {
+		return false, err
+	}
+	if peerError != nil {
+		return false, peerError
+	}
+	if peer.Pid != int32(pid) {
+		return false, fmt.Errorf("control socket peer PID %d differs from target %d", peer.Pid, pid)
+	}
 	if err = connection.SetDeadline(time.Now().Add(5 * time.Second)); err != nil {
 		return false, err
 	}
@@ -74,6 +92,37 @@ func control(pid int, request string) (bool, error) {
 	reply, err := io.ReadAll(io.LimitReader(connection, 4097))
 	text := string(reply)
 	return len(reply) <= 4096 && (text == "ok" || text == "ok\n" || strings.HasPrefix(text, "ok ")), err
+}
+
+func openRecord(path, command string) (*os.File, error) {
+	flags := syscall.O_RDWR | syscall.O_CLOEXEC | syscall.O_NOFOLLOW | syscall.O_NONBLOCK
+	if command == "report" {
+		flags = syscall.O_RDONLY | syscall.O_CLOEXEC | syscall.O_NOFOLLOW | syscall.O_NONBLOCK
+	}
+	var file *os.File
+	var err error
+	if command == "setup" {
+		file, err = os.OpenFile(path, flags|syscall.O_CREAT|syscall.O_EXCL, 0640)
+	}
+	if command != "setup" || os.IsExist(err) {
+		file, err = os.OpenFile(path, flags, 0)
+	}
+	if err != nil {
+		return nil, err
+	}
+	info, err := file.Stat()
+	if err == nil {
+		status := info.Sys().(*syscall.Stat_t)
+		if !info.Mode().IsRegular() || status.Nlink != 1 || info.Mode().Perm()&0022 != 0 ||
+			((command != "report" || os.Geteuid() == 0) && status.Uid != 0 && status.Uid != uint32(os.Geteuid())) {
+			err = fmt.Errorf("unsafe coordination record owner, permissions, type or link count")
+		}
+	}
+	if err != nil {
+		file.Close()
+		return nil, err
+	}
+	return file, nil
 }
 
 func run(arguments []string, environment ...string) ([]byte, error) {

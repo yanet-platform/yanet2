@@ -20,11 +20,7 @@ Setup exits while profiling continues. Repeating setup preserves counters;
 add `--replace` to reset them with a collection gap. Stop before upgrading or
 uninstalling; the runtime stays mapped until CP exits. Attach requires ptrace
 permission, the original executable inode and matching debug symbols; executable
-paths cannot contain whitespace. To profile from process startup instead:
-
-```sh
-sudo yanet-cp-lock setup --launch -- /usr/bin/yanet-controlplane ARGUMENTS
-```
+paths cannot contain whitespace.
 
 For collection through existing Telegraf outputs:
 
@@ -46,6 +42,6 @@ stale samples.
 
 Local build: `cd scripts/bpftime/cp-lock && ./prepare.sh && make`.
 Requires Go 1.27.1, clang with BPF support and libbpf development files.
-Docker is needed only to extract the pinned prebuilt runtime during preparation.
+Packaging needs access to a Docker daemon to extract the pinned prebuilt runtime.
 `make selftest` checks real locks and session lifecycle using the project's
 configured DPDK build. Installed hosts need no Docker or build tools.

@@ -56,6 +56,7 @@ execute_after_dh_auto_clean:
 
 execute_after_dh_auto_build:
 ifneq (,$(filter yanet2-cp-lock-bpftime,$(shell dh_listpackages)))
+	$(MAKE) -C scripts/bpftime/cp-lock prepare
 	$(MAKE) -C scripts/bpftime/cp-lock all
 endif
 
@@ -76,4 +77,3 @@ override_dh_dwz:
 
 override_dh_strip:
 	dh_strip --dbgsym-migration='yanet2-dbgsym (<< 0.0.1-1~)'
-

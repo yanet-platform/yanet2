@@ -13,11 +13,64 @@ import (
 	"sync/atomic"
 	"syscall"
 	"testing"
+	"unicode/utf8"
 	"unsafe"
 
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sync/errgroup"
 )
+
+// Test_Execute_Help verifies that option discovery needs no active session.
+func Test_Execute_Help(t *testing.T) {
+	arguments := os.Args
+	t.Cleanup(func() { os.Args = arguments })
+	t.Setenv("BPFTIME_GLOBAL_SHM_NAME", "invalid/name")
+	for _, command := range []string{"setup", "report", "stop"} {
+		os.Args = []string{"yanet-cp-lock", command, "--help"}
+		require.NotPanics(t, execute)
+	}
+}
+
+// Test_Execute_EmptyStop verifies that an absent session needs no cleanup.
+func Test_Execute_EmptyStop(t *testing.T) {
+	arguments := os.Args
+	t.Cleanup(func() { os.Args = arguments })
+	os.Args = []string{"yanet-cp-lock", "stop"}
+	t.Setenv("BPFTIME_GLOBAL_SHM_NAME", fmt.Sprintf("cp_lock_absent_%d", os.Getpid()))
+	require.NotPanics(t, execute)
+}
+
+// Test_Quote_UTF8 verifies valid labels and merging after invalid-byte repair.
+func Test_Quote_UTF8(t *testing.T) {
+	require.Equal(t, "a\\\"\\\\\\n\uFFFD", quote("a\"\\\n\xff"))
+	require.True(t, utf8.ValidString(quote("\xff")))
+	rows := mergeSites([]Row{{Name: "caller\xff", Line: "file:1"}, {Name: "caller\xfe", Line: "file:1"}})
+	require.Len(t, rows, 1)
+	require.Equal(t, "caller\uFFFD", rows[0].Name)
+}
+
+// Test_Stop_FailedReset verifies that a partial stop cannot be reused as active.
+func Test_Stop_FailedReset(t *testing.T) {
+	m, _ := statsFixture(t)
+	var err error
+	m.File, err = os.CreateTemp(t.TempDir(), "record")
+	require.NoError(t, err)
+	defer m.File.Close()
+	identity, err := buildID("/proc/self/exe")
+	require.NoError(t, err)
+	copyText(m.Record.Build[:], identity)
+	copyText(m.Record.Runtime[:], runtimeLabel)
+	m.Helper = t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(m.Helper, "setup"), []byte("#!/bin/sh\nexit 1\n"), 0755))
+	controlFixture(t, os.Getpid())
+	m.save()
+	require.Panics(t, m.stop)
+	var persisted Record
+	_, err = m.File.ReadAt(unsafe.Slice((*byte)(unsafe.Pointer(&persisted)), int(unsafe.Sizeof(persisted))), 0)
+	require.NoError(t, err)
+	require.EqualValues(t, 2, persisted.Active)
+	require.EqualValues(t, 2, m.Record.Active)
+}
 
 // statsFixture maps a private session payload with the production row layout.
 func statsFixture(t *testing.T) (*Coordinator, []byte) {

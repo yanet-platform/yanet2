@@ -12,14 +12,13 @@ import (
 	"bytes"
 	"debug/dwarf"
 	"debug/elf"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -140,6 +139,8 @@ func (m *Coordinator) stop() {
 		mappedBuild(int(m.Record.PID), text(m.Record.Build[:]))
 	}
 	if m.Record.Active > 0 && m.live() {
+		m.Record.Active = 2
+		m.save()
 		acknowledged, err := control(int(m.Record.PID), "detach")
 		check(err == nil && acknowledged, fmt.Sprintf("CP %d did not acknowledge detach; handlers retained", m.Record.PID))
 	}
@@ -220,29 +221,14 @@ func targetRuntime(pid int, name string, owned bool) {
 	}
 }
 
-// gatedLaunch holds the initial exec until durable probes are ready.
-func (m *Coordinator) gatedLaunch(arguments []string, image *os.File) (int, *os.File) {
-	input, output, err := os.Pipe()
-	must(err)
-	defer input.Close()
-	executable, err := os.Executable()
-	must(err)
-	command := exec.Command(executable, append([]string{"__launch", m.Runtime + "/libbpftime-agent.so"}, arguments...)...)
-	command.ExtraFiles = []*os.File{input, image}
-	command.Stdin, command.Stdout, command.Stderr = os.Stdin, os.Stdout, os.Stderr
-	command.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
-	must(command.Start())
-	return command.Process.Pid, output
-}
-
-func (m *Coordinator) setup(pid int, replace bool, debugFile string, launch []string) {
+func (m *Coordinator) setup(pid int, replace bool, debugFile string) {
 	runtimeEnvironment()
 	exists := m.inode() != 0
 	oldLive := m.Record.Magic == recordMagic && m.live()
 	resident := oldLive && m.Record.Active >= 0
 	check(exists || !resident, "owned shared memory is missing while its CP agent remains resident; an operator-managed CP exit is required before setup")
 	m.residentCompatible()
-	if exists && oldLive && m.Record.Active == 1 && int(m.Record.PID) == pid && !replace && len(launch) == 0 {
+	if exists && oldLive && m.Record.Active == 1 && int(m.Record.PID) == pid && !replace {
 		m.owned()
 		m.compatible()
 		mappedBuild(pid, text(m.Record.Build[:]))
@@ -251,41 +237,18 @@ func (m *Coordinator) setup(pid int, replace bool, debugFile string, launch []st
 		return
 	}
 
-	var binary, image string
-	var gate *os.File
-	var pinned *os.File
-	var generation uint64
-	if len(launch) > 0 {
-		check(!oldLive, "launch requires no live owned CP")
-		resolved, err := exec.LookPath(launch[0])
-		must(err)
-		binary, err = filepath.EvalSymlinks(resolved)
-		must(err)
-		binary, err = filepath.Abs(binary)
-		must(err)
-		check(!strings.ContainsAny(binary, " \t\n\r\f\v"), "matching bpftime cannot attach executable paths containing whitespace")
-		launch[0] = binary
-		pinned, err = os.Open(binary)
-		must(err)
-		defer pinned.Close()
-		image = fmt.Sprintf("/proc/%d/fd/%d", os.Getpid(), pinned.Fd())
-	} else {
-		var err error
-		generation, err = startTime(pid)
-		must(err)
-		check(generation != 0, "target generation is unavailable")
-		image = fmt.Sprintf("/proc/%d/exe", pid)
-		binary = verifiedBinary(image)
-		targetRuntime(pid, m.Name, resident && int(m.Record.PID) == pid)
-	}
+	generation, err := startTime(pid)
+	must(err)
+	check(generation != 0, "target generation is unavailable")
+	image := fmt.Sprintf("/proc/%d/exe", pid)
+	binary := verifiedBinary(image)
+	targetRuntime(pid, m.Name, resident && int(m.Record.PID) == pid)
 
 	debug, identity, offsets := symbols(image, debugFile)
 	if debug == image {
 		debug = binary
 	}
-	if pinned == nil {
-		verifyTarget(pid, generation, identity)
-	}
+	verifyTarget(pid, generation, identity)
 
 	if m.Record.Magic == recordMagic && exists {
 		m.owned()
@@ -294,7 +257,7 @@ func (m *Coordinator) setup(pid int, replace bool, debugFile string, launch []st
 			exists = false
 		} else {
 			m.compatible()
-			check(int(m.Record.PID) == pid && len(launch) == 0, "session belongs to another live CP generation")
+			check(int(m.Record.PID) == pid, "session belongs to another live CP generation")
 			check(identity == text(m.Record.Build[:]), "owned CP executable build-id changed; handlers retained")
 			m.stop()
 		}
@@ -307,15 +270,6 @@ func (m *Coordinator) setup(pid int, replace bool, debugFile string, launch []st
 		if info, err := os.Stat(temporary); err == nil && info.Sys().(*syscall.Stat_t).Ino == m.Record.Inode {
 			must(os.Remove(temporary))
 		}
-	}
-
-	if pinned != nil {
-		pid, gate = m.gatedLaunch(launch, pinned)
-		defer gate.Close()
-		var err error
-		generation, err = startTime(pid)
-		must(err)
-		check(generation != 0, "target generation is unavailable")
 	}
 
 	m.Record = Record{Magic: recordMagic, ABI: offsetABI, Schema: C.CP_LOCK_SCHEMA, PID: int32(pid), Start: generation, Active: -1, Session: uint64(time.Now().UnixNano()), Offsets: offsets}
@@ -344,17 +298,11 @@ func (m *Coordinator) setup(pid int, replace bool, debugFile string, launch []st
 		must(os.Remove("/dev/shm/" + temporary))
 	}
 
-	target := image
-	if pinned != nil {
-		target = binary
-	}
-	loader := []string{m.Helper + "/setup", m.Helper + "/cp_lock.bpf.o", strconv.Itoa(pid), target}
+	loader := []string{m.Helper + "/setup", m.Helper + "/cp_lock.bpf.o", strconv.Itoa(pid), image}
 	for _, offset := range offsets {
 		loader = append(loader, strconv.FormatUint(offset, 10))
 	}
-	if pinned == nil {
-		verifyTarget(pid, generation, identity)
-	}
+	verifyTarget(pid, generation, identity)
 
 	loaded, err := run(loader, "LD_PRELOAD="+m.Runtime+"/libbpftime-syscall-server.so", "BPFTIME_GLOBAL_SHM_NAME="+m.Name)
 	if err != nil {
@@ -381,19 +329,13 @@ func (m *Coordinator) setup(pid int, replace bool, debugFile string, launch []st
 	}
 
 	check(m.Record.MapOffsets[0] != 0 && m.Record.MapOffsets[1] != 0, "runtime did not expose ARRAY payload offsets")
-	if pinned == nil {
-		verifyTarget(pid, generation, identity)
-	}
+	verifyTarget(pid, generation, identity)
 
 	check(m.live(), "CP generation changed during setup")
 	m.Record.Active = 2
 	m.save()
 
-	if gate != nil {
-		_, err := gate.Write([]byte{'x'})
-		must(err)
-		must(gate.Close())
-	} else if acknowledged, err := control(pid, "refresh shm_open_type=1"); err != nil || !acknowledged {
+	if acknowledged, err := control(pid, "refresh shm_open_type=1"); err != nil || !acknowledged {
 		check(!resident, "resident runtime refresh failed; handlers retained")
 		_, err := run([]string{m.Runtime + "/bpftime", "--install-location", m.Runtime, "attach", strconv.Itoa(pid)})
 		check(err == nil, "agent attach failed; handlers retained")
@@ -411,14 +353,6 @@ func (m *Coordinator) setup(pid int, replace bool, debugFile string, launch []st
 	}
 
 	check(ready && m.live(), "agent did not acknowledge hook installation; handlers retained")
-	if pinned != nil {
-		expected, err := pinned.Stat()
-		must(err)
-		actual, err := os.Stat(fmt.Sprintf("/proc/%d/exe", pid))
-		must(err)
-		check(os.SameFile(expected, actual), "launched executable changed during setup; handlers retained")
-	}
-
 	verifyTarget(pid, generation, identity)
 	m.Record.Active = 1
 	m.save()
@@ -437,7 +371,7 @@ type Row struct {
 }
 
 func quote(value string) string {
-	return strings.NewReplacer("\\", "\\\\", "\"", "\\\"", "\n", "\\n").Replace(value)
+	return strings.NewReplacer("\\", "\\\\", "\"", "\\\"", "\n", "\\n").Replace(strings.ToValidUTF8(value, "\uFFFD"))
 }
 
 func (m *Coordinator) symbolize(address uint64, maps []byte, cache map[string]*dwarf.Data) (string, string) {
@@ -501,6 +435,8 @@ func mergeSites(rows []Row) []Row {
 	sites := map[[2]string]int{}
 	merged := make([]Row, 0, len(rows))
 	for _, row := range rows {
+		row.Name = strings.ToValidUTF8(row.Name, "\uFFFD")
+		row.Line = strings.ToValidUTF8(row.Line, "\uFFFD")
 		// Keep acquisition counts consistent with the sampled histogram.
 		row.Stats.count = 0
 		for _, count := range row.Stats.hist {
@@ -635,27 +571,24 @@ func coordinator(command string) (*Coordinator, int) {
 	check(name != "" && !strings.Contains(name, "/"), "invalid shm name")
 	helper := environment("CP_LOCK_HELPER_DIR", "/usr/lib/yanet2/cp-lock")
 	m := &Coordinator{Name: name, Path: "/dev/shm/" + name, Helper: helper, Runtime: helper + "/bpftime"}
-	flags := syscall.O_RDWR | syscall.O_CLOEXEC | syscall.O_NOFOLLOW
-	if command == "report" {
-		flags = syscall.O_RDONLY | syscall.O_CLOEXEC | syscall.O_NOFOLLOW
-	}
-	if command == "setup" {
-		flags |= syscall.O_CREAT
-	}
-
-	descriptor, err := syscall.Open(m.Path+".cp-lock", flags, 0640)
-	if command == "stop" && err == syscall.ENOENT {
+	file, err := openRecord(m.Path+".cp-lock", command)
+	if command == "stop" && os.IsNotExist(err) {
 		check(m.inode() == 0, "foreign/unidentified shared memory; refusing stop")
 		return m, 0
 	}
 	must(err)
-	m.File = os.NewFile(uintptr(descriptor), m.Path+".cp-lock")
+	m.File = file
 
 	lock := syscall.LOCK_EX
 	if command == "report" {
 		lock = syscall.LOCK_SH
 	}
-	must(syscall.Flock(descriptor, lock))
+	must(syscall.Flock(int(file.Fd()), lock))
+	opened, err := file.Stat()
+	must(err)
+	current, err := os.Lstat(file.Name())
+	must(err)
+	check(os.SameFile(opened, current), "coordination record replaced during locking")
 	check(unsafe.Sizeof(m.Record) == 8552 && unsafe.Offsetof(m.Record.Offsets) == 32 &&
 		unsafe.Offsetof(m.Record.ABI) == 56 && unsafe.Offsetof(m.Record.PID) == 64 && unsafe.Offsetof(m.Record.Boot) == 72 &&
 		unsafe.Offsetof(m.Record.Build) == 112 && unsafe.Offsetof(m.Record.Runtime) == 241 &&
@@ -681,28 +614,17 @@ func coordinator(command string) (*Coordinator, int) {
 }
 
 func execute() {
-	check(len(os.Args) >= 2, "usage: yanet-cp-lock setup --pid PID | setup --launch -- PROGRAM ARGS | report [--format prometheus] [--push URL] | stop")
+	check(len(os.Args) >= 2, "usage: yanet-cp-lock setup --pid PID | report [--format prometheus] [--push URL] | stop")
 	command := os.Args[1]
-	if command == "__launch" {
-		check(len(os.Args) >= 4, "invalid gated launch")
-		gate := os.NewFile(3, "launch-gate")
-		var token [1]byte
-		count, err := gate.Read(token[:])
-		gate.Close()
-		check(err == nil && count == 1 && token[0] == 'x', "launch gate closed before handoff")
-		must(os.Setenv("LD_PRELOAD", os.Args[2]))
-		syscall.CloseOnExec(4)
-		must(syscall.Exec("/proc/self/fd/4", os.Args[3:], os.Environ()))
-	}
 
 	check(command == "setup" || command == "report" || command == "stop", "unknown command")
 
 	options := flag.NewFlagSet(command, flag.ContinueOnError)
 	var pid int
-	var replace, launch bool
+	var replace bool
 	var debugFile, format, push string
 	if command == "setup" {
-		options.Func("pid", "", func(value string) error {
+		options.Func("pid", "PID of the running control plane (required)", func(value string) error {
 			parsed, err := strconv.ParseUint(value, 10, 31)
 			if err != nil || parsed == 0 {
 				return fmt.Errorf("--pid requires a positive decimal PID")
@@ -710,24 +632,23 @@ func execute() {
 			pid = int(parsed)
 			return nil
 		})
-		options.BoolVar(&replace, "replace", false, "")
-		options.BoolVar(&launch, "launch", false, "")
-		options.StringVar(&debugFile, "debug-file", "", "")
+		options.BoolVar(&replace, "replace", false, "reset counters and replace existing probes")
+		options.StringVar(&debugFile, "debug-file", "", "matching build-id debug symbols")
 	} else if command == "report" {
-		options.StringVar(&format, "format", "table", "")
-		options.StringVar(&push, "push", "", "")
+		options.StringVar(&format, "format", "table", "table or prometheus")
+		options.StringVar(&push, "push", "", "HTTP URL to receive the Prometheus sample")
 	}
 
-	must(options.Parse(os.Args[2:]))
-	arguments := options.Args()
-	if launch {
-		check(slices.Contains(os.Args[2:], "--"), "--launch requires -- PROGRAM")
+	if err := options.Parse(os.Args[2:]); errors.Is(err, flag.ErrHelp) {
+		return
+	} else {
+		must(err)
 	}
 
 	options.Visit(func(option *flag.Flag) { check(option.Name != "push" || push != "", "--push requires a URL") })
-	check(command == "setup" && launch || len(arguments) == 0, "unexpected command arguments")
+	check(len(options.Args()) == 0, "unexpected command arguments")
 	if command == "setup" {
-		check((pid > 0) != launch && (!launch || len(arguments) > 0), "setup requires one positive PID or launch command")
+		check(pid > 0, "setup requires one positive PID")
 	}
 	check(command != "report" || format == "table" || format == "prometheus", "unknown format")
 
@@ -737,7 +658,7 @@ func execute() {
 	}
 	switch command {
 	case "setup":
-		m.setup(pid, replace, debugFile, arguments)
+		m.setup(pid, replace, debugFile)
 	case "stop":
 		if count > 0 {
 			m.stop()

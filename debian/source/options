@@ -6,4 +6,5 @@ tar-ignore=".git"
 tar-ignore="outdeb"
 tar-ignore="build"
 tar-ignore="target"
-
+tar-ignore=".deps"
+tar-ignore="*/scripts/bpftime/cp-lock/bpftime"

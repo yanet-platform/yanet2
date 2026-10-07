@@ -5,7 +5,6 @@ package selftest_test
 import (
 	"bufio"
 	"bytes"
-	"context"
 	"debug/elf"
 	_ "embed"
 	"encoding/hex"
@@ -220,6 +219,11 @@ func Test_Session_ContinuousRealLock(t *testing.T) {
 		}
 		return string(output)
 	}
+	for _, command := range []string{"setup", "report", "stop"} {
+		run(command, "--help")
+	}
+	require.Error(t, exec.Command(tool, "setup", "--launch", "--", "/bin/true").Run())
+	require.Error(t, exec.Command(tool, "__launch").Run())
 	setup := func() { run("setup", "--pid", strconv.Itoa(command.Process.Pid)) }
 	batch := func(count string) {
 		fmt.Fprintln(input, count)
@@ -369,6 +373,17 @@ func Test_Session_ContinuousRealLock(t *testing.T) {
 			run("stop")
 		}
 		setup()
+		failingHelper := t.TempDir()
+		require.NoError(t, os.Symlink(runtimeDirectory, filepath.Join(failingHelper, "bpftime")))
+		require.NoError(t, os.WriteFile(filepath.Join(failingHelper, "setup"), []byte("#!/bin/sh\nexit 1\n"), 0755))
+		failedStop := exec.Command(tool, "stop")
+		failedStop.Env = append(os.Environ(), "CP_LOCK_HELPER_DIR="+failingHelper)
+		require.Error(t, failedStop.Run(), "reset failure was accepted")
+		setup()
+		batch("2")
+		require.Equal(t, float64(4), sample(t, report(), true), "partial stop was reused instead of recovered")
+		run("stop")
+		setup()
 		batch("2")
 		backup := command.Path + ".original"
 		require.NoError(t, os.Link(command.Path, backup))
@@ -383,42 +398,4 @@ func Test_Session_ContinuousRealLock(t *testing.T) {
 		require.NoError(t, os.Rename(backup, command.Path))
 		run("stop")
 	}
-}
-
-// Test_Launch_PinnedImage verifies that initial exec survives atomic path replacement.
-func Test_Launch_PinnedImage(t *testing.T) {
-	helper := os.Getenv("CP_LOCK_HELPER_DIR")
-	if helper == "" {
-		t.Skip("build opt-in cp-lock before launch check")
-	}
-	path := filepath.Join(t.TempDir(), "launch-image")
-	original, err := os.ReadFile(os.Args[0])
-	require.NoError(t, err)
-	require.NoError(t, os.WriteFile(path, original, 0755))
-	image, err := os.Open(path)
-	require.NoError(t, err)
-	defer image.Close()
-	gate, release, err := os.Pipe()
-	require.NoError(t, err)
-	defer gate.Close()
-	defer release.Close()
-	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
-	defer cancel()
-	command := exec.CommandContext(ctx, filepath.Join(helper, "yanet-cp-lock"), "__launch", "", path, "-test.run=^Test_Workload_Child$")
-	command.ExtraFiles = []*os.File{gate, image}
-	command.Env = append(os.Environ(), "CP_LOCK_CHILD=1")
-	var output bytes.Buffer
-	command.Stdout, command.Stderr = &output, &output
-	require.NoError(t, command.Start())
-	t.Cleanup(func() { command.Process.Kill(); command.Wait() })
-	replacement := filepath.Join(t.TempDir(), "replacement")
-	other, err := os.ReadFile("/bin/false")
-	require.NoError(t, err)
-	require.NoError(t, os.WriteFile(replacement, other, 0755))
-	require.NoError(t, os.Rename(replacement, path))
-	_, err = release.Write([]byte{'x'})
-	require.NoError(t, err)
-	release.Close()
-	require.NoError(t, command.Wait(), "%s", output.String())
-	require.Contains(t, output.String(), "ready\n", "replacement executed instead of pinned workload")
 }

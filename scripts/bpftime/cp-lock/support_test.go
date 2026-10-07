@@ -10,15 +10,145 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"golang.org/x/sync/errgroup"
 )
+
+// controlFixture acknowledges one request from the test process.
+func controlFixture(t *testing.T, pid int) <-chan string {
+	t.Helper()
+	listener, err := net.ListenUnix("unix", &net.UnixAddr{Name: fmt.Sprintf("@bpftime-agent-%d", pid), Net: "unix"})
+	require.NoError(t, err)
+	var group errgroup.Group
+	requests := make(chan string, 1)
+	t.Cleanup(func() {
+		defer listener.Close()
+		listener.SetDeadline(time.Now().Add(time.Second))
+		require.NoError(t, group.Wait())
+	})
+	group.Go(func() error {
+		connection, err := listener.AcceptUnix()
+		if err != nil {
+			return err
+		}
+		defer connection.Close()
+		request, err := io.ReadAll(connection)
+		if err != nil {
+			return err
+		}
+		requests <- string(request)
+		// A rejected peer closes before sending a request.
+		_, _ = io.WriteString(connection, "ok\n")
+		return nil
+	})
+	return requests
+}
+
+// Test_Control_PeerIdentity verifies that acknowledgements belong to the target.
+func Test_Control_PeerIdentity(t *testing.T) {
+	for _, tc := range []struct {
+		Name string
+		PID  int
+	}{
+		{"target peer", os.Getpid()},
+		{"foreign peer", os.Getpid() + 100000000},
+	} {
+		t.Run(tc.Name, func(t *testing.T) {
+			requests := controlFixture(t, tc.PID)
+			acknowledged, err := control(tc.PID, "refresh")
+			if tc.PID == os.Getpid() {
+				require.NoError(t, err)
+				require.True(t, acknowledged)
+				require.Equal(t, "refresh", <-requests)
+			} else {
+				require.ErrorContains(t, err, "peer PID")
+				require.False(t, acknowledged)
+				require.Empty(t, <-requests, "foreign peer received a mutating request")
+			}
+		})
+	}
+}
+
+// Test_OpenRecord_MonitoringUID verifies read access across nonroot operators.
+func Test_OpenRecord_MonitoringUID(t *testing.T) {
+	if path := os.Getenv("CP_LOCK_MONITOR_RECORD"); path != "" {
+		file, err := openRecord(path, "report")
+		require.NoError(t, err)
+		file.Close()
+		return
+	}
+	if os.Geteuid() != 0 {
+		t.Skip("separate operator and monitoring UIDs require root")
+	}
+	file, err := os.CreateTemp("/tmp", "cp-lock-monitor-*")
+	require.NoError(t, err)
+	file.Close()
+	t.Cleanup(func() { os.Remove(file.Name()) })
+	require.NoError(t, os.Chmod(file.Name(), 0644))
+	require.NoError(t, os.Chown(file.Name(), 65533, -1))
+	command := exec.Command("/proc/self/exe", "-test.run=^Test_OpenRecord_MonitoringUID$")
+	command.SysProcAttr = &syscall.SysProcAttr{Credential: &syscall.Credential{Uid: 65534, Gid: 65534}}
+	command.Env = append(os.Environ(), "CP_LOCK_MONITOR_RECORD="+file.Name())
+	output, err := command.CombinedOutput()
+	require.NoError(t, err, "%s", output)
+}
+
+// Test_OpenRecord_Trust verifies that unsafe existing files are never trusted.
+func Test_OpenRecord_Trust(t *testing.T) {
+	for _, name := range []string{"new", "existing", "writable", "symlink", "hardlink", "fifo", "foreign owner"} {
+		for _, command := range []string{"setup", "report", "stop"} {
+			t.Run(name+"/"+command, func(t *testing.T) {
+				path := filepath.Join(t.TempDir(), "record")
+				if name != "new" && name != "fifo" {
+					require.NoError(t, os.WriteFile(path, []byte("retained"), 0640))
+				}
+				switch name {
+				case "writable":
+					require.NoError(t, os.Chmod(path, 0666))
+				case "symlink":
+					require.NoError(t, os.Rename(path, path+".target"))
+					require.NoError(t, os.Symlink(path+".target", path))
+				case "hardlink":
+					require.NoError(t, os.Link(path, path+".link"))
+				case "fifo":
+					require.NoError(t, syscall.Mkfifo(path, 0600))
+				case "foreign owner":
+					if os.Geteuid() != 0 {
+						t.Skip("changing file owner requires root")
+					}
+					require.NoError(t, os.Chown(path, 65534, -1))
+				}
+				file, err := openRecord(path, command)
+				if name == "new" && command != "setup" {
+					require.ErrorIs(t, err, os.ErrNotExist)
+					return
+				}
+				if name == "new" || name == "existing" {
+					require.NoError(t, err)
+					defer file.Close()
+					contents, err := io.ReadAll(file)
+					require.NoError(t, err)
+					if name == "existing" {
+						require.Equal(t, "retained", string(contents))
+					}
+				} else {
+					require.Error(t, err)
+					require.Nil(t, file)
+				}
+			})
+		}
+	}
+}
 
 // symbolFixture builds mixed Go/C debug data independently of test-binary stripping.
 func symbolFixture(t *testing.T) (string, string) {
@@ -201,7 +331,7 @@ func Test_Setup_MissingResidentSegment(t *testing.T) {
 					t.Fatalf("refusal created segment: %v", err)
 				}
 			}()
-			m.setup(os.Getpid(), true, "", nil)
+			m.setup(os.Getpid(), true, "")
 		})
 	}
 }
