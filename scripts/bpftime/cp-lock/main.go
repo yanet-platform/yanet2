@@ -71,6 +71,7 @@ func text(value []byte) string {
 
 func copyText(destination []byte, value string) {
 	check(len(value) < len(destination), "metadata value too long")
+	clear(destination)
 	copy(destination, value)
 }
 
@@ -160,7 +161,12 @@ func (m *Coordinator) stop() {
 		m.Record.Active = 2
 		m.save()
 		acknowledged, err := control(int(m.Record.PID), "detach")
-		check(err == nil && acknowledged, fmt.Sprintf("CP %d did not acknowledge detach; handlers retained", m.Record.PID))
+		if err != nil || !acknowledged {
+			check(!agentMapped(int(m.Record.PID)), fmt.Sprintf("CP %d did not acknowledge detach; handlers retained", m.Record.PID))
+			check(m.live(), "CP generation changed during cleanup; handlers retained")
+			m.Record.Active = -1
+			m.save()
+		}
 	}
 	m.reset(m.Name)
 	if m.Record.Active >= 0 {
@@ -216,6 +222,18 @@ func mappedBuild(pid int, identity string) {
 	check(err == nil && mapped == identity, "CP executable build-id changed; handlers retained")
 }
 
+func agentMapped(pid int) bool {
+	maps, err := os.ReadFile(fmt.Sprintf("/proc/%d/maps", pid))
+	must(err)
+	for _, line := range strings.Split(string(maps), "\n") {
+		_, path := mapFields(line)
+		if filepath.Base(strings.TrimSuffix(path, " (deleted)")) == "libbpftime-agent.so" {
+			return true
+		}
+	}
+	return false
+}
+
 func targetRuntime(pid int, name string, owned bool) {
 	data, err := os.ReadFile(fmt.Sprintf("/proc/%d/environ", pid))
 	must(err)
@@ -230,12 +248,7 @@ func targetRuntime(pid int, name string, owned bool) {
 	}
 	check(targetName == name, "target bpftime shared-memory name differs; refusing setup")
 	if !owned {
-		maps, err := os.ReadFile(fmt.Sprintf("/proc/%d/maps", pid))
-		must(err)
-		for _, line := range strings.Split(string(maps), "\n") {
-			_, path := mapFields(line)
-			check(filepath.Base(strings.TrimSuffix(path, " (deleted)")) != "libbpftime-agent.so", "unowned resident bpftime agent; refusing refresh")
-		}
+		check(!agentMapped(pid), "unowned resident bpftime agent; refusing refresh")
 	}
 }
 
@@ -252,6 +265,13 @@ func (m *Coordinator) setup(pid int, replace bool, debugFile string) {
 		m.owned()
 		m.compatible(false)
 		mappedBuild(pid, text(m.Record.Build[:]))
+		if debugFile != "" {
+			debug, identity, offsets := symbols(fmt.Sprintf("/proc/%d/exe", pid), debugFile)
+			check(identity == text(m.Record.Build[:]) && offsets == m.Record.Offsets, "debug symbols differ from installed probes; handlers retained")
+			check(m.live(), "CP generation changed during symbol update; handlers retained")
+			copyText(m.Record.Debug[:], debug)
+			m.save()
+		}
 		check(m.live(), "CP generation changed during reuse; handlers retained")
 		fmt.Println("compatible live session reused; counters preserved")
 		return
@@ -279,6 +299,7 @@ func (m *Coordinator) setup(pid int, replace bool, debugFile string) {
 			check(int(m.Record.PID) == pid, "session belongs to another live CP generation")
 			check(identity == text(m.Record.Build[:]), "owned CP executable build-id changed; handlers retained")
 			m.stop()
+			resident = m.Record.Active >= 0
 		}
 	} else {
 		check(!exists, "foreign/unidentified bpftime shared memory; refusing mutation")
@@ -350,7 +371,9 @@ func (m *Coordinator) setup(pid int, replace bool, debugFile string) {
 	if acknowledged, err := control(pid, "refresh shm_open_type=1"); err != nil || !acknowledged {
 		check(!resident, "resident runtime refresh failed; handlers retained")
 		_, err := run([]string{m.Runtime + "/bpftime", "--install-location", m.Runtime, "attach", strconv.Itoa(pid)})
-		check(err == nil, "agent attach failed; handlers retained")
+		if err != nil {
+			panic(fmt.Errorf("agent attach failed; run stop or setup --replace to recover: %w", err))
+		}
 	}
 
 	ready := false

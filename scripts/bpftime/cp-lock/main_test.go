@@ -89,6 +89,48 @@ func Test_Stop_FailedReset(t *testing.T) {
 	require.EqualValues(t, 2, m.Record.Active)
 }
 
+// Test_Stop_UnreachableAgent verifies that absent agents permit cleanup while
+// mapped agents without a detach acknowledgement retain their shared memory.
+func Test_Stop_UnreachableAgent(t *testing.T) {
+	for _, tc := range []struct {
+		Name, Library string
+		Resident      bool
+	}{
+		{"failed injection", "unrelated.so", false},
+		{"unresponsive resident agent", "libbpftime-agent.so", true},
+	} {
+		t.Run(tc.Name, func(t *testing.T) {
+			m, _ := statsFixture(t)
+			var err error
+			m.File, err = os.CreateTemp(t.TempDir(), "record")
+			require.NoError(t, err)
+			defer m.File.Close()
+			identity, err := buildID("/proc/self/exe")
+			require.NoError(t, err)
+			copyText(m.Record.Build[:], identity)
+			copyText(m.Record.Runtime[:], runtimeLabel)
+			m.Helper = t.TempDir()
+			require.NoError(t, os.WriteFile(filepath.Join(m.Helper, "setup"), []byte("#!/bin/sh\nexit 0\n"), 0755))
+			library, err := os.Create(filepath.Join(t.TempDir(), tc.Library))
+			require.NoError(t, err)
+			defer library.Close()
+			require.NoError(t, library.Truncate(4096))
+			mapping, err := syscall.Mmap(int(library.Fd()), 0, 4096, syscall.PROT_READ, syscall.MAP_PRIVATE)
+			require.NoError(t, err)
+			defer syscall.Munmap(mapping)
+			m.Record.Active = 2
+			if tc.Resident {
+				require.Panics(t, m.stop)
+				require.EqualValues(t, 2, m.Record.Active)
+			} else {
+				require.NotPanics(t, m.stop)
+				require.EqualValues(t, -1, m.Record.Active)
+			}
+			m.owned()
+		})
+	}
+}
+
 // statsFixture maps a private session payload with the production row layout.
 func statsFixture(t *testing.T) (*Coordinator, []byte) {
 	t.Helper()

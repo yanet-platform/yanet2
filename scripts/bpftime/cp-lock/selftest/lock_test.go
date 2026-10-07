@@ -236,6 +236,35 @@ func Test_Session_ContinuousRealLock(t *testing.T) {
 		require.True(t, scanner.Scan() && scanner.Text() == "done", "workload failed")
 	}
 	report := func() string { return run("report", "--format", "prometheus") }
+	if os.Getenv("CP_LOCK_SMOKE") == "" {
+		helperDirectory := helper
+		if helperDirectory == "" {
+			helperDirectory = "/usr/lib/yanet2/cp-lock"
+		}
+		failingHelper := t.TempDir()
+		failingRuntime := filepath.Join(failingHelper, "bpftime")
+		require.NoError(t, os.Mkdir(failingRuntime, 0755))
+		for _, file := range []string{"libbpftime-agent.so", "libbpftime-syscall-server.so", "BUILD"} {
+			require.NoError(t, os.Symlink(filepath.Join(runtimeDirectory, file), filepath.Join(failingRuntime, file)))
+		}
+		for _, file := range []string{"setup", "cp_lock.bpf.o"} {
+			require.NoError(t, os.Symlink(filepath.Join(helperDirectory, file), filepath.Join(failingHelper, file)))
+		}
+		require.NoError(t, os.WriteFile(filepath.Join(failingRuntime, "bpftime"), []byte("#!/bin/sh\nexit 1\n"), 0755))
+		for _, recovery := range []string{"stop", "replace"} {
+			failedAttach := exec.Command(tool, "setup", "--pid", strconv.Itoa(command.Process.Pid))
+			failedAttach.Env = append(os.Environ(), "CP_LOCK_HELPER_DIR="+failingHelper)
+			require.Error(t, failedAttach.Run(), "failed injection was accepted")
+			if recovery == "stop" {
+				run("stop")
+			} else {
+				run("setup", "--pid", strconv.Itoa(command.Process.Pid), "--replace")
+				batch("2")
+				require.Equal(t, float64(4), sample(t, report(), true), "failed attach could not be replaced")
+				run("stop")
+			}
+		}
+	}
 	setup()
 	batch("5")
 	first := sample(t, report(), true)
@@ -282,8 +311,26 @@ func Test_Session_ContinuousRealLock(t *testing.T) {
 	}
 	require.True(t, waited && waitMaximum, "contended real lock wait sum/maximum lower bound lost")
 	if os.Getenv("CP_LOCK_SMOKE") == "" {
-		// Offset readers do not consult installed runtime files.
+		debug := filepath.Join(t.TempDir(), "longer-matching-debug-image")
+		image, err := os.ReadFile(command.Path)
+		require.NoError(t, err)
+		require.NoError(t, os.WriteFile(debug, image, 0600))
+		run("setup", "--pid", strconv.Itoa(command.Process.Pid), "--debug-file", debug)
+		require.NoError(t, os.Remove(debug))
+		require.Error(t, exec.Command(tool, "report").Run(), "removed symbols remained readable")
+		run("setup", "--pid", strconv.Itoa(command.Process.Pid), "--debug-file", command.Path)
+		require.Equal(t, first+3, sample(t, report(), true), "updating symbols reset counters")
 		recordPath := "/dev/shm/" + name + ".cp-lock"
+		before, err := os.ReadFile(recordPath)
+		require.NoError(t, err)
+		for _, invalid := range []string{"/nonexistent-cp-lock-symbols", "/bin/false"} {
+			require.Error(t, exec.Command(tool, "setup", "--pid", strconv.Itoa(command.Process.Pid), "--debug-file", invalid).Run())
+			after, err := os.ReadFile(recordPath)
+			require.NoError(t, err)
+			require.Equal(t, before, after, "invalid symbols changed the live session")
+		}
+
+		// Offset readers do not consult installed runtime files.
 		metadata, err := os.ReadFile(recordPath)
 		require.NoError(t, err)
 		temporary := "/dev/shm/" + name + ".new-" + strconv.FormatUint(binary.NativeEndian.Uint64(metadata[24:32]), 10)

@@ -22,8 +22,9 @@ The table shows average and maximum durations for completed lock/unlock pairs.
 `HOLD P95~` estimates the 95th percentile using rounded log2 bucket upper edges.
 Statistics cover the whole session; rows are sorted by total hold time.
 
-Setup exits while profiling continues. Repeating setup preserves counters;
-add `--replace` to reset them with a collection gap. Stop before upgrading or
+Setup exits while profiling continues. Repeating setup preserves counters and
+accepts a new matching `--debug-file`; add `--replace` to reset counters with a
+collection gap. Stop before upgrading or
 uninstalling; the runtime stays mapped until CP exits. Attach requires ptrace
 permission, the original executable inode and matching debug symbols; executable
 paths cannot contain whitespace.
