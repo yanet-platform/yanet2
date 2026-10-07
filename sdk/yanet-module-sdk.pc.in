@@ -1,0 +1,11 @@
+yanet_srcroot=@YANET_SRCROOT@
+yanet_builddir=@YANET_BUILDDIR@
+
+Name: yanet-module-sdk
+Description: Build YANET dataplane module plugins against this configured yanet2 tree
+Version: @YANET_VERSION@
+Cflags: @SDK_INC_FLAGS@ @SDK_DEFINES@ -include rte_config.h
+# Nothing references yanet_module_abi_version at link time (the loader
+# dlsym's it), so the archive must be included wholesale or the linker
+# would drop its only object.
+Libs: -L${yanet_builddir}/sdk -Wl,--whole-archive -lmodule_abi_export -Wl,--no-whole-archive

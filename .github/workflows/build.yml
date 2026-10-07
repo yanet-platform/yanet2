@@ -499,3 +499,54 @@ jobs:
             tests/functional/converted/test.log
             /tmp/yanet2-lab-*/**/supervisor.log
             /tmp/yanet2-lab-*/**/last-report.json
+
+  sdk-example:
+    runs-on: ubuntu-24.04
+
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: true
+
+      - uses: ./.github/actions/apt-packages
+        timeout-minutes: 10
+        with:
+          packages: meson clang cmake python3-pyelftools libnuma-dev libpcap-dev git protobuf-compiler
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@1.88.0
+
+      - name: Cache rust
+        uses: Swatinem/rust-cache@v2.9.2
+        with:
+          shared-key: sdk-example
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - uses: hendrikmuhs/ccache-action@v1.2.23
+        name: ccache
+        with:
+          key: ${{ runner.os }}-sdk-example-cache
+          max-size: 2G
+          verbose: 2
+          save: ${{ github.ref == 'refs/heads/main' }}
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: "1.27.x"
+          cache: false
+          check-latest: true
+
+      - name: Restore Go module cache
+        uses: ./.github/actions/go-modcache
+
+      - name: Install Go Protobuf Plugins
+        uses: ./.github/actions/protoc-plugins
+
+      # The gate for out-of-tree module support: builds the SDK artifacts
+      # into build/sdk/, then builds and tests the reference module in
+      # sdk/example strictly through the SDK surfaces (own meson project,
+      # own go.mod, standalone CLI workspace).
+      - name: Build the module SDK and the reference module
+        run: |
+          meson setup build -Dbuildtype=release
+          make sdk-example

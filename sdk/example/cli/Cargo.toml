@@ -1,0 +1,25 @@
+# Standalone workspace: the yanet2 root workspace deliberately does not
+# include out-of-tree module CLIs (see the comment in the root Cargo.toml),
+# so this crate carries its own [workspace] table and is built through its
+# own manifest.
+[workspace]
+
+[package]
+name = "yanet-cli-example"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+rust-version = "1.88"
+
+[dependencies]
+ync = { path = "../../../cli/core", package = "yanet-cli" }
+clap = { version = "4.5", features = ["derive", "wrap_help"] }
+clap_complete = { version = "4.5", features = ["unstable-dynamic"] }
+prost = "0.14"
+tonic = { version = "0.14", features = ["gzip"] }
+tonic-prost = "0.14"
+serde = { version = "1", features = ["derive"] }
+
+[build-dependencies]
+ync-build = { path = "../../../cli/ync-build", package = "yanet-cli-build" }
