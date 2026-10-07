@@ -1,13 +1,55 @@
 package neigh
 
 import (
+	"context"
 	"net/netip"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
 	"github.com/vishvananda/netlink"
 )
+
+// observedContext delegates cancellation and reports its first error check.
+type observedContext struct {
+	context.Context
+	Checked chan struct{}
+	once    sync.Once
+}
+
+// Err preserves the underlying result while signaling the cancellation check.
+func (m *observedContext) Err() error {
+	result := m.Context.Err()
+	m.once.Do(func() { close(m.Checked) })
+	return result
+}
+
+// Test_NeighTable_SwapSourceContext_CancelledWhileWaitingPreservesObservation
+// verifies that lock contention cannot commit a cancelled table replacement.
+func Test_NeighTable_SwapSourceContext_CancelledWhileWaitingPreservesObservation(t *testing.T) {
+	m := NewNeighTable()
+	mustCreateSource(t, m, "publisher", 100, false)
+	entry := makeEntry("192.0.2.1", [6]byte{2, 0, 0, 0, 0, 1}, 100)
+	require.NoError(t, m.Add("publisher", []NeighbourEntry{entry}))
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	observation := &observedContext{Context: ctx, Checked: make(chan struct{})}
+	result := make(chan error, 1)
+	m.mu.Lock()
+	go func() {
+		result <- m.SwapSourceContext(observation, "publisher", map[netip.Addr]NeighbourEntry{})
+	}()
+	<-observation.Checked
+	cancel()
+	m.mu.Unlock()
+	require.ErrorIs(t, <-result, context.Canceled)
+	view, ok := m.SourceView("publisher")
+	require.True(t, ok)
+	actual, ok := view.Lookup(entry.NextHop)
+	require.True(t, ok, "cancelled replacement must retain the last accepted neighbour")
+	require.Equal(t, entry, actual)
+}
 
 func makeEntry(ip string, mac [6]byte, priority uint32) NeighbourEntry {
 	return NeighbourEntry{

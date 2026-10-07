@@ -1,6 +1,7 @@
 package neigh
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/netip"
@@ -237,7 +238,19 @@ func (m *NeighTable) Remove(table string, addrs []netip.Addr) error {
 //
 // Entries with zero priority inherit the source's default priority.
 func (m *NeighTable) SwapSource(name string, entries map[netip.Addr]NeighbourEntry) error {
+	return m.SwapSourceContext(context.Background(), name, entries)
+}
+
+// SwapSourceContext replaces a complete observation unless cancelled before
+// its serialized commit begins.
+func (m *NeighTable) SwapSourceContext(ctx context.Context, name string, entries map[netip.Addr]NeighbourEntry) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	return m.update(func() error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		src, ok := m.sources[name]
 		if !ok {
 			return fmt.Errorf("%w: %q", ErrSourceNotFound, name)

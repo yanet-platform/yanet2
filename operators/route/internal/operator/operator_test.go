@@ -19,6 +19,7 @@ import (
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
 	"github.com/yanet-platform/yanet2/common/go/operator"
 	"github.com/yanet-platform/yanet2/common/go/xcfg"
+	readinesspb "github.com/yanet-platform/yanet2/common/readinesspb/v1"
 	ynpb "github.com/yanet-platform/yanet2/controlplane/ynpb/v1"
 	"github.com/yanet-platform/yanet2/modules/route/controlplane/routepb/v1"
 	op "github.com/yanet-platform/yanet2/operators/route/internal/operator"
@@ -226,4 +227,93 @@ func Test_Operator_NeighbourOverGRPC_PushesTheFIBBeforeTheInterval(t *testing.T)
 	require.Equal(t, prefix.Addr(), start)
 	require.Equal(t, netip.MustParseAddr("10.10.0.255"), end)
 	require.Equal(t, "eth0", entries[0].GetNexthops()[0].GetDevice())
+}
+
+// Test_Operator_ExternalNeighbours_RefreshesAcceptedObservations verifies that
+// complete publications refresh readiness independently of forwarding changes,
+// while refused publications leave the last successful observation intact.
+func Test_Operator_ExternalNeighbours_RefreshesAcceptedObservations(t *testing.T) {
+	_, gatewayEndpoint := startFakeGateway(t)
+	operatorEndpoint := reserveEndpoint(t)
+	config := op.DefaultConfig()
+	config.NetlinkMonitor.Disabled = true
+	config.Readiness.ExpectBird = false
+	config.Server.Endpoint = xcfg.MustNonEmptyString(operatorEndpoint)
+	config.Gateways = []operator.GatewayConfig{{
+		Name: "gw0", Endpoint: xcfg.MustNonEmptyString(gatewayEndpoint),
+	}}
+	config.Reconcile.Interval = xcfg.MustNonZero(time.Hour)
+	runOperator(t, config)
+
+	connection, err := grpc.NewClient(operatorEndpoint, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, connection.Close()) })
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+	neighbours := operatorpb.NewNeighbourServiceClient(connection)
+	readiness := operatorpb.NewReadinessServiceClient(connection)
+	readScope := func() *readinesspb.Scope {
+		response, err := readiness.Ready(ctx, &readinesspb.ReadyRequest{}, grpc.WaitForReady(true))
+		require.NoError(t, err)
+		for _, scope := range response.GetScopes() {
+			if scope.GetName() == "neighbours" {
+				return scope
+			}
+		}
+		t.Fatal("neighbours readiness scope is missing")
+		return nil
+	}
+	previous := readScope()
+	require.Equal(t, readinesspb.State_STATE_READY, previous.GetState())
+	_, err = neighbours.CreateTable(ctx, &operatorpb.CreateNeighbourTableRequest{Name: "publisher"})
+	require.NoError(t, err)
+	require.True(t, proto.Equal(previous, readScope()), "table metadata is not an observation")
+
+	entries := entryRequest("192.0.2.1", [6]byte{2, 0, 0, 0, 0, 1}, "eth0").GetEntries()
+	for _, tc := range []struct {
+		name    string
+		entries []*operatorpb.NeighbourEntry
+	}{
+		{name: "first empty observation"},
+		{name: "first populated observation", entries: entries},
+		{name: "identical populated observation", entries: entries},
+		{name: "withdrawal observation"},
+		{name: "identical empty observation"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := neighbours.SwapNeighbours(ctx, &operatorpb.SwapNeighboursRequest{
+				Table: "publisher", Entries: tc.entries,
+			})
+			require.NoError(t, err)
+			current := readScope()
+			require.Equal(t, readinesspb.State_STATE_READY, current.GetState())
+			require.True(t, current.GetObservedAt().AsTime().After(previous.GetObservedAt().AsTime()),
+				"accepted publication must advance its observation timestamp")
+			require.True(t, proto.Equal(previous.GetLastTransitionTime(), current.GetLastTransitionTime()),
+				"a fresh observation must not create a state transition")
+			previous = current
+		})
+	}
+
+	invalid := entryRequest("192.0.2.1", [6]byte{2, 0, 0, 0, 0, 1}, "eth0").GetEntries()
+	invalid[0].NextHop = &commonpb.IPAddress{Addr: []byte{1, 2, 3}}
+	for _, tc := range []struct {
+		name    string
+		request *operatorpb.SwapNeighboursRequest
+		code    codes.Code
+	}{
+		{name: "unknown table", request: &operatorpb.SwapNeighboursRequest{Table: "missing"}, code: codes.NotFound},
+		{name: "invalid snapshot", request: &operatorpb.SwapNeighboursRequest{Table: "publisher", Entries: invalid}, code: codes.InvalidArgument},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := neighbours.SwapNeighbours(ctx, tc.request)
+			require.Equal(t, tc.code, status.Code(err))
+			require.True(t, proto.Equal(previous, readScope()), "a rejected publication must not refresh readiness")
+		})
+	}
+	cancelled, stop := context.WithCancel(ctx)
+	stop()
+	_, err = neighbours.SwapNeighbours(cancelled, &operatorpb.SwapNeighboursRequest{Table: "publisher"})
+	require.Equal(t, codes.Canceled, status.Code(err))
+	require.True(t, proto.Equal(previous, readScope()), "a cancelled publication must not refresh readiness")
 }
