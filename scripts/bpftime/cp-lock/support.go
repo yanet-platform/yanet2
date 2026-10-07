@@ -13,6 +13,7 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
@@ -197,19 +198,73 @@ func translate(image *elf.File, value uint64, fromFile bool) (uint64, error) {
 	return 0, fmt.Errorf("address outside loadable image")
 }
 
-func sourceLine(path string, address uint64, cache map[string]*dwarf.Data) (string, error) {
+func debugData(path string, cache map[string]*dwarf.Data) (*dwarf.Data, error) {
 	data := cache[path]
 	if data == nil {
 		image, err := elf.Open(path)
 		if err != nil {
-			return "", err
+			return nil, err
 		}
 		data, err = image.DWARF()
 		image.Close()
 		if err != nil {
-			return "", err
+			return nil, err
 		}
 		cache[path] = data
+	}
+	return data, nil
+}
+
+func sourceRoot(path string, cache map[string]*dwarf.Data) (string, string) {
+	data, err := debugData(path, cache)
+	if err != nil {
+		return "", ""
+	}
+	reader := data.Reader()
+	for {
+		unit, err := reader.Next()
+		if err != nil || unit == nil {
+			return "", ""
+		}
+		if unit.Tag != dwarf.TagCompileUnit {
+			continue
+		}
+		name, _ := unit.Val(dwarf.AttrName).(string)
+		directory, _ := unit.Val(dwarf.AttrCompDir).(string)
+		if !filepath.IsAbs(name) {
+			name = filepath.Join(directory, name)
+		}
+		name = filepath.Clean(name)
+		if root, found := strings.CutSuffix(name, "/lib/controlplane/config/zone.c"); found && filepath.IsAbs(root) {
+			return root, directory
+		}
+		reader.SkipChildren()
+	}
+}
+
+func normalizeLocation(location, root, directory string) string {
+	separator := strings.LastIndexByte(location, ':')
+	if root == "" || separator < 0 {
+		return location
+	}
+	path := location[:separator]
+	if path == "??" {
+		return location
+	}
+	if !filepath.IsAbs(path) {
+		path = filepath.Join(directory, path)
+	}
+	relative, err := filepath.Rel(root, path)
+	if err != nil || relative == ".." || strings.HasPrefix(relative, "../") {
+		return location
+	}
+	return relative + location[separator:]
+}
+
+func sourceLine(path string, address uint64, cache map[string]*dwarf.Data) (string, error) {
+	data, err := debugData(path, cache)
+	if err != nil {
+		return "", err
 	}
 
 	unit, err := data.Reader().SeekPC(address)

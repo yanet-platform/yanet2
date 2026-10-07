@@ -54,7 +54,8 @@ func controlFixture(t *testing.T, pid int) <-chan string {
 	return requests
 }
 
-// Test_Control_PeerIdentity verifies that acknowledgements belong to the target.
+// Test_Control_PeerIdentity verifies that acknowledgements belong to the
+// target.
 func Test_Control_PeerIdentity(t *testing.T) {
 	for _, tc := range []struct {
 		Name string
@@ -150,7 +151,8 @@ func Test_OpenRecord_Trust(t *testing.T) {
 	}
 }
 
-// symbolFixture builds mixed Go/C debug data independently of test-binary stripping.
+// symbolFixture builds mixed Go/C debug data independently of test-binary
+// stripping.
 func symbolFixture(t *testing.T) (string, string) {
 	t.Helper()
 	directory := t.TempDir()
@@ -190,7 +192,8 @@ func symbolAddress(t *testing.T, path, name string) uint64 {
 	return 0
 }
 
-// Test_SourceLine_MixedDebug verifies that C and Go lines survive split debug packaging.
+// Test_SourceLine_MixedDebug verifies that C and Go lines survive split
+// debug packaging.
 func Test_SourceLine_MixedDebug(t *testing.T) {
 	image, debug := symbolFixture(t)
 	cache := map[string]*dwarf.Data{}
@@ -213,7 +216,70 @@ func Test_SourceLine_MixedDebug(t *testing.T) {
 	}
 }
 
-// Test_Generation_ReadFailure verifies that only confirmed exit permits reclaim.
+// Test_SourceRoot_BuildPaths verifies checkout-independent paths from C
+// debug data.
+func Test_SourceRoot_BuildPaths(t *testing.T) {
+	root := t.TempDir()
+	directory := filepath.Join(root, "build-debug")
+	source := filepath.Join(root, "lib/controlplane/config/zone.c")
+	require.NoError(t, os.MkdirAll(filepath.Dir(source), 0755))
+	require.NoError(t, os.MkdirAll(directory, 0755))
+	require.NoError(t, os.WriteFile(source, []byte("int lockCaller(void) { return 42; }\n"), 0600))
+	for _, tc := range []struct {
+		Name, Source, Root, Map string
+	}{
+		{"relative source", "../lib/controlplane/config/zone.c", root, ""},
+		{"absolute source", source, root, ""},
+		{"package debug path", source, "/usr/src/yanet2", "-fdebug-prefix-map=" + root + "=/usr/src/yanet2"},
+	} {
+		t.Run(tc.Name, func(t *testing.T) {
+			image := filepath.Join(t.TempDir(), "zone.o")
+			arguments := []string{"-g", "-c", tc.Source, "-o", image}
+			if tc.Map != "" {
+				arguments = append(arguments, tc.Map)
+			}
+			command := exec.Command(environment("CC", "cc"), arguments...)
+			command.Dir = directory
+			output, err := command.CombinedOutput()
+			require.NoError(t, err, "%s", output)
+			foundRoot, foundDirectory := sourceRoot(image, map[string]*dwarf.Data{})
+			require.Equal(t, tc.Root, foundRoot)
+			require.Equal(t, filepath.Join(tc.Root, "build-debug"), foundDirectory)
+			require.Equal(t, "lib/controlplane/config/zone.c:1", normalizeLocation("../lib/controlplane/config/zone.c:1", foundRoot, foundDirectory))
+		})
+	}
+}
+
+// Test_NormalizeLocation_SourceIdentity verifies that shortening preserves
+// distinct module paths, unknown locations and files outside the checkout.
+func Test_NormalizeLocation_SourceIdentity(t *testing.T) {
+	for _, tc := range []struct {
+		Name, Location, Want, Directory string
+	}{
+		{"relative source", "../lib/controlplane/config/zone.c:579", "lib/controlplane/config/zone.c:579", "/checkout/build"},
+		{"absolute source", "/checkout/lib/controlplane/config/zone.c:579", "lib/controlplane/config/zone.c:579", "/checkout/build"},
+		{"clean path", "/checkout/lib/controlplane/../controlplane/config/zone.c:579", "lib/controlplane/config/zone.c:579", "/checkout/build"},
+		{"route module", "../modules/route/api/controlplane.c:184", "modules/route/api/controlplane.c:184", "/checkout/build"},
+		{"forward module", "../modules/forward/api/controlplane.c:184", "modules/forward/api/controlplane.c:184", "/checkout/build"},
+		{"module compilation directory", "api/controlplane.c:184", "modules/route/api/controlplane.c:184", "/checkout/modules/route"},
+		{"root compilation directory", "modules/route/api/controlplane.c:184", "modules/route/api/controlplane.c:184", "/checkout"},
+		{"colon in filename", "../modules/route/caller:extra.c:3", "modules/route/caller:extra.c:3", "/checkout/build"},
+		{"unknown line", "??:?", "??:?", "/checkout/build"},
+		{"unknown zero", "??:0", "??:0", "/checkout/build"},
+		{"outside checkout", "/usr/include/caller.h:5", "/usr/include/caller.h:5", "/checkout/build"},
+		{"similar checkout prefix", "/checkout-other/lib/caller.c:5", "/checkout-other/lib/caller.c:5", "/checkout/build"},
+		{"relative external file", "../../other/caller.c:5", "../../other/caller.c:5", "/checkout/build"},
+		{"no source line", "unknown", "unknown", "/checkout/build"},
+	} {
+		t.Run(tc.Name, func(t *testing.T) {
+			require.Equal(t, tc.Want, normalizeLocation(tc.Location, "/checkout", tc.Directory))
+			require.Equal(t, tc.Location, normalizeLocation(tc.Location, "", ""))
+		})
+	}
+}
+
+// Test_Generation_ReadFailure verifies that only confirmed exit permits
+// reclaim.
 func Test_Generation_ReadFailure(t *testing.T) {
 	cases := []struct {
 		Name      string
@@ -238,7 +304,8 @@ func Test_Generation_ReadFailure(t *testing.T) {
 	}
 }
 
-// Test_Generation_StatParsing verifies that malformed records fail and process-name delimiters preserve generation.
+// Test_Generation_StatParsing verifies that malformed records fail and
+// process-name delimiters preserve generation.
 func Test_Generation_StatParsing(t *testing.T) {
 	fields := append([]string{"S"}, strings.Fields(strings.Repeat("0 ", 18))...)
 	fields = append(fields, "12345")
@@ -270,7 +337,8 @@ func Test_MapFields_PathSpacing(t *testing.T) {
 	}
 }
 
-// Test_BuildID_NoteDiscovery verifies that renamed note sections retain build identity.
+// Test_BuildID_NoteDiscovery verifies that renamed note sections retain
+// build identity.
 func Test_BuildID_NoteDiscovery(t *testing.T) {
 	fixture := filepath.Join(t.TempDir(), "image")
 	notes := filepath.Join(t.TempDir(), "notes")
@@ -307,7 +375,8 @@ func Test_BuildID_NoteDiscovery(t *testing.T) {
 	}
 }
 
-// Test_Setup_MissingResidentSegment verifies that rebinding is refused for a live agent's mapping.
+// Test_Setup_MissingResidentSegment verifies that rebinding is refused for a
+// live agent's mapping.
 func Test_Setup_MissingResidentSegment(t *testing.T) {
 	generation, err := startTime(os.Getpid())
 	if err != nil {
@@ -336,7 +405,8 @@ func Test_Setup_MissingResidentSegment(t *testing.T) {
 	}
 }
 
-// Test_Runtime_ResidentMismatch verifies that an incompatible session cannot be detached.
+// Test_Runtime_ResidentMismatch verifies that an incompatible session cannot
+// be detached.
 func Test_Runtime_ResidentMismatch(t *testing.T) {
 	generation, err := startTime(os.Getpid())
 	if err != nil {
@@ -355,7 +425,8 @@ func Test_Runtime_ResidentMismatch(t *testing.T) {
 	m.residentCompatible()
 }
 
-// Test_Runtime_EnvironmentRefusal verifies that kernel and alternate VM modes are refused.
+// Test_Runtime_EnvironmentRefusal verifies that kernel and alternate VM
+// modes are refused.
 func Test_Runtime_EnvironmentRefusal(t *testing.T) {
 	for _, name := range []string{"BPFTIME_RUN_WITH_KERNEL", "BPFTIME_DISABLE_JIT", "BPFTIME_VM_NAME"} {
 		t.Run(name, func(t *testing.T) {
@@ -370,7 +441,8 @@ func Test_Runtime_EnvironmentRefusal(t *testing.T) {
 	}
 }
 
-// Test_Generation_ZombieLeader verifies that surviving threads retain ownership.
+// Test_Generation_ZombieLeader verifies that surviving threads retain
+// ownership.
 func Test_Generation_ZombieLeader(t *testing.T) {
 	fixture := filepath.Join(t.TempDir(), "threads.c")
 	image := strings.TrimSuffix(fixture, ".c")
@@ -406,7 +478,8 @@ int main(void) { pthread_t thread; pthread_create(&thread, NULL, waiter, NULL); 
 	t.Fatal("leader did not become a zombie")
 }
 
-// Test_Runtime_TargetEnvironment verifies that targets cannot choose another segment or backend.
+// Test_Runtime_TargetEnvironment verifies that targets cannot choose another
+// segment or backend.
 func Test_Runtime_TargetEnvironment(t *testing.T) {
 	for _, tc := range []struct{ Environment, Message string }{
 		{"BPFTIME_GLOBAL_SHM_NAME=another-cp-lock-segment", "shared-memory name differs"},

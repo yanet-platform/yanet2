@@ -49,7 +49,8 @@ func Test_Quote_UTF8(t *testing.T) {
 	require.Equal(t, "caller\uFFFD", rows[0].Name)
 }
 
-// Test_Stop_FailedReset verifies that a partial stop cannot be reused as active.
+// Test_Stop_FailedReset verifies that a partial stop cannot be reused as
+// active.
 func Test_Stop_FailedReset(t *testing.T) {
 	m, _ := statsFixture(t)
 	var err error
@@ -268,8 +269,9 @@ func Test_ReadStats_InvalidMapping(t *testing.T) {
 	}
 }
 
-// Test_Symbolize_ReturnAddressFallback verifies translated callers when GNU lacks a line.
-func Test_Symbolize_ReturnAddressFallback(t *testing.T) {
+// Test_Symbolize_TrustedTool verifies native callers resolve without executing
+// a replacement tool from the caller's search path.
+func Test_Symbolize_TrustedTool(t *testing.T) {
 	path, debug := symbolFixture(t)
 	address := symbolAddress(t, debug, "nativeCaller")
 	image, err := elf.Open(path)
@@ -286,29 +288,61 @@ func Test_Symbolize_ReturnAddressFallback(t *testing.T) {
 	}
 	require.NotEmpty(t, maps)
 
-	for _, tc := range []struct {
-		Name, GNU, Expected string
-	}{
-		{"unknown source line", "??:?", "fixture.go:3"},
-		{"zero source line", "??:0", "fixture.go:3"},
-		{"GNU discriminator", "fixture.go:42 (discriminator 2)", "fixture.go:42"},
-	} {
-		t.Run(tc.Name, func(t *testing.T) {
-			directory := t.TempDir()
-			script := "#!/bin/sh\nprintf '%s\\n' 'nativeCaller' '" + tc.GNU + "'\n"
-			require.NoError(t, os.WriteFile(filepath.Join(directory, "addr2line"), []byte(script), 0755))
-			t.Setenv("PATH", directory+":"+os.Getenv("PATH"))
-			m := Coordinator{}
-			name, line := m.symbolize(relocation+address+1, maps, map[string]*dwarf.Data{})
-			require.Equal(t, "nativeCaller", name)
-			require.Equal(t, tc.Expected, filepath.Base(line))
+	directory := t.TempDir()
+	marker := filepath.Join(directory, "executed")
+	script := "#!/bin/sh\nprintf executed > \"" + marker + "\"\nexit 1\n"
+	require.NoError(t, os.WriteFile(filepath.Join(directory, "addr2line"), []byte(script), 0755))
+	t.Setenv("PATH", directory+":"+os.Getenv("PATH"))
+	m := Coordinator{}
+	name, line := m.symbolize(relocation+address+1, maps, map[string]*dwarf.Data{})
+	require.Equal(t, "nativeCaller", name)
+	require.Equal(t, "fixture.go:3", filepath.Base(line))
+	require.NoFileExists(t, marker)
+}
+
+// Test_CleanupTemporary_Ownership verifies interrupted publication is reclaimed
+// whether the final name exists, while foreign files and symlinks survive.
+func Test_CleanupTemporary_Ownership(t *testing.T) {
+	for _, name := range []string{"final present", "final absent", "foreign regular", "foreign symlink"} {
+		t.Run(name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "segment")
+			require.NoError(t, os.WriteFile(path, []byte("owned"), 0600))
+			info, err := os.Stat(path)
+			require.NoError(t, err)
+			m := Coordinator{Path: path, Record: Record{Magic: recordMagic, Inode: info.Sys().(*syscall.Stat_t).Ino, Session: 7}}
+			temporary := path + ".new-7"
+			switch name {
+			case "foreign regular":
+				require.NoError(t, os.WriteFile(temporary, []byte("foreign"), 0600))
+			case "foreign symlink":
+				require.NoError(t, os.Symlink(path, temporary))
+			default:
+				require.NoError(t, os.Link(path, temporary))
+			}
+			if name == "final absent" {
+				require.NoError(t, os.Remove(path))
+			}
+			m.cleanupTemporary()
+			m.cleanupTemporary()
+			_, err = os.Lstat(temporary)
+			if name == "foreign regular" || name == "foreign symlink" {
+				require.NoError(t, err)
+			} else {
+				require.True(t, os.IsNotExist(err))
+			}
+			if name != "final absent" {
+				data, err := os.ReadFile(path)
+				require.NoError(t, err)
+				require.Equal(t, "owned", string(data))
+			}
 		})
 	}
 }
 
-// Test_MergeSites_SourceIdentity verifies that equal source sites form one coherent histogram.
+// Test_MergeSites_SourceIdentity verifies that equal source sites form one
+// coherent histogram.
 func Test_MergeSites_SourceIdentity(t *testing.T) {
-	first := Row{Name: "caller", Line: "caller.c:42"}
+	first := Row{Name: "caller", Line: normalizeLocation("/checkout/modules/route/caller.c:42", "/checkout", "/checkout/build")}
 	first.Stats.address = 0x1000
 	first.Stats.count = 9
 	first.Stats.fail_count = 1
@@ -318,7 +352,7 @@ func Test_MergeSites_SourceIdentity(t *testing.T) {
 	first.Stats.hold_max_ns = 10
 	first.Stats.hist[3] = 2
 
-	second := Row{Name: first.Name, Line: first.Line}
+	second := Row{Name: first.Name, Line: normalizeLocation("../modules/route/caller.c:42", "/checkout", "/checkout/build")}
 	second.Stats.address = 0x2000
 	second.Stats.count = 7
 	second.Stats.fail_count = 2
@@ -328,10 +362,12 @@ func Test_MergeSites_SourceIdentity(t *testing.T) {
 	second.Stats.hold_max_ns = 16
 	second.Stats.hist[4] = 1
 
-	distinct := Row{Name: first.Name, Line: "caller.c:43"}
-	rows := mergeSites([]Row{first, second, distinct})
-	require.Len(t, rows, 2)
+	distinct := Row{Name: first.Name, Line: "modules/route/caller.c:43"}
+	distinctFile := Row{Name: first.Name, Line: normalizeLocation("../modules/forward/caller.c:42", "/checkout", "/checkout/build")}
+	rows := mergeSites([]Row{first, second, distinct, distinctFile})
+	require.Len(t, rows, 3)
 	require.Equal(t, distinct, rows[1], "different source line merged")
+	require.Equal(t, distinctFile, rows[2], "different source file merged")
 	stats := rows[0].Stats
 	require.EqualValues(t, 3, stats.count)
 	require.EqualValues(t, 3, stats.fail_count)

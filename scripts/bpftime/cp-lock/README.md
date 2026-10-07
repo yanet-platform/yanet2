@@ -5,9 +5,10 @@ Install `yanet2-cp-lock-bpftime` and its exact-version dependency
 [bpftime v0.9.0](https://github.com/eunomia-bpf/bpftime/tree/v0.9.0).
 Userspace probes measure acquisitions, failed try-locks, wait/hold times and
 hold histograms per caller in one CP process.
-Prometheus `site` is `function@file:line`; calls at the same source location
-are combined. Unavailable source locations appear as `??:?` and are combined
-within each function.
+Prometheus `site` is `function@file:line`; CP source paths are repository-relative
+when the debug data identifies the root. External paths are preserved.
+Calls at the same source location are combined. Unavailable source locations
+appear as `??:?` and are combined within each function.
 
 ```sh
 sudo yanet-cp-lock setup --pid "$CP_PID"

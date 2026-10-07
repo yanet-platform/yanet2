@@ -23,6 +23,7 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+	"text/tabwriter"
 	"time"
 	"unsafe"
 )
@@ -124,6 +125,21 @@ func (m *Coordinator) residentCompatible() {
 
 func (m *Coordinator) owned() {
 	check(m.Record.Inode != 0 && m.inode() == m.Record.Inode, "owned shared-memory inode changed or is missing")
+}
+
+func (m *Coordinator) cleanupTemporary() {
+	if m.Record.Magic != recordMagic || m.Record.Inode == 0 {
+		return
+	}
+	temporary := m.Path + ".new-" + strconv.FormatUint(m.Record.Session, 10)
+	info, err := os.Lstat(temporary)
+	if os.IsNotExist(err) {
+		return
+	}
+	must(err)
+	if info.Mode().IsRegular() && info.Sys().(*syscall.Stat_t).Ino == m.Record.Inode {
+		must(os.Remove(temporary))
+	}
 }
 
 func (m *Coordinator) reset(name string) {
@@ -229,6 +245,7 @@ func (m *Coordinator) setup(pid int, replace bool, debugFile string) {
 	resident := oldLive && m.Record.Active >= 0
 	check(exists || !resident, "owned shared memory is missing while its CP agent remains resident; an operator-managed CP exit is required before setup")
 	m.residentCompatible()
+	m.cleanupTemporary()
 	check(runtimeLabel != "", "missing bundled runtime identity; build with make")
 	if exists && oldLive && m.Record.Active == 1 && int(m.Record.PID) == pid && !replace {
 		m.owned()
@@ -265,13 +282,6 @@ func (m *Coordinator) setup(pid int, replace bool, debugFile string) {
 		}
 	} else {
 		check(!exists, "foreign/unidentified bpftime shared memory; refusing mutation")
-	}
-
-	if !exists && m.Record.Magic == recordMagic && m.Record.Inode != 0 {
-		temporary := m.Path + ".new-" + strconv.FormatUint(m.Record.Session, 10)
-		if info, err := os.Stat(temporary); err == nil && info.Sys().(*syscall.Stat_t).Ino == m.Record.Inode {
-			must(os.Remove(temporary))
-		}
 	}
 
 	m.Record = Record{Magic: recordMagic, ABI: offsetABI, Schema: C.CP_LOCK_SCHEMA, PID: int32(pid), Start: generation, Active: -1, Session: uint64(time.Now().UnixNano()), Offsets: offsets}
@@ -413,7 +423,7 @@ func (m *Coordinator) symbolize(address uint64, maps []byte, cache map[string]*d
 		executable.Close()
 		must(err)
 
-		output, err := run([]string{"addr2line", "-f", "-e", debug, fmt.Sprintf("0x%x", virtual)})
+		output, err := run([]string{"/usr/bin/addr2line", "-f", "-e", debug, fmt.Sprintf("0x%x", virtual)})
 		must(err)
 		lines := strings.Split(string(output), "\n")
 		check(len(lines) >= 2, "invalid addr2line output")
@@ -422,6 +432,13 @@ func (m *Coordinator) symbolize(address uint64, maps []byte, cache map[string]*d
 		if strings.HasPrefix(location, "??:") {
 			if line, err := sourceLine(debug, virtual, cache); err == nil {
 				location = line
+			}
+		}
+		if data, err := debugData(debug, cache); err == nil {
+			if unit, err := data.Reader().SeekPC(virtual); err == nil {
+				root, _ := sourceRoot(debug, cache)
+				directory, _ := unit.Val(dwarf.AttrCompDir).(string)
+				location = normalizeLocation(location, root, directory)
 			}
 		}
 
@@ -513,22 +530,36 @@ func (m *Coordinator) report(prometheus bool) string {
 
 	var output strings.Builder
 	if !prometheus {
-		fmt.Fprintf(&output, "pid=%d generation=%d session=%d\nsite count failed wait_sum_ms hold_sum_ms hold_max_ms file:line\n", m.Record.PID, m.Record.Start, m.Record.Session)
-	} else {
-		for _, metric := range []string{"cp_lock_acquisitions_total counter", "cp_lock_failed_try_total counter", "cp_lock_wait_seconds_total counter", "cp_lock_hold_seconds histogram", "cp_lock_wait_max_seconds gauge", "cp_lock_hold_max_seconds gauge"} {
-			fmt.Fprintf(&output, "# TYPE %s\n", metric)
+		fmt.Fprintf(&output, "CP lock profile | PID %d\nSession: %d  Generation: %d\n\n",
+			m.Record.PID, m.Record.Session, m.Record.Start,
+		)
+		table := tabwriter.NewWriter(&output, 0, 4, 2, ' ', tabwriter.AlignRight)
+		fmt.Fprintln(table, "COUNT\tFAILED TRY\tWAIT TOTAL (ms)\tHOLD TOTAL (ms)\tHOLD MAX (ms)\t  CALL SITE")
+		for _, row := range rows {
+			stats := row.Stats
+			fmt.Fprintf(table, "%d\t%d\t%.3f\t%.3f\t%.3f\t  %s (%s)\n",
+				uint64(stats.count), uint64(stats.fail_count),
+				float64(stats.wait_sum_ns)/1e6,
+				float64(stats.hold_sum_ns)/1e6,
+				float64(stats.hold_max_ns)/1e6,
+				row.Name, row.Line,
+			)
 		}
-		fmt.Fprintf(&output, "# TYPE cp_lock_session_info gauge\ncp_lock_session_info{pid=\"%d\",generation=\"%d\",boot_id=\"%s\",session=\"%d\",build_id=\"%s\"} 1\n", m.Record.PID, m.Record.Start, text(m.Record.Boot[:]), m.Record.Session, text(m.Record.Build[:]))
-		fmt.Fprintf(&output, "# TYPE cp_lock_sample_time_seconds gauge\ncp_lock_sample_time_seconds %.17g\n", float64(time.Now().UnixNano())/1e9)
+		must(table.Flush())
+		fmt.Fprintf(&output, "\nDropped events: %d  Site overflow: %d\n", uint64(counts.drops), uint64(counts.overflow))
+		check(m.live(), "CP exited during report")
+		return output.String()
 	}
+
+	for _, metric := range []string{"cp_lock_acquisitions_total counter", "cp_lock_failed_try_total counter", "cp_lock_wait_seconds_total counter", "cp_lock_hold_seconds histogram", "cp_lock_wait_max_seconds gauge", "cp_lock_hold_max_seconds gauge"} {
+		fmt.Fprintf(&output, "# TYPE %s\n", metric)
+	}
+	fmt.Fprintf(&output, "# TYPE cp_lock_session_info gauge\ncp_lock_session_info{pid=\"%d\",generation=\"%d\",boot_id=\"%s\",session=\"%d\",build_id=\"%s\"} 1\n", m.Record.PID, m.Record.Start, text(m.Record.Boot[:]), m.Record.Session, text(m.Record.Build[:]))
+	fmt.Fprintf(&output, "# TYPE cp_lock_sample_time_seconds gauge\ncp_lock_sample_time_seconds %.17g\n", float64(time.Now().UnixNano())/1e9)
 
 	comm := readLine(fmt.Sprintf("/proc/%d/comm", m.Record.PID))
 	for _, row := range rows {
 		stats := row.Stats
-		if !prometheus {
-			fmt.Fprintf(&output, "%s %d %d %.17g %.17g %.17g %s\n", row.Name, uint64(stats.count), uint64(stats.fail_count), float64(stats.wait_sum_ns)/1e6, float64(stats.hold_sum_ns)/1e6, float64(stats.hold_max_ns)/1e6, row.Line)
-			continue
-		}
 		labels := fmt.Sprintf("pid=\"%d\",site=\"%s\",comm=\"%s\"", m.Record.PID, quote(row.Name+"@"+row.Line), quote(comm))
 		metric := func(name string, value float64) { fmt.Fprintf(&output, "%s{%s} %.17g\n", name, labels, value) }
 		metric("cp_lock_acquisitions_total", float64(stats.count))
@@ -553,15 +584,7 @@ func (m *Coordinator) report(prometheus bool) string {
 		Name  string
 		Value uint64
 	}{{"drops", uint64(counts.drops)}, {"site_overflow", uint64(counts.overflow)}} {
-		if prometheus {
-			fmt.Fprintf(&output, "# TYPE cp_lock_%s_total counter\ncp_lock_%s_total %d\n", counter.Name, counter.Name, counter.Value)
-		} else {
-			name := counter.Name
-			if name == "site_overflow" {
-				name = "overflow"
-			}
-			fmt.Fprintf(&output, "%s %d\n", name, counter.Value)
-		}
+		fmt.Fprintf(&output, "# TYPE cp_lock_%s_total counter\ncp_lock_%s_total %d\n", counter.Name, counter.Name, counter.Value)
 	}
 
 	check(m.live(), "CP exited during report")

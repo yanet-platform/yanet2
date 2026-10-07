@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"debug/elf"
 	_ "embed"
+	"encoding/binary"
 	"encoding/hex"
 	"fmt"
 	"io"
@@ -26,7 +27,8 @@ import (
 //go:embed lock.go
 var lockSource string
 
-// Test_Workload_Child verifies that every critical section stays on one C thread.
+// Test_Workload_Child verifies that every critical section stays on one C
+// thread.
 func Test_Workload_Child(t *testing.T) {
 	if os.Getenv("CP_LOCK_CHILD") == "" {
 		return
@@ -51,7 +53,8 @@ func Test_Workload_Child(t *testing.T) {
 	os.Exit(0)
 }
 
-// child starts only a workload owned by this test and returns its command channel.
+// child starts only a workload owned by this test and returns its command
+// channel.
 func child(t *testing.T) (*exec.Cmd, io.WriteCloser, *bufio.Scanner) {
 	t.Helper()
 	executable := filepath.Join(t.TempDir(), "workload")
@@ -181,7 +184,8 @@ func installedSymbols(t *testing.T) {
 	require.False(t, count != 3, "packaged target lock symbols missing")
 }
 
-// Test_Session_ContinuousRealLock verifies that counters survive reader death and CP survives explicit detach.
+// Test_Session_ContinuousRealLock verifies that counters survive reader
+// death and CP survives explicit detach.
 func Test_Session_ContinuousRealLock(t *testing.T) {
 	helper := os.Getenv("CP_LOCK_HELPER_DIR")
 	tool := filepath.Join(helper, "yanet-cp-lock")
@@ -280,6 +284,12 @@ func Test_Session_ContinuousRealLock(t *testing.T) {
 		recordPath := "/dev/shm/" + name + ".cp-lock"
 		metadata, err := os.ReadFile(recordPath)
 		require.NoError(t, err)
+		temporary := "/dev/shm/" + name + ".new-" + strconv.FormatUint(binary.NativeEndian.Uint64(metadata[24:32]), 10)
+		require.NoError(t, os.Link("/dev/shm/"+name, temporary))
+		t.Cleanup(func() { os.Remove(temporary) })
+		setup()
+		require.NoFileExists(t, temporary, "reuse left an interrupted publication link")
+		require.Equal(t, first+3, sample(t, report(), true), "temporary-link cleanup reset counters")
 		require.Error(t, exec.Command(tool, "setup", "--pid", strconv.Itoa(command.Process.Pid), "--replace", "--debug-file", "/nonexistent-cp-lock-symbols").Run())
 		unchangedReplacement, err := os.ReadFile(recordPath)
 		require.NoError(t, err)
