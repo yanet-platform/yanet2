@@ -137,22 +137,23 @@ packet_list_first(struct packet_list *list) {
 }
 
 // Move every packet from src into dst, leaving src empty.
+//
+// The handoff must not test list emptiness on the hot path:
+// emptiness is data-dependent, so both cases fold into conditional
+// selects. An empty source merges safely because the destination's
+// tail link (its head when empty) already holds null, and the source
+// tail is adopted only when the source actually carried packets. The
+// source tail is read before the link is stored, through a
+// volatile-qualified access: the two slots never alias in a valid
+// state, and the materialized read is what lets the selects lower to
+// conditional moves on the production compiler.
 static inline void
 packet_list_concat(struct packet_list *dst, struct packet_list *src) {
-	// Nothing to do if src is empty
-	if (src->first == NULL) {
-		return;
-	}
+	struct packet **src_tail = *(struct packet * *volatile *)&src->last;
+	struct packet **dst_tail = dst->last != NULL ? dst->last : &dst->first;
 
-	// Replace dst with src if dst is empty
-	if (dst->first == NULL) {
-		*dst = *src;
-		packet_list_init(src);
-		return;
-	}
-
-	*dst->last = packet_list_first(src);
-	dst->last = src->last;
+	*dst_tail = src->first;
+	dst->last = src->first != NULL ? src_tail : dst->last;
 
 	packet_list_init(src);
 }
