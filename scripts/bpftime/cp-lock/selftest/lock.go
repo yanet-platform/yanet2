@@ -20,6 +20,7 @@ static struct cp_config configuration;
 static _Atomic int ready;
 static clockid_t waiter_clock;
 static struct timespec wait_start;
+static long second_hold_ns = 1000000;
 
 static void
 delay(long nanoseconds) {
@@ -37,7 +38,7 @@ cp_lock_test_first(void) {
 __attribute__((noinline)) void
 cp_lock_test_second(void) {
 	cp_config_lock(&configuration);
-	delay(1000000);
+	delay(second_hold_ns);
 	cp_config_unlock(&configuration);
 }
 
@@ -115,6 +116,14 @@ failed(void) {
 	cp_lock_test_second();
 	pthread_join(thread, NULL);
 }
+
+static void
+total(void) {
+	second_hold_ns = 100000000;
+	cp_lock_test_second();
+	second_hold_ns = 1000000;
+	failed();
+}
 */
 import "C"
 
@@ -125,3 +134,5 @@ func Batch(count int) { C.batch(C.long(count)) }
 func Failed() { C.failed() }
 
 func Try() { C.cp_lock_test_try() }
+
+func Total() { C.total() }

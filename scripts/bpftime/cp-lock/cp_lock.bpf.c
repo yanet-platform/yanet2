@@ -59,7 +59,6 @@ own(struct cp_lock_site_stats *stats) {
 
 static __always_inline void
 release(struct cp_lock_site_stats *stats) {
-	__sync_fetch_and_add(&stats->generation, 1);
 	__sync_fetch_and_sub(&stats->writer, 1);
 }
 
@@ -209,6 +208,10 @@ cp_lock_on_unlock_return(struct pt_regs *ctx) {
 			}
 			if (hold > stats->hold_max_ns) {
 				stats->hold_max_ns = hold;
+			}
+			__u64 total = state->end_ns - state->start_ns;
+			if (total > stats->total_max_ns) {
+				stats->total_max_ns = total;
 			}
 
 			__u64 duration = hold;

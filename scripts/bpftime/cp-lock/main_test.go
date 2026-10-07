@@ -40,6 +40,22 @@ func Test_Execute_EmptyStop(t *testing.T) {
 	require.NotPanics(t, execute)
 }
 
+// Test_Compatible_PreviousSchema verifies that old statistics can only be
+// detached and reset, while unknown layouts remain unsupported.
+func Test_Compatible_PreviousSchema(t *testing.T) {
+	m := &Coordinator{Record: Record{ABI: offsetABI, Schema: 3}}
+	require.Panics(t, func() { m.compatible(false) })
+	require.NotPanics(t, func() { m.compatible(true) })
+	require.EqualValues(t, 584, unsafe.Sizeof(Row{}.Stats))
+	require.EqualValues(t, 8, unsafe.Offsetof(Row{}.Stats.total_max_ns))
+	require.EqualValues(t, 72, unsafe.Offsetof(Row{}.Stats.hist))
+	m.Record.ABI++
+	require.Panics(t, func() { m.compatible(true) })
+	m.Record.ABI = offsetABI
+	m.Record.Schema = 2
+	require.Panics(t, func() { m.compatible(true) })
+}
+
 // Test_Quote_UTF8 verifies valid labels and merging after invalid-byte repair.
 func Test_Quote_UTF8(t *testing.T) {
 	require.Equal(t, "a\\\"\\\\\\n\uFFFD", quote("a\"\\\n\xff"))
@@ -94,7 +110,7 @@ func statsFixture(t *testing.T) (*Coordinator, []byte) {
 	m := &Coordinator{Name: filepath.Base(file.Name()), Path: file.Name()}
 	generation, err := startTime(os.Getpid())
 	require.NoError(t, err)
-	m.Record = Record{Magic: recordMagic, ABI: offsetABI, Schema: 3, Active: 1, PID: int32(os.Getpid()), Start: generation}
+	m.Record = Record{Magic: recordMagic, ABI: offsetABI, Schema: 4, Active: 1, PID: int32(os.Getpid()), Start: generation}
 	copyText(m.Record.Boot[:], readLine("/proc/sys/kernel/random/boot_id"))
 	m.Record.Inode = info.Sys().(*syscall.Stat_t).Ino
 	m.Record.MapOffsets = [2]uint64{sitesOffset, uint64(countsOffset)}
@@ -124,6 +140,7 @@ func Test_ReadStats_PausedWriter(t *testing.T) {
 	source.wait_max_ns = 15
 	source.hold_sum_ns = 10
 	source.hold_max_ns = 20
+	source.total_max_ns = 28
 	source.hist[3] = 1
 
 	statistics, _ = m.readStats()
@@ -135,6 +152,7 @@ func Test_ReadStats_PausedWriter(t *testing.T) {
 	require.EqualValues(t, 15, rows[0].Stats.wait_max_ns)
 	require.EqualValues(t, 10, rows[0].Stats.hold_sum_ns)
 	require.EqualValues(t, 20, rows[0].Stats.hold_max_ns)
+	require.EqualValues(t, 28, rows[0].Stats.total_max_ns)
 	require.EqualValues(t, 1, source.writer, "report mutated producer state")
 	output := m.report(true)
 	require.Regexp(t, `(?m)^cp_lock_acquisitions_total\{[^}\n]*\} 1$`, output)
@@ -144,7 +162,6 @@ func Test_ReadStats_PausedWriter(t *testing.T) {
 	source.wait_sum_ns = 25
 	source.hold_sum_ns = 30
 	source.hist[4] = 1
-	source.generation++
 	source.writer = 0
 	statistics, _ = m.readStats()
 	rows = mergeSites([]Row{{Stats: statistics[0], Name: "caller", Line: "caller.c:42"}})
@@ -180,10 +197,10 @@ func Test_ReadStats_ConcurrentWrites(t *testing.T) {
 			storeNative(&source.hold_sum_ns, completed*3)
 			storeNative(&source.wait_max_ns, completed)
 			storeNative(&source.hold_max_ns, completed)
+			storeNative(&source.total_max_ns, completed*2)
 			bucket := completed % uint64(len(bins))
 			bins[bucket]++
 			storeNative(&source.hist[bucket], bins[bucket])
-			storeNative(&source.generation, completed)
 			storeNative(&source.writer, 0)
 			storeNative(&counters.drops, completed)
 			storeNative(&counters.overflow, completed/7)
@@ -212,6 +229,7 @@ func Test_ReadStats_ConcurrentWrites(t *testing.T) {
 		require.GreaterOrEqual(t, row.Stats.hold_sum_ns, previous.Stats.hold_sum_ns)
 		require.GreaterOrEqual(t, row.Stats.wait_max_ns, previous.Stats.wait_max_ns)
 		require.GreaterOrEqual(t, row.Stats.hold_max_ns, previous.Stats.hold_max_ns)
+		require.GreaterOrEqual(t, row.Stats.total_max_ns, previous.Stats.total_max_ns)
 		require.GreaterOrEqual(t, uint64(counts.drops), previousDrops)
 		require.GreaterOrEqual(t, uint64(counts.overflow), previousOverflow)
 		for idx := range row.Stats.hist {
@@ -233,6 +251,7 @@ func Test_ReadStats_ConcurrentWrites(t *testing.T) {
 	require.EqualValues(t, completed*3, stats.hold_sum_ns)
 	require.EqualValues(t, completed, stats.wait_max_ns)
 	require.EqualValues(t, completed, stats.hold_max_ns)
+	require.EqualValues(t, completed*2, stats.total_max_ns)
 	require.EqualValues(t, completed, counts.drops)
 	require.EqualValues(t, completed/7, counts.overflow)
 	for idx, value := range bins {
@@ -350,6 +369,7 @@ func Test_MergeSites_SourceIdentity(t *testing.T) {
 	first.Stats.wait_max_ns = 8
 	first.Stats.hold_sum_ns = 20
 	first.Stats.hold_max_ns = 10
+	first.Stats.total_max_ns = 15
 	first.Stats.hist[3] = 2
 
 	second := Row{Name: first.Name, Line: normalizeLocation("../modules/route/caller.c:42", "/checkout", "/checkout/build")}
@@ -360,6 +380,7 @@ func Test_MergeSites_SourceIdentity(t *testing.T) {
 	second.Stats.wait_max_ns = 3
 	second.Stats.hold_sum_ns = 16
 	second.Stats.hold_max_ns = 16
+	second.Stats.total_max_ns = 18
 	second.Stats.hist[4] = 1
 
 	distinct := Row{Name: first.Name, Line: "modules/route/caller.c:43"}
@@ -375,6 +396,36 @@ func Test_MergeSites_SourceIdentity(t *testing.T) {
 	require.EqualValues(t, 8, stats.wait_max_ns)
 	require.EqualValues(t, 36, stats.hold_sum_ns)
 	require.EqualValues(t, 16, stats.hold_max_ns)
+	require.EqualValues(t, 18, stats.total_max_ns)
 	require.EqualValues(t, 2, stats.hist[3])
 	require.EqualValues(t, 1, stats.hist[4])
+	require.Equal(t, uint64(31), rows[0].holdPercentile95())
+}
+
+// Test_HoldPercentile95_BucketRanks verifies nearest-rank selection across
+// histogram boundaries, including an empty sample and the unbounded last bin.
+func Test_HoldPercentile95_BucketRanks(t *testing.T) {
+	for _, tc := range []struct {
+		Name      string
+		Histogram [64]uint64
+		Want      uint64
+	}{
+		{"empty sample", [64]uint64{}, 0},
+		{"single smallest observation", [64]uint64{0: 1}, 1},
+		{"one observation", [64]uint64{10: 1}, 2047},
+		{"exact 95 percent boundary", [64]uint64{3: 19, 17: 1}, 15},
+		{"round rank upward", [64]uint64{3: 19, 17: 2}, 262143},
+		{"last bucket", [64]uint64{63: 1}, ^uint64(0)},
+	} {
+		t.Run(tc.Name, func(t *testing.T) {
+			row := Row{}
+			var count uint64
+			for idx, observations := range tc.Histogram {
+				storeNative(&row.Stats.hist[idx], observations)
+				count += observations
+			}
+			storeNative(&row.Stats.count, count)
+			require.Equal(t, tc.Want, row.holdPercentile95())
+		})
+	}
 }

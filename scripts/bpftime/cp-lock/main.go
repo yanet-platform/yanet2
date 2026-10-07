@@ -112,8 +112,9 @@ func (m *Coordinator) save() {
 	must(m.File.Sync())
 }
 
-func (m *Coordinator) compatible() {
-	check(m.Record.ABI == offsetABI && m.Record.Schema == C.CP_LOCK_SCHEMA,
+func (m *Coordinator) compatible(allowPrevious bool) {
+	check(allowPrevious || m.Record.Schema != 3, "statistics schema changed; run setup --replace to reset counters and update probes")
+	check(m.Record.ABI == offsetABI && (m.Record.Schema == C.CP_LOCK_SCHEMA || allowPrevious && m.Record.Schema == 3),
 		"unsupported runtime layout/statistics schema; an operator-managed CP restart is required to install this runtime")
 }
 
@@ -149,7 +150,7 @@ func (m *Coordinator) reset(name string) {
 
 func (m *Coordinator) stop() {
 	runtimeEnvironment()
-	m.compatible()
+	m.compatible(true)
 	m.owned()
 	m.residentCompatible()
 	if m.live() {
@@ -249,7 +250,7 @@ func (m *Coordinator) setup(pid int, replace bool, debugFile string) {
 	check(runtimeLabel != "", "missing bundled runtime identity; build with make")
 	if exists && oldLive && m.Record.Active == 1 && int(m.Record.PID) == pid && !replace {
 		m.owned()
-		m.compatible()
+		m.compatible(false)
 		mappedBuild(pid, text(m.Record.Build[:]))
 		check(m.live(), "CP generation changed during reuse; handlers retained")
 		fmt.Println("compatible live session reused; counters preserved")
@@ -275,7 +276,6 @@ func (m *Coordinator) setup(pid int, replace bool, debugFile string) {
 			must(os.Remove(m.Path))
 			exists = false
 		} else {
-			m.compatible()
 			check(int(m.Record.PID) == pid, "session belongs to another live CP generation")
 			check(identity == text(m.Record.Build[:]), "owned CP executable build-id changed; handlers retained")
 			m.stop()
@@ -477,6 +477,7 @@ func mergeSites(rows []Row) []Row {
 		stats.hold_sum_ns += row.Stats.hold_sum_ns
 		stats.wait_max_ns = max(stats.wait_max_ns, row.Stats.wait_max_ns)
 		stats.hold_max_ns = max(stats.hold_max_ns, row.Stats.hold_max_ns)
+		stats.total_max_ns = max(stats.total_max_ns, row.Stats.total_max_ns)
 		for bucket := range stats.hist {
 			stats.hist[bucket] += row.Stats.hist[bucket]
 		}
@@ -504,9 +505,37 @@ func (m *Coordinator) readStats() ([]C.struct_cp_lock_site_stats, C.struct_cp_lo
 	return statistics, counts
 }
 
+func formatDuration(nanoseconds uint64) string {
+	if nanoseconds > 1<<63-1 {
+		return fmt.Sprintf("%.3fh", float64(nanoseconds)/float64(time.Hour))
+	}
+	duration := time.Duration(nanoseconds)
+	precision := time.Nanosecond
+	if duration >= time.Second {
+		precision = time.Millisecond
+	} else if duration >= time.Millisecond {
+		precision = time.Microsecond
+	}
+	return duration.Round(precision).String()
+}
+
+func (m Row) holdPercentile95() uint64 {
+	remaining := uint64(m.Stats.count) - uint64(m.Stats.count)/20
+	if remaining == 0 {
+		return 0
+	}
+	for idx, count := range m.Stats.hist {
+		if uint64(count) >= remaining {
+			return uint64(1)<<(idx+1) - 1
+		}
+		remaining -= uint64(count)
+	}
+	return 0
+}
+
 func (m *Coordinator) report(prometheus bool) string {
 	check(m.Record.Active == 1 && m.live(), "no active session on a live CP generation")
-	m.compatible()
+	m.compatible(false)
 	m.owned()
 
 	statistics, counts := m.readStats()
@@ -534,24 +563,37 @@ func (m *Coordinator) report(prometheus bool) string {
 			m.Record.PID, m.Record.Session, m.Record.Start,
 		)
 		table := tabwriter.NewWriter(&output, 0, 4, 2, ' ', tabwriter.AlignRight)
-		fmt.Fprintln(table, "COUNT\tFAILED TRY\tWAIT TOTAL (ms)\tHOLD TOTAL (ms)\tHOLD MAX (ms)\t  CALL SITE")
+		fmt.Fprintln(table, "COUNT\tFAILED TRY\tTOTAL MAX\tWAIT AVG\tWAIT MAX\tHOLD AVG\tHOLD P95~\tHOLD MAX\t  CALL SITE")
 		for _, row := range rows {
 			stats := row.Stats
-			fmt.Fprintf(table, "%d\t%d\t%.3f\t%.3f\t%.3f\t  %s (%s)\n",
+			waitAverage, holdAverage, holdPercentile := "-", "-", "-"
+			waitMaximum, holdMaximum := "-", "-"
+			totalMaximum := "-"
+			if stats.count != 0 {
+				waitAverage = formatDuration(uint64(stats.wait_sum_ns / stats.count))
+				holdAverage = formatDuration(uint64(stats.hold_sum_ns / stats.count))
+				holdPercentile = formatDuration(row.holdPercentile95())
+				waitMaximum = formatDuration(uint64(stats.wait_max_ns))
+				holdMaximum = formatDuration(uint64(stats.hold_max_ns))
+				totalMaximum = formatDuration(uint64(stats.total_max_ns))
+			}
+			fmt.Fprintf(table, "%d\t%d\t%s\t%s\t%s\t%s\t%s\t%s\t  %s (%s)\n",
 				uint64(stats.count), uint64(stats.fail_count),
-				float64(stats.wait_sum_ns)/1e6,
-				float64(stats.hold_sum_ns)/1e6,
-				float64(stats.hold_max_ns)/1e6,
+				totalMaximum,
+				waitAverage, waitMaximum,
+				holdAverage, holdPercentile, holdMaximum,
 				row.Name, row.Line,
 			)
 		}
 		must(table.Flush())
-		fmt.Fprintf(&output, "\nDropped events: %d  Site overflow: %d\n", uint64(counts.drops), uint64(counts.overflow))
+		fmt.Fprintln(&output, "\nTOTAL MAX: max(wait + hold) per call. P95~: rounded log2 bucket estimate.")
+		fmt.Fprintln(&output, "Sorted by total hold time.")
+		fmt.Fprintf(&output, "Dropped events: %d  Site overflow: %d\n", uint64(counts.drops), uint64(counts.overflow))
 		check(m.live(), "CP exited during report")
 		return output.String()
 	}
 
-	for _, metric := range []string{"cp_lock_acquisitions_total counter", "cp_lock_failed_try_total counter", "cp_lock_wait_seconds_total counter", "cp_lock_hold_seconds histogram", "cp_lock_wait_max_seconds gauge", "cp_lock_hold_max_seconds gauge"} {
+	for _, metric := range []string{"cp_lock_acquisitions_total counter", "cp_lock_failed_try_total counter", "cp_lock_wait_seconds_total counter", "cp_lock_hold_seconds histogram", "cp_lock_wait_max_seconds gauge", "cp_lock_hold_max_seconds gauge", "cp_lock_total_max_seconds gauge"} {
 		fmt.Fprintf(&output, "# TYPE %s\n", metric)
 	}
 	fmt.Fprintf(&output, "# TYPE cp_lock_session_info gauge\ncp_lock_session_info{pid=\"%d\",generation=\"%d\",boot_id=\"%s\",session=\"%d\",build_id=\"%s\"} 1\n", m.Record.PID, m.Record.Start, text(m.Record.Boot[:]), m.Record.Session, text(m.Record.Build[:]))
@@ -567,6 +609,7 @@ func (m *Coordinator) report(prometheus bool) string {
 		metric("cp_lock_wait_seconds_total", float64(stats.wait_sum_ns)/1e9)
 		metric("cp_lock_wait_max_seconds", float64(stats.wait_max_ns)/1e9)
 		metric("cp_lock_hold_max_seconds", float64(stats.hold_max_ns)/1e9)
+		metric("cp_lock_total_max_seconds", float64(stats.total_max_ns)/1e9)
 		var cumulative uint64
 		for idx, bucket := range stats.hist {
 			cumulative += uint64(bucket)

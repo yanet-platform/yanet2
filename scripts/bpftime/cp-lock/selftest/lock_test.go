@@ -41,6 +41,8 @@ func Test_Workload_Child(t *testing.T) {
 			workload.Try()
 		} else if commands.Text() == "failed" {
 			workload.Failed()
+		} else if commands.Text() == "total" {
+			workload.Total()
 		} else {
 			count, err := strconv.Atoi(commands.Text())
 			if err != nil {
@@ -353,7 +355,15 @@ func Test_Session_ContinuousRealLock(t *testing.T) {
 		require.True(t, os.SameFile(segment, current), "replacement changed the mapped inode")
 		batch("2")
 		require.Equal(t, float64(4), sample(t, report(), true), "replacement retained old counters")
-
+		previous, err := os.ReadFile(recordPath)
+		require.NoError(t, err)
+		binary.NativeEndian.PutUint32(previous[60:64], 3)
+		require.NoError(t, os.WriteFile(recordPath, previous, 0640))
+		require.Error(t, exec.Command(tool, "report").Run(), "previous schema accepted as current statistics")
+		require.Error(t, exec.Command(tool, "setup", "--pid", strconv.Itoa(command.Process.Pid)).Run(), "previous probes reused")
+		run("setup", "--pid", strconv.Itoa(command.Process.Pid), "--replace")
+		batch("2")
+		require.Equal(t, float64(4), sample(t, report(), true), "schema upgrade retained old counters")
 	}
 	run("stop")
 	if os.Getenv("CP_LOCK_SMOKE") != "" {
@@ -369,6 +379,31 @@ func Test_Session_ContinuousRealLock(t *testing.T) {
 	}
 	batch("2")
 	require.False(t, sample(t, report(), true) != 4, "fresh setup retained old counters")
+	run("stop")
+	setup()
+	batch("total")
+	maxima := map[string]float64{}
+	for _, line := range strings.Split(report(), "\n") {
+		if !strings.Contains(line, `site="cp_lock_test_second@`) {
+			continue
+		}
+		metric, _, _ := strings.Cut(line, "{")
+		if metric != "cp_lock_wait_max_seconds" && metric != "cp_lock_hold_max_seconds" && metric != "cp_lock_total_max_seconds" {
+			continue
+		}
+		_, number, _ := strings.Cut(line, "} ")
+		value, err := strconv.ParseFloat(number, 64)
+		require.NoError(t, err)
+		maxima[metric] = value
+	}
+	require.Len(t, maxima, 3, "per-call maxima missing")
+	waitMaximumSeconds := maxima["cp_lock_wait_max_seconds"]
+	holdMaximumSeconds := maxima["cp_lock_hold_max_seconds"]
+	totalMaximumSeconds := maxima["cp_lock_total_max_seconds"]
+	require.GreaterOrEqual(t, waitMaximumSeconds, 0.010)
+	require.GreaterOrEqual(t, holdMaximumSeconds, 0.100)
+	require.GreaterOrEqual(t, totalMaximumSeconds, max(waitMaximumSeconds, holdMaximumSeconds))
+	require.Less(t, totalMaximumSeconds, waitMaximumSeconds+holdMaximumSeconds, "total added maxima from different calls")
 	run("stop")
 	if os.Getenv("CP_LOCK_SMOKE") == "" {
 		for _, signal := range []os.Signal{os.Interrupt, os.Kill} {
