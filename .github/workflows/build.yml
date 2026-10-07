@@ -544,9 +544,10 @@ jobs:
 
       # The gate for out-of-tree module support: builds the SDK artifacts
       # into build/sdk/, then builds and tests the reference module in
-      # sdk/example strictly through the SDK surfaces (own meson project,
-      # own go.mod, standalone CLI workspace).
-      - name: Build the module SDK and the reference module
+      # sdk/example and the ported route-mpls submodule, both strictly
+      # through the SDK surfaces (own meson project, own go.mod,
+      # standalone CLI workspace).
+      - name: Build the module SDK and the out-of-tree modules
         run: |
           meson setup build -Dbuildtype=release
           make sdk-example

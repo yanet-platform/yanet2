@@ -4,7 +4,9 @@ The module SDK lets a YANET module — dataplane plugin, control-plane
 daemon, CLI — live in its own repository and build against a yanet2
 checkout, without editing any tracked yanet2 file and without forking the
 tree. `sdk/example/` is a complete reference module built this way; copy it
-to start a new one.
+to start a new one. The `external/route-mpls` submodule is the
+production-grade port of a real module — see
+[yanet-module-route-mpls](https://github.com/yanet-platform/yanet-module-route-mpls).
 
 The runtime machinery is part of the dataplane itself: it scans a
 configured `plugin_dir` for `lib<name>_dp.so` files, refuses any whose
@@ -165,6 +167,19 @@ its dataplane as a `shared_module` (instead of a static library, adding
 hardcoded `yanet-dataplane` link list entirely — the private module then
 needs zero edits to tracked build files. The fully external layout above
 is preferred when the module has its own repository.
+
+## The ported route-mpls module
+
+[yanet-module-route-mpls](https://github.com/yanet-platform/yanet-module-route-mpls)
+is a real module ported to this shape: its C sources are verbatim from
+`modules/route-mpls`, the Go control plane and CLI carry only the
+import-path moves, and the functional suite loads the plugin into the
+in-process harness. yanet2 carries it as the `external/route-mpls`
+submodule (so all its relative paths — the go.mod `replace`, the CLI's
+`ync` dependency, the CGO include paths — resolve by default) and gates
+it alongside `sdk/example` in `make sdk-example` when the submodule is
+checked out. The in-tree module remains the shipped implementation; the
+port exists to prove and pressure-test the SDK with production code.
 
 ## Limits
 

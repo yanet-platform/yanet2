@@ -33,18 +33,47 @@ libmodule_abi_export = static_library(
 # Mirror the compile environment an in-tree module translation unit gets:
 # the yanet source root (headers are tree-rooted), the build root
 # (generated yanet_build_config.h and rte_build_config.h), and DPDK's
-# config and per-library include directories. DPDK driver headers are
-# deliberately left out: module code never includes them, and the driver
-# set varies with the enabled PMDs.
+# per-library include directories on both the source side and the build
+# side. EAL carries OS- and arch-specific include dirs (rte_os.h lives in
+# lib/eal/<os>/include and pulls the libc headers yanet's spinlock relies
+# on), so those are added for the host pair only, exactly as DPDK's own
+# meson does — globbing every OS dir would let freebsd/rte_os.h win.
+# DPDK driver headers are deliberately left out: module code never
+# includes them, and the driver set varies with the enabled PMDs.
 find_tool = find_program('find')
-dpdk_lib_dirs = run_command(
+dpdk_libroot = join_paths(meson.project_source_root(), 'subprojects', 'dpdk', 'lib')
+dpdk_build_libroot = join_paths(meson.global_build_root(), 'subprojects', 'dpdk', 'lib')
+
+# EAL's arch include dir name per DPDK's own layout.
+dpdk_cpu_map = {
+  'x86_64': 'x86',
+  'aarch64': 'arm',
+  'loongarch64': 'loongarch',
+  'ppc64': 'ppc',
+  'riscv64': 'riscv',
+}
+dpdk_cpu = dpdk_cpu_map.get(host_machine.cpu_family(), '')
+eal_inc_dirs = ['include', 'common', host_machine.system() / 'include']
+if dpdk_cpu != ''
+  eal_inc_dirs += [dpdk_cpu / 'include']
+endif
+
+dpdk_lib_dirs = []
+foreach dir : run_command(
   find_tool,
-  join_paths(meson.project_source_root(), 'subprojects', 'dpdk', 'lib'),
+  [dpdk_libroot, dpdk_build_libroot],
   '-mindepth', '1',
-  '-maxdepth', '2',
+  '-maxdepth', '1',
   '-type', 'd',
   check: true,
 ).stdout().strip().split('\n')
+  dpdk_lib_dirs += [dir]
+  if dir.endswith('lib/eal')
+    foreach eal : eal_inc_dirs
+      dpdk_lib_dirs += [dir / eal]
+    endforeach
+  endif
+endforeach
 
 sdk_inc_dirs = [
   meson.project_source_root(),
