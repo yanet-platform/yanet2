@@ -18,7 +18,10 @@
 # <builddir>/sdk and depending on yanet-module-sdk; see docs/module-sdk.md
 # and sdk/example for a complete reference module.
 
-libmodule_abi_export = static_library(
+# Not captured in a variable on purpose: nothing in this build consumes
+# the target object, the .pc names the archive by its output path, and an
+# unused assignment trips the meson linter.
+static_library(
   'module_abi_export',
   c_args: yanet_c_args,
   # Carries plugin_abi_export.c itself plus the tree-rooted include path.
