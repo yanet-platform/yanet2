@@ -11,52 +11,6 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-static int
-snapshot(
-	const struct cp_lock_site_stats *source,
-	struct cp_lock_site_stats *copy,
-	char *error
-) {
-	for (int attempt = 0; attempt < 128; attempt++) {
-		uint64_t generation =
-			__atomic_load_n(&source->generation, __ATOMIC_SEQ_CST);
-		if (__atomic_load_n(&source->writer, __ATOMIC_SEQ_CST)) {
-			continue;
-		}
-
-		__u64 *destination = (__u64 *)copy;
-		const __u64 *values = (const __u64 *)source;
-		for (size_t idx = 0; idx < sizeof(*copy) / sizeof(__u64);
-		     idx++) {
-			destination[idx] =
-				__atomic_load_n(&values[idx], __ATOMIC_RELAXED);
-		}
-
-		__atomic_thread_fence(__ATOMIC_SEQ_CST);
-		if (!__atomic_load_n(&source->writer, __ATOMIC_SEQ_CST) &&
-		    generation == __atomic_load_n(
-					  &source->generation, __ATOMIC_SEQ_CST
-				  )) {
-			uint64_t total = 0;
-			for (size_t idx = 0; idx < CP_LOCK_HIST_BUCKETS;
-			     idx++) {
-				total += copy->hist[idx];
-			}
-
-			if (total != copy->count ||
-			    copy->wait_max_ns > copy->wait_sum_ns ||
-			    copy->hold_max_ns > copy->hold_sum_ns) {
-				snprintf(error, 512, "incoherent statistics");
-				return -1;
-			}
-			return 0;
-		}
-	}
-
-	snprintf(error, 512, "statistics busy; retry report");
-	return -1;
-}
-
 int
 cp_lock_snapshot(
 	const char *name,
@@ -116,27 +70,27 @@ cp_lock_snapshot(
 
 	const struct cp_lock_site_stats *sites =
 		(const void *)((const char *)memory + offsets[0]);
-	int result = 0;
 	for (size_t idx = 0; idx < CP_LOCK_MAX_SITES; idx++) {
-		if (snapshot(&sites[idx], &rows[idx], error)) {
-			result = -1;
-			break;
+		const __u64 *source = (const __u64 *)&sites[idx];
+		__u64 *destination = (__u64 *)&rows[idx];
+
+		for (size_t word = 0; word < sizeof(*rows) / sizeof(__u64);
+		     word++) {
+			destination[word] = __atomic_load_n(
+				&source[word], __ATOMIC_RELAXED
+			);
 		}
 	}
 
-	if (!result) {
-		const struct cp_lock_counters *source =
-			(const void *)((const char *)memory + offsets[1]);
-		counts->drops =
-			__atomic_load_n(&source->drops, __ATOMIC_RELAXED);
-		counts->overflow =
-			__atomic_load_n(&source->overflow, __ATOMIC_RELAXED);
-	}
+	const struct cp_lock_counters *source =
+		(const void *)((const char *)memory + offsets[1]);
+	counts->drops = __atomic_load_n(&source->drops, __ATOMIC_RELAXED);
+	counts->overflow = __atomic_load_n(&source->overflow, __ATOMIC_RELAXED);
 
-	if (munmap(memory, size) && !result) {
+	if (munmap(memory, size)) {
 		snprintf(error, 512, "unmap session: %s", strerror(errno));
-		result = -1;
+		return -1;
 	}
 
-	return result;
+	return 0;
 }

@@ -501,6 +501,12 @@ func mergeSites(rows []Row) []Row {
 	sites := map[[2]string]int{}
 	merged := make([]Row, 0, len(rows))
 	for _, row := range rows {
+		// Keep acquisition counts consistent with the sampled histogram.
+		row.Stats.count = 0
+		for _, count := range row.Stats.hist {
+			row.Stats.count += count
+		}
+
 		key := [2]string{row.Name, row.Line}
 		idx, found := sites[key]
 		if !found {
@@ -523,18 +529,32 @@ func mergeSites(rows []Row) []Row {
 	return merged
 }
 
-func (m *Coordinator) report(prometheus bool) string {
-	check(m.Record.Active == 1 && m.live(), "no active session on a live CP generation")
-	m.compatible()
-	m.owned()
-
+func (m *Coordinator) readStats() ([]C.struct_cp_lock_site_stats, C.struct_cp_lock_counters) {
 	nativeName := C.CString(m.Name)
 	defer C.free(unsafe.Pointer(nativeName))
 
 	statistics := make([]C.struct_cp_lock_site_stats, C.CP_LOCK_MAX_SITES)
 	var counts C.struct_cp_lock_counters
 	var message [512]C.char
-	check(C.cp_lock_snapshot(nativeName, C.uint64_t(m.Record.Inode), (*C.uint64_t)(unsafe.Pointer(&m.Record.MapOffsets[0])), &statistics[0], &counts, &message[0]) == 0, C.GoString(&message[0]))
+	result := C.cp_lock_snapshot(
+		nativeName,
+		C.uint64_t(m.Record.Inode),
+		(*C.uint64_t)(unsafe.Pointer(&m.Record.MapOffsets[0])),
+		&statistics[0],
+		&counts,
+		&message[0],
+	)
+	check(result == 0, C.GoString(&message[0]))
+
+	return statistics, counts
+}
+
+func (m *Coordinator) report(prometheus bool) string {
+	check(m.Record.Active == 1 && m.live(), "no active session on a live CP generation")
+	m.compatible()
+	m.owned()
+
+	statistics, counts := m.readStats()
 
 	maps, err := os.ReadFile(fmt.Sprintf("/proc/%d/maps", m.Record.PID))
 	must(err)

@@ -39,8 +39,9 @@ For collection through existing Telegraf outputs:
 
 The monitoring UID needs read access to `/dev/shm/bpftime_maps_shm`, its
 `.cp-lock` record, `/proc/PID/maps` and debug files. Reports are cumulative;
-use `cp_lock_session_info` and `cp_lock_sample_time_seconds` to detect resets
-and stale samples.
+concurrent fields may reflect different moments and converge after writes finish.
+Use `cp_lock_session_info` and `cp_lock_sample_time_seconds` to detect resets and
+stale samples.
 `report --push URL` also posts one Prometheus sample to an HTTP endpoint.
 
 Local build: `cd scripts/bpftime/cp-lock && ./prepare.sh && make`.

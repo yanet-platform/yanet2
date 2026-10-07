@@ -89,8 +89,8 @@ func child(t *testing.T) (*exec.Cmd, io.WriteCloser, *bufio.Scanner) {
 	return command, input, scanner
 }
 
-// sample rejects incoherent counters, maxima and every cumulative histogram row.
-func sample(t *testing.T, output string) float64 {
+// sample enforces cross-field bounds only for completed workloads.
+func sample(t *testing.T, output string, settled bool) float64 {
 	t.Helper()
 	require.NotContains(t, output, "address=", "process addresses must not identify metric series")
 	require.NotRegexp(t, `site="[^"\n]*@0x`, output)
@@ -145,11 +145,11 @@ func sample(t *testing.T, output string) float64 {
 		histogramCount, present := histogramCounts[labels]
 		require.True(t, present, "histogram count missing")
 		require.Equal(t, count, histogramCount, "histogram count disagrees with acquisitions")
-		if histogram[labels] != count || maxima[labels] > sums[labels] || buckets[labels] != 64 {
+		if histogram[labels] != count || settled && maxima[labels] > sums[labels] || buckets[labels] != 64 {
 			t.Fatalf("incoherent row %s", labels)
 		}
-		require.False(t, (strings.Contains(labels, "cp_lock_test_first") || strings.Contains(labels, "cp_lock_test_second")) && count > 0 && sums[labels] < count*0.001, "real critical section hold bound lost")
-		if (strings.Contains(labels, "cp_lock_test_first") || strings.Contains(labels, "cp_lock_test_second")) && count > 0 {
+		require.False(t, settled && (strings.Contains(labels, "cp_lock_test_first") || strings.Contains(labels, "cp_lock_test_second")) && count > 0 && sums[labels] < count*0.001, "real critical section hold bound lost")
+		if settled && (strings.Contains(labels, "cp_lock_test_first") || strings.Contains(labels, "cp_lock_test_second")) && count > 0 {
 			require.GreaterOrEqual(t, maximum, 0.001, "real hold maximum lower bound lost")
 		}
 		total += count
@@ -228,7 +228,7 @@ func Test_Session_ContinuousRealLock(t *testing.T) {
 	report := func() string { return run("report", "--format", "prometheus") }
 	setup()
 	batch("5")
-	first := sample(t, report())
+	first := sample(t, report(), true)
 	require.Equal(t, float64(10), first, "completed real acquisitions")
 	require.True(t, strings.Contains(report(), "cp_lock_test_first") && strings.Contains(report(), "cp_lock_test_second"), "named sites missing")
 	for _, name := range []string{"cp_lock_test_first", "cp_lock_test_second"} {
@@ -248,7 +248,7 @@ func Test_Session_ContinuousRealLock(t *testing.T) {
 	}
 	require.NotContains(t, run("report"), "@0x", "raw addresses must not appear in the table")
 	batch("try")
-	require.Equal(t, first+1, sample(t, report()), "successful trylock did not count acquisition")
+	require.Equal(t, first+1, sample(t, report(), true), "successful trylock did not count acquisition")
 	batch("failed")
 	require.True(t, strings.Contains(report(), "cp_lock_failed_try_total{pid="), "failed try missing")
 	failed := false
@@ -280,7 +280,7 @@ func Test_Session_ContinuousRealLock(t *testing.T) {
 		unchangedReplacement, err := os.ReadFile(recordPath)
 		require.NoError(t, err)
 		require.Equal(t, metadata, unchangedReplacement, "invalid replacement mutated ownership")
-		require.Equal(t, first+3, sample(t, report()), "invalid replacement cleared counters")
+		require.Equal(t, first+3, sample(t, report(), true), "invalid replacement cleared counters")
 		require.NoError(t, os.WriteFile(recordPath, nil, 0640))
 		require.Error(t, exec.Command(tool, "stop").Run(), "empty ownership record accepted foreign shm")
 		refused, err := exec.Command(tool, "setup", "--pid", strconv.Itoa(command.Process.Pid)).CombinedOutput()
@@ -305,7 +305,7 @@ func Test_Session_ContinuousRealLock(t *testing.T) {
 				os.Rename(movedRuntime, runtimeDirectory)
 			}
 		}()
-		require.Equal(t, sample(t, report()), sample(t, report()))
+		require.Equal(t, sample(t, report(), true), sample(t, report(), true))
 		require.NoError(t, os.Rename(movedRuntime, runtimeDirectory))
 		require.Error(t, exec.Command(tool, "setup", "--pid", strconv.Itoa(command.Process.Pid), "--replace").Run(), "mutation accepted incompatible resident runtime")
 		after, err := os.ReadFile(recordPath)
@@ -314,7 +314,7 @@ func Test_Session_ContinuousRealLock(t *testing.T) {
 		require.NoError(t, os.WriteFile(recordPath, metadata, 0640))
 		setup()
 		batch("5")
-		second := sample(t, report())
+		second := sample(t, report(), true)
 		if second != first+13 {
 			t.Fatalf("reuse reset counters: %g", second)
 		}
@@ -324,12 +324,13 @@ func Test_Session_ContinuousRealLock(t *testing.T) {
 		reader.Process.Kill()
 		reader.Wait()
 		batch("5")
-		require.False(t, sample(t, report()) != second+10, "reader death reset counters")
+		require.False(t, sample(t, report(), true) != second+10, "reader death reset counters")
 		fmt.Fprintln(input, "30")
 		for range 4 {
-			sample(t, report())
+			sample(t, report(), false)
 		}
 		require.True(t, scanner.Scan() && scanner.Text() == "done", "concurrent workload failed")
+		require.Equal(t, second+70, sample(t, report(), true), "completed workload did not converge")
 		segment, err := os.Stat("/dev/shm/" + name)
 		require.NoError(t, err)
 		run("setup", "--pid", strconv.Itoa(command.Process.Pid), "--replace")
@@ -337,7 +338,7 @@ func Test_Session_ContinuousRealLock(t *testing.T) {
 		require.NoError(t, err)
 		require.True(t, os.SameFile(segment, current), "replacement changed the mapped inode")
 		batch("2")
-		require.Equal(t, float64(4), sample(t, report()), "replacement retained old counters")
+		require.Equal(t, float64(4), sample(t, report(), true), "replacement retained old counters")
 
 	}
 	run("stop")
@@ -353,7 +354,7 @@ func Test_Session_ContinuousRealLock(t *testing.T) {
 		t.Fatalf("relative debug setup: %v %s", err, output)
 	}
 	batch("2")
-	require.False(t, sample(t, report()) != 4, "fresh setup retained old counters")
+	require.False(t, sample(t, report(), true) != 4, "fresh setup retained old counters")
 	run("stop")
 	if os.Getenv("CP_LOCK_SMOKE") == "" {
 		for _, signal := range []os.Signal{os.Interrupt, os.Kill} {
@@ -364,7 +365,7 @@ func Test_Session_ContinuousRealLock(t *testing.T) {
 			command, input, scanner = child(t)
 			setup()
 			batch("2")
-			require.False(t, sample(t, report()) != 4, "restart did not reset owned shm")
+			require.False(t, sample(t, report(), true) != 4, "restart did not reset owned shm")
 			run("stop")
 		}
 		setup()
@@ -377,7 +378,7 @@ func Test_Session_ContinuousRealLock(t *testing.T) {
 		require.NoError(t, os.WriteFile(temporary, replacement, 0755))
 		require.NoError(t, os.Rename(temporary, command.Path))
 		setup()
-		require.Equal(t, float64(4), sample(t, report()), "replaced disk image prevented live reuse")
+		require.Equal(t, float64(4), sample(t, report(), true), "replaced disk image prevented live reuse")
 		require.Error(t, exec.Command(tool, "setup", "--pid", strconv.Itoa(command.Process.Pid), "--replace").Run(), "replacement accepted missing original disk image")
 		require.NoError(t, os.Rename(backup, command.Path))
 		run("stop")
