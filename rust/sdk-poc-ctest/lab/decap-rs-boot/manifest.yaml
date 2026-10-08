@@ -1,0 +1,52 @@
+$schema: ../../../../lab/yanet2-lab.schema.json
+version: 1
+name: decap-rs-boot
+description: >-
+  Boot YANET with the Rust decap plugin, prove the dataplane bound the decap
+  module to it, then start the lab operator profile with the lab's own
+  start commands, so the built-in decap scenario runs unmodified.
+boot:
+  dataplane: dataplane.yaml
+steps:
+  # Proof that every decap module instance runs the Rust handler: the
+  # plugin is loaded, the loader resolved the decap constructor from it
+  # rather than from the dataplane binary, and the library is mapped.
+  - name: plugin-loaded
+    argv: [grep, -F, "loaded plugin decap from /mnt/yanet2/rust/sdk-poc-ctest/target/release/libdecap_dp.so", /tmp/yanet/logs/yanet-dataplane.log]
+  - name: decap-bound-to-plugin
+    argv: [grep, -F, "module decap found in plugin decap", /tmp/yanet/logs/yanet-dataplane.log]
+  - name: plugin-mapped
+    argv: [bash, -c, "grep -F libdecap_dp.so /proc/$(pgrep -o yanet-dataplan)/maps"]
+
+  # The operator profile: the start commands of the lab's own sequence,
+  # with a reduced readiness wait; the lab's status check stays the gate.
+  # Binaries, configuration files and BIRD are already staged in the
+  # pre-YANET snapshot the boot restores.
+  - name: kni-addresses
+    argv: [bash, -c, "ip addr replace 203.0.113.14/24 dev kni0 && ip addr replace 2001:db8::14/64 dev kni0 && ip nei replace 203.0.113.1 lladdr 52:54:00:6b:ff:a1 dev kni0 && ip nei replace 2001:db8::1 lladdr 52:54:00:6b:ff:a1 dev kni0"]
+  - name: start-route-operator
+    argv: [bash, -c, "nohup /tmp/yanet/operators/yanet-route-operator -c /tmp/yanet/config/operators/route.yaml > /tmp/yanet/logs/yanet-route-operator.log 2>&1 &"]
+  - name: start-forward-operator
+    argv: [bash, -c, "nohup /tmp/yanet/operators/yanet-generic-operator -c /tmp/yanet/config/operators/forward.yaml > /tmp/yanet/logs/yanet-forward-operator.log 2>&1 &"]
+  - name: start-decap-operator
+    argv: [bash, -c, "nohup /tmp/yanet/operators/yanet-generic-operator -c /tmp/yanet/config/operators/decap.yaml > /tmp/yanet/logs/yanet-decap-operator.log 2>&1 &"]
+  - name: start-bird
+    argv: [bash, -c, "nohup bird -c /tmp/yanet/config/operators/bird.conf > /tmp/yanet/logs/bird.log 2>&1 &"]
+  - name: start-bird-adapter
+    argv: [bash, -c, "nohup /tmp/yanet/operators/yanet-bird-adapter server -c /tmp/yanet/config/operators/bird-adapter.yaml > /tmp/yanet/logs/yanet-bird-adapter.log 2>&1 &"]
+  - name: wait-bird-sockets
+    argv: [bash, -c, "for n in $(seq 1 60); do test -S /tmp/yanet/bird/master4.sock && test -S /tmp/yanet/bird/master6.sock && exit 0; sleep 1; done; exit 1"]
+    timeout: 70s
+  - name: wait-bird-adapter
+    argv: [bash, -c, "for n in $(seq 1 60); do (: > /dev/tcp/127.0.0.1/50051) 2>/dev/null && exit 0; sleep 1; done; exit 1"]
+    timeout: 70s
+  - name: configure-bird-adapter
+    argv: [bash, /tmp/yanet/operators/configure-bird.sh]
+    timeout: 30s
+  - name: create-lab-function
+    argv: [/tmp/yanet/cli/yanet-cli-function, update, --name=fn:lab, --chains, default:1=forward:forward0]
+  - name: start-pipeline-operator
+    argv: [bash, -c, "nohup /tmp/yanet/operators/yanet-pipeline-operator -c /tmp/yanet/config/operators/pipeline.yaml > /tmp/yanet/logs/yanet-pipeline-operator.log 2>&1 &"]
+  - name: wait-ready
+    argv: [bash, -c, "for n in $(seq 1 45); do /tmp/yanet/cli/yanet-cli-ready --all >/dev/null 2>&1 && exit 0; sleep 1; done; /tmp/yanet/cli/yanet-cli-ready --all"]
+    timeout: 60s

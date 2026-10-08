@@ -24,9 +24,8 @@ Run all commands from this directory. `systest`, the `dataplane` testkit
 feature and the scripts need a configured meson build directory: the
 default is `<repo>/build`, or set `YANET_BUILD_DIR`. Setting it up once:
 `git submodule update --init && meson setup build` at the repository root.
-On this host, meson only found libyaml after adding
-`PKG_CONFIG_PATH=/usr/lib/x86_64-linux-gnu/pkgconfig:/usr/share/pkgconfig`.
-`meson setup` is enough; no `ninja` step is needed.
+`meson setup` is enough for everything except the QEMU lab run, which needs
+the full `make all` build.
 
 ```bash
 cargo build --release -p decap-rs        # target/release/libdecap_dp.so
@@ -88,8 +87,8 @@ Measured on this host (16 cores, rustc 1.98, gcc 13.3):
 - Miri, strict provenance, `yanet-sys` + `yanet-sdk`: 15 tests pass in
   each model; the C-calling test and the negative control are ignored.
   Wall time per model, including the Miri build of the crates:
-  - Stacked Borrows: 6.5 to 12 min over three runs;
-  - Tree Borrows: about 2.3 min.
+  - Stacked Borrows: 3.3 to 12 min over four runs;
+  - Tree Borrows: 1.3 to 2.3 min.
 
   The negative control fails as intended in both models.
 
@@ -158,6 +157,9 @@ Measured on this host (16 cores, rustc 1.98, gcc 13.3):
 - **Real loader path.** `scripts/dlopen-smoke.sh` uses the dataplane's own
   `dp_load_plugins`: the ABI check passes, the constructor resolves, and
   `packet_decap` binds.
+- **End to end in the QEMU lab.** The real dataplane loads the plugin from
+  its `plugin_dir`, and the unmodified built-in `decap` scenario passes
+  through it (see below).
 - **Validation is control-plane side.** `validate_lpm` bounds-checks and
   alignment-checks the page table, chunks and every child edge. It requires
   each intermediate slot to point at the start of one of the tree's own
@@ -176,6 +178,140 @@ Measured on this host (16 cores, rustc 1.98, gcc 13.3):
   and carries the module type (`"decap"`). `export_module!` const-asserts
   that the exported name equals it; `export_module!(route, Decap)` fails to
   compile.
+
+## End to end on the QEMU lab
+
+The plugin ran in the lab VM in place of the C decap module, and the
+unmodified built-in `decap` scenario passed through it. The run used the
+full `make all` build of this worktree, the shared functional-test image
+copied to `tests/functional/yanet-test.qcow2`, KVM, and QEMU 8.2 from
+`/usr/bin`.
+
+### How the plugin gets in
+
+`lab/decap-rs-boot/dataplane.yaml` is the functional-test dataplane
+configuration as the harness writes it when a plugin directory is set
+(`cp_memory` 160 MiB instead of the lab baseline's 128 MiB), with
+`plugin_dir: /mnt/yanet2/rust/sdk-poc-ctest/target/release`.
+`/mnt/yanet2` is the worktree, shared into the guest read-only over 9p.
+The loader tries plugins before built-ins, so `new_module_decap` resolves
+to the Rust library for every decap module instance: the operator-managed
+`decap0` and the scenario's `decap_lab`.
+
+`lab/decap-rs-boot/manifest.yaml` boots YANET with that configuration.
+A boot manifest starts from the pre-YANET snapshot, which drops the
+operator profile, and `scenario run` refuses a session whose profile is not
+ready. The manifest therefore:
+- proves the binding (three steps: log lines and the library mapped in the
+  dataplane process);
+- restarts the operator profile with the start commands of the lab's own
+  sequence (`lab/operators.go`); the binaries, configuration and BIRD are
+  already staged in that snapshot. Its final wait checks only the readiness
+  services, not the full operator health check (processes, the route0
+  adapter session, imported routes). `status` and `scenario run` still
+  enforce the full check, so a premature run is refused rather than passed.
+
+Repeating the start commands keeps the built-in scenario unmodified, at
+the cost of a copy that can drift from `lab/operators.go`. The manifest
+descriptions and comments were reworded after the recorded run; the steps
+and probes are the ones that ran.
+
+`lab/decap-rs-proof/manifest.yaml` runs after the scenario. It:
+- checks that the same dataplane still has the plugin bound and mapped;
+- sends the scenario's packet again (`input.pcap` / `expected.pcap`, copies
+  of the built-in fixtures);
+- sends `fragment.pcap`, the same frame with the outer "more fragments" bit
+  set and the header checksum recomputed, which must be dropped.
+
+### Commands
+
+From the repository root:
+
+```bash
+make all                                       # every artifact `just lab doctor` lists
+export YANET_QEMU_IMAGE=$PWD/tests/functional/yanet-test.qcow2
+L="flock -o /tmp/yanet2-lab.lock just lab --session ctest-poc"
+$L doctor
+$L up
+$L scenario run decap                          # control: C module, baseline
+$L reset
+$L manifest run rust/sdk-poc-ctest/lab/decap-rs-boot/manifest.yaml
+$L status
+$L scenario run decap                          # the same scenario, Rust module
+$L manifest run rust/sdk-poc-ctest/lab/decap-rs-proof/manifest.yaml
+$L exec -- /tmp/yanet/cli/yanet-cli-counters --module-type decap --format json
+$L down
+```
+
+Use `flock -o`. A plain `flock` around `up` leaves the lock held by the
+forked supervisor and QEMU, which inherit its descriptor, for the whole
+session.
+
+### Outputs
+
+Control on the C baseline: `scenario run decap` gives
+`PASS probe decap-ipv4`, and the dataplane log has
+`load module decap` but no "found in plugin" line.
+
+`manifest run .../decap-rs-boot/manifest.yaml` (all 15 steps pass; output
+trimmed):
+
+```
+PASS boot     custom-config
+PASS step     plugin-loaded
+... [INFO ][plugin_loader.c:161]: loaded plugin decap from /mnt/yanet2/rust/sdk-poc-ctest/target/release/libdecap_dp.so
+PASS step     decap-bound-to-plugin
+... [INFO ][module_loader.c:36]: module decap found in plugin decap
+PASS step     plugin-mapped
+74d4c0a25000-74d4c0a5f000 r-xp 00011000 00:2e 3411803  /mnt/yanet2/rust/sdk-poc-ctest/target/release/libdecap_dp.so
+PASS step     kni-addresses
+...
+PASS step     configure-bird-adapter
+PASS step     create-lab-function
+PASS step     start-pipeline-operator
+PASS step     wait-ready
+```
+
+`status` then reports `READY`. `scenario run decap` gives:
+
+```
+READY
+PASS step     configure-decap
+[✓] Updated config 'decap_lab'.
+PASS step     attach-decap
+[✓] Updated function 'fn:lab'.
+PASS step     inspect-decap
+prefixes: 4.5.6.7/32
+1:2:3:4::abcd/128
+PASS probe    decap-ipv4
+```
+
+`manifest run .../decap-rs-proof/manifest.yaml` passes all steps and
+probes:
+- `single-dataplane-start`: exactly one plugin binding in the log.
+- `decap-bound-to-plugin` and `plugin-mapped`: the binding is still in
+  place and the library is still mapped.
+- `pipeline`: shows `fn:forward -> fn:decap -> fn:lab -> fn:route`, with
+  `decap:decap0` and `decap:decap_lab`.
+- `decap-ipv4-again` and `outer-fragment-dropped`: both probes pass.
+
+Decap module counters afterwards (worker 0, `[packets, bytes]`):
+
+| module | rx | tx | drop |
+|---|---|---|---|
+| `decap0` | 3, 222 | 2, 148 | 1, 74 |
+| `decap_lab` | 2, 148 | 2, 108 | 0, 0 |
+
+How the counters read:
+- `decap0` has no prefixes. It passed both tunnel packets and dropped the
+  fragment: the fragment check runs before the prefix lookup, as in C.
+- `decap_lab` stripped the 20-byte outer header from both tunnel packets
+  (74 to 54 bytes each).
+
+Both instances are of the plugin-bound type. These counters are not a
+Rust-only observable; the Rust module deliberately behaves like C, so the
+proof that Rust handled the packets is the plugin binding and mapping of
+the live dataplane process.
 
 ## Design notes
 
