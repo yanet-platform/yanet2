@@ -1,0 +1,6 @@
+# Default libclang for bindgen: one that ships its resource headers.
+#
+# On the reference Ubuntu host the newest libclang (19) lacks stdatomic.h,
+# so the LLVM 18 one is the default; an exported LIBCLANG_PATH wins.
+[env]
+LIBCLANG_PATH = { value = "/usr/lib/llvm-18/lib", force = false }

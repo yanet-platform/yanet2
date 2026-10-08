@@ -1,0 +1,17 @@
+[package]
+name = "yanet-sdk"
+version = "0.1.0"
+description = "Safe surface of the YANET2 Rust module SDK."
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+yanet-sys = { path = "../yanet-sys" }
+
+[dev-dependencies]
+yanet-sys = { path = "../yanet-sys", features = ["testing"] }
