@@ -18,7 +18,7 @@ use yanet_shm::{CounterStorage, CpModule, OffsetPtr};
 ///
 /// Mirrors `YANET_MODULE_ABI_VERSION` in `lib/dataplane/module/module.h`;
 /// bump both together, in the change that alters any mirrored layout.
-pub const YANET_MODULE_ABI_VERSION: u32 = 32;
+pub const YANET_MODULE_ABI_VERSION: u32 = 33;
 
 /// Symbol name a module `.so` exports carrying its ABI version.
 pub const YANET_MODULE_ABI_VERSION_SYMBOL: &str = "yanet_module_abi_version";

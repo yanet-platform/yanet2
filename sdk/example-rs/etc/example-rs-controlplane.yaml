@@ -1,0 +1,32 @@
+# Control-plane daemon configuration for the reference out-of-tree module.
+#
+# Run as:
+#   yanet-example-rs-controlplane --config sdk/example-rs/etc/example-rs-controlplane.yaml
+#
+# The dataplane side needs the plugin deployed and named; in dataplane.yaml:
+#   plugin_dir: /usr/lib/yanet2/modules
+#   modules:
+#     - example_rs
+module:
+  # Dataplane instance the module's agent serves.
+  instance_id: 0
+  memory_path: /dev/hugepages/yanet
+  memory_requirements: 4MB
+
+server:
+  # Where the daemon serves the module's gRPC service.
+  endpoint: "[::1]:8092"
+  # Address advertised to the gateways; empty uses the bound address, so
+  # set it when binding a wildcard or loopback address reachable elsewhere.
+  # advertise_endpoint: "10.0.0.1:8092"
+
+register:
+  # Gateway heartbeat period.
+  interval: 30s
+
+gateways: []
+  # - name: primary
+  #   endpoint: "[::1]:8080"
+
+logging:
+  level: info

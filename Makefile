@@ -302,12 +302,13 @@ sdk: dataplane
 	@echo "  plugin to deploy: build/<module>/lib<name>_dp.so -> plugin_dir"
 	@echo "  reference module: make sdk-example"
 
-# Builds and tests the reference out-of-tree module (sdk/example) against
-# this tree's SDK: the gate for out-of-tree module support. When the
-# external/route-mpls submodule (the production port) is checked out, its
-# full build and test suite runs too.
+# Builds and tests the out-of-tree reference modules against this tree's
+# SDK: the gate for out-of-tree module support — sdk/example (C dataplane),
+# sdk/example-rs (Rust dataplane) and, when the external/route-mpls
+# submodule (the production port) is checked out, its full suite too.
 sdk-example: sdk
 	$(MAKE) -C sdk/example YANET_ROOT=$(CURDIR) all test
+	$(MAKE) -C sdk/example-rs YANET_ROOT=$(CURDIR) all test
 	@if [ -f external/route-mpls/Makefile ]; then \
 		$(MAKE) -C external/route-mpls YANET_ROOT=$(CURDIR) all test; \
 	else \

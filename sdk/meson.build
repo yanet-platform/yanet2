@@ -112,6 +112,16 @@ sdk_conf.set('YANET_BUILDDIR', meson.global_build_root())
 sdk_conf.set('SDK_INC_FLAGS', sdk_inc_flags)
 sdk_conf.set('SDK_DEFINES', ' '.join(sdk_defines))
 
+# Read straight from the header both sides compile, so the .pc can never
+# drift from the loader's expectation (Rust consumers assert their
+# yanet-dp mirrors against this variable).
+module_abi_version = cc.get_define(
+  'YANET_MODULE_ABI_VERSION',
+  prefix: '#include "lib/dataplane/module/module.h"',
+  args: ['-I' + meson.project_source_root()],
+).strip()
+sdk_conf.set('YANET_MODULE_ABI_VERSION', module_abi_version)
+
 configure_file(
   input: 'yanet-module-sdk.pc.in',
   output: 'yanet-module-sdk.pc',

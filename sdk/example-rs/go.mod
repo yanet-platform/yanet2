@@ -1,0 +1,44 @@
+// Own module so the yanet2 tree never compiles this module's Go code; the
+// replace directive pins it to the checkout the module is developed against.
+// A template copy points it at its own yanet2 checkout instead.
+module github.com/yanet-platform/yanet2/sdk/example-rs
+
+go 1.27.1
+
+replace github.com/yanet-platform/yanet2 => ../../
+
+require (
+	github.com/c2h5oh/datasize v0.0.0-20231215233829-aa82cc1e6500
+	github.com/gopacket/gopacket v1.6.1
+	github.com/stretchr/testify v1.11.1
+	github.com/yanet-platform/yanet2 v0.0.0-00010101000000-000000000000
+	go.uber.org/zap v1.28.0
+	golang.org/x/sync v0.19.0
+	google.golang.org/grpc v1.80.0
+	google.golang.org/protobuf v1.36.11
+)
+
+require (
+	github.com/cenkalti/backoff/v5 v5.0.3 // indirect
+	github.com/davecgh/go-spew v1.1.1 // indirect
+	github.com/gobwas/glob v0.2.3 // indirect
+	github.com/google/go-cmp v0.7.0 // indirect
+	github.com/hashicorp/errwrap v1.1.0 // indirect
+	github.com/hashicorp/go-multierror v1.1.1 // indirect
+	github.com/inconshreveable/mousetrap v1.1.0 // indirect
+	github.com/klauspost/compress v1.18.6 // indirect
+	github.com/pmezard/go-difflib v1.0.0 // indirect
+	github.com/siderolabs/grpc-proxy v0.5.2 // indirect
+	github.com/spf13/cobra v1.10.2 // indirect
+	github.com/spf13/pflag v1.0.9 // indirect
+	github.com/stripe/krl v0.0.0-20250403164848-fcf8101b2f53 // indirect
+	github.com/yanet-platform/xnetip v0.1.1 // indirect
+	go.uber.org/multierr v1.11.0 // indirect
+	golang.org/x/crypto v0.48.0 // indirect
+	golang.org/x/net v0.50.0 // indirect
+	golang.org/x/sys v0.41.0 // indirect
+	golang.org/x/term v0.40.0 // indirect
+	golang.org/x/text v0.34.0 // indirect
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20260120221211-b8f7ae30c516 // indirect
+	gopkg.in/yaml.v3 v3.0.1 // indirect
+)

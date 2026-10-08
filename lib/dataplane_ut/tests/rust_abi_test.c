@@ -51,9 +51,15 @@ size_t yanet_dp_offset_module_ectx_abs_module_prepared(void);
 size_t yanet_dp_offset_device_entry_ectx_schedule(void);
 size_t yanet_dp_offset_config_gen_ectx_ready_list(void);
 size_t yanet_dp_offset_dp_worker_current_time(void);
+uint32_t yanet_dp_abi_version(void);
 
 int
 main(void) {
+	TEST_ASSERT_EQUAL(
+		(long)YANET_MODULE_ABI_VERSION,
+		(long)yanet_dp_abi_version(),
+		"yanet-dp ABI version mirror diverged from module.h"
+	);
 	TEST_ASSERT_EQUAL(
 		(long)sizeof(struct module),
 		(long)yanet_dp_sizeof_module(),

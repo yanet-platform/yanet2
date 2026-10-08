@@ -88,7 +88,24 @@ abi_offset!(
 );
 abi_offset!(yanet_dp_offset_dp_worker_current_time, raw::DpWorker, current_time);
 
-/// The ABI version this SDK compiled against; the plugin loader checks
-/// it against the dataplane binary for `.so` modules.
+/// The ABI version this SDK compiled against.
+///
+/// Cross-checked against the real header by the dataplane_ut C test, so
+/// the mirror cannot silently drift when the header bumps (as it did
+/// for 33).
+#[unsafe(no_mangle)]
+pub extern "C" fn yanet_dp_abi_version() -> u32 {
+    raw::YANET_MODULE_ABI_VERSION
+}
+
+/// The ABI version a plugin build exports; the loader checks it against
+/// the dataplane binary for `.so` modules.
+///
+/// Feature-gated: only a plugin build (`--features yanet-dp/plugin`) may
+/// define the symbol. The statically linked built-ins never may — two
+/// Rust modules linked into the same dataplane binary would collide on
+/// it, which is why the C side keeps its copy out of the static module
+/// libraries too (lib/dataplane/config/meson.build).
+#[cfg(feature = "plugin")]
 #[unsafe(no_mangle)]
 pub static yanet_module_abi_version: u32 = raw::YANET_MODULE_ABI_VERSION;

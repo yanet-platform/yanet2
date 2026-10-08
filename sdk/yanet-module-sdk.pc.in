@@ -1,5 +1,8 @@
 yanet_srcroot=@YANET_SRCROOT@
 yanet_builddir=@YANET_BUILDDIR@
+# The dataplane ABI this build stamps into plugins; consumers (including
+# Rust builds through yanet-dp) can assert their mirrors match it.
+yanet_abi_version=@YANET_MODULE_ABI_VERSION@
 
 Name: yanet-module-sdk
 Description: Build YANET dataplane module plugins against this configured yanet2 tree
