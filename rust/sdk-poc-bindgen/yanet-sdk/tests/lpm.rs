@@ -19,8 +19,8 @@ use yanet_sys::{
 /// Offset of the relative page directory in the LPM header.
 const LPM_PAGES: usize = core::mem::offset_of!(bindings::lpm, pages);
 
-const LPM4: &[u8] = include_bytes!("fixtures/lpm4.bin");
-const LPM6: &[u8] = include_bytes!("fixtures/lpm6.bin");
+const LPM4: &[u8] = yanet_sys::testing::LPM4_FIXTURE;
+const LPM6: &[u8] = yanet_sys::testing::LPM6_FIXTURE;
 
 /// Small deterministic generator: xorshift64* over a fixed seed.
 struct Rng(u64);
@@ -53,7 +53,10 @@ fn prefix_range(addr: &[u8], len: usize) -> (Vec<u8>, Vec<u8>) {
     (from, to)
 }
 
-/// Fixed prefix sets of the committed fixtures: (address, length, value).
+/// Fixed prefix sets of the fixtures: (address, length, value).
+///
+/// The build-time C generator (`shim/fixture_gen.c` in yanet-sys) must use
+/// the same sets; the fixture comparison test fails otherwise.
 fn fixture_prefixes(key_size: usize) -> Vec<(Vec<u8>, usize, u32)> {
     if key_size == 4 {
         vec![
@@ -79,6 +82,8 @@ fn fixture_prefixes(key_size: usize) -> Vec<(Vec<u8>, usize, u32)> {
 }
 
 /// Keys around every prefix boundary plus a few random ones.
+///
+/// `shim/fixture_gen.c` in yanet-sys generates the same keys in C.
 fn fixture_keys(key_size: usize) -> Vec<[u8; 16]> {
     let mut keys = Vec::new();
     for (addr, len, _) in fixture_prefixes(key_size) {
@@ -119,24 +124,18 @@ fn build_fixture(key_size: usize) -> Fixture {
     Fixture::capture(&arena, &lpm, key_size as u8, &fixture_keys(key_size))
 }
 
-/// Verifies that the committed fixtures are exactly what the C builder
-/// produces today; set YANET_SDK_REGENERATE_FIXTURES=1 to rewrite them.
+/// Verifies that the build-time C fixtures equal what the in-process C
+/// builder and the Rust capture produce, so the Miri replay tests replay
+/// exactly the C LPMs.
 #[test]
 #[cfg_attr(miri, ignore = "runs the C LPM builder")]
 fn test_lpm_fixtures_match_c_builder() {
-    for (key_size, name, committed) in [(4, "lpm4.bin", LPM4), (16, "lpm6.bin", LPM6)] {
+    for (key_size, name, generated) in [(4, "lpm4.bin", LPM4), (16, "lpm6.bin", LPM6)] {
         let encoded = build_fixture(key_size).encode();
-        if std::env::var_os("YANET_SDK_REGENERATE_FIXTURES").is_some() {
-            let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("tests/fixtures")
-                .join(name);
-            std::fs::write(path, &encoded).unwrap();
-        } else {
-            assert!(
-                committed == encoded.as_slice(),
-                "{name} is stale; regenerate the fixtures"
-            );
-        }
+        assert!(
+            generated == encoded.as_slice(),
+            "{name} differs from the in-process C build"
+        );
     }
 }
 

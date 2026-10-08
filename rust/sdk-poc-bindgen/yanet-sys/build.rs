@@ -193,6 +193,9 @@ fn main() {
     fs::write(out_dir.join("rust_layout.rs"), render_rust_layout(&gcc_fields)).unwrap();
 
     compile_shim(&flags, &root, &shim_dir);
+    if env::var_os("CARGO_FEATURE_TESTING").is_some() {
+        generate_fixtures(&flags, &shim_dir, &out_dir);
+    }
 
     // Single source of C flags for dependents' build scripts.
     let join = |values: Vec<String>| values.join(";");
@@ -596,6 +599,32 @@ fn render_rust_layout(fields: &[GccField]) -> String {
     }
     out.push_str("];\n");
     out
+}
+
+/// Builds and runs the C fixture generator: C-built LPM images the Miri
+/// tests replay, since Miri itself cannot run C.
+fn generate_fixtures(flags: &CFlags, shim_dir: &Path, out_dir: &Path) {
+    let binary = out_dir.join("fixture_gen");
+    let status = Command::new(&flags.compiler)
+        .args(flags.header_args())
+        .arg(format!("-I{}", shim_dir.display()))
+        .arg("-O2")
+        .arg("-o")
+        .arg(&binary)
+        .arg(shim_dir.join("fixture_gen.c"))
+        .arg(shim_dir.join("test_shim.c"))
+        .status()
+        .expect("run the C compiler for the fixture generator");
+    assert!(status.success(), "fixture generator failed to compile");
+    for (key_size, name) in [(4, "lpm4.bin"), (16, "lpm6.bin")] {
+        let status = Command::new(&binary)
+            .arg(key_size.to_string())
+            .arg(out_dir.join(name))
+            .status()
+            .expect("run the fixture generator");
+        assert!(status.success(), "fixture generator failed for key size {key_size}");
+    }
+    println!("cargo:rerun-if-changed={}", shim_dir.join("fixture_gen.c").display());
 }
 
 fn compile_shim(flags: &CFlags, root: &Path, shim_dir: &Path) {

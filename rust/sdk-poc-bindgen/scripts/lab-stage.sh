@@ -5,7 +5,8 @@
 # The functional framework copies every build/modules/*/dataplane/
 # *_dp_plugin.so into the guest plugin directory, so a staged plugin
 # replaces the built-in decap in any VM booted with plugin_dir until it is
-# unstaged. The tagged control plane is staged beside the default one.
+# unstaged. The tagged control plane is staged beside the default one, and
+# the boot YAML is generated into the lab manifest directories.
 set -euo pipefail
 
 poc=$(cd "$(dirname "$0")/.." && pwd)
@@ -19,7 +20,9 @@ case ${1:-} in
         (cd "$poc" && cargo build --offline --release -p decap-rs && cargo build --offline --release -p yanet-cp)
         cp "$poc/target/release/libdecap_dp.so" "$plugin"
         (cd "$root" && go build -tags yanet_rust_cp -o "$controlplane" ./controlplane/cmd/yncp-director)
-        echo "staged $plugin and $controlplane"
+        # The manifests' boot configuration is generated, not committed.
+        (cd "$root" && go run rust/sdk-poc-bindgen/lab/gen_config.go)
+        echo "staged $plugin, $controlplane and the lab boot configuration"
         ;;
     unstage)
         rm -f "$plugin" "$controlplane"

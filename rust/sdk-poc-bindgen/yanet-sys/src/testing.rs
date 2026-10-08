@@ -528,6 +528,13 @@ impl<'g> Resolver<'g> for BlockResolver<'g> {
     }
 }
 
+/// C-built IPv4 LPM fixture, produced at build time by the C generator in
+/// `shim/fixture_gen.c`.
+pub const LPM4_FIXTURE: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/lpm4.bin"));
+
+/// C-built IPv6 LPM fixture, produced like [`LPM4_FIXTURE`].
+pub const LPM6_FIXTURE: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/lpm6.bin"));
+
 /// C-built LPM captured as blocks plus reference lookups.
 pub struct Fixture {
     pub key_size: u8,
