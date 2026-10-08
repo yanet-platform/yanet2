@@ -6,6 +6,17 @@ checkout, without editing any tracked yanet2 file and without forking the
 tree. `sdk/example/` is a complete reference module built this way; copy it
 to start a new one.
 
+The dataplane plugin can be written in C (everything above) or in Rust
+through the Rust dataplane SDK (`yanet-packet`/`yanet-shm`/`yanet-dp`,
+documented in [rust-dataplane-modules.md](rust-dataplane-modules.md)):
+`sdk/example-rs/` is sdk/example's twin with a Rust handler. A Rust
+plugin builds as a cargo `cdylib` with `--features yanet-dp/plugin` —
+the feature emits the `yanet_module_abi_version` export the loader
+dlsym's, which statically linked built-ins must never define — and its
+undefined C symbols resolve against the dataplane binary exactly like a
+C plugin's. The control plane, daemon and CLI are identical to the C
+frontend's.
+
 The runtime machinery is part of the dataplane itself: it scans a
 configured `plugin_dir` for `lib<name>_dp.so` files, refuses any whose
 exported `yanet_module_abi_version` does not match, and prefers a plugin's

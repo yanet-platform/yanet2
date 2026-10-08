@@ -311,11 +311,12 @@ sdk: dataplane
 	@echo "  plugin to deploy: build/<module>/lib<name>_dp.so -> plugin_dir"
 	@echo "  reference module: make sdk-example"
 
-# Builds and tests the reference out-of-tree module (sdk/example) against
-# this tree's SDK: the gate for out-of-tree module support.
+# Builds and tests the out-of-tree reference modules against this tree's
+# SDK: the gate for out-of-tree module support — sdk/example (C dataplane)
+# and sdk/example-rs (Rust dataplane).
 sdk-example: sdk
 	$(MAKE) -C sdk/example YANET_ROOT=$(CURDIR) all test
-
+	$(MAKE) -C sdk/example-rs YANET_ROOT=$(CURDIR) all test
 
 cli: cli-build
 

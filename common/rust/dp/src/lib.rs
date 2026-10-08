@@ -12,7 +12,8 @@
 //! Layouts are pinned three ways: compile-time asserts against
 //! `plugin_abi_assert.h` values ([`raw`]), `#[no_mangle]` size and
 //! offset getters cross-checked by the dataplane_ut C test ([`abi`]),
-//! and the exported `yanet_module_abi_version`.
+//! and the `yanet_module_abi_version` a plugin build exports (the
+//! `plugin` feature; statically linked built-ins must not define it).
 //!
 //! Panics in a handler abort the dataplane (the workspace pins
 //! `panic = "abort"` for release), exactly like a C crash; there is no

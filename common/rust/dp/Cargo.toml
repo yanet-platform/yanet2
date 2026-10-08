@@ -9,6 +9,16 @@ rust-version = "1.88"
 [lints]
 workspace = true
 
+[features]
+# Emits the `yanet_module_abi_version` export the plugin loader dlsym's.
+# Only a module built as a `.so` plugin may define it: the statically
+# linked built-ins never may, or two Rust modules linked into the same
+# dataplane binary would collide on the symbol (the same reason the C
+# side keeps plugin_abi_export.c out of its static module libraries).
+# Enable through the module crate: `cargo build --features yanet-dp/plugin`.
+default = []
+plugin = []
+
 [dependencies]
 yanet-packet = { path = "../packet", package = "yanet-packet" }
 yanet-shm = { path = "../shm", package = "yanet-shm" }

@@ -146,10 +146,19 @@ The mirrored layouts are pinned three ways:
 - compile-time size and offset asserts in the crates, carrying the same
   values as `lib/dataplane/config/plugin_abi_assert.h`;
 - `#[no_mangle]` size/offset getters (`yanet_dp_sizeof_*`,
-  `yanet_dp_offset_*`) cross-checked against the real headers by the
-  `dataplane_ut_rust_abi` test in the same binary;
-- the exported `yanet_module_abi_version` (32), which a future `.so`
-  plugin path would check at load.
+  `yanet_dp_offset_*`, `yanet_dp_abi_version`) cross-checked against the
+  real headers and `YANET_MODULE_ABI_VERSION` by the `dataplane_ut_rust_abi`
+  test in the same binary;
+- the `yanet_module_abi_version` a plugin build exports (the `plugin`
+  cargo feature), which the plugin loader checks at load.
+
+The version symbol is feature-gated because the statically linked
+built-ins must never define it: two Rust modules linked into the same
+dataplane binary would collide on it, the same reason the C side keeps
+its `plugin_abi_export.c` out of the static module libraries. The
+module SDK's pkg-config file also exports
+`pkg-config --variable=yanet_abi_version yanet-module-sdk` for
+out-of-tree builds to assert against (see docs/module-sdk.md).
 
 `YANET_MODULE_ABI_VERSION` bumps must update `yanet-dp`'s mirrors in the
 same change.
@@ -168,8 +177,10 @@ packet.
 - Config building, classifier compilation and the Go/CLI control plane
   remain in C/Go/Rust-CLI respectively; the SDK is the dataplane read
   side.
-- `.so` plugin packaging is not wired yet; Rust modules link statically
-  into the `yanet-dataplane` binary.
+- in-tree Rust modules link statically into the `yanet-dataplane`
+  binary; the out-of-tree plugin path (a `cdylib` built with
+  `--features yanet-dp/plugin`, deployed via `plugin_dir` like a C
+  plugin) is demonstrated by `sdk/example-rs` and docs/module-sdk.md.
 - Multi-segment mbufs: header views and lengths cover the first segment
   (matching the parser's cached metadata); `total_len()` reports the
   whole packet.
