@@ -22,10 +22,15 @@ lib_sources = files(
   'numa.c',
 )
 
+lib_c_args = yanet_c_args
+if rust_builtins_enabled
+  lib_c_args += ['-DYANET_RUST_BUILTINS']
+endif
+
 lib_dataplane = static_library(
   'dataplane',
   lib_sources,
-  c_args: yanet_c_args,
+  c_args: lib_c_args,
   link_args: yanet_link_args,
   dependencies: lib_dependencies,
   install: false,
@@ -65,6 +70,7 @@ dependencies = lib_dependencies + [
   lib_dev_plain_dp_dep,
   lib_dev_vlan_dp_dep,
   lib_dev_trafgen_dp_dep,
+  lib_dev_vxlan_dp_dep,
 ]
 
 sources = files(

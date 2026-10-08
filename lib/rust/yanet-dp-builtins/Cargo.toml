@@ -1,0 +1,18 @@
+[package]
+name = "yanet-dp-builtins"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[lib]
+crate-type = ["staticlib"]
+test = false
+doctest = false
+
+[dependencies]
+yanet-device-vxlan = { path = "../../../devices/vxlan/dataplane" }
+yanet-dp-sys = { path = "../yanet-dp-sys" }
