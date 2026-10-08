@@ -161,25 +161,44 @@ mod tests {
 
     /// A one-attribute filter whose single leaf reads `data[leaf_idx]`
     /// and whose root row maps class 5 to rule 9.
-    fn fixture() -> (Box<Filter>, Box<[u8; 1]>) {
+    /// Owns every allocation the filter's offset pointers reach, so they
+    /// outlive the queries under test.
+    struct FilterFixture {
+        filter: Box<Filter>,
+        payload: Box<[u8; 1]>,
+        _root_rows: Box<[[u32; 6]]>,
+        _chunks: Box<[OffsetPtr<u32>; 1]>,
+    }
+
+    fn fixture() -> FilterFixture {
         let mut filter = Box::new(Filter::default());
         let mut payload: Box<[u8; 1]> = Box::new([0]);
-        let mut root_rows: Box<[[u32; 1]]> = Box::new([[0], [0], [0], [0], [0], [9]]);
-        let mut chunks: Box<[OffsetPtr<u32>; 6]> = Box::new(core::array::from_fn(|_| OffsetPtr::null()));
+        // The root fold indexes value_table_get(table, 0, class) for a
+        // single-attribute signature, so the classes span the horizontal
+        // dimension and the vertical one holds the single row.
+        let mut root_rows: Box<[[u32; 6]]> = Box::new([[0, 0, 0, 0, 0, 9]]);
+        let mut chunks: Box<[OffsetPtr<u32>; 1]> = Box::new(core::array::from_fn(|_| OffsetPtr::null()));
         for (idx, row) in root_rows.iter_mut().enumerate() {
             chunks[idx].store(row.as_mut_ptr());
         }
         let root = &mut filter.v[0];
-        root.table.v_dim = 6;
-        root.table.h_dim = 1;
+        root.table.v_dim = 1;
+        root.table.h_dim = 6;
         root.table.values.store(chunks.as_mut_ptr());
         filter.v[1].data.store(payload.as_mut_ptr());
-        (filter, payload)
+        FilterFixture {
+            filter,
+            payload,
+            _root_rows: root_rows,
+            _chunks: chunks,
+        }
     }
 
     #[test]
     fn single_attribute_query_maps_class_to_rule() {
-        let (filter, mut payload) = fixture();
+        let mut f = fixture();
+        let filter = &f.filter;
+        let payload = &mut *f.payload;
         payload[0] = 0;
         let mut slots = FilterSlots::with_capacity(2);
         let mut results = [0u32; 2];

@@ -224,8 +224,6 @@ mod tests {
         pages[0].values[10] = LpmValue { value: lpm_value_set(1) };
         pages[1].values[5] = LpmValue { value: lpm_value_set(2) };
         let child = unsafe { (pages.as_mut_ptr()).add(1) };
-        let mut link = OffsetPtr::<LpmPage>::null();
-        link.store(child);
 
         let mut chunk: Box<[OffsetPtr<LpmPage>; 1]> = Box::new([OffsetPtr::null()]);
         chunk[0].store(pages.as_mut_ptr());
@@ -238,7 +236,14 @@ mod tests {
         // Root page is the chunk's first page; the child link aims
         // straight at the second page of the same chunk.
         lpm.pages.store(chunk.as_mut_ptr());
-        pages[0].values[20] = LpmValue { page: link };
+        // OffsetPtr is self-relative (resolve is field-address plus stored
+        // offset), so the link must be stored at its final slot: a stack
+        // temporary's offset would dangle once copied.
+        pages[0].values[20] = LpmValue { page: OffsetPtr::null() };
+        // SAFETY: writing the page arm of the LpmValue union at its final slot.
+        unsafe {
+            pages[0].values[20].page.store(child);
+        }
 
         Fixture { lpm, _pages: pages, _chunk: chunk }
     }

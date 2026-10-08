@@ -111,10 +111,18 @@ mod tests {
         // SAFETY: the field was just aimed at a live two-byte array.
         assert_eq!(unsafe { *field.resolve() }, 13);
 
-        // Offsets are position-independent: copying the stored field into
-        // another location resolves to the same target from either spot.
+        // Offsets are self-relative (SET_OFFSET_OF semantics): a moved
+        // field re-aims by the distance it moved, so a structure carrying
+        // one must be stored at its final location, never copied after
+        // storing. The copy keeps the same offset value.
+        let target = field.resolve() as isize;
+        let base = &field as *const OffsetPtr<u8> as isize;
         let copy = field;
-        assert_eq!(copy.resolve(), field.resolve());
+        let copy_base = &copy as *const OffsetPtr<u8> as isize;
+        // Different field address, same stored offset: the copy resolves
+        // to a target shifted by exactly the move distance.
+        assert_eq!(copy.resolve() as isize, target + (copy_base - base));
+        assert_ne!(copy.resolve() as isize, target);
     }
 
     #[test]

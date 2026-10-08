@@ -133,9 +133,11 @@ mod tests {
     #[test]
     fn handle_resolves_to_values_array() {
         let mut values: Box<[u64; 2]> = Box::new([3, 100]);
-        let mut handle_field: OffsetPtr<CounterValueHandle> = OffsetPtr::null();
-        handle_field.store(values.as_mut_ptr() as *mut CounterValueHandle);
-        let mut handles: Box<[OffsetPtr<CounterValueHandle>; 1]> = Box::new([handle_field]);
+        // OffsetPtr is self-relative (resolve is field-address plus stored
+        // offset), so the link must be stored at its final slot: a stack
+        // temporary's offset would dangle once copied.
+        let mut handles: Box<[OffsetPtr<CounterValueHandle>; 1]> = Box::new([OffsetPtr::null()]);
+        handles[0].store(values.as_mut_ptr() as *mut CounterValueHandle);
 
         let mut storage = CounterStorage::default();
         storage.counter_value_handles.store(handles.as_mut_ptr());
