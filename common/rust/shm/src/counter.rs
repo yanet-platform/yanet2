@@ -2,8 +2,7 @@
 
 use core::ffi::c_char;
 
-use crate::memory::MemoryContext;
-use crate::offset::OffsetPtr;
+use crate::{memory::MemoryContext, offset::OffsetPtr};
 
 /// Counter name capacity, counting the terminating zero.
 pub const COUNTER_NAME_LEN: usize = 128;

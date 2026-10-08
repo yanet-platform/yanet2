@@ -1,9 +1,9 @@
+use clap::{CommandFactory, Parser};
+use clap_complete::engine::{ArgValueCandidates, CompletionCandidate};
 use examplepb::{
     DeleteConfigRequest, ListConfigsRequest, ShowConfigRequest, UpdateConfigRequest,
     example_service_client::ExampleServiceClient, example_service_server::SERVICE_NAME,
 };
-use clap::{CommandFactory, Parser};
-use clap_complete::engine::{ArgValueCandidates, CompletionCandidate};
 use tonic::codec::CompressionEncoding;
 use ync::{
     GlobalArgs,

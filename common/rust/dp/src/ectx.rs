@@ -5,9 +5,7 @@ use core::marker::PhantomData;
 
 use yanet_shm::{CpModule, ModuleConfig, ObjectConfig, counter_get_address};
 
-use crate::front::packet_list_add;
-use crate::packet::Packet;
-use crate::raw;
+use crate::{front::packet_list_add, packet::Packet, raw};
 
 /// A counter values array, single-writer per worker.
 ///

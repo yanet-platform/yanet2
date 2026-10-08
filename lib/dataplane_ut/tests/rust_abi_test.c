@@ -24,34 +24,61 @@
 
 #include "lib/filter/filter.h"
 
-size_t yanet_dp_sizeof_module(void);
-size_t yanet_dp_sizeof_packet(void);
-size_t yanet_dp_sizeof_packet_front(void);
-size_t yanet_dp_sizeof_module_ectx(void);
-size_t yanet_dp_sizeof_dp_worker(void);
-size_t yanet_dp_sizeof_rte_mbuf(void);
-size_t yanet_dp_sizeof_cp_module(void);
-size_t yanet_dp_sizeof_memory_context(void);
-size_t yanet_dp_sizeof_lpm(void);
-size_t yanet_dp_sizeof_value_table(void);
-size_t yanet_dp_sizeof_vline(void);
-size_t yanet_dp_sizeof_filter(void);
+size_t
+yanet_dp_sizeof_module(void);
+size_t
+yanet_dp_sizeof_packet(void);
+size_t
+yanet_dp_sizeof_packet_front(void);
+size_t
+yanet_dp_sizeof_module_ectx(void);
+size_t
+yanet_dp_sizeof_dp_worker(void);
+size_t
+yanet_dp_sizeof_rte_mbuf(void);
+size_t
+yanet_dp_sizeof_cp_module(void);
+size_t
+yanet_dp_sizeof_memory_context(void);
+size_t
+yanet_dp_sizeof_lpm(void);
+size_t
+yanet_dp_sizeof_value_table(void);
+size_t
+yanet_dp_sizeof_vline(void);
+size_t
+yanet_dp_sizeof_filter(void);
 
-size_t yanet_dp_offset_packet_mbuf(void);
-size_t yanet_dp_offset_packet_data_len(void);
-size_t yanet_dp_offset_rte_mbuf_next(void);
-size_t yanet_dp_offset_rte_mbuf_buf_addr(void);
-size_t yanet_dp_offset_rte_mbuf_data_off(void);
-size_t yanet_dp_offset_rte_mbuf_pkt_len(void);
-size_t yanet_dp_offset_rte_mbuf_data_len(void);
-size_t yanet_dp_offset_module_ectx_abs_cp_module(void);
-size_t yanet_dp_offset_module_ectx_abs_counter_storage(void);
-size_t yanet_dp_offset_module_ectx_packet_recirc_limit(void);
-size_t yanet_dp_offset_module_ectx_abs_module_prepared(void);
-size_t yanet_dp_offset_device_entry_ectx_schedule(void);
-size_t yanet_dp_offset_config_gen_ectx_ready_list(void);
-size_t yanet_dp_offset_dp_worker_current_time(void);
-uint32_t yanet_dp_abi_version(void);
+size_t
+yanet_dp_offset_packet_mbuf(void);
+size_t
+yanet_dp_offset_packet_data_len(void);
+size_t
+yanet_dp_offset_rte_mbuf_next(void);
+size_t
+yanet_dp_offset_rte_mbuf_buf_addr(void);
+size_t
+yanet_dp_offset_rte_mbuf_data_off(void);
+size_t
+yanet_dp_offset_rte_mbuf_pkt_len(void);
+size_t
+yanet_dp_offset_rte_mbuf_data_len(void);
+size_t
+yanet_dp_offset_module_ectx_abs_cp_module(void);
+size_t
+yanet_dp_offset_module_ectx_abs_counter_storage(void);
+size_t
+yanet_dp_offset_module_ectx_packet_recirc_limit(void);
+size_t
+yanet_dp_offset_module_ectx_abs_module_prepared(void);
+size_t
+yanet_dp_offset_device_entry_ectx_schedule(void);
+size_t
+yanet_dp_offset_config_gen_ectx_ready_list(void);
+size_t
+yanet_dp_offset_dp_worker_current_time(void);
+uint32_t
+yanet_dp_abi_version(void);
 
 int
 main(void) {
@@ -88,7 +115,8 @@ main(void) {
 	TEST_ASSERT_EQUAL(
 		(long)sizeof(struct rte_mbuf),
 		(long)yanet_dp_sizeof_rte_mbuf(),
-		"rte_mbuf mirror size diverged; check the DPDK build's IOVA shape"
+		"rte_mbuf mirror size diverged; check the DPDK build's IOVA "
+		"shape"
 	);
 	TEST_ASSERT_EQUAL(
 		(long)sizeof(struct cp_module),

@@ -2,8 +2,10 @@
 
 use alloc::vec::Vec;
 
-use crate::memory::MemoryContext;
-use crate::value::{ValueTable, value_table_get};
+use crate::{
+    memory::MemoryContext,
+    value::{ValueTable, value_table_get},
+};
 
 /// Upper bound on attributes per filter signature.
 pub const MAX_ATTRIBUTES: usize = 10;
@@ -114,7 +116,7 @@ pub fn filter_query<E>(
     slots: &mut [u32],
     results: &mut [u32],
 ) where
-    E: Fn(usize /*leaf*/, *mut u8, &mut [u32]),
+    E: Fn(usize /* leaf */, *mut u8, &mut [u32]),
 {
     debug_assert!(leaf_count >= 1);
     debug_assert!(leaf_count <= MAX_ATTRIBUTES);

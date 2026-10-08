@@ -2,8 +2,7 @@
 
 use core::marker::PhantomData;
 
-use crate::packet::Packet;
-use crate::raw;
+use crate::{packet::Packet, raw};
 
 /// The packet batch a module call receives.
 ///

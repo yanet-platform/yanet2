@@ -1,7 +1,9 @@
 //! Attribute-classifier mirrors (`lib/classify` and `lib/filter` halves).
 
-use crate::lpm::{Lpm, lpm4_lookup, lpm8_lookup};
-use crate::value::{ValueTable, value_table_get};
+use crate::{
+    lpm::{Lpm, lpm4_lookup, lpm8_lookup},
+    value::{ValueTable, value_table_get},
+};
 
 /// Marks a high-half trie value whose result row lives in the join table.
 ///
@@ -94,8 +96,10 @@ mod tests {
     use std::prelude::v1::*;
 
     use super::*;
-    use crate::lpm::{LpmPage, LpmValue, lpm_value_set};
-    use crate::offset::OffsetPtr;
+    use crate::{
+        lpm::{LpmPage, LpmValue, lpm_value_set},
+        offset::OffsetPtr,
+    };
 
     fn net6_fixture() -> (Box<ClassifyAttrNet6>, Box<[LpmPage; 3]>) {
         // Pages 0-1 form the hi trie: the 0x20 region descends and its
