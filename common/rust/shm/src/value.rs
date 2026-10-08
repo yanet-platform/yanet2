@@ -1,7 +1,6 @@
 //! Class-join table and decoder line mirrors over shared memory.
 
-use crate::memory::MemoryContext;
-use crate::offset::OffsetPtr;
+use crate::{memory::MemoryContext, offset::OffsetPtr};
 
 /// Mirror of `struct value_table` (`common/value.h`).
 ///

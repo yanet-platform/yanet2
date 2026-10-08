@@ -1,7 +1,6 @@
 //! Longest-prefix-match trie mirror over shared memory.
 
-use crate::memory::MemoryContext;
-use crate::offset::OffsetPtr;
+use crate::{memory::MemoryContext, offset::OffsetPtr};
 
 /// Sentinel produced by a lookup that matched no inserted range.
 pub const LPM_VALUE_INVALID: u32 = 0xffff_ffff;

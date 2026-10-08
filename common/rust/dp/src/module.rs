@@ -2,9 +2,7 @@
 
 use core::ffi::c_void;
 
-use crate::ectx::Ectx;
-use crate::front::PacketFront;
-use crate::raw;
+use crate::{ectx::Ectx, front::PacketFront, raw};
 
 /// A module's per-batch packet processing, written in safe code.
 ///

@@ -2,9 +2,7 @@
 
 use core::ffi::c_char;
 
-use crate::counter::CounterRegistry;
-use crate::memory::MemoryContext;
-use crate::offset::OffsetPtr;
+use crate::{counter::CounterRegistry, memory::MemoryContext, offset::OffsetPtr};
 
 /// Module and device name capacity, counting the terminating zero.
 pub const CP_MODULE_NAME_LEN: usize = 80;

@@ -4,11 +4,13 @@
 //! list, geometry and metadata mechanics run under `cargo test` without
 //! the dataplane binary; the dataplane_ut suite covers the real path.
 
-use std::prelude::v1::*;
+use std::{prelude::v1::*, vec};
 
-use crate::front::{packet_list_add, packet_list_pop};
-use crate::packet::Packet;
-use crate::raw;
+use crate::{
+    front::{packet_list_add, packet_list_pop},
+    packet::Packet,
+    raw,
+};
 
 const DATA_OFF: usize = 192;
 

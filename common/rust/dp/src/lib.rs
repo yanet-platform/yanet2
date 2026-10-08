@@ -39,14 +39,18 @@ pub use yanet_shm;
 
 /// The names a module usually wants in scope.
 pub mod prelude {
-    pub use crate::ectx::{Counter, DeviceTarget, Ectx, ObjectLink};
-    pub use crate::front::PacketFront;
-    pub use crate::module::{ModuleCommit, ModuleCommitEctx, ModuleHandler};
-    pub use crate::packet::Packet;
-    pub use crate::raw::YANET_MODULE_ABI_VERSION;
-    pub use crate::{define_module, yanet_shm};
     pub use yanet_packet as packet;
     pub use yanet_shm::{CpModule, LPM_VALUE_INVALID, Lpm, ModuleConfig, ObjectConfig};
+
+    pub use crate::{
+        define_module,
+        ectx::{Counter, DeviceTarget, Ectx, ObjectLink},
+        front::PacketFront,
+        module::{ModuleCommit, ModuleCommitEctx, ModuleHandler},
+        packet::Packet,
+        raw::YANET_MODULE_ABI_VERSION,
+        yanet_shm,
+    };
 }
 
 #[cfg(test)]

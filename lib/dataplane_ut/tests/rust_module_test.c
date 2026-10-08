@@ -116,7 +116,9 @@ run_one(const uint8_t dst_addr[4], struct round_outcome *outcome) {
 	TEST_ASSERT_NOT_NULL(wire_chain, "cp_chain_config_create failed");
 	struct cp_function_config *output_function =
 		cp_function_config_create("output_function", 1);
-	TEST_ASSERT_NOT_NULL(output_function, "cp_function_config_create failed");
+	TEST_ASSERT_NOT_NULL(
+		output_function, "cp_function_config_create failed"
+	);
 	TEST_ASSERT_SUCCESS(
 		cp_function_config_set_chain(output_function, 0, wire_chain, 1),
 		"cp_function_config_set_chain failed"
@@ -132,10 +134,14 @@ run_one(const uint8_t dst_addr[4], struct round_outcome *outcome) {
 		cp_pipeline_config_create("output", 1);
 	TEST_ASSERT_NOT_NULL(output_pipeline, "output pipeline alloc failed");
 	TEST_ASSERT_SUCCESS(
-		cp_pipeline_config_set_function(output_pipeline, 0, "output_function"),
+		cp_pipeline_config_set_function(
+			output_pipeline, 0, "output_function"
+		),
 		"output device pipeline setup failed"
 	);
-	struct cp_pipeline_config *pipelines[] = {input_pipeline, output_pipeline};
+	struct cp_pipeline_config *pipelines[] = {
+		input_pipeline, output_pipeline
+	};
 	TEST_ASSERT_SUCCESS(
 		agent_update_pipelines(agent, 2, pipelines, &err),
 		"pipeline update failed"
@@ -145,9 +151,13 @@ run_one(const uint8_t dst_addr[4], struct round_outcome *outcome) {
 
 	struct cp_device_plain_config *device_config =
 		cp_device_plain_config_new("dev0", 1, 1, &err);
-	TEST_ASSERT_NOT_NULL(device_config, "cp_device_plain_config_new failed");
+	TEST_ASSERT_NOT_NULL(
+		device_config, "cp_device_plain_config_new failed"
+	);
 	TEST_ASSERT_SUCCESS(
-		cp_device_plain_config_set_input_pipeline(device_config, 0, "input", 1),
+		cp_device_plain_config_set_input_pipeline(
+			device_config, 0, "input", 1
+		),
 		"input device pipeline setup failed"
 	);
 	TEST_ASSERT_SUCCESS(
@@ -183,8 +193,7 @@ run_one(const uint8_t dst_addr[4], struct round_outcome *outcome) {
 	ether->ether_type = rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV4);
 	struct rte_ipv4_hdr *ipv4 = (struct rte_ipv4_hdr *)(ether + 1);
 	ipv4->version_ihl = RTE_IPV4_VHL_DEF;
-	ipv4->total_length =
-		rte_cpu_to_be_16(sizeof(struct rte_ipv4_hdr));
+	ipv4->total_length = rte_cpu_to_be_16(sizeof(struct rte_ipv4_hdr));
 	// dst_addr is already network order; a byte copy keeps it so.
 	memcpy(&ipv4->dst_addr, dst_addr, 4);
 	TEST_ASSERT_SUCCESS(parse_packet(packet), "parse_packet failed");
@@ -208,8 +217,7 @@ rust_module_round_test(void) {
 	struct round_outcome dropped;
 	uint8_t dropped_dst[4] = {192, 0, 2, 1};
 	TEST_ASSERT_SUCCESS(
-		run_one(dropped_dst, &dropped),
-		"blackholed round failed"
+		run_one(dropped_dst, &dropped), "blackholed round failed"
 	);
 	TEST_ASSERT_EQUAL(
 		(long)dropped.output_count,
@@ -225,8 +233,7 @@ rust_module_round_test(void) {
 	struct round_outcome passed;
 	uint8_t passed_dst[4] = {198, 51, 100, 7};
 	TEST_ASSERT_SUCCESS(
-		run_one(passed_dst, &passed),
-		"passed round failed"
+		run_one(passed_dst, &passed), "passed round failed"
 	);
 	TEST_ASSERT_EQUAL(
 		(long)passed.output_count,
@@ -249,8 +256,7 @@ main(void) {
 
 #ifdef YANET_DATAPLANE_UT_CONTROLPLANE
 	TEST_ASSERT_SUCCESS(
-		rust_module_round_test(),
-		"rblackhole round test failed"
+		rust_module_round_test(), "rblackhole round test failed"
 	);
 #endif
 	return TEST_SUCCESS;

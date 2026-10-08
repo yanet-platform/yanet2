@@ -2,10 +2,12 @@
 
 use std::prelude::v1::*;
 
-use crate::checksum::{Checksum, checksum, checksum_compose, checksum_update, verify};
-use crate::ip6::{Ipv6, Ipv6ExtIter};
-use crate::protocol::{EtherType, IpProtocol};
-use crate::{Arp, Eth2, Eth2Mut, Gre, Icmp, Ipv4, Ipv4Mut, Ipv6Mut, Tcp, Udp, Vlan};
+use crate::{
+    Arp, Eth2, Eth2Mut, Gre, Icmp, Ipv4, Ipv4Mut, Ipv6Mut, Tcp, Udp, Vlan,
+    checksum::{Checksum, checksum, checksum_compose, checksum_update, verify},
+    ip6::{Ipv6, Ipv6ExtIter},
+    protocol::{EtherType, IpProtocol},
+};
 
 #[test]
 fn eth2_round_trip() {
