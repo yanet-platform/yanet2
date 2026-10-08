@@ -101,7 +101,18 @@ mod tests {
         offset::OffsetPtr,
     };
 
-    fn net6_fixture() -> (Box<ClassifyAttrNet6>, Box<[LpmPage; 3]>) {
+    /// Owns every allocation the attribute's offset pointers reach, so
+    /// they outlive the lookups under test.
+    struct Net6Fixture {
+        attr: Box<ClassifyAttrNet6>,
+        _pages: Box<[LpmPage; 3]>,
+        _hi_dir: Box<[OffsetPtr<LpmPage>; 1]>,
+        _lo_dir: Box<[OffsetPtr<LpmPage>; 1]>,
+        _rows: Box<[[u32; 8]]>,
+        _chunks: Box<[OffsetPtr<u32>; 4]>,
+    }
+
+    fn net6_fixture() -> Net6Fixture {
         // Pages 0-1 form the hi trie: the 0x20 region descends and its
         // 0x01 child byte carries the row mark; every other slot holds
         // class 7 directly. Page 2 is the lo trie's single page, all 7 —
@@ -113,9 +124,14 @@ mod tests {
             value: lpm_value_set(FILTER_NET6_ROW_MARK | 3),
         };
         let hi_child = unsafe { (pages.as_mut_ptr()).add(1) };
-        let mut link = OffsetPtr::<LpmPage>::null();
-        link.store(hi_child);
-        pages[0].values[0x20] = LpmValue { page: link };
+        // OffsetPtr is self-relative (resolve is field-address plus
+        // stored offset), so the link must be stored at its final slot:
+        // a stack temporary's offset would dangle once copied.
+        pages[0].values[0x20] = LpmValue { page: OffsetPtr::null() };
+        // SAFETY: writing the page arm of the LpmValue union at its final slot.
+        unsafe {
+            pages[0].values[0x20].page.store(hi_child);
+        }
 
         let mut hi_dir: Box<[OffsetPtr<LpmPage>; 1]> = Box::new([OffsetPtr::null()]);
         hi_dir[0].store(pages.as_mut_ptr());
@@ -128,22 +144,33 @@ mod tests {
         attr.lo.pages.store(lo_dir.as_mut_ptr());
         attr.lo.page_count = 1;
 
-        // Join table row 3: column 7 maps to class 11.
-        let mut rows: Box<[[u32; 1]]> = Box::new([[0], [0], [0], [11]]);
+        // Join table row 3: column 7 maps to class 11. The width must
+        // cover the lo trie's class values (the all-7 page resolves
+        // column 7), which is what the lo lookup indexes.
+        let mut rows: Box<[[u32; 8]]> = Box::new([[0; 8], [0; 8], [0; 8], [0; 8]]);
+        rows[3][7] = 11;
         let mut chunks: Box<[OffsetPtr<u32>; 4]> = Box::new(core::array::from_fn(|_| OffsetPtr::null()));
         for (idx, row) in rows.iter_mut().enumerate() {
             chunks[idx].store(row.as_mut_ptr());
         }
         attr.comb.v_dim = 4;
-        attr.comb.h_dim = 1;
+        attr.comb.h_dim = 8;
         attr.comb.values.store(chunks.as_mut_ptr());
 
-        (attr, pages)
+        Net6Fixture {
+            attr,
+            _pages: pages,
+            _hi_dir: hi_dir,
+            _lo_dir: lo_dir,
+            _rows: rows,
+            _chunks: chunks,
+        }
     }
 
     #[test]
     fn net6_marked_row_joins_low_half() {
-        let (attr, _pages) = net6_fixture();
+        let net6 = net6_fixture();
+        let attr = &net6.attr;
         // 2001:... hits the marked hi value; the low half (all 0x07 here)
         // resolves column 7 of row 3.
         let mut marked = [0u8; 16];
