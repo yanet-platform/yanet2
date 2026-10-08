@@ -606,7 +606,7 @@ func (m *FWStateMapService) ListEntries(
 
 	pbEntries := make([]*fwstatemappb.FwStateEntry, 0, len(entries))
 	for idx := range entries {
-		pbEntries = append(pbEntries, fwstatemappb.FromCursorEntry(entries[idx]))
+		pbEntries = append(pbEntries, fromCursorEntry(entries[idx]))
 	}
 
 	return &fwstatemappb.ListEntriesResponse{
