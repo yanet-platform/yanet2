@@ -1,0 +1,19 @@
+[package]
+# A module dataplane crate: cargo builds it as a static archive that
+# meson links into the yanet-dataplane binary.
+name = "yanet-rblackhole-dp"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+rust-version = "1.88"
+
+[lints]
+workspace = true
+
+[dependencies]
+yanet-dp = { path = "../../../common/rust/dp", package = "yanet-dp" }
+yanet-packet = { path = "../../../common/rust/packet", package = "yanet-packet" }
+
+[lib]
+crate-type = ["staticlib", "rlib"]

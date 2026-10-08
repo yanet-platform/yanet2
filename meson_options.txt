@@ -70,3 +70,12 @@ option(
   description: 'Additional module directories under modules/ to build, '
                 + 'beyond the built-in set (for optional or vendored modules).',
 )
+
+option(
+  'with_rust_modules',
+  type: 'boolean',
+  value: false,
+  description: 'Build the Rust-implemented modules (currently rblackhole). '
+                + 'Resolving cargo breaks the no-Rust-toolchain promise of a '
+                + 'default or dataplane-only build, so this stays opt-in.',
+)

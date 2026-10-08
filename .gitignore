@@ -200,6 +200,7 @@ deploy/packages/
 !/modules/mirror/
 !/modules/nat64/
 !/modules/pdump/
+!/modules/rblackhole/
 !/modules/route/
 !/modules/route-mpls/
 !/modules/unrdup/
