@@ -1,0 +1,11 @@
+[package]
+name = "yanet-build"
+version = "0.1.0"
+description = "Build-script helper: C compile flags of the configured meson build directory."
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
