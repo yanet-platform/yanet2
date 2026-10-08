@@ -72,6 +72,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "decap-bench"
+version = "0.1.0"
+dependencies = [
+ "decap-oracle",
+ "yanet-sys",
+]
+
+[[package]]
 name = "decap-oracle"
 version = "0.1.0"
 dependencies = [

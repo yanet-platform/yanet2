@@ -1,0 +1,101 @@
+name: Rust SDK PoC bitcode
+
+# Builds the bindgen decap PoC with its C helpers inlined into Rust through
+# LLVM bitcode, checks that the inlining happened and runs the PoC tests in
+# that mode.
+#
+# The paths cover the PoC and every repository C source and header its C
+# helpers, bindings and C oracle include, so a C change that stops the
+# inlining or breaks the build is caught here.
+
+on:
+  push:
+    branches: ["main"]
+    paths:
+      - "rust/sdk-poc-bindgen/**"
+      - "common/*.h"
+      - "lib/controlplane/agent/**"
+      - "lib/controlplane/config/**"
+      - "lib/counters/**"
+      - "lib/dataplane/**"
+      - "lib/errors/**"
+      - "modules/decap/dataplane/**"
+      - "meson.build"
+      - "meson_options.txt"
+      - "subprojects/**"
+      - ".gitmodules"
+      - ".github/workflows/rust-sdk-poc-bitcode.yml"
+      - ".github/actions/apt-packages/**"
+      - ".github/actions/apt-failover/**"
+  pull_request:
+    # A stacked pull request has a non-main base, so a main-only filter would skip it.
+    branches: ["**"]
+    paths:
+      - "rust/sdk-poc-bindgen/**"
+      - "common/*.h"
+      - "lib/controlplane/agent/**"
+      - "lib/controlplane/config/**"
+      - "lib/counters/**"
+      - "lib/dataplane/**"
+      - "lib/errors/**"
+      - "modules/decap/dataplane/**"
+      - "meson.build"
+      - "meson_options.txt"
+      - "subprojects/**"
+      - ".gitmodules"
+      - ".github/workflows/rust-sdk-poc-bitcode.yml"
+      - ".github/actions/apt-packages/**"
+      - ".github/actions/apt-failover/**"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  bitcode:
+    name: bitcode inlining
+    runs-on: ubuntu-24.04
+    env:
+      # bindgen and the bitcode build use the same LLVM 20.
+      CLANG_PATH: /usr/bin/clang-20
+      LIBCLANG_PATH: /usr/lib/llvm-20/lib
+      LLVM_OBJDUMP: llvm-objdump-20
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: true
+
+      - uses: ./.github/actions/apt-packages
+        timeout-minutes: 10
+        with:
+          packages: meson cmake python3-pyelftools libnuma-dev libpcap-dev git clang-20 lld-20 llvm-20
+
+      # Pinned: rustc 1.88 is built on LLVM 20, the major of clang-20.
+      - uses: dtolnay/rust-toolchain@1.88.0
+
+      - name: Check that rustc, clang and lld share the LLVM major
+        run: |
+          rustc_llvm=$(rustc +1.88.0 -vV | sed -n 's/^LLVM version: \([0-9]*\).*/\1/p')
+          clang_llvm=$(clang-20 --version | sed -n 's/.*clang version \([0-9]*\).*/\1/p')
+          lld_llvm=$(ld.lld-20 --version | sed -n 's/.*LLD \([0-9]*\).*/\1/p')
+          echo "rustc LLVM $rustc_llvm, clang $clang_llvm, lld $lld_llvm"
+          if [[ -z $rustc_llvm || $rustc_llvm != "$clang_llvm" || $rustc_llvm != "$lld_llvm" ]]; then
+            echo "::error::LLVM major mismatch: rustc $rustc_llvm, clang $clang_llvm, lld $lld_llvm"
+            exit 1
+          fi
+
+      # The sys build script reads the decap module flags from the meson
+      # compile database; configuring the dataplane is enough.
+      #
+      # Meson compiles nothing here. The script runs the database's compiler
+      # command as is, so it must be a plain compiler, not a ccache
+      # wrapper.
+      - name: Configure meson
+        run: CC=gcc meson setup -Ddataplane_only=true build
+
+      # The PoC scripts and their nested test builds run cargo offline.
+      - name: Fetch crates
+        run: cargo +1.88.0 fetch --locked --manifest-path rust/sdk-poc-bindgen/Cargo.toml
+
+      - name: Build, check inlining and test the bitcode variant
+        run: rust/sdk-poc-bindgen/scripts/bitcode.sh

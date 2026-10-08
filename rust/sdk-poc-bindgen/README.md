@@ -11,6 +11,7 @@ The module crate is `#![forbid(unsafe_code)]`; every `unsafe` block lives in
 | `yanet-sdk`    | Safe surface: re-exports and the Rust port of the C `lpm_lookup`; `#![forbid(unsafe_code)]` |
 | `decap-rs`     | The module, `cdylib` named `libdecap_dp.so` for the plugin loader; `#![forbid(unsafe_code)]` |
 | `decap-oracle` | Test-only: the unmodified C `modules/decap/dataplane/dataplane.c` and C packet construction, compiled from the `DEP_YANET_*` flags |
+| `decap-bench`  | Bench-only: per-packet cost of the C module and Rust plugins on identical fronts, see [Bitcode variant](#bitcode-variant-c-helpers-inlined-into-rust) |
 
 ## Build and run
 
@@ -239,3 +240,252 @@ Not proven:
   its defined failure state are not implemented.
 - Meson integration of cargo (per-module `.so`, pinned toolchain) and the
   ctest-style comparison PoC.
+
+## Bitcode variant: C helpers inlined into Rust
+
+An opt-in build compiles the C helpers the module calls per packet to LLVM
+bitcode and lets lld inline them into the Rust handler at link time, the
+idea behind the kernel's `RUST_INLINE_HELPERS`. The default build is
+unchanged and keeps working with any toolchain.
+
+### Mechanism
+
+- **Stable cross-language ThinLTO.** With the `bitcode` feature
+  (`decap-rs/bitcode` → `yanet-sdk/bitcode` → `yanet-sys/bitcode`), the sys
+  build script compiles the shim with `clang-20 -flto=thin` (same include
+  directories, defines and `-march` as the meson decap module, archived by
+  `llvm-ar-20`). `.cargo/bitcode.toml` builds Rust with
+  `-Clinker-plugin-lto -Ctarget-cpu=haswell`, links with `clang-20
+  -fuse-ld=lld` and raises the ThinLTO import limit. lld then runs one LTO
+  over Rust and C bitcode and emits the cdylib. The kernel-style fallback
+  (`llvm-link` of `.bc` helpers into the crate bitcode) was not needed.
+- **Three levers were needed, each found from inliner remarks**
+  (`-Wl,--plugin-opt=opt-remarks-filename=...`):
+  1. ThinLTO imports only functions below 100 instructions: `packet_decap`
+     was "definition unavailable" to the Rust module until
+     `-import-instr-limit=1000`.
+  2. Once imported, the cost model declined it ("TooCostly", cost 625,
+     threshold 625; `parse_ipv6_header` into it: 400 vs 325). The C module
+     calls it out of line too, since it lives in another unit.
+     `yanet-sys/shim/inline_helpers.c` compiles the unmodified `decap.c` and
+     `packet.c` into one unit with `always_inline` merged into the
+     declarations of `packet_decap`, `parse_ipv4_header` and
+     `parse_ipv6_header`. No repository C file changes.
+  3. The Rust wrapper `Packet::decap` is `#[inline(always)]` in this build
+     only (`cfg_attr`), or the body moves into the wrapper and the call
+     stays.
+- **Version rule: one LLVM major on all three sides.** rustc 1.88.0 is LLVM
+  20.1.5, clang-20 and lld-20 are 20.1.2. Stable rustc 1.98 is LLVM 22 with
+  no matching distribution clang, so the build pins `+1.88.0`. The sys build
+  script (`yanet-sys/build_bitcode.rs`) fails the build with a message when:
+  - rustc's LLVM major has no `clang-<major>` (stable: "rustc uses LLVM 22
+    and no clang-22 is installed");
+  - `YANET_BITCODE_CLANG` points at another major;
+  - the linker is not clang of that major or lld is another major;
+  - `-Clinker-plugin-lto` is missing;
+  - the last `-Ctarget-cpu` is not the meson `-march` (LLVM refuses to
+    inline a callee built for more CPU features than its caller).
+
+### Commands
+
+```sh
+./scripts/bitcode.sh     # build, check exports and inlining, run the tests
+./scripts/bench.sh       # handler and LPM benchmarks, pinned to BENCH_CPU (2)
+# by hand:
+cargo +1.88.0 --config .cargo/bitcode.toml build --release -p decap-rs --features decap-rs/bitcode
+cargo +1.88.0 clippy --config .cargo/bitcode.toml --all-targets --features decap-rs/bitcode
+```
+
+The plugin is `target/bitcode/x86_64-unknown-linux-gnu/release/libdecap_dp.so`.
+`cargo clippy` does not forward a `--config` given before the subcommand;
+put it after `clippy`. `bitcode.sh` skips the trybuild cases: trybuild
+rebuilds the crate with the feature but without this build's link flags, and
+the build script then refuses it. They do not depend on the C toolchain and
+run in the default build.
+
+### Evidence that the inlining happened
+
+`scripts/bitcode.sh` checks the release cdylib:
+
+- it exports exactly `new_module_decap` and `yanet_module_abi_version`;
+- no `packet_decap`, `parse_ipv4_header` or `parse_ipv6_header` symbol is
+  left in it;
+- the handler trampoline (the Rust handler is inlined into it, 700
+  instructions) calls none of them, and does call `memmove` through the GOT
+  itself: that call is the Ethernet header move inside `packet_decap`.
+
+The same checks fail on the default build, which keeps all three helpers
+out of line. Calls left in the bitcode handler: `memmove` (the C module
+calls it too) and the Rust packet-front accessors `PacketFrontRaw::{input,
+output, drop}`, which `PacketFront::list` takes as function pointers.
+
+### Correctness
+
+- Every PoC test passes in this mode (`bitcode.sh`, release): differential
+  decap against C (20 cases, batch, 20 000 mutations), LPM differential,
+  packet front, gcc layout cross-check, negative builds. In this mode the
+  oracle's C module calls the clang-compiled `packet_decap`.
+- `scripts/e2e.sh`'s dataplane_ut harness, pointed at a plugin directory with
+  the bitcode library: 6 frames identical to the built-in C decap.
+- Miri does not execute C, and the bitcode feature only changes C
+  compilation and one inline attribute, so `scripts/miri.sh` runs on the
+  default build: all positive suites and the 8 expected-UB outcomes as
+  before.
+- Not run: ASan/UBSan/TSan of the bitcode build. Sanitizer instrumentation
+  would have to be enabled consistently in rustc (nightly `-Zsanitizer`) and
+  clang across the LTO unit.
+
+### QEMU lab
+
+`lab/decap-bitcode-boot` and `lab/decap-bitcode-proof` follow the ctest
+PoC's lab manifests, with `plugin_dir` set to the bitcode release directory.
+The boot manifest also checks that the mapped library has no `packet_decap`
+symbol (the default build has one). With the worktree's full `make all`
+build, QEMU 11.1.1 and KVM:
+
+```sh
+export YANET_QEMU_IMAGE=$PWD/tests/functional/yanet-test.qcow2   # from the repository root
+L="flock -o /tmp/yanet2-lab.lock just lab --session bitcode-poc"
+$L up && $L scenario run decap                      # control: C module
+$L reset
+$L manifest run rust/sdk-poc-bindgen/lab/decap-bitcode-boot/manifest.yaml
+$L scenario run decap                               # the same scenario, bitcode Rust module
+$L manifest run rust/sdk-poc-bindgen/lab/decap-bitcode-proof/manifest.yaml
+$L down
+```
+
+Result: the dataplane log has `loaded plugin decap from
+/mnt/yanet2/rust/sdk-poc-bindgen/target/bitcode/x86_64-unknown-linux-gnu/release/libdecap_dp.so`
+and `module decap found in plugin decap`, the library is mapped in the
+dataplane process, and the unmodified `decap` scenario passes on it. The
+proof manifest passes: one dataplane start, the scenario packet decapsulated
+again, the outer fragment dropped (decap0 counters: rx 3, tx 2, drop 1).
+
+### Benchmark
+
+`decap-bench` runs the C module (`modules/decap/dataplane/dataplane.c` as
+compiled into the oracle: gcc 13.3, `-O2 -march=haswell`, the meson flags,
+`packet_decap` from a separate gcc unit, as in the dataplane) and every
+plugin through the same C handler pointer:
+
+- **Input.** 2048 C-parsed packets: 60% tunnels to a decap prefix
+  (IP-in-IP, GRE with key, IPv6 in IPv6, IPv4 in IPv6), 30% TCP/UDP to
+  uncovered addresses, 5% outer fragments, 5% ARP. They are cut into fronts
+  of 32 or 64 against 1000 IPv4 prefixes (/16-/32) and 500 IPv6 prefixes
+  (/32-/64).
+- **Timing.** Each front is restored from a snapshot right before its call,
+  so the packets are cache-warm. Only the handler call sits between
+  `lfence`-serialised `rdtsc` reads, and the timer overhead (26 cycles) is
+  subtracted.
+- **Sampling.** A sample is 50 passes over all fronts (102 400 packets).
+  There are 31 samples per variant, round-robin across variants after a
+  warm-up sample whose timings are discarded, pinned with `taskset -c 2`.
+- **Agreement.** A hash of every packet's bytes, metadata, list placement
+  and the front counters must equal the C module's, or the run fails.
+
+All Rust variants use `-Ctarget-cpu=haswell` (the meson `-march=haswell`):
+
+| Variant | Build |
+|---------|-------|
+| `bindgen` | the default build, rustc 1.88, no LTO, C helpers out of line |
+| `bindgen-stable` | the same with rustc 1.98.0, which also links with its bundled rust-lld |
+| `bindgen-lto` | rustc 1.88, fat Rust LTO (`--crate-type cdylib`, see below), C helpers out of line |
+| `bitcode` | this variant, rustc 1.88, C helpers inlined |
+
+Host: Xeon Gold 6230 (Cascade Lake), 16 CPUs, shared with other jobs. The
+load average was 0.4 during run 4 and 2.1-2.3 during runs 2 and 3; run 1
+overlapped a load peak above 20 and is left out. There is no isolated CPU
+and the frequency is not pinned, so treat differences under about 3% as
+noise. Values are ns per packet over runs 2-4 with fronts of 32, and one
+run with fronts of 64:
+
+| Variant | best | median (3 runs) | p10-p90, run 3 | Mpps (median) | vs C (median) | front 64: median, vs C |
+|---------|------|-----------------|----------------|---------------|---------------|------------------------|
+| C | 54.8 | 56.4-59.0 | 54.9-59.6 | 16.9-17.7 | — | 58.9 |
+| bindgen | 85.4 | 88.1-91.0 | 86.3-94.1 | 11.0-11.3 | +54 to +56% | 89.0, +51% |
+| bindgen-stable | 61.4 | 63.3-66.4 | 62.0-65.8 | 15.1-15.8 | +11 to +12% | 66.5, +13% |
+| bindgen-lto | 53.6 | 55.5-59.1 | 54.2-59.8 | 16.9-18.0 | −2.5 to +0.1% | 58.5, −0.7% |
+| bitcode | 54.7 | 56.0-58.9 | 54.8-58.4 | 17.0-17.9 | −1.3 to −0.2% | 58.7, −0.4% |
+
+What the numbers say:
+
+- **The C call is not where the bindgen variant loses.** `bindgen-lto`
+  still calls `packet_decap` out of line and is as fast as C, and so is
+  `bitcode`. Inlining the C helpers adds nothing measurable over Rust-only
+  LTO: `bitcode` was within 1.2% of `bindgen-lto` in every run, on either
+  side.
+- **The loss is Rust to Rust.** Without LTO, rustc 1.88 leaves every
+  `layout!` accessor (`PacketRaw::mbuf`, `MbufRaw::data_off`,
+  `PacketListRaw::first`, ...) an out-of-line cross-crate call through the
+  GOT: 36 calls in the 1.88 `handle_packets` against 4 with rustc 1.98,
+  whose cross-crate inlining takes most of them. In a `perf` profile of the
+  bindgen and bitcode handlers in one run, the bindgen handler body has
+  14.8% of the samples, its out-of-line `packet_decap` 0.9%, and the whole
+  bitcode handler 11.6%.
+- **Cargo does not apply `lto` to `decap-rs`**, because the crate is also
+  an `rlib` (for the differential tests): `CARGO_PROFILE_RELEASE_LTO=fat
+  cargo build` passes no `-C lto` to it. `bench.sh` builds `bindgen-lto`
+  with `cargo rustc --crate-type cdylib`. The bitcode build gets cross-crate
+  ThinLTO over the workspace crates anyway, because lld runs it over all
+  bitcode it links (the precompiled std takes part as object code).
+- One-off experiments (single runs, front 32, not in `bench.sh`):
+  - the bitcode build with the helpers marked `noinline` instead of
+    `always_inline`: +3.4% vs C;
+  - linker-plugin LTO with the C helpers left as gcc objects (bitcode config
+    without the feature): +7.4%;
+  - the default build linked by lld: no change;
+  - the default build with `-x86-branches-within-32B-boundaries`: no
+    change.
+
+LPM lookup micro-benchmark (`lookup_bench`, best of 20 x 1M keys, same
+CPU). Rust is rustc 1.88 with `-Ctarget-cpu=haswell`; the C loop is the
+test shim's inline `lpm_lookup`:
+
+| Build | IPv4: C / Rust ns | IPv6: C / Rust ns |
+|-------|-------------------|-------------------|
+| default (C from gcc) | 6.18 / 7.64 (+24%) | 16.00 / 17.23 (+8%) |
+| bitcode (C from clang-20, LTO) | 5.37 / 7.62 (+42%) | 14.95 / 17.29 (+16%) |
+
+The Rust lookup is pure Rust and unaffected by the build; the C side gets
+faster from clang. The handler benchmark does not show this gap, because
+there the lookup shares the time with header loads and list handling.
+
+### CI
+
+`.github/workflows/rust-sdk-poc-bitcode.yml` runs on ubuntu-24.04:
+
+1. installs `clang-20 lld-20 llvm-20` with the meson dependencies through
+   `.github/actions/apt-packages`, the cached apt helper the hosted-runner
+   Rust jobs use (the CI base image serves the container builds, and adding
+   LLVM 20 there would grow every image for one job);
+2. pins rustc 1.88.0 and asserts that rustc, clang-20 and lld-20 report
+   one LLVM major;
+3. configures meson (`-Ddataplane_only=true`, no compilation) for the
+   compile database;
+4. runs `scripts/bitcode.sh`: build, export and inlining checks, tests.
+
+Its paths cover the PoC and every repository source and header the helpers,
+bindings and oracle include. The benchmark is not run in CI (too noisy on
+shared runners).
+
+### Limitations
+
+- **Toolchain coupling.** The bitcode build is tied to a rustc whose LLVM
+  major has a matching distribution clang and lld: today rustc 1.88, ten
+  releases behind stable 1.98. A production build would pin rustc and
+  clang to one LLVM, or build clang from rustc's LLVM sources.
+- **Forced inlining is a choice per helper.** The cost model declines
+  `packet_decap` with LTO alone. Forcing it into both call sites grows the
+  handler from 1240 to 2951 bytes (2456 counting the three out-of-line
+  helpers) and, here, buys nothing measurable. Inlining pays for small
+  helpers; the decap module has no such per-packet C call.
+- **The flags live in a cargo config, not in the crate.** A feature cannot
+  set the linker or rustflags, so builds go through `--config
+  .cargo/bitcode.toml`, and the build script refuses the feature without
+  them. trybuild cases must run in the default build.
+- **No sanitizer or Miri coverage of the bitcode build** (see Correctness).
+- **A production meson integration would need** a pinned rustc and clang
+  pair in the build environment; the shim compiled by meson's clang to
+  bitcode (or by the sys build script as here); the cdylib linked by
+  clang+lld with the same `-march`; and the inlining check as a meson test.
+  The C module calls `packet_decap` out of line too; meson's `b_lto` is off.

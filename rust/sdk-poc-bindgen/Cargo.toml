@@ -2,7 +2,7 @@
 # module SDK; deliberately not a member of the repository root workspace.
 [workspace]
 resolver = "2"
-members = ["yanet-sys", "yanet-sdk", "decap-rs", "decap-oracle"]
+members = ["yanet-sys", "yanet-sdk", "decap-rs", "decap-oracle", "decap-bench"]
 
 [workspace.package]
 edition = "2024"

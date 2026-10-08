@@ -162,6 +162,9 @@ impl Packet<'_> {
     ///
     /// Backed by the C `packet_decap`, compiled into the module: porting it
     /// needs mbuf adjustment and the inner header parser.
+    // The bitcode build inlines the C body here; this wrapper must then
+    // vanish into the handler too, or the call it saves comes back.
+    #[cfg_attr(feature = "bitcode", inline(always))]
     pub fn decap(&mut self) -> Result<(), DecapError> {
         // SAFETY: the packet and its mbuf are exclusively ours.
         match unsafe { bindings::packet_decap(self.raw.as_ptr()) } {

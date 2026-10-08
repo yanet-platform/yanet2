@@ -46,7 +46,7 @@ impl Scratch {
         for dir in ["src", "shim"] {
             copy_dir(&crate_dir.join(dir), &sys.join(dir));
         }
-        for file in ["Cargo.toml", "build.rs"] {
+        for file in ["Cargo.toml", "build.rs", "build_bitcode.rs"] {
             fs::copy(crate_dir.join(file), sys.join(file)).unwrap();
         }
         copy_dir(&poc.join(".cargo"), &work.join(".cargo"));

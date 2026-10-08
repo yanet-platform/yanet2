@@ -19,6 +19,10 @@ doctest = false
 [lints]
 workspace = true
 
+[features]
+# Inline the C helpers through LLVM bitcode (see README).
+bitcode = ["yanet-sdk/bitcode"]
+
 [dependencies]
 yanet-sdk = { path = "../yanet-sdk" }
 

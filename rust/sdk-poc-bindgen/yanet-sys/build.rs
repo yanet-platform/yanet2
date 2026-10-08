@@ -13,6 +13,9 @@ use std::{
     process::Command,
 };
 
+#[path = "build_bitcode.rs"]
+mod bitcode;
+
 /// Translation unit whose meson flags every C consumer of this crate reuses.
 const REFERENCE_TU: &str = "modules/decap/dataplane/dataplane.c";
 
@@ -191,7 +194,7 @@ fn main() {
     fs::write(out_dir.join("gcc_layout.rs"), render_gcc_layout(&gcc_fields)).unwrap();
     fs::write(out_dir.join("rust_layout.rs"), render_rust_layout(&gcc_fields)).unwrap();
 
-    compile_shim(&flags, &root, &shim_dir);
+    compile_shim(&flags, &root, &shim_dir, &out_dir);
 
     // Single source of C flags for dependents' build scripts.
     let join = |values: Vec<String>| values.join(";");
@@ -589,13 +592,26 @@ fn render_rust_layout(fields: &[GccField]) -> String {
     out
 }
 
-fn compile_shim(flags: &CFlags, root: &Path, shim_dir: &Path) {
+fn compile_shim(flags: &CFlags, root: &Path, shim_dir: &Path, out_dir: &Path) {
     let mut build = cc::Build::new();
+    if env::var_os("CARGO_FEATURE_BITCODE").is_some() {
+        // ThinLTO bitcode that lld inlines into the Rust callers.
+        let march = flags.machine.iter().find_map(|f| f.strip_prefix("-march="));
+        let toolchain = bitcode::check(march, out_dir);
+        build
+            .compiler(toolchain.clang)
+            .archiver(toolchain.archiver)
+            .flag("-flto=thin")
+            .include(root)
+            .file(shim_dir.join("inline_helpers.c"));
+    } else {
+        build
+            .compiler(&flags.compiler)
+            .file(root.join("lib/dataplane/packet/decap.c"))
+            .file(root.join("lib/dataplane/packet/packet.c"));
+    }
     build
-        .compiler(&flags.compiler)
         .file(shim_dir.join("test_shim.c"))
-        .file(root.join("lib/dataplane/packet/decap.c"))
-        .file(root.join("lib/dataplane/packet/packet.c"))
         .include(shim_dir)
         .opt_level(2)
         .warnings(false)
@@ -618,7 +634,7 @@ fn compile_shim(flags: &CFlags, root: &Path, shim_dir: &Path) {
     for machine in &flags.machine {
         build.flag(machine);
     }
-    for file in ["test_shim.c", "test_shim.h", "bindings.h"] {
+    for file in ["test_shim.c", "test_shim.h", "bindings.h", "inline_helpers.c"] {
         println!("cargo:rerun-if-changed={}", shim_dir.join(file).display());
     }
     for file in ["lib/dataplane/packet/decap.c", "lib/dataplane/packet/packet.c"] {

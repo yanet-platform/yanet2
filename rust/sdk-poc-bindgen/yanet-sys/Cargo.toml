@@ -15,6 +15,9 @@ workspace = true
 [features]
 # Test support over C-built images; unsound to rely on outside tests.
 testing = []
+# Compile the C helpers to LLVM bitcode for cross-language inlining; needs
+# the toolchain of .cargo/bitcode.toml (see README).
+bitcode = []
 
 [build-dependencies]
 bindgen = { version = "0.72", default-features = false, features = ["runtime"] }

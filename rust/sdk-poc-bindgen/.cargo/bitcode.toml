@@ -1,0 +1,22 @@
+# Cross-language LTO build: rustc and clang both emit LLVM bitcode, and lld
+# inlines the C helpers into the Rust module at link time.
+#
+# Use with `cargo +1.88.0 --config .cargo/bitcode.toml ... --features
+# decap-rs/bitcode`, or through scripts/bitcode.sh. rustc 1.88 is LLVM 20,
+# the same major as clang-20 and lld-20; the sys build script fails on any
+# mismatch. The explicit target keeps these flags off build scripts and
+# proc macros, and target-cpu matches the meson -march.
+[build]
+target = "x86_64-unknown-linux-gnu"
+target-dir = "target/bitcode"
+
+[target.x86_64-unknown-linux-gnu]
+linker = "clang-20"
+rustflags = [
+    "-Clinker-plugin-lto",
+    "-Ctarget-cpu=haswell",
+    "-Clink-arg=-fuse-ld=lld",
+    # ThinLTO imports only functions below 100 instructions into another
+    # module; the decap helper is larger.
+    "-Clink-arg=-Wl,-mllvm,-import-instr-limit=1000",
+]
