@@ -7,6 +7,4 @@
 #include "lib/dataplane/module/packet_front.h"
 #include "lib/dataplane/pipeline/econtext.h"
 
-#include "devices/vxlan/dataplane/config.h"
-
 #include "lib/rust/yanet-dp-sys/shim/yanet_dp_shim.h"

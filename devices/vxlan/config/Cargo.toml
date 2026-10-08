@@ -1,0 +1,13 @@
+[package]
+name = "yanet-vxlan-config"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.88"
+publish = false
+workspace = "../../../lib/rust"
+
+[lints]
+workspace = true
+
+[dependencies]
+yanet-shm = { path = "../../../lib/rust/yanet-shm" }

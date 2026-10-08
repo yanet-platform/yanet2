@@ -1,0 +1,29 @@
+# The functional-test baseline control plane, trimmed to the services the
+# scenario and the common lab configuration use, plus the vxlan device
+# service; the full baseline exhausts the default control-plane memory.
+
+logging:
+  level: debug
+
+gateway:
+  instance_id: 0
+  server:
+    endpoint: "0.0.0.0:8080"
+  auth:
+    disabled: true
+
+modules:
+  route:
+    instance_id: 0
+    memory_requirements: 8MB
+  forward:
+    instance_id: 0
+    memory_requirements: 8MB
+
+devices:
+  plain:
+    instance_id: 0
+    memory_requirements: 8MB
+  vxlan:
+    instance_id: 0
+    memory_requirements: 8MB

@@ -9,7 +9,7 @@ publish.workspace = true
 workspace = true
 
 [dependencies]
-zerocopy.workspace = true
+yanet-shm = { path = "../yanet-shm" }
 
 [build-dependencies]
 bindgen.workspace = true

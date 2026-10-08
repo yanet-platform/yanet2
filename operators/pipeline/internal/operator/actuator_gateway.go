@@ -11,6 +11,7 @@ import (
 	ynpb "github.com/yanet-platform/yanet2/controlplane/ynpb/v1"
 	"github.com/yanet-platform/yanet2/devices/plain/controlplane/plainpb/v1"
 	"github.com/yanet-platform/yanet2/devices/vlan/controlplane/vlanpb/v1"
+	"github.com/yanet-platform/yanet2/devices/vxlan/controlplane/vxlanpb/v1"
 )
 
 // GatewayActuatorMetricsObserver receives semantic events from a
@@ -29,6 +30,7 @@ type GatewayActuator struct {
 	pipelines ynpb.PipelineServiceClient
 	plain     plainpb.DevicePlainServiceClient
 	vlan      vlanpb.DeviceVlanServiceClient
+	vxlan     vxlanpb.DeviceVxlanServiceClient
 
 	metrics GatewayActuatorMetricsObserver
 	log     *zap.Logger
@@ -56,6 +58,7 @@ func NewGatewayActuator(
 		pipelines: ynpb.NewPipelineServiceClient(conn),
 		plain:     plainpb.NewDevicePlainServiceClient(conn),
 		vlan:      vlanpb.NewDeviceVlanServiceClient(conn),
+		vxlan:     vxlanpb.NewDeviceVxlanServiceClient(conn),
 		metrics:   opts.Metrics,
 		log:       opts.Log.With(zap.String("gateway", cfg.Name)),
 	}, nil
@@ -134,6 +137,24 @@ func (m *GatewayActuator) applyStage(ctx context.Context, stage *StageConfig) er
 		m.log.Debug("applied vlan device",
 			zap.String("device", d.Name),
 			zap.Uint32("vlan", d.VLAN),
+			zap.Strings("input", devicePipelineRefStrings(d.Input)),
+			zap.Strings("output", devicePipelineRefStrings(d.Output)),
+		)
+	}
+
+	for _, d := range stage.Devices.VXLAN {
+		request, err := vxlanDeviceToProto(d)
+		if err == nil {
+			_, err = m.vxlan.UpdateDevice(ctx, request)
+		}
+		m.metrics.OnResourceUpdated(kindDeviceVxlan, err)
+		if err != nil {
+			return fmt.Errorf("update vxlan device %q: %w", d.Name, err)
+		}
+
+		m.log.Debug("applied vxlan device",
+			zap.String("device", d.Name),
+			zap.Uint32("vni", d.Tunnel.VNI),
 			zap.Strings("input", devicePipelineRefStrings(d.Input)),
 			zap.Strings("output", devicePipelineRefStrings(d.Output)),
 		)

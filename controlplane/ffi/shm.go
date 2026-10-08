@@ -9,7 +9,7 @@ package ffi
 //#cgo LDFLAGS: -L../../build/lib/dataplane/pipeline -lpipeline
 //#cgo LDFLAGS: -L../../build/lib/errors -lerrors
 //#cgo LDFLAGS: -L../../build/lib/counters -lcounter_pattern
-//#cgo LDFLAGS: -L../../build/lib/counters -lrure
+//#cgo LDFLAGS: -L../../build/lib/rust/cp -lyanet_cp
 //#include "api/agent.h"
 //#include "api/counter.h"
 import "C"

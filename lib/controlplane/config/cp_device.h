@@ -107,6 +107,21 @@ cp_device_init(
 	yanet_error **err
 );
 
+// Initialize device resources like cp_device_init, for a configuration of
+// the given layout.
+//
+// Refuses with an error when the dataplane's device type was loaded for
+// another configuration layout; cp_device_init expects the zero layout of
+// a C device. Called once per created device, never on the packet path.
+int
+cp_device_init_layout(
+	struct cp_device *self,
+	struct agent *agent,
+	const struct cp_device_config *cfg,
+	uint64_t config_layout,
+	yanet_error **err
+);
+
 // Tear down the base resources acquired by cp_device_init.
 //
 // Base only: a subclass frees its own allocations in its own typed free

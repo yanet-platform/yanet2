@@ -1,0 +1,27 @@
+rules:
+  - action:
+      target: vx0
+      mode: IN
+      counter: vx_decap
+    devices:
+      - name: "01:00.0"
+    vlan_ranges:
+      - from: 0
+        to: 4095
+    sources4:
+      - "0.0.0.0/0"
+    destinations4:
+      - "192.0.2.1/32"
+  - action:
+      target: vx0
+      mode: OUT
+      counter: vx_encap
+    devices:
+      - name: "01:00.0"
+    vlan_ranges:
+      - from: 0
+        to: 4095
+    sources4:
+      - "0.0.0.0/0"
+    destinations4:
+      - "203.0.113.0/24"

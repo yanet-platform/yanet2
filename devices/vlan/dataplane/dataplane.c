@@ -180,6 +180,7 @@ new_device_vlan() {
 	device_vlan->device.input_handler = vlan_input_handle;
 	device_vlan->device.output_handler = vlan_output_handle;
 	device_vlan->device.commit_handler = vlan_device_commit;
+	device_vlan->device.config_layout = 0;
 
 	return &device_vlan->device;
 }

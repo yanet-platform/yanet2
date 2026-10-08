@@ -11,6 +11,7 @@ const (
 	kindPipeline    = "pipeline"
 	kindDevicePlain = "device-plain"
 	kindDeviceVlan  = "device-vlan"
+	kindDeviceVxlan = "device-vxlan"
 )
 
 // Metrics is the single observability sink for the operator.
@@ -80,7 +81,7 @@ type GatewayMetrics struct {
 }
 
 func NewGatewayMetrics(name string) *GatewayMetrics {
-	kinds := []string{kindPipeline, kindDevicePlain, kindDeviceVlan}
+	kinds := []string{kindPipeline, kindDevicePlain, kindDeviceVlan, kindDeviceVxlan}
 
 	resourceUpdate := make(map[string]*metrics.Counter, len(kinds))
 	resourceUpdateErrors := make(map[string]*metrics.Counter, len(kinds))

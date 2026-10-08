@@ -1,0 +1,72 @@
+$schema: ../../yanet2-lab.schema.json
+version: 1
+name: vxlan
+description: >-
+  Create a Rust vxlan device through its CLI, steer port traffic into it with
+  forward rules, and verify one encapsulation, one decapsulation and one drop
+  of a foreign VNI.
+boot:
+  controlplane: controlplane.yaml
+files:
+  - source: vx_to_port.yaml
+    destination: /tmp/vxlan/vx_to_port.yaml
+  - source: vx_steer.yaml
+    destination: /tmp/vxlan/vx_steer.yaml
+steps:
+  - name: forward-to-port
+    argv: [/tmp/yanet/cli/yanet-cli-forward, update, --name=vx_to_port, /tmp/vxlan/vx_to_port.yaml]
+  - name: function-inner
+    argv: [/tmp/yanet/cli/yanet-cli-function, update, --name=fn:vx_inner, --chains, "out:1=forward:vx_to_port"]
+  - name: function-outer
+    argv: [/tmp/yanet/cli/yanet-cli-function, update, --name=fn:vx_outer, --chains, "out:1=forward:vx_to_port"]
+  - name: pipeline-inner
+    argv: [/tmp/yanet/cli/yanet-cli-pipeline, update, --name=vx_inner, --functions, "fn:vx_inner"]
+  - name: pipeline-outer
+    argv: [/tmp/yanet/cli/yanet-cli-pipeline, update, --name=vx_outer, --functions, "fn:vx_outer"]
+  - name: create-vxlan
+    argv:
+      - /tmp/yanet/cli/yanet-cli-device-vxlan
+      - update
+      - --name=vx0
+      - --input=vx_inner:1
+      - --output=vx_outer:1
+      - --local-ip=192.0.2.1
+      - --remote-ip=198.51.100.7
+      - --local-mac=52:54:00:6b:ff:a5
+      - --remote-mac=52:54:00:6b:ff:a1
+      - --vni=4660
+  - name: show-vxlan
+    argv: [/tmp/yanet/cli/yanet-cli-device-vxlan, show, vx0]
+  - name: forward-steer
+    argv: [/tmp/yanet/cli/yanet-cli-forward, update, --name=vx_steer, /tmp/vxlan/vx_steer.yaml]
+  - name: function-steer
+    argv: [/tmp/yanet/cli/yanet-cli-function, update, --name=fn:vx_steer, --chains, "steer:1=forward:vx_steer"]
+  - name: pipeline-steer
+    argv: [/tmp/yanet/cli/yanet-cli-pipeline, update, --name=vx_port, --functions, "fn:vx_steer"]
+  # The guest kernel's own traffic (router solicitations after kni0 comes
+  # up) would leave on port 0 and land in the probes' captures.
+  - name: kni-drop-pipeline
+    argv: [/tmp/yanet/cli/yanet-cli-pipeline, update, --name=kni_drop, --functions]
+  - name: isolate-kni
+    argv: [/tmp/yanet/cli/yanet-cli-device-plain, update, --name=virtio_user_kni0, --input, "kni_drop:1", --output, "dummy:1"]
+  - name: bind-port
+    argv: [/tmp/yanet/cli/yanet-cli-device-plain, update, --name=01:00.0, --input, "vx_port:1", --output, "dummy:1"]
+probes:
+  - name: encap
+    ingress: 0
+    egress: 0
+    timeout: 1s
+    send: {pcap: encap-input.pcap}
+    expect: {pcap: encap-expected.pcap}
+  - name: decap
+    ingress: 0
+    egress: 0
+    timeout: 1s
+    send: {pcap: decap-input.pcap}
+    expect: {pcap: decap-expected.pcap}
+  - name: foreign-vni
+    ingress: 0
+    egress: 0
+    timeout: 1s
+    send: {pcap: foreign-vni-input.pcap}
+    expect: {drop: true}

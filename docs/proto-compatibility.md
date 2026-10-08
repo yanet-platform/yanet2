@@ -28,6 +28,7 @@ The following versioned package families are covered by the breaking gate.
 **Devices** — `devices/<name>/controlplane/<name>pb/v1/`
 - `devices.plain.controlplane.plainpb.v1`
 - `devices.vlan.controlplane.vlanpb.v1`
+- `devices.vxlan.controlplane.vxlanpb.v1`
 
 **Operators** — `operators/<name>/.../v1/`
 - `operators.pipeline.operatorpb.v1`

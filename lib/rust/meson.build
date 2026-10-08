@@ -2,8 +2,8 @@
 #
 # Disabled when cargo is missing under the default auto setting; the
 # dataplane then loads no Rust device types.
-cargo = find_program('cargo', required: get_option('dataplane_rust'))
-rust_builtins_enabled = cargo.found()
+dp_cargo = find_program('cargo', required: get_option('dataplane_rust'))
+rust_builtins_enabled = dp_cargo.found()
 
 if rust_builtins_enabled
   lib_rust_dp_shim = static_library(
@@ -29,7 +29,7 @@ if rust_builtins_enabled
     ),
     command: [
       files('cargo-staticlib.sh'),
-      cargo,
+      dp_cargo,
       meson.current_source_dir() / 'Cargo.toml',
       meson.current_build_dir() / 'target',
       'yanet-dp-builtins',
@@ -42,4 +42,10 @@ if rust_builtins_enabled
   lib_rust_dp_builtins_dep = declare_dependency(
     link_with: [lib_rust_dp_builtins, lib_rust_dp_shim],
   )
+endif
+
+# The control-plane archive carries the regex C API the counters need, so it
+# is built whenever the control plane is.
+if not dataplane_only
+  subdir('cp')
 endif

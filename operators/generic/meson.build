@@ -52,6 +52,7 @@ if not get_option('fuzzing').enabled()
           trafgen_protoc_gen,
           unrdup_protoc_gen,
           vlan_protoc_gen,
+          vxlan_protoc_gen,
       ],
       install: true,
       install_dir: get_option('bindir'),

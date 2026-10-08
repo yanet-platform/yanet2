@@ -1,0 +1,55 @@
+syntax = "proto3";
+
+package devices.vxlan.controlplane.vxlanpb.v1;
+
+import "common/commonpb/v1/ipv4addr.proto";
+import "common/commonpb/v1/macaddr.proto";
+import "common/commonpb/v1/target.proto";
+
+option go_package = "github.com/yanet-platform/yanet2/devices/vxlan/controlplane/vxlanpb/v1;vxlanpb";
+
+service DeviceVxlanService {
+  // UpdateDevice creates or replaces the vxlan device with the given name.
+  rpc UpdateDevice(UpdateDeviceVxlanRequest) returns (UpdateDeviceVxlanResponse);
+
+  // ShowDevice returns the pipeline bindings and the tunnel of the vxlan device with the given name.
+  rpc ShowDevice(ShowDeviceVxlanRequest) returns (ShowDeviceVxlanResponse);
+}
+
+// VxlanTunnel is the IPv4 VXLAN tunnel a device encapsulates into and
+// decapsulates from (RFC 7348).
+message VxlanTunnel {
+  // Local endpoint: the outer source address and the only destination
+  // decapsulated. Required: not unspecified, multicast or broadcast.
+  common.commonpb.v1.IPv4Address local_ip = 1;
+  // Remote endpoint: the outer destination address. Same constraints as
+  // the local endpoint.
+  common.commonpb.v1.IPv4Address remote_ip = 2;
+  // Outer source hardware address. Required: unicast and not all zeros.
+  common.commonpb.v1.MACAddress local_mac = 3;
+  // Outer destination hardware address, the underlay next hop. Same
+  // constraints as the local hardware address.
+  common.commonpb.v1.MACAddress remote_mac = 4;
+  // VXLAN network identifier. Accepted range: 0..16777215.
+  uint32 vni = 5;
+}
+
+message UpdateDeviceVxlanRequest {
+  // Accepted range: at most 79 bytes.
+  string name = 1;
+  common.commonpb.v1.Device device = 2;
+  // Required.
+  VxlanTunnel tunnel = 3;
+}
+
+message UpdateDeviceVxlanResponse {}
+
+message ShowDeviceVxlanRequest {
+  // Accepted range: at most 79 bytes.
+  string name = 1;
+}
+
+message ShowDeviceVxlanResponse {
+  common.commonpb.v1.Device device = 1;
+  VxlanTunnel tunnel = 2;
+}

@@ -2786,6 +2786,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "yanet-cli-device-vxlan"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "clap_complete",
+ "netip",
+ "prost",
+ "serde",
+ "tabled",
+ "tonic",
+ "tonic-prost",
+ "yanet-cli",
+ "yanet-cli-build",
+ "yanet-commonpb",
+ "yanet-ynpb",
+]
+
+[[package]]
 name = "yanet-cli-dscp"
 version = "0.1.0"
 dependencies = [

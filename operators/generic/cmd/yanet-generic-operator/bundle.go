@@ -11,6 +11,7 @@ import (
 	_ "github.com/yanet-platform/yanet2/devices/plain/controlplane/plainpb/v1"
 	_ "github.com/yanet-platform/yanet2/devices/trafgen/controlplane/trafgenpb/v1"
 	_ "github.com/yanet-platform/yanet2/devices/vlan/controlplane/vlanpb/v1"
+	_ "github.com/yanet-platform/yanet2/devices/vxlan/controlplane/vxlanpb/v1"
 	_ "github.com/yanet-platform/yanet2/modules/blackhole/controlplane/blackholepb/v1"
 	_ "github.com/yanet-platform/yanet2/modules/decap/controlplane/decappb/v1"
 	_ "github.com/yanet-platform/yanet2/modules/dscp/controlplane/dscppb/v1"

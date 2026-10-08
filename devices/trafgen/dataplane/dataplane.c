@@ -192,6 +192,7 @@ new_device_trafgen() {
 	device->device.input_handler = trafgen_input_handle;
 	device->device.output_handler = trafgen_output_handle;
 	device->device.commit_handler = trafgen_device_commit;
+	device->device.config_layout = 0;
 
 	return &device->device;
 }

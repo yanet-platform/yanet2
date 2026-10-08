@@ -19,10 +19,7 @@ fn main() {
         .allowlist_type("device")
         .allowlist_type("device_ectx")
         .allowlist_type("packet")
-        .allowlist_type("vxlan_device_config")
-        .allowlist_type("cp_device_vxlan")
         .allowlist_var("DEVICE_TYPE_LEN")
-        .allowlist_var("VXLAN_UDP_PORT")
         .allowlist_function("yanet_dp_shim_.*")
         // Opaque: size and alignment only, no field Rust could form a
         // reference over. The header of a published device is mutated by C

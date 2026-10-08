@@ -1,0 +1,107 @@
+name: Rust Device SDK Miri
+
+# The dataplane and control-plane Rust workspaces (lib/rust, lib/rust/cp)
+# are separate from the root CLI workspace, so the root Rust jobs do not
+# reach them.
+#
+# Miri checks the shared-memory code under strict provenance in both
+# aliasing models. The dataplane sys crate runs bindgen over repository C
+# headers at build time, so the job needs libclang and the headers trigger
+# it too.
+
+on:
+  push:
+    branches: ["main"]
+    paths:
+      - "lib/rust/**"
+      - "devices/vxlan/**"
+      - "lib/dataplane/device/device.h"
+      - "lib/dataplane/module/packet_front.h"
+      - "lib/dataplane/packet/packet.h"
+      - "lib/dataplane/pipeline/econtext.h"
+      - "lib/controlplane/config/*.h"
+      - "lib/controlplane/agent/*.h"
+      - "lib/dataplane/config/*.h"
+      - "lib/errors/errors.h"
+      - "lib/counters/counters.h"
+      - "common/*.h"
+      - "subprojects/regex"
+      - ".github/workflows/rust-device-miri.yml"
+  pull_request:
+    branches: ["**"]
+    paths:
+      - "lib/rust/**"
+      - "devices/vxlan/**"
+      - "lib/dataplane/device/device.h"
+      - "lib/dataplane/module/packet_front.h"
+      - "lib/dataplane/packet/packet.h"
+      - "lib/dataplane/pipeline/econtext.h"
+      - "lib/controlplane/config/*.h"
+      - "lib/controlplane/agent/*.h"
+      - "lib/dataplane/config/*.h"
+      - "lib/errors/errors.h"
+      - "lib/counters/counters.h"
+      - "common/*.h"
+      - "subprojects/regex"
+      - ".github/workflows/rust-device-miri.yml"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: device sdk cargo test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: true
+      - uses: dtolnay/rust-toolchain@1.88.0
+        with:
+          components: clippy
+      - uses: ./.github/actions/apt-packages
+        timeout-minutes: 10
+        with:
+          packages: clang libclang-dev
+      - run: cargo test --workspace --locked
+        working-directory: lib/rust
+      - run: cargo clippy --workspace --all-targets --locked -- -D warnings
+        working-directory: lib/rust
+      - run: cargo test --workspace --locked
+        working-directory: lib/rust/cp
+      # Denied warnings apply to the workspace's own crates; the vendored
+      # regex crate only warns.
+      - run: cargo clippy --workspace --all-targets --locked -- -D warnings
+        working-directory: lib/rust/cp
+
+  miri:
+    name: device sdk miri (${{ matrix.model }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - model: stacked-borrows
+            flags: -Zmiri-strict-provenance
+          - model: tree-borrows
+            flags: -Zmiri-strict-provenance -Zmiri-tree-borrows
+    env:
+      MIRIFLAGS: ${{ matrix.flags }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: true
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          toolchain: nightly-2026-08-28
+          components: miri, rust-src
+      - uses: ./.github/actions/apt-packages
+        timeout-minutes: 10
+        with:
+          packages: clang libclang-dev
+      - run: cargo miri setup
+      - run: cargo miri test --workspace --locked
+        working-directory: lib/rust
+      - run: cargo miri test --locked -p yanet-cp-sys -p yanet-vxlan-api
+        working-directory: lib/rust/cp

@@ -10,16 +10,14 @@
 #![cfg_attr(not(test), no_std)]
 #![forbid(unsafe_code)]
 
-use core::mem::{offset_of, size_of};
+use core::mem::size_of;
 
-use yanet_dp_sys::{Device, Packet, Verdict, raw};
+use yanet_dp_sys::{Device, Packet, Verdict};
+pub use yanet_vxlan_config::{TYPE_NAME, VNI_MAX, VXLAN_PORT, VxlanConfig};
 use zerocopy::{
     FromBytes, Immutable, IntoBytes, KnownLayout, Unaligned,
     byteorder::network_endian::{U16, U32},
 };
-
-/// UDP destination port IANA assigned to VXLAN.
-pub const VXLAN_PORT: u16 = 4789;
 
 const ETHER_TYPE_IPV4: u16 = 0x0800;
 const IP_PROTO_UDP: u8 = 17;
@@ -28,32 +26,7 @@ const IPV4_FLAG_MF: u16 = 0x2000;
 const IPV4_FRAGMENT_OFFSET_MASK: u16 = 0x1fff;
 const OUTER_TTL: u8 = 64;
 const VXLAN_FLAG_VNI: u8 = 0x08;
-const VNI_MASK: u32 = 0x00ff_ffff;
-
-/// Device body as the C control plane stores it after the device header.
-///
-/// Addresses are in network byte order, the VNI in host byte order.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, FromBytes, IntoBytes, Immutable, KnownLayout)]
-#[repr(C)]
-pub struct VxlanConfig {
-    pub local_mac: [u8; 6],
-    pub remote_mac: [u8; 6],
-    pub local_ip: [u8; 4],
-    pub remote_ip: [u8; 4],
-    pub vni: u32,
-}
-
-// The Rust body must match the C body field by field.
-const _: () = {
-    assert!(size_of::<VxlanConfig>() == size_of::<raw::vxlan_device_config>());
-    assert!(align_of::<VxlanConfig>() == align_of::<raw::vxlan_device_config>());
-    assert!(offset_of!(VxlanConfig, local_mac) == offset_of!(raw::vxlan_device_config, local_mac));
-    assert!(offset_of!(VxlanConfig, remote_mac) == offset_of!(raw::vxlan_device_config, remote_mac));
-    assert!(offset_of!(VxlanConfig, local_ip) == offset_of!(raw::vxlan_device_config, local_ip));
-    assert!(offset_of!(VxlanConfig, remote_ip) == offset_of!(raw::vxlan_device_config, remote_ip));
-    assert!(offset_of!(VxlanConfig, vni) == offset_of!(raw::vxlan_device_config, vni));
-    assert!(VXLAN_PORT as u32 == raw::VXLAN_UDP_PORT);
-};
+const VNI_MASK: u32 = VNI_MAX;
 
 #[derive(Clone, Copy, Debug, FromBytes, IntoBytes, Immutable, KnownLayout, Unaligned)]
 #[repr(C)]
@@ -248,7 +221,7 @@ pub fn classify_ingress(config: &VxlanConfig, frame: &[u8]) -> Ingress {
 pub struct Vxlan;
 
 impl Device for Vxlan {
-    type Body = raw::vxlan_device_config;
+    const NAME: &'static str = TYPE_NAME;
     type Config = VxlanConfig;
 
     fn input(config: &VxlanConfig, packet: &mut Packet<'_>) -> Verdict {

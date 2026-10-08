@@ -38,6 +38,7 @@ package dataplaneut
 #cgo LDFLAGS: -L../../../build/lib/filter
 #cgo LDFLAGS: -L../../../build/lib/fwstate
 #cgo LDFLAGS: -L../../../build/lib/utils
+#cgo LDFLAGS: -L../../../build/lib/rust/cp
 
 // Link all static libs inside a group so the linker resolves circular
 // references between them (fwstate->acl, worker->pipeline, etc.).
@@ -49,7 +50,7 @@ package dataplaneut
 #cgo LDFLAGS: -lplain_dp -lvlan_dp
 #cgo LDFLAGS: -ldataplane_ut -lpipeline -lmodule -lworker_dp -lconfig_dp -lpacket
 #cgo LDFLAGS: -llogging -lagent -lconfig_cp -lcounters -lerrors -lfilter_compiler -lfwstate -lstatemap -ll3state -llib_utils
-#cgo LDFLAGS: -lagent_counters -lcounter_pattern -lrure
+#cgo LDFLAGS: -lagent_counters -lcounter_pattern -lyanet_cp
 #cgo LDFLAGS: -Wl,--end-group
 
 #cgo LDFLAGS: -lnuma

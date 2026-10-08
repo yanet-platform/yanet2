@@ -7,8 +7,11 @@
 [workspace]
 resolver = "2"
 members = [
+    "yanet-shm",
+    "yanet-shm-derive",
     "yanet-dp-sys",
     "yanet-dp-builtins",
+    "../../devices/vxlan/config",
     "../../devices/vxlan/dataplane",
 ]
 

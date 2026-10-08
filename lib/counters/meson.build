@@ -102,13 +102,9 @@ if not dataplane_only
     link_args: ['-lgcc_s', '-lutil', '-lrt', '-lpthread', '-lm', '-ldl'],
   )
 
-  # The engine archive itself, for targets meson cannot see the link line of.
-  #
-  # A Go binary names -lrure through cgo, which is a plain string to meson,
-  # so nothing orders the two. Depending on lib_counter_pattern is not
-  # enough either: a static library records what it will be linked against
-  # rather than linking it.
-  librure_targets = [librure]
+  # Go binaries take the engine from the Rust control-plane archive
+  # (lib/rust/cp), which carries the same C API, so they link one Rust
+  # runtime; this archive serves the C targets only.
 
   lib_counter_pattern = static_library(
     'counter_pattern',

@@ -1,9 +1,10 @@
 //! Strict-provenance checks of the shared-memory resolution, run under Miri.
 //!
 //! A fixture arena stands in for the shared mapping: one allocation holding a
-//! device execution context and a device whose relative slot links them, as
-//! the control plane lays them out. Every pointer into the arena derives from
-//! the one allocation pointer, as the pointer C passes to a handler does.
+//! device execution context and a Rust device item whose relative slot links
+//! them, as the control plane lays them out. Every pointer into the arena
+//! derives from the one allocation pointer, as the pointer C passes to a
+//! handler does.
 
 use core::{
     alloc::Layout,
@@ -12,9 +13,9 @@ use core::{
     ptr::{self, NonNull},
 };
 
-use zerocopy::{FromBytes, Immutable};
+use yanet_shm::ShmLayout;
 
-use super::{Device, DeviceBody, Packet, Verdict, device_config, new_device, raw, resolve_rel, sealed};
+use super::{Device, DeviceItem, Packet, Verdict, device_item, new_device, raw, resolve_rel};
 
 unsafe extern "C" {
     fn free(ptr: *mut c_void);
@@ -67,46 +68,17 @@ mod shim {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, FromBytes, Immutable)]
+#[derive(ShmLayout, Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(C)]
 struct TestConfig {
     tag: u32,
     value: u64,
 }
 
-/// C embedding of the test body after the common device header.
-#[repr(C)]
-struct TestCpDevice {
-    header: raw::cp_device,
-    body: TestConfig,
-}
-
-impl sealed::Sealed for TestConfig {}
-
-impl DeviceBody for TestConfig {
-    const TYPE_NAME: &'static str = "test";
-    const OFFSET: usize = offset_of!(TestCpDevice, body);
-}
-
-/// A body whose type name is longer than the C name field.
-#[derive(FromBytes, Immutable)]
-#[repr(C)]
-struct LongNameBody(u64);
-
-impl sealed::Sealed for LongNameBody {}
-
-impl DeviceBody for LongNameBody {
-    const TYPE_NAME: &'static str = concat!(
-        "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
-        "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
-    );
-    const OFFSET: usize = size_of::<raw::cp_device>();
-}
-
 struct TestDevice;
 
 impl Device for TestDevice {
-    type Body = TestConfig;
+    const NAME: &'static str = "test";
     type Config = TestConfig;
 
     fn input(_config: &TestConfig, _packet: &mut Packet<'_>) -> Verdict {
@@ -121,14 +93,17 @@ impl Device for TestDevice {
 struct LongNameDevice;
 
 impl Device for LongNameDevice {
-    type Body = LongNameBody;
-    type Config = LongNameBody;
+    const NAME: &'static str = concat!(
+        "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+    );
+    type Config = u64;
 
-    fn input(_config: &LongNameBody, _packet: &mut Packet<'_>) -> Verdict {
+    fn input(_config: &u64, _packet: &mut Packet<'_>) -> Verdict {
         Verdict::Output
     }
 
-    fn output(_config: &LongNameBody, _packet: &mut Packet<'_>) -> Verdict {
+    fn output(_config: &u64, _packet: &mut Packet<'_>) -> Verdict {
         Verdict::Output
     }
 }
@@ -161,17 +136,18 @@ impl Arena {
         unsafe { self.base.add(offset) }
     }
 
-    /// Places a context whose relative device slot points at a device whose
-    /// body holds the given config, and returns the context pointer.
+    /// Places a context whose relative device slot points at a device item
+    /// with the given body, and returns the context pointer.
     fn link_device(&self, config: TestConfig) -> NonNull<raw::device_ectx> {
+        assert!(DEVICE_OFFSET + size_of::<DeviceItem<TestConfig>>() <= ARENA_SIZE);
         let ectx = self.at(ECTX_OFFSET).cast::<raw::device_ectx>();
         let slot = self.at(ECTX_OFFSET + offset_of!(raw::device_ectx, cp_device));
         let offset = DEVICE_OFFSET - (ECTX_OFFSET + offset_of!(raw::device_ectx, cp_device));
-        let body = self.at(DEVICE_OFFSET + TestConfig::OFFSET);
-        // SAFETY: both writes are in bounds and aligned inside the arena.
+        let body_at = self.at(DEVICE_OFFSET + offset_of!(DeviceItem<TestConfig>, body));
+        // SAFETY: every write is in bounds and aligned inside the arena.
         unsafe {
             slot.cast::<usize>().write(offset);
-            body.cast::<TestConfig>().write(config);
+            body_at.cast::<TestConfig>().write(config);
         }
         ectx
     }
@@ -184,30 +160,31 @@ impl Drop for Arena {
     }
 }
 
-#[test]
-fn test_device_config_resolves_body_past_header() {
-    let arena = Arena::new();
-    let expected = TestConfig {
-        tag: 0x00ab_cdef,
-        value: u64::MAX - 1,
-    };
-    let ectx = arena.link_device(expected);
+const CONFIG: TestConfig = TestConfig {
+    tag: 0x00ab_cdef,
+    value: u64::MAX - 1,
+};
 
-    // SAFETY: the arena holds a linked context and a frozen body.
-    let config = unsafe { device_config::<TestDevice>(ectx) };
-
-    assert_eq!(Some(&expected), config);
+/// Resolves the body of the device linked from the context, if accepted.
+fn resolve(ectx: NonNull<raw::device_ectx>) -> Option<TestConfig> {
+    // SAFETY: the arena holds a linked context and a frozen device.
+    unsafe { device_item::<TestDevice>(ectx) }.map(|item| item.body)
 }
 
 #[test]
-fn test_device_config_null_slot_is_none() {
+fn test_device_item_resolves_body_past_header() {
+    let arena = Arena::new();
+    let ectx = arena.link_device(CONFIG);
+
+    assert_eq!(Some(CONFIG), resolve(ectx));
+}
+
+#[test]
+fn test_device_item_null_slot_is_none() {
     let arena = Arena::new();
     let ectx = arena.at(ECTX_OFFSET).cast::<raw::device_ectx>();
 
-    // SAFETY: the zeroed context has a null relative slot.
-    let config = unsafe { device_config::<TestDevice>(ectx) };
-
-    assert_eq!(None, config);
+    assert_eq!(None, resolve(ectx));
 }
 
 #[test]
@@ -234,16 +211,13 @@ fn test_resolve_rel_keeps_root_provenance_for_backward_offset() {
 /// behavior, which is why it is ignored by default.
 #[test]
 #[ignore = "expected to be rejected by Miri under Stacked Borrows"]
-fn test_device_config_narrow_root_is_rejected() {
+fn test_device_item_narrow_root_is_rejected() {
     let arena = Arena::new();
-    let ectx = arena.link_device(TestConfig { tag: 1, value: 2 });
+    let ectx = arena.link_device(CONFIG);
     // SAFETY: the context is in bounds, aligned and initialized.
     let narrow = NonNull::from(unsafe { ectx.as_ref() });
 
-    // SAFETY: deliberately violated: the root does not cover the device.
-    let config = unsafe { device_config::<TestDevice>(narrow) };
-
-    assert_eq!(Some(&TestConfig { tag: 1, value: 2 }), config);
+    assert_eq!(Some(CONFIG), resolve(narrow));
 }
 
 #[test]
@@ -252,11 +226,12 @@ fn test_new_device_fills_descriptor() {
     assert!(!device.is_null());
 
     // SAFETY: the constructor returned an initialized descriptor.
-    let (name, has_handlers) = unsafe {
+    let (name, has_handlers, layout) = unsafe {
         let device = &*device;
         (
             CStr::from_ptr(device.name.as_ptr()).to_bytes().to_vec(),
             device.input_handler.is_some() && device.output_handler.is_some() && device.commit_handler.is_some(),
+            device.config_layout,
         )
     };
     // SAFETY: allocated with malloc by the constructor.
@@ -264,6 +239,7 @@ fn test_new_device_fills_descriptor() {
 
     assert_eq!(b"test".to_vec(), name);
     assert!(has_handlers);
+    assert_eq!(TestConfig::FINGERPRINT, layout);
 }
 
 #[test]
@@ -282,12 +258,12 @@ fn test_new_device_truncates_long_name() {
 #[test]
 fn test_input_handler_runs_on_empty_front() {
     let arena = Arena::new();
-    let ectx = arena.link_device(TestConfig { tag: 3, value: 4 });
+    let ectx = arena.link_device(CONFIG);
     let device = new_device::<TestDevice>();
     assert!(!device.is_null());
 
     // SAFETY: the handler gets a linked context; the stand-in front is
-    // empty, so it resolves the body and returns.
+    // empty, so it resolves the device and returns.
     unsafe {
         let input = (*device).input_handler.expect("input handler");
         input(ptr::null_mut(), ectx.as_ptr(), ptr::null_mut());

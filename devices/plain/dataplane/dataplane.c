@@ -63,6 +63,7 @@ new_device_plain() {
 	device_plain->device.input_handler = plain_input_handle;
 	device_plain->device.output_handler = plain_output_handle;
 	device_plain->device.commit_handler = plain_device_commit;
+	device_plain->device.config_layout = 0;
 
 	return &device_plain->device;
 }

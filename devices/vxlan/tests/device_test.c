@@ -2,12 +2,14 @@
 //
 // The harness resolves the device constructor from this binary through the
 // same dlopen/dlsym loader the dataplane uses, so the test covers the
-// builtin link path end to end: the exported Rust constructor, the shared
-// memory device body written by the C api, and both Rust handlers running on
-// a real packet front. The port hands every packet to the vxlan input,
-// whose pipeline hands it to the vxlan output, so one round runs both.
+// builtin link path end to end: the exported Rust constructor, the device
+// the Rust control-plane api builds and validates through its C ABI, and
+// both Rust handlers running on a real packet front. The port hands every
+// packet to the vxlan input, whose pipeline hands it to the vxlan output, so
+// one round runs both.
 
 #include <errno.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include <rte_ether.h>
@@ -20,26 +22,59 @@
 #include "common/strutils.h"
 #include "common/test_assert.h"
 #include "devices/plain/api/controlplane.h"
-#include "devices/vxlan/api/controlplane.h"
 #include "lib/controlplane/agent/agent.h"
+#include "lib/controlplane/config/cp_device.h"
 #include "lib/dataplane/config/zone.h"
 #include "lib/dataplane/packet/data.h"
 #include "lib/dataplane_ut/dataplane_ut.h"
 #include "lib/logging/log.h"
+#include "lib/rust/cp/yanet-cp-sys/shim/yanet_cp_shim.h"
 #include "modules/forward/api/controlplane.h"
+#include "yanet_cp.h"
 
+#define VXLAN_UDP_PORT 4789
+#define VXLAN_VNI_MAX ((UINT32_C(1) << 24) - 1)
 #define VXLAN_HDR_LEN 8
 #define ENCAP_LEN                                                              \
 	(sizeof(struct rte_ether_hdr) + sizeof(struct rte_ipv4_hdr) +          \
 	 sizeof(struct rte_udp_hdr) + VXLAN_HDR_LEN)
 
-static const struct vxlan_device_config test_vxlan = {
+static const struct yanet_cp_vxlan_tunnel test_vxlan = {
 	.local_mac = {0x02, 0, 0, 0, 0, 0x01},
 	.remote_mac = {0x02, 0, 0, 0, 0, 0x02},
 	.local_ip = {192, 0, 2, 1},
 	.remote_ip = {198, 51, 100, 7},
 	.vni = 0x1234,
 };
+
+// Creates a vxlan device through the Rust control-plane api.
+static void *
+vxlan_device_new(
+	struct agent *agent,
+	const char *name,
+	const struct yanet_cp_vxlan_tunnel *tunnel,
+	char *err
+) {
+	struct yanet_cp_pipeline input = {
+		.name = "to_vxlan_output", .weight = 1
+	};
+	struct yanet_cp_pipeline output = {.name = "empty", .weight = 1};
+	struct yanet_cp_vxlan_device_request request = {
+		.name = name,
+		.tunnel = *tunnel,
+		.input = &input,
+		.input_len = 1,
+		.output = &output,
+		.output_len = 1,
+	};
+	void *device = NULL;
+	if (yanet_cp_vxlan_device_new(
+		    agent, &request, &device, err, YANET_CP_ERROR_LEN
+	    ) != YANET_CP_OK) {
+		return NULL;
+	}
+	return device;
+}
 
 // A harness with one port and one vxlan device.
 struct vxlan_fixture {
@@ -206,29 +241,10 @@ fixture_setup(struct vxlan_fixture *fixture) {
 	cp_device_plain_config_free(port_config);
 	TEST_ASSERT_NOT_NULL(port, "cp_device_plain_new failed");
 
-	struct cp_device_vxlan_config *vxlan_config =
-		cp_device_vxlan_config_new("vx0", 1, 1, &test_vxlan, &err);
-	TEST_ASSERT_NOT_NULL(vxlan_config, "cp_device_vxlan_config_new failed");
-	TEST_ASSERT_SUCCESS(
-		cp_device_vxlan_config_set_input_pipeline(
-			vxlan_config, 0, "to_vxlan_output", 1
-		),
-		"vxlan input pipeline binding failed"
-	);
-	TEST_ASSERT_SUCCESS(
-		cp_device_vxlan_config_set_output_pipeline(
-			vxlan_config, 0, "empty", 1
-		),
-		"vxlan output pipeline binding failed"
-	);
+	char cp_err[YANET_CP_ERROR_LEN];
 	struct cp_device *vxlan =
-		cp_device_vxlan_new(agent, vxlan_config, &err);
-	cp_device_vxlan_config_free(vxlan_config);
-	TEST_ASSERT_NOT_NULL(
-		vxlan,
-		"cp_device_vxlan_new failed: %s",
-		err ? yanet_error_format(err) : "?"
-	);
+		vxlan_device_new(agent, "vx0", &test_vxlan, cp_err);
+	TEST_ASSERT_NOT_NULL(vxlan, "vxlan device creation failed: %s", cp_err);
 
 	struct cp_device *devices[] = {port, vxlan};
 	TEST_ASSERT_SUCCESS(
@@ -241,9 +257,11 @@ fixture_setup(struct vxlan_fixture *fixture) {
 	yanet_error *port_err = NULL;
 	cp_device_plain_free(port, &port_err);
 	yanet_error_free(port_err);
-	yanet_error *vxlan_err = NULL;
-	cp_device_vxlan_free(vxlan, &vxlan_err);
-	yanet_error_free(vxlan_err);
+	TEST_ASSERT_EQUAL(
+		yanet_cp_vxlan_device_free(vxlan, cp_err, sizeof(cp_err)),
+		YANET_CP_STILL_REFERENCED,
+		"a published device must stay alive"
+	);
 
 	return TEST_SUCCESS;
 }
@@ -493,26 +511,100 @@ run_vxlan_plain_frame_encap_test(void) {
 	return rc;
 }
 
-// Verifies that the C api refuses a VNI wider than 24 bits.
+// Verifies that the Rust api refuses a VNI wider than 24 bits.
 static int
 run_vxlan_api_rejects_wide_vni_test(void) {
 	struct vxlan_fixture fixture;
 	TEST_ASSERT_SUCCESS(fixture_setup(&fixture), "fixture setup failed");
 
-	struct vxlan_device_config wide = test_vxlan;
+	struct yanet_cp_vxlan_tunnel wide = test_vxlan;
 	wide.vni = VXLAN_VNI_MAX + 1;
-	yanet_error *err = NULL;
-	struct cp_device_vxlan_config *config =
-		cp_device_vxlan_config_new("vx1", 1, 1, &wide, &err);
-	TEST_ASSERT_NOT_NULL(config, "cp_device_vxlan_config_new failed");
-	struct cp_device *device =
-		cp_device_vxlan_new(fixture.agent, config, &err);
-	cp_device_vxlan_config_free(config);
+	char err[YANET_CP_ERROR_LEN];
+	void *device = vxlan_device_new(fixture.agent, "vx1", &wide, err);
 	TEST_ASSERT(device == NULL, "a 25-bit VNI must be refused");
-	TEST_ASSERT_STR_CONTAINS(
-		yanet_error_message(err), "24 bits", "error names the limit"
+	TEST_ASSERT_STR_CONTAINS(err, "vni", "error names the field");
+
+	fixture_teardown(&fixture);
+	return TEST_SUCCESS;
+}
+
+// Verifies that the Rust api reads back the tunnel of a published device.
+static int
+run_vxlan_api_shows_published_tunnel_test(void) {
+	struct vxlan_fixture fixture;
+	TEST_ASSERT_SUCCESS(fixture_setup(&fixture), "fixture setup failed");
+
+	struct yanet_cp_vxlan_tunnel shown;
+	memset(&shown, 0, sizeof(shown));
+	char err[YANET_CP_ERROR_LEN];
+	TEST_ASSERT_EQUAL(
+		yanet_cp_vxlan_device_show(
+			fixture.agent, "vx0", &shown, err, sizeof(err)
+		),
+		YANET_CP_OK,
+		"show failed: %s",
+		err
 	);
+	TEST_ASSERT(
+		memcmp(&shown, &test_vxlan, sizeof(shown)) == 0,
+		"show must return the created tunnel"
+	);
+	TEST_ASSERT_EQUAL(
+		yanet_cp_vxlan_device_show(
+			fixture.agent, "nope", &shown, err, sizeof(err)
+		),
+		YANET_CP_NOT_FOUND,
+		"an unknown name is not found"
+	);
+	uint8_t bytes[sizeof(shown)];
+	TEST_ASSERT_EQUAL(
+		yanet_cp_shim_device_read(
+			fixture.agent,
+			"vxlan",
+			"vx0",
+			0,
+			0,
+			bytes,
+			sizeof(bytes)
+		),
+		2,
+		"a read for another configuration layout is refused"
+	);
+
+	fixture_teardown(&fixture);
+	return TEST_SUCCESS;
+}
+
+// Verifies that a vxlan device cannot be created for another configuration
+// layout: the C device init without a layout expects the zero layout of a C
+// device, which the Rust device type was not loaded with.
+static int
+run_vxlan_layout_mismatch_refused_test(void) {
+	struct vxlan_fixture fixture;
+	TEST_ASSERT_SUCCESS(fixture_setup(&fixture), "fixture setup failed");
+
+	yanet_error *err = NULL;
+	struct cp_device_config config;
+	memset(&config, 0, sizeof(config));
+	TEST_ASSERT_SUCCESS(
+		cp_device_config_init(&config, "vxlan", "vx1", 0, 0, &err),
+		"device config init failed"
+	);
+	struct cp_device *device =
+		cp_device_new(&fixture.agent->memory_context);
+	TEST_ASSERT_NOT_NULL(device, "device allocation failed");
+	int rc = cp_device_init(device, fixture.agent, &config, &err);
+	cp_device_config_fini(&config);
+	TEST_ASSERT_EQUAL(rc, -1, "a C init of a vxlan device must be refused");
+	char *message = yanet_error_format(err);
+	TEST_ASSERT_STR_CONTAINS(
+		message, "configuration layout", "the error names the layout"
+	);
+	free(message);
 	yanet_error_free(err);
+	memory_bfree(
+		&fixture.agent->memory_context, device, sizeof(struct cp_device)
+	);
 
 	fixture_teardown(&fixture);
 	return TEST_SUCCESS;
@@ -528,5 +620,7 @@ main(void) {
 	failed |= run_vxlan_vni_mismatch_drop_test();
 	failed |= run_vxlan_plain_frame_encap_test();
 	failed |= run_vxlan_api_rejects_wide_vni_test();
+	failed |= run_vxlan_api_shows_published_tunnel_test();
+	failed |= run_vxlan_layout_mismatch_refused_test();
 	return failed == TEST_SUCCESS ? 0 : 1;
 }

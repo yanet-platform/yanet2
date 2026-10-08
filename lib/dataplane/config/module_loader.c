@@ -119,6 +119,7 @@ dp_load_device(struct dp_config *dp_config, void *bin_hndl, const char *name) {
 	dp_device->input_handler = device->input_handler;
 	dp_device->output_handler = device->output_handler;
 	dp_device->commit_handler = device->commit_handler;
+	dp_device->config_layout = device->config_layout;
 
 	SET_OFFSET_OF(&dp_config->dp_devices, dp_devices);
 

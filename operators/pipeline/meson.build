@@ -28,6 +28,7 @@ if not get_option('fuzzing').enabled()
           common_protoc_gen,
           plain_protoc_gen,
           vlan_protoc_gen,
+          vxlan_protoc_gen,
       ],
       install: true,
       install_dir: get_option('bindir'),

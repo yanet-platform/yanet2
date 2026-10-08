@@ -207,6 +207,7 @@ name = "yanet-device-vxlan"
 version = "0.1.0"
 dependencies = [
  "yanet-dp-sys",
+ "yanet-vxlan-config",
  "zerocopy",
 ]
 
@@ -223,7 +224,30 @@ name = "yanet-dp-sys"
 version = "0.1.0"
 dependencies = [
  "bindgen",
- "zerocopy",
+ "yanet-shm",
+]
+
+[[package]]
+name = "yanet-shm"
+version = "0.1.0"
+dependencies = [
+ "yanet-shm-derive",
+]
+
+[[package]]
+name = "yanet-shm-derive"
+version = "0.1.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
+name = "yanet-vxlan-config"
+version = "0.1.0"
+dependencies = [
+ "yanet-shm",
 ]
 
 [[package]]

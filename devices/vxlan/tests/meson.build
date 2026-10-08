@@ -12,7 +12,7 @@ if rust_builtins_enabled
       lib_dev_plain_dp_dep,
       lib_dev_vxlan_dp_dep,
       lib_dev_plain_api,
-      lib_dev_vxlan_api,
+      lib_rust_cp_dep,
       lib_forward_cp_dep,
       lib_logging_dep,
       libdpdk_dep,

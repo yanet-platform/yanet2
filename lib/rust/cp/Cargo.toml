@@ -1,0 +1,25 @@
+# Control-plane Rust workspace: everything statically linked into the Go
+# control plane.
+#
+# Separate from the dataplane workspace because the control plane unwinds:
+# every exported function catches panics at the C boundary. It links as one
+# archive, the yanet-cp umbrella, which also carries the regex C API the Go
+# control plane used to link as its own Rust archive.
+[workspace]
+resolver = "2"
+members = [
+    "yanet-cp-sys",
+    "yanet-cp",
+    "../../../devices/vxlan/api",
+]
+
+[workspace.package]
+edition = "2024"
+rust-version = "1.88"
+publish = false
+
+[workspace.lints.rust]
+unused_crate_dependencies = "deny"
+
+[workspace.lints.clippy]
+std_instead_of_core = "deny"
