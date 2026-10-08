@@ -19,8 +19,13 @@ doctest = false
 [lints]
 workspace = true
 
+[features]
+default = ["dp"]
+# The dataplane module; without it the crate only declares the layout.
+dp = ["yanet-sdk/dp"]
+
 [dependencies]
-yanet-sdk = { path = "../yanet-sdk" }
+yanet-sdk = { path = "../yanet-sdk", default-features = false }
 
 [dev-dependencies]
 decap-oracle = { path = "../decap-oracle" }

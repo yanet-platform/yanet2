@@ -2,7 +2,7 @@
 # module SDK; deliberately not a member of the repository root workspace.
 [workspace]
 resolver = "2"
-members = ["yanet-sys", "yanet-sdk", "decap-rs", "decap-oracle"]
+members = ["yanet-sys", "yanet-sdk", "yanet-sdk-derive", "decap-rs", "decap-oracle", "decap-api", "yanet-cp"]
 
 [workspace.package]
 edition = "2024"
@@ -16,9 +16,3 @@ unused_crate_dependencies = "deny"
 
 [workspace.lints.clippy]
 std_instead_of_core = "deny"
-
-[profile.release]
-panic = "abort"
-
-[profile.dev]
-panic = "abort"

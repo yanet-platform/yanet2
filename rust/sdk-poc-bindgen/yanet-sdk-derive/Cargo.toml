@@ -1,0 +1,19 @@
+[package]
+name = "yanet-sdk-derive"
+version = "0.1.0"
+description = "Audited derive of the shared-memory layout trait for YANET2 module configurations."
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+proc-macro = true
+
+[lints]
+workspace = true
+
+[dependencies]
+proc-macro2 = "1"
+quote = "1"
+syn = { version = "2", features = ["full"] }

@@ -13,8 +13,10 @@ use std::{
 
 use crate::{
     bindings,
-    rel::{FrozenView, MapResolver, Resolver, sealed},
-    views::Lpm,
+    builder::{ConfigBuilder, CpError, Owner},
+    lpm::Lpm,
+    rel::{MapResolver, Resolver, sealed},
+    shm::{Module, Shm, ShmRead},
 };
 
 /// C test arena: block allocator plus root memory context inside one
@@ -92,6 +94,92 @@ impl TestArena {
     }
 }
 
+impl TestArena {
+    /// Starts a configuration of module `M` in the arena.
+    ///
+    /// The C module header stays zeroed: a test arena is not an agent, so
+    /// there is no dataplane module whose layout could be checked.
+    pub fn build<M: Module>(&self, name: &str) -> Result<ConfigBuilder<'_, M, Self>, CpError> {
+        ConfigBuilder::new(self, name)
+    }
+}
+
+/// Whole-arena reader for validation in tests.
+struct ArenaRange {
+    root: NonNull<u8>,
+    size: usize,
+}
+
+impl ShmRead for ArenaRange {
+    fn check(&self, addr: usize, len: usize, align: usize) -> bool {
+        let start = self.root.as_ptr().addr();
+        addr.is_multiple_of(align) && addr >= start && addr.checked_add(len).is_some_and(|end| end <= start + self.size)
+    }
+
+    fn read_u64(&self, addr: usize) -> Option<u64> {
+        if !self.check(addr, 8, 8) {
+            return None;
+        }
+        // SAFETY: an aligned word inside the live arena.
+        let word = unsafe { core::sync::atomic::AtomicU64::from_ptr(self.root.as_ptr().with_addr(addr).cast()) };
+        Some(word.load(core::sync::atomic::Ordering::Relaxed))
+    }
+}
+
+// SAFETY: the root is the arena C allocated, covering every block the
+// arena's C allocator hands out (zeroed by the shim, power-of-two blocks);
+// the reader refuses addresses outside the arena.
+unsafe impl Owner for TestArena {
+    fn root(&self) -> NonNull<u8> {
+        NonNull::new(self.base()).unwrap()
+    }
+
+    fn alloc(&self, size: usize) -> *mut u8 {
+        // SAFETY: the arena is live.
+        unsafe { bindings::yanet_sys_test_arena_alloc(self.raw.as_ptr(), size) }.cast()
+    }
+
+    unsafe fn free(&self, _block: *mut u8, _size: usize) {}
+
+    unsafe fn init_header(
+        &self,
+        _: *mut bindings::cp_module,
+        _: &core::ffi::CStr,
+        _: &core::ffi::CStr,
+        _: u64,
+    ) -> Result<(), CpError> {
+        Ok(())
+    }
+
+    unsafe fn fini_header(&self, _: *mut bindings::cp_module) {}
+
+    unsafe fn lpm_init(&self, lpm: *mut bindings::lpm, _: *mut bindings::cp_module) -> core::ffi::c_int {
+        // SAFETY: guaranteed by the caller.
+        unsafe { bindings::yanet_sys_test_lpm_init(self.raw.as_ptr(), lpm) }
+    }
+
+    unsafe fn lpm_insert(
+        &self,
+        lpm: *mut bindings::lpm,
+        key_size: u8,
+        from: *const u8,
+        to: *const u8,
+        value: u32,
+    ) -> core::ffi::c_int {
+        // SAFETY: guaranteed by the caller.
+        unsafe { bindings::yanet_sys_test_lpm_insert(lpm, key_size, from, to, value) }
+    }
+
+    unsafe fn lpm_free(&self, lpm: *mut bindings::lpm) {
+        // SAFETY: guaranteed by the caller.
+        unsafe { bindings::yanet_sys_test_lpm_free(lpm) }
+    }
+
+    unsafe fn reader(&self, _: *mut bindings::cp_module) -> Result<Box<dyn ShmRead + '_>, CpError> {
+        Ok(Box::new(ArenaRange { root: self.root(), size: self.size() }))
+    }
+}
+
 impl Drop for TestArena {
     fn drop(&mut self) {
         // SAFETY: the arena was allocated by the C constructor.
@@ -145,15 +233,15 @@ impl CLpm<'_> {
         }
     }
 
-    /// View of the LPM through a resolver rooted at the arena pointer C
-    /// returned.
-    pub fn view(&self) -> Lpm<'_, MapResolver<'_>> {
+    /// View of the LPM, with `K` its key size, through a resolver rooted at
+    /// the arena pointer C returned.
+    pub fn view<const K: usize>(&self) -> Shm<'_, Lpm<K>, MapResolver<'_>> {
         // SAFETY: the root comes straight from C and covers the whole arena,
         // which outlives the handle; the LPM is C-built, and C writes to it
         // need `&mut self`, which the returned borrow excludes.
         unsafe {
             let res = MapResolver::new(NonNull::new(self.arena.base()).unwrap());
-            Lpm::from_raw(res, res.at(self.raw().addr()))
+            Shm::from_raw(res, res.at(self.raw().addr()))
         }
     }
 
@@ -257,11 +345,16 @@ impl MappedImage {
     ///
     /// The image must hold a valid LPM graph at `offset`, as a C-built
     /// image does: the views do no validation of their own.
-    pub unsafe fn lpm(&self, offset: usize) -> Lpm<'_, MapResolver<'_>> {
+    pub unsafe fn lpm<const K: usize>(&self, offset: usize) -> Shm<'_, Lpm<K>, MapResolver<'_>> {
         assert!(offset + core::mem::size_of::<bindings::lpm>() <= self.len());
         let res = self.resolver();
         // SAFETY: in bounds; the graph is valid by the caller's contract.
-        unsafe { Lpm::from_raw(res, res.at(self.ptr.as_ptr().addr() + offset)) }
+        unsafe { Shm::from_raw(res, res.at(self.ptr.as_ptr().addr() + offset)) }
+    }
+
+    /// Address of a byte offset of the image.
+    pub fn addr_of(&self, offset: usize) -> usize {
+        self.ptr.as_ptr().addr() + offset
     }
 
     /// Looks a key up with the C LPM lookup on an LPM inside the image.
@@ -277,6 +370,23 @@ impl MappedImage {
     /// Raw pointer at a byte offset, with image provenance.
     pub fn ptr_at(&self, offset: usize) -> *mut u8 {
         self.ptr.as_ptr().wrapping_add(offset)
+    }
+}
+
+impl ShmRead for MappedImage {
+    fn check(&self, addr: usize, len: usize, align: usize) -> bool {
+        let start = self.ptr.as_ptr().addr();
+        addr.is_multiple_of(align)
+            && addr >= start
+            && addr.checked_add(len).is_some_and(|end| end <= start + self.len())
+    }
+
+    fn read_u64(&self, addr: usize) -> Option<u64> {
+        if !self.check(addr, 8, 8) {
+            return None;
+        }
+        // SAFETY: an aligned word inside the image allocation.
+        Some(unsafe { self.ptr.as_ptr().with_addr(addr).cast::<u64>().read() })
     }
 }
 
@@ -356,12 +466,12 @@ impl BlockImage {
     ///
     /// The blocks must hold a valid LPM graph rooted at `logical`, as a
     /// C-built image does: the views do no validation of their own.
-    pub unsafe fn lpm(&self, logical: usize) -> Lpm<'_, BlockResolver<'_>> {
+    pub unsafe fn lpm<const K: usize>(&self, logical: usize) -> Shm<'_, Lpm<K>, BlockResolver<'_>> {
         let block = self.by_logical(logical);
         assert!(logical + core::mem::size_of::<bindings::lpm>() <= block.logical + block.layout.size());
         // SAFETY: the header lies inside one live block; the graph is valid
         // by the caller's contract.
-        unsafe { Lpm::from_raw(self.resolver(), Self::pointer(block, logical).cast()) }
+        unsafe { Shm::from_raw(self.resolver(), Self::pointer(block, logical).cast()) }
     }
 
     /// Frees the block at a logical address while keeping it resolvable.

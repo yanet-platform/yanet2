@@ -1,241 +1,348 @@
 # Rust module SDK proof of concept: bindgen sys path, decap
 
 A self-contained workspace (not a member of the root `Cargo.toml`) that ports
-the C `decap` dataplane module to Rust on a kernel-style bindgen sys crate.
-The module crate is `#![forbid(unsafe_code)]`; every `unsafe` block lives in
-`yanet-sys`, including the export macro it provides.
+the C `decap` module to Rust on a kernel-style bindgen sys crate, end to end:
+a dataplane plugin, a control-plane api called from the Go decap service
+through a C ABI, and a QEMU lab run driven by the unchanged `yanet-cli-decap`.
+Module crates are `#![forbid(unsafe_code)]`; every `unsafe` block lives in
+`yanet-sys`, the export macro it provides, the layout derive and the C ABI
+crate.
 
-| Crate          | Role                                                                                       |
-|----------------|--------------------------------------------------------------------------------------------|
-| `yanet-sys`    | bindgen bindings, crate-private `layout!` classification and strict pointer check, `RelPtr`/resolvers, views, packet front, `register_module!`; test support behind the `testing` feature (C arena, image copies, block resolver) |
-| `yanet-sdk`    | Safe surface: re-exports and the Rust port of the C `lpm_lookup`; `#![forbid(unsafe_code)]` |
-| `decap-rs`     | The module, `cdylib` named `libdecap_dp.so` for the plugin loader; `#![forbid(unsafe_code)]` |
-| `decap-oracle` | Test-only: the unmodified C `modules/decap/dataplane/dataplane.c` and C packet construction, compiled from the `DEP_YANET_*` flags |
+| Crate | Role |
+|-------|------|
+| `yanet-sys` | bindgen bindings, crate-private `layout!` classification of C aggregates with the strict pointer check, `RelPtr`/resolvers, `ShmLayout`/`Opaque`/`Module`/`ModuleConfig`, the LPM library type, packet front, `register_module!` (feature `dp`), configuration builder and agent owner (feature `cp`), test support (feature `testing`) |
+| `yanet-sdk-derive` | The audited `#[derive(ShmLayout)]`; the only `ShmLayout` impls outside sys |
+| `yanet-sdk` | Safe surface: re-exports, the derive, the Rust port of `lpm_lookup`; `#![forbid(unsafe_code)]` |
+| `decap-rs` | The module: `DecapConfig` body, `Decap: Module`, the handler; `cdylib` `libdecap_dp.so` for the plugin loader; `#![forbid(unsafe_code)]` |
+| `decap-api` | Rust replacement of `modules/decap/api/controlplane.c`: builds and validates the configuration; `#![forbid(unsafe_code)]` |
+| `yanet-cp` | The one control-plane static library for Go: C ABI of the api crates (cbindgen header `include/yanet_cp.h`) plus the rure C API |
+| `decap-oracle` | Test-only: the unmodified C decap module and C packet construction, built from the `DEP_YANET_*` flags |
+
+Outside this directory the change adds the generic layout binding to C
+(`config_layout` in `struct module`/`struct dp_module`,
+`cp_module_init_layout`, module ABI 33 -> 34), the Go binding
+`modules/decap/bindings/go/rsdecap`, the build-tag switch of the Go decap
+backend, the rure link split in `controlplane/ffi` and
+`bindings/go/dataplane_ut`, decap functional tests and a Miri CI workflow
+(`.github/workflows/rust-miri.yml`).
 
 ## Build and run
 
 Prerequisites: a configured meson build directory (the sys build script reads
-its `compile_commands.json`) and a libclang with resource headers.
+its `compile_commands.json` and the generated DPDK configuration header) and
+bindgen's clang pair: `CLANG_PATH` and `LIBCLANG_PATH` must name the same LLVM
+major version (bindgen asks the `clang` binary for system include paths and
+parses with libclang; mixing majors breaks `stdatomic.h`).
 
 ```sh
 git submodule update --init
-PKG_CONFIG=/usr/bin/pkg-config meson setup build   # host pkg-config, as the devshell does
-meson compile -C build                              # only needed for scripts/e2e.sh
+meson setup build && meson compile -C build      # the dataplane and C libraries
 cd rust/sdk-poc-bindgen
-cargo test --offline                                # native suite
-./scripts/miri.sh                                   # Miri, both borrow models
-./scripts/e2e.sh                                    # Rust plugin inside the real dataplane harness
-./scripts/asm.sh                                    # Rust vs C machine code
+cargo test --offline                             # native suite
+./scripts/miri.sh [stacked|tree]                 # Miri, both models by default
+./scripts/e2e.sh                                 # Go suites linking the Rust plugin and api
+./scripts/asm.sh                                 # Rust vs C machine code
 cargo run --release -p yanet-sdk --example lookup_bench
 ```
 
-`.cargo/config.toml` defaults `LIBCLANG_PATH` to `/usr/lib/llvm-18/lib`: on
-the reference host the newest libclang (19) has no resource headers, and
-bindgen then fails on `stdatomic.h`. `YANET_BUILD_DIR` and `YANET_ROOT`
-override the defaults (`<repo>/build`, the repository root).
+`YANET_BUILD_DIR` and `YANET_ROOT` override `<repo>/build` and the repository
+root. Go code using the Rust api builds with `-tags yanet_rust_cp` after
+`cargo build --release -p yanet-cp -p decap-rs`; without the tag nothing
+changes for the C build.
 
-## How it fits together
+## Design
 
 - **One source of C flags.** `yanet-sys/build.rs` takes the include
-  directories, defines, forced includes and `-march` of the meson
-  `modules/decap/dataplane/dataplane.c` command. The same set drives bindgen,
-  the C shim compile (`lib/dataplane/packet/{decap,packet}.c` and the test
-  shim) and the gcc layout probe, and is exported as `DEP_YANET_ROOT`,
-  `_INCLUDE`, `_DEFINES`, `_FORCED_INCLUDES`, `_MACHINE`, `_COMPILER`
-  (`links = "yanet"`). `decap-oracle/build.rs` consumes only that metadata.
-- **Strict provenance resolver.** `Resolver::resolve(&RelPtr<T>)` uses the slot
-  only for its address: the target is `root.with_addr(slot + offset)`. The
-  production `MapResolver` root is the raw `module_ectx *` the dataplane
-  passes to the handler; absolute fields (`abs_cp_module`) are also turned
-  into pointers by `root.with_addr(addr)`. Packet, mbuf and list pointers live
-  outside the mapping and are used as loaded (`ffi` class). No
-  `with_exposed_provenance` or integer-to-pointer cast anywhere.
-- **`RelPtr<T>` / `RelRef<T>`**: `repr(transparent)` `isize`, private field,
-  no constructor, not `Copy`/`Clone`/`Unpin`; views return `&RelPtr` in
-  place. `RelRef` is a slot the validated graph guarantees non-null
-  (`ADDR_OF_NONNULL`); the LPM projection decides it from the slot flag.
-- **`layout!`** (`yanet-sys/src/views.rs`) classifies every field of each
-  aggregate the SDK projects into: `rel`, `abs`, `ffi`, `plain`, `embed`,
-  `opaque`. The build script walks the bindgen output with `syn`, marks every
-  field whose bytes carry a pointer (transitively through nested aggregates
-  and unions; opaque bindgen blobs count as pointer-carrying; an unrecognised
-  type form or name fails the build instead of counting as plain) and
-  generates a const check: a declared aggregate with an unclassified
-  pointer-carrying field fails const evaluation with the field name (75 such
-  checks over 206 bindgen fields). Declared classes are also checked:
-  `rel`/`abs`/`ffi` must be pointers and `plain` must carry none; `plain`
-  and `ffi` types must equal the bindgen types exactly, `rel` sizes must
-  match. `module_ectx` alone forces 21 pointer fields to be classified. The
-  macro is crate-private: generated accessors dereference the view pointer
-  and mirror types are constructible from their fields, so a declaration is
-  a statement about C memory only the sys crate may make. Integer fields that
-  hold addresses or offsets are invisible to the check.
-- **No reference over C-mutable bytes.** `frozen` views (`Lpm`,
-  `DecapConfig`, `ModuleEctx`) hold a raw pointer and hand out references to
-  single declared fields only. `lpm.memory_context` and the `cp_module`
-  header are `opaque`, so C may rewrite a sibling link or a registry refcount
-  while a worker runs the configuration. `mirror` types (`LpmPage`,
-  `LpmValue`) are layout-asserted `repr(C)` copies of fully frozen
-  aggregates.
-- **Hybrid helpers.** Cold path in C: LPMs are built with the C `lpm_insert`
-  (test shim) and `packet_decap` is the C function compiled into the module
-  (`Packet::decap`), because porting it means porting mbuf adjustment and the
-  inner header parser. Hot path in Rust: the LPM lookup (`yanet-sdk`).
-- **Export macro.** `register_module!{ name: decap, config: Decap, handler:
-  handle_packets }` emits `new_module_decap` (descriptor allocated with C
-  `malloc`, since the loader `free`s it) and `yanet_module_abi_version`
-  (generated from `YANET_MODULE_ABI_VERSION`, 33). The grammar accepts only
-  identifiers and `::` paths, and the caller's tokens are used only outside
-  the macro's `unsafe` block. **Panic policy: abort.** The handler is wrapped
-  in `catch_unwind` + `process::abort()` (and the profiles set
-  `panic = "abort"`): unwinding into C is undefined and a half-processed front
-  has no consistent state to return. A context without a configuration drops
-  every packet.
+  directories, defines, forced includes and `-march` of the meson command for
+  `modules/decap/dataplane/dataplane.c` and feeds bindgen, the C shims and a
+  gcc layout probe with them; they are re-exported as `DEP_YANET_*`
+  (`links = "yanet"`), which `decap-oracle/build.rs` consumes.
+- **Strict provenance.** A relative slot contributes only its address; the
+  target is `root.with_addr(slot + offset)` where `root` is a raw pointer
+  from C (`module_ectx *` on the dataplane, the agent on the control plane)
+  covering the whole mapping. No exposed provenance anywhere. `resolve_ref`
+  compiles to the same load + add as gcc's `ADDR_OF_NONNULL`.
+- **`RelPtr<T>`/`RelRef<T>`/`RelSlice<T>`**: transparent offsets with private
+  fields and no constructor, not `Copy`/`Clone`/`Unpin`; only reachable in
+  place through shared memory.
+- **`ShmLayout` + derive.** `unsafe trait ShmLayout` is implemented by sys for
+  integers, arrays, relative pointers and C library types (`Lpm<K>`), and by
+  `#[derive(ShmLayout)]` for module bodies. The derive accepts only a
+  non-generic `#[repr(C)]` struct with named fields whose every field is
+  `ShmLayout` (so no `bool`, enums, references or raw pointers), and emits a
+  structural `FINGERPRINT` (size, alignment, every field offset and
+  fingerprint), a `validate()` walking every field and `visit_c_objects()`
+  reporting embedded C objects. `validate` reads only through a bounds-checked
+  reader, so a corrupt graph is an error, never an out-of-bounds access;
+  `Lpm<K>` validates page counts, the chunk directory, every chunk, that each
+  child pointer names a page of the same LPM and leaf value ranges.
+- **`Opaque<T>`** (an `UnsafeCell`) marks bytes C may write while Rust holds
+  a reference: the C module header and the memory context embedded in
+  `struct lpm`. A reference to `Lpm<K>` held across a C write to its memory
+  context is accepted by Miri in both models; the same with a plain
+  `&bindings::lpm` is reported as UB.
+- **Module binding without per-config bytes.** `trait Module { const NAME;
+  type Config: ShmLayout }`; one impl (`decap_rs::Decap`) is used by the
+  export macro and by the control-plane api, so the body the api builds and
+  the body the handler reads are one type. The configuration block is
+  `ModuleConfig<B> = { Opaque<cp_module>, B }`. The export macro declares
+  `config_layout::<M>()` (a non-zero fingerprint of the block) in the module
+  descriptor; the loader copies it into `dp_module`; `cp_module_init_layout`
+  refuses with `module '<type>' config layout mismatch: control plane 0x..,
+  dataplane 0x..` when the creator names another layout, and
+  `cp_module_init` names 0, the layout of every C module. Safety argument:
+  the dataplane interprets a module header as `ModuleConfig<B>` only when its
+  `dp_module_idx` points at this module, and every such header passed
+  `cp_module_init_layout` with `config_layout == config_layout::<M>()`, after
+  which the api validated the graph; the packet path checks nothing
+  (analogous to kernel modversions/vermagic). This assumes the SDK builder
+  is the only caller naming a non-zero layout; C code calling
+  `cp_module_init_layout` with a Rust module's layout would skip validation. The export macro also fails the
+  build when the exported name differs from `Module::NAME`.
+- **`layout!`** (crate-private) mirrors the C aggregates sys projects into
+  (`lpm`, `lpm_page`, `lpm_value`, `module_ectx`, packet, list, front,
+  `rte_mbuf`) and classifies every field `rel`/`abs`/`ffi`/`plain`/`embed`/
+  `opaque`. The build script walks the bindgen output with `syn` (failing on
+  any unrecognised type form or name) and generates a const check: a declared
+  aggregate with an unclassified pointer-carrying field fails the build with
+  the field named (83 checks over 226 bindgen fields; `module_ectx` alone has
+  21 pointer fields). `plain` and `ffi` types must equal the bindgen types
+  exactly. Integer fields holding addresses are invisible to the check.
+- **Hybrid helpers.** Cold paths in C: allocation, `cp_module_init_layout`,
+  `lpm_init`/`lpm_insert`/`lpm_free` through a small shim; `packet_decap`
+  (compiled into the plugin) behind `Packet::decap`. Hot path in Rust: the
+  LPM lookup.
+- **Panic policy.** Dataplane handler: `catch_unwind` + `process::abort()`
+  (no consistent state to return to). C ABI exports: `catch_unwind` into an
+  error code.
 
-## Results (commands run on this host)
+## Rust -> C ABI -> Go
+
+`yanet-cp` is the one Rust static library the Go control plane links; its
+crate dependencies are the api list (`decap-api`). Exports:
+`yanet_cp_abi_query`, `yanet_cp_decap_config_build`,
+`yanet_cp_decap_config_free` (header generated by cbindgen in `build.rs`).
+
+Safety contract:
+- `repr(C)` arguments only (prefix records, C strings, caller buffers, C
+  handles); no protobuf. Nothing Rust allocates is returned: the module
+  configuration lives in agent shared memory and is owned by the caller once
+  handed over, like one from the C api, so Go never holds a Rust-owned
+  pointer.
+- Every export runs under `catch_unwind`; errors are a negative code plus a
+  message truncated into the caller's buffer; the free reports through a C
+  `yanet_error` chain and errno `EAGAIN` exactly like the C module free.
+- No threads, no signal handlers, no thread-local state of its own (the Rust
+  standard library keeps a thread-local panic count, touched only while a
+  panic is being caught). Rust writes only into caller buffers and agent
+  shared memory; calls for different modules are reentrant.
+- Go calls `yanet_cp_abi_query` once at package init and refuses every build
+  call when the library's ABI version, module ABI version, prefix record size
+  or `struct cp_module` size differs from what the Go binding was compiled
+  against.
+
+Go side: all cgo and `unsafe` for the Rust api is in
+`modules/decap/bindings/go/rsdecap` (build tag `yanet_rust_cp`). The decap
+backend picks the api by build tag (`config_c.go`, the default, and
+`config_rust.go`); the service, its protobuf and `yanet-cli-decap` are
+unchanged.
+
+**rure.** Go already linked the Rust static library `librure.a`; a second
+Rust static library duplicates `rust_eh_personality` and the allocator shims.
+`yanet-cp` depends on the `rure` crate (`subprojects/regex/regex-capi`), so
+its C API stays exported (33 `rure_*` symbols, the same set as `librure.a`),
+and with the tag `controlplane/ffi` and `bindings/go/dataplane_ut` link
+`libyanet_cp.a` instead of `librure.a` (`*_rure_c.go`/`*_rure_rust.go`). The
+library is linked by path, not `-L`, because `target/release` also holds
+`libdecap_dp.so`, which `-ldecap_dp` would otherwise pick up. A
+control-plane-only build of `yanet-sys` leaves out the C packet helpers, so
+the Go link sees no duplicate `parse_packet`/`packet_decap`.
+
+## Stand recipe
+
+1. Build the dataplane and C libraries: `meson setup build && meson compile
+   -C build`.
+2. Build the Rust artifacts: in `rust/sdk-poc-bindgen`, `cargo build
+   --release -p decap-rs -p yanet-cp`.
+3. Build the control plane with the Rust api: `go build -tags yanet_rust_cp
+   -o yanet-controlplane ./controlplane/cmd/yncp-director`.
+4. Put `target/release/libdecap_dp.so` into a directory named by the
+   `plugin_dir` key of the dataplane YAML (`dataplane.plugin_dir`, read in
+   `dataplane/config.c`). The loader prefers a plugin over the built-in
+   module of the same name (`lib/dataplane/config/module_loader.c`) and logs
+   `module decap found in plugin decap`.
+5. Configure with the unchanged CLI: `yanet-cli-decap update --name decap0
+   -p 4.5.6.7/32 -p 1:2:3:4::abcd/128`, then attach the module to a function
+   and pipeline as for the C module.
+
+The default (C api) control plane cannot configure the Rust plugin: the
+update fails with the layout mismatch above; likewise the Rust api refuses
+the built-in C module.
+
+## QEMU lab
+
+`lab/decap-rs/manifest.yaml` boots the lab VM with `plugin_dir:
+/tmp/yanet/build/plugins` (the framework copies
+`build/modules/*/dataplane/*_dp_plugin.so` there, so the Rust plugin is staged
+as `build/modules/decap/dataplane/libdecap_dp_plugin.so`), checks the loader
+log, restarts the control plane with the tagged build (staged as
+`build/controlplane/yanet-controlplane-rustcp`, `swap-controlplane.sh`;
+agents are 4 MB so both control-plane processes fit the instance memory),
+reapplies the common configuration, drives `yanet-cli-decap` and probes one
+IPv4-in-IPv4 packet with the built-in scenario's pcaps.
+`lab/decap-rs-c-api/manifest.yaml` shows the C api refused by the plugin's
+layout. `lab/gen_config.go` regenerates the boot YAML from the framework.
+
+```sh
+./scripts/lab-stage.sh stage          # plugin and tagged control plane into build/
+cd ../..
+flock -o /tmp/yanet2-lab.lock just lab --session rpb up
+flock -o /tmp/yanet2-lab.lock just lab --session rpb scenario run decap      # C api, built-in module
+flock -o /tmp/yanet2-lab.lock just lab --session rpb reset
+flock -o /tmp/yanet2-lab.lock just lab --session rpb manifest run rust/sdk-poc-bindgen/lab/decap-rs/manifest.yaml
+flock -o /tmp/yanet2-lab.lock just lab --session rpb reset
+flock -o /tmp/yanet2-lab.lock just lab --session rpb manifest run rust/sdk-poc-bindgen/lab/decap-rs-c-api/manifest.yaml
+flock -o /tmp/yanet2-lab.lock just lab --session rpb down
+rust/sdk-poc-bindgen/scripts/lab-stage.sh unstage   # later VM runs get the built-in decap again
+```
+
+Results (guest artifacts verified by md5 against the worktree build): the
+built-in `decap` scenario passes; `decap-rs` passed 4 of 4 runs with the final build:
+
+```
+PASS step     plugin-loaded
+[INFO ][plugin_loader.c:161]: loaded plugin decap from /tmp/yanet/build/plugins/libdecap_dp.so
+[INFO ][module_loader.c:36]: module decap found in plugin decap
+PASS step     rust-api-controlplane
+control plane: /tmp/yanet/build/controlplane/yanet-controlplane-rustcp
+PASS step     configure-decap
+[✓] Updated config 'decap_lab'.
+PASS step     inspect-decap
+prefixes: 4.5.6.7/32
+1:2:3:4::abcd/128
+PASS probe    decap-ipv4
+```
+
+and `decap-rs-c-api`:
+
+```
+PASS step     c-api-update-refused
+[ERR] update failed: failed to update module config "decap_lab": failed to create module config:
+failed to initialize module config: failed to init module: module 'decap' config layout mismatch:
+control plane 0x0000000000000000, dataplane 0x2afabb9632b82356
+```
+
+Without the `settle` step the `decap-rs` probe captured a second packet in 2
+of 4 runs, most likely guest IPv6 neighbour traffic right after the devices
+are reconfigured; with a 10 s wait it passed 7 of 7 runs (3 with an earlier per-config header design, 4 with the final build). The extra packet
+was never identified, and an earlier drop-probe variant of the C api manifest
+caught an unexplained packet in 2 of 4 runs even with the wait, which is why
+that manifest checks the refused update instead of a probe.
+
+## Results
 
 | Check | Command | Result |
 |-------|---------|--------|
-| Native suite | `cargo test --offline` | all pass: sdk 8 (+4 ignored UB cases), sys 6, decap 4 |
-| Miri, strict provenance, Stacked + Tree Borrows | `./scripts/miri.sh` | positive suites pass under both models (6 LPM tests, 2 packet-front tests each) |
-| Miri expected-UB cases | `./scripts/miri.sh` | all 8 outcomes as expected, see below |
-| Differential LPM, 200k keys x {v4, v6} | `test_lookup_differential_against_c` | Rust == C on the C arena, on a relocated copy after freeing the arena, and C on the copy |
-| Differential decap handler | `decap-rs/tests/differential.rs` | 20 named cases (IP-in-IP, IPv6-in-IPv4, GRE with key / checksum + sequence / unknown payload, VLAN, IPv6 tunnels with and without a hop-by-hop header, outer fragments, truncated inner TCP, non-tunnel and non-IP), a batch of all of them and 20 000 random mutations (>10 000 parsable): verdict, bytes, metadata, list order and front counters equal to C; expected verdicts asserted separately |
-| Loader + real publish path | `./scripts/e2e.sh` | plugin exports exactly `new_module_decap yanet_module_abi_version`; dataplane_ut loads it from `plugin_dir` (handler address in the `.so`), 6 frames identical to the built-in C decap |
-| gcc layout cross-check | `tests/gcc_layout.rs` | 141 entries (15 aggregate size/align pairs, 126 field offset/size pairs) equal; every `layout!` field is probed |
-| Unclassified pointer check | `yanet-sys/tests/negative_build.rs` | builds a copy of `yanet-sys` with one declaration line removed or changed: unclassified `lpm.pages`, `lpm.memory_context` and `module_ectx.abs_object_links`, a pointer declared `plain`, a plain field declared `rel` each fail the build with the field named; the unmodified copy builds |
-| Macro grammar, forbidden unsafe | `yanet-sys/tests/compile_fail/*.rs` (trybuild) | a block as handler is rejected by the macro grammar; `unsafe` in a module crate is rejected |
-| Rust 1.88 | `cargo +1.88 test --offline --target-dir target/msrv` | builds and passes, including the negative builds and the trybuild cases |
-| Format, lints | `cargo +nightly-2026-08-28 fmt --all -- --check`, `cargo clippy --offline --all-targets` | clean |
+| Native suite | `cargo test --offline` | pass: sdk 10 (+4 expected-UB cases ignored) and compile-fail, sys 5, decap 6, api 3 |
+| Miri, strict provenance, SB and TB | `./scripts/miri.sh` | 8 LPM/validator and 2 packet-front tests pass under both models; 8 expected outcomes match (below) |
+| CI variant | `MIRI_TOOLCHAIN=nightly-2026-08-28 MIRI_CARGO_FLAGS=--locked ./scripts/miri.sh tree` | pass |
+| Rust 1.88 | `cargo +1.88 test --offline --target-dir target/msrv` | pass (compile-fail snapshots run only on rustc 1.98, whose wording they record) |
+| Format, lints | `cargo +nightly-2026-08-28 fmt --all -- --check`, `cargo clippy --offline --all-targets` | clean for the PoC crates; the third-party `rure` path dependency prints its own deprecation warnings (meson builds it with `--cap-lints allow`) |
+| Go | `go build ./...`, `go vet`, `go test -count=1 ./...` with and without `-tags yanet_rust_cp` on the touched packages | pass; `go test ./...` passes except `tests/functional/main`, which needs a VM image in the worktree |
+| C | `meson compile -C build`, `meson test -C build` | 93 of 93 pass |
+| End to end in Go | `./scripts/e2e.sh` | plugin exports exactly `new_module_decap` and `yanet_module_abi_version`; `libyanet_cp.a` has the 33 rure symbols and no packet helpers; the decap functional suite passes with the Rust plugin and Rust api, plus a gRPC `UpdateConfig` test (the CLI's request) and both layout refusals |
+| Differential | `test_lookup_differential_against_c`, `decap-rs/tests/differential.rs` | LPM: Rust == C on 200k keys x {v4, v6}, also on a relocated copy; handler: 20 named cases, a batch and 20 000 mutations equal to the C module on identical LPMs |
+| Layout cross-check | `tests/gcc_layout.rs` | 142 gcc/bindgen entries equal |
+| Unclassified pointer | `tests/negative_build.rs` | 5 broken declarations fail the build naming the field |
+| Derive and export | `yanet-sdk/tests/compile_fail` | `bool`, `&T`, `*const T` fields and missing `repr(C)` rejected; a manual `unsafe impl ShmLayout` rejected by `forbid(unsafe_code)`; export under another name than `Module::NAME` rejected; a block as handler rejected by the macro grammar |
+| Lab | see above | built-in decap scenario, `decap-rs` (4/4 with the final build), `decap-rs-c-api` pass; with nothing staged, the `plugin-loaded` step fails as it should |
 
 Expected-UB matrix (`-Zmiri-strict-provenance`):
 
 | Case | Stacked | Tree |
 |------|---------|------|
 | Block resolver, chunk block freed, then lookup | UB (use-after-free) | UB |
-| Block resolver, chunk pointer aimed at the last 8 bytes of the header block | UB (beyond allocation) | UB |
-| `&lpm` over the whole header held across a C write to its memory context | UB (protected SharedReadOnly) | UB (write forbidden) |
+| Block resolver, chunk pointer aimed at the end of another block | UB (beyond allocation) | UB |
+| `&bindings::lpm` (no `Opaque`) held across a C write to its memory context | UB | UB |
 | Resolution with provenance from the slot reference (the PR #2890 model) | UB | passes |
 
-Machine code (`./scripts/asm.sh`, release, x86-64): `resolve_ref` is
-`mov; add (%rsi); ret`, the same load + add as gcc's `ADDR_OF_NONNULL`. The
-IPv4 lookup has no bounds checks or fences; it is fully unrolled over the four
-hops, while gcc keeps a loop and uses `cmov` for the two `ADDR_OF` NULL tests
-where Rust has one predictable branch.
+Lookup microbenchmark (`lookup_bench`, 1M keys, best of 20, two runs): v4 C
+6.1-6.3 ns, Rust 5.5-5.7 ns; v6 C 15.6-15.8 ns, Rust 13.8-14.7 ns. Not like
+for like: the C loop passes the key size at run time as `lpm_lookup` callers
+do, the Rust loop uses the compile-time key size the module uses; C is built
+with `-march=haswell`, Rust for the default target.
 
-Lookup throughput (`lookup_bench`, 1M keys, half inside 4000 v4 / 1000 v6
-random prefixes, best of 20, three runs): v4 C 5.9-6.1 ns, Rust 6.7-7.1 ns
-(+14-17%); v6 C 14.9-15.8 ns, Rust 15.7-16.0 ns (+1-6%). The C loop is the
-inline `lpm_lookup` compiled with `-O2 -march=haswell`; Rust uses the default
-x86-64 target. This is a microbenchmark of one helper, not a dataplane
-throughput comparison.
+Build times (16 cores, separate target directory): clean release `decap-rs`
+14.2 s, then `yanet-cp` 11.4 s; after editing the module 0.4 s, a sys source
+2.0 s, a bound C header (bindgen, gcc probe, shims) 5.0 s. `libdecap_dp.so`
+is 413 KiB, `libyanet_cp.a` 27 MiB (unstripped, includes std and regex).
 
-Line counts (`wc -l`):
-
-| Part | Lines |
-|------|-------|
-| `yanet-sys` hand-written library (`src/`, without `testing.rs`) | 1205 |
-| `yanet-sys/build.rs` | 628 |
-| `yanet-sys` C shim (`shim/`) | 199 |
-| `yanet-sys/src/testing.rs` (test support) | 550 |
-| `yanet-sdk/src` | 56 |
-| `decap-rs/src` (the module) | 88 |
-| Tests, oracle, e2e harness, examples, scripts | 1930 |
-| Generated: `bindings.rs` / field table and checks / gcc + Rust layout tables | 1594 / 440 / 290 |
-
-Build times (16 cores, separate target directory): clean release build of
-`decap-rs` including bindgen and all dependencies 11.4 s; incremental after
-editing the module 0.2 s, after editing a `yanet-sys` source 1.6 s, after
-touching a bound C header (bindgen, gcc probe and shim rerun) 3.9 s. The
-release `libdecap_dp.so` is 410 KiB, most of it std panic and formatting
-machinery.
+Line counts (`wc -l`): hand-written `yanet-sys` library 2173 (plus
+`testing.rs` 656), `build.rs` 649, C shims 328, derive 129, `yanet-sdk` 70,
+the module 119, the api 85, the C ABI 257 (+ generated header 133); tests,
+oracle, examples, scripts and lab files 2192; Go 373 new lines; the C change is
+60 lines in 6 C files. Generated: bindings 1716, pointer table and checks 483, layout
+tables 292.
 
 ## What this proves, and what it does not
 
 Proven, for the executions tested:
-
-- A module crate under `forbid(unsafe_code)` can implement decap with
-  behaviour equal to the C module, as a plugin the existing loader accepts.
-- Resolution through a raw FFI root with `with_addr` is accepted by Miri
-  under both borrow models with strict provenance, survives copying the image
-  and freeing the original, and costs what `ADDR_OF` costs.
-- With one Rust allocation per allocator block, Miri reports a dangling or
-  overrunning resolution natively; with a single mapping allocation it
-  cannot (expected, and why the block resolver exists).
-- A whole-aggregate reference over the LPM header would be UB once C rewrites
-  the embedded memory context; the field-only view is not.
-- bindgen (libclang) and gcc with the meson flags agree on every probed
-  layout, and removing or misclassifying a pointer field of a declared
-  aggregate fails the build. The check sees pointer types only, not
-  integers used as addresses.
+- A `forbid(unsafe_code)` module and api crate implement decap end to end on
+  the lab: the dataplane loads the Rust plugin, the Go service builds the
+  configuration through the Rust api, the unchanged CLI drives it, a packet
+  is decapsulated.
+- A configuration of one layout cannot reach a module of another: C api vs
+  Rust module and Rust api vs C module are both refused at creation, with no
+  per-config bytes and no packet-path check.
+- Pre-publish validation rejects corrupt LPM graphs without out-of-bounds
+  reads (Miri) and every built configuration passes it.
+- Strict-provenance resolution, the block resolver, relocation and `Opaque`
+  behave as stated under both borrow models; resolution costs what `ADDR_OF`
+  costs.
 
 Not proven:
-
-- No config validator exists yet. Views trust the graph (the resolver
-  constructor's contract); the test-support constructors over arbitrary
-  bytes are `unsafe` for that reason. The CP-side api crate that would
-  validate edges against `cp_module->agent->arenas[]` before publish is not
-  built.
-- Resolvers are not branded. A view hands out its resolver, so safe code
-  can resolve a slot of one graph through another graph's resolver. With the
-  production root every graph is in the one mapping the root covers, so the
-  result is the correct target; with two separate test images it is UB, which
-  is one reason the test support is feature-gated. The block resolver panics
-  instead. Generative branding is open.
+- Miri never executes C; that pointers C hands over carry mapping-wide
+  provenance is an FFI assumption.
+- Resolvers are not branded: safe code can resolve a slot of one graph
+  through another graph's resolver. With one mapping-wide root the result is
+  still correct; across separate test images it is UB (test support is
+  feature-gated for that reason).
+- The validator walks LPMs and relative pointers; relative-pointer targets
+  other than C library objects cannot be allocated by the builder yet.
 - `decap-rs` drops a packet whose first segment is shorter than the outer
-  IPv4/IPv6 header; the C module reads such a header past the segment
-  unchecked. The differential tests only use frames the C parser accepts, so
-  they never reach this difference. Multi-segment mbufs are not exercised.
-- Miri never executes C: fixtures are C-built images replayed in Rust, and
-  the claim that the `module_ectx *` handed over by C carries mapping-wide
-  provenance is an FFI assumption, not something Miri checks.
-- The e2e harness drops every frame after the decap stage (the output
-  pipeline has no route); it compares bytes and metadata, while verdicts are
-  compared by the handler-level differential test.
-- No packet-loop throughput benchmark of the whole module, no TSan/ASan run.
+  IP header (C reads past it); multi-segment mbufs are not exercised.
+- No whole-module throughput benchmark; golangci-lint could not run locally
+  (the installed binary predates Go 1.27).
 
 ## Friction found
 
-- `forbid(unsafe_code)` does not fire on code expanded from another crate's
-  macro: `#[unsafe(export_name)]` and the macro's `unsafe` block compile in the
-  module crate (the compile-fail case shows only the user's own block
-  rejected). The macro input grammar is therefore part of the safety
-  boundary, and is restricted to identifiers and paths.
-- A `#[macro_export]` macro produced by `include!` cannot be referred to by
-  `$crate::` path, so the generated per-field check is a `const fn` with one
-  literal panic per pointer field rather than a generated macro.
-- `layout!` had to become crate-private: an exported macro whose expansion
-  contains `unsafe` lets a `forbid(unsafe_code)` crate build a view over an
-  arbitrary pointer (found in review). The negative build test therefore
-  compiles a mutated copy of the sys crate instead of a trybuild case, and
-  module-defined config layouts need a different, non-`unsafe`-expanding
-  declaration surface.
-- trybuild snapshots of const-evaluation errors differ between rustc 1.88
-  and 1.98 (the panic text moves from the header to a label), so the layout
-  negative tests match message substrings instead.
-- bindgen picked the newest libclang (19) without resource headers; the
-  build needs `LIBCLANG_PATH`. meson needs the host `pkg-config` for
-  `yaml-0.1`.
-- `unused_crate_dependencies = "deny"` applies to every test target, so test
-  files carry `use x as _;` lines; `clippy --all-targets` builds the
-  library's test target even with `test = false`.
-- `Option<&T>` from a resolved pointer kept a NULL test in the loop until
-  `assert_unchecked(!ptr.is_null())` was added in the resolver.
-- `cargo test` does not build a `cdylib`, so loader checks live in
-  `scripts/e2e.sh`.
+- `forbid(unsafe_code)` does not see code expanded from another crate's
+  macro or derive, so the macro grammar (identifiers and paths only) and the
+  derive's field bound are the safety boundary; an exported macro that
+  generates accessors was unsound and `layout!` had to become crate-private.
+- bindgen with mismatched clang and libclang majors fails on `stdatomic.h`.
+- A path dependency outside the workspace (rure) is linted as local code.
+- `cargo test` builds no `cdylib`; Go's `-L` search found the Rust `.so`
+  before the meson `.a`; Go orders cgo flags by file name, so the rure link
+  files had to sort after `shm.go`.
+- trybuild snapshots differ between rustc 1.88 and 1.98.
+- The lab has no plugin knob for its baseline; a boot manifest plus a
+  control-plane restart was needed, which in turn needed smaller agents.
 
 ## Open issues
 
-- CP-side Rust api crate with full graph validation before `agent_update_modules`.
-- Module-owned config layouts: here the decap layout is C-defined and bound
-  in `yanet-sys`; a Rust-defined config needs a declaration surface in the
-  module crate whose macro input stays identifier-only.
-- Resolver branding: views of two different graphs share the resolver type;
-  mixing them is harmless with one mapping-wide root, UB across separate
-  test images, and not prevented by types.
-- Worker-owned zones (`Worker<'round>`, prepared buffers, counters) are not
-  modelled; decap needs none.
-- `commit_handler`/`commit_ectx_handler` are left NULL; the header check and
-  its defined failure state are not implemented.
-- Meson integration of cargo (per-module `.so`, pinned toolchain) and the
-  ctest-style comparison PoC.
+- CI runs only the Miri job for this workspace; cargo test/clippy/fmt, the
+  1.88 build, the 1.98-only compile-fail suite and the `yanet_rust_cp` Go
+  build are local gates so far.
+- `yanet-cp/build.rs` writes the cbindgen header into the source tree (a
+  stable path for cgo); a read-only checkout or `cargo package` needs an
+  explicit generate step instead.
+- Validation bounds edges by the owner agent's arenas, not by the
+  configuration's own blocks.
+- Generative branding of resolvers.
+- Builder support for allocating `RelPtr`/`RelSlice` targets.
+- Meson integration of the cargo builds and of the `yanet_rust_cp` control
+  plane; packaging of the plugin.
+- Worker-owned zones (`Worker<'round>`, prepared buffers, counters); decap
+  needs none.
+- The ctest-style comparison PoC.

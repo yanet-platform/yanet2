@@ -170,6 +170,7 @@ fn main() {
     println!("cargo:rerun-if-env-changed=YANET_ROOT");
     println!("cargo:rerun-if-env-changed=YANET_BUILD_DIR");
     println!("cargo:rerun-if-env-changed=LIBCLANG_PATH");
+    println!("cargo:rerun-if-env-changed=CLANG_PATH");
 
     let root = env::var_os("YANET_ROOT")
         .map(PathBuf::from)
@@ -235,6 +236,12 @@ fn generate_bindings(flags: &CFlags, shim_dir: &Path, out: &Path) {
         .allowlist_function("packet_decap")
         .allowlist_function("parse_packet")
         .allowlist_function("yanet_sys_test_.*")
+        .allowlist_function("yanet_sys_cp_.*")
+        .allowlist_function("cp_module_init_layout")
+        .allowlist_function("cp_module_fini")
+        .allowlist_function("cp_module_try_destroy")
+        .allowlist_function("yanet_error_message")
+        .allowlist_function("yanet_error_free")
         .allowlist_var("LPM_.*")
         .allowlist_var("YANET_MODULE_ABI_VERSION")
         .allowlist_var("RTE_PKTMBUF_HEADROOM")
@@ -243,7 +250,9 @@ fn generate_bindings(flags: &CFlags, shim_dir: &Path, out: &Path) {
         // Reached only behind pointers the SDK never follows.
         .opaque_type("rte_mempool")
         .opaque_type("rte_mbuf_ext_shared_info")
-        .opaque_type("agent")
+        .opaque_type("dp_config")
+        .opaque_type("cp_config")
+        .opaque_type("agent_storage")
         .opaque_type("dp_worker")
         .opaque_type("config_gen_ectx")
         .opaque_type("device_entry_ectx")
@@ -590,18 +599,30 @@ fn render_rust_layout(fields: &[GccField]) -> String {
 }
 
 fn compile_shim(flags: &CFlags, root: &Path, shim_dir: &Path) {
+    // The dataplane feature links the C packet helpers into module objects;
+    // the control-plane feature adds the allocation and LPM wrappers. A
+    // control-plane-only build leaves the packet helpers out, so a process
+    // that also links the C packet library sees no duplicate definitions.
+    let dp = env::var_os("CARGO_FEATURE_DP").is_some();
+    let cp = env::var_os("CARGO_FEATURE_CP").is_some();
     let mut build = cc::Build::new();
     build
         .compiler(&flags.compiler)
         .file(shim_dir.join("test_shim.c"))
-        .file(root.join("lib/dataplane/packet/decap.c"))
-        .file(root.join("lib/dataplane/packet/packet.c"))
         .include(shim_dir)
         .opt_level(2)
         .warnings(false)
         // Linked into module shared objects; nothing here is part of their
         // exported interface.
         .flag("-fvisibility=hidden");
+    if dp {
+        build
+            .file(root.join("lib/dataplane/packet/decap.c"))
+            .file(root.join("lib/dataplane/packet/packet.c"));
+    }
+    if cp {
+        build.file(shim_dir.join("cp_shim.c"));
+    }
     for include in &flags.includes {
         build.include(include);
     }
@@ -618,7 +639,7 @@ fn compile_shim(flags: &CFlags, root: &Path, shim_dir: &Path) {
     for machine in &flags.machine {
         build.flag(machine);
     }
-    for file in ["test_shim.c", "test_shim.h", "bindings.h"] {
+    for file in ["test_shim.c", "test_shim.h", "cp_shim.c", "cp_shim.h", "bindings.h"] {
         println!("cargo:rerun-if-changed={}", shim_dir.join(file).display());
     }
     for file in ["lib/dataplane/packet/decap.c", "lib/dataplane/packet/packet.c"] {

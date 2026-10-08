@@ -1,25 +1,35 @@
 //! Safe surface of the YANET2 Rust module SDK.
 //!
-//! Re-exports what a module needs from the sys crate and adds safe Rust
-//! ports of hot-path helpers. This crate contains no `unsafe` code.
+//! Re-exports what a module needs from the sys crate, the audited layout
+//! derive, and safe Rust ports of hot-path helpers. This crate contains no
+//! `unsafe` code.
 
 #![forbid(unsafe_code)]
 
+pub use yanet_sdk_derive::ShmLayout;
 pub use yanet_sys::{
-    module::{Decap, ModuleConfig},
+    lpm::{Lpm, Lpm4, Lpm6},
+    rel::{MapResolver, RelPtr, RelRef, Resolver},
+    shm::{self, Module, RelSlice, Shm, ShmLayout},
+};
+#[cfg(feature = "dp")]
+pub use yanet_sys::{
     packet::{DecapError, Packet, PacketFront},
     register_module,
-    rel::{MapResolver, Resolver},
 };
 
-/// Decap module configuration of one published generation.
-pub type DecapConfig<'g> = yanet_sys::views::DecapConfig<'g, MapResolver<'g>>;
+/// Configuration body of one published generation, as a handler sees it.
+pub type Config<'g, B> = Shm<'g, B, MapResolver<'g>>;
 
 pub mod lpm {
-    //! Rust port of the C LPM lookup over the shared-memory LPM view.
+    //! Rust port of the C LPM lookup over the shared-memory LPM.
 
-    pub use yanet_sys::views::Lpm;
-    use yanet_sys::{bindings, lpm::LpmEntry, rel::Resolver};
+    use yanet_sys::{
+        bindings,
+        lpm::{Lpm, LpmEntry},
+        rel::Resolver,
+        shm::Shm,
+    };
 
     /// Value returned for a key no inserted range covers.
     pub const LPM_VALUE_INVALID: u32 = bindings::LPM_VALUE_INVALID;
@@ -31,7 +41,7 @@ pub mod lpm {
     /// as C does when the key ends on an intermediate node. An LPM that was
     /// never initialised matches nothing.
     #[inline]
-    pub fn lookup<'g, R: Resolver<'g>>(lpm: &Lpm<'g, R>, key: &[u8]) -> u32 {
+    pub fn lookup<'g, const K: usize, R: Resolver<'g>>(lpm: Shm<'g, Lpm<K>, R>, key: &[u8; K]) -> u32 {
         let Some(mut page) = lpm.root_page() else {
             return LPM_VALUE_INVALID;
         };
@@ -50,7 +60,11 @@ pub mod lpm {
 
     /// Reports whether some inserted range covers the key.
     #[inline]
-    pub fn contains<'g, R: Resolver<'g>>(lpm: &Lpm<'g, R>, key: &[u8]) -> bool {
+    pub fn contains<'g, const K: usize, R: Resolver<'g>>(lpm: Shm<'g, Lpm<K>, R>, key: &[u8; K]) -> bool {
         lookup(lpm, key) != LPM_VALUE_INVALID
     }
 }
+
+// Test-only dependencies are visible to the library's own test target.
+#[cfg(test)]
+use trybuild as _;

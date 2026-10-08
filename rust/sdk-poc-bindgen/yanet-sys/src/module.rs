@@ -3,68 +3,51 @@
 //! Panic policy: a panic inside a handler aborts the dataplane process. The
 //! handler runs between a C caller and C-owned packet lists; unwinding into
 //! C is undefined, and returning early would leave popped packets neither
-//! output nor dropped, so no consistent state exists to continue from. The
-//! workspace also builds with `panic = "abort"`; the explicit abort keeps the
-//! policy independent of the profile.
+//! output nor dropped, so no consistent state exists to continue from.
+//!
+//! Configuration binding: the descriptor declares the module's
+//! configuration layout, the loader copies it into the dataplane module
+//! table, and the C module init refuses to create a configuration for this
+//! module unless the creator names the same layout. The dataplane
+//! interprets a module header as `ModuleConfig<M::Config>` only when the
+//! header's dataplane module index points at this module, so every header
+//! it reads was created for this layout (as kernel modversions bind a
+//! module to the symbols it was built against). The packet path checks
+//! nothing per generation or per packet. The argument assumes the SDK
+//! builder is the only caller naming a non-zero layout: it validates the
+//! graph before handing the configuration over, while C code calling the
+//! layout-aware init with a Rust module's layout would bypass that.
 
-use core::{ffi::c_void, ptr::NonNull};
+use core::ptr::NonNull;
 
 use crate::{
     bindings,
     packet::PacketFront,
     rel::{FrozenView, MapResolver},
-    views::{DecapConfig, ModuleEctx},
+    shm::{Module, ModuleConfig, Shm},
+    views::ModuleEctx,
 };
 
 /// Dataplane to module ABI version this crate was generated against.
 pub const ABI_VERSION: u32 = bindings::YANET_MODULE_ABI_VERSION;
 
-/// Configuration a module reads from its execution context.
-pub trait ModuleConfig {
-    /// View of one published generation of the configuration.
-    type View<'g>;
-
-    /// Locates the configuration, `None` when the context carries none.
-    fn from_ectx<'g>(ectx: &ModuleEctx<'g, MapResolver<'g>>) -> Option<Self::View<'g>>;
-}
-
-/// The C decap module configuration: a module header followed by two LPMs.
-pub struct Decap;
-
-impl ModuleConfig for Decap {
-    type View<'g> = DecapConfig<'g, MapResolver<'g>>;
-
-    fn from_ectx<'g>(ectx: &ModuleEctx<'g, MapResolver<'g>>) -> Option<Self::View<'g>> {
-        // The module header is the first field, so the configuration starts
-        // at the header address, as the C container_of computes.
-        const _: () = assert!(core::mem::offset_of!(bindings::decap_module_config, cp_module) == 0);
-        let addr = ectx.abs_cp_module().addr();
-        if addr == 0 {
-            return None;
-        }
-        let res = ectx.resolver();
-        // SAFETY: the absolutized module header of a published context
-        // points at this module's configuration inside the mapping.
-        Some(unsafe { DecapConfig::from_raw(res, res.at(addr)) })
-    }
-}
-
 /// Handler signature a module provides.
-pub type Handler<C> = for<'r, 'g> fn(&mut PacketFront<'r>, &<C as ModuleConfig>::View<'g>);
+pub type Handler<M> = for<'r, 'g> fn(&mut PacketFront<'r>, Shm<'g, <M as Module>::Config, MapResolver<'g>>);
 
 #[doc(hidden)]
 pub mod rt {
     use super::*;
 
     unsafe extern "C" {
-        fn malloc(size: usize) -> *mut c_void;
+        fn malloc(size: usize) -> *mut core::ffi::c_void;
     }
 
     /// Runs `body`, aborting the process if it panics.
     #[inline(always)]
-    pub fn abort_on_panic(body: impl FnOnce()) {
-        if std::panic::catch_unwind(core::panic::AssertUnwindSafe(body)).is_err() {
-            std::process::abort();
+    pub fn abort_on_panic<T>(body: impl FnOnce() -> T) -> T {
+        match std::panic::catch_unwind(core::panic::AssertUnwindSafe(body)) {
+            Ok(value) => value,
+            Err(_) => std::process::abort(),
         }
     }
 
@@ -75,13 +58,14 @@ pub mod rt {
     /// # Safety
     ///
     /// Must be called with the arguments the dataplane passes to a module
-    /// handler. The execution context pointer is the provenance root of the
-    /// shared-memory mapping, so it must come straight from C.
+    /// handler, for a module registered with `M`'s layout. The execution
+    /// context pointer is the provenance root of the shared-memory mapping,
+    /// so it must come straight from C.
     #[inline(always)]
-    pub unsafe fn handle<C: ModuleConfig>(
+    pub unsafe fn handle<M: Module>(
         ectx: *mut bindings::module_ectx,
         front: *mut bindings::packet_front,
-        handler: Handler<C>,
+        handler: Handler<M>,
     ) {
         abort_on_panic(|| {
             let (Some(ectx), Some(front)) = (NonNull::new(ectx), NonNull::new(front)) else {
@@ -90,23 +74,29 @@ pub mod rt {
             // SAFETY: C passes a context living in the shared mapping and
             // frozen once handed to the worker, with mapping-wide provenance,
             // and the worker-owned front of this invocation.
-            let (ectx, mut front) = unsafe {
+            let (view, mut front) = unsafe {
                 let res = MapResolver::new(ectx.cast());
                 (ModuleEctx::from_raw(res, ectx), PacketFront::from_raw(front))
             };
-            match C::from_ectx(&ectx) {
-                Some(config) => handler(&mut front, &config),
-                None => {
-                    while let Some(packet) = front.pop() {
-                        front.drop(packet);
-                    }
+            let config = view.abs_cp_module().addr();
+            if config == 0 {
+                while let Some(packet) = front.pop() {
+                    front.drop(packet);
                 }
+                return;
             }
+            let res = view.resolver();
+            // SAFETY: the context names a module header created by the C
+            // module init with this module's layout (see the module docs) and
+            // validated by the control-plane api before publish; the C header
+            // bytes stay opaque.
+            let config = unsafe { Shm::from_raw(res, res.at::<ModuleConfig<M::Config>>(config)) };
+            handler(&mut front, config.map(ModuleConfig::body));
         });
     }
 
     /// Allocates the module descriptor the loader copies and frees.
-    pub fn new_module(name: &str, handler: bindings::module_handler) -> *mut bindings::module {
+    pub fn new_module(name: &str, handler: bindings::module_handler, config_layout: u64) -> *mut bindings::module {
         let size = core::mem::size_of::<bindings::module>();
         // SAFETY: the loader releases the descriptor with C free, so it is
         // allocated with C malloc and fully initialised before return.
@@ -120,6 +110,7 @@ pub mod rt {
             let len = name.len().min((*dst).len() - 1);
             core::ptr::copy_nonoverlapping(name.as_ptr(), dst.cast::<u8>(), len);
             (*module).handler = handler;
+            (*module).config_layout = config_layout;
             module
         }
     }
@@ -127,26 +118,30 @@ pub mod rt {
 
 /// Exports a module to the dataplane plugin loader.
 ///
-/// Emits `new_module_<name>` and `yanet_module_abi_version`, and a C handler
-/// trampoline that builds the views and calls `handler`. The input grammar is
-/// part of the safety boundary: it accepts identifiers and `::`-separated
-/// identifier paths only, and the caller's tokens are only ever used outside
-/// the macro's `unsafe` block (the handler as a safe function value, the
-/// configuration as a type), so the module crate's `forbid(unsafe_code)`
-/// cannot be bypassed through the macro input.
+/// Emits `new_module_<name>` and `yanet_module_abi_version`, and a C
+/// handler trampoline that builds the configuration view and calls
+/// `handler`. The descriptor declares `config_layout::<Module>()`; `name`
+/// must equal the module's `Module::NAME`, or the build fails. The input
+/// grammar is part of the safety boundary: identifiers and `::`-separated
+/// identifier paths only, used outside the macro's `unsafe` blocks.
 #[macro_export]
 macro_rules! register_module {
     (
         name: $name:ident,
-        config: $($config:ident)::+,
+        module: $($module:ident)::+,
         handler: $($handler:ident)::+ $(,)?
     ) => {
         const _: () = {
             #[unsafe(export_name = "yanet_module_abi_version")]
             pub static YANET_MODULE_ABI_VERSION: u32 = $crate::module::ABI_VERSION;
 
-            type Config = $($config)::+;
-            const HANDLER: $crate::module::Handler<Config> = $($handler)::+;
+            type M = $($module)::+;
+            const HANDLER: $crate::module::Handler<M> = $($handler)::+;
+
+            const _: () = ::core::assert!(
+                $crate::shm::same_name(<M as $crate::shm::Module>::NAME, ::core::stringify!($name)),
+                "register_module!: the module is exported under another name than its Module::NAME",
+            );
 
             unsafe extern "C" fn trampoline(
                 _dp_worker: *mut $crate::bindings::dp_worker,
@@ -154,12 +149,16 @@ macro_rules! register_module {
                 front: *mut $crate::bindings::packet_front,
             ) {
                 // SAFETY: the dataplane calls this with handler arguments.
-                unsafe { $crate::module::rt::handle::<Config>(ectx, front, HANDLER) }
+                unsafe { $crate::module::rt::handle::<M>(ectx, front, HANDLER) }
             }
 
             #[unsafe(export_name = ::core::concat!("new_module_", ::core::stringify!($name)))]
             pub extern "C" fn new_module() -> *mut $crate::bindings::module {
-                $crate::module::rt::new_module(::core::stringify!($name), ::core::option::Option::Some(trampoline))
+                $crate::module::rt::new_module(
+                    ::core::stringify!($name),
+                    ::core::option::Option::Some(trampoline),
+                    $crate::shm::config_layout::<M>(),
+                )
             }
         };
     };

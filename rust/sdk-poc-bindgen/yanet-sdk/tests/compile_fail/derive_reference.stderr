@@ -1,0 +1,32 @@
+error[E0277]: the trait bound `&'static u64: ShmLayout` is not satisfied
+ --> tests/compile_fail/derive_reference.rs:9:12
+  |
+9 |     value: &'static u64,
+  |            ^^^^^^^^^^^^ the trait `ShmLayout` is not implemented for `&'static u64`
+  |
+note: required by a bound in `_::{closure#0}::field_is_shm_layout`
+ --> tests/compile_fail/derive_reference.rs:5:10
+  |
+5 | #[derive(yanet_sdk::ShmLayout)]
+  |          ^^^^^^^^^^^^^^^^^^^^ required by this bound in `field_is_shm_layout`
+...
+9 |     value: &'static u64,
+  |            - required by a bound in this function
+  = note: this error originates in the derive macro `yanet_sdk::ShmLayout` (in Nightly builds, run with -Z macro-backtrace for more info)
+help: consider removing the leading `&`-reference
+  |
+9 -     value: &'static u64,
+9 +     value: u64,
+  |
+
+error[E0277]: the trait bound `&'static u64: ShmLayout` is not satisfied
+ --> tests/compile_fail/derive_reference.rs:9:12
+  |
+9 |     value: &'static u64,
+  |            ^^^^^^^^^^^^ the trait `ShmLayout` is not implemented for `&'static u64`
+  |
+help: consider removing the leading `&`-reference
+  |
+9 -     value: &'static u64,
+9 +     value: u64,
+  |

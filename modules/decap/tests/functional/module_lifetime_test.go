@@ -26,6 +26,7 @@ func newLifetimeHarness(t *testing.T) *dataplaneut.Harness {
 		WorkerCount:   1,
 		Devices:       []string{"port0"},
 		Modules:       []string{"decap"},
+		PluginDir:     decapPluginDir,
 		DevicesToLoad: []string{"plain"},
 	})
 	require.NoError(t, err)

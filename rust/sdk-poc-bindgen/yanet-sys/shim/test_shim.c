@@ -94,6 +94,11 @@ yanet_sys_test_lpm_insert(
 	return lpm_insert(lpm, key_size, from, to, value);
 }
 
+void
+yanet_sys_test_lpm_free(struct lpm *lpm) {
+	lpm_free(lpm);
+}
+
 uint32_t
 yanet_sys_test_lpm_lookup(
 	const struct lpm *lpm, uint8_t key_size, const uint8_t *key

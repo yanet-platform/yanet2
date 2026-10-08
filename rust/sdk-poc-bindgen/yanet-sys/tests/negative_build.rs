@@ -11,8 +11,7 @@ use std::{
     process::Command,
 };
 
-// Dev-dependencies and the library are visible to every test target.
-use trybuild as _;
+// The library is visible to every test target.
 use yanet_sys as _;
 
 fn copy_dir(from: &Path, to: &Path) {
@@ -49,7 +48,6 @@ impl Scratch {
         for file in ["Cargo.toml", "build.rs"] {
             fs::copy(crate_dir.join(file), sys.join(file)).unwrap();
         }
-        copy_dir(&poc.join(".cargo"), &work.join(".cargo"));
         fs::copy(poc.join("Cargo.lock"), work.join("Cargo.lock")).unwrap();
         let manifest = fs::read_to_string(poc.join("Cargo.toml")).unwrap();
         let manifest = manifest
@@ -109,7 +107,7 @@ fn test_layout_build_fails_on_bad_classification() {
         ),
         (
             "unclassified embedded aggregate carrying pointers",
-            "        opaque memory_context,\n",
+            "        opaque memory_context: Opaque<bindings::memory_context>,\n",
             "",
             "pointer-carrying field `lpm.memory_context` is not classified",
         ),

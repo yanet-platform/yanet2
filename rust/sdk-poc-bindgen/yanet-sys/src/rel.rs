@@ -196,7 +196,7 @@ impl MapResolver<'_> {
     }
 
     /// Pointer with root provenance at an absolute address of the mapping.
-    pub(crate) fn at<T>(self, addr: usize) -> NonNull<T> {
+    pub fn at<T>(self, addr: usize) -> NonNull<T> {
         debug_assert!(addr != 0, "absolute address is NULL");
         // SAFETY: a non-zero address keeps the pointer non-null.
         unsafe { NonNull::new_unchecked(self.root.as_ptr().with_addr(addr).cast()) }

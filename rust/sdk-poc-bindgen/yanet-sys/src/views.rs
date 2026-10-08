@@ -9,6 +9,7 @@
 use crate::{
     bindings,
     rel::{RelPtr, RelRef},
+    shm::Opaque,
 };
 
 /// Bytes Rust never reads, used as the target of classified but unused
@@ -23,13 +24,13 @@ pub struct COpaque {
 pub type LpmChunk = [LpmPage; bindings::LPM_CHUNK_SIZE as usize];
 
 crate::layout::layout! {
-    /// LPM header: the page directory and the page count.
+    /// Mirror of the C LPM header.
     ///
-    /// The embedded memory context stays opaque: its sibling link may be
+    /// The embedded memory context is opaque: its sibling link may be
     /// rewritten after publish when another context under the same parent
-    /// is finalised, so no reference ever covers it.
-    frozen Lpm = lpm {
-        opaque memory_context,
+    /// is finalised.
+    mirror LpmRaw = lpm {
+        opaque memory_context: Opaque<bindings::memory_context>,
         rel pages: RelPtr<RelRef<LpmChunk>>,
         plain page_count: usize,
     }
@@ -44,17 +45,6 @@ crate::layout::layout! {
     mirror_union LpmValue = lpm_value {
         rel page: RelPtr<LpmPage>,
         plain value: u64,
-    }
-
-    /// Configuration of the decap module: the C module header followed by
-    /// the IPv4 and IPv6 prefix sets.
-    ///
-    /// The header carries registry state the control plane mutates under
-    /// its lock while workers run this configuration, so it stays opaque.
-    frozen DecapConfig = decap_module_config {
-        opaque cp_module,
-        embed prefixes4: Lpm<'g, R>,
-        embed prefixes6: Lpm<'g, R>,
     }
 
     /// Module execution context, frozen once handed to the worker.

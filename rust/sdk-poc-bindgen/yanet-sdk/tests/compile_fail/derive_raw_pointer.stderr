@@ -1,0 +1,45 @@
+error[E0277]: the trait bound `*const u64: ShmLayout` is not satisfied
+ --> tests/compile_fail/derive_raw_pointer.rs:9:12
+  |
+9 |     value: *const u64,
+  |            ^^^^^^^^^^ the trait `ShmLayout` is not implemented for `*const u64`
+  |
+help: the trait `ShmLayout` is implemented for `u64`
+ --> $WORKSPACE/yanet-sys/src/shm.rs
+  |
+  |           unsafe impl ShmLayout for $ty {
+  |           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+  | / primitive! {
+  | |     u8 => 1, u16 => 2, u32 => 4, u64 => 8, usize => 9,
+  | |     i8 => 0x81, i16 => 0x82, i32 => 0x84, i64 => 0x88, isize => 0x89,
+  | | }
+  | |_- in this macro invocation
+note: required by a bound in `_::{closure#0}::field_is_shm_layout`
+ --> tests/compile_fail/derive_raw_pointer.rs:5:10
+  |
+5 | #[derive(yanet_sdk::ShmLayout)]
+  |          ^^^^^^^^^^^^^^^^^^^^ required by this bound in `field_is_shm_layout`
+...
+9 |     value: *const u64,
+  |            - required by a bound in this function
+  = note: this error originates in the macro `primitive` which comes from the expansion of the derive macro `yanet_sdk::ShmLayout` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0277]: the trait bound `*const u64: ShmLayout` is not satisfied
+ --> tests/compile_fail/derive_raw_pointer.rs:9:12
+  |
+9 |     value: *const u64,
+  |            ^^^^^^^^^^ the trait `ShmLayout` is not implemented for `*const u64`
+  |
+help: the trait `ShmLayout` is implemented for `u64`
+ --> $WORKSPACE/yanet-sys/src/shm.rs
+  |
+  |           unsafe impl ShmLayout for $ty {
+  |           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+  | / primitive! {
+  | |     u8 => 1, u16 => 2, u32 => 4, u64 => 8, usize => 9,
+  | |     i8 => 0x81, i16 => 0x82, i32 => 0x84, i64 => 0x88, isize => 0x89,
+  | | }
+  | |_- in this macro invocation
+  = note: this error originates in the macro `primitive` (in Nightly builds, run with -Z macro-backtrace for more info)

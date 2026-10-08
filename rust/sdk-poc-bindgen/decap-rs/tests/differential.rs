@@ -1,8 +1,7 @@
 //! Differential test: the Rust decap module against the unmodified C decap
 //! module, on the same C-built configuration and C-parsed packets.
 
-// Links the Rust module whose exported constructor is declared below.
-use decap_dp as _;
+use decap_dp::Decap;
 use decap_oracle::{OraclePacket, c_handle};
 use yanet_sdk as _;
 use yanet_sys::{bindings, testing::TestArena};
@@ -213,36 +212,75 @@ fn cases() -> Vec<(&'static str, Vec<u8>)> {
     ]
 }
 
-/// Decap configuration and execution context inside one C test arena.
+/// Decap configurations and execution contexts inside one C test arena:
+/// the C layout for the C module, the SDK layout for the Rust module, both
+/// with identical LPMs built by the C insert.
 struct Setup {
     _arena: TestArena,
-    ectx: *mut bindings::module_ectx,
+    /// Context of the C module over the C-layout configuration.
+    c_ectx: *mut bindings::module_ectx,
+    /// Context of the Rust module over the SDK-layout configuration.
+    rust_ectx: *mut bindings::module_ectx,
+}
+
+/// Inclusive `[from, to]` key ranges of one address family.
+type Ranges<const K: usize> = Vec<([u8; K], [u8; K])>;
+
+/// Inclusive ranges of the test configuration, IPv4 then IPv6.
+fn ranges() -> (Ranges<4>, Ranges<16>) {
+    let mut from = [0u8; 16];
+    from[..4].copy_from_slice(&IN6);
+    let mut to = [0xffu8; 16];
+    to[..4].copy_from_slice(&IN6);
+    (
+        vec![([10, 0, 0, 0], [10, 255, 255, 255]), ([192, 0, 2, 0], [192, 0, 2, 255])],
+        vec![(from, to)],
+    )
+}
+
+/// Zeroed execution context naming `config`.
+fn ectx(arena: &TestArena, config: *mut u8) -> *mut bindings::module_ectx {
+    let ectx = arena
+        .alloc(size_of::<bindings::module_ectx>())
+        .cast::<bindings::module_ectx>();
+    // SAFETY: the zeroed context lives in the arena; the module header is
+    // the first field of either configuration layout.
+    unsafe { (*ectx).abs_cp_module = config.cast() };
+    ectx
 }
 
 impl Setup {
     fn new() -> Self {
-        let arena = TestArena::new(4 << 20);
-        let config = arena
-            .alloc(size_of::<bindings::decap_module_config>())
-            .cast::<bindings::decap_module_config>();
-        // SAFETY: the zeroed configuration block lives in the arena.
-        let (v4, v6) = unsafe { (&raw mut (*config).prefixes4, &raw mut (*config).prefixes6) };
-        // SAFETY: both LPMs are unused fields of an arena block.
-        let (mut v4, mut v6) = unsafe { (arena.init_lpm(v4), arena.init_lpm(v6)) };
-        v4.insert(&[10, 0, 0, 0], &[10, 255, 255, 255], 1);
-        v4.insert(&[192, 0, 2, 0], &[192, 0, 2, 255], 1);
-        let mut from = [0u8; 16];
-        from[..4].copy_from_slice(&IN6);
-        let mut to = [0xffu8; 16];
-        to[..4].copy_from_slice(&IN6);
-        v6.insert(&from, &to, 1);
-        let ectx = arena
-            .alloc(size_of::<bindings::module_ectx>())
-            .cast::<bindings::module_ectx>();
-        // SAFETY: the zeroed context lives in the arena; the module header
-        // is the first field of the configuration.
-        unsafe { (*ectx).abs_cp_module = config.cast() };
-        Self { _arena: arena, ectx }
+        let arena = TestArena::new(8 << 20);
+        let (v4_ranges, v6_ranges) = ranges();
+
+        let config = arena.alloc(size_of::<bindings::decap_module_config>());
+        let c_config = config.cast::<bindings::decap_module_config>();
+        // SAFETY: both LPMs are unused fields of a zeroed arena block.
+        let (mut v4, mut v6) = unsafe {
+            (
+                arena.init_lpm(&raw mut (*c_config).prefixes4),
+                arena.init_lpm(&raw mut (*c_config).prefixes6),
+            )
+        };
+        for (from, to) in &v4_ranges {
+            v4.insert(from, to, 1);
+        }
+        for (from, to) in &v6_ranges {
+            v6.insert(from, to, 1);
+        }
+
+        let mut rust = arena.build::<Decap>("decap0").expect("SDK config");
+        for (from, to) in &v4_ranges {
+            rust.insert(|c| &c.prefixes4, from, to, 1).unwrap();
+        }
+        for (from, to) in &v6_ranges {
+            rust.insert(|c| &c.prefixes6, from, to, 1).unwrap();
+        }
+        let rust_config = rust.finish().expect("validated SDK config").as_ptr().cast::<u8>();
+
+        let (c_ectx, rust_ectx) = (ectx(&arena, config), ectx(&arena, rust_config));
+        Self { _arena: arena, c_ectx, rust_ectx }
     }
 }
 
@@ -335,8 +373,8 @@ fn run_both(setup: &Setup, frames: &[Vec<u8>]) -> Option<(Vec<Outcome>, Vec<Outc
     let mut c_front = front(&c_packets.iter().collect::<Vec<_>>());
     let mut rust_front = front(&rust_packets.iter().collect::<Vec<_>>());
     // SAFETY: arena-backed context and test-owned fronts.
-    unsafe { c_handle(setup.ectx, &mut *c_front) };
-    rust_handle(setup.ectx, &mut *rust_front);
+    unsafe { c_handle(setup.c_ectx, &mut *c_front) };
+    rust_handle(setup.rust_ectx, &mut *rust_front);
     assert_eq!(counters(&c_front), counters(&rust_front), "front counters");
     let order = |front: &bindings::packet_front, packets: &[OraclePacket]| {
         let index = |p: &*mut bindings::packet| packets.iter().position(|q| q.raw() == *p).unwrap();
@@ -391,6 +429,35 @@ fn test_decap_verdicts_per_case() {
         assert_eq!(output, rust[0].output, "{name}: verdict");
         assert_eq!(decapsulated, rust[0].data.len() < frame.len(), "{name}: decapsulated");
     }
+}
+
+/// Verifies that the descriptor declares the configuration layout the
+/// control-plane api names, and only the packet handler.
+#[test]
+fn test_descriptor_declares_config_layout() {
+    // SAFETY: the exported constructor returns a malloc'd descriptor.
+    unsafe {
+        let module = new_module_decap();
+        assert_eq!(yanet_sys::shm::config_layout::<Decap>(), (*module).config_layout);
+        assert_ne!(0, (*module).config_layout);
+        assert!((*module).handler.is_some());
+        assert!((*module).commit_ectx_handler.is_none());
+        assert_eq!(0, (*module).prepared_size);
+        free(module.cast());
+    }
+}
+
+/// Verifies that the Rust module drops every packet of a context without
+/// a configuration.
+#[test]
+fn test_decap_drops_without_config() {
+    let setup = Setup::new();
+    let frames: Vec<_> = cases().into_iter().map(|(_, f)| f).collect();
+    let packets: Vec<_> = frames.iter().map(|f| OraclePacket::new(f).unwrap()).collect();
+    let mut raw = front(&packets.iter().collect::<Vec<_>>());
+    rust_handle(ectx(&setup._arena, core::ptr::null_mut()), &mut *raw);
+    assert!(members(&raw.output).is_empty());
+    assert_eq!(frames.len() as u64, raw.drop_count);
 }
 
 /// Verifies that the IPv6 flow label of a decapsulated packet is recorded.

@@ -131,6 +131,3 @@ fn test_packet_data_is_first_segment() {
     assert_eq!(0xabcde, packet.flow_label());
     front.output(packet);
 }
-
-// The compile-fail suite's dependency is visible to every test target.
-use trybuild as _;

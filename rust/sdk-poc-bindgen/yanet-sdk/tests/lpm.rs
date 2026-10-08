@@ -5,12 +5,19 @@
 //! Behavior; they are ignored by default and run one by one by
 //! `scripts/miri.sh`, which asserts the failure.
 
-use yanet_sdk::lpm::{LPM_VALUE_INVALID, lookup};
+use yanet_sdk::{
+    Lpm, Shm, ShmLayout,
+    lpm::{LPM_VALUE_INVALID, lookup},
+};
 use yanet_sys::{
     bindings,
     rel::Resolver,
-    testing::{Fixture, TestArena},
+    shm::Validator,
+    testing::{CLpm, Fixture, TestArena},
 };
+
+/// Offset of the relative page directory in the LPM header.
+const LPM_PAGES: usize = core::mem::offset_of!(bindings::lpm, pages);
 
 const LPM4: &[u8] = include_bytes!("fixtures/lpm4.bin");
 const LPM6: &[u8] = include_bytes!("fixtures/lpm6.bin");
@@ -133,16 +140,17 @@ fn test_lpm_fixtures_match_c_builder() {
     }
 }
 
-fn check_cases<'g, R: Resolver<'g>>(fixture: &Fixture, lpm: &yanet_sdk::lpm::Lpm<'g, R>) {
-    let key_size = usize::from(fixture.key_size);
+fn check_cases<'g, const K: usize, R: Resolver<'g>>(fixture: &Fixture, lpm: Shm<'g, Lpm<K>, R>) {
+    assert_eq!(K, usize::from(fixture.key_size));
     for (key, expected) in &fixture.cases {
-        assert_eq!(
-            *expected,
-            lookup(lpm, &key[..key_size]),
-            "key {:02x?}",
-            &key[..key_size]
-        );
+        let key: &[u8; K] = key[..K].try_into().unwrap();
+        assert_eq!(*expected, lookup(lpm, key), "key {key:02x?}");
     }
+}
+
+/// Key of `K` bytes from the front of a 16-byte buffer.
+fn key_of<const K: usize>(bytes: &[u8; 16]) -> &[u8; K] {
+    bytes[..K].try_into().unwrap()
 }
 
 #[test]
@@ -150,7 +158,7 @@ fn test_lookup_mapping_resolver_matches_c_fixture_v4() {
     let fixture = Fixture::decode(LPM4);
     let (image, root) = fixture.mapping();
     // SAFETY: the fixture is a C-built LPM.
-    check_cases(&fixture, &unsafe { image.lpm(root) });
+    check_cases(&fixture, unsafe { image.lpm::<4>(root) });
 }
 
 #[test]
@@ -158,7 +166,7 @@ fn test_lookup_mapping_resolver_matches_c_fixture_v6() {
     let fixture = Fixture::decode(LPM6);
     let (image, root) = fixture.mapping();
     // SAFETY: the fixture is a C-built LPM.
-    check_cases(&fixture, &unsafe { image.lpm(root) });
+    check_cases(&fixture, unsafe { image.lpm::<16>(root) });
 }
 
 /// Verifies that an image copied to a new address, with the original freed,
@@ -166,45 +174,61 @@ fn test_lookup_mapping_resolver_matches_c_fixture_v6() {
 /// the new root.
 #[test]
 fn test_lookup_after_remap_and_free_of_original() {
-    for bytes in [LPM4, LPM6] {
-        let fixture = Fixture::decode(bytes);
-        let (image, root) = fixture.mapping();
-        // SAFETY: the fixture is a C-built LPM.
-        check_cases(&fixture, &unsafe { image.lpm(root) });
-        let moved = image.relocate();
-        drop(image);
-        // SAFETY: a byte copy of a C-built LPM.
-        check_cases(&fixture, &unsafe { moved.lpm(root) });
-    }
+    remap_case::<4>(LPM4);
+    remap_case::<16>(LPM6);
+}
+
+fn remap_case<const K: usize>(bytes: &[u8]) {
+    let fixture = Fixture::decode(bytes);
+    let (image, root) = fixture.mapping();
+    // SAFETY: the fixture is a C-built LPM.
+    check_cases(&fixture, unsafe { image.lpm::<K>(root) });
+    let moved = image.relocate();
+    drop(image);
+    // SAFETY: a byte copy of a C-built LPM.
+    check_cases(&fixture, unsafe { moved.lpm::<K>(root) });
 }
 
 /// Verifies that resolution through per-block allocations finds every
 /// target inside its own block: no pointer crosses a block boundary.
 #[test]
 fn test_lookup_block_resolver_matches_c_fixture() {
-    for bytes in [LPM4, LPM6] {
-        let fixture = Fixture::decode(bytes);
-        let image = fixture.block_image();
-        // SAFETY: the fixture is a C-built LPM.
-        check_cases(&fixture, &unsafe { image.lpm(fixture.root) });
-    }
+    block_case::<4>(LPM4);
+    block_case::<16>(LPM6);
 }
 
-/// Verifies that the view tolerates C rewriting the embedded memory
-/// context after publish, the sibling-link bridge of another context's
-/// teardown: no Rust reference covers those bytes.
+fn block_case<const K: usize>(bytes: &[u8]) {
+    let fixture = Fixture::decode(bytes);
+    let image = fixture.block_image();
+    // SAFETY: the fixture is a C-built LPM.
+    check_cases(&fixture, unsafe { image.lpm::<K>(fixture.root) });
+}
+
+/// Verifies that a reference to the whole LPM, held across a call during
+/// which C rewrites the embedded memory context (the sibling-link bridge of
+/// another context's teardown), stays valid: those bytes are opaque.
 #[test]
-fn test_lookup_survives_c_write_to_embedded_memory_context() {
+fn test_lookup_survives_c_write_with_opaque_reference() {
     let fixture = Fixture::decode(LPM4);
     let (image, root) = fixture.mapping();
     // SAFETY: the fixture is a C-built LPM.
-    let lpm = unsafe { image.lpm(root) };
-    check_cases(&fixture, &lpm);
+    let lpm = unsafe { image.lpm::<4>(root) };
+    check_cases(&fixture, lpm);
     let sibling = core::mem::offset_of!(bindings::memory_context, next_sibling);
-    // SAFETY: in bounds of the image; models the C bridge write through the
-    // mapping, not through any Rust reference.
-    unsafe { image.ptr_at(root + sibling).cast::<isize>().write(0x40) };
-    check_cases(&fixture, &lpm);
+    let count = page_count_across_opaque(lpm.get(), || {
+        // SAFETY: in bounds of the image; models the C bridge write through
+        // the mapping, not through any Rust reference.
+        unsafe { image.ptr_at(root + sibling).cast::<isize>().write(0x40) };
+    });
+    assert_ne!(0, count);
+    check_cases(&fixture, lpm);
+}
+
+/// Reads the page count through a whole-LPM reference while `meanwhile`
+/// runs; the reference is a protected function argument for the call.
+fn page_count_across_opaque(lpm: &Lpm<4>, meanwhile: impl FnOnce()) -> usize {
+    meanwhile();
+    lpm.page_count()
 }
 
 /// Reads the page count through a whole-header reference while `meanwhile`
@@ -240,9 +264,15 @@ fn test_ub_stacked_slot_reference_provenance() {
     let fixture = Fixture::decode(LPM4);
     let (image, root) = fixture.mapping();
     // SAFETY: the fixture is a C-built LPM.
-    let lpm = unsafe { image.lpm(root) };
-    let slot = lpm.pages();
-    let directory = core::ptr::from_ref(slot).cast::<u8>().wrapping_offset(slot.offset());
+    let lpm = unsafe { image.lpm::<4>(root) };
+    // SAFETY: a reference over the header's directory slot only.
+    let slot: &isize = unsafe {
+        &*core::ptr::from_ref(lpm.get())
+            .cast::<u8>()
+            .add(LPM_PAGES)
+            .cast::<isize>()
+    };
+    let directory = core::ptr::from_ref(slot).cast::<u8>().wrapping_offset(*slot);
     // SAFETY: deliberately wrong: the pointer only carries the 8-byte slot
     // reference's permissions, yet reads the chunk directory elsewhere.
     let first_chunk = unsafe { directory.cast::<isize>().read() };
@@ -259,7 +289,7 @@ fn test_ub_block_resolver_freed_chunk() {
     // SAFETY: deliberately frees a block the graph still points at.
     unsafe { image.free_block(chunk) };
     // SAFETY: deliberately broken graph; the test expects the failure.
-    check_cases(&fixture, &unsafe { image.lpm(fixture.root) });
+    check_cases(&fixture, unsafe { image.lpm::<4>(fixture.root) });
 }
 
 /// Expected UB: a chunk pointer redirected to the tail of another block, so
@@ -275,7 +305,7 @@ fn test_ub_block_resolver_cross_block_overrun() {
     let target = header + header_bytes.len() - 8;
     image.poke(*directory, target as isize - *directory as isize);
     // SAFETY: deliberately broken graph; the test expects the failure.
-    check_cases(&fixture, &unsafe { image.lpm(fixture.root) });
+    check_cases(&fixture, unsafe { image.lpm::<4>(fixture.root) });
 }
 
 /// Verifies that a target outside every block is refused by the block
@@ -288,7 +318,92 @@ fn test_block_resolver_refuses_target_outside_blocks() {
     let (directory, _) = &fixture.blocks[1];
     image.poke(*directory, -0x10_0000);
     // SAFETY: deliberately broken graph; the test expects the failure.
-    check_cases(&fixture, &unsafe { image.lpm(fixture.root) });
+    check_cases(&fixture, unsafe { image.lpm::<4>(fixture.root) });
+}
+
+/// Validates the LPM at `offset` of an image.
+fn validate<const K: usize>(image: &yanet_sys::testing::MappedImage, offset: usize) -> Result<(), String> {
+    let validator = Validator::new(image);
+    <Lpm<K> as ShmLayout>::validate(&validator, image.addr_of(offset)).map_err(|err| err.reason)
+}
+
+/// Verifies that both C-built fixtures pass validation, before and after
+/// relocation.
+#[test]
+fn test_validate_accepts_c_built_fixtures() {
+    let fixture = Fixture::decode(LPM4);
+    let (image, root) = fixture.mapping();
+    assert_eq!(Ok(()), validate::<4>(&image, root));
+    assert_eq!(Ok(()), validate::<4>(&image.relocate(), root));
+    let fixture = Fixture::decode(LPM6);
+    let (image, root) = fixture.mapping();
+    assert_eq!(Ok(()), validate::<16>(&image, root));
+}
+
+/// Offset of the first slot of the root page whose raw value satisfies
+/// `pick`, found through the validated fixture.
+fn find_slot(image: &yanet_sys::testing::MappedImage, root: usize, pick: impl Fn(u64) -> bool) -> usize {
+    use yanet_sys::shm::ShmRead;
+    let base = image.addr_of(0);
+    let slot = image.addr_of(root + LPM_PAGES);
+    let directory = slot.wrapping_add_signed(image.read_u64(slot).unwrap() as isize);
+    let chunk = directory.wrapping_add_signed(image.read_u64(directory).unwrap() as isize);
+    (0..256)
+        .map(|idx| chunk + idx * 8)
+        .find(|addr| pick(image.read_u64(*addr).unwrap()))
+        .expect("no matching slot")
+        - base
+}
+
+/// Verifies that corrupt LPM graphs are rejected by validation without any
+/// out-of-image access, each for the invariant it breaks.
+#[test]
+fn test_validate_rejects_corrupt_graphs() {
+    let fixture = Fixture::decode(LPM4);
+    let page_count = core::mem::offset_of!(bindings::lpm, page_count);
+    let (probe, root) = fixture.mapping();
+    let child = find_slot(&probe, root, |raw| raw & 1 == 0);
+    let leaf = find_slot(&probe, root, |raw| raw & 1 == 1);
+    let child_raw = {
+        use yanet_sys::shm::ShmRead;
+        probe.read_u64(probe.addr_of(child)).unwrap()
+    };
+    let cases: [(&str, usize, u64, &str); 5] = [
+        ("zero page count", root + page_count, 0, "page count is out of range"),
+        (
+            "huge page count",
+            root + page_count,
+            1 << 40,
+            "page count is out of range",
+        ),
+        (
+            "directory outside the image",
+            root + LPM_PAGES,
+            1 << 40,
+            "outside the owner's memory",
+        ),
+        ("child not a page start", child, child_raw + 8, "not a page of this LPM"),
+        (
+            "leaf value out of range",
+            leaf,
+            (1 << 40) | 1,
+            "leaf value is out of range",
+        ),
+    ];
+    for (name, offset, value, expected) in cases {
+        let (mut image, root) = fixture.mapping();
+        image.write(offset, &value.to_le_bytes());
+        let err = validate::<4>(&image, root).expect_err(name);
+        assert!(err.contains(expected), "{name}: {err}");
+    }
+}
+
+/// Rust lookup of a key of the C LPM's key size.
+fn lookup_any(lpm: &CLpm<'_>, key_size: usize, bytes: &[u8; 16]) -> u32 {
+    match key_size {
+        4 => lookup(lpm.view::<4>(), key_of::<4>(bytes)),
+        _ => lookup(lpm.view::<16>(), key_of::<16>(bytes)),
+    }
 }
 
 /// Random prefixes of the given key size: (from, to, value).
@@ -337,21 +452,28 @@ fn test_lookup_differential_against_c() {
         let hits = expected.iter().filter(|v| **v != LPM_VALUE_INVALID).count();
         assert!(hits > keys.len() / 3, "too few hits: {hits}");
 
-        let view = lpm.view();
         for (key, value) in keys.iter().zip(&expected) {
-            assert_eq!(*value, lookup(&view, &key[..key_size]));
+            assert_eq!(*value, lookup_any(&lpm, key_size, key));
         }
 
         let offset = arena.offset_of(lpm.raw().cast());
         let image = arena.copy_image();
         drop(arena);
         // SAFETY: a byte copy of the C-built LPM.
-        let moved = unsafe { image.lpm(offset) };
         for (key, value) in keys.iter().zip(&expected) {
-            assert_eq!(*value, lookup(&moved, &key[..key_size]));
+            // SAFETY: a byte copy of the C-built LPM.
+            let moved = match key_size {
+                4 => lookup(unsafe { image.lpm::<4>(offset) }, key_of::<4>(key)),
+                _ => lookup(unsafe { image.lpm::<16>(offset) }, key_of::<16>(key)),
+            };
+            assert_eq!(*value, moved);
             // SAFETY: the copy holds the C-built LPM at the same offset.
             let c_moved = unsafe { image.c_lpm_lookup(offset, &key[..key_size]) };
             assert_eq!(*value, c_moved);
         }
     }
 }
+
+// The derive is a dependency of the library, visible to every test target.
+use trybuild as _;
+use yanet_sdk_derive as _;

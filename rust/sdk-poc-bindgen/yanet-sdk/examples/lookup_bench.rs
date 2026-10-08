@@ -4,13 +4,21 @@
 use std::time::Instant;
 
 use yanet_sdk::lpm::lookup;
-use yanet_sys::testing::TestArena;
+use yanet_sys::testing::{CLpm, TestArena};
 
 fn xorshift(state: &mut u64) -> u64 {
     *state ^= *state << 13;
     *state ^= *state >> 7;
     *state ^= *state << 17;
     *state
+}
+
+/// Rust lookups of consecutive `K`-byte keys.
+fn rust_loop<const K: usize>(lpm: &CLpm<'_>, keys: &[u8], results: &mut [u32]) {
+    let view = lpm.view::<K>();
+    for (key, result) in keys.as_chunks::<K>().0.iter().zip(results.iter_mut()) {
+        *result = lookup(view, key);
+    }
 }
 
 fn main() {
@@ -59,13 +67,13 @@ fn main() {
             lpm.lookup_many(key_size, &keys, &mut c_results);
             best_c = best_c.min(start.elapsed().as_secs_f64());
         }
-        let view = lpm.view();
         let mut rust_results = vec![0u32; KEYS];
         let mut best_rust = f64::MAX;
         for _ in 0..ROUNDS {
             let start = Instant::now();
-            for (key, result) in keys.chunks_exact(key_size).zip(rust_results.iter_mut()) {
-                *result = lookup(&view, key);
+            match key_size {
+                4 => rust_loop::<4>(&lpm, &keys, &mut rust_results),
+                _ => rust_loop::<16>(&lpm, &keys, &mut rust_results),
             }
             best_rust = best_rust.min(start.elapsed().as_secs_f64());
         }
@@ -78,3 +86,7 @@ fn main() {
         );
     }
 }
+
+// The derive is a dependency of the library, visible to every example.
+use trybuild as _;
+use yanet_sdk_derive as _;

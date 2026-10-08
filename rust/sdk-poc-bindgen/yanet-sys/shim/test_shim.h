@@ -47,6 +47,10 @@ yanet_sys_test_lpm_insert(
 	uint32_t value
 );
 
+// Releases every block of an initialised LPM.
+void
+yanet_sys_test_lpm_free(struct lpm *lpm);
+
 uint32_t
 yanet_sys_test_lpm_lookup(
 	const struct lpm *lpm, uint8_t key_size, const uint8_t *key

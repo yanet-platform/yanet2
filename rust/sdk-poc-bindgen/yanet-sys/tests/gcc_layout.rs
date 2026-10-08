@@ -29,6 +29,3 @@ fn test_gcc_layout_covers_declared_aggregates() {
         );
     }
 }
-
-// The compile-fail suite's dependency is visible to every test target.
-use trybuild as _;

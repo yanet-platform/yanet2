@@ -1,0 +1,11 @@
+error: no rules expected `{`
+  --> tests/compile_fail/register_module_block_handler.rs:23:14
+   |
+23 |     handler: { |_front, _config| {} },
+   |              ^ no rules expected this token in macro call
+   |
+note: while trying to match meta-variable `$handler:ident`
+  --> $WORKSPACE/yanet-sys/src/module.rs
+   |
+   |         handler: $($handler:ident)::+ $(,)?
+   |                    ^^^^^^^^^^^^^^

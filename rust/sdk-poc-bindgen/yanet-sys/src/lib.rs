@@ -31,16 +31,19 @@ pub mod layout_probe {
     include!(concat!(env!("OUT_DIR"), "/rust_layout.rs"));
 }
 
+#[cfg(any(feature = "cp", feature = "testing"))]
+pub mod builder;
+#[cfg(feature = "cp")]
+pub mod cp;
 pub mod layout;
 pub mod lpm;
+#[cfg(feature = "dp")]
 pub mod module;
+#[cfg(feature = "dp")]
 pub mod packet;
 pub mod rel;
+pub mod shm;
 #[cfg(feature = "testing")]
 #[doc(hidden)]
 pub mod testing;
 pub mod views;
-
-// The compile-fail suite's dependency is visible to the unit tests.
-#[cfg(test)]
-use trybuild as _;

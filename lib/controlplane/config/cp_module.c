@@ -18,6 +18,20 @@ cp_module_init(
 	const char *module_name,
 	yanet_error **err
 ) {
+	return cp_module_init_layout(
+		cp_module, agent, module_type, module_name, 0, err
+	);
+}
+
+int
+cp_module_init_layout(
+	struct cp_module *cp_module,
+	struct agent *agent,
+	const char *module_type,
+	const char *module_name,
+	uint64_t expected_layout,
+	yanet_error **err
+) {
 	memset(cp_module, 0, sizeof(struct cp_module));
 
 	struct dp_config *dp_config = ADDR_OF(&agent->dp_config);
@@ -29,6 +43,20 @@ cp_module_init(
 			err,
 			"module type '%s' not found in dataplane config",
 			module_type
+		);
+		return -1;
+	}
+
+	struct dp_module *dp_module =
+		ADDR_OF(&dp_config->dp_modules) + cp_module->dp_module_idx;
+	if (dp_module->config_layout != expected_layout) {
+		yanet_error_add(
+			err,
+			"module '%s' config layout mismatch: control plane "
+			"0x%016llx, dataplane 0x%016llx",
+			module_type,
+			(unsigned long long)expected_layout,
+			(unsigned long long)dp_module->config_layout
 		);
 		return -1;
 	}

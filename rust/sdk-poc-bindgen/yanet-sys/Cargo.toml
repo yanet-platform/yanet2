@@ -13,6 +13,11 @@ publish.workspace = true
 workspace = true
 
 [features]
+default = ["dp"]
+# Dataplane side: packet front, module export macro, C packet helpers.
+dp = []
+# Control-plane side: module allocation, LPM construction, arena reads.
+cp = []
 # Test support over C-built images; unsound to rely on outside tests.
 testing = []
 
@@ -22,5 +27,3 @@ cc = "1"
 serde_json = "1"
 syn = { version = "2", features = ["full", "visit"] }
 
-[dev-dependencies]
-trybuild = "1"

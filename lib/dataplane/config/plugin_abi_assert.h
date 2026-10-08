@@ -20,7 +20,7 @@
 #include "lib/dataplane/pipeline/econtext.h"
 
 _Static_assert(
-	sizeof(struct module) == 112,
+	sizeof(struct module) == 120,
 	"struct module size changed, bump YANET_MODULE_ABI_VERSION"
 );
 _Static_assert(

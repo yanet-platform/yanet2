@@ -7,6 +7,7 @@
 
 #include "common/lpm.h"
 #include "common/memory_address.h"
+#include "lib/controlplane/agent/agent.h"
 #include "lib/controlplane/config/cp_module.h"
 #include "lib/dataplane/module/module.h"
 #include "lib/dataplane/module/packet_front.h"
@@ -17,4 +18,5 @@
 
 #include <rte_mbuf_core.h>
 
+#include "cp_shim.h"
 #include "test_shim.h"
