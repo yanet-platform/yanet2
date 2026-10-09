@@ -2,10 +2,16 @@ use core::error::Error;
 use std::{env, path::PathBuf};
 
 fn main() -> Result<(), Box<dyn Error>> {
-    ync_build::client("../../..", &["modules/pdump/controlplane/pdumppb/v1/pdump.proto"])
-        .with(|builder| builder.protoc_arg("--experimental_allow_proto3_optional"))
-        .serialize()
-        .compile()?;
+    ync_build::client(
+        "../../..",
+        &[
+            "modules/pdump/controlplane/pdumppb/v1/pdump.proto",
+            "objects/ring/controlplane/ringpb/v1/ring.proto",
+        ],
+    )
+    .with(|builder| builder.protoc_arg("--experimental_allow_proto3_optional"))
+    .serialize()
+    .compile()?;
 
     let bindings = bindgen::Builder::default()
         .header("../dataplane/mode.h")

@@ -158,7 +158,7 @@ writer_write(struct writer_ctx *ctx) {
 		ctx->payload,
 		ctx->payload_len
 	);
-	ring_worker_commit(ctx->ring, ctx->data, total_len);
+	ring_worker_commit(ctx->ring, total_len);
 }
 
 // Write records back to back until the deadline, reading the clock once

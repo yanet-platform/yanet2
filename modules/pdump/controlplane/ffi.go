@@ -4,6 +4,7 @@ package pdump
 //#cgo LDFLAGS: -L../../../build/modules/pdump/api -lpdump_cp
 //#cgo LDFLAGS: -L../../../build/subprojects/libpcap -l:libpcap_static.a
 //
+//#include <stddef.h>
 //#include <stdlib.h>
 //#include "modules/pdump/api/controlplane.h"
 import "C"
@@ -32,6 +33,25 @@ var (
 	defaultMode uint32 = C.PDUMP_INPUT
 	maxMode     uint32 = C.PDUMP_ALL
 )
+
+// MinRingCapacity is the smallest ring capacity a pdump config may capture
+// into, so every record pdump writes fits the ring.
+//
+// It is PDUMP_MIN_RING_CAPACITY (modules/pdump/dataplane/record.h), read
+// through cgo.
+const MinRingCapacity = uint32(C.PDUMP_MIN_RING_CAPACITY)
+
+// pdumpRecordHdrSize is the size of the fixed metadata block a record
+// carries behind the ring's own frame.
+//
+// It mirrors struct pdump_record_hdr (modules/pdump/dataplane/record.h).
+const pdumpRecordHdrSize = uint32(C.sizeof_struct_pdump_record_hdr)
+
+// pdumpRecordMagic identifies a pdump record's metadata block. A reader
+// checks it before trusting the rest of the block.
+//
+// It mirrors PDUMP_RECORD_MAGIC (modules/pdump/dataplane/record.h).
+var pdumpRecordMagic = uint32(C.pdump_record_magic)
 
 //export pdumpGoControlplaneLog
 func pdumpGoControlplaneLog(level C.uint32_t, msg *C.char) {
@@ -203,35 +223,21 @@ func (m *ModuleConfig) SetSnapLen(snaplen uint32) error {
 	return nil
 }
 
-// SetupRings allocates a capture ring of the given size for every worker.
-func (m *ModuleConfig) SetupRings(size uint32) ([]Ring, error) {
-	var workerCount C.uint64_t
+// LinkRing records the ring this config captures into, by name.
+//
+// The dataplane resolves the link to a ring object when it next rebuilds
+// its execution contexts; whether a ring by this name exists is not
+// checked here. The caller establishes that order itself: the ring-service
+// lease is taken, and the name is known to resolve, before this link is
+// published.
+func (m *ModuleConfig) LinkRing(ringName string) error {
+	cName := C.CString(ringName)
+	defer C.free(unsafe.Pointer(cName))
 
-	errCtx := newErrorCallbackContext()
-	defer errCtx.Close()
-
-	addr, err := C.pdump_module_config_set_per_worker_ring(
-		m.asRawPtr(),
-		C.uint32_t(size),
-		&workerCount,
-		errCtx.Handle(),
-	)
-	if addr == nil {
-		err = errors.Join(fmt.Errorf("failed to allocate ring buffer"), err)
-		if reason := errCtx.Reason(); reason != "" {
-			err = errors.Join(err, fmt.Errorf("reason=%s", reason))
-		}
-		return nil, err
+	var cErr *C.yanet_error
+	rc := C.pdump_module_config_link_ring(m.asRawPtr(), cName, &cErr)
+	if rc != 0 {
+		return fmt.Errorf("failed to link ring %q: %w", ringName, cerrors.FromC(unsafe.Pointer(cErr)))
 	}
-	cRings := unsafe.Slice(addr, workerCount)
-	rings := make([]Ring, 0, len(cRings))
-	for idx := range cRings {
-		dataPtr := C.pdump_module_config_addr_of(&cRings[idx].data)
-		rings = append(rings, Ring{
-			WriteIdx:    (*uint64)(&(cRings[idx].write_idx)),
-			ReadableIdx: (*uint64)(&(cRings[idx].readable_idx)),
-			Data:        unsafe.Slice((*byte)(dataPtr), cRings[idx].size),
-		})
-	}
-	return rings, nil
+	return nil
 }

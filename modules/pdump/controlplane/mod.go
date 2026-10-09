@@ -65,12 +65,13 @@ func NewPdumpModule(cfg *Config, options ...Option) (*PdumpModule, error) {
 	}
 	agent := attachment.Agent
 
+	ringService := ring.NewRingService(agent, ring.WithLog(log))
+
 	service := NewPdumpService(
 		NewBackend(agent, WithBackendLog(log)),
+		newRingOwner(ringService),
 		WithPdumpServiceLog(log),
 	)
-
-	ringService := ring.NewRingService(agent, ring.WithLog(log))
 
 	return &PdumpModule{
 		cfg:         cfg,

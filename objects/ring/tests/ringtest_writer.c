@@ -118,6 +118,7 @@ ringtest_commit_record(
 	uint32_t payload_len
 ) {
 	uint32_t total_len = RING_RECORD_FRAME_SIZE + payload_len;
+	uint32_t seqno = ring->local.next_seqno;
 	if (ring_worker_prepare(ring, data, total_len) != 0) {
 		return -1;
 	}
@@ -126,7 +127,8 @@ ringtest_commit_record(
 			ring, data, RING_RECORD_FRAME_SIZE, payload, payload_len
 		);
 	}
-	return ring_worker_commit(ring, data, total_len);
+	ring_worker_commit(ring, total_len);
+	return seqno;
 }
 
 void
@@ -157,7 +159,7 @@ ringtest_stress_run(void *arg) {
 			(const uint8_t *)buf,
 			len
 		);
-		ring_worker_commit(s->ring, s->data, total);
+		ring_worker_commit(s->ring, total);
 	}
 	ring_worker_publish(s->ring);
 	atomic_store_explicit(&s->written, committed, memory_order_relaxed);

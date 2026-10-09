@@ -149,22 +149,23 @@ publish_checked(struct ring_worker *ring, const uint8_t *data) {
 	check_invariants(ring, data);
 }
 
-// A record that crosses the physical end of the ring keeps its payload.
+// A header that crosses the physical end of the ring keeps its fields.
 //
-// Every payload byte reads back unchanged after the wrap.
+// The prepare step writes the header in two pieces, and a reader that
+// copies it out gets the length and sequence number back whole.
 static int
-run_ring_wrap_roundtrip_test() {
+run_ring_wrap_splits_header_test() {
 	const uint32_t ring_size = 32;
 	uint8_t *data;
 	struct ring_worker ring = init_test_ring(ring_size, &data);
 	TEST_ASSERT_NOT_NULL(data, "failed to allocate ring data");
 
-	// Start 12 bytes before the end. The 8-byte frame fits before the
-	// end, and the payload wraps: [28,32) then [0,4).
-	ring_worker_set_positions(&ring, ring_size - 12, ring_size - 12);
-	check_invariants(&ring, data);
+	// Start 4 bytes before the end. The header takes [28,32) then [0,4),
+	// and the payload [4,8).
+	ring_worker_set_positions(&ring, ring_size - 4, ring_size - 4);
+	ring.local.next_seqno = 7;
 
-	const uint8_t payload[8] = {1, 2, 3, 4, 5, 6, 7, 8};
+	const uint8_t payload[4] = {1, 2, 3, 4};
 	uint32_t total_len = RING_RECORD_FRAME_SIZE + sizeof(payload);
 
 	TEST_ASSERT_EQUAL(
@@ -172,25 +173,25 @@ run_ring_wrap_roundtrip_test() {
 		0,
 		"prepare must succeed on an empty ring"
 	);
-	check_invariants(&ring, data);
 	ring_worker_write(
 		&ring, data, RING_RECORD_FRAME_SIZE, payload, sizeof(payload)
 	);
-	check_invariants(&ring, data);
-	ring_worker_commit(&ring, data, total_len);
-	check_invariants(&ring, data);
+	ring_worker_commit(&ring, total_len);
 	publish_checked(&ring, data);
 
-	uint8_t roundtrip[8];
-	for (size_t i = 0; i < sizeof(payload); ++i) {
-		uint64_t pos = (ring_size - 12 + RING_RECORD_FRAME_SIZE + i) &
-			       ring.local.mask;
-		roundtrip[i] = data[pos];
-	}
+	struct ring_record_frame frame = read_frame(&ring, data, ring_size - 4);
 	TEST_ASSERT_EQUAL(
-		memcmp(roundtrip, payload, sizeof(payload)),
+		(long)frame.total_len,
+		(long)total_len,
+		"the split header must keep the record length"
+	);
+	TEST_ASSERT_EQUAL(
+		(long)frame.seqno, 7L, "the split header must keep the seqno"
+	);
+	TEST_ASSERT_EQUAL(
+		memcmp(data + 4, payload, sizeof(payload)),
 		0,
-		"payload must round-trip unchanged across the physical wrap"
+		"the payload must follow the split header"
 	);
 
 	free(data);
@@ -222,7 +223,7 @@ commit_fixed_record(
 		ring, data, RING_RECORD_FRAME_SIZE, payload, payload_len
 	);
 	check_invariants(ring, data);
-	ring_worker_commit(ring, data, total_len);
+	ring_worker_commit(ring, total_len);
 	check_invariants(ring, data);
 }
 
@@ -434,6 +435,9 @@ run_ring_prepare_rejects_oversize_alignment_wraparound_test() {
 		"a record of exactly the batch limit must be accepted"
 	);
 	check_invariants(&ring, data);
+	uint32_t next_seqno = ring.local.next_seqno;
+	uint8_t snapshot[64];
+	memcpy(snapshot, data, ring_size);
 
 	uint32_t oversize_values[] = {batch_max + 1, 0xFFFFFFFD, 0xFFFFFFFF};
 	for (size_t i = 0;
@@ -466,8 +470,14 @@ run_ring_prepare_rejects_oversize_alignment_wraparound_test() {
 		);
 		TEST_ASSERT_EQUAL(
 			(long)ring.local.next_seqno,
-			0L,
+			(long)next_seqno,
 			"total_len %u must not touch next_seqno",
+			total_len
+		);
+		TEST_ASSERT_EQUAL(
+			memcmp(data, snapshot, ring_size),
+			0,
+			"total_len %u must not write the ring",
 			total_len
 		);
 	}
@@ -963,7 +973,33 @@ run_ring_full_batch_auto_publishes_test() {
 	return TEST_SUCCESS;
 }
 
-// The sequence counter of a worker starts at 0 and counts every commit.
+// Prepare and commit one empty record; return its sequence number.
+//
+// The number is read from the header right after the prepare step, before
+// the commit. It aborts if the ring refuses the record or the prepare step
+// does not write the header.
+static uint32_t
+commit_empty_record(struct ring_worker *ring, uint8_t *data) {
+	uint64_t pos = ring->local.write_idx & ring->local.mask;
+	if (ring_worker_prepare(ring, data, RING_RECORD_FRAME_SIZE) != 0) {
+		LOG(ERROR, "ring_worker_prepare of an empty record failed");
+		abort();
+	}
+	struct ring_record_frame frame;
+	memcpy(&frame, data + pos, sizeof(frame));
+	ring_worker_commit(ring, RING_RECORD_FRAME_SIZE);
+	if (frame.total_len != RING_RECORD_FRAME_SIZE) {
+		LOG(ERROR,
+		    "header length %u, want %u",
+		    frame.total_len,
+		    (uint32_t)RING_RECORD_FRAME_SIZE);
+		abort();
+	}
+	check_invariants(ring, data);
+	return frame.seqno;
+}
+
+// The sequence counter of a worker starts at 0 and counts every record.
 //
 // It wraps from UINT32_MAX to 0 without a gap.
 static int
@@ -973,12 +1009,8 @@ run_ring_seqno_wrap_test() {
 	struct ring_worker ring = init_test_ring(ring_size, &data);
 	TEST_ASSERT_NOT_NULL(data, "failed to allocate ring data");
 
-	uint32_t first =
-		ring_worker_commit(&ring, data, RING_RECORD_FRAME_SIZE);
-	check_invariants(&ring, data);
-	uint32_t second =
-		ring_worker_commit(&ring, data, RING_RECORD_FRAME_SIZE);
-	check_invariants(&ring, data);
+	uint32_t first = commit_empty_record(&ring, data);
+	uint32_t second = commit_empty_record(&ring, data);
 	TEST_ASSERT_EQUAL((long)first, 0L, "first commit must be seqno 0");
 	TEST_ASSERT_EQUAL(
 		(long)second, (long)first + 1, "commits must be contiguous"
@@ -986,17 +1018,14 @@ run_ring_seqno_wrap_test() {
 
 	ring.local.next_seqno = UINT32_MAX;
 
-	uint32_t seqno =
-		ring_worker_commit(&ring, data, RING_RECORD_FRAME_SIZE);
-	check_invariants(&ring, data);
+	uint32_t seqno = commit_empty_record(&ring, data);
 	TEST_ASSERT_EQUAL(
 		(long)seqno,
 		(long)UINT32_MAX,
 		"the last seqno before wrap must be used"
 	);
 
-	seqno = ring_worker_commit(&ring, data, RING_RECORD_FRAME_SIZE);
-	check_invariants(&ring, data);
+	seqno = commit_empty_record(&ring, data);
 	TEST_ASSERT_EQUAL((long)seqno, 0L, "seqno must wrap to 0 contiguously");
 
 	free(data);
@@ -1013,7 +1042,7 @@ main(void) {
 	};
 
 	struct test_case cases[] = {
-		{"wrap_roundtrip", run_ring_wrap_roundtrip_test},
+		{"wrap_splits_header", run_ring_wrap_splits_header_test},
 		{"overwrite_evicts_whole_records",
 		 run_ring_overwrite_evicts_whole_records_test},
 		{"eviction_corrupt_length_catches_up",
