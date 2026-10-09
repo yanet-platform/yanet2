@@ -1,30 +1,45 @@
-// Hand-written mirrors of the C layouts the decap module touches.
+// Hand-written mirrors of the C library layouts the SDK touches; no module
+// is named here.
 //
 // This file is the ctest input: the systest crate expands it as a standalone
-// crate and checks every public struct, union, field, relative-pointer alias
-// and constant against the C headers. It must therefore stay self-contained
-// (only `core` paths, no `crate::` references, no inner attributes) and keep
-// the C spelling of every name, so ctest maps `packet` to `struct packet`
-// without a rename table.
+// crate, with the `ctest` cfg set so that the zerocopy derives drop out, and
+// checks every public struct, union, field, relative-pointer alias and
+// constant against the C headers. It must therefore stay self-contained (only
+// `core` paths, no `crate::` references, no inner attributes) and keep the C
+// spelling of every name, so ctest maps `packet` to `struct packet` without a
+// rename table.
 
 use core::{
+    cell::UnsafeCell,
     ffi::{c_char, c_int, c_void},
-    marker::{PhantomData, PhantomPinned},
-    mem::ManuallyDrop,
+    marker::PhantomData,
+    mem::{ManuallyDrop, MaybeUninit},
 };
 
 /// Self-relative pointer as written by the C `SET_OFFSET_OF` macro.
 ///
 /// The stored value is the signed distance from the slot's own address to the
-/// target; zero means NULL. The type is deliberately neither `Copy` nor
-/// `Clone` nor `Unpin`: a value moved out of its slot would silently point
-/// elsewhere, so code only ever handles it as a shared reference in place.
+/// target; zero means NULL. Any bit pattern is a valid value, which is what
+/// makes it `FromBytes`: an offset is inert data, and only the validated
+/// configuration graph plus the resolver turn it into an access. It is
+/// neither `Copy` nor `Clone`, because a value moved out of its slot would
+/// silently point elsewhere.
 #[repr(transparent)]
+#[cfg_attr(not(ctest), derive(zerocopy::FromBytes, zerocopy::KnownLayout))]
 pub struct RelPtr<T> {
     offset: isize,
     _target: PhantomData<*const T>,
-    _pinned: PhantomPinned,
 }
+
+/// Bytes owned and mutated by C after publication, never read from Rust.
+///
+/// The interior-mutable wrapper keeps a shared reference to a structure that
+/// embeds it from asserting that these bytes stay unchanged, so C may
+/// rewrite them while Rust holds such a reference. Rust never reads them,
+/// so no data race arises. Any bit pattern is acceptable.
+#[repr(transparent)]
+#[cfg_attr(not(ctest), derive(zerocopy::FromBytes))]
+pub struct Opaque<T>(UnsafeCell<MaybeUninit<T>>);
 
 impl<T> RelPtr<T> {
     /// Raw stored offset; inert data that grants no access by itself.
@@ -46,6 +61,8 @@ pub type rel_lpm_chunks = RelPtr<RelPtr<lpm_page>>;
 pub type rel_lpm_chunk = RelPtr<lpm_page>;
 /// `struct lpm_page *` member of `union lpm_value`.
 pub type rel_lpm_value_page = ManuallyDrop<RelPtr<lpm_page>>;
+/// `struct memory_context` embedded in `struct lpm`, mutated by C.
+pub type opaque_memory_context = Opaque<memory_context>;
 
 // Opaque C types: referenced only through pointers, never dereferenced here.
 
@@ -162,28 +179,28 @@ pub struct cp_module {
 /// One LPM slot: a leaf value when the low bit is set, otherwise the offset of
 /// the child page relative to the slot itself.
 #[repr(C)]
+#[cfg_attr(not(ctest), derive(zerocopy::FromBytes, zerocopy::KnownLayout))]
 pub union lpm_value {
     pub page: rel_lpm_value_page,
     pub value: u64,
 }
 
 #[repr(C)]
+#[cfg_attr(not(ctest), derive(zerocopy::FromBytes, zerocopy::KnownLayout))]
 pub struct lpm_page {
     pub values: [lpm_value; 256],
 }
 
+/// An LPM tree as embedded in a module configuration.
+///
+/// The memory context is opaque because C rewrites its sibling links after
+/// publication; a reference to the whole tree is therefore sound.
 #[repr(C)]
+#[cfg_attr(not(ctest), derive(zerocopy::FromBytes, zerocopy::KnownLayout))]
 pub struct lpm {
-    pub memory_context: memory_context,
+    pub memory_context: opaque_memory_context,
     pub pages: rel_lpm_chunks,
     pub page_count: usize,
-}
-
-#[repr(C)]
-pub struct decap_module_config {
-    pub cp_module: cp_module,
-    pub prefixes4: lpm,
-    pub prefixes6: lpm,
 }
 
 // Function-pointer fields are spelled inline rather than through aliases so

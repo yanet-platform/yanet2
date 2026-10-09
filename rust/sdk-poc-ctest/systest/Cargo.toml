@@ -9,6 +9,9 @@ license.workspace = true
 publish.workspace = true
 build = "build.rs"
 
+[dependencies]
+zerocopy.workspace = true
+
 [build-dependencies]
 ctest = "0.5.1"
 yanet-build = { path = "../yanet-build" }

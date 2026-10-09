@@ -7,6 +7,9 @@ rust-version.workspace = true
 license.workspace = true
 publish.workspace = true
 
+[dependencies]
+zerocopy.workspace = true
+
 [dev-dependencies]
 yanet-testkit = { path = "../yanet-testkit" }
 

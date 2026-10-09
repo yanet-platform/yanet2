@@ -9,11 +9,12 @@
 
 use core::{ffi::c_char, ptr, ptr::NonNull};
 
-pub use yanet_sys::{self as sys, ConfigLayout, LpmView, Packet};
+pub use yanet_sys::{self as sys, ConfigView, Lpm, LpmView, Packet};
 use yanet_sys::{
     Front, Root,
     ffi::{MODULE_TYPE_LEN, YANET_MODULE_ABI_VERSION, dp_worker, module, module_ectx, packet_front},
 };
+use zerocopy::{FromBytes, KnownLayout};
 
 /// ABI version the exported `yanet_module_abi_version` symbol carries.
 pub const ABI_VERSION: u32 = YANET_MODULE_ABI_VERSION;
@@ -29,14 +30,21 @@ pub enum Verdict {
 
 /// A dataplane module.
 pub trait Module {
-    /// Layout of the module's published configuration.
-    type Layout: ConfigLayout;
+    /// Mirror of the module's own configuration fields, after the C module
+    /// header; the module's C header is the source of truth for its layout.
+    type Config: FromBytes + KnownLayout;
+
+    /// Per-invocation state derived from the configuration, such as views.
+    type Views<'g>;
+
+    /// Derives the per-invocation state once per handler invocation.
+    fn attach<'g>(config: &ConfigView<'g, Self::Config>) -> Self::Views<'g>;
 
     /// Decides the fate of one packet.
     ///
     /// Runs on a worker with exclusive access to the packet; the
     /// configuration is read-only and stays published for the call.
-    fn handle_packet(config: &<Self::Layout as ConfigLayout>::View<'_>, packet: &mut Packet<'_>) -> Verdict;
+    fn handle_packet(views: &Self::Views<'_>, packet: &mut Packet<'_>) -> Verdict;
 }
 
 /// C handler trampoline for module `M`.
@@ -44,9 +52,9 @@ pub trait Module {
 /// # Safety
 ///
 /// Called only by the dataplane with a published execution context whose
-/// configuration has this module's layout and was validated before
-/// publication, and with the invocation's own front of parsed packets on
-/// live mbufs.
+/// configuration has the C layout the module's configuration mirrors and was
+/// validated before publication, and with the invocation's own front of
+/// parsed packets on live mbufs.
 #[doc(hidden)]
 pub unsafe extern "C" fn handle_packets<M: Module>(
     _dp_worker: *mut dp_worker,
@@ -61,9 +69,15 @@ pub unsafe extern "C" fn handle_packets<M: Module>(
     let front = NonNull::new(packet_front).expect("the dataplane passes a front");
     // SAFETY: see the function contract; the configuration stays published
     // for the call and the front belongs to this invocation.
-    let (config, mut front) = unsafe { (M::Layout::attach(Root::from_raw(root)), Front::from_raw(front)) };
+    let (config, mut front) = unsafe {
+        (
+            ConfigView::<M::Config>::attach(Root::from_raw(root)),
+            Front::from_raw(front),
+        )
+    };
+    let views = M::attach(&config);
     while let Some(mut packet) = front.pop_input() {
-        match M::handle_packet(&config, &mut packet) {
+        match M::handle_packet(&views, &mut packet) {
             Verdict::Output => front.output(packet),
             Verdict::Drop => front.drop_packet(packet),
         }
@@ -115,24 +129,30 @@ pub const fn same_name(a: &str, b: &str) -> bool {
     true
 }
 
+/// Compiles only when both arguments have the same type.
+#[doc(hidden)]
+pub const fn same_type<T>(_: core::marker::PhantomData<T>, _: core::marker::PhantomData<T>) {}
+
 /// Exports module `$module` as `new_module_$name` plus the ABI version.
 ///
 /// Accepts only an identifier and a path, so the expansion carries no code
 /// from the module crate; the generated items call safe SDK functions, and
-/// the `unsafe(export_name)` attributes are the only unsafe tokens. The name
-/// must be the module type of the layout, so the dataplane can only hand the
-/// module configurations of that layout.
+/// the `unsafe(export_name)` attributes are the only unsafe tokens. Nothing
+/// at run time ties the exported name to the configuration mirror, so the
+/// export also publishes the name and the module type for the module's
+/// systest to check against the C header.
 #[macro_export]
 macro_rules! export_module {
     ($name:ident, $module:path) => {
+        /// Module type name this crate exports, checked by its systest.
+        #[doc(hidden)]
+        pub const YANET_MODULE_NAME: &str = stringify!($name);
+
+        /// Exported module type, checked by its systest.
+        #[doc(hidden)]
+        pub type YanetModule = $module;
+
         const _: () = {
-            assert!(
-                $crate::same_name(
-                    stringify!($name),
-                    <<$module as $crate::Module>::Layout as $crate::ConfigLayout>::TYPE_NAME,
-                ),
-                "the exported name must be the module type of the configuration layout"
-            );
             assert!(
                 stringify!($name).len() < $crate::sys::ffi::MODULE_TYPE_LEN,
                 "module name does not fit the descriptor"
@@ -154,31 +174,41 @@ mod tests {
     use core::ptr::{self, NonNull};
 
     use yanet_sys::{
-        decap::{DecapConfig, DecapLayout},
+        ConfigView, Lpm, LpmView,
         ffi::{
             RTE_ETHER_TYPE_IPV4, YANET_RS_MBUF_BUF_ADDR_OFFSET, YANET_RS_MBUF_DATA_LEN_OFFSET,
             YANET_RS_MBUF_DATA_OFF_OFFSET, module_ectx, packet, packet_front, packet_list,
         },
     };
     use yanet_testkit::{RawBuf, fixture};
+    use zerocopy::{FromBytes, KnownLayout};
 
     use super::{Module, Packet, Verdict, handle_packets, new_module};
 
-    /// Drops IPv4 packets whose destination is a configured prefix.
+    /// Body of the C-built fixture image: two trees after the module header.
+    #[derive(FromBytes, KnownLayout)]
+    #[repr(C)]
+    struct TwoTrees {
+        first: Lpm,
+        second: Lpm,
+    }
+
+    /// Drops IPv4 packets whose destination is in the first tree; the
+    /// fixture's first tree holds IPv4 prefixes.
     enum Probe {}
 
     impl Module for Probe {
-        type Layout = DecapLayout;
+        type Config = TwoTrees;
+        type Views<'g> = [LpmView<'g>; 2];
 
-        fn handle_packet(config: &DecapConfig<'_>, packet: &mut Packet<'_>) -> Verdict {
+        fn attach<'g>(config: &ConfigView<'g, TwoTrees>) -> [LpmView<'g>; 2] {
+            let body = config.body();
+            [config.lpm(&body.first), config.lpm(&body.second)]
+        }
+
+        fn handle_packet([first, _]: &[LpmView<'_>; 2], packet: &mut Packet<'_>) -> Verdict {
             match packet.network_header::<20>() {
-                Some(header)
-                    if config
-                        .prefixes4()
-                        .contains(&[header[16], header[17], header[18], header[19]]) =>
-                {
-                    Verdict::Drop
-                }
+                Some(header) if first.contains(&[header[16], header[17], header[18], header[19]]) => Verdict::Drop,
                 _ => Verdict::Output,
             }
         }

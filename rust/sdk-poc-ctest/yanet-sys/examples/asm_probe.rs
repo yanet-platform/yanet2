@@ -5,6 +5,7 @@ use core::ptr::NonNull;
 
 use yanet_sys::{LpmView, Root, ffi::RelPtr};
 use yanet_testkit as _;
+use zerocopy as _;
 
 /// Strict-provenance resolve with the NULL test, as `ADDR_OF`.
 ///

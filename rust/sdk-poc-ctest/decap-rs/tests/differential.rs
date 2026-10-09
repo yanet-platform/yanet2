@@ -13,6 +13,7 @@ use yanet_testkit::{
     dataplane::{self, Outcome, Verdict},
     random_prefix,
 };
+use zerocopy as _;
 
 unsafe extern "C" {
     /// The Rust module's constructor, exported by the export macro.

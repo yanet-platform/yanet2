@@ -6,8 +6,17 @@
 
 use std::time::Instant;
 
-use yanet_sys::{LpmView, Root, ffi::decap_module_config};
+use yanet_sys::{ConfigView, Lpm, LpmView, Root};
 use yanet_testkit::{CImage, Family, XorShift, key_len, random_prefix};
+use zerocopy::{FromBytes, KnownLayout};
+
+/// Body of the C test image: an IPv4 and an IPv6 tree after the header.
+#[derive(FromBytes, KnownLayout)]
+#[repr(C)]
+struct TwoTrees {
+    v4: Lpm,
+    v6: Lpm,
+}
 
 const KEYS: usize = 1 << 20;
 const ROUNDS: usize = 20;
@@ -21,9 +30,9 @@ fn main() {
             image.insert(family, &from, &to, rng.below(1 << 30) as u32);
         }
     }
-    // SAFETY: the C image is not modified while the root is used.
-    let root = unsafe { Root::from_raw(image.config_ptr()) };
-    let config = root.as_ptr().cast::<decap_module_config>();
+    // SAFETY: the C image holds a C-built configuration of this layout and
+    // is not modified while the view is used.
+    let config = unsafe { ConfigView::<TwoTrees>::attach(Root::from_raw(image.config_ptr())) };
 
     for family in [Family::V4, Family::V6] {
         let size = key_len(family);
@@ -31,12 +40,9 @@ fn main() {
         rng.fill(&mut keys);
         let mut c_results = vec![0u32; KEYS];
         let mut rust_results = vec![0u32; KEYS];
-        // SAFETY: the tree is C-built, hence valid, and not modified.
-        let view = unsafe {
-            match family {
-                Family::V4 => LpmView::attach(root, &raw const (*config).prefixes4),
-                Family::V6 => LpmView::attach(root, &raw const (*config).prefixes6),
-            }
+        let view: LpmView<'_> = match family {
+            Family::V4 => config.lpm(&config.body().v4),
+            Family::V6 => config.lpm(&config.body().v6),
         };
 
         // Two passes, so that neither side only ever runs on a cold cache.

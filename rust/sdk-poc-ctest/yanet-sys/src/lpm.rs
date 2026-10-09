@@ -1,10 +1,10 @@
 //! Read-only view of a C `struct lpm` and its control-plane validator.
 //!
 //! The lookup is a Rust port of the C `lpm_lookup` hot path; the cold path
-//! (building the tree) stays in C. The view never forms a reference over the
-//! embedded memory context, whose sibling links C may rewrite after
-//! publication: it borrows only the page table slot, the page table and the
-//! pages.
+//! (building the tree) stays in C. The embedded memory context, whose sibling
+//! links C may rewrite after publication, is opaque in the mirror, so a
+//! reference to the whole tree is sound; the view itself borrows the page
+//! table slot, the page table and the pages.
 
 use core::{
     fmt::{self, Display, Formatter},
@@ -29,15 +29,12 @@ impl<'g> LpmView<'g> {
     ///
     /// # Safety
     ///
-    /// `lpm` must be derived from `root` and point to a `struct lpm` whose
-    /// page graph passed [`validate_lpm`] before publication; `root` must
+    /// `lpm` must lie in the mapping covered by `root` and its page graph
+    /// must have passed [`validate_lpm`] before publication; `root` must
     /// satisfy the [`Root::from_raw`] contract for that graph.
     #[inline]
-    pub unsafe fn attach(root: Root<'g>, lpm: *const lpm) -> Self {
-        // SAFETY: the caller guarantees `lpm` is a live, validated tree. Only
-        // the page table slot is borrowed; the memory context in front of it
-        // is never covered by a reference.
-        let pages: &'g RelPtr<RelPtr<lpm_page>> = unsafe { &(*lpm).pages };
+    pub unsafe fn attach(root: Root<'g>, lpm: &'g lpm) -> Self {
+        let pages: &'g RelPtr<RelPtr<lpm_page>> = &lpm.pages;
         debug_assert!(pages.offset() != 0, "a validated tree has a page table");
         // SAFETY: validation proved the page table and its first chunk lie
         // inside the mapping and are aligned; both are frozen for 'g.
@@ -274,32 +271,31 @@ mod tests {
     use yanet_testkit::{CImage, Family, RawBuf, XorShift, fixture, key_len, random_prefix};
 
     use super::{LpmError, LpmView, validate_lpm};
-    use crate::{
-        Root,
-        ffi::{decap_module_config, lpm},
-    };
+    use crate::{Root, body_offset, config_range, ffi::lpm, test_body::TwoTrees};
 
-    /// Raw pointer to one prefix tree of the decap configuration at `root`.
+    /// Raw pointer to one prefix tree of the two-tree configuration at
+    /// `root`: IPv4 first, IPv6 second, as the C fixture lays them out.
     fn tree(root: Root<'_>, family: Family) -> *const lpm {
-        let config = root.as_ptr().cast::<decap_module_config>();
-        let offset = match family {
-            Family::V4 => offset_of!(decap_module_config, prefixes4),
-            Family::V6 => offset_of!(decap_module_config, prefixes6),
+        let field = match family {
+            Family::V4 => offset_of!(TwoTrees, first),
+            Family::V6 => offset_of!(TwoTrees, second),
         };
-        config.cast::<u8>().wrapping_add(offset).cast::<lpm>()
+        root.as_ptr()
+            .wrapping_add(body_offset::<TwoTrees>() + field)
+            .cast::<lpm>()
     }
 
     /// Views of both trees of the configuration at `root`.
     ///
     /// # Safety
     ///
-    /// `root` must point at a validated, unwritten decap configuration.
+    /// `root` must point at a validated, unwritten two-tree configuration.
     unsafe fn views(root: Root<'_>) -> (LpmView<'_>, LpmView<'_>) {
-        // SAFETY: forwarded caller contract.
+        // SAFETY: forwarded caller contract; both trees lie in the mapping.
         unsafe {
             (
-                LpmView::attach(root, tree(root, Family::V4)),
-                LpmView::attach(root, tree(root, Family::V6)),
+                LpmView::attach(root, &*tree(root, Family::V4)),
+                LpmView::attach(root, &*tree(root, Family::V6)),
             )
         }
     }
@@ -402,7 +398,7 @@ mod tests {
         // SAFETY: raw allocation pointer; the copy is written only below.
         let root = unsafe { Root::from_raw(buf.ptr_at(fixture::CONFIG_OFFSET)) };
         let lpm = tree(root, Family::V4);
-        let header = root.as_ptr().addr()..root.as_ptr().addr() + size_of::<decap_module_config>();
+        let header = config_range::<TwoTrees>(root);
         // SAFETY: the page table slot lies inside the copy; nothing borrows
         // it. The new offset aims the table at the configuration header.
         unsafe {

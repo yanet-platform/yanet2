@@ -9,24 +9,39 @@
 
 #![forbid(unsafe_code)]
 
+mod config;
+
+pub use config::DecapConfig;
 use yanet_sdk::{
-    Module, Packet, Verdict, export_module,
-    sys::{
-        decap::{DecapConfig, DecapLayout},
-        ffi::{IPPROTO_FRAGMENT, RTE_ETHER_TYPE_IPV4, RTE_ETHER_TYPE_IPV6},
-    },
+    ConfigView, LpmView, Module, Packet, Verdict, export_module,
+    sys::ffi::{IPPROTO_FRAGMENT, RTE_ETHER_TYPE_IPV4, RTE_ETHER_TYPE_IPV6},
 };
 
 /// The decap module.
 pub enum Decap {}
 
-impl Module for Decap {
-    type Layout = DecapLayout;
+/// Views of both prefix sets for one handler invocation.
+pub struct Prefixes<'g> {
+    v4: LpmView<'g>,
+    v6: LpmView<'g>,
+}
 
-    fn handle_packet(config: &DecapConfig<'_>, packet: &mut Packet<'_>) -> Verdict {
+impl Module for Decap {
+    type Config = DecapConfig;
+    type Views<'g> = Prefixes<'g>;
+
+    fn attach<'g>(config: &ConfigView<'g, DecapConfig>) -> Prefixes<'g> {
+        let body = config.body();
+        Prefixes {
+            v4: config.lpm(&body.prefixes4),
+            v6: config.lpm(&body.prefixes6),
+        }
+    }
+
+    fn handle_packet(prefixes: &Prefixes<'_>, packet: &mut Packet<'_>) -> Verdict {
         match packet.ether_type() {
-            RTE_ETHER_TYPE_IPV4 => handle_v4(config, packet),
-            RTE_ETHER_TYPE_IPV6 => handle_v6(config, packet),
+            RTE_ETHER_TYPE_IPV4 => handle_v4(prefixes, packet),
+            RTE_ETHER_TYPE_IPV6 => handle_v6(prefixes, packet),
             _ => Verdict::Output,
         }
     }
@@ -41,7 +56,7 @@ const IPV4_FRAGMENT_MASK: u16 = 0x3fff;
 /// Flow label bits of the first IPv6 header word.
 const IPV6_FLOW_LABEL_MASK: u32 = 0x000f_ffff;
 
-fn handle_v4(config: &DecapConfig<'_>, packet: &mut Packet<'_>) -> Verdict {
+fn handle_v4(prefixes: &Prefixes<'_>, packet: &mut Packet<'_>) -> Verdict {
     // The parser guarantees the fixed header; a short one is not a packet
     // the dataplane would hand to a module.
     let Some(header) = packet.network_header::<IPV4_HEADER_LEN>() else {
@@ -51,13 +66,13 @@ fn handle_v4(config: &DecapConfig<'_>, packet: &mut Packet<'_>) -> Verdict {
         return Verdict::Drop;
     }
     let destination = [header[16], header[17], header[18], header[19]];
-    if !config.prefixes4().contains(&destination) {
+    if !prefixes.v4.contains(&destination) {
         return Verdict::Output;
     }
     decap(packet)
 }
 
-fn handle_v6(config: &DecapConfig<'_>, packet: &mut Packet<'_>) -> Verdict {
+fn handle_v6(prefixes: &Prefixes<'_>, packet: &mut Packet<'_>) -> Verdict {
     let Some(header) = packet.network_header::<IPV6_HEADER_LEN>() else {
         return Verdict::Drop;
     };
@@ -65,7 +80,7 @@ fn handle_v6(config: &DecapConfig<'_>, packet: &mut Packet<'_>) -> Verdict {
         return Verdict::Drop;
     }
     let destination: [u8; 16] = header[24..40].try_into().expect("slice of 16 bytes");
-    if !config.prefixes6().contains(&destination) {
+    if !prefixes.v6.contains(&destination) {
         return Verdict::Output;
     }
     let label = u32::from_be_bytes([header[0], header[1], header[2], header[3]]) & IPV6_FLOW_LABEL_MASK;

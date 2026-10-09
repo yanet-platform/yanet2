@@ -9,6 +9,7 @@ publish.workspace = true
 
 [dependencies]
 yanet-sys = { path = "../yanet-sys" }
+zerocopy.workspace = true
 
 [dev-dependencies]
 yanet-testkit = { path = "../yanet-testkit" }

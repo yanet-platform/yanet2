@@ -28,11 +28,12 @@ const OPAQUE: &[&str] = &[
     "rte_mbuf",
 ];
 
-/// Monomorphic relative-pointer aliases and the C pointer type each shadows.
+/// Monomorphic aliases of the generic wrappers and the C type each shadows.
 const REL_ALIASES: &[(&str, &str)] = &[
     ("rel_lpm_chunks", "struct lpm_page **"),
     ("rel_lpm_chunk", "struct lpm_page *"),
     ("rel_lpm_value_page", "struct lpm_page *"),
+    ("opaque_memory_context", "struct memory_context"),
 ];
 
 const HEADERS: &[&str] = &[
@@ -44,7 +45,6 @@ const HEADERS: &[&str] = &[
     "lib/dataplane/module/packet_front.h",
     "lib/dataplane/packet/packet.h",
     "lib/dataplane/pipeline/econtext.h",
-    "modules/decap/dataplane/config.h",
     "systest.h",
 ];
 
@@ -75,6 +75,9 @@ fn main() {
     cfg.skip_private(true);
     cfg.language(ctest::Language::C);
     cfg.edition(2024);
+    // The mirrors' zerocopy derives drop out under this cfg, so the
+    // standalone expansion needs no dependencies.
+    cfg.cfg("ctest", None);
 
     if let Ok(kind) = env::var("YANET_CTEST_DRIFT") {
         let overlay = out_dir.join("drift-overlay");
@@ -126,8 +129,8 @@ fn main() {
             .map(|(_, c)| (*c).to_string())
     });
 
-    // The generic primitive is checked through its monomorphic aliases.
-    cfg.skip_struct(|s| s.ident() == "RelPtr");
+    // The generic wrappers are checked through their monomorphic aliases.
+    cfg.skip_struct(|s| s.ident() == "RelPtr" || s.ident() == "Opaque");
     // No C typedef exists for it; the systest header pins the prototype.
     cfg.skip_alias(|alias| alias.ident() == "packet_decap_fn");
 
