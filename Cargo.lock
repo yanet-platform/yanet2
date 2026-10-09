@@ -3132,6 +3132,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "yanet-dp"
+version = "0.1.0"
+dependencies = [
+ "yanet-packet",
+ "yanet-shm",
+]
+
+[[package]]
 name = "yanet-filterpb"
 version = "0.1.0"
 dependencies = [
@@ -3140,6 +3148,18 @@ dependencies = [
  "serde_json",
  "tonic",
  "tonic-prost-build",
+]
+
+[[package]]
+name = "yanet-packet"
+version = "0.1.0"
+
+[[package]]
+name = "yanet-rblackhole-dp"
+version = "0.1.0"
+dependencies = [
+ "yanet-dp",
+ "yanet-packet",
 ]
 
 [[package]]
@@ -3154,6 +3174,10 @@ dependencies = [
  "tonic-prost-build",
  "yanet-commonpb",
 ]
+
+[[package]]
+name = "yanet-shm"
+version = "0.1.0"
 
 [[package]]
 name = "yanet-ynpb"
