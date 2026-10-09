@@ -65,6 +65,11 @@ pub struct SetConfigCmd {
     /// Per-worker ring buffer size.
     #[arg(long = "ring-size")]
     pub ring_size: Option<RingBufferSize>,
+
+    /// Aggregate packet capture rate in packets per second; zero disables the
+    /// limit.
+    #[arg(long = "rate", short = 'r')]
+    pub rate_pps: Option<u64>,
 }
 
 #[derive(Debug, Clone, Parser)]

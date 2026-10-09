@@ -125,6 +125,7 @@ async fn set_config(service: &mut PdumpService, cmd: SetConfigCmd) -> Result<(),
             mode: cmd.mode.map(Into::into),
             snaplen: cmd.snaplen,
             ring_size: cmd.ring_size.map(|ring_size| ring_size.get()),
+            rate_pps: cmd.rate_pps,
         }),
     };
     service
@@ -255,6 +256,7 @@ fn config_block(config: &pdumppb::Config) -> display::KeyValue {
         .row("mode", dump_mode::to_str(config.mode.unwrap_or_default()))
         .row("snaplen", config.snaplen.unwrap_or_default())
         .row("ring size", config.ring_size.unwrap_or_default())
+        .row("rate pps", config.rate_pps.unwrap_or_default())
 }
 
 fn main() -> std::process::ExitCode {

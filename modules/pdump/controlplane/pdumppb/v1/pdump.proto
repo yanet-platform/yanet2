@@ -73,6 +73,11 @@ message Config {
   optional uint32 snaplen = 3;
   // Ring_size specifies per worker ring buffer size.
   optional uint32 ring_size = 4;
+  // Aggregate capture rate in packets per second; zero disables limiting.
+  //
+  // Each worker receives an equal share; unused shares are not transferred.
+  // Bursts of up to 32 records per worker are permitted.
+  optional uint64 rate_pps = 5;
 }
 
 // ShowConfigResponse contains the configuration details of the pdump module.

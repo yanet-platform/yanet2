@@ -29,6 +29,10 @@ struct ring_buffer {
 	uint32_t mask;
 	// Pointer to the ring buffer data area
 	uint8_t *data;
+	// Only the owning worker writes these capture-rate fields.
+	uint64_t rate_credit;
+	uint64_t rate_last_time;
+	uint8_t rate_initialized;
 };
 
 // Magic number to validate ring message headers

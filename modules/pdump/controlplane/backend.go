@@ -14,6 +14,7 @@ type Settings struct {
 	Mode     uint32
 	Snaplen  uint32
 	RingSize uint32
+	RatePPS  uint64
 }
 
 // Ring is one worker's capture ring inside the module config memory.
@@ -108,6 +109,10 @@ func (m *backend) apply(name string, config *ModuleConfig, settings Settings) ([
 	m.log.Debug("set snaplen", zap.String("module", name))
 	if err := config.SetSnapLen(settings.Snaplen); err != nil {
 		return nil, fmt.Errorf("failed to set snaplen for %s: %w", name, err)
+	}
+
+	if err := config.SetRate(settings.RatePPS); err != nil {
+		return nil, fmt.Errorf("failed to set capture rate for %s: %w", name, err)
 	}
 
 	m.log.Debug("set filter", zap.String("module", name))

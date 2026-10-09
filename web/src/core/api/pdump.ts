@@ -11,6 +11,7 @@ export interface PdumpConfig {
     mode?: number;
     snaplen?: number;
     ring_size?: number;
+    rate_pps?: number;
 }
 
 export interface ListConfigsResponse {
