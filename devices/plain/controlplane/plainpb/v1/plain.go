@@ -1,15 +1,13 @@
 package plainpb
 
 import (
-	"errors"
 	"fmt"
-	"strings"
 
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
 )
 
 func (m *UpdateDevicePlainRequest) Validate() error {
-	if err := validateDeviceName(m.GetName()); err != nil {
+	if err := commonpb.ValidateDeviceName("name", m.GetName()); err != nil {
 		return err
 	}
 	if err := m.GetDevice().Validate(); err != nil {
@@ -19,18 +17,5 @@ func (m *UpdateDevicePlainRequest) Validate() error {
 }
 
 func (m *ShowDevicePlainRequest) Validate() error {
-	return validateDeviceName(m.GetName())
-}
-
-func validateDeviceName(name string) error {
-	if name == "" {
-		return errors.New("name is required")
-	}
-	if strings.IndexByte(name, 0) != -1 {
-		return errors.New("name must not contain NUL")
-	}
-	if len(name) >= commonpb.MaxDeviceNameLen {
-		return fmt.Errorf("name must be shorter than %d bytes", commonpb.MaxDeviceNameLen)
-	}
-	return nil
+	return commonpb.ValidateDeviceName("name", m.GetName())
 }
