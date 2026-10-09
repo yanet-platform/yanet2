@@ -1,0 +1,5 @@
+error: ShmLayout requires #[repr(C)]
+ --> tests/compile_fail/derive_not_repr_c.rs:6:8
+  |
+6 | struct Body {
+  |        ^^^^

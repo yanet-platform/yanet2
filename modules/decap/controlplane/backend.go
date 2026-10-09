@@ -5,11 +5,20 @@ import (
 	"net/netip"
 
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
-	"github.com/yanet-platform/yanet2/modules/decap/bindings/go/cdecap"
 )
 
 // moduleType identifies the decap module to the shared-memory agent.
 const moduleType = "decap"
+
+// moduleConfig is a decap configuration built in shared memory and not
+// published yet.
+//
+// The C api builds it by default; the yanet_rust_cp build tag switches to
+// the Rust api, whose layout only the Rust dataplane module reads.
+type moduleConfig interface {
+	ModuleHandle
+	AsFFIModule() ffi.ModuleConfig
+}
 
 // backend is the real Backend implementation backed by shared memory.
 type backend struct {
@@ -24,18 +33,9 @@ func NewBackend(agent *ffi.Agent) Backend {
 }
 
 func (m *backend) UpdateModule(name string, prefixes []netip.Prefix) (ModuleHandle, error) {
-	mod, err := cdecap.NewModuleConfig(m.agent, name)
+	mod, err := newModuleConfig(m.agent, name, prefixes)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create module config: %w", err)
-	}
-
-	for _, prefix := range prefixes {
-		if err := mod.PrefixAdd(prefix); err != nil {
-			if err := mod.Free(); err != nil {
-				return nil, fmt.Errorf("failed to free abandoned config: %w", err)
-			}
-			return nil, fmt.Errorf("failed to add prefix %v: %w", prefix, err)
-		}
+		return nil, err
 	}
 
 	if err := m.agent.UpdateModules(

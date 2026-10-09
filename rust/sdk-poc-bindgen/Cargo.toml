@@ -1,0 +1,18 @@
+# Standalone proof-of-concept workspace for the bindgen (kernel-style) Rust
+# module SDK; deliberately not a member of the repository root workspace.
+[workspace]
+resolver = "2"
+members = ["yanet-sys", "yanet-sdk", "yanet-sdk-derive", "decap-rs", "decap-oracle", "decap-api", "yanet-cp"]
+
+[workspace.package]
+edition = "2024"
+rust-version = "1.88"
+license = "Apache-2.0"
+publish = false
+
+[workspace.lints.rust]
+unsafe_op_in_unsafe_fn = "deny"
+unused_crate_dependencies = "deny"
+
+[workspace.lints.clippy]
+std_instead_of_core = "deny"

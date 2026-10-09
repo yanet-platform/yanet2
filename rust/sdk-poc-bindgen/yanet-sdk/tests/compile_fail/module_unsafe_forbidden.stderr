@@ -1,0 +1,11 @@
+error: usage of an `unsafe` block
+  --> tests/compile_fail/module_unsafe_forbidden.rs:22:13
+   |
+22 |     let _ = unsafe { core::ptr::read(&value) };
+   |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+note: the lint level is defined here
+  --> tests/compile_fail/module_unsafe_forbidden.rs:3:11
+   |
+ 3 | #![forbid(unsafe_code)]
+   |           ^^^^^^^^^^^

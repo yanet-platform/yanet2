@@ -1,0 +1,32 @@
+[package]
+name = "decap-rs"
+version = "0.1.0"
+description = "Rust port of the YANET2 decap dataplane module."
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+# The plugin loader scans for lib<name>_dp.so and derives the module name
+# from it, so the library name fixes the produced file name.
+name = "decap_dp"
+crate-type = ["cdylib", "rlib"]
+# Behaviour is tested against the C module under tests/.
+test = false
+doctest = false
+
+[lints]
+workspace = true
+
+[features]
+default = ["dp"]
+# The dataplane module; without it the crate only declares the layout.
+dp = ["yanet-sdk/dp"]
+
+[dependencies]
+yanet-sdk = { path = "../yanet-sdk", default-features = false }
+
+[dev-dependencies]
+decap-oracle = { path = "../decap-oracle" }
+yanet-sys = { path = "../yanet-sys", features = ["testing"] }

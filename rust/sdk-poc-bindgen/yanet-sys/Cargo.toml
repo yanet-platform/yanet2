@@ -1,0 +1,29 @@
+[package]
+name = "yanet-sys"
+version = "0.1.0"
+description = "Unsafe boundary of the YANET2 Rust module SDK: bindgen bindings, relative pointers, views and the module export macro."
+links = "yanet"
+build = "build.rs"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[features]
+default = ["dp"]
+# Dataplane side: packet front, module export macro, C packet helpers.
+dp = []
+# Control-plane side: module allocation, LPM construction, arena reads.
+cp = []
+# Test support over C-built images; unsound to rely on outside tests.
+testing = []
+
+[build-dependencies]
+bindgen = { version = "0.72", default-features = false, features = ["runtime"] }
+cc = "1"
+serde_json = "1"
+syn = { version = "2", features = ["full", "visit"] }
+

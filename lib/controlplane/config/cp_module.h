@@ -166,6 +166,26 @@ cp_module_init(
 	yanet_error **err
 );
 
+// Initialize a module configuration whose dataplane module declares a
+// configuration layout.
+//
+// Same as cp_module_init, but refuses with an error when the loaded
+// dataplane module's configuration layout differs from expected_layout, so
+// a module never receives a configuration built for another layout.
+// cp_module_init is this function with expected_layout zero, the value of
+// every module that reads its configuration without a typed layout. A
+// non-zero layout is meant for the SDK builder of such modules, which
+// validates the configuration before handing it over.
+int
+cp_module_init_layout(
+	struct cp_module *cp_module,
+	struct agent *agent,
+	const char *module_type,
+	const char *module_name,
+	uint64_t expected_layout,
+	yanet_error **err
+);
+
 /**
  * Release resources allocated by cp_module_init.
  *

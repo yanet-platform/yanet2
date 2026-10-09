@@ -1,0 +1,24 @@
+[package]
+name = "decap-api"
+version = "0.1.0"
+description = "Rust replacement of the decap control-plane C API: build and validate the module config in agent memory."
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+# Tested through tests/ only.
+test = false
+doctest = false
+
+[lints]
+workspace = true
+
+[dependencies]
+decap-rs = { path = "../decap-rs", default-features = false }
+yanet-sys = { path = "../yanet-sys", default-features = false, features = ["cp"] }
+
+[dev-dependencies]
+yanet-sdk = { path = "../yanet-sdk", default-features = false }
+yanet-sys = { path = "../yanet-sys", default-features = false, features = ["cp", "testing"] }
