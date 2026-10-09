@@ -175,9 +175,12 @@ struct virtual_service {
 	// zero inherits the inner DSCP unchanged.
 	uint32_t dscp_flags;
 
-	// Object-scoped counter registry ids, COUNTER_INVALID when the
-	// counter is absent. Incoming counts every dispatched packet; the
-	// rest count the drop reasons in turn.
+	// All object-scoped counters must be registered before service creation
+	// succeeds.
+	//
+	// Counters track incoming packets, filter rejections, ring selection
+	// failures, disabled backend encounters, and successful ICMP echo
+	// replies.
 	uint64_t counter_incoming;
 	uint64_t counter_filter_rejected;
 	uint64_t counter_ring_empty;
