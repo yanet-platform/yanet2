@@ -67,6 +67,12 @@ dependencies = lib_dependencies + [
   lib_dev_trafgen_dp_dep,
 ]
 
+# Rust-implemented modules: the dependency exists only when the option
+# gated their subdir in, so the reference stays inside the same guard.
+if get_option('with_rust_modules')
+  dependencies += lib_rblackhole_dp_dep
+endif
+
 sources = files(
   'dpdk.c',
   'main.c',

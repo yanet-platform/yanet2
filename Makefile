@@ -122,6 +122,8 @@ CLI_RELEASE_BINARIES := $(addprefix $(RELEASE_DIR)/,$(CLI_BINARIES))
 	setup-debug \
 	setup-asan \
 	dataplane \
+	sdk \
+	sdk-example \
 	install \
 	install1 \
 	clean \
@@ -283,6 +285,35 @@ setup-asan:
 
 dataplane:
 	meson compile -C build
+
+# Module SDK: the build-side surface for out-of-tree modules.
+#
+# A configured and built tree already carries everything an out-of-tree
+# module compiles against; this target confirms the SDK artifacts exist
+# (build/sdk/yanet-module-sdk.pc and the PIC ABI-version archive) and
+# prints the environment such a module builds with. See docs/module-sdk.md.
+sdk: dataplane
+	@test -f build/sdk/yanet-module-sdk.pc || { \
+		echo "ERROR: build/sdk/yanet-module-sdk.pc missing; re-run meson setup" >&2; \
+		exit 1; \
+	}
+	@echo "module SDK ready:"
+	@echo "  PKG_CONFIG_PATH=$(CURDIR)/build/sdk"
+	@echo "  plugin to deploy: build/<module>/lib<name>_dp.so -> plugin_dir"
+	@echo "  reference module: make sdk-example"
+
+# Builds and tests the out-of-tree reference modules against this tree's
+# SDK: the gate for out-of-tree module support — sdk/example (C dataplane),
+# sdk/example-rs (Rust dataplane) and, when the external/route-mpls
+# submodule (the production port) is checked out, its full suite too.
+sdk-example: sdk
+	$(MAKE) -C sdk/example YANET_ROOT=$(CURDIR) all test
+	$(MAKE) -C sdk/example-rs YANET_ROOT=$(CURDIR) all test
+	@if [ -f external/route-mpls/Makefile ]; then \
+		$(MAKE) -C external/route-mpls YANET_ROOT=$(CURDIR) all test; \
+	else \
+		echo "external/route-mpls not checked out; skipping its gate (git submodule update --init external/route-mpls)"; \
+	fi
 
 cli: cli-build
 

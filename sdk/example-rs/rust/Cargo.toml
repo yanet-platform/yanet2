@@ -1,0 +1,27 @@
+# Standalone workspace: the yanet2 root workspace keeps an explicit member
+# list, so an out-of-tree module crate carries its own [workspace] table
+# and is built through its own manifest (see the Makefile).
+[workspace]
+
+[package]
+name = "yanet-example-rs-dp"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+rust-version = "1.88"
+
+# staticlib keeps the in-tree link mode available; the cdylib is the
+# plugin the loader picks up from plugin_dir as libexample_rs_dp.so.
+[lib]
+name = "example_rs_dp"
+crate-type = ["staticlib", "cdylib"]
+
+[dependencies]
+yanet-dp = { path = "../../../common/rust/dp" }
+
+# The root workspace pins this for its members; a standalone workspace
+# must pin it itself, or a handler panic would unwind across the FFI
+# boundary into the dataplane.
+[profile.release]
+panic = "abort"
