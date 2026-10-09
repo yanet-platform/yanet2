@@ -90,6 +90,16 @@ struct counter_storage {
 	struct counter_registry *registry;
 	struct counter_storage_pool pools[COUNTER_POOL_SIZE];
 
+	// Absolute value addresses of this process, one per registry
+	// counter, rebuilt from the offsets by whoever serves the packet
+	// path.
+	//
+	// The offsets are the shared contract; a process that maps the
+	// storage at another address resolves its own cache and must not
+	// read one resolved elsewhere. Unlike the offset walk, indexing
+	// this array costs a single load on the packet path.
+	uint64_t **abs_counter_values;
+
 	// Reference count for cross-generation sharing.
 	//
 	// When a config update does not change a module's counter layout, the
@@ -120,6 +130,33 @@ counter_get_value_handle(
 static inline uint64_t *
 counter_handle_get_value(struct counter_value_handle *value_handle) {
 	return (uint64_t *)value_handle;
+}
+
+// Rebuild this process's absolute value-address cache from the offsets.
+//
+// Idempotent and safe to repeat, so a storage reused across generations
+// is re-resolved on every pass that will read the cache. A storage
+// without a cache has no registry counters to resolve, so it is a
+// no-op.
+static inline void
+counter_storage_resolve_absolutes(struct counter_storage *storage) {
+	uint64_t **abs_values = ADDR_OF(&storage->abs_counter_values);
+	if (abs_values == NULL) {
+		return;
+	}
+
+	struct counter_value_handle **handles =
+		ADDR_OF(&storage->counter_value_handles);
+	if (handles == NULL) {
+		return;
+	}
+
+	struct counter_registry *registry = ADDR_OF(&storage->registry);
+	for (uint64_t idx = 0; idx < registry->count; ++idx) {
+		abs_values[idx] =
+			counter_handle_get_value(ADDR_OF_NONNULL(handles + idx)
+			);
+	}
 }
 
 static inline uint64_t *

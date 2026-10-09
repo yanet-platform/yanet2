@@ -13,6 +13,7 @@
 // the literal here and bump YANET_MODULE_ABI_VERSION in the same change.
 
 #include "lib/controlplane/config/cp_module.h"
+#include "lib/counters/counters.h"
 #include "lib/dataplane/config/zone.h"
 #include "lib/dataplane/module/module.h"
 #include "lib/dataplane/module/packet_front.h"
@@ -62,4 +63,8 @@ _Static_assert(
 _Static_assert(
 	sizeof(struct dp_port) == 120,
 	"struct dp_port size changed, bump YANET_MODULE_ABI_VERSION"
+);
+_Static_assert(
+	sizeof(struct counter_storage) == 152,
+	"struct counter_storage size changed, bump YANET_MODULE_ABI_VERSION"
 );

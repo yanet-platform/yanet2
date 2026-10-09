@@ -160,4 +160,4 @@ counter_storage_test = executable(
   include_directories: yanet_rootdir,
   link_language: 'c',
 )
-test('counter_storage_oom', counter_storage_test, suite: ['lib'])
+test('counter_storage', counter_storage_test, suite: ['lib'])

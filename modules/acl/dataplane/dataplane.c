@@ -7,8 +7,10 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "common/likely.h"
 #include "dataplane/worker.h"
 #include "lib/controlplane/config/econtext.h"
+#include "lib/counters/counters.h"
 #include "lib/dataplane/module/module.h"
 #include "lib/dataplane/module/packet_front.h"
 #include "lib/dataplane/packet/packet.h"
@@ -34,6 +36,80 @@ static const struct fwstate_map_link acl_no_state = {0};
 
 // One fixed batch of the input front processed by the handler.
 #define ACL_HANDLE_MAX_BATCH 64
+
+// Rule counts of the in-flight batch, kept out of the shared storage.
+//
+// Rule counters sit in shared memory scattered by rule, so a counted
+// packet writing them directly pays a shared-line round trip each time.
+// A batch revisits a handful of rules, so their counts pile up in this
+// worker-local table and reach the shared lines once per distinct rule
+// per batch. The table survives the whole handler call; a stamp names
+// the batch a slot belongs to, so a new batch claims stale slots
+// without clearing anything.
+#define ACL_RULE_COUNT_SLOTS 128
+
+struct acl_rule_count_acc {
+	uint32_t stamps[ACL_RULE_COUNT_SLOTS];
+	uint64_t ids[ACL_RULE_COUNT_SLOTS];
+	uint64_t packets[ACL_RULE_COUNT_SLOTS];
+	uint64_t bytes[ACL_RULE_COUNT_SLOTS];
+};
+
+// Account one counted packet against its rule, or report a full table.
+//
+// Rule identifiers are dense, so masking them onto the table spreads
+// consecutive rules over consecutive slots. Probing stops at the first
+// slot of another batch; a whole batch of distinct rules cannot fill
+// the table, but the caller still falls back to a direct update when
+// one somehow does.
+static inline bool
+acl_rule_count_acc_add(
+	struct acl_rule_count_acc *acc,
+	uint32_t stamp,
+	uint64_t counter_id,
+	uint64_t bytes
+) {
+	uint64_t base = counter_id & (ACL_RULE_COUNT_SLOTS - 1);
+	for (uint64_t probe = 0; probe < ACL_RULE_COUNT_SLOTS; ++probe) {
+		uint64_t slot = (base + probe) & (ACL_RULE_COUNT_SLOTS - 1);
+		uint32_t slot_stamp = acc->stamps[slot];
+		if (slot_stamp != stamp) {
+			acc->stamps[slot] = stamp;
+			acc->ids[slot] = counter_id;
+			acc->packets[slot] = 1;
+			acc->bytes[slot] = bytes;
+			return true;
+		}
+		if (acc->ids[slot] == counter_id) {
+			acc->packets[slot] += 1;
+			acc->bytes[slot] += bytes;
+			return true;
+		}
+	}
+	return false;
+}
+
+// Move one batch's accumulated counts into the shared rule counters.
+//
+// Runs inside the handler, so a reader of the rule counters lags by at
+// most the in-flight batch — the same freshness a direct per-packet
+// update already had.
+static inline void
+acl_rule_count_acc_flush(
+	const struct acl_rule_count_acc *acc,
+	uint32_t stamp,
+	uint64_t **rule_counters
+) {
+	for (uint64_t slot = 0; slot < ACL_RULE_COUNT_SLOTS; ++slot) {
+		if (acc->stamps[slot] != stamp) {
+			continue;
+		}
+
+		uint64_t *counters = rule_counters[acc->ids[slot]];
+		counters[0] += acc->packets[slot];
+		counters[1] += acc->bytes[slot];
+	}
+}
 
 // Append a sync record for an allowed packet to the executing worker's
 // stash slot of the family map.
@@ -81,9 +157,21 @@ acl_handle_packets(
 
 	// Everything the burst loop needs that does not depend on the
 	// packets themselves — the module counters, the per-rule counter
-	// handle array and the linked state tables — is derived per
+	// addresses and the linked state tables — is derived per
 	// worker by the execution-context commit handler.
 	struct acl_prepared *prepared = module_ectx->abs_module_prepared;
+
+	// The rule-counter addresses are the one exception: the worker
+	// fills them on its first burst, the only thread that ever reads
+	// or writes its storage's cache. See the prepared buffer.
+	if (unlikely(!prepared->rule_counters_resolved)) {
+		if (prepared->rule_counters_storage != NULL) {
+			counter_storage_resolve_absolutes(
+				prepared->rule_counters_storage
+			);
+		}
+		prepared->rule_counters_resolved = true;
+	}
 
 	// Time in nanoseconds is sufficient for keeping state up to 500 years
 	uint64_t now = dp_worker->current_time;
@@ -145,11 +233,19 @@ acl_handle_packets(
 	uint32_t frag6_classes[ACL_HANDLE_MAX_BATCH];
 	uint32_t core6_path_classes[ACL_HANDLE_MAX_BATCH];
 
+	// Stamps start at one so a zeroed slot is never mistaken for a
+	// claimed one; only the stamps need clearing, the payloads are
+	// written before their stamp makes them readable.
+	struct acl_rule_count_acc rule_acc;
+	memset(rule_acc.stamps, 0, sizeof(rule_acc.stamps));
+	uint32_t rule_stamp = 0;
+
 	struct packet *packet;
 	uint32_t count;
 	while ((count = packet_front_collect_input(
 			packet_front, packets, ACL_HANDLE_MAX_BATCH
 		)) != 0) {
+		++rule_stamp;
 		uint32_t ip4_idx = 0;
 		uint32_t ip4_tcp_idx = 0;
 		uint32_t ip4_udp_idx = 0;
@@ -514,14 +610,24 @@ acl_handle_packets(
 						goto apply;
 					}
 					case ACTION_COUNT: {
-						uint64_t *counters = counter_handle_get_value(
-							ADDR_OF_NONNULL(
-								prepared->rules_handles +
-								target->counter_id
-							)
-						);
-						counters[0] += 1;
-						counters[1] += pkt_len;
+						if (!acl_rule_count_acc_add(
+							    &rule_acc,
+							    rule_stamp,
+							    target->counter_id,
+							    pkt_len
+						    )) {
+							// The batch bound
+							// keeps the table from
+							// filling; count
+							// directly if that
+							// bound is ever
+							// violated.
+							uint64_t *counters =
+								prepared->rule_counters
+									[target->counter_id];
+							counters[0] += 1;
+							counters[1] += pkt_len;
+						}
 
 						break;
 					}
@@ -612,6 +718,10 @@ acl_handle_packets(
 				packet_front_drop(packet_front, packet);
 			}
 		}
+
+		acl_rule_count_acc_flush(
+			&rule_acc, rule_stamp, prepared->rule_counters
+		);
 	}
 }
 
@@ -627,7 +737,7 @@ acl_module_commit_ectx(
 		container_of(cp_module, struct acl_module_config, cp_module);
 
 	// An absent or zeroed buffer leaves every value at its absent
-	// state: no state table, no rule counter handle array.
+	// state: no state table, no rule counter addresses.
 	struct acl_prepared *prepared = module_ectx->abs_module_prepared;
 	if (prepared == NULL) {
 		return;
@@ -667,15 +777,27 @@ acl_module_commit_ectx(
 		acl_config->no_match_counter_id, counter_storage
 	);
 
-	// Rule counters are resolved per matched target; hoisting the
-	// lookup array leaves a single hop per packet.
+	// Rule counters are resolved per matched target; the worker fills
+	// the storage's absolute value addresses on its first burst, which
+	// leaves a single load per counted rule.
+	//
+	// Only the storage is wired here: a generation that reuses an
+	// unchanged registry shares it with the running one, so filling the
+	// cache from the publishing pass would write over the running
+	// generation's reads. Every target carries a rule counter id, so a
+	// config that reaches workers always has the rule registry and its
+	// storage behind it.
 	struct counter_storage *rules_storage = module_ectx_counter_storage(
 		module_ectx, acl_config->rules_registry_idx
 	);
-	prepared->rules_handles =
-		(rules_storage != NULL)
-			? ADDR_OF_NONNULL(&rules_storage->counter_value_handles)
-			: NULL;
+	prepared->rule_counters_storage = rules_storage;
+	if (rules_storage != NULL) {
+		prepared->rule_counters =
+			ADDR_OF(&rules_storage->abs_counter_values);
+	} else {
+		prepared->rule_counters = NULL;
+	}
+	prepared->rule_counters_resolved = false;
 
 	// Linked map objects' fwtables and stashes, one per family. NULL when
 	// the config declared no link for the family, in which case

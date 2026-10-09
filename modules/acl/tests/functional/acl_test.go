@@ -1292,6 +1292,97 @@ func TestACL_Counters(t *testing.T) {
 		dataplaneut.RequireRuleCounter(t, h, path, "dns", 2, 2*pktSize1)
 	})
 
+	t.Run("burst_mixed_rules", func(t *testing.T) {
+		// One handler call mixes packets of several counted rules, so
+		// the counts of a burst must land whole on each rule and stay
+		// additive across a following burst.
+		rules := []cacl.ACLRule{
+			{
+				Actions:       []cacl.ACLAction{{Kind: cacl.ActionCount}, {Kind: cacl.ActionAllow}},
+				Counter:       "http",
+				Devices:       filter.Devices{{Name: "port0"}},
+				Src4s:         []xnetip.Contiguous[xnetip.Network4]{xnetip.MustParseContiguous4("10.0.0.1/255.255.255.255")},
+				Dst4s:         []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
+				Src6s:         []xnetip.BiContiguous{},
+				Dst6s:         []xnetip.BiContiguous{},
+				SrcPortRanges: allPorts,
+				DstPortRanges: allPorts,
+				ProtoRanges:   udpProto,
+			},
+			{
+				Actions:       []cacl.ACLAction{{Kind: cacl.ActionCount}, {Kind: cacl.ActionAllow}},
+				Counter:       "dns",
+				Devices:       filter.Devices{{Name: "port0"}},
+				Src4s:         []xnetip.Contiguous[xnetip.Network4]{xnetip.MustParseContiguous4("10.0.0.2/255.255.255.255")},
+				Dst4s:         []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
+				Src6s:         []xnetip.BiContiguous{},
+				Dst6s:         []xnetip.BiContiguous{},
+				SrcPortRanges: allPorts,
+				DstPortRanges: allPorts,
+				ProtoRanges:   udpProto,
+			},
+		}
+
+		eth := layers.Ethernet{
+			SrcMAC:       xerror.Unwrap(net.ParseMAC("aa:bb:cc:dd:ee:ff")),
+			DstMAC:       xerror.Unwrap(net.ParseMAC("11:22:33:44:55:66")),
+			EthernetType: layers.EthernetTypeIPv4,
+		}
+		ip4 := layers.IPv4{
+			Version:  4,
+			TTL:      64,
+			Protocol: layers.IPProtocolUDP,
+			DstIP:    net.ParseIP("10.1.0.1"),
+		}
+
+		// Each burst packet is built fresh; the source address picks
+		// the rule its counter must land on.
+		makePacket := func(src string, dport layers.UDPPort) (gopacket.Packet, int) {
+			ip := ip4
+			ip.SrcIP = net.ParseIP(src)
+			udp := layers.UDP{SrcPort: 12345, DstPort: dport}
+			udp.SetNetworkLayerForChecksum(&ip)
+			pkt := xpacket.LayersToPacket(t, &eth, &ip, &udp)
+			return pkt, len(pkt.Data())
+		}
+
+		httpPacket := func() (gopacket.Packet, int) {
+			return makePacket("10.0.0.1", 80)
+		}
+		dnsPacket := func() (gopacket.Packet, int) {
+			return makePacket("10.0.0.2", 53)
+		}
+
+		h, agent, backend := setupACLHarness(t, []string{"port0"})
+		applyACLRules(t, backend, "test", rules)
+		wireACLPipeline(t, agent, "port0", "test")
+
+		burst := func(want int, packets ...gopacket.Packet) {
+			result, err := h.HandlePackets(packets...)
+			require.NoError(t, err)
+			require.Len(t, result.Output, want)
+		}
+
+		// First burst: 3 http packets interleaved with 2 dns packets.
+		p0, httpSize := httpPacket()
+		p1, dnsSize := dnsPacket()
+		p2, _ := httpPacket()
+		p3, _ := dnsPacket()
+		p4, _ := httpPacket()
+		burst(5, p0, p1, p2, p3, p4)
+
+		// Second burst: 1 http packet after 2 dns packets, so the
+		// second batch re-accrues both rules on top of the first.
+		p5, _ := dnsPacket()
+		p6, _ := dnsPacket()
+		p7, _ := httpPacket()
+		burst(3, p5, p6, p7)
+
+		path := aclCounterPath("port0", "test")
+		dataplaneut.RequireRuleCounter(t, h, path, "http", 4, 4*uint64(httpSize))
+		dataplaneut.RequireRuleCounter(t, h, path, "dns", 4, 4*uint64(dnsSize))
+	})
+
 	t.Run("rules_counters_via_service", func(t *testing.T) {
 		// GetRulesCounters serves the per-rule counters of a config applied
 		// through the service, while Metrics reports no per-rule counters.
