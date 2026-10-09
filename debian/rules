@@ -51,7 +51,19 @@ override_dh_auto_configure:
 override_dh_auto_test:
 	:
 
+execute_after_dh_auto_clean:
+	$(MAKE) -C scripts/bpftime/cp-lock clean
+
+execute_after_dh_auto_build:
+ifneq (,$(filter yanet2-cp-lock-bpftime,$(shell dh_listpackages)))
+	$(MAKE) -C scripts/bpftime/cp-lock prepare
+	$(MAKE) -C scripts/bpftime/cp-lock all
+endif
+
 execute_after_dh_auto_install:
+ifneq (,$(filter yanet2-cp-lock-bpftime,$(shell dh_listpackages)))
+	$(MAKE) -C scripts/bpftime/cp-lock install DESTDIR=$(CURDIR)/debian/tmp
+endif
 	./scripts/gen-shell-completions.sh debian/yanet2-cli.install \
 		debian/tmp/usr/share/bash-completion/completions \
 		debian/tmp/usr/share/zsh/vendor-completions
@@ -65,4 +77,3 @@ override_dh_dwz:
 
 override_dh_strip:
 	dh_strip --dbgsym-migration='yanet2-dbgsym (<< 0.0.1-1~)'
-
