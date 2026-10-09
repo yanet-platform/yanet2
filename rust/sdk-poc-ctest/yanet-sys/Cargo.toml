@@ -1,0 +1,17 @@
+[package]
+name = "yanet-sys"
+version = "0.1.0"
+description = "Hand-written repr(C) mirrors of YANET shared-memory layouts and the strict-provenance resolver."
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+zerocopy.workspace = true
+
+[dev-dependencies]
+yanet-testkit = { path = "../yanet-testkit" }
+
+[lints]
+workspace = true

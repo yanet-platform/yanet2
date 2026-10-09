@@ -1,0 +1,44 @@
+# Lab baseline dataplane configuration with the Rust decap plugin.
+#
+# Identical to the functional-test baseline with a plugin directory, except
+# that the directory is the PoC's release output, shared into the guest
+# read-only at /mnt/yanet2. The loader resolves new_module_decap from a
+# plugin before the built-in module, so every decap instance runs the Rust
+# handler.
+dataplane:
+  storage: /dev/hugepages/yanet
+  dpdk_memory: 128
+  loglevel: trace
+  plugin_dir: /mnt/yanet2/rust/sdk-poc-ctest/target/release
+  instances:
+    - dp_memory: 96 MiB
+      cp_memory: 160 MiB
+      numa_id: 0
+  devices:
+    - port_name: 01:00.0
+      mac_addr: 52:54:00:6b:ff:a5
+      mtu: 7000
+      max_lro_packet_size: 7200
+      rss_hash: 0
+      workers:
+        - core_id: 0
+          instance_id: 0
+          rx_queue_len: 1024
+          tx_queue_len: 1024
+          num_mbufs: 2048
+    - port_name: virtio_user_kni0
+      mac_addr: 52:54:00:6b:ff:a5
+      mtu: 7000
+      max_lro_packet_size: 7200
+      rss_hash: 0
+      workers:
+        - core_id: 0
+          instance_id: 0
+          rx_queue_len: 1024
+          tx_queue_len: 1024
+          num_mbufs: 2048
+  connections:
+    - src_device: 01:00.0
+      dst_device: virtio_user_kni0
+    - src_device: virtio_user_kni0
+      dst_device: 01:00.0

@@ -1,0 +1,31 @@
+$schema: ../../../../lab/yanet2-lab.schema.json
+version: 1
+name: decap-rs-proof
+description: >-
+  Run after the built-in decap scenario on a session booted by
+  decap-rs-boot: show that the dataplane that forwarded the scenario's
+  packet still has the Rust plugin bound and mapped, decapsulate the
+  scenario's packet again, and check that an outer fragment is dropped.
+steps:
+  - name: single-dataplane-start
+    argv: [bash, -c, "test \"$(grep -cF 'module decap found in plugin decap' /tmp/yanet/logs/yanet-dataplane.log)\" = 1"]
+  - name: decap-bound-to-plugin
+    argv: [grep, -F, "module decap found in plugin decap", /tmp/yanet/logs/yanet-dataplane.log]
+  - name: plugin-mapped
+    argv: [bash, -c, "grep -F libdecap_dp.so /proc/$(pgrep -o yanet-dataplan)/maps"]
+  - name: pipeline
+    argv: [/tmp/yanet/cli/yanet-cli-inspect]
+    timeout: 10s
+probes:
+  - name: decap-ipv4-again
+    ingress: 0
+    egress: 0
+    timeout: 1s
+    send: {pcap: input.pcap}
+    expect: {pcap: expected.pcap}
+  - name: outer-fragment-dropped
+    ingress: 0
+    egress: 0
+    timeout: 1s
+    send: {pcap: fragment.pcap}
+    expect: {drop: true}

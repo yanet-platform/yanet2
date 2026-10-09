@@ -1,0 +1,20 @@
+[package]
+name = "systest"
+version = "0.1.0"
+description = "ctest layout verification of the yanet-sys mirrors against the C headers."
+# ctest 0.5.1 emits `gen` unescaped, a reserved word in edition 2024.
+edition = "2021"
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+build = "build.rs"
+
+[dependencies]
+zerocopy.workspace = true
+
+[build-dependencies]
+ctest = "0.5.1"
+yanet-build = { path = "../yanet-build" }
+
+[lints]
+workspace = true

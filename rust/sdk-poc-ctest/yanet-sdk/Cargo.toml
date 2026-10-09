@@ -1,0 +1,18 @@
+[package]
+name = "yanet-sdk"
+version = "0.1.0"
+description = "Module-facing SDK: the safe module trait and the export macro."
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+yanet-sys = { path = "../yanet-sys" }
+zerocopy.workspace = true
+
+[dev-dependencies]
+yanet-testkit = { path = "../yanet-testkit" }
+
+[lints]
+workspace = true
