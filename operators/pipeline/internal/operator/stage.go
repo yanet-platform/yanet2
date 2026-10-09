@@ -7,8 +7,9 @@ type StageConfig struct {
 }
 
 type DevicesConfig struct {
-	Plain []DeviceConfig     `yaml:"plain"`
-	VLAN  []VLANDeviceConfig `yaml:"vlan"`
+	Plain []DeviceConfig      `yaml:"plain"`
+	VLAN  []VLANDeviceConfig  `yaml:"vlan"`
+	VXLAN []VXLANDeviceConfig `yaml:"vxlan"`
 }
 
 type PipelineConfig struct {
@@ -27,6 +28,27 @@ type VLANDeviceConfig struct {
 	VLAN   uint32              `yaml:"vlan"`
 	Input  []PipelineRefConfig `yaml:"input"`
 	Output []PipelineRefConfig `yaml:"output"`
+}
+
+// VXLANDeviceConfig binds a vxlan device to its pipelines and its IPv4
+// tunnel.
+type VXLANDeviceConfig struct {
+	Name   string              `yaml:"name"`
+	Tunnel VXLANTunnelConfig   `yaml:"tunnel"`
+	Input  []PipelineRefConfig `yaml:"input"`
+	Output []PipelineRefConfig `yaml:"output"`
+}
+
+// VXLANTunnelConfig is the tunnel of a vxlan device.
+//
+// Addresses are written in their usual text forms: dotted-quad IPv4 and
+// colon-separated EUI-48.
+type VXLANTunnelConfig struct {
+	LocalIP   string `yaml:"local_ip"`
+	RemoteIP  string `yaml:"remote_ip"`
+	LocalMAC  string `yaml:"local_mac"`
+	RemoteMAC string `yaml:"remote_mac"`
+	VNI       uint32 `yaml:"vni"`
 }
 
 type PipelineRefConfig struct {

@@ -70,3 +70,11 @@ option(
   description: 'Additional module directories under modules/ to build, '
                 + 'beyond the built-in set (for optional or vendored modules).',
 )
+
+option(
+  'dataplane_rust',
+  type: 'feature',
+  value: 'auto',
+  description: 'Link the builtin Rust device types (cargo and libclang '
+                + 'required) into the dataplane.',
+)

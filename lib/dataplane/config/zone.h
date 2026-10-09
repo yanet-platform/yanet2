@@ -34,6 +34,8 @@ struct dp_device {
 	device_handler input_handler;
 	device_handler output_handler;
 	device_commit_handler commit_handler;
+	// Configuration layout of the loaded device type; see struct device.
+	uint64_t config_layout;
 };
 
 /*

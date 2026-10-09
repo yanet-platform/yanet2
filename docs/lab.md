@@ -121,6 +121,10 @@ route FIB) is still applied after the custom boot.
   IPv4-in-IPv4 transformation.
 - `nat64` configures an unmanaged prefix and mapping and verifies an exact
   IPv4-to-IPv6 transformation.
+- `vxlan` boots a control plane with the vxlan device service, creates the
+  Rust vxlan device through its CLI, steers port traffic into it with forward
+  rules, and verifies an exact encapsulation, an exact decapsulation and the
+  drop of a foreign VNI.
 
 Run `reset` between unrelated experiments. Scenario execution is fail-fast and
 writes its latest structured report to the session runtime directory under the

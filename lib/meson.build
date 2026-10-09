@@ -12,3 +12,4 @@ subdir('l3state') # depends on the statemap lib
 subdir('fuzzing')
 subdir('dataplane_ut')
 subdir('tests') # depends on utils lib
+subdir('rust') # depends on dataplane libs

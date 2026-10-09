@@ -1,0 +1,15 @@
+[package]
+name = "yanet-device-vxlan"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.88"
+publish = false
+workspace = "../../../lib/rust"
+
+[lints]
+workspace = true
+
+[dependencies]
+yanet-dp-sys = { path = "../../../lib/rust/yanet-dp-sys" }
+yanet-vxlan-config = { path = "../config" }
+zerocopy.workspace = true

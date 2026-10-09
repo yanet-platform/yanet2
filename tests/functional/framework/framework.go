@@ -62,7 +62,7 @@ var CLIBinaryNames = []string{
 	"yanet-cli-nat64", "yanet-cli-acl", "yanet-cli-blackhole",
 	"yanet-cli-fwstate", "yanet-cli-fwstatemap", "yanet-cli-ring",
 	"yanet-cli-pipeline", "yanet-cli-function",
-	"yanet-cli-device-plain", "yanet-cli-device-vlan",
+	"yanet-cli-device-plain", "yanet-cli-device-vlan", "yanet-cli-device-vxlan",
 	"yanet-cli-decap", "yanet-cli-forward",
 	"yanet-cli-common", "yanet-cli-dscp", "yanet-cli-counters",
 	"yanet-cli-pdump", "yanet-cli-inspect",

@@ -39,6 +39,7 @@ custom_target(
         trafgen_protoc_gen,
         plain_protoc_gen,
         vlan_protoc_gen,
+        vxlan_protoc_gen,
         filter_protoc_gen,
         fwstate_protoc_gen,
         l3b_protoc_gen,
@@ -76,7 +77,9 @@ custom_target(
         lib_agent_counters,
         lib_counter_pattern,
         lib_ring_objects,
-    ] + librure_targets,
+        lib_rust_cp,
+        lib_rust_cp_shim,
+    ],
     install: true,
     install_dir: get_option('bindir'),
 )

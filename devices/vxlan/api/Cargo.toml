@@ -1,0 +1,18 @@
+[package]
+name = "yanet-vxlan-api"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.88"
+publish = false
+workspace = "../../../lib/rust/cp"
+
+[lints]
+workspace = true
+
+[dependencies]
+yanet-cp-sys = { path = "../../../lib/rust/cp/yanet-cp-sys" }
+yanet-shm = { path = "../../../lib/rust/yanet-shm" }
+yanet-vxlan-config = { path = "../config" }
+
+[dev-dependencies]
+yanet-cp-sys = { path = "../../../lib/rust/cp/yanet-cp-sys", features = ["fixture"] }

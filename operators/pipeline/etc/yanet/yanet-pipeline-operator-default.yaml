@@ -46,6 +46,7 @@ stages:
             - name: bypass
               weight: 1
       vlan: []
+      vxlan: []
   - name: production
     pipelines:
       - name: main
@@ -66,3 +67,4 @@ stages:
             - name: bypass
               weight: 1
       vlan: []
+      vxlan: []

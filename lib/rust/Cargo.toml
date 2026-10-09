@@ -1,0 +1,40 @@
+# Dataplane Rust workspace: everything statically linked into yanet-dataplane.
+#
+# Separate from the root CLI workspace because it is no_std, needs libclang
+# for bindgen and links as exactly one archive: the builtins umbrella crate.
+# Every builtin Rust device, module or object joins as a member and as a
+# dependency of the umbrella.
+[workspace]
+resolver = "2"
+members = [
+    "yanet-shm",
+    "yanet-shm-derive",
+    "yanet-dp-sys",
+    "yanet-dp-builtins",
+    "../../devices/vxlan/config",
+    "../../devices/vxlan/dataplane",
+]
+
+[workspace.package]
+edition = "2024"
+rust-version = "1.88"
+publish = false
+
+[workspace.dependencies]
+bindgen = { version = "0.72", default-features = false, features = ["runtime"] }
+zerocopy = { version = "0.8", features = ["derive"] }
+
+[workspace.lints.rust]
+unused_crate_dependencies = "deny"
+
+[workspace.lints.clippy]
+std_instead_of_core = "deny"
+
+# The dataplane never unwinds: a panic aborts the process.
+[profile.dev]
+panic = "abort"
+
+[profile.release]
+panic = "abort"
+lto = true
+codegen-units = 1

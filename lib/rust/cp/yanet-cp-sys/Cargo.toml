@@ -1,0 +1,16 @@
+[package]
+name = "yanet-cp-sys"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[features]
+# A heap-backed fake of an agent's memory for tests of api crates.
+fixture = []
+
+[dependencies]
+yanet-shm = { path = "../../yanet-shm" }

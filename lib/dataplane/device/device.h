@@ -1,5 +1,7 @@
 #pragma once
 
+#include <stdint.h>
+
 #define DEVICE_TYPE_LEN 80
 
 struct packet_front;
@@ -37,6 +39,12 @@ struct device {
 	device_handler input_handler;
 	device_handler output_handler;
 	device_commit_handler commit_handler;
+	// Layout of the configuration the handlers read, as a fingerprint the
+	// control plane must present when it creates a device of this type.
+	//
+	// Zero for a device whose configuration layout is the C struct its
+	// handlers are compiled against, which every C device is.
+	uint64_t config_layout;
 };
 
 typedef struct device *(*device_load_handler)();

@@ -8,6 +8,7 @@
 #include "lib/controlplane/config/zone.h"
 
 #include <errno.h>
+#include <inttypes.h>
 
 int
 cp_device_config_init(
@@ -137,15 +138,41 @@ cp_device_init(
 	const struct cp_device_config *cfg,
 	yanet_error **err
 ) {
+	return cp_device_init_layout(self, agent, cfg, 0, err);
+}
+
+int
+cp_device_init_layout(
+	struct cp_device *self,
+	struct agent *agent,
+	const struct cp_device_config *cfg,
+	uint64_t config_layout,
+	yanet_error **err
+) {
 	struct dp_config *dp_config = ADDR_OF(&agent->dp_config);
 
 	if (dp_config_lookup_device(
 		    dp_config, cfg->type, &self->dp_device_idx
 	    )) {
-		yanet_error_add(
+		yanet_error_add_kind(
 			err,
+			YANET_ERROR_FAILED_PRECONDITION,
 			"device type '%s' not found in dataplane config",
 			cfg->type
+		);
+		goto err_out;
+	}
+	struct dp_device *dp_device =
+		ADDR_OF(&dp_config->dp_devices) + self->dp_device_idx;
+	if (dp_device->config_layout != config_layout) {
+		yanet_error_add_kind(
+			err,
+			YANET_ERROR_FAILED_PRECONDITION,
+			"device type '%s' expects configuration layout "
+			"%016" PRIx64 ", the control plane builds %016" PRIx64,
+			cfg->type,
+			dp_device->config_layout,
+			config_layout
 		);
 		goto err_out;
 	}

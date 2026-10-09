@@ -1,0 +1,8 @@
+rules:
+  - action:
+      target: "01:00.0"
+      mode: OUT
+      counter: vx_to_port
+    vlan_ranges:
+      - from: 0
+        to: 4095
