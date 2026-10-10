@@ -15,7 +15,10 @@
 // 32: struct packet dropped the module_device_id field (56 -> 48 bytes).
 // 33: struct module_ectx replaced the device index tables with the
 // per-device routing targets and the module device id.
-#define YANET_MODULE_ABI_VERSION 33
+// 34: struct packet_front dropped the pending tallies; module_ectx gained
+// the chain back-reference, device_entry_ectx and config_gen_ectx carry
+// bare packet lists instead of fronts.
+#define YANET_MODULE_ABI_VERSION 34
 
 // Symbol name a module .so exports carrying its compiled-against
 // YANET_MODULE_ABI_VERSION, as a uint32_t global.

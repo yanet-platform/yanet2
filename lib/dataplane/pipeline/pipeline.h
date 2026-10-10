@@ -15,6 +15,7 @@ config_gen_ectx_resolve_counters(struct config_gen_ectx *config_gen_ectx);
 void
 device_ectx_process_input(
 	struct dp_worker *dp_worker,
+	struct config_gen_ectx *config_gen_ectx,
 	struct device_ectx *device_ectx,
 	struct packet_front *packet_front
 );
@@ -22,6 +23,7 @@ device_ectx_process_input(
 void
 device_ectx_process_output(
 	struct dp_worker *dp_worker,
+	struct config_gen_ectx *config_gen_ectx,
 	struct device_ectx *device_ectx,
 	struct packet_front *packet_front
 );

@@ -38,9 +38,9 @@ static inline void
 device_entry_ectx_count_recirc_drop(
 	struct device_entry_ectx *entry_ectx, const struct packet *packet
 ) {
-	uint64_t *counter =
-		counter_handle_get_value(entry_ectx->counter_packet_recirc_drop
-		);
+	uint64_t *counter = counter_handle_get_value(
+		entry_ectx->counter_packet_recirc_drop
+	);
 	counter[0] += 1;
 	counter[1] += rte_pktmbuf_pkt_len(packet_to_mbuf(packet));
 }
@@ -87,7 +87,21 @@ config_gen_ectx_schedules_prepare(struct config_gen_ectx *config_gen_ectx) {
 	config_gen_ectx->schedules_ready = 1;
 }
 
-// Schedule a packet onto a device entry's input list, moving the entry
+// Count one packet and its first-segment bytes into a counter handle.
+//
+// Counter slot 0 stores packets, slot 1 bytes. Unlike
+// device_entry_ectx_count_recirc_drop this uses the cached data_len the
+// packet fronts tally, matching the per-stage rx/in/drop counters.
+static inline void
+counter_add_one_packet(
+	struct counter_value_handle *counter, const struct packet *packet
+) {
+	uint64_t *values = counter_handle_get_value(counter);
+	values[0] += 1;
+	values[1] += packet->data_len;
+}
+
+// Schedule a packet onto a device entry's inbox, moving the entry
 // onto the round's ready list when needed.
 //
 // An entry anywhere but ready — home, or already drained onto the
@@ -97,6 +111,9 @@ config_gen_ectx_schedules_prepare(struct config_gen_ectx *config_gen_ectx) {
 // may sit on any of the round's lists. Packets are only scheduled
 // from inside a worker round, whose preparation built the worklists
 // before any of them, so no readiness check is needed here.
+//
+// The inbox is a bare list: the entry's rx counter is credited here,
+// at the one site that touches every scheduled packet.
 static inline void
 device_entry_ectx_schedule(
 	struct config_gen_ectx *config_gen_ectx,
@@ -112,21 +129,24 @@ device_entry_ectx_schedule(
 		device_entry_ectx->schedule_list = device_entry_schedule_ready;
 	}
 
-	packet_front_input(&device_entry_ectx->schedule, packet);
+	packet_list_add(&device_entry_ectx->schedule, packet);
+	counter_add_one_packet(device_entry_ectx->counter_packet_rx, packet);
 }
 
-// Route a packet to a target device's input entry, counting it as
-// pending_input on the originating schedule.
+// Route a packet to a target device's input entry, crediting the
+// pending_input counters of the module and every enclosing stage.
 //
 // The entry comes from the module's device target table, so it is never
-// NULL here; the packet lands on its schedule input so the next round
-// picks it up. Input and output routes share the packet lineage budget;
-// an exhausted budget drops on the originating schedule and increments
+// NULL here; the packet lands on its inbox so the next round picks it
+// up. Input and output routes share the packet lineage budget; an
+// exhausted budget drops on the originating schedule and increments
 // the target entry's input_recirc_drop counter. packet->tx_device_id
 // must already name the destination: the worker's transmit path picks
 // the physical device by it once the packet leaves the pipeline. The
 // pending counters count every route attempt, including dropped
-// packets.
+// packets. Routing is the cold path (recirculation), so the five
+// direct credits here replace the tallies the fronts used to fold
+// upward through the stage merges.
 static inline void
 module_ectx_route_input(
 	struct module_ectx *module_ectx,
@@ -134,8 +154,19 @@ module_ectx_route_input(
 	struct device_entry_ectx *entry_ectx,
 	struct packet *packet
 ) {
-	packet_front->pending_input_count += 1;
-	packet_front->pending_input_bytes += packet->data_len;
+	struct chain_ectx *chain_ectx = module_ectx->abs_chain_ectx;
+
+	counter_add_one_packet(module_ectx->pending_input_counter, packet);
+	counter_add_one_packet(
+		chain_ectx->abs_counter_packet_pending_input, packet
+	);
+	counter_add_one_packet(
+		chain_ectx->sinks.function_pending_input, packet
+	);
+	counter_add_one_packet(
+		chain_ectx->sinks.pipeline_pending_input, packet
+	);
+	counter_add_one_packet(chain_ectx->sinks.entry_pending_input, packet);
 
 	if (!packet_recirc_try_redirect(
 		    packet, module_ectx->packet_recirc_limit
@@ -149,11 +180,11 @@ module_ectx_route_input(
 	);
 }
 
-// Route a packet to a target device's output entry, counting it as
-// pending_output on the originating schedule.
+// Route a packet to a target device's output entry, crediting the
+// pending_output counters of the module and every enclosing stage.
 //
 // Symmetric to module_ectx_route_input: the packet is placed on the
-// target device's output-pipelines schedule. packet->tx_device_id must
+// target device's output-pipelines inbox. packet->tx_device_id must
 // already name the destination, as above.
 static inline void
 module_ectx_route_output(
@@ -162,8 +193,19 @@ module_ectx_route_output(
 	struct device_entry_ectx *entry_ectx,
 	struct packet *packet
 ) {
-	packet_front->pending_output_count += 1;
-	packet_front->pending_output_bytes += packet->data_len;
+	struct chain_ectx *chain_ectx = module_ectx->abs_chain_ectx;
+
+	counter_add_one_packet(module_ectx->pending_output_counter, packet);
+	counter_add_one_packet(
+		chain_ectx->abs_counter_packet_pending_output, packet
+	);
+	counter_add_one_packet(
+		chain_ectx->sinks.function_pending_output, packet
+	);
+	counter_add_one_packet(
+		chain_ectx->sinks.pipeline_pending_output, packet
+	);
+	counter_add_one_packet(chain_ectx->sinks.entry_pending_output, packet);
 
 	if (!packet_recirc_try_redirect(
 		    packet, module_ectx->packet_recirc_limit
