@@ -3,7 +3,7 @@ cp_dependencies = [
   lib_config_cp_dep,
   lib_counters_dep,
   lib_errors_dep,
-  lib_filter_compiler_dep,
+  lib_classify_compiler_dep,
   lib_l3state_dep,
 ]
 

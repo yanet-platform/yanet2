@@ -184,14 +184,6 @@ int
 main(void) {
 	log_enable_name("info");
 
-	// The in-place readers under test do not reference the filter
-	// queries declared alongside them; these casts keep the unused
-	// declarations from failing the build.
-	(void)l3b_source_filter_ip4;
-	(void)l3b_source_filter_ip6;
-	(void)l3b_destination_filter_ip4;
-	(void)l3b_destination_filter_ip6;
-
 	struct {
 		const char *name;
 		int (*fn)(void);

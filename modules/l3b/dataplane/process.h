@@ -29,17 +29,7 @@
 #include "lib/dataplane/packet/packet.h"
 #include "lib/dataplane/pipeline/econtext.h"
 
-#include <lib/filter/query.h>
-
-// Per-service source filter: classifies incoming packets by source network and
-// destination (service) port.
-FILTER_QUERY_DECLARE(l3b_source_filter_ip4, net4_src, port_dst);
-FILTER_QUERY_DECLARE(l3b_source_filter_ip6, net6_src, port_dst);
-
-// Module-level destination filter: classifies incoming packets by destination
-// network and protocol into a virtual service index.
-FILTER_QUERY_DECLARE(l3b_destination_filter_ip4, net4_dst, proto_range);
-FILTER_QUERY_DECLARE(l3b_destination_filter_ip6, net6_dst, proto_range);
+#include "filter_lookup.h"
 
 // The ICMP type byte of an initial packet, or -1 when the packet carries
 // no complete ICMP header.
@@ -764,8 +754,6 @@ l3b_virtual_service_process(
 	const uint64_t *link_packets,
 	struct counter_storage *counters
 ) {
-	uint16_t type = packet->network_header.type;
-
 	l3b_counter_add(counters, virtual_service->counter_incoming, packet);
 
 	// Echo replies require configured reals, regardless of eligibility.
@@ -784,23 +772,7 @@ l3b_virtual_service_process(
 		return 0;
 	}
 
-	const struct filter_query *query;
-	struct filter *filter;
-
-	if (type == rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV4)) {
-		filter = &virtual_service->filter_ip4;
-		query = l3b_source_filter_ip4;
-	} else if (type == rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV6)) {
-		filter = &virtual_service->filter_ip6;
-		query = l3b_source_filter_ip6;
-	} else {
-		return -1;
-	}
-
-	struct packet *packets[1] = {packet};
-	uint32_t result[1];
-	filter_query(filter, query, packets, result, 1);
-	if (result[0] == FILTER_RULE_INVALID) {
+	if (!l3b_source_filter_matches(virtual_service, packet)) {
 		l3b_counter_add(
 			counters,
 			virtual_service->counter_filter_rejected,
