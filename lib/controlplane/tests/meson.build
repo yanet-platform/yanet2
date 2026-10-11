@@ -108,6 +108,7 @@ device_list_test = executable(
     '-Wl,--undefined=new_device_plain',
     '-Wl,--export-dynamic-symbol=new_device_plain',
     '-Wl,--wrap=malloc',
+    '-Wl,--wrap=calloc',
   ],
   dependencies: [
     lib_dataplane_ut_dep,

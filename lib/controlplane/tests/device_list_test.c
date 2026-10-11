@@ -71,22 +71,22 @@ static _Thread_local bool control_device_info_read;
 void *
 __real_malloc(size_t size);
 
-// Stop one selected allocation before the reader resumes source copying.
 void *
-__wrap_malloc(size_t size) {
-	if (!control_device_info_read) {
-		return __real_malloc(size);
-	}
+__real_calloc(size_t nmemb, size_t size);
 
+// Stop one selected allocation before the reader resumes source
+// copying, and report whether the allocation must fail.
+static bool
+allocation_gate_stop(size_t size) {
 	pthread_mutex_lock(&device_info_gate.mutex);
 	if (!device_info_gate.armed || size != device_info_gate.size) {
 		pthread_mutex_unlock(&device_info_gate.mutex);
-		return __real_malloc(size);
+		return false;
 	}
 	if (device_info_gate.skip != 0) {
 		--device_info_gate.skip;
 		pthread_mutex_unlock(&device_info_gate.mutex);
-		return __real_malloc(size);
+		return false;
 	}
 
 	device_info_gate.armed = false;
@@ -99,8 +99,28 @@ __wrap_malloc(size_t size) {
 	}
 	bool fail = device_info_gate.fail;
 	pthread_mutex_unlock(&device_info_gate.mutex);
+	return fail;
+}
 
-	return fail ? NULL : __real_malloc(size);
+void *
+__wrap_malloc(size_t size) {
+	if (control_device_info_read && allocation_gate_stop(size)) {
+		return NULL;
+	}
+	return __real_malloc(size);
+}
+
+// A compiler may serve a zeroed reader allocation through the zeroing
+// entry point instead of the plain one, so the gate observes both.
+void *
+__wrap_calloc(size_t nmemb, size_t size) {
+	size_t total;
+	if (control_device_info_read &&
+	    __builtin_mul_overflow(nmemb, size, &total) == 0 &&
+	    allocation_gate_stop(total)) {
+		return NULL;
+	}
+	return __real_calloc(nmemb, size);
 }
 
 // Arm one selected allocation stop for the next snapshot read.
