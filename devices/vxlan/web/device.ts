@@ -12,7 +12,7 @@ const save = async (device: BaseDevice): Promise<Record<string, unknown>> => {
         throw new Error('tunnel settings are incomplete or invalid');
     }
     const ext = resolvedExt(device);
-    const response = await devices.updateVxlan({
+    await devices.updateVxlan({
         name: device.id.name,
         device: toDevicePayload(device.inputPipelines, device.outputPipelines),
         vni: ext.vni,
@@ -22,9 +22,6 @@ const save = async (device: BaseDevice): Promise<Record<string, unknown>> => {
         src_ip: ext.srcIp,
         dst_ip: ext.dstIp,
     });
-    if (response.error) {
-        throw new Error(response.error);
-    }
     return { ...ext };
 };
 

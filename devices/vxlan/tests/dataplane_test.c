@@ -474,11 +474,15 @@ main(void) {
 	size_t after_create =
 		block_allocator_free_size(&agent->block_allocator);
 
-	// Releasing the device parks it on the agent instead of destroying
-	// it, so the next construction must reclaim the parked entry whole:
-	// its free bytes then equal the first construction's, and repeated
-	// create/release cycles cannot exhaust the agent memory.
-	cp_device_vxlan_free(cp_device);
+	// No generation ever registered the device, so it is dangling and
+	// the free destroys it at once: free bytes return to the
+	// pre-construction level, and repeated create/release cycles cannot
+	// exhaust the agent memory.
+	TEST_ASSERT_EQUAL(
+		cp_device_vxlan_free(cp_device, &err),
+		0,
+		"a dangling device must destroy on release"
+	);
 
 	struct cp_device_vxlan_config *reclaim_cfg =
 		cp_device_vxlan_config_new("tun1", 1, 1, &test_settings, &err);
@@ -495,12 +499,16 @@ main(void) {
 	TEST_ASSERT_EQUAL(
 		(long)after_reclaim,
 		(long)after_create,
-		"a parked device must return every arena byte on reclaim: "
+		"a released device must return every arena byte: "
 		"after_create=%zu after_reclaim=%zu",
 		after_create,
 		after_reclaim
 	);
-	cp_device_vxlan_free(reclaimed);
+	TEST_ASSERT_EQUAL(
+		cp_device_vxlan_free(reclaimed, &err),
+		0,
+		"a dangling device must destroy on release"
+	);
 
 	agent_detach(agent);
 	dataplane_ut_free(ut);

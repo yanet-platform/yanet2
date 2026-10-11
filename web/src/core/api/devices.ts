@@ -53,9 +53,7 @@ export interface UpdateDeviceVxlanRequest {
     dst_ip?: string;
 }
 
-export interface UpdateDeviceVxlanResponse {
-    error?: string;
-}
+export interface UpdateDeviceVxlanResponse {}
 
 // VXLAN device get request/response
 export interface GetDeviceVxlanRequest {

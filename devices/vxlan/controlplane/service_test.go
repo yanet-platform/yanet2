@@ -59,11 +59,9 @@ func attachVxlanAgent(t *testing.T) (*ffi.SharedMemory, *ffi.Agent) {
 // TestUpdateDevice_DrainsSupersededDevices verifies that repeated
 // UpdateDevice calls do not leak shared-memory arena space.
 //
-// Each update after the first retires the previous generation's device, and
-// the service releases it through the reference tracker. A retired device
-// whose generation reference is already dropped parks on the agent, and every
-// later construction reclaims the previous parked entry before parking a new
-// one, so free bytes must settle instead of decreasing indefinitely.
+// Each update after the first supersedes the previous generation's device;
+// freeing that handle destroys it once it is dangling, so the arena must
+// settle after the first supersede instead of decreasing indefinitely.
 func TestUpdateDevice_DrainsSupersededDevices(t *testing.T) {
 	shm, agent := attachVxlanAgent(t)
 
@@ -78,9 +76,9 @@ func TestUpdateDevice_DrainsSupersededDevices(t *testing.T) {
 		require.NoError(t, err)
 
 		freeBytes := freeBytesForAgent(t, shm, "vxlan")
-		// The first supersede parks the old device without destroying
-		// it, so its space stays held once; every later construction
-		// reclaims the previous parked entry before parking a new one.
+		// The first supersede is measured before anything was freed
+		// against it; every later update destroys its superseded
+		// predecessor, so free bytes must hold steady from there on.
 		if idx > 1 {
 			require.Equalf(
 				t,
@@ -108,22 +106,6 @@ func TestUpdateDevice_InvalidArguments(t *testing.T) {
 		name   string
 		modify func(*vxlanpb.UpdateDeviceVxlanRequest)
 	}{
-		{
-			name:   "missing_name",
-			modify: func(request *vxlanpb.UpdateDeviceVxlanRequest) { request.Name = "" },
-		},
-		{
-			name: "name_beyond_device_name_limit",
-			modify: func(request *vxlanpb.UpdateDeviceVxlanRequest) {
-				request.Name = strings.Repeat("d", 80)
-			},
-		},
-		{
-			name: "name_with_embedded_nul",
-			modify: func(request *vxlanpb.UpdateDeviceVxlanRequest) {
-				request.Name = "tun0\x00suffix"
-			},
-		},
 		{
 			name:   "vni_over_24_bits",
 			modify: func(request *vxlanpb.UpdateDeviceVxlanRequest) { request.Vni = 1 << 24 },
@@ -178,15 +160,15 @@ func TestUpdateDevice_InvalidArguments(t *testing.T) {
 
 // TestUpdateDevice_NameLengthBoundary verifies that the longest name the
 // C device configuration can carry without truncation is accepted and
-// served back, while one byte more is rejected before any shared-memory
-// call.
+// served back, while the pb validation rejects one byte more.
 func TestUpdateDevice_NameLengthBoundary(t *testing.T) {
 	_, agent := attachVxlanAgent(t)
 
 	service := vxlan.NewDeviceVxlanService(agent)
 
-	longest := strings.Repeat("d", vxlan.DeviceNameMaxLength)
+	longest := strings.Repeat("d", commonpb.MaxDeviceNameLen-1)
 	request := newTunnelRequest(longest)
+	require.NoError(t, request.Validate())
 	_, err := service.UpdateDevice(t.Context(), request)
 	require.NoError(t, err)
 
@@ -197,13 +179,13 @@ func TestUpdateDevice_NameLengthBoundary(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, longest, response.GetName())
 
-	overlong := strings.Repeat("d", vxlan.DeviceNameMaxLength+1)
-	updateResponse, err := service.UpdateDevice(
-		t.Context(),
-		newTunnelRequest(overlong),
+	overlong := strings.Repeat("d", commonpb.MaxDeviceNameLen)
+	overlongRequest := newTunnelRequest(overlong)
+	require.EqualError(
+		t,
+		overlongRequest.Validate(),
+		"name must be shorter than 80 bytes",
 	)
-	require.Nil(t, updateResponse)
-	require.Equal(t, codes.InvalidArgument, status.Code(err))
 }
 
 // TestUpdateDevice_ConcurrentUpdates verifies that concurrent callers cannot
@@ -251,30 +233,17 @@ func freeBytesForAgent(t *testing.T, shm *ffi.SharedMemory, name string) uint64 
 	return 0
 }
 
-// TestGetDevice_InvalidName verifies that a GetDevice without a usable name
-// is rejected before the cache is consulted.
-func TestGetDevice_InvalidName(t *testing.T) {
+// TestGetDevice_UnknownName verifies that a GetDevice for a name nothing
+// was published under reports not found.
+func TestGetDevice_UnknownName(t *testing.T) {
 	service := vxlan.NewDeviceVxlanService(nil)
 
-	cases := []struct {
-		name       string
-		deviceName string
-		code       codes.Code
-	}{
-		{name: "empty_name", deviceName: "", code: codes.InvalidArgument},
-		{name: "unknown_name", deviceName: "missing", code: codes.NotFound},
-	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			response, err := service.GetDevice(
-				t.Context(),
-				&vxlanpb.GetDeviceVxlanRequest{Name: tc.deviceName},
-			)
-			require.Nil(t, response)
-			require.Equal(t, tc.code, status.Code(err))
-		})
-	}
+	response, err := service.GetDevice(
+		t.Context(),
+		&vxlanpb.GetDeviceVxlanRequest{Name: "missing"},
+	)
+	require.Nil(t, response)
+	require.Equal(t, codes.NotFound, status.Code(err))
 }
 
 // TestGetDevice_RoundTrip verifies that GetDevice echoes exactly the

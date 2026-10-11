@@ -38,7 +38,7 @@ message UpdateDeviceVxlanRequest {
   string dst_ip = 8;
 }
 
-message UpdateDeviceVxlanResponse { string error = 1; }
+message UpdateDeviceVxlanResponse {}
 
 message GetDeviceVxlanRequest { string name = 1; }
 

@@ -2791,13 +2791,16 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "clap_complete",
+ "netip",
  "prost",
  "serde",
- "tokio",
+ "tabled",
  "tonic",
- "tonic-build",
+ "tonic-prost",
  "yanet-cli",
+ "yanet-cli-build",
  "yanet-commonpb",
+ "yanet-ynpb",
 ]
 
 [[package]]

@@ -15,12 +15,14 @@ import (
 	"github.com/gopacket/gopacket/layers"
 	"github.com/stretchr/testify/require"
 
+	"github.com/yanet-platform/xnetip"
 	dataplaneut "github.com/yanet-platform/yanet2/bindings/go/dataplane_ut"
 	"github.com/yanet-platform/yanet2/bindings/go/filter"
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
 	"github.com/yanet-platform/yanet2/common/go/xerror"
 	"github.com/yanet-platform/yanet2/common/go/xpacket"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
+	plain "github.com/yanet-platform/yanet2/devices/plain/controlplane"
 	vxlan "github.com/yanet-platform/yanet2/devices/vxlan/controlplane"
 	"github.com/yanet-platform/yanet2/devices/vxlan/controlplane/vxlanpb/v1"
 	"github.com/yanet-platform/yanet2/modules/blackhole/bindings/go/cblackhole"
@@ -159,57 +161,57 @@ func wireVxlanPipelines(t *testing.T, agent *ffi.Agent) {
 			Target:  "port0",
 			Mode:    cforward.ModeOut,
 			Counter: "sink4",
-			Src4s:   filter.IPNets{filter.UnspecifiedIPv4},
-			Dst4s:   filter.IPNets{filter.UnspecifiedIPv4},
+			Src4s:   []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
+			Dst4s:   []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
 		},
 		{
 			Target:  "port0",
 			Mode:    cforward.ModeOut,
 			Counter: "sink6",
-			Src6s:   filter.IPNets{filter.UnspecifiedIPv6},
-			Dst6s:   filter.IPNets{filter.UnspecifiedIPv6},
+			Src6s:   []xnetip.BiContiguous{filter.UnspecifiedIPv6},
+			Dst6s:   []xnetip.BiContiguous{filter.UnspecifiedIPv6},
 		},
 	})
 	require.NoError(t, err)
-	t.Cleanup(sinkHandle.Free)
+	t.Cleanup(func() { _ = sinkHandle.Free() })
 
 	toTunInHandle, err := forward.NewBackend(agent).UpdateModule("to-tun-in", []cforward.ForwardRule{
 		{
 			Target:  "tun0",
 			Mode:    cforward.ModeIn,
 			Counter: "to_tun_in4",
-			Src4s:   filter.IPNets{filter.UnspecifiedIPv4},
-			Dst4s:   filter.IPNets{filter.UnspecifiedIPv4},
+			Src4s:   []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
+			Dst4s:   []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
 		},
 		{
 			Target:  "tun0",
 			Mode:    cforward.ModeIn,
 			Counter: "to_tun_in6",
-			Src6s:   filter.IPNets{filter.UnspecifiedIPv6},
-			Dst6s:   filter.IPNets{filter.UnspecifiedIPv6},
+			Src6s:   []xnetip.BiContiguous{filter.UnspecifiedIPv6},
+			Dst6s:   []xnetip.BiContiguous{filter.UnspecifiedIPv6},
 		},
 	})
 	require.NoError(t, err)
-	t.Cleanup(toTunInHandle.Free)
+	t.Cleanup(func() { _ = toTunInHandle.Free() })
 
 	toTunOutHandle, err := forward.NewBackend(agent).UpdateModule("to-tun-out", []cforward.ForwardRule{
 		{
 			Target:  "tun0",
 			Mode:    cforward.ModeOut,
 			Counter: "to_tun_out4",
-			Src4s:   filter.IPNets{filter.UnspecifiedIPv4},
-			Dst4s:   filter.IPNets{filter.UnspecifiedIPv4},
+			Src4s:   []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
+			Dst4s:   []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
 		},
 		{
 			Target:  "tun0",
 			Mode:    cforward.ModeOut,
 			Counter: "to_tun_out6",
-			Src6s:   filter.IPNets{filter.UnspecifiedIPv6},
-			Dst6s:   filter.IPNets{filter.UnspecifiedIPv6},
+			Src6s:   []xnetip.BiContiguous{filter.UnspecifiedIPv6},
+			Dst6s:   []xnetip.BiContiguous{filter.UnspecifiedIPv6},
 		},
 	})
 	require.NoError(t, err)
-	t.Cleanup(toTunOutHandle.Free)
+	t.Cleanup(func() { _ = toTunOutHandle.Free() })
 
 	chains := []struct {
 		function string
@@ -245,11 +247,12 @@ func wireVxlanPipelines(t *testing.T, agent *ffi.Agent) {
 func wirePortInput(t *testing.T, agent *ffi.Agent, pipeline string) {
 	t.Helper()
 
-	require.NoError(t, agent.UpdatePlainDevices([]ffi.DeviceConfig{{
+	_, err := plain.UpdateDevices(agent, []ffi.DeviceConfig{{
 		Name:   "port0",
 		Input:  []ffi.DevicePipelineConfig{{Name: pipeline, Weight: 1}},
 		Output: []ffi.DevicePipelineConfig{{Name: "port-dummy", Weight: 1}},
-	}}))
+	}})
+	require.NoError(t, err)
 }
 
 // wireUnderlayPipeline installs the "tun-underlay" pipeline for the tunnel's
@@ -267,8 +270,8 @@ func wireUnderlayPipeline(t *testing.T, agent *ffi.Agent) {
 			Target:  "port0",
 			Mode:    cforward.ModeOut,
 			Counter: "underlay4",
-			Src4s:   filter.IPNets{filter.MustParseIPNet(tunnelSrcIP + "/32")},
-			Dst4s:   filter.IPNets{filter.UnspecifiedIPv4},
+			Src4s:   []xnetip.Contiguous[xnetip.Network4]{xnetip.MustParseContiguous4(tunnelSrcIP + "/32")},
+			Dst4s:   []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
 		},
 		{
 			// Never matches: it only keeps the ip6 filter non-empty,
@@ -277,16 +280,16 @@ func wireUnderlayPipeline(t *testing.T, agent *ffi.Agent) {
 			Target:  "port0",
 			Mode:    cforward.ModeOut,
 			Counter: "underlay6",
-			Src6s:   filter.IPNets{filter.MustParseIPNet("2001:db8:7654:3210::/64")},
-			Dst6s:   filter.IPNets{filter.UnspecifiedIPv6},
+			Src6s:   []xnetip.BiContiguous{xnetip.MustParseBiContiguous("2001:db8:7654:3210::/64")},
+			Dst6s:   []xnetip.BiContiguous{filter.UnspecifiedIPv6},
 		},
 	})
 	require.NoError(t, err)
-	t.Cleanup(underlayHandle.Free)
+	t.Cleanup(func() { _ = underlayHandle.Free() })
 
 	blackholeConfig, err := cblackhole.NewModuleConfig(agent, "underlay-sink")
 	require.NoError(t, err)
-	t.Cleanup(blackholeConfig.Free)
+	t.Cleanup(func() { _ = blackholeConfig.Free() })
 	require.NoError(t, agent.UpdateModules([]ffi.ModuleConfig{blackholeConfig.AsFFIModule()}))
 
 	require.NoError(t, agent.UpdateFunction(ffi.FunctionConfig{
@@ -328,11 +331,11 @@ func wireUntaggedPipeline(t *testing.T, agent *ffi.Agent) {
 		},
 	})
 	require.NoError(t, err)
-	t.Cleanup(untaggedHandle.Free)
+	t.Cleanup(func() { _ = untaggedHandle.Free() })
 
 	blackholeConfig, err := cblackhole.NewModuleConfig(agent, "untagged-sink")
 	require.NoError(t, err)
-	t.Cleanup(blackholeConfig.Free)
+	t.Cleanup(func() { _ = blackholeConfig.Free() })
 	require.NoError(t, agent.UpdateModules([]ffi.ModuleConfig{blackholeConfig.AsFFIModule()}))
 
 	require.NoError(t, agent.UpdateFunction(ffi.FunctionConfig{
@@ -373,7 +376,7 @@ func wireL2SinkPipeline(t *testing.T, agent *ffi.Agent) {
 		},
 	})
 	require.NoError(t, err)
-	t.Cleanup(l2SinkHandle.Free)
+	t.Cleanup(func() { _ = l2SinkHandle.Free() })
 
 	require.NoError(t, agent.UpdateFunction(ffi.FunctionConfig{
 		Name: "tun-l2-func",

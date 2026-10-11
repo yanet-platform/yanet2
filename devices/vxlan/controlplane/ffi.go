@@ -21,11 +21,6 @@ import (
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 )
 
-// DeviceNameMaxLength is the longest device name the C configuration can
-// carry: cp_device_config_init truncates into a CP_DEVICE_NAME_LEN buffer,
-// which would silently publish a differently named dataplane device.
-const DeviceNameMaxLength = int(C.CP_DEVICE_NAME_LEN) - 1
-
 // Settings are the tunnel parameters copied verbatim into the shared-memory
 // configuration.
 //
@@ -166,23 +161,17 @@ func NewDeviceConfig(
 	}, nil
 }
 
-func (m *DeviceConfig) asRawPtr() *C.struct_cp_device {
-	return (*C.struct_cp_device)(m.ptr.AsRawPtr())
-}
-
 // AsFFIDevice returns the module configuration as an FFI module
 func (m *DeviceConfig) AsFFIDevice() ffi.ShmDeviceConfig {
 	return m.ptr
 }
 
-// Free drops the underlying device's construction reference.
-//
-// Safe to call multiple times: subsequent calls are no-ops. When this is the
-// last reference, the device parks on the agent until the next vxlan-device
-// construction reclaims it.
-func (m *DeviceConfig) Free() {
-	if ptr := m.asRawPtr(); ptr != nil {
-		C.cp_device_vxlan_free(ptr)
-		m.ptr = ffi.ShmDeviceConfig{}
-	}
+// Free destroys the device, or reports ffi.ErrStillReferenced while a
+// live generation still holds it. Safe to call multiple times.
+func (m *DeviceConfig) Free() error {
+	return m.ptr.Free(func(ptr unsafe.Pointer) (int, unsafe.Pointer, error) {
+		var cErr *C.yanet_error
+		rc, errno := C.cp_device_vxlan_free((*C.struct_cp_device)(ptr), &cErr)
+		return int(rc), unsafe.Pointer(cErr), errno
+	})
 }

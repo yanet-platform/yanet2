@@ -2,17 +2,17 @@ package vxlan
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"net/netip"
-	"strings"
-	"sync"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
+	"github.com/yanet-platform/yanet2/controlplane/configstore"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/devices/vxlan/controlplane/vxlanpb/v1"
 )
@@ -21,38 +21,36 @@ import (
 type DeviceVxlanService struct {
 	vxlanpb.UnimplementedDeviceVxlanServiceServer
 
-	mu      sync.Mutex
 	agent   *ffi.Agent
-	configs map[string]*cachedDevice
+	configs *configstore.Store[*DeviceEntry]
 }
 
-// cachedDevice is the last applied configuration of one device: the
-// shared-memory device freed when a later update supersedes it, and the
-// request fields served back by GetDevice.
-type cachedDevice struct {
+// DeviceEntry is the last applied configuration of one device: the
+// shared-memory device owned by the store, and the request fields served
+// back by GetDevice.
+type DeviceEntry struct {
 	config   DeviceConfig
 	device   *commonpb.Device
 	settings Settings
 }
 
-// Free releases the shared-memory device the cached entry owns.
-func (m *cachedDevice) Free() {
-	m.config.Free()
+// Free releases the shared-memory device the entry owns, reporting
+// ffi.ErrStillReferenced while a live generation still holds it.
+func (m *DeviceEntry) Free() error {
+	return m.config.Free()
 }
 
-// GetResponse renders the cached entry as a GetDevice reply.
-//
-// Must be called with the service mutex held: UpdateDevice replaces the
-// entry and frees the old device under it, which would race an unlocked
-// reader of the cached fields.
-func (m *cachedDevice) GetResponse(name string) *vxlanpb.GetDeviceVxlanResponse {
+// GetResponse renders the entry as a GetDevice reply. The entry never
+// changes after it is published, so an unlocked reader sees one applied
+// generation whole.
+func (m *DeviceEntry) GetResponse(name string) *vxlanpb.GetDeviceVxlanResponse {
 	return &vxlanpb.GetDeviceVxlanResponse{
 		Name:    name,
 		Device:  m.device,
-		Vni:     m.settings.VNI,
-		DstPort: uint32(m.settings.DstPort),
 		SrcMac:  net.HardwareAddr(m.settings.SrcMAC[:]).String(),
 		DstMac:  net.HardwareAddr(m.settings.DstMAC[:]).String(),
+		Vni:     m.settings.VNI,
+		DstPort: uint32(m.settings.DstPort),
 		SrcIp:   m.settings.SrcIP.String(),
 		DstIp:   m.settings.DstIP.String(),
 	}
@@ -63,7 +61,7 @@ func (m *cachedDevice) GetResponse(name string) *vxlanpb.GetDeviceVxlanResponse 
 func NewDeviceVxlanService(agent *ffi.Agent) *DeviceVxlanService {
 	return &DeviceVxlanService{
 		agent:   agent,
-		configs: map[string]*cachedDevice{},
+		configs: configstore.NewStore[*DeviceEntry](),
 	}
 }
 
@@ -73,52 +71,39 @@ func (m *DeviceVxlanService) UpdateDevice(
 	ctx context.Context,
 	request *vxlanpb.UpdateDeviceVxlanRequest,
 ) (*vxlanpb.UpdateDeviceVxlanResponse, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
 	name := request.GetName()
-	if name == "" {
-		return nil, status.Error(codes.InvalidArgument, "module config name is required")
-	}
-	// A longer name would be truncated into the fixed C name buffer, and
-	// an embedded NUL would end it early; either way the cache entry
-	// keyed by the full Go string and the published dataplane device
-	// would disagree, and distinct names could collide on one C entry.
-	if len(name) > DeviceNameMaxLength || strings.ContainsRune(name, 0) {
-		return nil, status.Errorf(
-			codes.InvalidArgument,
-			"device name must be at most %d bytes without NUL",
-			DeviceNameMaxLength,
-		)
-	}
-
 	settings, err := newSettings(request)
 	if err != nil {
 		return nil, status.Error(codes.InvalidArgument, err.Error())
 	}
 
-	deviceConfig, err := NewDeviceConfig(m.agent, name, request.GetDevice(), settings)
+	err = m.configs.Update(name, func(*DeviceEntry, bool) (*DeviceEntry, error) {
+		deviceConfig, err := NewDeviceConfig(m.agent, name, request.GetDevice(), settings)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create device config: %w", err)
+		}
+
+		if err := m.agent.UpdateDevices([]ffi.ShmDeviceConfig{deviceConfig.AsFFIDevice()}); err != nil {
+			if freeErr := deviceConfig.Free(); freeErr != nil {
+				return nil, fmt.Errorf("failed to update device and free the unpublished replacement: %w (update error: %v)", freeErr, err)
+			}
+			code := codes.Internal
+			if errors.Is(err, ffi.ErrFailedPrecondition) {
+				// The device names an entity of the graph it runs that the
+				// configuration cannot resolve.
+				code = codes.FailedPrecondition
+			}
+			return nil, status.Errorf(code, "failed to update device: %v", err)
+		}
+
+		return &DeviceEntry{
+			config:   *deviceConfig,
+			device:   copyDevice(request.GetDevice()),
+			settings: settings,
+		}, nil
+	})
 	if err != nil {
-		return nil, fmt.Errorf("failed to create device config: %w", err)
-	}
-
-	if err := m.agent.UpdateDevices([]ffi.ShmDeviceConfig{deviceConfig.AsFFIDevice()}); err != nil {
-		deviceConfig.Free()
-		return nil, fmt.Errorf("failed to update device: %w", err)
-	}
-
-	// UpdateDevices publishes the new generation and waits for the
-	// dataplane to drop the old one. The superseded device is then
-	// released through the reference tracker: it parks on the agent if a
-	// reader still pins it, and the next vxlan construction reclaims it,
-	// the same lifecycle the vlan control plane gives its devices.
-	if old, ok := m.configs[name]; ok {
-		old.Free()
-	}
-	m.configs[name] = &cachedDevice{
-		config:   *deviceConfig,
-		device:   copyDevice(request.GetDevice()),
-		settings: settings,
+		return nil, err
 	}
 
 	return &vxlanpb.UpdateDeviceVxlanResponse{}, nil
@@ -129,20 +114,12 @@ func (m *DeviceVxlanService) GetDevice(
 	ctx context.Context,
 	request *vxlanpb.GetDeviceVxlanRequest,
 ) (*vxlanpb.GetDeviceVxlanResponse, error) {
-	name := request.GetName()
-	if name == "" {
-		return nil, status.Error(codes.InvalidArgument, "module config name is required")
-	}
-
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	cached, ok := m.configs[name]
+	cached, ok := m.configs.Get(request.GetName())
 	if !ok {
 		return nil, status.Error(codes.NotFound, "no config found")
 	}
 
-	return cached.GetResponse(name), nil
+	return cached.GetResponse(request.GetName()), nil
 }
 
 // copyDevice deep-copies a request's pipeline bindings, so a reused or

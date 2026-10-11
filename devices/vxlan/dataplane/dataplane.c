@@ -345,6 +345,14 @@ struct device_vxlan {
 	struct device device;
 };
 
+// The handlers derive everything from the shared-memory configuration at
+// run time, so there is no generation-invariant state to derive here.
+static void
+vxlan_device_commit(struct dp_config *dp_config, struct cp_device *cp_device) {
+	(void)dp_config;
+	(void)cp_device;
+}
+
 struct device *
 new_device_vxlan() {
 	struct device_vxlan *device_vxlan =
@@ -362,6 +370,7 @@ new_device_vxlan() {
 	);
 	device_vxlan->device.input_handler = vxlan_input_handle;
 	device_vxlan->device.output_handler = vxlan_output_handle;
+	device_vxlan->device.commit_handler = vxlan_device_commit;
 
 	return &device_vxlan->device;
 }

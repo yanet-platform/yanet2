@@ -38,8 +38,12 @@ cp_device_vxlan_new(
 	yanet_error **err
 );
 
-void
-cp_device_vxlan_free(struct cp_device *cp_device);
+// Destroy the device when it is dangling, per cp_device_try_destroy.
+//
+// Returns -1 with errno EAGAIN while a live generation still references
+// the device; the caller must keep its handle and retry later.
+int
+cp_device_vxlan_free(struct cp_device *cp_device, yanet_error **err);
 
 struct cp_device_vxlan_config *
 cp_device_vxlan_config_new(
