@@ -8,6 +8,7 @@
 #include "lib/classify/rule.h"
 
 #include <stdio.h>
+#include <string.h>
 
 /*
  * Compilation contracts shared by every attribute variant.
@@ -140,23 +141,20 @@ classifier_init(
  * context - the artifacts it commits and the stage registry - so the
  * entry name alone would leave the siblings indistinguishable in the
  * memory tree. The buffer holds a full context title; an entry name
- * long enough to crowd the leaf out truncates like the context init
- * truncates the title itself.
+ * too long for it is cut with a dot marker, so the leaf suffix telling
+ * the siblings apart always survives.
  */
 static inline void
 classify_leaf_name(char *buf, size_t size, const char *name, const char *leaf) {
-	// The title truncates by design (see above), but GCC 16's range
-	// analysis flags the possible truncation even when the return value
-	// is consumed. Clang does not know -Wformat-truncation, so the
-	// pragma is gcc-only, like the one in memory.h.
-#if defined(__GNUC__) && !defined(__clang__)
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wformat-truncation"
-#endif
-	snprintf(buf, size, "%s:%s", name, leaf);
-#if defined(__GNUC__) && !defined(__clang__)
-#pragma GCC diagnostic pop
-#endif
+	size_t leaf_len = strlen(leaf);
+	int name_max = (int)size - (int)leaf_len - 2;
+	if (name_max < 1) {
+		name_max = 1;
+	}
+	snprintf(buf, size, "%.*s:%s", name_max, name, leaf);
+	if ((size_t)name_max > 3 && strlen(name) > (size_t)name_max) {
+		memcpy(buf + name_max - 3, "...", 3);
+	}
 }
 
 /*
