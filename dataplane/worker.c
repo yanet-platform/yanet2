@@ -211,9 +211,7 @@ worker_submit_burst(
 }
 
 static void
-worker_write(
-	struct dataplane_worker *worker, struct packet_front *packet_front
-) {
+worker_write(struct dataplane_worker *worker, struct packet_list *output) {
 	struct packet_list failed;
 	packet_list_init(&failed);
 
@@ -223,15 +221,10 @@ worker_write(
 	// Free all ready mbufs from tx write channels
 	worker_collect_from_port(worker);
 
-	// Drain the output list; transmitted packets are freed and failures
-	// are re-added via packet_front_output, so reset the counters first.
-	packet_front->output_count = 0;
-	packet_front->output_bytes = 0;
-
 	uint16_t to_write = 0;
 
 	struct packet *packet;
-	while ((packet = packet_list_pop(&packet_front->output)) != NULL) {
+	while ((packet = packet_list_pop(output)) != NULL) {
 		if (to_write == ctx->write_size) {
 			worker_submit_burst(worker, mbufs, to_write, &failed);
 			to_write = 0;
@@ -264,11 +257,8 @@ worker_write(
 		&failed
 	);
 
-	// Move failures back to the output list, restoring counters.
-	struct packet *failed_packet;
-	while ((failed_packet = packet_list_pop(&failed)) != NULL) {
-		packet_front_output(packet_front, failed_packet);
-	}
+	// Move failures back onto the output list for the caller to drop.
+	packet_list_concat(output, &failed);
 
 	// Read incoming mbufs from remote workers and write them to device
 	for (uint32_t pipe_idx = 0; pipe_idx < ctx->rx_pipe_count; ++pipe_idx) {
@@ -310,16 +300,17 @@ worker_loop_round(struct dataplane_worker *worker) {
 	if (config_gen_ectx == NULL) {
 		worker_drop_staged(worker);
 
-		struct packet_front packet_front;
-		packet_front_init(&packet_front);
+		struct packet_list output;
+		packet_list_init(&output);
 
 		worker_rx_stage(worker);
 
-		worker_write(worker, &packet_front);
+		worker_write(worker, &output);
 		return;
 	}
 
-	struct packet_front *packet_front = &config_gen_ectx->packet_front;
+	struct packet_list *output = &config_gen_ectx->round_output;
+	struct packet_list *drop = &config_gen_ectx->round_drop;
 
 	worker_process_staged(worker, config_gen_ectx);
 
@@ -332,17 +323,17 @@ worker_loop_round(struct dataplane_worker *worker) {
 	// whole transmit instead of stalling the parse.
 	worker_rx_stage(worker);
 
-	worker_write(worker, packet_front);
+	worker_write(worker, output);
 
 	/*
 	 * `output` now contains failed-to-transmit packets which should be
 	 * freed.
 	 */
-	packet_front_drop_output(packet_front);
+	packet_list_concat(drop, output);
 
-	*(worker->dp_worker->drop_count) += packet_front->drop_count;
-	dataplane_drop_packets(worker->dataplane, &packet_front->drop);
-	packet_front_recycle(packet_front);
+	*(worker->dp_worker->drop_count) += packet_list_count(drop);
+	dataplane_drop_packets(worker->dataplane, drop);
+	packet_list_init(drop);
 }
 
 static void *

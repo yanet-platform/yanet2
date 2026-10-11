@@ -23,6 +23,7 @@ struct cp_config_counter_storage_registry;
 struct dp_config;
 
 struct device_entry_ectx;
+struct chain_ectx;
 
 // One routing target of a module device, joining the generation-global
 // device id with the target device's entries so the packet hot path
@@ -106,6 +107,17 @@ struct module_ectx {
 	// before the context is released to workers; it is zero until
 	// then.
 	struct config_gen_ectx *abs_config_gen_ectx;
+	// Offset pointer to the chain this context executes in, filled by
+	// the control plane at creation. A module context belongs to one
+	// chain position, so the routing path reaches the chain's counters
+	// and upward sinks through it.
+	struct chain_ectx *chain_ectx;
+	// The same chain, as an absolute address for the packet hot path.
+	//
+	// The publishing process copies it from the relative field above
+	// before the context is released to workers; it is zero until
+	// then.
+	struct chain_ectx *abs_chain_ectx;
 	uint16_t packet_recirc_limit;
 
 	// The module device id of the device whose entry this context
@@ -208,6 +220,27 @@ module_ectx_device_target(struct module_ectx *module_ectx, uint64_t index) {
 	return target;
 }
 
+// Upward counter sinks of a chain: the drop and pending counters of the
+// function, pipeline and device entry enclosing the chain, as absolute
+// handles for the packet hot path.
+//
+// The publishing process resolves them during the absolutization pass,
+// which walks entry -> pipeline -> function -> chain and has every
+// enclosing handle in scope; they are zero until then. Drops and routes
+// are credited straight to these sinks at chain end and route time, so
+// finished chains carry no counters upward through merges.
+struct chain_ectx_sinks {
+	struct counter_value_handle *function_drop;
+	struct counter_value_handle *function_pending_input;
+	struct counter_value_handle *function_pending_output;
+	struct counter_value_handle *pipeline_drop;
+	struct counter_value_handle *pipeline_pending_input;
+	struct counter_value_handle *pipeline_pending_output;
+	struct counter_value_handle *entry_drop;
+	struct counter_value_handle *entry_pending_input;
+	struct counter_value_handle *entry_pending_output;
+};
+
 struct chain_ectx {
 	struct cp_chain *cp_chain;
 	struct counter_storage *counter_storage;
@@ -219,6 +252,9 @@ struct chain_ectx {
 	// context is released to workers; they are zero until then.
 	struct counter_value_handle *abs_counter_packet_pending_input;
 	struct counter_value_handle *abs_counter_packet_pending_output;
+	// The upward counter sinks above, resolved by the publishing
+	// process together with the chain's own counters.
+	struct chain_ectx_sinks sinks;
 	// Offset pointer to an array of per-slot offset pointers to the
 	// chain's module contexts, mirroring the tail below.
 	//
@@ -227,6 +263,10 @@ struct chain_ectx {
 	// tail is turned into absolute ones.
 	struct module_ectx **module_ptrs;
 	uint64_t length;
+	// The chain's working front: the one place packet tallies are
+	// maintained, because module handlers consume and produce the
+	// front's lists and the per-module rx/tx/drop deltas are read off
+	// its counters.
 	struct packet_front schedule;
 	// The final drop list of the owning worker's round, as an absolute
 	// address for the packet hot path.
@@ -314,7 +354,10 @@ struct pipeline_ectx {
 	// after the tail is turned into absolute ones.
 	struct function_ectx **function_ptrs;
 	uint64_t length;
-	struct packet_front schedule;
+	// The pipeline's bare packet carrier. Dispatch fills it and each
+	// function's chains work it in place; the counters of the stages
+	// inside are credited directly, so the carrier carries no tallies.
+	struct packet_list schedule;
 	// Absolute addresses of the pipeline's functions.
 	//
 	// The publishing process copies them from the function_ptrs
@@ -399,12 +442,13 @@ struct device_entry_ectx {
 	// then.
 	struct pipeline_ectx **abs_pipelines;
 	uint64_t pipeline_map_size;
-	// Per-entry inbox for packets awaiting processing.
+	// Per-entry inbox for packets awaiting processing: a bare list,
+	// counted into the entry's rx counter at schedule time.
 	//
 	// The worker detaches each batch before invoking the entry, so packets
 	// routed back here during processing remain queued for the next
 	// traversal.
-	struct packet_front schedule;
+	struct packet_list schedule;
 	// The entry's pipelines, indexed by packet hash for the demux.
 	//
 	// Creation writes relative addresses; the publishing process
@@ -467,15 +511,16 @@ struct config_gen_ectx {
 	uint64_t object_count;
 	struct object_ectx **objects;
 
-	// Per-worker scratch front reused across worker rounds.
+	// Per-worker round output carrier and drop sink, bare lists reused
+	// across worker rounds.
 	//
-	// Initialized once when the ectx is created and left clean at the
-	// end of every worker round, so the worker loop reuses it in place
-	// instead of reinitializing a fresh front on each iteration. The
-	// drop list doubles as the round's final drop list: finished chain
-	// drop lists are spliced into it directly, bypassing the per-stage
-	// front merges.
-	struct packet_front packet_front;
+	// Initialized once when the ectx is created and left empty at the
+	// end of every worker round, so the worker loop reuses them in
+	// place. The drop sink is the round's final drop list: finished
+	// chain drop lists and every drain path splice straight into it,
+	// and the worker frees it once per round.
+	struct packet_list round_output;
+	struct packet_list round_drop;
 
 	// The device-entry home list.
 	//

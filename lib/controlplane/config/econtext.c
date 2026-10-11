@@ -130,6 +130,7 @@ module_ectx_create(
 	SET_OFFSET_OF(&module_ectx->cp_module, cp_module);
 
 	SET_OFFSET_OF(&module_ectx->config_gen_ectx, config_gen_ectx);
+	SET_OFFSET_OF(&module_ectx->chain_ectx, chain_ectx);
 	module_ectx->packet_recirc_limit = dp_config->packet_recirc_limit;
 
 	struct dp_module *dp_module =
@@ -217,9 +218,9 @@ module_ectx_create(
 		struct counter_storage **runtime_storages =
 			(struct counter_storage **)memory_balloc(
 				memory_context,
-				sizeof(struct counter_storage *) *
-					cp_module
-						->runtime_counter_registry_count
+				sizeof(
+					struct counter_storage *
+				) * cp_module->runtime_counter_registry_count
 			);
 		if (runtime_storages == NULL) {
 			yanet_error_add(
@@ -244,9 +245,9 @@ module_ectx_create(
 		struct counter_storage **abs_runtime_storages =
 			(struct counter_storage **)memory_balloc(
 				memory_context,
-				sizeof(struct counter_storage *) *
-					cp_module
-						->runtime_counter_registry_count
+				sizeof(
+					struct counter_storage *
+				) * cp_module->runtime_counter_registry_count
 			);
 		if (abs_runtime_storages == NULL &&
 		    cp_module->runtime_counter_registry_count > 0) {
@@ -275,7 +276,8 @@ module_ectx_create(
 			if (old_ectx != NULL) {
 				old_storage =
 					cp_config_counter_storage_registry_lookup_module_tagged(
-						ADDR_OF(&old_ectx->counter_storage_registry
+						ADDR_OF(
+							&old_ectx->counter_storage_registry
 						),
 						cp_device->name,
 						cp_pipeline->name,
@@ -305,7 +307,8 @@ module_ectx_create(
 			}
 
 			if (cp_config_counter_storage_registry_insert_module_tagged(
-				    ADDR_OF(&config_gen_ectx
+				    ADDR_OF(
+					    &config_gen_ectx
 						     ->counter_storage_registry
 				    ),
 				    cp_device->name,
@@ -410,7 +413,8 @@ module_ectx_create(
 			if (old_ectx != NULL) {
 				old_link_storage =
 					cp_config_counter_storage_registry_lookup_module_object_link(
-						ADDR_OF(&old_ectx->counter_storage_registry
+						ADDR_OF(
+							&old_ectx->counter_storage_registry
 						),
 						cp_device->name,
 						cp_pipeline->name,
@@ -451,7 +455,8 @@ module_ectx_create(
 			// module's path and the linked object, so the relation
 			// counters are queryable by any combination of them.
 			if (cp_config_counter_storage_registry_insert_module_object_link(
-				    ADDR_OF(&config_gen_ectx
+				    ADDR_OF(
+					    &config_gen_ectx
 						     ->counter_storage_registry
 				    ),
 				    cp_device->name,
@@ -1905,7 +1910,8 @@ config_gen_ectx_create(
 		return NULL;
 	}
 	memset(config_gen_ectx, 0, ectx_size);
-	packet_front_init(&config_gen_ectx->packet_front);
+	packet_list_init(&config_gen_ectx->round_output);
+	packet_list_init(&config_gen_ectx->round_drop);
 
 	SET_OFFSET_OF(&config_gen_ectx->cp_config_gen, cp_config_gen);
 
