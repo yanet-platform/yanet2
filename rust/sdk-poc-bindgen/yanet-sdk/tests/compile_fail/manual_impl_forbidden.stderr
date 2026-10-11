@@ -1,0 +1,16 @@
+error: implementation of an `unsafe` trait
+  --> tests/compile_fail/manual_impl_forbidden.rs:12:1
+   |
+12 | / unsafe impl ShmLayout for Body {
+13 | |     const FINGERPRINT: u64 = 0;
+14 | |
+15 | |     fn validate(_: &Validator<'_>, _: usize) -> Result<(), ValidationError> {
+...  |
+18 | | }
+   | |_^
+   |
+note: the lint level is defined here
+  --> tests/compile_fail/manual_impl_forbidden.rs:3:11
+   |
+ 3 | #![forbid(unsafe_code)]
+   |           ^^^^^^^^^^^

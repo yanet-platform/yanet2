@@ -48,6 +48,7 @@ func setupDecapHarnessWithLimit(
 		PacketRecircLimit: packetRecircLimit,
 		Devices:           []string{"port0"},
 		Modules:           []string{"decap", "forward"},
+		PluginDir:         decapPluginDir,
 		DevicesToLoad:     []string{"plain"},
 	})
 	require.NoError(t, err)

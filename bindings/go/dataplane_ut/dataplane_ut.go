@@ -50,7 +50,7 @@ package dataplaneut
 #cgo LDFLAGS: -lplain_dp -lvlan_dp -lvxlan_dp
 #cgo LDFLAGS: -ldataplane_ut -lpipeline -lmodule -lworker_dp -lconfig_dp -lpacket
 #cgo LDFLAGS: -llogging -lagent -lconfig_cp -lcounters -lerrors -lfilter_compiler -lfwstate -lstatemap -ll3state -llib_utils
-#cgo LDFLAGS: -lagent_counters -lcounter_pattern -lrure
+#cgo LDFLAGS: -lagent_counters -lcounter_pattern
 #cgo LDFLAGS: -Wl,--end-group
 
 #cgo LDFLAGS: -lnuma

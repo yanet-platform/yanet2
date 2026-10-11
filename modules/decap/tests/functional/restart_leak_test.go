@@ -28,6 +28,7 @@ func TestRestart_WithoutRelease_ReclaimsSupersededAgents(t *testing.T) {
 		WorkerCount:   1,
 		Devices:       []string{"port0"},
 		Modules:       []string{"decap"},
+		PluginDir:     decapPluginDir,
 		DevicesToLoad: []string{"plain"},
 	})
 	require.NoError(t, err)

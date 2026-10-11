@@ -1,0 +1,43 @@
+$schema: ../../../../lab/yanet2-lab.schema.json
+version: 1
+name: decap-rs
+description: >-
+  Rust decap end to end: the dataplane loads the Rust plugin from
+  plugin_dir, the control plane builds the decap configuration with the
+  Rust api (build tag yanet_rust_cp), the unchanged yanet-cli-decap drives
+  it, and one IPv4-in-IPv4 packet is decapsulated.
+boot:
+  dataplane: dataplane.yaml
+  controlplane: controlplane.yaml
+files:
+  - source: swap-controlplane.sh
+    destination: /tmp/yanet/swap-controlplane.sh
+steps:
+  - name: plugin-loaded
+    argv: [/bin/grep, -E, "loaded plugin decap|module decap found in plugin decap", /tmp/yanet/logs/yanet-dataplane.log]
+  - name: rust-api-controlplane
+    argv: [/bin/bash, /tmp/yanet/swap-controlplane.sh]
+    timeout: 60s
+  - name: configure-decap
+    argv: [/tmp/yanet/cli/yanet-cli-decap, update, --name, decap_lab, -p, 4.5.6.7/32, -p, "1:2:3:4::abcd/128"]
+  - name: attach-decap
+    argv: [/tmp/yanet/cli/yanet-cli-function, update, --name=fn:lab, --chains, "default:1=decap:decap_lab"]
+  - name: pipeline-with-decap
+    argv: [/tmp/yanet/cli/yanet-cli-pipeline, update, --name=test, --functions, "fn:lab,test"]
+  - name: inspect-decap
+    argv: [/tmp/yanet/cli/yanet-cli-decap, show, --name, decap_lab]
+  # The restarted control plane re-applies device configuration, after which
+  # the guest kernel emits a few IPv6 neighbour packets through the ports;
+  # waiting keeps them out of the probe's capture window.
+  - name: settle
+    argv: [/bin/sleep, "10"]
+    timeout: 20s
+probes:
+  - name: decap-ipv4
+    ingress: 0
+    egress: 0
+    timeout: 1s
+    send:
+      pcap: input.pcap
+    expect:
+      pcap: expected.pcap

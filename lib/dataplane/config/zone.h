@@ -27,6 +27,9 @@ struct dp_module {
 	// Size of the module's private per-context buffer, zero when the
 	// module needs none; mirrors the loaded module's declaration.
 	uint64_t prepared_size;
+	// Configuration layout identity; mirrors the loaded module's
+	// declaration, zero when unchecked.
+	uint64_t config_layout;
 };
 
 struct dp_device {

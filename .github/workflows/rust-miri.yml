@@ -1,0 +1,86 @@
+name: Rust Miri
+
+# Miri over the Rust module SDK proof of concept (rust/sdk-poc-bindgen):
+# strict provenance under Stacked and Tree Borrows, including the cases that
+# must be reported as Undefined Behavior. The sys crate's build script runs
+# bindgen and gcc over the repository's C headers with the flags of a meson
+# configuration, so changes to those headers re-run the job and the job
+# configures meson (no compilation) before Miri.
+
+on:
+  push:
+    branches: ["main"]
+    paths:
+      - "rust/sdk-poc-bindgen/**"
+      - "common/**.h"
+      - "lib/**.h"
+      - "lib/dataplane/packet/**"
+      - "modules/decap/dataplane/**"
+      - "subprojects/dpdk"
+      - "**/meson.build"
+      - "meson_options.txt"
+      - ".github/workflows/rust-miri.yml"
+      - ".github/actions/apt-packages/**"
+      - ".github/actions/apt-failover/**"
+  pull_request:
+    # A stacked pull request has a non-main base, so a main-only filter would skip it.
+    branches: ["**"]
+    paths:
+      - "rust/sdk-poc-bindgen/**"
+      - "common/**.h"
+      - "lib/**.h"
+      - "lib/dataplane/packet/**"
+      - "modules/decap/dataplane/**"
+      - "subprojects/dpdk"
+      - "**/meson.build"
+      - "meson_options.txt"
+      - ".github/workflows/rust-miri.yml"
+      - ".github/actions/apt-packages/**"
+      - ".github/actions/apt-failover/**"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  miri:
+    name: miri (${{ matrix.model }} borrows)
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        model: [stacked, tree]
+    env:
+      # bindgen needs a libclang and a clang of the same LLVM major.
+      CLANG_PATH: /usr/bin/clang-18
+      LIBCLANG_PATH: /usr/lib/llvm-18/lib
+      MIRI_TOOLCHAIN: nightly-2026-08-28
+      MIRI_CARGO_FLAGS: --locked
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: true
+      - uses: ./.github/actions/apt-packages
+        timeout-minutes: 10
+        with:
+          packages: meson clang-18 libclang-18-dev cmake python3-pyelftools libnuma-dev libpcap-dev libyaml-dev
+      # Pinned with the rustfmt nightly, so Miri moves only with a deliberate bump.
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          toolchain: nightly-2026-08-28
+          components: miri, rust-src
+      - name: Cache cargo registry and target directory
+        uses: Swatinem/rust-cache@v2.9.2
+        with:
+          workspaces: rust/sdk-poc-bindgen
+          shared-key: rust-miri-${{ matrix.model }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      # The build script reads compile_commands.json and the generated DPDK
+      # configuration header; configuring is enough, nothing is compiled.
+      - name: Configure meson
+        run: meson setup build -Ddataplane_only=true
+      - name: Miri
+        working-directory: rust/sdk-poc-bindgen
+        run: |
+          cargo "+$MIRI_TOOLCHAIN" miri setup
+          ./scripts/miri.sh ${{ matrix.model }}

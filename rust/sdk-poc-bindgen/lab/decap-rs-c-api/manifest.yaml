@@ -1,0 +1,24 @@
+$schema: ../../../../lab/yanet2-lab.schema.json
+version: 1
+name: decap-rs-c-api
+description: >-
+  Layout binding: with the Rust plugin loaded, the default control plane
+  (C decap api) cannot create a decap configuration. The plugin declares a
+  non-zero configuration layout and the C module init, which names layout
+  zero, refuses with a layout mismatch, so the Rust module never sees a
+  configuration of the C layout.
+boot:
+  dataplane: dataplane.yaml
+  controlplane: controlplane.yaml
+steps:
+  - name: plugin-loaded
+    argv: [/bin/grep, -E, "loaded plugin decap|module decap found in plugin decap", /tmp/yanet/logs/yanet-dataplane.log]
+  - name: c-api-update-refused
+    argv:
+      - /bin/bash
+      - -c
+      - >-
+        if /tmp/yanet/cli/yanet-cli-decap update --name decap_lab -p 4.5.6.7/32 >/tmp/yanet/decap-update.out 2>&1;
+        then echo "the C api update unexpectedly succeeded"; exit 1; fi;
+        cat /tmp/yanet/decap-update.out;
+        grep -q "config layout mismatch" /tmp/yanet/decap-update.out

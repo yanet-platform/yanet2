@@ -1,0 +1,11 @@
+error[E0080]: evaluation panicked: register_module!: the module is exported under another name than its Module::NAME
+  --> tests/compile_fail/export_wrong_module_name.rs:21:1
+   |
+21 | / register_module! {
+22 | |     name: dscp,
+23 | |     module: Decap,
+24 | |     handler: handle,
+25 | | }
+   | |_^ evaluation of `_::_` failed here
+   |
+   = note: this error originates in the macro `$crate::panic::panic_2021` which comes from the expansion of the macro `register_module` (in Nightly builds, run with -Z macro-backtrace for more info)

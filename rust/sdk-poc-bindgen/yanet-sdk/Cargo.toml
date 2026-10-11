@@ -1,0 +1,29 @@
+[package]
+name = "yanet-sdk"
+version = "0.1.0"
+description = "Safe surface of the YANET2 Rust module SDK."
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+# Tested through tests/ only.
+test = false
+doctest = false
+
+[lints]
+workspace = true
+
+[features]
+default = ["dp"]
+# Dataplane surface: packet front and the module export macro.
+dp = ["yanet-sys/dp"]
+
+[dependencies]
+yanet-sdk-derive = { path = "../yanet-sdk-derive" }
+yanet-sys = { path = "../yanet-sys", default-features = false }
+
+[dev-dependencies]
+trybuild = "1"
+yanet-sys = { path = "../yanet-sys", features = ["testing"] }
