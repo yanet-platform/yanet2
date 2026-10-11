@@ -165,6 +165,7 @@ deploy/packages/
 !.agents/skills/issue-create
 !.agents/skills/review-change
 !.agents/skills/ship-pr
+!.agents/skills/yanet-configure
 .claude/skills/*
 !.claude/skills/bmad-*
 !.claude/skills/autopilot
@@ -174,6 +175,7 @@ deploy/packages/
 !.claude/skills/issue-create
 !.claude/skills/review-change
 !.claude/skills/ship-pr
+!.claude/skills/yanet-configure
 
 ### Uncategorized ###
 # Worktree symlinks: a worktree may symlink this tree into the main
