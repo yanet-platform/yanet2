@@ -5,7 +5,7 @@ set positional-arguments := true
 # Project configuration
 TAG := "yanet2-dev"
 ROOT_DIR := justfile_directory()
-DOCKER_CACHE_DIR := "/tmp"
+export DOCKER_CACHE_DIR := env_var_or_default("DOCKER_CACHE_DIR", "/tmp")
 
 
 # Show available commands
@@ -130,6 +130,9 @@ _docker_run IT *COMMAND:
 
     set -euo pipefail
     docker_mounts=(-v "{{ ROOT_DIR }}:/yanet2")
+    if [ "{{ ROOT_DIR }}" != /yanet2 ]; then
+        docker_mounts+=(-v "{{ ROOT_DIR }}:{{ ROOT_DIR }}")
+    fi
     if [ -f "{{ ROOT_DIR }}/.git" ]; then
         # Linked worktrees reference Git metadata outside the source mount.
         git_common_dir="$(git -C "{{ ROOT_DIR }}" rev-parse --path-format=absolute --git-common-dir)"
@@ -145,17 +148,19 @@ _docker_run IT *COMMAND:
         --platform linux/amd64 \
         --network=host \
         "${docker_mounts[@]}" \
-        -v {{ DOCKER_CACHE_DIR }}/gomodcache:/tmp/gomodcache:rw \
-        -v {{ DOCKER_CACHE_DIR }}/gocache:/tmp/gocache:rw \
+        -v "${DOCKER_CACHE_DIR}/gomodcache:/tmp/gomodcache:rw" \
+        -v "${DOCKER_CACHE_DIR}/gocache:/tmp/gocache:rw" \
         {{ TAG }} \
-        sh -c 'cd /yanet2 && git config --global --add safe.directory /yanet2 && {{ COMMAND }}'
+        sh -c 'cd "$1" && git config --global --add safe.directory /yanet2 && git config --global --add safe.directory "$1" && shift && sh -c "$@"' sh "{{ ROOT_DIR }}" "${@:2}"
 
 dsetup COVERAGE_MODE="false":
     @just _docker_run -it "just setup {{ COVERAGE_MODE }}"
 
-# Run tests in Docker
-dtest:
-    @just _docker_run -it "just setup false test"
+# Options select only Go tests; successful runs retain the C build and Meson suite.
+dtest GO_TEST_FLAGS="" GO_TEST_PACKAGES="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    just _docker_run -it 'make test-recipes && just setup false && GO_TEST_FLAGS="$1" GO_TEST_PACKAGES="$2" make test' sh "$@"
 
 # Run clang-tidy in Docker
 dtidy *FILES:
