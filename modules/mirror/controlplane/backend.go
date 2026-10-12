@@ -5,7 +5,12 @@ import (
 
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/modules/mirror/bindings/go/cmirror"
+	"github.com/yanet-platform/yanet2/objects/classifier/bindings/go/cclassifier"
 )
+
+// classifierObjectType is the shared object type the module binds its
+// classification through.
+const classifierObjectType = "classifier"
 
 // backend is the real Backend implementation backed by shared memory.
 type backend struct {
@@ -19,29 +24,95 @@ func NewBackend(agent *ffi.Agent) Backend {
 	}
 }
 
+// boundModule is the published pair behind one mirror config: the
+// module and the classifier object its rules were compiled into. The
+// object carries the name of the module, so the pair is published and
+// retired as one unit.
+type boundModule struct {
+	agent  *ffi.Agent
+	name   string
+	module *cmirror.ModuleConfig
+	object *cclassifier.ObjectConfig
+}
+
+// Free releases both handles of the pair, the module first: the
+// module links the object, and the object retires only after every
+// module generation referencing it is gone. Safe to call repeatedly;
+// reports ffi.ErrStillReferenced while a live generation still holds
+// either half, so the config store parks the pair for a later retry.
+func (m *boundModule) Free() error {
+	if m.module != nil {
+		if err := m.module.Free(); err != nil {
+			return err
+		}
+	}
+	if m.object != nil {
+		if err := m.object.Free(); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (m *backend) UpdateModule(name string, rules []cmirror.MirrorRule) (ModuleHandle, error) {
-	module, err := cmirror.NewModuleConfig(m.agent, name)
+	classifierRules, decisions := cmirror.Split(rules)
+
+	// The classifier object publishes first: the module build binds it
+	// by name and resolves the ruleset its decisions are indexed by.
+	object, err := cclassifier.NewL3(m.agent, name, classifierRules)
 	if err != nil {
+		return nil, fmt.Errorf("failed to create classifier object: %w", err)
+	}
+
+	if err := m.agent.UpdateObjects([]ffi.ObjectConfig{object.AsFFIObject()}); err != nil {
+		if freeErr := object.Free(); freeErr != nil {
+			return nil, fmt.Errorf(
+				"failed to update classifier object: %v (failed to free abandoned object: %v)",
+				err,
+				freeErr,
+			)
+		}
+		return nil, fmt.Errorf("failed to update classifier object: %w", err)
+	}
+
+	bound := &boundModule{
+		agent:  m.agent,
+		name:   name,
+		object: object,
+	}
+
+	module, err := cmirror.NewModuleConfig(m.agent, name, name, decisions)
+	if err != nil {
+		bound.abandon()
 		return nil, fmt.Errorf("failed to create module config: %w", err)
 	}
-
-	if err := module.Update(rules); err != nil {
-		if err := module.Free(); err != nil {
-			return nil, fmt.Errorf("failed to free abandoned config: %w", err)
-		}
-		return nil, fmt.Errorf("failed to update module config: %w", err)
-	}
+	bound.module = module
 
 	if err := m.agent.UpdateModules([]ffi.ModuleConfig{module.AsFFIModule()}); err != nil {
-		if err := module.Free(); err != nil {
-			return nil, fmt.Errorf("failed to free abandoned config: %w", err)
-		}
+		bound.abandon()
 		return nil, fmt.Errorf("failed to update module: %w", err)
 	}
 
-	return module, nil
+	return bound, nil
+}
+
+// abandon retracts a pair whose publication failed: the module, the
+// object and its live-generation registration.
+func (m *boundModule) abandon() {
+	if m.module != nil {
+		if err := m.module.Free(); err != nil {
+			return
+		}
+	}
+	if err := m.agent.DeleteObject(classifierObjectType, m.name); err != nil {
+		return
+	}
+	m.object.Free()
 }
 
 func (m *backend) DeleteModule(name string) error {
-	return m.agent.DeleteModuleConfig(moduleType, name)
+	if err := m.agent.DeleteModuleConfig(moduleType, name); err != nil {
+		return err
+	}
+	return m.agent.DeleteObject(classifierObjectType, name)
 }

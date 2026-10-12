@@ -5,6 +5,8 @@
 #include <rte_ether.h>
 #include <rte_ip.h>
 
+#include "common/container_of.h"
+
 #include "lib/controlplane/config/econtext.h"
 
 #include "lib/dataplane/config/zone.h"
@@ -15,15 +17,18 @@
 #include "lib/dataplane/pipeline/pipeline.h"
 #include "lib/dataplane/worker/worker.h"
 
-#include "filter_lookup.h"
-
 static void
 mirror_clone(
 	struct dp_worker *worker,
 	struct packet *packet,
 	struct module_ectx *module_ectx,
 	struct packet_front *packet_front,
-	void (*route)(struct module_ectx *, struct packet_front *, struct device_entry_ectx *, struct packet *),
+	void (*route)(
+		struct module_ectx *,
+		struct packet_front *,
+		struct device_entry_ectx *,
+		struct packet *
+	),
 	struct device_entry_ectx *entry_ectx,
 	uint16_t device_id
 ) {
@@ -49,6 +54,8 @@ mirror_handle_packets(
 		struct mirror_module_config,
 		cp_module
 	);
+	struct mirror_prepared *prepared =
+		ADDR_OF(&module_ectx->module_prepared);
 
 	// The worker force-polls every module each tick, so an empty front here
 	// is normal. Zero-sizing the arrays below is undefined behavior.
@@ -57,85 +64,41 @@ mirror_handle_packets(
 		return;
 	}
 
-	struct packet *vlan_packets[count];
-	uint32_t vlan_result[count];
-	uint64_t vlan_idx = 0;
+	struct packet *packets[count];
+	uint32_t results[count];
 
-	struct packet *ip4_packets[count];
-	uint32_t ip4_result[count];
-	uint64_t ip4_idx = 0;
-
-	struct packet *ip6_packets[count];
-	uint32_t ip6_result[count];
-	uint64_t ip6_idx = 0;
-
+	uint64_t collect_idx = 0;
 	for (struct packet *packet = packet_list_first(&packet_front->input);
 	     packet != NULL;
 	     packet = packet->next) {
-
-		vlan_packets[vlan_idx++] = packet;
-
-		if (packet->network_header.type ==
-		    rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV4)) {
-			ip4_packets[ip4_idx++] = packet;
-		}
-
-		if (packet->network_header.type ==
-		    rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV6)) {
-			ip6_packets[ip6_idx++] = packet;
-		}
+		packets[collect_idx++] = packet;
 	}
 
-	mirror_classify_vlan(
-		&mirror_config->classifier_vlan,
-		module_ectx->module_device_id,
-		(const struct packet **)vlan_packets,
-		vlan_result,
-		vlan_idx
+	// The classification is the linked classifier object's: the public
+	// handler of the object type runs the bundle the object's subtype
+	// selected, over the whole batch at once. A context whose binding
+	// resolved nothing classifies every packet to no rule.
+	classifier_object_classify(
+		prepared->classifier,
+		prepared->device_class,
+		(const struct packet **)packets,
+		results,
+		count
 	);
-
-	mirror_classify_ip4(
-		&mirror_config->classifier_ip4,
-		module_ectx->module_device_id,
-		(const struct packet **)ip4_packets,
-		ip4_result,
-		ip4_idx
-	);
-
-	mirror_classify_ip6(
-		&mirror_config->classifier_ip6,
-		module_ectx->module_device_id,
-		(const struct packet **)ip6_packets,
-		ip6_result,
-		ip6_idx
-	);
-
-	vlan_idx = 0;
-	ip4_idx = 0;
-	ip6_idx = 0;
 
 	struct packet *packet;
+	uint64_t idx = 0;
 	while ((packet = packet_list_pop(&packet_front->input)) != NULL) {
 		struct mirror_target *target = NULL;
 
-		uint32_t action = vlan_result[vlan_idx];
-		++vlan_idx;
+		uint32_t action = results[idx++];
 
-		if (packet->network_header.type ==
-		    rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV4)) {
-			if (ip4_result[ip4_idx] < action) {
-				action = ip4_result[ip4_idx];
-			}
-			++ip4_idx;
-		} else if (packet->network_header.type ==
-			   rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV6)) {
-			if (ip6_result[ip6_idx] < action) {
-				action = ip6_result[ip6_idx];
-			}
-			++ip6_idx;
-		}
-
-		if (action != CLASSIFY_RULE_INVALID) {
+		// The decision of the matched rule resolves the result; the
+		// bound guards a ruleset that changed under a module the
+		// owner did not rebuild, by mirroring nothing for the rule
+		// indices that no longer resolve.
+		if (action != CLASSIFY_RULE_INVALID &&
+		    action < mirror_config->target_count) {
 			target = ADDR_OF(&mirror_config->targets) + action;
 		}
 
@@ -185,12 +148,51 @@ struct mirror_module {
 	struct module module;
 };
 
+// Resolves the module's binding to the classifier object: the linked
+// object's prepared classification handles, and the class of the
+// executing device in the object's device attribute - the device the
+// link pass identified through the object's device names.
 static void
 mirror_module_commit_ectx(
 	struct module_ectx *module_ectx, struct cp_module *cp_module
 ) {
-	(void)module_ectx;
-	(void)cp_module;
+	struct mirror_module_config *config =
+		container_of(cp_module, struct mirror_module_config, cp_module);
+	struct mirror_prepared *prepared =
+		ADDR_OF(&module_ectx->module_prepared);
+
+	prepared->classifier = NULL;
+	prepared->device_class = 0;
+
+	if (config->classifier_link_idx == MIRROR_CLASSIFIER_LINK_NONE) {
+		return;
+	}
+
+	struct module_object_link_ectx *link = object_link_get_address(
+		module_ectx, config->classifier_link_idx
+	);
+	if (link == NULL || link->abs_object_ectx == NULL) {
+		return;
+	}
+
+	struct cp_object *cp_object = link->abs_object_ectx->abs_cp_object;
+	if (cp_object == NULL) {
+		return;
+	}
+
+	prepared->classifier = link->abs_object_ectx->abs_object_prepared;
+
+	// The module device id is the executing device's slot in the
+	// module's device table, which carries the object's device names;
+	// a device outside the table keeps the any slot's name.
+	uint32_t module_device_id = module_ectx->module_device_id;
+	if (module_device_id >= cp_module->device_count) {
+		module_device_id = 0;
+	}
+	struct cp_module_device *devices = ADDR_OF(&cp_module->devices);
+	prepared->device_class = classifier_object_device_class(
+		cp_object, devices[module_device_id].name
+	);
 }
 
 static void

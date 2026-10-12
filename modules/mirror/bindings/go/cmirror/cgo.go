@@ -2,7 +2,10 @@ package cmirror
 
 //#cgo CFLAGS: -I../../../../../
 //#cgo LDFLAGS: -L../../../../../build/modules/mirror/api -lmirror_cp
+//#cgo LDFLAGS: -L../../../../../build/objects/classifier/api -lclassifier_objects
+//#cgo LDFLAGS: -L../../../../../build/lib/controlplane/config -lconfig_cp
 //#cgo LDFLAGS: -L../../../../../build/lib/classify -lclassify_compiler
+//#cgo LDFLAGS: -L../../../../../build/lib/errors -lerrors
 //
 //#include "api/agent.h"
 //#include "modules/mirror/api/controlplane.h"
@@ -22,13 +25,36 @@ type ModuleConfig struct {
 	ptr ffi.ModuleConfig
 }
 
-// NewModuleConfig allocates a new mirror module configuration via the C API.
-func NewModuleConfig(agent *ffi.Agent, name string) (*ModuleConfig, error) {
+// NewModuleConfig allocates a new mirror module configuration bound to
+// the named classifier object via the C API. The object must already be
+// installed (agent_update_objects), and the decision count must match
+// the object's ruleset.
+func NewModuleConfig(agent *ffi.Agent, name, classifierObject string, decisions []Decision) (*ModuleConfig, error) {
 	cName := C.CString(name)
 	defer C.free(unsafe.Pointer(cName))
 
+	cClassifier := C.CString(classifierObject)
+	defer C.free(unsafe.Pointer(cClassifier))
+
+	cDecisions := make([]C.struct_mirror_decision, len(decisions))
+	for idx := range decisions {
+		cDecisions[idx] = decisions[idx].cBuild()
+	}
+
+	var cDecisionsPtr *C.struct_mirror_decision
+	if len(cDecisions) > 0 {
+		cDecisionsPtr = &cDecisions[0]
+	}
+
 	var cErr *C.yanet_error
-	ptr := C.mirror_module_config_init((*C.struct_agent)(agent.AsRawPtr()), cName, &cErr)
+	ptr := C.mirror_module_config_init(
+		(*C.struct_agent)(agent.AsRawPtr()),
+		cName,
+		cClassifier,
+		cDecisionsPtr,
+		C.uint32_t(len(cDecisions)),
+		&cErr,
+	)
 	if ptr == nil {
 		return nil, fmt.Errorf("failed to initialize module config: %w", cerrors.FromC(unsafe.Pointer(cErr)))
 	}
@@ -55,14 +81,4 @@ func (m *ModuleConfig) Free() error {
 		rc, errno := C.mirror_module_config_free((*C.struct_cp_module)(ptr), &cErr)
 		return int(rc), unsafe.Pointer(cErr), errno
 	})
-}
-
-// update maps 1:1 to mirror_module_config_update.
-func (m *ModuleConfig) update(rules *C.struct_mirror_rule, count C.uint32_t) error {
-	var cErr *C.yanet_error
-	rc := C.mirror_module_config_update(m.asRawPtr(), rules, count, &cErr)
-	if rc != 0 {
-		return fmt.Errorf("failed to update mirror config: %w", cerrors.FromC(unsafe.Pointer(cErr)))
-	}
-	return nil
 }

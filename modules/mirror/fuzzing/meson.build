@@ -9,6 +9,7 @@ fuzzing_targets += {
       lib_worker_dp_dep,
       lib_config_dp_dep,
       lib_lib_utils_dep,
+      lib_classifier_objects_dep,
     ],
     'module_dir': '..',
   }
