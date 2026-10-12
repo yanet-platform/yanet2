@@ -186,4 +186,35 @@ for package_name in "${package_names[@]}"; do
     fi
 done
 
+build_profiles=$(sed -n 's/^Built-For-Profiles: //p' "$changes_file")
+if [[ ${package_file[yanet2-controlplane]+present} == present && " $build_profiles " != *" pkg.yanet2.nouprobe "* ]]; then
+    diagnostic=yanet2-uprobe
+    [[ ${package_file[$diagnostic]+present} == present ]] || fail "missing $diagnostic"
+    [[ ${package_file[yanet2-controlplane-dbgsym]+present} == present ]] || fail "missing target dbgsym"
+    depends=$(read_field Depends "${package_file[$diagnostic]}")
+    # Build-id matching at setup ties symbols to the target, so the
+    # dependency stays unversioned and uprobe upgrades independently of CP.
+    expected=yanet2-controlplane-dbgsym
+    printf '%s\n' "$depends" | tr ',' '\n' | sed 's/^ *//;s/ *$//' | fgrep -x "$expected" >/dev/null ||
+        fail "$diagnostic must depend on unversioned $expected"
+    extraction=$(mktemp -d)
+    trap 'rm -rf "$extraction"' EXIT
+    dpkg-deb --extract "${package_file[$diagnostic]}" "$extraction"
+    [[ -f $extraction/usr/lib/yanet2/uprobe/cp_lock.bpf.o ]] || fail "missing BPF object"
+    for binary in usr/bin/yanet-uprobe usr/lib/yanet2/uprobe/setup; do
+        [[ -f $extraction/$binary ]] || fail "missing diagnostic artifact $binary"
+        dependencies=$(readelf -d "$extraction/$binary")
+        [[ $dependencies == *NEEDED* ]] || fail "missing dynamic dependency metadata: $binary"
+        [[ $dependencies != *libbpftime* && $dependencies != *libLLVM* && $dependencies != *libstdc++* ]] ||
+            fail "diagnostic links private C++ runtime: $binary"
+    done
+    for binary in bpftime libbpftime-agent.so libbpftime-syscall-server.so; do
+        runtime_file=$extraction/usr/lib/yanet2/uprobe/bpftime/$binary
+        [[ -f $runtime_file ]] || fail "missing prebuilt runtime artifact $binary"
+        readelf -h "$runtime_file" >/dev/null || fail "invalid prebuilt runtime artifact $binary"
+    done
+    [[ ! -d $extraction/usr/lib/yanet2/uprobe/bpftime/source && ! -d $extraction/usr/lib/yanet2/uprobe/bpftime/build ]] ||
+        fail "runtime source/build directories in diagnostic package"
+fi
+
 echo "Verified $((runtime_count + dbgsym_count)) Debian packages at version $artifact_version"
