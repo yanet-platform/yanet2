@@ -84,6 +84,7 @@ func setupVxlanHarness(t *testing.T) (*dataplaneut.Harness, *ffi.Agent, *vxlan.D
 		Devices:       []string{"port0"},
 		Modules:       []string{"forward", "blackhole"},
 		DevicesToLoad: []string{"plain", "vxlan"},
+		ObjectsToLoad: []string{"classifier"},
 	})
 	require.NoError(t, err)
 	t.Cleanup(harness.Free)
