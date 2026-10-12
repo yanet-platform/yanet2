@@ -49,8 +49,10 @@ type Backend interface {
 		cursor uint64,
 		limit uint32,
 	) ([]cl3bobject.Session, uint64, uint64, error)
-	// GetService inspects a named virtual service: scheduler masks and
-	// the live real servers with addresses, weights and states.
+	// GetService returns an owned snapshot of accepted configuration and state.
+	//
+	// Runtime state and weights become visible after the shared-memory call
+	// returns, including applied changes when a ring rebuild fails.
 	GetService(service string) (*l3bpb.GetServiceResponse, error)
 }
 
@@ -81,7 +83,7 @@ type ModuleHandle interface {
 	AsFFIModule() ffi.ModuleConfig
 }
 
-// SharedMemoryOps is the allocation and publication boundary used by Backend.
+// SharedMemoryOps separates allocation and publication from backend bookkeeping.
 type SharedMemoryOps interface {
 	WorkerCount() uint32
 	CreateSessionTable(string, uint16, uint32) (SessionTableHandle, error)
@@ -143,44 +145,44 @@ type retainedHandle struct {
 	readers int
 }
 
-// Free retries destruction after admitted readers have left.
+// Free leaves still-referenced allocations available for a later retry.
 func (m *retainedHandle) Free() error { return m.handle.Free() }
 
-// HasReaders reports whether a Go reader still uses the handle.
+// HasReaders gates destruction while a reader can still reach the allocation.
 func (m *retainedHandle) HasReaders() bool { return m.readers != 0 }
 
-// Admit records one reader of the handle.
+// Admit keeps the allocation alive for a reader admitted under the view lock.
 func (m *retainedHandle) Admit() { m.readers++ }
 
-// Release drops one reader of the handle.
+// Release ends a reader's lease under the view lock without freeing memory.
 func (m *retainedHandle) Release() {
 	m.readers--
 }
 
-// VirtualService returns the service carried by this retained handle.
+// VirtualService requires a handle wrapping a service allocation.
 func (m *retainedHandle) VirtualService() VirtualServiceHandle {
 	return m.handle.(VirtualServiceHandle)
 }
 
-// SessionTable returns the table carried by this retained handle.
+// SessionTable requires a handle wrapping a session-table allocation.
 func (m *retainedHandle) SessionTable() SessionTableHandle {
 	return m.handle.(SessionTableHandle)
 }
 
 type managedService struct {
 	object *retainedHandle
-	// The table outlives every generation published under this name and
-	// is destroyed only when the named service is deleted.
+	// Deletion retires the shared table; destruction waits for admitted readers
+	// and every referencing configuration generation to drain.
 	sessionTable *retainedHandle
 	config       cl3bobject.VirtualServiceConfig
-	// weights[i] is the configured weight of real server i.
+	// Configured weights survive disabling and re-enabling real servers.
 	weights []uint32
-	// enabled[i] is whether real server i takes traffic; disabled servers
-	// leave the scheduler ring so their share shifts to the enabled ones.
+	// Traffic state changes precede ring rebuilding; disabled servers leave the
+	// ring only after a successful rebuild.
 	enabled []bool
 }
 
-// Replace installs a fresh service and returns the object it superseded.
+// Replace commits a published generation and returns the superseded allocation.
 func (m *managedService) Replace(
 	object *retainedHandle,
 	config cl3bobject.VirtualServiceConfig,
@@ -197,7 +199,7 @@ func (m *managedService) Replace(
 	return previous
 }
 
-// PublishTarget returns the service object currently serving traffic.
+// PublishTarget selects the generation affected by serialized runtime updates.
 func (m *managedService) PublishTarget() VirtualServiceHandle {
 	return m.object.VirtualService()
 }
@@ -222,9 +224,9 @@ func (m *managedService) Handles() (*retainedHandle, *retainedHandle) {
 
 var errRealServerIndexOutOfRange = errors.New("real server index out of range")
 
-// SetRealServerState enables or disables a single real server, mirrors the
-// state into the service object and rebuilds the ring over the enabled
-// servers only.
+// SetRealServerState applies a traffic state change before rebuilding the ring.
+//
+// A failed ring rebuild keeps the applied state visible.
 func (m *managedService) SetRealServerState(
 	realServerIndex uint32,
 	enabled bool,
@@ -241,8 +243,9 @@ func (m *managedService) SetRealServerState(
 	return m.rebuildRing()
 }
 
-// SetRealServerWeight clamps the weight into range, applies it and rebuilds
-// the scheduler ring of the published object.
+// SetRealServerWeight stores a bounded weight before rebuilding the ring.
+//
+// A failed ring rebuild keeps the configured weight visible.
 func (m *managedService) SetRealServerWeight(
 	realServerIndex uint32,
 	weight uint32,
@@ -259,8 +262,10 @@ func (m *managedService) SetRealServerWeight(
 	return m.rebuildRing()
 }
 
-// rebuildRing installs a ring over the enabled servers only, each with its
-// configured weight; an empty ring drops new flows until a server is enabled.
+// rebuildRing attempts to install weighted scheduling over enabled servers.
+//
+// An empty ring drops new flows. Recovery requires a successful rebuild with
+// at least one enabled server whose configured weight is positive.
 func (m *managedService) rebuildRing() error {
 	effective := make([]uint32, len(m.weights))
 	for idx, weight := range m.weights {
@@ -271,7 +276,9 @@ func (m *managedService) rebuildRing() error {
 	return m.PublishTarget().UpdateRing(RingFromWeights(effective))
 }
 
-// Snapshot builds an owned response from the writer's applied state.
+// Snapshot builds an owned response from accepted config and applied state.
+//
+// Stored weights remain visible even when a ring rebuild fails.
 func (m *managedService) Snapshot() *l3bpb.GetServiceResponse {
 	realServers := make([]*l3bpb.RealServerState, 0, len(m.config.RealServers))
 	for idx, real := range m.config.RealServers {
@@ -303,7 +310,7 @@ func (m *managedConfig) Retire() freeable {
 	return m.module
 }
 
-// backend is the real Backend backed by shared memory.
+// backend keeps readers independent of serialized shared-memory mutations.
 type backend struct {
 	operations SharedMemoryOps
 
@@ -314,21 +321,23 @@ type backend struct {
 	configs   map[string]*managedConfig
 
 	// Retired handles wait for both Go readers and C generations to drain.
+	//
+	// Later mutations retry reclamation; reader completion never frees memory.
 	deferred []*retainedHandle
 }
 
-// NewBackend creates a Backend that operates on real shared memory.
+// NewBackend operates on real shared memory through the supplied agent.
 func NewBackend(agent *ffi.Agent) Backend {
 	return NewBackendWithSharedMemory(NewSharedMemoryOps(agent))
 }
 
-// NewSharedMemoryOps adapts a real agent to the backend operation boundary.
-func NewSharedMemoryOps(agent *ffi.Agent) SharedMemoryOps {
+// NewSharedMemoryOps preserves C ownership and publication through the agent.
+func NewSharedMemoryOps(agent *ffi.Agent) agentOps {
 	return agentOps{agent: agent}
 }
 
-// NewBackendWithSharedMemory creates a backend over shared-memory operations.
-func NewBackendWithSharedMemory(operations SharedMemoryOps) Backend {
+// NewBackendWithSharedMemory serializes writes independently of reads.
+func NewBackendWithSharedMemory(operations SharedMemoryOps) *backend {
 	return &backend{
 		operations: operations,
 		services:   map[string]*managedService{},
@@ -338,6 +347,7 @@ func NewBackendWithSharedMemory(operations SharedMemoryOps) Backend {
 }
 
 // reclaimDeferred retries retired handles once their Go readers have drained.
+//
 // The caller holds the writer lock, and no reader lock spans a free.
 func (m *backend) reclaimDeferred() {
 	m.mu.Lock()
@@ -368,6 +378,7 @@ func isStillReferenced(err error) bool {
 }
 
 // deferOrFree retires a handle and attempts serialized reclamation.
+//
 // The caller holds the writer lock.
 func (m *backend) deferOrFree(handle freeable) {
 	m.retire(&retainedHandle{handle: handle})
@@ -455,15 +466,15 @@ func (m *backend) UpdateService(service *l3bpb.VirtualService) error {
 		return err
 	}
 
-	// The replacement borrows the live session table, so pinned flows keep
-	// their real servers across the update.
+	// The replacement reuses the live session table. Existing pins survive only
+	// for destinations that remain listed and enabled in the replacement.
 	object, weights, err := m.publishService(config, name, existing.SessionTable())
 	if err != nil {
 		return err
 	}
 
-	// The upsert swapped the registry slot atomically; the superseded
-	// service object stays alive until its generations drain.
+	// The upsert swapped the registry slot atomically; the superseded service
+	// stays alive until admitted readers and referencing generations drain.
 	m.mu.Lock()
 	oldObject := existing.Replace(&retainedHandle{handle: object}, config, weights)
 	m.snapshots[name] = existing.Snapshot()
