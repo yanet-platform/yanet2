@@ -11,9 +11,7 @@
 
 #include "lib/dataplane/pipeline/pipeline.h"
 
-// Both directions are pure pass-through, so the identity flags keep the
-// entry level from ever calling these; they remain as the direct
-// implementation of the same contract.
+// Both directions are pure pass-through.
 static void
 plain_input_handle(
 	struct dp_worker *dp_worker,
@@ -71,8 +69,6 @@ new_device_plain() {
 	device_plain->device.input_handler = plain_input_handle;
 	device_plain->device.output_handler = plain_output_handle;
 	device_plain->device.commit_handler = plain_device_commit;
-	device_plain->device.identity =
-		DEVICE_IDENTITY_INPUT | DEVICE_IDENTITY_OUTPUT;
 
 	return &device_plain->device;
 }

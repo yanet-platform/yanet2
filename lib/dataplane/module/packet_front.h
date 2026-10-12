@@ -91,7 +91,7 @@ packet_front_collect_input(
 // Sum the packets and first-segment bytes of a bare list in one walk.
 //
 // Used where a list producer keeps no tally — the output of a
-// non-identity device handler — and the consumer stage needs one. The
+// device handler — and the consumer stage needs one. The
 // walk touches packet heads the consumer is about to read anyway.
 static inline void
 packet_list_tally(struct packet_list *list, uint64_t *count, uint64_t *bytes) {

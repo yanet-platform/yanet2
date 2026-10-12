@@ -1134,7 +1134,6 @@ device_entry_ectx_create(
 	struct config_gen_ectx *config_gen_ectx,
 	struct device_ectx *device_ectx,
 	device_handler handler,
-	uint8_t identity,
 	struct cp_device_entry *cp_device_entry,
 	struct cp_config_gen *old_config_gen,
 	uint64_t worker_idx,
@@ -1166,7 +1165,6 @@ device_entry_ectx_create(
 
 	memset(device_entry_ectx, 0, ectx_size);
 	device_entry_ectx->handler = handler;
-	device_entry_ectx->identity = identity;
 
 	struct pipeline_ectx **pipelines =
 		(struct pipeline_ectx **)memory_balloc(
@@ -1371,7 +1369,6 @@ device_ectx_create(
 		config_gen_ectx,
 		device_ectx,
 		dp_device->input_handler,
-		(dp_device->identity & DEVICE_IDENTITY_INPUT) != 0,
 		ADDR_OF(&cp_device->input_pipelines),
 		old_config_gen,
 		worker_idx,
@@ -1389,7 +1386,6 @@ device_ectx_create(
 		config_gen_ectx,
 		device_ectx,
 		dp_device->output_handler,
-		(dp_device->identity & DEVICE_IDENTITY_OUTPUT) != 0,
 		ADDR_OF(&cp_device->output_pipelines),
 		old_config_gen,
 		worker_idx,

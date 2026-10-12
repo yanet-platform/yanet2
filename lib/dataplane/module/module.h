@@ -18,8 +18,8 @@
 // 34: struct packet_front dropped the pending tallies; module_ectx gained
 // the chain back-reference, device_entry_ectx and config_gen_ectx carry
 // bare packet lists instead of fronts.
-// 35: device_handler takes bare packet lists; struct device gained the
-// identity flags; device_entry_ectx carries the inbox tally.
+// 35: device_handler takes bare packet lists; device_entry_ectx carries
+// the inbox tally.
 #define YANET_MODULE_ABI_VERSION 35
 
 // Symbol name a module .so exports carrying its compiled-against

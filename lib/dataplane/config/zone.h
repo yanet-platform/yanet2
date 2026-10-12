@@ -34,9 +34,6 @@ struct dp_device {
 	device_handler input_handler;
 	device_handler output_handler;
 	device_commit_handler commit_handler;
-	// DEVICE_IDENTITY_* flags copied from the loaded device; the entry
-	// contexts read their direction's flag when they are created.
-	uint8_t identity;
 };
 
 /*

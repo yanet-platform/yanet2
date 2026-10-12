@@ -1,7 +1,5 @@
 #pragma once
 
-#include <stdint.h>
-
 #define DEVICE_TYPE_LEN 80
 
 struct packet_list;
@@ -24,13 +22,6 @@ typedef void (*device_handler)(
 	struct packet_list *output,
 	struct packet_list *drop
 );
-
-// An identity direction: the handler would only pass every packet from
-// input to output unchanged. The entry level skips calling the handler
-// and moves the list wholesale, preserving its tallies, so a pass-through
-// direction costs no per-packet work.
-#define DEVICE_IDENTITY_INPUT (1u << 0)
-#define DEVICE_IDENTITY_OUTPUT (1u << 1)
 
 // Commit handler: a preparation hook, run exactly once per published
 // generation per shared device config.
@@ -55,9 +46,6 @@ struct device {
 	device_handler input_handler;
 	device_handler output_handler;
 	device_commit_handler commit_handler;
-	// DEVICE_IDENTITY_* flags for the two directions; the entry level
-	// reads them when the context is linked.
-	uint8_t identity;
 };
 
 typedef struct device *(*device_load_handler)();

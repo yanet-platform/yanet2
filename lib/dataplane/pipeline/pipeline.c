@@ -877,12 +877,10 @@ device_entry_ectx_dispatch(
 
 // Run one device entry over its detached inbox batch.
 //
-// The rx counter is credited from the inbox tally in one bump. An
-// identity direction never calls its handler: the batch moves to the
-// output wholesale and the inbox tally becomes the output tally. A
-// real handler runs on bare lists; its output tally is restored by one
-// walk over lines the dispatch is about to read anyway, and its drops
-// are credited and spliced to the round's drop sink.
+// The rx counter is credited from the inbox tally in one bump. The
+// handler runs on bare lists; its output tally is restored by one walk
+// over lines the dispatch is about to read anyway, and its drops are
+// credited and spliced to the round's drop sink.
 static inline void
 device_ectx_process_entry(
 	struct dp_worker *dp_worker,
@@ -903,19 +901,11 @@ device_ectx_process_entry(
 	packet_list_init(&output);
 	packet_list_init(&drop);
 
+	entry_ectx->handler(dp_worker, device_ectx, input, &output, &drop);
+
 	uint64_t output_count;
 	uint64_t output_bytes;
-
-	if (entry_ectx->identity) {
-		packet_list_concat(&output, input);
-		output_count = input_count;
-		output_bytes = input_bytes;
-	} else {
-		entry_ectx->handler(
-			dp_worker, device_ectx, input, &output, &drop
-		);
-		packet_list_tally(&output, &output_count, &output_bytes);
-	}
+	packet_list_tally(&output, &output_count, &output_bytes);
 
 	counter_add_packets_bytes(
 		entry_ectx->counter_packet_entry, output_count, output_bytes
