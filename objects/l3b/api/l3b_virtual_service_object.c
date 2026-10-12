@@ -147,6 +147,23 @@ out:
 	return rc;
 }
 
+static int
+register_object_counter(
+	struct cp_object *cp_object,
+	const char *name,
+	uint64_t *counter_id,
+	yanet_error **err
+) {
+	*counter_id = counter_registry_register(
+		&cp_object->counter_registry, name, 2, err
+	);
+	if (*counter_id == COUNTER_INVALID) {
+		yanet_error_add(err, "failed to register counter '%s'", name);
+		return -1;
+	}
+	return 0;
+}
+
 struct cp_object *
 l3b_virtual_service_create(
 	const struct l3b_virtual_service_create_config *config,
@@ -236,40 +253,39 @@ l3b_virtual_service_create(
 
 	vs->real_server_count = virtual_service->real_server_count;
 
-	// The service's own counters live on the object registry: per-worker
-	// storages spawn from it and are scraped under the object's tags. A
-	// failed registration leaves the id at COUNTER_INVALID and the
-	// dataplane skips the counter.
-	vs->counter_incoming = counter_registry_register(
-		&object->cp_object.counter_registry,
-		L3B_COUNTER_INCOMING,
-		2,
-		err
-	);
-	vs->counter_filter_rejected = counter_registry_register(
-		&object->cp_object.counter_registry,
-		L3B_COUNTER_FILTER_REJECTED,
-		2,
-		err
-	);
-	vs->counter_ring_empty = counter_registry_register(
-		&object->cp_object.counter_registry,
-		L3B_COUNTER_RING_EMPTY,
-		2,
-		err
-	);
-	vs->counter_real_disabled = counter_registry_register(
-		&object->cp_object.counter_registry,
-		L3B_COUNTER_REAL_DISABLED,
-		2,
-		err
-	);
-	vs->counter_icmp_replied = counter_registry_register(
-		&object->cp_object.counter_registry,
-		L3B_COUNTER_ICMP_REPLIED,
-		2,
-		err
-	);
+	if (register_object_counter(
+		    &object->cp_object,
+		    L3B_COUNTER_INCOMING,
+		    &vs->counter_incoming,
+		    err
+	    ) ||
+	    register_object_counter(
+		    &object->cp_object,
+		    L3B_COUNTER_FILTER_REJECTED,
+		    &vs->counter_filter_rejected,
+		    err
+	    ) ||
+	    register_object_counter(
+		    &object->cp_object,
+		    L3B_COUNTER_RING_EMPTY,
+		    &vs->counter_ring_empty,
+		    err
+	    ) ||
+	    register_object_counter(
+		    &object->cp_object,
+		    L3B_COUNTER_REAL_DISABLED,
+		    &vs->counter_real_disabled,
+		    err
+	    ) ||
+	    register_object_counter(
+		    &object->cp_object,
+		    L3B_COUNTER_ICMP_REPLIED,
+		    &vs->counter_icmp_replied,
+		    err
+	    )) {
+		goto error_object;
+	}
+
 	vs->real_counter_ids = NULL;
 	if (vs->real_server_count > 0) {
 		uint64_t *real_counter_ids = (uint64_t *)memory_balloc(
@@ -282,19 +298,20 @@ l3b_virtual_service_create(
 			goto error_object;
 		}
 
+		SET_OFFSET_OF(&vs->real_counter_ids, real_counter_ids);
 		for (uint32_t real_idx = 0; real_idx < vs->real_server_count;
 		     ++real_idx) {
 			char name[COUNTER_NAME_LEN] = {0};
 			snprintf(name, sizeof(name), "real/%" PRIu32, real_idx);
-			real_counter_ids[real_idx] = counter_registry_register(
-				&object->cp_object.counter_registry,
-				name,
-				2,
-				err
-			);
+			if (register_object_counter(
+				    &object->cp_object,
+				    name,
+				    &real_counter_ids[real_idx],
+				    err
+			    )) {
+				goto error_real_counters;
+			}
 		}
-
-		SET_OFFSET_OF(&vs->real_counter_ids, real_counter_ids);
 	}
 
 	// Backends.
@@ -307,7 +324,7 @@ l3b_virtual_service_create(
 			);
 		if (real_servers == NULL) {
 			yanet_error_add(err, "failed to allocate real servers");
-			goto error_vs;
+			goto error_real_counters;
 		}
 
 		for (uint32_t idx = 0; idx < virtual_service->real_server_count;
@@ -367,15 +384,6 @@ l3b_virtual_service_create(
 
 	return &object->cp_object;
 
-error_object:
-	cp_object_fini(&object->cp_object);
-	memory_bfree(
-		&agent->memory_context,
-		object,
-		sizeof(struct l3b_virtual_service_object)
-	);
-	return NULL;
-
 error_ring:
 	if (vs->real_ring.capacity > 0) {
 		memory_bfree(
@@ -386,14 +394,6 @@ error_ring:
 	}
 
 error_real_servers:
-	if (vs->real_counter_ids != NULL) {
-		memory_bfree(
-			memory_context,
-			ADDR_OF(&vs->real_counter_ids),
-			sizeof(uint64_t) * vs->real_server_count
-		);
-	}
-
 	if (vs->real_server_count > 0) {
 		memory_bfree(
 			memory_context,
@@ -402,7 +402,16 @@ error_real_servers:
 		);
 	}
 
-error_vs:
+error_real_counters:
+	if (vs->real_counter_ids != NULL) {
+		memory_bfree(
+			memory_context,
+			ADDR_OF(&vs->real_counter_ids),
+			sizeof(uint64_t) * vs->real_server_count
+		);
+	}
+
+error_object:
 	cp_object_fini(&object->cp_object);
 	memory_bfree(
 		&agent->memory_context,
