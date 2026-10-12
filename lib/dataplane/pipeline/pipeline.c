@@ -671,16 +671,16 @@ function_ectx_process(
 // flows through the functions as the running output tally, so each
 // function's in-counter is the previous stage's out by construction.
 // The final tally credits the pipeline's out-counter and the entry's
-// tx-counter, and the carrier's packets move back onto the entry front:
-// the entry level owns the direction policy, dropping the output of an
-// input entry instead of letting it transmit.
+// tx-counter, and the carrier's packets move onto the entry's output
+// sink: the entry level owns the direction policy, dropping the output
+// of an input entry instead of letting it transmit.
 static inline void
 pipeline_ectx_process(
 	struct dp_worker *dp_worker,
 	struct pipeline_ectx *pipeline_ectx,
 	struct device_entry_ectx *entry_ectx,
 	struct config_gen_ectx *config_gen_ectx,
-	struct packet_front *packet_front,
+	struct packet_list *output_sink,
 	struct packet_list *carrier,
 	const struct packet_tally *in
 ) {
@@ -707,9 +707,7 @@ pipeline_ectx_process(
 		entry_ectx->counter_packet_tx, tally.packets, tally.bytes
 	);
 
-	packet_list_concat(&packet_front->output, carrier);
-	packet_front->output_count += tally.packets;
-	packet_front->output_bytes += tally.bytes;
+	packet_list_concat(output_sink, carrier);
 }
 
 // Run the entry's only pipeline.
@@ -717,34 +715,32 @@ pipeline_ectx_process(
 // With a single pipeline every packet maps to pipeline 0, so the
 // per-packet hash demux is skipped: the handler output moves to the
 // pipeline's carrier in one step and the pipeline's in-counter is
-// credited wholesale from the front's output tally.
+// credited wholesale from the handler's output tally.
 static inline void
 device_entry_ectx_dispatch_single(
 	struct dp_worker *dp_worker,
 	struct device_entry_ectx *entry_ectx,
 	struct config_gen_ectx *config_gen_ectx,
-	struct packet_front *packet_front
+	struct packet_list *output,
+	uint64_t output_count,
+	uint64_t output_bytes,
+	struct packet_list *output_sink
 ) {
 	struct pipeline_ectx *pipeline_ectx = entry_ectx->abs_pipelines[0];
 
-	struct packet_tally in = {
-		packet_front->output_count,
-		packet_front->output_bytes,
-	};
+	struct packet_tally in = {output_count, output_bytes};
 
 	counter_add_packets_bytes(
 		pipeline_ectx->abs_counter_packet_in, in.packets, in.bytes
 	);
-	packet_list_concat(&pipeline_ectx->schedule, &packet_front->output);
-	packet_front->output_count = 0;
-	packet_front->output_bytes = 0;
+	packet_list_concat(&pipeline_ectx->schedule, output);
 
 	pipeline_ectx_process(
 		dp_worker,
 		pipeline_ectx,
 		entry_ectx,
 		config_gen_ectx,
-		packet_front,
+		output_sink,
 		&pipeline_ectx->schedule,
 		&in
 	);
@@ -760,14 +756,15 @@ device_entry_ectx_dispatch_many(
 	struct dp_worker *dp_worker,
 	struct device_entry_ectx *entry_ectx,
 	struct config_gen_ectx *config_gen_ectx,
-	struct packet_front *packet_front
+	struct packet_list *output,
+	struct packet_list *output_sink
 ) {
 	struct pipeline_ectx **pipelines = entry_ectx->abs_pipelines;
 
 	struct pipeline_ectx **pipeline_map = entry_ectx->pipeline_map;
 	uint64_t map_size = entry_ectx->pipeline_map_size;
 
-	struct packet *packet = packet_list_pop(&packet_front->output);
+	struct packet *packet = packet_list_pop(output);
 	while (packet != NULL) {
 		uint64_t map_idx = ((uint64_t)packet->hash * map_size) >> 32;
 		struct pipeline_ectx *pipeline_ectx = pipeline_map[map_idx];
@@ -780,10 +777,8 @@ device_entry_ectx_dispatch_many(
 
 		packet_list_add(&pipeline_ectx->schedule, packet);
 
-		packet = packet_list_pop(&packet_front->output);
+		packet = packet_list_pop(output);
 	}
-	packet_front->output_count = 0;
-	packet_front->output_bytes = 0;
 
 	for (uint64_t idx = 0; idx < entry_ectx->pipeline_count; ++idx) {
 		struct pipeline_ectx *pipeline_ectx = pipelines[idx];
@@ -794,7 +789,7 @@ device_entry_ectx_dispatch_many(
 			pipeline_ectx,
 			entry_ectx,
 			config_gen_ectx,
-			packet_front,
+			output_sink,
 			&pipeline_ectx->schedule,
 			&in
 		);
@@ -804,7 +799,7 @@ device_entry_ectx_dispatch_many(
 // Drain a device entry that has no routable pipeline.
 //
 // The unroutable output is dropped and the entry's drop counter is
-// credited from the front's output tally. If the entry has pipelines
+// credited from the handler's output tally. If the entry has pipelines
 // but they are all zero-weight, they are still worked on empty carriers
 // so the worker keeps force-polling every module once per tick for
 // periodic work; reusing the demux is safe once the output list is
@@ -817,20 +812,23 @@ device_entry_ectx_drain(
 	struct dp_worker *dp_worker,
 	struct device_entry_ectx *entry_ectx,
 	struct config_gen_ectx *config_gen_ectx,
-	struct packet_front *packet_front
+	struct packet_list *output,
+	uint64_t output_count,
+	uint64_t output_bytes,
+	struct packet_list *output_sink
 ) {
 	counter_add_packets_bytes(
-		entry_ectx->counter_packet_drop,
-		packet_front->output_count,
-		packet_front->output_bytes
+		entry_ectx->counter_packet_drop, output_count, output_bytes
 	);
-	packet_list_concat(&config_gen_ectx->round_drop, &packet_front->output);
-	packet_front->output_count = 0;
-	packet_front->output_bytes = 0;
+	packet_list_concat(&config_gen_ectx->round_drop, output);
 
 	if (entry_ectx->pipeline_count > 0) {
 		device_entry_ectx_dispatch_many(
-			dp_worker, entry_ectx, config_gen_ectx, packet_front
+			dp_worker,
+			entry_ectx,
+			config_gen_ectx,
+			output,
+			output_sink
 		);
 	}
 }
@@ -841,50 +839,104 @@ device_entry_ectx_dispatch(
 	struct dp_worker *dp_worker,
 	struct device_entry_ectx *entry_ectx,
 	struct config_gen_ectx *config_gen_ectx,
-	struct packet_front *packet_front
+	struct packet_list *output,
+	uint64_t output_count,
+	uint64_t output_bytes,
+	struct packet_list *output_sink
 ) {
 	if (entry_ectx->pipeline_map_size == 0) {
 		device_entry_ectx_drain(
-			dp_worker, entry_ectx, config_gen_ectx, packet_front
+			dp_worker,
+			entry_ectx,
+			config_gen_ectx,
+			output,
+			output_count,
+			output_bytes,
+			output_sink
 		);
 	} else if (entry_ectx->pipeline_count == 1) {
 		device_entry_ectx_dispatch_single(
-			dp_worker, entry_ectx, config_gen_ectx, packet_front
+			dp_worker,
+			entry_ectx,
+			config_gen_ectx,
+			output,
+			output_count,
+			output_bytes,
+			output_sink
 		);
 	} else {
 		device_entry_ectx_dispatch_many(
-			dp_worker, entry_ectx, config_gen_ectx, packet_front
+			dp_worker,
+			entry_ectx,
+			config_gen_ectx,
+			output,
+			output_sink
 		);
 	}
 }
 
+// Run one device entry over its detached inbox batch.
+//
+// The rx counter is credited from the inbox tally in one bump. An
+// identity direction never calls its handler: the batch moves to the
+// output wholesale and the inbox tally becomes the output tally. A
+// real handler runs on bare lists; its output tally is restored by one
+// walk over lines the dispatch is about to read anyway, and its drops
+// are credited and spliced to the round's drop sink.
 static inline void
 device_ectx_process_entry(
 	struct dp_worker *dp_worker,
 	struct config_gen_ectx *config_gen_ectx,
 	struct device_ectx *device_ectx,
 	struct device_entry_ectx *entry_ectx,
-	struct packet_front *packet_front
+	struct packet_list *input,
+	uint64_t input_count,
+	uint64_t input_bytes,
+	struct packet_list *output_sink
 ) {
-	entry_ectx->handler(dp_worker, device_ectx, packet_front);
+	counter_add_packets_bytes(
+		entry_ectx->counter_packet_rx, input_count, input_bytes
+	);
+
+	struct packet_list output;
+	struct packet_list drop;
+	packet_list_init(&output);
+	packet_list_init(&drop);
+
+	uint64_t output_count;
+	uint64_t output_bytes;
+
+	if (entry_ectx->identity) {
+		packet_list_concat(&output, input);
+		output_count = input_count;
+		output_bytes = input_bytes;
+	} else {
+		entry_ectx->handler(
+			dp_worker, device_ectx, input, &output, &drop
+		);
+		packet_list_tally(&output, &output_count, &output_bytes);
+	}
 
 	counter_add_packets_bytes(
-		entry_ectx->counter_packet_entry,
-		packet_front_output_count(packet_front),
-		packet_front_output_bytes(packet_front)
+		entry_ectx->counter_packet_entry, output_count, output_bytes
 	);
-	// Handler drops are all the front's drop list holds at this point:
-	// chain drops are spliced straight to the round's sink and credited
-	// through the chain's sinks, and drain drops credit the entry
-	// counter where they happen.
+
+	uint64_t drop_count;
+	uint64_t drop_bytes;
+	packet_list_tally(&drop, &drop_count, &drop_bytes);
 	counter_add_packets_bytes(
-		entry_ectx->counter_packet_drop,
-		packet_front_drop_count(packet_front),
-		packet_front_drop_bytes(packet_front)
+		entry_ectx->counter_packet_drop, drop_count, drop_bytes
 	);
+	packet_list_concat(&config_gen_ectx->round_drop, &drop);
 
 	device_entry_ectx_dispatch(
-		dp_worker, entry_ectx, config_gen_ectx, packet_front
+		dp_worker,
+		entry_ectx,
+		config_gen_ectx,
+		&output,
+		output_count,
+		output_bytes,
+		output_sink
 	);
 }
 
@@ -893,7 +945,10 @@ device_ectx_process_input(
 	struct dp_worker *dp_worker,
 	struct config_gen_ectx *config_gen_ectx,
 	struct device_ectx *device_ectx,
-	struct packet_front *packet_front
+	struct packet_list *input,
+	uint64_t input_count,
+	uint64_t input_bytes,
+	struct packet_list *output_sink
 ) {
 	struct device_entry_ectx *entry_ectx = device_ectx->abs_input_pipelines;
 
@@ -902,7 +957,10 @@ device_ectx_process_input(
 		config_gen_ectx,
 		device_ectx,
 		entry_ectx,
-		packet_front
+		input,
+		input_count,
+		input_bytes,
+		output_sink
 	);
 }
 
@@ -911,7 +969,10 @@ device_ectx_process_output(
 	struct dp_worker *dp_worker,
 	struct config_gen_ectx *config_gen_ectx,
 	struct device_ectx *device_ectx,
-	struct packet_front *packet_front
+	struct packet_list *input,
+	uint64_t input_count,
+	uint64_t input_bytes,
+	struct packet_list *output_sink
 ) {
 	struct device_entry_ectx *entry_ectx =
 		device_ectx->abs_output_pipelines;
@@ -921,6 +982,9 @@ device_ectx_process_output(
 		config_gen_ectx,
 		device_ectx,
 		entry_ectx,
-		packet_front
+		input,
+		input_count,
+		input_bytes,
+		output_sink
 	);
 }

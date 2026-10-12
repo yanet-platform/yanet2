@@ -90,10 +90,9 @@ packet_front_collect_input(
 
 // Sum the packets and first-segment bytes of a bare list in one walk.
 //
-// The only producer handing a bare list to a front is the device entry
-// detach: the inbox carries no counters, so the active front tallies
-// its input here. The walk touches the packet heads the device handler
-// is about to read anyway.
+// Used where a list producer keeps no tally — the output of a
+// non-identity device handler — and the consumer stage needs one. The
+// walk touches packet heads the consumer is about to read anyway.
 static inline void
 packet_list_tally(struct packet_list *list, uint64_t *count, uint64_t *bytes) {
 	uint64_t total_count = 0;
@@ -127,19 +126,6 @@ packet_front_pass(struct packet_front *packet_front) {
 	packet_front->output_bytes += packet_front->input_bytes;
 	packet_front->input_count = 0;
 	packet_front->input_bytes = 0;
-}
-
-// Move the whole output list into the drop list, transferring the counters.
-//
-// Used by drain paths that discard unroutable output.
-static inline void
-packet_front_drop_output(struct packet_front *packet_front) {
-	packet_list_concat(&packet_front->drop, &packet_front->output);
-
-	packet_front->drop_count += packet_front->output_count;
-	packet_front->drop_bytes += packet_front->output_bytes;
-	packet_front->output_count = 0;
-	packet_front->output_bytes = 0;
 }
 
 static inline uint64_t

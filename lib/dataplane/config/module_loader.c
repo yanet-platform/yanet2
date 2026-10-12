@@ -30,8 +30,9 @@ dp_load_module(
 	module_load_handler loader = NULL;
 	if (plugins != NULL) {
 		for (uint64_t i = 0; i < plugins->count; i++) {
-			loader = (module_load_handler
-			)dlsym(plugins->plugins[i].dl_handle, loader_name);
+			loader = (module_load_handler)dlsym(
+				plugins->plugins[i].dl_handle, loader_name
+			);
 			if (loader != NULL) {
 				LOG(INFO,
 				    "module %s found in plugin %s",
@@ -119,6 +120,7 @@ dp_load_device(struct dp_config *dp_config, void *bin_hndl, const char *name) {
 	dp_device->input_handler = device->input_handler;
 	dp_device->output_handler = device->output_handler;
 	dp_device->commit_handler = device->commit_handler;
+	dp_device->identity = device->identity;
 
 	SET_OFFSET_OF(&dp_config->dp_devices, dp_devices);
 

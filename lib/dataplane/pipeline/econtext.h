@@ -442,13 +442,22 @@ struct device_entry_ectx {
 	// then.
 	struct pipeline_ectx **abs_pipelines;
 	uint64_t pipeline_map_size;
-	// Per-entry inbox for packets awaiting processing: a bare list,
-	// counted into the entry's rx counter at schedule time.
+	// Per-entry inbox for packets awaiting processing: a bare list with
+	// its tally, maintained at the schedule site. The rx counter is
+	// credited from the tally once per detached batch, and an identity
+	// direction reuses the tally as its output tally wholesale.
 	//
 	// The worker detaches each batch before invoking the entry, so packets
 	// routed back here during processing remain queued for the next
 	// traversal.
 	struct packet_list schedule;
+	uint64_t schedule_count;
+	uint64_t schedule_bytes;
+	// The DEVICE_IDENTITY_* flag of this entry's direction: when set, the
+	// handler would only pass packets through, so the entry level moves
+	// the batch wholesale without calling it. Filled by the control plane
+	// when the context is linked.
+	uint8_t identity;
 	// The entry's pipelines, indexed by packet hash for the demux.
 	//
 	// Creation writes relative addresses; the publishing process
