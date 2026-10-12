@@ -27,9 +27,14 @@ worker_run_entry(
 	struct packet_list input = device_entry_ectx->schedule;
 	uint64_t input_count = device_entry_ectx->schedule_count;
 	uint64_t input_bytes = device_entry_ectx->schedule_bytes;
-	packet_list_init(&device_entry_ectx->schedule);
-	device_entry_ectx->schedule_count = 0;
-	device_entry_ectx->schedule_bytes = 0;
+	// The tally moves with the list, so an empty inbox needs no reset:
+	// an idle tick then writes nothing into the shared zone, where every
+	// store waits for cache-line ownership.
+	if (input_count != 0) {
+		packet_list_init(&device_entry_ectx->schedule);
+		device_entry_ectx->schedule_count = 0;
+		device_entry_ectx->schedule_bytes = 0;
+	}
 
 	struct packet_list entry_output;
 	packet_list_init(&entry_output);

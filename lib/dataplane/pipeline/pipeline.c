@@ -521,7 +521,14 @@ chain_ectx_run(
 	tally->bytes += schedule->output_bytes;
 	packet_list_concat(carrier, &schedule->output);
 
-	packet_front_init(schedule);
+	// A run that moved no packets leaves every tally at zero and every
+	// list empty, so the reset is skipped and an idle poll of the chain
+	// writes nothing into the shared zone. Any non-zero tally marks the
+	// one left dirty by a loaded run.
+	if (schedule->input_count != 0 || schedule->output_count != 0 ||
+	    schedule->drop_count != 0) {
+		packet_front_init(schedule);
+	}
 }
 
 // Run the function's only chain.
@@ -539,8 +546,12 @@ function_ectx_run_single_chain(
 	struct chain_ectx *chain_ectx = function_ectx->abs_chains[0];
 	struct packet_front *schedule = &chain_ectx->schedule;
 
-	schedule->input_count = tally->packets;
-	schedule->input_bytes = tally->bytes;
+	// The schedule is left clean by its previous run, so an empty batch
+	// writes no tallies into the shared zone.
+	if (tally->packets != 0) {
+		schedule->input_count = tally->packets;
+		schedule->input_bytes = tally->bytes;
+	}
 	packet_list_concat(&schedule->input, carrier);
 
 	*tally = (struct packet_tally){0, 0};
