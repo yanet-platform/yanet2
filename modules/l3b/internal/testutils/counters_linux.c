@@ -90,9 +90,7 @@ clear_fault(void) {
 }
 
 extern uint64_t
-__real_counter_registry_register(
-	struct counter_registry *, const char *, uint64_t, yanet_error **
-);
+__real_counter_registry_register(struct counter_registry *, const char *, uint64_t, yanet_error **);
 
 uint64_t
 __wrap_counter_registry_register(
