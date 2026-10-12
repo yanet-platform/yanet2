@@ -15,11 +15,14 @@
 
 #include "common/strutils.h"
 #include "devices/plain/api/controlplane.h"
+#include "modules/forward/api/controlplane.h"
+
 #include "lib/controlplane/agent/agent.h"
 #include "lib/dataplane/packet/dscp.h"
 #include "modules/decap/api/controlplane.h"
 #include "modules/dscp/api/controlplane.h"
 #include "modules/forward/api/controlplane.h"
+#include "objects/classifier/api/classifier_object.h"
 #endif
 
 #ifdef YANET_DATAPLANE_UT_CONTROLPLANE
@@ -37,6 +40,7 @@ run_round_restore_test(void) {
 	const char *port_names[] = {"dev0"};
 	const char *module_names[] = {"dscp", "forward"};
 	const char *devs_to_load[] = {"plain"};
+	const char *objs_to_load[] = {"classifier"};
 	struct dataplane_ut_config cfg = {
 		.cp_memory = 1u << 25,
 		.dp_memory = 1u << 20,
@@ -47,6 +51,8 @@ run_round_restore_test(void) {
 		.module_count = 2,
 		.devices_to_load = devs_to_load,
 		.devices_to_load_count = 1,
+		.objects_to_load = objs_to_load,
+		.objects_to_load_count = 1,
 	};
 	struct dataplane_ut *ut = dataplane_ut_new(&cfg);
 	TEST_ASSERT_NOT_NULL(ut, "dataplane_ut_new returned NULL");
@@ -71,19 +77,33 @@ run_round_restore_test(void) {
 		"dscp marking setup failed"
 	);
 
-	struct cp_module *forward =
-		forward_module_config_init(agent, "loop", &err);
-	TEST_ASSERT_NOT_NULL(forward, "forward_module_config_init failed");
-	struct forward_rule forward_rule;
-	memset(&forward_rule, 0, sizeof(forward_rule));
-	strtcpy(forward_rule.target, "dev0", sizeof(forward_rule.target));
-	strtcpy(forward_rule.counter, "loop", sizeof(forward_rule.counter));
-	forward_rule.mode = FORWARD_MODE_IN;
-	TEST_ASSERT_SUCCESS(
-		forward_module_config_update(forward, &forward_rule, 1, &err),
-		"forward rule setup failed: %s",
-		err ? yanet_error_message(err) : "?"
+	// The classifier object the forward module binds to: one empty
+	// rule matching every packet, the loop the smoke round expects.
+	struct classifier_object_rule cls_rules[1];
+	memset(cls_rules, 0, sizeof(cls_rules));
+	struct cp_object *cls = classifier_object_config_new_l3(
+		agent, "loop-rules", cls_rules, 1, &err
 	);
+	TEST_ASSERT_NOT_NULL(cls, "classifier object create failed");
+	struct cp_object *cls_objects[] = {cls};
+	TEST_ASSERT_SUCCESS(
+		agent_update_objects(agent, 1, cls_objects, &err),
+		"classifier object install failed"
+	);
+
+	struct forward_decision forward_decision;
+	memset(&forward_decision, 0, sizeof(forward_decision));
+	strtcpy(forward_decision.target,
+		"dev0",
+		sizeof(forward_decision.target));
+	strtcpy(forward_decision.counter,
+		"loop",
+		sizeof(forward_decision.counter));
+	forward_decision.mode = FORWARD_MODE_IN;
+	struct cp_module *forward = forward_module_config_init(
+		agent, "loop", "loop-rules", &forward_decision, 1, &err
+	);
+	TEST_ASSERT_NOT_NULL(forward, "forward_module_config_init failed");
 
 	struct cp_module *modules[] = {dscp, forward};
 	TEST_ASSERT_SUCCESS(

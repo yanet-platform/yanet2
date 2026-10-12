@@ -582,6 +582,7 @@ func TestHandleSegmentedPacketsOnDevice_ForwardDeviceScopedRule(t *testing.T) {
 		Devices:       []string{"port0", "port1"},
 		Modules:       []string{"forward"},
 		DevicesToLoad: []string{"plain"},
+		ObjectsToLoad: []string{"classifier"},
 		Workers: []WorkerSpec{
 			{DeviceID: 0, QueueID: 0},
 			{DeviceID: 1, QueueID: 0},

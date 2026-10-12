@@ -62,6 +62,7 @@ func setupHarness(
 		Devices:       []string{deviceName},
 		Modules:       []string{"unrdup", "forward"},
 		DevicesToLoad: []string{"plain"},
+		ObjectsToLoad: []string{"classifier"},
 	})
 	require.NoError(t, err)
 	t.Cleanup(harness.Free)

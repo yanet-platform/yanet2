@@ -2,9 +2,6 @@
 
 #include <stdint.h>
 
-#include <lib/classify/classify.h>
-#include <lib/classify/rule.h>
-
 #include "lib/counters/counters.h"
 
 #include "lib/controlplane/config/defines.h"
@@ -18,9 +15,42 @@
 struct agent;
 struct cp_module;
 
+/*
+ * The decision one rule of the linked classifier object's ruleset
+ * resolves to: the forwarding target, its direction and its counter.
+ *
+ * The decisions are indexed by the classification results the object
+ * yields, so the module build validates their count against the
+ * object's ruleset.
+ */
+struct forward_decision {
+	char target[CP_DEVICE_NAME_LEN];
+	char counter[COUNTER_NAME_LEN];
+
+	uint8_t mode;
+};
+
+/*
+ * Allocate the forward module config and bind it to a classifier
+ * object in one step: a config handle is fully built at construction
+ * and never updated afterwards.
+ *
+ * The classifier object 'classifier:<classifier_object_name>' must be
+ * installed (agent_update_objects) before this runs: the module links
+ * it by name, resolves the object's device names into its own device
+ * table so the executing device identifies itself, and validates
+ * decision_count against the object's ruleset.
+ *
+ * Returns NULL with err set on failure; nothing is left allocated.
+ */
 struct cp_module *
 forward_module_config_init(
-	struct agent *agent, const char *name, yanet_error **err
+	struct agent *agent,
+	const char *name,
+	const char *classifier_object_name,
+	const struct forward_decision *decisions,
+	uint32_t decision_count,
+	yanet_error **err
 );
 
 // Destroy the module when it is dangling, per cp_module_try_destroy.
@@ -29,31 +59,3 @@ forward_module_config_init(
 // the module; the caller must keep its handle and retry later.
 int
 forward_module_config_free(struct cp_module *cp_module, yanet_error **err);
-
-struct forward_rule {
-	struct classifier_rule rule;
-
-	char target[CP_DEVICE_NAME_LEN];
-	char counter[COUNTER_NAME_LEN];
-
-	uint8_t mode;
-
-	struct filter_devices devices;
-	// The VLAN line intervals widened out of the authored VLAN
-	// ranges by the control plane that authors the rules.
-	struct classify_line_ranges vlan_ranges;
-
-	struct filter_net4s src_net4s;
-	struct filter_net4s dst_net4s;
-
-	struct filter_net6s src_net6s;
-	struct filter_net6s dst_net6s;
-};
-
-int
-forward_module_config_update(
-	struct cp_module *cp_module,
-	struct forward_rule *rules,
-	uint32_t rule_count,
-	yanet_error **err
-);

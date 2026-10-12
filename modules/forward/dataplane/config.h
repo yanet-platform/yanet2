@@ -1,94 +1,50 @@
 #pragma once
 
-#include "common/value.h"
-
-#include "lib/classify/classifiers/device.h"
-#include "lib/classify/classifiers/line.h"
-#include "lib/classify/classifiers/net4.h"
-#include "lib/classify/classifiers/net6.h"
-
 #include "lib/controlplane/config/cp_module.h"
+
+#include "objects/classifier/api/classifier_object.h"
 
 #define FORWARD_MODE_NONE 0
 #define FORWARD_MODE_IN 1
 #define FORWARD_MODE_OUT 2
 
+// Sentinel for "no object link at this slot", mirroring the acl
+// module's map link slots.
+#define FORWARD_CLASSIFIER_LINK_NONE (uint64_t)-1
+
+// The decision a classification result resolves to, compiled from the
+// authored decision of the same rule index.
 struct forward_target {
 	uint64_t device_id;
 	uint64_t counter_id;
 	uint8_t mode;
 };
 
-// Per-worker anchor of the execution-context commit that binds the
-// device mapping into the classifiers.
+/*
+ * Per-worker handles of the module's binding to the classifier
+ * object: the linked object's prepared classification handles, and
+ * the class of the executing device in the object's device
+ * attribute, both resolved once per execution context by the commit
+ * below. A context whose link resolved nothing keeps a NULL handle
+ * and classifies nothing: every packet passes through unrouted.
+ */
 struct forward_prepared {
-	uint64_t anchor;
+	struct classifier_prepared *classifier;
+	uint32_t device_class;
 };
 
 /*
- * Shared core classifier: the device and vlan attributes joined once
- * over the union of the family projections; the family filters and the
- * l2 filter reference its classes.
+ * The module config: the decisions the classification results resolve
+ * into, and the link to the classifier object that classifies.
  *
- * The attributes and the joint are embedded by value and released by
- * the config destroy through the typed attribute frees.
- */
-struct fwd_classifier_core {
-	struct classify_attr_device dev_attr;
-	struct classify_attr_line vlan_attr;
-	struct value_table joint; // device classes joined with vlan classes
-};
-
-struct fwd_classifier_net4 {
-	struct classify_attr_net4 src_attr;
-	struct classify_attr_net4 dst_attr;
-	struct value_table joint;
-};
-
-struct fwd_classifier_net6 {
-	struct classify_attr_net6 src_attr;
-	struct classify_attr_net6 dst_attr;
-	struct value_table joint;
-};
-
-/*
- * Final filters: the l2 decoder over the core classes, and the family
- * root joints joining the core classes with the network pair classes,
- * each with its own projection decoder.
- */
-struct fwd_filter_vlan {
-	struct vline rule_map;
-};
-
-struct fwd_filter_ip4 {
-	struct value_table root_joint;
-	struct vline rule_map;
-};
-
-struct fwd_filter_ip6 {
-	struct value_table root_joint;
-	struct vline rule_map;
-};
-
-/*
- * Ownership: the classifiers are built once per config update and
- * embedded by value, the filters hold only their own joints and
- * decoders; nothing is borrowed across the structs, so the value
- * tables, lines and matches keep their internal offset discipline
- * with no wrapper. The destroy frees the filters first, then the
- * classifiers; every free is safe on a zeroed struct, so a partially
- * built config of a failed update walks the same total destroy.
+ * The classification itself - the compiled attribute classifiers and
+ * their joins - is owned by the linked classifier object; the module
+ * holds no filter of its own.
  */
 struct forward_module_config {
 	struct cp_module cp_module;
 
-	struct fwd_classifier_core classifier_core;
-	struct fwd_classifier_net4 classifier_net4;
-	struct fwd_classifier_net6 classifier_net6;
-
-	struct fwd_filter_vlan filter_vlan;
-	struct fwd_filter_ip4 filter_ip4;
-	struct fwd_filter_ip6 filter_ip6;
+	uint64_t classifier_link_idx;
 
 	uint64_t target_count;
 	struct forward_target *targets;

@@ -175,6 +175,7 @@ func setupACLHarnessLarge(b *testing.B, devices []string) (*dataplaneut.Harness,
 		Devices:       devices,
 		Modules:       []string{"acl", "forward"},
 		DevicesToLoad: []string{"plain"},
+		ObjectsToLoad: []string{"classifier"},
 	}
 	h, err := dataplaneut.NewHarness(cfg)
 	require.NoError(b, err)

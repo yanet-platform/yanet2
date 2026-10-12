@@ -742,7 +742,7 @@ func setupACLFWStateSyncHarnessTopology(
 		Devices:       devices,
 		Modules:       []string{"acl", "fwstate", "forward"},
 		DevicesToLoad: []string{"plain"},
-		ObjectsToLoad: []string{"fwstate_map_v4", "fwstate_map_v6"},
+		ObjectsToLoad: []string{"fwstate_map_v4", "fwstate_map_v6", "classifier"},
 	})
 	require.NoError(t, err)
 	t.Cleanup(h.Free)

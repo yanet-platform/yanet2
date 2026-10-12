@@ -806,6 +806,7 @@ func datasetTopoBenchSetup(b *testing.B) *datasetBenchState {
 			Devices:       datasetTopoDevices,
 			Modules:       []string{"acl", "forward"},
 			DevicesToLoad: []string{"plain"},
+			ObjectsToLoad: []string{"classifier"},
 		}
 		harness, err := dataplaneut.NewHarness(cfg)
 		if err != nil {

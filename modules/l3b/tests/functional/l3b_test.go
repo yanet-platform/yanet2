@@ -61,7 +61,7 @@ func setupL3bHarness(
 		Devices:       []string{deviceName},
 		Modules:       []string{"l3b", "forward"},
 		DevicesToLoad: []string{"plain"},
-		ObjectsToLoad: []string{"l3b_virtual_service", "l3b_session_table"},
+		ObjectsToLoad: []string{"l3b_virtual_service", "l3b_session_table", "classifier"},
 	}
 	h, err := dataplaneut.NewHarness(cfg)
 	require.NoError(t, err)

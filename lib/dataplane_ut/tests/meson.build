@@ -18,6 +18,7 @@ if not dataplane_only
     lib_decap_cp_dep,
     lib_dscp_cp_dep,
     lib_forward_cp_dep,
+    lib_classifier_objects_dep,
   ]
   smoke_test_link_with += [lib_decap_dp, lib_dscp_dp, lib_forward_dp]
   smoke_test_link_args += [

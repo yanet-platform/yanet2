@@ -91,6 +91,7 @@ func setupACLBackend(
 		Devices:       []string{"port0"},
 		Modules:       modules,
 		DevicesToLoad: []string{"plain"},
+		ObjectsToLoad: []string{"classifier"},
 	}
 	h, err := dataplaneut.NewHarness(cfg)
 	require.NoError(t, err)

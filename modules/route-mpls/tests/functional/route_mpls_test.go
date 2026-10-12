@@ -479,6 +479,7 @@ func deployChain(
 		Devices:           []string{mplsDevice},
 		Modules:           []string{"route_mpls", "forward"},
 		DevicesToLoad:     []string{"plain"},
+		ObjectsToLoad:     []string{"classifier"},
 	}
 	harness, err := dataplaneut.NewHarness(config)
 	require.NoError(t, err)

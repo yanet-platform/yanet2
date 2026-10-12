@@ -23,6 +23,7 @@ import (
 	"github.com/yanet-platform/yanet2/modules/forward/bindings/go/cforward"
 	forward "github.com/yanet-platform/yanet2/modules/forward/controlplane"
 	forwardpb "github.com/yanet-platform/yanet2/modules/forward/controlplane/forwardpb/v1"
+	"github.com/yanet-platform/yanet2/objects/classifier/bindings/go/cclassifier"
 )
 
 // Memory sizes for the forward functional harness.
@@ -61,6 +62,7 @@ func setupForwardHarnessWithLimit(
 		Devices:           devices,
 		Modules:           []string{"forward"},
 		DevicesToLoad:     []string{"plain"},
+		ObjectsToLoad:     []string{"classifier"},
 	}
 	h, err := dataplaneut.NewHarness(config)
 	require.NoError(t, err)
@@ -1110,9 +1112,19 @@ func TestForwardConfigMemoryLeak(t *testing.T) {
 	var parkedHandles modulePark
 	var baseline uint64
 	for round := range 4 {
-		module, err := cforward.NewModuleConfig(agent, "forward0")
+		// The published pair of one forward config: the classifier
+		// object carrying the rules, and the module resolving the
+		// results into decisions.
+		classifierRules, decisions := cforward.Split(rules)
+		object, err := cclassifier.NewL3(agent, "forward0", classifierRules)
+		require.NoErrorf(t, err, "round %d: object construct failed", round)
+		require.NoErrorf(
+			t,
+			agent.UpdateObjects([]ffi.ObjectConfig{object.AsFFIObject()}),
+			"round %d: object publish failed", round,
+		)
+		module, err := cforward.NewModuleConfig(agent, "forward0", "forward0", decisions)
 		require.NoErrorf(t, err, "round %d: construct failed", round)
-		require.NoErrorf(t, module.Update(rules), "round %d: update failed", round)
 		require.NoErrorf(
 			t,
 			agent.UpdateModules([]ffi.ModuleConfig{module.AsFFIModule()}),
@@ -1120,10 +1132,15 @@ func TestForwardConfigMemoryLeak(t *testing.T) {
 		)
 		// The publish retired the previous round's generation, so the
 		// owner's retry of the parked handle destroys that round's
-		// module; this round's handle is then freed — destroyed when
+		// pair; this round's handle is then freed — destroyed when
 		// dangling, parked while the new generation references it.
 		parkedHandles.retry()
-		parkedHandles.freeOrPark(module)
+		parkedHandles.freeOrPark(&forwardPair{
+			agent:  agent,
+			name:   "forward0",
+			module: module,
+			object: object,
+		})
 
 		if round == 0 {
 			// No superseded generation exists yet, so this round's
@@ -1141,6 +1158,32 @@ func TestForwardConfigMemoryLeak(t *testing.T) {
 			)
 		}
 	}
+}
+
+// forwardPair is the published pair of one forward config in the leak
+// test: the module and the classifier object its rules compiled into,
+// freed as the backend's handle frees them.
+type forwardPair struct {
+	agent  *ffi.Agent
+	name   string
+	module *cforward.ModuleConfig
+	object *cclassifier.ObjectConfig
+}
+
+// Free releases the module first - it links the object - and the
+// object after, parking the pair while a live generation holds either.
+func (m *forwardPair) Free() error {
+	if m.module != nil {
+		if err := m.module.Free(); err != nil {
+			return err
+		}
+	}
+	if m.object != nil {
+		if err := m.object.Free(); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // modulePark holds module handles whose free was refused because a live

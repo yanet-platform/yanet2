@@ -19,6 +19,7 @@ import (
 	"github.com/yanet-platform/yanet2/common/go/xgrpc"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/modules/forward/bindings/go/cforward"
+	"github.com/yanet-platform/yanet2/objects/classifier/bindings/go/cclassifier"
 	"github.com/yanet-platform/yanet2/objects/ring/bindings/go/cring"
 	ring "github.com/yanet-platform/yanet2/objects/ring/controlplane"
 	ringpb "github.com/yanet-platform/yanet2/objects/ring/controlplane/ringpb/v1"
@@ -48,7 +49,7 @@ func newRingFixture(t *testing.T, extraModules ...string) *ringFixture {
 		DPMemory:      uint64(4 * datasize.MB),
 		WorkerCount:   1,
 		Modules:       extraModules,
-		ObjectsToLoad: []string{"ring"},
+		ObjectsToLoad: []string{"ring", "classifier"},
 	})
 	require.NoError(t, err)
 	t.Cleanup(h.Free)
@@ -287,11 +288,27 @@ func Test_RingService_DeleteRing_PinnedRingStaysUsable(t *testing.T) {
 		{
 			name: "module link",
 			pin: func(t *testing.T, f *ringFixture, name string) func() {
-				config, err := cforward.NewModuleConfig(f.agent, "ring-linker")
+				// The forward module links the ring through its
+				// config; the module itself binds a trivial
+				// one-rule classifier object.
+				classifierRules := make([]cclassifier.Rule, 1)
+				object, err := cclassifier.NewL3(f.agent, "ring-linker", classifierRules)
+				require.NoError(t, err)
+				require.NoError(t, f.agent.UpdateObjects([]ffi.ObjectConfig{object.AsFFIObject()}))
+
+				decisions := []cforward.Decision{{
+					Target:  "port0",
+					Mode:    cforward.ModeOut,
+					Counter: "ring-linker",
+				}}
+				config, err := cforward.NewModuleConfig(f.agent, "ring-linker", "ring-linker", decisions)
 				require.NoError(t, err)
 				require.NoError(t, ringtest.LinkRing(config.AsFFIModule().AsRawPtr(), name))
 				require.NoError(t, f.agent.UpdateModules([]ffi.ModuleConfig{config.AsFFIModule()}))
-				return func() { require.NoError(t, f.agent.DeleteModuleConfig("forward", "ring-linker")) }
+				return func() {
+					require.NoError(t, f.agent.DeleteModuleConfig("forward", "ring-linker"))
+					require.NoError(t, f.agent.DeleteObject("classifier", "ring-linker"))
+				}
 			},
 		},
 	}
