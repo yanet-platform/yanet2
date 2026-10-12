@@ -20,7 +20,9 @@
 // bare packet lists instead of fronts.
 // 35: device_handler takes bare packet lists; device_entry_ectx carries
 // the inbox tally.
-#define YANET_MODULE_ABI_VERSION 35
+// 36: struct device gained the identity flags; device_entry_ectx carries
+// its direction's identity flag.
+#define YANET_MODULE_ABI_VERSION 36
 
 // Symbol name a module .so exports carrying its compiled-against
 // YANET_MODULE_ABI_VERSION, as a uint32_t global.

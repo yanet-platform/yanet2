@@ -14,7 +14,9 @@
 
 #include "lib/dataplane/pipeline/pipeline.h"
 
-// The input direction is pure pass-through.
+// The input direction is pure pass-through, declared identity so the
+// entry level never calls this; it remains as the direct implementation
+// of the same contract.
 static void
 vlan_input_handle(
 	struct dp_worker *dp_worker,
@@ -185,6 +187,7 @@ new_device_vlan() {
 	device_vlan->device.input_handler = vlan_input_handle;
 	device_vlan->device.output_handler = vlan_output_handle;
 	device_vlan->device.commit_handler = vlan_device_commit;
+	device_vlan->device.identity = DEVICE_IDENTITY_INPUT;
 
 	return &device_vlan->device;
 }
