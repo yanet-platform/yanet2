@@ -89,6 +89,7 @@ func setupHarness(
 		Devices:       devices,
 		Modules:       []string{"forward"},
 		DevicesToLoad: []string{"plain"},
+		ObjectsToLoad: []string{"classifier"},
 	}
 	h, err := dataplaneut.NewHarness(cfg)
 	require.NoError(b, err)

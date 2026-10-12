@@ -18,6 +18,7 @@
 #include "api/agent.h"
 #include "common/memory.h"
 #include "common/memory_address.h"
+#include "common/strutils.h"
 #include "common/test_assert.h"
 
 #include "devices/plain/api/controlplane.h"
@@ -31,6 +32,8 @@
 #include "lib/logging/log.h"
 #include "modules/decap/api/controlplane.h"
 #include "modules/forward/api/controlplane.h"
+
+#include "objects/classifier/api/classifier_object.h"
 
 #define PREPARE_TEST_MEMORY_LIMIT (8u * 1024u * 1024u)
 #define PREPARE_TEST_BUFFER_SIZE 64
@@ -58,7 +61,7 @@ prepare_test_count(
 				.module_ectx = module_ectx,
 				.cp_module = cp_module,
 				.buffer = module_ectx->abs_module_prepared,
-			};
+		};
 	}
 	++prepare_test_call_count;
 }
@@ -122,8 +125,8 @@ prepare_test_find_module_ectx(
 				     func_idx < pipeline_ectx->length;
 				     ++func_idx) {
 					struct function_ectx *function_ectx =
-						ADDR_OF(function_ptrs + func_idx
-						);
+						ADDR_OF(function_ptrs +
+							func_idx);
 					if (function_ectx == NULL) {
 						continue;
 					}
@@ -166,14 +169,16 @@ prepare_test_find_module_ectx(
 							if (strncmp(cp_module
 									    ->type,
 								    type,
-								    sizeof(cp_module
-										   ->type
+								    sizeof(
+									    cp_module
+										    ->type
 								    )) == 0 &&
 							    strncmp(cp_module
 									    ->name,
 								    name,
-								    sizeof(cp_module
-										   ->name
+								    sizeof(
+									    cp_module
+										    ->name
 								    )) == 0) {
 								return module_ectx;
 							}
@@ -267,15 +272,38 @@ prepare_test_setup(struct prepare_test_env *env, struct dataplane_ut *ut) {
 		"patching the forward slot failed"
 	);
 
-	struct cp_module *hook_a =
-		forward_module_config_init(env->agent, "hook-a", &err);
+	// The classifier object both forward modules bind to: one empty
+	// rule matching every packet, so the modules' decisions are the
+	// only authored behavior.
+	struct classifier_object_rule cls_rules[1];
+	memset(cls_rules, 0, sizeof(cls_rules));
+	struct cp_object *cls = classifier_object_config_new_l3(
+		env->agent, "prepare-rules", cls_rules, 1, &err
+	);
+	TEST_ASSERT_NOT_NULL(cls, "classifier object create failed");
+	struct cp_object *cls_objects[] = {cls};
+	TEST_ASSERT_SUCCESS(
+		agent_update_objects(env->agent, 1, cls_objects, &err),
+		"classifier object install failed"
+	);
+
+	struct forward_decision decisions[1];
+	memset(decisions, 0, sizeof(decisions));
+	strtcpy(decisions[0].target, "dev0", CP_DEVICE_NAME_LEN);
+	strtcpy(decisions[0].counter, "cnt0", COUNTER_NAME_LEN);
+	decisions[0].mode = FORWARD_MODE_IN;
+
+	struct cp_module *hook_a = forward_module_config_init(
+		env->agent, "hook-a", "prepare-rules", decisions, 1, &err
+	);
 	TEST_ASSERT_NOT_NULL(
 		hook_a,
 		"forward module 'hook-a' failed: %s",
 		err ? yanet_error_message(err) : "?"
 	);
-	struct cp_module *hook_b =
-		forward_module_config_init(env->agent, "hook-b", &err);
+	struct cp_module *hook_b = forward_module_config_init(
+		env->agent, "hook-b", "prepare-rules", decisions, 1, &err
+	);
 	TEST_ASSERT_NOT_NULL(
 		hook_b,
 		"forward module 'hook-b' failed: %s",
@@ -537,6 +565,7 @@ main(void) {
 	const char *port_names[] = {"01:00.0"};
 	const char *mods_to_load[] = {"forward", "decap"};
 	const char *devs_to_load[] = {"plain"};
+	const char *objs_to_load[] = {"classifier"};
 
 	struct dataplane_ut_config cfg = {
 		.cp_memory = 1u << 26,
@@ -548,6 +577,8 @@ main(void) {
 		.module_count = 2,
 		.devices_to_load = devs_to_load,
 		.devices_to_load_count = 1,
+		.objects_to_load = objs_to_load,
+		.objects_to_load_count = 1,
 	};
 
 	struct dataplane_ut *ut = dataplane_ut_new(&cfg);
@@ -602,8 +633,10 @@ main(void) {
 	if (failed == 0) {
 		LOG(INFO, "=== All %zu prepare tests passed! ===", total);
 	} else {
-		LOG(ERROR, "=== %zu/%zu prepare tests failed ===", failed, total
-		);
+		LOG(ERROR,
+		    "=== %zu/%zu prepare tests failed ===",
+		    failed,
+		    total);
 	}
 
 	return failed == 0 ? TEST_SUCCESS : TEST_FAILED;

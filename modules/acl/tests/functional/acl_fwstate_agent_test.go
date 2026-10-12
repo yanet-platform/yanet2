@@ -27,6 +27,7 @@ func setupACLFWStateHarness(tb testing.TB) (*ffi.Agent, acl.Backend) {
 		Devices:       []string{"port0"},
 		Modules:       []string{"acl", "forward", "fwstate"},
 		DevicesToLoad: []string{"plain"},
+		ObjectsToLoad: []string{"classifier"},
 	}
 	h, err := dataplaneut.NewHarness(cfg)
 	require.NoError(tb, err)

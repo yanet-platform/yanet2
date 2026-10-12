@@ -1,14 +1,17 @@
 package cmirror
 
+//#cgo CFLAGS: -I../../../../../
+//
 //#include "modules/mirror/api/controlplane.h"
 import "C"
 
 import (
-	"github.com/yanet-platform/xnetip"
-	"runtime"
 	"unsafe"
 
+	"github.com/yanet-platform/xnetip"
+
 	"github.com/yanet-platform/yanet2/bindings/go/filter"
+	"github.com/yanet-platform/yanet2/objects/classifier/bindings/go/cclassifier"
 )
 
 // MirrorMode defines the mirroring direction.
@@ -31,7 +34,8 @@ func (m MirrorMode) toC() C.uint8_t {
 	}
 }
 
-// MirrorRule describes a single mirroring rule in Go types.
+// MirrorRule describes a single authored mirroring rule in Go types:
+// the filter conditions classify, the action mirrors.
 type MirrorRule struct {
 	// Target is the mirroring target device name.
 	Target string
@@ -53,42 +57,58 @@ type MirrorRule struct {
 	Dst6s []xnetip.BiContiguous
 }
 
-// Update compiles the given rules into C structures and pushes them into
-// shared memory.
-func (m *ModuleConfig) Update(rules []MirrorRule) error {
-	pinner := &runtime.Pinner{}
-	defer pinner.Unpin()
-
-	cRules := make([]C.struct_mirror_rule, len(rules))
-	for idx := range rules {
-		cRules[idx] = rules[idx].cBuild(pinner)
-	}
-
-	var cRulesPtr *C.struct_mirror_rule
-	if len(cRules) > 0 {
-		cRulesPtr = &cRules[0]
-	}
-
-	return m.update(cRulesPtr, C.uint32_t(len(cRules)))
+// Decision is the mirroring decision one rule of the linked
+// classifier object's ruleset resolves to.
+type Decision struct {
+	// Target is the mirroring target device name.
+	Target string
+	// Mode selects how matched packets are handled.
+	Mode MirrorMode
+	// Counter is the counter name for traffic accounting.
+	Counter string
 }
 
-func (m *MirrorRule) cBuild(pinner *runtime.Pinner) C.struct_mirror_rule {
-	cRule := C.struct_mirror_rule{}
+func (d *Decision) cBuild() C.struct_mirror_decision {
+	cDecision := C.struct_mirror_decision{}
 
-	target := unsafe.Slice((*byte)(unsafe.Pointer(&cRule.target[0])), C.CP_DEVICE_NAME_LEN)
-	copy(target, m.Target)
+	target := unsafe.Slice((*byte)(unsafe.Pointer(&cDecision.target[0])), C.CP_DEVICE_NAME_LEN)
+	copy(target, d.Target)
 
-	counter := unsafe.Slice((*byte)(unsafe.Pointer(&cRule.counter[0])), C.COUNTER_NAME_LEN)
-	copy(counter, m.Counter)
+	counter := unsafe.Slice((*byte)(unsafe.Pointer(&cDecision.counter[0])), C.COUNTER_NAME_LEN)
+	copy(counter, d.Counter)
 
-	cRule.mode = m.Mode.toC()
+	cDecision.mode = d.Mode.toC()
 
-	filter.CBuildDevices(&cRule.devices, m.Devices, pinner)
-	filter.CBuildVlanLineRanges(&cRule.vlan_ranges, m.VlanRanges, pinner)
-	filter.CBuildNet4s(&cRule.src_net4s, m.Src4s, pinner)
-	filter.CBuildNet4s(&cRule.dst_net4s, m.Dst4s, pinner)
-	filter.CBuildNet6s(&cRule.src_net6s, m.Src6s, pinner)
-	filter.CBuildNet6s(&cRule.dst_net6s, m.Dst6s, pinner)
+	return cDecision
+}
 
-	return cRule
+// Split divides the authored rules into the halves the classifier
+// binding consumes: the ruleset of the classifier object - the filter
+// conditions, one per rule, in order - and the decisions the module
+// resolves the classification results through, indexed by the same
+// rule order.
+func Split(rules []MirrorRule) (classifierRules []cclassifier.Rule, decisions []Decision) {
+	classifierRules = make([]cclassifier.Rule, len(rules))
+	decisions = make([]Decision, len(rules))
+
+	for idx := range rules {
+		rule := &rules[idx]
+
+		classifierRules[idx] = cclassifier.Rule{
+			Devices:    rule.Devices,
+			VlanRanges: rule.VlanRanges,
+			Src4s:      rule.Src4s,
+			Dst4s:      rule.Dst4s,
+			Src6s:      rule.Src6s,
+			Dst6s:      rule.Dst6s,
+		}
+
+		decisions[idx] = Decision{
+			Target:  rule.Target,
+			Mode:    rule.Mode,
+			Counter: rule.Counter,
+		}
+	}
+
+	return classifierRules, decisions
 }

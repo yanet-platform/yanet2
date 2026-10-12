@@ -43,6 +43,7 @@ func setupNAT64Harness(t *testing.T) (*dataplaneut.Harness, *nat64.NAT64Service)
 		Devices:       []string{"port0"},
 		Modules:       []string{"nat64", "forward"},
 		DevicesToLoad: []string{"plain"},
+		ObjectsToLoad: []string{"classifier"},
 	})
 	require.NoError(t, err)
 	t.Cleanup(h.Free)

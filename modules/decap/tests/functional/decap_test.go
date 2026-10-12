@@ -49,6 +49,7 @@ func setupDecapHarnessWithLimit(
 		Devices:           []string{"port0"},
 		Modules:           []string{"decap", "forward"},
 		DevicesToLoad:     []string{"plain"},
+		ObjectsToLoad:     []string{"classifier"},
 	})
 	require.NoError(t, err)
 	t.Cleanup(h.Free)

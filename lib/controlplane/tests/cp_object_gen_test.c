@@ -9,6 +9,7 @@
 
 #include "common/memory.h"
 #include "common/memory_block.h"
+#include "common/strutils.h"
 #include "common/test_assert.h"
 
 #include "lib/controlplane/agent/agent.h"
@@ -20,6 +21,8 @@
 
 #include "devices/plain/api/controlplane.h"
 #include "modules/forward/api/controlplane.h"
+
+#include "objects/classifier/api/classifier_object.h"
 
 #include "lib/dataplane_ut/dataplane_ut.h"
 #include "lib/errors/errors.h"
@@ -40,6 +43,25 @@
 // device-pipeline-function-chain-module ectx tree plus a forward module
 // and an object.
 #define MODULE_OBJECT_LINK_TEST_MEMORY_LIMIT (2u * 1024u * 1024u)
+
+// Installs the one-rule classifier object the forward modules of the
+// link tests bind to: an empty rule matching every packet, so the
+// modules' decisions are the only authored behavior.
+static int
+install_classifier_for_forward(
+	struct agent *agent, const char *name, yanet_error **err
+) {
+	struct classifier_object_rule rules[1];
+	memset(rules, 0, sizeof(rules));
+
+	struct cp_object *cls =
+		classifier_object_config_new_l3(agent, name, rules, 1, err);
+	if (cls == NULL) {
+		return -1;
+	}
+	struct cp_object *objects[] = {cls};
+	return agent_update_objects(agent, 1, objects, err);
+}
 
 // Update installs objects into the live generation; lookup, lookup_index,
 // and get_object all agree on identity and index, and a missing name
@@ -692,9 +714,21 @@ test_module_object_link_ectx(struct yanet_shm *shm) {
 		err ? yanet_error_message(err) : "?"
 	);
 
+	TEST_ASSERT_SUCCESS(
+		install_classifier_for_forward(agent, "fwd0-rules", &err),
+		"classifier object install failed"
+	);
+
+	struct forward_decision decisions[1];
+	memset(decisions, 0, sizeof(decisions));
+	strtcpy(decisions[0].target, "dev0", CP_DEVICE_NAME_LEN);
+	strtcpy(decisions[0].counter, "cnt0", COUNTER_NAME_LEN);
+	decisions[0].mode = FORWARD_MODE_IN;
+
 	// Create the forward module and link the object to it before install.
-	struct cp_module *module =
-		forward_module_config_init(agent, "fwd0", &err);
+	struct cp_module *module = forward_module_config_init(
+		agent, "fwd0", "fwd0-rules", decisions, 1, &err
+	);
 	TEST_ASSERT_NOT_NULL(module, "forward_module_config_init failed");
 	uint64_t link_idx;
 	TEST_ASSERT_SUCCESS(
@@ -703,8 +737,10 @@ test_module_object_link_ectx(struct yanet_shm *shm) {
 		),
 		"cp_module_link_object failed"
 	);
+	// The classifier binding of the module update path occupies link
+	// index 0; the manually declared link appends after it.
 	TEST_ASSERT_EQUAL(
-		(long)link_idx, 0L, "first object link must be at index 0"
+		(long)link_idx, 1L, "the declared link must follow the binding"
 	);
 	struct cp_module *modules[] = {module};
 	TEST_ASSERT_SUCCESS(
@@ -826,10 +862,24 @@ test_module_object_link_missing_fails(struct yanet_shm *shm) {
 	struct dp_config *dp_config = agent_dp_config(agent);
 	struct cp_config *cp_config = ADDR_OF(&agent->cp_config);
 
+	TEST_ASSERT_SUCCESS(
+		install_classifier_for_forward(
+			agent, "fwd-missing-rules", &err
+		),
+		"classifier object install failed"
+	);
+
+	struct forward_decision decisions[1];
+	memset(decisions, 0, sizeof(decisions));
+	strtcpy(decisions[0].target, "dev0", CP_DEVICE_NAME_LEN);
+	strtcpy(decisions[0].counter, "cnt0", COUNTER_NAME_LEN);
+	decisions[0].mode = FORWARD_MODE_IN;
+
 	// Create the forward module linking to an object that was never
 	// installed.
-	struct cp_module *module =
-		forward_module_config_init(agent, "fwd-missing", &err);
+	struct cp_module *module = forward_module_config_init(
+		agent, "fwd-missing", "fwd-missing-rules", decisions, 1, &err
+	);
 	TEST_ASSERT_NOT_NULL(module, "forward_module_config_init failed");
 	uint64_t link_idx;
 	TEST_ASSERT_SUCCESS(
@@ -877,7 +927,7 @@ main(void) {
 	const char *port_names[] = {"01:00.0"};
 	const char *mods_to_load[] = {"forward"};
 	const char *devs_to_load[] = {"plain"};
-	const char *objs_to_load[] = {"test"};
+	const char *objs_to_load[] = {"test", "classifier"};
 
 	struct dataplane_ut_config cfg = {
 		.cp_memory = 1u << 26,
@@ -890,7 +940,7 @@ main(void) {
 		.devices_to_load = devs_to_load,
 		.devices_to_load_count = 1,
 		.objects_to_load = objs_to_load,
-		.objects_to_load_count = 1,
+		.objects_to_load_count = 2,
 	};
 
 	struct dataplane_ut *ut = dataplane_ut_new(&cfg);

@@ -604,6 +604,7 @@ dataplane_init(
 			"l3b_virtual_service",
 			"l3b_session_table",
 			"ring",
+			"classifier",
 		};
 		for (size_t i = 0; i < sizeof(objects) / sizeof(objects[0]);
 		     ++i) {

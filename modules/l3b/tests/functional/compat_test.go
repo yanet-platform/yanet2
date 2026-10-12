@@ -574,7 +574,7 @@ func Test_CompatMetabalancerDecap(t *testing.T) {
 		WorkerCount:   1,
 		Devices:       []string{"port0"},
 		Modules:       []string{"decap", "l3b", "forward"},
-		ObjectsToLoad: []string{"l3b_virtual_service", "l3b_session_table"},
+		ObjectsToLoad: []string{"l3b_virtual_service", "l3b_session_table", "classifier"},
 		DevicesToLoad: []string{"plain"},
 	})
 	require.NoError(t, err)

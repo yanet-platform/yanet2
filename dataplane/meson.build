@@ -60,6 +60,7 @@ dependencies = lib_dependencies + [
   lib_fwstate_objects_dep,
   lib_l3b_objects_dep,
   lib_ring_objects_dep,
+  lib_classifier_objects_dep,
 
   #devices
   lib_dev_plain_dp_dep,

@@ -47,7 +47,7 @@ func setupACLFWTableHarnessSized(
 		Devices:       []string{"port0"},
 		Modules:       []string{"acl", "forward"},
 		DevicesToLoad: []string{"plain"},
-		ObjectsToLoad: []string{"fwstate_map_v4", "fwstate_map_v6"},
+		ObjectsToLoad: []string{"fwstate_map_v4", "fwstate_map_v6", "classifier"},
 	}
 	h, err := dataplaneut.NewHarness(cfg)
 	require.NoError(tb, err)

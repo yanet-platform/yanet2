@@ -8,6 +8,8 @@
 #include "modules/mirror/dataplane/config.h"
 #include "modules/mirror/dataplane/dataplane.h"
 
+#include "objects/classifier/api/classifier_object.h"
+
 #include "lib/classify/classifiers/device.h"
 #include "lib/fuzzing/fuzzing.h"
 
@@ -19,6 +21,13 @@
 #define MIRROR_EXTRA_ARENA_SIZE (16 << 20)
 
 static struct fuzzing_params fuzz_params = {0};
+
+// The hand-built classifier object binding: the compiled bundle and the
+// prepared buffer the module's execution context carries. Static, so the
+// addresses stay valid for every run of the harness.
+static struct classifier_object fuzz_classifier = {0};
+static struct classifier_prepared fuzz_classifier_prepared = {0};
+static struct mirror_prepared fuzz_mirror_prepared = {0};
 
 static int
 mirror_test_config(struct cp_module **cp_module, yanet_error **err) {
@@ -45,10 +54,11 @@ mirror_test_config(struct cp_module **cp_module, yanet_error **err) {
 
 	config->cp_module.dp_module_idx = 0;
 	config->cp_module.agent = NULL;
+	config->classifier_link_idx = MIRROR_CLASSIFIER_LINK_NONE;
 
 	// Initialize counter registry.
 	//
-	// Needed by "mirror_module_config_update".
+	// Needed by the target counters.
 	if (counter_registry_init(
 		    &config->cp_module.counter_registry,
 		    &config->cp_module.memory_context,
@@ -57,24 +67,24 @@ mirror_test_config(struct cp_module **cp_module, yanet_error **err) {
 		goto fail;
 	}
 
-	// Initialize filters and targets to empty state.
+	// Initialize targets to empty state.
 	SET_OFFSET_OF(&config->targets, NULL);
 	config->target_count = 0;
 
-	// Build rules covering L2, IPv4, and IPv6 filter paths.
-	struct mirror_rule rules[3];
+	// Build the classifier object by hand: no agent owns it, so the
+	// embedded cp_object gets only the memory context the compile
+	// allocates through, and the prepared handles are selected directly
+	// instead of by an execution-context commit.
+	//
+	// The rules cover L2, IPv4, and IPv6 filter paths, the same
+	// ruleset the module compiled in-house before the classification
+	// moved into the object.
+	struct classifier_object_rule rules[3];
 	memset(rules, 0, sizeof(rules));
 
-	// L2-only.
-	strtcpy(rules[0].target, "dev1", sizeof(rules[0].target));
-	strtcpy(rules[0].counter, "cnt_l2", sizeof(rules[0].counter));
-	rules[0].mode = MIRROR_MODE_OUT;
+	// L2-only catch-all.
 
 	// 127.0.0.0/24.
-	strtcpy(rules[1].target, "dev1", sizeof(rules[1].target));
-	strtcpy(rules[1].counter, "cnt_v4", sizeof(rules[1].counter));
-	rules[1].mode = MIRROR_MODE_IN;
-
 	struct net4 src4 = {
 		.addr = {127, 0, 0, 0},
 		.mask = {255, 255, 255, 0},
@@ -89,52 +99,91 @@ mirror_test_config(struct cp_module **cp_module, yanet_error **err) {
 	rules[1].dst_net4s.count = 1;
 
 	// fe80::/96.
-	strtcpy(rules[2].target, "dev0", sizeof(rules[2].target));
-	strtcpy(rules[2].counter, "cnt_v6", sizeof(rules[2].counter));
-	rules[2].mode = MIRROR_MODE_IN;
-
 	struct net6 src6 = {
 		.addr = {0xfe, 0x80, [15] = 0},
-		.mask =
-			{0xff,
-			 0xff,
-			 0xff,
-			 0xff,
-			 0xff,
-			 0xff,
-			 0xff,
-			 0xff,
-			 0xff,
-			 0xff,
-			 0xff,
-			 0xff,
-			 [15] = 0},
+		.mask = {
+			0xff,
+			0xff,
+			0xff,
+			0xff,
+			0xff,
+			0xff,
+			0xff,
+			0xff,
+			0xff,
+			0xff,
+			0xff,
+			0xff,
+			[15] = 0
+		},
 	};
 	struct net6 dst6 = {
 		.addr = {0xfe, 0x80, [15] = 0},
-		.mask =
-			{0xff,
-			 0xff,
-			 0xff,
-			 0xff,
-			 0xff,
-			 0xff,
-			 0xff,
-			 0xff,
-			 0xff,
-			 0xff,
-			 0xff,
-			 0xff,
-			 [15] = 0},
+		.mask = {
+			0xff,
+			0xff,
+			0xff,
+			0xff,
+			0xff,
+			0xff,
+			0xff,
+			0xff,
+			0xff,
+			0xff,
+			0xff,
+			0xff,
+			[15] = 0
+		},
 	};
 	rules[2].src_net6s.items = &src6;
 	rules[2].src_net6s.count = 1;
 	rules[2].dst_net6s.items = &dst6;
 	rules[2].dst_net6s.count = 1;
 
-	int rc = mirror_module_config_update(&config->cp_module, rules, 3, err);
-	if (rc != 0) {
+	memory_context_init_from(
+		&fuzz_classifier.cp_object.memory_context,
+		&fuzz_params.mctx,
+		"classifier_fuzz"
+	);
+	if (classifier_object_compile(
+		    &fuzz_classifier,
+		    CLASSIFIER_OBJECT_SUBTYPE_L3,
+		    rules,
+		    3,
+		    err
+	    )) {
 		goto fail;
+	}
+	classifier_object_prepare(&fuzz_classifier_prepared, &fuzz_classifier);
+
+	// The decisions of the three rules, in the shape the module config
+	// compiles them from the authored decisions.
+	struct mirror_target *targets = (struct mirror_target *)memory_balloc(
+		&config->cp_module.memory_context,
+		sizeof(struct mirror_target) * 3
+	);
+	if (targets == NULL) {
+		goto fail;
+	}
+	SET_OFFSET_OF(&config->targets, targets);
+	config->target_count = 3;
+
+	static const char *const counters[3] = {"cnt_l2", "cnt_v4", "cnt_v6"};
+	static const uint8_t modes[3] = {
+		MIRROR_MODE_OUT, MIRROR_MODE_IN, MIRROR_MODE_IN
+	};
+
+	for (uint32_t idx = 0; idx < 3; ++idx) {
+		targets[idx].device_id = idx;
+		targets[idx].mode = modes[idx];
+		if ((targets[idx].counter_id = counter_registry_register(
+			     &config->cp_module.counter_registry,
+			     counters[idx],
+			     2,
+			     err
+		     )) == (uint64_t)-1) {
+			goto fail;
+		}
 	}
 
 	// Set up counter storage, because "mirror_handle_packets" accesses
@@ -154,11 +203,18 @@ mirror_test_config(struct cp_module **cp_module, yanet_error **err) {
 	SET_OFFSET_OF(&fuzz_params.module_ectx.counter_storage, cs);
 	fuzz_params.module_ectx.abs_counter_storage = cs;
 
-	// The device classification and routing resolve through the context:
-	// the hand-built module context never runs the execution-context
-	// commit, so the zeroed module device id classifies every packet as
-	// module device zero and the empty device target table drops every
-	// routed packet safely.
+	// The classification binding resolves through the context: the
+	// hand-built module context never runs the execution-context
+	// commit, so the prepared handles are attached directly - the
+	// zeroed device class classifies every packet as the any device,
+	// and the empty device target table drops every routed packet
+	// safely.
+	fuzz_mirror_prepared.classifier = &fuzz_classifier_prepared;
+	fuzz_mirror_prepared.device_class = 0;
+	SET_OFFSET_OF(
+		&fuzz_params.module_ectx.module_prepared, &fuzz_mirror_prepared
+	);
+	fuzz_params.module_ectx.abs_module_prepared = &fuzz_mirror_prepared;
 
 	*cp_module = (struct cp_module *)config;
 	return 0;
@@ -171,6 +227,7 @@ fail:
 	// and never took the reference construction normally holds, so the
 	// public free's release path would decrement a reference count that
 	// starts at zero and silently wrap instead of freeing anything.
+	classifier_object_fini_data(&fuzz_classifier);
 	cp_module_fini(&config->cp_module);
 	memory_bfree(
 		&fuzz_params.mctx, config, sizeof(struct mirror_module_config)

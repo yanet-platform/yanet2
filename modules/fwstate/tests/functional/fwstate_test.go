@@ -48,7 +48,7 @@ func setupFWStateHarness(t *testing.T) (*dataplaneut.Harness, *ffi.Agent) {
 		Devices:       []string{"port0"},
 		Modules:       []string{"fwstate", "forward"},
 		DevicesToLoad: []string{"plain"},
-		ObjectsToLoad: []string{"fwstate_map_v4", "fwstate_map_v6"},
+		ObjectsToLoad: []string{"fwstate_map_v4", "fwstate_map_v6", "classifier"},
 	}
 	h, err := dataplaneut.NewHarness(cfg)
 	require.NoError(t, err)

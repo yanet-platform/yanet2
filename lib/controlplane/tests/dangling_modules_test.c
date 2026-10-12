@@ -14,6 +14,7 @@
 
 #include "common/memory.h"
 #include "common/memory_block.h"
+#include "common/strutils.h"
 #include "common/test_assert.h"
 
 #include "lib/controlplane/agent/agent.h"
@@ -22,6 +23,8 @@
 
 #include "modules/decap/api/controlplane.h"
 #include "modules/forward/api/controlplane.h"
+
+#include "objects/classifier/api/classifier_object.h"
 
 #include "lib/dataplane_ut/dataplane_ut.h"
 #include "lib/errors/errors.h"
@@ -147,10 +150,31 @@ test_typed_destroy_is_per_owner(struct yanet_shm *shm) {
 	);
 	TEST_ASSERT_NOT_NULL(agent, "agent_attach failed");
 
+	// The classifier object the forward module binds to, installed
+	// before the baseline: its memory stays in the arena for the whole
+	// test, so every delta below stays about the modules alone.
+	struct classifier_object_rule cls_rules[1];
+	memset(cls_rules, 0, sizeof(cls_rules));
+	struct cp_object *cls = classifier_object_config_new_l3(
+		agent, "f0-rules", cls_rules, 1, &err
+	);
+	TEST_ASSERT_NOT_NULL(cls, "classifier object create failed");
+	struct cp_object *cls_objects[] = {cls};
+	TEST_ASSERT_SUCCESS(
+		agent_update_objects(agent, 1, cls_objects, &err),
+		"classifier object install failed"
+	);
+
 	struct cp_module *decap0 = decap_module_config_new(agent, "d0", &err);
 	TEST_ASSERT_NOT_NULL(decap0, "decap_module_config_new failed");
-	struct cp_module *forward0 =
-		forward_module_config_init(agent, "f0", &err);
+	struct forward_decision decisions[1];
+	memset(decisions, 0, sizeof(decisions));
+	strtcpy(decisions[0].target, "dev0", CP_DEVICE_NAME_LEN);
+	strtcpy(decisions[0].counter, "cnt0", COUNTER_NAME_LEN);
+	decisions[0].mode = FORWARD_MODE_IN;
+	struct cp_module *forward0 = forward_module_config_init(
+		agent, "f0", "f0-rules", decisions, 1, &err
+	);
 	TEST_ASSERT_NOT_NULL(forward0, "forward_module_config_init failed");
 
 	struct cp_module_registry reg;
@@ -219,6 +243,7 @@ main(void) {
 	log_enable_name("debug");
 
 	const char *mods_to_load[] = {"decap", "forward"};
+	const char *objs_to_load[] = {"classifier"};
 
 	struct dataplane_ut_config cfg = {
 		.cp_memory = 1u << 24,
@@ -226,6 +251,8 @@ main(void) {
 		.worker_count = 1,
 		.modules = mods_to_load,
 		.module_count = 2,
+		.objects_to_load = objs_to_load,
+		.objects_to_load_count = 1,
 	};
 
 	struct dataplane_ut *ut = dataplane_ut_new(&cfg);

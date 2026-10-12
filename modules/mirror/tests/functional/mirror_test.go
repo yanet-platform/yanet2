@@ -21,6 +21,7 @@ import (
 	forward "github.com/yanet-platform/yanet2/modules/forward/controlplane"
 	"github.com/yanet-platform/yanet2/modules/mirror/bindings/go/cmirror"
 	mirror "github.com/yanet-platform/yanet2/modules/mirror/controlplane"
+	"github.com/yanet-platform/yanet2/objects/classifier/bindings/go/cclassifier"
 )
 
 // Memory sizes for the mirror functional harness.
@@ -59,6 +60,7 @@ func setupMirrorHarnessWithLimit(
 		Devices:           devices,
 		Modules:           []string{"mirror", "forward"},
 		DevicesToLoad:     []string{"plain"},
+		ObjectsToLoad:     []string{"classifier"},
 	}
 	h, err := dataplaneut.NewHarness(config)
 	require.NoError(t, err)
@@ -291,8 +293,8 @@ func Test_MirrorBackend_UpdateModuleEmptyRules(t *testing.T) {
 	require.EqualError(
 		t,
 		err,
-		"failed to update module config: failed to update mirror config: "+
-			"mirror config must contain at least one rule",
+		"failed to create module config: failed to initialize module "+
+			"config: mirror config must contain at least one rule",
 	)
 }
 
@@ -737,7 +739,8 @@ func Test_Mirror_OutputSelfLoopHasBoundedPopulation(t *testing.T) {
 }
 
 // TestMirrorConfigMemoryLeak verifies the block allocator returns memory once a
-// superseded mirror config generation is reclaimed.
+// superseded mirror config generation - the module config and the classifier
+// object bound to it - is reclaimed.
 //
 // THE MAGIC: 8 rules make sizeof(mirror_target)*8 = 192 and
 // sizeof(mirror_target*)*8 = 64 land in different block-allocator pools even
@@ -765,9 +768,19 @@ func TestMirrorConfigMemoryLeak(t *testing.T) {
 	var parkedHandles modulePark
 	var baseline uint64
 	for round := range 4 {
-		module, err := cmirror.NewModuleConfig(agent, "mirror0")
+		// The published pair of one mirror config: the classifier
+		// object carrying the rules, and the module resolving the
+		// results into decisions.
+		classifierRules, decisions := cmirror.Split(rules)
+		object, err := cclassifier.NewL3(agent, "mirror0", classifierRules)
+		require.NoErrorf(t, err, "round %d: object construct failed", round)
+		require.NoErrorf(
+			t,
+			agent.UpdateObjects([]ffi.ObjectConfig{object.AsFFIObject()}),
+			"round %d: object publish failed", round,
+		)
+		module, err := cmirror.NewModuleConfig(agent, "mirror0", "mirror0", decisions)
 		require.NoErrorf(t, err, "round %d: construct failed", round)
-		require.NoErrorf(t, module.Update(rules), "round %d: update failed", round)
 		require.NoErrorf(
 			t,
 			agent.UpdateModules([]ffi.ModuleConfig{module.AsFFIModule()}),
@@ -775,10 +788,15 @@ func TestMirrorConfigMemoryLeak(t *testing.T) {
 		)
 		// The publish retired the previous round's generation, so the
 		// owner's retry of the parked handle destroys that round's
-		// module; this round's handle is then freed — destroyed when
+		// pair; this round's handle is then freed — destroyed when
 		// dangling, parked while the new generation references it.
 		parkedHandles.retry()
-		parkedHandles.freeOrPark(module)
+		parkedHandles.freeOrPark(&mirrorPair{
+			agent:  agent,
+			name:   "mirror0",
+			module: module,
+			object: object,
+		})
 
 		if round == 0 {
 			// No superseded generation exists yet, so this round's
@@ -796,6 +814,32 @@ func TestMirrorConfigMemoryLeak(t *testing.T) {
 			)
 		}
 	}
+}
+
+// mirrorPair is the published pair of one mirror config in the leak
+// test: the module and the classifier object its rules compiled into,
+// freed as the backend's handle frees them.
+type mirrorPair struct {
+	agent  *ffi.Agent
+	name   string
+	module *cmirror.ModuleConfig
+	object *cclassifier.ObjectConfig
+}
+
+// Free releases the module first - it links the object - and the
+// object after, parking the pair while a live generation holds either.
+func (m *mirrorPair) Free() error {
+	if m.module != nil {
+		if err := m.module.Free(); err != nil {
+			return err
+		}
+	}
+	if m.object != nil {
+		if err := m.object.Free(); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // modulePark holds module handles whose free was refused because a live
