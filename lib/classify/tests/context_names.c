@@ -581,8 +581,10 @@ free_composition(struct memory_context *mctx, struct names_composition *comp) {
 #define CTX_NAMES_ARENA_SIZE (1 << 24)
 
 // Shared per-case fixture: a root memory_context over a fresh block
-// allocator, the two rules, and the allocator's free-byte count
-// captured before the composition is built.
+// allocator and the two rules.
+//
+// The allocator's free-byte count is captured before the composition
+// is built.
 struct ctx_names_fixture {
 	struct block_allocator allocator;
 	struct memory_context mctx;
@@ -700,8 +702,10 @@ test_no_sibling_name_collision(void *arena) {
 }
 
 // Verifies that an entry name longer than a full title is cut with a
-// dot marker, so the leaf suffix telling the siblings apart survives
-// the cut and the cut stays visible in the memory tree.
+// dot marker.
+//
+// The leaf suffix telling the siblings apart survives the cut and the
+// cut stays visible in the memory tree.
 static int
 test_long_entry_name_cuts_before_the_leaf(void *arena) {
 	(void)arena;
@@ -742,8 +746,9 @@ test_long_entry_name_cuts_before_the_leaf(void *arena) {
 }
 
 // Verifies that a joint leaves exactly one table and one registry
-// child behind, leaf named after the joint, so the two allocations of
-// one join are told apart in the memory tree.
+// child behind, leaf named after the joint.
+//
+// The two allocations of one join are told apart in the memory tree.
 static int
 test_joint_children_are_leaf_named(void *arena) {
 	struct ctx_names_fixture fx;
@@ -837,8 +842,10 @@ test_attribute_children_are_leaf_named(void *arena) {
 }
 
 // Verifies that the decoder keeps the plain entry name for its rule
-// map: a decode leaves a single context behind, so no leaf is needed
-// to tell siblings apart.
+// map.
+//
+// A decode leaves a single context behind, so no leaf is needed to
+// tell siblings apart.
 static int
 test_decode_rule_map_keeps_entry_name(void *arena) {
 	struct ctx_names_fixture fx;
