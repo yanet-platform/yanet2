@@ -108,7 +108,8 @@ l3b_session_table_object_free(struct cp_object *cp_object, yanet_error **err) {
 
 struct object *
 new_object_l3b_session_table() {
-	struct object *object = (struct object *)malloc(sizeof(struct object));
+	struct object *object =
+		(struct object *)calloc(1, sizeof(struct object));
 	if (object == NULL) {
 		return NULL;
 	}

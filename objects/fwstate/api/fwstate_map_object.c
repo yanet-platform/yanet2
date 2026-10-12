@@ -706,7 +706,8 @@ fwstate_map_v6_object_has_reclaimable(
 
 struct object *
 new_object_fwstate_map_v4() {
-	struct object *object = (struct object *)malloc(sizeof(struct object));
+	struct object *object =
+		(struct object *)calloc(1, sizeof(struct object));
 	if (object == NULL) {
 		return NULL;
 	}
@@ -716,7 +717,8 @@ new_object_fwstate_map_v4() {
 
 struct object *
 new_object_fwstate_map_v6() {
-	struct object *object = (struct object *)malloc(sizeof(struct object));
+	struct object *object =
+		(struct object *)calloc(1, sizeof(struct object));
 	if (object == NULL) {
 		return NULL;
 	}

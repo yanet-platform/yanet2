@@ -424,7 +424,8 @@ ring_object_exists(struct agent *agent, const char *name) {
 
 struct object *
 new_object_ring() {
-	struct object *object = (struct object *)malloc(sizeof(struct object));
+	struct object *object =
+		(struct object *)calloc(1, sizeof(struct object));
 	if (object == NULL) {
 		return NULL;
 	}

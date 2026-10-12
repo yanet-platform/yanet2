@@ -1414,6 +1414,21 @@ object_ectx_free(
 		counter_storage_free(counter_storage);
 	}
 
+	// The buffer is opaque here: only its size, read back from the
+	// object's dataplane slot, and its lifetime are known.
+	struct cp_object *cp_object = ADDR_OF(&object_ectx->cp_object);
+	struct dp_config *dp_config = ADDR_OF(&cp_config->dp_config);
+	struct dp_object *dp_objects = ADDR_OF(&dp_config->dp_objects);
+	struct dp_object *dp_object = dp_objects + cp_object->dp_object_idx;
+	void *object_prepared = ADDR_OF(&object_ectx->object_prepared);
+	if (object_prepared != NULL) {
+		memory_bfree(
+			memory_context,
+			object_prepared,
+			dp_object->prepared_size
+		);
+	}
+
 	memory_bfree(memory_context, object_ectx, sizeof(struct object_ectx));
 }
 
@@ -1448,6 +1463,30 @@ object_ectx_create(
 	}
 	memset(object_ectx, 0, sizeof(struct object_ectx));
 	SET_OFFSET_OF(&object_ectx->cp_object, cp_object);
+	object_ectx->worker_idx = worker_idx;
+
+	struct dp_config *dp_config = ADDR_OF(&cp_config->dp_config);
+	struct dp_object *dp_objects = ADDR_OF(&dp_config->dp_objects);
+	struct dp_object *dp_object = dp_objects + cp_object->dp_object_idx;
+
+	// The buffer is opaque to the control plane: the object fills it
+	// in the dataplane during the absolutization pass.
+	if (dp_object->prepared_size > 0) {
+		void *object_prepared =
+			memory_balloc(memory_context, dp_object->prepared_size);
+		if (object_prepared == NULL) {
+			yanet_error_add(
+				err,
+				"failed to allocate the prepared buffer of "
+				"object '%s:%s'",
+				cp_object->type,
+				cp_object->name
+			);
+			goto error;
+		}
+		memset(object_prepared, 0, dp_object->prepared_size);
+		SET_OFFSET_OF(&object_ectx->object_prepared, object_prepared);
+	}
 
 	struct counter_storage *old_counter_storage = NULL;
 	struct config_gen_ectx *old_ectx =
