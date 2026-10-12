@@ -2,16 +2,25 @@
 
 #define DEVICE_TYPE_LEN 80
 
-struct packet_front;
+struct packet_list;
 struct device_ectx;
 struct dp_worker;
 struct dp_config;
 struct cp_device;
 
+// A device entry handler: consume the input list, emit results onto the
+// output list and unwanted packets onto the drop list.
+//
+// A device handler cannot schedule packets — routing onto other device
+// entries belongs to module handlers with their routing targets — so it
+// never sees a packet front: the entry level hands it bare lists and
+// owns the tallies itself.
 typedef void (*device_handler)(
 	struct dp_worker *dp_worker,
 	struct device_ectx *device_ectx,
-	struct packet_front *packet_front
+	struct packet_list *input,
+	struct packet_list *output,
+	struct packet_list *drop
 );
 
 // Commit handler: a preparation hook, run exactly once per published

@@ -1,5 +1,4 @@
 #include "config.h"
-
 #include <rte_ether.h>
 
 #include "common/container_of.h"
@@ -15,23 +14,29 @@
 
 #include "lib/dataplane/pipeline/pipeline.h"
 
+// The input direction is pure pass-through.
 static void
 vlan_input_handle(
 	struct dp_worker *dp_worker,
 	struct device_ectx *device_ectx,
-	struct packet_front *packet_front
+	struct packet_list *input,
+	struct packet_list *output,
+	struct packet_list *drop
 ) {
 	(void)dp_worker;
 	(void)device_ectx;
+	(void)drop;
 
-	packet_front_pass(packet_front);
+	packet_list_concat(output, input);
 }
 
 static void
 vlan_output_handle(
 	struct dp_worker *dp_worker,
 	struct device_ectx *device_ectx,
-	struct packet_front *packet_front
+	struct packet_list *input,
+	struct packet_list *output,
+	struct packet_list *drop
 ) {
 	(void)dp_worker;
 
@@ -39,13 +44,13 @@ vlan_output_handle(
 	struct cp_device_vlan *cp_device_vlan =
 		container_of(cp_device, struct cp_device_vlan, cp_device);
 
-	struct packet *packet = packet_list_pop(&packet_front->input);
+	struct packet *packet = packet_list_pop(input);
 
 	while (packet != NULL) {
 		struct rte_mbuf *mbuf = packet_to_mbuf(packet);
 		uint16_t offset = 0;
 		if (rte_pktmbuf_pkt_len(mbuf) < sizeof(struct rte_ether_hdr)) {
-			packet_front_drop(packet_front, packet);
+			packet_list_add(drop, packet);
 			goto next;
 		}
 
@@ -61,7 +66,7 @@ vlan_output_handle(
 				 * No output tag is set for device and the
 				 * packet does not have one - nothing to do.
 				 */
-				packet_front_output(packet_front, packet);
+				packet_list_add(output, packet);
 				goto next;
 			}
 
@@ -71,7 +76,7 @@ vlan_output_handle(
 			 */
 			if (rte_pktmbuf_pkt_len(mbuf) <
 			    sizeof(struct rte_ether_hdr) + offset) {
-				packet_front_drop(packet_front, packet);
+				packet_list_add(drop, packet);
 				goto next;
 			}
 
@@ -90,7 +95,7 @@ vlan_output_handle(
 			rte_pktmbuf_adj(mbuf, sizeof(struct rte_vlan_hdr));
 			packet_refresh_data_len(packet);
 
-			packet_front_output(packet_front, packet);
+			packet_list_add(output, packet);
 			goto next;
 		}
 
@@ -99,7 +104,7 @@ vlan_output_handle(
 		    rte_cpu_to_be_16(RTE_ETHER_TYPE_VLAN)) {
 			if (rte_pktmbuf_pkt_len(mbuf) <
 			    sizeof(struct rte_ether_hdr) + offset) {
-				packet_front_drop(packet_front, packet);
+				packet_list_add(drop, packet);
 				goto next;
 			}
 
@@ -111,7 +116,7 @@ vlan_output_handle(
 			vlan_hdr->vlan_tci =
 				rte_cpu_to_be_16(cp_device_vlan->vlan);
 
-			packet_front_output(packet_front, packet);
+			packet_list_add(output, packet);
 			goto next;
 		}
 
@@ -119,7 +124,7 @@ vlan_output_handle(
 		if (packet_headroom_prepend(
 			    mbuf, sizeof(struct rte_vlan_hdr)
 		    ) == NULL) {
-			packet_front_drop(packet_front, packet);
+			packet_list_add(drop, packet);
 			goto next;
 		}
 		packet_refresh_data_len(packet);
@@ -142,11 +147,11 @@ vlan_output_handle(
 		vlan_hdr->eth_proto = ether_hdr->ether_type;
 		ether_hdr->ether_type = rte_cpu_to_be_16(RTE_ETHER_TYPE_VLAN);
 
-		packet_front_output(packet_front, packet);
+		packet_list_add(output, packet);
 		goto next;
 
 	next:
-		packet = packet_list_pop(&packet_front->input);
+		packet = packet_list_pop(input);
 	}
 
 	return;

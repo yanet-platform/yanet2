@@ -33,7 +33,7 @@ static int
 trafgen_emit_frame(
 	struct dp_worker *dp_worker,
 	struct cp_device_trafgen *config,
-	struct packet_front *packet_front,
+	struct packet_list *output,
 	uint32_t frame_idx
 ) {
 	const uint8_t *frames = ADDR_OF(&config->frames);
@@ -74,7 +74,7 @@ trafgen_emit_frame(
 		return 1;
 	}
 
-	packet_front_output(packet_front, packet);
+	packet_list_add(output, packet);
 	return 0;
 }
 
@@ -82,7 +82,7 @@ trafgen_emit_frame(
 //
 // The device registry force-polls every device input handler once per worker
 // tick, so the generator sources fresh traffic even when no packet arrives from
-// a NIC. The emitted packets land in packet_front->output and are demultiplexed
+// a NIC. The emitted packets land on the output list and are demultiplexed
 // into the device's configured input pipelines by the pipeline runtime. A
 // per-worker token bucket accrues elapsed_ns * rate_pps and releases one packet
 // per 1e9 * worker_count credit, which divides rate_pps evenly across all
@@ -91,7 +91,9 @@ static void
 trafgen_input_handle(
 	struct dp_worker *dp_worker,
 	struct device_ectx *device_ectx,
-	struct packet_front *packet_front
+	struct packet_list *input,
+	struct packet_list *output,
+	struct packet_list *drop
 ) {
 	struct cp_device_trafgen *config = container_of(
 		device_ectx->abs_cp_device, struct cp_device_trafgen, cp_device
@@ -99,7 +101,8 @@ trafgen_input_handle(
 
 	// Forward anything that arrived on this device unchanged; a generator
 	// has no real RX, so this is normally empty.
-	packet_front_pass(packet_front);
+	packet_list_concat(output, input);
+	(void)drop;
 
 	if (config->frame_count == 0 || config->rate_pps == 0 ||
 	    config->worker_count == 0) {
@@ -136,7 +139,7 @@ trafgen_input_handle(
 		cursor += 1;
 
 		int rc = trafgen_emit_frame(
-			dp_worker, config, packet_front, frame_idx
+			dp_worker, config, output, frame_idx
 		);
 		if (rc < 0) {
 			// Mbuf pool exhausted; keep the unspent credit.
@@ -158,12 +161,15 @@ static void
 trafgen_output_handle(
 	struct dp_worker *dp_worker,
 	struct device_ectx *device_ectx,
-	struct packet_front *packet_front
+	struct packet_list *input,
+	struct packet_list *output,
+	struct packet_list *drop
 ) {
 	(void)dp_worker;
 	(void)device_ectx;
+	(void)drop;
 
-	packet_front_pass(packet_front);
+	packet_list_concat(output, input);
 }
 
 static void

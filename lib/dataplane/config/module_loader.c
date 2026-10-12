@@ -30,8 +30,9 @@ dp_load_module(
 	module_load_handler loader = NULL;
 	if (plugins != NULL) {
 		for (uint64_t i = 0; i < plugins->count; i++) {
-			loader = (module_load_handler
-			)dlsym(plugins->plugins[i].dl_handle, loader_name);
+			loader = (module_load_handler)dlsym(
+				plugins->plugins[i].dl_handle, loader_name
+			);
 			if (loader != NULL) {
 				LOG(INFO,
 				    "module %s found in plugin %s",

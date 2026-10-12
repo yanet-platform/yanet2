@@ -4,7 +4,7 @@
 
 struct dp_config;
 struct dp_worker;
-struct packet_front;
+struct packet_list;
 
 struct config_gen_ectx;
 struct device_ectx;
@@ -17,7 +17,10 @@ device_ectx_process_input(
 	struct dp_worker *dp_worker,
 	struct config_gen_ectx *config_gen_ectx,
 	struct device_ectx *device_ectx,
-	struct packet_front *packet_front
+	struct packet_list *input,
+	uint64_t input_count,
+	uint64_t input_bytes,
+	struct packet_list *output_sink
 );
 
 void
@@ -25,5 +28,8 @@ device_ectx_process_output(
 	struct dp_worker *dp_worker,
 	struct config_gen_ectx *config_gen_ectx,
 	struct device_ectx *device_ectx,
-	struct packet_front *packet_front
+	struct packet_list *input,
+	uint64_t input_count,
+	uint64_t input_bytes,
+	struct packet_list *output_sink
 );

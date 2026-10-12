@@ -11,28 +11,35 @@
 
 #include "lib/dataplane/pipeline/pipeline.h"
 
+// Both directions are pure pass-through.
 static void
 plain_input_handle(
 	struct dp_worker *dp_worker,
 	struct device_ectx *device_ectx,
-	struct packet_front *packet_front
+	struct packet_list *input,
+	struct packet_list *output,
+	struct packet_list *drop
 ) {
 	(void)dp_worker;
 	(void)device_ectx;
+	(void)drop;
 
-	packet_front_pass(packet_front);
+	packet_list_concat(output, input);
 }
 
 static void
 plain_output_handle(
 	struct dp_worker *dp_worker,
 	struct device_ectx *device_ectx,
-	struct packet_front *packet_front
+	struct packet_list *input,
+	struct packet_list *output,
+	struct packet_list *drop
 ) {
 	(void)dp_worker;
 	(void)device_ectx;
+	(void)drop;
 
-	packet_front_pass(packet_front);
+	packet_list_concat(output, input);
 }
 
 struct device_plain {
@@ -49,7 +56,6 @@ struct device *
 new_device_plain() {
 	struct device_plain *device_plain =
 		(struct device_plain *)malloc(sizeof(struct device_plain));
-
 	if (device_plain == NULL) {
 		return NULL;
 	}

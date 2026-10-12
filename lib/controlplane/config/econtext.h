@@ -112,8 +112,9 @@ counter_add_one_packet(
 // from inside a worker round, whose preparation built the worklists
 // before any of them, so no readiness check is needed here.
 //
-// The inbox is a bare list: the entry's rx counter is credited here,
-// at the one site that touches every scheduled packet.
+// The inbox carries its own tally, maintained here at the one site
+// that touches every scheduled packet; the entry's rx counter is
+// credited from the tally once per detached batch.
 static inline void
 device_entry_ectx_schedule(
 	struct config_gen_ectx *config_gen_ectx,
@@ -130,7 +131,8 @@ device_entry_ectx_schedule(
 	}
 
 	packet_list_add(&device_entry_ectx->schedule, packet);
-	counter_add_one_packet(device_entry_ectx->counter_packet_rx, packet);
+	device_entry_ectx->schedule_count += 1;
+	device_entry_ectx->schedule_bytes += packet->data_len;
 }
 
 // Route a packet to a target device's input entry, crediting the
