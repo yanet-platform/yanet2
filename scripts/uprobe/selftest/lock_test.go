@@ -1,4 +1,4 @@
-//go:build cp_lock_bpftime
+//go:build yanet_uprobe
 
 package selftest_test
 
@@ -21,7 +21,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	workload "github.com/yanet-platform/yanet2/scripts/bpftime/cp-lock/selftest"
+	workload "github.com/yanet-platform/yanet2/scripts/uprobe/selftest"
 )
 
 //go:embed lock.go
@@ -30,7 +30,7 @@ var lockSource string
 // Test_Workload_Child verifies that every critical section stays on one C
 // thread.
 func Test_Workload_Child(t *testing.T) {
-	if os.Getenv("CP_LOCK_CHILD") == "" {
+	if os.Getenv("YANET_UPROBE_CHILD") == "" {
 		return
 	}
 	workload.PermitInjection()
@@ -63,7 +63,7 @@ func child(t *testing.T) (*exec.Cmd, io.WriteCloser, *bufio.Scanner) {
 	data, err := os.ReadFile(os.Args[0])
 	require.NoError(t, err)
 	require.NoError(t, os.WriteFile(executable, data, 0755))
-	if os.Getenv("CP_LOCK_SMOKE") != "" {
+	if os.Getenv("YANET_UPROBE_SMOKE") != "" {
 		image, err := elf.Open(executable)
 		require.NoError(t, err)
 		note, err := image.Section(".note.gnu.build-id").Data()
@@ -80,7 +80,7 @@ func child(t *testing.T) (*exec.Cmd, io.WriteCloser, *bufio.Scanner) {
 		}
 	}
 	command := exec.Command(executable, "-test.run=^Test_Workload_Child$")
-	command.Env = append(os.Environ(), "CP_LOCK_CHILD=1")
+	command.Env = append(os.Environ(), "YANET_UPROBE_CHILD=1")
 	input, err := command.StdinPipe()
 	require.NoError(t, err)
 	output, err := command.StdoutPipe()
@@ -189,37 +189,40 @@ func installedSymbols(t *testing.T) {
 // Test_Session_ContinuousRealLock verifies that counters survive reader
 // death and CP survives explicit detach.
 func Test_Session_ContinuousRealLock(t *testing.T) {
-	helper := os.Getenv("CP_LOCK_HELPER_DIR")
-	tool := filepath.Join(helper, "yanet-cp-lock")
+	helper := os.Getenv("YANET_UPROBE_HELPER_DIR")
+	tool := filepath.Join(helper, "yanet-uprobe")
 	if helper == "" {
-		tool = "/usr/bin/yanet-cp-lock"
+		tool = "/usr/bin/yanet-uprobe"
 	}
 	if _, err := os.Stat(tool); err != nil {
-		if os.Getenv("CP_LOCK_SMOKE") != "" {
+		if os.Getenv("YANET_UPROBE_SMOKE") != "" {
 			t.Fatal(err)
 		}
-		t.Skip("build opt-in cp-lock before running self-check")
+		t.Skip("build opt-in yanet-uprobe before running self-check")
 	}
 	runtimeDirectory := filepath.Join(helper, "bpftime")
 	if helper == "" {
-		runtimeDirectory = "/usr/lib/yanet2/cp-lock/bpftime"
+		runtimeDirectory = "/usr/lib/yanet2/uprobe/bpftime"
 	}
 	if _, err := os.Stat(filepath.Join(runtimeDirectory, "libbpftime-agent.so")); err != nil {
-		if os.Getenv("CP_LOCK_SMOKE") != "" {
+		if os.Getenv("YANET_UPROBE_SMOKE") != "" {
 			t.Fatal("installed smoke requires the packaged runtime: ", err)
 		}
 		t.Skip("prepare the prebuilt bpftime release before self-check")
 	}
-	if os.Getenv("CP_LOCK_SMOKE") != "" {
+	if os.Getenv("YANET_UPROBE_SMOKE") != "" {
 		installedSymbols(t)
 	}
 	t.Setenv("BPFTIME_GLOBAL_SHM_NAME", fmt.Sprintf("cp_lock_test_%d", os.Getpid()))
 	name := os.Getenv("BPFTIME_GLOBAL_SHM_NAME")
-	t.Cleanup(func() { os.Remove("/dev/shm/" + name); os.Remove("/dev/shm/" + name + ".cp-lock") })
+	t.Cleanup(func() { os.Remove("/dev/shm/" + name); os.Remove("/dev/shm/" + name + ".uprobe") })
 	command, input, scanner := child(t)
+	uprobe := func(arguments ...string) *exec.Cmd {
+		return exec.Command(tool, append([]string{"cp-lock"}, arguments...)...)
+	}
 	run := func(arguments ...string) string {
 		t.Helper()
-		output, err := exec.Command(tool, arguments...).CombinedOutput()
+		output, err := uprobe(arguments...).CombinedOutput()
 		if err != nil {
 			t.Fatalf("%v: %v\n%s", arguments, err, output)
 		}
@@ -228,18 +231,18 @@ func Test_Session_ContinuousRealLock(t *testing.T) {
 	for _, command := range []string{"setup", "report", "stop"} {
 		run(command, "--help")
 	}
-	require.Error(t, exec.Command(tool, "setup", "--launch", "--", "/bin/true").Run())
-	require.Error(t, exec.Command(tool, "__launch").Run())
+	require.Error(t, uprobe("setup", "--launch", "--", "/bin/true").Run())
+	require.Error(t, uprobe("__launch").Run())
 	setup := func() { run("setup", "--pid", strconv.Itoa(command.Process.Pid)) }
 	batch := func(count string) {
 		fmt.Fprintln(input, count)
 		require.True(t, scanner.Scan() && scanner.Text() == "done", "workload failed")
 	}
 	report := func() string { return run("report", "--format", "prometheus") }
-	if os.Getenv("CP_LOCK_SMOKE") == "" {
+	if os.Getenv("YANET_UPROBE_SMOKE") == "" {
 		helperDirectory := helper
 		if helperDirectory == "" {
-			helperDirectory = "/usr/lib/yanet2/cp-lock"
+			helperDirectory = "/usr/lib/yanet2/uprobe"
 		}
 		failingHelper := t.TempDir()
 		failingRuntime := filepath.Join(failingHelper, "bpftime")
@@ -252,8 +255,8 @@ func Test_Session_ContinuousRealLock(t *testing.T) {
 		}
 		require.NoError(t, os.WriteFile(filepath.Join(failingRuntime, "bpftime"), []byte("#!/bin/sh\nexit 1\n"), 0755))
 		for _, recovery := range []string{"stop", "replace"} {
-			failedAttach := exec.Command(tool, "setup", "--pid", strconv.Itoa(command.Process.Pid))
-			failedAttach.Env = append(os.Environ(), "CP_LOCK_HELPER_DIR="+failingHelper)
+			failedAttach := uprobe("setup", "--pid", strconv.Itoa(command.Process.Pid))
+			failedAttach.Env = append(os.Environ(), "YANET_UPROBE_HELPER_DIR="+failingHelper)
 			require.Error(t, failedAttach.Run(), "failed injection was accepted")
 			if recovery == "stop" {
 				run("stop")
@@ -310,21 +313,21 @@ func Test_Session_ContinuousRealLock(t *testing.T) {
 		}
 	}
 	require.True(t, waited && waitMaximum, "contended real lock wait sum/maximum lower bound lost")
-	if os.Getenv("CP_LOCK_SMOKE") == "" {
+	if os.Getenv("YANET_UPROBE_SMOKE") == "" {
 		debug := filepath.Join(t.TempDir(), "longer-matching-debug-image")
 		image, err := os.ReadFile(command.Path)
 		require.NoError(t, err)
 		require.NoError(t, os.WriteFile(debug, image, 0600))
 		run("setup", "--pid", strconv.Itoa(command.Process.Pid), "--debug-file", debug)
 		require.NoError(t, os.Remove(debug))
-		require.Error(t, exec.Command(tool, "report").Run(), "removed symbols remained readable")
+		require.Error(t, uprobe("report").Run(), "removed symbols remained readable")
 		run("setup", "--pid", strconv.Itoa(command.Process.Pid), "--debug-file", command.Path)
 		require.Equal(t, first+3, sample(t, report(), true), "updating symbols reset counters")
-		recordPath := "/dev/shm/" + name + ".cp-lock"
+		recordPath := "/dev/shm/" + name + ".uprobe"
 		before, err := os.ReadFile(recordPath)
 		require.NoError(t, err)
 		for _, invalid := range []string{"/nonexistent-cp-lock-symbols", "/bin/false"} {
-			require.Error(t, exec.Command(tool, "setup", "--pid", strconv.Itoa(command.Process.Pid), "--debug-file", invalid).Run())
+			require.Error(t, uprobe("setup", "--pid", strconv.Itoa(command.Process.Pid), "--debug-file", invalid).Run())
 			after, err := os.ReadFile(recordPath)
 			require.NoError(t, err)
 			require.Equal(t, before, after, "invalid symbols changed the live session")
@@ -339,20 +342,20 @@ func Test_Session_ContinuousRealLock(t *testing.T) {
 		setup()
 		require.NoFileExists(t, temporary, "reuse left an interrupted publication link")
 		require.Equal(t, first+3, sample(t, report(), true), "temporary-link cleanup reset counters")
-		require.Error(t, exec.Command(tool, "setup", "--pid", strconv.Itoa(command.Process.Pid), "--replace", "--debug-file", "/nonexistent-cp-lock-symbols").Run())
+		require.Error(t, uprobe("setup", "--pid", strconv.Itoa(command.Process.Pid), "--replace", "--debug-file", "/nonexistent-cp-lock-symbols").Run())
 		unchangedReplacement, err := os.ReadFile(recordPath)
 		require.NoError(t, err)
 		require.Equal(t, metadata, unchangedReplacement, "invalid replacement mutated ownership")
 		require.Equal(t, first+3, sample(t, report(), true), "invalid replacement cleared counters")
 		require.NoError(t, os.WriteFile(recordPath, nil, 0640))
-		require.Error(t, exec.Command(tool, "stop").Run(), "empty ownership record accepted foreign shm")
-		refused, err := exec.Command(tool, "setup", "--pid", strconv.Itoa(command.Process.Pid)).CombinedOutput()
+		require.Error(t, uprobe("stop").Run(), "empty ownership record accepted foreign shm")
+		refused, err := uprobe("setup", "--pid", strconv.Itoa(command.Process.Pid)).CombinedOutput()
 		require.Error(t, err, "unowned resident agent accepted")
 		require.Contains(t, string(refused), "unowned resident bpftime agent")
 		require.NoError(t, os.WriteFile(recordPath, metadata, 0640))
 		preOffset := metadata[:len(metadata)-16]
 		require.NoError(t, os.WriteFile(recordPath, preOffset, 0640))
-		require.Error(t, exec.Command(tool, "stop").Run(), "stop accepted pre-offset metadata")
+		require.Error(t, uprobe("stop").Run(), "stop accepted pre-offset metadata")
 		unchanged, err := os.ReadFile(recordPath)
 		require.NoError(t, err)
 		require.Equal(t, preOffset, unchanged, "unsupported record was mutated")
@@ -370,7 +373,7 @@ func Test_Session_ContinuousRealLock(t *testing.T) {
 		}()
 		require.Equal(t, sample(t, report(), true), sample(t, report(), true))
 		require.NoError(t, os.Rename(movedRuntime, runtimeDirectory))
-		require.Error(t, exec.Command(tool, "setup", "--pid", strconv.Itoa(command.Process.Pid), "--replace").Run(), "mutation accepted incompatible resident runtime")
+		require.Error(t, uprobe("setup", "--pid", strconv.Itoa(command.Process.Pid), "--replace").Run(), "mutation accepted incompatible resident runtime")
 		after, err := os.ReadFile(recordPath)
 		require.NoError(t, err)
 		require.Equal(t, older, after, "runtime refusal mutated metadata")
@@ -381,7 +384,7 @@ func Test_Session_ContinuousRealLock(t *testing.T) {
 		if second != first+13 {
 			t.Fatalf("reuse reset counters: %g", second)
 		}
-		reader := exec.Command(tool, "report", "--format", "prometheus")
+		reader := uprobe("report", "--format", "prometheus")
 		require.NoError(t, reader.Start())
 		time.Sleep(2 * time.Millisecond)
 		reader.Process.Kill()
@@ -406,20 +409,20 @@ func Test_Session_ContinuousRealLock(t *testing.T) {
 		require.NoError(t, err)
 		binary.NativeEndian.PutUint32(previous[60:64], 3)
 		require.NoError(t, os.WriteFile(recordPath, previous, 0640))
-		require.Error(t, exec.Command(tool, "report").Run(), "previous schema accepted as current statistics")
-		require.Error(t, exec.Command(tool, "setup", "--pid", strconv.Itoa(command.Process.Pid)).Run(), "previous probes reused")
+		require.Error(t, uprobe("report").Run(), "previous schema accepted as current statistics")
+		require.Error(t, uprobe("setup", "--pid", strconv.Itoa(command.Process.Pid)).Run(), "previous probes reused")
 		run("setup", "--pid", strconv.Itoa(command.Process.Pid), "--replace")
 		batch("2")
 		require.Equal(t, float64(4), sample(t, report(), true), "schema upgrade retained old counters")
 	}
 	run("stop")
-	if os.Getenv("CP_LOCK_SMOKE") != "" {
+	if os.Getenv("YANET_UPROBE_SMOKE") != "" {
 		return
 	}
 	run("stop")
-	require.Error(t, exec.Command(tool, "report").Run(), "report accepted stopped session")
+	require.Error(t, uprobe("report").Run(), "report accepted stopped session")
 	batch("2")
-	relativeSetup := exec.Command(tool, "setup", "--pid", strconv.Itoa(command.Process.Pid), "--debug-file", filepath.Base(command.Path))
+	relativeSetup := uprobe("setup", "--pid", strconv.Itoa(command.Process.Pid), "--debug-file", filepath.Base(command.Path))
 	relativeSetup.Dir = filepath.Dir(command.Path)
 	if output, err := relativeSetup.CombinedOutput(); err != nil {
 		t.Fatalf("relative debug setup: %v %s", err, output)
@@ -452,7 +455,7 @@ func Test_Session_ContinuousRealLock(t *testing.T) {
 	require.GreaterOrEqual(t, totalMaximumSeconds, max(waitMaximumSeconds, holdMaximumSeconds))
 	require.Less(t, totalMaximumSeconds, waitMaximumSeconds+holdMaximumSeconds, "total added maxima from different calls")
 	run("stop")
-	if os.Getenv("CP_LOCK_SMOKE") == "" {
+	if os.Getenv("YANET_UPROBE_SMOKE") == "" {
 		for _, signal := range []os.Signal{os.Interrupt, os.Kill} {
 			setup()
 			batch("2")
@@ -468,8 +471,8 @@ func Test_Session_ContinuousRealLock(t *testing.T) {
 		failingHelper := t.TempDir()
 		require.NoError(t, os.Symlink(runtimeDirectory, filepath.Join(failingHelper, "bpftime")))
 		require.NoError(t, os.WriteFile(filepath.Join(failingHelper, "setup"), []byte("#!/bin/sh\nexit 1\n"), 0755))
-		failedStop := exec.Command(tool, "stop")
-		failedStop.Env = append(os.Environ(), "CP_LOCK_HELPER_DIR="+failingHelper)
+		failedStop := uprobe("stop")
+		failedStop.Env = append(os.Environ(), "YANET_UPROBE_HELPER_DIR="+failingHelper)
 		require.Error(t, failedStop.Run(), "reset failure was accepted")
 		setup()
 		batch("2")
@@ -486,7 +489,7 @@ func Test_Session_ContinuousRealLock(t *testing.T) {
 		require.NoError(t, os.Rename(temporary, command.Path))
 		setup()
 		require.Equal(t, float64(4), sample(t, report(), true), "replaced disk image prevented live reuse")
-		require.Error(t, exec.Command(tool, "setup", "--pid", strconv.Itoa(command.Process.Pid), "--replace").Run(), "replacement accepted missing original disk image")
+		require.Error(t, uprobe("setup", "--pid", strconv.Itoa(command.Process.Pid), "--replace").Run(), "replacement accepted missing original disk image")
 		require.NoError(t, os.Rename(backup, command.Path))
 		run("stop")
 	}

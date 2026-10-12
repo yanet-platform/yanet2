@@ -1,4 +1,4 @@
-//go:build cp_lock_bpftime
+//go:build yanet_uprobe
 
 package main
 
@@ -82,7 +82,7 @@ func Test_Control_PeerIdentity(t *testing.T) {
 
 // Test_OpenRecord_MonitoringUID verifies read access across nonroot operators.
 func Test_OpenRecord_MonitoringUID(t *testing.T) {
-	if path := os.Getenv("CP_LOCK_MONITOR_RECORD"); path != "" {
+	if path := os.Getenv("YANET_UPROBE_MONITOR_RECORD"); path != "" {
 		file, err := openRecord(path, "report")
 		require.NoError(t, err)
 		file.Close()
@@ -99,7 +99,7 @@ func Test_OpenRecord_MonitoringUID(t *testing.T) {
 	require.NoError(t, os.Chown(file.Name(), 65533, -1))
 	command := exec.Command("/proc/self/exe", "-test.run=^Test_OpenRecord_MonitoringUID$")
 	command.SysProcAttr = &syscall.SysProcAttr{Credential: &syscall.Credential{Uid: 65534, Gid: 65534}}
-	command.Env = append(os.Environ(), "CP_LOCK_MONITOR_RECORD="+file.Name())
+	command.Env = append(os.Environ(), "YANET_UPROBE_MONITOR_RECORD="+file.Name())
 	output, err := command.CombinedOutput()
 	require.NoError(t, err, "%s", output)
 }

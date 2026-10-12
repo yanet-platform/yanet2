@@ -1,4 +1,4 @@
-//go:build cp_lock_bpftime
+//go:build yanet_uprobe
 
 package main
 
@@ -26,7 +26,7 @@ func Test_Execute_Help(t *testing.T) {
 	t.Cleanup(func() { os.Args = arguments })
 	t.Setenv("BPFTIME_GLOBAL_SHM_NAME", "invalid/name")
 	for _, command := range []string{"setup", "report", "stop"} {
-		os.Args = []string{"yanet-cp-lock", command, "--help"}
+		os.Args = []string{"yanet-uprobe", "cp-lock", command, "--help"}
 		require.NotPanics(t, execute)
 	}
 }
@@ -35,7 +35,7 @@ func Test_Execute_Help(t *testing.T) {
 func Test_Execute_EmptyStop(t *testing.T) {
 	arguments := os.Args
 	t.Cleanup(func() { os.Args = arguments })
-	os.Args = []string{"yanet-cp-lock", "stop"}
+	os.Args = []string{"yanet-uprobe", "cp-lock", "stop"}
 	t.Setenv("BPFTIME_GLOBAL_SHM_NAME", fmt.Sprintf("cp_lock_absent_%d", os.Getpid()))
 	require.NotPanics(t, execute)
 }

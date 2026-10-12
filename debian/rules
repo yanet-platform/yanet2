@@ -52,17 +52,17 @@ override_dh_auto_test:
 	:
 
 execute_after_dh_auto_clean:
-	$(MAKE) -C scripts/bpftime/cp-lock clean
+	$(MAKE) -C scripts/uprobe clean
 
 execute_after_dh_auto_build:
-ifneq (,$(filter yanet2-cp-lock-bpftime,$(shell dh_listpackages)))
-	$(MAKE) -C scripts/bpftime/cp-lock prepare
-	$(MAKE) -C scripts/bpftime/cp-lock all
+ifneq (,$(filter yanet2-uprobe,$(shell dh_listpackages)))
+	$(MAKE) -C scripts/uprobe prepare
+	$(MAKE) -C scripts/uprobe all
 endif
 
 execute_after_dh_auto_install:
-ifneq (,$(filter yanet2-cp-lock-bpftime,$(shell dh_listpackages)))
-	$(MAKE) -C scripts/bpftime/cp-lock install DESTDIR=$(CURDIR)/debian/tmp
+ifneq (,$(filter yanet2-uprobe,$(shell dh_listpackages)))
+	$(MAKE) -C scripts/uprobe install DESTDIR=$(CURDIR)/debian/tmp
 endif
 	./scripts/gen-shell-completions.sh debian/yanet2-cli.install \
 		debian/tmp/usr/share/bash-completion/completions \

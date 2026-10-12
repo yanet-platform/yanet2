@@ -1,8 +1,12 @@
 #!/bin/bash
 set -euo pipefail
-[[ $(uname -m) == aarch64 ]]
+case $(uname -m) in
+x86_64) arch=amd64 ;;
+aarch64) arch=arm64 ;;
+*) echo "unsupported bpftime architecture: $(uname -m)" >&2; exit 1 ;;
+esac
 root=$(git rev-parse --show-toplevel)
-cd "$root/scripts/bpftime/cp-lock"
+cd "$root/scripts/uprobe"
 source_dir=$PWD/.deps/upstream
 [[ $(git -C "$source_dir" rev-parse HEAD) == 6bde654abce3649fe8e6943b16419dfdf71ebf38 ]]
 git -C "$source_dir" diff --exit-code
@@ -33,10 +37,10 @@ cat "$root/LICENSE" .deps/notices/runtime/{bpftime,llvmbpf,spdlog,argparse,LLVM,
 (
     cd .deps/runtime
     sha256sum bpftime libbpftime-agent.so libbpftime-syscall-server.so > SHA256SUMS
-    printf 'v0.9.0-arm64@sha256:%s\n' "$(sha256sum SHA256SUMS | cut -d' ' -f1)" > BUILD
+    printf 'v0.9.0-%s@sha256:%s\n' "$arch" "$(sha256sum SHA256SUMS | cut -d' ' -f1)" > BUILD
 )
 
 CC=clang-19 meson setup "$root/build" "$root" -Ddataplane_only=true
 make selftest
-tar -czf .deps/bpftime-arm64.tar.gz -C .deps runtime notices/runtime
-(cd .deps && sha256sum bpftime-arm64.tar.gz > bpftime-arm64.tar.gz.sha256)
+tar -czf ".deps/bpftime-$arch.tar.gz" -C .deps runtime notices/runtime
+(cd .deps && sha256sum "bpftime-$arch.tar.gz" > "bpftime-$arch.tar.gz.sha256")

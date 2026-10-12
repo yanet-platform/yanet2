@@ -1,6 +1,6 @@
 /.deps/
 /*.o
 /setup
-/yanet-cp-lock
+/yanet-uprobe
 /selftest/*.o
 /bpftime

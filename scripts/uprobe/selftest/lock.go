@@ -1,9 +1,9 @@
-//go:build cp_lock_bpftime
+//go:build yanet_uprobe
 
 package selftest
 
 /*
-#cgo CFLAGS: -I../../../..
+#cgo CFLAGS: -I../../..
 #cgo LDFLAGS: ${SRCDIR}/zone.o -pthread
 #include <pthread.h>
 #include <stdatomic.h>

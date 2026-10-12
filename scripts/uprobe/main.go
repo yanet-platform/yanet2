@@ -1,4 +1,4 @@
-//go:build cp_lock_bpftime
+//go:build yanet_uprobe
 
 package main
 
@@ -660,9 +660,9 @@ func (m *Coordinator) report(prometheus bool) string {
 func coordinator(command string) (*Coordinator, int) {
 	name := environment("BPFTIME_GLOBAL_SHM_NAME", "bpftime_maps_shm")
 	check(name != "" && !strings.Contains(name, "/"), "invalid shm name")
-	helper := environment("CP_LOCK_HELPER_DIR", "/usr/lib/yanet2/cp-lock")
+	helper := environment("YANET_UPROBE_HELPER_DIR", "/usr/lib/yanet2/uprobe")
 	m := &Coordinator{Name: name, Path: "/dev/shm/" + name, Helper: helper, Runtime: helper + "/bpftime"}
-	file, err := openRecord(m.Path+".cp-lock", command)
+	file, err := openRecord(m.Path+".uprobe", command)
 	if command == "stop" && os.IsNotExist(err) {
 		check(m.inode() == 0, "foreign/unidentified shared memory; refusing stop")
 		return m, 0
@@ -705,8 +705,9 @@ func coordinator(command string) (*Coordinator, int) {
 }
 
 func execute() {
-	check(len(os.Args) >= 2, "usage: yanet-cp-lock setup --pid PID | report [--format prometheus] [--push URL] | stop")
-	command := os.Args[1]
+	check(len(os.Args) >= 3, "usage: yanet-uprobe cp-lock setup --pid PID | cp-lock report [--format prometheus] [--push URL] | cp-lock stop")
+	check(os.Args[1] == "cp-lock", "unknown probe; available probes: cp-lock")
+	command := os.Args[2]
 
 	check(command == "setup" || command == "report" || command == "stop", "unknown command")
 
@@ -730,7 +731,7 @@ func execute() {
 		options.StringVar(&push, "push", "", "HTTP URL to receive the Prometheus sample")
 	}
 
-	if err := options.Parse(os.Args[2:]); errors.Is(err, flag.ErrHelp) {
+	if err := options.Parse(os.Args[3:]); errors.Is(err, flag.ErrHelp) {
 		return
 	} else {
 		must(err)
@@ -775,7 +776,7 @@ func execute() {
 func main() {
 	defer func() {
 		if failure := recover(); failure != nil {
-			fmt.Fprintln(os.Stderr, "cp-lock:", failure)
+			fmt.Fprintln(os.Stderr, "yanet-uprobe:", failure)
 			os.Exit(1)
 		}
 	}()

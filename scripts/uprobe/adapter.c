@@ -1,5 +1,5 @@
 // clang-format off
-//go:build cp_lock_bpftime
+//go:build yanet_uprobe
 // clang-format on
 
 #include "adapter.h"

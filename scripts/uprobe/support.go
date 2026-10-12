@@ -1,4 +1,4 @@
-//go:build cp_lock_bpftime
+//go:build yanet_uprobe
 
 package main
 
