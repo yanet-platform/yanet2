@@ -53,6 +53,74 @@ struct route_fib {
 	uint64_t *route_indexes;
 };
 
+/*
+ * Outcome of one table lookup.
+ */
+enum route_fib_lookup {
+	// No prefix of the table covers the key.
+	ROUTE_FIB_LOOKUP_MISS,
+	// The covering prefix selects an empty route list: nothing to
+	// forward through.
+	ROUTE_FIB_LOOKUP_EMPTY,
+	// out_route carries the selected route.
+	ROUTE_FIB_LOOKUP_ROUTE,
+};
+
+/*
+ * The public handler of the FIB object type: resolves one destination
+ * to the action of forwarding through it - the selected nexthop by
+ * value, carrying its destination and source ethernet addresses and
+ * the device index of the module that runs the table.
+ *
+ * The key is packet agnostic: the family comes from the address
+ * length (4 or 16), and the hash drives the selection inside a
+ * multi-nexthop list, so any addressable key resolves, a packet or a
+ * test key alike. The caller keeps everything the result does not
+ * carry: the hop limit check and repair, the device index to entry
+ * resolution of its own context, and the counters of its own
+ * registries.
+ */
+static inline enum route_fib_lookup
+route_fib_lookup_route(
+	const struct route_fib *fib,
+	uint32_t addr_len,
+	const uint8_t *addr,
+	uint32_t hash,
+	struct route *out_route
+) {
+	uint32_t route_list_id = LPM_VALUE_INVALID;
+	if (addr_len == 4) {
+		route_list_id = lpm_lookup(&fib->lpm_v4, 4, addr);
+	} else if (addr_len == 16) {
+		route_list_id = lpm_lookup(&fib->lpm_v6, 16, addr);
+	} else {
+		return ROUTE_FIB_LOOKUP_MISS;
+	}
+	if (route_list_id == LPM_VALUE_INVALID) {
+		return ROUTE_FIB_LOOKUP_MISS;
+	}
+
+	struct route_list *route_lists = ADDR_OF(&fib->route_lists);
+	struct route_list *route_list = &route_lists[route_list_id];
+	if (route_list->count == 0) {
+		return ROUTE_FIB_LOOKUP_EMPTY;
+	}
+
+	// TODO: Route selection should be based on hash/NUMA/dp
+	// instance/etc
+	//
+	// The high word of the 32-bit packet hash scaled by the list
+	// size spreads the hash uniformly over the list.
+	uint64_t *route_indexes = ADDR_OF(&fib->route_indexes);
+	uint64_t route_index = route_indexes
+		[route_list->start +
+		 (((uint64_t)hash * route_list->count) >> 32)];
+
+	struct route *routes = ADDR_OF(&fib->routes);
+	*out_route = routes[route_index];
+	return ROUTE_FIB_LOOKUP_ROUTE;
+}
+
 // A FIB published as a shared object, registered under its type and name
 // and reachable from a linking module's execution context.
 //

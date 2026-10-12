@@ -290,6 +290,187 @@ run_publish_lifecycle_test(struct yanet_shm *shm) {
 	return TEST_SUCCESS;
 }
 
+// Pins the public handler of the FIB object type: a key resolves to the
+// selected nexthop by value - its ethernet addresses and device index -
+// the longest covering prefix wins, the hash spreads a multi-nexthop
+// list, and a key no prefix covers or one under an empty list reads as
+// its own lookup verdict.
+static int
+run_public_lookup_test(struct yanet_shm *shm) {
+	yanet_error *err = NULL;
+
+	struct agent *agent = agent_attach(
+		shm, 0, "fib-lookup", ROUTE_FIB_OBJECT_TEST_MEMORY_LIMIT, &err
+	);
+	TEST_ASSERT_NOT_NULL(agent, "agent_attach failed");
+
+	size_t baseline = block_allocator_free_size(&agent->block_allocator);
+
+	struct cp_object *obj = route_fib_object_new(agent, "fib0", &err);
+	TEST_ASSERT_NOT_NULL(obj, "route_fib_object_new failed");
+
+	int route_a = route_fib_object_add_route(
+		obj, dst_a, src, 1, "nexthop_a", &err
+	);
+	TEST_ASSERT(route_a == 0, "first nexthop must take index 0");
+	int route_b =
+		route_fib_object_add_route(obj, dst_b, src, 2, NULL, &err);
+	TEST_ASSERT(route_b == 1, "second nexthop must take index 1");
+
+	uint32_t both[] = {(uint32_t)route_a, (uint32_t)route_b};
+	int ecmp = route_fib_object_add_route_list(obj, 2, both);
+	TEST_ASSERT(ecmp == 0, "first route list must take index 0");
+	uint32_t only_b[] = {(uint32_t)route_b};
+	int specific = route_fib_object_add_route_list(obj, 1, only_b);
+	TEST_ASSERT(specific == 1, "second route list must take index 1");
+	int empty = route_fib_object_add_route_list(obj, 0, NULL);
+	TEST_ASSERT(empty == 2, "third route list must take index 2");
+
+	// The covering range selects the ECMP list; the nested more
+	// specific half-outer range selects the single nexthop, and the
+	// empty list covers a destination nothing forwards through.
+	TEST_ASSERT_SUCCESS(
+		route_fib_object_add_prefix_v4(
+			obj,
+			(uint8_t[4]){10, 0, 0, 0},
+			(uint8_t[4]){10, 0, 0, 255},
+			(uint32_t)ecmp
+		),
+		"add_prefix_v4 of the covering range failed"
+	);
+	TEST_ASSERT_SUCCESS(
+		route_fib_object_add_prefix_v4(
+			obj,
+			(uint8_t[4]){10, 0, 0, 0},
+			(uint8_t[4]){10, 0, 0, 127},
+			(uint32_t)specific
+		),
+		"add_prefix_v4 of the specific range failed"
+	);
+	TEST_ASSERT_SUCCESS(
+		route_fib_object_add_prefix_v4(
+			obj,
+			(uint8_t[4]){192, 168, 0, 0},
+			(uint8_t[4]){192, 168, 0, 255},
+			(uint32_t)empty
+		),
+		"add_prefix_v4 of the empty range failed"
+	);
+	TEST_ASSERT_SUCCESS(
+		route_fib_object_add_prefix_v6(
+			obj,
+			(uint8_t[16]){0xfd, 0x00, [15] = 0},
+			(uint8_t[16]){0xfd, 0x00, [2 ... 15] = 0xff},
+			(uint32_t)specific
+		),
+		"add_prefix_v6 failed"
+	);
+
+	const struct route_fib *fib = route_fib_object_fib(obj);
+	struct route route;
+
+	// The nested more specific range wins over its covering one.
+	TEST_ASSERT_EQUAL(
+		(long)route_fib_lookup_route(
+			fib, 4, (uint8_t[4]){10, 0, 0, 5}, 0, &route
+		),
+		(long)ROUTE_FIB_LOOKUP_ROUTE,
+		"a key of the specific range must resolve"
+	);
+	TEST_ASSERT(
+		!memcmp(&route.dst_addr, &dst_b, sizeof(dst_b)),
+		"the specific range must select its own nexthop"
+	);
+	TEST_ASSERT_EQUAL(
+		(long)route.device_id,
+		2L,
+		"the action must carry the nexthop's device index"
+	);
+	TEST_ASSERT(
+		!memcmp(&route.src_addr, &src, sizeof(src)),
+		"the action must carry the source address by value"
+	);
+
+	// The hash spreads the ECMP list of the covering range: the low
+	// key selects the first nexthop, the high key the second.
+	TEST_ASSERT_EQUAL(
+		(long)route_fib_lookup_route(
+			fib, 4, (uint8_t[4]){10, 0, 0, 200}, 0, &route
+		),
+		(long)ROUTE_FIB_LOOKUP_ROUTE,
+		"a key of the covering range must resolve"
+	);
+	TEST_ASSERT(
+		!memcmp(&route.dst_addr, &dst_a, sizeof(dst_a)),
+		"the zero hash must select the first nexthop of the list"
+	);
+	TEST_ASSERT_EQUAL(
+		(long)route_fib_lookup_route(
+			fib, 4, (uint8_t[4]){10, 0, 0, 200}, UINT32_MAX, &route
+		),
+		(long)ROUTE_FIB_LOOKUP_ROUTE,
+		"a key of the covering range must resolve under any hash"
+	);
+	TEST_ASSERT(
+		!memcmp(&route.dst_addr, &dst_b, sizeof(dst_b)),
+		"the maximal hash must select the last nexthop of the list"
+	);
+
+	// Verdicts short of a route: an uncovered key, an unknown family
+	// length, and a key covered by an empty list.
+	TEST_ASSERT_EQUAL(
+		(long)route_fib_lookup_route(
+			fib, 4, (uint8_t[4]){10, 9, 9, 9}, 0, &route
+		),
+		(long)ROUTE_FIB_LOOKUP_MISS,
+		"an uncovered key must miss"
+	);
+	TEST_ASSERT_EQUAL(
+		(long)route_fib_lookup_route(
+			fib, 6, (uint8_t[6]){0}, 0, &route
+		),
+		(long)ROUTE_FIB_LOOKUP_MISS,
+		"an unknown address length must miss"
+	);
+	TEST_ASSERT_EQUAL(
+		(long)route_fib_lookup_route(
+			fib, 4, (uint8_t[4]){192, 168, 0, 7}, 0, &route
+		),
+		(long)ROUTE_FIB_LOOKUP_EMPTY,
+		"a key covered by an empty list must read empty"
+	);
+
+	TEST_ASSERT_EQUAL(
+		(long)route_fib_lookup_route(
+			fib, 16, (uint8_t[16]){0xfd, 0x00, [15] = 1}, 0, &route
+		),
+		(long)ROUTE_FIB_LOOKUP_ROUTE,
+		"an IPv6 key must resolve"
+	);
+	TEST_ASSERT(
+		!memcmp(&route.dst_addr, &dst_b, sizeof(dst_b)),
+		"the IPv6 range must select its nexthop"
+	);
+
+	TEST_ASSERT_SUCCESS(
+		route_fib_object_free(obj, &err),
+		"free of a dangling object failed: %s",
+		err ? yanet_error_message(err) : "?"
+	);
+
+	size_t after = block_allocator_free_size(&agent->block_allocator);
+	TEST_ASSERT_EQUAL(
+		(long)after,
+		(long)baseline,
+		"arena did not return to baseline: baseline=%zu after=%zu",
+		baseline,
+		after
+	);
+
+	agent_detach(agent);
+	return TEST_SUCCESS;
+}
+
 int
 main(void) {
 	log_enable_name("debug");
@@ -329,6 +510,9 @@ main(void) {
 	int res = run_table_walk_test(shm);
 	if (res == TEST_SUCCESS) {
 		res = run_publish_lifecycle_test(shm);
+	}
+	if (res == TEST_SUCCESS) {
+		res = run_public_lookup_test(shm);
 	}
 	dataplane_ut_free(ut);
 

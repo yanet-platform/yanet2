@@ -27,9 +27,11 @@ struct route_module {
 
 // Why a packet could not be routed.
 //
-// Meaningful only when route_handle_v4 or route_handle_v6 return
-// LPM_VALUE_INVALID. The two are worth telling apart: an expired TTL is
-// ordinary traceroute traffic, while a lookup miss is a blackhole.
+// Meaningful only when a routed packet never reaches the emit: an
+// expired TTL is ordinary traceroute traffic, a lookup miss is a
+// blackhole, and an empty route list or an unresolved device are
+// table-state drops. The TTL verdicts are the module's own; the
+// lookup verdicts come from the FIB object's public handler.
 enum route_drop_reason {
 	ROUTE_DROP_TTL_EXPIRED,
 	ROUTE_DROP_NO_ROUTE,
@@ -46,20 +48,19 @@ route_count_packet(
 	counters[1] += packet_data_len(packet);
 }
 
-static uint32_t
-route_handle_v4(
-	const struct route_fib *fib,
-	struct packet *packet,
-	enum route_drop_reason *drop_reason
-) {
+// Per-family packet preparation: the hop limit check and repair stay
+// with the packet, and the key of the FIB's public handler is handed
+// out. Returns false on an expired hop limit, the drop the caller
+// counts with the family's ttl counter.
+static inline bool
+route_hop_limit_v4(struct packet *packet, const uint8_t **dst_addr) {
 	struct rte_mbuf *mbuf = packet_to_mbuf(packet);
 
 	struct rte_ipv4_hdr *header = rte_pktmbuf_mtod_offset(
 		mbuf, struct rte_ipv4_hdr *, packet->network_header.offset
 	);
 	if (header->time_to_live <= 1) {
-		*drop_reason = ROUTE_DROP_TTL_EXPIRED;
-		return LPM_VALUE_INVALID;
+		return false;
 	}
 	header->time_to_live -= 1;
 
@@ -73,31 +74,24 @@ route_handle_v4(
 		((~rte_be_to_cpu_16(header->hdr_checksum)) & 0xFFFF) + 0xFEFF;
 	header->hdr_checksum = ~rte_cpu_to_be_16(sum + (sum >> 16));
 
-	// Past the TTL check a miss is the only remaining way to fail.
-	*drop_reason = ROUTE_DROP_NO_ROUTE;
-	return lpm_lookup(&fib->lpm_v4, 4, (uint8_t *)&header->dst_addr);
+	*dst_addr = (const uint8_t *)&header->dst_addr;
+	return true;
 }
 
-static uint32_t
-route_handle_v6(
-	const struct route_fib *fib,
-	struct packet *packet,
-	enum route_drop_reason *drop_reason
-) {
+static inline bool
+route_hop_limit_v6(struct packet *packet, const uint8_t **dst_addr) {
 	struct rte_mbuf *mbuf = packet_to_mbuf(packet);
 
 	struct rte_ipv6_hdr *header = rte_pktmbuf_mtod_offset(
 		mbuf, struct rte_ipv6_hdr *, packet->network_header.offset
 	);
 	if (header->hop_limits <= 1) {
-		*drop_reason = ROUTE_DROP_TTL_EXPIRED;
-		return LPM_VALUE_INVALID;
+		return false;
 	}
 	header->hop_limits -= 1;
 
-	// Past the hop limit check a miss is the only remaining way to fail.
-	*drop_reason = ROUTE_DROP_NO_ROUTE;
-	return lpm_lookup(&fib->lpm_v6, 16, header->dst_addr);
+	*dst_addr = header->dst_addr;
+	return true;
 }
 
 static void
@@ -171,8 +165,8 @@ route_handle_packets(
 	);
 	if (link == NULL) {
 		struct packet *packet;
-		while ((packet = packet_list_pop(&packet_front->input)) != NULL
-		) {
+		while ((packet = packet_list_pop(&packet_front->input)) !=
+		       NULL) {
 			packet_front_drop(packet_front, packet);
 		}
 		return;
@@ -188,22 +182,38 @@ route_handle_packets(
 
 	struct packet *packet;
 	while ((packet = packet_list_pop(&packet_front->input)) != NULL) {
-		uint32_t route_list_id = 0;
-		// Nothing makes the helpers assign a reason, so keep the
-		// historical one by default rather than misattribute a drop.
-		enum route_drop_reason drop_reason = ROUTE_DROP_NO_ROUTE;
+		const uint8_t *dst_addr;
+		uint32_t addr_len;
 		const struct route_family_counter_ids *counters;
 
 		if (packet->network_header.type ==
 		    rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV4)) {
-			route_list_id =
-				route_handle_v4(fib, packet, &drop_reason);
 			counters = &route_config->counters_v4;
-		} else if (packet->network_header.type ==
-			   rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV6)) {
-			route_list_id =
-				route_handle_v6(fib, packet, &drop_reason);
+			addr_len = 4;
+			if (!route_hop_limit_v4(packet, &dst_addr)) {
+				route_count_packet(
+					counter_storage,
+					counters->drop_ttl_expired,
+					packet
+				);
+				packet_front_drop(packet_front, packet);
+				continue;
+			}
+		} else if (
+			packet->network_header.type ==
+			rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV6)
+		) {
 			counters = &route_config->counters_v6;
+			addr_len = 16;
+			if (!route_hop_limit_v6(packet, &dst_addr)) {
+				route_count_packet(
+					counter_storage,
+					counters->drop_ttl_expired,
+					packet
+				);
+				packet_front_drop(packet_front, packet);
+				continue;
+			}
 		} else {
 			route_count_packet(
 				counter_storage,
@@ -214,21 +224,20 @@ route_handle_packets(
 			continue;
 		}
 
-		if (route_list_id == LPM_VALUE_INVALID) {
+		// The routing is the FIB object's public handler: the
+		// selected nexthop arrives by value, an action the module
+		// applies below.
+		struct route route;
+		switch (route_fib_lookup_route(
+			fib, addr_len, dst_addr, packet->hash, &route
+		)) {
+		case ROUTE_FIB_LOOKUP_MISS:
 			route_count_packet(
-				counter_storage,
-				drop_reason == ROUTE_DROP_TTL_EXPIRED
-					? counters->drop_ttl_expired
-					: counters->drop_no_route,
-				packet
+				counter_storage, counters->drop_no_route, packet
 			);
 			packet_front_drop(packet_front, packet);
 			continue;
-		}
-
-		struct route_list *route_list =
-			ADDR_OF(&fib->route_lists) + route_list_id;
-		if (route_list->count == 0) {
+		case ROUTE_FIB_LOOKUP_EMPTY:
 			route_count_packet(
 				counter_storage,
 				counters->drop_empty_route_list,
@@ -236,25 +245,14 @@ route_handle_packets(
 			);
 			packet_front_drop(packet_front, packet);
 			continue;
+		case ROUTE_FIB_LOOKUP_ROUTE:
+			break;
 		}
-
-		// TODO: Route selection should be based on hash/NUMA/dp
-		// instance/etc
-		//
-		// The high word of the 32-bit packet hash scaled by the list
-		// size spreads the hash uniformly over the list.
-		uint64_t route_index = ADDR_OF(&fib->route_indexes
-		)[route_list->start +
-		  (((uint64_t)packet->hash * route_list->count) >> 32)];
-
-		struct route *route = ADDR_OF(&fib->routes) + route_index;
 
 		// An index past the module's device table, or a device absent
 		// from this generation, resolves nothing.
 		struct module_device_target *device_target =
-			module_ectx_device_target(
-				module_ectx, route->device_id
-			);
+			module_ectx_device_target(module_ectx, route.device_id);
 		if (device_target == NULL) {
 			route_count_packet(
 				counter_storage,
@@ -265,14 +263,14 @@ route_handle_packets(
 			continue;
 		}
 
-		route_set_packet_destination(packet, route);
+		route_set_packet_destination(packet, &route);
 		packet->tx_device_id = device_target->device_id;
 		route_count_packet(
 			counter_storage, counters->forwarded, packet
 		);
-		if (route->counter_id != COUNTER_INVALID) {
+		if (route.counter_id != COUNTER_INVALID) {
 			route_count_packet(
-				routes_storage, route->counter_id, packet
+				routes_storage, route.counter_id, packet
 			);
 		}
 		module_ectx_route_output(
