@@ -11,6 +11,7 @@ import (
 
 	dataplaneut "github.com/yanet-platform/yanet2/bindings/go/dataplane_ut"
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
+	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	controlplane "github.com/yanet-platform/yanet2/modules/l3b/controlplane"
 	l3bpb "github.com/yanet-platform/yanet2/modules/l3b/controlplane/l3bpb/v1"
 )
@@ -18,6 +19,13 @@ import (
 // newTestBackend returns a shared-memory backend over a harness with the l3b
 // module and its objects loaded.
 func newTestBackend(t *testing.T) controlplane.Backend {
+	t.Helper()
+	backend, _, _ := newTestBackendFixture(t)
+	return backend
+}
+
+// newTestBackendFixture returns a real backend and its accounting/worker owners.
+func newTestBackendFixture(t *testing.T) (controlplane.Backend, *ffi.Agent, *dataplaneut.Harness) {
 	t.Helper()
 
 	harness, err := dataplaneut.NewHarness(dataplaneut.Config{
@@ -34,7 +42,7 @@ func newTestBackend(t *testing.T) controlplane.Backend {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = agent.CleanUp() })
 
-	return controlplane.NewBackend(agent)
+	return controlplane.NewBackend(agent), agent, harness
 }
 
 // Test_Backend_UpdateRealServer_IndexOutOfRange verifies that a real server
