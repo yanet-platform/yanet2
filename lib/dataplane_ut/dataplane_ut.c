@@ -188,6 +188,11 @@ dataplane_ut_new(const struct dataplane_ut_config *cfg) {
 			dataplane_ut_free(ut);
 			return NULL;
 		}
+		// Zero the slots so the commit hook and prepared size start
+		// unset, like a constructor-allocated struct object would.
+		memset(dp_objects,
+		       0,
+		       cfg->objects_to_load_count * sizeof(struct dp_object));
 		for (size_t idx = 0; idx < cfg->objects_to_load_count; ++idx) {
 			strtcpy(dp_objects[idx].name,
 				cfg->objects_to_load[idx],

@@ -171,6 +171,10 @@ register_object_types(struct dp_config *dp_config) {
 		return -1;
 	}
 
+	// Zero the slots so the commit hook and prepared size start unset,
+	// like a constructor-allocated descriptor would.
+	memset(dp_objects, 0, sizeof(struct dp_object) * count);
+
 	for (size_t idx = 0; idx < count; ++idx) {
 		snprintf(
 			dp_objects[idx].name,

@@ -297,7 +297,8 @@ route_module_commit(struct dp_config *dp_config, struct cp_module *cp_module) {
 // along instead of needing a dependency of its own.
 struct object *
 new_object_route_fib() {
-	struct object *object = (struct object *)malloc(sizeof(struct object));
+	struct object *object =
+		(struct object *)calloc(1, sizeof(struct object));
 	if (object == NULL) {
 		return NULL;
 	}

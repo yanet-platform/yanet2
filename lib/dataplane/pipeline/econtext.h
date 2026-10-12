@@ -452,6 +452,24 @@ struct object_ectx {
 	// then.
 	struct cp_object *abs_cp_object;
 	struct counter_storage *counter_storage;
+	// Offset pointer to the object's private per-context buffer,
+	// allocated zeroed by the control plane when the object declares a
+	// size. Opaque to the control plane; filled by the object's
+	// execution-context commit handler during the absolutization pass.
+	void *object_prepared;
+	// The same buffer, as an absolute address for the packet hot
+	// path.
+	//
+	// The publishing process copies it from the relative field above
+	// before the context is released to workers; it is zero until
+	// then.
+	void *abs_object_prepared;
+
+	// Index of the worker this context belongs to, fixed when the
+	// context is built. A commit hook preparing worker-indexed state
+	// selects its slot through it; objects have no generation back
+	// reference to recover the index from, unlike module contexts.
+	uint64_t worker_idx;
 };
 
 struct config_gen_ectx {

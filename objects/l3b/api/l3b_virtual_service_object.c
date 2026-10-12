@@ -604,7 +604,8 @@ l3b_virtual_service_set_real_server_state(
 
 struct object *
 new_object_l3b_virtual_service() {
-	struct object *object = (struct object *)malloc(sizeof(struct object));
+	struct object *object =
+		(struct object *)calloc(1, sizeof(struct object));
 	if (object == NULL) {
 		return NULL;
 	}
