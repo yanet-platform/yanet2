@@ -171,10 +171,14 @@ dataplane_ut_new(const struct dataplane_ut_config *cfg) {
 		}
 	}
 
-	// Register requested object types directly. The harness owns no
-	// dlsym constructor for them, so fill the dp_objects array in place
-	// rather than going through dp_load_object; cp_object_init only needs
-	// the type name resolvable via dp_config_lookup_object.
+	// Register requested object types in place, installing the real
+	// dataplane descriptor when the harness binary exports one: the
+	// constructor's commit hook and prepared size are what a production
+	// dataplane dlsym's and copies, so a binary linking the object
+	// library with dynamic exports serves its contexts the same way. A
+	// type without an exported constructor keeps the zeroed slot - no
+	// hook and no prepared buffer - which pseudo objects built by tests
+	// rely on.
 	if (cfg->objects_to_load_count > 0) {
 		struct dp_object *dp_objects =
 			(struct dp_object *)memory_balloc(
@@ -188,7 +192,7 @@ dataplane_ut_new(const struct dataplane_ut_config *cfg) {
 			dataplane_ut_free(ut);
 			return NULL;
 		}
-		// Zero the slots so the commit hook and prepared size start
+		// Zero the slots so the fields no constructor fills start
 		// unset, like a constructor-allocated struct object would.
 		memset(dp_objects,
 		       0,
@@ -197,6 +201,34 @@ dataplane_ut_new(const struct dataplane_ut_config *cfg) {
 			strtcpy(dp_objects[idx].name,
 				cfg->objects_to_load[idx],
 				sizeof(dp_objects[idx].name));
+
+			char loader_name[128];
+			snprintf(
+				loader_name,
+				sizeof(loader_name),
+				"%s%s",
+				"new_object_",
+				cfg->objects_to_load[idx]
+			);
+			object_load_handler loader = (object_load_handler)dlsym(
+				bin_hndl, loader_name
+			);
+			if (loader == NULL) {
+				continue;
+			}
+			struct object *object = loader();
+			if (object == NULL) {
+				LOG(ERROR,
+				    "dataplane_ut_new: object constructor of "
+				    "%s failed",
+				    cfg->objects_to_load[idx]);
+				dataplane_ut_free(ut);
+				return NULL;
+			}
+			dp_objects[idx].commit_ectx_handler =
+				object->commit_ectx_handler;
+			dp_objects[idx].prepared_size = object->prepared_size;
+			free(object);
 		}
 		SET_OFFSET_OF(&ut->dp_config->dp_objects, dp_objects);
 		ut->dp_config->object_count = cfg->objects_to_load_count;
@@ -627,8 +659,9 @@ dataplane_ut_run(
 		while ((packet = packet_list_pop(input)) != NULL) {
 			packet_list_add(&result->drop, packet);
 		}
-		pthread_mutex_unlock(dp_config_external_round_lock(ut->dp_config
-		));
+		pthread_mutex_unlock(
+			dp_config_external_round_lock(ut->dp_config)
+		);
 		return;
 	}
 

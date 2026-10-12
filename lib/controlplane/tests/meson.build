@@ -248,6 +248,36 @@ object_prepare_test = executable(
 
 test('object_prepare', object_prepare_test, suite: ['lib'])
 
+classifier_object_test = executable(
+  'classifier_object_test',
+  ['classifier_object_test.c'],
+  c_args: yanet_c_args,
+  link_args: yanet_link_args + [
+    '-Wl,-E',
+    '-Wl,--undefined=new_device_plain',
+    '-Wl,--export-dynamic-symbol=new_device_plain',
+    '-Wl,--undefined=new_module_mirror',
+    '-Wl,--export-dynamic-symbol=new_module_mirror',
+  ],
+  dependencies: [
+    lib_dataplane_ut_dep,
+    lib_logging_dep,
+    lib_errors_dep,
+    lib_dev_plain_api,
+    libdpdk_dep,
+    lib_lib_utils_dep,
+  ],
+  link_with: [
+    lib_dev_plain_dp,
+    lib_mirror_dp,
+    lib_mirror_cp,
+    lib_classifier_objects,
+  ],
+  include_directories: yanet_rootdir,
+)
+
+test('classifier_object', classifier_object_test, suite: ['lib'])
+
 dangling_modules_test = executable(
   'dangling_modules_test',
   ['dangling_modules_test.c'],
