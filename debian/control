@@ -18,6 +18,11 @@ Build-Depends: debhelper (>= 12)
  , python3-dev
  , python3-setuptools
  , python3-pyelftools
+ , clang-19 [amd64 arm64] <!pkg.yanet2.nouprobe> | clang-15 [amd64 arm64] <!pkg.yanet2.nouprobe>
+ , libbpf-dev [amd64 arm64] <!pkg.yanet2.nouprobe>
+ , libncurses6 [amd64 arm64] <!pkg.yanet2.nouprobe>
+ , curl [amd64 arm64] <!pkg.yanet2.nouprobe>
+ , ca-certificates [amd64 arm64] <!pkg.yanet2.nouprobe>
 
 Package: yanet2-dataplane
 Architecture: amd64 arm64
@@ -114,3 +119,16 @@ Description: YANET2 generic operator
  One instance serves one module role, started as
  yanet2-generic-operator@<instance> with its configuration in
  /etc/yanet2/generic-operator.d/<instance>.yaml.
+
+Package: yanet2-uprobe
+Architecture: amd64 arm64
+Build-Profiles: <!pkg.yanet2.nouprobe>
+Depends: yanet2-controlplane-dbgsym
+ , binutils
+ , ${shlibs:Depends}
+ , ${misc:Depends}
+Description: Opt-in userspace probes for running YANET2 processes
+ Attaches to a live process through a bundled prebuilt bpftime release.
+ The cp-lock probe collects per-site control-plane lock statistics.
+ Setup, report and stop are disposable commands; no service is installed.
+ Debug symbols are matched to the target executable by build-id at setup.

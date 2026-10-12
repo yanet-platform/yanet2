@@ -79,7 +79,7 @@ echo "Current PATH during build: $PATH" > build-path.log
 # it, and every path takes only the resulting .deb and .ddeb files. Skipping
 # it also avoids xz-compressing the whole working tree, DPDK submodule included.
 # Preserve environment variables for cargo (order matters in dpkg-buildpackage)
-echo y | debuild --preserve-envvar=PATH -us -uc -b 2>&1 | tee build.log
+echo y | debuild --preserve-envvar=PATH --preserve-envvar=DEB_BUILD_PROFILES -us -uc -b 2>&1 | tee build.log
 
 mkdir -p outdeb
 dcmd cp ../*.changes outdeb/
