@@ -99,7 +99,9 @@ func setupVxlanHarness(t *testing.T) (*dataplaneut.Harness, *ffi.Agent, *vxlan.D
 //
 // Decapsulated frames arriving from the tunnel are routed into the "tun-sink"
 // pipeline, and encapsulated frames leaving it pass through the empty
-// "tun-dummy" pipeline into the round output.
+// "tun-dummy" pipeline. A frame finishing that pipeline names the tunnel
+// device itself, so it drops at the output-entry terminal; only the input
+// side of this wiring reaches the round output.
 func createTunnel(t *testing.T, service *vxlan.DeviceVxlanService) {
 	t.Helper()
 
@@ -516,7 +518,8 @@ func TestVxlan_Decap(t *testing.T) {
 func TestVxlan_Encap(t *testing.T) {
 	harness, agent, service := setupVxlanHarness(t)
 	wireVxlanPipelines(t, agent)
-	createTunnel(t, service)
+	wireUnderlayPipeline(t, agent)
+	createTunnelWithOutput(t, service, "tun-underlay")
 	wirePortInput(t, agent, "vxlan-out")
 
 	inner := innerFrame(t)
@@ -1050,7 +1053,8 @@ func fixedInnerFrame(t *testing.T) gopacket.Packet {
 func TestVxlan_EncapSourcePortDeterministic(t *testing.T) {
 	harness, agent, service := setupVxlanHarness(t)
 	wireVxlanPipelines(t, agent)
-	createTunnel(t, service)
+	wireUnderlayPipeline(t, agent)
+	createTunnelWithOutput(t, service, "tun-underlay")
 	wirePortInput(t, agent, "vxlan-out")
 
 	inner := fixedInnerFrame(t)
@@ -1093,7 +1097,8 @@ func jumboInnerSegments(t *testing.T, length int) ([][]byte, []byte) {
 func TestVxlan_EncapJumboBoundary(t *testing.T) {
 	harness, agent, service := setupVxlanHarness(t)
 	wireVxlanPipelines(t, agent)
-	createTunnel(t, service)
+	wireUnderlayPipeline(t, agent)
+	createTunnelWithOutput(t, service, "tun-underlay")
 	wirePortInput(t, agent, "vxlan-out")
 
 	// The largest inner frame that still fits: 36 outer bytes (IPv4 + UDP +

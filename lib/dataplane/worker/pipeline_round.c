@@ -3,10 +3,78 @@
 #include "common/container_of.h"
 #include "lib/controlplane/config/econtext.h"
 #include "lib/controlplane/config/zone.h"
+#include "lib/counters/counters.h"
 #include "lib/dataplane/config/zone.h"
 #include "lib/dataplane/module/packet_front.h"
+#include "lib/dataplane/packet/packet.h"
 #include "lib/dataplane/pipeline/econtext.h"
 #include "lib/dataplane/pipeline/pipeline.h"
+
+static inline void
+counter_add_packets_bytes(
+	struct counter_value_handle *counter, int64_t packets, int64_t bytes
+) {
+	if (packets == 0) {
+		return;
+	}
+
+	uint64_t *values = counter_handle_get_value(counter);
+	values[0] += packets;
+	values[1] += bytes;
+}
+
+void
+worker_entry_terminal_egress(
+	struct config_gen_ectx *config_gen_ectx,
+	struct device_entry_ectx *entry_ectx,
+	struct packet_front *packet_front
+) {
+	const uint16_t *backing = config_gen_ectx->abs_egress_backing;
+	uint64_t dropped_packets = 0;
+	uint64_t dropped_bytes = 0;
+
+	struct packet_list survive;
+	packet_list_init(&survive);
+
+	struct packet *packet;
+	while ((packet = packet_list_pop(&packet_front->output)) != NULL) {
+		uint16_t port = UINT16_MAX;
+		if (packet->tx_device_id < config_gen_ectx->device_count) {
+			port = backing[packet->tx_device_id];
+		}
+
+		if (port == UINT16_MAX) {
+			packet_list_add(&packet_front->drop, packet);
+			dropped_packets += 1;
+			dropped_bytes += packet->data_len;
+		} else {
+			packet_list_add(&survive, packet);
+		}
+	}
+
+	packet_list_concat(&packet_front->output, &survive);
+	packet_front->drop_count += dropped_packets;
+	packet_front->drop_bytes += dropped_bytes;
+	packet_front->output_count -= dropped_packets;
+	packet_front->output_bytes -= dropped_bytes;
+
+	if (dropped_packets != 0) {
+		counter_add_packets_bytes(
+			entry_ectx->counter_packet_drop,
+			dropped_packets,
+			dropped_bytes
+		);
+		// The entry's accounting already counted these packets as
+		// handed to the next stage; a terminal drop means they never
+		// reach transmit, so the transmit side of the accounting
+		// gives them back.
+		counter_add_packets_bytes(
+			entry_ectx->counter_packet_tx,
+			-(int64_t)dropped_packets,
+			-(int64_t)dropped_bytes
+		);
+	}
+}
 
 // Run one device entry on its own schedule.
 //
@@ -17,6 +85,7 @@
 static inline void
 worker_run_entry(
 	struct dp_worker *dp_worker,
+	struct config_gen_ectx *config_gen_ectx,
 	struct device_entry_ectx *device_entry_ectx,
 	struct packet_front *packet_front
 ) {
@@ -31,6 +100,9 @@ worker_run_entry(
 		packet_front_drop_output(&active);
 	} else {
 		device_ectx_process_output(dp_worker, device_ectx, &active);
+		worker_entry_terminal_egress(
+			config_gen_ectx, device_entry_ectx, &active
+		);
 	}
 
 	packet_front_merge(packet_front, &active);
@@ -59,7 +131,12 @@ worker_pipeline_round_process_ready(
 		rlist_add(&config_gen_ectx->entry_list, node);
 		device_entry_ectx->schedule_list = device_entry_schedule_home;
 
-		worker_run_entry(dp_worker, device_entry_ectx, packet_front);
+		worker_run_entry(
+			dp_worker,
+			config_gen_ectx,
+			device_entry_ectx,
+			packet_front
+		);
 	}
 }
 

@@ -1,8 +1,27 @@
 #pragma once
 
+#include <stdint.h>
+
 struct dp_worker;
 struct cp_config_gen;
 struct config_gen_ectx;
+struct device_entry_ectx;
+struct packet_front;
+
+// Decide the egress of the packets that finished an output entry.
+//
+// A packet whose destination device resolves to no port joins the
+// front's drop list, counted against the entry's drop counter, instead
+// of travelling namelessly to the write stage. Packets toward a real
+// port stay in the output untouched. The decision is per packet, so
+// traffic a module aimed at another device's port passes an entry it
+// only traversed.
+void
+worker_entry_terminal_egress(
+	struct config_gen_ectx *config_gen_ectx,
+	struct device_entry_ectx *entry_ectx,
+	struct packet_front *packet_front
+);
 
 // Drain the device entry schedules through the pipeline.
 //

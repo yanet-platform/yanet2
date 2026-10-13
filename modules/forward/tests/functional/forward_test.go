@@ -1325,3 +1325,43 @@ func Test_Forward_MultiBatchBurst(t *testing.T) {
 	l2Bytes := counts[fwdKindARP]*sizes[fwdKindARP] + counts[fwdKindOther4]*sizes[fwdKindOther4]
 	dataplaneut.RequireModuleCounter(t, h, path, "rule_l2", uint64(l2Packets), uint64(l2Bytes))
 }
+
+// Test_Forward_ModeOut_PortlessTargetCountsTerminalDrop verifies that a packet
+// forwarded to a port-less device drops at the output-entry terminal.
+//
+// The drop is counted in that device's output_drop counter and never reaches
+// the write stage: the target is registered by the wiring helper but
+// deliberately absent from the harness topology, so its egress resolves to no
+// port.
+func Test_Forward_ModeOut_PortlessTargetCountsTerminalDrop(t *testing.T) {
+	eth, ip4, _, icmp := fwdEtherLayers()
+	pkt := xpacket.LayersToPacket(t, &eth, &ip4, &icmp)
+	pktSize := uint64(len(pkt.Data()))
+
+	rule := cforward.ForwardRule{
+		Target:  "sink",
+		Mode:    cforward.ModeOut,
+		Counter: "rule0",
+		Src4s:   []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
+		Dst4s:   []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
+	}
+
+	h, agent, backend := setupForwardHarness(t, []string{"port0"})
+	applyRules(t, backend, "test", []cforward.ForwardRule{rule})
+	wireForwardPipeline(t, agent, "port0", "test", []string{"sink"})
+
+	result, err := h.HandlePackets(pkt)
+	require.NoError(t, err)
+	require.Empty(t, result.Output, "a port-less target must not reach the write stage")
+	require.Len(t, result.Drop, 1, "the packet must drop at the output entry terminal")
+
+	deviceCounters := dataplaneut.ValueCounters(
+		h.SharedMemory().DPConfig(0).DeviceCounters("sink"),
+	)
+	require.Equal(
+		t,
+		[]uint64{1, pktSize},
+		deviceCounters["output_drop"],
+		"the terminal drop must be counted on the port-less device",
+	)
+}

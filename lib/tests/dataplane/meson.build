@@ -143,6 +143,7 @@ backing_test = executable(
   dependencies: [
     lib_config_dp_dep,
     lib_config_cp_dep,
+    lib_worker_dp_dep,
     lib_logging_dep,
   ],
   include_directories: yanet_rootdir,
