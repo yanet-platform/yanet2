@@ -22,7 +22,9 @@
 // 36: struct config_gen_ectx gained the egress backing table with its
 // absolute copy and the worker's receive device slot; struct
 // device_ectx gained its registry device index.
-#define YANET_MODULE_ABI_VERSION 36
+// 37: struct value_table packs its rows into owned slabs with a row
+// count instead of one chunk per row.
+#define YANET_MODULE_ABI_VERSION 37
 
 // Symbol name a module .so exports carrying its compiled-against
 // YANET_MODULE_ABI_VERSION, as a uint32_t global.
