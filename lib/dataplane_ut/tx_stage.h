@@ -27,10 +27,12 @@ dataplane_ut_tx_stage_packet(
 	uint32_t hash
 );
 
-// Offer one packet to the staging path.
+// Offer one packet to the staging path, addressed to a device.
 void
 dataplane_ut_tx_stage_offer(
-	struct dataplane_ut_tx_stage *fixture, struct packet *packet
+	struct dataplane_ut_tx_stage *fixture,
+	struct packet *packet,
+	uint16_t tx_device_id
 );
 
 // Hand every pipe's held packets to their consumers.

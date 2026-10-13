@@ -80,9 +80,11 @@ func (m *TxStageFixture) Packet(txDeviceID uint16, hash uint32) (*TxStagePacket,
 	return &TxStagePacket{ptr: ptr}, nil
 }
 
-// Offer hands one packet to the staging path.
-func (m *TxStageFixture) Offer(packet *TxStagePacket) {
-	C.dataplane_ut_tx_stage_offer(m.ptr, packet.ptr)
+// Offer hands one packet to the staging path, addressed to a device.
+func (m *TxStageFixture) Offer(packet *TxStagePacket, txDeviceID uint16) {
+	C.dataplane_ut_tx_stage_offer(
+		m.ptr, packet.ptr, C.uint16_t(txDeviceID),
+	)
 }
 
 // Flush hands every pipe's held packets to their consumers.
