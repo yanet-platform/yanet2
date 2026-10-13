@@ -187,8 +187,6 @@ forward_handle_packets(
 				}
 
 				if (target->mode == FORWARD_MODE_IN) {
-					packet->tx_device_id =
-						device_target->device_id;
 					module_ectx_route_input(
 						module_ectx,
 						packet_front,
@@ -196,8 +194,6 @@ forward_handle_packets(
 						packet
 					);
 				} else if (target->mode == FORWARD_MODE_OUT) {
-					packet->tx_device_id =
-						device_target->device_id;
 					module_ectx_route_output(
 						module_ectx,
 						packet_front,

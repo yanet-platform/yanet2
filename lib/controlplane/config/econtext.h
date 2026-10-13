@@ -122,11 +122,10 @@ device_entry_ectx_schedule(
 // NULL here; the packet lands on its schedule input so the next round
 // picks it up. Input and output routes share the packet lineage budget;
 // an exhausted budget drops on the originating schedule and increments
-// the target entry's input_recirc_drop counter. packet->tx_device_id
-// must already name the destination: the worker's transmit path picks
-// the physical device by it once the packet leaves the pipeline. The
-// pending counters count every route attempt, including dropped
-// packets.
+// the target entry's input_recirc_drop counter. The transmit device is
+// stamped from the target entry, so the transmit stage reads the
+// destination the packet was actually routed to. The pending counters
+// count every route attempt, including dropped packets.
 static inline void
 module_ectx_route_input(
 	struct module_ectx *module_ectx,
@@ -134,6 +133,7 @@ module_ectx_route_input(
 	struct device_entry_ectx *entry_ectx,
 	struct packet *packet
 ) {
+	packet->tx_device_id = entry_ectx->device_id;
 	packet_front->pending_input_count += 1;
 	packet_front->pending_input_bytes += packet->data_len;
 
@@ -153,8 +153,8 @@ module_ectx_route_input(
 // pending_output on the originating schedule.
 //
 // Symmetric to module_ectx_route_input: the packet is placed on the
-// target device's output-pipelines schedule. packet->tx_device_id must
-// already name the destination, as above.
+// target device's output-pipelines schedule, and the transmit device is
+// stamped from the target entry, as above.
 static inline void
 module_ectx_route_output(
 	struct module_ectx *module_ectx,
@@ -162,6 +162,7 @@ module_ectx_route_output(
 	struct device_entry_ectx *entry_ectx,
 	struct packet *packet
 ) {
+	packet->tx_device_id = entry_ectx->device_id;
 	packet_front->pending_output_count += 1;
 	packet_front->pending_output_bytes += packet->data_len;
 

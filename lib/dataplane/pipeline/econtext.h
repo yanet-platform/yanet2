@@ -352,6 +352,14 @@ struct device_entry_ectx {
 	struct rlist schedule_node;
 	uint8_t schedule_list;
 	uint8_t direction;
+	// The device this entry belongs to, as an index into the
+	// generation's device table.
+	//
+	// Routing into the entry stamps this index onto the packet, so the
+	// transmit stage reads exactly the destination the packet was
+	// routed to, with no parallel value that could drift from the
+	// entry.
+	uint16_t device_id;
 	// Offset pointer to the owning device, kept by the control plane.
 	struct device_ectx *device_ectx;
 	// The same device, as an absolute address for the packet hot

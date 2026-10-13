@@ -24,8 +24,7 @@ mirror_clone(
 	struct module_ectx *module_ectx,
 	struct packet_front *packet_front,
 	void (*route)(struct module_ectx *, struct packet_front *, struct device_entry_ectx *, struct packet *),
-	struct device_entry_ectx *entry_ectx,
-	uint16_t device_id
+	struct device_entry_ectx *entry_ectx
 ) {
 	struct packet *clone = worker_clone_packet(
 		worker, packet, module_ectx->packet_recirc_limit
@@ -34,7 +33,6 @@ mirror_clone(
 		return;
 	}
 
-	clone->tx_device_id = device_id;
 	route(module_ectx, packet_front, entry_ectx, clone);
 }
 
@@ -160,8 +158,7 @@ mirror_handle_packets(
 						module_ectx,
 						packet_front,
 						module_ectx_route_input,
-						device_target->abs_input_entry,
-						device_target->device_id
+						device_target->abs_input_entry
 					);
 				} else if (target->mode == MIRROR_MODE_OUT) {
 					mirror_clone(
@@ -170,8 +167,7 @@ mirror_handle_packets(
 						module_ectx,
 						packet_front,
 						module_ectx_route_output,
-						device_target->abs_output_entry,
-						device_target->device_id
+						device_target->abs_output_entry
 					);
 				}
 			}
