@@ -48,6 +48,19 @@ classify_join(
 	struct classifier *out
 );
 
+// The name titles the joint memory context of the first-match rows in
+// the memory tree.
+int
+classify_join_rules(
+	struct memory_context *memory_context,
+	const char *name,
+	const struct classifier *left,
+	const struct classifier *right,
+	const struct classifier_rule *const *rules,
+	uint32_t rule_count,
+	struct value_table *table
+);
+
 // The name titles the rule map memory context of the decode in the
 // memory tree.
 int

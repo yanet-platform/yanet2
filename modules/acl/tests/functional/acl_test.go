@@ -812,6 +812,133 @@ func TestACL_Subnet_IPv4(t *testing.T) {
 	require.Empty(t, result.Drop)
 }
 
+// generatedPortPacket returns a distinct flow with a bounded destination port.
+func generatedPortPacket(t *testing.T, ipv6, tcp bool, idx int, port uint16) gopacket.Packet {
+	t.Helper()
+	ethernet := &layers.Ethernet{
+		SrcMAC:       net.HardwareAddr{2, 0, 0, 0, 0, 1},
+		DstMAC:       net.HardwareAddr{2, 0, 0, 0, 0, 2},
+		EthernetType: layers.EthernetTypeIPv4,
+	}
+	protocol := layers.IPProtocolUDP
+	if tcp {
+		protocol = layers.IPProtocolTCP
+	}
+	var network gopacket.NetworkLayer
+	var networkLayer gopacket.SerializableLayer
+	if ipv6 {
+		ethernet.EthernetType = layers.EthernetTypeIPv6
+		header := &layers.IPv6{
+			Version: 6, HopLimit: 64, NextHeader: protocol,
+			SrcIP: net.ParseIP(fmt.Sprintf("2001:db8::%x", idx+1)),
+			DstIP: net.ParseIP("2001:db8:1::1"),
+		}
+		network, networkLayer = header, header
+	} else {
+		header := &layers.IPv4{
+			Version: 4, TTL: 64, Protocol: protocol,
+			SrcIP: net.IPv4(192, 0, byte(idx/256), byte(idx%256)),
+			DstIP: net.IPv4(198, 51, 100, 1),
+		}
+		network, networkLayer = header, header
+	}
+	var transport gopacket.SerializableLayer
+	if tcp {
+		header := &layers.TCP{SrcPort: layers.TCPPort(idx + 1024), DstPort: layers.TCPPort(port), SYN: true}
+		require.NoError(t, header.SetNetworkLayerForChecksum(network))
+		transport = header
+	} else {
+		header := &layers.UDP{SrcPort: layers.UDPPort(idx + 1024), DstPort: layers.UDPPort(port)}
+		require.NoError(t, header.SetNetworkLayerForChecksum(network))
+		transport = header
+	}
+	return xpacket.LayersToPacket(t, ethernet, networkLayer, transport, gopacket.Payload([]byte("acl-generated-flow")))
+}
+
+// Test_ACL_PortPaths_GeneratedTrafficAndReplacement verifies that every flow
+// keeps its expected first-match verdict and counter across config replacement.
+func Test_ACL_PortPaths_GeneratedTrafficAndReplacement(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		ipv6 bool
+		tcp  bool
+	}{
+		{"ipv4 udp", false, false}, {"ipv4 tcp", false, true},
+		{"ipv6 udp", true, false}, {"ipv6 tcp", true, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			harness, agent, backend := setupACLHarness(t, []string{"port0"})
+			ports := []uint16{99, 100, 149, 150, 160, 161, 200, 201}
+			// 0: no match, 1: first narrow rule, 2: broader later rule.
+			matches := []int{0, 2, 2, 1, 1, 2, 2, 0}
+			packets := make([]gopacket.Packet, 512)
+			counts := [3]uint64{}
+			bytes := [3]uint64{}
+			for idx := range packets {
+				packets[idx] = generatedPortPacket(t, tc.ipv6, tc.tcp, idx, ports[idx%len(ports)])
+				match := matches[idx%len(matches)]
+				counts[match]++
+				bytes[match] += uint64(len(packets[idx].Data()))
+			}
+			for round := range 3 {
+				firstAction, broadAction := uint32(cacl.ActionAllow), uint32(cacl.ActionDeny)
+				if round == 1 {
+					firstAction, broadAction = cacl.ActionDeny, cacl.ActionAllow
+				}
+				base := cacl.ACLRule{
+					Devices:       filter.Devices{{Name: "port0"}},
+					SrcPortRanges: allPorts,
+					ProtoRanges:   udpProto,
+				}
+				if tc.tcp {
+					base.ProtoRanges = tcpProto
+				}
+				if tc.ipv6 {
+					base.Src6s = []xnetip.BiContiguous{filter.UnspecifiedIPv6}
+					base.Dst6s = []xnetip.BiContiguous{filter.UnspecifiedIPv6}
+				} else {
+					base.Src4s = []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4}
+					base.Dst4s = []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4}
+				}
+				first, shadowed, broad := base, base, base
+				first.DstPortRanges = filter.PortRanges{{From: 150, To: 160}}
+				shadowed.DstPortRanges = first.DstPortRanges
+				broad.DstPortRanges = filter.PortRanges{{From: 100, To: 200}}
+				first.Counter = fmt.Sprintf("first-%d", round)
+				shadowed.Counter = fmt.Sprintf("shadowed-%d", round)
+				broad.Counter = fmt.Sprintf("broad-%d", round)
+				first.Actions = []cacl.ACLAction{{Kind: cacl.ActionCount}, {Kind: firstAction}}
+				shadowed.Actions = []cacl.ACLAction{{Kind: cacl.ActionCount}, {Kind: broadAction}}
+				broad.Actions = []cacl.ACLAction{{Kind: cacl.ActionCount}, {Kind: broadAction}}
+				applyACLRules(t, backend, "generated", []cacl.ACLRule{first, shadowed, broad})
+				if round == 0 {
+					wireACLPipeline(t, agent, "port0", "generated")
+				}
+				result, err := harness.HandlePackets(packets...)
+				require.NoError(t, err)
+				require.Len(t, result.Output, int(counts[1+round%2]))
+				seen := map[uint16]bool{}
+				for _, output := range result.Output {
+					require.False(t, seen[output.SrcPort])
+					seen[output.SrcPort] = true
+					require.Equal(t, 1+round%2, matches[(int(output.SrcPort)-1024)%len(matches)])
+				}
+				for _, dropped := range result.Drop {
+					require.False(t, seen[dropped.SrcPort])
+					seen[dropped.SrcPort] = true
+					require.NotEqual(t, 1+round%2, matches[(int(dropped.SrcPort)-1024)%len(matches)])
+				}
+				require.Len(t, seen, len(packets))
+				path := aclCounterPath("port0", "generated")
+				dataplaneut.RequireRuleCounter(t, harness, path, first.Counter, counts[1], bytes[1])
+				dataplaneut.RequireRuleCounter(t, harness, path, shadowed.Counter, 0, 0)
+				dataplaneut.RequireRuleCounter(t, harness, path, broad.Counter, counts[2], bytes[2])
+			}
+			t.Log("1536 generated flows: per-flow verdicts and first-match counters verified across three configurations")
+		})
+	}
+}
+
 // TestACL_TCP_IPv4 verifies that a TCP rule routes through the
 // filter_ip4_port branch (TCP + port ranges).
 func TestACL_TCP_IPv4(t *testing.T) {

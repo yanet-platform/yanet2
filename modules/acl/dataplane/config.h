@@ -130,10 +130,8 @@ struct acl_classifier_core6 {
 };
 
 /*
- * Final filters: the l2 decoder over the device classes, the plain
- * family root joint joining the core classes with the fragment suffix
- * classes, and the protocol path root joints joining the core classes
- * with the path suffix classes, each with its own projection decoder.
+ * Final filters decode layer-2 and plain IP classes; protocol-path
+ * joints carry original first-match rule indices directly.
  */
 struct acl_filter_l2 {
 	struct vline rule_map;
@@ -146,33 +144,22 @@ struct acl_filter_ip4 {
 
 struct acl_filter_ip4_tcp {
 	struct value_table root_joint;
-	struct vline rule_map;
-	// The core classes compacted to the coverage classes of this
-	// path's port restricted projection; uncovered classes read the
-	// zero row of the joint.
-	struct vline root_compact;
 	// The without-ports decoding: rules whose port predicates are
 	// vacuous resolve through the core classes joined with the tcp
-	// flags classes alone, combined with the root decoding by rule
-	// order at lookup time.
+	// flags classes alone - carrying original first-match rule
+	// indices - combined with the root decoding by rule order at
+	// lookup time.
 	struct value_table vac_joint;
-	struct vline vac_rule_map;
 };
 
 struct acl_filter_ip4_udp {
 	struct value_table root_joint;
-	struct vline rule_map;
-	// The core classes compacted to the coverage classes of this
-	// path's port restricted projection; uncovered classes read the
-	// zero row of the joint.
-	struct vline root_compact;
 	// The without-ports decoding over the core classes alone.
 	struct vline vac_rule_map;
 };
 
 struct acl_filter_ip4_icmp {
 	struct value_table root_joint;
-	struct vline rule_map;
 };
 
 struct acl_filter_ip6 {
@@ -182,28 +169,16 @@ struct acl_filter_ip6 {
 
 struct acl_filter_ip6_tcp {
 	struct value_table root_joint;
-	struct vline rule_map;
-	// The core classes compacted to the coverage classes of this
-	// path's port restricted projection; uncovered classes read the
-	// zero row of the joint.
-	struct vline root_compact;
 	struct value_table vac_joint;
-	struct vline vac_rule_map;
 };
 
 struct acl_filter_ip6_udp {
 	struct value_table root_joint;
-	struct vline rule_map;
-	// The core classes compacted to the coverage classes of this
-	// path's port restricted projection; uncovered classes read the
-	// zero row of the joint.
-	struct vline root_compact;
 	struct vline vac_rule_map;
 };
 
 struct acl_filter_ip6_icmp {
 	struct value_table root_joint;
-	struct vline rule_map;
 };
 
 /*

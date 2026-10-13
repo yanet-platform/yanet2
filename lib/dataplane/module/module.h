@@ -24,7 +24,9 @@
 // device_ectx gained its registry device index.
 // 37: struct value_table packs its rows into owned slabs with a row
 // count instead of one chunk per row.
-#define YANET_MODULE_ABI_VERSION 37
+// 38: the acl filter structs drop the path decoders for the root
+// joints carrying first-match rule rows.
+#define YANET_MODULE_ABI_VERSION 38
 
 // Symbol name a module .so exports carrying its compiled-against
 // YANET_MODULE_ABI_VERSION, as a uint32_t global.
