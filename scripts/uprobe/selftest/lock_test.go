@@ -43,6 +43,10 @@ func Test_Workload_Child(t *testing.T) {
 			workload.Failed()
 		} else if commands.Text() == "total" {
 			workload.Total()
+		} else if commands.Text() == "contend" {
+			workload.Contend()
+		} else if commands.Text() == "release" {
+			workload.Release()
 		} else {
 			count, err := strconv.Atoi(commands.Text())
 			if err != nil {
@@ -454,6 +458,77 @@ func Test_Session_ContinuousRealLock(t *testing.T) {
 	require.GreaterOrEqual(t, holdMaximumSeconds, 0.100)
 	require.GreaterOrEqual(t, totalMaximumSeconds, max(waitMaximumSeconds, holdMaximumSeconds))
 	require.Less(t, totalMaximumSeconds, waitMaximumSeconds+holdMaximumSeconds, "total added maxima from different calls")
+	run("stop")
+
+	// A hold over a second with callers spinning on it must stand out
+	// against millisecond baseline holds, as the 7.8 s incident hold would have.
+	value := func(output, series string) float64 {
+		t.Helper()
+		for _, line := range strings.Split(output, "\n") {
+			if number, found := strings.CutPrefix(line, series+" "); found {
+				parsed, err := strconv.ParseFloat(number, 64)
+				require.NoError(t, err)
+				return parsed
+			}
+		}
+		t.Fatalf("series %s missing", series)
+		return 0
+	}
+	siteValue := func(output, metric, site string) float64 {
+		t.Helper()
+		for _, line := range strings.Split(output, "\n") {
+			if strings.HasPrefix(line, metric+"{") && strings.Contains(line, `site="`+site+"@") {
+				_, number, _ := strings.Cut(line, "} ")
+				parsed, err := strconv.ParseFloat(number, 64)
+				require.NoError(t, err)
+				return parsed
+			}
+		}
+		t.Fatalf("%s for %s missing", metric, site)
+		return 0
+	}
+	setup()
+	batch("5")
+	idleThreads := value(report(), "cp_lock_process_threads")
+	batch("contend")
+	contended := time.Now()
+	waiters := value(report(), "cp_lock_waiters")
+	for deadline := contended.Add(5 * time.Second); waiters != workload.ContentionWaiters && time.Now().Before(deadline); {
+		time.Sleep(20 * time.Millisecond)
+		waiters = value(report(), "cp_lock_waiters")
+	}
+	require.EqualValues(t, workload.ContentionWaiters, waiters, "waiter gauge missed spinning callers")
+	// The holder and waiters are extra threads; Go keeps its idle threads.
+	require.GreaterOrEqual(t, value(report(), "cp_lock_process_threads"), idleThreads+workload.ContentionWaiters+1, "thread gauge missed contending threads")
+	// Every waiter is spinning by now, so its wait outlasts the remaining hold.
+	time.Sleep(max(time.Until(contended.Add(1200*time.Millisecond)), time.Second))
+	batch("release")
+	contention := report()
+	require.Zero(t, value(contention, "cp_lock_waiters"), "waiter gauge leaked after release")
+	require.EqualValues(t, workload.ContentionWaiters, siteValue(contention, "cp_lock_acquisitions_total", "cp_lock_test_wait"))
+	require.GreaterOrEqual(t, siteValue(contention, "cp_lock_wait_max_seconds", "cp_lock_test_wait"), 1.0)
+	longHold := siteValue(contention, "cp_lock_hold_max_seconds", "cp_lock_test_hold")
+	require.GreaterOrEqual(t, longHold, 1.2)
+	require.Greater(t, longHold, 10*siteValue(contention, "cp_lock_hold_max_seconds", "cp_lock_test_first"), "long hold indistinguishable from baseline")
+	for _, line := range strings.Split(contention, "\n") {
+		if !strings.HasPrefix(line, "cp_lock_hold_seconds_bucket{") || !strings.Contains(line, `site="cp_lock_test_hold@`) {
+			continue
+		}
+		_, boundary, _ := strings.Cut(line, `le="`)
+		boundary, number, _ := strings.Cut(boundary, `"} `)
+		if boundary != "+Inf" {
+			bound, err := strconv.ParseFloat(boundary, 64)
+			require.NoError(t, err)
+			if bound >= 1.0 {
+				continue
+			}
+		}
+		expected := "0"
+		if boundary == "+Inf" {
+			expected = "1"
+		}
+		require.Equal(t, expected, number, "long hold landed in a sub-second bucket: %s", line)
+	}
 	run("stop")
 	if os.Getenv("YANET_UPROBE_SMOKE") == "" {
 		for _, signal := range []os.Signal{os.Interrupt, os.Kill} {

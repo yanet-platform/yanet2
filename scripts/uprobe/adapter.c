@@ -86,6 +86,7 @@ cp_lock_snapshot(
 		(const void *)((const char *)memory + offsets[1]);
 	counts->drops = __atomic_load_n(&source->drops, __ATOMIC_RELAXED);
 	counts->overflow = __atomic_load_n(&source->overflow, __ATOMIC_RELAXED);
+	counts->waiting = __atomic_load_n(&source->waiting, __ATOMIC_RELAXED);
 
 	if (munmap(memory, size)) {
 		snprintf(error, 512, "unmap session: %s", strerror(errno));

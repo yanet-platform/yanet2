@@ -44,6 +44,27 @@ dropped(int overflow) {
 	}
 }
 
+// Returns this thread's waiter to the gauge at most once.
+//
+// The flag pairs each decrement with the thread's own increment, so the gauge
+// never goes negative and an overwritten entry gives its waiter back. A lost
+// return leaves the waiter counted until the same thread enters again.
+static __always_inline void
+settle(struct cp_lock_state *state) {
+	if (!state->waiting) {
+		return;
+	}
+
+	__u32 zero = 0;
+	struct cp_lock_counters *counts =
+		bpf_map_lookup_elem(&cp_lock_counts, &zero);
+
+	state->waiting = 0;
+	if (counts) {
+		__sync_fetch_and_sub(&counts->waiting, 1);
+	}
+}
+
 // Writer ownership covers the complete record; exhausted retries drop a sample.
 static __always_inline int
 own(struct cp_lock_site_stats *stats) {
@@ -88,13 +109,19 @@ site(__u64 address) {
 }
 
 static __always_inline int
-entry(struct pt_regs *ctx) {
+entry(struct pt_regs *ctx, int waits) {
 	__u64 thread = bpf_get_current_pid_tgid();
-	if (bpf_map_lookup_elem(&cp_lock_state, &thread)) {
+	struct cp_lock_state *previous =
+		bpf_map_lookup_elem(&cp_lock_state, &thread);
+
+	if (previous) {
+		settle(previous);
 		dropped(0);
 	}
 
-	struct cp_lock_state state = {.start_ns = bpf_ktime_get_ns()};
+	struct cp_lock_state state = {
+		.start_ns = bpf_ktime_get_ns(), .waiting = waits
+	};
 	// Userspace entry hooks retain the caller's link register or stack
 	// slot.
 #if defined(__TARGET_ARCH_arm64)
@@ -106,6 +133,14 @@ entry(struct pt_regs *ctx) {
 	if (bpf_map_update_elem(&cp_lock_state, &thread, &state, BPF_ANY)) {
 		bpf_map_delete_elem(&cp_lock_state, &thread);
 		dropped(0);
+	} else if (waits) {
+		__u32 zero = 0;
+		struct cp_lock_counters *counts =
+			bpf_map_lookup_elem(&cp_lock_counts, &zero);
+
+		if (counts) {
+			__sync_fetch_and_add(&counts->waiting, 1);
+		}
 	}
 
 	return 0;
@@ -114,13 +149,13 @@ entry(struct pt_regs *ctx) {
 SEC("uprobe/cp_config_lock")
 int
 cp_lock_on_lock_entry(struct pt_regs *ctx) {
-	return entry(ctx);
+	return entry(ctx, 1);
 }
 
 SEC("uprobe/cp_config_try_lock")
 int
 cp_lock_on_try_lock_entry(struct pt_regs *ctx) {
-	return entry(ctx);
+	return entry(ctx, 0);
 }
 
 static __always_inline int
@@ -134,6 +169,7 @@ acquired(int success) {
 		return 0;
 	}
 
+	settle(state);
 	if (success) {
 		state->acquired_ns = bpf_ktime_get_ns();
 	} else {
@@ -190,6 +226,7 @@ cp_lock_on_unlock_return(struct pt_regs *ctx) {
 		return 0;
 	}
 
+	settle(state);
 	if (!state->acquired_ns || state->acquired_ns < state->start_ns ||
 	    state->end_ns < state->acquired_ns) {
 		dropped(0);
