@@ -266,7 +266,6 @@ route_handle_packets(
 		}
 
 		route_set_packet_destination(packet, route);
-		packet->tx_device_id = device_target->device_id;
 		route_count_packet(
 			counter_storage, counters->forwarded, packet
 		);

@@ -2065,6 +2065,13 @@ config_gen_ectx_create(
 			goto error;
 		}
 		SET_OFFSET_OF(device_ptrs + device_idx, device_ectx);
+
+		// Both entries name the same device, the one at this table
+		// index; routing into them stamps the index onto packets.
+		ADDR_OF(&device_ectx->input_pipelines)->device_id =
+			(uint16_t)device_idx;
+		ADDR_OF(&device_ectx->output_pipelines)->device_id =
+			(uint16_t)device_idx;
 	}
 
 	if (link_config_gen_ectx(config_gen_ectx, err)) {

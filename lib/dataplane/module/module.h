@@ -17,7 +17,9 @@
 // per-device routing targets and the module device id.
 // 34: struct object_ectx gained the object's private per-context
 // prepared buffer fields and the owning worker index.
-#define YANET_MODULE_ABI_VERSION 34
+// 35: struct device_entry_ectx took the padding after the direction
+// field for the device index routing stamps onto packets.
+#define YANET_MODULE_ABI_VERSION 35
 
 // Symbol name a module .so exports carrying its compiled-against
 // YANET_MODULE_ABI_VERSION, as a uint32_t global.
