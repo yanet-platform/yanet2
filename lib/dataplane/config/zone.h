@@ -63,6 +63,12 @@ struct dp_port_counters {
 	struct counter_storage *storage;
 };
 
+// One (device, queue) pair a worker polls and transmits on.
+struct dp_worker_assignment {
+	uint32_t device_id;
+	uint32_t queue_id;
+};
+
 struct dp_worker {
 	uint64_t idx;
 
@@ -106,13 +112,25 @@ struct dp_worker {
 	// Total packets dropped by this worker for any reason.
 	uint64_t *drop_count;
 
+	// Packet source pool of the worker's first assignment.
+	//
+	// A worker with several assignments owns one pool per assignment; this
+	// names the primary one, from which helper paths (unit-test packet
+	// injection, packet cloning) allocate.
 	struct rte_mempool *rx_mempool;
 
 	uint64_t *rx_bursts;
 	uint32_t core_id;
-	uint32_t device_id;
-	uint32_t queue_id;
 	uint32_t rx_burst_size;
+
+	// The (device, queue) pairs this worker polls, in configuration
+	// order.
+	//
+	// An offset pointer into the same zone, filled in before the worker
+	// is appended to dp_config->workers, so a reader bounded by
+	// worker_count only ever observes live assignments.
+	uint32_t assignment_count;
+	struct dp_worker_assignment *assignments;
 
 	// Offset pointer to the execution context this worker runs,
 	// taken from the generation most recently assigned to it.

@@ -536,14 +536,22 @@ struct config_gen_ectx {
 	// stay available after the tail is turned into absolute ones.
 	struct device_ectx **device_ptrs;
 	uint64_t device_count;
-	// The registry slot of this worker's own port device.
+	// The registry slot of each physical device.
 	//
-	// Resolved at build by reverse lookup through the egress backing
-	// table, so the receive stamp names a registry device without
-	// assuming any alignment between the two device namespaces. An
-	// absent device reads as the no-port sentinel, and receive then
+	// Resolved at build by reversing the egress backing table, so the
+	// receive stamp — which starts from the assignment's physical
+	// device — names a registry device without assuming any alignment
+	// between the two device namespaces. A device no registry entry
+	// backs reads as the no-port sentinel, and receive on it then
 	// drops into the absent-device path.
-	uint16_t worker_rx_device_id;
+	uint64_t backing_registry_count;
+	uint16_t *backing_registry;
+	// The same table, as an absolute address for the packet hot path.
+	//
+	// The publishing process copies it from the relative field above
+	// before the context is released to workers; it is zero until
+	// then.
+	uint16_t *abs_backing_registry;
 	// Registry slot to physical transmit device, resolved once at
 	// build by name against the port topology.
 	//

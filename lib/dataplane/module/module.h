@@ -25,7 +25,11 @@
 // 37: struct config_gen_ectx gained the per-physical-device transmit
 // buckets the output-entry terminals fill and the write stage drains.
 // 38: struct packet dropped the unused receive device field.
-#define YANET_MODULE_ABI_VERSION 38
+// 39: struct dp_worker replaced its single device_id/queue_id pair with
+// an assignment list (device, queue per polled queue), and struct
+// config_gen_ectx replaced the worker's receive device slot with the
+// reverse backing table and its absolute copy.
+#define YANET_MODULE_ABI_VERSION 39
 
 // Symbol name a module .so exports carrying its compiled-against
 // YANET_MODULE_ABI_VERSION, as a uint32_t global.

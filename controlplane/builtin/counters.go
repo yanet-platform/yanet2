@@ -3,8 +3,10 @@ package builtin
 import (
 	"context"
 	"errors"
+	"fmt"
 	"math"
 	"strconv"
+	"strings"
 
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
@@ -169,6 +171,14 @@ func (m *Counters) Workers(
 			}
 		}
 
+		assignments := make([]*ynpb.WorkerAssignment, 0, len(worker.Assignments))
+		for _, assignment := range worker.Assignments {
+			assignments = append(assignments, &ynpb.WorkerAssignment{
+				DeviceId: assignment.DeviceID,
+				QueueId:  assignment.QueueID,
+			})
+		}
+
 		response.Workers = append(response.Workers, &ynpb.WorkerCounter{
 			WorkerIdx:       worker.WorkerIdx,
 			CoreId:          worker.CoreID,
@@ -187,6 +197,7 @@ func (m *Counters) Workers(
 			RemoteTxDrops:   worker.RemoteTxDrops,
 			Disposed:        worker.Disposed,
 			RxMempool:       pool,
+			Assignments:     assignments,
 		})
 	}
 
@@ -280,16 +291,41 @@ func PortMetrics(ports []ffi.PortGroup) []*commonpb.Metric {
 	return metrics
 }
 
+// workerMetricLabels labels one worker's aggregate series.
+//
+// A single-assignment worker keeps the long-standing device_id/queue_id
+// labels so existing time series are not recreated. A worker polling
+// several queues has no single device or queue to name: its aggregates
+// carry an assignments label listing every polled pair instead.
+func workerMetricLabels(worker ffi.WorkerCounter) []*commonpb.Label {
+	labels := []*commonpb.Label{
+		{Name: "worker_idx", Value: strconv.FormatUint(uint64(worker.WorkerIdx), 10)},
+		{Name: "core_id", Value: strconv.FormatUint(uint64(worker.CoreID), 10)},
+	}
+	if len(worker.Assignments) > 1 {
+		pairs := make([]string, 0, len(worker.Assignments))
+		for _, assignment := range worker.Assignments {
+			pairs = append(pairs, fmt.Sprintf(
+				"%d/%d", assignment.DeviceID, assignment.QueueID,
+			))
+		}
+		labels = append(labels, &commonpb.Label{
+			Name: "assignments", Value: strings.Join(pairs, ","),
+		})
+		return labels
+	}
+	labels = append(labels,
+		&commonpb.Label{Name: "device_id", Value: strconv.FormatUint(uint64(worker.DeviceID), 10)},
+		&commonpb.Label{Name: "queue_id", Value: strconv.FormatUint(uint64(worker.QueueID), 10)},
+	)
+	return labels
+}
+
 func workerMetrics(workers []ffi.WorkerCounter, instanceID uint32) []*commonpb.Metric {
 	metrics := make([]*commonpb.Metric, 0)
 	instance := strconv.FormatUint(uint64(instanceID), 10)
 	for _, worker := range workers {
-		labels := []*commonpb.Label{
-			{Name: "worker_idx", Value: strconv.FormatUint(uint64(worker.WorkerIdx), 10)},
-			{Name: "core_id", Value: strconv.FormatUint(uint64(worker.CoreID), 10)},
-			{Name: "device_id", Value: strconv.FormatUint(uint64(worker.DeviceID), 10)},
-			{Name: "queue_id", Value: strconv.FormatUint(uint64(worker.QueueID), 10)},
-		}
+		labels := workerMetricLabels(worker)
 
 		metrics = append(metrics,
 			commonpb.NewMetricCounter("worker_iterations", worker.Iterations, labels...),

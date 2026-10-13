@@ -66,9 +66,9 @@ dataplane_device_start(
 	struct dataplane *dataplane, struct dataplane_device *device
 ) {
 	LOG(INFO,
-	    "start dataplane device id=%u with %d workers",
+	    "start dataplane device id=%u with %u queues",
 	    device->device_id,
-	    device->worker_count);
+	    device->queue_count);
 	int rc = dpdk_port_start(device->port_id);
 	if (rc) {
 		LOG(ERROR,
@@ -86,22 +86,7 @@ dataplane_device_start(
 	// fall back to their non-RSS-aware path.
 	dataplane_device_start_query_rss(dataplane, device);
 
-	for (uint32_t wrk_idx = 0; wrk_idx < device->worker_count; ++wrk_idx) {
-		struct dataplane_worker *worker = device->workers + wrk_idx;
-		if (dataplane_worker_start(worker)) {
-			return -1;
-		}
-	}
-
 	return 0;
-}
-
-void
-dataplane_device_stop(struct dataplane_device *device) {
-	for (uint32_t wrk_idx = 0; wrk_idx < device->worker_count; ++wrk_idx) {
-		struct dataplane_worker *worker = device->workers + wrk_idx;
-		dataplane_worker_stop(worker);
-	}
 }
 
 int
@@ -111,8 +96,10 @@ dataplane_device_init(
 	uint32_t device_id,
 	struct dataplane_device_config *config
 ) {
+	(void)dataplane;
+
 	device->device_id = device_id;
-	device->worker_count = 0;
+	device->queue_count = config->worker_count;
 
 	if (dpdk_port_init(
 		    config->port_name,
@@ -129,32 +116,6 @@ dataplane_device_init(
 	}
 
 	strtcpy(device->port_name, config->port_name, 80);
-
-	device->workers = (struct dataplane_worker *)malloc(
-		sizeof(struct dataplane_worker) * config->worker_count
-	);
-	if (device->workers == NULL) {
-		LOG(ERROR, "failed to allocate memory for device workers");
-		errno = ENOMEM;
-		return -1;
-	}
-	memset(device->workers,
-	       0,
-	       sizeof(struct dataplane_worker) * config->worker_count);
-
-	for (device->worker_count = 0;
-	     device->worker_count < config->worker_count;
-	     ++device->worker_count) {
-		if (dataplane_worker_init(
-			    dataplane,
-			    device,
-			    device->workers + device->worker_count,
-			    device->worker_count,
-			    config->workers + device->worker_count
-		    )) {
-			return -1;
-		}
-	}
 
 	return 0;
 }

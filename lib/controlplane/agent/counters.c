@@ -663,12 +663,61 @@ yanet_get_worker_counter_metadata(
 		return -1;
 	}
 
+	struct dp_worker_assignment *assignments =
+		ADDR_OF(&worker->assignments);
+
 	metadata->core_id = worker->core_id;
-	metadata->device_id = worker->device_id;
-	metadata->queue_id = worker->queue_id;
 	metadata->rx_burst_size = worker->rx_burst_size;
+	metadata->assignment_count = worker->assignment_count;
+	if (worker->assignment_count > 0 && assignments != NULL) {
+		metadata->device_id = assignments[0].device_id;
+		metadata->queue_id = assignments[0].queue_id;
+	} else {
+		metadata->device_id = 0;
+		metadata->queue_id = 0;
+	}
 
 	return 0;
+}
+
+int
+yanet_get_worker_assignments(
+	struct dp_config *dp_config,
+	uint64_t worker_idx,
+	struct worker_assignment_metadata *assignments,
+	uint32_t max_count
+) {
+	if (dp_config == NULL) {
+		return -1;
+	}
+
+	struct dp_worker **workers = ADDR_OF(&dp_config->workers);
+	if (workers == NULL || worker_idx >= dp_config->worker_count) {
+		return -1;
+	}
+
+	struct dp_worker *worker = ADDR_OF(&workers[worker_idx]);
+	if (worker == NULL) {
+		return -1;
+	}
+
+	struct dp_worker_assignment *source = ADDR_OF(&worker->assignments);
+	uint32_t count = worker->assignment_count;
+	if (count > max_count) {
+		count = max_count;
+	}
+	if (source == NULL) {
+		count = 0;
+	}
+
+	for (uint32_t idx = 0; idx < count; ++idx) {
+		assignments[idx] = (struct worker_assignment_metadata){
+			.device_id = source[idx].device_id,
+			.queue_id = source[idx].queue_id,
+		};
+	}
+
+	return (int)count;
 }
 
 struct port_counter_group_list *
