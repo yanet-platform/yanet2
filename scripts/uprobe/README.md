@@ -10,7 +10,12 @@ includes [bpftime v0.9.0](https://github.com/eunomia-bpf/bpftime/tree/v0.9.0).
 ## cp-lock
 
 The `cp-lock` probe measures acquisitions, failed try-locks, wait/hold times and
-hold histograms per caller in one CP process.
+hold histograms per caller in one CP process. Each report also samples how many
+threads are inside `cp_config_lock` right now (`cp_lock_waiters`) and the CP OS
+thread count (`cp_lock_process_threads`); a stuck lock shows up as both
+climbing. The waiter gauge counts only callers that entered after setup, stops
+growing once 4096 threads are tracked (`cp_lock_drops_total` grows instead) and
+keeps a thread that died while waiting until that thread ID locks again.
 Prometheus `site` is `function@file:line`; CP source paths are repository-relative
 when the debug data identifies the root. External paths are preserved.
 Calls at the same source location are combined. Unavailable source locations
@@ -35,8 +40,9 @@ uninstalling; the runtime stays mapped until CP exits. Attach requires ptrace
 permission, the original executable inode and matching debug symbols; executable
 paths cannot contain whitespace.
 
-Sessions created before `TOTAL MAX` require `setup --pid "$CP_PID" --replace`
-to update probes and reset counters without restarting CP.
+Sessions created by an earlier yanet-uprobe release require
+`setup --pid "$CP_PID" --replace` to update probes and reset counters without
+restarting CP.
 
 For collection through existing Telegraf outputs:
 

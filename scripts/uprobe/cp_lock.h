@@ -2,7 +2,7 @@
 
 #include <linux/types.h>
 
-#define CP_LOCK_SCHEMA 4
+#define CP_LOCK_SCHEMA 5
 #ifndef CP_LOCK_MAX_SITES
 #define CP_LOCK_MAX_SITES 1024
 #endif
@@ -17,9 +17,11 @@ struct cp_lock_site_stats {
 };
 
 struct cp_lock_state {
-	__u64 start_ns, acquired_ns, end_ns, ret;
+	__u64 start_ns, acquired_ns, end_ns, ret, waiting;
 };
 
+// Drops and overflow are totals; waiting counts threads currently inside
+// cp_config_lock.
 struct cp_lock_counters {
-	__u64 drops, overflow;
+	__u64 drops, overflow, waiting;
 };

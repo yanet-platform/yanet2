@@ -113,9 +113,12 @@ func (m *Coordinator) save() {
 	must(m.File.Sync())
 }
 
+// Sessions from schema 3 onward share the record layout, so stop and replace
+// can reset them; only the current schema has readable statistics.
 func (m *Coordinator) compatible(allowPrevious bool) {
-	check(allowPrevious || m.Record.Schema != 3, "statistics schema changed; run setup --replace to reset counters and update probes")
-	check(m.Record.ABI == offsetABI && (m.Record.Schema == C.CP_LOCK_SCHEMA || allowPrevious && m.Record.Schema == 3),
+	previous := m.Record.Schema >= 3 && m.Record.Schema < C.CP_LOCK_SCHEMA
+	check(allowPrevious || !previous, "statistics schema changed; run setup --replace to reset counters and update probes")
+	check(m.Record.ABI == offsetABI && (m.Record.Schema == C.CP_LOCK_SCHEMA || allowPrevious && previous),
 		"unsupported runtime layout/statistics schema; an operator-managed CP restart is required to install this runtime")
 }
 
@@ -547,6 +550,20 @@ func (m *Coordinator) readStats() ([]C.struct_cp_lock_site_stats, C.struct_cp_lo
 	return statistics, counts
 }
 
+// threads reads the OS thread count of a live process.
+func threads(pid int32) uint64 {
+	data, err := os.ReadFile(fmt.Sprintf("/proc/%d/status", pid))
+	must(err)
+	for _, line := range strings.Split(string(data), "\n") {
+		if value, found := strings.CutPrefix(line, "Threads:"); found {
+			count, err := strconv.ParseUint(strings.TrimSpace(value), 10, 64)
+			must(err)
+			return count
+		}
+	}
+	panic(fmt.Errorf("thread count missing from process status"))
+}
+
 func formatDuration(nanoseconds uint64) string {
 	if nanoseconds > 1<<63-1 {
 		return fmt.Sprintf("%.3fh", float64(nanoseconds)/float64(time.Hour))
@@ -582,6 +599,7 @@ func (m *Coordinator) report(prometheus bool) string {
 	m.attached()
 
 	statistics, counts := m.readStats()
+	waiting, threadCount := int64(counts.waiting), threads(m.Record.PID)
 
 	maps, err := os.ReadFile(fmt.Sprintf("/proc/%d/maps", m.Record.PID))
 	must(err)
@@ -603,8 +621,8 @@ func (m *Coordinator) report(prometheus bool) string {
 
 	var output strings.Builder
 	if !prometheus {
-		fmt.Fprintf(&output, "CP lock profile | PID %d\nSession: %d  Generation: %d\n\n",
-			m.Record.PID, m.Record.Session, m.Record.Start,
+		fmt.Fprintf(&output, "CP lock profile | PID %d\nSession: %d  Generation: %d\nWaiting now: %d  CP threads: %d\n\n",
+			m.Record.PID, m.Record.Session, m.Record.Start, waiting, threadCount,
 		)
 		table := tabwriter.NewWriter(&output, 0, 4, 2, ' ', tabwriter.AlignRight)
 		fmt.Fprintln(table, "COUNT\tFAILED TRY\tTOTAL MAX\tWAIT AVG\tWAIT MAX\tHOLD AVG\tHOLD P95~\tHOLD MAX\t  CALL SITE")
@@ -642,6 +660,8 @@ func (m *Coordinator) report(prometheus bool) string {
 	}
 	fmt.Fprintf(&output, "# TYPE cp_lock_session_info gauge\ncp_lock_session_info{pid=\"%d\",generation=\"%d\",boot_id=\"%s\",session=\"%d\",build_id=\"%s\"} 1\n", m.Record.PID, m.Record.Start, text(m.Record.Boot[:]), m.Record.Session, text(m.Record.Build[:]))
 	fmt.Fprintf(&output, "# TYPE cp_lock_sample_time_seconds gauge\ncp_lock_sample_time_seconds %.17g\n", float64(time.Now().UnixNano())/1e9)
+	fmt.Fprintf(&output, "# TYPE cp_lock_waiters gauge\ncp_lock_waiters %d\n", waiting)
+	fmt.Fprintf(&output, "# TYPE cp_lock_process_threads gauge\ncp_lock_process_threads %d\n", threadCount)
 
 	comm := readLine(fmt.Sprintf("/proc/%d/comm", m.Record.PID))
 	for _, row := range rows {

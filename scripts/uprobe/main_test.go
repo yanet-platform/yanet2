@@ -8,6 +8,7 @@ import (
 	"debug/elf"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -47,6 +48,10 @@ func Test_Compatible_PreviousSchema(t *testing.T) {
 	m := &Coordinator{Record: Record{ABI: offsetABI, Schema: 3}}
 	require.Panics(t, func() { m.compatible(false) })
 	require.NotPanics(t, func() { m.compatible(true) })
+	m.Record.Schema = 4
+	require.Panics(t, func() { m.compatible(false) })
+	require.NotPanics(t, func() { m.compatible(true) })
+	m.Record.Schema = 3
 	require.EqualValues(t, 584, unsafe.Sizeof(Row{}.Stats))
 	require.EqualValues(t, 8, unsafe.Offsetof(Row{}.Stats.total_max_ns))
 	require.EqualValues(t, 72, unsafe.Offsetof(Row{}.Stats.hist))
@@ -105,7 +110,7 @@ func Test_Stop_UnpublishedSession(t *testing.T) {
 	} {
 		t.Run(tc.Name, func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "segment")
-			m := &Coordinator{Path: path, Record: Record{Magic: recordMagic, ABI: offsetABI, Schema: 4, Active: tc.Active, Session: 7}}
+			m := &Coordinator{Path: path, Record: Record{Magic: recordMagic, ABI: offsetABI, Schema: 5, Active: tc.Active, Session: 7}}
 			temporary := path + ".new-7"
 			require.NoError(t, os.WriteFile(temporary, []byte("segment"), 0600))
 			if tc.PersistedInode {
@@ -202,7 +207,7 @@ func statsFixture(t *testing.T) (*Coordinator, []byte) {
 
 	const sitesOffset = 8
 	countsOffset := sitesOffset + 1024*int(unsafe.Sizeof(Row{}.Stats))
-	size := countsOffset + 16
+	size := countsOffset + 24
 	require.NoError(t, file.Truncate(int64(size)))
 	info, err := file.Stat()
 	require.NoError(t, err)
@@ -213,7 +218,7 @@ func statsFixture(t *testing.T) (*Coordinator, []byte) {
 	m := &Coordinator{Name: filepath.Base(file.Name()), Path: file.Name()}
 	generation, err := startTime(os.Getpid())
 	require.NoError(t, err)
-	m.Record = Record{Magic: recordMagic, ABI: offsetABI, Schema: 4, Active: 1, PID: int32(os.Getpid()), Start: generation}
+	m.Record = Record{Magic: recordMagic, ABI: offsetABI, Schema: 5, Active: 1, PID: int32(os.Getpid()), Start: generation}
 	copyText(m.Record.Boot[:], readLine("/proc/sys/kernel/random/boot_id"))
 	m.Record.Inode = info.Sys().(*syscall.Stat_t).Ino
 	m.Record.MapOffsets = [2]uint64{sitesOffset, uint64(countsOffset)}
@@ -246,7 +251,7 @@ func storeNative[T ~uint64](destination *T, value uint64) {
 // Test_ReadStats_PausedWriter verifies that an unfinished row remains readable.
 func Test_ReadStats_PausedWriter(t *testing.T) {
 	m, memory := statsFixture(t)
-	statistics, _ := m.readStats()
+	statistics, counts := m.readStats()
 	source := mappedValue(memory[m.Record.MapOffsets[0]:], statistics[0])
 	source.address = 0x1000
 	source.writer = 1
@@ -278,6 +283,11 @@ func Test_ReadStats_PausedWriter(t *testing.T) {
 	require.Regexp(t, `(?m)^cp_lock_acquisitions_total\{[^}\n]*\} 1$`, output)
 	require.Regexp(t, `(?m)^cp_lock_hold_seconds_count\{[^}\n]*\} 1$`, output)
 	require.Regexp(t, `(?m)^cp_lock_hold_seconds_bucket\{[^}\n]*le="\+Inf"\} 1$`, output)
+	counters := mappedValue(memory[m.Record.MapOffsets[1]:], counts)
+	storeNative(&counters.waiting, 3)
+	output = m.report(true)
+	require.Regexp(t, `(?m)^cp_lock_waiters 3$`, output)
+	require.Regexp(t, `(?m)^cp_lock_process_threads [1-9][0-9]*$`, output)
 
 	source.wait_sum_ns = 25
 	source.hold_sum_ns = 30
@@ -324,6 +334,7 @@ func Test_ReadStats_ConcurrentWrites(t *testing.T) {
 			storeNative(&source.writer, 0)
 			storeNative(&counters.drops, completed)
 			storeNative(&counters.overflow, completed/7)
+			storeNative(&counters.waiting, completed%5)
 			if completed == 1 {
 				close(started)
 			}
@@ -374,6 +385,7 @@ func Test_ReadStats_ConcurrentWrites(t *testing.T) {
 	require.EqualValues(t, completed*2, stats.total_max_ns)
 	require.EqualValues(t, completed, counts.drops)
 	require.EqualValues(t, completed/7, counts.overflow)
+	require.EqualValues(t, completed%5, counts.waiting)
 	for idx, value := range bins {
 		require.EqualValues(t, value, stats.hist[idx])
 	}
@@ -556,4 +568,13 @@ func Test_HoldPercentile95_BucketRanks(t *testing.T) {
 			require.Equal(t, tc.Want, row.holdPercentile95())
 		})
 	}
+}
+
+// Test_Threads_ProcessStatus verifies the count of a single-threaded process.
+func Test_Threads_ProcessStatus(t *testing.T) {
+	command := exec.Command("sleep", "10")
+	require.NoError(t, command.Start())
+	t.Cleanup(func() { command.Process.Kill(); command.Wait() })
+	require.EqualValues(t, 1, threads(int32(command.Process.Pid)))
+	require.Panics(t, func() { threads(-1) })
 }

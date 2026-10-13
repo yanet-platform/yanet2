@@ -1,5 +1,8 @@
 # Test artifacts
 *.qcow2
+# Lab template lock and checksum files beside cached images
+*.qcow2.lock
+*.qcow2.sha256
 *.iso
 *.log
 *.test

@@ -16,8 +16,13 @@ permit_injection(void) {
 	prctl(PR_SET_PTRACER, PR_SET_PTRACER_ANY, 0, 0, 0);
 }
 
+#define CONTENTION_WAITERS 3
+
 static struct cp_config configuration;
 static _Atomic int ready;
+static _Atomic int released;
+static pthread_t contention_holder;
+static pthread_t contention_waiters[CONTENTION_WAITERS];
 static clockid_t waiter_clock;
 static struct timespec wait_start;
 static long second_hold_ns = 1000000;
@@ -47,6 +52,36 @@ cp_lock_test_try(void) {
 	if (cp_config_try_lock(&configuration)) {
 		cp_config_unlock(&configuration);
 	}
+}
+
+__attribute__((noinline)) void
+cp_lock_test_hold(void) {
+	cp_config_lock(&configuration);
+	atomic_store(&ready, 1);
+	while (!atomic_load(&released)) {
+		delay(1000000);
+	}
+	cp_config_unlock(&configuration);
+}
+
+__attribute__((noinline)) void
+cp_lock_test_wait(void) {
+	cp_config_lock(&configuration);
+	cp_config_unlock(&configuration);
+}
+
+static void *
+hold_worker(void *value) {
+	(void)value;
+	cp_lock_test_hold();
+	return NULL;
+}
+
+static void *
+wait_worker(void *value) {
+	(void)value;
+	cp_lock_test_wait();
+	return NULL;
 }
 
 static void *
@@ -117,6 +152,31 @@ failed(void) {
 	pthread_join(thread, NULL);
 }
 
+// Waiters start only after the holder owns the lock, so all of them spin
+// until release.
+static void
+contend(void) {
+	atomic_store(&ready, 0);
+	atomic_store(&released, 0);
+	pthread_create(&contention_holder, NULL, hold_worker, NULL);
+	while (!atomic_load(&ready)) {
+		delay(10000);
+	}
+
+	for (int idx = 0; idx < CONTENTION_WAITERS; idx++) {
+		pthread_create(&contention_waiters[idx], NULL, wait_worker, NULL);
+	}
+}
+
+static void
+release(void) {
+	atomic_store(&released, 1);
+	pthread_join(contention_holder, NULL);
+	for (int idx = 0; idx < CONTENTION_WAITERS; idx++) {
+		pthread_join(contention_waiters[idx], NULL);
+	}
+}
+
 static void
 total(void) {
 	second_hold_ns = 100000000;
@@ -136,3 +196,12 @@ func Failed() { C.failed() }
 func Try() { C.cp_lock_test_try() }
 
 func Total() { C.total() }
+
+// ContentionWaiters is the number of callers Contend leaves spinning.
+const ContentionWaiters = C.CONTENTION_WAITERS
+
+// Contend holds the lock in a background thread with waiters spinning on it.
+func Contend() { C.contend() }
+
+// Release ends the hold started by Contend and joins all of its threads.
+func Release() { C.release() }
