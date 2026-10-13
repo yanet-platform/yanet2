@@ -30,6 +30,7 @@ worker_tx_stage(
 	uint32_t device_count,
 	struct dp_worker *dp_worker,
 	struct packet *packet,
+	uint16_t device_id,
 	struct packet_list *failed
 );
 

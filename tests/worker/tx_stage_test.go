@@ -33,7 +33,7 @@ func offer(t *testing.T, fixture *dataplaneut.TxStageFixture, device uint16, has
 
 	packet, err := fixture.Packet(device, hash)
 	require.NoError(t, err)
-	fixture.Offer(packet)
+	fixture.Offer(packet, device)
 
 	return packet
 }

@@ -130,13 +130,16 @@ dataplane_ut_tx_stage_packet(
 
 void
 dataplane_ut_tx_stage_offer(
-	struct dataplane_ut_tx_stage *fixture, struct packet *packet
+	struct dataplane_ut_tx_stage *fixture,
+	struct packet *packet,
+	uint16_t tx_device_id
 ) {
 	worker_tx_stage(
 		fixture->connections,
 		fixture->device_count,
 		&fixture->dp_worker,
 		packet,
+		tx_device_id,
 		&fixture->failed
 	);
 }

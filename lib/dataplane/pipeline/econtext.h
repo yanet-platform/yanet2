@@ -442,6 +442,12 @@ struct device_ectx {
 	// until then, and the packet hot path loads them directly.
 	struct device_entry_ectx *abs_input_pipelines;
 	struct device_entry_ectx *abs_output_pipelines;
+	// The device's index in the generation's device table.
+	//
+	// Device handlers that emit traffic of their own stamp it onto the
+	// packet, so the emitted packet names a registry slot rather than
+	// whatever physical index the emitting worker happens to carry.
+	uint16_t device_id;
 };
 
 // Per-worker execution context for a cp_object.
@@ -530,6 +536,28 @@ struct config_gen_ectx {
 	// stay available after the tail is turned into absolute ones.
 	struct device_ectx **device_ptrs;
 	uint64_t device_count;
+	// The registry slot of this worker's own port device.
+	//
+	// Resolved at build by reverse lookup through the egress backing
+	// table, so the receive stamp names a registry device without
+	// assuming any alignment between the two device namespaces. An
+	// absent device reads as the no-port sentinel, and receive then
+	// drops into the absent-device path.
+	uint16_t worker_rx_device_id;
+	// Registry slot to physical transmit device, resolved once at
+	// build by name against the port topology.
+	//
+	// The no-port sentinel marks a device whose egress has no port
+	// counterpart. The write stage resolves every outgoing packet
+	// through this table, so registry order never has to agree with
+	// topology order for a packet to reach the right port.
+	uint16_t *egress_backing;
+	// The same table, as an absolute address for the packet hot path.
+	//
+	// The publishing process copies it from the relative field above
+	// before the context is released to workers; it is zero until
+	// then.
+	uint16_t *abs_egress_backing;
 	// The generation's devices, as absolute addresses for the packet
 	// hot path.
 	//

@@ -134,3 +134,17 @@ worker_clone_test = executable(
   include_directories: yanet_rootdir,
 )
 test('worker_clone', worker_clone_test, suite: 'lib_worker')
+
+backing_test = executable(
+  'backing_test',
+  'backing_test.c',
+  c_args: yanet_c_args,
+  link_args: yanet_link_args,
+  dependencies: [
+    lib_config_dp_dep,
+    lib_config_cp_dep,
+    lib_logging_dep,
+  ],
+  include_directories: yanet_rootdir,
+)
+test('backing', backing_test, suite: 'lib_dataplane')

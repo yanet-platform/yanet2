@@ -1571,6 +1571,15 @@ config_gen_ectx_free(
 		);
 	}
 
+	uint16_t *egress_backing = ADDR_OF(&config_gen_ectx->egress_backing);
+	if (egress_backing != NULL) {
+		memory_bfree(
+			memory_context,
+			egress_backing,
+			sizeof(uint16_t) * config_gen_ectx->device_count
+		);
+	}
+
 	struct object_ectx **objects = ADDR_OF(&config_gen_ectx->objects);
 	if (objects != NULL) {
 		for (uint64_t object_idx = 0;
@@ -1970,6 +1979,25 @@ config_gen_ectx_create(
 	}
 	SET_OFFSET_OF(&config_gen_ectx->device_ptrs, device_ptrs);
 
+	// The no-port sentinel everywhere first: a slot with no device, or
+	// one whose name matches no port, must read as port-less rather
+	// than as whatever a zeroed byte pattern would decode to.
+	uint16_t *egress_backing = (uint16_t *)memory_balloc(
+		memory_context, sizeof(uint16_t) * device_count
+	);
+	if (egress_backing == NULL && device_count > 0) {
+		yanet_error_add(
+			err,
+			"failed to allocate memory for the egress "
+			"backing table of the config generation"
+		);
+		goto error;
+	}
+	if (device_count > 0) {
+		memset(egress_backing, 0xFF, sizeof(uint16_t) * device_count);
+	}
+	SET_OFFSET_OF(&config_gen_ectx->egress_backing, egress_backing);
+
 	struct cp_config_counter_storage_registry *registry =
 		(struct cp_config_counter_storage_registry *)memory_balloc(
 			&cp_config->memory_context,
@@ -2044,6 +2072,7 @@ config_gen_ectx_create(
 	}
 
 	// FIXME: cp_config_gen_device_count
+	struct dp_config *dp_config = ADDR_OF(&cp_config->dp_config);
 	for (uint64_t device_idx = 0; device_idx < device_count; ++device_idx) {
 
 		struct cp_device *cp_device =
@@ -2051,6 +2080,21 @@ config_gen_ectx_create(
 		if (cp_device == NULL) {
 			config_gen_ectx->devices[device_idx] = NULL;
 			continue;
+		}
+
+		// The physical transmit device is the topology slot carrying
+		// this device's name; a name no port answers to leaves the
+		// no-port sentinel in place.
+		struct dp_topology *topology = &dp_config->dp_topology;
+		struct dp_port *ports = ADDR_OF(&topology->devices);
+		for (uint64_t port_idx = 0; port_idx < topology->device_count;
+		     ++port_idx) {
+			if (strncmp(ports[port_idx].device_name,
+				    cp_device->name,
+				    sizeof(ports[port_idx].device_name)) == 0) {
+				egress_backing[device_idx] = (uint16_t)port_idx;
+				break;
+			}
 		}
 
 		struct device_ectx *device_ectx = device_ectx_create(
@@ -2065,6 +2109,7 @@ config_gen_ectx_create(
 			goto error;
 		}
 		SET_OFFSET_OF(device_ptrs + device_idx, device_ectx);
+		device_ectx->device_id = (uint16_t)device_idx;
 
 		// Both entries name the same device, the one at this table
 		// index; routing into them stamps the index onto packets.
@@ -2072,6 +2117,24 @@ config_gen_ectx_create(
 			(uint16_t)device_idx;
 		ADDR_OF(&device_ectx->output_pipelines)->device_id =
 			(uint16_t)device_idx;
+	}
+
+	// The worker's own registry slot backs onto its physical device;
+	// an unwired worker, or one whose port device never registered,
+	// keeps the absent-device sentinel and receive drops into it.
+	config_gen_ectx->worker_rx_device_id = UINT16_MAX;
+	struct dp_worker **dp_workers = ADDR_OF(&dp_config->workers);
+	if (dp_workers != NULL && worker_idx < dp_config->worker_count) {
+		uint16_t physical_device_id =
+			ADDR_OF(dp_workers + worker_idx)->device_id;
+		for (uint64_t device_idx = 0; device_idx < device_count;
+		     ++device_idx) {
+			if (egress_backing[device_idx] == physical_device_id) {
+				config_gen_ectx->worker_rx_device_id =
+					(uint16_t)device_idx;
+				break;
+			}
+		}
 	}
 
 	if (link_config_gen_ectx(config_gen_ectx, err)) {

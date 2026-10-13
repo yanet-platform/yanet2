@@ -111,9 +111,12 @@ worker_process_staged(
 		// FIXME update packet fields
 		packet->mbuf = ctx->staged[idx];
 
-		packet->rx_device_id = worker->device_id;
-		// Preserve device by default
-		packet->tx_device_id = worker->device_id;
+		// Preserve device by default: the registry slot this worker's
+		// own port resolved to at build. Both device ids share the
+		// registry namespace, and the absent-device sentinel resolves
+		// no device below, so receive drops into it.
+		packet->rx_device_id = config_gen_ectx->worker_rx_device_id;
+		packet->tx_device_id = config_gen_ectx->worker_rx_device_id;
 
 		if (parse_packet(packet)) {
 			struct rte_mbuf *mbuf = packet_to_mbuf(packet);
@@ -212,7 +215,9 @@ worker_submit_burst(
 
 static void
 worker_write(
-	struct dataplane_worker *worker, struct packet_front *packet_front
+	struct dataplane_worker *worker,
+	struct config_gen_ectx *config_gen_ectx,
+	struct packet_front *packet_front
 ) {
 	struct packet_list failed;
 	packet_list_init(&failed);
@@ -237,7 +242,20 @@ worker_write(
 			to_write = 0;
 		}
 
-		if (packet->tx_device_id == worker->device_id) {
+		// Resolve the egress through the generation's backing table:
+		// the packet names a registry device, the table names the
+		// physical port behind it. A port-less device is not a
+		// transmit failure, so it joins the failures without
+		// counting one.
+		uint16_t backing = UINT16_MAX;
+		if (packet->tx_device_id < config_gen_ectx->device_count) {
+			backing = config_gen_ectx->abs_egress_backing
+					  [packet->tx_device_id];
+		}
+
+		if (backing == UINT16_MAX) {
+			packet_list_add(&failed, packet);
+		} else if (backing == worker->device_id) {
 			mbufs[to_write] = packet_to_mbuf(packet);
 			++to_write;
 		} else {
@@ -246,6 +264,7 @@ worker_write(
 				worker->dataplane->device_count,
 				worker->dp_worker,
 				packet,
+				backing,
 				&failed
 			);
 		}
@@ -315,7 +334,10 @@ worker_loop_round(struct dataplane_worker *worker) {
 
 		worker_rx_stage(worker);
 
-		worker_write(worker, &packet_front);
+		// The empty front means the backing table is never read; the
+		// write side still runs to drain remote rx pipes and reclaim
+		// tx pipes.
+		worker_write(worker, NULL, &packet_front);
 		return;
 	}
 
@@ -332,7 +354,7 @@ worker_loop_round(struct dataplane_worker *worker) {
 	// whole transmit instead of stalling the parse.
 	worker_rx_stage(worker);
 
-	worker_write(worker, packet_front);
+	worker_write(worker, config_gen_ectx, packet_front);
 
 	/*
 	 * `output` now contains failed-to-transmit packets which should be
