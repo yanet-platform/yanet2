@@ -3,12 +3,20 @@ package fwstatemappb
 import (
 	"errors"
 	"fmt"
+	"math"
 	"strings"
 )
 
 // MaxMapNameLen is the C object-name buffer size, including the terminating
 // NUL. The longest accepted name is one byte shorter than this bound.
 const MaxMapNameLen = 80
+
+// MaxWorkerCount is the largest worker count representable by the C map
+// configuration.
+const MaxWorkerCount uint32 = math.MaxUint16
+
+// MaxIndexSize is the largest index size accepted by the C map allocator.
+const MaxIndexSize uint32 = 1 << 30
 
 // Per-worker stash buffer bounds a map accepts, in bytes. They mirror the C
 // FWSTATE_STASH_MIN_SIZE (one sync record) and FWSTATE_STASH_MAX_SIZE.
@@ -38,6 +46,26 @@ func ValidateMapNameField(field, name string) error {
 	return nil
 }
 
+func validateWorkerCount(workerCount uint32) error {
+	if workerCount > MaxWorkerCount {
+		return fmt.Errorf(
+			"worker_count %d exceeds maximum %d",
+			workerCount, MaxWorkerCount,
+		)
+	}
+	return nil
+}
+
+func validateIndexSize(indexSize uint32) error {
+	if indexSize > MaxIndexSize {
+		return fmt.Errorf(
+			"index_size %d must be in range 0..%d",
+			indexSize, MaxIndexSize,
+		)
+	}
+	return nil
+}
+
 func (m *CreateMapRequest) Validate() error {
 	if err := ValidateMapNameField("name", m.GetName()); err != nil {
 		return err
@@ -57,7 +85,10 @@ func (m *CreateMapRequest) Validate() error {
 			size, MaxStashSize,
 		)
 	}
-	return nil
+	if err := validateWorkerCount(m.GetWorkerCount()); err != nil {
+		return err
+	}
+	return validateIndexSize(m.GetIndexSize())
 }
 
 func (m *DeleteMapRequest) Validate() error {
@@ -69,7 +100,13 @@ func (m *GetMapStatsRequest) Validate() error {
 }
 
 func (m *InsertLayerRequest) Validate() error {
-	return ValidateMapNameField("name", m.GetName())
+	if err := ValidateMapNameField("name", m.GetName()); err != nil {
+		return err
+	}
+	if err := validateWorkerCount(m.GetWorkerCount()); err != nil {
+		return err
+	}
+	return validateIndexSize(m.GetIndexSize())
 }
 
 func (m *ListEntriesRequest) Validate() error {

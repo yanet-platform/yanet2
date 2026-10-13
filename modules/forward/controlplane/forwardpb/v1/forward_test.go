@@ -72,6 +72,23 @@ func Test_UpdateConfigRequest_Validate(t *testing.T) {
 			message: "rules[0]: action is required",
 		},
 		{
+			name: "device name contains NUL at repeated indices",
+			request: &forwardpb.UpdateConfigRequest{
+				Name: "forward0",
+				Rules: []*forwardpb.Rule{
+					{Action: &forwardpb.Action{}},
+					{
+						Action: &forwardpb.Action{},
+						Devices: []*filterpb.Device{
+							{Name: "eth0"},
+							{Name: "eth0\x00suffix"},
+						},
+					},
+				},
+			},
+			message: "rules[1]: devices[1]: name must not contain NUL",
+		},
+		{
 			name: "valid rule",
 			request: &forwardpb.UpdateConfigRequest{
 				Name:  "forward0",

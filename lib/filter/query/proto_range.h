@@ -34,8 +34,7 @@ FILTER_ATTR_QUERY_FUNC(proto_range)(
 			read_size = offsetof(struct rte_tcp_hdr, tcp_flags) + 1;
 		}
 
-		if ((transport_type & PACKET_TRANSPORT_HEADER_UNAVAILABLE) !=
-			    0 ||
+		if (!packet_transport_header_available(packet) ||
 		    rte_pktmbuf_pkt_len(packet_to_mbuf(packet)
 		    ) < (uint32_t)packet->transport_header.offset + read_size) {
 			// The declared protocol is known but its header is

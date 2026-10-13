@@ -136,8 +136,7 @@ fwstate_fill_sync_record(
 	const enum sync_packet_direction direction,
 	struct fwstate_sync_record *record
 ) {
-	if ((packet->transport_header.type & PACKET_TRANSPORT_HEADER_UNAVAILABLE
-	    ) != 0) {
+	if (!packet_transport_header_available(packet)) {
 		// There is no transport header to copy ports and flags
 		// from; refuse to fabricate a sync frame from payload.
 		return -1;

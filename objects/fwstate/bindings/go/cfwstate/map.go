@@ -246,6 +246,10 @@ func (m *MapObjectConfig) insertLayer(
 	return nil
 }
 
+// MaxIndexSize is the largest raw index size whose upward power-of-two
+// rounding stays below half the uint32 address space.
+const MaxIndexSize uint32 = (C.UINT32_MAX/2 + 1) / 2
+
 // Per-worker stash buffer bounds in bytes, matching the C
 // FWSTATE_STASH_DEFAULT_SIZE, FWSTATE_STASH_MIN_SIZE and
 // FWSTATE_STASH_MAX_SIZE.

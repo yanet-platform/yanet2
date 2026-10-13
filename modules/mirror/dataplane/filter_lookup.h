@@ -32,25 +32,19 @@
 
 #include "config.h"
 
-static inline void
+// Resolve the device class of the whole invocation: the context carries
+// the module device id of the device entry it executes under, so the
+// device attribute reads that id instead of each packet's device. A
+// device outside the module keeps the module device zero.
+static inline uint32_t
 mirror_lookup_device(
-	const struct classify_attr_device *attr,
-	const uint64_t *cm_index,
-	const struct packet **packets,
-	uint32_t *results,
-	uint32_t count
+	const struct classify_attr_device *attr, uint32_t module_device_id
 ) {
-	for (uint32_t idx = 0; idx < count; ++idx) {
-		// The packet device resolves through the per generation
-		// global-to-module mapping of the module execution context;
-		// a device outside the module keeps the module device zero.
-		uint32_t device_id = cm_index[packets[idx]->tx_device_id];
-		if (device_id >= attr->line.size) {
-			device_id = 0;
-		}
-		results[idx] =
-			vline_get((struct vline *)&attr->line, device_id);
+	uint32_t device_id = module_device_id;
+	if (device_id >= attr->line.size) {
+		device_id = 0;
 	}
+	return vline_get((struct vline *)&attr->line, device_id);
 }
 
 static inline void
@@ -178,11 +172,13 @@ mirror_packet_get_net6_dst_batch(
 static inline void
 mirror_classify_vlan(
 	const struct mirror_classifier_vlan *cls,
-	const uint64_t *cm_index,
+	uint32_t module_device_id,
 	const struct packet **packets,
 	uint32_t *results,
 	uint32_t packet_count
 ) {
+	uint32_t dev_class =
+		mirror_lookup_device(&cls->dev_attr, module_device_id);
 	uint32_t dev[MIRROR_CLASSIFY_MAX_BATCH];
 	uint32_t vlan[MIRROR_CLASSIFY_MAX_BATCH];
 
@@ -193,14 +189,14 @@ mirror_classify_vlan(
 					 : MIRROR_CLASSIFY_MAX_BATCH;
 		const struct packet **batch = packets + off;
 
-		mirror_lookup_device(
-			&cls->dev_attr, cm_index, batch, dev, count
-		);
 		mirror_lookup_vlan(&cls->vlan_attr, batch, vlan, count);
 
 		// The joint chains in place through the device array, so the
-		// joined classes need no frame of their own.
-		classify_joint_lookup(&cls->joint, dev, vlan, dev, count);
+		// joined classes need no frame of their own. The device side
+		// is the context constant, so the join takes it directly.
+		classify_joint_lookup_const(
+			&cls->joint, dev_class, vlan, dev, count
+		);
 		classify_resolve(&cls->rule_map, dev, results + off, count);
 	}
 }
@@ -208,11 +204,13 @@ mirror_classify_vlan(
 static inline void
 mirror_classify_ip4(
 	const struct mirror_classifier_ip4 *cls,
-	const uint64_t *cm_index,
+	uint32_t module_device_id,
 	const struct packet **packets,
 	uint32_t *results,
 	uint32_t packet_count
 ) {
+	uint32_t dev_class =
+		mirror_lookup_device(&cls->dev_attr, module_device_id);
 	uint32_t dev[MIRROR_CLASSIFY_MAX_BATCH];
 	uint32_t vlan[MIRROR_CLASSIFY_MAX_BATCH];
 	uint32_t n4s[MIRROR_CLASSIFY_MAX_BATCH];
@@ -226,9 +224,6 @@ mirror_classify_ip4(
 					 : MIRROR_CLASSIFY_MAX_BATCH;
 		const struct packet **batch = packets + off;
 
-		mirror_lookup_device(
-			&cls->dev_attr, cm_index, batch, dev, count
-		);
 		mirror_lookup_vlan(&cls->vlan_attr, batch, vlan, count);
 
 		mirror_packet_get_net4_src_batch(batch, addrs4, count);
@@ -240,9 +235,12 @@ mirror_classify_ip4(
 		// The joint stages chain in place through the class arrays:
 		// every join consumes the partial classes of its two sides
 		// and leaves its own in the array of its left side, so the
-		// three stages need no frame of their own.
-		classify_joint_lookup(
-			&cls->dev_vlan_joint, dev, vlan, dev, count
+		// three stages need no frame of their own. The device side
+		// of the first join is the context constant, so the join
+		// takes it directly and the device array carries only its
+		// result onward.
+		classify_joint_lookup_const(
+			&cls->dev_vlan_joint, dev_class, vlan, dev, count
 		);
 		classify_joint_lookup(&cls->nets_joint, n4s, n4d, n4s, count);
 		classify_joint_lookup(&cls->root_joint, dev, n4s, dev, count);
@@ -253,11 +251,13 @@ mirror_classify_ip4(
 static inline void
 mirror_classify_ip6(
 	const struct mirror_classifier_ip6 *cls,
-	const uint64_t *cm_index,
+	uint32_t module_device_id,
 	const struct packet **packets,
 	uint32_t *results,
 	uint32_t packet_count
 ) {
+	uint32_t dev_class =
+		mirror_lookup_device(&cls->dev_attr, module_device_id);
 	uint32_t dev[MIRROR_CLASSIFY_MAX_BATCH];
 	uint32_t vlan[MIRROR_CLASSIFY_MAX_BATCH];
 	uint32_t n6s[MIRROR_CLASSIFY_MAX_BATCH];
@@ -271,9 +271,6 @@ mirror_classify_ip6(
 					 : MIRROR_CLASSIFY_MAX_BATCH;
 		const struct packet **batch = packets + off;
 
-		mirror_lookup_device(
-			&cls->dev_attr, cm_index, batch, dev, count
-		);
 		mirror_lookup_vlan(&cls->vlan_attr, batch, vlan, count);
 
 		// One address scratch serves both sides: the lookup of a side
@@ -291,9 +288,12 @@ mirror_classify_ip6(
 		// The joint stages chain in place through the class arrays:
 		// every join consumes the partial classes of its two sides
 		// and leaves its own in the array of its left side, so the
-		// three stages need no frame of their own.
-		classify_joint_lookup(
-			&cls->dev_vlan_joint, dev, vlan, dev, count
+		// three stages need no frame of their own. The device side
+		// of the first join is the context constant, so the join
+		// takes it directly and the device array carries only its
+		// result onward.
+		classify_joint_lookup_const(
+			&cls->dev_vlan_joint, dev_class, vlan, dev, count
 		);
 		classify_joint_lookup(&cls->nets_joint, n6s, n6d, n6s, count);
 		classify_joint_lookup(&cls->root_joint, dev, n6s, dev, count);

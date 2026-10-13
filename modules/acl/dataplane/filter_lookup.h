@@ -46,25 +46,19 @@
 // of the former tape walkers.
 #define ACL_CLASSIFY_MAX_BATCH 256
 
-static inline void
+// Resolve the device class of the whole invocation: the context carries
+// the module device id of the device entry it executes under, so the
+// device attribute reads that id instead of each packet's device. A
+// device outside the module keeps the module device zero.
+static inline uint32_t
 acl_lookup_device(
-	const struct classify_attr_device *attr,
-	const uint64_t *cm_index,
-	const struct packet **packets,
-	uint32_t *results,
-	uint32_t count
+	const struct classify_attr_device *attr, uint32_t module_device_id
 ) {
-	for (uint32_t idx = 0; idx < count; ++idx) {
-		// The packet device resolves through the per generation
-		// global-to-module mapping of the module execution context;
-		// a device outside the module keeps the module device zero.
-		uint32_t device_id = cm_index[packets[idx]->tx_device_id];
-		if (device_id >= attr->line.size) {
-			device_id = 0;
-		}
-		results[idx] =
-			vline_get((struct vline *)&attr->line, device_id);
+	uint32_t device_id = module_device_id;
+	if (device_id >= attr->line.size) {
+		device_id = 0;
 	}
+	return vline_get((struct vline *)&attr->line, device_id);
 }
 
 static inline void
@@ -343,31 +337,27 @@ acl_lookup_ports(
 static inline void
 acl_classify_l2(
 	const struct acl_classifier_l2 *cls,
-	const uint64_t *cm_index,
+	uint32_t module_device_id,
 	const struct vline *rule_map,
-	const struct packet **packets,
 	uint32_t *results,
 	uint32_t packet_count
 ) {
-	uint32_t dev[ACL_CLASSIFY_MAX_BATCH];
+	// The device attribute is one class for the whole context, so the
+	// l2 projection - the device classes alone through the decoder -
+	// resolves to one rule index for every packet of the batch.
+	uint32_t dev_class =
+		acl_lookup_device(&cls->dev_attr, module_device_id);
+	uint32_t result = vline_get((struct vline *)rule_map, dev_class);
 
-	for (uint32_t off = 0; off < packet_count;
-	     off += ACL_CLASSIFY_MAX_BATCH) {
-		uint32_t count = packet_count - off < ACL_CLASSIFY_MAX_BATCH
-					 ? packet_count - off
-					 : ACL_CLASSIFY_MAX_BATCH;
-
-		acl_lookup_device(
-			&cls->dev_attr, cm_index, packets + off, dev, count
-		);
-		classify_resolve(rule_map, dev, results + off, count);
+	for (uint32_t idx = 0; idx < packet_count; ++idx) {
+		results[idx] = result;
 	}
 }
 
 static inline void
 acl_classify_core4(
 	const struct acl_classifier_core4 *cls,
-	const uint64_t *cm_index,
+	uint32_t module_device_id,
 	const struct packet **packets,
 	uint32_t *classes,
 	uint32_t packet_count
@@ -378,14 +368,15 @@ acl_classify_core4(
 	uint32_t ipproto[ACL_CLASSIFY_MAX_BATCH];
 	uint32_t addrs4[ACL_CLASSIFY_MAX_BATCH];
 
+	uint32_t dev_class =
+		acl_lookup_device(&cls->dev_attr, module_device_id);
+
 	for (uint32_t off = 0; off < packet_count;
 	     off += ACL_CLASSIFY_MAX_BATCH) {
 		uint32_t count = packet_count - off < ACL_CLASSIFY_MAX_BATCH
 					 ? packet_count - off
 					 : ACL_CLASSIFY_MAX_BATCH;
 		const struct packet **batch = packets + off;
-
-		acl_lookup_device(&cls->dev_attr, cm_index, batch, dev, count);
 
 		acl_packet_get_net4_src_batch(batch, addrs4, count);
 		classify_net4_lookup(&cls->net4_src_attr, addrs4, n4s, count);
@@ -399,9 +390,13 @@ acl_classify_core4(
 		// every join consumes the partial classes of its two sides
 		// and leaves its own in the array of its left side, so the
 		// stages need no frame of their own - the final one resolves
-		// straight into the caller's classes.
+		// straight into the caller's classes. The device side is the
+		// context constant, so the middle join takes it directly and
+		// the device array carries only its result onward.
 		classify_joint_lookup(&cls->nets_joint, n4s, n4d, n4s, count);
-		classify_joint_lookup(&cls->mid_joint, dev, n4s, dev, count);
+		classify_joint_lookup_const(
+			&cls->mid_joint, dev_class, n4s, dev, count
+		);
 		classify_joint_lookup(
 			&cls->proto_joint, dev, ipproto, classes + off, count
 		);
@@ -411,7 +406,7 @@ acl_classify_core4(
 static inline void
 acl_classify_core6(
 	const struct acl_classifier_core6 *cls,
-	const uint64_t *cm_index,
+	uint32_t module_device_id,
 	const struct packet **packets,
 	uint32_t *classes,
 	uint32_t packet_count
@@ -422,14 +417,15 @@ acl_classify_core6(
 	uint32_t ipproto[ACL_CLASSIFY_MAX_BATCH];
 	uint8_t addrs6[ACL_CLASSIFY_MAX_BATCH][NET6_LEN];
 
+	uint32_t dev_class =
+		acl_lookup_device(&cls->dev_attr, module_device_id);
+
 	for (uint32_t off = 0; off < packet_count;
 	     off += ACL_CLASSIFY_MAX_BATCH) {
 		uint32_t count = packet_count - off < ACL_CLASSIFY_MAX_BATCH
 					 ? packet_count - off
 					 : ACL_CLASSIFY_MAX_BATCH;
 		const struct packet **batch = packets + off;
-
-		acl_lookup_device(&cls->dev_attr, cm_index, batch, dev, count);
 
 		// One address scratch serves both sides: the lookup of a side
 		// finishes before the getter of the other one rewrites it.
@@ -449,9 +445,13 @@ acl_classify_core6(
 		// every join consumes the partial classes of its two sides
 		// and leaves its own in the array of its left side, so the
 		// stages need no frame of their own - the final one resolves
-		// straight into the caller's classes.
+		// straight into the caller's classes. The device side is the
+		// context constant, so the middle join takes it directly and
+		// the device array carries only its result onward.
 		classify_joint_lookup(&cls->nets_joint, n6s, n6d, n6s, count);
-		classify_joint_lookup(&cls->mid_joint, dev, n6s, dev, count);
+		classify_joint_lookup_const(
+			&cls->mid_joint, dev_class, n6s, dev, count
+		);
 		classify_joint_lookup(
 			&cls->proto_joint, dev, ipproto, classes + off, count
 		);

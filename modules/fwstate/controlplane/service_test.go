@@ -167,7 +167,13 @@ func Test_FWStateService_UpdateConfig_InvalidMergedConfigDoesNotPublish(t *testi
 	const name = "update-invalid-merged"
 	_, agent := newDeleteTestHarness(t, []string{"fwstate"}, name)
 	service := fwstate.NewFWStateService(agent)
-	publishConfig(t, service, &fwstatepb.UpdateConfigRequest{Name: name})
+	publishConfig(t, service, &fwstatepb.UpdateConfigRequest{
+		Name: name,
+		SyncConfig: &fwstatepb.SyncConfig{
+			Tcp:                 proto.Uint64(fwstatepb.TTL48Max),
+			SyncSuppressTimeout: proto.Uint64(0),
+		},
+	})
 	before := showConfig(t, service, name)
 
 	cases := []struct {
@@ -183,12 +189,8 @@ func Test_FWStateService_UpdateConfig_InvalidMergedConfigDoesNotPublish(t *testi
 			syncConfig: &fwstatepb.SyncConfig{DstAddrMulticast: syncTestAddr()},
 		},
 		{
-			name:       "timeout overflow",
-			syncConfig: &fwstatepb.SyncConfig{Udp: proto.Uint64(1 << 48)},
-		},
-		{
-			name:       "sync mtu below one frame",
-			syncConfig: &fwstatepb.SyncConfig{SyncMtu: proto.Uint32(103)},
+			name:       "suppression overflows stored timeout",
+			syncConfig: &fwstatepb.SyncConfig{SyncSuppressTimeout: proto.Uint64(1)},
 		},
 	}
 	for _, tc := range cases {

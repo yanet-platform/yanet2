@@ -3,6 +3,7 @@ package routemplspb
 import (
 	"errors"
 	"fmt"
+	"strings"
 
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
 )
@@ -47,7 +48,7 @@ func (m *UpdateEvent) Validate() error {
 		return nil
 	}
 	if withdraw := m.GetWithdraw(); withdraw != nil {
-		if err := withdraw.Validate(); err != nil {
+		if err := validateWithdraw(withdraw); err != nil {
 			return fmt.Errorf("withdraw: %w", err)
 		}
 		return nil
@@ -65,16 +66,58 @@ func (m *DeleteConfigRequest) Validate() error {
 }
 
 func (m *Rule) Validate() error {
-	if nexthop := m.GetNexthop(); nexthop != nil {
-		if err := nexthop.Validate(); err != nil {
-			return fmt.Errorf("nexthop: %w", err)
-		}
+	if m.GetPrefix() == nil {
+		return errors.New("prefix is required")
+	}
+	if m.GetNexthop() == nil {
+		return errors.New("nexthop is required")
+	}
+	if err := m.GetNexthop().Validate(); err != nil {
+		return fmt.Errorf("nexthop: %w", err)
+	}
+
+	return nil
+}
+
+func validateWithdraw(m *Rule) error {
+	return m.validateWithdraw()
+}
+
+func (m *Rule) validateWithdraw() error {
+	if m.GetPrefix() == nil {
+		return errors.New("prefix is required")
+	}
+	if m.GetNexthop() == nil {
+		return errors.New("nexthop is required")
+	}
+	if err := validateLabel(m.GetNexthop()); err != nil {
+		return fmt.Errorf("nexthop: %w", err)
 	}
 
 	return nil
 }
 
 func (m *NextHop) Validate() error {
+	if err := validateLabel(m); err != nil {
+		return err
+	}
+
+	counter := m.GetCounter()
+	if strings.IndexByte(counter, 0) != -1 {
+		return errors.New("counter must not contain NUL")
+	}
+	if len(counter) >= commonpb.MaxCounterNameLen {
+		return fmt.Errorf("counter must be shorter than %d bytes", commonpb.MaxCounterNameLen)
+	}
+
+	return nil
+}
+
+func validateLabel(m *NextHop) error {
+	return m.validateLabel()
+}
+
+func (m *NextHop) validateLabel() error {
 	label := m.GetLabel()
 	if label > maxMPLSLabel {
 		return fmt.Errorf("label %d must be in range 0..%d", label, maxMPLSLabel)

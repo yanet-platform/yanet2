@@ -117,8 +117,19 @@ module_ectx_resolve_absolutes(struct module_ectx *module_ectx) {
 		cp_module->pending_output_counter_id, counter_storage
 	);
 
-	module_ectx->abs_mc_index = ADDR_OF(&module_ectx->mc_index);
-	module_ectx->abs_cm_index = ADDR_OF(&module_ectx->cm_index);
+	struct module_device_target *device_targets =
+		ADDR_OF(&module_ectx->device_targets);
+	module_ectx->abs_device_targets = device_targets;
+	if (device_targets != NULL) {
+		for (uint64_t idx = 0; idx < module_ectx->device_target_count;
+		     ++idx) {
+			device_targets[idx].abs_input_entry =
+				ADDR_OF(&device_targets[idx].input_entry);
+			device_targets[idx].abs_output_entry =
+				ADDR_OF(&device_targets[idx].output_entry);
+		}
+	}
+
 	module_ectx->abs_counter_storage =
 		ADDR_OF(&module_ectx->counter_storage);
 	module_ectx->abs_config_gen_ectx =
@@ -176,6 +187,55 @@ module_ectx_resolve_absolutes(struct module_ectx *module_ectx) {
 		ADDR_OF(&dp_config->dp_modules) + cp_module->dp_module_idx;
 	if (dp_module->commit_ectx_handler != NULL) {
 		dp_module->commit_ectx_handler(module_ectx, cp_module);
+	}
+}
+
+// Derive an object context's absolute addresses and fill its private
+// per-context buffer through the object type's registered hook, the
+// object twin of the module pass above. The dataplane config is reached
+// through the owning generation instead of a back reference: unlike a
+// module context, an object context is never dereferenced from the
+// packet hot path to find its config.
+static void
+object_ectx_resolve_absolutes(
+	struct object_ectx *object_ectx, struct config_gen_ectx *config_gen_ectx
+) {
+	struct cp_object *cp_object = ADDR_OF(&object_ectx->cp_object);
+	object_ectx->abs_cp_object = cp_object;
+
+	object_ectx->abs_object_prepared =
+		ADDR_OF(&object_ectx->object_prepared);
+	if (object_ectx->abs_object_prepared == NULL) {
+		return;
+	}
+
+	// Filling the private buffer joins the derivations above: the
+	// single-writer pass re-derives from authoritative fields, so a
+	// repeated pass rewrites the same values. The skips are defensive
+	// only — the slot index is validated when the config is built.
+	struct cp_config_gen *cp_config_gen =
+		ADDR_OF(&config_gen_ectx->cp_config_gen);
+	struct dp_config *dp_config = ADDR_OF(&cp_config_gen->dp_config);
+	if (dp_config == NULL) {
+		LOG(ERROR,
+		    "object context commit skipped for '%s:%s': no dataplane "
+		    "config",
+		    cp_object->type,
+		    cp_object->name);
+		return;
+	}
+	if (cp_object->dp_object_idx >= dp_config->object_count) {
+		LOG(ERROR,
+		    "object context commit skipped for '%s:%s': no dataplane "
+		    "object",
+		    cp_object->type,
+		    cp_object->name);
+		return;
+	}
+	struct dp_object *dp_object =
+		ADDR_OF(&dp_config->dp_objects) + cp_object->dp_object_idx;
+	if (dp_object->commit_ectx_handler != NULL) {
+		dp_object->commit_ectx_handler(object_ectx, cp_object);
 	}
 }
 
@@ -364,8 +424,9 @@ device_entry_ectx_resolve_absolutes(
 // counter pointers of every stage, resolved from the counter registry
 // ids and the stage counter storages; the stage hop addresses, copied
 // or recoded from the controlplane-owned relative arrays; every
-// object's controlplane counterpart, copied from the generation's
-// relative object array; and each module's private per-context
+// object's controlplane counterpart and private per-context buffer,
+// the buffer filled by the object's execution-context commit handler
+// when one is registered; and each module's private per-context
 // buffer, filled by its execution-context commit handler when one is
 // registered.
 //
@@ -380,7 +441,7 @@ config_gen_ectx_resolve_counters(struct config_gen_ectx *config_gen_ectx) {
 		if (object_ectx == NULL) {
 			continue;
 		}
-		object_ectx->abs_cp_object = ADDR_OF(&object_ectx->cp_object);
+		object_ectx_resolve_absolutes(object_ectx, config_gen_ectx);
 	}
 
 	struct device_ectx **device_ptrs =

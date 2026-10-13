@@ -148,8 +148,7 @@ fwstate_check_state_table(
 		return false;
 	}
 
-	if ((packet->transport_header.type & PACKET_TRANSPORT_HEADER_UNAVAILABLE
-	    ) != 0) {
+	if (!packet_transport_header_available(packet)) {
 		// A non-initial fragment carries flow payload where its
 		// transport header should be, so no state key can be derived
 		// from it; report no state without emitting a sync.

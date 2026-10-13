@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"crypto/sha256"
@@ -543,7 +544,7 @@ func TestHandleRuntimeConnectionReturnsBusyWhileStarting(t *testing.T) {
 			go handleRuntimeConnection(server, t.TempDir(), runtime, func() {})
 			require.NoError(t, json.NewEncoder(client).Encode(request{Action: action}))
 			var reply response
-			require.NoError(t, json.NewDecoder(client).Decode(&reply))
+			require.NoError(t, decodeReply(client, &reply))
 			require.False(t, reply.OK)
 			require.Equal(t, labBusyError, reply.Error)
 		})
@@ -557,7 +558,7 @@ func TestHandleRuntimeConnectionIncludesProtocolVersion(t *testing.T) {
 	go handleRuntimeConnection(server, t.TempDir(), runtime, func() {})
 	require.NoError(t, json.NewEncoder(client).Encode(request{Action: "status"}))
 	var reply response
-	require.NoError(t, json.NewDecoder(client).Decode(&reply))
+	require.NoError(t, decodeReply(client, &reply))
 	require.Equal(t, supervisorProtocolVersion, reply.SupervisorProtocolVersion)
 	require.Equal(t, 0, reply.Protocol)
 }
@@ -631,7 +632,7 @@ func Test_HandleConnection_ManifestUsesDeadlineRuntime(t *testing.T) {
 	})
 	require.NoError(t, json.NewEncoder(client).Encode(request{Action: "manifest", Manifest: "unused"}))
 	var reply response
-	require.NoError(t, json.NewDecoder(client).Decode(&reply))
+	require.NoError(t, decodeReply(client, &reply))
 	require.NoError(t, handlers.Wait())
 
 	runtime, ok := (<-runtimeSeen).(*deadlineManifestRuntime)
@@ -658,7 +659,7 @@ func Test_HandleConnection_ExecUsesActionBudget(t *testing.T) {
 	go handleConnection(server, nil, t.TempDir(), &supervisor{}, nil, nil, func() {})
 	require.NoError(t, json.NewEncoder(client).Encode(request{Action: "exec", Argv: []string{"sleep", "31"}}))
 	var reply response
-	require.NoError(t, json.NewDecoder(client).Decode(&reply))
+	require.NoError(t, decodeReply(client, &reply))
 
 	require.Equal(t, "'sleep' '31'", command)
 	require.Equal(t, supervisorExecTimeout, timeout)
@@ -689,7 +690,7 @@ func Test_HandleConnection_ReportUsesFullProcessPatterns(t *testing.T) {
 	})
 	require.NoError(t, json.NewEncoder(client).Encode(request{Action: "report"}))
 	var reply response
-	require.NoError(t, json.NewDecoder(client).Decode(&reply))
+	require.NoError(t, decodeReply(client, &reply))
 	require.NoError(t, handlers.Wait())
 
 	require.True(t, reply.OK)
@@ -770,6 +771,18 @@ func (m *heldReplyConnection) Write(data []byte) (int, error) {
 	return written, err
 }
 
+// decodeReply reads one newline-terminated reply in full.
+//
+// A pipe write blocks until every byte is read, so the reply is consumed
+// through its newline for the handler to finish.
+func decodeReply(connection io.Reader, reply any) error {
+	line, err := bufio.NewReader(connection).ReadBytes('\n')
+	if err != nil {
+		return err
+	}
+	return json.Unmarshal(line, reply)
+}
+
 // startHandlerConnection runs a guest-free handler and joins it during cleanup.
 func startHandlerConnection(
 	t *testing.T,
@@ -844,7 +857,7 @@ func Test_HandleConnection_ReplyReleasesOperationBeforeNextRequest(t *testing.T)
 			}, true)
 			require.NoError(t, json.NewEncoder(first).Encode(request{Action: testCase.first}))
 			var firstReply response
-			require.NoError(t, json.NewDecoder(first).Decode(&firstReply))
+			require.NoError(t, decodeReply(first, &firstReply))
 			require.Equal(t, testCase.wantError == "", firstReply.OK)
 			require.Equal(t, testCase.wantError, firstReply.Error)
 			if testCase.first == "status" {
@@ -859,7 +872,7 @@ func Test_HandleConnection_ReplyReleasesOperationBeforeNextRequest(t *testing.T)
 			next, _ := startHandlerConnection(t, state, directory, nil, false)
 			require.NoError(t, json.NewEncoder(next).Encode(request{Action: testCase.next}))
 			var nextReply response
-			require.NoError(t, json.NewDecoder(next).Decode(&nextReply))
+			require.NoError(t, decodeReply(next, &nextReply))
 			require.True(t, nextReply.OK, "next request failed: %s", nextReply.Error)
 			if testCase.next == "status" {
 				require.Equal(t, statusReady, nextReply.Status)
@@ -904,7 +917,7 @@ func Test_HandleConnection_ActiveResetRejectsConcurrentReset(t *testing.T) {
 	}, false)
 	require.NoError(t, json.NewEncoder(next).Encode(request{Action: "reset"}))
 	var reply response
-	require.NoError(t, json.NewDecoder(next).Decode(&reply))
+	require.NoError(t, decodeReply(next, &reply))
 	require.False(t, reply.OK)
 	require.Equal(t, labBusyError, reply.Error)
 	require.False(t, concurrentRestore.Load())
@@ -918,11 +931,11 @@ func Test_HandleConnection_SerialAckKeepsOperationExclusive(t *testing.T) {
 	serial, serialDone := startHandlerConnection(t, state, directory, nil, false)
 	require.NoError(t, json.NewEncoder(serial).Encode(request{Action: "serial"}))
 	var reply response
-	require.NoError(t, json.NewDecoder(serial).Decode(&reply))
+	require.NoError(t, decodeReply(serial, &reply))
 	require.True(t, reply.OK)
 	next, _ := startHandlerConnection(t, state, directory, nil, false)
 	require.NoError(t, json.NewEncoder(next).Encode(request{Action: "status"}))
-	require.NoError(t, json.NewDecoder(next).Decode(&reply))
+	require.NoError(t, decodeReply(next, &reply))
 	require.False(t, reply.OK)
 	require.Equal(t, labBusyError, reply.Error)
 	require.NoError(t, serial.Close())
@@ -951,7 +964,7 @@ func TestHandleConnectionReturnsBusy(t *testing.T) {
 			})
 			require.NoError(t, json.NewEncoder(client).Encode(request{Action: action}))
 			var reply response
-			require.NoError(t, json.NewDecoder(client).Decode(&reply))
+			require.NoError(t, decodeReply(client, &reply))
 			require.False(t, reply.OK)
 			require.Equal(t, labBusyError, reply.Error)
 			require.Equal(t, supervisorProtocolVersion, reply.SupervisorProtocolVersion)
@@ -985,7 +998,7 @@ func TestDownWaitsForActiveOperation(t *testing.T) {
 
 	require.NoError(t, json.NewEncoder(client).Encode(request{Action: "down"}))
 	var reply response
-	require.NoError(t, json.NewDecoder(client).Decode(&reply))
+	require.NoError(t, decodeReply(client, &reply))
 	require.True(t, reply.OK)
 	require.Equal(t, "lab stopped", reply.Output)
 	require.Eventually(t, func() bool {
@@ -1002,7 +1015,7 @@ func TestDownWaitsForActiveOperation(t *testing.T) {
 	})
 	require.NoError(t, json.NewEncoder(busyClient).Encode(request{Action: "status"}))
 	var busyReply response
-	require.NoError(t, json.NewDecoder(busyClient).Decode(&busyReply))
+	require.NoError(t, decodeReply(busyClient, &busyReply))
 	require.False(t, busyReply.OK)
 	require.Equal(t, labBusyError, busyReply.Error)
 	require.NoError(t, busyHandlers.Wait())
@@ -1044,7 +1057,7 @@ func TestSupervisorOperationCanRetryAfterRelease(t *testing.T) {
 	})
 	require.NoError(t, json.NewEncoder(busyClient).Encode(request{Action: "reset"}))
 	var busyReply response
-	require.NoError(t, json.NewDecoder(busyClient).Decode(&busyReply))
+	require.NoError(t, decodeReply(busyClient, &busyReply))
 	require.False(t, busyReply.OK)
 	require.Equal(t, labBusyError, busyReply.Error)
 	require.NoError(t, busyHandlers.Wait())
@@ -1071,7 +1084,7 @@ func TestSupervisorOperationCanRetryAfterRelease(t *testing.T) {
 	})
 	require.NoError(t, json.NewEncoder(client).Encode(request{Action: "reset"}))
 	var reply response
-	require.NoError(t, json.NewDecoder(client).Decode(&reply))
+	require.NoError(t, decodeReply(client, &reply))
 	require.True(t, reply.OK)
 	require.Equal(t, "baseline restored", reply.Output)
 	require.NoError(t, handlers.Wait())
@@ -1097,7 +1110,7 @@ func TestHandleConnectionDownAcksBeforeShutdown(t *testing.T) {
 	})
 	require.NoError(t, json.NewEncoder(client).Encode(request{Action: "down"}))
 	var reply response
-	require.NoError(t, json.NewDecoder(client).Decode(&reply))
+	require.NoError(t, decodeReply(client, &reply))
 	require.True(t, reply.OK)
 	require.Equal(t, "lab stopped", reply.Output)
 	require.Equal(t, supervisorProtocolVersion, reply.SupervisorProtocolVersion)
@@ -1298,7 +1311,7 @@ func Test_HandleConnection_DownFailureKeepsSupervisorForRetry(t *testing.T) {
 		}()
 		require.NoError(t, json.NewEncoder(client).Encode(request{Action: "down"}))
 		var reply response
-		require.NoError(t, json.NewDecoder(client).Decode(&reply))
+		require.NoError(t, decodeReply(client, &reply))
 		require.NoError(t, client.Close())
 		<-done
 		return reply
@@ -1794,7 +1807,7 @@ func TestStatusHandlerPopulatesScopes(t *testing.T) {
 			})
 			require.NoError(t, json.NewEncoder(client).Encode(request{Action: "status"}))
 			var reply response
-			require.NoError(t, json.NewDecoder(client).Decode(&reply))
+			require.NoError(t, decodeReply(client, &reply))
 			require.Equal(t, tc.wantOK, reply.OK)
 			require.Equal(t, tc.wantStatus, reply.Status)
 			require.Equal(t, tc.wantError, reply.Error)
@@ -2165,6 +2178,147 @@ func TestUpRejectsLockedButSilentSession(t *testing.T) {
 	require.EqualError(t, err, labBusyError)
 }
 
+// holdSessionLock takes the session lock in directory the way a running
+// supervisor does and returns the file whose close releases it.
+func holdSessionLock(t *testing.T, directory string) *os.File {
+	t.Helper()
+	holder, err := os.OpenFile(filepath.Join(directory, "supervisor.lock"), os.O_CREATE|os.O_RDWR|syscall.O_NOFOLLOW, 0o600)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = holder.Close() })
+	require.NoError(t, syscall.Flock(int(holder.Fd()), syscall.LOCK_EX|syscall.LOCK_NB))
+	return holder
+}
+
+// stubAcknowledgedDown makes the supervisor acknowledge down the way it does
+// before it stops its VM, running beforeReply first if set; any other action
+// fails.
+func stubAcknowledgedDown(t *testing.T, beforeReply func() error) {
+	t.Helper()
+	stubCallAndServe(t, func(_ *application, value request) (*response, error) {
+		if value.Action != "down" {
+			return nil, fmt.Errorf("unexpected action %q", value.Action)
+		}
+		if beforeReply != nil {
+			if err := beforeReply(); err != nil {
+				return nil, err
+			}
+		}
+		return &response{OK: true, Output: "lab stopped", SupervisorProtocolVersion: supervisorProtocolVersion}, nil
+	}, nil)
+}
+
+// runDown starts down for session in the background and returns the channel
+// that receives its result; the test does not finish before down returns.
+func runDown(t *testing.T, session string) <-chan error {
+	t.Helper()
+	done := make(chan error, 1)
+	finished := make(chan struct{})
+	go func() {
+		defer close(finished)
+		application := newApplication()
+		application.session = session
+		done <- application.down()
+	}()
+	t.Cleanup(func() { <-finished })
+	return done
+}
+
+// Test_ApplicationDown_WaitsForSupervisorExit verifies that down returns only
+// after the acknowledging supervisor has released the session lock, so the
+// next up does not find the session busy.
+func Test_ApplicationDown_WaitsForSupervisorExit(t *testing.T) {
+	directory, cleanup := tempUp(t, "down-wait")
+	defer cleanup()
+	holder := holdSessionLock(t, directory)
+	stubAcknowledgedDown(t, nil)
+
+	done := runDown(t, "down-wait")
+	select {
+	case err := <-done:
+		t.Fatalf("down returned while the supervisor still held the session: %v", err)
+	case <-time.After(300 * time.Millisecond):
+	}
+	require.NoError(t, holder.Close())
+	select {
+	case err := <-done:
+		require.NoError(t, err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("down did not return after the supervisor released the session")
+	}
+	require.NoError(t, probeSessionLock(directory))
+}
+
+// Test_ApplicationDown_SupervisorExitTimeout verifies that down fails with a
+// bounded wait when the supervisor keeps the session lock.
+func Test_ApplicationDown_SupervisorExitTimeout(t *testing.T) {
+	directory, cleanup := tempUp(t, "down-timeout")
+	defer cleanup()
+	holdSessionLock(t, directory)
+	stubAcknowledgedDown(t, nil)
+	savedTimeout := supervisorExitTimeout
+	t.Cleanup(func() { supervisorExitTimeout = savedTimeout })
+	supervisorExitTimeout = 100 * time.Millisecond
+
+	err := <-runDown(t, "down-timeout")
+	require.EqualError(t, err, "lab supervisor did not exit within 100ms; it may still be finishing startup or shutdown; see "+filepath.Join(directory, "supervisor.log"))
+}
+
+// Test_ApplicationDown_FailedShutdownEndsWait verifies that a shutdown marker
+// written during down ends the wait at once with the recorded failure.
+func Test_ApplicationDown_FailedShutdownEndsWait(t *testing.T) {
+	directory, cleanup := tempUp(t, "down-failed")
+	defer cleanup()
+	holdSessionLock(t, directory)
+	stubAcknowledgedDown(t, func() error {
+		return writeShutdownMarker(directory, "down", "sentinel failure")
+	})
+
+	select {
+	case err := <-runDown(t, "down-failed"):
+		require.EqualError(t, err, `lab shutdown failed at step "down": sentinel failure; run 'yanet-lab down' to retry cleanup`)
+	case <-time.After(5 * time.Second):
+		t.Fatal("down kept waiting after the supervisor recorded a failed shutdown")
+	}
+}
+
+// Test_ApplicationDown_PriorShutdownMarkerKeepsWaiting verifies that a marker
+// left by an earlier failed down does not end the wait of a retry.
+func Test_ApplicationDown_PriorShutdownMarkerKeepsWaiting(t *testing.T) {
+	directory, cleanup := tempUp(t, "down-retry")
+	defer cleanup()
+	require.NoError(t, writeShutdownMarker(directory, "down", "prior failure"))
+	holder := holdSessionLock(t, directory)
+	stubAcknowledgedDown(t, nil)
+
+	done := runDown(t, "down-retry")
+	select {
+	case err := <-done:
+		t.Fatalf("down returned on the prior shutdown marker: %v", err)
+	case <-time.After(300 * time.Millisecond):
+	}
+	require.NoError(t, os.Remove(filepath.Join(directory, shutdownMarkerName)))
+	require.NoError(t, holder.Close())
+	select {
+	case err := <-done:
+		require.NoError(t, err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("down did not return after the retried shutdown succeeded")
+	}
+}
+
+// Test_ApplicationDown_LeftoverShutdownMarkerFails verifies that down fails
+// when the supervisor has exited but left a shutdown marker that would block
+// the next up.
+func Test_ApplicationDown_LeftoverShutdownMarkerFails(t *testing.T) {
+	directory, cleanup := tempUp(t, "down-leftover")
+	defer cleanup()
+	require.NoError(t, writeShutdownMarker(directory, "down", "prior failure"))
+	stubAcknowledgedDown(t, nil)
+
+	err := <-runDown(t, "down-leftover")
+	require.EqualError(t, err, `lab shutdown failed at step "down": prior failure; run 'yanet-lab down' to retry cleanup`)
+}
+
 func TestUpReusesHealthyRunningSupervisor(t *testing.T) {
 	_, cleanup := tempUp(t, "healthy-reuse")
 	defer cleanup()
@@ -2464,7 +2618,7 @@ func TestResetHappyPath(t *testing.T) {
 
 	require.NoError(t, json.NewEncoder(client).Encode(request{Action: "reset"}))
 	var reply response
-	require.NoError(t, json.NewDecoder(client).Decode(&reply))
+	require.NoError(t, decodeReply(client, &reply))
 	require.True(t, reply.OK)
 	require.Equal(t, "baseline restored", reply.Output)
 	require.Equal(t, supervisorProtocolVersion, reply.SupervisorProtocolVersion)
@@ -2496,7 +2650,7 @@ func TestResetRejectsMissingBaseline(t *testing.T) {
 
 	require.NoError(t, json.NewEncoder(client).Encode(request{Action: "reset"}))
 	var reply response
-	require.NoError(t, json.NewDecoder(client).Decode(&reply))
+	require.NoError(t, decodeReply(client, &reply))
 	require.False(t, reply.OK)
 	require.Equal(t, "baseline snapshot missing; run up again", reply.Error)
 	require.Equal(t, supervisorProtocolVersion, reply.SupervisorProtocolVersion)
@@ -2542,7 +2696,7 @@ func TestDownWritesShutdownMarkerOnError(t *testing.T) {
 
 	require.NoError(t, json.NewEncoder(client).Encode(request{Action: "down"}))
 	var reply response
-	require.NoError(t, json.NewDecoder(client).Decode(&reply))
+	require.NoError(t, decodeReply(client, &reply))
 	require.True(t, reply.OK)
 	require.Equal(t, "lab stopped", reply.Output)
 	require.NoError(t, handlers.Wait())
@@ -2590,7 +2744,7 @@ func TestDownRemovesPriorMarkerOnSuccess(t *testing.T) {
 
 	require.NoError(t, json.NewEncoder(client).Encode(request{Action: "down"}))
 	var reply response
-	require.NoError(t, json.NewDecoder(client).Decode(&reply))
+	require.NoError(t, decodeReply(client, &reply))
 	require.True(t, reply.OK)
 
 	select {

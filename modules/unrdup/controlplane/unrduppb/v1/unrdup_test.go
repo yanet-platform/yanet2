@@ -64,10 +64,10 @@ func Test_ShowConfigRequest_Validate(t *testing.T) {
 func Test_UpdateConfigRequest_Validate(t *testing.T) {
 	validService := &unrduppb.Service{
 		Peers: []*commonpb.IPAddress{{}},
-		Endpoints: []*unrduppb.Endpoint{{
-			Port:     443,
-			Protocol: unrduppb.Protocol_PROTOCOL_TCP,
-		}},
+		Endpoints: []*unrduppb.Endpoint{
+			{Port: 443, Protocol: unrduppb.Protocol_PROTOCOL_TCP},
+			{Port: 443, Protocol: unrduppb.Protocol_PROTOCOL_UDP},
+		},
 	}
 
 	cases := []struct {
@@ -140,6 +140,20 @@ func Test_UpdateConfigRequest_Validate(t *testing.T) {
 				}}},
 			},
 			message: "config: services[0]: endpoints[0]: protocol unknown value 0",
+		},
+		{
+			name: "endpoint listed twice in one service",
+			request: &unrduppb.UpdateConfigRequest{
+				Name: "unrdup0",
+				Config: &unrduppb.Config{Services: []*unrduppb.Service{{
+					Peers: validService.Peers,
+					Endpoints: []*unrduppb.Endpoint{
+						{Port: 443, Protocol: unrduppb.Protocol_PROTOCOL_TCP},
+						{Port: 443, Protocol: unrduppb.Protocol_PROTOCOL_TCP},
+					},
+				}}},
+			},
+			message: "config: services[0]: endpoints[1]: endpoint 443 is listed twice",
 		},
 		{
 			name:    "valid empty service list",

@@ -245,9 +245,8 @@ acl_handle_packets(
 		// results merge into.
 		acl_classify_l2(
 			&acl_config->classifier_l2,
-			module_ectx->abs_cm_index,
+			module_ectx->module_device_id,
 			&acl_config->filter_l2.rule_map,
-			(const struct packet **)packets,
 			l2_result,
 			count
 		);
@@ -259,7 +258,7 @@ acl_handle_packets(
 		// filters.
 		acl_classify_core4(
 			&acl_config->classifier_core4,
-			module_ectx->abs_cm_index,
+			module_ectx->module_device_id,
 			(const struct packet **)ip4_packets,
 			core4_classes,
 			ip4_idx
@@ -323,7 +322,7 @@ acl_handle_packets(
 
 		acl_classify_core6(
 			&acl_config->classifier_core6,
-			module_ectx->abs_cm_index,
+			module_ectx->module_device_id,
 			(const struct packet **)ip6_packets,
 			core6_classes,
 			ip6_idx
@@ -533,10 +532,9 @@ acl_handle_packets(
 						// creation waits for the
 						// fragment carrying the
 						// header.
-						if ((packet->transport_header
-							     .type &
-						     PACKET_TRANSPORT_HEADER_UNAVAILABLE
-						    ) == 0) {
+						if (packet_transport_header_available(
+							    packet
+						    )) {
 							push_sync_packet =
 								SYNC_INGRESS;
 						}

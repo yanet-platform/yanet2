@@ -157,6 +157,9 @@ const MaxDeviceNameLen = C.CP_DEVICE_NAME_LEN
 // terminating NUL.
 const MaxAgentNameLen = C.AGENT_NAME_LEN
 
+// AgentSizeAlignment is the C allocator's extension-size granularity.
+const AgentSizeAlignment = C.MEMORY_BLOCK_ALLOCATOR_MIN_SIZE
+
 // MaxPipelineNameLen is the size of the C-side pipeline name buffer, including
 // the terminating NUL.
 const MaxPipelineNameLen = C.CP_PIPELINE_NAME_LEN

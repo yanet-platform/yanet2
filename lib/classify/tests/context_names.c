@@ -581,8 +581,10 @@ free_composition(struct memory_context *mctx, struct names_composition *comp) {
 #define CTX_NAMES_ARENA_SIZE (1 << 24)
 
 // Shared per-case fixture: a root memory_context over a fresh block
-// allocator, the two rules, and the allocator's free-byte count
-// captured before the composition is built.
+// allocator and the two rules.
+//
+// The allocator's free-byte count is captured before the composition
+// is built.
 struct ctx_names_fixture {
 	struct block_allocator allocator;
 	struct memory_context mctx;
@@ -699,9 +701,54 @@ test_no_sibling_name_collision(void *arena) {
 	return TEST_SUCCESS;
 }
 
+// Verifies that an entry name longer than a full title is cut with a
+// dot marker.
+//
+// The leaf suffix telling the siblings apart survives the cut and the
+// cut stays visible in the memory tree.
+static int
+test_long_entry_name_cuts_before_the_leaf(void *arena) {
+	(void)arena;
+
+	char entry[2 * MEMORY_CONTEXT_NAME_SIZE];
+	memset(entry, 'x', sizeof(entry) - 1);
+	entry[sizeof(entry) - 1] = '\0';
+
+	static const char *leaves[] = {"table", "registry"};
+	char titles[sizeof(leaves) / sizeof(leaves[0])]
+		   [MEMORY_CONTEXT_NAME_SIZE];
+	for (size_t i = 0; i < sizeof(leaves) / sizeof(leaves[0]); ++i) {
+		size_t leaf_len = strlen(leaves[i]);
+		classify_leaf_name(
+			titles[i], sizeof(titles[i]), entry, leaves[i]
+		);
+		size_t len = strlen(titles[i]);
+		TEST_ASSERT(
+			len >= leaf_len + 1 &&
+				titles[i][len - leaf_len - 1] == ':' &&
+				strcmp(titles[i] + len - leaf_len, leaves[i]) ==
+					0,
+			"the '%s' suffix did not survive the cut",
+			leaves[i]
+		);
+		TEST_ASSERT_STR_CONTAINS(
+			titles[i],
+			"...",
+			"the cut before '%s' is unmarked",
+			leaves[i]
+		);
+	}
+	TEST_ASSERT(
+		strcmp(titles[0], titles[1]) != 0,
+		"the cut titles of two leaves collided"
+	);
+	return TEST_SUCCESS;
+}
+
 // Verifies that a joint leaves exactly one table and one registry
-// child behind, leaf named after the joint, so the two allocations of
-// one join are told apart in the memory tree.
+// child behind, leaf named after the joint.
+//
+// The two allocations of one join are told apart in the memory tree.
 static int
 test_joint_children_are_leaf_named(void *arena) {
 	struct ctx_names_fixture fx;
@@ -795,8 +842,10 @@ test_attribute_children_are_leaf_named(void *arena) {
 }
 
 // Verifies that the decoder keeps the plain entry name for its rule
-// map: a decode leaves a single context behind, so no leaf is needed
-// to tell siblings apart.
+// map.
+//
+// A decode leaves a single context behind, so no leaf is needed to
+// tell siblings apart.
 static int
 test_decode_rule_map_keeps_entry_name(void *arena) {
 	struct ctx_names_fixture fx;
@@ -857,6 +906,8 @@ main() {
 		int (*func)(void *);
 	} cases[] = {
 		{"no_sibling_name_collision", test_no_sibling_name_collision},
+		{"long_entry_name_cuts_before_the_leaf",
+		 test_long_entry_name_cuts_before_the_leaf},
 		{"joint_children_are_leaf_named",
 		 test_joint_children_are_leaf_named},
 		{"attribute_children_are_leaf_named",

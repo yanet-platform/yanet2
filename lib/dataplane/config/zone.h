@@ -37,14 +37,18 @@ struct dp_device {
 };
 
 /*
- * Inert dataplane-side descriptor for a loaded object type.
+ * Dataplane-side descriptor for a loaded object type.
  *
- * Carries only the type name: objects take no per-packet action, so there
- * is no handler slot. A handler field can be added here when objects gain
- * dataplane behaviour.
+ * Objects take no per-packet action, so there is no packet handler slot;
+ * the execution-context commit handler and the prepared buffer size it
+ * fills mirror the module slots of the same names.
  */
 struct dp_object {
 	char name[OBJECT_TYPE_LEN];
+	object_commit_ectx_handler commit_ectx_handler;
+	// Size of the object's private per-context buffer, zero when the
+	// object needs none; mirrors the loaded object's declaration.
+	uint64_t prepared_size;
 };
 
 // Per-DPDK-port counter registry and storage.

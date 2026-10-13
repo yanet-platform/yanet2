@@ -175,3 +175,23 @@ crc32_test = executable(
 )
 test('crc32', crc32_test, suite: ['common'])
 
+
+ring_test = executable(
+  'ring_test',
+  ['ring_test.c'],
+  c_args: yanet_test_c_args,
+  link_args: yanet_link_args,
+  dependencies: dependencies,
+  include_directories: yanet_rootdir,
+)
+test('ring', ring_test, suite: ['common'])
+
+ring_bench = executable(
+  'ring_bench',
+  ['ring_bench.c'],
+  c_args: yanet_c_args,
+  link_args: yanet_link_args,
+  dependencies: [lib_common_dep, thread_dep],
+  include_directories: yanet_rootdir,
+)
+benchmark('ring_bench', ring_bench, timeout: 300)

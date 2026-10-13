@@ -46,6 +46,7 @@ if not get_option('fuzzing').enabled()
           nat64_protoc_gen,
           pdump_protoc_gen,
           plain_protoc_gen,
+          ring_protoc_gen,
           route_protoc_gen,
           route_mpls_protoc_gen,
           trafgen_protoc_gen,

@@ -202,6 +202,11 @@ func (q *QEMUManager) Start() (bool, error) {
 		return false, fmt.Errorf("QEMU image %s not found: %w", q.ImagePath, err)
 	}
 
+	size, err := VMSizeFromEnv()
+	if err != nil {
+		return false, err
+	}
+
 	// Create working directories
 	q.log.Debug("Creating logs directory...")
 	if err := os.MkdirAll(q.LogsDir, 0755); err != nil {
@@ -268,17 +273,7 @@ func (q *QEMUManager) Start() (bool, error) {
 		q.log.Debugf("Created QCOW2 overlay: %s -> %s", overlayPath, absImagePath)
 	}
 
-	// Base arguments
-	args := []string{
-		"-name", vmName,
-		"-smp", "2",
-		"-m", "1G",
-		"-machine", "q35,kernel-irqchip=split",
-		"-cpu", "max",
-		"-device", "intel-iommu,intremap=on,device-iotlb=on",
-		"-device", "ioh3420,id=pcie.1,chassis=1",
-		"-device", "ioh3420,id=pcie.2,chassis=2",
-	}
+	args := machineArgs(vmName, size)
 
 	// OS-specific configuration
 	if osType == "linux" {
@@ -1431,9 +1426,19 @@ func (q *QEMUManager) SaveBootedOverlay() (string, error) {
 	return q.SaveSnapshotOverlay(BootedSnapshotName)
 }
 
-// BootedImagePath returns the versioned path to the booted snapshot image.
+// BootedImagePath returns the versioned path to the booted snapshot image
+// of a VM of the default size.
 func BootedImagePath(baseImagePath string) string {
-	return SnapshotImagePath(baseImagePath, BootedSnapshotName+"-"+bootedTemplateVersion)
+	return BootedImagePathFor(baseImagePath, DefaultVMSize())
+}
+
+// BootedImagePathFor returns the versioned path to the booted snapshot
+// image of a VM of size.
+//
+// Other vCPUs or RAM name a template of their own: a saved snapshot loads
+// only into a machine of the shape it was taken on.
+func BootedImagePathFor(baseImagePath string, size VMSize) string {
+	return SnapshotImagePath(baseImagePath, BootedSnapshotName+"-"+bootedTemplateVersion+size.machineSuffix())
 }
 
 // BaselineImagePath returns the versioned path to the cached baseline snapshot.

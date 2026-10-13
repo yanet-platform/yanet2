@@ -253,7 +253,7 @@ func (m *FWStateService) prepareUpdate(
 	newConfig, err := newFWStateModuleConfig(
 		m.agent,
 		name,
-		syncConfig.ToC(),
+		SyncConfigToC(syncConfig),
 		mapNameV4,
 		mapNameV6,
 	)

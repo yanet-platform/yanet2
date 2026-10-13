@@ -154,32 +154,11 @@ mirror_test_config(struct cp_module **cp_module, yanet_error **err) {
 	SET_OFFSET_OF(&fuzz_params.module_ectx.counter_storage, cs);
 	fuzz_params.module_ectx.abs_counter_storage = cs;
 
-	// Set up "mc_index" so "module_ectx_encode_device" returns invalid
-	// device, causing all matched packets to be dropped safely.
-	uint64_t *mc_index =
-		memory_balloc(&fuzz_params.mctx, sizeof(uint64_t) * 2);
-	if (mc_index == NULL) {
-		goto fail;
-	}
-	mc_index[0] = LPM_VALUE_INVALID;
-	mc_index[1] = LPM_VALUE_INVALID;
-	fuzz_params.module_ectx.mc_index_size = 2;
-	SET_OFFSET_OF(&fuzz_params.module_ectx.mc_index, mc_index);
-	fuzz_params.module_ectx.abs_mc_index = mc_index;
-
-	// The device lookups resolve through the mapping bound into the
-	// classifiers; the hand-built module context never runs the
-	// execution-context commit, so bind an identity mapping directly.
-	uint64_t *cm_index =
-		memory_balloc(&fuzz_params.mctx, sizeof(uint64_t) * 2);
-	if (cm_index == NULL) {
-		goto fail;
-	}
-	cm_index[0] = 0;
-	cm_index[1] = 0;
-	fuzz_params.module_ectx.cm_index_size = 2;
-	SET_OFFSET_OF(&fuzz_params.module_ectx.cm_index, cm_index);
-	fuzz_params.module_ectx.abs_cm_index = cm_index;
+	// The device classification and routing resolve through the context:
+	// the hand-built module context never runs the execution-context
+	// commit, so the zeroed module device id classifies every packet as
+	// module device zero and the empty device target table drops every
+	// routed packet safely.
 
 	*cp_module = (struct cp_module *)config;
 	return 0;

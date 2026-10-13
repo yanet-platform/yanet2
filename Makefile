@@ -46,6 +46,7 @@ CLI_MODULES := \
 	decap \
 	device-plain \
 	device-vlan \
+	device-vxlan \
 	device-trafgen \
 	dscp \
 	fwstate \
@@ -57,6 +58,7 @@ CLI_MODULES := \
 	forward \
 	nat64 \
 	pdump \
+	ring \
 	unrdup \
 	operator-neighbour \
 	operator-pipeline \

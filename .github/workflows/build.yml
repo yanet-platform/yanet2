@@ -88,7 +88,7 @@ jobs:
 
       - uses: actions/setup-go@v6
         with:
-          go-version: "1.24.x"
+          go-version: "1.27.x"
           cache: false
           check-latest: true
 
@@ -134,7 +134,7 @@ jobs:
 
       - uses: actions/setup-go@v6
         with:
-          go-version: "1.24.x"
+          go-version: "1.27.x"
           cache: false
           check-latest: true
 
@@ -185,7 +185,7 @@ jobs:
 
       - uses: actions/setup-go@v6
         with:
-          go-version: "1.24.x"
+          go-version: "1.27.x"
           cache: false
           check-latest: true
 
@@ -321,7 +321,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
-          go-version: "1.24.x"
+          go-version: "1.27.x"
           cache: true
 
       - uses: ./.github/actions/apt-packages

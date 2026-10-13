@@ -167,11 +167,22 @@ func Test_UpdateModuleConfigRequest_Validate(t *testing.T) {
 			message: "config: name is required",
 		},
 		{
+			name: "missing destination service",
+			request: &l3bpb.UpdateModuleConfigRequest{
+				Config: &l3bpb.ModuleConfig{
+					Name:                   "l3b0",
+					DestinationFilterRules: []*l3bpb.DestinationFilterRule{{}},
+				},
+			},
+			message: "config: destination_filter_rules[0]: service is required",
+		},
+		{
 			name: "nil protocol range at repeated index",
 			request: &l3bpb.UpdateModuleConfigRequest{
 				Config: &l3bpb.ModuleConfig{
 					Name: "l3b0",
 					DestinationFilterRules: []*l3bpb.DestinationFilterRule{{
+						Service:     "vs0",
 						ProtoRanges: []*filterpb.ProtoRange{nil},
 					}},
 				},
@@ -234,8 +245,8 @@ func Test_UpdateRealServerStateRequest_Validate(t *testing.T) {
 	}
 }
 
-// Test_UpdateRealServerWeightRequest_Validate verifies that weight updates use
-// the complete service-name validation rather than only an empty check.
+// Test_UpdateRealServerWeightRequest_Validate verifies that weight updates
+// validate service names and reject weights beyond the scheduler bound.
 func Test_UpdateRealServerWeightRequest_Validate(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -253,7 +264,12 @@ func Test_UpdateRealServerWeightRequest_Validate(t *testing.T) {
 			request: &l3bpb.UpdateRealServerWeightRequest{Service: "vs\n"},
 			message: "service must contain only printable bytes",
 		},
-		{name: "named service", request: &l3bpb.UpdateRealServerWeightRequest{Service: "vs0"}},
+		{
+			name:    "weight above maximum",
+			request: &l3bpb.UpdateRealServerWeightRequest{Service: "vs0", Weight: 1001},
+			message: "weight 1001 must be in range 0..1000",
+		},
+		{name: "named service", request: &l3bpb.UpdateRealServerWeightRequest{Service: "vs0", Weight: 1000}},
 		{name: "nil request", request: nil, message: "service is required"},
 	}
 
@@ -384,22 +400,23 @@ func Test_DestinationFilterRule_Validate(t *testing.T) {
 	}{
 		{
 			name:    "nil IPv6 network",
-			rule:    &l3bpb.DestinationFilterRule{Net6S: []*commonpb.IPv6Network{nil}},
+			rule:    &l3bpb.DestinationFilterRule{Service: "vs0", Net6S: []*commonpb.IPv6Network{nil}},
 			message: "net6s[0] is required",
 		},
 		{
 			name:    "nil IPv4 network",
-			rule:    &l3bpb.DestinationFilterRule{Net4S: []*commonpb.IPv4Network{nil}},
+			rule:    &l3bpb.DestinationFilterRule{Service: "vs0", Net4S: []*commonpb.IPv4Network{nil}},
 			message: "net4s[0] is required",
 		},
 		{
 			name:    "nil protocol range",
-			rule:    &l3bpb.DestinationFilterRule{ProtoRanges: []*filterpb.ProtoRange{nil}},
+			rule:    &l3bpb.DestinationFilterRule{Service: "vs0", ProtoRanges: []*filterpb.ProtoRange{nil}},
 			message: "proto_ranges[0] is required",
 		},
 		{
 			name: "non-nil ranges",
 			rule: &l3bpb.DestinationFilterRule{
+				Service:     "vs0",
 				Net6S:       []*commonpb.IPv6Network{{}},
 				Net4S:       []*commonpb.IPv4Network{{}},
 				ProtoRanges: []*filterpb.ProtoRange{{}},
@@ -467,7 +484,8 @@ func Test_ModuleConfig_Validate(t *testing.T) {
 			config: &l3bpb.ModuleConfig{
 				Name: "l3b0",
 				DestinationFilterRules: []*l3bpb.DestinationFilterRule{{
-					Net6S: []*commonpb.IPv6Network{nil},
+					Service: "vs0",
+					Net6S:   []*commonpb.IPv6Network{nil},
 				}},
 			},
 			message: "destination_filter_rules[0]: net6s[0] is required",

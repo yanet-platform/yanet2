@@ -13,6 +13,10 @@ import (
 	"github.com/yanet-platform/xnetip"
 )
 
+// MaxDeviceNameLen includes the terminating NUL in the C filter device name
+// buffer.
+const MaxDeviceNameLen = C.ACL_DEVICE_NAME_LEN
+
 func (m *Device) build() C.struct_filter_device {
 	var name [C.ACL_DEVICE_NAME_LEN]C.char
 

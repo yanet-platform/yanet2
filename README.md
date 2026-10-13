@@ -65,7 +65,7 @@ YANET employs a multi-language approach to leverage the strengths of different p
 
 ### Dependencies
 
-- Go 1.21+.
+- Go 1.27.1+.
 - Rust 1.88+.
 - Protobuf compiler 3.0+.
 - Meson 0.61+.

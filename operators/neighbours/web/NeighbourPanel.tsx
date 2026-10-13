@@ -164,6 +164,7 @@ const NeighbourPanel: React.FC<NeighbourPanelProps> = ({
     const canSubmit =
         !submitting &&
         (mode === 'edit' || nextHop.trim() !== '') &&
+        device.trim() !== '' &&
         !nextHopError &&
         !linkAddrError &&
         !hardwareAddrError;
@@ -507,7 +508,9 @@ const NeighbourPanel: React.FC<NeighbourPanelProps> = ({
                                         <div className="yn-section-h">Egress</div>
                                         <div className="yn-section__body">
                                             <div className="yn-field">
-                                                <label className="yn-field__label">Device</label>
+                                                <label className="yn-field__label">
+                                                    Device <span className="yn-field__req">*</span>
+                                                </label>
                                                 <input
                                                     className="yn-input"
                                                     value={device}

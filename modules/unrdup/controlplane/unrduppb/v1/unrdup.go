@@ -9,6 +9,11 @@ import (
 
 const maxPort = 65535
 
+type endpointKey struct {
+	port     uint32
+	protocol Protocol
+}
+
 func (m *ShowConfigRequest) Validate() error {
 	return commonpb.ValidateModuleName("name", m.GetName())
 }
@@ -48,10 +53,19 @@ func (m *Service) Validate() error {
 	if len(m.GetEndpoints()) == 0 {
 		return errors.New("endpoints must contain at least one endpoint")
 	}
+	seenEndpoints := map[endpointKey]struct{}{}
 	for idx, endpoint := range m.GetEndpoints() {
 		if err := endpoint.Validate(); err != nil {
 			return fmt.Errorf("endpoints[%d]: %w", idx, err)
 		}
+		key := endpointKey{
+			port:     endpoint.GetPort(),
+			protocol: endpoint.GetProtocol(),
+		}
+		if _, ok := seenEndpoints[key]; ok {
+			return fmt.Errorf("endpoints[%d]: endpoint %d is listed twice", idx, endpoint.GetPort())
+		}
+		seenEndpoints[key] = struct{}{}
 	}
 
 	return nil

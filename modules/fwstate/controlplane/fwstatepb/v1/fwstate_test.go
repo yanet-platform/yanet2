@@ -8,10 +8,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
-	"github.com/yanet-platform/yanet2/modules/fwstate/bindings/go/cfwstate"
 )
-
-const cfwstateTTL48Max = cfwstate.TTL48Max
 
 // Test_ShowConfigRequest_Validate verifies that a show request must name a
 // configuration, including when the protobuf receiver is nil.
@@ -100,6 +97,30 @@ func Test_UpdateConfigRequest_Validate(t *testing.T) {
 			message: "sync_config: port_multicast 65536 exceeds maximum allowed value 65535",
 		},
 		{
+			name: "timeout overflow",
+			request: &UpdateConfigRequest{
+				Name:       "fwstate0",
+				SyncConfig: &SyncConfig{Udp: proto.Uint64(1 << 48)},
+			},
+			message: "sync_config: udp 281474976710656 exceeds maximum allowed value 281474976710655",
+		},
+		{
+			name: "sync mtu below one frame",
+			request: &UpdateConfigRequest{
+				Name:       "fwstate0",
+				SyncConfig: &SyncConfig{SyncMtu: proto.Uint32(103)},
+			},
+			message: "sync_config: sync_mtu 103 is below the minimum 104",
+		},
+		{
+			name: "suppression timeout overflow",
+			request: &UpdateConfigRequest{
+				Name:       "fwstate0",
+				SyncConfig: &SyncConfig{SyncSuppressTimeout: proto.Uint64(1 << 48)},
+			},
+			message: "sync_config: sync_suppress_timeout 281474976710656 exceeds maximum allowed value 281474976710655",
+		},
+		{
 			name: "partial destination left to merged validation",
 			request: &UpdateConfigRequest{
 				Name:       "fwstate0",
@@ -120,54 +141,73 @@ func Test_UpdateConfigRequest_Validate(t *testing.T) {
 	}
 }
 
-func TestValidateSyncConfigTimeouts(t *testing.T) {
-	valid := &SyncConfig{
-		TcpSynAck: proto.Uint64(120e9),
-		TcpSyn:    proto.Uint64(120e9),
-		TcpFin:    proto.Uint64(120e9),
-		Tcp:       proto.Uint64(120e9),
-		Udp:       proto.Uint64(30e9),
-		Default:   proto.Uint64(16e9),
+// Test_SyncConfig_ValidateTimeouts verifies that request timeout fields fit
+// individually while merged timeouts include the suppression window.
+func Test_SyncConfig_ValidateTimeouts(t *testing.T) {
+	cases := []struct {
+		name          string
+		config        *SyncConfig
+		fieldsMessage string
+		mergedMessage string
+	}{
+		{
+			name: "all timeouts fit",
+			config: &SyncConfig{
+				TcpSynAck: proto.Uint64(120e9),
+				TcpSyn:    proto.Uint64(120e9),
+				TcpFin:    proto.Uint64(120e9),
+				Tcp:       proto.Uint64(120e9),
+				Udp:       proto.Uint64(30e9),
+				Default:   proto.Uint64(16e9),
+			},
+		},
+		{
+			name: "first overflowing timeout is reported",
+			config: &SyncConfig{
+				TcpSyn: proto.Uint64(1 << 48),
+				Udp:    proto.Uint64(1 << 48),
+			},
+			fieldsMessage: "tcp_syn 281474976710656 exceeds maximum allowed value 281474976710655",
+			mergedMessage: "timeout values exceed 48-bit limit: [tcp_syn+sync_suppress_timeout udp+sync_suppress_timeout]",
+		},
+		{
+			name: "effective timeout includes suppression",
+			config: &SyncConfig{
+				Tcp:                 proto.Uint64(TTL48Max),
+				SyncSuppressTimeout: proto.Uint64(1),
+			},
+			mergedMessage: "timeout values exceed 48-bit limit: [tcp+sync_suppress_timeout]",
+		},
+		{
+			name:   "maximum timeout without suppression fits",
+			config: &SyncConfig{Tcp: proto.Uint64(TTL48Max)},
+		},
+		{
+			name: "timeout with fitting suppression fits",
+			config: &SyncConfig{
+				Tcp:                 proto.Uint64(120e9),
+				SyncSuppressTimeout: proto.Uint64(8e9),
+			},
+		},
 	}
-	require.NoError(t, valid.ValidateTimeouts())
 
-	tooLarge := uint64(1) << 48
-	invalid := &SyncConfig{
-		TcpSynAck: proto.Uint64(120e9),
-		TcpSyn:    proto.Uint64(tooLarge),
-		TcpFin:    proto.Uint64(120e9),
-		Tcp:       proto.Uint64(120e9),
-		Udp:       proto.Uint64(tooLarge),
-		Default:   proto.Uint64(16e9),
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			fieldError := tc.config.ValidateFields()
+			if tc.fieldsMessage == "" {
+				require.NoError(t, fieldError)
+			} else {
+				require.EqualError(t, fieldError, tc.fieldsMessage)
+			}
+
+			mergedError := tc.config.ValidateMerged()
+			if tc.mergedMessage == "" {
+				require.NoError(t, mergedError)
+				return
+			}
+			require.EqualError(t, mergedError, tc.mergedMessage)
+		})
 	}
-	err := invalid.ValidateTimeouts()
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "tcp_syn")
-	require.Contains(t, err.Error(), "udp")
-}
-
-// TestValidateSyncConfigTimeoutsSuppressOverflow verifies that a suppress
-// window large enough to push an otherwise-valid timeout past the 48-bit
-// last_ttl limit is rejected, since the dataplane stores the inflated
-// (timeout + suppress) value.
-func TestValidateSyncConfigTimeoutsSuppressOverflow(t *testing.T) {
-	// A suppress window that by itself fits, but added to the default timeout
-	// overflows the 48-bit field.
-	overflowing := &SyncConfig{
-		Tcp:                 proto.Uint64(cfwstateTTL48Max),
-		SyncSuppressTimeout: proto.Uint64(1),
-	}
-	err := overflowing.ValidateTimeouts()
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "tcp+sync_suppress_timeout")
-
-	// The same timeout with no suppress, or with a window that still fits, is
-	// accepted.
-	require.NoError(t, (&SyncConfig{Tcp: proto.Uint64(cfwstateTTL48Max)}).ValidateTimeouts())
-	require.NoError(t, (&SyncConfig{
-		Tcp:                 proto.Uint64(120e9),
-		SyncSuppressTimeout: proto.Uint64(8e9),
-	}).ValidateTimeouts())
 }
 
 // Test_SyncConfig_ValidateFields_RejectsUnusableValues verifies that values
@@ -332,10 +372,9 @@ func Test_SyncConfig_ValidateMerged_DestinationIsAllOrNothing(t *testing.T) {
 	})
 }
 
-// Test_SyncConfig_ValidateMerged_SyncMTU verifies that the merged config
-// accepts a zero sync MTU and any value holding one frame that fits 16 bits,
-// and rejects the rest.
-func Test_SyncConfig_ValidateMerged_SyncMTU(t *testing.T) {
+// Test_SyncConfig_ValidateFields_SyncMTU verifies that request MTU values
+// accept zero and any value holding one frame that fits 16 bits.
+func Test_SyncConfig_ValidateFields_SyncMTU(t *testing.T) {
 	cases := []struct {
 		name    string
 		mtu     uint32
@@ -349,7 +388,7 @@ func Test_SyncConfig_ValidateMerged_SyncMTU(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			err := (&SyncConfig{SyncMtu: proto.Uint32(tc.mtu)}).ValidateMerged()
+			err := (&SyncConfig{SyncMtu: proto.Uint32(tc.mtu)}).ValidateFields()
 			if tc.message == "" {
 				require.NoError(t, err)
 				return
@@ -357,10 +396,4 @@ func Test_SyncConfig_ValidateMerged_SyncMTU(t *testing.T) {
 			require.EqualError(t, err, tc.message)
 		})
 	}
-}
-
-// Test_MinSyncMTU_MatchesC verifies that the Go minimum sync MTU equals the
-// C bound it mirrors.
-func Test_MinSyncMTU_MatchesC(t *testing.T) {
-	require.Equal(t, uint32(cfwstate.MinSyncMTU), MinSyncMTU)
 }

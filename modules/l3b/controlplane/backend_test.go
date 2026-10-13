@@ -324,11 +324,20 @@ func (m *capturedService) ReadSessions(cursor uint64, limit uint32) ([]cl3bobjec
 // newTestBackend returns a shared-memory backend over a harness with the l3b
 // module and its objects loaded.
 func newTestBackend(t *testing.T) controlplane.Backend {
-	return controlplane.NewBackend(newTestAgent(t))
+	t.Helper()
+	backend, _, _ := newTestBackendFixture(t)
+	return backend
 }
 
 // newTestAgent returns a real shared-memory agent owned by the test harness.
 func newTestAgent(t *testing.T) *ffi.Agent {
+	t.Helper()
+	_, agent, _ := newTestBackendFixture(t)
+	return agent
+}
+
+// newTestBackendFixture returns a real backend and its accounting/worker owners.
+func newTestBackendFixture(t *testing.T) (controlplane.Backend, *ffi.Agent, *dataplaneut.Harness) {
 	t.Helper()
 
 	harness, err := dataplaneut.NewHarness(dataplaneut.Config{
@@ -345,7 +354,7 @@ func newTestAgent(t *testing.T) *ffi.Agent {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = agent.CleanUp() })
 
-	return agent
+	return controlplane.NewBackend(agent), agent, harness
 }
 
 // stalledPublishOps pauses real publication while retaining C-backed reads.
@@ -620,10 +629,15 @@ func Test_Backend_UpdateModuleConfig_PreservesAcceptedHandles(t *testing.T) {
 }
 
 // Test_Backend_RuntimeUpdates_AdvanceSnapshot verifies that successful mutations
-// expose the new state and preserve configured weights through re-enabling.
+// retain each server's state and configured weight through re-enabling.
 func Test_Backend_RuntimeUpdates_AdvanceSnapshot(t *testing.T) {
 	backend := controlplane.NewBackendWithSharedMemory(&fakeSharedMemory{})
-	require.NoError(t, backend.CreateService(serviceWithRealServer("vs0")))
+	service := serviceWithRealServer("vs0")
+	service.RealServers = append(service.RealServers, &l3bpb.RealServer{
+		DestinationAddress: netip.MustParseAddr("2001:db8:1::2").AsSlice(),
+		SourceNetwork:      commonpb.NewIPNetworkFrom(xnetip.MustParseNetwork("2001:db8:2::/64")),
+	})
+	require.NoError(t, backend.CreateService(service))
 	for _, tc := range []struct {
 		name    string
 		mutate  func() error
@@ -633,17 +647,17 @@ func Test_Backend_RuntimeUpdates_AdvanceSnapshot(t *testing.T) {
 		{name: "new service starts enabled with unit weight", enabled: true, weight: 1},
 		{
 			name:   "disabling preserves the configured weight",
-			mutate: func() error { return backend.UpdateRealServerState("vs0", 0, false) },
+			mutate: func() error { return backend.UpdateRealServerState("vs0", 1, false) },
 			weight: 1,
 		},
 		{
 			name:   "weight update advances the disabled service snapshot",
-			mutate: func() error { return backend.UpdateRealServerWeight("vs0", 0, 7) },
+			mutate: func() error { return backend.UpdateRealServerWeight("vs0", 1, 7) },
 			weight: 7,
 		},
 		{
 			name:    "re-enabling preserves the updated weight",
-			mutate:  func() error { return backend.UpdateRealServerState("vs0", 0, true) },
+			mutate:  func() error { return backend.UpdateRealServerState("vs0", 1, true) },
 			enabled: true,
 			weight:  7,
 		},
@@ -654,9 +668,13 @@ func Test_Backend_RuntimeUpdates_AdvanceSnapshot(t *testing.T) {
 			}
 			response, err := backend.GetService("vs0")
 			require.NoError(t, err)
-			require.Len(t, response.RealServers, 1)
-			require.Equal(t, tc.enabled, response.RealServers[0].Enabled)
-			require.Equal(t, tc.weight, response.RealServers[0].Weight)
+			require.Len(t, response.RealServers, 2)
+			require.Equal(t, []byte{192, 0, 2, 1}, response.RealServers[0].DestinationAddress)
+			require.True(t, response.RealServers[0].Enabled)
+			require.Equal(t, uint32(1), response.RealServers[0].Weight)
+			require.Equal(t, netip.MustParseAddr("2001:db8:1::2").AsSlice(), response.RealServers[1].DestinationAddress)
+			require.Equal(t, tc.enabled, response.RealServers[1].Enabled)
+			require.Equal(t, tc.weight, response.RealServers[1].Weight)
 		})
 	}
 }
@@ -996,8 +1014,8 @@ func Test_Backend_GetService_ReturnsConfiguredIndexMask(t *testing.T) {
 	require.Equal(t, uint32(0x0f), response.IndexMask)
 }
 
-// Test_Backend_CreateService_PublishesRealIndexMask verifies that the concrete
-// backend publishes a real C service containing the configured scheduler mask.
+// Test_Backend_CreateService_PublishesRealIndexMask verifies that the captured
+// C allocation contains the configured nonzero scheduler mask.
 func Test_Backend_CreateService_PublishesRealIndexMask(t *testing.T) {
 	agent := newTestAgent(t)
 	operations := &capturingServiceOps{

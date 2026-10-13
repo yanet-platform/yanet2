@@ -120,7 +120,7 @@ pub struct AddCmd {
     pub hardware_addr: MacAddr,
     /// Network interface name.
     #[arg(long, short = 'd')]
-    pub device: Option<String>,
+    pub device: String,
     /// Neighbour table name. Defaults to "static".
     #[arg(long, add = ArgValueCandidates::new(table_candidates))]
     pub table: Option<String>,
@@ -241,7 +241,7 @@ async fn update_neighbour(service: &mut NeighbourService, cmd: AddCmd) -> Result
             link_addr: Some(MacAddress::from(cmd.link_addr)),
             hardware_addr: Some(MacAddress::from(cmd.hardware_addr)),
             priority: cmd.priority.unwrap_or_default(),
-            device: cmd.device.clone().unwrap_or_default(),
+            device: cmd.device.clone(),
             ..Default::default()
         }],
     };

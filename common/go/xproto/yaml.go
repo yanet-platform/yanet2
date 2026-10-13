@@ -41,7 +41,7 @@ func Unmarshal(data []byte, msg proto.Message) error {
 		proto.Reset(msg)
 		return nil
 	}
-	if err := rejectNullEntries(tree, ""); err != nil {
+	if err := rejectInvalidEntries(tree, ""); err != nil {
 		return err
 	}
 	encoded, err := json.Marshal(tree)
@@ -68,9 +68,13 @@ func isEmptyDocument(node *yaml.Node) bool {
 		content.Value == "" && content.Style == 0
 }
 
-// rejectNullEntries fails on a null list entry, which would otherwise land
-// as an empty value far from the file that caused it.
-func rejectNullEntries(node any, path string) error {
+// rejectInvalidEntries fails on a null list entry or a non-string mapping key.
+//
+// A null entry would otherwise land as an empty value far from the file that
+// caused it. JSON has no non-string keys, and since Go 1.27 its encoder turns
+// a numeric key into a string instead of failing, so a key such as 443 must
+// be refused before encoding.
+func rejectInvalidEntries(node any, path string) error {
 	switch value := node.(type) {
 	case []any:
 		for idx, entry := range value {
@@ -78,17 +82,22 @@ func rejectNullEntries(node any, path string) error {
 			if entry == nil {
 				return fmt.Errorf("%s is null", entryPath)
 			}
-			if err := rejectNullEntries(entry, entryPath); err != nil {
+			if err := rejectInvalidEntries(entry, entryPath); err != nil {
 				return err
 			}
 		}
+	case map[any]any:
+		if path == "" {
+			return errors.New("the document has a non-string mapping key")
+		}
+		return fmt.Errorf("%s has a non-string mapping key", path)
 	case map[string]any:
 		for key, entry := range value {
 			entryPath := key
 			if path != "" {
 				entryPath = path + "." + key
 			}
-			if err := rejectNullEntries(entry, entryPath); err != nil {
+			if err := rejectInvalidEntries(entry, entryPath); err != nil {
 				return err
 			}
 		}

@@ -32,25 +32,19 @@
 
 #include "config.h"
 
-static inline void
+// Resolve the device class of the whole invocation: the context carries
+// the module device id of the device entry it executes under, so the
+// device attribute reads that id instead of each packet's device. A
+// device outside the module keeps the module device zero.
+static inline uint32_t
 fwd_lookup_device(
-	const struct classify_attr_device *attr,
-	const uint64_t *cm_index,
-	const struct packet **packets,
-	uint32_t *results,
-	uint32_t count
+	const struct classify_attr_device *attr, uint32_t module_device_id
 ) {
-	for (uint32_t idx = 0; idx < count; ++idx) {
-		// The packet device resolves through the per generation
-		// global-to-module mapping of the module execution context;
-		// a device outside the module keeps the module device zero.
-		uint32_t device_id = cm_index[packets[idx]->tx_device_id];
-		if (device_id >= attr->line.size) {
-			device_id = 0;
-		}
-		results[idx] =
-			vline_get((struct vline *)&attr->line, device_id);
+	uint32_t device_id = module_device_id;
+	if (device_id >= attr->line.size) {
+		device_id = 0;
 	}
+	return vline_get((struct vline *)&attr->line, device_id);
 }
 
 static inline void
@@ -165,9 +159,10 @@ fwd_packet_get_net6_dst_batch(
  * attribute indirect dispatch remains.
  *
  * The family results share the core classification: the core
- * dispatcher evaluates the device and vlan pair once per batch, and
- * the family dispatcher of every network pair is combined with the
- * core classes through the family root joint at the caller.
+ * dispatcher evaluates the device class once per execution context
+ * and the vlan attribute once per batch, and the family dispatcher of
+ * every network pair is combined with the core classes through the
+ * family root joint at the caller.
  */
 
 // The dispatcher scratch is one fixed frame per classifier: batches
@@ -180,12 +175,13 @@ fwd_packet_get_net6_dst_batch(
 static inline void
 fwd_classify_core(
 	const struct fwd_classifier_core *cls,
-	const uint64_t *cm_index,
+	uint32_t module_device_id,
 	const struct packet **packets,
 	uint32_t *classes,
 	uint32_t packet_count
 ) {
-	uint32_t dev[FWD_CLASSIFY_MAX_BATCH];
+	uint32_t dev_class =
+		fwd_lookup_device(&cls->dev_attr, module_device_id);
 	uint32_t vlan[FWD_CLASSIFY_MAX_BATCH];
 
 	for (uint32_t off = 0; off < packet_count;
@@ -195,11 +191,10 @@ fwd_classify_core(
 					 : FWD_CLASSIFY_MAX_BATCH;
 		const struct packet **batch = packets + off;
 
-		fwd_lookup_device(&cls->dev_attr, cm_index, batch, dev, count);
 		fwd_lookup_vlan(&cls->vlan_attr, batch, vlan, count);
 
-		classify_joint_lookup(
-			&cls->joint, dev, vlan, classes + off, count
+		classify_joint_lookup_const(
+			&cls->joint, dev_class, vlan, classes + off, count
 		);
 	}
 }

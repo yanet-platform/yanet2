@@ -1,7 +1,7 @@
 # Route operator readiness
 
 The route operator exposes four readiness dimensions, each as its own scope:
-FIB programming per gateway, kernel neighbour resolution, the RIB content, and
+FIB programming per gateway, neighbour observations, the RIB content, and
 (optionally) the BIRD FeedRIB transport session.
 
 - gRPC FQN: `operators.route.operatorpb.v1.ReadinessService`
@@ -14,7 +14,7 @@ FIB programming per gateway, kernel neighbour resolution, the RIB content, and
 | Scope                    | Meaning                                              |
 | ------------------------ | --------------------------------------------------- |
 | `fib:<gateway>:<module>` | Per-gateway FIB apply outcome into the dataplane module. |
-| `neighbours`             | Kernel neighbour (ARP/ND) resolution state.          |
+| `neighbours`             | Local neighbour discovery or accepted external snapshots. |
 | `rib`                    | Routing information base content readiness.          |
 | `bird-session`           | BIRD FeedRIB transport liveness (only when `readiness.expect_bird`). |
 
@@ -33,8 +33,8 @@ Driven by the apply outcome recorded through `Observe` (via
 
 ### `neighbours`
 
-Driven by the netlink neighbour monitor. When the monitor is enabled
-(`netlink_monitor.disabled` is false, the default):
+Driven by local discovery or external publications. When the netlink monitor is
+enabled (`netlink_monitor.disabled` is false, the default):
 
 - Before the first sync: `STATE_NOT_READY`, reason `SYNCING` (seeded at
   construction). Refresh errors are ignored until the first successful sync, so
@@ -44,7 +44,9 @@ Driven by the netlink neighbour monitor. When the monitor is enabled
 - Refresh error: `STATE_DEGRADED`, reason `RESYNC`.
 
 When the monitor is disabled (`netlink_monitor.disabled: true`), the scope is
-latched to `STATE_READY` once at construction and never updated again.
+seeded at `STATE_READY` at construction. Accepted complete `SwapNeighbours`
+publications refresh `observed_at` without changing state, reason, or
+`last_transition_time`. See the external-publication freshness contract below.
 
 ### `rib`
 
@@ -139,17 +141,31 @@ neighbour cache refresh, which happens in two ways:
 
 Config parameters (under `netlink_monitor:`):
 
-- `netlink_monitor.disabled` (bool, default false): when true the scope
-  becomes a latch (see below) and `observed_at` stops advancing entirely. The
-  event-driven and periodic refresh paths have no separate config knobs.
+- `netlink_monitor.disabled` (bool, default false): when true, local discovery
+  is disabled and accepted external publications refresh the scope instead
+  (see below). The event-driven and periodic local refresh paths have no
+  separate config knobs.
 
-A quiet network therefore shows up to ~5min of age. The scope publishes that
-5min periodic interval; a multiplier of 2-3 gives a 10-15min threshold. An
-active network stays near-real-time.
+A quiet network with local monitoring enabled therefore shows up to ~5min of
+age. The scope publishes that 5min periodic interval; a multiplier of 2-3 gives
+a 10-15min threshold. An active network stays near-real-time.
 
-When the monitor is disabled, the scope is set READY once and never refreshed,
-so a staleness check is **not applicable** (treat READY as fresh regardless of
-`observed_at`, as for the gateway scope).
+When the monitor is disabled, `observed_at` starts at construction and advances
+after every accepted complete `SwapNeighbours` publication. Identical and empty
+snapshots also refresh it; a forwarding change is not required. Rejected
+publications, requests cancelled before replacement, and table-metadata changes
+do not refresh it.
+
+Timestamp-only refreshes leave `last_transition_time` unchanged and do not emit
+`Watch` events, so consumers checking freshness must poll `Ready`.
+
+The receiving route operator does not know the external publisher's cadence and
+does not advertise `expected_observation_interval` for this mode. Consumers
+checking external-publication staleness must configure an explicit age threshold
+appropriate to that publisher rather than derive one from an advertised
+interval. Startup READY alone does not confirm that an external snapshot has
+been received; without accepted publications, `observed_at` remains at its
+construction timestamp.
 
 ### `rib` and `bird-session`
 

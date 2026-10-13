@@ -1,6 +1,7 @@
 package ynpb_test
 
 import (
+	"math"
 	"strings"
 	"testing"
 
@@ -9,8 +10,8 @@ import (
 	ynpb "github.com/yanet-platform/yanet2/controlplane/ynpb/v1"
 )
 
-// Test_ExtendAgentRequest_Validate verifies that the agent name obeys the
-// fixed-size buffer and NUL rules and that a positive extension size is required.
+// Test_ExtendAgentRequest_Validate verifies that names fit the C buffer
+// without NUL and extension sizes are positive and safe to round up.
 func Test_ExtendAgentRequest_Validate(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -34,6 +35,11 @@ func Test_ExtendAgentRequest_Validate(t *testing.T) {
 			request: &ynpb.ExtendAgentRequest{Agent: strings.Repeat("a", ynpb.MaxAgentNameLen-1), Size: 1},
 		},
 		{name: "zero size", request: &ynpb.ExtendAgentRequest{Agent: "agent0"}, message: "size must be positive"},
+		{
+			name:    "size overflows once rounded up",
+			request: &ynpb.ExtendAgentRequest{Agent: "route", Size: math.MaxUint64},
+			message: "size 18446744073709551615 must be in range 1..18446744073709551608",
+		},
 		{name: "positive size", request: &ynpb.ExtendAgentRequest{Agent: "agent0", Size: 1}},
 	}
 

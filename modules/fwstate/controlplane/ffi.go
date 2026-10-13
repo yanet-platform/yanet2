@@ -40,7 +40,7 @@ func NewFWStateModuleConfig(
 	fw4MapName, fw6MapName string,
 ) (*FwStateConfig, error) {
 	merged := mergedSyncConfig(old, syncConfig)
-	return newFWStateModuleConfig(agent, name, merged.ToC(), fw4MapName, fw6MapName)
+	return newFWStateModuleConfig(agent, name, SyncConfigToC(merged), fw4MapName, fw6MapName)
 }
 
 // newFWStateModuleConfig installs the already merged values verbatim.
@@ -96,7 +96,7 @@ func mergedSyncConfig(
 	old *FwStateConfig,
 	update *fwstatepb.SyncConfig,
 ) *fwstatepb.SyncConfig {
-	merged := fwstatepb.FromCSyncConfig(cfwstate.DefaultSyncConfig())
+	merged := SyncConfigFromC(cfwstate.DefaultSyncConfig())
 	if old != nil {
 		merged = old.GetSyncConfig()
 	}
@@ -115,5 +115,5 @@ func (m *FwStateConfig) MapNameV6() string {
 }
 
 func (m *FwStateConfig) GetSyncConfig() *fwstatepb.SyncConfig {
-	return fwstatepb.FromCSyncConfig(m.syncConfig)
+	return SyncConfigFromC(m.syncConfig)
 }

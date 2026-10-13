@@ -214,26 +214,12 @@ fuzz_setup(yanet_error **err) {
 		return EXIT_FAILURE;
 	}
 
-	// Configure module_ectx for route module
-	// Set up mc_index and config_gen_ectx stubs
+	// The zeroed module_ectx leaves the module with no device targets, so
+	// every routed packet resolves nothing and drops.
 	// TODO: For more comprehensive fuzzing, we should:
-	// - Provide real device contexts instead of stubs (device_count > 0)
-	// - Test with multiple mc_index values to cover different routing paths
-	// - Vary config_gen_ectx to test different device configurations
+	// - Provide real device target tables to cover the routing paths
 	// This would allow packets to actually be routed instead of always
 	// being dropped
-	fuzz_params.module_ectx.mc_index_size = 1;
-	SET_OFFSET_OF(
-		&fuzz_params.module_ectx.mc_index, &fuzz_params.mc_index_stub
-	);
-	fuzz_params.module_ectx.abs_mc_index = &fuzz_params.mc_index_stub;
-	SET_OFFSET_OF(
-		&fuzz_params.module_ectx.config_gen_ectx,
-		&fuzz_params.config_gen_ectx_stub
-	);
-	fuzz_params.module_ectx.abs_config_gen_ectx =
-		&fuzz_params.config_gen_ectx_stub;
-
 	return 0;
 }
 

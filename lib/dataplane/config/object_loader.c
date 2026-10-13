@@ -43,6 +43,8 @@ dp_load_object(struct dp_config *dp_config, void *bin_hndl, const char *name) {
 	struct dp_object *dp_object = dp_objects + dp_config->object_count - 1;
 
 	strtcpy(dp_object->name, object->name, sizeof(dp_object->name));
+	dp_object->commit_ectx_handler = object->commit_ectx_handler;
+	dp_object->prepared_size = object->prepared_size;
 
 	SET_OFFSET_OF(&dp_config->dp_objects, dp_objects);
 

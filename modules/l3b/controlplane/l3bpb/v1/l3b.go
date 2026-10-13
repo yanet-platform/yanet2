@@ -10,6 +10,9 @@ import (
 // The registry stores names in an 80-byte buffer including its terminator.
 const maxNameLength = 79
 
+// MaxRealServerWeight is the largest supported real server scheduler weight.
+const MaxRealServerWeight uint32 = 1000
+
 func validateName(field, name string) error {
 	if name == "" {
 		return errors.New(field + " is required")
@@ -76,8 +79,11 @@ func (m *SourceFilterRule) Validate() error {
 	return validatePortRangeList("port_ranges", m.GetPortRanges())
 }
 
-// Validate checks destination filter lists for missing range messages.
+// Validate checks the destination service name and filter lists.
 func (m *DestinationFilterRule) Validate() error {
+	if err := validateName("service", m.GetService()); err != nil {
+		return err
+	}
 	if err := validateNetworkList("net6s", m.GetNet6S()); err != nil {
 		return err
 	}
@@ -146,9 +152,15 @@ func (m *UpdateRealServerStateRequest) Validate() error {
 	return validateName("service", m.GetService())
 }
 
-// Validate checks the service name.
+// Validate checks the service name and scheduler weight range.
 func (m *UpdateRealServerWeightRequest) Validate() error {
-	return validateName("service", m.GetService())
+	if err := validateName("service", m.GetService()); err != nil {
+		return err
+	}
+	if m.GetWeight() > MaxRealServerWeight {
+		return fmt.Errorf("weight %d must be in range 0..%d", m.GetWeight(), MaxRealServerWeight)
+	}
+	return nil
 }
 
 // Validate checks the service name.

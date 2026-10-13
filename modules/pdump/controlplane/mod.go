@@ -9,6 +9,7 @@ import (
 
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/modules/pdump/controlplane/pdumppb/v1"
+	ring "github.com/yanet-platform/yanet2/objects/ring/controlplane"
 )
 
 // Option configures the PdumpModule constructor.
@@ -32,11 +33,15 @@ func WithLog(log *zap.Logger) Option {
 }
 
 // PdumpModule is a control-plane component of a packet dump module.
+//
+// It also hosts the ring service. That service owns the standalone named
+// rings created through this agent.
 type PdumpModule struct {
-	cfg        *Config
-	attachment *ffi.Attachment
-	service    *PdumpService
-	log        *zap.Logger
+	cfg         *Config
+	attachment  *ffi.Attachment
+	service     *PdumpService
+	ringService *ring.RingService
+	log         *zap.Logger
 }
 
 func NewPdumpModule(cfg *Config, options ...Option) (*PdumpModule, error) {
@@ -65,11 +70,14 @@ func NewPdumpModule(cfg *Config, options ...Option) (*PdumpModule, error) {
 		WithPdumpServiceLog(log),
 	)
 
+	ringService := ring.NewRingService(agent, ring.WithLog(log))
+
 	return &PdumpModule{
-		cfg:        cfg,
-		attachment: attachment,
-		service:    service,
-		log:        log,
+		cfg:         cfg,
+		attachment:  attachment,
+		service:     service,
+		ringService: ringService,
+		log:         log,
 	}, nil
 }
 
@@ -82,11 +90,15 @@ func (m *PdumpModule) Endpoint() string {
 }
 
 func (m *PdumpModule) ServicesNames() []string {
-	return []string{pdumppb.PdumpService_ServiceDesc.ServiceName}
+	return []string{
+		pdumppb.PdumpService_ServiceDesc.ServiceName,
+		ring.ServiceName,
+	}
 }
 
 func (m *PdumpModule) RegisterService(server *grpc.Server) {
 	pdumppb.RegisterPdumpServiceServer(server, m.service)
+	m.ringService.Register(server)
 }
 
 // Run runs the module until the specified context is canceled.

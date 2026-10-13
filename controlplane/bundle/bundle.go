@@ -1,7 +1,9 @@
 package bundle
 
 import (
+	"errors"
 	"fmt"
+	"io"
 
 	"go.uber.org/zap"
 
@@ -12,6 +14,7 @@ import (
 	plain "github.com/yanet-platform/yanet2/devices/plain/controlplane"
 	trafgen "github.com/yanet-platform/yanet2/devices/trafgen/controlplane"
 	vlan "github.com/yanet-platform/yanet2/devices/vlan/controlplane"
+	vxlan "github.com/yanet-platform/yanet2/devices/vxlan/controlplane"
 	acl "github.com/yanet-platform/yanet2/modules/acl/controlplane"
 	blackhole "github.com/yanet-platform/yanet2/modules/blackhole/controlplane"
 	decap "github.com/yanet-platform/yanet2/modules/decap/controlplane"
@@ -205,6 +208,13 @@ func buildServices(
 				return trafgen.NewTrafgenDevice(devicesCfg.Trafgen.Unwrap(), trafgen.WithLog(log))
 			},
 		},
+		{
+			Name:       "vxlan device",
+			Configured: devicesCfg.Vxlan.Unwrap() != nil,
+			New: func() (gateway.Service, error) {
+				return vxlan.NewDeviceVxlanDevice(devicesCfg.Vxlan.Unwrap(), vxlan.WithLog(log))
+			},
+		},
 	}
 
 	services := make([]gateway.Service, 0, len(factories))
@@ -217,7 +227,13 @@ func buildServices(
 
 		service, err := factory.New()
 		if err != nil {
-			return nil, fmt.Errorf("failed to initialize %s: %w", factory.Name, err)
+			err = fmt.Errorf("failed to initialize %s: %w", factory.Name, err)
+			for _, service := range services {
+				if closer, ok := service.(io.Closer); ok {
+					err = errors.Join(err, closer.Close())
+				}
+			}
+			return nil, err
 		}
 
 		services = append(services, service)

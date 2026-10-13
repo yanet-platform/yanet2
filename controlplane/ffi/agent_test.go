@@ -47,6 +47,12 @@ func Test_MaxAgentNameLen_MatchesC(t *testing.T) {
 	require.Equal(t, ynpb.MaxAgentNameLen, ffi.MaxAgentNameLen)
 }
 
+// Test_AgentSizeAlignment_MatchesC verifies that the pure-Go size bound
+// uses the same granularity as the C allocator.
+func Test_AgentSizeAlignment_MatchesC(t *testing.T) {
+	require.Equal(t, ynpb.AgentSizeAlignment, ffi.AgentSizeAlignment)
+}
+
 // Test_MaxPipelineNameLen_MatchesC verifies that the pure-Go bound matches the
 // C pipeline-name buffer size, including its terminating byte.
 func Test_MaxPipelineNameLen_MatchesC(t *testing.T) {

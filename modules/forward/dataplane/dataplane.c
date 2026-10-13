@@ -92,7 +92,7 @@ forward_handle_packets(
 		// joints.
 		fwd_classify_core(
 			&forward_config->classifier_core,
-			module_ectx->abs_cm_index,
+			module_ectx->module_device_id,
 			(const struct packet **)packets,
 			core_classes,
 			count
@@ -176,27 +176,32 @@ forward_handle_packets(
 				counters[0] += 1;
 				counters[1] += packet_data_len(packet);
 
-				uint16_t device_id = module_ectx_encode_device(
-					module_ectx, target->device_id
-				);
+				struct module_device_target *device_target =
+					module_ectx_device_target(
+						module_ectx, target->device_id
+					);
 
-				if (device_id == (uint16_t)-1) {
+				if (device_target == NULL) {
 					packet_front_drop(packet_front, packet);
 					continue;
 				}
 
 				if (target->mode == FORWARD_MODE_IN) {
-					packet->tx_device_id = device_id;
+					packet->tx_device_id =
+						device_target->device_id;
 					module_ectx_route_input(
 						module_ectx,
 						packet_front,
+						device_target->abs_input_entry,
 						packet
 					);
 				} else if (target->mode == FORWARD_MODE_OUT) {
-					packet->tx_device_id = device_id;
+					packet->tx_device_id =
+						device_target->device_id;
 					module_ectx_route_output(
 						module_ectx,
 						packet_front,
+						device_target->abs_output_entry,
 						packet
 					);
 				} else {

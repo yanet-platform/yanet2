@@ -147,7 +147,13 @@ func NewOperator(cfg *Config, options ...Option) (*Operator, error) {
 		}),
 	)
 
-	neighbourSvc := NewNeighbourService(neighTable)
+	neighbourOptions := []NeighbourServiceOption{}
+	if cfg.NetlinkMonitor.Disabled {
+		neighbourOptions = append(neighbourOptions, WithNeighbourServiceOnSnapshot(func() {
+			tracker.Touch("neighbours")
+		}))
+	}
+	neighbourSvc := NewNeighbourService(neighTable, neighbourOptions...)
 	metricsSvc := NewMetricsService(
 		WithMetricsServiceCollector(metrics),
 	)
@@ -386,7 +392,7 @@ func parseMAC(s string) ([6]byte, error) {
 }
 
 // readinessScopeSpecs maps each readiness source to its nominal cadence.
-// Disabled neighbour monitoring leaves its set-once scope without a contract.
+// External publishers have no configured observation cadence here.
 func readinessScopeSpecs(cfg *Config, moduleName string) []readiness.ScopeSpec {
 	fibInterval := cfg.Reconcile.Interval.Unwrap()
 	specs := make([]readiness.ScopeSpec, 0, len(cfg.Gateways)+3)

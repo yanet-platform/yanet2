@@ -585,7 +585,9 @@ dataplane_init(
 			}
 		}
 
-		static const char *devices[] = {"plain", "vlan", "trafgen"};
+		static const char *devices[] = {
+			"plain", "vlan", "trafgen", "vxlan"
+		};
 		for (size_t i = 0; i < sizeof(devices) / sizeof(devices[0]);
 		     ++i) {
 			if (dp_load_device(
@@ -601,6 +603,7 @@ dataplane_init(
 			"route_fib",
 			"l3b_virtual_service",
 			"l3b_session_table",
+			"ring",
 		};
 		for (size_t i = 0; i < sizeof(objects) / sizeof(objects[0]);
 		     ++i) {

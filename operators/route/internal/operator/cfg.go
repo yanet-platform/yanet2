@@ -2,10 +2,12 @@ package operator
 
 import (
 	"errors"
+	"fmt"
 	"time"
 
 	"go.uber.org/zap/zapcore"
 
+	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
 	"github.com/yanet-platform/yanet2/common/go/logging"
 	"github.com/yanet-platform/yanet2/common/go/operator"
 	"github.com/yanet-platform/yanet2/common/go/xcfg"
@@ -102,6 +104,11 @@ func (m *Config) LoggingConfig() *logging.Config {
 func (m *Config) Validate() error {
 	if len(m.Gateways) == 0 {
 		return errors.New("at least one gateway must be configured")
+	}
+	for key, device := range m.LinkMap {
+		if err := commonpb.ValidateDeviceName(fmt.Sprintf("link_map[%q]", key), device); err != nil {
+			return err
+		}
 	}
 
 	return nil
@@ -201,6 +208,10 @@ type StaticNeighbourConfig struct {
 	Device string `yaml:"device"`
 	// Priority overrides the table default priority when non-zero.
 	Priority uint32 `yaml:"priority"`
+}
+
+func (m *StaticNeighbourConfig) Validate() error {
+	return commonpb.ValidateDeviceName("device", m.Device)
 }
 
 // NetlinkMonitorConfig configures the kernel neighbour discovery via

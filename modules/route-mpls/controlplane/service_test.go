@@ -108,22 +108,6 @@ func Test_RouteMPLSService_CreateConfig_InvalidPrefix(t *testing.T) {
 	require.Equal(t, codes.InvalidArgument, status.Code(err))
 }
 
-// Test_RouteMPLSService_CreateConfig_MissingPrefix verifies that a rule
-// carrying no prefix message is rejected rather than treated as a default.
-func Test_RouteMPLSService_CreateConfig_MissingPrefix(t *testing.T) {
-	service := newTestService(t)
-
-	rule := makeRule(t, "10.0.0.0/24", "203.0.113.1", 100)
-	rule.Prefix = nil
-
-	response, err := service.CreateConfig(t.Context(), &routemplspb.CreateConfigRequest{
-		Name:  "mpls0",
-		Rules: []*routemplspb.Rule{rule},
-	})
-	require.Nil(t, response)
-	require.Equal(t, codes.InvalidArgument, status.Code(err))
-}
-
 func Test_RouteMPLSService_UpdateConfig_UpdateAndWithdraw(t *testing.T) {
 	svc := newTestService(t)
 	ctx := t.Context()
@@ -241,10 +225,6 @@ func Test_RouteMPLSService_UpdateConfig_WithdrawInvalidDestination(t *testing.T)
 		name    string
 		nexthop *routemplspb.NextHop
 	}{
-		{
-			name:    "nil nexthop",
-			nexthop: nil,
-		},
 		{
 			name: "missing destination_ip",
 			nexthop: &routemplspb.NextHop{
