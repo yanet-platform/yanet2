@@ -30,11 +30,9 @@ worker_entry_terminal_egress(
 	struct packet_front *packet_front
 ) {
 	const uint16_t *backing = config_gen_ectx->abs_egress_backing;
+	struct packet_list *buckets = config_gen_ectx->abs_tx_buckets;
 	uint64_t dropped_packets = 0;
 	uint64_t dropped_bytes = 0;
-
-	struct packet_list survive;
-	packet_list_init(&survive);
 
 	struct packet *packet;
 	while ((packet = packet_list_pop(&packet_front->output)) != NULL) {
@@ -48,15 +46,14 @@ worker_entry_terminal_egress(
 			dropped_packets += 1;
 			dropped_bytes += packet->data_len;
 		} else {
-			packet_list_add(&survive, packet);
+			packet_list_add(buckets + port, packet);
 		}
 	}
 
-	packet_list_concat(&packet_front->output, &survive);
 	packet_front->drop_count += dropped_packets;
 	packet_front->drop_bytes += dropped_bytes;
-	packet_front->output_count -= dropped_packets;
-	packet_front->output_bytes -= dropped_bytes;
+	packet_front->output_count = 0;
+	packet_front->output_bytes = 0;
 
 	if (dropped_packets != 0) {
 		counter_add_packets_bytes(

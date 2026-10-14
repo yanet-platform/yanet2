@@ -663,6 +663,17 @@ dataplane_ut_run(
 	packet_list_concat(&result->drop, &packet_front->drop);
 	packet_front_init(packet_front);
 
+	// The write stage a real worker runs is absent here, so the
+	// transmit buckets the output-entry terminals filled are the
+	// egress set: every bucket's packets would be written out, and
+	// they become the result's output in bucket order.
+	struct packet_list *buckets = config_gen_ectx->abs_tx_buckets;
+	for (uint32_t bucket_idx = 0;
+	     bucket_idx < config_gen_ectx->tx_bucket_count;
+	     ++bucket_idx) {
+		packet_list_concat(&result->output, buckets + bucket_idx);
+	}
+
 	pthread_mutex_unlock(dp_config_external_round_lock(ut->dp_config));
 }
 

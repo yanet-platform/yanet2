@@ -228,45 +228,44 @@ worker_write(
 	// Free all ready mbufs from tx write channels
 	worker_collect_from_port(worker);
 
-	// Drain the output list; transmitted packets are freed and failures
-	// are re-added via packet_front_output, so reset the counters first.
-	packet_front->output_count = 0;
-	packet_front->output_bytes = 0;
-
 	uint16_t to_write = 0;
 
-	struct packet *packet;
-	while ((packet = packet_list_pop(&packet_front->output)) != NULL) {
-		if (to_write == ctx->write_size) {
-			worker_submit_burst(worker, mbufs, to_write, &failed);
-			to_write = 0;
-		}
+	// Drain the transmit buckets the output-entry terminals filled:
+	// each bucket is already the egress decision for its packets, so
+	// this worker's own device goes straight into the local burst and
+	// every other device's bucket crosses through its pipes. No
+	// per-packet destination is read here.
+	if (config_gen_ectx != NULL) {
+		struct packet_list *buckets = config_gen_ectx->abs_tx_buckets;
+		for (uint32_t bucket_idx = 0;
+		     bucket_idx < config_gen_ectx->tx_bucket_count;
+		     ++bucket_idx) {
+			struct packet *packet;
+			while ((packet = packet_list_pop(buckets + bucket_idx)
+			       ) != NULL) {
+				if (to_write == ctx->write_size) {
+					worker_submit_burst(
+						worker, mbufs, to_write, &failed
+					);
+					to_write = 0;
+				}
 
-		// Resolve the egress through the generation's backing table:
-		// the packet names a registry device, the table names the
-		// physical port behind it. A port-less device is not a
-		// transmit failure, so it joins the failures without
-		// counting one.
-		uint16_t backing = UINT16_MAX;
-		if (packet->tx_device_id < config_gen_ectx->device_count) {
-			backing = config_gen_ectx->abs_egress_backing
-					  [packet->tx_device_id];
-		}
-
-		if (backing == UINT16_MAX) {
-			packet_list_add(&failed, packet);
-		} else if (backing == worker->device_id) {
-			mbufs[to_write] = packet_to_mbuf(packet);
-			++to_write;
-		} else {
-			worker_tx_stage(
-				worker->write_ctx.tx_connections,
-				worker->dataplane->device_count,
-				worker->dp_worker,
-				packet,
-				backing,
-				&failed
-			);
+				if (bucket_idx == worker->device_id) {
+					mbufs[to_write] =
+						packet_to_mbuf(packet);
+					++to_write;
+				} else {
+					worker_tx_stage(
+						worker->write_ctx
+							.tx_connections,
+						worker->dataplane->device_count,
+						worker->dp_worker,
+						packet,
+						(uint16_t)bucket_idx,
+						&failed
+					);
+				}
+			}
 		}
 	}
 

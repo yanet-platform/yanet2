@@ -448,6 +448,7 @@ config_gen_ectx_resolve_counters(struct config_gen_ectx *config_gen_ectx) {
 		ADDR_OF(&config_gen_ectx->device_ptrs);
 	config_gen_ectx->abs_egress_backing =
 		ADDR_OF(&config_gen_ectx->egress_backing);
+	config_gen_ectx->abs_tx_buckets = ADDR_OF(&config_gen_ectx->tx_buckets);
 	for (uint64_t idx = 0; idx < config_gen_ectx->device_count; ++idx) {
 		config_gen_ectx->devices[idx] = ADDR_OF(device_ptrs + idx);
 		struct device_ectx *device_ectx = config_gen_ectx->devices[idx];

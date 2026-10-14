@@ -1580,6 +1580,16 @@ config_gen_ectx_free(
 		);
 	}
 
+	struct packet_list *tx_buckets = ADDR_OF(&config_gen_ectx->tx_buckets);
+	if (tx_buckets != NULL) {
+		memory_bfree(
+			memory_context,
+			tx_buckets,
+			sizeof(struct packet_list) *
+				config_gen_ectx->tx_bucket_count
+		);
+	}
+
 	struct object_ectx **objects = ADDR_OF(&config_gen_ectx->objects);
 	if (objects != NULL) {
 		for (uint64_t object_idx = 0;
@@ -1998,6 +2008,28 @@ config_gen_ectx_create(
 	}
 	SET_OFFSET_OF(&config_gen_ectx->egress_backing, egress_backing);
 
+	// One transmit bucket per physical port: every egress the backing
+	// table can name has a bucket to land in.
+	struct dp_config *dp_config = ADDR_OF(&cp_config->dp_config);
+	uint32_t tx_bucket_count =
+		(uint32_t)dp_config->dp_topology.device_count;
+	config_gen_ectx->tx_bucket_count = tx_bucket_count;
+	struct packet_list *tx_buckets = (struct packet_list *)memory_balloc(
+		memory_context, sizeof(struct packet_list) * tx_bucket_count
+	);
+	if (tx_buckets == NULL && tx_bucket_count > 0) {
+		yanet_error_add(
+			err,
+			"failed to allocate memory for the transmit "
+			"buckets of the config generation"
+		);
+		goto error;
+	}
+	for (uint32_t idx = 0; idx < tx_bucket_count; ++idx) {
+		packet_list_init(tx_buckets + idx);
+	}
+	SET_OFFSET_OF(&config_gen_ectx->tx_buckets, tx_buckets);
+
 	struct cp_config_counter_storage_registry *registry =
 		(struct cp_config_counter_storage_registry *)memory_balloc(
 			&cp_config->memory_context,
@@ -2072,7 +2104,6 @@ config_gen_ectx_create(
 	}
 
 	// FIXME: cp_config_gen_device_count
-	struct dp_config *dp_config = ADDR_OF(&cp_config->dp_config);
 	for (uint64_t device_idx = 0; device_idx < device_count; ++device_idx) {
 
 		struct cp_device *cp_device =

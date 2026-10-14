@@ -558,6 +558,23 @@ struct config_gen_ectx {
 	// before the context is released to workers; it is zero until
 	// then.
 	uint16_t *abs_egress_backing;
+
+	// Transmit output buckets, one per physical device, filled by the
+	// output-entry terminals as they decide each packet's egress.
+	//
+	// A packet lands in the bucket of the port it will leave through,
+	// so the write stage drains whole buckets — its own device into the
+	// local burst, every other into that device's pipes — without
+	// reading a per-packet destination again. The lists are round
+	// scratch like the round front: empty at the end of every round.
+	uint32_t tx_bucket_count;
+	struct packet_list *tx_buckets;
+	// The same array, as an absolute address for the packet hot path.
+	//
+	// The publishing process copies it from the relative field above
+	// before the context is released to workers; it is zero until
+	// then.
+	struct packet_list *abs_tx_buckets;
 	// The generation's devices, as absolute addresses for the packet
 	// hot path.
 	//
