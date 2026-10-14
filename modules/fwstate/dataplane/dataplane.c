@@ -463,7 +463,7 @@ struct fwstate_sync_batch {
 	uint32_t count;
 	uint32_t limit;
 	uint16_t rx_device_id;
-	uint16_t tx_device_id;
+	uint16_t device_id;
 	const struct fw_state_sync_frame *frames[FWSTATE_SYNC_BATCH_MAX];
 };
 
@@ -555,7 +555,7 @@ fwstate_sync_batch_flush(struct fwstate_emitter *emitter) {
 			batch->frames + done,
 			batch->count - done,
 			batch->rx_device_id,
-			batch->tx_device_id,
+			batch->device_id,
 			packet
 		);
 		if (unlikely(written <= 0)) {
@@ -585,13 +585,13 @@ fwstate_sync_batch_add(
 	struct fwstate_sync_batch *batch = &emitter->batch;
 
 	if (batch->count > 0 && (batch->count >= batch->limit ||
-				 batch->tx_device_id != record->tx_device_id)) {
+				 batch->device_id != record->device_id)) {
 		fwstate_sync_batch_flush(emitter);
 	}
 
 	batch->frames[batch->count++] = &record->frame;
 	batch->rx_device_id = record->rx_device_id;
-	batch->tx_device_id = record->tx_device_id;
+	batch->device_id = record->device_id;
 }
 
 // Apply one frame of a family to its table, counting into the family's

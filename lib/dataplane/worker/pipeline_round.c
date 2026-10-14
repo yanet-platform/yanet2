@@ -37,8 +37,8 @@ worker_entry_terminal_egress(
 	struct packet *packet;
 	while ((packet = packet_list_pop(&packet_front->output)) != NULL) {
 		uint16_t port = UINT16_MAX;
-		if (packet->tx_device_id < config_gen_ectx->device_count) {
-			port = backing[packet->tx_device_id];
+		if (packet->device_id < config_gen_ectx->device_count) {
+			port = backing[packet->device_id];
 		}
 
 		if (port == UINT16_MAX) {

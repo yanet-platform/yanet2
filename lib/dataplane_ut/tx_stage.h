@@ -22,9 +22,7 @@ dataplane_ut_tx_stage_free(struct dataplane_ut_tx_stage *fixture);
 // flow hash. Returns NULL on exhaustion.
 struct packet *
 dataplane_ut_tx_stage_packet(
-	struct dataplane_ut_tx_stage *fixture,
-	uint16_t tx_device_id,
-	uint32_t hash
+	struct dataplane_ut_tx_stage *fixture, uint16_t device_id, uint32_t hash
 );
 
 // Offer one packet to the staging path, addressed to a device.
@@ -32,7 +30,7 @@ void
 dataplane_ut_tx_stage_offer(
 	struct dataplane_ut_tx_stage *fixture,
 	struct packet *packet,
-	uint16_t tx_device_id
+	uint16_t device_id
 );
 
 // Hand every pipe's held packets to their consumers.

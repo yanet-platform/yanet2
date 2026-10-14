@@ -154,6 +154,7 @@ func Test_Ring_ParseRecordMeta_ValidRecord(t *testing.T) {
 		PipelineIdx: 7,
 		RxDeviceId:  11,
 		TxDeviceId:  22,
+		DeviceId:    22,
 		Queue:       uint32(pdumppb.MaxMode),
 	}
 	require.Equal(t, want, got)

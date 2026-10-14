@@ -21,22 +21,22 @@ import (
 
 type PacketData struct {
 	Payload    []uint8
-	TxDeviceId uint16
+	DeviceId   uint16
 	RxDeviceId uint16
 }
 
-func NewPacketData(txDeviceId uint16, rxDeviceId uint16, packet gopacket.Packet) PacketData {
-	return PacketData{Payload: packet.Data(), TxDeviceId: txDeviceId, RxDeviceId: rxDeviceId}
+func NewPacketData(deviceId uint16, rxDeviceId uint16, packet gopacket.Packet) PacketData {
+	return PacketData{Payload: packet.Data(), DeviceId: deviceId, RxDeviceId: rxDeviceId}
 }
 
-func PacketsData(txDeviceId uint16, rxDeviceId uint16, packets ...gopacket.Packet) []PacketData {
+func PacketsData(deviceId uint16, rxDeviceId uint16, packets ...gopacket.Packet) []PacketData {
 	payload := make([]PacketData, 0, len(packets))
 	for idx := range packets {
 		payload = append(
 			payload,
 			PacketData{
 				Payload:    packets[idx].Data(),
-				TxDeviceId: txDeviceId,
+				DeviceId:   deviceId,
 				RxDeviceId: rxDeviceId,
 			},
 		)
@@ -51,10 +51,12 @@ type Packet C.struct_packet
 //
 // Each element of segments becomes one mbuf segment allocated at exactly that
 // segment's length, so an over-read past a segment boundary is detectable by
-// AddressSanitizer. parse_packet is run on the assembled head mbuf.
+// AddressSanitizer. parse_packet is run on the assembled head mbuf; the device
+// ids name the pipeline the packet enters, matching the executing-device
+// contract of the packet metadata.
 // Returns an error if segments is empty, the total payload is zero, or the
 // underlying C call fails.
-func NewPacketFromSegments(segments [][]byte, txDeviceId, rxDeviceId uint16) (*Packet, error) {
+func NewPacketFromSegments(segments [][]byte, deviceId, rxDeviceId uint16) (*Packet, error) {
 	if len(segments) == 0 {
 		return nil, fmt.Errorf("failed to create segmented packet: no segments provided")
 	}
@@ -88,7 +90,7 @@ func NewPacketFromSegments(segments [][]byte, txDeviceId, rxDeviceId uint16) (*P
 	packetInfo := C.struct_packet_info{
 		data:         (*C.uint8_t)(&payload[0]),
 		size:         C.uint16_t(len(payload)),
-		tx_device_id: C.uint16_t(txDeviceId),
+		device_id:    C.uint16_t(deviceId),
 		rx_device_id: C.uint16_t(rxDeviceId),
 	}
 
@@ -110,7 +112,7 @@ func NewPacketFromData(data PacketData) (*Packet, error) {
 	packetData := C.struct_packet_info{
 		data:         (*C.uint8_t)(&data.Payload[0]),
 		size:         C.uint16_t(len(data.Payload)),
-		tx_device_id: C.uint16_t(data.TxDeviceId),
+		device_id:    C.uint16_t(data.DeviceId),
 		rx_device_id: C.uint16_t(data.RxDeviceId),
 	}
 
@@ -128,7 +130,7 @@ func (packet *Packet) Data() PacketData {
 	bytes := unsafe.Slice((*uint8)(data.data), size)
 	return PacketData{
 		Payload:    bytes,
-		TxDeviceId: uint16(data.tx_device_id),
+		DeviceId:   uint16(data.device_id),
 		RxDeviceId: uint16(data.rx_device_id),
 	}
 }
@@ -343,7 +345,7 @@ func NewPacketFrontFromPayload(pinner *runtime.Pinner, payload [][]byte) (*Packe
 	for idx := range payload {
 		packets = append(packets, PacketData{
 			Payload:    payload[idx],
-			TxDeviceId: 0,
+			DeviceId:   0,
 			RxDeviceId: 0,
 		})
 	}

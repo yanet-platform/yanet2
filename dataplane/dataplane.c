@@ -173,19 +173,19 @@ dataplane_connect_devices(
 			    dataplane->device_count);
 			return -1;
 		}
-		if (connection->dst_device_id >= dataplane->device_count) {
+		if (connection->device_id >= dataplane->device_count) {
 			LOG(ERROR,
 			    "connection %lu: destination device_id %lu out of "
 			    "range (device count %u)",
 			    conn_idx,
-			    connection->dst_device_id,
+			    connection->device_id,
 			    dataplane->device_count);
 			return -1;
 		}
 		if (dataplane_connect_device(
 			    dataplane,
 			    dataplane->devices + connection->src_device_id,
-			    dataplane->devices + connection->dst_device_id
+			    dataplane->devices + connection->device_id
 		    )) {
 			LOG(ERROR,
 			    "failed to configure connection %lu",

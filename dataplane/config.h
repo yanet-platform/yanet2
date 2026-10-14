@@ -37,7 +37,7 @@ struct dataplane_device_config {
 
 struct dataplane_connection_config {
 	uint64_t src_device_id;
-	uint64_t dst_device_id;
+	uint64_t device_id;
 	char src_device[80];
 	char dst_device[80];
 };

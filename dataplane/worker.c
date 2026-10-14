@@ -116,7 +116,7 @@ worker_process_staged(
 		// registry namespace, and the absent-device sentinel resolves
 		// no device below, so receive drops into it.
 		packet->rx_device_id = config_gen_ectx->worker_rx_device_id;
-		packet->tx_device_id = config_gen_ectx->worker_rx_device_id;
+		packet->device_id = config_gen_ectx->worker_rx_device_id;
 
 		if (parse_packet(packet)) {
 			struct rte_mbuf *mbuf = packet_to_mbuf(packet);
@@ -126,7 +126,7 @@ worker_process_staged(
 		}
 
 		struct device_ectx *device_ectx = config_gen_ectx_get_device(
-			config_gen_ectx, packet->tx_device_id
+			config_gen_ectx, packet->device_id
 		);
 		if (device_ectx == NULL) {
 			rte_pktmbuf_free(ctx->staged[idx]);

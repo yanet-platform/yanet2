@@ -51,7 +51,7 @@ func TestPacket(t *testing.T) {
 
 	data := PacketData{
 		Payload:    gopacketData,
-		TxDeviceId: 1,
+		DeviceId:   1,
 		RxDeviceId: 2,
 	}
 	packet, err := NewPacketFromData(data)
@@ -113,7 +113,7 @@ func genPackets(t *testing.T, pinner *runtime.Pinner, count uint64) []*Packet {
 
 		packet, err := NewPacketFromData(PacketData{
 			Payload:    data,
-			TxDeviceId: uint16(idx % 1000),
+			DeviceId:   uint16(idx % 1000),
 			RxDeviceId: uint16(idx * 13 % 1000),
 		})
 

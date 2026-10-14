@@ -82,7 +82,7 @@ fwstate_fill_sync_record(
  * @param frames Frames to copy, in order
  * @param count Number of frames
  * @param rx_device_id Receive device of the sync packet
- * @param tx_device_id Transmit device of the sync packet
+ * @param device_id Transmit device of the sync packet
  * @param sync_pkt Freshly allocated packet to fill
  * @return the number of frames written, or -1 when not even one fits
  */
@@ -91,7 +91,7 @@ fwstate_build_sync_packet(
 	const struct fw_state_sync_frame *const *frames,
 	uint32_t count,
 	uint16_t rx_device_id,
-	uint16_t tx_device_id,
+	uint16_t device_id,
 	struct packet *sync_pkt
 );
 

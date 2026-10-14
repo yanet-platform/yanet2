@@ -146,7 +146,7 @@ resolve_connections(struct dataplane_config *config) {
 		}
 
 		conn->src_device_id = (uint64_t)src_id;
-		conn->dst_device_id = (uint64_t)dst_id;
+		conn->device_id = (uint64_t)dst_id;
 	}
 	return 0;
 }

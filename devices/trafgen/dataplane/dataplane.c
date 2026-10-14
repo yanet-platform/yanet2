@@ -68,7 +68,7 @@ trafgen_emit_frame(
 	rte_memcpy(data, frames + offsets[frame_idx], len);
 
 	packet->rx_device_id = device_id;
-	packet->tx_device_id = device_id;
+	packet->device_id = device_id;
 
 	if (parse_packet(packet)) {
 		worker_packet_free(packet);

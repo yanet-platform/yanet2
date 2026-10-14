@@ -298,7 +298,7 @@ init_packet_with_mbuf(
 ) {
 	memset(packet, 0, sizeof(struct packet));
 	packet->mbuf = mbuf;
-	packet->tx_device_id = data->tx_device_id;
+	packet->device_id = data->device_id;
 	packet->rx_device_id = data->rx_device_id;
 	return parse_packet(packet);
 }
@@ -343,8 +343,7 @@ packet_info(const struct packet *p) {
 	// TODO: multisegment packets
 	size_t size = m->data_len;
 	uint8_t *data = rte_pktmbuf_mtod(m, uint8_t *);
-	return (struct packet_info){data, size, p->tx_device_id, p->rx_device_id
-	};
+	return (struct packet_info){data, size, p->device_id, p->rx_device_id};
 }
 
 int

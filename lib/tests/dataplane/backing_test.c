@@ -356,11 +356,11 @@ test_terminal_egress_drops_portless_destinations(void) {
 	memset(&dangling, 0, sizeof(dangling));
 	memset(&beyond, 0, sizeof(beyond));
 	// Registry slots: portB is zero, userX is one, portA is two.
-	through.tx_device_id = 2;
+	through.device_id = 2;
 	through.data_len = 100;
-	dangling.tx_device_id = 1;
+	dangling.device_id = 1;
 	dangling.data_len = 60;
-	beyond.tx_device_id = 999;
+	beyond.device_id = 999;
 	beyond.data_len = 40;
 
 	struct packet_front front;
