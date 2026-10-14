@@ -551,25 +551,22 @@ acl_classify_tcp4(
 		classify_joint_lookup(
 			&tcp->flags_joint, src, flags, mid, count
 		);
-		classify_compact_classes(
-			&flt->root_compact, core_classes + off, dst, count
-		);
-		classify_combine(
+		classify_rule_table_lookup(
 			&flt->root_joint,
-			&flt->rule_map,
-			dst,
+			core_classes + off,
 			mid,
 			results + off,
 			count
 		);
-		// The without-ports decoding of the vacuous port rules: the
-		// core classes joined with the flags classes alone, merged by
-		// rule order. A ruleset without such rules leaves the map
-		// empty and skips the lookups.
-		if (flt->vac_rule_map.size != 0) {
-			classify_combine(
+		// The without-ports decoding of the vacuous port rules,
+		// merged by rule order.
+		//
+		// The core classes joined with the flags classes alone carry
+		// the original first-match rule indices. A ruleset without
+		// such rules leaves the joint empty and skips the lookups.
+		if (flt->vac_joint.v_dim != 0) {
+			classify_rule_table_lookup(
 				&flt->vac_joint,
-				&flt->vac_rule_map,
 				core_classes + off,
 				flags,
 				mid,
@@ -609,15 +606,9 @@ acl_classify_udp4(
 		);
 
 		classify_joint_lookup(&ports->joint, src, dst, src, count);
-		// The root joint spans the coverage classes of this path's
-		// projection; uncovered core classes read the empty row.
-		classify_compact_classes(
-			&flt->root_compact, core_classes + off, dst, count
-		);
-		classify_combine(
+		classify_rule_table_lookup(
 			&flt->root_joint,
-			&flt->rule_map,
-			dst,
+			core_classes + off,
 			src,
 			results + off,
 			count
@@ -656,9 +647,8 @@ acl_classify_icmp4(
 		const struct packet **batch = packets + off;
 
 		acl_lookup_icmp_type(&icmp->type_attr, batch, type, count);
-		classify_combine(
+		classify_rule_table_lookup(
 			&flt->root_joint,
-			&flt->rule_map,
 			core_classes + off,
 			type,
 			results + off,
@@ -705,23 +695,18 @@ acl_classify_tcp6(
 		classify_joint_lookup(
 			&tcp->flags_joint, src, flags, mid, count
 		);
-		classify_compact_classes(
-			&flt->root_compact, core_classes + off, dst, count
-		);
-		classify_combine(
+		classify_rule_table_lookup(
 			&flt->root_joint,
-			&flt->rule_map,
-			dst,
+			core_classes + off,
 			mid,
 			results + off,
 			count
 		);
 		// The without-ports decoding of the vacuous port rules,
 		// skipped when the ruleset has no such rules.
-		if (flt->vac_rule_map.size != 0) {
-			classify_combine(
+		if (flt->vac_joint.v_dim != 0) {
+			classify_rule_table_lookup(
 				&flt->vac_joint,
-				&flt->vac_rule_map,
 				core_classes + off,
 				flags,
 				mid,
@@ -761,15 +746,9 @@ acl_classify_udp6(
 		);
 
 		classify_joint_lookup(&ports->joint, src, dst, src, count);
-		// The root joint spans the coverage classes of this path's
-		// projection; uncovered core classes read the empty row.
-		classify_compact_classes(
-			&flt->root_compact, core_classes + off, dst, count
-		);
-		classify_combine(
+		classify_rule_table_lookup(
 			&flt->root_joint,
-			&flt->rule_map,
-			dst,
+			core_classes + off,
 			src,
 			results + off,
 			count
@@ -808,9 +787,8 @@ acl_classify_icmp6(
 		const struct packet **batch = packets + off;
 
 		acl_lookup_icmp_type(&icmp->type_attr, batch, type, count);
-		classify_combine(
+		classify_rule_table_lookup(
 			&flt->root_joint,
-			&flt->rule_map,
 			core_classes + off,
 			type,
 			results + off,

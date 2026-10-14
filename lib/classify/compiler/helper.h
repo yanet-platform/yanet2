@@ -5,6 +5,7 @@
 #include "common/value.h"
 
 #include "lib/classify/classify.h"
+#include "lib/classify/rule_table.h"
 
 // The rule coverage classes of a stage's value space over a rule
 // projection, written as a shared memory value line.
@@ -46,6 +47,19 @@ classify_join(
 	uint32_t rule_count,
 	struct value_table *table,
 	struct classifier *out
+);
+
+// The name titles the joint memory context of the first-match rows in
+// the memory tree.
+int
+classify_join_rules(
+	struct memory_context *memory_context,
+	const char *name,
+	const struct classifier *left,
+	const struct classifier *right,
+	const struct classifier_rule *const *rules,
+	uint32_t rule_count,
+	struct rule_table *table
 );
 
 // The name titles the rule map memory context of the decode in the
