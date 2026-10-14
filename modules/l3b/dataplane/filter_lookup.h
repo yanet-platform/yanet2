@@ -1,7 +1,7 @@
 #pragma once
 
 /*
- * Module authored attribute lookups of the l3b classifiers.
+ * Packet lookups must follow the same attribute joins as compilation.
  *
  * Each leaf routine reads one attribute classifier the compile side
  * produced and yields the class of every packet of the batch; the network
@@ -51,10 +51,8 @@ l3b_packet_get_net4_src_batch(
 			struct rte_ipv4_hdr *,
 			packet->network_header.offset
 		);
-		// The addresses sit deep inside the header, so the head
-		// segment of a chained packet must hold the whole header for
-		// the read to stay inside it; an absent address classifies
-		// as zero.
+		// The head-length check protects the address read.
+		// An unread address supplies a zero key, not a fixed class.
 		if (rte_pktmbuf_data_len(mbuf) >=
 		    packet->network_header.offset +
 			    sizeof(struct rte_ipv4_hdr)) {
@@ -77,10 +75,8 @@ l3b_packet_get_net4_dst_batch(
 			struct rte_ipv4_hdr *,
 			packet->network_header.offset
 		);
-		// The addresses sit deep inside the header, so the head
-		// segment of a chained packet must hold the whole header for
-		// the read to stay inside it; an absent address classifies
-		// as zero.
+		// The head-length check protects the address read.
+		// An unread address supplies a zero key, not a fixed class.
 		if (rte_pktmbuf_data_len(mbuf) >=
 		    packet->network_header.offset +
 			    sizeof(struct rte_ipv4_hdr)) {
@@ -103,10 +99,8 @@ l3b_packet_get_net6_src_batch(
 			struct rte_ipv6_hdr *,
 			packet->network_header.offset
 		);
-		// The addresses sit deep inside the header, so the head
-		// segment of a chained packet must hold the whole header for
-		// the read to stay inside it; an absent address classifies
-		// as zero.
+		// The head-length check protects the address read.
+		// An unread address supplies a zero key, not a fixed class.
 		if (rte_pktmbuf_data_len(mbuf) >=
 		    packet->network_header.offset +
 			    sizeof(struct rte_ipv6_hdr)) {
@@ -129,10 +123,8 @@ l3b_packet_get_net6_dst_batch(
 			struct rte_ipv6_hdr *,
 			packet->network_header.offset
 		);
-		// The addresses sit deep inside the header, so the head
-		// segment of a chained packet must hold the whole header for
-		// the read to stay inside it; an absent address classifies
-		// as zero.
+		// The head-length check protects the address read.
+		// An unread address supplies a zero key, not a fixed class.
 		if (rte_pktmbuf_data_len(mbuf) >=
 		    packet->network_header.offset +
 			    sizeof(struct rte_ipv6_hdr)) {
@@ -144,17 +136,13 @@ l3b_packet_get_net6_dst_batch(
 }
 
 /*
- * The transport attribute: the sixteen bit key of the protocol domain,
- * with the protocol number in the high byte and the transport specific
- * byte — the TCP flags, the ICMP and ICMPv6 type — in the low one.
+ * Transport keys encode protocol in the high byte and subtype in the low
+ * byte: TCP flags or ICMP/ICMPv6 type.
  *
- * Every subtype byte this lookup reads must be inside the packet: the
- * parser rejects TCP and UDP segments shorter than their fixed header,
- * and the echo guard ahead of the classification keeps the ICMP types
- * readable; a packet that slips both keeps the plain protocol slot. A
- * non-initial fragment carries the protocol with the header-unavailable
- * tag in the upper bits — the low byte keeps the declared protocol, and
- * the tag is masked away here.
+ * The head-length check protects each subtype read; if unread, its key
+ * byte stays zero. Module dispatch excludes fragments and rejects required
+ * headers outside the head before this lookup. Whole-packet length alone
+ * does not establish head readability.
  */
 static inline void
 l3b_lookup_proto(
@@ -211,11 +199,10 @@ l3b_lookup_port_dst(
 		struct rte_mbuf *mbuf = packet_to_mbuf(packet);
 		uint16_t port = 0;
 
-		// The port pair occupies the first four bytes of the TCP and
-		// the UDP segment, so one word read and one byteswap cover it;
-		// the destination side is the low half after the swap, and the
-		// rest of the header can sit in a later segment of a chained
-		// packet.
+		// Source admission uses the destination service port.
+		//
+		// The head-length check protects the four-byte port pair read;
+		// its low half after byte-order conversion is the destination.
 		if (packet->transport_header.type == IPPROTO_TCP ||
 		    packet->transport_header.type == IPPROTO_UDP) {
 			if (rte_pktmbuf_data_len(mbuf) >=
@@ -236,14 +223,11 @@ l3b_lookup_port_dst(
 	}
 }
 
-// The dispatcher scratch is one fixed frame per classifier: batches are
-// processed in chunks of L3B_CLASSIFY_MAX_BATCH packets, and the frames
-// stay below the sizes the former tape walkers allocated per query.
+// Fixed-size chunks bound dispatcher scratch independently of batch size.
 #define L3B_CLASSIFY_MAX_BATCH 256
 
 /*
- * Resolves the destination classes of an IPv4 batch into the first
- * matching destination rule of the module configuration.
+ * IPv4 destination lookup preserves first-match rule precedence.
  */
 static inline void
 l3b_classify_destination_ip4(
@@ -268,8 +252,6 @@ l3b_classify_destination_ip4(
 
 		l3b_lookup_proto(&cls->proto_attr, batch, protos, count);
 
-		// The joint of the two attributes resolves through the root
-		// table and the decoder line in one step.
 		classify_combine(
 			&cls->root_joint,
 			&cls->rule_map,
@@ -281,8 +263,7 @@ l3b_classify_destination_ip4(
 	}
 }
 
-// Resolves the destination classes of an IPv6 batch, in the same shape
-// as the IPv4 dispatcher.
+// IPv6 destination lookup preserves first-match rule precedence.
 static inline void
 l3b_classify_destination_ip6(
 	const struct l3b_destination_classifier_ip6 *cls,
@@ -318,12 +299,11 @@ l3b_classify_destination_ip6(
 }
 
 /*
- * Whether the source classifiers of a service admit the packet: the
- * family classifier resolves the packet into its first matching source
- * rule, and a service without source rules admits nothing.
+ * Source admission requires a matching client network and service port.
+ * With no source rules, ordinary transport admission fails.
  *
- * The callers hand this only packets the parser gave a complete TCP or
- * UDP header to; anything else keeps the zero port slot.
+ * Module dispatch supplies head-resident required headers. Matched Echo
+ * requests bypass this predicate in service processing.
  */
 static inline bool
 l3b_source_filter_matches(

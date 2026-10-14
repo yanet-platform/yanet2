@@ -34,9 +34,10 @@
 // The ICMP type byte of an initial packet, or -1 when the packet carries
 // no complete ICMP header.
 //
-// The transport region must hold the full header, not just the type byte:
-// an echo request classified by this predicate gets answered in place,
-// which rewrites the type, code and checksum bytes of the same header.
+// The head segment must hold the full header, not just the type byte: an
+// echo request classified by this predicate gets answered in place, which
+// rewrites the type, code and checksum bytes of the same header, and the
+// read below only reaches the head segment of a chained packet.
 static inline int
 l3b_packet_icmp_type(const struct packet *packet) {
 	if (packet->fragment_offset != 0) {
@@ -46,11 +47,11 @@ l3b_packet_icmp_type(const struct packet *packet) {
 	struct rte_mbuf *mbuf = packet_to_mbuf((struct packet *)packet);
 
 	if (packet->transport_header.type == IPPROTO_ICMP) {
-		if (rte_pktmbuf_pkt_len(mbuf) <
+		if (rte_pktmbuf_data_len(mbuf) <
 		    (uint32_t)packet->transport_header.offset +
 			    sizeof(struct yanet_icmp_hdr)) {
-			// The transport region holds no complete header
-			// to classify or rewrite.
+			// The head segment holds no complete header to
+			// classify or rewrite.
 			return -1;
 		}
 		const struct yanet_icmp_hdr *icmp = rte_pktmbuf_mtod_offset(
@@ -61,7 +62,7 @@ l3b_packet_icmp_type(const struct packet *packet) {
 		return icmp->icmp_type;
 	}
 	if (packet->transport_header.type == IPPROTO_ICMPV6) {
-		if (rte_pktmbuf_pkt_len(mbuf) <
+		if (rte_pktmbuf_data_len(mbuf) <
 		    (uint32_t)packet->transport_header.offset +
 			    sizeof(struct yanet_icmp6_hdr)) {
 			return -1;
@@ -74,6 +75,58 @@ l3b_packet_icmp_type(const struct packet *packet) {
 		return icmp6->icmp6_type;
 	}
 	return -1;
+}
+
+// Classifier keys and Echo rewrites require fixed/base headers in the head.
+//
+// This checks base IP, fixed TCP/UDP and complete ICMP headers, not TCP
+// options. Unread protocols and globally short ICMP messages stay exempt:
+// neither enters classification or Echo rewriting.
+static inline bool
+l3b_packet_headers_are_head_resident(const struct packet *packet) {
+	struct rte_mbuf *mbuf = packet_to_mbuf((struct packet *)packet);
+	uint32_t data_len = rte_pktmbuf_data_len(mbuf);
+	uint32_t transport_len;
+	switch (packet->transport_header.type) {
+	case IPPROTO_TCP:
+		transport_len = sizeof(struct rte_tcp_hdr);
+		break;
+	case IPPROTO_UDP:
+		transport_len = sizeof(struct rte_udp_hdr);
+		break;
+	case IPPROTO_ICMP:
+		transport_len = sizeof(struct yanet_icmp_hdr);
+		break;
+	case IPPROTO_ICMPV6:
+		transport_len = sizeof(struct yanet_icmp6_hdr);
+		break;
+	default:
+		return true;
+	}
+	if ((packet->transport_header.type == IPPROTO_ICMP ||
+	     packet->transport_header.type == IPPROTO_ICMPV6) &&
+	    rte_pktmbuf_pkt_len(mbuf) <
+		    packet->transport_header.offset + transport_len) {
+		return true;
+	}
+
+	if (packet->network_header.type ==
+	    rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV4)) {
+		if (data_len < packet->network_header.offset +
+				       sizeof(struct rte_ipv4_hdr)) {
+			return false;
+		}
+	} else if (packet->network_header.type ==
+		   rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV6)) {
+		if (data_len < packet->network_header.offset +
+				       sizeof(struct rte_ipv6_hdr)) {
+			return false;
+		}
+	} else {
+		return true;
+	}
+
+	return data_len >= packet->transport_header.offset + transport_len;
 }
 
 // Whether the packet is an ICMP echo request towards a service address: the
@@ -737,14 +790,12 @@ l3b_schedule_value(
 }
 
 /*
- * Process a single packet through a virtual service.
+ * Service processing preserves backend pins after source admission.
  *
- * The per-family filter is queried first; a non-match aborts with -1. A live
- * session record then pins the flow to its real server; only flows without
- * one go through the hash-derived scheduler, and the choice is written back
- * as a new session record. The chosen real performs the encapsulation.
- *
- * Returns 0 on success, -1 on failure.
+ * Echo replies bypass source filtering and sessions. Other packets require
+ * source admission before consulting an existing session. New flows and
+ * eligible disabled-real reselections use hash or link-counter scheduling;
+ * the chosen real performs encapsulation. Returns 0 on success, -1 on failure.
  */
 static inline int
 l3b_virtual_service_process(
@@ -786,10 +837,12 @@ l3b_virtual_service_process(
 	uint64_t *real_counter_ids =
 		ADDR_OF(&virtual_service->real_counter_ids);
 
-	// An existing session keeps its backend while that backend is still
-	// listed — matched by address, so the session survives service
-	// updates that reorder or replace the list. A disabled backend counts
-	// as a rejection by state and falls through to the scheduler.
+	// Live pins survive backend-list reordering because they match by
+	// address.
+	//
+	// A disabled pin counts a state rejection; only UDP and TCP setup
+	// traffic may then use the scheduler. Established TCP must not move
+	// between reals.
 	uint32_t real_index;
 	struct l3s_key key;
 	l3s_key_of_packet(packet, &key);

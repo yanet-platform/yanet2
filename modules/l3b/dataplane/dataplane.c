@@ -17,11 +17,9 @@
 #include "filter_lookup.h"
 #include "process.h"
 
-// Whether the packet is classifiable by the source and destination
-// classifiers: a TCP or UDP segment, or an ICMP echo request the service
-// answers on its address's behalf. The handler counted-drops every packet
-// the parser marked fragmented before classification, so this predicate
-// only sees unfragmented traffic.
+// Only TCP, UDP and complete Echo requests enter classification.
+//
+// Module dispatch excludes fragments before this predicate is consulted.
 static bool
 l3b_packet_has_transport(const struct packet *packet) {
 	return packet->transport_header.type == IPPROTO_TCP ||
@@ -73,6 +71,11 @@ l3b_handle_packets(
 			continue;
 		}
 
+		// Required headers outside the head are rejected before lookup.
+		if (!l3b_packet_headers_are_head_resident(packet)) {
+			continue;
+		}
+
 		if (packet->network_header.type ==
 		    rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV4)) {
 			ip4_packets[ip4_idx++] = packet;
@@ -84,11 +87,9 @@ l3b_handle_packets(
 		}
 	}
 
-	// The module-level classifiers stay zeroed until the first destination
-	// rule is installed; querying a zeroed classifier is undefined
-	// (value_table_get dereferences a relative pointer via
-	// ADDR_OF_NONNULL). Skip the query and treat every TCP/UDP packet as
-	// unmatched while there are no rules.
+	// Zeroed classifiers must not be queried before rules are installed.
+	//
+	// With no destination rules, TCP/UDP traffic remains unmatched.
 	if (config->destination_filter_rule_count > 0) {
 		l3b_classify_destination_ip4(
 			&config->classifier_ip4,
@@ -113,16 +114,18 @@ l3b_handle_packets(
 		uint16_t type = packet->network_header.type;
 		bool fragmented =
 			(packet->flags & (1 << PACKET_FLAG_FRAGMENTED)) != 0;
+		bool headers_resident =
+			l3b_packet_headers_are_head_resident(packet);
 		bool classified =
-			!fragmented &&
+			!fragmented && headers_resident &&
 			(type == rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV4) ||
 			 type == rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV6)) &&
 			l3b_packet_has_transport(packet);
 
 		if (!classified) {
-			if (fragmented) {
-				// Counted drop before any destination or
-				// source lookup touches the packet.
+			if (fragmented || !headers_resident) {
+				// Fragments and nonresident required headers
+				// counted-drop before any lookup.
 				packet_front_drop(packet_front, packet);
 			} else {
 				packet_front_output(packet_front, packet);
