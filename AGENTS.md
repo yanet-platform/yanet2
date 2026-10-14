@@ -27,6 +27,9 @@ make fuzz [MODULE=<name>]
 make ai/agents                                     # regenerate agent charters from .rulesync/subagents/
 ```
 
+Docker development builds persist Go caches and ccache under `DOCKER_CACHE_DIR` (default `/tmp`); ccache uses its `ccache/` subdirectory with a 10 GB limit. `TAG` selects the development image, including nested Docker recipes.
+Fresh Meson setup automatically discovers ccache when no compiler is specified; explicit `CC` overrides must include the `ccache` prefix (for example, `CC='ccache clang'`) to use it.
+
 ## Layout
 
 - `dataplane/` — DPDK binary (`main.c`, `config.c`, `dpdk.c`, `worker.c`, `drivers/`).
