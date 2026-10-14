@@ -508,6 +508,13 @@ fwstate_emit_sync_packet(
 	uint16_t dst_port = emitter->emit_multicast
 				    ? sync_config->port_multicast
 				    : sync_config->port_unicast;
+	// The packet leaves on the module's own front for the chain's
+	// next module to route.
+	//
+	// In an output pipeline the output-entry terminal then treats the
+	// transmit device the packet already carries as its egress when
+	// nothing routed it; an input pipeline drops unrouted output, so
+	// a routing module must follow there.
 	fwstate_finalize_internal_sync(packet, sync_config, dst_addr, dst_port);
 	emitter->counters->internal_forwarded[0] += 1;
 	emitter->counters->internal_forwarded[1] +=
@@ -565,8 +572,11 @@ fwstate_sync_batch_flush(struct fwstate_emitter *emitter) {
 
 // Queue one applied record for emission.
 //
-// A full batch or a record for another TX device closes the current
-// batch first.
+// A full batch or a record for another transmit device closes the
+// current batch first. The transmit device is the fallback egress: a
+// routing module downstream of the emitter may aim the packet
+// elsewhere, and the receive device rides along from the last record
+// of the batch.
 static void
 fwstate_sync_batch_add(
 	struct fwstate_emitter *emitter,
