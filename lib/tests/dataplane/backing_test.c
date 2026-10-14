@@ -336,6 +336,7 @@ test_terminal_egress_drops_portless_destinations(void) {
 	TEST_ASSERT_NOT_NULL(ectxs, "execution context build failed");
 	struct config_gen_ectx *ectx = ADDR_OF(ectxs);
 	ectx->abs_egress_backing = ADDR_OF(&ectx->egress_backing);
+	ectx->abs_tx_buckets = ADDR_OF(&ectx->tx_buckets);
 
 	// The terminal runs on the port-less device's output entry.
 	//
@@ -376,21 +377,26 @@ test_terminal_egress_drops_portless_destinations(void) {
 	worker_entry_terminal_egress(ectx, entry, &front);
 
 	TEST_ASSERT_EQUAL(
-		1, packet_front_output_count(&front), "one packet survives"
+		0, packet_front_output_count(&front), "the output list drains"
 	);
 	TEST_ASSERT_EQUAL(
 		2, packet_front_drop_count(&front), "two packets drop"
 	);
 	TEST_ASSERT_EQUAL(
-		100, packet_front_output_bytes(&front), "byte accounting holds"
+		0, packet_front_output_bytes(&front), "the output bytes drain"
 	);
 	TEST_ASSERT_EQUAL(
 		100, packet_front_drop_bytes(&front), "dropped bytes add up"
 	);
 	TEST_ASSERT_EQUAL(
-		packet_list_first(&front.output),
+		packet_list_first(ectx->abs_tx_buckets + 0),
 		&through,
-		"the port-bound packet survives"
+		"the port-bound packet lands in its port's bucket"
+	);
+	TEST_ASSERT_EQUAL(
+		packet_list_first(ectx->abs_tx_buckets + 1),
+		NULL,
+		"nothing lands in the other port's bucket"
 	);
 	TEST_ASSERT_EQUAL(
 		drop_counter[0], 2, "the entry's drop counter saw both packets"
