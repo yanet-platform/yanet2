@@ -27,6 +27,7 @@ l3b_session_timeouts_defaults(void) {
 }
 
 #include "common/container_of.h"
+#include "common/network_mask.h"
 #include "common/strutils.h"
 #include "lib/controlplane/agent/agent.h"
 #include "lib/controlplane/config/econtext.h"
@@ -34,8 +35,7 @@ l3b_session_timeouts_defaults(void) {
 #include "lib/dataplane/object/object.h"
 
 /*
- * Field selectors of the source rule: the module rule is handed to the
- * classify compilers directly, every attribute through its getter.
+ * Source attributes borrow their networks and ranges from service rules.
  */
 static inline void
 l3b_rule_get_net4_srcs(
@@ -72,11 +72,10 @@ CLASSIFY_U16_RANGES_COMPILE(
 	l3b_port, struct classify_attr_port, l3b_rule_get_port_ranges
 )
 
-// Spells a projection of the source ruleset through a fresh array: one
-// slot per rule, NULL for the rules the family projection cannot match —
-// the ones without networks of the family, and the ones without port
-// ranges, which no port satisfies. Returns NULL when the array cannot be
-// allocated.
+// Missing-family networks never match; omitted service ports are wildcard.
+//
+// Excluded rules keep their slots so decoded indices retain rule order.
+// Allocation failure returns no projection.
 static const struct classifier_rule **
 l3b_rule_ptrs_project(
 	const struct l3b_source_filter_rule *source_filter_rules,
@@ -93,9 +92,7 @@ l3b_rule_ptrs_project(
 	}
 
 	for (uint32_t idx = 0; idx < rule_count; ++idx) {
-		if (source_filter_rules[idx].port_ranges.count == 0) {
-			rule_ptrs[idx] = NULL;
-		} else if (family_is_ip4) {
+		if (family_is_ip4) {
 			rule_ptrs[idx] =
 				source_filter_rules[idx].net4s.count > 0
 					? &source_filter_rules[idx].rule
@@ -137,15 +134,12 @@ l3b_source_classifier_ip6_free(
 }
 
 /*
- * Compiles the source classifier of one family: the source network
- * attribute joined with the service port attribute over the rules holding
- * networks of the family, decoded over the same projection.
+ * Source classification combines client networks and destination service
+ * ports within one address family while preserving rule order.
  *
- * The stages write straight into the classifier embedded in the service,
- * and a failed stage leaves its own outputs zeroed or released, so the
- * destroy walk finishes a partially built service without per stage
- * cleanup here; the registries and the rule group mappings are the only
- * scratch, released on the common exit of both success and failure.
+ * Persistent outputs belong to the service; constructor failure labels
+ * release partial construction. Temporary registries and rule mappings
+ * are released here on both success and failure.
  */
 static int
 l3b_module_init_source(
@@ -250,9 +244,11 @@ error:
 	return rc;
 }
 
-// Builds both per-family source classifiers of the service; a ruleset
-// without rules leaves them zeroed, and the dataplane admits nothing
-// while the rule count is zero.
+// Rule-less services keep zeroed classifiers and reject source admission.
+// Matched Echo requests bypass source admission in service processing.
+//
+// Masks are validated before classifier construction because prefix-length
+// classifiers cannot represent holes within an IPv4 mask or an IPv6 half.
 static int
 build_source_classifiers(
 	struct virtual_service *virtual_service,
@@ -264,6 +260,34 @@ build_source_classifiers(
 	if (source_filter_rule_count == 0) {
 		virtual_service->source_filter_rule_count = 0;
 		return 0;
+	}
+
+	for (uint32_t rule_idx = 0; rule_idx < source_filter_rule_count;
+	     ++rule_idx) {
+		const struct l3b_source_filter_rule *source_rule =
+			&source_filter_rules[rule_idx];
+		if (!network_net4_masks_are_valid(
+			    source_rule->net4s.items, source_rule->net4s.count
+		    )) {
+			yanet_error_add(
+				err,
+				"source filter rule %u has a non-contiguous "
+				"IPv4 network mask",
+				rule_idx
+			);
+			return -1;
+		}
+		if (!network_net6_masks_are_valid(
+			    source_rule->net6s.items, source_rule->net6s.count
+		    )) {
+			yanet_error_add(
+				err,
+				"source filter rule %u has an IPv6 network "
+				"mask that is not bi-contiguous",
+				rule_idx
+			);
+			return -1;
+		}
 	}
 
 	if (l3b_module_init_source(
@@ -366,9 +390,7 @@ l3b_virtual_service_create(
 		&object->cp_object.memory_context;
 	struct virtual_service *vs = &object->virtual_service;
 
-	// The object allocation is not zeroed, and a service without source
-	// rules never compiles its classifiers in: zero them here so the
-	// destroy walk frees them as empty rather than as arena garbage.
+	// Zero initialization makes empty and partial classifier cleanup safe.
 	memset(&vs->classifier_ip6, 0, sizeof(vs->classifier_ip6));
 	memset(&vs->classifier_ip4, 0, sizeof(vs->classifier_ip4));
 	vs->source_filter_rule_count = 0;
@@ -509,7 +531,6 @@ l3b_virtual_service_create(
 	vs->real_ring.count = 0;
 	vs->real_ring.sequence = 0;
 
-	// Per-service source classifiers.
 	if (build_source_classifiers(
 		    vs,
 		    virtual_service->source_filter_rules,
@@ -534,10 +555,11 @@ l3b_virtual_service_create(
 	return &object->cp_object;
 
 error_ring:
-	// The context teardown below only unlinks the accounting tree, so a
-	// partially compiled classifier must release its own allocations
-	// here; the frees are safe on the zeroed classifiers of an earlier
-	// failure.
+	// Partial classifiers own allocations that accounting teardown cannot
+	// free.
+	//
+	// Explicit release is safe for both zeroed and partially built
+	// families.
 	l3b_source_classifier_ip4_free(memory_context, &vs->classifier_ip4);
 	l3b_source_classifier_ip6_free(memory_context, &vs->classifier_ip6);
 
@@ -585,8 +607,8 @@ l3b_virtual_service_object_destroy(struct cp_object *cp_object) {
 	struct virtual_service *vs = &object->virtual_service;
 	struct memory_context *memory_context = &cp_object->memory_context;
 
-	// Every free below is safe on a zeroed struct, so a partially built
-	// service of a failed create walks the same total destroy.
+	// Classifier release is safe for zeroed families of a rule-less
+	// service.
 	l3b_source_classifier_ip4_free(memory_context, &vs->classifier_ip4);
 	l3b_source_classifier_ip6_free(memory_context, &vs->classifier_ip6);
 

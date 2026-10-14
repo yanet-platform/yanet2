@@ -9,9 +9,8 @@
 #include "lib/controlplane/config/cp_module.h"
 
 /*
- * Destination classifier of one family: the destination network attribute
- * joined with the transport attribute, with the projection decoder folded
- * in.
+ * Destination classification joins network and transport restrictions
+ * within one address family, then selects the first matching rule.
  *
  * The transport attribute is the sixteen bit protocol domain the rules
  * address: the protocol number in the high byte, the transport specific
@@ -38,25 +37,19 @@ struct l3b_destination_classifier_ip6 {
 /*
  * Top-level l3b module configuration published into shared memory.
  *
- * The module-level classifiers resolve an incoming packet into the index of
- * the matched destination rule; rule_object_links holds, per rule, the
- * cp_module object link index through which the per-worker execution context
- * resolves the named virtual service object.
- *
- * Contract: the classifiers stay zeroed until the first destination rule is
- * installed, and the dataplane queries them only while at least one rule
- * exists — a lookup over a zeroed attribute reads through a relative
- * pointer the compile never published.
+ * The classifiers select a destination rule whose object link resolves the
+ * named virtual service in the worker's execution context. They stay zeroed
+ * until a rule is installed and must not be queried without rules: their
+ * relative pointers have no compiled targets yet.
  */
 struct module_config {
 	struct cp_module cp_module;
 
 	uint32_t destination_filter_rule_count;
-	// Object link index per destination filter rule, into
-	// cp_module.objects.
+	// Each destination rule resolves through its module object link.
 	uint64_t *rule_object_links;
-	// Link packets counter registry id per rule; COUNTER_INVALID when the
-	// linked service publishes none.
+	// Each rule counts link packets only if the service publishes that
+	// counter.
 	uint64_t *rule_link_counter_ids;
 
 	struct l3b_destination_classifier_ip6 classifier_ip6;
