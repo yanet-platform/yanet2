@@ -254,8 +254,6 @@ func mirEtherLayers() (layers.Ethernet, layers.IPv4, layers.IPv6, layers.ICMPv4)
 
 // TestMirror_NoMatch verifies that a packet not matched by any rule passes
 // through to the next module unchanged.
-//
-// Covers branch: action == FILTER_RULE_INVALID -> packet_front_output (no target).
 func TestMirror_NoMatch(t *testing.T) {
 	// A rule with only Dst4s and no Src4s is excluded from the ip4 filter
 	// by check_has_ip4 (which requires both src and dst). Such a rule also
@@ -299,8 +297,6 @@ func Test_MirrorBackend_UpdateModuleEmptyRules(t *testing.T) {
 // TestMirror_ModeNone_IPv4 verifies that an IPv4 packet matched by an ip4
 // rule with ModeNone passes through to the next module without device redirect,
 // and that the per-rule counter is incremented.
-//
-// Covers branch: target found, mode == MIRROR_MODE_NONE -> packet_front_output.
 func TestMirror_ModeNone_IPv4(t *testing.T) {
 	eth, ip4, _, icmp := mirEtherLayers()
 	pkt := xpacket.LayersToPacket(t, &eth, &ip4, &icmp)
@@ -337,9 +333,6 @@ func TestMirror_ModeNone_IPv4(t *testing.T) {
 // TestMirror_ModeOut_IPv4 verifies that an IPv4 packet matched by a ModeOut
 // rule is re-queued for egress via the target device, and that the per-rule
 // counter is incremented.
-//
-// Covers branch: target found, mode == MIRROR_MODE_OUT -> set tx_device_id,
-// queue to pending_output.
 func TestMirror_ModeOut_IPv4(t *testing.T) {
 	eth, ip4, _, icmp := mirEtherLayers()
 	pkt := xpacket.LayersToPacket(t, &eth, &ip4, &icmp)
@@ -379,9 +372,6 @@ func TestMirror_ModeOut_IPv4(t *testing.T) {
 // TestMirror_ModeIn_IPv4 verifies that an IPv4 packet matched by a ModeIn
 // rule is re-queued for ingress via the target device, and that the per-rule
 // counter is incremented.
-//
-// Covers branch: target found, mode == MIRROR_MODE_IN -> set tx_device_id,
-// queue to pending_input.
 func TestMirror_ModeIn_IPv4(t *testing.T) {
 	eth, ip4, _, icmp := mirEtherLayers()
 	pkt := xpacket.LayersToPacket(t, &eth, &ip4, &icmp)
@@ -425,9 +415,6 @@ func TestMirror_ModeIn_IPv4(t *testing.T) {
 //
 // The per-rule counter is incremented BEFORE the device translation check,
 // so the counter must show 1 even though no mirror copy is emitted.
-//
-// Covers branch: target found, module_ectx_encode_device returns -1 -> the
-// mirror copy is skipped while the original is forwarded unconditionally.
 func TestMirror_UnmappedDevice(t *testing.T) {
 	eth, ip4, _, icmp := mirEtherLayers()
 	pkt := xpacket.LayersToPacket(t, &eth, &ip4, &icmp)
@@ -576,9 +563,6 @@ func TestMirror_NonIP(t *testing.T) {
 // Rule 0: device-only (L2 filter, action 0).
 // Rule 1: ip4 prefix rule (ip4 filter, action 1).
 // An IPv4 packet satisfies both filters. action = min(0, 1) = 0 -> rule 0 wins.
-//
-// Covers branch: both vlan_result and ip4_result valid -> action = min ->
-// lower-index rule's target is used.
 func TestMirror_MinAction(t *testing.T) {
 	eth, ip4, _, icmp := mirEtherLayers()
 	pkt := xpacket.LayersToPacket(t, &eth, &ip4, &icmp)

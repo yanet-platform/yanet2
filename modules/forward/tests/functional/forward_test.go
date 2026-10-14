@@ -255,8 +255,6 @@ func fwdEtherLayers() (layers.Ethernet, layers.IPv4, layers.IPv6, layers.ICMPv4)
 
 // TestForward_NoMatch verifies that a packet not matched by any rule passes
 // through to the next module unchanged.
-//
-// Covers branch: action == FILTER_RULE_INVALID -> packet_front_output (no target).
 func TestForward_NoMatch(t *testing.T) {
 	// A rule with only Dst4s and no Src4s is excluded from the ip4 filter
 	// by check_has_ip4 (which requires both src and dst). Such a rule also
@@ -286,8 +284,6 @@ func TestForward_NoMatch(t *testing.T) {
 // TestForward_ModeNone_IPv4 verifies that an IPv4 packet matched by an ip4
 // rule with ModeNone passes through to the next module without device redirect,
 // and that the per-rule counter is incremented.
-//
-// Covers branch: target found, mode == FORWARD_MODE_NONE -> packet_front_output.
 func TestForward_ModeNone_IPv4(t *testing.T) {
 	eth, ip4, _, icmp := fwdEtherLayers()
 	pkt := xpacket.LayersToPacket(t, &eth, &ip4, &icmp)
@@ -324,9 +320,6 @@ func TestForward_ModeNone_IPv4(t *testing.T) {
 // TestForward_ModeOut_IPv4 verifies that an IPv4 packet matched by a ModeOut
 // rule is re-queued for egress via the target device, and that the per-rule
 // counter is incremented.
-//
-// Covers branch: target found, mode == FORWARD_MODE_OUT -> set tx_device_id,
-// queue to pending_output.
 func TestForward_ModeOut_IPv4(t *testing.T) {
 	eth, ip4, _, icmp := fwdEtherLayers()
 	pkt := xpacket.LayersToPacket(t, &eth, &ip4, &icmp)
@@ -476,9 +469,6 @@ func TestForward_EmptyCounterLongTargetRegistersInCounterRegistry(t *testing.T) 
 // TestForward_ModeIn_IPv4 verifies that an IPv4 packet matched by a ModeIn
 // rule is re-queued for ingress via the target device, and that the per-rule
 // counter is incremented.
-//
-// Covers branch: target found, mode == FORWARD_MODE_IN -> set tx_device_id,
-// queue to pending_input.
 func TestForward_ModeIn_IPv4(t *testing.T) {
 	eth, ip4, _, icmp := fwdEtherLayers()
 	pkt := xpacket.LayersToPacket(t, &eth, &ip4, &icmp)
@@ -880,8 +870,6 @@ func Test_Forward_ModeOutCrossDeviceLoopAttributesDropToTarget(t *testing.T) {
 //
 // The per-rule counter is incremented BEFORE the device translation check,
 // so the counter must show 1 even though the packet is dropped.
-//
-// Covers branch: target found, module_ectx_encode_device returns -1 -> drop.
 func TestForward_UnmappedDevice(t *testing.T) {
 	eth, ip4, _, icmp := fwdEtherLayers()
 	pkt := xpacket.LayersToPacket(t, &eth, &ip4, &icmp)
@@ -1030,9 +1018,6 @@ func TestForward_NonIP(t *testing.T) {
 // Rule 0: device-only (L2 filter, action 0).
 // Rule 1: ip4 prefix rule (ip4 filter, action 1).
 // An IPv4 packet satisfies both filters. action = min(0, 1) = 0 -> rule 0 wins.
-//
-// Covers branch: both vlan_result and ip4_result valid -> action = min ->
-// lower-index rule's target is used.
 func TestForward_MinAction(t *testing.T) {
 	eth, ip4, _, icmp := fwdEtherLayers()
 	pkt := xpacket.LayersToPacket(t, &eth, &ip4, &icmp)

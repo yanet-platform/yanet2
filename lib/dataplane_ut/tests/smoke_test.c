@@ -216,7 +216,7 @@ run_round_restore_test(void) {
 	ipv4->type_of_service = original_tos;
 	ipv4->hdr_checksum = original_checksum;
 	packet->rx_device_id = 0;
-	packet->tx_device_id = 0;
+	packet->device_id = 0;
 	packet->recirc_remaining = 0;
 	packet->recirc_initialized = 0;
 	TEST_ASSERT_SUCCESS(
@@ -244,7 +244,7 @@ run_round_restore_test(void) {
 		"run_rounds must restore rx device id"
 	);
 	TEST_ASSERT_EQUAL(
-		(long)input.first->tx_device_id,
+		(long)input.first->device_id,
 		0L,
 		"run_rounds must restore tx device id"
 	);

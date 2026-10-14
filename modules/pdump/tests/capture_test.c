@@ -237,7 +237,7 @@ run_record_layout_body(
 	struct packet *packet = pdump_test_build_packet(ut, true, packet_len);
 	TEST_ASSERT_NOT_NULL(packet, "failed to build a test packet");
 	packet->rx_device_id = PDUMP_TEST_RX_DEVICE_ID;
-	packet->tx_device_id = PDUMP_TEST_TX_DEVICE_ID;
+	packet->device_id = PDUMP_TEST_TX_DEVICE_ID;
 	memcpy(expected,
 	       rte_pktmbuf_mtod(packet_to_mbuf(packet), uint8_t *),
 	       snaplen);
@@ -296,9 +296,10 @@ run_record_layout_body(
 		"rx_device_id must name the packet's receiving device"
 	);
 	TEST_ASSERT_EQUAL(
-		(long)rec->hdr.tx_device_id,
+		(long)rec->hdr.device_id,
 		(long)PDUMP_TEST_TX_DEVICE_ID,
-		"tx_device_id must name the packet's transmitting device"
+		"device_id must name the device whose pipeline executed the "
+		"packet"
 	);
 	TEST_ASSERT_EQUAL(
 		(long)rec->hdr.queue,

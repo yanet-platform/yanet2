@@ -18,7 +18,7 @@ import (
 
 type PacketData struct {
 	Data       []uint8
-	TxDeviceId uint16
+	DeviceId   uint16
 	RxDeviceId uint16
 }
 
@@ -26,7 +26,7 @@ func (data *PacketData) asRaw() C.struct_packet_info {
 	return C.struct_packet_info{
 		data:         (*C.uint8_t)(&data.Data[0]),
 		size:         C.uint16_t(len(data.Data)),
-		tx_device_id: C.uint16_t(data.TxDeviceId),
+		device_id:    C.uint16_t(data.DeviceId),
 		rx_device_id: C.uint16_t(data.RxDeviceId),
 	}
 }
@@ -58,7 +58,7 @@ func (packet *Packet) Data() PacketData {
 	bytes := unsafe.Slice((*uint8)(data.data), size)
 	return PacketData{
 		Data:       bytes,
-		TxDeviceId: uint16(data.tx_device_id),
+		DeviceId:   uint16(data.device_id),
 		RxDeviceId: uint16(data.rx_device_id),
 	}
 }

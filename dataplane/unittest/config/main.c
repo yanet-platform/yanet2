@@ -251,9 +251,9 @@ test_valid_config(void) {
 
 	assert(config->connection_count == 2);
 	assert(config->connections[0].src_device_id == 0);
-	assert(config->connections[0].dst_device_id == 1);
+	assert(config->connections[0].device_id == 1);
 	assert(config->connections[1].src_device_id == 1);
-	assert(config->connections[1].dst_device_id == 0);
+	assert(config->connections[1].device_id == 0);
 
 	dataplane_config_free(config);
 

@@ -644,7 +644,7 @@ dataplane_ut_run(
 	struct packet *packet;
 	while ((packet = packet_list_pop(input)) != NULL) {
 		struct device_ectx *device_ectx = config_gen_ectx_get_device(
-			config_gen_ectx, packet->tx_device_id
+			config_gen_ectx, packet->device_id
 		);
 		if (device_ectx == NULL) {
 			packet_front_drop(packet_front, packet);

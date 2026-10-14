@@ -43,9 +43,11 @@ message RecordMeta {
   // ID of the device from which the packet was received.
   uint32 rx_device_id = 6;
   // ID of the device to which the packet may be sent.
-  uint32 tx_device_id = 7;
+  uint32 tx_device_id = 7 [deprecated = true]; // Use device_id instead.
   // Indicates from which packet_list the packet is collected.
   uint32 queue = 8;
+  // ID of the device on whose pipeline the packet was captured.
+  uint32 device_id = 9;
 }
 
 message Record {

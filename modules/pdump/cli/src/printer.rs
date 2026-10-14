@@ -16,6 +16,19 @@ use pnet_packet::{
 
 use crate::{dump_mode, pdumppb};
 
+/// The captured pipeline's device, preferring the renamed field and
+/// falling back to the legacy alias of a server that predates it.
+// The legacy read is deliberate: the alias exists exactly for clients
+// of servers that predate the rename.
+#[allow(deprecated)]
+fn capture_device(meta: &pdumppb::RecordMeta) -> u32 {
+    if meta.device_id != 0 {
+        meta.device_id
+    } else {
+        meta.tx_device_id
+    }
+}
+
 /// Pretty prints a pdumppb::Record metadata field in a concise, single-line
 /// format.
 ///
@@ -24,16 +37,16 @@ use crate::{dump_mode, pdumppb};
 /// * `writer` - A writer to output the formatted text to.
 /// * `meta` - The metadata field from a pdumppb::Record.
 pub fn pretty_print_metadata_concise<W: Write>(mut writer: W, meta: &pdumppb::RecordMeta) -> io::Result<()> {
-    // Format: W:worker_idx P:pipeline_idx RX:rx_device_id TX:tx_device_id
+    // Format: W:worker_idx P:pipeline_idx RX:rx_device_id DEV:device_id
     write!(
         writer,
-        "{} Q:{} W:{} P:{} RX:{} TX:{} ",
+        "{} Q:{} W:{} P:{} RX:{} DEV:{} ",
         format_duration_ns(meta.timestamp),
         dump_mode::to_char(meta.queue),
         meta.worker_idx,
         meta.pipeline_idx,
         meta.rx_device_id,
-        meta.tx_device_id
+        capture_device(meta)
     )
 }
 
@@ -52,7 +65,7 @@ pub fn pretty_print_metadata<W: Write>(mut writer: W, meta: &pdumppb::RecordMeta
     writeln!(writer, "  Pipeline Index: {}", meta.pipeline_idx)?;
     writeln!(writer, "  Data Size:      {}", meta.data_size)?;
     writeln!(writer, "  RX Device ID:   {}", meta.rx_device_id)?;
-    writeln!(writer, "  TX Device ID:   {}", meta.tx_device_id)?;
+    writeln!(writer, "  Device ID:       {}", capture_device(meta))?;
     writeln!(writer, "  Packet Queue:   {}", dump_mode::to_str(meta.queue))?;
     writeln!(writer, "----------------------")?;
     Ok(())
@@ -1640,6 +1653,7 @@ mod tests {
             data_size: 1000,
             rx_device_id: 3,
             tx_device_id: 4,
+            device_id: 4,
             queue: dump_mode::INPUT,
         };
 
@@ -1647,14 +1661,14 @@ mod tests {
         pretty_print_metadata_concise(&mut output, &meta).unwrap();
 
         let output_str = String::from_utf8(output.clone()).unwrap();
-        assert_eq!(output_str, "00:00:01.234.567 Q:I W:1 P:2 RX:3 TX:4 ");
+        assert_eq!(output_str, "00:00:01.234.567 Q:I W:1 P:2 RX:3 DEV:4 ");
 
         meta.queue = dump_mode::DROPS;
         output.clear();
         pretty_print_metadata_concise(&mut output, &meta).unwrap();
 
         let output_str = String::from_utf8(output).unwrap();
-        assert_eq!(output_str, "00:00:01.234.567 Q:D W:1 P:2 RX:3 TX:4 ");
+        assert_eq!(output_str, "00:00:01.234.567 Q:D W:1 P:2 RX:3 DEV:4 ");
     }
 
     #[test]
@@ -1667,6 +1681,7 @@ mod tests {
             data_size: 1000,
             rx_device_id: 3,
             tx_device_id: 4,
+            device_id: 4,
             queue: dump_mode::DROPS,
         };
 
@@ -1682,7 +1697,7 @@ mod tests {
   Pipeline Index: 2
   Data Size:      1000
   RX Device ID:   3
-  TX Device ID:   4
+  Device ID:       4
   Packet Queue:   DROPS
 ----------------------
 ";
@@ -1699,6 +1714,7 @@ mod tests {
             data_size: 1000,
             rx_device_id: 3,
             tx_device_id: 4,
+            device_id: 4,
             queue: dump_mode::DROPS,
         };
 

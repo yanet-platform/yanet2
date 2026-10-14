@@ -721,7 +721,7 @@ func Test_FWState_StashEmission_SplitsOnTxDevice(t *testing.T) {
 	require.Len(t, result.OutputData, 3)
 	var tx, rx, frames []int
 	for _, data := range result.OutputData {
-		tx = append(tx, int(data.TxDeviceId))
+		tx = append(tx, int(data.DeviceId))
 		rx = append(rx, int(data.RxDeviceId))
 		_, _, payload := syncPayload(data.Payload)
 		frames = append(frames, len(payload)/frameSize)

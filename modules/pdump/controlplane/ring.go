@@ -48,9 +48,13 @@ func parseRecordMeta(payload []byte) (meta *pdumppb.RecordMeta, data []byte, ok 
 		WorkerIdx:   binary.LittleEndian.Uint32(payload[16:20]),
 		PipelineIdx: binary.LittleEndian.Uint32(payload[20:24]),
 		RxDeviceId:  uint32(binary.LittleEndian.Uint16(payload[24:26])),
-		TxDeviceId:  uint32(binary.LittleEndian.Uint16(payload[26:28])),
-		Queue:       uint32(payload[28]),
-		DataSize:    uint32(len(data)),
+		// Both device aliases carry the captured pipeline's device so
+		// pre-rename clients keep decoding it during the deprecation
+		// window.
+		TxDeviceId: uint32(binary.LittleEndian.Uint16(payload[26:28])),
+		DeviceId:   uint32(binary.LittleEndian.Uint16(payload[26:28])),
+		Queue:      uint32(payload[28]),
+		DataSize:   uint32(len(data)),
 	}
 	return meta, data, true
 }

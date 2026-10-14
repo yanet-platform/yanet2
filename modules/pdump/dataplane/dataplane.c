@@ -135,7 +135,7 @@ process_queue(
 			// FIXME
 			// .pipeline_idx = pkt->pipeline_idx,
 			.rx_device_id = pkt->rx_device_id,
-			.tx_device_id = pkt->tx_device_id,
+			.device_id = pkt->device_id,
 			.queue = (uint8_t)queue,
 		};
 

@@ -19,7 +19,8 @@ struct pdump_record_hdr {
 	uint32_t worker_idx;
 	uint32_t pipeline_idx;
 	uint16_t rx_device_id;
-	uint16_t tx_device_id;
+	// The device on whose pipeline the packet was captured.
+	uint16_t device_id;
 	uint8_t queue; // enum pdump_mode bitmap
 	uint8_t reserved[3];
 };
@@ -53,8 +54,8 @@ _Static_assert(
 	"a Go cgo reader decodes rx_device_id at a fixed offset"
 );
 _Static_assert(
-	offsetof(struct pdump_record_hdr, tx_device_id) == 26,
-	"a Go cgo reader decodes tx_device_id at a fixed offset"
+	offsetof(struct pdump_record_hdr, device_id) == 26,
+	"a Go cgo reader decodes device_id at a fixed offset"
 );
 _Static_assert(
 	offsetof(struct pdump_record_hdr, queue) == 28,

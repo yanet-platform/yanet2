@@ -145,7 +145,7 @@ craft_single_sync_packet(
 	}
 	const struct fw_state_sync_frame *frames[] = {&record->frame};
 	int written = fwstate_build_sync_packet(
-		frames, 1, record->rx_device_id, record->tx_device_id, sync_pkt
+		frames, 1, record->rx_device_id, record->device_id, sync_pkt
 	);
 	return written == 1 ? 0 : -1;
 }
@@ -158,7 +158,7 @@ test_sync_packet_destination(void) {
 	);
 	assert(rc == 0);
 	src_pkt.rx_device_id = 7;
-	src_pkt.tx_device_id = 9;
+	src_pkt.device_id = 9;
 
 	struct rte_mbuf *sync_mbuf = rte_pktmbuf_alloc(test_pool);
 	assert(sync_mbuf != NULL);
@@ -217,7 +217,7 @@ test_sync_packet_destination(void) {
 	assert((sync_pkt.flags & (1U << PACKET_FLAG_FWSTATE_SYNC_INTERNAL)) == 0
 	);
 	assert(sync_pkt.rx_device_id == src_pkt.rx_device_id);
-	assert(sync_pkt.tx_device_id == src_pkt.tx_device_id);
+	assert(sync_pkt.device_id == src_pkt.device_id);
 	assert(sync_pkt.network_header.offset == ipv6_offset);
 	assert(sync_pkt.transport_header.offset == udp_offset);
 	assert(sync_pkt.data_len == udp_offset + payload_len);
@@ -467,7 +467,7 @@ test_build_packs_frames(void) {
 	       rte_cpu_to_be_16(sizeof(struct rte_udp_hdr) + payload_len));
 	assert(sync_pkt.data_len == payload_offset + payload_len);
 	assert(sync_pkt.rx_device_id == 4);
-	assert(sync_pkt.tx_device_id == 5);
+	assert(sync_pkt.device_id == 5);
 
 	for (size_t idx = 0; idx < 3; ++idx) {
 		const struct fw_state_sync_frame *packed =
