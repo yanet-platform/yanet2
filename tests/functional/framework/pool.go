@@ -305,6 +305,9 @@ func (p *VMPool) startAllFromTemplate(templateOverlay string, snapshotName strin
 		if err := entry.fw.thawRootFilesystem(); err != nil {
 			return fmt.Errorf("VM%d filesystem thaw failed after start from template: %w", i, err)
 		}
+		if err := entry.fw.syncGuestClock(); err != nil {
+			return fmt.Errorf("VM%d guest clock sync failed after start from template: %w", i, err)
+		}
 	}
 
 	for i := range p.vms {

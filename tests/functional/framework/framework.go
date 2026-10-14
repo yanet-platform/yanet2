@@ -1688,6 +1688,9 @@ func (f *TestFramework) restoreSnapshotCore(snapshot string) error {
 	if err := f.Mount9P(); err != nil {
 		return fmt.Errorf("post-restore remount failed: %w", err)
 	}
+	if err := f.syncGuestClock(); err != nil {
+		return fmt.Errorf("sync guest clock after restoring %q: %w", snapshot, err)
+	}
 
 	return nil
 }
@@ -1880,11 +1883,22 @@ func (f *TestFramework) RestoreBooted() error {
 	if err := f.Mount9P(); err != nil {
 		return fmt.Errorf("post-restore 9P mount: %w", err)
 	}
+	if err := f.syncGuestClock(); err != nil {
+		return fmt.Errorf("sync guest clock after booted restore: %w", err)
+	}
 
 	// Reset socket connections (forces DPDK virtio-user reconnect).
 	f.ResetConnections()
 
 	f.log.Infof("Booted restore complete")
+	return nil
+}
+
+func (f *TestFramework) syncGuestClock() error {
+	command := fmt.Sprintf("date --utc --set=@%d", time.Now().Unix())
+	if _, err := f.ExecuteCommand(command); err != nil {
+		return fmt.Errorf("set guest clock: %w", err)
+	}
 	return nil
 }
 
