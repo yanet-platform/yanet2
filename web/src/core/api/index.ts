@@ -12,6 +12,7 @@ export * from './forward';
 export { fwstate } from './fwstate';
 export { fwstatemap } from './fwstatemap';
 export * from './counters';
+export { ring } from './ring';
 
 // Several module clients each declare their own ShowConfigRequest /
 // ShowConfigResponse / Device; re-export one explicitly so the barrel is
@@ -32,6 +33,7 @@ import { forward } from './forward';
 import { fwstate } from './fwstate';
 import { fwstatemap } from './fwstatemap';
 import { counters } from './counters';
+import { ring } from './ring';
 
 export const API = {
     neighbours,
@@ -47,4 +49,5 @@ export const API = {
     fwstate,
     fwstatemap,
     counters,
+    ring,
 };

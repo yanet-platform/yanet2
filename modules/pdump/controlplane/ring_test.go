@@ -2,20 +2,23 @@ package pdump
 
 import (
 	"context"
-	"runtime"
+	"encoding/binary"
+	"errors"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
-	"unsafe"
 
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
-	"go.uber.org/zap/zaptest"
+	"go.uber.org/zap/zapcore"
+	"go.uber.org/zap/zaptest/observer"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/yanet-platform/yanet2/modules/pdump/controlplane/pdumppb/v1"
+	"github.com/yanet-platform/yanet2/objects/ring/bindings/go/cring"
 )
 
 // Test_MaxMode_MatchesC verifies that the pure-Go mode bound matches the
@@ -24,877 +27,444 @@ func Test_MaxMode_MatchesC(t *testing.T) {
 	require.Equal(t, uint32(pdumppb.MaxMode), maxMode)
 }
 
-// Test_MaxRingSize_MatchesC verifies that the pure-Go ring limit matches the
-// allocator's internal pool capacity.
-func Test_MaxRingSize_MatchesC(t *testing.T) {
-	require.Equal(t, uint32(pdumppb.MaxRingSize), maxRingCapacity)
-}
-
-// Test_MaxRingSize_MatchesCGOBuildProfile verifies that the linked ring bound
-// agrees with the usable capacity compiled into the Go bridge.
-func Test_MaxRingSize_MatchesCGOBuildProfile(t *testing.T) {
-	require.Equal(t, compiledMaxRingSize, maxRingSize)
-}
-
-// NativeMaxRingSizeForTest returns the linked allocator's usable ring limit.
-func NativeMaxRingSizeForTest() uint32 {
-	return maxRingSize
-}
-
-const (
-	testRingSize      = 1024
-	testReadChunkSize = 512
-)
-
-// testWorkerWrapper wraps workerArea with C ring buffer for testing
-type testWorkerWrapper struct {
-	cRing *cRingBuffer
-	wa    *workerArea
-}
-
-// testRingBufferWrapper wraps ringBuffer with C ring buffers for testing
-type testRingBufferWrapper struct {
-	rb *ringBuffer
-	ww []*testWorkerWrapper
-}
-
-// createTestWorker creates a worker area for testing
-func createTestWorker(t *testing.T, size int) *testWorkerWrapper {
-	t.Helper()
-
-	// Create C ring buffer structure
-	cRing := &cRingBuffer{
-		size: _Ctype_uint32_t(size),
-		mask: _Ctype_uint32_t(size - 1),
-	}
-
-	worker := &workerArea{
-		writeIdx:    (*uint64)(&cRing.write_idx),
-		readableIdx: (*uint64)(&cRing.readable_idx),
-		readIdx:     0,
-		data:        make([]byte, size),
-		mask:        uint64(size - 1),
-		log:         zaptest.NewLogger(t),
-		buf:         make([]byte, 0, size),
-	}
-
-	return &testWorkerWrapper{
-		wa:    worker,
-		cRing: cRing,
-	}
-}
-
-type ringBufferOption func(*ringBufferConfig)
-
-type ringBufferConfig struct {
-	ringSize int
-}
-
-func WithRingSize(size int) ringBufferOption {
-	return func(c *ringBufferConfig) {
-		c.ringSize = size
-	}
-}
-
-// createTestRingBuffer creates a ring buffer for testing
-func createTestRingBuffer(t *testing.T, numWorkers int, opts ...ringBufferOption) *testRingBufferWrapper {
-	t.Helper()
-
-	config := &ringBufferConfig{
-		ringSize: testRingSize,
-	}
-
-	for _, opt := range opts {
-		opt(config)
-	}
-
-	workers := make([]*workerArea, numWorkers)
-	workerWrappers := make([]*testWorkerWrapper, numWorkers)
-	for i := range numWorkers {
-		wrapper := createTestWorker(t, config.ringSize)
-		workers[i] = wrapper.wa
-		workerWrappers[i] = wrapper
-	}
-	return &testRingBufferWrapper{
-		rb: &ringBuffer{
-			workers:       workers,
-			PerWorkerSize: uint32(config.ringSize),
-			ReadChunkSize: testReadChunkSize,
-		},
-		ww: workerWrappers,
-	}
-}
-
-// writeTestMessage writes a test message to the ring buffer at the specified offset
-func writeTestMessage(t *testing.T, wrapper *testWorkerWrapper, payload []byte) int {
-	t.Helper()
-
-	msg := ringMsgHdr{
-		magic:        ringMsgMagic,
-		total_len:    _Ctype_uint32_t(unsafe.Sizeof(ringMsgHdr{}) + uintptr(len(payload))),
-		timestamp:    1234567890,
-		packet_len:   _Ctype_uint32_t(len(payload)),
-		worker_idx:   1,
-		pipeline_idx: 2,
-		rx_device_id: 3,
-		tx_device_id: 4,
-		queue:        _Ctype_uint8_t(defaultMode),
-	}
-
-	var payloadPtr *uint8
-	if len(payload) > 0 {
-		payloadPtr = &payload[0]
-	}
-
-	pinner := runtime.Pinner{}
-	pinner.Pin(wrapper.wa)
-	defer pinner.Unpin()
-	forTestsPdumpRingWriteMsg(
-		wrapper.cRing,
-		&wrapper.wa.data[0],
-		&msg,
-		payloadPtr,
-	)
-
-	return alignToU32(int(msg.total_len))
-}
-
-// TestAlignToU32 tests the alignment function
-func TestAlignToU32(t *testing.T) {
-	tests := []struct {
-		name     string
-		input    int
-		expected int
-	}{
-		{"already aligned", 0, 0},
-		{"already aligned 4", 4, 4},
-		{"already aligned 8", 8, 8},
-		{"needs alignment +1", 1, 4},
-		{"needs alignment +2", 2, 4},
-		{"needs alignment +3", 3, 4},
-		{"needs alignment +5", 5, 8},
-		{"needs alignment +9", 9, 12},
-		{"large number", 1023, 1024},
-		{"large aligned", 1024, 1024},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := alignToU32(tt.input)
-			assert.Equal(t, tt.expected, result)
-		})
-	}
-}
-
-// TestRingBufferClone tests the Clone functionality
-func TestRingBufferClone(t *testing.T) {
-	original := createTestRingBuffer(t, 2)
-	*original.rb.workers[0].readableIdx = 96
-	*original.rb.workers[0].writeIdx = 150
-	*original.rb.workers[0].readableIdx = 128
-	*original.rb.workers[1].writeIdx = 250
-
-	clone := original.rb.Clone()
-
-	// Verify basic properties are copied
-	assert.Equal(t, original.rb.PerWorkerSize, clone.PerWorkerSize)
-	assert.Equal(t, original.rb.ReadChunkSize, clone.ReadChunkSize)
-	assert.Equal(t, len(original.rb.workers), len(clone.workers))
-
-	// Verify worker areas are properly cloned
-	for i := range original.rb.workers {
-		// writeIdx and readableIdx should point to the same location for all clones
-		assert.Equal(t, unsafe.Pointer(original.rb.workers[i].readableIdx), unsafe.Pointer(clone.workers[i].readableIdx))
-		assert.Equal(t, unsafe.Pointer(original.rb.workers[i].writeIdx), unsafe.Pointer(clone.workers[i].writeIdx))
-		assert.Equal(t, original.rb.workers[i].mask, clone.workers[i].mask)
-		assert.Equal(t, len(original.rb.workers[i].data), len(clone.workers[i].data))
-	}
-}
-
-// TestWorkerAreaHasMore tests the hasMore functionality
-func TestWorkerAreaHasMore(t *testing.T) {
-	tests := []struct {
-		name     string
-		writeIdx uint64
-		readIdx  uint64
-		expected bool
-	}{
-		{
-			name:     "no new data",
-			writeIdx: 100,
-			readIdx:  100,
-			expected: false,
-		},
-		{
-			name:     "has new data",
-			writeIdx: 200,
-			readIdx:  100,
-			expected: true,
-		},
-		{
-			name:     "reader ahead of writer",
-			writeIdx: 100,
-			readIdx:  200,
-			expected: false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			worker := createTestWorker(t, testRingSize).wa
-			*worker.writeIdx = tt.writeIdx
-			worker.readIdx = tt.readIdx
-
-			assert.Equal(t, tt.expected, worker.hasMore())
-		})
-	}
-
-	t.Run("concurrent access", func(t *testing.T) {
-		worker := createTestWorker(t, testRingSize).wa
-
-		var wg sync.WaitGroup
-		results := make([]bool, 100)
-
-		// Start multiple goroutines checking hasMore
-		wg.Add(100)
-		for i := range 100 {
-			go func(idx int) {
-				defer wg.Done()
-				results[idx] = worker.hasMore()
-			}(i)
-		}
-
-		// Concurrently update write index
-		go func() {
-			for range 50 {
-				atomic.AddUint64(worker.writeIdx, 1)
-				time.Sleep(time.Microsecond)
-			}
-		}()
-
-		wg.Wait() // Should not panic (run with race detector)
-	})
-}
-
-// TestWorkerAreaRead tests the read functionality
-func TestWorkerAreaRead(t *testing.T) {
-	t.Run("read single message", func(t *testing.T) {
-		worker := createTestWorker(t, testRingSize)
-		payload := []byte("ABC")
-
-		writeTestMessage(t, worker, payload)
-
-		// Debug: Check ring buffer state after writing
-		writeIdx := *worker.wa.writeIdx
-		readableIdx := *worker.wa.readableIdx
-		t.Logf("After writeTestMessage: writeIdx=%d, readableIdx=%d, readIdx=%d",
-			writeIdx, readableIdx, worker.wa.readIdx)
-
-		records := worker.wa.read(testReadChunkSize)
-		require.Len(t, records, 1)
-
-		record := records[0]
-		assert.Equal(t, uint64(1234567890), record.Meta.Timestamp)
-		assert.Equal(t, uint32(len(payload)), record.Meta.DataSize)
-		assert.Equal(t, uint32(len(payload)), record.Meta.PacketLen)
-		assert.Equal(t, uint32(1), record.Meta.WorkerIdx)
-		assert.Equal(t, uint32(2), record.Meta.PipelineIdx)
-		assert.Equal(t, uint32(3), record.Meta.RxDeviceId)
-		assert.Equal(t, uint32(4), record.Meta.TxDeviceId)
-		assert.False(t, record.Meta.Queue&_Ciconst_PDUMP_DROPS != 0, "meta.queue %b", record.Meta.Queue)
-		assert.True(t, record.Meta.Queue&_Ciconst_PDUMP_INPUT != 0)
-		assert.Equal(t, payload, record.Data)
-	})
-
-	t.Run("read multiple messages", func(t *testing.T) {
-		worker := createTestWorker(t, testRingSize)
-
-		payload1 := []byte("AB")
-		payload2 := []byte("CD")
-
-		writeTestMessage(t, worker, payload1)
-		writeTestMessage(t, worker, payload2)
-
-		records := worker.wa.read(testReadChunkSize)
-		require.Len(t, records, 2)
-
-		assert.Equal(t, payload1, records[0].Data)
-		assert.Equal(t, payload2, records[1].Data)
-	})
-
-	t.Run("incomplete message", func(t *testing.T) {
-		worker := createTestWorker(t, testRingSize)
-		payload := []byte("BCD")
-
-		writeTestMessage(t, worker, payload)
-
-		records := worker.wa.read(40 /*too small chunk size*/)
-		assert.Empty(t, records, "Should not return incomplete messages")
-	})
-
-	t.Run("invalid magic number", func(t *testing.T) {
-		worker := createTestWorker(t, testRingSize)
-		payload := []byte{0x42}
-
-		// First write a valid message
-		writeTestMessage(t, worker, payload)
-
-		// Then corrupt the magic number in the ring buffer data
-		msgHeader := (*ringMsgHdr)(unsafe.Pointer(&worker.wa.data[0]))
-		msgHeader.magic = 0xBADC0DE // Invalid magic
-
-		records := worker.wa.read(testReadChunkSize)
-		assert.Empty(t, records, "Should not return records with invalid magic")
-		assert.Empty(t, worker.wa.buf, "Buffer should be cleared after invalid magic")
-	})
-
-	t.Run("invalid total length", func(t *testing.T) {
-		worker := createTestWorker(t, testRingSize)
-		payload := []byte{0x42}
-
-		// First write a valid message
-		writeTestMessage(t, worker, payload)
-
-		// Then corrupt the total_len in the ring buffer data
-		msgHeader := (*ringMsgHdr)(unsafe.Pointer(&worker.wa.data[0]))
-		msgHeader.total_len = _Ctype_uint32_t(unsafe.Sizeof(ringMsgHdr{}) - 1) // Too small
-
-		records := worker.wa.read(testReadChunkSize)
-		assert.Empty(t, records, "Should not return records with invalid total_len")
-		assert.Empty(t, worker.wa.buf, "Buffer should be cleared after invalid total_len")
-	})
-
-	t.Run("wraparound read", func(t *testing.T) {
-		const smallRingSize = 64
-		worker := createTestWorker(t, smallRingSize)
-		worker.wa.mask = smallRingSize - 1
-
-		payload := []byte("ABCD")
-		headerSize := int(unsafe.Sizeof(ringMsgHdr{}))
-
-		// Position the ring buffer to force wraparound by advancing write_idx
-		startOffset := smallRingSize - headerSize + 2 // Header will wrap
-		*worker.wa.writeIdx = uint64(startOffset)
-		*worker.wa.readableIdx = uint64(startOffset)
-
-		// Write message using the proper function - it will handle wraparound
-		writeTestMessage(t, worker, payload)
-
-		records := worker.wa.read(uint32(smallRingSize))
-		require.Len(t, records, 1)
-
-		record := records[0]
-		assert.Equal(t, payload, record.Data)
-		assert.Equal(t, uint64(1234567890), record.Meta.Timestamp)
-	})
-
-	t.Run("no data available", func(t *testing.T) {
-		worker := createTestWorker(t, testRingSize)
-		*worker.wa.writeIdx = 100
-		*worker.wa.readableIdx = 100
-		worker.wa.readIdx = 100
-
-		records := worker.wa.read(testReadChunkSize)
-		assert.Empty(t, records)
-	})
-
-	t.Run("read with chunk size limit", func(t *testing.T) {
-		worker := createTestWorker(t, testRingSize)
-
-		// Create multiple messages
-		for i := range 10 {
-			payload := []byte{byte(i)}
-			writeTestMessage(t, worker, payload)
-		}
-
-		// Read with small chunk size
-		records := worker.wa.read(100) // Small chunk size
-
-		// Should read some but not all messages due to chunk size limit
-		assert.Greater(t, len(records), 0)
-		assert.LessOrEqual(t, len(records), 10)
-	})
-}
-
-// TestWorkerAreaReadAdditional tests additional read scenarios
-func TestWorkerAreaReadAdditional(t *testing.T) {
-	t.Run("drops flag handling", func(t *testing.T) {
-		worker := createTestWorker(t, testRingSize)
-		payload := []byte{0x42}
-
-		// First write a valid message
-		writeTestMessage(t, worker, payload)
-
-		// Then modify the is_drops flag in the ring buffer data
-		msgHeader := (*ringMsgHdr)(unsafe.Pointer(&worker.wa.data[0]))
-		msgHeader.queue = _Ciconst_PDUMP_DROPS // Set drops flag
-
-		records := worker.wa.read(testReadChunkSize)
-		require.Len(t, records, 1)
-
-		assert.True(t, records[0].Meta.Queue&_Ciconst_PDUMP_DROPS != 0, "Should correctly handle drops flag")
-	})
-}
-
-// TestWorkerAreaOverwriteHandling tests overwrite detection and handling
-func TestWorkerAreaOverwriteHandling(t *testing.T) {
-	t.Run("complete overwrite", func(t *testing.T) {
-		worker := createTestWorker(t, testRingSize)
-
-		payload := []byte{0x42}
-		writeTestMessage(t, worker, payload)
-		// Simulate complete overwrite
-		*worker.wa.readableIdx = *worker.wa.writeIdx + 500 // Overwrite everything
-
-		records := worker.wa.read(testReadChunkSize)
-		assert.Empty(t, records)
-		assert.Empty(t, worker.wa.buf, "Buffer should be cleared after complete overwrite")
-	})
-
-	t.Run("reader behind readable index", func(t *testing.T) {
-		worker := createTestWorker(t, testRingSize)
-		worker.wa.readIdx = 50
-		*worker.wa.readableIdx = 100 // Reader is behind
-		*worker.wa.writeIdx = 200
-
-		// Add stale data to buffer
-		worker.wa.buf = append(worker.wa.buf, []byte{0x01, 0x02, 0x03}...)
-
-		worker.wa.read(testReadChunkSize)
-
-		// Should catch up reader position and clear stale buffer
-		assert.Equal(t, 200, int(worker.wa.readIdx))
-		assert.True(t, len(worker.wa.buf) < 3) // Original buffer should be cleared
-	})
-}
-
-// TestRingBufferSpawnWakers tests the waker functionality
-func TestRingBufferSpawnWakers(t *testing.T) {
-	t.Run("basic waker functionality", func(t *testing.T) {
-		rb := createTestRingBuffer(t, 2)
-		ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
-		defer cancel()
-
-		wakers, _ := rb.rb.spawnWakers(ctx)
-		require.Len(t, wakers, 2)
-
-		// Add data to first worker
-		atomic.StoreUint64(rb.rb.workers[0].writeIdx, 100)
-		atomic.StoreUint64(&rb.rb.workers[0].readIdx, 50)
-
-		// Should receive notification
-		select {
-		case <-wakers[0]:
-			// Expected
-		case <-time.After(50 * time.Millisecond):
-			t.Fatal("Should have received waker notification")
-		}
-	})
-
-	t.Run("waker stops on context cancellation", func(t *testing.T) {
-		rb := createTestRingBuffer(t, 1)
-		ctx, cancel := context.WithCancel(context.Background())
-
-		wakers, _ := rb.rb.spawnWakers(ctx)
-		require.Len(t, wakers, 1)
-
-		// Cancel context
-		cancel()
-
-		// Give some time for goroutine to stop
-		time.Sleep(5 * time.Millisecond)
-
-		// Add data - should not receive notification after context cancellation
-		atomic.StoreUint64(rb.rb.workers[0].writeIdx, 100)
-		atomic.StoreUint64(&rb.rb.workers[0].readIdx, 50)
-
-		select {
-		case <-wakers[0]:
-			t.Fatal("Should not receive notification after context cancellation")
-		case <-time.After(10 * time.Millisecond):
-			// Expected - no notification
-		}
-	})
-}
-
-// Test_RingBuffer_RunReaders_StopsReadingRingOnReturn verifies that no
-// goroutine started by the readers still reads the ring once they return.
+// stubSourceCapacity comfortably fits every test's small, non-wrapping
+// pushes into a stubSource.
+const stubSourceCapacity = 4096
+
+// stubSource is a minimal fake ring source whose write position a test
+// advances directly, into a fixed backing array, with no wraparound and
+// no real ring frame behind it.
 //
-// Every round ends with a plain write to the ring's write index, which
-// the race detector reports against any read still running.
-func Test_RingBuffer_RunReaders_StopsReadingRingOnReturn(t *testing.T) {
-	rb := createTestRingBuffer(t, 1)
-	recordCh := make(chan *pdumppb.Record, 1)
+// The backing array is allocated once, on the first push, and never
+// reassigned again: a concurrent read of it then never races with a
+// later push growing or replacing it, the same way the real ring stays
+// race-free through its write position alone. Its readable position
+// never moves: readable marks the oldest position a record was evicted
+// up to, not the newest write, and this stub never evicts. The real
+// framing and wraparound rules are covered in
+// objects/ring/bindings/go/cring.
+type stubSource struct {
+	data  []byte
+	write atomic.Uint64
+}
 
-	for range 100 {
+func (m *stubSource) Indices() (write, readable uint64) {
+	return m.write.Load(), 0
+}
+
+func (m *stubSource) CopyRange(dst []byte, start, size uint64) {
+	copy(dst, m.data[start:start+size])
+}
+
+// push appends a frame-aligned chunk at the current write position and
+// publishes it.
+//
+// Only the test goroutine ever calls it, so the lazy allocation below
+// never races with itself.
+func (m *stubSource) push(chunk []byte) {
+	if m.data == nil {
+		m.data = make([]byte, stubSourceCapacity)
+	}
+
+	start := m.write.Load()
+	if start+uint64(len(chunk)) > uint64(len(m.data)) {
+		panic("stubSource: push exceeded stubSourceCapacity; this stub does not wrap")
+	}
+	copy(m.data[start:], chunk)
+	m.write.Add(uint64(len(chunk)))
+}
+
+// signalingSource wraps a stubSource and closes a channel the moment
+// its position is queried for the first time, after that query already
+// read the current value.
+//
+// A test waits on that channel to know exactly when a tail reader has
+// captured its starting position, so a write issued right after is
+// guaranteed to land after that position, never folded into it.
+type signalingSource struct {
+	*stubSource
+	called chan struct{}
+	once   sync.Once
+}
+
+func newSignalingSource() *signalingSource {
+	return &signalingSource{stubSource: &stubSource{}, called: make(chan struct{})}
+}
+
+func (m *signalingSource) Indices() (write, readable uint64) {
+	write, readable = m.stubSource.Indices()
+	m.once.Do(func() { close(m.called) })
+	return write, readable
+}
+
+// waitStarted waits for a tail reader to have read this source's starting
+// position.
+func (m *signalingSource) waitStarted(t *testing.T) {
+	t.Helper()
+	select {
+	case <-m.called:
+	case <-time.After(time.Second):
+		t.Fatal("the reader never started reading its source")
+	}
+}
+
+// newRecordFrame builds the ring's own 8-byte frame around the given
+// metadata and payload, aligned to 4 bytes like the real writer.
+func newRecordFrame(meta, data []byte, seqno uint32) []byte {
+	totalLen := uint32(cring.RecordFrameSize) + uint32(len(meta)) + uint32(len(data))
+	aligned := (totalLen + 3) &^ 3
+	buf := make([]byte, aligned)
+	binary.LittleEndian.PutUint32(buf[0:4], totalLen)
+	binary.LittleEndian.PutUint32(buf[4:8], seqno)
+	copy(buf[8:], meta)
+	copy(buf[8+len(meta):], data)
+	return buf
+}
+
+// newRecordMeta builds the 32-byte pdump metadata block
+// (modules/pdump/dataplane/record.h) with a valid magic.
+func newRecordMeta(packetLen, workerIdx uint32) []byte {
+	buf := make([]byte, pdumpRecordHdrSize)
+	binary.LittleEndian.PutUint32(buf[0:4], pdumpRecordMagic)
+	binary.LittleEndian.PutUint32(buf[4:8], packetLen)
+	binary.LittleEndian.PutUint32(buf[16:20], workerIdx)
+	return buf
+}
+
+// Test_Ring_ParseRecordMeta_ValidRecord verifies that a well-formed record
+// decodes every fixed field, including the queue bitmap's drop bit, and
+// keeps the data behind the metadata block.
+func Test_Ring_ParseRecordMeta_ValidRecord(t *testing.T) {
+	meta := newRecordMeta(9000, 3)
+	binary.LittleEndian.PutUint64(meta[8:16], 123456789)
+	binary.LittleEndian.PutUint32(meta[20:24], 7)
+	binary.LittleEndian.PutUint16(meta[24:26], 11)
+	binary.LittleEndian.PutUint16(meta[26:28], 22)
+	meta[28] = pdumppb.MaxMode // the drop bit plus every other mode bit
+
+	payload := append(meta, []byte("hello")...)
+
+	got, data, ok := parseRecordMeta(payload)
+	require.True(t, ok)
+	want := &pdumppb.RecordMeta{
+		Timestamp:   123456789,
+		DataSize:    uint32(len("hello")),
+		PacketLen:   9000,
+		WorkerIdx:   3,
+		PipelineIdx: 7,
+		RxDeviceId:  11,
+		TxDeviceId:  22,
+		Queue:       uint32(pdumppb.MaxMode),
+	}
+	require.Equal(t, want, got)
+	require.Equal(t, []byte("hello"), data)
+}
+
+// Test_Ring_ParseRecordMeta_ShortRecord verifies that a payload shorter
+// than the metadata block is dropped rather than read out of bounds.
+func Test_Ring_ParseRecordMeta_ShortRecord(t *testing.T) {
+	_, _, ok := parseRecordMeta(make([]byte, pdumpRecordHdrSize-1))
+	require.False(t, ok)
+}
+
+// Test_Ring_ParseRecordMeta_BadMagic verifies that a metadata block whose
+// magic does not match is dropped even though its length is otherwise
+// valid.
+func Test_Ring_ParseRecordMeta_BadMagic(t *testing.T) {
+	payload := newRecordMeta(1, 0)
+	payload[0] ^= 0xFF
+
+	_, _, ok := parseRecordMeta(payload)
+	require.False(t, ok)
+}
+
+// Test_Ring_RunReaders_TagsEachWorker verifies that the read session
+// gives each source its own reader: a worker's record carries its own
+// metadata, independently of the other worker's.
+func Test_Ring_RunReaders_TagsEachWorker(t *testing.T) {
+	sigs := []*signalingSource{newSignalingSource(), newSignalingSource()}
+	sources := make([]cring.RecordSource, len(sigs))
+	for idx, sig := range sigs {
+		sources[idx] = sig
+	}
+
+	ctx, cancel := context.WithCancel(t.Context())
+	recordCh := make(chan *pdumppb.Record, len(sources))
+	var group errgroup.Group
+	group.Go(func() error { return runReaders(ctx, sources, 64, zap.NewNop(), recordCh) })
+
+	for _, sig := range sigs {
+		sig.waitStarted(t)
+	}
+	for idx, sig := range sigs {
+		sig.push(newRecordFrame(newRecordMeta(1, uint32(idx)), []byte{byte(idx)}, 0))
+	}
+
+	got := map[uint32][]byte{}
+	for range sources {
+		rec := <-recordCh
+		got[rec.GetMeta().GetWorkerIdx()] = rec.GetData()
+	}
+	require.Equal(t, map[uint32][]byte{0: {0}, 1: {1}}, got)
+
+	cancel()
+	require.ErrorIs(t, group.Wait(), context.Canceled)
+}
+
+// Test_Ring_RunReaders_StartsAtTailSkipsHistory verifies that a session
+// starts at the source's current write position: a record committed
+// before the session starts is never delivered, while one committed
+// after it is.
+func Test_Ring_RunReaders_StartsAtTailSkipsHistory(t *testing.T) {
+	sig := newSignalingSource()
+	sig.push(newRecordFrame(newRecordMeta(1, 0), []byte("before"), 0))
+
+	ctx, cancel := context.WithCancel(t.Context())
+	recordCh := make(chan *pdumppb.Record, 4)
+	var group errgroup.Group
+	group.Go(func() error { return runReaders(ctx, []cring.RecordSource{sig}, 64, zap.NewNop(), recordCh) })
+
+	sig.waitStarted(t)
+	sig.push(newRecordFrame(newRecordMeta(1, 0), []byte("after"), 0))
+
+	rec := <-recordCh
+	require.Equal(t, []byte("after"), rec.GetData(), "a record written before the session started must never arrive")
+
+	cancel()
+	require.ErrorIs(t, group.Wait(), context.Canceled)
+}
+
+// Test_Ring_RunReaders_DropsMalformedRecordAndContinues verifies that
+// malformed records are dropped without ending the session, and the
+// valid record after them still arrives.
+//
+// Three drops must log only one first-drop warning plus one final
+// count, not one line per record.
+func Test_Ring_RunReaders_DropsMalformedRecordAndContinues(t *testing.T) {
+	sig := newSignalingSource()
+
+	ctx, cancel := context.WithCancel(t.Context())
+	recordCh := make(chan *pdumppb.Record, 4)
+	core, logs := observer.New(zapcore.WarnLevel)
+	var group errgroup.Group
+	group.Go(func() error { return runReaders(ctx, []cring.RecordSource{sig}, 64, zap.New(core), recordCh) })
+
+	sig.waitStarted(t)
+
+	badMeta := newRecordMeta(1, 0)
+	badMeta[0] ^= 0xFF // corrupt the magic
+	for range 3 {
+		sig.push(newRecordFrame(badMeta, nil, 0))
+	}
+	sig.push(newRecordFrame(newRecordMeta(1, 0), []byte("ok"), 0))
+
+	rec := <-recordCh
+	require.Equal(t, []byte("ok"), rec.GetData(), "the valid record after the malformed ones must still arrive")
+
+	cancel()
+	require.ErrorIs(t, group.Wait(), context.Canceled)
+
+	require.Equal(t, 1, logs.FilterMessage("dropped the first malformed pdump record in this session").Len(),
+		"three malformed records must log the first-drop warning only once")
+	require.Equal(t, 1, logs.FilterMessage("dropped malformed pdump records in this session").Len(),
+		"the session must log its final drop count exactly once, when it stops")
+}
+
+// raceSourcePlainWrite is a fake ring source whose write position is a
+// plain, unsynchronized field: a stand-in for memory a caller may reuse
+// or free the moment a read session returns.
+//
+// It never actually copies any data, since no test using it ever reads
+// a whole record; it exists only to let the waker poll its position.
+type raceSourcePlainWrite struct {
+	write uint64
+}
+
+func (m *raceSourcePlainWrite) Indices() (write, readable uint64) {
+	return m.write, 0
+}
+
+func (m *raceSourcePlainWrite) CopyRange(dst []byte, start, size uint64) {}
+
+// Test_Ring_RunReaders_StopsWakerBeforeReturning pins that the read
+// session does not return until its waker has stopped touching the
+// sources.
+//
+// The waker polls a source's indices on its own schedule, independent of
+// the readers; a caller that reuses or frees that memory right after
+// the session returns must never still race with it. This source's
+// write position carries no synchronization of its own, so a waker
+// still running when the session returned would race, under the race
+// detector, with the plain write below. Repeated runs (see the gate's
+// -count) make the window this pins reliably observable.
+func Test_Ring_RunReaders_StopsWakerBeforeReturning(t *testing.T) {
+	src := &raceSourcePlainWrite{}
+
+	ctx, cancel := context.WithCancel(t.Context())
+	var group errgroup.Group
+	group.Go(func() error {
+		return runReaders(ctx, []cring.RecordSource{src}, 64, zap.NewNop(), make(chan *pdumppb.Record, 1))
+	})
+
+	cancel()
+	require.ErrorIs(t, group.Wait(), context.Canceled)
+
+	src.write = 1
+}
+
+// pollClock is a fake ring source that records the time of every poll.
+//
+// The waker reads each reader's source once per poll, so inside a
+// synctest bubble the recorded times give the waker's exact intervals in
+// virtual time. A poll also records whether any data had been written
+// by then.
+type pollClock struct {
+	stubSource
+	mu      sync.Mutex
+	polls   []time.Time
+	sawData []bool
+}
+
+func (m *pollClock) Indices() (write, readable uint64) {
+	write, readable = m.stubSource.Indices()
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.polls = append(m.polls, time.Now())
+	m.sawData = append(m.sawData, write > 0)
+	return write, readable
+}
+
+// intervals returns the time between consecutive polls, interval idx
+// running from poll idx to poll idx+1, and per poll whether it saw data.
+func (m *pollClock) intervals() ([]time.Duration, []bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	intervals := make([]time.Duration, 0, len(m.polls))
+	for idx := 1; idx < len(m.polls); idx++ {
+		intervals = append(intervals, m.polls[idx].Sub(m.polls[idx-1]))
+	}
+	return intervals, m.sawData
+}
+
+// startWaker runs the waker over the readers in the group and returns its
+// wake-up channels.
+func startWaker(ctx context.Context, group *errgroup.Group, readers []*cring.Reader) []chan struct{} {
+	wakers := newWakers(len(readers))
+	group.Go(func() error {
+		runWaker(ctx, readers, wakers)
+		return nil
+	})
+	return wakers
+}
+
+// Test_Ring_RunWaker_BusyReaderBacksOff verifies that a reader with
+// unread data it never drains does not keep the waker polling at its
+// fastest rate.
+//
+// A wake-up still sitting unconsumed is not a fresh one: after the first
+// poll delivers it, the interval doubles on every poll up to the cap and
+// stays there.
+func Test_Ring_RunWaker_BusyReaderBacksOff(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
 		ctx, cancel := context.WithCancel(t.Context())
-		done := make(chan error, 1)
-		go func() {
-			done <- rb.rb.RunReaders(ctx, recordCh)
-		}()
-		time.Sleep(time.Millisecond)
+		source := &pollClock{}
+		source.push(newRecordFrame(newRecordMeta(1, 0), nil, 0))
+		reader, err := cring.NewReader(0, 64, source)
+		require.NoError(t, err)
+
+		var group errgroup.Group
+		startWaker(ctx, &group, []*cring.Reader{reader})
+		time.Sleep(20 * wakerMaxInterval)
 		cancel()
-		<-done
+		require.NoError(t, group.Wait())
 
-		*rb.rb.workers[0].writeIdx = 0
-	}
+		intervals, _ := source.intervals()
+		require.Greater(t, len(intervals), 10)
+		want := wakerStartInterval
+		for idx, interval := range intervals {
+			require.Equal(t, want, interval, "interval %d", idx)
+			want = min(2*want, wakerMaxInterval)
+		}
+	})
 }
 
-// TestRingBufferRunReaders tests the reader functionality
-func TestRingBufferRunReaders(t *testing.T) {
-	t.Run("basic reader functionality", func(t *testing.T) {
-		rb := createTestRingBuffer(t, 1)
+// Test_Ring_RunWaker_ResetsToStartIntervalAfterWake verifies that the
+// interval returns to its starting value as soon as a poll wakes an
+// idle reader, after a stretch of backing off while there was nothing
+// to report.
+func Test_Ring_RunWaker_ResetsToStartIntervalAfterWake(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ctx, cancel := context.WithCancel(t.Context())
+		source := &pollClock{}
+		reader, err := cring.NewReader(0, 64, source)
+		require.NoError(t, err)
 
-		payload := []byte{0x42, 0x43}
-		writeTestMessage(t, rb.ww[0], payload)
-
-		recordCh := make(chan *pdumppb.Record, 10)
-		ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
-		defer cancel()
-
-		wg, _ := errgroup.WithContext(context.Background())
-		wg.Go(func() error {
-			err := rb.rb.RunReaders(ctx, recordCh)
-			t.Logf("runReaders return: %v", err)
-			assert.ErrorIs(t, err, context.DeadlineExceeded)
-			return nil
-		})
-
-		// Should receive the record
-		select {
-		case record := <-recordCh:
-			assert.Equal(t, payload, record.Data)
-			assert.Equal(t, uint32(len(payload)), record.Meta.DataSize)
-		case <-time.After(50 * time.Millisecond):
-			t.Fatal("Should have received record")
-		}
-		wg.Wait()
-	})
-
-	t.Run("multiple workers", func(t *testing.T) {
-		rb := createTestRingBuffer(t, 3)
-
-		// Add data to each worker
-		for i := range rb.rb.workers {
-			payload := []byte{byte(i + 1)}
-			writeTestMessage(t, rb.ww[i], payload)
-		}
-
-		recordCh := make(chan *pdumppb.Record, 10)
-		ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
-		defer cancel()
-
-		wg, _ := errgroup.WithContext(context.Background())
-		wg.Go(func() error {
-			err := rb.rb.RunReaders(ctx, recordCh)
-			t.Logf("runReaders return: %v", err)
-			assert.ErrorIs(t, err, context.DeadlineExceeded)
-			return nil
-		})
-
-		// Should receive records from all workers
-		receivedData := make(map[byte]bool)
-		for range 3 {
-			select {
-			case record := <-recordCh:
-				require.Len(t, record.Data, 1)
-				receivedData[record.Data[0]] = true
-			case <-time.After(50 * time.Millisecond):
-				t.Fatal("Should have received all records")
-			}
-		}
-		wg.Wait()
-
-		assert.True(t, receivedData[1])
-		assert.True(t, receivedData[2])
-		assert.True(t, receivedData[3])
-	})
-
-	t.Run("context cancellation", func(t *testing.T) {
-		rb := createTestRingBuffer(t, 1)
-		recordCh := make(chan *pdumppb.Record, 10)
-		ctx, cancel := context.WithCancel(context.Background())
-
-		errCh := make(chan error, 1)
-		go func() {
-			errCh <- rb.rb.RunReaders(ctx, recordCh)
-		}()
-
-		// Cancel context
+		var group errgroup.Group
+		wakers := startWaker(ctx, &group, []*cring.Reader{reader})
+		time.Sleep(5 * wakerMaxInterval)
+		source.push(newRecordFrame(newRecordMeta(1, 0), nil, 0))
+		time.Sleep(2 * wakerMaxInterval)
 		cancel()
+		require.NoError(t, group.Wait())
 
-		// Should return context error
-		select {
-		case err := <-errCh:
-			assert.ErrorIs(t, err, context.Canceled)
-		case <-time.After(50 * time.Millisecond):
-			t.Fatal("Should have returned context error")
-		}
-	})
-
-	t.Run("continuous reading", func(t *testing.T) {
-		rb := createTestRingBuffer(t, 1)
-		recordCh := make(chan *pdumppb.Record, 100)
-		ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
-		defer cancel()
-
-		runReadersGo := make(chan bool)
-		go func() {
-			close(runReadersGo)
-			rb.rb.RunReaders(ctx, recordCh)
-		}()
-
-		// Continuously add data
-		go func() {
-			<-runReadersGo
-			// Wait for runReaders to spawn and fall into waiting state for waker notifications
-			time.Sleep(10 * time.Millisecond)
-			for i := range 10 {
-				payload := []byte{byte(i)}
-				writeTestMessage(t, rb.ww[0], payload)
-				time.Sleep(time.Millisecond)
-			}
-		}()
-
-		// Should receive multiple records
-		recordCount := 0
-		timeout := time.After(50 * time.Millisecond)
-		for {
-			select {
-			case <-recordCh:
-				recordCount++
-			case <-timeout:
-				assert.Greater(t, recordCount, 0, "Should have received some records")
-				return
-			}
-		}
+		intervals, data := source.intervals()
+		first := slices.Index(data, true)
+		require.Positive(t, first, "the data must arrive after some idle polls")
+		require.Equal(t, wakerMaxInterval, intervals[first-1], "the idle waker must have backed off to the cap")
+		require.Equal(t, wakerStartInterval, intervals[first], "a poll that wakes an idle reader resets the interval")
+		require.Len(t, wakers[0], 1, "the poll that saw the record must deliver one wake-up")
 	})
 }
 
-// TestRingBufferConcurrency tests concurrent operations
-func TestRingBufferConcurrency(t *testing.T) {
-	t.Run("concurrent readers", func(t *testing.T) {
-		rb := createTestRingBuffer(t, 2)
+// Test_Ring_RunWaker_NotifiesOnlyAfterDataArrives verifies that the
+// waker stays quiet on an empty ring, wakes the reader at the first poll
+// after data is published, and stops once its context ends.
+func Test_Ring_RunWaker_NotifiesOnlyAfterDataArrives(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ctx, cancel := context.WithCancel(t.Context())
+		source := &pollClock{}
+		reader, err := cring.NewReader(0, 64, source)
+		require.NoError(t, err)
 
-		// Add data to both workers
-		for workerIdx := range rb.rb.workers {
-			for j := range 5 {
-				payload := []byte{byte(workerIdx*10 + j)}
-				writeTestMessage(t, rb.ww[workerIdx], payload)
-			}
-		}
+		var group errgroup.Group
+		wakers := startWaker(ctx, &group, []*cring.Reader{reader})
+		time.Sleep(5 * wakerMaxInterval)
+		require.Empty(t, wakers[0], "the waker must not notify before any data exists")
 
-		recordCh := make(chan *pdumppb.Record, 100)
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Millisecond)
-		defer cancel()
+		source.push(newRecordFrame(newRecordMeta(1, 0), nil, 0))
+		time.Sleep(wakerMaxInterval)
+		synctest.Wait()
+		require.Len(t, wakers[0], 1, "the first poll after the data arrived must notify")
 
-		// Start multiple reader instances. The ring buffer contains 10 messages,
-		// so each reader can read at most 10 messages. For the test to pass,
-		// the other readers must read their own copy of the ring buffer.
-		var wg sync.WaitGroup
-		for range 3 {
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
-				rbClone := rb.rb.Clone()
-				rbClone.RunReaders(ctx, recordCh)
-			}()
-		}
-
-		go func() {
-			wg.Wait()
-			close(recordCh)
-		}()
-
-		expectedRecordCount := 20
-		// Count received records
-		recordCount := 0
-		for range recordCh {
-			recordCount++
-			if recordCount == expectedRecordCount {
-				break
-			}
-		}
-
-		// Should receive records from all readers
-		assert.Equal(t, recordCount, expectedRecordCount, "Should receive exactly two copies of the ring buffer from concurrent readers")
-	})
-
-	t.Run("concurrent hasMore calls", func(t *testing.T) {
-		worker := createTestWorker(t, testRingSize)
-
-		var wg sync.WaitGroup
-		results := make([]bool, 1000)
-
-		// Start many concurrent hasMore calls
-		for i := range 1000 {
-			wg.Add(1)
-			go func(idx int) {
-				defer wg.Done()
-				results[idx] = worker.wa.hasMore()
-			}(i)
-		}
-
-		// Concurrently modify indices
-		go func() {
-			for range 100 {
-				atomic.AddUint64(worker.wa.writeIdx, 1)
-				atomic.AddUint64(&worker.wa.readIdx, 1)
-			}
-		}()
-
-		wg.Wait()
-		// Should not panic and should return valid results
-		for _, result := range results {
-			_ = result // Just ensure no panic
-		}
+		cancel()
+		require.NoError(t, group.Wait())
 	})
 }
 
-// TestRingBufferEdgeCases tests various edge cases
-func TestRingBufferEdgeCases(t *testing.T) {
-	t.Run("zero-length payload", func(t *testing.T) {
-		worker := createTestWorker(t, testRingSize)
-		payload := []byte{}
+// retiredLease is a fake ring lease a test uses only to retire a
+// binding; none of its other methods are meant to be called once that
+// has happened.
+type retiredLease struct{}
 
-		writeTestMessage(t, worker, payload)
-
-		records := worker.wa.read(testReadChunkSize)
-		require.Len(t, records, 1)
-
-		record := records[0]
-		assert.Equal(t, uint32(0), record.Meta.DataSize)
-		assert.Equal(t, []byte{}, record.Data)
-	})
-
-	t.Run("maximum payload size", func(t *testing.T) {
-		worker := createTestWorker(t, testRingSize)
-		// Create large payload that fits in ring buffer
-		maxPayloadSize := testRingSize - int(unsafe.Sizeof(ringMsgHdr{})) - 64 // Leave some margin
-		payload := make([]byte, maxPayloadSize)
-		for i := range payload {
-			payload[i] = byte(i % 256)
-		}
-
-		writeTestMessage(t, worker, payload)
-
-		records := worker.wa.read(testReadChunkSize)
-		require.Len(t, records, 0)
-		// The message should be read in its entirety on the second attempt
-		// since testReadChunkSize is too small to read it in one go
-		records = worker.wa.read(testReadChunkSize)
-		require.Len(t, records, 1)
-
-		record := records[0]
-		assert.Equal(t, uint32(len(payload)), record.Meta.DataSize)
-		assert.Equal(t, payload, record.Data)
-	})
-
-	t.Run("buffer exactly at boundary", func(t *testing.T) {
-		worker := createTestWorker(t, testRingSize)
-
-		// Position message exactly at ring buffer boundary
-		*worker.wa.writeIdx = testRingSize - 1
-		payload := []byte{0x42}
-
-		writeTestMessage(t, worker, payload)
-
-		records := worker.wa.read(testReadChunkSize)
-		require.Len(t, records, 1)
-		assert.Equal(t, payload, records[0].Data)
-	})
-
-	t.Run("very small ring buffer", func(t *testing.T) {
-		const verySmallSize = 64
-		worker := createTestWorker(t, verySmallSize)
-		worker.wa.mask = verySmallSize - 1
-
-		payload := []byte{0x42}
-		writeTestMessage(t, worker, payload)
-
-		records := worker.wa.read(uint32(verySmallSize))
-		require.Len(t, records, 1)
-		assert.Equal(t, payload, records[0].Data)
-	})
+func (retiredLease) Handle() RingHandle { return 0 }
+func (retiredLease) Release()           {}
+func (retiredLease) Capacity() uint32   { return 0 }
+func (retiredLease) Sources() ([]cring.RecordSource, error) {
+	return nil, errors.New("a retired binding must not be read")
 }
 
-// TestRingBufferStressTest performs stress testing
-func TestRingBufferStressTest(t *testing.T) {
-	if testing.Short() {
-		t.Skip("Skipping stress test in short mode")
-	}
+// Test_Capture_Read_RetiredBindingReportsErrRetired verifies that a
+// capture whose binding was already released before its read started
+// reports the retired-binding error instead of running a session on a
+// binding that is already gone.
+//
+// This is the outcome of the race a read's own lookup leaves open: a
+// capture retired between that lookup and the start of its read.
+func Test_Capture_Read_RetiredBindingReportsErrRetired(t *testing.T) {
+	binding := newBinding("A", retiredLease{})
+	binding.Release() // retires the binding before any stream reads it
 
-	t.Run("high frequency reads", func(t *testing.T) {
-		rb := createTestRingBuffer(t, 4, WithRingSize(64*1024))
-
-		// Prepare data in all workers
-		for workerIdx := range rb.rb.workers {
-			for j := range 100 {
-				payload := []byte{byte(j % 256)}
-				writeTestMessage(t, rb.ww[workerIdx], payload)
-			}
-		}
-
-		recordCh := make(chan *pdumppb.Record, 1000)
-		ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
-		defer cancel()
-
-		go func() {
-			rb.rb.RunReaders(ctx, recordCh)
-		}()
-
-		// Count records received
-		recordCount := 0
-		timeout := time.After(50 * time.Millisecond)
-		for {
-			select {
-			case <-recordCh:
-				recordCount++
-			case <-timeout:
-				assert.Greater(t, recordCount, 300, "Should process many records under stress")
-				return
-			}
-		}
-	})
-
-	t.Run("rapid context cancellations", func(t *testing.T) {
-		rb := createTestRingBuffer(t, 2)
-
-		for range 50 {
-			recordCh := make(chan *pdumppb.Record, 10)
-			ctx, cancel := context.WithTimeout(context.Background(), 1*time.Millisecond)
-
-			go func() {
-				rb := rb.rb.Clone()
-				rb.RunReaders(ctx, recordCh)
-			}()
-
-			cancel()
-			time.Sleep(time.Microsecond * 100)
-		}
-		// Should not panic or deadlock
-	})
-}
-
-// BenchmarkWorkerAreaRead benchmarks the read performance
-func BenchmarkWorkerAreaRead(b *testing.B) {
-	worker := createTestWorker(&testing.T{}, testRingSize)
-	worker.wa.log = zap.NewNop()
-
-	// Prepare test data
-	for i := range 100 {
-		payload := []byte{byte(i % 256)}
-		writeTestMessage(&testing.T{}, worker, payload)
-	}
-
-	b.ReportAllocs()
-
-	for b.Loop() {
-		worker.wa.readIdx = 0
-		worker.wa.buf = worker.wa.buf[:0]
-		records := worker.wa.read(testReadChunkSize)
-		if len(records) == 0 {
-			b.Fatal("No records read")
-		}
-	}
+	entry := &capture{binding: binding}
+	err := entry.Read(t.Context(), func(*pdumppb.Record) error { return nil })
+	require.ErrorIs(t, err, errRetired)
 }

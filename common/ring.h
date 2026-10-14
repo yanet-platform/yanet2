@@ -20,7 +20,8 @@
  * is full. The producer also publishes at the end of each call, so the
  * last records of a slow producer do not wait for a full batch.
  *
- * No producer uses this ring yet. Pdump capture still has its own rings.
+ * Pdump capture is this ring's first producer, writing one record per
+ * captured packet and publishing once at the end of each handler call.
  */
 
 #include <assert.h>
@@ -52,8 +53,9 @@ ring_align4(uint32_t val) {
 
 // Header in front of every record's opaque payload.
 //
-// The length counts the header and the payload together. The writer sets
-// the sequence number at commit. Each worker numbers its own records.
+// The length counts the header and the payload together. The prepare step
+// writes the header and takes the worker's next sequence number. Each
+// worker numbers its own records.
 // Records are only 4-byte aligned. So a reader must copy the header out
 // before it reads the length, and must not read it in place.
 struct ring_record_frame {
@@ -366,49 +368,6 @@ ring_worker_evict(
 	ring_evict_fence();
 }
 
-// Make room for a record of the given length; 0 on success, -1 with errno
-// on error.
-//
-// If the record does not fit, the writer drops a chunk of whole oldest
-// records. No record bytes are written here. EINVAL means the length is
-// smaller than the header. E2BIG means it is larger than the batch limit.
-// On error no position changes. If the record would push the unpublished
-// batch past the limit, the writer first publishes the batch. This happens
-// before any eviction and before any byte of the new record. So a long
-// batch is never refused and never drops its own records. The caller
-// passes the data area already resolved, so it is not resolved per call.
-static inline int
-ring_worker_prepare(
-	struct ring_worker *ring, uint8_t *data, uint32_t total_len
-) {
-	if (unlikely(total_len < RING_RECORD_FRAME_SIZE)) {
-		errno = EINVAL;
-		return -1;
-	}
-	// Check the raw length before alignment, so the rounding cannot
-	// overflow.
-	//
-	// The limit is a multiple of 4, so it bounds the aligned length too.
-	if (unlikely(total_len > ring_worker_batch_max(ring))) {
-		errno = E2BIG;
-		return -1;
-	}
-	uint32_t aligned_total_len = ring_align4(total_len);
-	if (unlikely(aligned_total_len > ring_worker_batch_room(ring))) {
-		ring_worker_publish(ring);
-	}
-
-	// Use only the private positions. Do not load the line a reader may be
-	// polling.
-	uint64_t occupied = ring->local.write_idx - ring->local.readable_idx;
-	if (likely(occupied <= ring->local.size - aligned_total_len)) {
-		ring_worker_walk_ahead(ring, data);
-		return 0;
-	}
-	ring_worker_evict(ring, data, aligned_total_len);
-	return 0;
-}
-
 // Copy a piece of an uncommitted record at the given offset from its start.
 //
 // The copy wraps around at the physical end of the ring. A record may be
@@ -440,29 +399,67 @@ ring_worker_write(
 	}
 }
 
-// Write the record header and add the record to the unpublished batch.
+// Make room for a record of the given length and write its header; 0 on
+// success, -1 with errno on error.
 //
-// The header gets the worker's next sequence number. When the batch
-// reaches the ring's publish batch size, the writer publishes it. Readers
-// see the record only after the next publication. Returns the sequence
-// number. It wraps from UINT32_MAX to 0.
-static inline uint32_t
-ring_worker_commit(
+// The header takes the worker's next sequence number, which wraps from
+// UINT32_MAX to 0. The caller writes the rest of the record after it, so
+// each record is stored front to back, and must commit it before the next
+// prepare, or the numbering gets a gap. A record that would push the
+// unpublished batch past the limit first publishes it, so a long batch is
+// never refused and never drops its own records. Then, if the record does
+// not fit, the writer drops a chunk of whole oldest records. EINVAL means
+// the length is below the header, E2BIG above the batch limit; on error
+// nothing is written and no position changes.
+static inline int
+ring_worker_prepare(
 	struct ring_worker *ring, uint8_t *data, uint32_t total_len
 ) {
-	uint32_t seqno = ring->local.next_seqno;
-	ring->local.next_seqno = seqno + 1;
+	if (unlikely(total_len < RING_RECORD_FRAME_SIZE)) {
+		errno = EINVAL;
+		return -1;
+	}
+	// Check the raw length before alignment, so the rounding cannot
+	// overflow.
+	//
+	// The limit is a multiple of 4, so it bounds the aligned length too.
+	if (unlikely(total_len > ring_worker_batch_max(ring))) {
+		errno = E2BIG;
+		return -1;
+	}
+	uint32_t aligned_total_len = ring_align4(total_len);
+	if (unlikely(aligned_total_len > ring_worker_batch_room(ring))) {
+		ring_worker_publish(ring);
+	}
+
+	// Use only the private positions. Do not load the line a reader may be
+	// polling.
+	uint64_t occupied = ring->local.write_idx - ring->local.readable_idx;
+	if (likely(occupied <= ring->local.size - aligned_total_len)) {
+		ring_worker_walk_ahead(ring, data);
+	} else {
+		ring_worker_evict(ring, data, aligned_total_len);
+	}
 
 	struct ring_record_frame frame = {
-		.total_len = total_len, .seqno = seqno
+		.total_len = total_len, .seqno = ring->local.next_seqno++
 	};
 	ring_worker_write(
 		ring, data, 0, (const uint8_t *)&frame, sizeof(frame)
 	);
+	return 0;
+}
 
+// Add the prepared record to the unpublished batch.
+//
+// The length must be the one passed to the prepare step, which already
+// wrote the header. When the batch reaches the ring's publish batch size,
+// the writer publishes it. Readers see the record only after the next
+// publication.
+static inline void
+ring_worker_commit(struct ring_worker *ring, uint32_t total_len) {
 	ring->local.write_idx += ring_align4(total_len);
 	if (++ring->local.batch_records >= ring->local.publish_batch) {
 		ring_worker_publish(ring);
 	}
-	return seqno;
 }

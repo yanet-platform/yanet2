@@ -2,7 +2,8 @@ import { useCallback, useRef, useState, useEffect } from 'react';
 import { useAsyncData } from '@yanet/core/hooks/useAsyncData';
 import { useConfigListCache } from '@yanet/core/hooks/useConfigListCache';
 import { pdumpApi, type PdumpRecord } from '@yanet/core/api/pdump';
-import { base64ToUint8Array, parsePacket, toaster } from '@yanet/core/utils';
+import { ring, type RingInfo } from '@yanet/core/api/ring';
+import { base64ToUint8Array, compareNatural, parsePacket, toaster } from '@yanet/core/utils';
 import type { PdumpConfigInfo, CapturedPacket } from './types';
 
 const MAX_PACKETS = 5000;
@@ -68,6 +69,55 @@ export const usePdumpConfigs = () => {
         error,
         refetch,
         deleteConfig,
+    };
+};
+
+/** Lists rings, and provisions create/delete; a pdump config links one by name. */
+export const useRings = () => {
+    const fetchRings = useCallback(async (): Promise<RingInfo[]> => {
+        const response = await ring.listRings();
+        return [...(response.rings ?? [])].sort((a, b) => compareNatural(a.name ?? '', b.name ?? ''));
+    }, []);
+
+    const { data, loading, error, refetch } = useAsyncData<RingInfo[]>({
+        fetchFn: fetchRings,
+        errorToastName: 'pdump-ring-list-error',
+        errorMessage: 'Failed to load rings',
+    });
+
+    const createRing = useCallback(async (name: string, capacity: number, publishBatch?: number): Promise<boolean> => {
+        try {
+            await ring.createRing({ name, capacity, publish_batch: publishBatch });
+            toaster.success('pdump-ring-create', `Ring "${name}" created`);
+            await refetch();
+            return true;
+        } catch (err) {
+            toaster.error('pdump-ring-create-error', `Failed to create ring "${name}"`, err);
+            return false;
+        }
+    }, [refetch]);
+
+    const deleteRing = useCallback(async (name: string): Promise<boolean> => {
+        try {
+            await ring.deleteRing({ name });
+            toaster.success('pdump-ring-delete', `Ring "${name}" deleted`);
+            await refetch();
+            return true;
+        } catch (err) {
+            // A ring linked or leased by a pdump config refuses with
+            // FailedPrecondition; the service message explains which.
+            toaster.error('pdump-ring-delete-error', `Failed to delete ring "${name}"`, err);
+            return false;
+        }
+    }, [refetch]);
+
+    return {
+        rings: data ?? [],
+        loading,
+        error,
+        refetch,
+        createRing,
+        deleteRing,
     };
 };
 

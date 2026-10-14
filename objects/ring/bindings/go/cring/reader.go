@@ -18,8 +18,8 @@ const RecordFrameSize = uint32(C.RING_RECORD_FRAME_SIZE)
 
 // Record is one payload read from a worker's ring.
 //
-// It carries the worker index and the sequence number the writer stamped at
-// commit. The records of one read share one allocation, and nothing else
+// It carries the worker index and the sequence number the writer wrote into
+// the record's frame. The records of one read share one allocation, and nothing else
 // uses it. So a later read does not change the payload. The payload's
 // capacity equals its length, so an append allocates new memory and never
 // writes into the next record.
@@ -95,15 +95,33 @@ type Reader struct {
 
 // NewReader creates a Reader for one worker's ring.
 //
-// The reader tags every record with the worker index. It treats a record
-// length above the ring capacity as corruption. NewReader fails for a
-// capacity below the frame size: no record fits such a ring, so every
-// length would look corrupt.
+// The reader starts at the oldest readable record and tags every record
+// with the worker index. It treats a record length above the ring
+// capacity as corruption. NewReader fails for a capacity below the frame
+// size: no record fits such a ring, so every length would look corrupt.
 func NewReader(worker uint16, capacity uint32, src RecordSource) (*Reader, error) {
 	if capacity < RecordFrameSize {
 		return nil, fmt.Errorf("ring capacity %d is below the record frame size %d", capacity, RecordFrameSize)
 	}
 	return &Reader{worker: worker, capacity: capacity, src: src}, nil
+}
+
+// NewReaderFromTail creates a Reader like NewReader, except that it
+// starts at the source's current write position instead of the oldest
+// readable record.
+//
+// It skips every record already committed; only a record written after
+// this call reaches it. A caller that wants a fresh stream to see only
+// new traffic, not a ring's history, uses this instead of NewReader.
+func NewReaderFromTail(worker uint16, capacity uint32, src RecordSource) (*Reader, error) {
+	reader, err := NewReader(worker, capacity, src)
+	if err != nil {
+		return nil, err
+	}
+
+	write, _ := src.Indices()
+	reader.readIdx.Store(write)
+	return reader, nil
 }
 
 // HasMore reports whether the ring has data this Reader has not read yet.

@@ -47,6 +47,7 @@ const (
 	CLIDecap       = CLIBasePath + "/yanet-cli-decap"
 	CLIForward     = CLIBasePath + "/yanet-cli-forward"
 	CLIRing        = CLIBasePath + "/yanet-cli-ring"
+	CLIPdump       = CLIBasePath + "/yanet-cli-pdump"
 	CLIGeneric     = CLIBasePath + "/yanet-cli"
 
 	globalName = "global"

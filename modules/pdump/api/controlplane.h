@@ -4,15 +4,13 @@
 
 #include "lib/errors/errors.h"
 #include "mode.h"
-#include "ring.h"
+#include "record.h"
 
 struct agent;
 struct cp_module;
-struct ring_buffer;
 
 extern const uint32_t default_snaplen;
-extern const uint32_t max_ring_size;
-extern const uint32_t ring_msg_magic;
+extern const uint32_t pdump_record_magic;
 
 // From rte_log.h
 /* Can't use 0, as it gives compiler warnings */
@@ -69,15 +67,14 @@ pdump_module_config_set_snaplen(
 	struct cp_module *module, uint32_t snaplen, uintptr_t cb
 );
 
-// Initialize worker ring buffers for packet dumping.
-struct ring_buffer *
-pdump_module_config_set_per_worker_ring(
-	struct cp_module *module,
-	uint32_t size,
-	uint64_t *worker_count,
-	uintptr_t cb
+// Link the module's capture ring by name.
+//
+// Records an object link on the module config; the dataplane handler finds
+// the ring through this link when the execution contexts are built.
+// Whether a ring by this name exists is resolved later, not by this call.
+// Returns 0 on success, or -1 with err set when the link cannot be
+// recorded.
+int
+pdump_module_config_link_ring(
+	struct cp_module *module, const char *ring_name, yanet_error **err
 );
-
-// Converts a shared memory offset to a direct memory address.
-uint8_t *
-pdump_module_config_addr_of(uint8_t **offset);

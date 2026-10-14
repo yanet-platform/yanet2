@@ -356,7 +356,7 @@ func Test_RingService_DeleteRing_RefusedFreeRetried(t *testing.T) {
 	require.True(t, ok)
 	require.NotEqual(t, oldHandle, newHandle)
 	_, err = f.service.Acquire("deferred", oldHandle)
-	require.Error(t, err, "the old handle must not admit a lease against the recreated ring")
+	require.ErrorIs(t, err, ring.ErrHandleGone, "the old handle must not admit a lease against the recreated ring")
 	require.NoError(t, f.delete(t, "deferred"))
 
 	ref.Release()
@@ -411,5 +411,27 @@ func Test_RingService_LeaseVsDeleteRace(t *testing.T) {
 	}
 
 	_, err := f.service.Acquire("race", handle)
-	require.Error(t, err, "a deleted handle must never admit a lease")
+	require.ErrorIs(t, err, ring.ErrHandleGone, "a deleted handle must never admit a lease")
+}
+
+// Test_Lease_Object_ReachesTheRing verifies that a lease reaches the same
+// ring it was acquired for, usable through its own accessors and to open
+// a reader, while the lease is held.
+func Test_Lease_Object_ReachesTheRing(t *testing.T) {
+	f := newRingFixture(t)
+	f.create(t, "leased", 64)
+
+	handle, ok := f.service.LookupHandle("leased")
+	require.True(t, ok)
+	lease, err := f.service.Acquire("leased", handle)
+	require.NoError(t, err)
+	defer lease.Release()
+
+	object := lease.Object()
+	require.NotNil(t, object)
+	require.Equal(t, uint32(64), object.Capacity())
+
+	readers, err := object.OpenReaders()
+	require.NoError(t, err)
+	require.NotEmpty(t, readers)
 }

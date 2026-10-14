@@ -20,8 +20,11 @@ its own.
   ring (the Go owner checks this). Second, a published module config still
   links the ring by name (the generic `cp_object` check that every shared
   object gets). In both cases the ring stays usable. The caller retries the
-  delete after the blocker is gone. No production module links a ring
-  yet, so today only tests can hit the link refusal.
+  delete after the blocker is gone. In pdump both belong to the config:
+  the config links the ring and holds the lease, and its capture streams
+  only read through that lease. Readers never keep a ring alive on their
+  own. Deleting the config, or rebinding it to another ring, ends its
+  streams and releases the lease; then the ring can be deleted.
 
 ## Limitations
 
@@ -48,10 +51,16 @@ its own.
   capacity, create a new ring.
 - The number of per-worker buffers is not a `create` argument and is not
   reported. It always equals the dataplane's configured worker count.
-- Ring storage is charged to the pdump module's agent memory. Storage is
-  each worker's buffer (capacity times worker count) plus the metadata
-  array. The limit is `memory_requirements` in the controlplane config,
-  16 MiB by default. A create that would go over it fails.
+- Ring storage is charged to the pdump module's agent arena, the same
+  arena pdump's own configs and bindings share; there is no separate ring
+  reserve. Storage is each worker's buffer (capacity times worker count)
+  plus the metadata array. The limit is `memory_requirements` in the
+  controlplane config, 128 MiB by default (`cfg.go`, `default.yaml`): a
+  1 MiB ring on a 16-worker dataplane takes about 16 MiB, so the default
+  holds several such rings with headroom. Configs capture into a shared
+  ring without multiplying its cost. Raise pdump's `memory_requirements`
+  to fit more or larger rings. A create that would go over the limit
+  fails.
 
 ## Overwrite semantics
 
@@ -87,9 +96,9 @@ its own.
 - Records start on a 4-byte boundary. Only this 4-byte alignment is
   guaranteed. So a private payload header (for example, a future capture
   header) must still decode itself safely.
-- `seqno` is a per-worker u32 counter. The writer assigns it at commit and
-  adds one for every accepted record. It wraps from `0xFFFFFFFF` back to
-  `0` with no gap.
+- `seqno` is a per-worker u32 counter. Each accepted prepare writes the
+  next number into the frame and advances the counter. It wraps from
+  `0xFFFFFFFF` back to `0` with no gap.
 - The writer rejects a record whose declared size is below the frame size
   or above the batch limit (the capacity minus the eviction chunk). For a
   rejected record nothing is written, no position moves, and no seqno is
@@ -98,8 +107,12 @@ its own.
 ## Batch publication
 
 - The writer commits a record and publishes it as two separate steps.
-- A commit writes the record's frame, stamps its seqno and moves the
-  writer's private write position. Readers do not see the record yet.
+- A prepare makes room and writes the record's frame with the next
+  seqno. The producer then writes the payload after the frame, so each
+  record is stored front to back.
+- A commit moves the writer's private write position past the record.
+  Readers do not see the record yet. Every successful prepare is followed
+  by a commit before the next prepare, so the numbering has no gaps.
 - A publication makes visible every record committed since the last
   publication. It does this with one store of the published write
   position. If nothing was committed, it does nothing.
@@ -276,11 +289,56 @@ pacing, one worker. To reproduce the last row, run
 `build/tests/common/ring_bench` (`RING_BENCH_CPUS`, `RING_BENCH_REPS`). The
 numbers are only a guide. They change with hardware, compiler and load.
 
+### Pdump capture handler benchmark
+
+`modules/pdump/tests/pdump_bench` measures the whole pdump capture
+handler through `new_module_pdump()` itself, not a reproduction of it: the
+BPF filter, the metadata build and the ring write, for 64, 256, 1500 and
+9000-byte packets, publish batches of 8 and 64, with and without a full
+reader, plus one row where the filter rejects half the packets. Run it
+with `meson test -C build --benchmark pdump_bench`, or directly as
+`build/modules/pdump/tests/pdump_bench` (`PDUMP_BENCH_CPUS`,
+`PDUMP_BENCH_REPS`).
+
 ## Pdump capture status
 
-Pdump packet capture still writes into its own private ring buffers
-inside the module. It does not use standalone ring objects yet. A later
-change moves it over.
+- Pdump captures into a pre-existing ring object instead of sizing a
+  private buffer. The ring is named by the config's `ring_name`
+  (`yanet-cli-pdump set --ring-name`, the web config dialog's ring
+  field).
+- `ring_name` is required when a config is created. An update that omits
+  it keeps the config's currently bound ring; an explicit empty value is
+  invalid.
+- Several pdump configs may capture into the same ring. Each keeps its
+  own reader cursor on it, independent of the others. Deleting a pdump
+  config ends that config's capture streams and releases its hold on the
+  ring, but never deletes the ring itself.
+- A pdump config binds only to a ring of at least 128 KiB per worker. A
+  record is at most the 40-byte combined header plus 65535 captured
+  bytes, and a ring takes records up to its capacity minus one eviction
+  chunk of at most 4 KiB, so such a ring holds every record whatever the
+  snaplen. A smaller ring is refused (`InvalidArgument`), and the
+  config's prior binding and capture stream survive the refusal.
+- A new capture stream — including one opened by reconnecting after a
+  rebind — starts at the ring's current write position, not its oldest
+  readable record. It never replays what the ring already held before it
+  started.
+- A same-object update (filter, snaplen or mode, with `ring_name`
+  omitted) keeps the ring linked and the config's capture stream and
+  cursor running without a reset. Rebinding a config to a different ring
+  ends only that config's own stream; every other config on either ring
+  is untouched.
+- A record's payload is the 32-byte pdump metadata block (worker,
+  pipeline and device ids, queue, packet length, timestamp) followed by
+  the captured bytes, a 40-byte combined header behind the ring's own
+  8-byte frame.
+- The producer commits only packets its BPF filter accepts and publishes
+  once at the end of every handler call, so a call that captures only a
+  few packets still makes them visible without waiting for a full
+  publish batch.
+- CLI and PCAP/PCAPNG export always write a 65535 header snaplen,
+  independent of the configured capture snaplen, so a capture file stays
+  readable across a snaplen change.
 
 ## CLI examples
 

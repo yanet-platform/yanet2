@@ -3023,7 +3023,6 @@ name = "yanet-cli-pdump"
 version = "0.1.0"
 dependencies = [
  "bindgen",
- "bytesize",
  "clap",
  "clap_complete",
  "log",
@@ -3031,6 +3030,7 @@ dependencies = [
  "pnet_packet",
  "prost",
  "serde",
+ "tempfile",
  "tokio",
  "tokio-util",
  "tonic",

@@ -6,12 +6,11 @@ import (
 	"strings"
 
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
+	ringpb "github.com/yanet-platform/yanet2/objects/ring/controlplane/ringpb/v1"
 )
 
 // MaxMode mirrors the largest bitmap accepted by the pdump dataplane.
 const MaxMode = 3
-
-const minRingSize = 1 << 20
 
 func (m *ShowConfigRequest) Validate() error {
 	return commonpb.ValidateModuleName("name", m.GetName())
@@ -40,18 +39,9 @@ func (m *Config) Validate() error {
 	if m.Snaplen != nil && m.GetSnaplen() == 0 {
 		return errors.New("snaplen must be greater than zero")
 	}
-	if m.RingSize != nil {
-		ringSize := m.GetRingSize()
-		if ringSize&(ringSize-1) != 0 {
-			return fmt.Errorf("ring_size %d must be a power of two", ringSize)
-		}
-		if ringSize < minRingSize || ringSize > MaxRingSize {
-			return fmt.Errorf(
-				"ring_size %d must be in range %d..%d",
-				ringSize,
-				minRingSize,
-				MaxRingSize,
-			)
+	if m.RingName != nil {
+		if err := ringpb.ValidateRingName("ring_name", m.GetRingName()); err != nil {
+			return err
 		}
 	}
 	if strings.ContainsRune(m.GetFilter(), '\x00') {

@@ -65,19 +65,9 @@ loopindex:modules/fwstate/tests/dataplane/fwstate.go:createSyncFrame:i:2  # lega
 loopindex:modules/mirror/controlplane/service_test.go:TestMirrorServiceConcurrentAccess:i:1  # legacy: rename to idx
 loopindex:modules/mirror/controlplane/service_test.go:TestMirrorServiceConcurrentAccess:i:2  # legacy: rename to idx
 loopindex:modules/mirror/controlplane/service_test.go:TestMirrorServiceConcurrentAccess:i:3  # legacy: rename to idx
-loopindex:modules/pdump/controlplane/ring_test.go:BenchmarkWorkerAreaRead:i:1  # legacy: rename to idx
-loopindex:modules/pdump/controlplane/ring_test.go:TestRingBufferClone:i:1  # legacy: rename to idx
-loopindex:modules/pdump/controlplane/ring_test.go:TestRingBufferConcurrency:i:1  # legacy: rename to idx
-loopindex:modules/pdump/controlplane/ring_test.go:TestRingBufferEdgeCases:i:1  # legacy: rename to idx
-loopindex:modules/pdump/controlplane/ring_test.go:TestRingBufferRunReaders:i:1  # legacy: rename to idx
-loopindex:modules/pdump/controlplane/ring_test.go:TestRingBufferRunReaders:i:2  # legacy: rename to idx
-loopindex:modules/pdump/controlplane/ring_test.go:TestWorkerAreaHasMore:i:1  # legacy: rename to idx
-loopindex:modules/pdump/controlplane/ring_test.go:TestWorkerAreaRead:i:1  # legacy: rename to idx
-loopindex:modules/pdump/controlplane/ring_test.go:createTestRingBuffer:i:1  # legacy: rename to idx
 maplit:controlplane/ffi/shm.go:DPConfig.AllModulePositions:map[string][]Chain:1  # legacy: use T{} instead of make(map...)
 maplit:controlplane/ffi/shm.go:DPConfig.AllModulePositions:map[string][]string:1  # legacy: use T{} instead of make(map...)
 maplit:modules/acl/controlplane/metrics.go:ACLService.collectDataplaneMetrics:map[string]struct{}:1  # legacy: use T{} instead of make(map...)
-maplit:modules/pdump/controlplane/ring_test.go:TestRingBufferRunReaders:map[byte]bool:1  # legacy: use T{} instead of make(map...)
 maplit:operators/bird-adapter/internal/mpls/routes.go:Rib.Apply:map[mplsRouteKey][]rib.Route:1  # legacy: use T{} instead of make(map...)
 maplit:operators/bird-adapter/service.go:NewAdapterService:map[string]*importHolder:1  # legacy: use T{} instead of make(map...)
 maplit:operators/route/neigh/neigh.go:newOptions:map[string]string:1  # legacy: use T{} instead of make(map...)
@@ -116,8 +106,6 @@ receiver:lint/protobuf/cmd/protolint/main.go:excludeList.String:1  # legacy: ren
 receiver:modules/pdump/controlplane/ffi.go:errorCallbackContext.Close:1  # legacy: rename the receiver to m
 receiver:modules/pdump/controlplane/ffi.go:errorCallbackContext.Handle:1  # legacy: rename the receiver to m
 receiver:modules/pdump/controlplane/ffi.go:errorCallbackContext.Reason:1  # legacy: rename the receiver to m
-receiver:modules/pdump/controlplane/ring.go:workerArea.hasMore:1  # legacy: rename the receiver to m
-receiver:modules/pdump/controlplane/ring.go:workerArea.read:1  # legacy: rename the receiver to m
 receiver:operators/bird-adapter/cmd/yanet-bird-adapter/client.go:logLevelFlag.Type:1  # legacy: rename the receiver to m
 sugar:modules/pdump/controlplane/ffi.go:pdumpGoControlplaneLog:Sugar():1  # legacy: migrate off zap.SugaredLogger
 sugar:modules/pdump/controlplane/ffi.go:pdumpGoControlplaneLog:Sugar():2  # legacy: migrate off zap.SugaredLogger
@@ -145,17 +133,6 @@ testctx:controlplane/internal/auth/sshkey/authenticator_test.go:TestAuthenticate
 testctx:controlplane/internal/xgrpc/interceptor_test.go:TestAccessLogInterceptor_ProtoLogValue:Background:1  # legacy: migrate to t.Context()
 testctx:modules/forward/controlplane/service_test.go:TestForwardServiceConcurrentAccess:Background:1  # legacy: migrate to t.Context()
 testctx:modules/mirror/controlplane/service_test.go:TestMirrorServiceConcurrentAccess:Background:1  # legacy: migrate to t.Context()
-testctx:modules/pdump/controlplane/ring_test.go:TestRingBufferConcurrency:Background:1  # legacy: migrate to t.Context()
-testctx:modules/pdump/controlplane/ring_test.go:TestRingBufferRunReaders:Background:1  # legacy: migrate to t.Context()
-testctx:modules/pdump/controlplane/ring_test.go:TestRingBufferRunReaders:Background:2  # legacy: migrate to t.Context()
-testctx:modules/pdump/controlplane/ring_test.go:TestRingBufferRunReaders:Background:3  # legacy: migrate to t.Context()
-testctx:modules/pdump/controlplane/ring_test.go:TestRingBufferRunReaders:Background:4  # legacy: migrate to t.Context()
-testctx:modules/pdump/controlplane/ring_test.go:TestRingBufferRunReaders:Background:5  # legacy: migrate to t.Context()
-testctx:modules/pdump/controlplane/ring_test.go:TestRingBufferRunReaders:Background:6  # legacy: migrate to t.Context()
-testctx:modules/pdump/controlplane/ring_test.go:TestRingBufferSpawnWakers:Background:1  # legacy: migrate to t.Context()
-testctx:modules/pdump/controlplane/ring_test.go:TestRingBufferSpawnWakers:Background:2  # legacy: migrate to t.Context()
-testctx:modules/pdump/controlplane/ring_test.go:TestRingBufferStressTest:Background:1  # legacy: migrate to t.Context()
-testctx:modules/pdump/controlplane/ring_test.go:TestRingBufferStressTest:Background:2  # legacy: migrate to t.Context()
 testpkg:bindings/go/dataplane_ut/bench_test.go:dataplaneut:1  # legacy: migrate to the external test package
 testpkg:bindings/go/dataplane_ut/dataplane_ut_test.go:dataplaneut:1  # legacy: migrate to the external test package
 testpkg:common/commonpb/v1/ipaddr_test.go:commonpb:1  # legacy: migrate to the external test package
@@ -185,7 +162,7 @@ testpkg:modules/fwstate/controlplane/metrics_test.go:fwstate:1  # legacy: migrat
 testpkg:modules/fwstate/tests/dataplane/cursor_test.go:fwstate:1  # legacy: migrate to the external test package
 testpkg:modules/fwstate/tests/dataplane/fwstate_test.go:fwstate:1  # legacy: migrate to the external test package
 testpkg:modules/nat64/controlplane/service_test.go:nat64:1  # legacy: migrate to the external test package
-testpkg:modules/pdump/controlplane/ring_test.go:pdump:1  # white-box unit test of the lock-free ring buffer's internal read/write index state machine and cgo message-header layout; an external test cannot reach the shared-memory position pointers or the C struct fields it must drive
+testpkg:modules/pdump/controlplane/ring_test.go:pdump:1  # white-box unit test of the unexported record parser, reader fan-out, adaptive waker and capture retire path; an external test cannot reach parseRecordMeta, runReaders, runWaker or capture
 testpkg:modules/route-mpls/controlplane/service_test.go:route_mpls:1  # legacy: migrate to the external test package
 testpkg:operators/bird-adapter/internal/bird/layout_test.go:bird:1  # white-box guard on unsafe struct layout; an external test cannot observe Sizeof of the private union types
 testpkg:operators/pipeline/internal/operator/stage_source_test.go:operator:1  # legacy: migrate to the external test package

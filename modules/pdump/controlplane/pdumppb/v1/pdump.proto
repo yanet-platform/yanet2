@@ -71,8 +71,17 @@ message Config {
   // Snaplen specifies maximum packet length to capture. Must be greater
   // than zero.
   optional uint32 snaplen = 3;
-  // Ring_size specifies per worker ring buffer size.
-  optional uint32 ring_size = 4;
+  // Removed in favor of ring_name, which binds to a pre-existing ring object
+  // instead of sizing a private one.
+  reserved 4;
+  reserved "ring_size";
+  // RingName names a pre-existing ring object, created through RingService,
+  // that this config captures into.
+  //
+  // Required when a config is created. Absent on an update keeps the
+  // currently bound ring; explicitly empty is invalid. Deleting a config
+  // never deletes its ring.
+  optional string ring_name = 5;
 }
 
 // ShowConfigResponse contains the configuration details of the pdump module.

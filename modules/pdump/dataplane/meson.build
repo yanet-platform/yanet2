@@ -3,6 +3,7 @@ dp_dependencies = [
   lib_logging_dep,
   lib_packet_dp_dep,
   lib_module_dp_dep,
+  lib_ring_objects_dep,
 ]
 
 dp_sources = files(

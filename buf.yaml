@@ -38,6 +38,9 @@ breaking:
     - modules/fwstate/controlplane/fwstatepb/v1/fwstate.proto
     # TODO: drop after the NAT64 prefix wire cutover in #2197 reaches main.
     - modules/nat64/controlplane/nat64pb/v1/nat64.proto
+    # TODO: drop once main carries the ring-object cutover (pdump captures
+    # bind to a named ring object instead of sizing a private one, #2543).
+    - modules/pdump/controlplane/pdumppb/v1/pdump.proto
     # ListEntries changes from a bidi stream to cursor-paginated unary calls
     # in the same cutover.
     - objects/fwstate/controlplane/fwstatemappb/v1/fwstatemap.proto

@@ -18,37 +18,41 @@ import (
 	"github.com/yanet-platform/yanet2/controlplane/configstore"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/modules/pdump/controlplane/pdumppb/v1"
+	ring "github.com/yanet-platform/yanet2/objects/ring/controlplane"
 )
 
 const moduleType = "pdump"
 
-// Module is a published pdump module config with its capture rings.
+// Module is a published pdump module config.
+//
+// It no longer exposes rings: a stream reads its capture's binding, which
+// outlives any one module generation across a same-object update.
 type Module interface {
-	// Rings returns the per-worker rings, valid until Free succeeds.
-	Rings() []Ring
-	// Free releases the module config and its rings, reporting
-	// ffi.ErrStillReferenced while a live generation still holds it.
+	// Free releases the module config, reporting ffi.ErrStillReferenced
+	// while a live generation still holds it.
 	Free() error
 }
 
 // Backend publishes and removes pdump module configs in shared memory.
 type Backend interface {
-	// UpdateModule builds a module config with fresh rings from the settings
-	// and publishes it.
+	// UpdateModule builds a module config from the settings, links its
+	// ring by name and publishes it.
 	//
 	// On error nothing stays allocated.
 	UpdateModule(name string, settings Settings) (Module, error)
-	// DeleteModule removes the module config from the dataplane.
+	// DeleteModule removes the module config from the dataplane. It never
+	// touches the ring the config was linked to.
 	DeleteModule(name string) error
 }
 
 // PdumpService provides packet capture functionality through a gRPC interface.
-// It manages packet capture configurations and ring buffers.
+// It manages packet capture configurations and the bindings their streams read.
 type PdumpService struct {
 	pdumppb.UnimplementedPdumpServiceServer
 
-	backend Backend
-	configs *configstore.Store[*capture]
+	backend   Backend
+	ringOwner RingOwner
+	configs   *configstore.Store[*capture]
 	// life ends every stream once the service shuts down.
 	life context.Context
 	stop context.CancelFunc
@@ -76,7 +80,10 @@ func WithPdumpServiceLog(log *zap.Logger) PdumpServiceOption {
 }
 
 // NewPdumpService initializes a new packet capture service.
-func NewPdumpService(backend Backend, options ...PdumpServiceOption) *PdumpService {
+//
+// The ring owner resolves the ring names configs bind to; production
+// passes the ring service this agent hosts, a test fakes it.
+func NewPdumpService(backend Backend, ringOwner RingOwner, options ...PdumpServiceOption) *PdumpService {
 	opts := newPdumpServiceOptions()
 	for _, o := range options {
 		o(opts)
@@ -85,11 +92,12 @@ func NewPdumpService(backend Backend, options ...PdumpServiceOption) *PdumpServi
 	life, stop := context.WithCancel(context.Background())
 
 	return &PdumpService{
-		backend: backend,
-		configs: configstore.NewStore[*capture](),
-		life:    life,
-		stop:    stop,
-		log:     opts.Log,
+		backend:   backend,
+		ringOwner: ringOwner,
+		configs:   configstore.NewStore[*capture](),
+		life:      life,
+		stop:      stop,
+		log:       opts.Log,
 	}
 }
 
@@ -125,7 +133,14 @@ func (m *PdumpService) ShowConfig(
 }
 
 // SetConfig updates or creates packet capture configuration.
-// Only the config fields the request carries change.
+//
+// Only the config fields the request carries change. ring_name is
+// required to create a config, keeps the bound ring when absent on an
+// update, and is invalid when carried empty. A newly bound ring must
+// exist and be at least the pdump minimum capacity, whatever the snaplen;
+// a same-object update keeps its binding without a new check. On any
+// failure the published config, its binding and its streams are left
+// exactly as they were.
 func (m *PdumpService) SetConfig(
 	ctx context.Context,
 	request *pdumppb.SetConfigRequest,
@@ -138,27 +153,69 @@ func (m *PdumpService) SetConfig(
 			settings = current.Settings()
 		}
 		settings = mergeSettings(settings, request.GetConfig())
-		if settings.RingSize > maxRingSize {
-			return nil, status.Errorf(
-				codes.InvalidArgument,
-				"ring_size %d exceeds native allocator limit %d",
-				settings.RingSize,
-				maxRingSize,
-			)
+
+		if settings.RingName == "" {
+			if !ok {
+				return nil, status.Error(codes.InvalidArgument, "ring_name is required to create a config")
+			}
+			return nil, status.Error(codes.InvalidArgument, "ring_name must not be carried empty on an update; omit it to keep the bound ring")
+		}
+
+		handle, found := m.ringOwner.LookupHandle(settings.RingName)
+		if !found {
+			return nil, status.Errorf(codes.NotFound, "ring %q not found", settings.RingName)
+		}
+
+		// Comparing handles, not names, tells a same-object update from
+		// a rebind: a ring deleted and recreated under the same name
+		// gets a new handle.
+		//
+		// A same-object update retains the current binding instead of
+		// taking a second lease, so an in-flight stream keeps reading it
+		// with no reset.
+		var b *binding
+		if ok && current.Binding().Handle() == handle {
+			b = current.Binding()
+			b.Retain()
+		} else {
+			lease, err := m.ringOwner.Acquire(settings.RingName, handle)
+			if err != nil {
+				// A handle gone between the lookup above and this
+				// acquire is the same "ring is gone" case the lookup
+				// itself would have reported as NotFound.
+				//
+				// Any other acquire failure is the owner's own
+				// problem, not the caller's request.
+				code := codes.Internal
+				if errors.Is(err, ring.ErrHandleGone) {
+					code = codes.NotFound
+				}
+				return nil, status.Errorf(code, "ring %q: %v", settings.RingName, err)
+			}
+			// A ring below the minimum could refuse a large record, and
+			// the capture would silently miss that packet.
+			if capacity := lease.Capacity(); capacity < MinRingCapacity {
+				lease.Release()
+				return nil, status.Errorf(
+					codes.InvalidArgument,
+					"ring %q capacity %d is below the pdump minimum %d",
+					settings.RingName, capacity, MinRingCapacity,
+				)
+			}
+			b = newBinding(settings.RingName, lease, withBindingLog(m.log))
 		}
 
 		m.log.Debug("update config", zap.String("module", name))
-
 		module, err := m.backend.UpdateModule(name, settings)
 		if err != nil {
+			b.Release()
 			return nil, status.Errorf(codes.Internal, "failed to update module config %q: %v", name, err)
 		}
 
 		return &capture{
 			settings: settings,
 			module:   module,
-			readers:  newGate(),
-			log:      m.log,
+			binding:  b,
 		}, nil
 	})
 	if err != nil {
@@ -169,6 +226,8 @@ func (m *PdumpService) SetConfig(
 }
 
 // DeleteConfig removes a packet capture configuration.
+//
+// The ring the config was linked to is never deleted.
 func (m *PdumpService) DeleteConfig(
 	ctx context.Context,
 	request *pdumppb.DeleteConfigRequest,
@@ -204,9 +263,9 @@ func (m *PdumpService) DeleteConfig(
 //   - The client disconnects (context cancellation from the gRPC stream)
 //   - The service is shut down
 //   - An error occurs while sending a packet record on the stream
-//   - The configuration of this module is updated or deleted
+//   - The configuration of this module is deleted or rebound to another ring
 //
-// Every request reads the rings through its own read positions, so
+// Every request reads its binding's ring through its own read positions, so
 // concurrent ReadDump requests do not interfere with each other. The handler
 // returns only after its readers have stopped reading those rings.
 func (m *PdumpService) ReadDump(req *pdumppb.ReadDumpRequest, stream grpc.ServerStreamingServer[pdumppb.Record]) error {
@@ -230,20 +289,21 @@ func (m *PdumpService) ReadDump(req *pdumppb.ReadDumpRequest, stream grpc.Server
 			return err
 		default:
 			// A client that abandoned the stream gets its own error,
-			// while a shutdown or a config change ends it without one.
+			// while a shutdown, a delete or a rebind ends it without
+			// one.
 			return stream.Context().Err()
 		}
 	}
 }
 
 // defaultSettings are the capture parameters of a config that was never
-// updated: every packet on input, the system snapshot length and the
-// smallest ring.
+// updated: every packet on input and the system snapshot length.
+//
+// The ring name stays unset: a config must carry one to be created.
 func defaultSettings() Settings {
 	return Settings{
-		Mode:     defaultMode,
-		Snaplen:  defaultSnaplen,
-		RingSize: uint32(minRingSize.Bytes()),
+		Mode:    defaultMode,
+		Snaplen: defaultSnaplen,
 	}
 }
 
@@ -266,8 +326,11 @@ func mergeSettings(settings Settings, config *pdumppb.Config) Settings {
 	if config.Snaplen != nil {
 		settings.Snaplen = config.GetSnaplen()
 	}
-	if config.RingSize != nil {
-		settings.RingSize = config.GetRingSize()
+	if config.RingName != nil {
+		// An explicitly empty ring name is carried through as-is, so
+		// the config update's required-ring-name check reports it
+		// rather than silently keeping the old binding.
+		settings.RingName = config.GetRingName()
 	}
 
 	return settings
@@ -280,6 +343,6 @@ func settingsProto(settings Settings) *pdumppb.Config {
 		Filter:   proto.String(settings.Filter),
 		Mode:     proto.Uint32(settings.Mode),
 		Snaplen:  proto.Uint32(settings.Snaplen),
-		RingSize: proto.Uint32(settings.RingSize),
+		RingName: proto.String(settings.RingName),
 	}
 }
