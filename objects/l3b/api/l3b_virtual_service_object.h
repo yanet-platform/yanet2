@@ -148,14 +148,12 @@ struct real_ring {
 };
 
 /*
- * Source classifier of one family: the source network attribute joined
- * with the service port attribute, with the projection decoder folded
- * in.
+ * Source admission joins client networks and destination service ports
+ * within one address family.
  *
- * The classifiers are embedded by value in the published service and
- * die with it through the typed attribute, table and line frees; every
- * free is safe on a zeroed struct, so a service without source rules
- * keeps them zeroed and rejects every packet.
+ * Embedded classifiers share the service lifetime and support zero-safe
+ * release. With no source rules they remain zeroed and reject ordinary
+ * transport admission; matched Echo requests bypass that admission.
  */
 struct l3b_source_classifier_ip4 {
 	struct classify_attr_net4 src_attr;
@@ -176,15 +174,11 @@ struct l3b_source_classifier_ip6 {
 /*
  * A virtual service exposed to clients.
  *
- * Incoming traffic that matches one of the per-family source classifiers
- * is dispatched to a real server: the session table first pins each
- * client flow to a real, and only flows without a live session go through
- * the hash-derived real_ring scheduler.
- *
- * Contract: the classifiers stay zeroed until the first source rule is
- * compiled in, and the dataplane queries them only while the service holds
- * source rules — a lookup over a zeroed attribute reads through a relative
- * pointer the compile never published.
+ * Matched Echo requests bypass source filtering and sessions. Other traffic
+ * requires source admission, then uses a live backend pin or hash/link-counter
+ * scheduling. Disabled pins permit reselection for UDP and TCP setup traffic.
+ * Classifiers remain zeroed without source rules and must not be queried in
+ * that state: their relative pointers have no compiled targets yet.
  */
 struct virtual_service {
 	// Backends available for this service.
@@ -253,8 +247,8 @@ struct l3b_virtual_service_object {
  */
 
 /*
- * Source-side match criteria of a virtual service: the IPv6/IPv4 networks and
- * L4 port ranges a packet may originate from.
+ * Source admission matches client IPv6/IPv4 networks and destination service
+ * ports, not client source ports.
  */
 struct l3b_source_filter_rule {
 	struct classifier_rule rule;

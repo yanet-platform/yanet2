@@ -11,6 +11,7 @@
 
 #include "common/container_of.h"
 #include "common/memory.h"
+#include "common/network_mask.h"
 #include "lib/controlplane/agent/agent.h"
 #include "lib/controlplane/config/cp_module.h"
 #include "lib/controlplane/config/zone.h"
@@ -19,8 +20,7 @@
 #include "objects/l3b/api/l3b_virtual_service_object.h"
 
 /*
- * Field selectors of the destination rule: the module rule is handed to
- * the classify compilers directly, every attribute through its getter.
+ * Destination attributes borrow their networks and ranges from module rules.
  */
 static inline void
 l3b_rule_get_net4_dsts(
@@ -83,9 +83,7 @@ l3b_module_config_new(
 	SET_OFFSET_OF(&config->rule_object_links, NULL);
 	SET_OFFSET_OF(&config->rule_link_counter_ids, NULL);
 
-	// The classifiers are embedded by value with their decoders, so the
-	// region is zeroed as a whole; every free of the destroy walk is
-	// safe on a zeroed struct.
+	// Zero initialization makes partial-construction cleanup safe.
 	memset(&config->classifier_ip6, 0, sizeof(config->classifier_ip6));
 	memset(&config->classifier_ip4, 0, sizeof(config->classifier_ip4));
 
@@ -172,11 +170,9 @@ l3b_module_config_free(struct cp_module *cp_module, yanet_error **err) {
 	return 0;
 }
 
-// Spells a projection of the destination ruleset through a fresh array:
-// one slot per rule, NULL for the rules the family projection cannot
-// match — the ones without networks of the family, and the ones without
-// protocol ranges, which no protocol satisfies. Returns NULL when the
-// array cannot be allocated.
+// Missing-family networks and empty protocol ranges must never match.
+//
+// Excluded rules keep their slots so decoded indices retain rule order.
 static const struct classifier_rule **
 l3b_rule_ptrs_project(
 	const struct l3b_destination_filter_rule *destination_filter_rules,
@@ -216,15 +212,12 @@ l3b_rule_ptrs_project(
 }
 
 /*
- * Compiles the destination classifier of one family: the destination
- * network attribute joined with the transport attribute over the rules
- * holding networks of the family, decoded over the same projection.
+ * Destination classification combines network and transport restrictions
+ * within one address family while preserving rule order.
  *
- * The stages write straight into the classifier embedded in the config,
- * and a failed stage leaves its own outputs zeroed or released, so the
- * destroy walk finishes a partially built config without per stage
- * cleanup here; the registries and the rule group mappings are the only
- * scratch, released on the common exit of both success and failure.
+ * Persistent outputs belong to the module config, whose destruction
+ * releases partial construction after failure. Temporary registries and
+ * rule mappings are released here on both success and failure.
  */
 static int
 l3b_module_init_destination(
@@ -451,6 +444,39 @@ l3b_module_config_update(
 		SET_OFFSET_OF(&config->rule_link_counter_ids, NULL);
 	}
 	config->destination_filter_rule_count = destination_filter_rule_count;
+
+	// Reject unrepresentable masks before classifier construction.
+	//
+	// Earlier link and array allocations remain owned by the module config.
+	for (uint32_t rule_idx = 0; rule_idx < destination_filter_rule_count;
+	     ++rule_idx) {
+		const struct l3b_destination_filter_rule *destination_rule =
+			&destination_filter_rules[rule_idx];
+		if (!network_net4_masks_are_valid(
+			    destination_rule->net4s.items,
+			    destination_rule->net4s.count
+		    )) {
+			yanet_error_add(
+				err,
+				"destination filter rule %u has a "
+				"non-contiguous IPv4 network mask",
+				rule_idx
+			);
+			return -1;
+		}
+		if (!network_net6_masks_are_valid(
+			    destination_rule->net6s.items,
+			    destination_rule->net6s.count
+		    )) {
+			yanet_error_add(
+				err,
+				"destination filter rule %u has an IPv6 "
+				"network mask that is not bi-contiguous",
+				rule_idx
+			);
+			return -1;
+		}
+	}
 
 	// A ruleset without rules keeps the classifiers zeroed: the dataplane
 	// queries them only while the rule count is positive.

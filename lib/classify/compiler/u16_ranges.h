@@ -284,6 +284,16 @@ filter_u16_commit_iterate(
 			const struct filter_u16_span *span =                   \
 				ranges.items + range_idx;                      \
                                                                                \
+			/*                                                     \
+			 * Reversed endpoint pairs cover no values.            \
+			 *                                                     \
+			 * They add no collector blocks, so their boundaries   \
+			 * need not exist in the region index.                 \
+			 */                                                    \
+			if (span->from > span->to) {                           \
+				continue;                                      \
+			}                                                      \
+                                                                               \
 			uint8_t from_key[2];                                   \
 			uint8_t to_key[2];                                     \
 			from_key[0] = span->from >> 8;                         \
@@ -292,12 +302,20 @@ filter_u16_commit_iterate(
 			to_key[1] = span->to;                                  \
 			filter_key_inc(2, to_key);                             \
                                                                                \
+			/*                                                     \
+			 * Valid boundaries must resolve to region starts.     \
+			 * A missing boundary fails compilation safely.        \
+			 */                                                    \
 			uint32_t start = radix_lookup(                         \
 				&tag_compile->range_index.radix, 2, from_key   \
 			);                                                     \
 			uint32_t stop = radix_lookup(                          \
 				&tag_compile->range_index.radix, 2, to_key     \
 			);                                                     \
+			if (start == RADIX_VALUE_INVALID ||                    \
+			    stop == RADIX_VALUE_INVALID) {                     \
+				return -1;                                     \
+			}                                                      \
 			if (stop == 0) {                                       \
 				/*                                             \
 				 * The only chance get zero here is for        \
