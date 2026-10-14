@@ -21,7 +21,10 @@
 #include "lib/controlplane/config/zone.h"
 #include "lib/counters/counters.h"
 #include "lib/dataplane/config/zone.h"
+#include "lib/dataplane/module/packet_front.h"
+#include "lib/dataplane/packet/packet.h"
 #include "lib/dataplane/pipeline/econtext.h"
+#include "lib/dataplane/worker/pipeline_round.h"
 #include "lib/logging/log.h"
 #include "lib/tests/dataplane/fixture.h"
 
@@ -265,9 +268,158 @@ test_backing_resolves_crossed_registration_order(void) {
 	return TEST_SUCCESS;
 }
 
+// Verifies that the output-entry terminal drops port-less destinations
+// and counts them on the entry's drop counter.
+//
+// Packets aimed at a real port pass through untouched, including ones
+// that only traverse the entry's own port-less device.
+static int
+test_terminal_egress_drops_portless_destinations(void) {
+	struct dataplane_test_fixture fixture;
+	TEST_ASSERT_SUCCESS(
+		dataplane_test_fixture_init(&fixture, "backing_test", 2),
+		"fixture init failed"
+	);
+	struct dp_config *cfg = &fixture.dp_config;
+
+	struct dp_port *ports = ADDR_OF(&cfg->dp_topology.devices);
+	snprintf(
+		ports[0].device_name,
+		sizeof(ports[0].device_name),
+		"%s",
+		"portA"
+	);
+	snprintf(
+		ports[1].device_name,
+		sizeof(ports[1].device_name),
+		"%s",
+		"portB"
+	);
+
+	struct cp_config cp_config;
+	struct cp_config_gen gen;
+	struct cp_device port_b, user_x, port_a;
+	TEST_ASSERT_SUCCESS(
+		backing_test_cp_config_init(&fixture, &cp_config),
+		"cp_config init failed"
+	);
+	TEST_ASSERT_SUCCESS(
+		backing_test_gen_init(cfg, &cp_config, &gen), "gen init failed"
+	);
+	TEST_ASSERT_SUCCESS(
+		backing_test_add_device(&fixture, &gen, &port_b, "portB"),
+		"add portB failed"
+	);
+	TEST_ASSERT_SUCCESS(
+		backing_test_add_device(&fixture, &gen, &user_x, "userX"),
+		"add userX failed"
+	);
+	TEST_ASSERT_SUCCESS(
+		backing_test_add_device(&fixture, &gen, &port_a, "portA"),
+		"add portA failed"
+	);
+
+	struct dp_worker worker;
+	memset(&worker, 0, sizeof(worker));
+	worker.device_id = 0;
+	struct dp_worker **workers = (struct dp_worker **)memory_balloc(
+		&cfg->memory_context, sizeof(struct dp_worker *)
+	);
+	TEST_ASSERT_NOT_NULL(workers, "worker array alloc failed");
+	SET_OFFSET_OF(workers, &worker);
+	SET_OFFSET_OF(&cfg->workers, workers);
+	cfg->worker_count = 1;
+
+	yanet_error *err = NULL;
+	struct config_gen_ectx **ectxs =
+		config_gen_ectxs_create(&gen, NULL, 1, &err);
+	TEST_ASSERT_NOT_NULL(ectxs, "execution context build failed");
+	struct config_gen_ectx *ectx = ADDR_OF(ectxs);
+	ectx->abs_egress_backing = ADDR_OF(&ectx->egress_backing);
+
+	// The terminal runs on the port-less device's output entry.
+	//
+	// The drop counter stands in for the resolved handle the publish
+	// pass would install.
+	struct device_ectx **device_ptrs = ADDR_OF(&ectx->device_ptrs);
+	struct device_entry_ectx *entry =
+		ADDR_OF(&ADDR_OF(device_ptrs + 1)->output_pipelines);
+	uint64_t drop_counter[2] = {0, 0};
+	entry->counter_packet_drop =
+		(struct counter_value_handle *)drop_counter;
+	uint64_t tx_counter[2] = {0, 0};
+	entry->counter_packet_tx = (struct counter_value_handle *)tx_counter;
+
+	struct packet through, dangling, beyond;
+	memset(&through, 0, sizeof(through));
+	memset(&dangling, 0, sizeof(dangling));
+	memset(&beyond, 0, sizeof(beyond));
+	// Registry slots: portB is zero, userX is one, portA is two.
+	through.tx_device_id = 2;
+	through.data_len = 100;
+	dangling.tx_device_id = 1;
+	dangling.data_len = 60;
+	beyond.tx_device_id = 999;
+	beyond.data_len = 40;
+
+	struct packet_front front;
+	packet_front_init(&front);
+	packet_front_output(&front, &through);
+	packet_front_output(&front, &dangling);
+	packet_front_output(&front, &beyond);
+
+	// Stand in for the entry's accounting, which counts the whole
+	// output as handed onward before the terminal filters it.
+	tx_counter[0] = 3;
+	tx_counter[1] = 200;
+
+	worker_entry_terminal_egress(ectx, entry, &front);
+
+	TEST_ASSERT_EQUAL(
+		1, packet_front_output_count(&front), "one packet survives"
+	);
+	TEST_ASSERT_EQUAL(
+		2, packet_front_drop_count(&front), "two packets drop"
+	);
+	TEST_ASSERT_EQUAL(
+		100, packet_front_output_bytes(&front), "byte accounting holds"
+	);
+	TEST_ASSERT_EQUAL(
+		100, packet_front_drop_bytes(&front), "dropped bytes add up"
+	);
+	TEST_ASSERT_EQUAL(
+		packet_list_first(&front.output),
+		&through,
+		"the port-bound packet survives"
+	);
+	TEST_ASSERT_EQUAL(
+		drop_counter[0], 2, "the entry's drop counter saw both packets"
+	);
+	TEST_ASSERT_EQUAL(
+		drop_counter[1], 100, "the entry's drop counter saw the bytes"
+	);
+	TEST_ASSERT_EQUAL(
+		tx_counter[0],
+		1,
+		"the transmit accounting gave the dropped packets back"
+	);
+	TEST_ASSERT_EQUAL(
+		tx_counter[1],
+		100,
+		"the transmit accounting gave the dropped bytes back"
+	);
+
+	dataplane_test_fixture_fini(&fixture);
+	return TEST_SUCCESS;
+}
+
 int
 main(void) {
 	if (test_backing_resolves_crossed_registration_order() !=
+	    TEST_SUCCESS) {
+		return 1;
+	}
+	if (test_terminal_egress_drops_portless_destinations() !=
 	    TEST_SUCCESS) {
 		return 1;
 	}
