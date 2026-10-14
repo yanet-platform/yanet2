@@ -1103,6 +1103,8 @@ classify_compile_net6_commit(
 		// struct copy would strand.
 		comb->v_dim = dense.v_dim;
 		comb->h_dim = dense.h_dim;
+		comb->row_count = dense.row_count;
+		SET_OFFSET_OF(&comb->slabs, ADDR_OF(&dense.slabs));
 		SET_OFFSET_OF(&comb->values, ADDR_OF(&dense.values));
 		SET_OFFSET_OF(
 			&comb->memory_context, ADDR_OF(&dense.memory_context)
@@ -1136,6 +1138,8 @@ classify_compile_net6_commit(
 	 */
 	net6_attr->comb.v_dim = comb->v_dim;
 	net6_attr->comb.h_dim = comb->h_dim;
+	net6_attr->comb.row_count = comb->row_count;
+	SET_OFFSET_OF(&net6_attr->comb.slabs, ADDR_OF(&comb->slabs));
 	SET_OFFSET_OF(&net6_attr->comb.values, ADDR_OF(&comb->values));
 	SET_OFFSET_OF(
 		&net6_attr->comb.memory_context, ADDR_OF(&comb->memory_context)
