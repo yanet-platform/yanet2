@@ -37,7 +37,9 @@
 // 43: struct registry_item lost the destroying flag, changing the layout
 // of every module, device and object embedding it.
 // 44: struct module and struct dp_module lost config_layout.
-#define YANET_MODULE_ABI_VERSION 44
+// 45: the acl filter structs carry interned first-match rule tables
+// in place of the path joints with their decoders.
+#define YANET_MODULE_ABI_VERSION 45
 
 // Symbol name a module .so exports carrying its compiled-against
 // YANET_MODULE_ABI_VERSION, as a uint32_t global.
