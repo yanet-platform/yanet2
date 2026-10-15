@@ -51,10 +51,6 @@ struct packet {
 
 	uint32_t hash;
 
-	// Where the packet entered the dataplane, as a registry device
-	// index. Observability metadata only: nothing routes by it.
-	uint16_t rx_device_id;
-
 	// The device on whose pipeline the packet is executing, as a
 	// registry device index.
 	//

@@ -78,9 +78,6 @@ assert_clone_correct(
 		"fragment_offset preserved"
 	);
 	TEST_ASSERT_EQUAL(
-		clone->rx_device_id, src->rx_device_id, "rx_device_id preserved"
-	);
-	TEST_ASSERT_EQUAL(
 		clone->device_id, src->device_id, "device_id preserved"
 	);
 	TEST_ASSERT_NULL(clone->next, "clone chain pointer must be NULL");
@@ -99,7 +96,6 @@ set_metadata(struct packet *p, uint32_t hash, uint16_t flags, uint16_t vlan) {
 	p->recirc_remaining = 5;
 	p->recirc_initialized = 1;
 	p->fragment_offset = 42;
-	p->rx_device_id = 7;
 	p->device_id = 3;
 }
 
@@ -195,9 +191,6 @@ test_packet_alloc_resets_metadata(struct rte_mempool *pool) {
 	TEST_ASSERT_NOT_NULL(packet, "packet allocation must succeed");
 	TEST_ASSERT_NULL(packet->next, "new packet chain pointer must be NULL");
 	TEST_ASSERT_EQUAL(packet->hash, 0, "new packet hash must be zero");
-	TEST_ASSERT_EQUAL(
-		packet->rx_device_id, 0, "new packet rx device must be zero"
-	);
 	TEST_ASSERT_EQUAL(
 		packet->device_id, 0, "new packet tx device must be zero"
 	);

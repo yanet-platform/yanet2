@@ -121,7 +121,6 @@ fwstate_test_stash_push(
 	struct cp_module *cp_module,
 	struct dp_worker *dp_worker,
 	const struct fw_state_sync_frame *frame,
-	uint16_t rx_device_id,
 	uint16_t device_id
 );
 

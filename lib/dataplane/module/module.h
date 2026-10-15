@@ -24,7 +24,8 @@
 // device_ectx gained its registry device index.
 // 37: struct config_gen_ectx gained the per-physical-device transmit
 // buckets the output-entry terminals fill and the write stage drains.
-#define YANET_MODULE_ABI_VERSION 37
+// 38: struct packet dropped the unused receive device field.
+#define YANET_MODULE_ABI_VERSION 38
 
 // Symbol name a module .so exports carrying its compiled-against
 // YANET_MODULE_ABI_VERSION, as a uint32_t global.

@@ -313,7 +313,6 @@ generate_packet_info(
 			.data = buf,
 			.size = total_size,
 			.device_id = 0,
-			.rx_device_id = 0,
 		};
 	}
 }

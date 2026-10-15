@@ -52,7 +52,7 @@ trafgen_emit_frame(
 	}
 
 	// worker_packet_alloc returns zero-initialised packet metadata, so the
-	// caller's only obligations are setting the device ids and parsing the
+	// caller's only obligations are setting the device id and parsing the
 	// packet.
 	struct packet *packet = worker_packet_alloc(dp_worker);
 	if (packet == NULL) {
@@ -67,7 +67,6 @@ trafgen_emit_frame(
 	}
 	rte_memcpy(data, frames + offsets[frame_idx], len);
 
-	packet->rx_device_id = device_id;
 	packet->device_id = device_id;
 
 	if (parse_packet(packet)) {

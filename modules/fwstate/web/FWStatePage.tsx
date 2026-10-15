@@ -1164,11 +1164,11 @@ const MapNameField: React.FC<MapNameFieldProps> = ({
                         value={stashSize}
                         onUpdate={onStashSizeUpdate}
                         error={stashSizeError}
-                        placeholder="3968"
+                        placeholder="3840"
                         disabled={busy || knownKind !== undefined}
                         controlProps={{
                             'aria-label': 'Stash size in bytes of the new map',
-                            title: 'Stash size in bytes used only when the create button makes a new map: each worker\'s sync stash buffer, one 62-byte record per stateful packet per round. Empty or 0 selects room for 64 records (3968 bytes); at most 1048576. An existing map keeps the size it was created with.',
+                            title: 'Stash size in bytes used only when the create button makes a new map: each worker\'s sync stash buffer, one 60-byte record per stateful packet per round. Empty or 0 selects room for 64 records (3840 bytes); at most 1048576. An existing map keeps the size it was created with.',
                         }}
                     />
                 </div>

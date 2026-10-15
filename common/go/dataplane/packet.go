@@ -20,24 +20,22 @@ import (
 )
 
 type PacketData struct {
-	Payload    []uint8
-	DeviceId   uint16
-	RxDeviceId uint16
+	Payload  []uint8
+	DeviceId uint16
 }
 
-func NewPacketData(deviceId uint16, rxDeviceId uint16, packet gopacket.Packet) PacketData {
-	return PacketData{Payload: packet.Data(), DeviceId: deviceId, RxDeviceId: rxDeviceId}
+func NewPacketData(deviceId uint16, packet gopacket.Packet) PacketData {
+	return PacketData{Payload: packet.Data(), DeviceId: deviceId}
 }
 
-func PacketsData(deviceId uint16, rxDeviceId uint16, packets ...gopacket.Packet) []PacketData {
+func PacketsData(deviceId uint16, packets ...gopacket.Packet) []PacketData {
 	payload := make([]PacketData, 0, len(packets))
 	for idx := range packets {
 		payload = append(
 			payload,
 			PacketData{
-				Payload:    packets[idx].Data(),
-				DeviceId:   deviceId,
-				RxDeviceId: rxDeviceId,
+				Payload:  packets[idx].Data(),
+				DeviceId: deviceId,
 			},
 		)
 	}
@@ -56,7 +54,7 @@ type Packet C.struct_packet
 // contract of the packet metadata.
 // Returns an error if segments is empty, the total payload is zero, or the
 // underlying C call fails.
-func NewPacketFromSegments(segments [][]byte, deviceId, rxDeviceId uint16) (*Packet, error) {
+func NewPacketFromSegments(segments [][]byte, deviceId uint16) (*Packet, error) {
 	if len(segments) == 0 {
 		return nil, fmt.Errorf("failed to create segmented packet: no segments provided")
 	}
@@ -88,10 +86,9 @@ func NewPacketFromSegments(segments [][]byte, deviceId, rxDeviceId uint16) (*Pac
 
 	packet := C.struct_packet{}
 	packetInfo := C.struct_packet_info{
-		data:         (*C.uint8_t)(&payload[0]),
-		size:         C.uint16_t(len(payload)),
-		device_id:    C.uint16_t(deviceId),
-		rx_device_id: C.uint16_t(rxDeviceId),
+		data:      (*C.uint8_t)(&payload[0]),
+		size:      C.uint16_t(len(payload)),
+		device_id: C.uint16_t(deviceId),
 	}
 
 	rc := C.fill_packet_from_segments(
@@ -110,10 +107,9 @@ func NewPacketFromSegments(segments [][]byte, deviceId, rxDeviceId uint16) (*Pac
 func NewPacketFromData(data PacketData) (*Packet, error) {
 	packet := C.struct_packet{}
 	packetData := C.struct_packet_info{
-		data:         (*C.uint8_t)(&data.Payload[0]),
-		size:         C.uint16_t(len(data.Payload)),
-		device_id:    C.uint16_t(data.DeviceId),
-		rx_device_id: C.uint16_t(data.RxDeviceId),
+		data:      (*C.uint8_t)(&data.Payload[0]),
+		size:      C.uint16_t(len(data.Payload)),
+		device_id: C.uint16_t(data.DeviceId),
 	}
 
 	rc := C.fill_packet_from_data(&packet, &packetData)
@@ -129,9 +125,8 @@ func (packet *Packet) Data() PacketData {
 	size := data.size
 	bytes := unsafe.Slice((*uint8)(data.data), size)
 	return PacketData{
-		Payload:    bytes,
-		DeviceId:   uint16(data.device_id),
-		RxDeviceId: uint16(data.rx_device_id),
+		Payload:  bytes,
+		DeviceId: uint16(data.device_id),
 	}
 }
 
@@ -234,7 +229,7 @@ func NewPacketList(pinner *runtime.Pinner, packets []*Packet) *PacketList {
 }
 
 func NewPacketListFromPackets(pinner *runtime.Pinner, packets ...gopacket.Packet) (*PacketList, error) {
-	data := PacketsData(0, 0, packets...)
+	data := PacketsData(0, packets...)
 	return NewPacketListFromData(pinner, data...)
 }
 
@@ -344,9 +339,8 @@ func NewPacketFrontFromPayload(pinner *runtime.Pinner, payload [][]byte) (*Packe
 	packets := []PacketData{}
 	for idx := range payload {
 		packets = append(packets, PacketData{
-			Payload:    payload[idx],
-			DeviceId:   0,
-			RxDeviceId: 0,
+			Payload:  payload[idx],
+			DeviceId: 0,
 		})
 	}
 	packetList, err := NewPacketListFromData(pinner, packets...)

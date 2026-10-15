@@ -236,7 +236,6 @@ run_record_layout_body(
 
 	struct packet *packet = pdump_test_build_packet(ut, true, packet_len);
 	TEST_ASSERT_NOT_NULL(packet, "failed to build a test packet");
-	packet->rx_device_id = PDUMP_TEST_RX_DEVICE_ID;
 	packet->device_id = PDUMP_TEST_TX_DEVICE_ID;
 	memcpy(expected,
 	       rte_pktmbuf_mtod(packet_to_mbuf(packet), uint8_t *),
@@ -292,8 +291,8 @@ run_record_layout_body(
 	);
 	TEST_ASSERT_EQUAL(
 		(long)rec->hdr.rx_device_id,
-		(long)PDUMP_TEST_RX_DEVICE_ID,
-		"rx_device_id must name the packet's receiving device"
+		0L,
+		"the receive slot of the record format ships zeroed"
 	);
 	TEST_ASSERT_EQUAL(
 		(long)rec->hdr.device_id,

@@ -506,7 +506,6 @@ LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) { // NOLINT
 				break;
 			}
 			memcpy(&record->frame, frame, sizeof(record->frame));
-			record->rx_device_id = frame->fib;
 			record->device_id = frame->proto & 1;
 			record->status = FWSTATE_SYNC_RECORD_PENDING;
 			fwstate_stash_slot_commit(slot);

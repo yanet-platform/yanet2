@@ -185,11 +185,10 @@ func SetSyncMTU(cpModule *C.struct_cp_module, mtu uint16) {
 }
 
 // localEvent is one stashed sync record: the frame bytes and the device
-// ids ACL would capture from the original packet.
+// id ACL would capture from the original packet.
 type localEvent struct {
-	frame      []byte
-	rxDeviceID uint16
-	txDeviceID uint16
+	frame    []byte
+	deviceID uint16
 }
 
 // roundResult is what one handler call left in the packet front, with the
@@ -220,8 +219,7 @@ func stashEvents(cpModule *C.struct_cp_module, worker *C.struct_dp_worker, event
 	for _, event := range events {
 		frame := (*C.struct_fw_state_sync_frame)(C.CBytes(event.frame))
 		rc := C.fwstate_test_stash_push(
-			cpModule, worker, frame,
-			C.uint16_t(event.rxDeviceID), C.uint16_t(event.txDeviceID),
+			cpModule, worker, frame, C.uint16_t(event.deviceID),
 		)
 		C.free(unsafe.Pointer(frame))
 		if rc == 0 {
@@ -642,14 +640,13 @@ func fwstateSiblingModuleConfig(cpModule *C.struct_cp_module, name string) (*C.s
 
 // v6Event builds a stashed IPv6 TCP event from 2001:db8::1 to 2001:db8::2
 // whose source port tells events apart.
-func v6Event(srcPort uint16, rxDeviceID, txDeviceID uint16) localEvent {
+func v6Event(srcPort uint16, deviceID uint16) localEvent {
 	return localEvent{
 		frame: createSyncFrame(
 			layers.IPProtocolTCP, 6, srcPort, 80,
 			net.ParseIP("2001:db8::2"), net.ParseIP("2001:db8::1"),
 		),
-		rxDeviceID: rxDeviceID,
-		txDeviceID: txDeviceID,
+		deviceID: deviceID,
 	}
 }
 

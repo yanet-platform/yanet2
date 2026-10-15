@@ -31,7 +31,6 @@ export interface RecordMeta {
     packet_len?: number;
     worker_idx?: number;
     pipeline_idx?: number;
-    rx_device_id?: number;
     // Legacy alias of device_id, kept during the field rename so a UI
     // newer than the control plane keeps decoding older servers.
     tx_device_id?: number;

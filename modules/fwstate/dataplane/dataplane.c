@@ -457,12 +457,11 @@ fwstate_process_sync_v6(
 
 // Applied frames waiting to be packed into one wire packet.
 //
-// All frames leave through the same TX device; the packet takes its RX
-// device from the last frame added.
+// All frames leave through the same device, the fallback egress of the
+// emitted packet.
 struct fwstate_sync_batch {
 	uint32_t count;
 	uint32_t limit;
-	uint16_t rx_device_id;
 	uint16_t device_id;
 	const struct fw_state_sync_frame *frames[FWSTATE_SYNC_BATCH_MAX];
 };
@@ -554,7 +553,6 @@ fwstate_sync_batch_flush(struct fwstate_emitter *emitter) {
 		int written = fwstate_build_sync_packet(
 			batch->frames + done,
 			batch->count - done,
-			batch->rx_device_id,
 			batch->device_id,
 			packet
 		);
@@ -572,11 +570,9 @@ fwstate_sync_batch_flush(struct fwstate_emitter *emitter) {
 
 // Queue one applied record for emission.
 //
-// A full batch or a record for another transmit device closes the
-// current batch first. The transmit device is the fallback egress: a
-// routing module downstream of the emitter may aim the packet
-// elsewhere, and the receive device rides along from the last record
-// of the batch.
+// A full batch or a record naming another device closes the current
+// batch first. The device is the fallback egress: a routing module
+// downstream of the emitter may aim the packet elsewhere.
 static void
 fwstate_sync_batch_add(
 	struct fwstate_emitter *emitter,
@@ -590,7 +586,6 @@ fwstate_sync_batch_add(
 	}
 
 	batch->frames[batch->count++] = &record->frame;
-	batch->rx_device_id = record->rx_device_id;
 	batch->device_id = record->device_id;
 }
 

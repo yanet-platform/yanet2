@@ -134,7 +134,10 @@ process_queue(
 			.worker_idx = (uint32_t)dp_worker->idx,
 			// FIXME
 			// .pipeline_idx = pkt->pipeline_idx,
-			.rx_device_id = pkt->rx_device_id,
+			// The receive slot stays in the record format for
+			// old readers; new captures carry no receive
+			// device, so the slot ships zeroed.
+			.rx_device_id = 0,
 			.device_id = pkt->device_id,
 			.queue = (uint8_t)queue,
 		};

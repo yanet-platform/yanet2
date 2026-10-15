@@ -49,7 +49,6 @@ struct packet_info {
 	const uint8_t *data;
 	uint16_t size;
 	uint16_t device_id;
-	uint16_t rx_device_id;
 };
 
 struct packet_info
