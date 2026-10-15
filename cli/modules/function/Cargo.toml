@@ -15,5 +15,5 @@ commonpb = { path = "../../../common/rust/commonpb", package = "yanet-commonpb" 
 ync = { path = "../../core", package = "yanet-cli" }
 clap = { version = "4.5", features = ["derive", "wrap_help"] }
 clap_complete = { version = "4.5", features = ["unstable-dynamic"] }
-tonic = { version = "0.14", features = ["gzip"] }
+tonic = { version = "0.14", features = ["gzip", "zstd"] }
 serde_yaml = "0.9"

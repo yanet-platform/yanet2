@@ -17,9 +17,9 @@ import (
 	"google.golang.org/grpc/connectivity"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
-	"google.golang.org/grpc/encoding/gzip"
 	"google.golang.org/grpc/status"
 
+	"github.com/yanet-platform/yanet2/common/go/xgrpc"
 	"github.com/yanet-platform/yanet2/modules/route-mpls/controlplane/routemplspb/v1"
 	adapterpb "github.com/yanet-platform/yanet2/operators/bird-adapter/adapterpb/v1"
 	"github.com/yanet-platform/yanet2/operators/bird-adapter/internal/bird"
@@ -245,7 +245,7 @@ func (m *AdapterService) SetupImport(params ImportParams) error {
 	conn, err := grpc.NewClient(
 		m.routeOperatorEndpoint,
 		grpc.WithTransportCredentials(m.routeOperatorCredentials),
-		grpc.WithDefaultCallOptions(grpc.UseCompressor(gzip.Name)),
+		grpc.WithDefaultCallOptions(grpc.UseCompressor(xgrpc.ZstdName)),
 	)
 	if err != nil {
 		return fmt.Errorf("failed to connect to the route operator endpoint: %w", err)

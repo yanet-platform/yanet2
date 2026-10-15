@@ -12,9 +12,10 @@ import (
 	"github.com/siderolabs/grpc-proxy/proxy"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
-	"google.golang.org/grpc/encoding/gzip"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/test/bufconn"
+
+	"github.com/yanet-platform/yanet2/common/go/xgrpc"
 )
 
 // memoryListenerBufferSize is the per-connection buffer of an in-memory
@@ -48,7 +49,7 @@ func newBackend(
 		}),
 		grpc.WithDefaultCallOptions(
 			grpc.ForceCodecV2(proxy.Codec()),
-			grpc.UseCompressor(gzip.Name),
+			grpc.UseCompressor(xgrpc.ZstdName),
 			grpc.MaxCallRecvMsgSize(int(256*datasize.MB)),
 			grpc.MaxCallSendMsgSize(int(256*datasize.MB)),
 		),

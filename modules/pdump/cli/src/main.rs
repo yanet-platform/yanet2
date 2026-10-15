@@ -67,7 +67,8 @@ async fn run(cmd: Cmd) -> Result<(), Error> {
 
 fn client(channel: LayeredChannel) -> PdumpServiceClient<LayeredChannel> {
     PdumpServiceClient::new(channel)
-        .send_compressed(CompressionEncoding::Gzip)
+        .send_compressed(CompressionEncoding::Zstd)
+        .accept_compressed(CompressionEncoding::Zstd)
         .accept_compressed(CompressionEncoding::Gzip)
 }
 
@@ -75,7 +76,8 @@ fn client(channel: LayeredChannel) -> PdumpServiceClient<LayeredChannel> {
 /// used only to complete `--ring-name` against the registered ring objects.
 fn ring_client(channel: LayeredChannel) -> RingServiceClient<LayeredChannel> {
     RingServiceClient::new(channel)
-        .send_compressed(CompressionEncoding::Gzip)
+        .send_compressed(CompressionEncoding::Zstd)
+        .accept_compressed(CompressionEncoding::Zstd)
         .accept_compressed(CompressionEncoding::Gzip)
 }
 

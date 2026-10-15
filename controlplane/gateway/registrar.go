@@ -12,9 +12,9 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
-	"google.golang.org/grpc/encoding/gzip"
 	"google.golang.org/grpc/status"
 
+	"github.com/yanet-platform/yanet2/common/go/xgrpc"
 	ynpb "github.com/yanet-platform/yanet2/controlplane/ynpb/v1"
 )
 
@@ -95,7 +95,7 @@ func NewGatewayRegistrar(
 	conn, err := grpc.NewClient(
 		endpoint,
 		grpc.WithTransportCredentials(creds),
-		grpc.WithDefaultCallOptions(grpc.UseCompressor(gzip.Name)),
+		grpc.WithDefaultCallOptions(grpc.UseCompressor(xgrpc.ZstdName)),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create gRPC client to gateway %q: %w", endpoint, err)

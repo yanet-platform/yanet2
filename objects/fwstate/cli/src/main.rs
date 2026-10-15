@@ -27,7 +27,8 @@ pub mod fwstatemappb {
 
 fn client(channel: LayeredChannel) -> FwStateMapServiceClient<LayeredChannel> {
     FwStateMapServiceClient::new(channel)
-        .send_compressed(CompressionEncoding::Gzip)
+        .send_compressed(CompressionEncoding::Zstd)
+        .accept_compressed(CompressionEncoding::Zstd)
         .accept_compressed(CompressionEncoding::Gzip)
 }
 

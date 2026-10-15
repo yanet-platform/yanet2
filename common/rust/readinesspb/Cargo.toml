@@ -13,7 +13,7 @@ workspace = true
 prost = "0.14"
 prost-types = "0.14"
 serde = { version = "1", features = ["derive"] }
-tonic = { version = "0.14", features = ["gzip"] }
+tonic = { version = "0.14", features = ["gzip", "zstd"] }
 commonpb = { path = "../commonpb", package = "yanet-commonpb" }
 
 [dev-dependencies]

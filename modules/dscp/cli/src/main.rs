@@ -132,7 +132,8 @@ pub struct DeleteConfigCmd {
 
 fn client(channel: LayeredChannel) -> DscpServiceClient<LayeredChannel> {
     DscpServiceClient::new(channel)
-        .send_compressed(CompressionEncoding::Gzip)
+        .send_compressed(CompressionEncoding::Zstd)
+        .accept_compressed(CompressionEncoding::Zstd)
         .accept_compressed(CompressionEncoding::Gzip)
 }
 

@@ -80,7 +80,8 @@ pub struct DeleteConfigCmd {
 
 fn client(channel: LayeredChannel) -> DecapServiceClient<LayeredChannel> {
     DecapServiceClient::new(channel)
-        .send_compressed(CompressionEncoding::Gzip)
+        .send_compressed(CompressionEncoding::Zstd)
+        .accept_compressed(CompressionEncoding::Zstd)
         .accept_compressed(CompressionEncoding::Gzip)
 }
 

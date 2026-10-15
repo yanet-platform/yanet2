@@ -17,7 +17,8 @@ use ynpb::pb::{
 
 fn client(channel: LayeredChannel) -> DeviceServiceClient<LayeredChannel> {
     DeviceServiceClient::new(channel)
-        .send_compressed(CompressionEncoding::Gzip)
+        .send_compressed(CompressionEncoding::Zstd)
+        .accept_compressed(CompressionEncoding::Zstd)
         .accept_compressed(CompressionEncoding::Gzip)
 }
 

@@ -34,7 +34,8 @@ fn main() -> std::process::ExitCode {
 async fn run(cmd: Cmd) -> Result<(), Error> {
     let mut service = Service::connect_for(&cmd.globals.connection, "device-list", DEVICE_SERVICE, |channel| {
         DeviceServiceClient::new(channel)
-            .send_compressed(CompressionEncoding::Gzip)
+            .send_compressed(CompressionEncoding::Zstd)
+            .accept_compressed(CompressionEncoding::Zstd)
             .accept_compressed(CompressionEncoding::Gzip)
     })
     .await?;
