@@ -64,6 +64,8 @@ pdump_module_config_set_mode(struct cp_module *module, enum pdump_mode mode);
 //
 // Rates above 1,000,000 are rejected with EINVAL before any mutation.
 // Only unpublished configs may be changed; setting a rate starts fresh credit.
+// Nonzero rates use published dataplane time; until available, EAGAIN is
+// returned without allocation or mutation. Zero needs no published time.
 int
 pdump_module_config_set_rate(struct cp_module *module, uint64_t rate_pps);
 

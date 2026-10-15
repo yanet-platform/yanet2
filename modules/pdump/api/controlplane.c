@@ -1,6 +1,5 @@
 #include <errno.h>
 #include <pcap/pcap.h>
-#include <time.h>
 
 #include <bpf_impl.h>
 #include <rte_bpf.h>
@@ -12,6 +11,7 @@
 
 #include "hacks.h"
 
+#include "api/agent.h"
 #include "common/memory_address.h"
 #include "lib/errors/errors.h"
 
@@ -327,15 +327,16 @@ pdump_module_config_set_rate(struct cp_module *module, uint64_t rate_pps) {
 	struct pdump_module_config *config =
 		container_of(module, struct pdump_module_config, cp_module);
 	if (rate_pps != 0) {
-		struct timespec now;
-		if (clock_gettime(CLOCK_REALTIME, &now) != 0) {
+		struct agent *agent = ADDR_OF(&module->agent);
+		struct dp_config *dp_config = ADDR_OF(&agent->dp_config);
+		uint64_t timestamp;
+		if (dataplane_instance_current_time(dp_config, &timestamp) !=
+		    0) {
+			errno = EAGAIN;
 			return -1;
 		}
-		uint64_t timestamp =
-			(uint64_t)now.tv_sec * 1000000000ULL + now.tv_nsec;
 		struct token_bucket *bucket = ADDR_OF(&config->rate_bucket);
 		if (bucket == NULL) {
-			struct agent *agent = ADDR_OF(&module->agent);
 			void *raw = memory_balloc(
 				&agent->memory_context,
 				pdump_rate_bucket_raw_size()

@@ -32,11 +32,17 @@ func FreeWorker(memory *ffi.SharedMemory) {
 	C.pdump_test_free_worker((*C.struct_yanet_shm)(memory.AsRawPtr()))
 }
 
+// SetWorkerTime publishes a deterministic timestamp for the idle worker.
+func SetWorkerTime(agent *ffi.Agent, timestamp uint64) {
+	C.pdump_test_set_worker_time((*C.struct_agent)(agent.AsRawPtr()), C.uint64_t(timestamp))
+}
+
 // RateSnapshot contains copied scalars from a published capture configuration.
 type RateSnapshot struct {
 	RatePPS   uint64
 	Cost      uint64
 	Cap       uint64
+	EDT       uint64
 	HasBucket bool
 }
 
@@ -52,6 +58,7 @@ func ReadRate(agent *ffi.Agent, name string) (RateSnapshot, error) {
 		RatePPS:   uint64(snapshot.rate_pps),
 		Cost:      uint64(snapshot.cost),
 		Cap:       uint64(snapshot.cap),
+		EDT:       uint64(snapshot.edt),
 		HasBucket: bool(snapshot.has_bucket),
 	}, nil
 }

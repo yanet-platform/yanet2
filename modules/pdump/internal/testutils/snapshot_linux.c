@@ -56,6 +56,14 @@ pdump_test_free_worker(struct yanet_shm *shm) {
 	config->worker_count = 0;
 }
 
+void
+pdump_test_set_worker_time(struct agent *agent, uint64_t timestamp) {
+	struct dp_config *config = ADDR_OF(&agent->dp_config);
+	struct dp_worker **workers = ADDR_OF(&config->workers);
+	struct dp_worker *worker = ADDR_OF(workers);
+	__atomic_store_n(&worker->current_time, timestamp, __ATOMIC_RELAXED);
+}
+
 // Match the native BPF allocator's ABI without requiring an EAL heap.
 //
 // The production Go-host shim takes one argument, but the converter calls the
@@ -90,6 +98,11 @@ pdump_test_read_rate(
 		.has_bucket = bucket != NULL,
 		.cost = bucket == NULL ? 0 : bucket->cost,
 		.cap = bucket == NULL ? 0 : bucket->cap,
+		.edt = bucket == NULL
+			       ? 0
+			       : atomic_load_explicit(
+					 &bucket->edt, memory_order_relaxed
+				 ),
 	};
 	cp_config_unlock(cp_config);
 	return 0;

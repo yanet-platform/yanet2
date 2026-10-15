@@ -348,6 +348,11 @@ Omitting the rate on an update preserves it; a new config defaults to zero.
 The web dialog's blank rate omits the field, whereas an explicit zero
 disables limiting.
 
+Nonzero rates initialize fresh credit from published dataplane time. If no
+worker has published time yet, the update fails with a retryable `EAGAIN`
+and leaves the previous config intact. Retry after workers publish time;
+setting zero does not require worker time.
+
 Each config has one best-effort budget shared by all workers, independent
 of its ring. One busy worker can use the entire budget. The automatic
 global burst is `max(32, ceil(rate_pps / 1000))` packets; it replenishes

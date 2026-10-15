@@ -1,6 +1,7 @@
 package pdump_test
 
 import (
+	"syscall"
 	"testing"
 
 	"github.com/c2h5oh/datasize"
@@ -44,7 +45,8 @@ func newTestBackend(t *testing.T) (pdump.Backend, *ffi.Agent) {
 }
 
 // Test_Backend_UpdateModule_PublishesCaptureRate verifies that production
-// publication initializes the C bucket and replacement with zero is unlimited.
+// publication anchors credit to worker time, rejects missing time without
+// replacement, and permits an unlimited replacement before clock readiness.
 func Test_Backend_UpdateModule_PublishesCaptureRate(t *testing.T) {
 	backend, agent := newTestBackend(t)
 	modules := []pdump.Module{}
@@ -56,22 +58,39 @@ func Test_Backend_UpdateModule_PublishesCaptureRate(t *testing.T) {
 			assert.NoError(t, module.Free())
 		}
 	})
-	for _, rate := range []uint64{32001, 0} {
-		module, err := backend.UpdateModule("capture", pdump.Settings{
-			Filter:   "ip",
-			Mode:     1,
-			Snaplen:  128,
-			RingName: "capture-ring",
-			RatePPS:  rate,
-		})
-		require.NoError(t, err)
-		modules = append(modules, module)
-		snapshot, err := testutils.ReadRate(agent, "capture")
-		require.NoError(t, err)
-		want := testutils.RateSnapshot{}
-		if rate != 0 {
-			want = testutils.RateSnapshot{RatePPS: 32001, Cost: 31250, Cap: 1_031_250, HasBucket: true}
-		}
-		require.Equal(t, want, snapshot)
+	const timestamp = uint64(123_456_789)
+	settings := pdump.Settings{
+		Filter:   "ip",
+		Mode:     1,
+		Snaplen:  128,
+		RingName: "capture-ring",
+		RatePPS:  32001,
 	}
+	testutils.SetWorkerTime(agent, timestamp)
+	module, err := backend.UpdateModule("capture", settings)
+	require.NoError(t, err, "positive rate publishes with worker time")
+	modules = append(modules, module)
+	published, err := testutils.ReadRate(agent, "capture")
+	require.NoError(t, err, "positive rate has a published snapshot")
+	require.Equal(t, testutils.RateSnapshot{
+		RatePPS: 32001, Cost: 31250, Cap: 1_031_250, EDT: timestamp, HasBucket: true,
+	}, published,
+		"fresh credit is anchored exactly to published worker time",
+	)
+
+	testutils.SetWorkerTime(agent, 0)
+	module, err = backend.UpdateModule("capture", settings)
+	require.ErrorIs(t, err, syscall.EAGAIN, "missing worker time rejects a positive replacement")
+	require.Nil(t, module, "failed replacement returns no module handle")
+	snapshot, err := testutils.ReadRate(agent, "capture")
+	require.NoError(t, err, "failed replacement leaves the prior config published")
+	require.Equal(t, published, snapshot, "failed replacement preserves the published snapshot")
+
+	settings.RatePPS = 0
+	module, err = backend.UpdateModule("capture", settings)
+	require.NoError(t, err, "zero rate succeeds without worker time")
+	modules = append(modules, module)
+	snapshot, err = testutils.ReadRate(agent, "capture")
+	require.NoError(t, err, "zero rate replacement is published")
+	require.Equal(t, testutils.RateSnapshot{}, snapshot, "zero rate is unlimited without a bucket")
 }
