@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"runtime"
 	"testing"
+	"time"
 
 	"github.com/klauspost/compress/zstd"
 	"github.com/stretchr/testify/require"
@@ -70,4 +72,92 @@ func Test_ZstdCompressor_DecompressesLibzstdFrame(t *testing.T) {
 	require.NoError(t, err)
 
 	require.True(t, bytes.Equal(lines(20000), unpack(t, frame)))
+}
+
+// allocatedDuring returns the bytes call allocated, counting every allocation
+// whether or not it was freed again.
+func allocatedDuring(call func()) uint64 {
+	var before, after runtime.MemStats
+	runtime.ReadMemStats(&before)
+	call()
+	runtime.ReadMemStats(&after)
+
+	return after.TotalAlloc - before.TotalAlloc
+}
+
+// Test_ZstdCompressor_DecompressRefusesWindowBeyondCap verifies that a frame
+// declaring a history beyond the cap is refused without reserving it, whether
+// the history is the content of a single segment or a window.
+func Test_ZstdCompressor_DecompressRefusesWindowBeyondCap(t *testing.T) {
+	cases := []struct {
+		name   string
+		header []byte
+	}{
+		{"single segment of 200 MiB", []byte{0xa0, 0x00, 0x00, 0x80, 0x0c}},
+		{"window of 128 MiB", []byte{0x00, 0x88}},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// One run-length block follows the header, which starts the decoder.
+			frame := append([]byte{0x28, 0xb5, 0x2f, 0xfd}, tc.header...)
+			frame = append(frame, 0x03, 0x00, 0x10, 0x00)
+
+			var err error
+			allocated := allocatedDuring(func() {
+				var reader io.Reader
+				if reader, err = encoding.GetCompressor("zstd").Decompress(bytes.NewReader(frame)); err == nil {
+					_, err = io.ReadAll(reader)
+				}
+			})
+
+			require.Error(t, err)
+			require.Less(t, allocated, uint64(1<<20))
+		})
+	}
+}
+
+// Test_ZstdCompressor_DecompressReleasesAbandonedReader verifies that a
+// decoder is pooled again when its reader is dropped half read, as grpc drops
+// it at a receive limit.
+//
+// A pooled decoder makes the next read cost a fraction of a new one, which the
+// test waits for across collections, as a pool may also drop what it is given.
+func Test_ZstdCompressor_DecompressReleasesAbandonedReader(t *testing.T) {
+	frame, err := os.ReadFile("testdata/libzstd_no_content_size.zst")
+	require.NoError(t, err)
+
+	halfRead := func() (reader io.Reader, allocated uint64) {
+		allocated = allocatedDuring(func() {
+			var err error
+			reader, err = encoding.GetCompressor("zstd").Decompress(bytes.NewReader(frame))
+			require.NoError(t, err)
+			_, err = reader.Read(make([]byte, 1))
+			require.NoError(t, err)
+		})
+
+		return reader, allocated
+	}
+
+	// Drain the pool, keeping the readers so that none releases its decoder,
+	// until a read has to build one: a new decoder costs megabytes.
+	var held []io.Reader
+	for allocated := uint64(0); allocated < 1<<20; {
+		require.Less(t, len(held), 1000, "no read has built a decoder")
+
+		var reader io.Reader
+		reader, allocated = halfRead()
+		held = append(held, reader)
+	}
+	held = nil
+
+	for range 100 {
+		runtime.GC()
+		time.Sleep(time.Millisecond)
+		if _, allocated := halfRead(); allocated < 64<<10 {
+			return
+		}
+	}
+
+	t.Fatal("the abandoned decoder was never pooled again")
 }

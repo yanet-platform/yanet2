@@ -15,9 +15,9 @@ import (
 	"github.com/yanet-platform/yanet2/common/go/xgrpc"
 )
 
-// checkHealth makes one Health.Check call over plain HTTP/2 with exactly the
-// given coding headers, and returns the content coding the response names.
-func checkHealth(t *testing.T, address string, header http.Header) string {
+// checkCall makes one call of path over plain HTTP/2 with exactly the given
+// coding headers, and returns the content coding the response names.
+func checkCall(t *testing.T, address, path string, header http.Header) string {
 	t.Helper()
 
 	protocols := &http.Protocols{}
@@ -26,8 +26,7 @@ func checkHealth(t *testing.T, address string, header http.Header) string {
 
 	// An empty, uncompressed message.
 	body := strings.NewReader("\x00\x00\x00\x00\x00")
-	url := "http://" + address + "/grpc.health.v1.Health/Check"
-	request, err := http.NewRequestWithContext(t.Context(), http.MethodPost, url, body)
+	request, err := http.NewRequestWithContext(t.Context(), http.MethodPost, "http://"+address+path, body)
 	require.NoError(t, err)
 	request.Header = header.Clone()
 	request.Header.Set("Content-Type", "application/grpc")
@@ -50,9 +49,12 @@ func Test_ResponseCompression_FollowsAdvertisedCodings(t *testing.T) {
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	require.NoError(t, err)
 
+	// A stream handler that sends one message of two bytes and ends.
+	serving := &grpc_health_v1.HealthCheckResponse{Status: grpc_health_v1.HealthCheckResponse_SERVING}
 	server := grpc.NewServer(
 		grpc.ChainUnaryInterceptor(xgrpc.ResponseCompressionUnaryInterceptor()),
 		grpc.ChainStreamInterceptor(xgrpc.ResponseCompressionStreamInterceptor()),
+		grpc.UnknownServiceHandler(func(_ any, stream grpc.ServerStream) error { return stream.SendMsg(serving) }),
 	)
 	grpc_health_v1.RegisterHealthServer(server, health.NewServer())
 
@@ -71,9 +73,12 @@ func Test_ResponseCompression_FollowsAdvertisedCodings(t *testing.T) {
 		{"nothing, gzip request", http.Header{"Grpc-Encoding": {"gzip"}}, "gzip"},
 	}
 
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			require.Equal(t, tc.want, checkHealth(t, listener.Addr().String(), tc.header))
-		})
+	// The unary path and the stream path each have an interceptor of their own.
+	for _, path := range []string{"/grpc.health.v1.Health/Check", "/yanet.test/Stream"} {
+		for _, tc := range cases {
+			t.Run(tc.name+path, func(t *testing.T) {
+				require.Equal(t, tc.want, checkCall(t, listener.Addr().String(), path, tc.header))
+			})
+		}
 	}
 }

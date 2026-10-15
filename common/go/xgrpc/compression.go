@@ -2,7 +2,9 @@ package xgrpc
 
 import (
 	"io"
+	"runtime"
 	"sync"
+	"sync/atomic"
 
 	"github.com/klauspost/compress/zstd"
 	"google.golang.org/grpc/encoding"
@@ -10,6 +12,14 @@ import (
 
 // ZstdName is the content coding of the zstd compressor registered here.
 const ZstdName = "zstd"
+
+// zstdMaxWindowSize bounds the history a frame may ask the decoder to keep.
+//
+// A decoder reserves the window when it starts on the first block, and
+// decompression runs before authentication, so the default of 512 MiB would
+// let a tiny frame claim that much. Level 3 frames use a window of at most
+// 8 MiB from klauspost and of 2 MiB from libzstd.
+const zstdMaxWindowSize = 8 << 20
 
 func init() {
 	encoding.RegisterCompressor(&zstdCompressor{})
@@ -49,39 +59,70 @@ func (m *zstdCompressor) Decompress(r io.Reader) (io.Reader, error) {
 	decoder, ok := m.decoders.Get().(*zstd.Decoder)
 	if !ok {
 		var err error
-		decoder, err = zstd.NewReader(nil, zstd.WithDecoderConcurrency(1))
+		decoder, err = zstd.NewReader(nil, zstd.WithDecoderConcurrency(1), zstd.WithDecoderMaxWindow(zstdMaxWindowSize))
 		if err != nil {
 			return nil, err
 		}
 	}
 
+	slot := &decoderSlot{decoder: decoder, pool: &m.decoders}
 	if err := decoder.Reset(r); err != nil {
+		slot.Release()
 		return nil, err
 	}
 
-	return &pooledDecoder{decoder: decoder, pool: &m.decoders}, nil
+	reader := &pooledDecoder{decoderSlot: slot}
+	runtime.AddCleanup(reader, (*decoderSlot).Release, slot)
+
+	return reader, nil
 }
 
 // pooledEncoder returns its encoder to the pool once the frame is closed.
+//
+// A writer that fails is dropped without being closed. The encoder has one
+// slot and so runs no goroutine, and the garbage collector takes it whole.
 type pooledEncoder struct {
 	*zstd.Encoder
-	pool *sync.Pool
+	pool   *sync.Pool
+	closed bool
+	err    error
 }
 
 func (m *pooledEncoder) Close() error {
-	err := m.Encoder.Close()
+	if m.closed {
+		return m.err
+	}
 
+	m.closed = true
+	m.err = m.Encoder.Close()
 	m.Encoder.Reset(nil)
 	m.pool.Put(m.Encoder)
 
-	return err
+	return m.err
 }
 
-// pooledDecoder returns its decoder to the pool once the stream ends or fails.
+// decoderSlot owns a pooled decoder until it is released.
+//
+// The release happens once, either by the reader that finishes with the
+// decoder or by the cleanup of a reader dropped half read, as grpc drops it
+// when a message passes its receive limit.
+type decoderSlot struct {
+	decoder  *zstd.Decoder
+	pool     *sync.Pool
+	released atomic.Bool
+}
+
+func (m *decoderSlot) Release() {
+	if m.released.CompareAndSwap(false, true) {
+		_ = m.decoder.Reset(nil)
+		m.pool.Put(m.decoder)
+	}
+}
+
+// pooledDecoder releases its decoder once the stream ends or fails.
 type pooledDecoder struct {
-	decoder *zstd.Decoder
-	pool    *sync.Pool
-	err     error
+	*decoderSlot
+	err error
 }
 
 func (m *pooledDecoder) Read(p []byte) (int, error) {
@@ -92,8 +133,7 @@ func (m *pooledDecoder) Read(p []byte) (int, error) {
 	n, err := m.decoder.Read(p)
 	if err != nil {
 		m.err = err
-		_ = m.decoder.Reset(nil)
-		m.pool.Put(m.decoder)
+		m.Release()
 	}
 
 	return n, err
