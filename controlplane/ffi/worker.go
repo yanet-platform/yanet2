@@ -16,12 +16,20 @@ const (
 	bytesIdx       = 1
 )
 
-// WorkerRxMempool is the occupancy of one worker's RX packet pool, in
-// mempool objects. In-use objects are the difference Capacity minus
-// Available, which counts mbufs held by NIC descriptors and in flight.
+// WorkerRxMempool is the occupancy of a worker's RX packet pools, in
+// mempool objects: a worker with several assignments owns one pool per
+// polled queue, and both values are worker-wide sums over those pools.
+// In-use objects are the difference Capacity minus Available, which
+// counts mbufs held by NIC descriptors and in flight.
 type WorkerRxMempool struct {
 	Capacity  uint32
 	Available uint32
+}
+
+// WorkerAssignment is one (device, queue) pair a worker polls.
+type WorkerAssignment struct {
+	DeviceID uint32
+	QueueID  uint32
 }
 
 type WorkerCounter struct {
@@ -42,6 +50,9 @@ type WorkerCounter struct {
 	RemoteTxDrops   uint64
 	Disposed        uint64
 	RxMempool       *WorkerRxMempool
+	// Assignments lists every (device, queue) the worker polls; the
+	// DeviceID/QueueID fields above carry the first of them.
+	Assignments []WorkerAssignment
 }
 
 func (m *DPConfig) WorkerCounters() ([]WorkerCounter, error) {
@@ -90,6 +101,11 @@ func (m *DPConfig) WorkerCounters() ([]WorkerCounter, error) {
 			return nil, fmt.Errorf("worker %d: %w", idx, err)
 		}
 
+		assignments, err := workerAssignments(m.ptr, idx, metadata.assignment_count)
+		if err != nil {
+			return nil, fmt.Errorf("worker %d: %w", idx, err)
+		}
+
 		result[idx] = WorkerCounter{
 			WorkerIdx:       uint32(idx),
 			CoreID:          uint32(metadata.core_id),
@@ -108,10 +124,36 @@ func (m *DPConfig) WorkerCounters() ([]WorkerCounter, error) {
 			RemoteTxDrops:   remoteTxDrops.Value(idx, singleValueIdx),
 			Disposed:        drops.Value(idx, singleValueIdx),
 			RxMempool:       pool,
+			Assignments:     assignments,
 		}
 	}
 
 	return result, nil
+}
+
+// workerAssignments reads one worker's (device, queue, weight)
+// assignment list through the FFI.
+func workerAssignments(ptr *C.struct_dp_config, idx int, count C.uint32_t) ([]WorkerAssignment, error) {
+	if count == 0 {
+		return nil, fmt.Errorf("no device assignments reported")
+	}
+
+	raw := make([]C.struct_worker_assignment_metadata, count)
+	filled := C.yanet_get_worker_assignments(
+		ptr, C.uint64_t(idx), &raw[0], count,
+	)
+	if filled < 0 {
+		return nil, fmt.Errorf("failed to get worker assignments")
+	}
+
+	assignments := make([]WorkerAssignment, filled)
+	for idx := range assignments {
+		assignments[idx] = WorkerAssignment{
+			DeviceID: uint32(raw[idx].device_id),
+			QueueID:  uint32(raw[idx].queue_id),
+		}
+	}
+	return assignments, nil
 }
 
 // workerRxMempool validates one worker's pool gauge pair. A snapshot no

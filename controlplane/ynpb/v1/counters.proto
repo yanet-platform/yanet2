@@ -43,19 +43,29 @@ message WorkerCountersRequest {}
 // point-in-time gauges, scoped to the instance this service serves.
 message WorkerCountersResponse { repeated WorkerCounter workers = 1; }
 
-// Occupancy of one worker's RX packet pool.
+// Occupancy of a worker's RX packet pools.
 //
-// Both values count mempool objects (mbufs). `available` is a gauge
+// A worker with several assignments owns one pool per polled queue;
+// both values are worker-wide sums over those pools, counting mempool
+// objects (mbufs). `available` is a gauge
 // resampled by the owning worker at most once every 10 ms — slow
 // worker rounds stretch the spacing further — so it reflects the most
 // recent dataplane sample rather than the moment of the read.
 // Objects in use by the NIC descriptors or in flight are the difference
 // `capacity - available`.
 message WorkerRxMempool {
-  // Total object capacity for the lifetime of this worker pool.
+  // Total object capacity across the worker's pools.
   uint32 capacity = 1;
   // Objects currently available in the most recent dataplane sample.
   uint32 available = 2;
+}
+
+// One (device, queue) pair a worker polls.
+message WorkerAssignment {
+  // Device identifier used for RX/TX.
+  uint32 device_id = 1;
+  // RX queue identifier polled by the worker.
+  uint32 queue_id = 2;
 }
 
 message WorkerCounter {
@@ -63,9 +73,11 @@ message WorkerCounter {
   uint32 worker_idx = 1;
   // CPU core currently assigned to this worker.
   uint32 core_id = 2;
-  // Device identifier used by this worker for RX/TX.
+  // Device identifier used by this worker for RX/TX; the first of the
+  // assignments below.
   uint32 device_id = 3;
-  // RX queue identifier polled by this worker.
+  // RX queue identifier polled by this worker; the first of the
+  // assignments below.
   uint32 queue_id = 4;
   // Maximum valid burst index for rx_bursts.
   uint32 max_burst_size = 5;
@@ -100,6 +112,11 @@ message WorkerCounter {
   // pool gauges fails the whole read instead, so an empty value here is
   // never a stand-in for a real pool.
   WorkerRxMempool rx_mempool = 17;
+  // Every (device, queue) pair this worker polls, in configuration
+  // order. Absent only when the serving control plane predates
+  // multi-assignment workers; device_id/queue_id above then carry the
+  // single polled pair.
+  repeated WorkerAssignment assignments = 18;
 }
 
 // Requests a snapshot of raw cumulative per-port extended stats counters.

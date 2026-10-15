@@ -9,6 +9,7 @@
 
 struct dataplane_config;
 struct dataplane_device;
+struct dataplane_worker;
 
 struct dataplane_instance {
 	struct dp_config *dp_config;
@@ -36,6 +37,11 @@ struct dataplane {
 
 	struct dataplane_device *devices;
 	uint32_t device_count;
+
+	// The flat worker list, in configuration order; each worker owns one
+	// or more device-queue assignments.
+	struct dataplane_worker *workers;
+	uint32_t worker_count;
 
 	struct plugin_registry plugins;
 };

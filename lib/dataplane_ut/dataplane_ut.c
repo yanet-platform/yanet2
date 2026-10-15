@@ -339,14 +339,33 @@ dataplane_ut_new(const struct dataplane_ut_config *cfg) {
 		dp_worker->idx = idx;
 		dp_worker->rx_mempool = ut->mempool;
 		dp_worker->core_id = (uint32_t)idx;
-		if (cfg->workers != NULL) {
-			dp_worker->device_id = cfg->workers[idx].device_id;
-			dp_worker->queue_id = cfg->workers[idx].queue_id;
-		} else {
-			dp_worker->device_id = 0;
-			dp_worker->queue_id = (uint32_t)idx;
-		}
 		dp_worker->rx_burst_size = WORKER_RX_BURST_SIZE;
+		dp_worker->assignment_count = 1;
+
+		// Harness workers poll exactly one queue, mirroring the
+		// single-assignment shape the expanded configuration produces.
+		struct dp_worker_assignment *assignment =
+			(struct dp_worker_assignment *)memory_balloc(
+				&ut->dp_config->memory_context,
+				sizeof(struct dp_worker_assignment)
+			);
+		if (assignment == NULL) {
+			LOG(ERROR,
+			    "dataplane_ut_new: failed to allocate dp_worker "
+			    "%zu "
+			    "assignment",
+			    idx);
+			dataplane_ut_free(ut);
+			return NULL;
+		}
+		if (cfg->workers != NULL) {
+			assignment->device_id = cfg->workers[idx].device_id;
+			assignment->queue_id = cfg->workers[idx].queue_id;
+		} else {
+			assignment->device_id = 0;
+			assignment->queue_id = (uint32_t)idx;
+		}
+		SET_OFFSET_OF(&dp_worker->assignments, assignment);
 
 		SET_OFFSET_OF(dp_workers + idx, dp_worker);
 	}
@@ -408,7 +427,9 @@ dataplane_ut_new(const struct dataplane_ut_config *cfg) {
 		}
 		for (size_t idx = 0; idx < cfg->worker_count; ++idx) {
 			struct dp_worker *dp_worker = ADDR_OF(dp_workers + idx);
-			++device_worker_counts[dp_worker->device_id];
+			struct dp_worker_assignment *assignment =
+				ADDR_OF(&dp_worker->assignments);
+			++device_worker_counts[assignment->device_id];
 		}
 		for (size_t device_idx = 0; device_idx < effective_device_count;
 		     ++device_idx) {

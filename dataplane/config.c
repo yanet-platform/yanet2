@@ -151,6 +151,76 @@ resolve_connections(struct dataplane_config *config) {
 	return 0;
 }
 
+// Expand the nested devices[].workers[] declarations into the flat
+// top-level worker list.
+//
+// Worker i declared inside device d becomes a worker with a single
+// assignment to queue i of d, carrying the declaration's ring and pool
+// sizing. The queue ids are therefore the worker indices
+// inside the device, exactly the numbering the device init used to
+// apply implicitly.
+static int
+expand_workers(struct dataplane_config *config) {
+	uint64_t worker_count = 0;
+	for (uint64_t dev_idx = 0; dev_idx < config->device_count; ++dev_idx) {
+		worker_count += config->devices[dev_idx].worker_count;
+	}
+
+	if (worker_count == 0) {
+		return 0;
+	}
+
+	struct dataplane_worker_config *workers =
+		(struct dataplane_worker_config *)calloc(
+			worker_count, sizeof(struct dataplane_worker_config)
+		);
+	if (workers == NULL) {
+		return -1;
+	}
+
+	uint64_t wrk_idx = 0;
+	for (uint64_t dev_idx = 0; dev_idx < config->device_count; ++dev_idx) {
+		struct dataplane_device_config *device =
+			config->devices + dev_idx;
+		for (uint32_t idx = 0; idx < device->worker_count; ++idx) {
+			struct dataplane_device_worker_config *source =
+				device->workers + idx;
+			struct dataplane_worker_config *worker =
+				workers + wrk_idx;
+
+			worker->assignments =
+				(struct dataplane_assignment_config *)calloc(
+					1,
+					sizeof(struct
+					       dataplane_assignment_config)
+				);
+			if (worker->assignments == NULL) {
+				config->workers = workers;
+				config->worker_count = wrk_idx;
+				return -1;
+			}
+
+			worker->core_id = source->core_id;
+			worker->instance_id = source->instance_id;
+			worker->assignment_count = 1;
+			worker->assignments->device_id = (uint32_t)dev_idx;
+			worker->assignments->queue_id = idx;
+			worker->assignments->rx_queue_len =
+				source->rx_queue_len;
+			worker->assignments->tx_queue_len =
+				source->tx_queue_len;
+			worker->assignments->num_mbufs = source->num_mbufs;
+
+			++wrk_idx;
+		}
+	}
+
+	config->workers = workers;
+	config->worker_count = worker_count;
+
+	return 0;
+}
+
 enum state {
 	state_empty,
 	state_dataplane,
@@ -779,6 +849,10 @@ dataplane_config_init(FILE *file, struct dataplane_config **config) {
 		goto error;
 	}
 
+	if (expand_workers(dataplane) != 0) {
+		goto error;
+	}
+
 	yaml_parser_delete(&parser);
 
 	*config = dataplane;
@@ -806,6 +880,11 @@ dataplane_config_free(struct dataplane_config *config) {
 		free(device->workers);
 	}
 
+	for (uint64_t wrk_idx = 0; wrk_idx < config->worker_count; ++wrk_idx) {
+		free(config->workers[wrk_idx].assignments);
+	}
+
+	free(config->workers);
 	free(config->devices);
 	free(config->connections);
 	free(config);

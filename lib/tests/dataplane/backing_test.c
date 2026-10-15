@@ -167,8 +167,8 @@ backing_test_gen_init(
 
 // Verifies that a generation whose device registration order is
 // crossed against the port topology still resolves every egress to the
-// port of the same name, marks port-less devices as such, and points
-// the worker's receive slot at its own port's registry device.
+// port of the same name, marks port-less devices as such, and resolves
+// each physical port's receive slot through the reverse backing table.
 static int
 test_backing_resolves_crossed_registration_order(void) {
 	struct dataplane_test_fixture fixture;
@@ -217,10 +217,21 @@ test_backing_resolves_crossed_registration_order(void) {
 		"add portA failed"
 	);
 
-	// The worker owns physical port zero, "portA".
+	// The worker's single assignment polls physical port zero, "portA".
 	struct dp_worker worker;
 	memset(&worker, 0, sizeof(worker));
-	worker.device_id = 0;
+	struct dp_worker_assignment *assignments =
+		(struct dp_worker_assignment *)memory_balloc(
+			&cfg->memory_context,
+			sizeof(struct dp_worker_assignment)
+		);
+	TEST_ASSERT_NOT_NULL(assignments, "assignment alloc failed");
+	*assignments = (struct dp_worker_assignment){
+		.device_id = 0,
+		.queue_id = 0,
+	};
+	worker.assignment_count = 1;
+	SET_OFFSET_OF(&worker.assignments, assignments);
 	struct dp_worker **workers = (struct dp_worker **)memory_balloc(
 		&cfg->memory_context, sizeof(struct dp_worker *)
 	);
@@ -245,10 +256,16 @@ test_backing_resolves_crossed_registration_order(void) {
 	TEST_ASSERT_EQUAL(
 		backing[2], 0, "portA must back onto physical port zero"
 	);
+	const uint16_t *backing_registry = ADDR_OF(&ectx->backing_registry);
 	TEST_ASSERT_EQUAL(
-		ectx->worker_rx_device_id,
+		backing_registry[0],
 		2,
-		"the worker's receive slot is portA's registry device"
+		"physical port zero's registry slot is portA"
+	);
+	TEST_ASSERT_EQUAL(
+		backing_registry[1],
+		0,
+		"physical port one's registry slot is portB"
 	);
 
 	struct device_ectx **device_ptrs = ADDR_OF(&ectx->device_ptrs);
@@ -319,9 +336,21 @@ test_terminal_egress_drops_portless_destinations(void) {
 		"add portA failed"
 	);
 
+	// The worker's single assignment polls physical port zero, "portA".
 	struct dp_worker worker;
 	memset(&worker, 0, sizeof(worker));
-	worker.device_id = 0;
+	struct dp_worker_assignment *assignments =
+		(struct dp_worker_assignment *)memory_balloc(
+			&cfg->memory_context,
+			sizeof(struct dp_worker_assignment)
+		);
+	TEST_ASSERT_NOT_NULL(assignments, "assignment alloc failed");
+	*assignments = (struct dp_worker_assignment){
+		.device_id = 0,
+		.queue_id = 0,
+	};
+	worker.assignment_count = 1;
+	SET_OFFSET_OF(&worker.assignments, assignments);
 	struct dp_worker **workers = (struct dp_worker **)memory_balloc(
 		&cfg->memory_context, sizeof(struct dp_worker *)
 	);

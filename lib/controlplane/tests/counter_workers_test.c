@@ -637,7 +637,48 @@ test_worker_rx_mempool_gauges(struct dp_config *dp_config) {
 			"worker %lu burst size",
 			(unsigned long)w_idx
 		);
+		TEST_ASSERT_EQUAL(
+			1,
+			metadata.assignment_count,
+			"worker %lu assignment count",
+			(unsigned long)w_idx
+		);
+
+		// The assignment list must carry the same pair the legacy
+		// metadata fields report, with the default weight.
+		struct worker_assignment_metadata assignments[1];
+		int filled = yanet_get_worker_assignments(
+			dp_config, w_idx, assignments, 1
+		);
+		TEST_ASSERT_EQUAL(
+			1,
+			filled,
+			"worker %lu assignment read",
+			(unsigned long)w_idx
+		);
+		TEST_ASSERT_EQUAL(
+			metadata.device_id,
+			assignments[0].device_id,
+			"worker %lu assignment device id",
+			(unsigned long)w_idx
+		);
+		TEST_ASSERT_EQUAL(
+			metadata.queue_id,
+			assignments[0].queue_id,
+			"worker %lu assignment queue id",
+			(unsigned long)w_idx
+		);
 	}
+
+	// An out-of-range worker index must refuse rather than fill.
+	struct worker_assignment_metadata assignments[1];
+	TEST_ASSERT_EQUAL(
+		-1,
+		yanet_get_worker_assignments(
+			dp_config, CW_WORKER_COUNT, assignments, 1
+		),
+		"out-of-range worker assignment read"
+	);
 
 	return TEST_SUCCESS;
 }

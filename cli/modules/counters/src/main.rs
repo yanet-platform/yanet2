@@ -306,8 +306,25 @@ fn format_worker_counters(response: &WorkerCountersResponse) {
     display::print_table_from_entries(rows);
 
     for worker in &response.workers {
+        print_worker_assignments(worker);
         print_worker_histogram(worker);
     }
+}
+
+/// Prints one worker's device assignments when it polls more than one
+/// queue; a single-assignment worker is already fully described by the
+/// table's Device and Queue columns.
+fn print_worker_assignments(worker: &WorkerCounter) {
+    if worker.assignments.len() <= 1 {
+        return;
+    }
+
+    let parts: Vec<String> = worker
+        .assignments
+        .iter()
+        .map(|a| format!("device {} queue {}", a.device_id, a.queue_id))
+        .collect();
+    println!("worker {} assignments: {}", worker.worker_idx, parts.join("; "));
 }
 
 /// Prints the rx-burst histogram for one worker in the metrics style.

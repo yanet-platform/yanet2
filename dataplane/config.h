@@ -22,6 +22,26 @@ struct dataplane_device_worker_config {
 	uint32_t num_mbufs;
 };
 
+// One (device, queue) pair a worker polls.
+//
+// The queue's ring and pool sizing travels with the assignment: it is a
+// property of the queue, not of the worker.
+struct dataplane_assignment_config {
+	uint32_t device_id;
+	uint32_t queue_id;
+	uint16_t rx_queue_len;
+	uint16_t tx_queue_len;
+	uint32_t num_mbufs;
+};
+
+// A worker thread: one core, one instance, one or more assignments.
+struct dataplane_worker_config {
+	uint16_t core_id;
+	uint16_t instance_id;
+	uint32_t assignment_count;
+	struct dataplane_assignment_config *assignments;
+};
+
 struct dataplane_device_config {
 	char device_name[80];
 	char port_name[80];
@@ -31,6 +51,10 @@ struct dataplane_device_config {
 	uint64_t max_lro_packet_size;
 	uint64_t rss_hash;
 
+	// The workers declared inside the device; also the device's queue
+	// count, with worker i polling queue i. Expanded into the flat
+	// top-level worker list (one single-assignment worker per entry) by
+	// dataplane_config_init.
 	uint32_t worker_count;
 	struct dataplane_device_worker_config *workers;
 };
@@ -63,6 +87,13 @@ struct dataplane_config {
 	struct dataplane_device_config *devices;
 	uint64_t connection_count;
 	struct dataplane_connection_config *connections;
+
+	// The flat worker list the nested devices[].workers[] entries expand
+	// into, one single-assignment worker per entry in device and entry
+	// order; worker i of device d polls queue i of d.
+	uint64_t worker_count;
+	struct dataplane_worker_config *workers;
+
 	char loglevel[32];
 
 	char plugin_dir[DATAPLANE_PLUGIN_DIR_LEN];

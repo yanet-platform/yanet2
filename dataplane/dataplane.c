@@ -55,13 +55,13 @@
 static int
 dataplane_worker_connect(
 	struct dataplane *dataplane,
-	struct dataplane_device *device,
 	struct dataplane_worker *wrk_tx,
 	struct worker_tx_connection *tx_conn,
-	struct dataplane_worker *wrk_rx
+	struct dataplane_worker *wrk_rx,
+	uint16_t rx_port_id,
+	uint16_t rx_queue_id
 ) {
 	(void)dataplane;
-	(void)device;
 	(void)wrk_tx;
 
 	if (!(tx_conn->count & (tx_conn->count + 1))) {
@@ -77,9 +77,9 @@ dataplane_worker_connect(
 
 	if (!(wrk_rx->write_ctx.rx_pipe_count &
 	      (wrk_rx->write_ctx.rx_pipe_count + 1))) {
-		struct data_pipe *pipes = (struct data_pipe *)realloc(
+		struct worker_rx_pipe *pipes = (struct worker_rx_pipe *)realloc(
 			wrk_rx->write_ctx.rx_pipes,
-			sizeof(struct data_pipe) * 2 *
+			sizeof(struct worker_rx_pipe) * 2 *
 				(wrk_rx->write_ctx.rx_pipe_count + 1)
 		);
 		if (pipes == NULL) {
@@ -95,9 +95,75 @@ dataplane_worker_connect(
 
 	++tx_conn->count;
 
-	*(wrk_rx->write_ctx.rx_pipes + wrk_rx->write_ctx.rx_pipe_count++) =
-		tx_pipe->pipe;
+	struct worker_rx_pipe *rx_pipe =
+		wrk_rx->write_ctx.rx_pipes + wrk_rx->write_ctx.rx_pipe_count;
+	// Copied by value: the producer may realloc its pipes array on a
+	// later connection, and the consumer's copy stays valid regardless.
+	rx_pipe->pipe = tx_pipe->pipe;
+	rx_pipe->port_id = rx_port_id;
+	rx_pipe->queue_id = rx_queue_id;
+	++wrk_rx->write_ctx.rx_pipe_count;
 
+	return 0;
+}
+
+// One (worker, assignment) pair referencing a device, used to wire the
+// connection mesh over the flat worker list.
+struct device_assignment_ref {
+	struct dataplane_worker *worker;
+	struct worker_assignment *assignment;
+};
+
+// Collect the assignments polling one device, in worker and assignment
+// order.
+//
+// The caller owns the returned array and frees it once the connections
+// are wired. An empty result means the device has no queue assigned to
+// any worker, which the caller rejects.
+static int
+collect_device_assignments(
+	struct dataplane *dataplane,
+	uint32_t device_id,
+	struct device_assignment_ref **refs_out,
+	uint32_t *count_out
+) {
+	uint32_t count = 0;
+	for (uint32_t wrk_idx = 0; wrk_idx < dataplane->worker_count;
+	     ++wrk_idx) {
+		struct dataplane_worker *worker = dataplane->workers + wrk_idx;
+		for (uint32_t asgn_idx = 0; asgn_idx < worker->assignment_count;
+		     ++asgn_idx) {
+			if (worker->assignments[asgn_idx].device_id ==
+			    device_id) {
+				++count;
+			}
+		}
+	}
+
+	struct device_assignment_ref *refs = (struct device_assignment_ref *)
+		malloc(sizeof(struct device_assignment_ref) * count);
+	if (refs == NULL) {
+		return -1;
+	}
+
+	uint32_t idx = 0;
+	for (uint32_t wrk_idx = 0; wrk_idx < dataplane->worker_count;
+	     ++wrk_idx) {
+		struct dataplane_worker *worker = dataplane->workers + wrk_idx;
+		for (uint32_t asgn_idx = 0; asgn_idx < worker->assignment_count;
+		     ++asgn_idx) {
+			if (worker->assignments[asgn_idx].device_id ==
+			    device_id) {
+				refs[idx].worker = worker;
+				refs[idx].assignment =
+					worker->assignments + asgn_idx;
+				++idx;
+			}
+		}
+	}
+
+	*refs_out = refs;
+	*count_out = count;
 	return 0;
 }
 
@@ -108,45 +174,83 @@ dataplane_connect_device(
 	struct dataplane_device *to_device
 ) {
 	/*
-	 * Each worker from source device should have at least one
-	 * connection to destination device. Also create at least one
-	 * incoming connection from source device for each destination
-	 * device worker.
+	 * Each assignment on the source device should have at least one
+	 * connection to the destination device. Also create at least one
+	 * incoming connection from the source device for each destination
+	 * device assignment.
 	 */
-	size_t pipe_count = from_device->worker_count;
-	if (to_device->worker_count > pipe_count) {
-		pipe_count = to_device->worker_count;
+	struct device_assignment_ref *from_refs;
+	uint32_t from_count;
+	if (collect_device_assignments(
+		    dataplane, from_device->device_id, &from_refs, &from_count
+	    )) {
+		return -1;
+	}
+	struct device_assignment_ref *to_refs;
+	uint32_t to_count;
+	if (collect_device_assignments(
+		    dataplane, to_device->device_id, &to_refs, &to_count
+	    )) {
+		free(from_refs);
+		return -1;
+	}
+
+	if (from_count == 0 || to_count == 0) {
+		LOG(ERROR,
+		    "cannot connect device %s to device %s: a device with no "
+		    "assigned queue cannot carry connections",
+		    from_device->port_name,
+		    to_device->port_name);
+		free(from_refs);
+		free(to_refs);
+		return -1;
+	}
+
+	size_t pipe_count = from_count;
+	if (to_count > pipe_count) {
+		pipe_count = to_count;
 	}
 
 	for (size_t pipe_idx = 0; pipe_idx < pipe_count; ++pipe_idx) {
-		// Select source and destination workers
-		struct dataplane_worker *from_worker =
-			from_device->workers +
-			pipe_idx % from_device->worker_count;
+		// Select source and destination assignments
+		struct device_assignment_ref *from_ref =
+			from_refs + pipe_idx % from_count;
 
-		struct dataplane_worker *to_worker =
-			to_device->workers + pipe_idx % to_device->worker_count;
+		struct device_assignment_ref *to_ref =
+			to_refs + pipe_idx % to_count;
+
+		// A pipe whose consumer is also its producer would never
+		// carry a packet: the producer transmits on the queue it
+		// owns directly. Skip it instead of paying a dead ring.
+		if (from_ref->worker == to_ref->worker) {
+			continue;
+		}
 
 		struct worker_tx_connection *tx_conn =
-			from_worker->write_ctx.tx_connections +
+			from_ref->worker->write_ctx.tx_connections +
 			to_device->device_id;
 
 		if (dataplane_worker_connect(
 			    dataplane,
-			    from_device,
-			    from_worker,
+			    from_ref->worker,
 			    tx_conn,
-			    to_worker
+			    to_ref->worker,
+			    to_ref->assignment->port_id,
+			    to_ref->assignment->queue_id
 		    )) {
 			LOG(ERROR,
 			    "failed to connect workers from device %s to "
 			    "device %s",
 			    from_device->port_name,
 			    to_device->port_name);
-
+			free(from_refs);
+			free(to_refs);
 			return -1;
 		};
 	}
+
+	free(from_refs);
+	free(to_refs);
 
 	return 0;
 }
@@ -344,6 +448,40 @@ dataplane_create_devices(
 			LOG(ERROR,
 			    "failed to init device %s",
 			    device_config->port_name);
+			return -1;
+		}
+	}
+
+	return 0;
+}
+
+// Create the flat worker list from the expanded configuration, after the
+// devices exist: each assignment's queue setup needs the device's port.
+static int
+dataplane_create_workers(
+	struct dataplane *dataplane, const struct dataplane_config *config
+) {
+	dataplane->worker_count = 0;
+
+	dataplane->workers = (struct dataplane_worker *)malloc(
+		sizeof(struct dataplane_worker) * config->worker_count
+	);
+	if (dataplane->workers == NULL) {
+		LOG(ERROR, "failed to allocate 'workers'");
+		return -1;
+	}
+	memset(dataplane->workers,
+	       0,
+	       sizeof(struct dataplane_worker) * config->worker_count);
+
+	for (dataplane->worker_count = 0;
+	     dataplane->worker_count < config->worker_count;
+	     ++dataplane->worker_count) {
+		if (dataplane_worker_init(
+			    dataplane,
+			    dataplane->workers + dataplane->worker_count,
+			    config->workers + dataplane->worker_count
+		    )) {
 			return -1;
 		}
 	}
@@ -695,6 +833,12 @@ dataplane_init(
 		return -1;
 	}
 
+	LOG(INFO, "create workers");
+	if (dataplane_create_workers(dataplane, config)) {
+		LOG(ERROR, "failed to create workers");
+		return -1;
+	}
+
 	LOG(INFO, "connect devices");
 	if (dataplane_connect_devices(
 		    dataplane, config->connection_count, config->connections
@@ -840,49 +984,41 @@ dataplane_init(
 
 		worker_counters_bind(dp_config, &counter_ids);
 
-		// Publish each worker pool's occupancy before the instance
+		// Publish each worker's pool occupancy before the instance
 		// becomes visible: until the worker threads run their first
 		// rounds, a scrape would otherwise read the zero-filled
 		// storage, fail pool validation, and drop the whole worker
 		// family despite a healthy startup.
-		for (uint32_t device_idx = 0;
-		     device_idx < dataplane->device_count;
-		     ++device_idx) {
-			struct dataplane_device *device =
-				dataplane->devices + device_idx;
-			for (uint32_t wrk_idx = 0;
-			     wrk_idx < device->worker_count;
-			     ++wrk_idx) {
-				struct dataplane_worker *worker =
-					device->workers + wrk_idx;
-				if (worker->instance != instance) {
-					continue;
-				}
+		for (uint32_t wrk_idx = 0; wrk_idx < dataplane->worker_count;
+		     ++wrk_idx) {
+			struct dataplane_worker *worker =
+				dataplane->workers + wrk_idx;
+			if (worker->instance != instance) {
+				continue;
+			}
 
-				uint64_t worker_idx = worker->dp_worker->idx;
-				if (worker_rx_pool_sampler_init(
-					    &worker->rx_pool_sampler,
-					    worker->rx_mempool,
-					    worker_counter_slot(
-						    dp_config,
-						    worker_idx,
-						    counter_ids
-							    .rx_mempool_capacity
-					    ),
-					    worker_counter_slot(
-						    dp_config,
-						    worker_idx,
-						    counter_ids
-							    .rx_mempool_available
-					    )
-				    )) {
-					LOG(ERROR,
-					    "failed to bind rx pool counters "
-					    "for worker %lu of instance %u",
+			uint64_t worker_idx = worker->dp_worker->idx;
+			if (worker_rx_pool_sampler_init(
+				    &worker->rx_pool_sampler,
+				    worker->assignment_count,
+				    worker->rx_pools,
+				    worker_counter_slot(
+					    dp_config,
 					    worker_idx,
-					    instance_idx);
-					return -1;
-				}
+					    counter_ids.rx_mempool_capacity
+				    ),
+				    worker_counter_slot(
+					    dp_config,
+					    worker_idx,
+					    counter_ids.rx_mempool_available
+				    )
+			    )) {
+				LOG(ERROR,
+				    "failed to bind rx pool counters "
+				    "for worker %lu of instance %u",
+				    worker_idx,
+				    instance_idx);
+				return -1;
 			}
 		}
 
@@ -892,7 +1028,7 @@ dataplane_init(
 			if (dp_topology_set_device_worker_count(
 				    dp_config,
 				    device_idx,
-				    dataplane->devices[device_idx].worker_count
+				    dataplane->devices[device_idx].queue_count
 			    ) != 0) {
 				LOG(ERROR,
 				    "failed to set dp_topology worker count "
@@ -974,6 +1110,16 @@ dataplane_start(struct dataplane *dataplane) {
 		}
 	}
 
+	// The worker threads start only after every port is up: a worker
+	// polling several devices must not race another device's port
+	// start.
+	for (uint32_t wrk_idx = 0; wrk_idx < dataplane->worker_count;
+	     ++wrk_idx) {
+		if (dataplane_worker_start(dataplane->workers + wrk_idx)) {
+			return -1;
+		}
+	}
+
 	for (uint32_t instance_idx = 0;
 	     instance_idx < dataplane->instance_count;
 	     ++instance_idx) {
@@ -1000,8 +1146,9 @@ dataplane_start(struct dataplane *dataplane) {
 
 int
 dataplane_stop(struct dataplane *dataplane) {
-	for (size_t dev_idx = 0; dev_idx < dataplane->device_count; ++dev_idx) {
-		dataplane_device_stop(dataplane->devices + dev_idx);
+	for (uint32_t wrk_idx = 0; wrk_idx < dataplane->worker_count;
+	     ++wrk_idx) {
+		dataplane_worker_stop(dataplane->workers + wrk_idx);
 	}
 
 	// The workers are joined above while the assigners still run:

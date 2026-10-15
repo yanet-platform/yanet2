@@ -135,11 +135,21 @@ yanet_get_port_counter_group(
 void
 yanet_port_counter_group_list_free(struct port_counter_group_list *groups);
 
+// One (device, queue) pair a worker polls.
+struct worker_assignment_metadata {
+	uint32_t device_id;
+	uint32_t queue_id;
+};
+
 struct worker_counter_metadata {
 	uint32_t core_id;
+	// The first assignment's device and queue, kept for single-queue
+	// consumers; the full list is read via
+	// yanet_get_worker_assignments.
 	uint32_t device_id;
 	uint32_t queue_id;
 	uint32_t rx_burst_size;
+	uint32_t assignment_count;
 };
 
 int
@@ -147,6 +157,20 @@ yanet_get_worker_counter_metadata(
 	struct dp_config *dp_config,
 	uint64_t worker_idx,
 	struct worker_counter_metadata *metadata
+);
+
+// Copy the worker's assignments into a caller-supplied array.
+//
+// Returns how many entries were filled, or -1 when the worker index is
+// out of range. The caller sizes the array from
+// worker_counter_metadata.assignment_count; a short array receives a
+// prefix.
+int
+yanet_get_worker_assignments(
+	struct dp_config *dp_config,
+	uint64_t worker_idx,
+	struct worker_assignment_metadata *assignments,
+	uint32_t max_count
 );
 
 struct counter_handle *

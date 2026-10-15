@@ -1590,6 +1590,17 @@ config_gen_ectx_free(
 		);
 	}
 
+	uint16_t *backing_registry =
+		ADDR_OF(&config_gen_ectx->backing_registry);
+	if (backing_registry != NULL) {
+		memory_bfree(
+			memory_context,
+			backing_registry,
+			sizeof(uint16_t) *
+				config_gen_ectx->backing_registry_count
+		);
+	}
+
 	struct object_ectx **objects = ADDR_OF(&config_gen_ectx->objects);
 	if (objects != NULL) {
 		for (uint64_t object_idx = 0;
@@ -2150,23 +2161,41 @@ config_gen_ectx_create(
 			(uint16_t)device_idx;
 	}
 
-	// The worker's own registry slot backs onto its physical device;
-	// an unwired worker, or one whose port device never registered,
-	// keeps the absent-device sentinel and receive drops into it.
-	config_gen_ectx->worker_rx_device_id = UINT16_MAX;
-	struct dp_worker **dp_workers = ADDR_OF(&dp_config->workers);
-	if (dp_workers != NULL && worker_idx < dp_config->worker_count) {
-		uint16_t physical_device_id =
-			ADDR_OF(dp_workers + worker_idx)->device_id;
-		for (uint64_t device_idx = 0; device_idx < device_count;
-		     ++device_idx) {
-			if (egress_backing[device_idx] == physical_device_id) {
-				config_gen_ectx->worker_rx_device_id =
-					(uint16_t)device_idx;
-				break;
-			}
+	// Reverse the backing table once: the receive stamp starts from a
+	// worker assignment's physical device and needs the registry slot
+	// behind it. The first registry entry wins when several share one
+	// port, and a device nothing backs keeps the no-port sentinel, so
+	// receive on it drops into the absent-device path.
+	uint64_t backing_registry_count = dp_config->dp_topology.device_count;
+	config_gen_ectx->backing_registry_count = backing_registry_count;
+	uint16_t *backing_registry = (uint16_t *)memory_balloc(
+		memory_context, sizeof(uint16_t) * backing_registry_count
+	);
+	if (backing_registry == NULL && backing_registry_count > 0) {
+		yanet_error_add(
+			err,
+			"failed to allocate memory for the reverse backing "
+			"table of the config generation"
+		);
+		goto error;
+	}
+	if (backing_registry_count > 0) {
+		memset(backing_registry,
+		       0xFF,
+		       sizeof(uint16_t) * backing_registry_count);
+	}
+	for (uint64_t device_idx = 0; device_idx < device_count; ++device_idx) {
+		uint16_t physical_device_id = egress_backing[device_idx];
+		if (physical_device_id == UINT16_MAX ||
+		    physical_device_id >= backing_registry_count) {
+			continue;
+		}
+		if (backing_registry[physical_device_id] == UINT16_MAX) {
+			backing_registry[physical_device_id] =
+				(uint16_t)device_idx;
 		}
 	}
+	SET_OFFSET_OF(&config_gen_ectx->backing_registry, backing_registry);
 
 	if (link_config_gen_ectx(config_gen_ectx, err)) {
 		yanet_error_add(

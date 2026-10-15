@@ -4,16 +4,17 @@
 
 #include "config.h"
 
-#include "worker.h"
-
 struct rte_ether_addr;
 struct dataplane;
+struct dataplane_worker;
 
 struct dataplane_device {
 	uint32_t device_id;
 
-	uint32_t worker_count;
-	struct dataplane_worker *workers;
+	// The device's RX/TX queue count: one per assignment referencing the
+	// device, across all workers. The workers themselves live in the
+	// dataplane's flat worker list.
+	uint32_t queue_count;
 
 	char port_name[80];
 
@@ -25,9 +26,6 @@ int
 dataplane_device_start(
 	struct dataplane *dataplane, struct dataplane_device *device
 );
-
-void
-dataplane_device_stop(struct dataplane_device *device);
 
 int
 dataplane_device_init(
