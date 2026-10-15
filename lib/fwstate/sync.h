@@ -57,7 +57,7 @@ fwstate_sync_frames_per_packet(uint16_t sync_mtu) {
  * Fill a stash record from the given packet.
  *
  * Captures the normalized 5-tuple, direction, current TCP flags and IPv6
- * flow id together with the packet's device ids, and marks the record
+ * flow id together with the packet's device id, and marks the record
  * pending.
  *
  * @param packet The original packet to extract the 5-tuple from
@@ -81,8 +81,7 @@ fwstate_fill_sync_record(
  *
  * @param frames Frames to copy, in order
  * @param count Number of frames
- * @param rx_device_id Receive device of the sync packet
- * @param device_id Transmit device of the sync packet
+ * @param device_id Device the sync packet names as its egress
  * @param sync_pkt Freshly allocated packet to fill
  * @return the number of frames written, or -1 when not even one fits
  */
@@ -90,7 +89,6 @@ int
 fwstate_build_sync_packet(
 	const struct fw_state_sync_frame *const *frames,
 	uint32_t count,
-	uint16_t rx_device_id,
 	uint16_t device_id,
 	struct packet *sync_pkt
 );

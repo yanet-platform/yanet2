@@ -2,7 +2,7 @@
 //!
 //! Lists all configured devices with their registry indices, allowing
 //! consumers to resolve numeric device_id values (e.g. from pdump
-//! RecordMeta.rx_device_id) to human-readable names.
+//! RecordMeta.device_id) to human-readable names.
 
 use clap::Parser;
 use colored::Colorize;

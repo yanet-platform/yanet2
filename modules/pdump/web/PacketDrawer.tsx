@@ -26,7 +26,7 @@ const formatTime = (date: Date): string =>
  * Right-side drawer for inspecting a captured pdump packet.
  *
  * Wraps the shared PacketInspector and injects capture metadata
- * (worker, queue, rx/tx device, timestamp) via the metaSection prop.
+ * (worker, queue, device, timestamp) via the metaSection prop.
  */
 const PacketDrawer: React.FC<PacketDrawerProps> = ({
     open,
@@ -47,7 +47,6 @@ const PacketDrawer: React.FC<PacketDrawerProps> = ({
             <KV k="Time" v={formatTime(packet.timestamp)} />
             <KV k="Worker" v={packet.record.meta?.worker_idx ?? 'N/A'} />
             <KV k="Queue" v={packet.record.meta?.queue ?? 'N/A'} />
-            <KV k="RX device" v={packet.record.meta?.rx_device_id ?? 'N/A'} />
             <KV
                 k="Device"
                 v={packet.record.meta?.device_id ?? packet.record.meta?.tx_device_id ?? 'N/A'}

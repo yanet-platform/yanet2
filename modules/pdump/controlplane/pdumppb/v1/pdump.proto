@@ -40,8 +40,9 @@ message RecordMeta {
   uint32 worker_idx = 4;
   // Index of the pipeline where the pdump module is located.
   uint32 pipeline_idx = 5;
-  // ID of the device from which the packet was received.
-  uint32 rx_device_id = 6;
+  // Legacy receive device of pre-rename captures; new records ship the
+  // slot zeroed, so consumers should not display it.
+  uint32 rx_device_id = 6 [deprecated = true]; // Display device_id only.
   // ID of the device to which the packet may be sent.
   uint32 tx_device_id = 7 [deprecated = true]; // Use device_id instead.
   // Indicates from which packet_list the packet is collected.

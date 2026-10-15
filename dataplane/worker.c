@@ -112,10 +112,8 @@ worker_process_staged(
 		packet->mbuf = ctx->staged[idx];
 
 		// Preserve device by default: the registry slot this worker's
-		// own port resolved to at build. Both device ids share the
-		// registry namespace, and the absent-device sentinel resolves
-		// no device below, so receive drops into it.
-		packet->rx_device_id = config_gen_ectx->worker_rx_device_id;
+		// own port resolved to at build. The absent-device sentinel
+		// resolves no device below, so receive drops into it.
 		packet->device_id = config_gen_ectx->worker_rx_device_id;
 
 		if (parse_packet(packet)) {

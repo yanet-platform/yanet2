@@ -37,15 +37,14 @@ fn capture_device(meta: &pdumppb::RecordMeta) -> u32 {
 /// * `writer` - A writer to output the formatted text to.
 /// * `meta` - The metadata field from a pdumppb::Record.
 pub fn pretty_print_metadata_concise<W: Write>(mut writer: W, meta: &pdumppb::RecordMeta) -> io::Result<()> {
-    // Format: W:worker_idx P:pipeline_idx RX:rx_device_id DEV:device_id
+    // Format: W:worker_idx P:pipeline_idx DEV:device_id
     write!(
         writer,
-        "{} Q:{} W:{} P:{} RX:{} DEV:{} ",
+        "{} Q:{} W:{} P:{} DEV:{} ",
         format_duration_ns(meta.timestamp),
         dump_mode::to_char(meta.queue),
         meta.worker_idx,
         meta.pipeline_idx,
-        meta.rx_device_id,
         capture_device(meta)
     )
 }
@@ -64,7 +63,6 @@ pub fn pretty_print_metadata<W: Write>(mut writer: W, meta: &pdumppb::RecordMeta
     writeln!(writer, "  Worker Index:   {}", meta.worker_idx)?;
     writeln!(writer, "  Pipeline Index: {}", meta.pipeline_idx)?;
     writeln!(writer, "  Data Size:      {}", meta.data_size)?;
-    writeln!(writer, "  RX Device ID:   {}", meta.rx_device_id)?;
     writeln!(writer, "  Device ID:       {}", capture_device(meta))?;
     writeln!(writer, "  Packet Queue:   {}", dump_mode::to_str(meta.queue))?;
     writeln!(writer, "----------------------")?;
@@ -1661,14 +1659,14 @@ mod tests {
         pretty_print_metadata_concise(&mut output, &meta).unwrap();
 
         let output_str = String::from_utf8(output.clone()).unwrap();
-        assert_eq!(output_str, "00:00:01.234.567 Q:I W:1 P:2 RX:3 DEV:4 ");
+        assert_eq!(output_str, "00:00:01.234.567 Q:I W:1 P:2 DEV:4 ");
 
         meta.queue = dump_mode::DROPS;
         output.clear();
         pretty_print_metadata_concise(&mut output, &meta).unwrap();
 
         let output_str = String::from_utf8(output).unwrap();
-        assert_eq!(output_str, "00:00:01.234.567 Q:D W:1 P:2 RX:3 DEV:4 ");
+        assert_eq!(output_str, "00:00:01.234.567 Q:D W:1 P:2 DEV:4 ");
     }
 
     #[test]
@@ -1696,7 +1694,6 @@ mod tests {
   Worker Index:   1
   Pipeline Index: 2
   Data Size:      1000
-  RX Device ID:   3
   Device ID:       4
   Packet Queue:   DROPS
 ----------------------

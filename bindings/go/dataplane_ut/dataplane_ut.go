@@ -547,44 +547,43 @@ func (m *Harness) HandlePacketsWithHashes(
 // multi-segment mbuf. The result is returned unparsed so callers can inspect
 // packets that gopacket cannot decode.
 func (m *Harness) HandleSegmentedPackets(packets ...[][]byte) (*RawResult, error) {
-	return m.handleSegmentedPackets(0, 0, 0, packets...)
+	return m.handleSegmentedPackets(0, 0, packets...)
 }
 
 // HandleSegmentedPacketsOnDevice runs one pipeline round on the given worker
 // where each input packet is supplied as an ordered list of byte segments,
-// producing a chained multi-segment mbuf stamped with rxDeviceID as both its
-// ingress device and the device whose pipeline it first executes on.
+// producing a chained multi-segment mbuf stamped with deviceID as the device
+// whose pipeline it first executes on.
 //
 // This mirrors the real dataplane's ingress stamp, where the polling
-// worker's own device becomes the packet's rx device and executing device
-// (see dataplane/worker.c), letting a test exercise device-keyed module
-// behavior instead of the harness default of device 0 on every packet. A
-// packet the round later routes elsewhere executes there with that device's
-// id.
+// worker's own device becomes the packet's executing device (see
+// dataplane/worker.c), letting a test exercise device-keyed module behavior
+// instead of the harness default of device 0 on every packet. A packet the
+// round later routes elsewhere executes there with that device's id.
 func (m *Harness) HandleSegmentedPacketsOnDevice(
 	worker int,
-	rxDeviceID uint16,
+	deviceID uint16,
 	packets ...[][]byte,
 ) (*RawResult, error) {
 	// The round dispatch indexes per-device scheduling arrays by the
 	// packet device id, so an id outside the registered topology would
 	// corrupt memory on the C side.
-	if int(rxDeviceID) >= m.deviceCount {
+	if int(deviceID) >= m.deviceCount {
 		return nil, fmt.Errorf(
 			"device id %d exceeds topology device count %d",
-			rxDeviceID,
+			deviceID,
 			m.deviceCount,
 		)
 	}
 
-	return m.handleSegmentedPackets(worker, rxDeviceID, rxDeviceID, packets...)
+	return m.handleSegmentedPackets(worker, deviceID, packets...)
 }
 
 // handleSegmentedPackets is the shared implementation for the
 // HandleSegmentedPackets* variants.
 func (m *Harness) handleSegmentedPackets(
 	worker int,
-	deviceID, rxDeviceID uint16,
+	deviceID uint16,
 	packets ...[][]byte,
 ) (*RawResult, error) {
 	// The dataplane_ut_run call indexes ut->dp_config->workers[worker] directly.
@@ -602,7 +601,7 @@ func (m *Harness) handleSegmentedPackets(
 
 	builtPackets := make([]*dataplane.Packet, 0, len(packets))
 	for idx := range packets {
-		pkt, err := dataplane.NewPacketFromSegments(packets[idx], deviceID, rxDeviceID)
+		pkt, err := dataplane.NewPacketFromSegments(packets[idx], deviceID)
 		if err != nil {
 			return nil, fmt.Errorf("failed to build segmented packet at index %d: %w", idx, err)
 		}
@@ -671,9 +670,8 @@ func (m *Harness) handlePackets(
 	data := make([]dataplane.PacketData, 0, len(payloads))
 	for idx := range payloads {
 		data = append(data, dataplane.PacketData{
-			Payload:    payloads[idx],
-			DeviceId:   0,
-			RxDeviceId: 0,
+			Payload:  payloads[idx],
+			DeviceId: 0,
 		})
 	}
 
@@ -743,8 +741,8 @@ func WithPayloadReset() BenchOption {
 	}
 }
 
-// WithDeviceIDs assigns per-packet receive and executing device ids
-// before the run.
+// WithDeviceIDs assigns each packet's executing device id before the
+// run.
 //
 // ids[i] is written into packets[i]. Packets past len(ids) keep device 0.
 // The round dispatch then splits the burst into per-device fronts the way
@@ -801,7 +799,6 @@ func (m *Harness) Bench(
 		packetData := dataplane.PacketData{Payload: payloads[idx]}
 		if idx < len(opts.DeviceIDs) {
 			packetData.DeviceId = opts.DeviceIDs[idx]
-			packetData.RxDeviceId = opts.DeviceIDs[idx]
 		}
 		data = append(data, packetData)
 	}

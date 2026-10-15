@@ -215,7 +215,6 @@ run_round_restore_test(void) {
 	packet_list_concat(&input, &first_result.drop);
 	ipv4->type_of_service = original_tos;
 	ipv4->hdr_checksum = original_checksum;
-	packet->rx_device_id = 0;
 	packet->device_id = 0;
 	packet->recirc_remaining = 0;
 	packet->recirc_initialized = 0;
@@ -237,11 +236,6 @@ run_round_restore_test(void) {
 		(long)input.first->recirc_initialized,
 		0L,
 		"run_rounds must restore recirculation initialization state"
-	);
-	TEST_ASSERT_EQUAL(
-		(long)input.first->rx_device_id,
-		0L,
-		"run_rounds must restore rx device id"
 	);
 	TEST_ASSERT_EQUAL(
 		(long)input.first->device_id,

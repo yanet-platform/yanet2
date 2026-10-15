@@ -2152,7 +2152,6 @@ push_packet(struct upkt *pkt) {
 	struct packet *packet = mbuf_to_packet(mbuf);
 	memset(packet, 0, sizeof(struct packet));
 	packet->mbuf = mbuf;
-	packet->rx_device_id = 0;
 	packet->device_id = 0;
 
 	if (parse_packet(packet)) {
@@ -2285,7 +2284,6 @@ push_packet_malformed(
 	struct packet *packet = mbuf_to_packet(mbuf);
 	memset(packet, 0, sizeof(struct packet));
 	packet->mbuf = mbuf;
-	packet->rx_device_id = 0;
 	packet->device_id = 0;
 
 	// SKIP parse_packet() - we want malformed packets to reach NAT64

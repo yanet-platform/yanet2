@@ -143,7 +143,6 @@ fwstate_fill_sync_record(
 	}
 
 	fwstate_fill_sync_frame(packet, direction, &record->frame);
-	record->rx_device_id = packet->rx_device_id;
 	record->device_id = packet->device_id;
 	record->status = FWSTATE_SYNC_RECORD_PENDING;
 	return 0;
@@ -153,7 +152,6 @@ int
 fwstate_build_sync_packet(
 	const struct fw_state_sync_frame *const *frames,
 	uint32_t count,
-	uint16_t rx_device_id,
 	uint16_t device_id,
 	struct packet *sync_pkt
 ) {
@@ -224,7 +222,6 @@ fwstate_build_sync_packet(
 		rte_memcpy(payload + idx * frame_size, frames[idx], frame_size);
 	}
 
-	sync_pkt->rx_device_id = rx_device_id;
 	sync_pkt->device_id = device_id;
 
 	// Set packet header offsets directly (we know the structure)

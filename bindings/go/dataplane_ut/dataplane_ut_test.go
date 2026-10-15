@@ -502,7 +502,7 @@ func TestNewHarness_WorkerDeviceIDOutOfRange(t *testing.T) {
 }
 
 // TestHandleSegmentedPacketsOnDevice_InvalidDeviceID verifies that
-// HandleSegmentedPacketsOnDevice rejects an rxDeviceID at or beyond the
+// HandleSegmentedPacketsOnDevice rejects a deviceID at or beyond the
 // harness's registered device count instead of stamping a packet that
 // would index the C-side per-device scheduling arrays out of bounds.
 func TestHandleSegmentedPacketsOnDevice_InvalidDeviceID(t *testing.T) {
