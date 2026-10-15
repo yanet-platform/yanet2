@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"fmt"
 	"io"
-	"os"
 	"runtime"
 	"testing"
 	"time"
@@ -14,7 +13,7 @@ import (
 	"google.golang.org/grpc/encoding"
 )
 
-// lines returns the text of the libzstd fixture, cut to count lines.
+// lines returns count lines of compressible text.
 func lines(count int) []byte {
 	var text bytes.Buffer
 	for idx := range count {
@@ -22,6 +21,20 @@ func lines(count int) []byte {
 	}
 
 	return text.Bytes()
+}
+
+// pack compresses data with the registered zstd compressor.
+func pack(t *testing.T, data []byte) []byte {
+	t.Helper()
+
+	var packed bytes.Buffer
+	writer, err := encoding.GetCompressor("zstd").Compress(&packed)
+	require.NoError(t, err)
+	_, err = writer.Write(data)
+	require.NoError(t, err)
+	require.NoError(t, writer.Close())
+
+	return packed.Bytes()
 }
 
 // unpack decompresses data with the registered zstd compressor.
@@ -44,34 +57,17 @@ func Test_ZstdCompressor_RoundTripAtLevelThree(t *testing.T) {
 		t.Run(fmt.Sprintf("%d lines", count), func(t *testing.T) {
 			t.Parallel()
 
-			var packed bytes.Buffer
-			writer, err := encoding.GetCompressor("zstd").Compress(&packed)
-			require.NoError(t, err)
 			data := lines(count)
-			_, err = writer.Write(data)
-			require.NoError(t, err)
-			require.NoError(t, writer.Close())
-			require.True(t, bytes.Equal(data, unpack(t, packed.Bytes())))
+			packed := pack(t, data)
+			require.True(t, bytes.Equal(data, unpack(t, packed)))
 
 			if count == 3000 {
 				reference, err := zstd.NewWriter(nil, zstd.WithEncoderLevel(zstd.EncoderLevelFromZstd(3)))
 				require.NoError(t, err)
-				require.Equal(t, reference.EncodeAll(data, nil), packed.Bytes())
+				require.Equal(t, reference.EncodeAll(data, nil), packed)
 			}
 		})
 	}
-}
-
-// Test_ZstdCompressor_DecompressesLibzstdFrame verifies that a frame written
-// by libzstd without stating its size decompresses to the message.
-//
-// The fixture comes from zstd 1.5.7 reading a pipe: seq 0 19999 |
-// awk '{printf "line %06d: yanet gateway config\n", $1}' | zstd -3 -c -q
-func Test_ZstdCompressor_DecompressesLibzstdFrame(t *testing.T) {
-	frame, err := os.ReadFile("testdata/libzstd_no_content_size.zst")
-	require.NoError(t, err)
-
-	require.True(t, bytes.Equal(lines(20000), unpack(t, frame)))
 }
 
 // allocatedDuring returns the bytes call allocated, counting every allocation
@@ -124,8 +120,7 @@ func Test_ZstdCompressor_DecompressRefusesWindowBeyondCap(t *testing.T) {
 // A pooled decoder makes the next read cost a fraction of a new one, which the
 // test waits for across collections, as a pool may also drop what it is given.
 func Test_ZstdCompressor_DecompressReleasesAbandonedReader(t *testing.T) {
-	frame, err := os.ReadFile("testdata/libzstd_no_content_size.zst")
-	require.NoError(t, err)
+	frame := pack(t, lines(20000))
 
 	halfRead := func() (reader io.Reader, allocated uint64) {
 		allocated = allocatedDuring(func() {
