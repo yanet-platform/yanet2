@@ -70,7 +70,7 @@ pub struct CreateCmd {
     pub worker_count: Option<u32>,
 
     /// Sync stash buffer per worker, for example 4KiB (0 selects room for 64
-    /// sync records, 3840 bytes; otherwise at least 60 bytes and at most
+    /// sync records, 3648 bytes; otherwise at least 57 bytes and at most
     /// 1MiB).
     #[arg(long, value_parser = parse_stash_size)]
     pub stash_size: Option<u64>,

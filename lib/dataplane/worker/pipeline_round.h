@@ -10,12 +10,11 @@ struct packet_front;
 
 // Decide the egress of the packets that finished an output entry.
 //
-// A packet whose destination device resolves to no port joins the
-// front's drop list, counted against the entry's drop counter, instead
-// of travelling namelessly to the write stage. Packets toward a real
-// port stay in the output untouched. The decision is per packet, so
-// traffic a module aimed at another device's port passes an entry it
-// only traversed.
+// The entry's device resolves through the backing table once, and every
+// finisher lands in that port's transmit bucket. A device with no port
+// has its finishers join the front's drop list, counted against the
+// entry's drop counter, instead of travelling namelessly to the write
+// stage.
 void
 worker_entry_terminal_egress(
 	struct config_gen_ectx *config_gen_ectx,

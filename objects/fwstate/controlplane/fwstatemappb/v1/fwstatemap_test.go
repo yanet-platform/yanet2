@@ -135,12 +135,12 @@ func Test_CreateMapRequest_Validate(t *testing.T) {
 		},
 		{
 			name:    "stash size below one record",
-			request: &fwstatemappb.CreateMapRequest{Name: "map", StashSize: 59},
-			message: "stash_size 59 is below the minimum 60",
+			request: &fwstatemappb.CreateMapRequest{Name: "map", StashSize: 56},
+			message: "stash_size 56 is below the minimum 57",
 		},
 		{
 			name:    "stash size of one record",
-			request: &fwstatemappb.CreateMapRequest{Name: "map", StashSize: 60},
+			request: &fwstatemappb.CreateMapRequest{Name: "map", StashSize: 57},
 		},
 		{
 			name:    "stash size at the maximum",

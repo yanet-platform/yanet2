@@ -29,24 +29,30 @@ worker_entry_terminal_egress(
 	struct device_entry_ectx *entry_ectx,
 	struct packet_front *packet_front
 ) {
-	const uint16_t *backing = config_gen_ectx->abs_egress_backing;
 	struct packet_list *buckets = config_gen_ectx->abs_tx_buckets;
 	uint64_t dropped_packets = 0;
 	uint64_t dropped_bytes = 0;
 
+	// The whole entry shares one egress: its device resolves through the
+	// backing table once, and every packet finishing here is bound for
+	// that port. A device with no port drops its finishers, counted on
+	// the entry's drop counter.
+	uint16_t port = UINT16_MAX;
+	if (entry_ectx->device_id < config_gen_ectx->device_count) {
+		port = config_gen_ectx
+			       ->abs_egress_backing[entry_ectx->device_id];
+	}
+	struct packet_list *bucket =
+		(port == UINT16_MAX) ? NULL : buckets + port;
+
 	struct packet *packet;
 	while ((packet = packet_list_pop(&packet_front->output)) != NULL) {
-		uint16_t port = UINT16_MAX;
-		if (packet->device_id < config_gen_ectx->device_count) {
-			port = backing[packet->device_id];
-		}
-
-		if (port == UINT16_MAX) {
+		if (bucket == NULL) {
 			packet_list_add(&packet_front->drop, packet);
 			dropped_packets += 1;
 			dropped_bytes += packet->data_len;
 		} else {
-			packet_list_add(buckets + port, packet);
+			packet_list_add(bucket, packet);
 		}
 	}
 

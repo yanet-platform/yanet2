@@ -128,12 +128,12 @@ worker_process_staged(
 			// FIXME update packet fields
 			packet->mbuf = ctx->staged[idx];
 
-			// Preserve device by default: the registry slot
-			// this assignment's physical device backs, resolved
-			// at build through the reverse backing table. The
-			// absent-device sentinel resolves no device below, so
-			// receive drops into it.
-			packet->device_id =
+			// The packet enters on the registry slot this
+			// assignment's physical device backs, resolved at
+			// build through the reverse backing table. The
+			// absent-device sentinel resolves no device below,
+			// so receive drops into it.
+			uint16_t entry_device_id =
 				config_gen_ectx->abs_backing_registry
 					[assignment->device_id];
 
@@ -146,7 +146,7 @@ worker_process_staged(
 
 			struct device_ectx *device_ectx =
 				config_gen_ectx_get_device(
-					config_gen_ectx, packet->device_id
+					config_gen_ectx, entry_device_id
 				);
 			if (device_ectx == NULL) {
 				rte_pktmbuf_free(ctx->staged[idx]);

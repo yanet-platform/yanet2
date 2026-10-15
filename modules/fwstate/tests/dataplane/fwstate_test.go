@@ -652,7 +652,7 @@ func Test_FWState_StashEmission_BatchesByDefaultMTU(t *testing.T) {
 	var events []localEvent
 	var want []byte
 	for idx := range 30 {
-		event := v6Event(uint16(1000+idx), 0)
+		event := v6Event(uint16(1000 + idx))
 		events = append(events, event)
 		want = append(want, event.frame...)
 	}
@@ -686,7 +686,7 @@ func Test_FWState_StashEmission_BatchesByCustomMTU(t *testing.T) {
 	worker := testWorker(0)
 	nextRound(worker)
 	for idx := range 5 {
-		require.Equal(t, 1, stashEvents(cpModule, worker, v6Event(uint16(2000+idx), 0)))
+		require.Equal(t, 1, stashEvents(cpModule, worker, v6Event(uint16(2000+idx))))
 	}
 
 	result := runHandler(cpModule, storage, worker, false)
@@ -696,35 +696,6 @@ func Test_FWState_StashEmission_BatchesByCustomMTU(t *testing.T) {
 		_, _, payload := syncPayload(raw)
 		frames = append(frames, len(payload)/frameSize)
 	}
-	require.Equal(t, []int{2, 2, 1}, frames)
-}
-
-// Test_FWState_StashEmission_SplitsOnTxDevice verifies that a change of
-// device starts a new packet.
-func Test_FWState_StashEmission_SplitsOnTxDevice(t *testing.T) {
-	memCtx := testutils.NewMemoryContext("fwstate_stash_test", datasize.MB*64)
-	defer memCtx.Free()
-	cpModule, storage := fwstateModuleConfig(memCtx)
-	defer fwstateCounterStorageFree(storage)
-
-	worker := testWorker(0)
-	nextRound(worker)
-	txDevices := []uint16{1, 1, 2, 2, 1}
-	for idx, tx := range txDevices {
-		event := v6Event(uint16(3000+idx), tx)
-		require.Equal(t, 1, stashEvents(cpModule, worker, event))
-	}
-
-	result := runHandler(cpModule, storage, worker, false)
-
-	require.Len(t, result.OutputData, 3)
-	var tx, frames []int
-	for _, data := range result.OutputData {
-		tx = append(tx, int(data.DeviceId))
-		_, _, payload := syncPayload(data.Payload)
-		frames = append(frames, len(payload)/frameSize)
-	}
-	require.Equal(t, []int{1, 2, 1}, tx)
 	require.Equal(t, []int{2, 2, 1}, frames)
 }
 
@@ -740,7 +711,7 @@ func Test_FWState_StashEmission_BothEndpoints(t *testing.T) {
 	worker := testWorker(0)
 	nextRound(worker)
 	for idx := range 30 {
-		require.Equal(t, 1, stashEvents(cpModule, worker, v6Event(uint16(4000+idx), 0)))
+		require.Equal(t, 1, stashEvents(cpModule, worker, v6Event(uint16(4000+idx))))
 	}
 
 	result := runHandler(cpModule, storage, worker, false)
@@ -774,7 +745,7 @@ func Test_FWState_StashEmission_PacksBothFamilies(t *testing.T) {
 
 	worker := testWorker(0)
 	nextRound(worker)
-	event6 := v6Event(5000, 0)
+	event6 := v6Event(5000)
 	event4 := v4Event(5001)
 	require.Equal(t, 2, stashEvents(cpModule, worker, event6, event4))
 
@@ -799,10 +770,10 @@ func Test_FWState_Stash_RepeatInvocationHandlesOnlyNewRecords(t *testing.T) {
 
 	worker := testWorker(0)
 	nextRound(worker)
-	require.Equal(t, 2, stashEvents(cpModule, worker, v6Event(6000, 0), v6Event(6001, 0)))
+	require.Equal(t, 2, stashEvents(cpModule, worker, v6Event(6000), v6Event(6001)))
 	first := runHandler(cpModule, storage, worker, false)
 
-	event := v6Event(6002, 0)
+	event := v6Event(6002)
 	require.Equal(t, 1, stashEvents(cpModule, worker, event))
 	second := runHandler(cpModule, storage, worker, false)
 	third := runHandler(cpModule, storage, worker, false)
@@ -834,8 +805,8 @@ func Test_FWState_Stash_SecondConfigEmitsWithoutDeciding(t *testing.T) {
 
 	// Round one: two new records, both applied by the first config.
 	nextRound(worker)
-	refreshed := v6Event(7000, 0)
-	require.Equal(t, 2, stashEvents(first, worker, refreshed, v6Event(7001, 0)))
+	refreshed := v6Event(7000)
+	require.Equal(t, 2, stashEvents(first, worker, refreshed, v6Event(7001)))
 	firstRound := runHandler(first, firstStorage, worker, false)
 	require.Len(t, firstRound.Output, 1)
 	upstream := gopacket.NewPacket(firstRound.Output[0], layers.LayerTypeEthernet, gopacket.Default)
@@ -852,7 +823,7 @@ func Test_FWState_Stash_SecondConfigEmitsWithoutDeciding(t *testing.T) {
 
 	// Round two: a suppressible refresh and a new record.
 	nextRound(worker)
-	fresh := v6Event(7002, 0)
+	fresh := v6Event(7002)
 	require.Equal(t, 2, stashEvents(first, worker, refreshed, fresh))
 	firstRound = runHandler(first, firstStorage, worker, false)
 	secondRound = runHandler(second, secondStorage, worker, false)
@@ -883,7 +854,7 @@ func Test_FWState_Stash_NewRoundDropsUnprocessedRecords(t *testing.T) {
 
 	worker := testWorker(0)
 	nextRound(worker)
-	require.Equal(t, 1, stashEvents(cpModule, worker, v6Event(8000, 0)))
+	require.Equal(t, 1, stashEvents(cpModule, worker, v6Event(8000)))
 	nextRound(worker)
 
 	result := runHandler(cpModule, storage, worker, false)
@@ -903,11 +874,11 @@ func Test_FWState_Stash_CursorRestartsEachRound(t *testing.T) {
 
 	worker := testWorker(0)
 	nextRound(worker)
-	require.Equal(t, 2, stashEvents(cpModule, worker, v6Event(9000, 0), v6Event(9001, 0)))
+	require.Equal(t, 2, stashEvents(cpModule, worker, v6Event(9000), v6Event(9001)))
 	runHandler(cpModule, storage, worker, false)
 
 	nextRound(worker)
-	event := v6Event(9002, 0)
+	event := v6Event(9002)
 	require.Equal(t, 1, stashEvents(cpModule, worker, event))
 	result := runHandler(cpModule, storage, worker, false)
 
@@ -930,7 +901,7 @@ func Test_FWState_Stash_WorkersAreIsolated(t *testing.T) {
 	worker1 := testWorker(1)
 	nextRound(worker0)
 	nextRound(worker1)
-	event := v6Event(9100, 0)
+	event := v6Event(9100)
 	require.Equal(t, 1, stashEvents(cpModule, worker1, event))
 
 	idle := runHandler(cpModule, storage, worker0, false)
@@ -972,7 +943,7 @@ func Test_FWState_Stash_LayerInsertionKeepsRecords(t *testing.T) {
 
 	worker := testWorker(0)
 	nextRound(worker)
-	event := v6Event(9200, 0)
+	event := v6Event(9200)
 	require.Equal(t, 1, stashEvents(cpModule, worker, event))
 
 	InsertNewLayer(cpModule)
@@ -995,7 +966,7 @@ func Test_FWState_StashEmission_AllocationFailureKeepsState(t *testing.T) {
 
 	worker := testWorker(0)
 	nextRound(worker)
-	require.Equal(t, 2, stashEvents(cpModule, worker, v6Event(9300, 0), v6Event(9301, 0)))
+	require.Equal(t, 2, stashEvents(cpModule, worker, v6Event(9300), v6Event(9301)))
 
 	outstanding := poolOutstanding(worker)
 	limitPool(worker, 0)
@@ -1027,7 +998,7 @@ func Test_FWState_StashEmission_CloneFailureKeepsMulticastCopy(t *testing.T) {
 
 	worker := testWorker(0)
 	nextRound(worker)
-	events := []localEvent{v6Event(9400, 0), v4Event(9401)}
+	events := []localEvent{v6Event(9400), v4Event(9401)}
 	require.Equal(t, 2, stashEvents(cpModule, worker, events...))
 
 	outstanding := poolOutstanding(worker)
@@ -1068,7 +1039,7 @@ func Test_FWState_StashEmission_BatchLargerThanOneMbuf(t *testing.T) {
 	nextRound(worker)
 	var want []byte
 	for idx := range recordCount {
-		event := v6Event(uint16(10000+idx), 0)
+		event := v6Event(uint16(10000 + idx))
 		require.Equal(t, 1, stashEvents(cpModule, worker, event))
 		want = append(want, event.frame...)
 	}
@@ -1098,7 +1069,7 @@ func Test_FWState_Stash_ContextsOfOneConfigShareReadPosition(t *testing.T) {
 
 	worker := testWorker(0)
 	nextRound(worker)
-	require.Equal(t, 2, stashEvents(cpModule, worker, v6Event(9500, 0), v6Event(9501, 0)))
+	require.Equal(t, 2, stashEvents(cpModule, worker, v6Event(9500), v6Event(9501)))
 
 	first := runHandlerInContext(cpModule, storage, worker, 0, false)
 	second := runHandlerInContext(cpModule, storage, worker, 1, false)
@@ -1107,7 +1078,7 @@ func Test_FWState_Stash_ContextsOfOneConfigShareReadPosition(t *testing.T) {
 	require.Len(t, payload, 2*frameSize)
 	require.Empty(t, second.Output, "the other context must not re-send read records")
 
-	event := v6Event(9502, 0)
+	event := v6Event(9502)
 	require.Equal(t, 1, stashEvents(cpModule, worker, event))
 	second = runHandlerInContext(cpModule, storage, worker, 1, false)
 	first = runHandlerInContext(cpModule, storage, worker, 0, false)

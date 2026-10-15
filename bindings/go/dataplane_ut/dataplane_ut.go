@@ -512,13 +512,13 @@ func (m *Harness) AdvanceTime(d time.Duration) time.Time {
 
 // HandlePackets runs packets through worker 0 for one pipeline round.
 func (m *Harness) HandlePackets(packets ...gopacket.Packet) (*Result, error) {
-	return m.handlePackets(0, nil, packets...)
+	return m.handlePackets(0, 0, nil, packets...)
 }
 
 // HandlePacketsOnWorker runs packets through the given worker index for one
 // pipeline round.
 func (m *Harness) HandlePacketsOnWorker(worker int, packets ...gopacket.Packet) (*Result, error) {
-	return m.handlePackets(worker, nil, packets...)
+	return m.handlePackets(worker, 0, nil, packets...)
 }
 
 // HandlePacketsWithHashes runs one pipeline round with caller-supplied per-packet hash values.
@@ -539,7 +539,7 @@ func (m *Harness) HandlePacketsWithHashes(
 			len(packets),
 		)
 	}
-	return m.handlePackets(0, hashes, packets...)
+	return m.handlePackets(0, 0, hashes, packets...)
 }
 
 // HandleSegmentedPackets runs one pipeline round on worker 0 where each input
@@ -552,14 +552,14 @@ func (m *Harness) HandleSegmentedPackets(packets ...[][]byte) (*RawResult, error
 
 // HandleSegmentedPacketsOnDevice runs one pipeline round on the given worker
 // where each input packet is supplied as an ordered list of byte segments,
-// producing a chained multi-segment mbuf stamped with deviceID as the device
-// whose pipeline it first executes on.
+// producing a chained multi-segment mbuf that enters the pipeline of the
+// given device.
 //
-// This mirrors the real dataplane's ingress stamp, where the polling
-// worker's own device becomes the packet's executing device (see
-// dataplane/worker.c), letting a test exercise device-keyed module behavior
-// instead of the harness default of device 0 on every packet. A packet the
-// round later routes elsewhere executes there with that device's id.
+// This mirrors the real dataplane's ingress, where the polling worker
+// deposits its batch on its own device's entry (see dataplane/worker.c),
+// letting a test exercise device-keyed module behavior instead of the
+// harness default of device 0 on every packet. A packet the round later
+// routes elsewhere executes on that device's entry.
 func (m *Harness) HandleSegmentedPacketsOnDevice(
 	worker int,
 	deviceID uint16,
@@ -575,7 +575,6 @@ func (m *Harness) HandleSegmentedPacketsOnDevice(
 			m.deviceCount,
 		)
 	}
-
 	return m.handleSegmentedPackets(worker, deviceID, packets...)
 }
 
@@ -601,7 +600,7 @@ func (m *Harness) handleSegmentedPackets(
 
 	builtPackets := make([]*dataplane.Packet, 0, len(packets))
 	for idx := range packets {
-		pkt, err := dataplane.NewPacketFromSegments(packets[idx], deviceID)
+		pkt, err := dataplane.NewPacketFromSegments(packets[idx])
 		if err != nil {
 			return nil, fmt.Errorf("failed to build segmented packet at index %d: %w", idx, err)
 		}
@@ -613,10 +612,21 @@ func (m *Harness) handleSegmentedPackets(
 
 	pinner.Pin(m)
 
+	devices := make([]uint16, len(packets))
+	for idx := range devices {
+		devices[idx] = deviceID
+	}
+	devicesPtr := (*C.uint16_t)(nil)
+	if len(devices) > 0 {
+		devicesPtr = (*C.uint16_t)(&devices[0])
+		pinner.Pin(&devices[0])
+	}
+
 	var result C.struct_dataplane_ut_round_result
 	C.dataplane_ut_run(
 		m.ptr,
 		C.size_t(worker),
+		devicesPtr,
 		(*C.struct_packet_list)(unsafe.Pointer(packetList)),
 		&result,
 	)
@@ -650,6 +660,7 @@ func (m *Harness) handleSegmentedPackets(
 // then runs one pipeline round on the given worker index.
 func (m *Harness) handlePackets(
 	worker int,
+	deviceID uint16,
 	hashes []uint32,
 	packets ...gopacket.Packet,
 ) (*Result, error) {
@@ -670,8 +681,7 @@ func (m *Harness) handlePackets(
 	data := make([]dataplane.PacketData, 0, len(payloads))
 	for idx := range payloads {
 		data = append(data, dataplane.PacketData{
-			Payload:  payloads[idx],
-			DeviceId: 0,
+			Payload: payloads[idx],
 		})
 	}
 
@@ -691,10 +701,21 @@ func (m *Harness) handlePackets(
 
 	pinner.Pin(m)
 
+	devices := make([]uint16, len(packets))
+	for idx := range devices {
+		devices[idx] = deviceID
+	}
+	devicesPtr := (*C.uint16_t)(nil)
+	if len(devices) > 0 {
+		devicesPtr = (*C.uint16_t)(&devices[0])
+		pinner.Pin(&devices[0])
+	}
+
 	var result C.struct_dataplane_ut_round_result
 	C.dataplane_ut_run(
 		m.ptr,
 		C.size_t(worker),
+		devicesPtr,
 		(*C.struct_packet_list)(unsafe.Pointer(packetList)),
 		&result,
 	)
@@ -796,11 +817,7 @@ func (m *Harness) Bench(
 	payloads := xpacket.PacketsGoPayload(packets...)
 	data := make([]dataplane.PacketData, 0, len(payloads))
 	for idx := range payloads {
-		packetData := dataplane.PacketData{Payload: payloads[idx]}
-		if idx < len(opts.DeviceIDs) {
-			packetData.DeviceId = opts.DeviceIDs[idx]
-		}
-		data = append(data, packetData)
+		data = append(data, dataplane.PacketData{Payload: payloads[idx]})
 	}
 
 	packetList, err := dataplane.NewPacketListFromData(&pinner, data...)
@@ -822,10 +839,19 @@ func (m *Harness) Bench(
 		reset = C.int(1)
 	}
 
+	devices := make([]uint16, len(packets))
+	copy(devices, opts.DeviceIDs)
+
+	var devicesPtr *C.uint16_t
+	if len(devices) > 0 {
+		devicesPtr = (*C.uint16_t)(&devices[0])
+	}
+
 	b.ResetTimer()
 	rc := C.dataplane_ut_run_rounds(
 		m.ptr,
 		C.size_t(0),
+		devicesPtr,
 		(*C.struct_packet_list)(unsafe.Pointer(packetList)),
 		C.uint64_t(b.N),
 		reset,

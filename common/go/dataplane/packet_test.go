@@ -50,8 +50,7 @@ func TestPacket(t *testing.T) {
 	pinner.Pin(&gopacketData[0])
 
 	data := PacketData{
-		Payload:  gopacketData,
-		DeviceId: 1,
+		Payload: gopacketData,
 	}
 	packet, err := NewPacketFromData(data)
 	require.NoError(t, err, "failed to create new packet from data")
@@ -111,8 +110,7 @@ func genPackets(t *testing.T, pinner *runtime.Pinner, count uint64) []*Packet {
 		pinner.Pin(&data[0])
 
 		packet, err := NewPacketFromData(PacketData{
-			Payload:  data,
-			DeviceId: uint16(idx % 1000),
+			Payload: data,
 		})
 
 		require.NoError(t, err)
@@ -250,7 +248,7 @@ func TestPacket_NonInitialFragmentSegmented(t *testing.T) {
 	require.Equal(t, 70, len(frame))
 
 	packet, err := NewPacketFromSegments(
-		[][]byte{frame[:64], frame[64:]}, 0,
+		[][]byte{frame[:64], frame[64:]},
 	)
 	require.NoError(t, err, "the segmented fragment must parse")
 	t.Cleanup(packet.Free)

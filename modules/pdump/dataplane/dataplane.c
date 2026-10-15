@@ -105,6 +105,7 @@ process_queue(
 	struct ring_worker *ring,
 	uint8_t *ring_data,
 	const struct dp_worker *dp_worker,
+	uint16_t device_id,
 	uint32_t snaplen,
 	enum pdump_mode queue
 ) {
@@ -138,7 +139,7 @@ process_queue(
 			// old readers; new captures carry no receive
 			// device, so the slot ships zeroed.
 			.rx_device_id = 0,
-			.device_id = pkt->device_id,
+			.device_id = device_id,
 			.queue = (uint8_t)queue,
 		};
 
@@ -168,6 +169,7 @@ pdump_handle_packets(
 	// committed. A context with no resolved ring captures nothing.
 	const struct pdump_prepared *prepared =
 		module_ectx->abs_module_prepared;
+	uint16_t device_id = module_ectx_global_device_id(module_ectx);
 	struct ring_worker *ring = prepared->ring;
 	if (likely(ring != NULL)) {
 		uint8_t *ring_data = prepared->ring_data;
@@ -182,6 +184,7 @@ pdump_handle_packets(
 				ring,
 				ring_data,
 				dp_worker,
+				device_id,
 				config->snaplen,
 				PDUMP_DROPS
 			);
@@ -196,6 +199,7 @@ pdump_handle_packets(
 				ring,
 				ring_data,
 				dp_worker,
+				device_id,
 				config->snaplen,
 				PDUMP_INPUT
 			);

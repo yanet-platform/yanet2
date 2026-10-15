@@ -212,8 +212,7 @@ int
 fwstate_test_stash_push(
 	struct cp_module *cp_module,
 	struct dp_worker *dp_worker,
-	const struct fw_state_sync_frame *frame,
-	uint16_t device_id
+	const struct fw_state_sync_frame *frame
 ) {
 	bool is_ipv6 = frame->addr_type == FW_STATE_ADDR_TYPE_IP6;
 	struct cp_object *cp_object = fwstate_test_object(cp_module, is_ipv6);
@@ -240,7 +239,6 @@ fwstate_test_stash_push(
 		return -1;
 	}
 	memcpy(&record->frame, frame, sizeof(record->frame));
-	record->device_id = device_id;
 	record->status = FWSTATE_SYNC_RECORD_PENDING;
 	fwstate_stash_slot_commit(slot);
 	return 0;

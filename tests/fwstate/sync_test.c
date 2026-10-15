@@ -144,9 +144,7 @@ craft_single_sync_packet(
 		return -1;
 	}
 	const struct fw_state_sync_frame *frames[] = {&record->frame};
-	int written = fwstate_build_sync_packet(
-		frames, 1, record->device_id, sync_pkt
-	);
+	int written = fwstate_build_sync_packet(frames, 1, sync_pkt);
 	return written == 1 ? 0 : -1;
 }
 
@@ -157,7 +155,6 @@ test_sync_packet_destination(void) {
 		&src_pkt, IPPROTO_UDP, TEST_SRC_PORT, TEST_DST_PORT
 	);
 	assert(rc == 0);
-	src_pkt.device_id = 9;
 
 	struct rte_mbuf *sync_mbuf = rte_pktmbuf_alloc(test_pool);
 	assert(sync_mbuf != NULL);
@@ -215,7 +212,6 @@ test_sync_packet_destination(void) {
 	assert(udp_hdr->dgram_len == rte_cpu_to_be_16(payload_len));
 	assert((sync_pkt.flags & (1U << PACKET_FLAG_FWSTATE_SYNC_INTERNAL)) == 0
 	);
-	assert(sync_pkt.device_id == src_pkt.device_id);
 	assert(sync_pkt.network_header.offset == ipv6_offset);
 	assert(sync_pkt.transport_header.offset == udp_offset);
 	assert(sync_pkt.data_len == udp_offset + payload_len);
@@ -445,7 +441,7 @@ test_build_packs_frames(void) {
 	assert(sync_mbuf != NULL);
 	struct packet sync_pkt = {.mbuf = sync_mbuf};
 
-	int written = fwstate_build_sync_packet(frames, 3, 5, &sync_pkt);
+	int written = fwstate_build_sync_packet(frames, 3, &sync_pkt);
 	assert(written == 3);
 
 	const uint16_t ipv6_offset =
@@ -464,7 +460,6 @@ test_build_packs_frames(void) {
 	assert(udp_hdr->dgram_len ==
 	       rte_cpu_to_be_16(sizeof(struct rte_udp_hdr) + payload_len));
 	assert(sync_pkt.data_len == payload_offset + payload_len);
-	assert(sync_pkt.device_id == 5);
 
 	for (size_t idx = 0; idx < 3; ++idx) {
 		const struct fw_state_sync_frame *packed =
@@ -510,7 +505,7 @@ test_build_zeroes_unset_header_bytes(void) {
 	struct packet sync_pkt = {.mbuf = sync_mbuf};
 
 	const struct fw_state_sync_frame *frames[] = {&record.frame};
-	int written = fwstate_build_sync_packet(frames, 1, 0, &sync_pkt);
+	int written = fwstate_build_sync_packet(frames, 1, &sync_pkt);
 	assert(written == 1);
 
 	const struct rte_ether_hdr *ether_hdr =
@@ -564,7 +559,7 @@ test_build_clamps_to_tailroom(void) {
 		frames[idx] = &record.frame;
 	}
 
-	int written = fwstate_build_sync_packet(frames, count, 0, &sync_pkt);
+	int written = fwstate_build_sync_packet(frames, count, &sync_pkt);
 	assert(written == (int)fit &&
 	       "the builder must stop at the frames the tailroom holds");
 	assert(sync_pkt.data_len ==

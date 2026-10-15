@@ -51,17 +51,6 @@ struct packet {
 
 	uint32_t hash;
 
-	// The device on whose pipeline the packet is executing, as a
-	// registry device index.
-	//
-	// The receive stamp and the routing helpers set it as the packet
-	// enters each device entry, so it stays current through the walk.
-	// A module that emits a packet of its own names the egress it
-	// intends; that value stands until a routing module overrides it,
-	// and the output-entry terminal treats it as the packet's egress
-	// when nothing did.
-	uint16_t device_id;
-
 	uint16_t flags;
 	uint16_t vlan;
 

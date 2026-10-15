@@ -127,6 +127,7 @@ module_ectx_create(
 	}
 
 	memset(module_ectx, 0, ectx_size);
+	module_ectx->registry_device_id = device_ectx->device_id;
 	SET_OFFSET_OF(&module_ectx->cp_module, cp_module);
 
 	SET_OFFSET_OF(&module_ectx->config_gen_ectx, config_gen_ectx);
@@ -1293,6 +1294,7 @@ device_ectx_create(
 	struct cp_device *cp_device,
 	struct config_gen_ectx *config_gen_ectx,
 	struct cp_config_gen *old_config_gen,
+	uint64_t device_idx,
 	uint64_t worker_idx,
 	yanet_error **err
 ) {
@@ -1313,6 +1315,10 @@ device_ectx_create(
 	}
 
 	memset(device_ectx, 0, ectx_size);
+	// The ids land before any nested context is created: the module
+	// contexts stamp their registry device from here, and the entries
+	// need theirs before their own pipelines are built.
+	device_ectx->device_id = (uint16_t)device_idx;
 	SET_OFFSET_OF(&device_ectx->cp_device, cp_device);
 
 	struct counter_storage *old_counter_storage = NULL;
@@ -2144,6 +2150,7 @@ config_gen_ectx_create(
 			cp_device,
 			config_gen_ectx,
 			old_config_gen,
+			device_idx,
 			worker_idx,
 			err
 		);
@@ -2151,10 +2158,8 @@ config_gen_ectx_create(
 			goto error;
 		}
 		SET_OFFSET_OF(device_ptrs + device_idx, device_ectx);
-		device_ectx->device_id = (uint16_t)device_idx;
 
-		// Both entries name the same device, the one at this table
-		// index; routing into them stamps the index onto packets.
+		// Both entries name this device, the one at this table index.
 		ADDR_OF(&device_ectx->input_pipelines)->device_id =
 			(uint16_t)device_idx;
 		ADDR_OF(&device_ectx->output_pipelines)->device_id =

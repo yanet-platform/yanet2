@@ -285,13 +285,14 @@ test_backing_resolves_crossed_registration_order(void) {
 	return TEST_SUCCESS;
 }
 
-// Verifies that the output-entry terminal drops port-less destinations
-// and counts them on the entry's drop counter.
+// Verifies that the output-entry terminal resolves the whole entry's
+// egress from the entry's device.
 //
-// Packets aimed at a real port pass through untouched, including ones
-// that only traverse the entry's own port-less device.
+// A port-backed entry lands every finisher in its port's bucket, and a
+// port-less entry drops its finishers on the front's drop list with the
+// entry's counters accounting them.
 static int
-test_terminal_egress_drops_portless_destinations(void) {
+test_terminal_egress_resolves_per_entry(void) {
 	struct dataplane_test_fixture fixture;
 	TEST_ASSERT_SUCCESS(
 		dataplane_test_fixture_init(&fixture, "backing_test", 2),
@@ -367,60 +368,42 @@ test_terminal_egress_drops_portless_destinations(void) {
 	ectx->abs_egress_backing = ADDR_OF(&ectx->egress_backing);
 	ectx->abs_tx_buckets = ADDR_OF(&ectx->tx_buckets);
 
-	// The terminal runs on the port-less device's output entry.
-	//
-	// The drop counter stands in for the resolved handle the publish
-	// pass would install.
 	struct device_ectx **device_ptrs = ADDR_OF(&ectx->device_ptrs);
-	struct device_entry_ectx *entry =
-		ADDR_OF(&ADDR_OF(device_ptrs + 1)->output_pipelines);
-	uint64_t drop_counter[2] = {0, 0};
-	entry->counter_packet_drop =
-		(struct counter_value_handle *)drop_counter;
-	uint64_t tx_counter[2] = {0, 0};
-	entry->counter_packet_tx = (struct counter_value_handle *)tx_counter;
 
-	struct packet through, dangling, beyond;
-	memset(&through, 0, sizeof(through));
-	memset(&dangling, 0, sizeof(dangling));
-	memset(&beyond, 0, sizeof(beyond));
-	// Registry slots: portB is zero, userX is one, portA is two.
-	through.device_id = 2;
-	through.data_len = 100;
-	dangling.device_id = 1;
-	dangling.data_len = 60;
-	beyond.device_id = 999;
-	beyond.data_len = 40;
+	// A port-backed entry: portA is registry slot two, physical zero.
+	struct device_entry_ectx *backed =
+		ADDR_OF(&ADDR_OF(device_ptrs + 2)->output_pipelines);
+	uint64_t backed_drop[2] = {0, 0};
+	backed->counter_packet_drop =
+		(struct counter_value_handle *)backed_drop;
+	uint64_t backed_tx[2] = {0, 0};
+	backed->counter_packet_tx = (struct counter_value_handle *)backed_tx;
+
+	struct packet first, second;
+	memset(&first, 0, sizeof(first));
+	memset(&second, 0, sizeof(second));
+	first.data_len = 100;
+	second.data_len = 60;
 
 	struct packet_front front;
 	packet_front_init(&front);
-	packet_front_output(&front, &through);
-	packet_front_output(&front, &dangling);
-	packet_front_output(&front, &beyond);
+	packet_front_output(&front, &first);
+	packet_front_output(&front, &second);
+	backed_tx[0] = 2;
+	backed_tx[1] = 160;
 
-	// Stand in for the entry's accounting, which counts the whole
-	// output as handed onward before the terminal filters it.
-	tx_counter[0] = 3;
-	tx_counter[1] = 200;
-
-	worker_entry_terminal_egress(ectx, entry, &front);
+	worker_entry_terminal_egress(ectx, backed, &front);
 
 	TEST_ASSERT_EQUAL(
 		0, packet_front_output_count(&front), "the output list drains"
 	);
 	TEST_ASSERT_EQUAL(
-		2, packet_front_drop_count(&front), "two packets drop"
-	);
-	TEST_ASSERT_EQUAL(
-		0, packet_front_output_bytes(&front), "the output bytes drain"
-	);
-	TEST_ASSERT_EQUAL(
-		100, packet_front_drop_bytes(&front), "dropped bytes add up"
+		0, packet_front_drop_count(&front), "nothing drops on a port"
 	);
 	TEST_ASSERT_EQUAL(
 		packet_list_first(ectx->abs_tx_buckets + 0),
-		&through,
-		"the port-bound packet lands in its port's bucket"
+		&first,
+		"the entry's finishers land in its port's bucket in order"
 	);
 	TEST_ASSERT_EQUAL(
 		packet_list_first(ectx->abs_tx_buckets + 1),
@@ -428,20 +411,48 @@ test_terminal_egress_drops_portless_destinations(void) {
 		"nothing lands in the other port's bucket"
 	);
 	TEST_ASSERT_EQUAL(
-		drop_counter[0], 2, "the entry's drop counter saw both packets"
+		backed_tx[0], 2, "a full port keeps its transmit accounting"
+	);
+	TEST_ASSERT_EQUAL(backed_drop[0], 0, "a full port drops nothing");
+
+	// A port-less entry: userX is registry slot one, no port answers to
+	// its name.
+	struct device_entry_ectx *dangling =
+		ADDR_OF(&ADDR_OF(device_ptrs + 1)->output_pipelines);
+	uint64_t dangling_drop[2] = {0, 0};
+	dangling->counter_packet_drop =
+		(struct counter_value_handle *)dangling_drop;
+	uint64_t dangling_tx[2] = {0, 0};
+	dangling->counter_packet_tx =
+		(struct counter_value_handle *)dangling_tx;
+
+	struct packet third;
+	memset(&third, 0, sizeof(third));
+	third.data_len = 40;
+
+	packet_front_init(&front);
+	packet_front_output(&front, &third);
+	dangling_tx[0] = 1;
+	dangling_tx[1] = 40;
+
+	worker_entry_terminal_egress(ectx, dangling, &front);
+
+	TEST_ASSERT_EQUAL(
+		1, packet_front_drop_count(&front), "the finisher drops"
 	);
 	TEST_ASSERT_EQUAL(
-		drop_counter[1], 100, "the entry's drop counter saw the bytes"
+		40, packet_front_drop_bytes(&front), "dropped bytes add up"
 	);
 	TEST_ASSERT_EQUAL(
-		tx_counter[0],
-		1,
-		"the transmit accounting gave the dropped packets back"
+		dangling_drop[0], 1, "the entry's drop counter saw the packet"
 	);
 	TEST_ASSERT_EQUAL(
-		tx_counter[1],
-		100,
-		"the transmit accounting gave the dropped bytes back"
+		dangling_drop[1], 40, "the entry's drop counter saw the bytes"
+	);
+	TEST_ASSERT_EQUAL(
+		dangling_tx[0],
+		0,
+		"the transmit accounting gave the dropped packet back"
 	);
 
 	dataplane_test_fixture_fini(&fixture);
@@ -454,8 +465,7 @@ main(void) {
 	    TEST_SUCCESS) {
 		return 1;
 	}
-	if (test_terminal_egress_drops_portless_destinations() !=
-	    TEST_SUCCESS) {
+	if (test_terminal_egress_resolves_per_entry() != TEST_SUCCESS) {
 		return 1;
 	}
 	printf("backing tests passed\n");

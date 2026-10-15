@@ -29,7 +29,10 @@
 // an assignment list (device, queue per polled queue), and struct
 // config_gen_ectx replaced the worker's receive device slot with the
 // reverse backing table and its absolute copy.
-#define YANET_MODULE_ABI_VERSION 39
+// 40: struct packet dropped its device field — the executing device is
+// derived from the pipeline context, and struct module_ectx gained the
+// registry device of its placement.
+#define YANET_MODULE_ABI_VERSION 40
 
 // Symbol name a module .so exports carrying its compiled-against
 // YANET_MODULE_ABI_VERSION, as a uint32_t global.

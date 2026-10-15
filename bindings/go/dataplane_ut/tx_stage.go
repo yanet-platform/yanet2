@@ -67,12 +67,9 @@ func (m *TxStageFixture) Free() {
 	runtime.KeepAlive(m)
 }
 
-// Packet takes a packet from the mock pool addressed to a device and carrying
-// a flow hash.
-func (m *TxStageFixture) Packet(txDeviceID uint16, hash uint32) (*TxStagePacket, error) {
-	ptr := C.dataplane_ut_tx_stage_packet(
-		m.ptr, C.uint16_t(txDeviceID), C.uint32_t(hash),
-	)
+// Packet takes a packet from the mock pool carrying a flow hash.
+func (m *TxStageFixture) Packet(hash uint32) (*TxStagePacket, error) {
+	ptr := C.dataplane_ut_tx_stage_packet(m.ptr, C.uint32_t(hash))
 	if ptr == nil {
 		return nil, fmt.Errorf("mock pool exhausted")
 	}
