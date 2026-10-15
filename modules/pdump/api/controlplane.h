@@ -3,6 +3,7 @@
 #include <stdint.h>
 
 #include "lib/errors/errors.h"
+#include "limit.h"
 #include "mode.h"
 #include "record.h"
 
@@ -60,6 +61,9 @@ int
 pdump_module_config_set_mode(struct cp_module *module, enum pdump_mode mode);
 
 // Set the aggregate packet capture rate; zero leaves capture unlimited.
+//
+// Rates above 1,000,000 are rejected with EINVAL before any mutation.
+// Only unpublished configs may be changed; setting a rate starts fresh credit.
 int
 pdump_module_config_set_rate(struct cp_module *module, uint64_t rate_pps);
 

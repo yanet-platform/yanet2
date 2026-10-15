@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { pdumpApi } from '@yanet/core/api/pdump';
+import { pdumpApi, PDUMP_RATE_PPS_MAX } from '@yanet/core/api/pdump';
 import { toaster } from '@yanet/core/utils';
 import { ConfigDialog } from './ConfigDialog';
 
@@ -54,32 +54,49 @@ describe('capture limit editing', () => {
         vi.spyOn(pdumpApi, 'setConfig').mockResolvedValue(undefined);
     });
 
-    it.each([0, 1000, Number.MAX_SAFE_INTEGER])('saves the exact numeric limit %s', async rate => {
+    it.each([0, 1000, 1_000_000])('saves the exact numeric limit %s', async rate => {
         render(<ConfigDialog {...ringProps} open configName="capture" initialConfig={{ filter: 'udp', mode: 1, ring_name: 'A', rate_pps: rate }} onClose={vi.fn()} onSaved={vi.fn()} />);
         fireEvent.click(screen.getByRole('button', { name: 'Save' }));
         await waitFor(() => expect(pdumpApi.setConfig).toHaveBeenCalledWith('capture', expect.objectContaining({ rate_pps: rate })));
     });
 
-    it('preserves a large existing limit when saving another field', async () => {
-        render(<ConfigDialog {...ringProps} open configName="capture" initialConfig={{ filter: 'udp', mode: 1, ring_name: 'A', rate_pps: Number('18446744073709551615') }} onClose={vi.fn()} onSaved={vi.fn()} />);
-        expect(screen.getByPlaceholderText('Keep existing limit')).toHaveValue('');
+    it('omits a blank rate while saving another field', async () => {
+        render(<ConfigDialog {...ringProps} open configName="capture" initialConfig={{ filter: 'udp', mode: 1, ring_name: 'A', rate_pps: 1000 }} onClose={vi.fn()} onSaved={vi.fn()} />);
+        fireEvent.change(screen.getByRole('textbox', { name: 'Capture limit (pps)' }), { target: { value: '' } });
         fireEvent.change(screen.getByPlaceholderText('tcp port 80'), { target: { value: 'tcp' } });
         fireEvent.click(screen.getByRole('button', { name: 'Save' }));
         await waitFor(() => expect(pdumpApi.setConfig).toHaveBeenCalledWith('capture', expect.objectContaining({ filter: 'tcp', rate_pps: undefined })));
     });
 
-    it('allows explicitly disabling a large existing limit', async () => {
-        render(<ConfigDialog {...ringProps} open configName="capture" initialConfig={{ filter: 'udp', mode: 1, ring_name: 'A', rate_pps: Number('18446744073709551615') }} onClose={vi.fn()} onSaved={vi.fn()} />);
-        fireEvent.change(screen.getByPlaceholderText('Keep existing limit'), { target: { value: '0' } });
+    it('allows explicitly disabling an existing limit', async () => {
+        render(<ConfigDialog {...ringProps} open configName="capture" initialConfig={{ filter: 'udp', mode: 1, ring_name: 'A', rate_pps: 1000 }} onClose={vi.fn()} onSaved={vi.fn()} />);
+        fireEvent.change(screen.getByRole('textbox', { name: 'Capture limit (pps)' }), { target: { value: '0' } });
         fireEvent.click(screen.getByRole('button', { name: 'Save' }));
         await waitFor(() => expect(pdumpApi.setConfig).toHaveBeenCalledWith('capture', expect.objectContaining({ rate_pps: 0 })));
     });
 
-    it.each(['9007199254740992', '18446744073709551615', '-1', '1.5', '1e3'])('rejects inexact or invalid input %s before sending', value => {
+    it.each(['1000001', '9007199254740992', '-1', '1.5', '1e3'])('rejects out-of-range or invalid input %s before sending', value => {
         render(<ConfigDialog {...ringProps} open configName="capture" initialConfig={{ filter: 'udp', mode: 1, ring_name: 'A' }} onClose={vi.fn()} onSaved={vi.fn()} />);
-        fireEvent.change(screen.getByPlaceholderText('0'), { target: { value } });
+        fireEvent.change(screen.getByRole('textbox', { name: 'Capture limit (pps)' }), { target: { value } });
         fireEvent.click(screen.getByRole('button', { name: 'Save' }));
         expect(pdumpApi.setConfig).not.toHaveBeenCalled();
         expect(toaster.error).toHaveBeenCalled();
+    });
+
+    it('associates each capture limit with its own label and explanatory help', () => {
+        for (const name of ['first', 'second']) {
+            render(<ConfigDialog {...ringProps} open configName={name} onClose={vi.fn()} onSaved={vi.fn()} />);
+        }
+        const inputs = screen.getAllByRole('textbox', { name: 'Capture limit (pps)' });
+        expect(new Set(inputs.map(input => input.id)).size).toBe(2);
+        const helpIds = inputs.map(input => input.getAttribute('aria-describedby'));
+        expect(new Set(helpIds).size).toBe(2);
+        for (const input of inputs) {
+            expect(input).toHaveAccessibleName('Capture limit (pps)');
+            expect(input).toHaveAccessibleDescription(
+                `Shared best-effort budget across all workers, up to ${PDUMP_RATE_PPS_MAX.toLocaleString()} pps. `
+                + 'Burst: max(32, ceil(rate/1000)). Zero disables the limit; blank preserves it on update.',
+            );
+        }
     });
 });

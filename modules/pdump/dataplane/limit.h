@@ -1,75 +1,32 @@
 #pragma once
 
-#include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
-#include "common/cache.h"
+#include "common/token_bucket.h"
 
-// Capture accounting belongs to the config, not the shared ring object.
-struct pdump_rate_state {
-	uint64_t rate_credit;
-	uint64_t rate_last_time;
-	uint8_t rate_initialized;
-	// Separate worker writes even when the allocation is not cache-aligned.
-	uint8_t padding[2 * YANET_CACHE_LINE_SIZE - 17];
-};
+#define PDUMP_RATE_PPS_MAX 1000000ULL
 
-#define PDUMP_NS_PER_SEC 1000000000ULL
-#define PDUMP_MAX_BURST 32ULL
-
-struct pdump_rate {
-	uint64_t rate_pps;
-	uint64_t threshold;
-	uint64_t cap;
-};
-
-static inline struct pdump_rate
-pdump_rate_init(uint64_t rate_pps, uint64_t worker_count) {
-	struct pdump_rate rate = {.rate_pps = rate_pps};
-	if (rate_pps == 0 || worker_count == 0) {
-		return rate;
-	}
-	rate.threshold = PDUMP_NS_PER_SEC * worker_count;
-	uint64_t burst = PDUMP_MAX_BURST;
-	if (burst > UINT64_MAX / rate.threshold) {
-		burst = UINT64_MAX / rate.threshold;
-	}
-	rate.cap = rate.threshold * burst;
-	return rate;
+static inline size_t
+pdump_rate_bucket_raw_size(void) {
+	return sizeof(struct token_bucket) + _Alignof(struct token_bucket) - 1;
 }
 
-static inline bool
-pdump_rate_allow(
-	struct pdump_rate_state *ring, uint64_t now, const struct pdump_rate *rate
-) {
-	if (rate->rate_pps == 0) {
-		return true;
-	}
-	if (rate->threshold == 0) {
-		return false;
-	}
+static inline struct token_bucket *
+pdump_rate_bucket_align(void *raw) {
+	size_t alignment = _Alignof(struct token_bucket);
+	return (void *)(((uintptr_t)raw + alignment - 1) &
+			~(uintptr_t)(alignment - 1));
+}
 
-	if (!ring->rate_initialized) {
-		ring->rate_last_time = now;
-		ring->rate_credit = rate->threshold;
-		ring->rate_initialized = 1;
+// Round packet cost upward; bounded rates lose less than 0.1% to rounding.
+static inline void
+pdump_rate_init(struct token_bucket *bucket, uint64_t rate_pps, uint64_t now) {
+	assert(rate_pps != 0 && rate_pps <= PDUMP_RATE_PPS_MAX);
+	uint64_t burst = (rate_pps + 999) / 1000;
+	if (burst < 32) {
+		burst = 32;
 	}
-
-	uint64_t elapsed =
-		now > ring->rate_last_time ? now - ring->rate_last_time : 0;
-	ring->rate_last_time = now;
-	if (elapsed != 0) {
-		uint64_t remaining = rate->cap - ring->rate_credit;
-		if (remaining == 0 ||
-		    elapsed > (remaining - 1) / rate->rate_pps) {
-			ring->rate_credit = rate->cap;
-		} else {
-			ring->rate_credit += elapsed * rate->rate_pps;
-		}
-	}
-	if (ring->rate_credit < rate->threshold) {
-		return false;
-	}
-	ring->rate_credit -= rate->threshold;
-	return true;
+	uint64_t cost = (1000000000ULL + rate_pps - 1) / rate_pps;
+	token_bucket_init(bucket, cost, burst, now);
 }

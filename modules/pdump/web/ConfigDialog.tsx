@@ -1,6 +1,6 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useId } from 'react';
 import { Select } from '@gravity-ui/uikit';
-import { pdumpApi, parseModeFlags, modeFlagsToNumber, type PdumpConfig } from '@yanet/core/api/pdump';
+import { pdumpApi, parseModeFlags, modeFlagsToNumber, PDUMP_RATE_PPS_MAX, type PdumpConfig } from '@yanet/core/api/pdump';
 import type { RingInfo } from '@yanet/core/api/ring';
 import { toaster } from '@yanet/core/utils';
 import BpfTokens from './BpfTokens';
@@ -62,7 +62,8 @@ export const ConfigDialog: React.FC<ConfigDialogProps> = ({
     const [loading, setLoading] = useState(false);
     const [recent, setRecent] = useState<string[]>([]);
     const initialRatePps = initialConfig?.rate_pps;
-    const rateExceedsWebRange = !isCreate && initialRatePps !== undefined && !Number.isSafeInteger(initialRatePps);
+    const rateInputId = useId();
+    const rateHelpId = useId();
 
     const ringOptions = useMemo(
         () => buildRingOptions(rings, isCreate, boundRingName),
@@ -87,7 +88,7 @@ export const ConfigDialog: React.FC<ConfigDialogProps> = ({
                 setSnaplen(initialConfig.snaplen?.toString() ?? '');
                 setBoundRingName(initialConfig.ring_name ?? '');
                 setSelectedRing(initialConfig.ring_name ?? '');
-                setRatePps(initialRatePps !== undefined && Number.isSafeInteger(initialRatePps) ? initialRatePps.toString() : '');
+                setRatePps(initialRatePps?.toString() ?? '');
             } else {
                 setConfigName(initialConfigName ?? '');
                 setFilter('');
@@ -125,8 +126,8 @@ export const ConfigDialog: React.FC<ConfigDialogProps> = ({
 
         setLoading(true);
         try {
-            if (ratePps !== '' && (!/^(0|[1-9]\d*)$/.test(ratePps) || !Number.isSafeInteger(Number(ratePps)))) {
-                toaster.error('pdump-config-error', `Rate must be an integer between 0 and ${Number.MAX_SAFE_INTEGER}`, new Error('Invalid rate'));
+            if (ratePps !== '' && (!/^(0|[1-9]\d*)$/.test(ratePps) || Number(ratePps) > PDUMP_RATE_PPS_MAX)) {
+                toaster.error('pdump-config-error', `Rate must be an integer between 0 and ${PDUMP_RATE_PPS_MAX}`, new Error('Invalid rate'));
                 return;
             }
 
@@ -298,19 +299,20 @@ export const ConfigDialog: React.FC<ConfigDialogProps> = ({
                 </div>
             </div>
             <div className="pdump-field">
-                <label className="pdump-field__label">Capture limit (pps)</label>
+                <label className="pdump-field__label" htmlFor={rateInputId}>Capture limit (pps)</label>
                 <input
+                    id={rateInputId}
+                    aria-describedby={rateHelpId}
                     className="pdump-input pdump-input--mono"
                     type="text"
                     inputMode="numeric"
                     value={ratePps}
-                    placeholder={rateExceedsWebRange ? 'Keep existing limit' : '0'}
+                    placeholder="0"
                     onChange={e => setRatePps(e.target.value)}
                 />
-                <span className="pdump-field__hint">
-                    Total configured rate, divided equally between workers. Zero disables the limit.
-                    {' '}Web input supports up to {Number.MAX_SAFE_INTEGER} pps; use CLI/API for larger values.
-                    {rateExceedsWebRange && ' The existing limit exceeds this range. Leave blank to preserve it.'}
+                <span id={rateHelpId} className="pdump-field__hint">
+                    Shared best-effort budget across all workers, up to {PDUMP_RATE_PPS_MAX.toLocaleString()} pps.
+                    {' '}Burst: max(32, ceil(rate/1000)). Zero disables the limit; blank preserves it on update.
                 </span>
             </div>
         </PdumpModal>

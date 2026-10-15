@@ -27,6 +27,12 @@ func Test_MaxMode_MatchesC(t *testing.T) {
 	require.Equal(t, uint32(pdumppb.MaxMode), maxMode)
 }
 
+// Test_MaxRatePPS_MatchesC verifies that request validation and the C setter
+// reject rates above the same maximum.
+func Test_MaxRatePPS_MatchesC(t *testing.T) {
+	require.Equal(t, uint64(pdumppb.MaxRatePPS), maxRatePPS)
+}
+
 // stubSourceCapacity comfortably fits every test's small, non-wrapping
 // pushes into a stubSource.
 const stubSourceCapacity = 4096

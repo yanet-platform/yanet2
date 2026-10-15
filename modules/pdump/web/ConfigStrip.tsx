@@ -70,7 +70,7 @@ const ConfigStrip: React.FC<ConfigStripProps> = ({
                     <span className="pdump-strip__param">
                         <span className="pdump-strip__param-label">Limit</span>
                         <span className="pdump-strip__param-value">
-                            {Number.isSafeInteger(ratePps) ? ratePps : `> ${Number.MAX_SAFE_INTEGER}`} pps
+                            {ratePps} pps
                         </span>
                     </span>
                 )}

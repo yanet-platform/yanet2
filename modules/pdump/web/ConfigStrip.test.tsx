@@ -13,9 +13,8 @@ describe('capture limit display', () => {
         expect(screen.queryByText('Limit') !== null).toBe(visible);
     });
 
-    it('marks large limits without displaying a rounded value as exact', () => {
-        render(<ConfigStrip config={{ name: 'capture', config: { rate_pps: Number('18446744073709551615') } }} isCapturing={false} isCaptureActive={false} packetCount={0} ppsHistory={[]} onStartCapture={vi.fn()} onStopCapture={vi.fn()} onEdit={vi.fn()} onDelete={vi.fn()} />);
-        expect(screen.getByText(`> ${Number.MAX_SAFE_INTEGER} pps`)).toBeInTheDocument();
-        expect(screen.queryByText('18446744073709552000 pps')).not.toBeInTheDocument();
+    it('displays the maximum supported rate exactly', () => {
+        render(<ConfigStrip config={{ name: 'capture', config: { rate_pps: 1_000_000 } }} isCapturing={false} isCaptureActive={false} packetCount={0} ppsHistory={[]} onStartCapture={vi.fn()} onStopCapture={vi.fn()} onEdit={vi.fn()} onDelete={vi.fn()} />);
+        expect(screen.getByText('1000000 pps')).toBeInTheDocument();
     });
 });

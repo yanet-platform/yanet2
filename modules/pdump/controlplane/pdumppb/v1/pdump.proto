@@ -84,10 +84,14 @@ message Config {
   // currently bound ring; explicitly empty is invalid. Deleting a config
   // never deletes its ring.
   optional string ring_name = 5;
-  // Aggregate capture rate in packets per second; zero disables limiting.
+  // Shared best-effort capture rate, 0..1,000,000 pps; zero is unlimited.
   //
-  // Each worker receives an equal share; unused shares are not transferred.
-  // Bursts of up to 32 records per worker are permitted.
+  // All workers share one continuously replenished budget per config, with
+  // burst max(32, ceil(rate/1000)). Unused credit never exceeds that burst.
+  // Absent on an update preserves the rate; explicit zero disables it.
+  // Every new config, including a filter-only update, starts fresh credit.
+  // Contention may undercapture; worker clock offsets affect the effective
+  // rate, so this is not a strict wall-clock guarantee or a fairness policy.
   optional uint64 rate_pps = 6;
 }
 

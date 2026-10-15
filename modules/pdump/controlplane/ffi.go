@@ -32,6 +32,7 @@ var (
 
 	defaultMode uint32 = C.PDUMP_INPUT
 	maxMode     uint32 = C.PDUMP_ALL
+	maxRatePPS  uint64 = C.PDUMP_RATE_PPS_MAX
 )
 
 // MinRingCapacity is the smallest ring capacity a pdump config may capture

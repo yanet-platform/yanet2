@@ -22,8 +22,10 @@ struct pdump_module_config {
 	enum pdump_mode mode;
 	uint32_t snaplen;
 	uint64_t rate_pps;
-	uint64_t worker_count;
-	struct pdump_rate_state *rate_states;
+	struct token_bucket *rate_bucket;
+	void *rate_bucket_raw;
+	// Counts refused matches and packets skipped without filter evaluation.
+	uint64_t rate_skipped_counter_id;
 
 	// Object link index of the ring this config captures into.
 	//

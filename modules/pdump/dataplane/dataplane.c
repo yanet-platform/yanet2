@@ -32,8 +32,8 @@ struct pdump_prepared {
 	struct ring_worker *ring;
 	uint8_t *ring_data;
 	struct rte_bpf bpf;
-	struct pdump_rate rate;
-	struct pdump_rate_state *rate_state;
+	struct token_bucket *rate_bucket;
+	uint64_t *rate_skipped;
 };
 
 // Worker index of an execution context whose worker is not known.
@@ -104,6 +104,7 @@ pdump_ring_write_msg(
 static inline void
 process_queue(
 	struct packet *first_pkt,
+	uint64_t count,
 	const struct pdump_prepared *prepared,
 	const struct dp_worker *dp_worker,
 	uint32_t snaplen,
@@ -114,17 +115,30 @@ process_queue(
 	// portable nanoseconds: mlx5 hands over a raw device counter unless
 	// the NIC runs in real-time mode, so they cannot share this field.
 	uint64_t timestamp = dp_worker->current_time;
+	if (prepared->rate_bucket != NULL &&
+	    token_bucket_full(prepared->rate_bucket, timestamp)) {
+		*prepared->rate_skipped += count;
+		return;
+	}
+	uint64_t remaining = count;
 
 	for (struct packet *pkt = first_pkt; pkt != NULL; pkt = pkt->next) {
+		--remaining;
 		struct rte_mbuf *mbuf = packet_to_mbuf(pkt);
 
 		int rc = rte_bpf_exec(&prepared->bpf, (void *)mbuf);
 		if (!rc) {
 			continue;
 		}
-		if (!pdump_rate_allow(
-			    prepared->rate_state, timestamp, &prepared->rate
-		    )) {
+		if (prepared->rate_bucket != NULL &&
+		    !token_bucket_take(prepared->rate_bucket, timestamp)) {
+			++*prepared->rate_skipped;
+			if (token_bucket_full(
+				    prepared->rate_bucket, timestamp
+			    )) {
+				*prepared->rate_skipped += remaining;
+				break;
+			}
 			continue;
 		}
 
@@ -178,6 +192,7 @@ pdump_handle_packets(
 		    packet_front->drop.first != NULL) {
 			process_queue(
 				packet_front->drop.first,
+				packet_front_drop_count(packet_front),
 				prepared,
 				dp_worker,
 				config->snaplen,
@@ -190,6 +205,7 @@ pdump_handle_packets(
 		    packet_front->input.first != NULL) {
 			process_queue(
 				packet_front->input.first,
+				packet_front_input_count(packet_front),
 				prepared,
 				dp_worker,
 				config->snaplen,
@@ -249,15 +265,16 @@ pdump_resolve_prepared(
 	if (ring == NULL) {
 		return result;
 	}
-	result.rate = pdump_rate_init(config->rate_pps, config->worker_count);
 	if (config->rate_pps != 0) {
-		struct pdump_rate_state *rate_states =
-			ADDR_OF(&config->rate_states);
-		if (rate_states == NULL || worker_idx >= config->worker_count) {
+		result.rate_bucket = ADDR_OF(&config->rate_bucket);
+		if (result.rate_bucket == NULL) {
 			return result;
 		}
-		result.rate_state = rate_states + worker_idx;
 	}
+	result.rate_skipped = counter_get_address(
+		config->rate_skipped_counter_id,
+		module_ectx->abs_counter_storage
+	);
 
 	result.bpf = *bpf;
 	result.bpf.prm.ins = ADDR_OF(&bpf->prm.ins);
