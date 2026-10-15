@@ -3,9 +3,11 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "lib/controlplane/agent/agent.h"
 #include "lib/controlplane/config/cp_counter.h"
 #include "lib/controlplane/config/zone.h"
 #include "lib/dataplane/pipeline/econtext.h"
+#include "modules/l3b/dataplane/config.h"
 #include "objects/l3b/api/l3b_session_table_object.h"
 #include "objects/l3b/api/l3b_virtual_service_object.h"
 
@@ -279,5 +281,127 @@ l3b_test_counter_state_read(
 	    )) {
 		return -1;
 	}
+	return 0;
+}
+
+static _Thread_local struct {
+	struct cp_config *configuration;
+	struct l3b_test_lookup_witness witness;
+} lookup;
+
+extern struct cp_object *
+__real_cp_object_registry_lookup(struct cp_object_registry *, const char *, const char *);
+
+struct cp_object *
+__wrap_cp_object_registry_lookup(
+	struct cp_object_registry *registry, const char *type, const char *name
+) {
+	if (lookup.configuration == NULL) {
+		return __real_cp_object_registry_lookup(registry, type, name);
+	}
+	uint64_t idx = lookup.witness.object_lookups++;
+	if (idx >= L3B_TEST_COUNTER_CAPACITY) {
+		++lookup.witness.provenance_errors;
+		return __real_cp_object_registry_lookup(registry, type, name);
+	}
+	struct l3b_test_service_lookup *observed = &lookup.witness.lookups[idx];
+	observed->counter_id = COUNTER_INVALID;
+	bool protected = cp_config_locked_by_thread == lookup.configuration;
+	if (!protected) {
+		++lookup.witness.unprotected_objects;
+	} else {
+		struct cp_config_gen *generation =
+			ADDR_OF(&lookup.configuration->cp_config_gen);
+		if (generation == NULL ||
+		    registry != &generation->object_registry) {
+			++lookup.witness.provenance_errors;
+			protected = false;
+		} else {
+			observed->generation = (uintptr_t)generation;
+			observed->generation_number = generation->gen;
+		}
+	}
+	struct cp_object *object =
+		__real_cp_object_registry_lookup(registry, type, name);
+	observed->object = (uintptr_t)object;
+	if (protected && object != NULL) {
+		observed->counter_registry =
+			(uintptr_t)&object->link_counter_registry;
+	}
+	return object;
+}
+
+extern uint64_t
+__real_counter_registry_lookup_index(struct counter_registry *, const char *);
+
+uint64_t
+__wrap_counter_registry_lookup_index(
+	struct counter_registry *registry, const char *name
+) {
+	if (lookup.configuration == NULL) {
+		return __real_counter_registry_lookup_index(registry, name);
+	}
+	++lookup.witness.counter_lookups;
+	struct l3b_test_service_lookup *observed = NULL;
+	uint64_t count = lookup.witness.object_lookups;
+	if (count == 0 || count > L3B_TEST_COUNTER_CAPACITY) {
+		++lookup.witness.provenance_errors;
+	} else {
+		observed = &lookup.witness.lookups[count - 1];
+	}
+	if (cp_config_locked_by_thread != lookup.configuration) {
+		++lookup.witness.unprotected_counters;
+	} else if (observed != NULL) {
+		struct cp_config_gen *generation =
+			ADDR_OF(&lookup.configuration->cp_config_gen);
+		if (generation == NULL ||
+		    (uintptr_t)generation != observed->generation ||
+		    generation->gen != observed->generation_number ||
+		    (uintptr_t)registry != observed->counter_registry ||
+		    strcmp(name, L3B_LINK_COUNTER_PACKETS) != 0) {
+			++lookup.witness.provenance_errors;
+		}
+	}
+	uint64_t counter_id =
+		__real_counter_registry_lookup_index(registry, name);
+	if (observed != NULL) {
+		observed->counter_id = counter_id;
+	}
+	return counter_id;
+}
+
+int
+l3b_test_lookup_begin(struct agent *agent) {
+	if (lookup.configuration != NULL || agent == NULL) {
+		return -1;
+	}
+	memset(&lookup, 0, sizeof(lookup));
+	lookup.configuration = ADDR_OF(&agent->cp_config);
+	return lookup.configuration == NULL ? -1 : 0;
+}
+
+struct l3b_test_lookup_witness
+l3b_test_lookup_end(void) {
+	struct l3b_test_lookup_witness observed = lookup.witness;
+	memset(&lookup, 0, sizeof(lookup));
+	return observed;
+}
+
+int
+l3b_test_module_counter_ids(
+	struct cp_module *module, uint64_t *ids, uint32_t count
+) {
+	struct module_config *config = (struct module_config *)module;
+	if (config == NULL || config->destination_filter_rule_count != count) {
+		return -1;
+	}
+	if (count == 0) {
+		return 0;
+	}
+	uint64_t *stored = ADDR_OF(&config->rule_link_counter_ids);
+	if (stored == NULL || ids == NULL) {
+		return -1;
+	}
+	memcpy(ids, stored, count * sizeof(*ids));
 	return 0;
 }
