@@ -3,13 +3,14 @@
 Manual steps required when upgrading an existing deployment. The packaging
 does not perform these automatically.
 
-## Pdump capture rate is shared across workers
+## Pdump adds an optional capture rate limit
 
-Pdump now uses one best-effort rate/burst budget per config rather than
-dividing it between workers. The accepted range is 0..1,000,000 pps,
-inclusive; zero is unlimited, and an omitted update preserves the rate.
-Automation sending larger values must be changed: they are now rejected.
-Burst is automatic and global, not per worker. See
+Pdump now supports an optional `rate_pps` setting with one best-effort
+rate/burst budget per config shared across all workers. The accepted range
+is 0..1,000,000 pps, inclusive. New configs default to zero (unlimited),
+so existing configurations do not need a rate setting. Omitting the rate
+on an update preserves its current value. Burst is automatic and global,
+not per worker. See
 [shared capture limit](ring.md#shared-capture-limit) for replacement,
 recommit and `pdump_rate_skipped` counter semantics.
 
