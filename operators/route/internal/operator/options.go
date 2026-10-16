@@ -183,10 +183,11 @@ func newOperatorServiceOptions() *operatorServiceOptions {
 type OperatorServiceOption func(*operatorServiceOptions)
 
 type gatewayActuatorOptions struct {
-	Function   FunctionConfig
-	Devices    []string
-	OnFIBBuilt func(module string, stats FIBBuildStats)
-	Log        *zap.Logger
+	Function     FunctionConfig
+	Devices      []string
+	StaticRoutes []StaticRouteConfig
+	OnFIBBuilt   func(module string, stats FIBBuildStats)
+	Log          *zap.Logger
 }
 
 func newGatewayActuatorOptions() *gatewayActuatorOptions {
@@ -222,6 +223,14 @@ func WithGatewayActuatorFunction(fn FunctionConfig) GatewayActuatorOption {
 func WithGatewayActuatorDevices(devices []string) GatewayActuatorOption {
 	return func(o *gatewayActuatorOptions) {
 		o.Devices = devices
+	}
+}
+
+// WithGatewayActuatorStaticRoutes requires one configured static alternative
+// per exact prefix to resolve locally before an apply can succeed.
+func WithGatewayActuatorStaticRoutes(routes []StaticRouteConfig) GatewayActuatorOption {
+	return func(o *gatewayActuatorOptions) {
+		o.StaticRoutes = routes
 	}
 }
 
