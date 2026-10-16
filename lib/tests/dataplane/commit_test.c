@@ -1,12 +1,13 @@
 // Generation commit pass: module and device commit handlers run
-// exactly once per published generation as a preparation hook.
+// exactly once per config item as a preparation hook.
 //
-// Pins the once-per-generation semantics (a repeated pass on an
-// already committed generation must not re-run handlers), the silent
-// skip of handlers never registered and of out-of-range slot indices,
-// that the harness deliverance path runs the handlers during its
-// in-place delivery, and that the delivery wait completes once a real
-// worker holds the delivered context.
+// Pins the once-per-item semantics (a repeated pass on an already
+// committed generation or an item carried over unchanged must not
+// re-run handlers, a replaced or newly inserted item must), the
+// silent skip of handlers never registered and of out-of-range slot
+// indices, that the harness deliverance path runs the handlers during
+// its in-place delivery, and that the delivery wait completes once a
+// real worker holds the delivered context.
 
 #include <pthread.h>
 #include <stdint.h>
@@ -179,8 +180,8 @@ commit_test_wire_worker(struct dp_config *cfg, struct dp_worker *worker) {
 }
 
 // Verifies that the commit pass runs each module and device handler
-// exactly once per generation: a second pass on the same generation
-// does not re-invoke, a bumped generation does.
+// exactly once per item: neither a second pass on the same generation
+// nor a successor generation carrying the same items re-invokes it.
 static int
 test_commit_runs_once_per_gen(void) {
 	struct dataplane_test_fixture fixture;
@@ -236,17 +237,164 @@ test_commit_runs_once_per_gen(void) {
 		"a committed generation must not re-run the device handler"
 	);
 
-	gen.gen = 8;
-	dp_config_commit_gen(cfg, &gen);
+	struct cp_config_gen next_gen;
+	TEST_ASSERT_SUCCESS(
+		commit_test_gen_init(cfg, &next_gen, 8), "gen init failed"
+	);
+	TEST_ASSERT_SUCCESS(
+		registry_insert(
+			&next_gen.module_registry.registry,
+			&cp_module.config_item
+		),
+		"carry module failed"
+	);
+	TEST_ASSERT_SUCCESS(
+		registry_insert(
+			&next_gen.device_registry.registry,
+			&cp_device.config_item
+		),
+		"carry device failed"
+	);
+	dp_config_commit_gen(cfg, &next_gen);
+	TEST_ASSERT_EQUAL(
+		commit_test_module_runs,
+		1,
+		"an item carried over unchanged must not re-run the module "
+		"handler"
+	);
+	TEST_ASSERT_EQUAL(
+		commit_test_device_runs,
+		1,
+		"an item carried over unchanged must not re-run the device "
+		"handler"
+	);
+
+	dataplane_test_fixture_fini(&fixture);
+	return TEST_SUCCESS;
+}
+
+// Verifies that an item replaced by a new one at the same index and an
+// item inserted into a previously empty slot run their handlers, while
+// the item carried over beside them does not.
+static int
+test_commit_runs_for_new_items_only(void) {
+	struct dataplane_test_fixture fixture;
+	TEST_ASSERT_SUCCESS(
+		dataplane_test_fixture_init(&fixture, "commit_test", 1),
+		"fixture init failed"
+	);
+	struct dp_config *cfg = &fixture.dp_config;
+
+	struct cp_config_gen first_gen;
+	struct cp_module first_module;
+	struct cp_device first_device;
+	TEST_ASSERT_SUCCESS(
+		commit_test_gen_init(cfg, &first_gen, 1), "gen init failed"
+	);
+	TEST_ASSERT_SUCCESS(
+		commit_test_add_module(
+			cfg, &first_gen, &first_module, commit_test_module_count
+		),
+		"add module failed"
+	);
+	TEST_ASSERT_SUCCESS(
+		commit_test_add_device(
+			cfg, &first_gen, &first_device, commit_test_device_count
+		),
+		"add device failed"
+	);
+
+	commit_test_module_runs = 0;
+	commit_test_device_runs = 0;
+
+	dp_config_commit_gen(cfg, &first_gen);
+	TEST_ASSERT_EQUAL(commit_test_module_runs, 1, "first module must run");
+	TEST_ASSERT_EQUAL(commit_test_device_runs, 1, "first device must run");
+
+	struct cp_config_gen replaced_gen;
+	struct cp_module replaced_module;
+	struct cp_device replaced_device;
+	TEST_ASSERT_SUCCESS(
+		commit_test_gen_init(cfg, &replaced_gen, 2), "gen init failed"
+	);
+	TEST_ASSERT_SUCCESS(
+		commit_test_add_module(
+			cfg,
+			&replaced_gen,
+			&replaced_module,
+			commit_test_module_count
+		),
+		"add module failed"
+	);
+	TEST_ASSERT_SUCCESS(
+		commit_test_add_device(
+			cfg,
+			&replaced_gen,
+			&replaced_device,
+			commit_test_device_count
+		),
+		"add device failed"
+	);
+	dp_config_commit_gen(cfg, &replaced_gen);
 	TEST_ASSERT_EQUAL(
 		commit_test_module_runs,
 		2,
-		"a bumped generation must re-run the module handler"
+		"a module replaced at the same index must run its handler"
 	);
 	TEST_ASSERT_EQUAL(
 		commit_test_device_runs,
 		2,
-		"a bumped generation must re-run the device handler"
+		"a device replaced at the same index must run its handler"
+	);
+
+	struct cp_config_gen inserted_gen;
+	struct cp_module inserted_module;
+	struct cp_device inserted_device;
+	TEST_ASSERT_SUCCESS(
+		commit_test_gen_init(cfg, &inserted_gen, 3), "gen init failed"
+	);
+	TEST_ASSERT_SUCCESS(
+		registry_insert(
+			&inserted_gen.module_registry.registry,
+			&replaced_module.config_item
+		),
+		"carry module failed"
+	);
+	TEST_ASSERT_SUCCESS(
+		registry_insert(
+			&inserted_gen.device_registry.registry,
+			&replaced_device.config_item
+		),
+		"carry device failed"
+	);
+	TEST_ASSERT_SUCCESS(
+		commit_test_add_module(
+			cfg,
+			&inserted_gen,
+			&inserted_module,
+			commit_test_module_count
+		),
+		"add module failed"
+	);
+	TEST_ASSERT_SUCCESS(
+		commit_test_add_device(
+			cfg,
+			&inserted_gen,
+			&inserted_device,
+			commit_test_device_count
+		),
+		"add device failed"
+	);
+	dp_config_commit_gen(cfg, &inserted_gen);
+	TEST_ASSERT_EQUAL(
+		commit_test_module_runs,
+		3,
+		"only the inserted module may run its handler"
+	);
+	TEST_ASSERT_EQUAL(
+		commit_test_device_runs,
+		3,
+		"only the inserted device may run its handler"
 	);
 
 	dataplane_test_fixture_fini(&fixture);
@@ -333,12 +481,27 @@ test_out_of_range_indices_skip(void) {
 		"no handler may run for an out-of-range index"
 	);
 
-	// The skip is defensive only: a corrected successor generation
-	// commits and runs the handlers.
-	cp_module.dp_module_idx = 0;
-	cp_device.dp_device_idx = 0;
-	gen.gen = 3;
-	dp_config_commit_gen(cfg, &gen);
+	// The skip is defensive only: a successor generation with valid
+	// items commits and runs the handlers.
+	struct cp_config_gen next_gen;
+	struct cp_module next_module;
+	struct cp_device next_device;
+	TEST_ASSERT_SUCCESS(
+		commit_test_gen_init(cfg, &next_gen, 3), "gen init failed"
+	);
+	TEST_ASSERT_SUCCESS(
+		commit_test_add_module(
+			cfg, &next_gen, &next_module, commit_test_module_count
+		),
+		"add module failed"
+	);
+	TEST_ASSERT_SUCCESS(
+		commit_test_add_device(
+			cfg, &next_gen, &next_device, commit_test_device_count
+		),
+		"add device failed"
+	);
+	dp_config_commit_gen(cfg, &next_gen);
 	TEST_ASSERT_EQUAL(
 		commit_test_module_runs,
 		1,
@@ -488,6 +651,8 @@ main(void) {
 		int (*fn)(void);
 	} tests[] = {
 		{"commit_runs_once_per_gen", test_commit_runs_once_per_gen},
+		{"commit_runs_for_new_items_only",
+		 test_commit_runs_for_new_items_only},
 		{"null_handlers_skipped", test_null_handlers_skipped},
 		{"out_of_range_indices_skip", test_out_of_range_indices_skip},
 		{"null_gen_commits_nothing", test_null_gen_commits_nothing},
