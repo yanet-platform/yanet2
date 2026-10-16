@@ -730,4 +730,38 @@ rules:
         assert_eq!(1, rule.destinations4.len());
         assert_eq!(1, rule.destinations6.len());
     }
+
+    #[test]
+    fn test_rules_yaml_structured_protocols_parse() {
+        let yaml = r#"
+rules:
+  - actions:
+      - kind: ACTION_KIND_PASS
+    protocols:
+      - number: 6
+        tcp:
+          flags: 2
+          mask: 18
+      - number: 1
+        icmp_types:
+          - from: 8
+            to: 8
+      - number: 58
+        icmp6_types:
+          - from: 135
+            to: 136
+      - number: 17
+"#;
+        let config: ACLConfig = serde_yaml::from_str(yaml).expect("structured protocols must parse");
+
+        let rule = &config.rules[0];
+        assert_eq!(4, rule.protocols.len());
+        assert_eq!(
+            Some((2, 18)),
+            rule.protocols[0].tcp.as_ref().map(|tcp| (tcp.flags, tcp.mask))
+        );
+        assert_eq!(1, rule.protocols[1].icmp_types.len());
+        assert_eq!(1, rule.protocols[2].icmp6_types.len());
+        assert_eq!(17, rule.protocols[3].number);
+    }
 }

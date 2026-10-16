@@ -20,7 +20,9 @@ import (
 	"github.com/yanet-platform/xnetip"
 
 	dataplaneut "github.com/yanet-platform/yanet2/bindings/go/dataplane_ut"
+	"github.com/yanet-platform/yanet2/bindings/go/filter"
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
+	filterpb "github.com/yanet-platform/yanet2/common/filterpb/v1"
 	"github.com/yanet-platform/yanet2/common/go/grpcmetrics"
 	"github.com/yanet-platform/yanet2/common/go/metrics"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
@@ -777,6 +779,90 @@ func TestUpdateConfig_RejectsTypedOutOfClassMasks(t *testing.T) {
 			rule: &aclpb.Rule{
 				Actions:  []*aclpb.Action{{Kind: aclpb.ActionKind_ACTION_KIND_PASS}},
 				Sources6: []*commonpb.IPv6Network{mustV6Network("2001:db8::/ffff:0:ffff::")},
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			backend := newFakeBackend()
+			svc := newTestService(backend)
+
+			_, err := svc.UpdateConfig(t.Context(), &aclpb.UpdateConfigRequest{
+				Name:  "acl0",
+				Rules: []*aclpb.Rule{tc.rule},
+			})
+			require.Error(t, err)
+			require.Equal(t, codes.InvalidArgument, status.Code(err))
+			assert.Equal(t, 0, backend.PublishCalls(), "backend must not be asked to publish")
+		})
+	}
+}
+
+// Test_ACLService_UpdateConfig_StructuredProtocols verifies that the
+// structured protocol entries of a rule reach the backend as the
+// packed protocol ranges, unioned with the raw ranges of the same
+// rule.
+func Test_ACLService_UpdateConfig_StructuredProtocols(t *testing.T) {
+	backend := newFakeBackend()
+	svc := newTestService(backend)
+
+	_, err := svc.UpdateConfig(t.Context(), &aclpb.UpdateConfigRequest{
+		Name: "acl0",
+		Rules: []*aclpb.Rule{{
+			Actions: []*aclpb.Action{{Kind: aclpb.ActionKind_ACTION_KIND_PASS}},
+			Protocols: []*filterpb.Protocol{
+				{Number: 6, Tcp: &filterpb.TcpFlags{Flags: 0x02, Mask: 0xff}},
+				{Number: 1, IcmpTypes: []*filterpb.IcmpTypeRange{{From: 8, To: 8}}},
+				{Number: 58},
+			},
+			ProtoRanges: []*filterpb.ProtoRange{{From: 17 << 8, To: 17<<8 | 0xff}},
+		}},
+	})
+	require.NoError(t, err)
+
+	handles := backend.CreatedHandles()
+	require.Len(t, handles, 1)
+	rules := handles[0].Rules()
+	require.Len(t, rules, 1)
+
+	assert.Equal(t, filter.ProtoRanges{
+		{From: 17 << 8, To: 17<<8 | 0xff},
+		filter.NewProtoRange(6, filter.ExactSubtype(0x02)),
+		filter.NewProtoRange(1, filter.ExactSubtype(8)),
+		filter.NewProtoRange(58, filter.AnySubtype()),
+	}, rules[0].ProtoRanges)
+}
+
+// Test_ACLService_UpdateConfig_RejectsInvalidProtocolEntries verifies
+// that a protocol entry whose conditions belong to another protocol is
+// refused before the backend compiles anything.
+func Test_ACLService_UpdateConfig_RejectsInvalidProtocolEntries(t *testing.T) {
+	tests := []struct {
+		name string
+		rule *aclpb.Rule
+	}{
+		{
+			name: "tcp flags on icmp",
+			rule: &aclpb.Rule{
+				Actions:   []*aclpb.Action{{Kind: aclpb.ActionKind_ACTION_KIND_PASS}},
+				Protocols: []*filterpb.Protocol{{Number: 1, Tcp: &filterpb.TcpFlags{Flags: 0x02, Mask: 0x02}}},
+			},
+		},
+		{
+			name: "flags outside the mask",
+			rule: &aclpb.Rule{
+				Actions:   []*aclpb.Action{{Kind: aclpb.ActionKind_ACTION_KIND_PASS}},
+				Protocols: []*filterpb.Protocol{{Number: 6, Tcp: &filterpb.TcpFlags{Flags: 0x12, Mask: 0x02}}},
+			},
+		},
+		{
+			name: "icmpv6 types on icmp",
+			rule: &aclpb.Rule{
+				Actions: []*aclpb.Action{{Kind: aclpb.ActionKind_ACTION_KIND_PASS}},
+				Protocols: []*filterpb.Protocol{
+					{Number: 1, Icmp6Types: []*filterpb.IcmpTypeRange{{From: 135, To: 135}}},
+				},
 			},
 		},
 	}
