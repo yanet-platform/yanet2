@@ -8,6 +8,7 @@ import (
 	"slices"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 
@@ -613,13 +614,10 @@ func Test_PdumpService_SetConfig_RejectsEmptyRingNameOnUpdate(t *testing.T) {
 // when its own update is the reason for the refusal.
 func Test_PdumpService_SetConfig_CreateRefused(t *testing.T) {
 	cases := []struct {
-		name   string
-		config *pdumppb.Config
-		setup  func(owner *fakeRingOwner, backend *fakeBackend)
-		code   codes.Code
-		// updateAttempted is set only for the row where the backend
-		// update itself is the reason for the refusal; every other row
-		// must never reach the backend.
+		name            string
+		config          *pdumppb.Config
+		setup           func(owner *fakeRingOwner, backend *fakeBackend)
+		code            codes.Code
 		updateAttempted bool
 	}{
 		{
@@ -681,6 +679,16 @@ func Test_PdumpService_SetConfig_CreateRefused(t *testing.T) {
 				backend.updateErr = errors.New("failed to compile filter")
 			},
 			code:            codes.Internal,
+			updateAttempted: true,
+		},
+		{
+			name:   "missing worker time is retryable",
+			config: &pdumppb.Config{RingName: proto.String("A"), RatePps: proto.Uint64(1000)},
+			setup: func(owner *fakeRingOwner, backend *fakeBackend) {
+				owner.register("A", testRingCapacity, 1)
+				backend.updateErr = fmt.Errorf("failed to set capture rate: %w", syscall.EAGAIN)
+			},
+			code:            codes.Unavailable,
 			updateAttempted: true,
 		},
 	}

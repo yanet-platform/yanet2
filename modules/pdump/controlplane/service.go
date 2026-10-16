@@ -8,6 +8,7 @@ package pdump
 import (
 	"context"
 	"errors"
+	"syscall"
 
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
@@ -209,7 +210,11 @@ func (m *PdumpService) SetConfig(
 		module, err := m.backend.UpdateModule(name, settings)
 		if err != nil {
 			b.Release()
-			return nil, status.Errorf(codes.Internal, "failed to update module config %q: %v", name, err)
+			code := codes.Internal
+			if errors.Is(err, syscall.EAGAIN) {
+				code = codes.Unavailable
+			}
+			return nil, status.Errorf(code, "failed to update module config %q: %v", name, err)
 		}
 
 		return &capture{
