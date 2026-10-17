@@ -68,3 +68,34 @@ l3b_test_counter_state_read(
 	const struct l3b_test_counter_link *link,
 	struct l3b_test_counter_state *out
 );
+
+struct agent;
+struct cp_module;
+
+struct l3b_test_service_lookup {
+	uintptr_t generation;
+	uint64_t generation_number;
+	uintptr_t object;
+	uintptr_t counter_registry;
+	uint64_t counter_id;
+};
+
+struct l3b_test_lookup_witness {
+	uint64_t object_lookups;
+	uint64_t counter_lookups;
+	uint64_t unprotected_objects;
+	uint64_t unprotected_counters;
+	uint64_t provenance_errors;
+	struct l3b_test_service_lookup lookups[L3B_TEST_COUNTER_CAPACITY];
+};
+
+int
+l3b_test_lookup_begin(struct agent *agent);
+
+struct l3b_test_lookup_witness
+l3b_test_lookup_end(void);
+
+int
+l3b_test_module_counter_ids(
+	struct cp_module *module, uint64_t *ids, uint32_t count
+);

@@ -3,6 +3,7 @@ package testutils
 /*
 #cgo CFLAGS: -I../../../../
 #cgo LDFLAGS: -Wl,--wrap=counter_registry_register
+#cgo LDFLAGS: -Wl,--wrap=cp_object_registry_lookup -Wl,--wrap=counter_registry_lookup_index
 #include <stdlib.h>
 #include "counters.h"
 */
@@ -12,6 +13,8 @@ import (
 	"fmt"
 	"runtime"
 	"unsafe"
+
+	"github.com/yanet-platform/yanet2/controlplane/ffi"
 )
 
 // CounterFailure describes one semantic registration boundary and its prefix.
@@ -187,4 +190,83 @@ func ReadCounterState(
 		}
 	}
 	return state, nil
+}
+
+// ServiceLookup binds a copied counter ID to its protected generation and object.
+//
+// Addresses are identity values, not handles that may be dereferenced afterward.
+type ServiceLookup struct {
+	Generation       uintptr
+	GenerationNumber uint64
+	Object           uintptr
+	CounterRegistry  uintptr
+	CounterID        uint64
+}
+
+// LookupWitness records real lookup hits, missing protection and provenance errors.
+type LookupWitness struct {
+	Lookups             []ServiceLookup
+	CounterLookups      uint64
+	UnprotectedObjects  uint64
+	UnprotectedCounters uint64
+	ProvenanceErrors    uint64
+}
+
+// WithLinkedServiceLookup observes a synchronous update without pinning its reads.
+//
+// The caller keeps the agent alive. Thread-local observation is disarmed on every
+// exit; unrelated threads and unarmed calls use the real implementation unchanged.
+func WithLinkedServiceLookup(
+	agent *ffi.Agent,
+	operation func() error,
+) (witness LookupWitness, err error) {
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+	if C.l3b_test_lookup_begin((*C.struct_agent)(agent.AsRawPtr())) != 0 {
+		return LookupWitness{}, fmt.Errorf("lookup observer unavailable or already active")
+	}
+	defer func() {
+		observed := C.l3b_test_lookup_end()
+		witness.CounterLookups = uint64(observed.counter_lookups)
+		witness.UnprotectedObjects = uint64(observed.unprotected_objects)
+		witness.UnprotectedCounters = uint64(observed.unprotected_counters)
+		witness.ProvenanceErrors = uint64(observed.provenance_errors)
+		count := min(uint64(observed.object_lookups), uint64(C.L3B_TEST_COUNTER_CAPACITY))
+		witness.Lookups = make([]ServiceLookup, count)
+		for idx := range witness.Lookups {
+			item := observed.lookups[idx]
+			witness.Lookups[idx] = ServiceLookup{
+				Generation:       uintptr(item.generation),
+				GenerationNumber: uint64(item.generation_number),
+				Object:           uintptr(item.object),
+				CounterRegistry:  uintptr(item.counter_registry),
+				CounterID:        uint64(item.counter_id),
+			}
+		}
+	}()
+	return witness, operation()
+}
+
+// ReadModuleCounterIDs copies IDs from an idle, live unpublished module candidate.
+func ReadModuleCounterIDs(module ffi.ModuleConfig, count int) ([]uint64, error) {
+	if count < 0 || count > int(C.L3B_TEST_COUNTER_CAPACITY) {
+		return nil, fmt.Errorf("unsupported observed rule count %d", count)
+	}
+	ids := make([]C.uint64_t, count)
+	var destination *C.uint64_t
+	if count > 0 {
+		destination = &ids[0]
+	}
+	if C.l3b_test_module_counter_ids(
+		(*C.struct_cp_module)(module.AsRawPtr()),
+		destination,
+		C.uint32_t(count),
+	) != 0 {
+		return nil, fmt.Errorf("module counter array does not match %d rules", count)
+	}
+	result := make([]uint64, count)
+	for idx := range result {
+		result[idx] = uint64(ids[idx])
+	}
+	return result, nil
 }
