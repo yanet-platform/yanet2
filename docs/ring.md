@@ -357,9 +357,12 @@ Each config has one best-effort budget shared by all workers, independent
 of its ring. One busy worker can use the entire budget. The automatic
 global burst is `max(32, ceil(rate_pps / 1000))` packets; it replenishes
 continuously, never accumulates beyond that burst, and does not reset at
-second boundaries. Contention can miss captures without spending credit;
-worker clock offsets affect the effective rate. There is no worker fairness
-or strict wall-clock rate guarantee.
+second boundaries. Active reservations use fetch-add tickets: stale reads do
+not lose fitting reservations, but a late refusal retains debt and delays
+refill, causing best-effort undercapture. A fresh exhausted read adds no debt.
+Idle restarts use one strong CAS; collisions can miss captures without
+spending credit. Worker clock offsets affect the effective rate. There is no
+worker fairness or strict wall-clock rate guarantee.
 
 Replacing a config starts fresh credit, including a filter-only update
 that preserves the rate and the same ring/reader cursor. Recommitting the
@@ -368,9 +371,9 @@ Independent configs keep independent budgets even on the same ring.
 
 The per-worker `pdump_rate_skipped` counter counts packet opportunities
 not captured because of the limiter: rejected matching reservations
-(including CAS losses), whole queues skipped while exhausted, and
-unexamined queue tails after exhaustion. Those tails can contain
-nonmatching packets, so this is **not** a count of lost matching packets.
+(including late active refusals and idle CAS losses), whole queues skipped
+while exhausted, and unexamined queue tails after exhaustion. Those tails can
+contain nonmatching packets, so this is **not** a count of lost matching packets.
 Examined filter nonmatches do not contribute. Rate limiting never changes
 normal forwarding or drop-queue processing; accepted prefixes are still
 published at the end of the handler call.

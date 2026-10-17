@@ -1,7 +1,7 @@
 // Shared token-bucket arithmetic and bounded concurrent reservations.
 //
-// Frozen clocks make the budget deterministic. Stale snapshots separately
-// pin collision losses without granting free credit or spending rejected debt.
+// Frozen clocks make the budget deterministic. Stale snapshots distinguish
+// idle collision losses from active tickets, retained debt and later recovery.
 #include <assert.h>
 #include <pthread.h>
 #include <sched.h>
@@ -66,18 +66,22 @@ run_failed_restart_and_late_reservation_test(void) {
 
 	stale = atomic_load(&bucket.edt);
 	assert(token_bucket_reserve(&bucket, 10000, stale));
-	assert(!token_bucket_reserve(&bucket, 10000, stale));
-	assert(10200 == atomic_load(&bucket.edt));
+	assert(token_bucket_reserve(&bucket, 10000, stale));
+	assert(10300 == atomic_load(&bucket.edt));
 	assert(!token_bucket_full(&bucket, 10000));
-	for (uint64_t idx = 2; idx < 32; ++idx) {
+	for (uint64_t idx = 3; idx < 32; ++idx) {
 		assert(token_bucket_take(&bucket, 10000));
 	}
+	assert(13200 == atomic_load(&bucket.edt));
 	assert(!token_bucket_reserve(&bucket, 10000, stale));
-	assert(13200 == atomic_load(&bucket.edt));
-	assert(!token_bucket_take(&bucket, 10099));
-	assert(13200 == atomic_load(&bucket.edt));
-	assert(token_bucket_take(&bucket, 10100));
 	assert(13300 == atomic_load(&bucket.edt));
+	assert(token_bucket_full(&bucket, 10000));
+	assert(!token_bucket_take(&bucket, 10000));
+	assert(!token_bucket_take(&bucket, 10199));
+	assert(13300 == atomic_load(&bucket.edt));
+	assert(token_bucket_take(&bucket, 10200));
+	assert(13400 == atomic_load(&bucket.edt));
+	assert(token_bucket_full(&bucket, 10200));
 }
 
 static void
@@ -188,6 +192,8 @@ run_concurrent_startup_test(void) {
 		unsigned accepted = atomic_load(&round.accepted);
 		if (round.stale_restart) {
 			assert(accepted == 1);
+			assert(atomic_load(&bucket.edt) ==
+			       round.now + bucket.cost);
 			assert(!token_bucket_full(&bucket, round.now));
 		} else {
 			assert(accepted == 32);
