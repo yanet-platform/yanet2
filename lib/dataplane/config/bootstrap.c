@@ -38,6 +38,7 @@ dp_storage_init(
 	// Nothing is committed into a fresh zone; the record starts at
 	// none.
 	dp_config->committed_gen_seq = 0;
+	dp_config->committed_gen = NULL;
 
 	dp_config->dp_modules = NULL;
 	dp_config->module_count = 0;
