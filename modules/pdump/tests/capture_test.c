@@ -44,7 +44,7 @@
 #define PDUMP_TEST_RX_DEVICE_ID 7
 #define PDUMP_TEST_TX_DEVICE_ID 9
 #define PDUMP_TEST_WORKER_COUNT 2
-#define PDUMP_TEST_MAX_RECORDS 8
+#define PDUMP_TEST_MAX_RECORDS 64
 
 static void
 run_handler(struct pdump_test_fixture *fx, struct packet_front *pf) {
@@ -98,9 +98,7 @@ read_ring_record(
 	}
 }
 
-// Read a published ring position with the acquire order a real reader
-// must use, even though this single-threaded harness has no concurrent
-// writer to order against.
+// Acquire the writer's published boundary before decoding ring records.
 static uint64_t
 load_published(const _Atomic uint64_t *pos) {
 	return atomic_load_explicit(pos, memory_order_acquire);
@@ -471,6 +469,319 @@ run_no_ring_link_captures_nothing_body(
 	return TEST_SUCCESS;
 }
 
+// Check bounded links as well as identity, order and the append position.
+static int
+assert_packet_list(
+	struct packet_list *list, struct packet *const *expected, size_t count
+) {
+	struct packet *packet = list->first;
+	for (size_t idx = 0; idx < count; ++idx) {
+		TEST_ASSERT_EQUAL(
+			packet, expected[idx], "packet identity at %zu", idx
+		);
+		packet = packet->next;
+	}
+	TEST_ASSERT_NULL(packet, "list must end after the expected packets");
+	TEST_ASSERT_EQUAL(
+		list->last,
+		count == 0 ? NULL : &expected[count - 1]->next,
+		"append position must follow the final packet"
+	);
+	return TEST_SUCCESS;
+}
+
+// A captured prefix remains readable while all packets keep their queue path.
+static int
+run_rate_prefix_and_refill_body(
+	struct dataplane_ut *ut,
+	struct pdump_test_fixture *fx,
+	struct packet_front *pf
+) {
+	struct packet *packets[43];
+	struct packet *dropped[2];
+	for (unsigned idx = 0; idx < 2; ++idx) {
+		dropped[idx] = pdump_test_build_packet(ut, false, 60);
+		TEST_ASSERT_NOT_NULL(
+			dropped[idx], "failed to build dropped packet"
+		);
+		packet_front_drop(pf, dropped[idx]);
+	}
+	for (unsigned idx = 0; idx < 43; ++idx) {
+		bool matches = (idx >= 3 && idx < 35) || idx == 38;
+		struct packet *packet =
+			pdump_test_build_packet(ut, matches, 60);
+		TEST_ASSERT_NOT_NULL(packet, "failed to build packet");
+		packets[idx] = packet;
+		packet_front_input(pf, packet);
+	}
+	run_handler(fx, pf);
+	TEST_ASSERT_EQUAL(packet_front_output_count(pf), 43, "all inputs pass");
+	TEST_ASSERT_SUCCESS(
+		assert_packet_list(&pf->input, NULL, 0), "input drained"
+	);
+	TEST_ASSERT_SUCCESS(
+		assert_packet_list(&pf->output, packets, 43),
+		"prefix forwarding"
+	);
+	TEST_ASSERT_SUCCESS(
+		assert_packet_list(&pf->drop, dropped, 2), "drop unchanged"
+	);
+	struct pdump_test_record records[PDUMP_TEST_MAX_RECORDS];
+	int count = 0;
+	TEST_ASSERT_SUCCESS(
+		read_published_records(
+			fx, 0, records, PDUMP_TEST_MAX_RECORDS, &count
+		),
+		"read prefix"
+	);
+	TEST_ASSERT_EQUAL(count, 32, "one worker spends the whole burst");
+	for (int idx = 0; idx < count; ++idx) {
+		TEST_ASSERT_EQUAL(
+			records[idx].seqno,
+			(uint32_t)idx,
+			"prefix has no sequence gap"
+		);
+	}
+	uint64_t *skipped = counter_get_address(
+		fx->config.rate_skipped_counter_id,
+		fx->module_ectx.abs_counter_storage
+	);
+	TEST_ASSERT_EQUAL(
+		*skipped,
+		5,
+		"only refused match and unexamined tail count as skips"
+	);
+	pdump_test_free_front(pf);
+	packet_front_init(pf);
+
+	uint64_t from = load_published(&fx->ring->published.write_idx);
+	fx->dp_worker.current_time += 1000000;
+	struct packet *packet;
+	for (unsigned idx = 0; idx < 2; ++idx) {
+		dropped[idx] = pdump_test_build_packet(ut, false, 60);
+		TEST_ASSERT_NOT_NULL(
+			dropped[idx], "failed to build dropped packet"
+		);
+		packet_front_drop(pf, dropped[idx]);
+		packet = pdump_test_build_packet(ut, true, 60);
+		TEST_ASSERT_NOT_NULL(packet, "failed to build packet");
+		packets[idx] = packet;
+		packet_front_input(pf, packet);
+	}
+	run_handler(fx, pf);
+	TEST_ASSERT_SUCCESS(
+		assert_packet_list(&pf->input, NULL, 0),
+		"input drained after refill"
+	);
+	TEST_ASSERT_SUCCESS(
+		assert_packet_list(&pf->output, packets, 2), "refill forwarding"
+	);
+	TEST_ASSERT_SUCCESS(
+		assert_packet_list(&pf->drop, dropped, 2),
+		"drop unchanged after refill"
+	);
+	TEST_ASSERT_SUCCESS(
+		read_published_records(
+			fx, from, records, PDUMP_TEST_MAX_RECORDS, &count
+		),
+		"read refill"
+	);
+	TEST_ASSERT_EQUAL(
+		count, 1, "one millisecond refills exactly one packet"
+	);
+	TEST_ASSERT_EQUAL(*skipped, 6, "rejection adds no debt before refill");
+	return TEST_SUCCESS;
+}
+
+// Exhausted queues count every unexamined packet and preserve both lists.
+static int
+run_rate_exhausted_both_queues_body(
+	struct dataplane_ut *ut,
+	struct pdump_test_fixture *fx,
+	struct packet_front *pf
+) {
+	for (unsigned idx = 0; idx < 32; ++idx) {
+		TEST_ASSERT(
+			token_bucket_take(
+				&fx->rate_bucket, fx->dp_worker.current_time
+			),
+			"fill bucket"
+		);
+	}
+	fx->config.mode = PDUMP_ALL;
+	pdump_test_fixture_commit(fx);
+	struct packet *packets[7];
+	for (unsigned idx = 0; idx < 7; ++idx) {
+		struct packet *packet = pdump_test_build_packet(ut, false, 60);
+		TEST_ASSERT_NOT_NULL(packet, "failed to build packet");
+		packets[idx] = packet;
+		if (idx < 3) {
+			packet_front_drop(pf, packet);
+		} else {
+			packet_front_input(pf, packet);
+		}
+	}
+	run_handler(fx, pf);
+	TEST_ASSERT_SUCCESS(
+		assert_packet_list(&pf->input, NULL, 0),
+		"exhausted input drained"
+	);
+	TEST_ASSERT_SUCCESS(
+		assert_packet_list(&pf->output, packets + 3, 4),
+		"exhausted input forwarding"
+	);
+	TEST_ASSERT_SUCCESS(
+		assert_packet_list(&pf->drop, packets, 3),
+		"exhausted drop unchanged"
+	);
+	TEST_ASSERT_EQUAL(
+		packet_front_output_count(pf), 4, "all input packets pass"
+	);
+	TEST_ASSERT_EQUAL(
+		packet_front_drop_count(pf), 3, "drop queue stays intact"
+	);
+	TEST_ASSERT_EQUAL(
+		load_published(&fx->ring->published.write_idx),
+		0,
+		"exhaustion writes nothing"
+	);
+	uint64_t *skipped = counter_get_address(
+		fx->config.rate_skipped_counter_id,
+		fx->module_ectx.abs_counter_storage
+	);
+	TEST_ASSERT_EQUAL(
+		*skipped, 7, "both unexamined queues count every packet"
+	);
+	return TEST_SUCCESS;
+}
+
+// Worker-local counters accompany one shared config budget, not worker shares.
+static int
+run_rate_shared_workers_and_independent_configs_body(
+	struct dataplane_ut *ut,
+	struct pdump_test_fixture *fx,
+	struct packet_front *pf
+) {
+	for (unsigned idx = 0; idx < 32; ++idx) {
+		struct packet *packet = pdump_test_build_packet(ut, true, 60);
+		TEST_ASSERT_NOT_NULL(packet, "failed to build packet");
+		packet_front_input(pf, packet);
+	}
+	run_handler(fx, pf);
+	TEST_ASSERT_EQUAL(
+		fx->ring->local.next_seqno,
+		32,
+		"skewed worker spends full burst"
+	);
+	pdump_test_free_front(pf);
+	packet_front_init(pf);
+
+	struct module_ectx other = fx->module_ectx;
+	other.abs_module_prepared = calloc(1, fx->module->prepared_size);
+	TEST_ASSERT_NOT_NULL(
+		other.abs_module_prepared, "allocate second context"
+	);
+	other.abs_config_gen_ectx = pdump_test_gen_worker_ectx(fx->gen, 1);
+	other.abs_counter_storage = counter_storage_spawn(
+		ADDR_OF(&fx->config.cp_module.counter_registry.memory_context),
+		NULL,
+		&fx->config.cp_module.counter_registry
+	);
+	TEST_ASSERT_NOT_NULL(
+		other.abs_counter_storage, "allocate worker-local counters"
+	);
+	struct dp_worker worker = fx->dp_worker;
+	worker.idx = 1;
+	fx->module->commit_ectx_handler(&other, &fx->config.cp_module);
+	struct packet *packet = pdump_test_build_packet(ut, true, 60);
+	TEST_ASSERT_NOT_NULL(packet, "failed to build packet");
+	packet_front_input(pf, packet);
+	fx->module->handler(&worker, &other, pf);
+	struct ring_worker *other_ring = ring_object_worker(fx->ring_object, 1);
+	TEST_ASSERT_EQUAL(
+		other_ring->local.next_seqno,
+		0,
+		"second worker has no separate credit"
+	);
+	uint64_t *skipped = counter_get_address(
+		fx->config.rate_skipped_counter_id, other.abs_counter_storage
+	);
+	TEST_ASSERT_EQUAL(
+		*skipped, 1, "second worker owns its skipped counter"
+	);
+	uint64_t *first_skipped = counter_get_address(
+		fx->config.rate_skipped_counter_id,
+		fx->module_ectx.abs_counter_storage
+	);
+	TEST_ASSERT_EQUAL(
+		*first_skipped, 0, "first worker's counter is unchanged"
+	);
+	pdump_test_free_front(pf);
+	packet_front_init(pf);
+
+	struct pdump_module_config independent = {0};
+	struct token_bucket bucket;
+	pdump_rate_init(&bucket, 1000, fx->dp_worker.current_time);
+	independent.mode = PDUMP_INPUT;
+	independent.snaplen = fx->config.snaplen;
+	independent.rate_skipped_counter_id =
+		fx->config.rate_skipped_counter_id;
+	SET_OFFSET_OF(
+		&independent.ebpf_program, ADDR_OF(&fx->config.ebpf_program)
+	);
+	SET_OFFSET_OF(&independent.rate_bucket, &bucket);
+	other.abs_cp_module = &independent.cp_module;
+	fx->module->commit_ectx_handler(&other, &independent.cp_module);
+	for (unsigned idx = 0; idx < 32; ++idx) {
+		packet = pdump_test_build_packet(ut, true, 60);
+		TEST_ASSERT_NOT_NULL(packet, "failed to build packet");
+		packet_front_input(pf, packet);
+	}
+	fx->module->handler(&worker, &other, pf);
+	TEST_ASSERT_EQUAL(
+		other_ring->local.next_seqno,
+		32,
+		"new config on same ring has independent credit"
+	);
+	TEST_ASSERT_EQUAL(*skipped, 1, "no skips for independent config burst");
+	counter_storage_free(other.abs_counter_storage);
+	free(other.abs_module_prepared);
+	return TEST_SUCCESS;
+}
+
+// Unlimited capture leaves the budget and skip counter out of the hot path.
+static int
+run_rate_unlimited_body(
+	struct dataplane_ut *ut,
+	struct pdump_test_fixture *fx,
+	struct packet_front *pf
+) {
+	pdump_rate_init(&fx->rate_bucket, 1000, fx->dp_worker.current_time);
+	SET_OFFSET_OF(&fx->config.rate_bucket_raw, &fx->rate_bucket);
+	fx->config.rate_bucket = NULL;
+	fx->module->commit_ectx_handler(
+		&fx->module_ectx, &fx->config.cp_module
+	);
+	for (unsigned idx = 0; idx < 40; ++idx) {
+		struct packet *packet = pdump_test_build_packet(ut, true, 60);
+		TEST_ASSERT_NOT_NULL(packet, "failed to build packet");
+		packet_front_input(pf, packet);
+	}
+	run_handler(fx, pf);
+	TEST_ASSERT_EQUAL(
+		fx->ring->local.next_seqno,
+		40,
+		"unlimited captures beyond burst"
+	);
+	uint64_t *skipped = counter_get_address(
+		fx->config.rate_skipped_counter_id,
+		fx->module_ectx.abs_counter_storage
+	);
+	TEST_ASSERT_EQUAL(*skipped, 0, "unlimited capture never rate-skips");
+	TEST_ASSERT_EQUAL(packet_front_output_count(pf), 40, "all inputs pass");
+	return TEST_SUCCESS;
+}
+
 // The pdump minimum ring capacity holds the largest record pdump writes.
 //
 // The largest record is the ring frame, the metadata and 65535 captured
@@ -509,6 +820,7 @@ struct pdump_capture_case {
 	uint32_t capacity;
 	uint32_t snaplen;
 	uint64_t worker_idx;
+	uint64_t rate_pps;
 	int (*body)(
 		struct dataplane_ut *ut,
 		struct pdump_test_fixture *fx,
@@ -548,6 +860,7 @@ run_pdump_capture_case(
 		.publish_batch = RING_PUBLISH_BATCH_DEFAULT,
 		.snaplen = tc->snaplen,
 		.worker_idx = tc->worker_idx,
+		.rate_pps = tc->rate_pps,
 		.module = module,
 		.bpf = bpf,
 		.gen = gen,
@@ -595,10 +908,14 @@ main(void) {
 	}
 
 	const char *objs_to_load[] = {RING_OBJECT_TYPE};
+	const char *modules[] = {"pdump"};
 	struct dataplane_ut_config cfg = {
-		.cp_memory = 1u << 26,
+		// Detached agents retain arenas; allow for sanitizer red zones.
+		.cp_memory = 1u << 28,
 		.dp_memory = 1u << 20,
 		.worker_count = 2,
+		.modules = modules,
+		.module_count = 1,
 		.objects_to_load = objs_to_load,
 		.objects_to_load_count = 1,
 	};
@@ -630,22 +947,51 @@ main(void) {
 		 PDUMP_TEST_RING_CAPACITY,
 		 128,
 		 0,
+		 0,
 		 run_publish_per_call_filtered_no_gap_body},
 		{"record-layout",
 		 PDUMP_TEST_RING_CAPACITY,
 		 40,
 		 1,
+		 0,
 		 run_record_layout_body},
 		{"mode-select",
 		 PDUMP_TEST_RING_CAPACITY,
 		 128,
+		 0,
 		 0,
 		 run_mode_selects_and_tags_queue_body},
 		{"no-ring-link",
 		 PDUMP_TEST_RING_CAPACITY,
 		 128,
 		 0,
+		 0,
 		 run_no_ring_link_captures_nothing_body},
+		{"rate-prefix-refill",
+		 PDUMP_TEST_RING_CAPACITY,
+		 40,
+		 0,
+		 1000,
+		 run_rate_prefix_and_refill_body},
+		{"rate-full-queues",
+		 PDUMP_TEST_RING_CAPACITY,
+		 40,
+		 0,
+		 1000,
+		 run_rate_exhausted_both_queues_body},
+		{"rate-shared-workers",
+		 PDUMP_TEST_RING_CAPACITY,
+		 40,
+		 0,
+		 1000,
+		 run_rate_shared_workers_and_independent_configs_body},
+
+		{"rate-unlimited",
+		 PDUMP_TEST_RING_CAPACITY,
+		 40,
+		 0,
+		 0,
+		 run_rate_unlimited_body},
 	};
 
 	int res = TEST_SUCCESS;

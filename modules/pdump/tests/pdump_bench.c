@@ -180,8 +180,7 @@ call_handler(
 	struct packet_front *pf
 ) {
 	module->handler(dp_worker, module_ectx, pf);
-	pf->input = pf->output;
-	packet_list_init(&pf->output);
+	packet_front_switch(pf);
 }
 
 // A C mirror of the production Go reader for one worker's ring: acquire

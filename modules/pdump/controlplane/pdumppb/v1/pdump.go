@@ -12,6 +12,9 @@ import (
 // MaxMode mirrors the largest bitmap accepted by the pdump dataplane.
 const MaxMode = 3
 
+// MaxRatePPS mirrors the largest capture rate accepted by the dataplane.
+const MaxRatePPS = 1_000_000
+
 func (m *ShowConfigRequest) Validate() error {
 	return commonpb.ValidateModuleName("name", m.GetName())
 }
@@ -38,6 +41,9 @@ func (m *Config) Validate() error {
 	}
 	if m.Snaplen != nil && m.GetSnaplen() == 0 {
 		return errors.New("snaplen must be greater than zero")
+	}
+	if m.GetRatePps() > MaxRatePPS {
+		return fmt.Errorf("rate_pps %d must be in range 0..%d", m.GetRatePps(), MaxRatePPS)
 	}
 	if m.RingName != nil {
 		if err := ringpb.ValidateRingName("ring_name", m.GetRingName()); err != nil {

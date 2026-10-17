@@ -11,6 +11,7 @@
 
 #include "hacks.h"
 
+#include "api/agent.h"
 #include "common/memory_address.h"
 #include "lib/errors/errors.h"
 
@@ -99,6 +100,9 @@ pdump_module_config_data_init(
 	config->mode = PDUMP_INPUT;
 	config->snaplen = default_snaplen;
 	config->ring_link_idx = PDUMP_RING_LINK_NONE;
+	config->rate_bucket = NULL;
+	config->rate_bucket_raw = NULL;
+	config->rate_skipped_counter_id = COUNTER_INVALID;
 	return 0;
 }
 
@@ -108,6 +112,14 @@ pdump_module_config_destroy(struct cp_module *module) {
 		container_of(module, struct pdump_module_config, cp_module);
 
 	struct agent *agent = ADDR_OF(&module->agent);
+	void *rate_bucket_raw = ADDR_OF(&config->rate_bucket_raw);
+	if (rate_bucket_raw != NULL) {
+		memory_bfree(
+			&agent->memory_context,
+			rate_bucket_raw,
+			pdump_rate_bucket_raw_size()
+		);
+	}
 	char *filter = ADDR_OF(&config->filter);
 	if (filter != NULL) {
 		memory_bfree(
@@ -171,6 +183,18 @@ pdump_module_config_new(
 			config,
 			sizeof(struct pdump_module_config)
 		);
+		return NULL;
+	}
+
+	config->rate_skipped_counter_id = counter_registry_register(
+		&config->cp_module.counter_registry,
+		"pdump_rate_skipped",
+		1,
+		err
+	);
+	if (config->rate_skipped_counter_id == COUNTER_INVALID) {
+		yanet_error_add(err, "failed to register capture rate counter");
+		pdump_module_config_destroy(&config->cp_module);
 		return NULL;
 	}
 
@@ -290,6 +314,45 @@ pdump_module_config_set_mode(struct cp_module *module, enum pdump_mode mode) {
 
 	config->mode = mode;
 
+	return 0;
+}
+
+int
+pdump_module_config_set_rate(struct cp_module *module, uint64_t rate_pps) {
+	if (rate_pps > PDUMP_RATE_PPS_MAX) {
+		errno = EINVAL;
+		return -1;
+	}
+	struct pdump_module_config *config =
+		container_of(module, struct pdump_module_config, cp_module);
+	if (rate_pps != 0) {
+		struct agent *agent = ADDR_OF(&module->agent);
+		struct dp_config *dp_config = ADDR_OF(&agent->dp_config);
+		uint64_t timestamp;
+		if (dataplane_instance_current_time(dp_config, &timestamp) !=
+		    0) {
+			errno = EAGAIN;
+			return -1;
+		}
+		void *raw = ADDR_OF(&config->rate_bucket_raw);
+		if (raw == NULL) {
+			raw = memory_balloc(
+				&agent->memory_context,
+				pdump_rate_bucket_raw_size()
+			);
+			if (raw == NULL) {
+				errno = ENOMEM;
+				return -1;
+			}
+			memset(raw, 0, pdump_rate_bucket_raw_size());
+			SET_OFFSET_OF(&config->rate_bucket_raw, raw);
+		}
+		struct token_bucket *bucket = pdump_rate_bucket_align(raw);
+		pdump_rate_init(bucket, rate_pps, timestamp);
+		SET_OFFSET_OF(&config->rate_bucket, bucket);
+	} else {
+		config->rate_bucket = NULL;
+	}
 	return 0;
 }
 
