@@ -1,0 +1,24 @@
+[package]
+name = "decap-systest"
+version = "0.1.0"
+description = "ctest check of the decap module's configuration mirror against its C header."
+# ctest 0.5.1 emits field names unescaped; edition 2021 keeps that working.
+edition = "2021"
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+build = "build.rs"
+
+[dependencies]
+decap-rs = { path = ".." }
+yanet-sdk = { path = "../../yanet-sdk" }
+yanet-sys = { path = "../../yanet-sys" }
+
+[build-dependencies]
+ctest = "0.5.1"
+quote = "1"
+syn = { version = "2", features = ["full"] }
+yanet-build = { path = "../../yanet-build" }
+
+[lints]
+workspace = true

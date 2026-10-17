@@ -1,0 +1,31 @@
+# Self-contained proof of concept: hand-written repr(C) mirrors verified by
+# ctest, demonstrated on the decap module.
+#
+# Deliberately not a member of the root workspace: it pins its own lints and
+# profiles and needs a configured meson build directory for its C-facing
+# crates (see README.md).
+[workspace]
+resolver = "2"
+members = ["yanet-build", "yanet-sys", "yanet-sdk", "decap-rs", "decap-rs/systest", "yanet-testkit", "systest"]
+
+[workspace.package]
+edition = "2024"
+rust-version = "1.88"
+license = "Apache-2.0"
+publish = false
+
+[workspace.dependencies]
+zerocopy = { version = "0.8", features = ["derive"] }
+
+[workspace.lints.rust]
+unused_crate_dependencies = "deny"
+# The C layout mirrors drop their zerocopy derives when ctest expands them.
+unexpected_cfgs = { level = "warn", check-cfg = ["cfg(ctest)"] }
+unsafe_op_in_unsafe_fn = "deny"
+
+[workspace.lints.clippy]
+std_instead_of_core = "deny"
+undocumented_unsafe_blocks = "deny"
+
+[profile.release]
+panic = "abort"

@@ -1,0 +1,23 @@
+[package]
+name = "decap-rs"
+version = "0.1.0"
+description = "Decap dataplane module in safe Rust, a drop-in plugin for the C decap module."
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+# The plugin loader picks up lib<name>_dp.so and resolves new_module_<name>.
+name = "decap_dp"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+yanet-sdk = { path = "../yanet-sdk" }
+zerocopy.workspace = true
+
+[dev-dependencies]
+yanet-testkit = { path = "../yanet-testkit", features = ["dataplane"] }
+
+[lints]
+workspace = true
