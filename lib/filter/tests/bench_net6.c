@@ -358,7 +358,6 @@ generate_packet_info(
 		packets[i] = (struct packet_info){
 			.data = buf,
 			.size = total_size,
-			.device_id = 0,
 		};
 	}
 }

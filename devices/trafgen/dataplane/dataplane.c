@@ -34,7 +34,6 @@ trafgen_emit_frame(
 	struct dp_worker *dp_worker,
 	struct cp_device_trafgen *config,
 	struct packet_front *packet_front,
-	uint16_t device_id,
 	uint32_t frame_idx
 ) {
 	const uint8_t *frames = ADDR_OF(&config->frames);
@@ -66,8 +65,6 @@ trafgen_emit_frame(
 		return 1;
 	}
 	rte_memcpy(data, frames + offsets[frame_idx], len);
-
-	packet->device_id = device_id;
 
 	if (parse_packet(packet)) {
 		worker_packet_free(packet);
@@ -136,11 +133,7 @@ trafgen_input_handle(
 		cursor += 1;
 
 		int rc = trafgen_emit_frame(
-			dp_worker,
-			config,
-			packet_front,
-			device_ectx->device_id,
-			frame_idx
+			dp_worker, config, packet_front, frame_idx
 		);
 		if (rc < 0) {
 			// Mbuf pool exhausted; keep the unspent credit.

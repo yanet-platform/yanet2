@@ -143,7 +143,6 @@ fwstate_fill_sync_record(
 	}
 
 	fwstate_fill_sync_frame(packet, direction, &record->frame);
-	record->device_id = packet->device_id;
 	record->status = FWSTATE_SYNC_RECORD_PENDING;
 	return 0;
 }
@@ -152,7 +151,6 @@ int
 fwstate_build_sync_packet(
 	const struct fw_state_sync_frame *const *frames,
 	uint32_t count,
-	uint16_t device_id,
 	struct packet *sync_pkt
 ) {
 	struct rte_mbuf *sync_mbuf = packet_to_mbuf(sync_pkt);
@@ -221,8 +219,6 @@ fwstate_build_sync_packet(
 	for (uint32_t idx = 0; idx < count; ++idx) {
 		rte_memcpy(payload + idx * frame_size, frames[idx], frame_size);
 	}
-
-	sync_pkt->device_id = device_id;
 
 	// Set packet header offsets directly (we know the structure)
 	sync_pkt->network_header.type = rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV6);

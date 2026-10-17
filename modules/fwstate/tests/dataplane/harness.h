@@ -120,8 +120,7 @@ int
 fwstate_test_stash_push(
 	struct cp_module *cp_module,
 	struct dp_worker *dp_worker,
-	const struct fw_state_sync_frame *frame,
-	uint16_t device_id
+	const struct fw_state_sync_frame *frame
 );
 
 // Return the worker's stash slot of the map linked for one family, or

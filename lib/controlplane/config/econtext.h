@@ -122,10 +122,8 @@ device_entry_ectx_schedule(
 // NULL here; the packet lands on its schedule input so the next round
 // picks it up. Input and output routes share the packet lineage budget;
 // an exhausted budget drops on the originating schedule and increments
-// the target entry's input_recirc_drop counter. The device id is
-// stamped from the target entry on the accepted transition only, so it
-// keeps naming the pipeline the packet executes on. The pending
-// counters count every route attempt, including dropped packets.
+// the target entry's input_recirc_drop counter. The pending counters
+// count every route attempt, including dropped packets.
 static inline void
 module_ectx_route_input(
 	struct module_ectx *module_ectx,
@@ -143,9 +141,6 @@ module_ectx_route_input(
 		packet_front_drop(packet_front, packet);
 		return;
 	}
-	// The stamp rides the accepted transition only: a refused redirect
-	// drops the packet on the originating schedule, where it executed.
-	packet->device_id = entry_ectx->device_id;
 	device_entry_ectx_schedule(
 		module_ectx->abs_config_gen_ectx, entry_ectx, packet
 	);
@@ -155,8 +150,7 @@ module_ectx_route_input(
 // pending_output on the originating schedule.
 //
 // Symmetric to module_ectx_route_input: the packet is placed on the
-// target device's output-pipelines schedule, and the device id is
-// stamped from the target entry on the accepted transition, as above.
+// target device's output-pipelines schedule.
 static inline void
 module_ectx_route_output(
 	struct module_ectx *module_ectx,
@@ -174,8 +168,6 @@ module_ectx_route_output(
 		packet_front_drop(packet_front, packet);
 		return;
 	}
-	// As above: the device id names the entry that takes the packet.
-	packet->device_id = entry_ectx->device_id;
 	device_entry_ectx_schedule(
 		module_ectx->abs_config_gen_ectx, entry_ectx, packet
 	);

@@ -199,7 +199,8 @@ run_round_restore_test(void) {
 	packet_list_init(&input);
 	packet_list_add(&input, packet);
 	struct dataplane_ut_round_result first_result;
-	dataplane_ut_run(ut, 0, &input, &first_result);
+	uint16_t input_devices[1] = {0};
+	dataplane_ut_run(ut, 0, input_devices, &input, &first_result);
 	TEST_ASSERT_EQUAL(
 		(long)(packet_list_count(&first_result.output) +
 		       packet_list_count(&first_result.drop)),
@@ -215,11 +216,10 @@ run_round_restore_test(void) {
 	packet_list_concat(&input, &first_result.drop);
 	ipv4->type_of_service = original_tos;
 	ipv4->hdr_checksum = original_checksum;
-	packet->device_id = 0;
 	packet->recirc_remaining = 0;
 	packet->recirc_initialized = 0;
 	TEST_ASSERT_SUCCESS(
-		dataplane_ut_run_rounds(ut, 0, &input, 3, 1),
+		dataplane_ut_run_rounds(ut, 0, input_devices, &input, 3, 1),
 		"run_rounds failed"
 	);
 	TEST_ASSERT_EQUAL(
@@ -236,11 +236,6 @@ run_round_restore_test(void) {
 		(long)input.first->recirc_initialized,
 		0L,
 		"run_rounds must restore recirculation initialization state"
-	);
-	TEST_ASSERT_EQUAL(
-		(long)input.first->device_id,
-		0L,
-		"run_rounds must restore tx device id"
 	);
 	TEST_ASSERT_EQUAL(
 		(long)ipv4->type_of_service,
@@ -423,7 +418,8 @@ run_rounds_geometry_mismatch_test(void) {
 	packet_list_init(&input);
 	packet_list_add(&input, packet);
 
-	int rc = dataplane_ut_run_rounds(ut, 0, &input, 3, 1);
+	uint16_t empty_devices[1] = {0};
+	int rc = dataplane_ut_run_rounds(ut, 0, empty_devices, &input, 3, 1);
 	TEST_ASSERT_EQUAL(
 		(long)rc,
 		(long)-EINVAL,
@@ -537,7 +533,8 @@ main(void) {
 		struct packet_list empty;
 		packet_list_init(&empty);
 		struct dataplane_ut_round_result result;
-		dataplane_ut_run(ut, 0, &empty, &result);
+		uint16_t no_devices[1] = {0};
+		dataplane_ut_run(ut, 0, no_devices, &empty, &result);
 		TEST_ASSERT_EQUAL(
 			(long)dp_worker->current_time,
 			(long)12345ULL,
@@ -565,7 +562,7 @@ main(void) {
 
 		// Empty-input round must complete cleanly and yield empty
 		// output and drop lists.
-		dataplane_ut_run(ut, 0, &empty, &result);
+		dataplane_ut_run(ut, 0, no_devices, &empty, &result);
 		TEST_ASSERT_EQUAL(
 			(long)packet_list_count(&result.output),
 			0L,
@@ -659,8 +656,11 @@ main(void) {
 		packet_list_init(&input);
 		packet_list_add(&input, packet);
 
+		uint16_t no_devices[1] = {0};
 		struct dataplane_ut_round_result result;
-		dataplane_ut_run(ut, cfg.worker_count + 1, &input, &result);
+		dataplane_ut_run(
+			ut, cfg.worker_count + 1, no_devices, &input, &result
+		);
 
 		TEST_ASSERT_EQUAL(
 			(long)packet_list_count(&input),
@@ -704,7 +704,9 @@ main(void) {
 		packet_list_init(&rounds_input);
 		packet_list_add(&rounds_input, round_packet);
 		TEST_ASSERT_SUCCESS(
-			dataplane_ut_run_rounds(ut, 0, &rounds_input, 5, 0),
+			dataplane_ut_run_rounds(
+				ut, 0, no_devices, &rounds_input, 5, 0
+			),
 			"run_rounds failed"
 		);
 		TEST_ASSERT_EQUAL(

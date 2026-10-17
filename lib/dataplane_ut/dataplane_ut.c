@@ -600,6 +600,7 @@ void
 dataplane_ut_run(
 	struct dataplane_ut *ut,
 	size_t worker_idx,
+	const uint16_t *device_ids,
 	struct packet_list *input,
 	struct dataplane_ut_round_result *result
 ) {
@@ -659,13 +660,14 @@ dataplane_ut_run(
 	// that front and the front reset for the next round.
 	struct packet_front *packet_front = &config_gen_ectx->packet_front;
 
-	// Feed input straight onto each packet's target device input entry,
-	// the same way the worker deposits its staged RX batch into the
-	// pipeline.
+	// Feed each input packet onto its named device's input entry, the
+	// same way the worker deposits its staged RX batch into the
+	// pipeline; the array parallels the input list's order.
+	size_t input_idx = 0;
 	struct packet *packet;
 	while ((packet = packet_list_pop(input)) != NULL) {
 		struct device_ectx *device_ectx = config_gen_ectx_get_device(
-			config_gen_ectx, packet->device_id
+			config_gen_ectx, device_ids[input_idx++]
 		);
 		if (device_ectx == NULL) {
 			packet_front_drop(packet_front, packet);
@@ -792,6 +794,7 @@ int
 dataplane_ut_run_rounds(
 	struct dataplane_ut *ut,
 	size_t worker,
+	const uint16_t *device_ids,
 	struct packet_list *input,
 	uint64_t rounds,
 	int reset_payload
@@ -860,7 +863,7 @@ dataplane_ut_run_rounds(
 		}
 
 		struct dataplane_ut_round_result round_result;
-		dataplane_ut_run(ut, worker, input, &round_result);
+		dataplane_ut_run(ut, worker, device_ids, input, &round_result);
 		saved_packet_list_free_extra(
 			&round_result.output, saved, count
 		);

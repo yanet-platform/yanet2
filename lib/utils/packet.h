@@ -48,7 +48,6 @@ free_packet(struct packet *packet);
 struct packet_info {
 	const uint8_t *data;
 	uint16_t size;
-	uint16_t device_id;
 };
 
 struct packet_info

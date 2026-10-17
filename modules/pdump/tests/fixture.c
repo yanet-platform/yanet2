@@ -207,6 +207,9 @@ pdump_test_fixture_build(
 	fx->module_ectx.abs_object_links = &fx->link;
 	fx->module_ectx.abs_cp_module = &fx->config.cp_module;
 
+	// One placement: the module executes on the test device.
+	fx->module_ectx.registry_device_id = PDUMP_TEST_FIXTURE_DEVICE_ID;
+
 	fx->dp_worker.idx = params->worker_idx;
 	fx->dp_worker.current_time = PDUMP_TEST_TIMESTAMP;
 

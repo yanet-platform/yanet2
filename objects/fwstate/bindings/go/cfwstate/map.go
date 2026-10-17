@@ -316,8 +316,6 @@ const StashRecordSize = int(C.sizeof_struct_fwstate_sync_record)
 type StashRecord struct {
 	// Frame is the wire form of the sync frame.
 	Frame []byte
-	// DeviceID is the device id captured from the original packet.
-	DeviceID uint16
 	// Status is the decision state: StashRecordPending, StashRecordApplied
 	// or StashRecordSuppressed.
 	Status uint8
@@ -365,8 +363,7 @@ func (m *MapObjectConfig) StashRecords(workerIdx uint16) ([]StashRecord, error) 
 				unsafe.Pointer(&record.frame),
 				C.int(C.sizeof_struct_fw_state_sync_frame),
 			),
-			DeviceID: uint16(record.device_id),
-			Status:   uint8(record.status),
+			Status: uint8(record.status),
 		})
 	}
 	return records, nil

@@ -31,7 +31,7 @@ func newTxStageFixture(t *testing.T, devices, pipesPerDevice int) *dataplaneut.T
 func offer(t *testing.T, fixture *dataplaneut.TxStageFixture, device uint16, hash uint32) *dataplaneut.TxStagePacket {
 	t.Helper()
 
-	packet, err := fixture.Packet(device, hash)
+	packet, err := fixture.Packet(hash)
 	require.NoError(t, err)
 	fixture.Offer(packet, device)
 

@@ -133,6 +133,7 @@ void
 dataplane_ut_run(
 	struct dataplane_ut *ut,
 	size_t worker_idx,
+	const uint16_t *device_ids,
 	struct packet_list *input,
 	struct dataplane_ut_round_result *result
 );
@@ -174,6 +175,7 @@ int
 dataplane_ut_run_rounds(
 	struct dataplane_ut *ut,
 	size_t worker,
+	const uint16_t *device_ids,
 	struct packet_list *input,
 	uint64_t rounds,
 	int reset_payload

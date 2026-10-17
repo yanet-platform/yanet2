@@ -21,7 +21,7 @@ const MaxIndexSize uint32 = 1 << 30
 // Per-worker stash buffer bounds a map accepts, in bytes. They mirror the C
 // FWSTATE_STASH_MIN_SIZE (one sync record) and FWSTATE_STASH_MAX_SIZE.
 const (
-	MinStashSize = 60
+	MinStashSize = 57
 	MaxStashSize = 1 << 20
 )
 

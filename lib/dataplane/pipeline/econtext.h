@@ -110,13 +110,18 @@ struct module_ectx {
 
 	// The module device id of the device whose entry this context
 	// executes under, resolved when the context is linked. Packets
-	// scheduled onto the entry name this device, so the module's
-	// per-device classification reads the id here instead of
-	// translating each packet's device; a packet a module injected
-	// into its own front with a foreign device (an fwstate sync copy,
-	// for one) classifies by this device too. Zero when the device
-	// names no device of the module — the classifiers' fallback id.
+	// placement the module executes on occupies this slot, so
+	// per-device classification reads it instead of a per-packet
+	// device. Zero when the placement's device names no device of
+	// the module — the classifiers' fallback id.
 	uint32_t module_device_id;
+
+	// The registry device of the pipeline this context executes in.
+	//
+	// Stamped at creation from the owning device, independent of the
+	// module's own device table: a module without device constraints
+	// still learns here which device's pipeline placed it.
+	uint16_t registry_device_id;
 
 	uint64_t device_target_count;
 	// Offset pointer to the module's per-device routing targets,
@@ -206,6 +211,12 @@ module_ectx_device_target(struct module_ectx *module_ectx, uint64_t index) {
 		return NULL;
 	}
 	return target;
+}
+
+// The registry device id of the pipeline this context executes in.
+static inline uint16_t
+module_ectx_global_device_id(struct module_ectx *module_ectx) {
+	return module_ectx->registry_device_id;
 }
 
 struct chain_ectx {
@@ -355,10 +366,8 @@ struct device_entry_ectx {
 	// The device this entry belongs to, as an index into the
 	// generation's device table.
 	//
-	// Routing into the entry stamps this index onto the packet, so the
-	// transmit stage reads exactly the destination the packet was
-	// routed to, with no parallel value that could drift from the
-	// entry.
+	// The output-entry terminal resolves the entry's whole output
+	// through the egress backing table by this index.
 	uint16_t device_id;
 	// Offset pointer to the owning device, kept by the control plane.
 	struct device_ectx *device_ectx;
@@ -444,9 +453,9 @@ struct device_ectx {
 	struct device_entry_ectx *abs_output_pipelines;
 	// The device's index in the generation's device table.
 	//
-	// Device handlers that emit traffic of their own stamp it onto the
-	// packet, so the emitted packet names a registry slot rather than
-	// whatever physical index the emitting worker happens to carry.
+	// Module contexts created under this device stamp it as their
+	// placement, so handlers resolve the pipeline they execute in
+	// without per-packet state.
 	uint16_t device_id;
 };
 

@@ -457,12 +457,11 @@ fwstate_process_sync_v6(
 
 // Applied frames waiting to be packed into one wire packet.
 //
-// All frames leave through the same device, the fallback egress of the
-// emitted packet.
+// Frames pack up to the limit; the emitted packet continues the current
+// pipeline execution.
 struct fwstate_sync_batch {
 	uint32_t count;
 	uint32_t limit;
-	uint16_t device_id;
 	const struct fw_state_sync_frame *frames[FWSTATE_SYNC_BATCH_MAX];
 };
 
@@ -507,13 +506,6 @@ fwstate_emit_sync_packet(
 	uint16_t dst_port = emitter->emit_multicast
 				    ? sync_config->port_multicast
 				    : sync_config->port_unicast;
-	// The packet leaves on the module's own front for the chain's
-	// next module to route.
-	//
-	// In an output pipeline the output-entry terminal then treats the
-	// transmit device the packet already carries as its egress when
-	// nothing routed it; an input pipeline drops unrouted output, so
-	// a routing module must follow there.
 	fwstate_finalize_internal_sync(packet, sync_config, dst_addr, dst_port);
 	emitter->counters->internal_forwarded[0] += 1;
 	emitter->counters->internal_forwarded[1] +=
@@ -551,10 +543,7 @@ fwstate_sync_batch_flush(struct fwstate_emitter *emitter) {
 			break;
 		}
 		int written = fwstate_build_sync_packet(
-			batch->frames + done,
-			batch->count - done,
-			batch->device_id,
-			packet
+			batch->frames + done, batch->count - done, packet
 		);
 		if (unlikely(written <= 0)) {
 			worker_packet_free(packet);
@@ -570,9 +559,8 @@ fwstate_sync_batch_flush(struct fwstate_emitter *emitter) {
 
 // Queue one applied record for emission.
 //
-// A full batch or a record naming another device closes the current
-// batch first. The device is the fallback egress: a routing module
-// downstream of the emitter may aim the packet elsewhere.
+// A full batch closes first; the emitted packet continues the current
+// pipeline execution, so whatever module follows decides its fate.
 static void
 fwstate_sync_batch_add(
 	struct fwstate_emitter *emitter,
@@ -580,13 +568,11 @@ fwstate_sync_batch_add(
 ) {
 	struct fwstate_sync_batch *batch = &emitter->batch;
 
-	if (batch->count > 0 && (batch->count >= batch->limit ||
-				 batch->device_id != record->device_id)) {
+	if (batch->count > 0 && batch->count >= batch->limit) {
 		fwstate_sync_batch_flush(emitter);
 	}
 
 	batch->frames[batch->count++] = &record->frame;
-	batch->device_id = record->device_id;
 }
 
 // Apply one frame of a family to its table, counting into the family's
