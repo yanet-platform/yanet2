@@ -1,8 +1,8 @@
 # Route operator readiness
 
 The route operator exposes four readiness dimensions, each as its own scope:
-FIB programming per gateway, neighbour observations, the RIB content, and
-(optionally) the BIRD FeedRIB transport session.
+FIB apply and configured static-path resolution per gateway, neighbour
+observations, the RIB content, and (optionally) the BIRD FeedRIB transport session.
 
 - gRPC FQN: `operators.route.operatorpb.v1.ReadinessService`
 - Service implementation: `readiness_service.go` (`ReadinessService`).
@@ -13,7 +13,7 @@ FIB programming per gateway, neighbour observations, the RIB content, and
 
 | Scope                    | Meaning                                              |
 | ------------------------ | --------------------------------------------------- |
-| `fib:<gateway>:<module>` | Per-gateway FIB apply outcome into the dataplane module. |
+| `fib:<gateway>:<module>` | Per-gateway FIB apply and configured static-path resolution. |
 | `neighbours`             | Local neighbour discovery or accepted external snapshots. |
 | `rib`                    | Routing information base content readiness.          |
 | `bird-session`           | BIRD FeedRIB transport liveness (only when `readiness.expect_bird`). |
@@ -30,6 +30,32 @@ Driven by the apply outcome recorded through `Observe` (via
 - Apply succeeded: `STATE_READY`.
 - Apply failed, previously READY or DEGRADED: `STATE_DEGRADED` (`APPLY_FAILED`).
 - Apply failed, never applied: `STATE_NOT_READY` (`APPLY_FAILED`).
+
+An apply succeeds only after programming succeeds and every distinct canonical
+exact prefix in `static.routes` has at least one configured static path still
+present in the managed module's RIB with a locally resolvable nexthop. Paths
+configured for the same prefix are alternatives; not every alternative must
+resolve. Host bits are masked for prefix matching, and IPv4-mapped nexthops are
+normalized to native IPv4.
+
+Resolution uses the same `gateway_devices`-filtered neighbour view as FIB
+construction. Each gateway is evaluated independently. A BGP path or an
+unconfigured static nexthop cannot satisfy a configured-path requirement, even
+if that fallback is published for the same prefix. Runtime route deletion does
+not remove the configured requirement. Diagnostics identify the gateway,
+module, and missing prefixes in deterministic order.
+
+Validation never blocks publication: available routes, including fallback
+paths, and empty FIBs are still pushed, and function updates are still attempted.
+Programming and resolution failures are joined under the existing `APPLY_FAILED`
+reason. Neighbour or route changes wake reconciliation; successful programming
+after a configured path resolves restores `STATE_READY` without a restart.
+Without `static.routes`, unresolved dynamic routes keep their existing omission
+behaviour and do not introduce a new readiness gate.
+
+This condition establishes local neighbour-cache resolution only. It adds no
+active probes, stricter MAC or neighbour-state validation, peer-liveness checks,
+or packet-delivery guarantee, and does not change route selection.
 
 ### `neighbours`
 

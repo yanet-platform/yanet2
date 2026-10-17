@@ -183,9 +183,12 @@ type StaticConfig struct {
 	Neighbours []StaticNeighbourConfig `yaml:"neighbours"`
 }
 
-// StaticRouteConfig describes a single static-route entry to seed. The
-// route is implicitly seeded into the operator's single managed module
-// (Config.Function.Module).
+// StaticRouteConfig describes a static path seeded into the managed module.
+//
+// Paths with the same canonical exact prefix are alternatives. FIB readiness
+// requires one configured static path per prefix to remain in the RIB and
+// resolve through a neighbour on the gateway's allowed devices. Deleting a
+// seeded path at runtime does not remove that requirement.
 type StaticRouteConfig struct {
 	// Prefix is the destination prefix in CIDR notation.
 	Prefix string `yaml:"prefix"`
