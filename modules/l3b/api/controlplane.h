@@ -40,10 +40,10 @@ l3b_module_config_new(
 int
 l3b_module_config_free(struct cp_module *config, yanet_error **err);
 
-// Compile the destination filters and link the virtual service each rule
-// names through cp_module_link_object. Rules naming the same service share one
-// link; the dataplane resolves each rule's link to the service object at
-// execution time.
+// Compile destination filters and link the service each rule names.
+//
+// The caller keeps the owning agent alive and must not hold its configuration
+// lock. Rules naming the same service share a link resolved at execution time.
 int
 l3b_module_config_update(
 	struct cp_module *cp_module,
