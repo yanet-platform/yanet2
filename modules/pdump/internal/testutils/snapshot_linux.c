@@ -94,7 +94,6 @@ pdump_test_read_rate(
 		container_of(module, struct pdump_module_config, cp_module);
 	struct token_bucket *bucket = ADDR_OF(&config->rate_bucket);
 	*snapshot = (struct pdump_test_rate_snapshot){
-		.rate_pps = config->rate_pps,
 		.has_bucket = bucket != NULL,
 		.cost = bucket == NULL ? 0 : bucket->cost,
 		.cap = bucket == NULL ? 0 : bucket->cap,

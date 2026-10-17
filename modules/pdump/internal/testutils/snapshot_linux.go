@@ -37,9 +37,8 @@ func SetWorkerTime(agent *ffi.Agent, timestamp uint64) {
 	C.pdump_test_set_worker_time((*C.struct_agent)(agent.AsRawPtr()), C.uint64_t(timestamp))
 }
 
-// RateSnapshot contains copied scalars from a published capture configuration.
+// RateSnapshot contains copied limiter parameters and activation state.
 type RateSnapshot struct {
-	RatePPS   uint64
 	Cost      uint64
 	Cap       uint64
 	EDT       uint64
@@ -55,7 +54,6 @@ func ReadRate(agent *ffi.Agent, name string) (RateSnapshot, error) {
 		return RateSnapshot{}, fmt.Errorf("pdump configuration %q is not published", name)
 	}
 	return RateSnapshot{
-		RatePPS:   uint64(snapshot.rate_pps),
 		Cost:      uint64(snapshot.cost),
 		Cap:       uint64(snapshot.cap),
 		EDT:       uint64(snapshot.edt),

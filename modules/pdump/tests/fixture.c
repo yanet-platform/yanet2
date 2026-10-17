@@ -200,7 +200,6 @@ pdump_test_fixture_build(
 	fx->config.snaplen = params->snaplen;
 	fx->config.mode = PDUMP_INPUT;
 	fx->config.ring_link_idx = 0;
-	fx->config.rate_pps = params->rate_pps;
 	if (params->rate_pps != 0) {
 		pdump_rate_init(
 			&fx->rate_bucket, params->rate_pps, PDUMP_TEST_TIMESTAMP

@@ -21,7 +21,6 @@ struct pdump_module_config {
 	struct rte_bpf *ebpf_program;
 	enum pdump_mode mode;
 	uint32_t snaplen;
-	uint64_t rate_pps;
 	struct token_bucket *rate_bucket;
 	void *rate_bucket_raw;
 	// Counts refused matches and packets skipped without filter evaluation.

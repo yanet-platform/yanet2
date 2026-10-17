@@ -100,7 +100,6 @@ pdump_module_config_data_init(
 	config->mode = PDUMP_INPUT;
 	config->snaplen = default_snaplen;
 	config->ring_link_idx = PDUMP_RING_LINK_NONE;
-	config->rate_pps = 0;
 	config->rate_bucket = NULL;
 	config->rate_bucket_raw = NULL;
 	config->rate_skipped_counter_id = COUNTER_INVALID;
@@ -335,9 +334,9 @@ pdump_module_config_set_rate(struct cp_module *module, uint64_t rate_pps) {
 			errno = EAGAIN;
 			return -1;
 		}
-		struct token_bucket *bucket = ADDR_OF(&config->rate_bucket);
-		if (bucket == NULL) {
-			void *raw = memory_balloc(
+		void *raw = ADDR_OF(&config->rate_bucket_raw);
+		if (raw == NULL) {
+			raw = memory_balloc(
 				&agent->memory_context,
 				pdump_rate_bucket_raw_size()
 			);
@@ -346,13 +345,14 @@ pdump_module_config_set_rate(struct cp_module *module, uint64_t rate_pps) {
 				return -1;
 			}
 			memset(raw, 0, pdump_rate_bucket_raw_size());
-			bucket = pdump_rate_bucket_align(raw);
 			SET_OFFSET_OF(&config->rate_bucket_raw, raw);
-			SET_OFFSET_OF(&config->rate_bucket, bucket);
 		}
+		struct token_bucket *bucket = pdump_rate_bucket_align(raw);
 		pdump_rate_init(bucket, rate_pps, timestamp);
+		SET_OFFSET_OF(&config->rate_bucket, bucket);
+	} else {
+		config->rate_bucket = NULL;
 	}
-	config->rate_pps = rate_pps;
 	return 0;
 }
 

@@ -265,12 +265,7 @@ pdump_resolve_prepared(
 	if (ring == NULL) {
 		return result;
 	}
-	if (config->rate_pps != 0) {
-		result.rate_bucket = ADDR_OF(&config->rate_bucket);
-		if (result.rate_bucket == NULL) {
-			return result;
-		}
-	}
+	result.rate_bucket = ADDR_OF(&config->rate_bucket);
 	result.rate_skipped = counter_get_address(
 		config->rate_skipped_counter_id,
 		module_ectx->abs_counter_storage

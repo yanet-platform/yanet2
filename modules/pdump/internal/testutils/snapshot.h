@@ -19,7 +19,6 @@ void
 pdump_test_set_worker_time(struct agent *agent, uint64_t timestamp);
 
 struct pdump_test_rate_snapshot {
-	uint64_t rate_pps;
 	uint64_t cost;
 	uint64_t cap;
 	uint64_t edt;

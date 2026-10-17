@@ -73,7 +73,7 @@ func Test_Backend_UpdateModule_PublishesCaptureRate(t *testing.T) {
 	published, err := testutils.ReadRate(agent, "capture")
 	require.NoError(t, err, "positive rate has a published snapshot")
 	require.Equal(t, testutils.RateSnapshot{
-		RatePPS: 32001, Cost: 31250, Cap: 1_031_250, EDT: timestamp, HasBucket: true,
+		Cost: 31250, Cap: 1_031_250, EDT: timestamp, HasBucket: true,
 	}, published,
 		"fresh credit is anchored exactly to published worker time",
 	)

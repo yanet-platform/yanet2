@@ -725,7 +725,6 @@ run_rate_shared_workers_and_independent_configs_body(
 	pdump_rate_init(&bucket, 1000, fx->dp_worker.current_time);
 	independent.mode = PDUMP_INPUT;
 	independent.snaplen = fx->config.snaplen;
-	independent.rate_pps = 1000;
 	independent.rate_skipped_counter_id =
 		fx->config.rate_skipped_counter_id;
 	SET_OFFSET_OF(
@@ -758,6 +757,12 @@ run_rate_unlimited_body(
 	struct pdump_test_fixture *fx,
 	struct packet_front *pf
 ) {
+	pdump_rate_init(&fx->rate_bucket, 1000, fx->dp_worker.current_time);
+	SET_OFFSET_OF(&fx->config.rate_bucket_raw, &fx->rate_bucket);
+	fx->config.rate_bucket = NULL;
+	fx->module->commit_ectx_handler(
+		&fx->module_ectx, &fx->config.cp_module
+	);
 	for (unsigned idx = 0; idx < 40; ++idx) {
 		struct packet *packet = pdump_test_build_packet(ut, true, 60);
 		TEST_ASSERT_NOT_NULL(packet, "failed to build packet");
