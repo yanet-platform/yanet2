@@ -75,7 +75,8 @@ pub struct DeleteConfigCmd {
 
 fn client(channel: LayeredChannel) -> BlackholeServiceClient<LayeredChannel> {
     BlackholeServiceClient::new(channel)
-        .send_compressed(CompressionEncoding::Gzip)
+        .send_compressed(CompressionEncoding::Zstd)
+        .accept_compressed(CompressionEncoding::Zstd)
         .accept_compressed(CompressionEncoding::Gzip)
 }
 

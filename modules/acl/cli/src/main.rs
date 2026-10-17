@@ -315,7 +315,8 @@ fn client(channel: LayeredChannel) -> AclServiceClient<LayeredChannel> {
     AclServiceClient::new(channel)
         .max_decoding_message_size(256 * 1024 * 1024)
         .max_encoding_message_size(256 * 1024 * 1024)
-        .send_compressed(CompressionEncoding::Gzip)
+        .send_compressed(CompressionEncoding::Zstd)
+        .accept_compressed(CompressionEncoding::Zstd)
         .accept_compressed(CompressionEncoding::Gzip)
 }
 
@@ -323,7 +324,8 @@ fn metrics_client(channel: LayeredChannel) -> MetricsServiceClient<LayeredChanne
     MetricsServiceClient::new(channel)
         .max_decoding_message_size(256 * 1024 * 1024)
         .max_encoding_message_size(256 * 1024 * 1024)
-        .send_compressed(CompressionEncoding::Gzip)
+        .send_compressed(CompressionEncoding::Zstd)
+        .accept_compressed(CompressionEncoding::Zstd)
         .accept_compressed(CompressionEncoding::Gzip)
 }
 

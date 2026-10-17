@@ -559,7 +559,8 @@ impl L3BService {
     pub async fn new(connection: &ConnectionArgs, action: &'static str) -> Result<Self, Error> {
         let service = Service::connect_for(connection, action, SERVICE_NAME, |channel| {
             L3bServiceClient::new(channel)
-                .send_compressed(CompressionEncoding::Gzip)
+                .send_compressed(CompressionEncoding::Zstd)
+                .accept_compressed(CompressionEncoding::Zstd)
                 .accept_compressed(CompressionEncoding::Gzip)
         })
         .await?;

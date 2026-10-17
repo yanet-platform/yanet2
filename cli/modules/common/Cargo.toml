@@ -14,6 +14,6 @@ ynpb = { path = "../../../common/rust/ynpb", package = "yanet-ynpb" }
 ync = { path = "../../core", package = "yanet-cli" }
 clap = { version = "4.5", features = ["derive", "wrap_help"] }
 clap_complete = { version = "4.5", features = ["unstable-dynamic"] }
-tonic = { version = "0.14", features = ["gzip"] }
+tonic = { version = "0.14", features = ["gzip", "zstd"] }
 bytesize = "2"
 tabled = { version = "0.21", default-features = false, features = ["ansi", "derive"] }

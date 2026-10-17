@@ -105,7 +105,8 @@ fn deserialize_mirror_mode<'de, D: Deserializer<'de>>(deserializer: D) -> Result
 
 fn client(channel: LayeredChannel) -> MirrorServiceClient<LayeredChannel> {
     MirrorServiceClient::new(channel)
-        .send_compressed(CompressionEncoding::Gzip)
+        .send_compressed(CompressionEncoding::Zstd)
+        .accept_compressed(CompressionEncoding::Zstd)
         .accept_compressed(CompressionEncoding::Gzip)
 }
 

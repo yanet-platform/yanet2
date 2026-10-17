@@ -17,7 +17,8 @@
 //!
 //! let channel = connect(&cmd.globals.connection).await?;
 //! let client = MyServiceClient::new(channel)
-//!     .send_compressed(CompressionEncoding::Gzip)
+//!     .send_compressed(CompressionEncoding::Zstd)
+//!     .accept_compressed(CompressionEncoding::Zstd)
 //!     .accept_compressed(CompressionEncoding::Gzip);
 //! ```
 
@@ -347,7 +348,8 @@ impl Connection {
         Resp: Message + Default + 'static,
     {
         let mut grpc = Grpc::new(self.channel.clone())
-            .send_compressed(CompressionEncoding::Gzip)
+            .send_compressed(CompressionEncoding::Zstd)
+            .accept_compressed(CompressionEncoding::Zstd)
             .accept_compressed(CompressionEncoding::Gzip);
 
         let path = PathAndQuery::try_from(format!("/{service}/{method}")).map_err(|err| {
@@ -393,7 +395,8 @@ impl Connection {
         F: FnMut(Resp),
     {
         let mut grpc = Grpc::new(self.channel.clone())
-            .send_compressed(CompressionEncoding::Gzip)
+            .send_compressed(CompressionEncoding::Zstd)
+            .accept_compressed(CompressionEncoding::Zstd)
             .accept_compressed(CompressionEncoding::Gzip);
 
         let path = PathAndQuery::try_from(format!("/{service}/{method}")).map_err(|err| {

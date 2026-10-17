@@ -164,7 +164,8 @@ async fn run(cmd: Cmd) -> Result<(), Error> {
     let action = cmd.mode.action();
     let mut service = Service::connect_for(&cmd.globals.connection, action, SERVICE_NAME, |channel| {
         DeviceVxlanServiceClient::new(channel)
-            .send_compressed(CompressionEncoding::Gzip)
+            .send_compressed(CompressionEncoding::Zstd)
+            .accept_compressed(CompressionEncoding::Zstd)
             .accept_compressed(CompressionEncoding::Gzip)
     })
     .await?;
@@ -245,7 +246,8 @@ fn device_candidates() -> Vec<CompletionCandidate> {
 
 fn device_client(channel: LayeredChannel) -> DeviceServiceClient<LayeredChannel> {
     DeviceServiceClient::new(channel)
-        .send_compressed(CompressionEncoding::Gzip)
+        .send_compressed(CompressionEncoding::Zstd)
+        .accept_compressed(CompressionEncoding::Zstd)
         .accept_compressed(CompressionEncoding::Gzip)
 }
 

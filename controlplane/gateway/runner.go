@@ -88,7 +88,7 @@ func NewInProcessServiceRunner(
 		)
 	}
 
-	interceptors := []grpc.UnaryServerInterceptor{xgrpc.AccessLogInterceptor(log)}
+	interceptors := []grpc.UnaryServerInterceptor{commonxgrpc.ResponseCompressionUnaryInterceptor(), xgrpc.AccessLogInterceptor(log)}
 	if provider, ok := module.(UnaryInterceptedService); ok {
 		interceptors = append(interceptors, provider.UnaryServerInterceptors()...)
 	}
@@ -100,7 +100,7 @@ func NewInProcessServiceRunner(
 		endpoint: endpoint,
 		server: grpc.NewServer(
 			grpc.ChainUnaryInterceptor(interceptors...),
-			grpc.ChainStreamInterceptor(commonxgrpc.ValidateStreamInterceptor()),
+			grpc.ChainStreamInterceptor(commonxgrpc.ResponseCompressionStreamInterceptor(), commonxgrpc.ValidateStreamInterceptor()),
 			grpc.MaxRecvMsgSize(1024*1024*256), grpc.MaxSendMsgSize(1024*1024*256),
 		),
 		ready: make(chan struct{}),

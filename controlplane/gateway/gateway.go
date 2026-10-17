@@ -318,12 +318,14 @@ func NewGateway(cfg Config, options ...GatewayOption) (*Gateway, error) {
 
 	serverOpts := []grpc.ServerOption{
 		grpc.ChainUnaryInterceptor(
+			commonxgrpc.ResponseCompressionUnaryInterceptor(),
 			serverMetrics.UnaryServerInterceptor(),
 			auth.UnaryServerInterceptor(authManager, log),
 			xgrpc.AccessLogInterceptor(log),
 			commonxgrpc.ValidateUnaryInterceptor(),
 		),
 		grpc.ChainStreamInterceptor(
+			commonxgrpc.ResponseCompressionStreamInterceptor(),
 			serverMetrics.StreamServerInterceptor(),
 			auth.StreamServerInterceptor(authManager, log),
 			commonxgrpc.ValidateStreamInterceptor(),
