@@ -54,3 +54,48 @@ worker_counters_test = executable(
   include_directories: yanet_rootdir,
 )
 test('worker_counters', worker_counters_test, suite: 'dataplane_ut')
+
+# Rust-module tests link the cargo-built archive, so they exist only
+# when the opt-in option gated its build in.
+if get_option('with_rust_modules')
+  rust_abi_test = executable(
+    'dataplane_ut_rust_abi_test',
+    ['rust_abi_test.c'],
+    c_args: yanet_c_args,
+    link_args: yanet_link_args,
+    dependencies: [
+      lib_dataplane_ut_dep,
+      lib_logging_dep,
+      libdpdk_dep,
+      lib_rblackhole_dp_dep,
+    ],
+    include_directories: yanet_rootdir,
+  )
+  test('dataplane_ut_rust_abi', rust_abi_test, suite: 'dataplane_ut')
+
+  if not dataplane_only
+    rust_module_test = executable(
+      'dataplane_ut_rust_module_test',
+      ['rust_module_test.c'],
+      c_args: yanet_c_args + ['-DYANET_DATAPLANE_UT_CONTROLPLANE'],
+      link_args: yanet_link_args + [
+        '-Wl,-E',
+        '-Wl,--undefined=new_device_plain',
+        '-Wl,--export-dynamic-symbol=new_device_plain',
+        '-Wl,--undefined=new_module_rblackhole',
+        '-Wl,--export-dynamic-symbol=new_module_rblackhole',
+      ],
+      dependencies: [
+        lib_dataplane_ut_dep,
+        lib_logging_dep,
+        libdpdk_dep,
+        lib_rblackhole_dp_dep,
+        lib_dev_plain_api,
+        lib_rblackhole_cp_dep,
+      ],
+      link_with: [lib_dev_plain_dp],
+      include_directories: yanet_rootdir,
+    )
+    test('dataplane_ut_rust_module', rust_module_test, suite: 'dataplane_ut')
+  endif
+endif

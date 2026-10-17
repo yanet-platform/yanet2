@@ -40,6 +40,7 @@ make ai/agents                                     # regenerate agent charters f
 
 - `lab/` — reusable local QEMU lab library (manifests, scenarios, operator baseline); `cmd/yanet-lab/` — developer-only lab supervisor CLI (not packaged).
 - `tests/functional/framework/` — shared QEMU/harness infrastructure used by both functional tests and the lab supervisor (not purely test code; imports `testing`).
+- `sdk/` — build-side surface for out-of-tree modules: pkg-config metadata + ABI-version archive generated into `build/sdk/`; `sdk/example/` (C dataplane) and `sdk/example-rs/` (Rust dataplane, see also docs/rust-dataplane-modules.md) are complete reference modules built as if external (`make sdk-example`). `external/route-mpls` — submodule with the production port of route-mpls, gated by `make sdk-example` when checked out.
 
 ### Module layout (canonical — decap, dscp, forward, route as reference)
 
@@ -54,6 +55,8 @@ modules/<name>/
 ```
 
 Active modules: `route, acl, l3b, blackhole, forward, decap, nat64, fwstate, dscp, pdump, route-mpls, mirror`. Legacy shape: `pdump` (CGO in `controlplane/ffi.go`, no `bindings/`); `fwstate` partially migrated. The `l3b` module links virtual-service and session-table objects under `objects/l3b/`. Dataplane symbols are exported via meson `--defsym new_module_<name>`.
+
+Rust dataplanes: `common/rust/{packet,shm,dp}` is the module SDK (`yanet-dp` wraps the C ABI; module code stays unsafe-free) and `modules/rblackhole` is the opt-in reference module, built only with `-Dwith_rust_modules=true` (see `docs/rust-dataplane-modules.md`); its control-plane api stays in C, only the dataplane is Rust.
 
 Shared-memory pattern: `ffi.SharedMemory` → `shm.AgentAttach(name, instanceIdx, size)` → write the C config through FFI (`<name>_module_config_update()`) with Go memory pinned by `runtime.Pinner` → the dataplane reads it atomically. Exported Go APIs whose arguments index C arrays (device IDs, queue/worker indices) validate the range on the Go side.
 

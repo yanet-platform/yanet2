@@ -1,0 +1,93 @@
+# Build orchestration for the reference out-of-tree module with a Rust
+# dataplane.
+#
+# Prerequisite: a configured and built yanet2 checkout that carries the
+# module SDK (the feat/module-sdk branch or its successor): from its root
+# run `make sdk` once (or plain `meson setup build && meson compile -C
+# build`); then this Makefile builds every layer of the module against it.
+#
+# YANET_ROOT points the build at the yanet2 checkout this module is
+# developed against. A template copy of this directory adjusts the default
+# (and the go.mod replace directive, the rust/ and cli/ path dependencies)
+# to its own checkout location.
+YANET_ROOT ?= $(realpath ../..)
+SDK_PC_DIR := $(YANET_ROOT)/build/sdk
+
+# Keep the caller's pkg-config search path intact while adding the SDK.
+export PKG_CONFIG_PATH := $(SDK_PC_DIR)$(if $(PKG_CONFIG_PATH),:$(PKG_CONFIG_PATH),)
+
+# The shared structs are alignment-sensitive: the cache-line size must match
+# the dataplane build the module is compiled against.
+RTE_CONFIG ?= $(YANET_ROOT)/build/subprojects/dpdk/rte_build_config.h
+CACHE_LINE_SIZE := $(shell awk '$$2 == "RTE_CACHE_LINE_SIZE" { print $$3; exit }' "$(RTE_CONFIG)")
+export CGO_CPPFLAGS += -DYANET_CACHE_LINE_SIZE=$(CACHE_LINE_SIZE)
+
+# Build the dataplane crate and the CLI through the checkout's target
+# directory so artifacts land next to the in-tree ones.
+CARGO_TARGET_DIR ?= $(YANET_ROOT)/target
+export CARGO_TARGET_DIR
+
+PROTO_DIR := controlplane/examplerspb/v1
+
+.PHONY: \
+	all \
+	meson \
+	rust \
+	protoc \
+	go \
+	cli \
+	test \
+	clean
+
+all: meson rust protoc go cli
+
+# Control-plane FFI archive, through the SDK pkg-config metadata generated
+# by the yanet2 build. The dataplane needs no meson: cargo builds it.
+meson:
+	@if [ -d build ]; then \
+		meson compile -C build; \
+	else \
+		meson setup build && meson compile -C build; \
+	fi
+
+# The dataplane plugin. The `plugin` feature makes the crate export the
+# yanet_module_abi_version the loader dlsym's — statically linked built-ins
+# must never define it — and the cdylib lands in plugin_dir as
+# libexample_rs_dp.so, its undefined C symbols satisfied by the dataplane
+# binary at load time.
+rust:
+	cargo build --release --manifest-path rust/Cargo.toml --features yanet-dp/plugin
+	@mkdir -p build
+	cp "$(CARGO_TARGET_DIR)/release/libexample_rs_dp.so" build/
+	@nm -D build/libexample_rs_dp.so | grep -q yanet_module_abi_version || { \
+		echo "ERROR: plugin does not export yanet_module_abi_version" >&2; \
+		exit 1; \
+	}
+
+# Generated protobuf code, written into the source tree like in-tree
+# modules (and gitignored the same way).
+protoc:
+	protoc \
+		-I $(PROTO_DIR) \
+		-I $(YANET_ROOT) \
+		--go_out=paths=source_relative:$(PROTO_DIR) \
+		--go-grpc_out=paths=source_relative:$(PROTO_DIR) \
+		$(PROTO_DIR)/examplers.proto
+
+# Control plane and daemon; needs the yanet2 checkout's C archives and
+# generated protobuf code in place.
+go: meson rust protoc
+	go build ./...
+
+# Module CLI as a standalone workspace, so the yanet2 workspace never
+# grows a member it does not ship.
+cli:
+	cargo build --release --manifest-path cli/Cargo.toml
+
+# Functional test: loads the plugin into the in-process dataplane harness
+# and drives the control plane through the module bindings.
+test: go
+	go test -count=1 ./...
+
+clean:
+	rm -rf build

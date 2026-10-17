@@ -7,3 +7,6 @@
 [submodule "subprojects/regex"]
 	path = subprojects/regex
 	url = https://github.com/rust-lang/regex
+[submodule "external/route-mpls"]
+	path = external/route-mpls
+	url = ../yanet-module-route-mpls

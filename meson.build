@@ -315,6 +315,9 @@ module_test_dirs = []
 subdir('objects')
 subdir('modules')
 subdir('devices')
+# After the module/device traversal so the SDK reflects the final yanet_c_args
+# and ISA flag, and before lib/dataplane_ut/tests which consumes module libs.
+subdir('sdk')
 subdir('lib/dataplane_ut/tests')
 subdir('dataplane')
 

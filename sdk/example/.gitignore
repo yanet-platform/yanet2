@@ -1,0 +1,5 @@
+# The module's own meson build directory.
+/build/
+# Generated protobuf code (protoc writes into the source tree, like in-tree
+# modules; the Makefile regenerates it).
+/controlplane/examplepb/v1/*.pb.go
