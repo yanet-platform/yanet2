@@ -32,7 +32,8 @@
 // 40: struct packet dropped its device field — the executing device is
 // derived from the pipeline context, and struct module_ectx gained the
 // registry device of its placement.
-#define YANET_MODULE_ABI_VERSION 40
+// 41: struct dp_config gained the last committed generation pointer.
+#define YANET_MODULE_ABI_VERSION 41
 
 // Symbol name a module .so exports carrying its compiled-against
 // YANET_MODULE_ABI_VERSION, as a uint32_t global.
@@ -64,20 +65,20 @@ typedef void (*module_handler)(
 	struct packet_front *packet_front
 );
 
-// Commit handler: a preparation hook, run exactly once per published
-// generation per shared module config.
+// Commit handler: a preparation hook, run exactly once per config
+// item, before any worker can see it.
 //
 // Runs inside the dataplane address space, from exactly one thread,
-// before the generation's contexts reach the workers. Only
+// when the item first appears in a published generation; a later
+// generation carrying the same item does not run it again. Only
 // generation-invariant derivation — from the item's own content
 // alone, like absolutizing its own internal pointers — may be
-// written; the item is shared with older generations whose workers
-// read it concurrently and observe the write. Controlplane-owned
-// relative fields stay authoritative, and anything per-worker or
-// referencing generation-owned memory belongs in the ectx layer
-// instead. The thread holds no control-plane lock in production and
-// is the installer holding the control-plane configuration lock in
-// the harness; taking that lock self-deadlocks.
+// written. Controlplane-owned relative fields stay authoritative,
+// and anything per-worker or referencing generation-owned memory
+// belongs in the ectx layer instead. The thread holds no
+// control-plane lock in production and is the installer holding the
+// control-plane configuration lock in the harness; taking that lock
+// self-deadlocks.
 typedef void (*module_commit_handler)(
 	struct dp_config *dp_config, struct cp_module *cp_module
 );

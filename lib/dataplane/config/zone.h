@@ -207,10 +207,13 @@ struct dp_config {
 	// numbers advance monotonically per zone — a superseded
 	// generation is freed only after every worker moved to its
 	// successor — so the record names exactly one generation: the
-	// last whose commit handlers ran. It is written and read only
-	// under the commit lock, by one process's assigner threads or
-	// harness round driver; no reader in another process exists.
+	// last whose commit handlers ran. The pointer below names the
+	// same generation; the next pass skips the items it inherits
+	// from it. Both are written and read only under the commit lock,
+	// by one process's assigner threads or harness round driver; no
+	// reader in another process exists.
 	uint64_t committed_gen_seq;
+	struct cp_config_gen *committed_gen;
 
 	// Selects the synchronous generation hand-off used by in-process
 	// harnesses; production leaves it clear.
@@ -288,7 +291,7 @@ dp_config_lookup_object(
 uint64_t
 dp_config_device_worker_count(struct dp_config *dp_config, uint32_t device_id);
 
-// Run the generation's commit handlers once.
+// Run the commit handlers of the generation's new config items once.
 //
 // Runs inside the dataplane address space during config deliverance,
 // from exactly one thread per shared config: a process-wide lock plus
