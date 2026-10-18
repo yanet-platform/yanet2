@@ -10,11 +10,12 @@
 // Shared best-effort token bucket using a virtual finish time.
 //
 // Active reservations use relaxed fetch-add; idle restarts use one strong CAS.
-// Late active refusals retain debt and delay refill; idle collisions may miss
-// captures without spending credit. There are no retries, refunds or fairness
-// guarantees. Worker clock offsets preclude a strict wall-clock rate guarantee.
-// Modular arithmetic requires clock differences and outstanding reservation
-// debt to stay below 2^63 ticks.
+// Late active refusals refund their cost; refunds can move virtual time
+// backwards and cross an idle restart. Idle CAS losers pass uncharged, and
+// stale active tickets can pass one cost beyond the cap. There are no retries
+// or fairness guarantees, nor strict burst or wall-clock rate bounds. Modular
+// arithmetic requires clock differences and outstanding debt to stay below 2^63
+// ticks.
 struct token_bucket {
 	_Alignas(YANET_CACHE_LINE_SIZE) _Atomic uint64_t edt;
 	uint64_t cost;
@@ -58,18 +59,25 @@ token_bucket_reserve(struct token_bucket *bucket, uint64_t now, uint64_t edt) {
 		return false;
 	}
 	if (edt - now > UINT64_MAX / 2) {
-		return atomic_compare_exchange_strong_explicit(
+		atomic_compare_exchange_strong_explicit(
 			&bucket->edt,
 			&edt,
 			now + bucket->cost,
 			memory_order_relaxed,
 			memory_order_relaxed
 		);
+		return true;
 	}
 	uint64_t previous = atomic_fetch_add_explicit(
 		&bucket->edt, bucket->cost, memory_order_relaxed
 	);
-	return previous - now <= bucket->cap - bucket->cost;
+	if (previous - now <= bucket->cap) {
+		return true;
+	}
+	atomic_fetch_sub_explicit(
+		&bucket->edt, bucket->cost, memory_order_relaxed
+	);
+	return false;
 }
 
 static inline bool

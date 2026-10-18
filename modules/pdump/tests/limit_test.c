@@ -1,4 +1,4 @@
-// Pdump rate rounding and aggregate burst bounds.
+// Pdump rate rounding and sequential aggregate burst bounds.
 #include <assert.h>
 #include <stdint.h>
 

@@ -356,13 +356,19 @@ setting zero does not require worker time.
 Each config has one best-effort budget shared by all workers, independent
 of its ring. One busy worker can use the entire budget. The automatic
 global burst is `max(32, ceil(rate_pps / 1000))` packets; it replenishes
-continuously, never accumulates beyond that burst, and does not reset at
-second boundaries. Active reservations use fetch-add tickets: stale reads do
-not lose fitting reservations, but a late refusal retains debt and delays
-refill, causing best-effort undercapture. A fresh exhausted read adds no debt.
-Idle restarts use one strong CAS; collisions can miss captures without
-spending credit. Worker clock offsets affect the effective rate. There is no
-worker fairness or strict wall-clock rate guarantee.
+continuously, caps accumulated credit at that burst, and does not reset at
+second boundaries. This credit cap is not a strict admission burst bound.
+Active reservations use fetch-add tickets with a soft threshold: a stale
+fitting read can admit a ticket whose prior debt is already at the cap,
+charging one cost beyond it. Later refusals atomically refund their cost.
+An active ticket whose returned debt falls in the past clock half-range is
+also refused and refunded. A fresh exhausted read adds no debt, but transient
+fullness before a refund can still skip a queue or its tail; a refund cannot
+recover those opportunities. Idle restarts use one strong CAS and accept even
+when it loses, leaving those losers uncharged. Refunds can move virtual time
+backwards and a delayed refund can cross an idle restart; cancellation is not
+transactional. Worker clock offsets affect the effective rate. There is no
+worker fairness or strict burst or wall-clock rate guarantee.
 
 Replacing a config starts fresh credit, including a filter-only update
 that preserves the rate and the same ring/reader cursor. Recommitting the
@@ -371,7 +377,7 @@ Independent configs keep independent budgets even on the same ring.
 
 The per-worker `pdump_rate_skipped` counter counts packet opportunities
 not captured because of the limiter: rejected matching reservations
-(including late active refusals and idle CAS losses), whole queues skipped
+(including late active refusals), whole queues skipped
 while exhausted, and unexamined queue tails after exhaustion. Those tails can
 contain nonmatching packets, so this is **not** a count of lost matching packets.
 Examined filter nonmatches do not contribute. Rate limiting never changes

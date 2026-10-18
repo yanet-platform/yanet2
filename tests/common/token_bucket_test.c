@@ -1,7 +1,7 @@
-// Shared token-bucket arithmetic and bounded concurrent reservations.
+// Shared token-bucket arithmetic and best-effort concurrent reservations.
 //
-// Frozen clocks make the budget deterministic. Stale snapshots distinguish
-// idle collision losses from active tickets, retained debt and later recovery.
+// Frozen clocks distinguish uncharged idle admissions from soft-cap active
+// tickets, late refunds and later recovery.
 #include <assert.h>
 #include <pthread.h>
 #include <sched.h>
@@ -55,12 +55,12 @@ run_continuous_windows_without_free_burst_test(void) {
 }
 
 static void
-run_failed_restart_and_late_reservation_test(void) {
+run_stale_restart_and_late_refund_test(void) {
 	struct token_bucket bucket;
 	token_bucket_init(&bucket, 100, 32, 0);
 	uint64_t stale = atomic_load(&bucket.edt);
 	assert(token_bucket_reserve(&bucket, 10000, stale));
-	assert(!token_bucket_reserve(&bucket, 10000, stale));
+	assert(token_bucket_reserve(&bucket, 10000, stale));
 	assert(!token_bucket_full(&bucket, 10000));
 	assert(10100 == atomic_load(&bucket.edt));
 
@@ -73,6 +73,10 @@ run_failed_restart_and_late_reservation_test(void) {
 		assert(token_bucket_take(&bucket, 10000));
 	}
 	assert(13200 == atomic_load(&bucket.edt));
+	assert(!token_bucket_take(&bucket, 10000));
+	assert(13200 == atomic_load(&bucket.edt));
+	assert(token_bucket_reserve(&bucket, 10000, stale));
+	assert(13300 == atomic_load(&bucket.edt));
 	assert(!token_bucket_reserve(&bucket, 10000, stale));
 	assert(13300 == atomic_load(&bucket.edt));
 	assert(token_bucket_full(&bucket, 10000));
@@ -121,6 +125,16 @@ run_fresh_start_before_and_through_wrap_test(void) {
 			assert(token_bucket_take(&bucket, now + 10000));
 		}
 		assert(token_bucket_full(&bucket, now + 10000));
+		assert(token_bucket_reserve(&bucket, now + 10000, now + 10000));
+		assert(atomic_load(&bucket.edt) == now + 13300);
+		assert(!token_bucket_reserve(&bucket, now + 10000, now + 10000)
+		);
+		assert(atomic_load(&bucket.edt) == now + 13300);
+
+		// Actual past debt refuses and refunds a stale active ticket.
+		atomic_store(&bucket.edt, now - 100);
+		assert(!token_bucket_reserve(&bucket, now, now));
+		assert(atomic_load(&bucket.edt) == now - 100);
 	}
 }
 
@@ -191,12 +205,14 @@ run_concurrent_startup_test(void) {
 		}
 		unsigned accepted = atomic_load(&round.accepted);
 		if (round.stale_restart) {
-			assert(accepted == 1);
+			assert(accepted == THREAD_COUNT);
 			assert(atomic_load(&bucket.edt) ==
 			       round.now + bucket.cost);
 			assert(!token_bucket_full(&bucket, round.now));
 		} else {
-			assert(accepted == 32);
+			assert(accepted >= 32 && accepted <= 33);
+			assert(atomic_load(&bucket.edt) ==
+			       round.now + accepted * bucket.cost);
 			assert(token_bucket_full(&bucket, round.now));
 		}
 	}
@@ -206,7 +222,7 @@ int
 main(void) {
 	run_burst_refill_and_idle_cap_test();
 	run_continuous_windows_without_free_burst_test();
-	run_failed_restart_and_late_reservation_test();
+	run_stale_restart_and_late_refund_test();
 	run_clock_skew_and_wrap_test();
 	run_fresh_start_before_and_through_wrap_test();
 	run_concurrent_startup_test();
