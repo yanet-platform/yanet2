@@ -10,6 +10,7 @@
 
 #define CP_MODULE_TYPE_LEN 80
 #define CP_MODULE_NAME_LEN 80
+#define CP_MODULE_AGENT_LEN 80
 
 #define CP_CHAIN_NAME_LEN 80
 #define CP_FUNCTION_NAME_LEN 80
@@ -45,6 +46,9 @@ yanet_get_dp_module_info(
 struct cp_module_info {
 	char type[CP_MODULE_TYPE_LEN];
 	char name[CP_MODULE_NAME_LEN];
+	// Name of the agent that published the module; empty when the module
+	// has no owner.
+	char agent[CP_MODULE_AGENT_LEN];
 	uint64_t gen;
 };
 
@@ -185,6 +189,27 @@ struct cp_device_pipeline_info *
 yanet_get_cp_device_output_pipeline_info(
 	struct cp_device_info *device_info, uint64_t idx
 );
+
+// Structure
+
+// Whole-structure snapshot of one configuration generation.
+//
+// All four lists are copied under a single generation pin, so they are
+// mutually consistent even while updates install newer generations. A part
+// that fails its copy fails the whole snapshot; the parts are owned by the
+// snapshot and freed together.
+struct cp_structure_info {
+	struct cp_module_list_info *modules;
+	struct cp_function_list_info *functions;
+	struct cp_pipeline_list_info *pipelines;
+	struct cp_device_list_info *devices;
+};
+
+void
+cp_structure_info_free(struct cp_structure_info *structure_info);
+
+struct cp_structure_info *
+yanet_get_cp_structure_info(struct dp_config *dp_config);
 
 // Instance
 

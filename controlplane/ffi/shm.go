@@ -240,18 +240,28 @@ func (m *DPConfig) Modules() []DPModule {
 }
 
 func (m *DPConfig) CPConfigs() []CPConfig {
-	cpModulesListInfo := C.yanet_get_cp_module_list_info(m.ptr)
-	defer C.cp_module_list_info_free(cpModulesListInfo)
+	listInfo := C.yanet_get_cp_module_list_info(m.ptr)
+	if listInfo == nil {
+		return nil
+	}
+	defer C.cp_module_list_info_free(listInfo)
 
-	out := make([]CPConfig, 0, cpModulesListInfo.module_count)
+	return cpConfigs(listInfo)
+}
 
-	for idx := C.uint64_t(0); idx < cpModulesListInfo.module_count; idx++ {
-		moduleInfo := C.yanet_get_cp_module_info(cpModulesListInfo, idx)
+// cpConfigs copies a heap module list, publishing agent included; the list
+// stays owned by its holder.
+func cpConfigs(listInfo *C.struct_cp_module_list_info) []CPConfig {
+	out := make([]CPConfig, 0, listInfo.module_count)
+
+	for idx := C.uint64_t(0); idx < listInfo.module_count; idx++ {
+		moduleInfo := C.yanet_get_cp_module_info(listInfo, idx)
 
 		out = append(out, CPConfig{
-			Type: C.GoString(&moduleInfo._type[0]),
-			Name: C.GoString(&moduleInfo.name[0]),
-			Gen:  uint64(moduleInfo.gen),
+			Type:  C.GoString(&moduleInfo._type[0]),
+			Name:  C.GoString(&moduleInfo.name[0]),
+			Agent: C.GoString(&moduleInfo.agent[0]),
+			Gen:   uint64(moduleInfo.gen),
 		})
 	}
 
@@ -276,12 +286,21 @@ type Function struct {
 
 // Functions returns all functions configurations from the dataplane.
 func (m *DPConfig) Functions() []Function {
-	functionListInfo := C.yanet_get_cp_function_list_info(m.ptr)
-	defer C.cp_function_list_info_free(functionListInfo)
+	listInfo := C.yanet_get_cp_function_list_info(m.ptr)
+	if listInfo == nil {
+		return nil
+	}
+	defer C.cp_function_list_info_free(listInfo)
 
-	out := make([]Function, functionListInfo.function_count)
-	for idx := C.uint64_t(0); idx < functionListInfo.function_count; idx++ {
-		functionInfo := C.yanet_get_cp_function_info(functionListInfo, idx)
+	return functions(listInfo)
+}
+
+// functions copies a heap function list, chains included; the list stays
+// owned by its holder.
+func functions(listInfo *C.struct_cp_function_list_info) []Function {
+	out := make([]Function, listInfo.function_count)
+	for idx := C.uint64_t(0); idx < listInfo.function_count; idx++ {
+		functionInfo := C.yanet_get_cp_function_info(listInfo, idx)
 
 		chains := make([]Chain, functionInfo.chain_count)
 		for idx := range functionInfo.chain_count {
@@ -317,25 +336,34 @@ func (m *DPConfig) Functions() []Function {
 
 // Pipelines returns all pipeline configurations from the dataplane.
 func (m *DPConfig) Pipelines() []Pipeline {
-	pipelineListInfo := C.yanet_get_cp_pipeline_list_info(m.ptr)
-	defer C.cp_pipeline_list_info_free(pipelineListInfo)
+	listInfo := C.yanet_get_cp_pipeline_list_info(m.ptr)
+	if listInfo == nil {
+		return nil
+	}
+	defer C.cp_pipeline_list_info_free(listInfo)
 
-	out := make([]Pipeline, pipelineListInfo.count)
-	for idx := C.uint64_t(0); idx < pipelineListInfo.count; idx++ {
-		pipelineInfo := C.yanet_get_cp_pipeline_info(pipelineListInfo, idx)
+	return pipelines(listInfo)
+}
 
-		functions := make([]string, pipelineInfo.length)
+// pipelines copies a heap pipeline list; the list stays owned by its
+// holder.
+func pipelines(listInfo *C.struct_cp_pipeline_list_info) []Pipeline {
+	out := make([]Pipeline, listInfo.count)
+	for idx := C.uint64_t(0); idx < listInfo.count; idx++ {
+		pipelineInfo := C.yanet_get_cp_pipeline_info(listInfo, idx)
+
+		pipelineFunctions := make([]string, pipelineInfo.length)
 		for idx := range pipelineInfo.length {
 			function := C.yanet_get_cp_pipeline_function_info_id(
 				pipelineInfo,
 				idx,
 			)
-			functions[idx] = C.GoString(&function.name[0])
+			pipelineFunctions[idx] = C.GoString(&function.name[0])
 		}
 
 		out[idx] = Pipeline{
 			Name:      C.GoString(&pipelineInfo.name[0]),
-			Functions: functions,
+			Functions: pipelineFunctions,
 		}
 	}
 
@@ -422,7 +450,11 @@ type DPModule struct {
 type CPConfig struct {
 	Type string
 	Name string
-	Gen  uint64
+	// Agent is the name of the control-plane agent that published the
+	// module, telling a restarted process which service instance the
+	// running configuration came from.
+	Agent string
+	Gen   uint64
 }
 
 // Pipeline represents a dataplane packet processing pipeline configuration.
@@ -499,15 +531,21 @@ type DeviceInfo struct {
 
 // Devices returns all device information from the dataplane.
 func (m *DPConfig) Devices() []DeviceInfo {
-	deviceListInfo := C.yanet_get_cp_device_list_info(m.ptr)
-	if deviceListInfo == nil {
+	listInfo := C.yanet_get_cp_device_list_info(m.ptr)
+	if listInfo == nil {
 		return nil
 	}
-	defer C.cp_device_list_info_free(deviceListInfo)
+	defer C.cp_device_list_info_free(listInfo)
 
-	out := make([]DeviceInfo, deviceListInfo.device_count)
-	for idx := C.uint64_t(0); idx < deviceListInfo.device_count; idx++ {
-		deviceInfo := C.yanet_get_cp_device_info(deviceListInfo, idx)
+	return devices(listInfo)
+}
+
+// devices copies a heap device list, pipeline bindings included; the list
+// stays owned by its holder.
+func devices(listInfo *C.struct_cp_device_list_info) []DeviceInfo {
+	out := make([]DeviceInfo, listInfo.device_count)
+	for idx := C.uint64_t(0); idx < listInfo.device_count; idx++ {
+		deviceInfo := C.yanet_get_cp_device_info(listInfo, idx)
 		if deviceInfo == nil {
 			continue
 		}
@@ -565,6 +603,35 @@ func (m *DPConfig) Device(deviceType, name string) (DeviceInfo, bool) {
 		}
 	}
 	return DeviceInfo{}, false
+}
+
+// CPStructure is a mutually consistent snapshot of the control-plane
+// structure: modules, functions, pipelines and devices.
+//
+// All four lists are copied from one pinned configuration generation, so
+// concurrent updates cannot make the parts disagree.
+type CPStructure struct {
+	Modules   []CPConfig
+	Functions []Function
+	Pipelines []Pipeline
+	Devices   []DeviceInfo
+}
+
+// CPStructure returns the whole control-plane structure from a single
+// pinned generation, module provenance included.
+func (m *DPConfig) CPStructure() CPStructure {
+	structureInfo := C.yanet_get_cp_structure_info(m.ptr)
+	if structureInfo == nil {
+		return CPStructure{}
+	}
+	defer C.cp_structure_info_free(structureInfo)
+
+	return CPStructure{
+		Modules:   cpConfigs(structureInfo.modules),
+		Functions: functions(structureInfo.functions),
+		Pipelines: pipelines(structureInfo.pipelines),
+		Devices:   devices(structureInfo.devices),
+	}
 }
 
 type ModuleReference struct {

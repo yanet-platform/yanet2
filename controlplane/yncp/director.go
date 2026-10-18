@@ -133,6 +133,18 @@ func NewDirector(cfg *Config, options ...DirectorOption) (*Director, error) {
 		zap.Uint32("instance_id", cfg.Gateway.InstanceID.Unwrap()),
 	)
 
+	// The dataplane holds the authoritative structure across control-plane
+	// restarts, so reading it back here tells a restarted process which
+	// configurations survived it and which service instances published
+	// them.
+	structure := shm.DPConfig(cfg.Gateway.InstanceID.Unwrap()).CPStructure()
+	log.Info("read back the surviving control-plane structure",
+		zap.Int("modules", len(structure.Modules)),
+		zap.Int("functions", len(structure.Functions)),
+		zap.Int("pipelines", len(structure.Pipelines)),
+		zap.Int("devices", len(structure.Devices)),
+	)
+
 	bundle, err := bundle.NewBundle(cfg.Modules, cfg.Devices, bundle.WithLog(log))
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize bundle: %w", err)

@@ -910,12 +910,14 @@ cp_module_list_info_free(struct cp_module_list_info *module_list_info) {
 	free(module_list_info);
 }
 
-struct cp_module_list_info *
-yanet_get_cp_module_list_info(struct dp_config *dp_config) {
-	struct cp_config *cp_config = ADDR_OF(&dp_config->cp_config);
-	cp_config_lock(cp_config);
-
-	struct cp_config_gen *config_gen = ADDR_OF(&cp_config->cp_config_gen);
+// Copy the module registry of one held generation, recording the
+// publishing agent of every module.
+//
+// The caller holds the generation through a pin or the config lock; an
+// agent referenced by a module of that generation cannot be reclaimed
+// while the reference lasts, so the owner name read here stays valid.
+static struct cp_module_list_info *
+build_cp_module_list_info(struct cp_config_gen *config_gen) {
 	struct cp_module_registry *module_registry =
 		&config_gen->module_registry;
 
@@ -926,7 +928,7 @@ yanet_get_cp_module_list_info(struct dp_config *dp_config) {
 				module_registry->registry.capacity
 		);
 	if (module_list_info == NULL) {
-		goto unlock;
+		return NULL;
 	}
 
 	module_list_info->module_count = 0;
@@ -944,12 +946,29 @@ yanet_get_cp_module_list_info(struct dp_config *dp_config) {
 		}
 		strtcpy(info->type, cp_module->type, sizeof(info->type));
 		strtcpy(info->name, cp_module->name, sizeof(info->name));
+		struct agent *agent = ADDR_OF(&cp_module->agent);
+		if (agent != NULL) {
+			strtcpy(info->agent, agent->name, sizeof(info->agent));
+		} else {
+			info->agent[0] = '\0';
+		}
 		info->gen = cp_module->gen;
 
 		module_list_info->module_count += 1;
 	}
 
-unlock:
+	return module_list_info;
+}
+
+struct cp_module_list_info *
+yanet_get_cp_module_list_info(struct dp_config *dp_config) {
+	struct cp_config *cp_config = ADDR_OF(&dp_config->cp_config);
+	cp_config_lock(cp_config);
+
+	struct cp_config_gen *config_gen = ADDR_OF(&cp_config->cp_config_gen);
+	struct cp_module_list_info *module_list_info =
+		build_cp_module_list_info(config_gen);
+
 	cp_config_unlock(cp_config);
 
 	return module_list_info;
@@ -988,13 +1007,9 @@ cp_function_list_info_free(struct cp_function_list_info *function_list_info) {
 	free(function_list_info);
 }
 
-struct cp_function_list_info *
-yanet_get_cp_function_list_info(struct dp_config *dp_config) {
-	struct cp_config *cp_config = ADDR_OF(&dp_config->cp_config);
-	cp_config_lock(cp_config);
-	struct cp_config_gen *config_gen = cp_config_gen_acquire(cp_config);
-	cp_config_unlock(cp_config);
-
+// Copy the function registry of one pinned generation, chains included.
+static struct cp_function_list_info *
+build_cp_function_list_info(struct cp_config_gen *config_gen) {
 	struct cp_function_registry *function_registry =
 		&config_gen->function_registry;
 
@@ -1005,7 +1020,7 @@ yanet_get_cp_function_list_info(struct dp_config *dp_config) {
 				function_registry->registry.capacity
 		);
 	if (function_list_info == NULL) {
-		goto release;
+		return NULL;
 	}
 
 	function_list_info->function_count = 0;
@@ -1081,13 +1096,23 @@ yanet_get_cp_function_list_info(struct dp_config *dp_config) {
 		function_list_info->function_count += 1;
 	}
 
-	goto release;
+	return function_list_info;
 
 error_free:
 	cp_function_list_info_free(function_list_info);
-	function_list_info = NULL;
+	return NULL;
+}
 
-release:
+struct cp_function_list_info *
+yanet_get_cp_function_list_info(struct dp_config *dp_config) {
+	struct cp_config *cp_config = ADDR_OF(&dp_config->cp_config);
+	cp_config_lock(cp_config);
+	struct cp_config_gen *config_gen = cp_config_gen_acquire(cp_config);
+	cp_config_unlock(cp_config);
+
+	struct cp_function_list_info *function_list_info =
+		build_cp_function_list_info(config_gen);
+
 	cp_config_lock(cp_config);
 	cp_config_gen_release(cp_config, config_gen);
 	cp_config_unlock(cp_config);
@@ -1138,13 +1163,9 @@ cp_pipeline_list_info_free(struct cp_pipeline_list_info *pipeline_list_info) {
 	free(pipeline_list_info);
 }
 
-struct cp_pipeline_list_info *
-yanet_get_cp_pipeline_list_info(struct dp_config *dp_config) {
-	struct cp_config *cp_config = ADDR_OF(&dp_config->cp_config);
-	cp_config_lock(cp_config);
-	struct cp_config_gen *config_gen = cp_config_gen_acquire(cp_config);
-	cp_config_unlock(cp_config);
-
+// Copy the pipeline registry of one pinned generation.
+static struct cp_pipeline_list_info *
+build_cp_pipeline_list_info(struct cp_config_gen *config_gen) {
 	struct registry *pipeline_registry =
 		&config_gen->pipeline_registry.registry;
 
@@ -1155,7 +1176,7 @@ yanet_get_cp_pipeline_list_info(struct dp_config *dp_config) {
 				pipeline_registry->capacity
 		);
 	if (pipeline_list_info == NULL) {
-		goto release;
+		return NULL;
 	}
 
 	memset(pipeline_list_info,
@@ -1177,9 +1198,7 @@ yanet_get_cp_pipeline_list_info(struct dp_config *dp_config) {
 					cp_pipeline->length
 			);
 		if (pipeline_info == NULL) {
-			cp_pipeline_list_info_free(pipeline_list_info);
-			pipeline_list_info = NULL;
-			goto release;
+			goto error_free;
 		}
 
 		strtcpy(pipeline_info->name,
@@ -1195,7 +1214,23 @@ yanet_get_cp_pipeline_list_info(struct dp_config *dp_config) {
 			pipeline_info;
 	}
 
-release:
+	return pipeline_list_info;
+
+error_free:
+	cp_pipeline_list_info_free(pipeline_list_info);
+	return NULL;
+}
+
+struct cp_pipeline_list_info *
+yanet_get_cp_pipeline_list_info(struct dp_config *dp_config) {
+	struct cp_config *cp_config = ADDR_OF(&dp_config->cp_config);
+	cp_config_lock(cp_config);
+	struct cp_config_gen *config_gen = cp_config_gen_acquire(cp_config);
+	cp_config_unlock(cp_config);
+
+	struct cp_pipeline_list_info *pipeline_list_info =
+		build_cp_pipeline_list_info(config_gen);
+
 	cp_config_lock(cp_config);
 	cp_config_gen_release(cp_config, config_gen);
 	cp_config_unlock(cp_config);
@@ -1279,15 +1314,11 @@ yanet_build_device_info(struct cp_device *device, uint64_t index) {
 	return device_info;
 }
 
-struct cp_device_list_info *
-yanet_get_cp_device_list_info(struct dp_config *dp_config) {
-	struct cp_config *cp_config = ADDR_OF(&dp_config->cp_config);
-	cp_config_lock(cp_config);
-	struct cp_config_gen *cp_config_gen = cp_config_gen_acquire(cp_config);
-	cp_config_unlock(cp_config);
-
+// Copy the device registry of one pinned generation, bindings included.
+static struct cp_device_list_info *
+build_cp_device_list_info(struct cp_config_gen *config_gen) {
 	struct cp_device_registry *device_registry =
-		&cp_config_gen->device_registry;
+		&config_gen->device_registry;
 
 	size_t device_list_info_size =
 		sizeof(struct cp_device_list_info) +
@@ -1296,7 +1327,7 @@ yanet_get_cp_device_list_info(struct dp_config *dp_config) {
 	struct cp_device_list_info *device_list_info =
 		(struct cp_device_list_info *)malloc(device_list_info_size);
 	if (device_list_info == NULL) {
-		goto release;
+		return NULL;
 	}
 
 	memset(device_list_info, 0, device_list_info_size);
@@ -1304,16 +1335,14 @@ yanet_get_cp_device_list_info(struct dp_config *dp_config) {
 	for (uint64_t idx = 0; idx < device_registry->registry.capacity;
 	     ++idx) {
 		struct cp_device *cp_device =
-			cp_config_gen_get_device(cp_config_gen, idx);
+			cp_config_gen_get_device(config_gen, idx);
 		if (cp_device == NULL) {
 			continue;
 		}
 		struct cp_device_info *device_info =
 			yanet_build_device_info(cp_device, idx);
 		if (device_info == NULL) {
-			cp_device_list_info_free(device_list_info);
-			device_list_info = NULL;
-			goto release;
+			goto error_free;
 		}
 
 		device_list_info->devices[device_list_info->device_count] =
@@ -1321,7 +1350,23 @@ yanet_get_cp_device_list_info(struct dp_config *dp_config) {
 		device_list_info->device_count++;
 	}
 
-release:
+	return device_list_info;
+
+error_free:
+	cp_device_list_info_free(device_list_info);
+	return NULL;
+}
+
+struct cp_device_list_info *
+yanet_get_cp_device_list_info(struct dp_config *dp_config) {
+	struct cp_config *cp_config = ADDR_OF(&dp_config->cp_config);
+	cp_config_lock(cp_config);
+	struct cp_config_gen *cp_config_gen = cp_config_gen_acquire(cp_config);
+	cp_config_unlock(cp_config);
+
+	struct cp_device_list_info *device_list_info =
+		build_cp_device_list_info(cp_config_gen);
+
 	cp_config_lock(cp_config);
 	cp_config_gen_release(cp_config, cp_config_gen);
 	cp_config_unlock(cp_config);
@@ -1360,6 +1405,68 @@ yanet_get_cp_device_output_pipeline_info(
 	}
 
 	return device_info->pipelines + device_info->input_count + idx;
+}
+
+// Structure
+
+void
+cp_structure_info_free(struct cp_structure_info *structure_info) {
+	if (structure_info == NULL) {
+		return;
+	}
+	if (structure_info->modules != NULL) {
+		cp_module_list_info_free(structure_info->modules);
+	}
+	if (structure_info->functions != NULL) {
+		cp_function_list_info_free(structure_info->functions);
+	}
+	if (structure_info->pipelines != NULL) {
+		cp_pipeline_list_info_free(structure_info->pipelines);
+	}
+	if (structure_info->devices != NULL) {
+		cp_device_list_info_free(structure_info->devices);
+	}
+	free(structure_info);
+}
+
+// Copy the whole configuration structure of one pinned generation.
+//
+// The four copies share a single pin, so no list can come from a
+// generation another list was already replaced in. A part that fails its
+// copy takes the whole snapshot with it: a reader must not mistake a
+// missing part for an empty registry.
+struct cp_structure_info *
+yanet_get_cp_structure_info(struct dp_config *dp_config) {
+	struct cp_config *cp_config = ADDR_OF(&dp_config->cp_config);
+	cp_config_lock(cp_config);
+	struct cp_config_gen *config_gen = cp_config_gen_acquire(cp_config);
+	cp_config_unlock(cp_config);
+
+	struct cp_structure_info *structure_info =
+		(struct cp_structure_info *)malloc(sizeof(*structure_info));
+	if (structure_info == NULL) {
+		goto release;
+	}
+
+	structure_info->modules = build_cp_module_list_info(config_gen);
+	structure_info->functions = build_cp_function_list_info(config_gen);
+	structure_info->pipelines = build_cp_pipeline_list_info(config_gen);
+	structure_info->devices = build_cp_device_list_info(config_gen);
+
+	if (structure_info->modules == NULL ||
+	    structure_info->functions == NULL ||
+	    structure_info->pipelines == NULL ||
+	    structure_info->devices == NULL) {
+		cp_structure_info_free(structure_info);
+		structure_info = NULL;
+	}
+
+release:
+	cp_config_lock(cp_config);
+	cp_config_gen_release(cp_config, config_gen);
+	cp_config_unlock(cp_config);
+
+	return structure_info;
 }
 
 // Count the nodes of a memory_context subtree, depth-first.
