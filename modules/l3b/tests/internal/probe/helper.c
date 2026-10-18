@@ -16,7 +16,8 @@ _Thread_local struct l3b_probe_state *l3b_probe_active;
 // Both construction paths issue at most two decoder calls, IPv4 before IPv6,
 // and short-circuit so IPv6 is skipped when IPv4 fails. Each construction
 // wrapper installs fresh probe state before delegating, resetting the call
-// count for that construction. The decoder wrapper only observes progress.
+// count for that construction. The decoder wrapper observes progress and
+// scopes optional IPv6 decoder allocation failure.
 int
 l3b_probe_classify_decode(
 	struct memory_context *memory_context,

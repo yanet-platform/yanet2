@@ -4,11 +4,14 @@ package probe
 #cgo CFLAGS: -I../../../../../ -I../../../../../lib
 #cgo CFLAGS: -I../../../../../modules/l3b/dataplane
 #cgo CFLAGS: -I../../../../../build/subprojects/dpdk/lib
-#cgo CFLAGS: -D_GNU_SOURCE -march=haswell
+#cgo CFLAGS: -D_GNU_SOURCE
+#cgo amd64 CFLAGS: -march=haswell
 #cgo CFLAGS: -I../../../../../build/subprojects/dpdk -I../../../../../subprojects/dpdk/config
-#cgo CFLAGS: -I../../../../../subprojects/dpdk/lib/eal/include -I../../../../../subprojects/dpdk/lib/eal/linux/include -I../../../../../subprojects/dpdk/lib/eal/x86/include
+#cgo CFLAGS: -I../../../../../subprojects/dpdk/lib/eal/include -I../../../../../subprojects/dpdk/lib/eal/linux/include
+#cgo amd64 CFLAGS: -I../../../../../subprojects/dpdk/lib/eal/x86/include
 #cgo CFLAGS: -I../../../../../subprojects/dpdk/lib/mbuf -I../../../../../subprojects/dpdk/lib/mempool -I../../../../../subprojects/dpdk/lib/ring
 #cgo CFLAGS: -I../../../../../subprojects/dpdk/lib/log -I../../../../../subprojects/dpdk/lib/net
+#cgo LDFLAGS: -L../../../../../build/modules/l3b/tests -ll3b_probe_service
 #cgo LDFLAGS: -L../../../../../build/objects/l3b/api -ll3b_objects
 #cgo LDFLAGS: -L../../../../../build/lib/classify -lclassify_compiler
 #cgo LDFLAGS: -L../../../../../build/lib/statemap -lstatemap
@@ -30,12 +33,15 @@ import (
 // Masks bypass typed network validation at the actual C entrypoints.
 //
 // Each family starts with one zero-address network. Additional masks append
-// networks after that first descriptor; omitted masks remain wildcards.
+// networks within the selected rule; omitted masks remain wildcards. The
+// default is one rule. Selecting the second rule prepends a valid wildcard
+// rule; destination protocols remain active only on the first rule.
 type Masks struct {
 	IPv4           [4]byte
 	IPv6           [16]byte
 	AdditionalIPv4 [][4]byte
 	AdditionalIPv6 [][16]byte
+	InSecondRule   bool
 }
 
 // rawNetworks pins one network per family plus any appended raw masks.
@@ -118,18 +124,24 @@ func NewService(agent *ffi.Agent, table ffi.ObjectConfig, name string, masks Mas
 	defer pinner.Unpin()
 	networks4, networks6 := rawNetworks(masks, &pinner)
 	ports := C.struct_filter_port_range{from: 1, to: 65535}
-	rule := C.struct_l3b_source_filter_rule{
+	rules := []C.struct_l3b_source_filter_rule{{
 		net4s:       networks4,
 		net6s:       networks6,
 		port_ranges: C.struct_filter_port_ranges{items: &ports, count: 1},
+	}}
+	if masks.InSecondRule {
+		wildcardNetworks4, wildcardNetworks6 := rawNetworks(Masks{}, &pinner)
+		rules = append(rules, rules[0])
+		rules[0].net4s = wildcardNetworks4
+		rules[0].net6s = wildcardNetworks6
 	}
-	service := C.struct_l3b_virtual_service{source_filter_rules: &rule, source_filter_rule_count: 1, ring_capacity: 4}
+	service := C.struct_l3b_virtual_service{source_filter_rules: &rules[0], source_filter_rule_count: C.uint32_t(len(rules)), ring_capacity: 4}
 	config := C.struct_l3b_virtual_service_create_config{
 		agent: (*C.struct_agent)(agent.AsRawPtr()), name: cName,
 		session_table: (*C.struct_cp_object)(table.AsRawPtr()), virtual_service: &service,
 	}
 	pinner.Pin(&ports)
-	pinner.Pin(&rule)
+	pinner.Pin(&rules[0])
 	pinner.Pin(&service)
 	pinner.Pin(&config)
 	var cWitness C.struct_l3b_probe_witness
@@ -176,14 +188,21 @@ func UpdateModule(module ffi.ModuleConfig, serviceName string, masks Masks, fail
 	defer pinner.Unpin()
 	networks4, networks6 := rawNetworks(masks, &pinner)
 	protocols := C.struct_filter_proto_range{from: 0x0600, to: 0x06ff}
-	rule := C.struct_l3b_destination_filter_rule{
+	rules := []C.struct_l3b_destination_filter_rule{{
 		net4s:           networks4,
 		net6s:           networks6,
 		proto_ranges:    C.struct_filter_proto_ranges{items: &protocols, count: 1},
 		virtual_service: cName,
+	}}
+	if masks.InSecondRule {
+		wildcardNetworks4, wildcardNetworks6 := rawNetworks(Masks{}, &pinner)
+		rules = append(rules, rules[0])
+		rules[0].net4s = wildcardNetworks4
+		rules[0].net6s = wildcardNetworks6
+		rules[1].proto_ranges = C.struct_filter_proto_ranges{}
 	}
 	pinner.Pin(&protocols)
-	pinner.Pin(&rule)
+	pinner.Pin(&rules[0])
 	var cWitness C.struct_l3b_probe_witness
 	var cError *C.yanet_error
 	pinner.Pin(&cWitness)
@@ -192,7 +211,7 @@ func UpdateModule(module ffi.ModuleConfig, serviceName string, masks Masks, fail
 	if failIPv6 {
 		fail = 1
 	}
-	result := C.l3b_probe_module_update((*C.struct_cp_module)(module.AsRawPtr()), &rule, 1, fail, &cWitness, &cError)
+	result := C.l3b_probe_module_update((*C.struct_cp_module)(module.AsRawPtr()), &rules[0], C.uint32_t(len(rules)), fail, &cWitness, &cError)
 	if result != 0 {
 		return witness(cWitness), cerrors.FromC(unsafe.Pointer(cError))
 	}

@@ -115,7 +115,8 @@ test_icmp_type_accepts_full_header(void) {
 	return TEST_SUCCESS;
 }
 
-// Verifies that complete head-resident TCP, UDP and ICMP remain classifiable.
+// Verifies that complete head-resident TCP, UDP and ICMP pass the residency
+// guard.
 static int
 test_headers_resident_accepts_whole_packets(void) {
 	struct {

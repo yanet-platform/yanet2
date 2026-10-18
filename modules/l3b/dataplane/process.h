@@ -50,8 +50,6 @@ l3b_packet_icmp_type(const struct packet *packet) {
 		if (rte_pktmbuf_data_len(mbuf) <
 		    (uint32_t)packet->transport_header.offset +
 			    sizeof(struct yanet_icmp_hdr)) {
-			// The head segment holds no complete header to
-			// classify or rewrite.
 			return -1;
 		}
 		const struct yanet_icmp_hdr *icmp = rte_pktmbuf_mtod_offset(
@@ -79,9 +77,10 @@ l3b_packet_icmp_type(const struct packet *packet) {
 
 // Classifier keys and Echo rewrites require fixed/base headers in the head.
 //
-// This checks base IP, fixed TCP/UDP and complete ICMP headers, not TCP
-// options. Unread protocols and globally short ICMP messages stay exempt:
-// neither enters classification or Echo rewriting.
+// This checks base IP and fixed TCP/UDP headers, not TCP options. ICMP and
+// ICMPv6 require only the type byte for non-Echo messages, all eight header
+// bytes for Echo. Unread protocols and globally short ICMP messages stay
+// exempt: neither enters classification or Echo rewriting.
 static inline bool
 l3b_packet_headers_are_head_resident(const struct packet *packet) {
 	struct rte_mbuf *mbuf = packet_to_mbuf((struct packet *)packet);
@@ -124,6 +123,24 @@ l3b_packet_headers_are_head_resident(const struct packet *packet) {
 		}
 	} else {
 		return true;
+	}
+
+	if (packet->transport_header.type == IPPROTO_ICMP ||
+	    packet->transport_header.type == IPPROTO_ICMPV6) {
+		if (data_len <= packet->transport_header.offset) {
+			return false;
+		}
+		uint8_t icmp_type = *rte_pktmbuf_mtod_offset(
+			mbuf, const uint8_t *, packet->transport_header.offset
+		);
+		bool is_echo =
+			packet->network_header.type ==
+					rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV4)
+				? icmp_type == ICMP_ECHO
+				: icmp_type == RTE_ICMP6_ECHO_REQUEST;
+		if (!is_echo) {
+			return true;
+		}
 	}
 
 	return data_len >= packet->transport_header.offset + transport_len;

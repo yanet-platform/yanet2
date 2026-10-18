@@ -162,8 +162,6 @@ struct l3b_source_classifier_ip4 {
 	struct vline rule_map;
 };
 
-// Source classifier of the IPv6 family, in the same shape as the IPv4
-// one.
 struct l3b_source_classifier_ip6 {
 	struct classify_attr_net6 src_attr;
 	struct classify_attr_port port_attr;

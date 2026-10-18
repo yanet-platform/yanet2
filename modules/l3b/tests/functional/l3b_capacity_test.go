@@ -73,6 +73,10 @@ func Test_L3bProbe_RawMasks(t *testing.T) {
 		{name: "two valid IPv4 networks", masks: probe.Masks{AdditionalIPv4: [][4]byte{{0xff, 0xff}}}, valid: true},
 		{name: "two valid IPv6 networks", masks: probe.Masks{AdditionalIPv6: [][16]byte{{0xff, 0xff}}}, valid: true},
 		{name: "valid first IPv6 network then second with cross boundary gap", masks: probe.Masks{AdditionalIPv6: [][16]byte{{0xff, 0xff, 8: 0xff, 9: 0xff}}}, valid: true},
+		{name: "second rule IPv4 hole", masks: probe.Masks{InSecondRule: true, IPv4: [4]byte{0xff, 0x7f}}},
+		{name: "second rule IPv6 first half hole", masks: probe.Masks{InSecondRule: true, IPv6: [16]byte{0xff, 0x7f}}},
+		{name: "second rule IPv6 second half hole", masks: probe.Masks{InSecondRule: true, IPv6: [16]byte{8: 0xff, 9: 0x7f}}},
+		{name: "valid second rule IPv4 prefix and IPv6 cross boundary gap", masks: probe.Masks{InSecondRule: true, IPv4: [4]byte{0xff, 0xff}, IPv6: [16]byte{0xff, 0xff, 8: 0xff, 9: 0xff}}, valid: true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -184,8 +188,6 @@ func Test_L3bProbe_DestinationFailureRestoresCapacity(t *testing.T) {
 
 // TestL3bVirtualService_RepeatedCreateReturnsAgentCapacity verifies that
 // alternating compiled and rule-less services preserve post-warm-up capacity.
-//
-// Each round creates and frees a dual-family service, then a rule-less service.
 func TestL3bVirtualService_RepeatedCreateReturnsAgentCapacity(t *testing.T) {
 	agent := newCapacityAgent(t)
 
@@ -214,7 +216,6 @@ func TestL3bVirtualService_RepeatedCreateReturnsAgentCapacity(t *testing.T) {
 		require.NoError(t, table.Free())
 	}
 
-	// The capacity reference is measured after one compiled/rule-less warm-up round.
 	createAndFree(dualFamily)
 	createAndFree(cl3bobject.VirtualServiceConfig{})
 

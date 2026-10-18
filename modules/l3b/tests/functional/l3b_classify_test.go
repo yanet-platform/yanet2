@@ -343,7 +343,7 @@ func Test_L3b_FirstMatchBatchBoundary(t *testing.T) {
 	packets := make([][][]byte, 0, 514)
 	for idx := range 257 {
 		destination4, destination6 := "192.168.1.1", "2001:db8:2::1"
-		if idx%2 != 0 {
+		if idx%2 != 0 || idx == 256 {
 			destination4, destination6 = "192.168.1.2", "2001:db8:2::2"
 		}
 		packets = append(packets,
@@ -361,7 +361,7 @@ func Test_L3b_FirstMatchBatchBoundary(t *testing.T) {
 		require.True(t, info.IsTunneled)
 		// Packet order identifies the service expected at each family boundary.
 		expected := "172.16.0.10"
-		if (idx/2)%2 != 0 {
+		if (idx/2)%2 != 0 || idx/2 == 256 {
 			expected = "172.16.0.11"
 		}
 		require.Equal(t, expected, info.DstIP.String(), "packet %d", idx)
@@ -496,6 +496,71 @@ func Test_L3b_SegmentedHeadersFailClosed(t *testing.T) {
 			}
 			require.Zero(t, outputHead[tc.headerLength-7])
 			require.Equal(t, frame[tc.headerLength-4:tc.headerLength], outputHead[tc.headerLength-4:])
+		})
+	}
+}
+
+// Test_L3b_SegmentedICMPErrorsPassthrough verifies that readable non-Echo types
+// pass unchanged, absent types drop, and following TCP still tunnels.
+//
+// Chained packet comparisons cover only the observable head bytes.
+func Test_L3b_SegmentedICMPErrorsPassthrough(t *testing.T) {
+	harness, agent := setupL3bHarness(t, "port0", "test")
+	wirePipeline(t, agent, "port0", "test")
+	publishClassifyService(t, agent, "svc", "172.16.0.10", []cl3bobject.SourceFilterRule{{
+		Net4s: []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
+		Net6s: []xnetip.BiContiguous{filter.UnspecifiedIPv6},
+	}})
+	publishClassifyModule(t, agent, "test", []cl3b.DestinationFilterRule{{
+		Net4s: []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
+		Net6s: []xnetip.BiContiguous{filter.UnspecifiedIPv6},
+		ProtoRanges: filter.ProtoRanges{
+			filter.NewProtoRange(1, filter.AnySubtype()),
+			filter.NewProtoRange(58, filter.AnySubtype()),
+			filter.NewProtoRange(6, filter.AnySubtype()),
+		},
+		VirtualService: "svc",
+	}})
+	for _, tc := range []struct {
+		name, source, destination string
+		protocol, subtype, code   byte
+		networkLength             int
+	}{
+		{"IPv4 fragmentation needed", "10.0.0.1", "192.168.1.1", 1, 3, 4, 20},
+		{"IPv6 packet too big", "2001:db8:1::1", "2001:db8:2::1", 58, 2, 0, 40},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			quoted := classifyFrame(tc.destination, tc.source, 80, 12345, 6, 2, nil)
+			frame := classifyFrame(
+				tc.source, tc.destination, 0, 0, tc.protocol, tc.subtype,
+				quoted[ethHeaderLen:],
+			)
+			transportOffset := ethHeaderLen + tc.networkLength
+			frame[transportOffset+1] = tc.code
+			binary.BigEndian.PutUint32(frame[transportOffset+4:transportOffset+8], 1280)
+			packets := [][][]byte{}
+			for _, headBytes := range []int{1, 4, 7} {
+				splitOffset := transportOffset + headBytes
+				packets = append(packets, [][]byte{frame[:splitOffset], frame[splitOffset:]})
+			}
+			control := classifyFrame(tc.source, tc.destination, 12345, 80, 6, 2, nil)
+			packets = append(packets,
+				[][]byte{frame[:transportOffset], frame[transportOffset:]},
+				[][]byte{frame},
+				[][]byte{control},
+			)
+			result, err := harness.HandleSegmentedPackets(packets...)
+			require.NoError(t, err)
+			require.Equal(t, [][]byte{frame[:transportOffset]}, result.Drop)
+			require.Len(t, result.Output, 5)
+			for idx, headBytes := range []int{1, 4, 7} {
+				require.Equal(t, frame[:transportOffset+headBytes], result.Output[idx], "ICMP bytes in head: %d", headBytes)
+			}
+			require.Equal(t, frame, result.Output[3])
+			info, err := framework.NewPacketParser().ParsePacket(result.Output[4])
+			require.NoError(t, err)
+			require.True(t, info.IsTunneled)
+			require.Equal(t, "172.16.0.10", info.DstIP.String())
 		})
 	}
 }
