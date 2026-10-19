@@ -106,7 +106,8 @@ fn deserialize_forward_mode<'de, D: Deserializer<'de>>(deserializer: D) -> Resul
 
 fn forward_client(channel: LayeredChannel) -> ForwardServiceClient<LayeredChannel> {
     ForwardServiceClient::new(channel)
-        .send_compressed(CompressionEncoding::Gzip)
+        .send_compressed(CompressionEncoding::Zstd)
+        .accept_compressed(CompressionEncoding::Zstd)
         .accept_compressed(CompressionEncoding::Gzip)
 }
 

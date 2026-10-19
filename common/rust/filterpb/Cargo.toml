@@ -12,7 +12,7 @@ workspace = true
 [dependencies]
 prost = "0.14"
 serde = { version = "1", features = ["derive"] }
-tonic = { version = "0.14", features = ["gzip"] }
+tonic = { version = "0.14", features = ["gzip", "zstd"] }
 
 [dev-dependencies]
 serde_json = "1"

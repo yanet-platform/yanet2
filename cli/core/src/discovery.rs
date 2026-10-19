@@ -213,7 +213,8 @@ impl Family {
 pub async fn list_services(connection: &Connection, suffix: &str) -> Result<Vec<String>, Error> {
     let mut service = Service::new(connection, GATEWAY_SERVICE, |channel: LayeredChannel| {
         GatewayClient::new(channel)
-            .send_compressed(CompressionEncoding::Gzip)
+            .send_compressed(CompressionEncoding::Zstd)
+            .accept_compressed(CompressionEncoding::Zstd)
             .accept_compressed(CompressionEncoding::Gzip)
     });
 

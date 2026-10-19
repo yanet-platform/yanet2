@@ -38,9 +38,9 @@ has the manifest, `build.rs`, skeleton and registration steps for a new binary.
 - The tonic build generates both client and server modules, so the CLI imports
   `SERVICE_NAME` from the generated `<x>_service_server` module. A crate that
   builds its client at a single site keeps the builder inline:
-  `|channel| <X>ServiceClient::new(channel).send_compressed(Gzip)
-  .accept_compressed(Gzip)`. Once the crate builds it at more than one site,
-  pull it into `fn client(channel: LayeredChannel) ->
+  `|channel| <X>ServiceClient::new(channel).send_compressed(Zstd)
+  .accept_compressed(Zstd).accept_compressed(Gzip)`. Once the crate builds it at
+  more than one site, pull it into `fn client(channel: LayeredChannel) ->
   <X>ServiceClient<LayeredChannel>`, named `<x>_client` only when the crate
   imports the `ync::client` module under that name. One service:
   `Service::connect_for(&cmd.globals.connection, action, SERVICE_NAME,

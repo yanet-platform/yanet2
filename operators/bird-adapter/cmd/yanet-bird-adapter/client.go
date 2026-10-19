@@ -12,10 +12,10 @@ import (
 	"go.uber.org/zap/zapcore"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
-	"google.golang.org/grpc/encoding/gzip"
 
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
 	"github.com/yanet-platform/yanet2/common/go/xcfg"
+	"github.com/yanet-platform/yanet2/common/go/xgrpc"
 	adapterpb "github.com/yanet-platform/yanet2/operators/bird-adapter/adapterpb/v1"
 )
 
@@ -113,7 +113,7 @@ func runClient() error {
 	conn, err := grpc.NewClient(
 		serverCfg.ListenAddr,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
-		grpc.WithDefaultCallOptions(grpc.UseCompressor(gzip.Name)),
+		grpc.WithDefaultCallOptions(grpc.UseCompressor(xgrpc.ZstdName)),
 	)
 	if err != nil {
 		return fmt.Errorf("failed to connect to adapter server: %w", err)
@@ -183,7 +183,7 @@ func runListSessions() error {
 	conn, err := grpc.NewClient(
 		serverCfg.ListenAddr,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
-		grpc.WithDefaultCallOptions(grpc.UseCompressor(gzip.Name)),
+		grpc.WithDefaultCallOptions(grpc.UseCompressor(xgrpc.ZstdName)),
 	)
 	if err != nil {
 		return fmt.Errorf("failed to connect to adapter server: %w", err)

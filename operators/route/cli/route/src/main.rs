@@ -37,7 +37,8 @@ pub mod operatorpb {
 
 fn client(channel: LayeredChannel) -> RouteServiceClient<LayeredChannel> {
     RouteServiceClient::new(channel)
-        .send_compressed(CompressionEncoding::Gzip)
+        .send_compressed(CompressionEncoding::Zstd)
+        .accept_compressed(CompressionEncoding::Zstd)
         .accept_compressed(CompressionEncoding::Gzip)
 }
 

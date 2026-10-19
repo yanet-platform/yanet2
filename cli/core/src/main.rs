@@ -247,7 +247,8 @@ fn run_auth_whoami(matches: &ArgMatches) -> i32 {
 async fn whoami(connection: &ConnectionArgs) -> Result<(String, Principal), Error> {
     let mut service = Service::connect_for(connection, "whoami", AUTH_SERVICE_NAME, |channel| {
         AuthServiceClient::new(channel)
-            .send_compressed(CompressionEncoding::Gzip)
+            .send_compressed(CompressionEncoding::Zstd)
+            .accept_compressed(CompressionEncoding::Zstd)
             .accept_compressed(CompressionEncoding::Gzip)
     })
     .await?;

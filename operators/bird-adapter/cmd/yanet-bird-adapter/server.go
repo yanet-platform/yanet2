@@ -15,7 +15,6 @@ import (
 	"go.uber.org/zap/zapcore"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
-	_ "google.golang.org/grpc/encoding/gzip"
 
 	"github.com/yanet-platform/yanet2/common/go/logging"
 	"github.com/yanet-platform/yanet2/common/go/xcfg"
@@ -129,8 +128,8 @@ func (m *BIRDConfig) Validate() error {
 // interceptor chains.
 func newGRPCServer() *grpc.Server {
 	return grpc.NewServer(
-		grpc.ChainUnaryInterceptor(xgrpc.ValidateUnaryInterceptor()),
-		grpc.ChainStreamInterceptor(xgrpc.ValidateStreamInterceptor()),
+		grpc.ChainUnaryInterceptor(xgrpc.ResponseCompressionUnaryInterceptor(), xgrpc.ValidateUnaryInterceptor()),
+		grpc.ChainStreamInterceptor(xgrpc.ResponseCompressionStreamInterceptor(), xgrpc.ValidateStreamInterceptor()),
 	)
 }
 

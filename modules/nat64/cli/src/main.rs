@@ -24,7 +24,8 @@ pub mod nat64pb {
 
 fn client(channel: LayeredChannel) -> Nat64ServiceClient<LayeredChannel> {
     Nat64ServiceClient::new(channel)
-        .send_compressed(CompressionEncoding::Gzip)
+        .send_compressed(CompressionEncoding::Zstd)
+        .accept_compressed(CompressionEncoding::Zstd)
         .accept_compressed(CompressionEncoding::Gzip)
 }
 

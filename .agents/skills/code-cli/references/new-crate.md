@@ -40,7 +40,7 @@ clap_complete = { version = "4.5", features = ["unstable-dynamic"] }
 netip = "0.3"
 prost = "0.14"
 serde = { version = "1", features = ["derive"] }
-tonic = { version = "0.14", features = ["gzip"] }
+tonic = { version = "0.14", features = ["gzip", "zstd"] }
 tonic-prost = "0.14"
 
 [build-dependencies]
@@ -111,7 +111,8 @@ pub mod <x>pb {
 
 fn client(channel: LayeredChannel) -> <X>ServiceClient<LayeredChannel> {
     <X>ServiceClient::new(channel)
-        .send_compressed(CompressionEncoding::Gzip)
+        .send_compressed(CompressionEncoding::Zstd)
+        .accept_compressed(CompressionEncoding::Zstd)
         .accept_compressed(CompressionEncoding::Gzip)
 }
 

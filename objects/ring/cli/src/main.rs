@@ -27,7 +27,8 @@ pub mod ringpb {
 
 fn client(channel: LayeredChannel) -> RingServiceClient<LayeredChannel> {
     RingServiceClient::new(channel)
-        .send_compressed(CompressionEncoding::Gzip)
+        .send_compressed(CompressionEncoding::Zstd)
+        .accept_compressed(CompressionEncoding::Zstd)
         .accept_compressed(CompressionEncoding::Gzip)
 }
 
