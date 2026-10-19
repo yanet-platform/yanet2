@@ -19,7 +19,7 @@ struct dataplane_ut_worker_spec {
 // Construction parameters for an in-process dataplane harness.
 // worker_count must be >= 1.
 //
-// The three list pairs may be empty.
+// The four list pairs may be empty.
 struct dataplane_ut_config {
 	size_t cp_memory;
 	size_t dp_memory;
@@ -33,15 +33,17 @@ struct dataplane_ut_config {
 	const char *const *modules;
 	size_t module_count;
 
-	// Directory scanned for module .so plugins. NULL or empty loads
-	// only statically-linked built-ins.
+	// Directory scanned for .so plugins providing modules or object
+	// types. NULL or empty loads only statically-linked built-ins.
 	const char *plugin_dir;
 
 	const char *const *devices_to_load;
 	size_t devices_to_load_count;
 
-	// Object type names to load via dp_load_object (resolving
-	// new_object_<name> from the main binary). May be empty.
+	// Object type names to load; a repeated name loads once. May be empty.
+	//
+	// A type's constructor resolves from the main binary or from a plugin
+	// in the plugin directory, so a plugin-provided type needs it set.
 	const char *const *objects_to_load;
 	size_t objects_to_load_count;
 

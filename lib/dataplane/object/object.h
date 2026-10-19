@@ -11,9 +11,8 @@
  * stable dataplane index at init time, mirroring modules and devices,
  * and so it can declare the per-context preparation below.
  *
- * The load-handler typedef is resolved by dp_load_object from a
- * new_object_<name> constructor exported by the main binary, parallel to
- * dp_load_module and dp_load_device.
+ * A type is loaded through its exported new_object_<name> constructor,
+ * which the main binary or a plugin may provide.
  */
 #define OBJECT_TYPE_LEN 80
 

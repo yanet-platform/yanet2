@@ -9,12 +9,14 @@
 
 #include "common/memory.h"
 #include "common/memory_block.h"
+#include "common/strutils.h"
 #include "common/test_assert.h"
 
 #include "lib/controlplane/agent/agent.h"
 #include "lib/controlplane/config/cp_object.h"
 #include "lib/controlplane/config/econtext.h"
 #include "lib/controlplane/config/zone.h"
+#include "lib/dataplane/object/object.h"
 
 #include "lib/counters/counters.h"
 
@@ -868,6 +870,18 @@ test_module_object_link_missing_fails(struct yanet_shm *shm) {
 
 	agent_detach(agent);
 	return TEST_SUCCESS;
+}
+
+// Constructor of the "test" object type, which the harness resolves from
+// this executable: it declares no hook and no prepared buffer.
+struct object *
+new_object_test(void) {
+	struct object *object =
+		(struct object *)calloc(1, sizeof(struct object));
+	if (object != NULL) {
+		strtcpy(object->name, "test", sizeof(object->name));
+	}
+	return object;
 }
 
 int

@@ -139,6 +139,13 @@ keep_refs(void **ptrs) {
 	extern struct device *new_device_vlan(void);
 	extern struct device *new_device_vxlan(void);
 
+	extern struct object *new_object_fwstate_map_v4(void);
+	extern struct object *new_object_fwstate_map_v6(void);
+	extern struct object *new_object_l3b_session_table(void);
+	extern struct object *new_object_l3b_virtual_service(void);
+	extern struct object *new_object_ring(void);
+	extern struct object *new_object_route_fib(void);
+
 	static void *funcs[] = {
 		new_module_blackhole,
 		new_module_l3b,
@@ -157,6 +164,13 @@ keep_refs(void **ptrs) {
 		new_device_plain,
 		new_device_vlan,
 		new_device_vxlan,
+
+		new_object_fwstate_map_v4,
+		new_object_fwstate_map_v6,
+		new_object_l3b_session_table,
+		new_object_l3b_virtual_service,
+		new_object_ring,
+		new_object_route_fib,
 	};
 
 	*ptrs = funcs;
@@ -203,10 +217,14 @@ type Config struct {
 	Devices           []string
 	Modules           []string
 	DevicesToLoad     []string
-	// ObjectsToLoad registers standalone shared-memory object types (e.g. "fwstate_map_v4") in the dataplane config.
+	// ObjectsToLoad lists object types (e.g. "fwstate_map_v4") loaded through
+	// their constructors; a repeated name loads once.
+	//
+	// A name with no constructor in the test binary or a plugin fails
+	// harness creation.
 	ObjectsToLoad []string
-	// PluginDir is the directory scanned for module .so plugins. An empty
-	// value loads only the statically-linked built-ins.
+	// PluginDir is the directory scanned for .so plugins providing modules or
+	// object types. An empty value loads only the statically-linked built-ins.
 	PluginDir string
 	// Workers optionally assigns each worker's device and queue.
 	//

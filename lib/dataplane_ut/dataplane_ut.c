@@ -19,6 +19,7 @@
 #include "lib/dataplane/config/bootstrap.h"
 #include "lib/dataplane/config/counter_storage.h"
 #include "lib/dataplane/config/module_loader.h"
+#include "lib/dataplane/config/object_loader.h"
 #include "lib/dataplane/config/plugin_loader.h"
 #include "lib/dataplane/config/topology.h"
 #include "lib/dataplane/config/zone.h"
@@ -171,35 +172,18 @@ dataplane_ut_new(const struct dataplane_ut_config *cfg) {
 		}
 	}
 
-	// Register requested object types directly. The harness owns no
-	// dlsym constructor for them, so fill the dp_objects array in place
-	// rather than going through dp_load_object; cp_object_init only needs
-	// the type name resolvable via dp_config_lookup_object.
-	if (cfg->objects_to_load_count > 0) {
-		struct dp_object *dp_objects =
-			(struct dp_object *)memory_balloc(
-				&ut->dp_config->memory_context,
-				cfg->objects_to_load_count *
-					sizeof(struct dp_object)
-			);
-		if (dp_objects == NULL) {
+	// Load requested object types through their constructors, so each
+	// type keeps the commit hook and prepared size it declares.
+	for (size_t idx = 0; idx < cfg->objects_to_load_count; ++idx) {
+		if (dp_load_object(
+			    ut->dp_config, bin_hndl, cfg->objects_to_load[idx]
+		    ) == -1) {
 			LOG(ERROR,
-			    "dataplane_ut_new: failed to allocate dp_objects");
+			    "dataplane_ut_new: failed to load object %s",
+			    cfg->objects_to_load[idx]);
 			dataplane_ut_free(ut);
 			return NULL;
 		}
-		// Zero the slots so the commit hook and prepared size start
-		// unset, like a constructor-allocated struct object would.
-		memset(dp_objects,
-		       0,
-		       cfg->objects_to_load_count * sizeof(struct dp_object));
-		for (size_t idx = 0; idx < cfg->objects_to_load_count; ++idx) {
-			strtcpy(dp_objects[idx].name,
-				cfg->objects_to_load[idx],
-				sizeof(dp_objects[idx].name));
-		}
-		SET_OFFSET_OF(&ut->dp_config->dp_objects, dp_objects);
-		ut->dp_config->object_count = cfg->objects_to_load_count;
 	}
 
 	// Populate dp_topology with the logical port names from cfg.

@@ -36,7 +36,7 @@ dp_load_object(struct dp_config *dp_config, void *bin_hndl, const char *name) {
 		    &dp_config->object_count
 	    )) {
 		LOG(ERROR, "failed to allocate memory for object %s", name);
-		// FIXME: free object
+		free(object);
 		return -1;
 	}
 
