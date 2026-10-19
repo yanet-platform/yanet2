@@ -44,7 +44,7 @@ test_memory_tree_exported(void) {
 	yanet_error *err = NULL;
 	struct cp_config_gen *gen = cp_config_gen_new(sys, &err);
 	TEST_ASSERT_NOT_NULL(gen, "cp_config_gen_new failed");
-	SET_OFFSET_OF(&cp->cp_config_gen, gen);
+	cp_config_publish_gen(cp, gen);
 
 	// Build a small named agent directly in shared memory.
 	struct agent *ag =
@@ -214,7 +214,7 @@ test_memory_tree_after_fini(void) {
 	yanet_error *err = NULL;
 	struct cp_config_gen *gen = cp_config_gen_new(sys, &err);
 	TEST_ASSERT_NOT_NULL(gen, "cp_config_gen_new failed");
-	SET_OFFSET_OF(&cp->cp_config_gen, gen);
+	cp_config_publish_gen(cp, gen);
 
 	struct agent *ag =
 		(struct agent *)memory_balloc(&cp->memory_context, sizeof(*ag));

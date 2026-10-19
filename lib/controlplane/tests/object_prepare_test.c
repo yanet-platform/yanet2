@@ -211,7 +211,7 @@ object_prepare_test_setup(
 		err ? yanet_error_message(err) : "?"
 	);
 
-	env->gen = ADDR_OF(&env->cp_config->cp_config_gen);
+	env->gen = cp_config_current_gen(env->cp_config);
 
 	return TEST_SUCCESS;
 }
@@ -379,7 +379,7 @@ run_object_prepare_null_handler_buffer_without_call_test(
 		err ? yanet_error_message(err) : "?"
 	);
 
-	struct cp_config_gen *gen = ADDR_OF(&env->cp_config->cp_config_gen);
+	struct cp_config_gen *gen = cp_config_current_gen(env->cp_config);
 	struct config_gen_ectx *ectx = cp_config_gen_worker_ectx(gen, 0);
 	struct object_ectx *no_buffer_ectx =
 		object_prepare_test_find_object_ectx(

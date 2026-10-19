@@ -334,7 +334,13 @@ counter_storage_spawn(
 	// wrapper rebuild, pool copy, and handle resolution.
 	if (old_counter_storage != NULL &&
 	    ADDR_OF(&old_counter_storage->registry) == counter_registry) {
-		old_counter_storage->refcnt += 1;
+		// Gains only ever happen while building under the
+		// configuration lock, but drops run from a retired
+		// generation's unlocked teardown, so the shared count moves
+		// with atomics.
+		__atomic_add_fetch(
+			&old_counter_storage->refcnt, 1, __ATOMIC_RELAXED
+		);
 		return old_counter_storage;
 	}
 
@@ -396,7 +402,9 @@ counter_storage_spawn(
 				struct counter_storage_block *block =
 					ADDR_OF(ADDR_OF(&old_pool->blocks) + idx
 					);
-				block->refcnt += 1;
+				__atomic_fetch_add(
+					&block->refcnt, 1, __ATOMIC_RELAXED
+				);
 				SET_OFFSET_OF(new_blocks + idx, block);
 
 				++idx;
@@ -488,7 +496,12 @@ counter_storage_pool_fini(
 			continue;
 		}
 
-		if (--block->refcnt == 0) {
+		// The release that reaches zero is the sole owner of the
+		// pages: every earlier sharer's reads order before its own
+		// drop by the acquire-release exchange, and new shares only
+		// appear under the configuration lock.
+		if (__atomic_sub_fetch(&block->refcnt, 1, __ATOMIC_ACQ_REL) ==
+		    0) {
 			memory_bfree(
 				memory_context,
 				ADDR_OF(&block->pages),
@@ -515,7 +528,10 @@ counter_storage_free(struct counter_storage *storage) {
 		return;
 	}
 
-	if (--storage->refcnt > 0) {
+	// The sole zero-transition owns the teardown, ordered against all
+	// earlier sharers by the acquire-release exchange; racing builds
+	// only add references under the configuration lock.
+	if (__atomic_sub_fetch(&storage->refcnt, 1, __ATOMIC_ACQ_REL) > 0) {
 		return;
 	}
 

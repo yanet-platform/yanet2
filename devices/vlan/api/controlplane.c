@@ -62,7 +62,10 @@ cp_device_vlan_free(struct cp_device *cp_device, yanet_error **err) {
 		return -1;
 	}
 
+	struct agent *owner = ADDR_OF(&cp_device->agent);
+
 	cp_device_vlan_destroy(cp_device);
+	agent_destroy_released(owner, AGENT_REFERENCE_DEVICE);
 	return 0;
 }
 
@@ -71,12 +74,10 @@ cp_device_vlan_get_vlan(
 	struct agent *agent, const char *name, uint16_t *vlan, yanet_error **err
 ) {
 	struct cp_config *cp_config = ADDR_OF(&agent->cp_config);
-	cp_config_lock(cp_config);
+	struct cp_config_gen *config_gen = cp_config_gen_acquire(cp_config);
 
-	struct cp_config_gen *cp_config_gen =
-		ADDR_OF(&cp_config->cp_config_gen);
 	struct cp_device *cp_device = cp_device_registry_lookup(
-		&cp_config_gen->device_registry, "vlan", name
+		&config_gen->device_registry, "vlan", name
 	);
 	if (cp_device == NULL) {
 		yanet_error_add_kind(
@@ -85,13 +86,13 @@ cp_device_vlan_get_vlan(
 			"vlan device '%s' not found",
 			name
 		);
-		cp_config_unlock(cp_config);
+		cp_config_gen_release(cp_config, config_gen);
 		return -1;
 	}
 
 	*vlan = container_of(cp_device, struct cp_device_vlan, cp_device)->vlan;
 
-	cp_config_unlock(cp_config);
+	cp_config_gen_release(cp_config, config_gen);
 	return 0;
 }
 

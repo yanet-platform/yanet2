@@ -143,8 +143,9 @@ run_loaded_counts_test(struct yanet_shm *shm) {
 	return TEST_SUCCESS;
 }
 
-// Verifies that a final delayed release reclaims the superseded owner it made
-// unreferenced.
+// Verifies that a final delayed release tears the retired generation down at
+// once, and that the superseded owner it made unreferenced is reclaimed by
+// the next agent sweep.
 static int
 run_delayed_generation_release_test(struct yanet_shm *shm) {
 	yanet_error *err = NULL;
@@ -160,9 +161,7 @@ run_delayed_generation_release_test(struct yanet_shm *shm) {
 		"failed to install delayed-dev under agent A"
 	);
 
-	cp_config_lock(cp_config);
 	struct cp_config_gen *pinned_gen = cp_config_gen_acquire(cp_config);
-	cp_config_unlock(cp_config);
 
 	struct agent *agent_b = agent_attach(
 		shm, 0, "delayed-release", LOADED_COUNTS_TEST_MEMORY_LIMIT, &err
@@ -176,11 +175,10 @@ run_delayed_generation_release_test(struct yanet_shm *shm) {
 		install_device(agent_b, dp_config, cp_config, "delayed-dev"),
 		"failed to replace delayed-dev under agent B"
 	);
-	cp_config_lock(cp_config);
 	bool generation_retired =
-		ADDR_OF(&cp_config->cp_config_gen) != pinned_gen;
-	uint64_t remaining_pins = pinned_gen->refcnt;
-	cp_config_unlock(cp_config);
+		cp_config_current_gen(cp_config) != pinned_gen;
+	uint64_t remaining_pins =
+		cp_config_gen_pin_count(cp_config, pinned_gen);
 
 	TEST_ASSERT(generation_retired, "pinned generation was not retired");
 	TEST_ASSERT_EQUAL(
@@ -197,13 +195,15 @@ run_delayed_generation_release_test(struct yanet_shm *shm) {
 		"agent A was reclaimed while the retired generation was pinned"
 	);
 
-	cp_config_lock(cp_config);
+	// The last release frees the generation — dropping its device
+	// reference — and the sweep that follows reclaims the superseded
+	// agent wholesale, so the reclaimed agent's memory must not be read
+	// afterwards: the surviving agent's chain tells the outcome.
 	cp_config_gen_release(cp_config, pinned_gen);
-	cp_config_unlock(cp_config);
-
 	TEST_ASSERT_NULL(
 		ADDR_OF(&agent_b->prev),
-		"final generation release did not reclaim agent A"
+		"final release did not drop the retired generation's "
+		"references and reclaim agent A"
 	);
 
 	return TEST_SUCCESS;

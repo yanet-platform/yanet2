@@ -207,7 +207,10 @@ pdump_module_config_free(struct cp_module *module, yanet_error **err) {
 		return -1;
 	}
 
+	struct agent *owner = ADDR_OF(&module->agent);
+
 	pdump_module_config_destroy(module);
+	agent_destroy_released(owner, AGENT_REFERENCE_MODULE);
 	return 0;
 }
 

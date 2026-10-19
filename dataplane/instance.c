@@ -52,7 +52,7 @@ config_assigner_thread(void *arg) {
 
 	for (;;) {
 		struct cp_config_gen *published =
-			ATOMIC_ADDR_OF(&cp_config->cp_config_gen);
+			cp_config_current_gen(cp_config);
 		if (published != last_assigned) {
 			dp_config_assign_worker_ectxs(dp_config, published);
 			last_assigned = published;

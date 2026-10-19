@@ -94,7 +94,7 @@ test_cp_object_gen_update_and_lookup(struct yanet_shm *shm) {
 	);
 
 	struct cp_config *cp_config = ADDR_OF(&agent->cp_config);
-	struct cp_config_gen *gen = ADDR_OF(&cp_config->cp_config_gen);
+	struct cp_config_gen *gen = cp_config_current_gen(cp_config);
 
 	TEST_ASSERT(
 		cp_config_gen_lookup_object(gen, "test", "lookup-1") == obj1,
@@ -247,7 +247,7 @@ test_cp_object_gen_replace_delete(struct yanet_shm *shm) {
 	);
 
 	struct cp_config *cp_config = ADDR_OF(&agent->cp_config);
-	struct cp_config_gen *gen = ADDR_OF(&cp_config->cp_config_gen);
+	struct cp_config_gen *gen = cp_config_current_gen(cp_config);
 
 	uint64_t idx1;
 	TEST_ASSERT_SUCCESS(
@@ -285,7 +285,7 @@ test_cp_object_gen_replace_delete(struct yanet_shm *shm) {
 		"gains a reference while obj1 loses its last one"
 	);
 
-	gen = ADDR_OF(&cp_config->cp_config_gen);
+	gen = cp_config_current_gen(cp_config);
 	uint64_t new_idx1;
 	TEST_ASSERT_SUCCESS(
 		cp_config_gen_lookup_object_index(
@@ -321,7 +321,7 @@ test_cp_object_gen_replace_delete(struct yanet_shm *shm) {
 		"loaded_object_count must be 1 after delete-me retires"
 	);
 
-	gen = ADDR_OF(&cp_config->cp_config_gen);
+	gen = cp_config_current_gen(cp_config);
 	TEST_ASSERT_NULL(
 		cp_config_gen_lookup_object(gen, "test", "delete-me"),
 		"deleted object must not be findable in the live generation"
@@ -411,7 +411,7 @@ test_cp_object_gen_ectx_counter_storage(struct yanet_shm *shm) {
 	);
 
 	struct cp_config *cp_config = ADDR_OF(&agent->cp_config);
-	struct cp_config_gen *gen = ADDR_OF(&cp_config->cp_config_gen);
+	struct cp_config_gen *gen = cp_config_current_gen(cp_config);
 
 	uint64_t idx;
 	TEST_ASSERT_SUCCESS(
@@ -767,7 +767,7 @@ test_module_object_link_ectx(struct yanet_shm *shm) {
 
 	// The link counter storage is registered under tags combining the
 	// module's path and the linked object's identity.
-	struct cp_config_gen *gen = ADDR_OF(&cp_config->cp_config_gen);
+	struct cp_config_gen *gen = cp_config_current_gen(cp_config);
 	struct config_gen_ectx *ectx = cp_config_gen_worker_ectx(gen, 0);
 	TEST_ASSERT_NOT_NULL(ectx, "worker 0 execution context must exist");
 
@@ -858,7 +858,7 @@ test_module_object_link_missing_fails(struct yanet_shm *shm) {
 
 	// The rejected update leaves the prior generation live and the
 	// module uninstalled.
-	struct cp_config_gen *config_gen = ADDR_OF(&cp_config->cp_config_gen);
+	struct cp_config_gen *config_gen = cp_config_current_gen(cp_config);
 	TEST_ASSERT_NULL(
 		cp_config_gen_lookup_module(
 			config_gen, "forward", "fwd-missing"

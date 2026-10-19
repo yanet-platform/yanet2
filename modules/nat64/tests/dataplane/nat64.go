@@ -56,6 +56,14 @@ cp_module_try_destroy(struct cp_module *cp_module, yanet_error **err) {
 	return 0;
 }
 
+// The destroy hold lives in the configuration library, which this
+// harness does not link; the stub agent is never reclaimed, so a no-op
+// body stands in.
+void
+agent_destroy_released(struct agent *agent, enum agent_reference_kind kind) {
+	(void)agent, (void)kind;
+}
+
 // nat64dp.c registers an RTE log type at load time and logs through the
 // DPDK EAL, which this harness does not link. Stand in with no-op bodies.
 int

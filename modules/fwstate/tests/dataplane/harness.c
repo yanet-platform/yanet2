@@ -92,7 +92,14 @@ fwstate_test_agent_new(struct memory_context *parent, const char *name) {
 		return NULL;
 	}
 	memset(config_gen, 0, sizeof(struct cp_config_gen));
-	SET_OFFSET_OF(&cp_config->cp_config_gen, config_gen);
+	// Start the hand-built generation pinned by its publication, the way
+	// the real creation path does: the harness assembles its zone by
+	// hand, without the allocator that path needs.
+	config_gen->refcnt = 1;
+	// The zeroed lock word would work in practice, but the atomic is
+	// only defined after proper initialisation.
+	spinlock_init(&cp_config->gen_lock);
+	cp_config_publish_gen(cp_config, config_gen);
 	SET_OFFSET_OF(&agent->cp_config, cp_config);
 
 	yanet_error *err = NULL;
@@ -390,7 +397,7 @@ test_fwstate_handle_packets_in_context(
 
 	struct agent *agent = ADDR_OF(&cp_module->agent);
 	struct cp_config *cp_config = ADDR_OF(&agent->cp_config);
-	struct cp_config_gen *config_gen = ADDR_OF(&cp_config->cp_config_gen);
+	struct cp_config_gen *config_gen = cp_config_current_gen(cp_config);
 
 	bool all_resolved = true;
 	for (uint64_t idx = 0; idx < object_count; ++idx) {
@@ -478,7 +485,7 @@ fwstate_test_object(struct cp_module *cp_module, bool is_ipv6) {
 
 	struct agent *agent = ADDR_OF(&cp_module->agent);
 	struct cp_config *cp_config = ADDR_OF(&agent->cp_config);
-	struct cp_config_gen *config_gen = ADDR_OF(&cp_config->cp_config_gen);
+	struct cp_config_gen *config_gen = cp_config_current_gen(cp_config);
 
 	return cp_object_registry_lookup(
 		&config_gen->object_registry,
@@ -560,7 +567,7 @@ fwstate_test_map_object_new(
 int
 fwstate_test_register_object(struct agent *agent, struct cp_object *cp_object) {
 	struct cp_config *cp_config = ADDR_OF(&agent->cp_config);
-	struct cp_config_gen *config_gen = ADDR_OF(&cp_config->cp_config_gen);
+	struct cp_config_gen *config_gen = cp_config_current_gen(cp_config);
 
 	cp_config_lock(cp_config);
 

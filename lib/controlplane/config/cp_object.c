@@ -7,6 +7,7 @@
 #include "lib/controlplane/config/zone.h"
 
 #include <errno.h>
+#include <stdlib.h>
 #include <string.h>
 
 int
@@ -131,7 +132,9 @@ cp_object_registry_copy(
 		}
 		struct agent *agent = ADDR_OF(&object->agent);
 		if (agent != NULL) {
-			agent->loaded_object_count += 1;
+			__atomic_add_fetch(
+				&agent->loaded_object_count, 1, __ATOMIC_RELAXED
+			);
 		}
 	}
 
@@ -144,11 +147,22 @@ cp_object_try_destroy(struct cp_object *self, yanet_error **err) {
 	struct cp_config *cp_config =
 		(agent != NULL) ? ADDR_OF(&agent->cp_config) : NULL;
 
+	char type[CP_OBJECT_TYPE_LEN];
+	char name[CP_OBJECT_NAME_LEN];
+
 	if (cp_config != NULL) {
 		cp_config_lock(cp_config);
 	}
 
-	uint64_t refcnt = self->config_item.refcnt;
+	// Everything read from the item happens under the lock, including
+	// the identity copies for the refusal: once the lock is gone, a
+	// final generation release may tear the item's registries down and
+	// an agent sweep may reclaim the arena the item lives in.
+	strtcpy(type, self->type, sizeof(type));
+	strtcpy(name, self->name, sizeof(name));
+
+	uint64_t refcnt =
+		__atomic_load_n(&self->config_item.refcnt, __ATOMIC_RELAXED);
 
 	if (refcnt == 0) {
 		// Reserve the item against a racing re-registration before
@@ -156,6 +170,15 @@ cp_object_try_destroy(struct cp_object *self, yanet_error **err) {
 		// handle could otherwise install this pointer into a new
 		// generation between this check and the typed destroy.
 		registry_item_mark_destroying(&self->config_item);
+		if (agent != NULL) {
+			// Hold the owner against reclamation for the caller's
+			// typed destroy: the destructor and the caller's error
+			// reporting run unlocked, on storage only this count
+			// keeps alive.
+			__atomic_add_fetch(
+				&agent->loaded_object_count, 1, __ATOMIC_RELAXED
+			);
+		}
 	}
 
 	if (cp_config != NULL) {
@@ -170,8 +193,8 @@ cp_object_try_destroy(struct cp_object *self, yanet_error **err) {
 			YANET_ERROR_BUSY,
 			"object '%s:%s' is still referenced by a live "
 			"generation",
-			self->type,
-			self->name
+			type,
+			name
 		);
 		errno = EAGAIN;
 		return -1;
@@ -183,29 +206,46 @@ cp_object_try_destroy(struct cp_object *self, yanet_error **err) {
 void
 cp_object_registry_fini(struct cp_object_registry *registry) {
 	// Mirror each remaining item's dropped generation reference into its
-	// own agent before releasing it.
-	//
-	// The zero transition releases nothing: an item that leaves its last
-	// registry becomes dangling and is destroyed by its owner's next free
-	// attempt, or reclaimed with the agent's arena if that owner is gone.
-	// The same allocation-failure guard applies as elsewhere: a registry
-	// whose backing storage never allocated reports a nonzero capacity
-	// with nothing to walk.
-	if (ADDR_OF(&registry->registry.items) != NULL) {
-		for (uint64_t idx = 0; idx < registry->registry.capacity;
-		     ++idx) {
-			struct cp_object *object =
-				cp_object_registry_get(registry, idx);
-			if (object == NULL) {
-				continue;
-			}
-			struct agent *agent = ADDR_OF(&object->agent);
-			if (agent != NULL) {
-				agent->loaded_object_count -= 1;
-			}
-		}
+	// own agent, with every dereference of agent-owned storage done
+	// before the loaded counts can drop; see the module finaliser for
+	// the ordering argument.
+	if (ADDR_OF(&registry->registry.items) == NULL) {
+		return;
 	}
 
+	uint64_t capacity = registry->registry.capacity;
+	struct agent **owners = malloc(sizeof(*owners) * capacity);
+	if (owners != NULL) {
+		for (uint64_t idx = 0; idx < capacity; ++idx) {
+			struct cp_object *object =
+				cp_object_registry_get(registry, idx);
+			owners[idx] =
+				object != NULL ? ADDR_OF(&object->agent) : NULL;
+		}
+		registry_fini(&registry->registry, NULL, NULL);
+		agent_unload_references(
+			owners, capacity, AGENT_REFERENCE_OBJECT
+		);
+		free(owners);
+		return;
+	}
+
+	// Teardown could not snapshot the owners; drop each reference
+	// directly, accepting that a concurrent sweep may race the
+	// remaining dereferences.
+	for (uint64_t idx = 0; idx < capacity; ++idx) {
+		struct cp_object *object =
+			cp_object_registry_get(registry, idx);
+		if (object == NULL) {
+			continue;
+		}
+		struct agent *agent = ADDR_OF(&object->agent);
+		if (agent != NULL) {
+			__atomic_sub_fetch(
+				&agent->loaded_object_count, 1, __ATOMIC_RELAXED
+			);
+		}
+	}
 	registry_fini(&registry->registry, NULL, NULL);
 }
 
@@ -350,12 +390,18 @@ cp_object_registry_upsert(
 
 	struct agent *new_agent = ADDR_OF(&new_object->agent);
 	if (new_agent != NULL) {
-		new_agent->loaded_object_count += 1;
+		__atomic_add_fetch(
+			&new_agent->loaded_object_count, 1, __ATOMIC_RELAXED
+		);
 	}
 	if (old_object != NULL) {
 		struct agent *old_agent = ADDR_OF(&old_object->agent);
 		if (old_agent != NULL) {
-			old_agent->loaded_object_count -= 1;
+			__atomic_sub_fetch(
+				&old_agent->loaded_object_count,
+				1,
+				__ATOMIC_RELAXED
+			);
 		}
 	}
 
@@ -392,7 +438,11 @@ cp_object_registry_delete(
 	if (old_object != NULL) {
 		struct agent *old_agent = ADDR_OF(&old_object->agent);
 		if (old_agent != NULL) {
-			old_agent->loaded_object_count -= 1;
+			__atomic_sub_fetch(
+				&old_agent->loaded_object_count,
+				1,
+				__ATOMIC_RELAXED
+			);
 		}
 	}
 

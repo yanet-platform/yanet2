@@ -5,12 +5,21 @@
 #include "lib/controlplane/config/config_lock.h"
 
 struct registry_item {
+	// Reference count of live registry slots holding this item.
+	//
+	// Gains only ever happen under the configuration lock; drops and
+	// reads are relaxed atomics, because a retired generation's
+	// registries are released by the last pinning reader without that
+	// lock. An owner reading the count under the lock may therefore see
+	// a stale high value — one that a racing drop has not lowered yet —
+	// which can only postpone an owner's destroy attempt, never free an
+	// item another registry still holds.
 	uint64_t refcnt;
 	// Set by registry_item_mark_destroying once an owner won the right
 	// to destroy this dangling item, so a racing re-registration of the
 	// same pointer can be refused instead of referencing memory the
 	// owner is about to free. Mutated only under the configuration
-	// lock, like refcnt.
+	// lock.
 	uint64_t destroying;
 };
 
@@ -20,8 +29,8 @@ registry_item_init(struct registry_item *item) {
 	item->destroying = 0;
 }
 
-// Take one reference for a registry slot; like every registry
-// mutation this must run under the control-plane configuration lock
+// Take one reference for a registry slot; like every registry mutation
+// this must run under the control-plane configuration lock
 // (cp_config_lock) of the owning configuration.
 //
 // Checked in debug builds against the owner: a caller outside that
@@ -30,7 +39,10 @@ registry_item_init(struct registry_item *item) {
 static inline void
 registry_item_ref(struct registry_item *item, const struct cp_config *owner) {
 	cp_config_assert_locked(owner);
-	item->refcnt += 1;
+	// The bump is itself atomic: pin-dropping releases run without the
+	// lock, and a plain increment interleaving with them could lose a
+	// decrement.
+	__atomic_fetch_add(&item->refcnt, 1, __ATOMIC_RELAXED);
 }
 
 // Mark a zero-reference item as taken for destruction by its owner.
@@ -49,14 +61,19 @@ registry_item_is_destroying(const struct registry_item *item) {
 
 typedef void (*registry_item_free_func)(struct registry_item *item, void *data);
 
-// Drop one reference. A NULL free_func makes the zero transition a no-op:
-// the item stays alive, dangling, and only its owner may destroy it.
+// Drop one reference.
 //
-// Every mutation of a registry or its items' reference counts runs under
-// the control-plane configuration lock (cp_config_lock) of the owning
-// configuration, checked in debug builds, so an owner reading the count
-// under that lock sees a value no concurrent registry operation can
-// still change.
+// Called under the configuration lock by registry mutations, and
+// without it by a retired generation's teardown, so the count moves
+// with a relaxed atomic. Without a destroy callback the zero
+// transition is a no-op: the item stays alive, dangling, and only its
+// owner may destroy it.
+//
+// A destroy callback may run on either path, including the unlocked
+// final release of a retired generation, so it must only perform
+// teardown that is safe without the configuration lock — memory return
+// through the internally locked allocator, never mutation of state the
+// lock guards.
 static inline void
 registry_item_unref(
 	struct registry_item *item,
@@ -64,9 +81,10 @@ registry_item_unref(
 	registry_item_free_func free_func,
 	void *free_func_data
 ) {
-	cp_config_assert_locked(owner);
-	item->refcnt -= 1;
-	if (!item->refcnt && free_func != NULL) {
+	(void)owner;
+	uint64_t remaining =
+		__atomic_sub_fetch(&item->refcnt, 1, __ATOMIC_RELAXED);
+	if (!remaining && free_func != NULL) {
 		free_func(item, free_func_data);
 	}
 }

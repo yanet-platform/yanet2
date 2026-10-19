@@ -149,7 +149,12 @@ struct dp_worker {
 // The writer uses release ordering; readers use acquire ordering before
 // attempting to attach, so observing this value guarantees the instance is
 // ready and its cp_config lock is free.
-#define DP_CONFIG_READY_MAGIC UINT64_C(0xDEAD10CC00000001)
+//
+// The value also versions the shared-memory layout: a process built
+// against a different layout of the control-plane zone or the dataplane
+// structures recognises a foreign magic and refuses the attach instead
+// of misreading shifted fields. Bump it on every layout change.
+#define DP_CONFIG_READY_MAGIC UINT64_C(0xDEAD10CC00000002)
 
 struct dp_config {
 	uint32_t instance_count;

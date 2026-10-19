@@ -473,9 +473,12 @@ l3b_virtual_service_free(struct cp_object *cp_object, yanet_error **err) {
 		return -1;
 	}
 
+	struct agent *owner = ADDR_OF(&cp_object->agent);
+
 	// The session table outlives the service and is destroyed through its
 	// own handle.
 	l3b_virtual_service_object_destroy(cp_object);
+	agent_destroy_released(owner, AGENT_REFERENCE_OBJECT);
 	return 0;
 }
 

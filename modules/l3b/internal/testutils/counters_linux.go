@@ -201,6 +201,10 @@ type ServiceLookup struct {
 	Object           uintptr
 	CounterRegistry  uintptr
 	CounterID        uint64
+	// Racing marks a lookup diverted from the published generation by a
+	// concurrent publication while its reader still held the pin; the
+	// provenance fields above stay unset for it.
+	Racing bool
 }
 
 // LookupWitness records real lookup hits, missing protection and provenance errors.
@@ -210,6 +214,7 @@ type LookupWitness struct {
 	UnprotectedObjects  uint64
 	UnprotectedCounters uint64
 	ProvenanceErrors    uint64
+	RacingObjects       uint64
 }
 
 // WithLinkedServiceLookup observes a synchronous update without pinning its reads.
@@ -231,6 +236,7 @@ func WithLinkedServiceLookup(
 		witness.UnprotectedObjects = uint64(observed.unprotected_objects)
 		witness.UnprotectedCounters = uint64(observed.unprotected_counters)
 		witness.ProvenanceErrors = uint64(observed.provenance_errors)
+		witness.RacingObjects = uint64(observed.racing_objects)
 		count := min(uint64(observed.object_lookups), uint64(C.L3B_TEST_COUNTER_CAPACITY))
 		witness.Lookups = make([]ServiceLookup, count)
 		for idx := range witness.Lookups {
@@ -241,6 +247,7 @@ func WithLinkedServiceLookup(
 				Object:           uintptr(item.object),
 				CounterRegistry:  uintptr(item.counter_registry),
 				CounterID:        uint64(item.counter_id),
+				Racing:           bool(item.racing),
 			}
 		}
 	}()
