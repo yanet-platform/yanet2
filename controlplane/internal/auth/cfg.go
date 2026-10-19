@@ -17,8 +17,10 @@ const (
 
 // Config is the configuration for authentication and authorization.
 type Config struct {
-	// Mode defaults to disabled when no policy is supplied.
-	Mode Mode `yaml:"mode"`
+	// Mode selects an explicit policy; omission uses legacy input or disabled.
+	Mode Mode `yaml:"mode,omitempty"`
+	// Disabled is the deprecated input alias for the authentication policy.
+	Disabled *bool `yaml:"disabled,omitempty"`
 	// IdentityProviders is a list of identity providers (chain of responsibility).
 	// First match wins.
 	IdentityProviders []IdentityProviderConfig `yaml:"identity_providers"`
@@ -30,10 +32,13 @@ type Config struct {
 	PermissionsPath string `yaml:"permissions_path"`
 }
 
-// Validate rejects unsupported authentication modes.
+// Validate rejects ambiguous policies and unsupported authentication modes.
 func (m *Config) Validate() error {
+	if m.Mode != "" && m.Disabled != nil {
+		return fmt.Errorf("mode and deprecated disabled cannot both be specified; remove disabled and use mode")
+	}
 	switch m.Mode {
-	case ModeDisabled, ModeAudit, ModeEnabled:
+	case "", ModeDisabled, ModeAudit, ModeEnabled:
 		return nil
 	default:
 		return fmt.Errorf("unknown mode %q; use disabled, audit, or enabled", m.Mode)
@@ -61,7 +66,5 @@ type AuthenticatorConfig struct {
 
 // DefaultConfig returns the default authentication configuration.
 func DefaultConfig() Config {
-	return Config{
-		Mode: ModeDisabled,
-	}
+	return Config{}
 }

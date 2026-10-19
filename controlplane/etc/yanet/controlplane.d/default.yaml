@@ -26,6 +26,10 @@ gateway:
   auth:
     # Disabled admits anonymous callers. Audit logs verified identities and
     # admits all callers. Enabled enforces identity lookup and permissions.
+    #
+    # Replace legacy disabled: true/false with mode: disabled/enabled. Remove
+    # the old key and YANET_GATEWAY_AUTH_DISABLED when setting mode or
+    # YANET_GATEWAY_AUTH_MODE; both policy spellings together are an error.
     mode: disabled
     # For SSH-agent certificate audit logging, select mode: audit and
     # configure the SSH certificate authenticator below with a trusted CA.

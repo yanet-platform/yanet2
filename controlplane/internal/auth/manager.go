@@ -78,10 +78,22 @@ func NewManager(cfg *Config, options ...ManagerOption) (*Manager, error) {
 	if err := cfg.Validate(); err != nil {
 		return nil, fmt.Errorf("invalid authentication policy: %w", err)
 	}
+	mode := cfg.Mode
+	if mode == "" {
+		mode = ModeDisabled
+		if cfg.Disabled != nil && !*cfg.Disabled {
+			mode = ModeEnabled
+		}
+	}
+	if cfg.Disabled != nil {
+		log.Warn("gateway.auth.disabled is deprecated; use gateway.auth.mode",
+			zap.String("mode", string(mode)),
+		)
+	}
 
 	m := &Manager{
 		authenticators: []core.Authenticator{},
-		mode:           cfg.Mode,
+		mode:           mode,
 		log:            log,
 	}
 
