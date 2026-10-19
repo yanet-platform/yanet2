@@ -15,6 +15,15 @@ const (
 	ModeEnabled  Mode = "enabled"
 )
 
+// UnmarshalText rejects an explicitly empty authentication mode.
+func (m *Mode) UnmarshalText(data []byte) error {
+	if len(data) == 0 {
+		return fmt.Errorf("mode must not be empty; use disabled, audit, or enabled")
+	}
+	*m = Mode(data)
+	return nil
+}
+
 // Config is the configuration for authentication and authorization.
 type Config struct {
 	// Mode selects an explicit policy; omission uses legacy input or disabled.
