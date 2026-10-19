@@ -25,7 +25,7 @@ func UnaryServerInterceptor(
 		}
 
 		// Authenticate the request.
-		principal, err := manager.Authenticate(ctx, credential, requestInfo)
+		principal, err := manager.AuthenticateRequest(ctx, credential, requestInfo)
 		if err != nil {
 			log.Warn("authentication failed",
 				zap.String("method", info.FullMethod),
@@ -60,7 +60,7 @@ func StreamServerInterceptor(manager *Manager, log *zap.Logger) grpc.StreamServe
 		}
 
 		// Authenticate the request.
-		principal, err := manager.Authenticate(ctx, credential, requestInfo)
+		principal, err := manager.AuthenticateRequest(ctx, credential, requestInfo)
 		if err != nil {
 			log.Warn("authentication failed",
 				zap.String("method", info.FullMethod),

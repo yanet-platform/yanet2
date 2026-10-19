@@ -20,7 +20,7 @@ import (
 
 func TestManager_Authenticate(t *testing.T) {
 	config := &auth.Config{
-		Disabled: true,
+		Mode: auth.ModeDisabled,
 	}
 	m, err := auth.NewManager(config)
 	if err != nil {
@@ -73,7 +73,7 @@ func TestManager_Authenticate(t *testing.T) {
 func TestManager_Authorize(t *testing.T) {
 	log := zap.NewNop()
 	m, err := auth.NewManager(&auth.Config{
-		Disabled: true,
+		Mode: auth.ModeDisabled,
 	}, auth.WithLog(log))
 	if err != nil {
 		t.Fatalf("NewManager() error = %v", err)
@@ -184,7 +184,7 @@ func buildEnabledConfig(t *testing.T) auth.Config {
 	permissionsPath := writePermissionsFile(t)
 	credentialsPath := writeBasicCredentialsFile(t)
 
-	text := "disabled: false\n" +
+	text := "mode: enabled\n" +
 		"identity_providers:\n" +
 		"  - type: file\n" +
 		"    path: " + identitiesPath + "\n" +
@@ -339,6 +339,52 @@ func TestNewManagerConfigErrors(t *testing.T) {
 			for _, want := range testCase.errContains {
 				assert.Contains(t, err.Error(), want)
 			}
+		})
+	}
+}
+
+// Test_Manager_Audit_VerifiesWithoutAccountStores verifies that verified subjects
+// keep their credential identity even when account and permission files are absent.
+func Test_Manager_Audit_VerifiesWithoutAccountStores(t *testing.T) {
+	config := buildEnabledConfig(t)
+	config.Mode = auth.ModeAudit
+	config.IdentityProviders = []auth.IdentityProviderConfig{{Type: "file", Path: "/nonexistent/identities.yaml"}}
+	config.PermissionsPath = "/nonexistent/permissions.yaml"
+	manager, err := auth.NewManager(&config)
+	require.NoError(t, err)
+
+	principal, err := manager.Authenticate(t.Context(), core.Credential{Token: basicToken("ghost", "s3cret")}, &core.RequestInfo{})
+	require.NoError(t, err)
+	require.Equal(t, "ghost", principal.User)
+	require.Equal(t, "basic", principal.AuthMethod)
+	require.Empty(t, principal.Groups)
+	require.False(t, principal.IsAnonymous)
+	require.NoError(t, manager.Authorize(t.Context(), principal, "/other.Service/Method"))
+
+	for _, token := range []string{basicToken("ghost", "wrong"), "unsupported credential"} {
+		_, err := manager.Authenticate(t.Context(), core.Credential{Token: token}, &core.RequestInfo{})
+		require.Equal(t, codes.Unauthenticated, status.Code(err))
+	}
+}
+
+// Test_Manager_Audit_InvalidAuthenticatorFailsStartup verifies that admission
+// fallback never hides a broken authenticator configuration.
+func Test_Manager_Audit_InvalidAuthenticatorFailsStartup(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		typeName string
+	}{
+		{name: "unknown authenticator", typeName: "unknown"},
+		{name: "missing certificate authorities", typeName: "sshcert"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var node yaml.Node
+			require.NoError(t, yaml.Unmarshal([]byte("{}"), &node))
+			_, err := auth.NewManager(&auth.Config{
+				Mode:           auth.ModeAudit,
+				Authenticators: []auth.AuthenticatorConfig{{Type: tc.typeName, Config: node}},
+			})
+			require.Error(t, err)
 		})
 	}
 }

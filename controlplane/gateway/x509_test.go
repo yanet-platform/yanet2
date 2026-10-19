@@ -64,7 +64,7 @@ func newX509AuthConfig(t *testing.T, ca *tlscert.CA) auth.Config {
 	credentials := writeTestFile(t, "basic_auth.yaml", "credentials:\n"+
 		"  - username: alice\n    password_hash: "+string(hash)+"\n")
 
-	text := "disabled: false\n" +
+	text := "mode: enabled\n" +
 		"identity_providers:\n  - type: file\n    path: " + identities + "\n" +
 		"permissions_path: " + permissions + "\n" +
 		"authenticators:\n" +
@@ -220,15 +220,20 @@ func Test_Gateway_X509_UnknownCommonNameIsRejected(t *testing.T) {
 func Test_Gateway_X509_UntrustedCertificateFailsHandshake(t *testing.T) {
 	t.Parallel()
 
-	ca := tlscert.NewCA(t)
-	other := tlscert.NewCA(t)
-	cfg := gateway.DefaultConfig()
-	cfg.Auth = newX509AuthConfig(t, ca)
-	address := startX509Gateway(t, ca, cfg)
+	for _, mode := range []auth.Mode{auth.ModeEnabled, auth.ModeAudit} {
+		t.Run(string(mode), func(t *testing.T) {
+			ca := tlscert.NewCA(t)
+			other := tlscert.NewCA(t)
+			cfg := gateway.DefaultConfig()
+			cfg.Auth = newX509AuthConfig(t, ca)
+			cfg.Auth.Mode = mode
+			address := startX509Gateway(t, ca, cfg)
 
-	client := dialAuth(t, address, ca, other.IssueClient(t, "route-operator").Certificate)
-	_, err := introspectSelf(t, t.Context(), client)
-	require.Equal(t, codes.Unavailable, status.Code(err))
+			client := dialAuth(t, address, ca, other.IssueClient(t, "route-operator").Certificate)
+			_, err := introspectSelf(t, t.Context(), client)
+			require.Equal(t, codes.Unavailable, status.Code(err))
+		})
+	}
 }
 
 // Test_Gateway_HTTPS_NeverRequestsClientCertificate verifies that the HTTP
