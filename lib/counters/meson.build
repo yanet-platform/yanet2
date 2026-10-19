@@ -78,9 +78,16 @@ if not dataplane_only
       # only withholds from the package being built. The target value is
       # left unquoted so an empty one expands to nothing rather than to an
       # empty argument.
+
+      # Preserve unchanged archives so dependent links can stay up to date.
       'set -eu; RUSTFLAGS="--cap-lints allow" ' +
         '"$1" build --release --manifest-path "$2" --target-dir "$3" $5; ' +
-        'cp "$3/$6/librure.a" "$4"',
+        'if ! cmp -s "$3/$6/librure.a" "$4"; then ' +
+          'tmp=$(mktemp -d "$4.XXXXXX"); ' +
+          'trap \'rm -rf "$tmp"\' 0; ' +
+          'cp "$3/$6/librure.a" "$tmp/librure.a"; ' +
+          'mv -f "$tmp/librure.a" "$4"; ' +
+        'fi',
       'sh',
       cargo,
       regex_root / 'regex-capi' / 'Cargo.toml',
