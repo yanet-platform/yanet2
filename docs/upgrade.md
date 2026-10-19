@@ -3,6 +3,28 @@
 Manual steps required when upgrading an existing deployment. The packaging
 does not perform these automatically.
 
+## Pdump adds an optional capture rate limit
+
+Pdump now supports an optional `rate_pps` setting with one best-effort
+rate/burst budget per config shared across all workers. The accepted range
+is 0..1,000,000 pps, inclusive. New configs default to zero (unlimited),
+so existing configurations do not need a rate setting. Omitting the rate
+on an update preserves its current value. Burst is automatic and global,
+not per worker. See
+[shared capture limit](ring.md#shared-capture-limit) for replacement,
+recommit and `pdump_rate_skipped` counter semantics.
+
+The private shared-memory pdump config layout changed. Rebuild the
+dataplane, pdump plugin and CGO control-plane binaries from the same
+revision, then stop the old dataplane and all processes attached to its
+shared memory in a coordinated maintenance window. Remove stale
+`/dev/hugepages/yanet*` mappings only after those processes have stopped,
+then restart the rebuilt components and reapply configuration. Do not mix
+old/new binaries or reuse pre-upgrade shared memory. For source builds,
+clear the Go build cache and rebuild standalone CGO executables as well as
+C archives. The plugin interface ABI does not version this private layout;
+there is no mixed-version negotiation or rolling compatibility here.
+
 ## Pdump capture moved onto named ring objects
 
 Pdump no longer sizes a private per-worker ring. A config captures into a

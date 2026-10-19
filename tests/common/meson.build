@@ -1,6 +1,16 @@
 dependencies = [lib_common_dep, lib_logging_dep]
 thread_dep = dependency('threads')
 
+token_bucket_test = executable(
+  'token_bucket_test',
+  ['token_bucket_test.c'],
+  c_args: yanet_test_c_args + ['-UNDEBUG'],
+  link_args: yanet_link_args,
+  dependencies: [thread_dep],
+  include_directories: yanet_rootdir,
+)
+test('token_bucket', token_bucket_test, suite: ['common'])
+
 numutils_test = executable(
   'numutils_test',
   ['numutils_test.c'],

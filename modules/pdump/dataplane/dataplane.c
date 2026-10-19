@@ -19,6 +19,7 @@
 
 #include "objects/ring/api/ring_object.h"
 
+#include "limit.h"
 #include "record.h"
 
 // Per-worker state of one execution context, set by the context commit
@@ -31,6 +32,8 @@ struct pdump_prepared {
 	struct ring_worker *ring;
 	uint8_t *ring_data;
 	struct rte_bpf bpf;
+	struct token_bucket *rate_bucket;
+	uint64_t *rate_skipped;
 };
 
 // Worker index of an execution context whose worker is not known.
@@ -101,9 +104,8 @@ pdump_ring_write_msg(
 static inline void
 process_queue(
 	struct packet *first_pkt,
-	const struct rte_bpf *bpf,
-	struct ring_worker *ring,
-	uint8_t *ring_data,
+	uint64_t count,
+	const struct pdump_prepared *prepared,
 	const struct dp_worker *dp_worker,
 	uint16_t device_id,
 	uint32_t snaplen,
@@ -114,12 +116,30 @@ process_queue(
 	// portable nanoseconds: mlx5 hands over a raw device counter unless
 	// the NIC runs in real-time mode, so they cannot share this field.
 	uint64_t timestamp = dp_worker->current_time;
+	if (prepared->rate_bucket != NULL &&
+	    token_bucket_full(prepared->rate_bucket, timestamp)) {
+		*prepared->rate_skipped += count;
+		return;
+	}
+	uint64_t remaining = count;
 
 	for (struct packet *pkt = first_pkt; pkt != NULL; pkt = pkt->next) {
+		--remaining;
 		struct rte_mbuf *mbuf = packet_to_mbuf(pkt);
 
-		int rc = rte_bpf_exec(bpf, (void *)mbuf);
+		int rc = rte_bpf_exec(&prepared->bpf, (void *)mbuf);
 		if (!rc) {
+			continue;
+		}
+		if (prepared->rate_bucket != NULL &&
+		    !token_bucket_take(prepared->rate_bucket, timestamp)) {
+			++*prepared->rate_skipped;
+			if (token_bucket_full(
+				    prepared->rate_bucket, timestamp
+			    )) {
+				*prepared->rate_skipped += remaining;
+				break;
+			}
 			continue;
 		}
 
@@ -144,8 +164,8 @@ process_queue(
 		};
 
 		pdump_ring_write_msg(
-			ring,
-			ring_data,
+			prepared->ring,
+			prepared->ring_data,
 			&hdr,
 			rte_pktmbuf_mtod(mbuf, uint8_t *),
 			capture_len
@@ -172,17 +192,13 @@ pdump_handle_packets(
 	uint16_t device_id = module_ectx_global_device_id(module_ectx);
 	struct ring_worker *ring = prepared->ring;
 	if (likely(ring != NULL)) {
-		uint8_t *ring_data = prepared->ring_data;
-		const struct rte_bpf *bpf = &prepared->bpf;
-
 		// First, process dropped packets.
 		if (config->mode & PDUMP_DROPS &&
 		    packet_front->drop.first != NULL) {
 			process_queue(
 				packet_front->drop.first,
-				bpf,
-				ring,
-				ring_data,
+				packet_front_drop_count(packet_front),
+				prepared,
 				dp_worker,
 				device_id,
 				config->snaplen,
@@ -195,9 +211,8 @@ pdump_handle_packets(
 		    packet_front->input.first != NULL) {
 			process_queue(
 				packet_front->input.first,
-				bpf,
-				ring,
-				ring_data,
+				packet_front_input_count(packet_front),
+				prepared,
 				dp_worker,
 				device_id,
 				config->snaplen,
@@ -257,6 +272,11 @@ pdump_resolve_prepared(
 	if (ring == NULL) {
 		return result;
 	}
+	result.rate_bucket = ADDR_OF(&config->rate_bucket);
+	result.rate_skipped = counter_get_address(
+		config->rate_skipped_counter_id,
+		module_ectx->abs_counter_storage
+	);
 
 	result.bpf = *bpf;
 	result.bpf.prm.ins = ADDR_OF(&bpf->prm.ins);

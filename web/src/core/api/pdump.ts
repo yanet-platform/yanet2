@@ -1,5 +1,7 @@
 import { createService, createStreamingService, type CallOptions, type StreamCallbacks } from './client';
 
+export const PDUMP_RATE_PPS_MAX = 1_000_000;
+
 // Pdump configuration modes (bitmap) - matches dataplane/mode.h
 export const PDUMP_MODE = {
     INPUT: 1 << 0,  // 1
@@ -15,6 +17,7 @@ export interface PdumpConfig {
     // Required on create; absent on an update keeps the bound ring, an
     // explicit empty string is rejected.
     ring_name?: string;
+    rate_pps?: number;
 }
 
 export interface ListConfigsResponse {
@@ -60,6 +63,9 @@ export const pdumpApi = {
         config: PdumpConfig,
         options?: CallOptions
     ): Promise<void> => {
+        if (config.rate_pps !== undefined && (!Number.isInteger(config.rate_pps) || config.rate_pps < 0 || config.rate_pps > PDUMP_RATE_PPS_MAX)) {
+            return Promise.reject(new Error(`Rate must be an integer between 0 and ${PDUMP_RATE_PPS_MAX}`));
+        }
         return pdumpService.callWithBody<void>(
             'SetConfig',
             { name, config },

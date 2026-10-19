@@ -340,6 +340,50 @@ with `meson test -C build --benchmark pdump_bench`, or directly as
   independent of the configured capture snaplen, so a capture file stays
   readable across a snaplen change.
 
+### Shared capture limit
+
+`rate_pps` (`yanet-cli-pdump set --rate` / `-r`, or the web rate field)
+accepts 0..1,000,000 packets per second, inclusive. Zero is unlimited.
+Omitting the rate on an update preserves it; a new config defaults to zero.
+The web dialog's blank rate omits the field, whereas an explicit zero
+disables limiting.
+
+Nonzero rates initialize fresh credit from published dataplane time. If no
+worker has published time yet, the update fails with a retryable `EAGAIN`
+and leaves the previous config intact. Retry after workers publish time;
+setting zero does not require worker time.
+
+Each config has one best-effort budget shared by all workers, independent
+of its ring. One busy worker can use the entire budget. The automatic
+global burst is `max(32, ceil(rate_pps / 1000))` packets; it replenishes
+continuously, caps accumulated credit at that burst, and does not reset at
+second boundaries. This credit cap is not a strict admission burst bound.
+Active reservations use fetch-add tickets with a soft threshold: a stale
+fitting read can admit a ticket whose prior debt is already at the cap,
+charging one cost beyond it. Later refusals atomically refund their cost.
+An active ticket whose returned debt falls in the past clock half-range is
+also refused and refunded. A fresh exhausted read adds no debt, but transient
+fullness before a refund can still skip a queue or its tail; a refund cannot
+recover those opportunities. Idle restarts use one strong CAS and accept even
+when it loses, leaving those losers uncharged. Refunds can move virtual time
+backwards and a delayed refund can cross an idle restart; cancellation is not
+transactional. Worker clock offsets affect the effective rate. There is no
+worker fairness or strict burst or wall-clock rate guarantee.
+
+Replacing a config starts fresh credit, including a filter-only update
+that preserves the rate and the same ring/reader cursor. Recommitting the
+existing config or rebuilding its execution contexts retains its debt.
+Independent configs keep independent budgets even on the same ring.
+
+The per-worker `pdump_rate_skipped` counter counts packet opportunities
+not captured because of the limiter: rejected matching reservations
+(including late active refusals), whole queues skipped
+while exhausted, and unexamined queue tails after exhaustion. Those tails can
+contain nonmatching packets, so this is **not** a count of lost matching packets.
+Examined filter nonmatches do not contribute. Rate limiting never changes
+normal forwarding or drop-queue processing; accepted prefixes are still
+published at the end of the handler call.
+
 ## CLI examples
 
 `yanet-cli-ring` manages ring objects through `RingService`. The

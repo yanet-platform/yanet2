@@ -10,6 +10,7 @@
 #include <rte_mbuf.h>
 
 #include "api/agent.h"
+#include "lib/controlplane/agent/agent.h"
 
 #include "common/memory_address.h"
 
@@ -199,7 +200,46 @@ pdump_test_fixture_build(
 	fx->config.snaplen = params->snaplen;
 	fx->config.mode = PDUMP_INPUT;
 	fx->config.ring_link_idx = 0;
+	if (params->rate_pps != 0) {
+		pdump_rate_init(
+			&fx->rate_bucket, params->rate_pps, PDUMP_TEST_TIMESTAMP
+		);
+		SET_OFFSET_OF(&fx->config.rate_bucket, &fx->rate_bucket);
+	}
 	SET_OFFSET_OF(&fx->config.ebpf_program, params->bpf);
+	TEST_ASSERT_SUCCESS(
+		counter_registry_init(
+			&fx->config.cp_module.counter_registry,
+			&fx->agent->memory_context,
+			0
+		),
+		"failed to initialize counters"
+	);
+	fx->config.rate_skipped_counter_id = counter_registry_register(
+		&fx->config.cp_module.counter_registry,
+		"pdump_rate_skipped",
+		1,
+		&err
+	);
+	TEST_ASSERT(
+		fx->config.rate_skipped_counter_id != COUNTER_INVALID,
+		"failed to register skipped counter"
+	);
+	TEST_ASSERT_SUCCESS(
+		counter_registry_link(
+			&fx->config.cp_module.counter_registry, NULL, &err
+		),
+		"failed to lay out counters"
+	);
+	fx->module_ectx.abs_counter_storage = counter_storage_spawn(
+		&fx->agent->memory_context,
+		NULL,
+		&fx->config.cp_module.counter_registry
+	);
+	TEST_ASSERT_NOT_NULL(
+		fx->module_ectx.abs_counter_storage,
+		"failed to allocate counters"
+	);
 
 	fx->ring_object_ectx.abs_cp_object = fx->ring_object;
 	fx->link.abs_object_ectx = &fx->ring_object_ectx;
@@ -235,6 +275,12 @@ pdump_test_fixture_commit(struct pdump_test_fixture *fx) {
 void
 pdump_test_fixture_destroy(struct pdump_test_fixture *fx) {
 	free(fx->prepared);
+	if (fx->module_ectx.abs_counter_storage != NULL) {
+		counter_storage_free(fx->module_ectx.abs_counter_storage);
+	}
+	if (fx->config.cp_module.counter_registry.memory_context != NULL) {
+		counter_registry_fini(&fx->config.cp_module.counter_registry);
+	}
 	if (fx->ring_object != NULL) {
 		yanet_error *err = NULL;
 		ring_object_config_free(fx->ring_object, &err);
@@ -254,4 +300,5 @@ pdump_test_free_front(struct packet_front *pf) {
 			rte_pktmbuf_free(packet_to_mbuf(packet));
 		}
 	}
+	packet_front_init(pf);
 }

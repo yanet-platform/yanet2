@@ -1,14 +1,9 @@
 #pragma once
 
 /*
- * Shared harness for modules/pdump/tests/capture_test.c and pdump_bench.c.
+ * Shared hand-linked capture fixture for handler tests and benchmarks.
  *
- * Both link new_module_pdump() straight from its static library: the
- * module's own control-plane API cannot link into either binary, since its
- * cgo exports and DPDK stubs need a Go host process. This builds the
- * config, the object link and the eBPF filter by hand instead, the way
- * modules/fwstate/fuzzing/fwstate.c builds a module_ectx with a
- * hand-linked object.
+ * Builds a config, object link and eBPF filter without publishing a generation.
  */
 
 #include <stdbool.h>
@@ -40,9 +35,8 @@ struct rte_bpf;
 //
 // Accepts every Ethernet frame whose ethertype is IPv4 and rejects every
 // other frame, independent of the IP header's own validity. Mirrors the
-// pointer layout modules/pdump/api/controlplane.c's filter setter builds
-// for a configured filter -- duplicated here because that API cannot link
-// into either binary. Returns NULL and leaves err set on failure; the
+// pointer layout of a configured filter without a control-plane dependency
+// in the benchmark. Returns NULL and leaves err set on failure; the
 // caller frees a non-NULL result with free().
 struct rte_bpf *
 pdump_test_compile_accept_ip_filter(uint32_t snaplen, yanet_error **err);
@@ -99,6 +93,7 @@ struct pdump_test_fixture {
 	struct ring_worker *ring;
 	uint8_t *ring_data;
 	struct pdump_module_config config;
+	struct token_bucket rate_bucket;
 	struct module_ectx module_ectx;
 	void *prepared;
 	struct module_object_link_ectx link;
@@ -115,6 +110,7 @@ struct pdump_test_fixture_params {
 	uint32_t capacity;
 	uint32_t publish_batch;
 	uint32_t snaplen;
+	uint64_t rate_pps;
 	uint64_t worker_idx;
 
 	// Borrowed: the fixture resolves against these but does not own or

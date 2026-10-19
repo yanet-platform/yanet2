@@ -64,6 +64,12 @@ pub struct SetConfigCmd {
     /// update.
     #[arg(long = "ring-name", add = ArgValueCandidates::new(crate::ring_candidates))]
     pub ring_name: Option<String>,
+
+    /// Shared best-effort capture rate, 0..1,000,000 pps; zero is unlimited.
+    ///
+    /// Workers share burst max(32, ceil(rate/1000)); omit to preserve the rate.
+    #[arg(long = "rate", short = 'r', value_parser = clap::value_parser!(u64).range(0..=1_000_000))]
+    pub rate_pps: Option<u64>,
 }
 
 #[derive(Debug, Clone, Parser)]

@@ -4,6 +4,7 @@
 
 #include "lib/controlplane/config/cp_module.h"
 
+#include "limit.h"
 #include "mode.h"
 
 struct rte_bpf;
@@ -20,6 +21,10 @@ struct pdump_module_config {
 	struct rte_bpf *ebpf_program;
 	enum pdump_mode mode;
 	uint32_t snaplen;
+	struct token_bucket *rate_bucket;
+	void *rate_bucket_raw;
+	// Counts refused matches and packets skipped without filter evaluation.
+	uint64_t rate_skipped_counter_id;
 
 	// Object link index of the ring this config captures into.
 	//

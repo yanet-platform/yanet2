@@ -32,6 +32,7 @@ var (
 
 	defaultMode uint32 = C.PDUMP_INPUT
 	maxMode     uint32 = C.PDUMP_ALL
+	maxRatePPS  uint64 = C.PDUMP_RATE_PPS_MAX
 )
 
 // MinRingCapacity is the smallest ring capacity a pdump config may capture
@@ -218,6 +219,14 @@ func (m *ModuleConfig) SetSnapLen(snaplen uint32) error {
 		if reason := errCtx.Reason(); reason != "" {
 			return errors.Join(err, fmt.Errorf("reason=%s", reason))
 		}
+		return errors.Join(fmt.Errorf("error code=%d", rc), err)
+	}
+	return nil
+}
+
+func (m *ModuleConfig) SetRate(ratePPS uint64) error {
+	rc, err := C.pdump_module_config_set_rate(m.asRawPtr(), C.uint64_t(ratePPS))
+	if rc != 0 {
 		return errors.Join(fmt.Errorf("error code=%d", rc), err)
 	}
 	return nil

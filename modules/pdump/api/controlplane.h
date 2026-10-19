@@ -3,6 +3,7 @@
 #include <stdint.h>
 
 #include "lib/errors/errors.h"
+#include "limit.h"
 #include "mode.h"
 #include "record.h"
 
@@ -58,6 +59,15 @@ pdump_module_config_set_filter(
 // The 'mode' parameter specifies the packet list that pdump should read from.
 int
 pdump_module_config_set_mode(struct cp_module *module, enum pdump_mode mode);
+
+// Set the aggregate packet capture rate; zero leaves capture unlimited.
+//
+// Rates above 1,000,000 are rejected with EINVAL before any mutation.
+// Only unpublished configs may be changed; setting a rate starts fresh credit.
+// Nonzero rates use published dataplane time; until available, EAGAIN is
+// returned without allocation or mutation. Zero needs no published time.
+int
+pdump_module_config_set_rate(struct cp_module *module, uint64_t rate_pps);
 
 // Set the maximum packet length to be captured by the pdump module.
 // If a filter is already set, setting the snaplen will trigger filter

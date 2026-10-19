@@ -157,6 +157,32 @@ func Test_SetConfigRequest_Validate(t *testing.T) {
 			},
 			message: "config: filter must not contain NUL",
 		},
+		{
+			name: "explicit zero disables the rate limit",
+			request: &pdumppb.SetConfigRequest{
+				Name: "pdump0", Config: &pdumppb.Config{RatePps: proto.Uint64(0)},
+			},
+		},
+		{
+			name: "maximum rate is accepted",
+			request: &pdumppb.SetConfigRequest{
+				Name: "pdump0", Config: &pdumppb.Config{RatePps: proto.Uint64(pdumppb.MaxRatePPS)},
+			},
+		},
+		{
+			name: "rate above maximum is rejected",
+			request: &pdumppb.SetConfigRequest{
+				Name: "pdump0", Config: &pdumppb.Config{RatePps: proto.Uint64(pdumppb.MaxRatePPS + 1)},
+			},
+			message: "config: rate_pps 1000001 must be in range 0..1000000",
+		},
+		{
+			name: "full uint64 rate is rejected",
+			request: &pdumppb.SetConfigRequest{
+				Name: "pdump0", Config: &pdumppb.Config{RatePps: proto.Uint64(^uint64(0))},
+			},
+			message: "config: rate_pps 18446744073709551615 must be in range 0..1000000",
+		},
 	}
 
 	for _, tc := range cases {
