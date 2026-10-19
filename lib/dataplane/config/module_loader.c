@@ -76,6 +76,7 @@ dp_load_module(
 	dp_module->commit_handler = module->commit_handler;
 	dp_module->commit_ectx_handler = module->commit_ectx_handler;
 	dp_module->prepared_size = module->prepared_size;
+	dp_module->config_layout = module->config_layout;
 
 	SET_OFFSET_OF(&dp_config->dp_modules, dp_modules);
 

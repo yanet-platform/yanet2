@@ -33,7 +33,8 @@
 // derived from the pipeline context, and struct module_ectx gained the
 // registry device of its placement.
 // 41: struct dp_config gained the last committed generation pointer.
-#define YANET_MODULE_ABI_VERSION 41
+// 42: struct module and struct dp_module gained config_layout.
+#define YANET_MODULE_ABI_VERSION 42
 
 // Symbol name a module .so exports carrying its compiled-against
 // YANET_MODULE_ABI_VERSION, as a uint32_t global.
@@ -108,6 +109,13 @@ struct module {
 	// module needs none. The control plane allocates a zeroed buffer
 	// of this size for every module execution context it builds.
 	uint64_t prepared_size;
+	// Layout identity of the module's configuration, zero when unchecked.
+	//
+	// A module whose handler reads its configuration through a typed
+	// layout declares a non-zero value here; the control plane then
+	// creates configurations for it only through an init that names the
+	// same value, so the handler never sees bytes of another layout.
+	uint64_t config_layout;
 };
 
 typedef struct module *(*module_load_handler)();
