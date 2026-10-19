@@ -7,7 +7,7 @@ import (
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/status"
+	grpcstatus "google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
 
@@ -85,14 +85,14 @@ func logCompletion(
 	started time.Time,
 	err error,
 ) {
-	rpcStatus, hasStatus := status.FromError(err)
-	if !hasStatus {
-		rpcStatus = status.FromContextError(err)
+	status, ok := grpcstatus.FromError(err)
+	if !ok {
+		status = grpcstatus.FromContextError(err)
 	}
 
 	fields := []zap.Field{
 		zap.String("method", method),
-		zap.String("status", rpcStatus.Code().String()),
+		zap.String("status", status.Code().String()),
 		zap.Duration("duration", time.Since(started)),
 	}
 	if principal := core.FromContext(ctx); principal != nil {
