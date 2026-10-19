@@ -80,7 +80,10 @@ cp_device_trafgen_free(struct cp_device *cp_device, yanet_error **err) {
 		return -1;
 	}
 
+	struct agent *owner = ADDR_OF(&cp_device->agent);
+
 	cp_device_trafgen_destroy(cp_device);
+	agent_destroy_released(owner, AGENT_REFERENCE_DEVICE);
 	return 0;
 }
 

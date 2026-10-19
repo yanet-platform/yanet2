@@ -246,7 +246,7 @@ dataplane_ut_new(const struct dataplane_ut_config *cfg) {
 		dataplane_ut_free(ut);
 		return NULL;
 	}
-	SET_OFFSET_OF(&ut->cp_config->cp_config_gen, cp_config_gen);
+	cp_config_publish_gen(ut->cp_config, cp_config_gen);
 	cp_config_unlock(ut->cp_config);
 
 	counter_registry_init(
@@ -908,8 +908,7 @@ dataplane_ut_worker_ectx(struct dataplane_ut *ut, size_t worker_idx) {
 
 uintptr_t
 dataplane_ut_published_ectx(struct dataplane_ut *ut, size_t worker_idx) {
-	struct cp_config_gen *config_gen =
-		ADDR_OF(&ut->cp_config->cp_config_gen);
+	struct cp_config_gen *config_gen = cp_config_current_gen(ut->cp_config);
 	if (config_gen == NULL) {
 		return 0;
 	}
@@ -927,8 +926,7 @@ dataplane_ut_worker_gen(struct dataplane_ut *ut, size_t worker_idx) {
 
 uint64_t
 dataplane_ut_published_gen(struct dataplane_ut *ut) {
-	struct cp_config_gen *config_gen =
-		ADDR_OF(&ut->cp_config->cp_config_gen);
+	struct cp_config_gen *config_gen = cp_config_current_gen(ut->cp_config);
 	if (config_gen == NULL) {
 		return 0;
 	}

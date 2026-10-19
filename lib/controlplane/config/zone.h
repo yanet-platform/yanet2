@@ -61,12 +61,14 @@ struct cp_config_gen {
 	struct cp_device_registry device_registry;
 	struct cp_object_registry object_registry;
 
-	// Number of holders pinning this generation alive, read and mutated
-	// only while the config lock is held.
+	// Number of holders pinning this generation alive.
 	//
 	// The currently published generation always counts one holder for
 	// itself, so a pin taken by an unlocked reader keeps a racing update
 	// from tearing the generation down until the pin is released too.
+	// Gaining a reference happens only under the publication lock;
+	// dropping one is a relaxed-atomic decrement that the last dropper
+	// follows with the generation's own teardown.
 	uint64_t refcnt;
 };
 
@@ -120,6 +122,16 @@ struct cp_config {
 	uint8_t _config_lock_pad[YANET_CACHE_LINE_SIZE - sizeof(pid_t)];
 
 	/*
+	 * Publication lock: serialises reading the published generation
+	 * together with gaining its first reference, and serialises the
+	 * pointer swap of a publish against that. Held for a handful of
+	 * instructions only — never across generation builds, worker
+	 * round-trips or teardown. A publish takes the configuration lock
+	 * first and this one second; readers take this one alone.
+	 */
+	struct spinlock gen_lock;
+
+	/*
 	 * Relative pointer to the current active packet processing
 	 * configuration.
 	 */
@@ -133,7 +145,7 @@ struct cp_config {
 };
 
 _Static_assert(
-	offsetof(struct cp_config, cp_config_gen) -
+	offsetof(struct cp_config, gen_lock) -
 			offsetof(struct cp_config, config_lock) >=
 		YANET_CACHE_LINE_SIZE,
 	"config lock and generation publication must use separate cache lines"
@@ -253,30 +265,91 @@ cp_config_delete_object(
 struct cp_config_gen *
 cp_config_gen_new(struct agent *agent, yanet_error **err);
 
-// Pin the currently published generation for use outside the config lock.
+// The currently published generation.
 //
-// MUST be called with the config lock held. Every acquire MUST be matched
-// by exactly one release, no matter how long the unlocked window that
-// follows runs or whether a config update replaces this generation as
-// current during that window.
+// Intended for callers holding the config lock, and for the dataplane's
+// assigner whose use of the generation is ordered by the publish
+// handshake instead; an unlocked caller that walks the generation must
+// pin through the acquire protocol below.
+static inline struct cp_config_gen *
+cp_config_current_gen(struct cp_config *cp_config) {
+	return ATOMIC_ADDR_OF(&cp_config->cp_config_gen);
+}
+
+// Make a freshly built generation the published one.
+//
+// The caller must hold the config lock; the swap itself runs under the
+// publication lock so it cannot interleave with a reader naming the old
+// generation, and the release store pairs with the acquire loads so the
+// generation's contents are fully written before any reader can see it.
+static inline void
+cp_config_publish_gen(
+	struct cp_config *cp_config, struct cp_config_gen *config_gen
+) {
+	spinlock_lock(&cp_config->gen_lock);
+	ATOMIC_SET_OFFSET_OF(&cp_config->cp_config_gen, config_gen);
+	spinlock_unlock(&cp_config->gen_lock);
+}
+
+// Pin the currently published generation for use without the config lock.
+//
+// Every acquire MUST be matched by exactly one release, no matter how
+// long the unlocked window that follows runs or whether an update
+// replaces this generation as current during that window. Naming the
+// generation and gaining its reference happen together under the
+// publication lock, so a publish cannot retire and free a generation
+// a reader is in the middle of pinning.
 static inline struct cp_config_gen *
 cp_config_gen_acquire(struct cp_config *cp_config) {
-	cp_config_assert_locked(cp_config);
-	struct cp_config_gen *config_gen = ADDR_OF(&cp_config->cp_config_gen);
-	config_gen->refcnt += 1;
+	spinlock_lock(&cp_config->gen_lock);
+	struct cp_config_gen *config_gen = cp_config_current_gen(cp_config);
+	// The bump is itself atomic: pin-dropping releases run without the
+	// lock, and a plain increment interleaving with them could lose a
+	// decrement. The same GCC false positive the memory accounting
+	// suppresses fires on this atomic in some inlining contexts: the
+	// architecturally-unreachable NULL branch of the offset load makes
+	// the RMW look like a write to a size-0 object.
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wstringop-overflow"
+#endif
+	__atomic_fetch_add(&config_gen->refcnt, 1, __ATOMIC_RELAXED);
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic pop
+#endif
+	spinlock_unlock(&cp_config->gen_lock);
 	return config_gen;
 }
 
-// Release a pin, freeing the generation once no pin remains.
+// Release a pin taken by an acquire.
 //
-// MUST be called with the config lock held. A generation that lost its
-// current-published status while pinned is freed here instead of at
-// publish time, once its last pin drops. Teardown also reclaims superseded
-// agents made unreferenced by that generation.
+// Safe to call without the config lock. The last release — the one that
+// drops the count to zero — performs the generation's own teardown:
+// registry release and memory return, all of which is independently
+// safe (atomic agent counters, internally locked allocator). That
+// teardown can leave a superseded agent unreferenced, and the release
+// then reclaims it too when the configuration lock happens to be free:
+// after the call returns, storage owned by such an agent may already be
+// gone. A busy lock defers the reclamation to the next update's sweep.
 void
 cp_config_gen_release(
 	struct cp_config *cp_config, struct cp_config_gen *config_gen
 );
+
+// Number of pins currently held on the generation, counting the
+// publication pin of a generation that is still current.
+//
+// An observation snapshot for tests and diagnostics; nothing may branch
+// on it, because a pin may appear or drain at any moment. Valid only
+// while holding a pin on the generation or the config lock.
+static inline uint64_t
+cp_config_gen_pin_count(
+	const struct cp_config *cp_config,
+	const struct cp_config_gen *config_gen
+) {
+	(void)cp_config;
+	return __atomic_load_n(&config_gen->refcnt, __ATOMIC_RELAXED);
+}
 
 static inline struct cp_module *
 cp_config_gen_get_module(struct cp_config_gen *config_gen, uint64_t index) {

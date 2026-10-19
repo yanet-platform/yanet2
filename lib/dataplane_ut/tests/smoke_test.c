@@ -535,7 +535,7 @@ main(void) {
 		struct dp_worker *dp_worker = ADDR_OF(workers);
 		struct cp_config *cp_config = ADDR_OF(&dp_config->cp_config);
 		struct cp_config_gen *cp_config_gen =
-			ADDR_OF(&cp_config->cp_config_gen);
+			cp_config_current_gen(cp_config);
 		uint64_t iterations = *dp_worker->iterations;
 
 		// The harness round uses shared preparation for mock time,

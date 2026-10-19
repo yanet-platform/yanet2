@@ -513,14 +513,12 @@ func Test_CompatACLBalancerRoute(t *testing.T) {
 
 	// The old counters block: per-service packets and per-real
 	// throughput observe the whole run (8 + 8 per service so far).
-	ectx, err := env.h.PublishedExecutionContext(0)
-	require.NoError(t, err)
 	for _, service := range []string{"v4-80", "v6-80"} {
-		packets, _, err := cl3bobject.ReadServiceCounter(ectx, service, "incoming")
+		packets, _, err := cl3bobject.ReadServiceCounter(env.agent, 0, service, "incoming")
 		require.NoError(t, err)
 		require.EqualValues(t, 8, packets, "service %s must account 8 packets", service)
 	}
-	real1Packets, _, err := cl3bobject.ReadServiceCounter(ectx, "v4-80", "real/1")
+	real1Packets, _, err := cl3bobject.ReadServiceCounter(env.agent, 0, "v4-80", "real/1")
 	require.NoError(t, err)
 	require.EqualValues(t, 4, real1Packets,
 		"the second real of the v4 service must account the swapped flows")

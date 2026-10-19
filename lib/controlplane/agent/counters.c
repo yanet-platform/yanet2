@@ -484,10 +484,8 @@ yanet_get_counters_by_tags_per_worker(
 	const struct counter_pattern_set *names =
 		query != NULL ? &query->patterns : &any;
 
-	cp_config_lock(cp_config);
 	uint64_t worker_count = dp_config->worker_count;
 	struct cp_config_gen *config_gen = cp_config_gen_acquire(cp_config);
-	cp_config_unlock(cp_config);
 
 	struct worker_counter_matches matches = {
 		.by_worker = NULL,
@@ -506,9 +504,7 @@ yanet_get_counters_by_tags_per_worker(
 out:
 	worker_counter_matches_free(&matches);
 
-	cp_config_lock(cp_config);
 	cp_config_gen_release(cp_config, config_gen);
-	cp_config_unlock(cp_config);
 
 	return sets;
 }

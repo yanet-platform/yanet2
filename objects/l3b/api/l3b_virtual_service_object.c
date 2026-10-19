@@ -464,52 +464,75 @@ l3b_virtual_service_free(struct cp_object *cp_object, yanet_error **err) {
 		return -1;
 	}
 
+	struct agent *owner = ADDR_OF(&cp_object->agent);
+
 	// The session table outlives the service and is destroyed through its
 	// own handle.
 	l3b_virtual_service_object_destroy(cp_object);
+	agent_destroy_released(owner, AGENT_REFERENCE_OBJECT);
 	return 0;
 }
 
 int
 l3b_virtual_service_counter_read(
-	uint64_t ectx, const char *service, const char *counter, uint64_t *out
+	struct agent *agent,
+	uint32_t worker_idx,
+	const char *service,
+	const char *counter,
+	uint64_t *out
 ) {
-	struct config_gen_ectx *gen_ectx =
-		(struct config_gen_ectx *)(uintptr_t)ectx;
-	struct cp_config_gen *config_gen = ADDR_OF(&gen_ectx->cp_config_gen);
+	// The execution context, the object registry it is looked up in and
+	// the per-worker storage all live inside one generation, so the
+	// published generation is pinned for the whole read: a concurrent
+	// publish would otherwise retire and free them mid-read.
+	struct cp_config *cp_config = ADDR_OF(&agent->cp_config);
+	struct cp_config_gen *config_gen = cp_config_gen_acquire(cp_config);
 
-	uint64_t object_idx;
-	if (cp_config_gen_lookup_object_index(
-		    config_gen,
-		    L3B_VIRTUAL_SERVICE_OBJECT_TYPE,
-		    service,
-		    &object_idx
-	    )) {
-		return -1;
-	}
+	int rc = -1;
+	do {
+		struct config_gen_ectx *gen_ectx =
+			cp_config_gen_worker_ectx(config_gen, worker_idx);
+		if (gen_ectx == NULL) {
+			break;
+		}
 
-	struct object_ectx *object_ectx =
-		config_gen_ectx_get_object(gen_ectx, object_idx);
-	if (object_ectx == NULL) {
-		return -1;
-	}
+		uint64_t object_idx;
+		if (cp_config_gen_lookup_object_index(
+			    config_gen,
+			    L3B_VIRTUAL_SERVICE_OBJECT_TYPE,
+			    service,
+			    &object_idx
+		    )) {
+			break;
+		}
 
-	struct counter_storage *storage =
-		ADDR_OF(&object_ectx->counter_storage);
-	if (storage == NULL) {
-		return -1;
-	}
+		struct object_ectx *object_ectx =
+			config_gen_ectx_get_object(gen_ectx, object_idx);
+		if (object_ectx == NULL) {
+			break;
+		}
 
-	struct counter_registry *registry = ADDR_OF(&storage->registry);
-	uint64_t counter_id = counter_registry_lookup_index(registry, counter);
-	if (counter_id == (uint64_t)-1) {
-		return -1;
-	}
+		struct counter_storage *storage =
+			ADDR_OF(&object_ectx->counter_storage);
+		if (storage == NULL) {
+			break;
+		}
 
-	uint64_t *slot = counter_get_address(counter_id, storage);
-	out[0] = slot[0];
-	out[1] = slot[1];
-	return 0;
+		struct counter_registry *registry = ADDR_OF(&storage->registry);
+		uint64_t counter_id =
+			counter_registry_lookup_index(registry, counter);
+		if (counter_id == (uint64_t)-1) {
+			break;
+		}
+
+		uint64_t *slot = counter_get_address(counter_id, storage);
+		out[0] = slot[0];
+		out[1] = slot[1];
+		rc = 0;
+	} while (0);
+
+	cp_config_gen_release(cp_config, config_gen);
+	return rc;
 }
 
 struct l3b_session_table_object *

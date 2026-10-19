@@ -266,3 +266,33 @@ dangling_objects_test = executable(
 )
 
 test('dangling_objects', dangling_objects_test, suite: ['lib'])
+
+gen_pin_race_thread_dep = dependency('threads')
+
+gen_pin_race_test = executable(
+  'gen_pin_race_test',
+  ['gen_pin_race_test.c'],
+  c_args: yanet_c_args,
+  link_args: yanet_link_args + [
+    '-Wl,-E',
+    '-Wl,--undefined=new_device_plain',
+    '-Wl,--export-dynamic-symbol=new_device_plain',
+  ],
+  dependencies: [
+    lib_dataplane_ut_dep,
+    lib_logging_dep,
+    lib_errors_dep,
+    lib_dev_plain_api,
+    libdpdk_dep,
+    gen_pin_race_thread_dep,
+  ],
+  link_with: [lib_dev_plain_dp],
+  include_directories: yanet_rootdir,
+)
+
+test(
+  'gen_pin_race',
+  gen_pin_race_test,
+  suite: ['lib'],
+  timeout: 90,
+)

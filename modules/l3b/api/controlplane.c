@@ -96,7 +96,10 @@ l3b_module_config_free(struct cp_module *cp_module, yanet_error **err) {
 		return -1;
 	}
 
+	struct agent *owner = ADDR_OF(&cp_module->agent);
+
 	l3b_module_config_destroy(cp_module);
+	agent_destroy_released(owner, AGENT_REFERENCE_MODULE);
 	return 0;
 }
 
@@ -219,26 +222,35 @@ out:
 	return rc;
 }
 
-// Look up the live published service object by name, for reading its
-// contracts (the link counter registry) while building a module update.
-static struct cp_object *
-l3b_linked_service_object(const struct cp_module *cp_module, const char *name) {
+// Copy the service's packet-counter ID while its published generation is
+// pinned.
+static uint64_t
+l3b_linked_service_counter_id(
+	const struct cp_module *cp_module, const char *name
+) {
 	struct agent *agent = ADDR_OF(&cp_module->agent);
 	if (agent == NULL) {
-		return NULL;
+		return COUNTER_INVALID;
 	}
 
 	struct cp_config *cp_config = ADDR_OF(&agent->cp_config);
-	struct cp_config_gen *config_gen = ADDR_OF(&cp_config->cp_config_gen);
-	if (config_gen == NULL) {
-		return NULL;
+	struct cp_config_gen *config_gen = cp_config_gen_acquire(cp_config);
+	uint64_t counter_id = COUNTER_INVALID;
+	{
+		struct cp_object *linked = cp_object_registry_lookup(
+			&config_gen->object_registry,
+			L3B_VIRTUAL_SERVICE_OBJECT_TYPE,
+			name
+		);
+		if (linked != NULL) {
+			counter_id = counter_registry_lookup_index(
+				&linked->link_counter_registry,
+				L3B_LINK_COUNTER_PACKETS
+			);
+		}
 	}
-
-	return cp_object_registry_lookup(
-		&config_gen->object_registry,
-		L3B_VIRTUAL_SERVICE_OBJECT_TYPE,
-		name
-	);
+	cp_config_gen_release(cp_config, config_gen);
+	return counter_id;
 }
 
 int
@@ -315,19 +327,10 @@ l3b_module_config_update(
 			// the per-generation registry copies, so the
 			// per-worker link storages spawned at install time
 			// answer them.
-			struct cp_object *linked = l3b_linked_service_object(
+			counter_id_array[idx] = l3b_linked_service_counter_id(
 				cp_module,
 				destination_filter_rules[idx].virtual_service
 			);
-			if (linked != NULL) {
-				counter_id_array[idx] =
-					counter_registry_lookup_index(
-						&linked->link_counter_registry,
-						L3B_LINK_COUNTER_PACKETS
-					);
-			} else {
-				counter_id_array[idx] = COUNTER_INVALID;
-			}
 		}
 		SET_OFFSET_OF(&config->rule_object_links, link_array);
 		SET_OFFSET_OF(&config->rule_link_counter_ids, counter_id_array);

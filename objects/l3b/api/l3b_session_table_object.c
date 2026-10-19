@@ -102,7 +102,10 @@ l3b_session_table_object_free(struct cp_object *cp_object, yanet_error **err) {
 		return -1;
 	}
 
+	struct agent *owner = ADDR_OF(&cp_object->agent);
+
 	l3b_session_table_object_destroy(cp_object);
+	agent_destroy_released(owner, AGENT_REFERENCE_OBJECT);
 	return 0;
 }
 

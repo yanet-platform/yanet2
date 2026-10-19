@@ -300,13 +300,20 @@ l3b_virtual_service_create(
 struct l3b_session_table_object *
 l3b_virtual_service_session_table(const struct cp_object *cp_object);
 
-// Read one [packets, bytes] counter of the named service object from a
-// worker's published execution context. Values are per worker; callers
-// aggregate across workers. Returns 0 on success, -1 when the object, its
-// storage or the counter is absent.
+// Read one [packets, bytes] counter of the named service object from the
+// named worker's execution context of the currently published generation.
+// Values are per worker; callers aggregate across workers. Returns 0 on
+// success, -1 when the object, its storage or the counter is absent.
+//
+// The published generation is pinned for the duration of the read, so the
+// result is safe against a concurrent publish without caller locking.
 int
 l3b_virtual_service_counter_read(
-	uint64_t ectx, const char *service, const char *counter, uint64_t *out
+	struct agent *agent,
+	uint32_t worker_idx,
+	const char *service,
+	const char *counter,
+	uint64_t *out
 );
 
 // Destroy the virtual service object once it is dangling — referenced by no

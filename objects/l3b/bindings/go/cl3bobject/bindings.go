@@ -406,17 +406,31 @@ func (m *VirtualServiceObject) Free() error {
 }
 
 // ReadServiceCounter reads one packets/bytes counter pair of the named
-// service object from the per-worker storage of a published generation's
-// execution context, exposed by the harness or a dataplane as an opaque
-// pointer. Values are per worker; callers aggregate across workers.
-func ReadServiceCounter(ectx uintptr, service string, counter string) (uint64, uint64, error) {
+// service object from the given worker's execution context of the
+// currently published generation. Values are per worker; callers
+// aggregate across workers.
+//
+// The read pins the published generation for its duration, so it is safe
+// against a concurrent publish without caller locking.
+func ReadServiceCounter(
+	agent *ffi.Agent,
+	worker int,
+	service string,
+	counter string,
+) (uint64, uint64, error) {
 	cService := C.CString(service)
 	defer C.free(unsafe.Pointer(cService))
 	cCounter := C.CString(counter)
 	defer C.free(unsafe.Pointer(cCounter))
 
 	var values [2]C.uint64_t
-	rc := C.l3b_virtual_service_counter_read(C.uint64_t(ectx), cService, cCounter, &values[0])
+	rc := C.l3b_virtual_service_counter_read(
+		(*C.struct_agent)(agent.AsRawPtr()),
+		C.uint32_t(worker),
+		cService,
+		cCounter,
+		&values[0],
+	)
 	if rc != 0 {
 		return 0, 0, fmt.Errorf("counter %q of virtual service %q not found", counter, service)
 	}

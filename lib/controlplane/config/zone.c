@@ -133,7 +133,8 @@ cp_config_gen_new_from(
 	new_config_gen->config_gen_ectx_count = 0;
 	new_config_gen->config_gen_ectxs = NULL;
 	// Starts pinned by its own eventual current-published status, the
-	// same pin publish later transfers rather than adds to.
+	// same pin the publish later spends rather than adds to. Only one
+	// writer builds at a time, so the plain store needs no ordering.
 	new_config_gen->refcnt = 1;
 
 	SET_OFFSET_OF(
@@ -246,11 +247,28 @@ void
 cp_config_gen_release(
 	struct cp_config *cp_config, struct cp_config_gen *config_gen
 ) {
-	cp_config_assert_locked(cp_config);
+	// The release that observes the count reach zero is the sole owner
+	// of the teardown: every earlier holder's walk is ordered before its
+	// own decrement by the acquire-release exchange, and no new holder
+	// can appear — a retired generation is no longer published, and
+	// pinning goes through the publication lock.
+	uint64_t remaining =
+		__atomic_sub_fetch(&config_gen->refcnt, 1, __ATOMIC_ACQ_REL);
+	if (remaining != 0) {
+		return;
+	}
 
-	if (--config_gen->refcnt == 0) {
-		cp_config_gen_free(cp_config, config_gen);
+	cp_config_gen_free(cp_config, config_gen);
+
+	// The teardown may have left a superseded agent unreferenced. Reclaim
+	// it opportunistically, without waiting on an active update: a busy
+	// lock means its holder — a publish, an attach, an extension or the
+	// agent listing — is on a path that sweeps before releasing it, and a
+	// caller already holding the lock runs its own sweep.
+	if (cp_config_locked_by_thread != cp_config &&
+	    cp_config_try_lock(cp_config)) {
 		cp_config_reclaim_unused_agents_locked(cp_config);
+		cp_config_unlock(cp_config);
 	}
 }
 
@@ -261,7 +279,10 @@ cp_config_gen_release(
 // leaves the configuration in use untouched and the generation being
 // installed unobserved by any worker, so the caller may reclaim it.
 // Success is reported only once every worker has taken the new generation,
-// so the replaced one is executed nowhere and is safe to reclaim.
+// so the replaced one is executed nowhere and its publication pin may be
+// dropped here — freeing it at once unless an unlocked reader still holds
+// a pin, in which case that reader's later release frees it. Superseded
+// agents are reclaimed by the sweep below in either case.
 static inline int
 cp_config_gen_install(
 	struct dp_config *dp_config,
@@ -269,8 +290,7 @@ cp_config_gen_install(
 	struct cp_config_gen *new_config_gen,
 	yanet_error **err
 ) {
-	struct cp_config_gen *old_config_gen =
-		ADDR_OF(&cp_config->cp_config_gen);
+	struct cp_config_gen *old_config_gen = cp_config_current_gen(cp_config);
 
 	uint64_t worker_count = dp_config->worker_count;
 
@@ -284,17 +304,14 @@ cp_config_gen_install(
 	SET_OFFSET_OF(&new_config_gen->config_gen_ectxs, new_config_gen_ectxs);
 	new_config_gen->config_gen_ectx_count = worker_count;
 
-	// Release-publish the new generation so workers never observe this
-	// pointer before its contents are fully written.
-	ATOMIC_SET_OFFSET_OF(&cp_config->cp_config_gen, new_config_gen);
+	// Swap under the publication lock: a reader either names and pins the
+	// old generation before this, or observes the new one after, so the
+	// old generation's pin count can only shrink from here on.
+	cp_config_publish_gen(cp_config, new_config_gen);
 	dp_config_wait_for_gen(dp_config, new_config_gen);
 
-	// The new generation already carries the pin it was created with, so
-	// publishing it as current spends that pin rather than adding one.
-	// Dropping the old generation's own matching pin here frees it
-	// immediately, unless an unlocked reader is still pinning it too, in
-	// which case that reader's later release finishes the teardown.
 	cp_config_gen_release(cp_config, old_config_gen);
+	cp_config_reclaim_unused_agents_locked(cp_config);
 
 	return 0;
 }
@@ -309,8 +326,7 @@ cp_config_delete_module(
 ) {
 	cp_config_lock(cp_config);
 
-	struct cp_config_gen *old_config_gen =
-		ADDR_OF(&cp_config->cp_config_gen);
+	struct cp_config_gen *old_config_gen = cp_config_current_gen(cp_config);
 
 	struct cp_config_gen *new_config_gen =
 		cp_config_gen_new_from(cp_config, old_config_gen, err);
@@ -356,8 +372,7 @@ cp_config_update_modules(
 ) {
 	cp_config_lock(cp_config);
 
-	struct cp_config_gen *old_config_gen =
-		ADDR_OF(&cp_config->cp_config_gen);
+	struct cp_config_gen *old_config_gen = cp_config_current_gen(cp_config);
 	struct cp_config_gen *new_config_gen =
 		cp_config_gen_new_from(cp_config, old_config_gen, err);
 	if (new_config_gen == NULL) {
@@ -448,8 +463,7 @@ cp_config_update_functions(
 ) {
 	cp_config_lock(cp_config);
 
-	struct cp_config_gen *old_config_gen =
-		ADDR_OF(&cp_config->cp_config_gen);
+	struct cp_config_gen *old_config_gen = cp_config_current_gen(cp_config);
 	struct cp_config_gen *new_config_gen =
 		cp_config_gen_new_from(cp_config, old_config_gen, err);
 	if (new_config_gen == NULL) {
@@ -524,8 +538,7 @@ cp_config_delete_function(
 ) {
 	cp_config_lock(cp_config);
 
-	struct cp_config_gen *old_config_gen =
-		ADDR_OF(&cp_config->cp_config_gen);
+	struct cp_config_gen *old_config_gen = cp_config_current_gen(cp_config);
 
 	uint64_t index;
 	if (cp_config_gen_lookup_function_index(old_config_gen, name, &index)) {
@@ -578,8 +591,7 @@ cp_config_update_pipelines(
 ) {
 	cp_config_lock(cp_config);
 
-	struct cp_config_gen *old_config_gen =
-		ADDR_OF(&cp_config->cp_config_gen);
+	struct cp_config_gen *old_config_gen = cp_config_current_gen(cp_config);
 	struct cp_config_gen *new_config_gen =
 		cp_config_gen_new_from(cp_config, old_config_gen, err);
 
@@ -654,8 +666,7 @@ cp_config_delete_pipeline(
 ) {
 	cp_config_lock(cp_config);
 
-	struct cp_config_gen *old_config_gen =
-		ADDR_OF(&cp_config->cp_config_gen);
+	struct cp_config_gen *old_config_gen = cp_config_current_gen(cp_config);
 
 	uint64_t index;
 	if (cp_config_gen_lookup_pipeline_index(old_config_gen, name, &index)) {
@@ -774,8 +785,7 @@ cp_config_update_devices(
 	// TODO weight clamp
 	cp_config_lock(cp_config);
 
-	struct cp_config_gen *old_config_gen =
-		ADDR_OF(&cp_config->cp_config_gen);
+	struct cp_config_gen *old_config_gen = cp_config_current_gen(cp_config);
 	struct cp_config_gen *new_config_gen =
 		cp_config_gen_new_from(cp_config, old_config_gen, err);
 	if (new_config_gen == NULL) {
@@ -839,8 +849,7 @@ cp_config_delete_device(
 
 	cp_config_lock(cp_config);
 
-	struct cp_config_gen *old_config_gen =
-		ADDR_OF(&cp_config->cp_config_gen);
+	struct cp_config_gen *old_config_gen = cp_config_current_gen(cp_config);
 
 	struct cp_config_gen *new_config_gen =
 		cp_config_gen_new_from(cp_config, old_config_gen, err);
@@ -882,8 +891,7 @@ cp_config_update_objects(
 ) {
 	cp_config_lock(cp_config);
 
-	struct cp_config_gen *old_config_gen =
-		ADDR_OF(&cp_config->cp_config_gen);
+	struct cp_config_gen *old_config_gen = cp_config_current_gen(cp_config);
 	struct cp_config_gen *new_config_gen =
 		cp_config_gen_new_from(cp_config, old_config_gen, err);
 	if (new_config_gen == NULL) {
@@ -932,8 +940,7 @@ cp_config_delete_object(
 ) {
 	cp_config_lock(cp_config);
 
-	struct cp_config_gen *old_config_gen =
-		ADDR_OF(&cp_config->cp_config_gen);
+	struct cp_config_gen *old_config_gen = cp_config_current_gen(cp_config);
 
 	uint64_t index;
 	if (cp_config_gen_lookup_object_index(
@@ -1044,10 +1051,6 @@ cp_config_gen_new(struct agent *agent, yanet_error **err) {
 	cp_config_gen->gen = 0;
 	cp_config_gen->config_gen_ectx_count = 0;
 	cp_config_gen->config_gen_ectxs = NULL;
-	// The bootstrap generation is installed directly by its caller
-	// rather than through the publish path, so it starts pinned by its
-	// own current-published status just like every later generation.
-	cp_config_gen->refcnt = 1;
 	SET_OFFSET_OF(
 		&cp_config_gen->dp_config, ADDR_OF(&cp_config->dp_config)
 	);
@@ -1166,6 +1169,12 @@ cp_config_gen_new(struct agent *agent, yanet_error **err) {
 			goto error;
 		}
 	}
+
+	// The bootstrap generation is installed directly by its caller
+	// rather than through the publish path, before any unlocked reader
+	// exists, so it starts pinned by its own current-published status
+	// just like every later generation.
+	cp_config_gen->refcnt = 1;
 
 	return cp_config_gen;
 

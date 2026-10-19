@@ -227,9 +227,7 @@ insert_worker1_extra_storage(struct cp_config *cp_config) {
 		{.key = "kind", .value = "object"},
 	};
 
-	cp_config_lock(cp_config);
 	struct cp_config_gen *config_gen = cp_config_gen_acquire(cp_config);
-	cp_config_unlock(cp_config);
 
 	struct config_gen_ectx *ectx = cp_config_gen_worker_ectx(config_gen, 1);
 	TEST_ASSERT_NOT_NULL(ectx, "worker 1 has no execution context");
@@ -246,9 +244,7 @@ insert_worker1_extra_storage(struct cp_config *cp_config) {
 		err ? yanet_error_message(err) : "?"
 	);
 
-	cp_config_lock(cp_config);
 	cp_config_gen_release(cp_config, config_gen);
-	cp_config_unlock(cp_config);
 	return TEST_SUCCESS;
 }
 
@@ -269,9 +265,7 @@ make_workers_diverge(
 		"failed to install dev0 with input pipeline pipe0"
 	);
 
-	cp_config_lock(cp_config);
 	struct cp_config_gen *config_gen = cp_config_gen_acquire(cp_config);
-	cp_config_unlock(cp_config);
 
 	for (uint64_t w_idx = 0; w_idx < CW_WORKER_COUNT; ++w_idx) {
 		struct config_gen_ectx *ectx =
@@ -289,9 +283,7 @@ make_workers_diverge(
 		);
 	}
 
-	cp_config_lock(cp_config);
 	cp_config_gen_release(cp_config, config_gen);
-	cp_config_unlock(cp_config);
 
 	TEST_ASSERT_SUCCESS(
 		insert_worker1_extra_storage(cp_config),
@@ -679,9 +671,7 @@ test_registry_exact_lookup(struct cp_config *cp_config) {
 		counter_storage_spawn(memory_context, NULL, extra_registry);
 	TEST_ASSERT_NOT_NULL(storage, "failed to spawn the growth storage");
 
-	cp_config_lock(cp_config);
 	struct cp_config_gen *config_gen = cp_config_gen_acquire(cp_config);
-	cp_config_unlock(cp_config);
 
 	struct config_gen_ectx *ectx = cp_config_gen_worker_ectx(config_gen, 1);
 	TEST_ASSERT_NOT_NULL(ectx, "worker 1 has no execution context");
@@ -815,9 +805,7 @@ test_registry_exact_lookup(struct cp_config *cp_config) {
 		"the pattern query must match every growth item"
 	);
 
-	cp_config_lock(cp_config);
 	cp_config_gen_release(cp_config, config_gen);
-	cp_config_unlock(cp_config);
 	return TEST_SUCCESS;
 }
 

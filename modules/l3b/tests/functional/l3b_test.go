@@ -1149,9 +1149,7 @@ func TestL3b_ServiceAndRealCounters(t *testing.T) {
 		_ = result
 	}
 	counter := func(name string) (uint64, uint64) {
-		ectx, err := h.PublishedExecutionContext(0)
-		require.NoError(t, err)
-		packets, bytes, err := cl3bobject.ReadServiceCounter(ectx, "svc", name)
+		packets, bytes, err := cl3bobject.ReadServiceCounter(agent, 0, "svc", name)
 		require.NoError(t, err)
 		return packets, bytes
 	}
@@ -1588,15 +1586,13 @@ func Test_L3b_ConfiguredRealsGateEcho(t *testing.T) {
 						t.Run(pair.name, func(t *testing.T) {
 							request, reply := pair.request, pair.reply
 							original := bytes.Clone(request.Data())
-							executionContext, err := harness.PublishedExecutionContext(0)
-							require.NoError(t, err)
 							counterNames := []string{"incoming", "icmp_replied", "filter_rejected", "ring_empty", "real_disabled"}
 							for idx := range reals {
 								counterNames = append(counterNames, fmt.Sprintf("real/%d", idx))
 							}
 							baseline := map[string][2]uint64{}
 							for _, name := range counterNames {
-								packets, bytes, err := cl3bobject.ReadServiceCounter(executionContext, "svc", name)
+								packets, bytes, err := cl3bobject.ReadServiceCounter(agent, 0, "svc", name)
 								require.NoError(t, err)
 								baseline[name] = [2]uint64{packets, bytes}
 							}
@@ -1634,16 +1630,16 @@ func Test_L3b_ConfiguredRealsGateEcho(t *testing.T) {
 								require.Len(t, afterSessions, 0)
 								require.Equal(t, []uint64{0}, afterCursors)
 							}
-							incoming, incomingBytes, err := cl3bobject.ReadServiceCounter(executionContext, "svc", "incoming")
+							incoming, incomingBytes, err := cl3bobject.ReadServiceCounter(agent, 0, "svc", "incoming")
 							require.NoError(t, err)
 							require.Equal(t, tc.wantInput, incoming-baseline["incoming"][0])
 							require.Equal(t, tc.wantInput*uint64(len(original)), incomingBytes-baseline["incoming"][1])
-							replied, repliedBytes, err := cl3bobject.ReadServiceCounter(executionContext, "svc", "icmp_replied")
+							replied, repliedBytes, err := cl3bobject.ReadServiceCounter(agent, 0, "svc", "icmp_replied")
 							require.NoError(t, err)
 							require.Equal(t, tc.wantReply, replied-baseline["icmp_replied"][0])
 							require.Equal(t, tc.wantReply*uint64(len(reply.Data())), repliedBytes-baseline["icmp_replied"][1])
 							for _, name := range counterNames[2:] {
-								packets, bytes, err := cl3bobject.ReadServiceCounter(executionContext, "svc", name)
+								packets, bytes, err := cl3bobject.ReadServiceCounter(agent, 0, "svc", name)
 								require.NoError(t, err)
 								require.Equal(t, baseline[name], [2]uint64{packets, bytes}, name)
 							}

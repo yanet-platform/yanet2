@@ -642,9 +642,7 @@ dataplane_init(
 			cp_config_unlock(instance->cp_config);
 			return -1;
 		}
-		SET_OFFSET_OF(
-			&instance->cp_config->cp_config_gen, cp_config_gen
-		);
+		cp_config_publish_gen(instance->cp_config, cp_config_gen);
 		cp_config_unlock(instance->cp_config);
 
 		instance_offset += instance_size;

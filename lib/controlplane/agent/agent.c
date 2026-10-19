@@ -273,7 +273,7 @@ agent_attach(
 	SET_OFFSET_OF(&new_agent->cp_config, cp_config);
 	new_agent->pid = getpid();
 
-	struct cp_config_gen *config_gen = ADDR_OF(&cp_config->cp_config_gen);
+	struct cp_config_gen *config_gen = cp_config_current_gen(cp_config);
 	new_agent->gen = config_gen->gen;
 
 	block_allocator_init(&new_agent->block_allocator);
@@ -394,13 +394,10 @@ unlock:
 
 uint64_t
 agent_memory_limit(struct agent *agent) {
-	struct cp_config *cp_config = ADDR_OF(&agent->cp_config);
-
-	cp_config_lock(cp_config);
-	uint64_t memory_limit = agent->memory_limit;
-	cp_config_unlock(cp_config);
-
-	return memory_limit;
+	// The limit only ever grows, and always while the config lock is
+	// held, so an unlocked reader needs nothing stronger than an atomic
+	// load to observe a value that was valid at some point.
+	return __atomic_load_n(&agent->memory_limit, __ATOMIC_ACQUIRE);
 }
 
 static int
@@ -486,7 +483,9 @@ agent_extend_locked(struct agent *agent, uint64_t size, yanet_error **err) {
 
 	SET_OFFSET_OF(&agent->arenas, new_arenas);
 	agent->arena_count = new_arena_count;
-	agent->memory_limit += needed;
+	// The limit only ever grows and is read by unlocked observers, so
+	// the store is an atomic matching their acquire loads.
+	__atomic_add_fetch(&agent->memory_limit, needed, __ATOMIC_RELEASE);
 
 	for (uint64_t idx = 0; idx < added_count; ++idx) {
 		struct agent_arena *reserved = &new_arenas[arena_count + idx];
@@ -512,6 +511,10 @@ agent_extend(struct agent *agent, uint64_t size, yanet_error **err) {
 
 	cp_config_lock(cp_config);
 	int ret = agent_extend_locked(agent, size, err);
+	// Every completed hold of the configuration lock sweeps, so a final
+	// generation release that finds the lock busy is never left waiting
+	// for a holder that will not reclaim.
+	cp_config_reclaim_unused_agents_locked(cp_config);
 	cp_config_unlock(cp_config);
 
 	return ret;
@@ -902,9 +905,8 @@ cp_module_list_info_free(struct cp_module_list_info *module_list_info) {
 struct cp_module_list_info *
 yanet_get_cp_module_list_info(struct dp_config *dp_config) {
 	struct cp_config *cp_config = ADDR_OF(&dp_config->cp_config);
-	cp_config_lock(cp_config);
+	struct cp_config_gen *config_gen = cp_config_gen_acquire(cp_config);
 
-	struct cp_config_gen *config_gen = ADDR_OF(&cp_config->cp_config_gen);
 	struct cp_module_registry *module_registry =
 		&config_gen->module_registry;
 
@@ -915,7 +917,7 @@ yanet_get_cp_module_list_info(struct dp_config *dp_config) {
 				module_registry->registry.capacity
 		);
 	if (module_list_info == NULL) {
-		goto unlock;
+		goto release;
 	}
 
 	module_list_info->module_count = 0;
@@ -938,8 +940,8 @@ yanet_get_cp_module_list_info(struct dp_config *dp_config) {
 		module_list_info->module_count += 1;
 	}
 
-unlock:
-	cp_config_unlock(cp_config);
+release:
+	cp_config_gen_release(cp_config, config_gen);
 
 	return module_list_info;
 }
@@ -980,9 +982,7 @@ cp_function_list_info_free(struct cp_function_list_info *function_list_info) {
 struct cp_function_list_info *
 yanet_get_cp_function_list_info(struct dp_config *dp_config) {
 	struct cp_config *cp_config = ADDR_OF(&dp_config->cp_config);
-	cp_config_lock(cp_config);
-
-	struct cp_config_gen *config_gen = ADDR_OF(&cp_config->cp_config_gen);
+	struct cp_config_gen *config_gen = cp_config_gen_acquire(cp_config);
 	struct cp_function_registry *function_registry =
 		&config_gen->function_registry;
 
@@ -993,7 +993,7 @@ yanet_get_cp_function_list_info(struct dp_config *dp_config) {
 				function_registry->registry.capacity
 		);
 	if (function_list_info == NULL) {
-		goto unlock;
+		goto release;
 	}
 
 	function_list_info->function_count = 0;
@@ -1069,16 +1069,14 @@ yanet_get_cp_function_list_info(struct dp_config *dp_config) {
 		function_list_info->function_count += 1;
 	}
 
-	cp_config_unlock(cp_config);
-
-	return function_list_info;
+	goto release;
 
 error_free:
 	cp_function_list_info_free(function_list_info);
 	function_list_info = NULL;
 
-unlock:
-	cp_config_unlock(cp_config);
+release:
+	cp_config_gen_release(cp_config, config_gen);
 
 	return function_list_info;
 }
@@ -1129,9 +1127,7 @@ cp_pipeline_list_info_free(struct cp_pipeline_list_info *pipeline_list_info) {
 struct cp_pipeline_list_info *
 yanet_get_cp_pipeline_list_info(struct dp_config *dp_config) {
 	struct cp_config *cp_config = ADDR_OF(&dp_config->cp_config);
-	cp_config_lock(cp_config);
-
-	struct cp_config_gen *config_gen = ADDR_OF(&cp_config->cp_config_gen);
+	struct cp_config_gen *config_gen = cp_config_gen_acquire(cp_config);
 	struct registry *pipeline_registry =
 		&config_gen->pipeline_registry.registry;
 
@@ -1142,7 +1138,7 @@ yanet_get_cp_pipeline_list_info(struct dp_config *dp_config) {
 				pipeline_registry->capacity
 		);
 	if (pipeline_list_info == NULL) {
-		goto unlock;
+		goto release;
 	}
 
 	memset(pipeline_list_info,
@@ -1166,7 +1162,7 @@ yanet_get_cp_pipeline_list_info(struct dp_config *dp_config) {
 		if (pipeline_info == NULL) {
 			cp_pipeline_list_info_free(pipeline_list_info);
 			pipeline_list_info = NULL;
-			goto unlock;
+			goto release;
 		}
 
 		strtcpy(pipeline_info->name,
@@ -1182,8 +1178,8 @@ yanet_get_cp_pipeline_list_info(struct dp_config *dp_config) {
 			pipeline_info;
 	}
 
-unlock:
-	cp_config_unlock(cp_config);
+release:
+	cp_config_gen_release(cp_config, config_gen);
 
 	return pipeline_list_info;
 }
@@ -1267,9 +1263,7 @@ yanet_build_device_info(struct cp_device *device, uint64_t index) {
 struct cp_device_list_info *
 yanet_get_cp_device_list_info(struct dp_config *dp_config) {
 	struct cp_config *cp_config = ADDR_OF(&dp_config->cp_config);
-	cp_config_lock(cp_config);
-	struct cp_config_gen *cp_config_gen =
-		ADDR_OF(&cp_config->cp_config_gen);
+	struct cp_config_gen *cp_config_gen = cp_config_gen_acquire(cp_config);
 
 	struct cp_device_registry *device_registry =
 		&cp_config_gen->device_registry;
@@ -1281,7 +1275,7 @@ yanet_get_cp_device_list_info(struct dp_config *dp_config) {
 	struct cp_device_list_info *device_list_info =
 		(struct cp_device_list_info *)malloc(device_list_info_size);
 	if (device_list_info == NULL) {
-		goto unlock;
+		goto release;
 	}
 
 	memset(device_list_info, 0, device_list_info_size);
@@ -1298,7 +1292,7 @@ yanet_get_cp_device_list_info(struct dp_config *dp_config) {
 		if (device_info == NULL) {
 			cp_device_list_info_free(device_list_info);
 			device_list_info = NULL;
-			goto unlock;
+			goto release;
 		}
 
 		device_list_info->devices[device_list_info->device_count] =
@@ -1306,8 +1300,8 @@ yanet_get_cp_device_list_info(struct dp_config *dp_config) {
 		device_list_info->device_count++;
 	}
 
-unlock:
-	cp_config_unlock(cp_config);
+release:
+	cp_config_gen_release(cp_config, cp_config_gen);
 
 	return device_list_info;
 }
@@ -1566,6 +1560,10 @@ yanet_get_cp_agent_list_info(struct dp_config *dp_config) {
 	}
 
 unlock:
+	// Every completed hold of the configuration lock sweeps, so a final
+	// generation release that finds the lock busy is never left waiting
+	// for a holder that will not reclaim.
+	cp_config_reclaim_unused_agents_locked(cp_config);
 	cp_config_unlock(cp_config);
 	return agent_list_info;
 }
@@ -1786,6 +1784,10 @@ yanet_shm_extend_agent(
 		}
 	}
 
+	// Every completed hold of the configuration lock sweeps, so a final
+	// generation release that finds the lock busy is never left waiting
+	// for a holder that will not reclaim.
+	cp_config_reclaim_unused_agents_locked(cp_config);
 	cp_config_unlock(cp_config);
 
 	return ret;

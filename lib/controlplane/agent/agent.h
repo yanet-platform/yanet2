@@ -62,15 +62,19 @@ struct agent {
 	// dangling — known only to its owner — and its memory returns either
 	// through the owner's typed destroy or, if the owner is gone, with
 	// this agent's wholesale reclaim.
+	//
+	// All three counts move with relaxed atomics, so generation
+	// teardown may drop references without the config lock. Reference
+	// gains only ever happen under the lock; a racing drop unseen by a
+	// reclaim decision can only postpone that agent's reclamation.
 	uint64_t loaded_module_count;
 	uint64_t loaded_device_count;
 	// Count of this agent's shared objects that still hold a reference
 	// from a live generation.
 	//
-	// Follows the same accounting as the device count above: incremented
-	// when a reference is added and decremented when it is dropped and
-	// the object retires. Reclaiming a superseded agent waits for this
-	// and the sibling counts to reach zero, because freeing the arena is
+	// Follows the same accounting and the same relaxed-atomic access as
+	// the sibling counts above. Reclaiming a superseded agent waits for
+	// this and those counts to reach zero, because freeing the arena is
 	// one wholesale operation with no way to tear objects down
 	// individually first.
 	uint64_t loaded_object_count;
@@ -90,6 +94,36 @@ void
 agent_cleanup(struct agent *agent);
 
 struct cp_module;
+
+// Which of an agent's loaded counts a batch of registry-reference drops
+// applies to.
+enum agent_reference_kind {
+	AGENT_REFERENCE_MODULE,
+	AGENT_REFERENCE_DEVICE,
+	AGENT_REFERENCE_OBJECT,
+};
+
+// Drop the registry references named by the array, one subtraction of
+// the total per distinct agent.
+//
+// Every pointer in the array is read — never dereferenced — after the
+// first subtraction runs, so an agent whose count reaches zero may be
+// reclaimed by a concurrent sweep midway through the batch. Callers
+// must therefore finish every dereference of agent-owned storage before
+// calling this.
+void
+agent_unload_references(
+	struct agent **owners, uint64_t count, enum agent_reference_kind kind
+);
+
+// Return one destruction hold of the named kind, as taken by a destroy
+// gate alongside its destroying mark.
+//
+// The hold keeps the agent reclaimable-safe while a caller runs a typed
+// destructor unlocked; capture the agent pointer before the destructor
+// frees the item it came from.
+void
+agent_destroy_released(struct agent *agent, enum agent_reference_kind kind);
 
 int
 agent_update_modules(
