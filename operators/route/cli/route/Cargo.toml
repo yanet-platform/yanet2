@@ -22,8 +22,5 @@ tabled = { version = "0.21", default-features = false, features = ["ansi", "deri
 tonic = { version = "0.14", features = ["gzip", "zstd"] }
 tonic-prost = "0.14"
 
-[dev-dependencies]
-serde_json = "1"
-
 [build-dependencies]
 ync-build = { path = "../../../../cli/ync-build", package = "yanet-cli-build" }

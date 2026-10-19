@@ -3010,7 +3010,6 @@ dependencies = [
  "netip",
  "prost",
  "serde",
- "serde_json",
  "tabled",
  "tonic",
  "tonic-prost",
