@@ -328,6 +328,7 @@ func NewGateway(cfg Config, options ...GatewayOption) (*Gateway, error) {
 			commonxgrpc.ResponseCompressionStreamInterceptor(),
 			serverMetrics.StreamServerInterceptor(),
 			auth.StreamServerInterceptor(authManager, log),
+			xgrpc.StreamAccessLogInterceptor(log),
 			commonxgrpc.ValidateStreamInterceptor(),
 		),
 		grpc.MaxRecvMsgSize(1024 * 1024 * 256),

@@ -19,6 +19,7 @@ import (
 	"google.golang.org/protobuf/reflect/protoregistry"
 
 	"github.com/yanet-platform/yanet2/controlplane/internal/xgrpc"
+	ynpb "github.com/yanet-platform/yanet2/controlplane/ynpb/v1"
 )
 
 // BackendRegistry is the subset of backend lookup API required by the HTTP proxy.
@@ -199,11 +200,16 @@ func (m *TransparentWebGRPCProxy) handleUnary(w http.ResponseWriter, r *http.Req
 		grpc.ForceCodecV2(proxy.Codec()),
 	)
 	if err != nil {
-		m.log.Error("failed to proxy gRPC",
+		fields := []zap.Field{
 			zap.String("service", service),
 			zap.String("method", method),
-			zap.Error(err),
-		)
+			zap.String("status", status.Code(err).String()),
+		}
+		// Credential parsing errors may contain fragments of the supplied token.
+		if fullMethodName != ynpb.AuthService_IntrospectToken_FullMethodName {
+			fields = append(fields, zap.Error(err))
+		}
+		m.log.Error("failed to proxy gRPC", fields...)
 		statusErr, ok := status.FromError(err)
 		if ok {
 			code := statusErr.Code()

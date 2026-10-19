@@ -1,15 +1,35 @@
 package auth
 
 import (
+	"fmt"
+
 	"gopkg.in/yaml.v3"
 )
 
+// Mode selects RPC authentication and authorization policy.
+type Mode string
+
+const (
+	ModeDisabled Mode = "disabled"
+	ModeAudit    Mode = "audit"
+	ModeEnabled  Mode = "enabled"
+)
+
+// UnmarshalText rejects an explicitly empty authentication mode.
+func (m *Mode) UnmarshalText(data []byte) error {
+	if len(data) == 0 {
+		return fmt.Errorf("mode must not be empty; use disabled, audit, or enabled")
+	}
+	*m = Mode(data)
+	return nil
+}
+
 // Config is the configuration for authentication and authorization.
 type Config struct {
-	// Disabled indicates if authentication is disabled.
-	//
-	// When true, all requests are treated as anonymous with full permissions.
-	Disabled bool `yaml:"disabled"`
+	// Mode selects an explicit policy; omission uses legacy input or disabled.
+	Mode Mode `yaml:"mode,omitempty"`
+	// Disabled is the deprecated input alias for the authentication policy.
+	Disabled *bool `yaml:"disabled,omitempty"`
 	// IdentityProviders is a list of identity providers (chain of responsibility).
 	// First match wins.
 	IdentityProviders []IdentityProviderConfig `yaml:"identity_providers"`
@@ -19,6 +39,19 @@ type Config struct {
 	Authenticators []AuthenticatorConfig `yaml:"authenticators"`
 	// PermissionsPath is the path to the permissions YAML file.
 	PermissionsPath string `yaml:"permissions_path"`
+}
+
+// Validate rejects ambiguous policies and unsupported authentication modes.
+func (m *Config) Validate() error {
+	if m.Mode != "" && m.Disabled != nil {
+		return fmt.Errorf("mode and deprecated disabled cannot both be specified; remove disabled and use mode")
+	}
+	switch m.Mode {
+	case "", ModeDisabled, ModeAudit, ModeEnabled:
+		return nil
+	default:
+		return fmt.Errorf("unknown mode %q; use disabled, audit, or enabled", m.Mode)
+	}
 }
 
 // IdentityProviderConfig configures a single identity provider.
@@ -42,7 +75,5 @@ type AuthenticatorConfig struct {
 
 // DefaultConfig returns the default authentication configuration.
 func DefaultConfig() Config {
-	return Config{
-		Disabled: true, // TODO: Security by default. For now transition phase.
-	}
+	return Config{}
 }

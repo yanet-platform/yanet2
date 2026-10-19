@@ -64,7 +64,7 @@ func newX509AuthConfig(t *testing.T, ca *tlscert.CA) auth.Config {
 	credentials := writeTestFile(t, "basic_auth.yaml", "credentials:\n"+
 		"  - username: alice\n    password_hash: "+string(hash)+"\n")
 
-	text := "disabled: false\n" +
+	text := "mode: enabled\n" +
 		"identity_providers:\n  - type: file\n    path: " + identities + "\n" +
 		"permissions_path: " + permissions + "\n" +
 		"authenticators:\n" +

@@ -23,22 +23,34 @@ gateway:
     # tls:
     #   cert_file: /etc/yanet2/tls/server.pem
     #   key_file:  /etc/yanet2/tls/server.key
-  auth:
-    disabled: true
-    # Enabling auth means setting `disabled: false` plus all three keys
-    # below: an identity source, an authenticator, a permissions policy.
-    # None of the referenced files ships with the package — add per site.
-    # identity_providers:
-    #   - type: file
-    #     path: /etc/yanet2/auth/identities.yaml
+  # auth:
+    # Audit admits RPCs after transport TLS checks and logs verified identities.
+    # Enabled enforces identity lookup and permissions; disabled is anonymous.
+    #
+    # Replace legacy disabled: true/false with mode: disabled/enabled. Remove
+    # the old key and YANET_GATEWAY_AUTH_DISABLED when setting mode or
+    # YANET_GATEWAY_AUTH_MODE; both policy spellings together are an error.
+    # mode: disabled
+    # For SSH-agent certificate audit logging, select mode: audit and
+    # configure the SSH certificate authenticator below with a trusted CA.
+    #
+    # Audit needs no identity source or permissions file. None of these
+    # site-specific files ships with the package.
     # authenticators:
+    #   - type: sshcert
+    #     config:
+    #       ca_sources:
+    #         - /etc/yanet2/auth/ssh-ca.pub
+    # Additional authenticators can be appended to the same list.
     #   - type: basic
     #     config:
     #       credentials_path: /etc/yanet2/auth/basic_auth.yaml
-    #   # A client certificate presented in the TLS handshake identifies a
-    #   # caller that sends no token by its common name, which must be listed
-    #   # in the identities file. Requires server.tls. Revocation lists are
-    #   # optional and must be signed by one of the authorities.
+    #   # A client certificate identifies a caller that sends no token by its
+    #   # verified common name.
+    #   #
+    #   # Enabled mode requires this name in the identities file; audit records
+    #   # it directly. Requires server.tls. Revocation lists are optional and
+    #   # must be signed by one of the authorities.
     #   - type: x509
     #     config:
     #       ca_sources:
@@ -46,6 +58,10 @@ gateway:
     #       crl_sources:
     #         - https://pki.example.com/yanet-clients.crl
     #       refresh_interval: 5m
+    # Enabled mode also requires an identity source and permissions policy.
+    # identity_providers:
+    #   - type: file
+    #     path: /etc/yanet2/auth/identities.yaml
     # permissions_path: /etc/yanet2/auth/permissions.yaml
   registry:
     # The gateway drops backends that stopped refreshing their registration,

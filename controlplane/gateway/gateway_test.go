@@ -8,7 +8,10 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/base64"
+	"encoding/json"
 	"encoding/pem"
+	"fmt"
 	"io"
 	"math/big"
 	"net"
@@ -21,6 +24,8 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
+	"go.uber.org/zap/zaptest/observer"
+	"golang.org/x/crypto/ssh"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -29,10 +34,12 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/emptypb"
 	"google.golang.org/protobuf/types/known/wrapperspb"
+	"gopkg.in/yaml.v3"
 
 	"github.com/yanet-platform/yanet2/common/go/xcfg"
 	readinesspb "github.com/yanet-platform/yanet2/common/readinesspb/v1"
 	"github.com/yanet-platform/yanet2/controlplane/gateway"
+	"github.com/yanet-platform/yanet2/controlplane/internal/auth/sshcert"
 	ynpb "github.com/yanet-platform/yanet2/controlplane/ynpb/v1"
 )
 
@@ -952,5 +959,167 @@ func Test_GatewayService_Register_RejectsInvalidRequest(t *testing.T) {
 			require.Equal(t, codes.InvalidArgument, statusErr.Code())
 			require.Equal(t, tc.message, statusErr.Message())
 		})
+	}
+}
+
+// auditProbeServer returns a backend failure so proxy logs must retain its status.
+type auditProbeServer struct{}
+
+func (m *auditProbeServer) Probe(ctx context.Context, request *emptypb.Empty) (*emptypb.Empty, error) {
+	return nil, status.Error(codes.FailedPrecondition, "operation rejected")
+}
+
+// newAuditSigner returns an ephemeral P-256 signer usable for SSH certificates.
+func newAuditSigner(t *testing.T) ssh.Signer {
+	t.Helper()
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+	signer, err := ssh.NewSignerFromKey(key)
+	require.NoError(t, err)
+	return signer
+}
+
+// signAuditToken binds a certificate identity to one RPC and timestamp.
+func signAuditToken(t *testing.T, authority, signer ssh.Signer, method string) string {
+	t.Helper()
+	certificate := &ssh.Certificate{
+		Key:             signer.PublicKey(),
+		CertType:        ssh.UserCert,
+		ValidPrincipals: []string{"verified-operator"},
+		ValidAfter:      uint64(time.Now().Add(-time.Hour).Unix()),
+		ValidBefore:     uint64(time.Now().Add(time.Hour).Unix()),
+	}
+	require.NoError(t, certificate.SignCert(rand.Reader, authority))
+	token := sshcert.Token{
+		Version:     1,
+		Certificate: base64.StdEncoding.EncodeToString(certificate.Marshal()),
+		Timestamp:   time.Now().UnixNano(),
+		Nonce:       "audit-test-nonce",
+		Method:      method,
+	}
+	signature, err := signer.Sign(rand.Reader, token.CanonicalSignedData())
+	require.NoError(t, err)
+	token.Signature = base64.StdEncoding.EncodeToString(ssh.Marshal(signature))
+	payload, err := json.Marshal(token)
+	require.NoError(t, err)
+	return "sshcert " + base64.StdEncoding.EncodeToString(payload)
+}
+
+// Test_Gateway_Audit_LogsVerifiedAndAnonymousRPCOutcomes verifies that audit logs
+// record verified or anonymous identities with the original RPC outcome.
+//
+// Account stores are absent and both built-in and proxy requests are exercised.
+func Test_Gateway_Audit_LogsVerifiedAndAnonymousRPCOutcomes(t *testing.T) {
+	authority := newAuditSigner(t)
+	signer := newAuditSigner(t)
+	trustPath := writeTestFile(t, "ssh-ca.pub", string(ssh.MarshalAuthorizedKey(authority.PublicKey())))
+	config := gateway.DefaultConfig()
+	require.NoError(t, yaml.Unmarshal([]byte("mode: audit\nauthenticators:\n  - type: sshcert\n    config:\n      ca_sources: ["+trustPath+"]\n"), &config.Auth))
+	logCore, logs := observer.New(zap.DebugLevel)
+	listener := NewTestListener(t)
+	gatewayServer, err := gateway.NewGateway(config, gateway.WithListener(listener), gateway.WithLog(zap.New(logCore)))
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, gatewayServer.Close()) })
+	ctx, cancel := context.WithCancel(t.Context())
+	var group errgroup.Group
+	group.Go(func() error { return gatewayServer.Run(ctx) })
+	t.Cleanup(func() { cancel(); require.NoError(t, group.Wait()) })
+
+	backendListener := NewTestListener(t)
+	backend := grpc.NewServer()
+	backend.RegisterService(&cancelProbeServiceDesc, &auditProbeServer{})
+	go func() { _ = backend.Serve(backendListener) }()
+	t.Cleanup(backend.Stop)
+	connection, err := grpc.NewClient(listener.Addr().String(), grpc.WithTransportCredentials(insecure.NewCredentials()))
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, connection.Close()) })
+	client := ynpb.NewGatewayClient(connection)
+	_, err = client.Register(t.Context(), &ynpb.RegisterRequest{Backend: &ynpb.BackendDesc{Name: cancelProbeServiceName, Endpoint: backendListener.Addr().String()}}, grpc.WaitForReady(true))
+	require.NoError(t, err)
+
+	for _, tc := range []struct {
+		name     string
+		kind     string
+		verified bool
+	}{
+		{name: "signed trusted certificate", kind: "valid", verified: true},
+		{name: "missing credential", kind: "missing"},
+		{name: "unsupported credential", kind: "unsupported"},
+		{name: "malformed credential", kind: "malformed"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			for _, method := range []string{ynpb.Gateway_ListServices_FullMethodName, cancelProbeFullMethod} {
+				token := signAuditToken(t, authority, signer, method)
+				switch tc.kind {
+				case "missing":
+					token = ""
+				case "unsupported":
+					token = "unsupported secret-credential"
+				case "malformed":
+					token = "sshcert !!!secret-credential"
+				}
+				callContext := metadata.NewOutgoingContext(t.Context(), metadata.Pairs("x-yanet-authentication", token))
+				logs.TakeAll()
+				if method == cancelProbeFullMethod {
+					err = connection.Invoke(callContext, method, &emptypb.Empty{}, &emptypb.Empty{})
+					require.Equal(t, codes.FailedPrecondition, status.Code(err))
+				} else {
+					_, err = client.ListServices(callContext, &ynpb.ListServicesRequest{})
+					require.NoError(t, err)
+				}
+				require.Eventually(t, func() bool {
+					return logs.FilterField(zap.String("method", method)).FilterMessageSnippet("gRPC").FilterFieldKey("status").Len() == 1
+				}, time.Second, time.Millisecond)
+				entries := logs.FilterField(zap.String("method", method)).FilterFieldKey("status").All()
+				require.Len(t, entries, 1)
+				fields := entries[0].ContextMap()
+				user, authMethod := "anonymous", "none"
+				if tc.verified {
+					user, authMethod = "verified-operator", "sshcert"
+				}
+				require.Equal(t, user, fields["user"])
+				require.Equal(t, authMethod, fields["auth_method"])
+				require.Equal(t, !tc.verified, fields["is_anonymous"])
+				require.Contains(t, fields, "duration")
+				require.Equal(t, status.Code(err).String(), fields["status"])
+				for _, entry := range logs.All() {
+					rendered := fmt.Sprint(entry.ContextMap())
+					if token != "" {
+						require.NotContains(t, rendered, token)
+					}
+					require.NotContains(t, rendered, "secret-credential")
+				}
+			}
+		})
+	}
+
+	malformedCertificate := sshcert.Token{
+		Version:     1,
+		Certificate: base64.StdEncoding.EncodeToString(ssh.Marshal(struct{ Algorithm string }{"introspection-secret"})),
+		Timestamp:   time.Now().UnixNano(),
+		Nonce:       "audit-test-nonce",
+		Method:      ynpb.AuthService_IntrospectToken_FullMethodName,
+		Signature:   "unused",
+	}
+	malformedPayload, err := json.Marshal(malformedCertificate)
+	require.NoError(t, err)
+	authClient := ynpb.NewAuthServiceClient(connection)
+	for _, tc := range []struct {
+		token        string
+		parsingError bool
+	}{
+		{token: "sshcert !!!introspection-secret"},
+		{token: "unsupported introspection-secret"},
+		{token: "sshcert " + base64.StdEncoding.EncodeToString(malformedPayload), parsingError: true},
+	} {
+		logs.TakeAll()
+		_, err := authClient.IntrospectToken(t.Context(), &ynpb.IntrospectTokenRequest{Token: tc.token})
+		require.Equal(t, codes.Unauthenticated, status.Code(err))
+		if tc.parsingError {
+			require.ErrorContains(t, err, "ssh: unknown key algorithm: introspection-secret")
+		}
+		for _, entry := range logs.All() {
+			require.NotContains(t, fmt.Sprint(entry.ContextMap()), "introspection-secret")
+		}
 	}
 }

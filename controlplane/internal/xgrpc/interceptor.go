@@ -12,6 +12,7 @@ import (
 	"google.golang.org/protobuf/reflect/protoreflect"
 
 	"github.com/yanet-platform/yanet2/controlplane/internal/auth/core"
+	ynpb "github.com/yanet-platform/yanet2/controlplane/ynpb/v1"
 )
 
 // ProtoLogValue is an interface for custom proto message serialization in logs.
@@ -28,13 +29,10 @@ type ProtoLogValue interface {
 	AsLogValue() any
 }
 
-// AccessLogInterceptor returns a gRPC unary server interceptor that logs
-// requests and responses.
+// AccessLogInterceptor logs sanitized requests and unary RPC completion.
 //
-// The interceptor logs:
-// - Debug: method entry with sanitized request
-// - Info: successful completion with duration and status
-// - Error: failed calls with duration, status and error message
+// Completion records identity, duration, and handler status. Credential
+// introspection failures omit parser details that may contain token fragments.
 func AccessLogInterceptor(log *zap.Logger) grpc.UnaryServerInterceptor {
 	return func(
 		ctx context.Context,
@@ -58,30 +56,61 @@ func AccessLogInterceptor(log *zap.Logger) grpc.UnaryServerInterceptor {
 		}
 
 		resp, err := handler(ctx, req)
-		duration := time.Since(now)
-		status, _ := status.FromError(err)
-
-		fields := []zap.Field{
-			zap.String("method", info.FullMethod),
-			zap.String("status", status.Code().String()),
-			zap.Duration("duration", duration),
-		}
-
-		if principal := core.FromContext(ctx); principal != nil {
-			fields = append(fields,
-				zap.String("user", principal.User),
-				zap.String("auth_method", principal.AuthMethod),
-			)
-		}
-
-		if err != nil {
-			fields = append(fields, zap.Error(err))
-			log.Error("failed to execute gRPC", fields...)
-		} else {
-			log.Info("completed gRPC execution", fields...)
-		}
+		logCompletion(log, ctx, info.FullMethod, now, err)
 
 		return resp, err
+	}
+}
+
+// StreamAccessLogInterceptor logs streaming RPC completion without inspecting
+// message contents or changing the handler outcome.
+func StreamAccessLogInterceptor(log *zap.Logger) grpc.StreamServerInterceptor {
+	return func(
+		server any,
+		stream grpc.ServerStream,
+		info *grpc.StreamServerInfo,
+		handler grpc.StreamHandler,
+	) error {
+		now := time.Now()
+		err := handler(server, stream)
+		logCompletion(log, stream.Context(), info.FullMethod, now, err)
+		return err
+	}
+}
+
+func logCompletion(
+	log *zap.Logger,
+	ctx context.Context,
+	method string,
+	started time.Time,
+	err error,
+) {
+	st, ok := status.FromError(err)
+	if !ok {
+		st = status.FromContextError(err)
+	}
+
+	fields := []zap.Field{
+		zap.String("method", method),
+		zap.String("status", st.Code().String()),
+		zap.Duration("duration", time.Since(started)),
+	}
+	if principal := core.FromContext(ctx); principal != nil {
+		fields = append(fields,
+			zap.String("user", principal.User),
+			zap.String("auth_method", principal.AuthMethod),
+			zap.Bool("is_anonymous", principal.IsAnonymous),
+		)
+	}
+
+	if err != nil {
+		// Credential parsing errors may contain fragments of the supplied token.
+		if method != ynpb.AuthService_IntrospectToken_FullMethodName {
+			fields = append(fields, zap.Error(err))
+		}
+		log.Error("failed to execute gRPC", fields...)
+	} else {
+		log.Info("completed gRPC execution", fields...)
 	}
 }
 
