@@ -28,3 +28,10 @@ new_object_loader_probe(void) {
 	object->prepared_size = LOADER_PROBE_PLUGIN_PREPARED_SIZE;
 	return object;
 }
+
+// A constructor whose symbol names another type than the one it returns;
+// the loader must refuse it.
+__attribute__((visibility("default"))) struct object *
+new_object_loader_alias(void) {
+	return new_object_loader_probe();
+}

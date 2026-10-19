@@ -234,6 +234,55 @@ test_resolve_connections_empty_device_name(void) {
 	fclose(f);
 }
 
+// The object list keeps every configured type name in order, as the
+// module list does, and refuses a name the loader could not use whole.
+static void
+test_objects_list(void) {
+	const char yaml[] = "dataplane:\n"
+			    "  devices:\n"
+			    "    - port_name: eth0\n"
+			    "  modules:\n"
+			    "    - plugin_module\n"
+			    "  objects:\n"
+			    "    - ring\n"
+			    "    - plugin_store\n";
+	struct dataplane_config *config = NULL;
+	assert(parse_yaml(yaml, &config) == 0);
+	assert(config->module_count == 1);
+	assert(strcmp(config->module_names[0], "plugin_module") == 0);
+	assert(config->object_count == 2);
+	assert(strcmp(config->object_names[0], "ring") == 0);
+	assert(strcmp(config->object_names[1], "plugin_store") == 0);
+	dataplane_config_free(config);
+
+	const char empty[] = "dataplane:\n"
+			     "  devices:\n"
+			     "    - port_name: eth0\n"
+			     "  objects:\n"
+			     "    - \"\"\n";
+	config = NULL;
+	assert(parse_yaml(empty, &config) == -1);
+	assert(config == NULL);
+
+	char long_name[DATAPLANE_OBJECT_NAME_LEN + 1];
+	memset(long_name, 'a', DATAPLANE_OBJECT_NAME_LEN);
+	long_name[DATAPLANE_OBJECT_NAME_LEN] = '\0';
+	char overlong[256];
+	snprintf(
+		overlong,
+		sizeof(overlong),
+		"dataplane:\n"
+		"  devices:\n"
+		"    - port_name: eth0\n"
+		"  objects:\n"
+		"    - %s\n",
+		long_name
+	);
+	config = NULL;
+	assert(parse_yaml(overlong, &config) == -1);
+	assert(config == NULL);
+}
+
 static void
 test_valid_config(void) {
 	FILE *f = fopen(CONFIG_PATH, "r");
@@ -266,6 +315,7 @@ main(int argc, char **argv) {
 	(void)argv;
 
 	test_valid_config();
+	test_objects_list();
 	test_numeric_field_maximum_values();
 	test_packet_recirc_limit_default_and_bounds();
 	test_numeric_field_ranges();

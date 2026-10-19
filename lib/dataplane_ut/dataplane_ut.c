@@ -123,7 +123,8 @@ dataplane_ut_new(const struct dataplane_ut_config *cfg) {
 	ut->dp_config->external_worker_rounds = true;
 	pthread_mutex_init(dp_config_external_round_lock(ut->dp_config), NULL);
 
-	// Open the current binary so dlsym can resolve module/device symbols.
+	// Open the current binary so dlsym can resolve module, device and
+	// object type constructors.
 	void *bin_hndl = dlopen(NULL, RTLD_NOW | RTLD_GLOBAL);
 	if (bin_hndl == NULL) {
 		LOG(ERROR,
@@ -133,8 +134,10 @@ dataplane_ut_new(const struct dataplane_ut_config *cfg) {
 		return NULL;
 	}
 
-	// Load module .so plugins so their symbols take priority over the
-	// statically-linked built-ins when resolving new_module_<name>.
+	// Load .so plugins; their modules take priority over the built-ins.
+	//
+	// An object type resolves from the main binary first, so a plugin
+	// adds new types without shadowing a built-in one.
 	if (dp_load_plugins(cfg->plugin_dir, &ut->plugins) == -1) {
 		LOG(ERROR,
 		    "dataplane_ut_new: failed to load plugins from %s",
@@ -172,18 +175,19 @@ dataplane_ut_new(const struct dataplane_ut_config *cfg) {
 		}
 	}
 
-	// Load requested object types through their constructors, so each
-	// type keeps the commit hook and prepared size it declares.
-	for (size_t idx = 0; idx < cfg->objects_to_load_count; ++idx) {
-		if (dp_load_object(
-			    ut->dp_config, bin_hndl, cfg->objects_to_load[idx]
-		    ) == -1) {
-			LOG(ERROR,
-			    "dataplane_ut_new: failed to load object %s",
-			    cfg->objects_to_load[idx]);
-			dataplane_ut_free(ut);
-			return NULL;
-		}
+	// Load requested object types through their constructors.
+	//
+	// Each type keeps the commit hook and prepared size it declares; a
+	// repeated name loads once, as in the dataplane.
+	if (dp_load_objects(
+		    ut->dp_config,
+		    bin_hndl,
+		    cfg->objects_to_load,
+		    cfg->objects_to_load_count
+	    ) == -1) {
+		LOG(ERROR, "dataplane_ut_new: failed to load object types");
+		dataplane_ut_free(ut);
+		return NULL;
 	}
 
 	// Populate dp_topology with the logical port names from cfg.

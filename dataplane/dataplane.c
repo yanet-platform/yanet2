@@ -743,13 +743,25 @@ dataplane_init(
 			"l3b_session_table",
 			"ring",
 		};
-		for (size_t i = 0; i < sizeof(objects) / sizeof(objects[0]);
-		     ++i) {
-			if (dp_load_object(
-				    instance->dp_config, bin_hndl, objects[i]
-			    ) == -1) {
-				return -1;
-			}
+		// Object types the config names beside the built-in ones, such
+		// as those a plugin ships; a name already loaded loads once.
+		const char *configured[DATAPLANE_MAX_OBJECTS];
+		for (uint64_t i = 0; i < config->object_count; ++i) {
+			configured[i] = config->object_names[i];
+		}
+		if (dp_load_objects(
+			    instance->dp_config,
+			    bin_hndl,
+			    objects,
+			    sizeof(objects) / sizeof(objects[0])
+		    ) == -1 ||
+		    dp_load_objects(
+			    instance->dp_config,
+			    bin_hndl,
+			    configured,
+			    config->object_count
+		    ) == -1) {
+			return -1;
 		}
 
 		// System agent for this instance.

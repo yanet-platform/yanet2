@@ -1,10 +1,10 @@
-// Loading of object types a plugin ships.
+// Loading of object types a plugin ships, and of object type lists.
 //
 // The loaders resolve a constructor through the main-program handle, which
 // also sees the symbols of a plugin loaded with global symbols. Only the
-// plugin constructs the "loader_probe" object type, so the scenario tells
+// plugin constructs the "loader_probe" object type, so each scenario tells
 // from the loaded descriptor that the plugin's constructor ran: the harness
-// loading the type it is asked for.
+// loading the type it is asked for, and a list loading each name once.
 
 #include <dlfcn.h>
 #include <stdint.h>
@@ -80,6 +80,62 @@ run_harness_loads_plugin_object_test(void) {
 	return result;
 }
 
+// A list naming the plugin's type twice registers it once, from the
+// plugin; a name no constructor serves fails the list, and so does a
+// constructor returning another type than its symbol names.
+static int
+run_load_objects_once_each_test(void) {
+	struct dataplane_ut_config cfg = {
+		.cp_memory = 1u << 24,
+		.dp_memory = 1u << 20,
+		.worker_count = 1,
+	};
+	struct dataplane_ut *ut = dataplane_ut_new(&cfg);
+	TEST_ASSERT_NOT_NULL(ut, "the harness must start");
+	struct dp_config *dp_config =
+		yanet_shm_dp_config(dataplane_ut_shm(ut), 0);
+	void *bin_hndl = dlopen(NULL, RTLD_NOW | RTLD_GLOBAL);
+	struct plugin_registry plugins = {0};
+	int result = TEST_FAILED;
+	if (bin_hndl == NULL || dp_load_plugins(LOADER_PLUGIN_DIR, &plugins)) {
+		goto out;
+	}
+
+	uint64_t before = dp_config->object_count;
+	const char *names[] = {LOADER_PROBE_NAME, LOADER_PROBE_NAME};
+	if (dp_load_objects(dp_config, bin_hndl, names, 2) != 0) {
+		LOG(ERROR, "the list must load");
+		goto out;
+	}
+	if (dp_config->object_count != before + 1) {
+		LOG(ERROR, "a repeated name must load once");
+		goto out;
+	}
+	if (assert_from_plugin(dp_config, &plugins) != TEST_SUCCESS) {
+		goto out;
+	}
+	const char *missing[] = {"loader_missing"};
+	if (dp_load_objects(dp_config, bin_hndl, missing, 1) != -1) {
+		LOG(ERROR, "a name no constructor serves must fail");
+		goto out;
+	}
+	const char *alias[] = {"loader_alias"};
+	if (dp_load_objects(dp_config, bin_hndl, alias, 1) != -1 ||
+	    dp_config->object_count != before + 1) {
+		LOG(ERROR, "a constructor returning another type must fail");
+		goto out;
+	}
+	result = TEST_SUCCESS;
+
+out:
+	dp_unload_plugins(&plugins);
+	if (bin_hndl != NULL) {
+		dlclose(bin_hndl);
+	}
+	dataplane_ut_free(ut);
+	return result;
+}
+
 int
 main(void) {
 	log_enable_name("info");
@@ -90,6 +146,7 @@ main(void) {
 	} tests[] = {
 		{"harness_loads_plugin_object",
 		 run_harness_loads_plugin_object_test},
+		{"load_objects_once_each", run_load_objects_once_each_test},
 	};
 
 	size_t failed = 0;

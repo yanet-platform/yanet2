@@ -1,5 +1,7 @@
-# The plugin of the loader test: an object type exported as
-# new_object_loader_probe, beside the ABI version every plugin exports.
+# The loader test's plugin: constructors for the loader_probe object type.
+#
+# Beside the ABI version every plugin exports, it carries a probe constructor
+# and an alias constructor that returns a mismatched type name.
 loader_probe_plugin = shared_module(
   'loader_probe_dp',
   ['loader_plugin.c'] + lib_module_abi_export_sources,

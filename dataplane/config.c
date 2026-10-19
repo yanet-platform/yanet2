@@ -261,6 +261,7 @@ enum state {
 
 	state_plugin_dir,
 	state_modules,
+	state_objects,
 };
 
 int
@@ -383,6 +384,22 @@ dataplane_config_init(FILE *file, struct dataplane_config **config) {
 					start,
 					DATAPLANE_MODULE_NAME_LEN);
 				dataplane->module_count++;
+				break;
+			case state_objects:
+				if (dataplane->object_count >=
+				    DATAPLANE_MAX_OBJECTS) {
+					goto error;
+				}
+				if (scalar_length == 0 ||
+				    scalar_length >=
+					    DATAPLANE_OBJECT_NAME_LEN) {
+					goto error;
+				}
+				strtcpy(dataplane->object_names
+						[dataplane->object_count],
+					start,
+					DATAPLANE_OBJECT_NAME_LEN);
+				dataplane->object_count++;
 				break;
 
 			// handle new instance
@@ -602,6 +619,8 @@ dataplane_config_init(FILE *file, struct dataplane_config **config) {
 					state = state_plugin_dir;
 				} else if (!strcmp("modules", start)) {
 					state = state_modules;
+				} else if (!strcmp("objects", start)) {
+					state = state_objects;
 				} else {
 					goto error;
 				}
@@ -684,6 +703,8 @@ dataplane_config_init(FILE *file, struct dataplane_config **config) {
 				break;
 			case state_modules:
 				break;
+			case state_objects:
+				break;
 			default:
 				goto error;
 			}
@@ -703,6 +724,9 @@ dataplane_config_init(FILE *file, struct dataplane_config **config) {
 				state = state_dataplane;
 				break;
 			case state_modules:
+				state = state_dataplane;
+				break;
+			case state_objects:
 				state = state_dataplane;
 				break;
 			default:
