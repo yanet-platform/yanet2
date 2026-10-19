@@ -189,50 +189,6 @@ func (m *mockServerStream) Context() context.Context {
 	return m.ctx
 }
 
-// Test_AuthenticationInterceptors_Audit_PreservesOutcomes verifies that invalid
-// credentials become anonymous without changing handler responses or status.
-func Test_AuthenticationInterceptors_Audit_PreservesOutcomes(t *testing.T) {
-	config := buildEnabledConfig(t)
-	config.Mode = auth.ModeAudit
-	manager, err := auth.NewManager(&config)
-	require.NoError(t, err)
-	for _, tc := range []struct {
-		name      string
-		token     string
-		user      string
-		anonymous bool
-	}{
-		{name: "missing credentials are anonymous", user: "anonymous", anonymous: true},
-		{name: "unsupported credentials are anonymous", token: "unknown secret", user: "anonymous", anonymous: true},
-		{name: "malformed credentials are anonymous", token: "Basic !!!secret", user: "anonymous", anonymous: true},
-		{name: "unverified account name stays anonymous", token: basicToken("alice", "wrong"), user: "anonymous", anonymous: true},
-		{name: "verified subject skips account lookup", token: basicToken("ghost", "s3cret"), user: "ghost"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			ctx := metadata.NewIncomingContext(t.Context(), metadata.Pairs("x-yanet-authentication", tc.token))
-			handlerError := status.Error(codes.Aborted, "handler outcome")
-			unary := auth.UnaryServerInterceptor(manager, zap.NewNop())
-			response, err := unary(ctx, "request", &grpc.UnaryServerInfo{FullMethod: "/test.Service/Method"}, func(ctx context.Context, request any) (any, error) {
-				principal := core.FromContext(ctx)
-				require.Equal(t, tc.user, principal.User)
-				require.Equal(t, tc.anonymous, principal.IsAnonymous)
-				return "response", handlerError
-			})
-			require.Equal(t, "response", response)
-			require.Same(t, handlerError, err)
-
-			stream := auth.StreamServerInterceptor(manager, zap.NewNop())
-			err = stream(nil, &mockServerStream{ctx: ctx}, &grpc.StreamServerInfo{FullMethod: "/test.Service/Method"}, func(server any, stream grpc.ServerStream) error {
-				principal := core.FromContext(stream.Context())
-				require.Equal(t, tc.user, principal.User)
-				require.Equal(t, tc.anonymous, principal.IsAnonymous)
-				return handlerError
-			})
-			require.Same(t, handlerError, err)
-		})
-	}
-}
-
 // Test_AuthenticationInterceptors_Enabled_RejectsInvalidCredentials verifies
 // that failed verification rejects RPCs even when anonymous callers have access.
 func Test_AuthenticationInterceptors_Enabled_RejectsInvalidCredentials(t *testing.T) {

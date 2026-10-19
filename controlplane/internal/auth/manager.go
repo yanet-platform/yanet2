@@ -75,15 +75,8 @@ func NewManager(cfg *Config, options ...ManagerOption) (*Manager, error) {
 	}
 
 	log := opts.Log
-	configuration := *cfg
-	cfg = &configuration
 	if err := cfg.Validate(); err != nil {
 		return nil, fmt.Errorf("invalid authentication policy: %w", err)
-	}
-	if cfg.LegacyPolicyUsed() {
-		log.Warn("gateway.auth.disabled is deprecated; use gateway.auth.mode",
-			zap.String("mode", string(cfg.Mode)),
-		)
 	}
 
 	m := &Manager{

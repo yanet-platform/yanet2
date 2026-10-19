@@ -136,7 +136,7 @@ gateway:
   server:
     endpoint: "0.0.0.0:8080"
   auth:
-    disabled: true
+    mode: disabled
 
 modules:
   route:
