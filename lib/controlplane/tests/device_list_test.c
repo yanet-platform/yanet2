@@ -665,13 +665,10 @@ run_pipeline_list_generation_test(struct yanet_shm *shm) {
 	return run_snapshot_generation_race(shm, SNAPSHOT_PIPELINES);
 }
 
-// Sample generation retention under the same lock as its mutations.
+// Sample how many pins retain the generation right now.
 static uint64_t
 snapshot_refcnt(struct cp_config *cp_config, struct cp_config_gen *generation) {
-	cp_config_lock(cp_config);
-	uint64_t refs = generation->refcnt;
-	cp_config_unlock(cp_config);
-	return refs;
+	return cp_config_gen_pin_count(cp_config, generation);
 }
 
 // Verifies that complete and partially failed copies release every read pin.
@@ -683,7 +680,7 @@ run_snapshot_allocation_failures_test(struct yanet_shm *shm) {
 		"failed to prepare snapshot allocation fixture"
 	);
 	struct cp_config_gen *generation =
-		ADDR_OF(&fixture.cp_config->cp_config_gen);
+		cp_config_current_gen(fixture.cp_config);
 	for (enum snapshot_reader_kind kind = SNAPSHOT_DEVICES;
 	     kind <= SNAPSHOT_PIPELINES;
 	     ++kind) {

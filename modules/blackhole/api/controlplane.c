@@ -41,6 +41,9 @@ blackhole_module_config_free(struct cp_module *config, yanet_error **err) {
 		return -1;
 	}
 
+	struct agent *owner = ADDR_OF(&config->agent);
+
 	blackhole_module_config_destroy(config);
+	agent_destroy_released(owner, AGENT_REFERENCE_MODULE);
 	return 0;
 }

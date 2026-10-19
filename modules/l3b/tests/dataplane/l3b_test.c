@@ -232,7 +232,7 @@ publish_service(void) {
 		cp_config_unlock(cp_config);
 		return -1;
 	}
-	SET_OFFSET_OF(&cp_config->cp_config_gen, config_gen);
+	cp_config_publish_gen(cp_config, config_gen);
 	cp_config_unlock(cp_config);
 
 	dp_config_mark_ready(dp_config);

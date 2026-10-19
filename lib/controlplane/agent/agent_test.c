@@ -371,7 +371,7 @@ test_attach_initialised_segment_succeeds() {
 	struct cp_config_gen *cp_config_gen =
 		cp_config_gen_new(sys_agent, &setup_err);
 	TEST_ASSERT_NOT_NULL(cp_config_gen, "cp_config_gen_new failed");
-	SET_OFFSET_OF(&cp_config->cp_config_gen, cp_config_gen);
+	cp_config_publish_gen(cp_config, cp_config_gen);
 	cp_config_unlock(cp_config);
 
 	dp_config->instance_count = 1;
@@ -624,7 +624,7 @@ extend_env_init(
 		yanet_error_free(err);
 		return -1;
 	}
-	SET_OFFSET_OF(&cp_config->cp_config_gen, config_gen);
+	cp_config_publish_gen(cp_config, config_gen);
 	cp_config_unlock(cp_config);
 
 	dp_config->instance_count = 1;
@@ -944,8 +944,8 @@ main() {
 	    TEST_SUCCESS) {
 		++tests_failed;
 		LOG(ERROR,
-		    "test_initialised_segment_magic_and_cp_config_valid failed"
-		);
+		    "test_initialised_segment_magic_and_cp_config_valid "
+		    "failed");
 	}
 
 	++tests_count;
@@ -1000,8 +1000,8 @@ main() {
 	    TEST_SUCCESS) {
 		++tests_failed;
 		LOG(ERROR,
-		    "test_detach_uninitialised_segment_releases_mapping failed"
-		);
+		    "test_detach_uninitialised_segment_releases_mapping "
+		    "failed");
 	}
 
 	++tests_count;

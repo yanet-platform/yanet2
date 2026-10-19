@@ -96,7 +96,10 @@ l3b_module_config_free(struct cp_module *cp_module, yanet_error **err) {
 		return -1;
 	}
 
+	struct agent *owner = ADDR_OF(&cp_module->agent);
+
 	l3b_module_config_destroy(cp_module);
+	agent_destroy_released(owner, AGENT_REFERENCE_MODULE);
 	return 0;
 }
 
@@ -220,7 +223,7 @@ out:
 }
 
 // Copy the service's packet-counter ID while its published generation is
-// protected.
+// pinned.
 static uint64_t
 l3b_linked_service_counter_id(
 	const struct cp_module *cp_module, const char *name
@@ -231,10 +234,9 @@ l3b_linked_service_counter_id(
 	}
 
 	struct cp_config *cp_config = ADDR_OF(&agent->cp_config);
-	cp_config_lock(cp_config);
-	struct cp_config_gen *config_gen = ADDR_OF(&cp_config->cp_config_gen);
+	struct cp_config_gen *config_gen = cp_config_gen_acquire(cp_config);
 	uint64_t counter_id = COUNTER_INVALID;
-	if (config_gen != NULL) {
+	{
 		struct cp_object *linked = cp_object_registry_lookup(
 			&config_gen->object_registry,
 			L3B_VIRTUAL_SERVICE_OBJECT_TYPE,
@@ -247,7 +249,7 @@ l3b_linked_service_counter_id(
 			);
 		}
 	}
-	cp_config_unlock(cp_config);
+	cp_config_gen_release(cp_config, config_gen);
 	return counter_id;
 }
 

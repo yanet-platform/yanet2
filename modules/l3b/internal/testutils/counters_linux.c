@@ -272,7 +272,9 @@ l3b_test_counter_state_read(
 	}
 	out->service = (uintptr_t)object;
 	out->table = (uintptr_t)table;
-	out->table_references = table->cp_object.config_item.refcnt;
+	out->table_references = __atomic_load_n(
+		&table->cp_object.config_item.refcnt, __ATOMIC_RELAXED
+	);
 	out->object_storage = (uintptr_t)object_storage;
 	out->link_storage = (uintptr_t)link_storage;
 	if (read_registry(&object->counter_registry, object_storage, 0, out) ||
@@ -286,6 +288,9 @@ l3b_test_counter_state_read(
 
 static _Thread_local struct {
 	struct cp_config *configuration;
+	// Published generation when witnessing began, compared by address
+	// only: a change proves a publication raced the witnessed read.
+	struct cp_config_gen *begin_generation;
 	struct l3b_test_lookup_witness witness;
 } lookup;
 
@@ -306,25 +311,36 @@ __wrap_cp_object_registry_lookup(
 	}
 	struct l3b_test_service_lookup *observed = &lookup.witness.lookups[idx];
 	observed->counter_id = COUNTER_INVALID;
-	bool protected = cp_config_locked_by_thread == lookup.configuration;
-	if (!protected) {
-		++lookup.witness.unprotected_objects;
+	// The module reads linked services through a pinned published
+	// generation rather than the config lock, so protection here means
+	// provenance: the lookup went through a generation its reader keeps
+	// pinned. The published generation is itself pinned for the
+	// comparison — an unpinned snapshot could retire between reading it
+	// and looking inside. A registry that is not the published one's
+	// still counts as protected when a publication happened since
+	// witnessing began: the read may legitimately keep walking the
+	// generation it pinned while the publication replaced the current
+	// one.
+	struct cp_config_gen *generation =
+		cp_config_gen_acquire(lookup.configuration);
+	bool from_published = registry == &generation->object_registry;
+	bool publication_since_begin = generation != lookup.begin_generation;
+	uint64_t generation_number = generation->gen;
+	uintptr_t generation_address = (uintptr_t)generation;
+	cp_config_gen_release(lookup.configuration, generation);
+	if (from_published) {
+		observed->generation = generation_address;
+		observed->generation_number = generation_number;
+	} else if (publication_since_begin) {
+		observed->racing = true;
+		++lookup.witness.racing_objects;
 	} else {
-		struct cp_config_gen *generation =
-			ADDR_OF(&lookup.configuration->cp_config_gen);
-		if (generation == NULL ||
-		    registry != &generation->object_registry) {
-			++lookup.witness.provenance_errors;
-			protected = false;
-		} else {
-			observed->generation = (uintptr_t)generation;
-			observed->generation_number = generation->gen;
-		}
+		++lookup.witness.unprotected_objects;
 	}
 	struct cp_object *object =
 		__real_cp_object_registry_lookup(registry, type, name);
 	observed->object = (uintptr_t)object;
-	if (protected && object != NULL) {
+	if (from_published && object != NULL) {
 		observed->counter_registry =
 			(uintptr_t)&object->link_counter_registry;
 	}
@@ -349,18 +365,22 @@ __wrap_counter_registry_lookup_index(
 	} else {
 		observed = &lookup.witness.lookups[count - 1];
 	}
-	if (cp_config_locked_by_thread != lookup.configuration) {
+	// The counter lookup's provenance is the pinned object itself, not
+	// the currently published generation: a publication between the
+	// object lookup and this lookup is legal, and the read it belongs to
+	// still walks the generation it pinned. Identity of the object's
+	// counter registry is therefore the check that holds. A racing
+	// lookup recorded no registry to tie against, so only the counter
+	// name remains checkable for it.
+	if (observed == NULL) {
 		++lookup.witness.unprotected_counters;
-	} else if (observed != NULL) {
-		struct cp_config_gen *generation =
-			ADDR_OF(&lookup.configuration->cp_config_gen);
-		if (generation == NULL ||
-		    (uintptr_t)generation != observed->generation ||
-		    generation->gen != observed->generation_number ||
-		    (uintptr_t)registry != observed->counter_registry ||
-		    strcmp(name, L3B_LINK_COUNTER_PACKETS) != 0) {
+	} else if (observed->counter_registry == 0) {
+		if (strcmp(name, L3B_LINK_COUNTER_PACKETS) != 0) {
 			++lookup.witness.provenance_errors;
 		}
+	} else if ((uintptr_t)registry != observed->counter_registry ||
+		   strcmp(name, L3B_LINK_COUNTER_PACKETS) != 0) {
+		++lookup.witness.provenance_errors;
 	}
 	uint64_t counter_id =
 		__real_counter_registry_lookup_index(registry, name);
@@ -377,7 +397,13 @@ l3b_test_lookup_begin(struct agent *agent) {
 	}
 	memset(&lookup, 0, sizeof(lookup));
 	lookup.configuration = ADDR_OF(&agent->cp_config);
-	return lookup.configuration == NULL ? -1 : 0;
+	if (lookup.configuration == NULL) {
+		return -1;
+	}
+	// Kept by address for the whole window and never dereferenced: only
+	// a changed address later proves a publication raced the read.
+	lookup.begin_generation = cp_config_current_gen(lookup.configuration);
+	return 0;
 }
 
 struct l3b_test_lookup_witness

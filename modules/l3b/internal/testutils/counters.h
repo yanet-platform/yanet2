@@ -1,5 +1,6 @@
 #pragma once
 
+#include <stdbool.h>
 #include <stdint.h>
 
 #include "lib/counters/counters.h"
@@ -78,6 +79,9 @@ struct l3b_test_service_lookup {
 	uintptr_t object;
 	uintptr_t counter_registry;
 	uint64_t counter_id;
+	// The lookup went through a generation a racing publication replaced
+	// while its reader still pinned it; provenance fields stay unset.
+	bool racing;
 };
 
 struct l3b_test_lookup_witness {
@@ -86,6 +90,9 @@ struct l3b_test_lookup_witness {
 	uint64_t unprotected_objects;
 	uint64_t unprotected_counters;
 	uint64_t provenance_errors;
+	// Lookups that a concurrent publication legitimately diverted from
+	// the published generation; protected by the reader's pin.
+	uint64_t racing_objects;
 	struct l3b_test_service_lookup lookups[L3B_TEST_COUNTER_CAPACITY];
 };
 

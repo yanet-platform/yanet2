@@ -171,10 +171,12 @@ ring_object_worker_view(
 
 // Whether a ring with this name is in the agent's published configuration.
 //
-// It checks the current generation under the config lock. A creator uses it
-// to refuse a create that would replace a published ring of the same name
-// without notice. It does not see objects that a concurrent update is still
-// building and has not published yet.
+// It pins the currently published generation and checks that snapshot,
+// without the config lock and without serialising with a concurrent
+// update. A creator uses it to refuse a create that would replace a
+// published ring of the same name without notice. It does not see
+// objects that a concurrent update is still building and has not
+// published yet.
 bool
 ring_object_exists(struct agent *agent, const char *name);
 

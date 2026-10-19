@@ -126,7 +126,7 @@ static int bootstrap(
 			}
 			return -5;
 		}
-		SET_OFFSET_OF(&cp_config->cp_config_gen, generation);
+		cp_config_publish_gen(cp_config, generation);
 		cp_config_unlock(cp_config);
 		dp_config->instance_count = (uint32_t)instance_count;
 	}

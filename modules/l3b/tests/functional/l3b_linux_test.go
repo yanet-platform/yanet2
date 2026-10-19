@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/netip"
 	"testing"
+	"time"
 
 	"github.com/gopacket/gopacket"
 	"github.com/gopacket/gopacket/layers"
@@ -18,6 +19,7 @@ import (
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
 	filterpb "github.com/yanet-platform/yanet2/common/filterpb/v1"
 	"github.com/yanet-platform/yanet2/common/go/xpacket"
+	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/modules/l3b/bindings/go/cl3b"
 	l3b "github.com/yanet-platform/yanet2/modules/l3b/controlplane"
 	l3bpb "github.com/yanet-platform/yanet2/modules/l3b/controlplane/l3bpb/v1"
@@ -346,6 +348,16 @@ func Test_L3bModuleConfig_UpdateDuringOtherAgentPublication(t *testing.T) {
 					return err
 				}
 				for idx, observed := range witness.Lookups {
+					// A lookup diverted by a concurrent
+					// publication keeps its pin but records no
+					// provenance; its counter ID must still
+					// resolve through the pinned object.
+					if observed.Racing {
+						if ids[idx] == ^uint64(0) || ids[idx] != observed.CounterID {
+							return fmt.Errorf("racing rule %d lost its counter: %+v", idx, observed)
+						}
+						continue
+					}
 					if observed.Generation == 0 || observed.GenerationNumber == 0 ||
 						observed.Object == 0 || observed.CounterRegistry == 0 ||
 						observed.CounterID == ^uint64(0) || ids[idx] != observed.CounterID {
@@ -387,8 +399,32 @@ func Test_L3bModuleConfig_UpdateDuringOtherAgentPublication(t *testing.T) {
 			previous := current
 			current = replacement
 			replacements++
-			if err := previous.Free(); err != nil {
-				return err
+			// The publish may have retired a generation the other
+			// goroutine's linked-service read still pins, so the
+			// retiring free can be answered with still-referenced
+			// until that read drains; keep trying, but bound the
+			// wait so a leaked pin reports instead of hanging the
+			// suite.
+			freeDeadline := time.Now().Add(30 * time.Second)
+			for {
+				err := previous.Free()
+				if !errors.Is(err, ffi.ErrStillReferenced) {
+					if err != nil {
+						return err
+					}
+					break
+				}
+				if time.Now().After(freeDeadline) {
+					return fmt.Errorf(
+						"retired service stayed referenced for %v; a generation pin leaked",
+						30*time.Second,
+					)
+				}
+				select {
+				case <-ctx.Done():
+					return ctx.Err()
+				case <-time.After(time.Millisecond):
+				}
 			}
 			retiredFrees++
 			select {

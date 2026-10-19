@@ -103,7 +103,10 @@ nat64_module_config_free(struct cp_module *cp_module, yanet_error **err) {
 		return -1;
 	}
 
+	struct agent *owner = ADDR_OF(&cp_module->agent);
+
 	nat64_module_config_destroy(cp_module);
+	agent_destroy_released(owner, AGENT_REFERENCE_MODULE);
 	return 0;
 }
 

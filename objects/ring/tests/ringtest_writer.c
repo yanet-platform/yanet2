@@ -30,11 +30,10 @@ struct ringtest_stress {
 struct cp_object *
 ringtest_lookup_ring(struct agent *agent, const char *name) {
 	struct cp_config *cp_config = ADDR_OF(&agent->cp_config);
-	cp_config_lock(cp_config);
-	struct cp_config_gen *gen = ADDR_OF(&cp_config->cp_config_gen);
+	struct cp_config_gen *gen = cp_config_gen_acquire(cp_config);
 	struct cp_object *object =
 		cp_config_gen_lookup_object(gen, RING_OBJECT_TYPE, name);
-	cp_config_unlock(cp_config);
+	cp_config_gen_release(cp_config, gen);
 	return object;
 }
 
