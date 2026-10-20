@@ -191,9 +191,10 @@ impl<'a> Ipv6ExtHopByHop<'a> {
         (self.bytes[1] as usize + 1) * 8
     }
 
-    /// The options bytes.
+    /// The options bytes: the option area after the Next Header and Hdr
+    /// Ext Len fixed prefix.
     pub fn options(&self) -> &'a [u8] {
-        &self.bytes[..self.header_len()]
+        &self.bytes[Self::FIXED_LEN..self.header_len()]
     }
 }
 
@@ -314,11 +315,32 @@ impl<'a> Iterator for Ipv6ExtIter<'a> {
 
     fn next(&mut self) -> Option<Self::Item> {
         let kind = match IpProtocol::from_raw(self.next_header) {
-            Some(IpProtocol::HopByHop | IpProtocol::Routing | IpProtocol::Fragment | IpProtocol::Destination) => {
-                self.next_header
-            }
+            Some(
+                IpProtocol::HopByHop
+                | IpProtocol::Routing
+                | IpProtocol::Fragment
+                | IpProtocol::Destination
+                | IpProtocol::Ah,
+            ) => self.next_header,
             _ => return None,
         };
+
+        // AH sizes in 4-byte units minus two (RFC 4302), and the parser
+        // walks past it the same way; it has no decodable options body,
+        // so it rides as raw bytes.
+        if kind == IpProtocol::Ah as u8 {
+            if self.bytes.len() < 2 {
+                return None;
+            }
+            let len = (self.bytes[1] as usize + 2) * 4;
+            if self.bytes.len() < len {
+                return None;
+            }
+            let (head, rest) = self.bytes.split_at(len);
+            self.next_header = head[0];
+            self.bytes = rest;
+            return Some(Ipv6Ext::Other(head));
+        }
 
         let ext = match kind {
             0 => Ipv6ExtHopByHop::from_bytes(self.bytes).map(Ipv6Ext::HopByHop),

@@ -57,7 +57,11 @@ fn classify_v6(prefixes: &yanet_shm::Lpm, packet: &Packet<'_>) -> Verdict {
     let Some(ip) = packet.ipv6() else {
         return Verdict::Pass;
     };
-    if ip.next_header() == yanet_packet::IpProtocol::Fragment as u8 {
+    // The parser's fragmentation flag walks the extension chain, so a
+    // Fragment header behind Hop-by-Hop or Routing options counts too —
+    // reading next_header alone would only see an immediately following
+    // Fragment.
+    if packet.is_fragmented() {
         return Verdict::Pass;
     }
     if yanet_shm::lpm16_lookup(prefixes, &ip.dst()) != yanet_shm::LPM_VALUE_INVALID {
@@ -114,4 +118,7 @@ yanet_dp::define_module! {
     loader: new_module_rblackhole,
     name: "rblackhole",
     handler: handle,
+    // Mirrors RBLACKHOLE_CONFIG_LAYOUT (dataplane/config.h), spelled as
+    // "RBLKHOLE"; the control-plane init refuses any other layout.
+    config_layout: 0x5242_4c4b_484f_4c45,
 }

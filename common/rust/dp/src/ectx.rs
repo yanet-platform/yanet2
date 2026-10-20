@@ -14,18 +14,25 @@ use crate::{front::packet_list_add, packet::Packet, raw};
 #[derive(Clone, Copy)]
 pub struct Counter {
     values: *mut u64,
+    slots: usize,
 }
 
 impl Counter {
+    /// The registered slot count of this counter.
+    pub fn slots(&self) -> usize {
+        self.slots
+    }
+
     /// Read one slot.
     ///
     /// # Panics
     ///
-    /// Panics when `slot` is 3 or more: counters hold at most two slots.
+    /// Panics when `slot` is at or beyond the counter's registered slot
+    /// count.
     pub fn get(&self, slot: usize) -> u64 {
-        assert!(slot < 2, "a counter holds at most two slots");
-        // SAFETY: the storage owns slot_count live u64s and module code
-        // reads within its registered schema.
+        assert!(slot < self.slots, "slot beyond the registered counter size");
+        // SAFETY: the storage owns the registered count of live u64s and
+        // the bound above keeps the read inside them.
         unsafe { *self.values.add(slot) }
     }
 
@@ -33,9 +40,10 @@ impl Counter {
     ///
     /// # Panics
     ///
-    /// Panics when `slot` is 3 or more: counters hold at most two slots.
+    /// Panics when `slot` is at or beyond the counter's registered slot
+    /// count.
     pub fn add(&mut self, slot: usize, delta: u64) {
-        assert!(slot < 2, "a counter holds at most two slots");
+        assert!(slot < self.slots, "slot beyond the registered counter size");
         // SAFETY: same live-values contract as get().
         unsafe { *self.values.add(slot) += delta };
     }
@@ -106,15 +114,20 @@ impl<'a> Ectx<'a> {
     }
 
     /// Resolve a counter from the module's registry by id.
+    ///
+    /// `None` when the id is outside the registry the per-worker storage
+    /// spawned from — a failed-registration sentinel, a stale id from an
+    /// older registry generation, or any out-of-range value.
     pub fn counter(&self, id: u64) -> Option<Counter> {
         // SAFETY: the absolutization pass filled abs_counter_storage
         // before workers saw the context.
         let storage = unsafe { self.raw().abs_counter_storage.as_ref() }?;
-        Some(Counter {
-            // SAFETY: id comes from the module's own registry, which the
-            // per-worker storage spawned in full.
-            values: counter_get_address(storage, id),
-        })
+        let slots = yanet_shm::counter_size(storage, id)?;
+        let values = counter_get_address(storage, id);
+        if values.is_null() {
+            return None;
+        }
+        Some(Counter { values, slots })
     }
 
     /// The framework's rx counter for this module.
@@ -152,8 +165,10 @@ impl<'a> Ectx<'a> {
             raw.pending_output_counter,
         ][idx];
         // SAFETY: the absolutization pass derived all five from the
-        // module's registry ids before workers saw the context.
-        Counter { values: value }
+        // module's registry ids before workers saw the context; the
+        // framework schema registers each as a size-2 [packets, bytes]
+        // pair.
+        Counter { values: value, slots: 2 }
     }
 
     /// Resolve a counter from one of the module's runtime (named)
@@ -172,22 +187,36 @@ impl<'a> Ectx<'a> {
         if storage.is_null() {
             return None;
         }
-        Some(Counter {
-            // SAFETY: id comes from the named registry that spawned this
-            // storage.
-            values: counter_get_address(unsafe { &*storage }, id),
-        })
+        // SAFETY: the reference stays live for the worker round; the
+        // storage belongs to the context's generation.
+        let storage = unsafe { &*storage };
+        let slots = yanet_shm::counter_size(storage, id)?;
+        let values = counter_get_address(storage, id);
+        if values.is_null() {
+            return None;
+        }
+        Some(Counter { values, slots })
     }
 
     /// The module's private per-worker buffer, `None` when the module
     /// declared no prepared size.
-    pub fn prepared<T>(&self) -> Option<&'a mut T> {
+    ///
+    /// `T` must be the same type the module declared through
+    /// `define_module!`'s `prepared:` key: the buffer is exactly
+    /// `size_of::<T>()` bytes. The `&mut self` receiver keeps two live
+    /// mutable views of the one buffer from coexisting.
+    pub fn prepared<T>(&mut self) -> Option<&'a mut T> {
         let buffer = self.raw().abs_module_prepared;
-        if buffer.is_null() {
+        if buffer.is_null() || core::mem::size_of::<T>() == 0 {
             return None;
         }
+        debug_assert!(
+            core::mem::align_of::<T>() <= core::mem::align_of::<u64>(),
+            "prepared buffers share the control plane's u64 alignment"
+        );
         // SAFETY: the buffer is prepared_size bytes of zeroed memory the
-        // module owns for this worker, and T is its declared type.
+        // module owns for this worker, and T is its declared type; the
+        // exclusive receiver keeps the returned reference unique.
         Some(unsafe { &mut *(buffer as *mut T) })
     }
 
@@ -336,11 +365,15 @@ impl<'a> ObjectLink<'a> {
         if storage.is_null() {
             return None;
         }
-        Some(Counter {
-            // SAFETY: id comes from the link registry that spawned this
-            // per-link storage.
-            values: counter_get_address(unsafe { &*storage }, id),
-        })
+        // SAFETY: the reference stays live for the worker round; the
+        // storage belongs to the linked object's generation.
+        let storage = unsafe { &*storage };
+        let slots = yanet_shm::counter_size(storage, id)?;
+        let values = counter_get_address(storage, id);
+        if values.is_null() {
+            return None;
+        }
+        Some(Counter { values, slots })
     }
 
     /// The linked object as its concrete type, `None` before the

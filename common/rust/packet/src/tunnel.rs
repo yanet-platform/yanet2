@@ -48,7 +48,7 @@ impl<'a> Gre<'a> {
 
     /// Sequence-number-present flag.
     pub fn has_sequence(&self) -> bool {
-        self.bytes[1] & 0x01 != 0
+        self.bytes[0] & 0x10 != 0
     }
 }
 

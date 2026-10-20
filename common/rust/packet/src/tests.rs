@@ -48,6 +48,9 @@ fn vlan_fields() {
 #[test]
 fn arp_fields() {
     let mut buf = [0u8; 28];
+    // Ethernet hardware, IPv4 protocol, the 6/4 address lengths.
+    buf[0..2].copy_from_slice(&[0x00, 0x01]);
+    buf[2..4].copy_from_slice(&[0x08, 0x00]);
     buf[4] = 6;
     buf[5] = 4;
     buf[6..8].copy_from_slice(&[0x00, 0x02]);
@@ -55,6 +58,8 @@ fn arp_fields() {
     buf[24..28].copy_from_slice(&[10, 0, 0, 2]);
 
     let arp = Arp::from_bytes(&buf).expect("arp parses");
+    assert_eq!(arp.hardware_type(), 1);
+    assert_eq!(arp.protocol_type(), 0x0800);
     assert_eq!(arp.operation(), 2);
     assert_eq!(arp.sender_ip(), [10, 0, 0, 1]);
     assert_eq!(arp.target_ip(), [10, 0, 0, 2]);
@@ -63,6 +68,15 @@ fn arp_fields() {
     let mut bad = buf;
     bad[4] = 8;
     assert!(Arp::from_bytes(&bad).is_none());
+
+    // A non-Ethernet hardware type or a non-IPv4 protocol type is
+    // refused however ARP-shaped the rest is.
+    let mut bad_hw = buf;
+    bad_hw[1] = 0x02;
+    assert!(Arp::from_bytes(&bad_hw).is_none());
+    let mut bad_proto = buf;
+    bad_proto[3] = 0x35;
+    assert!(Arp::from_bytes(&bad_proto).is_none());
 }
 
 #[test]
@@ -223,12 +237,19 @@ fn transport_views() {
 
 #[test]
 fn gre_flags() {
-    let buf = [0x80, 0x01, 0x08, 0x00];
+    // Checksum present (0x8000) and sequence present (0x1000) over
+    // version 1: the sequence flag lives in the high byte.
+    let buf = [0x90, 0x01, 0x08, 0x00];
     let gre = Gre::from_bytes(&buf).expect("gre parses");
     assert!(gre.has_checksum());
     assert!(gre.has_sequence());
     assert!(!gre.has_key());
     assert_eq!(gre.protocol(), 0x0800);
+
+    // Version bits alone never read as a sequence flag.
+    let version_only = [0x00, 0x01, 0x08, 0x00];
+    let gre = Gre::from_bytes(&version_only).expect("gre parses");
+    assert!(!gre.has_sequence());
 }
 
 #[test]

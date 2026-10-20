@@ -10,10 +10,14 @@ fn fold(mut sum: u32) -> u16 {
 }
 
 fn sum_bytes(data: &[u8]) -> u32 {
+    // One's-complement addition folds carries inside the loop: a plain
+    // u32 accumulator overflows past roughly 128 KiB of high-valued
+    // words (an IPv6 jumbogram), while the folded form is exact for any
+    // length.
     let mut sum: u32 = 0;
     let mut idx = 0;
     while idx + 2 <= data.len() {
-        sum += u16::from_be_bytes([data[idx], data[idx + 1]]) as u32;
+        sum = (sum & 0xffff) + u16::from_be_bytes([data[idx], data[idx + 1]]) as u32 + (sum >> 16);
         idx += 2;
     }
     // An odd trailing byte pads with a zero low byte, matching the RFC's

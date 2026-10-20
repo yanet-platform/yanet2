@@ -35,6 +35,7 @@ pub use classify::{
 };
 pub use counter::{
     COUNTER_INVALID, CounterRegistry, CounterSchema, CounterStorage, CounterValueHandle, counter_get_address,
+    counter_size,
 };
 pub use cp_module::{
     CP_MODULE_NAME_LEN, CpModule, CpModuleDevice, CpModuleObject, CpObject, ModuleConfig, ObjectConfig, RegistryItem,

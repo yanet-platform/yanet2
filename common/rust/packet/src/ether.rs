@@ -148,16 +148,34 @@ impl<'a> Arp<'a> {
 
     /// Borrow an ARP header from the start of `bytes`.
     ///
-    /// Returns `None` for a non-Ethernet/non-IPv4 hardware or protocol
-    /// address length, the only shape the dataplane cares about.
+    /// Returns `None` for anything but the Ethernet/IPv4 shape the
+    /// dataplane cares about: hardware type 1, protocol type 0x0800, and
+    /// the 6/4 address lengths. Anything else is not an ARP message this
+    /// view can label.
     pub fn from_bytes(bytes: &'a [u8]) -> Option<Self> {
         if bytes.len() < Self::LEN {
+            return None;
+        }
+        if u16::from_be_bytes([bytes[0], bytes[1]]) != 1 {
+            return None;
+        }
+        if u16::from_be_bytes([bytes[2], bytes[3]]) != 0x0800 {
             return None;
         }
         if bytes[4] != 6 || bytes[5] != 4 {
             return None;
         }
         Some(Self { bytes })
+    }
+
+    /// The hardware type, 1 for Ethernet on every accepted view.
+    pub fn hardware_type(&self) -> u16 {
+        u16::from_be_bytes([self.bytes[0], self.bytes[1]])
+    }
+
+    /// The protocol type, 0x0800 for IPv4 on every accepted view.
+    pub fn protocol_type(&self) -> u16 {
+        u16::from_be_bytes([self.bytes[2], self.bytes[3]])
     }
 
     /// Operation: 1 request, 2 reply.

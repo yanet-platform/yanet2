@@ -238,6 +238,9 @@ impl<'a> Packet<'a> {
 
     /// GRE header view at the parsed transport offset.
     pub fn gre(&self) -> Option<Gre<'_>> {
+        if !self.transport_available() {
+            return None;
+        }
         Gre::from_bytes(self.data_from(self.transport_offset() as usize)?)
     }
 
@@ -258,9 +261,9 @@ impl<'a> Packet<'a> {
             }
             mbuf.data_off = mbuf.data_off.saturating_add(len);
             mbuf.data_len -= len;
-            if mbuf.nb_segs == 1 {
-                mbuf.pkt_len = mbuf.pkt_len.saturating_sub(len as u32);
-            }
+            // The whole-packet length counts every segment, so the head
+            // shrinks it regardless of how the packet is chained.
+            mbuf.pkt_len = mbuf.pkt_len.saturating_sub(len as u32);
             mbuf.data_len
         };
         let raw = self.raw();
@@ -292,9 +295,9 @@ impl<'a> Packet<'a> {
             }
             mbuf.data_off -= len;
             mbuf.data_len = mbuf.data_len.saturating_add(len);
-            if mbuf.nb_segs == 1 {
-                mbuf.pkt_len = mbuf.pkt_len.saturating_add(len as u32);
-            }
+            // Headroom growth lengthens the whole packet across every
+            // segment, chained or not.
+            mbuf.pkt_len = mbuf.pkt_len.saturating_add(len as u32);
             mbuf.data_len
         };
         let raw = self.raw();

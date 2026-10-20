@@ -63,8 +63,13 @@ rblackhole_module_config_new(
 		return NULL;
 	}
 
-	if (cp_module_init(
-		    &config->cp_module, agent, "rblackhole", name, err
+	if (cp_module_init_layout(
+		    &config->cp_module,
+		    agent,
+		    "rblackhole",
+		    name,
+		    RBLACKHOLE_CONFIG_LAYOUT,
+		    err
 	    )) {
 		yanet_error_add(err, "failed to init module");
 		memory_bfree(

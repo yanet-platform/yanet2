@@ -110,9 +110,32 @@ impl Default for CounterStorage {
 /// The handle is the values array itself; size-2 counters lay out as
 /// `[packets, bytes]`.
 pub fn counter_get_address(storage: &CounterStorage, counter_id: u64) -> *mut u64 {
-    // SAFETY: the handle array is filled at storage spawn time and never
-    // changes while the storage lives; counter_id comes from the module's
-    // own registry, which spawn expanded in full.
+    match counter_size(storage, counter_id) {
+        Some(_) => counter_get_address_unchecked(storage, counter_id),
+        None => core::ptr::null_mut(),
+    }
+}
+
+/// The registered slot count of one counter, `None` when the id is outside
+/// the registry the storage spawned from.
+pub fn counter_size(storage: &CounterStorage, counter_id: u64) -> Option<usize> {
+    // SAFETY: the registry pointer is filled at spawn time and never
+    // changes while the storage lives; the names array holds `count`
+    // entries.
+    unsafe {
+        let registry = storage.registry.resolve_non_null().as_ref()?;
+        if counter_id >= registry.count {
+            return None;
+        }
+        let names = registry.names.resolve_non_null();
+        Some((*names.add(counter_id as usize)).size as usize)
+    }
+}
+
+fn counter_get_address_unchecked(storage: &CounterStorage, counter_id: u64) -> *mut u64 {
+    // SAFETY: the caller validated the id against the registry count; the
+    // handle array is filled at storage spawn time and never changes
+    // while the storage lives.
     unsafe {
         let handles = storage.counter_value_handles.resolve_non_null();
         let handle_field = &*handles.add(counter_id as usize);
@@ -142,9 +165,29 @@ mod tests {
         let mut storage = CounterStorage::default();
         storage.counter_value_handles.store(handles.as_mut_ptr());
 
+        // The bounded lookup reads the registry the storage spawned from:
+        // one counter, registered as a size-2 [packets, bytes] pair.
+        let mut schema: Box<[CounterSchema; 1]> = Box::new([CounterSchema {
+            name: [0; COUNTER_NAME_LEN],
+            size: 2,
+            generation: 0,
+            offset: 0,
+        }]);
+        let mut registry: Box<CounterRegistry> = Box::new(CounterRegistry {
+            count: 1,
+            names: OffsetPtr::null(),
+            ..CounterRegistry::default()
+        });
+        registry.names.store(schema.as_mut_ptr() as *mut CounterSchema);
+        storage.registry.store(Box::into_raw(registry));
+
         let address = counter_get_address(&storage, 0);
         // SAFETY: aimed at a live [u64; 2] above.
         assert_eq!(unsafe { *address }, 3);
         assert_eq!(unsafe { *address.add(1) }, 100);
+        assert_eq!(counter_size(&storage, 0), Some(2));
+        // An id outside the registry resolves to nothing instead of
+        // reading past the handle array.
+        assert!(counter_get_address(&storage, 1).is_null());
     }
 }

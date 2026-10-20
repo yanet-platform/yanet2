@@ -106,6 +106,7 @@ pub fn module_descriptor(
     commit: Option<raw::ModuleCommitHandler>,
     commit_ectx: Option<raw::ModuleCommitEctxHandler>,
     prepared_size: u64,
+    config_layout: u64,
 ) -> *mut raw::Module {
     debug_assert!(name.len() < raw::MODULE_TYPE_LEN);
 
@@ -121,6 +122,7 @@ pub fn module_descriptor(
     module.name[..name.len()].copy_from_slice(name.as_bytes());
     module.name[name.len()] = 0;
     module.handler = Some(handler);
+    module.config_layout = config_layout;
     module.commit_handler = commit;
     module.commit_ectx_handler = commit_ectx;
     module.prepared_size = prepared_size;
@@ -172,6 +174,7 @@ macro_rules! define_module {
         $(, commit: $commit:path)?
         $(, commit_ectx: $commit_ectx:path)?
         $(, prepared: $prepared:ty)?
+        $(, config_layout: $config_layout:expr)?
         $(,)?
     ) => {
         $(#[$outer])*
@@ -224,6 +227,7 @@ macro_rules! define_module {
                 Some($crate::commit_ectx_trampoline::<__CommitEctx>),
                 0u64
                     $(+ core::mem::size_of::<$prepared>() as u64)?,
+                0u64 $(+ ($config_layout as u64))?,
             )
         }
     };
