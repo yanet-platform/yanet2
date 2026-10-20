@@ -49,6 +49,7 @@ jobs:
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0
+          submodules: true
 
       - uses: actions/setup-go@v6
         with:
@@ -57,13 +58,18 @@ jobs:
       - uses: ./.github/actions/apt-packages
         timeout-minutes: 10
         with:
-          packages: protobuf-compiler libpcap-dev
+          packages: meson clang cmake python3-pyelftools libnuma-dev libpcap-dev git protobuf-compiler
 
       - name: Install Go Protobuf Plugins
         uses: ./.github/actions/protoc-plugins
 
       - name: Generate protobuf Go sources
         run: make proto-go
+
+      # CGO test packages compile production translation units whose headers
+      # reach DPDK, so typechecking needs a configured (not built) tree.
+      - name: Configure build tree
+        run: meson setup build -Dbuildtype=debug -Doptimization=0
 
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v9
