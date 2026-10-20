@@ -5,6 +5,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import struct
 import subprocess
 import sys
@@ -186,6 +187,24 @@ def discover(root, package, go, output, stamp):
         return paths
 
 
+def native_inputs(root, inputs, ar):
+    """Include the external object files referenced by thin archives."""
+    paths = set()
+    for value in inputs:
+        path = value.resolve(strict=True)
+        path.relative_to(root)
+        paths.add(path)
+        with path.open("rb") as source:
+            thin = source.read(8) == b"!<thin>\n"
+        if thin:
+            for name in run([ar, "t", str(path)], path.parent).split("\n"):
+                if name:
+                    member = (path.parent / name).resolve(strict=True)
+                    member.relative_to(root)
+                    paths.add(member)
+    return paths
+
+
 def fingerprint(root, inputs):
     """Hash native inputs independently of checkout location and mtimes."""
     digest = hashlib.sha256()
@@ -225,13 +244,15 @@ def stage_changed(path, content):
     return temporary
 
 
-def publish(root, inputs, output, stamp):
+def publish(root, inputs, output, stamp, build_tag=None):
     """Read every input before staging the marker, then publish the stamp last."""
     value = fingerprint(root, inputs)
     marker = (
         "static const char yanet_go_cdeps_fingerprint_v1[] "
         f'__attribute__((used)) = "{value}";\n'
     ).encode("ascii")
+    if build_tag is not None:
+        marker = f"//go:build {build_tag}\n\n".encode("ascii") + marker
     staged = []
     try:
         for path, content in ((output, marker), (stamp, f"{value}\n".encode("ascii"))):
@@ -251,14 +272,22 @@ def main():
     )
     parser.add_argument("--root", required=True, type=Path)
     parser.add_argument("--go", required=True)
+    parser.add_argument("--ar", default="ar")
     parser.add_argument("--package", required=True, type=Path)
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--stamp", required=True, type=Path)
+    parser.add_argument("--build-tag")
     parser.add_argument("inputs", nargs="*", type=Path)
     args = parser.parse_args()
     try:
+        if args.build_tag is not None and not re.fullmatch(
+            r"[A-Za-z0-9_.]+", args.build_tag,
+        ):
+            raise ValueError(
+                "build tag must contain only ASCII letters, digits, underscores or dots"
+            )
         root = args.root.resolve(strict=True)
-        inputs = [path.resolve(strict=True) for path in args.inputs]
+        inputs = native_inputs(root, args.inputs, args.ar)
         if args.output.is_symlink() or args.stamp.is_symlink():
             raise ValueError("marker and stamp must not be symlinks")
         output = args.output.resolve()
@@ -272,7 +301,7 @@ def main():
         inputs = set(inputs) | discover(
             root, args.package, args.go, output, stamp,
         )
-        publish(root, inputs, output, stamp)
+        publish(root, inputs, output, stamp, args.build_tag)
     except (OSError, RuntimeError, ValueError) as error:
         print(f"go_cdeps: {args.package}: {error}", file=sys.stderr)
         return 1

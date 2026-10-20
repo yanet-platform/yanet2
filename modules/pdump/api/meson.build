@@ -25,7 +25,9 @@ pcap_opts.add_cmake_defines({
 pcap_opts.set_override_option('werror', 'false')
 pcap_opts.set_override_option('warning_level', '0')
 pcap_opts.append_compile_args('c', '-U_GNU_SOURCE')
-libpcap_dep = cmake.subproject('libpcap', options: pcap_opts).dependency('pcap_static')
+libpcap_project = cmake.subproject('libpcap', options: pcap_opts)
+libpcap_dep = libpcap_project.dependency('pcap_static')
+lib_pcap_static = libpcap_project.target('pcap_static')
 
 cp_dependencies = [lib_common_dep, lib_errors_dep, lib_config_cp_dep, libdpdk_dep, libpcap_dep]
 api_sources = files('controlplane.c')

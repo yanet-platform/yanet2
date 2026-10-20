@@ -337,13 +337,7 @@ cli-clean:
 cli-clean/%:
 	$(CARGO) clean || true
 
-# Wipes the Go build cache first: a stale entry can link a stale C archive.
-#
-# The clean is a recipe step rather than a prerequisite so that -j cannot run
-# it concurrently with the build. A caller that has already cleaned once, such
-# as a CI job, invokes the -only target instead.
 test:
-	$(MAKE) go-cache-clean
 	$(MAKE) test-only
 
 test-only: dataplane
@@ -351,7 +345,6 @@ test-only: dataplane
 	meson test -C build
 
 test-asan:
-	$(MAKE) go-cache-clean
 	$(MAKE) test-asan-only
 
 # Set a default sanitizer policy while preserving inherited Go flags and tags.
@@ -388,7 +381,6 @@ test-functional:
 #   go test -run='^$$' -bench=. -benchmem -count=6 ./bindings/go/dataplane_ut/... > new.txt
 #   benchstat old.txt new.txt
 bench:
-	$(MAKE) go-cache-clean
 	$(MAKE) dataplane
 	CGO_CPPFLAGS="$(strip $(CGO_CPPFLAGS) $(YANET_CACHE_LINE_CPPFLAG))" go test -run='^$$' -bench=. -benchmem ./bindings/go/dataplane_ut/... ./modules/acl/tests/functional/...
 

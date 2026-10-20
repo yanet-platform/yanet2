@@ -82,11 +82,13 @@ if not dataplane_only
   # Define common programs once to avoid duplication
   go = find_program('go', required: true)
   python3 = find_program('python3', required: true, version: '>=3.8', native: true)
+  ar = find_program('ar', required: true)
   go_cdeps = [
     python3,
     files('scripts/go_cdeps.py'),
     '--root', meson.project_source_root(),
     '--go', go.full_path(),
+    '--ar', ar.full_path(),
   ]
   protoc = find_program('protoc', required: true)
   find_program('protoc-gen-go', required: true, version: '>=1.36.5')
@@ -325,12 +327,14 @@ subdir('modules')
 subdir('devices')
 
 if not dataplane_only
-  cgo_targets = {}
+  subdir('bindings/go')
+  cgo_controlplane_deps = []
   foreach package_path, package : cgo_packages
-    cgo_inputs = package.get('inputs', [])
+    cgo_native_inputs = package.get('inputs', []) + package.get('libraries', [])
+    cgo_inputs = cgo_native_inputs
     foreach library : package.get('libraries', [])
       # Thin archives keep member contents in separate object files.
-      cgo_inputs += [library, library.extract_all_objects(recursive: false)]
+      cgo_inputs += library.extract_all_objects(recursive: true)
     endforeach
     cgo_name = package_path.replace('/', '-') + '-go-cdeps'
     # Content checks also catch restored mtimes and a deleted package marker.
@@ -342,12 +346,14 @@ if not dataplane_only
         '--package', package_path,
         '--output', join_paths(meson.project_source_root(), package_path, 'zz_yanet_cdeps.c'),
         '--stamp', '@OUTPUT@',
-      ] + (cgo_inputs.length() > 0 ? ['@INPUT@'] : []),
+      ] + cgo_native_inputs,
       env: yanet_go_env,
       build_always_stale: true,
       build_by_default: true,
     )
-    cgo_targets += {package_path: cgo_target}
+    if cgo_controlplane_packages.contains(package_path)
+      cgo_controlplane_deps += cgo_target
+    endif
   endforeach
 endif
 

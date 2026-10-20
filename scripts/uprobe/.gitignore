@@ -3,4 +3,5 @@
 /setup
 /yanet-uprobe
 /selftest/*.o
+/selftest/*.d
 /bpftime
