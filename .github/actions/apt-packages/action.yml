@@ -6,19 +6,64 @@ inputs:
     description: 'Space-separated list of apt packages to install'
     required: true
 
+outputs:
+  fingerprint:
+    description: 'Source-image namespace and actual restored package versions'
+    value: ${{ steps.fingerprint.outputs.fingerprint }}
+
 runs:
   using: 'composite'
   steps:
+    # Cached symlink targets must come from the current hosted image.
+    - name: Resolve APT cache namespace
+      if: ${{ !env.ACT }}
+      id: namespace
+      shell: bash
+      run: |
+        set -euo pipefail
+        if [[ ! "${ImageVersion:-}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+          echo "APT package cache requires a hosted runner ImageVersion" >&2
+          exit 1
+        fi
+        case "${RUNNER_ARCH:-}" in
+          X86|X64|ARM|ARM64) ;;
+          *) echo "Unsupported hosted runner architecture: ${RUNNER_ARCH:-}" >&2; exit 1 ;;
+        esac
+        . /etc/os-release
+        echo "version=3-${ID}-${VERSION_ID}-${RUNNER_ARCH}-${ImageVersion}" >>"$GITHUB_OUTPUT"
+
     - uses: ./.github/actions/apt-failover
 
     - name: refresh apt index
       shell: bash
       run: sudo apt-get update
 
-    # On a cache hit this action extracts archives rather than installing, so the dpkg
-    # database will not list the packages and a dpkg presence check cannot work here.
-    # Refreshing the index above prevents a failed install being cached as an empty result.
+    # Cache restores extract files without registering package state.
+    #
+    # Refreshing the index prevents a failed install from being cached as an empty result.
     - uses: awalsh128/cache-apt-pkgs-action@v1.6.3
+      id: install
       with:
         packages: ${{ inputs.packages }}
-        version: 2
+        version: ${{ env.ACT && '2' || steps.namespace.outputs.version }}
+
+    - name: Fingerprint cached APT packages
+      if: ${{ !env.ACT }}
+      id: fingerprint
+      shell: bash
+      env:
+        APT_NAMESPACE: ${{ steps.namespace.outputs.version }}
+        APT_PACKAGES: ${{ steps.install.outputs.all-package-version-list }}
+      run: |
+        set -euo pipefail
+        if [[ -z "$APT_NAMESPACE" ]]; then
+          echo "APT package fingerprint requires its source-image namespace" >&2
+          exit 1
+        fi
+        fingerprint=$(printf 'apt-namespace=%s\0all-package-version-list=%s\0' "$APT_NAMESPACE" "$APT_PACKAGES" | sha256sum)
+        fingerprint=${fingerprint%% *}
+        if [[ ! "$fingerprint" =~ ^[0-9a-f]{64}$ ]]; then
+          echo "Invalid APT package fingerprint" >&2
+          exit 1
+        fi
+        echo "fingerprint=$fingerprint" >>"$GITHUB_OUTPUT"

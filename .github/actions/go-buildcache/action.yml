@@ -5,6 +5,10 @@ inputs:
   profile:
     description: 'Build profile: release, asan, race, or deb'
     required: true
+  apt-fingerprint:
+    description: 'Package provenance from the cached APT wrapper; required outside Debian builds'
+    required: false
+    default: ''
 
 outputs:
   path:
@@ -25,13 +29,30 @@ runs:
       shell: bash
       env:
         CACHE_PROFILE: ${{ inputs.profile }}
+        APT_FINGERPRINT: ${{ inputs.apt-fingerprint }}
         CACHE_RUN_ID: ${{ github.run_id }}
       run: |
         set -euo pipefail
         case "$CACHE_PROFILE" in
-          release|asan|race|deb) ;;
+          release|asan|race)
+            if [[ ! "$APT_FINGERPRINT" =~ ^[0-9a-f]{64}$ ]]; then
+              echo "Go build cache requires an APT package fingerprint: $CACHE_PROFILE" >&2
+              exit 1
+            fi
+            ;;
+          deb)
+            if [[ -n "$APT_FINGERPRINT" ]]; then
+              echo "Debian Go build cache must use installed package provenance" >&2
+              exit 1
+            fi
+            ;;
           *) echo "Unsupported Go build cache profile: $CACHE_PROFILE" >&2; exit 1 ;;
         esac
+
+        if [[ ! "${ImageVersion:-}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+          echo "Go build cache requires a hosted runner ImageVersion" >&2
+          exit 1
+        fi
 
         path=$(go env GOCACHE)
         case "$path" in
@@ -39,20 +60,31 @@ runs:
           *) echo "Go build cache must have an absolute path: $path" >&2; exit 1 ;;
         esac
 
-        # External native headers must match even for Go's runtime packages.
+        # Hosted image and package provenance cover system native inputs.
+        packages=$(dpkg-query -W -f='${Package}\t${Architecture}\t${Version}\t${Status}\n')
+        if [[ -z "$packages" ]]; then
+          echo "Go build cache requires installed package provenance" >&2
+          exit 1
+        fi
         native_hash=$(
           {
-            printf 'ImageVersion=%s\0' "${ImageVersion:-}"
-            find -L /usr/include /usr/local/include /usr/lib/gcc -type f -print0 |
-              LC_ALL=C sort -z |
-              xargs -0 -r sha256sum --zero
+            printf 'native-scope=hosted-packages-v2\0ImageVersion=%s\0APT-fingerprint=%s\0' "$ImageVersion" "$APT_FINGERPRINT"
+            printf '%s\n' "$packages" |
+              LC_ALL=C sort
           } | sha256sum
         )
         native_hash=${native_hash%% *}
+        if [[ ! "$native_hash" =~ ^[0-9a-f]{64}$ ]]; then
+          echo "Invalid Go build cache native fingerprint" >&2
+          exit 1
+        fi
         path="${path%/}/yanet-ci-${CACHE_PROFILE}-${native_hash}"
 
         . /etc/os-release
-        family="go-build-v1-${ID}-${VERSION_ID}-$(go env GOOS)-$(go env GOARCH)-$(go env GOVERSION)-${CACHE_PROFILE}-${native_hash}-"
+        goos=$(go env GOOS)
+        goarch=$(go env GOARCH)
+        goversion=$(go env GOVERSION)
+        family="go-build-v2-${ID}-${VERSION_ID}-${goos}-${goarch}-${goversion}-${CACHE_PROFILE}-${native_hash}-"
         source=$(git rev-parse HEAD)
         echo "path=$path" >>"$GITHUB_OUTPUT"
         echo "key=${family}${source}-${CACHE_RUN_ID}" >>"$GITHUB_OUTPUT"

@@ -263,7 +263,7 @@ jobs:
           sudo apt-get update
           sudo -E apt-get -o Debug::pkgProblemResolver=yes --no-install-recommends -y --allow-downgrades --allow-remove-essential --allow-change-held-packages build-dep . 2>&1 | tee build-deps.log
       - name: Restore Go build cache
-        if: hashFiles('.github/actions/go-buildcache/action.yml') != ''
+        if: ${{ hashFiles('.github/actions/go-buildcache/action.yml') != '' && !env.ACT }}
         id: go-buildcache
         uses: ./.github/actions/go-buildcache
         with:
