@@ -86,17 +86,8 @@ if not dataplane_only
     python3,
     files('scripts/go_cdeps.py'),
     '--root', meson.project_source_root(),
+    '--go', go.full_path(),
   ]
-  test(
-    'go-cdeps',
-    python3,
-    args: [
-      files('scripts/go_cdeps_test.py'),
-      '--meson', find_program('meson', required: true).full_path(),
-      '--go', go.full_path(),
-    ],
-    timeout: 300,
-  )
   protoc = find_program('protoc', required: true)
   find_program('protoc-gen-go', required: true, version: '>=1.36.5')
   find_program('protoc-gen-go-grpc', required: true, version: '>=1.5.1')
@@ -325,12 +316,41 @@ yanet_stamp.set_quoted(
 build_stamp = 'yanet_build_stamp.h'
 configure_file(output: build_stamp, configuration: yanet_stamp)
 
+cgo_packages = {}
 subdir('common')
 subdir('lib')
 module_test_dirs = []
 subdir('objects')
 subdir('modules')
 subdir('devices')
+
+if not dataplane_only
+  cgo_targets = {}
+  foreach package_path, package : cgo_packages
+    cgo_inputs = package.get('inputs', [])
+    foreach library : package.get('libraries', [])
+      # Thin archives keep member contents in separate object files.
+      cgo_inputs += [library, library.extract_all_objects(recursive: false)]
+    endforeach
+    cgo_name = package_path.replace('/', '-') + '-go-cdeps'
+    # Content checks also catch restored mtimes and a deleted package marker.
+    cgo_target = custom_target(
+      cgo_name,
+      input: cgo_inputs,
+      output: cgo_name + '.stamp',
+      command: go_cdeps + [
+        '--package', package_path,
+        '--output', join_paths(meson.project_source_root(), package_path, 'zz_yanet_cdeps.c'),
+        '--stamp', '@OUTPUT@',
+      ] + (cgo_inputs.length() > 0 ? ['@INPUT@'] : []),
+      env: yanet_go_env,
+      build_always_stale: true,
+      build_by_default: true,
+    )
+    cgo_targets += {package_path: cgo_target}
+  endforeach
+endif
+
 subdir('lib/dataplane_ut/tests')
 subdir('dataplane')
 

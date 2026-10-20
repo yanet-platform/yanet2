@@ -47,8 +47,10 @@ custom_target(
         route_operator_protoc_gen,
         route_operator_readiness_protoc_gen,
 
-        # cgo linker deps
-        cerrors_go_cdeps,
+        # Native libraries and fingerprints must be ready before Go builds.
+        cgo_targets['bindings/go/cerrors'],
+        cgo_targets['common/go/logging/clog'],
+        cgo_targets['bindings/go/filter'],
         lib_acl_cp,
         lib_acl_dp,
         lib_blackhole_cp,

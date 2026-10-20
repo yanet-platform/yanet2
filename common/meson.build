@@ -6,5 +6,10 @@ if not dataplane_only
   subdir('commonpb')
   subdir('filterpb')
   subdir('readinesspb')
+
+  cgo_packages += {
+    'bindings/go/filter': {},
+    'common/go/testutils': {},
+  }
 endif
 
