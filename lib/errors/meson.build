@@ -15,11 +15,3 @@ lib_errors_dep = declare_dependency(
   link_with: lib_errors,
   include_directories: [include_directories('.'), yanet_rootdir],
 )
-
-if not dataplane_only
-  cgo_packages += {
-    'bindings/go/cerrors': {
-      'libraries': [lib_errors],
-    },
-  }
-endif

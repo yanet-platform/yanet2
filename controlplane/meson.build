@@ -48,9 +48,6 @@ custom_target(
         route_operator_readiness_protoc_gen,
 
         # Native libraries and fingerprints must be ready before Go builds.
-        cgo_targets['bindings/go/cerrors'],
-        cgo_targets['common/go/logging/clog'],
-        cgo_targets['bindings/go/filter'],
         lib_acl_cp,
         lib_acl_dp,
         lib_blackhole_cp,
@@ -81,7 +78,7 @@ custom_target(
         lib_agent_counters,
         lib_counter_pattern,
         lib_ring_objects,
-    ] + librure_targets,
+    ] + cgo_controlplane_deps + librure_targets,
     install: true,
     install_dir: get_option('bindir'),
 )

@@ -17,7 +17,7 @@ test('ring_object', ring_object_test, suite: 'ring')
 
 # C writer helpers for the Go ringtest package. Meson builds them with the
 # same cache line size as the ring object archive.
-static_library(
+lib_ringtest_writer = static_library(
   'ringtest_writer',
   ['ringtest_writer.c'],
   c_args: yanet_c_args,

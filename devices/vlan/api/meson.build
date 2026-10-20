@@ -11,7 +11,7 @@ sources = files(
   'controlplane.c',
 )
 
-lib_dev_vlan_api = static_library(
+lib_dev_vlan_api_static = static_library(
   'dev_vlan_api',
   sources,
   c_args: yanet_c_args,
@@ -22,5 +22,5 @@ lib_dev_vlan_api = static_library(
 )
 
 lib_dev_vlan_api = declare_dependency(
-  link_with: lib_dev_vlan_api,
+  link_with: lib_dev_vlan_api_static,
 )

@@ -21,9 +21,10 @@ shared memory in a coordinated maintenance window. Remove stale
 `/dev/hugepages/yanet*` mappings only after those processes have stopped,
 then restart the rebuilt components and reapply configuration. Do not mix
 old/new binaries or reuse pre-upgrade shared memory. For source builds,
-clear the Go build cache and rebuild standalone CGO executables as well as
-C archives. The plugin interface ABI does not version this private layout;
-there is no mixed-version negotiation or rolling compatibility here.
+run `meson compile -C build` to rebuild C archives and CGO dependency
+fingerprints, then rebuild standalone CGO executables. The plugin interface
+ABI does not version this private layout; there is no mixed-version
+negotiation or rolling compatibility here.
 
 ## Pdump capture moved onto named ring objects
 

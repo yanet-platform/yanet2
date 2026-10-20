@@ -16,13 +16,11 @@ default:
 
 # Build all targets
 build:
-    @go clean -cache
     @meson setup build
     @meson compile -C build
 
 # Build all targets in debug
 build-debug:
-    @go clean -cache
     @meson setup -Dbuildtype=debug -Doptimization=0 -Db_sanitize=address,undefined build
     @meson compile -C build
 

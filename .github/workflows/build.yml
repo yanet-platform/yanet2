@@ -102,7 +102,6 @@ jobs:
 
       - name: Build YANET (sanitize)
         run: |
-          make go-cache-clean
           meson setup build -Dbuildtype=debug -Doptimization=0 -Db_sanitize=address,undefined
           make dataplane
 
@@ -200,7 +199,6 @@ jobs:
 
       - name: Build YANET (release)
         run: |
-          make go-cache-clean
           meson setup build -Dbuildtype=release
           make dataplane cli
 

@@ -13,12 +13,12 @@ Data flow: CLI (Rust) → gRPC → gateway (Go) → gRPC → module control plan
 ```bash
 git submodule update --init && meson setup build   # once; DPDK is a meson subproject
 make all | make dataplane | make cli               # everything | meson compile -C build | cargo build --release --workspace
-cd controlplane && go build ./...                  # Go
+make dataplane && (cd controlplane && go build ./...) # prepare native inputs before direct Go
 npm ci && npm run build -w web                     # web is an npm workspace: install at repo root
 make setup-debug | make setup-asan                 # debug / ASan+UBSan builds
-make test | make test-asan | make test-tsan        # Go + meson tests (cleans go cache first)
+make test | make test-asan | make test-tsan        # Go + meson tests
 make test-functional                               # QEMU VM suite
-meson test -C build <name>; go test ./modules/route/...
+meson test -C build <name>; make dataplane && go test -count=1 ./modules/route/...
 gofmt -w . ; clang-format -i <file> ; cargo +nightly-2026-08-28 fmt ; cargo clippy
 make proto-lint | make lint-go | make lint/clang-syntax | make lint-commit
 make proto-go                                      # *.pb.go, needed before go lint locally
@@ -65,7 +65,7 @@ Agents: charters are authored in `.rulesync/subagents/*.md` (`make ai/agents` ge
 
 Language rules: `.agents/conventions/{go,rust,c,ts}.md` — read the one for the language you touch. Comments (all languages): `.agents/conventions/comments.md`. Tests (all languages): `.agents/conventions/tests.md`.
 
-- C-only changes still need `go test -count=1` and a clean `meson compile`: Go can link a stale C archive. A shared-memory layout or `YANET_MODULE_ABI_VERSION` change needs `go clean -cache`, removal of standalone CGO binaries and of `/dev/hugepages/yanet*`.
+- Before direct Go commands after native changes, run `meson compile -C build` to rebuild C inputs and CGO fingerprints, then `go test -count=1` with the configured cache-line and sanitizer CGO flags; `make test` and `make test-asan` supply them automatically. Shared-memory layout or `YANET_MODULE_ABI_VERSION` changes also need rebuilt standalone CGO binaries and coordinated process restarts; stop attached processes before removing stale `/dev/hugepages/yanet*`.
 - Test logic and invariants, not human-readable CLI output (ASCII-only paths and canonical MAC/hex rendering are contracts and may be tested).
 - Race tests need targeted `-run` repetition (~10–20 runs); one `-race` pass can miss it.
 - `modules/*/tests/vm` exit code 127/3 means binaries are not staged, not a product defect.

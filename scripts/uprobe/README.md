@@ -70,7 +70,10 @@ and verifies its hashes; the package build never compiles bpftime. Both
 archives come from the manual workflow mode described below. For in-tree builds, placing an archive
 with the pinned hash at `.deps/bpftime-<arch>.tar.gz` skips the download.
 `make selftest` checks real locks and session lifecycle using the project's
-configured DPDK build. Installed hosts need no build tools.
+configured DPDK build. It rebuilds the external lock object after header changes
+and refreshes its tagged CGO dependency fingerprint before testing. The main
+uprobe package uses only package-local C inputs, which Go tracks directly.
+Installed hosts need no build tools.
 
 Runtime archives are built from pinned upstream v0.9.0 on a native GitHub
 Actions VM by a manual workflow mode that runs `make selftest` and publishes the
