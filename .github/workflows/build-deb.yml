@@ -256,13 +256,38 @@ jobs:
           check-latest: true
       - name: Restore Go module cache
         uses: ./.github/actions/go-modcache
+      - name: Install Debian build dependencies
+        if: hashFiles('.github/actions/go-buildcache/action.yml') != ''
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo -E apt-get -o Debug::pkgProblemResolver=yes --no-install-recommends -y --allow-downgrades --allow-remove-essential --allow-change-held-packages build-dep . 2>&1 | tee build-deps.log
+      - name: Restore Go build cache
+        if: ${{ hashFiles('.github/actions/go-buildcache/action.yml') != '' && !env.ACT }}
+        id: go-buildcache
+        uses: ./.github/actions/go-buildcache
+        with:
+          profile: deb
       - name: Install Go Protobuf Plugins
         uses: ./.github/actions/protoc-plugins
 
       - name: Build packages
         run: |
-          sudo -E env "PATH=$PATH" "PKG_VERSION=$PKG_VERSION" ./scripts/build-deb.sh
+          build_deb_args=()
+          if [[ -f .github/actions/go-buildcache/action.yml ]]; then
+            build_deb_args+=(--skip-build-deps)
+          fi
+          sudo -E env "PATH=$PATH" "PKG_VERSION=$PKG_VERSION" "GOCACHE=${GOCACHE:-}" ./scripts/build-deb.sh "${build_deb_args[@]}"
           sudo chown -R $(id -u) ~/.cargo  # fix caching for Rust
+
+      - name: Restore Go build cache ownership
+        if: always() && steps.go-buildcache.outputs.path != ''
+        env:
+          GOCACHE_PATH: ${{ steps.go-buildcache.outputs.path }}
+        run: |
+          if [[ -d "$GOCACHE_PATH" ]]; then
+            sudo chown -R "$(id -u):$(id -g)" -- "$GOCACHE_PATH"
+          fi
 
       - name: Verify package artifacts
         run: sudo ./scripts/verify-deb-artifacts.sh outdeb '${{ matrix.arch }}'
@@ -287,6 +312,13 @@ jobs:
             outdeb/*.buildinfo
             outdeb/*.deb
             outdeb/*.ddeb
+
+      - name: Save Go build cache
+        if: success() && github.ref == 'refs/heads/main' && (inputs.source_sha == '' || inputs.source_sha == github.sha) && steps.go-buildcache.outputs.cache-hit != 'true' && steps.go-buildcache.outputs.path != '' && steps.go-buildcache.outputs.key != ''
+        uses: actions/cache/save@v5
+        with:
+          path: ${{ steps.go-buildcache.outputs.path }}
+          key: ${{ steps.go-buildcache.outputs.key }}
 
   verify-release:
     if: inputs.pkg_version != ''

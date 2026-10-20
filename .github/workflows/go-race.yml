@@ -6,12 +6,16 @@ on:
     paths:
       - "**/*.go"
       - ".github/workflows/go-race.yml"
+      - ".github/actions/go-buildcache/**"
+      - ".github/actions/apt-packages/**"
   pull_request:
     # A stacked pull request has a non-main base, so a main-only filter would skip it.
     branches: ["**"]
     paths:
       - "**/*.go"
       - ".github/workflows/go-race.yml"
+      - ".github/actions/go-buildcache/**"
+      - ".github/actions/apt-packages/**"
 
 concurrency:
   # The run_id fallback keeps non-PR runs from cancelling each other.
@@ -29,6 +33,7 @@ jobs:
           submodules: true
 
       - uses: ./.github/actions/apt-packages
+        id: apt-packages
         timeout-minutes: 10
         with:
           packages: meson clang cmake python3-pyelftools libnuma-dev libpcap-dev git protobuf-compiler
@@ -49,6 +54,14 @@ jobs:
       - name: Restore Go module cache
         uses: ./.github/actions/go-modcache
 
+      - name: Restore Go build cache
+        if: ${{ !env.ACT }}
+        id: go-buildcache
+        uses: ./.github/actions/go-buildcache
+        with:
+          profile: race
+          apt-fingerprint: ${{ steps.apt-packages.outputs.fingerprint }}
+
       - name: Install Go Protobuf Plugins
         uses: ./.github/actions/protoc-plugins
 
@@ -62,3 +75,10 @@ jobs:
           set -euo pipefail
           packages=$(go list ./... | grep -v '^github.com/yanet-platform/yanet2/tests/functional/main')
           go test -race -count=1 $packages
+
+      - name: Save Go build cache
+        if: success() && github.ref == 'refs/heads/main' && steps.go-buildcache.outputs.cache-hit != 'true' && !env.ACT
+        uses: actions/cache/save@v5
+        with:
+          path: ${{ steps.go-buildcache.outputs.path }}
+          key: ${{ steps.go-buildcache.outputs.key }}

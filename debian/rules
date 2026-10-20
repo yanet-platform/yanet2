@@ -51,6 +51,13 @@ override_dh_auto_configure:
 override_dh_auto_test:
 	:
 
+override_dh_auto_clean:
+	if printf '%s\0' "$${GOCACHE##*/}" | LC_ALL=C grep -zEq '^yanet-ci-(release|asan|race|deb)-[0-9a-f]{64}$$'; then \
+		dh_auto_clean -- -o go-cache-clean; \
+	else \
+		dh_auto_clean; \
+	fi
+
 execute_after_dh_auto_clean:
 	$(MAKE) -C scripts/uprobe clean
 

@@ -1,13 +1,10 @@
 name: Actions cache cleanup
 
-# Prunes two classes of dead cache before the repo's 10 GB cap forces GitHub
-# to LRU-evict live entries: superseded ccache-action generations (it never
-# prunes its own timestamped keys) and caches left on already-merged or
-# closed PR refs.
+# Prunes superseded native and main Go snapshots, plus closed-PR caches,
+# before the repo's 10 GB cap forces eviction of active entries.
 #
-# Superseded generations pile up through the working day faster than a
-# once-daily sweep clears them, so the sweep runs hourly to match the rate
-# they appear.
+# Hourly cleanup keeps immutable build snapshots from accumulating
+# throughout the working day.
 
 on:
   schedule:
@@ -100,16 +97,17 @@ jobs:
         run: |
           set -euo pipefail
           cat > "$RUNNER_TEMP/select.jq" <<'JQ'
-          # Selection rules for cache deletion.
+          # Selection rules retain active cache generations.
           #
-          # Rule A: superseded ccache-action generations on any ref, grouped
-          # per (ref, family) with family = key minus its trailing ISO8601
-          # timestamp. The newest generation per group is kept. Rule B:
-          # every cache on a refs/pull/<N>/merge ref whose PR is closed or
-          # merged. --argjson pr_states maps PR number (string) to that bool.
+          # Rule A removes older compiler snapshots on each ref. Rule B
+          # removes every cache on a closed pull request's merge ref. Rule C
+          # removes older main Go snapshots within each compatible native
+          # environment, retaining the newest creation time and breaking
+          # ties by cache ID.
 
           def ccache_re: "^ccache-.+-[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z$";
           def pr_ref_re: "^refs/pull/(?<n>[0-9]+)/merge$";
+          def go_build_re: "^go-build-v2-.+-[0-9a-f]{64}-[0-9a-f]{40}-[0-9]+$";
 
           def with_family:
             . + (.key | capture("^(?<family>ccache-.+)-(?<ts>[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z)$"));
@@ -130,8 +128,17 @@ jobs:
             | map(select($pr_states[.pr_number] == true))
             | map(.rule = "B");
 
+          def rule_c($caches):
+            ($caches
+             | map(select(.ref == "refs/heads/main" and (.key | test(go_build_re))))
+             | map(. + {family: (.key | sub("-[0-9a-f]{40}-[0-9]+$"; ""))}))
+            | group_by([.ref, .family])
+            | map(sort_by([.created_at, .id]) | .[0:-1])
+            | flatten
+            | map(.rule = "C");
+
           . as $caches
-          | (rule_a($caches) + rule_b($caches; $pr_states))
+          | (rule_a($caches) + rule_b($caches; $pr_states) + rule_c($caches))
           | group_by(.id)
           | map(. as $g | $g[0] + {rules: ($g | map(.rule) | unique | join(","))})
           | map({id, ref, key, size_in_bytes, rules})
