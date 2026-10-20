@@ -101,9 +101,9 @@ jobs:
           #
           # Rule A removes older compiler snapshots on each ref. Rule B
           # removes every cache on a closed pull request's merge ref. Rule C
-          # removes older main Go snapshots within each platform, toolchain
-          # and profile family, retaining the newest creation time and
-          # breaking ties by cache ID across native environments.
+          # removes older main Go snapshots within each compatible native
+          # environment, retaining the newest creation time and breaking
+          # ties by cache ID.
 
           def ccache_re: "^ccache-.+-[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z$";
           def pr_ref_re: "^refs/pull/(?<n>[0-9]+)/merge$";
@@ -131,7 +131,7 @@ jobs:
           def rule_c($caches):
             ($caches
              | map(select(.ref == "refs/heads/main" and (.key | test(go_build_re))))
-             | map(. + {family: (.key | sub("-[0-9a-f]{64}-[0-9a-f]{40}-[0-9]+$"; ""))}))
+             | map(. + {family: (.key | sub("-[0-9a-f]{40}-[0-9]+$"; ""))}))
             | group_by([.ref, .family])
             | map(sort_by([.created_at, .id]) | .[0:-1])
             | flatten
