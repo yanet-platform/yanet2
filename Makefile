@@ -118,6 +118,8 @@ CLI_RELEASE_BINARIES := $(addprefix $(RELEASE_DIR)/,$(CLI_BINARIES))
 	build \
 	dataplane \
 	go-test-prepare \
+	sdk \
+	sdk-example \
 	install \
 	clean \
 	go-cache-clean \
@@ -267,6 +269,32 @@ dataplane: build
 go-test-prepare:
 	meson compile -C build go-test-prepare
 	@test -f build/yanet_cgo_cppflags || { echo "ERROR: build/yanet_cgo_cppflags not found: go tests need this checkout's own build/, not a link to another one (remove it and run 'meson setup build')"; exit 1; }
+
+# Module SDK: the build-side surface for out-of-tree modules.
+#
+# A configured and built tree already carries everything an out-of-tree
+# module compiles against; this target confirms the SDK artifacts exist
+# (build/sdk/yanet-module-sdk.pc and the PIC ABI-version archive) and
+# prints the environment such a module builds with. See docs/module-sdk.md.
+sdk: dataplane
+	@test -f build/meson-info/intro-buildoptions.json || { \
+		echo "No configured build directory; run: meson setup build" >&2; \
+		exit 1; \
+	}
+	@test -f build/sdk/yanet-module-sdk.pc || { \
+		echo "ERROR: build/sdk/yanet-module-sdk.pc missing; re-run meson setup" >&2; \
+		exit 1; \
+	}
+	@echo "module SDK ready:"
+	@echo "  PKG_CONFIG_PATH=$(CURDIR)/build/sdk"
+	@echo "  plugin to deploy: build/<module>/lib<name>_dp.so -> plugin_dir"
+	@echo "  reference module: make sdk-example"
+
+# Builds and tests the reference out-of-tree module (sdk/example) against
+# this tree's SDK: the gate for out-of-tree module support.
+sdk-example: sdk
+	$(MAKE) -C sdk/example YANET_ROOT=$(CURDIR) all test
+
 
 cli: cli-build
 
