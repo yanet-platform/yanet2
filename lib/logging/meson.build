@@ -15,3 +15,11 @@ lib_logging_dep = declare_dependency(
   link_with: lib_logging,
   include_directories: yanet_rootdir,
 )
+
+if not dataplane_only
+  cgo_packages += {
+    'common/go/logging/clog': {
+      'libraries': [lib_logging],
+    },
+  }
+endif
