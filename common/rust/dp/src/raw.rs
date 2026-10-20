@@ -18,7 +18,7 @@ use yanet_shm::{CounterStorage, CpModule, OffsetPtr};
 ///
 /// Mirrors `YANET_MODULE_ABI_VERSION` in `lib/dataplane/module/module.h`;
 /// bump both together, in the change that alters any mirrored layout.
-pub const YANET_MODULE_ABI_VERSION: u32 = 41;
+pub const YANET_MODULE_ABI_VERSION: u32 = 42;
 
 /// Symbol name a module `.so` exports carrying its ABI version.
 pub const YANET_MODULE_ABI_VERSION_SYMBOL: &str = "yanet_module_abi_version";
@@ -44,6 +44,8 @@ pub struct Module {
     pub commit_handler: Option<ModuleCommitHandler>,
     pub commit_ectx_handler: Option<ModuleCommitEctxHandler>,
     pub prepared_size: u64,
+    /// Layout identity of the module configuration, zero when unchecked.
+    pub config_layout: u64,
 }
 
 /// Capacity of the module type name, counting the terminating zero.
@@ -419,7 +421,7 @@ pub struct DpConfig {
 // pinned sizes and offsets, mirroring plugin_abi_assert.h
 // ---------------------------------------------------------------------------
 
-const _: () = assert!(core::mem::size_of::<Module>() == 112);
+const _: () = assert!(core::mem::size_of::<Module>() == 120);
 const _: () = assert!(core::mem::size_of::<Packet>() == 48);
 const _: () = assert!(core::mem::size_of::<PacketList>() == 16);
 const _: () = assert!(core::mem::size_of::<PacketFront>() == 128);
