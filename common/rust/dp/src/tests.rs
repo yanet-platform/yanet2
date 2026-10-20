@@ -107,7 +107,6 @@ fn front_counts_and_views() {
         drop_bytes: 0,
     };
 
-    tp.packet_mut().set_tx_device_id(7);
     // Queue the packet the way a framework switch would: listed as
     // input with its byte accounting.
     // SAFETY: the packet is unlinked and the front starts empty.
@@ -120,7 +119,6 @@ fn front_counts_and_views() {
         // SAFETY: the front is live and uniquely wrapped.
         let mut front = unsafe { crate::PacketFront::from_raw(&mut front) };
         let packet = front.pop_input().expect("input present");
-        assert_eq!(packet.tx_device_id(), 7);
         assert_eq!(packet.len(), 18);
         assert_eq!(packet.total_len(), 18);
         // The fixture left the network offset at the Ethernet header.

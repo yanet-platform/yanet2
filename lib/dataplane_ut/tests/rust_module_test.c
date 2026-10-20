@@ -202,7 +202,8 @@ run_one(const uint8_t dst_addr[4], struct round_outcome *outcome) {
 	packet_list_init(&input);
 	packet_list_add(&input, packet);
 	struct dataplane_ut_round_result result;
-	dataplane_ut_run(ut, 0, &input, &result);
+	uint16_t input_devices[1] = {0};
+	dataplane_ut_run(ut, 0, input_devices, &input, &result);
 	outcome->output_count = packet_list_count(&result.output);
 	outcome->drop_count = packet_list_count(&result.drop);
 	dataplane_ut_round_result_free(&result);

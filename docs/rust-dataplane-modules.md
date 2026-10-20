@@ -60,8 +60,8 @@ it exactly once to `front.output(...)` or `front.drop_packet(...)`. An
 empty front is normal (force-polled ticks). One framework rule matters
 in practice: a module running in a device INPUT pipeline has its bare
 `output` dropped — the only way a packet leaves is being routed into a
-device entry (`route_input`/`route_output` with `set_tx_device_id`),
-exactly as the C modules do. Optional macro keys:
+device entry (`route_input`/`route_output`), exactly as the C modules
+do; the egress device derives from the routed entry itself. Optional macro keys:
 
 - `commit: fn(&DpConfig, &CpModule)` — generation-invariant derivation
   over the config (the C commit handler);
@@ -79,8 +79,8 @@ exactly as the C modules do. Optional macro keys:
   counters (`rx_counter()` …) — per-worker, single-writer value arrays,
   size-2 counters are `[packets, bytes]`;
 - `device_target(index)` + `route_input/route_output` — send a packet to
-  a device entry (set `packet.set_tx_device_id(...)` first, using the
-  target's generation device id);
+  a device entry; the egress device is the entry's own, packets no
+  longer carry one;
 - `object_link(index)` — a linked shared object: `link.object::<T>()`
   for the typed object, `link.counter(id)` for link counters;
 - `alloc_packet` / `clone_packet` / `free_packet`, `worker_idx()`,

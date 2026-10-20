@@ -126,21 +126,6 @@ impl<'a> Packet<'a> {
         self.raw().vlan
     }
 
-    /// The device the packet was received on.
-    pub fn rx_device_id(&self) -> u16 {
-        self.raw().rx_device_id
-    }
-
-    /// The device the packet is routed to for transmission.
-    pub fn tx_device_id(&self) -> u16 {
-        self.raw().tx_device_id
-    }
-
-    /// Route the packet to a device for transmission.
-    pub fn set_tx_device_id(&mut self, device_id: u16) {
-        raw::Packet::set(self.raw, |raw| raw.tx_device_id = device_id);
-    }
-
     /// Network header type in host byte order of the wire EtherType.
     pub fn network_type(&self) -> u16 {
         self.raw().network_type()

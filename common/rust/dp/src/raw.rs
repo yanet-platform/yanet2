@@ -18,7 +18,7 @@ use yanet_shm::{CounterStorage, CpModule, OffsetPtr};
 ///
 /// Mirrors `YANET_MODULE_ABI_VERSION` in `lib/dataplane/module/module.h`;
 /// bump both together, in the change that alters any mirrored layout.
-pub const YANET_MODULE_ABI_VERSION: u32 = 33;
+pub const YANET_MODULE_ABI_VERSION: u32 = 41;
 
 /// Symbol name a module `.so` exports carrying its ABI version.
 pub const YANET_MODULE_ABI_VERSION_SYMBOL: &str = "yanet_module_abi_version";
@@ -87,8 +87,6 @@ pub struct Packet {
     pub next: *mut Packet,
     pub mbuf: *mut RteMbuf,
     pub hash: u32,
-    pub rx_device_id: u16,
-    pub tx_device_id: u16,
     pub flags: u16,
     pub vlan: u16,
     pub recirc_remaining: u16,
@@ -99,6 +97,9 @@ pub struct Packet {
     pub data_len: u16,
     network_header: NetworkHeaderRaw,
     transport_header: TransportHeaderRaw,
+    // Trailing alignment padding: the struct carries pointers, so its
+    // 44 bytes of fields round up to the pinned 48.
+    _tail_pad: [u8; 4],
 }
 
 impl Packet {
@@ -232,6 +233,9 @@ pub struct ObjectEctx {
     pub cp_object: OffsetPtr<yanet_shm::CpObject>,
     pub abs_cp_object: *mut yanet_shm::CpObject,
     pub counter_storage: *mut CounterStorage,
+    pub object_prepared: OffsetPtr<u8>,
+    pub abs_object_prepared: *mut u8,
+    pub worker_idx: u64,
 }
 
 /// Mirror of `struct module_ectx`
@@ -257,6 +261,8 @@ pub struct ModuleEctx {
     pub packet_recirc_limit: u16,
     _pad0: [u8; 2],
     pub module_device_id: u32,
+    pub registry_device_id: u16,
+    _pad1: [u8; 6],
     pub device_target_count: u64,
     pub device_targets: OffsetPtr<ModuleDeviceTarget>,
     pub abs_device_targets: *mut ModuleDeviceTarget,
@@ -332,6 +338,15 @@ pub struct ConfigGenEctx {
     _pad0: [u8; 7],
     pub device_ptrs: OffsetPtr<OffsetPtr<DeviceEctx>>,
     pub device_count: u64,
+    pub backing_registry_count: u64,
+    pub backing_registry: OffsetPtr<u16>,
+    pub abs_backing_registry: *mut u16,
+    pub egress_backing: OffsetPtr<u16>,
+    pub abs_egress_backing: *mut u16,
+    pub tx_bucket_count: u32,
+    _pad1: [u8; 4],
+    pub tx_buckets: OffsetPtr<PacketList>,
+    pub abs_tx_buckets: *mut PacketList,
     // Trailing flexible array of absolute device addresses.
     pub devices: [*mut DeviceEctx; 0],
 }
@@ -386,9 +401,10 @@ pub struct DpWorker {
     pub rx_mempool: *mut c_void,
     pub rx_bursts: *mut u64,
     pub core_id: u32,
-    pub device_id: u32,
-    pub queue_id: u32,
     pub rx_burst_size: u32,
+    pub assignment_count: u32,
+    _pad0: [u8; 4],
+    pub assignments: *mut c_void,
     pub config_gen_ectx: OffsetPtr<ConfigGenEctx>,
 }
 
@@ -408,25 +424,25 @@ const _: () = assert!(core::mem::size_of::<Packet>() == 48);
 const _: () = assert!(core::mem::size_of::<PacketList>() == 16);
 const _: () = assert!(core::mem::size_of::<PacketFront>() == 128);
 const _: () = assert!(core::mem::size_of::<RteMbuf>() == 128);
-const _: () = assert!(core::mem::size_of::<ModuleEctx>() == 200);
+const _: () = assert!(core::mem::size_of::<ModuleEctx>() == 208);
 const _: () = assert!(core::mem::size_of::<ModuleDeviceTarget>() == 40);
 const _: () = assert!(core::mem::size_of::<ModuleObjectLinkEctx>() == 24);
-const _: () = assert!(core::mem::size_of::<ObjectEctx>() == 24);
+const _: () = assert!(core::mem::size_of::<ObjectEctx>() == 48);
 const _: () = assert!(core::mem::size_of::<DeviceEntryEctx>() == 272);
-const _: () = assert!(core::mem::size_of::<ConfigGenEctx>() == 224);
-const _: () = assert!(core::mem::size_of::<DpWorker>() == 168);
+const _: () = assert!(core::mem::size_of::<ConfigGenEctx>() == 288);
+const _: () = assert!(core::mem::size_of::<DpWorker>() == 176);
 const _: () = assert!(core::mem::size_of::<TscClock>() == 24);
 const _: () = assert!(core::mem::align_of::<RteMbuf>() == 64);
 
 const _: () = assert!(core::mem::offset_of!(Packet, mbuf) == 8);
-const _: () = assert!(core::mem::offset_of!(Packet, data_len) == 38);
+const _: () = assert!(core::mem::offset_of!(Packet, data_len) == 34);
 const _: () = assert!(core::mem::offset_of!(PacketFront, input) == 0);
 const _: () = assert!(core::mem::offset_of!(ModuleEctx, abs_cp_module) == 16);
 const _: () = assert!(core::mem::offset_of!(ModuleEctx, abs_counter_storage) == 72);
 const _: () = assert!(core::mem::offset_of!(ModuleEctx, packet_recirc_limit) == 128);
-const _: () = assert!(core::mem::offset_of!(ModuleEctx, abs_device_targets) == 152);
-const _: () = assert!(core::mem::offset_of!(ModuleEctx, abs_object_links) == 176);
-const _: () = assert!(core::mem::offset_of!(ModuleEctx, abs_module_prepared) == 192);
+const _: () = assert!(core::mem::offset_of!(ModuleEctx, abs_device_targets) == 160);
+const _: () = assert!(core::mem::offset_of!(ModuleEctx, abs_object_links) == 184);
+const _: () = assert!(core::mem::offset_of!(ModuleEctx, abs_module_prepared) == 200);
 const _: () = assert!(core::mem::offset_of!(DeviceEntryEctx, schedule) == 144);
 const _: () = assert!(core::mem::offset_of!(ConfigGenEctx, ready_list) == 184);
 const _: () = assert!(core::mem::offset_of!(DpWorker, current_time) == 40);

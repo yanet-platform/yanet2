@@ -96,7 +96,8 @@ fn handle<'a>(ectx: &mut Ectx<'a>, front: &mut PacketFront<'a>) {
                 // unset config fails the routing and drops.
                 match ectx.device_target(config.pass_device_idx as usize) {
                     Some(target) => {
-                        packet.set_tx_device_id(target.device_id());
+                        // The egress device derives from the routed
+                        // entry itself; packets no longer carry one.
                         ectx.route_output(front, target, packet);
                     }
                     None => {
