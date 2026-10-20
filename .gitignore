@@ -94,6 +94,7 @@ web/dist/
 
 # generated files
 *.pb.go
+zz_yanet_cdeps.c
 
 # Ignore lock for subprojects
 subprojects/.wraplock

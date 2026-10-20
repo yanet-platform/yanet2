@@ -81,6 +81,22 @@ dataplane_only = get_option('dataplane_only')
 if not dataplane_only
   # Define common programs once to avoid duplication
   go = find_program('go', required: true)
+  python3 = find_program('python3', required: true, version: '>=3.8', native: true)
+  go_cdeps = [
+    python3,
+    files('scripts/go_cdeps.py'),
+    '--root', meson.project_source_root(),
+  ]
+  test(
+    'go-cdeps',
+    python3,
+    args: [
+      files('scripts/go_cdeps_test.py'),
+      '--meson', find_program('meson', required: true).full_path(),
+      '--go', go.full_path(),
+    ],
+    timeout: 300,
+  )
   protoc = find_program('protoc', required: true)
   find_program('protoc-gen-go', required: true, version: '>=1.36.5')
   find_program('protoc-gen-go-grpc', required: true, version: '>=1.5.1')

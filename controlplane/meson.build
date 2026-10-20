@@ -48,6 +48,7 @@ custom_target(
         route_operator_readiness_protoc_gen,
 
         # cgo linker deps
+        cerrors_go_cdeps,
         lib_acl_cp,
         lib_acl_dp,
         lib_blackhole_cp,
