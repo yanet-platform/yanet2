@@ -28,7 +28,7 @@ type GatewayActuator struct {
 	routes           routepb.RouteServiceClient
 	function         *ynpb.Function
 	functionActuator *operator.FunctionActuator
-	devices          []string
+	devices          neigh.DeviceScope
 	module           string
 	staticRoutes     map[netip.Prefix]map[netip.Addr]struct{}
 	onFIBBuilt       func(module string, stats FIBBuildStats)
@@ -98,7 +98,7 @@ func NewGatewayActuator(
 		routes:           routepb.NewRouteServiceClient(conn),
 		function:         function,
 		functionActuator: operator.NewFunctionActuator(ynpb.NewFunctionServiceClient(conn), actuatorOptions...),
-		devices:          opts.Devices,
+		devices:          neigh.NewDeviceScope(opts.Devices),
 		module:           fn.Module.Unwrap(),
 		staticRoutes:     staticRoutes,
 		onFIBBuilt:       opts.OnFIBBuilt,
@@ -118,8 +118,6 @@ func (m *GatewayActuator) Close() error {
 // failure — the joined errors let the reconcile loop retry under backoff.
 // Configured static-path resolution gates success but never publication.
 func (m *GatewayActuator) Apply(ctx context.Context, snapshot RouteSnapshot) error {
-	neighbours := neigh.FilterByDevices(snapshot.Neighbours, m.devices)
-
 	var err error
 	for name, dump := range snapshot.RIBs {
 		if name == "" {
@@ -127,7 +125,7 @@ func (m *GatewayActuator) Apply(ctx context.Context, snapshot RouteSnapshot) err
 			continue
 		}
 
-		fib, stats := BuildFIB(dump, neighbours)
+		fib, stats := BuildFIB(dump, snapshot.Neighbours, m.devices)
 		fib.Name = name
 		m.onFIBBuilt(name, stats)
 		if e := m.pushFIB(ctx, fib); e != nil {
@@ -135,15 +133,16 @@ func (m *GatewayActuator) Apply(ctx context.Context, snapshot RouteSnapshot) err
 		}
 	}
 
-	return errors.Join(err, m.applyFunction(ctx), m.validateStaticRoutes(snapshot, neighbours))
+	return errors.Join(err, m.applyFunction(ctx), m.validateStaticRoutes(snapshot))
 }
 
 // validateStaticRoutes keeps configured requirements independent of runtime
 // deletion and accepts only configured static paths in the gateway's local view.
-func (m *GatewayActuator) validateStaticRoutes(
-	snapshot RouteSnapshot,
-	neighbours neigh.NexthopCacheView,
-) error {
+func (m *GatewayActuator) validateStaticRoutes(snapshot RouteSnapshot) error {
+	if len(m.staticRoutes) == 0 {
+		return nil
+	}
+
 	dump := snapshot.RIBs[m.module]
 	var missing []string
 	for prefix, nexthops := range m.staticRoutes {
@@ -156,7 +155,7 @@ func (m *GatewayActuator) validateStaticRoutes(
 			if _, ok := nexthops[nexthop]; !ok {
 				continue
 			}
-			if _, ok := neighbours.Lookup(nexthop); ok {
+			if entry, ok := snapshot.Neighbours.Lookup(nexthop); ok && m.devices.Allows(entry.HardwareRoute.Device) {
 				resolved = true
 				break
 			}

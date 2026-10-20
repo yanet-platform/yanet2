@@ -114,6 +114,10 @@ func requireFIB(
 func Test_GatewayActuator_StaticRequirements(t *testing.T) {
 	configured := []op.StaticRouteConfig{staticPath("10.10.0.0/24", "192.0.2.1")}
 	static := ribPath("10.10.0.0/24", "192.0.2.1", rib.RouteSourceStatic)
+	lowerPriorityStatic := static
+	lowerPriorityStatic.Pref = 50
+	higherPriorityStatic := ribPath("10.10.0.0/24", "192.0.2.2", rib.RouteSourceStatic)
+	higherPriorityStatic.Pref = 100
 	for _, tc := range []struct {
 		name       string
 		configured []op.StaticRouteConfig
@@ -141,6 +145,12 @@ func Test_GatewayActuator_StaticRequirements(t *testing.T) {
 			configured: configured, routes: []rib.Route{static},
 			neighbours: map[string]string{"192.0.2.1": "eth1"}, devices: []string{"eth0"},
 			missing: []string{"10.10.0.0/24"},
+		},
+		{
+			name:       "a resolved configured path satisfies readiness even when not selected",
+			configured: configured, routes: []rib.Route{higherPriorityStatic, lowerPriorityStatic},
+			devices: []string{"eth0"}, neighbours: map[string]string{"192.0.2.1": "eth0", "192.0.2.2": "eth0"},
+			expected: resolvedPath("10.10.0.0/24", "192.0.2.2", "eth0"),
 		},
 		{
 			name: "all missing prefixes are deterministic while available prefixes publish",
@@ -307,6 +317,90 @@ func Test_GatewayActuator_StaticRequirements(t *testing.T) {
 			requireFIB(t, writes[0], pathModule, tc.expected)
 			require.Equal(t, 1, functionUpdates)
 		})
+	}
+}
+
+// Test_GatewayActuator_DeviceScopeOwnership verifies that mutating the caller's
+// device list cannot change forwarding eligibility or static-path readiness.
+func Test_GatewayActuator_DeviceScopeOwnership(t *testing.T) {
+	gateway, endpoint := startFakeGateway(t)
+	devices := []string{"eth0"}
+	actuator, err := op.NewGatewayActuator(
+		operator.GatewayConfig{Name: "gw0", Endpoint: xcfg.MustNonEmptyString(endpoint)},
+		op.WithGatewayActuatorFunction(op.DefaultConfig().Function),
+		op.WithGatewayActuatorDevices(devices),
+		op.WithGatewayActuatorStaticRoutes([]op.StaticRouteConfig{staticPath("10.10.0.0/24", "192.0.2.1")}),
+	)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, actuator.Close()) })
+	devices[0] = "eth1"
+	snapshot := routeSnapshot(
+		[]rib.Route{
+			ribPath("10.10.0.0/24", "192.0.2.1", rib.RouteSourceStatic),
+			ribPath("10.10.0.0/24", "192.0.2.2", rib.RouteSourceStatic),
+		},
+		map[string]string{"192.0.2.1": "eth0", "192.0.2.2": "eth1"},
+	)
+	require.NoError(t, actuator.Apply(requestContext(t), snapshot))
+	writes, _ := gateway.receivedWrites()
+	require.Len(t, writes, 1)
+	requireFIB(t, writes[0], "route0", resolvedPath("10.10.0.0/24", "192.0.2.1", "eth0"))
+}
+
+// Test_GatewayActuator_RejectedFIB_ClassificationLifecycle verifies that completed
+// builds publish and clear classification gauges despite programming failures.
+func Test_GatewayActuator_RejectedFIB_ClassificationLifecycle(t *testing.T) {
+	gateway, endpoint := startFakeGateway(t)
+	gateway.failWrites(status.Error(codes.Unavailable, "FIB rejected"), nil)
+	metrics := op.NewMetrics(&op.RIBStore{}, neigh.NewNeighTable())
+	actuator, err := op.NewGatewayActuator(
+		operator.GatewayConfig{Name: "gw0", Endpoint: xcfg.MustNonEmptyString(endpoint)},
+		op.WithGatewayActuatorFunction(op.DefaultConfig().Function),
+		op.WithGatewayActuatorDevices([]string{"eth0"}),
+		op.WithGatewayActuatorOnFIBBuilt(metrics.Gateway("gw0").OnFIBBuilt),
+	)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, actuator.Close()) })
+	routes := []rib.Route{
+		ribPath("10.10.0.0/24", "192.0.2.1", rib.RouteSourceBird),
+		ribPath("10.10.0.0/24", "192.0.2.2", rib.RouteSourceBird),
+		ribPath("10.10.0.0/24", "192.0.2.3", rib.RouteSourceBird),
+		ribPath("10.10.0.0/24", "192.0.2.4", rib.RouteSourceBird),
+	}
+	for idx := range routes {
+		routes[idx].GlobalID = uint32(idx + 1)
+	}
+	for idx, tc := range []struct {
+		name       string
+		routes     []rib.Route
+		neighbours map[string]string
+		unresolved float64
+		excluded   float64
+		expected   map[string][]neigh.HardwareRoute
+	}{
+		{
+			name: "missing and foreign paths are classified separately", routes: routes,
+			neighbours: map[string]string{"192.0.2.3": "eth1", "192.0.2.4": "eth0"},
+			unresolved: 2, excluded: 1, expected: resolvedPath("10.10.0.0/24", "192.0.2.4", "eth0"),
+		},
+		{
+			name: "neighbour-only changes replace classifications after a rejected write", routes: routes,
+			neighbours: map[string]string{"192.0.2.1": "eth0", "192.0.2.2": "eth1", "192.0.2.3": "eth1", "192.0.2.4": "eth1"},
+			excluded:   3, expected: resolvedPath("10.10.0.0/24", "192.0.2.1", "eth0"),
+		},
+		{
+			name:       "explicit empty module dump resets both classifications",
+			neighbours: map[string]string{"192.0.2.1": "eth1", "192.0.2.2": "eth1", "192.0.2.3": "eth0"},
+		},
+	} {
+		t.Logf("step %d: %s", idx+1, tc.name)
+		err := actuator.Apply(requestContext(t), routeSnapshot(tc.routes, tc.neighbours))
+		require.ErrorContains(t, err, "FIB rejected")
+		require.Equal(t, codes.Unavailable, status.Code(err))
+		requireFIBClassifications(t, metrics.Collect(), "gw0", "route0", tc.unresolved, tc.excluded)
+		writes, _ := gateway.receivedWrites()
+		require.Len(t, writes, idx+1)
+		requireFIB(t, writes[idx], "route0", tc.expected)
 	}
 }
 

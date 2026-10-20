@@ -62,56 +62,38 @@ func Test_RouteSource_SnapshotDrainsWake(t *testing.T) {
 	}
 }
 
+// Test_RouteSource_SnapshotIncludesRIBs verifies that snapshots expose the
+// stored route paths together with their resolved neighbour entries.
 func Test_RouteSource_SnapshotIncludesRIBs(t *testing.T) {
-	nd := neigh.NewNeighTable()
-	nd.CreateSource(defaultStaticTable, 100, false)
-	nd.Add(defaultStaticTable, []neigh.NeighbourEntry{
-		{
-			NextHop: netip.MustParseAddr("10.0.0.1"),
-			HardwareRoute: neigh.HardwareRoute{
-				SourceMAC:      [6]byte{0x00, 0x00, 0x00, 0x00, 0x00, 0x01},
-				DestinationMAC: [6]byte{0x00, 0x00, 0x00, 0x00, 0x00, 0x02},
-				Device:         "eth0",
-			},
-			UpdatedAt: time.Now(),
-			State:     neigh.NeighbourStatePermanent,
-			Source:    "kernel",
-			Priority:  100,
+	neighbours := neigh.NewNeighTable()
+	_, err := neighbours.CreateSource(defaultStaticTable, 100, false)
+	require.NoError(t, err)
+	entry := neigh.NeighbourEntry{
+		NextHop: netip.MustParseAddr("10.0.0.1"),
+		HardwareRoute: neigh.HardwareRoute{
+			SourceMAC:      [6]byte{0x00, 0x00, 0x00, 0x00, 0x00, 0x01},
+			DestinationMAC: [6]byte{0x00, 0x00, 0x00, 0x00, 0x00, 0x02},
+			Device:         "eth0",
 		},
-	})
+		UpdatedAt: time.Now(),
+		State:     neigh.NeighbourStatePermanent,
+	}
+	require.NoError(t, neighbours.Add(defaultStaticTable, []neigh.NeighbourEntry{entry}))
 
 	ribs := newRIBStore()
-	source := NewRouteSource(nd, ribs)
-
-	r := ribs.GetOrCreate("route0")
-	r.AddUnicastRoute(
-		netip.MustParsePrefix("10.0.0.0/24"),
-		netip.MustParseAddr("10.0.0.1"),
-		rib.RouteSourceStatic,
-	)
+	source := NewRouteSource(neighbours, ribs)
+	prefix := netip.MustParsePrefix("10.0.0.0/24")
+	ribs.GetOrCreate("route0").AddUnicastRoute(prefix, entry.NextHop, rib.RouteSourceStatic)
 
 	snapshot, ok := source.Snapshot()
 	require.True(t, ok)
 	require.Len(t, snapshot.RIBs, 1)
 	require.Contains(t, snapshot.RIBs, "route0")
-
-	fib, _ := BuildFIB(snapshot.RIBs["route0"], snapshot.Neighbours)
-	fib.Name = "route0"
-
-	expected := FIB{
-		Name: "route0",
-		Entries: []FIBEntry{
-			{
-				Prefix: netip.MustParsePrefix("10.0.0.0/24"),
-				Nexthops: []neigh.HardwareRoute{
-					{
-						SourceMAC:      [6]byte{0x00, 0x00, 0x00, 0x00, 0x00, 0x01},
-						DestinationMAC: [6]byte{0x00, 0x00, 0x00, 0x00, 0x00, 0x02},
-						Device:         "eth0",
-					},
-				},
-			},
-		},
-	}
-	require.Equal(t, expected, fib)
+	paths := snapshot.RIBs["route0"][prefix.Bits()][prefix].Routes
+	require.Len(t, paths, 1)
+	require.Equal(t, entry.NextHop, paths[0].NextHop)
+	require.Equal(t, rib.RouteSourceStatic, paths[0].SourceID)
+	resolved, ok := snapshot.Neighbours.Lookup(entry.NextHop)
+	require.True(t, ok)
+	require.Equal(t, entry.HardwareRoute, resolved.HardwareRoute)
 }

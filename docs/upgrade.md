@@ -3,6 +3,21 @@
 Manual steps required when upgrading an existing deployment. The packaging
 does not perform these automatically.
 
+## Route operator separates device exclusions from unresolved nexthops
+
+`route_operator_fib_unresolved_nexthops` now counts route records whose
+nexthops are absent from the full neighbour snapshot. Healthy routes on
+foreign devices no longer inflate this metric. The new
+`route_operator_fib_device_excluded_routes` gauge counts resolved route
+records excluded by the gateway's device restriction, with `gateway` and
+`module` labels.
+
+Both metrics are latest-build gauges: subsequent builds replace their
+values, including resetting them to zero. They are not counters or
+confirmations of successful gateway programming. Missing neighbours have
+unknown device ownership, so do not sum per-gateway unresolved series as
+unique global losses. No configuration migration is needed.
+
 ## Pdump adds an optional capture rate limit
 
 Pdump now supports an optional `rate_pps` setting with one best-effort
