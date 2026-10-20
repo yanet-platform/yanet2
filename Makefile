@@ -124,6 +124,8 @@ CLI_RELEASE_BINARIES := $(addprefix $(RELEASE_DIR)/,$(CLI_BINARIES))
 	setup-asan \
 	dataplane \
 	go-test-prepare \
+	sdk \
+	sdk-example \
 	install \
 	install1 \
 	clean \
@@ -288,6 +290,32 @@ dataplane:
 
 go-test-prepare:
 	meson compile -C build go-test-prepare
+
+# Module SDK: the build-side surface for out-of-tree modules.
+#
+# A configured and built tree already carries everything an out-of-tree
+# module compiles against; this target confirms the SDK artifacts exist
+# (build/sdk/yanet-module-sdk.pc and the PIC ABI-version archive) and
+# prints the environment such a module builds with. See docs/module-sdk.md.
+sdk: dataplane
+	@test -f build/meson-info/intro-buildoptions.json || { \
+		echo "No configured build directory; run: meson setup build" >&2; \
+		exit 1; \
+	}
+	@test -f build/sdk/yanet-module-sdk.pc || { \
+		echo "ERROR: build/sdk/yanet-module-sdk.pc missing; re-run meson setup" >&2; \
+		exit 1; \
+	}
+	@echo "module SDK ready:"
+	@echo "  PKG_CONFIG_PATH=$(CURDIR)/build/sdk"
+	@echo "  plugin to deploy: build/<module>/lib<name>_dp.so -> plugin_dir"
+	@echo "  reference module: make sdk-example"
+
+# Builds and tests the reference out-of-tree module (sdk/example) against
+# this tree's SDK: the gate for out-of-tree module support.
+sdk-example: sdk
+	$(MAKE) -C sdk/example YANET_ROOT=$(CURDIR) all test
+
 
 cli: cli-build
 
