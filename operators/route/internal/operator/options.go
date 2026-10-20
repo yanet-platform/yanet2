@@ -207,8 +207,11 @@ func WithGatewayActuatorLog(log *zap.Logger) GatewayActuatorOption {
 	}
 }
 
-// WithGatewayActuatorFunction sets the network function the actuator
-// publishes to its gateway on every Apply pass.
+// WithGatewayActuatorFunction sets the network function maintained after
+// forwarding preflight succeeds.
+//
+// Preflight rejection suppresses forwarding and function publication and drives
+// reconciliation backoff.
 func WithGatewayActuatorFunction(fn FunctionConfig) GatewayActuatorOption {
 	return func(o *gatewayActuatorOptions) {
 		o.Function = fn

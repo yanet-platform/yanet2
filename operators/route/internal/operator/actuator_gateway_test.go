@@ -109,6 +109,97 @@ func requireFIB(
 	}
 }
 
+// Test_GatewayActuator_PreflightRejectsWholeUpdate verifies that invalid desired
+// state prevents every forwarding and function write, including valid modules.
+func Test_GatewayActuator_PreflightRejectsWholeUpdate(t *testing.T) {
+	resolved := routeSnapshot(
+		[]rib.Route{ribPath("10.10.0.0/24", "192.0.2.1", rib.RouteSourceBird)},
+		map[string]string{"192.0.2.1": "eth0"},
+	)
+	emptyLists := maptrie.NewMapTrie[netip.Prefix, netip.Addr, rib.RoutesList](0)
+	emptyLists[24][netip.MustParsePrefix("10.20.0.0/24")] = rib.RoutesList{}
+	mixed := routeSnapshot(
+		[]rib.Route{ribPath("10.10.0.0/24", "192.0.2.1", rib.RouteSourceBird)},
+		map[string]string{"192.0.2.1": "eth0"},
+	)
+	mixed.RIBs["empty"] = emptyLists
+	for _, tc := range []struct {
+		name       string
+		snapshot   op.RouteSnapshot
+		message    string
+		module     string
+		configured []op.StaticRouteConfig
+	}{
+		{
+			name: "empty neighbours with routes", message: "empty merged neighbour view", module: "route0",
+			snapshot: op.RouteSnapshot{RIBs: resolved.RIBs},
+		},
+		{
+			name: "absent RIB map", message: "no RIBs", module: "route0",
+			snapshot: op.RouteSnapshot{Neighbours: resolved.Neighbours},
+		},
+		{
+			name: "prefixes without route records", message: "no route records", module: "empty",
+			snapshot: op.RouteSnapshot{
+				RIBs:       map[string]maptrie.MapTrie[netip.Prefix, netip.Addr, rib.RoutesList]{"empty": emptyLists},
+				Neighbours: resolved.Neighbours,
+			},
+		},
+		{
+			name: "unresolved routes with unrelated neighbours", message: "empty local FIB", module: "route0",
+			snapshot: routeSnapshot(
+				[]rib.Route{ribPath("10.10.0.0/24", "192.0.2.2", rib.RouteSourceBird)},
+				map[string]string{"192.0.2.1": "eth0"},
+			),
+		},
+		{
+			name: "only foreign-device paths", message: "empty local FIB", module: "route0",
+			snapshot: routeSnapshot(
+				[]rib.Route{ribPath("10.10.0.0/24", "192.0.2.1", rib.RouteSourceBird)},
+				map[string]string{"192.0.2.1": "eth1"},
+			),
+		},
+		{
+			name: "valid module alongside empty dump", message: "no route records", module: "empty",
+			snapshot: mixed, configured: []op.StaticRouteConfig{staticPath("10.30.0.0/24", "192.0.2.3")},
+		},
+		{
+			name: "valid module alongside empty local FIB", message: "empty local FIB", module: "unreachable-module",
+			snapshot: op.RouteSnapshot{
+				RIBs: map[string]maptrie.MapTrie[netip.Prefix, netip.Addr, rib.RoutesList]{
+					"route0": resolved.RIBs["route0"],
+					"unreachable-module": routeSnapshot([]rib.Route{
+						ribPath("10.20.0.0/24", "192.0.2.2", rib.RouteSourceBird),
+					}, nil).RIBs["route0"],
+				},
+				Neighbours: resolved.Neighbours,
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			gateway, endpoint := startFakeGateway(t)
+			actuator, err := op.NewGatewayActuator(
+				operator.GatewayConfig{Name: "gw0", Endpoint: xcfg.MustNonEmptyString(endpoint)},
+				op.WithGatewayActuatorFunction(op.DefaultConfig().Function),
+				op.WithGatewayActuatorDevices([]string{"eth0"}),
+				op.WithGatewayActuatorStaticRoutes(tc.configured),
+			)
+			require.NoError(t, err)
+			t.Cleanup(func() { require.NoError(t, actuator.Close()) })
+			err = actuator.Apply(requestContext(t), tc.snapshot)
+			require.ErrorContains(t, err, tc.message)
+			require.ErrorContains(t, err, "gw0")
+			require.ErrorContains(t, err, tc.module)
+			for _, path := range tc.configured {
+				require.ErrorContains(t, err, path.Prefix)
+			}
+			writes, functionUpdates := gateway.receivedWrites()
+			require.Empty(t, writes)
+			require.Zero(t, functionUpdates)
+		})
+	}
+}
+
 // Test_GatewayActuator_StaticRequirements verifies that only locally resolvable
 // configured static alternatives satisfy each exact-prefix requirement.
 func Test_GatewayActuator_StaticRequirements(t *testing.T) {
@@ -118,6 +209,7 @@ func Test_GatewayActuator_StaticRequirements(t *testing.T) {
 	lowerPriorityStatic.Pref = 50
 	higherPriorityStatic := ribPath("10.10.0.0/24", "192.0.2.2", rib.RouteSourceStatic)
 	higherPriorityStatic.Pref = 100
+	fallback := ribPath("10.20.0.0/24", "192.0.2.254", rib.RouteSourceBird)
 	for _, tc := range []struct {
 		name       string
 		configured []op.StaticRouteConfig
@@ -130,8 +222,10 @@ func Test_GatewayActuator_StaticRequirements(t *testing.T) {
 		expected   map[string][]neigh.HardwareRoute
 	}{
 		{
-			name:       "unresolved configured path still publishes an empty table",
-			configured: configured, routes: []rib.Route{static}, missing: []string{"10.10.0.0/24"},
+			name:       "unresolved configured path still publishes a nonempty fallback",
+			configured: configured, routes: []rib.Route{static, fallback}, missing: []string{"10.10.0.0/24"},
+			neighbours: map[string]string{"192.0.2.254": "eth0"},
+			expected:   resolvedPath("10.20.0.0/24", "192.0.2.254", "eth0"),
 		},
 		{
 			name:       "one resolved configured alternative is sufficient",
@@ -142,9 +236,10 @@ func Test_GatewayActuator_StaticRequirements(t *testing.T) {
 		},
 		{
 			name:       "foreign device does not satisfy local resolution",
-			configured: configured, routes: []rib.Route{static},
-			neighbours: map[string]string{"192.0.2.1": "eth1"}, devices: []string{"eth0"},
-			missing: []string{"10.10.0.0/24"},
+			configured: configured, routes: []rib.Route{static, fallback},
+			neighbours: map[string]string{"192.0.2.1": "eth1", "192.0.2.254": "eth0"}, devices: []string{"eth0"},
+			missing:  []string{"10.10.0.0/24"},
+			expected: resolvedPath("10.20.0.0/24", "192.0.2.254", "eth0"),
 		},
 		{
 			name:       "a resolved configured path satisfies readiness even when not selected",
@@ -167,8 +262,10 @@ func Test_GatewayActuator_StaticRequirements(t *testing.T) {
 		},
 		{
 			name:       "runtime deletion fails despite an existing neighbour",
-			configured: configured, neighbours: map[string]string{"192.0.2.1": "eth0"},
-			missing: []string{"10.10.0.0/24"},
+			configured: configured, routes: []rib.Route{fallback},
+			neighbours: map[string]string{"192.0.2.1": "eth0", "192.0.2.254": "eth0"},
+			missing:    []string{"10.10.0.0/24"},
+			expected:   resolvedPath("10.20.0.0/24", "192.0.2.254", "eth0"),
 		},
 		{
 			name:       "BGP path cannot substitute even with the configured nexthop",
@@ -185,8 +282,10 @@ func Test_GatewayActuator_StaticRequirements(t *testing.T) {
 			missing:    []string{"10.10.0.0/24"},
 		},
 		{
-			name:   "unresolved dynamic routes do not introduce requirements",
-			routes: []rib.Route{ribPath("10.10.0.0/24", "192.0.2.1", rib.RouteSourceBird)},
+			name:       "unresolved dynamic routes do not block nonempty forwarding",
+			routes:     []rib.Route{ribPath("10.10.0.0/24", "192.0.2.1", rib.RouteSourceBird), fallback},
+			neighbours: map[string]string{"192.0.2.254": "eth0"},
+			expected:   resolvedPath("10.20.0.0/24", "192.0.2.254", "eth0"),
 		},
 		{
 			name: "canonical prefixes group host-bit alternatives and normalize mapped nexthops",
@@ -347,8 +446,8 @@ func Test_GatewayActuator_DeviceScopeOwnership(t *testing.T) {
 	requireFIB(t, writes[0], "route0", resolvedPath("10.10.0.0/24", "192.0.2.1", "eth0"))
 }
 
-// Test_GatewayActuator_RejectedFIB_ClassificationLifecycle verifies that completed
-// builds publish and clear classification gauges despite programming failures.
+// Test_GatewayActuator_RejectedFIB_ClassificationLifecycle verifies that build
+// gauges refresh even when programming or preflight rejects the update.
 func Test_GatewayActuator_RejectedFIB_ClassificationLifecycle(t *testing.T) {
 	gateway, endpoint := startFakeGateway(t)
 	gateway.failWrites(status.Error(codes.Unavailable, "FIB rejected"), nil)
@@ -389,18 +488,31 @@ func Test_GatewayActuator_RejectedFIB_ClassificationLifecycle(t *testing.T) {
 			excluded:   3, expected: resolvedPath("10.10.0.0/24", "192.0.2.1", "eth0"),
 		},
 		{
-			name:       "explicit empty module dump resets both classifications",
+			name:   "empty neighbours refresh classifications without a write",
+			routes: routes, unresolved: 4,
+		},
+		{
+			name:       "explicit empty module dump clears unresolved classifications",
 			neighbours: map[string]string{"192.0.2.1": "eth1", "192.0.2.2": "eth1", "192.0.2.3": "eth0"},
 		},
 	} {
 		t.Logf("step %d: %s", idx+1, tc.name)
+		previousWrites, previousFunctionUpdates := gateway.receivedWrites()
 		err := actuator.Apply(requestContext(t), routeSnapshot(tc.routes, tc.neighbours))
-		require.ErrorContains(t, err, "FIB rejected")
-		require.Equal(t, codes.Unavailable, status.Code(err))
+		require.Error(t, err)
+		if tc.expected != nil {
+			require.ErrorContains(t, err, "FIB rejected")
+			require.Equal(t, codes.Unavailable, status.Code(err))
+		}
 		requireFIBClassifications(t, metrics.Collect(), "gw0", "route0", tc.unresolved, tc.excluded)
-		writes, _ := gateway.receivedWrites()
-		require.Len(t, writes, idx+1)
-		requireFIB(t, writes[idx], "route0", tc.expected)
+		writes, functionUpdates := gateway.receivedWrites()
+		if tc.expected == nil {
+			require.Len(t, writes, len(previousWrites))
+			require.Equal(t, previousFunctionUpdates, functionUpdates)
+		} else {
+			require.Len(t, writes, len(previousWrites)+1)
+			requireFIB(t, gateway.lastFIBRequest(), "route0", tc.expected)
+		}
 	}
 }
 
@@ -416,8 +528,13 @@ func Test_GatewayActuator_StaticAndRPCFailures(t *testing.T) {
 	)
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, actuator.Close()) })
-	snapshot := routeSnapshot(nil, nil)
-	snapshot.RIBs["other"] = snapshot.RIBs["route0"]
+	snapshot := routeSnapshot(
+		[]rib.Route{ribPath("10.20.0.0/24", "192.0.2.2", rib.RouteSourceBird)},
+		map[string]string{"192.0.2.2": "eth0", "192.0.2.3": "eth1"},
+	)
+	snapshot.RIBs["other"] = routeSnapshot(
+		[]rib.Route{ribPath("10.30.0.0/24", "192.0.2.3", rib.RouteSourceBird)}, nil,
+	).RIBs["route0"]
 	err = actuator.Apply(requestContext(t), snapshot)
 	require.ErrorContains(t, err, "10.10.0.0/24")
 	require.ErrorContains(t, err, "FIB rejected")
@@ -426,6 +543,13 @@ func Test_GatewayActuator_StaticAndRPCFailures(t *testing.T) {
 	require.Len(t, writes, 2)
 	modules := []string{writes[0].GetModuleName(), writes[1].GetModuleName()}
 	require.ElementsMatch(t, []string{"route0", "other"}, modules)
+	expected := map[string]map[string][]neigh.HardwareRoute{
+		"route0": resolvedPath("10.20.0.0/24", "192.0.2.2", "eth0"),
+		"other":  resolvedPath("10.30.0.0/24", "192.0.2.3", "eth1"),
+	}
+	for _, request := range writes {
+		requireFIB(t, request, request.GetModuleName(), expected[request.GetModuleName()])
+	}
 	require.Equal(t, 1, functionUpdates)
 }
 

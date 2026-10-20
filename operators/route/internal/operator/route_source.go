@@ -58,9 +58,8 @@ func NewRouteSource(
 // Snapshot returns the current desired state: the per-module RIB dumps
 // and the neighbour view.
 //
-// It always reports ok=true, even with no RIBs: the operator republishes
-// its network function on every reconcile pass, and an empty state would
-// otherwise make the framework skip the pass and never republish.
+// Empty desired state remains actionable so failed applies refresh readiness
+// and keep retrying until current input permits forwarding publication.
 func (m *RouteSource) Snapshot() (RouteSnapshot, bool) {
 	select {
 	case <-m.wakeCh:

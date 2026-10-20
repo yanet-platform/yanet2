@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"net/netip"
 	"slices"
 	"strings"
@@ -111,23 +112,48 @@ func (m *GatewayActuator) Close() error {
 	return m.conn.Close()
 }
 
-// Apply builds and pushes the FIB for each module config to the gateway,
-// then republishes the operator's network function.
+// Apply validates every local forwarding candidate before publishing any
+// forwarding table or the operator's network function.
 //
-// Every FIB is attempted and the function is published even on a partial
-// failure — the joined errors let the reconcile loop retry under backoff.
-// Configured static-path resolution gates success but never publication.
+// Empty desired or locally resolved state leaves installed forwarding intact.
+// Rejections include missing configured static prefixes for diagnosis.
+// After preflight succeeds, every table and the function are attempted despite
+// RPC failures. Configured static-path resolution gates success after publication.
 func (m *GatewayActuator) Apply(ctx context.Context, snapshot RouteSnapshot) error {
 	var err error
-	for name, dump := range snapshot.RIBs {
+	if _, count := snapshot.Neighbours.Entries(); count == 0 {
+		err = errors.Join(err, fmt.Errorf("gateway %q module %q has an empty merged neighbour view", m.name, m.module))
+	}
+	if len(snapshot.RIBs) == 0 {
+		err = errors.Join(err, fmt.Errorf("gateway %q module %q has no RIBs", m.name, m.module))
+	}
+
+	fibs := make([]FIB, 0, len(snapshot.RIBs))
+	for _, name := range slices.Sorted(maps.Keys(snapshot.RIBs)) {
 		if name == "" {
-			err = errors.Join(err, fmt.Errorf("FIB is missing module config name"))
+			err = errors.Join(err, fmt.Errorf("gateway %q FIB is missing module config name", m.name))
 			continue
 		}
 
-		fib, stats := BuildFIB(dump, snapshot.Neighbours, m.devices)
+		fib, stats := BuildFIB(snapshot.RIBs[name], snapshot.Neighbours, m.devices)
 		fib.Name = name
 		m.onFIBBuilt(name, stats)
+		switch {
+		case stats.TotalRoutes == 0:
+			err = errors.Join(err, fmt.Errorf("gateway %q module %q has no route records", m.name, name))
+		case len(fib.Entries) == 0:
+			err = errors.Join(err, fmt.Errorf(
+				"gateway %q module %q has an empty local FIB: %d routes, %d unresolved nexthops, %d device-excluded routes",
+				m.name, name, stats.TotalRoutes, stats.NeighbourNotFound, stats.DeviceExcludedRoutes,
+			))
+		}
+		fibs = append(fibs, fib)
+	}
+	if err != nil {
+		return errors.Join(err, m.validateStaticRoutes(snapshot))
+	}
+
+	for _, fib := range fibs {
 		if e := m.pushFIB(ctx, fib); e != nil {
 			err = errors.Join(err, fmt.Errorf("failed to push FIB to gateway %q: %w", m.name, e))
 		}

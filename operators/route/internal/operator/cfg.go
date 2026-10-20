@@ -43,8 +43,8 @@ type Config struct {
 	Register  operator.RegisterConfig   `yaml:"register"`
 	Reconcile operator.ReconcileConfig  `yaml:"reconcile"`
 	Static    StaticConfig              `yaml:"static"`
-	// Function is the single gateway-side network function published by
-	// this operator. Re-applied every reconcile pass — idempotent updates.
+	// Function is the gateway-side network function maintained after forwarding
+	// preflight succeeds.
 	Function       FunctionConfig       `yaml:"function"`
 	LinkMap        map[string]string    `yaml:"link_map"`
 	RIBTTL         time.Duration        `yaml:"rib_ttl"`

@@ -31,12 +31,30 @@ Driven by the apply outcome recorded through `Observe` (via
 - Apply failed, previously READY or DEGRADED: `STATE_DEGRADED` (`APPLY_FAILED`).
 - Apply failed, never applied: `STATE_NOT_READY` (`APPLY_FAILED`).
 
-An apply succeeds only after programming succeeds and every distinct canonical
-exact prefix in `static.routes` has at least one configured static path still
-present in the managed module's RIB with a locally resolvable nexthop. Paths
-configured for the same prefix are alternatives; not every alternative must
-resolve. Host bits are masked for prefix matching, and IPv4-mapped nexthops are
-normalized to native IPv4.
+Before its first FIB or function write, each gateway builds and validates the
+whole update. An empty merged neighbour view, no RIBs, a present module dump
+without actual route records, or an empty computed local FIB rejects the entire
+gateway update. Every present module must have routes and a nonempty local FIB;
+a valid module cannot publish alongside an invalid one. Diagnostics identify
+the gateway and affected module or missing input, plus missing configured static
+prefixes. Module candidates are evaluated in sorted name order, keeping joined
+diagnostics stable across identical retries. Completed builds still refresh their
+metrics, including zero classifications for empty dumps or refreshed unresolved
+counts after a complete neighbour withdrawal.
+
+Rejection performs no FIB or function writes, retaining the last successfully
+installed forwarding and function without rollback. Before a successful whole
+apply the FIB scope remains `STATE_NOT_READY`; after success, repeated failures
+keep it `STATE_DEGRADED`, always with `APPLY_FAILED`. Gateways validate their
+local candidates independently, so a gateway with no eligible paths does not
+prevent a healthy gateway from publishing.
+
+An apply succeeds only after preflight and programming succeed and every
+distinct canonical exact prefix in `static.routes` has at least one configured
+static path still present in the managed module's RIB with a locally resolvable
+nexthop. Paths configured for the same prefix are alternatives; not every
+alternative must resolve. Host bits are masked for prefix matching, and
+IPv4-mapped nexthops are normalized to native IPv4.
 
 Resolution and FIB construction look up nexthops in the complete neighbour
 snapshot and share the same normalized `gateway_devices` eligibility policy,
@@ -48,13 +66,31 @@ if that fallback is published for the same prefix. Runtime route deletion does
 not remove the configured requirement. Diagnostics identify the gateway,
 module, and missing prefixes in deterministic order.
 
-Validation never blocks publication: available routes, including fallback
-paths, and empty FIBs are still pushed, and function updates are still attempted.
+Configured static-path validation stays after publication: when preflight passes,
+available routes, including fallback paths, are pushed and function updates are
+attempted even if a configured static path is unresolved.
 Programming and resolution failures are joined under the existing `APPLY_FAILED`
-reason. Neighbour or route changes wake reconciliation; successful programming
-after a configured path resolves restores `STATE_READY` without a restart.
-Without `static.routes`, unresolved dynamic routes keep their existing omission
-behaviour and do not introduce a new readiness gate.
+reason. Desired-state withdrawals are retained, not replaced by cached good input.
+Empty snapshots remain actionable for readiness observations and retries.
+Neighbour or route changes wake reconciliation; valid nonempty input and a
+successful whole apply restore `STATE_READY` without a restart. Partially
+resolved dynamic routes retain their omission behaviour as long as every present
+module still produces a nonempty FIB. Unresolved configured static paths alone
+never block nonempty fallback publication.
+
+These rejection rules affect only the per-gateway FIB scopes. The independent
+`rib`, `neighbours`, and `bird-session` observation semantics are unchanged.
+
+An intentional total withdrawal has the same rejection behavior as an accidental
+empty snapshot: installed forwarding and the function are retained indefinitely
+while desired input remains invalid. Desired-state mutation RPCs can succeed
+because they accept route/neighbour changes; success does not mean that the
+resulting empty state was installed. Rejected applies keep retrying with backoff
+and reporting `APPLY_FAILED`; they do not time out into a forwarding removal.
+Intentional traffic draining or removal must use the owning pipeline/function
+control plane, not an empty desired route or neighbour snapshot. The independent
+`rib` scope continues to reflect current RIB content, and `neighbours` continues
+to reflect discovery or accepted external observations, not retained forwarding.
 
 This condition establishes local neighbour-cache resolution only. It adds no
 active probes, stricter MAC or neighbour-state validation, peer-liveness checks,

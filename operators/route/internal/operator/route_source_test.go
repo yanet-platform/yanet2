@@ -35,6 +35,8 @@ func Test_RouteSource_WakeFuncCoalesces(t *testing.T) {
 	}
 }
 
+// Test_RouteSource_SnapshotEmptyOK verifies that empty desired state remains
+// actionable for readiness failures and reconciliation retries.
 func Test_RouteSource_SnapshotEmptyOK(t *testing.T) {
 	source := NewRouteSource(
 		neigh.NewNeighTable(),
@@ -42,7 +44,7 @@ func Test_RouteSource_SnapshotEmptyOK(t *testing.T) {
 	)
 
 	snapshot, ok := source.Snapshot()
-	require.True(t, ok, "Snapshot must always return ok=true to keep the function publish alive")
+	require.True(t, ok, "empty desired state must remain actionable for readiness and retries")
 	require.Empty(t, snapshot.RIBs)
 }
 

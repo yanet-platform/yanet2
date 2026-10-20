@@ -50,17 +50,19 @@ register:
 # Reconcile loop: snapshot RIB + neighbour-table -> build FIB ->
 # fan-out per-gateway.
 #
-# Backoffs apply on per-gateway push errors.
+# Backoffs apply on preflight rejection, programming errors, and unresolved
+# configured static paths. Preflight rejection suppresses FIB/function writes
+# for the affected gateway.
 reconcile:
   interval: 30s
   initial_backoff: 500ms
   max_backoff: 30s
 
-# The single network function published by the operator on every
-# gateway.
+# The network function maintained on each gateway after forwarding preflight
+# succeeds.
 #
-# Re-applied every reconcile pass (idempotent). One operator manages exactly
-# one function with one chain and one route module.
+# Rejected candidates leave the installed function unchanged and drive backoff.
+# One operator manages one function with one chain and one route module.
 function:
   name: "fn:route"
   chain: "default"
