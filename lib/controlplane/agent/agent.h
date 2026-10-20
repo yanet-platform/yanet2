@@ -117,7 +117,7 @@ agent_unload_references(
 );
 
 // Return one destruction hold of the named kind, as taken by a destroy
-// gate alongside its destroying mark.
+// gate that observed the item unreferenced.
 //
 // The hold keeps the agent reclaimable-safe while a caller runs a typed
 // destructor unlocked; capture the agent pointer before the destructor

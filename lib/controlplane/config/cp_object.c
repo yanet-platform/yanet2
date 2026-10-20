@@ -165,11 +165,6 @@ cp_object_try_destroy(struct cp_object *self, yanet_error **err) {
 		__atomic_load_n(&self->config_item.refcnt, __ATOMIC_RELAXED);
 
 	if (refcnt == 0) {
-		// Reserve the item against a racing re-registration before
-		// releasing the lock: a publisher holding a stale copied
-		// handle could otherwise install this pointer into a new
-		// generation between this check and the typed destroy.
-		registry_item_mark_destroying(&self->config_item);
 		if (agent != NULL) {
 			// Hold the owner against reclamation for the caller's
 			// typed destroy: the destructor and the caller's error
@@ -323,16 +318,6 @@ cp_object_registry_upsert(
 	struct cp_object *new_object,
 	yanet_error **err
 ) {
-	if (registry_item_is_destroying(&new_object->config_item)) {
-		yanet_error_add(
-			err,
-			"object '%s' is being destroyed by its owner; "
-			"re-registering it is a use of a freed handle",
-			new_object->name
-		);
-		return -1;
-	}
-
 	struct cp_object *old_object =
 		cp_object_registry_lookup(registry, object_type, object_name);
 
