@@ -437,11 +437,6 @@ cp_module_try_destroy(struct cp_module *cp_module, yanet_error **err) {
 	);
 
 	if (refcnt == 0) {
-		// Reserve the item against a racing re-registration before
-		// releasing the lock: a publisher holding a stale copied
-		// handle could otherwise install this pointer into a new
-		// generation between this check and the typed destroy.
-		registry_item_mark_destroying(&cp_module->config_item);
 		if (agent != NULL) {
 			// Hold the owner against reclamation for the caller's
 			// typed destroy: the destructor and the caller's error
@@ -676,16 +671,6 @@ cp_module_registry_upsert(
 	struct cp_module *new_module,
 	yanet_error **err
 ) {
-	if (registry_item_is_destroying(&new_module->config_item)) {
-		yanet_error_add(
-			err,
-			"module '%s' is being destroyed by its owner; "
-			"re-registering it is a use of a freed handle",
-			new_module->name
-		);
-		return -1;
-	}
-
 	struct cp_module_cmp_data cmp_data = {
 		.type = type,
 		.name = name,

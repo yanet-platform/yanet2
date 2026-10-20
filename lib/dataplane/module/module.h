@@ -34,7 +34,9 @@
 // registry device of its placement.
 // 41: struct dp_config gained the last committed generation pointer.
 // 42: struct module and struct dp_module gained config_layout.
-#define YANET_MODULE_ABI_VERSION 42
+// 43: struct registry_item lost the destroying flag, changing the layout
+// of every module, device and object embedding it.
+#define YANET_MODULE_ABI_VERSION 43
 
 // Symbol name a module .so exports carrying its compiled-against
 // YANET_MODULE_ABI_VERSION, as a uint32_t global.
