@@ -1,9 +1,11 @@
 package neigh_test
 
 import (
+	"maps"
 	"net"
 	"net/netip"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"github.com/vishvananda/netlink"
@@ -11,8 +13,55 @@ import (
 	"go.uber.org/zap/zapcore"
 	"go.uber.org/zap/zaptest/observer"
 
+	"github.com/yanet-platform/yanet2/common/go/rcucache"
 	"github.com/yanet-platform/yanet2/operators/route/neigh"
 )
+
+// Test_FilterByDevices_Eligibility verifies that the compatibility helper
+// preserves full entries and never mutates the supplied neighbour snapshot.
+func Test_FilterByDevices_Eligibility(t *testing.T) {
+	entries := map[netip.Addr]neigh.NeighbourEntry{
+		netip.MustParseAddr("192.0.2.1"): {HardwareRoute: neigh.HardwareRoute{Device: "eth0"}},
+		netip.MustParseAddr("192.0.2.2"): {HardwareRoute: neigh.HardwareRoute{Device: "eth1"}},
+	}
+	for address, entry := range entries {
+		entry.NextHop = address
+		entry.Source = "static"
+		entry.Priority = 100
+		entry.State = neigh.NeighbourStatePermanent
+		entry.UpdatedAt = time.Unix(1_700_000_000, 123_456_789).UTC()
+		entry.HardwareRoute.SourceMAC = [6]byte{2, 0, 0, 0, 0, 1}
+		entry.HardwareRoute.DestinationMAC = [6]byte{2, 0, 0, 0, 0, 2}
+		entries[address] = entry
+	}
+	for _, tc := range []struct {
+		name      string
+		devices   []string
+		addresses []string
+	}{
+		{name: "unrestricted view preserves every entry", addresses: []string{"192.0.2.1", "192.0.2.2"}},
+		{name: "restricted view preserves only matching entries", devices: []string{"eth0"}, addresses: []string{"192.0.2.1"}},
+		{name: "unknown device excludes every entry", devices: []string{"eth2"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			view := rcucache.NewCache(maps.Clone(entries)).View()
+			filtered := neigh.FilterByDevices(view, tc.devices)
+			_, count := filtered.All()
+			require.Equal(t, len(tc.addresses), count)
+			for _, address := range tc.addresses {
+				key := netip.MustParseAddr(address)
+				entry, ok := filtered.Lookup(key)
+				require.True(t, ok)
+				require.Equal(t, entries[key], entry)
+			}
+			for address, expected := range entries {
+				entry, ok := view.Lookup(address)
+				require.True(t, ok)
+				require.Equal(t, expected, entry)
+			}
+		})
+	}
+}
 
 // fakeKernelTable is a neigh.KernelTable backed by fixed link and neighbour
 // lists instead of a live netlink socket.

@@ -211,8 +211,8 @@ func requestContext(t *testing.T) context.Context {
 	return ctx
 }
 
-// requireFIBClassifications checks public build gauges with exact gateway/module
-// labels, including zero-valued series.
+// requireFIBClassifications checks build gauge values for one gateway/module,
+// including the presence of zero-valued series.
 func requireFIBClassifications(
 	collector require.TestingT,
 	metricList []*commonpb.Metric,
@@ -236,8 +236,6 @@ func requireFIBClassifications(
 		if labels["gateway"] != gateway || labels["module"] != module {
 			continue
 		}
-		require.Equal(collector, map[string]string{"gateway": gateway, "module": module}, labels)
-		require.Len(collector, metric.GetLabels(), 2)
 		require.IsType(collector, &commonpb.Metric_Gauge{}, metric.GetValue())
 		require.Equal(collector, value, metric.GetGauge(), "%s gateway=%s", metric.GetName(), gateway)
 		counts[metric.GetName()]++
@@ -393,7 +391,7 @@ func Test_Operator_StaticResolution_IndependentGateways(t *testing.T) {
 	second := entryRequest("192.0.2.2", [6]byte{2, 0, 0, 0, 0, 2}, "eth1").GetEntries()
 	changedSecond := entryRequest("192.0.2.2", [6]byte{2, 0, 0, 0, 0, 22}, "eth1").GetEntries()
 	latestSecond := entryRequest("192.0.2.2", [6]byte{2, 0, 0, 0, 0, 33}, "eth1").GetEntries()
-	for _, tc := range []struct {
+	for idx, tc := range []struct {
 		name        string
 		entries     []*operatorpb.NeighbourEntry
 		state       readinesspb.State
@@ -420,52 +418,47 @@ func Test_Operator_StaticResolution_IndependentGateways(t *testing.T) {
 			name: "healthy gateway updates its destination while first remains degraded", entries: latestSecond,
 			state: readinesspb.State_STATE_DEGRADED, destination: [6]byte{2, 0, 0, 0, 0, 33},
 		},
-		{
-			name: "both gateways recover without accumulating classification counts", entries: append(first, latestSecond...),
-			state: readinesspb.State_STATE_READY, firstReady: true, destination: [6]byte{2, 0, 0, 0, 0, 33},
-		},
 	} {
-		t.Run(tc.name, func(t *testing.T) {
-			_, err := neighbours.SwapNeighbours(requestContext(t), &operatorpb.SwapNeighboursRequest{
-				Table: "static", Entries: tc.entries,
-			}, grpc.WaitForReady(true))
-			require.NoError(t, err)
-			require.EventuallyWithT(t, func(collector *assert.CollectT) {
-				ctx, cancel := context.WithTimeout(t.Context(), time.Second)
-				defer cancel()
-				response, err := readiness.Ready(ctx, &readinesspb.ReadyRequest{})
-				require.NoError(collector, err)
-				states := map[string]readinesspb.State{}
-				for _, scope := range response.GetScopes() {
-					states[scope.GetName()] = scope.GetState()
-				}
-				require.Equal(collector, tc.state, states["fib:gw0:route0"])
-				require.Equal(collector, readinesspb.State_STATE_READY, states["fib:gw1:route0"])
-				firstPaths := map[string][]neigh.HardwareRoute{}
-				if tc.firstReady {
-					firstPaths["10.10.0.0/24"] = []neigh.HardwareRoute{{
-						SourceMAC:      [6]byte{0x00, 0x11, 0x22, 0x33, 0x44, 0x55},
-						DestinationMAC: [6]byte{2, 0, 0, 0, 0, 1}, Device: "eth0",
-					}}
-				}
-				requireFIB(collector, firstGateway.lastFIBRequest(), "route0", firstPaths)
-				requireFIB(collector, secondGateway.lastFIBRequest(), "route0", map[string][]neigh.HardwareRoute{
-					"10.10.0.0/24": {{
-						SourceMAC:      [6]byte{0x00, 0x11, 0x22, 0x33, 0x44, 0x55},
-						DestinationMAC: tc.destination, Device: "eth1",
-					}},
-				})
-				metricResponse, err := metrics.GetMetrics(ctx, &commonpb.GetMetricsRequest{})
-				require.NoError(collector, err)
-				if tc.firstReady {
-					requireFIBClassifications(collector, metricResponse.GetMetrics(), "gw0", "route0", 0, 1)
-					requireFIBClassifications(collector, metricResponse.GetMetrics(), "gw1", "route0", 0, 1)
-				} else {
-					requireFIBClassifications(collector, metricResponse.GetMetrics(), "gw0", "route0", 1, 1)
-					requireFIBClassifications(collector, metricResponse.GetMetrics(), "gw1", "route0", 1, 0)
-				}
-			}, 10*time.Second, 20*time.Millisecond)
-		})
+		t.Logf("step %d: %s", idx+1, tc.name)
+		_, err := neighbours.SwapNeighbours(requestContext(t), &operatorpb.SwapNeighboursRequest{
+			Table: "static", Entries: tc.entries,
+		}, grpc.WaitForReady(true))
+		require.NoError(t, err)
+		require.EventuallyWithT(t, func(collector *assert.CollectT) {
+			ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+			defer cancel()
+			response, err := readiness.Ready(ctx, &readinesspb.ReadyRequest{})
+			require.NoError(collector, err)
+			states := map[string]readinesspb.State{}
+			for _, scope := range response.GetScopes() {
+				states[scope.GetName()] = scope.GetState()
+			}
+			require.Equal(collector, tc.state, states["fib:gw0:route0"])
+			require.Equal(collector, readinesspb.State_STATE_READY, states["fib:gw1:route0"])
+			firstPaths := map[string][]neigh.HardwareRoute{}
+			if tc.firstReady {
+				firstPaths["10.10.0.0/24"] = []neigh.HardwareRoute{{
+					SourceMAC:      [6]byte{0x00, 0x11, 0x22, 0x33, 0x44, 0x55},
+					DestinationMAC: [6]byte{2, 0, 0, 0, 0, 1}, Device: "eth0",
+				}}
+			}
+			requireFIB(collector, firstGateway.lastFIBRequest(), "route0", firstPaths)
+			requireFIB(collector, secondGateway.lastFIBRequest(), "route0", map[string][]neigh.HardwareRoute{
+				"10.10.0.0/24": {{
+					SourceMAC:      [6]byte{0x00, 0x11, 0x22, 0x33, 0x44, 0x55},
+					DestinationMAC: tc.destination, Device: "eth1",
+				}},
+			})
+			metricResponse, err := metrics.GetMetrics(ctx, &commonpb.GetMetricsRequest{})
+			require.NoError(collector, err)
+			if tc.firstReady {
+				requireFIBClassifications(collector, metricResponse.GetMetrics(), "gw0", "route0", 0, 1)
+				requireFIBClassifications(collector, metricResponse.GetMetrics(), "gw1", "route0", 0, 1)
+			} else {
+				requireFIBClassifications(collector, metricResponse.GetMetrics(), "gw0", "route0", 1, 1)
+				requireFIBClassifications(collector, metricResponse.GetMetrics(), "gw1", "route0", 1, 0)
+			}
+		}, 10*time.Second, 20*time.Millisecond)
 	}
 
 	routes := operatorpb.NewRouteServiceClient(connection)

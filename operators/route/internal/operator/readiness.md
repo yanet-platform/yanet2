@@ -38,8 +38,11 @@ configured for the same prefix are alternatives; not every alternative must
 resolve. Host bits are masked for prefix matching, and IPv4-mapped nexthops are
 normalized to native IPv4.
 
-Resolution uses the same `gateway_devices`-filtered neighbour view as FIB
-construction. Each gateway is evaluated independently. A BGP path or an
+Resolution and FIB construction look up nexthops in the complete neighbour
+snapshot and share the same normalized `gateway_devices` eligibility policy,
+constructed once per gateway actuator. Static validation looks up only configured
+paths still present in the managed RIB; it does not copy the neighbour cache.
+Each gateway is evaluated independently. A BGP path or an
 unconfigured static nexthop cannot satisfy a configured-path requirement, even
 if that fallback is published for the same prefix. Runtime route deletion does
 not remove the configured requirement. Diagnostics identify the gateway,

@@ -28,7 +28,7 @@ type GatewayActuator struct {
 	routes           routepb.RouteServiceClient
 	function         *ynpb.Function
 	functionActuator *operator.FunctionActuator
-	devices          []string
+	devices          neigh.DeviceScope
 	module           string
 	staticRoutes     map[netip.Prefix]map[netip.Addr]struct{}
 	onFIBBuilt       func(module string, stats FIBBuildStats)
@@ -98,7 +98,7 @@ func NewGatewayActuator(
 		routes:           routepb.NewRouteServiceClient(conn),
 		function:         function,
 		functionActuator: operator.NewFunctionActuator(ynpb.NewFunctionServiceClient(conn), actuatorOptions...),
-		devices:          opts.Devices,
+		devices:          neigh.NewDeviceScope(opts.Devices),
 		module:           fn.Module.Unwrap(),
 		staticRoutes:     staticRoutes,
 		onFIBBuilt:       opts.OnFIBBuilt,
@@ -143,7 +143,6 @@ func (m *GatewayActuator) validateStaticRoutes(snapshot RouteSnapshot) error {
 		return nil
 	}
 
-	neighbours := neigh.FilterByDevices(snapshot.Neighbours, m.devices)
 	dump := snapshot.RIBs[m.module]
 	var missing []string
 	for prefix, nexthops := range m.staticRoutes {
@@ -156,7 +155,7 @@ func (m *GatewayActuator) validateStaticRoutes(snapshot RouteSnapshot) error {
 			if _, ok := nexthops[nexthop]; !ok {
 				continue
 			}
-			if _, ok := neighbours.Lookup(nexthop); ok {
+			if entry, ok := snapshot.Neighbours.Lookup(nexthop); ok && m.devices.Allows(entry.HardwareRoute.Device) {
 				resolved = true
 				break
 			}

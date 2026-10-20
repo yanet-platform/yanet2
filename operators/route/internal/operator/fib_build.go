@@ -48,21 +48,14 @@ type FIBBuildStats struct {
 // produces a deduplicated FIB for the gateway's devices.
 //
 // Missing neighbours and resolved paths on excluded devices are counted
-// separately before best-per-source selection. Empty device names are ignored;
-// an effectively empty list accepts every device. Only locally eligible routes
+// separately before best-per-source selection. Only locally eligible routes
 // compete, allowing fallback to a reachable lower-priority path.
 func BuildFIB(
 	ribDump maptrie.MapTrie[netip.Prefix, netip.Addr, rib.RoutesList],
 	neighbours neigh.NexthopCacheView,
-	devices []string,
+	devices neigh.DeviceScope,
 ) (FIB, FIBBuildStats) {
 	var stats FIBBuildStats
-	deviceSet := map[string]struct{}{}
-	for _, device := range devices {
-		if device != "" {
-			deviceSet[device] = struct{}{}
-		}
-	}
 
 	entries := make([]FIBEntry, 0)
 
@@ -85,11 +78,9 @@ func BuildFIB(
 					stats.NeighbourNotFound++
 					continue
 				}
-				if len(deviceSet) != 0 {
-					if _, ok := deviceSet[entry.HardwareRoute.Device]; !ok {
-						stats.DeviceExcludedRoutes++
-						continue
-					}
+				if !devices.Allows(entry.HardwareRoute.Device) {
+					stats.DeviceExcludedRoutes++
+					continue
 				}
 
 				local = append(local, r)

@@ -28,11 +28,14 @@ func findMetric(metricList []*commonpb.Metric, name string, labels map[string]st
 		}
 
 		matched := true
+		seen := map[string]struct{}{}
 		for _, label := range metric.GetLabels() {
-			if labels[label.GetName()] != label.GetValue() {
+			expected, ok := labels[label.GetName()]
+			if _, duplicate := seen[label.GetName()]; duplicate || !ok || expected != label.GetValue() {
 				matched = false
 				break
 			}
+			seen[label.GetName()] = struct{}{}
 		}
 		if matched {
 			return metric
@@ -249,9 +252,9 @@ func TestMetrics_PullNeighbourStats(t *testing.T) {
 // Test_GatewayMetrics_FIBBuilt verifies that exported build statistics remain
 // gauges with exactly the gateway and module labels.
 func Test_GatewayMetrics_FIBBuilt(t *testing.T) {
-	m := NewMetrics(newRIBStore(), neigh.NewNeighTable())
+	metrics := NewMetrics(newRIBStore(), neigh.NewNeighTable())
 
-	gateway := m.Gateway("gw0")
+	gateway := metrics.Gateway("gw0")
 	gateway.OnFIBBuilt("route0", FIBBuildStats{
 		TotalRoutes:          4,
 		SkippedPrefixes:      1,
@@ -261,22 +264,23 @@ func Test_GatewayMetrics_FIBBuilt(t *testing.T) {
 		DeviceExcludedRoutes: 6,
 	})
 
-	metricList := m.Collect()
+	metricList := metrics.Collect()
 	labels := map[string]string{"gateway": "gw0", "module": "route0"}
 
 	for _, tc := range []struct {
-		name  string
-		value float64
+		name       string
+		metricName string
+		value      float64
 	}{
-		{name: "route_operator_fib_entries", value: 3},
-		{name: "route_operator_fib_routes", value: 4},
-		{name: "route_operator_fib_unresolved_nexthops", value: 2},
-		{name: "route_operator_fib_skipped_prefixes", value: 1},
-		{name: "route_operator_fib_filtered_routes", value: 5},
-		{name: "route_operator_fib_device_excluded_routes", value: 6},
+		{name: "added prefixes are a gauge", metricName: "route_operator_fib_entries", value: 3},
+		{name: "input route records are a gauge", metricName: "route_operator_fib_routes", value: 4},
+		{name: "unresolved route records are a gauge", metricName: "route_operator_fib_unresolved_nexthops", value: 2},
+		{name: "skipped prefixes are a gauge", metricName: "route_operator_fib_skipped_prefixes", value: 1},
+		{name: "lower-priority route records are a gauge", metricName: "route_operator_fib_filtered_routes", value: 5},
+		{name: "device-excluded route records are a gauge", metricName: "route_operator_fib_device_excluded_routes", value: 6},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			metric := findMetric(metricList, tc.name, labels)
+			metric := findMetric(metricList, tc.metricName, labels)
 			require.NotNil(t, metric)
 			require.IsType(t, &commonpb.Metric_Gauge{}, metric.GetValue())
 			require.Equal(t, tc.value, metric.GetGauge())
@@ -317,15 +321,15 @@ func Test_GatewayMetrics_FIBClassificationIsolationAndReset(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			m := NewMetrics(newRIBStore(), neigh.NewNeighTable())
-			firstGateway := m.Gateway("gw0")
-			secondGateway := m.Gateway("gw1")
+			metrics := NewMetrics(newRIBStore(), neigh.NewNeighTable())
+			firstGateway := metrics.Gateway("gw0")
+			secondGateway := metrics.Gateway("gw1")
 			firstGateway.OnFIBBuilt("route0", FIBBuildStats{NeighbourNotFound: 2, DeviceExcludedRoutes: 3})
 			firstGateway.OnFIBBuilt("route1", FIBBuildStats{NeighbourNotFound: 4, DeviceExcludedRoutes: 5})
 			secondGateway.OnFIBBuilt("route0", FIBBuildStats{NeighbourNotFound: 6, DeviceExcludedRoutes: 7})
 
 			firstGateway.OnFIBBuilt(tc.module, tc.stats)
-			metricList := m.Collect()
+			metricList := metrics.Collect()
 			for _, series := range []struct {
 				gateway string
 				module  string
