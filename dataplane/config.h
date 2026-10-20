@@ -5,6 +5,8 @@
 
 #define DATAPLANE_MODULE_NAME_LEN 80
 #define DATAPLANE_MAX_MODULES 64
+#define DATAPLANE_OBJECT_NAME_LEN 80
+#define DATAPLANE_MAX_OBJECTS 64
 #define DATAPLANE_PLUGIN_DIR_LEN 256
 
 struct dataplane_instance_config {
@@ -99,6 +101,14 @@ struct dataplane_config {
 	char plugin_dir[DATAPLANE_PLUGIN_DIR_LEN];
 	uint64_t module_count;
 	char module_names[DATAPLANE_MAX_MODULES][DATAPLANE_MODULE_NAME_LEN];
+
+	// Object types to load beside the built-in ones, by name.
+	//
+	// A plugin ships an object type as new_object_<name>; listing the name
+	// here makes the dataplane load it, as the module list does for
+	// modules. Built-in names may be listed and load once.
+	uint64_t object_count;
+	char object_names[DATAPLANE_MAX_OBJECTS][DATAPLANE_OBJECT_NAME_LEN];
 };
 
 int

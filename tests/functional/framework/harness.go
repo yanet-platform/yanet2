@@ -46,18 +46,22 @@ func baselineTemplatePathFor(qemuImage, baselineTag string, vmSize VMSize) strin
 // boots with.
 //
 // PluginDir and Modules drive the dataplane's runtime plugin loader: when
-// PluginDir is set the dataplane scans it for module .so plugins and loads
-// each name listed in Modules. Leaving both empty produces a configuration
-// that relies solely on the modules statically linked into the dataplane
-// binary.
+// PluginDir is set the dataplane scans it for .so plugins and loads each
+// module listed in Modules. Objects lists object types the dataplane loads
+// beside its built-in ones, with or without a plugin directory; a plugin's
+// object type also needs PluginDir. Leaving them empty produces a
+// configuration that relies solely on the modules and object types
+// statically linked into the dataplane binary.
 type DataplaneOptions struct {
 	PluginDir         string
 	Modules           []string
+	Objects           []string
 	PacketRecircLimit uint16
 }
 
 // DataplaneConfig returns the baseline dataplane YAML used by functional
-// tests, optionally requesting runtime module plugins via opts.
+// tests, optionally requesting runtime module plugins and object types via
+// opts.
 func DataplaneConfig(opts DataplaneOptions) string {
 	plugins := ""
 	cpMemory := "128 MiB"
@@ -76,6 +80,12 @@ func DataplaneConfig(opts DataplaneOptions) string {
 			}
 		}
 		cpMemory = "160 MiB"
+	}
+	if len(opts.Objects) > 0 {
+		plugins += "  objects:\n"
+		for _, object := range opts.Objects {
+			plugins += "    - " + object + "\n"
+		}
 	}
 
 	// The cp_memory value defaults to 128 MiB, matching the built-in main pool.

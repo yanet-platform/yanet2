@@ -76,7 +76,7 @@ var CLIBinaryNames = []string{
 type GuestPaths struct {
 	CLIBase        string // directory with yanet-cli-* binaries
 	BuildDir       string // directory with yanet-dataplane, yanet-controlplane
-	PluginDir      string // directory with dataplane module .so plugins
+	PluginDir      string // directory with dataplane .so plugins (modules, object types)
 	ConfigDir      string // directory for config files
 	LogDir         string // directory for log files
 	DPDKDevbindDir string // directory containing dpdk-devbind.py

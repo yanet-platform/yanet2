@@ -54,3 +54,26 @@ worker_counters_test = executable(
   include_directories: yanet_rootdir,
 )
 test('worker_counters', worker_counters_test, suite: 'dataplane_ut')
+
+subdir('loader_plugin')
+
+loader_test = executable(
+  'loader_test',
+  ['loader_test.c'],
+  c_args: yanet_c_args + [
+    '-DLOADER_PLUGIN_DIR="@0@"'.format(loader_probe_plugin_dir),
+  ],
+  link_args: yanet_link_args + ['-Wl,-E'],
+  dependencies: [
+    lib_dataplane_ut_dep,
+    lib_logging_dep,
+    libdpdk_dep,
+  ],
+  include_directories: [yanet_rootdir, loader_probe_include],
+)
+test(
+  'loader_plugin_types',
+  loader_test,
+  depends: loader_probe_plugin,
+  suite: 'dataplane_ut',
+)

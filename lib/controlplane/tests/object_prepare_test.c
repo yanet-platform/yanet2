@@ -12,11 +12,13 @@
 #include <errno.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "api/agent.h"
 #include "common/memory.h"
 #include "common/memory_address.h"
+#include "common/strutils.h"
 #include "common/test_assert.h"
 
 #include "lib/controlplane/agent/agent.h"
@@ -24,6 +26,7 @@
 #include "lib/controlplane/config/econtext.h"
 #include "lib/controlplane/config/zone.h"
 #include "lib/dataplane/config/zone.h"
+#include "lib/dataplane/object/object.h"
 #include "lib/dataplane/pipeline/econtext.h"
 #include "lib/dataplane_ut/dataplane_ut.h"
 #include "lib/errors/errors.h"
@@ -411,6 +414,30 @@ run_object_prepare_null_handler_buffer_without_call_test(
 
 	env->gen = gen;
 	return TEST_SUCCESS;
+}
+
+// Constructor of the "hook" object type, which the harness resolves from
+// this executable: the test setup installs its hook and prepared buffer.
+struct object *
+new_object_hook(void) {
+	struct object *object =
+		(struct object *)calloc(1, sizeof(struct object));
+	if (object != NULL) {
+		strtcpy(object->name, "hook", sizeof(object->name));
+	}
+	return object;
+}
+
+// Constructor of the "inert" object type, which the harness resolves from
+// this executable: it declares no hook and no prepared buffer.
+struct object *
+new_object_inert(void) {
+	struct object *object =
+		(struct object *)calloc(1, sizeof(struct object));
+	if (object != NULL) {
+		strtcpy(object->name, "inert", sizeof(object->name));
+	}
+	return object;
 }
 
 int

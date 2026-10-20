@@ -3,6 +3,7 @@
 #include <dlfcn.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 #include "common/exp_array.h"
 #include "common/memory_address.h"
@@ -27,6 +28,15 @@ dp_load_object(struct dp_config *dp_config, void *bin_hndl, const char *name) {
 		LOG(ERROR, "failed to construct object %s", name);
 		return -1;
 	}
+	if (strncmp(object->name, name, sizeof(object->name)) != 0) {
+		LOG(ERROR,
+		    "constructor %s returned object type %.*s",
+		    loader_name,
+		    (int)sizeof(object->name),
+		    object->name);
+		free(object);
+		return -1;
+	}
 
 	struct dp_object *dp_objects = ADDR_OF(&dp_config->dp_objects);
 	if (mem_array_expand_exp(
@@ -36,7 +46,7 @@ dp_load_object(struct dp_config *dp_config, void *bin_hndl, const char *name) {
 		    &dp_config->object_count
 	    )) {
 		LOG(ERROR, "failed to allocate memory for object %s", name);
-		// FIXME: free object
+		free(object);
 		return -1;
 	}
 
@@ -50,5 +60,25 @@ dp_load_object(struct dp_config *dp_config, void *bin_hndl, const char *name) {
 
 	free(object);
 
+	return 0;
+}
+
+int
+dp_load_objects(
+	struct dp_config *dp_config,
+	void *bin_hndl,
+	const char *const *names,
+	size_t count
+) {
+	for (size_t idx = 0; idx < count; ++idx) {
+		uint64_t index;
+		if (dp_config_lookup_object(dp_config, names[idx], &index) ==
+		    0) {
+			continue;
+		}
+		if (dp_load_object(dp_config, bin_hndl, names[idx])) {
+			return -1;
+		}
+	}
 	return 0;
 }

@@ -324,3 +324,24 @@ func TestRunProfileHooks(t *testing.T) {
 		})
 	}
 }
+
+// Test_DataplaneConfig_ListsPluginObjects verifies that object types requested
+// beside plugin modules are rendered as the dataplane's object list.
+func Test_DataplaneConfig_ListsPluginObjects(t *testing.T) {
+	config := DataplaneConfig(DataplaneOptions{
+		PluginDir: "/opt/plugins",
+		Modules:   []string{"plugin_module"},
+		Objects:   []string{"plugin_store"},
+	})
+
+	require.Contains(t, config, "  plugin_dir: /opt/plugins\n  modules:\n    - plugin_module\n  objects:\n    - plugin_store\n")
+}
+
+// Test_DataplaneConfig_ListsObjectsWithoutPlugins verifies that object types
+// are rendered as the dataplane's object list without a plugin directory.
+func Test_DataplaneConfig_ListsObjectsWithoutPlugins(t *testing.T) {
+	config := DataplaneConfig(DataplaneOptions{Objects: []string{"ring"}})
+
+	require.Contains(t, config, "  loglevel: trace\n  objects:\n    - ring\n  instances:\n")
+	require.NotContains(t, config, "plugin_dir")
+}
