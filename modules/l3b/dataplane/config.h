@@ -1,33 +1,57 @@
 #pragma once
 
-#include <lib/filter/filter.h>
-#include <lib/filter/rule.h>
+#include "common/value.h"
+
+#include "lib/classify/classifiers/net4.h"
+#include "lib/classify/classifiers/net6.h"
+#include "lib/classify/classifiers/port.h"
 
 #include "lib/controlplane/config/cp_module.h"
 
 /*
+ * Destination classification joins network and transport restrictions
+ * within one address family, then selects the first matching rule.
+ *
+ * The transport attribute is the sixteen bit protocol domain the rules
+ * address: the protocol number in the high byte, the transport specific
+ * byte (TCP flags, ICMP and ICMPv6 type) in the low one. The classifier
+ * holds the class line over the whole domain, and the dataplane leaf
+ * composes the key out of the packet.
+ */
+struct l3b_destination_classifier_ip4 {
+	struct classify_attr_net4 dst_attr;
+	struct classify_attr_port proto_attr;
+	struct value_table root_joint;
+	struct vline rule_map;
+};
+
+// Destination classifier of the IPv6 family, in the same shape as the
+// IPv4 one.
+struct l3b_destination_classifier_ip6 {
+	struct classify_attr_net6 dst_attr;
+	struct classify_attr_port proto_attr;
+	struct value_table root_joint;
+	struct vline rule_map;
+};
+
+/*
  * Top-level l3b module configuration published into shared memory.
  *
- * The module-level filters classify an incoming packet into the index of the
- * matched destination filter rule; rule_object_links holds, per rule, the
- * cp_module object link index through which the per-worker execution context
- * resolves the named virtual service object.
- *
- * Contract: as long as destination_filter_rule_count is greater than zero, the
- * controlplane must filter_init both filter_ip6 and filter_ip4 — the dataplane
- * queries them whenever at least one rule exists.
+ * The classifiers select a destination rule whose object link resolves the
+ * named virtual service in the worker's execution context. They stay zeroed
+ * until a rule is installed and must not be queried without rules: their
+ * relative pointers have no compiled targets yet.
  */
 struct module_config {
 	struct cp_module cp_module;
 
 	uint32_t destination_filter_rule_count;
-	// Object link index per destination filter rule, into
-	// cp_module.objects.
+	// Each destination rule resolves through its module object link.
 	uint64_t *rule_object_links;
-	// Link packets counter registry id per rule; COUNTER_INVALID when the
-	// linked service publishes none.
+	// Each rule counts link packets only if the service publishes that
+	// counter.
 	uint64_t *rule_link_counter_ids;
 
-	struct filter filter_ip6;
-	struct filter filter_ip4;
+	struct l3b_destination_classifier_ip6 classifier_ip6;
+	struct l3b_destination_classifier_ip4 classifier_ip4;
 };

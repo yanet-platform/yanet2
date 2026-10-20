@@ -3,10 +3,15 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-#include <lib/filter/filter.h>
-#include <lib/filter/rule.h>
-
+#include "common/filter_views.h"
 #include "common/network.h"
+#include "common/value.h"
+
+#include "lib/classify/classifiers/net4.h"
+#include "lib/classify/classifiers/net6.h"
+#include "lib/classify/classifiers/port.h"
+#include "lib/classify/classify.h"
+
 #include "lib/controlplane/config/cp_object.h"
 #include "lib/errors/errors.h"
 
@@ -143,16 +148,37 @@ struct real_ring {
 };
 
 /*
+ * Source admission joins client networks and destination service ports
+ * within one address family.
+ *
+ * Embedded classifiers share the service lifetime and support zero-safe
+ * release. With no source rules they remain zeroed and reject ordinary
+ * transport admission; matched Echo requests bypass that admission.
+ */
+struct l3b_source_classifier_ip4 {
+	struct classify_attr_net4 src_attr;
+	struct classify_attr_port port_attr;
+	struct value_table root_joint;
+	struct vline rule_map;
+};
+
+// Source classifier of the IPv6 family, in the same shape as the IPv4
+// one.
+struct l3b_source_classifier_ip6 {
+	struct classify_attr_net6 src_attr;
+	struct classify_attr_port port_attr;
+	struct value_table root_joint;
+	struct vline rule_map;
+};
+
+/*
  * A virtual service exposed to clients.
  *
- * Incoming traffic that matches one of the per-family filters is dispatched
- * to a real server: the session table first pins each client flow to a real,
- * and only flows without a live session go through the hash-derived
- * real_ring scheduler.
- *
- * Contract: the controlplane must filter_init both filter_ip4 and filter_ip6
- * before publishing a virtual service; the dataplane queries them directly
- * (value_table_get assumes a non-NULL backing table).
+ * Matched Echo requests bypass source filtering and sessions. Other traffic
+ * requires source admission, then uses a live backend pin or hash/link-counter
+ * scheduling. Disabled pins permit reselection for UDP and TCP setup traffic.
+ * Classifiers remain zeroed without source rules and must not be queried in
+ * that state: their relative pointers have no compiled targets yet.
  */
 struct virtual_service {
 	// Backends available for this service.
@@ -190,9 +216,9 @@ struct virtual_service {
 	// pointer into object shared memory (NULL without real servers).
 	uint64_t *real_counter_ids;
 
-	// Per-family classification of incoming packets.
-	struct filter filter_ip6;
-	struct filter filter_ip4;
+	struct l3b_source_classifier_ip6 classifier_ip6;
+	struct l3b_source_classifier_ip4 classifier_ip4;
+	uint32_t source_filter_rule_count;
 
 	// Hash index of client flows pinned to real servers; supplied at
 	// creation and owned outside the service object.
@@ -221,10 +247,12 @@ struct l3b_virtual_service_object {
  */
 
 /*
- * Source-side match criteria of a virtual service: the IPv6/IPv4 networks and
- * L4 port ranges a packet may originate from.
+ * Source admission matches client IPv6/IPv4 networks and destination service
+ * ports, not client source ports.
  */
 struct l3b_source_filter_rule {
+	struct classifier_rule rule;
+
 	struct filter_net6s net6s;
 	struct filter_net4s net4s;
 	struct filter_port_ranges port_ranges;
