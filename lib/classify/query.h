@@ -14,6 +14,7 @@
 #include <stdint.h>
 
 #include "classify.h"
+#include "rule_table.h"
 
 /*
  * Joins the classes of two classifier fields through one value table.
@@ -32,6 +33,23 @@ classify_joint_lookup(
 ) {
 	for (uint32_t idx = 0; idx < count; ++idx) {
 		classes[idx] = value_table_get(
+			joint, left_classes[idx], right_classes[idx]
+		);
+	}
+}
+
+// Resolves the first-match rule indices out of an immutable joint of
+// rule rows: one directory read and one row read per packet.
+static inline void
+classify_rule_table_lookup(
+	const struct rule_table *joint,
+	const uint32_t *left_classes,
+	const uint32_t *right_classes,
+	uint32_t *rules,
+	uint32_t count
+) {
+	for (uint32_t idx = 0; idx < count; ++idx) {
+		rules[idx] = rule_table_get(
 			joint, left_classes[idx], right_classes[idx]
 		);
 	}

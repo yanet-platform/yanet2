@@ -33,7 +33,9 @@
 // derived from the pipeline context, and struct module_ectx gained the
 // registry device of its placement.
 // 41: struct dp_config gained the last committed generation pointer.
-#define YANET_MODULE_ABI_VERSION 41
+// 42: the acl filter structs carry interned first-match rule tables
+// in place of the path joints with their decoders.
+#define YANET_MODULE_ABI_VERSION 42
 
 // Symbol name a module .so exports carrying its compiled-against
 // YANET_MODULE_ABI_VERSION, as a uint32_t global.

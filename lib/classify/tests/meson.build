@@ -67,3 +67,13 @@ classify_context_names = executable(
 )
 
 test('classify_context_names', classify_context_names, suite: ['filter'])
+
+classify_join_test = executable(
+  'classify_join_test',
+  ['join.c'],
+  c_args: yanet_test_c_args,
+  link_args: yanet_link_args,
+  dependencies: test_deps,
+  include_directories: yanet_rootdir,
+)
+test('classify_join_test', classify_join_test, suite: ['filter'])
