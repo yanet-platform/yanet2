@@ -77,7 +77,7 @@ fn handle<'a>(ectx: &mut Ectx<'a>, front: &mut PacketFront<'a>) {
         return;
     };
 
-    while let Some(mut packet) = front.pop_input() {
+    while let Some(packet) = front.pop_input() {
         let verdict = match packet.network_type_known() {
             Some(yanet_packet::EtherType::Ipv4) => classify_v4(&config.prefixes4, &packet),
             Some(yanet_packet::EtherType::Ipv6) => classify_v6(&config.prefixes6, &packet),
