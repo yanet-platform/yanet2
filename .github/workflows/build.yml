@@ -28,6 +28,7 @@ on:
       - ".github/actions/apt-packages/**"
       - ".github/actions/apt-failover/**"
       - ".github/actions/go-modcache/**"
+      - ".github/actions/go-buildcache/**"
       - ".github/actions/protoc-plugins/**"
       - "tests/functional/**"
   pull_request:
@@ -58,6 +59,7 @@ on:
       - ".github/actions/apt-packages/**"
       - ".github/actions/apt-failover/**"
       - ".github/actions/go-modcache/**"
+      - ".github/actions/go-buildcache/**"
       - ".github/actions/protoc-plugins/**"
       - "tests/functional/**"
 
@@ -97,6 +99,12 @@ jobs:
       - name: Restore Go module cache
         uses: ./.github/actions/go-modcache
 
+      - name: Restore Go build cache
+        id: go-buildcache
+        uses: ./.github/actions/go-buildcache
+        with:
+          profile: asan
+
       - name: Install Go Protobuf Plugins
         uses: ./.github/actions/protoc-plugins
 
@@ -111,6 +119,13 @@ jobs:
       - name: Show meson test log
         if: always()
         run: grep -v 'Inherited environment' build/meson-logs/testlog.txt || true
+
+      - name: Save Go build cache
+        if: success() && github.ref == 'refs/heads/main' && steps.go-buildcache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v5
+        with:
+          path: ${{ steps.go-buildcache.outputs.path }}
+          key: ${{ steps.go-buildcache.outputs.key }}
 
   build-tsan-test:
     runs-on: ubuntu-24.04
@@ -193,6 +208,12 @@ jobs:
       - name: Restore Go module cache
         id: go-modcache
         uses: ./.github/actions/go-modcache
+
+      - name: Restore Go build cache
+        id: go-buildcache
+        uses: ./.github/actions/go-buildcache
+        with:
+          profile: release
 
       - name: Install Go Protobuf Plugins
         uses: ./.github/actions/protoc-plugins
@@ -299,6 +320,13 @@ jobs:
             yanet-*-operator
             yanet-bird-adapter
             yanet-neighbour-sidecar
+
+      - name: Save Go build cache
+        if: success() && github.ref == 'refs/heads/main' && steps.go-buildcache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v5
+        with:
+          path: ${{ steps.go-buildcache.outputs.path }}
+          key: ${{ steps.go-buildcache.outputs.key }}
 
   functional-tests:
     name: Run Functional Tests

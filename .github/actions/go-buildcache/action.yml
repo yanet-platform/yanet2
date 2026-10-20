@@ -1,0 +1,71 @@
+name: 'Go build cache (restore)'
+description: 'Restore compatible Go compilation snapshots for the selected build profile.'
+
+inputs:
+  profile:
+    description: 'Build profile: release, asan, race, or deb'
+    required: true
+
+outputs:
+  path:
+    description: 'Scoped absolute GOCACHE directory'
+    value: ${{ steps.resolve.outputs.path }}
+  key:
+    description: 'Immutable snapshot key for the checked-out source and workflow run'
+    value: ${{ steps.resolve.outputs.key }}
+  cache-hit:
+    description: 'True only on an exact-key match'
+    value: ${{ steps.restore.outputs.cache-hit }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Resolve the build cache location and compatibility
+      id: resolve
+      shell: bash
+      env:
+        CACHE_PROFILE: ${{ inputs.profile }}
+        CACHE_RUN_ID: ${{ github.run_id }}
+      run: |
+        set -euo pipefail
+        case "$CACHE_PROFILE" in
+          release|asan|race|deb) ;;
+          *) echo "Unsupported Go build cache profile: $CACHE_PROFILE" >&2; exit 1 ;;
+        esac
+
+        path=$(go env GOCACHE)
+        case "$path" in
+          /*) ;;
+          *) echo "Go build cache must have an absolute path: $path" >&2; exit 1 ;;
+        esac
+
+        # External native headers must match even for Go's runtime packages.
+        native_hash=$(
+          {
+            printf 'ImageVersion=%s\0' "${ImageVersion:-}"
+            find -L /usr/include /usr/local/include /usr/lib/gcc -type f -print0 |
+              LC_ALL=C sort -z |
+              xargs -0 -r sha256sum --zero
+          } | sha256sum
+        )
+        native_hash=${native_hash%% *}
+        path="${path%/}/yanet-ci-${CACHE_PROFILE}-${native_hash}"
+
+        . /etc/os-release
+        family="go-build-v1-${ID}-${VERSION_ID}-$(go env GOOS)-$(go env GOARCH)-$(go env GOVERSION)-${CACHE_PROFILE}-${native_hash}-"
+        source=$(git rev-parse HEAD)
+        echo "path=$path" >>"$GITHUB_OUTPUT"
+        echo "key=${family}${source}-${CACHE_RUN_ID}" >>"$GITHUB_OUTPUT"
+        echo "source-prefix=${family}${source}-" >>"$GITHUB_OUTPUT"
+        echo "family-prefix=$family" >>"$GITHUB_OUTPUT"
+        echo "GOCACHE=$path" >>"$GITHUB_ENV"
+
+    - name: Restore the build cache
+      id: restore
+      uses: actions/cache/restore@v5
+      with:
+        path: ${{ steps.resolve.outputs.path }}
+        key: ${{ steps.resolve.outputs.key }}
+        restore-keys: |
+          ${{ steps.resolve.outputs.source-prefix }}
+          ${{ steps.resolve.outputs.family-prefix }}

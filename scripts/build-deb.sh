@@ -2,6 +2,14 @@
 set -euxo pipefail
 env
 
+skip_build_deps=false
+for arg in "$@"; do
+    case "$arg" in
+        --skip-build-deps) skip_build_deps=true ;;
+        *) echo "Unknown argument: $arg" >&2; exit 1 ;;
+    esac
+done
+
 # Resolve the debian package version from git.
 #
 # A `vX.Y.Z` tag on HEAD becomes `X.Y.Z`, otherwise
@@ -70,16 +78,17 @@ trap 'exit 143' TERM
 # an argument so dch never tries to open an editor.
 dch --newversion "$PKG_VERSION" --distribution unstable --force-bad-version "Automatic CI build."
 
-# Install build deps with verbose output
-apt-get update
-apt-get -o Debug::pkgProblemResolver=yes --no-install-recommends -y --allow-downgrades --allow-remove-essential --allow-change-held-packages build-dep . 2>&1 | tee build-deps.log
+if [[ "$skip_build_deps" == false ]]; then
+    apt-get update
+    apt-get -o Debug::pkgProblemResolver=yes --no-install-recommends -y --allow-downgrades --allow-remove-essential --allow-change-held-packages build-dep . 2>&1 | tee build-deps.log
+fi
 
 echo "Current PATH during build: $PATH" > build-path.log
-# Build binary-only, skipping the source package. Nothing downstream consumes
-# it, and every path takes only the resulting .deb and .ddeb files. Skipping
-# it also avoids xz-compressing the whole working tree, DPDK submodule included.
-# Preserve environment variables for cargo (order matters in dpkg-buildpackage)
-echo y | debuild --preserve-envvar=PATH --preserve-envvar=DEB_BUILD_PROFILES -us -uc -b 2>&1 | tee build.log
+# Build binary packages while preserving toolchain and cache selections.
+#
+# Downstream steps consume only binaries. Skipping the source package also
+# avoids compressing the whole working tree and its bundled dependencies.
+echo y | debuild --preserve-envvar=PATH --preserve-envvar=DEB_BUILD_PROFILES --preserve-envvar=GOCACHE -us -uc -b 2>&1 | tee build.log
 
 mkdir -p outdeb
 dcmd cp ../*.changes outdeb/
