@@ -235,15 +235,6 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@1.88.0
 
-      # Only the cargo home is cached. Debuild runs the clean target first,
-      # which removes the target directory, so an entry holding it would be
-      # deleted before the build could use it.
-      - name: Cache rust
-        uses: Swatinem/rust-cache@v2.9.2
-        with:
-          shared-key: deb-${{ matrix.unbtver }}-${{ matrix.arch }}
-          cache-targets: false
-
       - name: Install packaging tools
         timeout-minutes: 10
         run: |
@@ -268,17 +259,33 @@ jobs:
         uses: ./.github/actions/go-buildcache
         with:
           profile: deb
+      - name: Cache rust
+        uses: Swatinem/rust-cache@v2.9.2
+        with:
+          shared-key: ${{ steps.go-buildcache.outputs.native-hash != '' && format('deb-{0}-{1}-{2}-{3}', matrix.unbtver, matrix.arch, steps.go-buildcache.outputs.native-hash, hashFiles('Cargo.toml', 'debian/rules', 'Makefile', 'scripts/build-deb.sh')) || format('deb-{0}-{1}', matrix.unbtver, matrix.arch) }}
+          cache-targets: ${{ steps.go-buildcache.outputs.native-hash != '' && !env.ACT }}
+          save-if: ${{ steps.go-buildcache.outputs.native-hash == '' || (github.ref == 'refs/heads/main' && (inputs.source_sha == '' || inputs.source_sha == github.sha) && !env.ACT) }}
       - name: Install Go Protobuf Plugins
         uses: ./.github/actions/protoc-plugins
 
       - name: Build packages
+        env:
+          YANET_DEB_CARGO_CACHE: ${{ steps.go-buildcache.outputs.native-hash != '' && !env.ACT && '1' || '' }}
         run: |
           build_deb_args=()
           if [[ -f .github/actions/go-buildcache/action.yml ]]; then
             build_deb_args+=(--skip-build-deps)
           fi
-          sudo -E env "PATH=$PATH" "PKG_VERSION=$PKG_VERSION" "GOCACHE=${GOCACHE:-}" ./scripts/build-deb.sh "${build_deb_args[@]}"
-          sudo chown -R $(id -u) ~/.cargo  # fix caching for Rust
+          sudo -E env "PATH=$PATH" "PKG_VERSION=$PKG_VERSION" "GOCACHE=${GOCACHE:-}" "YANET_DEB_CARGO_CACHE=$YANET_DEB_CARGO_CACHE" ./scripts/build-deb.sh "${build_deb_args[@]}"
+
+      - name: Restore Rust cache ownership
+        if: always()
+        run: |
+          for cache_path in "${CARGO_HOME:-$HOME/.cargo}" "$GITHUB_WORKSPACE/target"; do
+            if [[ -d "$cache_path" ]]; then
+              sudo chown -R "$(id -u):$(id -g)" -- "$cache_path"
+            fi
+          done
 
       - name: Restore Go build cache ownership
         if: always() && steps.go-buildcache.outputs.path != ''
