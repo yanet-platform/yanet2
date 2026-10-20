@@ -42,6 +42,21 @@ diagnostics stable across identical retries. Completed builds still refresh thei
 metrics, including zero classifications for empty dumps or refreshed unresolved
 counts after a complete neighbour withdrawal.
 
+When `readiness.expect_bird` is true (the default), every present module must
+also contain BIRD route records and at least one BIRD path resolved through a
+neighbour on an allowed device. Surviving static routes cannot satisfy either
+requirement or mask the loss of all local BIRD forwarding. Neighbour provenance
+does not matter: statically supplied neighbours may resolve BIRD nexthops.
+This gate checks route content and local resolution, not FeedRIB session state.
+Set `readiness.expect_bird: false` for static-only deployments; nonempty static
+forwarding may then publish without BIRD, while all general empty-state guards
+remain active.
+
+**Upgrade impact:** `readiness.expect_bird` now also gates FIB/function
+publication, not just readiness reporting. The programmatic `DefaultConfig()`
+and YAML loading default it to `true` when omitted; the shipped example
+explicitly sets `false`. Static-only deployments must set it to `false`.
+
 Rejection performs no FIB or function writes, retaining the last successfully
 installed forwarding and function without rollback. Before a successful whole
 apply the FIB scope remains `STATE_NOT_READY`; after success, repeated failures
@@ -75,8 +90,9 @@ Empty snapshots remain actionable for readiness observations and retries.
 Neighbour or route changes wake reconciliation; valid nonempty input and a
 successful whole apply restore `STATE_READY` without a restart. Partially
 resolved dynamic routes retain their omission behaviour as long as every present
-module still produces a nonempty FIB. Unresolved configured static paths alone
-never block nonempty fallback publication.
+module still produces a nonempty FIB and, when BIRD is expected, at least one
+local BIRD path survives. Unresolved configured static paths alone never block
+fallback publication that passes preflight.
 
 These rejection rules affect only the per-gateway FIB scopes. The independent
 `rib`, `neighbours`, and `bird-session` observation semantics are unchanged.
@@ -243,7 +259,8 @@ Config parameters (under `readiness:`):
 - `readiness.sample_interval` (default 1s): the sampling tick that drives
   `observed_at` for both scopes.
 - `readiness.expect_bird` (bool, default true): selects BIRD vs static mode
-  for `rib` and whether `bird-session` exists at all, but does **not** change
+  for `rib`, whether `bird-session` exists at all, and whether FIB preflight
+  requires BIRD route content and local BIRD forwarding. It does **not** change
   the tick cadence — both modes tick at `sample_interval`.
 
 Both scopes publish

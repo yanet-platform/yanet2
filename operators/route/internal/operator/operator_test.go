@@ -371,6 +371,100 @@ func Test_Operator_StaticResolution_ReadinessLifecycle(t *testing.T) {
 	waitForState(readinesspb.State_STATE_READY, expected)
 }
 
+// Test_Operator_BirdForwarding_StaticDecoyLifecycle verifies that static-only
+// input cannot mask BIRD loss and fresh routes restore forwarding.
+func Test_Operator_BirdForwarding_StaticDecoyLifecycle(t *testing.T) {
+	gateway, gatewayEndpoint := startFakeGateway(t)
+	endpoint := reserveEndpoint(t)
+	config := op.DefaultConfig()
+	config.NetlinkMonitor.Disabled = true
+	config.Readiness.ExpectBird = true
+	config.Server.Endpoint = xcfg.MustNonEmptyString(endpoint)
+	config.Gateways = []operator.GatewayConfig{{
+		Name: "gw0", Endpoint: xcfg.MustNonEmptyString(gatewayEndpoint),
+	}}
+	config.Reconcile.Interval = xcfg.MustNonZero(time.Hour)
+	config.Static.Routes = []op.StaticRouteConfig{staticPath("10.10.0.0/24", "192.0.2.1")}
+	config.Static.Neighbours = []op.StaticNeighbourConfig{{
+		NextHop: "192.0.2.1", LinkAddr: "02:00:00:00:00:01",
+		HardwareAddr: "00:11:22:33:44:55", Device: "eth0",
+	}}
+	runOperator(t, config)
+	connection, err := grpc.NewClient(endpoint, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, connection.Close()) })
+	readiness := operatorpb.NewReadinessServiceClient(connection)
+	waitForState := func(state readinesspb.State, paths map[string][]neigh.HardwareRoute) {
+		t.Helper()
+		require.EventuallyWithT(t, func(collector *assert.CollectT) {
+			ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+			defer cancel()
+			response, err := readiness.Ready(ctx, &readinesspb.ReadyRequest{
+				Scopes: []string{"fib:gw0:route0"},
+			}, grpc.WaitForReady(true))
+			require.NoError(collector, err)
+			require.Len(collector, response.GetScopes(), 1)
+			scope := response.GetScopes()[0]
+			require.Equal(collector, state, scope.GetState())
+			if state != readinesspb.State_STATE_READY {
+				require.Len(collector, scope.GetReasons(), 1)
+				require.Equal(collector, "APPLY_FAILED", scope.GetReasons()[0].GetCode())
+				require.Contains(collector, scope.GetReasons()[0].GetMessage(), "no BIRD route records")
+			}
+			if paths == nil {
+				writes, functionUpdates := gateway.receivedWrites()
+				require.Empty(collector, writes)
+				require.Zero(collector, functionUpdates)
+			} else {
+				requireFIB(collector, gateway.lastFIBRequest(), "route0", paths)
+				require.Equal(collector, []string{"route0"}, gateway.functionModules(config.Function.Name.Unwrap()))
+			}
+		}, 10*time.Second, 20*time.Millisecond)
+	}
+	waitForState(readinesspb.State_STATE_NOT_READY, nil)
+
+	routes := operatorpb.NewRouteServiceClient(connection)
+	prefix, err := commonpb.NewIPPrefixFromPrefix(netip.MustParsePrefix("10.20.0.0/24"))
+	require.NoError(t, err)
+	nexthops := []*commonpb.IPAddress{commonpb.NewIPAddressFromAddr(netip.MustParseAddr("192.0.2.1"))}
+	_, err = routes.InsertRoute(requestContext(t), &operatorpb.InsertRouteRequest{
+		Name: "route0", Prefix: prefix, NexthopAddrs: nexthops,
+		SourceId: operatorpb.RouteSourceID_ROUTE_SOURCE_ID_BIRD, DoFlush: true,
+	})
+	require.NoError(t, err)
+	hardware := neigh.HardwareRoute{
+		SourceMAC:      [6]byte{0, 0x11, 0x22, 0x33, 0x44, 0x55},
+		DestinationMAC: [6]byte{2, 0, 0, 0, 0, 1}, Device: "eth0",
+	}
+	expected := map[string][]neigh.HardwareRoute{
+		"10.10.0.0/24": {hardware}, "10.20.0.0/24": {hardware},
+	}
+	waitForState(readinesspb.State_STATE_READY, expected)
+	_, err = routes.DeleteRoute(requestContext(t), &operatorpb.DeleteRouteRequest{
+		Name: "route0", Prefix: prefix, NexthopAddrs: nexthops,
+		SourceId: operatorpb.RouteSourceID_ROUTE_SOURCE_ID_BIRD, DoFlush: true,
+	})
+	require.NoError(t, err)
+	waitForState(readinesspb.State_STATE_DEGRADED, expected)
+
+	hardware.DestinationMAC[5] = 42
+	neighbours := operatorpb.NewNeighbourServiceClient(connection)
+	_, err = neighbours.SwapNeighbours(requestContext(t), &operatorpb.SwapNeighboursRequest{
+		Table: "static", Entries: entryRequest("192.0.2.1", hardware.DestinationMAC, "eth0").GetEntries(),
+	})
+	require.NoError(t, err)
+	prefix, err = commonpb.NewIPPrefixFromPrefix(netip.MustParsePrefix("10.30.0.0/24"))
+	require.NoError(t, err)
+	_, err = routes.InsertRoute(requestContext(t), &operatorpb.InsertRouteRequest{
+		Name: "route0", Prefix: prefix, NexthopAddrs: nexthops,
+		SourceId: operatorpb.RouteSourceID_ROUTE_SOURCE_ID_BIRD, DoFlush: true,
+	})
+	require.NoError(t, err)
+	waitForState(readinesspb.State_STATE_READY, map[string][]neigh.HardwareRoute{
+		"10.10.0.0/24": {hardware}, "10.30.0.0/24": {hardware},
+	})
+}
+
 // Test_Operator_StaticResolution_IndependentGateways verifies that local FIBs,
 // readiness, and route classifications stay independent through loss and recovery.
 func Test_Operator_StaticResolution_IndependentGateways(t *testing.T) {

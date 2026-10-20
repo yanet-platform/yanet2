@@ -109,9 +109,9 @@ func requireFIB(
 	}
 }
 
-// Test_GatewayActuator_PreflightRejectsWholeUpdate verifies that invalid desired
-// state prevents every forwarding and function write, including valid modules.
-func Test_GatewayActuator_PreflightRejectsWholeUpdate(t *testing.T) {
+// Test_GatewayActuator_PreflightGatesWholeUpdate verifies that each module must
+// satisfy forwarding requirements before any table or function write.
+func Test_GatewayActuator_PreflightGatesWholeUpdate(t *testing.T) {
 	resolved := routeSnapshot(
 		[]rib.Route{ribPath("10.10.0.0/24", "192.0.2.1", rib.RouteSourceBird)},
 		map[string]string{"192.0.2.1": "eth0"},
@@ -123,12 +123,16 @@ func Test_GatewayActuator_PreflightRejectsWholeUpdate(t *testing.T) {
 		map[string]string{"192.0.2.1": "eth0"},
 	)
 	mixed.RIBs["empty"] = emptyLists
+	static := ribPath("10.30.0.0/24", "192.0.2.1", rib.RouteSourceStatic)
+	staticOnly := routeSnapshot([]rib.Route{static}, map[string]string{"192.0.2.1": "eth0"})
 	for _, tc := range []struct {
 		name       string
 		snapshot   op.RouteSnapshot
 		message    string
 		module     string
 		configured []op.StaticRouteConfig
+		expectBird bool
+		expected   map[string][]neigh.HardwareRoute
 	}{
 		{
 			name: "empty neighbours with routes", message: "empty merged neighbour view", module: "route0",
@@ -175,6 +179,39 @@ func Test_GatewayActuator_PreflightRejectsWholeUpdate(t *testing.T) {
 				Neighbours: resolved.Neighbours,
 			},
 		},
+		{
+			name:     "static-only input publishes when BIRD is not expected",
+			snapshot: staticOnly, expected: resolvedPath("10.30.0.0/24", "192.0.2.1", "eth0"),
+		},
+		{
+			name:     "resolved static routes cannot replace expected BIRD input",
+			snapshot: staticOnly, expectBird: true, message: "no BIRD route records", module: "route0",
+			configured: []op.StaticRouteConfig{staticPath("10.40.0.0/24", "192.0.2.4")},
+		},
+		{
+			name:       "resolved static routes cannot mask unresolved BIRD paths",
+			expectBird: true, message: "no local BIRD forwarding", module: "route0",
+			snapshot: routeSnapshot([]rib.Route{
+				static, ribPath("10.10.0.0/24", "192.0.2.2", rib.RouteSourceBird),
+			}, map[string]string{"192.0.2.1": "eth0"}),
+		},
+		{
+			name:       "resolved static routes cannot mask device-excluded BIRD paths",
+			expectBird: true, message: "no local BIRD forwarding", module: "route0",
+			snapshot: routeSnapshot([]rib.Route{
+				static, ribPath("10.10.0.0/24", "192.0.2.2", rib.RouteSourceBird),
+			}, map[string]string{"192.0.2.1": "eth0", "192.0.2.2": "eth1"}),
+		},
+		{
+			name:       "valid BIRD module cannot publish alongside a static-only module",
+			expectBird: true, message: "no BIRD route records", module: "static-only",
+			snapshot: op.RouteSnapshot{
+				RIBs: map[string]maptrie.MapTrie[netip.Prefix, netip.Addr, rib.RoutesList]{
+					"route0": resolved.RIBs["route0"], "static-only": staticOnly.RIBs["route0"],
+				},
+				Neighbours: resolved.Neighbours,
+			},
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			gateway, endpoint := startFakeGateway(t)
@@ -183,17 +220,25 @@ func Test_GatewayActuator_PreflightRejectsWholeUpdate(t *testing.T) {
 				op.WithGatewayActuatorFunction(op.DefaultConfig().Function),
 				op.WithGatewayActuatorDevices([]string{"eth0"}),
 				op.WithGatewayActuatorStaticRoutes(tc.configured),
+				op.WithGatewayActuatorExpectBird(tc.expectBird),
 			)
 			require.NoError(t, err)
 			t.Cleanup(func() { require.NoError(t, actuator.Close()) })
 			err = actuator.Apply(requestContext(t), tc.snapshot)
+			writes, functionUpdates := gateway.receivedWrites()
+			if tc.expected != nil {
+				require.NoError(t, err)
+				require.Len(t, writes, 1)
+				requireFIB(t, writes[0], "route0", tc.expected)
+				require.Equal(t, 1, functionUpdates)
+				return
+			}
 			require.ErrorContains(t, err, tc.message)
 			require.ErrorContains(t, err, "gw0")
 			require.ErrorContains(t, err, tc.module)
 			for _, path := range tc.configured {
 				require.ErrorContains(t, err, path.Prefix)
 			}
-			writes, functionUpdates := gateway.receivedWrites()
 			require.Empty(t, writes)
 			require.Zero(t, functionUpdates)
 		})
@@ -220,15 +265,25 @@ func Test_GatewayActuator_StaticRequirements(t *testing.T) {
 		pathModule string
 		missing    []string
 		expected   map[string][]neigh.HardwareRoute
+		expectBird bool
 	}{
 		{
+			name:       "expected BIRD forwarding publishes alongside resolved configured static paths",
+			configured: configured, routes: []rib.Route{static, fallback}, expectBird: true,
+			neighbours: map[string]string{"192.0.2.1": "eth0", "192.0.2.254": "eth0"},
+			expected: map[string][]neigh.HardwareRoute{
+				"10.10.0.0/24": {testHardwareRoute("192.0.2.1", "eth0")},
+				"10.20.0.0/24": {testHardwareRoute("192.0.2.254", "eth0")},
+			},
+		},
+		{
 			name:       "unresolved configured path still publishes a nonempty fallback",
-			configured: configured, routes: []rib.Route{static, fallback}, missing: []string{"10.10.0.0/24"},
+			configured: configured, routes: []rib.Route{static, fallback}, missing: []string{"10.10.0.0/24"}, expectBird: true,
 			neighbours: map[string]string{"192.0.2.254": "eth0"},
 			expected:   resolvedPath("10.20.0.0/24", "192.0.2.254", "eth0"),
 		},
 		{
-			name:       "one resolved configured alternative is sufficient",
+			name:       "static-only mode publishes one resolved configured alternative without BIRD",
 			configured: append([]op.StaticRouteConfig{staticPath("10.10.0.0/24", "192.0.2.2")}, configured...),
 			routes:     []rib.Route{static, ribPath("10.10.0.0/24", "192.0.2.2", rib.RouteSourceStatic)},
 			neighbours: map[string]string{"192.0.2.1": "eth0"},
@@ -282,7 +337,8 @@ func Test_GatewayActuator_StaticRequirements(t *testing.T) {
 			missing:    []string{"10.10.0.0/24"},
 		},
 		{
-			name:       "unresolved dynamic routes do not block nonempty forwarding",
+			name:       "one resolved BIRD path permits omitting another unresolved BIRD path",
+			expectBird: true,
 			routes:     []rib.Route{ribPath("10.10.0.0/24", "192.0.2.1", rib.RouteSourceBird), fallback},
 			neighbours: map[string]string{"192.0.2.254": "eth0"},
 			expected:   resolvedPath("10.20.0.0/24", "192.0.2.254", "eth0"),
@@ -373,6 +429,7 @@ func Test_GatewayActuator_StaticRequirements(t *testing.T) {
 				op.WithGatewayActuatorFunction(function),
 				op.WithGatewayActuatorStaticRoutes(tc.configured),
 				op.WithGatewayActuatorDevices(tc.devices),
+				op.WithGatewayActuatorExpectBird(tc.expectBird),
 			)
 			require.NoError(t, err)
 			t.Cleanup(func() { require.NoError(t, actuator.Close()) })
@@ -457,6 +514,7 @@ func Test_GatewayActuator_RejectedFIB_ClassificationLifecycle(t *testing.T) {
 		op.WithGatewayActuatorFunction(op.DefaultConfig().Function),
 		op.WithGatewayActuatorDevices([]string{"eth0"}),
 		op.WithGatewayActuatorOnFIBBuilt(metrics.Gateway("gw0").OnFIBBuilt),
+		op.WithGatewayActuatorExpectBird(true),
 	)
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, actuator.Close()) })
@@ -490,6 +548,14 @@ func Test_GatewayActuator_RejectedFIB_ClassificationLifecycle(t *testing.T) {
 		{
 			name:   "empty neighbours refresh classifications without a write",
 			routes: routes, unresolved: 4,
+		},
+		{
+			name: "static decoy refreshes classifications without a write",
+			routes: []rib.Route{
+				ribPath("10.10.0.0/24", "192.0.2.1", rib.RouteSourceBird),
+				ribPath("10.20.0.0/24", "192.0.2.4", rib.RouteSourceStatic),
+			},
+			neighbours: map[string]string{"192.0.2.4": "eth0"}, unresolved: 1,
 		},
 		{
 			name:       "explicit empty module dump clears unresolved classifications",

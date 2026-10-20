@@ -32,6 +32,7 @@ type GatewayActuator struct {
 	devices          neigh.DeviceScope
 	module           string
 	staticRoutes     map[netip.Prefix]map[netip.Addr]struct{}
+	expectBird       bool
 	onFIBBuilt       func(module string, stats FIBBuildStats)
 	log              *zap.Logger
 }
@@ -102,6 +103,7 @@ func NewGatewayActuator(
 		devices:          neigh.NewDeviceScope(opts.Devices),
 		module:           fn.Module.Unwrap(),
 		staticRoutes:     staticRoutes,
+		expectBird:       opts.ExpectBird,
 		onFIBBuilt:       opts.OnFIBBuilt,
 		log:              log.With(zap.String("function", fn.Name.Unwrap())),
 	}, nil
@@ -116,9 +118,11 @@ func (m *GatewayActuator) Close() error {
 // forwarding table or the operator's network function.
 //
 // Empty desired or locally resolved state leaves installed forwarding intact.
+// When BIRD is expected, static routes cannot substitute for local BIRD paths.
 // Rejections include missing configured static prefixes for diagnosis.
 // After preflight succeeds, every table and the function are attempted despite
-// RPC failures. Configured static-path resolution gates success after publication.
+// RPC failures. Configured static-path resolution gates success after
+// publication.
 func (m *GatewayActuator) Apply(ctx context.Context, snapshot RouteSnapshot) error {
 	var err error
 	if _, count := snapshot.Neighbours.Entries(); count == 0 {
@@ -145,6 +149,13 @@ func (m *GatewayActuator) Apply(ctx context.Context, snapshot RouteSnapshot) err
 			err = errors.Join(err, fmt.Errorf(
 				"gateway %q module %q has an empty local FIB: %d routes, %d unresolved nexthops, %d device-excluded routes",
 				m.name, name, stats.TotalRoutes, stats.NeighbourNotFound, stats.DeviceExcludedRoutes,
+			))
+		case m.expectBird && stats.BirdRoutes == 0:
+			err = errors.Join(err, fmt.Errorf("gateway %q module %q has no BIRD route records", m.name, name))
+		case m.expectBird && stats.LocalBirdRoutes == 0:
+			err = errors.Join(err, fmt.Errorf(
+				"gateway %q module %q has no local BIRD forwarding: %d BIRD route records",
+				m.name, name, stats.BirdRoutes,
 			))
 		}
 		fibs = append(fibs, fib)

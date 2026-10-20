@@ -96,12 +96,14 @@ netlink_monitor:
   table_name: kernel
   default_priority: 100
 
-# Readiness probes reported to the gateway.
+# Readiness reporting and BIRD forwarding requirements.
 #
-# expect_bird: set to true when a BIRD adapter is expected; the rib scope
-# stays NOT_READY (SYNCING) until the FeedRIB update rate settles, then
-# becomes READY for the duration of the session. Set false for static-only
-# deployments; rib scope is driven by route presence only.
+# When enabled, every present module needs BIRD routes and at least one locally
+# resolved BIRD path; surviving static routes cannot substitute. Static neighbours
+# may resolve BIRD nexthops. RIB readiness also requires an active, settled FeedRIB
+# session and nonempty content. Disable expectation for static-only deployments:
+# RIB readiness then follows route presence, and publication keeps the general
+# empty-input and empty-FIB guards without requiring BIRD.
 readiness:
   expect_bird: false
   # rate_threshold: maximum RIB updates/sec below which the bulk-load
