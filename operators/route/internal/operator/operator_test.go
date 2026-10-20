@@ -211,6 +211,44 @@ func requestContext(t *testing.T) context.Context {
 	return ctx
 }
 
+// requireFIBClassifications checks public build gauges with exact gateway/module
+// labels, including zero-valued series.
+func requireFIBClassifications(
+	collector require.TestingT,
+	metricList []*commonpb.Metric,
+	gateway, module string,
+	unresolved, excluded float64,
+) {
+	expected := map[string]float64{
+		"route_operator_fib_unresolved_nexthops":    unresolved,
+		"route_operator_fib_device_excluded_routes": excluded,
+	}
+	counts := map[string]int{}
+	for _, metric := range metricList {
+		value, ok := expected[metric.GetName()]
+		if !ok {
+			continue
+		}
+		labels := map[string]string{}
+		for _, label := range metric.GetLabels() {
+			labels[label.GetName()] = label.GetValue()
+		}
+		if labels["gateway"] != gateway || labels["module"] != module {
+			continue
+		}
+		require.Equal(collector, map[string]string{"gateway": gateway, "module": module}, labels)
+		require.Len(collector, metric.GetLabels(), 2)
+		require.IsType(collector, &commonpb.Metric_Gauge{}, metric.GetValue())
+		require.Equal(collector, value, metric.GetGauge(), "%s gateway=%s", metric.GetName(), gateway)
+		counts[metric.GetName()]++
+	}
+	for name := range expected {
+		require.Equal(collector, 1, counts[name],
+			"expected exactly one %s series for gateway=%s module=%s", name, gateway, module,
+		)
+	}
+}
+
 // Test_Operator_StaticResolution_ReadinessLifecycle verifies that neighbour
 // arrival, withdrawal, and route deletion drive readiness with FIB publication.
 func Test_Operator_StaticResolution_ReadinessLifecycle(t *testing.T) {
@@ -324,8 +362,8 @@ func Test_Operator_StaticResolution_ReadinessLifecycle(t *testing.T) {
 	waitForState(readinesspb.State_STATE_READY, expected)
 }
 
-// Test_Operator_StaticResolution_IndependentGateways verifies that unresolved
-// gateways cannot suppress healthy gateways' readiness or hardware-route updates.
+// Test_Operator_StaticResolution_IndependentGateways verifies that local FIBs,
+// readiness, and route classifications stay independent through loss and recovery.
 func Test_Operator_StaticResolution_IndependentGateways(t *testing.T) {
 	firstGateway, firstEndpoint := startFakeGateway(t)
 	secondGateway, secondEndpoint := startFakeGateway(t)
@@ -350,6 +388,7 @@ func Test_Operator_StaticResolution_IndependentGateways(t *testing.T) {
 	t.Cleanup(func() { require.NoError(t, connection.Close()) })
 	neighbours := operatorpb.NewNeighbourServiceClient(connection)
 	readiness := operatorpb.NewReadinessServiceClient(connection)
+	metrics := operatorpb.NewMetricsServiceClient(connection)
 	first := entryRequest("192.0.2.1", [6]byte{2, 0, 0, 0, 0, 1}, "eth0").GetEntries()
 	second := entryRequest("192.0.2.2", [6]byte{2, 0, 0, 0, 0, 2}, "eth1").GetEntries()
 	changedSecond := entryRequest("192.0.2.2", [6]byte{2, 0, 0, 0, 0, 22}, "eth1").GetEntries()
@@ -380,6 +419,10 @@ func Test_Operator_StaticResolution_IndependentGateways(t *testing.T) {
 		{
 			name: "healthy gateway updates its destination while first remains degraded", entries: latestSecond,
 			state: readinesspb.State_STATE_DEGRADED, destination: [6]byte{2, 0, 0, 0, 0, 33},
+		},
+		{
+			name: "both gateways recover without accumulating classification counts", entries: append(first, latestSecond...),
+			state: readinesspb.State_STATE_READY, firstReady: true, destination: [6]byte{2, 0, 0, 0, 0, 33},
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -412,9 +455,42 @@ func Test_Operator_StaticResolution_IndependentGateways(t *testing.T) {
 						DestinationMAC: tc.destination, Device: "eth1",
 					}},
 				})
+				metricResponse, err := metrics.GetMetrics(ctx, &commonpb.GetMetricsRequest{})
+				require.NoError(collector, err)
+				if tc.firstReady {
+					requireFIBClassifications(collector, metricResponse.GetMetrics(), "gw0", "route0", 0, 1)
+					requireFIBClassifications(collector, metricResponse.GetMetrics(), "gw1", "route0", 0, 1)
+				} else {
+					requireFIBClassifications(collector, metricResponse.GetMetrics(), "gw0", "route0", 1, 1)
+					requireFIBClassifications(collector, metricResponse.GetMetrics(), "gw1", "route0", 1, 0)
+				}
 			}, 10*time.Second, 20*time.Millisecond)
 		})
 	}
+
+	routes := operatorpb.NewRouteServiceClient(connection)
+	prefix, err := commonpb.NewIPPrefixFromPrefix(netip.MustParsePrefix("10.10.0.0/24"))
+	require.NoError(t, err)
+	_, err = routes.DeleteRoute(requestContext(t), &operatorpb.DeleteRouteRequest{
+		Name: "route0", Prefix: prefix,
+		NexthopAddrs: []*commonpb.IPAddress{
+			commonpb.NewIPAddressFromAddr(netip.MustParseAddr("192.0.2.1")),
+			commonpb.NewIPAddressFromAddr(netip.MustParseAddr("192.0.2.2")),
+		},
+		SourceId: operatorpb.RouteSourceID_ROUTE_SOURCE_ID_STATIC, DoFlush: true,
+	})
+	require.NoError(t, err)
+	require.EventuallyWithT(t, func(collector *assert.CollectT) {
+		ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+		defer cancel()
+		response, err := metrics.GetMetrics(ctx, &commonpb.GetMetricsRequest{})
+		require.NoError(collector, err)
+		for _, gateway := range []string{"gw0", "gw1"} {
+			requireFIBClassifications(collector, response.GetMetrics(), gateway, "route0", 0, 0)
+		}
+		requireFIB(collector, firstGateway.lastFIBRequest(), "route0", nil)
+		requireFIB(collector, secondGateway.lastFIBRequest(), "route0", nil)
+	}, 10*time.Second, 20*time.Millisecond)
 }
 
 // Test_Operator_ExternalNeighbours_RefreshesAcceptedObservations verifies that

@@ -246,42 +246,111 @@ func TestMetrics_PullNeighbourStats(t *testing.T) {
 	require.Equal(t, 2.0, nexthops.GetGauge())
 }
 
-// TestGatewayMetrics_FIBBuilt verifies that OnFIBBuilt renders the five FIB
-// gauges from FIBBuildStats, keyed by gateway and module.
-func TestGatewayMetrics_FIBBuilt(t *testing.T) {
+// Test_GatewayMetrics_FIBBuilt verifies that exported build statistics remain
+// gauges with exactly the gateway and module labels.
+func Test_GatewayMetrics_FIBBuilt(t *testing.T) {
 	m := NewMetrics(newRIBStore(), neigh.NewNeighTable())
 
 	gateway := m.Gateway("gw0")
 	gateway.OnFIBBuilt("route0", FIBBuildStats{
-		TotalRoutes:       4,
-		SkippedPrefixes:   1,
-		NeighbourNotFound: 2,
-		PrefixesAdded:     3,
-		FilteredRoutes:    5,
+		TotalRoutes:          4,
+		SkippedPrefixes:      1,
+		NeighbourNotFound:    2,
+		PrefixesAdded:        3,
+		FilteredRoutes:       5,
+		DeviceExcludedRoutes: 6,
 	})
 
 	metricList := m.Collect()
 	labels := map[string]string{"gateway": "gw0", "module": "route0"}
 
-	entries := findMetric(metricList, "route_operator_fib_entries", labels)
-	require.NotNil(t, entries)
-	require.Equal(t, 3.0, entries.GetGauge())
+	for _, tc := range []struct {
+		name  string
+		value float64
+	}{
+		{name: "route_operator_fib_entries", value: 3},
+		{name: "route_operator_fib_routes", value: 4},
+		{name: "route_operator_fib_unresolved_nexthops", value: 2},
+		{name: "route_operator_fib_skipped_prefixes", value: 1},
+		{name: "route_operator_fib_filtered_routes", value: 5},
+		{name: "route_operator_fib_device_excluded_routes", value: 6},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			metric := findMetric(metricList, tc.name, labels)
+			require.NotNil(t, metric)
+			require.IsType(t, &commonpb.Metric_Gauge{}, metric.GetValue())
+			require.Equal(t, tc.value, metric.GetGauge())
+		})
+	}
+}
 
-	routes := findMetric(metricList, "route_operator_fib_routes", labels)
-	require.NotNil(t, routes)
-	require.Equal(t, 4.0, routes.GetGauge())
+// Test_GatewayMetrics_FIBClassificationIsolationAndReset verifies that each
+// gateway/module series replaces its last build counts independently, even zero.
+func Test_GatewayMetrics_FIBClassificationIsolationAndReset(t *testing.T) {
+	for _, tc := range []struct {
+		name              string
+		module            string
+		stats             FIBBuildStats
+		firstCounts       [2]int
+		otherModuleCounts [2]int
+	}{
+		{
+			name:        "rebuild replaces both counts rather than accumulating",
+			module:      "route0",
+			stats:       FIBBuildStats{NeighbourNotFound: 1, DeviceExcludedRoutes: 2},
+			firstCounts: [2]int{1, 2}, otherModuleCounts: [2]int{4, 5},
+		},
+		{
+			name:        "resolution clears only the unresolved gauge",
+			module:      "route0",
+			stats:       FIBBuildStats{DeviceExcludedRoutes: 3},
+			firstCounts: [2]int{0, 3}, otherModuleCounts: [2]int{4, 5},
+		},
+		{
+			name:        "an empty build resets another module without changing its peers",
+			module:      "route1",
+			firstCounts: [2]int{2, 3},
+		},
+		{
+			name:   "an empty build resets the remaining exclusions",
+			module: "route0", otherModuleCounts: [2]int{4, 5},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := NewMetrics(newRIBStore(), neigh.NewNeighTable())
+			firstGateway := m.Gateway("gw0")
+			secondGateway := m.Gateway("gw1")
+			firstGateway.OnFIBBuilt("route0", FIBBuildStats{NeighbourNotFound: 2, DeviceExcludedRoutes: 3})
+			firstGateway.OnFIBBuilt("route1", FIBBuildStats{NeighbourNotFound: 4, DeviceExcludedRoutes: 5})
+			secondGateway.OnFIBBuilt("route0", FIBBuildStats{NeighbourNotFound: 6, DeviceExcludedRoutes: 7})
 
-	unresolved := findMetric(metricList, "route_operator_fib_unresolved_nexthops", labels)
-	require.NotNil(t, unresolved)
-	require.Equal(t, 2.0, unresolved.GetGauge())
-
-	skipped := findMetric(metricList, "route_operator_fib_skipped_prefixes", labels)
-	require.NotNil(t, skipped)
-	require.Equal(t, 1.0, skipped.GetGauge())
-
-	filtered := findMetric(metricList, "route_operator_fib_filtered_routes", labels)
-	require.NotNil(t, filtered)
-	require.Equal(t, 5.0, filtered.GetGauge())
+			firstGateway.OnFIBBuilt(tc.module, tc.stats)
+			metricList := m.Collect()
+			for _, series := range []struct {
+				gateway string
+				module  string
+				counts  [2]int
+			}{
+				{gateway: "gw0", module: "route0", counts: tc.firstCounts},
+				{gateway: "gw0", module: "route1", counts: tc.otherModuleCounts},
+				{gateway: "gw1", module: "route0", counts: [2]int{6, 7}},
+			} {
+				for idx, name := range []string{
+					"route_operator_fib_unresolved_nexthops",
+					"route_operator_fib_device_excluded_routes",
+				} {
+					metric := findMetric(metricList, name, map[string]string{
+						"gateway": series.gateway, "module": series.module,
+					})
+					require.NotNil(t, metric)
+					require.IsType(t, &commonpb.Metric_Gauge{}, metric.GetValue())
+					require.Equal(t, float64(series.counts[idx]), metric.GetGauge(),
+						"%s gateway=%s module=%s", name, series.gateway, series.module,
+					)
+				}
+			}
+		})
+	}
 }
 
 // TestGatewayMetrics_ObserveApply verifies that ObserveApply updates the

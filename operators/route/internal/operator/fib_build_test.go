@@ -53,7 +53,7 @@ func Test_BuildFIB_BestPerSourceFiltersWorse(t *testing.T) {
 		},
 	}
 
-	fib, stats := BuildFIB(ribDump, cache.View())
+	fib, stats := BuildFIB(ribDump, cache.View(), nil)
 
 	require.Equal(t, 2, stats.TotalRoutes)
 	require.Equal(t, 1, stats.FilteredRoutes)
@@ -90,7 +90,7 @@ func Test_BuildFIB_EqualCostECMPPreserved(t *testing.T) {
 		},
 	}
 
-	fib, stats := BuildFIB(ribDump, cache.View())
+	fib, stats := BuildFIB(ribDump, cache.View(), nil)
 
 	require.Equal(t, 2, stats.TotalRoutes)
 	require.Equal(t, 0, stats.FilteredRoutes)
@@ -128,7 +128,7 @@ func Test_BuildFIB_StaticAndBirdBothInFIB(t *testing.T) {
 		},
 	}
 
-	fib, stats := BuildFIB(ribDump, cache.View())
+	fib, stats := BuildFIB(ribDump, cache.View(), nil)
 
 	require.Equal(t, 2, stats.TotalRoutes)
 	require.Equal(t, 0, stats.FilteredRoutes, "static route is its own source's best — not filtered")
@@ -171,34 +171,57 @@ func Test_BuildFIB_PerGatewayDeviceFilter(t *testing.T) {
 	}
 
 	tests := []struct {
-		name       string
-		devices    []string
-		wantDevice string
+		name         string
+		devices      []string
+		wantDevice   string
+		wantExcluded int
+		wantFiltered int
 	}{
 		{
-			name:       "no filter selects the global best on eth2",
-			devices:    nil,
-			wantDevice: "eth2",
+			name:         "no filter selects the global best on eth2",
+			devices:      nil,
+			wantDevice:   "eth2",
+			wantFiltered: 1,
 		},
 		{
-			name:       "gateway without eth2 falls back to its eth1 route",
-			devices:    []string{"eth1"},
-			wantDevice: "eth1",
+			name:    "empty list selects the global best",
+			devices: []string{}, wantDevice: "eth2", wantFiltered: 1,
 		},
 		{
-			name:       "gateway with eth2 keeps the global best",
-			devices:    []string{"eth2"},
-			wantDevice: "eth2",
+			name:    "empty names leave devices unrestricted",
+			devices: []string{"", ""}, wantDevice: "eth2", wantFiltered: 1,
+		},
+		{
+			name:         "gateway without eth2 falls back to its eth1 route",
+			devices:      []string{"eth1"},
+			wantDevice:   "eth1",
+			wantExcluded: 1,
+		},
+		{
+			name:         "gateway with eth2 keeps the global best",
+			devices:      []string{"eth2"},
+			wantDevice:   "eth2",
+			wantExcluded: 1,
+		},
+		{
+			name:    "duplicate and empty names retain the device restriction",
+			devices: []string{"", "eth1", "eth1", ""}, wantDevice: "eth1", wantExcluded: 1,
+		},
+		{
+			name:    "multiple owned devices select the global best",
+			devices: []string{"eth1", "", "eth2"}, wantDevice: "eth2", wantFiltered: 1,
 		},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			view := neigh.FilterByDevices(cache.View(), tc.devices)
-			fib, _ := BuildFIB(ribDump, view)
+			fib, stats := BuildFIB(ribDump, cache.View(), tc.devices)
 			require.Len(t, fib.Entries, 1)
 			require.Len(t, fib.Entries[0].Nexthops, 1)
 			require.Equal(t, tc.wantDevice, fib.Entries[0].Nexthops[0].Device)
+			require.Zero(t, stats.NeighbourNotFound)
+			require.Equal(t, tc.wantExcluded, stats.DeviceExcludedRoutes)
+			require.Equal(t, tc.wantFiltered, stats.FilteredRoutes)
 		})
 	}
 }
@@ -222,10 +245,10 @@ func Test_BuildFIB_DeviceFilterStarvesPrefix(t *testing.T) {
 		},
 	}
 
-	view := neigh.FilterByDevices(cache.View(), []string{"eth2"})
-	fib, stats := BuildFIB(ribDump, view)
+	fib, stats := BuildFIB(ribDump, cache.View(), []string{"eth2"})
 	require.Empty(t, fib.Entries)
-	require.Equal(t, 1, stats.NeighbourNotFound)
+	require.Zero(t, stats.NeighbourNotFound)
+	require.Equal(t, 1, stats.DeviceExcludedRoutes)
 }
 
 // Test_BuildFIB_FallsBackToLiveRouteWhenBestUnresolvable verifies that an
@@ -259,7 +282,7 @@ func Test_BuildFIB_FallsBackToLiveRouteWhenBestUnresolvable(t *testing.T) {
 		},
 	}
 
-	fib, stats := BuildFIB(ribDump, cache.View())
+	fib, stats := BuildFIB(ribDump, cache.View(), nil)
 
 	require.Len(t, fib.Entries, 1)
 	require.Len(t, fib.Entries[0].Nexthops, 1)
@@ -306,15 +329,15 @@ func Test_BuildFIB_MultiSourceWithDeviceFilter(t *testing.T) {
 		},
 	}
 
-	view := neigh.FilterByDevices(cache.View(), []string{"eth1"})
-	fib, stats := BuildFIB(ribDump, view)
+	fib, stats := BuildFIB(ribDump, cache.View(), []string{"eth1"})
 
 	require.Len(t, fib.Entries, 1)
 	require.Len(t, fib.Entries[0].Nexthops, 2, "bird fallback and static, both on eth1")
 	for _, nh := range fib.Entries[0].Nexthops {
 		require.Equal(t, "eth1", nh.Device)
 	}
-	require.Equal(t, 1, stats.NeighbourNotFound, "the bird route on eth2 is dropped")
+	require.Zero(t, stats.NeighbourNotFound)
+	require.Equal(t, 1, stats.DeviceExcludedRoutes, "the bird route on eth2 is dropped")
 }
 
 // Test_BuildFIB_MultiPrefix verifies that each prefix gets its own
@@ -362,11 +385,11 @@ func Test_BuildFIB_MultiPrefix(t *testing.T) {
 		},
 	}
 
-	view := neigh.FilterByDevices(cache.View(), []string{"eth1"})
-	fib, stats := BuildFIB(ribDump, view)
+	fib, stats := BuildFIB(ribDump, cache.View(), []string{"eth1"})
 
 	require.Len(t, fib.Entries, 2)
-	require.Equal(t, 1, stats.NeighbourNotFound, "only the eth2 route of the wider prefix is dropped")
+	require.Zero(t, stats.NeighbourNotFound)
+	require.Equal(t, 1, stats.DeviceExcludedRoutes, "only the eth2 route of the wider prefix is dropped")
 
 	byPrefix := map[string]FIBEntry{}
 	for _, entry := range fib.Entries {
@@ -384,6 +407,81 @@ func Test_BuildFIB_MultiPrefix(t *testing.T) {
 	require.True(t, ok)
 	require.Len(t, narrow.Nexthops, 1, "buffer reuse must not leak the wider prefix's routes")
 	require.Equal(t, "eth1", narrow.Nexthops[0].Device)
+}
+
+// Test_BuildFIB_MixedEligibility verifies that route-record classifications stay
+// separate from local cost selection, ECMP, and hardware-route deduplication.
+func Test_BuildFIB_MixedEligibility(t *testing.T) {
+	first := neigh.HardwareRoute{
+		SourceMAC:      [6]byte{2, 0, 0, 0, 0, 1},
+		DestinationMAC: [6]byte{2, 0, 0, 0, 0, 2}, Device: "eth1",
+	}
+	second := first
+	second.DestinationMAC[5] = 3
+	foreign := first
+	foreign.Device = "eth2"
+	cache := rcucache.NewCache(map[netip.Addr]neigh.NeighbourEntry{
+		netip.MustParseAddr("192.0.2.1"): {HardwareRoute: first},
+		netip.MustParseAddr("192.0.2.2"): {HardwareRoute: first},
+		netip.MustParseAddr("192.0.2.3"): {HardwareRoute: second},
+		netip.MustParseAddr("192.0.2.4"): {HardwareRoute: second},
+		netip.MustParseAddr("192.0.2.5"): {HardwareRoute: foreign},
+	})
+	list := rib.RoutesList{}
+	for idx, path := range []struct {
+		nexthop    string
+		preference uint32
+	}{
+		{nexthop: "192.0.2.1", preference: 100},
+		{nexthop: "::ffff:192.0.2.2", preference: 100},
+		{nexthop: "192.0.2.3", preference: 100},
+		{nexthop: "192.0.2.4", preference: 50},
+		{nexthop: "192.0.2.5", preference: 200},
+		{nexthop: "::ffff:192.0.2.5", preference: 200},
+		{nexthop: "192.0.2.6", preference: 300},
+		{nexthop: "::ffff:192.0.2.6", preference: 300},
+	} {
+		list.Insert(rib.Route{
+			NextHop: netip.MustParseAddr(path.nexthop), Pref: path.preference,
+			SourceID: rib.RouteSourceBird, GlobalID: uint32(idx + 1),
+		})
+	}
+	prefix := netip.MustParsePrefix("10.0.0.0/24")
+	dump := maptrie.NewMapTrie[netip.Prefix, netip.Addr, rib.RoutesList](1)
+	dump[prefix.Bits()][prefix] = list
+
+	fib, stats := BuildFIB(dump, cache.View(), []string{"eth1"})
+
+	require.Equal(t, FIB{Entries: []FIBEntry{{
+		Prefix: prefix, Nexthops: []neigh.HardwareRoute{first, second},
+	}}}, fib)
+	require.Equal(t, FIBBuildStats{
+		TotalPrefixes: 1, TotalRoutes: 8, NeighbourNotFound: 2,
+		DeviceExcludedRoutes: 2, HardwareRoutes: 2, PrefixesAdded: 1,
+		FilteredRoutes: 1,
+	}, stats)
+}
+
+// Test_BuildFIB_MissingNeighbourCountsPerGateway verifies that shared missing
+// nexthops count once per route on every gateway without inferred ownership.
+func Test_BuildFIB_MissingNeighbourCountsPerGateway(t *testing.T) {
+	cache := rcucache.NewEmptyCache[netip.Addr, neigh.NeighbourEntry]()
+	dump := maptrie.NewMapTrie[netip.Prefix, netip.Addr, rib.RoutesList](1)
+	dump[24][netip.MustParsePrefix("10.0.0.0/24")] = rib.RoutesList{
+		Routes: []rib.Route{
+			{NextHop: netip.MustParseAddr("192.0.2.1"), SourceID: rib.RouteSourceBird, GlobalID: 1},
+			{NextHop: netip.MustParseAddr("192.0.2.1"), SourceID: rib.RouteSourceBird, GlobalID: 2},
+		},
+	}
+	for _, device := range []string{"eth1", "eth2"} {
+		t.Run(device, func(t *testing.T) {
+			fib, stats := BuildFIB(dump, cache.View(), []string{device})
+			require.Empty(t, fib.Entries)
+			require.Equal(t, 2, stats.NeighbourNotFound)
+			require.Zero(t, stats.DeviceExcludedRoutes)
+			require.Zero(t, stats.FilteredRoutes)
+		})
+	}
 }
 
 func Test_BuildFIB_DedupsNexthops(t *testing.T) {
@@ -413,7 +511,7 @@ func Test_BuildFIB_DedupsNexthops(t *testing.T) {
 		},
 	}
 
-	fib, stats := BuildFIB(ribDump, cache.View())
+	fib, stats := BuildFIB(ribDump, cache.View(), nil)
 
 	require.Len(t, fib.Entries, 1)
 	require.Equal(t, 1, stats.PrefixesAdded)

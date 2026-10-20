@@ -28,30 +28,41 @@ type FIB struct {
 
 // FIBBuildStats summarises a BuildFIB pass for observability.
 type FIBBuildStats struct {
-	TotalPrefixes     int
-	TotalRoutes       int
-	SkippedPrefixes   int
+	TotalPrefixes   int
+	TotalRoutes     int
+	SkippedPrefixes int
+	// NeighbourNotFound counts route records whose nexthops are absent from
+	// the full neighbour snapshot; their device ownership is unknown.
 	NeighbourNotFound int
-	HardwareRoutes    int
-	PrefixesAdded     int
+	// DeviceExcludedRoutes counts resolved route records on devices outside
+	// the gateway's non-empty device restriction.
+	DeviceExcludedRoutes int
+	HardwareRoutes       int
+	PrefixesAdded        int
 	// FilteredRoutes counts eligible routes dropped because a better route
 	// of the same source exists.
 	FilteredRoutes int
 }
 
-// BuildFIB resolves a RIB dump against the supplied neighbour view and
-// produces a deduplicated FIB.
+// BuildFIB resolves a RIB dump against the complete neighbour snapshot and
+// produces a deduplicated FIB for the gateway's devices.
 //
-// A route is eligible only when its nexthop resolves in the neighbour view;
-// pass a device-filtered view to restrict a gateway to its own egress
-// devices. The best routes per source are chosen among the eligible routes,
-// so a gateway can fall back to a lower-priority route it can actually reach
-// rather than a globally best one it cannot.
+// Missing neighbours and resolved paths on excluded devices are counted
+// separately before best-per-source selection. Empty device names are ignored;
+// an effectively empty list accepts every device. Only locally eligible routes
+// compete, allowing fallback to a reachable lower-priority path.
 func BuildFIB(
 	ribDump maptrie.MapTrie[netip.Prefix, netip.Addr, rib.RoutesList],
 	neighbours neigh.NexthopCacheView,
+	devices []string,
 ) (FIB, FIBBuildStats) {
 	var stats FIBBuildStats
+	deviceSet := map[string]struct{}{}
+	for _, device := range devices {
+		if device != "" {
+			deviceSet[device] = struct{}{}
+		}
+	}
 
 	entries := make([]FIBEntry, 0)
 
@@ -69,9 +80,16 @@ func BuildFIB(
 
 			local := make([]rib.Route, 0, len(routesList.Routes))
 			for _, r := range routesList.Routes {
-				if _, ok := neighbours.Lookup(r.NextHop.Unmap()); !ok {
+				entry, ok := neighbours.Lookup(r.NextHop.Unmap())
+				if !ok {
 					stats.NeighbourNotFound++
 					continue
+				}
+				if len(deviceSet) != 0 {
+					if _, ok := deviceSet[entry.HardwareRoute.Device]; !ok {
+						stats.DeviceExcludedRoutes++
+						continue
+					}
 				}
 
 				local = append(local, r)
@@ -81,9 +99,6 @@ func BuildFIB(
 				continue
 			}
 
-			// The best route of each source is chosen among the resolvable
-			// routes only, so the gateway falls back to a reachable route
-			// when its source's best one has no neighbour.
 			localList := rib.RoutesList{Routes: local}
 			bestRoutes := localList.BestPerSource()
 			stats.FilteredRoutes += len(local) - len(bestRoutes)

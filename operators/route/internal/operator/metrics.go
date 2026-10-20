@@ -291,9 +291,15 @@ type fibGauges struct {
 	Entries metrics.Gauge
 	// Routes is the total number of routes seen by the last build.
 	Routes metrics.Gauge
-	// UnresolvedNexthops is the number of routes dropped for lack of a
-	// resolved neighbour.
+	// UnresolvedNexthops counts route records whose neighbours were missing
+	// in the last build's full snapshot; device ownership is unknown.
+	//
+	// Each gateway counts these records independently, so summing gateways
+	// does not give a unique-neighbour loss count.
 	UnresolvedNexthops metrics.Gauge
+	// DeviceExcludedRoutes counts resolved route records excluded by the
+	// gateway's device restriction in the last build.
+	DeviceExcludedRoutes metrics.Gauge
 	// SkippedPrefixes is the number of prefixes with no routes at all in
 	// the last build.
 	SkippedPrefixes metrics.Gauge
@@ -307,6 +313,7 @@ func (m *fibGauges) Store(stats FIBBuildStats) {
 	m.Entries.Store(float64(stats.PrefixesAdded))
 	m.Routes.Store(float64(stats.TotalRoutes))
 	m.UnresolvedNexthops.Store(float64(stats.NeighbourNotFound))
+	m.DeviceExcludedRoutes.Store(float64(stats.DeviceExcludedRoutes))
 	m.SkippedPrefixes.Store(float64(stats.SkippedPrefixes))
 	m.FilteredRoutes.Store(float64(stats.FilteredRoutes))
 }
@@ -377,6 +384,7 @@ func (m *GatewayMetrics) Collect() []*commonpb.Metric {
 			commonpb.NewMetricGauge("route_operator_fib_entries", g.Entries.Load(), labels...),
 			commonpb.NewMetricGauge("route_operator_fib_routes", g.Routes.Load(), labels...),
 			commonpb.NewMetricGauge("route_operator_fib_unresolved_nexthops", g.UnresolvedNexthops.Load(), labels...),
+			commonpb.NewMetricGauge("route_operator_fib_device_excluded_routes", g.DeviceExcludedRoutes.Load(), labels...),
 			commonpb.NewMetricGauge("route_operator_fib_skipped_prefixes", g.SkippedPrefixes.Load(), labels...),
 			commonpb.NewMetricGauge("route_operator_fib_filtered_routes", g.FilteredRoutes.Load(), labels...),
 		)
