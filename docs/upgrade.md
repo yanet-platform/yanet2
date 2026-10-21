@@ -3,6 +3,67 @@
 Manual steps required when upgrading an existing deployment. The packaging
 does not perform these automatically.
 
+## Gateway listeners move into `grpc` and `http` sections
+
+The gateway's `server` block now configures each protocol in a section of
+its own, `grpc` and `http`. A section takes an optional plaintext `endpoint`
+and an optional `tls` listener with its own `endpoint`, `cert_file` and
+`key_file`, so plaintext and TLS can run side by side while clients move to
+TLS one at a time.
+
+The old `endpoint`, `http_endpoint` and `tls` keys keep working as
+deprecated aliases until #2983 removes them, and the director logs a
+warning naming every one it finds. `endpoint` maps to `grpc.endpoint` and
+`http_endpoint` to `http.endpoint`; with `tls` set, both turn into the TLS
+listener of their section instead, as before. `[::1]:8080` stays the gRPC
+default only while neither `endpoint` nor `grpc` is given. A section
+replaces the old keys of its protocol, so old keys left beside it are
+ignored and named in the warning.
+
+The packaged `default.yaml` keeps the old keys until #2983, so it logs the
+warning, and the new sections appear in it as a commented example. A site
+config kept by dpkg keeps its old keys and keeps working; to move it,
+rewrite for example
+
+```yaml
+gateway:
+  server:
+    endpoint: "[::1]:8080"
+    http_endpoint: "[::1]:8081"
+    tls:
+      cert_file: /etc/yanet2/tls/server.pem
+      key_file: /etc/yanet2/tls/server.key
+```
+
+into the same listeners:
+
+```yaml
+gateway:
+  server:
+    grpc:
+      tls:
+        endpoint: "[::1]:8080"
+        cert_file: /etc/yanet2/tls/server.pem
+        key_file: /etc/yanet2/tls/server.key
+    http:
+      tls:
+        endpoint: "[::1]:8081"
+        cert_file: /etc/yanet2/tls/server.pem
+        key_file: /etc/yanet2/tls/server.key
+```
+
+Adding `grpc.endpoint` on another address then serves plaintext gRPC beside
+TLS for the clients that have not moved yet. An x509 authenticator needs
+the gRPC TLS listener: only that listener asks for client certificates,
+plaintext callers stay anonymous, and HTTPS never asks for one.
+
+Environment overrides follow the keys: `YANET_GATEWAY_SERVER_GRPC_ENDPOINT`,
+`YANET_GATEWAY_SERVER_GRPC_TLS_ENDPOINT`, `YANET_GATEWAY_SERVER_GRPC_TLS_CERT_FILE`
+and so on for the sections. Once a config uses a section, overrides of that
+protocol's old keys are ignored like the keys themselves. Until #2983,
+`YANET_GATEWAY_SERVER_HTTP_ENDPOINT` names both `http_endpoint` and
+`http.endpoint`, and setting it fails startup.
+
 ## Route operator separates device exclusions from unresolved nexthops
 
 `route_operator_fib_unresolved_nexthops` now counts route records whose
@@ -178,8 +239,9 @@ Instances are grouped under `yanet2-controlplane.target`, which the operators
 order against, so `systemctl restart yanet2-controlplane.target` reaches every
 running instance.
 
-Running more than one instance needs per-instance `endpoint`, `http_endpoint`
-and `memory_path` values in each config, and the operators point at
+Running more than one instance needs per-instance listener endpoints
+(`grpc` and `http`, or the deprecated `endpoint` and `http_endpoint`) and
+`memory_path` values in each config, and the operators point at
 `[::1]:8080` in their own configs.
 
 ## `instance_id` is now mandatory on the gateway and on every module and device

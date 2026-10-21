@@ -97,10 +97,9 @@ func serve(server *grpc.Server, listener net.Listener) error {
 // listener without a network hop.
 //
 // The transport credentials must match what the server behind the listener
-// expects: plaintext for a server without credentials, the pinned loopback
-// credentials for the gateway's own TLS server. The address is only the
-// label the registry tracks the backend by: where the proxied services are
-// reachable from outside, which is the gateway's own address.
+// expects. The address is only the label the registry tracks the backend
+// by: where the proxied services are reachable from outside, which is the
+// gateway's own address.
 func dialMemoryBackend(
 	endpoint string,
 	listener *bufconn.Listener,

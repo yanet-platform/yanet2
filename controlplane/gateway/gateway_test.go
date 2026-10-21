@@ -18,6 +18,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -29,7 +30,9 @@ import (
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/emptypb"
@@ -184,9 +187,6 @@ func newTestServerTLS(t *testing.T) (certFile, keyFile string, pool *x509.CertPo
 
 // Test_Gateway_HTTPProxy_ReachesBuiltinOverTLS verifies that with server TLS
 // configured the HTTP surface still reaches gateway-hosted services.
-//
-// Server credentials apply to every listener, the in-memory one included, so
-// the in-process loopback has to complete the handshake they impose.
 func Test_Gateway_HTTPProxy_ReachesBuiltinOverTLS(t *testing.T) {
 	t.Parallel()
 
@@ -236,6 +236,293 @@ func Test_Gateway_HTTPProxy_ReachesBuiltinOverTLS(t *testing.T) {
 
 	require.Equal(t, http.StatusOK, statusCode, string(body))
 	require.Contains(t, string(body), "controlplane.ynpb.v1.Gateway")
+}
+
+// newClientTLSCredentials returns client transport credentials trusting
+// only the certificates in pool.
+func newClientTLSCredentials(pool *x509.CertPool) credentials.TransportCredentials {
+	return credentials.NewTLS(&tls.Config{RootCAs: pool, MinVersion: tls.VersionTLS12})
+}
+
+// runGateway runs a gateway built from cfg and the given options until the
+// test ends, failing the test if the run ends with an error.
+//
+// A silent log applies before the given options, so they may replace it.
+func runGateway(t *testing.T, cfg gateway.Config, options ...gateway.GatewayOption) {
+	t.Helper()
+
+	defaults := []gateway.GatewayOption{gateway.WithLog(zap.NewNop())}
+	gw, err := gateway.NewGateway(cfg, append(defaults, options...)...)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = gw.Close() })
+
+	ctx, cancel := context.WithCancel(t.Context())
+	var group errgroup.Group
+	group.Go(func() error { return gw.Run(ctx) })
+	t.Cleanup(func() {
+		cancel()
+		require.NoError(t, group.Wait())
+	})
+}
+
+// newTLSListenerConfig returns a TLS listener config at endpoint serving the
+// given PEM pair.
+func newTLSListenerConfig(endpoint, certFile, keyFile string) *gateway.TLSListenerConfig {
+	return &gateway.TLSListenerConfig{
+		Endpoint: xcfg.MustNonEmptyString(endpoint),
+		TLSConfig: gateway.TLSConfig{
+			CertFile: xcfg.MustNonEmptyString(certFile),
+			KeyFile:  xcfg.MustNonEmptyString(keyFile),
+		},
+	}
+}
+
+// startDedicatedTLSGateway runs a gateway whose gRPC section serves
+// plaintext on one listener and TLS with the given PEM pair on another until
+// the test ends, returning both listeners.
+//
+// Both listeners are pre-bound and injected in place of the section's
+// endpoints. The given options apply after the listeners and a silent log.
+func startDedicatedTLSGateway(
+	t *testing.T,
+	cfg gateway.Config,
+	certFile, keyFile string,
+	options ...gateway.GatewayOption,
+) (plaintext, secure net.Listener) {
+	t.Helper()
+
+	plaintext = NewTestListener(t)
+	secure = NewTestListener(t)
+	cfg.Server.GRPC = &gateway.ListenerConfig{
+		Endpoint: plaintext.Addr().String(),
+		TLS:      newTLSListenerConfig(secure.Addr().String(), certFile, keyFile),
+	}
+
+	listeners := []gateway.GatewayOption{
+		gateway.WithListener(plaintext),
+		gateway.WithTLSListener(secure),
+	}
+	runGateway(t, cfg, append(listeners, options...)...)
+
+	return plaintext, secure
+}
+
+// dialGateway opens a client connection to address with the given transport
+// credentials, closed when the test ends.
+func dialGateway(t *testing.T, address string, transportCredentials credentials.TransportCredentials) *grpc.ClientConn {
+	t.Helper()
+
+	conn, err := grpc.NewClient(address, grpc.WithTransportCredentials(transportCredentials))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = conn.Close() })
+
+	return conn
+}
+
+// requireListServices fails the test unless conn reaches the gateway's own
+// service listing within a bounded wait.
+func requireListServices(t *testing.T, conn *grpc.ClientConn) {
+	t.Helper()
+
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+
+	_, err := ynpb.NewGatewayClient(conn).ListServices(ctx, &ynpb.ListServicesRequest{}, grpc.WaitForReady(true))
+	require.NoError(t, err)
+}
+
+// requireHTTPListServices fails the test unless the HTTP surface at baseURL
+// answers the gateway's own service listing within a bounded wait.
+func requireHTTPListServices(t *testing.T, client *http.Client, baseURL string) {
+	t.Helper()
+
+	url := baseURL + "/api/controlplane.ynpb.v1.Gateway/ListServices"
+
+	var body []byte
+	var statusCode int
+	require.Eventually(t, func() bool {
+		response, postErr := client.Post(url, "application/json", strings.NewReader("{}"))
+		if postErr != nil {
+			return false
+		}
+		defer func() { _ = response.Body.Close() }()
+
+		body, postErr = io.ReadAll(response.Body)
+		statusCode = response.StatusCode
+		return postErr == nil
+	}, 5*time.Second, 50*time.Millisecond, "HTTP proxy did not answer")
+
+	require.Equal(t, http.StatusOK, statusCode, string(body))
+	require.Contains(t, string(body), "controlplane.ynpb.v1.Gateway")
+}
+
+// Test_Gateway_DedicatedTLS_ServesEveryBackendKindOnBothListeners verifies
+// that with a gRPC section serving plaintext and TLS side by side, a
+// plaintext and a TLS client alike reach a built-in, an in-process and an
+// external service.
+func Test_Gateway_DedicatedTLS_ServesEveryBackendKindOnBothListeners(t *testing.T) {
+	t.Parallel()
+
+	certFile, keyFile, pool := newTestServerTLS(t)
+	plaintextListener, tlsListener := startDedicatedTLSGateway(
+		t, gateway.DefaultConfig(), certFile, keyFile, gateway.WithService(&healthService{}),
+	)
+
+	backendListener := NewTestListener(t)
+	backend := grpc.NewServer()
+	backend.RegisterService(&cancelProbeServiceDesc, &auditProbeServer{})
+	go func() { _ = backend.Serve(backendListener) }()
+	t.Cleanup(backend.Stop)
+
+	plaintext := dialGateway(t, plaintextListener.Addr().String(), insecure.NewCredentials())
+	secure := dialGateway(t, tlsListener.Addr().String(), newClientTLSCredentials(pool))
+
+	request := &ynpb.RegisterRequest{Backend: &ynpb.BackendDesc{
+		Name:     cancelProbeServiceName,
+		Endpoint: backendListener.Addr().String(),
+	}}
+	registerCtx, cancelRegister := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancelRegister()
+	_, err := ynpb.NewGatewayClient(plaintext).Register(registerCtx, request, grpc.WaitForReady(true))
+	require.NoError(t, err)
+
+	clients := []struct {
+		name string
+		conn *grpc.ClientConn
+	}{
+		{name: "plaintext", conn: plaintext},
+		{name: "TLS", conn: secure},
+	}
+	cases := []struct {
+		name  string
+		reach func(t *testing.T, conn *grpc.ClientConn)
+	}{
+		{
+			name:  "built-in",
+			reach: requireListServices,
+		},
+		{
+			name: "in-process",
+			reach: func(t *testing.T, conn *grpc.ClientConn) {
+				// The runner registers the module after Run starts, so the
+				// check is retried while the service is still unknown, each
+				// attempt under a deadline of its own.
+				var response *grpc_health_v1.HealthCheckResponse
+				require.Eventually(t, func() bool {
+					ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+					defer cancel()
+
+					var checkErr error
+					response, checkErr = grpc_health_v1.NewHealthClient(conn).Check(ctx, &grpc_health_v1.HealthCheckRequest{})
+					return checkErr == nil
+				}, 5*time.Second, 50*time.Millisecond, "in-process service did not answer")
+				require.Equal(t, grpc_health_v1.HealthCheckResponse_SERVING, response.GetStatus())
+			},
+		},
+		{
+			name: "external",
+			reach: func(t *testing.T, conn *grpc.ClientConn) {
+				ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+				defer cancel()
+
+				err := conn.Invoke(ctx, cancelProbeFullMethod, &emptypb.Empty{}, &emptypb.Empty{})
+				require.Equal(t, codes.FailedPrecondition, status.Code(err), "backend rejection must come back: %v", err)
+			},
+		},
+	}
+
+	for _, client := range clients {
+		for _, tc := range cases {
+			t.Run(client.name+" client reaches "+tc.name+" service", func(t *testing.T) {
+				tc.reach(t, client.conn)
+			})
+		}
+	}
+}
+
+// Test_Gateway_DedicatedTLS_TLSListenerRefusesPlaintextClient verifies that
+// a plaintext client is not served on the dedicated TLS listener, so the TLS
+// port never serves plaintext.
+func Test_Gateway_DedicatedTLS_TLSListenerRefusesPlaintextClient(t *testing.T) {
+	t.Parallel()
+
+	certFile, keyFile, pool := newTestServerTLS(t)
+	plaintextListener, tlsListener := startDedicatedTLSGateway(t, gateway.DefaultConfig(), certFile, keyFile)
+	tlsAddress := tlsListener.Addr().String()
+
+	// Both listeners already serve their own protocol, so the refusal below
+	// comes from the mismatch rather than from a gateway still starting.
+	requireListServices(t, dialGateway(t, plaintextListener.Addr().String(), insecure.NewCredentials()))
+	requireListServices(t, dialGateway(t, tlsAddress, newClientTLSCredentials(pool)))
+
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+
+	client := ynpb.NewGatewayClient(dialGateway(t, tlsAddress, insecure.NewCredentials()))
+	_, err := client.ListServices(ctx, &ynpb.ListServicesRequest{})
+	require.Equal(t, codes.Unavailable, status.Code(err), "%v", err)
+}
+
+// Test_Gateway_SectionsFromYAML_ReplaceDeprecatedEndpoint verifies that Run
+// binds the gRPC and HTTP sections decoded from YAML, plaintext and TLS
+// alike, and ignores the deprecated endpoint beside them, which points at an
+// occupied address.
+func Test_Gateway_SectionsFromYAML_ReplaceDeprecatedEndpoint(t *testing.T) {
+	t.Parallel()
+
+	certFile, keyFile, pool := newTestServerTLS(t)
+	occupied := NewTestListener(t)
+	plaintextAddress := newFreeAddress(t)
+	tlsAddress := newFreeAddress(t)
+	httpAddress := newFreeAddress(t)
+
+	text := "endpoint: " + strconv.Quote(occupied.Addr().String()) + "\n" +
+		"grpc:\n" +
+		"  endpoint: " + strconv.Quote(plaintextAddress) + "\n" +
+		"  tls:\n" +
+		"    endpoint: " + strconv.Quote(tlsAddress) + "\n" +
+		"    cert_file: " + strconv.Quote(certFile) + "\n" +
+		"    key_file: " + strconv.Quote(keyFile) + "\n" +
+		"http:\n" +
+		"  endpoint: " + strconv.Quote(httpAddress) + "\n"
+	cfg := gateway.DefaultConfig()
+	require.NoError(t, xcfg.Decode([]byte(text), &cfg.Server, xcfg.WithKnownFields()))
+
+	runGateway(t, cfg)
+
+	requireListServices(t, dialGateway(t, plaintextAddress, insecure.NewCredentials()))
+	requireListServices(t, dialGateway(t, tlsAddress, newClientTLSCredentials(pool)))
+	requireHTTPListServices(t, &http.Client{Timeout: 5 * time.Second}, "http://"+httpAddress)
+}
+
+// Test_Gateway_TLSOnly_HTTPSReachesBuiltin verifies that with gRPC served
+// over TLS alone, the HTTPS listener of the HTTP section still reaches a
+// built-in service through the in-memory loopback.
+func Test_Gateway_TLSOnly_HTTPSReachesBuiltin(t *testing.T) {
+	t.Parallel()
+
+	certFile, keyFile, pool := newTestServerTLS(t)
+	secure := NewTestListener(t)
+	httpsAddress := newFreeAddress(t)
+
+	cfg := gateway.DefaultConfig()
+	cfg.Server.GRPC = &gateway.ListenerConfig{
+		TLS: newTLSListenerConfig(secure.Addr().String(), certFile, keyFile),
+	}
+	cfg.Server.HTTP = &gateway.ListenerConfig{
+		TLS: newTLSListenerConfig(httpsAddress, certFile, keyFile),
+	}
+	runGateway(t, cfg, gateway.WithTLSListener(secure))
+
+	requireListServices(t, dialGateway(t, secure.Addr().String(), newClientTLSCredentials(pool)))
+
+	client := &http.Client{
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{RootCAs: pool, MinVersion: tls.VersionTLS12},
+		},
+		Timeout: 5 * time.Second,
+	}
+	requireHTTPListServices(t, client, "https://"+httpsAddress)
 }
 
 // lifecycleService is a Service recording that its background job ran and

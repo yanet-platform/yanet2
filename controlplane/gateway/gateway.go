@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"slices"
 	"sync"
 	"time"
 
@@ -15,7 +16,6 @@ import (
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
@@ -77,10 +77,11 @@ const errorReasonMetadataKey = "x-yanet-error-reason"
 const errorReasonServiceUnregistered = "service-unregistered"
 
 type gatewayOptions struct {
-	Services []serviceEntry
-	Log      *zap.Logger
-	LogLevel *zap.AtomicLevel
-	Listener net.Listener
+	Services    []serviceEntry
+	Log         *zap.Logger
+	LogLevel    *zap.AtomicLevel
+	Listener    net.Listener
+	TLSListener net.Listener
 }
 
 func newGatewayOptions() *gatewayOptions {
@@ -121,14 +122,30 @@ func WithAtomicLogLevel(level *zap.AtomicLevel) GatewayOption {
 }
 
 // WithListener hands the Gateway an already-open listener to serve instead
-// of binding cfg.Server.Endpoint itself.
+// of binding the gRPC endpoint the config names.
 //
-// Run serves this listener directly and never calls net.Listen. The server
-// closes it when it stops, and closing it again is a harmless net.ErrClosed
-// — close it yourself only if Run never runs.
+// It stands in for server.grpc.endpoint and serves plaintext, or for the
+// deprecated server.endpoint, which serves TLS while the deprecated
+// server.tls is set. Run serves this listener directly and never calls
+// net.Listen for it. The server closes it when it stops, and closing it
+// again is a harmless net.ErrClosed — close it yourself only if Run never
+// serves it.
 func WithListener(listener net.Listener) GatewayOption {
 	return func(o *gatewayOptions) {
 		o.Listener = listener
+	}
+}
+
+// WithTLSListener hands the Gateway an already-open listener to serve gRPC
+// over TLS on instead of binding server.grpc.tls.endpoint.
+//
+// It requires the server.grpc.tls section, whose certificate it serves.
+// Run serves this listener directly and never calls net.Listen for it. The
+// server closes it when it stops, and closing it again is a harmless
+// net.ErrClosed — close it yourself only if Run never serves it.
+func WithTLSListener(listener net.Listener) GatewayOption {
+	return func(o *gatewayOptions) {
+		o.TLSListener = listener
 	}
 }
 
@@ -163,14 +180,31 @@ type serviceRunner interface {
 //
 // Think of it as gRPC middleware if it were a single process.
 type Gateway struct {
-	cfg              Config
-	server           *grpc.Server
-	listener         net.Listener
+	cfg Config
+	// server is the plaintext gRPC server, which also serves the in-memory
+	// loopback.
+	server *grpc.Server
+	// secureServer is the TLS gRPC server, nil without a gRPC TLS listener.
+	secureServer     *grpc.Server
+	grpcListeners    []grpcListener
+	http             ListenerConfig
 	memoryListener   *bufconn.Listener
 	runners          []serviceRunner
 	registry         *BackendRegistry
 	readinessTracker *readiness.Tracker
 	log              *zap.Logger
+}
+
+// grpcListener is a network listener of one of the gateway's gRPC servers.
+type grpcListener struct {
+	// Scheme is how the listener is logged: grpcs for TLS, grpc otherwise.
+	Scheme string
+	// Server is the gRPC server the listener feeds.
+	Server *grpc.Server
+	// Listener is the injected listener, nil when Run binds the endpoint.
+	Listener net.Listener
+	// Endpoint is the configured address of the listener.
+	Endpoint string
 }
 
 // NewGateway creates a new Gateway API.
@@ -180,14 +214,35 @@ func NewGateway(cfg Config, options ...GatewayOption) (*Gateway, error) {
 		o(opts)
 	}
 	log := opts.Log
-	registry := NewBackendRegistry()
 
-	// Every backend hosted inside this process is labeled with the address it
-	// is reachable at from outside: the injected listener's, else the configured.
-	endpoint := cfg.Server.Endpoint
-	if opts.Listener != nil {
-		endpoint = opts.Listener.Addr().String()
+	plan := newListenerPlan(&cfg.Server)
+	if len(plan.Mapped) > 0 || len(plan.Ignored) > 0 {
+		log.Warn("deprecated gateway server keys, use server.grpc and server.http instead",
+			zap.Strings("mapped", plan.Mapped),
+			zap.Strings("ignored", plan.Ignored),
+			zap.String("issue", deprecatedKeysIssue),
+		)
 	}
+
+	// An injected TLS listener stands in for the endpoint of the gRPC TLS
+	// section and serves that section's certificate.
+	if opts.TLSListener != nil && (cfg.Server.GRPC == nil || cfg.Server.GRPC.TLS == nil) {
+		return nil, errors.New("TLS listener requires server.grpc.tls")
+	}
+
+	// The deprecated gRPC endpoint serves TLS while the deprecated TLS
+	// material is set, and so does a listener injected in its place.
+	listener, tlsListener := opts.Listener, opts.TLSListener
+	if cfg.Server.GRPC == nil && cfg.Server.TLS != nil {
+		listener, tlsListener = nil, opts.Listener
+	}
+
+	plaintext := listener != nil || plan.GRPC.Endpoint != ""
+	if !plaintext && plan.GRPC.TLS == nil {
+		return nil, errors.New("server.grpc needs an endpoint or a tls listener")
+	}
+
+	registry := NewBackendRegistry()
 
 	authManager, err := auth.NewManager(&cfg.Auth, auth.WithLog(log))
 	if err != nil {
@@ -195,9 +250,9 @@ func NewGateway(cfg Config, options ...GatewayOption) (*Gateway, error) {
 	}
 
 	// A client certificate is only ever verified in a TLS handshake, so an
-	// authenticator that reads one is dead without server TLS.
-	if authManager.ClientCAs() != nil && cfg.Server.TLS == nil {
-		return nil, errors.New("x509 authenticator requires server.tls")
+	// authenticator that reads one is dead without a gRPC TLS listener.
+	if authManager.ClientCAs() != nil && plan.GRPC.TLS == nil {
+		return nil, errors.New("x509 authenticator requires server.tls or server.grpc.tls")
 	}
 
 	authService := NewAuthService(authManager)
@@ -338,24 +393,8 @@ func NewGateway(cfg Config, options ...GatewayOption) (*Gateway, error) {
 			proxy.TransparentHandler(director),
 		),
 	}
-	if cfg.Server.TLS != nil {
-		var clientCAs func() *x509.CertPool
-		if authManager.ClientCAs() != nil {
-			clientCAs = authManager.ClientCAs
-		}
-
-		creds, err := cfg.Server.TLS.ServerCredentials(clientCAs)
-		if err != nil {
-			return nil, fmt.Errorf("load gateway TLS: %w", err)
-		}
-		serverOpts = append(serverOpts, grpc.Creds(creds))
-	}
-	server = grpc.NewServer(serverOpts...)
 
 	gatewayService := NewGatewayService(registry, WithGatewayServiceLog(log))
-	ynpb.RegisterGatewayServer(server, gatewayService)
-
-	ynpb.RegisterAuthServiceServer(server, authService)
 
 	// The gateway scope is set once at startup and has no heartbeat source,
 	// so it declares no expected freshness.
@@ -365,33 +404,86 @@ func NewGateway(cfg Config, options ...GatewayOption) (*Gateway, error) {
 		readiness.WithLog(log),
 	)
 	readinessSvc := NewReadinessService(rdTracker)
-	ynpb.RegisterReadinessServiceServer(server, readinessSvc)
-
 	metricsService := NewMetricsService(append(metricsCollectors(serverMetrics, opts.Services), authManager)...)
-	ynpb.RegisterMetricsServiceServer(server, metricsService)
-
 	portMetricsService := NewPortMetricsService(portMetricsCollectors(opts.Services)...)
-	ynpb.RegisterPortMetricsServiceServer(server, portMetricsService)
+
+	var builtins []Service
+	for _, entry := range opts.Services {
+		if entry.Kind == BackendKindBuiltin {
+			builtins = append(builtins, entry.Service)
+		}
+	}
+
+	// Both gRPC servers share the options, the interceptor instances and
+	// the services, and differ only in transport credentials.
+	newServer := func(options ...grpc.ServerOption) *grpc.Server {
+		server := grpc.NewServer(slices.Concat(serverOpts, options)...)
+		ynpb.RegisterGatewayServer(server, gatewayService)
+		ynpb.RegisterAuthServiceServer(server, authService)
+		ynpb.RegisterReadinessServiceServer(server, readinessSvc)
+		ynpb.RegisterMetricsServiceServer(server, metricsService)
+		ynpb.RegisterPortMetricsServiceServer(server, portMetricsService)
+		for _, service := range builtins {
+			service.RegisterService(server)
+		}
+
+		return server
+	}
+
+	// The plaintext server runs even without a plaintext gRPC listener: it
+	// serves the in-memory loopback.
+	server = newServer()
+
+	var grpcListeners []grpcListener
+	if plaintext {
+		grpcListeners = append(grpcListeners, grpcListener{
+			Scheme:   "grpc",
+			Server:   server,
+			Listener: listener,
+			Endpoint: plan.GRPC.Endpoint,
+		})
+	}
+
+	// Client certificates are asked for on the TLS server alone.
+	var secureServer *grpc.Server
+	if plan.GRPC.TLS != nil {
+		var clientCAs func() *x509.CertPool
+		if authManager.ClientCAs() != nil {
+			clientCAs = authManager.ClientCAs
+		}
+
+		creds, err := plan.GRPC.TLS.ServerCredentials(clientCAs)
+		if err != nil {
+			return nil, fmt.Errorf("load gateway TLS: %w", err)
+		}
+		secureServer = newServer(grpc.Creds(creds))
+		grpcListeners = append(grpcListeners, grpcListener{
+			Scheme:   "grpcs",
+			Server:   secureServer,
+			Listener: tlsListener,
+			Endpoint: plan.GRPC.TLS.Endpoint.Unwrap(),
+		})
+	}
+
+	// Every backend hosted inside this process is labeled with the address it
+	// is reachable at from outside: the plaintext gRPC listener's, else the
+	// TLS one's, injected or configured.
+	endpoint := grpcListeners[0].Endpoint
+	if grpcListeners[0].Listener != nil {
+		endpoint = grpcListeners[0].Listener.Addr().String()
+	}
 
 	// Gateway-hosted services are reached through one in-memory connection
-	// back into this server, a backend for the HTTP surface and the registry.
+	// back into the plaintext server, a backend for the HTTP surface and the
+	// registry.
 	//
 	// No network hop is involved, and the interceptor chain still runs on every
 	// request that comes through it. External backends (from the Register RPC)
 	// each get their own network connection via RegisterBackend in the
-	// registration loop.
-	// The loopback completes the handshake the server credentials impose on
-	// every listener, so under TLS it pins the gateway's own certificate.
-	loopbackCreds := credentials.TransportCredentials(insecure.NewCredentials())
-	if cfg.Server.TLS != nil {
-		loopbackCreds, err = cfg.Server.TLS.LoopbackCredentials()
-		if err != nil {
-			return nil, fmt.Errorf("failed to build loopback TLS credentials: %w", err)
-		}
-	}
-
+	// registration loop. A connection that never leaves the process runs no
+	// TLS.
 	memoryListener := newMemoryListener()
-	loopback, err := dialMemoryBackend(endpoint, memoryListener, loopbackCreds)
+	loopback, err := dialMemoryBackend(endpoint, memoryListener, insecure.NewCredentials())
 	if err != nil {
 		return nil, fmt.Errorf("failed to create loopback backend for gateway-hosted services: %w", err)
 	}
@@ -415,10 +507,8 @@ func NewGateway(cfg Config, options ...GatewayOption) (*Gateway, error) {
 	for _, entry := range opts.Services {
 		switch entry.Kind {
 		case BackendKindBuiltin:
-			// Shared-server service: register on the gateway's gRPC server and
-			// point every service name at the shared loopback backend.
-			entry.Service.RegisterService(server)
-
+			// Shared-server service: registered on the gateway's gRPC servers
+			// above, every service name points at the shared loopback backend.
 			for _, name := range entry.Service.ServicesNames() {
 				registry.RegisterBackend(name, loopback, entry.Kind)
 				log.Info("registered service in registry",
@@ -440,7 +530,9 @@ func NewGateway(cfg Config, options ...GatewayOption) (*Gateway, error) {
 	return &Gateway{
 		cfg:              cfg,
 		server:           server,
-		listener:         opts.Listener,
+		secureServer:     secureServer,
+		grpcListeners:    grpcListeners,
+		http:             plan.HTTP,
 		memoryListener:   memoryListener,
 		runners:          runners,
 		registry:         registry,
@@ -487,26 +579,35 @@ func (m *Gateway) pendingRunners() []serviceRunner {
 func (m *Gateway) Run(ctx context.Context) error {
 	m.log.Info("starting gRPC gateway")
 
-	listener := m.listener
-	if listener == nil {
-		var err error
-		listener, err = net.Listen("tcp", m.cfg.Server.Endpoint)
+	// Every gRPC listener is bound before any is served.
+	listeners := slices.Clone(m.grpcListeners)
+	for idx := range listeners {
+		if listeners[idx].Listener != nil {
+			continue
+		}
+
+		listener, err := net.Listen("tcp", listeners[idx].Endpoint)
 		if err != nil {
 			return fmt.Errorf("failed to initialize gRPC listener: %w", err)
 		}
+		listeners[idx].Listener = listener
 	}
-
-	m.log.Info("exposing gRPC gateway", zap.Stringer("addr", listener.Addr()))
 
 	wg, ctx := errgroup.WithContext(ctx)
 
-	wg.Go(func() error {
-		return serve(m.server, listener)
-	})
+	for _, entry := range listeners {
+		m.log.Info("exposing gRPC gateway",
+			zap.String("scheme", entry.Scheme),
+			zap.Stringer("addr", entry.Listener.Addr()),
+		)
+		wg.Go(func() error {
+			return serve(entry.Server, entry.Listener)
+		})
+	}
 	wg.Go(func() error {
 		return serve(m.server, m.memoryListener)
 	})
-	if m.cfg.Server.HTTPEndpoint != "" {
+	if m.http.Endpoint != "" || m.http.TLS != nil {
 		wg.Go(func() error {
 			return m.runHTTPServer(ctx)
 		})
@@ -560,16 +661,41 @@ func (m *Gateway) Run(ctx context.Context) error {
 
 	m.readinessTracker.Drain()
 
-	m.log.Info("stopping gRPC gateway", zap.Stringer("addr", listener.Addr()))
-	defer m.log.Info("stopped gRPC gateway", zap.Stringer("addr", listener.Addr()))
-
-	commonxgrpc.StopGracefully(m.server, commonxgrpc.GracefulStopTimeout, func() {
-		m.log.Warn("graceful stop timed out, forcing shutdown",
-			zap.Duration("grace_period", commonxgrpc.GracefulStopTimeout),
+	for _, entry := range listeners {
+		m.log.Info("stopping gRPC gateway",
+			zap.String("scheme", entry.Scheme),
+			zap.Stringer("addr", entry.Listener.Addr()),
 		)
-	})
+	}
 
-	return wg.Wait()
+	// The servers stop in parallel, so a shutdown waits out one grace period
+	// rather than one per server.
+	var stops errgroup.Group
+	for _, server := range []*grpc.Server{m.server, m.secureServer} {
+		if server == nil {
+			continue
+		}
+
+		stops.Go(func() error {
+			commonxgrpc.StopGracefully(server, commonxgrpc.GracefulStopTimeout, func() {
+				m.log.Warn("graceful stop timed out, forcing shutdown",
+					zap.Duration("grace_period", commonxgrpc.GracefulStopTimeout),
+				)
+			})
+			return nil
+		})
+	}
+	_ = stops.Wait()
+
+	err := wg.Wait()
+	for _, entry := range listeners {
+		m.log.Info("stopped gRPC gateway",
+			zap.String("scheme", entry.Scheme),
+			zap.Stringer("addr", entry.Listener.Addr()),
+		)
+	}
+
+	return err
 }
 
 // runRegistrySweeper periodically evicts stale external backends from the
@@ -629,10 +755,11 @@ func (m *Gateway) runRegistrySweeper(ctx context.Context) error {
 }
 
 // runHTTPServer runs the HTTP server that provides access to gRPC services
-// via HTTP.
+// via HTTP, one server on its plaintext and TLS listeners alike.
+//
+// A listener that fails to bind or to serve ends the run with its error.
 func (m *Gateway) runHTTPServer(ctx context.Context) error {
 	server := &http.Server{
-		Addr: m.cfg.Server.HTTPEndpoint,
 		Handler: httpproxy.GzipMiddleware(
 			httpproxy.NewHTTPHandler(
 				m.registry,
@@ -641,36 +768,65 @@ func (m *Gateway) runHTTPServer(ctx context.Context) error {
 		),
 	}
 
+	type httpListener struct {
+		Scheme   string
+		Listener net.Listener
+		Serve    func(listener net.Listener) error
+	}
+
+	var listeners []httpListener
+	if endpoint := m.http.Endpoint; endpoint != "" {
+		listener, err := net.Listen("tcp", endpoint)
+		if err != nil {
+			return fmt.Errorf("failed to serve: %w", err)
+		}
+		listeners = append(listeners, httpListener{Scheme: "http", Listener: listener, Serve: server.Serve})
+	}
+	if config := m.http.TLS; config != nil {
+		listener, err := net.Listen("tcp", config.Endpoint.Unwrap())
+		if err != nil {
+			return fmt.Errorf("failed to serve: %w", err)
+		}
+		// The server has no TLS config of its own, so HTTPS never asks for a
+		// client certificate.
+		serveTLS := func(listener net.Listener) error {
+			return server.ServeTLS(listener, config.CertFile.Unwrap(), config.KeyFile.Unwrap())
+		}
+		listeners = append(listeners, httpListener{Scheme: "https", Listener: listener, Serve: serveTLS})
+	}
+
+	group, ctx := errgroup.WithContext(ctx)
+
 	// Set up graceful shutdown.
-	go func() {
+	group.Go(func() error {
 		<-ctx.Done()
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 
-		m.log.Info("shutting down HTTP server", zap.String("addr", m.cfg.Server.HTTPEndpoint))
+		for _, entry := range listeners {
+			m.log.Info("shutting down HTTP server",
+				zap.String("scheme", entry.Scheme),
+				zap.Stringer("addr", entry.Listener.Addr()),
+			)
+		}
 		if err := server.Shutdown(shutdownCtx); err != nil {
 			m.log.Warn("failed to shut down HTTP server", zap.Error(err))
 		}
-	}()
+		return nil
+	})
 
-	scheme := "http"
-	listen := server.ListenAndServe
-	if tlsCfg := m.cfg.Server.TLS; tlsCfg != nil {
-		scheme = "https"
-		cert, key := tlsCfg.CertFile.Unwrap(), tlsCfg.KeyFile.Unwrap()
-
-		listen = func() error {
-			return server.ListenAndServeTLS(cert, key)
-		}
+	for _, entry := range listeners {
+		m.log.Info("exposing HTTP <-> gRPC gateway",
+			zap.String("scheme", entry.Scheme),
+			zap.Stringer("addr", entry.Listener.Addr()),
+		)
+		group.Go(func() error {
+			if err := entry.Serve(entry.Listener); err != http.ErrServerClosed {
+				return fmt.Errorf("failed to serve: %w", err)
+			}
+			return nil
+		})
 	}
 
-	m.log.Info("exposing HTTP <-> gRPC gateway",
-		zap.String("scheme", scheme),
-		zap.String("addr", m.cfg.Server.HTTPEndpoint),
-	)
-	if err := listen(); err != http.ErrServerClosed {
-		return fmt.Errorf("failed to serve: %w", err)
-	}
-
-	return nil
+	return group.Wait()
 }

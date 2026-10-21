@@ -14,15 +14,33 @@ gateway:
   # value but must be written down.
   instance_id: 0
   server:
+    # Deprecated listener keys, kept here until issue #2983 removes them, so
+    # the director logs a deprecation warning. With tls set, endpoint and
+    # http_endpoint serve TLS instead of plaintext.
     endpoint: "[::1]:8080"
     http_endpoint: "[::1]:8081"
-    # TLS is optional. When present both gRPC and HTTP listeners use it.
-    # The certificate only has to match the hosts clients dial: the
-    # director's own in-process loopback pins this certificate and needs
-    # no name for it. Cert rotation requires a director restart.
     # tls:
     #   cert_file: /etc/yanet2/tls/server.pem
     #   key_file:  /etc/yanet2/tls/server.key
+    # The grpc and http sections replace these keys, each for its own
+    # protocol. A section takes a plaintext endpoint, a TLS listener, or both
+    # side by side, so clients can move to TLS one at a time.
+    #
+    # Both listeners serve every service. The certificate only has to match
+    # the hosts clients dial; cert rotation requires a director restart. The
+    # gRPC TLS listener alone asks for client certificates; HTTPS never does.
+    # grpc:
+    #   endpoint: "[::1]:8080"
+    #   tls:
+    #     endpoint: "[::1]:8443"
+    #     cert_file: /etc/yanet2/tls/server.pem
+    #     key_file:  /etc/yanet2/tls/server.key
+    # http:
+    #   endpoint: "[::1]:8081"
+    #   tls:
+    #     endpoint: "[::1]:8444"
+    #     cert_file: /etc/yanet2/tls/server.pem
+    #     key_file:  /etc/yanet2/tls/server.key
   # auth:
     # Audit admits RPCs after transport TLS checks and logs verified identities.
     # Enabled enforces identity lookup and permissions; disabled is anonymous.
@@ -49,7 +67,9 @@ gateway:
     #   # verified common name.
     #   #
     #   # Enabled mode requires this name in the identities file; audit records
-    #   # it directly. Requires server.tls. Revocation lists are optional and
+    #   # it directly. Requires a gRPC TLS listener (server.grpc.tls, or the
+    #   # deprecated server.tls), the only listener that checks certificates;
+    #   # plaintext callers stay anonymous. Revocation lists are optional and
     #   # must be signed by one of the authorities.
     #   - type: x509
     #     config:
