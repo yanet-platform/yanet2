@@ -157,15 +157,49 @@ cp_config_reclaim_unused_agents_locked(struct cp_config *cp_config) {
 }
 
 void
+cp_config_reclaim_unused_agents(struct cp_config *cp_config) {
+	if (cp_config == NULL) {
+		return;
+	}
+
+	// The sweep waits out a busy agent lock rather than leaving the
+	// reclamation to a later holder. Waiting is safe: no agent-lock
+	// holder ever waits for the configuration lock, and every
+	// agent-lock section is short. A configuration lock held by the
+	// calling thread means the caller's own exit path sweeps before
+	// releasing it.
+	if (cp_config_locked_by_thread != cp_config) {
+		spinlock_lock(&cp_config->agent_lock);
+		cp_config_reclaim_unused_agents_locked(cp_config);
+		spinlock_unlock(&cp_config->agent_lock);
+	}
+}
+
+void
 agent_destroy_released(struct agent *agent) {
 	if (agent == NULL) {
 		return;
 	}
 
+	// The configuration is captured before the subtraction: once the
+	// count reaches zero a concurrent sweep may reclaim the agent, and
+	// nothing of the agent may be read past that point.
+	struct cp_config *cp_config = ADDR_OF(&agent->cp_config);
+
 	// The release half publishes the caller's typed destructor and
 	// everything before it, so the sweep that observes the resulting
 	// zero reclaims the arena ordered after those accesses.
-	__atomic_sub_fetch(&agent->loaded_entity_count, 1, __ATOMIC_RELEASE);
+	//
+	// A drop that releases the last live reference runs that sweep
+	// itself: a typed destroy has no reason to stay lock-free, and
+	// leaving the reclamation to a later holder waits on one that may
+	// never come. A caller already holding the configuration lock is
+	// on a path that sweeps before releasing it.
+	if (__atomic_sub_fetch(
+		    &agent->loaded_entity_count, 1, __ATOMIC_RELEASE
+	    ) == 0) {
+		cp_config_reclaim_unused_agents(cp_config);
+	}
 }
 
 // Release every item of a retiring registry and mirror the drops into

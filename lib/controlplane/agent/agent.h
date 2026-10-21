@@ -93,8 +93,24 @@ struct agent {
 struct dp_config *
 agent_dp_config(struct agent *agent);
 
+// Free the agent's memory outright, arenas and storages included. Safe only
+// for an agent no registry slot or predecessor chain references: the
+// unlocked attach error paths and the sweep use it after unlinking.
 void
 agent_cleanup(struct agent *agent);
+
+// Deregister the agent from its configuration and free it outright,
+// references or not.
+//
+// Any chain link to it is unlinked, and its registry slot goes to its
+// predecessor or, for a sole agent, out of a registry rebuilt without
+// the emptied slot. The force-teardown counterpart to the no-op
+// detach, for harnesses and tests that discard their agent without
+// draining generations first. A registry that cannot shrink returns
+// the agent registered with an error. After a success, no sweep of
+// the configuration can reach the agent's memory.
+int
+agent_destroy(struct agent *agent);
 
 struct cp_module;
 
@@ -114,7 +130,10 @@ agent_unload_references(struct agent **owners, uint64_t count);
 //
 // The hold keeps the agent reclaimable-safe while a caller runs a typed
 // destructor unlocked; capture the agent pointer before the destructor
-// frees the item it came from.
+// frees the item it came from. A drop that releases the agent's last
+// live reference runs the superseded-agent sweep itself, so a
+// superseded agent does not stay allocated waiting for an unrelated
+// update or listing to reclaim it.
 void
 agent_destroy_released(struct agent *agent);
 

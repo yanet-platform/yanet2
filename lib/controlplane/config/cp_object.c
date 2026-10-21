@@ -1,4 +1,5 @@
 #include "cp_object.h"
+#include "reclaim.h"
 
 #include "common/container_of.h"
 #include "lib/dataplane/config/zone.h"
@@ -233,6 +234,10 @@ cp_object_try_destroy(struct cp_object *self, yanet_error **err) {
 	}
 
 	if (cp_config != NULL) {
+		// Every completed hold of the locks sweeps: what the gate
+		// leaves unreferenced is reclaimed by its own exit, not by
+		// an unrelated later holder.
+		cp_config_reclaim_unused_agents_locked(cp_config);
 		spinlock_unlock(&cp_config->agent_lock);
 		cp_config_unlock(cp_config);
 	}

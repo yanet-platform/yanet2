@@ -108,6 +108,29 @@ test(
   timeout: 90,
 )
 
+agent_reclaim_test = executable(
+  'agent_reclaim_test',
+  ['agent_reclaim_test.c'],
+  dependencies: [
+    lib_dataplane_ut_dep,
+    lib_logging_dep,
+    lib_errors_dep,
+    lib_dev_plain_api_dep,
+    lib_agent_cp_dep,
+    lib_config_cp_dep,
+    lib_dev_plain_dp_dep,
+    libdpdk_test_dep,
+  ],
+  include_directories: yanet_rootdir,
+)
+
+test(
+  'agent_reclaim',
+  agent_reclaim_test,
+  suite: ['lib'],
+  timeout: 90,
+)
+
 device_list_thread_dep = dependency('threads')
 
 device_list_test = executable(

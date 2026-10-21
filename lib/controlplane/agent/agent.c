@@ -401,10 +401,16 @@ agent_attach(
 		SET_OFFSET_OF(&cp_config->agent_registry, new_registry);
 	}
 
-	cp_config_reclaim_unused_agents_locked(cp_config);
 	spinlock_unlock(&cp_config->agent_lock);
 
 unlock:
+	// Every completed hold of the configuration lock sweeps, the
+	// failed attaches included. No incoming path holds the agent lock
+	// here: the failure legs release it before jumping, and the
+	// success path falls through from its release above.
+	spinlock_lock(&cp_config->agent_lock);
+	cp_config_reclaim_unused_agents_locked(cp_config);
+	spinlock_unlock(&cp_config->agent_lock);
 	cp_config_unlock(cp_config);
 
 	return new_agent;
@@ -544,6 +550,106 @@ int
 agent_detach(struct agent *agent) {
 	(void)agent;
 	// NOTE: Currently a no-op.
+	return 0;
+}
+
+int
+agent_destroy(struct agent *agent) {
+	if (agent == NULL) {
+		return 0;
+	}
+
+	struct cp_config *cp_config = ADDR_OF(&agent->cp_config);
+	if (cp_config == NULL) {
+		agent_cleanup(agent);
+		return 0;
+	}
+
+	cp_config_lock(cp_config);
+	spinlock_lock(&cp_config->agent_lock);
+
+	// Remove every registry reference to the agent, so no later sweep
+	// of the configuration can walk into the memory freed below. A
+	// predecessor chain naming it is unlinked first; its own slot, when
+	// it has one, goes to its predecessor. A sole agent leaves no
+	// predecessor, and every slot must name an agent, so the registry
+	// is rebuilt without the emptied slot instead.
+	struct cp_agent_registry *registry =
+		ADDR_OF(&cp_config->agent_registry);
+	if (registry != NULL) {
+		for (uint64_t idx = 0; idx < registry->count; ++idx) {
+			struct agent *chain = ADDR_OF(&registry->agents[idx]);
+			while (chain != NULL && ADDR_OF(&chain->prev) != NULL) {
+				if (ADDR_OF(&chain->prev) == agent) {
+					SET_OFFSET_OF(
+						&chain->prev,
+						ADDR_OF(&agent->prev)
+					);
+					break;
+				}
+				chain = ADDR_OF(&chain->prev);
+			}
+		}
+		for (uint64_t idx = 0; idx < registry->count; ++idx) {
+			if (ADDR_OF(&registry->agents[idx]) != agent) {
+				continue;
+			}
+			struct agent *predecessor = ADDR_OF(&agent->prev);
+			if (predecessor != NULL) {
+				SET_OFFSET_OF(
+					&registry->agents[idx], predecessor
+				);
+				break;
+			}
+			// The registry allocation always matches the live
+			// slot count — the growth path frees the old array
+			// by that size — so the emptied slot is squeezed
+			// out with the same copy-swap, and a failed
+			// allocation leaves the agent registered rather
+			// than the invariant broken.
+			struct cp_agent_registry *new_registry =
+				(struct cp_agent_registry *)memory_balloc(
+					&cp_config->memory_context,
+					sizeof(struct cp_agent_registry) +
+						(registry->count - 1) *
+							sizeof(struct agent *)
+				);
+			if (new_registry == NULL) {
+				spinlock_unlock(&cp_config->agent_lock);
+				cp_config_unlock(cp_config);
+				errno = ENOMEM;
+				return -1;
+			}
+			new_registry->count = registry->count - 1;
+			for (uint64_t copy = 0; copy < idx; ++copy) {
+				SET_OFFSET_OF(
+					&new_registry->agents[copy],
+					ADDR_OF(&registry->agents[copy])
+				);
+			}
+			for (uint64_t copy = idx; copy < new_registry->count;
+			     ++copy) {
+				SET_OFFSET_OF(
+					&new_registry->agents[copy],
+					ADDR_OF(&registry->agents[copy + 1])
+				);
+			}
+			memory_bfree(
+				&cp_config->memory_context,
+				registry,
+				sizeof(struct cp_agent_registry) +
+					sizeof(struct agent *) * registry->count
+			);
+			SET_OFFSET_OF(&cp_config->agent_registry, new_registry);
+			break;
+		}
+	}
+
+	agent_cleanup(agent);
+	// Every completed hold of the locks sweeps, this holder included.
+	cp_config_reclaim_unused_agents_locked(cp_config);
+	spinlock_unlock(&cp_config->agent_lock);
+	cp_config_unlock(cp_config);
 	return 0;
 }
 
