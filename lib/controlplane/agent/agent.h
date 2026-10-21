@@ -121,7 +121,10 @@ agent_unload_references(
 //
 // The hold keeps the agent reclaimable-safe while a caller runs a typed
 // destructor unlocked; capture the agent pointer before the destructor
-// frees the item it came from.
+// frees the item it came from. A drop that releases the agent's last live
+// reference also triggers the opportunistic superseded-agent sweep, so a
+// superseded agent does not stay allocated waiting for an unrelated update
+// or listing to reclaim it.
 void
 agent_destroy_released(struct agent *agent, enum agent_reference_kind kind);
 

@@ -1,4 +1,5 @@
 #include "cp_device.h"
+#include "reclaim.h"
 
 #include "common/container_of.h"
 
@@ -517,6 +518,11 @@ cp_device_try_destroy(struct cp_device *self, yanet_error **err) {
 	}
 
 	if (cp_config != NULL) {
+		// Every completed hold of the configuration lock sweeps, so a
+		// generation release that finds this destroy gate holding the
+		// lock is never left deferring to a holder that will not
+		// reclaim.
+		cp_config_reclaim_unused_agents_locked(cp_config);
 		cp_config_unlock(cp_config);
 	}
 
