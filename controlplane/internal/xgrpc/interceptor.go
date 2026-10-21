@@ -7,6 +7,9 @@ import (
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/peer"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
@@ -31,8 +34,10 @@ type ProtoLogValue interface {
 
 // AccessLogInterceptor logs sanitized requests and unary RPC completion.
 //
-// Completion records identity, duration, and handler status. Credential
-// introspection failures omit parser details that may contain token fragments.
+// Completion records identity, duration, handler status, and how the call
+// arrived: transport (tls, plain or memory), peer address and user agent.
+// Credential introspection failures omit parser details that may contain
+// token fragments.
 func AccessLogInterceptor(log *zap.Logger) grpc.UnaryServerInterceptor {
 	return func(
 		ctx context.Context,
@@ -64,6 +69,9 @@ func AccessLogInterceptor(log *zap.Logger) grpc.UnaryServerInterceptor {
 
 // StreamAccessLogInterceptor logs streaming RPC completion without inspecting
 // message contents or changing the handler outcome.
+//
+// Completion carries the same identity, transport, peer and user agent
+// fields as the unary access log.
 func StreamAccessLogInterceptor(log *zap.Logger) grpc.StreamServerInterceptor {
 	return func(
 		server any,
@@ -102,6 +110,7 @@ func logCompletion(
 			zap.Bool("is_anonymous", principal.IsAnonymous),
 		)
 	}
+	fields = append(fields, connectionFields(ctx)...)
 
 	if err != nil {
 		// Credential parsing errors may contain fragments of the supplied token.
@@ -112,6 +121,42 @@ func logCompletion(
 	} else {
 		log.Info("completed gRPC execution", fields...)
 	}
+}
+
+// connectionFields describes how a call arrived, as received from the peer.
+//
+// A call over an in-process memory listener, a bufconn one in the gateway,
+// is reported as memory, never plain, so plain entries are exactly the calls
+// served on a plaintext gRPC listener. HTTP requests reach built-in services
+// through such a listener and are logged as memory.
+func connectionFields(ctx context.Context) []zap.Field {
+	transport, address := "plain", ""
+	if info, ok := peer.FromContext(ctx); ok && info.Addr != nil {
+		address = info.Addr.String()
+		switch {
+		case isTLS(info.AuthInfo):
+			transport = "tls"
+		case info.Addr.Network() == "bufconn":
+			transport = "memory"
+		}
+	}
+
+	userAgent := ""
+	if values := metadata.ValueFromIncomingContext(ctx, "user-agent"); len(values) > 0 {
+		userAgent = values[0]
+	}
+
+	return []zap.Field{
+		zap.String("transport", transport),
+		zap.String("peer", address),
+		zap.String("user_agent", userAgent),
+	}
+}
+
+// isTLS reports whether the peer's authentication came from a TLS handshake.
+func isTLS(authInfo credentials.AuthInfo) bool {
+	_, ok := authInfo.(credentials.TLSInfo)
+	return ok
 }
 
 // protoMarshaler wraps a proto.Message to implement zapcore.ObjectMarshaler.
