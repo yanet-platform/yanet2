@@ -17,4 +17,5 @@ protoc_gen = custom_target(
     ],
     build_by_default: true,
 )
+go_proto_targets += protoc_gen
 bird_adapter_protoc_gen = protoc_gen

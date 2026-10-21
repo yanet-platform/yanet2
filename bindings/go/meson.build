@@ -70,7 +70,7 @@ cgo_packages += {
     ],
   },
   'modules/l3b/bindings/go/cl3b': {
-    'libraries': [lib_l3b_cp, lib_filter_compiler, lib_statemap],
+    'libraries': [lib_l3b_cp, lib_classify_compiler, lib_statemap],
   },
   'modules/mirror/bindings/go/cmirror': {
     'libraries': [lib_mirror_cp, lib_classify_compiler],
@@ -94,7 +94,7 @@ cgo_packages += {
     'libraries': [lib_fwstate_objects, lib_statemap, lib_counters],
   },
   'objects/l3b/bindings/go/cl3bobject': {
-    'libraries': [lib_l3b_objects, lib_filter_compiler, lib_statemap, lib_l3state, lib_counters],
+    'libraries': [lib_l3b_objects, lib_classify_compiler, lib_statemap, lib_l3state, lib_counters],
   },
   'objects/ring/bindings/go/cring': {
     'libraries': [lib_ring_objects],
@@ -137,6 +137,7 @@ cgo_packages += {
       lib_config_cp,
       lib_counters,
       lib_errors,
+      lib_classify_compiler,
       lib_filter_compiler,
       lib_fwstate,
       lib_statemap,
@@ -203,6 +204,7 @@ cgo_packages += {
     'libraries': [
       lib_l3b_dp,
       lib_l3b_objects,
+      lib_classify_compiler,
       lib_config_dp,
       lib_module_dp,
       lib_packet_dp,
@@ -215,6 +217,9 @@ cgo_packages += {
       lib_errors,
       lib_logging,
     ],
+  },
+  'modules/l3b/tests/internal/probe': {
+    'libraries': [lib_l3b_objects, lib_classify_compiler, lib_statemap, lib_l3state, lib_counters],
   },
   'modules/nat64/tests/dataplane': {
     'libraries': [lib_nat64_dp, lib_nat64_cp, lib_packet_dp, lib_logging, lib_errors],

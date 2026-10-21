@@ -111,11 +111,6 @@ jobs:
       - name: Install Go Protobuf Plugins
         uses: ./.github/actions/protoc-plugins
 
-      - name: Build YANET (sanitize)
-        run: |
-          meson setup build -Dbuildtype=debug -Doptimization=0 -Db_sanitize=address,undefined
-          make dataplane
-
       - name: Build and run tests (sanitize)
         run: make test-asan-only
 

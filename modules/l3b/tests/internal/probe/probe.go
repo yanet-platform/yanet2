@@ -4,9 +4,11 @@ package probe
 #cgo CFLAGS: -I../../../../../ -I../../../../../lib
 #cgo CFLAGS: -I../../../../../modules/l3b/dataplane
 #cgo CFLAGS: -I../../../../../build/subprojects/dpdk/lib
-#cgo CFLAGS: -D_GNU_SOURCE -march=haswell
+#cgo CFLAGS: -D_GNU_SOURCE
 #cgo CFLAGS: -I../../../../../build/subprojects/dpdk -I../../../../../subprojects/dpdk/config
-#cgo CFLAGS: -I../../../../../subprojects/dpdk/lib/eal/include -I../../../../../subprojects/dpdk/lib/eal/linux/include -I../../../../../subprojects/dpdk/lib/eal/x86/include
+#cgo CFLAGS: -I../../../../../subprojects/dpdk/lib/eal/include -I../../../../../subprojects/dpdk/lib/eal/linux/include
+#cgo amd64 CFLAGS: -march=haswell -I../../../../../subprojects/dpdk/lib/eal/x86/include
+#cgo arm64 CFLAGS: -I../../../../../subprojects/dpdk/lib/eal/arm/include
 #cgo CFLAGS: -I../../../../../subprojects/dpdk/lib/mbuf -I../../../../../subprojects/dpdk/lib/mempool -I../../../../../subprojects/dpdk/lib/ring
 #cgo CFLAGS: -I../../../../../subprojects/dpdk/lib/log -I../../../../../subprojects/dpdk/lib/net
 #cgo LDFLAGS: -L../../../../../build/objects/l3b/api -ll3b_objects

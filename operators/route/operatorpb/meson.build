@@ -27,6 +27,7 @@ protoc_gen = custom_target(
     ],
     build_by_default: true,
 )
+go_proto_targets += protoc_gen
 route_operator_protoc_gen = protoc_gen
 
 # Readiness proto imports common/readinesspb, so it must be compiled with
@@ -54,3 +55,4 @@ route_operator_readiness_protoc_gen = custom_target(
     ],
     build_by_default: true,
 )
+go_proto_targets += route_operator_readiness_protoc_gen

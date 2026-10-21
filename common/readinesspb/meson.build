@@ -19,3 +19,4 @@ common_readiness_protoc_gen = custom_target(
     ],
     build_by_default: true,
 )
+go_proto_targets += common_readiness_protoc_gen
