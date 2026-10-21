@@ -262,16 +262,11 @@ cp_config_gen_release(
 
 	// The teardown may have left a superseded agent unreferenced, and
 	// this release is the last event guaranteed to observe it, so the
-	// sweep waits for the agent lock rather than leaving reclamation to
-	// a later mutation. Blocking is safe: no agent-lock holder ever
-	// waits for the configuration lock, and every agent-lock section is
-	// short. A thread already holding the configuration lock is an
-	// install, whose update path sweeps before releasing it.
-	if (cp_config_locked_by_thread != cp_config) {
-		spinlock_lock(&cp_config->agent_lock);
-		cp_config_reclaim_unused_agents_locked(cp_config);
-		spinlock_unlock(&cp_config->agent_lock);
-	}
+	// release reclaims it itself rather than leaving the reclamation
+	// to a later mutation. A thread already holding the configuration
+	// lock is an install, whose update path sweeps before releasing
+	// it.
+	cp_config_reclaim_unused_agents(cp_config);
 }
 
 // Publishes a fully built configuration generation and retires the one it
@@ -362,6 +357,11 @@ cp_config_delete_module(
 error_free:
 	cp_config_gen_free(cp_config, new_config_gen);
 error_unlock:
+	// Every completed hold of the configuration lock sweeps, failed
+	// builds included.
+	spinlock_lock(&cp_config->agent_lock);
+	cp_config_reclaim_unused_agents_locked(cp_config);
+	spinlock_unlock(&cp_config->agent_lock);
 	cp_config_unlock(cp_config);
 	return -1;
 }
@@ -475,6 +475,11 @@ cp_config_update_modules(
 error_free:
 	cp_config_gen_free(cp_config, new_config_gen);
 error_unlock:
+	// Every completed hold of the configuration lock sweeps, failed
+	// builds included.
+	spinlock_lock(&cp_config->agent_lock);
+	cp_config_reclaim_unused_agents_locked(cp_config);
+	spinlock_unlock(&cp_config->agent_lock);
 	cp_config_unlock(cp_config);
 	return -1;
 }
@@ -554,6 +559,11 @@ cp_config_update_functions(
 error_free:
 	cp_config_gen_free(cp_config, new_config_gen);
 error_unlock:
+	// Every completed hold of the configuration lock sweeps, failed
+	// builds included.
+	spinlock_lock(&cp_config->agent_lock);
+	cp_config_reclaim_unused_agents_locked(cp_config);
+	spinlock_unlock(&cp_config->agent_lock);
 	cp_config_unlock(cp_config);
 	return -1;
 }
@@ -603,6 +613,11 @@ cp_config_delete_function(
 error_free:
 	cp_config_gen_free(cp_config, new_config_gen);
 error_unlock:
+	// Every completed hold of the configuration lock sweeps, failed
+	// builds included.
+	spinlock_lock(&cp_config->agent_lock);
+	cp_config_reclaim_unused_agents_locked(cp_config);
+	spinlock_unlock(&cp_config->agent_lock);
 	cp_config_unlock(cp_config);
 	return -1;
 }
@@ -682,6 +697,11 @@ cp_config_update_pipelines(
 error_free:
 	cp_config_gen_free(cp_config, new_config_gen);
 error_unlock:
+	// Every completed hold of the configuration lock sweeps, failed
+	// builds included.
+	spinlock_lock(&cp_config->agent_lock);
+	cp_config_reclaim_unused_agents_locked(cp_config);
+	spinlock_unlock(&cp_config->agent_lock);
 	cp_config_unlock(cp_config);
 	return -1;
 }
@@ -731,6 +751,11 @@ cp_config_delete_pipeline(
 error_free:
 	cp_config_gen_free(cp_config, new_config_gen);
 error_unlock:
+	// Every completed hold of the configuration lock sweeps, failed
+	// builds included.
+	spinlock_lock(&cp_config->agent_lock);
+	cp_config_reclaim_unused_agents_locked(cp_config);
+	spinlock_unlock(&cp_config->agent_lock);
 	cp_config_unlock(cp_config);
 	return -1;
 }
@@ -868,6 +893,11 @@ cp_config_update_devices(
 error_free:
 	cp_config_gen_free(cp_config, new_config_gen);
 error_unlock:
+	// Every completed hold of the configuration lock sweeps, failed
+	// builds included.
+	spinlock_lock(&cp_config->agent_lock);
+	cp_config_reclaim_unused_agents_locked(cp_config);
+	spinlock_unlock(&cp_config->agent_lock);
 	cp_config_unlock(cp_config);
 	return -1;
 }
@@ -926,6 +956,11 @@ cp_config_delete_device(
 error_free:
 	cp_config_gen_free(cp_config, new_config_gen);
 error_unlock:
+	// Every completed hold of the configuration lock sweeps, failed
+	// builds included.
+	spinlock_lock(&cp_config->agent_lock);
+	cp_config_reclaim_unused_agents_locked(cp_config);
+	spinlock_unlock(&cp_config->agent_lock);
 	cp_config_unlock(cp_config);
 	return -1;
 }
@@ -997,6 +1032,11 @@ cp_config_update_objects(
 error_free:
 	cp_config_gen_free(cp_config, new_config_gen);
 error_unlock:
+	// Every completed hold of the configuration lock sweeps, failed
+	// builds included.
+	spinlock_lock(&cp_config->agent_lock);
+	cp_config_reclaim_unused_agents_locked(cp_config);
+	spinlock_unlock(&cp_config->agent_lock);
 	cp_config_unlock(cp_config);
 	return -1;
 }
@@ -1093,6 +1133,11 @@ cp_config_delete_object(
 error_free:
 	cp_config_gen_free(cp_config, new_config_gen);
 error_unlock:
+	// Every completed hold of the configuration lock sweeps, failed
+	// builds included.
+	spinlock_lock(&cp_config->agent_lock);
+	cp_config_reclaim_unused_agents_locked(cp_config);
+	spinlock_unlock(&cp_config->agent_lock);
 	cp_config_unlock(cp_config);
 	return -1;
 }

@@ -650,10 +650,8 @@ agent_reserved_size(struct agent *agent) {
 }
 
 static void
-extend_agent_release(struct agent *agent, struct cp_config *cp_config) {
-	cp_config_lock(cp_config);
-	agent_cleanup(agent);
-	cp_config_unlock(cp_config);
+extend_agent_release(struct agent *agent) {
+	agent_destroy(agent);
 }
 
 // Verify that growing an agent adds usable capacity, records the new arena
@@ -706,7 +704,7 @@ test_extend_grows_agent_capacity() {
 	TEST_ASSERT_NOT_NULL(block, "the added capacity must be usable");
 	memory_bfree(&agent->memory_context, block, 1 << 14);
 
-	extend_agent_release(agent, cp_config);
+	extend_agent_release(agent);
 	free(storage);
 	return TEST_SUCCESS;
 }
@@ -808,7 +806,7 @@ test_extend_rolls_back_on_exhausted_pool() {
 	TEST_ASSERT_NOT_NULL(block, "the agent must survive a failed extend");
 	memory_bfree(&agent->memory_context, block, 256);
 
-	extend_agent_release(agent, cp_config);
+	extend_agent_release(agent);
 	free(storage);
 	return TEST_SUCCESS;
 }
@@ -874,8 +872,8 @@ test_extend_agent_grows_the_named_agent() {
 		"an agent nobody named must keep its memory"
 	);
 
-	extend_agent_release(first, cp_config);
-	extend_agent_release(second, cp_config);
+	extend_agent_release(first);
+	extend_agent_release(second);
 	free(storage);
 	return TEST_SUCCESS;
 }
@@ -921,7 +919,7 @@ test_extend_agent_gates_on_readiness() {
 		"a refused growth must not move any agent's memory"
 	);
 
-	extend_agent_release(agent, cp_config);
+	extend_agent_release(agent);
 	free(storage);
 	return TEST_SUCCESS;
 }

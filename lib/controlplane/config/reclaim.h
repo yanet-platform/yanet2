@@ -31,3 +31,15 @@ agent_is_current(struct cp_config *cp_config, struct agent *agent);
 // tracks enforcing that precondition.
 void
 cp_config_reclaim_unused_agents_locked(struct cp_config *cp_config);
+
+// cp_config_reclaim_unused_agents is the unlocked form of the sweep
+// above: it takes the agent lock, sweeps and releases it, waiting out
+// a busy holder rather than leaving the reclamation to a later one.
+//
+// For paths that drop the last live reference to an agent outside the
+// configuration lock, so a superseded agent cannot outlive the call
+// that released it. A thread already holding the configuration lock
+// skips the sweep and leaves the reclamation to its own exit path,
+// which sweeps before releasing the lock.
+void
+cp_config_reclaim_unused_agents(struct cp_config *cp_config);
