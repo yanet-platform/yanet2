@@ -319,6 +319,7 @@ build_stamp = 'yanet_build_stamp.h'
 configure_file(output: build_stamp, configuration: yanet_stamp)
 
 cgo_packages = {}
+go_proto_targets = []
 subdir('common')
 subdir('lib')
 module_test_dirs = []
@@ -329,6 +330,7 @@ subdir('devices')
 if not dataplane_only
   subdir('bindings/go')
   cgo_controlplane_deps = []
+  cgo_test_deps = []
   foreach package_path, package : cgo_packages
     cgo_native_inputs = package.get('inputs', []) + package.get('libraries', [])
     cgo_inputs = cgo_native_inputs
@@ -351,6 +353,7 @@ if not dataplane_only
       build_always_stale: true,
       build_by_default: true,
     )
+    cgo_test_deps += cgo_target
     if cgo_controlplane_packages.contains(package_path)
       cgo_controlplane_deps += cgo_target
     endif
@@ -382,6 +385,7 @@ if not dataplane_only
     subdir(dir)
   endforeach
   subdir('tests')
+  alias_target('go-test-prepare', go_proto_targets + cgo_test_deps)
 endif
 
 # Define a default test setup that excludes large tests

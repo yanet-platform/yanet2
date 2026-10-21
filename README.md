@@ -99,18 +99,24 @@ YANET employs a multi-language approach to leverage the strengths of different p
    ```
 
 Meson rebuilds native inputs and refreshes CGO dependency fingerprints. After
-changing C code, project headers or linked archives, run `make dataplane`
-(equivalent to `meson compile -C build`) before direct Go commands. Use the same
-cache-line and sanitizer CGO flags as the configured build. For an unsanitized
-build with 64-byte cache lines:
+changing C code, project headers or linked archives, run `make go-test-prepare`
+(equivalent to `meson compile -C build go-test-prepare`) before direct Go
+commands. Use the same cache-line and sanitizer CGO flags as the configured build.
+For an unsanitized build with 64-byte cache lines:
 
 ```bash
-make dataplane
+make go-test-prepare
 CGO_CPPFLAGS=-DYANET_CACHE_LINE_SIZE=64 go test -count=1 ./modules/route/...
 ```
 
 The root `make test`, `make test-asan` and `make bench` targets prepare these
 dependencies and CGO flags automatically and reuse the Go build cache.
+
+Custom Meson modules must append their existing protobuf targets to
+`go_proto_targets` when declaring them and register CGO native dependencies in
+`cgo_packages` during module configuration, before the root creates fingerprints.
+`build_by_default: true` alone does not add a generator to the Go test preparation
+closure.
 
 ### Testing
 

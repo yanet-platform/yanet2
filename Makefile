@@ -123,6 +123,7 @@ CLI_RELEASE_BINARIES := $(addprefix $(RELEASE_DIR)/,$(CLI_BINARIES))
 	setup-debug \
 	setup-asan \
 	dataplane \
+	go-test-prepare \
 	install \
 	install1 \
 	clean \
@@ -285,6 +286,9 @@ setup-asan:
 dataplane:
 	meson compile -C build
 
+go-test-prepare:
+	meson compile -C build go-test-prepare
+
 cli: cli-build
 
 cli-build:
@@ -340,7 +344,7 @@ cli-clean/%:
 test:
 	$(MAKE) test-only
 
-test-only: dataplane
+test-only: go-test-prepare
 	CGO_CPPFLAGS="$(strip $(CGO_CPPFLAGS) $(YANET_CACHE_LINE_CPPFLAG))" go test -count=1 $$(go list ./... | grep -v '^github.com/yanet-platform/yanet2/tests/functional/main')
 	meson test -C build
 
@@ -354,7 +358,7 @@ test-asan-only:
 	else \
 		meson configure -Dbuildtype=debug -Doptimization=0 -Dfuzzing=disabled -Db_sanitize=address,undefined $(EXTRA_MODULES_FLAG) build; \
 	fi
-	meson compile -C build
+	$(MAKE) go-test-prepare
 	@set -eu; \
 	export CGO_CPPFLAGS="$(strip $(CGO_CPPFLAGS) $(YANET_CACHE_LINE_CPPFLAG))"; \
 	export CGO_CFLAGS="-fsanitize=address,undefined"; \
@@ -381,7 +385,7 @@ test-functional:
 #   go test -run='^$$' -bench=. -benchmem -count=6 ./bindings/go/dataplane_ut/... > new.txt
 #   benchstat old.txt new.txt
 bench:
-	$(MAKE) dataplane
+	$(MAKE) go-test-prepare
 	CGO_CPPFLAGS="$(strip $(CGO_CPPFLAGS) $(YANET_CACHE_LINE_CPPFLAG))" go test -run='^$$' -bench=. -benchmem ./bindings/go/dataplane_ut/... ./modules/acl/tests/functional/...
 
 # Reconfigure an existing fuzz build so its Go targets keep current flags.

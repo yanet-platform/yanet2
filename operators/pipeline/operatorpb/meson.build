@@ -16,6 +16,7 @@ protoc_gen = custom_target(
     ],
     build_by_default: true,
 )
+go_proto_targets += protoc_gen
 pipeline_operator_protoc_gen = protoc_gen
 
 readiness_proto_files = [
@@ -38,3 +39,4 @@ pipeline_operator_readiness_protoc_gen = custom_target(
     ],
     build_by_default: true,
 )
+go_proto_targets += pipeline_operator_readiness_protoc_gen

@@ -5,6 +5,8 @@ on:
     branches: [main]
     paths:
       - "**/*.go"
+      - "**/meson.build"
+      - "Makefile"
       - ".github/workflows/go-race.yml"
       - ".github/actions/go-buildcache/**"
       - ".github/actions/apt-packages/**"
@@ -13,6 +15,8 @@ on:
     branches: ["**"]
     paths:
       - "**/*.go"
+      - "**/meson.build"
+      - "Makefile"
       - ".github/workflows/go-race.yml"
       - ".github/actions/go-buildcache/**"
       - ".github/actions/apt-packages/**"
@@ -65,10 +69,10 @@ jobs:
       - name: Install Go Protobuf Plugins
         uses: ./.github/actions/protoc-plugins
 
-      - name: Build YANET
+      - name: Prepare Go tests
         run: |
           meson setup build -Dbuildtype=debug -Doptimization=0
-          make dataplane
+          make go-test-prepare
 
       - name: Run Go race tests
         run: |
