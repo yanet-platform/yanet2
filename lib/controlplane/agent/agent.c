@@ -539,6 +539,74 @@ agent_detach(struct agent *agent) {
 }
 
 int
+agent_destroy(struct agent *agent) {
+	if (agent == NULL) {
+		return 0;
+	}
+
+	struct cp_config *cp_config = ADDR_OF(&agent->cp_config);
+	if (cp_config == NULL) {
+		agent_cleanup(agent);
+		return 0;
+	}
+
+	cp_config_lock(cp_config);
+
+	// Remove every registry reference to the agent, so no later sweep
+	// of the configuration can walk into the memory freed below. A
+	// predecessor chain naming it is unlinked first; its own slot, when
+	// it has one, goes to its predecessor — and a sole agent leaves no
+	// predecessor, while the slot consumers assume every slot names an
+	// agent, so the registry tail is compacted into the emptied slot
+	// instead.
+	struct cp_agent_registry *registry =
+		ADDR_OF(&cp_config->agent_registry);
+	if (registry != NULL) {
+		for (uint64_t idx = 0; idx < registry->count; ++idx) {
+			struct agent *chain = ADDR_OF(&registry->agents[idx]);
+			while (chain != NULL && ADDR_OF(&chain->prev) != NULL) {
+				if (ADDR_OF(&chain->prev) == agent) {
+					SET_OFFSET_OF(
+						&chain->prev, ADDR_OF(&agent->prev)
+					);
+					break;
+				}
+				chain = ADDR_OF(&chain->prev);
+			}
+		}
+		for (uint64_t idx = 0; idx < registry->count; ++idx) {
+			if (ADDR_OF(&registry->agents[idx]) != agent) {
+				continue;
+			}
+			struct agent *predecessor = ADDR_OF(&agent->prev);
+			if (predecessor != NULL) {
+				SET_OFFSET_OF(
+					&registry->agents[idx], predecessor
+				);
+				break;
+			}
+			for (uint64_t tail = idx + 1; tail < registry->count;
+			     ++tail) {
+				SET_OFFSET_OF(
+					&registry->agents[tail - 1],
+					ADDR_OF(&registry->agents[tail])
+				);
+			}
+			registry->count -= 1;
+			break;
+		}
+	}
+
+	agent_cleanup(agent);
+	// Every completed hold of the configuration lock sweeps, this
+	// holder included: a concurrent final release may have deferred its
+	// reclamation to it.
+	cp_config_reclaim_unused_agents_locked(cp_config);
+	cp_config_unlock(cp_config);
+	return 0;
+}
+
+int
 agent_update_modules(
 	struct agent *agent,
 	size_t module_count,

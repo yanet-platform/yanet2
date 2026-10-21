@@ -217,7 +217,7 @@ func (m *Agent) Close() error {
 }
 
 func (m *Agent) CleanUp() error {
-	_, err := C.agent_cleanup(m.ptr)
+	_, err := C.agent_destroy(m.ptr)
 	return err
 }
 

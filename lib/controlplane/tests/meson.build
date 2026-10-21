@@ -127,6 +127,36 @@ test(
   timeout: 90,
 )
 
+agent_reclaim_thread_dep = dependency('threads')
+
+agent_reclaim_test = executable(
+  'agent_reclaim_test',
+  ['agent_reclaim_test.c'],
+  c_args: yanet_c_args,
+  link_args: yanet_link_args + [
+    '-Wl,-E',
+    '-Wl,--undefined=new_device_plain',
+    '-Wl,--export-dynamic-symbol=new_device_plain',
+  ],
+  dependencies: [
+    lib_dataplane_ut_dep,
+    lib_logging_dep,
+    lib_errors_dep,
+    lib_dev_plain_api,
+    libdpdk_dep,
+    agent_reclaim_thread_dep,
+  ],
+  link_with: [lib_dev_plain_dp],
+  include_directories: yanet_rootdir,
+)
+
+test(
+  'agent_reclaim',
+  agent_reclaim_test,
+  suite: ['lib'],
+  timeout: 90,
+)
+
 device_list_thread_dep = dependency('threads')
 
 device_list_test = executable(

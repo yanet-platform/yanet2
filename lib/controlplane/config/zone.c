@@ -262,14 +262,11 @@ cp_config_gen_release(
 
 	// The teardown may have left a superseded agent unreferenced. Reclaim
 	// it opportunistically, without waiting on an active update: a busy
-	// lock means its holder — a publish, an attach, an extension or the
-	// agent listing — is on a path that sweeps before releasing it, and a
-	// caller already holding the lock runs its own sweep.
-	if (cp_config_locked_by_thread != cp_config &&
-	    cp_config_try_lock(cp_config)) {
-		cp_config_reclaim_unused_agents_locked(cp_config);
-		cp_config_unlock(cp_config);
-	}
+	// lock means its holder — a publish, an attach, an extension, an
+	// agent listing or a destroy gate — is on a path that sweeps before
+	// releasing it, and a caller already holding the lock runs its own
+	// sweep.
+	cp_config_reclaim_unused_agents(cp_config);
 }
 
 // Publishes a fully built configuration generation and retires the one it
@@ -358,6 +355,10 @@ cp_config_delete_module(
 error_free:
 	cp_config_gen_free(cp_config, new_config_gen);
 error_unlock:
+	// Every completed hold of the configuration lock sweeps, including
+	// the failed builds: a concurrent final release may have deferred
+	// its reclamation to this holder while it still held the lock.
+	cp_config_reclaim_unused_agents_locked(cp_config);
 	cp_config_unlock(cp_config);
 	return -1;
 }
@@ -446,6 +447,10 @@ cp_config_update_modules(
 error_free:
 	cp_config_gen_free(cp_config, new_config_gen);
 error_unlock:
+	// Every completed hold of the configuration lock sweeps, including
+	// the failed builds: a concurrent final release may have deferred
+	// its reclamation to this holder while it still held the lock.
+	cp_config_reclaim_unused_agents_locked(cp_config);
 	cp_config_unlock(cp_config);
 	return -1;
 }
@@ -525,6 +530,10 @@ cp_config_update_functions(
 error_free:
 	cp_config_gen_free(cp_config, new_config_gen);
 error_unlock:
+	// Every completed hold of the configuration lock sweeps, including
+	// the failed builds: a concurrent final release may have deferred
+	// its reclamation to this holder while it still held the lock.
+	cp_config_reclaim_unused_agents_locked(cp_config);
 	cp_config_unlock(cp_config);
 	return -1;
 }
@@ -574,6 +583,10 @@ cp_config_delete_function(
 error_free:
 	cp_config_gen_free(cp_config, new_config_gen);
 error_unlock:
+	// Every completed hold of the configuration lock sweeps, including
+	// the failed builds: a concurrent final release may have deferred
+	// its reclamation to this holder while it still held the lock.
+	cp_config_reclaim_unused_agents_locked(cp_config);
 	cp_config_unlock(cp_config);
 	return -1;
 }
@@ -653,6 +666,10 @@ cp_config_update_pipelines(
 error_free:
 	cp_config_gen_free(cp_config, new_config_gen);
 error_unlock:
+	// Every completed hold of the configuration lock sweeps, including
+	// the failed builds: a concurrent final release may have deferred
+	// its reclamation to this holder while it still held the lock.
+	cp_config_reclaim_unused_agents_locked(cp_config);
 	cp_config_unlock(cp_config);
 	return -1;
 }
@@ -702,6 +719,10 @@ cp_config_delete_pipeline(
 error_free:
 	cp_config_gen_free(cp_config, new_config_gen);
 error_unlock:
+	// Every completed hold of the configuration lock sweeps, including
+	// the failed builds: a concurrent final release may have deferred
+	// its reclamation to this holder while it still held the lock.
+	cp_config_reclaim_unused_agents_locked(cp_config);
 	cp_config_unlock(cp_config);
 	return -1;
 }
@@ -819,6 +840,10 @@ cp_config_update_devices(
 error_free:
 	cp_config_gen_free(cp_config, new_config_gen);
 error_unlock:
+	// Every completed hold of the configuration lock sweeps, including
+	// the failed builds: a concurrent final release may have deferred
+	// its reclamation to this holder while it still held the lock.
+	cp_config_reclaim_unused_agents_locked(cp_config);
 	cp_config_unlock(cp_config);
 	return -1;
 }
@@ -877,6 +902,10 @@ cp_config_delete_device(
 error_free:
 	cp_config_gen_free(cp_config, new_config_gen);
 error_unlock:
+	// Every completed hold of the configuration lock sweeps, including
+	// the failed builds: a concurrent final release may have deferred
+	// its reclamation to this holder while it still held the lock.
+	cp_config_reclaim_unused_agents_locked(cp_config);
 	cp_config_unlock(cp_config);
 	return -1;
 }
@@ -926,6 +955,10 @@ cp_config_update_objects(
 error_free:
 	cp_config_gen_free(cp_config, new_config_gen);
 error_unlock:
+	// Every completed hold of the configuration lock sweeps, including
+	// the failed builds: a concurrent final release may have deferred
+	// its reclamation to this holder while it still held the lock.
+	cp_config_reclaim_unused_agents_locked(cp_config);
 	cp_config_unlock(cp_config);
 	return -1;
 }
@@ -1022,6 +1055,10 @@ cp_config_delete_object(
 error_free:
 	cp_config_gen_free(cp_config, new_config_gen);
 error_unlock:
+	// Every completed hold of the configuration lock sweeps, including
+	// the failed builds: a concurrent final release may have deferred
+	// its reclamation to this holder while it still held the lock.
+	cp_config_reclaim_unused_agents_locked(cp_config);
 	cp_config_unlock(cp_config);
 	return -1;
 }
