@@ -52,8 +52,15 @@ override_dh_auto_test:
 	:
 
 override_dh_auto_clean:
+	set --; \
 	if printf '%s\0' "$${GOCACHE##*/}" | LC_ALL=C grep -zEq '^yanet-ci-(release|asan|race|deb)-[0-9a-f]{64}$$'; then \
-		dh_auto_clean -- -o go-cache-clean; \
+		set -- "$$@" -o go-cache-clean; \
+	fi; \
+	if [ "$${YANET_DEB_CARGO_CACHE:-}" = 1 ]; then \
+		set -- "$$@" -o cli-clean; \
+	fi; \
+	if [ "$$#" -gt 0 ]; then \
+		dh_auto_clean -- "$$@"; \
 	else \
 		dh_auto_clean; \
 	fi

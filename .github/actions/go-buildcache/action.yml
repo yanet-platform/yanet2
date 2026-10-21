@@ -20,6 +20,9 @@ outputs:
   cache-hit:
     description: 'True only on an exact-key match'
     value: ${{ steps.restore.outputs.cache-hit }}
+  native-hash:
+    description: 'Full hosted image and installed package compatibility fingerprint'
+    value: ${{ steps.resolve.outputs.native-hash }}
 
 runs:
   using: 'composite'
@@ -90,6 +93,7 @@ runs:
         echo "key=${family}${source}-${CACHE_RUN_ID}" >>"$GITHUB_OUTPUT"
         echo "source-prefix=${family}${source}-" >>"$GITHUB_OUTPUT"
         echo "family-prefix=$family" >>"$GITHUB_OUTPUT"
+        echo "native-hash=$native_hash" >>"$GITHUB_OUTPUT"
         echo "GOCACHE=$path" >>"$GITHUB_ENV"
 
     - name: Restore the build cache

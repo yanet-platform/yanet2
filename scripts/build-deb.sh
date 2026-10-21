@@ -88,7 +88,7 @@ echo "Current PATH during build: $PATH" > build-path.log
 #
 # Downstream steps consume only binaries. Skipping the source package also
 # avoids compressing the whole working tree and its bundled dependencies.
-echo y | debuild --preserve-envvar=PATH --preserve-envvar=DEB_BUILD_PROFILES --preserve-envvar=GOCACHE -us -uc -b 2>&1 | tee build.log
+echo y | debuild --preserve-envvar=PATH --preserve-envvar=DEB_BUILD_PROFILES --preserve-envvar=GOCACHE --preserve-envvar=YANET_DEB_CARGO_CACHE -us -uc -b 2>&1 | tee build.log
 
 mkdir -p outdeb
 dcmd cp ../*.changes outdeb/
