@@ -154,26 +154,65 @@ cp_config_reclaim_unused_agents_locked(struct cp_config *cp_config) {
 }
 
 void
+cp_config_reclaim_unused_agents(struct cp_config *cp_config) {
+	if (cp_config == NULL) {
+		return;
+	}
+
+	// A lock held by the calling thread means the caller's own exit path
+	// sweeps before releasing it; a lock held by anyone else defers to
+	// that holder's sweep, which every completed hold performs.
+	if (cp_config_locked_by_thread != cp_config &&
+	    cp_config_try_lock(cp_config)) {
+		cp_config_reclaim_unused_agents_locked(cp_config);
+		cp_config_unlock(cp_config);
+	}
+}
+
+void
 agent_destroy_released(struct agent *agent, enum agent_reference_kind kind) {
 	if (agent == NULL) {
 		return;
 	}
 
+	// The configuration is captured before the subtraction: once the
+	// count reaches zero a concurrent sweep may reclaim the agent, and
+	// nothing of the agent may be read past that point.
+	struct cp_config *cp_config = ADDR_OF(&agent->cp_config);
+
+	bool released_last = false;
 	switch (kind) {
 	case AGENT_REFERENCE_MODULE:
-		__atomic_sub_fetch(
-			&agent->loaded_module_count, 1, __ATOMIC_RELAXED
-		);
+		released_last =
+			__atomic_sub_fetch(
+				&agent->loaded_module_count, 1, __ATOMIC_RELAXED
+			) == 0;
 		break;
 	case AGENT_REFERENCE_DEVICE:
-		__atomic_sub_fetch(
-			&agent->loaded_device_count, 1, __ATOMIC_RELAXED
-		);
+		released_last =
+			__atomic_sub_fetch(
+				&agent->loaded_device_count, 1, __ATOMIC_RELAXED
+			) == 0;
 		break;
 	case AGENT_REFERENCE_OBJECT:
-		__atomic_sub_fetch(
-			&agent->loaded_object_count, 1, __ATOMIC_RELAXED
-		);
+		released_last =
+			__atomic_sub_fetch(
+				&agent->loaded_object_count, 1, __ATOMIC_RELAXED
+			) == 0;
 		break;
+	}
+
+	// Dropping the last live reference ends everything that kept a
+	// superseded agent reclaimable-safe, so this drop reclaims it itself.
+	// Unlike a
+	// reader's pin release, a typed destroy has no reason to stay
+	// lock-free, and deferring to the lock holder is not sound: the
+	// holder's sweep may already have run before this drop became
+	// visible. A caller already holding the lock is on a path that
+	// sweeps before releasing it.
+	if (released_last && cp_config_locked_by_thread != cp_config) {
+		cp_config_lock(cp_config);
+		cp_config_reclaim_unused_agents_locked(cp_config);
+		cp_config_unlock(cp_config);
 	}
 }

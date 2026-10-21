@@ -1,6 +1,7 @@
 #include <stdlib.h>
 
 #include "lib/controlplane/agent/agent.h"
+#include "lib/controlplane/config/reclaim.h"
 #include "lib/controlplane/config/zone.h"
 #include "modules/pdump/dataplane/config.h"
 
@@ -87,6 +88,7 @@ pdump_test_read_rate(
 	struct cp_module *module =
 		cp_config_gen_lookup_module(generation, "pdump", name);
 	if (module == NULL) {
+		cp_config_reclaim_unused_agents_locked(cp_config);
 		cp_config_unlock(cp_config);
 		return -1;
 	}
@@ -103,6 +105,7 @@ pdump_test_read_rate(
 					 &bucket->edt, memory_order_relaxed
 				 ),
 	};
+	cp_config_reclaim_unused_agents_locked(cp_config);
 	cp_config_unlock(cp_config);
 	return 0;
 }

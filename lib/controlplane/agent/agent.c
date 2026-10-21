@@ -343,6 +343,11 @@ agent_attach(
 	     ++agent_idx) {
 		struct agent *old_agent =
 			ADDR_OF(&old_registry->agents[agent_idx]);
+		// A slot may sit empty after agent_destroy returned it to no
+		// predecessor.
+		if (old_agent == NULL) {
+			continue;
+		}
 		if (!strncmp(old_agent->name, agent_name, AGENT_NAME_LEN)) {
 			found = true;
 			SET_OFFSET_OF(
@@ -535,6 +540,56 @@ int
 agent_detach(struct agent *agent) {
 	(void)agent;
 	// NOTE: Currently a no-op.
+	return 0;
+}
+
+int
+agent_destroy(struct agent *agent) {
+	if (agent == NULL) {
+		return 0;
+	}
+
+	struct cp_config *cp_config = ADDR_OF(&agent->cp_config);
+	if (cp_config == NULL) {
+		agent_cleanup(agent);
+		return 0;
+	}
+
+	cp_config_lock(cp_config);
+
+	// Remove every registry reference to the agent: a slot holding it
+	// goes to its predecessor, and a predecessor chain naming it is
+	// unlinked, so no later sweep of the configuration can walk into
+	// the memory freed below.
+	struct cp_agent_registry *registry =
+		ADDR_OF(&cp_config->agent_registry);
+	if (registry != NULL) {
+		for (uint64_t idx = 0; idx < registry->count; ++idx) {
+			struct agent *registered =
+				ADDR_OF(&registry->agents[idx]);
+			if (registered == agent) {
+				SET_OFFSET_OF(
+					&registry->agents[idx],
+					ADDR_OF(&agent->prev)
+				);
+				continue;
+			}
+			while (registered != NULL &&
+			       ADDR_OF(&registered->prev) != NULL) {
+				if (ADDR_OF(&registered->prev) == agent) {
+					SET_OFFSET_OF(
+						&registered->prev,
+						ADDR_OF(&agent->prev)
+					);
+					break;
+				}
+				registered = ADDR_OF(&registered->prev);
+			}
+		}
+	}
+
+	agent_cleanup(agent);
+	cp_config_unlock(cp_config);
 	return 0;
 }
 
