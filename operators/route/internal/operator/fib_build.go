@@ -26,11 +26,16 @@ type FIB struct {
 	Entries []FIBEntry
 }
 
-// FIBBuildStats summarises a BuildFIB pass for observability.
+// FIBBuildStats summarises route eligibility and forwarding in one build pass.
 type FIBBuildStats struct {
 	TotalPrefixes   int
 	TotalRoutes     int
 	SkippedPrefixes int
+	// BirdRoutes counts BIRD route records before neighbour resolution.
+	BirdRoutes int
+	// LocalBirdRoutes counts BIRD records with resolved nexthops on allowed
+	// devices, before best-per-source selection and hardware deduplication.
+	LocalBirdRoutes int
 	// NeighbourNotFound counts route records whose nexthops are absent from
 	// the full neighbour snapshot; their device ownership is unknown.
 	NeighbourNotFound int
@@ -50,6 +55,8 @@ type FIBBuildStats struct {
 // Missing neighbours and resolved paths on excluded devices are counted
 // separately before best-per-source selection. Only locally eligible routes
 // compete, allowing fallback to a reachable lower-priority path.
+// Best-per-source selection preserves a BIRD path whenever one is locally
+// eligible.
 func BuildFIB(
 	ribDump maptrie.MapTrie[netip.Prefix, netip.Addr, rib.RoutesList],
 	neighbours neigh.NexthopCacheView,
@@ -73,6 +80,9 @@ func BuildFIB(
 
 			local := make([]rib.Route, 0, len(routesList.Routes))
 			for _, r := range routesList.Routes {
+				if r.SourceID == rib.RouteSourceBird {
+					stats.BirdRoutes++
+				}
 				entry, ok := neighbours.Lookup(r.NextHop.Unmap())
 				if !ok {
 					stats.NeighbourNotFound++
@@ -83,6 +93,9 @@ func BuildFIB(
 					continue
 				}
 
+				if r.SourceID == rib.RouteSourceBird {
+					stats.LocalBirdRoutes++
+				}
 				local = append(local, r)
 			}
 

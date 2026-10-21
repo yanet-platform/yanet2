@@ -98,6 +98,8 @@ func Test_BuildFIB_PerGatewayDeviceFilter(t *testing.T) {
 			require.Zero(t, stats.NeighbourNotFound)
 			require.Equal(t, tc.wantExcluded, stats.DeviceExcludedRoutes)
 			require.Equal(t, tc.wantFiltered, stats.FilteredRoutes)
+			require.Equal(t, 2, stats.BirdRoutes)
+			require.Equal(t, 2-tc.wantExcluded, stats.LocalBirdRoutes)
 		})
 	}
 }
@@ -125,6 +127,8 @@ func Test_BuildFIB_DeviceFilterStarvesPrefix(t *testing.T) {
 	require.Empty(t, fib.Entries)
 	require.Zero(t, stats.NeighbourNotFound)
 	require.Equal(t, 1, stats.DeviceExcludedRoutes)
+	require.Equal(t, 1, stats.BirdRoutes)
+	require.Zero(t, stats.LocalBirdRoutes)
 }
 
 // Test_BuildFIB_FallsBackToLiveRouteWhenBestUnresolvable verifies that an
@@ -219,6 +223,8 @@ func Test_BuildFIB_MultiSourceWithDeviceFilter(t *testing.T) {
 	}, fib.Entries[0].Nexthops)
 	require.Zero(t, stats.NeighbourNotFound)
 	require.Equal(t, 1, stats.DeviceExcludedRoutes, "the bird route on eth2 is dropped")
+	require.Equal(t, 2, stats.BirdRoutes)
+	require.Equal(t, 1, stats.LocalBirdRoutes)
 }
 
 // Test_BuildFIB_MultiPrefix verifies that nexthops remain prefix-local while
@@ -270,6 +276,7 @@ func Test_BuildFIB_MultiPrefix(t *testing.T) {
 	}, fib.Entries)
 	require.Equal(t, FIBBuildStats{
 		TotalPrefixes: 2, TotalRoutes: 7, NeighbourNotFound: 2,
+		BirdRoutes: 7, LocalBirdRoutes: 3,
 		DeviceExcludedRoutes: 2, HardwareRoutes: 3, PrefixesAdded: 2,
 	}, stats)
 }
@@ -313,6 +320,10 @@ func Test_BuildFIB_MixedEligibility(t *testing.T) {
 			SourceID: rib.RouteSourceBird, GlobalID: uint32(idx + 1),
 		})
 	}
+	list.Insert(rib.Route{
+		NextHop: netip.MustParseAddr("192.0.2.1"), Pref: 500,
+		SourceID: rib.RouteSourceStatic,
+	})
 	prefix := netip.MustParsePrefix("10.0.0.0/24")
 	dump := maptrie.NewMapTrie[netip.Prefix, netip.Addr, rib.RoutesList](1)
 	dump[prefix.Bits()][prefix] = list
@@ -323,7 +334,8 @@ func Test_BuildFIB_MixedEligibility(t *testing.T) {
 	require.Equal(t, prefix, fib.Entries[0].Prefix)
 	require.ElementsMatch(t, []neigh.HardwareRoute{first, second}, fib.Entries[0].Nexthops)
 	require.Equal(t, FIBBuildStats{
-		TotalPrefixes: 1, TotalRoutes: 8, NeighbourNotFound: 2,
+		TotalPrefixes: 1, TotalRoutes: 9, NeighbourNotFound: 2,
+		BirdRoutes: 8, LocalBirdRoutes: 4,
 		DeviceExcludedRoutes: 2, HardwareRoutes: 2, PrefixesAdded: 1,
 		FilteredRoutes: 1,
 	}, stats)
@@ -343,6 +355,8 @@ func Test_BuildFIB_MissingNeighbourCountsRouteRecords(t *testing.T) {
 	fib, stats := BuildFIB(dump, cache.View(), neigh.NewDeviceScope([]string{"eth1"}))
 	require.Empty(t, fib.Entries)
 	require.Equal(t, 2, stats.NeighbourNotFound)
+	require.Equal(t, 2, stats.BirdRoutes)
+	require.Zero(t, stats.LocalBirdRoutes)
 	require.Zero(t, stats.DeviceExcludedRoutes)
 	require.Zero(t, stats.FilteredRoutes)
 }
@@ -376,9 +390,11 @@ func Test_BuildFIB_DedupsNexthops(t *testing.T) {
 		},
 	}
 
-	fib, _ := BuildFIB(ribDump, cache.View(), neigh.DeviceScope{})
+	fib, stats := BuildFIB(ribDump, cache.View(), neigh.DeviceScope{})
 
 	require.Len(t, fib.Entries, 1)
+	require.Zero(t, stats.BirdRoutes)
+	require.Zero(t, stats.LocalBirdRoutes)
 
 	expected := []neigh.HardwareRoute{
 		{

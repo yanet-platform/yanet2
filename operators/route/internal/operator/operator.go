@@ -169,6 +169,7 @@ func NewOperator(cfg *Config, options ...Option) (*Operator, error) {
 			WithGatewayActuatorFunction(cfg.Function),
 			WithGatewayActuatorDevices(cfg.GatewayDevices[gw.Name]),
 			WithGatewayActuatorStaticRoutes(cfg.Static.Routes),
+			WithGatewayActuatorExpectBird(cfg.Readiness.ExpectBird),
 			WithGatewayActuatorOnFIBBuilt(gatewayMetrics.OnFIBBuilt),
 		)
 		if err != nil {

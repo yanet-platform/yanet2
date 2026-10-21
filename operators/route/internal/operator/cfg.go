@@ -43,8 +43,8 @@ type Config struct {
 	Register  operator.RegisterConfig   `yaml:"register"`
 	Reconcile operator.ReconcileConfig  `yaml:"reconcile"`
 	Static    StaticConfig              `yaml:"static"`
-	// Function is the single gateway-side network function published by
-	// this operator. Re-applied every reconcile pass — idempotent updates.
+	// Function is the gateway-side network function maintained after forwarding
+	// preflight succeeds.
 	Function       FunctionConfig       `yaml:"function"`
 	LinkMap        map[string]string    `yaml:"link_map"`
 	RIBTTL         time.Duration        `yaml:"rib_ttl"`
@@ -58,12 +58,15 @@ type Config struct {
 	GatewayDevices map[string][]string `yaml:"gateway_devices"`
 }
 
-// ReadinessConfig controls the operator's readiness reporting.
+// ReadinessConfig controls readiness and BIRD forwarding requirements.
 type ReadinessConfig struct {
-	// ExpectBird gates the rib scope on BIRD connectivity.
+	// ExpectBird requires BIRD connectivity for RIB readiness and local BIRD
+	// forwarding in every present module before FIB or function publication.
 	//
-	// When false (static-only deployments with no BIRD adapter running), the rib
-	// scope becomes READY immediately at startup.
+	// Static routes cannot satisfy the BIRD forwarding requirement, but static
+	// neighbours may resolve BIRD nexthops. When false, static-only forwarding
+	// is allowed; general empty-input and empty-FIB guards still apply, and RIB
+	// readiness depends on route presence alone.
 	ExpectBird bool `yaml:"expect_bird"`
 
 	// RateThreshold is the maximum RIB-update rate (updates per second) still
