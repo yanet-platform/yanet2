@@ -94,7 +94,7 @@ func (m *GatewayRegRunner) Run(ctx context.Context) error {
 			zap.String("gateway_endpoint", cfg.Endpoint.Unwrap()),
 		)
 
-		creds, err := xgrpc.ClientCredentials(cfg.TLS)
+		creds, err := xgrpc.ClientCredentials(cfg.TLS, xgrpc.WithCertificateStoreLog(log))
 		if err != nil {
 			return fmt.Errorf("failed to build transport credentials for gateway %q: %w", cfg.Name, err)
 		}

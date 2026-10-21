@@ -15,6 +15,7 @@ import (
 	"github.com/yanet-platform/xnetip"
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
 	"github.com/yanet-platform/yanet2/common/go/operator"
+	"github.com/yanet-platform/yanet2/common/go/xgrpc"
 	ynpb "github.com/yanet-platform/yanet2/controlplane/ynpb/v1"
 	"github.com/yanet-platform/yanet2/modules/route/controlplane/routepb/v1"
 	"github.com/yanet-platform/yanet2/operators/route/internal/rib"
@@ -68,7 +69,8 @@ func NewGatewayActuator(
 		staticRoutes[prefix][nexthop.Unmap()] = struct{}{}
 	}
 
-	conn, err := operator.DialGateway(cfg)
+	log := opts.Log.With(zap.String("gateway", cfg.Name))
+	conn, err := operator.DialGateway(cfg, xgrpc.WithCertificateStoreLog(log))
 	if err != nil {
 		return nil, err
 	}
@@ -88,7 +90,6 @@ func NewGatewayActuator(
 		}},
 	}
 
-	log := opts.Log.With(zap.String("gateway", cfg.Name))
 	actuatorOptions := []operator.FunctionActuatorOption{operator.WithFunctionLog(log)}
 	if fn.IgnorePdump {
 		actuatorOptions = append(actuatorOptions, operator.WithIgnorePDump())

@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"context"
+	"crypto/tls"
 	"crypto/x509"
 	"errors"
 	"fmt"
@@ -17,6 +18,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/keepalive"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 	"google.golang.org/grpc/test/bufconn"
@@ -185,14 +187,17 @@ type Gateway struct {
 	// loopback.
 	server *grpc.Server
 	// secureServer is the TLS gRPC server, nil without a gRPC TLS listener.
-	secureServer     *grpc.Server
-	grpcListeners    []grpcListener
-	http             ListenerConfig
-	memoryListener   *bufconn.Listener
-	runners          []serviceRunner
-	registry         *BackendRegistry
-	readinessTracker *readiness.Tracker
-	log              *zap.Logger
+	secureServer  *grpc.Server
+	grpcListeners []grpcListener
+	http          ListenerConfig
+	// httpsCertificates is the store the HTTPS listener serves from, nil
+	// without one.
+	httpsCertificates *commonxgrpc.CertificateStore
+	memoryListener    *bufconn.Listener
+	runners           []serviceRunner
+	registry          *BackendRegistry
+	readinessTracker  *readiness.Tracker
+	log               *zap.Logger
 }
 
 // grpcListener is a network listener of one of the gateway's gRPC servers.
@@ -242,6 +247,49 @@ func NewGateway(cfg Config, options ...GatewayOption) (*Gateway, error) {
 		return nil, errors.New("server.grpc needs an endpoint or a tls listener")
 	}
 
+	// Only the gRPC TLS server bounds connection age, so an age given to
+	// HTTPS would silently do nothing.
+	if plan.HTTP.TLS != nil && plan.HTTP.TLS.MaxConnectionAge != 0 {
+		return nil, errors.New("server.http.tls.max_connection_age is not supported, only server.grpc.tls bounds connection age")
+	}
+	if plan.GRPC.TLS != nil {
+		switch age := plan.GRPC.TLS.MaxConnectionAge; {
+		case age < 0:
+			return nil, fmt.Errorf("server.grpc.tls.max_connection_age (%s) must not be negative", age)
+		case age > 0 && age < minConnectionAge:
+			return nil, fmt.Errorf("server.grpc.tls.max_connection_age (%s) must be at least %s", age, minConnectionAge)
+		}
+	}
+
+	// Every TLS listener serves from a store that picks up renewed files
+	// without a restart. Building a store loads its files, so an unreadable
+	// or mismatched pair fails startup here, before any authenticator starts
+	// its background refresh.
+	var grpcsCertificates, httpsCertificates *commonxgrpc.CertificateStore
+	var served servedCertificates
+	if plan.GRPC.TLS != nil {
+		store, err := newCertificateStore(
+			&plan.GRPC.TLS.TLSConfig,
+			commonxgrpc.WithCertificateStoreLog(log.With(zap.String("listener", "grpcs"))),
+		)
+		if err != nil {
+			return nil, fmt.Errorf("load gateway TLS: %w", err)
+		}
+		grpcsCertificates = store
+		served = append(served, listenerCertificates{Listener: "grpcs", Store: store})
+	}
+	if plan.HTTP.TLS != nil {
+		store, err := newCertificateStore(
+			&plan.HTTP.TLS.TLSConfig,
+			commonxgrpc.WithCertificateStoreLog(log.With(zap.String("listener", "https"))),
+		)
+		if err != nil {
+			return nil, fmt.Errorf("load gateway HTTPS: %w", err)
+		}
+		httpsCertificates = store
+		served = append(served, listenerCertificates{Listener: "https", Store: store})
+	}
+
 	registry := NewBackendRegistry()
 
 	authManager, err := auth.NewManager(&cfg.Auth, auth.WithLog(log))
@@ -253,6 +301,15 @@ func NewGateway(cfg Config, options ...GatewayOption) (*Gateway, error) {
 	// authenticator that reads one is dead without a gRPC TLS listener.
 	if authManager.ClientCAs() != nil && plan.GRPC.TLS == nil {
 		return nil, errors.New("x509 authenticator requires server.tls or server.grpc.tls")
+	}
+
+	// A connection keeps the client certificate of its handshake, so
+	// without a bounded age a renewed one reaches the gateway only when its
+	// client reconnects.
+	if authManager.ClientCAs() != nil && plan.GRPC.TLS.MaxConnectionAge == 0 {
+		log.Warn("gRPC TLS connection age is unbounded, clients keep their certificate until they reconnect",
+			zap.String("key", "server.grpc.tls.max_connection_age"),
+		)
 	}
 
 	authService := NewAuthService(authManager)
@@ -404,7 +461,7 @@ func NewGateway(cfg Config, options ...GatewayOption) (*Gateway, error) {
 		readiness.WithLog(log),
 	)
 	readinessSvc := NewReadinessService(rdTracker)
-	metricsService := NewMetricsService(append(metricsCollectors(serverMetrics, opts.Services), authManager)...)
+	metricsService := NewMetricsService(append(metricsCollectors(serverMetrics, opts.Services), authManager, served)...)
 	portMetricsService := NewPortMetricsService(portMetricsCollectors(opts.Services)...)
 
 	var builtins []Service
@@ -452,11 +509,16 @@ func NewGateway(cfg Config, options ...GatewayOption) (*Gateway, error) {
 			clientCAs = authManager.ClientCAs
 		}
 
-		creds, err := plan.GRPC.TLS.ServerCredentials(clientCAs)
-		if err != nil {
-			return nil, fmt.Errorf("load gateway TLS: %w", err)
+		secureOptions := []grpc.ServerOption{grpc.Creds(serverCredentials(grpcsCertificates, clientCAs))}
+		// A bounded age makes every client reconnect and present its current
+		// certificate. The grace stays unlimited, so calls in flight run to
+		// completion.
+		if age := plan.GRPC.TLS.MaxConnectionAge; age > 0 {
+			secureOptions = append(secureOptions, grpc.KeepaliveParams(keepalive.ServerParameters{
+				MaxConnectionAge: age,
+			}))
 		}
-		secureServer = newServer(grpc.Creds(creds))
+		secureServer = newServer(secureOptions...)
 		grpcListeners = append(grpcListeners, grpcListener{
 			Scheme:   "grpcs",
 			Server:   secureServer,
@@ -528,16 +590,17 @@ func NewGateway(cfg Config, options ...GatewayOption) (*Gateway, error) {
 	}
 
 	return &Gateway{
-		cfg:              cfg,
-		server:           server,
-		secureServer:     secureServer,
-		grpcListeners:    grpcListeners,
-		http:             plan.HTTP,
-		memoryListener:   memoryListener,
-		runners:          runners,
-		registry:         registry,
-		readinessTracker: rdTracker,
-		log:              log,
+		cfg:               cfg,
+		server:            server,
+		secureServer:      secureServer,
+		grpcListeners:     grpcListeners,
+		http:              plan.HTTP,
+		httpsCertificates: httpsCertificates,
+		memoryListener:    memoryListener,
+		runners:           runners,
+		registry:          registry,
+		readinessTracker:  rdTracker,
+		log:               log,
 	}, nil
 }
 
@@ -787,10 +850,17 @@ func (m *Gateway) runHTTPServer(ctx context.Context) error {
 		if err != nil {
 			return fmt.Errorf("failed to serve: %w", err)
 		}
-		// The server has no TLS config of its own, so HTTPS never asks for a
-		// client certificate.
+		// The TLS config leaves client authentication at its default of
+		// none, so HTTPS never asks for a client certificate. It names h2, so
+		// HTTP/2 is set up whether this listener or the plaintext one starts
+		// serving first.
+		server.TLSConfig = &tls.Config{
+			GetCertificate: m.httpsCertificates.GetCertificate,
+			MinVersion:     tls.VersionTLS12,
+			NextProtos:     []string{"h2", "http/1.1"},
+		}
 		serveTLS := func(listener net.Listener) error {
-			return server.ServeTLS(listener, config.CertFile.Unwrap(), config.KeyFile.Unwrap())
+			return server.ServeTLS(listener, "", "")
 		}
 		listeners = append(listeners, httpListener{Scheme: "https", Listener: listener, Serve: serveTLS})
 	}

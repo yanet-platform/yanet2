@@ -26,7 +26,6 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/yanet-platform/yanet2/common/go/testutils/tlscert"
-	"github.com/yanet-platform/yanet2/common/go/xcfg"
 	"github.com/yanet-platform/yanet2/controlplane/gateway"
 	"github.com/yanet-platform/yanet2/controlplane/internal/auth"
 	ynpb "github.com/yanet-platform/yanet2/controlplane/ynpb/v1"
@@ -84,10 +83,7 @@ func startX509Gateway(t *testing.T, ca *tlscert.CA, cfg gateway.Config) string {
 	t.Helper()
 
 	server := ca.IssueServer(t, "127.0.0.1")
-	cfg.Server.TLS = &gateway.TLSConfig{
-		CertFile: xcfg.MustNonEmptyString(server.CertFile),
-		KeyFile:  xcfg.MustNonEmptyString(server.KeyFile),
-	}
+	cfg.Server.TLS = &gateway.TLSConfig{KeyPairs: newKeyPairs(t, server.CertFile, server.KeyFile)}
 
 	listener := NewTestListener(t)
 	gw, err := gateway.NewGateway(cfg, gateway.WithLog(zap.NewNop()), gateway.WithListener(listener))

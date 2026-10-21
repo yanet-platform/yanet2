@@ -27,6 +27,10 @@ const defaultEndpoint = "[::1]:8080"
 // deprecatedKeysIssue is the issue that removes the deprecated server keys.
 const deprecatedKeysIssue = "https://github.com/yanet-platform/yanet2/issues/2983"
 
+// minConnectionAge is the shortest bound on gRPC TLS connection age; a
+// shorter one would keep clients reconnecting almost without pause.
+const minConnectionAge = time.Second
+
 // Config is the configuration for the gateway.
 type Config struct {
 	// InstanceID specifies which dataplane instance this gateway serves.
@@ -85,8 +89,18 @@ type ListenerConfig struct {
 type TLSListenerConfig struct {
 	// Endpoint is the listener's address.
 	Endpoint xcfg.NonEmptyString `yaml:"endpoint"`
-	// TLSConfig is the certificate the listener serves.
+	// TLSConfig holds the certificates the listener serves.
 	TLSConfig `yaml:",inline"`
+	// MaxConnectionAge bounds how long a gRPC TLS connection lives before
+	// the gateway asks its client to reconnect, so a renewed client
+	// certificate reaches every connection.
+	//
+	// Optional; zero leaves connections open for as long as their clients
+	// keep them, and any other value is at least 1s. Each connection's age
+	// varies by up to 10% either way, calls in flight complete without a
+	// deadline, and the client reconnects on its next call. Only
+	// server.grpc.tls takes it.
+	MaxConnectionAge time.Duration `yaml:"max_connection_age"`
 }
 
 // listenerPlan is where the gateway listens, with the deprecated keys

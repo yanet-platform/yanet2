@@ -11,10 +11,11 @@ import (
 // DialGateway opens a client connection to the gateway cfg describes, in
 // plaintext or over TLS as its tls block says.
 //
-// The connection dials lazily, so an unreachable gateway surfaces on the
-// first RPC rather than here.
-func DialGateway(cfg GatewayConfig) (*grpc.ClientConn, error) {
-	creds, err := xgrpc.ClientCredentials(cfg.TLS)
+// The options configure the store presenting the client certificate. The
+// connection dials lazily, so an unreachable gateway surfaces on the first
+// RPC rather than here.
+func DialGateway(cfg GatewayConfig, options ...xgrpc.CertificateStoreOption) (*grpc.ClientConn, error) {
+	creds, err := xgrpc.ClientCredentials(cfg.TLS, options...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to build transport credentials for gateway %q: %w", cfg.Name, err)
 	}

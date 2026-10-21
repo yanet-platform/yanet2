@@ -20,27 +20,49 @@ gateway:
     endpoint: "[::1]:8080"
     http_endpoint: "[::1]:8081"
     # tls:
-    #   cert_file: /etc/yanet2/tls/server.pem
-    #   key_file:  /etc/yanet2/tls/server.key
+    #   key_pairs:
+    #     - type: file
+    #       config:
+    #         cert_file: /etc/yanet2/tls/server.pem
+    #         key_file:  /etc/yanet2/tls/server.key
     # The grpc and http sections replace these keys, each for its own
     # protocol. A section takes a plaintext endpoint, a TLS listener, or both
     # side by side, so clients can move to TLS one at a time.
     #
     # Both listeners serve every service. The certificate only has to match
-    # the hosts clients dial; cert rotation requires a director restart. The
-    # gRPC TLS listener alone asks for client certificates; HTTPS never does.
+    # the hosts clients dial; a handshake gets the first key pair that is
+    # valid and that the client supports, else the first. Renewed files are
+    # picked up within an hour without a restart: replace them by rename or
+    # symlink swap, since a key and certificate written one after the other
+    # keep the old pair until both match. Key pair paths cannot be set from
+    # the environment. The gRPC TLS listener alone asks for client
+    # certificates; HTTPS never does.
     # grpc:
     #   endpoint: "[::1]:8080"
     #   tls:
     #     endpoint: "[::1]:8443"
-    #     cert_file: /etc/yanet2/tls/server.pem
-    #     key_file:  /etc/yanet2/tls/server.key
+    #     # Clients reconnect within this age plus 10%, presenting their
+    #     # current certificate; a running stream keeps its connection until
+    #     # it ends.
+    #     #
+    #     # Off by default, at least 1s when set. Deploy a renewed client pair
+    #     # more than 1h plus 1.1 times the age before the old one expires; a
+    #     # day is plenty.
+    #     max_connection_age: 1h
+    #     key_pairs:
+    #       - type: file
+    #         config:
+    #           cert_file: /etc/yanet2/tls/server.pem
+    #           key_file:  /etc/yanet2/tls/server.key
     # http:
     #   endpoint: "[::1]:8081"
     #   tls:
     #     endpoint: "[::1]:8444"
-    #     cert_file: /etc/yanet2/tls/server.pem
-    #     key_file:  /etc/yanet2/tls/server.key
+    #     key_pairs:
+    #       - type: file
+    #         config:
+    #           cert_file: /etc/yanet2/tls/server.pem
+    #           key_file:  /etc/yanet2/tls/server.key
   # auth:
     # Audit admits RPCs after transport TLS checks and logs verified identities.
     # Enabled enforces identity lookup and permissions; disabled is anonymous.

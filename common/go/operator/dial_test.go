@@ -40,6 +40,17 @@ func serveHealth(t *testing.T, options ...grpc.ServerOption) string {
 	return listener.Addr().String()
 }
 
+// newFileKeyPair returns a key pair entry of the file type naming the given
+// PEM files.
+func newFileKeyPair(t *testing.T, certFile, keyFile string) xgrpc.KeyPairConfig {
+	t.Helper()
+
+	keyPair := xgrpc.KeyPairConfig{Type: "file"}
+	require.NoError(t, keyPair.Config.Encode(map[string]string{"cert_file": certFile, "key_file": keyFile}))
+
+	return keyPair
+}
+
 // checkHealth dials the gateway described by cfg and reports the error of
 // one health check through it.
 func checkHealth(t *testing.T, cfg operator.GatewayConfig) error {
@@ -92,7 +103,7 @@ func Test_DialGateway_TLS(t *testing.T) {
 			CAFile: ca.BundleFile(), ServerName: "gateway.test",
 		}},
 		{name: "mutual tls gateway with client certificate", endpoint: mutualTLS, tls: &xgrpc.ClientTLSConfig{
-			CAFile: ca.BundleFile(), CertFile: client.CertFile, KeyFile: client.KeyFile,
+			CAFile: ca.BundleFile(), KeyPairs: []xgrpc.KeyPairConfig{newFileKeyPair(t, client.CertFile, client.KeyFile)},
 		}},
 		{name: "tls gateway without tls block", endpoint: serverTLS, wantErr: true},
 		{name: "tls gateway with untrusted CA", endpoint: serverTLS, tls: &xgrpc.ClientTLSConfig{CAFile: other.BundleFile()}, wantErr: true},

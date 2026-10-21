@@ -14,6 +14,7 @@ import (
 
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
 	"github.com/yanet-platform/yanet2/common/go/readiness"
+	"github.com/yanet-platform/yanet2/common/go/xgrpc"
 	readinesspb "github.com/yanet-platform/yanet2/common/readinesspb/v1"
 	ynpb "github.com/yanet-platform/yanet2/controlplane/ynpb/v1"
 )
@@ -110,7 +111,8 @@ func NewStaticModuleOperator(
 			commonpb.NewLabel("gateway", gw.Name),
 		)
 		metricsCollectors = append(metricsCollectors, gatewayMetrics)
-		conn, err := DialGateway(gw)
+		gatewayLog := log.With(zap.String("gateway", gw.Name))
+		conn, err := DialGateway(gw, xgrpc.WithCertificateStoreLog(gatewayLog))
 		if err != nil {
 			for _, a := range actuators {
 				_ = a.Close()
@@ -121,7 +123,7 @@ func NewStaticModuleOperator(
 			name:      gw.Name,
 			conn:      conn,
 			functions: ynpb.NewFunctionServiceClient(conn),
-			log:       log.With(zap.String("gateway", gw.Name)),
+			log:       gatewayLog,
 		}
 		observed := NewObservedActuator(actuator, "config:"+gw.Name, func(scope string, err error) {
 			tracker.Observe(scope, err)

@@ -3,13 +3,128 @@
 Manual steps required when upgrading an existing deployment. The packaging
 does not perform these automatically.
 
+## TLS key pairs move into `key_pairs` and rotate without a restart
+
+Every certificate and private key is now given as a `key_pairs` list
+instead of `cert_file` and `key_file`: in the gateway's `server.grpc.tls`,
+`server.http.tls` and deprecated `server.tls`, and in every client `tls`
+block (`gateways[].tls` of the operators, `route_operator_tls` of the BIRD
+adapter). Each entry names a loader type and its settings, and `file` is
+the only type. `ca_file` and `server_name` stay as they are. Rewrite
+
+```yaml
+tls:
+  cert_file: /etc/yanet2/tls/server.pem
+  key_file: /etc/yanet2/tls/server.key
+```
+
+into
+
+```yaml
+tls:
+  key_pairs:
+    - type: file
+      config:
+        cert_file: /etc/yanet2/tls/server.pem
+        key_file: /etc/yanet2/tls/server.key
+```
+
+A gateway TLS listener needs at least one entry, so a gateway config left
+with only the old keys fails to load and names the listener. A client may
+give no entry and then presents no certificate, and an operator `tls`
+block left with only `cert_file` and `key_file` dials without one, since
+the old keys are ignored like any unknown key. Keep `cert_file` and
+`key_file` next to `key_pairs` through the package upgrade, as the older
+binaries ignore `key_pairs` and the newer ones the old keys, and drop the
+old keys afterwards. The BIRD adapter rejects unknown keys in both
+versions, so its `route_operator_tls` moves to `key_pairs` together with
+the package. An unknown `type`, or an unknown key under `config`, fails
+the config load. Environment overrides cannot reach the settings under
+`config`, so key pair paths are YAML-only.
+
+The files are reread without a restart. The gateway and every client
+reload an entry on the first handshake an hour after its last try, the
+gateway also on a metrics scrape, and on every handshake while its
+certificate expires within the hour or already has. A loaded pair replaces
+the current one only when it parses, its key matches and it is valid now.
+A pair not yet valid waits and takes over at its start without another
+read; anything else keeps the current pair, with a warning naming the
+source once per content. Replace the files by rename or by swapping a
+symlink: a key and certificate written one after the other may be read
+half written, which keeps the old pair until both files match at a later
+reload. Startup still fails on an unreadable or mismatched pair, and a
+pair outside its validity period still loads, with a warning.
+
+The gateway serves the first entry that is valid and that the client
+supports, else the first entry. A client presents the first entry that is
+valid and that the server's request accepts, else no certificate, so an
+expired client certificate leaves its calls anonymous instead of failing
+the handshake.
+
+A gRPC connection keeps the client certificate of its handshake, while the
+x509 authenticator checks that certificate on every call. Set
+`server.grpc.tls.max_connection_age` to make every client reconnect:
+
+```yaml
+gateway:
+  server:
+    grpc:
+      tls:
+        endpoint: "[::1]:8443"
+        max_connection_age: 1h
+        key_pairs:
+          - type: file
+            config:
+              cert_file: /etc/yanet2/tls/server.pem
+              key_file: /etc/yanet2/tls/server.key
+```
+
+Once a connection reaches that age, varied by up to 10% either way, the
+gateway sends GOAWAY: calls and streams in flight run to completion and the
+client reconnects on its next call. That listener also refuses TLS session
+resumption, which would carry an old client certificate over. The key is
+off by default, and a gateway with an x509 authenticator warns at startup
+while it is unset. Under `server.http.tls`, negative, or positive but under
+a second, it fails startup.
+
+Deploy a renewed client pair more than the reload interval plus 1.1 times
+the connection age before the old one expires, 1h + 1.1 × 1h = 2h06m with
+the example above: the first handshake an hour after the last reload picks
+the pair up, and within 1.1 times the age every older connection has had
+its GOAWAY, so new calls go out presenting the new pair. A stream already
+running at the GOAWAY keeps its connection until it ends, since its
+identity was checked when it started. Renewing a day ahead satisfies this
+with room to spare. A server pair only needs the hour, since clients check
+the server certificate at the handshake alone.
+
+To move client certificates onto a new CA:
+
+1. Add the new CA to the x509 authenticator's `ca_sources` on every
+   gateway; the gateway reloads them by itself.
+2. Replace the pair files of every client with a certificate from the new
+   CA, as for a renewal, without a restart. A second `key_pairs` entry, a
+   config change and so a restart, is needed only while a client talks to
+   gateways that do not all trust the new CA yet. A client then presents
+   the first entry whose issuer the gateway's request names, so the two
+   CAs need distinct subject names.
+3. Drop the old CA from `ca_sources` last.
+
+To move the gateway's server certificate onto a new CA, add the new CA to
+the `ca_file` of every client first, which a client reads only when it
+starts, then replace the gateway's pair files.
+
+Two gauges follow a rollout, see [gateway TLS metrics](metrics.md#gateway-tls-metrics):
+`gateway_tls_certificate_not_after_seconds` for the certificates the
+gateway serves and `auth_x509_client_certificate_not_after_seconds` for
+those its clients present.
+
 ## Gateway listeners move into `grpc` and `http` sections
 
 The gateway's `server` block now configures each protocol in a section of
 its own, `grpc` and `http`. A section takes an optional plaintext `endpoint`
-and an optional `tls` listener with its own `endpoint`, `cert_file` and
-`key_file`, so plaintext and TLS can run side by side while clients move to
-TLS one at a time.
+and an optional `tls` listener with its own `endpoint` and `key_pairs`, so
+plaintext and TLS can run side by side while clients move to TLS one at a
+time.
 
 The old `endpoint`, `http_endpoint` and `tls` keys keep working as
 deprecated aliases until #2983 removes them, and the director logs a
@@ -31,8 +146,11 @@ gateway:
     endpoint: "[::1]:8080"
     http_endpoint: "[::1]:8081"
     tls:
-      cert_file: /etc/yanet2/tls/server.pem
-      key_file: /etc/yanet2/tls/server.key
+      key_pairs:
+        - type: file
+          config:
+            cert_file: /etc/yanet2/tls/server.pem
+            key_file: /etc/yanet2/tls/server.key
 ```
 
 into the same listeners:
@@ -43,13 +161,19 @@ gateway:
     grpc:
       tls:
         endpoint: "[::1]:8080"
-        cert_file: /etc/yanet2/tls/server.pem
-        key_file: /etc/yanet2/tls/server.key
+        key_pairs:
+          - type: file
+            config:
+              cert_file: /etc/yanet2/tls/server.pem
+              key_file: /etc/yanet2/tls/server.key
     http:
       tls:
         endpoint: "[::1]:8081"
-        cert_file: /etc/yanet2/tls/server.pem
-        key_file: /etc/yanet2/tls/server.key
+        key_pairs:
+          - type: file
+            config:
+              cert_file: /etc/yanet2/tls/server.pem
+              key_file: /etc/yanet2/tls/server.key
 ```
 
 Adding `grpc.endpoint` on another address then serves plaintext gRPC beside
@@ -58,11 +182,12 @@ the gRPC TLS listener: only that listener asks for client certificates,
 plaintext callers stay anonymous, and HTTPS never asks for one.
 
 Environment overrides follow the keys: `YANET_GATEWAY_SERVER_GRPC_ENDPOINT`,
-`YANET_GATEWAY_SERVER_GRPC_TLS_ENDPOINT`, `YANET_GATEWAY_SERVER_GRPC_TLS_CERT_FILE`
-and so on for the sections. Once a config uses a section, overrides of that
-protocol's old keys are ignored like the keys themselves. Until #2983,
-`YANET_GATEWAY_SERVER_HTTP_ENDPOINT` names both `http_endpoint` and
-`http.endpoint`, and setting it fails startup.
+`YANET_GATEWAY_SERVER_GRPC_TLS_ENDPOINT`,
+`YANET_GATEWAY_SERVER_GRPC_TLS_MAX_CONNECTION_AGE` and so on for the
+sections, while key pair paths are YAML-only. Once a config uses a section,
+overrides of that protocol's old keys are ignored like the keys themselves.
+Until #2983, `YANET_GATEWAY_SERVER_HTTP_ENDPOINT` names both
+`http_endpoint` and `http.endpoint`, and setting it fails startup.
 
 ## Route operator separates device exclusions from unresolved nexthops
 

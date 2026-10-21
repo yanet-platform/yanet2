@@ -8,6 +8,7 @@ import (
 	"google.golang.org/grpc"
 
 	"github.com/yanet-platform/yanet2/common/go/operator"
+	"github.com/yanet-platform/yanet2/common/go/xgrpc"
 	ynpb "github.com/yanet-platform/yanet2/controlplane/ynpb/v1"
 	"github.com/yanet-platform/yanet2/devices/plain/controlplane/plainpb/v1"
 	"github.com/yanet-platform/yanet2/devices/vlan/controlplane/vlanpb/v1"
@@ -45,7 +46,8 @@ func NewGatewayActuator(
 		o(opts)
 	}
 
-	conn, err := operator.DialGateway(cfg)
+	log := opts.Log.With(zap.String("gateway", cfg.Name))
+	conn, err := operator.DialGateway(cfg, xgrpc.WithCertificateStoreLog(log))
 	if err != nil {
 		return nil, err
 	}
@@ -57,7 +59,7 @@ func NewGatewayActuator(
 		plain:     plainpb.NewDevicePlainServiceClient(conn),
 		vlan:      vlanpb.NewDeviceVlanServiceClient(conn),
 		metrics:   opts.Metrics,
-		log:       opts.Log.With(zap.String("gateway", cfg.Name)),
+		log:       log,
 	}, nil
 }
 
