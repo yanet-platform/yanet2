@@ -20,6 +20,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 	"gopkg.in/yaml.v3"
@@ -288,4 +289,53 @@ func Test_NewGateway_X509RequiresServerTLS(t *testing.T) {
 
 	_, err := gateway.NewGateway(cfg, gateway.WithLog(zap.NewNop()))
 	require.ErrorContains(t, err, "x509 authenticator requires server.tls")
+}
+
+// Test_Gateway_X509_DedicatedTLS_VerifiesCertificatesOnlyOverTLS verifies
+// that with a gRPC section serving plaintext and TLS side by side, a trusted
+// client certificate identifies its caller over TLS, while a plaintext
+// caller of the same gateway stays anonymous.
+func Test_Gateway_X509_DedicatedTLS_VerifiesCertificatesOnlyOverTLS(t *testing.T) {
+	t.Parallel()
+
+	ca := tlscert.NewCA(t)
+	cfg := gateway.DefaultConfig()
+	cfg.Auth = newX509AuthConfig(t, ca)
+	server := ca.IssueServer(t, "127.0.0.1")
+	plaintextListener, tlsListener := startDedicatedTLSGateway(t, cfg, server.CertFile, server.KeyFile)
+	plaintext := dialGateway(t, plaintextListener.Addr().String(), insecure.NewCredentials())
+	tlsAddress := tlsListener.Addr().String()
+
+	cases := []struct {
+		name       string
+		client     ynpb.AuthServiceClient
+		user       string
+		authMethod string
+		anonymous  bool
+	}{
+		{
+			name:       "trusted certificate over TLS identifies its common name",
+			client:     dialAuth(t, tlsAddress, ca, ca.IssueClient(t, "route-operator").Certificate),
+			user:       "route-operator",
+			authMethod: "x509",
+		},
+		{
+			name:       "plaintext caller is anonymous",
+			client:     ynpb.NewAuthServiceClient(plaintext),
+			user:       "anonymous",
+			authMethod: "none",
+			anonymous:  true,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			principal, err := introspectSelf(t, t.Context(), tc.client)
+			require.NoError(t, err)
+
+			require.Equal(t, tc.user, principal.GetUser())
+			require.Equal(t, tc.authMethod, principal.GetAuthMethod())
+			require.Equal(t, tc.anonymous, principal.GetIsAnonymous())
+		})
+	}
 }
