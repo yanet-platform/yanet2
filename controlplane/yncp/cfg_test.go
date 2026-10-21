@@ -136,18 +136,23 @@ func Test_NullTopLevelDevices_FailsValidation(t *testing.T) {
 	require.Equal(t, `key "devices" at line 3 has no value; give it a body or remove the key`, err.Error())
 }
 
-// Test_ModuleBlock_StrayNestedKey_RejectedByKnownFields asserts that a key
-// nested inside a module's own block, not just at the document's top level,
-// is rejected when loading through the director's WithKnownFields path.
-func Test_ModuleBlock_StrayNestedKey_RejectedByKnownFields(t *testing.T) {
-	input := "modules:\n  decap:\n" +
-		"    instance_id: 0\n" +
-		"    memory_path: /dev/hugepages/yanet\n" +
-		"    memory_requirements: 16MB\n" +
-		"    endpoint: \"[::1]:0\"\n" +
-		"    bogus: z\n"
-	var cfg yncp.Config
-	err := xcfg.Decode([]byte(input), &cfg, xcfg.WithKnownFields())
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "modules.decap.bogus")
+// Test_UnknownKeys_Ignored asserts that a config carrying keys from a newer
+// release, at the top level and inside a module block, still loads the way
+// the director loads it.
+func Test_UnknownKeys_Ignored(t *testing.T) {
+	input := `
+gateway:
+  instance_id: 0
+future_section:
+  enabled: true
+modules:
+  decap:
+    instance_id: 0
+    memory_path: /dev/hugepages/yanet
+    memory_requirements: 16MB
+    endpoint: "[::1]:0"
+    future_knob: 1
+`
+	cfg := yncp.DefaultConfig()
+	require.NoError(t, xcfg.Decode([]byte(input), cfg, xcfg.WithEnv()))
 }

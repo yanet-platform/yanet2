@@ -54,7 +54,9 @@ func main() {
 }
 
 func run(cmd Cmd) error {
-	cfg, err := xcfg.LoadConfig[yncp.Config](cmd.ConfigPath, xcfg.WithKnownFields(), xcfg.WithEnv())
+	// Unknown keys are ignored so that a config extended for a newer release
+	// still loads on an older one during a rolling cluster upgrade.
+	cfg, err := xcfg.LoadConfig[yncp.Config](cmd.ConfigPath, xcfg.WithEnv())
 	if err != nil {
 		return fmt.Errorf("failed to load config: %w", err)
 	}
