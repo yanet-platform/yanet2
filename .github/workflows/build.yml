@@ -572,10 +572,12 @@ jobs:
         uses: ./.github/actions/protoc-plugins
 
       # The gate for out-of-tree module support: builds the SDK artifacts
-      # into build/sdk/, then builds and tests the reference module in
-      # sdk/example strictly through the SDK surfaces (own build, own
-      # go.mod, standalone CLI workspace).
+      # into build/sdk/, then builds and tests the reference modules in
+      # sdk/example (C dataplane) and sdk/example-rs (Rust dataplane),
+      # strictly through the SDK surfaces (own build, own go.mod,
+      # standalone CLI workspace).
       - name: Build the module SDK and the out-of-tree modules
         run: |
-          meson setup build -Dbuildtype=release
+          meson setup build -Dbuildtype=release -Dwith_rust_modules=true
           make sdk-example
+          meson test -C build 'dataplane_ut_rust*'
