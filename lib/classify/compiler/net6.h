@@ -93,7 +93,10 @@ struct classify_compile_net6 {
 
 	struct value_registry net_registry;
 	uint32_t *region_values;
+	// Raw region identity stays stable while callbacks change classes.
+	uint32_t *region_seen;
 	uint32_t region_count;
+	uint32_t region_gen;
 
 	// The dense high by low join table of the combined regions; it
 	// moves into the embedded attribute at commit.
@@ -707,9 +710,25 @@ classify_compile_net6_create(
 	       0,
 	       sizeof(uint32_t) * compile->region_count);
 
+	compile->region_seen = memory_balloc(
+		memory_context, sizeof(uint32_t) * compile->region_count
+	);
+	if (compile->region_seen == NULL) {
+		goto error_free_net_registry;
+	}
+	memset(compile->region_seen, 0, sizeof(uint32_t) * compile->region_count
+	);
+
 	return compile;
 
 error_free_net_registry:
+	if (compile->region_seen != NULL) {
+		memory_bfree(
+			memory_context,
+			compile->region_seen,
+			sizeof(uint32_t) * compile->region_count
+		);
+	}
 	if (compile->region_values != NULL) {
 		memory_bfree(
 			memory_context,
@@ -825,6 +844,17 @@ classify_compile_net6_rule_iter(
 		return 0;
 	}
 
+	uint32_t generation = 0;
+	if (nets.count > 1) {
+		generation = ++net6_compile->region_gen;
+		if (generation == 0) {
+			memset(net6_compile->region_seen,
+			       0,
+			       sizeof(uint32_t) * net6_compile->region_count);
+			generation = net6_compile->region_gen = 1;
+		}
+	}
+
 	for (uint32_t net_idx = 0; net_idx < nets.count; ++net_idx) {
 		struct net6 net6;
 		net6_normalize(nets.items + net_idx, &net6);
@@ -836,8 +866,17 @@ classify_compile_net6_rule_iter(
 
 		const uint32_t *values = ADDR_OF(&range->values);
 		for (uint32_t idx = 0; idx < range->count; ++idx) {
+			const uint32_t region_idx = values[idx];
+			if (nets.count > 1) {
+				if (net6_compile->region_seen[region_idx] ==
+				    generation) {
+					continue;
+				}
+				net6_compile->region_seen[region_idx] =
+					generation;
+			}
 			if (iter_cb_func(
-				    net6_compile->region_values + values[idx],
+				    net6_compile->region_values + region_idx,
 				    cb_func_data
 			    ) < 0) {
 				return -1;
@@ -856,6 +895,14 @@ classify_compile_net6_free(
 
 	range_index_free(&net6_compile->ri_hi);
 	range_index_free(&net6_compile->ri_lo);
+
+	if (net6_compile->region_seen != NULL) {
+		memory_bfree(
+			memory_context,
+			net6_compile->region_seen,
+			sizeof(uint32_t) * net6_compile->region_count
+		);
+	}
 
 	if (net6_compile->region_values != NULL) {
 		memory_bfree(
