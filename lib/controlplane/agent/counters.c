@@ -464,11 +464,12 @@ counter_worker_set_list_build(
 // Match the tag and name predicates against every worker's own counter
 // storage registry and return each worker's matched counters separately.
 //
-// The config lock is held only long enough to acquire the generation pin
-// at the start and to drop it again at the end. The pin itself stays held
-// for the whole call: matching, allocation and the value copy all run
-// unlocked against the pinned generation, so a concurrent config update
-// can retire and replace it mid-call without disturbing this read.
+// The generation is pinned through the publication lock at the start
+// and the pin dropped at the end, both without the configuration lock.
+// The pin itself stays held for the whole call: matching, allocation and
+// the value copy all run unlocked against the pinned generation, so a
+// concurrent config update can retire and replace it mid-call without
+// disturbing this read.
 struct counter_worker_set_list *
 yanet_get_counters_by_tags_per_worker(
 	struct dp_config *dp_config,

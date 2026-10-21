@@ -535,6 +535,14 @@ cp_module_registry_copy(
 	return 0;
 }
 
+// The item-to-owner mapping for the registry teardown fallback below.
+static struct agent *
+module_item_owner(struct registry_item *item) {
+	struct cp_module *module =
+		container_of(item, struct cp_module, config_item);
+	return ADDR_OF(&module->agent);
+}
+
 void
 cp_module_registry_fini(struct cp_module_registry *module_registry) {
 	// Mirror each remaining item's dropped generation reference into its
@@ -573,23 +581,14 @@ cp_module_registry_fini(struct cp_module_registry *module_registry) {
 		return;
 	}
 
-	// Teardown could not snapshot the owners; drop each reference
-	// directly, accepting that a concurrent sweep may race the
-	// remaining dereferences.
-	for (uint64_t idx = 0; idx < capacity; ++idx) {
-		struct cp_module *module =
-			cp_module_registry_get(module_registry, idx);
-		if (module == NULL) {
-			continue;
-		}
-		struct agent *agent = ADDR_OF(&module->agent);
-		if (agent != NULL) {
-			__atomic_sub_fetch(
-				&agent->loaded_module_count, 1, __ATOMIC_RELAXED
-			);
-		}
-	}
-	registry_fini(&module_registry->registry, NULL, NULL);
+	// Teardown could not snapshot the owners; release the items and
+	// drop the owners' references in allocation-free batches that keep
+	// the same dereferences-before-drops order per batch.
+	agent_release_registry_items(
+		&module_registry->registry,
+		module_item_owner,
+		AGENT_REFERENCE_MODULE
+	);
 }
 
 struct cp_module *
@@ -777,7 +776,7 @@ cp_module_registry_upsert(
 			__atomic_sub_fetch(
 				&old_agent->loaded_module_count,
 				1,
-				__ATOMIC_RELAXED
+				__ATOMIC_RELEASE
 			);
 		}
 	}
@@ -819,7 +818,7 @@ cp_module_registry_delete(
 			__atomic_sub_fetch(
 				&old_agent->loaded_module_count,
 				1,
-				__ATOMIC_RELAXED
+				__ATOMIC_RELEASE
 			);
 		}
 	}

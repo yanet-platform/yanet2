@@ -15,6 +15,9 @@ struct cp_module;
 struct cp_device;
 struct cp_object;
 
+struct registry;
+struct registry_item;
+
 struct agent;
 
 // Longest agent name the registry can hold, terminator included.
@@ -124,6 +127,22 @@ agent_unload_references(
 // frees the item it came from.
 void
 agent_destroy_released(struct agent *agent, enum agent_reference_kind kind);
+
+// Release every item of a retiring registry and mirror the drops into
+// the owners' loaded counts, in bounded allocation-free batches.
+//
+// The fallback for a registry teardown whose one-shot owners snapshot
+// could not be allocated; item_owner maps one registry item to the
+// agent that owns it. Each batch finishes every dereference of
+// agent-owned storage before its loaded counts drop, so an owner whose
+// count reaches zero has no reference left anywhere and nothing later
+// in the release can touch reclaimed storage.
+void
+agent_release_registry_items(
+	struct registry *registry,
+	struct agent *(*item_owner)(struct registry_item *item),
+	enum agent_reference_kind kind
+);
 
 int
 agent_update_modules(

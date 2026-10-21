@@ -128,6 +128,12 @@ cp_device_fini(struct cp_device *self);
 // with errno EAGAIN while a live generation still holds the device; the
 // caller must keep its handle and retry once the generations drain.
 //
+// A successful call also marks the device destroying, holding it against
+// a racing re-registration, and takes one destruction hold of the owning
+// agent: the caller must run the device's typed destructor and then
+// return that hold with agent_destroy_released, on storage only the hold
+// keeps alive.
+//
 // The count is read under the configuration lock, which every registry
 // mutation also runs under, so the answer is stable against concurrent
 // generation installs and releases in other processes.
