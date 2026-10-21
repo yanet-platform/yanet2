@@ -6,6 +6,7 @@
 
 #include "api/agent.h"
 
+#include "common/container_of.h"
 #include "common/memory_block.h"
 #include "common/strutils.h"
 #include "common/test_assert.h"
@@ -342,6 +343,13 @@ test_cp_object_index_stability(struct yanet_shm *shm) {
 	// dangling object out of circulation and tear it down explicitly so
 	// the arena returns to its pre-test size.
 	yanet_error *free_err = NULL;
+	// Each successful gate takes one destruction hold of the owner, so
+	// the owners are captured before any teardown can free the objects
+	// and the holds are returned once each typed destroy is done.
+	struct agent *foo_owner = ADDR_OF(&foo->agent);
+	struct agent *bar_owner = ADDR_OF(&bar->agent);
+	struct agent *foo2_owner = ADDR_OF(&foo2->agent);
+	struct agent *bar2_owner = ADDR_OF(&bar2->agent);
 	TEST_ASSERT_SUCCESS(
 		cp_object_try_destroy(foo, &free_err),
 		"dangling object must be destroyable"
@@ -360,12 +368,22 @@ test_cp_object_index_stability(struct yanet_shm *shm) {
 	);
 	cp_object_fini(foo);
 	memory_bfree(&agent->memory_context, foo, sizeof(*foo));
+	agent_destroy_released(foo_owner, AGENT_REFERENCE_OBJECT);
 	cp_object_fini(bar);
 	memory_bfree(&agent->memory_context, bar, sizeof(*bar));
+	agent_destroy_released(bar_owner, AGENT_REFERENCE_OBJECT);
 	cp_object_fini(foo2);
 	memory_bfree(&agent->memory_context, foo2, sizeof(*foo2));
+	agent_destroy_released(foo2_owner, AGENT_REFERENCE_OBJECT);
 	cp_object_fini(bar2);
 	memory_bfree(&agent->memory_context, bar2, sizeof(*bar2));
+	agent_destroy_released(bar2_owner, AGENT_REFERENCE_OBJECT);
+	TEST_ASSERT_EQUAL(
+		agent->loaded_object_count,
+		0,
+		"loaded_object_count must stay balanced through the destroy "
+		"gates"
+	);
 
 	size_t after = block_allocator_free_size(&agent->block_allocator);
 	TEST_ASSERT_EQUAL(
@@ -541,6 +559,118 @@ new_object_test(void) {
 	return object;
 }
 
+// The allocation-free batched release must reproduce the snapshot path's
+// outcome across the batch boundary: every item reference dropped, every
+// owner count mirrored down to zero, and the registry storage discarded
+// while the objects' own storage stays valid for their owner to destroy.
+#define CP_OBJECT_BATCH_TEST_COUNT 150
+
+// The batch scenario's agent stays registered for the harness lifetime
+// (detach is a no-op), so it claims a small arena on top of the other
+// scenarios' agents rather than a full test-memory one.
+#define CP_OBJECT_BATCH_MEMORY_LIMIT (1u * 1024u * 1024u)
+
+static struct agent *
+batch_test_item_owner(struct registry_item *item) {
+	struct cp_object *object =
+		container_of(item, struct cp_object, config_item);
+	return ADDR_OF(&object->agent);
+}
+
+static int
+test_cp_object_batched_release(struct yanet_shm *shm) {
+	yanet_error *err = NULL;
+
+	struct agent *agent = agent_attach(
+		shm, 0, "cp-object-batch", CP_OBJECT_BATCH_MEMORY_LIMIT, &err
+	);
+	TEST_ASSERT_NOT_NULL(agent, "agent_attach failed");
+
+	size_t baseline = block_allocator_free_size(&agent->block_allocator);
+
+	struct cp_object_registry registry;
+	TEST_ASSERT_SUCCESS(
+		cp_object_registry_init(
+			&agent->memory_context, NULL, &registry, &err
+		),
+		"object registry init failed: %s",
+		err ? yanet_error_message(err) : "?"
+	);
+
+	struct cp_object *objects[CP_OBJECT_BATCH_TEST_COUNT];
+	char name[CP_OBJECT_NAME_LEN];
+	for (uint64_t idx = 0; idx < CP_OBJECT_BATCH_TEST_COUNT; ++idx) {
+		snprintf(
+			name,
+			sizeof(name),
+			"batch-%llu",
+			(unsigned long long)idx
+		);
+		struct cp_object *object = (struct cp_object *)memory_balloc(
+			&agent->memory_context, sizeof(struct cp_object)
+		);
+		TEST_ASSERT_NOT_NULL(object, "object allocation failed");
+		TEST_ASSERT_SUCCESS(
+			cp_object_init(object, agent, "test", name, &err),
+			"cp_object_init failed: %s",
+			err ? yanet_error_message(err) : "?"
+		);
+		TEST_ASSERT_SUCCESS(
+			cp_object_registry_upsert(
+				&registry, "test", name, object, &err
+			),
+			"upsert(%s) failed: %s",
+			name,
+			err ? yanet_error_message(err) : "?"
+		);
+		objects[idx] = object;
+	}
+	TEST_ASSERT_EQUAL(
+		agent->loaded_object_count,
+		CP_OBJECT_BATCH_TEST_COUNT,
+		"every upsert must take one generation reference"
+	);
+
+	agent_release_registry_items(
+		&registry.registry,
+		batch_test_item_owner,
+		AGENT_REFERENCE_OBJECT
+	);
+	TEST_ASSERT_EQUAL(
+		agent->loaded_object_count,
+		0,
+		"the batched release must mirror every dropped reference"
+	);
+	TEST_ASSERT_NULL(
+		ADDR_OF(&registry.registry.items),
+		"the batched release must discard the registry storage"
+	);
+
+	// The items' storage survives the release for their owner: each
+	// object tears down explicitly and the arena returns to baseline.
+	for (uint64_t idx = 0; idx < CP_OBJECT_BATCH_TEST_COUNT; ++idx) {
+		cp_object_fini(objects[idx]);
+		memory_bfree(
+			&agent->memory_context,
+			objects[idx],
+			sizeof(*objects[idx])
+		);
+	}
+
+	size_t after = block_allocator_free_size(&agent->block_allocator);
+	TEST_ASSERT_EQUAL(
+		(long)after,
+		(long)baseline,
+		"arena did not return to baseline after the batched release: "
+		"baseline=%zu after=%zu",
+		baseline,
+		after
+	);
+
+	agent_detach(agent);
+	return TEST_SUCCESS;
+}
+
 int
 main(void) {
 	log_enable_name("debug");
@@ -582,6 +712,9 @@ main(void) {
 	}
 	if (res == TEST_SUCCESS) {
 		res = test_cp_object_attach_gate(shm);
+	}
+	if (res == TEST_SUCCESS) {
+		res = test_cp_object_batched_release(shm);
 	}
 	if (res == TEST_SUCCESS) {
 		res = test_cp_object_init_unknown_type_fails(shm);

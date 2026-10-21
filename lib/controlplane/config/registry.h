@@ -65,9 +65,16 @@ typedef void (*registry_item_free_func)(struct registry_item *item, void *data);
 //
 // Called under the configuration lock by registry mutations, and
 // without it by a retired generation's teardown, so the count moves
-// with a relaxed atomic. Without a destroy callback the zero
-// transition is a no-op: the item stays alive, dangling, and only its
-// owner may destroy it.
+// with an atomic RMW. The subtraction releases the caller's prior
+// accesses to the item, and the subtraction that observes zero
+// acquires every earlier releaser's publication — the release
+// sequence the chained RMWs form carries each one to the final
+// subtraction — so a destroy callback runs ordered after the last
+// holder's reads of the item instead of racing them on a weakly
+// ordered target.
+//
+// Without a destroy callback the zero transition is a no-op: the item
+// stays alive, dangling, and only its owner may destroy it.
 //
 // A destroy callback may run on either path, including the unlocked
 // final release of a retired generation, so it must only perform
@@ -83,7 +90,7 @@ registry_item_unref(
 ) {
 	(void)owner;
 	uint64_t remaining =
-		__atomic_sub_fetch(&item->refcnt, 1, __ATOMIC_RELAXED);
+		__atomic_sub_fetch(&item->refcnt, 1, __ATOMIC_ACQ_REL);
 	if (!remaining && free_func != NULL) {
 		free_func(item, free_func_data);
 	}
@@ -146,6 +153,26 @@ registry_init(
 	return 0;
 }
 
+// Free a registry's storage without touching its items, for teardown
+// paths that release every item reference themselves before the storage
+// goes.
+//
+// Idempotent on zero-init, like registry_fini below.
+static inline void
+registry_discard(struct registry *registry) {
+	if (ADDR_OF(&registry->items) == NULL) {
+		return;
+	}
+
+	memory_bfree(
+		ADDR_OF(&registry->memory_context),
+		ADDR_OF(&registry->items),
+		sizeof(struct registry_item *) * registry->capacity
+	);
+
+	memset(registry, 0, sizeof(*registry));
+}
+
 // Release all items in the registry, free the items array, and zero the struct.
 //
 // Idempotent on zero-init: safe to call on a registry that was never
@@ -160,8 +187,6 @@ registry_fini(
 		return;
 	}
 
-	struct memory_context *memory_context =
-		ADDR_OF(&registry->memory_context);
 	struct cp_config *owner = ADDR_OF(&registry->owner);
 
 	for (uint64_t idx = 0; idx < registry->capacity; ++idx) {
@@ -175,13 +200,7 @@ registry_fini(
 		);
 	}
 
-	memory_bfree(
-		memory_context,
-		ADDR_OF(&registry->items),
-		sizeof(struct registry_item *) * registry->capacity
-	);
-
-	memset(registry, 0, sizeof(*registry));
+	registry_discard(registry);
 }
 
 static inline int
