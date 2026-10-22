@@ -13,16 +13,6 @@ export DEB_BUILD_MAINT_OPTIONS = hardening=+all
 YANET_VERSION ?= $(DEB_VERSION)
 export YANET_VERSION
 
-# Pin the DWARF source path so it does not carry the package version.
-#
-# Ubuntu's fixfilepath feature maps the build directory to
-# /usr/src/<source>-<version>, and the CI build script gives every commit a
-# distinct +dev version. ccache hashes that mapped directory into both its
-# manifest and result keys, so a version-bearing path makes every key unique
-# and no cache entry is ever reused. Turning the feature off instead would
-# leave a relative path, which DWARF forbids for DW_AT_comp_dir.
-export DEB_BUILD_DEBUGPATH = /usr/src/yanet2
-
 # Fall back to nproc for parallel jobs when the caller supplies none.
 #
 # The dpkg-buildpackage tool exports DEB_BUILD_OPTIONS with a parallel
@@ -50,20 +40,6 @@ override_dh_auto_configure:
 # validates the source rather than the packages.
 override_dh_auto_test:
 	:
-
-override_dh_auto_clean:
-	set --; \
-	if printf '%s\0' "$${GOCACHE##*/}" | LC_ALL=C grep -zEq '^yanet-ci-(release|asan|race|deb)-[0-9a-f]{64}$$'; then \
-		set -- "$$@" -o go-cache-clean; \
-	fi; \
-	if [ "$${YANET_DEB_CARGO_CACHE:-}" = 1 ]; then \
-		set -- "$$@" -o cli-clean; \
-	fi; \
-	if [ "$$#" -gt 0 ]; then \
-		dh_auto_clean -- "$$@"; \
-	else \
-		dh_auto_clean; \
-	fi
 
 execute_after_dh_auto_clean:
 	$(MAKE) -C scripts/uprobe clean
