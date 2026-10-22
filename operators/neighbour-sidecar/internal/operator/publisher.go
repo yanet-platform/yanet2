@@ -112,9 +112,8 @@ func (m *Publisher) Apply(ctx context.Context, snapshot neigh.NexthopCacheView) 
 }
 
 func neighbourEntriesToProto(snapshot neigh.NexthopCacheView) []*operatorpb.NeighbourEntry {
-	entries, count := snapshot.Entries()
-	neighbours := make([]*operatorpb.NeighbourEntry, 0, count)
-	for entry := range entries {
+	neighbours := make([]*operatorpb.NeighbourEntry, 0, snapshot.Len())
+	for entry := range snapshot.Entries() {
 		neighbours = append(
 			neighbours,
 			&operatorpb.NeighbourEntry{

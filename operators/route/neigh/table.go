@@ -178,12 +178,10 @@ func (m *NeighTable) ListSources() []SourceInfo {
 
 	result := make([]SourceInfo, 0, len(m.sources))
 	for _, src := range m.sources {
-		view := src.Cache.View()
-		_, count := view.Entries()
 		result = append(result, SourceInfo{
 			Name:            src.Name,
 			DefaultPriority: src.DefaultPriority,
-			EntryCount:      count,
+			EntryCount:      src.Cache.View().Len(),
 			BuiltIn:         src.BuiltIn,
 		})
 	}
@@ -309,10 +307,7 @@ func (m *NeighTable) rebuildMergedCacheLocked() bool {
 	merged := map[netip.Addr]NeighbourEntry{}
 
 	for _, src := range m.sources {
-		view := src.Cache.View()
-		entries, _ := view.Entries()
-
-		for entry := range entries {
+		for entry := range src.Cache.View().Entries() {
 			entry.Source = src.Name
 			existing, ok := merged[entry.NextHop]
 			if !ok || entry.Priority < existing.Priority {
@@ -329,7 +324,7 @@ func (m *NeighTable) rebuildMergedCacheLocked() bool {
 // sameHardwareRoutes compares the only projection a forwarding table is
 // built from: which nexthops resolve, and to what hardware route.
 func sameHardwareRoutes(before NexthopCacheView, after map[netip.Addr]NeighbourEntry) bool {
-	if _, n := before.Entries(); n != len(after) {
+	if before.Len() != len(after) {
 		return false
 	}
 

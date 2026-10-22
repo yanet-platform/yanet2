@@ -243,7 +243,7 @@ func (m *Metrics) Collect() []*commonpb.Metric {
 			commonpb.NewLabel("table", src.Name),
 		))
 	}
-	_, nexthops := m.neighTable.View().Entries()
+	nexthops := m.neighTable.View().Len()
 	out = append(out, commonpb.NewMetricGauge("route_operator_neighbour_nexthops", float64(nexthops)))
 
 	for _, entry := range m.ribSessionStarts.Metrics() {
