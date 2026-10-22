@@ -43,17 +43,17 @@ func routeSnapshot(routes []rib.Route, devices map[string]string) op.RouteSnapsh
 		list.Routes = append(list.Routes, route)
 		dump[prefix.Bits()][prefix] = list
 	}
-	cache := rcucache.NewEmptyCache[netip.Addr, neigh.NeighbourEntry]()
+	cache := map[netip.Addr]neigh.NeighbourEntry{}
 	for address, device := range devices {
-		cache.Set(netip.MustParseAddr(address).Unmap(), neigh.NeighbourEntry{
+		cache[netip.MustParseAddr(address).Unmap()] = neigh.NeighbourEntry{
 			HardwareRoute: testHardwareRoute(address, device),
-		})
+		}
 	}
 	return op.RouteSnapshot{
 		RIBs: map[string]maptrie.MapTrie[netip.Prefix, netip.Addr, rib.RoutesList]{
 			"route0": dump,
 		},
-		Neighbours: cache.View(),
+		Neighbours: rcucache.NewCache(cache).View(),
 	}
 }
 

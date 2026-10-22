@@ -2,6 +2,7 @@ package neigh
 
 import (
 	"context"
+	"maps"
 	"net/netip"
 	"sync"
 	"testing"
@@ -192,6 +193,48 @@ func TestNeighTableSourceView(t *testing.T) {
 	// Non-existent source returns false.
 	_, ok = nt.SourceView("nonexistent")
 	require.False(t, ok)
+}
+
+// Test_NeighTable_SourceView_KeepsSnapshotAcrossChanges verifies that a
+// source view keeps the entries it was taken with after the source changes.
+//
+// Readers iterate views without the table lock, so a change written into
+// the map a view holds races with them and can crash the process.
+func Test_NeighTable_SourceView_KeepsSnapshotAcrossChanges(t *testing.T) {
+	kept := makeEntry("10.0.0.1", [6]byte{0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA}, 10)
+	added := makeEntry("10.0.0.2", [6]byte{0xBB, 0xBB, 0xBB, 0xBB, 0xBB, 0xBB}, 10)
+
+	cases := []struct {
+		name   string
+		change func(nt *NeighTable) error
+	}{
+		{
+			name: "add",
+			change: func(nt *NeighTable) error {
+				return nt.Add("static", []NeighbourEntry{added})
+			},
+		},
+		{
+			name: "remove",
+			change: func(nt *NeighTable) error {
+				return nt.Remove("static", []netip.Addr{kept.NextHop})
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			nt := NewNeighTable()
+			mustCreateSource(t, nt, "static", 10, true)
+			require.NoError(t, nt.Add("static", []NeighbourEntry{kept}))
+			view, ok := nt.SourceView("static")
+			require.True(t, ok)
+
+			require.NoError(t, tc.change(nt))
+
+			require.Equal(t, map[netip.Addr]NeighbourEntry{kept.NextHop: kept}, maps.Collect(view.Iter()))
+		})
+	}
 }
 
 func TestNeighTableCreateSource(t *testing.T) {

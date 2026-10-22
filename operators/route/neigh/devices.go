@@ -41,8 +41,7 @@ func (m DeviceScope) filter(view NexthopCacheView) NexthopCacheView {
 		return view
 	}
 	filtered := map[netip.Addr]NeighbourEntry{}
-	entries, _ := view.All()
-	for address, entry := range entries {
+	for address, entry := range view.Iter() {
 		if m.Allows(entry.HardwareRoute.Device) {
 			filtered[address] = entry
 		}
