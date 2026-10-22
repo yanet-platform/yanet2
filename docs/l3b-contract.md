@@ -262,6 +262,20 @@ orders.
   finish reclamation; its absence may delay reclamation, not invalidate
   sessions or expose a third table. Terminal VS deletion still waits for old
   reader rights but does not wait for session expiry as its cleanup criterion.
+- Copy-forward first validates that the back pin is live and unsuperseded.
+  For an admitted stateful packet, copying its real identity and applying the
+  permitted refresh are one front commit: checked `now + timeout` for the
+  packet's class, or `now + other` for permitted ICMP-error delivery. UDP OPS
+  copies the stored absolute deadline without refresh. Ownership queries and
+  inspection neither copy forward nor refresh. The back record and its frozen
+  retirement watermark are never extended. Arithmetic, resource-admission or
+  required-write failure preserves prior records and suppression and
+  counted-drops; there is no partially published front or false supersession.
+  An expired back cannot be revived. No `max(old_deadline, new_deadline)` is
+  applied: a shorter timeout may expire the front before the retained back,
+  and zero makes it immediately expired. A successful front commit still
+  suppresses the old back; later packets follow ordinary miss/admission rules,
+  never fall back to that displaced pin.
 - For the exact decoded logical session key within one VS incarnation, a
   successfully committed newer front record supersedes the older back record.
   Front expiry, reclamation or slot reuse never restores that back record's
@@ -393,7 +407,17 @@ orders.
   update with unchanged membership uses the update path without an additional
   Adjust. Preparation is private, publication is atomic, and a failure retains
   the previous version instead of mutating it as rollback scratch. The empty
-  case is an explicit empty selector.
+  case is an explicit empty selector. These are the selected `Make` with initial
+  `Adjust` and `Update` without additional `Adjust` semantics; silently replacing
+  an ordinary same-membership update with full reconstruction is not permitted.
+  The explicitly specified recovery rebuild below is a separate operation.
+  This contract promises no bit-identical cell placement across implementations
+  or versions, exact traffic shares, churn bound, A-to-B-to-A restoration or
+  restart-stable placement. Before implementation, the downstream selector
+  specification must define the selected construction/update algorithms, tie
+  rules and conformance vectors, preserving the rules above. Those vectors
+  verify the selected algorithm, not a permanent public cell-mapping format;
+  weights and table length alone do not make an arbitrary builder conformant.
 - Recovery after a control-plane mutation-owner takeover, with the dataplane
   and shared memory surviving, restores authoritative accepted configuration,
   administrative state, configured weights and identities, establishes
@@ -766,7 +790,30 @@ cross-process proof and the implementation remain downstream (#2725, #2726).
   burst at least the eligible peer count. One service-wide budget spans workers:
   a `not-owned` original atomically funds all eligible clones or emits none.
   Allocation and encapsulation failures have separate counters. Absent budget
-  fields do not satisfy readiness.
+  fields do not satisfy readiness. The budget is one token bucket per projected
+  service, shared across workers: one token funds one output clone, the rate
+  is a positive integral number of clones per second, and burst is a positive
+  integral capacity in clones. Refill uses elapsed time in one monotonic time
+  domain for the shared bucket, retains fractional credit without floating
+  point and caps total credit at burst; excess credit is discarded, not banked.
+  A newly created budget starts full. A surviving service/dataplane budget
+  keeps its credit across control-plane restart, takeover and configuration
+  replacement; none of those events creates a fresh burst.
+  A rate/capacity change first accrues under the old rate up to the transition,
+  then carries credit capped by the new capacity. Peer-set changes do not refill
+  it. Accrual, policy transition and reservation have one consistent ordering:
+  a packet uses one policy and peer set, never mixed old/new values. For `n`
+  eligible peers it atomically reserves `n` tokens or none. With insufficient
+  credit it counted-drops without partial fanout; with no peers it spends none.
+  Failures after reservation never refund tokens: admission budgets attempts,
+  not guaranteed delivery. If peers grow beyond burst, fanout is not ready and
+  counted-drops without cloning until the configuration or group permits full
+  funding; capacity is never raised implicitly.
+  Bounded numeric representation, clock precision/source, safe elapsed-time
+  arithmetic and clock/arithmetic-error handling must be specified and verified
+  before activation. The cap is not permission to overflow an intermediate:
+  an interval sufficient to fill the bucket must yield the cap without unsafe
+  multiplication. No particular clock hardware, lock or CAS layout is selected.
 - The MSS policy is the typed boolean of F24 with the behavior recorded there.
   Option parsing stops at EOL, skips NOP, checks the other lengths, and the
   MSS option has length 4; the first valid MSS is used. A malformed
@@ -1233,6 +1280,20 @@ Required discriminating vectors include:
   delivery; physical inspection may still show the back. Failed front or
   suppression-metadata admission preserves prior authority without partial
   suppression; bounded accounting and observation-safe retirement are verified.
+
+- Copy-forward for every timeout class and permitted ICMP other; OPS stored
+  deadline; query/inspection no write; expired back; shorter/zero front deadline;
+  unchanged back/watermark; arithmetic/admission/write failures with no partial
+  authority change. Never max(old,new) or revival of a suppressed back.
+- Clone bucket fractional refill/cap, shared-worker contention, new-state full
+  versus surviving control-plane restart/takeover, old-rate update accrual and
+  carry/clamp, unchanged policy and peer churn, zero/exact/insufficient funding,
+  peers above burst, and no refund after reservation failures. Numeric/clock
+  bounds and error handling must be specified before activation.
+- Selected selector algorithms/ties/vectors before implementation; creation and
+  membership versus unchanged-membership Update, empty selector and failure
+  preservation, no silent full rebuild. These are algorithm-conformance vectors,
+  not portable-placement guarantees; explicit recovery rebuilding is preserved.
 
 All obligations above are specification obligations, **NOT RUN**.
 
