@@ -395,6 +395,24 @@ func NewCertificateStore(loaders []KeyPairLoader, options ...CertificateStoreOpt
 	return m, nil
 }
 
+// NewCertificateStoreFromConfig builds the loader of every key pair entry
+// and returns the store presenting them.
+//
+// An entry whose loader cannot be built fails with its position in the
+// list; loading then fails as it does for a store built from loaders.
+func NewCertificateStoreFromConfig(configs []KeyPairConfig, options ...CertificateStoreOption) (*CertificateStore, error) {
+	loaders := make([]KeyPairLoader, 0, len(configs))
+	for idx, config := range configs {
+		loader, err := NewKeyPairLoader(config)
+		if err != nil {
+			return nil, fmt.Errorf("key_pairs[%d]: %w", idx, err)
+		}
+		loaders = append(loaders, loader)
+	}
+
+	return NewCertificateStore(loaders, options...)
+}
+
 // GetCertificate serves a handshake the first entry whose pair is valid
 // now and supported by the client hello, else the first entry, as Go
 // selects over a static certificate list.
