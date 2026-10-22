@@ -9,7 +9,8 @@
  * carry no packet handler; a loaded object type exists so the
  * controlplane can resolve an object configuration's type name to a
  * stable dataplane index at init time, mirroring modules and devices,
- * and so it can declare the per-context preparation below.
+ * and so it can declare the per-context preparation and the configuration
+ * layout below.
  *
  * A type is loaded through its exported new_object_<name> constructor,
  * which the main binary or a plugin may provide.
@@ -44,6 +45,13 @@ struct object {
 	// object needs none. The control plane allocates a zeroed buffer
 	// of this size for every object execution context it builds.
 	uint64_t prepared_size;
+	// Layout identity of the object's configuration, zero when unchecked.
+	//
+	// An object type whose configuration is read through a typed layout
+	// declares a non-zero value here; the control plane then creates
+	// configurations for it only through an init that names the same
+	// value, so a reader never sees bytes of another layout.
+	uint64_t config_layout;
 };
 
 typedef struct object *(*object_load_handler)();

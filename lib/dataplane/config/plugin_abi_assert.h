@@ -16,12 +16,17 @@
 #include "lib/dataplane/config/zone.h"
 #include "lib/dataplane/module/module.h"
 #include "lib/dataplane/module/packet_front.h"
+#include "lib/dataplane/object/object.h"
 #include "lib/dataplane/packet/packet.h"
 #include "lib/dataplane/pipeline/econtext.h"
 
 _Static_assert(
 	sizeof(struct module) == 120,
 	"struct module size changed, bump YANET_MODULE_ABI_VERSION"
+);
+_Static_assert(
+	sizeof(struct object) == 104,
+	"struct object size changed, bump YANET_MODULE_ABI_VERSION"
 );
 _Static_assert(
 	sizeof(struct device) == 104,

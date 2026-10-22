@@ -524,6 +524,35 @@ run_ring_object_free_refused_while_referenced_test(struct yanet_shm *shm) {
 	return TEST_SUCCESS;
 }
 
+// The ring object type declares no configuration layout.
+//
+// The loader keeps zero for it, which is the layout its plain init expects.
+static int
+run_ring_object_layout_unset_test(struct yanet_shm *shm) {
+	yanet_error *err = NULL;
+
+	struct agent *agent = agent_attach(
+		shm, 0, "ring-layout", RING_OBJECT_TEST_MEMORY_LIMIT, &err
+	);
+	TEST_ASSERT_NOT_NULL(agent, "agent_attach failed");
+
+	struct dp_config *dp_config = agent_dp_config(agent);
+	uint64_t dp_idx;
+	TEST_ASSERT_SUCCESS(
+		dp_config_lookup_object(dp_config, RING_OBJECT_TYPE, &dp_idx),
+		"the ring object type must be loaded"
+	);
+	struct dp_object *dp_object = ADDR_OF(&dp_config->dp_objects) + dp_idx;
+	TEST_ASSERT_EQUAL(
+		dp_object->config_layout,
+		0,
+		"the ring object type must declare no layout"
+	);
+
+	agent_detach(agent);
+	return TEST_SUCCESS;
+}
+
 // A second fini after a full create does nothing.
 //
 // The first fini clears the fields it freed, so no memory is freed twice.
@@ -689,6 +718,7 @@ main(void) {
 		{"worker_rings", run_ring_object_worker_rings_test},
 		{"free_refused_while_referenced",
 		 run_ring_object_free_refused_while_referenced_test},
+		{"layout_unset", run_ring_object_layout_unset_test},
 		{"fini_idempotent", run_ring_object_fini_idempotent_test},
 		{"enomem_rollback", run_ring_object_enomem_rollback_test},
 	};

@@ -36,7 +36,8 @@
 // 42: struct module and struct dp_module gained config_layout.
 // 43: struct registry_item lost the destroying flag, changing the layout
 // of every module, device and object embedding it.
-#define YANET_MODULE_ABI_VERSION 43
+// 44: struct object and struct dp_object gained config_layout.
+#define YANET_MODULE_ABI_VERSION 44
 
 // Symbol name a module .so exports carrying its compiled-against
 // YANET_MODULE_ABI_VERSION, as a uint32_t global.

@@ -1,7 +1,8 @@
 /*
  * Unit tests for the generic shared object entity: lifecycle symmetry,
  * stable name index across copy/upsert/delete, counter continuity across
- * replacement, and the agent reclamation gate driven by loaded_object_count.
+ * replacement, the agent reclamation gate driven by loaded_object_count,
+ * and the binding of a configuration to the layout its object type declares.
  */
 
 #include "api/agent.h"
@@ -13,6 +14,7 @@
 
 #include "lib/controlplane/agent/agent.h"
 #include "lib/controlplane/config/cp_object.h"
+#include "lib/dataplane/config/zone.h"
 #include "lib/dataplane/object/object.h"
 
 #include "lib/counters/counters.h"
@@ -32,6 +34,9 @@
 // reclamation gate but holds only one tiny object, so it uses a smaller
 // arena than the registry-heavy subtests.
 #define CP_OBJECT_GATE_MEMORY_LIMIT (1u * 1024u * 1024u)
+
+// Configuration layout identity the "layout_probe" object type declares.
+#define CP_OBJECT_TEST_LAYOUT 0x1234abcd5678ef90ull
 
 // Lifecycle symmetry: allocate+init then fini+reclaim, plus the zero-init
 // fini no-op. The agent arena must return to its pre-test size.
@@ -559,6 +564,208 @@ new_object_test(void) {
 	return object;
 }
 
+// Constructor of the "layout_probe" object type, which the harness resolves
+// from this executable: it declares a non-zero configuration layout.
+struct object *
+new_object_layout_probe(void) {
+	struct object *object =
+		(struct object *)calloc(1, sizeof(struct object));
+	if (object != NULL) {
+		strtcpy(object->name, "layout_probe", sizeof(object->name));
+		object->config_layout = CP_OBJECT_TEST_LAYOUT;
+	}
+	return object;
+}
+
+// Initializes and releases an object of the given type for an expected
+// layout.
+//
+// Returns the init result; a refusal leaves its error with the caller.
+static int
+layout_test_init(
+	struct agent *agent,
+	const char *type,
+	uint64_t layout,
+	yanet_error **err
+) {
+	struct cp_object *object = (struct cp_object *)memory_balloc(
+		&agent->memory_context, sizeof(struct cp_object)
+	);
+	if (object == NULL) {
+		return -2;
+	}
+	int rc = cp_object_init_layout(object, agent, type, "o0", layout, err);
+	if (rc == 0) {
+		cp_object_fini(object);
+	}
+	memory_bfree(&agent->memory_context, object, sizeof(*object));
+	return rc;
+}
+
+// The loader must mirror the layout an object type declares into the
+// dataplane object table, and a type that declares none must read as zero.
+static int
+test_cp_object_layout_loader_mirrors(struct yanet_shm *shm) {
+	yanet_error *err = NULL;
+
+	struct agent *agent = agent_attach(
+		shm,
+		0,
+		"cp-object-layout-load",
+		CP_OBJECT_GATE_MEMORY_LIMIT,
+		&err
+	);
+	TEST_ASSERT_NOT_NULL(agent, "agent_attach failed");
+
+	struct dp_config *dp_config = agent_dp_config(agent);
+	const char *types[] = {"layout_probe", "test"};
+	const uint64_t layouts[] = {CP_OBJECT_TEST_LAYOUT, 0};
+	for (size_t idx = 0; idx < 2; ++idx) {
+		uint64_t dp_idx;
+		TEST_ASSERT_SUCCESS(
+			dp_config_lookup_object(dp_config, types[idx], &dp_idx),
+			"object type '%s' must be loaded",
+			types[idx]
+		);
+		struct dp_object *dp_object =
+			ADDR_OF(&dp_config->dp_objects) + dp_idx;
+		TEST_ASSERT_EQUAL(
+			dp_object->config_layout,
+			layouts[idx],
+			"the loader must copy the declared layout of '%s'",
+			types[idx]
+		);
+	}
+
+	agent_detach(agent);
+	return TEST_SUCCESS;
+}
+
+// An object type declaring a layout must accept an init naming that same
+// layout.
+static int
+test_cp_object_layout_matching_accepted(struct yanet_shm *shm) {
+	yanet_error *err = NULL;
+
+	struct agent *agent = agent_attach(
+		shm, 0, "cp-object-layout-ok", CP_OBJECT_GATE_MEMORY_LIMIT, &err
+	);
+	TEST_ASSERT_NOT_NULL(agent, "agent_attach failed");
+
+	int rc = layout_test_init(
+		agent, "layout_probe", CP_OBJECT_TEST_LAYOUT, &err
+	);
+	TEST_ASSERT_EQUAL(
+		rc,
+		0,
+		"matching layout must be accepted: %s",
+		err ? yanet_error_message(err) : "?"
+	);
+	yanet_error_free(err);
+
+	agent_detach(agent);
+	return TEST_SUCCESS;
+}
+
+// An object type declaring a layout must refuse an init naming any other
+// layout, including the unchecked zero, and a refusal must leak nothing.
+static int
+test_cp_object_layout_other_refused(struct yanet_shm *shm) {
+	yanet_error *err = NULL;
+
+	struct agent *agent = agent_attach(
+		shm,
+		0,
+		"cp-object-layout-bad",
+		CP_OBJECT_GATE_MEMORY_LIMIT,
+		&err
+	);
+	TEST_ASSERT_NOT_NULL(agent, "agent_attach failed");
+
+	size_t baseline = block_allocator_free_size(&agent->block_allocator);
+
+	const uint64_t layouts[] = {0, CP_OBJECT_TEST_LAYOUT + 1};
+	for (size_t idx = 0; idx < 2; ++idx) {
+		yanet_error *refusal = NULL;
+		int rc = layout_test_init(
+			agent, "layout_probe", layouts[idx], &refusal
+		);
+		TEST_ASSERT_EQUAL(
+			rc,
+			-1,
+			"layout 0x%llx must be refused",
+			(unsigned long long)layouts[idx]
+		);
+		TEST_ASSERT_STR_CONTAINS(
+			refusal ? yanet_error_message(refusal) : NULL,
+			"config layout mismatch",
+			"refusal must name the mismatch"
+		);
+		yanet_error_free(refusal);
+	}
+
+	size_t after = block_allocator_free_size(&agent->block_allocator);
+	TEST_ASSERT_EQUAL(
+		(long)after,
+		(long)baseline,
+		"a refused init must leave the arena untouched: "
+		"baseline=%zu after=%zu",
+		baseline,
+		after
+	);
+
+	agent_detach(agent);
+	return TEST_SUCCESS;
+}
+
+// An object type declaring no layout must keep accepting the plain init, and
+// refuse an init naming a non-zero layout.
+static int
+test_cp_object_layout_unset_type(struct yanet_shm *shm) {
+	yanet_error *err = NULL;
+
+	struct agent *agent = agent_attach(
+		shm,
+		0,
+		"cp-object-layout-zero",
+		CP_OBJECT_GATE_MEMORY_LIMIT,
+		&err
+	);
+	TEST_ASSERT_NOT_NULL(agent, "agent_attach failed");
+
+	struct cp_object *object = (struct cp_object *)memory_balloc(
+		&agent->memory_context, sizeof(struct cp_object)
+	);
+	TEST_ASSERT_NOT_NULL(object, "object allocation failed");
+	int rc = cp_object_init(object, agent, "test", "o0", &err);
+	if (rc == 0) {
+		cp_object_fini(object);
+	}
+	memory_bfree(&agent->memory_context, object, sizeof(*object));
+	TEST_ASSERT_EQUAL(
+		rc,
+		0,
+		"plain init of a type without layout must succeed: %s",
+		err ? yanet_error_message(err) : "?"
+	);
+	yanet_error_free(err);
+
+	err = NULL;
+	rc = layout_test_init(agent, "test", CP_OBJECT_TEST_LAYOUT, &err);
+	TEST_ASSERT_EQUAL(
+		rc, -1, "a layout for a type without one must be refused"
+	);
+	TEST_ASSERT_STR_CONTAINS(
+		err ? yanet_error_message(err) : NULL,
+		"config layout mismatch",
+		"refusal must name the mismatch"
+	);
+	yanet_error_free(err);
+
+	agent_detach(agent);
+	return TEST_SUCCESS;
+}
+
 // The allocation-free batched release must reproduce the snapshot path's
 // outcome across the batch boundary: every item reference dropped, every
 // owner count mirrored down to zero, and the registry storage discarded
@@ -677,7 +884,7 @@ main(void) {
 
 	const char *port_names[] = {"01:00.0"};
 	const char *devs_to_load[] = {"plain"};
-	const char *objs_to_load[] = {"test"};
+	const char *objs_to_load[] = {"test", "layout_probe"};
 
 	struct dataplane_ut_config cfg = {
 		.cp_memory = 1u << 25,
@@ -690,7 +897,7 @@ main(void) {
 		.devices_to_load = devs_to_load,
 		.devices_to_load_count = 1,
 		.objects_to_load = objs_to_load,
-		.objects_to_load_count = 1,
+		.objects_to_load_count = 2,
 	};
 
 	struct dataplane_ut *ut = dataplane_ut_new(&cfg);
@@ -718,6 +925,18 @@ main(void) {
 	}
 	if (res == TEST_SUCCESS) {
 		res = test_cp_object_init_unknown_type_fails(shm);
+	}
+	if (res == TEST_SUCCESS) {
+		res = test_cp_object_layout_loader_mirrors(shm);
+	}
+	if (res == TEST_SUCCESS) {
+		res = test_cp_object_layout_matching_accepted(shm);
+	}
+	if (res == TEST_SUCCESS) {
+		res = test_cp_object_layout_other_refused(shm);
+	}
+	if (res == TEST_SUCCESS) {
+		res = test_cp_object_layout_unset_type(shm);
 	}
 
 	dataplane_ut_free(ut);

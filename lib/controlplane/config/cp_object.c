@@ -18,6 +18,18 @@ cp_object_init(
 	const char *name,
 	yanet_error **err
 ) {
+	return cp_object_init_layout(self, agent, object_type, name, 0, err);
+}
+
+int
+cp_object_init_layout(
+	struct cp_object *self,
+	struct agent *agent,
+	const char *object_type,
+	const char *name,
+	uint64_t expected_layout,
+	yanet_error **err
+) {
 	memset(self, 0, sizeof(struct cp_object));
 
 	struct dp_config *dp_config = ADDR_OF(&agent->dp_config);
@@ -29,6 +41,20 @@ cp_object_init(
 			err,
 			"object type '%s' not found in dataplane config",
 			object_type
+		);
+		goto err_out;
+	}
+
+	struct dp_object *dp_object =
+		ADDR_OF(&dp_config->dp_objects) + self->dp_object_idx;
+	if (dp_object->config_layout != expected_layout) {
+		yanet_error_add(
+			err,
+			"object '%s' config layout mismatch: control plane "
+			"0x%016llx, dataplane 0x%016llx",
+			object_type,
+			(unsigned long long)expected_layout,
+			(unsigned long long)dp_object->config_layout
 		);
 		goto err_out;
 	}

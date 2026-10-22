@@ -52,6 +52,9 @@ struct dp_object {
 	// Size of the object's private per-context buffer, zero when the
 	// object needs none; mirrors the loaded object's declaration.
 	uint64_t prepared_size;
+	// Configuration layout identity; mirrors the loaded object's
+	// declaration, zero when unchecked.
+	uint64_t config_layout;
 };
 
 // Per-DPDK-port counter registry and storage.

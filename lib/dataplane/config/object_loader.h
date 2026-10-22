@@ -9,9 +9,10 @@ struct dp_config;
  *
  * The constructor resolves from the main program, which also sees every
  * plugin loaded with global symbols, so a built-in and a plugin-provided
- * type load the same way, keeping the commit hook and prepared size the
- * constructor declares. Returns 0 on success, -1 when the constructor is
- * missing, returns a type other than the requested one, or memory runs out.
+ * type load the same way, keeping the commit hook, prepared size and
+ * configuration layout the constructor declares. Returns 0 on success, -1
+ * when the constructor is missing, returns a type other than the requested
+ * one, or memory runs out.
  */
 int
 dp_load_object(struct dp_config *dp_config, void *bin_hndl, const char *name);

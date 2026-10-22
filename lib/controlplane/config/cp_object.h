@@ -63,6 +63,23 @@ cp_object_init(
 	yanet_error **err
 );
 
+// Initialize an object for an expected configuration layout.
+//
+// Same as the plain init, but refuses with an error before anything is
+// allocated when the loaded dataplane object type's configuration layout
+// differs from the expected one, so an object never receives a
+// configuration built for another layout. Layout zero means none declared;
+// the plain init is this function with zero.
+int
+cp_object_init_layout(
+	struct cp_object *self,
+	struct agent *agent,
+	const char *object_type,
+	const char *name,
+	uint64_t expected_layout,
+	yanet_error **err
+);
+
 // Tear down resources acquired by cp_object_init.
 //
 // Finalizes the sub-context last, mirroring cp_module_fini. Idempotent on
