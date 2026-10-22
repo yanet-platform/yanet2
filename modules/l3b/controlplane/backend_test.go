@@ -21,7 +21,7 @@ import (
 	"github.com/yanet-platform/yanet2/modules/l3b/bindings/go/cl3b"
 	controlplane "github.com/yanet-platform/yanet2/modules/l3b/controlplane"
 	l3bpb "github.com/yanet-platform/yanet2/modules/l3b/controlplane/l3bpb/v1"
-	cl3bobject "github.com/yanet-platform/yanet2/objects/l3b/bindings/go/cl3bobject"
+	"github.com/yanet-platform/yanet2/objects/l3b/bindings/go/cl3bobject"
 )
 
 var errFakeRing = errors.New("ring update failed")

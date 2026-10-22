@@ -36,7 +36,7 @@ import (
 
 	"github.com/yanet-platform/yanet2/common/go/testutils/tlscert"
 	"github.com/yanet-platform/yanet2/common/go/xcfg"
-	commonxgrpc "github.com/yanet-platform/yanet2/common/go/xgrpc"
+	"github.com/yanet-platform/yanet2/common/go/xgrpc"
 	readinesspb "github.com/yanet-platform/yanet2/common/readinesspb/v1"
 	"github.com/yanet-platform/yanet2/controlplane/gateway"
 	"github.com/yanet-platform/yanet2/controlplane/internal/auth/sshcert"
@@ -163,7 +163,7 @@ func Test_Gateway_HTTPProxy_ReachesBuiltinOverTLS(t *testing.T) {
 	cfg := gateway.DefaultConfig()
 	cfg.Server.HTTPEndpoint = newFreeAddress(t)
 	cfg.Server.TLS = &gateway.TLSConfig{
-		KeyPairs: []commonxgrpc.KeyPairConfig{tlscert.FileKeyPair(t, certFile, keyFile)},
+		KeyPairs: []xgrpc.KeyPairConfig{tlscert.FileKeyPair(t, certFile, keyFile)},
 	}
 
 	listener := NewTestListener(t)
@@ -240,7 +240,7 @@ func newTLSListenerConfig(t *testing.T, endpoint, certFile, keyFile string) *gat
 	return &gateway.TLSListenerConfig{
 		Endpoint: xcfg.MustNonEmptyString(endpoint),
 		TLSConfig: gateway.TLSConfig{
-			KeyPairs: []commonxgrpc.KeyPairConfig{tlscert.FileKeyPair(t, certFile, keyFile)},
+			KeyPairs: []xgrpc.KeyPairConfig{tlscert.FileKeyPair(t, certFile, keyFile)},
 		},
 	}
 }

@@ -17,7 +17,7 @@ import (
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/modules/l3b/bindings/go/cl3b"
 	l3bpb "github.com/yanet-platform/yanet2/modules/l3b/controlplane/l3bpb/v1"
-	cl3bobject "github.com/yanet-platform/yanet2/objects/l3b/bindings/go/cl3bobject"
+	"github.com/yanet-platform/yanet2/objects/l3b/bindings/go/cl3bobject"
 )
 
 // Backend abstracts the shared-memory operations behind the l3b service.

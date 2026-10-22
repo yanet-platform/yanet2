@@ -8,7 +8,7 @@ import (
 	"google.golang.org/grpc/credentials"
 
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
-	commonxgrpc "github.com/yanet-platform/yanet2/common/go/xgrpc"
+	"github.com/yanet-platform/yanet2/common/go/xgrpc"
 )
 
 const (
@@ -30,7 +30,7 @@ type TLSConfig struct {
 	// Required, at least one. A handshake gets the first pair that is valid
 	// and that the client supports, else the first pair. Renewed files are
 	// picked up without a restart.
-	KeyPairs []commonxgrpc.KeyPairConfig `yaml:"key_pairs"`
+	KeyPairs []xgrpc.KeyPairConfig `yaml:"key_pairs"`
 }
 
 // Validate requires at least one key pair.
@@ -49,13 +49,13 @@ func (m *TLSConfig) Validate() error {
 // listener fails startup.
 func newCertificateStore(
 	config *TLSConfig,
-	options ...commonxgrpc.CertificateStoreOption,
-) (*commonxgrpc.CertificateStore, error) {
+	options ...xgrpc.CertificateStoreOption,
+) (*xgrpc.CertificateStore, error) {
 	if err := config.Validate(); err != nil {
 		return nil, err
 	}
 
-	return commonxgrpc.NewCertificateStoreFromConfig(config.KeyPairs, options...)
+	return xgrpc.NewCertificateStoreFromConfig(config.KeyPairs, options...)
 }
 
 // serverCredentials returns gRPC server transport credentials serving the
@@ -69,7 +69,7 @@ func newCertificateStore(
 // restart. A client without a certificate is still accepted and
 // authenticates by other means.
 func serverCredentials(
-	certificates *commonxgrpc.CertificateStore,
+	certificates *xgrpc.CertificateStore,
 	clientCAs func() *x509.CertPool,
 ) credentials.TransportCredentials {
 	config := &tls.Config{
@@ -96,7 +96,7 @@ type listenerCertificates struct {
 	// Listener names the listener: grpcs or https.
 	Listener string
 	// Store is the store the listener serves from.
-	Store *commonxgrpc.CertificateStore
+	Store *xgrpc.CertificateStore
 }
 
 // servedCertificates reports when the certificates the gateway TLS
