@@ -41,7 +41,7 @@ representation and the protobuf/C consequences.
 | F07 | Scheduler | Create and full replacement select RR, WRR, WLC or PURR explicitly; absent, unspecified and unknown values reject; partial real mutations do not resubmit the scheduler. There are no public hash masks, index masks or scheduler flags that redefine the selected scheduler. Standalone CHASH is deferred to #2904. |
 | F08 | OPS and removed `pure_l3` | OPS is a separate boolean, omitted equals false. UDP supports all four schedulers; live hits are used without deadline refresh and misses select statelessly, creating no session. For TCP, omitted, false and true normalize to false in accepted state. The redundant `pure_l3` switch is removed; portless mode is derived from destination-port absence (F02). |
 | F09 | WLC power | Requested power is a retained uint32: omission or explicit 0 stores 0, 1..100 is effective as given, and any other uint32 value is retained verbatim with effective power 10. There is no public `max_weight`; the selector-parameter ceiling is fixed at 100 and is not an input-weight limit. |
-| F10 | WLC inputs, samples and confirmation | Inputs are the original positive weights of administratively enabled, health-eligible reals; one complete all-worker sample; one-second cadence; the first two consecutive invalid attempts within one input generation may retain the applicable published result, the third triggers capped-base fallback; a valid sample resets the streak once. Requested, effective, active and freshness observations are read-only, never caller setters. |
+| F10 | WLC inputs, samples and confirmation | Inputs are the original positive weights of administratively enabled, health-eligible reals; one complete all-worker sample; one-second cadence. Within one input generation, the first two consecutive invalid attempts retain the last applicable successfully published result with degraded freshness; the third and subsequent invalid attempts trigger capped-base fallback publication attempts and WLC not-ready. Without an applicable result, fallback applies immediately; a valid sample resets the streak once. Requested WLC power is writable configuration under F09; derived effective power, WLC results, active-state and freshness observations are read-only, never independent caller setters. |
 | F11 | WLC geometry and resource admission | Logical lookup length 1600*N over all configured unique real bindings including disabled and zero-weight members; an explicit empty selector at N=0. The aggregate binding charge is at most 2097151 per actual dataplane-instance registry across all four schedulers and agent owners, including unlinked VSes; physical admission is separate; all arithmetic is checked before narrowing or allocation. The 10000-VS and 100000-real values are planning inputs, not API caps. |
 | F12 | PURR cursor | Unsigned 64-bit; increments modulo 2^64 before a successful nonempty selection, then modulo the ring length. Per worker and VS incarnation, shared across links, preserved across ordinary replacement and a control-plane restart. Wrap is ordinary arithmetic and may break strict cyclic order when the length does not divide 2^64. Internal runtime state: no public cursor setter and no 32-bit narrowing. |
 | F13 | `session_timeouts.tcp` | Optional uint32 seconds, domain 0..4294967295; omission defaults 60; explicit 0 retained. |
@@ -140,6 +140,18 @@ orders.
   authorization, a mutation token, a deduplication key nor a payload binding.
   One accepted creation invalidates every permit from the preceding absence
   interval, and deletion never restores old authorization.
+- The 300-second lifetime starts at the coordinated issuance decision. A permit
+  is invalid at `now >= expiry` on authoritative server monotonic time. Expiry
+  after acceptance does not roll back an accepted create.
+  The record cap spans both object kinds and all issuers. Admission counts
+  pending issuance reservations and expired/invalid records still accessed by
+  in-flight work until safe reclamation. Reclaimable obsolete records may be
+  removed; active grants must not be silently evicted to admit another requester.
+  Exhausted record capacity or established allocation/reservation failure
+  returns `ResourceExhausted` from `PrepareCreate`; indeterminate authoritative
+  accounting during recovery returns `Unavailable`. Owner turnover invalidates
+  old permits but does not free still-accessible storage. The cap does not
+  guarantee that every deployment can issue 16384 grants.
 - A known rejection before acceptance, including invalid input, resource
   exhaustion, cancellation or a preparation failure, neither consumes nor
   extends the permit. It remains usable only until its original expiry or
@@ -241,14 +253,18 @@ orders.
   conversion and deadline addition use checked uint64 arithmetic. If
   `now > UINT64_MAX - ttl`, a required insert or refresh leaves the prior
   record unchanged and counted-drops the packet, with no wrap, saturation or
-  infinite lifetime. OPS and query paths introduce no deadline write or check.
+  infinite lifetime. OPS and read-only queries do not refresh deadlines or
+  require the corresponding deadline-addition check; lookup still treats
+  `deadline <= now` as expired.
 - Session state belongs to one VS incarnation. It is created with the service,
   preserved across its replacement, and automatically reclaimed after an
   accepted deletion once old reader rights end; both the front and the
   draining back are covered. The cleanup duty survives a control-plane
   restart, delayed cleanup stays observable, and its retained memory stays in
-  physical accounting. There is no separate public session-state creation,
-  list or deletion operation, and no operator state-delete command.
+  physical accounting. There are no independent public session-state-object
+  creation, listing or deletion operations, and no operator state-delete command.
+  Read-only inspection of a VS's session records remains public through
+  `ListSessions` (O12).
 - A positive-capacity state has a front and at most one draining back.
   Lookup checks the front before the back; inserts go to the front and an
   unsuperseded live back hit is copied forward. Required insertion, refresh or copy-forward
@@ -817,9 +833,11 @@ cross-process proof and the implementation remain downstream (#2725, #2726).
 - The MSS policy is the typed boolean of F24 with the behavior recorded there.
   Option parsing stops at EOL, skips NOP, checks the other lengths, and the
   MSS option has length 4; the first valid MSS is used. A malformed
-  enabled-policy packet or the inability to obtain the required buffer space
-  is a counted drop with no partial modification, while a disabled policy adds
-  no MSS-specific rejection. Lengths and the necessary checksums are
+  enabled-policy packet, or failure to obtain packet-buffer space for an
+  otherwise required MSS modification, is a counted drop with no partial
+  modification. Insufficient logical TCP option space for the four-byte
+  insertion is not such a failure: a valid header remains unchanged by the MSS
+  step. A disabled policy adds no MSS-specific rejection. Lengths and the necessary checksums are
   corrected. The constants 1220 and 536 are not path-MTU guarantees.
 - DSCP is not an l3b policy in the new API. l3b transfers the inner traffic
   class into the outer header and preserves ECN; the configured `dscp` module
