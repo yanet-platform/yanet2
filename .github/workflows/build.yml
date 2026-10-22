@@ -167,8 +167,21 @@ jobs:
         if: always()
         run: grep -v 'Inherited environment' build-tsan/meson-logs/testlog.txt || true
 
+  # Functional tests need only binaries, so the CLI build and the release
+  # unit tests run in their own jobs instead of delaying them.
   build-release-artifacts:
     runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      # Every meson-built binary the functional tests and lab scenarios copy
+      # into their VMs.
+      FUNCTIONAL_BINARIES: |
+        build/dataplane/yanet-dataplane
+        build/controlplane/yanet-controlplane
+        build/operators/route/yanet-route-operator
+        build/operators/generic/yanet-generic-operator
+        build/operators/pipeline/yanet-pipeline-operator
+        build/operators/bird-adapter/yanet-bird-adapter
 
     steps:
       - uses: actions/checkout@v5
@@ -181,6 +194,75 @@ jobs:
         with:
           packages: meson clang cmake python3-pyelftools libnuma-dev libpcap-dev git protobuf-compiler jq
 
+      # The meson build compiles a Rust regex library of its own.
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@1.88.0
+
+      - uses: hendrikmuhs/ccache-action@v1.2.23
+        name: ccache
+        with:
+          key: ${{ runner.os }}-build-release-artifacts-cache
+          max-size: 2G
+          verbose: 2
+          save: ${{ github.ref == 'refs/heads/main' }}
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: "1.27.x"
+          cache: false
+          check-latest: true
+
+      - name: Restore Go module cache
+        uses: ./.github/actions/go-modcache
+
+      # The release test job compiles a superset of these packages and is the
+      # one that saves this cache.
+      - name: Restore Go build cache
+        if: ${{ !env.ACT }}
+        uses: ./.github/actions/go-buildcache
+        with:
+          profile: release
+          apt-fingerprint: ${{ steps.apt-packages.outputs.fingerprint }}
+
+      - name: Install Go Protobuf Plugins
+        uses: ./.github/actions/protoc-plugins
+
+      - name: Build YANET (release)
+        run: |
+          meson setup build -Dbuildtype=release
+          make dataplane
+
+      - name: Check functional test binaries
+        run: |
+          set -euo pipefail
+          while IFS= read -r path; do
+            if [[ -n $path && ! -x $path ]]; then
+              echo "missing functional test binary: $path" >&2
+              exit 1
+            fi
+          done <<<"$FUNCTIONAL_BINARIES"
+
+      # Artifacts keep paths relative to the build directory and drop the
+      # executable bit; the functional test job restores both.
+      - name: Upload YANET binaries
+        uses: actions/upload-artifact@v5
+        with:
+          name: yanet2-binaries
+          if-no-files-found: error
+          path: ${{ env.FUNCTIONAL_BINARIES }}
+
+  build-cli:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: ./.github/actions/apt-packages
+        timeout-minutes: 10
+        with:
+          packages: cmake protobuf-compiler
+
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@1.88.0
 
@@ -192,13 +274,61 @@ jobs:
           shared-key: build-release
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
+      - name: Build CLI (release)
+        run: make cli
+
+      - name: Verify CLI crypto linkage
+        run: |
+          for binary in target/release/yanet-cli target/release/yanet-cli-*; do
+            if [ ! -x "$binary" ]; then
+              continue
+            fi
+            if readelf -d "$binary" | grep -E 'NEEDED.*\[(libssl|libcrypto|[^]]*aws[-_]lc)[^]]*\.so'; then
+              echo "$binary must not depend on a shared TLS or crypto library" >&2
+              exit 1
+            fi
+          done
+
+      # Artifacts keep paths relative to the release directory and drop the
+      # executable bit; the functional test job restores both.
+      - name: Upload YANET CLI
+        uses: actions/upload-artifact@v5
+        with:
+          name: yanet2-cli
+          if-no-files-found: error
+          path: |
+            target/release/yanet-cli
+            target/release/yanet-cli-*
+            !target/release/*.d
+
+  test-release:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: true
+
+      # The package list must match the artifacts job's, since it is part of
+      # the Go build cache key both jobs share.
+      - uses: ./.github/actions/apt-packages
+        id: apt-packages
+        timeout-minutes: 10
+        with:
+          packages: meson clang cmake python3-pyelftools libnuma-dev libpcap-dev git protobuf-compiler jq
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@1.88.0
+
+      # The artifacts job compiles the same tree and saves this cache.
       - uses: hendrikmuhs/ccache-action@v1.2.23
         name: ccache
         with:
           key: ${{ runner.os }}-build-release-artifacts-cache
           max-size: 2G
           verbose: 2
-          save: ${{ github.ref == 'refs/heads/main' }}
+          save: false
 
       - uses: actions/setup-go@v6
         with:
@@ -221,32 +351,20 @@ jobs:
       - name: Install Go Protobuf Plugins
         uses: ./.github/actions/protoc-plugins
 
-      - name: Build YANET (release)
+      # Building the binaries before the tests keeps their cgo-free packages in
+      # the Go build cache this job saves for the artifacts job.
+      - name: Build and run tests (release)
         run: |
           meson setup build -Dbuildtype=release
-          make dataplane cli
-
-      - name: Verify CLI crypto linkage
-        run: |
-          for binary in target/release/yanet-cli target/release/yanet-cli-*; do
-            if [ ! -x "$binary" ]; then
-              continue
-            fi
-            if readelf -d "$binary" | grep -E 'NEEDED.*\[(libssl|libcrypto|[^]]*aws[-_]lc)[^]]*\.so'; then
-              echo "$binary must not depend on a shared TLS or crypto library" >&2
-              exit 1
-            fi
-          done
-
-      - name: Clang syntax sweep
-        run: make lint/clang-syntax
-
-      - name: Build and run tests (release)
-        run: make test-only
+          make dataplane
+          make test-only
 
       - name: Show meson test log
         if: always()
         run: grep -v 'Inherited environment' build/meson-logs/testlog.txt || true
+
+      - name: Clang syntax sweep
+        run: make lint/clang-syntax
 
       # This job is the designated writer of the shared Go module cache key:
       # its `make test-only` resolves the whole module list, unlike tsan's
@@ -261,69 +379,6 @@ jobs:
           path: ${{ steps.go-modcache.outputs.path }}
           key: ${{ steps.go-modcache.outputs.key }}
 
-      - name: Verify binaries before upload
-        run: |
-          echo "=== DIAGNOSTIC: Verifying binaries before artifact upload ==="
-          echo "Current git commit: $(git rev-parse HEAD)"
-          echo "Current git commit short: $(git rev-parse --short HEAD)"
-          echo ""
-
-          echo "yanet-dataplane:"
-          if [ -f "build/dataplane/yanet-dataplane" ]; then
-              stat build/dataplane/yanet-dataplane
-              md5sum build/dataplane/yanet-dataplane
-              strings build/dataplane/yanet-dataplane | grep -E "yanet|version" | head -20 || true
-          else
-              echo "ERROR: build/dataplane/yanet-dataplane not found!"
-              exit 1
-          fi
-
-          echo ""
-          echo "yanet-controlplane:"
-          if [ -f "build/controlplane/yanet-controlplane" ]; then
-              stat build/controlplane/yanet-controlplane
-              md5sum build/controlplane/yanet-controlplane
-              strings build/controlplane/yanet-controlplane | grep -E "yanet|version" | head -20 || true
-          else
-              echo "ERROR: build/controlplane/yanet-controlplane not found!"
-              exit 1
-          fi
-
-          echo ""
-          echo "yanet-cli binaries:"
-          if ls target/release/yanet-cli* 1>/dev/null 2>&1; then
-              stat target/release/yanet-cli* || true
-              md5sum target/release/yanet-cli* || true
-          else
-              echo "ERROR: No yanet-cli binaries found in target/release/!"
-              exit 1
-          fi
-
-      - name: Stage operator binaries
-        run: |
-          set -euo pipefail
-          for path in \
-            build/operators/route/yanet-route-operator \
-            build/operators/generic/yanet-generic-operator \
-            build/operators/pipeline/yanet-pipeline-operator \
-            build/operators/neighbour-sidecar/yanet-neighbour-sidecar \
-            build/operators/bird-adapter/yanet-bird-adapter; do
-            test -x "$path"
-            cp "$path" "$(basename "$path")"
-          done
-
-      - name: Upload YANET binaries
-        uses: actions/upload-artifact@v5
-        with:
-          name: yanet2-binaries
-          path: |
-            build/dataplane/yanet-dataplane
-            build/controlplane/yanet-controlplane
-            target/release/yanet-cli*
-            yanet-*-operator
-            yanet-bird-adapter
-            yanet-neighbour-sidecar
-
       - name: Save Go build cache
         if: success() && github.ref == 'refs/heads/main' && steps.go-buildcache.outputs.cache-hit != 'true' && !env.ACT
         uses: actions/cache/save@v5
@@ -331,11 +386,16 @@ jobs:
           path: ${{ steps.go-buildcache.outputs.path }}
           key: ${{ steps.go-buildcache.outputs.key }}
 
+  # The two suites boot their own VMs, so they run on separate runners.
   functional-tests:
-    name: Run Functional Tests
+    name: Run ${{ matrix.suite == 'lab' && 'Lab Scenarios' || 'Functional Tests' }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 150
-    needs: build-release-artifacts
+    timeout-minutes: 120
+    needs: [build-release-artifacts, build-cli]
+    strategy:
+      fail-fast: false
+      matrix:
+        suite: [functional, lab]
 
     steps:
       - uses: actions/checkout@v5
@@ -343,17 +403,17 @@ jobs:
           submodules: true
           persist-credentials: false
 
-      - name: Clean any pre-existing build artifacts
-        run: |
-          echo "=== Cleaning any cached build artifacts before downloading from build job ==="
-          rm -rf build/ target/ || true
-          echo "Cleaned build/ and target/ directories"
-
+      # The setup-go cache is keyed on the module list alone, so only one leg
+      # may write it; the lab leg restores modules only and compiles cold.
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
           go-version: "1.27.x"
-          cache: true
+          cache: ${{ matrix.suite == 'functional' }}
+
+      - name: Restore Go module cache
+        if: matrix.suite == 'lab'
+        uses: ./.github/actions/go-modcache
 
       - uses: ./.github/actions/apt-packages
         timeout-minutes: 10
@@ -378,18 +438,19 @@ jobs:
           # Check QEMU capabilities
           qemu-system-x86_64 --version
 
-      - name: Cache Ubuntu cloud image
+      # Both legs restore the VM images; only the functional leg saves them.
+      - name: Restore Ubuntu cloud image
         id: cache-ubuntu-image
-        uses: actions/cache@v5
+        uses: actions/cache/restore@v5
         with:
           path: tests/functional/ubuntu-24.04-minimal-cloudimg-amd64.img
           key: ${{ runner.os }}-ubuntu-image-${{ hashFiles('tests/functional/Makefile') }}
           restore-keys: |
             ${{ runner.os }}-ubuntu-image-
 
-      - name: Cache QEMU image
+      - name: Restore QEMU image
         id: cache-qemu-image
-        uses: actions/cache@v5
+        uses: actions/cache/restore@v5
         with:
           path: |
             tests/functional/yanet-test.qcow2
@@ -418,84 +479,37 @@ jobs:
               touch yanet-test.qcow2
           fi
 
-      - name: Download YANET binaries from build job
+      - name: Download YANET binaries
         uses: actions/download-artifact@v5
         with:
           name: yanet2-binaries
-          path: ./
+          path: build
 
-      - name: Place downloaded binaries
-        run: |
-          mkdir -p build/dataplane build/controlplane target/release
-          [ -f "./yanet-dataplane" ] && mv -f ./yanet-dataplane build/dataplane/
-          [ -f "./yanet-controlplane" ] && mv -f ./yanet-controlplane build/controlplane/
-          if ls ./yanet-cli* 1>/dev/null 2>&1; then
-              mv -f ./yanet-cli-* target/release/
-          fi
-          mkdir -p build/operators/{route,generic,pipeline,bird-adapter}
-          mv -f ./yanet-route-operator build/operators/route/
-          mv -f ./yanet-generic-operator build/operators/generic/
-          mv -f ./yanet-pipeline-operator build/operators/pipeline/
-          mv -f ./yanet-bird-adapter build/operators/bird-adapter/
-          chmod +x build/dataplane/yanet-dataplane 2>/dev/null || true
-          chmod +x build/controlplane/yanet-controlplane 2>/dev/null || true
-          chmod +x target/release/yanet-cli* 2>/dev/null || true
+      - name: Download YANET CLI
+        uses: actions/download-artifact@v5
+        with:
+          name: yanet2-cli
+          path: target/release
+
+      - name: Restore executable bits
+        run: chmod +x build/dataplane/yanet-dataplane build/controlplane/yanet-controlplane build/operators/*/yanet-* target/release/yanet-cli*
 
       - name: Prepare test environment
         working-directory: tests/functional
+        timeout-minutes: 60
         run: |
-          make check-deps
-
-          echo "=== Starting QEMU VM preparation ==="
-
-          # Run with timeout and monitoring
-          timeout 7200 make prepare-vm &
-          QEMU_PID=$!
-
-          # Monitor QEMU progress
-          for i in {1..120}; do
-              echo "=== QEMU status check $i/120 ==="
-              ps aux | grep qemu | grep -v grep || echo "QEMU process not found"
-
-              if [ -f qemu_debug.log ]; then
-                  echo "=== QEMU log size: $(wc -l <qemu_debug.log) lines ==="
-                  echo "=== Last 10 lines of QEMU log ==="
-                  tail -10 qemu_debug.log
-              fi
-
-              sleep 60
-
-              # Check if QEMU is still running
-              if ! kill -0 $QEMU_PID 2>/dev/null; then
-                  echo "QEMU process finished"
-                  break
-              fi
-          done
-
-          # Wait for QEMU to finish
-          wait $QEMU_PID
-          QEMU_EXIT_CODE=$?
-
-          echo "=== QEMU exit code: $QEMU_EXIT_CODE ==="
-
-          if [ -f qemu_debug.log ]; then
-              echo "=== Final QEMU log (last 50 lines) ==="
-              tail -50 qemu_debug.log
-          fi
-
-          if [ $QEMU_EXIT_CODE -ne 0 ]; then
-              echo "QEMU preparation failed with exit code $QEMU_EXIT_CODE"
-              exit $QEMU_EXIT_CODE
+          set -euo pipefail
+          if ! make prepare-vm; then
+            tail -n 50 qemu_debug.log 2>/dev/null || true
+            exit 1
           fi
 
           # Watch file length: actions/cache restores the image dense, so disk
           # size roughly doubles on every cache hit even with no real regrowth.
-          echo "=== yanet-test.qcow2 size ==="
           qemu-img info yanet-test.qcow2 || true
 
-        timeout-minutes: 130
-
       - name: Run functional tests
+        if: matrix.suite == 'functional'
         working-directory: tests/functional
         run: |
           set +e
@@ -511,6 +525,8 @@ jobs:
         timeout-minutes: 45
 
       - name: Run reusable lab scenarios
+        if: matrix.suite == 'lab'
+        timeout-minutes: 30
         run: |
           set -euo pipefail
           trap 'go run ./cmd/yanet-lab down || true' EXIT
@@ -520,13 +536,34 @@ jobs:
             go run ./cmd/yanet-lab scenario run "$scenario"
           done
 
+      - name: Save Ubuntu cloud image
+        if: success() && matrix.suite == 'functional' && steps.cache-ubuntu-image.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v5
+        with:
+          path: tests/functional/ubuntu-24.04-minimal-cloudimg-amd64.img
+          key: ${{ steps.cache-ubuntu-image.outputs.cache-primary-key }}
+
+      - name: Save QEMU image
+        if: success() && matrix.suite == 'functional' && steps.cache-qemu-image.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v5
+        with:
+          path: |
+            tests/functional/yanet-test.qcow2
+            tests/functional/*.iso
+          key: ${{ steps.cache-qemu-image.outputs.cache-primary-key }}
+
       - name: Upload functional test logs
         uses: actions/upload-artifact@v5
-        if: always()
+        if: always() && matrix.suite == 'functional'
         with:
           name: functional-test-logs
+          path: tests/functional/main/test.log
+
+      - name: Upload lab logs
+        uses: actions/upload-artifact@v5
+        if: always() && matrix.suite == 'lab'
+        with:
+          name: lab-logs
           path: |
-            tests/functional/main/test.log
-            tests/functional/converted/test.log
             /tmp/yanet2-lab-*/**/supervisor.log
             /tmp/yanet2-lab-*/**/last-report.json
