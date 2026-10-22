@@ -1,4 +1,6 @@
-package loader
+// Package bytesource reads raw trust and key material from a file or an HTTP
+// source, decompressing zstd sources.
+package bytesource
 
 import (
 	"strings"
@@ -23,7 +25,7 @@ func NewLoader(source string) Loader {
 	if strings.HasPrefix(source, "http://") || strings.HasPrefix(source, "https://") {
 		loader = &httpLoader{url: source}
 	} else {
-		loader = &fileLoader{path: source}
+		loader = NewFileLoader(source)
 	}
 
 	if strings.HasSuffix(source, ".zst") {

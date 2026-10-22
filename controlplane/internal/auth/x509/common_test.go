@@ -7,9 +7,9 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/yanet-platform/yanet2/common/go/bytesource"
 	"github.com/yanet-platform/yanet2/common/go/testutils/tlscert"
 	"github.com/yanet-platform/yanet2/controlplane/internal/auth/core"
-	"github.com/yanet-platform/yanet2/controlplane/internal/auth/loader"
 	x509auth "github.com/yanet-platform/yanet2/controlplane/internal/auth/x509"
 )
 
@@ -18,12 +18,12 @@ import (
 func newStore(t *testing.T, ca *tlscert.CA, crlFiles ...string) *x509auth.Store {
 	t.Helper()
 
-	crlSources := make([]loader.Loader, 0, len(crlFiles))
+	crlSources := make([]bytesource.Loader, 0, len(crlFiles))
 	for _, file := range crlFiles {
-		crlSources = append(crlSources, loader.NewLoader(file))
+		crlSources = append(crlSources, bytesource.NewLoader(file))
 	}
 
-	store, err := x509auth.NewStore([]loader.Loader{loader.NewLoader(ca.BundleFile())}, crlSources)
+	store, err := x509auth.NewStore([]bytesource.Loader{bytesource.NewLoader(ca.BundleFile())}, crlSources)
 	require.NoError(t, err)
 
 	return store

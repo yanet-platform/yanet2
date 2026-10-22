@@ -13,8 +13,8 @@ import (
 	"time"
 
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
+	"github.com/yanet-platform/yanet2/common/go/bytesource"
 	"github.com/yanet-platform/yanet2/common/go/metrics"
-	"github.com/yanet-platform/yanet2/controlplane/internal/auth/loader"
 )
 
 const (
@@ -71,8 +71,8 @@ type RevocationListInfo struct {
 // for its source, so a stalled PKI never widens what is accepted.
 type Store struct {
 	snapshot      atomic.Pointer[snapshot]
-	caSources     []loader.Loader
-	crlSources    []loader.Loader
+	caSources     []bytesource.Loader
+	crlSources    []bytesource.Loader
 	refreshErrors map[string]*metrics.Counter
 }
 
@@ -81,7 +81,7 @@ type Store struct {
 // Every source must load and every list must be signed by one of the
 // authorities, so a misconfigured source fails startup instead of silently
 // disabling revocation.
-func NewStore(caSources []loader.Loader, crlSources []loader.Loader) (*Store, error) {
+func NewStore(caSources []bytesource.Loader, crlSources []bytesource.Loader) (*Store, error) {
 	m := &Store{
 		caSources:     caSources,
 		crlSources:    crlSources,
@@ -199,7 +199,7 @@ func (m *Store) Collect() []*commonpb.Metric {
 			commonpb.MetricLabelsToProto(metrics.Labels{labelSource: sourceLabel(info.Source)})...,
 		))
 	}
-	for _, sources := range [][]loader.Loader{m.caSources, m.crlSources} {
+	for _, sources := range [][]bytesource.Loader{m.caSources, m.crlSources} {
 		for _, source := range sources {
 			out = append(out, commonpb.NewMetricCounter(
 				metricRefreshErrors,
@@ -228,7 +228,7 @@ func (m *Store) loadAuthorities() ([]*x509.Certificate, error) {
 }
 
 // loadCertificates reads a PEM bundle from source.
-func loadCertificates(source loader.Loader) ([]*x509.Certificate, error) {
+func loadCertificates(source bytesource.Loader) ([]*x509.Certificate, error) {
 	data, err := source.Load()
 	if err != nil {
 		return nil, err
@@ -274,7 +274,7 @@ func parseCertificates(data []byte) ([]*x509.Certificate, error) {
 
 // loadRevocationList reads one list, DER or PEM, and accepts it only when
 // one of the authorities signed it.
-func loadRevocationList(source loader.Loader, authorities []*x509.Certificate) (*x509.RevocationList, error) {
+func loadRevocationList(source bytesource.Loader, authorities []*x509.Certificate) (*x509.RevocationList, error) {
 	data, err := source.Load()
 	if err != nil {
 		return nil, err

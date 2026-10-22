@@ -17,8 +17,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
+	"github.com/yanet-platform/yanet2/common/go/bytesource"
 	"github.com/yanet-platform/yanet2/common/go/testutils/tlscert"
-	"github.com/yanet-platform/yanet2/controlplane/internal/auth/loader"
 	x509auth "github.com/yanet-platform/yanet2/controlplane/internal/auth/x509"
 )
 
@@ -62,8 +62,8 @@ func Test_NewStore_RejectsUntrustedRevocationList(t *testing.T) {
 	crlFile := other.RevocationListFile(t, time.Now().Add(time.Hour))
 
 	_, err := x509auth.NewStore(
-		[]loader.Loader{loader.NewLoader(ca.BundleFile())},
-		[]loader.Loader{loader.NewLoader(crlFile)},
+		[]bytesource.Loader{bytesource.NewLoader(ca.BundleFile())},
+		[]bytesource.Loader{bytesource.NewLoader(crlFile)},
 	)
 	require.ErrorIs(t, err, x509auth.ErrUntrustedRevocationList)
 }
@@ -74,7 +74,7 @@ func Test_NewStore_RejectsBundleWithoutCertificates(t *testing.T) {
 	bundle := filepath.Join(t.TempDir(), "empty.pem")
 	require.NoError(t, os.WriteFile(bundle, []byte("# nothing here\n"), 0o600))
 
-	_, err := x509auth.NewStore([]loader.Loader{loader.NewLoader(bundle)}, nil)
+	_, err := x509auth.NewStore([]bytesource.Loader{bytesource.NewLoader(bundle)}, nil)
 	require.ErrorIs(t, err, x509auth.ErrNoAuthorities)
 }
 
@@ -180,7 +180,7 @@ func Test_NewStore_RejectsEndEntityInBundle(t *testing.T) {
 	ca := tlscert.NewCA(t)
 	client := ca.IssueClient(t, "route-operator")
 
-	_, err := x509auth.NewStore([]loader.Loader{loader.NewLoader(client.CertFile)}, nil)
+	_, err := x509auth.NewStore([]bytesource.Loader{bytesource.NewLoader(client.CertFile)}, nil)
 	require.ErrorIs(t, err, x509auth.ErrNotAuthority)
 }
 
@@ -215,7 +215,7 @@ func Test_Store_Collect_RedactsSourceURL(t *testing.T) {
 	t.Cleanup(server.Close)
 
 	source := strings.Replace(server.URL, "http://", "http://user:secret@", 1) + "/ca.pem?token=secret"
-	store, err := x509auth.NewStore([]loader.Loader{loader.NewLoader(source)}, nil)
+	store, err := x509auth.NewStore([]bytesource.Loader{bytesource.NewLoader(source)}, nil)
 	require.NoError(t, err)
 
 	require.EqualValues(t, 0, findMetric(t, store, "auth_x509_refresh_errors_total", server.URL+"/ca.pem").GetCounter())
@@ -290,8 +290,8 @@ func Test_NewStore_RejectsDeltaRevocationList(t *testing.T) {
 	require.NoError(t, os.WriteFile(crlFile, delta, 0o600))
 
 	_, err = x509auth.NewStore(
-		[]loader.Loader{loader.NewLoader(ca.BundleFile())},
-		[]loader.Loader{loader.NewLoader(crlFile)},
+		[]bytesource.Loader{bytesource.NewLoader(ca.BundleFile())},
+		[]bytesource.Loader{bytesource.NewLoader(crlFile)},
 	)
 	require.ErrorIs(t, err, x509auth.ErrDeltaRevocationList)
 }
@@ -317,8 +317,8 @@ func Test_Store_IsRevoked_DistinguishesIssuerKeys(t *testing.T) {
 
 	crlFile := oldCA.RevocationListFile(t, time.Now().Add(time.Hour), oldClient.Leaf)
 	store, err := x509auth.NewStore(
-		[]loader.Loader{loader.NewLoader(bundle)},
-		[]loader.Loader{loader.NewLoader(crlFile)},
+		[]bytesource.Loader{bytesource.NewLoader(bundle)},
+		[]bytesource.Loader{bytesource.NewLoader(crlFile)},
 	)
 	require.NoError(t, err)
 

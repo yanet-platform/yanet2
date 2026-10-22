@@ -7,7 +7,7 @@ import (
 	"github.com/stripe/krl"
 	"golang.org/x/crypto/ssh"
 
-	"github.com/yanet-platform/yanet2/controlplane/internal/auth/loader"
+	"github.com/yanet-platform/yanet2/common/go/bytesource"
 )
 
 // RevocationChecker checks whether a certificate has been revoked.
@@ -41,7 +41,7 @@ func (m *nopRevocationChecker) Reload() error {
 // KRLRevocationChecker checks certificates against an OpenSSH KRL.
 type KRLRevocationChecker struct {
 	krlData atomic.Pointer[krl.KRL]
-	source  loader.Loader
+	source  bytesource.Loader
 }
 
 // NewKRLRevocationChecker creates a RevocationChecker from a parsed
@@ -56,7 +56,7 @@ func NewKRLRevocationChecker(k *krl.KRL) *KRLRevocationChecker {
 // NewKRLRevocationCheckerFromLoader creates a RevocationChecker by
 // loading KRL data from the given loader.
 func NewKRLRevocationCheckerFromLoader(
-	source loader.Loader,
+	source bytesource.Loader,
 ) (*KRLRevocationChecker, error) {
 	data, err := source.Load()
 	if err != nil {

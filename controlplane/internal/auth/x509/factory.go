@@ -8,7 +8,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/yanet-platform/yanet2/controlplane/internal/auth/loader"
+	"github.com/yanet-platform/yanet2/common/go/bytesource"
 )
 
 // NewFromConfig creates an Authenticator from a raw YAML config node.
@@ -22,14 +22,14 @@ func NewFromConfig(rawCfg *yaml.Node, options ...Option) (*Authenticator, error)
 		return nil, fmt.Errorf("ca_sources is required")
 	}
 
-	caSources := make([]loader.Loader, 0, len(cfg.CASources))
+	caSources := make([]bytesource.Loader, 0, len(cfg.CASources))
 	for _, source := range cfg.CASources {
-		caSources = append(caSources, loader.NewLoader(source))
+		caSources = append(caSources, bytesource.NewLoader(source))
 	}
 
-	crlSources := make([]loader.Loader, 0, len(cfg.CRLSources))
+	crlSources := make([]bytesource.Loader, 0, len(cfg.CRLSources))
 	for _, source := range cfg.CRLSources {
-		crlSources = append(crlSources, loader.NewLoader(source))
+		crlSources = append(crlSources, bytesource.NewLoader(source))
 	}
 
 	store, err := NewStore(caSources, crlSources)

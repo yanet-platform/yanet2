@@ -10,7 +10,6 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
-	"os"
 	"reflect"
 	"strings"
 	"sync"
@@ -19,6 +18,8 @@ import (
 
 	"go.uber.org/zap"
 	"gopkg.in/yaml.v3"
+
+	"github.com/yanet-platform/yanet2/common/go/bytesource"
 )
 
 const (
@@ -228,11 +229,11 @@ func (m *KeyPairFiles) Source() string {
 // may be read half written; the store then sees a key that does not match
 // and keeps its current pair.
 func (m *KeyPairFiles) Load() ([]byte, []byte, error) {
-	certPEM, err := os.ReadFile(m.certFile)
+	certPEM, err := bytesource.NewFileLoader(m.certFile).Load()
 	if err != nil {
 		return nil, nil, err
 	}
-	keyPEM, err := os.ReadFile(m.keyFile)
+	keyPEM, err := bytesource.NewFileLoader(m.keyFile).Load()
 	if err != nil {
 		return nil, nil, err
 	}

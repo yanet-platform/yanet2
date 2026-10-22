@@ -7,7 +7,7 @@ import (
 
 	"github.com/yanet-platform/yanet2/controlplane/internal/auth/core"
 
-	"github.com/yanet-platform/yanet2/controlplane/internal/auth/loader"
+	"github.com/yanet-platform/yanet2/common/go/bytesource"
 )
 
 // NewFromConfig creates an SSH certificate Authenticator from a raw YAML.
@@ -26,7 +26,7 @@ func NewFromConfig(
 
 	caStores := make([]*CAStore, len(cfg.CASources))
 	for idx, src := range cfg.CASources {
-		store, err := NewCAStoreFromLoader(loader.NewLoader(src))
+		store, err := NewCAStoreFromLoader(bytesource.NewLoader(src))
 		if err != nil {
 			return nil, fmt.Errorf(
 				"create CA store from %q: %w", src, err,
@@ -40,7 +40,7 @@ func NewFromConfig(
 
 	var revChecker RevocationChecker = NewNopRevocationChecker()
 	if cfg.KRLSource != "" {
-		krlLoader := loader.NewLoader(cfg.KRLSource)
+		krlLoader := bytesource.NewLoader(cfg.KRLSource)
 		var err error
 		revChecker, err = NewKRLRevocationCheckerFromLoader(krlLoader)
 		if err != nil {

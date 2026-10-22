@@ -8,7 +8,7 @@ import (
 
 	"golang.org/x/crypto/ssh"
 
-	"github.com/yanet-platform/yanet2/controlplane/internal/auth/loader"
+	"github.com/yanet-platform/yanet2/common/go/bytesource"
 )
 
 const (
@@ -36,7 +36,7 @@ type CAEntry struct {
 // CAStore stores trusted certificate authority public keys.
 type CAStore struct {
 	snapshot atomic.Pointer[[]CAEntry]
-	source   loader.Loader
+	source   bytesource.Loader
 }
 
 // NewCAStore creates a CAStore from an in-memory slice.
@@ -49,7 +49,7 @@ func NewCAStore(entries []CAEntry) *CAStore {
 
 // NewCAStoreFromLoader creates a CAStore by loading CA data from
 // the given loader.
-func NewCAStoreFromLoader(source loader.Loader) (*CAStore, error) {
+func NewCAStoreFromLoader(source bytesource.Loader) (*CAStore, error) {
 	data, err := source.Load()
 	if err != nil {
 		return nil, fmt.Errorf("failed to load CA data: %w", err)

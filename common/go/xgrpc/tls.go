@@ -4,10 +4,11 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"fmt"
-	"os"
 
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
+
+	"github.com/yanet-platform/yanet2/common/go/bytesource"
 )
 
 // ClientTLSConfig is the TLS material a gRPC client uses towards a server.
@@ -53,7 +54,7 @@ func ClientCredentials(config *ClientTLSConfig, options ...CertificateStoreOptio
 	}
 
 	if config.CAFile != "" {
-		bundle, err := os.ReadFile(config.CAFile)
+		bundle, err := bytesource.NewFileLoader(config.CAFile).Load()
 		if err != nil {
 			return nil, fmt.Errorf("failed to read CA bundle: %w", err)
 		}
