@@ -250,8 +250,8 @@ orders.
   physical accounting. There is no separate public session-state creation,
   list or deletion operation, and no operator state-delete command.
 - A positive-capacity state has a front and at most one draining back.
-  Lookup checks the front before the back; inserts go to the front and a live
-  back hit is copied forward. Required insertion, refresh or copy-forward
+  Lookup checks the front before the back; inserts go to the front and an
+  unsuperseded live back hit is copied forward. Required insertion, refresh or copy-forward
   failure counted-drops without stateless fallback or a partial record update.
   Lookup, insert, refresh, copy-forward and expiry continue during control-plane
   absence while dataplane and shared memory survive; no survival across a
@@ -262,6 +262,27 @@ orders.
   finish reclamation; its absence may delay reclamation, not invalidate
   sessions or expose a third table. Terminal VS deletion still waits for old
   reader rights but does not wait for session expiry as its cleanup criterion.
+- For the exact decoded logical session key within one VS incarnation, a
+  successfully committed newer front record supersedes the older back record.
+  Front expiry, reclamation or slot reuse never restores that back record's
+  authority, even while its physical deadline remains live. This also applies
+  when an admitted reschedule changes the selected real. Suppression is scoped
+  to the affected back-table generation, never just a hash or slot, and never
+  crosses VS recreation or unrelated table generations.
+  Lookup, copy-forward, ownership query, reverse-session delivery and WLC all
+  honor this authority: a suppressed back record is not a logically live pin
+  and cannot prevent a genuine miss or supply ownership or a delivery target.
+  Physical inspection may still report the retained record.
+  Required suppression resources are bounded, physically accounted and admitted
+  before the newer front commits. New authority and suppression become effective
+  atomically; failed admission or a failed front write preserves prior authority
+  and suppression, subject to normal expiry, and required write failure
+  counted-drops. No expiry/reuse window may expose the displaced back pin.
+  Suppression survives front-slot reuse until observation-safe retirement of
+  the affected back. Its metadata is part of physical session/resize admission,
+  not free capacity hidden in the slot count; existing capacity numbers do not
+  qualify its cost. The representation and concurrency proof remain downstream,
+  with no prescribed tombstone layout or persistence across dataplane restart.
 - The creation size resolves once: an omitted or zero initial size selects the
   server default 65536, and the resolved value becomes a concrete accepted
   size returned by readback. An explicit positive size in 1..1073741824 rounds
@@ -339,6 +360,18 @@ orders.
   original configured weight rather than a pre-clamped value. An empty
   eligible set yields an empty selector; it does not divide by zero and does
   not independently clear sessions.
+- Each `c_i` counts logically live authoritative sessions, not physical records.
+  Count a logical key once across front/back copies and worker observations,
+  within its VS incarnation, preserving address family and the portless rule
+  that excludes both transport ports. Attribute it only to its stored full real
+  key and incarnation in the eligible WLC input set, while its authoritative
+  deadline is unexpired in the sample's observation. A superseded back counts
+  zero even after the newer front expires, is reclaimed or its slot is reused;
+  an ineligible newer pin does not make the older pin countable.
+  This predicate does not select a new sampling consistency model or promise
+  a globally instantaneous snapshot or resize-invariant count under concurrent
+  traffic. The complete all-worker sample, validity, cadence and failure rules
+  remain required; the sampling mechanism must establish them before use.
 - The output boundary is min(calculation, 100) for an applicable valid result,
   min(configured, 100) for a fallback or a missing applicable snapshot, and 0
   for a configured weight of 0, a disabled real or a health-ineligible real. A
@@ -1193,6 +1226,13 @@ Required discriminating vectors include:
 - WLC empty eligibility, zero total sessions, `C < W`, `C = W`, half-rounding
   boundaries, the `[10,10]` / `[0,30]` example, output capping and checked
   arithmetic failure; missing workers or reals invalidate the entire sample.
+- Logical WLC deduplication across front/back and workers; exact family and
+  portless identities; expired, ineligible and removed/readded real incarnations
+  excluded. A newer front suppresses a still-live back after front expiry,
+  reclamation and slot reuse, consistently for lookup, ownership query and
+  delivery; physical inspection may still show the back. Failed front or
+  suppression-metadata admission preserves prior authority without partial
+  suppression; bounded accounting and observation-safe retirement are verified.
 
 All obligations above are specification obligations, **NOT RUN**.
 
