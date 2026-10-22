@@ -147,7 +147,10 @@ orders.
   consumes the grant and invalidates the entire preceding absence interval
   atomically with creation, without a replay window. An uncertain outcome is
   not a known rejection and does not authorize replay. Expiry or invalidation
-  during preparation rejects before acceptance; only safely reclaimable
+  during preparation rejects before acceptance. The final coordinated recheck
+  uses the same precedence: a present target yields `AlreadyExists`; an absent
+  target with an invalid permit yields `Aborted`, with recovery still gated by
+  `Unavailable`. Only safely reclaimable
   unpublished resources are released, while in-flight accesses stay protected
   and accounted.
 - Mutations of an existing object carry a required expected token of 1..256
@@ -169,9 +172,15 @@ orders.
   validation, then owning-object lookup, then the expected token, then target
   resolution and state-dependent preconditions, then normalized equality, then
   resource admission and acceptance. A compiler error is not automatically an
-  out-of-memory condition. Create and prepare keep their own existence and
-  permit ordering, and a read continuation has its own identity rules rather
-  than a mutation-token stage.
+  out-of-memory condition. For either create kind, an otherwise valid request
+  whose target exists returns `AlreadyExists` before checking whether its
+  bounded permit is expired, consumed or invalidated. When the target is absent,
+  such a permit returns `Aborted`. Thus a competing create loses with
+  `AlreadyExists` while the winner remains present; deleting the winner does not
+  revive the losing permit. Missing or structurally invalid required permits
+  remain `InvalidArgument`, and recovery remains `Unavailable`. This does not
+  define precedence for every combination of malformed request fields. A read
+  continuation has its own identity rules rather than a mutation-token stage.
 - Cancellation and a deadline do not prove that a change was not accepted.
   There is no automatic create or update replay with a fresh token after an
   uncertain result, and no automatic permit renewal. An uncertain, cancelled
@@ -593,7 +602,12 @@ cross-process proof and the implementation remain downstream (#2725, #2726).
   selector rebuild, switching away from PURR and back, and a control-plane
   only restart; delete followed by create establishes new cursor state. It is
   internal runtime state, not a user-settable field, and advancement does not
-  change the configuration token.
+  change the configuration token. Given a coherent nonempty ring of length `L`,
+  compute `next = (cursor + 1) mod 2^64` and read `slot = next mod L` without
+  narrowing the cursor. Commit `cursor = next` only if selection succeeds;
+  computing `next` is not itself an advancement. The initial cursor position and
+  first slot have no public guarantee. Wrap is ordinary arithmetic, including
+  a discontinuity in cyclic slot order when `L` does not divide `2^64`.
 - The VS identity is the destination address, transport protocol and optional
   destination port. An absent port is a wildcard within the protocol, an
   explicit zero matches port zero, duplicates reject, and for one address and
@@ -1082,8 +1096,11 @@ invent zero. The layer role is exactly front or back; an unknown or
 unspecified role is an invalid response. These are finite semantic types, not
 a shared-memory identity layout or new caller inputs. Opaque page cursors
 carry their required context; internal components need no new caller fields or
-registry. Text output emits uint64 as decimal strings and bytes as canonical
-padded base64; input accepts ProtoJSON base64 variants and normalizes them to
+registry. ProtoJSON output emits uint64 as decimal strings; YAML output emits
+lossless nonnegative decimal integer scalars, not quoted numeric strings or
+floating-point values, matching its integer input rules through `UINT64_MAX`.
+Both formats emit bytes as canonical padded base64; input accepts ProtoJSON
+base64 variants and normalizes them to
 decoded bytes. YAML tokens, cursors and policy metadata use the same base64
 convention. Host-address YAML uses unzoned bare IPv4 and IPv6 strings; wire
 host fields carry raw 4 or 16 bytes (ProtoJSON base64), not network messages.
