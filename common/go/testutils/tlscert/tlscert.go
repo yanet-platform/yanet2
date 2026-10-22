@@ -21,6 +21,8 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/yanet-platform/yanet2/common/go/xgrpc"
 )
 
 // CA is a self-signed certificate authority whose bundle lives in the test's
@@ -306,6 +308,17 @@ func (m *CA) issue(t *testing.T, kind string, template *x509.Certificate) Keypai
 		CertFile:    certFile,
 		KeyFile:     keyFile,
 	}
+}
+
+// FileKeyPair returns a key pair entry of the file type naming the given PEM
+// files, an empty name leaving that setting empty.
+func FileKeyPair(t *testing.T, certFile, keyFile string) xgrpc.KeyPairConfig {
+	t.Helper()
+
+	keyPair := xgrpc.KeyPairConfig{Type: "file"}
+	require.NoError(t, keyPair.Config.Encode(map[string]string{"cert_file": certFile, "key_file": keyFile}))
+
+	return keyPair
 }
 
 // newSerial draws a 62-bit random serial, making a collision between

@@ -7,17 +7,12 @@ import (
 	"crypto/rand"
 	"crypto/tls"
 	"crypto/x509"
-	"crypto/x509/pkix"
 	"encoding/base64"
 	"encoding/json"
-	"encoding/pem"
 	"fmt"
 	"io"
-	"math/big"
 	"net"
 	"net/http"
-	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -39,6 +34,7 @@ import (
 	"google.golang.org/protobuf/types/known/wrapperspb"
 	"gopkg.in/yaml.v3"
 
+	"github.com/yanet-platform/yanet2/common/go/testutils/tlscert"
 	"github.com/yanet-platform/yanet2/common/go/xcfg"
 	commonxgrpc "github.com/yanet-platform/yanet2/common/go/xgrpc"
 	readinesspb "github.com/yanet-platform/yanet2/common/readinesspb/v1"
@@ -146,44 +142,15 @@ func newFreeAddress(t *testing.T) string {
 	return address
 }
 
-// newTestServerTLS issues a throwaway self-signed certificate for 127.0.0.1,
-// writes the PEM pair under the test's temporary directory and returns the
-// file paths with a pool trusting that certificate.
+// newTestServerTLS issues a throwaway server certificate for 127.0.0.1 from
+// a private CA and returns its PEM files with a pool trusting that CA.
 func newTestServerTLS(t *testing.T) (certFile, keyFile string, pool *x509.CertPool) {
 	t.Helper()
 
-	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	require.NoError(t, err)
+	ca := tlscert.NewCA(t)
+	server := ca.IssueServer(t, "127.0.0.1")
 
-	template := &x509.Certificate{
-		SerialNumber:          big.NewInt(1),
-		Subject:               pkix.Name{CommonName: "gateway.test"},
-		NotBefore:             time.Now().Add(-time.Minute),
-		NotAfter:              time.Now().Add(time.Hour),
-		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign,
-		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
-		BasicConstraintsValid: true,
-		IsCA:                  true,
-		IPAddresses:           []net.IP{net.ParseIP("127.0.0.1")},
-	}
-	der, err := x509.CreateCertificate(rand.Reader, template, template, &key.PublicKey, key)
-	require.NoError(t, err)
-
-	keyDER, err := x509.MarshalPKCS8PrivateKey(key)
-	require.NoError(t, err)
-
-	dir := t.TempDir()
-	certFile = filepath.Join(dir, "server.pem")
-	keyFile = filepath.Join(dir, "server.key")
-	require.NoError(t, os.WriteFile(certFile, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}), 0o600))
-	require.NoError(t, os.WriteFile(keyFile, pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: keyDER}), 0o600))
-
-	leaf, err := x509.ParseCertificate(der)
-	require.NoError(t, err)
-	pool = x509.NewCertPool()
-	pool.AddCert(leaf)
-
-	return certFile, keyFile, pool
+	return server.CertFile, server.KeyFile, ca.Pool()
 }
 
 // Test_Gateway_HTTPProxy_ReachesBuiltinOverTLS verifies that with server TLS
@@ -195,7 +162,9 @@ func Test_Gateway_HTTPProxy_ReachesBuiltinOverTLS(t *testing.T) {
 
 	cfg := gateway.DefaultConfig()
 	cfg.Server.HTTPEndpoint = newFreeAddress(t)
-	cfg.Server.TLS = &gateway.TLSConfig{KeyPairs: newKeyPairs(t, certFile, keyFile)}
+	cfg.Server.TLS = &gateway.TLSConfig{
+		KeyPairs: []commonxgrpc.KeyPairConfig{tlscert.FileKeyPair(t, certFile, keyFile)},
+	}
 
 	listener := NewTestListener(t)
 	gw, err := gateway.NewGateway(cfg, gateway.WithLog(zap.NewNop()), gateway.WithListener(listener))
@@ -263,25 +232,16 @@ func runGateway(t *testing.T, cfg gateway.Config, options ...gateway.GatewayOpti
 	})
 }
 
-// newKeyPairs returns a key pair list holding one file entry that names the
-// given PEM pair.
-func newKeyPairs(t *testing.T, certFile, keyFile string) []commonxgrpc.KeyPairConfig {
-	t.Helper()
-
-	keyPair := commonxgrpc.KeyPairConfig{Type: "file"}
-	require.NoError(t, keyPair.Config.Encode(map[string]string{"cert_file": certFile, "key_file": keyFile}))
-
-	return []commonxgrpc.KeyPairConfig{keyPair}
-}
-
 // newTLSListenerConfig returns a TLS listener config at endpoint serving the
 // given PEM pair.
 func newTLSListenerConfig(t *testing.T, endpoint, certFile, keyFile string) *gateway.TLSListenerConfig {
 	t.Helper()
 
 	return &gateway.TLSListenerConfig{
-		Endpoint:  xcfg.MustNonEmptyString(endpoint),
-		TLSConfig: gateway.TLSConfig{KeyPairs: newKeyPairs(t, certFile, keyFile)},
+		Endpoint: xcfg.MustNonEmptyString(endpoint),
+		TLSConfig: gateway.TLSConfig{
+			KeyPairs: []commonxgrpc.KeyPairConfig{tlscert.FileKeyPair(t, certFile, keyFile)},
+		},
 	}
 }
 
