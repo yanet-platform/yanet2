@@ -66,16 +66,7 @@ func ClientCredentials(config *ClientTLSConfig, options ...CertificateStoreOptio
 	}
 
 	if len(config.KeyPairs) > 0 {
-		loaders := make([]KeyPairLoader, 0, len(config.KeyPairs))
-		for idx, entry := range config.KeyPairs {
-			loader, err := NewKeyPairLoader(entry)
-			if err != nil {
-				return nil, fmt.Errorf("key_pairs[%d]: %w", idx, err)
-			}
-			loaders = append(loaders, loader)
-		}
-
-		store, err := NewCertificateStore(loaders, options...)
+		store, err := NewCertificateStoreFromConfig(config.KeyPairs, options...)
 		if err != nil {
 			return nil, fmt.Errorf("failed to load client TLS key pairs: %w", err)
 		}

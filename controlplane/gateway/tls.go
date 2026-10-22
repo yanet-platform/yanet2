@@ -4,7 +4,6 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"errors"
-	"fmt"
 
 	"google.golang.org/grpc/credentials"
 
@@ -56,16 +55,7 @@ func newCertificateStore(
 		return nil, err
 	}
 
-	loaders := make([]commonxgrpc.KeyPairLoader, 0, len(config.KeyPairs))
-	for idx, entry := range config.KeyPairs {
-		loader, err := commonxgrpc.NewKeyPairLoader(entry)
-		if err != nil {
-			return nil, fmt.Errorf("key_pairs[%d]: %w", idx, err)
-		}
-		loaders = append(loaders, loader)
-	}
-
-	return commonxgrpc.NewCertificateStore(loaders, options...)
+	return commonxgrpc.NewCertificateStoreFromConfig(config.KeyPairs, options...)
 }
 
 // serverCredentials returns gRPC server transport credentials serving the
