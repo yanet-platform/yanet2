@@ -3,20 +3,25 @@ package rcucache
 import (
 	"iter"
 	"maps"
-	"sync"
+	"sync/atomic"
 )
 
-// Cache is a generic key-value cache.
+// Cache is a generic key-value cache with lock-free reads.
+//
+// A map handed to the cache is published and must not be modified again:
+// readers keep a consistent snapshot for as long as they hold it, and every
+// change publishes a whole new map. Writers that build the next map from
+// the current one must serialize among themselves, or concurrent changes
+// are lost. The zero value is an empty cache.
 type Cache[K comparable, V any] struct {
-	mu    sync.RWMutex
-	cache map[K]V
+	cache atomic.Pointer[map[K]V]
 }
 
 // NewCache constructs a new cache using specified underlying map.
 func NewCache[K comparable, V any](cache map[K]V) *Cache[K, V] {
-	return &Cache[K, V]{
-		cache: cache,
-	}
+	m := &Cache[K, V]{}
+	m.Swap(cache)
+	return m
 }
 
 // NewEmptyCache returns an empty cache.
@@ -24,41 +29,19 @@ func NewEmptyCache[K comparable, V any]() *Cache[K, V] {
 	return NewCache(map[K]V{})
 }
 
-// View returns a read-only view of this cache, that can be used concurrently
-// to lookup cached	entries.
+// View returns a read-only snapshot of this cache, that can be used
+// concurrently to look up cached entries.
 func (m *Cache[K, V]) View() CacheView[K, V] {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-
-	// Just copy the pointer here.
-	//
-	// The returned type provides only read-only access, while this structure
-	// only allows to atomically swap the entire table.
-	return CacheView[K, V]{cache: m.cache}
+	cache := m.cache.Load()
+	if cache == nil {
+		return CacheView[K, V]{}
+	}
+	return CacheView[K, V]{cache: *cache}
 }
 
 // Swap atomically swaps the entire cache.
 func (m *Cache[K, V]) Swap(cache map[K]V) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	m.cache = cache
-}
-
-// Set inserts or updates a single entry in the cache.
-func (m *Cache[K, V]) Set(key K, value V) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	m.cache[key] = value
-}
-
-// Delete removes a single entry from the cache.
-func (m *Cache[K, V]) Delete(key K) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	delete(m.cache, key)
+	m.cache.Store(&cache)
 }
 
 // CacheView is a read-only view of the cache.
@@ -77,7 +60,12 @@ func (m CacheView[K, V]) Entries() (iter.Seq[V], int) {
 	return maps.Values(m.cache), len(m.cache)
 }
 
-// All returns the cache entries as a key-value iterator.
-func (m CacheView[K, V]) All() (iter.Seq2[K, V], int) {
-	return maps.All(m.cache), len(m.cache)
+// Iter returns the cache entries as a key-value iterator.
+func (m CacheView[K, V]) Iter() iter.Seq2[K, V] {
+	return maps.All(m.cache)
+}
+
+// Len returns the number of cache entries.
+func (m CacheView[K, V]) Len() int {
+	return len(m.cache)
 }

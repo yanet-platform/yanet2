@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"net/netip"
 	"sync"
 
@@ -70,9 +71,9 @@ func newTableOptions() *tableOptions {
 
 // NeighTable merges multiple neighbour sources by per-entry priority.
 //
-// All mutations are serialized under mu. After every mutation the merged
-// cache is rebuilt and atomically swapped so that readers (via View)
-// never block.
+// All mutations are serialized under the table lock and replace published
+// maps instead of modifying them, so readers of the merged and per-source
+// views never block and keep a consistent snapshot.
 type NeighTable struct {
 	mu sync.Mutex
 	// sources maps source name to its NeighSource.
@@ -207,12 +208,14 @@ func (m *NeighTable) Add(table string, entries []NeighbourEntry) error {
 			return fmt.Errorf("%w: %q", ErrSourceNotFound, table)
 		}
 
+		next := maps.Collect(src.Cache.View().Iter())
 		for _, entry := range entries {
 			if entry.Priority == 0 {
 				entry.Priority = src.DefaultPriority
 			}
-			src.Cache.Set(entry.NextHop, entry)
+			next[entry.NextHop] = entry
 		}
+		src.Cache.Swap(next)
 		return nil
 	})
 }
@@ -226,9 +229,11 @@ func (m *NeighTable) Remove(table string, addrs []netip.Addr) error {
 			return fmt.Errorf("%w: %q", ErrSourceNotFound, table)
 		}
 
+		next := maps.Collect(src.Cache.View().Iter())
 		for _, addr := range addrs {
-			src.Cache.Delete(addr)
+			delete(next, addr)
 		}
+		src.Cache.Swap(next)
 		return nil
 	})
 }

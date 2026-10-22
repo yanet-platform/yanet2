@@ -46,8 +46,7 @@ func Test_FilterByDevices_Eligibility(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			view := rcucache.NewCache(maps.Clone(entries)).View()
 			filtered := neigh.FilterByDevices(view, tc.devices)
-			_, count := filtered.All()
-			require.Equal(t, len(tc.addresses), count)
+			require.Equal(t, len(tc.addresses), filtered.Len())
 			for _, address := range tc.addresses {
 				key := netip.MustParseAddr(address)
 				entry, ok := filtered.Lookup(key)
