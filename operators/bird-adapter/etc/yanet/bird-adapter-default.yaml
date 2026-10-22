@@ -19,9 +19,16 @@ route_operator_endpoint: "[::1]:8080"
 #   route_operator_tls:
 #     # PEM bundle that replaces the system roots.
 #     ca_file: /etc/yanet2/tls/ca.pem
-#     # Client certificate, both files or neither.
-#     cert_file: /etc/yanet2/tls/bird-adapter.pem
-#     key_file: /etc/yanet2/tls/bird-adapter.key
+#     # Client certificates, reread without a restart.
+#     #
+#     # A handshake presents the first pair that is valid and that the
+#     # server accepts, else none. Replace the files by rename or symlink
+#     # swap. Paths cannot be set from the environment.
+#     key_pairs:
+#       - type: file
+#         config:
+#           cert_file: /etc/yanet2/tls/bird-adapter.pem
+#           key_file: /etc/yanet2/tls/bird-adapter.key
 #     # Host the server certificate is checked against, defaults to the host
 #     # of the endpoint.
 #     server_name: gateway.numa0

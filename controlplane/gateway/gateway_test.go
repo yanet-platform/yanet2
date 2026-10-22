@@ -40,6 +40,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/yanet-platform/yanet2/common/go/xcfg"
+	commonxgrpc "github.com/yanet-platform/yanet2/common/go/xgrpc"
 	readinesspb "github.com/yanet-platform/yanet2/common/readinesspb/v1"
 	"github.com/yanet-platform/yanet2/controlplane/gateway"
 	"github.com/yanet-platform/yanet2/controlplane/internal/auth/sshcert"
@@ -194,10 +195,7 @@ func Test_Gateway_HTTPProxy_ReachesBuiltinOverTLS(t *testing.T) {
 
 	cfg := gateway.DefaultConfig()
 	cfg.Server.HTTPEndpoint = newFreeAddress(t)
-	cfg.Server.TLS = &gateway.TLSConfig{
-		CertFile: xcfg.MustNonEmptyString(certFile),
-		KeyFile:  xcfg.MustNonEmptyString(keyFile),
-	}
+	cfg.Server.TLS = &gateway.TLSConfig{KeyPairs: newKeyPairs(t, certFile, keyFile)}
 
 	listener := NewTestListener(t)
 	gw, err := gateway.NewGateway(cfg, gateway.WithLog(zap.NewNop()), gateway.WithListener(listener))
@@ -265,15 +263,25 @@ func runGateway(t *testing.T, cfg gateway.Config, options ...gateway.GatewayOpti
 	})
 }
 
+// newKeyPairs returns a key pair list holding one file entry that names the
+// given PEM pair.
+func newKeyPairs(t *testing.T, certFile, keyFile string) []commonxgrpc.KeyPairConfig {
+	t.Helper()
+
+	keyPair := commonxgrpc.KeyPairConfig{Type: "file"}
+	require.NoError(t, keyPair.Config.Encode(map[string]string{"cert_file": certFile, "key_file": keyFile}))
+
+	return []commonxgrpc.KeyPairConfig{keyPair}
+}
+
 // newTLSListenerConfig returns a TLS listener config at endpoint serving the
 // given PEM pair.
-func newTLSListenerConfig(endpoint, certFile, keyFile string) *gateway.TLSListenerConfig {
+func newTLSListenerConfig(t *testing.T, endpoint, certFile, keyFile string) *gateway.TLSListenerConfig {
+	t.Helper()
+
 	return &gateway.TLSListenerConfig{
-		Endpoint: xcfg.MustNonEmptyString(endpoint),
-		TLSConfig: gateway.TLSConfig{
-			CertFile: xcfg.MustNonEmptyString(certFile),
-			KeyFile:  xcfg.MustNonEmptyString(keyFile),
-		},
+		Endpoint:  xcfg.MustNonEmptyString(endpoint),
+		TLSConfig: gateway.TLSConfig{KeyPairs: newKeyPairs(t, certFile, keyFile)},
 	}
 }
 
@@ -295,7 +303,7 @@ func startDedicatedTLSGateway(
 	secure = NewTestListener(t)
 	cfg.Server.GRPC = &gateway.ListenerConfig{
 		Endpoint: plaintext.Addr().String(),
-		TLS:      newTLSListenerConfig(secure.Addr().String(), certFile, keyFile),
+		TLS:      newTLSListenerConfig(t, secure.Addr().String(), certFile, keyFile),
 	}
 
 	listeners := []gateway.GatewayOption{
@@ -481,8 +489,11 @@ func Test_Gateway_SectionsFromYAML_ReplaceDeprecatedEndpoint(t *testing.T) {
 		"  endpoint: " + strconv.Quote(plaintextAddress) + "\n" +
 		"  tls:\n" +
 		"    endpoint: " + strconv.Quote(tlsAddress) + "\n" +
-		"    cert_file: " + strconv.Quote(certFile) + "\n" +
-		"    key_file: " + strconv.Quote(keyFile) + "\n" +
+		"    key_pairs:\n" +
+		"      - type: file\n" +
+		"        config:\n" +
+		"          cert_file: " + strconv.Quote(certFile) + "\n" +
+		"          key_file: " + strconv.Quote(keyFile) + "\n" +
 		"http:\n" +
 		"  endpoint: " + strconv.Quote(httpAddress) + "\n"
 	cfg := gateway.DefaultConfig()
@@ -507,10 +518,10 @@ func Test_Gateway_TLSOnly_HTTPSReachesBuiltin(t *testing.T) {
 
 	cfg := gateway.DefaultConfig()
 	cfg.Server.GRPC = &gateway.ListenerConfig{
-		TLS: newTLSListenerConfig(secure.Addr().String(), certFile, keyFile),
+		TLS: newTLSListenerConfig(t, secure.Addr().String(), certFile, keyFile),
 	}
 	cfg.Server.HTTP = &gateway.ListenerConfig{
-		TLS: newTLSListenerConfig(httpsAddress, certFile, keyFile),
+		TLS: newTLSListenerConfig(t, httpsAddress, certFile, keyFile),
 	}
 	runGateway(t, cfg, gateway.WithTLSListener(secure))
 

@@ -6,12 +6,14 @@ import (
 	"fmt"
 	"time"
 
+	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
 	"github.com/yanet-platform/yanet2/common/go/operator"
+	"github.com/yanet-platform/yanet2/common/go/xgrpc"
 	"github.com/yanet-platform/yanet2/operators/route/neigh"
 	operatorpb "github.com/yanet-platform/yanet2/operators/route/operatorpb/v1"
 )
@@ -30,15 +32,41 @@ type Publisher struct {
 	timeout         time.Duration
 }
 
+type publisherOptions struct {
+	Log *zap.Logger
+}
+
+func newPublisherOptions() *publisherOptions {
+	return &publisherOptions{Log: zap.NewNop()}
+}
+
+// PublisherOption configures NewPublisher.
+type PublisherOption func(*publisherOptions)
+
+// WithPublisherLog sets the logger for the gateway connections, which log
+// client certificate rotation.
+func WithPublisherLog(log *zap.Logger) PublisherOption {
+	return func(o *publisherOptions) {
+		o.Log = log
+	}
+}
+
 // NewPublisher opens lazy connections using the common gateway TLS settings.
-func NewPublisher(cfg *Config) (*Publisher, error) {
+func NewPublisher(cfg *Config, options ...PublisherOption) (*Publisher, error) {
+	opts := newPublisherOptions()
+	for _, o := range options {
+		o(opts)
+	}
+
 	m := &Publisher{
 		tableName:       cfg.TableName.Unwrap(),
 		defaultPriority: cfg.DefaultPriority,
 		timeout:         cfg.PublishTimeout.Unwrap(),
 	}
 	for _, gateway := range cfg.Gateways {
-		connection, err := operator.DialGateway(gateway)
+		connection, err := operator.DialGateway(gateway,
+			xgrpc.WithCertificateStoreLog(opts.Log.With(zap.String("gateway", gateway.Name))),
+		)
 		if err != nil {
 			return nil, errors.Join(err, m.Close())
 		}

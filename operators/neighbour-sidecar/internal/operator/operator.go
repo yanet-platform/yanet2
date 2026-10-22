@@ -43,7 +43,7 @@ func NewOperator(cfg *Config, options ...Option) (*operator.Operator[neigh.Nexth
 	if err != nil {
 		return nil, fmt.Errorf("failed to create neighbour source: %w", err)
 	}
-	publisher, err := NewPublisher(cfg)
+	publisher, err := NewPublisher(cfg, WithPublisherLog(opts.Log))
 	if err != nil {
 		return nil, err
 	}

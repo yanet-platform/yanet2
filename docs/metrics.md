@@ -93,3 +93,21 @@ deployment that grants metrics access per method has to grant this one.
 The same values are exposed per port through the
 `controlplane.ynpb.v1.CountersService/Ports` RPC, which reports every port
 from whichever instance is asked.
+
+## Gateway TLS metrics
+
+Both gauges come from the instance endpoint and hold unix times in
+seconds, so an alert compares them with the current time:
+
+- `gateway_tls_certificate_not_after_seconds` — labels `listener`
+  (`grpcs` or `https`) and `source`, the `cert_file` of a `key_pairs`
+  entry: when the certificate that listener serves for that entry expires.
+  A scrape first rereads the entries due for a reload, so the series
+  follows a renewal without waiting for a handshake.
+- `auth_x509_client_certificate_not_after_seconds` — label `user`, the
+  account name the x509 authenticator derives from a client certificate:
+  the earliest expiry among the certificates that user presented on calls
+  in the last hour. A certificate unused for an hour drops out, and a user
+  left with none loses the series. It moves on to a renewed certificate's
+  expiry only once every connection of that user presents the renewed
+  one, so a client still holding an expiring certificate stays visible.

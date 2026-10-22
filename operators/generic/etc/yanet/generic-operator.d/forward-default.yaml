@@ -13,9 +13,16 @@ gateways:
     #   tls:
     #     # PEM bundle that replaces the system roots.
     #     ca_file: /etc/yanet2/tls/ca.pem
-    #     # Client certificate, both files or neither.
-    #     cert_file: /etc/yanet2/tls/operator.pem
-    #     key_file: /etc/yanet2/tls/operator.key
+    #     # Client certificates, reread without a restart.
+    #     #
+    #     # A handshake presents the first pair that is valid and that the
+    #     # gateway accepts, else none. Replace the files by rename or
+    #     # symlink swap. Paths cannot be set from the environment.
+    #     key_pairs:
+    #       - type: file
+    #         config:
+    #           cert_file: /etc/yanet2/tls/operator.pem
+    #           key_file: /etc/yanet2/tls/operator.key
     #     # Host the server certificate is checked against, defaults to the
     #     # host of the endpoint.
     #     server_name: gateway.numa0

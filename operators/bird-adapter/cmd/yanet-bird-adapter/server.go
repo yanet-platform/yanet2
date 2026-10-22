@@ -150,7 +150,7 @@ func runServer() error {
 		zap.String("route_operator_endpoint", cfg.RouteOperatorEndpoint),
 	)
 
-	routeOperatorCreds, err := xgrpc.ClientCredentials(cfg.RouteOperatorTLS)
+	routeOperatorCreds, err := xgrpc.ClientCredentials(cfg.RouteOperatorTLS, xgrpc.WithCertificateStoreLog(log))
 	if err != nil {
 		return fmt.Errorf("failed to build transport credentials for the route operator endpoint: %w", err)
 	}
