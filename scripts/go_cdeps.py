@@ -93,7 +93,18 @@ def dependency_paths(value):
             yield "".join(word)
 
 
-def discover(root, package, go, output, stamp):
+def input_name(root, build_root, path):
+    """Keep source and build inputs bounded and distinct across relocations."""
+    for kind, directory in (("build", build_root), ("source", root)):
+        if directory is not None:
+            try:
+                return kind + "/" + path.relative_to(directory).as_posix()
+            except ValueError:
+                pass
+    raise ValueError(f"native input is outside the source and build roots: {path}")
+
+
+def discover(root, package, go, output, stamp, build_root=None):
     """Use active CGO sources and compiler includes as the dependency authority."""
     directory = (root / package).resolve(strict=True)
     directory.relative_to(root)
@@ -169,30 +180,36 @@ def discover(root, package, go, output, stamp):
             raise ValueError("compiler did not emit dependency rules")
         paths = set()
         for name in dependency_paths(dependencies):
-            lexical = Path(os.path.abspath(directory / name))
-            path = (directory / name).resolve(strict=True)
+            dependency = directory / name
+            path = dependency.resolve(strict=True)
             if path in (output, stamp):
                 raise ValueError("marker and stamp must not replace a native input")
             try:
-                path.relative_to(root)
+                input_name(root, build_root, path)
             except ValueError:
-                try:
-                    lexical.relative_to(root)
-                except ValueError:
-                    continue
-                raise ValueError(f"project dependency resolves outside the root: {lexical}")
+                # Resolve prefixes before collapsing traversal so aliases retain ownership.
+                for parent in dependency.parents:
+                    try:
+                        input_name(root, build_root, parent.resolve(strict=True))
+                    except ValueError:
+                        continue
+                    raise ValueError(
+                        "project dependency resolves outside the source and build roots: "
+                        f"{dependency}"
+                    )
+                continue
             if scratch in path.parents:
                 continue
             paths.add(path)
         return paths
 
 
-def native_inputs(root, inputs, ar):
+def native_inputs(root, inputs, ar, build_root=None):
     """Include the external object files referenced by thin archives."""
     paths = set()
     for value in inputs:
         path = value.resolve(strict=True)
-        path.relative_to(root)
+        input_name(root, build_root, path)
         paths.add(path)
         with path.open("rb") as source:
             thin = source.read(8) == b"!<thin>\n"
@@ -200,12 +217,12 @@ def native_inputs(root, inputs, ar):
             for name in run([ar, "t", str(path)], path.parent).split("\n"):
                 if name:
                     member = (path.parent / name).resolve(strict=True)
-                    member.relative_to(root)
+                    input_name(root, build_root, member)
                     paths.add(member)
     return paths
 
 
-def fingerprint(root, inputs):
+def fingerprint(root, inputs, build_root=None):
     """Hash native inputs independently of checkout location and mtimes."""
     digest = hashlib.sha256()
 
@@ -213,11 +230,11 @@ def fingerprint(root, inputs):
         digest.update(struct.pack(">Q", len(value)))
         digest.update(value)
 
-    frame(b"yanet-go-cdeps-v1")
+    frame(b"yanet-go-cdeps-v2")
     paths = []
     for value in inputs:
         path = value.resolve(strict=True)
-        paths.append((path.relative_to(root).as_posix(), path))
+        paths.append((input_name(root, build_root, path), path))
     for logical_path, path in sorted(paths):
         frame(logical_path.encode("utf-8"))
         frame(path.read_bytes())
@@ -244,9 +261,9 @@ def stage_changed(path, content):
     return temporary
 
 
-def publish(root, inputs, output, stamp, build_tag=None):
+def publish(root, inputs, output, stamp, build_tag=None, build_root=None):
     """Read every input before staging the marker, then publish the stamp last."""
-    value = fingerprint(root, inputs)
+    value = fingerprint(root, inputs, build_root)
     marker = (
         "static const char yanet_go_cdeps_fingerprint_v1[] "
         f'__attribute__((used)) = "{value}";\n'
@@ -271,6 +288,10 @@ def main():
         description="Publish a CGO source marker for compiler-discovered native inputs."
     )
     parser.add_argument("--root", required=True, type=Path)
+    parser.add_argument(
+        "--build-root", type=Path,
+        help="allow native inputs in this project build directory as well as the source root",
+    )
     parser.add_argument("--go", required=True)
     parser.add_argument("--ar", default="ar")
     parser.add_argument("--package", required=True, type=Path)
@@ -287,7 +308,10 @@ def main():
                 "build tag must contain only ASCII letters, digits, underscores or dots"
             )
         root = args.root.resolve(strict=True)
-        inputs = native_inputs(root, args.inputs, args.ar)
+        build_root = args.build_root.resolve(strict=True) if args.build_root else None
+        if not root.is_dir() or (build_root is not None and not build_root.is_dir()):
+            raise ValueError("source and build roots must be directories")
+        inputs = native_inputs(root, args.inputs, args.ar, build_root)
         if args.output.is_symlink() or args.stamp.is_symlink():
             raise ValueError("marker and stamp must not be symlinks")
         output = args.output.resolve()
@@ -299,9 +323,9 @@ def main():
         if args.package.is_absolute():
             raise ValueError("package must be a path relative to the project root")
         inputs = set(inputs) | discover(
-            root, args.package, args.go, output, stamp,
+            root, args.package, args.go, output, stamp, build_root,
         )
-        publish(root, inputs, output, stamp, args.build_tag)
+        publish(root, inputs, output, stamp, args.build_tag, build_root)
     except (OSError, RuntimeError, ValueError) as error:
         print(f"go_cdeps: {args.package}: {error}", file=sys.stderr)
         return 1
