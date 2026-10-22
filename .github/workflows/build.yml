@@ -127,6 +127,107 @@ jobs:
           path: ${{ steps.go-buildcache.outputs.path }}
           key: ${{ steps.go-buildcache.outputs.key }}
 
+  # Most pull requests get no package build, so this job checks the arm64
+  # build with the flags the packages use and runs the unit tests on arm64.
+  test-release-arm64:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: true
+
+      - uses: ./.github/actions/apt-packages
+        id: apt-packages
+        timeout-minutes: 10
+        with:
+          packages: meson clang cmake python3-pyelftools libnuma-dev libpcap-dev git protobuf-compiler
+
+      # The meson build compiles a Rust regex library of its own.
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@1.88.0
+
+      - uses: hendrikmuhs/ccache-action@v1.2.23
+        name: ccache
+        with:
+          key: ${{ runner.os }}-test-release-arm64-cache
+          max-size: 2G
+          verbose: 2
+          save: ${{ github.ref == 'refs/heads/main' }}
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: "1.27.x"
+          cache: false
+          check-latest: true
+
+      - name: Restore Go module cache
+        uses: ./.github/actions/go-modcache
+
+      - name: Restore Go build cache
+        if: ${{ !env.ACT }}
+        id: go-buildcache
+        uses: ./.github/actions/go-buildcache
+        with:
+          profile: release
+          apt-fingerprint: ${{ steps.apt-packages.outputs.fingerprint }}
+
+      - name: Install Go Protobuf Plugins
+        uses: ./.github/actions/protoc-plugins
+
+      # Debian's hardening flags turn warnings the plain release build never
+      # sees into errors, as they do in the package build.
+      - name: Build and run tests (release, packaging flags)
+        run: |
+          flags=$(DEB_BUILD_MAINT_OPTIONS=hardening=+all DEB_CFLAGS_MAINT_APPEND=-fno-lto DEB_LDFLAGS_MAINT_APPEND=-fno-lto dpkg-buildflags --export=sh)
+          eval "$flags"
+          meson setup build -Dbuildtype=release
+          make dataplane
+          make test-only
+
+      - name: Show meson test log
+        if: always()
+        run: grep -v 'Inherited environment' build/meson-logs/testlog.txt || true
+
+      - name: Save Go build cache
+        if: success() && github.ref == 'refs/heads/main' && steps.go-buildcache.outputs.cache-hit != 'true' && !env.ACT
+        uses: actions/cache/save@v5
+        with:
+          path: ${{ steps.go-buildcache.outputs.path }}
+          key: ${{ steps.go-buildcache.outputs.key }}
+
+  # The CLI's bundled C libraries pick up the package flags too, so the arm64
+  # CLI build runs with them in a job of its own, beside the one above.
+  build-cli-arm64:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: ./.github/actions/apt-packages
+        timeout-minutes: 10
+        with:
+          packages: cmake protobuf-compiler
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@1.88.0
+
+      # A cache written on a pull-request ref is readable only from that
+      # same pull request, so only main writes this one.
+      - name: Cache rust
+        uses: Swatinem/rust-cache@v2.9.2
+        with:
+          shared-key: build-release-arm64
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Build CLI (release, packaging flags)
+        run: |
+          flags=$(DEB_BUILD_MAINT_OPTIONS=hardening=+all DEB_CFLAGS_MAINT_APPEND=-fno-lto DEB_LDFLAGS_MAINT_APPEND=-fno-lto dpkg-buildflags --export=sh)
+          eval "$flags"
+          make cli
+
   build-tsan-test:
     runs-on: ubuntu-24.04
 

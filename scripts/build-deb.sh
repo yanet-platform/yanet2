@@ -2,14 +2,6 @@
 set -euxo pipefail
 env
 
-skip_build_deps=false
-for arg in "$@"; do
-    case "$arg" in
-        --skip-build-deps) skip_build_deps=true ;;
-        *) echo "Unknown argument: $arg" >&2; exit 1 ;;
-    esac
-done
-
 # Resolve the debian package version from git.
 #
 # A `vX.Y.Z` tag on HEAD becomes `X.Y.Z`, otherwise
@@ -78,17 +70,15 @@ trap 'exit 143' TERM
 # an argument so dch never tries to open an editor.
 dch --newversion "$PKG_VERSION" --distribution unstable --force-bad-version "Automatic CI build."
 
-if [[ "$skip_build_deps" == false ]]; then
-    apt-get update
-    apt-get -o Debug::pkgProblemResolver=yes --no-install-recommends -y --allow-downgrades --allow-remove-essential --allow-change-held-packages build-dep . 2>&1 | tee build-deps.log
-fi
+apt-get update
+apt-get -o Debug::pkgProblemResolver=yes --no-install-recommends -y --allow-downgrades --allow-remove-essential --allow-change-held-packages build-dep . 2>&1 | tee build-deps.log
 
 echo "Current PATH during build: $PATH" > build-path.log
-# Build binary packages while preserving toolchain and cache selections.
+# Build binary packages while preserving the toolchain path and build profiles.
 #
 # Downstream steps consume only binaries. Skipping the source package also
 # avoids compressing the whole working tree and its bundled dependencies.
-echo y | debuild --preserve-envvar=PATH --preserve-envvar=DEB_BUILD_PROFILES --preserve-envvar=GOCACHE --preserve-envvar=YANET_DEB_CARGO_CACHE -us -uc -b 2>&1 | tee build.log
+echo y | debuild --preserve-envvar=PATH --preserve-envvar=DEB_BUILD_PROFILES -us -uc -b 2>&1 | tee build.log
 
 mkdir -p outdeb
 dcmd cp ../*.changes outdeb/

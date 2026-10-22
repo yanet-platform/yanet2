@@ -3,12 +3,11 @@ description: 'Restore compatible Go compilation snapshots for the selected build
 
 inputs:
   profile:
-    description: 'Build profile: release, asan, race, or deb'
+    description: 'Build profile: release, asan, or race'
     required: true
   apt-fingerprint:
-    description: 'Package provenance from the cached APT wrapper; required outside Debian builds'
-    required: false
-    default: ''
+    description: 'Package provenance from the cached APT wrapper'
+    required: true
 
 outputs:
   path:
@@ -20,9 +19,6 @@ outputs:
   cache-hit:
     description: 'True only on an exact-key match'
     value: ${{ steps.restore.outputs.cache-hit }}
-  native-hash:
-    description: 'Full hosted image and installed package compatibility fingerprint'
-    value: ${{ steps.resolve.outputs.native-hash }}
 
 runs:
   using: 'composite'
@@ -40,12 +36,6 @@ runs:
           release|asan|race)
             if [[ ! "$APT_FINGERPRINT" =~ ^[0-9a-f]{64}$ ]]; then
               echo "Go build cache requires an APT package fingerprint: $CACHE_PROFILE" >&2
-              exit 1
-            fi
-            ;;
-          deb)
-            if [[ -n "$APT_FINGERPRINT" ]]; then
-              echo "Debian Go build cache must use installed package provenance" >&2
               exit 1
             fi
             ;;
@@ -93,7 +83,6 @@ runs:
         echo "key=${family}${source}-${CACHE_RUN_ID}" >>"$GITHUB_OUTPUT"
         echo "source-prefix=${family}${source}-" >>"$GITHUB_OUTPUT"
         echo "family-prefix=$family" >>"$GITHUB_OUTPUT"
-        echo "native-hash=$native_hash" >>"$GITHUB_OUTPUT"
         echo "GOCACHE=$path" >>"$GITHUB_ENV"
 
     - name: Restore the build cache
