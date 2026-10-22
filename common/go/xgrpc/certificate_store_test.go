@@ -42,7 +42,7 @@ func (m *memoryKeyPair) Source() string {
 	return "memory"
 }
 
-func (m *memoryKeyPair) Load() (certPEM, keyPEM []byte, err error) {
+func (m *memoryKeyPair) Load() ([]byte, []byte, error) {
 	if m.err != nil {
 		return nil, nil, m.err
 	}

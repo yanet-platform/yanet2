@@ -287,7 +287,7 @@ func newTLSListenerConfig(t *testing.T, endpoint, certFile, keyFile string) *gat
 
 // startDedicatedTLSGateway runs a gateway whose gRPC section serves
 // plaintext on one listener and TLS with the given PEM pair on another until
-// the test ends, returning both listeners.
+// the test ends, returning the plaintext listener and then the TLS one.
 //
 // Both listeners are pre-bound and injected in place of the section's
 // endpoints. The given options apply after the listeners and a silent log.
@@ -296,11 +296,11 @@ func startDedicatedTLSGateway(
 	cfg gateway.Config,
 	certFile, keyFile string,
 	options ...gateway.GatewayOption,
-) (plaintext, secure net.Listener) {
+) (net.Listener, net.Listener) {
 	t.Helper()
 
-	plaintext = NewTestListener(t)
-	secure = NewTestListener(t)
+	plaintext := NewTestListener(t)
+	secure := NewTestListener(t)
 	cfg.Server.GRPC = &gateway.ListenerConfig{
 		Endpoint: plaintext.Addr().String(),
 		TLS:      newTLSListenerConfig(t, secure.Addr().String(), certFile, keyFile),

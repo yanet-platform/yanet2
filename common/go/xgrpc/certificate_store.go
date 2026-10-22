@@ -52,7 +52,7 @@ type KeyPairLoader interface {
 	Source() string
 	// Load returns the PEM certificate chain, leaf first, and the PEM
 	// private key of the leaf.
-	Load() (certPEM, keyPEM []byte, err error)
+	Load() ([]byte, []byte, error)
 }
 
 // KeyPairConfig configures one key pair entry: a loader type and the
@@ -227,12 +227,12 @@ func (m *KeyPairFiles) Source() string {
 // The two reads are not one atomic step, so a pair replaced file by file
 // may be read half written; the store then sees a key that does not match
 // and keeps its current pair.
-func (m *KeyPairFiles) Load() (certPEM, keyPEM []byte, err error) {
-	certPEM, err = os.ReadFile(m.certFile)
+func (m *KeyPairFiles) Load() ([]byte, []byte, error) {
+	certPEM, err := os.ReadFile(m.certFile)
 	if err != nil {
 		return nil, nil, err
 	}
-	keyPEM, err = os.ReadFile(m.keyFile)
+	keyPEM, err := os.ReadFile(m.keyFile)
 	if err != nil {
 		return nil, nil, err
 	}
