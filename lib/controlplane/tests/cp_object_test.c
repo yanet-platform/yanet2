@@ -35,6 +35,14 @@
 // arena than the registry-heavy subtests.
 #define CP_OBJECT_GATE_MEMORY_LIMIT (1u * 1024u * 1024u)
 
+// The layout scenarios hold at most one empty object, so each attaches an
+// arena of this small size.
+//
+// A sanitizer build pads every allocation with redzones, which rounds an
+// arena limit that is a power of two up to the next power of two. Scenario
+// agents are never reclaimed, so larger arenas exhaust the shared test memory.
+#define CP_OBJECT_LAYOUT_MEMORY_LIMIT (64u * 1024u)
+
 // Configuration layout identity the "layout_probe" object type declares.
 #define CP_OBJECT_TEST_LAYOUT 0x1234abcd5678ef90ull
 
@@ -612,7 +620,7 @@ test_cp_object_layout_loader_mirrors(struct yanet_shm *shm) {
 		shm,
 		0,
 		"cp-object-layout-load",
-		CP_OBJECT_GATE_MEMORY_LIMIT,
+		CP_OBJECT_LAYOUT_MEMORY_LIMIT,
 		&err
 	);
 	TEST_ASSERT_NOT_NULL(agent, "agent_attach failed");
@@ -648,7 +656,11 @@ test_cp_object_layout_matching_accepted(struct yanet_shm *shm) {
 	yanet_error *err = NULL;
 
 	struct agent *agent = agent_attach(
-		shm, 0, "cp-object-layout-ok", CP_OBJECT_GATE_MEMORY_LIMIT, &err
+		shm,
+		0,
+		"cp-object-layout-ok",
+		CP_OBJECT_LAYOUT_MEMORY_LIMIT,
+		&err
 	);
 	TEST_ASSERT_NOT_NULL(agent, "agent_attach failed");
 
@@ -677,7 +689,7 @@ test_cp_object_layout_other_refused(struct yanet_shm *shm) {
 		shm,
 		0,
 		"cp-object-layout-bad",
-		CP_OBJECT_GATE_MEMORY_LIMIT,
+		CP_OBJECT_LAYOUT_MEMORY_LIMIT,
 		&err
 	);
 	TEST_ASSERT_NOT_NULL(agent, "agent_attach failed");
@@ -728,7 +740,7 @@ test_cp_object_layout_unset_type(struct yanet_shm *shm) {
 		shm,
 		0,
 		"cp-object-layout-zero",
-		CP_OBJECT_GATE_MEMORY_LIMIT,
+		CP_OBJECT_LAYOUT_MEMORY_LIMIT,
 		&err
 	);
 	TEST_ASSERT_NOT_NULL(agent, "agent_attach failed");
