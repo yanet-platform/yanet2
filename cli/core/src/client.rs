@@ -26,10 +26,17 @@ use core::{fmt::Debug, time::Duration};
 use std::{
     fs,
     path::{Path, PathBuf},
+    sync::Arc,
 };
 
 use http::{Uri, uri::PathAndQuery};
 use prost::Message;
+use rustls::{
+    DigitallySignedStruct, SignatureScheme,
+    client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier},
+    crypto::{self, CryptoProvider, WebPkiSupportedAlgorithms},
+    pki_types::{CertificateDer, ServerName, UnixTime},
+};
 use tonic::{
     Request, Response, Status,
     client::Grpc,
@@ -69,11 +76,21 @@ pub struct TlsArgs {
     /// PEM client private key for mutual TLS.
     #[arg(long, global = true, env = "YANET_CLIENT_KEY", value_name = "PATH")]
     pub client_key: Option<PathBuf>,
+    /// Accept any server certificate without checking its chain, name or
+    /// validity period.
+    ///
+    /// The connection stays encrypted but is open to an active
+    /// man-in-the-middle; the CA bundle and native roots are not consulted.
+    #[arg(long, global = true)]
+    pub dangerously_skip_verify: bool,
 }
 
 impl Settings {
     fn tls_configured(&self) -> bool {
-        self.ca.value.is_some() || self.client_cert.value.is_some() || self.client_key.value.is_some()
+        self.ca.value.is_some()
+            || self.client_cert.value.is_some()
+            || self.client_key.value.is_some()
+            || self.skip_verify
     }
 }
 
@@ -165,6 +182,14 @@ fn build_endpoint(settings: &Settings) -> Result<Endpoint, ConnectionError> {
             let channel = Channel::from_shared(format!("https://{address}"))?;
             let tls = build_tls_config(settings)?;
 
+            if settings.skip_verify {
+                log::warn!("server certificate verification is disabled");
+
+                return channel
+                    .tls_config_with_verifier(tls, Arc::new(SkipServerVerification::new()))
+                    .map_err(ConnectionError::TlsConfig);
+            }
+
             channel.tls_config(tls).map_err(ConnectionError::TlsConfig)
         }
         Some(("grpc" | "unix", ..)) if settings.tls_configured() => Err(ConnectionError::TlsOptionsWithoutTls),
@@ -175,7 +200,8 @@ fn build_endpoint(settings: &Settings) -> Result<Endpoint, ConnectionError> {
     }
 }
 
-/// Uses native roots unless an explicit CA bundle replaces them.
+/// Uses native roots unless an explicit CA bundle replaces them, and no
+/// roots at all when the server certificate is not verified.
 fn build_tls_config(settings: &Settings) -> Result<ClientTlsConfig, ConnectionError> {
     let identity = match (&settings.client_cert.value, &settings.client_key.value) {
         (Some(cert), Some(key)) => Some(Identity::from_pem(
@@ -186,7 +212,9 @@ fn build_tls_config(settings: &Settings) -> Result<ClientTlsConfig, ConnectionEr
         (..) => return Err(ConnectionError::IncompleteClientIdentity),
     };
 
+    // tonic refuses a custom verifier combined with any root.
     let mut tls = match &settings.ca.value {
+        _ if settings.skip_verify => ClientTlsConfig::new(),
         Some(path) => {
             ClientTlsConfig::new().ca_certificate(Certificate::from_pem(read_tls_file(path, "CA certificate bundle")?))
         }
@@ -202,6 +230,61 @@ fn build_tls_config(settings: &Settings) -> Result<ClientTlsConfig, ConnectionEr
     }
 
     Ok(tls)
+}
+
+/// Accepts any server certificate while still checking that the server
+/// holds the key of the certificate it presented.
+#[derive(Debug)]
+struct SkipServerVerification {
+    algorithms: WebPkiSupportedAlgorithms,
+}
+
+impl SkipServerVerification {
+    /// Takes the signature algorithms of the provider tonic builds the
+    /// connection with: the process default, else aws-lc-rs.
+    fn new() -> Self {
+        let algorithms = match CryptoProvider::get_default() {
+            Some(provider) => provider.signature_verification_algorithms,
+            None => crypto::aws_lc_rs::default_provider().signature_verification_algorithms,
+        };
+
+        Self { algorithms }
+    }
+}
+
+impl ServerCertVerifier for SkipServerVerification {
+    fn verify_server_cert(
+        &self,
+        _end_entity: &CertificateDer<'_>,
+        _intermediates: &[CertificateDer<'_>],
+        _server_name: &ServerName<'_>,
+        _ocsp_response: &[u8],
+        _now: UnixTime,
+    ) -> Result<ServerCertVerified, rustls::Error> {
+        Ok(ServerCertVerified::assertion())
+    }
+
+    fn verify_tls12_signature(
+        &self,
+        message: &[u8],
+        cert: &CertificateDer<'_>,
+        dss: &DigitallySignedStruct,
+    ) -> Result<HandshakeSignatureValid, rustls::Error> {
+        crypto::verify_tls12_signature(message, cert, dss, &self.algorithms)
+    }
+
+    fn verify_tls13_signature(
+        &self,
+        message: &[u8],
+        cert: &CertificateDer<'_>,
+        dss: &DigitallySignedStruct,
+    ) -> Result<HandshakeSignatureValid, rustls::Error> {
+        crypto::verify_tls13_signature(message, cert, dss, &self.algorithms)
+    }
+
+    fn supported_verify_schemes(&self) -> Vec<SignatureScheme> {
+        self.algorithms.supported_schemes()
+    }
 }
 
 /// Returns the bare address of an IPv6-literal endpoint for certificate
@@ -915,6 +998,7 @@ mod test {
                 ca: Some(tls_fixture("ca.pem")),
                 client_cert: Some(tls_fixture("client-cert.pem")),
                 client_key: Some(tls_fixture("client-key.pem")),
+                ..TlsArgs::default()
             },
         );
 
@@ -929,6 +1013,20 @@ mod test {
         let err = check_tls_health(&args).await.unwrap_err();
 
         assert!(err.message().to_lowercase().contains("certificate"), "{err:?}");
+    }
+
+    #[tokio::test]
+    async fn test_connect_skip_verify_accepts_untrusted_certificate() {
+        let server = start_tls_server(false).await;
+        let args = tls_connection_args(
+            server.endpoint.clone(),
+            TlsArgs {
+                dangerously_skip_verify: true,
+                ..TlsArgs::default()
+            },
+        );
+
+        check_tls_health(&args).await.unwrap();
     }
 
     #[test]

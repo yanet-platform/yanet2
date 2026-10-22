@@ -132,6 +132,9 @@ pub struct Settings {
     pub client_cert: Resolved<Option<PathBuf>>,
     pub client_key: Resolved<Option<PathBuf>>,
     pub timeout: Resolved<Option<Duration>>,
+    /// Whether the server certificate is accepted unverified; a flag of
+    /// one invocation only, never read from the file.
+    pub skip_verify: bool,
     /// Every file consulted while resolving, in system-then-user order.
     pub files: Vec<ConsultedFile>,
 }
@@ -681,6 +684,7 @@ pub fn resolve(args: &ConnectionArgs, sources: &Sources) -> Result<Settings, Err
             value: timeout,
             origin: timeout_origin,
         },
+        skip_verify: args.tls.dangerously_skip_verify,
         files: merged.files,
     })
 }
