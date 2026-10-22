@@ -177,16 +177,14 @@ func TestNeighTableSourceView(t *testing.T) {
 	// Source view for static should only contain 10.0.0.1.
 	sv, ok := nt.SourceView("static")
 	require.True(t, ok)
-	_, count := sv.Entries()
-	require.Equal(t, 1, count)
+	require.Equal(t, 1, sv.Len())
 	_, ok = sv.Lookup(netip.MustParseAddr("10.0.0.1"))
 	require.True(t, ok)
 
 	// Source view for kernel should only contain 10.0.0.2.
 	sv, ok = nt.SourceView("kernel")
 	require.True(t, ok)
-	_, count = sv.Entries()
-	require.Equal(t, 1, count)
+	require.Equal(t, 1, sv.Len())
 	_, ok = sv.Lookup(netip.MustParseAddr("10.0.0.2"))
 	require.True(t, ok)
 
@@ -327,9 +325,7 @@ func TestNeighTableBatchAdd(t *testing.T) {
 	}
 	require.NoError(t, nt.Add("static", entries))
 
-	view := nt.View()
-	_, count := view.Entries()
-	require.Equal(t, 3, count)
+	require.Equal(t, 3, nt.View().Len())
 }
 
 func TestNeighTableBatchRemove(t *testing.T) {
@@ -349,8 +345,7 @@ func TestNeighTableBatchRemove(t *testing.T) {
 	}))
 
 	view := nt.View()
-	_, count := view.Entries()
-	require.Equal(t, 1, count)
+	require.Equal(t, 1, view.Len())
 
 	_, ok := view.Lookup(netip.MustParseAddr("10.0.0.2"))
 	require.True(t, ok)

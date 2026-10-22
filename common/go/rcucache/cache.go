@@ -56,8 +56,8 @@ func (m CacheView[K, V]) Lookup(key K) (V, bool) {
 }
 
 // Entries returns entries in the cache as an iterator.
-func (m CacheView[K, V]) Entries() (iter.Seq[V], int) {
-	return maps.Values(m.cache), len(m.cache)
+func (m CacheView[K, V]) Entries() iter.Seq[V] {
+	return maps.Values(m.cache)
 }
 
 // Iter returns the cache entries as a key-value iterator.

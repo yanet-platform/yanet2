@@ -69,10 +69,8 @@ func (m *NeighbourService) List(
 		view = v
 	}
 
-	entries, size := view.Entries()
-
-	neighbours := make([]*operatorpb.NeighbourEntry, 0, size)
-	for entry := range entries {
+	neighbours := make([]*operatorpb.NeighbourEntry, 0, view.Len())
+	for entry := range view.Entries() {
 		source := entry.Source
 		if source == "" {
 			source = table

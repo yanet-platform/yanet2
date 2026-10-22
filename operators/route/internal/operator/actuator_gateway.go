@@ -126,7 +126,7 @@ func (m *GatewayActuator) Close() error {
 // publication.
 func (m *GatewayActuator) Apply(ctx context.Context, snapshot RouteSnapshot) error {
 	var err error
-	if _, count := snapshot.Neighbours.Entries(); count == 0 {
+	if snapshot.Neighbours.Len() == 0 {
 		err = errors.Join(err, fmt.Errorf("gateway %q module %q has an empty merged neighbour view", m.name, m.module))
 	}
 	if len(snapshot.RIBs) == 0 {
