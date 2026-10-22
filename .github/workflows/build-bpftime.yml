@@ -21,7 +21,7 @@ jobs:
     runs-on: ${{ inputs.arch == 'arm64' && 'ubuntu-24.04-arm' || 'ubuntu-24.04' }}
     timeout-minutes: 45
     permissions:
-      contents: write
+      contents: read
     steps:
       - uses: actions/checkout@v5
         with:
@@ -58,18 +58,38 @@ jobs:
       - uses: actions/upload-artifact@v5
         if: always()
         with:
+          name: bpftime-${{ inputs.arch }}-log
+          path: bpftime-${{ inputs.arch }}.log
+
+      - uses: actions/upload-artifact@v5
+        with:
           name: bpftime-${{ inputs.arch }}
-          path: |
-            bpftime-${{ inputs.arch }}.log
-            scripts/uprobe/.deps/bpftime-${{ inputs.arch }}.tar.gz*
+          path: scripts/uprobe/.deps/bpftime-${{ inputs.arch }}.tar.gz*
+          include-hidden-files: true
+          if-no-files-found: error
+
+  # The build job runs third-party code, so it never holds a write token:
+  # only this job, which runs nothing but the release upload, does.
+  publish:
+    name: Publish ${{ inputs.arch }} bpftime runtime
+    needs: build-bpftime
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v5
+        with:
+          name: bpftime-${{ inputs.arch }}
 
       - name: Publish tested runtime
         env:
           GH_TOKEN: ${{ github.token }}
           ARCH: ${{ inputs.arch }}
         run: |
+          sha256sum --check "bpftime-$ARCH.tar.gz.sha256"
           gh release create "bpftime-v0.9.0-$ARCH-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" \
-            scripts/uprobe/.deps/bpftime-$ARCH.tar.gz* \
+            "bpftime-$ARCH.tar.gz" "bpftime-$ARCH.tar.gz.sha256" \
+            --repo "$GITHUB_REPOSITORY" \
             --target "$GITHUB_SHA" --prerelease --latest=false \
             --title "bpftime v0.9.0 $ARCH runtime" \
             --notes 'Pinned upstream v0.9.0 (6bde654), LLVM JIT; validated with yanet-uprobe userspace probes. See bundled notices.'
