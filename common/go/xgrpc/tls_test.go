@@ -20,17 +20,6 @@ func Test_ClientCredentials_Nil_Plaintext(t *testing.T) {
 	require.Equal(t, "insecure", creds.Info().SecurityProtocol)
 }
 
-// newFileKeyPair returns a key pair entry of the file type naming the given
-// PEM files, an empty name leaving that setting empty.
-func newFileKeyPair(t *testing.T, certFile, keyFile string) xgrpc.KeyPairConfig {
-	t.Helper()
-
-	keyPair := xgrpc.KeyPairConfig{Type: "file"}
-	require.NoError(t, keyPair.Config.Encode(map[string]string{"cert_file": certFile, "key_file": keyFile}))
-
-	return keyPair
-}
-
 // Test_ClientCredentials_Config verifies that a present config yields TLS
 // credentials when its files are consistent and readable, and an error
 // otherwise.
@@ -49,18 +38,18 @@ func Test_ClientCredentials_Config(t *testing.T) {
 		{name: "empty config uses system roots"},
 		{name: "CA bundle", config: xgrpc.ClientTLSConfig{CAFile: ca.BundleFile()}},
 		{name: "CA bundle with client keypair", config: xgrpc.ClientTLSConfig{
-			CAFile: ca.BundleFile(), KeyPairs: []xgrpc.KeyPairConfig{newFileKeyPair(t, client.CertFile, client.KeyFile)},
+			CAFile: ca.BundleFile(), KeyPairs: []xgrpc.KeyPairConfig{tlscert.FileKeyPair(t, client.CertFile, client.KeyFile)},
 		}},
 		{name: "certificate without key", config: xgrpc.ClientTLSConfig{
-			KeyPairs: []xgrpc.KeyPairConfig{newFileKeyPair(t, client.CertFile, "")},
+			KeyPairs: []xgrpc.KeyPairConfig{tlscert.FileKeyPair(t, client.CertFile, "")},
 		}, wantErr: true},
 		{name: "key without certificate", config: xgrpc.ClientTLSConfig{
-			KeyPairs: []xgrpc.KeyPairConfig{newFileKeyPair(t, "", client.KeyFile)},
+			KeyPairs: []xgrpc.KeyPairConfig{tlscert.FileKeyPair(t, "", client.KeyFile)},
 		}, wantErr: true},
 		{name: "missing CA bundle", config: xgrpc.ClientTLSConfig{CAFile: missing}, wantErr: true},
 		{name: "CA bundle without certificates", config: xgrpc.ClientTLSConfig{CAFile: client.KeyFile}, wantErr: true},
 		{name: "missing certificate file", config: xgrpc.ClientTLSConfig{
-			KeyPairs: []xgrpc.KeyPairConfig{newFileKeyPair(t, missing, client.KeyFile)},
+			KeyPairs: []xgrpc.KeyPairConfig{tlscert.FileKeyPair(t, missing, client.KeyFile)},
 		}, wantErr: true},
 	}
 

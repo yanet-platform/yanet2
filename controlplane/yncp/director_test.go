@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	testshm "github.com/yanet-platform/yanet2/common/go/testutils/shm"
+	"github.com/yanet-platform/yanet2/common/go/testutils/tlscert"
 	"github.com/yanet-platform/yanet2/common/go/xcfg"
 	"github.com/yanet-platform/yanet2/common/go/xgrpc"
 	"github.com/yanet-platform/yanet2/controlplane/gateway"
@@ -55,9 +56,9 @@ func Test_Director_GatewayConstructorErrorReleasesServices(t *testing.T) {
 	dscpConfig.MemoryPath = xcfg.MustNonEmptyString(config.MemoryPath)
 	config.Modules.DSCP = xcfg.NewOptional(*dscpConfig)
 	missing := filepath.Join(t.TempDir(), "missing")
-	keyPair := xgrpc.KeyPairConfig{Type: "file"}
-	require.NoError(t, keyPair.Config.Encode(map[string]string{"cert_file": missing, "key_file": missing}))
-	config.Gateway.Server.TLS = &gateway.TLSConfig{KeyPairs: []xgrpc.KeyPairConfig{keyPair}}
+	config.Gateway.Server.TLS = &gateway.TLSConfig{
+		KeyPairs: []xgrpc.KeyPairConfig{tlscert.FileKeyPair(t, missing, missing)},
+	}
 	director, err := yncp.NewDirector(config)
 	if director != nil {
 		t.Cleanup(func() { require.NoError(t, director.Close()) })
