@@ -2598,7 +2598,7 @@ checksum = "589f6da84c646204747d1270a2a5661ea66ed1cced2631d546fdfb155959f9ec"
 
 [[package]]
 name = "yanet-cli"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "base64 0.23.1",
  "byteorder",
@@ -2636,7 +2636,7 @@ dependencies = [
 
 [[package]]
 name = "yanet-cli-acl"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "clap",
  "clap_complete",
@@ -2655,7 +2655,7 @@ dependencies = [
 
 [[package]]
 name = "yanet-cli-blackhole"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "clap",
  "clap_complete",
@@ -2669,14 +2669,14 @@ dependencies = [
 
 [[package]]
 name = "yanet-cli-build"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "tonic-prost-build",
 ]
 
 [[package]]
 name = "yanet-cli-common"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "bytesize",
  "clap",
@@ -2689,7 +2689,7 @@ dependencies = [
 
 [[package]]
 name = "yanet-cli-counters"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "bytesize",
  "clap",
@@ -2702,7 +2702,7 @@ dependencies = [
 
 [[package]]
 name = "yanet-cli-decap"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "clap",
  "clap_complete",
@@ -2718,7 +2718,7 @@ dependencies = [
 
 [[package]]
 name = "yanet-cli-device-delete"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "clap",
  "clap_complete",
@@ -2729,7 +2729,7 @@ dependencies = [
 
 [[package]]
 name = "yanet-cli-device-list"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "clap",
  "colored",
@@ -2740,7 +2740,7 @@ dependencies = [
 
 [[package]]
 name = "yanet-cli-device-plain"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "clap",
  "clap_complete",
@@ -2757,7 +2757,7 @@ dependencies = [
 
 [[package]]
 name = "yanet-cli-device-trafgen"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "clap",
  "clap_complete",
@@ -2772,7 +2772,7 @@ dependencies = [
 
 [[package]]
 name = "yanet-cli-device-vlan"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "clap",
  "clap_complete",
@@ -2789,7 +2789,7 @@ dependencies = [
 
 [[package]]
 name = "yanet-cli-device-vxlan"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "clap",
  "clap_complete",
@@ -2807,7 +2807,7 @@ dependencies = [
 
 [[package]]
 name = "yanet-cli-dscp"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "clap",
  "clap_complete",
@@ -2823,7 +2823,7 @@ dependencies = [
 
 [[package]]
 name = "yanet-cli-forward"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "clap",
  "clap_complete",
@@ -2840,7 +2840,7 @@ dependencies = [
 
 [[package]]
 name = "yanet-cli-function"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "clap",
  "clap_complete",
@@ -2853,7 +2853,7 @@ dependencies = [
 
 [[package]]
 name = "yanet-cli-fwstate"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "clap",
  "clap_complete",
@@ -2870,7 +2870,7 @@ dependencies = [
 
 [[package]]
 name = "yanet-cli-fwstatemap"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "bytesize",
  "clap",
@@ -2888,7 +2888,7 @@ dependencies = [
 
 [[package]]
 name = "yanet-cli-gateway"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "clap",
  "prost-types",
@@ -2900,7 +2900,7 @@ dependencies = [
 
 [[package]]
 name = "yanet-cli-inspect"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "bytesize",
  "clap",
@@ -2913,7 +2913,7 @@ dependencies = [
 
 [[package]]
 name = "yanet-cli-l3b"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "clap",
  "clap_complete",
@@ -2933,7 +2933,7 @@ dependencies = [
 
 [[package]]
 name = "yanet-cli-metrics"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "clap",
  "clap_complete",
@@ -2944,7 +2944,7 @@ dependencies = [
 
 [[package]]
 name = "yanet-cli-mirror"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "clap",
  "clap_complete",
@@ -2961,7 +2961,7 @@ dependencies = [
 
 [[package]]
 name = "yanet-cli-nat64"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "clap",
  "clap_complete",
@@ -2977,7 +2977,7 @@ dependencies = [
 
 [[package]]
 name = "yanet-cli-operator-neighbour"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "clap",
  "clap_complete",
@@ -2995,7 +2995,7 @@ dependencies = [
 
 [[package]]
 name = "yanet-cli-operator-pipeline"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "clap",
  "yanet-cli",
@@ -3003,7 +3003,7 @@ dependencies = [
 
 [[package]]
 name = "yanet-cli-operator-route"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "clap",
  "clap_complete",
@@ -3021,7 +3021,7 @@ dependencies = [
 
 [[package]]
 name = "yanet-cli-pdump"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "bindgen",
  "clap",
@@ -3042,7 +3042,7 @@ dependencies = [
 
 [[package]]
 name = "yanet-cli-pipeline"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "clap",
  "clap_complete",
@@ -3055,7 +3055,7 @@ dependencies = [
 
 [[package]]
 name = "yanet-cli-ready"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "chrono",
  "clap",
@@ -3071,7 +3071,7 @@ dependencies = [
 
 [[package]]
 name = "yanet-cli-ring"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "bytesize",
  "clap",
@@ -3087,7 +3087,7 @@ dependencies = [
 
 [[package]]
 name = "yanet-cli-route"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "clap",
  "clap_complete",
@@ -3106,7 +3106,7 @@ dependencies = [
 
 [[package]]
 name = "yanet-cli-route-mpls"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "clap",
  "clap_complete",
@@ -3123,7 +3123,7 @@ dependencies = [
 
 [[package]]
 name = "yanet-cli-unrdup"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "clap",
  "clap_complete",
@@ -3139,7 +3139,7 @@ dependencies = [
 
 [[package]]
 name = "yanet-commonpb"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "netip",
  "prost",
@@ -3152,7 +3152,7 @@ dependencies = [
 
 [[package]]
 name = "yanet-filterpb"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "prost",
  "serde",
@@ -3163,7 +3163,7 @@ dependencies = [
 
 [[package]]
 name = "yanet-readinesspb"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "prost",
  "prost-types",
@@ -3176,7 +3176,7 @@ dependencies = [
 
 [[package]]
 name = "yanet-ynpb"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "prost",
  "prost-types",

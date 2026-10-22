@@ -1,3 +1,9 @@
+yanet2 (0.2.0) unstable; urgency=medium
+
+  * Release 0.2.0.
+
+ -- Georgy Kirichenko <kirichenkoga@gmail.com>  Thu, 22 Oct 2026 13:03:46 +0300
+
 yanet2 (0.0.1) UNRELEASED; urgency=medium
 
   * Initial release.
