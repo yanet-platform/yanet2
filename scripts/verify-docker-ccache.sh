@@ -1,14 +1,9 @@
 #!/usr/bin/env bash
-# Asserts that two disposable containers launched through the active justfile's
-# shared Docker runner share one host compiler cache.
+# Two disposable containers must reuse one isolated host compiler cache.
 #
-# A cold compile must register exactly one cache miss, and the identical repeat
-# compile in a second container exactly one hit, direct or preprocessed, with
-# no further miss. If the runner's cache bind mount is lost, the second
-# container sees an empty container-local cache and the hit assertion fails
-# before the suite starts. All state lives in one isolated directory that is
-# removed on exit; the caller's shared cache is never read, cleared, or
-# deleted.
+# A cold compile must miss once and the repeat must hit once without another
+# miss. A missing bind mount leaves the second container cold. Temporary state
+# is removed on exit; the caller's shared cache is never read or cleared.
 set -euo pipefail
 
 justfile="${1:?usage: $0 <path to active justfile>}"
@@ -19,27 +14,19 @@ cache_root="${DOCKER_CACHE_DIR:-/tmp}"
 mkdir -p "${cache_root}"
 probe_dir="$(mktemp -d "${cache_root}/ccache-probe.XXXXXX")"
 trap 'rm -rf "$probe_dir"' EXIT
-# Pre-create the runner's mount sources so the Docker daemon never creates
-# root-owned directories that the exit cleanup could not remove on Linux.
-mkdir -p "${probe_dir}/ccache" "${probe_dir}/gomodcache" "${probe_dir}/gocache"
 
 export DOCKER_CACHE_DIR="${probe_dir}"
 
 # Fixed source path, flags, and output keep both compiles deterministic.
 #
-# The errexit prefix keeps a failed compile from being masked by the statistics
-# commands, and the world-writable umask keeps cache entries written by the
-# root container user removable for the host-side cleanup. Assertions read the
-# machine counters; the human summary is printed only as evidence.
+# Errexit prevents statistics from masking compilation failures. World-writable
+# cache entries remain removable by the host user after the container exits.
 compile_cmd='set -eu; umask 0000; mkdir -p /tmp/ccache-probe; printf "int ccache_probe(void) { return 42; }\n" > /tmp/ccache-probe/probe.c; ccache cc -c /tmp/ccache-probe/probe.c -o /tmp/ccache-probe/probe.o; ccache -s; ccache --print-stats'
 
-# Sums the direct and preprocessed hit counters from machine-readable cache
-# statistics on stdin.
 cache_hits() {
     awk '$1 == "direct_cache_hit" { d = $2 + 0 } $1 == "preprocessed_cache_hit" { p = $2 + 0 } END { print d + p }'
 }
 
-# Prints the miss counter from machine-readable cache statistics on stdin.
 cache_misses() {
     awk '$1 == "cache_miss" { m = $2 + 0 } END { print m + 0 }'
 }
@@ -55,7 +42,6 @@ run_container() {
     printf '%s\n' "${out}"
 }
 
-# Reports both containers' statistics and exits nonzero.
 fail() {
     printf 'ccache probe FAILED: %s\n' "$1" >&2
     printf '%s\n%s\n%s\n%s\n' \
@@ -65,6 +51,13 @@ fail() {
 }
 
 cold_out="$(run_container)"
+# The real runner must create every mount source as the invoking host user.
+for cache in ccache gomodcache gocache; do
+    [ -d "${probe_dir}/${cache}" ] && [ -O "${probe_dir}/${cache}" ] || {
+        printf 'ccache probe FAILED: host does not own cache directory %s\n' "${cache}" >&2
+        exit 1
+    }
+done
 warm_out="$(run_container)"
 cold_hits="$(printf '%s\n' "${cold_out}" | cache_hits)"
 cold_misses="$(printf '%s\n' "${cold_out}" | cache_misses)"

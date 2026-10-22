@@ -127,7 +127,7 @@ _docker_run IT *COMMAND:
     # Add working directory to safe list to avoid it.
 
     set -euo pipefail
-    mkdir -p "${DOCKER_CACHE_DIR}/ccache"
+    mkdir -p "${DOCKER_CACHE_DIR}/gomodcache" "${DOCKER_CACHE_DIR}/gocache" "${DOCKER_CACHE_DIR}/ccache"
     docker_mounts=(-v "{{ ROOT_DIR }}:/yanet2")
     if [ -f "{{ ROOT_DIR }}/.git" ]; then
         # Linked worktrees reference Git metadata outside the source mount.
@@ -158,9 +158,14 @@ dsetup COVERAGE_MODE="false":
 dtest-ccache-probe:
     @bash "{{ justfile_directory() }}/scripts/verify-docker-ccache.sh" "{{ justfile() }}"
 
+_ccache_setup *OPTIONS:
+    @test ! -f build/build.ninja || python3 scripts/check-meson-ccache.py build
+    @meson setup build {{ OPTIONS }}
+    @python3 scripts/check-meson-ccache.py build
+
 # Run tests in Docker
 dtest: dtest-ccache-probe
-    @just _docker_run -it "just setup false test"
+    @just _docker_run -it "python3 scripts/test-meson-ccache.py && just _ccache_setup -Dbuildtype=debug -Db_coverage=false && just test"
 
 # Run clang-tidy in Docker
 dtidy *FILES:
@@ -172,7 +177,7 @@ dbloody *FILES:
 
 # Build in Docker
 dbuild:
-    @just _docker_run -it "just build"
+    @just _docker_run -it "just _ccache_setup && meson compile -C build"
 
 # Build in Docker
 dbuild-debug:
