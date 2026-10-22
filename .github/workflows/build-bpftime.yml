@@ -1,0 +1,75 @@
+name: Build bpftime Runtime
+
+# Manual only, and kept apart from build-deb.yml: publishing the runtime needs
+# contents: write, which a reusable workflow may not request from release
+# callers that grant contents: read.
+on:
+  workflow_dispatch:
+    inputs:
+      arch:
+        description: "Architecture to build and test the bpftime runtime for"
+        type: choice
+        options: [amd64, arm64]
+        default: amd64
+
+permissions:
+  contents: read
+
+jobs:
+  build-bpftime:
+    name: Build ${{ inputs.arch }} bpftime runtime
+    runs-on: ${{ inputs.arch == 'arm64' && 'ubuntu-24.04-arm' || 'ubuntu-24.04' }}
+    timeout-minutes: 45
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: true
+          persist-credentials: false
+
+      - uses: actions/checkout@v5
+        with:
+          repository: eunomia-bpf/bpftime
+          ref: 6bde654abce3649fe8e6943b16419dfdf71ebf38
+          path: scripts/uprobe/.deps/upstream
+          submodules: recursive
+          persist-credentials: false
+
+      - uses: ./.github/actions/apt-failover
+      - uses: actions/setup-go@v6
+        with:
+          go-version: "1.27.1"
+          cache: false
+
+      - name: Install runtime build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            clang-19 clang-16 llvm-16-dev cmake make libboost-dev \
+            libelf-dev zlib1g-dev libncurses-dev libbpf-dev \
+            meson ninja-build pkg-config python3-pyelftools \
+            libnuma-dev libpcap-dev libyaml-dev libibverbs-dev
+
+      - name: Build runtime and test userspace lock probes
+        shell: bash
+        run: .github/scripts/build-bpftime.sh 2>&1 | tee "bpftime-${{ inputs.arch }}.log"
+
+      - uses: actions/upload-artifact@v5
+        if: always()
+        with:
+          name: bpftime-${{ inputs.arch }}
+          path: |
+            bpftime-${{ inputs.arch }}.log
+            scripts/uprobe/.deps/bpftime-${{ inputs.arch }}.tar.gz*
+
+      - name: Publish tested runtime
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ARCH: ${{ inputs.arch }}
+        run: |
+          gh release create "bpftime-v0.9.0-$ARCH-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" \
+            scripts/uprobe/.deps/bpftime-$ARCH.tar.gz* \
+            --target "$GITHUB_SHA" --prerelease --latest=false \
+            --title "bpftime v0.9.0 $ARCH runtime" \
+            --notes 'Pinned upstream v0.9.0 (6bde654), LLVM JIT; validated with yanet-uprobe userspace probes. See bundled notices.'
