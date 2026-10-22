@@ -76,8 +76,8 @@ uprobe package uses only package-local C inputs, which Go tracks directly.
 Installed hosts need no build tools.
 
 Runtime archives are built from pinned upstream v0.9.0 on a native GitHub
-Actions VM by a manual workflow mode that runs `make selftest` and publishes the
+Actions VM by a manual workflow that runs `make selftest` and publishes the
 archive with checksums as a prerelease; ordinary CI never builds bpftime:
-`gh workflow run build-deb.yml -f build_bpftime=amd64` (or `arm64`).
+`gh workflow run build-bpftime.yml -f arch=amd64` (or `arm64`).
 Pin the published archive URL, archive hash, runtime hashes and `BUILD`
 identity in `prepare.sh` after the run.
