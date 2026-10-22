@@ -17,7 +17,7 @@ import (
 	"github.com/yanet-platform/yanet2/common/go/xpacket"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	plain "github.com/yanet-platform/yanet2/devices/plain/controlplane"
-	cforward "github.com/yanet-platform/yanet2/modules/forward/bindings/go/cforward"
+	"github.com/yanet-platform/yanet2/modules/forward/bindings/go/cforward"
 	forward "github.com/yanet-platform/yanet2/modules/forward/controlplane"
 	"github.com/yanet-platform/yanet2/modules/unrdup/bindings/go/cunrdup"
 )

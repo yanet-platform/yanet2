@@ -31,7 +31,7 @@ import (
 	"github.com/yanet-platform/yanet2/modules/l3b/bindings/go/cl3b"
 	l3b "github.com/yanet-platform/yanet2/modules/l3b/controlplane"
 	"github.com/yanet-platform/yanet2/modules/l3b/tests/internal/probe"
-	cl3bobject "github.com/yanet-platform/yanet2/objects/l3b/bindings/go/cl3bobject"
+	"github.com/yanet-platform/yanet2/objects/l3b/bindings/go/cl3bobject"
 	"github.com/yanet-platform/yanet2/tests/functional/framework"
 )
 

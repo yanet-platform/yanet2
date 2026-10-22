@@ -9,7 +9,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	cfwstate "github.com/yanet-platform/yanet2/objects/fwstate/bindings/go/cfwstate"
+	"github.com/yanet-platform/yanet2/objects/fwstate/bindings/go/cfwstate"
 	fwstatemap "github.com/yanet-platform/yanet2/objects/fwstate/controlplane"
 )
 

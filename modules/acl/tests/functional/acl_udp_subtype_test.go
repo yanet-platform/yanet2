@@ -9,9 +9,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	xnetip "github.com/yanet-platform/xnetip"
+	"github.com/yanet-platform/xnetip"
 	"github.com/yanet-platform/yanet2/common/go/xerror"
-	xpacket "github.com/yanet-platform/yanet2/common/go/xpacket"
+	"github.com/yanet-platform/yanet2/common/go/xpacket"
 
 	"github.com/yanet-platform/yanet2/bindings/go/filter"
 	"github.com/yanet-platform/yanet2/modules/acl/bindings/go/cacl"

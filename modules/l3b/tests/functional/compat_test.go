@@ -28,7 +28,7 @@ import (
 	forward "github.com/yanet-platform/yanet2/modules/forward/controlplane"
 	"github.com/yanet-platform/yanet2/modules/l3b/bindings/go/cl3b"
 	controlplane "github.com/yanet-platform/yanet2/modules/l3b/controlplane"
-	cl3bobject "github.com/yanet-platform/yanet2/objects/l3b/bindings/go/cl3bobject"
+	"github.com/yanet-platform/yanet2/objects/l3b/bindings/go/cl3bobject"
 
 	"github.com/yanet-platform/xnetip"
 
