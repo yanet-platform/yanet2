@@ -22,7 +22,12 @@
 //!     .accept_compressed(CompressionEncoding::Gzip);
 //! ```
 
-use core::{fmt::Debug, time::Duration};
+use core::{
+    fmt::Debug,
+    pin::Pin,
+    task::{Context, Poll},
+    time::Duration,
+};
 use std::{
     fs,
     path::{Path, PathBuf},
@@ -39,26 +44,44 @@ use rustls::{
 };
 use tonic::{
     Request, Response, Status,
+    body::Body,
     client::Grpc,
     codec::CompressionEncoding,
     transport::{Certificate, Channel, ClientTlsConfig, Endpoint, Identity},
 };
 use tonic_prost::ProstCodec;
-use tower::Layer;
+use tower::{BoxError, Layer, ServiceExt, util::BoxCloneSyncService};
 
 use crate::{
-    auth::{self, AuthArgs, interceptor::AuthService},
+    auth::{self, AuthArgs},
     config::{self, Settings},
     errors::{Error, map_not_found, root_cause},
     progress::ProgressService,
-    timeout::{TimeoutLayer, TimeoutService},
+    timeout::TimeoutLayer,
 };
 
 /// Channel type with all interceptors applied.
 ///
 /// Use this as the type parameter for tonic-generated clients, e.g.
-/// `MyServiceClient<LayeredChannel>`.
-pub type LayeredChannel = ProgressService<TimeoutService<AuthService<Channel>>>;
+/// `MyServiceClient<LayeredChannel>`. The interceptors and the transport
+/// sit behind one boxed service built in this crate, so a CLI binary does
+/// not compile its own copy of them.
+#[derive(Clone)]
+pub struct LayeredChannel(BoxCloneSyncService<http::Request<Body>, http::Response<Body>, BoxError>);
+
+impl tower::Service<http::Request<Body>> for LayeredChannel {
+    type Response = http::Response<Body>;
+    type Error = BoxError;
+    type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
+
+    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        self.0.poll_ready(cx)
+    }
+
+    fn call(&mut self, request: http::Request<Body>) -> Self::Future {
+        self.0.call(request)
+    }
+}
 
 /// TLS material supplied explicitly by the user.
 #[derive(Debug, Clone, Default, clap::Args)]
@@ -312,30 +335,37 @@ fn read_tls_file(path: &Path, kind: &'static str) -> Result<Vec<u8>, ConnectionE
 /// returned channel. Resolution stays the caller's job so that a transport
 /// failure can still be blamed on the alias and URI that were actually
 /// resolved, rather than losing that context to a fresh, potentially
-/// different resolution.
-async fn establish(settings: &Settings) -> Result<LayeredChannel, ConnectionError> {
-    // Checked before any I/O, like the TLS/identity checks in
-    // `build_endpoint`: a missing cert tag must not cost a round trip or
-    // get masked by an unrelated transport failure.
-    let resolved_auth = settings.resolved_auth()?;
+/// different resolution. The future is boxed so the transport it drives is
+/// compiled once in this crate rather than in every CLI binary.
+fn establish(
+    settings: &Settings,
+) -> Pin<Box<dyn Future<Output = Result<LayeredChannel, ConnectionError>> + Send + '_>> {
+    Box::pin(async move {
+        // Checked before any I/O, like the TLS/identity checks in
+        // `build_endpoint`: a missing cert tag must not cost a round trip or
+        // get masked by an unrelated transport failure.
+        let resolved_auth = settings.resolved_auth()?;
 
-    let attempt = async {
-        let channel = build_endpoint(settings)?.connect().await?;
-        let auth = auth::create_layer(resolved_auth).await?;
+        let attempt = async {
+            let channel = build_endpoint(settings)?.connect().await?;
+            let auth = auth::create_layer(resolved_auth).await?;
 
-        Ok::<_, ConnectionError>(auth.layer(channel))
-    };
+            Ok::<_, ConnectionError>(auth.layer(channel))
+        };
 
-    let auth_service = match settings.timeout.value {
-        Some(budget) => tokio::time::timeout(budget, attempt)
-            .await
-            .map_err(|_| ConnectionError::Timeout(budget))??,
-        None => attempt.await?,
-    };
+        let auth_service = match settings.timeout.value {
+            Some(budget) => tokio::time::timeout(budget, attempt)
+                .await
+                .map_err(|_| ConnectionError::Timeout(budget))??,
+            None => attempt.await?,
+        };
 
-    Ok(ProgressService::new(
-        TimeoutLayer::new(settings.timeout.value).layer(auth_service),
-    ))
+        let layered = ProgressService::new(TimeoutLayer::new(settings.timeout.value).layer(auth_service));
+
+        Ok(LayeredChannel(BoxCloneSyncService::new(
+            layered.map_response(|response| response.map(Body::new)),
+        )))
+    })
 }
 
 /// Resolves the label for an error raised before any RPC is attempted.
