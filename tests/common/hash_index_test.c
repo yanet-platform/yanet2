@@ -615,6 +615,337 @@ test_rehash_overflowing_capacity_rejected(void) {
 	return 0;
 }
 
+// Verifies that removing the middle entry of a collision cluster keeps
+// both neighbours reachable through their own probe paths.
+static int
+test_remove_middle_of_cluster(void) {
+	struct fixture fix;
+	if (fixture_init(&fix, ITEM_COUNT) != 0) {
+		return TEST_FAILED;
+	}
+
+	items[0] = (struct test_item){.key = 7, .tag = 10};
+	items[1] = (struct test_item){.key = 7, .tag = 20};
+	items[2] = (struct test_item){.key = 7, .tag = 30};
+
+	uint32_t hash = hash_key(7);
+	for (uint32_t idx = 0; idx < 3; ++idx) {
+		TEST_ASSERT(
+			hash_index_insert(&fix.index, hash, idx) == 0,
+			"insert failed at %u",
+			idx
+		);
+	}
+
+	TEST_ASSERT(
+		hash_index_remove(&fix.index, hash, 1) == 0,
+		"middle removal must succeed"
+	);
+	TEST_ASSERT(fix.index.count == 2, "count must drop to 2");
+	TEST_ASSERT_EQUAL(
+		0,
+		lookup_item(&fix, 7, 10),
+		"first neighbour after middle removal"
+	);
+	TEST_ASSERT_EQUAL(
+		2,
+		lookup_item(&fix, 7, 30),
+		"last neighbour after middle removal"
+	);
+	TEST_ASSERT_EQUAL(
+		HASH_INDEX_INVALID,
+		lookup_item(&fix, 7, 20),
+		"removed middle must be gone"
+	);
+
+	fixture_fini(&fix);
+	return 0;
+}
+
+// Verifies that removing the cluster head shifts every displaced entry
+// back into the freed slot and keeps all of them reachable.
+static int
+test_remove_first_of_cluster(void) {
+	struct fixture fix;
+	if (fixture_init(&fix, ITEM_COUNT) != 0) {
+		return TEST_FAILED;
+	}
+
+	items[0] = (struct test_item){.key = 9, .tag = 11};
+	items[1] = (struct test_item){.key = 9, .tag = 21};
+	items[2] = (struct test_item){.key = 9, .tag = 31};
+
+	uint32_t hash = hash_key(9);
+	for (uint32_t idx = 0; idx < 3; ++idx) {
+		TEST_ASSERT(
+			hash_index_insert(&fix.index, hash, idx) == 0,
+			"insert failed at %u",
+			idx
+		);
+	}
+
+	TEST_ASSERT(
+		hash_index_remove(&fix.index, hash, 0) == 0,
+		"head removal must succeed"
+	);
+	TEST_ASSERT(fix.index.count == 2, "count must drop to 2");
+	TEST_ASSERT_EQUAL(
+		1, lookup_item(&fix, 9, 21), "middle after head removal"
+	);
+	TEST_ASSERT_EQUAL(
+		2, lookup_item(&fix, 9, 31), "last after head removal"
+	);
+	TEST_ASSERT_EQUAL(
+		HASH_INDEX_INVALID,
+		lookup_item(&fix, 9, 11),
+		"removed head must be gone"
+	);
+
+	fixture_fini(&fix);
+	return 0;
+}
+
+static int
+test_remove_last_of_cluster(void) {
+	struct fixture fix;
+	if (fixture_init(&fix, ITEM_COUNT) != 0) {
+		return TEST_FAILED;
+	}
+
+	items[0] = (struct test_item){.key = 7, .tag = 10};
+	items[1] = (struct test_item){.key = 7, .tag = 20};
+	items[2] = (struct test_item){.key = 7, .tag = 30};
+
+	uint32_t hash = hash_key(7);
+	for (uint32_t idx = 0; idx < 3; ++idx) {
+		TEST_ASSERT(
+			hash_index_insert(&fix.index, hash, idx) == 0,
+			"insert failed at %u",
+			idx
+		);
+	}
+
+	TEST_ASSERT(
+		hash_index_remove(&fix.index, hash, 2) == 0,
+		"tail removal must succeed"
+	);
+	TEST_ASSERT(fix.index.count == 2, "count must drop to 2");
+	TEST_ASSERT_EQUAL(
+		0, lookup_item(&fix, 7, 10), "first after tail removal"
+	);
+	TEST_ASSERT_EQUAL(
+		1, lookup_item(&fix, 7, 20), "middle after tail removal"
+	);
+	TEST_ASSERT_EQUAL(
+		HASH_INDEX_INVALID,
+		lookup_item(&fix, 7, 30),
+		"removed tail must be gone"
+	);
+
+	fixture_fini(&fix);
+	return 0;
+}
+
+static int
+test_remove_absent(void) {
+	struct fixture fix;
+	if (fixture_init(&fix, ITEM_COUNT) != 0) {
+		return TEST_FAILED;
+	}
+
+	items[0] = (struct test_item){.key = 5, .tag = 6};
+	TEST_ASSERT(
+		hash_index_insert(&fix.index, hash_key(5), 0) == 0,
+		"insert failed"
+	);
+
+	TEST_ASSERT(
+		hash_index_remove(&fix.index, hash_key(5), 1) == -1,
+		"absent value must not be removed"
+	);
+	TEST_ASSERT(
+		hash_index_remove(&fix.index, hash_key(6), 0) == -1,
+		"absent hash must not be removed"
+	);
+	TEST_ASSERT(fix.index.count == 1, "count must stay at 1");
+	TEST_ASSERT_EQUAL(
+		0, lookup_item(&fix, 5, 6), "entry must survive misses"
+	);
+
+	fixture_fini(&fix);
+	return 0;
+}
+
+static int
+test_remove_zero_capacity(void) {
+	struct fixture fix;
+	if (fixture_init(&fix, 0) != 0) {
+		return TEST_FAILED;
+	}
+
+	TEST_ASSERT(
+		hash_index_remove(&fix.index, hash_key(1), 0) == -1,
+		"zero-capacity remove must be refused"
+	);
+
+	fixture_fini(&fix);
+	return 0;
+}
+
+static int
+test_remove_all_and_reinsert(void) {
+	struct fixture fix;
+	if (fixture_init(&fix, 8) != 0) {
+		return TEST_FAILED;
+	}
+
+	for (uint32_t idx = 0; idx < 8; ++idx) {
+		items[idx] = (struct test_item){.key = idx * 7 + 3,
+						.tag = idx * 13 + 5};
+		TEST_ASSERT(
+			hash_index_insert(
+				&fix.index, hash_key(items[idx].key), idx
+			) == 0,
+			"insert failed at %u",
+			idx
+		);
+	}
+
+	for (uint32_t idx = 0; idx < 8; ++idx) {
+		TEST_ASSERT(
+			hash_index_remove(
+				&fix.index, hash_key(items[idx].key), idx
+			) == 0,
+			"remove failed at %u",
+			idx
+		);
+	}
+	TEST_ASSERT(fix.index.count == 0, "count must reach 0");
+	TEST_ASSERT(fix.index.capacity == 8, "capacity must be unchanged");
+
+	for (uint32_t idx = 0; idx < 8; ++idx) {
+		TEST_ASSERT(
+			hash_index_insert(
+				&fix.index, hash_key(items[idx].key), idx
+			) == 0,
+			"reinsert failed at %u",
+			idx
+		);
+	}
+	TEST_ASSERT(fix.index.count == 8, "count must reach 8 again");
+	for (uint32_t idx = 0; idx < 8; ++idx) {
+		uint32_t result =
+			lookup_item(&fix, items[idx].key, items[idx].tag);
+		TEST_ASSERT_EQUAL(idx, result, "post-recycle lookup %u", idx);
+	}
+
+	fixture_fini(&fix);
+	return 0;
+}
+
+// Verifies that survivors of earlier rounds stay reachable through the
+// removals and shifts of every later round.
+static int
+test_remove_churn(void) {
+	struct fixture fix;
+	if (fixture_init(&fix, 32) != 0) {
+		return TEST_FAILED;
+	}
+
+	for (uint32_t round = 0; round < 4; ++round) {
+		for (uint32_t idx = 0; idx < 8; ++idx) {
+			uint32_t value = round * 8 + idx;
+			items[value] = (struct test_item
+			){.key = round * 100 + idx, .tag = value};
+			TEST_ASSERT(
+				hash_index_insert(
+					&fix.index,
+					hash_key(items[value].key),
+					value
+				) == 0,
+				"insert failed at round %u idx %u",
+				round,
+				idx
+			);
+		}
+
+		for (uint32_t idx = 0; idx < 8; idx += 2) {
+			uint32_t value = round * 8 + idx;
+			TEST_ASSERT(
+				hash_index_remove(
+					&fix.index,
+					hash_key(items[value].key),
+					value
+				) == 0,
+				"remove failed at round %u idx %u",
+				round,
+				idx
+			);
+		}
+
+		for (uint32_t prior = 0; prior <= round; ++prior) {
+			for (uint32_t idx = 1; idx < 8; idx += 2) {
+				uint32_t value = prior * 8 + idx;
+				uint32_t result = lookup_item(
+					&fix, items[value].key, items[value].tag
+				);
+				TEST_ASSERT_EQUAL(
+					value,
+					result,
+					"survivor lookup round %u prior %u idx "
+					"%u",
+					round,
+					prior,
+					idx
+				);
+			}
+		}
+	}
+
+	TEST_ASSERT(fix.index.count == 16, "count must be 16 after churn");
+
+	fixture_fini(&fix);
+	return 0;
+}
+
+// Verifies that removal keeps a wrapped cluster entry reachable when
+// probe distances cross the slot-zero wrap of a non-power-of-two slot
+// count.
+static int
+test_remove_wraparound_distance(void) {
+	struct fixture fix;
+	if (fixture_init(&fix, 3) != 0) {
+		return TEST_FAILED;
+	}
+
+	items[0] = (struct test_item){.key = 1, .tag = 1};
+	items[1] = (struct test_item){.key = 2, .tag = 2};
+	items[2] = (struct test_item){.key = 2, .tag = 3};
+
+	// The hashes place the cluster at slots 10, 11 and 0.
+	TEST_ASSERT(hash_index_insert(&fix.index, 10, 0) == 0, "insert failed");
+	TEST_ASSERT(hash_index_insert(&fix.index, 11, 1) == 0, "insert failed");
+	TEST_ASSERT(hash_index_insert(&fix.index, 11, 2) == 0, "insert failed");
+
+	TEST_ASSERT(hash_index_remove(&fix.index, 10, 0) == 0, "remove failed");
+
+	struct eq_context unwrapped = {.want_key = 2, .want_tag = 2};
+	uint32_t result =
+		hash_index_lookup(&fix.index, 11, match_item, &unwrapped);
+	TEST_ASSERT_EQUAL(1, result, "unwrapped entry after wrap removal");
+
+	struct eq_context wrapped = {.want_key = 2, .want_tag = 3};
+	result = hash_index_lookup(&fix.index, 11, match_item, &wrapped);
+	TEST_ASSERT_EQUAL(2, result, "wrapped entry after wrap removal");
+
+	struct eq_context miss = {.want_key = 1, .want_tag = 1};
+	result = hash_index_lookup(&fix.index, 10, match_item, &miss);
+	TEST_ASSERT_EQUAL(HASH_INDEX_INVALID, result, "removed entry is gone");
+
+	fixture_fini(&fix);
+	return 0;
+}
+
 int
 main(void) {
 	log_enable_name("info");
@@ -677,6 +1008,38 @@ main(void) {
 	}
 	if (test_rehash_overflowing_capacity_rejected() != 0) {
 		LOG(ERROR, "test_rehash_overflowing_capacity_rejected failed");
+		return -1;
+	}
+	if (test_remove_middle_of_cluster() != 0) {
+		LOG(ERROR, "test_remove_middle_of_cluster failed");
+		return -1;
+	}
+	if (test_remove_first_of_cluster() != 0) {
+		LOG(ERROR, "test_remove_first_of_cluster failed");
+		return -1;
+	}
+	if (test_remove_last_of_cluster() != 0) {
+		LOG(ERROR, "test_remove_last_of_cluster failed");
+		return -1;
+	}
+	if (test_remove_absent() != 0) {
+		LOG(ERROR, "test_remove_absent failed");
+		return -1;
+	}
+	if (test_remove_zero_capacity() != 0) {
+		LOG(ERROR, "test_remove_zero_capacity failed");
+		return -1;
+	}
+	if (test_remove_all_and_reinsert() != 0) {
+		LOG(ERROR, "test_remove_all_and_reinsert failed");
+		return -1;
+	}
+	if (test_remove_churn() != 0) {
+		LOG(ERROR, "test_remove_churn failed");
+		return -1;
+	}
+	if (test_remove_wraparound_distance() != 0) {
+		LOG(ERROR, "test_remove_wraparound_distance failed");
 		return -1;
 	}
 
