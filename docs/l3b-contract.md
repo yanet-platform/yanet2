@@ -330,8 +330,11 @@ cross-page pin or completed-history guarantee is selected by this surface.
   absence while dataplane and shared memory survive; no survival across a
   dataplane, shared-memory or host restart is promised. On demotion, freeze
   the monotonic maximum absolute-deadline watermark as `retire_not_before`.
-  A live back is detached only after that watermark passes, then reclaimed
-  after reader observation safety (an RCU grace period). Fenced takeover may
+  `now >= retire_not_before` makes the back eligible to begin retirement;
+  `now < retire_not_before` does not. Eligibility is not immediate detachment,
+  free or growth: detach first, wait for reader observation safety (an RCU grace
+  period), and only then free. Retained storage stays physically accounted until release,
+  and growth remains rejected while a back physically exists. Fenced takeover may
   finish reclamation; its absence may delay reclamation, not invalidate
   sessions or expose a third table. Terminal VS deletion still waits for old
   reader rights but does not wait for session expiry as its cleanup criterion.
@@ -1450,6 +1453,13 @@ Required discriminating vectors include:
   deadline; query/inspection no write; expired back; shorter/zero front deadline;
   unchanged back/watermark; arithmetic/admission/write failures with no partial
   authority change. Never max(old,new) or revival of a suppressed back.
+- Back retirement: `now < retire_not_before` is ineligible; equality is eligible
+  to begin retirement, including `now == retire_not_before == UINT64_MAX` for a
+  representable deadline. `UINT64_MAX` is an abstract domain bound, not a
+  real-clock prediction or a clock-wrap policy. Equality neither implies immediate
+  detachment/free/growth nor bypasses reader rights, RCU grace, physical accounting
+  until release, growth rejection while a back physically exists, or the one-back/
+  no-third-table rule. Terminal deletion still waits for reader rights, not expiry.
 - Clone bucket fractional refill/cap, shared-worker contention, new-state full
   versus surviving control-plane restart/takeover, old-rate update accrual and
   carry/clamp, unchanged policy and peer churn, zero/exact/insufficient funding,
