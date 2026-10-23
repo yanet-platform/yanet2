@@ -6,7 +6,7 @@
 
 use core::net::{Ipv4Addr, Ipv6Addr};
 
-/// Unfolded one's-complement sum of `data` as big-endian 16-bit words.
+/// Unfolded one's-complement sum of the bytes as big-endian 16-bit words.
 ///
 /// An odd trailing byte is the high half of a final word. The sum runs over
 /// 32-bit words, half the additions of 16-bit ones; as 2^16 is 1 modulo
@@ -38,7 +38,7 @@ fn fold(mut acc: u64) -> u16 {
     acc as u16
 }
 
-/// Folded one's-complement sum of `data`, not complemented.
+/// Folded one's-complement sum of the bytes, not complemented.
 ///
 /// Equals the C sum of the same bytes up to a byte swap of the result.
 pub fn sum(data: &[u8]) -> u16 {
@@ -70,7 +70,7 @@ fn replace_words(cksum: u16, old: &[u8], new: &[u8]) -> u16 {
     acc
 }
 
-/// Replaces one word covered by `cksum` and returns the new checksum.
+/// Replaces one word covered by a checksum and returns the new checksum.
 ///
 /// Port of the DSCP rewrite of the C code, which is the form used for IPv4
 /// header checksums: the complement of an all-ones sum is stored as zero.
@@ -86,9 +86,9 @@ pub fn update_no_zero(cksum: u16, old: u16, new: u16) -> u16 {
     no_zero(plus(minus(!cksum, old), new))
 }
 
-/// Replaces consecutive words of `old` by those of `new`.
+/// Replaces a run of consecutive covered words by new ones.
 ///
-/// Both slices are read as whole big-endian words, a shorter slice limits the
+/// Both runs are read as whole big-endian words, a shorter run limits the
 /// count and an odd tail byte is ignored. Used for 4- and 16-byte addresses.
 pub fn update_bytes(cksum: u16, old: &[u8], new: &[u8]) -> u16 {
     !replace_words(cksum, old, new)
@@ -125,7 +125,7 @@ fn l4_is_valid(pseudo: u64, segment: &[u8]) -> bool {
     fold(pseudo + partial_sum(segment)) == 0xffff
 }
 
-/// Full L4 checksum over IPv4 of `segment`, whose checksum field is zero.
+/// Full L4 checksum over IPv4 of a segment whose checksum field is zero.
 ///
 /// The pseudo-header length is the low 16 bits of the segment length: a
 /// segment longer than 65535 bytes cannot be an IPv4 one. A UDP checksum that
@@ -138,9 +138,9 @@ pub fn l4_checksum_ipv4(src: Ipv4Addr, dst: Ipv4Addr, protocol: u8, segment: &[u
     )
 }
 
-/// Full L4 checksum over IPv6 of `segment`, as [`l4_checksum_ipv4`].
+/// Full L4 checksum over IPv6 of a segment, as [`l4_checksum_ipv4`].
 ///
-/// `next_header` is the upper-layer protocol, which follows any extension
+/// The protocol number is the upper-layer one, which follows any extension
 /// headers, not the next header field of the fixed header.
 pub fn l4_checksum_ipv6(src: Ipv6Addr, dst: Ipv6Addr, next_header: u8, segment: &[u8]) -> u16 {
     l4_checksum(
@@ -161,7 +161,7 @@ pub fn l4_is_valid_ipv4(src: Ipv4Addr, dst: Ipv4Addr, protocol: u8, segment: &[u
 
 /// Verifies over IPv6 an L4 segment that includes its checksum field.
 ///
-/// `next_header` is the upper-layer protocol, as in [`l4_checksum_ipv6`].
+/// The protocol is the upper-layer one, as in [`l4_checksum_ipv6`].
 pub fn l4_is_valid_ipv6(src: Ipv6Addr, dst: Ipv6Addr, next_header: u8, segment: &[u8]) -> bool {
     l4_is_valid(
         pseudo_sum_ipv6(src.octets(), dst.octets(), next_header, segment.len() as u32),
@@ -181,7 +181,8 @@ mod tests {
         cksum as u16
     }
 
-    /// The C checksum of `data`: little-endian words, reduced, in host order.
+    /// The C checksum of the bytes: little-endian words, reduced, in host
+    /// order.
     fn c_csum(data: &[u8]) -> u16 {
         let mut result: u32 = 0;
         let mut rest = data;

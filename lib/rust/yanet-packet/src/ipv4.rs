@@ -113,6 +113,10 @@ impl Ipv4Header {
         self.replace_checksum(old, self.tos_word());
     }
 
+    /// Sets the total length and updates the checksum.
+    ///
+    /// A packet view keeps the split it was parsed with: after a length
+    /// change, parse the packet again to see the new payload.
     pub fn set_total_len(&mut self, total_len: u16) {
         let old = self.total_len.get();
         self.total_len.set(total_len);
@@ -203,10 +207,10 @@ pub struct Ipv4Packet<'a> {
 }
 
 impl<'a> Ipv4Packet<'a> {
-    /// Splits an IPv4 packet at the start of `buf`.
+    /// Splits an IPv4 packet at the start of the input.
     ///
     /// Refuses a version other than 4, a header length below five words or
-    /// beyond the total length, and a total length beyond `buf`.
+    /// beyond the total length, and a total length beyond the input.
     pub fn parse(buf: &'a [u8]) -> Option<Self> {
         let (header, rest) = Ipv4Header::ref_from_prefix(buf).ok()?;
         let (options_len, payload_len) = split_lengths(header, buf.len())?;
@@ -259,7 +263,7 @@ impl<'a> Ipv4PacketMut<'a> {
 mod tests {
     use super::*;
 
-    /// Builds a valid packet with the given option words and payload.
+    /// Builds a valid packet with the given number of option words and payload.
     ///
     /// Returns the buffer and the packet length.
     fn build(opts: usize, payload: &[u8]) -> ([u8; 128], usize) {
@@ -349,13 +353,22 @@ mod tests {
     }
 
     #[test]
-    fn test_ipv4_refuses_wrong_version_and_total_len() {
+    fn test_ipv4_refuses_wrong_version() {
         let (mut buf, total) = build(0, &[1, 2, 3, 4]);
         buf[0] = 0x65;
         assert!(Ipv4Packet::parse(&buf[..total]).is_none());
-        buf[0] = 0x45;
+    }
+
+    #[test]
+    fn test_ipv4_refuses_total_len_below_header() {
+        let (mut buf, total) = build(0, &[1, 2, 3, 4]);
         buf[3] = 19;
         assert!(Ipv4Packet::parse(&buf[..total]).is_none());
+    }
+
+    #[test]
+    fn test_ipv4_refuses_total_len_beyond_input() {
+        let (mut buf, total) = build(0, &[1, 2, 3, 4]);
         buf[3] = (total + 1) as u8;
         assert!(Ipv4Packet::parse(&buf[..total]).is_none());
     }

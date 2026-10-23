@@ -19,9 +19,9 @@ pub struct UdpHeader {
 impl UdpHeader {
     pub const LEN: usize = 8;
 
-    /// Splits the header and its payload off the front of `buf`.
+    /// Splits the header and its payload off the front of the input.
     ///
-    /// Refuses a length field below the header size or beyond `buf`. The
+    /// Refuses a length field below the header size or beyond the input. The
     /// payload ends at the length field.
     pub fn parse(buf: &[u8]) -> Option<(&Self, &[u8])> {
         let (header, rest) = Self::ref_from_prefix(buf).ok()?;
@@ -117,7 +117,7 @@ mod tests {
     use super::*;
     use crate::IPPROTO_UDP;
 
-    /// A UDP datagram over IPv4 carrying `payload`, with its checksum set or
+    /// A UDP datagram over IPv4 carrying the payload, with its checksum set or
     /// zero, and its length.
     fn build(src: [u8; 4], dst: [u8; 4], payload: &[u8], with_checksum: bool) -> ([u8; 64], usize) {
         let mut buf = [0u8; 64];
@@ -151,11 +151,16 @@ mod tests {
     }
 
     #[test]
-    fn test_udp_refuses_short_and_malformed() {
-        let (mut buf, total) = build([1, 1, 1, 1], [2, 2, 2, 2], &[9, 8, 7], true);
+    fn test_udp_refuses_short_buffer() {
+        let (buf, total) = build([1, 1, 1, 1], [2, 2, 2, 2], &[9, 8, 7], true);
         for len in 0..total {
             assert!(UdpHeader::parse(&buf[..len]).is_none(), "len {len}");
         }
+    }
+
+    #[test]
+    fn test_udp_refuses_length_below_header() {
+        let (mut buf, total) = build([1, 1, 1, 1], [2, 2, 2, 2], &[9, 8, 7], true);
         buf[5] = 7;
         assert!(UdpHeader::parse(&buf[..total]).is_none());
         assert!(UdpHeader::parse_mut(&mut buf[..total]).is_none());

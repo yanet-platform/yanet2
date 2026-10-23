@@ -24,9 +24,9 @@ pub struct Ipv6Header {
 impl Ipv6Header {
     pub const LEN: usize = 40;
 
-    /// Splits the header and its payload off the front of `buf`.
+    /// Splits the header and its payload off the front of the input.
     ///
-    /// Refuses a version other than 6 and a payload length beyond `buf`. A
+    /// Refuses a version other than 6 and a payload length beyond the input. A
     /// zero payload length (jumbogram) yields an empty payload.
     pub fn parse(buf: &[u8]) -> Option<(&Self, &[u8])> {
         let (header, rest) = Self::ref_from_prefix(buf).ok()?;
@@ -148,12 +148,16 @@ mod tests {
     }
 
     #[test]
-    fn test_ipv6_refuses_short_and_malformed() {
+    fn test_ipv6_refuses_short_buffer() {
         let buf = packet();
         for len in 0..buf.len() {
             assert!(Ipv6Header::parse(&buf[..len]).is_none(), "len {len}");
         }
-        let mut wrong = buf;
+    }
+
+    #[test]
+    fn test_ipv6_refuses_wrong_version() {
+        let mut wrong = packet();
         wrong[0] = 0x45;
         assert!(Ipv6Header::parse(&wrong).is_none());
         assert!(Ipv6Header::parse_mut(&mut wrong).is_none());

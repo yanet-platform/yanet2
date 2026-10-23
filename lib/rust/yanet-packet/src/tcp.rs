@@ -130,9 +130,9 @@ pub struct TcpPacket<'a> {
 }
 
 impl<'a> TcpPacket<'a> {
-    /// Splits a TCP segment at the start of `buf`.
+    /// Splits a TCP segment at the start of the input.
     ///
-    /// Refuses a data offset below five words or beyond `buf`.
+    /// Refuses a data offset below five words or beyond the input.
     pub fn parse(buf: &'a [u8]) -> Option<Self> {
         let (header, rest) = TcpHeader::ref_from_prefix(buf).ok()?;
         let options_len = split_options(header, buf.len())?;
@@ -166,8 +166,9 @@ mod tests {
     use super::*;
     use crate::IPPROTO_TCP;
 
-    /// Builds a segment with `opts` option words and a valid checksum for the
-    /// given IPv4 addresses; returns the buffer and the segment length.
+    /// Builds a segment with the given number of option words and a valid
+    /// checksum for the given IPv4 addresses; returns the buffer and the
+    /// segment length.
     fn build(src: [u8; 4], dst: [u8; 4], opts: usize, payload: &[u8]) -> ([u8; 96], usize) {
         let mut buf = [0u8; 96];
         let hlen = 20 + opts * 4;
@@ -211,15 +212,25 @@ mod tests {
     }
 
     #[test]
-    fn test_tcp_refuses_short_and_malformed() {
-        let (mut buf, total) = build([1, 2, 3, 4], [5, 6, 7, 8], 2, &[]);
+    fn test_tcp_refuses_short_buffer() {
+        let (buf, total) = build([1, 2, 3, 4], [5, 6, 7, 8], 2, &[]);
         for len in 0..total {
             assert!(TcpPacket::parse(&buf[..len]).is_none(), "len {len}");
         }
+    }
+
+    #[test]
+    fn test_tcp_refuses_data_offset_below_five_words() {
+        let (mut buf, total) = build([1, 2, 3, 4], [5, 6, 7, 8], 2, &[]);
         for offset in 0..5u8 {
             buf[12] = offset << 4;
             assert!(TcpPacket::parse(&buf[..total]).is_none(), "offset {offset}");
         }
+    }
+
+    #[test]
+    fn test_tcp_refuses_data_offset_beyond_input() {
+        let (mut buf, total) = build([1, 2, 3, 4], [5, 6, 7, 8], 2, &[]);
         buf[12] = 0xf0;
         assert!(TcpPacket::parse(&buf[..total]).is_none());
         assert!(TcpPacketMut::parse(&mut buf[..total]).is_none());

@@ -18,12 +18,12 @@ pub struct Icmpv4Header {
 impl Icmpv4Header {
     pub const LEN: usize = 8;
 
-    /// Splits the header off the front of `buf`.
+    /// Splits the header off the front of the input.
     pub fn parse(buf: &[u8]) -> Option<(&Self, &[u8])> {
         Self::ref_from_prefix(buf).ok()
     }
 
-    /// Splits the header off the front of `buf` for in-place editing.
+    /// Splits the header off the front of the input for in-place editing.
     pub fn parse_mut(buf: &mut [u8]) -> Option<(&mut Self, &mut [u8])> {
         Self::mut_from_prefix(buf).ok()
     }
@@ -73,12 +73,12 @@ pub struct Icmpv6Header {
 impl Icmpv6Header {
     pub const LEN: usize = 8;
 
-    /// Splits the header off the front of `buf`.
+    /// Splits the header off the front of the input.
     pub fn parse(buf: &[u8]) -> Option<(&Self, &[u8])> {
         Self::ref_from_prefix(buf).ok()
     }
 
-    /// Splits the header off the front of `buf` for in-place editing.
+    /// Splits the header off the front of the input for in-place editing.
     pub fn parse_mut(buf: &mut [u8]) -> Option<(&mut Self, &mut [u8])> {
         Self::mut_from_prefix(buf).ok()
     }
@@ -129,7 +129,7 @@ mod tests {
     use super::*;
     use crate::IPPROTO_ICMPV6;
 
-    /// An ICMPv4 echo request carrying `payload`, and its length.
+    /// An ICMPv4 echo request carrying the payload, and its length.
     fn echo(payload: &[u8]) -> ([u8; 32], usize) {
         let mut buf = [0u8; 32];
         let total = 8 + payload.len();
@@ -143,13 +143,18 @@ mod tests {
     }
 
     #[test]
-    fn test_icmpv4_parse_fields_and_refuse_short() {
+    fn test_icmpv4_parse_reads_fields() {
         let (buf, total) = echo(&[1, 2, 3]);
         let (h, payload) = Icmpv4Header::parse(&buf[..total]).unwrap();
         assert_eq!(8, h.icmp_type());
         assert_eq!(0, h.code());
         assert_eq!([0x12, 0x34, 0, 7], h.rest());
         assert_eq!([1, 2, 3], payload);
+    }
+
+    #[test]
+    fn test_icmpv4_parse_refuses_short_buffer() {
+        let (buf, _) = echo(&[]);
         for len in 0..Icmpv4Header::LEN {
             assert!(Icmpv4Header::parse(&buf[..len]).is_none(), "len {len}");
         }

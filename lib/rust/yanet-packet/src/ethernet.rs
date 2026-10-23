@@ -18,12 +18,12 @@ pub struct EthernetHeader {
 impl EthernetHeader {
     pub const LEN: usize = 14;
 
-    /// Splits the header off the front of `buf`.
+    /// Splits the header off the front of the input.
     pub fn parse(buf: &[u8]) -> Option<(&Self, &[u8])> {
         Self::ref_from_prefix(buf).ok()
     }
 
-    /// Splits the header off the front of `buf` for in-place editing.
+    /// Splits the header off the front of the input for in-place editing.
     pub fn parse_mut(buf: &mut [u8]) -> Option<(&mut Self, &mut [u8])> {
         Self::mut_from_prefix(buf).ok()
     }
@@ -69,12 +69,12 @@ pub struct VlanTag {
 impl VlanTag {
     pub const LEN: usize = 4;
 
-    /// Splits the tag off the front of `buf`.
+    /// Splits the tag off the front of the input.
     pub fn parse(buf: &[u8]) -> Option<(&Self, &[u8])> {
         Self::ref_from_prefix(buf).ok()
     }
 
-    /// Splits the tag off the front of `buf` for in-place editing.
+    /// Splits the tag off the front of the input for in-place editing.
     pub fn parse_mut(buf: &mut [u8]) -> Option<(&mut Self, &mut [u8])> {
         Self::mut_from_prefix(buf).ok()
     }
