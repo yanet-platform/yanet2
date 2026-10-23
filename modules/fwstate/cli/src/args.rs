@@ -23,7 +23,7 @@ fn parse_sync_endpoint(value: &str) -> Result<SocketAddrV6, String> {
     Ok(endpoint)
 }
 
-#[allow(clippy::large_enum_variant)]
+#[expect(clippy::large_enum_variant)]
 #[derive(Debug, Clone, Parser)]
 pub enum ModeCmd {
     /// List all fwstate configurations.
