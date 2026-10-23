@@ -31,6 +31,7 @@ on:
       - ".github/actions/go-modcache/**"
       - ".github/actions/go-buildcache/**"
       - ".github/actions/protoc-plugins/**"
+      - ".github/actions/protoc/**"
       - "tests/functional/**"
   pull_request:
     # A stacked pull request has a non-main base, so a main-only filter would skip it.
@@ -63,6 +64,7 @@ on:
       - ".github/actions/go-modcache/**"
       - ".github/actions/go-buildcache/**"
       - ".github/actions/protoc-plugins/**"
+      - ".github/actions/protoc/**"
       - "tests/functional/**"
 
 concurrency:
@@ -206,10 +208,8 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - uses: ./.github/actions/apt-packages
-        timeout-minutes: 10
-        with:
-          packages: cmake protobuf-compiler
+      - uses: ./.github/actions/protoc
+        timeout-minutes: 5
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@1.88.0
@@ -359,10 +359,8 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - uses: ./.github/actions/apt-packages
-        timeout-minutes: 10
-        with:
-          packages: cmake protobuf-compiler
+      - uses: ./.github/actions/protoc
+        timeout-minutes: 5
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@1.88.0
