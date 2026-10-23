@@ -54,10 +54,6 @@ unused_crate_dependencies = "deny"
 
 [workspace.lints.clippy]
 std_instead_of_core = "deny"
-# Rust 1.99 extends the lint to `async fn`, which flags every function
-# returning the 176-byte `ync::errors::Error`. Allowed until the error is
-# boxed in a separate change.
-result_large_err = "allow"
 
 [profile.release]
 panic = "abort"

@@ -326,11 +326,6 @@ pub fn dispatch(name: &str, prefix: &str, behavior: &impl Dispatch) -> ! {
     exec_sub_binary(&prefix, cmd, collect_args(sub_matches), &modules, behavior);
 }
 
-// `core::io::ErrorKind` is behind the unstable `core_io` feature, so this
-// function keeps `std::io::ErrorKind`; the allow sits here rather than on a
-// `use` because clippy's `useless_attribute` rejects it directly on a `use`
-// item.
-#[allow(clippy::std_instead_of_core)]
 fn exec_sub_binary(
     prefix: &str,
     cmd: &str,
