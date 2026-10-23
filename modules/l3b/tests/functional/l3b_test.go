@@ -2685,41 +2685,61 @@ func Test_L3b_SegmentedICMPErrorsPassthrough(t *testing.T) {
 
 // Test_L3b_ClassifyExemptPacketsPassthrough verifies that globally short ICMP
 // and unread protocols pass unchanged even with a published matching service.
+//
+// Admitted TCP and UDP tunnel to the real, and a readable Echo request is
+// answered locally.
 func Test_L3b_ClassifyExemptPacketsPassthrough(t *testing.T) {
 	harness, agent := setupL3bHarness(t, "port0", "test")
 	wirePipeline(t, agent, "port0", "test")
-	publishClassifyService(t, agent, "svc", "172.16.0.10", nil)
+	publishClassifyService(t, agent, "svc", "172.16.0.10", []cl3bobject.SourceFilterRule{{
+		Net4s:      []xnetip.Contiguous[xnetip.Network4]{xnetip.MustParseContiguous4("10.0.0.0/24")},
+		Net6s:      []xnetip.BiContiguous{xnetip.MustParseBiContiguous("2001:db8:1::/48")},
+		PortRanges: filter.PortRanges{{From: 0, To: 65535}},
+	}})
 	publishClassifyModule(t, agent, "test", []cl3b.DestinationFilterRule{{
-		Net4s:          []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
-		Net6s:          []xnetip.BiContiguous{filter.UnspecifiedIPv6},
-		ProtoRanges:    filter.ProtoRanges{filter.NewProtoRange(1, filter.AnySubtype()), filter.NewProtoRange(58, filter.AnySubtype()), filter.NewProtoRange(47, filter.AnySubtype())},
+		Net4s: []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
+		Net6s: []xnetip.BiContiguous{filter.UnspecifiedIPv6},
+		ProtoRanges: filter.ProtoRanges{
+			filter.NewProtoRange(1, filter.AnySubtype()),
+			filter.NewProtoRange(58, filter.AnySubtype()),
+			filter.NewProtoRange(47, filter.AnySubtype()),
+			filter.NewProtoRange(6, filter.AnySubtype()),
+			filter.NewProtoRange(17, filter.AnySubtype()),
+		},
 		VirtualService: "svc",
 	}})
 	for _, tc := range []struct {
 		name, source, destination string
-		protocol                  byte
+		protocol, subtype         byte
 		networkLength             int
+		transportLength           int
 		splitOffset               int
 	}{
-		{"IPv4 short ICMP", "10.0.0.1", "192.168.1.1", 1, 20, 0},
-		{"IPv6 short ICMP", "2001:db8:1::1", "2001:db8:2::1", 58, 40, 0},
-		{"IPv4 unread protocol", "10.0.0.1", "192.168.1.1", 47, 20, 0},
-		{"IPv6 unread protocol", "2001:db8:1::1", "2001:db8:2::1", 47, 40, 0},
-		{"IPv4 unread protocol IP header split", "10.0.0.1", "192.168.1.1", 47, 20, 24},
-		{"IPv6 unread protocol IP header split", "2001:db8:1::1", "2001:db8:2::1", 47, 40, 24},
+		{"IPv4 short ICMP", "10.0.0.1", "192.168.1.1", 1, 0, 20, 0, 0},
+		{"IPv6 short ICMP", "2001:db8:1::1", "2001:db8:2::1", 58, 0, 40, 0, 0},
+		{"IPv4 truncated Echo passes through unanswered", "10.0.0.1", "192.168.1.1", 1, 8, 20, 1, 0},
+		{"IPv6 truncated Echo passes through unanswered", "2001:db8:1::1", "2001:db8:2::1", 58, 128, 40, 1, 0},
+		{"IPv4 one-byte non-Echo passes through", "10.0.0.1", "192.168.1.1", 1, 3, 20, 1, 0},
+		{"IPv6 one-byte non-Echo passes through", "2001:db8:1::1", "2001:db8:2::1", 58, 2, 40, 1, 0},
+		{"IPv4 unread protocol", "10.0.0.1", "192.168.1.1", 47, 0, 20, 0, 0},
+		{"IPv6 unread protocol", "2001:db8:1::1", "2001:db8:2::1", 47, 0, 40, 0, 0},
+		{"IPv4 unread protocol IP header split", "10.0.0.1", "192.168.1.1", 47, 0, 20, 0, 24},
+		{"IPv6 unread protocol IP header split", "2001:db8:1::1", "2001:db8:2::1", 47, 0, 40, 0, 24},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			frame := classifyFrame(tc.source, tc.destination, 0, 0, tc.protocol, 0, nil)
-			frame = frame[:ethHeaderLen+tc.networkLength]
+			frame := classifyFrame(tc.source, tc.destination, 0, 0, tc.protocol, tc.subtype, nil)
+			frame = frame[:ethHeaderLen+tc.networkLength+tc.transportLength]
 			if tc.networkLength == 20 {
-				binary.BigEndian.PutUint16(frame[16:18], 20)
+				binary.BigEndian.PutUint16(frame[16:18], uint16(tc.networkLength+tc.transportLength))
 			} else {
-				binary.BigEndian.PutUint16(frame[18:20], 0)
+				binary.BigEndian.PutUint16(frame[18:20], uint16(tc.transportLength))
 			}
 			input := [][][]byte{{frame}}
 			if tc.splitOffset != 0 {
 				input = append(input, [][]byte{frame[:tc.splitOffset], frame[tc.splitOffset:]})
 			}
+			incomingBefore, incomingBytesBefore := counterOf(t, harness, "svc", "incoming")
+			rejectedBefore, rejectedBytesBefore := counterOf(t, harness, "svc", "filter_rejected")
 			result, err := harness.HandleSegmentedPackets(input...)
 			require.NoError(t, err)
 			require.Empty(t, result.Drop)
@@ -2728,10 +2748,65 @@ func Test_L3b_ClassifyExemptPacketsPassthrough(t *testing.T) {
 				// Only the readable head is observable for chained passthrough.
 				require.Equal(t, input[idx][0], output)
 			}
+			incomingAfter, incomingBytesAfter := counterOf(t, harness, "svc", "incoming")
+			rejectedAfter, rejectedBytesAfter := counterOf(t, harness, "svc", "filter_rejected")
+			require.Equal(t, incomingBefore, incomingAfter)
+			require.Equal(t, incomingBytesBefore, incomingBytesAfter)
+			require.Equal(t, rejectedBefore, rejectedAfter)
+			require.Equal(t, rejectedBytesBefore, rejectedBytesAfter)
 		})
 	}
-	packets, _ := counterOf(t, harness, "svc", "filter_rejected")
-	require.Zero(t, packets)
+	for _, tc := range []struct {
+		name, source, destination string
+		protocol, subtype         byte
+	}{
+		{"IPv4 TCP tunnels to real", "10.0.0.1", "192.168.1.1", 6, 2},
+		{"IPv6 TCP tunnels to real", "2001:db8:1::1", "2001:db8:2::1", 6, 2},
+		{"IPv4 UDP tunnels to real", "10.0.0.1", "192.168.1.1", 17, 0},
+		{"IPv6 UDP tunnels to real", "2001:db8:1::1", "2001:db8:2::1", 17, 0},
+		{"IPv4 Echo replies locally", "10.0.0.1", "192.168.1.1", 1, 8},
+		{"IPv6 Echo replies locally", "2001:db8:1::1", "2001:db8:2::1", 58, 128},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			frame := classifyFrame(tc.source, tc.destination, 12345, 80, tc.protocol, tc.subtype, nil)
+			// Request lifetime stays below the reply value to pin a restart, not a copy.
+			if tc.protocol == 1 {
+				frame[22] = 1
+			} else if tc.protocol == 58 {
+				frame[21] = 1
+			}
+			incomingBefore, incomingBytesBefore := counterOf(t, harness, "svc", "incoming")
+			repliedBefore, repliedBytesBefore := counterOf(t, harness, "svc", "icmp_replied")
+			result, err := harness.HandleSegmentedPackets([][]byte{frame})
+			require.NoError(t, err)
+			require.Empty(t, result.Drop)
+			require.Len(t, result.Output, 1)
+			info, err := framework.NewPacketParser().ParsePacket(result.Output[0])
+			require.NoError(t, err)
+			incomingAfter, incomingBytesAfter := counterOf(t, harness, "svc", "incoming")
+			require.Equal(t, incomingBefore+1, incomingAfter)
+			require.Equal(t, incomingBytesBefore+uint64(len(frame)), incomingBytesAfter)
+			if tc.protocol == 6 || tc.protocol == 17 {
+				require.True(t, info.IsTunneled)
+				require.Equal(t, "172.16.0.10", info.DstIP.String())
+				return
+			}
+			require.False(t, info.IsTunneled)
+			require.Equal(t, tc.destination, info.SrcIP.String())
+			require.Equal(t, tc.source, info.DstIP.String())
+			require.Len(t, result.Output[0], len(frame))
+			if tc.protocol == 1 {
+				require.EqualValues(t, 0, result.Output[0][34])
+				require.EqualValues(t, 64, result.Output[0][22])
+			} else {
+				require.EqualValues(t, 129, result.Output[0][54])
+				require.EqualValues(t, 64, result.Output[0][21])
+			}
+			repliedAfter, repliedBytesAfter := counterOf(t, harness, "svc", "icmp_replied")
+			require.Equal(t, repliedBefore+1, repliedAfter)
+			require.Equal(t, repliedBytesBefore+uint64(len(result.Output[0])), repliedBytesAfter)
+		})
+	}
 }
 
 // Test_L3b_ClassifyMatchesByDestination verifies that reversing source and
