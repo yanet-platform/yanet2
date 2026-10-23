@@ -357,13 +357,23 @@ from the network key and is not reconstructed by current real lookup.
   dataplane, shared-memory or host restart is promised. On demotion, freeze
   the monotonic maximum absolute-deadline watermark as `retire_not_before`.
   `now >= retire_not_before` makes the back eligible to begin retirement;
-  `now < retire_not_before` does not. Eligibility is not immediate detachment,
+  `now < retire_not_before` does not. A safely frozen/demoted table proved never
+  to have accepted a committed record/deadline is immediately eligible to begin
+  retirement, without waiting for a nonexistent deadline. The proof includes
+  operations crossing demotion; an earlier empty observation is insufficient.
+  A previously populated but now logically empty table retains its monotonic
+  historical watermark without reset. No numeric empty-watermark sentinel,
+  demotion timestamp or clock-wrap policy is selected. Eligibility is not immediate detachment,
   free or growth: detach first, wait for reader observation safety (an RCU grace
   period), and only then free. Retained storage stays physically accounted until release,
   and growth remains rejected while a back physically exists. Fenced takeover may
   finish reclamation; its absence may delay reclamation, not invalidate
   sessions or expose a third table. Terminal VS deletion still waits for old
   reader rights but does not wait for session expiry as its cleanup criterion.
+- Admission never evicts unrelated live sessions to make room for a new key,
+  including in a full bucket. Safe expired-storage reclamation and authorized
+  same-key replacement are distinct from such eviction. A silent eviction reported
+  as insertion success cannot bypass the required-write counted-drop rule.
 - Copy-forward first validates that the back pin is live and unsuperseded.
   For an admitted stateful packet, copying its real identity and applying the
   permitted refresh are one front commit: checked `now + timeout` for the
@@ -450,6 +460,44 @@ from the network key and is not reconstructed by current real lookup.
   empty page is `ResourceExhausted` rather than an endless empty continuation.
   A record that cannot be read safely within budget is `Unavailable` with no
   usable partial page, and the client does not advance.
+
+### Concurrent Session Authority
+
+For ordinary admitted TCP/UDP forwarding, reclassify against current session
+authority within bounded work rather than blindly overwriting a competing commit.
+Keep the applicable protected VS descriptor; this does not require the newest
+published configuration. The following table does not apply ordinary miss or
+reschedule permissions to reverse ICMP delivery, which still cannot reselect,
+rebind or create a session; ownership queries remain read-only.
+
+| Initial operation | Authority found on revalidation | Required outcome |
+| --- | --- | --- |
+| Insert-on-miss | Another worker committed a live eligible pin | Use it as a hit; do not overwrite it with the earlier selection. |
+| Refresh-on-hit | The record changed | Re-read current authority and classify it; do not reinstate the old record or real. A deadline-only change is not a rebind. |
+| Copy-forward-on-back-hit | Front authority appeared | Use current front authority, never republish the suppressed back. |
+| Reschedule | Another operation rebound the pin | Reclassify the current pin: use an eligible hit; an invalid live pin permits rebind only under the existing UDP or TCP SYN-without-RST gate, otherwise counted-drop. |
+| Any of these | The pin expired before commit and a genuine miss is established | Select a fresh eligible real; ordinary stateful forwarding requires new insertion. OPS selects statelessly without creating a logical session. |
+
+An existing eligible pin is preserved; only a currently authorized reschedule can
+rebind. Final prepared packet contents, including encapsulation, must match the
+validated full real key AND real incarnation. If either differs from the prepared
+target, reprepare and revalidate before handoff and any required commit. A changed
+deadline alone does not require a different target, but refresh must be a valid
+serially ordered write using checked `now + timeout` for the permitted class (or
+`other` for permitted ICMP delivery), never a stale record restore or
+`max(old_deadline, new_deadline)`. Shorter and zero deadlines remain allowed. OPS
+keeps the stored absolute deadline: front live eligible hits and misses need no
+session write, while back migration and invalid-pin rebind require their writes.
+
+Revalidation, any repreparation and required commit must fit bounded work. If
+coherent state cannot be established or a required write cannot be performed,
+counted-drop without partial session or suppression changes by this operation;
+normal expiry and independent concurrent operations remain possible. Front
+authority and back suppression commit atomically, with no resurrection. Failed
+preparation causes no session mutation by this operation; postcommit packet loss
+does not roll back. This chooses no numeric retry budget, new counters, lock/CAS
+algorithm or ABA layout, changes no hash or PURR cursor rule, and promises no
+progress under continuous churn.
 
 ## 8. WLC Contract
 
@@ -925,8 +973,10 @@ cross-process proof and the implementation remain downstream (#2725, #2726).
 - Bounded validation and real-fragment rejection precede dispatch. Ordinary
   TCP/UDP traffic alone follows VS lookup, bound service-policy admission,
   session resolution and eligible-real selection, MSS processing and
-  encapsulation, then the required atomic session insert/refresh/copy-forward
-  commit before handoff. Packet-preparation failure creates no session and
+  encapsulation, then, only if session mutation is needed, the required atomic
+  session insert/refresh/copy-forward or authorized rebind commit before handoff.
+  OPS front live eligible hits and misses do not require a write; back migration
+  and invalid-pin rebind do. Packet-preparation failure creates no session and
   extends no deadline. A failed required commit counted-drops the prepared packet
   without stateless fallback or partial authority/suppression changes. After a
   successful commit, later transmission loss does not roll the session back.
@@ -1568,6 +1618,54 @@ Required discriminating vectors include:
   preservation, no silent full rebuild. These are algorithm-conformance vectors,
   not portable-placement guarantees; explicit recovery rebuilding is preserved.
 
+- Concurrent session authority (**NOT RUN**): two workers miss the same key and
+  prepare for different full real keys; after one commits a live eligible pin,
+  the other adopts it as a hit and reprepares rather than overwriting it. Repeat
+  with equal full real keys but different real incarnations, adopting only a pin
+  eligible under the packet's applicable protected descriptor. A mismatching
+  prepared target must never reach handoff.
+- Protected-descriptor conflict (**NOT RUN**): the competing winner is valid only
+  under newly published D2 but invalid under the packet's still-protected D1.
+  Apply the existing invalid-pin reschedule gate or counted-drop under D1; do not
+  force D2 adoption or treat D2-only eligibility as an eligible D1 hit.
+- Concurrent same-pin refresh (**NOT RUN**): two refreshes use different timeout
+  classes or different protected timeout configurations, with time advancing
+  between preparation and commit. Require valid serially authorized checked
+  deadline writes under each applicable context, not stale record restoration,
+  max(old,new), monotonic session deadlines or a newly invented clock policy.
+- Zero-timeout competing front (**NOT RUN**): a competing front commit suppresses
+  the back with zero timeout and is expired when the loser revalidates. Establish
+  a genuine miss and apply ordinary stateful insertion or OPS stateless selection;
+  never resurrect the suppressed back even if its physical deadline remains live.
+- Changed refresh (**NOT RUN**): re-read a concurrently changed record without
+  reinstating the old real/record. A deadline-only change is not rebind; verify
+  a valid serially ordered checked refresh, including shorter and zero timeouts,
+  without max(old,new) or a monotonic per-session deadline rule.
+- Back/front conflict (**NOT RUN**): front appears during prepared back copy;
+  use current front and matching preparation, never republish suppressed back,
+  including after front expiry/reuse. Front commit and suppression stay atomic.
+- Reschedule/expiry/OPS (**NOT RUN**): another operation rebinds first; adopt its
+  eligible pin. For a currently invalid live pin, UDP and TCP SYN without RST
+  may reschedule, while non-SYN TCP and SYN+RST counted-drop. Expiry before commit
+  instead establishes genuine miss with fresh selection and ordinary insertion,
+  including non-SYN TCP; OPS miss is stateless. OPS front live eligible hit/miss
+  performs no write, but back migration/invalid rebind requires a stored-deadline
+  write. Reverse ICMP still cannot reselect, rebind or create; query stays read-only.
+- Failure/admission (**NOT RUN**): exhaust bounded work, fail repreparation or a
+  required write, and inject final-target mismatch. Counted-drop without partial
+  operation-owned state/suppression, allowing normal expiry/concurrent changes;
+  postcommit loss does not roll back. A full bucket of unrelated live sessions
+  cannot admit a new key through eviction, even a reported-success eviction;
+  safely reclaimable expired storage and authorized same-key replacement are
+  separate cases, not stateless failure fallback.
+- Empty demotion (**NOT RUN**): prove never-populated with no crossing writer
+  able to commit, and begin retirement eligibility without a deadline wait.
+  Contrast a formerly populated now-empty table retaining its historical maximum,
+  and a writer crossing demotion that prevents the never-populated proof unless
+  resolved without a committed record/deadline. Neither eligibility nor empty
+  observation permits immediate growth, detach/free, a third table or bypass of
+  reader rights/RCU/accounting; cleanup may remain delayed. No numeric empty
+  sentinel, demotion timestamp or clock-wrap behavior is asserted.
 - Late session commit: MSS/encapsulation preparation failures leave session
   state/deadlines unchanged; required commit failure drops the prepared packet
   without partial authority change; postcommit transmission loss does not roll
