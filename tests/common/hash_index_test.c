@@ -81,6 +81,14 @@ fixture_fini(struct fixture *fix) {
 	free(fix->arena);
 }
 
+// Look up the item carrying the given key and tag, reporting absence
+// when none matches.
+static uint32_t
+lookup_item(const struct fixture *fix, uint32_t key, uint32_t tag) {
+	struct eq_context ctx = {.want_key = key, .want_tag = tag};
+	return hash_index_lookup(&fix->index, hash_key(key), match_item, &ctx);
+}
+
 // Inserts one item and looks it up by hash plus tag, then confirms a
 // mismatched tag yields HASH_INDEX_INVALID.
 static int
@@ -366,6 +374,247 @@ test_fini_idempotent(void) {
 	return 0;
 }
 
+static int
+test_rehash_grow_preserves_entries(void) {
+	struct fixture fix;
+	if (fixture_init(&fix, 8) != 0) {
+		return TEST_FAILED;
+	}
+
+	for (uint32_t idx = 0; idx < 8; ++idx) {
+		items[idx] = (struct test_item){.key = idx * 7 + 3,
+						.tag = idx * 13 + 5};
+		TEST_ASSERT(
+			hash_index_insert(
+				&fix.index, hash_key(items[idx].key), idx
+			) == 0,
+			"insert failed at %u",
+			idx
+		);
+	}
+
+	TEST_ASSERT(hash_index_rehash(&fix.index, 32) == 0, "rehash failed");
+	TEST_ASSERT(fix.index.capacity == 32, "capacity must follow rehash");
+	TEST_ASSERT(fix.index.count == 8, "count must survive rehash");
+
+	for (uint32_t idx = 0; idx < 8; ++idx) {
+		uint32_t result =
+			lookup_item(&fix, items[idx].key, items[idx].tag);
+		TEST_ASSERT_EQUAL(idx, result, "post-grow lookup %u", idx);
+	}
+
+	fixture_fini(&fix);
+	return 0;
+}
+
+static int
+test_rehash_shrink_to_count(void) {
+	struct fixture fix;
+	if (fixture_init(&fix, 32) != 0) {
+		return TEST_FAILED;
+	}
+
+	for (uint32_t idx = 0; idx < 5; ++idx) {
+		items[idx] = (struct test_item){.key = idx * 11 + 2,
+						.tag = idx * 17 + 9};
+		TEST_ASSERT(
+			hash_index_insert(
+				&fix.index, hash_key(items[idx].key), idx
+			) == 0,
+			"insert failed at %u",
+			idx
+		);
+	}
+
+	TEST_ASSERT(hash_index_rehash(&fix.index, 5) == 0, "rehash failed");
+	TEST_ASSERT(fix.index.capacity == 5, "capacity must follow rehash");
+	TEST_ASSERT(fix.index.count == 5, "count must survive rehash");
+
+	for (uint32_t idx = 0; idx < 5; ++idx) {
+		uint32_t result =
+			lookup_item(&fix, items[idx].key, items[idx].tag);
+		TEST_ASSERT_EQUAL(idx, result, "post-shrink lookup %u", idx);
+	}
+
+	fixture_fini(&fix);
+	return 0;
+}
+
+static int
+test_rehash_below_count_rejected(void) {
+	struct fixture fix;
+	if (fixture_init(&fix, 8) != 0) {
+		return TEST_FAILED;
+	}
+
+	for (uint32_t idx = 0; idx < 3; ++idx) {
+		items[idx] = (struct test_item){.key = idx * 5 + 1,
+						.tag = idx * 7 + 4};
+		TEST_ASSERT(
+			hash_index_insert(
+				&fix.index, hash_key(items[idx].key), idx
+			) == 0,
+			"insert failed at %u",
+			idx
+		);
+	}
+
+	TEST_ASSERT(
+		hash_index_rehash(&fix.index, 2) == -1,
+		"undersized rehash must be refused"
+	);
+	TEST_ASSERT(fix.index.capacity == 8, "capacity must be unchanged");
+	TEST_ASSERT(fix.index.count == 3, "count must be unchanged");
+
+	for (uint32_t idx = 0; idx < 3; ++idx) {
+		uint32_t result =
+			lookup_item(&fix, items[idx].key, items[idx].tag);
+		TEST_ASSERT_EQUAL(idx, result, "refused-rehash lookup %u", idx);
+	}
+
+	fixture_fini(&fix);
+	return 0;
+}
+
+static int
+test_rehash_from_zero_capacity(void) {
+	struct fixture fix;
+	if (fixture_init(&fix, 0) != 0) {
+		return TEST_FAILED;
+	}
+
+	TEST_ASSERT(fix.index.capacity == 0, "capacity must start at 0");
+	TEST_ASSERT(
+		hash_index_rehash(&fix.index, 0) == -1,
+		"zero rehash must be refused even from zero capacity"
+	);
+	TEST_ASSERT(hash_index_rehash(&fix.index, 4) == 0, "rehash failed");
+	TEST_ASSERT(fix.index.capacity == 4, "capacity must follow rehash");
+
+	items[0] = (struct test_item){.key = 42, .tag = 100};
+	TEST_ASSERT(
+		hash_index_insert(&fix.index, hash_key(42), 0) == 0,
+		"insert failed"
+	);
+	TEST_ASSERT_EQUAL(0, lookup_item(&fix, 42, 100), "late-init lookup");
+
+	fixture_fini(&fix);
+	return 0;
+}
+
+static int
+test_rehash_same_capacity_noop(void) {
+	struct fixture fix;
+	if (fixture_init(&fix, 8) != 0) {
+		return TEST_FAILED;
+	}
+
+	for (uint32_t idx = 0; idx < 3; ++idx) {
+		items[idx] = (struct test_item){.key = idx * 9 + 6,
+						.tag = idx * 15 + 3};
+		TEST_ASSERT(
+			hash_index_insert(
+				&fix.index, hash_key(items[idx].key), idx
+			) == 0,
+			"insert failed at %u",
+			idx
+		);
+	}
+
+	TEST_ASSERT(
+		hash_index_rehash(&fix.index, 8) == 0,
+		"same rehash must succeed"
+	);
+	TEST_ASSERT(fix.index.capacity == 8, "capacity must be unchanged");
+	TEST_ASSERT(fix.index.count == 3, "count must be unchanged");
+
+	for (uint32_t idx = 0; idx < 3; ++idx) {
+		uint32_t result =
+			lookup_item(&fix, items[idx].key, items[idx].tag);
+		TEST_ASSERT_EQUAL(idx, result, "no-op rehash lookup %u", idx);
+	}
+
+	fixture_fini(&fix);
+	return 0;
+}
+
+// The failure is forced by requesting a buffer larger than the fixture
+// arena can hold.
+static int
+test_rehash_failure_leaves_index_usable(void) {
+	struct fixture fix;
+	if (fixture_init(&fix, 8) != 0) {
+		return TEST_FAILED;
+	}
+
+	for (uint32_t idx = 0; idx < 3; ++idx) {
+		items[idx] = (struct test_item){.key = idx * 3 + 8,
+						.tag = idx * 21 + 7};
+		TEST_ASSERT(
+			hash_index_insert(
+				&fix.index, hash_key(items[idx].key), idx
+			) == 0,
+			"insert failed at %u",
+			idx
+		);
+	}
+
+	TEST_ASSERT(
+		hash_index_rehash(&fix.index, 1u << 20) == -1,
+		"oversized rehash must fail"
+	);
+	TEST_ASSERT(fix.index.capacity == 8, "capacity must be unchanged");
+	TEST_ASSERT(fix.index.count == 3, "count must be unchanged");
+
+	for (uint32_t idx = 0; idx < 3; ++idx) {
+		uint32_t result =
+			lookup_item(&fix, items[idx].key, items[idx].tag);
+		TEST_ASSERT_EQUAL(idx, result, "post-failure lookup %u", idx);
+	}
+
+	items[3] = (struct test_item){.key = 77, .tag = 88};
+	TEST_ASSERT(
+		hash_index_insert(&fix.index, hash_key(77), 3) == 0,
+		"insert after failed rehash"
+	);
+	TEST_ASSERT_EQUAL(3, lookup_item(&fix, 77, 88), "post-failure insert");
+
+	fixture_fini(&fix);
+	return 0;
+}
+
+// The capacity sits one past the slot-count bound, so scaling it by the
+// sparse factor would wrap to a near-zero slot count.
+static int
+test_rehash_overflowing_capacity_rejected(void) {
+	struct fixture fix;
+	if (fixture_init(&fix, 8) != 0) {
+		return TEST_FAILED;
+	}
+
+	struct hash_index probe;
+	TEST_ASSERT(
+		hash_index_init(&probe, &fix.memory_context, 0x40000001u) == -1,
+		"overflowing init capacity must be refused"
+	);
+	hash_index_fini(&probe);
+
+	items[0] = (struct test_item){.key = 4, .tag = 5};
+	TEST_ASSERT(
+		hash_index_insert(&fix.index, hash_key(4), 0) == 0,
+		"insert failed"
+	);
+	TEST_ASSERT(
+		hash_index_rehash(&fix.index, 0x40000001u) == -1,
+		"overflowing rehash capacity must be refused"
+	);
+	TEST_ASSERT(fix.index.capacity == 8, "capacity must be unchanged");
+	TEST_ASSERT_EQUAL(0, lookup_item(&fix, 4, 5), "index must stay usable");
+
+	fixture_fini(&fix);
+	return 0;
+}
+
 int
 main(void) {
 	log_enable_name("info");
@@ -400,6 +649,34 @@ main(void) {
 	}
 	if (test_fini_idempotent() != 0) {
 		LOG(ERROR, "test_fini_idempotent failed");
+		return -1;
+	}
+	if (test_rehash_grow_preserves_entries() != 0) {
+		LOG(ERROR, "test_rehash_grow_preserves_entries failed");
+		return -1;
+	}
+	if (test_rehash_shrink_to_count() != 0) {
+		LOG(ERROR, "test_rehash_shrink_to_count failed");
+		return -1;
+	}
+	if (test_rehash_below_count_rejected() != 0) {
+		LOG(ERROR, "test_rehash_below_count_rejected failed");
+		return -1;
+	}
+	if (test_rehash_from_zero_capacity() != 0) {
+		LOG(ERROR, "test_rehash_from_zero_capacity failed");
+		return -1;
+	}
+	if (test_rehash_same_capacity_noop() != 0) {
+		LOG(ERROR, "test_rehash_same_capacity_noop failed");
+		return -1;
+	}
+	if (test_rehash_failure_leaves_index_usable() != 0) {
+		LOG(ERROR, "test_rehash_failure_leaves_index_usable failed");
+		return -1;
+	}
+	if (test_rehash_overflowing_capacity_rejected() != 0) {
+		LOG(ERROR, "test_rehash_overflowing_capacity_rejected failed");
 		return -1;
 	}
 
