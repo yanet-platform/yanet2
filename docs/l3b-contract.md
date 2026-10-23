@@ -24,7 +24,7 @@ This specifies target behavior, not implemented behavior or executed evidence.
   makes no implementation, ABI, compatibility, qualification or production
   claim.
 
-## 2. Configuration Field Inventory (F01-F35)
+## 2. Configuration And Observation Inventory (F01-F36)
 
 Each field carries its omitted/present/zero/empty/default/range semantics.
 Section 16 adds the per-field binary protobuf, ProtoJSON and CLI YAML
@@ -67,6 +67,7 @@ representation and the protobuf/C consequences.
 | F33 | `SessionRecord` and `ListSessions` response | Coherent physical records with the flow key, the stored real key and incarnation, the expiry and the layer identity and role; a portless session reports an absent port rather than a fabricated 0; the page reports the VS and chain identity and one page clock reading used for both the expiry predicate and the response. Cross-page duplicates are allowed and no unique-flow or snapshot guarantee is given; `complete` means the captured traversal end, and the next cursor is empty exactly when complete. A successful sparse page may return zero rows and still advance. |
 | F34 | Network, range and transport presence | Decoded family identity, optional port and source rules, and explicit-empty top-level collections. F02/F03 bare hosts, F19-F21 raw sources and the native ACL networks and ranges of section 14 are deliberately different types; generic network normalization must not erase raw source-template bits. Section 16 carries the per-field binary, ProtoJSON and YAML null, empty and missing matrix. |
 | F35 | Centralized operational policy | One authoritative location, the `l3b.policy` section of the control-plane configuration, for constants and suitable configurable limits; the CLI uses server defaults and lower layers receive the resolved budget. The initial read limits of 100 default records, 1000 maximum records, 4096 scan steps, a 256 KiB response and a 1024-byte cursor are provisional; the reviewed 4 MiB export cap and 16384 module-binding cap are unqualified. Policy changes are initially restart-required, hard API domains are not adjustable upward, no cap is bypassed automatically, ACL-owned limits are not duplicated in l3b, and lowering a limit must not make accepted configuration unreadable. |
+| F36 | Service runtime status | Separate read-only `GetServiceStatus` observations: VS identity/configuration context, per-real health and published effective enablement/selector weight, WLC mode/freshness/applicability/provenance, scoped readiness and drain/cleanup phases. Bounded live pages, not an accepted export or cross-page snapshot; accepted-config changes abort continuation, runtime-only changes do not. Pending deleted-VS cleanup is addressed by incarnation, not a reused name; no infinite completed-history promise. Section 6 defines the surface. |
 
 F35 configurable domains: `session_default_slots` is 1..1073741824 resolved
 with F26 rounding; `list_default_records`, `list_max_records`,
@@ -81,9 +82,16 @@ are not configurable l3b quota copies. Rule and collection resource failure is
 `ResourceExhausted` even below a representation ceiling; there is no
 workload-fit guarantee.
 
-## 3. Operation Inventory (O01-O15)
+`module_max_bindings` limits the complete candidate list of one ModuleConfig at
+create or replacement, not the sum across an instance. Two ModuleConfigs with
+10000 bindings each satisfy this cap alone. Retained older versions do not
+consume this logical cap again, but remain physically accounted until reclaimed.
+Other admission limits still apply; passing this object-size bound does not
+guarantee that resources exist for publication.
 
-One public l3b service exposes fifteen operations; there is no second
+## 3. Operation Inventory (O01-O16)
+
+One public l3b service exposes sixteen operations; there is no second
 session-table service. The names are contract inventory, not a protobuf
 package, tag or C ABI freeze.
 
@@ -104,6 +112,17 @@ package, tag or C ABI freeze.
 | O13 | `GetModuleConfig` | The full accepted typed snapshot including ordered identity-bound links and its own token, under the same versioned byte-page rules as `GetService`. The state must be recoverable rather than reconstructed from an empty local map. |
 | O14 | `ResizeServiceSessions` | Name, the existing VS token and a required positive size. After domain, existence and token checks, a raw target below the accepted size is `FailedPrecondition` before rounding, an exactly equal target is a no-op even with a back, growth while a back exists is rejected, and a larger target without a back proceeds to preparation and admission. A stale token is `Aborted` before target checks. Accepted growth advances the VS token; traffic and back retirement do not. One recoverable capacity, chain, token and export outcome; no second independent acceptance and no public state token. |
 | O15 | `DeleteModuleConfig` | Name and expected token under the existing-object ordering; absent is `NotFound` and any accepted incoming reference, including a detached function, is `FailedPrecondition`. No cascade and an empty success response; accepted deletion removes outgoing VS links while old readers delay physical reclamation. A late cleanup failure does not undo the accepted deletion. |
+| O16 | `GetServiceStatus` | Read-only bounded live status, separate from O11's immutable accepted export. Observe the current VS or pending cleanup identified by VS incarnation, with the F36 groups and section 6 consistency rules. Runtime changes neither advance the mutation token nor invalidate a traversal bound to unchanged accepted configuration. |
+
+Successful O02/O06 creation returns the created object's incarnation and first
+mutation token. O03/O07 replacement returns that object's incarnation/token for
+the accepted version; O09/O10/O14 returns the owning VS incarnation/token.
+A normalized no-op returns the same pair without a new version. O04/O15 deletion
+returns empty success, not a new token. The pair identifies this operation's
+accepted result, not an arbitrary latest version read while sending the reply.
+Another writer may already have made the token stale; conditional mutations still
+validate it. Full configuration and actual session capacity use existing readback,
+not a mandatory full snapshot in every mutation response.
 
 For all existing-object mutations the order is: management recovery gate,
 request-local structural and domain validation, owning-object lookup,
@@ -235,6 +254,37 @@ orders.
   token. The returned configuration and its token come from one coherent
   protected state, and a read that cannot establish that pairing is not
   answered with a mixed snapshot.
+
+### Live Service Status
+
+`GetServiceStatus` is the runtime observation surface; `GetService` remains the
+immutable accepted-configuration export. Status is read-only and carries VS
+incarnation and accepted configuration-token context, with separately identified
+observation provenance rather than pretending those classes were read atomically.
+It includes:
+
+- Per-real full identity/incarnation, health observations, published effective
+  enablement and selector weight; these are not independent configuration setters.
+- WLC mode, freshness, applicability and result provenance, distinguishing a
+  published result from a later confirmation and from worker adoption.
+- Separate readiness scopes and their observations, not one unqualified ready bit.
+- Drain/cleanup phases distinguishing expiry, reader-safety and reclamation
+  waits, without a completion percentage or ETA guarantee.
+
+Large results use bounded live pages under the centralized read/work limits.
+Each page labels its configuration and observation context; health/WLC can change
+between pages, and clients must not assemble a fictitious simultaneous snapshot.
+Continuation is bound to the VS incarnation and accepted configuration, not to
+each health/WLC update. Accepted-configuration changes abort continuation;
+runtime-only changes do not. Observation identities do not grant mutation rights.
+Unavailable observations must not be fabricated as zero, healthy or ready.
+
+Pending cleanup after deletion is addressed by the old VS incarnation; a new VS
+with the same name never supplies the old object's status. The surface exposes
+retained pending work, not an infinite ledger of completed deletions. Exact wire
+schema, cursor encoding, observation/error representation and protected retained
+cleanup lookup must be specified before implementation; no new retention TTL,
+cross-page pin or completed-history guarantee is selected by this surface.
 
 ## 7. Session Ownership, Capacity And Inspection
 
@@ -774,8 +824,13 @@ cross-process proof and the implementation remain downstream (#2725, #2726).
 - Bounded validation and real-fragment rejection precede dispatch. Ordinary
   TCP/UDP traffic alone follows VS lookup, bound service-policy admission,
   session resolution and eligible-real selection, MSS processing and
-  encapsulation. Failed required session insertion counted-drops without
-  stateless fallback. Echo and ICMP errors use the separate paths below,
+  encapsulation, then the required atomic session insert/refresh/copy-forward
+  commit before handoff. Packet-preparation failure creates no session and
+  extends no deadline. A failed required commit counted-drops the prepared packet
+  without stateless fallback or partial authority/suppression changes. After a
+  successful commit, later transmission loss does not roll the session back.
+  Lookup/selection alone is not a session commit; the same late-commit boundary
+  applies to permitted reverse-session delivery refresh. Echo and ICMP errors use the separate paths below,
   not ordinary TCP/UDP VS or service-policy admission.
 - An active VIP with at least one configured real answers IPv4/v6 Echo
   Requests without session lookup or refresh. Supported ICMPv4 errors are
@@ -786,6 +841,13 @@ cross-process proof and the implementation remain downstream (#2725, #2726).
   when ports exist; quoted non-initial fragments counted-drop; IPv6 atomic
   fragments are ordinary. These quote rules do not admit fragmented incoming
   error packets through the real-fragment drop floor.
+- An ICMP type outside the supported Echo Request and error paths, if delivered
+  to l3b, counted-drops with a distinct unsupported-type reason. It invokes no
+  session operation, real selection, encapsulation or error-distribution path.
+  Traffic needing routing, Neighbor Discovery or local delivery must be directed
+  to those paths before l3b. This is not a router-wide ICMP prohibition and does
+  not alter supported-type, malformed-packet or fragment handling. Exact counter
+  naming is part of the separate naming contract.
 - Raw ICMP errors enter the separate error-distribution module for bounded
   parsing and offending-flow normalization. Its read-only l3b ownership query
   protects one coherent session-chain generation and returns only `owned`,
@@ -1159,6 +1221,7 @@ qualification.
 | F33 SessionRecord and response | The entire response is RO. Flow family, addresses and protocol (TCP or UDP) and the stored real key and incarnation 1..256 are required; optional ports preserve absence versus 0. expires_at and page_now are uint64 nanoseconds in the same identified dataplane clock domain, with no UTC claim; layer identity and front or back role are required; a zero numeric time is representable. Rows may be empty on an incomplete advancing page. | Complete if and only if the next cursor is empty; uint64 clocks and lossless typed identities; no public memory address. An unsafe read is `Unavailable`, an oversized record is `ResourceExhausted`, and a failure yields no usable partial page. |
 | F34 networks, ranges, transport presence | F02 and F03 bare hosts, F19-F21 raw sources and the section 14 native networks and ranges are deliberately different types; no blanket normalization. | The per-field matrix above applies to every field rather than copying old l3b network semantics. |
 | F35 l3b.policy configuration | Not an RPC mutation surface. A missing, null or `{}` section selects defaults; each optional setting missing or null selects its default; explicit zero is invalid for positive budgets. Settings and defaults are in section 2; unknown keys reject. | Checked integer arithmetic, restart-required changes, and the all-accepted-object readability check before a reduction. The CLI sends absence or 0 only on paging and initial-size request fields, not on policy configuration. |
+| F36 GetServiceStatus | Read-only observation groups; current VS identity or incarnation-scoped pending cleanup; accepted-token context distinct from runtime provenance. | Section 6's bounded live pages and configuration-bound continuation; reuse existing applicable identity/read-limit domains. Exact schema and cursor/error representation must precede implementation; no fabricated observation defaults or infinite completed history. |
 
 ### Byte-Page Framing, Cursor Errors And Read-Only Identities
 
@@ -1312,6 +1375,22 @@ Required discriminating vectors include:
   membership versus unchanged-membership Update, empty selector and failure
   preservation, no silent full rebuild. These are algorithm-conformance vectors,
   not portable-placement guarantees; explicit recovery rebuilding is preserved.
+
+- Late session commit: MSS/encapsulation preparation failures leave session
+  state/deadlines unchanged; required commit failure drops the prepared packet
+  without partial authority change; postcommit transmission loss does not roll
+  back. Include existing-pin refresh, new insertion, copy-forward and zero TTL.
+- ModuleConfig binding cap: two 10000-binding objects pass this cap alone;
+  a 16385-binding candidate exceeds the initial per-object cap; retained old
+  versions remain physically charged without duplicating the logical charge.
+- Each mutation success pair identifies its own accepted result, including
+  concurrent later writers; no-op preserves it, deletions are empty, and the
+  client still checks expected tokens on subsequent mutations.
+- Unsupported ICMP reaching l3b counted-drops without session/real/encap/error
+  distribution work; routing/ND/local paths before l3b remain distinct.
+- Status reads: config versus runtime separation, configuration-change cursor
+  invalidation versus runtime-only changes, per-page provenance without a
+  cross-page snapshot, and deleted-incarnation cleanup versus name recreation.
 
 All obligations above are specification obligations, **NOT RUN**.
 
