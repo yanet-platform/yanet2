@@ -16,6 +16,7 @@ import (
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
 
+	"github.com/yanet-platform/yanet2/common/go/debugserver"
 	"github.com/yanet-platform/yanet2/common/go/logging"
 	"github.com/yanet-platform/yanet2/common/go/xcfg"
 	"github.com/yanet-platform/yanet2/common/go/xcmd"
@@ -53,6 +54,8 @@ func init() {
 type ServerConfig struct {
 	// Logging configuration.
 	Logging logging.Config `yaml:"logging"`
+	// Debug configures the debug server, disabled by default.
+	Debug debugserver.Config `yaml:"debug"`
 	// ListenAddr is the gRPC endpoint to listen on (e.g., "localhost:50051").
 	ListenAddr string `yaml:"listen_addr"`
 	// RouteOperatorEndpoint is the gRPC endpoint serving the route operator's
@@ -181,6 +184,11 @@ func runServer() error {
 			return fmt.Errorf("gRPC server failed: %w", err)
 		}
 		return nil
+	})
+
+	debugServer := debugserver.NewServer(&cfg.Debug, debugserver.WithLog(log))
+	wg.Go(func() error {
+		return debugServer.Run(ctx)
 	})
 
 	if startupConfig := cfg.BIRD.Unwrap(); startupConfig != nil {

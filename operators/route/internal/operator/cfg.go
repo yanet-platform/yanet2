@@ -8,6 +8,7 @@ import (
 	"go.uber.org/zap/zapcore"
 
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
+	"github.com/yanet-platform/yanet2/common/go/debugserver"
 	"github.com/yanet-platform/yanet2/common/go/logging"
 	"github.com/yanet-platform/yanet2/common/go/operator"
 	"github.com/yanet-platform/yanet2/common/go/xcfg"
@@ -38,6 +39,7 @@ const (
 // Config is the top-level YAML configuration for yanet-route-operator.
 type Config struct {
 	Logging   logging.Config            `yaml:"logging"`
+	Debug     debugserver.Config        `yaml:"debug"`
 	Server    operator.GRPCServerConfig `yaml:"server"`
 	Gateways  []operator.GatewayConfig  `yaml:"gateways"`
 	Register  operator.RegisterConfig   `yaml:"register"`
@@ -102,6 +104,12 @@ func (m *Config) Default() {
 // generic operator CLI helper.
 func (m *Config) LoggingConfig() *logging.Config {
 	return &m.Logging
+}
+
+// DebugConfig exposes the debug server configuration to the common
+// command lifecycle.
+func (m *Config) DebugConfig() *debugserver.Config {
+	return &m.Debug
 }
 
 func (m *Config) Validate() error {

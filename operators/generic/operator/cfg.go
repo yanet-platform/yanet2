@@ -9,6 +9,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
+	"github.com/yanet-platform/yanet2/common/go/debugserver"
 	"github.com/yanet-platform/yanet2/common/go/logging"
 	"github.com/yanet-platform/yanet2/common/go/operator"
 	"github.com/yanet-platform/yanet2/common/go/xcfg"
@@ -25,6 +26,7 @@ type Config struct {
 	// under it, so it must match the name clients address.
 	Name      xcfg.NonEmptyString       `yaml:"name"`
 	Logging   logging.Config            `yaml:"logging"`
+	Debug     debugserver.Config        `yaml:"debug"`
 	Server    operator.GRPCServerConfig `yaml:"server"`
 	Gateways  []operator.GatewayConfig  `yaml:"gateways"`
 	Register  operator.RegisterConfig   `yaml:"register"`
@@ -44,6 +46,12 @@ func (m *Config) Default() {
 // generic operator CLI helper.
 func (m *Config) LoggingConfig() *logging.Config {
 	return &m.Logging
+}
+
+// DebugConfig exposes the debug server configuration to the common
+// command lifecycle.
+func (m *Config) DebugConfig() *debugserver.Config {
+	return &m.Debug
 }
 
 // Validate checks that the config is structurally sound.

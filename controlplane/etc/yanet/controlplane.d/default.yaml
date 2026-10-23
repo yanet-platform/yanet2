@@ -6,6 +6,16 @@ logging:
   #
   # Possible values: "debug", "info", "warning", "error".
   level: debug
+# Debug server with the Go runtime profiles under /debug/pprof/, off
+# unless an endpoint is set.
+#
+# It has no authentication, and its profiles expose the process internals
+# and can load it, so keep it on a unix socket, which is created owner-only,
+# or on a loopback address. The endpoint is "host:port" or an absolute
+# socket path whose directory must exist.
+#
+# debug:
+#   endpoint: /run/yanet-controlplane-debug.sock
 # MemoryPath is the path to the shared-memory file that is used to
 # communicate with dataplane.
 memory_path: &memory_path /dev/hugepages/yanet
