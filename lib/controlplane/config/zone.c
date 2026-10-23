@@ -264,11 +264,14 @@ cp_config_gen_release(
 	// this release is the last event guaranteed to observe it, so the
 	// sweep waits for the agent lock rather than leaving reclamation to
 	// a later mutation. Blocking is safe: no agent-lock holder ever
-	// waits for the configuration lock this thread may itself hold, and
-	// every agent-lock section is short.
-	spinlock_lock(&cp_config->agent_lock);
-	cp_config_reclaim_unused_agents_locked(cp_config);
-	spinlock_unlock(&cp_config->agent_lock);
+	// waits for the configuration lock, and every agent-lock section is
+	// short. A thread already holding the configuration lock is an
+	// install, whose update path sweeps before releasing it.
+	if (cp_config_locked_by_thread != cp_config) {
+		spinlock_lock(&cp_config->agent_lock);
+		cp_config_reclaim_unused_agents_locked(cp_config);
+		spinlock_unlock(&cp_config->agent_lock);
+	}
 }
 
 // Publishes a fully built configuration generation and retires the one it

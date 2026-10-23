@@ -71,11 +71,12 @@ struct agent {
 	// The count moves with relaxed atomics, so generation teardown may
 	// drop references without the config lock. A racing drop unseen by
 	// a reclaim decision can only postpone that agent's reclamation,
-	// and gains never race reclamation the other way: a gain from zero
-	// only ever targets a registry head — updates through a superseded
-	// agent are refused, and a copy gain mirrors a reference the source
-	// generation already holds — so a predecessor's count is monotone
-	// non-increasing and the sweep may run under the agent lock alone.
+	// and gains never race reclamation the other way: updates through
+	// a superseded agent are refused, a copy gain mirrors a reference
+	// the source generation already holds, and the one zero-to-one gain
+	// on a predecessor — a destroy gate's destruction hold — takes the
+	// agent lock, which the sweep's zero check therefore cannot miss,
+	// so the sweep may run under the agent lock alone.
 	// Reclaiming a superseded agent waits for it to reach zero, because
 	// freeing the arena is one wholesale operation with no way to tear
 	// the loaded entities down individually first.

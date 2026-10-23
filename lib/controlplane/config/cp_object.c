@@ -156,12 +156,13 @@ cp_object_try_destroy(struct cp_object *self, yanet_error **err) {
 	}
 
 	// Everything read from the item happens under the locks, including
-	// the identity copies for the refusal: once they are gone, a final
-	// generation release may tear the item's registries down and an
-	// agent sweep may reclaim the arena the item lives in. The hold
-	// below must also be atomic against the sweep's zero check of the
-	// owner's loaded count, which runs under the agent lock alone, so
-	// the acquisition takes that lock too.
+	// the identity copies for the refusal.
+	//
+	// Once they are gone, a final generation release may tear the item's
+	// registries down and an agent sweep may reclaim the arena the item
+	// lives in. The hold below must also be atomic against the sweep's
+	// zero check of the owner's loaded count, which runs under the agent
+	// lock alone, so the acquisition takes that lock too.
 	strtcpy(type, self->type, sizeof(type));
 	strtcpy(name, self->name, sizeof(name));
 

@@ -17,6 +17,8 @@
 #include "lib/controlplane/agent/agent.h"
 #include "lib/controlplane/config/reclaim.h"
 #include "lib/controlplane/config/zone.h"
+#include "modules/decap/api/controlplane.h"
+#include "objects/fwstate/api/fwstate_map_v4_object.h"
 
 #include "lib/dataplane_ut/dataplane_ut.h"
 #include "lib/errors/errors.h"
@@ -109,6 +111,58 @@ run_superseded_refusal_test(struct yanet_shm *shm) {
 		"owner"
 	);
 
+	// A module created through agent A must be refused the same way,
+	// leaving the published generation untouched.
+	struct cp_module *mod_a = decap_module_config_new(agent_a, "m0", &err);
+	TEST_ASSERT_NOT_NULL(mod_a, "module config new failed for agent A");
+	struct cp_module *mods_a[] = {mod_a};
+
+	refuse_err = NULL;
+	TEST_ASSERT(
+		cp_config_update_modules(
+			dp_config, cp_config, 1, mods_a, &refuse_err
+		) == -1,
+		"module update through a superseded agent must fail"
+	);
+	TEST_ASSERT_EQUAL(
+		yanet_error_kind(refuse_err),
+		YANET_ERROR_FAILED_PRECONDITION,
+		"the module refusal must carry the failed-precondition kind"
+	);
+	yanet_error_free(refuse_err);
+	TEST_ASSERT(
+		cp_config_current_gen(cp_config) == gen_before,
+		"a refused module update must not publish a generation"
+	);
+
+	// An object created through agent A must be refused the same way.
+	struct cp_object *obj_a =
+		fwstate_map_v4_object_config_new(agent_a, "o0", &err);
+	TEST_ASSERT_NOT_NULL(
+		obj_a,
+		"object config new failed for agent A: %s",
+		err ? yanet_error_message(err) : "?"
+	);
+	struct cp_object *objs_a[] = {obj_a};
+
+	refuse_err = NULL;
+	TEST_ASSERT(
+		cp_config_update_objects(
+			dp_config, cp_config, 1, objs_a, &refuse_err
+		) == -1,
+		"object update through a superseded agent must fail"
+	);
+	TEST_ASSERT_EQUAL(
+		yanet_error_kind(refuse_err),
+		YANET_ERROR_FAILED_PRECONDITION,
+		"the object refusal must carry the failed-precondition kind"
+	);
+	yanet_error_free(refuse_err);
+	TEST_ASSERT(
+		cp_config_current_gen(cp_config) == gen_before,
+		"a refused object update must not publish a generation"
+	);
+
 	// The successor's own update still succeeds and retires the
 	// generation holding agent A's device.
 	struct cp_device *dev_b = new_plain_device(agent_b, "dev0", &err);
@@ -128,6 +182,8 @@ main(void) {
 
 	const char *port_names[] = {"01:00.0"};
 	const char *devs_to_load[] = {"plain"};
+	const char *mods_to_load[] = {"decap"};
+	const char *objs_to_load[] = {FWSTATE_MAP_V4_OBJECT_TYPE};
 
 	struct dataplane_ut_config cfg = {
 		.cp_memory = 1u << 25,
@@ -135,10 +191,12 @@ main(void) {
 		.worker_count = 1,
 		.devices = port_names,
 		.device_count = 1,
-		.modules = NULL,
-		.module_count = 0,
+		.modules = mods_to_load,
+		.module_count = 1,
 		.devices_to_load = devs_to_load,
 		.devices_to_load_count = 1,
+		.objects_to_load = objs_to_load,
+		.objects_to_load_count = 1,
 	};
 
 	struct dataplane_ut *ut = dataplane_ut_new(&cfg);

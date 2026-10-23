@@ -343,15 +343,19 @@ superseded_agent_test = executable(
     '-Wl,-E',
     '-Wl,--undefined=new_device_plain',
     '-Wl,--export-dynamic-symbol=new_device_plain',
+    '-Wl,--undefined=new_module_decap',
+    '-Wl,--export-dynamic-symbol=new_module_decap',
   ],
   dependencies: [
     lib_dataplane_ut_dep,
     lib_logging_dep,
     lib_errors_dep,
     lib_dev_plain_api,
+    lib_decap_cp_dep,
+    lib_fwstate_objects_dep,
     libdpdk_dep,
   ],
-  link_with: [lib_dev_plain_dp],
+  link_with: [lib_dev_plain_dp, lib_decap_dp],
   include_directories: yanet_rootdir,
 )
 
