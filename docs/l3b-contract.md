@@ -970,6 +970,11 @@ cross-process proof and the implementation remain downstream (#2725, #2726).
 
 ## 12. Packet Surfaces
 
+- Once invoked, l3b consumes and counted-drops ordinary traffic with no matching
+  VS, including an empty ModuleConfig; there is no implicit pass-through.
+  Unrelated routing must occur before this invocation. Unsupported ordinary
+  IPv4 upper protocols counted-drop, preserving separate TCP/UDP admission,
+  Echo and supported ICMP-error paths rather than rejecting all IPv4 ICMP.
 - Bounded validation and real-fragment rejection precede dispatch. Ordinary
   TCP/UDP traffic alone follows VS lookup, bound service-policy admission,
   session resolution and eligible-real selection, MSS processing and
@@ -983,8 +988,25 @@ cross-process proof and the implementation remain downstream (#2725, #2726).
   Lookup/selection alone is not a session commit; the same late-commit boundary
   applies to permitted reverse-session delivery refresh. Echo and ICMP errors use the separate paths below,
   not ordinary TCP/UDP VS or service-policy admission.
-- An active VIP with at least one configured real answers IPv4/v6 Echo
-  Requests without session lookup or refresh. Supported ICMPv4 errors are
+- Echo eligibility aggregates only VSes linked in the invoked ModuleConfig's
+  protected coherent configuration, not necessarily the latest published one.
+  At least one configured real among those VSes at the addressed family/VIP
+  makes it active, regardless of administrative enablement, weight or health.
+  An admitted IPv4/v6 Echo Request then produces one reply without session
+  lookup, creation or refresh. If all those VSes have empty real sets, no reply
+  is generated and unmatched counted-drop accounting applies. The reply uses
+  the addressed VIP as source, the request source as destination, the family's
+  Echo Reply type, code zero and valid checksums. Its initial TTL/Hop Limit is
+  65 at l3b handoff, not a promise of 65 after downstream routing.
+  Count each generated response once by (ModuleConfig, IP family, decoded VIP
+  address), without protocol or port dimensions or arbitrary VS attribution.
+  All linked VSes at that family/VIP share the counter; equal VIPs in different
+  ModuleConfigs do not merge counters. All-empty and other no-response outcomes
+  are not reply-counter events; existing counted-drop accounting still applies.
+  This binding selects no new counter name, readback, lifetime or continuity
+  contract and is distinct from VS-scoped native policy counters. The remaining
+  counter-overlap surfaces are open; this binding does not complete them.
+- Supported ICMPv4 errors are
   Destination Unreachable, Time Exceeded, Redirect, Source Quench and Parameter
   Problem; supported ICMPv6 errors are Destination Unreachable, Packet Too Big,
   Time Exceeded and Parameter Problem. The bounded quote identifies the VIP as
@@ -1023,6 +1045,9 @@ cross-process proof and the implementation remain downstream (#2725, #2726).
   Queries never mutate sessions. Query/delivery API placement, execution
   context, packet ownership and protected generation lifetime require
   downstream integration proof, not access to shared tables by the caller.
+  If the session is absent or expired at delivery after an `owned` query, the
+  error counted-drops without another ownership query, refresh attempt or peer
+  fanout, and without reselection, rebind or revival.
 - The error-distribution module owns peer fanout and final error disposition;
   l3b performs no peer fanout. `indeterminate` consumes and counted-drops the
   original without retry or fanout; received clones never refan. Each projected
@@ -1054,6 +1079,17 @@ cross-process proof and the implementation remain downstream (#2725, #2726).
   before activation. The cap is not permission to overflow an intermediate:
   an interval sufficient to fill the bucket must yield the cap without unsafe
   multiplication. No particular clock hardware, lock or CAS layout is selected.
+  The distributor consumes the original exactly once per invocation on every
+  terminal outcome, including successful fanout, a valid zero-peer set and
+  failure. This is packet ownership, not crash-proof exactly-once processing;
+  only clones leave through peer fanout. Successful fanout and a valid zero-peer
+  set add no drop count merely for consuming the original; zero peers spend no
+  tokens. Existing failure and indeterminate-ownership accounting is unchanged.
+  Each funded peer receives at most one clone attempt. After a peer-local
+  allocation or encapsulation failure, attempts for all remaining funded peers
+  MUST continue. There are no retries, refunds or rollback of emitted clones;
+  atomic budget admission does not imply atomic network delivery. External
+  fanout configuration, update/readback and integration proof remain required.
 - The MSS policy is the typed boolean of F24 with the behavior recorded there.
   Option parsing stops at EOL, skips NOP, checks the other lengths, and the
   MSS option has length 4; the first valid MSS is used. A malformed
@@ -1091,13 +1127,31 @@ cross-process proof and the implementation remain downstream (#2725, #2726).
   dedicated counted drop before transport access, VS lookup, ACL evaluation,
   session, selector, or encapsulation.
 - IPv6 processing walks at most eight bounds-checked Hop-by-Hop, Routing,
-  Destination Options, Fragment and AH headers. AH is structurally skipped
+  Destination Options, Fragment and AH headers. A ninth supported extension
+  counted-drops before transport access or state effects. AH is structurally skipped
   using its encoded length, requires at least 12 bytes and is not authenticated.
   ESP, No Next Header and unsupported upper protocols counted-drop. An atomic
   IPv6 fragment (offset zero, M clear) follows ordinary processing. Exact-port
   VS and ACL port predicates require an available transport header; missing
   fields fail closed. These transport admission checks do not precede Echo or
   the separate ICMP-error path; no second error parser is introduced in l3b.
+
+### l3b-To-Real Outer Headers
+
+Both IPIP and GRE use this matrix, independent of the shared helper's future
+implementation. Encapsulation itself performs no additional TTL/Hop Limit
+decrement; a separate routing hop is outside this rule.
+
+| Inner -> outer | Outer TTL / Hop Limit | IPv4 ID and fragmentation field | IPv6 flow label |
+| --- | --- | --- | --- |
+| IPv4 -> IPv4 | Copy inner TTL | Copy inner ID and fragmentation field | N/A |
+| IPv6 -> IPv4 | Copy inner Hop Limit | ID 1, fragmentation field zero | N/A |
+| IPv4 -> IPv6 | Copy inner TTL | N/A | Zero |
+| IPv6 -> IPv6 | Copy inner Hop Limit | N/A | Copy inner flow label |
+
+The real-fragment admission floor, inner traffic-class/ECN inheritance,
+external DSCP marking and length/headroom counted-drop rules remain unchanged.
+This matrix does not specify the error distributor's peer-clone headers.
 
 ## 13. Service Policy Boundary
 
@@ -1457,6 +1511,32 @@ bucket, and a generated name mapped to different bytes is rejected before
 allocation. Unchanged identity and size retain the name.
 
 ## 18. Conformance Obligations
+
+Packet disposition vectors (all **NOT RUN**):
+
+- Ordinary no-VS and empty-ModuleConfig traffic counted-drop without pass-through;
+  unsupported ordinary IPv4 protocols drop while TCP/UDP, Echo and supported
+  errors retain distinct dispatch. Eight supported IPv6 extensions reach the
+  applicable path when otherwise valid; a ninth drops before transport/state.
+- Mixed empty/nonempty VSes at one family/VIP produce one Echo reply; all-empty
+  VSes produce none and counted-drop. A disabled or health-ineligible configured
+  real still permits Echo. Unlinked VSes and other ModuleConfigs do not contribute
+  eligibility; a protected older coherent configuration is not forced to latest.
+- Echo response counts share across TCP/UDP and ports at one module/family/VIP,
+  separate across ModuleConfigs, and do not increment on no-response outcomes.
+  Check source VIP, destination request source, family Echo Reply type, code zero,
+  valid checksums and initial TTL/Hop Limit 65 at handoff; no session effects.
+- Original consumption occurs once per distributor invocation for success, valid
+  zero peers and every failure outcome. Success/zero peers add no consumption
+  drop count, zero peers spend no tokens, and existing failure accounting remains.
+  Inject allocation and encapsulation failures at early funded peers: every
+  remaining funded peer is still attempted once, without retry/refund/rollback.
+- After an owned query, remove or expire the session before delivery: counted
+  drop, no query retry, refresh attempt, fanout, reselect, rebind or revival.
+- Check all four inner/outer family pairs in both IPIP and GRE against the header
+  matrix, including no encapsulation decrement, ID/fragment field and flow label,
+  retaining fragment rejection, class/ECN inheritance and external DSCP scope.
+  Do not reuse this matrix as the distributor-clone expectation.
 
 Canonical session-key vectors (all **NOT RUN**):
 
