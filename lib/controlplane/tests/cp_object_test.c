@@ -1,6 +1,7 @@
 /*
  * Unit tests for the generic shared object entity: lifecycle symmetry,
- * stable name index across copy/upsert/delete, counter continuity across
+ * resolvable name index across a compacting copy, slot-preserving
+ * upsert-replace and delete+reinsert, counter continuity across
  * replacement, and the agent reclamation gate driven by loaded_entity_count.
  */
 
@@ -105,8 +106,9 @@ test_cp_object_lifecycle(struct yanet_shm *shm) {
 	return TEST_SUCCESS;
 }
 
-// Stable name index across registry_copy, slot-preserving upsert-replace,
-// and delete+reinsert; counter continuity via counter_registry_link.
+// Verifies that names resolve across a compacting copy, that replace
+// and reinsert keep their slot, and that a replacement inherits the
+// replaced object's counter definition.
 //
 // loaded_entity_count tracks generation references: each copy, upsert, and
 // delete mirrors the reference it adds or drops into the owning agent, and
@@ -181,24 +183,10 @@ test_cp_object_index_stability(struct yanet_shm *shm) {
 		"loaded_entity_count must be 2 after upsert(bar)"
 	);
 
-	uint64_t foo_index;
-	uint64_t bar_index;
-	TEST_ASSERT_SUCCESS(
-		cp_object_registry_lookup_index(
-			&registry, "test", "foo", &foo_index
-		),
-		"lookup(foo) failed"
-	);
-	TEST_ASSERT_SUCCESS(
-		cp_object_registry_lookup_index(
-			&registry, "test", "bar", &bar_index
-		),
-		"lookup(bar) failed"
-	);
-
-	// registry_copy is slot-by-slot, so indices survive into the copy.
-	// Each copied item gains a generation reference, so the count rises
-	// by one per referenced object.
+	// The copy repacks densely, so positions do not survive it; the
+	// copy's own lookups drive the later checks. Each copied item gains
+	// a generation reference, so the count rises by one per referenced
+	// object.
 	struct cp_object_registry copied;
 	TEST_ASSERT_SUCCESS(
 		cp_object_registry_copy(
@@ -212,25 +200,28 @@ test_cp_object_index_stability(struct yanet_shm *shm) {
 		4,
 		"registry_copy must mirror a generation reference per object"
 	);
+	TEST_ASSERT_EQUAL(
+		(long)copied.registry.capacity,
+		2L,
+		"copy must compact to the live item count"
+	);
 
+	uint64_t copied_foo_index;
+	uint64_t copied_bar_index;
 	uint64_t index;
 	TEST_ASSERT_SUCCESS(
 		cp_object_registry_lookup_index(&copied, "test", "foo", &index),
 		"lookup(foo) in copy failed"
 	);
-	TEST_ASSERT_EQUAL(
-		(long)index,
-		(long)foo_index,
-		"foo index must be stable across copy"
-	);
+	copied_foo_index = index;
 	TEST_ASSERT_SUCCESS(
 		cp_object_registry_lookup_index(&copied, "test", "bar", &index),
 		"lookup(bar) in copy failed"
 	);
-	TEST_ASSERT_EQUAL(
-		(long)index,
-		(long)bar_index,
-		"bar index must be stable across copy"
+	copied_bar_index = index;
+	TEST_ASSERT(
+		copied_foo_index != copied_bar_index,
+		"copy must give each object its own dense slot"
 	);
 
 	// Replace foo in the copy: slot-preserving, and the replacement
@@ -264,7 +255,7 @@ test_cp_object_index_stability(struct yanet_shm *shm) {
 	);
 	TEST_ASSERT_EQUAL(
 		(long)index,
-		(long)foo_index,
+		(long)copied_foo_index,
 		"foo index must be stable across upsert-replace"
 	);
 	TEST_ASSERT_EQUAL(
@@ -311,16 +302,16 @@ test_cp_object_index_stability(struct yanet_shm *shm) {
 	);
 	TEST_ASSERT_EQUAL(
 		(long)index,
-		(long)bar_index,
+		(long)copied_bar_index,
 		"bar index must be stable across delete+reinsert"
 	);
 
 	TEST_ASSERT(
-		cp_object_registry_get(&copied, foo_index) == foo2,
+		cp_object_registry_get(&copied, copied_foo_index) == foo2,
 		"registry_get(foo) must return the replacement"
 	);
 	TEST_ASSERT(
-		cp_object_registry_get(&copied, bar_index) == bar2,
+		cp_object_registry_get(&copied, copied_bar_index) == bar2,
 		"registry_get(bar) must return the reinserted object"
 	);
 	TEST_ASSERT(

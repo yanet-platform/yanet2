@@ -343,6 +343,12 @@ registry_fini(
 	registry_discard(registry);
 }
 
+// Copy the live items into a fresh registry, densely packed.
+//
+// Positions do not survive a copy: the fresh registry holds exactly
+// the live items at the head of its array, so a generation built from
+// a churned predecessor sheds its holes and growth slack. Each live
+// item gains a reference in the fresh registry.
 static inline int
 registry_copy(
 	struct memory_context *memory_context,
@@ -350,42 +356,42 @@ registry_copy(
 	struct registry *new_registry,
 	struct registry *old_registry
 ) {
+	uint64_t live = 0;
+	for (uint64_t idx = 0; idx < old_registry->capacity; ++idx) {
+		if (registry_get(old_registry, idx) != NULL) {
+			live += 1;
+		}
+	}
+
 	if (registry_init(
 		    memory_context,
 		    ADDR_OF(&old_registry->owner),
 		    new_registry,
-		    old_registry->capacity
+		    live + !live
 	    )) {
 		return -1;
 	}
 
+	uint64_t slot = 0;
 	for (uint64_t idx = 0; idx < old_registry->capacity; ++idx) {
 		struct registry_item *item = registry_get(old_registry, idx);
-
-		if (item != NULL) {
-			registry_item_ref(item, ADDR_OF(&old_registry->owner));
+		if (item == NULL) {
+			continue;
 		}
 
-		registry_set(new_registry, idx, item);
-	}
+		registry_item_ref(item, ADDR_OF(&old_registry->owner));
+		registry_set(new_registry, slot, item);
 
-	if (keys != NULL) {
-		for (uint64_t idx = 0; idx < old_registry->capacity; ++idx) {
-			struct registry_item *item =
-				registry_get(new_registry, idx);
-			if (item == NULL) {
-				continue;
-			}
-
-			// Live slots never exceed the items capacity the
-			// index above was sized to, so the insert cannot
-			// find it full.
+		if (keys != NULL) {
+			// The dense array holds exactly the live items, so
+			// the entry insert cannot find the index full.
 			hash_index_insert(
 				&new_registry->key_index,
 				registry_hash_fold(keys->item_hash(item)),
-				(uint32_t)idx
+				(uint32_t)slot
 			);
 		}
+		slot += 1;
 	}
 
 #ifdef REGISTRY_SANITIZE

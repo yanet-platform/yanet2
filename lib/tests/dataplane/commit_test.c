@@ -275,6 +275,72 @@ test_commit_runs_once_per_gen(void) {
 	return TEST_SUCCESS;
 }
 
+// Verifies that an item carried over into a different slot — where a
+// compacting copy or a deleted neighbour shifts it — keeps its
+// exactly-once hook.
+static int
+test_commit_shifted_carried_over(void) {
+	struct dataplane_test_fixture fixture;
+	TEST_ASSERT_SUCCESS(
+		dataplane_test_fixture_init(&fixture, "commit_test", 1),
+		"fixture init failed"
+	);
+	struct dp_config *cfg = &fixture.dp_config;
+
+	struct cp_config_gen gen;
+	struct cp_module first;
+	struct cp_module second;
+	TEST_ASSERT_SUCCESS(
+		commit_test_gen_init(cfg, &gen, 7), "gen init failed"
+	);
+	TEST_ASSERT_SUCCESS(
+		commit_test_add_module(
+			cfg, &gen, &first, commit_test_module_count
+		),
+		"add first module failed"
+	);
+	TEST_ASSERT_SUCCESS(
+		commit_test_add_module(
+			cfg, &gen, &second, commit_test_module_count
+		),
+		"add second module failed"
+	);
+
+	commit_test_module_runs = 0;
+	dp_config_commit_gen(cfg, &gen);
+	TEST_ASSERT_EQUAL(
+		commit_test_module_runs,
+		2,
+		"both handlers must run on the first commit"
+	);
+
+	// The next generation holds only the second item: it now sits at
+	// the first slot, shifted ahead of its position in the committed
+	// generation.
+	struct cp_config_gen next_gen;
+	TEST_ASSERT_SUCCESS(
+		commit_test_gen_init(cfg, &next_gen, 8), "next gen init failed"
+	);
+	TEST_ASSERT_SUCCESS(
+		registry_insert(
+			&next_gen.module_registry.registry,
+			NULL,
+			&second.config_item
+		),
+		"carry shifted module failed"
+	);
+	dp_config_commit_gen(cfg, &next_gen);
+	TEST_ASSERT_EQUAL(
+		commit_test_module_runs,
+		2,
+		"a carried-over item must not re-run its handler from a "
+		"shifted slot"
+	);
+
+	dataplane_test_fixture_fini(&fixture);
+	return TEST_SUCCESS;
+}
+
 // Verifies that an item replaced by a new one at the same index and an
 // item inserted into a previously empty slot run their handlers, while
 // the item carried over beside them does not.
@@ -655,6 +721,8 @@ main(void) {
 		int (*fn)(void);
 	} tests[] = {
 		{"commit_runs_once_per_gen", test_commit_runs_once_per_gen},
+		{"commit_shifted_carried_over", test_commit_shifted_carried_over
+		},
 		{"commit_runs_for_new_items_only",
 		 test_commit_runs_for_new_items_only},
 		{"null_handlers_skipped", test_null_handlers_skipped},
