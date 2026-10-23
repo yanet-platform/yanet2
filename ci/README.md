@@ -8,7 +8,7 @@ A job that names the image by digest runs exactly the toolchain behind that dige
 
 ## Bumping the image
 
-1. Change `ci/Dockerfile`: a package, a Go or Rust version, or the base image digest. The pull request builds and probes both architectures and lists the tool versions in its job summary, but publishes nothing.
+1. Change `ci/Dockerfile`: a package, a Go version (together with `ci/go-version`), a Rust version, or the base image digest. The pull request builds and probes both architectures and lists the tool versions in its job summary, but publishes nothing.
 2. After the change reaches `main`, the workflow publishes the image and prints the new reference in its job summary. A manual run on `main` rebuilds it with the current versions of the listed packages and their dependencies; the rest of the base image changes only with its digest. Runs on other branches build and probe but never publish.
 3. Open a follow-up pull request that pins the new reference wherever the image is pinned (below). Its CI is the first run on the new toolchain, and the compiler caches of each job stay warm only for what the bump left unchanged.
 
@@ -40,4 +40,8 @@ An image published from `main` is tagged with the full SHA of the commit it was 
 
 ## Notes
 
-Go, Rust and the protobuf generators must match what the jobs on the hosted runner install (the Go setup and Rust toolchain steps, `.github/actions/protoc-plugins`) for as long as both kinds of jobs exist.
+`ci/go-version` names the Go that every Go setup step of the workflows installs, and the image build fails when the image carries a different one. A Go bump therefore changes `ci/go-version` and `ci/Dockerfile` (version and checksums) in the same pull request; until the follow-up pin lands, the jobs in the image still run the previous Go. A manual release rerun that builds an older tag takes the file from the workflow's own commit, since the tag may predate it.
+
+Rust and the protobuf generators must match what the jobs on the hosted runner install (the Rust toolchain steps, `.github/actions/protoc-plugins`) for as long as both kinds of jobs exist.
+
+The jobs in the image do not run under act: act runs JavaScript actions inside the job container, and the image carries no Node.js.

@@ -111,9 +111,11 @@ jobs:
           ref: ${{ github.sha }}
           path: release-tools
 
+      # A release rerun from main may promote an older tag whose tree predates
+      # the Go version file; the workflow's own commit always has it.
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: '1.27.x'
+          go-version-file: ${{ github.event_name == 'workflow_dispatch' && 'release-tools/ci/go-version' || 'ci/go-version' }}
           cache: false
 
       - name: Install registry copy tool

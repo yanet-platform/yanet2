@@ -6,6 +6,7 @@ on:
     paths:
       - "**/*.go"
       - "go.mod"
+      - "ci/go-version"
       - ".github/workflows/go-formatting.yml"
   pull_request:
     # A stacked pull request has a non-main base, so a main-only filter would skip it.
@@ -13,6 +14,7 @@ on:
     paths:
       - "**/*.go"
       - "go.mod"
+      - "ci/go-version"
       - ".github/workflows/go-formatting.yml"
 
 concurrency:
@@ -32,7 +34,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version-file: go.mod
+          go-version-file: ci/go-version
           cache: false
 
       - name: Check gofmt
