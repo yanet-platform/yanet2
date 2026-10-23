@@ -9,6 +9,7 @@ import (
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
 
+	"github.com/yanet-platform/yanet2/common/go/debugserver"
 	"github.com/yanet-platform/yanet2/common/go/logging"
 	"github.com/yanet-platform/yanet2/common/go/xcfg"
 	"github.com/yanet-platform/yanet2/common/go/xcmd"
@@ -28,6 +29,12 @@ type loggingConfig interface {
 	LoggingConfig() *logging.Config
 }
 
+// debugConfig is implemented by config types that can enable the debug
+// server.
+type debugConfig interface {
+	DebugConfig() *debugserver.Config
+}
+
 // Run is the generic entry point for an operator binary.
 //
 // It wires up:
@@ -35,7 +42,8 @@ type loggingConfig interface {
 //   - Loading and validating the YAML config.
 //   - Initializing logging from the config.
 //   - Constructing the Runnable from the build callback.
-//   - Running the Runnable in an errgroup alongside xcmd.WaitInterrupted.
+//   - Running the Runnable in an errgroup alongside xcmd.WaitInterrupted
+//     and, when the config enables it, the debug server.
 //
 // Note that xcmd.Interrupted is treated as a clean shutdown.
 func Run[C any](
@@ -110,6 +118,12 @@ func RunOperator[C any](
 	wg.Go(func() error {
 		return xcmd.WaitInterrupted(ctx)
 	})
+	if provider, ok := any(cfg).(debugConfig); ok {
+		server := debugserver.NewServer(provider.DebugConfig(), debugserver.WithLog(log))
+		wg.Go(func() error {
+			return server.Run(ctx)
+		})
+	}
 
 	return wg.Wait()
 }

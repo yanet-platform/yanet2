@@ -61,6 +61,18 @@ expects the client subcommand to configure it later. Set `name: ""` to
 disable a present block — a bare `name:` (YAML null) does not, since it leaves
 the shipped default in place. There is no separate bootstrap step.
 
+Set `debug.endpoint` to serve the Go runtime profiles under `/debug/pprof/`,
+off by default. It takes `host:port` or an absolute unix socket path, which is
+created owner-only and replaces a stale socket. The server has no
+authentication and its profiles expose the process internals, so keep it on a
+socket or a loopback address:
+
+```bash
+curl --unix-socket /run/yanet-bird-adapter-debug.sock \
+  http://localhost/debug/pprof/heap > heap.pb.gz
+go tool pprof heap.pb.gz
+```
+
 ### Reconfigure at Runtime
 
 The `client` subcommand reconfigures an already-running server, for example

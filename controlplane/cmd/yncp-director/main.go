@@ -10,6 +10,7 @@ import (
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
 
+	"github.com/yanet-platform/yanet2/common/go/debugserver"
 	"github.com/yanet-platform/yanet2/common/go/logging"
 	"github.com/yanet-platform/yanet2/common/go/logging/clog"
 	"github.com/yanet-platform/yanet2/common/go/xcfg"
@@ -88,6 +89,10 @@ func run(cmd Cmd) error {
 	wg, ctx := errgroup.WithContext(ctx)
 	wg.Go(func() error {
 		return director.Run(ctx)
+	})
+	debugServer := debugserver.NewServer(&cfg.Debug, debugserver.WithLog(log))
+	wg.Go(func() error {
+		return debugServer.Run(ctx)
 	})
 	wg.Go(func() error {
 		err := xcmd.WaitInterrupted(ctx)
