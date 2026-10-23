@@ -715,7 +715,13 @@ cross-process proof and the implementation remain downstream (#2725, #2726).
   returns false. Clients compare normalized intent with accepted
   configuration, so a TCP true on input and false on readback is not drift.
   WLC observes session load, not new stateless-packet load.
-  OPS transitions do not relax the disabled-real or invalid-pin disposition.
+  OPS belongs to VS configuration, not to a packet or session setting; entry
+  and exit take effect through VS configuration publication. Switching alone
+  neither deletes sessions nor rewrites their deadlines. Each packet uses its
+  applicable coherent protected VS version under the existing publisher rules;
+  this does not require every in-flight packet to adopt the newest configuration.
+  OPS invalid-pin rebinding follows the rule below, without deadline refresh.
+  OPS transitions do not relax disabled-real or invalid-pin dispositions.
 - The PURR cursor belongs to each worker and VS pair, is shared by links to
   the same VS on that worker, and advances once after a successful coherent
   read of the selected slot from a nonempty ring. It does not advance for a
@@ -770,6 +776,30 @@ cross-process proof and the implementation remain downstream (#2725, #2726).
   and not an unresolved identity in a still-live pin) permits fresh eligible
   real selection, including TCP non-SYN. Stateful forwarding still requires
   session insertion under the fail-closed contract.
+- On the ordinary UDP forwarding path under the applicable coherent VS
+  configuration with OPS enabled, a live
+  authoritative pin to a disabled, absent or reincarnated real requires eligible
+  real selection and rebinding of the same logical session, preserving its
+  stored absolute deadline. This is not insertion of a new session or refresh.
+  Reverse-session delivery retains its separate no-reselection/no-rebind rule;
+  ownership queries remain read-only.
+  For a back pin, the rebind is one late atomic front commit with supersession
+  under section 7's no-resurrection rule; the back deadline and watermark remain
+  unchanged. No eligible real counted-drops without session mutation. Packet
+  preparation or required-write failure counted-drops without partial changes
+  to session state or suppression by this operation, subject to normal expiry
+  and independent concurrent operations; there is no write-failure stateless
+  fallback.
+  Before the late commit, revalidate session authority, liveness and selected-real
+  eligibility in that coherent configuration context. A pin expired at commit
+  is an OPS miss: perform fresh eligible stateless selection without insertion,
+  never revive the pin or blindly forward to the previously selected real.
+  Do not blindly overwrite a concurrently changed pin; re-establish coherent
+  current authority or counted-drop if bounded work cannot establish it. Packet
+  preparation, including encapsulation, must agree with the finally validated
+  real: reselection to another target cannot send the old target's prepared
+  packet. These are outcome requirements, not a new synchronization algorithm,
+  retry threshold or requirement to switch to the newest published VS version.
 - Address identity is the decoded family and bytes, not the input spelling.
   Mapped IPv6 remains IPv6 and is distinct from native IPv4, with no implicit
   unmapping. Normalization happens before key comparison, duplicate detection
@@ -1391,6 +1421,18 @@ Required discriminating vectors include:
 - Status reads: config versus runtime separation, configuration-change cursor
   invalidation versus runtime-only changes, per-page provenance without a
   cross-page snapshot, and deleted-incarnation cleanup versus name recreation.
+
+- OPS publication entry/exit preserves sessions and does not itself rewrite
+  deadlines, including failed publication and protected in-flight old versions.
+  Reverse-session delivery never inherits ordinary OPS rebinding; invalid pins
+  on that delivery path still counted-drop without reselection.
+  Front/back invalid-pin rebinding preserves the same logical session and exact
+  absolute deadline for disabled, absent and reincarnated reals; back suppression
+  survives front expiry/reuse. Exercise expiry between lookup and commit, fresh
+  stateless reselection, concurrent pin changes and bounded incoherence, and
+  final-real/prepared-encapsulation agreement after reselection. Preparation or
+  required-write failure and no eligible real leave session/suppression unchanged
+  by this operation; no resurrection, partial commit or failure fallback.
 
 All obligations above are specification obligations, **NOT RUN**.
 
