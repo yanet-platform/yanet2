@@ -57,10 +57,10 @@ representation and the protobuf/C consequences.
 | F23 | Destination bindings | Nonempty ordered exact VS name and incarnation bindings, or explicit empty that unlinks without deleting the VS; duplicates reject; order affects accepted equality; the VIP, protocol and optional port come from the immutable VS identity; broad or contradictory selectors reject. Separate ICMP paths are not ordinary TCP/UDP bindings. |
 | F24 | `mss_fix` | Typed boolean, default false, dormant for UDP. For a TCP SYN without RST, including SYN-ACK, an existing MSS above 1220 is clamped to 1220 and a smaller value including 0 is preserved; 536 is inserted when the option is absent and four option bytes fit; a valid full header without room stays unchanged. Options are validated before mutation, EOL stops parsing, the MSS option length is 4, and a malformed enabled-policy packet or a missing buffer counted-drops. The constants 1220 and 536 are not path-MTU guarantees. No public numeric MSS knob. |
 | F25 | DSCP ownership | Per-VS DSCP policy is outside the l3b API. l3b inherits the inner traffic class and ECN into the outer header; the `dscp` module after l3b owns optional marking with its own configuration and readback, no shared VS token and no atomic two-module update. Destination-prefix marking cannot distinguish two VSes sharing a real, so this is pipeline and real-prefix scope, not per-VS equivalence. Marking must preserve ECN in both families and update the IPv4 checksum. Old packed or per-VS DSCP inputs reject even as null or 0. |
-| F26 | Session size | Initial public default 65536 resolved once at creation; explicit positive input 1..1073741824 rounds upward to a power of two with a minimum actual size of 16 (1 becomes 16, 1000 becomes 1024); the size is shared across the workers of one VS in one instance. Resize omission or zero is `InvalidArgument`; a raw target below the accepted size is `FailedPrecondition` before rounding; an exactly equal target is a no-op; only a larger target rounds. A later default change never resizes a live VS, and no resource-driven downsize exists. Bounds are not allocation or flow qualification. |
+| F26 | Session size | Omitted or zero creation size resolves the current `l3b.policy.session_default_slots` (initially 65536) once at creation; that default or explicit positive input 1..1073741824 rounds upward to a power of two with a minimum actual size of 16 (1 becomes 16, 1000 becomes 1024); the size is shared across the workers of one VS in one instance. Resize omission or zero is `InvalidArgument`; a raw target below the accepted size is `FailedPrecondition` before rounding; an exactly equal target is a no-op; only a larger target rounds. A later default change never resizes a live VS, and no resource-driven downsize exists. Bounds are not allocation or flow qualification. |
 | F27 | Encapsulation and NAT | Typed VS mode IPIP or GRE with IPIP as default; unknown or explicitly unspecified values reject. Minimal GRE v0 with a four-byte header and no optional key, checksum or sequence. The existing IPIP and GRE helpers are reused with no new header builders and no required separate pipeline hop; MSS precedes encapsulation. NAT is outside the reviewed mode set and is rejected rather than mapped to GRE. |
 | F28 | Mutation token, incarnation, real target | The VS token covers configuration, manual administrative and manual weight changes, deletion and accepted capacity growth; ModuleConfig has its own token; health, WLC, session traffic and automatic back retirement do not advance it. A required expected token is 1..256 bytes; a real target is the full F03 key plus a required incarnation of 1..256 bytes; a missing or malformed shape is `InvalidArgument`. A stale token precedes target lookup, an absent key is `NotFound`, a mismatched incarnation is `Aborted`. |
-| F29 | Create preparation | `PrepareCreate` takes a kind of SERVICE or MODULE_CONFIG and an exact name, observes absence, and returns an opaque token of 1..256 bytes with a 300-second lifetime measured on authoritative server monotonic time; at most 16384 retained permit records per actual instance registry across both kinds and all issuers. It is not an upsert, not a name or resource reservation, not payload-bound and not exactly-once. An expired, consumed or old-epoch permit is `Aborted`; a malformed kind or name is `InvalidArgument`. |
+| F29 | Create preparation | `PrepareCreate` takes a kind of SERVICE or MODULE_CONFIG and an exact name, observes absence, and returns an opaque token of 1..256 bytes bound to exact kind/name/instance/owner context with a 300-second lifetime measured on authoritative server monotonic time; at most 16384 retained permit records per actual instance registry across both kinds and all issuers. It is not an upsert, not a name or resource reservation, not payload-bound and not exactly-once. A well-shaped unknown, expired, consumed or context-mismatched permit is `Aborted` for an absent target; an otherwise valid existing target is `AlreadyExists`. An absent, empty or oversized request token field or another malformed required field is `InvalidArgument`; an unknown registry entry is not an absent request field. Recovery is `Unavailable`. |
 | F30 | Accepted configuration readback | A coherent snapshot with the object incarnation, accepted token, encoding version, total bytes, offset, chunk, completion and next cursor. The snapshot separates the replacement descriptor from read-only metadata such as the actual accepted capacity, administrative state and real incarnations. WLC result and provenance, health and drain observations stay outside the token-stable bytes. One token and encoding version identify stable bytes; map-like ordering is fixed by the encoding rules, not by a library's deterministic mode. Configuration and token are read from one coherent protected state, coordinated with the final acceptance section and the owner epoch, so a new configuration is never paired with an old token. |
 | F31 | Name-list responses | ASCII lexical inventory with a membership-revision, instance, epoch and position cursor; create and delete invalidate the continuation, content changes alone do not. Bounded output and scan, and authoritative recovery gating; an empty response is not recovery success. |
 | F32 | `ListSessions` request | VS name plus limit and opaque cursor; omitted or 0 limit uses the centralized default (initially 100), a positive value up to the maximum (initially 1000) is accepted, a larger value is `InvalidArgument` rather than clamped. An empty cursor starts; an opaque continuation binds purpose, instance, VS incarnation, owner epoch, observed chain generation, finite initial layer watermarks and position. No cursor registry, TTL or between-RPC pin. A changed record limit shapes the next page, not the identity of the query, so it does not invalidate an in-flight continuation. |
@@ -99,7 +99,7 @@ package, tag or C ABI freeze.
 | --- | --- | --- |
 | O01 | `PrepareCreate` | Explicit absence preparation, not a `Get` side effect; a distinct bounded grant, no name or resource reservation, no payload binding. An existing target is `AlreadyExists` without a new grant; fixed expiry and invalidation of all permits from the preceding absence interval apply. A lost response may retain a record; no deduplication and no invisible extension. |
 | O02 | `CreateService` | Full configuration including the required F22 policy binding plus a create token, absent target only; an existing valid request is `AlreadyExists` even when equal; duplicates, families and limits are validated before acceptance; new reals are administratively disabled. The first mutation token and incarnation are returned; there is no upsert. A known pre-accept failure preserves state; an uncertain outcome uses readback, not retry. |
-| O03 | `UpdateService` | Full replacement with the expected VS token; absent is `NotFound`; a stale token is `Aborted` even when equal; a normalized equality succeeds without publication or token change. Surviving real state, session deadlines and accepted capacity are preserved, and the VS network identity is immutable. The F22 boundary requires the complete policy binding on replacement, rejects changed content under the same identity/revision, and treats changed identity or revision as a configuration change. The writable descriptor excludes resize-only and other read-only metadata. |
+| O03 | `UpdateService` | Full replacement with the expected VS token; absent is `NotFound`; a stale token is `Aborted` even when equal; a normalized equality succeeds without publication or token change. Surviving real state, session deadlines and accepted capacity are preserved, and the VS network identity is immutable. The F22 boundary requires the complete policy binding on replacement, rejects changed content under the same identity/revision against the current binding or a retained shared revision the candidate would reuse, and treats changed identity or revision as a configuration change. The writable descriptor excludes resize-only and other read-only metadata. |
 | O04 | `DeleteService` | The current VS token; absent is `NotFound`; accepted incoming links are `FailedPrecondition` with no cascade. Accepted deletion automatically owns session cleanup; old configurations and readers delay reclamation, and there is no operator state-delete command. An accepted deletion accepts no resurrection of the deleted VS through a delayed create or link, and a VS recreated under the same name receives fresh session state: old affinity is not resurrected by name reuse. |
 | O05 | `ListServices` | Bounded authoritative lexical inventory, membership-bound continuation, and `Unavailable` during recovery; no permit or token issuance side effect. |
 | O06 | `CreateModuleConfig` | A distinct create with the complete explicit members or empty binding collection and a create token, no upsert; every link is validated by target incarnation and any invalid link rejects the whole operation. No internal common-policy field. |
@@ -141,7 +141,7 @@ orders.
 | ID | Obligation |
 | --- | --- |
 | C01 Presence and parsing | Optional text null or omission maps to absence before the field default; a required null or absent value rejects; a required boolean or weight retains false or 0; collections are explicit; read-only metadata is rejected as a writable field. Binary protobuf uses presence and oneof, not textual null. A full replacement omission is not KEEP. Section 16 carries the field-by-field matrix. |
-| C02 Identity and equality | Exact names, decoded addresses, optional ports, incarnations, authored real order, ModuleConfig binding order, the raw requested power and accepted no-op equality agree across clients and C. The F22 equality compares source-scoped identity, revision and the native normalized accepted content including order and counter-relevant identity; same identity/revision with changed content rejects, and changed identity or revision changes configuration even for equal behavior. Stale-token precedence survives, and semantic equality is not inferred from serialization bytes. |
+| C02 Identity and equality | Exact names, decoded addresses, optional ports, incarnations, authored real order, ModuleConfig binding order, the raw requested power and accepted no-op equality agree across clients and C. The F22 equality compares source-scoped identity, revision and the native normalized accepted content including order and counter-relevant identity; same identity/revision with changed content rejects against the current binding or a retained shared revision the candidate would reuse, and changed identity or revision changes configuration even for equal behavior. Stale-token precedence survives, and semantic equality is not inferred from serialization bytes. |
 | C03 Errors and uncertain outcomes | The existing-object order of section 3 with `InvalidArgument`, `NotFound`, `AlreadyExists`, `Aborted`, `FailedPrecondition`, `ResourceExhausted` and `Unavailable` kept distinct, and separate create, prepare and read rules. A timeout or lost reply is not non-application; there is no auto-renewal, deduplication or exactly-once promise. |
 | C04 Deadline and publication boundary | Admission and preparation are cancellable; the final section is bounded with no mid-commit rollback; success need not await worker adoption or reclamation. |
 | C05 Protobuf and C boundary | A separate versioned incompatible service and package keeps the product, module and CLI identity; there is no silent old-server fallback and no old mutation bypass. Removed fields and tags are reserved, the creation-envelope size is not the old VirtualService tag 6, and real and session identities and shared-memory changes need explicit ABI treatment. The common filter types (`Device`, `VlanRange`, `Fragment`) stay imported common definitions, never redeclared as l3b predicates. Exact package and tags, generated types, C widths, layout and attach migration stay downstream; no freeze, implicit legacy compatibility, guessed shared-memory layout, rolling upgrade or transparent downgrade promise. |
@@ -159,6 +159,13 @@ orders.
   authorization, a mutation token, a deduplication key nor a payload binding.
   One accepted creation invalidates every permit from the preceding absence
   interval, and deletion never restores old authorization.
+- Each permit is bound to its issuance's exact object kind, name, dataplane
+  instance and owner context, including owner epoch. A well-shaped token unknown
+  to the authoritative permit registry or bound to another such context is
+  `Aborted` when the target is absent; an otherwise
+  valid request for an existing target remains `AlreadyExists`. An absent, empty
+  or oversized request token field is `InvalidArgument`; missing means the
+  request field, not a registry entry. Recovery remains `Unavailable`.
 - The 300-second lifetime starts at the coordinated issuance decision. A permit
   is invalid at `now >= expiry` on authoritative server monotonic time. Expiry
   after acceptance does not roll back an accepted create.
@@ -205,10 +212,10 @@ orders.
   resource admission and acceptance. A compiler error is not automatically an
   out-of-memory condition. For either create kind, an otherwise valid request
   whose target exists returns `AlreadyExists` before checking whether its
-  bounded permit is expired, consumed or invalidated. When the target is absent,
+  bounded permit is unknown, expired, consumed or invalidated. When the target is absent,
   such a permit returns `Aborted`. Thus a competing create loses with
   `AlreadyExists` while the winner remains present; deleting the winner does not
-  revive the losing permit. Missing or structurally invalid required permits
+  revive the losing permit. Missing or structurally invalid required token fields
   remain `InvalidArgument`, and recovery remains `Unavailable`. This does not
   define precedence for every combination of malformed request fields. A read
   continuation has its own identity rules rather than a mutation-token stage.
@@ -364,7 +371,8 @@ cross-page pin or completed-history guarantee is selected by this surface.
   qualify its cost. The representation and concurrency proof remain downstream,
   with no prescribed tombstone layout or persistence across dataplane restart.
 - The creation size resolves once: an omitted or zero initial size selects the
-  server default 65536, and the resolved value becomes a concrete accepted
+  current `l3b.policy.session_default_slots` (initially 65536), rounded under
+  F26, and the resolved value becomes a concrete accepted
   size returned by readback. An explicit positive size in 1..1073741824 rounds
   upward to a power of two with a minimum actual size of 16. The size is
   shared across the workers of one VS in one instance and is not a guarantee
@@ -393,6 +401,9 @@ cross-page pin or completed-history guarantee is selected by this surface.
   uses one clock reading in the session deadline domain for both the expiry
   predicate and the response, and inspection never refreshes a session and
   never becomes a WLC sample.
+  Omit front and back records with `expires_at <= page_now`; scanning them
+  still consumes scan budget and advances traversal progress. Physical means
+  non-deduplicated, not inclusive of expired records.
 - The continuation binds purpose, instance, VS incarnation, owner epoch,
   observed chain generation, finite initial layer watermarks and position. It
   is validated before its positions or watermarks are trusted, and it has no
@@ -476,6 +487,11 @@ cross-page pin or completed-history guarantee is selected by this surface.
   case is an explicit empty selector. These are the selected `Make` with initial
   `Adjust` and `Update` without additional `Adjust` semantics; silently replacing
   an ordinary same-membership update with full reconstruction is not permitted.
+  A pure authored real reorder is not a membership change: WLC uses `Update`
+  without an additional `Adjust`, including when reordering accompanies an
+  applicable weight update with unchanged membership. F04 still advances the
+  token and republishes while preserving surviving state; no identical-placement
+  guarantee or additional non-WLC algorithm is implied.
   The explicitly specified recovery rebuild below is a separate operation.
   This contract promises no bit-identical cell placement across implementations
   or versions, exact traffic shares, churn bound, A-to-B-to-A restoration or
@@ -674,8 +690,15 @@ cross-process proof and the implementation remain downstream (#2725, #2726).
   cannot be established safely, unavailability is exposed instead of an
   invented generation, streak charge or readiness claim. After a complete
   valid sample has been adjudicated, a later activation or confirmation
-  failure is not a second invalid sample and does not undo the sample's streak
-  reset.
+  failure is not a second invalid sample and neither undoes nor repeats the
+  once-only reset of that generation's streak. It does not advance freshness
+  without successful activation or confirmation, or overwrite newer sampling
+  decisions. Preserve committed builder and prior active state; discard only
+  unpublished resources. Repeated activation failure gives no bounded wall-clock
+  staleness guarantee. The applicable-input rules still hold: preserving prior
+  active state does not authorize committing new inputs with an inapplicable
+  selector. This distinction selects no retry cadence, new threshold, mandatory
+  fallback on activation failure or additional O16 readiness representation.
 
 ## 10. Scheduler, OPS, Weights And Identities
 
@@ -1116,10 +1139,12 @@ distinct authored lists. Equality uses native values, not compiler layout,
 YAML spelling, wire bytes, allocator identity or hashes; the standalone ACL
 request equality is not evidence for it.
 
-The exact (source, key, revision) tuple and the normalized content are
-compared against the current binding and any retained shared revision the
-candidate would reuse. No history lookup is required for an old revision no
-longer retained or reused. The same tuple with changed content rejects; a
+The caller's exact (source, key, revision) tuple denotes immutable normalized
+content; reclamation does not authorize redefining it. The server compares
+against the current binding and any retained shared revision the candidate would
+reuse, rejecting changed content under the same tuple in those comparisons.
+No historical lookup is required once an old revision is no longer retained
+and would not be reused; no permanent revision ledger is introduced. A
 different tuple changes configuration even with equal rules. Equal policy
 alone is not full-VS equality. Provenance bytes grant no authorization and no
 token substitute.
@@ -1241,10 +1266,10 @@ qualification.
 | F23 ModuleConfig bindings | COL; each member has R name and R VS incarnation bytes 1..256; duplicates reject; order retained; empty unlinks only. No VIP, protocol or range fields on a link. | One atomic all-target validation; name and incarnation are separate, not token parsing. |
 | F24 mss_fix | D(false) bool; true is retained and dormant for UDP. A numeric MSS input is X. | Typed bool; no new clamp value. |
 | F25 DSCP | All old packed or per-VS DSCP inputs are X even null or 0; the separate `dscp` module owns marking. | No field in the new descriptor or C config; no shared token. |
-| F26 initial_session_slots; new_slots; actual_slots | Create only: D(server default 65536); explicit 0 also means the default; a positive value in 1..1073741824 rounds to the next power of two with minimum 16. Resize: R positive in the same domain; zero rejects. Actual slots RO. An initial size inside a replacement is X. | A creation envelope separate from the descriptor; the raw resize value is compared before rounding: shrink `FailedPrecondition`, equal no-op, back-blocked growth `FailedPrecondition`. |
+| F26 initial_session_slots; new_slots; actual_slots | Create only: D(current `l3b.policy.session_default_slots`, initially 65536); explicit 0 also means that default; the default or a positive value in 1..1073741824 rounds to the next power of two with minimum 16. Resize: R positive in the same domain; zero rejects. Actual slots RO. An initial size inside a replacement is X. | A creation envelope separate from the descriptor; the raw resize value is compared before rounding: shrink `FailedPrecondition`, equal no-op, back-blocked growth `FailedPrecondition`. |
 | F27 encapsulation mode | D(IPIP) optional enum; explicit unspecified, unknown or NAT rejects; GRE is supported with the fixed minimal header; key, checksum and sequence inputs are excluded. | Presence is distinct from enum zero; checked C mode mapping. |
 | F28 expected token, real target incarnation, returned identities | Expected token R bytes 1..256; real incarnation R bytes 1..256 with the full F03 key. Returned object incarnation and token are RO bytes 1..256; link-target incarnations use the same width. | Copied length plus bytes. Owner absence `NotFound`; a stale token `Aborted` before target lookup; a missing real `NotFound`; a wrong incarnation `Aborted`. |
-| F29 prepare kind and name; create token; valid_for_seconds | Kind R SERVICE or MODULE_CONFIG; name per F01; create token R bytes 1..256; valid_for_seconds RO uint32 (300 at issuance). The 16384 permit count is per registry, not per client. | A permit is distinct from a mutation token. An empty or malformed token is `InvalidArgument`; a well-shaped expired, consumed or wrong-epoch permit is `Aborted`. |
+| F29 prepare kind and name; create token; valid_for_seconds | Kind R SERVICE or MODULE_CONFIG; name per F01; create token R bytes 1..256 bound to exact kind/name/instance/owner context; valid_for_seconds RO uint32 (300 at issuance). The 16384 permit count is per registry, not per client. | A permit is distinct from a mutation token. An absent, empty or oversized request token field is `InvalidArgument`; a well-shaped unknown, expired, consumed or context-mismatched permit is `Aborted` for an absent target. Unknown means absent from the authoritative registry, not absent from the request. An otherwise valid existing target is `AlreadyExists`; recovery is `Unavailable`. |
 | F30 GetService and GetModuleConfig request and snapshot | Request R name; cursor D(empty) bytes 0..1024. Response: incarnation and token R nonempty bytes; encoding version R positive uint32; total and offset uint64 with offset <= total; chunk bytes; complete bool; next cursor bytes 0..1024. All response fields are RO. An empty chunk is valid only at completion; an incomplete success must advance the offset. | total <= the configured export cap (initial 4194304); chunk plus envelope <= the response cap (262144); checked size_t copies. No mixed snapshot, gap, overlap or overflow. An unknown encoding rejects client assembly, never a partial replacement. |
 | F31 list names request and response | No owner name; cursor D(empty); limit D(server default); 0 also means the default; a positive value at most the server maximum. Response names per F01 in ASCII lexical order; an empty page is permitted with an advancing cursor; complete if and only if the next cursor is empty. Membership identity, instance, epoch and position are RO and carried inside the opaque cursor. | Uses the F32 bounds for lists; no caller position or revision setter; checked counts and bytes; membership invalidation only on create and delete. |
 | F32 ListSessions request | R VS name; cursor D(empty) bytes 0..1024, empty starts; limit D(100 initially); 0 means the default; 1..1000 initially; above the maximum rejects, no clamp. | An opaque cursor, not the old uint64 cursor. The server resolves one policy snapshot per page; an unchanged limit is not required on continuation. |
@@ -1326,6 +1351,35 @@ and genuinely distinct values.
 
 Required discriminating vectors include:
 
+- Permit context: vary kind, name, instance and owner context independently;
+  a well-shaped mismatch with an absent target is `Aborted`, an otherwise valid
+  existing target is `AlreadyExists`, malformed input is `InvalidArgument`, and
+  recovery is `Unavailable`.
+- A supplied token of 1..256 bytes absent from the authoritative permit registry:
+  absent target yields `Aborted`, otherwise valid existing target yields
+  `AlreadyExists`, and recovery yields `Unavailable`. Contrast absent, empty
+  and 257-byte request token fields, which yield `InvalidArgument` after recovery.
+- WLC pure reorder and reorder with applicable weight changes at unchanged
+  membership use `Update` without another `Adjust`, not `Make`; F04 token and
+  publication effects remain, without asserting identical placement.
+- Creation with omitted and zero size under `session_default_slots=1000` accepts
+  1024 slots; after a policy change to 2048, new creations resolve 2048 while
+  existing capacity stays 1024. Resize zero still rejects.
+- In each of front and back, expiry before or exactly at `page_now` is omitted;
+  expiry after it remains eligible for physical inspection, including duplicate
+  copies. Expired-only scan work consumes budget and advances an incomplete
+  empty page rather than returning expired rows or stalling.
+- Changed normalized content under the same policy tuple rejects against the
+  current binding and a retained shared revision the candidate would reuse.
+  A no-longer-retained, non-reused revision requires no historical lookup;
+  caller fixtures still preserve tuple immutability, not redefine it after
+  reclamation or require a permanent ledger.
+- A valid WLC sample following invalid samples resets that generation's streak
+  once; subsequent activation or confirmation failure does not charge an invalid
+  sample, reset the streak again, advance freshness, or alter committed
+  builder/prior active state. Repeated failures and intervening input changes
+  retain applicability checks without asserting bounded staleness or a new
+  retry/fallback/readiness rule. These restoration vectors are **NOT RUN**.
 - Six timeouts: container absent, null and `{}`; tcp absent versus 0 versus
   60; SYN and SYN-ACK inheritance through an explicit 0; uint32 maximum and
   overflow; all six classes; every SYN/ACK/FIN/RST combination under section 7;
