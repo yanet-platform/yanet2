@@ -68,7 +68,7 @@ YANET employs a multi-language approach to leverage the strengths of different p
 - Go 1.27.1+.
 - Rust 1.99+.
 - Protobuf compiler 3.0+.
-- Meson 0.61+.
+- Meson 1.3+ (on Ubuntu 22.04, `pip install meson==1.3.2`).
 - Ninja build system.
 - CMake 3.5+.
 - GCC/Clang.

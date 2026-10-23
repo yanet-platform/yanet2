@@ -1,7 +1,7 @@
 project(
   'yanet',
   'c',
-  meson_version: '>= 0.61',
+  meson_version: '>= 1.3',
   version: '0.2.0',
   default_options: [
     'buildtype=release',
