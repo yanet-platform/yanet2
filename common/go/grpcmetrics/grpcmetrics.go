@@ -419,8 +419,8 @@ func (m *ServerMetrics) handledID(grpcType, service, method, code string, extra 
 // whole remainder as the method.
 func splitFullMethod(fullMethod string) (service, method string) {
 	trimmed := strings.TrimPrefix(fullMethod, "/")
-	if idx := strings.LastIndex(trimmed, "/"); idx >= 0 {
-		return trimmed[:idx], trimmed[idx+1:]
+	if service, method, ok := strings.CutLast(trimmed, "/"); ok {
+		return service, method
 	}
 
 	return "", trimmed

@@ -722,8 +722,7 @@ func Benchmark_Reader_Read_Prefilled(b *testing.B) {
 			perPass := benchRingCapacity / ((size + 3) &^ 3)
 
 			var stats readerBenchStats
-			b.ResetTimer()
-			for range b.N {
+			for b.Loop() {
 				b.StopTimer()
 				for range perPass {
 					if _, err := writer.WriteRecord(payload); err != nil {

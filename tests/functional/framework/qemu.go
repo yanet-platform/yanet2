@@ -756,8 +756,8 @@ func (q *QEMUManager) discardSerialThrough(marker string) {
 	if len(data) > scanSize {
 		data = data[len(data)-scanSize:]
 	}
-	if index := bytes.LastIndex(data, []byte(marker)); index >= 0 {
-		remainder := append([]byte(nil), data[index+len(marker):]...)
+	if _, after, ok := bytes.CutLast(data, []byte(marker)); ok {
+		remainder := append([]byte(nil), after...)
 		remainder = bytes.TrimPrefix(remainder, []byte{'\n'})
 		q.serialBuffer.Reset()
 		q.serialBuffer.Write(remainder)
@@ -996,17 +996,16 @@ func (q *QEMUManager) readUntilMonitorPrompt() (string, error) {
 	}
 
 	cleaned := stripMonitorEscapes(raw.String())
-	first := strings.Index(cleaned, "(qemu)")
-	last := strings.LastIndex(cleaned, "(qemu)")
-	if first >= 0 && last > first {
+	before, after, ok := strings.Cut(cleaned, "(qemu)")
+	if !ok {
+		return strings.TrimSpace(cleaned), nil
+	}
+	if content, _, ok := strings.CutLast(after, "(qemu)"); ok {
 		// Two prompts: content is between them, command echo + output.
-		return stripEchoLine(cleaned[first+len("(qemu)") : last]), nil
+		return stripEchoLine(content), nil
 	}
-	if first >= 0 {
-		// One prompt, at the end: content is what precedes it.
-		return stripEchoLine(cleaned[:first]), nil
-	}
-	return strings.TrimSpace(cleaned), nil
+	// One prompt, at the end: content is what precedes it.
+	return stripEchoLine(before), nil
 }
 
 // stripEchoLine drops the first line of s, the readline echo of the typed
@@ -1522,8 +1521,7 @@ type pgrepRunner func(pattern string) (string, error)
 // of silently passing the duplicate-VM check.
 func realPgrepRunner(pattern string) (string, error) {
 	out, err := exec.Command("pgrep", "-f", pattern).Output()
-	var exitErr *exec.ExitError
-	if errors.As(err, &exitErr) && exitErr.ExitCode() == 1 {
+	if exitErr, ok := errors.AsType[*exec.ExitError](err); ok && exitErr.ExitCode() == 1 {
 		return "", nil
 	}
 	if err != nil {
