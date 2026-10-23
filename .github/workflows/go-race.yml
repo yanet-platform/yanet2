@@ -30,6 +30,7 @@ jobs:
   go-race:
     name: Run Go race tests
     runs-on: ubuntu-24.04
+    timeout-minutes: 45
 
     steps:
       - uses: actions/checkout@v5
@@ -40,7 +41,7 @@ jobs:
         id: apt-packages
         timeout-minutes: 10
         with:
-          packages: meson clang cmake python3-pyelftools libnuma-dev libpcap-dev git protobuf-compiler
+          packages: meson clang cmake python3-pyelftools libnuma-dev libpcap-dev git protobuf-compiler ccache
 
       - uses: hendrikmuhs/ccache-action@v1.2.23
         name: ccache
