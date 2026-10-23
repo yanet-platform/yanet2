@@ -7,14 +7,15 @@ readiness_proto_files = [
 
 common_readiness_protoc_gen = custom_target(
     'readiness-protoc',
-    output: [
-        'readiness.pb.go',
-    ],
+    output: 'readiness.protoset',
+    depfile: 'readiness.protoset.d',
     input: readiness_proto_files,
     command: [
         protoc,
         '-I', root_dir,
         '--go_out=paths=source_relative:' + root_dir,
+        '--descriptor_set_out=@OUTPUT@',
+        '--dependency_out=@DEPFILE@',
         '@INPUT@',
     ],
     build_by_default: true,

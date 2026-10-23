@@ -4,7 +4,8 @@ proto_files = [join_paths(proto_dir, 'dscp.proto')]
 
 protoc_gen = custom_target(
   'dscp-protoc',
-  output: ['dscp.pb.go', 'dscp_grpc.pb.go'],
+  output: 'dscp.protoset',
+  depfile: 'dscp.protoset.d',
   input: proto_files,
   command: [
     protoc,
@@ -12,6 +13,8 @@ protoc_gen = custom_target(
     '-I', root_dir,
     '--go_out=paths=source_relative:' + proto_dir,
     '--go-grpc_out=paths=source_relative:' + proto_dir,
+    '--descriptor_set_out=@OUTPUT@',
+    '--dependency_out=@DEPFILE@',
     '@INPUT@',
   ],
   build_by_default: true,

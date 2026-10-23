@@ -6,16 +6,16 @@ proto_files = [
 
 protoc_gen = custom_target(
     'route-protoc',
-    output: [
-        'route.pb.go',
-        'route_grpc.pb.go',
-    ],
+    output: 'route.protoset',
+    depfile: 'route.protoset.d',
     input: proto_files,
     command: [
         protoc,
         '-I', root_dir,
         '--go_out=paths=source_relative:' + root_dir,
         '--go-grpc_out=paths=source_relative:' + root_dir,
+        '--descriptor_set_out=@OUTPUT@',
+        '--dependency_out=@DEPFILE@',
         '@INPUT@',
     ],
     build_by_default: true,

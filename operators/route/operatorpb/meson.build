@@ -8,14 +8,7 @@ proto_files = [
 
 protoc_gen = custom_target(
     'route-operator-protoc',
-    output: [
-        'operator.pb.go',
-        'operator_grpc.pb.go',
-        'route.pb.go',
-        'route_grpc.pb.go',
-        'neighbour.pb.go',
-        'neighbour_grpc.pb.go',
-    ],
+    output: 'route-operator.protoset',
     input: proto_files,
     command: [
         protoc,
@@ -23,8 +16,12 @@ protoc_gen = custom_target(
         '-I', root_dir,
         '--go_out=paths=source_relative:' + proto_dir,
         '--go-grpc_out=paths=source_relative:' + proto_dir,
+        '--descriptor_set_out=@OUTPUT@',
         '@INPUT@',
     ],
+    # protoc refuses --dependency_out with several inputs, so imports from
+    # other targets are tracked through their descriptor sets instead.
+    depends: [common_protoc_gen],
     build_by_default: true,
 )
 go_proto_targets += protoc_gen
@@ -41,16 +38,16 @@ readiness_proto_files = [
 
 route_operator_readiness_protoc_gen = custom_target(
     'route-operator-readiness-protoc',
-    output: [
-        'readiness.pb.go',
-        'readiness_grpc.pb.go',
-    ],
+    output: 'route-operator-readiness.protoset',
+    depfile: 'route-operator-readiness.protoset.d',
     input: readiness_proto_files,
     command: [
         protoc,
         '-I', root_dir,
         '--go_out=paths=source_relative:' + root_dir,
         '--go-grpc_out=paths=source_relative:' + root_dir,
+        '--descriptor_set_out=@OUTPUT@',
+        '--dependency_out=@DEPFILE@',
         '@INPUT@',
     ],
     build_by_default: true,

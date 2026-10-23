@@ -7,16 +7,16 @@ filter_proto_files = [
 
 filter_protoc_gen = custom_target(
     'filter-protoc',
-    output: [
-        'filter.pb.go',
-        'filter_grpc.pb.go',
-    ],
+    output: 'filter.protoset',
+    depfile: 'filter.protoset.d',
     input: filter_proto_files,
     command: [
         protoc,
         '-I', root_dir,
         '--go_out=paths=source_relative:' + root_dir,
         '--go-grpc_out=paths=source_relative:' + root_dir,
+        '--descriptor_set_out=@OUTPUT@',
+        '--dependency_out=@DEPFILE@',
         '@INPUT@',
     ],
     build_by_default: true,

@@ -22,26 +22,13 @@ common_proto_files = [
 # consumers outside this directory use.
 common_protoc_gen = custom_target(
     'common-protoc',
-    output: [
-        'target.pb.go',
-        'metric.pb.go',
-        'macaddr.pb.go',
-        'ipaddr.pb.go',
-        'ipv4addr.pb.go',
-        'ipv6addr.pb.go',
-        'iprange.pb.go',
-        'ipnetwork.pb.go',
-        'ipprefix.pb.go',
-        'ipv4prefix.pb.go',
-        'ipv4network.pb.go',
-        'ipv6network.pb.go',
-        'ipv6prefix.pb.go',
-    ],
+    output: 'common.protoset',
     input: common_proto_files,
     command: [
         protoc,
         '-I', root_dir,
         '--go_out=paths=source_relative:' + root_dir,
+        '--descriptor_set_out=@OUTPUT@',
         '@INPUT@',
     ],
     build_by_default: true,

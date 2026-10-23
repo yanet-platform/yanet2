@@ -7,7 +7,8 @@ proto_files = [
 
 protoc_gen = custom_target(
     'ring-protoc',
-    output: ['ring.pb.go', 'ring_grpc.pb.go'],
+    output: 'ring.protoset',
+    depfile: 'ring.protoset.d',
     input: proto_files,
     command: [
         protoc,
@@ -15,6 +16,8 @@ protoc_gen = custom_target(
         '-I', root_dir,
         '--go_out=paths=source_relative:' + proto_dir,
         '--go-grpc_out=paths=source_relative:' + proto_dir,
+        '--descriptor_set_out=@OUTPUT@',
+        '--dependency_out=@DEPFILE@',
         '@INPUT@',
     ],
     build_by_default: true,
