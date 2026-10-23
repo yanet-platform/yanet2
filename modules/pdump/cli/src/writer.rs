@@ -153,8 +153,8 @@ impl PdumpWriter {
 
         let ts = match &writer.base_ts {
             None => {
-                // Store the timestamp of the first packet in the writer to establish a
-                // baseline.
+                // Store the timestamp of the first packet in the writer to
+                // establish a baseline.
                 writer.base_ts = Some(meta.timestamp);
                 0
             }

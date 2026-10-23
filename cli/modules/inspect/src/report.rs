@@ -545,7 +545,8 @@ fn wrap(blocks: &[Vec<Span>], width: usize, indent: usize) -> Vec<Vec<Span>> {
     let mut line = Vec::new();
     let mut column = 0;
     for block in blocks {
-        // Padding between fields does not force a fitting value onto a new line.
+        // Padding between fields does not force a fitting value onto a new
+        // line.
         let mut block_width = 0;
         let mut trim = true;
         for span in block.iter().rev() {

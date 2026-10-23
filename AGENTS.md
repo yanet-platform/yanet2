@@ -19,7 +19,7 @@ make setup-debug | make setup-asan                 # debug / ASan+UBSan builds
 make test | make test-asan | make test-tsan        # Go + meson tests
 make test-functional                               # QEMU VM suite
 meson test -C build <name>; make dataplane && go test -count=1 ./modules/route/...
-gofmt -w . ; clang-format -i <file> ; cargo +nightly-2026-08-28 fmt ; cargo clippy
+gofmt -w . ; clang-format -i <file> ; cargo +nightly-2026-10-22 fmt ; cargo clippy
 make proto-lint | make lint-go | make lint/clang-syntax | make lint-commit
 make proto-go                                      # *.pb.go, needed before go lint locally
 make hooks                                         # install git hooks (once per clone)
@@ -89,4 +89,4 @@ Every writing task runs in a linked worktree on a task branch from confirmed `or
 
 ## Dependencies
 
-DPDK v23+ (submodule) · Go 1.27.1+ · Rust 1.88+ (rustfmt nightly-2026-08-28) · Meson 0.61+ · CMake 3.5+ · Protobuf 3.0+ (protoc-gen-go ≥ 1.36.5, protoc-gen-go-grpc ≥ 1.5.1).
+DPDK v23+ (submodule) · Go 1.27.1+ · Rust 1.99+ (rustfmt nightly-2026-10-22) · Meson 0.61+ · CMake 3.5+ · Protobuf 3.0+ (protoc-gen-go ≥ 1.36.5, protoc-gen-go-grpc ≥ 1.5.1).
