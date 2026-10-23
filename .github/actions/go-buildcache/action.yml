@@ -5,9 +5,6 @@ inputs:
   profile:
     description: 'Build profile: release, asan, or race'
     required: true
-  apt-fingerprint:
-    description: 'Package provenance from the cached APT wrapper'
-    required: true
 
 outputs:
   path:
@@ -28,22 +25,18 @@ runs:
       shell: bash
       env:
         CACHE_PROFILE: ${{ inputs.profile }}
-        APT_FINGERPRINT: ${{ inputs.apt-fingerprint }}
         CACHE_RUN_ID: ${{ github.run_id }}
       run: |
         set -euo pipefail
         case "$CACHE_PROFILE" in
-          release|asan|race)
-            if [[ ! "$APT_FINGERPRINT" =~ ^[0-9a-f]{64}$ ]]; then
-              echo "Go build cache requires an APT package fingerprint: $CACHE_PROFILE" >&2
-              exit 1
-            fi
-            ;;
+          release|asan|race) ;;
           *) echo "Unsupported Go build cache profile: $CACHE_PROFILE" >&2; exit 1 ;;
         esac
 
-        if [[ ! "${ImageVersion:-}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-          echo "Go build cache requires a hosted runner ImageVersion" >&2
+        # Packages restored from the runner's APT cache bypass the package
+        # database, so only a container image's packages identify the toolchain.
+        if [[ ! -f /.dockerenv ]]; then
+          echo "Go build cache requires a job that runs in a container" >&2
           exit 1
         fi
 
@@ -53,7 +46,7 @@ runs:
           *) echo "Go build cache must have an absolute path: $path" >&2; exit 1 ;;
         esac
 
-        # Hosted image and package provenance cover system native inputs.
+        # The image's packages cover every system native input.
         packages=$(dpkg-query -W -f='${Package}\t${Architecture}\t${Version}\t${Status}\n')
         if [[ -z "$packages" ]]; then
           echo "Go build cache requires installed package provenance" >&2
@@ -61,7 +54,7 @@ runs:
         fi
         native_hash=$(
           {
-            printf 'native-scope=hosted-packages-v2\0ImageVersion=%s\0APT-fingerprint=%s\0' "$ImageVersion" "$APT_FINGERPRINT"
+            printf 'native-scope=ci-image-packages-v1\0'
             printf '%s\n' "$packages" |
               LC_ALL=C sort
           } | sha256sum

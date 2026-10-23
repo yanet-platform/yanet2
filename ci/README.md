@@ -10,7 +10,17 @@ A job that names the image by digest runs exactly the toolchain behind that dige
 
 1. Change `ci/Dockerfile`: a package, a Go or Rust version, or the base image digest. The pull request builds and probes both architectures and lists the tool versions in its job summary, but publishes nothing.
 2. After the change reaches `main`, the workflow publishes the image and prints the new reference in its job summary. A manual run on `main` rebuilds it with the current versions of the listed packages and their dependencies; the rest of the base image changes only with its digest. Runs on other branches build and probe but never publish.
-3. Open a follow-up pull request that pins the new reference in the jobs that run in the image. Its CI is the first run on the new toolchain, and each job's first run on it starts with cold compiler caches.
+3. Open a follow-up pull request that pins the new reference wherever the image is pinned (below). Its CI is the first run on the new toolchain, and the compiler caches of each job stay warm only for what the bump left unchanged.
+
+## Where the image is pinned
+
+The native jobs of `.github/workflows/build.yml` and `.github/workflows/go-race.yml` name the image by digest in their `container:` key and pull it anonymously. A bump replaces the old digest in every reference at once:
+
+```
+grep -rl 'yanet2-ci@sha256:' .github/workflows | xargs sed -i 's/<old digest>/<new digest>/'
+```
+
+The Go build cache of these jobs is keyed on the image's package set, so a rebuild that leaves the packages unchanged keeps it.
 
 ## The gotcha
 

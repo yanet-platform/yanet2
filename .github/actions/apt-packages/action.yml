@@ -6,11 +6,6 @@ inputs:
     description: 'Space-separated list of apt packages to install'
     required: true
 
-outputs:
-  fingerprint:
-    description: 'Source-image namespace and actual restored package versions'
-    value: ${{ steps.fingerprint.outputs.fingerprint }}
-
 runs:
   using: 'composite'
   steps:
@@ -42,28 +37,6 @@ runs:
     #
     # Refreshing the index prevents a failed install from being cached as an empty result.
     - uses: awalsh128/cache-apt-pkgs-action@553a35bb8ebd9fcabcb1c9451aa4c98e1b4ca8a9 # v1.6.3
-      id: install
       with:
         packages: ${{ inputs.packages }}
         version: ${{ env.ACT && '2' || steps.namespace.outputs.version }}
-
-    - name: Fingerprint cached APT packages
-      if: ${{ !env.ACT }}
-      id: fingerprint
-      shell: bash
-      env:
-        APT_NAMESPACE: ${{ steps.namespace.outputs.version }}
-        APT_PACKAGES: ${{ steps.install.outputs.all-package-version-list }}
-      run: |
-        set -euo pipefail
-        if [[ -z "$APT_NAMESPACE" ]]; then
-          echo "APT package fingerprint requires its source-image namespace" >&2
-          exit 1
-        fi
-        fingerprint=$(printf 'apt-namespace=%s\0all-package-version-list=%s\0' "$APT_NAMESPACE" "$APT_PACKAGES" | sha256sum)
-        fingerprint=${fingerprint%% *}
-        if [[ ! "$fingerprint" =~ ^[0-9a-f]{64}$ ]]; then
-          echo "Invalid APT package fingerprint" >&2
-          exit 1
-        fi
-        echo "fingerprint=$fingerprint" >>"$GITHUB_OUTPUT"

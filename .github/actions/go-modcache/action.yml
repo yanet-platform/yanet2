@@ -1,15 +1,15 @@
 name: 'Go module cache (restore)'
 description: >-
   Restore the shared Go module cache under one key common to every Linux job,
-  so the same modules are stored once. These jobs turn setup-go's own cache
-  off and manage GOMODCACHE by hand because that cache bundles the build
-  cache with the module cache under a key no job can discriminate
-  (actions/setup-go#358). Restore-only: exactly one job saves under this key,
+  so the same modules are stored once. The action sets GOMODCACHE itself:
+  setup-go's own cache bundles the build cache with the module cache under a
+  key no job can discriminate (actions/setup-go#358), and jobs in the CI image
+  have no setup-go at all. Restore-only: exactly one job saves under this key,
   see the "Save Go module cache" step in build.yml.
 
 outputs:
   path:
-    description: 'Resolved GOMODCACHE directory'
+    description: 'Module cache path for the cache actions, relative to the workspace'
     value: ${{ steps.resolve.outputs.path }}
   key:
     description: 'Exact cache key for the current go.sum/go.mod'
@@ -26,10 +26,18 @@ runs:
       shell: bash
       env:
         CACHE_KEY: ${{ runner.os }}-go-mod-${{ hashFiles('**/go.sum') }}-${{ hashFiles('**/go.mod') }}
+      # The modules live in an ignored directory inside the workspace, so jobs on
+      # the runner and in a container unpack one cache entry to the same place.
+      #
+      # A cache archive stores paths relative to the workspace, which lies at a
+      # different depth on the runner and in a container job, and every job
+      # needs the same path string for the same cache version. Outside the
+      # workspace no string names one directory in both: an absolute path lands
+      # elsewhere, and saving refuses parent-directory segments.
       run: |
         set -euo pipefail
-        path=$(go env GOMODCACHE)
-        echo "path=$path" >>"$GITHUB_OUTPUT"
+        echo "GOMODCACHE=$GITHUB_WORKSPACE/.cache/go-mod" >>"$GITHUB_ENV"
+        echo "path=.cache/go-mod" >>"$GITHUB_OUTPUT"
         echo "key=$CACHE_KEY" >>"$GITHUB_OUTPUT"
 
     - name: Restore the module cache
