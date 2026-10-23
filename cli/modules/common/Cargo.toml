@@ -16,4 +16,4 @@ clap = { version = "4.5", features = ["derive", "wrap_help"] }
 clap_complete = { version = "4.5", features = ["unstable-dynamic"] }
 tonic = { version = "0.14", features = ["gzip", "zstd"] }
 bytesize = "2"
-tabled = { version = "0.21", default-features = false, features = ["ansi", "derive"] }
+tabled = { version = "0.22", default-features = false, features = ["ansi", "derive"] }
