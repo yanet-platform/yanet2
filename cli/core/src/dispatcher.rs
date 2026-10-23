@@ -83,7 +83,8 @@ pub fn locate_modules(prefix: &str) -> Result<HashSet<String>, Box<dyn Error>> {
         let entries = match fs::read_dir(&path) {
             Ok(entries) => entries,
             Err(err) => {
-                // Continue on error, because some directories may not be readable.
+                // Continue on error, because some directories may not be
+                // readable.
                 log::trace!("failed to read directory {}: {err}", path.display());
                 continue;
             }
@@ -92,7 +93,8 @@ pub fn locate_modules(prefix: &str) -> Result<HashSet<String>, Box<dyn Error>> {
             let entry = match entry {
                 Ok(entry) => entry,
                 Err(err) => {
-                    // Continue on error, because some entries may not be readable.
+                    // Continue on error, because some entries may not be
+                    // readable.
                     log::trace!("failed to read entry in directory {}: {err}", path.display());
                     continue;
                 }

@@ -359,7 +359,8 @@ fn format_compact(n: u64) -> String {
 
     let n_f = n as f64;
 
-    // Use compact notation for numbers >= 100,000 to keep table width manageable
+    // Use compact notation for numbers >= 100,000 to keep table width
+    // manageable
     if n_f >= TRILLION {
         format!("{:.2}T", n_f / TRILLION)
     } else if n_f >= BILLION {

@@ -25,7 +25,7 @@ version = "0.2.0"
 edition = "2024"
 publish = false
 
-rust-version = "1.88"
+rust-version = "1.99"
 
 [lints]
 workspace = true
@@ -302,7 +302,7 @@ Shell completions need nothing: the packaging script emits
 ## Gates before review
 
 ```bash
-cargo +nightly-2026-08-28 fmt -p yanet-cli-<suffix>
+cargo +nightly-2026-10-22 fmt -p yanet-cli-<suffix>
 cargo clippy -p yanet-cli-<suffix> --all-targets
 cargo build --release -p yanet-cli-<suffix>
 cargo test -p yanet-cli-<suffix>
