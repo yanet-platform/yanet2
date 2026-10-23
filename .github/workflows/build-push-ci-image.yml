@@ -1,0 +1,185 @@
+name: Build and push CI image
+
+# Builds the toolchain image of ci/Dockerfile on amd64 and arm64.
+#
+# Every run builds and probes the image; only a run on main publishes one
+# multi-architecture reference. Jobs pin the image by digest, so publishing
+# changes nothing until a follow-up change pins the reference from the job
+# summary (see ci/README.md).
+on:
+  workflow_dispatch:
+  push:
+    branches: ["main"]
+    paths:
+      - "ci/**"
+      - "!ci/README.md"
+      - ".github/workflows/build-push-ci-image.yml"
+  pull_request:
+    paths:
+      - "ci/**"
+      - "!ci/README.md"
+      - ".github/workflows/build-push-ci-image.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  # A pull request supersedes its own earlier run; a publishing run never
+  # cancels another.
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
+env:
+  IMAGE: ghcr.io/yanet-platform/yanet2-ci
+
+jobs:
+  build:
+    name: Build ${{ matrix.arch }} image
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4
+        if: github.ref == 'refs/heads/main'
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
+
+      - name: Build the image
+        if: github.ref != 'refs/heads/main'
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
+        with:
+          context: ci
+          target: ci
+          platforms: linux/${{ matrix.arch }}
+          load: true
+          tags: yanet2-ci:check
+
+      # Each architecture is pushed untagged; the merge job names them together.
+      - name: Build and push by digest
+        id: push
+        if: github.ref == 'refs/heads/main'
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
+        with:
+          context: ci
+          target: ci
+          platforms: linux/${{ matrix.arch }}
+          provenance: false
+          outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=true
+
+      - name: Check the toolchain
+        env:
+          ARCH: ${{ matrix.arch }}
+          DIGEST: ${{ steps.push.outputs.digest }}
+        run: |
+          set -euo pipefail
+          ref=yanet2-ci:check
+          if [[ -n $DIGEST ]]; then
+            ref="$IMAGE@$DIGEST"
+          fi
+          # Each probe fails when the image lacks something the builds rely on:
+          # the well-known protobuf types, libFuzzer, the sanitizer runtimes.
+          docker run --rm -i "$ref" sh -eux <<'EOF'
+          cd "$(mktemp -d)"
+          printf '%s\n' 'syntax = "proto3";' 'import "google/protobuf/timestamp.proto";' 'message Probe { google.protobuf.Timestamp at = 1; }' >probe.proto
+          protoc -I. --descriptor_set_out=/dev/null probe.proto
+          printf '%s\n' '#include <stddef.h>' '#include <stdint.h>' 'int LLVMFuzzerTestOneInput(const uint8_t *d, size_t n) { (void)d; (void)n; return 0; }' >fuzz.c
+          clang -fsanitize=fuzzer,address,undefined -o fuzz fuzz.c
+          ./fuzz -runs=1
+          printf '%s\n' 'int main(void) { return 0; }' >main.c
+          gcc -fsanitize=address,undefined -o main main.c
+          ./main
+          EOF
+          {
+            echo "### $ARCH image"
+            echo '```'
+            docker run --rm "$ref" sh -euc '
+              gcc --version | head -n1
+              clang --version | head -n1
+              meson --version
+              cmake --version | head -n1
+              go version
+              rustc --version
+              cargo --version
+              protoc --version
+              protoc-gen-go --version
+              protoc-gen-go-grpc --version
+              ccache --version | head -n1
+            '
+            echo '```'
+          } >>"$GITHUB_STEP_SUMMARY"
+
+      - name: Record the digest
+        if: github.ref == 'refs/heads/main'
+        env:
+          DIGEST: ${{ steps.push.outputs.digest }}
+        run: |
+          mkdir -p digests
+          touch "digests/${DIGEST#sha256:}"
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: github.ref == 'refs/heads/main'
+        with:
+          name: digest-${{ matrix.arch }}
+          path: digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  merge:
+    name: Publish the multi-architecture image
+    if: github.ref == 'refs/heads/main'
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: digest-*
+          merge-multiple: true
+          path: digests
+
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
+
+      - name: Create the manifest list
+        working-directory: digests
+        env:
+          TAG: ${{ env.IMAGE }}:sha-${{ github.sha }}
+        run: |
+          set -euo pipefail
+          refs=()
+          for digest in *; do
+            refs+=("$IMAGE@sha256:$digest")
+          done
+          [[ ${#refs[@]} -eq 2 ]] || { echo "expected 2 architecture digests, got ${#refs[@]}" >&2; exit 1; }
+          docker buildx imagetools create -t "$TAG" "${refs[@]}"
+          digest=$(docker buildx imagetools inspect "$TAG" --format '{{.Manifest.Digest}}')
+          {
+            echo "### CI image published"
+            echo "- Reference: \`$IMAGE@$digest\`"
+            echo "- Pin it in the jobs that run in the image (see ci/README.md)."
+          } >>"$GITHUB_STEP_SUMMARY"
