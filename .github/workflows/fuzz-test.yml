@@ -30,7 +30,7 @@ jobs:
           sudo apt-get clean
           docker rmi $(docker images -q) 2>/dev/null || true
 
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           submodules: true
 
@@ -39,7 +39,7 @@ jobs:
         with:
           packages: meson clang cmake python3-pyelftools libnuma-dev libpcap-dev git protobuf-compiler jq ccache
 
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
           go-version: "1.27.x"
           cache: false
@@ -50,7 +50,7 @@ jobs:
       - name: Install Go Protobuf Plugins
         uses: ./.github/actions/protoc-plugins
 
-      - uses: hendrikmuhs/ccache-action@v1.2.23
+      - uses: hendrikmuhs/ccache-action@d62db5f07c26379fc4b4e0916f098a92573c3b03 # v1.2.23
         name: ccache
         with:
           key: ${{ runner.os }}-fuzz-build-cache
@@ -74,7 +74,7 @@ jobs:
           echo "targets=$targets" >>"$GITHUB_OUTPUT"
 
       - name: Upload fuzz binaries
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
         with:
           name: fuzz-binaries
           path: fuzz-out/
@@ -94,13 +94,13 @@ jobs:
 
     steps:
       - name: Download fuzz binaries
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
         with:
           name: fuzz-binaries
           path: fuzz-binaries/
 
       - name: Restore corpus
-        uses: actions/cache/restore@v5
+        uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5
         with:
           path: corpus
           key: fuzz-corpus-${{ matrix.module }}-${{ github.run_id }}-${{ github.run_attempt }}
@@ -117,14 +117,14 @@ jobs:
       # A crash still grows the corpus, so it is kept either way.
       - name: Save corpus
         if: ${{ !cancelled() }}
-        uses: actions/cache/save@v5
+        uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25 # v5
         with:
           path: corpus
           key: fuzz-corpus-${{ matrix.module }}-${{ github.run_id }}-${{ github.run_attempt }}
 
       - name: Upload crashing inputs
         if: failure()
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
         with:
           name: fuzz-findings-${{ matrix.module }}
           path: findings/
@@ -138,7 +138,7 @@ jobs:
       targets: ${{ steps.list.outputs.targets }}
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
 
       - name: List Go fuzz targets
         id: list
@@ -166,7 +166,7 @@ jobs:
         target: ${{ fromJSON(needs.go-fuzz-targets.outputs.targets) }}
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           submodules: true
 
@@ -175,7 +175,7 @@ jobs:
         with:
           packages: meson clang cmake python3-pyelftools libnuma-dev libpcap-dev git protobuf-compiler jq ccache
 
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
           go-version: "1.27.x"
           cache: false
@@ -187,7 +187,7 @@ jobs:
         uses: ./.github/actions/protoc-plugins
 
       # The C fuzz build compiles the same tree and saves this cache.
-      - uses: hendrikmuhs/ccache-action@v1.2.23
+      - uses: hendrikmuhs/ccache-action@d62db5f07c26379fc4b4e0916f098a92573c3b03 # v1.2.23
         name: ccache
         with:
           key: ${{ runner.os }}-fuzz-build-cache
@@ -213,7 +213,7 @@ jobs:
         run: go test "$FUZZ_PKG" -run '^$' -fuzz "^${FUZZ_FUNC}\$" -fuzztime 10m
 
       - name: Upload Go fuzz failure testdata
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
         if: failure()
         with:
           name: go-fuzz-testdata-${{ matrix.target.func }}
