@@ -260,16 +260,15 @@ cp_config_gen_release(
 
 	cp_config_gen_free(cp_config, config_gen);
 
-	// The teardown may have left a superseded agent unreferenced. Reclaim
-	// it opportunistically through the agent lock, without waiting on an
-	// active update: the sweep needs no configuration lock, and a busy
-	// agent lock means its holder — an attach, an extension or the
-	// listing — is on a path that either sweeps before releasing it or
-	// leaves reclamation to the next mutation's sweep.
-	if (spinlock_try_lock(&cp_config->agent_lock)) {
-		cp_config_reclaim_unused_agents_locked(cp_config);
-		spinlock_unlock(&cp_config->agent_lock);
-	}
+	// The teardown may have left a superseded agent unreferenced, and
+	// this release is the last event guaranteed to observe it, so the
+	// sweep waits for the agent lock rather than leaving reclamation to
+	// a later mutation. Blocking is safe: no agent-lock holder ever
+	// waits for the configuration lock this thread may itself hold, and
+	// every agent-lock section is short.
+	spinlock_lock(&cp_config->agent_lock);
+	cp_config_reclaim_unused_agents_locked(cp_config);
+	spinlock_unlock(&cp_config->agent_lock);
 }
 
 // Publishes a fully built configuration generation and retires the one it
@@ -377,7 +376,10 @@ cp_config_update_modules(
 	// Refuse modules owned by a superseded agent: creating through a
 	// superseded agent would raise a predecessor's loaded count from
 	// zero and race the sweep's reclamation, and the superseding attach
-	// already ended the owner's lifetime anyway.
+	// already ended the owner's lifetime anyway. The owner and its name
+	// live in the predecessor's arena, which the sweep may free under
+	// the agent lock alone, so the reads take that lock too.
+	spinlock_lock(&cp_config->agent_lock);
 	for (uint64_t idx = 0; idx < module_count; ++idx) {
 		struct agent *owner = ADDR_OF(&cp_modules[idx]->agent);
 		if (owner != NULL && !agent_is_current(cp_config, owner)) {
@@ -390,9 +392,11 @@ cp_config_update_modules(
 				cp_modules[idx]->name,
 				owner->name
 			);
+			spinlock_unlock(&cp_config->agent_lock);
 			goto error_unlock;
 		}
 	}
+	spinlock_unlock(&cp_config->agent_lock);
 
 	struct cp_config_gen *old_config_gen = cp_config_current_gen(cp_config);
 	struct cp_config_gen *new_config_gen =
@@ -808,7 +812,9 @@ cp_config_update_devices(
 	cp_config_lock(cp_config);
 
 	// Refuse devices owned by a superseded agent; see the module update
-	// path for why creation through a predecessor is refused.
+	// path for why creation through a predecessor is refused and why
+	// the owner reads take the agent lock.
+	spinlock_lock(&cp_config->agent_lock);
 	for (uint64_t idx = 0; idx < device_count; ++idx) {
 		struct agent *owner = ADDR_OF(&devices[idx]->agent);
 		if (owner != NULL && !agent_is_current(cp_config, owner)) {
@@ -819,9 +825,11 @@ cp_config_update_devices(
 				devices[idx]->name,
 				owner->name
 			);
+			spinlock_unlock(&cp_config->agent_lock);
 			goto error_unlock;
 		}
 	}
+	spinlock_unlock(&cp_config->agent_lock);
 
 	struct cp_config_gen *old_config_gen = cp_config_current_gen(cp_config);
 	struct cp_config_gen *new_config_gen =
@@ -930,7 +938,9 @@ cp_config_update_objects(
 	cp_config_lock(cp_config);
 
 	// Refuse objects owned by a superseded agent; see the module update
-	// path for why creation through a predecessor is refused.
+	// path for why creation through a predecessor is refused and why
+	// the owner reads take the agent lock.
+	spinlock_lock(&cp_config->agent_lock);
 	for (uint64_t idx = 0; idx < object_count; ++idx) {
 		struct agent *owner = ADDR_OF(&objects[idx]->agent);
 		if (owner != NULL && !agent_is_current(cp_config, owner)) {
@@ -943,9 +953,11 @@ cp_config_update_objects(
 				objects[idx]->name,
 				owner->name
 			);
+			spinlock_unlock(&cp_config->agent_lock);
 			goto error_unlock;
 		}
 	}
+	spinlock_unlock(&cp_config->agent_lock);
 
 	struct cp_config_gen *old_config_gen = cp_config_current_gen(cp_config);
 	struct cp_config_gen *new_config_gen =
