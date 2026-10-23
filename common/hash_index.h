@@ -159,6 +159,64 @@ hash_index_rehash(struct hash_index *hash_index, uint32_t new_capacity) {
 	return 0;
 }
 
+// Cyclic distance from one slot to another, in probe direction,
+// normalised against the slot count.
+static inline uint32_t
+hash_index_distance(uint32_t from, uint32_t to, uint32_t slots) {
+	return to >= from ? to - from : (uint32_t)(to + (uint64_t)slots - from);
+}
+
+// Remove the entry stored under hash with the exact value.
+//
+// Entries displaced past the freed slot shift back when their probe path
+// crosses it, so every remaining entry stays reachable without
+// tombstones. Returns 0 when an entry was removed, -1 when no slot
+// under hash carries the value.
+static inline int
+hash_index_remove(
+	struct hash_index *hash_index, uint32_t hash, uint32_t value
+) {
+	if (!hash_index->capacity) {
+		return -1;
+	}
+
+	uint32_t slots = hash_index->capacity * HASH_INDEX_SPARSE_FACTOR;
+	uint32_t bucket = hash % slots;
+	struct hash_index_entry *entries = ADDR_OF(&hash_index->entries);
+
+	while (entries[bucket].value != HASH_INDEX_INVALID) {
+		if (entries[bucket].hash == hash &&
+		    entries[bucket].value == value) {
+			break;
+		}
+		bucket = (bucket + 1) % slots;
+	}
+	if (entries[bucket].value == HASH_INDEX_INVALID) {
+		return -1;
+	}
+
+	entries[bucket].value = HASH_INDEX_INVALID;
+
+	uint32_t hole = bucket;
+	uint32_t candidate = (bucket + 1) % slots;
+	while (entries[candidate].value != HASH_INDEX_INVALID) {
+		uint32_t home = entries[candidate].hash % slots;
+		// An entry whose probe path from its home bucket meets the
+		// freed slot before its current position would become
+		// unreachable, so it moves back into the freed slot.
+		if (hash_index_distance(home, hole, slots) <
+		    hash_index_distance(home, candidate, slots)) {
+			entries[hole] = entries[candidate];
+			entries[candidate].value = HASH_INDEX_INVALID;
+			hole = candidate;
+		}
+		candidate = (candidate + 1) % slots;
+	}
+
+	hash_index->count -= 1;
+	return 0;
+}
+
 // Resolve the value stored under hash whose key the callback accepts.
 //
 // The hash must be derived from the key exactly as at insert time: slots
