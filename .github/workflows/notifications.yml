@@ -9,21 +9,29 @@ jobs:
   notify:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-slim
+    timeout-minutes: 5
     env:
       Message: |
         🚀 PR created by ${{ github.actor }}:
         ${{ github.event.pull_request.title }}
         URL: ${{ github.event.pull_request.html_url }}
     steps:
+      # Titles may contain characters such as & or +, so every field is encoded.
       - name: Send PR notification to topic
+        env:
+          BOT_TOKEN: ${{ secrets.TELEGRAM_YANET_NOTIFICATIONS_BOT_TOKEN }}
+          CHAT_ID: ${{ vars.TELEGRAM_YANET_CHAT_ID }}
+          TOPIC_ID: ${{ vars.TELEGRAM_YANET_PR_TOPIC_ID }}
         run: |
-          curl -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_YANET_NOTIFICATIONS_BOT_TOKEN }}/sendMessage" \
-          -d "chat_id=${{ vars.TELEGRAM_YANET_CHAT_ID }}" -d "message_thread_id=${{ vars.TELEGRAM_YANET_PR_TOPIC_ID }}"   \
-          -d "text=$Message"
+          curl -X POST "https://api.telegram.org/bot${BOT_TOKEN}/sendMessage" \
+            --data-urlencode "chat_id=${CHAT_ID}" \
+            --data-urlencode "message_thread_id=${TOPIC_ID}" \
+            --data-urlencode "text=${Message}"
 
   notify_issue:
     if: github.event_name == 'issues'
     runs-on: ubuntu-slim
+    timeout-minutes: 5
     env:
       Message: |
         📝 Issue ${{ github.event.action }}:
@@ -31,7 +39,12 @@ jobs:
         URL: ${{ github.event.issue.html_url }}
     steps:
       - name: Send issue notification to topic
+        env:
+          BOT_TOKEN: ${{ secrets.TELEGRAM_YANET_NOTIFICATIONS_BOT_TOKEN }}
+          CHAT_ID: ${{ vars.TELEGRAM_YANET_CHAT_ID }}
+          TOPIC_ID: ${{ vars.TELEGRAM_YANET_ISSUES_TOPIC_ID }}
         run: |
-          curl -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_YANET_NOTIFICATIONS_BOT_TOKEN }}/sendMessage" \
-          -d "chat_id=${{ vars.TELEGRAM_YANET_CHAT_ID }}" -d "message_thread_id=${{ vars.TELEGRAM_YANET_ISSUES_TOPIC_ID }}"   \
-          --data-urlencode "text=$Message"
+          curl -X POST "https://api.telegram.org/bot${BOT_TOKEN}/sendMessage" \
+            --data-urlencode "chat_id=${CHAT_ID}" \
+            --data-urlencode "message_thread_id=${TOPIC_ID}" \
+            --data-urlencode "text=${Message}"

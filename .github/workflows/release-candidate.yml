@@ -23,6 +23,7 @@ concurrency:
 jobs:
   preflight:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     outputs:
       source_sha: ${{ steps.check.outputs.source_sha }}
       package_version: ${{ steps.check.outputs.package_version }}

@@ -21,6 +21,7 @@ concurrency:
 jobs:
   preflight:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     environment: release-branch-updater
     permissions:
       contents: read
@@ -147,6 +148,7 @@ jobs:
   release:
     needs: [preflight, images]
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     permissions:
       contents: write
     env:

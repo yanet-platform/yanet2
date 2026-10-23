@@ -35,6 +35,7 @@ jobs:
   build-images:
     name: Build ${{ matrix.component }} image
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     permissions:
       contents: read
       packages: write
@@ -95,6 +96,7 @@ jobs:
            (inputs.neighbour_sidecar_prebuilt && needs.build-neighbour-sidecar.result == 'skipped')) }}
     needs: [build-images, build-neighbour-sidecar]
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     permissions:
       contents: read
       packages: write
