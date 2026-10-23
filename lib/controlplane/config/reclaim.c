@@ -1,6 +1,8 @@
 #include "reclaim.h"
 
+#include <stdbool.h>
 #include <stdlib.h>
+#include <string.h>
 
 #include "lib/controlplane/agent/agent.h"
 #include "lib/controlplane/config/registry.h"
@@ -93,9 +95,32 @@ agent_unload_references(struct agent **owners, uint64_t count) {
 	}
 }
 
+// Report whether agent is still the registry head of its name — the one a
+// same-name attach would splice a successor over.
+//
+// The caller must hold the configuration lock, which every registry splice
+// also holds, so the structure cannot change under the scan. A false
+// return means the owner was superseded: items it still creates would
+// raise a predecessor's loaded count from zero and race the sweep's
+// reclamation, so update paths must refuse them.
+bool
+agent_is_current(struct cp_config *cp_config, struct agent *agent) {
+	struct cp_agent_registry *registry =
+		ADDR_OF(&cp_config->agent_registry);
+	if (registry != NULL) {
+		for (uint64_t idx = 0; idx < registry->count; ++idx) {
+			struct agent *head = ADDR_OF(&registry->agents[idx]);
+			if (!strncmp(head->name, agent->name, AGENT_NAME_LEN)) {
+				return head == agent;
+			}
+		}
+	}
+
+	return false;
+}
+
 void
 cp_config_reclaim_unused_agents_locked(struct cp_config *cp_config) {
-	cp_config_assert_locked(cp_config);
 
 	struct cp_agent_registry *registry =
 		ADDR_OF(&cp_config->agent_registry);

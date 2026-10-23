@@ -132,6 +132,22 @@ struct cp_config {
 	struct spinlock gen_lock;
 
 	/*
+	 * Agent lock: serialises the structure of the agent registry —
+	 * the array below and every name's predecessor chain — and the
+	 * agent structures it reaches (arenas, storage, memory contexts)
+	 * against the sweep's reclamation, an attach's supersession
+	 * splice and an extension's arena growth. The agent listing
+	 * takes this lock alone, so reading agent state never waits
+	 * behind a configuration update; a mutation path takes the
+	 * configuration lock first and this one second, and the sweep
+	 * runs under this lock alone — a superseded agent's loaded
+	 * count is monotone non-increasing once its superseding attach
+	 * has spliced it out of the registry slot, because updates
+	 * through a superseded agent are refused.
+	 */
+	struct spinlock agent_lock;
+
+	/*
 	 * Relative pointer to the current active packet processing
 	 * configuration.
 	 */

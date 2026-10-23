@@ -54,6 +54,19 @@ spinlock_lock(struct spinlock *lock) {
 	}
 }
 
+/* Try to acquire the lock without waiting; true when it was acquired */
+static inline bool
+spinlock_try_lock(struct spinlock *lock) {
+	bool expected = false;
+	return atomic_compare_exchange_strong_explicit(
+		&lock->locked,
+		&expected,
+		true,
+		memory_order_acquire,
+		memory_order_relaxed
+	);
+}
+
 /* Release the lock */
 static inline void
 spinlock_unlock(struct spinlock *lock) {
