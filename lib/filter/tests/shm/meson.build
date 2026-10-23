@@ -11,7 +11,6 @@ deps = [
 compiler = executable('compiler',
     ['compiler.c'],
     c_args: yanet_test_c_args,
-    link_args: yanet_link_args,
     dependencies: deps,
     include_directories: yanet_rootdir,
     link_language: 'c'
@@ -20,7 +19,6 @@ compiler = executable('compiler',
 filter = executable('filter',
     ['filter.c'],
     c_args: yanet_test_c_args,
-    link_args: yanet_link_args,
     dependencies: deps,
     include_directories: yanet_rootdir,
     link_language: 'c'

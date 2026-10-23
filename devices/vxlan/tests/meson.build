@@ -1,8 +1,6 @@
 vxlan_leak_test = executable(
   'vxlan_leak_test',
   'leak_test.c',
-  c_args: yanet_c_args,
-  link_args: yanet_link_args,
   dependencies: [
     lib_dev_vxlan_api_dep,
     lib_config_cp_dep,
@@ -18,8 +16,7 @@ test('vxlan_leak', vxlan_leak_test, suite: 'devices')
 vxlan_dataplane_test = executable(
   'vxlan_dataplane_test',
   'dataplane_test.c',
-  c_args: yanet_c_args,
-  link_args: yanet_link_args + [
+  link_args: [
     '-Wl,-E',
     '-Wl,--undefined=new_device_plain',
     '-Wl,--export-dynamic-symbol=new_device_plain',

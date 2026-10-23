@@ -20,8 +20,6 @@ dependencies = [
 l3b_test = executable(
   'l3b_test',
   'l3b_test.c',
-  c_args: yanet_c_args,
-  link_args: yanet_link_args,
   include_directories: [yanet_rootdir, '../../dataplane'],
   dependencies: dependencies,
 )
@@ -31,8 +29,6 @@ test('l3b', l3b_test, suite: 'l3b')
 l3b_guard_test = executable(
   'l3b_guard_test',
   'l3b_guard_test.c',
-  c_args: yanet_c_args,
-  link_args: yanet_link_args,
   include_directories: [yanet_rootdir, '../../dataplane'],
   dependencies: dependencies,
 )

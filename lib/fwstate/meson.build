@@ -14,8 +14,6 @@ sources = files(
 lib_fwstate = static_library(
   'fwstate',
   sources,
-  c_args: yanet_c_args,
-  link_args: yanet_link_args,
   dependencies: dependencies,
   install: false,
 )
@@ -26,7 +24,6 @@ lib_fwstate = static_library(
 lib_fwstate_registry = static_library(
   'fwstate_registry',
   'registry.c',
-  c_args: yanet_c_args,
   # Headers only: whole-archive propagation must not drag the dataplane
   # dependency closure into consumers.
   dependencies: [lib_statemap_dep],

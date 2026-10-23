@@ -14,8 +14,6 @@ dp_sources = files(
 lib_fwstate_dp = static_library(
   'fwstate_dp',
   dp_sources,
-  c_args: yanet_c_args,
-  link_args: yanet_link_args,
   dependencies: dp_dependencies,
   install: false,
 )

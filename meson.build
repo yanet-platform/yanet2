@@ -306,6 +306,9 @@ if host_machine.cpu_family() == 'aarch64'
   yanet_project_args += yanet_isa_flag
 endif
 add_project_arguments(yanet_project_args, language: 'c')
+# Project arguments stay out of subprojects such as DPDK.
+add_project_arguments(yanet_c_args, language: 'c')
+add_project_link_arguments(yanet_link_args, language: 'c')
 
 yanet_target = host_machine.cpu_family()
 if yanet_isa_flag != ''

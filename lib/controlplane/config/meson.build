@@ -21,8 +21,6 @@ sources = files(
 lib_config_cp = static_library(
   'config_cp',
   sources,
-  c_args: yanet_c_args,
-  link_args: yanet_link_args,
   dependencies: dependencies,
   install: false,
 )

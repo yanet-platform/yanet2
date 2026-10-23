@@ -13,8 +13,6 @@ dp_sources = files(
 lib_route_mpls_dp = static_library(
   'route_mpls_dp',
   dp_sources,
-  c_args: yanet_c_args,
-  link_args: yanet_link_args,
   dependencies: dp_dependencies,
   install: false,
 )

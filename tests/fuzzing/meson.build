@@ -16,8 +16,8 @@ foreach target_name, target_info : fuzzing_targets
 
   exe = executable(
     target_name,
-    c_args: yanet_c_args + fuzz_args,
-    link_args: yanet_link_args + fuzz_args,
+    c_args: fuzz_args,
+    link_args: fuzz_args,
     sources: [target_info['source']] + nofuzz_sources,
     dependencies: [libdpdk_dep] + target_info['deps'],
     include_directories: [yanet_rootdir, target_info['module_dir']],

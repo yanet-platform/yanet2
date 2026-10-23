@@ -15,8 +15,6 @@ dp_sources = files(
 lib_acl_dp = static_library(
   'acl_dp',
   dp_sources,
-  c_args: yanet_c_args,
-  link_args: yanet_link_args,
   dependencies: dp_dependencies,
   install: false,
 )

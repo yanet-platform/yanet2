@@ -35,8 +35,6 @@ api_sources = files('controlplane.c')
 lib_pdump_cp = static_library(
   'pdump_cp',
   api_sources,
-  c_args: yanet_c_args,
-  link_args: yanet_link_args,
   dependencies: cp_dependencies,
   include_directories: [yanet_rootdir, pdump_dataplane_inc],
   install: false,
