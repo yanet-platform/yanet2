@@ -24,9 +24,14 @@ struct eq_context {
 	uint32_t want_tag;
 };
 
+// Equality callbacks received so far; reset and asserted by the test
+// proving that foreign slots bypass the callback.
+static uint32_t match_item_calls;
+
 static int
 match_item(uint32_t value, const void *data) {
 	const struct eq_context *ctx = (const struct eq_context *)data;
+	match_item_calls += 1;
 	if (items[value].key == ctx->want_key &&
 	    items[value].tag == ctx->want_tag) {
 		return 0;
@@ -280,6 +285,63 @@ test_same_hash_multiple_values(void) {
 	return 0;
 }
 
+// Inserts two entries whose hashes differ yet share a bucket, then
+// confirms each lookup still reaches its own entry and consults the
+// equality callback for that entry alone: the foreign slot is bypassed
+// without a callback round.
+static int
+test_bucket_collision_distinct_hashes(void) {
+	struct fixture fix;
+	if (fixture_init(&fix, ITEM_COUNT) != 0) {
+		return TEST_FAILED;
+	}
+
+	uint32_t slots = ITEM_COUNT * HASH_INDEX_SPARSE_FACTOR;
+	uint32_t far_hash = 1 + slots;
+
+	items[0] = (struct test_item){.key = 10, .tag = 1};
+	items[1] = (struct test_item){.key = 20, .tag = 2};
+
+	TEST_ASSERT(
+		hash_index_insert(&fix.index, far_hash, 0) == 0,
+		"far insert failed"
+	);
+	TEST_ASSERT(
+		hash_index_insert(&fix.index, 1, 1) == 0, "near insert failed"
+	);
+	TEST_ASSERT(fix.index.count == 2, "count must be 2");
+
+	struct eq_context far_ctx = {.want_key = 10, .want_tag = 1};
+	match_item_calls = 0;
+	uint32_t result =
+		hash_index_lookup(&fix.index, far_hash, match_item, &far_ctx);
+	TEST_ASSERT_EQUAL(0, result, "far-hash entry must be found");
+	TEST_ASSERT_EQUAL(
+		1, match_item_calls, "far-hash lookup consults one slot"
+	);
+
+	struct eq_context near_ctx = {.want_key = 20, .want_tag = 2};
+	match_item_calls = 0;
+	result = hash_index_lookup(&fix.index, 1, match_item, &near_ctx);
+	TEST_ASSERT_EQUAL(1, result, "entry behind a foreign slot");
+	TEST_ASSERT_EQUAL(
+		1, match_item_calls, "foreign slot must bypass the callback"
+	);
+
+	struct eq_context miss = {.want_key = 30, .want_tag = 3};
+	match_item_calls = 0;
+	result = hash_index_lookup(&fix.index, 1, match_item, &miss);
+	TEST_ASSERT_EQUAL(
+		HASH_INDEX_INVALID, result, "absent key behind a foreign slot"
+	);
+	TEST_ASSERT_EQUAL(
+		1, match_item_calls, "absent key consults its own slot only"
+	);
+
+	fixture_fini(&fix);
+	return 0;
+}
+
 // Confirms that hash_index_fini is idempotent and safe to call twice.
 static int
 test_fini_idempotent(void) {
@@ -330,6 +392,10 @@ main(void) {
 	}
 	if (test_same_hash_multiple_values() != 0) {
 		LOG(ERROR, "test_same_hash_multiple_values failed");
+		return -1;
+	}
+	if (test_bucket_collision_distinct_hashes() != 0) {
+		LOG(ERROR, "test_bucket_collision_distinct_hashes failed");
 		return -1;
 	}
 	if (test_fini_idempotent() != 0) {

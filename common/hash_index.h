@@ -8,18 +8,28 @@
 #define HASH_INDEX_INVALID 0xffffffff
 #define HASH_INDEX_SPARSE_FACTOR 4
 
+// One probe-table slot: the originating hash next to the value.
+//
+// Lookups compare the stored hash before invoking the equality callback,
+// so probing past a foreign slot costs a compare instead of a callback
+// round into the external array the value indexes.
+struct hash_index_entry {
+	uint32_t hash;
+	uint32_t value;
+};
+
 // Equality predicate invoked during hash_index_lookup.
 //
-// Called for every probed slot until it returns 0 (match) or an empty slot
-// is reached. value is the slot payload, typically an index into an
-// external values array. data is the opaque pointer passed alongside the
-// callback from the lookup call site. Return 0 to accept the slot,
-// non-zero to keep probing.
+// Called for every probed slot carrying the looked-up hash until it
+// returns 0 (match) or an empty slot is reached. value is the slot
+// payload, typically an index into an external values array. data is the
+// opaque pointer passed alongside the callback from the lookup call site.
+// Return 0 to accept the slot, non-zero to keep probing.
 typedef int (*hash_index_eq_func)(uint32_t value, const void *data);
 
 struct hash_index {
 	struct memory_context *memory_context;
-	uint32_t *entries;
+	struct hash_index_entry *entries;
 	uint32_t count;
 	uint32_t capacity;
 };
@@ -40,10 +50,12 @@ hash_index_init(
 		return 0;
 	}
 
-	uint32_t *entries = (uint32_t *)memory_balloc(
-		ADDR_OF(&hash_index->memory_context),
-		sizeof(uint32_t) * capacity * HASH_INDEX_SPARSE_FACTOR
-	);
+	struct hash_index_entry *entries =
+		(struct hash_index_entry *)memory_balloc(
+			ADDR_OF(&hash_index->memory_context),
+			sizeof(struct hash_index_entry) * capacity *
+				HASH_INDEX_SPARSE_FACTOR
+		);
 	if (entries == NULL) {
 		SET_OFFSET_OF(&hash_index->entries, NULL);
 		hash_index->capacity = 0;
@@ -53,7 +65,8 @@ hash_index_init(
 
 	memset(entries,
 	       0xff,
-	       sizeof(uint32_t) * capacity * HASH_INDEX_SPARSE_FACTOR);
+	       sizeof(struct hash_index_entry) * capacity *
+		       HASH_INDEX_SPARSE_FACTOR);
 
 	SET_OFFSET_OF(&hash_index->entries, entries);
 	hash_index->capacity = capacity;
@@ -64,7 +77,7 @@ hash_index_init(
 
 static inline void
 hash_index_fini(struct hash_index *hash_index) {
-	uint32_t *entries = ADDR_OF(&hash_index->entries);
+	struct hash_index_entry *entries = ADDR_OF(&hash_index->entries);
 	if (entries == NULL) {
 		return;
 	}
@@ -72,7 +85,7 @@ hash_index_fini(struct hash_index *hash_index) {
 	memory_bfree(
 		ADDR_OF(&hash_index->memory_context),
 		entries,
-		sizeof(uint32_t) * hash_index->capacity *
+		sizeof(struct hash_index_entry) * hash_index->capacity *
 			HASH_INDEX_SPARSE_FACTOR
 	);
 	SET_OFFSET_OF(&hash_index->entries, NULL);
@@ -80,6 +93,10 @@ hash_index_fini(struct hash_index *hash_index) {
 	hash_index->count = 0;
 }
 
+// Resolve the value stored under hash whose key the callback accepts.
+//
+// The hash must be derived from the key exactly as at insert time: slots
+// storing a different hash are skipped without consulting the callback.
 static inline uint32_t
 hash_index_lookup(
 	const struct hash_index *hash_index,
@@ -93,11 +110,12 @@ hash_index_lookup(
 
 	uint32_t bucket =
 		hash % (hash_index->capacity * HASH_INDEX_SPARSE_FACTOR);
-	const uint32_t *entries = ADDR_OF(&hash_index->entries);
+	const struct hash_index_entry *entries = ADDR_OF(&hash_index->entries);
 
-	while (entries[bucket] != HASH_INDEX_INVALID) {
-		if (eq_func(entries[bucket], eq_func_data) == 0) {
-			return entries[bucket];
+	while (entries[bucket].value != HASH_INDEX_INVALID) {
+		if (entries[bucket].hash == hash &&
+		    eq_func(entries[bucket].value, eq_func_data) == 0) {
+			return entries[bucket].value;
 		}
 		bucket = (bucket + 1) %
 			 (hash_index->capacity * HASH_INDEX_SPARSE_FACTOR);
@@ -119,14 +137,15 @@ hash_index_insert(
 
 	uint32_t bucket =
 		hash % (hash_index->capacity * HASH_INDEX_SPARSE_FACTOR);
-	uint32_t *entries = ADDR_OF(&hash_index->entries);
+	struct hash_index_entry *entries = ADDR_OF(&hash_index->entries);
 
-	while (entries[bucket] != HASH_INDEX_INVALID) {
+	while (entries[bucket].value != HASH_INDEX_INVALID) {
 		bucket = (bucket + 1) %
 			 (hash_index->capacity * HASH_INDEX_SPARSE_FACTOR);
 	}
 
-	entries[bucket] = value;
+	entries[bucket].hash = hash;
+	entries[bucket].value = value;
 	hash_index->count += 1;
 
 	return 0;

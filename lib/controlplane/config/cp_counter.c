@@ -98,7 +98,7 @@ tag_index_grow(
 	struct cp_config_counter_storage_registry *registry, size_t new_capacity
 ) {
 	struct hash_index *index = &registry->tag_index;
-	uint32_t *old_entries = ADDR_OF(&index->entries);
+	struct hash_index_entry *old_entries = ADDR_OF(&index->entries);
 	uint32_t old_capacity = index->capacity;
 	uint32_t old_count = index->count;
 
@@ -120,7 +120,8 @@ tag_index_grow(
 			    tags_hash(items[i].tags, items[i].tag_count),
 			    (uint32_t)i
 		    )) {
-			uint32_t *new_entries = ADDR_OF(&index->entries);
+			struct hash_index_entry *new_entries =
+				ADDR_OF(&index->entries);
 			memory_bfree(
 				ADDR_OF(&registry->memory_context),
 				new_entries,
