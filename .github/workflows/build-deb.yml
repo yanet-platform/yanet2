@@ -56,7 +56,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
 
       - name: Run Debian artifact tests
         run: |
@@ -82,7 +82,7 @@ jobs:
 
     runs-on: ${{ matrix.runner }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           ref: ${{ inputs.source_sha || github.sha }}
           submodules: true
@@ -105,7 +105,7 @@ jobs:
           apt-get update
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@1.88.0
+        uses: dtolnay/rust-toolchain@360a4e93673de6630fac2478bc9e35244b01a759 # 1.88.0
 
       - name: Install packaging tools
         timeout-minutes: 10
@@ -113,7 +113,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends devscripts
 
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
           go-version: "1.27.x"
           cache: false
@@ -140,7 +140,7 @@ jobs:
           fi
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
         with:
           name: ${{ matrix.artifact }}
           overwrite: true
@@ -156,17 +156,17 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           ref: ${{ inputs.source_sha }}
 
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         if: github.event_name == 'workflow_dispatch'
         with:
           ref: ${{ github.sha }}
           path: release-tools
 
-      - uses: actions/download-artifact@v5
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
         with:
           pattern: debs-*
           path: artifacts
@@ -192,7 +192,7 @@ jobs:
           fi
           bash "$helper" "${args[@]}"
 
-      - uses: actions/upload-artifact@v5
+      - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
         with:
           name: verified-debs
           overwrite: true

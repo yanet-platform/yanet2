@@ -87,7 +87,7 @@ runs:
 
     - name: Restore the build cache
       id: restore
-      uses: actions/cache/restore@v5
+      uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5
       with:
         path: ${{ steps.resolve.outputs.path }}
         key: ${{ steps.resolve.outputs.key }}
