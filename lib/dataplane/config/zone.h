@@ -27,9 +27,6 @@ struct dp_module {
 	// Size of the module's private per-context buffer, zero when the
 	// module needs none; mirrors the loaded module's declaration.
 	uint64_t prepared_size;
-	// Configuration layout identity; mirrors the loaded module's
-	// declaration, zero when unchecked.
-	uint64_t config_layout;
 };
 
 struct dp_device {
@@ -157,7 +154,7 @@ struct dp_worker {
 // against a different layout of the control-plane zone or the dataplane
 // structures recognises a foreign magic and refuses the attach instead
 // of misreading shifted fields. Bump it on every layout change.
-#define DP_CONFIG_READY_MAGIC UINT64_C(0xDEAD10CC00000002)
+#define DP_CONFIG_READY_MAGIC UINT64_C(0xDEAD10CC00000003)
 
 struct dp_config {
 	uint32_t instance_count;
