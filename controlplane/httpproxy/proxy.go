@@ -39,19 +39,33 @@ type BackendRegistry interface {
 // with binary protobuf payloads to gRPC calls.
 type TransparentWebGRPCProxy struct {
 	registry BackendRegistry
-	log      *zap.Logger
+	// trustedOrigins are the origins that get CORS headers.
+	trustedOrigins map[string]struct{}
+	log            *zap.Logger
 }
 
 // Option configures the HTTPHandler constructor.
 type Option func(*handlerOptions)
 
 type handlerOptions struct {
-	Log *zap.Logger
+	TrustedOrigins []string
+	Log            *zap.Logger
 }
 
 func newHandlerOptions() *handlerOptions {
 	return &handlerOptions{
 		Log: zap.NewNop(),
+	}
+}
+
+// WithTrustedOrigins sets the origins whose browser pages may read the
+// handler's responses cross-origin.
+//
+// A request from any other origin gets no CORS headers, so the browser
+// withholds the response from the calling page.
+func WithTrustedOrigins(origins []string) Option {
+	return func(o *handlerOptions) {
+		o.TrustedOrigins = origins
 	}
 }
 
@@ -69,17 +83,29 @@ func NewHTTPHandler(registry BackendRegistry, options ...Option) *TransparentWeb
 		o(opts)
 	}
 
+	trustedOrigins := map[string]struct{}{}
+	for _, origin := range opts.TrustedOrigins {
+		trustedOrigins[origin] = struct{}{}
+	}
+
 	return &TransparentWebGRPCProxy{
-		registry: registry,
-		log:      opts.Log,
+		registry:       registry,
+		trustedOrigins: trustedOrigins,
+		log:            opts.Log,
 	}
 }
 
 // ServeHTTP handles HTTP requests.
 func (m *TransparentWebGRPCProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Access-Control-Allow-Origin", "*")
-	w.Header().Set("Access-Control-Allow-Methods", "POST, GET, OPTIONS")
-	w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+	// The CORS headers depend on the origin, so a cache keeps one response
+	// per origin.
+	w.Header().Add("Vary", "Origin")
+	origin := r.Header.Get("Origin")
+	if _, ok := m.trustedOrigins[origin]; ok {
+		w.Header().Set("Access-Control-Allow-Origin", origin)
+		w.Header().Set("Access-Control-Allow-Methods", "POST, GET, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+	}
 
 	if r.Method == http.MethodOptions {
 		w.WriteHeader(http.StatusOK)
@@ -393,7 +419,6 @@ func (m *TransparentWebGRPCProxy) handleServerStreaming(w http.ResponseWriter, r
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
-	w.Header().Set("Access-Control-Allow-Origin", "*")
 
 	streamDesc := &grpc.StreamDesc{
 		StreamName:    method,

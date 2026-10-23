@@ -190,6 +190,9 @@ type Gateway struct {
 	secureServer  *grpc.Server
 	grpcListeners []grpcListener
 	http          ListenerConfig
+	// crossOrigin rejects cross-origin browser requests to the HTTP server
+	// from every origin but the trusted ones.
+	crossOrigin *http.CrossOriginProtection
 	// httpsCertificates is the store the HTTPS listener serves from, nil
 	// without one.
 	httpsCertificates *commonxgrpc.CertificateStore
@@ -251,6 +254,15 @@ func NewGateway(cfg Config, options ...GatewayOption) (*Gateway, error) {
 	// HTTPS would silently do nothing.
 	if plan.HTTP.TLS != nil && plan.HTTP.TLS.MaxConnectionAge != 0 {
 		return nil, errors.New("server.http.tls.max_connection_age is not supported, only server.grpc.tls bounds connection age")
+	}
+	// Only the HTTP server sees browser origins, so origins given to gRPC
+	// would silently do nothing.
+	if len(plan.GRPC.TrustedOrigins) > 0 {
+		return nil, errors.New("server.grpc.trusted_origins is not supported, only server.http checks request origins")
+	}
+	crossOrigin, err := newCrossOriginProtection(plan.HTTP.TrustedOrigins)
+	if err != nil {
+		return nil, fmt.Errorf("server.http: %w", err)
 	}
 	if plan.GRPC.TLS != nil {
 		switch age := plan.GRPC.TLS.MaxConnectionAge; {
@@ -595,6 +607,7 @@ func NewGateway(cfg Config, options ...GatewayOption) (*Gateway, error) {
 		secureServer:      secureServer,
 		grpcListeners:     grpcListeners,
 		http:              plan.HTTP,
+		crossOrigin:       crossOrigin,
 		httpsCertificates: httpsCertificates,
 		memoryListener:    memoryListener,
 		runners:           runners,
@@ -823,10 +836,13 @@ func (m *Gateway) runRegistrySweeper(ctx context.Context) error {
 // A listener that fails to bind or to serve ends the run with its error.
 func (m *Gateway) runHTTPServer(ctx context.Context) error {
 	server := &http.Server{
-		Handler: httpproxy.GzipMiddleware(
-			httpproxy.NewHTTPHandler(
-				m.registry,
-				httpproxy.WithLog(m.log),
+		Handler: m.crossOrigin.Handler(
+			httpproxy.GzipMiddleware(
+				httpproxy.NewHTTPHandler(
+					m.registry,
+					httpproxy.WithTrustedOrigins(m.http.TrustedOrigins),
+					httpproxy.WithLog(m.log),
+				),
 			),
 		),
 	}

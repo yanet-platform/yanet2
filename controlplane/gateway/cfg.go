@@ -3,6 +3,7 @@ package gateway
 import (
 	"cmp"
 	"fmt"
+	"net/http"
 	"time"
 
 	"github.com/yanet-platform/yanet2/common/go/xcfg"
@@ -83,6 +84,35 @@ type ListenerConfig struct {
 	Endpoint string `yaml:"endpoint"`
 	// TLS configures the TLS listener; nil means none.
 	TLS *TLSListenerConfig `yaml:"tls,omitempty"`
+	// TrustedOrigins are the web origins, each "scheme://host[:port]",
+	// whose browser pages may call the HTTP server cross-origin, such as a
+	// web UI served apart from the gateway.
+	//
+	// A cross-origin browser request from any other origin that is not a
+	// GET, HEAD or OPTIONS is rejected with 403, and only a trusted origin
+	// gets CORS headers. Clients that are not browsers send no origin and
+	// are unaffected. Only server.http takes it.
+	TrustedOrigins []string `yaml:"trusted_origins,omitempty"`
+}
+
+// Validate rejects a trusted origin that is not a bare
+// "scheme://host[:port]".
+func (m *ListenerConfig) Validate() error {
+	_, err := newCrossOriginProtection(m.TrustedOrigins)
+	return err
+}
+
+// newCrossOriginProtection returns the protection that rejects cross-origin
+// browser requests from every origin but the trusted ones.
+func newCrossOriginProtection(origins []string) (*http.CrossOriginProtection, error) {
+	protection := http.NewCrossOriginProtection()
+	for _, origin := range origins {
+		if err := protection.AddTrustedOrigin(origin); err != nil {
+			return nil, fmt.Errorf("trusted_origins: %w", err)
+		}
+	}
+
+	return protection, nil
 }
 
 // TLSListenerConfig configures a listener that serves TLS.

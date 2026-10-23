@@ -105,7 +105,12 @@ npm run build -w web
 
 ### CORS
 
-The gateway's HTTP proxy sets `Access-Control-Allow-Origin: *`
-(`controlplane/httpproxy/proxy.go`), so cross-origin UI deployments work
-without additional configuration. The web client automatically skips gzip
-compression for cross-origin requests to avoid CORS preflight issues.
+The gateway rejects cross-origin browser requests unless the page's origin
+is listed in its `server.http.trusted_origins`
+(`controlplane/etc/yanet/controlplane.d/default.yaml`), and sends CORS
+headers to those origins only. Same-origin setups, including the dev proxy,
+need no configuration. A standalone UI, or a gateway added to the Gateway
+drawer that is not the UI's own origin, works only once every such gateway
+lists the UI's origin, e.g. `https://yanet-ui.example.net`. The web client
+automatically skips gzip compression for cross-origin requests to avoid
+CORS preflight issues.
