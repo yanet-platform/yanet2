@@ -16,8 +16,7 @@ on:
       - "**/Cargo.lock"
       - ".cargo/config.toml"
       - ".github/workflows/rust-check.yml"
-      - ".github/actions/apt-packages/**"
-      - ".github/actions/apt-failover/**"
+      - ".github/actions/protoc/**"
   pull_request:
     # A stacked pull request has a non-main base, so a main-only filter would skip it.
     branches: ["**"]
@@ -27,8 +26,7 @@ on:
       - "**/Cargo.lock"
       - ".cargo/config.toml"
       - ".github/workflows/rust-check.yml"
-      - ".github/actions/apt-packages/**"
-      - ".github/actions/apt-failover/**"
+      - ".github/actions/protoc/**"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
@@ -62,10 +60,8 @@ jobs:
         with:
           shared-key: rust-test
           save-if: ${{ github.ref == 'refs/heads/main' }}
-      - uses: ./.github/actions/apt-packages
-        timeout-minutes: 10
-        with:
-          packages: cmake protobuf-compiler
+      - uses: ./.github/actions/protoc
+        timeout-minutes: 5
       # --locked: a manifest change passes only with its regenerated Cargo.lock.
       - run: cargo test --workspace --locked
 
@@ -85,8 +81,6 @@ jobs:
         with:
           shared-key: rust-check
           save-if: ${{ github.ref == 'refs/heads/main' }}
-      - uses: ./.github/actions/apt-packages
-        timeout-minutes: 10
-        with:
-          packages: cmake protobuf-compiler
+      - uses: ./.github/actions/protoc
+        timeout-minutes: 5
       - run: cargo clippy --workspace --locked -- -D warnings
