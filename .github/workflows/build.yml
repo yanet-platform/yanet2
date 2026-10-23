@@ -78,7 +78,7 @@ jobs:
     timeout-minutes: 45
 
     steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           submodules: true
 
@@ -88,7 +88,7 @@ jobs:
         with:
           packages: meson clang cmake python3-pyelftools libnuma-dev libpcap-dev git protobuf-compiler ccache
 
-      - uses: hendrikmuhs/ccache-action@d62db5f07c26379fc4b4e0916f098a92573c3b03 # v1.2.23
+      - uses: hendrikmuhs/ccache-action@f09c25b45002a07be2955cbe52e8cee55643f89d # v1.2.24
         name: ccache
         with:
           key: ${{ runner.os }}-build-asan-test-cache
@@ -96,7 +96,7 @@ jobs:
           verbose: 2
           save: ${{ github.ref == 'refs/heads/main' }}
 
-      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: "1.27.x"
           cache: false
@@ -125,7 +125,7 @@ jobs:
 
       - name: Save Go build cache
         if: success() && github.ref == 'refs/heads/main' && steps.go-buildcache.outputs.cache-hit != 'true' && !env.ACT
-        uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25 # v5
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ steps.go-buildcache.outputs.path }}
           key: ${{ steps.go-buildcache.outputs.key }}
@@ -137,7 +137,7 @@ jobs:
     timeout-minutes: 45
 
     steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           submodules: true
 
@@ -151,7 +151,7 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@360a4e93673de6630fac2478bc9e35244b01a759 # 1.88.0
 
-      - uses: hendrikmuhs/ccache-action@d62db5f07c26379fc4b4e0916f098a92573c3b03 # v1.2.23
+      - uses: hendrikmuhs/ccache-action@f09c25b45002a07be2955cbe52e8cee55643f89d # v1.2.24
         name: ccache
         with:
           key: ${{ runner.os }}-test-release-arm64-cache
@@ -159,7 +159,7 @@ jobs:
           verbose: 2
           save: ${{ github.ref == 'refs/heads/main' }}
 
-      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: "1.27.x"
           cache: false
@@ -195,7 +195,7 @@ jobs:
 
       - name: Save Go build cache
         if: success() && github.ref == 'refs/heads/main' && steps.go-buildcache.outputs.cache-hit != 'true' && !env.ACT
-        uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25 # v5
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ steps.go-buildcache.outputs.path }}
           key: ${{ steps.go-buildcache.outputs.key }}
@@ -207,7 +207,7 @@ jobs:
     timeout-minutes: 30
 
     steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - uses: ./.github/actions/protoc
         timeout-minutes: 5
@@ -234,7 +234,7 @@ jobs:
     timeout-minutes: 30
 
     steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           submodules: true
 
@@ -243,7 +243,7 @@ jobs:
         with:
           packages: meson clang cmake python3-pyelftools libnuma-dev libpcap-dev git protobuf-compiler ccache
 
-      - uses: hendrikmuhs/ccache-action@d62db5f07c26379fc4b4e0916f098a92573c3b03 # v1.2.23
+      - uses: hendrikmuhs/ccache-action@f09c25b45002a07be2955cbe52e8cee55643f89d # v1.2.24
         name: ccache
         with:
           key: ${{ runner.os }}-build-tsan-test-cache
@@ -251,7 +251,7 @@ jobs:
           verbose: 2
           save: ${{ github.ref == 'refs/heads/main' }}
 
-      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: "1.27.x"
           cache: false
@@ -287,7 +287,7 @@ jobs:
         build/operators/bird-adapter/yanet-bird-adapter
 
     steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           submodules: true
 
@@ -301,7 +301,7 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@360a4e93673de6630fac2478bc9e35244b01a759 # 1.88.0
 
-      - uses: hendrikmuhs/ccache-action@d62db5f07c26379fc4b4e0916f098a92573c3b03 # v1.2.23
+      - uses: hendrikmuhs/ccache-action@f09c25b45002a07be2955cbe52e8cee55643f89d # v1.2.24
         name: ccache
         with:
           key: ${{ runner.os }}-build-release-artifacts-cache
@@ -309,7 +309,7 @@ jobs:
           verbose: 2
           save: ${{ github.ref == 'refs/heads/main' }}
 
-      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: "1.27.x"
           cache: false
@@ -348,7 +348,7 @@ jobs:
       # Artifacts keep paths relative to the build directory and drop the
       # executable bit; the functional test job restores both.
       - name: Upload YANET binaries
-        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: yanet2-binaries
           if-no-files-found: error
@@ -359,7 +359,7 @@ jobs:
     timeout-minutes: 30
 
     steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - uses: ./.github/actions/protoc
         timeout-minutes: 5
@@ -393,7 +393,7 @@ jobs:
       # Artifacts keep paths relative to the release directory and drop the
       # executable bit; the functional test job restores both.
       - name: Upload YANET CLI
-        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: yanet2-cli
           if-no-files-found: error
@@ -407,7 +407,7 @@ jobs:
     timeout-minutes: 45
 
     steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           submodules: true
 
@@ -423,7 +423,7 @@ jobs:
         uses: dtolnay/rust-toolchain@360a4e93673de6630fac2478bc9e35244b01a759 # 1.88.0
 
       # The artifacts job compiles the same tree and saves this cache.
-      - uses: hendrikmuhs/ccache-action@d62db5f07c26379fc4b4e0916f098a92573c3b03 # v1.2.23
+      - uses: hendrikmuhs/ccache-action@f09c25b45002a07be2955cbe52e8cee55643f89d # v1.2.24
         name: ccache
         with:
           key: ${{ runner.os }}-build-release-artifacts-cache
@@ -431,7 +431,7 @@ jobs:
           verbose: 2
           save: false
 
-      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: "1.27.x"
           cache: false
@@ -475,14 +475,14 @@ jobs:
       # earlier step fails the job.
       - name: Save Go module cache
         if: steps.go-modcache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25 # v5
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ steps.go-modcache.outputs.path }}
           key: ${{ steps.go-modcache.outputs.key }}
 
       - name: Save Go build cache
         if: success() && github.ref == 'refs/heads/main' && steps.go-buildcache.outputs.cache-hit != 'true' && !env.ACT
-        uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25 # v5
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ steps.go-buildcache.outputs.path }}
           key: ${{ steps.go-buildcache.outputs.key }}
@@ -499,7 +499,7 @@ jobs:
         suite: [functional, lab]
 
     steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           submodules: true
           persist-credentials: false
@@ -507,7 +507,7 @@ jobs:
       # The setup-go cache is keyed on the module list alone, so only one leg
       # may write it; the lab leg restores modules only and compiles cold.
       - name: Set up Go
-        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: "1.27.x"
           cache: ${{ matrix.suite == 'functional' }}
@@ -542,7 +542,7 @@ jobs:
       # Both legs restore the VM images; only the functional leg saves them.
       - name: Restore Ubuntu cloud image
         id: cache-ubuntu-image
-        uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: tests/functional/ubuntu-24.04-minimal-cloudimg-amd64.img
           key: ${{ runner.os }}-ubuntu-image-${{ hashFiles('tests/functional/Makefile') }}
@@ -551,7 +551,7 @@ jobs:
 
       - name: Restore QEMU image
         id: cache-qemu-image
-        uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             tests/functional/yanet-test.qcow2
@@ -581,13 +581,13 @@ jobs:
           fi
 
       - name: Download YANET binaries
-        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: yanet2-binaries
           path: build
 
       - name: Download YANET CLI
-        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: yanet2-cli
           path: target/release
@@ -639,14 +639,14 @@ jobs:
 
       - name: Save Ubuntu cloud image
         if: success() && matrix.suite == 'functional' && steps.cache-ubuntu-image.outputs.cache-hit != 'true'
-        uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25 # v5
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: tests/functional/ubuntu-24.04-minimal-cloudimg-amd64.img
           key: ${{ steps.cache-ubuntu-image.outputs.cache-primary-key }}
 
       - name: Save QEMU image
         if: success() && matrix.suite == 'functional' && steps.cache-qemu-image.outputs.cache-hit != 'true'
-        uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25 # v5
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             tests/functional/yanet-test.qcow2
@@ -654,14 +654,14 @@ jobs:
           key: ${{ steps.cache-qemu-image.outputs.cache-primary-key }}
 
       - name: Upload functional test logs
-        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always() && matrix.suite == 'functional'
         with:
           name: functional-test-logs
           path: tests/functional/main/test.log
 
       - name: Upload lab logs
-        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always() && matrix.suite == 'lab'
         with:
           name: lab-logs
