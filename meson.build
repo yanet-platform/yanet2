@@ -87,9 +87,11 @@ if not dataplane_only
     python3,
     files('scripts/go_cdeps.py'),
     '--root', meson.project_source_root(),
+    '--build-root', meson.project_build_root(),
     '--go', go.full_path(),
     '--ar', ar.full_path(),
   ]
+  test('go-cdeps', python3, args: files('scripts/test_go_cdeps.py'), timeout: 120)
   protoc = find_program('protoc', required: true)
   find_program('protoc-gen-go', required: true, version: '>=1.36.5')
   find_program('protoc-gen-go-grpc', required: true, version: '>=1.5.1')
