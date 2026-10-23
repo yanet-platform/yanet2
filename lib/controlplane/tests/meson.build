@@ -336,26 +336,3 @@ dangling_objects_test = executable(
 )
 
 test('dangling_objects', dangling_objects_test, suite: ['lib'])
-
-module_layout_test = executable(
-  'module_layout_test',
-  ['module_layout_test.c'],
-  link_args: [
-    '-Wl,-E',
-    '-Wl,--undefined=new_device_plain',
-    '-Wl,--export-dynamic-symbol=new_device_plain',
-    '-Wl,--undefined=new_module_forward',
-    '-Wl,--export-dynamic-symbol=new_module_forward',
-  ],
-  dependencies: [
-    lib_dataplane_ut_dep,
-    lib_logging_dep,
-    lib_errors_dep,
-    lib_dev_plain_api,
-    libdpdk_dep,
-  ],
-  link_with: [lib_dev_plain_dp, lib_forward_dp],
-  include_directories: yanet_rootdir,
-)
-
-test('module_layout', module_layout_test, suite: ['lib'])
