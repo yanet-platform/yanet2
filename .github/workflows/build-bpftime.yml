@@ -23,12 +23,12 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           submodules: true
           persist-credentials: false
 
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           repository: eunomia-bpf/bpftime
           ref: 6bde654abce3649fe8e6943b16419dfdf71ebf38
@@ -37,7 +37,7 @@ jobs:
           persist-credentials: false
 
       - uses: ./.github/actions/apt-failover
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
           go-version: "1.27.1"
           cache: false
@@ -55,7 +55,7 @@ jobs:
         shell: bash
         run: .github/scripts/build-bpftime.sh 2>&1 | tee "bpftime-${{ inputs.arch }}.log"
 
-      - uses: actions/upload-artifact@v5
+      - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
         if: always()
         with:
           name: bpftime-${{ inputs.arch }}

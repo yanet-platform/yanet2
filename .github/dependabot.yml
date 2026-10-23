@@ -1,0 +1,21 @@
+version: 2
+updates:
+  # Workflows pin every action to a commit SHA with its tag in a comment;
+  # this keeps those pins current in one weekly pull request.
+  - package-ecosystem: github-actions
+    directories:
+      - /
+      - /.github/actions/*
+    schedule:
+      interval: weekly
+    # A freshly published release waits a week, so a compromised tag is
+    # likely caught before it is adopted.
+    cooldown:
+      default-days: 7
+    groups:
+      github-actions:
+        patterns: ["*"]
+    ignore:
+      # The toolchain versions are deliberate pins: the MSRV build, the
+      # clippy release and the rustfmt nightly move only with the code.
+      - dependency-name: dtolnay/rust-toolchain
