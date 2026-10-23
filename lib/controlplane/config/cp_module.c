@@ -353,9 +353,8 @@ cp_module_link_device(
 		return -1;
 	}
 
-	strtcpy(devices[cp_module->device_count].name,
-		name,
-		CP_DEVICE_NAME_LEN);
+	strtcpy(devices[cp_module->device_count].name, name, CP_DEVICE_NAME_LEN
+	);
 	SET_OFFSET_OF(&cp_module->devices, devices);
 	*index = cp_module->device_count;
 	++cp_module->device_count;
@@ -697,8 +696,7 @@ cp_module_registry_upsert(
 		struct counter_registry *old_registry = NULL;
 		if (old_module != NULL) {
 			struct cp_module_counter_registry **old_runtime =
-				ADDR_OF(
-					&old_module->runtime_counter_registries
+				ADDR_OF(&old_module->runtime_counter_registries
 				);
 			for (uint64_t old_idx = 0;
 			     old_idx <

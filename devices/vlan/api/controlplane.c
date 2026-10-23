@@ -159,8 +159,7 @@ cp_device_vlan_config_set_output_pipeline(
 }
 
 void
-cp_device_vlan_config_free(
-	struct cp_device_vlan_config *cp_device_vlan_config
+cp_device_vlan_config_free(struct cp_device_vlan_config *cp_device_vlan_config
 ) {
 	cp_device_config_fini(&cp_device_vlan_config->cp_device_config);
 	free(cp_device_vlan_config);

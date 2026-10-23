@@ -466,8 +466,7 @@ fwstate_map_v4_object_free_stale_layers(struct fwstate_map_v4_object *self) {
 }
 
 uint32_t
-fwstate_map_v4_object_stale_layer_count(
-	const struct fwstate_map_v4_object *self
+fwstate_map_v4_object_stale_layer_count(const struct fwstate_map_v4_object *self
 ) {
 	return fwtable_stale_count(&self->table);
 }
@@ -697,8 +696,7 @@ fwstate_map_v6_object_free_stale_layers(struct fwstate_map_v6_object *self) {
 }
 
 uint32_t
-fwstate_map_v6_object_stale_layer_count(
-	const struct fwstate_map_v6_object *self
+fwstate_map_v6_object_stale_layer_count(const struct fwstate_map_v6_object *self
 ) {
 	return fwtable_stale_count(&self->table);
 }

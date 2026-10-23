@@ -62,8 +62,7 @@ cp_device_trafgen_new(
 			// Construction failed before registration, so no
 			// other holder can observe this device: destroy it
 			// directly here.
-			cp_device_trafgen_destroy(
-				&cp_device_trafgen->cp_device
+			cp_device_trafgen_destroy(&cp_device_trafgen->cp_device
 			);
 			return NULL;
 		}

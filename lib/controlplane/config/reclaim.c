@@ -163,8 +163,8 @@ agent_release_registry_items(
 	struct agent *owners[AGENT_RELEASE_BATCH];
 	for (uint64_t idx = 0; idx < registry->capacity;) {
 		size_t count = 0;
-		while (idx < registry->capacity &&
-		       count < AGENT_RELEASE_BATCH) {
+		while (idx < registry->capacity && count < AGENT_RELEASE_BATCH
+		) {
 			struct registry_item *item =
 				registry_get(registry, idx++);
 			if (item == NULL) {
