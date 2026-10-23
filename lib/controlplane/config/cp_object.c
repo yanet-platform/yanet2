@@ -84,6 +84,56 @@ cp_object_fini(struct cp_object *self) {
 	memory_context_fini(&self->memory_context);
 }
 
+static int
+cp_object_registry_item_cmp(
+	const struct registry_item *item, const void *data
+) {
+	const struct cp_object *object =
+		container_of(item, struct cp_object, config_item);
+
+	const struct cp_object_cmp_data *cmp_data =
+		(const struct cp_object_cmp_data *)data;
+
+	int cmp = strncmp(object->name, cmp_data->name, sizeof(object->name));
+	if (cmp) {
+		return cmp;
+	}
+
+	return strncmp(object->type, cmp_data->type, sizeof(object->type));
+}
+
+static uint64_t
+cp_object_registry_key_hash(const void *data) {
+	const struct cp_object_cmp_data *cmp_data =
+		(const struct cp_object_cmp_data *)data;
+
+	return registry_hash_name_pair(
+		cmp_data->name,
+		sizeof(cmp_data->name),
+		cmp_data->type,
+		sizeof(cmp_data->type)
+	);
+}
+
+static uint64_t
+cp_object_registry_item_hash(const struct registry_item *item) {
+	const struct cp_object *object =
+		container_of(item, struct cp_object, config_item);
+
+	return registry_hash_name_pair(
+		object->name,
+		sizeof(object->name),
+		object->type,
+		sizeof(object->type)
+	);
+}
+
+static const struct registry_keys cp_object_registry_keys = {
+	.cmp = cp_object_registry_item_cmp,
+	.key_hash = cp_object_registry_key_hash,
+	.item_hash = cp_object_registry_item_hash,
+};
+
 int
 cp_object_registry_init(
 	struct memory_context *memory_context,
@@ -109,6 +159,7 @@ cp_object_registry_copy(
 ) {
 	if (registry_copy(
 		    memory_context,
+		    &cp_object_registry_keys,
 		    &new_registry->registry,
 		    &old_registry->registry
 	    )) {
@@ -246,24 +297,6 @@ cp_object_registry_get(struct cp_object_registry *registry, uint64_t index) {
 	return container_of(item, struct cp_object, config_item);
 }
 
-static int
-cp_object_registry_item_cmp(
-	const struct registry_item *item, const void *data
-) {
-	const struct cp_object *object =
-		container_of(item, struct cp_object, config_item);
-
-	const struct cp_object_cmp_data *cmp_data =
-		(const struct cp_object_cmp_data *)data;
-
-	int cmp = strncmp(object->name, cmp_data->name, sizeof(object->name));
-	if (cmp) {
-		return cmp;
-	}
-
-	return strncmp(object->type, cmp_data->type, sizeof(object->type));
-}
-
 int
 cp_object_registry_lookup_index(
 	struct cp_object_registry *registry,
@@ -277,6 +310,7 @@ cp_object_registry_lookup_index(
 
 	return registry_lookup(
 		&registry->registry,
+		&cp_object_registry_keys,
 		cp_object_registry_item_cmp,
 		&cmp_data,
 		index
@@ -356,6 +390,7 @@ cp_object_registry_upsert(
 
 	if (registry_replace(
 		    &registry->registry,
+		    &cp_object_registry_keys,
 		    cp_object_registry_item_cmp,
 		    &cmp_data,
 		    &new_object->config_item,
@@ -401,6 +436,7 @@ cp_object_registry_delete(
 
 	if (registry_replace(
 		    &registry->registry,
+		    &cp_object_registry_keys,
 		    cp_object_registry_item_cmp,
 		    &cmp_data,
 		    NULL,

@@ -198,6 +198,37 @@ cp_function_fini(struct cp_function *self) {
 
 // Pipeline registry
 
+static int
+cp_function_registry_item_cmp(
+	const struct registry_item *item, const void *data
+) {
+	const struct cp_function *function =
+		container_of(item, struct cp_function, config_item);
+
+	return strncmp(
+		function->name, (const char *)data, CP_FUNCTION_NAME_LEN
+	);
+}
+
+static uint64_t
+cp_function_registry_key_hash(const void *data) {
+	return registry_hash_name((const char *)data, CP_FUNCTION_NAME_LEN);
+}
+
+static uint64_t
+cp_function_registry_item_hash(const struct registry_item *item) {
+	const struct cp_function *function =
+		container_of(item, struct cp_function, config_item);
+
+	return registry_hash_name(function->name, sizeof(function->name));
+}
+
+static const struct registry_keys cp_function_registry_keys = {
+	.cmp = cp_function_registry_item_cmp,
+	.key_hash = cp_function_registry_key_hash,
+	.item_hash = cp_function_registry_item_hash,
+};
+
 int
 cp_function_registry_init(
 	struct memory_context *memory_context,
@@ -225,6 +256,7 @@ cp_function_registry_copy(
 ) {
 	if (registry_copy(
 		    memory_context,
+		    &cp_function_registry_keys,
 		    &new_function_registry->registry,
 		    &old_function_registry->registry
 	    )) {
@@ -268,18 +300,6 @@ cp_function_registry_get(
 	return container_of(item, struct cp_function, config_item);
 }
 
-static int
-cp_function_registry_item_cmp(
-	const struct registry_item *item, const void *data
-) {
-	const struct cp_function *function =
-		container_of(item, struct cp_function, config_item);
-
-	return strncmp(
-		function->name, (const char *)data, CP_FUNCTION_NAME_LEN
-	);
-}
-
 int
 cp_function_registry_lookup_index(
 	struct cp_function_registry *function_registry,
@@ -288,6 +308,7 @@ cp_function_registry_lookup_index(
 ) {
 	return registry_lookup(
 		&function_registry->registry,
+		&cp_function_registry_keys,
 		cp_function_registry_item_cmp,
 		name,
 		index
@@ -363,6 +384,7 @@ cp_function_registry_upsert(
 
 	if (registry_replace(
 		    &function_registry->registry,
+		    &cp_function_registry_keys,
 		    cp_function_registry_item_cmp,
 		    name,
 		    &new_function->config_item,
@@ -382,6 +404,7 @@ cp_function_registry_delete(
 ) {
 	return registry_replace(
 		&function_registry->registry,
+		&cp_function_registry_keys,
 		cp_function_registry_item_cmp,
 		name,
 		NULL,
