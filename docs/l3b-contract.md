@@ -62,7 +62,7 @@ representation and the protobuf/C consequences.
 | F28 | Mutation token, incarnation, real target | The VS token covers configuration, manual administrative and manual weight changes, deletion and accepted capacity growth; ModuleConfig has its own token; health, WLC, session traffic and automatic back retirement do not advance it. A required expected token is 1..256 bytes; a real target is the full F03 key plus a required incarnation of 1..256 bytes; a missing or malformed shape is `InvalidArgument`. A stale token precedes target lookup, an absent key is `NotFound`, a mismatched incarnation is `Aborted`. |
 | F29 | Create preparation | `PrepareCreate` takes a kind of SERVICE or MODULE_CONFIG and an exact name, observes absence, and returns an opaque token of 1..256 bytes bound to exact kind/name/instance/owner context with a 300-second lifetime measured on authoritative server monotonic time; at most 16384 retained permit records per actual instance registry across both kinds and all issuers. It is not an upsert, not a name or resource reservation, not payload-bound and not exactly-once. A well-shaped unknown, expired, consumed or context-mismatched permit is `Aborted` for an absent target; an otherwise valid existing target is `AlreadyExists`. An absent, empty or oversized request token field or another malformed required field is `InvalidArgument`; an unknown registry entry is not an absent request field. Recovery is `Unavailable`. |
 | F30 | Accepted configuration readback | A coherent snapshot with the object incarnation, accepted token, encoding version, total bytes, offset, chunk, completion and next cursor. The snapshot separates the replacement descriptor from read-only metadata such as the actual accepted capacity, administrative state and real incarnations. WLC result and provenance, health and drain observations stay outside the token-stable bytes. One token and encoding version identify stable bytes; map-like ordering is fixed by the encoding rules, not by a library's deterministic mode. Configuration and token are read from one coherent protected state, coordinated with the final acceptance section and the owner epoch, so a new configuration is never paired with an old token. |
-| F31 | Name-list responses | ASCII lexical inventory with a membership-revision, instance, epoch and position cursor; create and delete invalidate the continuation, content changes alone do not. Bounded output and scan, and authoritative recovery gating; an empty response is not recovery success. |
+| F31 | Name-list responses | ASCII lexical inventory with a membership-revision, instance, epoch and position cursor; names, revision, completion and next cursor come from one coherent protected membership state per RPC (section 6), not necessarily newest at reply. Create and delete invalidate subsequent continuation requests; content changes alone do not. Bounded output and work, and authoritative recovery gating; an empty response is not recovery success. |
 | F32 | `ListSessions` request | VS name plus limit and opaque cursor; omitted or 0 limit uses the centralized default (initially 100), a positive value up to the maximum (initially 1000) is accepted, a larger value is `InvalidArgument` rather than clamped. An empty cursor starts; an opaque continuation binds purpose, instance, VS incarnation, owner epoch, observed chain generation, finite initial layer watermarks and position. No cursor registry, TTL or between-RPC pin. A changed record limit shapes the next page, not the identity of the query, so it does not invalidate an in-flight continuation. |
 | F33 | `SessionRecord` and `ListSessions` response | Coherent physical records with the flow key, the stored real key and incarnation, the expiry and the layer identity and role; a portless session reports an absent port rather than a fabricated 0; the page reports the VS and chain identity and one page clock reading used for both the expiry predicate and the response. Cross-page duplicates are allowed and no unique-flow or snapshot guarantee is given; `complete` means the captured traversal end, and the next cursor is empty exactly when complete. A successful sparse page may return zero rows and still advance. |
 | F34 | Network, range and transport presence | Decoded family identity, optional port and source rules, and explicit-empty top-level collections. F02/F03 bare hosts, F19-F21 raw sources and the native ACL networks and ranges of section 14 are deliberately different types; generic network normalization must not erase raw source-template bits. Section 16 carries the per-field binary, ProtoJSON and YAML null, empty and missing matrix. |
@@ -101,7 +101,7 @@ package, tag or C ABI freeze.
 | O02 | `CreateService` | Full configuration including the required F22 policy binding plus a create token, absent target only; an existing valid request is `AlreadyExists` even when equal; duplicates, families and limits are validated before acceptance; new reals are administratively disabled. The first mutation token and incarnation are returned; there is no upsert. A known pre-accept failure preserves state; an uncertain outcome uses readback, not retry. |
 | O03 | `UpdateService` | Full replacement with the expected VS token; absent is `NotFound`; a stale token is `Aborted` even when equal; a normalized equality succeeds without publication or token change. Surviving real state, session deadlines and accepted capacity are preserved, and the VS network identity is immutable. The F22 boundary requires the complete policy binding on replacement, rejects changed content under the same identity/revision against the current binding or a retained shared revision the candidate would reuse, and treats changed identity or revision as a configuration change. The writable descriptor excludes resize-only and other read-only metadata. |
 | O04 | `DeleteService` | The current VS token; absent is `NotFound`; accepted incoming links are `FailedPrecondition` with no cascade. Accepted deletion automatically owns session cleanup; old configurations and readers delay reclamation, and there is no operator state-delete command. An accepted deletion accepts no resurrection of the deleted VS through a delayed create or link, and a VS recreated under the same name receives fresh session state: old affinity is not resurrected by name reuse. |
-| O05 | `ListServices` | Bounded authoritative lexical inventory, membership-bound continuation, and `Unavailable` during recovery; no permit or token issuance side effect. |
+| O05 | `ListServices` | Bounded authoritative lexical inventory with per-RPC membership coherence under section 6, membership-bound continuation, and `Unavailable` during recovery or bounded coherence failure; no usable partial page on failure and no permit or token issuance side effect. |
 | O06 | `CreateModuleConfig` | A distinct create with the complete explicit members or empty binding collection and a create token, no upsert; every link is validated by target incarnation and any invalid link rejects the whole operation. No internal common-policy field. |
 | O07 | `UpdateModuleConfig` | Full replacement with its own expected token; absent is `NotFound`, an equal state is a no-op, a stale token is `Aborted`. Unlink before VS delete; a delete-first link is `NotFound` or `Aborted` after recreation. Ordered exact bindings replace arbitrary destination rules; no internal common policy. |
 | O08 | `ListModuleConfigs` | The same bounded lexical membership inventory and recovery semantics as `ListServices`; it is not a substitute for the full ModuleConfig snapshot. |
@@ -253,9 +253,28 @@ orders.
   copy completes, and an obsolete export is freed only after its protected
   readers and outstanding C accesses finish.
 - Name lists are ASCII-lexicographic with a membership-revision, instance,
-  epoch and position cursor. Create and delete invalidate the continuation;
+  epoch and position cursor. Create and delete invalidate subsequent continuation requests;
   content changes alone do not. Bounded record, response and work limits
   apply, and sorting the whole inventory on every page RPC is not allowed.
+- For `ListServices` and `ListModuleConfigs`, names, membership revision,
+  `complete` and the next cursor come from one coherent protected membership
+  state per RPC. Revision stays inside the existing opaque cursor; no new
+  public revision field is required. If matching state was protected/validated
+  before a concurrent membership change, the RPC may finish an old coherent
+  page with its old-revision cursor. It must not relabel old names or position
+  with the new revision. There is no newest-at-reply guarantee; a following
+  request with that cursor after the change is `Aborted`.
+- A fresh empty-cursor request may restart against a new membership state within
+  bounded work. A continuation never silently transfers its old position to a
+  new revision: a valid stale incoming cursor is `Aborted`, while a page whose
+  matching state was protected/validated before the change may complete as above.
+  If a coherent page cannot be completed within bounded work, return `Unavailable`
+  with no usable partial page or cursor. A concurrent mutation alone is not
+  failure. Protection, seek, scan, copy, encoding and recheck all consume bounded
+  work; unbounded retries and progress under continuous churn are not promised.
+  This adds no between-RPC snapshot, pin, history registry or TTL, chooses no
+  concurrency algorithm or numeric budget, and covers names only, not a snapshot
+  of all runtime fields.
 - The readback is coordinated with the final acceptance section and with the
   owner epoch, so it never exposes a new configuration paired with an old
   token. The returned configuration and its token come from one coherent
@@ -1274,7 +1293,7 @@ qualification.
 | F28 expected token, real target incarnation, returned identities | Expected token R bytes 1..256; real incarnation R bytes 1..256 with the full F03 key. Returned object incarnation and token are RO bytes 1..256; link-target incarnations use the same width. | Copied length plus bytes. Owner absence `NotFound`; a stale token `Aborted` before target lookup; a missing real `NotFound`; a wrong incarnation `Aborted`. |
 | F29 prepare kind and name; create token; valid_for_seconds | Kind R SERVICE or MODULE_CONFIG; name per F01; create token R bytes 1..256 bound to exact kind/name/instance/owner context; valid_for_seconds RO uint32 (300 at issuance). The 16384 permit count is per registry, not per client. | A permit is distinct from a mutation token. An absent, empty or oversized request token field is `InvalidArgument`; a well-shaped unknown, expired, consumed or context-mismatched permit is `Aborted` for an absent target. Unknown means absent from the authoritative registry, not absent from the request. An otherwise valid existing target is `AlreadyExists`; recovery is `Unavailable`. |
 | F30 GetService and GetModuleConfig request and snapshot | Request R name; cursor D(empty) bytes 0..1024. Response: incarnation and token R nonempty bytes; encoding version R positive uint32; total and offset uint64 with offset <= total; chunk bytes; complete bool; next cursor bytes 0..1024. All response fields are RO. An empty chunk is valid only at completion; an incomplete success must advance the offset. | total <= the configured export cap (initial 4194304); chunk plus envelope <= the response cap (262144); checked size_t copies. No mixed snapshot, gap, overlap or overflow. An unknown encoding rejects client assembly, never a partial replacement. |
-| F31 list names request and response | No owner name; cursor D(empty); limit D(server default); 0 also means the default; a positive value at most the server maximum. Response names per F01 in ASCII lexical order; an empty page is permitted with an advancing cursor; complete if and only if the next cursor is empty. Membership identity, instance, epoch and position are RO and carried inside the opaque cursor. | Uses the F32 bounds for lists; no caller position or revision setter; checked counts and bytes; membership invalidation only on create and delete. |
+| F31 list names request and response | No owner name; cursor D(empty); limit D(server default); 0 also means the default; a positive value at most the server maximum. Response names per F01 in ASCII lexical order; an empty page is permitted with an advancing cursor; complete if and only if the next cursor is empty. Names, membership revision, complete and next cursor obey section 6's per-RPC coherent-state rule. Membership identity, instance, epoch and position are RO and carried inside the opaque cursor, not a new revision field. | Uses the F32 bounds for lists; no caller position or revision setter; checked counts and bytes; membership invalidation only on create and delete. Bounded coherence failure is Unavailable with no usable partial page/cursor. |
 | F32 ListSessions request | R VS name; cursor D(empty) bytes 0..1024, empty starts; limit D(100 initially); 0 means the default; 1..1000 initially; above the maximum rejects, no clamp. | An opaque cursor, not the old uint64 cursor. The server resolves one policy snapshot per page; an unchanged limit is not required on continuation. |
 | F33 SessionRecord and response | The entire response is RO. Flow family, addresses and protocol (TCP or UDP) and the stored real key and incarnation 1..256 are required; optional ports preserve absence versus 0. expires_at and page_now are uint64 nanoseconds in the same identified dataplane clock domain, with no UTC claim; layer identity and front or back role are required; a zero numeric time is representable. Rows may be empty on an incomplete advancing page. | Complete if and only if the next cursor is empty; uint64 clocks and lossless typed identities; no public memory address. An unsafe read is `Unavailable`, an oversized record is `ResourceExhausted`, and a failure yields no usable partial page. |
 | F34 networks, ranges, transport presence | F02 and F03 bare hosts, F19-F21 raw sources and the section 14 native networks and ranges are deliberately different types; no blanket normalization. | The per-field matrix above applies to every field rather than copying old l3b network semantics. |
@@ -1303,6 +1322,13 @@ owner `NotFound`. A fresh empty-cursor read of a missing named object is
 is `Unavailable`, not fabricated invalidity or an empty successful page. These
 are status dispositions, not an implemented cursor codec or a claim that
 policy provenance or content hashes authenticate cursors.
+
+For name lists, current membership validation follows section 6's protected-state
+rule, not a newest-at-reply requirement. A valid stale incoming continuation is
+`Aborted`; inability to complete a coherent page within bounded work is
+`Unavailable` with no usable partial page/cursor. Recovery gating, malformed-cursor
+`InvalidArgument` and continuation-context `Aborted` remain unchanged; these rules
+add no exhaustive precedence for requests with multiple simultaneous faults.
 
 Response-only metadata has no input default: mandatory response identities
 must be present and valid, or the client rejects the response rather than
@@ -1354,6 +1380,21 @@ and genuinely distinct values.
 
 Required discriminating vectors include:
 
+- Name-page coherence for both list operations (**NOT RUN**): protect r1 `[a,b,c]`,
+  copy `[a]` with a continuation position after `a`, then delete `a` to form
+  r2 `[b,c]`. Returning `[a]`, `complete=false` and an r1 cursor is allowed;
+  attaching an r2 cursor to that old page/position is forbidden. A following
+  request with the r1 cursor after the deletion is `Aborted`.
+- Fresh empty-cursor listing may restart within bounded work against r2 and
+  return a wholly r2 page/cursor; a continuation must not reuse its r1 position
+  in r2. A matching continuation protected/validated before the deletion may
+  finish a coherent r1 page. Failure to complete a coherent page within budget
+  yields `Unavailable` with no usable partial page/cursor, not automatic failure
+  merely because membership changed (**NOT RUN**).
+- Content-only changes leave name-list continuation valid. Check completion and
+  cursor against the same protected membership state: `complete` iff next cursor
+  is empty, including terminal empty inventory and incomplete empty advancing
+  pages. Reject mixed-state completion/cursor pairs (**NOT RUN**).
 - Permit context: vary kind, name, instance and owner context independently;
   a well-shaped mismatch with an absent target is `Aborted`, an otherwise valid
   existing target is `AlreadyExists`, malformed input is `InvalidArgument`, and
