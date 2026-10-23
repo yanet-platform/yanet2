@@ -11,8 +11,6 @@ sources = files(
 lib_counters = static_library(
   'counters',
   sources,
-  c_args: yanet_c_args,
-  link_args: yanet_link_args,
   dependencies: dependencies,
   install: false,
 )
@@ -120,8 +118,6 @@ if not dataplane_only
   lib_counter_pattern = static_library(
     'counter_pattern',
     files('counter_pattern.c'),
-    c_args: yanet_c_args,
-    link_args: yanet_link_args,
     dependencies: [lib_counters_dep, rure_dep],
     install: false,
   )
@@ -137,8 +133,6 @@ if not dataplane_only
   test_counter_pattern = executable(
     'counter_pattern_test',
     'counter_pattern_test.c',
-    c_args: yanet_c_args,
-    link_args: yanet_link_args,
     dependencies: [lib_counter_pattern_dep, lib_common_dep, lib_logging_dep],
     include_directories: yanet_rootdir,
     link_language: 'c',
@@ -150,8 +144,6 @@ endif
 test_counters_histogram = executable(
   'counters_test',
   'tests.c',
-  c_args: yanet_c_args,
-  link_args: yanet_link_args,
   dependencies: [lib_counters_dep, lib_common_dep, lib_logging_dep],
   include_directories: yanet_rootdir,
   link_language: 'c',
@@ -161,8 +153,6 @@ test('counters', test_counters_histogram, suite: ['lib'])
 counter_storage_test = executable(
   'counter_storage_test',
   'storage_test.c',
-  c_args: yanet_c_args,
-  link_args: yanet_link_args,
   dependencies: [lib_counters_dep, lib_common_dep, lib_logging_dep],
   include_directories: yanet_rootdir,
   link_language: 'c',

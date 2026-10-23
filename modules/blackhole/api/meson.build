@@ -10,8 +10,6 @@ sources = files(
 lib_blackhole_cp = static_library(
   'blackhole_cp',
   sources,
-  c_args: yanet_c_args,
-  link_args: yanet_link_args,
   dependencies: cp_dependencies,
   include_directories: includes,
   install: false,

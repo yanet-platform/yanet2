@@ -16,8 +16,6 @@ sources = files(
 lib_dev_trafgen_api = static_library(
     'dev_trafgen_api',
     sources,
-    c_args: yanet_c_args,
-    link_args: yanet_link_args,
     dependencies: cp_dependencies,
     include_directories: includes,
     install: false,

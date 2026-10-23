@@ -12,8 +12,6 @@ sources = files(
 lib_agent_cp = static_library(
   'agent',
   sources,
-  c_args: yanet_c_args,
-  link_args: yanet_link_args,
   dependencies: dependencies,
   install: false,
 )
@@ -31,8 +29,6 @@ if not dataplane_only
   lib_agent_counters = static_library(
     'agent_counters',
     files('counters.c'),
-    c_args: yanet_c_args,
-    link_args: yanet_link_args,
     dependencies: dependencies + [lib_counter_pattern_dep],
     install: false,
   )
@@ -46,8 +42,6 @@ if not dataplane_only
   test_agent_attach = executable(
     'agent_attach_test',
     'agent_test.c',
-    c_args: yanet_c_args,
-    link_args: yanet_link_args,
     dependencies: [
       lib_agent_counters_dep,
       lib_config_dp_dep,

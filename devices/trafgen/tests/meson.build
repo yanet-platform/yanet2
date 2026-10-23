@@ -1,8 +1,6 @@
 trafgen_leak_test = executable(
   'trafgen_leak_test',
   'leak_test.c',
-  c_args: yanet_c_args,
-  link_args: yanet_link_args,
   dependencies: [
     lib_dev_trafgen_api_dep,
     lib_config_cp_dep,

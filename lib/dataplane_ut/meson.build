@@ -21,8 +21,7 @@ sources = files(
 lib_dataplane_ut = static_library(
   'dataplane_ut',
   sources,
-  c_args: yanet_c_args,
-  link_args: yanet_link_args + ['-Wl,-E'],
+  link_args: ['-Wl,-E'],
   dependencies: dependencies,
   include_directories: [
     yanet_rootdir,

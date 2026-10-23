@@ -21,8 +21,6 @@ sources = files(
 lib_worker_dp = static_library(
   'worker_dp',
   sources,
-  c_args: yanet_c_args,
-  link_args: yanet_link_args,
   dependencies: dependencies,
   install: false,
 )
