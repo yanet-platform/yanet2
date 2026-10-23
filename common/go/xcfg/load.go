@@ -212,7 +212,7 @@ func validate(v reflect.Value, path string) error {
 	}
 
 	if v.CanAddr() {
-		if val, ok := v.Addr().Interface().(validatable); ok {
+		if val, ok := reflect.TypeAssert[validatable](v.Addr()); ok {
 			if err := val.Validate(); err != nil {
 				if path == "" {
 					return err
@@ -226,7 +226,7 @@ func validate(v reflect.Value, path string) error {
 		// as a plain field with no Validate of its own. Checked after
 		// validatable so a wrapper implementing both still runs its own
 		// Validate.
-		if elemer, ok := v.Addr().Interface().(validatableElem); ok {
+		if elemer, ok := reflect.TypeAssert[validatableElem](v.Addr()); ok {
 			ev := elemer.Elem()
 			if !ev.IsValid() {
 				return nil

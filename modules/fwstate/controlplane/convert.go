@@ -1,8 +1,6 @@
 package fwstate
 
 import (
-	"google.golang.org/protobuf/proto"
-
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
 	"github.com/yanet-platform/yanet2/modules/fwstate/bindings/go/cfwstate"
 	fwstatepb "github.com/yanet-platform/yanet2/modules/fwstate/controlplane/fwstatepb/v1"
@@ -41,16 +39,16 @@ func SyncConfigFromC(nativeConfig cfwstate.SyncConfig) *fwstatepb.SyncConfig {
 	syncConfig := &fwstatepb.SyncConfig{
 		SrcAddr:             &commonpb.IPAddress{Addr: append([]byte(nil), nativeConfig.SrcAddr[:]...)},
 		DstEther:            commonpb.NewMACAddressEUI48(nativeConfig.DstEther),
-		PortMulticast:       proto.Uint32(uint32(nativeConfig.PortMulticast)),
-		PortUnicast:         proto.Uint32(uint32(nativeConfig.PortUnicast)),
-		TcpSynAck:           proto.Uint64(nativeConfig.TcpSynAck),
-		TcpSyn:              proto.Uint64(nativeConfig.TcpSyn),
-		TcpFin:              proto.Uint64(nativeConfig.TcpFin),
-		Tcp:                 proto.Uint64(nativeConfig.Tcp),
-		Udp:                 proto.Uint64(nativeConfig.Udp),
-		Default:             proto.Uint64(nativeConfig.Default),
-		SyncSuppressTimeout: proto.Uint64(nativeConfig.SyncSuppressTimeout),
-		SyncMtu:             proto.Uint32(uint32(nativeConfig.SyncMTU)),
+		PortMulticast:       new(uint32(nativeConfig.PortMulticast)),
+		PortUnicast:         new(uint32(nativeConfig.PortUnicast)),
+		TcpSynAck:           new(nativeConfig.TcpSynAck),
+		TcpSyn:              new(nativeConfig.TcpSyn),
+		TcpFin:              new(nativeConfig.TcpFin),
+		Tcp:                 new(nativeConfig.Tcp),
+		Udp:                 new(nativeConfig.Udp),
+		Default:             new(nativeConfig.Default),
+		SyncSuppressTimeout: new(nativeConfig.SyncSuppressTimeout),
+		SyncMtu:             new(uint32(nativeConfig.SyncMTU)),
 	}
 	if nativeConfig.PortMulticast != 0 {
 		syncConfig.DstAddrMulticast = &commonpb.IPAddress{Addr: append([]byte(nil), nativeConfig.DstAddrMulticast[:]...)}

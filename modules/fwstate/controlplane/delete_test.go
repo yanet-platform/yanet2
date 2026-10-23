@@ -191,7 +191,7 @@ func TestFWStateUpdateUnknownMapNameRejected(t *testing.T) {
 	service := fwstate.NewFWStateService(agent)
 
 	request := validDeleteTestUpdateRequest(configName, maps.v4Name(), maps.v6Name())
-	request.MapNameV6 = proto.String("no-such-map")
+	request.MapNameV6 = new("no-such-map")
 
 	_, err := service.UpdateConfig(t.Context(), request)
 	require.Equal(t, codes.FailedPrecondition, status.Code(err))
@@ -226,8 +226,8 @@ func TestDeleteModuleConfigUsesRegisteredType(t *testing.T) {
 func validDeleteTestUpdateRequest(name, fw4MapName, fw6MapName string) *fwstatepb.UpdateConfigRequest {
 	return &fwstatepb.UpdateConfigRequest{
 		Name:      name,
-		MapNameV4: proto.String(fw4MapName),
-		MapNameV6: proto.String(fw6MapName),
+		MapNameV4: new(fw4MapName),
+		MapNameV6: new(fw6MapName),
 		SyncConfig: &fwstatepb.SyncConfig{
 			SrcAddr:          &commonpb.IPAddress{Addr: []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}},
 			DstEther:         &commonpb.MACAddress{Addr: 0x333300000001},

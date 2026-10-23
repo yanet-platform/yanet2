@@ -44,7 +44,6 @@ loopindex:common/commonpb/v1/metrics.go:MetricValueToProto:i:1  # legacy: rename
 loopindex:common/commonpb/v1/metrics_test.go:TestMetricValueToProto_Histogram:i:1  # legacy: rename to idx
 loopindex:common/go/metrics/histogram_test.go:TestHistogramSnapshot:i:1  # legacy: rename to idx
 loopindex:common/go/metrics/histogram_test.go:TestNewHistogram:i:1  # legacy: rename to idx
-loopindex:common/go/metrics/map_test.go:BenchmarkGetOrCreate:i:1  # legacy: rename to idx
 loopindex:common/go/metrics/map_test.go:BenchmarkGetOrCreateParallel:i:1  # legacy: rename to idx
 loopindex:common/go/metrics/map_test.go:BenchmarkMetrics:i:1  # legacy: rename to idx
 loopindex:common/go/metrics/map_test.go:TestMetricMapConcurrent:i:1  # legacy: rename to idx

@@ -239,9 +239,7 @@ func newTLSListenerConfig(t *testing.T, endpoint, certFile, keyFile string) *gat
 
 	return &gateway.TLSListenerConfig{
 		Endpoint: xcfg.MustNonEmptyString(endpoint),
-		TLSConfig: gateway.TLSConfig{
-			KeyPairs: []xgrpc.KeyPairConfig{tlscert.FileKeyPair(t, certFile, keyFile)},
-		},
+		KeyPairs: []xgrpc.KeyPairConfig{tlscert.FileKeyPair(t, certFile, keyFile)},
 	}
 }
 

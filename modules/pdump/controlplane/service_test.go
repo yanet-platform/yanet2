@@ -456,7 +456,7 @@ func setRing(t *testing.T, service *pdump.PdumpService, name, ringName string) {
 
 	_, err := service.SetConfig(t.Context(), &pdumppb.SetConfigRequest{
 		Name:   name,
-		Config: &pdumppb.Config{RingName: proto.String(ringName)},
+		Config: &pdumppb.Config{RingName: new(ringName)},
 	})
 	require.NoError(t, err)
 }
@@ -549,11 +549,11 @@ func Test_PdumpService_RateLimit_PreservesAbsentAndAcceptsExplicitZero(t *testin
 		config  *pdumppb.Config
 		want    uint64
 	}{
-		{name: "new config is unlimited", config: &pdumppb.Config{RingName: proto.String("A")}, want: 0},
-		{name: "sets capture rate", initial: &pdumppb.Config{RingName: proto.String("A")}, config: &pdumppb.Config{RatePps: proto.Uint64(10000)}, want: 10000},
-		{name: "absent rate preserves limit", initial: &pdumppb.Config{RingName: proto.String("A"), RatePps: proto.Uint64(10000)}, config: &pdumppb.Config{Filter: proto.String("udp")}, want: 10000},
-		{name: "accepts maximum capture rate", initial: &pdumppb.Config{RingName: proto.String("A")}, config: &pdumppb.Config{RatePps: proto.Uint64(pdumppb.MaxRatePPS)}, want: pdumppb.MaxRatePPS},
-		{name: "explicit zero disables limit", initial: &pdumppb.Config{RingName: proto.String("A"), RatePps: proto.Uint64(10000)}, config: &pdumppb.Config{RatePps: proto.Uint64(0)}, want: 0},
+		{name: "new config is unlimited", config: &pdumppb.Config{RingName: new("A")}, want: 0},
+		{name: "sets capture rate", initial: &pdumppb.Config{RingName: new("A")}, config: &pdumppb.Config{RatePps: proto.Uint64(10000)}, want: 10000},
+		{name: "absent rate preserves limit", initial: &pdumppb.Config{RingName: new("A"), RatePps: proto.Uint64(10000)}, config: &pdumppb.Config{Filter: new("udp")}, want: 10000},
+		{name: "accepts maximum capture rate", initial: &pdumppb.Config{RingName: new("A")}, config: &pdumppb.Config{RatePps: proto.Uint64(pdumppb.MaxRatePPS)}, want: pdumppb.MaxRatePPS},
+		{name: "explicit zero disables limit", initial: &pdumppb.Config{RingName: new("A"), RatePps: proto.Uint64(10000)}, config: &pdumppb.Config{RatePps: proto.Uint64(0)}, want: 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			service, backend, _, _ := newTestService(t)
@@ -596,7 +596,7 @@ func Test_PdumpService_SetConfig_RejectsEmptyRingNameOnUpdate(t *testing.T) {
 
 	_, err = service.SetConfig(t.Context(), &pdumppb.SetConfigRequest{
 		Name:   "capture",
-		Config: &pdumppb.Config{RingName: proto.String("")},
+		Config: &pdumppb.Config{RingName: new("")},
 	})
 	require.Equal(t, codes.InvalidArgument, status.Code(err))
 	require.NotContains(t, status.Convert(err).Message(), "create a config",
@@ -627,17 +627,17 @@ func Test_PdumpService_SetConfig_CreateRefused(t *testing.T) {
 		},
 		{
 			name:   "empty ring_name",
-			config: &pdumppb.Config{RingName: proto.String("")},
+			config: &pdumppb.Config{RingName: new("")},
 			code:   codes.InvalidArgument,
 		},
 		{
 			name:   "ring_name not found",
-			config: &pdumppb.Config{RingName: proto.String("missing")},
+			config: &pdumppb.Config{RingName: new("missing")},
 			code:   codes.NotFound,
 		},
 		{
 			name:   "handle gone between the lookup and the acquire",
-			config: &pdumppb.Config{RingName: proto.String("A")},
+			config: &pdumppb.Config{RingName: new("A")},
 			setup: func(owner *fakeRingOwner, backend *fakeBackend) {
 				owner.register("A", testRingCapacity, 1)
 				owner.afterLookupHandle = func() {
@@ -648,7 +648,7 @@ func Test_PdumpService_SetConfig_CreateRefused(t *testing.T) {
 		},
 		{
 			name:   "acquire failure other than a gone handle",
-			config: &pdumppb.Config{RingName: proto.String("A")},
+			config: &pdumppb.Config{RingName: new("A")},
 			setup: func(owner *fakeRingOwner, backend *fakeBackend) {
 				owner.register("A", testRingCapacity, 1)
 				owner.rings["A"].acquireErr = errors.New("owner is shutting down")
@@ -657,7 +657,7 @@ func Test_PdumpService_SetConfig_CreateRefused(t *testing.T) {
 		},
 		{
 			name:   "ring below the minimum capacity",
-			config: &pdumppb.Config{RingName: proto.String("small")},
+			config: &pdumppb.Config{RingName: new("small")},
 			setup: func(owner *fakeRingOwner, backend *fakeBackend) {
 				owner.register("small", testRingCapacity/2, 1)
 			},
@@ -665,7 +665,7 @@ func Test_PdumpService_SetConfig_CreateRefused(t *testing.T) {
 		},
 		{
 			name:   "ring below the minimum capacity is refused even for a small snaplen",
-			config: &pdumppb.Config{RingName: proto.String("smaller"), Snaplen: proto.Uint32(64)},
+			config: &pdumppb.Config{RingName: new("smaller"), Snaplen: proto.Uint32(64)},
 			setup: func(owner *fakeRingOwner, backend *fakeBackend) {
 				owner.register("smaller", testRingCapacity/2, 1)
 			},
@@ -673,7 +673,7 @@ func Test_PdumpService_SetConfig_CreateRefused(t *testing.T) {
 		},
 		{
 			name:   "backend update fails",
-			config: &pdumppb.Config{RingName: proto.String("A")},
+			config: &pdumppb.Config{RingName: new("A")},
 			setup: func(owner *fakeRingOwner, backend *fakeBackend) {
 				owner.register("A", testRingCapacity, 1)
 				backend.updateErr = errors.New("failed to compile filter")
@@ -683,7 +683,7 @@ func Test_PdumpService_SetConfig_CreateRefused(t *testing.T) {
 		},
 		{
 			name:   "missing worker time is retryable",
-			config: &pdumppb.Config{RingName: proto.String("A"), RatePps: proto.Uint64(1000)},
+			config: &pdumppb.Config{RingName: new("A"), RatePps: proto.Uint64(1000)},
 			setup: func(owner *fakeRingOwner, backend *fakeBackend) {
 				owner.register("A", testRingCapacity, 1)
 				backend.updateErr = fmt.Errorf("failed to set capture rate: %w", syscall.EAGAIN)
@@ -729,7 +729,7 @@ func Test_PdumpService_Bind_AcceptsExactMinimumCapacity(t *testing.T) {
 
 	_, err := service.SetConfig(t.Context(), &pdumppb.SetConfigRequest{
 		Name:   "fits",
-		Config: &pdumppb.Config{RingName: proto.String("minimum"), Snaplen: proto.Uint32(65535)},
+		Config: &pdumppb.Config{RingName: new("minimum"), Snaplen: proto.Uint32(65535)},
 	})
 	require.NoError(t, err, "a ring of the minimum capacity must take the largest snaplen")
 }
@@ -781,7 +781,7 @@ func Test_PdumpService_Bind_SameObjectUpdateKeepsStreamRunning(t *testing.T) {
 
 	_, err := service.SetConfig(t.Context(), &pdumppb.SetConfigRequest{
 		Name:   "p1",
-		Config: &pdumppb.Config{Filter: proto.String("tcp")},
+		Config: &pdumppb.Config{Filter: new("tcp")},
 	})
 	require.NoError(t, err)
 	require.Equal(t, 1, owner.leaseCount("A"), "a same-object update must retain, not re-acquire, the lease")
@@ -816,7 +816,7 @@ func Test_PdumpService_RingRebind_EndsOnlyThatConfigsStream(t *testing.T) {
 
 	_, err := service.SetConfig(t.Context(), &pdumppb.SetConfigRequest{
 		Name:   "p1",
-		Config: &pdumppb.Config{RingName: proto.String("B")},
+		Config: &pdumppb.Config{RingName: new("B")},
 	})
 	require.NoError(t, err)
 
@@ -856,7 +856,7 @@ func Test_PdumpService_RingRebind_SameNameNewHandleEndsOldStream(t *testing.T) {
 
 	_, err := service.SetConfig(t.Context(), &pdumppb.SetConfigRequest{
 		Name:   "p1",
-		Config: &pdumppb.Config{RingName: proto.String("A")},
+		Config: &pdumppb.Config{RingName: new("A")},
 	})
 	require.NoError(t, err)
 
@@ -924,7 +924,7 @@ func Test_PdumpService_FailedBinding_LeavesOriginalIntact(t *testing.T) {
 
 			_, err := service.SetConfig(t.Context(), &pdumppb.SetConfigRequest{
 				Name:   "p1",
-				Config: &pdumppb.Config{RingName: proto.String("A"), Snaplen: proto.Uint32(10)},
+				Config: &pdumppb.Config{RingName: new("A"), Snaplen: proto.Uint32(10)},
 			})
 			require.NoError(t, err)
 			before, err := service.ShowConfig(t.Context(), &pdumppb.ShowConfigRequest{Name: "p1"})
@@ -938,9 +938,9 @@ func Test_PdumpService_FailedBinding_LeavesOriginalIntact(t *testing.T) {
 				tc.setup(owner, backend)
 			}
 
-			config := &pdumppb.Config{RingName: proto.String(tc.ringName)}
+			config := &pdumppb.Config{RingName: new(tc.ringName)}
 			if tc.snaplen != 0 {
-				config.Snaplen = proto.Uint32(tc.snaplen)
+				config.Snaplen = new(tc.snaplen)
 			}
 			_, err = service.SetConfig(t.Context(), &pdumppb.SetConfigRequest{Name: "p1", Config: config})
 			require.Equal(t, tc.code, status.Code(err))
@@ -1011,7 +1011,7 @@ func Test_PdumpService_RefusedFree_ReleasesBindingExactlyOnce(t *testing.T) {
 	// though its module free is refused.
 	_, err := service.SetConfig(t.Context(), &pdumppb.SetConfigRequest{
 		Name:   "capture",
-		Config: &pdumppb.Config{Filter: proto.String("tcp")},
+		Config: &pdumppb.Config{Filter: new("tcp")},
 	})
 	require.NoError(t, err)
 	published := backend.Last()
@@ -1042,17 +1042,17 @@ func Test_PdumpService_SetConfig_MergesCarriedFieldsOverPublishedConfig(t *testi
 	_, err := service.SetConfig(t.Context(), &pdumppb.SetConfigRequest{
 		Name: "capture",
 		Config: &pdumppb.Config{
-			Filter:   proto.String("udp"),
+			Filter:   new("udp"),
 			Mode:     proto.Uint32(2),
 			Snaplen:  proto.Uint32(256),
-			RingName: proto.String("A"),
+			RingName: new("A"),
 		},
 	})
 	require.NoError(t, err)
 
 	_, err = service.SetConfig(t.Context(), &pdumppb.SetConfigRequest{
 		Name:   "capture",
-		Config: &pdumppb.Config{Filter: proto.String("tcp")},
+		Config: &pdumppb.Config{Filter: new("tcp")},
 	})
 	require.NoError(t, err)
 
@@ -1062,10 +1062,10 @@ func Test_PdumpService_SetConfig_MergesCarriedFieldsOverPublishedConfig(t *testi
 	response, err := service.ShowConfig(t.Context(), &pdumppb.ShowConfigRequest{Name: "capture"})
 	require.NoError(t, err)
 	wantConfig := &pdumppb.Config{
-		Filter:   proto.String("tcp"),
+		Filter:   new("tcp"),
 		Mode:     proto.Uint32(2),
 		Snaplen:  proto.Uint32(256),
-		RingName: proto.String("A"),
+		RingName: new("A"),
 		RatePps:  proto.Uint64(0),
 	}
 	require.True(t, proto.Equal(wantConfig, response.Config), "got %v", response.Config)
@@ -1083,12 +1083,12 @@ func Test_PdumpService_SetConfig_AppliesCarriedEmptyAndZeroValues(t *testing.T) 
 
 	_, err = service.SetConfig(t.Context(), &pdumppb.SetConfigRequest{
 		Name:   "capture",
-		Config: &pdumppb.Config{Filter: proto.String("udp"), Mode: proto.Uint32(2), RingName: proto.String("A")},
+		Config: &pdumppb.Config{Filter: new("udp"), Mode: proto.Uint32(2), RingName: new("A")},
 	})
 	require.NoError(t, err)
 	_, err = service.SetConfig(t.Context(), &pdumppb.SetConfigRequest{
 		Name:   "capture",
-		Config: &pdumppb.Config{Filter: proto.String(""), Mode: proto.Uint32(0)},
+		Config: &pdumppb.Config{Filter: new(""), Mode: proto.Uint32(0)},
 	})
 	require.NoError(t, err)
 
@@ -1181,7 +1181,7 @@ func Test_PdumpService_ShowConfig_DoesNotWaitForPublish(t *testing.T) {
 	group.Go(func() error {
 		_, err := service.SetConfig(t.Context(), &pdumppb.SetConfigRequest{
 			Name:   "capture",
-			Config: &pdumppb.Config{Filter: proto.String("tcp")},
+			Config: &pdumppb.Config{Filter: new("tcp")},
 		})
 		return err
 	})
@@ -1220,7 +1220,7 @@ func Test_PdumpService_SetConfig_DoesNotSerializeNames(t *testing.T) {
 	group.Go(func() error {
 		_, err := service.SetConfig(t.Context(), &pdumppb.SetConfigRequest{
 			Name:   "blocked",
-			Config: &pdumppb.Config{RingName: proto.String("A")},
+			Config: &pdumppb.Config{RingName: new("A")},
 		})
 		return err
 	})
@@ -1231,7 +1231,7 @@ func Test_PdumpService_SetConfig_DoesNotSerializeNames(t *testing.T) {
 		defer close(otherDone)
 		_, err := service.SetConfig(t.Context(), &pdumppb.SetConfigRequest{
 			Name:   "other",
-			Config: &pdumppb.Config{RingName: proto.String("A")},
+			Config: &pdumppb.Config{RingName: new("A")},
 		})
 		return err
 	})

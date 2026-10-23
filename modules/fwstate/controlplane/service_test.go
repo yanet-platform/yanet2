@@ -32,8 +32,8 @@ func Test_FWStateService_UpdateConfig_SetsAllFieldsAndClearsSync(t *testing.T) {
 	}
 	publishConfig(t, service, &fwstatepb.UpdateConfigRequest{
 		Name:       name,
-		MapNameV4:  proto.String(maps.v4Name()),
-		MapNameV6:  proto.String(maps.v6Name()),
+		MapNameV4:  new(maps.v4Name()),
+		MapNameV6:  new(maps.v6Name()),
 		SyncConfig: syncConfig,
 	})
 	stored := showConfig(t, service, name)
@@ -43,7 +43,7 @@ func Test_FWStateService_UpdateConfig_SetsAllFieldsAndClearsSync(t *testing.T) {
 
 	publishConfig(t, service, &fwstatepb.UpdateConfigRequest{
 		Name:      name,
-		MapNameV6: proto.String(""),
+		MapNameV6: new(""),
 		SyncConfig: &fwstatepb.SyncConfig{
 			PortMulticast: proto.Uint32(0),
 			PortUnicast:   proto.Uint32(0),
@@ -100,14 +100,14 @@ func Test_FWStateService_UpdateConfig_ZeroValuesOverwriteAndAbsentFieldsKeep(t *
 	service := fwstate.NewFWStateService(agent)
 	publishConfig(t, service, &fwstatepb.UpdateConfigRequest{
 		Name:       name,
-		MapNameV4:  proto.String(maps.v4Name()),
-		MapNameV6:  proto.String(maps.v6Name()),
+		MapNameV4:  new(maps.v4Name()),
+		MapNameV6:  new(maps.v6Name()),
 		SyncConfig: &fwstatepb.SyncConfig{SyncSuppressTimeout: proto.Uint64(8e9)},
 	})
 	before := showConfig(t, service, name)
 	publishConfig(t, service, &fwstatepb.UpdateConfigRequest{
 		Name:      name,
-		MapNameV4: proto.String(""),
+		MapNameV4: new(""),
 		SyncConfig: &fwstatepb.SyncConfig{
 			SyncSuppressTimeout: proto.Uint64(0),
 			Udp:                 proto.Uint64(0),
@@ -276,8 +276,8 @@ func Test_FWStateService_UpdateConfig_AttachesMapsAndSyncLater(t *testing.T) {
 
 	_, err = service.UpdateConfig(t.Context(), &fwstatepb.UpdateConfigRequest{
 		Name:      configName,
-		MapNameV4: proto.String(maps.v4Name()),
-		MapNameV6: proto.String(maps.v6Name()),
+		MapNameV4: new(maps.v4Name()),
+		MapNameV6: new(maps.v6Name()),
 		SyncConfig: &fwstatepb.SyncConfig{
 			SrcAddr:          syncTestAddr(),
 			DstEther:         &commonpb.MACAddress{Addr: 0x333300000001},
@@ -359,8 +359,8 @@ func Test_FWStateService_UpdateConfig_KeepsUnnamedLinksAndUntouchedSync(t *testi
 	// An update carrying no sync settings at all keeps them too.
 	_, err = service.UpdateConfig(t.Context(), &fwstatepb.UpdateConfigRequest{
 		Name:      configName,
-		MapNameV4: proto.String(maps.v4Name()),
-		MapNameV6: proto.String(maps.v6Name()),
+		MapNameV4: new(maps.v4Name()),
+		MapNameV6: new(maps.v6Name()),
 	})
 	require.NoError(t, err)
 

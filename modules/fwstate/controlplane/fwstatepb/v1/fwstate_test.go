@@ -76,16 +76,16 @@ func Test_UpdateConfigRequest_Validate(t *testing.T) {
 		},
 		{
 			name:    "empty map name unlinks",
-			request: &UpdateConfigRequest{Name: "fwstate0", MapNameV4: proto.String("")},
+			request: &UpdateConfigRequest{Name: "fwstate0", MapNameV4: new("")},
 		},
 		{
 			name:    "map name contains NUL",
-			request: &UpdateConfigRequest{Name: "fwstate0", MapNameV4: proto.String("map\x00name")},
+			request: &UpdateConfigRequest{Name: "fwstate0", MapNameV4: new("map\x00name")},
 			message: "map_name_v4 must not contain NUL",
 		},
 		{
 			name:    "map name reaches byte limit",
-			request: &UpdateConfigRequest{Name: "fwstate0", MapNameV6: proto.String(strings.Repeat("a", 80))},
+			request: &UpdateConfigRequest{Name: "fwstate0", MapNameV6: new(strings.Repeat("a", 80))},
 			message: "map_name_v6 must be shorter than 80 bytes",
 		},
 		{
@@ -173,14 +173,14 @@ func Test_SyncConfig_ValidateTimeouts(t *testing.T) {
 		{
 			name: "effective timeout includes suppression",
 			config: &SyncConfig{
-				Tcp:                 proto.Uint64(TTL48Max),
+				Tcp:                 new(TTL48Max),
 				SyncSuppressTimeout: proto.Uint64(1),
 			},
 			mergedMessage: "timeout values exceed 48-bit limit: [tcp+sync_suppress_timeout]",
 		},
 		{
 			name:   "maximum timeout without suppression fits",
-			config: &SyncConfig{Tcp: proto.Uint64(TTL48Max)},
+			config: &SyncConfig{Tcp: new(TTL48Max)},
 		},
 		{
 			name: "timeout with fitting suppression fits",
@@ -388,7 +388,7 @@ func Test_SyncConfig_ValidateFields_SyncMTU(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			err := (&SyncConfig{SyncMtu: proto.Uint32(tc.mtu)}).ValidateFields()
+			err := (&SyncConfig{SyncMtu: new(tc.mtu)}).ValidateFields()
 			if tc.message == "" {
 				require.NoError(t, err)
 				return

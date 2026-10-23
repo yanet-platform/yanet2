@@ -396,11 +396,9 @@ func TestParallelCallsRace(t *testing.T) {
 
 	// Concurrent Collect() calls alongside the interceptors.
 	for range 10 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			_ = serverMetrics.Collect()
-		}()
+		})
 	}
 
 	wg.Wait()
