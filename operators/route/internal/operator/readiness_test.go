@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/netip"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/stretchr/testify/assert"
@@ -198,163 +199,170 @@ func TestRIBReadiness_SessionStart_SYNCING(t *testing.T) {
 }
 
 func TestRIBReadiness_HighRate_SYNCING(t *testing.T) {
-	cfg := ReadinessConfig{
-		RateThreshold:   5,
-		StabilityWindow: 200 * time.Millisecond,
-		SampleInterval:  20 * time.Millisecond,
-	}
-
-	store := newRIBStore()
-	tracker := readiness.NewTracker(specs("rib"))
-	helper := newBirdRIBReadiness(cfg, store, "route0", tracker)
-
-	helper.OnSessionStart("route0", 1)
-
-	ctx, cancel := context.WithCancel(t.Context())
-
-	eg, _ := errgroup.WithContext(ctx)
-	eg.Go(func() error {
-		return helper.Run(ctx)
-	})
-
-	// Drive a high update rate: > 5 per 20ms sample means more than 0.1 per tick.
-	// We push 3 updates every 10ms to stay well above threshold.
-	go func() {
-		ticker := time.NewTicker(10 * time.Millisecond)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-				helper.OnUpdate(3)
-			}
+	synctest.Test(t, func(t *testing.T) {
+		cfg := ReadinessConfig{
+			RateThreshold:   5,
+			StabilityWindow: 200 * time.Millisecond,
+			SampleInterval:  20 * time.Millisecond,
 		}
-	}()
 
-	time.Sleep(100 * time.Millisecond)
+		store := newRIBStore()
+		tracker := readiness.NewTracker(specs("rib"))
+		helper := newBirdRIBReadiness(cfg, store, "route0", tracker)
 
-	s := requireScope(t, tracker, "rib")
-	assert.Equal(t, readinesspb.State_STATE_NOT_READY, s.State)
-	require.NotEmpty(t, s.Reasons)
-	assert.Equal(t, "SYNCING", s.Reasons[0].Code)
+		helper.OnSessionStart("route0", 1)
 
-	cancel()
-	_ = eg.Wait()
+		ctx, cancel := context.WithCancel(t.Context())
+
+		eg, _ := errgroup.WithContext(ctx)
+		eg.Go(func() error {
+			return helper.Run(ctx)
+		})
+
+		// Drive a high update rate: > 5 per 20ms sample means more than 0.1 per tick.
+		// We push 3 updates every 10ms to stay well above threshold.
+		eg.Go(func() error {
+			ticker := time.NewTicker(10 * time.Millisecond)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ctx.Done():
+					return nil
+				case <-ticker.C:
+					helper.OnUpdate(3)
+				}
+			}
+		})
+
+		synctest.Sleep(100 * time.Millisecond)
+
+		s := requireScope(t, tracker, "rib")
+		assert.Equal(t, readinesspb.State_STATE_NOT_READY, s.State)
+		require.NotEmpty(t, s.Reasons)
+		assert.Equal(t, "SYNCING", s.Reasons[0].Code)
+
+		cancel()
+		_ = eg.Wait()
+	})
 }
 
 func TestRIBReadiness_LowRate_READY(t *testing.T) {
-	cfg := ReadinessConfig{
-		RateThreshold:   1000,
-		StabilityWindow: 50 * time.Millisecond,
-		SampleInterval:  20 * time.Millisecond,
-	}
+	synctest.Test(t, func(t *testing.T) {
+		cfg := ReadinessConfig{
+			RateThreshold:   1000,
+			StabilityWindow: 50 * time.Millisecond,
+			SampleInterval:  20 * time.Millisecond,
+		}
 
-	store := newRIBStore()
-	// Seed a route so that settled && routes>0 produces READY.
-	seedRoute(t, store, "route0")
-	tracker := readiness.NewTracker(specs("rib"))
-	helper := newBirdRIBReadiness(cfg, store, "route0", tracker)
+		store := newRIBStore()
+		// Seed a route so that settled && routes>0 produces READY.
+		seedRoute(t, store, "route0")
+		tracker := readiness.NewTracker(specs("rib"))
+		helper := newBirdRIBReadiness(cfg, store, "route0", tracker)
 
-	helper.OnSessionStart("route0", 1)
+		helper.OnSessionStart("route0", 1)
 
-	ctx, cancel := context.WithCancel(t.Context())
+		ctx, cancel := context.WithCancel(t.Context())
 
-	eg, ctx := errgroup.WithContext(ctx)
-	eg.Go(func() error {
-		return helper.Run(ctx)
+		eg, ctx := errgroup.WithContext(ctx)
+		eg.Go(func() error {
+			return helper.Run(ctx)
+		})
+
+		// Rate is 0 (well below 1000), so the stability window passes quickly.
+		synctest.Sleep(200 * time.Millisecond)
+
+		s := requireScope(t, tracker, "rib")
+		assert.Equal(t, readinesspb.State_STATE_READY, s.State)
+
+		cancel()
+		_ = eg.Wait()
 	})
-
-	// Rate is 0 (well below 1000), so the stability window passes quickly.
-	time.Sleep(200 * time.Millisecond)
-
-	s := requireScope(t, tracker, "rib")
-	assert.Equal(t, readinesspb.State_STATE_READY, s.State)
-
-	cancel()
-	_ = eg.Wait()
 }
 
 func TestRIBReadiness_MidWindowSpike_ResetsBelowSince(t *testing.T) {
-	cfg := ReadinessConfig{
-		RateThreshold: 5,
-		// Long window so a single spike definitely resets it.
-		StabilityWindow: 500 * time.Millisecond,
-		SampleInterval:  20 * time.Millisecond,
-	}
+	synctest.Test(t, func(t *testing.T) {
+		cfg := ReadinessConfig{
+			RateThreshold: 5,
+			// Long window so a single spike definitely resets it.
+			StabilityWindow: 500 * time.Millisecond,
+			SampleInterval:  20 * time.Millisecond,
+		}
 
-	store := newRIBStore()
-	tracker := readiness.NewTracker(specs("rib"))
-	helper := newBirdRIBReadiness(cfg, store, "route0", tracker)
+		store := newRIBStore()
+		tracker := readiness.NewTracker(specs("rib"))
+		helper := newBirdRIBReadiness(cfg, store, "route0", tracker)
 
-	helper.OnSessionStart("route0", 1)
+		helper.OnSessionStart("route0", 1)
 
-	ctx, cancel := context.WithCancel(t.Context())
+		ctx, cancel := context.WithCancel(t.Context())
 
-	eg, ctx := errgroup.WithContext(ctx)
-	eg.Go(func() error {
-		return helper.Run(ctx)
-	})
+		eg, ctx := errgroup.WithContext(ctx)
+		eg.Go(func() error {
+			return helper.Run(ctx)
+		})
 
-	// Let the below-threshold window start (low rate for ~60ms).
-	time.Sleep(60 * time.Millisecond)
+		// Let the below-threshold window start (low rate for ~60ms).
+		synctest.Sleep(60 * time.Millisecond)
 
-	// Inject a spike: 300 updates in one shot means ~15000/sec for the next tick.
-	helper.OnUpdate(300)
+		// Inject a spike: 300 updates in one shot means ~15000/sec for the next tick.
+		helper.OnUpdate(300)
 
-	// Even after 60ms more (well into where the window would have closed), the
-	// spike must have reset belowSince so the helper is still SYNCING.
-	time.Sleep(100 * time.Millisecond)
+		// The window opened by the first tick would have closed at 520ms; the
+		// spike restarted it at 100ms, so at 560ms the helper is still SYNCING.
+		synctest.Sleep(500 * time.Millisecond)
 
-	s := requireScope(t, tracker, "rib")
-	assert.Equal(t, readinesspb.State_STATE_NOT_READY, s.State)
-	if len(s.Reasons) > 0 {
+		s := requireScope(t, tracker, "rib")
+		assert.Equal(t, readinesspb.State_STATE_NOT_READY, s.State)
+		require.Len(t, s.Reasons, 1)
 		assert.Equal(t, "SYNCING", s.Reasons[0].Code)
-	}
 
-	cancel()
-	_ = eg.Wait()
+		cancel()
+		_ = eg.Wait()
+	})
 }
 
 func TestRIBReadiness_SessionEnd_Degraded(t *testing.T) {
-	cfg := ReadinessConfig{
-		RateThreshold:   1000,
-		StabilityWindow: 30 * time.Millisecond,
-		SampleInterval:  15 * time.Millisecond,
-	}
+	synctest.Test(t, func(t *testing.T) {
+		cfg := ReadinessConfig{
+			RateThreshold:   1000,
+			StabilityWindow: 30 * time.Millisecond,
+			SampleInterval:  15 * time.Millisecond,
+		}
 
-	store := newRIBStore()
-	// Seed a route so that the settled state produces READY and the session
-	// end with live routes produces DEGRADED(SESSION_ENDED).
-	seedRoute(t, store, "route0")
-	tracker := readiness.NewTracker(specs("rib"))
-	helper := newBirdRIBReadiness(cfg, store, "route0", tracker)
+		store := newRIBStore()
+		// Seed a route so that the settled state produces READY and the session
+		// end with live routes produces DEGRADED(SESSION_ENDED).
+		seedRoute(t, store, "route0")
+		tracker := readiness.NewTracker(specs("rib"))
+		helper := newBirdRIBReadiness(cfg, store, "route0", tracker)
 
-	helper.OnSessionStart("route0", 1)
+		helper.OnSessionStart("route0", 1)
 
-	ctx, cancel := context.WithCancel(t.Context())
+		ctx, cancel := context.WithCancel(t.Context())
 
-	eg, ctx := errgroup.WithContext(ctx)
-	eg.Go(func() error {
-		return helper.Run(ctx)
+		eg, ctx := errgroup.WithContext(ctx)
+		eg.Go(func() error {
+			return helper.Run(ctx)
+		})
+
+		// Wait for READY.
+		synctest.Sleep(120 * time.Millisecond)
+		s := requireScope(t, tracker, "rib")
+		assert.Equal(t, readinesspb.State_STATE_READY, s.State)
+
+		// Session ends — routes remain in the RIB until TTL cleanup, so the scope
+		// must flip to DEGRADED (not NOT_READY) immediately.
+		helper.OnSessionEnd("route0", 1)
+
+		s = requireScope(t, tracker, "rib")
+		assert.Equal(t, readinesspb.State_STATE_DEGRADED, s.State)
+		require.NotEmpty(t, s.Reasons)
+		assert.Equal(t, "SESSION_ENDED", s.Reasons[0].Code)
+
+		cancel()
+		_ = eg.Wait()
 	})
-
-	// Wait for READY.
-	time.Sleep(120 * time.Millisecond)
-	s := requireScope(t, tracker, "rib")
-	assert.Equal(t, readinesspb.State_STATE_READY, s.State)
-
-	// Session ends — routes remain in the RIB until TTL cleanup, so the scope
-	// must flip to DEGRADED (not NOT_READY) immediately.
-	helper.OnSessionEnd("route0", 1)
-
-	s = requireScope(t, tracker, "rib")
-	assert.Equal(t, readinesspb.State_STATE_DEGRADED, s.State)
-	require.NotEmpty(t, s.Reasons)
-	assert.Equal(t, "SESSION_ENDED", s.Reasons[0].Code)
-
-	cancel()
-	_ = eg.Wait()
 }
 
 // seedRoute adds a single static unicast route to the named RIB in the store.
@@ -394,61 +402,63 @@ func TestRIBReadiness_Syncing(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			cfg := ReadinessConfig{
-				RateThreshold:   5,
-				StabilityWindow: 500 * time.Millisecond,
-				SampleInterval:  20 * time.Millisecond,
-			}
-
-			store := newRIBStore()
-			tracker := readiness.NewTracker(specs("rib"))
-			helper := newBirdRIBReadiness(cfg, store, "route0", tracker)
-
-			if tc.seedRoutes {
-				seedRoute(t, store, "route0")
-			}
-
-			// Start the session — this calls syncingState() immediately.
-			helper.OnSessionStart("route0", 1)
-
-			// Verify the state set by OnSessionStart.
-			s := requireScope(t, tracker, "rib")
-			assert.Equal(t, tc.wantState, s.State)
-			require.NotEmpty(t, s.Reasons)
-			assert.Equal(t, tc.wantReasonCode, s.Reasons[0].Code)
-
-			// Now run the loop with a high update rate so it stays unsettled and
-			// confirm the per-tick path also produces the expected state.
-			ctx, cancel := context.WithCancel(t.Context())
-
-			eg, _ := errgroup.WithContext(ctx)
-			eg.Go(func() error {
-				return helper.Run(ctx)
-			})
-
-			// Drive a high rate to stay above the threshold (5/s).
-			go func() {
-				ticker := time.NewTicker(10 * time.Millisecond)
-				defer ticker.Stop()
-				for {
-					select {
-					case <-ctx.Done():
-						return
-					case <-ticker.C:
-						helper.OnUpdate(3)
-					}
+			synctest.Test(t, func(t *testing.T) {
+				cfg := ReadinessConfig{
+					RateThreshold:   5,
+					StabilityWindow: 500 * time.Millisecond,
+					SampleInterval:  20 * time.Millisecond,
 				}
-			}()
 
-			time.Sleep(100 * time.Millisecond)
+				store := newRIBStore()
+				tracker := readiness.NewTracker(specs("rib"))
+				helper := newBirdRIBReadiness(cfg, store, "route0", tracker)
 
-			s = requireScope(t, tracker, "rib")
-			assert.Equal(t, tc.wantState, s.State)
-			require.NotEmpty(t, s.Reasons)
-			assert.Equal(t, tc.wantReasonCode, s.Reasons[0].Code)
+				if tc.seedRoutes {
+					seedRoute(t, store, "route0")
+				}
 
-			cancel()
-			_ = eg.Wait()
+				// Start the session — this calls syncingState() immediately.
+				helper.OnSessionStart("route0", 1)
+
+				// Verify the state set by OnSessionStart.
+				s := requireScope(t, tracker, "rib")
+				assert.Equal(t, tc.wantState, s.State)
+				require.NotEmpty(t, s.Reasons)
+				assert.Equal(t, tc.wantReasonCode, s.Reasons[0].Code)
+
+				// Now run the loop with a high update rate so it stays unsettled and
+				// confirm the per-tick path also produces the expected state.
+				ctx, cancel := context.WithCancel(t.Context())
+
+				eg, _ := errgroup.WithContext(ctx)
+				eg.Go(func() error {
+					return helper.Run(ctx)
+				})
+
+				// Drive a high rate to stay above the threshold (5/s).
+				eg.Go(func() error {
+					ticker := time.NewTicker(10 * time.Millisecond)
+					defer ticker.Stop()
+					for {
+						select {
+						case <-ctx.Done():
+							return nil
+						case <-ticker.C:
+							helper.OnUpdate(3)
+						}
+					}
+				})
+
+				synctest.Sleep(100 * time.Millisecond)
+
+				s = requireScope(t, tracker, "rib")
+				assert.Equal(t, tc.wantState, s.State)
+				require.NotEmpty(t, s.Reasons)
+				assert.Equal(t, tc.wantReasonCode, s.Reasons[0].Code)
+
+				cancel()
+				_ = eg.Wait()
+			})
 		})
 	}
 }
@@ -458,60 +468,62 @@ func TestRIBReadiness_Syncing(t *testing.T) {
 // afterwards, the stale OnSessionEnd from A must be ignored so that session B
 // can still progress to READY.
 func TestRIBReadiness_SupersededSession(t *testing.T) {
-	cfg := ReadinessConfig{
-		RateThreshold:   1000,
-		StabilityWindow: 50 * time.Millisecond,
-		SampleInterval:  20 * time.Millisecond,
-	}
+	synctest.Test(t, func(t *testing.T) {
+		cfg := ReadinessConfig{
+			RateThreshold:   1000,
+			StabilityWindow: 50 * time.Millisecond,
+			SampleInterval:  20 * time.Millisecond,
+		}
 
-	store := newRIBStore()
-	// Seed a route so that the settled state produces READY.
-	seedRoute(t, store, "route0")
-	tracker := readiness.NewTracker(specs("rib"))
-	helper := newBirdRIBReadiness(cfg, store, "route0", tracker)
+		store := newRIBStore()
+		// Seed a route so that the settled state produces READY.
+		seedRoute(t, store, "route0")
+		tracker := readiness.NewTracker(specs("rib"))
+		helper := newBirdRIBReadiness(cfg, store, "route0", tracker)
 
-	// Session A starts (id=1) — routes are present so tracker enters
-	// DEGRADED(SYNCING) rather than NOT_READY(SYNCING).
-	helper.OnSessionStart("route0", 1)
+		// Session A starts (id=1) — routes are present so tracker enters
+		// DEGRADED(SYNCING) rather than NOT_READY(SYNCING).
+		helper.OnSessionStart("route0", 1)
 
-	s := requireScope(t, tracker, "rib")
-	assert.Equal(t, readinesspb.State_STATE_DEGRADED, s.State)
-	require.NotEmpty(t, s.Reasons)
-	assert.Equal(t, "SYNCING", s.Reasons[0].Code)
+		s := requireScope(t, tracker, "rib")
+		assert.Equal(t, readinesspb.State_STATE_DEGRADED, s.State)
+		require.NotEmpty(t, s.Reasons)
+		assert.Equal(t, "SYNCING", s.Reasons[0].Code)
 
-	// Session B starts (id=2), superseding A.
-	helper.OnSessionStart("route0", 2)
+		// Session B starts (id=2), superseding A.
+		helper.OnSessionStart("route0", 2)
 
-	s = requireScope(t, tracker, "rib")
-	assert.Equal(t, readinesspb.State_STATE_DEGRADED, s.State)
-	require.NotEmpty(t, s.Reasons)
-	assert.Equal(t, "SYNCING", s.Reasons[0].Code)
+		s = requireScope(t, tracker, "rib")
+		assert.Equal(t, readinesspb.State_STATE_DEGRADED, s.State)
+		require.NotEmpty(t, s.Reasons)
+		assert.Equal(t, "SYNCING", s.Reasons[0].Code)
 
-	// Session A's stale end arrives — must be ignored because currentSession is 2.
-	helper.OnSessionEnd("route0", 1)
+		// Session A's stale end arrives — must be ignored because currentSession is 2.
+		helper.OnSessionEnd("route0", 1)
 
-	// State must still reflect an active session (SYNCING), not SESSION_ENDED.
-	s = requireScope(t, tracker, "rib")
-	assert.Equal(t, readinesspb.State_STATE_DEGRADED, s.State)
-	require.NotEmpty(t, s.Reasons)
-	assert.Equal(t, "SYNCING", s.Reasons[0].Code)
+		// State must still reflect an active session (SYNCING), not SESSION_ENDED.
+		s = requireScope(t, tracker, "rib")
+		assert.Equal(t, readinesspb.State_STATE_DEGRADED, s.State)
+		require.NotEmpty(t, s.Reasons)
+		assert.Equal(t, "SYNCING", s.Reasons[0].Code)
 
-	// Run the sampling loop: with rate=0 (well below 1000/s), session B should
-	// settle and reach READY within the stability window.
-	ctx, cancel := context.WithCancel(t.Context())
+		// Run the sampling loop: with rate=0 (well below 1000/s), session B should
+		// settle and reach READY within the stability window.
+		ctx, cancel := context.WithCancel(t.Context())
 
-	eg, ctx := errgroup.WithContext(ctx)
-	eg.Go(func() error {
-		return helper.Run(ctx)
+		eg, ctx := errgroup.WithContext(ctx)
+		eg.Go(func() error {
+			return helper.Run(ctx)
+		})
+
+		synctest.Sleep(200 * time.Millisecond)
+
+		s = requireScope(t, tracker, "rib")
+		assert.Equal(t, readinesspb.State_STATE_READY, s.State)
+
+		cancel()
+		_ = eg.Wait()
 	})
-
-	time.Sleep(200 * time.Millisecond)
-
-	s = requireScope(t, tracker, "rib")
-	assert.Equal(t, readinesspb.State_STATE_READY, s.State)
-
-	cancel()
-	_ = eg.Wait()
 }
 
 // TestBirdSession_InitialDegraded verifies that the bird-session scope starts
@@ -581,183 +593,193 @@ func TestBirdSession_SessionEndReconnecting(t *testing.T) {
 // TestBirdSession_GraceExpiry verifies that the ticker flips bird-session
 // from RECONNECTING to DOWN after ReconnectGrace elapses.
 func TestBirdSession_GraceExpiry(t *testing.T) {
-	cfg := ReadinessConfig{
-		RateThreshold:   1000,
-		StabilityWindow: 50 * time.Millisecond,
-		SampleInterval:  20 * time.Millisecond,
-		ReconnectGrace:  60 * time.Millisecond,
-	}
+	synctest.Test(t, func(t *testing.T) {
+		cfg := ReadinessConfig{
+			RateThreshold:   1000,
+			StabilityWindow: 50 * time.Millisecond,
+			SampleInterval:  20 * time.Millisecond,
+			ReconnectGrace:  60 * time.Millisecond,
+		}
 
-	store := newRIBStore()
-	tracker := readiness.NewTracker(specs("bird-session", "rib"))
-	helper := newBirdRIBReadiness(cfg, store, "route0", tracker)
+		store := newRIBStore()
+		tracker := readiness.NewTracker(specs("bird-session", "rib"))
+		helper := newBirdRIBReadiness(cfg, store, "route0", tracker)
 
-	helper.OnSessionStart("route0", 1)
-	helper.OnSessionEnd("route0", 1)
+		helper.OnSessionStart("route0", 1)
+		helper.OnSessionEnd("route0", 1)
 
-	ctx, cancel := context.WithCancel(t.Context())
-	eg, _ := errgroup.WithContext(ctx)
-	eg.Go(func() error {
-		return helper.Run(ctx)
+		ctx, cancel := context.WithCancel(t.Context())
+		eg, _ := errgroup.WithContext(ctx)
+		eg.Go(func() error {
+			return helper.Run(ctx)
+		})
+
+		// Wait well past grace to ensure the ticker fires after grace elapses.
+		synctest.Sleep(200 * time.Millisecond)
+
+		s := requireScope(t, tracker, "bird-session")
+		assert.Equal(t, readinesspb.State_STATE_DEGRADED, s.State)
+		require.Len(t, s.Reasons, 1)
+		assert.Equal(t, "DOWN", s.Reasons[0].Code)
+
+		cancel()
+		_ = eg.Wait()
 	})
-
-	// Wait well past grace to ensure the ticker fires after grace elapses.
-	time.Sleep(200 * time.Millisecond)
-
-	s := requireScope(t, tracker, "bird-session")
-	assert.Equal(t, readinesspb.State_STATE_DEGRADED, s.State)
-	require.Len(t, s.Reasons, 1)
-	assert.Equal(t, "DOWN", s.Reasons[0].Code)
-
-	cancel()
-	_ = eg.Wait()
 }
 
 // TestBirdSession_NeverNotReady verifies that bird-session never reaches
 // NOT_READY regardless of session events.
 func TestBirdSession_NeverNotReady(t *testing.T) {
-	cfg := ReadinessConfig{
-		RateThreshold:   1000,
-		StabilityWindow: 50 * time.Millisecond,
-		SampleInterval:  20 * time.Millisecond,
-		ReconnectGrace:  30 * time.Millisecond,
-	}
+	synctest.Test(t, func(t *testing.T) {
+		cfg := ReadinessConfig{
+			RateThreshold:   1000,
+			StabilityWindow: 50 * time.Millisecond,
+			SampleInterval:  20 * time.Millisecond,
+			ReconnectGrace:  30 * time.Millisecond,
+		}
 
-	store := newRIBStore()
-	tracker := readiness.NewTracker(specs("bird-session", "rib"))
-	helper := newBirdRIBReadiness(cfg, store, "route0", tracker)
+		store := newRIBStore()
+		tracker := readiness.NewTracker(specs("bird-session", "rib"))
+		helper := newBirdRIBReadiness(cfg, store, "route0", tracker)
 
-	helper.OnSessionStart("route0", 1)
-	helper.OnSessionEnd("route0", 1)
+		helper.OnSessionStart("route0", 1)
+		helper.OnSessionEnd("route0", 1)
 
-	ctx, cancel := context.WithCancel(t.Context())
-	eg, _ := errgroup.WithContext(ctx)
-	eg.Go(func() error {
-		return helper.Run(ctx)
+		ctx, cancel := context.WithCancel(t.Context())
+		eg, _ := errgroup.WithContext(ctx)
+		eg.Go(func() error {
+			return helper.Run(ctx)
+		})
+
+		// Allow grace to expire.
+		synctest.Sleep(150 * time.Millisecond)
+
+		s := requireScope(t, tracker, "bird-session")
+		assert.NotEqual(t, readinesspb.State_STATE_NOT_READY, s.State,
+			"bird-session must never reach NOT_READY")
+
+		cancel()
+		_ = eg.Wait()
 	})
-
-	// Allow grace to expire.
-	time.Sleep(150 * time.Millisecond)
-
-	s := requireScope(t, tracker, "bird-session")
-	assert.NotEqual(t, readinesspb.State_STATE_NOT_READY, s.State,
-		"bird-session must never reach NOT_READY")
-
-	cancel()
-	_ = eg.Wait()
 }
 
 // TestBirdSession_ReconnectFromDown verifies that a new session start from
 // DEGRADED(DOWN) transitions bird-session back to READY.
 func TestBirdSession_ReconnectFromDown(t *testing.T) {
-	cfg := ReadinessConfig{
-		RateThreshold:   1000,
-		StabilityWindow: 50 * time.Millisecond,
-		SampleInterval:  20 * time.Millisecond,
-		ReconnectGrace:  30 * time.Millisecond,
-	}
+	synctest.Test(t, func(t *testing.T) {
+		cfg := ReadinessConfig{
+			RateThreshold:   1000,
+			StabilityWindow: 50 * time.Millisecond,
+			SampleInterval:  20 * time.Millisecond,
+			ReconnectGrace:  30 * time.Millisecond,
+		}
 
-	store := newRIBStore()
-	tracker := readiness.NewTracker(specs("bird-session", "rib"))
-	helper := newBirdRIBReadiness(cfg, store, "route0", tracker)
+		store := newRIBStore()
+		tracker := readiness.NewTracker(specs("bird-session", "rib"))
+		helper := newBirdRIBReadiness(cfg, store, "route0", tracker)
 
-	helper.OnSessionStart("route0", 1)
-	helper.OnSessionEnd("route0", 1)
+		helper.OnSessionStart("route0", 1)
+		helper.OnSessionEnd("route0", 1)
 
-	ctx, cancel := context.WithCancel(t.Context())
-	eg, _ := errgroup.WithContext(ctx)
-	eg.Go(func() error {
-		return helper.Run(ctx)
+		ctx, cancel := context.WithCancel(t.Context())
+		eg, _ := errgroup.WithContext(ctx)
+		eg.Go(func() error {
+			return helper.Run(ctx)
+		})
+
+		// Allow grace to expire, reaching DOWN.
+		synctest.Sleep(150 * time.Millisecond)
+		s := requireScope(t, tracker, "bird-session")
+		assert.Equal(t, "DOWN", s.Reasons[0].Code)
+
+		// Reconnect — must return to READY.
+		helper.OnSessionStart("route0", 2)
+
+		s = requireScope(t, tracker, "bird-session")
+		assert.Equal(t, readinesspb.State_STATE_READY, s.State)
+		assert.Empty(t, s.Reasons)
+
+		cancel()
+		_ = eg.Wait()
 	})
-
-	// Allow grace to expire, reaching DOWN.
-	time.Sleep(150 * time.Millisecond)
-	s := requireScope(t, tracker, "bird-session")
-	assert.Equal(t, "DOWN", s.Reasons[0].Code)
-
-	// Reconnect — must return to READY.
-	helper.OnSessionStart("route0", 2)
-
-	s = requireScope(t, tracker, "bird-session")
-	assert.Equal(t, readinesspb.State_STATE_READY, s.State)
-	assert.Empty(t, s.Reasons)
-
-	cancel()
-	_ = eg.Wait()
 }
 
 // TestRIBReadiness_SettledNoRoutes verifies the key fix: when the session is
 // settled but the RIB is empty, the rib scope reports NOT_READY(NO_ROUTES).
 func TestRIBReadiness_SettledNoRoutes(t *testing.T) {
-	cfg := ReadinessConfig{
-		RateThreshold:   1000,
-		StabilityWindow: 40 * time.Millisecond,
-		SampleInterval:  15 * time.Millisecond,
-		ReconnectGrace:  500 * time.Millisecond,
-	}
+	synctest.Test(t, func(t *testing.T) {
+		cfg := ReadinessConfig{
+			RateThreshold:   1000,
+			StabilityWindow: 40 * time.Millisecond,
+			SampleInterval:  15 * time.Millisecond,
+			ReconnectGrace:  500 * time.Millisecond,
+		}
 
-	store := newRIBStore()
-	// No routes seeded — empty RIB.
-	tracker := readiness.NewTracker(specs("rib"))
-	helper := newBirdRIBReadiness(cfg, store, "route0", tracker)
+		store := newRIBStore()
+		// No routes seeded — empty RIB.
+		tracker := readiness.NewTracker(specs("rib"))
+		helper := newBirdRIBReadiness(cfg, store, "route0", tracker)
 
-	helper.OnSessionStart("route0", 1)
+		helper.OnSessionStart("route0", 1)
 
-	ctx, cancel := context.WithCancel(t.Context())
-	eg, ctx := errgroup.WithContext(ctx)
-	eg.Go(func() error {
-		return helper.Run(ctx)
+		ctx, cancel := context.WithCancel(t.Context())
+		eg, ctx := errgroup.WithContext(ctx)
+		eg.Go(func() error {
+			return helper.Run(ctx)
+		})
+
+		// Wait for the stability window to clear.
+		synctest.Sleep(200 * time.Millisecond)
+
+		s := requireScope(t, tracker, "rib")
+		assert.Equal(t, readinesspb.State_STATE_NOT_READY, s.State)
+		require.Len(t, s.Reasons, 1)
+		assert.Equal(t, "NO_ROUTES", s.Reasons[0].Code)
+
+		cancel()
+		_ = eg.Wait()
 	})
-
-	// Wait for the stability window to clear.
-	time.Sleep(200 * time.Millisecond)
-
-	s := requireScope(t, tracker, "rib")
-	assert.Equal(t, readinesspb.State_STATE_NOT_READY, s.State)
-	require.Len(t, s.Reasons, 1)
-	assert.Equal(t, "NO_ROUTES", s.Reasons[0].Code)
-
-	cancel()
-	_ = eg.Wait()
 }
 
 // TestRIBReadiness_SessionEndedWithRoutes verifies that READY→SessionEnd
 // transitions rib to DEGRADED(SESSION_ENDED) when routes are still present.
 func TestRIBReadiness_SessionEndedWithRoutes(t *testing.T) {
-	cfg := ReadinessConfig{
-		RateThreshold:   1000,
-		StabilityWindow: 30 * time.Millisecond,
-		SampleInterval:  15 * time.Millisecond,
-		ReconnectGrace:  500 * time.Millisecond,
-	}
+	synctest.Test(t, func(t *testing.T) {
+		cfg := ReadinessConfig{
+			RateThreshold:   1000,
+			StabilityWindow: 30 * time.Millisecond,
+			SampleInterval:  15 * time.Millisecond,
+			ReconnectGrace:  500 * time.Millisecond,
+		}
 
-	store := newRIBStore()
-	seedRoute(t, store, "route0")
-	tracker := readiness.NewTracker(specs("rib"))
-	helper := newBirdRIBReadiness(cfg, store, "route0", tracker)
+		store := newRIBStore()
+		seedRoute(t, store, "route0")
+		tracker := readiness.NewTracker(specs("rib"))
+		helper := newBirdRIBReadiness(cfg, store, "route0", tracker)
 
-	helper.OnSessionStart("route0", 1)
+		helper.OnSessionStart("route0", 1)
 
-	ctx, cancel := context.WithCancel(t.Context())
-	eg, ctx := errgroup.WithContext(ctx)
-	eg.Go(func() error {
-		return helper.Run(ctx)
+		ctx, cancel := context.WithCancel(t.Context())
+		eg, ctx := errgroup.WithContext(ctx)
+		eg.Go(func() error {
+			return helper.Run(ctx)
+		})
+
+		// Wait for READY.
+		synctest.Sleep(150 * time.Millisecond)
+		s := requireScope(t, tracker, "rib")
+		assert.Equal(t, readinesspb.State_STATE_READY, s.State)
+
+		helper.OnSessionEnd("route0", 1)
+
+		s = requireScope(t, tracker, "rib")
+		assert.Equal(t, readinesspb.State_STATE_DEGRADED, s.State)
+		require.Len(t, s.Reasons, 1)
+		assert.Equal(t, "SESSION_ENDED", s.Reasons[0].Code)
+
+		cancel()
+		_ = eg.Wait()
 	})
-
-	// Wait for READY.
-	time.Sleep(150 * time.Millisecond)
-	s := requireScope(t, tracker, "rib")
-	assert.Equal(t, readinesspb.State_STATE_READY, s.State)
-
-	helper.OnSessionEnd("route0", 1)
-
-	s = requireScope(t, tracker, "rib")
-	assert.Equal(t, readinesspb.State_STATE_DEGRADED, s.State)
-	require.Len(t, s.Reasons, 1)
-	assert.Equal(t, "SESSION_ENDED", s.Reasons[0].Code)
-
-	cancel()
-	_ = eg.Wait()
 }
 
 // TestRIBReadiness_TTLPurgeAfterSessionEnd verifies that when a session has
@@ -765,57 +787,59 @@ func TestRIBReadiness_SessionEndedWithRoutes(t *testing.T) {
 // subsequently empties the RIB, the next ticker evaluation transitions rib to
 // NOT_READY(NO_ROUTES) without waiting for a new session start.
 func TestRIBReadiness_TTLPurgeAfterSessionEnd(t *testing.T) {
-	cfg := ReadinessConfig{
-		RateThreshold:   1000,
-		StabilityWindow: 30 * time.Millisecond,
-		SampleInterval:  15 * time.Millisecond,
-		ReconnectGrace:  500 * time.Millisecond,
-	}
+	synctest.Test(t, func(t *testing.T) {
+		cfg := ReadinessConfig{
+			RateThreshold:   1000,
+			StabilityWindow: 30 * time.Millisecond,
+			SampleInterval:  15 * time.Millisecond,
+			ReconnectGrace:  500 * time.Millisecond,
+		}
 
-	store := newRIBStore()
-	seedRoute(t, store, "route0")
-	tracker := readiness.NewTracker(specs("rib"))
-	helper := newBirdRIBReadiness(cfg, store, "route0", tracker)
+		store := newRIBStore()
+		seedRoute(t, store, "route0")
+		tracker := readiness.NewTracker(specs("rib"))
+		helper := newBirdRIBReadiness(cfg, store, "route0", tracker)
 
-	helper.OnSessionStart("route0", 1)
+		helper.OnSessionStart("route0", 1)
 
-	ctx, cancel := context.WithCancel(t.Context())
-	eg, ctx := errgroup.WithContext(ctx)
-	eg.Go(func() error {
-		return helper.Run(ctx)
+		ctx, cancel := context.WithCancel(t.Context())
+		eg, ctx := errgroup.WithContext(ctx)
+		eg.Go(func() error {
+			return helper.Run(ctx)
+		})
+
+		// Wait for READY.
+		synctest.Sleep(150 * time.Millisecond)
+		s := requireScope(t, tracker, "rib")
+		assert.Equal(t, readinesspb.State_STATE_READY, s.State)
+
+		// Session ends — routes still present, so rib must be DEGRADED(SESSION_ENDED).
+		helper.OnSessionEnd("route0", 1)
+
+		s = requireScope(t, tracker, "rib")
+		assert.Equal(t, readinesspb.State_STATE_DEGRADED, s.State)
+		require.Len(t, s.Reasons, 1)
+		assert.Equal(t, "SESSION_ENDED", s.Reasons[0].Code)
+
+		// Simulate TTL purge: remove the route from the store so that hasRoutes()
+		// returns false.
+		ribRef := store.GetOrCreate("route0")
+		prefix := netip.MustParsePrefix("10.0.0.0/24")
+		nexthop := netip.MustParseAddr("192.168.1.1")
+		require.NoError(t, ribRef.RemoveUnicastRoute(prefix, nexthop, rib.RouteSourceStatic))
+
+		// Advance at least one tick and verify rib transitions to NOT_READY(NO_ROUTES)
+		// without any new session start.
+		synctest.Sleep(60 * time.Millisecond)
+
+		s = requireScope(t, tracker, "rib")
+		assert.Equal(t, readinesspb.State_STATE_NOT_READY, s.State)
+		require.Len(t, s.Reasons, 1)
+		assert.Equal(t, "NO_ROUTES", s.Reasons[0].Code)
+
+		cancel()
+		_ = eg.Wait()
 	})
-
-	// Wait for READY.
-	time.Sleep(150 * time.Millisecond)
-	s := requireScope(t, tracker, "rib")
-	assert.Equal(t, readinesspb.State_STATE_READY, s.State)
-
-	// Session ends — routes still present, so rib must be DEGRADED(SESSION_ENDED).
-	helper.OnSessionEnd("route0", 1)
-
-	s = requireScope(t, tracker, "rib")
-	assert.Equal(t, readinesspb.State_STATE_DEGRADED, s.State)
-	require.Len(t, s.Reasons, 1)
-	assert.Equal(t, "SESSION_ENDED", s.Reasons[0].Code)
-
-	// Simulate TTL purge: remove the route from the store so that hasRoutes()
-	// returns false.
-	ribRef := store.GetOrCreate("route0")
-	prefix := netip.MustParsePrefix("10.0.0.0/24")
-	nexthop := netip.MustParseAddr("192.168.1.1")
-	require.NoError(t, ribRef.RemoveUnicastRoute(prefix, nexthop, rib.RouteSourceStatic))
-
-	// Advance at least one tick and verify rib transitions to NOT_READY(NO_ROUTES)
-	// without any new session start.
-	time.Sleep(60 * time.Millisecond)
-
-	s = requireScope(t, tracker, "rib")
-	assert.Equal(t, readinesspb.State_STATE_NOT_READY, s.State)
-	require.Len(t, s.Reasons, 1)
-	assert.Equal(t, "NO_ROUTES", s.Reasons[0].Code)
-
-	cancel()
-	_ = eg.Wait()
 }
 
 // TestNeighbours_SyncThenError verifies the neighbours scope edge:
@@ -865,58 +889,60 @@ func TestNeighbours_SyncThenError(t *testing.T) {
 // bird-adapter restart within grace+TTL, both bird-session and rib are at most
 // DEGRADED (never NOT_READY).
 func TestBirdRestartHoldInvariant(t *testing.T) {
-	cfg := ReadinessConfig{
-		RateThreshold:   1000,
-		StabilityWindow: 30 * time.Millisecond,
-		SampleInterval:  15 * time.Millisecond,
-		ReconnectGrace:  500 * time.Millisecond,
-	}
+	synctest.Test(t, func(t *testing.T) {
+		cfg := ReadinessConfig{
+			RateThreshold:   1000,
+			StabilityWindow: 30 * time.Millisecond,
+			SampleInterval:  15 * time.Millisecond,
+			ReconnectGrace:  500 * time.Millisecond,
+		}
 
-	store := newRIBStore()
-	seedRoute(t, store, "route0")
-	tracker := readiness.NewTracker(specs("bird-session", "rib"))
-	helper := newBirdRIBReadiness(cfg, store, "route0", tracker)
+		store := newRIBStore()
+		seedRoute(t, store, "route0")
+		tracker := readiness.NewTracker(specs("bird-session", "rib"))
+		helper := newBirdRIBReadiness(cfg, store, "route0", tracker)
 
-	helper.OnSessionStart("route0", 1)
+		helper.OnSessionStart("route0", 1)
 
-	ctx, cancel := context.WithCancel(t.Context())
-	eg, _ := errgroup.WithContext(ctx)
-	eg.Go(func() error {
-		return helper.Run(ctx)
+		ctx, cancel := context.WithCancel(t.Context())
+		eg, _ := errgroup.WithContext(ctx)
+		eg.Go(func() error {
+			return helper.Run(ctx)
+		})
+
+		// Wait for both scopes to reach READY.
+		synctest.Sleep(150 * time.Millisecond)
+		s := requireScope(t, tracker, "rib")
+		assert.Equal(t, readinesspb.State_STATE_READY, s.State)
+		s = requireScope(t, tracker, "bird-session")
+		assert.Equal(t, readinesspb.State_STATE_READY, s.State)
+
+		// Bird-adapter restarts — session ends. Both scopes must go to DEGRADED, not NOT_READY.
+		helper.OnSessionEnd("route0", 1)
+
+		s = requireScope(t, tracker, "bird-session")
+		assert.Equal(t, readinesspb.State_STATE_DEGRADED, s.State,
+			"bird-session must be DEGRADED after session end, not NOT_READY")
+		assert.NotEqual(t, readinesspb.State_STATE_NOT_READY, s.State)
+
+		s = requireScope(t, tracker, "rib")
+		assert.Equal(t, readinesspb.State_STATE_DEGRADED, s.State,
+			"rib must be DEGRADED after session end with live routes")
+		assert.NotEqual(t, readinesspb.State_STATE_NOT_READY, s.State)
+
+		// Within grace period — still DEGRADED.
+		synctest.Sleep(50 * time.Millisecond)
+		s = requireScope(t, tracker, "bird-session")
+		assert.NotEqual(t, readinesspb.State_STATE_NOT_READY, s.State,
+			"bird-session must not reach NOT_READY within grace period")
+
+		s = requireScope(t, tracker, "rib")
+		assert.NotEqual(t, readinesspb.State_STATE_NOT_READY, s.State,
+			"rib must not reach NOT_READY within grace period (routes still live)")
+
+		cancel()
+		_ = eg.Wait()
 	})
-
-	// Wait for both scopes to reach READY.
-	time.Sleep(150 * time.Millisecond)
-	s := requireScope(t, tracker, "rib")
-	assert.Equal(t, readinesspb.State_STATE_READY, s.State)
-	s = requireScope(t, tracker, "bird-session")
-	assert.Equal(t, readinesspb.State_STATE_READY, s.State)
-
-	// Bird-adapter restarts — session ends. Both scopes must go to DEGRADED, not NOT_READY.
-	helper.OnSessionEnd("route0", 1)
-
-	s = requireScope(t, tracker, "bird-session")
-	assert.Equal(t, readinesspb.State_STATE_DEGRADED, s.State,
-		"bird-session must be DEGRADED after session end, not NOT_READY")
-	assert.NotEqual(t, readinesspb.State_STATE_NOT_READY, s.State)
-
-	s = requireScope(t, tracker, "rib")
-	assert.Equal(t, readinesspb.State_STATE_DEGRADED, s.State,
-		"rib must be DEGRADED after session end with live routes")
-	assert.NotEqual(t, readinesspb.State_STATE_NOT_READY, s.State)
-
-	// Within grace period — still DEGRADED.
-	time.Sleep(50 * time.Millisecond)
-	s = requireScope(t, tracker, "bird-session")
-	assert.NotEqual(t, readinesspb.State_STATE_NOT_READY, s.State,
-		"bird-session must not reach NOT_READY within grace period")
-
-	s = requireScope(t, tracker, "rib")
-	assert.NotEqual(t, readinesspb.State_STATE_NOT_READY, s.State,
-		"rib must not reach NOT_READY within grace period (routes still live)")
-
-	cancel()
-	_ = eg.Wait()
 }
 
 // TestStaticRIBReadiness_ReadyWhenRoutesPresent verifies that staticRIBReadiness
@@ -924,48 +950,50 @@ func TestBirdRestartHoldInvariant(t *testing.T) {
 // NOT_READY(NO_ROUTES) once the route is removed, all without ever touching the
 // bird-session scope.
 func TestStaticRIBReadiness_ReadyWhenRoutesPresent(t *testing.T) {
-	store := newRIBStore()
-	seedRoute(t, store, "route0")
+	synctest.Test(t, func(t *testing.T) {
+		store := newRIBStore()
+		seedRoute(t, store, "route0")
 
-	// Register both rib and bird-session so we can assert bird-session is never set.
-	tracker := readiness.NewTracker(specs("rib", "bird-session"))
+		// Register both rib and bird-session so we can assert bird-session is never set.
+		tracker := readiness.NewTracker(specs("rib", "bird-session"))
 
-	helper := newStaticRIBReadiness(store, "route0", tracker, 20*time.Millisecond)
+		helper := newStaticRIBReadiness(store, "route0", tracker, 20*time.Millisecond)
 
-	// The constructor must seed rib=READY immediately (route already present).
-	s := requireScope(t, tracker, "rib")
-	assert.Equal(t, readinesspb.State_STATE_READY, s.State)
+		// The constructor must seed rib=READY immediately (route already present).
+		s := requireScope(t, tracker, "rib")
+		assert.Equal(t, readinesspb.State_STATE_READY, s.State)
 
-	ctx, cancel := context.WithCancel(t.Context())
-	eg, _ := errgroup.WithContext(ctx)
-	eg.Go(func() error {
-		return helper.Run(ctx)
+		ctx, cancel := context.WithCancel(t.Context())
+		eg, _ := errgroup.WithContext(ctx)
+		eg.Go(func() error {
+			return helper.Run(ctx)
+		})
+
+		// Confirm the polling loop keeps rib READY across several ticks.
+		synctest.Sleep(80 * time.Millisecond)
+		s = requireScope(t, tracker, "rib")
+		assert.Equal(t, readinesspb.State_STATE_READY, s.State)
+
+		// Remove the route: next tick must flip to NOT_READY(NO_ROUTES).
+		ribRef := store.GetOrCreate("route0")
+		prefix := netip.MustParsePrefix("10.0.0.0/24")
+		nexthop := netip.MustParseAddr("192.168.1.1")
+		require.NoError(t, ribRef.RemoveUnicastRoute(prefix, nexthop, rib.RouteSourceStatic))
+
+		synctest.Sleep(80 * time.Millisecond)
+		s = requireScope(t, tracker, "rib")
+		assert.Equal(t, readinesspb.State_STATE_NOT_READY, s.State)
+		require.NotEmpty(t, s.Reasons)
+		assert.Equal(t, "NO_ROUTES", s.Reasons[0].Code)
+
+		// The bird-session scope must never have been set (still UNKNOWN).
+		bs := requireScope(t, tracker, "bird-session")
+		assert.Equal(t, readinesspb.State_STATE_UNKNOWN, bs.State,
+			"bird-session must never be touched by staticRIBReadiness")
+
+		cancel()
+		_ = eg.Wait()
 	})
-
-	// Confirm the polling loop keeps rib READY across several ticks.
-	time.Sleep(80 * time.Millisecond)
-	s = requireScope(t, tracker, "rib")
-	assert.Equal(t, readinesspb.State_STATE_READY, s.State)
-
-	// Remove the route: next tick must flip to NOT_READY(NO_ROUTES).
-	ribRef := store.GetOrCreate("route0")
-	prefix := netip.MustParsePrefix("10.0.0.0/24")
-	nexthop := netip.MustParseAddr("192.168.1.1")
-	require.NoError(t, ribRef.RemoveUnicastRoute(prefix, nexthop, rib.RouteSourceStatic))
-
-	time.Sleep(80 * time.Millisecond)
-	s = requireScope(t, tracker, "rib")
-	assert.Equal(t, readinesspb.State_STATE_NOT_READY, s.State)
-	require.NotEmpty(t, s.Reasons)
-	assert.Equal(t, "NO_ROUTES", s.Reasons[0].Code)
-
-	// The bird-session scope must never have been set (still UNKNOWN).
-	bs := requireScope(t, tracker, "bird-session")
-	assert.Equal(t, readinesspb.State_STATE_UNKNOWN, bs.State,
-		"bird-session must never be touched by staticRIBReadiness")
-
-	cancel()
-	_ = eg.Wait()
 }
 
 // TestStaticRIBReadiness_ColdStart verifies that staticRIBReadiness seeds
@@ -987,39 +1015,40 @@ func TestStaticRIBReadiness_ColdStart(t *testing.T) {
 // is added before Run starts, the first call to Run must flip rib to READY
 // immediately without waiting for the first ticker tick.
 func TestStaticRIBReadiness_PostPreRunReady(t *testing.T) {
-	store := newRIBStore()
+	synctest.Test(t, func(t *testing.T) {
+		store := newRIBStore()
 
-	// Empty store at construction — seeds NOT_READY(NO_ROUTES), mirroring the
-	// real operator where PreRun has not yet populated static.routes.
-	tracker := readiness.NewTracker(specs("rib"))
-	helper := newStaticRIBReadiness(store, "route0", tracker, 500*time.Millisecond)
+		// Empty store at construction — seeds NOT_READY(NO_ROUTES), mirroring the
+		// real operator where PreRun has not yet populated static.routes.
+		tracker := readiness.NewTracker(specs("rib"))
+		helper := newStaticRIBReadiness(store, "route0", tracker, 500*time.Millisecond)
 
-	s := requireScope(t, tracker, "rib")
-	assert.Equal(t, readinesspb.State_STATE_NOT_READY, s.State)
-	require.NotEmpty(t, s.Reasons)
-	assert.Equal(t, "NO_ROUTES", s.Reasons[0].Code)
-
-	// Seed a route after construction, before Run — mirrors PreRun populating routes.
-	seedRoute(t, store, "route0")
-
-	// Start Run. The entry evaluate must fire synchronously before the ticker
-	// loop, so rib must be READY well before the 500ms sample_interval.
-	ctx, cancel := context.WithCancel(t.Context())
-	eg, _ := errgroup.WithContext(ctx)
-	eg.Go(func() error {
-		return helper.Run(ctx)
-	})
-
-	// The 50ms interval is shorter than the 500ms sample_interval. Any readiness
-	// change here can only come from entry evaluation, not a ticker tick.
-	require.Eventually(t, func() bool {
 		s := requireScope(t, tracker, "rib")
-		return s.State == readinesspb.State_STATE_READY
-	}, 50*time.Millisecond, 2*time.Millisecond,
-		"rib must become READY from entry evaluate before first ticker tick")
+		assert.Equal(t, readinesspb.State_STATE_NOT_READY, s.State)
+		require.NotEmpty(t, s.Reasons)
+		assert.Equal(t, "NO_ROUTES", s.Reasons[0].Code)
 
-	cancel()
-	_ = eg.Wait()
+		// Seed a route after construction, before Run — mirrors PreRun populating routes.
+		seedRoute(t, store, "route0")
+
+		// Start Run. The entry evaluate must fire synchronously before the ticker
+		// loop, so rib must be READY well before the 500ms sample_interval.
+		ctx, cancel := context.WithCancel(t.Context())
+		eg, _ := errgroup.WithContext(ctx)
+		eg.Go(func() error {
+			return helper.Run(ctx)
+		})
+
+		// The fake clock has not advanced, so no ticker tick has fired: the
+		// readiness change can only come from entry evaluation.
+		synctest.Wait()
+		s = requireScope(t, tracker, "rib")
+		assert.Equal(t, readinesspb.State_STATE_READY, s.State,
+			"rib must become READY from entry evaluate before first ticker tick")
+
+		cancel()
+		_ = eg.Wait()
+	})
 }
 
 // TestStaticRIBReadiness_NoopsIgnored verifies that OnSessionStart, OnUpdate,

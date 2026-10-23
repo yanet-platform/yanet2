@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/stretchr/testify/assert"
@@ -323,40 +324,42 @@ func TestTracker_Set_ReasonsUpdated(t *testing.T) {
 }
 
 func TestTracker_Touch_AdvancesObservedAt(t *testing.T) {
-	r := readiness.NewTracker(specs("neighbours"))
+	synctest.Test(t, func(t *testing.T) {
+		r := readiness.NewTracker(specs("neighbours"))
 
-	// Drive the scope to a known state.
-	r.SetWithReason("neighbours",
-		readinesspb.State_STATE_READY,
-		&readinesspb.Reason{Code: "SYNCED"},
-	)
+		// Drive the scope to a known state.
+		r.SetWithReason("neighbours",
+			readinesspb.State_STATE_READY,
+			&readinesspb.Reason{Code: "SYNCED"},
+		)
 
-	resp1 := r.Ready(&readinesspb.ReadyRequest{})
-	require.Len(t, resp1.Scopes, 1)
-	s1 := resp1.Scopes[0]
+		resp1 := r.Ready(&readinesspb.ReadyRequest{})
+		require.Len(t, resp1.Scopes, 1)
+		s1 := resp1.Scopes[0]
 
-	obs1 := s1.ObservedAt.AsTime()
-	ltt1 := s1.LastTransitionTime.AsTime()
-	wantState := s1.State
-	wantReason := s1.Reasons[0].Code
+		obs1 := s1.ObservedAt.AsTime()
+		ltt1 := s1.LastTransitionTime.AsTime()
+		wantState := s1.State
+		wantReason := s1.Reasons[0].Code
 
-	// Sleep a small amount so the clock advances reliably.
-	time.Sleep(2 * time.Millisecond)
+		// Advance the bubble's fake clock so a refresh must move observed_at.
+		time.Sleep(2 * time.Millisecond)
 
-	r.Touch("neighbours")
+		r.Touch("neighbours")
 
-	resp2 := r.Ready(&readinesspb.ReadyRequest{})
-	require.Len(t, resp2.Scopes, 1)
-	s2 := resp2.Scopes[0]
+		resp2 := r.Ready(&readinesspb.ReadyRequest{})
+		require.Len(t, resp2.Scopes, 1)
+		s2 := resp2.Scopes[0]
 
-	obs2 := s2.ObservedAt.AsTime()
-	ltt2 := s2.LastTransitionTime.AsTime()
+		obs2 := s2.ObservedAt.AsTime()
+		ltt2 := s2.LastTransitionTime.AsTime()
 
-	assert.True(t, obs2.After(obs1), "Touch must advance observed_at")
-	assert.Equal(t, ltt1, ltt2, "Touch must not change last_transition_time")
-	assert.Equal(t, wantState, s2.State, "Touch must not change state")
-	require.Len(t, s2.Reasons, 1)
-	assert.Equal(t, wantReason, s2.Reasons[0].Code, "Touch must not change reason")
+		assert.True(t, obs2.After(obs1), "Touch must advance observed_at")
+		assert.Equal(t, ltt1, ltt2, "Touch must not change last_transition_time")
+		assert.Equal(t, wantState, s2.State, "Touch must not change state")
+		require.Len(t, s2.Reasons, 1)
+		assert.Equal(t, wantReason, s2.Reasons[0].Code, "Touch must not change reason")
+	})
 }
 
 func TestTracker_Touch_UnknownScope_NoOp(t *testing.T) {
@@ -629,18 +632,19 @@ func recvTimeout(t *testing.T, ch <-chan *readinesspb.ReadyResponse, timeout tim
 	}
 }
 
-// assertNoMsg asserts that no message arrives on ch within the given window.
-func assertNoMsg(t *testing.T, ch <-chan *readinesspb.ReadyResponse, window time.Duration) {
+// assertNoMsg asserts that no message is pending on ch once every goroutine
+// in the synctest bubble has blocked, so it must run inside a bubble.
+func assertNoMsg(t *testing.T, ch <-chan *readinesspb.ReadyResponse) {
 	t.Helper()
+	synctest.Wait()
 	select {
 	case msg := <-ch:
 		t.Fatalf("unexpected Watch message: %v", msg)
-	case <-time.After(window):
+	default:
 	}
 }
 
 const watchTimeout = 200 * time.Millisecond
-const watchQuietWindow = 30 * time.Millisecond
 
 func TestWatch_InitialSnapshot_AllScopes(t *testing.T) {
 	r := readiness.NewTracker(specs("gw-a", "gw-b"))
@@ -736,106 +740,114 @@ func TestWatch_ReasonOnlyChange_EmitsDelta(t *testing.T) {
 // verifies that a timestamp-only refresh remains visible through readiness
 // queries without producing a stream event.
 func TestWatch_Touch_EmitsNothing(t *testing.T) {
-	r := readiness.NewTracker(specs("gw-a"))
-	r.Set("gw-a", readinesspb.State_STATE_READY)
+	synctest.Test(t, func(t *testing.T) {
+		r := readiness.NewTracker(specs("gw-a"))
+		r.Set("gw-a", readinesspb.State_STATE_READY)
 
-	ctx, cancel := context.WithCancel(t.Context())
-	defer cancel()
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
 
-	ch, eg := collectWatch(t, ctx, r, &readinesspb.ReadyRequest{}, 8)
+		ch, eg := collectWatch(t, ctx, r, &readinesspb.ReadyRequest{}, 8)
 
-	snap := recvTimeout(t, ch, watchTimeout)
-	observedBefore := snap.Scopes[0].ObservedAt.AsTime()
+		snap := recvTimeout(t, ch, watchTimeout)
+		observedBefore := snap.Scopes[0].ObservedAt.AsTime()
 
-	time.Sleep(2 * time.Millisecond)
-	r.Touch("gw-a")
+		time.Sleep(2 * time.Millisecond)
+		r.Touch("gw-a")
 
-	assertNoMsg(t, ch, watchQuietWindow)
-	resp := r.Ready(&readinesspb.ReadyRequest{})
-	require.Len(t, resp.Scopes, 1)
-	assert.True(t, resp.Scopes[0].ObservedAt.AsTime().After(observedBefore))
+		assertNoMsg(t, ch)
+		resp := r.Ready(&readinesspb.ReadyRequest{})
+		require.Len(t, resp.Scopes, 1)
+		assert.True(t, resp.Scopes[0].ObservedAt.AsTime().After(observedBefore))
 
-	cancel()
-	require.NoError(t, eg.Wait())
+		cancel()
+		require.NoError(t, eg.Wait())
+	})
 }
 
 // verifies that an unchanged mutation refreshes the observation timestamp
 // without producing a stream event.
 func TestWatch_NoopSet_EmitsNothing(t *testing.T) {
-	r := readiness.NewTracker(specs("gw-a"))
-	r.Set("gw-a", readinesspb.State_STATE_READY)
+	synctest.Test(t, func(t *testing.T) {
+		r := readiness.NewTracker(specs("gw-a"))
+		r.Set("gw-a", readinesspb.State_STATE_READY)
 
-	ctx, cancel := context.WithCancel(t.Context())
-	defer cancel()
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
 
-	ch, eg := collectWatch(t, ctx, r, &readinesspb.ReadyRequest{}, 8)
+		ch, eg := collectWatch(t, ctx, r, &readinesspb.ReadyRequest{}, 8)
 
-	snap := recvTimeout(t, ch, watchTimeout)
-	observedBefore := snap.Scopes[0].ObservedAt.AsTime()
+		snap := recvTimeout(t, ch, watchTimeout)
+		observedBefore := snap.Scopes[0].ObservedAt.AsTime()
 
-	time.Sleep(2 * time.Millisecond)
-	r.Set("gw-a", readinesspb.State_STATE_READY)
+		time.Sleep(2 * time.Millisecond)
+		r.Set("gw-a", readinesspb.State_STATE_READY)
 
-	assertNoMsg(t, ch, watchQuietWindow)
-	resp := r.Ready(&readinesspb.ReadyRequest{})
-	require.Len(t, resp.Scopes, 1)
-	assert.True(t, resp.Scopes[0].ObservedAt.AsTime().After(observedBefore))
+		assertNoMsg(t, ch)
+		resp := r.Ready(&readinesspb.ReadyRequest{})
+		require.Len(t, resp.Scopes, 1)
+		assert.True(t, resp.Scopes[0].ObservedAt.AsTime().After(observedBefore))
 
-	cancel()
-	require.NoError(t, eg.Wait())
+		cancel()
+		require.NoError(t, eg.Wait())
+	})
 }
 
 // verifies that a repeated outcome refreshes the observation timestamp without
 // producing a stream event.
 func TestWatch_NoopObserve_EmitsNothing(t *testing.T) {
-	r := readiness.NewTracker(specs("gw-a"))
-	r.Observe("gw-a", nil)
+	synctest.Test(t, func(t *testing.T) {
+		r := readiness.NewTracker(specs("gw-a"))
+		r.Observe("gw-a", nil)
 
-	ctx, cancel := context.WithCancel(t.Context())
-	defer cancel()
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
 
-	ch, eg := collectWatch(t, ctx, r, &readinesspb.ReadyRequest{}, 8)
+		ch, eg := collectWatch(t, ctx, r, &readinesspb.ReadyRequest{}, 8)
 
-	snap := recvTimeout(t, ch, watchTimeout)
-	observedBefore := snap.Scopes[0].ObservedAt.AsTime()
+		snap := recvTimeout(t, ch, watchTimeout)
+		observedBefore := snap.Scopes[0].ObservedAt.AsTime()
 
-	time.Sleep(2 * time.Millisecond)
-	r.Observe("gw-a", nil)
+		time.Sleep(2 * time.Millisecond)
+		r.Observe("gw-a", nil)
 
-	assertNoMsg(t, ch, watchQuietWindow)
-	resp := r.Ready(&readinesspb.ReadyRequest{})
-	require.Len(t, resp.Scopes, 1)
-	assert.True(t, resp.Scopes[0].ObservedAt.AsTime().After(observedBefore))
+		assertNoMsg(t, ch)
+		resp := r.Ready(&readinesspb.ReadyRequest{})
+		require.Len(t, resp.Scopes, 1)
+		assert.True(t, resp.Scopes[0].ObservedAt.AsTime().After(observedBefore))
 
-	cancel()
-	require.NoError(t, eg.Wait())
+		cancel()
+		require.NoError(t, eg.Wait())
+	})
 }
 
 func TestWatch_DeltaFilteredForDifferentScope(t *testing.T) {
-	r := readiness.NewTracker(specs("gw-a", "gw-b"))
+	synctest.Test(t, func(t *testing.T) {
+		r := readiness.NewTracker(specs("gw-a", "gw-b"))
 
-	ctx, cancel := context.WithCancel(t.Context())
-	defer cancel()
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
 
-	// Watch only gw-b.
-	ch, eg := collectWatch(t, ctx, r, &readinesspb.ReadyRequest{Scopes: []string{"gw-b"}}, 8)
+		// Watch only gw-b.
+		ch, eg := collectWatch(t, ctx, r, &readinesspb.ReadyRequest{Scopes: []string{"gw-b"}}, 8)
 
-	recvTimeout(t, ch, watchTimeout)
+		recvTimeout(t, ch, watchTimeout)
 
-	// Mutate gw-a — subscriber watches gw-b only, so no message.
-	r.Set("gw-a", readinesspb.State_STATE_READY)
+		// Mutate gw-a — subscriber watches gw-b only, so no message.
+		r.Set("gw-a", readinesspb.State_STATE_READY)
 
-	assertNoMsg(t, ch, watchQuietWindow)
+		assertNoMsg(t, ch)
 
-	// Mutate gw-b — now a message must arrive.
-	r.Set("gw-b", readinesspb.State_STATE_NOT_READY)
+		// Mutate gw-b — now a message must arrive.
+		r.Set("gw-b", readinesspb.State_STATE_NOT_READY)
 
-	delta := recvTimeout(t, ch, watchTimeout)
-	require.Len(t, delta.Scopes, 1)
-	assert.Equal(t, "gw-b", delta.Scopes[0].Name)
+		delta := recvTimeout(t, ch, watchTimeout)
+		require.Len(t, delta.Scopes, 1)
+		assert.Equal(t, "gw-b", delta.Scopes[0].Name)
 
-	cancel()
-	require.NoError(t, eg.Wait())
+		cancel()
+		require.NoError(t, eg.Wait())
+	})
 }
 
 func TestWatch_Drain_EmitsChangedScopes(t *testing.T) {
@@ -865,57 +877,61 @@ func TestWatch_Drain_EmitsChangedScopes(t *testing.T) {
 }
 
 func TestWatch_CtxCancel_ReturnsNil(t *testing.T) {
-	r := readiness.NewTracker(specs("gw-a"))
+	synctest.Test(t, func(t *testing.T) {
+		r := readiness.NewTracker(specs("gw-a"))
 
-	ctx, cancel := context.WithCancel(t.Context())
+		ctx, cancel := context.WithCancel(t.Context())
 
-	eg, ctx2 := errgroup.WithContext(ctx)
-	eg.Go(func() error {
-		return r.Watch(ctx2, &readinesspb.ReadyRequest{}, func(_ *readinesspb.ReadyResponse) error {
-			return nil
+		eg, ctx2 := errgroup.WithContext(ctx)
+		eg.Go(func() error {
+			return r.Watch(ctx2, &readinesspb.ReadyRequest{}, func(_ *readinesspb.ReadyResponse) error {
+				return nil
+			})
 		})
+
+		// Cancel only once Watch has registered and blocked after the snapshot.
+		synctest.Wait()
+		cancel()
+
+		require.NoError(t, eg.Wait())
 	})
-
-	// Give Watch time to register and send the snapshot.
-	time.Sleep(5 * time.Millisecond)
-	cancel()
-
-	require.NoError(t, eg.Wait())
 }
 
 func TestWatch_GatewayStyle_DrainLatch(t *testing.T) {
-	r := readiness.NewTracker(specs("gateway"), readiness.WithDrainLatch())
+	synctest.Test(t, func(t *testing.T) {
+		r := readiness.NewTracker(specs("gateway"), readiness.WithDrainLatch())
 
-	ctx, cancel := context.WithCancel(t.Context())
-	defer cancel()
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
 
-	ch, eg := collectWatch(t, ctx, r, &readinesspb.ReadyRequest{}, 8)
+		ch, eg := collectWatch(t, ctx, r, &readinesspb.ReadyRequest{}, 8)
 
-	// Initial snapshot: gateway is UNKNOWN.
-	snap := recvTimeout(t, ch, watchTimeout)
-	require.Len(t, snap.Scopes, 1)
-	assert.Equal(t, readinesspb.State_STATE_UNKNOWN, snap.Scopes[0].State)
+		// Initial snapshot: gateway is UNKNOWN.
+		snap := recvTimeout(t, ch, watchTimeout)
+		require.Len(t, snap.Scopes, 1)
+		assert.Equal(t, readinesspb.State_STATE_UNKNOWN, snap.Scopes[0].State)
 
-	// Set to READY — delta must arrive.
-	r.Set("gateway", readinesspb.State_STATE_READY)
-	delta1 := recvTimeout(t, ch, watchTimeout)
-	require.Len(t, delta1.Scopes, 1)
-	assert.Equal(t, readinesspb.State_STATE_READY, delta1.Scopes[0].State)
+		// Set to READY — delta must arrive.
+		r.Set("gateway", readinesspb.State_STATE_READY)
+		delta1 := recvTimeout(t, ch, watchTimeout)
+		require.Len(t, delta1.Scopes, 1)
+		assert.Equal(t, readinesspb.State_STATE_READY, delta1.Scopes[0].State)
 
-	// Drain — NOT_READY + SHUTTING_DOWN delta.
-	r.Drain()
-	delta2 := recvTimeout(t, ch, watchTimeout)
-	require.Len(t, delta2.Scopes, 1)
-	assert.Equal(t, readinesspb.State_STATE_NOT_READY, delta2.Scopes[0].State)
-	require.Len(t, delta2.Scopes[0].Reasons, 1)
-	assert.Equal(t, "SHUTTING_DOWN", delta2.Scopes[0].Reasons[0].Code)
+		// Drain — NOT_READY + SHUTTING_DOWN delta.
+		r.Drain()
+		delta2 := recvTimeout(t, ch, watchTimeout)
+		require.Len(t, delta2.Scopes, 1)
+		assert.Equal(t, readinesspb.State_STATE_NOT_READY, delta2.Scopes[0].State)
+		require.Len(t, delta2.Scopes[0].Reasons, 1)
+		assert.Equal(t, "SHUTTING_DOWN", delta2.Scopes[0].Reasons[0].Code)
 
-	// With latch active, Set is a no-op — no more messages.
-	r.Set("gateway", readinesspb.State_STATE_READY)
-	assertNoMsg(t, ch, watchQuietWindow)
+		// With latch active, Set is a no-op — no more messages.
+		r.Set("gateway", readinesspb.State_STATE_READY)
+		assertNoMsg(t, ch)
 
-	cancel()
-	require.NoError(t, eg.Wait())
+		cancel()
+		require.NoError(t, eg.Wait())
+	})
 }
 
 func TestWatch_ConcurrentSubscribersAndMutators(t *testing.T) {
