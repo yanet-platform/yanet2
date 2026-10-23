@@ -33,7 +33,7 @@ jobs:
     timeout-minutes: 45
 
     steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           submodules: true
 
@@ -43,7 +43,7 @@ jobs:
         with:
           packages: meson clang cmake python3-pyelftools libnuma-dev libpcap-dev git protobuf-compiler ccache
 
-      - uses: hendrikmuhs/ccache-action@d62db5f07c26379fc4b4e0916f098a92573c3b03 # v1.2.23
+      - uses: hendrikmuhs/ccache-action@f09c25b45002a07be2955cbe52e8cee55643f89d # v1.2.24
         name: ccache
         with:
           key: ${{ runner.os }}-go-race-cache
@@ -51,7 +51,7 @@ jobs:
           verbose: 2
           save: ${{ github.ref == 'refs/heads/main' }}
 
-      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
           cache: false
@@ -83,7 +83,7 @@ jobs:
 
       - name: Save Go build cache
         if: success() && github.ref == 'refs/heads/main' && steps.go-buildcache.outputs.cache-hit != 'true' && !env.ACT
-        uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25 # v5
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ steps.go-buildcache.outputs.path }}
           key: ${{ steps.go-buildcache.outputs.key }}
