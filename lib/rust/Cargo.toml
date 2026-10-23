@@ -4,7 +4,12 @@
 # repository root workspace (the CLIs).
 [workspace]
 resolver = "3"
-members = ["yanet-packet"]
+members = [
+    "yanet-sdk-testing",
+    "yanet-shm",
+    "yanet-packet",
+    "xtask",
+]
 
 [workspace.package]
 version = "0.1.0"

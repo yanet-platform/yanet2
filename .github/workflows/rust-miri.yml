@@ -1,0 +1,83 @@
+name: Rust Miri
+
+# Miri over the unsafe, provenance and shared-memory suites of the Rust
+# module SDK workspace (lib/rust): strict provenance under Stacked and Tree
+# Borrows, including the cases that must be reported as Undefined Behavior.
+
+on:
+  push:
+    branches: ["main"]
+    paths:
+      - "lib/rust/**"
+      - ".cargo/config.toml"
+      - ".github/workflows/rust-miri.yml"
+  pull_request:
+    # A stacked pull request has a non-main base, so a main-only filter would skip it.
+    branches: ["**"]
+    paths:
+      - "lib/rust/**"
+      - ".cargo/config.toml"
+      - ".github/workflows/rust-miri.yml"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  miri:
+    name: miri (${{ matrix.model }} borrows)
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        model: [stacked, tree]
+    env:
+      MIRI_TOOLCHAIN: nightly-2026-10-22
+      MIRI_CARGO_FLAGS: --locked
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # Pinned with the rustfmt nightly, so Miri moves only with a deliberate bump.
+      - uses: dtolnay/rust-toolchain@2c76c034f9e32a5d6e2c104dc4df23a22476db04 # nightly
+        with:
+          toolchain: ${{ env.MIRI_TOOLCHAIN }}
+          components: miri, rust-src
+      # One nextest run per model executes every selected suite, one process
+      # per test; the expected-outcome cases run beside it.
+      - uses: taiki-e/install-action@8cca0918f8471c33515202b73f56ab27f2bed283 # v2.87.29
+        with:
+          tool: cargo-nextest@0.9.148
+      # The borrow model is an interpreter flag (MIRIFLAGS), so both models
+      # build the same artefacts and share one cache that one of them writes.
+      - name: Cache cargo registry and target directory
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: lib/rust
+          shared-key: rust-miri
+          save-if: ${{ github.ref == 'refs/heads/main' && matrix.model == 'stacked' }}
+      # The standard library Miri interprets, cached per pinned toolchain.
+      #
+      # cargo miri setup fingerprints the rust-src file times, which a fresh
+      # toolchain install resets, so it would rebuild a restored sysroot; on an
+      # exact hit MIRI_SYSROOT points Miri at the restored one and setup is
+      # skipped.
+      - name: Restore the Miri sysroot
+        id: miri-sysroot
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/miri
+          key: miri-sysroot-${{ runner.os }}-${{ runner.arch }}-${{ env.MIRI_TOOLCHAIN }}
+      - name: Use the restored Miri sysroot
+        if: steps.miri-sysroot.outputs.cache-hit == 'true'
+        run: echo "MIRI_SYSROOT=$HOME/.cache/miri" >> "$GITHUB_ENV"
+      - name: Build the Miri sysroot
+        if: steps.miri-sysroot.outputs.cache-hit != 'true'
+        run: cargo "+$MIRI_TOOLCHAIN" miri setup
+      - name: Save the Miri sysroot
+        if: success() && github.ref == 'refs/heads/main' && matrix.model == 'stacked' && steps.miri-sysroot.outputs.cache-hit != 'true' && !env.ACT
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/miri
+          key: ${{ steps.miri-sysroot.outputs.cache-primary-key }}
+      - name: Miri
+        working-directory: lib/rust
+        run: cargo xtask miri ${{ matrix.model }}

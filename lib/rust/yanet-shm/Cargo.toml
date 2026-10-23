@@ -1,0 +1,13 @@
+[package]
+name = "yanet-shm"
+description = "Rust module SDK boundary shared by both sides: relative pointers, Opaque, the provenance root and the ShmLayout leaves."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+yanet-sdk-testing = { path = "../yanet-sdk-testing" }
