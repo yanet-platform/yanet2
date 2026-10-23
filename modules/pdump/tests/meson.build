@@ -11,8 +11,7 @@ pdump_capture_test_sources = pdump_test_fixture_sources + files(
 pdump_capture_test_exe = executable(
   'pdump_capture_test',
   pdump_capture_test_sources,
-  c_args: yanet_c_args + ['-UNDEBUG'],
-  link_args: yanet_link_args,
+  c_args: ['-UNDEBUG'],
   dependencies: [
     lib_dataplane_ut_dep,
     lib_logging_dep,
@@ -38,8 +37,6 @@ pdump_bench_sources = pdump_test_fixture_sources + files(
 pdump_bench_exe = executable(
   'pdump_bench',
   pdump_bench_sources,
-  c_args: yanet_c_args,
-  link_args: yanet_link_args,
   dependencies: [
     lib_dataplane_ut_dep,
     lib_logging_dep,
@@ -58,7 +55,6 @@ limit_test_exe = executable(
   'pdump_limit_test',
   sources: files('limit_test.c'),
   c_args: yanet_test_c_args + ['-UNDEBUG'],
-  link_args: yanet_link_args,
   include_directories: yanet_rootdir,
 )
 

@@ -3,8 +3,7 @@ includes = include_directories('../../../', '../../../lib')
 route_api_test = executable(
   'route_api_test',
   ['route_api_test.c'],
-  c_args: yanet_c_args,
-  link_args: yanet_link_args + [
+  link_args: [
     '-Wl,-E',
     '-Wl,--undefined=new_module_route',
     '-Wl,--export-dynamic-symbol=new_module_route',
@@ -27,8 +26,7 @@ test('route_api_test', route_api_test, suite: 'route')
 route_fib_object_test = executable(
   'route_fib_object_test',
   ['route_fib_object_test.c'],
-  c_args: yanet_c_args,
-  link_args: yanet_link_args + [
+  link_args: [
     '-Wl,-E',
     '-Wl,--undefined=new_module_route',
     '-Wl,--export-dynamic-symbol=new_module_route',

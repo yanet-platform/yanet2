@@ -25,8 +25,6 @@ lib_sources = files(
 lib_dataplane = static_library(
   'dataplane',
   lib_sources,
-  c_args: yanet_c_args,
-  link_args: yanet_link_args,
   dependencies: lib_dependencies,
   install: false,
 )
@@ -80,7 +78,6 @@ executable(
   # In sanitizer builds the staged shared runtimes need the rpath on the
   # final executable too; link_args of the static libraries do not
   # propagate to the link of the executable itself.
-  link_args: yanet_link_args,
   install: true,
   export_dynamic: true,
 )

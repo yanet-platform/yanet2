@@ -49,5 +49,5 @@ func Test_LoadRequest_RejectsUnknownKey(t *testing.T) {
 	_, err := operator.LoadRequest(decapUpdateMethod, path)
 
 	require.ErrorContains(t, err, "failed to parse module config")
-	require.ErrorContains(t, err, `unknown field "config"`)
+	require.ErrorContains(t, err, `unknown object member name "config"`)
 }

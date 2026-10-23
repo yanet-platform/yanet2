@@ -13,8 +13,6 @@ sources = files(
 lib_l3state = static_library(
   'l3state',
   sources,
-  c_args: yanet_c_args,
-  link_args: yanet_link_args,
   dependencies: dependencies,
   install: false,
 )

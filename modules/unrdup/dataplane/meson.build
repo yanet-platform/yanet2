@@ -12,8 +12,6 @@ dp_sources = files(
 lib_unrdup_dp = static_library(
     'unrdup_dp',
     dp_sources,
-    c_args: yanet_c_args,
-    link_args: yanet_link_args,
     dependencies: dp_dependencies,
     install: false,
 )

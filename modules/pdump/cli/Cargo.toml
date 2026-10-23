@@ -4,7 +4,7 @@ version = "0.2.0"
 edition = "2024"
 publish = false
 
-rust-version = "1.88"
+rust-version = "1.99"
 
 [lints]
 workspace = true
@@ -19,9 +19,9 @@ tonic = { version = "0.14", features = ["gzip", "zstd"] }
 tonic-prost = "0.14"
 prost = "0.14"
 ync = { path = "../../../cli/core", package = "yanet-cli" }
-# Pinned exactly: semver sorts rc.2 below rc1, so a caret requirement
-# resolves back to rc1, and rc.3 needs Rust 1.93 above the 1.88 MSRV.
-pcap-file = "=3.0.0-rc.2"
+# Pinned exactly: semver sorts rc.N below rc1, so a caret requirement
+# resolves back to rc1.
+pcap-file = "=3.0.0-rc.3"
 tokio-util = "0.7"
 pnet_packet = "0.35"
 

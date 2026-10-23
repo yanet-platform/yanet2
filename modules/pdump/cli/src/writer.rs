@@ -6,13 +6,13 @@ use std::{
 
 use pcap_file::{
     DataLink, Endianness,
-    pcap::{PcapHeader, PcapPacket, PcapWriter},
+    pcap::{PcapHeader, PcapPacket, PcapTsResolution, PcapWriter},
     pcapng::{
         PcapNgWriter,
         blocks::{
             Block,
             enhanced_packet::EnhancedPacketBlock,
-            interface_description::{InterfaceDescriptionBlock, InterfaceDescriptionOption, TsResolution},
+            interface_description::{InterfaceDescriptionBlock, InterfaceDescriptionOption, InterfaceTsResolution},
         },
     },
 };
@@ -101,7 +101,7 @@ impl PdumpWriter {
             DumpOutputFormat::Pcap => {
                 let header = PcapHeader {
                     snaplen: HEADER_SNAPLEN,
-                    ts_resolution: pcap_file::TsResolution::NanoSecond,
+                    ts_resolution: PcapTsResolution::NanoSecond,
                     endianness: Endianness::Little,
                     ..Default::default()
                 };
@@ -115,7 +115,7 @@ impl PdumpWriter {
                 let interface_block = InterfaceDescriptionBlock {
                     linktype: DataLink::ETHERNET,
                     snaplen: HEADER_SNAPLEN,
-                    options: vec![InterfaceDescriptionOption::IfTsResol(TsResolution::NANO.to_raw())],
+                    options: vec![InterfaceDescriptionOption::IfTsResol(InterfaceTsResolution::NANO)],
                 };
 
                 // Write the interface description block
@@ -153,8 +153,8 @@ impl PdumpWriter {
 
         let ts = match &writer.base_ts {
             None => {
-                // Store the timestamp of the first packet in the writer to establish a
-                // baseline.
+                // Store the timestamp of the first packet in the writer to
+                // establish a baseline.
                 writer.base_ts = Some(meta.timestamp);
                 0
             }
@@ -347,7 +347,7 @@ mod test {
         let mut reader = PcapNgReader::new(file.reopen().expect("must reopen")).expect("must parse the pcapng header");
         let mut packets = Vec::new();
         while let Some(block) = reader.next_block() {
-            if let Block::EnhancedPacket(packet) = block.expect("must parse block") {
+            if let (Block::EnhancedPacket(packet), _) = block.expect("must parse block") {
                 packets.push(packet.data.into_owned());
             }
         }
@@ -373,8 +373,8 @@ mod test {
 
     #[test]
     fn test_broken_pipe_is_recognised_through_a_wrapper() {
-        let piped = pcap_file::PcapError::IoError(io::Error::from(io::ErrorKind::BrokenPipe));
-        let full = pcap_file::PcapError::IoError(io::Error::from(io::ErrorKind::StorageFull));
+        let piped = pcap_file::pcap::PcapWriteError::Io(io::Error::from(io::ErrorKind::BrokenPipe));
+        let full = pcap_file::pcap::PcapWriteError::Io(io::Error::from(io::ErrorKind::StorageFull));
 
         assert!(is_broken_pipe(&piped));
         assert!(!is_broken_pipe(&full));

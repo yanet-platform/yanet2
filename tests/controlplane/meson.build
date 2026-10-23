@@ -2,7 +2,6 @@ config_gen_test = executable(
   'config_gen_test',
   ['config_gen_test.c'],
   c_args: yanet_test_c_args,
-  link_args: yanet_link_args,
   dependencies: [
     lib_common_dep,
     lib_logging_dep,
@@ -17,7 +16,6 @@ agent_memory_tree_test = executable(
   'agent_memory_tree_test',
   ['agent_memory_tree_test.c'],
   c_args: yanet_test_c_args,
-  link_args: yanet_link_args,
   dependencies: [
     lib_common_dep,
     lib_logging_dep,
@@ -33,7 +31,6 @@ cp_module_counter_registry_test = executable(
   'cp_module_counter_registry_test',
   ['cp_module_counter_registry_test.c'],
   c_args: yanet_test_c_args,
-  link_args: yanet_link_args,
   dependencies: [
     lib_common_dep,
     lib_logging_dep,

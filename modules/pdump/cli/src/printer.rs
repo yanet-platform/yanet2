@@ -20,7 +20,7 @@ use crate::{dump_mode, pdumppb};
 /// falling back to the legacy alias of a server that predates it.
 // The legacy read is deliberate: the alias exists exactly for clients
 // of servers that predate the rename.
-#[allow(deprecated)]
+#[expect(deprecated)]
 fn capture_device(meta: &pdumppb::RecordMeta) -> u32 {
     if meta.device_id != 0 {
         meta.device_id
@@ -108,12 +108,9 @@ pub fn pretty_print_ethernet_frame_concise<W: Write>(
     ethernet_packet: &[u8],
     packet_len: u32,
 ) -> io::Result<()> {
-    let frame = match EthernetPacket::new(ethernet_packet) {
-        Some(frame) => frame,
-        None => {
-            writeln!(writer, "Error: Malformed Ethernet frame.")?;
-            return Ok(());
-        }
+    let Some(frame) = EthernetPacket::new(ethernet_packet) else {
+        writeln!(writer, "Error: Malformed Ethernet frame.")?;
+        return Ok(());
     };
 
     let mut current_ethertype = frame.get_ethertype();
@@ -185,12 +182,9 @@ pub fn pretty_print_ethernet_frame_concise<W: Write>(
 /// * `ethernet_packet` - A byte slice representing the complete Ethernet frame.
 pub fn pretty_print_ethernet_frame<W: Write>(mut writer: W, ethernet_packet: &[u8], packet_len: u32) -> io::Result<()> {
     // Create an EthernetPacket from the byte slice.
-    let frame = match EthernetPacket::new(ethernet_packet) {
-        Some(frame) => frame,
-        None => {
-            writeln!(writer, "Error: Malformed Ethernet frame.")?;
-            return Ok(());
-        }
+    let Some(frame) = EthernetPacket::new(ethernet_packet) else {
+        writeln!(writer, "Error: Malformed Ethernet frame.")?;
+        return Ok(());
     };
 
     let truncated = if ethernet_packet.len() < packet_len as usize {
@@ -252,12 +246,9 @@ pub fn pretty_print_ethernet_frame<W: Write>(mut writer: W, ethernet_packet: &[u
 }
 
 fn pretty_print_ipv4_packet<W: Write>(mut writer: W, ipv4_packet: &[u8]) -> io::Result<()> {
-    let packet = match Ipv4Packet::new(ipv4_packet) {
-        Some(packet) => packet,
-        None => {
-            writeln!(writer, "Error: Malformed IPv4 packet.")?;
-            return Ok(());
-        }
+    let Some(packet) = Ipv4Packet::new(ipv4_packet) else {
+        writeln!(writer, "Error: Malformed IPv4 packet.")?;
+        return Ok(());
     };
 
     writeln!(writer, "  --- IPv4 Packet ---")?;
@@ -283,12 +274,9 @@ fn pretty_print_ipv4_packet<W: Write>(mut writer: W, ipv4_packet: &[u8]) -> io::
 }
 
 fn pretty_print_ipv6_packet<W: Write>(mut writer: W, ipv6_packet: &[u8]) -> io::Result<()> {
-    let packet = match Ipv6Packet::new(ipv6_packet) {
-        Some(packet) => packet,
-        None => {
-            writeln!(writer, "Error: Malformed IPv6 packet.")?;
-            return Ok(());
-        }
+    let Some(packet) = Ipv6Packet::new(ipv6_packet) else {
+        writeln!(writer, "Error: Malformed IPv6 packet.")?;
+        return Ok(());
     };
 
     writeln!(writer, "  --- IPv6 Packet ---")?;
@@ -339,12 +327,9 @@ fn handle_transport_protocol<W: Write>(
 }
 
 fn pretty_print_tcp_packet<W: Write>(mut writer: W, tcp_packet: &[u8]) -> io::Result<()> {
-    let packet = match TcpPacket::new(tcp_packet) {
-        Some(packet) => packet,
-        None => {
-            writeln!(writer, "Error: Malformed TCP packet.")?;
-            return Ok(());
-        }
+    let Some(packet) = TcpPacket::new(tcp_packet) else {
+        writeln!(writer, "Error: Malformed TCP packet.")?;
+        return Ok(());
     };
 
     writeln!(writer, "    --- TCP Segment ---")?;
@@ -390,12 +375,9 @@ fn pretty_print_tcp_packet<W: Write>(mut writer: W, tcp_packet: &[u8]) -> io::Re
 }
 
 fn pretty_print_udp_packet<W: Write>(mut writer: W, udp_packet: &[u8]) -> io::Result<()> {
-    let packet = match UdpPacket::new(udp_packet) {
-        Some(packet) => packet,
-        None => {
-            writeln!(writer, "Error: Malformed UDP packet.")?;
-            return Ok(());
-        }
+    let Some(packet) = UdpPacket::new(udp_packet) else {
+        writeln!(writer, "Error: Malformed UDP packet.")?;
+        return Ok(());
     };
 
     writeln!(writer, "    --- UDP Datagram ---")?;
@@ -866,11 +848,7 @@ fn format_duration_ns(ts: u64) -> String {
     format!("{hours:02}:{minutes:02}:{seconds:02}.{millis:03}.{micro:03}")
 }
 
-// `core::io::Cursor` is behind the unstable `core_io` feature, so this module
-// keeps `std::io::Cursor`; the allow sits on the module rather than the `use`
-// because clippy's `useless_attribute` rejects it directly on a `use` item.
 #[cfg(test)]
-#[allow(clippy::std_instead_of_core)]
 mod tests {
     use std::io::Cursor;
 
@@ -1649,10 +1627,9 @@ mod tests {
             worker_idx: 1,
             pipeline_idx: 2,
             data_size: 1000,
-            rx_device_id: 3,
-            tx_device_id: 4,
             device_id: 4,
             queue: dump_mode::INPUT,
+            ..Default::default()
         };
 
         let mut output = Vec::new();
@@ -1677,10 +1654,9 @@ mod tests {
             worker_idx: 1,
             pipeline_idx: 2,
             data_size: 1000,
-            rx_device_id: 3,
-            tx_device_id: 4,
             device_id: 4,
             queue: dump_mode::DROPS,
+            ..Default::default()
         };
 
         let mut output = Vec::new();
@@ -1709,10 +1685,9 @@ mod tests {
             worker_idx: 1,
             pipeline_idx: 2,
             data_size: 1000,
-            rx_device_id: 3,
-            tx_device_id: 4,
             device_id: 4,
             queue: dump_mode::DROPS,
+            ..Default::default()
         };
 
         let mut output = Vec::new();

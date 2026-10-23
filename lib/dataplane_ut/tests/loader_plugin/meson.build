@@ -6,7 +6,7 @@ loader_probe_plugin = shared_module(
   'loader_probe_dp',
   ['loader_plugin.c'] + lib_module_abi_export_sources,
   name_prefix: 'lib',
-  c_args: yanet_c_args + ['-fvisibility=hidden'],
+  c_args: ['-fvisibility=hidden'],
   include_directories: yanet_rootdir,
   install: false,
 )

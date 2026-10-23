@@ -4,7 +4,7 @@ version = "0.2.0"
 edition = "2024"
 publish = false
 
-rust-version = "1.88"
+rust-version = "1.99"
 
 [lints]
 workspace = true
@@ -18,7 +18,7 @@ prost = "0.14"
 netip = "0.3"
 colored = "3"
 serde = "1"
-tabled = { version = "0.21", default-features = false, features = ["ansi", "derive"] }
+tabled = { version = "0.22", default-features = false, features = ["ansi", "derive"] }
 tonic = { version = "0.14", features = ["gzip", "zstd"] }
 tonic-prost = "0.14"
 

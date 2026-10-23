@@ -1,8 +1,6 @@
 ring_object_test = executable(
   'ring_object_test',
   ['object_test.c'],
-  c_args: yanet_c_args,
-  link_args: yanet_link_args,
   dependencies: [
     lib_dataplane_ut_dep,
     lib_logging_dep,
@@ -20,8 +18,6 @@ test('ring_object', ring_object_test, suite: 'ring')
 lib_ringtest_writer = static_library(
   'ringtest_writer',
   ['ringtest_writer.c'],
-  c_args: yanet_c_args,
-  link_args: yanet_link_args,
   dependencies: [
     lib_common_dep,
     lib_config_cp_dep,

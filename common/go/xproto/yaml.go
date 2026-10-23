@@ -2,7 +2,8 @@ package xproto
 
 import (
 	"bytes"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"io"
@@ -13,6 +14,10 @@ import (
 
 // Unmarshal decodes a single YAML document, spelled as the message's JSON
 // form, into the message.
+//
+// A key must spell a field name exactly, letter case included, and an error
+// found while decoding into the message names the offending value by its
+// JSON pointer.
 func Unmarshal(data []byte, msg proto.Message) error {
 	if msg == nil || !msg.ProtoReflect().IsValid() {
 		return errors.New("the target message is nil")
@@ -44,7 +49,8 @@ func Unmarshal(data []byte, msg proto.Message) error {
 	if err := rejectInvalidEntries(tree, ""); err != nil {
 		return err
 	}
-	encoded, err := json.Marshal(tree)
+	// Sorted keys make the reported error the same from run to run.
+	encoded, err := json.Marshal(tree, json.Deterministic(true))
 	if err != nil {
 		return fmt.Errorf(
 			"the document holds what JSON cannot, such as a non-string mapping key or a NaN: %w", err,
@@ -52,9 +58,34 @@ func Unmarshal(data []byte, msg proto.Message) error {
 	}
 
 	proto.Reset(msg)
-	jsonDecoder := json.NewDecoder(bytes.NewReader(encoded))
-	jsonDecoder.DisallowUnknownFields()
-	return jsonDecoder.Decode(msg)
+	return json.Unmarshal(
+		encoded, msg,
+		json.RejectUnknownMembers(true),
+		json.WithUnmarshalers(json.UnmarshalFromFunc(unmarshalFieldless)),
+	)
+}
+
+// unmarshalFieldless decodes a message without fields, whose Go struct
+// encoding/json/v2 refuses for having no exported fields.
+//
+// An empty object fills it and a member is unknown. Any other message, or
+// a value other than an object, goes to the default decoding.
+func unmarshalFieldless(decoder *jsontext.Decoder, message proto.Message) error {
+	if message.ProtoReflect().Descriptor().Fields().Len() != 0 || decoder.PeekKind() != '{' {
+		return errors.ErrUnsupported
+	}
+	if _, err := decoder.ReadToken(); err != nil {
+		return err
+	}
+	if decoder.PeekKind() != '}' {
+		name, err := decoder.ReadToken()
+		if err != nil {
+			return err
+		}
+		return fmt.Errorf("unknown object member name %q", name.String())
+	}
+	_, err := decoder.ReadToken()
+	return err
 }
 
 // isEmptyDocument tells a bare separator, which the parser reports as an

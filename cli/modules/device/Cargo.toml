@@ -4,7 +4,7 @@ version = "0.2.0"
 edition = "2024"
 publish = false
 
-rust-version = "1.88"
+rust-version = "1.99"
 
 [lints]
 workspace = true

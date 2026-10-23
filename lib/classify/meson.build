@@ -9,8 +9,6 @@ compiler_sources = files(
 lib_classify_compiler = static_library(
   'classify_compiler',
   compiler_sources,
-  c_args: yanet_c_args,
-  link_args: yanet_link_args,
   dependencies: [lib_common_dep, lib_errors_dep],
   install: false,
 )

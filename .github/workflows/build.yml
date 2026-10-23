@@ -30,7 +30,6 @@ on:
       - ".github/actions/apt-failover/**"
       - ".github/actions/go-modcache/**"
       - ".github/actions/go-buildcache/**"
-      - ".github/actions/protoc-plugins/**"
       - ".github/actions/protoc/**"
       - "tests/functional/**"
   pull_request:
@@ -63,7 +62,6 @@ on:
       - ".github/actions/apt-failover/**"
       - ".github/actions/go-modcache/**"
       - ".github/actions/go-buildcache/**"
-      - ".github/actions/protoc-plugins/**"
       - ".github/actions/protoc/**"
       - "tests/functional/**"
 
@@ -72,35 +70,29 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
   cancel-in-progress: true
 
+defaults:
+  run:
+    # The runner's default shell, which container jobs would replace with sh.
+    shell: bash -e {0}
+
 jobs:
   build-asan-test:
     runs-on: ubuntu-24.04
     timeout-minutes: 45
+    container: ghcr.io/yanet-platform/yanet2-ci@sha256:81927a6bf8adabade5c16d5b1bd698e2ca5535ffd88175b58a5934e647834e25
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           submodules: true
 
-      - uses: ./.github/actions/apt-packages
-        id: apt-packages
-        timeout-minutes: 10
-        with:
-          packages: meson clang cmake python3-pyelftools libnuma-dev libpcap-dev git protobuf-compiler ccache
-
       - uses: hendrikmuhs/ccache-action@f09c25b45002a07be2955cbe52e8cee55643f89d # v1.2.24
         name: ccache
         with:
-          key: ${{ runner.os }}-build-asan-test-cache
+          key: ${{ runner.os }}-build-asan-test-image-cache
           max-size: 2G
           verbose: 2
           save: ${{ github.ref == 'refs/heads/main' }}
-
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version: "1.27.x"
-          cache: false
-          check-latest: true
 
       - name: Restore Go module cache
         uses: ./.github/actions/go-modcache
@@ -111,10 +103,6 @@ jobs:
         uses: ./.github/actions/go-buildcache
         with:
           profile: asan
-          apt-fingerprint: ${{ steps.apt-packages.outputs.fingerprint }}
-
-      - name: Install Go Protobuf Plugins
-        uses: ./.github/actions/protoc-plugins
 
       - name: Build and run tests (sanitize)
         run: make test-asan-only
@@ -135,35 +123,20 @@ jobs:
   test-release-arm64:
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 45
+    container: ghcr.io/yanet-platform/yanet2-ci@sha256:81927a6bf8adabade5c16d5b1bd698e2ca5535ffd88175b58a5934e647834e25
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           submodules: true
 
-      - uses: ./.github/actions/apt-packages
-        id: apt-packages
-        timeout-minutes: 10
-        with:
-          packages: meson clang cmake python3-pyelftools libnuma-dev libpcap-dev git protobuf-compiler ccache
-
-      # The meson build compiles a Rust regex library of its own.
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@360a4e93673de6630fac2478bc9e35244b01a759 # 1.88.0
-
       - uses: hendrikmuhs/ccache-action@f09c25b45002a07be2955cbe52e8cee55643f89d # v1.2.24
         name: ccache
         with:
-          key: ${{ runner.os }}-test-release-arm64-cache
+          key: ${{ runner.os }}-test-release-arm64-image-cache
           max-size: 2G
           verbose: 2
           save: ${{ github.ref == 'refs/heads/main' }}
-
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version: "1.27.x"
-          cache: false
-          check-latest: true
 
       - name: Restore Go module cache
         uses: ./.github/actions/go-modcache
@@ -174,10 +147,6 @@ jobs:
         uses: ./.github/actions/go-buildcache
         with:
           profile: release
-          apt-fingerprint: ${{ steps.apt-packages.outputs.fingerprint }}
-
-      - name: Install Go Protobuf Plugins
-        uses: ./.github/actions/protoc-plugins
 
       # Debian's hardening flags turn warnings the plain release build never
       # sees into errors, as they do in the package build.
@@ -213,7 +182,7 @@ jobs:
         timeout-minutes: 5
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@360a4e93673de6630fac2478bc9e35244b01a759 # 1.88.0
+        uses: dtolnay/rust-toolchain@d124f86f28ff42855784ff3319f48ac182c248f8 # 1.99.1
 
       # A cache written on a pull-request ref is readable only from that
       # same pull request, so only main writes this one.
@@ -232,36 +201,23 @@ jobs:
   build-tsan-test:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
+    container: ghcr.io/yanet-platform/yanet2-ci@sha256:81927a6bf8adabade5c16d5b1bd698e2ca5535ffd88175b58a5934e647834e25
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           submodules: true
 
-      - uses: ./.github/actions/apt-packages
-        timeout-minutes: 10
-        with:
-          packages: meson clang cmake python3-pyelftools libnuma-dev libpcap-dev git protobuf-compiler ccache
-
       - uses: hendrikmuhs/ccache-action@f09c25b45002a07be2955cbe52e8cee55643f89d # v1.2.24
         name: ccache
         with:
-          key: ${{ runner.os }}-build-tsan-test-cache
+          key: ${{ runner.os }}-build-tsan-test-image-cache
           max-size: 2G
           verbose: 2
           save: ${{ github.ref == 'refs/heads/main' }}
 
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version: "1.27.x"
-          cache: false
-          check-latest: true
-
       - name: Restore Go module cache
         uses: ./.github/actions/go-modcache
-
-      - name: Install Go Protobuf Plugins
-        uses: ./.github/actions/protoc-plugins
 
       - name: Run TSAN tests
         run: make test-tsan
@@ -275,6 +231,7 @@ jobs:
   build-release-artifacts:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
+    container: ghcr.io/yanet-platform/yanet2-ci@sha256:81927a6bf8adabade5c16d5b1bd698e2ca5535ffd88175b58a5934e647834e25
     env:
       # Every meson-built binary the functional tests and lab scenarios copy
       # into their VMs.
@@ -291,29 +248,13 @@ jobs:
         with:
           submodules: true
 
-      - uses: ./.github/actions/apt-packages
-        id: apt-packages
-        timeout-minutes: 10
-        with:
-          packages: meson clang cmake python3-pyelftools libnuma-dev libpcap-dev git protobuf-compiler jq ccache
-
-      # The meson build compiles a Rust regex library of its own.
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@360a4e93673de6630fac2478bc9e35244b01a759 # 1.88.0
-
       - uses: hendrikmuhs/ccache-action@f09c25b45002a07be2955cbe52e8cee55643f89d # v1.2.24
         name: ccache
         with:
-          key: ${{ runner.os }}-build-release-artifacts-cache
+          key: ${{ runner.os }}-build-release-artifacts-image-cache
           max-size: 2G
           verbose: 2
           save: ${{ github.ref == 'refs/heads/main' }}
-
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version: "1.27.x"
-          cache: false
-          check-latest: true
 
       - name: Restore Go module cache
         uses: ./.github/actions/go-modcache
@@ -325,10 +266,6 @@ jobs:
         uses: ./.github/actions/go-buildcache
         with:
           profile: release
-          apt-fingerprint: ${{ steps.apt-packages.outputs.fingerprint }}
-
-      - name: Install Go Protobuf Plugins
-        uses: ./.github/actions/protoc-plugins
 
       - name: Build YANET (release)
         run: |
@@ -365,7 +302,7 @@ jobs:
         timeout-minutes: 5
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@360a4e93673de6630fac2478bc9e35244b01a759 # 1.88.0
+        uses: dtolnay/rust-toolchain@d124f86f28ff42855784ff3319f48ac182c248f8 # 1.99.1
 
       # A cache written on a pull-request ref is readable only from that
       # same pull request, so only main writes this one.
@@ -405,37 +342,21 @@ jobs:
   test-release:
     runs-on: ubuntu-24.04
     timeout-minutes: 45
+    container: ghcr.io/yanet-platform/yanet2-ci@sha256:81927a6bf8adabade5c16d5b1bd698e2ca5535ffd88175b58a5934e647834e25
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           submodules: true
 
-      # The package list must match the artifacts job's, since it is part of
-      # the Go build cache key both jobs share.
-      - uses: ./.github/actions/apt-packages
-        id: apt-packages
-        timeout-minutes: 10
-        with:
-          packages: meson clang cmake python3-pyelftools libnuma-dev libpcap-dev git protobuf-compiler jq ccache
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@360a4e93673de6630fac2478bc9e35244b01a759 # 1.88.0
-
       # The artifacts job compiles the same tree and saves this cache.
       - uses: hendrikmuhs/ccache-action@f09c25b45002a07be2955cbe52e8cee55643f89d # v1.2.24
         name: ccache
         with:
-          key: ${{ runner.os }}-build-release-artifacts-cache
+          key: ${{ runner.os }}-build-release-artifacts-image-cache
           max-size: 2G
           verbose: 2
           save: false
-
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version: "1.27.x"
-          cache: false
-          check-latest: true
 
       - name: Restore Go module cache
         id: go-modcache
@@ -447,10 +368,6 @@ jobs:
         uses: ./.github/actions/go-buildcache
         with:
           profile: release
-          apt-fingerprint: ${{ steps.apt-packages.outputs.fingerprint }}
-
-      - name: Install Go Protobuf Plugins
-        uses: ./.github/actions/protoc-plugins
 
       # Building the binaries before the tests keeps their cgo-free packages in
       # the Go build cache this job saves for the artifacts job.

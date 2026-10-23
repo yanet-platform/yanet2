@@ -15,8 +15,6 @@ sources = files(
 lib_nat64_cp = static_library(
   'nat64_cp',
   sources,
-  c_args: yanet_c_args,
-  link_args: yanet_link_args,
   dependencies: cp_dependencies,
   include_directories: includes,
   install: false,

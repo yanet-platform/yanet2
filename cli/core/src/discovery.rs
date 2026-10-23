@@ -83,9 +83,6 @@ impl Family {
     /// registered it would resolve to that one and hand its outcome to a
     /// caller who never named a service. That is bad input rather than a
     /// registry condition, so it is rejected as such, before any lookup.
-    // The async siblings hide the same-sized `Result` inside their desugared
-    // `Future` output, so only this synchronous method trips the lint.
-    #[allow(clippy::result_large_err)]
     pub fn require_name(&self, endpoint: &str, name: &str) -> Result<(), Error> {
         if name.trim().is_empty() {
             return Err(Error::invalid_argument(
@@ -113,9 +110,6 @@ impl Family {
     /// up — because the alias is resolved against the live registry, so it
     /// carries the same kind the gateway's own answer would map to. An
     /// ambiguous alias, in contrast, really is bad input.
-    // The async siblings hide the same-sized `Result` inside their desugared
-    // `Future` output, so only this synchronous method trips the lint.
-    #[allow(clippy::result_large_err)]
     pub fn resolve_among(&self, endpoint: &str, name: &str, services: &[String]) -> Result<String, Error> {
         if name.contains('.') {
             return Ok(name.to_owned());

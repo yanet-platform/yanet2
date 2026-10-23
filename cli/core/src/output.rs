@@ -108,6 +108,7 @@ impl Output for HumanOutput {
     }
 
     fn failure(&self, err: &Error) {
+        let Error(err) = err;
         let prefix = if self.is_colored {
             "[✗]".red().to_string()
         } else {
@@ -180,6 +181,7 @@ impl Output for JsonOutput {
     }
 
     fn failure(&self, err: &Error) {
+        let Error(err) = err;
         let fallback_code = match err.kind {
             ErrorKind::ServiceUnregistered => "NotFound",
             ErrorKind::NotFound => "NotFound",

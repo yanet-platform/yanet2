@@ -16,8 +16,6 @@ compiler_sources = files(
 lib_filter_compiler = static_library(
   'filter_compiler',
   compiler_sources,
-  c_args: yanet_c_args,
-  link_args: yanet_link_args,
   dependencies: [lib_common_dep, lib_errors_dep],
   install: false,
 )
