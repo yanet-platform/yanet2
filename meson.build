@@ -181,7 +181,10 @@ libdpdk_default_options = [
   # later, and nothing outside subprojects/ uses any of them.
   'disable_apps=*',
   'enable_apps=',
-  'disable_libs=bitratestats,cfgfile,flow_classify,gpudev,gro,gso,kni,jobstats,latencystats,metrics,node,pdump,pipeline,port,power,table,vhost',
+  # On top of DPDK's always-enabled core: timer and bpf for the dataplane,
+  # security and cryptodev for net/iavf. DPDK refuses to configure when a
+  # listed driver lacks a library; our own code fails to compile instead.
+  'enable_libs=bpf,timer,security,cryptodev',
   'enable_driver_sdk=true',
   'enable_drivers=net/mlx5,common/mlx5,bus/auxiliary,net/virtio,net/e1000,net/iavf,common/iavf,net/i40e,net/ring',
   'default_library=static',
