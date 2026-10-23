@@ -7,6 +7,9 @@
 
 #define HASH_INDEX_INVALID 0xffffffff
 #define HASH_INDEX_SPARSE_FACTOR 4
+// Largest capacity whose slot count does not wrap when scaled by the
+// sparse factor; capacities beyond it are refused at every entry point.
+#define HASH_INDEX_MAX_CAPACITY (UINT32_MAX / HASH_INDEX_SPARSE_FACTOR)
 
 // One probe-table slot: the originating hash next to the value.
 //
@@ -48,6 +51,12 @@ hash_index_init(
 		hash_index->capacity = 0;
 		hash_index->count = 0;
 		return 0;
+	}
+	if (capacity > HASH_INDEX_MAX_CAPACITY) {
+		SET_OFFSET_OF(&hash_index->entries, NULL);
+		hash_index->capacity = 0;
+		hash_index->count = 0;
+		return -1;
 	}
 
 	struct hash_index_entry *entries =
@@ -91,6 +100,63 @@ hash_index_fini(struct hash_index *hash_index) {
 	SET_OFFSET_OF(&hash_index->entries, NULL);
 	hash_index->capacity = 0;
 	hash_index->count = 0;
+}
+
+// Rebuild the table for a new capacity, preserving every stored entry.
+//
+// The rehash lands in a fresh buffer and the live index is swapped only
+// once every entry is placed, so a failure leaves the old table intact.
+// The new capacity must be positive and fit the live entry count; a
+// rehash to the current capacity is a successful no-op. A zero-capacity
+// index gains its table here, so the rehash also serves as a late init.
+static inline int
+hash_index_rehash(struct hash_index *hash_index, uint32_t new_capacity) {
+	if (new_capacity == 0 || new_capacity > HASH_INDEX_MAX_CAPACITY ||
+	    new_capacity < hash_index->count) {
+		return -1;
+	}
+	if (new_capacity == hash_index->capacity) {
+		return 0;
+	}
+
+	struct memory_context *memory_context =
+		ADDR_OF(&hash_index->memory_context);
+	uint32_t new_slots = new_capacity * HASH_INDEX_SPARSE_FACTOR;
+	struct hash_index_entry *new_entries =
+		(struct hash_index_entry *)memory_balloc(
+			memory_context,
+			sizeof(struct hash_index_entry) * new_slots
+		);
+	if (new_entries == NULL) {
+		return -1;
+	}
+	memset(new_entries, 0xff, sizeof(struct hash_index_entry) * new_slots);
+
+	struct hash_index_entry *old_entries = ADDR_OF(&hash_index->entries);
+	uint32_t old_slots = hash_index->capacity * HASH_INDEX_SPARSE_FACTOR;
+
+	for (uint32_t pos = 0; pos < old_slots; ++pos) {
+		if (old_entries[pos].value == HASH_INDEX_INVALID) {
+			continue;
+		}
+		uint32_t bucket = old_entries[pos].hash % new_slots;
+		while (new_entries[bucket].value != HASH_INDEX_INVALID) {
+			bucket = (bucket + 1) % new_slots;
+		}
+		new_entries[bucket] = old_entries[pos];
+	}
+
+	SET_OFFSET_OF(&hash_index->entries, new_entries);
+	hash_index->capacity = new_capacity;
+
+	if (old_entries != NULL) {
+		memory_bfree(
+			memory_context,
+			old_entries,
+			sizeof(struct hash_index_entry) * old_slots
+		);
+	}
+	return 0;
 }
 
 // Resolve the value stored under hash whose key the callback accepts.

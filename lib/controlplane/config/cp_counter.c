@@ -87,65 +87,6 @@ tag_index_lookup(
 	);
 }
 
-// Rehash the index to new_capacity slots, in place.
-//
-// The index embeds self-relative offsets, so it cannot be rebuilt in a
-// scratch struct and copied over. The old entries buffer is kept alive
-// across the re-init and restored on failure, leaving the registry
-// fully usable; it is freed only once every item is rehashed.
-static int
-tag_index_grow(
-	struct cp_config_counter_storage_registry *registry, size_t new_capacity
-) {
-	struct hash_index *index = &registry->tag_index;
-	struct hash_index_entry *old_entries = ADDR_OF(&index->entries);
-	uint32_t old_capacity = index->capacity;
-	uint32_t old_count = index->count;
-
-	if (hash_index_init(
-		    index,
-		    ADDR_OF(&registry->memory_context),
-		    (uint32_t)new_capacity
-	    )) {
-		SET_OFFSET_OF(&index->entries, old_entries);
-		index->capacity = old_capacity;
-		index->count = old_count;
-		return -1;
-	}
-
-	struct cp_counter_storage *items = ADDR_OF(&registry->items);
-	for (size_t i = 0; i < registry->count; ++i) {
-		if (hash_index_insert(
-			    index,
-			    tags_hash(items[i].tags, items[i].tag_count),
-			    (uint32_t)i
-		    )) {
-			struct hash_index_entry *new_entries =
-				ADDR_OF(&index->entries);
-			memory_bfree(
-				ADDR_OF(&registry->memory_context),
-				new_entries,
-				sizeof(*new_entries) * new_capacity *
-					HASH_INDEX_SPARSE_FACTOR
-			);
-			SET_OFFSET_OF(&index->entries, old_entries);
-			index->capacity = old_capacity;
-			index->count = old_count;
-			return -1;
-		}
-	}
-
-	if (old_entries != NULL) {
-		memory_bfree(
-			ADDR_OF(&registry->memory_context),
-			old_entries,
-			sizeof(*old_entries) * old_capacity *
-				HASH_INDEX_SPARSE_FACTOR
-		);
-	}
-	return 0;
-}
-
 int
 cp_config_counter_storage_registry_init(
 	struct memory_context *memory_context,
@@ -312,7 +253,9 @@ cp_config_counter_storage_registry_insert(
 	// on an earlier insert can leave the index one doubling behind, and
 	// a failed array growth can leave it one ahead.
 	if (registry->tag_index.capacity < registry->capacity) {
-		if (tag_index_grow(registry, registry->capacity)) {
+		if (hash_index_rehash(
+			    &registry->tag_index, (uint32_t)registry->capacity
+		    )) {
 			yanet_error_add(
 				err, "failed to allocate counter storage index"
 			);
