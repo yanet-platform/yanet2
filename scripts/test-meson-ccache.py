@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 import tempfile
 
 
@@ -14,6 +15,10 @@ with tempfile.TemporaryDirectory(prefix="meson-ccache-") as temp:
         ("discovered", None, None, True, False),
         ("explicit-clang", "ccache clang", "ccache clang++", True, False),
         ("absolute-wrapper", "/usr/bin/ccache cc", "/usr/bin/ccache c++", True, False),
+        ("masquerade", None, None, True, False),
+        ("path-masquerade", "cc", "c++", True, False),
+        ("missing-executable", None, None, False, True),
+        ("real-compiler-symlink", None, None, False, True),
         ("stale-cc", "cc", "c++", False, True),
         ("uncached-clang", "clang", "clang++", False, True),
         ("uncached-cxx", "ccache cc", "c++", False, True),
@@ -35,9 +40,24 @@ with tempfile.TemporaryDirectory(prefix="meson-ccache-") as temp:
         env.pop("CXX", None)
         if cc is not None:
             env.update(CC=cc, CXX=cxx)
+        if name in ("masquerade", "path-masquerade", "missing-executable", "real-compiler-symlink"):
+            masquerade = source / "masquerade"
+            masquerade.mkdir()
+            for link in ("cc", "c++"):
+                target = link if name == "real-compiler-symlink" else "ccache"
+                target_path = shutil.which(target)
+                if target_path is None:
+                    sys.exit(f"fixture requires {target} in PATH")
+                os.symlink(target_path, masquerade / link)
+            if name == "path-masquerade":
+                env["PATH"] = f"{masquerade}{os.pathsep}{env['PATH']}"
+            else:
+                env.update(CC=str(masquerade / "cc"), CXX=str(masquerade / "c++"))
         if preexisting:
             subprocess.run(["meson", "setup", "build"], cwd=source, env=env, check=True)
             (source / "build/sentinel").write_text("user-owned artifact\n")
+        if name == "missing-executable":
+            (masquerade / "cc").unlink()
         before = {
             path.relative_to(source): (path.read_bytes(), path.stat().st_mtime_ns)
             for path in (source / "build").rglob("*") if path.is_file()
@@ -49,7 +69,9 @@ with tempfile.TemporaryDirectory(prefix="meson-ccache-") as temp:
         print(result.stdout, end="")
         if cached:
             assert result.returncode == 0, name
-            subprocess.run(["meson", "compile", "-C", "build"], cwd=source, check=True)
+            subprocess.run(
+                ["meson", "compile", "-C", "build"], cwd=source, env=env, check=True
+            )
             if name == "explicit-clang":
                 assert "ccache clang" in (source / "build/build.ninja").read_text()
         else:

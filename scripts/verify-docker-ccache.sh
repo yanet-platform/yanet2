@@ -19,9 +19,11 @@ export DOCKER_CACHE_DIR="${probe_dir}"
 
 # Fixed source path, flags, and output keep both compiles deterministic.
 #
-# Errexit prevents statistics from masking compilation failures. World-writable
-# cache entries remain removable by the host user after the container exits.
-compile_cmd='set -eu; umask 0000; mkdir -p /tmp/ccache-probe; printf "int ccache_probe(void) { return 42; }\n" > /tmp/ccache-probe/probe.c; ccache cc -c /tmp/ccache-probe/probe.c -o /tmp/ccache-probe/probe.o; ccache -s; ccache --print-stats'
+# Errexit prevents statistics from masking compilation failures. The compile
+# exercises the runner's normal permissions: the object mode and the cache
+# directory modes are asserted for both runs, guarding against a umask
+# regression of either direction.
+compile_cmd='set -eu; mkdir -p /tmp/ccache-probe; printf "int ccache_probe(void) { return 42; }\n" > /tmp/ccache-probe/probe.c; ccache cc -c /tmp/ccache-probe/probe.c -o /tmp/ccache-probe/probe.o; ccache -s; ccache --print-stats; printf "probe.o mode: "; stat -c "%a" /tmp/ccache-probe/probe.o; find /ccache -mindepth 1 -type d -printf "ccache dir mode: %m %p\n" | sort'
 
 cache_hits() {
     awk '$1 == "direct_cache_hit" { d = $2 + 0 } $1 == "preprocessed_cache_hit" { p = $2 + 0 } END { print d + p }'
@@ -68,6 +70,30 @@ warm_misses="$(printf '%s\n' "${warm_out}" | cache_misses)"
     || fail "cold compile must miss exactly once, got hits=${cold_hits} misses=${cold_misses}"
 [ "${warm_hits}" = "1" ] && [ "${warm_misses}" = "1" ] \
     || fail "warm compile must hit exactly once with no further miss, got hits=${warm_hits} misses=${warm_misses}: shared cache mount missing or ineffective"
+
+# Cold and cached compiler output must keep ordinary permissions; every
+# cache directory must allow the host user to traverse and remove entries.
+for run in cold warm; do
+    if [ "${run}" = cold ]; then out="${cold_out}"; else out="${warm_out}"; fi
+    object_mode="$(printf '%s\n' "${out}" | sed -n 's/^probe\.o mode: //p')"
+    [ -n "${object_mode}" ] \
+        || fail "${run} container must report the compiled object mode"
+    [ "$(( 8#${object_mode} & 002 ))" -eq 0 ] \
+        || fail "${run} compiled object must not be world-writable, mode ${object_mode}"
+    shard_modes="$(printf '%s\n' "${out}" | sed -n 's/^ccache dir mode: \([0-7]*\) .*$/\1/p')"
+    [ -n "${shard_modes}" ] \
+        || fail "${run} container must report ccache cache directory modes"
+    for mode in ${shard_modes}; do
+        [ "$(( 8#${mode} & 003 ))" -eq 3 ] \
+            || fail "${run} cache directory must be other-writable and searchable, mode ${mode}"
+    done
+done
+cache_tree="${probe_dir}/ccache"
+[ -d "${cache_tree}" ] || fail "warm container must populate the isolated ccache cache tree"
+[ -n "$(ls -A "${cache_tree}")" ] \
+    || fail "container-written ccache cache tree must not be empty"
+find "${cache_tree:?}" -mindepth 1 -delete \
+    || fail "host user must be able to remove container-written ccache cache entries"
 
 printf 'ccache probe OK: cold hits=%s misses=%s; warm hits=%s (direct+preprocessed) misses=%s\n' \
     "${cold_hits}" "${cold_misses}" "${warm_hits}" "${warm_misses}"

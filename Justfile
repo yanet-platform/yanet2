@@ -140,6 +140,12 @@ _docker_run IT *COMMAND:
         printf 'gitdir: %s\n' "$git_dir" > "$gitfile"
         docker_mounts+=(-v "${gitfile}:/yanet2/.git:ro")
     fi
+    # Cache entries written as root must stay manageable by the invoking host
+    # user.
+    #
+    # ccache applies this umask only when creating entries in its cache
+    # directory and restores the umask before running the compiler, so
+    # compile outputs keep default permissions.
     docker run {{ IT }} --rm \
         --platform linux/amd64 \
         --network=host \
@@ -148,7 +154,7 @@ _docker_run IT *COMMAND:
         -v "${DOCKER_CACHE_DIR}/gocache:/tmp/gocache:rw" \
         -v "${DOCKER_CACHE_DIR}/ccache:/ccache:rw" \
         {{ TAG }} \
-        sh -c 'cd /yanet2 && git config --global --add safe.directory /yanet2 && {{ COMMAND }}'
+        sh -c 'cd /yanet2 && git config --global --add safe.directory /yanet2 && export CCACHE_UMASK=000 && {{ COMMAND }}'
 
 dsetup COVERAGE_MODE="false":
     @just _docker_run -it "just setup {{ COVERAGE_MODE }}"

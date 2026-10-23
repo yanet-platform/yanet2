@@ -14,6 +14,8 @@ Docker development builds (`just dbuild`, `dtest`, etc.) share host caches with 
 - Set explicit compiler overrides inside the container, for example `CC='ccache clang' CXX='ccache clang++' just _ccache_setup` from `just dshell`. The Docker runner does not forward the host's `CC` or `CXX` environment variables.
 - `just dbuild` and `just dtest` check the generated Ninja C/C++ compilation commands before compiling. Installing ccache does not change an already configured compiler: an uncached build fails with a request to manually reconfigure or recreate it. The check never deletes or reconfigures the build and never replaces your compiler choice. Use `CXX='ccache clang++'` for an explicit C++ compiler.
 - The shared runner creates all three host cache directories before starting Docker. The isolated two-container probe also checks their host ownership; it does not precreate them itself.
+- The shared runner sets `CCACHE_UMASK=000` for new cache entries so the host user can remove root-written entries. It does not repair old root-owned caches. Cache contents are world-writable: use a private cache root (e.g. a mode-0700 directory) or share it only with trusted users.
+- Masquerade compiler paths (e.g. `CC=/usr/lib/ccache/cc`) are accepted as cached by the check.
 
 ## Fuzzing exception
 

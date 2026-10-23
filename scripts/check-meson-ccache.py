@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 import re
 import shlex
+import shutil
 import subprocess
 import sys
 
@@ -26,7 +27,14 @@ if not commands:
     sys.exit("ccache check FAILED: no configured C/C++ compilation commands")
 for command in commands:
     argv = shlex.split(command["command"])
-    if not argv or Path(argv[0]).name != "ccache":
+    # A compiler command is cached only when its first executable resolves
+    # (PATH search included) through symlinks to ccache.
+    #
+    # Masquerade paths (`/usr/lib/ccache/cc`, PATH entries of ccache symlinks)
+    # resolve through symlinks to the ccache binary; an unresolvable first
+    # executable cannot be proven cached and is rejected fail-safe.
+    executable = argv and shutil.which(argv[0])
+    if not executable or Path(executable).resolve().name != "ccache":
         sys.exit(
             f"ccache check FAILED: {build} has an uncached compiler command: "
             f"{command['command']}\n"
