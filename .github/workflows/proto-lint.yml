@@ -23,6 +23,7 @@ jobs:
   buf-lint:
     name: Buf lint
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v5
 
@@ -36,6 +37,7 @@ jobs:
   buf-breaking:
     name: Buf breaking
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     if: github.event_name == 'pull_request'
     steps:
       - uses: actions/checkout@v5
@@ -63,6 +65,7 @@ jobs:
   protolint:
     name: Custom protolint linter
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v5
 

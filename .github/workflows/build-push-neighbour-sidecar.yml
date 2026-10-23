@@ -14,6 +14,7 @@ jobs:
   build-image:
     name: Build neighbour-sidecar image
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     permissions:
       contents: read
       packages: write
