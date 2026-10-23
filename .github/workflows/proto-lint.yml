@@ -7,12 +7,14 @@ on:
       - '**/*.proto'
       - 'lint/protobuf/**'
       - 'buf.yaml'
+      - 'ci/go-version'
       - '.github/workflows/proto-lint.yml'
   pull_request:
     paths:
       - '**/*.proto'
       - 'lint/protobuf/**'
       - 'buf.yaml'
+      - 'ci/go-version'
       - '.github/workflows/proto-lint.yml'
 
 concurrency:
@@ -71,7 +73,7 @@ jobs:
 
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version-file: go.mod
+          go-version-file: ci/go-version
 
       - name: Run tests
         run: go test ./lint/protobuf/cmd/protolint/

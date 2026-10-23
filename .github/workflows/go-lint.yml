@@ -7,6 +7,7 @@ on:
       - '**/*.go'
       - 'lint/style/**'
       - '.golangci.yml'
+      - 'ci/go-version'
       - '.github/workflows/go-lint.yml'
       - '.github/actions/apt-packages/**'
       - '.github/actions/apt-failover/**'
@@ -16,6 +17,7 @@ on:
       - '**/*.go'
       - 'lint/style/**'
       - '.golangci.yml'
+      - 'ci/go-version'
       - '.github/workflows/go-lint.yml'
       - '.github/actions/apt-packages/**'
       - '.github/actions/apt-failover/**'
@@ -35,7 +37,7 @@ jobs:
 
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version-file: go.mod
+          go-version-file: ci/go-version
 
       - name: Run tests
         run: go test ./lint/style/cmd/stylelint/
@@ -55,7 +57,7 @@ jobs:
 
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version-file: go.mod
+          go-version-file: ci/go-version
 
       - uses: ./.github/actions/apt-packages
         timeout-minutes: 10
@@ -76,5 +78,5 @@ jobs:
       - name: golangci-lint
         uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9
         with:
-          version: v2.13.2
+          version: v2.15.0
           args: --timeout 5m

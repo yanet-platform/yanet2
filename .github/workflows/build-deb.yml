@@ -30,6 +30,7 @@ on:
       - "scripts/uprobe/**"
       - "Makefile"
       - "meson_options.txt"
+      - "ci/go-version"
       - ".github/actions/apt-failover/**"
       - ".github/actions/protoc-plugins/**"
       - ".github/scripts/release-deb-artifacts.sh"
@@ -91,6 +92,17 @@ jobs:
           SOURCE_SHA: ${{ inputs.source_sha || github.sha }}
         run: test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
 
+      # A release rerun from main builds an older tag whose tree may predate the
+      # Go version file, so a manual run takes it from the workflow's commit.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: github.event_name == 'workflow_dispatch'
+        with:
+          ref: ${{ github.sha }}
+          path: release-tools
+          sparse-checkout: ci/go-version
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+
       - uses: ./.github/actions/apt-failover
 
       - name: Fetch git history for versioning
@@ -115,9 +127,8 @@ jobs:
 
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: "1.27.x"
+          go-version-file: ${{ github.event_name == 'workflow_dispatch' && 'release-tools/ci/go-version' || 'ci/go-version' }}
           cache: false
-          check-latest: true
 
       - name: Install Go Protobuf Plugins
         uses: ./.github/actions/protoc-plugins

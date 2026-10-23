@@ -106,6 +106,14 @@ jobs:
           gcc -fsanitize=address,undefined -o main main.c
           ./main
           EOF
+          # Jobs on the hosted runner install the Go that ci/go-version names, so
+          # the image must carry the same one.
+          want="go$(tr -d '[:space:]' <ci/go-version)"
+          got=$(docker run --rm "$ref" go env GOVERSION)
+          if [[ $got != "$want" ]]; then
+            echo "the image carries $got, but ci/go-version names $want" >&2
+            exit 1
+          fi
           {
             echo "### $ARCH image"
             echo '```'
