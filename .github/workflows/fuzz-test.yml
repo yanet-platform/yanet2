@@ -1,5 +1,10 @@
 name: Fuzz test
 
+# Every C and Go fuzz target runs in a job of its own, in parallel.
+#
+# The C target list comes from the build, so a module that registers a new
+# fuzzer is fuzzed without editing this file. Each C target keeps its corpus
+# between nights, and any input that crashes a fuzzer is kept as an artifact.
 on:
   schedule:
     - cron: "0 4 * * *"
@@ -7,10 +12,11 @@ on:
 
 jobs:
   build:
-    name: Build and Go fuzz
+    name: Build C fuzz targets
     runs-on: ubuntu-24.04
+    timeout-minutes: 30
     outputs:
-      fuzz-binaries-artifact-id: ${{ steps.upload-fuzz-binaries.outputs.artifact-id }}
+      targets: ${{ steps.collect.outputs.targets }}
 
     steps:
       - name: Free up disk space on GitHub runner
@@ -31,7 +37,7 @@ jobs:
       - uses: ./.github/actions/apt-packages
         timeout-minutes: 10
         with:
-          packages: meson clang cmake python3-pyelftools libnuma-dev libpcap-dev git protobuf-compiler jq
+          packages: meson clang cmake python3-pyelftools libnuma-dev libpcap-dev git protobuf-compiler jq ccache
 
       - uses: actions/setup-go@v6
         with:
@@ -55,16 +61,19 @@ jobs:
         run: make fuzz
 
       - name: Collect fuzz binaries
+        id: collect
         run: |
+          set -euo pipefail
           mkdir -p fuzz-out
           find build/tests/fuzzing/ -maxdepth 1 -type f -executable -exec cp {} fuzz-out/ \;
-          if [ -z "$(ls -A fuzz-out)" ]; then
+          targets=$(find fuzz-out -maxdepth 1 -type f -printf '%f\n' | sort | jq -Rsc 'split("\n") | map(select(length > 0))')
+          if [[ $targets == "[]" ]]; then
             echo "::error::no fuzz binaries were collected from build/tests/fuzzing/"
             exit 1
           fi
+          echo "targets=$targets" >>"$GITHUB_OUTPUT"
 
       - name: Upload fuzz binaries
-        id: upload-fuzz-binaries
         uses: actions/upload-artifact@v5
         with:
           name: fuzz-binaries
@@ -72,65 +81,16 @@ jobs:
           retention-days: 1
           overwrite: true
 
-      - name: Run Go fuzz tests
-        id: go-fuzz
-        env:
-          # The cgo test binary has to link the sanitizer runtimes the
-          # instrumented archives reference, or it fails to link entirely.
-          CGO_CFLAGS: -O2 -g -fsanitize=address,undefined
-          CGO_LDFLAGS: -O2 -g -fsanitize=address,undefined
-          # Without this, a caught sanitizer diagnostic prints but the
-          # test still passes.
-          UBSAN_OPTIONS: halt_on_error=1:abort_on_error=1:print_summary=1:print_stacktrace=1
-        run: |
-          # Listing targets executes TestMain, and this suite's TestMain
-          # boots a VM from an image never staged in this job.
-          excluded_pkg="github.com/yanet-platform/yanet2/tests/functional/main"
-          packages=$(go list ./...)
-          failed_list_pkgs=""
-          for pkg in $packages; do
-            if [ "$pkg" = "$excluded_pkg" ]; then
-              continue
-            fi
-            if ! list_out=$(go test "$pkg" -list '^Fuzz'); then
-              echo "::error::failed to list fuzz targets in $pkg"
-              failed_list_pkgs="$failed_list_pkgs $pkg"
-              continue
-            fi
-            fuzz_funcs=$(printf '%s\n' "$list_out" | grep '^Fuzz' || true)
-            for func in $fuzz_funcs; do
-              echo "Fuzzing $func in $pkg"
-              go test "$pkg" -run '^$' -fuzz "^${func}\$" -fuzztime 10m
-            done
-          done
-          if [ -n "$failed_list_pkgs" ]; then
-            echo "Failed to list fuzz targets in:$failed_list_pkgs"
-            exit 1
-          fi
-
-      - name: Upload Go fuzz failure testdata
-        uses: actions/upload-artifact@v5
-        if: always() && steps.go-fuzz.outcome == 'failure'
-        with:
-          name: go-fuzz-testdata
-          path: "**/testdata/fuzz/**"
-          retention-days: 7
-          overwrite: true
-
   c-fuzz-test:
     name: Fuzz ${{ matrix.module }}
     runs-on: ubuntu-24.04
     needs: build
-    # The build job's conclusion tracks the Go fuzz loop, so a bare needs
-    # would skip the C fuzzers on any Go fuzz failure too. Run whenever the
-    # fuzz binaries were uploaded, even if build failed afterward.
-    if: ${{ !cancelled() && needs.build.outputs.fuzz-binaries-artifact-id != '' }}
-    timeout-minutes: 15
+    timeout-minutes: 20
 
     strategy:
       fail-fast: false
       matrix:
-        module: [decap, route, nat64w, dscp, fwstate, forward, mirror]
+        module: ${{ fromJSON(needs.build.outputs.targets) }}
 
     steps:
       - name: Download fuzz binaries
@@ -139,16 +99,133 @@ jobs:
           name: fuzz-binaries
           path: fuzz-binaries/
 
+      - name: Restore corpus
+        uses: actions/cache/restore@v5
+        with:
+          path: corpus
+          key: fuzz-corpus-${{ matrix.module }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: fuzz-corpus-${{ matrix.module }}-
+
       - name: Run fuzzer
+        env:
+          MODULE: ${{ matrix.module }}
         run: |
-          chmod +x fuzz-binaries/${{ matrix.module }}
-          mkdir -p corpus
-          ./fuzz-binaries/${{ matrix.module }} corpus/ -max_total_time=600
+          chmod +x "fuzz-binaries/$MODULE"
+          mkdir -p corpus findings
+          "./fuzz-binaries/$MODULE" corpus/ -max_total_time=600 -artifact_prefix=findings/
+
+      # A crash still grows the corpus, so it is kept either way.
+      - name: Save corpus
+        if: ${{ !cancelled() }}
+        uses: actions/cache/save@v5
+        with:
+          path: corpus
+          key: fuzz-corpus-${{ matrix.module }}-${{ github.run_id }}-${{ github.run_attempt }}
+
+      - name: Upload crashing inputs
+        if: failure()
+        uses: actions/upload-artifact@v5
+        with:
+          name: fuzz-findings-${{ matrix.module }}
+          path: findings/
+          retention-days: 14
+
+  go-fuzz-targets:
+    name: List Go fuzz targets
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      targets: ${{ steps.list.outputs.targets }}
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: List Go fuzz targets
+        id: list
+        run: |
+          set -euo pipefail
+          # The functional suite's test setup boots a VM, so it is never fuzzed.
+          targets=$(git grep -E '^func Fuzz[A-Za-z0-9_]*\(' -- '*_test.go' ':!tests/functional/main' |
+            sed -E 's#^(.*)/[^/]+_test\.go:func (Fuzz[A-Za-z0-9_]*)\(.*#\1 \2#' |
+            jq -Rsc 'split("\n") | map(select(length > 0) | split(" ") | {pkg: ("./" + .[0]), func: .[1]})')
+          if [[ $targets == "[]" ]]; then
+            echo "::error::no Go fuzz targets found"
+            exit 1
+          fi
+          echo "targets=$targets" >>"$GITHUB_OUTPUT"
+
+  go-fuzz-test:
+    name: Go fuzz ${{ matrix.target.func }}
+    runs-on: ubuntu-24.04
+    needs: go-fuzz-targets
+    timeout-minutes: 40
+
+    strategy:
+      fail-fast: false
+      matrix:
+        target: ${{ fromJSON(needs.go-fuzz-targets.outputs.targets) }}
+
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: true
+
+      - uses: ./.github/actions/apt-packages
+        timeout-minutes: 10
+        with:
+          packages: meson clang cmake python3-pyelftools libnuma-dev libpcap-dev git protobuf-compiler jq ccache
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: "1.27.x"
+          cache: false
+
+      - name: Restore Go module cache
+        uses: ./.github/actions/go-modcache
+
+      - name: Install Go Protobuf Plugins
+        uses: ./.github/actions/protoc-plugins
+
+      # The C fuzz build compiles the same tree and saves this cache.
+      - uses: hendrikmuhs/ccache-action@v1.2.23
+        name: ccache
+        with:
+          key: ${{ runner.os }}-fuzz-build-cache
+          max-size: 1G
+          verbose: 2
+          save: false
+
+      # The cgo-backed fuzz targets link the sanitized libraries this builds.
+      - name: Build fuzz targets
+        run: make fuzz
+
+      - name: Run Go fuzz target
+        env:
+          # The cgo test binary has to link the sanitizer runtimes the
+          # instrumented archives reference, or it fails to link entirely.
+          CGO_CFLAGS: -O2 -g -fsanitize=address,undefined
+          CGO_LDFLAGS: -O2 -g -fsanitize=address,undefined
+          # Without this, a caught sanitizer diagnostic prints but the
+          # test still passes.
+          UBSAN_OPTIONS: halt_on_error=1:abort_on_error=1:print_summary=1:print_stacktrace=1
+          FUZZ_PKG: ${{ matrix.target.pkg }}
+          FUZZ_FUNC: ${{ matrix.target.func }}
+        run: go test "$FUZZ_PKG" -run '^$' -fuzz "^${FUZZ_FUNC}\$" -fuzztime 10m
+
+      - name: Upload Go fuzz failure testdata
+        uses: actions/upload-artifact@v5
+        if: failure()
+        with:
+          name: go-fuzz-testdata-${{ matrix.target.func }}
+          path: "**/testdata/fuzz/**"
+          retention-days: 7
+          overwrite: true
 
   notify-on-failure:
     name: Notify on fuzz test failure
     runs-on: ubuntu-latest
-    needs: [build, c-fuzz-test]
+    timeout-minutes: 5
+    needs: [build, c-fuzz-test, go-fuzz-targets, go-fuzz-test]
     if: failure() && github.event_name == 'schedule'
     env:
       Message: |
@@ -157,9 +234,12 @@ jobs:
         Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
     steps:
       - name: Send failure notification to Telegram
+        env:
+          BOT_TOKEN: ${{ secrets.TELEGRAM_YANET_NOTIFICATIONS_BOT_TOKEN }}
+          CHAT_ID: ${{ vars.TELEGRAM_YANET_CHAT_ID }}
+          TOPIC_ID: ${{ vars.TELEGRAM_YANET_PR_TOPIC_ID }}
         run: |
-          curl -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_YANET_NOTIFICATIONS_BOT_TOKEN }}/sendMessage" \
-          -d "chat_id=${{ vars.TELEGRAM_YANET_CHAT_ID }}" \
-          -d "message_thread_id=${{ vars.TELEGRAM_YANET_PR_TOPIC_ID }}" \
-          -d "text=$Message"
-
+          curl -fsS -X POST "https://api.telegram.org/bot${BOT_TOKEN}/sendMessage" \
+            --data-urlencode "chat_id=${CHAT_ID}" \
+            --data-urlencode "message_thread_id=${TOPIC_ID}" \
+            --data-urlencode "text=${Message}" >/dev/null
