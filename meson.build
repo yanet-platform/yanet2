@@ -188,6 +188,9 @@ libdpdk_default_options = [
   'tests=false',
   'examples=',
   'werror=false',
+  # DPDK turns developer mode on whenever its tree holds .git, which a
+  # submodule always does; its symbol checks guard DPDK's own shared ABI.
+  'developer_mode=disabled',
   'c_args=-Wno-stringop-overflow -Wno-array-bounds -Wno-stringop-overread -Wno-vla-larger-than',
 ]
 if host_machine.cpu_family() == 'x86_64'
