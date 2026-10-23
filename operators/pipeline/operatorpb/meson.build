@@ -4,7 +4,8 @@ proto_files = [join_paths(proto_dir, 'operator.proto')]
 
 protoc_gen = custom_target(
     'pipeline-operator-protoc',
-    output: ['operator.pb.go', 'operator_grpc.pb.go'],
+    output: 'pipeline-operator.protoset',
+    depfile: 'pipeline-operator.protoset.d',
     input: proto_files,
     command: [
         protoc,
@@ -12,6 +13,8 @@ protoc_gen = custom_target(
         '-I', root_dir,
         '--go_out=paths=source_relative:' + proto_dir,
         '--go-grpc_out=paths=source_relative:' + proto_dir,
+        '--descriptor_set_out=@OUTPUT@',
+        '--dependency_out=@DEPFILE@',
         '@INPUT@',
     ],
     build_by_default: true,
@@ -25,16 +28,16 @@ readiness_proto_files = [
 
 pipeline_operator_readiness_protoc_gen = custom_target(
     'pipeline-operator-readiness-protoc',
-    output: [
-        'readiness.pb.go',
-        'readiness_grpc.pb.go',
-    ],
+    output: 'pipeline-operator-readiness.protoset',
+    depfile: 'pipeline-operator-readiness.protoset.d',
     input: readiness_proto_files,
     command: [
         protoc,
         '-I', root_dir,
         '--go_out=paths=source_relative:' + root_dir,
         '--go-grpc_out=paths=source_relative:' + root_dir,
+        '--descriptor_set_out=@OUTPUT@',
+        '--dependency_out=@DEPFILE@',
         '@INPUT@',
     ],
     build_by_default: true,

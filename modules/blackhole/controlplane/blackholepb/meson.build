@@ -4,7 +4,8 @@ proto_files = [join_paths(proto_dir, 'blackhole.proto')]
 
 protoc_gen = custom_target(
     'blackhole-protoc',
-    output: ['blackhole.pb.go', 'blackhole_grpc.pb.go'],
+    output: 'blackhole.protoset',
+    depfile: 'blackhole.protoset.d',
     input: proto_files,
     command: [
         protoc,
@@ -12,6 +13,8 @@ protoc_gen = custom_target(
         '-I', root_dir,
         '--go_out=paths=source_relative:' + proto_dir,
         '--go-grpc_out=paths=source_relative:' + proto_dir,
+        '--descriptor_set_out=@OUTPUT@',
+        '--dependency_out=@DEPFILE@',
         '@INPUT@',
     ],
     build_by_default: true,

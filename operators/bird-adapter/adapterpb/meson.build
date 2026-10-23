@@ -5,7 +5,8 @@ proto_files = [join_paths(proto_dir, 'bird_import.proto')]
 
 protoc_gen = custom_target(
     'bird-adapter-protoc',
-    output: ['bird_import.pb.go', 'bird_import_grpc.pb.go'],
+    output: 'bird-adapter.protoset',
+    depfile: 'bird-adapter.protoset.d',
     input: proto_files,
     command: [
         protoc,
@@ -13,6 +14,8 @@ protoc_gen = custom_target(
         '-I', root_dir,
         '--go_out=paths=source_relative:' + proto_dir,
         '--go-grpc_out=paths=source_relative:' + proto_dir,
+        '--descriptor_set_out=@OUTPUT@',
+        '--dependency_out=@DEPFILE@',
         '@INPUT@',
     ],
     build_by_default: true,
