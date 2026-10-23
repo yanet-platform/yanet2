@@ -3,6 +3,31 @@
 Manual steps required when upgrading an existing deployment. The packaging
 does not perform these automatically.
 
+## Gateway HTTP rejects cross-origin browser calls from untrusted origins
+
+The gateway's HTTP server no longer sends `Access-Control-Allow-Origin: *`.
+A cross-origin browser POST is now rejected with 403 unless the page's
+origin is listed in `server.http.trusted_origins`, and only a listed origin
+gets CORS headers. Same-origin pages, the web dev proxy and clients that are
+not browsers, such as curl and scripts, are unaffected.
+
+A web UI served from another origin than the gateway, a standalone UI or a
+gateway added to the UI's Gateway drawer, stops working until every such
+gateway lists the UI's origin:
+
+```yaml
+gateway:
+  server:
+    http:
+      endpoint: "[::1]:8081"
+      trusted_origins:
+        - "https://yanet-ui.example.net"
+```
+
+Each entry is a bare `scheme://host[:port]`; anything else fails the config
+load. The deprecated `server.http_endpoint` has no place for origins, so a
+gateway still on it moves to the `server.http` section to trust one.
+
 ## TLS key pairs move into `key_pairs` and rotate without a restart
 
 Every certificate and private key is now given as a `key_pairs` list

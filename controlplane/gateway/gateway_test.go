@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -492,6 +493,97 @@ func Test_Gateway_TLSOnly_HTTPSReachesBuiltin(t *testing.T) {
 		Timeout: 5 * time.Second,
 	}
 	requireHTTPListServices(t, client, "https://"+httpsAddress)
+}
+
+// countingHealthService is a builtin Service whose health checker counts
+// the checks that reach it.
+type countingHealthService struct {
+	grpc_health_v1.UnimplementedHealthServer
+	checks atomic.Int32
+}
+
+func (m *countingHealthService) Name() string     { return "counting-health" }
+func (m *countingHealthService) Endpoint() string { return "" }
+
+func (m *countingHealthService) ServicesNames() []string {
+	return []string{grpc_health_v1.Health_ServiceDesc.ServiceName}
+}
+
+func (m *countingHealthService) RegisterService(server *grpc.Server) {
+	grpc_health_v1.RegisterHealthServer(server, m)
+}
+
+func (m *countingHealthService) Check(
+	ctx context.Context,
+	request *grpc_health_v1.HealthCheckRequest,
+) (*grpc_health_v1.HealthCheckResponse, error) {
+	m.checks.Add(1)
+	return &grpc_health_v1.HealthCheckResponse{Status: grpc_health_v1.HealthCheckResponse_SERVING}, nil
+}
+
+// Test_Gateway_HTTP_RejectsCrossOriginFromUntrustedOrigin verifies that a
+// cross-site browser POST that needs no preflight never reaches a backend,
+// while a same-origin page and a trusted origin are served.
+func Test_Gateway_HTTP_RejectsCrossOriginFromUntrustedOrigin(t *testing.T) {
+	t.Parallel()
+
+	const trustedOrigin = "https://ui.example"
+	httpAddress := newFreeAddress(t)
+	health := &countingHealthService{}
+
+	cfg := gateway.DefaultConfig()
+	cfg.Server.GRPC = &gateway.ListenerConfig{Endpoint: newFreeAddress(t)}
+	cfg.Server.HTTP = &gateway.ListenerConfig{
+		Endpoint:       httpAddress,
+		TrustedOrigins: []string{trustedOrigin},
+	}
+	runGateway(t, cfg, gateway.WithBuiltinService(health))
+
+	url := "http://" + httpAddress + "/api/" + grpc_health_v1.Health_Check_FullMethodName[1:]
+	client := &http.Client{Timeout: 5 * time.Second}
+	post := func(site, origin string) (*http.Response, error) {
+		request, err := http.NewRequest(http.MethodPost, url, strings.NewReader("{}"))
+		require.NoError(t, err)
+		request.Header.Set("Content-Type", "text/plain")
+		request.Header.Set("Sec-Fetch-Site", site)
+		request.Header.Set("Origin", origin)
+		return client.Do(request)
+	}
+
+	cases := []struct {
+		name   string
+		site   string
+		origin string
+		status int
+		cors   string
+	}{
+		{name: "cross-site", site: "cross-site", origin: "https://evil.example", status: http.StatusForbidden},
+		{name: "same-origin", site: "same-origin", origin: "http://" + httpAddress, status: http.StatusOK},
+		{name: "trusted", site: "cross-site", origin: trustedOrigin, status: http.StatusOK, cors: trustedOrigin},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			before := health.checks.Load()
+
+			var response *http.Response
+			require.Eventually(t, func() bool {
+				var err error
+				response, err = post(tc.site, tc.origin)
+				return err == nil
+			}, 5*time.Second, 50*time.Millisecond, "HTTP server did not answer")
+			defer func() { _ = response.Body.Close() }()
+			body, err := io.ReadAll(response.Body)
+			require.NoError(t, err)
+
+			require.Equal(t, tc.status, response.StatusCode, string(body))
+			require.Equal(t, tc.cors, response.Header.Get("Access-Control-Allow-Origin"))
+			wantChecks := before
+			if tc.status == http.StatusOK {
+				wantChecks++
+			}
+			require.Equal(t, wantChecks, health.checks.Load())
+		})
+	}
 }
 
 // lifecycleService is a Service recording that its background job ran and

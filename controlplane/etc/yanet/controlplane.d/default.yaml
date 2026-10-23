@@ -56,6 +56,12 @@ gateway:
     #           key_file:  /etc/yanet2/tls/server.key
     # http:
     #   endpoint: "[::1]:8081"
+    #   # Web origins whose pages may call this server cross-origin, such as
+    #   # a web UI served apart from the gateway. Any other cross-origin
+    #   # browser POST is rejected with 403; same-origin pages and clients
+    #   # that are not browsers are unaffected. Each is scheme://host[:port].
+    #   trusted_origins:
+    #     - "https://yanet-ui.example.net"
     #   tls:
     #     endpoint: "[::1]:8444"
     #     key_pairs:
