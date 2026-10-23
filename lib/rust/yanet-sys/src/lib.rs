@@ -24,6 +24,8 @@ pub mod bindings {
 }
 
 pub mod common;
+pub mod counters;
+pub mod dp;
 
 // Test-only dependencies are visible to the library's own test target.
 #[cfg(test)]

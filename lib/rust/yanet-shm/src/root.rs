@@ -29,8 +29,8 @@ impl ShmRoot {
     ///
     /// `base` must be a raw pointer received from C, never derived from a
     /// Rust reference, whose provenance covers every byte of the mapping
-    /// any pointer of this root is used to access. The mapping is one
-    /// contiguous mapping (environment assumption of the attach).
+    /// any pointer of this root is used to access, and the mapping is one
+    /// contiguous mapping.
     #[inline(always)]
     pub const unsafe fn from_mapping(base: NonNull<u8>) -> Self {
         Self {

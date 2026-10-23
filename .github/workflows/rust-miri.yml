@@ -3,10 +3,10 @@ name: Rust Miri
 # Miri over the unsafe, provenance and shared-memory suites of the Rust
 # module SDK workspace (lib/rust): strict provenance under Stacked and Tree
 # Borrows, including the cases that must be reported as Undefined Behavior.
-# The bindings crate's build script runs bindgen over the repository's C
-# headers with the flags of a meson configuration's compilation database, so
-# changes to those headers re-run the job and the job configures meson (no
-# compilation) before Miri.
+# The bindings crate's build script runs bindgen and compiles the dataplane C
+# shim over the repository's C headers with the compiler and flags of a meson
+# configuration's compilation database, so changes to those headers re-run
+# the job and the job configures meson (no compilation) before Miri.
 
 on:
   push:
@@ -15,6 +15,7 @@ on:
       - "lib/rust/**"
       - ".cargo/config.toml"
       - "common/**.h"
+      - "lib/**.h"
       - "subprojects/dpdk"
       - "**/meson.build"
       - "meson_options.txt"
@@ -28,6 +29,7 @@ on:
       - "lib/rust/**"
       - ".cargo/config.toml"
       - "common/**.h"
+      - "lib/**.h"
       - "subprojects/dpdk"
       - "**/meson.build"
       - "meson_options.txt"

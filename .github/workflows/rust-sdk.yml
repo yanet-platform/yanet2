@@ -3,12 +3,14 @@ name: Rust SDK
 # Checks of the Rust module SDK workspace (lib/rust): formatting, lints, the
 # 1.88 test suite, std-freedom of the SDK crates and the extractable packet.
 #
-# The bindings crate's build script runs bindgen over the repository's C
-# headers with the flags of a meson configuration's compilation database, so
-# C header and meson changes re-run the jobs and every job that compiles the
-# SDK configures meson first (nothing is compiled); each
-# cargo cache family has exactly one job that writes it, from main only, since
-# a cache written on a pull-request ref is readable only from that pull
+# The bindings crate's build script runs bindgen and the C shim over the
+# repository's C headers with the flags of a meson configuration's
+# compilation database. C header and meson changes therefore re-run the jobs,
+# and every job that compiles the SDK configures meson first (nothing is
+# compiled).
+#
+# Each cargo cache family has exactly one job that writes it, from main only,
+# since a cache written on a pull-request ref is readable only from that pull
 # request.
 
 on:
@@ -19,6 +21,7 @@ on:
       - ".cargo/config.toml"
       - ".rustfmt.toml"
       - "common/**.h"
+      - "lib/**.h"
       - "subprojects/dpdk"
       - "**/meson.build"
       - "meson_options.txt"
@@ -33,6 +36,7 @@ on:
       - ".cargo/config.toml"
       - ".rustfmt.toml"
       - "common/**.h"
+      - "lib/**.h"
       - "subprojects/dpdk"
       - "**/meson.build"
       - "meson_options.txt"
