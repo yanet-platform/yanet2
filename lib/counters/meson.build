@@ -101,9 +101,9 @@ if not dataplane_only
   )
 
   rure_dep = declare_dependency(
-    include_directories: include_directories(
-      '..' / '..' / 'subprojects' / 'regex' / 'regex-capi' / 'include'
-    ),
+    # A plain flag: include_directories() into another subproject's tree is a
+    # sandbox violation that meson is turning into a hard error.
+    compile_args: ['-I' + regex_root / 'regex-capi' / 'include'],
     link_with: librure,
     # Reported by rustc --print native-static-libs for this crate.
     link_args: ['-lgcc_s', '-lutil', '-lrt', '-lpthread', '-lm', '-ldl'],
