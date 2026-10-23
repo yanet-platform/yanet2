@@ -416,6 +416,60 @@ cp_device_fini(struct cp_device *self) {
 	memory_context_fini(&self->memory_context);
 }
 
+struct cp_device_cmp_data {
+	const char *type;
+	const char *name;
+};
+
+static int
+cp_device_registry_item_cmp(
+	const struct registry_item *item, const void *data
+) {
+	const struct cp_device *device =
+		container_of(item, struct cp_device, config_item);
+	const struct cp_device_cmp_data *cmp_data =
+		(const struct cp_device_cmp_data *)data;
+
+	int cmp = strncmp(device->name, cmp_data->name, sizeof(device->name));
+	if (cmp) {
+		return cmp;
+	}
+
+	return strncmp(device->type, cmp_data->type, sizeof(device->type));
+}
+
+static uint64_t
+cp_device_registry_key_hash(const void *data) {
+	const struct cp_device_cmp_data *cmp_data =
+		(const struct cp_device_cmp_data *)data;
+
+	return registry_hash_name_pair(
+		cmp_data->name,
+		CP_DEVICE_NAME_LEN,
+		cmp_data->type,
+		CP_DEVICE_TYPE_LEN
+	);
+}
+
+static uint64_t
+cp_device_registry_item_hash(const struct registry_item *item) {
+	const struct cp_device *device =
+		container_of(item, struct cp_device, config_item);
+
+	return registry_hash_name_pair(
+		device->name,
+		sizeof(device->name),
+		device->type,
+		sizeof(device->type)
+	);
+}
+
+static const struct registry_keys cp_device_registry_keys = {
+	.cmp = cp_device_registry_item_cmp,
+	.key_hash = cp_device_registry_key_hash,
+	.item_hash = cp_device_registry_item_hash,
+};
+
 int
 cp_device_registry_init(
 	struct memory_context *memory_context,
@@ -443,6 +497,7 @@ cp_device_registry_copy(
 ) {
 	if (registry_copy(
 		    memory_context,
+		    &cp_device_registry_keys,
 		    &new_device_registry->registry,
 		    &old_device_registry->registry
 	    )) {
@@ -586,28 +641,6 @@ cp_device_registry_get(
 	return container_of(item, struct cp_device, config_item);
 }
 
-struct cp_device_cmp_data {
-	const char *type;
-	const char *name;
-};
-
-static int
-cp_device_registry_item_cmp(
-	const struct registry_item *item, const void *data
-) {
-	const struct cp_device *device =
-		container_of(item, struct cp_device, config_item);
-	const struct cp_device_cmp_data *cmp_data =
-		(const struct cp_device_cmp_data *)data;
-
-	int cmp = strncmp(device->name, cmp_data->name, sizeof(device->name));
-	if (cmp) {
-		return cmp;
-	}
-
-	return strncmp(device->type, cmp_data->type, sizeof(device->type));
-}
-
 static int
 cp_device_registry_name_cmp(
 	const struct registry_item *item, const void *data
@@ -626,6 +659,7 @@ cp_device_registry_lookup_name(
 	uint64_t index;
 	if (registry_lookup(
 		    &device_registry->registry,
+		    &cp_device_registry_keys,
 		    cp_device_registry_name_cmp,
 		    name,
 		    &index
@@ -653,6 +687,7 @@ cp_device_registry_lookup(
 	uint64_t index;
 	if (registry_lookup(
 		    &device_registry->registry,
+		    &cp_device_registry_keys,
 		    cp_device_registry_item_cmp,
 		    &cmp_data,
 		    &index
@@ -697,6 +732,7 @@ cp_device_registry_upsert(
 
 	if (registry_replace(
 		    &device_registry->registry,
+		    &cp_device_registry_keys,
 		    cp_device_registry_item_cmp,
 		    &cmp_data,
 		    &new_device->config_item,
@@ -742,6 +778,7 @@ cp_device_registry_delete(
 
 	if (registry_replace(
 		    &device_registry->registry,
+		    &cp_device_registry_keys,
 		    cp_device_registry_name_cmp,
 		    name,
 		    NULL,

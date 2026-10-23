@@ -1,8 +1,16 @@
 #pragma once
 
+#include <assert.h>
+#include <stddef.h>
+#include <stdint.h>
+
+#include "common/hash_index.h"
 #include "common/memory.h"
+#include "common/str_index.h"
 
 #include "lib/controlplane/config/config_lock.h"
+
+#define REGISTRY_HASH_SEED 0x9e3779b9
 
 struct registry_item {
 	// Reference count of live registry slots holding this item.
@@ -75,6 +83,56 @@ registry_item_unref(
 	}
 }
 
+typedef int (*registry_item_cmp_func)(
+	const struct registry_item *item, const void *data
+);
+
+// The key shape a registry's hash side-index serves.
+//
+// A registry may be searched with several comparison shapes; only the
+// canonical one drives the hash functions, and only lookups and
+// replacements using exactly that comparison go through the index,
+// every other shape keeps the linear scan. The caller supplies the key
+// set on every indexed operation, since a shared registry cannot hold
+// it: the callbacks live in each binary's static storage. A registry
+// is driven with one key set, or none; mixing sets is a caller bug.
+struct registry_keys {
+	registry_item_cmp_func cmp;
+	// Hash of a lookup key in the canonical shape.
+	uint64_t (*key_hash)(const void *key);
+	// Hash of an item's own key, agreeing with the lookup hash.
+	uint64_t (*item_hash)(const struct registry_item *item);
+};
+
+// Hash of one NUL-terminated key field.
+static inline uint64_t
+registry_hash_name(const char *name, size_t limit) {
+	return str_index_fnv1a(name, strnlen(name, limit), REGISTRY_HASH_SEED);
+}
+
+// Hash of a two-field key: the fields fold in order, so both influence
+// the digest and lookup comparison, not the hash, decides equality.
+static inline uint64_t
+registry_hash_name_pair(
+	const char *first,
+	size_t first_limit,
+	const char *second,
+	size_t second_limit
+) {
+	uint64_t hash = str_index_fnv1a(
+		first, strnlen(first, first_limit), REGISTRY_HASH_SEED
+	);
+	return str_index_fnv1a(
+		second, strnlen(second, second_limit), (uint32_t)hash
+	);
+}
+
+// Fold the 64-bit key hash into the 32 bits the side index probes with.
+static inline uint32_t
+registry_hash_fold(uint64_t hash) {
+	return (uint32_t)(hash ^ (hash >> 32));
+}
+
 struct registry {
 	struct memory_context *memory_context;
 	// Configuration whose lock must be held for every reference-count
@@ -82,6 +140,7 @@ struct registry {
 	struct cp_config *owner;
 	uint64_t capacity;
 	struct registry_item **items;
+	struct hash_index key_index;
 };
 
 static inline struct registry_item *
@@ -106,6 +165,89 @@ registry_set(
 	SET_OFFSET_OF(ADDR_OF(&registry->items) + idx, item);
 }
 
+// Equality probe of the side index: a bucket payload is an items-array
+// slot, accepted when the item in it matches the lookup key.
+struct registry_index_probe {
+	struct registry *registry;
+	registry_item_cmp_func cmp_func;
+	const void *cmp_data;
+};
+
+static inline int
+registry_index_probe_eq(uint32_t value, const void *data) {
+	const struct registry_index_probe *probe =
+		(const struct registry_index_probe *)data;
+
+	struct registry_item *item = registry_get(probe->registry, value);
+	if (item == NULL) {
+		return 1;
+	}
+
+	return probe->cmp_func(item, probe->cmp_data);
+}
+
+// Catch the side index up to the items capacity before an insertion.
+//
+// Returns 0 with the index aligned, or -1 leaving the registry sound:
+// an index behind the items array still resolves every live item, so
+// the caller may simply fail its own mutation and retry.
+static inline int
+registry_index_ensure(struct registry *registry) {
+	if ((uint64_t)registry->key_index.capacity >= registry->capacity) {
+		return 0;
+	}
+
+	return hash_index_rehash(
+		&registry->key_index, (uint32_t)registry->capacity
+	);
+}
+
+#ifdef REGISTRY_SANITIZE
+static inline int
+registry_sanitize_slot_eq(uint32_t value, const void *data) {
+	return value != *(const uint32_t *)data;
+}
+
+// Assert the side index still resolves every live item to its own slot
+// and counts exactly the live slots.
+//
+// The scan exists only to feed assertions, so it compiles away in
+// builds where assertions are compiled out: mutations stay constant
+// time there instead of rescanning the registry.
+static inline void
+registry_sanitize_index(
+	struct registry *registry, const struct registry_keys *keys
+) {
+#ifndef NDEBUG
+	if (keys == NULL) {
+		return;
+	}
+
+	uint64_t live = 0;
+	for (uint64_t slot = 0; slot < registry->capacity; ++slot) {
+		struct registry_item *item = registry_get(registry, slot);
+		if (item == NULL) {
+			continue;
+		}
+
+		uint32_t expected = (uint32_t)slot;
+		uint32_t found = hash_index_lookup(
+			&registry->key_index,
+			registry_hash_fold(keys->item_hash(item)),
+			registry_sanitize_slot_eq,
+			&expected
+		);
+		assert(found == expected);
+		live += 1;
+	}
+
+	assert((uint64_t)registry->key_index.count == live);
+#else
+	(void)registry;
+#endif
+}
+#endif
+
 static inline int
 registry_init(
 	struct memory_context *memory_context,
@@ -113,6 +255,10 @@ registry_init(
 	struct registry *registry,
 	uint64_t capacity
 ) {
+	if (capacity > UINT32_MAX) {
+		return -1;
+	}
+
 	SET_OFFSET_OF(&registry->memory_context, memory_context);
 	SET_OFFSET_OF(&registry->owner, owner);
 	registry->capacity = capacity;
@@ -129,6 +275,18 @@ registry_init(
 		registry_set(registry, idx, NULL);
 	}
 
+	if (hash_index_init(
+		    &registry->key_index, memory_context, (uint32_t)capacity
+	    )) {
+		SET_OFFSET_OF(&registry->items, NULL);
+		memory_bfree(
+			memory_context,
+			items,
+			sizeof(struct registry_item *) * capacity
+		);
+		return -1;
+	}
+
 	return 0;
 }
 
@@ -142,6 +300,8 @@ registry_discard(struct registry *registry) {
 	if (ADDR_OF(&registry->items) == NULL) {
 		return;
 	}
+
+	hash_index_fini(&registry->key_index);
 
 	memory_bfree(
 		ADDR_OF(&registry->memory_context),
@@ -182,30 +342,60 @@ registry_fini(
 	registry_discard(registry);
 }
 
+// Copy the live items into a fresh registry, densely packed.
+//
+// Positions do not survive a copy: the fresh registry holds exactly
+// the live items at the head of its array, so a generation built from
+// a churned predecessor sheds its holes and growth slack. Each live
+// item gains a reference in the fresh registry.
 static inline int
 registry_copy(
 	struct memory_context *memory_context,
+	const struct registry_keys *keys,
 	struct registry *new_registry,
 	struct registry *old_registry
 ) {
+	uint64_t live = 0;
+	for (uint64_t idx = 0; idx < old_registry->capacity; ++idx) {
+		if (registry_get(old_registry, idx) != NULL) {
+			live += 1;
+		}
+	}
+
 	if (registry_init(
 		    memory_context,
 		    ADDR_OF(&old_registry->owner),
 		    new_registry,
-		    old_registry->capacity
+		    live + !live
 	    )) {
 		return -1;
 	}
 
+	uint64_t slot = 0;
 	for (uint64_t idx = 0; idx < old_registry->capacity; ++idx) {
 		struct registry_item *item = registry_get(old_registry, idx);
-
-		if (item != NULL) {
-			registry_item_ref(item, ADDR_OF(&old_registry->owner));
+		if (item == NULL) {
+			continue;
 		}
 
-		registry_set(new_registry, idx, item);
+		registry_item_ref(item, ADDR_OF(&old_registry->owner));
+		registry_set(new_registry, slot, item);
+
+		if (keys != NULL) {
+			// The dense array holds exactly the live items, so
+			// the entry insert cannot find the index full.
+			hash_index_insert(
+				&new_registry->key_index,
+				registry_hash_fold(keys->item_hash(item)),
+				(uint32_t)slot
+			);
+		}
+		slot += 1;
 	}
+
+#ifdef REGISTRY_SANITIZE
+	registry_sanitize_index(new_registry, keys);
+#endif
 
 	return 0;
 }
@@ -249,17 +439,37 @@ registry_extend(struct registry *registry) {
 	return 0;
 }
 
-typedef int (*registry_item_cmp_func)(
-	const struct registry_item *item, const void *data
-);
-
+// Resolve a key through the side index when the comparison is the
+// indexed key shape, and through the linear scan otherwise.
 static inline int
 registry_lookup(
 	struct registry *registry,
+	const struct registry_keys *keys,
 	registry_item_cmp_func cmp_func,
 	const void *cmp_data,
 	uint64_t *index
 ) {
+	if (keys != NULL && cmp_func == keys->cmp) {
+		struct registry_index_probe probe = {
+			.registry = registry,
+			.cmp_func = cmp_func,
+			.cmp_data = cmp_data,
+		};
+
+		uint32_t found = hash_index_lookup(
+			&registry->key_index,
+			registry_hash_fold(keys->key_hash(cmp_data)),
+			registry_index_probe_eq,
+			&probe
+		);
+		if (found == HASH_INDEX_INVALID) {
+			return -1;
+		}
+
+		*index = found;
+		return 0;
+	}
+
 	for (uint64_t idx = 0; idx < registry->capacity; ++idx) {
 		struct registry_item *item = registry_get(registry, idx);
 		if (item == NULL) {
@@ -288,14 +498,34 @@ registry_get_unused_index(struct registry *registry, uint64_t *index) {
 }
 
 static inline int
-registry_insert(struct registry *registry, struct registry_item *new_item) {
+registry_insert(
+	struct registry *registry,
+	const struct registry_keys *keys,
+	struct registry_item *new_item
+) {
 	uint64_t index;
 	if (registry_get_unused_index(registry, &index)) {
 		return -1;
 	}
+	if (keys != NULL && registry_index_ensure(registry)) {
+		return -1;
+	}
 
 	registry_set(registry, index, new_item);
+	if (keys != NULL) {
+		// The ensure above aligned the index with the items array,
+		// so the entry insert cannot find it full.
+		hash_index_insert(
+			&registry->key_index,
+			registry_hash_fold(keys->item_hash(new_item)),
+			(uint32_t)index
+		);
+	}
 	registry_item_ref(new_item, ADDR_OF(&registry->owner));
+
+#ifdef REGISTRY_SANITIZE
+	registry_sanitize_index(registry, keys);
+#endif
 
 	return 0;
 }
@@ -303,6 +533,7 @@ registry_insert(struct registry *registry, struct registry_item *new_item) {
 static inline int
 registry_replace(
 	struct registry *registry,
+	const struct registry_keys *keys,
 	registry_item_cmp_func cmp_func,
 	const void *cmp_func_data,
 	struct registry_item *new_item,
@@ -316,13 +547,16 @@ registry_replace(
 #endif
 
 	uint64_t index;
-	if (registry_lookup(registry, cmp_func, cmp_func_data, &index)) {
+	if (registry_lookup(registry, keys, cmp_func, cmp_func_data, &index)) {
 		if (new_item == NULL) {
 			// Delete not existent item
 			return -1;
 		}
 
 		if (registry_get_unused_index(registry, &index)) {
+			return -1;
+		}
+		if (keys != NULL && registry_index_ensure(registry)) {
 			return -1;
 		}
 	}
@@ -334,6 +568,40 @@ registry_replace(
 
 	registry_set(registry, index, new_item);
 
+	// The side index is maintained before the old item is released, so
+	// its key stays readable while the slot's entry is swapped.
+	if (keys != NULL) {
+		if (old_item == NULL) {
+			// A fresh slot: the ensure above aligned the index
+			// with the items array, so the entry insert cannot
+			// find it full.
+			hash_index_insert(
+				&registry->key_index,
+				registry_hash_fold(keys->item_hash(new_item)),
+				(uint32_t)index
+			);
+		} else {
+			// The slot's entry keys the old item, so it is
+			// dropped and, for a replacement, re-created under
+			// the new item's key: a replaced item may hash to a
+			// different probe chain than its predecessor.
+			hash_index_remove(
+				&registry->key_index,
+				registry_hash_fold(keys->item_hash(old_item)),
+				(uint32_t)index
+			);
+			if (new_item != NULL) {
+				hash_index_insert(
+					&registry->key_index,
+					registry_hash_fold(
+						keys->item_hash(new_item)
+					),
+					(uint32_t)index
+				);
+			}
+		}
+	}
+
 	if (old_item != NULL) {
 		registry_item_unref(
 			old_item,
@@ -342,6 +610,10 @@ registry_replace(
 			item_free_func_data
 		);
 	}
+
+#ifdef REGISTRY_SANITIZE
+	registry_sanitize_index(registry, keys);
+#endif
 
 	return 0;
 }

@@ -166,6 +166,37 @@ cp_pipeline_fini(struct cp_pipeline *self) {
 
 // Pipeline registry
 
+static int
+cp_pipeline_registry_item_cmp(
+	const struct registry_item *item, const void *data
+) {
+	const struct cp_pipeline *pipeline =
+		container_of(item, struct cp_pipeline, config_item);
+
+	return strncmp(
+		pipeline->name, (const char *)data, CP_PIPELINE_NAME_LEN
+	);
+}
+
+static uint64_t
+cp_pipeline_registry_key_hash(const void *data) {
+	return registry_hash_name((const char *)data, CP_PIPELINE_NAME_LEN);
+}
+
+static uint64_t
+cp_pipeline_registry_item_hash(const struct registry_item *item) {
+	const struct cp_pipeline *pipeline =
+		container_of(item, struct cp_pipeline, config_item);
+
+	return registry_hash_name(pipeline->name, sizeof(pipeline->name));
+}
+
+static const struct registry_keys cp_pipeline_registry_keys = {
+	.cmp = cp_pipeline_registry_item_cmp,
+	.key_hash = cp_pipeline_registry_key_hash,
+	.item_hash = cp_pipeline_registry_item_hash,
+};
+
 int
 cp_pipeline_registry_init(
 	struct memory_context *memory_context,
@@ -193,6 +224,7 @@ cp_pipeline_registry_copy(
 ) {
 	if (registry_copy(
 		    memory_context,
+		    &cp_pipeline_registry_keys,
 		    &new_pipeline_registry->registry,
 		    &old_pipeline_registry->registry
 	    )) {
@@ -236,18 +268,6 @@ cp_pipeline_registry_get(
 	return container_of(item, struct cp_pipeline, config_item);
 }
 
-static int
-cp_pipeline_registry_item_cmp(
-	const struct registry_item *item, const void *data
-) {
-	const struct cp_pipeline *pipeline =
-		container_of(item, struct cp_pipeline, config_item);
-
-	return strncmp(
-		pipeline->name, (const char *)data, CP_PIPELINE_NAME_LEN
-	);
-}
-
 int
 cp_pipeline_registry_lookup_index(
 	struct cp_pipeline_registry *pipeline_registry,
@@ -256,6 +276,7 @@ cp_pipeline_registry_lookup_index(
 ) {
 	return registry_lookup(
 		&pipeline_registry->registry,
+		&cp_pipeline_registry_keys,
 		cp_pipeline_registry_item_cmp,
 		name,
 		index
@@ -306,6 +327,7 @@ cp_pipeline_registry_upsert(
 
 	return registry_replace(
 		&pipeline_registry->registry,
+		&cp_pipeline_registry_keys,
 		cp_pipeline_registry_item_cmp,
 		name,
 		&new_pipeline->config_item,
@@ -320,6 +342,7 @@ cp_pipeline_registry_delete(
 ) {
 	return registry_replace(
 		&pipeline_registry->registry,
+		&cp_pipeline_registry_keys,
 		cp_pipeline_registry_item_cmp,
 		name,
 		NULL,

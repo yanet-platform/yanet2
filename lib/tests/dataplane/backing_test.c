@@ -110,7 +110,7 @@ backing_test_add_device(
 	SET_OFFSET_OF(&cp_device->output_pipelines, entries[1]);
 
 	return registry_insert(
-		&gen->device_registry.registry, &cp_device->config_item
+		&gen->device_registry.registry, NULL, &cp_device->config_item
 	);
 }
 
