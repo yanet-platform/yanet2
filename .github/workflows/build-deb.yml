@@ -71,7 +71,10 @@ jobs:
     timeout-minutes: 90
     env:
       PKG_VERSION: ${{ inputs.pkg_version }}
-      DEB_BUILD_PROFILES: ${{ matrix.unbtver == '22.04' && 'pkg.yanet2.nouprobe' || '' }}
+      # Ubuntu 22.04 ships meson 0.61, below the project minimum, so its
+      # build takes meson from PyPI and the profile drops the apt package
+      # from Build-Depends.
+      DEB_BUILD_PROFILES: ${{ matrix.unbtver == '22.04' && 'pkg.yanet2.nouprobe pkg.yanet2.pipmeson' || '' }}
     strategy:
       fail-fast: false
       # Ubuntu 22.04 joins only when a caller or a manual run asks for it.
@@ -112,6 +115,16 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends devscripts
+
+      # Pinned to the version Ubuntu 24.04 packages, so every build uses
+      # the same meson. Installed system-wide because the package build runs
+      # under sudo.
+      - name: Install meson from PyPI
+        if: matrix.unbtver == '22.04'
+        timeout-minutes: 10
+        run: |
+          sudo python3 -m pip install --no-cache-dir meson==1.3.2
+          meson --version
 
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
