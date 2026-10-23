@@ -66,16 +66,19 @@ jobs:
             gh api --paginate --slurp "repos/$REPO/commits/$SHA/check-runs?per_page=100&filter=all" |
               jq -r --argjson suites "$1" '[.[].check_runs[] | select(.check_suite.id | IN($suites[]))]
                 | group_by([.check_suite.id, .name]) | map(max_by(.id)) | .[]
-                | [.name, (.conclusion // "")] | @tsv' |
+                | [.name, .status, (.conclusion // "")] | @tsv' |
               LC_ALL=C sort
           }
 
-          # Wait until every run has finished and a second listing agrees.
+          # Wait until every run has finished, a second listing agrees and no
+          # check is still running.
           #
           # A run stays in progress until its last job, including one that
           # waits on others, has finished. Workflows started by the same event
           # usually register within seconds; the second listing guards against
-          # a late one. A failed API call is retried after a minute rather than
+          # a late one. A check still running under finished runs means a job
+          # was just rerun, and the wait starts over unless a run has already
+          # failed. A failed API call is retried after a minute rather than
           # failing the gate.
           sleep 30
           previous='<none>'
@@ -87,9 +90,21 @@ jobs:
             fi
             pending=$(awk -F'\t' '$3 != "completed"' <<<"$current")
             if [[ -n $current && -z $pending && $current == "$previous" ]]; then
-              break
+              suites=$(cut -f1 <<<"$current" | jq -cs .)
+              if ! checks=$(list_checks "$suites"); then
+                echo "::warning::listing the checks failed; retrying"
+                sleep 60
+                continue
+              fi
+              unfinished=$(awk -F'\t' '$2 != "completed"' <<<"$checks")
+              failed_runs=$(awk -F'\t' '$4 != "success" && $4 != "skipped" && $4 != "neutral"' <<<"$current")
+              if [[ -z $unfinished || -n $failed_runs ]]; then
+                break
+              fi
+              previous='<none>'
+            else
+              previous=$current
             fi
-            previous=$current
             if [[ -n $current && -z $pending ]]; then
               sleep 10
             else
@@ -97,23 +112,17 @@ jobs:
             fi
           done
 
-          suites=$(cut -f1 <<<"$current" | jq -cs .)
-          until checks=$(list_checks "$suites"); do
-            echo "::warning::listing the checks failed; retrying"
-            sleep 60
-          done
-
           echo "Workflow runs (name, attempt, conclusion):"
           awk -F'\t' '{print $5 "\t" $2 "\t" $4}' <<<"$current"
           echo "Checks (name, conclusion):"
-          printf '%s\n' "$checks"
+          awk -F'\t' '{print $1 "\t" $3}' <<<"$checks"
 
           # A run that failed before starting any job has no check to show it.
           #
           # A broken workflow file ends that way.
           failed=$(
             awk -F'\t' '$4 != "success" && $4 != "skipped" && $4 != "neutral" {print $5 "\t" $4}' <<<"$current"
-            awk -F'\t' '$2 != "success" && $2 != "skipped" && $2 != "neutral"' <<<"$checks"
+            awk -F'\t' '$3 != "success" && $3 != "skipped" && $3 != "neutral" {print $1 "\t" $3}' <<<"$checks"
           )
           if [[ -n $failed ]]; then
             echo "::error::workflows or checks that did not succeed:"
