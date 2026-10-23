@@ -14,14 +14,9 @@ use core::net::{Ipv4Addr, Ipv6Addr};
 /// section 2). The 64-bit accumulator cannot overflow below 16 GiB of data,
 /// unlike the 32-bit C one.
 fn partial_sum(data: &[u8]) -> u64 {
-    let mut chunks = data.chunks_exact(4);
-    let mut acc: u64 = 0;
-    for chunk in &mut chunks {
-        if let [b0, b1, b2, b3] = *chunk {
-            acc += u64::from(u32::from_be_bytes([b0, b1, b2, b3]));
-        }
-    }
-    match *chunks.remainder() {
+    let (chunks, remainder) = data.as_chunks::<4>();
+    let mut acc: u64 = chunks.iter().map(|&chunk| u64::from(u32::from_be_bytes(chunk))).sum();
+    match *remainder {
         [] => {}
         [hi] => acc += u64::from(u16::from_be_bytes([hi, 0])),
         [hi, lo] => acc += u64::from(u16::from_be_bytes([hi, lo])),
@@ -58,14 +53,12 @@ fn minus(val0: u16, val1: u16) -> u16 {
 }
 
 fn replace_words(cksum: u16, old: &[u8], new: &[u8]) -> u16 {
-    let olds = old.chunks_exact(2);
-    let news = new.chunks_exact(2);
+    let (olds, _) = old.as_chunks::<2>();
+    let (news, _) = new.as_chunks::<2>();
     let mut acc = !cksum;
-    for (old, new) in olds.zip(news) {
-        if let ([o0, o1], [n0, n1]) = (old, new) {
-            acc = minus(acc, u16::from_be_bytes([*o0, *o1]));
-            acc = plus(acc, u16::from_be_bytes([*n0, *n1]));
-        }
+    for (&old, &new) in olds.iter().zip(news) {
+        acc = minus(acc, u16::from_be_bytes(old));
+        acc = plus(acc, u16::from_be_bytes(new));
     }
     acc
 }
