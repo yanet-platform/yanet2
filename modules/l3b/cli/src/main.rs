@@ -429,7 +429,6 @@ impl TryFrom<&DestinationRuleDoc> for l3bpb::DestinationFilterRule {
 
 /// Reads and parses a YAML document from a file, attributing failures to the
 /// given verb as invalid input.
-#[allow(clippy::result_large_err)]
 fn load_document<T: for<'de> Deserialize<'de>>(
     path: &Path,
     verb: &'static str,

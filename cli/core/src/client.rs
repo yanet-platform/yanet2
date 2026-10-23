@@ -296,7 +296,7 @@ fn ipv6_server_name(endpoint: &str) -> Option<String> {
     let uri: Uri = endpoint.parse().ok()?;
     let host = uri.host()?;
 
-    host.strip_prefix('[')?.strip_suffix(']').map(str::to_owned)
+    host.strip_circumfix('[', ']').map(str::to_owned)
 }
 
 /// Reads one PEM input while preserving its role and path in the error.
@@ -345,9 +345,6 @@ async fn establish(settings: &Settings) -> Result<LayeredChannel, ConnectionErro
 /// would from [`Connection::connect_for`], so a configuration mistake exits
 /// the same way regardless of where the command first needs an endpoint to
 /// reject something.
-// The siblings returning the same `Error` are all `async fn`, whose
-// desugared `Future` output hides the `Result` from this lint.
-#[allow(clippy::result_large_err)]
 pub fn resolve_label(args: &ConnectionArgs, action: &str) -> Result<String, Error> {
     config::resolve(args, &config::Sources::from_process_env())
         .map(|settings| settings.label())
@@ -735,7 +732,7 @@ where
 
 #[cfg(test)]
 mod test {
-    use core::{net::SocketAddr, time::Duration};
+    use core::{assert_matches, net::SocketAddr, time::Duration};
     use std::{
         net::{TcpListener, TcpStream},
         path::PathBuf,
@@ -898,7 +895,7 @@ mod test {
 
         assert_eq!(ErrorKind::Connection, err.kind());
         assert_eq!(4, err.exit_code());
-        assert_eq!("show", err.action);
+        assert_eq!("show", err.0.action);
         assert_eq!("connect timed out after 0.2s", err.message());
     }
 
@@ -919,7 +916,7 @@ mod test {
 
         let err = connect(&args).await.err().unwrap();
 
-        assert!(matches!(err, ConnectionError::InvalidEndpointScheme(scheme) if scheme == "https"));
+        assert_matches!(err, ConnectionError::InvalidEndpointScheme(scheme) if scheme == "https");
     }
 
     #[tokio::test]
@@ -939,7 +936,7 @@ mod test {
 
         let err = connect(&args).await.err().unwrap();
 
-        assert!(matches!(err, ConnectionError::TlsOptionsWithoutTls));
+        assert_matches!(err, ConnectionError::TlsOptionsWithoutTls);
     }
 
     #[tokio::test]
@@ -959,7 +956,7 @@ mod test {
 
         let err = connect(&args).await.err().unwrap();
 
-        assert!(matches!(err, ConnectionError::IncompleteClientIdentity));
+        assert_matches!(err, ConnectionError::IncompleteClientIdentity);
     }
 
     #[tokio::test]
@@ -986,7 +983,7 @@ mod test {
 
         let err = establish(&settings).await.err().unwrap();
 
-        assert!(matches!(err, ConnectionError::Config(config::Error::MissingCertTag)));
+        assert_matches!(err, ConnectionError::Config(config::Error::MissingCertTag));
     }
 
     #[tokio::test]
@@ -1034,7 +1031,7 @@ mod test {
         let service = Service::from_parts((), "grpc://[::1]:8080", "test.Service");
         let err = (service.status("list"))(Status::not_found("missing"));
 
-        assert_eq!(ErrorKind::NotFound, err.kind);
+        assert_eq!(ErrorKind::NotFound, err.0.kind);
     }
 
     #[test]
@@ -1042,8 +1039,8 @@ mod test {
         let service = Service::from_parts((), "grpc://[::1]:8080", "test.Service");
         let err = service.invalid("update", "bad input");
 
-        assert_eq!(ErrorKind::InvalidArgument, err.kind);
-        assert_eq!("bad input", err.message);
+        assert_eq!(ErrorKind::InvalidArgument, err.0.kind);
+        assert_eq!("bad input", err.0.message);
     }
 
     #[test]
@@ -1077,7 +1074,7 @@ mod test {
             .unwrap_err();
 
         assert_eq!(ErrorKind::Unavailable, err.kind());
-        assert_eq!("show", err.action);
+        assert_eq!("show", err.0.action);
     }
 
     #[tokio::test]
