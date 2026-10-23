@@ -64,7 +64,7 @@ func Test_SetConfigRequest_Validate(t *testing.T) {
 			name: "absent snaplen is not checked",
 			request: &pdumppb.SetConfigRequest{
 				Name:   "pdump0",
-				Config: &pdumppb.Config{Filter: proto.String("tcp")},
+				Config: &pdumppb.Config{Filter: new("tcp")},
 			},
 		},
 		{
@@ -115,7 +115,7 @@ func Test_SetConfigRequest_Validate(t *testing.T) {
 			name: "ring_name is empty",
 			request: &pdumppb.SetConfigRequest{
 				Name:   "pdump0",
-				Config: &pdumppb.Config{RingName: proto.String("")},
+				Config: &pdumppb.Config{RingName: new("")},
 			},
 			message: "config: ring_name is required",
 		},
@@ -123,7 +123,7 @@ func Test_SetConfigRequest_Validate(t *testing.T) {
 			name: "ring_name contains NUL",
 			request: &pdumppb.SetConfigRequest{
 				Name:   "pdump0",
-				Config: &pdumppb.Config{RingName: proto.String("ring\x00a")},
+				Config: &pdumppb.Config{RingName: new("ring\x00a")},
 			},
 			message: "config: ring_name must not contain NUL",
 		},
@@ -131,7 +131,7 @@ func Test_SetConfigRequest_Validate(t *testing.T) {
 			name: "ring_name is overlong",
 			request: &pdumppb.SetConfigRequest{
 				Name:   "pdump0",
-				Config: &pdumppb.Config{RingName: proto.String(strings.Repeat("r", ringpb.MaxRingNameLen))},
+				Config: &pdumppb.Config{RingName: new(strings.Repeat("r", ringpb.MaxRingNameLen))},
 			},
 			message: fmt.Sprintf("config: ring_name must be shorter than %d bytes", ringpb.MaxRingNameLen),
 		},
@@ -139,21 +139,21 @@ func Test_SetConfigRequest_Validate(t *testing.T) {
 			name: "ring_name at the longest accepted length",
 			request: &pdumppb.SetConfigRequest{
 				Name:   "pdump0",
-				Config: &pdumppb.Config{RingName: proto.String(strings.Repeat("r", ringpb.MaxRingNameLen-1))},
+				Config: &pdumppb.Config{RingName: new(strings.Repeat("r", ringpb.MaxRingNameLen-1))},
 			},
 		},
 		{
 			name: "ring_name is valid",
 			request: &pdumppb.SetConfigRequest{
 				Name:   "pdump0",
-				Config: &pdumppb.Config{RingName: proto.String("ring0")},
+				Config: &pdumppb.Config{RingName: new("ring0")},
 			},
 		},
 		{
 			name: "filter contains NUL",
 			request: &pdumppb.SetConfigRequest{
 				Name:   "pdump0",
-				Config: &pdumppb.Config{Filter: proto.String("tcp\x00udp")},
+				Config: &pdumppb.Config{Filter: new("tcp\x00udp")},
 			},
 			message: "config: filter must not contain NUL",
 		},
@@ -179,7 +179,7 @@ func Test_SetConfigRequest_Validate(t *testing.T) {
 		{
 			name: "full uint64 rate is rejected",
 			request: &pdumppb.SetConfigRequest{
-				Name: "pdump0", Config: &pdumppb.Config{RatePps: proto.Uint64(^uint64(0))},
+				Name: "pdump0", Config: &pdumppb.Config{RatePps: new(^uint64(0))},
 			},
 			message: "config: rate_pps 18446744073709551615 must be in range 0..1000000",
 		},

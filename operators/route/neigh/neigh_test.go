@@ -121,11 +121,9 @@ func TestNeighMonitorRejectsUnusableSourceMAC(t *testing.T) {
 			require.NoError(t, err)
 
 			link := &netlink.Device{
-				LinkAttrs: netlink.LinkAttrs{
-					Index:        1,
-					Name:         "eth0",
-					HardwareAddr: tt.linkHardwareAddr,
-				},
+				Index:        1,
+				Name:         "eth0",
+				HardwareAddr: tt.linkHardwareAddr,
 			}
 			kernelNeigh := netlink.Neigh{
 				LinkIndex:    1,
@@ -188,11 +186,9 @@ func TestNeighMonitorClassifiesMissingVsMalformedDestinationMAC(t *testing.T) {
 			require.NoError(t, err)
 
 			link := &netlink.Device{
-				LinkAttrs: netlink.LinkAttrs{
-					Index:        1,
-					Name:         "eth0",
-					HardwareAddr: linkHardwareAddr,
-				},
+				Index:        1,
+				Name:         "eth0",
+				HardwareAddr: linkHardwareAddr,
 			}
 			kernelNeigh := netlink.Neigh{
 				LinkIndex:    1,

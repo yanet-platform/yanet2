@@ -14,7 +14,6 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
-	"google.golang.org/protobuf/proto"
 
 	"github.com/yanet-platform/yanet2/controlplane/configstore"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
@@ -348,10 +347,10 @@ func mergeSettings(settings Settings, config *pdumppb.Config) Settings {
 // back.
 func settingsProto(settings Settings) *pdumppb.Config {
 	return &pdumppb.Config{
-		Filter:   proto.String(settings.Filter),
-		Mode:     proto.Uint32(settings.Mode),
-		Snaplen:  proto.Uint32(settings.Snaplen),
-		RingName: proto.String(settings.RingName),
-		RatePps:  proto.Uint64(settings.RatePPS),
+		Filter:   new(settings.Filter),
+		Mode:     new(settings.Mode),
+		Snaplen:  new(settings.Snaplen),
+		RingName: new(settings.RingName),
+		RatePps:  new(settings.RatePPS),
 	}
 }

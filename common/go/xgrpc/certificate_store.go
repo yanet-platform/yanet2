@@ -187,8 +187,7 @@ func resolveAlias(node *yaml.Node) *yaml.Node {
 // of its fields name them.
 func yamlKeys(structType reflect.Type) map[string]bool {
 	keys := map[string]bool{}
-	for idx := range structType.NumField() {
-		field := structType.Field(idx)
+	for field := range structType.Fields() {
 		name, _, _ := strings.Cut(field.Tag.Get("yaml"), ",")
 		if !field.IsExported() || name == "-" {
 			continue

@@ -460,12 +460,12 @@ func pruneUnsetRequiredDefaults(
 	if !value.IsValid() || !value.CanInterface() {
 		return defaultKept
 	}
-	if explicit, ok := value.Interface().(envExplicitlySet); ok && !explicit.EnvIsSet() {
+	if explicit, ok := reflect.TypeAssert[envExplicitlySet](value); ok && !explicit.EnvIsSet() {
 		if !envNodeTouched(node, touched) {
 			return defaultOmitted
 		}
 	}
-	if wrapper, ok := value.Interface().(envValued); ok {
+	if wrapper, ok := reflect.TypeAssert[envValued](value); ok {
 		switch pruneUnsetRequiredDefaults(node, wrapper.EnvValue(), touched) {
 		case defaultOmitted, defaultRejected:
 			return defaultRejected
@@ -547,7 +547,7 @@ func envValueIsWrapped(value reflect.Value) bool {
 		return false
 	}
 
-	_, ok := value.Interface().(envValued)
+	_, ok := reflect.TypeAssert[envValued](value)
 	return ok
 }
 
@@ -563,7 +563,7 @@ func envUnwrapValue(value reflect.Value) reflect.Value {
 			return value
 		}
 
-		wrapper, ok := value.Interface().(envValued)
+		wrapper, ok := reflect.TypeAssert[envValued](value)
 		if !ok {
 			return value
 		}
@@ -679,8 +679,7 @@ func envWrites(t reflect.Type, envName string, env map[string]string, depth int)
 
 	switch t.Kind() {
 	case reflect.Struct:
-		for idx := range t.NumField() {
-			f := t.Field(idx)
+		for f := range t.Fields() {
 			if !f.IsExported() {
 				continue
 			}
@@ -799,7 +798,7 @@ func envUnwrap(t reflect.Type) reflect.Type {
 			t = t.Elem()
 		}
 
-		wrapper, ok := reflect.New(t).Interface().(envTyped)
+		wrapper, ok := reflect.TypeAssert[envTyped](reflect.New(t))
 		if !ok {
 			return t
 		}

@@ -241,7 +241,7 @@ func isTransparentToWalk(t reflect.Type) bool {
 	if t.Kind() == reflect.Interface || t == yamlNodeType {
 		return false
 	}
-	if wt, ok := reflect.Zero(t).Interface().(walkableType); ok {
+	if wt, ok := reflect.TypeAssert[walkableType](reflect.Zero(t)); ok {
 		return isTransparentToWalk(wt.WalkType())
 	}
 	if isOpaqueToWalk(t) {
@@ -285,7 +285,7 @@ func walkKnownKeys(node *yaml.Node, t reflect.Type, path *walkPath, collected *f
 	if t.Kind() == reflect.Interface || t == yamlNodeType {
 		return
 	}
-	if wt, ok := reflect.Zero(t).Interface().(walkableType); ok {
+	if wt, ok := reflect.TypeAssert[walkableType](reflect.Zero(t)); ok {
 		walkKnownKeys(node, wt.WalkType(), path, collected, state)
 		return
 	}
@@ -492,8 +492,8 @@ func isOpaqueToWalk(t reflect.Type) bool {
 	if t.Kind() != reflect.Struct {
 		return false
 	}
-	for idx := range t.NumField() {
-		if t.Field(idx).IsExported() {
+	for field := range t.Fields() {
+		if field.IsExported() {
 			return false
 		}
 	}
@@ -522,8 +522,7 @@ func collectFields(t reflect.Type) (fieldSet, reflect.Type) {
 
 	fields := fieldSet{}
 	var inlineElem reflect.Type
-	for idx := range t.NumField() {
-		f := t.Field(idx)
+	for f := range t.Fields() {
 		if !f.IsExported() {
 			continue
 		}

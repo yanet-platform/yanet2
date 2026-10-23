@@ -8,7 +8,6 @@ import (
 
 	"github.com/yanet-platform/yanet2/common/go/xcfg"
 	"github.com/yanet-platform/yanet2/controlplane/bundle"
-	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	decap "github.com/yanet-platform/yanet2/modules/decap/controlplane"
 	l3b "github.com/yanet-platform/yanet2/modules/l3b/controlplane"
 )
@@ -88,12 +87,10 @@ func Test_NewBundle_EmptyConfig_NoServicesNoAgents(t *testing.T) {
 func Test_NewBundle_ConfiguredModuleWithBadPath_FailsNamingModule(t *testing.T) {
 	cfg := bundle.ModulesConfig{
 		Decap: xcfg.NewOptional(decap.Config{
-			AttachConfig: ffi.AttachConfig{
-				InstanceID:         xcfg.NewRequired(uint32(0)),
-				MemoryPath:         xcfg.MustNonEmptyString("/nonexistent/path/for/bundle/cfg/test"),
-				MemoryRequirements: xcfg.MustNonZero(16 * datasize.MB),
-			},
-			Endpoint: xcfg.MustNonEmptyString("[::1]:0"),
+			InstanceID:         xcfg.NewRequired(uint32(0)),
+			MemoryPath:         xcfg.MustNonEmptyString("/nonexistent/path/for/bundle/cfg/test"),
+			MemoryRequirements: xcfg.MustNonZero(16 * datasize.MB),
+			Endpoint:           xcfg.MustNonEmptyString("[::1]:0"),
 		}),
 	}
 

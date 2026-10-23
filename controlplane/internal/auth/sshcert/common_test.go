@@ -57,10 +57,8 @@ func generateTestUserCert(
 		ValidPrincipals: []string{username},
 		ValidAfter:      uint64(validAfter.Unix()),
 		ValidBefore:     uint64(validBefore.Unix()),
-		Permissions: ssh.Permissions{
-			Extensions: map[string]string{
-				"permit-pty": "",
-			},
+		Extensions: map[string]string{
+			"permit-pty": "",
 		},
 	}
 
