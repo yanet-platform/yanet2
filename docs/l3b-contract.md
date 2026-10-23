@@ -314,6 +314,13 @@ cross-page pin or completed-history guarantee is selected by this surface.
 
 ## 7. Session Ownership, Capacity And Inspection
 
+F33 exposes each record's full network key as defined in section 10, not a
+storage-layout abbreviation: semantic family, transport, client/VIP and ports
+according to VS mode. Mandatory page VS-incarnation context disambiguates scope;
+it need not be duplicated per row. Decode from record plus page without
+`GetService` or current VS state. The stored real key/incarnation is separate
+from the network key and is not reconstructed by current real lookup.
+
 - For a permitted stateful insert or refresh, TCP timeout classification uses
   the following precedence. It does not admit a packet or authorize
   rescheduling: in particular SYN+RST does not reschedule a live invalid pin.
@@ -796,6 +803,25 @@ cross-process proof and the implementation remain downstream (#2725, #2726).
   only in source and destination port share the same live pin; the ports are
   not direct selection-hash inputs, and the exact hash encoding and label
   provenance are not frozen.
+- The canonical logical session key within the existing VS-incarnation scope is
+  `(family, transport, client_address, VIP_address, ports)`: family is IPv4 or
+  IPv6, transport is TCP or UDP, and ports is either `Portless` (both absent) or
+  `Specific(client_port, VIP_port)` (both present). Mode is exactly the VS mode;
+  specific port 0 remains 0, not absence. Addresses are exact decoded bytes of
+  the stated family, with no implicit IPv4/IPv6 folding. Valid packet-derived
+  endpoints share one inner-header family; validation of mismatched externally
+  constructed typed keys or records remains required. This adds no client-address
+  allowlist and does not relax mapped-IPv6 VIP rejection.
+  Ordinary TCP/UDP extraction uses client-to-VIP inner endpoints before
+  encapsulation. Ordinary lookup, copy-forward, suppression, OPS, ownership
+  query, reverse delivery, WLC deduplication and inspection share this identity.
+  Links to the same VS share its scope; deleting and recreating the VS does not.
+  The saved real key and real incarnation are a separate pin value, not the flow
+  key. TCP flags, real endpoints and tunnel outer addresses are not session
+  identity. Physical storage MAY omit VS-invariant components and derive them
+  from protected immutable context, and MAY include scope bytes. This defines
+  no new namespace, C struct layout, protobuf field numbers, hash encoding,
+  endianness or selected algorithm; the portless selection-hash rule above stays.
 - The real key is the decoded address family, address bytes and optional real
   port inside the VS incarnation. Absent, zero and other port values stay
   distinct; exact duplicate keys reject the whole candidate; same-address
@@ -916,6 +942,17 @@ cross-process proof and the implementation remain downstream (#2725, #2726).
   when ports exist; quoted non-initial fragments counted-drop; IPv6 atomic
   fragments are ordinary. These quote rules do not admit fragmented incoming
   error packets through the real-fragment drop floor.
+- For an admitted reverse ICMP quote in VIP-to-client direction, swap both
+  addresses and both ports to recover the canonical client-to-VIP session key;
+  take TCP/UDP transport from the quote, not outer ICMP. Retain quote VIP,
+  protocol, family, fragment and port-presence validation. Portless identity
+  does not waive required quote ports. A wrong quote cannot be rerouted through
+  another VS to fabricate a matching key. Echo and unsupported paths produce no
+  session effects. Packet rejection before a successful session commit leaves no
+  partial session mutation by this operation, subject to normal expiry and
+  independent concurrent operations. Loss after a successful commit does not roll
+  it back. This does not prohibit internal parsing or introduce router-wide drop
+  rules.
 - An ICMP type outside the supported Echo Request and error paths, if delivered
   to l3b, counted-drops with a distinct unsupported-type reason. It invokes no
   session operation, real selection, encapsulation or error-distribution path.
@@ -1295,7 +1332,7 @@ qualification.
 | F30 GetService and GetModuleConfig request and snapshot | Request R name; cursor D(empty) bytes 0..1024. Response: incarnation and token R nonempty bytes; encoding version R positive uint32; total and offset uint64 with offset <= total; chunk bytes; complete bool; next cursor bytes 0..1024. All response fields are RO. An empty chunk is valid only at completion; an incomplete success must advance the offset. | total <= the configured export cap (initial 4194304); chunk plus envelope <= the response cap (262144); checked size_t copies. No mixed snapshot, gap, overlap or overflow. An unknown encoding rejects client assembly, never a partial replacement. |
 | F31 list names request and response | No owner name; cursor D(empty); limit D(server default); 0 also means the default; a positive value at most the server maximum. Response names per F01 in ASCII lexical order; an empty page is permitted with an advancing cursor; complete if and only if the next cursor is empty. Names, membership revision, complete and next cursor obey section 6's per-RPC coherent-state rule. Membership identity, instance, epoch and position are RO and carried inside the opaque cursor, not a new revision field. | Uses the F32 bounds for lists; no caller position or revision setter; checked counts and bytes; membership invalidation only on create and delete. Bounded coherence failure is Unavailable with no usable partial page/cursor. |
 | F32 ListSessions request | R VS name; cursor D(empty) bytes 0..1024, empty starts; limit D(100 initially); 0 means the default; 1..1000 initially; above the maximum rejects, no clamp. | An opaque cursor, not the old uint64 cursor. The server resolves one policy snapshot per page; an unchanged limit is not required on continuation. |
-| F33 SessionRecord and response | The entire response is RO. Flow family, addresses and protocol (TCP or UDP) and the stored real key and incarnation 1..256 are required; optional ports preserve absence versus 0. expires_at and page_now are uint64 nanoseconds in the same identified dataplane clock domain, with no UTC claim; layer identity and front or back role are required; a zero numeric time is representable. Rows may be empty on an incomplete advancing page. | Complete if and only if the next cursor is empty; uint64 clocks and lossless typed identities; no public memory address. An unsafe read is `Unavailable`, an oversized record is `ResourceExhausted`, and a failure yields no usable partial page. |
+| F33 SessionRecord and response | The entire response is RO. Each row exposes the full network key: actual semantic IPv4/IPv6 family, TCP/UDP protocol, client and VIP addresses, and both ports absent for Portless or both present for Specific, including 0. Mandatory page VS-incarnation context disambiguates logical scope; no per-row scope duplication is required. The separately stored real key and incarnation 1..256 are required, not reconstructed from current real lookup. Decode with record plus page, without GetService or current VS state. expires_at and page_now are uint64 nanoseconds in the same identified dataplane clock domain, with no UTC claim; layer identity and front or back role are required; a zero numeric time is representable. Rows may be empty on an incomplete advancing page. | Complete if and only if the next cursor is empty; uint64 clocks and lossless typed identities; no public memory address. An unsafe read is `Unavailable`, an oversized record is `ResourceExhausted`, and a failure yields no usable partial page. |
 | F34 networks, ranges, transport presence | F02 and F03 bare hosts, F19-F21 raw sources and the section 14 native networks and ranges are deliberately different types; no blanket normalization. | The per-field matrix above applies to every field rather than copying old l3b network semantics. |
 | F35 l3b.policy configuration | Not an RPC mutation surface. A missing, null or `{}` section selects defaults; each optional setting missing or null selects its default; explicit zero is invalid for positive budgets. Settings and defaults are in section 2; unknown keys reject. | Checked integer arithmetic, restart-required changes, and the all-accepted-object readability check before a reduction. The CLI sends absence or 0 only on paging and initial-size request fields, not on policy configuration. |
 | F36 GetServiceStatus | Read-only observation groups; current VS identity or incarnation-scoped pending cleanup; accepted-token context distinct from runtime provenance. | Section 6's bounded live pages and configuration-bound continuation; reuse existing applicable identity/read-limit domains. Exact schema and cursor/error representation must precede implementation; no fabricated observation defaults or infinite completed history. |
@@ -1370,6 +1407,26 @@ bucket, and a generated name mapped to different bytes is rejected before
 allocation. Unchanged identity and size retain the name.
 
 ## 18. Conformance Obligations
+
+Canonical session-key vectors (all **NOT RUN**):
+
+- Ordinary client-to-VIP TCP/UDP and an admitted VIP-to-client quote produce the
+  same key after swapping both quoted addresses and ports, using quoted transport.
+- `Portless` has neither port; `Specific(0, 0)` preserves both zero ports and
+  differs from absence. Vary both packet ports under one portless VS: the key
+  and live pin remain equal.
+- TCP versus UDP, IPv4 versus IPv6 and VS deletion/recreation stay isolated;
+  two links to the same VS retain the same key and scope.
+- Decode the full network key from a SessionRecord plus mandatory page
+  VS-incarnation context without current VS lookup or per-row scope duplication.
+  The saved real key/incarnation remains distinct, even after real recreation.
+- Invalid quote VIP, protocol, family, fragment or missing required ports cannot
+  bypass existing admission, including in portless mode, or reroute through a
+  different VS to fabricate a key. Mismatched externally constructed typed keys
+  and records retain validation. Echo and unsupported paths have no session
+  effects. Rejection before successful session commit leaves no partial session
+  mutation by this operation, subject to normal expiry and independent concurrent
+  operations; loss after successful commit does not roll it back.
 
 Service, CLI and direct-client tests must instantiate every matrix row with
 omitted, null where expressible, explicit empty, explicit zero or false,
