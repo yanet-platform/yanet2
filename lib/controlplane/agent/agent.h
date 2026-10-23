@@ -56,31 +56,25 @@ struct agent {
 	pid_t pid;
 	uint64_t memory_limit;
 	uint64_t gen;
-	// Count of live generation references to this agent's modules.
+	// Count of live generation references to this agent's modules,
+	// devices and objects.
 	//
-	// Modules, devices and objects carry no creator reference: their
-	// reference counts, and these mirrors of them, count only registry
-	// references from live configuration generations, which can outlive
-	// the creating process. An item whose count reaches zero is
-	// dangling — known only to its owner — and its memory returns either
-	// through the owner's typed destroy or, if the owner is gone, with
-	// this agent's wholesale reclaim.
+	// Those entities carry no creator reference: their reference
+	// counts, and this mirror of them, count only registry references
+	// from live configuration generations, which can outlive the
+	// creating process. An item whose count reaches zero is dangling —
+	// known only to its owner — and its memory returns either through
+	// the owner's typed destroy or, if the owner is gone, with this
+	// agent's wholesale reclaim.
 	//
-	// All three counts move with relaxed atomics, so generation
-	// teardown may drop references without the config lock. Reference
-	// gains only ever happen under the lock; a racing drop unseen by a
-	// reclaim decision can only postpone that agent's reclamation.
-	uint64_t loaded_module_count;
-	uint64_t loaded_device_count;
-	// Count of this agent's shared objects that still hold a reference
-	// from a live generation.
-	//
-	// Follows the same accounting and the same relaxed-atomic access as
-	// the sibling counts above. Reclaiming a superseded agent waits for
-	// this and those counts to reach zero, because freeing the arena is
-	// one wholesale operation with no way to tear objects down
-	// individually first.
-	uint64_t loaded_object_count;
+	// The count moves with relaxed atomics, so generation teardown may
+	// drop references without the config lock. Reference gains only
+	// ever happen under the lock; a racing drop unseen by a reclaim
+	// decision can only postpone that agent's reclamation. Reclaiming a
+	// superseded agent waits for it to reach zero, because freeing the
+	// arena is one wholesale operation with no way to tear the loaded
+	// entities down individually first.
+	uint64_t loaded_entity_count;
 	struct agent *prev;
 	char name[AGENT_NAME_LEN];
 
@@ -98,14 +92,6 @@ agent_cleanup(struct agent *agent);
 
 struct cp_module;
 
-// Which of an agent's loaded counts a batch of registry-reference drops
-// applies to.
-enum agent_reference_kind {
-	AGENT_REFERENCE_MODULE,
-	AGENT_REFERENCE_DEVICE,
-	AGENT_REFERENCE_OBJECT,
-};
-
 // Drop the registry references named by the array, one subtraction of
 // the total per distinct agent.
 //
@@ -115,33 +101,30 @@ enum agent_reference_kind {
 // must therefore finish every dereference of agent-owned storage before
 // calling this.
 void
-agent_unload_references(
-	struct agent **owners, uint64_t count, enum agent_reference_kind kind
-);
+agent_unload_references(struct agent **owners, uint64_t count);
 
-// Return one destruction hold of the named kind, as taken by a destroy
-// gate that observed the item unreferenced.
+// Return one destruction hold, as taken by a destroy gate that
+// observed the item unreferenced.
 //
 // The hold keeps the agent reclaimable-safe while a caller runs a typed
 // destructor unlocked; capture the agent pointer before the destructor
 // frees the item it came from.
 void
-agent_destroy_released(struct agent *agent, enum agent_reference_kind kind);
+agent_destroy_released(struct agent *agent);
 
 // Release every item of a retiring registry and mirror the drops into
-// the owners' loaded counts, in bounded allocation-free batches.
+// the owners' loaded count, in bounded allocation-free batches.
 //
 // The fallback for a registry teardown whose one-shot owners snapshot
 // could not be allocated; item_owner maps one registry item to the
 // agent that owns it. Each batch finishes every dereference of
-// agent-owned storage before its loaded counts drop, so an owner whose
+// agent-owned storage before its loaded count drops, so an owner whose
 // count reaches zero has no reference left anywhere and nothing later
 // in the release can touch reclaimed storage.
 void
 agent_release_registry_items(
 	struct registry *registry,
-	struct agent *(*item_owner)(struct registry_item *item),
-	enum agent_reference_kind kind
+	struct agent *(*item_owner)(struct registry_item *item)
 );
 
 int
@@ -294,6 +277,7 @@ cp_device_config_set_output_pipeline(
 	uint64_t weight
 );
 
-// Allows to clean up previous agents which have no loaded modules or devices.
+// Allows to clean up previous agents which have no loaded modules,
+// devices or objects.
 void
 agent_free_unused_agents(struct agent *agent);

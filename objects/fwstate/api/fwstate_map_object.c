@@ -350,7 +350,7 @@ fwstate_map_v4_object_config_free(
 	struct agent *owner = ADDR_OF(&cp_object->agent);
 
 	fwstate_map_v4_object_destroy(cp_object);
-	agent_destroy_released(owner, AGENT_REFERENCE_OBJECT);
+	agent_destroy_released(owner);
 	return 0;
 }
 
@@ -580,7 +580,7 @@ fwstate_map_v6_object_config_free(
 	struct agent *owner = ADDR_OF(&cp_object->agent);
 
 	fwstate_map_v6_object_destroy(cp_object);
-	agent_destroy_released(owner, AGENT_REFERENCE_OBJECT);
+	agent_destroy_released(owner);
 	return 0;
 }
 

@@ -60,9 +60,7 @@ agent_owner_cmp(const void *left, const void *right) {
 }
 
 void
-agent_unload_references(
-	struct agent **owners, uint64_t count, enum agent_reference_kind kind
-) {
+agent_unload_references(struct agent **owners, uint64_t count) {
 	// Sort the scratch snapshot and apply one subtraction per run of
 	// equal pointers: teardown runs synchronously on the final release,
 	// so aggregating must stay near-linear in the registry size rather
@@ -89,29 +87,9 @@ agent_unload_references(
 		// publishes this teardown's prior accesses to the agent-owned
 		// items, which the sweep's zero check acquires before
 		// reclamation.
-		switch (kind) {
-		case AGENT_REFERENCE_MODULE:
-			__atomic_sub_fetch(
-				&owner->loaded_module_count,
-				total,
-				__ATOMIC_RELEASE
-			);
-			break;
-		case AGENT_REFERENCE_DEVICE:
-			__atomic_sub_fetch(
-				&owner->loaded_device_count,
-				total,
-				__ATOMIC_RELEASE
-			);
-			break;
-		case AGENT_REFERENCE_OBJECT:
-			__atomic_sub_fetch(
-				&owner->loaded_object_count,
-				total,
-				__ATOMIC_RELEASE
-			);
-			break;
-		}
+		__atomic_sub_fetch(
+			&owner->loaded_entity_count, total, __ATOMIC_RELEASE
+		);
 	}
 }
 
@@ -129,24 +107,16 @@ cp_config_reclaim_unused_agents_locked(struct cp_config *cp_config) {
 		struct agent *agent = ADDR_OF(&registry->agents[idx]);
 		while (agent != NULL && ADDR_OF(&agent->prev) != NULL) {
 			struct agent *prev_agent = ADDR_OF(&agent->prev);
-			// The counts move with atomics, so a reference dropped
+			// The count moves with atomics, so a reference dropped
 			// outside the lock may not be visible yet — a stale
 			// high read only postpones that agent's reclamation to
-			// a later sweep, never frees it early. The loads
-			// acquire the dropping paths' release halves: once all
-			// three observe zero, the reclamation below runs
-			// ordered after every teardown access that preceded the
-			// final drop.
+			// a later sweep, never frees it early. The load
+			// acquires the dropping paths' release halves: once it
+			// observes zero, the reclamation below runs ordered
+			// after every teardown access that preceded the final
+			// drop.
 			if (__atomic_load_n(
-				    &prev_agent->loaded_module_count,
-				    __ATOMIC_ACQUIRE
-			    ) == 0 &&
-			    __atomic_load_n(
-				    &prev_agent->loaded_device_count,
-				    __ATOMIC_ACQUIRE
-			    ) == 0 &&
-			    __atomic_load_n(
-				    &prev_agent->loaded_object_count,
+				    &prev_agent->loaded_entity_count,
 				    __ATOMIC_ACQUIRE
 			    ) == 0) {
 				SET_OFFSET_OF(
@@ -162,7 +132,7 @@ cp_config_reclaim_unused_agents_locked(struct cp_config *cp_config) {
 }
 
 void
-agent_destroy_released(struct agent *agent, enum agent_reference_kind kind) {
+agent_destroy_released(struct agent *agent) {
 	if (agent == NULL) {
 		return;
 	}
@@ -170,41 +140,24 @@ agent_destroy_released(struct agent *agent, enum agent_reference_kind kind) {
 	// The release half publishes the caller's typed destructor and
 	// everything before it, so the sweep that observes the resulting
 	// zero reclaims the arena ordered after those accesses.
-	switch (kind) {
-	case AGENT_REFERENCE_MODULE:
-		__atomic_sub_fetch(
-			&agent->loaded_module_count, 1, __ATOMIC_RELEASE
-		);
-		break;
-	case AGENT_REFERENCE_DEVICE:
-		__atomic_sub_fetch(
-			&agent->loaded_device_count, 1, __ATOMIC_RELEASE
-		);
-		break;
-	case AGENT_REFERENCE_OBJECT:
-		__atomic_sub_fetch(
-			&agent->loaded_object_count, 1, __ATOMIC_RELEASE
-		);
-		break;
-	}
+	__atomic_sub_fetch(&agent->loaded_entity_count, 1, __ATOMIC_RELEASE);
 }
 
 // Release every item of a retiring registry and mirror the drops into
-// the owners' loaded counts without allocating: the fallback for
+// the owners' loaded count without allocating: the fallback for
 // teardown whose one-shot owners snapshot could not be allocated.
 //
 // Batches of a fixed size keep the strict order the snapshot path keeps
 // for the whole registry at once: every dereference of agent-owned
 // storage — reading an item's owner, releasing its registry reference —
-// happens before that batch's loaded counts drop. An owner whose count
+// happens before that batch's loaded count drops. An owner whose count
 // reaches zero in a batch has no reference left in any batch, earlier
 // or later, so neither a later batch nor the storage release below can
 // dereference an arena a concurrent sweep reclaimed.
 void
 agent_release_registry_items(
 	struct registry *registry,
-	struct agent *(*item_owner)(struct registry_item *item),
-	enum agent_reference_kind kind
+	struct agent *(*item_owner)(struct registry_item *item)
 ) {
 #define AGENT_RELEASE_BATCH 64
 	struct agent *owners[AGENT_RELEASE_BATCH];
@@ -223,7 +176,7 @@ agent_release_registry_items(
 			);
 			owners[count++] = owner;
 		}
-		agent_unload_references(owners, count, kind);
+		agent_unload_references(owners, count);
 	}
 #undef AGENT_RELEASE_BATCH
 	registry_discard(registry);

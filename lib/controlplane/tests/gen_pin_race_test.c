@@ -326,7 +326,7 @@ run_delayed_release_free_test(struct yanet_shm *shm) {
 		"the retired generation must retain exactly the reader pin"
 	);
 	TEST_ASSERT_EQUAL(
-		agent_a->loaded_device_count,
+		agent_a->loaded_entity_count,
 		1,
 		"the retired generation must still reference agent A's device"
 	);

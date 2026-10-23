@@ -70,7 +70,7 @@ test_referenced_free_eagain_then_destroy(struct yanet_shm *shm) {
 		"cp_object_registry_upsert failed"
 	);
 	TEST_ASSERT_EQUAL(
-		agent->loaded_object_count,
+		agent->loaded_entity_count,
 		1,
 		"the generation reference must be mirrored into the live count"
 	);
@@ -91,9 +91,9 @@ test_referenced_free_eagain_then_destroy(struct yanet_shm *shm) {
 	// succeeds.
 	cp_object_registry_fini(&reg);
 	TEST_ASSERT_EQUAL(
-		agent->loaded_object_count,
+		agent->loaded_entity_count,
 		0,
-		"loaded_object_count must balance to 0 once the registry "
+		"loaded_entity_count must balance to 0 once the registry "
 		"retired"
 	);
 	free_err = NULL;
