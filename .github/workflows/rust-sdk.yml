@@ -1,0 +1,86 @@
+name: Rust SDK
+
+# Checks of the Rust module SDK workspace (lib/rust): formatting, lints,
+# the 1.88 test suite and the extractable packet crate.
+#
+# Each cargo cache family has exactly one job that writes it, from main
+# only: a cache written on a pull-request ref is readable only from that
+# same pull request.
+
+on:
+  push:
+    branches: ["main"]
+    paths:
+      - "lib/rust/**"
+      - ".github/workflows/rust-sdk.yml"
+  pull_request:
+    # A stacked pull request has a non-main base, so a main-only filter would skip it.
+    branches: ["**"]
+    paths:
+      - "lib/rust/**"
+      - ".github/workflows/rust-sdk.yml"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  fmt:
+    name: cargo fmt
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      # Pinned with the root workspace's formatter, see rust-check.yml.
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          toolchain: nightly-2026-08-28
+          components: rustfmt
+      - working-directory: lib/rust
+        run: cargo fmt -- --check
+
+  clippy:
+    name: cargo clippy
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@1.97.1
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2.9.2
+        with:
+          workspaces: lib/rust
+          shared-key: rust-sdk
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - working-directory: lib/rust
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+
+  test:
+    name: cargo test (1.88)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@1.88.0
+      - uses: Swatinem/rust-cache@v2.9.2
+        with:
+          workspaces: lib/rust
+          shared-key: rust-sdk-msrv
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - working-directory: lib/rust
+        run: cargo test --workspace --locked
+
+  packet:
+    name: yanet-packet standalone
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@1.88.0
+        with:
+          targets: x86_64-unknown-none
+      # Built outside the workspace, as its own repository would be: a path
+      # dependency or workspace inheritance fails this build.
+      - name: Test outside the workspace
+        run: |
+          cp -r lib/rust/yanet-packet "$RUNNER_TEMP/yanet-packet"
+          cd "$RUNNER_TEMP/yanet-packet"
+          cargo test
+          cargo check --target x86_64-unknown-none

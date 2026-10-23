@@ -1,0 +1,18 @@
+[package]
+name = "yanet-packet"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.88"
+publish = false
+
+[dependencies]
+netip = "0.3"
+zerocopy = { version = "0.8", default-features = false, features = ["derive"] }
+
+[lints.rust]
+unsafe_code = "forbid"
+unused_crate_dependencies = "deny"
+
+[lints.clippy]
+std_instead_of_core = "deny"
+alloc_instead_of_core = "deny"

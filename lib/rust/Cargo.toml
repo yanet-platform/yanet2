@@ -1,0 +1,21 @@
+# Rust module SDK workspace.
+#
+# A separate cargo workspace with its own lock file, not a member of the
+# repository root workspace (the CLIs).
+[workspace]
+resolver = "3"
+members = ["yanet-packet"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.88"
+publish = false
+
+[workspace.lints.rust]
+unsafe_op_in_unsafe_fn = "deny"
+unused_crate_dependencies = "deny"
+
+[workspace.lints.clippy]
+std_instead_of_core = "deny"
+undocumented_unsafe_blocks = "deny"
