@@ -29,7 +29,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"math/rand"
+	"math/rand/v2"
 	"net"
 	"net/netip"
 	"os"
@@ -203,9 +203,9 @@ var (
 // randomNet6 derives a nested IPv6 network: a subnet of a random
 // supernet with a shape-weighted prefix length.
 func randomNet6(r *rand.Rand, supernets []netip.Addr) xnetip.BiContiguous {
-	base := supernets[r.Intn(len(supernets))].As16()
+	base := supernets[r.IntN(len(supernets))].As16()
 	bits := 48
-	switch pick := r.Intn(100); {
+	switch pick := r.IntN(100); {
 	case pick < 45:
 		bits = 48
 	case pick < 75:
@@ -219,15 +219,15 @@ func randomNet6(r *rand.Rand, supernets []netip.Addr) xnetip.BiContiguous {
 	}
 	addr := base
 	for idx := 4; idx < (bits+7)/8; idx++ {
-		addr[idx] = byte(r.Intn(256))
+		addr[idx] = byte(r.IntN(256))
 	}
 	net := xerror.Unwrap(xnetip.ContiguousFromCIDR6(netip.AddrFrom16(addr), bits))
 	return xnetip.BiContiguousFromContiguous(net)
 }
 
 func randomNet4(r *rand.Rand) xnetip.Contiguous[xnetip.Network4] {
-	bits := 16 + r.Intn(17)
-	addr := [4]byte{10, byte(r.Intn(256)), byte(r.Intn(256)), byte(r.Intn(256))}
+	bits := 16 + r.IntN(17)
+	addr := [4]byte{10, byte(r.IntN(256)), byte(r.IntN(256)), byte(r.IntN(256))}
 	return xerror.Unwrap(xnetip.ContiguousFromCIDR4(netip.AddrFrom4(addr), bits))
 }
 
@@ -237,11 +237,11 @@ func randomNet4(r *rand.Rand) xnetip.Contiguous[xnetip.Network4] {
 // far more diverse than destinations, prefixes nest inside a small set
 // of supernets, and a catch-all deny terminates the set.
 func generateDatasetRules(count int) []cacl.ACLRule {
-	r := rand.New(rand.NewSource(42))
+	r := rand.New(rand.NewPCG(42, 0))
 
 	supernets := make([]netip.Addr, 64)
 	for idx := range supernets {
-		a := [16]byte{0x2a, 0x02, byte(r.Intn(256)), byte(r.Intn(256))}
+		a := [16]byte{0x2a, 0x02, byte(r.IntN(256)), byte(r.IntN(256))}
 		supernets[idx] = netip.AddrFrom16(a)
 	}
 
@@ -257,30 +257,30 @@ func generateDatasetRules(count int) []cacl.ACLRule {
 	popularPorts := []uint16{80, 443, 22, 53, 123, 8080, 3128, 25}
 
 	dstPorts := func() []filter.PortRange {
-		switch pick := r.Intn(100); {
+		switch pick := r.IntN(100); {
 		case pick < 55:
-			p := popularPorts[r.Intn(len(popularPorts))]
+			p := popularPorts[r.IntN(len(popularPorts))]
 			return []filter.PortRange{{From: p, To: p}}
 		case pick < 80:
-			p := uint16(1 + r.Intn(65000))
+			p := uint16(1 + r.IntN(65000))
 			return []filter.PortRange{{From: p, To: p}}
 		default:
-			from := uint16(1 + r.Intn(60000))
+			from := uint16(1 + r.IntN(60000))
 			return []filter.PortRange{
-				{From: from, To: from + uint16(r.Intn(1000))},
+				{From: from, To: from + uint16(r.IntN(1000))},
 			}
 		}
 	}
 
 	proto := func() filter.ProtoRange {
-		if r.Intn(100) < 70 {
+		if r.IntN(100) < 70 {
 			return datasetProtoTCP
 		}
 		return datasetProtoUDP
 	}
 
 	action := func() []cacl.ACLAction {
-		if r.Intn(100) < 70 {
+		if r.IntN(100) < 70 {
 			return []cacl.ACLAction{{Kind: uint32(cacl.ActionAllow)}}
 		}
 		return []cacl.ACLAction{
@@ -297,7 +297,7 @@ func generateDatasetRules(count int) []cacl.ACLRule {
 			ProtoRanges: []filter.ProtoRange{proto()},
 		}
 
-		switch pick := r.Intn(1000); {
+		switch pick := r.IntN(1000); {
 		case pick < 2:
 			rule.Src4s = []xnetip.Contiguous[xnetip.Network4]{randomNet4(r)}
 			rule.Dst4s = []xnetip.Contiguous[xnetip.Network4]{randomNet4(r)}
@@ -307,20 +307,20 @@ func generateDatasetRules(count int) []cacl.ACLRule {
 			rule.DstPortRanges = dstPorts()
 		case pick < 130:
 			rule.Src6s = []xnetip.BiContiguous{
-				srcPool[r.Intn(len(srcPool))],
+				srcPool[r.IntN(len(srcPool))],
 			}
 			rule.Dst6s = []xnetip.BiContiguous{
-				dstPool[r.Intn(len(dstPool))],
+				dstPool[r.IntN(len(dstPool))],
 			}
 		default:
-			for idx := 0; idx < 1+r.Intn(3); idx++ {
+			for idx := 0; idx < 1+r.IntN(3); idx++ {
 				rule.Src6s = append(
 					rule.Src6s,
-					srcPool[r.Intn(len(srcPool))],
+					srcPool[r.IntN(len(srcPool))],
 				)
 			}
 			rule.Dst6s = []xnetip.BiContiguous{
-				dstPool[r.Intn(len(dstPool))],
+				dstPool[r.IntN(len(dstPool))],
 			}
 			rule.DstPortRanges = dstPorts()
 		}

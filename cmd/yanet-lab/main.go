@@ -261,6 +261,13 @@ func newApplication() *application {
 	return &application{session: defaultSession}
 }
 
+// usageError is an error that may ask for the usage exit code instead of the
+// generic failure one.
+type usageError interface {
+	error
+	Usage() bool
+}
+
 // Run executes the lab command and returns its process exit code.
 func (m *application) Run() int {
 	root := m.command()
@@ -272,8 +279,7 @@ func (m *application) Run() int {
 		} else {
 			fmt.Fprintln(os.Stderr, "yanet-lab:", err)
 		}
-		var usageErr interface{ Usage() bool }
-		if errors.As(err, &usageErr) && usageErr.Usage() {
+		if usageErr, ok := errors.AsType[usageError](err); ok && usageErr.Usage() {
 			return 2
 		}
 		return 1

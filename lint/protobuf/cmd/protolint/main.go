@@ -139,13 +139,15 @@ func parseProtoFile(path string) (protoFile, error) {
 // parseGoPkg parses the go_package line and returns (importPath, alias, ok). ok
 // is false when the line is malformed.
 func parseGoPkg(line string) (importPath, alias string, ok bool) {
-	start := strings.Index(line, `"`)
-	end := strings.LastIndex(line, `"`)
-	if start == -1 || end == -1 || end <= start {
+	_, rest, ok := strings.Cut(line, `"`)
+	if !ok {
+		return "", "", false
+	}
+	raw, _, ok := strings.CutLast(rest, `"`)
+	if !ok {
 		return "", "", false
 	}
 
-	raw := line[start+1 : end]
 	parts := strings.SplitN(raw, ";", 2)
 	if len(parts) != 2 {
 		return parts[0], "", true

@@ -46,11 +46,11 @@ func parseStartTime(data []byte, readError error, verifiedGone bool) (uint64, er
 		}
 		return 0, fmt.Errorf("cannot inspect CP generation: %w", readError)
 	}
-	end := bytes.LastIndexByte(data, ')')
-	if end < 0 {
+	_, after, ok := bytes.CutLast(data, []byte(")"))
+	if !ok {
 		return 0, fmt.Errorf("invalid CP generation")
 	}
-	fields := strings.Fields(string(data[end+1:]))
+	fields := strings.Fields(string(after))
 	if len(fields) < 20 {
 		return 0, fmt.Errorf("incomplete CP generation")
 	}
