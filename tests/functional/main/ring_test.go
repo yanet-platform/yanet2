@@ -329,13 +329,17 @@ func testPdumpRingCapture(t *testing.T, fw *framework.TestFramework) {
 		}
 
 		exitPath := capturePath + ".exit"
-		// The trailing ": " keeps the launched job from being the last
-		// token on the line: the console wraps every command with its
-		// own trailing ";" to capture a status, and a bare "&" directly
-		// against that is a shell syntax error.
+		// The reader starts from a subshell, so it never joins the console
+		// shell's jobs.
+		//
+		// A job of the interactive console prints a completion notice into
+		// the output of whichever later command runs when it ends, which
+		// broke the exit status check below. The closing parenthesis also
+		// keeps "&" off the end of the line, where the ";" the console
+		// appends to every command would make it a syntax error.
 		bgCmd := fmt.Sprintf(
-			"rm -f %s; nohup sh -c '%s read --name %s --dump-format pcap --num %d -o %s; echo $? > %s' "+
-				">/dev/null 2>&1 & :",
+			"rm -f %s; ( nohup sh -c '%s read --name %s --dump-format pcap --num %d -o %s; echo $? > %s' "+
+				">/dev/null 2>&1 & )",
 			exitPath, framework.CLIPdump, configName, captureCount, capturePath, exitPath,
 		)
 		_, err := fw.ExecuteCommand(bgCmd)
