@@ -123,7 +123,7 @@ commit_test_add_module(
 	dp_module->commit_handler = commit_handler;
 
 	return registry_insert(
-		&gen->module_registry.registry, &cp_module->config_item
+		&gen->module_registry.registry, NULL, &cp_module->config_item
 	);
 }
 
@@ -158,7 +158,7 @@ commit_test_add_device(
 	dp_device->commit_handler = commit_handler;
 
 	return registry_insert(
-		&gen->device_registry.registry, &cp_device->config_item
+		&gen->device_registry.registry, NULL, &cp_device->config_item
 	);
 }
 
@@ -244,6 +244,7 @@ test_commit_runs_once_per_gen(void) {
 	TEST_ASSERT_SUCCESS(
 		registry_insert(
 			&next_gen.module_registry.registry,
+			NULL,
 			&cp_module.config_item
 		),
 		"carry module failed"
@@ -251,6 +252,7 @@ test_commit_runs_once_per_gen(void) {
 	TEST_ASSERT_SUCCESS(
 		registry_insert(
 			&next_gen.device_registry.registry,
+			NULL,
 			&cp_device.config_item
 		),
 		"carry device failed"
@@ -356,6 +358,7 @@ test_commit_runs_for_new_items_only(void) {
 	TEST_ASSERT_SUCCESS(
 		registry_insert(
 			&inserted_gen.module_registry.registry,
+			NULL,
 			&replaced_module.config_item
 		),
 		"carry module failed"
@@ -363,6 +366,7 @@ test_commit_runs_for_new_items_only(void) {
 	TEST_ASSERT_SUCCESS(
 		registry_insert(
 			&inserted_gen.device_registry.registry,
+			NULL,
 			&replaced_device.config_item
 		),
 		"carry device failed"
