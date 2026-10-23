@@ -115,7 +115,7 @@ route_mpls_module_config_free(struct cp_module *cp_module, yanet_error **err) {
 	struct agent *owner = ADDR_OF(&cp_module->agent);
 
 	route_mpls_module_config_destroy(cp_module);
-	agent_destroy_released(owner, AGENT_REFERENCE_MODULE);
+	agent_destroy_released(owner);
 	return 0;
 }
 

@@ -353,8 +353,9 @@ cp_module_link_device(
 		return -1;
 	}
 
-	strtcpy(devices[cp_module->device_count].name, name, CP_DEVICE_NAME_LEN
-	);
+	strtcpy(devices[cp_module->device_count].name,
+		name,
+		CP_DEVICE_NAME_LEN);
 	SET_OFFSET_OF(&cp_module->devices, devices);
 	*index = cp_module->device_count;
 	++cp_module->device_count;
@@ -443,7 +444,7 @@ cp_module_try_destroy(struct cp_module *cp_module, yanet_error **err) {
 			// reporting run unlocked, on storage only this count
 			// keeps alive.
 			__atomic_add_fetch(
-				&agent->loaded_module_count, 1, __ATOMIC_RELAXED
+				&agent->loaded_entity_count, 1, __ATOMIC_RELAXED
 			);
 		}
 	}
@@ -522,7 +523,7 @@ cp_module_registry_copy(
 		struct agent *agent = ADDR_OF(&module->agent);
 		if (agent != NULL) {
 			__atomic_add_fetch(
-				&agent->loaded_module_count, 1, __ATOMIC_RELAXED
+				&agent->loaded_entity_count, 1, __ATOMIC_RELAXED
 			);
 		}
 	}
@@ -545,9 +546,9 @@ cp_module_registry_fini(struct cp_module_registry *module_registry) {
 	//
 	// The order is strict: every dereference of agent-owned storage —
 	// snapshotting the owners, releasing the item references — happens
-	// while the loaded counts still carry these references, and the
-	// counts drop only afterwards, one subtraction per distinct agent. A
-	// count reaching zero makes the agent reclaimable by a concurrent
+	// while the loaded count still carries these references, and the
+	// count drops only afterwards, one subtraction per distinct agent.
+	// A count reaching zero makes the agent reclaimable by a concurrent
 	// sweep, which frees the agent and its arena wholesale, so the
 	// subtraction is the final touch of anything the agent owns.
 	//
@@ -569,9 +570,7 @@ cp_module_registry_fini(struct cp_module_registry *module_registry) {
 				module != NULL ? ADDR_OF(&module->agent) : NULL;
 		}
 		registry_fini(&module_registry->registry, NULL, NULL);
-		agent_unload_references(
-			owners, capacity, AGENT_REFERENCE_MODULE
-		);
+		agent_unload_references(owners, capacity);
 		free(owners);
 		return;
 	}
@@ -580,9 +579,7 @@ cp_module_registry_fini(struct cp_module_registry *module_registry) {
 	// drop the owners' references in allocation-free batches that keep
 	// the same dereferences-before-drops order per batch.
 	agent_release_registry_items(
-		&module_registry->registry,
-		module_item_owner,
-		AGENT_REFERENCE_MODULE
+		&module_registry->registry, module_item_owner
 	);
 }
 
@@ -700,7 +697,8 @@ cp_module_registry_upsert(
 		struct counter_registry *old_registry = NULL;
 		if (old_module != NULL) {
 			struct cp_module_counter_registry **old_runtime =
-				ADDR_OF(&old_module->runtime_counter_registries
+				ADDR_OF(
+					&old_module->runtime_counter_registries
 				);
 			for (uint64_t old_idx = 0;
 			     old_idx <
@@ -752,14 +750,14 @@ cp_module_registry_upsert(
 	struct agent *new_agent = ADDR_OF(&new_module->agent);
 	if (new_agent != NULL) {
 		__atomic_add_fetch(
-			&new_agent->loaded_module_count, 1, __ATOMIC_RELAXED
+			&new_agent->loaded_entity_count, 1, __ATOMIC_RELAXED
 		);
 	}
 	if (old_module != NULL) {
 		struct agent *old_agent = ADDR_OF(&old_module->agent);
 		if (old_agent != NULL) {
 			__atomic_sub_fetch(
-				&old_agent->loaded_module_count,
+				&old_agent->loaded_entity_count,
 				1,
 				__ATOMIC_RELEASE
 			);
@@ -801,7 +799,7 @@ cp_module_registry_delete(
 		struct agent *old_agent = ADDR_OF(&old_module->agent);
 		if (old_agent != NULL) {
 			__atomic_sub_fetch(
-				&old_agent->loaded_module_count,
+				&old_agent->loaded_entity_count,
 				1,
 				__ATOMIC_RELEASE
 			);

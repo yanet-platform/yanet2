@@ -79,7 +79,7 @@ cp_device_vxlan_free(struct cp_device *cp_device, yanet_error **err) {
 	struct agent *owner = ADDR_OF(&cp_device->agent);
 
 	cp_device_vxlan_destroy(cp_device);
-	agent_destroy_released(owner, AGENT_REFERENCE_DEVICE);
+	agent_destroy_released(owner);
 	return 0;
 }
 

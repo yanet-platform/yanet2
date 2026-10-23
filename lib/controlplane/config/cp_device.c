@@ -468,7 +468,7 @@ cp_device_registry_copy(
 		struct agent *agent = ADDR_OF(&device->agent);
 		if (agent != NULL) {
 			__atomic_add_fetch(
-				&agent->loaded_device_count, 1, __ATOMIC_RELAXED
+				&agent->loaded_entity_count, 1, __ATOMIC_RELAXED
 			);
 		}
 	}
@@ -506,7 +506,7 @@ cp_device_try_destroy(struct cp_device *self, yanet_error **err) {
 			// reporting run unlocked, on storage only this count
 			// keeps alive.
 			__atomic_add_fetch(
-				&agent->loaded_device_count, 1, __ATOMIC_RELAXED
+				&agent->loaded_entity_count, 1, __ATOMIC_RELAXED
 			);
 		}
 	}
@@ -545,7 +545,7 @@ void
 cp_device_registry_fini(struct cp_device_registry *device_registry) {
 	// Mirror each remaining item's dropped generation reference into its
 	// own agent, with every dereference of agent-owned storage done
-	// before the loaded counts can drop; see the module finaliser for
+	// before the loaded count can drop; see the module finaliser for
 	// the ordering argument.
 	if (ADDR_OF(&device_registry->registry.items) == NULL) {
 		return;
@@ -561,9 +561,7 @@ cp_device_registry_fini(struct cp_device_registry *device_registry) {
 				device != NULL ? ADDR_OF(&device->agent) : NULL;
 		}
 		registry_fini(&device_registry->registry, NULL, NULL);
-		agent_unload_references(
-			owners, capacity, AGENT_REFERENCE_DEVICE
-		);
+		agent_unload_references(owners, capacity);
 		free(owners);
 		return;
 	}
@@ -572,9 +570,7 @@ cp_device_registry_fini(struct cp_device_registry *device_registry) {
 	// drop the owners' references in allocation-free batches that keep
 	// the same dereferences-before-drops order per batch.
 	agent_release_registry_items(
-		&device_registry->registry,
-		device_item_owner,
-		AGENT_REFERENCE_DEVICE
+		&device_registry->registry, device_item_owner
 	);
 }
 
@@ -720,14 +716,14 @@ cp_device_registry_upsert(
 	struct agent *new_agent = ADDR_OF(&new_device->agent);
 	if (new_agent != NULL) {
 		__atomic_add_fetch(
-			&new_agent->loaded_device_count, 1, __ATOMIC_RELAXED
+			&new_agent->loaded_entity_count, 1, __ATOMIC_RELAXED
 		);
 	}
 	if (old_device != NULL) {
 		struct agent *old_agent = ADDR_OF(&old_device->agent);
 		if (old_agent != NULL) {
 			__atomic_sub_fetch(
-				&old_agent->loaded_device_count,
+				&old_agent->loaded_entity_count,
 				1,
 				__ATOMIC_RELEASE
 			);
@@ -762,7 +758,7 @@ cp_device_registry_delete(
 		struct agent *old_agent = ADDR_OF(&old_device->agent);
 		if (old_agent != NULL) {
 			__atomic_sub_fetch(
-				&old_agent->loaded_device_count,
+				&old_agent->loaded_entity_count,
 				1,
 				__ATOMIC_RELEASE
 			);

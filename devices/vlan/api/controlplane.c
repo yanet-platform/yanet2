@@ -65,7 +65,7 @@ cp_device_vlan_free(struct cp_device *cp_device, yanet_error **err) {
 	struct agent *owner = ADDR_OF(&cp_device->agent);
 
 	cp_device_vlan_destroy(cp_device);
-	agent_destroy_released(owner, AGENT_REFERENCE_DEVICE);
+	agent_destroy_released(owner);
 	return 0;
 }
 
@@ -159,7 +159,8 @@ cp_device_vlan_config_set_output_pipeline(
 }
 
 void
-cp_device_vlan_config_free(struct cp_device_vlan_config *cp_device_vlan_config
+cp_device_vlan_config_free(
+	struct cp_device_vlan_config *cp_device_vlan_config
 ) {
 	cp_device_config_fini(&cp_device_vlan_config->cp_device_config);
 	free(cp_device_vlan_config);

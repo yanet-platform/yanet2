@@ -290,8 +290,9 @@ unrdup_module_config_register_counters(
 		{"unrdup_clones_sent", 2, &config->clones_sent_counter_id},
 		{"unrdup_clone_failed", 1, &config->clone_failed_counter_id},
 		{"unrdup_encap_failed", 1, &config->encap_failed_counter_id},
-		{"unrdup_peer_no_source", 1, &config->peer_no_source_counter_id
-		},
+		{"unrdup_peer_no_source",
+		 1,
+		 &config->peer_no_source_counter_id},
 		{"unrdup_unserved", 1, &config->unserved_counter_id},
 		{"unrdup_misaddressed", 1, &config->misaddressed_counter_id},
 		{"unrdup_malformed", 1, &config->malformed_counter_id},
@@ -347,7 +348,7 @@ unrdup_module_config_free(struct cp_module *cp_module, yanet_error **err) {
 	struct agent *owner = ADDR_OF(&cp_module->agent);
 
 	unrdup_module_config_destroy(cp_module);
-	agent_destroy_released(owner, AGENT_REFERENCE_MODULE);
+	agent_destroy_released(owner);
 	return 0;
 }
 

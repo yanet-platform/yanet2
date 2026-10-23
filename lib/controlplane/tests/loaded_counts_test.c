@@ -80,7 +80,7 @@ run_loaded_counts_test(struct yanet_shm *shm) {
 	yanet_error *err = NULL;
 
 	// Agent A installs a device. The upsert refs A's device (0->1), so A's
-	// loaded_device_count rises to one. Before the fix the count was never
+	// loaded count rises to one. Before the fix the count was never
 	// written, so every superseded agent was considered reclaimable.
 	struct agent *agent_a = agent_attach(
 		shm, 0, "loaded-counts", LOADED_COUNTS_TEST_MEMORY_LIMIT, &err
@@ -95,14 +95,9 @@ run_loaded_counts_test(struct yanet_shm *shm) {
 		"failed to install dev0 under agent A"
 	);
 	TEST_ASSERT_EQUAL(
-		agent_a->loaded_module_count,
-		0,
-		"agent A module count should be zero"
-	);
-	TEST_ASSERT_EQUAL(
-		agent_a->loaded_device_count,
+		agent_a->loaded_entity_count,
 		1,
-		"agent A device count should reflect its live device"
+		"agent A loaded count should reflect its live device"
 	);
 
 	// Attaching a second agent under the same name supersedes agent A.
@@ -131,9 +126,9 @@ run_loaded_counts_test(struct yanet_shm *shm) {
 		"failed to replace dev0 under agent B"
 	);
 	TEST_ASSERT_EQUAL(
-		agent_b->loaded_device_count,
+		agent_b->loaded_entity_count,
 		1,
-		"agent B device count should reflect its live device"
+		"agent B loaded count should reflect its live device"
 	);
 	TEST_ASSERT_NULL(
 		ADDR_OF(&agent_b->prev),
@@ -185,7 +180,7 @@ run_delayed_generation_release_test(struct yanet_shm *shm) {
 		remaining_pins, 1, "reader should hold the final generation pin"
 	);
 	TEST_ASSERT_EQUAL(
-		agent_a->loaded_device_count,
+		agent_a->loaded_entity_count,
 		1,
 		"retired generation should keep agent A's device referenced"
 	);
@@ -245,9 +240,9 @@ run_reinsert_count_test(struct yanet_shm *shm) {
 		err ? yanet_error_message(err) : "?"
 	);
 	TEST_ASSERT_EQUAL(
-		agent->loaded_device_count,
+		agent->loaded_entity_count,
 		1,
-		"device count should be one after the first install"
+		"loaded count should be one after the first install"
 	);
 
 	// Re-insert the SAME pointer: the upsert's reference gain and its
@@ -259,7 +254,7 @@ run_reinsert_count_test(struct yanet_shm *shm) {
 		err ? yanet_error_message(err) : "?"
 	);
 	TEST_ASSERT_EQUAL(
-		agent->loaded_device_count,
+		agent->loaded_entity_count,
 		1,
 		"re-inserting the same device must not double-count"
 	);

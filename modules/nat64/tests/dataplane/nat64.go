@@ -60,8 +60,8 @@ cp_module_try_destroy(struct cp_module *cp_module, yanet_error **err) {
 // harness does not link; the stub agent is never reclaimed, so a no-op
 // body stands in.
 void
-agent_destroy_released(struct agent *agent, enum agent_reference_kind kind) {
-	(void)agent, (void)kind;
+agent_destroy_released(struct agent *agent) {
+	(void)agent;
 }
 
 // nat64dp.c registers an RTE log type at load time and logs through the

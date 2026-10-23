@@ -62,7 +62,8 @@ cp_device_trafgen_new(
 			// Construction failed before registration, so no
 			// other holder can observe this device: destroy it
 			// directly here.
-			cp_device_trafgen_destroy(&cp_device_trafgen->cp_device
+			cp_device_trafgen_destroy(
+				&cp_device_trafgen->cp_device
 			);
 			return NULL;
 		}
@@ -83,7 +84,7 @@ cp_device_trafgen_free(struct cp_device *cp_device, yanet_error **err) {
 	struct agent *owner = ADDR_OF(&cp_device->agent);
 
 	cp_device_trafgen_destroy(cp_device);
-	agent_destroy_released(owner, AGENT_REFERENCE_DEVICE);
+	agent_destroy_released(owner);
 	return 0;
 }
 

@@ -133,7 +133,7 @@ cp_object_registry_copy(
 		struct agent *agent = ADDR_OF(&object->agent);
 		if (agent != NULL) {
 			__atomic_add_fetch(
-				&agent->loaded_object_count, 1, __ATOMIC_RELAXED
+				&agent->loaded_entity_count, 1, __ATOMIC_RELAXED
 			);
 		}
 	}
@@ -171,7 +171,7 @@ cp_object_try_destroy(struct cp_object *self, yanet_error **err) {
 			// reporting run unlocked, on storage only this count
 			// keeps alive.
 			__atomic_add_fetch(
-				&agent->loaded_object_count, 1, __ATOMIC_RELAXED
+				&agent->loaded_entity_count, 1, __ATOMIC_RELAXED
 			);
 		}
 	}
@@ -210,7 +210,7 @@ void
 cp_object_registry_fini(struct cp_object_registry *registry) {
 	// Mirror each remaining item's dropped generation reference into its
 	// own agent, with every dereference of agent-owned storage done
-	// before the loaded counts can drop; see the module finaliser for
+	// before the loaded count can drop; see the module finaliser for
 	// the ordering argument.
 	if (ADDR_OF(&registry->registry.items) == NULL) {
 		return;
@@ -226,9 +226,7 @@ cp_object_registry_fini(struct cp_object_registry *registry) {
 				object != NULL ? ADDR_OF(&object->agent) : NULL;
 		}
 		registry_fini(&registry->registry, NULL, NULL);
-		agent_unload_references(
-			owners, capacity, AGENT_REFERENCE_OBJECT
-		);
+		agent_unload_references(owners, capacity);
 		free(owners);
 		return;
 	}
@@ -236,9 +234,7 @@ cp_object_registry_fini(struct cp_object_registry *registry) {
 	// Teardown could not snapshot the owners; release the items and
 	// drop the owners' references in allocation-free batches that keep
 	// the same dereferences-before-drops order per batch.
-	agent_release_registry_items(
-		&registry->registry, object_item_owner, AGENT_REFERENCE_OBJECT
-	);
+	agent_release_registry_items(&registry->registry, object_item_owner);
 }
 
 struct cp_object *
@@ -373,14 +369,14 @@ cp_object_registry_upsert(
 	struct agent *new_agent = ADDR_OF(&new_object->agent);
 	if (new_agent != NULL) {
 		__atomic_add_fetch(
-			&new_agent->loaded_object_count, 1, __ATOMIC_RELAXED
+			&new_agent->loaded_entity_count, 1, __ATOMIC_RELAXED
 		);
 	}
 	if (old_object != NULL) {
 		struct agent *old_agent = ADDR_OF(&old_object->agent);
 		if (old_agent != NULL) {
 			__atomic_sub_fetch(
-				&old_agent->loaded_object_count,
+				&old_agent->loaded_entity_count,
 				1,
 				__ATOMIC_RELEASE
 			);
@@ -421,7 +417,7 @@ cp_object_registry_delete(
 		struct agent *old_agent = ADDR_OF(&old_object->agent);
 		if (old_agent != NULL) {
 			__atomic_sub_fetch(
-				&old_agent->loaded_object_count,
+				&old_agent->loaded_entity_count,
 				1,
 				__ATOMIC_RELEASE
 			);

@@ -217,14 +217,16 @@ acl_module_config_init(
 	memset(&config->classifier_l2, 0, sizeof(config->classifier_l2));
 	memset(&config->classifier_core4, 0, sizeof(config->classifier_core4));
 	memset(&config->classifier_frag4, 0, sizeof(config->classifier_frag4));
-	memset(&config->classifier_ports4, 0, sizeof(config->classifier_ports4)
-	);
+	memset(&config->classifier_ports4,
+	       0,
+	       sizeof(config->classifier_ports4));
 	memset(&config->classifier_tcp4, 0, sizeof(config->classifier_tcp4));
 	memset(&config->classifier_icmp4, 0, sizeof(config->classifier_icmp4));
 	memset(&config->classifier_core6, 0, sizeof(config->classifier_core6));
 	memset(&config->classifier_frag6, 0, sizeof(config->classifier_frag6));
-	memset(&config->classifier_ports6, 0, sizeof(config->classifier_ports6)
-	);
+	memset(&config->classifier_ports6,
+	       0,
+	       sizeof(config->classifier_ports6));
 	memset(&config->classifier_tcp6, 0, sizeof(config->classifier_tcp6));
 	memset(&config->classifier_icmp6, 0, sizeof(config->classifier_icmp6));
 
@@ -328,7 +330,7 @@ acl_module_config_free(struct cp_module *cp_module, yanet_error **err) {
 	struct agent *owner = ADDR_OF(&cp_module->agent);
 
 	acl_module_config_destroy(cp_module);
-	agent_destroy_released(owner, AGENT_REFERENCE_MODULE);
+	agent_destroy_released(owner);
 	return 0;
 }
 

@@ -52,7 +52,7 @@ func fwstateModuleConfigWithStashSize(memCtx testutils.MemoryContext, stashSize 
 	// the whole structure, not just the memory context, and wires the object
 	// registry the harness's own link-name lookups resolve against.
 	//
-	// The dangling-free protocol and the loaded counts all read agent fields
+	// The dangling-free protocol and the loaded count all read agent fields
 	// an unzeroed structure would leave as stale bytes.
 	cStubAgent := C.CString("stub agent")
 	defer C.free(unsafe.Pointer(cStubAgent))

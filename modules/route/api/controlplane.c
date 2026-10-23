@@ -22,10 +22,12 @@ route_module_config_register_counters(
 	} counters[] = {
 		{"route_forwarded_v4", 2, &config->counters_v4.forwarded},
 		{"route_forwarded_v6", 2, &config->counters_v6.forwarded},
-		{"route_drop_no_route_v4", 2, &config->counters_v4.drop_no_route
-		},
-		{"route_drop_no_route_v6", 2, &config->counters_v6.drop_no_route
-		},
+		{"route_drop_no_route_v4",
+		 2,
+		 &config->counters_v4.drop_no_route},
+		{"route_drop_no_route_v6",
+		 2,
+		 &config->counters_v6.drop_no_route},
 		{"route_drop_ttl_expired_v4",
 		 2,
 		 &config->counters_v4.drop_ttl_expired},
@@ -140,7 +142,7 @@ route_module_config_free(struct cp_module *cp_module, yanet_error **err) {
 	struct agent *owner = ADDR_OF(&cp_module->agent);
 
 	route_module_config_destroy(cp_module);
-	agent_destroy_released(owner, AGENT_REFERENCE_MODULE);
+	agent_destroy_released(owner);
 	return 0;
 }
 

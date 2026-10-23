@@ -350,7 +350,7 @@ fwstate_map_v4_object_config_free(
 	struct agent *owner = ADDR_OF(&cp_object->agent);
 
 	fwstate_map_v4_object_destroy(cp_object);
-	agent_destroy_released(owner, AGENT_REFERENCE_OBJECT);
+	agent_destroy_released(owner);
 	return 0;
 }
 
@@ -466,7 +466,8 @@ fwstate_map_v4_object_free_stale_layers(struct fwstate_map_v4_object *self) {
 }
 
 uint32_t
-fwstate_map_v4_object_stale_layer_count(const struct fwstate_map_v4_object *self
+fwstate_map_v4_object_stale_layer_count(
+	const struct fwstate_map_v4_object *self
 ) {
 	return fwtable_stale_count(&self->table);
 }
@@ -580,7 +581,7 @@ fwstate_map_v6_object_config_free(
 	struct agent *owner = ADDR_OF(&cp_object->agent);
 
 	fwstate_map_v6_object_destroy(cp_object);
-	agent_destroy_released(owner, AGENT_REFERENCE_OBJECT);
+	agent_destroy_released(owner);
 	return 0;
 }
 
@@ -696,7 +697,8 @@ fwstate_map_v6_object_free_stale_layers(struct fwstate_map_v6_object *self) {
 }
 
 uint32_t
-fwstate_map_v6_object_stale_layer_count(const struct fwstate_map_v6_object *self
+fwstate_map_v6_object_stale_layer_count(
+	const struct fwstate_map_v6_object *self
 ) {
 	return fwtable_stale_count(&self->table);
 }
