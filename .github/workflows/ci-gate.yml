@@ -1,0 +1,72 @@
+name: CI Gate
+
+# One check that summarizes every other check on a pull request's head commit.
+#
+# The other workflows filter on paths, so a check that does not apply to a
+# change never appears, and requiring it would block the merge forever. This
+# job runs on every pull request, waits until every check that did start has
+# finished, and fails if any of them did not succeed. It is the one check a
+# ruleset can require. After rerunning a failed job, rerun this one too.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, edited]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  checks: read
+
+jobs:
+  ci-ok:
+    name: CI OK
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - name: Wait for every other check on the head commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.event.pull_request.head.sha }}
+          SELF: CI OK
+        run: |
+          set -euo pipefail
+
+          # A rerun or a re-triggered workflow leaves older runs under the same
+          # name, so only the newest run of each check counts. Chat notifications
+          # are left out: a messenger outage says nothing about the change.
+          list_checks() {
+            gh api --paginate --slurp "repos/$REPO/commits/$SHA/check-runs?per_page=100&filter=all" |
+              jq -r '[.[].check_runs[]] | group_by(.name) | map(max_by(.id)) | .[]
+                | select(.name != env.SELF and .name != "notify" and .name != "notify_issue")
+                | [.name, .status, (.conclusion // "")] | @tsv' |
+              LC_ALL=C sort
+          }
+
+          # Workflows started by the same event register their checks within
+          # seconds; two identical settled listings guard against a late one.
+          sleep 30
+          previous='<none>'
+          while :; do
+            # A failed API call is retried rather than failing the gate.
+            if ! current=$(list_checks); then
+              echo "::warning::listing the checks failed; retrying"
+              sleep 60
+              continue
+            fi
+            pending=$(awk -F'\t' '$2 != "completed"' <<<"$current")
+            if [[ -n $current && -z $pending && $current == "$previous" ]]; then
+              break
+            fi
+            previous=$current
+            sleep 30
+          done
+
+          printf '%s\n' "$current"
+          failed=$(awk -F'\t' '$3 != "success" && $3 != "skipped" && $3 != "neutral"' <<<"$current")
+          if [[ -n $failed ]]; then
+            echo "::error::checks that did not succeed:"
+            printf '%s\n' "$failed"
+            exit 1
+          fi
