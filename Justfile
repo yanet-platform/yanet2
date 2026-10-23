@@ -3,9 +3,9 @@
 set positional-arguments := true
 
 # Project configuration
-TAG := "yanet2-dev"
+export TAG := env_var_or_default("TAG", "yanet2-dev")
 ROOT_DIR := justfile_directory()
-DOCKER_CACHE_DIR := "/tmp"
+export DOCKER_CACHE_DIR := env_var_or_default("DOCKER_CACHE_DIR", "/tmp")
 
 
 # Show available commands
@@ -127,6 +127,7 @@ _docker_run IT *COMMAND:
     # Add working directory to safe list to avoid it.
 
     set -euo pipefail
+    mkdir -p "${DOCKER_CACHE_DIR}/gomodcache" "${DOCKER_CACHE_DIR}/gocache" "${DOCKER_CACHE_DIR}/ccache"
     docker_mounts=(-v "{{ ROOT_DIR }}:/yanet2")
     if [ -f "{{ ROOT_DIR }}/.git" ]; then
         # Linked worktrees reference Git metadata outside the source mount.
@@ -139,21 +140,38 @@ _docker_run IT *COMMAND:
         printf 'gitdir: %s\n' "$git_dir" > "$gitfile"
         docker_mounts+=(-v "${gitfile}:/yanet2/.git:ro")
     fi
+    # Cache entries written as root must stay manageable by the invoking host
+    # user.
+    #
+    # ccache applies this umask only when creating entries in its cache
+    # directory and restores the umask before running the compiler, so
+    # compile outputs keep default permissions.
     docker run {{ IT }} --rm \
         --platform linux/amd64 \
         --network=host \
         "${docker_mounts[@]}" \
-        -v {{ DOCKER_CACHE_DIR }}/gomodcache:/tmp/gomodcache:rw \
-        -v {{ DOCKER_CACHE_DIR }}/gocache:/tmp/gocache:rw \
+        -v "${DOCKER_CACHE_DIR}/gomodcache:/tmp/gomodcache:rw" \
+        -v "${DOCKER_CACHE_DIR}/gocache:/tmp/gocache:rw" \
+        -v "${DOCKER_CACHE_DIR}/ccache:/ccache:rw" \
         {{ TAG }} \
-        sh -c 'cd /yanet2 && git config --global --add safe.directory /yanet2 && {{ COMMAND }}'
+        sh -c 'cd /yanet2 && git config --global --add safe.directory /yanet2 && export CCACHE_UMASK=000 && {{ COMMAND }}'
 
 dsetup COVERAGE_MODE="false":
     @just _docker_run -it "just setup {{ COVERAGE_MODE }}"
 
+# Smoke-check that disposable containers share the host compiler cache through
+# the shared Docker runner; guards the cache bind mount before the suite runs
+dtest-ccache-probe:
+    @bash "{{ justfile_directory() }}/scripts/verify-docker-ccache.sh" "{{ justfile() }}"
+
+_ccache_setup *OPTIONS:
+    @test ! -f build/build.ninja || python3 scripts/check-meson-ccache.py build
+    @meson setup build {{ OPTIONS }}
+    @python3 scripts/check-meson-ccache.py build
+
 # Run tests in Docker
-dtest:
-    @just _docker_run -it "just setup false test"
+dtest: dtest-ccache-probe
+    @just _docker_run -it "python3 scripts/test-meson-ccache.py && just _ccache_setup -Dbuildtype=debug -Db_coverage=false && just test"
 
 # Run clang-tidy in Docker
 dtidy *FILES:
@@ -165,7 +183,7 @@ dbloody *FILES:
 
 # Build in Docker
 dbuild:
-    @just _docker_run -it "just build"
+    @just _docker_run -it "just _ccache_setup && meson compile -C build"
 
 # Build in Docker
 dbuild-debug:

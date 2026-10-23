@@ -27,6 +27,8 @@ make fuzz [MODULE=<name>]
 make ai/agents                                     # regenerate agent charters from .rulesync/subagents/
 ```
 
+[Shared Docker caches](docs/docker-cache.md).
+
 ## Layout
 
 - `dataplane/` — DPDK binary (`main.c`, `config.c`, `dpdk.c`, `worker.c`, `drivers/`).
