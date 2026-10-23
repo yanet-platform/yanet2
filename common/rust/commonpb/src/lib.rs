@@ -830,6 +830,8 @@ pub fn partition_prefixes(
 
 #[cfg(test)]
 mod test {
+    use core::assert_matches;
+
     use super::*;
 
     #[test]
@@ -1191,7 +1193,7 @@ mod test {
     fn contiguous_ip_network_v4_round_trip() {
         let net = Contiguous::<IpNetwork>::parse("10.0.0.0/24").unwrap();
         let msg = pb::IpPrefix::from(net);
-        assert!(matches!(&msg.prefix, Some(pb::ip_prefix::Prefix::V4(prefix)) if prefix.prefix_len == 24));
+        assert_matches!(&msg.prefix, Some(pb::ip_prefix::Prefix::V4(prefix)) if prefix.prefix_len == 24);
         let got = IpNetwork::try_from(&msg).unwrap();
         assert_eq!(*net, got);
     }
@@ -1200,7 +1202,7 @@ mod test {
     fn contiguous_ip_network_v6_round_trip() {
         let net = Contiguous::<IpNetwork>::parse("2001:db8::/32").unwrap();
         let msg = pb::IpPrefix::from(net);
-        assert!(matches!(&msg.prefix, Some(pb::ip_prefix::Prefix::V6(prefix)) if prefix.prefix_len == 32));
+        assert_matches!(&msg.prefix, Some(pb::ip_prefix::Prefix::V6(prefix)) if prefix.prefix_len == 32);
         let got = IpNetwork::try_from(&msg).unwrap();
         assert_eq!(*net, got);
     }
@@ -1292,7 +1294,7 @@ mod test {
     fn contiguous_ip_network_try_from_accepts_contiguous_mask() {
         let net = IpNetwork::parse("192.168.0.0/255.255.255.0").unwrap();
         let msg = pb::IpPrefix::try_from(net).unwrap();
-        assert!(matches!(&msg.prefix, Some(pb::ip_prefix::Prefix::V4(prefix)) if prefix.prefix_len == 24));
+        assert_matches!(&msg.prefix, Some(pb::ip_prefix::Prefix::V4(prefix)) if prefix.prefix_len == 24);
     }
 
     #[test]
