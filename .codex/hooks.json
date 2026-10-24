@@ -7,7 +7,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"$(git rev-parse --show-toplevel)/.agents/hooks/agent_hook.py\" guard-writes",
+            "command": "f=\"$(git rev-parse --show-toplevel)/.agents/hooks/agent_hook.py\"; [ ! -f \"$f\" ] || python3 \"$f\" guard-writes",
             "timeout": 10
           }
         ]
@@ -17,7 +17,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"$(git rev-parse --show-toplevel)/.agents/hooks/agent_hook.py\" guard-git",
+            "command": "f=\"$(git rev-parse --show-toplevel)/.agents/hooks/agent_hook.py\"; [ ! -f \"$f\" ] || python3 \"$f\" guard-git",
             "timeout": 10
           }
         ]
@@ -29,7 +29,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"$(git rev-parse --show-toplevel)/.agents/hooks/agent_hook.py\" format",
+            "command": "f=\"$(git rev-parse --show-toplevel)/.agents/hooks/agent_hook.py\"; [ ! -f \"$f\" ] || python3 \"$f\" format",
             "timeout": 60
           }
         ]

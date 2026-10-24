@@ -63,9 +63,9 @@ Language rules: `.agents/conventions/{go,rust,c,ts}.md` — read the one for the
 - After native changes run `meson compile -C build` before direct Go commands; `go test` needs the cache-line and sanitizer CGO flags that `make test`/`make test-asan` supply. Shm layout or `YANET_MODULE_ABI_VERSION` changes need rebuilt standalone CGO binaries and coordinated restarts; stop attached processes before removing stale `/dev/hugepages/yanet*`.
 - Skills live in `.agents/skills/<name>/` (symlinked from `.claude/skills/`). Hooks in `.agents/hooks/` (`.claude/settings.json`, `.codex/hooks.json`; Codex needs `/hooks` trust) format edited files and refuse writes on `main`, whole-tree `git add`, `--no-verify`, `git stash` and git commands that discard changes.
 - Test logic and invariants, not human-readable CLI output (ASCII-only paths and canonical MAC/hex are contracts).
-- Race tests need targeted `-run` repetition (~10–20 runs); one `-race` pass can miss it.
+- Race tests need targeted `-run` repetition (~10–20 runs).
 - `modules/*/tests/vm` exit code 127/3 means binaries are not staged, not a product defect.
-- Benchmarks exercise the claimed path; `for b.Loop()` suppresses inlining — cross-check allocations with `-gcflags=-m` on a real caller.
+- Benchmarks exercise the claimed path; `for b.Loop()` suppresses inlining — check allocations with `-gcflags=-m`.
 
 ## Worktrees
 

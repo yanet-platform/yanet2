@@ -8,6 +8,7 @@ paths:
 
 Loaded by path in Claude Code and on demand elsewhere, for the agent writing or reviewing TypeScript/React; this is the single source for these rules.
 
+- Stack: React 19, react-router v7, TypeScript 5, Vite with the React compiler, Gravity UI (`@gravity-ui/uikit` v7, `navigation` v3, `icons` v2), `@xyflow/react`, `@tanstack/react-virtual`, Sass. `npm run dev` serves :3000 and proxies `/api` to the gateway on :8081; `npm run build` writes `dist/`, which the gateway serves.
 - Prefer arrow function expressions.
 - **A co-located spec only runs because `web/vite.config.ts` lists those sibling roots** — vitest's default `include` is web-relative, so a `*.test.ts` added or moved there silently stops running in CI. Diff the collected test-file count on any such move.
 - **Browser-visible changes need a real Playwright run on the real path plus an inspected screenshot**; `--list` is not verification. A pixel-diff of two empty states reports a false 0 — assert row counts first.

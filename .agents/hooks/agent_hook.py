@@ -187,6 +187,27 @@ def short_flags(arg):
     return arg[1:] if len(arg) > 1 and arg.startswith("-") and not arg.startswith("--") else ""
 
 
+def commit_flags(args):
+    """Returns the short flags a commit command line sets, leaving out option values."""
+    found = set()
+    skip_value = False
+    for arg in args:
+        if skip_value:
+            skip_value = False
+            continue
+        if arg == "--":
+            break
+        if arg in COMMIT_LONG_VALUES:
+            skip_value = True
+        flags = short_flags(arg)
+        for index, flag in enumerate(flags):
+            found.add(flag)
+            if flag in COMMIT_SHORT_VALUES:
+                skip_value = index == len(flags) - 1
+                break
+    return found
+
+
 def skips_hooks(subcommand, args):
     skip_value = False
     for arg in args:
@@ -226,15 +247,19 @@ def stages_whole_tree(args):
             update = update or "u" in arg
         else:
             pathspecs.append(arg)
-    return whole or any(spec in WHOLE_TREE_PATHSPECS for spec in pathspecs) or (update and not pathspecs)
+    return any(spec in WHOLE_TREE_PATHSPECS for spec in pathspecs) or ((whole or update) and not pathspecs)
 
 
 def git_verdict(args, dirty):
     """Returns why a git command is refused, or None; the callback reports uncommitted changes."""
     subcommand, rest = args[0], args[1:]
     flags = "".join(short_flags(arg) for arg in rest)
-    if subcommand == "add" and stages_whole_tree(rest):
-        return "git add of the whole tree; stage the change by explicit paths (ship-pr)"
+    if (subcommand == "add" and stages_whole_tree(rest)) or (
+        subcommand == "commit" and ("--all" in rest or "a" in commit_flags(rest))
+    ):
+        return f"git {subcommand} of the whole tree; stage the change by explicit paths (ship-pr)"
+    if subcommand == "clean" and ("x" in flags or "X" in flags) and not ("--dry-run" in rest or "n" in flags):
+        return "git clean -x also deletes ignored trees (build/, node_modules/, .arch/, private modules); remove paths explicitly"
     if subcommand in ("commit", "merge") and skips_hooks(subcommand, rest):
         return "--no-verify skips the commit hooks (commitlint, stylelint, main protection); fix what they report"
     if subcommand == "stash" and not (rest and rest[0] in ("list", "show")):

@@ -23,7 +23,7 @@ The caller names: the brief and acceptance criteria · the candidate root (workt
 1. Reconstruct the contract: what the change claims, and which callers, tests, docs, packaging and registration surfaces it touches (`grep` the class, not the sample).
 2. Read the whole diff. For each hunk ask: what input or state makes this wrong, what did the old code guarantee that this drops, what else must change for this to be complete.
 3. Invoke `$better-comment` in Review mode for the complete candidate. It inspects changed comments and nearby comments whose claims the changed behaviour may invalidate. Require `Result: APPROVED`; propagate `CHANGES REQUESTED` findings and do not approve the outer review.
-4. Run the gate once from the candidate root: `make gate` (the CI checks for the touched layers; it prints only failures). A gate that produces or consumes `build/` needs the candidate's own real `build/`.
+4. Run the gate once from the candidate root, never the primary checkout on `main` (there `gate: ok (nothing to check)` is a false green): `make gate` (the CI checks for the touched layers; it prints only failures). A gate that produces or consumes `build/` needs the candidate's own real `build/`.
 5. Check tests: each new test must fail on the defect it pins. Reason it through, or mutate without touching the tree: `go test -overlay f.json` with `{"Replace":{"<abs src>":"<abs mutated copy>"}}` compiles the copy in place of the source for one run. A green suite is not evidence when the assertion is vacuous.
 6. Rank findings, most severe first.
 
