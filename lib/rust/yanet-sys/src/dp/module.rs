@@ -31,7 +31,43 @@ pub trait Module: Sized + 'static {
     /// Holds plain values and the handles only the prepare context makes,
     /// which carry the lifetime `'p`, so none outlives the context that made
     /// it. It needs no drop and must not be aligned beyond what the block
-    /// allocator guarantees; both fail the build.
+    /// allocator guarantees; `export_module!` fails the build otherwise:
+    ///
+    /// ```compile_fail,E0080
+    /// use yanet_sys::dp::{Batch, CommitCx, Cx, Module};
+    /// #[repr(align(128))]
+    /// struct Wide(u64);
+    /// struct Mine;
+    /// impl Module for Mine {
+    ///     const NAME: &'static str = "mine";
+    ///     type Config = u64;
+    ///     type Prepared<'p> = Wide;
+    ///     fn handle(_: &mut Cx<Self>, _: &mut Batch) {}
+    ///     fn prepare(_: &CommitCx<'_, Self>) -> Wide {
+    ///         Wide(0)
+    ///     }
+    /// }
+    /// yanet_sys::export_module!(name = mine, module = Mine);
+    /// ```
+    ///
+    /// A prepared value within the allocator's alignment is accepted:
+    ///
+    /// ```
+    /// use yanet_sys::dp::{Batch, CommitCx, Cx, Module};
+    /// #[repr(align(64))]
+    /// struct Line(u64);
+    /// struct Mine;
+    /// impl Module for Mine {
+    ///     const NAME: &'static str = "mine";
+    ///     type Config = u64;
+    ///     type Prepared<'p> = Line;
+    ///     fn handle(_: &mut Cx<Self>, _: &mut Batch) {}
+    ///     fn prepare(_: &CommitCx<'_, Self>) -> Line {
+    ///         Line(0)
+    ///     }
+    /// }
+    /// yanet_sys::export_module!(name = mine, module = Mine);
+    /// ```
     type Prepared<'p>;
 
     /// Handles one batch of packets.

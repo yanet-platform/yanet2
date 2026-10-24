@@ -10,7 +10,7 @@
 use alloc::{boxed::Box, vec, vec::Vec};
 use core::{
     marker::PhantomData,
-    mem::{offset_of, size_of},
+    mem::{align_of, offset_of, size_of},
     ptr::NonNull,
 };
 
@@ -44,21 +44,38 @@ pub fn alloc_config<B>(arena: &'static BlockArena) -> usize {
     arena.alloc(size_of::<ModuleConfig<B>>()).as_ptr().addr()
 }
 
+/// Panics unless the address starts a live arena block that holds a module
+/// configuration of the body type.
+fn assert_config_block<B>(arena: &BlockArena, config: usize) {
+    let block = arena.block_of(config);
+    assert!(
+        matches!(block, Some((start, size)) if start == config && size >= size_of::<ModuleConfig<B>>()),
+        "the address is not a configuration block of the arena"
+    );
+}
+
 /// Writes an 8-byte word at an offset of the body of a configuration, as
 /// the control plane would write a counter id, a device index
 /// or a plain value.
 ///
 /// # Panics
 ///
-/// When the word does not lie inside the body.
+/// When the address is not a configuration block of the arena, or the word
+/// is not an aligned word inside the body.
 pub fn write_body_word<B>(arena: &'static BlockArena, config: usize, offset: usize, value: u64) {
+    assert_config_block::<B>(arena, config);
     assert!(
-        offset + size_of::<u64>() <= size_of::<B>(),
+        offset
+            .checked_add(size_of::<u64>())
+            .is_some_and(|end| end <= size_of::<B>()),
         "the word is outside the body"
     );
     let addr = config + ModuleConfig::<B>::BODY_OFFSET + offset;
-    // SAFETY: the word lies in the configuration's block (checked above),
-    // which nothing references while a test lays it out.
+    assert!(addr.is_multiple_of(align_of::<u64>()), "the word is misaligned");
+    // SAFETY: the word is aligned and lies in the configuration's block
+    // (checked above); the write is raw. A handler that reads the
+    // configuration afterwards relies on the contract of the invocation,
+    // which forbids writes while it lives.
     unsafe { arena.root().ptr::<u64>(addr).write(value) }
 }
 
@@ -136,17 +153,19 @@ pub struct Outcome {
 type PacketStorage = (Box<bindings::rte_mbuf>, Box<[u64]>);
 
 /// Fake dataplane state for calling a module's handler.
-pub struct Invocation {
+pub struct Invocation<M> {
     arena: &'static BlockArena,
     ectx: Box<bindings::module_ectx>,
     worker: Box<bindings::dp_worker>,
     counters: Vec<NonNull<u64>>,
     targets: NonNull<bindings::module_device_target>,
+    devices: usize,
     /// Arena blocks of the fake context, freed with the invocation.
     blocks: Vec<usize>,
+    _module: PhantomData<fn() -> M>,
 }
 
-impl Drop for Invocation {
+impl<M> Drop for Invocation<M> {
     fn drop(&mut self) {
         for &block in &self.blocks {
             self.arena.free(block);
@@ -154,11 +173,44 @@ impl Drop for Invocation {
     }
 }
 
-impl Invocation {
-    /// Context for the configuration header at an address inside the arena,
-    /// with a number of counter slots, a number of present device targets and
-    /// a prepared buffer of the module's type.
-    pub fn new<M: Module>(arena: &'static BlockArena, config: usize, counters: usize, devices: usize) -> Self {
+impl<M: Module> Invocation<M> {
+    /// Context for the configuration at an address of the arena, with a
+    /// number of counter slots, no device target and a prepared buffer of
+    /// the module's type, which the commit pass fills here.
+    ///
+    /// # Safety
+    ///
+    /// The configuration is what the runtime trusts a published one to be
+    /// (attach: binding, frozen, reclaim): a laid-out body of the module's
+    /// configuration type whose counter ids are below the number of counter
+    /// slots and whose edges name live blocks of their targets; it and those
+    /// blocks stay live and are not written while the invocation lives.
+    ///
+    /// # Panics
+    ///
+    /// When the address is not a configuration block of the module's body
+    /// type in the arena.
+    pub unsafe fn new(arena: &'static BlockArena, config: usize, counters: usize) -> Self {
+        Self::build(arena, config, counters, 0)
+    }
+
+    /// As [`Invocation::new`], with a number of present device targets the
+    /// handler can resolve.
+    ///
+    /// # Safety
+    ///
+    /// As for [`Invocation::new`]; and the handler must not redirect a
+    /// packet: the targets have no device entries or routing state, so the C
+    /// routing would read null entries.
+    pub unsafe fn with_devices(arena: &'static BlockArena, config: usize, counters: usize, devices: usize) -> Self {
+        Self::build(arena, config, counters, devices)
+    }
+
+    fn build(arena: &'static BlockArena, config: usize, counters: usize, devices: usize) -> Self {
+        // The checks `export_module!` makes on the prepared value, which the
+        // buffer below relies on as the dataplane's does.
+        yanet_sys::dp::__private::check_prepared::<M>();
+        assert_config_block::<M::Config>(arena, config);
         // SAFETY: the bindgen structs are plain C data, valid when zeroed.
         let mut ectx: Box<bindings::module_ectx> = Box::new(unsafe { core::mem::zeroed() });
         // SAFETY: as above.
@@ -207,13 +259,22 @@ impl Invocation {
         if let Some(prepared) = prepared {
             ectx.abs_module_prepared = prepared.as_ptr().cast();
         }
+        // The commit pass fills the prepared buffer, as the dataplane does
+        // when it publishes a generation, before any handler call.
+        let raw = &raw mut *ectx;
+        // SAFETY: the context is this harness's and its configuration a
+        // published one of the module (constructor contract); the root
+        // resolves every block of it.
+        unsafe { rt::commit_with::<M>(root, raw, (*raw).abs_cp_module) };
         Self {
             arena,
             ectx,
             worker,
             counters: slots,
             targets,
+            devices,
             blocks,
+            _module: PhantomData,
         }
     }
 
@@ -225,9 +286,14 @@ impl Invocation {
 
     /// Makes a device target absent from the generation, as the
     /// dataplane marks one with the invalid device id.
+    ///
+    /// # Panics
+    ///
+    /// When the index is not one of a present device.
     pub fn set_device_absent(&mut self, idx: usize) {
+        assert!(idx < self.devices, "no device target at this index");
         // SAFETY: the target table is a live arena block with one entry per
-        // present device; callers pass an index below that count.
+        // present device, and the index is below that count (checked above).
         unsafe { (*self.targets.as_ptr().add(idx)).device_id = u16::MAX };
     }
 
@@ -237,16 +303,22 @@ impl Invocation {
         unsafe { self.counters[idx].as_ptr().read() }
     }
 
-    /// Runs the commit pass that fills the prepared buffer.
-    pub fn commit<M: Module>(&mut self) {
-        let raw = &raw mut *self.ectx;
-        // SAFETY: the context and configuration are the arena's; the root
-        // resolves every block of it.
-        unsafe { rt::commit_with::<M>(self.arena.root(), raw, (*raw).abs_cp_module) };
-    }
-
     /// Calls the handler on the packets.
-    pub fn run<M: Module>(&mut self, packets: Vec<TestPacket>) -> Outcome {
+    ///
+    /// # Panics
+    ///
+    /// When a packet's buffer does not fit the 16-bit mbuf geometry.
+    pub fn run(&mut self, packets: Vec<TestPacket>) -> Outcome {
+        for packet in &packets {
+            let len = size_of::<bindings::packet>()
+                + usize::from(packet.headroom)
+                + packet.frame.len()
+                + usize::from(packet.tailroom);
+            assert!(
+                len <= usize::from(u16::MAX),
+                "the packet buffer exceeds the mbuf geometry"
+            );
+        }
         // Every box is in its final place before raw pointers are taken, so
         // no move invalidates them under the borrow models.
         let mut storage: Vec<PacketStorage> = packets
@@ -311,8 +383,10 @@ impl Invocation {
                 (*front_raw).input_bytes += u64::from((*packet).data_len);
             }
         }
-        // SAFETY: the context, worker and front are this harness's; the root
-        // resolves every arena block the context names.
+        // SAFETY: the context, worker and front are this harness's, the
+        // configuration a published one of the module (constructor contract)
+        // and committed at construction; the root resolves every arena block
+        // the context names.
         unsafe { rt::invoke::<M>(self.arena.root(), &raw mut *self.worker, &raw mut *self.ectx, front_raw) };
         let mut fates = vec![None; packet_ptrs.len()];
         // SAFETY: the lists hold the harness's input packets only.
