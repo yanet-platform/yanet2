@@ -3,8 +3,9 @@ name: issue-create
 description: >-
   Draft, create, or triage one complete GitHub issue in yanet2 or
   yanet2-private, including evidence, deduplication, planning metadata and
-  dependencies; also create planner-owned epic containers. Use when asked to
-  formulate, file, create or triage an issue, and whenever planner creates one.
+  dependencies; also plan on GitHub: decompose a goal into an epic, rank next
+  work, list debt, ingest findings, start and close issues. Use when asked to
+  formulate, file, create or triage an issue, or to plan or prioritize work.
 ---
 
 # issue-create
@@ -19,9 +20,12 @@ repository files, run git writes, or exceed the caller's build/test posture.
 - `create` — an explicit create/file/open verb authorizes publication and all
   metadata writes without a second preview.
 - `triage <n>` — complete an existing issue without changing its lifecycle.
-- `container` — planner-only epic after its complete child tree is designed.
-- `decompose` belongs to planner. One leaf has one independently closable
-  outcome: usually one PR, or one bounded evidence-backed verdict/decision.
+- `container` — an epic, created only by the planning modes after its
+  complete child tree is designed.
+- Planning modes (`decompose`, `next`, `debt`, `ingest`, `start`, `close`,
+  `scan`) live in `references/planning.md`; load it for any of them. One leaf
+  has one independently closable outcome: usually one PR, or one bounded
+  evidence-backed verdict/decision.
 
 ## Admission
 
@@ -33,7 +37,7 @@ repository files, run git writes, or exceed the caller's build/test posture.
   exact symbols. An exact open issue wins. A closed match needs a regression or
   independent delta. An active matching PR requires user reconfirmation before
   a tracking issue is created.
-- Multiple independently deliverable outcomes route to `planner decompose`.
+- Multiple independently deliverable outcomes route to `decompose`.
   An uncreated prerequisite does too. Existing prerequisites use a native
   dependency plus `blocked`; all issues remain visible on their primary board.
 - The outcome must be deliverable through tracked repository changes. Findings
@@ -89,7 +93,7 @@ repository files, run git writes, or exceed the caller's build/test posture.
   do not raise it.
 - Effort covers the whole path to closure: Low/S known/local, Medium/M several
   linked surfaces or bounded investigation, High/L tightly coupled uncertainty.
-  Independently splittable High work routes to planner. A container's Issue Type
+  Independently splittable High work routes to `decompose`. A container's Issue Type
   follows its overall Bug, Feature, or Task outcome.
 - Primary board: private → #10; public packet-path/shared-memory/CGO safety →
   #7; CI/packaging/deployment/dev-test infra → #9; other public work → #8.
