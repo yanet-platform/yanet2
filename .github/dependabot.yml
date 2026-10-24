@@ -19,3 +19,14 @@ updates:
       # The toolchain versions are deliberate pins: the MSRV build, the
       # clippy release and the rustfmt nightly move only with the code.
       - dependency-name: dtolnay/rust-toolchain
+
+  # The CI image pins its Ubuntu base by codename and digest.
+  #
+  # A codename tag has no version to bump, so an update is only the newer
+  # digest of the same release; it starts the bump described in ci/README.md.
+  - package-ecosystem: docker
+    directory: /ci
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
