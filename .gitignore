@@ -140,19 +140,15 @@ deploy/packages/
 .pi/
 /_bmad-output
 /_bmad/config.user.toml
+.agents/hooks/__pycache__/
 
 # Worktree symlinks: a worktree may symlink these trees into the main
 # checkout, and a directory-only pattern does not match a symlink.
-.claude/agent-memory
 .claude/settings.*.json
 .claude/worktrees
 /.codex/*
 !/.codex/hooks.json
 /.agent-state
-
-# Generated from .rulesync/subagents/*.md by 'make ai/agents'.
-.claude/agents
-.opencode/
 
 # Ignore skills by default.
 #
