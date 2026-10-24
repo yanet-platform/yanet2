@@ -20,6 +20,7 @@ make test-functional                               # QEMU VM suite
 meson test -C build <name>; make dataplane && go test -count=1 ./modules/route/...
 make proto-lint | make lint-go | make lint/clang-syntax | make lint-commit
 make proto-go                                      # *.pb.go, needed before go lint locally
+make gate                                          # CI checks for the layers changed since origin/main; prints failures only
 make hooks                                         # install git hooks (once per clone)
 make fuzz [MODULE=<name>]
 ```
