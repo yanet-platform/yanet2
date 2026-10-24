@@ -10,11 +10,11 @@ description: >-
 
 # ship-pr
 
-Land a verified, reviewer-approved change on `main`. Invoking this skill is the publish authorization: "create a PR" authorizes commit + push + PR + CI + addressing findings; "create and merge" / "влей в main" also authorizes merge + cleanup. You drive git and `gh` yourself; coders never commit.
+Land a verified, review-approved change on `main`. Invoking this skill is the publish authorization: "create a PR" authorizes commit + push + PR + CI + addressing findings; "create and merge" / "влей в main" also authorizes merge + cleanup. You drive git and `gh` yourself; coders never commit.
 
 ## Non-negotiables
 
-- Ship only a change that passed its gates and has a reviewer `APPROVED` on the complete current candidate. Any file change after approval → rerun the affected gates and get a fresh review of what changed.
+- Ship only a change that passed its gates and has a `review-change` `APPROVED` on the complete current candidate. Any file change after approval → rerun the affected gates and get a fresh review of what changed.
 - Branch from **confirmed** `origin/main` (`git fetch origin main` first), never from the session's current HEAD. Publish from a dedicated worktree unless the user waived isolation for this task.
 - Stage exactly the publish manifest: `git add <paths>` per file, never `git add -A`; never stage pre-existing dirty files or local-only ignored config; `git diff --cached --stat` before committing.
 - Verify `git branch --show-current` before every commit, amend and push — a parallel actor can switch branches under you.
@@ -27,7 +27,7 @@ Land a verified, reviewer-approved change on `main`. Invoking this skill is the 
 
 ## Phases
 
-0. **Ready?** Gates green in the candidate tree; reviewer APPROVED exists for this exact content. If not, do that first.
+0. **Ready?** Gates green in the candidate tree; `review-change` APPROVED exists for this exact content. If not, do that first.
 1. **Branch.** `git fetch origin main`; worktree: `git worktree add .claude/worktrees/<name> -b <type>/<scope>-<what> origin/main`; primary (waiver only, clean, on main): `git switch -c <branch> origin/main`. Shell-safe names, no parentheses.
 2. **Transfer & stage.** Bring the approved files over (`git diff <base>..<coder-branch> -- <paths> | git apply --index`, or `git add` in place); confirm `git diff --cached --stat` equals the manifest.
 3. **Commit.** Conventional subject, high-level body, no footers; `make lint-commit` must pass (the `commit-msg` hook runs it).
