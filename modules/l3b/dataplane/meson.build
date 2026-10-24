@@ -20,8 +20,7 @@ lib_l3b_dp = static_library(
 lib_l3b_dp_dep = declare_dependency(
   link_with: lib_l3b_dp,
   link_args: [
-    '-Wl,--defsym',
-    '-Wl,new_module_l3b=new_module_l3b',
+    '-Wl,--require-defined=new_module_l3b',
     '-Wl,--export-dynamic-symbol=new_module_l3b',
   ],
 )

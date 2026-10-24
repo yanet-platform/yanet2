@@ -19,8 +19,7 @@ lib_nat64_dp = static_library(
 lib_nat64_dp_dep = declare_dependency(
   link_with: lib_nat64_dp,
   link_args: [
-    '-Wl,--defsym',
-    '-Wl,new_module_nat64=new_module_nat64',
+    '-Wl,--require-defined=new_module_nat64',
     '-Wl,--export-dynamic-symbol=new_module_nat64',
   ],
 )

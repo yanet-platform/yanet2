@@ -1,7 +1,9 @@
 lib_dependencies = [
   dependency('threads'),
   dependency('yaml-0.1'),
-  libdpdk.get_variable('dpdk_dep'),
+  # Headers only: the full DPDK dependency would copy every DPDK object
+  # into libdataplane.a; the executable below links it instead.
+  libdpdk_inc_dep,
 
   lib_common_dep,
   lib_logging_dep,
@@ -35,6 +37,7 @@ lib_dataplane_dep = declare_dependency(
 )
 
 dependencies = lib_dependencies + [
+  libdpdk_dep,
   lib_dataplane_dep,
   lib_module_dp_dep,
 

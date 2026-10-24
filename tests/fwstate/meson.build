@@ -55,7 +55,7 @@ sync_test = executable(
   'sync_test',
   ['sync_test.c'],
   c_args: yanet_test_c_args,
-  dependencies: [lib_common_dep, lib_logging_dep, lib_fwstate_dep, lib_packet_dp_dep],
+  dependencies: [libdpdk_dep, lib_common_dep, lib_logging_dep, lib_fwstate_dep, lib_packet_dp_dep],
 )
 test('sync',
   sync_test,

@@ -18,8 +18,7 @@ lib_blackhole_dp = static_library(
 lib_blackhole_dp_dep = declare_dependency(
   link_with: lib_blackhole_dp,
   link_args: [
-    '-Wl,--defsym',
-    '-Wl,new_module_blackhole=new_module_blackhole',
+    '-Wl,--require-defined=new_module_blackhole',
     '-Wl,--export-dynamic-symbol=new_module_blackhole',
   ],
 )

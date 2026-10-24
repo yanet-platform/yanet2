@@ -19,8 +19,7 @@ lib_forward_dp = static_library(
 lib_forward_dp_dep = declare_dependency(
   link_with: lib_forward_dp,
   link_args: [
-    '-Wl,--defsym',
-    '-Wl,new_module_forward=new_module_forward',
+    '-Wl,--require-defined=new_module_forward',
     '-Wl,--export-dynamic-symbol=new_module_forward',
   ],
 )

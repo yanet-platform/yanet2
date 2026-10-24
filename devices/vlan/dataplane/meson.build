@@ -18,8 +18,7 @@ lib_dev_vlan_dp = static_library(
 lib_dev_vlan_dp_dep = declare_dependency(
   link_with: lib_dev_vlan_dp,
   link_args: [
-    '-Wl,--defsym',
-    '-Wl,new_device_vlan=new_device_vlan',
+    '-Wl,--require-defined=new_device_vlan',
     '-Wl,--export-dynamic-symbol=new_device_vlan',
   ],
 )

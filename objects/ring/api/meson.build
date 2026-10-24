@@ -24,8 +24,7 @@ lib_ring_objects_dep = declare_dependency(
   link_with: [lib_ring_objects],
   include_directories: include_directories('.'),
   link_args: [
-    '-Wl,--defsym',
-    '-Wl,new_object_ring=new_object_ring',
+    '-Wl,--require-defined=new_object_ring',
     '-Wl,--export-dynamic-symbol=new_object_ring',
   ],
 )

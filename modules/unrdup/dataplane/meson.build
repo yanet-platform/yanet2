@@ -19,8 +19,7 @@ lib_unrdup_dp = static_library(
 lib_unrdup_dp_dep = declare_dependency(
     link_with: lib_unrdup_dp,
     link_args: [
-        '-Wl,--defsym',
-        '-Wl,new_module_unrdup=new_module_unrdup',
+        '-Wl,--require-defined=new_module_unrdup',
         '-Wl,--export-dynamic-symbol=new_module_unrdup',
     ],
 )

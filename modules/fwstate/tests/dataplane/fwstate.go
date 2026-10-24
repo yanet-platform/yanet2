@@ -15,6 +15,9 @@ package fwstate
 //#cgo LDFLAGS: -L../../../../build/lib/fwstate -lfwstate
 //#cgo LDFLAGS: -L../../../../build/lib/logging -llogging
 //#cgo LDFLAGS: -L../../../../build/lib/errors -lerrors
+//#cgo LDFLAGS: -L../../../../build/subprojects/dpdk/lib
+//#cgo LDFLAGS: -l:librte_mbuf.a -l:librte_mempool.a -l:librte_ring.a
+//#cgo LDFLAGS: -l:librte_eal.a -l:librte_kvargs.a -l:librte_telemetry.a -l:librte_log.a
 //#cgo LDFLAGS: -lnuma
 /*
 #include <harness.h>

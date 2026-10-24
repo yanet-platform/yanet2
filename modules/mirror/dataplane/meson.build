@@ -20,8 +20,7 @@ lib_mirror_dp = static_library(
 lib_mirror_dp_dep = declare_dependency(
   link_with: lib_mirror_dp,
   link_args: [
-    '-Wl,--defsym',
-    '-Wl,new_module_mirror=new_module_mirror',
+    '-Wl,--require-defined=new_module_mirror',
     '-Wl,--export-dynamic-symbol=new_module_mirror',
   ],
 )

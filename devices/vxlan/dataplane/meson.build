@@ -18,8 +18,7 @@ lib_dev_vxlan_dp = static_library(
 lib_dev_vxlan_dp_dep = declare_dependency(
   link_with: lib_dev_vxlan_dp,
   link_args: [
-    '-Wl,--defsym',
-    '-Wl,new_device_vxlan=new_device_vxlan',
+    '-Wl,--require-defined=new_device_vxlan',
     '-Wl,--export-dynamic-symbol=new_device_vxlan',
   ],
 )
