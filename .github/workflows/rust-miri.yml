@@ -90,13 +90,14 @@ jobs:
       # cargo miri setup fingerprints the rust-src file times, which a fresh
       # toolchain install resets, so it would rebuild a restored sysroot; on an
       # exact hit MIRI_SYSROOT points Miri at the restored one and setup is
-      # skipped.
+      # skipped. The key names the CI image: a sysroot saved outside the
+      # container lies under another home and would restore to no use.
       - name: Restore the Miri sysroot
         id: miri-sysroot
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/miri
-          key: miri-sysroot-${{ runner.os }}-${{ runner.arch }}-${{ env.MIRI_TOOLCHAIN }}
+          key: miri-sysroot-ci-image-${{ runner.os }}-${{ runner.arch }}-${{ env.MIRI_TOOLCHAIN }}
       - name: Use the restored Miri sysroot
         if: steps.miri-sysroot.outputs.cache-hit == 'true'
         run: echo "MIRI_SYSROOT=$HOME/.cache/miri" >> "$GITHUB_ENV"
