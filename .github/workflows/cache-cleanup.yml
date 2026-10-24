@@ -1,7 +1,7 @@
 name: Actions cache cleanup
 
-# Prunes superseded native and main Go snapshots, plus closed-PR caches,
-# before the repo's 10 GB cap forces eviction of active entries.
+# Prunes superseded build snapshots and closed-PR caches before the repo's
+# 10 GB cap forces eviction of active entries.
 #
 # Hourly cleanup keeps immutable build snapshots from accumulating
 # throughout the working day.
@@ -103,11 +103,13 @@ jobs:
           # removes every cache on a closed pull request's merge ref. Rule C
           # removes older main Go snapshots within each compatible native
           # environment, retaining the newest creation time and breaking
-          # ties by cache ID.
+          # ties by cache ID. Rule D does the same for the package build
+          # caches of each Ubuntu release, architecture and toolchain.
 
           def ccache_re: "^ccache-.+-[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z$";
           def pr_ref_re: "^refs/pull/(?<n>[0-9]+)/merge$";
           def go_build_re: "^go-build-v2-.+-[0-9a-f]{64}-[0-9a-f]{40}-[0-9]+$";
+          def deb_build_re: "^deb-build-v1-.+-[0-9a-f]{64}-[0-9]+$";
 
           def with_family:
             . + (.key | capture("^(?<family>ccache-.+)-(?<ts>[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z)$"));
@@ -137,8 +139,17 @@ jobs:
             | flatten
             | map(.rule = "C");
 
+          def rule_d($caches):
+            ($caches
+             | map(select(.ref == "refs/heads/main" and (.key | test(deb_build_re))))
+             | map(. + {family: (.key | sub("-[0-9a-f]{64}-[0-9]+$"; ""))}))
+            | group_by([.ref, .family])
+            | map(sort_by([.created_at, .id]) | .[0:-1])
+            | flatten
+            | map(.rule = "D");
+
           . as $caches
-          | (rule_a($caches) + rule_b($caches; $pr_states) + rule_c($caches))
+          | (rule_a($caches) + rule_b($caches; $pr_states) + rule_c($caches) + rule_d($caches))
           | group_by(.id)
           | map(. as $g | $g[0] + {rules: ($g | map(.rule) | unique | join(","))})
           | map({id, ref, key, size_in_bytes, rules})

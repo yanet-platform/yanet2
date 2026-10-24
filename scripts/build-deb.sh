@@ -78,7 +78,15 @@ echo "Current PATH during build: $PATH" > build-path.log
 #
 # Downstream steps consume only binaries. Skipping the source package also
 # avoids compressing the whole working tree and its bundled dependencies.
-echo y | debuild --preserve-envvar=PATH --preserve-envvar=DEB_BUILD_PROFILES -us -uc -b 2>&1 | tee build.log
+debuild_args=(-us -uc -b)
+# A build that reuses restored compiler caches skips the pre-build clean.
+#
+# The clean target empties the Rust target directory, so it would discard the
+# restored dependencies before the build starts.
+if [[ ${DEB_KEEP_BUILD_CACHES:-} == 1 ]]; then
+    debuild_args+=(-nc)
+fi
+echo y | debuild --preserve-envvar=PATH --preserve-envvar=DEB_BUILD_PROFILES "${debuild_args[@]}" 2>&1 | tee build.log
 
 mkdir -p outdeb
 dcmd cp ../*.changes outdeb/

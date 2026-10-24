@@ -3,10 +3,11 @@ name: Build DEB Packages
 # Packages are built nightly, on demand, by release candidates and releases,
 # and on pull requests that change the packaging itself.
 #
-# Every build starts from a clean tree with no compiler caches: builds are
-# rare, and a released package must not depend on what earlier runs left
-# behind. Pull requests check the release flags and arm64 in the build
-# workflow instead.
+# Releases, release candidates and the nightly build start from a clean
+# tree with no compiler caches, so a released package never depends on what
+# earlier runs left behind; a pull request reuses the Rust dependencies the
+# last nightly build compiled. Most pull requests build no packages and
+# check the release flags and arm64 in the build workflow instead.
 on:
   workflow_call:
     inputs:
@@ -143,12 +144,70 @@ jobs:
           go-version-file: ${{ github.event_name == 'workflow_dispatch' && 'release-tools/ci/go-version' || 'ci/go-version' }}
           cache: false
 
+      # A pull request reuses the Rust dependencies the nightly build compiled.
+      #
+      # Without them a packaging change rebuilds every crate it depends on.
+      # The save drops the workspace's own outputs, which every build compiles
+      # again, and keeps no Go build cache, which does not track its C
+      # dependencies on the runner's packages. The restore comes before the
+      # protobuf plugins, whose install would leave read-only module
+      # directories in its way.
+      - name: Name the build caches
+        id: build-cache
+        env:
+          UBUNTU: ${{ matrix.unbtver }}
+          ARCH: ${{ matrix.arch }}
+        run: |
+          set -euo pipefail
+          rust=$(rustc -V | cut -d' ' -f2)
+          echo "prefix=deb-build-v1-$UBUNTU-$ARCH-rust$rust-$(go env GOVERSION)-" >>"$GITHUB_OUTPUT"
+
+      - name: Restore build caches
+        if: github.event_name == 'pull_request'
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            target
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            ~/go/pkg/mod
+          key: ${{ steps.build-cache.outputs.prefix }}${{ hashFiles('Cargo.lock', 'go.sum') }}
+          restore-keys: |
+            ${{ steps.build-cache.outputs.prefix }}${{ hashFiles('Cargo.lock', 'go.sum') }}-
+            ${{ steps.build-cache.outputs.prefix }}
+
       - name: Install Go Protobuf Plugins
         uses: ./.github/actions/protoc-plugins
 
       - name: Build packages
         timeout-minutes: 75
-        run: sudo -E env "PATH=$PATH" "PKG_VERSION=$PKG_VERSION" ./scripts/build-deb.sh
+        env:
+          DEB_KEEP_BUILD_CACHES: ${{ github.event_name == 'pull_request' && '1' || '' }}
+        run: sudo -E env "PATH=$PATH" "PKG_VERSION=$PKG_VERSION" "DEB_KEEP_BUILD_CACHES=$DEB_KEEP_BUILD_CACHES" ./scripts/build-deb.sh
+
+      # Only a build of main itself saves the caches, and only for Ubuntu 24.04.
+      #
+      # Pull requests build 24.04 alone, and a release calling this workflow
+      # passes its source commit, which leaves the caches alone.
+      - name: Drop the workspace outputs from the build caches
+        if: success() && github.ref == 'refs/heads/main' && inputs.source_sha == '' && matrix.unbtver == '24.04' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
+        run: |
+          sudo rm -rf target/release/yanet-* target/release/libyanet_* target/release/deps/yanet_* \
+            target/release/deps/libyanet_* target/release/build/yanet-* \
+            target/release/.fingerprint/yanet-*
+
+      - name: Save build caches
+        if: success() && github.ref == 'refs/heads/main' && inputs.source_sha == '' && matrix.unbtver == '24.04' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            target
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            ~/go/pkg/mod
+          key: ${{ steps.build-cache.outputs.prefix }}${{ hashFiles('Cargo.lock', 'go.sum') }}-${{ github.run_id }}
 
       - name: Verify package artifacts
         run: sudo ./scripts/verify-deb-artifacts.sh outdeb '${{ matrix.arch }}'
