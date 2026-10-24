@@ -4,7 +4,7 @@
 # versions the workflows pin. Jobs reference it by digest, so a rebuild
 # changes nothing until a follow-up change pins the new digest.
 
-FROM ubuntu:24.04@sha256:68ee22004a9109b44973313b02ff7b1de250f1de0f5ecb628d73f579aaff33ac AS ci
+FROM ubuntu:noble@sha256:68ee22004a9109b44973313b02ff7b1de250f1de0f5ecb628d73f579aaff33ac AS ci
 
 LABEL org.opencontainers.image.source=https://github.com/yanet-platform/yanet2
 

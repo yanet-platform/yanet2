@@ -8,7 +8,7 @@ A job that names the image by digest runs exactly the toolchain behind that dige
 
 ## Bumping the image
 
-1. Change `ci/Dockerfile`: a package, a Go version (together with `ci/go-version`), a Rust version, or the base image digest. The pull request builds and probes both architectures and lists the tool versions in its job summary, but publishes nothing.
+1. Change `ci/Dockerfile`: a package, a Go version (together with `ci/go-version`), a Rust version, or the base image digest. Dependabot proposes new digests of the base image weekly; the Ubuntu release changes only by hand. The pull request builds and probes both architectures and lists the tool versions in its job summary, but publishes nothing.
 2. After the change reaches `main`, the workflow publishes the image and prints the new reference in its job summary. A manual run on `main` rebuilds it with the current versions of the listed packages and their dependencies; the rest of the base image changes only with its digest. Runs on other branches build and probe but never publish.
 3. Open a follow-up pull request that pins the new reference wherever the image is pinned (below). Its CI is the first run on the new toolchain, and the compiler caches of each job stay warm only for what the bump left unchanged.
 
@@ -19,6 +19,8 @@ The native jobs of `.github/workflows/build.yml` and `.github/workflows/go-race.
 ```
 grep -rl 'yanet2-ci@sha256:' .github/workflows | xargs sed -i 's/<old digest>/<new digest>/'
 ```
+
+The `CI image pins agree` check fails a pull request, and a push to `main`, whose workflows reference the image by anything but one digest.
 
 The Go build cache of these jobs is keyed on the image's package set, so a rebuild that leaves the packages unchanged keeps it.
 
