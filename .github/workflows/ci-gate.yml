@@ -1,12 +1,13 @@
 name: CI Gate
 
-# One check that summarizes every other check on a pull request's head commit.
+# One check that summarizes every other check of a pull request.
 #
 # The other workflows filter on paths, so a check that does not apply to a
 # change never appears, and requiring it would block the merge forever. This
-# job runs on every pull request, waits until every check that did start has
-# finished, and fails if any of them did not succeed. It is the one check a
-# ruleset can require. After rerunning a failed job, rerun this one too.
+# job runs on every pull request, waits until every workflow the pull request
+# started has finished, and fails if any of them or any of their checks did not
+# succeed. It is the one check a ruleset can require. After rerunning a failed
+# job, rerun this one too.
 on:
   pull_request:
     types: [opened, synchronize, reopened, edited]
@@ -16,6 +17,7 @@ concurrency:
   cancel-in-progress: true
 
 permissions:
+  actions: read
   checks: read
 
 jobs:
@@ -24,49 +26,106 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 180
     steps:
-      - name: Wait for every other check on the head commit
+      - name: Wait for every other workflow of the pull request
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
           SHA: ${{ github.event.pull_request.head.sha }}
-          SELF: CI OK
         run: |
           set -euo pipefail
 
-          # A rerun or a re-triggered workflow leaves older runs under the same
-          # name, so only the newest run of each check counts. Chat notifications
-          # are left out: a messenger outage says nothing about the change.
+          # This workflow's own file as the runs API names it.
+          #
+          # The gate leaves its own run out by that path; a path it cannot
+          # tell would leave it waiting for itself until the timeout.
+          self=${GITHUB_WORKFLOW_REF#"$REPO/"}
+          self=${self%@*}
+          if [[ $self != .github/workflows/* ]]; then
+            echo "::error::cannot tell this workflow's file from $GITHUB_WORKFLOW_REF"
+            exit 1
+          fi
+
+          # The newest pull request run of every other workflow on the head commit.
+          #
+          # A workflow dispatched by hand on the same commit is not one of the
+          # change's checks, and a re-triggered workflow leaves older runs
+          # behind. Chat notifications are left out: a messenger outage says
+          # nothing about the change.
+          list_runs() {
+            gh api --paginate --slurp "repos/$REPO/actions/runs?head_sha=$SHA&event=pull_request&per_page=100" |
+              jq -r --arg self "$self" '[.[].workflow_runs[]] | group_by(.workflow_id) | map(max_by(.id)) | .[]
+                | select(.path != $self and .path != ".github/workflows/notifications.yml")
+                | [.check_suite_id, .run_attempt, .status, (.conclusion // ""), .name] | @tsv' |
+              LC_ALL=C sort
+          }
+
+          # The newest check of every job in the given check suites.
+          #
+          # A rerun adds a new check under the same run.
           list_checks() {
             gh api --paginate --slurp "repos/$REPO/commits/$SHA/check-runs?per_page=100&filter=all" |
-              jq -r '[.[].check_runs[]] | group_by(.name) | map(max_by(.id)) | .[]
-                | select(.name != env.SELF and .name != "notify" and .name != "notify_issue")
+              jq -r --argjson suites "$1" '[.[].check_runs[] | select(.check_suite.id | IN($suites[]))]
+                | group_by([.check_suite.id, .name]) | map(max_by(.id)) | .[]
                 | [.name, .status, (.conclusion // "")] | @tsv' |
               LC_ALL=C sort
           }
 
-          # Workflows started by the same event register their checks within
-          # seconds; two identical settled listings guard against a late one.
+          # Wait until every run has finished, a second listing agrees and no
+          # check is still running.
+          #
+          # A run stays in progress until its last job, including one that
+          # waits on others, has finished. Workflows started by the same event
+          # usually register within seconds; the second listing guards against
+          # a late one. A check still running under finished runs means a job
+          # was just rerun, and the wait starts over unless a run has already
+          # failed. A failed API call is retried after a minute rather than
+          # failing the gate.
           sleep 30
           previous='<none>'
           while :; do
-            # A failed API call is retried rather than failing the gate.
-            if ! current=$(list_checks); then
-              echo "::warning::listing the checks failed; retrying"
+            if ! current=$(list_runs); then
+              echo "::warning::listing the workflow runs failed; retrying"
               sleep 60
               continue
             fi
-            pending=$(awk -F'\t' '$2 != "completed"' <<<"$current")
+            pending=$(awk -F'\t' '$3 != "completed"' <<<"$current")
             if [[ -n $current && -z $pending && $current == "$previous" ]]; then
-              break
+              suites=$(cut -f1 <<<"$current" | jq -cs .)
+              if ! checks=$(list_checks "$suites"); then
+                echo "::warning::listing the checks failed; retrying"
+                sleep 60
+                continue
+              fi
+              unfinished=$(awk -F'\t' '$2 != "completed"' <<<"$checks")
+              failed_runs=$(awk -F'\t' '$4 != "success" && $4 != "skipped" && $4 != "neutral"' <<<"$current")
+              if [[ -z $unfinished || -n $failed_runs ]]; then
+                break
+              fi
+              previous='<none>'
+            else
+              previous=$current
             fi
-            previous=$current
-            sleep 30
+            if [[ -n $current && -z $pending ]]; then
+              sleep 10
+            else
+              sleep 30
+            fi
           done
 
-          printf '%s\n' "$current"
-          failed=$(awk -F'\t' '$3 != "success" && $3 != "skipped" && $3 != "neutral"' <<<"$current")
+          echo "Workflow runs (name, attempt, conclusion):"
+          awk -F'\t' '{print $5 "\t" $2 "\t" $4}' <<<"$current"
+          echo "Checks (name, conclusion):"
+          awk -F'\t' '{print $1 "\t" $3}' <<<"$checks"
+
+          # A run that failed before starting any job has no check to show it.
+          #
+          # A broken workflow file ends that way.
+          failed=$(
+            awk -F'\t' '$4 != "success" && $4 != "skipped" && $4 != "neutral" {print $5 "\t" $4}' <<<"$current"
+            awk -F'\t' '$3 != "success" && $3 != "skipped" && $3 != "neutral" {print $1 "\t" $3}' <<<"$checks"
+          )
           if [[ -n $failed ]]; then
-            echo "::error::checks that did not succeed:"
+            echo "::error::workflows or checks that did not succeed:"
             printf '%s\n' "$failed"
             exit 1
           fi
