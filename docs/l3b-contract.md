@@ -398,6 +398,24 @@ cells preserves it. This supplies no permanent history or counter continuity
 guarantee. Exact wire/text schemas, cursor codecs and protected-lifetime proof
 remain downstream; the semantic states and outcomes above are selected.
 
+The full counter-series identity is `(instance, parent-object incarnation,
+semantic key, accumulation identity)`. The semantic key is the counter tag for a
+VS and `(family, VIP)` for Echo within a ModuleConfig incarnation, never its name.
+An accumulation identity MUST NOT repeat in that domain throughout the entire
+parent incarnation, including after a binding disappears and reappears. Issuance
+metadata must survive takeover; a config-token change, empty registry or lost
+metadata never authorizes reset. A local value may repeat only in a provably
+distinct parent domain visible to the consumer. No automatic object-incarnation
+rollover, permanent per-value ledger or infinite issuance guarantee is required.
+
+Accumulation-identity exhaustion or uncertainty makes ONLY the corresponding
+observation group `UNAVAILABLE`; it MUST NOT block forwarding or ordinary
+configuration operations and is not mutation `ResourceExhausted`. Missing whole
+authority still returns RPC `Unavailable` under the existing rule. Restored
+identical cells and accumulated state with proven issuance metadata may retain
+the prior identity under the iff rule above; otherwise require a fresh safely
+issued identity before reporting that group as available.
+
 ## 7. Session Ownership, Capacity And Inspection
 
 F33 exposes each record's full network key as defined in section 10, not a
@@ -936,6 +954,21 @@ are not exit/re-entry.
   continuity initializes unknown/unhealthy and zero, never fabricated success.
   Stale old-marker deltas cannot enable a real. Administrative drain and health
   expiry remain independent constraints.
+- The external checker owns effective `retries`, an integer in `0..4294967295`
+  (uint32), not a new writable VS field. Each authoritative snapshot carries it
+  with checker-configuration identity and immutable revision, streak, eligibility,
+  continuity marker and observation sequence; deltas belong to that revision.
+  There is no implicit l3b default. A missing or invalid threshold is untrusted
+  and fails health closed, never interpreted as zero. Zero disables on the first
+  completed failure. The streak representation MUST distinguish `retries` from
+  `retries+1` without overflow even at UINT32_MAX; no physical width is selected.
+  A threshold change requires a coherent snapshot with proven history: preserve
+  that history, lowering may disable immediately, and raising MUST NOT revive an
+  already unhealthy real without a new success. Without trustworthy history use
+  the existing unknown/unhealthy initialization. Old-revision deltas MUST NOT
+  apply to the new revision. Checker revision is runtime provenance, not a VS
+  mutation token. Administrative disable and health expiry remain stronger than
+  checker eligibility; no external checker's default is inferred here.
 - RR always supplies selection weight 1 for an eligible real, even when its
   stored configured weight is 0, and RR shares the WRR ring builder. WRR, WLC
   and PURR exclude a configured weight of 0 from new selection without
@@ -1409,6 +1442,22 @@ The following vectors are required and **NOT RUN**:
   repeated Hop-by-Hop headers counted-drop even within the eight-header bound;
   reject an invalid quote before ownership query. This selects neither a general
   ordering for all extensions nor an ICMP Parameter Problem response promise.
+  Live incoming packets on these l3b paths validate every Hop-by-Hop and
+  Destination Options TLV completely within its validated extension-header
+  boundary before transport-dependent processing, ACL evaluation, session/selector
+  effects, Echo response or fanout. Pad1 occupies one byte; PadN requires a present
+  length and all declared bytes within the header. Padding is the only explicitly
+  supported option; all others are unknown for this admission policy. Unknown
+  action bits `00` skip the structurally valid option; `01`, `10` and `11`
+  counted-drop without generating Parameter Problem. This is a bounded admission
+  policy, NOT full RFC option/error-signalling compliance, including for `10/11`.
+  Quotes are separate: structurally validate available traversed headers/TLVs and
+  mandatory fields under the existing bounds, HBH-position, fragment and port
+  rules, but do NOT execute quoted option action bits or require the missing
+  original packet body. Malformed or incomplete quotes before required fields
+  counted-drop before ownership query, with no ICMP reply. This neither expands
+  routing scope nor changes ordinary TCP/UDP checksum policy or the eight-header
+  limit and ninth-header drop.
 
 ### l3b-To-Real Outer Headers
 
@@ -1829,6 +1878,15 @@ The following additional bounded vectors are **NOT RUN**:
 - Health initialization unknown/streak0, success reset, retries/retries+1 failures,
   reconnect with same marker/continuous sequence, restored complete history,
   missing history/changed marker and stale old-marker success follow section10.
+- Health threshold vectors (**NOT RUN**): with proven healthy history and
+  retries=0 the first failure disables; with retries=4294967295, streak4294967295
+  does not disable, the next failure does without wrap. Lower3->1 at streak2
+  disables immediately; raise1->3 while already unhealthy at streak2 stays
+  unhealthy until a new success resets0. Missing/invalid thresholds fail closed,
+  not default0; threshold change without history stays unknown/unhealthy.
+  A delayed success/failure from checker config revision A cannot affect B even
+  with the same continuity marker. Proven reconnect/restoration keeps history;
+  threshold revision does not mutate the VS token or override admin/expiry.
 - Exhaust all seven identity domains: stale plus exhausted is Aborted; validated
   no-op needs no new identity; a valid changing operation is ResourceExhausted.
   Lost metadata is Unavailable/no reset; parent reuse requires fencing. Kind-scoped
@@ -1844,6 +1902,16 @@ The following additional bounded vectors are **NOT RUN**:
   unproven continuity require new ID or unavailable. O17 includes an idle lagging
   worker in PENDING, then ALL_ADOPTED, and explicit UNAVAILABLE/NOT_APPLICABLE,
   without synchronous publication or inferred WLC/drain/latest-VS readiness.
+- Counter-series vectors (**NOT RUN**): current binding A->B->A in one parent
+  incarnation must not reissue A's prior accumulation ID for reset/new cells;
+  proven restored same cells/state and issuance metadata retain it only under
+  the iff rule. Token change, empty registry and takeover cannot reset issuance.
+  Exhausted/uncertain issuance makes only the affected group UNAVAILABLE while
+  forwarding and ordinary config operations continue; other groups remain usable
+  unless whole authority is missing (RPC Unavailable). Shared current cells read
+  once; independent retained cells stay excluded. Same-name recreated ModuleConfig
+  has a distinct visible incarnation: identical Echo family/VIP and local ID must
+  still produce a different full series identity, with no automatic rollover.
 - YAML native /0, host default, IPv6 global prefix and bi-contiguous mask round
   trips retain family and normalized bits; canonical zero-run ties and hex tails,
   rejected extra slash/empty segment/zones/brackets/space/hostnames/ambiguous IPv4
@@ -1883,6 +1951,19 @@ Packet disposition vectors (all **NOT RUN**):
 - Incoming and quoted IPv6 chains within eight extensions: base-first HBH is
   permitted subject to other checks; later or repeated HBH counted-drops, with
   quote rejection before ownership query.
+- IPv6 TLV vectors (**NOT RUN**): Pad1 in the last header byte, valid PadN with
+  zero/nonzero length, missing PadN length and overrun length; unknown nonpadding
+  options with each action `00/01/10/11`, both HBH and Destination Options.
+  Live valid00 continues only after complete TLV validation; malformed00 and
+  valid01/10/11 counted-drop before transport/ACL/session/selector/Echo/fanout,
+  without Parameter Problem (including multicast destinations). Put malformed
+  padding after a valid00 option to prove validation is not stopped early.
+  In a quote, structurally valid versions of all four actions permit required-field
+  extraction subject to other admission checks, without executing action bits;
+  truncated TLV/header before required ports drops before ownership, no ICMP reply.
+  A complete traversed chain and required ports with absent original payload does
+  not fail merely for that absent body. Repeat at eight/nine extensions and retain
+  HBH-position/fragment rules; ordinary TCP/UDP checksum behavior is unchanged.
 - Enabled eligible no-MSS TCP: 20-byte header plus payload grows to 24; 24-byte
   header with EOL padding grows to 28; 56 grows to 60; padded 60 stays unchanged.
   Insert MSS536 at offset20, preserving old options/payload at offsets +4 and
