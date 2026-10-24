@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Guidance for AI coding agents. Keep it under 8 KB: facts about the code, build and environment that every agent needs — process rules belong in a skill, a hook or a lint.
+Guidance for AI coding agents. Keep it under 8 KB: shared code, build and environment facts, plus repository-wide code review rules. Other process rules belong in skills, hooks or linters.
 
 ## Project
 
@@ -69,10 +69,11 @@ Language rules: `.agents/conventions/{go,rust,c,ts}.md` — read the one for the
 
 ## Worktrees
 
-Every writing task runs in a linked worktree on a task branch from confirmed `origin/main`: `.claude/worktrees/<name>` (Claude Code) or `.agent-state/worktrees/<name>` (Codex). The primary checkout stays on `main`; only gitignored trees (`.arch/`, private modules) are written there, by absolute path. Confirm the toplevel and branch before the first write. A gate that produces or consumes `build/` needs the worktree's own `build/` and submodules (`git submodule update --init`); cargo/npm/lint-only gates may symlink the primary `build/` and its `*.pb.go`.
+Use linked worktrees at `.claude/worktrees/` (Claude Code) or `.agent-state/worktrees/` (Codex), on task branches from confirmed `origin/main`. Confirm root and branch first. Keep primary on `main`; write only ignored trees there, by absolute path. Gates using `build/` need their own build and initialized submodules; cargo/npm/lint-only gates may link primary `build/` and `*.pb.go`.
 
 ## Commits & PRs
 
+- Write every PR review comment in English only, including inline comments, summaries, and replies. Do not mix languages.
 - Never `git commit`/`--amend` unless the request asks for it; never `stash`/`checkout`/`reset`/`restore` to A/B a pre-existing state — read `git show HEAD:<path>` instead.
 - Subject: `feat|fix|refactor|perf|chore|docs|test|build|ci|style(<scope>)[!]: brief` — scope mandatory (lowercase, comma-separated), brief lowercase, no trailing period, no code-level detail. Enforced by the `commit-msg` hook and the Commit Lint CI job.
 - No `Co-Authored-By` / `Generated with` footers.
