@@ -66,6 +66,7 @@ Agents: charters are authored in `.rulesync/subagents/*.md` (`make ai/agents` ge
 Language rules: `.agents/conventions/{go,rust,c,ts}.md` — read the one for the language you touch. Comments (all languages): `.agents/conventions/comments.md`. Tests (all languages): `.agents/conventions/tests.md`.
 
 - Before direct Go commands after native changes, run `meson compile -C build` to rebuild C inputs and CGO fingerprints, then `go test -count=1` with the configured cache-line and sanitizer CGO flags; `make test` and `make test-asan` supply them automatically. Shared-memory layout or `YANET_MODULE_ABI_VERSION` changes also need rebuilt standalone CGO binaries and coordinated process restarts; stop attached processes before removing stale `/dev/hugepages/yanet*`.
+- Agent hooks (`.agents/hooks/`, registered in `.claude/settings.json` and `.codex/hooks.json`; Codex runs them once `/hooks` trusts them) format each edited file with the formatter CI pins, refuse writes to a checkout on `main` outside gitignored paths, and refuse whole-tree `git add`, `--no-verify`, `git stash` and git commands that discard uncommitted changes.
 - Test logic and invariants, not human-readable CLI output (ASCII-only paths and canonical MAC/hex rendering are contracts and may be tested).
 - Race tests need targeted `-run` repetition (~10–20 runs); one `-race` pass can miss it.
 - `modules/*/tests/vm` exit code 127/3 means binaries are not staged, not a product defect.

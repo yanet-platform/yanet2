@@ -146,7 +146,8 @@ deploy/packages/
 .claude/agent-memory
 .claude/settings.*.json
 .claude/worktrees
-/.codex
+/.codex/*
+!/.codex/hooks.json
 /.agent-state
 
 # Generated from .rulesync/subagents/*.md by 'make ai/agents'.
