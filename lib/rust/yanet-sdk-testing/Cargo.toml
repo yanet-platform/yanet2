@@ -1,0 +1,13 @@
+[package]
+name = "yanet-sdk-testing"
+description = "Test support of the Rust module SDK: the block arena that serves tests as shared memory."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+yanet-shm = { path = "../yanet-shm" }
