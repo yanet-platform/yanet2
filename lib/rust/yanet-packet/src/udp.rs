@@ -2,7 +2,7 @@ use core::net::{Ipv4Addr, Ipv6Addr};
 
 use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout, Unaligned, byteorder::network_endian::U16};
 
-use crate::checksum;
+use crate::{ParseError, checksum, split_header, split_header_mut};
 
 /// UDP header.
 ///
@@ -21,23 +21,44 @@ impl UdpHeader {
 
     /// Splits the header and its payload off the front of the input.
     ///
-    /// Refuses a length field below the header size or beyond the input. The
-    /// payload ends at the length field.
-    pub fn parse(buf: &[u8]) -> Option<(&Self, &[u8])> {
-        let (header, rest) = Self::ref_from_prefix(buf).ok()?;
-        let payload = rest.get(..header.payload_len()?)?;
-        Some((header, payload))
+    /// The payload ends at the length field.
+    ///
+    /// # Errors
+    ///
+    /// - [`ParseError::Truncated`] when the input is shorter than the header.
+    /// - [`ParseError::LengthBelowHeader`] when the length field is below the
+    ///   header size.
+    /// - [`ParseError::LengthBeyondInput`] when the length field is beyond the
+    ///   input.
+    pub fn parse(buf: &[u8]) -> Result<(&Self, &[u8]), ParseError> {
+        let available = buf.len();
+        let (header, rest) = split_header::<Self>(buf)?;
+        let payload_len = header.payload_len(available)?;
+        Ok((header, &rest[..payload_len]))
     }
 
     /// Same as [`UdpHeader::parse`] for in-place editing.
-    pub fn parse_mut(buf: &mut [u8]) -> Option<(&mut Self, &mut [u8])> {
-        let (header, rest) = Self::mut_from_prefix(buf).ok()?;
-        let payload = rest.get_mut(..header.payload_len()?)?;
-        Some((header, payload))
+    ///
+    /// # Errors
+    ///
+    /// The same as [`UdpHeader::parse`].
+    pub fn parse_mut(buf: &mut [u8]) -> Result<(&mut Self, &mut [u8]), ParseError> {
+        let available = buf.len();
+        let (header, rest) = split_header_mut::<Self>(buf)?;
+        let payload_len = header.payload_len(available)?;
+        Ok((header, &mut rest[..payload_len]))
     }
 
-    fn payload_len(&self) -> Option<usize> {
-        usize::from(self.length.get()).checked_sub(Self::LEN)
+    /// Payload length from the length field, checked against the input.
+    fn payload_len(&self, available: usize) -> Result<usize, ParseError> {
+        let length = usize::from(self.length.get());
+        if length < Self::LEN {
+            return Err(ParseError::LengthBelowHeader { length, header_len: Self::LEN });
+        }
+        if length > available {
+            return Err(ParseError::LengthBeyondInput { length, available });
+        }
+        Ok(length - Self::LEN)
     }
 
     pub fn src_port(&self) -> u16 {
@@ -152,18 +173,50 @@ mod tests {
 
     #[test]
     fn test_udp_refuses_short_buffer() {
-        let (buf, total) = build([1, 1, 1, 1], [2, 2, 2, 2], &[9, 8, 7], true);
-        for len in 0..total {
-            assert!(UdpHeader::parse(&buf[..len]).is_none(), "len {len}");
+        let (buf, _) = build([1, 1, 1, 1], [2, 2, 2, 2], &[9, 8, 7], true);
+        for len in 0..UdpHeader::LEN {
+            let expected = ParseError::Truncated { needed: 8, available: len };
+            assert_eq!(expected, UdpHeader::parse(&buf[..len]).unwrap_err(), "len {len}");
         }
+        let mut copy = buf;
+        let expected = ParseError::Truncated { needed: 8, available: 7 };
+        assert_eq!(expected, UdpHeader::parse_mut(&mut copy[..7]).unwrap_err());
+    }
+
+    #[test]
+    fn test_udp_refuses_length_beyond_input() {
+        let (mut buf, total) = build([1, 1, 1, 1], [2, 2, 2, 2], &[9, 8, 7], true);
+        for len in UdpHeader::LEN..total {
+            let expected = ParseError::LengthBeyondInput { length: 11, available: len };
+            assert_eq!(expected, UdpHeader::parse(&buf[..len]).unwrap_err(), "len {len}");
+        }
+        let expected = ParseError::LengthBeyondInput { length: 11, available: 10 };
+        assert_eq!(expected, UdpHeader::parse_mut(&mut buf[..10]).unwrap_err());
+    }
+
+    #[test]
+    fn test_udp_trailing_bytes_are_not_payload() {
+        let (buf, total) = build([1, 1, 1, 1], [2, 2, 2, 2], &[9, 8, 7], true);
+        let (_, payload) = UdpHeader::parse(&buf[..total + 5]).unwrap();
+        assert_eq!(3, payload.len());
     }
 
     #[test]
     fn test_udp_refuses_length_below_header() {
         let (mut buf, total) = build([1, 1, 1, 1], [2, 2, 2, 2], &[9, 8, 7], true);
-        buf[5] = 7;
-        assert!(UdpHeader::parse(&buf[..total]).is_none());
-        assert!(UdpHeader::parse_mut(&mut buf[..total]).is_none());
+        for length in 0..8u8 {
+            buf[5] = length;
+            let expected = ParseError::LengthBelowHeader {
+                length: usize::from(length),
+                header_len: 8,
+            };
+            assert_eq!(
+                expected,
+                UdpHeader::parse(&buf[..total]).unwrap_err(),
+                "length {length}"
+            );
+            assert_eq!(expected, UdpHeader::parse_mut(&mut buf[..total]).unwrap_err());
+        }
     }
 
     #[test]

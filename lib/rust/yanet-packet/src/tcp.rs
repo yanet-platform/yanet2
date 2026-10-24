@@ -5,7 +5,7 @@ use zerocopy::{
     byteorder::network_endian::{U16, U32},
 };
 
-use crate::checksum;
+use crate::{ParseError, checksum, split_header, split_header_mut};
 
 /// TCP fixed header (20 bytes, options excluded).
 ///
@@ -112,12 +112,15 @@ impl TcpHeader {
     }
 }
 
-fn split_options(header: &TcpHeader, available: usize) -> Option<usize> {
-    let header_len = header.header_len();
-    if header.data_offset() < 5 || header_len > available {
-        return None;
+fn split_options(header: &TcpHeader, available: usize) -> Result<usize, ParseError> {
+    if header.data_offset() < 5 {
+        return Err(ParseError::HeaderLen { words: header.data_offset() });
     }
-    Some(header_len - TcpHeader::MIN_LEN)
+    let header_len = header.header_len();
+    if header_len > available {
+        return Err(ParseError::Truncated { needed: header_len, available });
+    }
+    Ok(header_len - TcpHeader::MIN_LEN)
 }
 
 /// Read-only TCP segment split into header, options and payload.
@@ -132,12 +135,21 @@ pub struct TcpPacket<'a> {
 impl<'a> TcpPacket<'a> {
     /// Splits a TCP segment at the start of the input.
     ///
-    /// Refuses a data offset below five words or beyond the input.
-    pub fn parse(buf: &'a [u8]) -> Option<Self> {
-        let (header, rest) = TcpHeader::ref_from_prefix(buf).ok()?;
-        let options_len = split_options(header, buf.len())?;
-        let (options, payload) = rest.split_at_checked(options_len)?;
-        Some(Self { header, options, payload })
+    /// Checks the fixed header, the data offset and the options, in this
+    /// order; the first failure is reported.
+    ///
+    /// # Errors
+    ///
+    /// - [`ParseError::Truncated`] when the input ends before the fixed header,
+    ///   or before the options the data offset counts.
+    /// - [`ParseError::HeaderLen`] when the data offset is below five words.
+    pub fn parse(buf: &'a [u8]) -> Result<Self, ParseError> {
+        let available = buf.len();
+        let (header, rest) = split_header::<TcpHeader>(buf)?;
+        let options_len = split_options(header, available)?;
+        // The options end within the input, so the split cannot panic.
+        let (options, payload) = rest.split_at(options_len);
+        Ok(Self { header, options, payload })
     }
 }
 
@@ -152,12 +164,17 @@ pub struct TcpPacketMut<'a> {
 
 impl<'a> TcpPacketMut<'a> {
     /// Same as [`TcpPacket::parse`] for in-place editing.
-    pub fn parse(buf: &'a mut [u8]) -> Option<Self> {
+    ///
+    /// # Errors
+    ///
+    /// The same as [`TcpPacket::parse`].
+    pub fn parse(buf: &'a mut [u8]) -> Result<Self, ParseError> {
         let available = buf.len();
-        let (header, rest) = TcpHeader::mut_from_prefix(buf).ok()?;
+        let (header, rest) = split_header_mut::<TcpHeader>(buf)?;
         let options_len = split_options(header, available)?;
-        let (options, payload) = rest.split_at_mut_checked(options_len)?;
-        Some(Self { header, options, payload })
+        // The options end within the input, so the split cannot panic.
+        let (options, payload) = rest.split_at_mut(options_len);
+        Ok(Self { header, options, payload })
     }
 }
 
@@ -213,10 +230,25 @@ mod tests {
 
     #[test]
     fn test_tcp_refuses_short_buffer() {
-        let (buf, total) = build([1, 2, 3, 4], [5, 6, 7, 8], 2, &[]);
-        for len in 0..total {
-            assert!(TcpPacket::parse(&buf[..len]).is_none(), "len {len}");
+        let (buf, _) = build([1, 2, 3, 4], [5, 6, 7, 8], 2, &[]);
+        for len in 0..TcpHeader::MIN_LEN {
+            let expected = ParseError::Truncated { needed: 20, available: len };
+            assert_eq!(expected, TcpPacket::parse(&buf[..len]).unwrap_err(), "len {len}");
         }
+        let mut copy = buf;
+        let expected = ParseError::Truncated { needed: 20, available: 19 };
+        assert_eq!(expected, TcpPacketMut::parse(&mut copy[..19]).unwrap_err());
+    }
+
+    #[test]
+    fn test_tcp_refuses_options_beyond_input() {
+        let (mut buf, total) = build([1, 2, 3, 4], [5, 6, 7, 8], 2, &[]);
+        for len in TcpHeader::MIN_LEN..total {
+            let expected = ParseError::Truncated { needed: 28, available: len };
+            assert_eq!(expected, TcpPacket::parse(&buf[..len]).unwrap_err(), "len {len}");
+        }
+        let expected = ParseError::Truncated { needed: 28, available: 27 };
+        assert_eq!(expected, TcpPacketMut::parse(&mut buf[..27]).unwrap_err());
     }
 
     #[test]
@@ -224,7 +256,13 @@ mod tests {
         let (mut buf, total) = build([1, 2, 3, 4], [5, 6, 7, 8], 2, &[]);
         for offset in 0..5u8 {
             buf[12] = offset << 4;
-            assert!(TcpPacket::parse(&buf[..total]).is_none(), "offset {offset}");
+            let expected = ParseError::HeaderLen { words: offset };
+            assert_eq!(
+                expected,
+                TcpPacket::parse(&buf[..total]).unwrap_err(),
+                "offset {offset}"
+            );
+            assert_eq!(expected, TcpPacketMut::parse(&mut buf[..total]).unwrap_err());
         }
     }
 
@@ -232,15 +270,17 @@ mod tests {
     fn test_tcp_refuses_data_offset_beyond_input() {
         let (mut buf, total) = build([1, 2, 3, 4], [5, 6, 7, 8], 2, &[]);
         buf[12] = 0xf0;
-        assert!(TcpPacket::parse(&buf[..total]).is_none());
-        assert!(TcpPacketMut::parse(&mut buf[..total]).is_none());
+        let expected = ParseError::Truncated { needed: 60, available: total };
+        assert_eq!(expected, TcpPacket::parse(&buf[..total]).unwrap_err());
+        assert_eq!(expected, TcpPacketMut::parse(&mut buf[..total]).unwrap_err());
     }
 
     #[test]
     fn test_tcp_segment_without_options_needs_twenty_bytes() {
         let (buf, _) = build([1, 2, 3, 4], [5, 6, 7, 8], 0, &[]);
-        assert!(TcpPacket::parse(&buf[..20]).is_some());
-        assert!(TcpPacket::parse(&buf[..19]).is_none());
+        assert!(TcpPacket::parse(&buf[..20]).is_ok());
+        let expected = ParseError::Truncated { needed: 20, available: 19 };
+        assert_eq!(expected, TcpPacket::parse(&buf[..19]).unwrap_err());
     }
 
     #[test]

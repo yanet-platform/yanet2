@@ -1,6 +1,8 @@
 use netip::MacAddr;
 use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout, Unaligned, byteorder::network_endian::U16};
 
+use crate::{ParseError, split_header, split_header_mut};
+
 pub const ETHERTYPE_IPV4: u16 = 0x0800;
 pub const ETHERTYPE_IPV6: u16 = 0x86dd;
 pub const ETHERTYPE_VLAN: u16 = 0x8100;
@@ -19,13 +21,21 @@ impl EthernetHeader {
     pub const LEN: usize = 14;
 
     /// Splits the header off the front of the input.
-    pub fn parse(buf: &[u8]) -> Option<(&Self, &[u8])> {
-        Self::ref_from_prefix(buf).ok()
+    ///
+    /// # Errors
+    ///
+    /// [`ParseError::Truncated`] when the input is shorter than the header.
+    pub fn parse(buf: &[u8]) -> Result<(&Self, &[u8]), ParseError> {
+        split_header(buf)
     }
 
     /// Splits the header off the front of the input for in-place editing.
-    pub fn parse_mut(buf: &mut [u8]) -> Option<(&mut Self, &mut [u8])> {
-        Self::mut_from_prefix(buf).ok()
+    ///
+    /// # Errors
+    ///
+    /// [`ParseError::Truncated`] when the input is shorter than the header.
+    pub fn parse_mut(buf: &mut [u8]) -> Result<(&mut Self, &mut [u8]), ParseError> {
+        split_header_mut(buf)
     }
 
     pub fn dst(&self) -> MacAddr {
@@ -70,13 +80,21 @@ impl VlanTag {
     pub const LEN: usize = 4;
 
     /// Splits the tag off the front of the input.
-    pub fn parse(buf: &[u8]) -> Option<(&Self, &[u8])> {
-        Self::ref_from_prefix(buf).ok()
+    ///
+    /// # Errors
+    ///
+    /// [`ParseError::Truncated`] when the input is shorter than the tag.
+    pub fn parse(buf: &[u8]) -> Result<(&Self, &[u8]), ParseError> {
+        split_header(buf)
     }
 
     /// Splits the tag off the front of the input for in-place editing.
-    pub fn parse_mut(buf: &mut [u8]) -> Option<(&mut Self, &mut [u8])> {
-        Self::mut_from_prefix(buf).ok()
+    ///
+    /// # Errors
+    ///
+    /// [`ParseError::Truncated`] when the input is shorter than the tag.
+    pub fn parse_mut(buf: &mut [u8]) -> Result<(&mut Self, &mut [u8]), ParseError> {
+        split_header_mut(buf)
     }
 
     /// Priority code point, 0 to 7.
@@ -148,10 +166,12 @@ mod tests {
     #[test]
     fn test_ethernet_refuses_short_buffer() {
         for len in 0..EthernetHeader::LEN {
-            assert!(EthernetHeader::parse(&FRAME[..len]).is_none(), "len {len}");
+            let expected = ParseError::Truncated { needed: 14, available: len };
+            assert_eq!(expected, EthernetHeader::parse(&FRAME[..len]).unwrap_err(), "len {len}");
         }
         let mut copy = FRAME;
-        assert!(EthernetHeader::parse_mut(&mut copy[..13]).is_none());
+        let expected = ParseError::Truncated { needed: 14, available: 13 };
+        assert_eq!(expected, EthernetHeader::parse_mut(&mut copy[..13]).unwrap_err());
     }
 
     #[test]
@@ -176,8 +196,12 @@ mod tests {
     #[test]
     fn test_vlan_refuses_short_buffer() {
         for len in 0..VlanTag::LEN {
-            assert!(VlanTag::parse(&FRAME[14..14 + len]).is_none(), "len {len}");
+            let expected = ParseError::Truncated { needed: 4, available: len };
+            assert_eq!(expected, VlanTag::parse(&FRAME[14..14 + len]).unwrap_err(), "len {len}");
         }
+        let mut copy = FRAME;
+        let expected = ParseError::Truncated { needed: 4, available: 3 };
+        assert_eq!(expected, VlanTag::parse_mut(&mut copy[14..17]).unwrap_err());
     }
 
     #[test]

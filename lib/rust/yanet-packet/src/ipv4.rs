@@ -2,7 +2,7 @@ use core::net::Ipv4Addr;
 
 use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout, Unaligned, byteorder::network_endian::U16};
 
-use crate::checksum;
+use crate::{ParseError, checksum, split_header, split_header_mut};
 
 /// IPv4 fixed header (20 bytes, options excluded).
 ///
@@ -184,16 +184,25 @@ fn header_checksum_is_valid(header: &Ipv4Header, options: &[u8]) -> bool {
     header_sum(header, options) == 0xffff
 }
 
-fn split_lengths(header: &Ipv4Header, available: usize) -> Option<(usize, usize)> {
-    if header.version() != 4 || header.ihl() < 5 {
-        return None;
+fn split_lengths(header: &Ipv4Header, available: usize) -> Result<(usize, usize), ParseError> {
+    if header.version() != 4 {
+        return Err(ParseError::Version { found: header.version() });
+    }
+    if header.ihl() < 5 {
+        return Err(ParseError::HeaderLen { words: header.ihl() });
     }
     let header_len = header.header_len();
-    let total = usize::from(header.total_len());
-    if total < header_len || total > available {
-        return None;
+    if header_len > available {
+        return Err(ParseError::Truncated { needed: header_len, available });
     }
-    Some((header_len.saturating_sub(Ipv4Header::MIN_LEN), total - header_len))
+    let total = usize::from(header.total_len());
+    if total < header_len {
+        return Err(ParseError::LengthBelowHeader { length: total, header_len });
+    }
+    if total > available {
+        return Err(ParseError::LengthBeyondInput { length: total, available });
+    }
+    Ok((header_len - Ipv4Header::MIN_LEN, total - header_len))
 }
 
 /// Read-only IPv4 packet split into header, options and payload.
@@ -209,14 +218,30 @@ pub struct Ipv4Packet<'a> {
 impl<'a> Ipv4Packet<'a> {
     /// Splits an IPv4 packet at the start of the input.
     ///
-    /// Refuses a version other than 4, a header length below five words or
-    /// beyond the total length, and a total length beyond the input.
-    pub fn parse(buf: &'a [u8]) -> Option<Self> {
-        let (header, rest) = Ipv4Header::ref_from_prefix(buf).ok()?;
-        let (options_len, payload_len) = split_lengths(header, buf.len())?;
-        let (options, rest) = rest.split_at_checked(options_len)?;
-        let payload = rest.get(..payload_len)?;
-        Some(Self { header, options, payload })
+    /// Checks the fixed header, the version, the header length, the options
+    /// and the total length, in this order; the first failure is reported.
+    ///
+    /// # Errors
+    ///
+    /// - [`ParseError::Truncated`] when the input ends before the fixed header,
+    ///   or before the options the header length counts.
+    /// - [`ParseError::Version`] when the version is not 4.
+    /// - [`ParseError::HeaderLen`] when the header length is below five words.
+    /// - [`ParseError::LengthBelowHeader`] when the total length is below the
+    ///   header length.
+    /// - [`ParseError::LengthBeyondInput`] when the total length is beyond the
+    ///   input.
+    pub fn parse(buf: &'a [u8]) -> Result<Self, ParseError> {
+        let available = buf.len();
+        let (header, rest) = split_header::<Ipv4Header>(buf)?;
+        let (options_len, payload_len) = split_lengths(header, available)?;
+        // The lengths are bounded by the input, so neither split can panic.
+        let (options, rest) = rest.split_at(options_len);
+        Ok(Self {
+            header,
+            options,
+            payload: &rest[..payload_len],
+        })
     }
 
     /// Verifies the header checksum over header and options.
@@ -237,13 +262,20 @@ pub struct Ipv4PacketMut<'a> {
 
 impl<'a> Ipv4PacketMut<'a> {
     /// Same as [`Ipv4Packet::parse`] for in-place editing.
-    pub fn parse(buf: &'a mut [u8]) -> Option<Self> {
+    ///
+    /// # Errors
+    ///
+    /// The same as [`Ipv4Packet::parse`].
+    pub fn parse(buf: &'a mut [u8]) -> Result<Self, ParseError> {
         let available = buf.len();
-        let (header, rest) = Ipv4Header::mut_from_prefix(buf).ok()?;
+        let (header, rest) = split_header_mut::<Ipv4Header>(buf)?;
         let (options_len, payload_len) = split_lengths(header, available)?;
-        let (options, rest) = rest.split_at_mut_checked(options_len)?;
-        let payload = rest.get_mut(..payload_len)?;
-        Some(Self { header, options, payload })
+        let (options, rest) = rest.split_at_mut(options_len);
+        Ok(Self {
+            header,
+            options,
+            payload: &mut rest[..payload_len],
+        })
     }
 
     /// Verifies the header checksum over header and options.
@@ -324,15 +356,25 @@ mod tests {
 
     #[test]
     fn test_ipv4_refuses_short_buffer() {
-        let (buf, total) = build(0, &[1, 2, 3]);
-        for len in 0..total {
-            assert!(Ipv4Packet::parse(&buf[..len]).is_none(), "len {len}");
+        let (mut buf, _) = build(0, &[1, 2, 3]);
+        for len in 0..Ipv4Header::MIN_LEN {
+            let expected = ParseError::Truncated { needed: 20, available: len };
+            assert_eq!(expected, Ipv4Packet::parse(&buf[..len]).unwrap_err(), "len {len}");
         }
-        let (buf, total) = build(4, &[]);
-        for len in 0..total {
-            assert!(Ipv4Packet::parse(&buf[..len]).is_none(), "len {len}");
+        let expected = ParseError::Truncated { needed: 20, available: 19 };
+        assert_eq!(expected, Ipv4PacketMut::parse(&mut buf[..19]).unwrap_err());
+    }
+
+    #[test]
+    fn test_ipv4_refuses_options_beyond_input() {
+        let (mut buf, total) = build(4, &[]);
+        for len in Ipv4Header::MIN_LEN..total {
+            let expected = ParseError::Truncated { needed: 36, available: len };
+            assert_eq!(expected, Ipv4Packet::parse(&buf[..len]).unwrap_err(), "len {len}");
         }
-        assert!(Ipv4Packet::parse(&buf[..total]).is_some());
+        let expected = ParseError::Truncated { needed: 36, available: 35 };
+        assert_eq!(expected, Ipv4PacketMut::parse(&mut buf[..35]).unwrap_err());
+        assert!(Ipv4Packet::parse(&buf[..total]).is_ok());
     }
 
     #[test]
@@ -340,37 +382,68 @@ mod tests {
         let (mut buf, total) = build(0, &[1, 2, 3, 4]);
         for ihl in 0..5u8 {
             buf[0] = 0x40 | ihl;
-            assert!(Ipv4Packet::parse(&buf[..total]).is_none(), "ihl {ihl}");
+            let expected = ParseError::HeaderLen { words: ihl };
+            assert_eq!(expected, Ipv4Packet::parse(&buf[..total]).unwrap_err(), "ihl {ihl}");
+            assert_eq!(expected, Ipv4PacketMut::parse(&mut buf[..total]).unwrap_err());
         }
-        // Header length beyond the total length.
-        buf[0] = 0x4f;
-        assert!(Ipv4Packet::parse(&buf[..total]).is_none());
-        // Header length beyond the buffer.
-        let (mut buf, _) = build(0, &[]);
-        buf[0] = 0x4f;
-        buf[3] = 0x3c;
-        assert!(Ipv4Packet::parse(&buf[..30]).is_none());
     }
 
     #[test]
     fn test_ipv4_refuses_wrong_version() {
         let (mut buf, total) = build(0, &[1, 2, 3, 4]);
         buf[0] = 0x65;
-        assert!(Ipv4Packet::parse(&buf[..total]).is_none());
+        let expected = ParseError::Version { found: 6 };
+        assert_eq!(expected, Ipv4Packet::parse(&buf[..total]).unwrap_err());
+        assert_eq!(expected, Ipv4PacketMut::parse(&mut buf[..total]).unwrap_err());
+        // The version is checked before the header length.
+        buf[0] = 0x60;
+        assert_eq!(
+            ParseError::Version { found: 6 },
+            Ipv4Packet::parse(&buf[..total]).unwrap_err()
+        );
     }
 
     #[test]
     fn test_ipv4_refuses_total_len_below_header() {
         let (mut buf, total) = build(0, &[1, 2, 3, 4]);
         buf[3] = 19;
-        assert!(Ipv4Packet::parse(&buf[..total]).is_none());
+        let expected = ParseError::LengthBelowHeader { length: 19, header_len: 20 };
+        assert_eq!(expected, Ipv4Packet::parse(&buf[..total]).unwrap_err());
+        assert_eq!(expected, Ipv4PacketMut::parse(&mut buf[..total]).unwrap_err());
+    }
+
+    #[test]
+    fn test_ipv4_refuses_total_len_below_header_with_options() {
+        let (mut buf, total) = build(2, &[1, 2, 3, 4]);
+        buf[3] = 27;
+        let expected = ParseError::LengthBelowHeader { length: 27, header_len: 28 };
+        assert_eq!(expected, Ipv4Packet::parse(&buf[..total]).unwrap_err());
+    }
+
+    #[test]
+    fn test_ipv4_header_len_beyond_total_len_refuses_length_below_header() {
+        let (mut buf, _) = build(0, &[1, 2, 3, 4]);
+        buf[0] = 0x4f;
+        let expected = ParseError::LengthBelowHeader { length: 24, header_len: 60 };
+        assert_eq!(expected, Ipv4Packet::parse(&buf[..64]).unwrap_err());
+    }
+
+    #[test]
+    fn test_ipv4_header_len_beyond_input_reports_truncated_before_length() {
+        let (mut buf, _) = build(0, &[]);
+        buf[0] = 0x4f;
+        buf[3] = 24;
+        let expected = ParseError::Truncated { needed: 60, available: 30 };
+        assert_eq!(expected, Ipv4Packet::parse(&buf[..30]).unwrap_err());
     }
 
     #[test]
     fn test_ipv4_refuses_total_len_beyond_input() {
         let (mut buf, total) = build(0, &[1, 2, 3, 4]);
         buf[3] = (total + 1) as u8;
-        assert!(Ipv4Packet::parse(&buf[..total]).is_none());
+        let expected = ParseError::LengthBeyondInput { length: total + 1, available: total };
+        assert_eq!(expected, Ipv4Packet::parse(&buf[..total]).unwrap_err());
+        assert_eq!(expected, Ipv4PacketMut::parse(&mut buf[..total]).unwrap_err());
     }
 
     #[test]

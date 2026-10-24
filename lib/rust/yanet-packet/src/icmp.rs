@@ -2,7 +2,7 @@ use core::net::Ipv6Addr;
 
 use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout, Unaligned, byteorder::network_endian::U16};
 
-use crate::checksum;
+use crate::{ParseError, checksum, split_header, split_header_mut};
 
 /// ICMPv4 header: type, code, checksum and four bytes of message-specific
 /// data. The checksum has no pseudo header.
@@ -19,13 +19,21 @@ impl Icmpv4Header {
     pub const LEN: usize = 8;
 
     /// Splits the header off the front of the input.
-    pub fn parse(buf: &[u8]) -> Option<(&Self, &[u8])> {
-        Self::ref_from_prefix(buf).ok()
+    ///
+    /// # Errors
+    ///
+    /// [`ParseError::Truncated`] when the input is shorter than the header.
+    pub fn parse(buf: &[u8]) -> Result<(&Self, &[u8]), ParseError> {
+        split_header(buf)
     }
 
     /// Splits the header off the front of the input for in-place editing.
-    pub fn parse_mut(buf: &mut [u8]) -> Option<(&mut Self, &mut [u8])> {
-        Self::mut_from_prefix(buf).ok()
+    ///
+    /// # Errors
+    ///
+    /// [`ParseError::Truncated`] when the input is shorter than the header.
+    pub fn parse_mut(buf: &mut [u8]) -> Result<(&mut Self, &mut [u8]), ParseError> {
+        split_header_mut(buf)
     }
 
     pub fn icmp_type(&self) -> u8 {
@@ -74,13 +82,21 @@ impl Icmpv6Header {
     pub const LEN: usize = 8;
 
     /// Splits the header off the front of the input.
-    pub fn parse(buf: &[u8]) -> Option<(&Self, &[u8])> {
-        Self::ref_from_prefix(buf).ok()
+    ///
+    /// # Errors
+    ///
+    /// [`ParseError::Truncated`] when the input is shorter than the header.
+    pub fn parse(buf: &[u8]) -> Result<(&Self, &[u8]), ParseError> {
+        split_header(buf)
     }
 
     /// Splits the header off the front of the input for in-place editing.
-    pub fn parse_mut(buf: &mut [u8]) -> Option<(&mut Self, &mut [u8])> {
-        Self::mut_from_prefix(buf).ok()
+    ///
+    /// # Errors
+    ///
+    /// [`ParseError::Truncated`] when the input is shorter than the header.
+    pub fn parse_mut(buf: &mut [u8]) -> Result<(&mut Self, &mut [u8]), ParseError> {
+        split_header_mut(buf)
     }
 
     pub fn icmp_type(&self) -> u8 {
@@ -156,8 +172,12 @@ mod tests {
     fn test_icmpv4_parse_refuses_short_buffer() {
         let (buf, _) = echo(&[]);
         for len in 0..Icmpv4Header::LEN {
-            assert!(Icmpv4Header::parse(&buf[..len]).is_none(), "len {len}");
+            let expected = ParseError::Truncated { needed: 8, available: len };
+            assert_eq!(expected, Icmpv4Header::parse(&buf[..len]).unwrap_err(), "len {len}");
         }
+        let mut copy = buf;
+        let expected = ParseError::Truncated { needed: 8, available: 7 };
+        assert_eq!(expected, Icmpv4Header::parse_mut(&mut copy[..7]).unwrap_err());
     }
 
     #[test]
@@ -175,9 +195,13 @@ mod tests {
     fn test_icmpv6_parse_refuses_short_buffer() {
         let buf = [0u8; 8];
         for len in 0..Icmpv6Header::LEN {
-            assert!(Icmpv6Header::parse(&buf[..len]).is_none(), "len {len}");
+            let expected = ParseError::Truncated { needed: 8, available: len };
+            assert_eq!(expected, Icmpv6Header::parse(&buf[..len]).unwrap_err(), "len {len}");
         }
-        assert!(Icmpv6Header::parse(&buf).is_some());
+        let mut copy = buf;
+        let expected = ParseError::Truncated { needed: 8, available: 7 };
+        assert_eq!(expected, Icmpv6Header::parse_mut(&mut copy[..7]).unwrap_err());
+        assert!(Icmpv6Header::parse(&buf).is_ok());
     }
 
     #[test]
