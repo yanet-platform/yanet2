@@ -1,0 +1,22 @@
+[package]
+name = "yanet-sys"
+description = "The C bindings of the Rust module SDK, with modules mirroring the C tree: the one bindgen output and the hand-written mirrors of the C structures a configuration embeds."
+build = "build.rs"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+yanet-shm = { path = "../yanet-shm" }
+
+[build-dependencies]
+bindgen = { version = "0.72", default-features = false, features = ["runtime"] }
+serde_json = "1"
+shlex = "1"
+
+[dev-dependencies]
+yanet-sdk-testing = { path = "../yanet-sdk-testing" }

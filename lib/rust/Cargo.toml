@@ -7,6 +7,7 @@ resolver = "3"
 members = [
     "yanet-sdk-testing",
     "yanet-shm",
+    "yanet-sys",
     "yanet-packet",
     "xtask",
 ]
