@@ -33,6 +33,7 @@
 
 #include "lib/classify/query.h"
 
+#include "lib/dataplane/packet/data.h"
 #include "lib/dataplane/packet/packet.h"
 
 #include "objects/l3b/api/l3b_virtual_service_object.h"

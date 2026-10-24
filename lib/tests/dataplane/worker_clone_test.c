@@ -9,6 +9,7 @@
 #include "lib/controlplane/config/econtext.h"
 #include "lib/dataplane/config/zone.h"
 #include "lib/dataplane/packet/packet.h"
+#include "lib/dataplane/pipeline/schedule.h"
 #include "lib/dataplane/worker/worker.h"
 #include "lib/dataplane_ut/mempool.h"
 #include "lib/logging/log.h"
