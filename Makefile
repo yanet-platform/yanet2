@@ -132,6 +132,7 @@ CLI_RELEASE_BINARIES := $(addprefix $(RELEASE_DIR)/,$(CLI_BINARIES))
 	lint-go \
 	lint/clang-syntax \
 	lint-commit \
+	gate \
 	hooks \
 	test \
 	test-only \
@@ -231,6 +232,11 @@ lint/clang-syntax:
 lint-commit:
 	lint/commit/commitlint_test.sh
 	lint/commit/commitlint.sh --range origin/main..HEAD
+
+# Runs the CI checks for the layers changed since origin/main and prints
+# only what fails.
+gate:
+	@scripts/gate.sh
 
 hooks:
 	git config core.hooksPath .githooks
