@@ -134,7 +134,11 @@ impl VlanTag {
 
 #[cfg(test)]
 mod tests {
+
+    use proptest::{collection::vec, prelude::*};
+
     use super::*;
+    use crate::testing;
 
     const FRAME: [u8; 22] = [
         1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 0x81, 0x00, 0xa1, 0x23, 0x08, 0x00, 0xde, 0xad, 0xbe, 0xef,
@@ -215,5 +219,138 @@ mod tests {
         assert_eq!(7, vlan.priority());
         assert_eq!(0x001, vlan.vlan_id());
         assert!(!vlan.drop_eligible());
+    }
+
+    /// Ethernet header fields as built and read back.
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    struct EthFields {
+        dst: [u8; 6],
+        src: [u8; 6],
+        ethertype: u16,
+    }
+
+    impl EthFields {
+        fn to_bytes(&self, payload: &[u8]) -> Vec<u8> {
+            [&self.dst[..], &self.src, &self.ethertype.to_be_bytes(), payload].concat()
+        }
+
+        fn read(header: &EthernetHeader) -> Self {
+            Self {
+                dst: header.dst().octets(),
+                src: header.src().octets(),
+                ethertype: header.ethertype(),
+            }
+        }
+    }
+
+    /// Random Ethernet header fields.
+    fn eth_fields() -> impl Strategy<Value = EthFields> {
+        (any::<[u8; 6]>(), any::<[u8; 6]>(), any::<u16>()).prop_map(|(dst, src, ethertype)| EthFields {
+            dst,
+            src,
+            ethertype,
+        })
+    }
+
+    /// VLAN tag fields as built and read back.
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    struct VlanFields {
+        priority: u8,
+        drop_eligible: bool,
+        vlan_id: u16,
+        ethertype: u16,
+    }
+
+    impl VlanFields {
+        fn to_bytes(&self, payload: &[u8]) -> Vec<u8> {
+            let tci = u16::from(self.priority) << 13 | u16::from(self.drop_eligible) << 12 | self.vlan_id;
+            [&tci.to_be_bytes()[..], &self.ethertype.to_be_bytes(), payload].concat()
+        }
+
+        fn read(tag: &VlanTag) -> Self {
+            Self {
+                priority: tag.priority(),
+                drop_eligible: tag.drop_eligible(),
+                vlan_id: tag.vlan_id(),
+                ethertype: tag.ethertype(),
+            }
+        }
+    }
+
+    /// Random VLAN tag fields.
+    fn vlan_fields() -> impl Strategy<Value = VlanFields> {
+        (0u8..8, any::<bool>(), 0u16..4096, any::<u16>()).prop_map(|(priority, drop_eligible, vlan_id, ethertype)| {
+            VlanFields {
+                priority,
+                drop_eligible,
+                vlan_id,
+                ethertype,
+            }
+        })
+    }
+
+    proptest! {
+        #![proptest_config(testing::config())]
+
+        #[test]
+        fn test_ethernet_round_trip_reads_back_built_fields(fields in eth_fields(), payload in vec(any::<u8>(), 0..=32)) {
+            let buf = fields.to_bytes(&payload);
+            let (header, rest) = EthernetHeader::parse(&buf).unwrap();
+            prop_assert_eq!(&fields, &EthFields::read(header));
+            prop_assert_eq!(&payload[..], rest);
+        }
+
+        #[test]
+        fn test_ethernet_setters_change_only_their_field(
+            start in eth_fields(),
+            dst in any::<[u8; 6]>(),
+            src in any::<[u8; 6]>(),
+            ethertype in any::<u16>(),
+        ) {
+            let mut buf = start.to_bytes(&[1, 2, 3]);
+            let (header, _) = EthernetHeader::parse_mut(&mut buf).unwrap();
+            let mut model = start.clone();
+            header.set_dst(MacAddr::from(dst));
+            model.dst = dst;
+            prop_assert_eq!(&model, &EthFields::read(header));
+            header.set_src(MacAddr::from(src));
+            model.src = src;
+            prop_assert_eq!(&model, &EthFields::read(header));
+            header.set_ethertype(ethertype);
+            model.ethertype = ethertype;
+            let (header, rest) = EthernetHeader::parse(&buf).unwrap();
+            prop_assert_eq!(&model, &EthFields::read(header));
+            prop_assert_eq!(&[1, 2, 3][..], rest);
+        }
+
+        #[test]
+        fn test_vlan_round_trip_reads_back_built_fields(fields in vlan_fields(), payload in vec(any::<u8>(), 0..=8)) {
+            let buf = fields.to_bytes(&payload);
+            let (tag, rest) = VlanTag::parse(&buf).unwrap();
+            prop_assert_eq!(&fields, &VlanFields::read(tag));
+            prop_assert_eq!(&payload[..], rest);
+        }
+
+        #[test]
+        fn test_vlan_setters_change_only_their_field(
+            start in vlan_fields(),
+            vlan_id in any::<u16>(),
+            priority in any::<u8>(),
+            ethertype in any::<u16>(),
+        ) {
+            let mut buf = start.to_bytes(&[]);
+            let (tag, _) = VlanTag::parse_mut(&mut buf).unwrap();
+            let mut model = start.clone();
+            tag.set_vlan_id(vlan_id);
+            model.vlan_id = vlan_id & 0x0fff;
+            prop_assert_eq!(&model, &VlanFields::read(tag));
+            tag.set_priority(priority);
+            model.priority = priority & 7;
+            prop_assert_eq!(&model, &VlanFields::read(tag));
+            tag.set_ethertype(ethertype);
+            model.ethertype = ethertype;
+            let (tag, _) = VlanTag::parse(&buf).unwrap();
+            prop_assert_eq!(&model, &VlanFields::read(tag));
+        }
     }
 }

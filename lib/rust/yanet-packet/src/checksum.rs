@@ -164,7 +164,10 @@ pub fn l4_is_valid_ipv6(src: Ipv6Addr, dst: Ipv6Addr, next_header: u8, segment: 
 
 #[cfg(test)]
 mod tests {
+    use proptest::{collection::vec, prelude::*};
+
     use super::*;
+    use crate::testing;
 
     /// The C reducer: folds a 32-bit accumulator with two end-around
     /// carries; the second fold cannot overflow 16 bits.
@@ -207,45 +210,6 @@ mod tests {
         sum
     }
 
-    /// Deterministic generator of test words.
-    struct Rng(u64);
-
-    impl Rng {
-        fn next(&mut self) -> u64 {
-            self.0 ^= self.0 << 13;
-            self.0 ^= self.0 >> 7;
-            self.0 ^= self.0 << 17;
-            self.0
-        }
-    }
-
-    #[test]
-    fn test_sum_matches_c_up_to_byte_swap() {
-        let mut rng = Rng(0x9e3779b97f4a7c15);
-        let mut data = [0u8; 97];
-        for len in 0..data.len() {
-            for byte in data.iter_mut() {
-                *byte = rng.next() as u8;
-            }
-            let c = c_csum(&data[..len]);
-            assert_eq!(c.swap_bytes(), sum(&data[..len]), "len {len}");
-        }
-    }
-
-    #[test]
-    fn test_partial_sum_folds_like_16_bit_words() {
-        let mut rng = Rng(0x9e37_79b9_7f4a_7c15);
-        for len in 0..200 {
-            let data: [u8; 200] = core::array::from_fn(|_| rng.next() as u8);
-            let data = &data[..len];
-            let mut words: u64 = 0;
-            for pair in data.chunks(2) {
-                words += u64::from(u16::from_be_bytes([pair[0], *pair.get(1).unwrap_or(&0)]));
-            }
-            assert_eq!(fold(words), fold(partial_sum(data)), "len {len}");
-        }
-    }
-
     #[test]
     fn test_sum_odd_tail_is_high_byte() {
         assert_eq!(0x0102 + 0x0300, sum(&[1, 2, 3]));
@@ -260,19 +224,13 @@ mod tests {
     }
 
     #[test]
-    fn test_plus_minus_match_c_exhaustive_edges() {
+    fn test_plus_minus_match_c_at_edges() {
         let edges = [0u16, 1, 2, 0x7fff, 0x8000, 0xfffe, 0xffff];
         for a in edges {
             for b in edges {
                 assert_eq!(c_plus(a, b), plus(a, b), "plus {a:#x} {b:#x}");
                 assert_eq!(c_minus(a, b), minus(a, b), "minus {a:#x} {b:#x}");
             }
-        }
-        let mut rng = Rng(7);
-        for _ in 0..20000 {
-            let (a, b) = (rng.next() as u16, rng.next() as u16);
-            assert_eq!(c_plus(a, b), plus(a, b));
-            assert_eq!(c_minus(a, b), minus(a, b));
         }
     }
 
@@ -283,28 +241,6 @@ mod tests {
         assert_eq!(0x0001, plus(0xffff, 1));
         assert_eq!(0xfffe, minus(0xffff, 1));
         assert_eq!(0, minus(0xffff, 0xffff));
-    }
-
-    #[test]
-    fn test_update_matches_c_dscp_form() {
-        let mut rng = Rng(42);
-        for _ in 0..20000 {
-            let (c, o, n) = (rng.next() as u16, rng.next() as u16, rng.next() as u16);
-            let expected = !c_plus(c_minus(!c, o), n);
-            assert_eq!(expected, update(c, o, n));
-        }
-    }
-
-    #[test]
-    fn test_update_no_zero_matches_c_mss_form() {
-        let mut rng = Rng(43);
-        for _ in 0..20000 {
-            let (c, o, n) = (rng.next() as u16, rng.next() as u16, rng.next() as u16);
-            let inner = c_plus(c_minus(!c, o), n);
-            let expected = if inner == 0xffff { inner } else { !inner };
-            assert_eq!(expected, update_no_zero(c, o, n));
-            assert_ne!(0, update_no_zero(c, o, n));
-        }
     }
 
     #[test]
@@ -321,40 +257,6 @@ mod tests {
         // Inner sum all-ones: plain stores zero, no-zero stores all-ones.
         assert_eq!(0x0000, update(0x0000, 0x0000, 0x0000));
         assert_eq!(0xffff, update_no_zero(0x0000, 0x0000, 0x0000));
-    }
-
-    #[test]
-    fn test_update_equals_full_recompute_modulo_zero_sign() {
-        let mut rng = Rng(99);
-        let mut data = [0u8; 20];
-        for _ in 0..5000 {
-            for byte in data.iter_mut() {
-                *byte = rng.next() as u8;
-            }
-            data[10] = 0;
-            data[11] = 0;
-            let full = !sum(&data);
-            data[10..12].copy_from_slice(&full.to_be_bytes());
-            let new = rng.next() as u16;
-            let old = u16::from_be_bytes([data[8], data[9]]);
-            let updated = update(full, old, new);
-            data[8..10].copy_from_slice(&new.to_be_bytes());
-            data[10] = 0;
-            data[11] = 0;
-            let recomputed = !sum(&data);
-            let zeros = [0, 0xffff];
-            assert!(updated == recomputed || (zeros.contains(&updated) && zeros.contains(&recomputed)));
-        }
-    }
-
-    #[test]
-    fn test_update_bytes_equals_sequential_word_updates() {
-        let old = [10, 0, 0, 1];
-        let new = [192, 168, 7, 200];
-        let mut expected = 0x4321;
-        expected = update(expected, 0x0a00, 0xc0a8);
-        expected = update(expected, 0x0001, 0x07c8);
-        assert_eq!(expected, update_bytes(0x4321, &old, &new));
     }
 
     #[test]
@@ -389,5 +291,78 @@ mod tests {
         let dst = [2u8; 16];
         let expected = 8 * 0x0101 + 8 * 0x0202 + 1 + 0x0002 + 17;
         assert_eq!(fold(expected), fold(pseudo_sum_ipv6(src, dst, 17, 0x1_0002)));
+    }
+
+    proptest! {
+        #![proptest_config(testing::config())]
+
+        #[test]
+        fn test_sum_matches_c_up_to_byte_swap(data in vec(any::<u8>(), 0..=300)) {
+            prop_assert_eq!(c_csum(&data).swap_bytes(), sum(&data));
+        }
+
+        #[test]
+        fn test_partial_sum_folds_like_16_bit_words(data in vec(any::<u8>(), 0..=300)) {
+            let words: u64 = data
+                .chunks(2)
+                .map(|pair| u64::from(u16::from_be_bytes([pair[0], *pair.get(1).unwrap_or(&0)])))
+                .sum();
+            prop_assert_eq!(fold(words), fold(partial_sum(&data)));
+        }
+
+        #[test]
+        fn test_plus_minus_match_c(a in any::<u16>(), b in any::<u16>()) {
+            prop_assert_eq!(c_plus(a, b), plus(a, b));
+            prop_assert_eq!(c_minus(a, b), minus(a, b));
+        }
+
+        #[test]
+        fn test_update_matches_c_dscp_form(cksum in any::<u16>(), old in any::<u16>(), new in any::<u16>()) {
+            prop_assert_eq!(!c_plus(c_minus(!cksum, old), new), update(cksum, old, new));
+        }
+
+        #[test]
+        fn test_update_no_zero_matches_c_mss_form(cksum in any::<u16>(), old in any::<u16>(), new in any::<u16>()) {
+            let inner = c_plus(c_minus(!cksum, old), new);
+            let expected = if inner == 0xffff { inner } else { !inner };
+            prop_assert_eq!(expected, update_no_zero(cksum, old, new));
+            prop_assert_ne!(0, update_no_zero(cksum, old, new));
+        }
+
+        #[test]
+        fn test_update_equals_full_recompute_modulo_zero_sign(
+            data in vec(any::<u8>(), 12..=64),
+            new in any::<u16>(),
+        ) {
+            let mut data = data;
+            data[10..12].fill(0);
+            let full = !sum(&data);
+            let old = u16::from_be_bytes([data[8], data[9]]);
+            let updated = update(full, old, new);
+            data[8..10].copy_from_slice(&new.to_be_bytes());
+            prop_assert!(testing::same_checksum(updated, !sum(&data)));
+        }
+
+        #[test]
+        fn test_update_bytes_equals_sequential_word_updates(
+            cksum in any::<u16>(),
+            old in vec(any::<u8>(), 16),
+            new in vec(any::<u8>(), 16),
+            long in any::<bool>(),
+        ) {
+            let len = if long { 16 } else { 4 };
+            let (old, new) = (&old[..len], &new[..len]);
+            let mut expected = cksum;
+            let mut expected_no_zero = cksum;
+            for (o, n) in old.chunks(2).zip(new.chunks(2)) {
+                let (o, n) = (u16::from_be_bytes([o[0], o[1]]), u16::from_be_bytes([n[0], n[1]]));
+                expected = update(expected, o, n);
+                expected_no_zero = update_no_zero(expected_no_zero, o, n);
+            }
+            prop_assert_eq!(expected, update_bytes(cksum, old, new));
+            // Each step of the word-by-word form may pick the other sign of zero.
+            prop_assert!(testing::same_checksum(expected_no_zero, update_bytes_no_zero(cksum, old, new)));
+            prop_assert_ne!(0, update_bytes_no_zero(cksum, old, new));
+        }
     }
 }

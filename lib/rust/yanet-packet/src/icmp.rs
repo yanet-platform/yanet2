@@ -142,8 +142,11 @@ impl Icmpv6Header {
 
 #[cfg(test)]
 mod tests {
+
+    use proptest::{collection::vec, prelude::*};
+
     use super::*;
-    use crate::IPPROTO_ICMPV6;
+    use crate::{IPPROTO_ICMPV6, testing};
 
     /// An ICMPv4 echo request carrying the payload, and its length.
     fn echo(payload: &[u8]) -> ([u8; 32], usize) {
@@ -181,17 +184,6 @@ mod tests {
     }
 
     #[test]
-    fn test_icmpv4_incremental_checksum_after_mutations() {
-        let (mut buf, total) = echo(&[1, 2, 3, 4, 5]);
-        for i in 0..=255u8 {
-            let (h, _) = Icmpv4Header::parse_mut(&mut buf[..total]).unwrap();
-            h.set_type_code(i, 255 - i);
-            h.set_rest([i, i ^ 0x77, 255 - i, i.wrapping_mul(3)]);
-            assert_eq!(0xffff, checksum::sum(&buf[..total]), "step {i}");
-        }
-    }
-
-    #[test]
     fn test_icmpv6_parse_refuses_short_buffer() {
         let buf = [0u8; 8];
         for len in 0..Icmpv6Header::LEN {
@@ -204,26 +196,205 @@ mod tests {
         assert!(Icmpv6Header::parse(&buf).is_ok());
     }
 
-    #[test]
-    fn test_icmpv6_incremental_checksum_for_mutations_and_address() {
-        let mut src = Ipv6Addr::new(0xfe80, 0, 0, 0, 0, 0, 0, 1);
-        let dst = Ipv6Addr::new(0xff02, 0, 0, 0, 0, 0, 0, 2);
-        let (mut buf, total) = echo(&[1, 2, 3, 4]);
-        buf[0] = 128;
-        buf[2] = 0;
-        buf[3] = 0;
-        let sum = checksum::l4_checksum_ipv6(src, dst, IPPROTO_ICMPV6, &buf[..total]);
-        buf[2..4].copy_from_slice(&sum.to_be_bytes());
-        for i in 0..=255u16 {
-            let new_src = Ipv6Addr::new(0x2001, i, 0xffff - i, 0, i, 3, 0xfffe, i);
-            let (h, _) = Icmpv6Header::parse_mut(&mut buf[..total]).unwrap();
-            h.set_type_code(129, (i % 7) as u8);
-            h.replace_ipv6_addr(src, new_src);
-            src = new_src;
-            assert!(
-                checksum::l4_is_valid_ipv6(src, dst, IPPROTO_ICMPV6, &buf[..total]),
-                "step {i}"
-            );
+    /// ICMP header fields as built and read back; both versions share them.
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    struct IcmpFields {
+        icmp_type: u8,
+        code: u8,
+        checksum: u16,
+        rest: [u8; 4],
+    }
+
+    impl IcmpFields {
+        fn to_bytes(&self, payload: &[u8]) -> Vec<u8> {
+            let checksum = self.checksum.to_be_bytes();
+            [&[self.icmp_type, self.code][..], &checksum, &self.rest, payload].concat()
+        }
+    }
+
+    /// Random ICMP header fields.
+    fn icmp_fields() -> impl Strategy<Value = IcmpFields> {
+        (any::<u8>(), any::<u8>(), any::<u16>(), any::<[u8; 4]>())
+            .prop_map(|(icmp_type, code, checksum, rest)| IcmpFields { icmp_type, code, checksum, rest })
+    }
+
+    /// A well-formed ICMP message with a random checksum field.
+    fn message() -> impl Strategy<Value = Vec<u8>> {
+        (icmp_fields(), vec(any::<u8>(), 0..=24)).prop_map(|(fields, payload)| fields.to_bytes(&payload))
+    }
+
+    /// A message whose checksum field is valid without a pseudo header.
+    fn checksummed_message() -> impl Strategy<Value = Vec<u8>> {
+        message().prop_map(|mut buf| {
+            buf[2..4].fill(0);
+            let sum = !checksum::sum(&buf);
+            buf[2..4].copy_from_slice(&sum.to_be_bytes());
+            buf
+        })
+    }
+
+    /// The fields a header reads back.
+    fn read_v4(header: &Icmpv4Header) -> IcmpFields {
+        IcmpFields {
+            icmp_type: header.icmp_type(),
+            code: header.code(),
+            checksum: header.checksum(),
+            rest: header.rest(),
+        }
+    }
+
+    /// The fields a header reads back.
+    fn read_v6(header: &Icmpv6Header) -> IcmpFields {
+        IcmpFields {
+            icmp_type: header.icmp_type(),
+            code: header.code(),
+            checksum: header.checksum(),
+            rest: header.rest(),
+        }
+    }
+
+    /// A checksum-maintaining mutation of an ICMP header.
+    #[derive(Debug, Clone)]
+    enum IcmpOp {
+        TypeCode(u8, u8),
+        Rest([u8; 4]),
+    }
+
+    /// A mutation of an ICMPv6 message: a header one, or a new pseudo-header
+    /// source address.
+    #[derive(Debug, Clone)]
+    enum Icmpv6Op {
+        Header(IcmpOp),
+        Src([u8; 16]),
+    }
+
+    /// A random header mutation.
+    fn icmp_op() -> impl Strategy<Value = IcmpOp> {
+        prop_oneof![
+            (any::<u8>(), any::<u8>()).prop_map(|(t, c)| IcmpOp::TypeCode(t, c)),
+            any::<[u8; 4]>().prop_map(IcmpOp::Rest),
+        ]
+    }
+
+    /// Random sequences of ICMPv4 mutations.
+    fn icmpv4_ops() -> impl Strategy<Value = Vec<IcmpOp>> {
+        vec(icmp_op(), 0..=12)
+    }
+
+    /// Random sequences of ICMPv6 mutations.
+    fn icmpv6_ops() -> impl Strategy<Value = Vec<Icmpv6Op>> {
+        let op = prop_oneof![
+            2 => icmp_op().prop_map(Icmpv6Op::Header),
+            1 => any::<[u8; 16]>().prop_map(Icmpv6Op::Src),
+        ];
+        vec(op, 0..=12)
+    }
+
+    proptest! {
+        #![proptest_config(testing::config())]
+
+        #[test]
+        fn test_icmpv4_round_trip_reads_back_built_fields(fields in icmp_fields(), payload in vec(any::<u8>(), 0..=24)) {
+            let buf = fields.to_bytes(&payload);
+            let (header, rest) = Icmpv4Header::parse(&buf).unwrap();
+            prop_assert_eq!(&fields, &read_v4(header));
+            prop_assert_eq!(&payload[..], rest);
+        }
+
+        #[test]
+        fn test_icmpv4_setters_change_only_their_field(buf in checksummed_message(), ops in icmpv4_ops()) {
+            let mut buf = buf;
+            let (header, _) = Icmpv4Header::parse(&buf).unwrap();
+            let mut model = read_v4(header);
+            for op in ops {
+                let (header, _) = Icmpv4Header::parse_mut(&mut buf).unwrap();
+                match op {
+                    IcmpOp::TypeCode(icmp_type, code) => {
+                        header.set_type_code(icmp_type, code);
+                        (model.icmp_type, model.code) = (icmp_type, code);
+                    }
+                    IcmpOp::Rest(rest) => {
+                        header.set_rest(rest);
+                        model.rest = rest;
+                    }
+                }
+                model.checksum = header.checksum();
+                prop_assert_eq!(&model, &read_v4(header));
+            }
+        }
+
+        #[test]
+        fn test_icmpv4_incremental_checksum_equals_full_sum(buf in checksummed_message(), ops in icmpv4_ops()) {
+            let mut buf = buf;
+            for op in ops {
+                let (header, _) = Icmpv4Header::parse_mut(&mut buf).unwrap();
+                match op {
+                    IcmpOp::TypeCode(icmp_type, code) => header.set_type_code(icmp_type, code),
+                    IcmpOp::Rest(rest) => header.set_rest(rest),
+                }
+            }
+            prop_assert_eq!(0xffff, checksum::sum(&buf));
+        }
+
+        #[test]
+        fn test_icmpv6_round_trip_reads_back_built_fields(fields in icmp_fields(), payload in vec(any::<u8>(), 0..=24)) {
+            let buf = fields.to_bytes(&payload);
+            let (header, rest) = Icmpv6Header::parse(&buf).unwrap();
+            prop_assert_eq!(&fields, &read_v6(header));
+            prop_assert_eq!(&payload[..], rest);
+        }
+
+        #[test]
+        fn test_icmpv6_setters_change_only_their_field(buf in message(), ops in icmpv6_ops()) {
+            let mut buf = buf;
+            let (header, _) = Icmpv6Header::parse(&buf).unwrap();
+            let mut model = read_v6(header);
+            let mut src = Ipv6Addr::UNSPECIFIED;
+            for op in ops {
+                let (header, _) = Icmpv6Header::parse_mut(&mut buf).unwrap();
+                match op {
+                    Icmpv6Op::Header(IcmpOp::TypeCode(icmp_type, code)) => {
+                        header.set_type_code(icmp_type, code);
+                        (model.icmp_type, model.code) = (icmp_type, code);
+                    }
+                    Icmpv6Op::Header(IcmpOp::Rest(rest)) => {
+                        header.set_rest(rest);
+                        model.rest = rest;
+                    }
+                    Icmpv6Op::Src(new) => {
+                        header.replace_ipv6_addr(src, Ipv6Addr::from(new));
+                        src = Ipv6Addr::from(new);
+                    }
+                }
+                model.checksum = header.checksum();
+                prop_assert_eq!(&model, &read_v6(header));
+            }
+        }
+
+        #[test]
+        fn test_icmpv6_incremental_checksum_verifies_over_pseudo_header(
+            buf in message(),
+            src in any::<[u8; 16]>(),
+            dst in any::<[u8; 16]>(),
+            ops in icmpv6_ops(),
+        ) {
+            let mut buf = buf;
+            buf[2..4].fill(0);
+            let sum = checksum::l4_checksum_ipv6(Ipv6Addr::from(src), Ipv6Addr::from(dst), IPPROTO_ICMPV6, &buf);
+            buf[2..4].copy_from_slice(&sum.to_be_bytes());
+            let mut src = Ipv6Addr::from(src);
+            for op in ops {
+                let (header, _) = Icmpv6Header::parse_mut(&mut buf).unwrap();
+                match op {
+                    Icmpv6Op::Header(IcmpOp::TypeCode(icmp_type, code)) => header.set_type_code(icmp_type, code),
+                    Icmpv6Op::Header(IcmpOp::Rest(rest)) => header.set_rest(rest),
+                    Icmpv6Op::Src(new) => {
+                        header.replace_ipv6_addr(src, Ipv6Addr::from(new));
+                        src = Ipv6Addr::from(new);
+                    }
+                }
+            }
+            prop_assert!(checksum::l4_is_valid_ipv6(src, Ipv6Addr::from(dst), IPPROTO_ICMPV6, &buf));
         }
     }
 }

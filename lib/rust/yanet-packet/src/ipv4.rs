@@ -293,7 +293,11 @@ impl<'a> Ipv4PacketMut<'a> {
 
 #[cfg(test)]
 mod tests {
+
+    use proptest::{collection::vec, prelude::*};
+
     use super::*;
+    use crate::testing;
 
     /// Builds a valid packet with the given number of option words and payload.
     ///
@@ -478,48 +482,6 @@ mod tests {
     }
 
     #[test]
-    fn test_ipv4_incremental_checksum_after_each_mutation() {
-        for opts in [0, 2] {
-            let (mut buf, total) = build(opts, &[0xaa; 7]);
-            for ttl in (0..=255u8).step_by(5) {
-                let p = Ipv4PacketMut::parse(&mut buf[..total]).unwrap();
-                p.header.set_ttl(ttl);
-                assert_matches_recompute(&mut buf[..total]);
-            }
-            for dscp in 0..64u8 {
-                let p = Ipv4PacketMut::parse(&mut buf[..total]).unwrap();
-                p.header.set_dscp(dscp);
-                assert_eq!(dscp, p.header.dscp());
-                assert_eq!(1, p.header.ecn());
-                assert_matches_recompute(&mut buf[..total]);
-            }
-            for ecn in 0..4u8 {
-                let p = Ipv4PacketMut::parse(&mut buf[..total]).unwrap();
-                p.header.set_ecn(ecn);
-                assert_matches_recompute(&mut buf[..total]);
-            }
-            for v in [0u16, 1, 0x00ff, 0xff00, 0x7fff, 0x8000, 0xfffe, 0xffff] {
-                let p = Ipv4PacketMut::parse(&mut buf[..total]).unwrap();
-                p.header.set_id(v);
-                p.header.set_protocol(v as u8);
-                assert_matches_recompute(&mut buf[..total]);
-            }
-            for i in 0..=255u8 {
-                let p = Ipv4PacketMut::parse(&mut buf[..total]).unwrap();
-                p.header.set_src(Ipv4Addr::new(i, i.wrapping_mul(3), 255 - i, i ^ 0x5a));
-                p.header.set_dst(Ipv4Addr::new(255 - i, 0, i, 255));
-                assert_matches_recompute(&mut buf[..total]);
-            }
-            let hlen = total - 7;
-            for len in (hlen..=total).rev() {
-                let p = Ipv4PacketMut::parse(&mut buf[..total]).unwrap();
-                p.header.set_total_len(len as u16);
-                assert_matches_recompute(&mut buf[..total]);
-            }
-        }
-    }
-
-    #[test]
     fn test_ipv4_decrement_ttl_matches_recompute_for_all_ttls() {
         for ttl in 2..=255u8 {
             let (mut buf, total) = build(0, &[]);
@@ -547,5 +509,301 @@ mod tests {
         let (mut buf, total) = build(1, &[]);
         buf[22] ^= 1;
         assert!(!Ipv4Packet::parse(&buf[..total]).unwrap().checksum_is_valid());
+    }
+
+    /// IPv4 header fields as built and read back; the version is always 4 and
+    /// the header length follows the options.
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    struct Fields {
+        dscp: u8,
+        ecn: u8,
+        total_len: u16,
+        id: u16,
+        frag: u16,
+        ttl: u8,
+        protocol: u8,
+        checksum: u16,
+        src: [u8; 4],
+        dst: [u8; 4],
+        options: Vec<u8>,
+    }
+
+    impl Fields {
+        fn header_len(&self) -> usize {
+            Ipv4Header::MIN_LEN + self.options.len()
+        }
+
+        fn to_bytes(&self, payload: &[u8]) -> Vec<u8> {
+            let version_ihl = 0x40 | (5 + self.options.len() / 4) as u8;
+            [
+                &[version_ihl, self.dscp << 2 | self.ecn][..],
+                &self.total_len.to_be_bytes(),
+                &self.id.to_be_bytes(),
+                &self.frag.to_be_bytes(),
+                &[self.ttl, self.protocol],
+                &self.checksum.to_be_bytes(),
+                &self.src,
+                &self.dst,
+                &self.options,
+                payload,
+            ]
+            .concat()
+        }
+
+        fn read(packet: &Ipv4Packet) -> Self {
+            let header = packet.header;
+            Self {
+                dscp: header.dscp(),
+                ecn: header.ecn(),
+                total_len: header.total_len(),
+                id: header.id(),
+                frag: header.frag(),
+                ttl: header.ttl(),
+                protocol: header.protocol(),
+                checksum: header.checksum(),
+                src: header.src().octets(),
+                dst: header.dst().octets(),
+                options: packet.options.to_vec(),
+            }
+        }
+    }
+
+    /// A header with random fields and up to ten option words.
+    ///
+    /// The total length is a placeholder until a payload is known.
+    fn fields() -> impl Strategy<Value = Fields> {
+        (
+            (0u8..64, 0u8..4),
+            any::<(u16, u16, u16)>(),
+            any::<(u8, u8)>(),
+            any::<u16>(),
+            any::<([u8; 4], [u8; 4])>(),
+            vec(any::<[u8; 4]>(), 0..=10),
+        )
+            .prop_map(
+                |((dscp, ecn), (total_len, id, frag), (ttl, protocol), checksum, (src, dst), options)| Fields {
+                    dscp,
+                    ecn,
+                    total_len,
+                    id,
+                    frag,
+                    ttl,
+                    protocol,
+                    checksum,
+                    src,
+                    dst,
+                    options: options.concat(),
+                },
+            )
+    }
+
+    /// Fields whose total length covers the header and the returned payload.
+    fn packet_fields() -> impl Strategy<Value = (Fields, Vec<u8>)> {
+        (fields(), vec(any::<u8>(), 0..=48)).prop_map(|(mut fields, payload)| {
+            fields.total_len = (fields.header_len() + payload.len()) as u16;
+            (fields, payload)
+        })
+    }
+
+    /// Offsets the property inputs may lie at: the version and header length
+    /// byte, and both total length bytes.
+    const LIES: &[usize] = &[0, 2, 3];
+
+    /// A well-formed packet with a random checksum field.
+    fn packet() -> impl Strategy<Value = Vec<u8>> {
+        packet_fields().prop_map(|(fields, payload)| fields.to_bytes(&payload))
+    }
+
+    /// The header and payload parts of a parse, in input order, or its error.
+    fn parts(buf: &[u8]) -> Result<Vec<&[u8]>, ParseError> {
+        let packet = Ipv4Packet::parse(buf)?;
+        Ok(vec![packet.header.as_bytes(), packet.options, packet.payload])
+    }
+
+    /// The parts as above, through the mutable parse.
+    fn parts_mut(buf: &mut [u8]) -> Result<Vec<&[u8]>, ParseError> {
+        let Ipv4PacketMut { header, options, payload } = Ipv4PacketMut::parse(buf)?;
+        Ok(vec![header.as_bytes(), &*options, &*payload])
+    }
+
+    /// A mutation of the IPv4 header through its setters.
+    #[derive(Debug, Clone)]
+    enum Op {
+        Dscp(u8),
+        Ecn(u8),
+        Id(u16),
+        Ttl(u8),
+        DecrementTtl,
+        Protocol(u8),
+        /// Taken modulo the room the buffer leaves for the payload.
+        TotalLen(u16),
+        Src([u8; 4]),
+        Dst([u8; 4]),
+    }
+
+    /// Random sequences of header mutations.
+    fn ops() -> impl Strategy<Value = Vec<Op>> {
+        let op = prop_oneof![
+            any::<u8>().prop_map(Op::Dscp),
+            any::<u8>().prop_map(Op::Ecn),
+            any::<u16>().prop_map(Op::Id),
+            any::<u8>().prop_map(Op::Ttl),
+            Just(Op::DecrementTtl),
+            any::<u8>().prop_map(Op::Protocol),
+            any::<u16>().prop_map(Op::TotalLen),
+            any::<[u8; 4]>().prop_map(Op::Src),
+            any::<[u8; 4]>().prop_map(Op::Dst),
+        ];
+        vec(op, 0..=16)
+    }
+
+    /// Runs the mutations on a packet with a valid checksum.
+    ///
+    /// Returns the buffer and the model of the fields after the same
+    /// mutations, with the checksum as stored.
+    fn run(start: &Fields, payload: &[u8], ops: &[Op]) -> (Vec<u8>, Fields) {
+        let mut buf = start.to_bytes(payload);
+        Ipv4PacketMut::parse(&mut buf).unwrap().recompute_checksum();
+        let mut model = Ipv4Packet::parse(&buf).map(|packet| Fields::read(&packet)).unwrap();
+        for op in ops {
+            let header = Ipv4PacketMut::parse(&mut buf).unwrap().header;
+            match *op {
+                Op::Dscp(dscp) => {
+                    header.set_dscp(dscp);
+                    model.dscp = dscp & 0x3f;
+                }
+                Op::Ecn(ecn) => {
+                    header.set_ecn(ecn);
+                    model.ecn = ecn & 3;
+                }
+                Op::Id(id) => {
+                    header.set_id(id);
+                    model.id = id;
+                }
+                Op::Ttl(ttl) => {
+                    header.set_ttl(ttl);
+                    model.ttl = ttl;
+                }
+                Op::DecrementTtl => {
+                    let expected = (model.ttl > 1).then(|| model.ttl - 1);
+                    assert_eq!(expected, header.decrement_ttl());
+                    model.ttl = expected.unwrap_or(model.ttl);
+                }
+                Op::Protocol(protocol) => {
+                    header.set_protocol(protocol);
+                    model.protocol = protocol;
+                }
+                Op::TotalLen(total_len) => {
+                    let room = payload.len() + 1;
+                    let total_len = (start.header_len() + usize::from(total_len) % room) as u16;
+                    header.set_total_len(total_len);
+                    model.total_len = total_len;
+                }
+                Op::Src(src) => {
+                    assert_eq!(Ipv4Addr::from(model.src), header.set_src(Ipv4Addr::from(src)));
+                    model.src = src;
+                }
+                Op::Dst(dst) => {
+                    assert_eq!(Ipv4Addr::from(model.dst), header.set_dst(Ipv4Addr::from(dst)));
+                    model.dst = dst;
+                }
+            }
+            model.checksum = header.checksum();
+        }
+        (buf, model)
+    }
+
+    /// Asserts that the error carries the values the input bytes hold.
+    fn assert_error(buf: &[u8], error: ParseError) {
+        let version = buf.first().map(|byte| byte >> 4);
+        let words = buf.first().map(|byte| byte & 0x0f);
+        match error {
+            ParseError::Truncated { needed, available } => {
+                assert_eq!(buf.len(), available);
+                assert!(needed > available);
+                if buf.len() < Ipv4Header::MIN_LEN {
+                    assert_eq!(Ipv4Header::MIN_LEN, needed);
+                } else {
+                    assert_eq!(Some(4), version);
+                    assert_eq!(usize::from(words.unwrap()) * 4, needed);
+                }
+            }
+            ParseError::Version { found } => {
+                assert_eq!(version, Some(found));
+                assert_ne!(4, found);
+            }
+            ParseError::HeaderLen { words: found } => {
+                assert_eq!(Some(4), version);
+                assert_eq!(words, Some(found));
+                assert!(found < 5);
+            }
+            ParseError::LengthBelowHeader { length, header_len } => {
+                assert_eq!(testing::be16(&buf[2..]), length);
+                assert_eq!(usize::from(words.unwrap()) * 4, header_len);
+                assert!(length < header_len && header_len <= buf.len());
+            }
+            ParseError::LengthBeyondInput { length, available } => {
+                assert_eq!(testing::be16(&buf[2..]), length);
+                assert_eq!(buf.len(), available);
+                assert!(length > available);
+            }
+        }
+    }
+
+    proptest! {
+        #![proptest_config(testing::config())]
+
+        #[test]
+        fn test_ipv4_parse_ok_respects_bounds(buf in testing::input(packet(), LIES)) {
+            if let Ok(parts) = parts(&buf) {
+                testing::assert_adjacent(&buf, &parts);
+                let header = Ipv4Header::read_from_bytes(parts[0]).unwrap();
+                prop_assert_eq!(Ipv4Header::MIN_LEN, parts[0].len());
+                prop_assert_eq!(header.header_len(), parts[0].len() + parts[1].len());
+                prop_assert_eq!(usize::from(header.total_len()), header.header_len() + parts[2].len());
+                prop_assert!(usize::from(header.total_len()) <= buf.len());
+            }
+        }
+
+        #[test]
+        fn test_ipv4_parse_error_reports_fields_of_input(buf in testing::input(packet(), LIES)) {
+            if let Err(error) = parts(&buf) {
+                assert_error(&buf, error);
+            }
+        }
+
+        #[test]
+        fn test_ipv4_parse_and_parse_mut_agree(buf in testing::input(packet(), LIES)) {
+            let mut copy = buf.clone();
+            prop_assert_eq!(testing::lens(&parts(&buf)), testing::lens(&parts_mut(&mut copy)));
+        }
+
+        #[test]
+        fn test_ipv4_round_trip_reads_back_built_fields((fields, payload) in packet_fields()) {
+            let buf = fields.to_bytes(&payload);
+            let packet = Ipv4Packet::parse(&buf).unwrap();
+            prop_assert_eq!(4, packet.header.version());
+            prop_assert_eq!(&fields, &Fields::read(&packet));
+            prop_assert_eq!(&payload[..], packet.payload);
+        }
+
+        #[test]
+        fn test_ipv4_setters_change_only_their_field((start, payload) in packet_fields(), ops in ops()) {
+            let (buf, model) = run(&start, &payload, &ops);
+            let packet = Ipv4Packet::parse(&buf).unwrap();
+            prop_assert_eq!(&model, &Fields::read(&packet));
+            let payload_len = usize::from(model.total_len) - start.header_len();
+            prop_assert_eq!(&payload[..payload_len], packet.payload);
+        }
+
+        #[test]
+        fn test_ipv4_incremental_checksum_equals_recompute((start, payload) in packet_fields(), ops in ops()) {
+            let (mut buf, _) = run(&start, &payload, &ops);
+            let mut packet = Ipv4PacketMut::parse(&mut buf).unwrap();
+            prop_assert!(packet.checksum_is_valid());
+            let incremental = packet.header.checksum();
+            packet.recompute_checksum();
+            prop_assert!(testing::same_checksum(incremental, packet.header.checksum()));
+        }
     }
 }

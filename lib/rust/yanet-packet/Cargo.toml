@@ -16,3 +16,6 @@ unused_crate_dependencies = "deny"
 [lints.clippy]
 std_instead_of_core = "deny"
 alloc_instead_of_core = "deny"
+
+[dev-dependencies]
+proptest = { version = "1.12", default-features = false, features = ["std"] }

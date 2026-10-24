@@ -135,7 +135,11 @@ impl Ipv6Header {
 
 #[cfg(test)]
 mod tests {
+
+    use proptest::{collection::vec, prelude::*};
+
     use super::*;
+    use crate::testing;
 
     /// An IPv6 packet with a fixed header and a 6-byte payload.
     fn packet() -> [u8; 46] {
@@ -254,5 +258,198 @@ mod tests {
         assert_eq!(Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 1), h.set_src(new));
         assert_eq!(new, h.src());
         assert_eq!(Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 2), h.set_dst(new));
+    }
+
+    /// IPv6 header fields as built and read back; the version is always 6.
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    struct Fields {
+        traffic_class: u8,
+        flow_label: u32,
+        next_header: u8,
+        hop_limit: u8,
+        src: [u8; 16],
+        dst: [u8; 16],
+    }
+
+    impl Fields {
+        /// The packet bytes, with the payload length of the payload.
+        fn to_bytes(&self, payload: &[u8]) -> Vec<u8> {
+            let word = 6u32 << 28 | u32::from(self.traffic_class) << 20 | self.flow_label;
+            [
+                &word.to_be_bytes()[..],
+                &(payload.len() as u16).to_be_bytes(),
+                &[self.next_header, self.hop_limit],
+                &self.src,
+                &self.dst,
+                payload,
+            ]
+            .concat()
+        }
+
+        fn read(header: &Ipv6Header) -> Self {
+            Self {
+                traffic_class: header.traffic_class(),
+                flow_label: header.flow_label(),
+                next_header: header.next_header(),
+                hop_limit: header.hop_limit(),
+                src: header.src().octets(),
+                dst: header.dst().octets(),
+            }
+        }
+    }
+
+    /// Random IPv6 header fields.
+    fn fields() -> impl Strategy<Value = Fields> {
+        (
+            any::<u8>(),
+            0u32..1 << 20,
+            any::<u8>(),
+            any::<u8>(),
+            any::<[u8; 16]>(),
+            any::<[u8; 16]>(),
+        )
+            .prop_map(|(traffic_class, flow_label, next_header, hop_limit, src, dst)| Fields {
+                traffic_class,
+                flow_label,
+                next_header,
+                hop_limit,
+                src,
+                dst,
+            })
+    }
+
+    /// Offsets the property inputs may lie at: the version byte, and both
+    /// payload length bytes.
+    const LIES: &[usize] = &[0, 4, 5];
+
+    /// A well-formed IPv6 packet.
+    fn valid_packet() -> impl Strategy<Value = Vec<u8>> {
+        (fields(), vec(any::<u8>(), 0..=32)).prop_map(|(fields, payload)| fields.to_bytes(&payload))
+    }
+
+    /// The header and payload parts of a parse, in input order, or its error.
+    fn parts(buf: &[u8]) -> Result<Vec<&[u8]>, ParseError> {
+        let (header, payload) = Ipv6Header::parse(buf)?;
+        Ok(vec![header.as_bytes(), payload])
+    }
+
+    /// The parts as above, through the mutable parse.
+    fn parts_mut(buf: &mut [u8]) -> Result<Vec<&[u8]>, ParseError> {
+        let (header, payload) = Ipv6Header::parse_mut(buf)?;
+        Ok(vec![header.as_bytes(), &*payload])
+    }
+
+    /// A mutation of the IPv6 header through its setters.
+    #[derive(Debug, Clone)]
+    enum Op {
+        TrafficClass(u8),
+        HopLimit(u8),
+        Src([u8; 16]),
+        Dst([u8; 16]),
+    }
+
+    /// A random header mutation.
+    fn op() -> impl Strategy<Value = Op> {
+        prop_oneof![
+            any::<u8>().prop_map(Op::TrafficClass),
+            any::<u8>().prop_map(Op::HopLimit),
+            any::<[u8; 16]>().prop_map(Op::Src),
+            any::<[u8; 16]>().prop_map(Op::Dst),
+        ]
+    }
+
+    /// Asserts that the error carries the values the input bytes hold.
+    fn assert_error(buf: &[u8], error: ParseError) {
+        match error {
+            ParseError::Truncated { needed, available } => {
+                assert_eq!(Ipv6Header::LEN, needed);
+                assert_eq!(buf.len(), available);
+                assert!(needed > available);
+            }
+            ParseError::Version { found } => {
+                assert_eq!(buf[0] >> 4, found);
+                assert_ne!(6, found);
+            }
+            ParseError::LengthBeyondInput { length, available } => {
+                assert_eq!(6, buf[0] >> 4);
+                assert_eq!(Ipv6Header::LEN + testing::be16(&buf[4..]), length);
+                assert_eq!(buf.len(), available);
+                assert!(length > available);
+            }
+            ParseError::HeaderLen { .. } | ParseError::LengthBelowHeader { .. } => panic!("unexpected {error:?}"),
+        }
+    }
+
+    proptest! {
+        #![proptest_config(testing::config())]
+
+        #[test]
+        fn test_ipv6_parse_ok_respects_bounds(buf in testing::input(valid_packet(), LIES)) {
+            if let Ok(parts) = parts(&buf) {
+                testing::assert_adjacent(&buf, &parts);
+                let header = Ipv6Header::read_from_bytes(parts[0]).unwrap();
+                prop_assert_eq!(Ipv6Header::LEN, parts[0].len());
+                prop_assert_eq!(usize::from(header.payload_len()), parts[1].len());
+                prop_assert!(Ipv6Header::LEN + parts[1].len() <= buf.len());
+            }
+        }
+
+        #[test]
+        fn test_ipv6_parse_error_reports_fields_of_input(buf in testing::input(valid_packet(), LIES)) {
+            if let Err(error) = parts(&buf) {
+                assert_error(&buf, error);
+            }
+        }
+
+        #[test]
+        fn test_ipv6_parse_and_parse_mut_agree(buf in testing::input(valid_packet(), LIES)) {
+            let mut copy = buf.clone();
+            prop_assert_eq!(testing::lens(&parts(&buf)), testing::lens(&parts_mut(&mut copy)));
+        }
+
+        #[test]
+        fn test_ipv6_round_trip_reads_back_built_fields(fields in fields(), payload in vec(any::<u8>(), 0..=32)) {
+            let buf = fields.to_bytes(&payload);
+            let (header, rest) = Ipv6Header::parse(&buf).unwrap();
+            prop_assert_eq!(6, header.version());
+            prop_assert_eq!(&fields, &Fields::read(header));
+            prop_assert_eq!(&payload[..], rest);
+        }
+
+        #[test]
+        fn test_ipv6_setters_change_only_their_field(
+            start in fields(),
+            payload in vec(any::<u8>(), 0..=8),
+            ops in vec(op(), 0..=12),
+        ) {
+            let mut buf = start.to_bytes(&payload);
+            let mut model = start.clone();
+            for op in ops {
+                let (header, _) = Ipv6Header::parse_mut(&mut buf).unwrap();
+                match op {
+                    Op::TrafficClass(traffic_class) => {
+                        header.set_traffic_class(traffic_class);
+                        model.traffic_class = traffic_class;
+                    }
+                    Op::HopLimit(hop_limit) => {
+                        header.set_hop_limit(hop_limit);
+                        model.hop_limit = hop_limit;
+                    }
+                    Op::Src(src) => {
+                        prop_assert_eq!(Ipv6Addr::from(model.src), header.set_src(Ipv6Addr::from(src)));
+                        model.src = src;
+                    }
+                    Op::Dst(dst) => {
+                        prop_assert_eq!(Ipv6Addr::from(model.dst), header.set_dst(Ipv6Addr::from(dst)));
+                        model.dst = dst;
+                    }
+                }
+            }
+            let (header, rest) = Ipv6Header::parse(&buf).unwrap();
+            prop_assert_eq!(6, header.version());
+            prop_assert_eq!(&model, &Fields::read(header));
+            prop_assert_eq!(usize::from(header.payload_len()), payload.len());
+            prop_assert_eq!(&payload[..], rest);
+        }
     }
 }

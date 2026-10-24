@@ -135,8 +135,14 @@ impl UdpHeader {
 
 #[cfg(test)]
 mod tests {
+
+    use proptest::{collection::vec, prelude::*};
+
     use super::*;
-    use crate::IPPROTO_UDP;
+    use crate::{
+        IPPROTO_UDP,
+        testing::{self, L4Op},
+    };
 
     /// A UDP datagram over IPv4 carrying the payload, with its checksum set or
     /// zero, and its length.
@@ -153,11 +159,6 @@ mod tests {
             buf[6..8].copy_from_slice(&sum.to_be_bytes());
         }
         (buf, total)
-    }
-
-    /// Whether the datagram's checksum verifies over the IPv4 pseudo-header.
-    fn valid(src: [u8; 4], dst: [u8; 4], seg: &[u8]) -> bool {
-        checksum::l4_is_valid_ipv4(Ipv4Addr::from(src), Ipv4Addr::from(dst), IPPROTO_UDP, seg)
     }
 
     #[test]
@@ -220,26 +221,6 @@ mod tests {
     }
 
     #[test]
-    fn test_udp_incremental_checksum_for_ports_and_addresses() {
-        let mut src = [10, 1, 2, 3];
-        let mut dst = [10, 4, 5, 6];
-        let (mut buf, total) = build(src, dst, &[1, 2, 3, 4, 5], true);
-        for i in 0..=255u8 {
-            let new_src = [i, 0, 255 - i, i];
-            let new_dst = [i ^ 0xff, i, 1, 2];
-            let (h, _) = UdpHeader::parse_mut(&mut buf[..total]).unwrap();
-            h.set_src_port(u16::from(i) << 8 | u16::from(255 - i));
-            h.set_dst_port(u16::from(i) * 251);
-            h.replace_ipv4_addr(Ipv4Addr::from(src), Ipv4Addr::from(new_src));
-            h.replace_ipv4_addr(Ipv4Addr::from(dst), Ipv4Addr::from(new_dst));
-            src = new_src;
-            dst = new_dst;
-            assert!(!h.has_no_checksum());
-            assert!(valid(src, dst, &buf[..total]), "step {i}");
-        }
-    }
-
-    #[test]
     fn test_udp_zero_checksum_over_ipv4_is_preserved() {
         let (mut buf, total) = build([1, 1, 1, 1], [2, 2, 2, 2], &[1, 2], false);
         let (h, _) = UdpHeader::parse_mut(&mut buf[..total]).unwrap();
@@ -266,5 +247,195 @@ mod tests {
         assert_eq!(0xffff, h.checksum());
         h.replace_ipv6_addr(Ipv6Addr::UNSPECIFIED, Ipv6Addr::UNSPECIFIED);
         assert_eq!(0xffff, h.checksum());
+    }
+
+    /// UDP header fields as built and read back; the length follows the
+    /// payload.
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    struct Fields {
+        src_port: u16,
+        dst_port: u16,
+        checksum: u16,
+    }
+
+    impl Fields {
+        fn to_bytes(&self, payload: &[u8]) -> Vec<u8> {
+            let length = (UdpHeader::LEN + payload.len()) as u16;
+            [
+                &self.src_port.to_be_bytes()[..],
+                &self.dst_port.to_be_bytes(),
+                &length.to_be_bytes(),
+                &self.checksum.to_be_bytes(),
+                payload,
+            ]
+            .concat()
+        }
+
+        fn read(header: &UdpHeader) -> Self {
+            Self {
+                src_port: header.src_port(),
+                dst_port: header.dst_port(),
+                checksum: header.checksum(),
+            }
+        }
+    }
+
+    /// Random UDP header fields.
+    fn fields() -> impl Strategy<Value = Fields> {
+        (any::<u16>(), any::<u16>(), any::<u16>()).prop_map(|(src_port, dst_port, checksum)| Fields {
+            src_port,
+            dst_port,
+            checksum,
+        })
+    }
+
+    /// Offsets the property inputs may lie at: both length bytes.
+    const LIES: &[usize] = &[4, 5];
+
+    /// A well-formed datagram with a random checksum field.
+    fn datagram() -> impl Strategy<Value = Vec<u8>> {
+        (fields(), vec(any::<u8>(), 0..=24)).prop_map(|(fields, payload)| fields.to_bytes(&payload))
+    }
+
+    /// The header and payload parts of a parse, in input order, or its error.
+    fn parts(buf: &[u8]) -> Result<Vec<&[u8]>, ParseError> {
+        let (header, payload) = UdpHeader::parse(buf)?;
+        Ok(vec![header.as_bytes(), payload])
+    }
+
+    /// The parts as above, through the mutable parse.
+    fn parts_mut(buf: &mut [u8]) -> Result<Vec<&[u8]>, ParseError> {
+        let (header, payload) = UdpHeader::parse_mut(buf)?;
+        Ok(vec![header.as_bytes(), &*payload])
+    }
+
+    impl testing::L4Header for UdpHeader {
+        fn set_src_port(&mut self, port: u16) {
+            UdpHeader::set_src_port(self, port);
+        }
+
+        fn set_dst_port(&mut self, port: u16) {
+            UdpHeader::set_dst_port(self, port);
+        }
+
+        fn replace_ipv4_addr(&mut self, old: Ipv4Addr, new: Ipv4Addr) {
+            UdpHeader::replace_ipv4_addr(self, old, new);
+        }
+
+        fn replace_ipv6_addr(&mut self, old: Ipv6Addr, new: Ipv6Addr) {
+            UdpHeader::replace_ipv6_addr(self, old, new);
+        }
+    }
+
+    /// Asserts that the error carries the values the input bytes hold.
+    fn assert_error(buf: &[u8], error: ParseError) {
+        match error {
+            ParseError::Truncated { needed, available } => {
+                assert_eq!(UdpHeader::LEN, needed);
+                assert_eq!(buf.len(), available);
+                assert!(needed > available);
+            }
+            ParseError::LengthBelowHeader { length, header_len } => {
+                assert_eq!(testing::be16(&buf[4..]), length);
+                assert_eq!(UdpHeader::LEN, header_len);
+                assert!(length < header_len);
+            }
+            ParseError::LengthBeyondInput { length, available } => {
+                assert_eq!(testing::be16(&buf[4..]), length);
+                assert_eq!(buf.len(), available);
+                assert!(length > available);
+            }
+            ParseError::Version { .. } | ParseError::HeaderLen { .. } => panic!("unexpected {error:?}"),
+        }
+    }
+
+    proptest! {
+        #![proptest_config(testing::config())]
+
+        #[test]
+        fn test_udp_parse_ok_respects_bounds(buf in testing::input(datagram(), LIES)) {
+            if let Ok(parts) = parts(&buf) {
+                testing::assert_adjacent(&buf, &parts);
+                let header = UdpHeader::read_from_bytes(parts[0]).unwrap();
+                prop_assert_eq!(UdpHeader::LEN, parts[0].len());
+                prop_assert_eq!(usize::from(header.length()), parts[0].len() + parts[1].len());
+                prop_assert!(usize::from(header.length()) <= buf.len());
+            }
+        }
+
+        #[test]
+        fn test_udp_parse_error_reports_fields_of_input(buf in testing::input(datagram(), LIES)) {
+            if let Err(error) = parts(&buf) {
+                assert_error(&buf, error);
+            }
+        }
+
+        #[test]
+        fn test_udp_parse_and_parse_mut_agree(buf in testing::input(datagram(), LIES)) {
+            let mut copy = buf.clone();
+            prop_assert_eq!(testing::lens(&parts(&buf)), testing::lens(&parts_mut(&mut copy)));
+        }
+
+        #[test]
+        fn test_udp_round_trip_reads_back_built_fields(fields in fields(), payload in vec(any::<u8>(), 0..=24)) {
+            let buf = fields.to_bytes(&payload);
+            let (header, rest) = UdpHeader::parse(&buf).unwrap();
+            prop_assert_eq!(&fields, &Fields::read(header));
+            prop_assert_eq!(payload.len() + UdpHeader::LEN, usize::from(header.length()));
+            prop_assert_eq!(&payload[..], rest);
+        }
+
+        #[test]
+        fn test_udp_setters_change_only_their_field(
+            start in fields(),
+            payload in vec(any::<u8>(), 0..=24),
+            family in testing::family(),
+            addrs in any::<([u8; 16], [u8; 16])>(),
+            ops in testing::l4_ops(),
+        ) {
+            let mut buf = start.to_bytes(&payload);
+            let mut model = start.clone();
+            let mut addrs = addrs;
+            for op in &ops {
+                let (header, _) = UdpHeader::parse_mut(&mut buf).unwrap();
+                testing::apply(header, family, op, &mut addrs);
+                match *op {
+                    L4Op::SrcPort(port) => model.src_port = port,
+                    L4Op::DstPort(port) => model.dst_port = port,
+                    L4Op::Src(_) | L4Op::Dst(_) => {}
+                }
+                model.checksum = header.checksum();
+                prop_assert_eq!(&model, &Fields::read(header));
+            }
+            let (header, rest) = UdpHeader::parse(&buf).unwrap();
+            prop_assert_eq!(payload.len() + UdpHeader::LEN, usize::from(header.length()));
+            prop_assert_eq!(&payload[..], rest);
+        }
+
+        #[test]
+        fn test_udp_incremental_checksum_verifies_over_pseudo_header(
+            (src_port, dst_port) in any::<(u16, u16)>(),
+            payload in vec(any::<u8>(), 0..=24),
+            family in testing::family(),
+            addrs in any::<([u8; 16], [u8; 16])>(),
+            has_checksum in any::<bool>(),
+            ops in testing::l4_ops(),
+        ) {
+            let start = Fields { src_port, dst_port, checksum: 0 };
+            let mut buf = start.to_bytes(&payload);
+            if has_checksum {
+                let sum = family.l4_checksum(addrs.0, addrs.1, IPPROTO_UDP, &buf);
+                buf[6..8].copy_from_slice(&if sum == 0 { 0xffff } else { sum }.to_be_bytes());
+            }
+            let mut addrs = addrs;
+            for op in &ops {
+                let (header, _) = UdpHeader::parse_mut(&mut buf).unwrap();
+                testing::apply(header, family, op, &mut addrs);
+                prop_assert_eq!(has_checksum, !header.has_no_checksum());
+            }
+            if has_checksum {
+                prop_assert!(family.l4_is_valid(addrs.0, addrs.1, IPPROTO_UDP, &buf));
+            }
+        }
     }
 }

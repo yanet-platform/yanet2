@@ -5,7 +5,7 @@
 //! [`ParseError`] that says why; nothing here panics on attacker-controlled
 //! bytes.
 
-#![no_std]
+#![cfg_attr(not(test), no_std)]
 #![forbid(unsafe_code)]
 
 pub mod checksum;
@@ -15,6 +15,8 @@ mod icmp;
 mod ipv4;
 mod ipv6;
 mod tcp;
+#[cfg(test)]
+mod testing;
 mod udp;
 
 pub use error::ParseError;

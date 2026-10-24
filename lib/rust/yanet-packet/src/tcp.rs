@@ -180,8 +180,14 @@ impl<'a> TcpPacketMut<'a> {
 
 #[cfg(test)]
 mod tests {
+
+    use proptest::{collection::vec, prelude::*};
+
     use super::*;
-    use crate::IPPROTO_TCP;
+    use crate::{
+        IPPROTO_TCP,
+        testing::{self, L4Op},
+    };
 
     /// Builds a segment with the given number of option words and a valid
     /// checksum for the given IPv4 addresses; returns the buffer and the
@@ -204,11 +210,6 @@ mod tests {
         let sum = checksum::l4_checksum_ipv4(Ipv4Addr::from(src), Ipv4Addr::from(dst), IPPROTO_TCP, &buf[..total]);
         buf[16..18].copy_from_slice(&sum.to_be_bytes());
         (buf, total)
-    }
-
-    /// Whether the segment's checksum verifies over the IPv4 pseudo-header.
-    fn valid(src: [u8; 4], dst: [u8; 4], seg: &[u8]) -> bool {
-        checksum::l4_is_valid_ipv4(Ipv4Addr::from(src), Ipv4Addr::from(dst), IPPROTO_TCP, seg)
     }
 
     #[test]
@@ -283,41 +284,222 @@ mod tests {
         assert_eq!(expected, TcpPacket::parse(&buf[..19]).unwrap_err());
     }
 
-    #[test]
-    fn test_tcp_incremental_checksum_for_ports_and_addresses() {
-        for opts in [0, 3] {
-            let mut src = [10, 0, 0, 1];
-            let mut dst = [192, 168, 1, 9];
-            let (mut buf, total) = build(src, dst, opts, &[0x55; 9]);
-            assert!(valid(src, dst, &buf[..total]));
-            for i in 0..=255u8 {
-                let new_src = [i, i ^ 0xa5, 255 - i, i.wrapping_mul(7)];
-                let new_dst = [255 - i, 0, i, 1];
-                let p = TcpPacketMut::parse(&mut buf[..total]).unwrap();
-                p.header.set_src_port(u16::from(i) * 257);
-                p.header.set_dst_port(u16::from(255 - i) * 131);
-                p.header.replace_ipv4_addr(Ipv4Addr::from(src), Ipv4Addr::from(new_src));
-                p.header.replace_ipv4_addr(Ipv4Addr::from(dst), Ipv4Addr::from(new_dst));
-                src = new_src;
-                dst = new_dst;
-                assert!(valid(src, dst, &buf[..total]), "step {i}");
-                assert_ne!(0, TcpPacket::parse(&buf[..total]).unwrap().header.checksum());
+    /// TCP header fields as built and read back; the data offset follows the
+    /// options.
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    struct Fields {
+        src_port: u16,
+        dst_port: u16,
+        seq: u32,
+        ack: u32,
+        flags: u16,
+        window: u16,
+        checksum: u16,
+        urgent: u16,
+        options: Vec<u8>,
+    }
+
+    impl Fields {
+        fn to_bytes(&self, payload: &[u8]) -> Vec<u8> {
+            let offset_flags = ((5 + self.options.len() / 4) as u16) << 12 | self.flags;
+            [
+                &self.src_port.to_be_bytes()[..],
+                &self.dst_port.to_be_bytes(),
+                &self.seq.to_be_bytes(),
+                &self.ack.to_be_bytes(),
+                &offset_flags.to_be_bytes(),
+                &self.window.to_be_bytes(),
+                &self.checksum.to_be_bytes(),
+                &self.urgent.to_be_bytes(),
+                &self.options,
+                payload,
+            ]
+            .concat()
+        }
+
+        fn read(packet: &TcpPacket) -> Self {
+            let header = packet.header;
+            Self {
+                src_port: header.src_port(),
+                dst_port: header.dst_port(),
+                seq: header.seq(),
+                ack: header.ack(),
+                flags: header.flags(),
+                window: header.window(),
+                checksum: header.checksum(),
+                urgent: header.urgent(),
+                options: packet.options.to_vec(),
             }
         }
     }
 
-    #[test]
-    fn test_tcp_incremental_checksum_for_ipv6_addresses() {
-        let src = Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 1);
-        let dst = Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 2);
-        let (mut buf, total) = build([0; 4], [0; 4], 0, &[1, 2, 3, 4]);
-        buf[16] = 0;
-        buf[17] = 0;
-        let sum = checksum::l4_checksum_ipv6(src, dst, IPPROTO_TCP, &buf[..total]);
-        buf[16..18].copy_from_slice(&sum.to_be_bytes());
-        let new_src = Ipv6Addr::new(0xfd00, 1, 2, 3, 4, 5, 6, 0xffff);
-        let p = TcpPacketMut::parse(&mut buf[..total]).unwrap();
-        p.header.replace_ipv6_addr(src, new_src);
-        assert!(checksum::l4_is_valid_ipv6(new_src, dst, IPPROTO_TCP, &buf[..total]));
+    /// Random TCP header fields with up to ten option words.
+    fn fields() -> impl Strategy<Value = Fields> {
+        (
+            any::<(u16, u16)>(),
+            any::<(u32, u32)>(),
+            0u16..0x200,
+            any::<(u16, u16, u16)>(),
+            vec(any::<[u8; 4]>(), 0..=10),
+        )
+            .prop_map(
+                |((src_port, dst_port), (seq, ack), flags, (window, checksum, urgent), options)| Fields {
+                    src_port,
+                    dst_port,
+                    seq,
+                    ack,
+                    flags,
+                    window,
+                    checksum,
+                    urgent,
+                    options: options.concat(),
+                },
+            )
+    }
+
+    /// Offsets the property inputs may lie at: the data offset byte.
+    const LIES: &[usize] = &[12];
+
+    /// A well-formed segment with a random checksum field.
+    fn segment() -> impl Strategy<Value = Vec<u8>> {
+        (fields(), vec(any::<u8>(), 0..=32)).prop_map(|(fields, payload)| fields.to_bytes(&payload))
+    }
+
+    /// The header and payload parts of a parse, in input order, or its error.
+    fn parts(buf: &[u8]) -> Result<Vec<&[u8]>, ParseError> {
+        let packet = TcpPacket::parse(buf)?;
+        Ok(vec![packet.header.as_bytes(), packet.options, packet.payload])
+    }
+
+    /// The parts as above, through the mutable parse.
+    fn parts_mut(buf: &mut [u8]) -> Result<Vec<&[u8]>, ParseError> {
+        let TcpPacketMut { header, options, payload } = TcpPacketMut::parse(buf)?;
+        Ok(vec![header.as_bytes(), &*options, &*payload])
+    }
+
+    impl testing::L4Header for TcpHeader {
+        fn set_src_port(&mut self, port: u16) {
+            TcpHeader::set_src_port(self, port);
+        }
+
+        fn set_dst_port(&mut self, port: u16) {
+            TcpHeader::set_dst_port(self, port);
+        }
+
+        fn replace_ipv4_addr(&mut self, old: Ipv4Addr, new: Ipv4Addr) {
+            TcpHeader::replace_ipv4_addr(self, old, new);
+        }
+
+        fn replace_ipv6_addr(&mut self, old: Ipv6Addr, new: Ipv6Addr) {
+            TcpHeader::replace_ipv6_addr(self, old, new);
+        }
+    }
+
+    /// Asserts that the error carries the values the input bytes hold.
+    fn assert_error(buf: &[u8], error: ParseError) {
+        match error {
+            ParseError::Truncated { needed, available } => {
+                assert_eq!(buf.len(), available);
+                assert!(needed > available);
+                if buf.len() < TcpHeader::MIN_LEN {
+                    assert_eq!(TcpHeader::MIN_LEN, needed);
+                } else {
+                    assert_eq!(usize::from(buf[12] >> 4) * 4, needed);
+                }
+            }
+            ParseError::HeaderLen { words } => {
+                assert_eq!(buf[12] >> 4, words);
+                assert!(words < 5);
+            }
+            ParseError::Version { .. }
+            | ParseError::LengthBelowHeader { .. }
+            | ParseError::LengthBeyondInput { .. } => {
+                panic!("unexpected {error:?}")
+            }
+        }
+    }
+
+    proptest! {
+        #![proptest_config(testing::config())]
+
+        #[test]
+        fn test_tcp_parse_ok_respects_bounds(buf in testing::input(segment(), LIES)) {
+            if let Ok(parts) = parts(&buf) {
+                testing::assert_adjacent(&buf, &parts);
+                let header = TcpHeader::read_from_bytes(parts[0]).unwrap();
+                prop_assert_eq!(TcpHeader::MIN_LEN, parts[0].len());
+                prop_assert_eq!(header.header_len(), parts[0].len() + parts[1].len());
+                prop_assert_eq!(buf.len(), header.header_len() + parts[2].len());
+            }
+        }
+
+        #[test]
+        fn test_tcp_parse_error_reports_fields_of_input(buf in testing::input(segment(), LIES)) {
+            if let Err(error) = parts(&buf) {
+                assert_error(&buf, error);
+            }
+        }
+
+        #[test]
+        fn test_tcp_parse_and_parse_mut_agree(buf in testing::input(segment(), LIES)) {
+            let mut copy = buf.clone();
+            prop_assert_eq!(testing::lens(&parts(&buf)), testing::lens(&parts_mut(&mut copy)));
+        }
+
+        #[test]
+        fn test_tcp_round_trip_reads_back_built_fields(fields in fields(), payload in vec(any::<u8>(), 0..=32)) {
+            let buf = fields.to_bytes(&payload);
+            let packet = TcpPacket::parse(&buf).unwrap();
+            prop_assert_eq!(&fields, &Fields::read(&packet));
+            prop_assert_eq!(5 + fields.options.len() / 4, usize::from(packet.header.data_offset()));
+            prop_assert_eq!(&payload[..], packet.payload);
+        }
+
+        #[test]
+        fn test_tcp_setters_change_only_their_field(
+            start in fields(),
+            payload in vec(any::<u8>(), 0..=32),
+            family in testing::family(),
+            addrs in any::<([u8; 16], [u8; 16])>(),
+            ops in testing::l4_ops(),
+        ) {
+            let mut buf = start.to_bytes(&payload);
+            let mut model = start.clone();
+            let mut addrs = addrs;
+            for op in &ops {
+                let packet = TcpPacketMut::parse(&mut buf).unwrap();
+                testing::apply(packet.header, family, op, &mut addrs);
+                match *op {
+                    L4Op::SrcPort(port) => model.src_port = port,
+                    L4Op::DstPort(port) => model.dst_port = port,
+                    L4Op::Src(_) | L4Op::Dst(_) => {}
+                }
+                model.checksum = packet.header.checksum();
+            }
+            let packet = TcpPacket::parse(&buf).unwrap();
+            prop_assert_eq!(&model, &Fields::read(&packet));
+            prop_assert_eq!(&payload[..], packet.payload);
+        }
+
+        #[test]
+        fn test_tcp_incremental_checksum_verifies_over_pseudo_header(
+            start in fields(),
+            payload in vec(any::<u8>(), 0..=32),
+            family in testing::family(),
+            addrs in any::<([u8; 16], [u8; 16])>(),
+            ops in testing::l4_ops(),
+        ) {
+            let start = Fields { checksum: 0, ..start };
+            let mut buf = start.to_bytes(&payload);
+            let sum = family.l4_checksum(addrs.0, addrs.1, IPPROTO_TCP, &buf);
+            buf[16..18].copy_from_slice(&sum.to_be_bytes());
+            let mut addrs = addrs;
+            for op in &ops {
+                let packet = TcpPacketMut::parse(&mut buf).unwrap();
+                testing::apply(packet.header, family, op, &mut addrs);
+                prop_assert_ne!(0, packet.header.checksum());
+            }
+            prop_assert!(family.l4_is_valid(addrs.0, addrs.1, IPPROTO_TCP, &buf));
+        }
     }
 }
