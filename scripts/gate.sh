@@ -45,6 +45,10 @@ if [ -z "$base" ]; then
 		exit 2
 	}
 fi
+git rev-parse --quiet --verify "$base^{commit}" >/dev/null || {
+	echo "gate: $base is not a commit" >&2
+	exit 2
+}
 
 changed=$({
 	git diff --name-only --no-renames "$base"
@@ -142,13 +146,13 @@ gate_go() {
 	# Packages that hold changed Go files or link changed C; C or build
 	# changes outside a module and module requirement changes reach every
 	# package. The QEMU suite is left to make test-functional.
-	if matching '^go\.(mod|sum)$' >/dev/null || matching '(\.[ch]$|(^|/)meson\.build$|^subprojects/)' | grep -qv '^modules/'; then
+	if matching '(^go\.(mod|sum)$|\.proto$)' >/dev/null || matching '(\.[ch]$|(^|/)meson\.build$|^subprojects/)' | grep -qv '^modules/'; then
 		pkgs=./...
 		[ "$list" = 1 ] || pkgs=$(go list ./... | grep -v '/tests/functional/main$')
 	else
 		pkgs=$({
 			matching '\.go$' | xargs -r -n 1 dirname | sort -u | while IFS= read -r d; do
-				compgen -G "$d/*.go" >/dev/null && echo "./$d"
+				go list "./$d" >/dev/null 2>&1 && echo "./$d"
 			done
 			matching '^modules/[^/]+/.*(\.[ch]|meson\.build)$' | cut -d / -f 1-2 | sed 's|^|./|; s|$|/...|'
 		} | grep -v '^\./tests/functional/main$' | sort -u)
@@ -197,10 +201,10 @@ c=0
 matching '(\.[ch]$|(^|/)meson\.build$|^meson_options\.txt$|^subprojects/)' >/dev/null && c=1
 [ "$c" = 1 ] && gate_c
 if [ "$c" = 1 ] || matching '(\.go$|^go\.(mod|sum)$|\.proto$)' >/dev/null; then gate_go; fi
-matching '(\.rs$|(^|/)Cargo\.(toml|lock)$|^\.rustfmt\.toml$|^\.cargo/)' >/dev/null && gate_rust
+matching '(\.rs$|(^|/)Cargo\.(toml|lock)$|^\.rustfmt\.toml$|^\.cargo/|\.proto$)' >/dev/null && gate_rust
 matching '(^|/)web/|^package(-lock)?\.json$' >/dev/null && gate_web
 matching '\.proto$' >/dev/null && step proto-lint make --no-print-directory proto-lint
-[ -n "$(git rev-list "$base"..HEAD)" ] && step commitlint make --no-print-directory lint-commit
+[ -n "$(git rev-list "$base"..HEAD)" ] && step commitlint lint/commit/commitlint.sh --range "$base..HEAD"
 
 [ "$list" = 1 ] && exit 0
 [ ${#skipped[@]} -eq 0 ] || echo "skipped: ${skipped[*]}"
