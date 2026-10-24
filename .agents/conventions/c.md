@@ -1,6 +1,12 @@
+---
+paths:
+  - "**/*.c"
+  - "**/*.h"
+---
+
 # C conventions
 
-Loaded on demand by the agent writing or reviewing C; this is the single source for these rules.
+Loaded by path in Claude Code and on demand elsewhere, for the agent writing or reviewing C; this is the single source for these rules.
 
 - Always use braces for `if`/`else`/`for`/`while`, even single-line bodies. `clang-format` (`InsertBraces: true`) inserts them automatically, but it silently skips some cases, among them a body inside a macro definition, a body split from its condition by a preprocessor directive, and an empty `;` body.
 - Format with `clang-format`, restricted to the exact `.c`/`.h` paths you changed. Never pass a `.go` or `meson.build` path (alone or batched with C files) — clang-format has no concept of Go or meson grammar and silently mangles it with no warning (breaks `:=`, `for range`, `key:` syntax). Format Go separately with `gofmt`.

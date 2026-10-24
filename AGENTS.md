@@ -57,7 +57,7 @@ Rust CLI (`code-cli` skill has the rest): a CLI is registered in THREE places th
 
 ## Conventions
 
-Language rules: `.agents/conventions/{go,rust,c,ts}.md` — read the one for the language you touch. Comments (all languages): `.agents/conventions/comments.md`. Tests (all languages): `.agents/conventions/tests.md`.
+Language rules: `.agents/conventions/{go,rust,c,ts}.md` — read the one for the language you touch (Claude Code loads them by path via `.claude/rules/`). Comments (all languages): `.agents/conventions/comments.md`. Tests (all languages): `.agents/conventions/tests.md`.
 
 - After native changes run `meson compile -C build` before direct Go commands; `go test` needs the cache-line and sanitizer CGO flags that `make test`/`make test-asan` supply. Shm layout or `YANET_MODULE_ABI_VERSION` changes need rebuilt standalone CGO binaries and coordinated restarts; stop attached processes before removing stale `/dev/hugepages/yanet*`.
 - Skills live in `.agents/skills/<name>/` (symlinked from `.claude/skills/`). Hooks in `.agents/hooks/` (`.claude/settings.json`, `.codex/hooks.json`; Codex needs `/hooks` trust) format edited files and refuse writes on `main`, whole-tree `git add`, `--no-verify`, `git stash` and git commands that discard changes.

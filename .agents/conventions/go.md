@@ -1,6 +1,12 @@
+---
+paths:
+  - "**/*.go"
+  - "**/go.mod"
+---
+
 # Go conventions
 
-Loaded on demand by the agent writing or reviewing Go; this is the single source for these rules.
+Loaded by path in Claude Code and on demand elsewhere, for the agent writing or reviewing Go; this is the single source for these rules.
 
 - **Receiver names**: always `m`. No type-letter mnemonics.
 - **No abbreviated identifiers**: spell out names in production and tests (`labels`, `metrics`, `durationSeconds`); only `ok`, `err`, `ctx`, `idx`, `tc` for the current table-driven test case, and short-scope type-assert temporaries are exceptions.
