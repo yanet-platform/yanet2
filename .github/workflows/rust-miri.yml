@@ -6,7 +6,8 @@ name: Rust Miri
 # The bindings crate's build script runs bindgen and compiles the dataplane C
 # shim over the repository's C headers with the compiler and flags of a meson
 # configuration's compilation database, so changes to those headers re-run
-# the job and the job configures meson (no compilation) before Miri.
+# the job, which runs in the CI image (ci/README.md) and configures meson (no
+# compilation) before Miri.
 
 on:
   push:
@@ -20,8 +21,6 @@ on:
       - "**/meson.build"
       - "meson_options.txt"
       - ".github/workflows/rust-miri.yml"
-      - ".github/actions/apt-packages/**"
-      - ".github/actions/apt-failover/**"
   pull_request:
     # A stacked pull request has a non-main base, so a main-only filter would skip it.
     branches: ["**"]
@@ -34,17 +33,25 @@ on:
       - "**/meson.build"
       - "meson_options.txt"
       - ".github/workflows/rust-miri.yml"
-      - ".github/actions/apt-packages/**"
-      - ".github/actions/apt-failover/**"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
   cancel-in-progress: true
 
+defaults:
+  run:
+    # The runner's default shell, which container jobs would replace with sh.
+    shell: bash -e {0}
+
+permissions:
+  contents: read
+
 jobs:
   miri:
     name: miri (${{ matrix.model }} borrows)
     runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    container: ghcr.io/yanet-platform/yanet2-ci@sha256:81927a6bf8adabade5c16d5b1bd698e2ca5535ffd88175b58a5934e647834e25
     strategy:
       fail-fast: false
       matrix:
@@ -58,11 +65,8 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
           submodules: true
-      - uses: ./.github/actions/apt-packages
-        timeout-minutes: 10
-        with:
-          packages: meson clang-18 libclang1-18 cmake python3-pyelftools libnuma-dev libpcap-dev libyaml-dev
       # Pinned with the rustfmt nightly, so Miri moves only with a deliberate bump.
       - uses: dtolnay/rust-toolchain@2c76c034f9e32a5d6e2c104dc4df23a22476db04 # nightly
         with:

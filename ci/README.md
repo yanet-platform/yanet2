@@ -14,7 +14,7 @@ A job that names the image by digest runs exactly the toolchain behind that dige
 
 ## Where the image is pinned
 
-The native jobs of `.github/workflows/build.yml` and `.github/workflows/go-race.yml` name the image by digest in their `container:` key and pull it anonymously. A bump replaces the old digest in every reference at once:
+The native jobs of `.github/workflows/build.yml` and `.github/workflows/go-race.yml`, and the jobs of `.github/workflows/rust-sdk.yml` and `.github/workflows/rust-miri.yml` that compile the Rust SDK, name the image by digest in their `container:` key and pull it anonymously. A bump replaces the old digest in every reference at once:
 
 ```
 grep -rl 'yanet2-ci@sha256:' .github/workflows | xargs sed -i 's/<old digest>/<new digest>/'
