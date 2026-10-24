@@ -26,11 +26,9 @@ lib_l3b_objects_dep = declare_dependency(
   link_with: [lib_l3b_objects],
   include_directories: include_directories('.'),
   link_args: [
-    '-Wl,--defsym',
-    '-Wl,new_object_l3b_virtual_service=new_object_l3b_virtual_service',
+    '-Wl,--require-defined=new_object_l3b_virtual_service',
     '-Wl,--export-dynamic-symbol=new_object_l3b_virtual_service',
-    '-Wl,--defsym',
-    '-Wl,new_object_l3b_session_table=new_object_l3b_session_table',
+    '-Wl,--require-defined=new_object_l3b_session_table',
     '-Wl,--export-dynamic-symbol=new_object_l3b_session_table',
   ],
 )

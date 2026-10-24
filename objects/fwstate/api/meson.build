@@ -25,11 +25,9 @@ lib_fwstate_objects_dep = declare_dependency(
   link_with: [lib_fwstate_objects],
   include_directories: include_directories('.'),
   link_args: [
-    '-Wl,--defsym',
-    '-Wl,new_object_fwstate_map_v4=new_object_fwstate_map_v4',
+    '-Wl,--require-defined=new_object_fwstate_map_v4',
     '-Wl,--export-dynamic-symbol=new_object_fwstate_map_v4',
-    '-Wl,--defsym',
-    '-Wl,new_object_fwstate_map_v6=new_object_fwstate_map_v6',
+    '-Wl,--require-defined=new_object_fwstate_map_v6',
     '-Wl,--export-dynamic-symbol=new_object_fwstate_map_v6',
   ],
 )

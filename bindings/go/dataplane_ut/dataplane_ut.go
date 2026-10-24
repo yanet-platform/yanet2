@@ -54,6 +54,14 @@ package dataplaneut
 #cgo LDFLAGS: -lagent_counters -lcounter_pattern -lrure
 #cgo LDFLAGS: -Wl,--end-group
 
+// DPDK code the dataplane libraries and the test mempool call into: mbuf,
+// mempool, bpf and the EAL parts they reference. The harness never
+// initializes EAL (no rte_eal_init, no hugepages); its mempool keeps
+// objects on the heap behind its own ops (lib/dataplane_ut/mempool.h).
+#cgo LDFLAGS: -L../../../build/subprojects/dpdk/lib
+#cgo LDFLAGS: -l:librte_bpf.a -l:librte_mbuf.a -l:librte_mempool.a -l:librte_ring.a
+#cgo LDFLAGS: -l:librte_eal.a -l:librte_kvargs.a -l:librte_telemetry.a -l:librte_log.a
+
 #cgo LDFLAGS: -lnuma
 #cgo LDFLAGS: -ldl
 

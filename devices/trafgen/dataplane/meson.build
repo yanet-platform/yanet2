@@ -19,8 +19,7 @@ lib_dev_trafgen_dp = static_library(
 lib_dev_trafgen_dp_dep = declare_dependency(
     link_with: lib_dev_trafgen_dp,
     link_args: [
-        '-Wl,--defsym',
-        '-Wl,new_device_trafgen=new_device_trafgen',
+        '-Wl,--require-defined=new_device_trafgen',
         '-Wl,--export-dynamic-symbol=new_device_trafgen',
     ],
 )

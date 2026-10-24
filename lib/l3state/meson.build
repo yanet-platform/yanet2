@@ -2,7 +2,7 @@
 dependencies = [
     lib_common_dep,
     lib_packet_dp_dep,
-    libdpdk_dep,
+    libdpdk_inc_dep,
     lib_statemap_dep,
 ]
 

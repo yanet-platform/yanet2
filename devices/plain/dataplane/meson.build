@@ -18,8 +18,7 @@ lib_dev_plain_dp = static_library(
 lib_dev_plain_dp_dep = declare_dependency(
   link_with: lib_dev_plain_dp,
   link_args: [
-    '-Wl,--defsym',
-    '-Wl,new_device_plain=new_device_plain',
+    '-Wl,--require-defined=new_device_plain',
     '-Wl,--export-dynamic-symbol=new_device_plain',
   ],
 )

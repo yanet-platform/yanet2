@@ -29,7 +29,7 @@ libpcap_project = cmake.subproject('libpcap', options: pcap_opts)
 libpcap_dep = libpcap_project.dependency('pcap_static')
 lib_pcap_static = libpcap_project.target('pcap_static')
 
-cp_dependencies = [lib_common_dep, lib_errors_dep, lib_config_cp_dep, libdpdk_dep, libpcap_dep]
+cp_dependencies = [lib_common_dep, lib_errors_dep, lib_config_cp_dep, libdpdk_inc_dep, libpcap_dep]
 api_sources = files('controlplane.c')
 
 lib_pdump_cp = static_library(

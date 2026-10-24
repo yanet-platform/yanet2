@@ -1,11 +1,15 @@
-lib_rte_bpf_candidates = []
+dpdk_static_libraries = {}
 foreach library : libdpdk.get_variable('dpdk_static_libraries')
-  if library.name() == 'rte_bpf'
-    lib_rte_bpf_candidates += library
-  endif
+  dpdk_static_libraries += {library.name(): library}
 endforeach
-assert(lib_rte_bpf_candidates.length() == 1, 'Expected one DPDK BPF static library')
-lib_rte_bpf = lib_rte_bpf_candidates[0]
+lib_rte_bpf = dpdk_static_libraries['rte_bpf']
+
+# The DPDK runtime that cgo test packages linking dataplane libraries
+# list in their LDFLAGS.
+dpdk_runtime_libraries = []
+foreach name : ['mbuf', 'mempool', 'ring', 'eal', 'kvargs', 'telemetry', 'log']
+  dpdk_runtime_libraries += dpdk_static_libraries['rte_' + name]
+endforeach
 
 cgo_packages += {
   'bindings/go/cerrors': {
@@ -79,7 +83,7 @@ cgo_packages += {
     'libraries': [lib_nat64_cp, lib_logging],
   },
   'modules/pdump/controlplane': {
-    'libraries': [lib_pdump_cp, lib_pcap_static],
+    'libraries': [lib_pdump_cp, lib_rte_bpf, lib_pcap_static],
   },
   'modules/route/bindings/go/croute': {
     'libraries': [lib_route_cp],
@@ -145,7 +149,8 @@ cgo_packages += {
       lib_lib_utils,
       lib_agent_counters,
       lib_counter_pattern,
-    ],
+      lib_rte_bpf,
+    ] + dpdk_runtime_libraries,
     'inputs': [librure],
   },
   'common/go/dataplane': {
@@ -195,7 +200,7 @@ cgo_packages += {
       lib_fwstate,
       lib_logging,
       lib_errors,
-    ],
+    ] + dpdk_runtime_libraries,
   },
   'modules/fwstate/tests/functional': {
     'libraries': [lib_counters],

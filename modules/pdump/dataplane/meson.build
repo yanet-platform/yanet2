@@ -20,8 +20,7 @@ lib_pdump_dp = static_library(
 lib_pdump_dp_dep = declare_dependency(
   link_with: lib_pdump_dp,
   link_args: [
-    '-Wl,--defsym',
-    '-Wl,new_module_pdump=new_module_pdump',
+    '-Wl,--require-defined=new_module_pdump',
     '-Wl,--export-dynamic-symbol=new_module_pdump',
   ],
 )

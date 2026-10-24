@@ -18,8 +18,7 @@ lib_dscp_dp = static_library(
 lib_dscp_dp_dep = declare_dependency(
   link_with: lib_dscp_dp,
   link_args: [
-    '-Wl,--defsym',
-    '-Wl,new_module_dscp=new_module_dscp',
+    '-Wl,--require-defined=new_module_dscp',
     '-Wl,--export-dynamic-symbol=new_module_dscp',
   ],
 )
