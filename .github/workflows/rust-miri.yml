@@ -3,6 +3,10 @@ name: Rust Miri
 # Miri over the unsafe, provenance and shared-memory suites of the Rust
 # module SDK workspace (lib/rust): strict provenance under Stacked and Tree
 # Borrows, including the cases that must be reported as Undefined Behavior.
+# The bindings crate's build script runs bindgen over the repository's C
+# headers with the flags of a meson configuration's compilation database, so
+# changes to those headers re-run the job and the job configures meson (no
+# compilation) before Miri.
 
 on:
   push:
@@ -10,14 +14,26 @@ on:
     paths:
       - "lib/rust/**"
       - ".cargo/config.toml"
+      - "common/**.h"
+      - "subprojects/dpdk"
+      - "**/meson.build"
+      - "meson_options.txt"
       - ".github/workflows/rust-miri.yml"
+      - ".github/actions/apt-packages/**"
+      - ".github/actions/apt-failover/**"
   pull_request:
     # A stacked pull request has a non-main base, so a main-only filter would skip it.
     branches: ["**"]
     paths:
       - "lib/rust/**"
       - ".cargo/config.toml"
+      - "common/**.h"
+      - "subprojects/dpdk"
+      - "**/meson.build"
+      - "meson_options.txt"
       - ".github/workflows/rust-miri.yml"
+      - ".github/actions/apt-packages/**"
+      - ".github/actions/apt-failover/**"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
@@ -32,10 +48,19 @@ jobs:
       matrix:
         model: [stacked, tree]
     env:
+      # bindgen needs a libclang and a clang of the same LLVM major.
+      CLANG_PATH: /usr/bin/clang-18
+      LIBCLANG_PATH: /usr/lib/llvm-18/lib
       MIRI_TOOLCHAIN: nightly-2026-10-22
       MIRI_CARGO_FLAGS: --locked
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          submodules: true
+      - uses: ./.github/actions/apt-packages
+        timeout-minutes: 10
+        with:
+          packages: meson clang-18 libclang1-18 cmake python3-pyelftools libnuma-dev libpcap-dev libyaml-dev
       # Pinned with the rustfmt nightly, so Miri moves only with a deliberate bump.
       - uses: dtolnay/rust-toolchain@2c76c034f9e32a5d6e2c104dc4df23a22476db04 # nightly
         with:
@@ -78,6 +103,11 @@ jobs:
         with:
           path: ~/.cache/miri
           key: ${{ steps.miri-sysroot.outputs.cache-primary-key }}
+      # The build script reads the C flags from the compilation database and the
+      # generated DPDK configuration header; nothing is compiled.
+      - name: Configure meson
+        run: |
+          meson setup build -Ddataplane_only=true
       - name: Miri
         working-directory: lib/rust
         run: cargo xtask miri ${{ matrix.model }}
