@@ -67,53 +67,8 @@ jobs:
             release_ref="refs/tags/$REQUESTED_TAG"
             release_helper=release-tools/.github/scripts/release-ref.sh
           fi
-          [[ $release_ref =~ ^refs/tags/v(0|[1-9][0-9]{0,8})\.(0|[1-9][0-9]{0,8})\.(0|[1-9][0-9]{0,8})$ ]] ||
-            { echo "Invalid release tag: $release_ref" >&2; exit 1; }
-          major=${BASH_REMATCH[1]} minor=${BASH_REMATCH[2]} patch=${BASH_REMATCH[3]}
-          branch="release/$major.$minor"
-          sha=$(git rev-parse "$release_ref^{commit}")
-          if ((patch > 0)); then
-            previous="v$major.$minor.$((patch - 1))"
-            draft=$(gh release view "$previous" --json isDraft --jq '.isDraft')
-            [[ $draft == false ]] ||
-              { echo "Previous release is not published: $previous" >&2; exit 1; }
-          fi
-          while IFS= read -r tag; do
-            [[ $tag =~ ^v${major}\.${minor}\.(0|[1-9][0-9]{0,8})$ ]] || continue
-            ((BASH_REMATCH[1] > patch)) || continue
-            newer_sha=$(git rev-parse "refs/tags/$tag^{commit}")
-            git rev-list --first-parent "$newer_sha" | grep -Fx "$sha" >/dev/null ||
-              { echo "Newer release tag does not descend from $release_ref: $tag" >&2; exit 1; }
-          done < <(git tag --list "v$major.$minor.*")
-          if ! git show-ref --verify --quiet "refs/remotes/origin/$branch"; then
-            if ((patch == 0)); then
-              git rev-list --first-parent refs/remotes/origin/main | grep -Fx "$sha" >/dev/null ||
-                { echo "$sha is not on main's first-parent history" >&2; exit 1; }
-            else
-              previous_sha=$(git rev-parse "refs/tags/$previous^{commit}")
-              git rev-list --first-parent "$sha" | grep -Fx "$previous_sha" >/dev/null ||
-                { echo "$sha does not descend from $previous on its first-parent history" >&2; exit 1; }
-            fi
-            git push origin "$sha:refs/heads/$branch"
-            git fetch origin "refs/heads/$branch:refs/remotes/origin/$branch"
-          elif ! git rev-list --first-parent "refs/remotes/origin/$branch" | grep -Fx "$sha" >/dev/null; then
-            git rev-list --first-parent refs/remotes/origin/main | grep -Fx "$sha" >/dev/null ||
-              { echo "$sha is not on main's first-parent history" >&2; exit 1; }
-            branch_sha=$(git rev-parse "refs/remotes/origin/$branch")
-            git rev-list --first-parent "$sha" | grep -Fx "$branch_sha" >/dev/null ||
-              { echo "$branch is not on $sha's first-parent history" >&2; exit 1; }
-            if ((patch > 0)); then
-              previous_sha=$(git rev-parse "refs/tags/$previous^{commit}")
-              git rev-list --first-parent "$sha" | grep -Fx "$previous_sha" >/dev/null ||
-                { echo "$sha does not descend from $previous on its first-parent history" >&2; exit 1; }
-            fi
-            git push origin "$sha:refs/heads/$branch"
-            git fetch origin "refs/heads/$branch:refs/remotes/origin/$branch"
-          fi
-          bash "$release_helper" stable \
-            "$release_ref" "$sha" >> "$GITHUB_OUTPUT"
-          echo "stage_tag=$major.$minor.$patch-stage-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
-          echo "release_tag=v$major.$minor.$patch" >> "$GITHUB_OUTPUT"
+          bash "$release_helper" prepare \
+            "$release_ref" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
 
   neighbour-sidecar:
     needs: preflight
