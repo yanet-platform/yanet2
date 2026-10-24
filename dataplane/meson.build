@@ -19,6 +19,7 @@ lib_sources = files(
   'config.c',
   'dataplane.c',
   'device.c',
+  'dpdk.c',
   'instance.c',
   'worker.c',
   'numa.c',
@@ -70,7 +71,6 @@ dependencies = lib_dependencies + [
 ]
 
 sources = files(
-  'dpdk.c',
   'main.c',
 )
 
