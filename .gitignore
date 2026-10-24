@@ -164,7 +164,10 @@ deploy/packages/
 !.agents/skills/better-comment
 !.agents/skills/bump-version
 !.agents/skills/code-cli
+!.agents/skills/hunt-bug
 !.agents/skills/issue-create
+!.agents/skills/measure-perf
+!.agents/skills/networking
 !.agents/skills/review-change
 !.agents/skills/ship-pr
 .claude/skills/*
@@ -173,7 +176,10 @@ deploy/packages/
 !.claude/skills/better-comment
 !.claude/skills/bump-version
 !.claude/skills/code-cli
+!.claude/skills/hunt-bug
 !.claude/skills/issue-create
+!.claude/skills/measure-perf
+!.claude/skills/networking
 !.claude/skills/review-change
 !.claude/skills/ship-pr
 

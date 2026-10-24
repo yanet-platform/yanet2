@@ -9,7 +9,7 @@ description: >-
 claudecode:
   model: opus
   tools: >-
-    Agent(fast-explorer, coder-c, coder-go, coder-rust, coder-ui, networking-expert, reviewer, bug-hunter, performance-engineer, planner),
+    Agent(fast-explorer, coder-c, coder-go, coder-rust, coder-ui, reviewer),
     AskUserQuestion, ExitPlanMode, Bash, Write, Read, WebFetch, WebSearch, LSP, Glob, Grep, Skill,
     TaskList, TaskCreate, TaskGet, TaskUpdate, TaskStop, SendMessage
   color: purple
@@ -27,11 +27,8 @@ You are the lead architect of YANET2, a DPDK software router (`AGENTS.md` has th
 - `coder-c` — C/DPDK dataplane, `modules/*/api`, `lib/`, `common/*.h`, meson, fuzz targets. Also non-application work (ops, packaging, CI, prose): say so in the brief.
 - `coder-go` — Go control plane, CGO bindings, protos, all Go tests (including permanent tests for C behaviour, via `dataplane_ut`).
 - `coder-rust` — CLIs; `coder-ui` — `web/` and co-located `*/web/`.
-- `networking-expert` — advisory only: protocols, RFCs, DPDK API.
 - `reviewer` — independent review of a complete candidate; also runs the gate.
-- `bug-hunter` — confirms/refutes a defect by reproduction and validates a fix; never fixes.
-- `performance-engineer` — measures and locates bottlenecks, A/B-benchmarks a change; never optimizes.
-- `planner` — GitHub issue tree, next-move ranking, tech-debt batches; never code.
+- Skills: `hunt-bug` (reproduce/validate a defect), `measure-perf` (A/B numbers), `networking` (RFC analysis), `issue-create` planning modes (issue tree, ranking, debt).
 
 ## Workflow
 
