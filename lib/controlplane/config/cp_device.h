@@ -32,7 +32,7 @@ struct cp_device_entry {
 
 struct cp_device {
 	struct registry_item config_item;
-	char type[80];
+	char type[CP_DEVICE_TYPE_LEN];
 	char name[CP_DEVICE_NAME_LEN];
 
 	uint64_t dp_device_idx;

@@ -46,7 +46,7 @@ struct cp_module {
 	// Reference to dataplane module
 	uint64_t dp_module_idx;
 
-	char type[80];
+	char type[CP_MODULE_TYPE_LEN];
 	/*
 	 * All module datas are accessible through registry so name
 	 * should live somewhere there.

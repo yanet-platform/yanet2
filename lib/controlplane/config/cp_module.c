@@ -442,6 +442,62 @@ cp_module_try_destroy(struct cp_module *cp_module, yanet_error **err) {
 	return 0;
 }
 
+struct cp_module_cmp_data {
+	const char *type;
+	const char *name;
+};
+
+static int
+cp_module_registry_item_cmp(
+	const struct registry_item *item, const void *data
+) {
+	const struct cp_module *module =
+		container_of(item, struct cp_module, config_item);
+
+	const struct cp_module_cmp_data *cmp_data =
+		(const struct cp_module_cmp_data *)data;
+
+	int cmp = strncmp(module->name, cmp_data->name, sizeof(module->name));
+
+	if (cmp) {
+		return cmp;
+	}
+
+	return strncmp(module->type, cmp_data->type, sizeof(module->type));
+}
+
+static uint64_t
+cp_module_registry_key_hash(const void *data) {
+	const struct cp_module_cmp_data *cmp_data =
+		(const struct cp_module_cmp_data *)data;
+
+	return registry_hash_name_pair(
+		cmp_data->name,
+		CP_MODULE_NAME_LEN,
+		cmp_data->type,
+		CP_MODULE_TYPE_LEN
+	);
+}
+
+static uint64_t
+cp_module_registry_item_hash(const struct registry_item *item) {
+	const struct cp_module *module =
+		container_of(item, struct cp_module, config_item);
+
+	return registry_hash_name_pair(
+		module->name,
+		sizeof(module->name),
+		module->type,
+		sizeof(module->type)
+	);
+}
+
+static const struct registry_keys cp_module_registry_keys = {
+	.cmp = cp_module_registry_item_cmp,
+	.key_hash = cp_module_registry_key_hash,
+	.item_hash = cp_module_registry_item_hash,
+};
+
 int
 cp_module_registry_init(
 	struct memory_context *memory_context,
@@ -469,6 +525,7 @@ cp_module_registry_copy(
 ) {
 	if (registry_copy(
 		    memory_context,
+		    &cp_module_registry_keys,
 		    &new_module_registry->registry,
 		    &old_module_registry->registry
 	    )) {
@@ -566,30 +623,6 @@ cp_module_registry_get(
 	return container_of(item, struct cp_module, config_item);
 }
 
-struct cp_module_cmp_data {
-	const char *type;
-	const char *name;
-};
-
-static int
-cp_module_registry_item_cmp(
-	const struct registry_item *item, const void *data
-) {
-	const struct cp_module *module =
-		container_of(item, struct cp_module, config_item);
-
-	const struct cp_module_cmp_data *cmp_data =
-		(const struct cp_module_cmp_data *)data;
-
-	int cmp = strncmp(module->name, cmp_data->name, sizeof(module->name));
-
-	if (cmp) {
-		return cmp;
-	}
-
-	return strncmp(module->type, cmp_data->type, sizeof(module->type));
-}
-
 int
 cp_module_registry_lookup_index(
 	struct cp_module_registry *module_registry,
@@ -604,6 +637,7 @@ cp_module_registry_lookup_index(
 
 	return registry_lookup(
 		&module_registry->registry,
+		&cp_module_registry_keys,
 		cp_module_registry_item_cmp,
 		&cmp_data,
 		index
@@ -701,6 +735,7 @@ cp_module_registry_upsert(
 
 	if (registry_replace(
 		    &module_registry->registry,
+		    &cp_module_registry_keys,
 		    cp_module_registry_item_cmp,
 		    &cmp_data,
 		    &new_module->config_item,
@@ -753,6 +788,7 @@ cp_module_registry_delete(
 
 	if (registry_replace(
 		    &module_registry->registry,
+		    &cp_module_registry_keys,
 		    cp_module_registry_item_cmp,
 		    &cmp_data,
 		    NULL,
