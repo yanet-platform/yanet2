@@ -1,6 +1,4 @@
 CARGO ?= cargo
-RULESYNC ?= npx --yes rulesync@16.8.0
-RULESYNC_GENERATE_ARGS := generate --targets claudecode,codexcli,opencode --features subagents
 
 # Compile database consumed by lint/clang-syntax.
 COMPILE_DB ?= build/compile_commands.json
@@ -134,8 +132,6 @@ CLI_RELEASE_BINARIES := $(addprefix $(RELEASE_DIR)/,$(CLI_BINARIES))
 	lint-go \
 	lint/clang-syntax \
 	lint-commit \
-	ai/agents \
-	lint/agents \
 	hooks \
 	test \
 	test-only \
@@ -235,34 +231,6 @@ lint/clang-syntax:
 lint-commit:
 	lint/commit/commitlint_test.sh
 	lint/commit/commitlint.sh --range origin/main..HEAD
-
-# Generate .claude/agents/*.md, .codex/agents/*.toml, and .opencode/agents/*.md from the tracked
-# source of truth, .rulesync/subagents/*.md.
-#
-# Refuses when the source roster is empty: rulesync's delete:true wipes
-# every already-generated charter and still exits success, and neither
-# tree is tracked in git to restore from. Also refuses when a source
-# charter is unloadable: a mutating generate silently deletes its output
-# and still exits 0, so a '--check' preflight (a real dry run) is scanned
-# for the diagnostic first.
-ai/agents:
-	@set -e; sources=$$(find .rulesync/subagents -maxdepth 1 -name '*.md'); \
-		test -n "$$sources" || { echo "ERROR: .rulesync/subagents/*.md is empty; refusing to run 'rulesync generate', which would delete every generated charter" >&2; exit 1; }
-	@out=$$($(RULESYNC) $(RULESYNC_GENERATE_ARGS) --check 2>&1); \
-		echo "$$out"; \
-		if echo "$$out" | grep -q 'Failed to load subagent file'; then \
-			echo "ERROR: rulesync failed to load a source charter; refusing to run the mutating generate (see diagnostic above)" >&2; \
-			exit 1; \
-		fi
-	$(RULESYNC) $(RULESYNC_GENERATE_ARGS)
-
-# Reports whether .claude/agents/, .codex/agents/, and .opencode/agents/ have drifted from
-# .rulesync/subagents/*.md, without writing to the filesystem.
-#
-# Run by .githooks/post-merge after a pull to warn about stale charters.
-# Run 'make ai/agents' to refresh the generated trees.
-lint/agents:
-	$(RULESYNC) $(RULESYNC_GENERATE_ARGS) --check
 
 hooks:
 	git config core.hooksPath .githooks
