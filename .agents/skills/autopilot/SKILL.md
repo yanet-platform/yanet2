@@ -27,7 +27,7 @@ Ambiguous number (both repos hold it, no repo named) · issue closed or is a PR 
 
 ## Pipeline
 
-0. **Admit.** Resolve `<n>` (`gh issue view <n> --repo yanet-platform/yanet2` then `yanet2-private`); check the hard stops and the assignee, allowing no assignee or `@me` and stopping for any other assignee; `.agents/scripts/issue-start.sh <owner>/<repo> <n>`.
+0. **Admit.** Resolve `<n>` (`gh issue view <n> --repo yanet-platform/yanet2` then `yanet2-private`); check the hard stops and the assignee, allowing no assignee or `@me` and stopping for any other assignee; check open PRs (`gh pr list --search <n>`) so you do not compete with one; `.agents/scripts/issue-start.sh <owner>/<repo> <n>`. Never revert or overwrite work you did not create without asking.
 1. **Understand.** Read the code the issue touches; an Explore subagent takes wide searches. A reported defect goes to `hunt-bug confirm` first; a speedup deliverable goes to `measure-perf` for a baseline first; a protocol question goes to `networking`. Name every shared surface and its consumers (grep generated and gitignored trees too).
 2. **Worktree.** `AGENTS.md` → Worktrees; seed what the gates need (its own `build/` and submodules for C or cgo, `node_modules` for web).
 3. **Implement.** Write the change across its layers in order — C API, proto + Go, Rust CLI, web UI — following the language conventions; run `$better-comment` in Author mode, then `make gate` until green.

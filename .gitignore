@@ -90,6 +90,7 @@ compile_commands.json
 
 buildclang/
 build/
+build-*/
 web/dist/
 
 # generated files
