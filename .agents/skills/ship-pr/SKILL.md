@@ -27,7 +27,11 @@ Land a verified, review-approved change on `main`. Invoking this skill is the pu
 
 ## Phases
 
-0. **Ready?** Gates green in the candidate tree; `review-change` APPROVED exists for this exact content. If not, do that first.
+0. **Ready?** Gates green in the candidate tree; `review-change` APPROVED exists for this exact content. If not, do that first. Before the first push, audit the diff as its reviewer — these are the recurring automated-review findings, and each is cheaper to catch here:
+   - Comments state invariants the code cannot: no internal identifiers in prose, no rejected alternatives; a doc block still documents its own symbol after insertions — with the exceptions `.agents/conventions/comments.md` allows (a doc comment opening with its own symbol, genuine cross-references, contract identifiers).
+   - Tests match the form their language requires (`.agents/conventions/tests.md` — Go needs both the structured name and its doc comment) and claim exactly what is asserted, not the setup. For a behaviour change, the new test must fail with the production code reverted and the test kept.
+   - Index, hash or capacity arithmetic is exercised at the boundaries it can actually reach: a probing ring covers a non-power-of-two modulus, the wraparound and the overflow edge, and an input rejected up front has its rejection tested — unreachable boundaries are not invented.
+   - Cross-cutting: a changed struct embedded in the `dp_config`/`cp_config` shared zone bumps `DP_CONFIG_READY_MAGIC`; a change crossing the dataplane–plugin boundary bumps `YANET_MODULE_ABI_VERSION` — one module's private config struct does not cross it.
 1. **Branch.** `git fetch origin main`; worktree: `git worktree add .claude/worktrees/<name> -b <type>/<scope>-<what> origin/main`; primary (waiver only, clean, on main): `git switch -c <branch> origin/main`. Shell-safe names, no parentheses.
 2. **Transfer & stage.** Bring the approved files over (`git diff <base>..<work-branch> -- <paths> | git apply --index`, or `git add` in place); confirm `git diff --cached --stat` equals the manifest.
 3. **Commit.** Conventional subject, high-level body, no footers; `make lint-commit` must pass (the `commit-msg` hook runs it).
