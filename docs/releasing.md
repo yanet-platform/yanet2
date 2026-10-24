@@ -11,8 +11,8 @@ existing PR CI passes.
 An administrator must configure these GitHub settings before the first release:
 
 - Protect `release/*` branches, excluding `release/alpha`: require pull requests,
-  require Commit Lint and Agents Lint, which run on every PR, and block force
-  pushes and deletion. Add a write-enabled deploy key for this repository and
+  require Commit Lint, which runs on every PR, and block force pushes and
+  deletion. Add a write-enabled deploy key for this repository and
   allow deploy keys to bypass the ruleset. Store its private key as
   `RELEASE_BRANCH_DEPLOY_KEY` in the `release-branch-updater` environment, with
   access limited to branch `main` and tags `v*`. Release preflight uses the key
