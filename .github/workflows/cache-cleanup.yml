@@ -3,12 +3,22 @@ name: Actions cache cleanup
 # Prunes superseded native and main Go snapshots, plus closed-PR caches,
 # before the repo's 10 GB cap forces eviction of active entries.
 #
-# Hourly cleanup keeps immutable build snapshots from accumulating
-# throughout the working day.
+# Every main build saves a new Go snapshot per family, so a sweep follows
+# each of them; the hourly cron, which often starts hours late, covers the
+# closed pull requests in between.
 
 on:
   schedule:
     - cron: "17 * * * *"
+  # Runs from the default branch and takes nothing from the build that
+  # triggered it, so that build cannot steer what this job does.
+  #
+  # The workflows are matched by their names, so renaming one of them stops
+  # the sweeps after its builds.
+  workflow_run: # zizmor: ignore[dangerous-triggers]
+    workflows: ["Build YANET", "Go Race"]
+    types: [completed]
+    branches: [main]
   workflow_dispatch:
     inputs:
       dry_run:
@@ -17,10 +27,12 @@ on:
         default: true
         type: boolean
 
-# The hourly cron and a manual dispatch must never overlap: a losing sweep
-# would select caches the winner already deleted, so every one of its
-# delete calls fails and the every-delete-failed guard turns the run red.
-# Let a running sweep finish rather than cancelling it mid delete-loop.
+# Sweeps run one at a time, and a running sweep always finishes.
+#
+# Two sweeps in parallel would select the same caches, so every delete of
+# the slower one would fail and its every-delete-failed guard would turn
+# the run red. A newer queued sweep replaces a waiting one, which loses
+# nothing because each sweep lists the caches afresh.
 concurrency:
   group: cache-cleanup
   cancel-in-progress: false
@@ -32,6 +44,9 @@ permissions:
 jobs:
   cleanup:
     name: Delete superseded and dead-PR-ref caches
+    # A fork's pull request from a branch named main passes the branch filter
+    # too; only pushes to main save the snapshots a sweep prunes.
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.event == 'push'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     env:
