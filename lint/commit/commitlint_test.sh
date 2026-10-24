@@ -3,7 +3,7 @@
 # commitlint_test.sh runs commitlint.sh against a table of subjects with
 # known verdicts and fails if any of them gets the wrong one.
 #
-# Each case here mirrors one of the rules documented in CLAUDE.md under
+# Each case here mirrors one of the rules documented in AGENTS.md under
 # "Commits & PRs": every accepted type, the mandatory scope, comma-separated
 # multi-scope, the breaking-change marker, the GitHub PR-number suffix, and
 # every rejection rule down to the exact diagnostic it must report.
