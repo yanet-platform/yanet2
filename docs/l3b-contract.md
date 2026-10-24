@@ -84,7 +84,7 @@ workload-fit guarantee.
 
 `module_max_bindings` limits the complete candidate list of one ModuleConfig at
 create or replacement, not the sum across an instance. Two ModuleConfigs with
-10000 bindings each satisfy this cap alone. Retained older versions do not
+10000 bindings each satisfy this cap alone under the default 16384 policy. Retained older versions do not
 consume this logical cap again, but remain physically accounted until reclaimed.
 Other admission limits still apply; passing this object-size bound does not
 guarantee that resources exist for publication.
@@ -998,6 +998,8 @@ cross-process proof and the implementation remain downstream (#2725, #2726).
   the addressed VIP as source, the request source as destination, the family's
   Echo Reply type, code zero and valid checksums. Its initial TTL/Hop Limit is
   65 at l3b handoff, not a promise of 65 after downstream routing.
+  In both families, preserve the request's identifier, sequence and payload
+  byte-for-byte, including an empty payload.
   Count each generated response once by (ModuleConfig, IP family, decoded VIP
   address), without protocol or port dimensions or arbitrary VS attribution.
   All linked VSes at that family/VIP share the counter; equal VIPs in different
@@ -1006,6 +1008,11 @@ cross-process proof and the implementation remain downstream (#2725, #2726).
   This binding selects no new counter name, readback, lifetime or continuity
   contract and is distinct from VS-scoped native policy counters. The remaining
   counter-overlap surfaces are open; this binding does not complete them.
+- Supported incoming Echo Request and error types accept every code in 0..255;
+  code alone is never grounds for rejection. Length, fragment, quote and
+  ownership validation still apply, including the incoming real-fragment floor.
+  This does not broaden the supported type set. Generated Echo Replies use code
+  zero; delivered errors remain unchanged, including their incoming code.
 - Supported ICMPv4 errors are
   Destination Unreachable, Time Exceeded, Redirect, Source Quench and Parameter
   Problem; supported ICMPv6 errors are Destination Unreachable, Packet Too Big,
@@ -1526,6 +1533,13 @@ Packet disposition vectors (all **NOT RUN**):
   separate across ModuleConfigs, and do not increment on no-response outcomes.
   Check source VIP, destination request source, family Echo Reply type, code zero,
   valid checksums and initial TTL/Hop Limit 65 at handoff; no session effects.
+- Echo/code vectors (NOT RUN): both IPv4 and IPv6, nonzero identifier/sequence,
+  empty and nonempty payloads including binary zero bytes, all preserved
+  byte-for-byte. Exercise incoming codes 0, 1 and 255 for Echo Requests and each
+  supported error type; admitted replies use code zero and delivered errors
+  retain code/content. At the same codes, truncated lengths, invalid quotes,
+  non-initial quoted fragments, genuinely fragmented incoming packets and failed
+  ownership/delivery checks retain their rejection paths; unsupported types drop.
 - Original consumption occurs once per distributor invocation for success, valid
   zero peers and every failure outcome. Success/zero peers add no consumption
   drop count, zero peers spend no tokens, and existing failure accounting remains.
@@ -1750,8 +1764,8 @@ Required discriminating vectors include:
   state/deadlines unchanged; required commit failure drops the prepared packet
   without partial authority change; postcommit transmission loss does not roll
   back. Include existing-pin refresh, new insertion, copy-forward and zero TTL.
-- ModuleConfig binding cap: two 10000-binding objects pass this cap alone;
-  a 16385-binding candidate exceeds the initial per-object cap; retained old
+- ModuleConfig binding cap: under the default 16384 policy, two 10000-binding objects pass this cap alone;
+  a 16385-binding candidate exceeds that default per-object cap; retained old
   versions remain physically charged without duplicating the logical charge.
 - Each mutation success pair identifies its own accepted result, including
   concurrent later writers; no-op preserves it, deletions are empty, and the
