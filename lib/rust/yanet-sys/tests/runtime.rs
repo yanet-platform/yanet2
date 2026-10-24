@@ -44,11 +44,12 @@ unsafe impl ShmLayout for Links {}
 
 /// Runs `M` on `count` non-IP packets of 60 bytes, the first byte of packet
 /// `n` being `n`, and returns the outcome.
-fn run<M: Module>(count: usize) -> Outcome {
+fn run<M: Module<Config = Word>>(count: usize) -> Outcome {
     let arena = BlockArena::new();
     let config = alloc_config::<M::Config>(arena);
-    let mut invocation = Invocation::new::<M>(arena, config, 0, 0);
-    invocation.run::<M>(packets(count))
+    // SAFETY: a plain word, never written.
+    let mut invocation = unsafe { Invocation::<M>::new(arena, config, 0) };
+    invocation.run(packets(count))
 }
 
 fn packets(count: usize) -> Vec<TestPacket> {
@@ -252,9 +253,10 @@ impl Module for WorkerAware {
 fn run_as(worker: u64, now: u64) -> Vec<Fate> {
     let arena = BlockArena::new();
     let config = alloc_config::<Word>(arena);
-    let mut invocation = Invocation::new::<WorkerAware>(arena, config, 0, 0);
+    // SAFETY: a plain word, never written.
+    let mut invocation = unsafe { Invocation::<WorkerAware>::new(arena, config, 0) };
     invocation.set_worker(worker, now);
-    invocation.run::<WorkerAware>(packets(1)).fates
+    invocation.run(packets(1)).fates
 }
 
 /// verifies that the context reports the worker index and the round time
@@ -291,20 +293,22 @@ impl Module for Stamped {
     }
 }
 
-/// verifies that the commit pass writes the prepared value the handler
-/// reads, from the configuration, and that the buffer is zero before it.
-#[test]
-fn test_commit_writes_the_prepared_value_the_handler_reads() {
+/// Runs `Stamped` on one packet over a configuration of the given word.
+fn run_stamped(word: u64) -> Vec<Fate> {
     let arena = BlockArena::new();
     let config = alloc_config::<Word>(arena);
-    write_body_word::<Word>(arena, config, 0, 7);
-    let mut invocation = Invocation::new::<Stamped>(arena, config, 0, 0);
+    write_body_word::<Word>(arena, config, 0, word);
+    // SAFETY: a plain word, not written while the invocation lives.
+    let mut invocation = unsafe { Invocation::<Stamped>::new(arena, config, 0) };
+    invocation.run(packets(1)).fates
+}
 
-    let before = invocation.run::<Stamped>(packets(1)).fates;
-    invocation.commit::<Stamped>();
-    let after = invocation.run::<Stamped>(packets(1)).fates;
-
-    assert_eq!((vec![Fate::Drop], vec![Fate::Output]), (before, after));
+/// verifies that the commit pass writes the prepared value the handler
+/// reads, from the configuration.
+#[test]
+fn test_commit_writes_the_prepared_value_the_handler_reads() {
+    assert_eq!(vec![Fate::Output], run_stamped(7));
+    assert_eq!(vec![Fate::Drop], run_stamped(8));
 }
 
 /// A prepared value of no size: the runtime needs no buffer for it.
@@ -329,10 +333,10 @@ impl Module for Unprepared {
 fn test_commit_of_a_zero_sized_prepared_value_needs_no_buffer() {
     let arena = BlockArena::new();
     let config = alloc_config::<Word>(arena);
-    let mut invocation = Invocation::new::<Unprepared>(arena, config, 0, 0);
+    // SAFETY: a plain word, never written.
+    let mut invocation = unsafe { Invocation::<Unprepared>::new(arena, config, 0) };
 
-    invocation.commit::<Unprepared>();
-    let outcome = invocation.run::<Unprepared>(packets(2));
+    let outcome = invocation.run(packets(2));
 
     assert_eq!(vec![Fate::Output, Fate::Output], outcome.fates);
 }
@@ -373,10 +377,11 @@ fn test_cx_counters_add_by_value_and_by_handle() {
     for (field, id) in [(0, 3), (1, 1), (2, 2), (3, 0)] {
         write_body_word::<Tally>(arena, config, offset_of!(Tally, by_value) + field * 8, id);
     }
-    let mut invocation = Invocation::new::<Tallier>(arena, config, 4, 0);
-    invocation.commit::<Tallier>();
+    // SAFETY: the four counter ids, the held one included, are below the four
+    // slots, and nothing writes the configuration afterwards.
+    let mut invocation = unsafe { Invocation::<Tallier>::new(arena, config, 4) };
 
-    invocation.run::<Tallier>((0..5).map(|idx| TestPacket::ether(0x0806, vec![idx; 60])).collect());
+    invocation.run((0..5).map(|idx| TestPacket::ether(0x0806, vec![idx; 60])).collect());
 
     // Packets 0..5 select the first three fields 0, 1, 2, 0, 1, which name
     // slots 3, 1, 2; the held field names slot 0 and takes two per packet.
@@ -425,10 +430,12 @@ fn test_device_resolve_present_absent_and_out_of_range() {
     for (field, index) in [(0, 0), (1, 1), (2, 2)] {
         write_body_word::<Links>(arena, config, field * 8, index);
     }
-    let mut invocation = Invocation::new::<Resolver>(arena, config, 0, 2);
+    // SAFETY: device indices, which resolving checks, not written afterwards;
+    // the resolver redirects no packet.
+    let mut invocation = unsafe { Invocation::<Resolver>::with_devices(arena, config, 0, 2) };
     invocation.set_device_absent(1);
 
-    let outcome = invocation.run::<Resolver>(packets(6));
+    let outcome = invocation.run(packets(6));
 
     assert_eq!(
         vec![
@@ -471,13 +478,14 @@ fn test_batch_transport_protocol_masks_the_unavailable_mark() {
     let mark = bindings::PACKET_TRANSPORT_HEADER_UNAVAILABLE as u16;
     let arena = BlockArena::new();
     let config = alloc_config::<Word>(arena);
-    let mut invocation = Invocation::new::<Udp>(arena, config, 0, 0);
+    // SAFETY: a plain word, never written.
+    let mut invocation = unsafe { Invocation::<Udp>::new(arena, config, 0) };
     let tagged = |transport_type| TestPacket {
         transport_type,
         ..TestPacket::ether(0x0800, vec![0; 60])
     };
 
-    let outcome = invocation.run::<Udp>(vec![tagged(mark | 17), tagged(17), tagged(mark | 6), tagged(6)]);
+    let outcome = invocation.run(vec![tagged(mark | 17), tagged(17), tagged(mark | 6), tagged(6)]);
 
     assert_eq!(vec![Fate::Output, Fate::Drop, Fate::Drop, Fate::Drop], outcome.fates);
 }
@@ -544,11 +552,12 @@ impl Module for Offsets {
 fn test_packet_reports_the_parsers_headers() {
     let arena = BlockArena::new();
     let config = alloc_config::<Word>(arena);
-    let mut invocation = Invocation::new::<Offsets>(arena, config, 0, 0);
+    // SAFETY: a plain word, never written.
+    let mut invocation = unsafe { Invocation::<Offsets>::new(arena, config, 0) };
     let mut parsed = TestPacket::ether(0x0800, vec![0; 42]);
     parsed.transport_offset = 34;
 
-    let outcome = invocation.run::<Offsets>(vec![parsed, TestPacket::ether(0x0806, vec![0; 42])]);
+    let outcome = invocation.run(vec![parsed, TestPacket::ether(0x0806, vec![0; 42])]);
 
     assert_eq!(vec![Fate::Output, Fate::Drop], outcome.fates);
 }

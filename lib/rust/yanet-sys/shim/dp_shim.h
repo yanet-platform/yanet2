@@ -15,9 +15,6 @@ struct module_device_target;
 struct packet;
 struct packet_front;
 
-// A shim function is hidden: it is in no dynamic symbol table, so a call
-// resolves through a local GOT slot filled at load time.
-//
 // bindgen is told to read the declarations without the attribute.
 #ifdef YANET_SYS_BINDGEN
 #define YANET_SYS_DP_HIDDEN

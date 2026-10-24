@@ -32,14 +32,19 @@
 //!   writes only `Opaque` bytes and atomics of configurations.
 //! - **publish**: C publishes a generation with a release store, workers load
 //!   it with acquire, and the commit pass (with the prepare step) completes
-//!   before the worker's first handler call of that generation.
+//!   before the worker's first handler call of that generation. Besides a
+//!   context without a prepared buffer, C skips the commit hook, logging an
+//!   error, for a context whose generation has no dataplane configuration or
+//!   module slot, which the control plane's validation of the configuration
+//!   excludes.
 //! - **reclaim**: a generation's blocks are freed only after every worker has
 //!   left it.
 //! - **packet**: a packet a module sees, with its mbuf, is exclusively owned by
 //!   the worker for the call, with no shared or cloned mbuf data reachable.
 //! - **unwind**: no foreign exception unwinds through Rust frames.
-//! - **align**: the block allocator aligns a block to its power-of-two size, so
-//!   the prepared buffer is aligned for every type the export checks admit.
+//! - **align**: the block allocator aligns a block to at least the smaller of
+//!   `MAX_ALIGN` and its size rounded up to a power of two, so the prepared
+//!   buffer is aligned for every type the export checks admit.
 
 pub mod batch;
 pub mod cx;
