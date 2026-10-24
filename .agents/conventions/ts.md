@@ -1,6 +1,12 @@
+---
+paths:
+  - "**/web/**/*.ts"
+  - "**/web/**/*.tsx"
+---
+
 # TypeScript/React conventions
 
-Loaded on demand by the agent writing or reviewing TypeScript/React; this is the single source for these rules.
+Loaded by path in Claude Code and on demand elsewhere, for the agent writing or reviewing TypeScript/React; this is the single source for these rules.
 
 - Prefer arrow function expressions.
 - **A co-located spec only runs because `web/vite.config.ts` lists those sibling roots** — vitest's default `include` is web-relative, so a `*.test.ts` added or moved there silently stops running in CI. Diff the collected test-file count on any such move.

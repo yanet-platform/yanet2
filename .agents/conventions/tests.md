@@ -1,6 +1,14 @@
+---
+paths:
+  - "**/*_test.go"
+  - "**/tests/**"
+  - "**/*.test.ts"
+  - "**/*.test.tsx"
+---
+
 # Test conventions
 
-Loaded on demand by the agent writing or reviewing tests in any language; this is the single source for what a test must say about itself. The per-language conventions defer to this file.
+Loaded by path in Claude Code and on demand elsewhere, for the agent writing or reviewing tests in any language; this is the single source for what a test must say about itself. The per-language conventions defer to this file.
 
 Every test names the behaviour it pins and, where the name alone is not enough, carries a one-brief comment stating the invariant under test. A test that checks "it works" checks nothing: name the subject, the case, and the expected outcome.
 

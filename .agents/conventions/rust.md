@@ -1,6 +1,12 @@
+---
+paths:
+  - "**/*.rs"
+  - "**/Cargo.toml"
+---
+
 # Rust conventions
 
-Loaded on demand by the agent writing or reviewing Rust; this is the single source for these rules.
+Loaded by path in Claude Code and on demand elsewhere, for the agent writing or reviewing Rust; this is the single source for these rules.
 
 - `.rustfmt.toml` uses nightly-only options (`wrap_comments`, `format_code_in_doc_comments`, `imports_granularity`, `group_imports`). Always use `cargo +nightly-2026-10-22 fmt` — the date `rust-check.yml` pins, installed once with `rustup toolchain install nightly-2026-10-22 --component rustfmt`; a newer nightly rewraps comments differently. Bump the date together with a workspace reformat.
 - Run `cargo +nightly-2026-10-22 fmt -- --check` and `cargo clippy --workspace --all-targets --locked -- -D warnings` (what CI runs, tests included) before committing.
