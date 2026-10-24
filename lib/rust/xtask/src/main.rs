@@ -15,7 +15,10 @@ use regex::Regex;
 const SUITES: &[(&str, Option<&str>)] = &[
     ("yanet-shm", None),
     ("yanet-shm", Some("provenance")),
+    ("yanet-sys", None),
+    ("yanet-sys", Some("export")),
     ("yanet-sys", Some("lpm")),
+    ("yanet-sys", Some("runtime")),
     ("yanet-packet", None),
 ];
 

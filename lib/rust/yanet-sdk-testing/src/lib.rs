@@ -7,11 +7,15 @@
 //! crossing from one block into another, or to an address no live block
 //! holds (a freed block's among them) as out of bounds of the fallback
 //! allocation. [`View`], native and under Miri alike, resolves edges through
-//! the arena's root.
+//! the arena's root. The `dp` module (feature `dp`) is the invocation harness
+//! of the dataplane runtime built on it.
 
 #![no_std]
 
 extern crate alloc;
+
+#[cfg(feature = "dp")]
+pub mod dp;
 
 use alloc::{boxed::Box, vec::Vec};
 use core::{alloc::Layout, cell::RefCell, marker::PhantomData, ptr::NonNull};
@@ -212,6 +216,7 @@ impl BlockLookup for BlockArena {
 /// the mapping.
 pub struct View<'g> {
     root: ShmRoot,
+    // Invariant brand: values of two different contexts never unify, so they cannot be mixed.
     _brand: PhantomData<fn(&'g ()) -> &'g ()>,
 }
 
