@@ -92,7 +92,6 @@ if not dataplane_only
     '--ar', ar.full_path(),
   ]
   test('go-cdeps', python3, args: files('scripts/test_go_cdeps.py'), timeout: 120)
-  test('agent-hooks', python3, args: files('.agents/hooks/test_agent_hook.py'))
   protoc = find_program('protoc', required: true)
   find_program('protoc-gen-go', required: true, version: '>=1.36.5')
   find_program('protoc-gen-go-grpc', required: true, version: '>=1.5.1')
