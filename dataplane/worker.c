@@ -52,6 +52,7 @@
 
 #include "lib/controlplane/config/econtext.h"
 #include "lib/controlplane/config/zone.h"
+#include "lib/dataplane/pipeline/schedule.h"
 #include "lib/dataplane/worker/counters.h"
 #include "lib/dataplane/worker/pipeline_round.h"
 #include "lib/dataplane/worker/round.h"

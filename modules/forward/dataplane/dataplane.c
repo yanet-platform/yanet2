@@ -8,6 +8,7 @@
 #include "filter_lookup.h"
 
 #include "lib/controlplane/config/econtext.h"
+#include "lib/dataplane/pipeline/schedule.h"
 
 #include "lib/dataplane/config/zone.h"
 #include "lib/dataplane/module/module.h"

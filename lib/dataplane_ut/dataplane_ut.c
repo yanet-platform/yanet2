@@ -25,6 +25,7 @@
 #include "lib/dataplane/config/zone.h"
 #include "lib/dataplane/module/packet_front.h"
 #include "lib/dataplane/packet/data.h"
+#include "lib/dataplane/pipeline/schedule.h"
 #include "lib/dataplane/worker/counters.h"
 #include "lib/dataplane/worker/pipeline_round.h"
 #include "lib/dataplane/worker/round.h"
