@@ -15,6 +15,8 @@ A CLI is a thin, typed front for one gRPC service: clap proves the argument
 form before a connection exists, the service owns every invariant,
 `ync` owns connection, output, errors and completion. `references/new-crate.md`
 has the manifest, `build.rs`, skeleton and registration steps for a new binary.
+Private CLIs outside this repository build against `ync` through a pinned
+yanet2 submodule, so a `ync` API change reaches them only on their next bump.
 
 ## Shape
 

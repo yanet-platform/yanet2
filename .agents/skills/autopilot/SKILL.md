@@ -31,7 +31,7 @@ Ambiguous number (both repos hold it, no repo named) · issue closed or is a PR 
 1. **Understand.** Read the code the issue touches; send `fast-explorer` for bounded facts. A reported defect goes to `bug-hunter confirm` first; a speedup deliverable goes to `performance-engineer` for a baseline first. Decompose into file-scoped briefs in layer order — C API, proto + Go, Rust CLI, web UI — naming every shared surface and its consumers (defining grep, generated and gitignored trees included).
 2. **Worktree.** `AGENTS.md` → Worktrees; seed what the gates need (its own `build/` if a gate produces or consumes it, `node_modules` for web).
 3. **Delegate.** One brief = one coherent change; each names the worktree's absolute root, the property to reach, the files in scope, the gate, and where to stop and report. Sequential when briefs share files, parallel otherwise.
-4. **Verify.** `reviewer` on the complete candidate; route findings back as minimal fixes; re-review the changed regions; at most two rounds.
+4. **Verify.** `review-change` on the complete candidate; route findings back as minimal fixes; re-review the changed regions; at most two rounds.
 5. **Publish.** `ship-pr` with merge authorized ("влей в main") unless the user said otherwise. Body: what and why, assumptions, `Closes #<n>.`.
 6. **Close & sweep.** After MERGED: `planner close <n>` (names the PR); leftovers the change exposed → `planner ingest`, never for agent-setup work; remove the worktree.
 7. **Report.** Issue, PR, state, stops fired, assumptions, follow-ups filed. Under 30 lines.
