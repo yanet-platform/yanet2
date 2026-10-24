@@ -1187,9 +1187,8 @@ cp_config_gen_new(struct agent *agent, yanet_error **err) {
 			ADDR_OF(&dp_config->dp_topology.devices)[idx]
 				.device_name,
 			CP_DEVICE_NAME_LEN);
-		strtcpy(device_config.type,
-			"plain",
-			sizeof(device_config.type));
+		strtcpy(device_config.type, "plain", sizeof(device_config.type)
+		);
 		struct cp_device_entry_config pipe_cfg;
 		pipe_cfg.count = 0;
 		device_config.input_pipelines = &pipe_cfg;
