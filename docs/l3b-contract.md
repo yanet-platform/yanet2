@@ -34,7 +34,7 @@ representation and the protobuf/C consequences.
 | --- | --- | --- |
 | F01 | Names and references | Exact case-sensitive `[A-Za-z0-9_.-]{1,79}`; required, empty rejects; no omission, control byte, normalization, trimming or first-character restriction; no automatic aliases. |
 | F02 | VS VIP, protocol, destination port | Exact decoded address, transport protocol and optional destination port; absent port is a wildcard within the protocol, explicit zero is port zero, range 0..65535. Protocol is TCP or UDP; unspecified and unknown values reject. Immutable inside a live VS incarnation; an identity change is `FailedPrecondition`, a conflicting candidate is `InvalidArgument`. Mapped IPv6 endpoints in a concrete VIP field reject. |
-| F03 | Real destination, family, port | Key is decoded family, address bytes and optional real port inside the VS incarnation; the optional real port domain is 0..65535; absent, zero and other ports stay distinct; no inheritance or implied rewrite; exact duplicate keys reject; mapped IPv6 endpoints in a concrete real field reject. |
+| F03 | Real destination, family, port | Key is decoded family, address bytes and optional real port inside the VS incarnation; the optional real port domain is 0..65535; absent, zero and other ports stay distinct; no inheritance or implied rewrite; exact duplicate keys reject. Every stored real obeys section 11 DestSet, independently of administrative state, weight or health. |
 | F04 | Real collection and continuity | Explicit nonempty members or explicit empty. Surviving keys keep accepted weights, administrative state, incarnations and pins; removed and readded keys are new and administratively disabled. Authored order is accepted state: a pure reorder advances the token and republishes while preserving surviving state. An explicit empty real collection leaves the VS still classified: traffic directed to it drops at selection rather than falling through to another rule or VS. |
 | F05 | Configured and manual weight | Stored configured-weight domain 0..16777215 for RR, WRR, WLC and PURR; a new or readded real defaults to 1 on omission. Manual weight is an optional uint32 field with mandatory presence: explicit 0 is valid, omission is `InvalidArgument`. No clamping. |
 | F06 | Administrative and health state | New and readded reals are administratively disabled; effective enablement is administrative enablement AND health eligibility; health never overrides an administrative disable. Manual enabled is an optional bool with mandatory presence; false is valid. |
@@ -52,7 +52,7 @@ representation and the protobuf/C consequences.
 | F18 | `session_timeouts.other` and container | Optional uint32 seconds; omission 60; explicit 0 retained. A permitted ICMP-error refresh uses now plus `other`; Echo, query and OPS never refresh. All classes expire at deadline <= now, and a configuration replacement does not rewrite old deadlines. The timeout container absent, null or `{}` means all children absent and resolves each default above; a scalar or list container rejects. |
 | F19 | VS source bases M4 and M6 | VS-owned; omission materializes 0.0.0.0 and ::, with no interface or link fallback; supplied dormant values are retained; full replacement omission resets them. A partial real update preserves the materialized bases. Structural validation applies even to dormant families. |
 | F20 | Optional IPv4 source override | Absent differs from explicit 0; a native bare IPv4 host address with no prefix metadata; the literal override or M4 supplies the outer source. A present zero override is structurally valid and fails output admission for a configured IPv4 outer family. |
-| F21 | Optional IPv6 source template | Absent differs from present; present requires a raw address, omitted prefix means 128, prefix domain 0..128 including non-byte lengths, host bits preserved, the byte-splice algorithm of section 11, and rejection of any generated unspecified, mapped or multicast output for the configured family. Raw template and prefix presence, not a normalized network. No per-real override or additional address-class exclusions. |
+| F21 | Optional IPv6 source template | Absent differs from present; present requires a raw address, omitted prefix means 128, prefix domain 0..128 including non-byte lengths, host bits preserved, the byte-splice algorithm of section 11, and SourceSet admission for every derivation input in each configured outer family. Raw template and prefix presence, not a normalized network. Per-real override remains deferred; class restrictions follow the role matrix, not a generic unicast blacklist. |
 | F22 | Service policy binding | Required on VS create and full replacement: source-scoped identity (source namespace plus policy key), immutable revision and complete native ACL content, or an explicit empty-policy choice with the same metadata. Missing or null binding, identity, revision, or content without the explicit empty choice rejects as `InvalidArgument`; omission never means KEEP or allow-all. Explicit empty is deny-all. Partial real state/weight operations preserve the binding. Full semantics in sections 13-16. |
 | F23 | Destination bindings | Nonempty ordered exact VS name and incarnation bindings, or explicit empty that unlinks without deleting the VS; duplicates reject; order affects accepted equality; the VIP, protocol and optional port come from the immutable VS identity; broad or contradictory selectors reject. Separate ICMP paths are not ordinary TCP/UDP bindings. |
 | F24 | `mss_fix` | Typed boolean, default false, dormant for UDP. For a TCP SYN without RST, including SYN-ACK, validate all options through EOL/end before mutation. Valid MD5 Signature or TCP-AO bypasses only MSS processing with the inner segment unchanged, as specified in section 12. Otherwise the first valid MSS above 1220 is clamped to 1220 and a smaller value including 0 is preserved; 536 is inserted when absent and four option bytes fit; a valid full header without room stays unchanged. MSS length is 4; malformed eligible enabled-policy options or a required missing buffer counted-drop. The constants 1220 and 536 are not path-MTU guarantees. No public numeric MSS knob. |
@@ -1135,6 +1135,60 @@ are not exit/re-entry.
 
 ## 11. Outer Source Policy
 
+### Address Roles For Network Emission
+
+These checks constrain network-emitting roles, not generic inner forwarding:
+
+- **SourceSet** forbids IPv4 `0.0.0.0/8`, `127.0.0.0/8`, `224.0.0.0/4` and
+  `255.255.255.255`; IPv6 `::`, `::1`, IPv4-mapped addresses and `ff00::/8`.
+- **DestSet** forbids IPv4 `0.0.0.0/8` and `127.0.0.0/8`; IPv6 `::`, `::1`
+  and IPv4-mapped addresses. Every stored real endpoint obeys DestSet even when
+  disabled, zero-weight or unhealthy; this is not deferred until selection.
+  Invalid real configuration rejects the whole VS candidate with `InvalidArgument`
+  under the existing validation/error order, preserving accepted/active state/token.
+
+RFC 1122 section 3.2.1.3(a,b) covers the entire IPv4 0/8, not merely exact zero;
+its initialization exception does not apply to these originators. Loopback is not
+for emission outside the host (RFC 1122 section 3.2.1.3(g), RFC 4291 section 2.5.3).
+RFC 4291 sections 2.5.2 and 2.7 constrain unspecified and multicast sources;
+mapped rejection also preserves the target's native-address domain. Legacy IPv4
+destination-zero broadcast mode is unsupported in this endpoint model, not a claim
+that every such legacy use is universally forbidden by the RFC. No node-local
+tunnel mode is selected and no universally RFC-safe endpoint behavior is promised.
+
+R = reject configuration; D = consume/count-drop Echo before reply; U = unchanged,
+no new class ban, **not** guaranteed support; K = context/compatibility knowledge
+boundary, **not** automatic rejection. VS source R applies to selected outputs
+for ALL derivation inputs in configured families, not raw or dormant values.
+
+| Address class | VIP stored | Real outer D | VS generated S | Clone fixed S | Peer/local D | Ordinary inner | Echo VIP->S | Echo client->D |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| IPv4 0/8 including exact zero | U | R | R | R | R | U | D | D |
+| IPv4 127/8 | U | R | R | R | R | U | D | D |
+| IPv4 224/4 | U | K | R | R | K | U | D | D |
+| IPv4 255.255.255.255 | U | K | R | R | K | U | D | D |
+| IPv6 :: or ::1 | U | R | R | R | R | U | D | D |
+| IPv4-mapped IPv6 | R (existing) | R | R | R | R | U | D | D |
+| IPv6 ff00::/8, including scope 0 | U | K | R | R | K | U | D | D |
+| Contextual directed broadcast, not suffix alone | U | K | K | K | K | U | K | K |
+| Link-local 169.254/16, fe80/10 | U | K | K | K | K | U | K | K |
+| 240/4 except limited broadcast | U | K | K | K | K | U | K | K |
+| Ordinary addresses, private IPv4, ULA, anycast | U | U | U | U | U | U | U | U |
+
+Directed broadcast needs authoritative subnet/link context: never infer it from
+`*.255` or the F21 splice prefix. A /31 has two host addresses and /32 is a host
+route. Link-local support needs zone/egress context that bare address bytes do not
+prove; this adds neither a blanket ban nor a zone field. Multicast/broadcast
+destinations do not inherit source bans; absence of a ban is not full multicast
+tunnel support, including IPv6 scope 0. The rest of 240/4 remains a separate
+compatibility policy. Private IPv4, ULA and anycast are not newly banned.
+Class validation proves neither source ownership nor reachability. Context-dependent
+support needs integration proof, but unknown subnet context does not make all
+ordinary addresses unavailable. F02 storage/exact lookup and ordinary inner traffic
+remain unchanged; this is not a global martian filter or a change to DHCP.
+
+### Selected VS Source And Family Transitions
+
 - The source policy is owned by the VS. Reals of the same outer family use
   that policy, and it does not vary by the linking module config or by the
   packet's module link. Per-real source override is deferred, not rejected,
@@ -1167,9 +1221,8 @@ are not exit/re-entry.
 - Generated-output admission is part of normal validation, not of enable or
   traffic. For each outer family present among configured reals, including
   disabled, zero-weight and health-ineligible reals, the selected source
-  branch is validated before publication: the IPv4 output must not be exactly
-  0.0.0.0 or belong to 224.0.0.0/4, and the IPv6 output must not be able to equal
-  :: or belong to the mapped range or ff00::/8 for any derivation input.
+  branch is validated before publication against SourceSet for ALL derivation
+  inputs R, not just observed traffic or one sample output.
   Structurally valid dormant-family
   inputs are stored but their output check is skipped while that family has no
   configured real. A failure rejects the complete candidate of one VS create
@@ -1183,9 +1236,15 @@ are not exit/re-entry.
   is not alone a rejection when the selected template uses only its last two
   bytes and its generated outputs pass validation. The structural prefix domain
   remains 0..128 for storage, equality and round-trip, including dormant p=0;
-  only active generated-output admission excludes p=0. No ACL exception, global
-  VIP/real destination ban, additional excluded class or universally valid-source
-  guarantee follows from these checks.
+  only active generated-output admission excludes p=0. A forbidden raw IPv4 base
+  may likewise be replaced by a valid literal override. Conversely, B not equal
+  to ::1 does not prove validity: a splice can generate ::1 for some R. At
+  p=121..128, k=16 and n=0, so R does not splice; check the selected B itself.
+  No ACL exception or universally valid-source guarantee follows.
+- Validate the complete replacement's family set. Adding its first real of a
+  family, even disabled, activates that family's output check; removing its last
+  real makes the family dormant, with structural validation and retention intact.
+  Partial enable/weight changes must not become the first source validator.
 
 ## 12. Packet Surfaces
 
@@ -1207,14 +1266,17 @@ are not exit/re-entry.
   Lookup/selection alone is not a session commit; the same late-commit boundary
   applies to permitted reverse-session delivery refresh. Echo and ICMP errors use the separate paths below,
   not ordinary TCP/UDP VS or service-policy admission.
-- An Echo Request to a multicast destination VIP (IPv4 224.0.0.0/4 or IPv6
-  ff00::/8) consumes and counted-drops the original before generating a reply.
+- Before Echo reply generation, apply SourceSet separately to the addressed VIP
+  as future reply source and to the request source as a valid request source and
+  future reply destination. A forbidden address on either leg consumes and
+  counted-drops the original. Multicast/broadcast request sources fail because of
+  their SOURCE role, not a global ban on such destinations.
   It performs no response-counter increment, session lookup/write, real selection,
-  encapsulation or fanout. This does not change F02 or ordinary TCP/UDP admission,
-  add an alternative reply source or extend IPv4 broadcast policy. It is an
+  encapsulation or fanout. There is no alternative address or ICMP error reply.
+  This does not change F02 storage/exact lookup or ordinary TCP/UDP admission. It is an
   explicit product limitation, not full RFC endpoint compliance: RFC 4443 says
   multicast Echo requests SHOULD receive replies, whose source MUST be unicast.
-- Unicast Echo eligibility aggregates only VSes linked in the invoked ModuleConfig's
+- After both address-role checks pass, Echo eligibility aggregates only VSes linked in the invoked ModuleConfig's
   protected coherent configuration, not necessarily the latest published one.
   At least one configured real among those VSes at the addressed family/VIP
   makes it active, regardless of administrative enablement, weight or health.
@@ -1381,7 +1443,16 @@ peer set and cannot establish readiness. Existing external limits must be
 reconciled before implementation; no peer node IDs or 65535-peer cap is implied.
 
 Peers are explicit deduplicated (family,address) endpoints, with an explicit local
-endpoint set; matching local endpoints are excluded. There is no dynamic peer
+endpoint set. Before deduplication or local exclusion, validate EVERY explicit
+peer and local endpoint against DestSet: an invalid peer cannot hide in the local
+set. Validate EVERY explicitly supplied fixed clone source against SourceSet even
+if its family currently has no eligible peer. This external configuration rule is
+deliberately different from VS dormant source-template retention. A provided-invalid
+endpoint or source rejects the whole external configuration, preserving its last
+accepted/active state and revision; no external RPC error code is prescribed here.
+Missing a needed family source instead follows the not-ready rule below, not a new
+configuration-rejection rule. No new wire field, epoch or cross-owner transaction.
+Matching valid local endpoints are excluded. There is no dynamic peer
 health filter. Unknown configuration is not empty. One protected peer/source/
 policy generation determines n and all funded attempts. Missing the configured
 source for any eligible outer family makes the service not-ready, not a reason
@@ -1852,7 +1923,7 @@ qualification.
 | --- | --- | --- |
 | F01 names and references | R string `[A-Za-z0-9_.-]{1,79}`; empty rejects; exact case, no trim or alias. | Length checked before 80-byte C storage. |
 | F02 VS VIP, protocol, port | VIP R bare host, 4 or 16 decoded bytes; mapped IPv6 rejects. Protocol R TCP or UDP; unspecified and unknown reject. Port OPT uint32 domain 0..65535; absent wildcard, 0 is port zero. | Raw bytes plus family and a port-presence bit; no C zero sentinel. Identity immutable; conflict `InvalidArgument`; current-token identity change `FailedPrecondition`. |
-| F03 real destination and port | Destination R native IPv4 or IPv6 bare host; mapped IPv6 rejects. Port OPT 0..65535; no inheritance or rewrite. Duplicate decoded keys reject. | Full family, bytes, presence and value key, not position. |
+| F03 real destination and port | Destination R native IPv4 or IPv6 bare host satisfying section 11 DestSet for every stored real, regardless of eligibility. Port OPT 0..65535; no inheritance or rewrite. Duplicate decoded keys reject. | Full family, bytes, presence and value key, not position; no unmap or fallback. |
 | F04 real collection | COL; order retained; no null elements. Empty keeps the VS classified and drops at selection. Aggregate bindings at most 2097151 across all owners and unlinked VSes, plus physical and export bounds. | Explicit choice, checked count and lengths. Surviving incarnations and state preserved; a readded key is a new disabled real. |
 | F05 new-real configured weight; manual weight | New or readded real D(1); explicit 0 retained; 0..16777215 for all schedulers. A surviving real ignores a submitted initial weight as a setter: the current weight is preserved and the supplied domain is still validated. Manual weight R uint32, 0 valid, same domain; missing or null rejects. | Presence-safe manual field, no clamping; survivor behavior comes from the replacement rule, not a stale snapshot overwrite. |
 | F06 manual enabled; administrative, effective, health observations | Manual enabled R bool; false valid. A new real is administratively disabled. Descriptor administrative, effective and health fields are RO. Effective is administrative AND health, never a default healthy. | Separate input and response types; no bool-zero absence sentinel. Health transport and freshness keep their own owner and are not an extra setter. |
@@ -2107,7 +2178,20 @@ Packet disposition vectors (all **NOT RUN**):
   VS create/replace InvalidArgument and unchanged old state/token.
 - Multicast Echo vectors (NOT RUN): both multicast destination families with
   nonempty configured reals drop original without response/count/session/selection/
-  encapsulation/fanout; unicast header/admission/accounting vectors remain unchanged.
+  encapsulation/fanout; header/admission/accounting vectors with both addresses
+  passing SourceSet remain unchanged. Section 11 extends the source-class checks
+  and section 12 checks both Echo legs, not just multicast VIPs.
+
+- Address-role conformance (NOT RUN): cover every section 11 matrix row and role,
+  including real eligibility independence, all-R versus raw-template admission,
+  active/dormant family transitions, explicit unused external sources versus missing
+  needed sources, pre-exclusion peer/local validation, and separate Echo VIP/client
+  rejection with no reply or session effects. Include IPv4 base and override
+  limited broadcast; bad base/valid override; B!=::1 with an R yielding ::1;
+  p121..128/k16/no splice; active p0 rejection/dormant p0 retention; raw bad M6 with
+  valid selected B. Exercise 192.0.2.255 under /24, /31 and /32 without a suffix or
+  F21-prefix heuristic, identical fe80 bytes in different zones, 169.254/16 and
+  240.0.0.1 without inventing a blanket ban or claiming contextual support.
 - Enabled eligible no-MSS TCP without authentication bypass: 20-byte header plus payload grows to 24; 24-byte
   header with EOL padding grows to 28; 56 grows to 60; padded 60 stays unchanged.
   Insert MSS536 at offset20, preserving old options/payload at offsets +4 and
