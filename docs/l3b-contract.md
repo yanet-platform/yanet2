@@ -416,6 +416,10 @@ identical cells and accumulated state with proven issuance metadata may retain
 the prior identity under the iff rule above; otherwise require a fresh safely
 issued identity before reporting that group as available.
 
+Counter numeric domains and observable arithmetic at overflow remain a separate
+preimplementation obligation; no physical width, wrap or saturation behavior is
+selected here. Accumulation identity alone does not settle that obligation.
+
 ## 7. Session Ownership, Capacity And Inspection
 
 F33 exposes each record's full network key as defined in section 10, not a
@@ -969,6 +973,12 @@ are not exit/re-entry.
   apply to the new revision. Checker revision is runtime provenance, not a VS
   mutation token. Administrative disable and health expiry remain stronger than
   checker eligibility; no external checker's default is inferred here.
+  A snapshot claiming eligible=true with streak>retries contradicts these rules
+  and cannot commit as trusted. This does not erase proven history or fabricate
+  health: eligible=false below threshold remains valid hysteresis. No new
+  immediate-disable state or grace timer is selected. Stream non-aliasing/fencing
+  must prove stale exclusion before implementation; no epoch width or new
+  exhaustion protocol is specified here.
 - RR always supplies selection weight 1 for an eligible real, even when its
   stored configured weight is 0, and RR shares the WRR ring builder. WRR, WLC
   and PURR exclude a configured weight of 0 from new selection without
@@ -977,21 +987,28 @@ are not exit/re-entry.
   changing the scheduler does not change the stored values.
 - WRR and PURR retain configured weights in 0..16777215 without clamping.
   Each VS reserves `100*N` selector slots, where N includes every bound real,
-  including disabled and zero-weight members. The resulting enabled weighted
-  distribution must fit that reservation. The multiplier 100 sizes the
-  reservation; it is not a per-real weight cap or a new distribution/tie rule.
+  including disabled, unhealthy and zero-weight members. Configuration admission
+  requires the exact sum of configured weights of ALL administratively enabled
+  reals, independent of health, to be <= `100*N`. Actual eligible runs remain
+  health-filtered; health success cannot overflow this logical reservation.
+  The multiplier 100 sizes the reservation; it is not a per-real weight cap or
+  a new distribution/tie rule.
   RR/WRR/PURR share a pool bounded by 209715200 real-ID cells per generation:
   charge reserved regions, not only occupied cells. Each VS is bounded both by
   its reservation and by the remaining shared pool; unused VS reservations are
   not implicitly donated to other services.
-  Validate creation, replacement, weight changes, enablement and membership
+  Validate creation, replacement, weight changes, administrative enablement,
+  scheduler transitions into WRR/PURR and membership
   changes, including removal of zero-weight or disabled reals. An overflowing
   result rejects the whole mutation, preserving previous accepted/active state
   and token: no truncation, partial ring fill or skipping later reals. For
-  example, enabled weight 150 with a zero-weight member (`[150,0]`, N=2) fits
-  200 slots; removing the zero-weight member leaves N=1 and only 100 slots,
-  so reject rather than clamp the survivor. RR uses unit selection weights and
-  need not fit the sum of ignored configured weights. WLC's distinct
+  example, administratively enabled weight 150 with a zero-weight member
+  (`[150,0]`, N=2) fits 200 slots; removing the zero-weight member leaves N=1 and only 100 slots,
+  so reject rather than clamp the survivor, even when it is unhealthy. At N=1,
+  disabled weight 150 may be stored, but enabling it rejects even if unhealthy.
+  This logical rule adds no generic runtime physical-allocation failure policy.
+  RR uses unit selection weights and need not fit the sum of ignored configured
+  weights. WLC's distinct
   `min(q,100)` output/fallback and `1600*N` geometry remain unchanged.
   The shared-pool number describes the historical sizing default, not reserved
   deployment memory, guaranteed allocatability or a promise that a build can
@@ -1191,6 +1208,22 @@ are not exit/re-entry.
   65 at l3b handoff, not a promise of 65 after downstream routing.
   In both families, preserve the request's identifier, sequence and payload
   byte-for-byte, including an empty payload.
+  Transform the admitted request with unchanged header geometry, rather than
+  constructing bare IP headers. Preserve IPv4 options, IPv6 extensions, TOS/Traffic
+  Class, IPv4 ID/DF and other IP fields, and IPv6 flow label. Only the endpoints,
+  TTL/Hop Limit, ICMP type/code and necessary checksums change as specified above;
+  header lengths remain unchanged. Recompute or correctly update the IPv4 header
+  checksum including options and the separate ICMP message checksum; for ICMPv6,
+  account for the complete message and pseudo-header.
+  Correct code changes from incoming 1 or 255 as well as type changes; a type-only
+  checksum delta is insufficient. Existing fragment, TLV, Routing and checksum
+  admission applies first; live AH never reaches Echo. No partial reply is emitted.
+  This does not implement source-route reversal, special Record Route/Timestamp
+  updates or full RFC endpoint conformance; preserving opaque options is not a
+  claim of safe delivery in every reverse-path context. Retained IPv4 IDs carry
+  known unmitigated reuse/reassembly risk, including Echo replies. The later
+  DF/MTU investigation includes Echo, without a new restriction or activation
+  gate, unique-ID allocator or DF1 policy.
   Count each generated response once by (ModuleConfig, IP family, decoded VIP
   address), without protocol or port dimensions or arbitrary VS attribution.
   All linked VSes at that family/VIP share the counter; equal VIPs in different
@@ -1240,10 +1273,26 @@ are not exit/re-entry.
   not alter supported-type, malformed-packet or fragment handling. Exact counter
   naming is part of the separate naming contract.
 - Raw ICMP errors enter the separate error-distribution module for bounded
-  parsing and offending-flow normalization. Its read-only l3b ownership query
+  parsing and offending-flow normalization. Before any ownership query, its trusted
+  ingress binder selects the actual instance and allowed scope; packet fields
+  cannot self-select either. Fully validate the quote, including required ports.
+  For VIP-to-client quotes, use quoted source VIP, quoted source service port and
+  quoted TCP/UDP protocol to select a unique immutable VS incarnation, then its
+  unique external projected-service-incarnation association. Existing global
+  portless/port-specific nonoverlap applies, not a new exact/wildcard priority.
+  Reverse base addresses and ports; omit ports from a portless session key only
+  AFTER selecting the VS. Never extract a destination from a quoted segment list.
+  Protect this coherent association context through query, handoff and budget
+  use; it need not be newest and implies no cross-owner atomic transaction.
+  Absent, multiple, stale or unprovable associations consume and counted-drop the
+  original before query, state effects, clones or tokens. Do not retarget after a
+  query. Recreated names cannot inherit an old incarnation's association; a new
+  VS incarnation does not authorize resetting the external service's bucket credit.
+  Concrete binder API, schema, table and fencing mechanisms remain downstream.
+  Its read-only l3b ownership query
   protects one coherent session-chain generation and returns only `owned`,
   `not-owned` or `indeterminate`, never real identity or table memory.
-  `owned` permits a separate handoff of the unchanged error to l3b for
+  `owned` permits a separate handoff of the unchanged error to the same VS for
   reverse-session delivery to its enabled real; it is not a permanent delivery
   guarantee across expiry or state changes. Disabled, removed or reincarnated
   real hits counted-drop without rescheduling. Permitted delivery refreshes
@@ -1255,6 +1304,9 @@ are not exit/re-entry.
   If the session is absent or expired at delivery after an `owned` query, the
   error counted-drops without another ownership query, refresh attempt or peer
   fanout, and without reselection, rebind or revival.
+  Fanout readiness is NOT a gate for this owned local delivery. A `not-owned`
+  result uses only the bound external service's readiness, peers and all-or-none
+  budget below; indeterminate handling is unchanged.
 - The error-distribution module owns peer fanout and final error disposition;
   l3b performs no peer fanout. `indeterminate` consumes and counted-drops the
   original without retry or fanout; received clones never refan. Each projected
@@ -1428,14 +1480,29 @@ The following vectors are required and **NOT RUN**:
   offset and every IPv6 packet with M or a nonzero fragment offset receives a
   dedicated counted drop before transport access, VS lookup, ACL evaluation,
   session, selector, or encapsulation.
-- IPv6 processing walks at most eight bounds-checked Hop-by-Hop, Routing,
-  Destination Options, Fragment and AH headers. A ninth supported extension
-  counted-drops before transport access or state effects. AH is structurally skipped
-  using its encoded length, requires at least 12 bytes and is not authenticated.
+- Live IPv6 processing walks at most eight bounds-checked Hop-by-Hop, Routing,
+  Destination Options and Fragment headers. A ninth supported extension
+  counted-drops before transport access or state effects. Encountered live AH
+  counted-drops as unsupported before transport-dependent processing, ACL,
+  session/selector effects, Echo or fanout, independent of `mss_fix`; this is not
+  an authentication-failure claim. IPv4 protocol51 also follows unsupported drop.
+  Quotes separately retain structural AH parsing using encoded length and a
+  12-byte minimum within the existing eight-header and required-field bounds.
+  A quoted AH is not by itself grounds for rejection or an authentication claim.
+  Every traversed live Routing header must be structurally bounded and have
+  Segments Left zero; nonzero counted-drops before the same effects. An unknown
+  Routing Type with zero is opaque and allowed subject to other admission checks.
+  Do not execute segment lists or rewrite destinations, and generate no Parameter
+  Problem. This is limited admission, not full RFC routing-header compliance.
+  Quoted Routing headers require structure only: nonzero quoted Segments Left
+  alone adds no rejection. Normalize quoted base addresses and reverse ports,
+  not segment lists; general ICMP error delivery for source-routed flows is not
+  promised. For admitted incoming ICMPv6 with Segments Left zero, the pseudo-header
+  uses the current base-header destination. No ordinary TCP/UDP checksum expansion.
   ESP, No Next Header and unsupported upper protocols counted-drop. An atomic
   IPv6 fragment (offset zero, M clear) follows ordinary processing. Exact-port
   VS and ACL port predicates require an available transport header; missing
-  fields fail closed. These transport admission checks do not precede Echo or
+  fields fail closed. These TCP/UDP port predicates do not precede Echo or
   the separate ICMP-error path; no second error parser is introduced in l3b.
   Hop-by-Hop is permitted only immediately after the corresponding IPv6 base
   header, both in incoming IPv6 packets and parsed IPv6 quotes. Misplaced or
@@ -1933,9 +2000,12 @@ Selector admission vectors (all **NOT RUN**):
 - WRR/PURR admission vectors (**NOT RUN**): accept representable configured
   weights 0 and 16777215 subject to distribution/resource admission; reject
   16777216 without narrowing. Check `[101,1]` and `[150,0]` at N=2, rejection
-  after removing the zero/disabled second member, enabled weight overflow on
-  create/replace/manual weight/enable, and membership changes. Count disabled
-  and zero-weight reservations across RR/WRR/PURR in one generation; reject
+  after removing the zero/disabled second member when the first is admin-enabled
+  even unhealthy, and exact admin-enabled weight overflow on create/replace/manual
+  weight/admin-enable/membership/scheduler-entry into WRR/PURR. Disabled N=1
+  weight150 may store; enabling rejects even unhealthy. Health recovery stays
+  within the logical reservation; actual runs still exclude unhealthy reals.
+  Count disabled, unhealthy and zero-weight reservations across RR/WRR/PURR; reject
   shared-pool exhaustion even with sparse occupancy and no implicit donation.
   Every rejection preserves accepted/active state and token. Verify RR unit
   weights despite large stored weights, and unchanged WLC capped output and
@@ -1943,6 +2013,31 @@ Selector admission vectors (all **NOT RUN**):
 
 Packet disposition vectors (all **NOT RUN**):
 
+- Live AH on TCP/UDP, Echo and error/fanout paths counted-drops before transport,
+  ACL, sessions, selectors, responses, queries, clones or tokens, with mss_fix
+  false/true and both rewriting/non-rewriting SYNs. Include IPv4 protocol51.
+  Quoted AH instead permits structural parsing with encoded length/minimum12;
+  truncated AH before required ports rejects, absent original payload alone does not.
+- Live Routing headers: known/unknown types at SL0 may proceed under other checks;
+  any traversed header with nonzero SL rejects before effects, even if another is0.
+  Malformed bounds reject at either value. Quoted SL0/nonzero remain structural
+  only, with base-address/reverse-port normalization, no segment-list execution
+  or extraction. Incoming admitted ICMPv6 SL0 checksum uses current base destination.
+- Echo with nondefault IPv4 options/TOS/ID/DF and IPv6 extensions/TC/flow label
+  preserves fields and geometry/lengths, with only approved endpoints,TTL/Hop65,
+  type/code/checksum changes. Codes1/255 yield correct full-header/message and
+  pseudo-header checksums, not just a type delta. Retain id/sequence/payload,
+  fragment/TLV/SL0/checksum rejects and live-AH drop; no partial reply or reply
+  counter on drop. No source-route reversal, special RR/Timestamp update or
+  retained-ID mitigation is inferred from these vectors.
+- Trusted ingress scope cannot be self-selected by packet fields. Missing ports
+  reject even for portless VS; quoted sourceVIP/source service port/protocol select
+  unique VS then external service association before reverse-key port omission.
+  No/multiple/stale/unprovable association consumes/count-drops before query/state/
+  clones/tokens. Coherent older binding is usable; owned delivery to sameVS bypasses
+  fanout readiness, not-owned uses only bound-service readiness/peers/budget.
+  No postquery retargeting, recreated-name inheritance or new-VS bucket refill;
+  indeterminate still drops without retry/fanout.
 - For both Echo and supported errors in both families, bad ICMP checksums
   counted-drop before reply/query/session mutation/fanout. Separately cover valid
   IPv4 header checksum with bad ICMP checksum and bad IPv4 header checksum with
