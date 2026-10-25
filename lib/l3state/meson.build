@@ -1,9 +1,7 @@
 # L3State library - l3b flow state (session pinning) on the statemap core
 dependencies = [
     lib_common_dep,
-    lib_packet_dp_dep,
     libdpdk_inc_dep,
-    lib_statemap_dep,
 ]
 
 sources = files(

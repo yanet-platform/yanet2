@@ -3,9 +3,7 @@ dependencies = [
   lib_counters_dep,
   lib_logging_dep,
   lib_errors_dep,
-  lib_config_dp_dep,
   lib_pipeline_dp_dep,
-  lib_module_dp_dep,
   libdpdk_inc_dep,
 ]
 

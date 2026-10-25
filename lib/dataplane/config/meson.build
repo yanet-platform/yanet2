@@ -3,18 +3,17 @@
 lib_dp_zone = static_library(
   'dp_zone',
   files('gen_resolve.c', 'zone.c'),
-  dependencies: [lib_module_dp_dep, lib_logging_dep, lib_counters_dep],
+  dependencies: [lib_logging_dep],
   install: false,
 )
 
 lib_dp_zone_dep = declare_dependency(
   link_with: [lib_dp_zone],
   include_directories: yanet_rootdir,
-  dependencies: [lib_module_dp_dep, lib_logging_dep, lib_counters_dep],
+  dependencies: [lib_logging_dep],
 )
 
 dependencies = [
-  lib_module_dp_dep,
   lib_dp_zone_dep,
   lib_errors_dep,
   lib_logging_dep,

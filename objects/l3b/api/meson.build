@@ -4,7 +4,7 @@ cp_dependencies = [
   lib_counters_dep,
   lib_errors_dep,
   lib_classify_compiler_dep,
-  lib_l3state_dep,
+  lib_statemap_dep,
 ]
 
 includes = include_directories('../../..')
@@ -31,4 +31,5 @@ lib_l3b_objects_dep = declare_dependency(
     '-Wl,--require-defined=new_object_l3b_session_table',
     '-Wl,--export-dynamic-symbol=new_object_l3b_session_table',
   ],
+  dependencies: cp_dependencies,
 )

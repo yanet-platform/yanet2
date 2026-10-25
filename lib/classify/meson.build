@@ -9,14 +9,14 @@ compiler_sources = files(
 lib_classify_compiler = static_library(
   'classify_compiler',
   compiler_sources,
-  dependencies: [lib_common_dep, lib_errors_dep],
+  dependencies: [lib_common_dep],
   install: false,
 )
 
 lib_classify_compiler_dep = declare_dependency(
   link_with: lib_classify_compiler,
   include_directories: include_directories('.'),
-  dependencies: [lib_errors_dep],
+  dependencies: [lib_common_dep],
 )
 
 subdir('tests')

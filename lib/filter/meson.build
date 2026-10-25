@@ -23,7 +23,7 @@ lib_filter_compiler = static_library(
 lib_filter_compiler_dep = declare_dependency(
   link_with: lib_filter_compiler,
   include_directories: include_directories('.'),
-  dependencies: [lib_errors_dep],
+  dependencies: [lib_common_dep, lib_errors_dep],
 )
 
 subdir('tests')

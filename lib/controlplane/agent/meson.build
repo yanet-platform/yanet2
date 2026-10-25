@@ -18,7 +18,7 @@ lib_agent_cp = static_library(
 
 lib_agent_cp_dep = declare_dependency(
   link_with: lib_agent_cp,
-  dependencies: [lib_errors_dep],
+  dependencies: dependencies,
   include_directories: yanet_rootdir,
 )
 
@@ -29,13 +29,23 @@ if not dataplane_only
   lib_agent_counters = static_library(
     'agent_counters',
     files('counters.c'),
-    dependencies: dependencies + [lib_counter_pattern_dep],
+    dependencies: [
+      lib_common_dep,
+      lib_config_cp_dep,
+      lib_errors_dep,
+      lib_counter_pattern_dep,
+    ],
     install: false,
   )
 
   lib_agent_counters_dep = declare_dependency(
     link_with: lib_agent_counters,
-    dependencies: [lib_agent_cp_dep, lib_counter_pattern_dep],
+    dependencies: [
+      lib_common_dep,
+      lib_config_cp_dep,
+      lib_errors_dep,
+      lib_counter_pattern_dep,
+    ],
     include_directories: yanet_rootdir,
   )
 
@@ -44,6 +54,7 @@ if not dataplane_only
     'agent_test.c',
     dependencies: [
       lib_agent_counters_dep,
+      lib_agent_cp_dep,
       lib_config_dp_dep,
       lib_config_cp_dep,
       lib_logging_dep,

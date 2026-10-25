@@ -1,8 +1,6 @@
 dp_dependencies = [
   lib_common_dep,
-  lib_classify_query_dep,
-  lib_packet_dp_dep,
-  lib_module_dp_dep,
+  libdpdk_inc_dep,
 ]
 
 dp_sources = files(
@@ -22,4 +20,5 @@ lib_forward_dp_dep = declare_dependency(
     '-Wl,--require-defined=new_module_forward',
     '-Wl,--export-dynamic-symbol=new_module_forward',
   ],
+  dependencies: dp_dependencies,
 )

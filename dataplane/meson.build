@@ -7,12 +7,14 @@ lib_dependencies = [
 
   lib_common_dep,
   lib_logging_dep,
-  lib_pipeline_dp_dep,
   lib_time_dp_dep,
   lib_config_dp_dep,
   lib_config_cp_dep,
   lib_worker_dp_dep,
-  lib_filter_query_dep,
+  lib_counters_dep,
+  lib_dp_zone_dep,
+  lib_packet_dp_dep,
+  lib_errors_dep,
 ]
 
 lib_sources = files(
@@ -35,6 +37,7 @@ lib_dataplane = static_library(
 lib_dataplane_dep = declare_dependency(
   link_with: lib_dataplane,
   include_directories: include_directories('.'),
+  dependencies: lib_dependencies,
 )
 
 dependencies = lib_dependencies + [

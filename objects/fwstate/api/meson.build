@@ -1,10 +1,8 @@
 cp_dependencies = [
   lib_common_dep,
   lib_config_cp_dep,
-  lib_counters_dep,
   lib_errors_dep,
-  lib_fwstate_dep,
-  libdpdk_inc_dep,
+  lib_statemap_dep,
 ]
 
 includes = include_directories('../../..')
@@ -16,7 +14,9 @@ sources = files(
 lib_fwstate_objects = static_library(
   'fwstate_objects',
   sources,
-  dependencies: cp_dependencies,
+  # The fwstate dependency only copies its registry into this archive,
+  # which is all that consumers need from it.
+  dependencies: cp_dependencies + [lib_fwstate_dep],
   include_directories: includes,
   install: false,
 )
@@ -30,4 +30,5 @@ lib_fwstate_objects_dep = declare_dependency(
     '-Wl,--require-defined=new_object_fwstate_map_v6',
     '-Wl,--export-dynamic-symbol=new_object_fwstate_map_v6',
   ],
+  dependencies: cp_dependencies,
 )

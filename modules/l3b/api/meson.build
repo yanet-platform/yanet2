@@ -4,7 +4,6 @@ cp_dependencies = [
     lib_classify_compiler_dep,
     lib_config_cp_dep,
     lib_counters_dep,
-    lib_l3b_objects_dep,
 ]
 
 includes = include_directories('../dataplane')
@@ -23,4 +22,5 @@ lib_l3b_cp = static_library(
 
 lib_l3b_cp_dep = declare_dependency(
   link_with: [lib_l3b_cp],
+  dependencies: cp_dependencies,
 )
