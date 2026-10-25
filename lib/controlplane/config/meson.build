@@ -1,6 +1,5 @@
 dependencies = [
   lib_counters_dep,
-  lib_module_dp_dep,
   lib_dp_zone_dep,
   lib_errors_dep,
 ]

@@ -1,9 +1,7 @@
 cp_dependencies = [
   lib_common_dep,
   lib_config_cp_dep,
-  lib_counters_dep,
   lib_errors_dep,
-  libdpdk_inc_dep,
 ]
 
 includes = include_directories('../../..')
@@ -27,4 +25,5 @@ lib_ring_objects_dep = declare_dependency(
     '-Wl,--require-defined=new_object_ring',
     '-Wl,--export-dynamic-symbol=new_object_ring',
   ],
+  dependencies: cp_dependencies,
 )

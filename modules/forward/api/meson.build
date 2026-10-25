@@ -4,8 +4,6 @@ cp_dependencies = [
   lib_classify_compiler_dep,
   lib_config_cp_dep,
   lib_counters_dep,
-  lib_agent_cp_dep,
-  libdpdk_inc_dep,
 ]
 
 includes = include_directories('../dataplane')
@@ -24,4 +22,5 @@ lib_forward_cp = static_library(
 
 lib_forward_cp_dep = declare_dependency(
   link_with: lib_forward_cp,
+  dependencies: cp_dependencies,
 )

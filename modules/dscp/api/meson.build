@@ -1,7 +1,6 @@
 cp_dependencies =  [
   lib_common_dep,
   lib_errors_dep,
-  lib_config_dp_dep,
   lib_config_cp_dep,
 ]
 
@@ -21,4 +20,5 @@ lib_dscp_cp = static_library(
 
 lib_dscp_cp_dep = declare_dependency(
   link_with: lib_dscp_cp,
+  dependencies: cp_dependencies,
 )

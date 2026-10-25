@@ -22,7 +22,6 @@ lib_ringtest_writer = static_library(
     lib_common_dep,
     lib_config_cp_dep,
     lib_errors_dep,
-    libdpdk_inc_dep,
   ],
   include_directories: yanet_rootdir,
   install: false,

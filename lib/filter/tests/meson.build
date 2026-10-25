@@ -129,7 +129,7 @@ filter_compiler_oom_shim = static_library(
 filter_compiler_oom_shim_dep = declare_dependency(
   link_with: filter_compiler_oom_shim,
   include_directories: include_directories('..'),
-  dependencies: [lib_errors_dep],
+  dependencies: [lib_common_dep, lib_errors_dep],
 )
 
 oom_sweep_deps = [

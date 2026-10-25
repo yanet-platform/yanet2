@@ -118,7 +118,7 @@ if not dataplane_only
   lib_counter_pattern = static_library(
     'counter_pattern',
     files('counter_pattern.c'),
-    dependencies: [lib_counters_dep, rure_dep],
+    dependencies: [lib_common_dep, rure_dep],
     install: false,
   )
 
@@ -127,7 +127,7 @@ if not dataplane_only
   lib_counter_pattern_dep = declare_dependency(
     link_with: [lib_counter_pattern],
     include_directories: yanet_rootdir,
-    dependencies: [lib_counters_dep, rure_dep],
+    dependencies: [lib_common_dep, rure_dep],
   )
 
   test_counter_pattern = executable(
