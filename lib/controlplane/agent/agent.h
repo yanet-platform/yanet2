@@ -1,5 +1,6 @@
 #pragma once
 
+#include <stdbool.h>
 #include <stddef.h>
 
 #include <sys/types.h>
@@ -68,12 +69,17 @@ struct agent {
 	// agent's wholesale reclaim.
 	//
 	// The count moves with relaxed atomics, so generation teardown may
-	// drop references without the config lock. Reference gains only
-	// ever happen under the lock; a racing drop unseen by a reclaim
-	// decision can only postpone that agent's reclamation. Reclaiming a
-	// superseded agent waits for it to reach zero, because freeing the
-	// arena is one wholesale operation with no way to tear the loaded
-	// entities down individually first.
+	// drop references without the config lock. A racing drop unseen by
+	// a reclaim decision can only postpone that agent's reclamation,
+	// and gains never race reclamation the other way: updates through
+	// a superseded agent are refused, a copy gain mirrors a reference
+	// the source generation already holds, and the one zero-to-one gain
+	// on a predecessor — a destroy gate's destruction hold — takes the
+	// agent lock, which the sweep's zero check therefore cannot miss,
+	// so the sweep may run under the agent lock alone.
+	// Reclaiming a superseded agent waits for it to reach zero, because
+	// freeing the arena is one wholesale operation with no way to tear
+	// the loaded entities down individually first.
 	uint64_t loaded_entity_count;
 	struct agent *prev;
 	char name[AGENT_NAME_LEN];

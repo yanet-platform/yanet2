@@ -132,6 +132,22 @@ struct cp_config {
 	struct spinlock gen_lock;
 
 	/*
+	 * Agent lock: serialises the structure of the agent registry —
+	 * the array below and every name's predecessor chain — and the
+	 * agent structures it reaches (arenas, storage, memory contexts)
+	 * against the sweep's reclamation, an attach's supersession
+	 * splice and an extension's arena growth. The agent listing
+	 * takes this lock alone, so reading agent state never waits
+	 * behind a configuration update; a mutation path takes the
+	 * configuration lock first and this one second, and the sweep
+	 * runs under this lock alone — a superseded agent's loaded
+	 * count cannot rise past an in-flight zero check, because
+	 * updates through a superseded agent are refused and a destroy
+	 * gate's hold takes this lock with the sweep's check.
+	 */
+	struct spinlock agent_lock;
+
+	/*
 	 * Relative pointer to the current active packet processing
 	 * configuration.
 	 */
@@ -318,9 +334,11 @@ cp_config_gen_acquire(struct cp_config *cp_config) {
 // registry release and memory return, all of which is independently
 // safe (atomic agent counters, internally locked allocator). That
 // teardown can leave a superseded agent unreferenced, and the release
-// then reclaims it too when the configuration lock happens to be free:
-// after the call returns, storage owned by such an agent may already be
-// gone. A busy lock defers the reclamation to the next update's sweep.
+// then reclaims it too, waiting for the agent lock if another thread
+// holds it: after the call returns, storage owned by such an agent may
+// already be gone. A caller that itself holds the configuration lock —
+// an install, whose update path sweeps before releasing it — skips that
+// sweep and leaves the reclamation to its caller.
 void
 cp_config_gen_release(
 	struct cp_config *cp_config, struct cp_config_gen *config_gen
