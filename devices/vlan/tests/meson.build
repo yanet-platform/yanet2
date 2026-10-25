@@ -3,11 +3,8 @@ vlan_leak_test = executable(
   'leak_test.c',
   dependencies: [
     lib_dev_vlan_api,
-    lib_config_cp_dep,
-    lib_agent_cp_dep,
     lib_common_dep,
     lib_logging_dep,
-    lib_errors_dep,
   ],
   include_directories: yanet_rootdir,
 )

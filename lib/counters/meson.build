@@ -151,7 +151,7 @@ test('counters', test_counters_histogram, suite: ['lib'])
 counter_storage_test = executable(
   'counter_storage_test',
   'storage_test.c',
-  dependencies: [lib_counters_dep, lib_common_dep, lib_logging_dep],
+  dependencies: [lib_counters_dep, lib_common_dep, lib_logging_dep, lib_errors_dep],
   include_directories: yanet_rootdir,
 )
 test('counter_storage_oom', counter_storage_test, suite: ['lib'])

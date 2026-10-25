@@ -3,11 +3,8 @@ vxlan_leak_test = executable(
   'leak_test.c',
   dependencies: [
     lib_dev_vxlan_api_dep,
-    lib_config_cp_dep,
-    lib_agent_cp_dep,
     lib_common_dep,
     lib_logging_dep,
-    lib_errors_dep,
   ],
   include_directories: yanet_rootdir,
 )
@@ -18,10 +15,6 @@ vxlan_dataplane_test = executable(
   'dataplane_test.c',
   link_args: [
     '-Wl,-E',
-    '-Wl,--undefined=new_device_plain',
-    '-Wl,--export-dynamic-symbol=new_device_plain',
-    '-Wl,--undefined=new_device_vxlan',
-    '-Wl,--export-dynamic-symbol=new_device_vxlan',
   ],
   dependencies: [
     lib_dataplane_ut_dep,
@@ -29,10 +22,12 @@ vxlan_dataplane_test = executable(
     lib_lib_utils_dep,
     lib_packet_dp_dep,
     lib_logging_dep,
-    lib_errors_dep,
+    lib_agent_cp_dep,
+    lib_dp_zone_dep,
+    lib_dev_vxlan_dp_dep,
+    lib_dev_plain_dp_dep,
     libdpdk_dep,
   ],
-  link_with: [lib_dev_vxlan_dp, lib_dev_plain_dp],
   include_directories: yanet_rootdir,
 )
 test('vxlan_dataplane', vxlan_dataplane_test, suite: 'devices')

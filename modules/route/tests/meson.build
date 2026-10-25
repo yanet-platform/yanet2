@@ -1,3 +1,5 @@
+# The tests register only the route module, by hand: its dependency object
+# would also register the FIB object type, which they do not load.
 includes = include_directories('../../../', '../../../lib')
 
 route_api_test = executable(
@@ -7,17 +9,17 @@ route_api_test = executable(
     '-Wl,-E',
     '-Wl,--undefined=new_module_route',
     '-Wl,--export-dynamic-symbol=new_module_route',
-    '-Wl,--undefined=new_device_plain',
-    '-Wl,--export-dynamic-symbol=new_device_plain',
   ],
   dependencies: [
     lib_dataplane_ut_dep,
     lib_logging_dep,
     lib_errors_dep,
     lib_route_cp_dep,
+    lib_dev_plain_dp_dep,
+    lib_agent_cp_dep,
     libdpdk_dep,
   ],
-  link_with: [lib_route_dp, lib_dev_plain_dp],
+  link_with: [lib_route_dp],
   include_directories: includes,
 )
 
@@ -30,17 +32,18 @@ route_fib_object_test = executable(
     '-Wl,-E',
     '-Wl,--undefined=new_module_route',
     '-Wl,--export-dynamic-symbol=new_module_route',
-    '-Wl,--undefined=new_device_plain',
-    '-Wl,--export-dynamic-symbol=new_device_plain',
   ],
   dependencies: [
     lib_dataplane_ut_dep,
     lib_logging_dep,
     lib_errors_dep,
     lib_route_cp_dep,
+    lib_dev_plain_dp_dep,
+    lib_agent_cp_dep,
+    lib_config_cp_dep,
     libdpdk_dep,
   ],
-  link_with: [lib_route_dp, lib_dev_plain_dp],
+  link_with: [lib_route_dp],
   include_directories: includes,
 )
 

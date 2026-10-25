@@ -3,8 +3,6 @@ counters_test = executable(
   ['counters_test.c'],
   link_args: [
     '-Wl,-E',
-    '-Wl,--undefined=new_device_plain',
-    '-Wl,--export-dynamic-symbol=new_device_plain',
   ],
   dependencies: [
     lib_dataplane_ut_dep,
@@ -12,9 +10,11 @@ counters_test = executable(
     lib_logging_dep,
     lib_errors_dep,
     lib_dev_plain_api,
+    lib_agent_cp_dep,
+    lib_config_cp_dep,
+    lib_dev_plain_dp_dep,
     libdpdk_dep,
   ],
-  link_with: [lib_dev_plain_dp],
   include_directories: yanet_rootdir,
 )
 
@@ -27,8 +27,6 @@ counters_lock_test = executable(
   ['counters_lock_test.c'],
   link_args: [
     '-Wl,-E',
-    '-Wl,--undefined=new_device_plain',
-    '-Wl,--export-dynamic-symbol=new_device_plain',
   ],
   dependencies: [
     lib_dataplane_ut_dep,
@@ -36,10 +34,12 @@ counters_lock_test = executable(
     lib_logging_dep,
     lib_errors_dep,
     lib_dev_plain_api,
+    lib_agent_cp_dep,
+    lib_config_cp_dep,
+    lib_dev_plain_dp_dep,
     libdpdk_dep,
     counters_lock_thread_dep,
   ],
-  link_with: [lib_dev_plain_dp],
   include_directories: yanet_rootdir,
 )
 
@@ -55,8 +55,6 @@ counter_workers_test = executable(
   ['counter_workers_test.c'],
   link_args: [
     '-Wl,-E',
-    '-Wl,--undefined=new_device_plain',
-    '-Wl,--export-dynamic-symbol=new_device_plain',
   ],
   dependencies: [
     lib_dataplane_ut_dep,
@@ -64,9 +62,12 @@ counter_workers_test = executable(
     lib_logging_dep,
     lib_errors_dep,
     lib_dev_plain_api,
+    lib_agent_cp_dep,
+    lib_config_cp_dep,
+    lib_counters_dep,
+    lib_dev_plain_dp_dep,
     libdpdk_dep,
   ],
-  link_with: [lib_dev_plain_dp],
   include_directories: yanet_rootdir,
 )
 
@@ -77,17 +78,17 @@ loaded_counts_test = executable(
   ['loaded_counts_test.c'],
   link_args: [
     '-Wl,-E',
-    '-Wl,--undefined=new_device_plain',
-    '-Wl,--export-dynamic-symbol=new_device_plain',
   ],
   dependencies: [
     lib_dataplane_ut_dep,
     lib_logging_dep,
     lib_errors_dep,
     lib_dev_plain_api,
+    lib_agent_cp_dep,
+    lib_config_cp_dep,
+    lib_dev_plain_dp_dep,
     libdpdk_dep,
   ],
-  link_with: [lib_dev_plain_dp],
   include_directories: yanet_rootdir,
 )
 
@@ -100,18 +101,18 @@ gen_pin_race_test = executable(
   ['gen_pin_race_test.c'],
   link_args: [
     '-Wl,-E',
-    '-Wl,--undefined=new_device_plain',
-    '-Wl,--export-dynamic-symbol=new_device_plain',
   ],
   dependencies: [
     lib_dataplane_ut_dep,
     lib_logging_dep,
     lib_errors_dep,
     lib_dev_plain_api,
+    lib_agent_cp_dep,
+    lib_config_cp_dep,
+    lib_dev_plain_dp_dep,
     libdpdk_dep,
     gen_pin_race_thread_dep,
   ],
-  link_with: [lib_dev_plain_dp],
   include_directories: yanet_rootdir,
 )
 
@@ -129,8 +130,6 @@ device_list_test = executable(
   ['device_list_test.c'],
   link_args: [
     '-Wl,-E',
-    '-Wl,--undefined=new_device_plain',
-    '-Wl,--export-dynamic-symbol=new_device_plain',
     '-Wl,--wrap=malloc',
     '-Wl,--wrap=calloc',
   ],
@@ -139,10 +138,12 @@ device_list_test = executable(
     lib_logging_dep,
     lib_errors_dep,
     lib_dev_plain_api,
+    lib_agent_cp_dep,
+    lib_config_cp_dep,
+    lib_dev_plain_dp_dep,
     libdpdk_dep,
     device_list_thread_dep,
   ],
-  link_with: [lib_dev_plain_dp],
   include_directories: yanet_rootdir,
 )
 
@@ -158,17 +159,13 @@ module_registry_fini_guard_test = executable(
   ['module_registry_fini_guard_test.c'],
   link_args: [
     '-Wl,-E',
-    '-Wl,--undefined=new_device_plain',
-    '-Wl,--export-dynamic-symbol=new_device_plain',
   ],
   dependencies: [
-    lib_dataplane_ut_dep,
     lib_logging_dep,
-    lib_errors_dep,
-    lib_dev_plain_api,
+    lib_config_cp_dep,
+    lib_dev_plain_dp_dep,
     libdpdk_dep,
   ],
-  link_with: [lib_dev_plain_dp],
   include_directories: yanet_rootdir,
 )
 
@@ -179,17 +176,17 @@ cp_object_test = executable(
   ['cp_object_test.c'],
   link_args: [
     '-Wl,-E',
-    '-Wl,--undefined=new_device_plain',
-    '-Wl,--export-dynamic-symbol=new_device_plain',
   ],
   dependencies: [
     lib_dataplane_ut_dep,
     lib_logging_dep,
     lib_errors_dep,
-    lib_dev_plain_api,
+    lib_agent_cp_dep,
+    lib_config_cp_dep,
+    lib_counters_dep,
+    lib_dev_plain_dp_dep,
     libdpdk_dep,
   ],
-  link_with: [lib_dev_plain_dp],
   include_directories: yanet_rootdir,
 )
 
@@ -200,10 +197,6 @@ cp_object_gen_test = executable(
   ['cp_object_gen_test.c'],
   link_args: [
     '-Wl,-E',
-    '-Wl,--undefined=new_device_plain',
-    '-Wl,--export-dynamic-symbol=new_device_plain',
-    '-Wl,--undefined=new_module_forward',
-    '-Wl,--export-dynamic-symbol=new_module_forward',
   ],
   dependencies: [
     lib_dataplane_ut_dep,
@@ -211,9 +204,13 @@ cp_object_gen_test = executable(
     lib_errors_dep,
     lib_dev_plain_api,
     lib_forward_cp_dep,
+    lib_agent_cp_dep,
+    lib_config_cp_dep,
+    lib_counters_dep,
+    lib_dev_plain_dp_dep,
+    lib_forward_dp_dep,
     libdpdk_dep,
   ],
-  link_with: [lib_dev_plain_dp, lib_forward_dp],
   include_directories: yanet_rootdir,
 )
 
@@ -224,12 +221,6 @@ prepare_test = executable(
   ['prepare_test.c'],
   link_args: [
     '-Wl,-E',
-    '-Wl,--undefined=new_device_plain',
-    '-Wl,--export-dynamic-symbol=new_device_plain',
-    '-Wl,--undefined=new_module_forward',
-    '-Wl,--export-dynamic-symbol=new_module_forward',
-    '-Wl,--undefined=new_module_decap',
-    '-Wl,--export-dynamic-symbol=new_module_decap',
   ],
   dependencies: [
     lib_dataplane_ut_dep,
@@ -238,9 +229,14 @@ prepare_test = executable(
     lib_dev_plain_api,
     lib_forward_cp_dep,
     lib_decap_cp_dep,
+    lib_agent_cp_dep,
+    lib_config_cp_dep,
+    lib_dp_zone_dep,
+    lib_dev_plain_dp_dep,
+    lib_forward_dp_dep,
+    lib_decap_dp_dep,
     libdpdk_dep,
   ],
-  link_with: [lib_dev_plain_dp, lib_forward_dp, lib_decap_dp],
   include_directories: yanet_rootdir,
 )
 
@@ -251,17 +247,17 @@ object_prepare_test = executable(
   ['object_prepare_test.c'],
   link_args: [
     '-Wl,-E',
-    '-Wl,--undefined=new_device_plain',
-    '-Wl,--export-dynamic-symbol=new_device_plain',
   ],
   dependencies: [
     lib_dataplane_ut_dep,
     lib_logging_dep,
     lib_errors_dep,
-    lib_dev_plain_api,
+    lib_agent_cp_dep,
+    lib_config_cp_dep,
+    lib_dp_zone_dep,
+    lib_dev_plain_dp_dep,
     libdpdk_dep,
   ],
-  link_with: [lib_dev_plain_dp],
   include_directories: yanet_rootdir,
 )
 
@@ -272,10 +268,6 @@ dangling_modules_test = executable(
   ['dangling_modules_test.c'],
   link_args: [
     '-Wl,-E',
-    '-Wl,--undefined=new_module_decap',
-    '-Wl,--export-dynamic-symbol=new_module_decap',
-    '-Wl,--undefined=new_module_forward',
-    '-Wl,--export-dynamic-symbol=new_module_forward',
   ],
   dependencies: [
     lib_dataplane_ut_dep,
@@ -283,9 +275,12 @@ dangling_modules_test = executable(
     lib_errors_dep,
     lib_decap_cp_dep,
     lib_forward_cp_dep,
+    lib_agent_cp_dep,
+    lib_config_cp_dep,
+    lib_decap_dp_dep,
+    lib_forward_dp_dep,
     libdpdk_dep,
   ],
-  link_with: [lib_decap_dp, lib_forward_dp],
   include_directories: yanet_rootdir,
 )
 
@@ -296,10 +291,6 @@ dangling_devices_test = executable(
   ['dangling_devices_test.c'],
   link_args: [
     '-Wl,-E',
-    '-Wl,--undefined=new_device_plain',
-    '-Wl,--export-dynamic-symbol=new_device_plain',
-    '-Wl,--undefined=new_device_vlan',
-    '-Wl,--export-dynamic-symbol=new_device_vlan',
   ],
   dependencies: [
     lib_dataplane_ut_dep,
@@ -307,9 +298,12 @@ dangling_devices_test = executable(
     lib_errors_dep,
     lib_dev_plain_api,
     lib_dev_vlan_api,
+    lib_agent_cp_dep,
+    lib_config_cp_dep,
+    lib_dev_plain_dp_dep,
+    lib_dev_vlan_dp_dep,
     libdpdk_dep,
   ],
-  link_with: [lib_dev_plain_dp, lib_dev_vlan_dp],
   include_directories: yanet_rootdir,
 )
 
@@ -320,18 +314,17 @@ dangling_objects_test = executable(
   ['dangling_objects_test.c'],
   link_args: [
     '-Wl,-E',
-    '-Wl,--undefined=new_device_plain',
-    '-Wl,--export-dynamic-symbol=new_device_plain',
   ],
   dependencies: [
     lib_dataplane_ut_dep,
     lib_logging_dep,
     lib_errors_dep,
-    lib_dev_plain_api,
     lib_fwstate_objects_dep,
+    lib_agent_cp_dep,
+    lib_config_cp_dep,
+    lib_dev_plain_dp_dep,
     libdpdk_dep,
   ],
-  link_with: [lib_dev_plain_dp],
   include_directories: yanet_rootdir,
 )
 
