@@ -12,7 +12,7 @@ route_api_test = executable(
     lib_route_dp_dep,
     lib_dev_plain_dp_dep,
     lib_agent_cp_dep,
-    libdpdk_dep,
+    libdpdk_test_dep,
   ],
 )
 
@@ -33,7 +33,7 @@ route_fib_object_test = executable(
     lib_dev_plain_dp_dep,
     lib_agent_cp_dep,
     lib_config_cp_dep,
-    libdpdk_dep,
+    libdpdk_test_dep,
   ],
 )
 

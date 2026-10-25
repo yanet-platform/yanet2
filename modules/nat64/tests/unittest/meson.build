@@ -1,5 +1,5 @@
 dependencies = [
-  libdpdk_dep,
+  libdpdk_test_dep,
   lib_common_dep,
   lib_config_cp_dep,
   lib_logging_dep,

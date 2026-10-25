@@ -4,7 +4,7 @@ smoke_test_dependencies = [
   lib_logging_dep,
   lib_dev_plain_dp_dep,
   lib_agent_cp_dep,
-  libdpdk_dep,
+  libdpdk_test_dep,
 ]
 smoke_test_link_args = [
   '-Wl,-E',
@@ -43,7 +43,7 @@ worker_counters_test = executable(
     lib_logging_dep,
     lib_agent_cp_dep,
     lib_worker_dp_dep,
-    libdpdk_dep,
+    libdpdk_test_dep,
   ],
   include_directories: yanet_rootdir,
 )
@@ -64,7 +64,7 @@ loader_test = executable(
     lib_agent_cp_dep,
     lib_config_dp_dep,
     lib_dp_zone_dep,
-    libdpdk_dep,
+    libdpdk_test_dep,
   ],
   include_directories: [yanet_rootdir, loader_probe_include],
 )

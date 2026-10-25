@@ -5,7 +5,7 @@ mss_test = executable(
     lib_packet_dp_dep,
     lib_lib_utils_dep,
     lib_logging_dep,
-    libdpdk_dep,
+    libdpdk_inc_dep,
   ],
   include_directories: yanet_rootdir,
 )
@@ -18,7 +18,7 @@ gre_test = executable(
     lib_packet_dp_dep,
     lib_lib_utils_dep,
     lib_logging_dep,
-    libdpdk_dep,
+    libdpdk_inc_dep,
   ],
   include_directories: yanet_rootdir,
 )
@@ -31,7 +31,7 @@ parse_frag_test = executable(
     lib_packet_dp_dep,
     lib_lib_utils_dep,
     lib_logging_dep,
-    libdpdk_dep,
+    libdpdk_inc_dep,
   ],
   include_directories: yanet_rootdir,
 )
@@ -52,7 +52,7 @@ encap_dscp_test = executable(
     lib_packet_dp_dep,
     lib_lib_utils_dep,
     lib_logging_dep,
-    libdpdk_dep,
+    libdpdk_inc_dep,
   ],
   include_directories: yanet_rootdir,
 )
@@ -110,7 +110,7 @@ worker_clone_test = executable(
   dependencies: [
     lib_worker_dp_dep,
     lib_logging_dep,
-    libdpdk_dep,
+    libdpdk_test_dep,
   ],
   include_directories: yanet_rootdir,
 )

@@ -13,7 +13,7 @@ counters_test = executable(
     lib_agent_cp_dep,
     lib_config_cp_dep,
     lib_dev_plain_dp_dep,
-    libdpdk_dep,
+    libdpdk_test_dep,
   ],
   include_directories: yanet_rootdir,
 )
@@ -37,7 +37,7 @@ counters_lock_test = executable(
     lib_agent_cp_dep,
     lib_config_cp_dep,
     lib_dev_plain_dp_dep,
-    libdpdk_dep,
+    libdpdk_test_dep,
     counters_lock_thread_dep,
   ],
   include_directories: yanet_rootdir,
@@ -66,7 +66,7 @@ counter_workers_test = executable(
     lib_config_cp_dep,
     lib_counters_dep,
     lib_dev_plain_dp_dep,
-    libdpdk_dep,
+    libdpdk_test_dep,
   ],
   include_directories: yanet_rootdir,
 )
@@ -87,7 +87,7 @@ loaded_counts_test = executable(
     lib_agent_cp_dep,
     lib_config_cp_dep,
     lib_dev_plain_dp_dep,
-    libdpdk_dep,
+    libdpdk_test_dep,
   ],
   include_directories: yanet_rootdir,
 )
@@ -110,7 +110,7 @@ gen_pin_race_test = executable(
     lib_agent_cp_dep,
     lib_config_cp_dep,
     lib_dev_plain_dp_dep,
-    libdpdk_dep,
+    libdpdk_test_dep,
     gen_pin_race_thread_dep,
   ],
   include_directories: yanet_rootdir,
@@ -141,7 +141,7 @@ device_list_test = executable(
     lib_agent_cp_dep,
     lib_config_cp_dep,
     lib_dev_plain_dp_dep,
-    libdpdk_dep,
+    libdpdk_test_dep,
     device_list_thread_dep,
   ],
   include_directories: yanet_rootdir,
@@ -157,14 +157,9 @@ test(
 module_registry_fini_guard_test = executable(
   'module_registry_fini_guard_test',
   ['module_registry_fini_guard_test.c'],
-  link_args: [
-    '-Wl,-E',
-  ],
   dependencies: [
     lib_logging_dep,
     lib_config_cp_dep,
-    lib_dev_plain_dp_dep,
-    libdpdk_dep,
   ],
   include_directories: yanet_rootdir,
 )
@@ -185,7 +180,7 @@ cp_object_test = executable(
     lib_config_cp_dep,
     lib_counters_dep,
     lib_dev_plain_dp_dep,
-    libdpdk_dep,
+    libdpdk_test_dep,
   ],
   include_directories: yanet_rootdir,
 )
@@ -209,7 +204,7 @@ cp_object_gen_test = executable(
     lib_counters_dep,
     lib_dev_plain_dp_dep,
     lib_forward_dp_dep,
-    libdpdk_dep,
+    libdpdk_test_dep,
   ],
   include_directories: yanet_rootdir,
 )
@@ -235,7 +230,7 @@ prepare_test = executable(
     lib_dev_plain_dp_dep,
     lib_forward_dp_dep,
     lib_decap_dp_dep,
-    libdpdk_dep,
+    libdpdk_test_dep,
   ],
   include_directories: yanet_rootdir,
 )
@@ -256,7 +251,7 @@ object_prepare_test = executable(
     lib_config_cp_dep,
     lib_dp_zone_dep,
     lib_dev_plain_dp_dep,
-    libdpdk_dep,
+    libdpdk_test_dep,
   ],
   include_directories: yanet_rootdir,
 )
@@ -279,7 +274,7 @@ dangling_modules_test = executable(
     lib_config_cp_dep,
     lib_decap_dp_dep,
     lib_forward_dp_dep,
-    libdpdk_dep,
+    libdpdk_test_dep,
   ],
   include_directories: yanet_rootdir,
 )
@@ -302,7 +297,7 @@ dangling_devices_test = executable(
     lib_config_cp_dep,
     lib_dev_plain_dp_dep,
     lib_dev_vlan_dp_dep,
-    libdpdk_dep,
+    libdpdk_test_dep,
   ],
   include_directories: yanet_rootdir,
 )
@@ -323,7 +318,7 @@ dangling_objects_test = executable(
     lib_agent_cp_dep,
     lib_config_cp_dep,
     lib_dev_plain_dp_dep,
-    libdpdk_dep,
+    libdpdk_test_dep,
   ],
   include_directories: yanet_rootdir,
 )

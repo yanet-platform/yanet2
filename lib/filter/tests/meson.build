@@ -5,7 +5,7 @@ test_deps = [
   lib_lib_utils_dep,
   lib_errors_dep,
   lib_logging_dep,
-  libdpdk_dep,
+  libdpdk_inc_dep,
 ]
 
 # test basic ports
@@ -137,7 +137,7 @@ oom_sweep_deps = [
   filter_compiler_oom_shim_dep,
   lib_errors_dep,
   lib_logging_dep,
-  libdpdk_dep,
+  libdpdk_inc_dep,
 ]
 
 # The sweep test itself inlines part of the compile path (filter_init is a

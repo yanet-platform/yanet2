@@ -207,6 +207,22 @@ libdpdk = subproject(
 
 libdpdk_dep = libdpdk.get_variable('dpdk_dep')
 
+# DPDK for test programs: every library, but of the drivers only the buses
+# and mempools.
+#
+# No test probes a NIC, and linking every NIC driver into each test program
+# is most of what it costs to link one.
+dpdk_test_drivers = []
+foreach driver : libdpdk.get_variable('dpdk_drivers')
+  if driver.name().startswith('rte_bus_') or driver.name().startswith('rte_mempool_')
+    dpdk_test_drivers += driver
+  endif
+endforeach
+libdpdk_test_dep = declare_dependency(
+  dependencies: libdpdk_dep.partial_dependency(compile_args: true, includes: true, link_args: true),
+  link_whole: libdpdk.get_variable('dpdk_static_libraries') + dpdk_test_drivers,
+)
+
 yanet_cache_line_size = libdpdk.get_variable('dpdk_conf').get('RTE_CACHE_LINE_SIZE')
 yanet_cache_line_arg = '-DYANET_CACHE_LINE_SIZE=' + yanet_cache_line_size.to_string()
 yanet_project_args += yanet_cache_line_arg
