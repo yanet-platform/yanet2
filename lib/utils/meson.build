@@ -24,7 +24,6 @@ lib_lib_utils_dep = declare_dependency(
 test_utils = executable(
   'test_utils',
   sources: 'test.c',
-  dependencies: lib_lib_utils_dep,
-  link_with: [lib_lib_utils, lib_packet_dp]
+  dependencies: [lib_lib_utils_dep, lib_logging_dep]
 )
 test('test_utils', test_utils, suite: 'lib_utils')

@@ -85,6 +85,7 @@ zone_test = executable(
   dependencies: [
     lib_config_dp_dep,
     lib_logging_dep,
+    lib_dp_zone_dep,
   ],
   include_directories: yanet_rootdir,
 )
@@ -97,6 +98,7 @@ commit_test = executable(
     lib_config_dp_dep,
     lib_config_cp_dep,
     lib_logging_dep,
+    lib_dp_zone_dep,
   ],
   include_directories: yanet_rootdir,
 )
@@ -107,7 +109,6 @@ worker_clone_test = executable(
   'worker_clone_test.c',
   dependencies: [
     lib_worker_dp_dep,
-    lib_dataplane_ut_dep,
     lib_logging_dep,
     libdpdk_dep,
   ],
@@ -123,6 +124,7 @@ backing_test = executable(
     lib_config_cp_dep,
     lib_worker_dp_dep,
     lib_logging_dep,
+    lib_counters_dep,
   ],
   include_directories: yanet_rootdir,
 )

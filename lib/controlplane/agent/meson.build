@@ -58,6 +58,7 @@ if not dataplane_only
       lib_config_dp_dep,
       lib_config_cp_dep,
       lib_logging_dep,
+      lib_errors_dep,
     ],
     include_directories: yanet_rootdir,
   )

@@ -1,4 +1,4 @@
-dependencies = [lib_common_dep, lib_logging_dep, lib_fwstate_dep]
+dependencies = [lib_common_dep, lib_fwstate_dep, lib_statemap_dep]
 
 fwmap_test_basic = executable(
   'fwmap_basic_test',
@@ -55,7 +55,7 @@ sync_test = executable(
   'sync_test',
   ['sync_test.c'],
   c_args: yanet_test_c_args,
-  dependencies: [libdpdk_dep, lib_common_dep, lib_logging_dep, lib_fwstate_dep, lib_packet_dp_dep],
+  dependencies: [libdpdk_dep, lib_common_dep, lib_fwstate_dep],
 )
 test('sync',
   sync_test,
@@ -67,7 +67,7 @@ check_state_fragment_test = executable(
   'check_state_fragment_test',
   ['check_state_fragment_test.c'],
   c_args: yanet_test_c_args,
-  dependencies: [lib_common_dep, lib_logging_dep, lib_fwstate_dep, lib_packet_dp_dep, lib_lib_utils_dep],
+  dependencies: [lib_common_dep, lib_fwstate_dep, lib_packet_dp_dep, lib_lib_utils_dep, lib_statemap_dep],
 )
 test('check_state_fragment',
   check_state_fragment_test,

@@ -2,9 +2,9 @@ test_deps = [
   lib_common_dep,
   lib_packet_dp_dep,
   lib_filter_compiler_dep,
-  lib_filter_query_dep,
   lib_lib_utils_dep,
-  libdpdk_inc_dep,
+  lib_errors_dep,
+  lib_logging_dep,
   libdpdk_dep,
 ]
 
@@ -134,11 +134,9 @@ filter_compiler_oom_shim_dep = declare_dependency(
 
 oom_sweep_deps = [
   lib_common_dep,
-  lib_packet_dp_dep,
   filter_compiler_oom_shim_dep,
-  lib_filter_query_dep,
-  lib_lib_utils_dep,
-  libdpdk_inc_dep,
+  lib_errors_dep,
+  lib_logging_dep,
   libdpdk_dep,
 ]
 

@@ -6,15 +6,12 @@ dependencies = [
   lib_config_cp_dep,
   lib_config_dp_dep,
   lib_counters_dep,
-  lib_classify_compiler_dep,
-  lib_classify_query_dep,
   lib_l3state_dep,
   lib_l3b_objects_dep,
   lib_lib_utils_dep,
   lib_logging_dep,
-  lib_module_dp_dep,
   lib_packet_dp_dep,
-  lib_worker_dp_dep,
+  lib_statemap_dep,
 ]
 
 l3b_test = executable(

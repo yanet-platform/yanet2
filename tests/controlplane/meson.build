@@ -6,7 +6,6 @@ config_gen_test = executable(
     lib_common_dep,
     lib_logging_dep,
     lib_config_cp_dep,
-    lib_config_dp_dep,
   ],
   include_directories: yanet_rootdir,
 )
@@ -35,7 +34,7 @@ cp_module_counter_registry_test = executable(
     lib_common_dep,
     lib_logging_dep,
     lib_config_cp_dep,
-    lib_config_dp_dep,
+    lib_counters_dep,
   ],
   include_directories: yanet_rootdir,
 )
