@@ -18,10 +18,18 @@ sources = files(
   'zone.c',
 )
 
+# The registry debug invariants rescan the whole registry after every
+# mutation, so only debug and sanitized builds enable them; release
+# mutations stay constant time.
+registry_sanitize_args = []
+if get_option('buildtype') == 'debug' or get_option('b_sanitize') != 'none'
+  registry_sanitize_args += '-DREGISTRY_SANITIZE'
+endif
+
 lib_config_cp = static_library(
   'config_cp',
   sources,
-  c_args: yanet_c_args + ['-DREGISTRY_SANITIZE'],
+  c_args: yanet_c_args + registry_sanitize_args,
   dependencies: dependencies,
   install: false,
 )
