@@ -211,9 +211,10 @@ registry_sanitize_slot_eq(uint32_t value, const void *data) {
 // Assert the side index still resolves every live item to its own slot
 // and counts exactly the live slots.
 //
-// The scan exists only to feed assertions, so it compiles away in
-// builds where assertions are compiled out: mutations stay constant
-// time there instead of rescanning the registry.
+// The scan exists only to feed assertions: only debug and sanitized
+// builds of this library compile it, and within those it still compiles
+// away where assertions are off, so release mutations stay constant
+// time instead of rescanning the registry.
 static inline void
 registry_sanitize_index(
 	struct registry *registry, const struct registry_keys *keys
