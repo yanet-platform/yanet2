@@ -13,7 +13,6 @@ test_filter_basic_ports = executable(
   'basic_ports',
   ['basic_ports.c'],
   dependencies: test_deps,
-  link_language: 'c',
   include_directories: include_directories('..'),
 )
 test('basic_ports', test_filter_basic_ports, suite: ['filter'])
@@ -23,7 +22,6 @@ test_filter_basic_net4 = executable('basic_net4',
 ['basic_net4.c'],
   c_args: yanet_test_c_args,
   dependencies: test_deps,
-  link_language: 'c'
 )
 test('basic_net4', test_filter_basic_net4, suite: ['filter'])
 
@@ -32,7 +30,6 @@ test_filter_basic_net6 = executable('basic_net6',
 ['basic_net6.c'],
   c_args: yanet_test_c_args,
   dependencies: test_deps,
-  link_language: 'c'
 )
 test('basic_net6', test_filter_basic_net6, suite: ['filter'])
 
@@ -42,7 +39,6 @@ test_filter_corner = executable(
   ['corner.c'],
   c_args: yanet_test_c_args,
   dependencies: test_deps,
-  link_language: 'c'
 )
 test('corner', test_filter_corner, suite: ['filter'])
 
@@ -52,7 +48,6 @@ test_filter_net4_ports = executable(
   ['net4_ports.c'],
   c_args: yanet_test_c_args,
   dependencies: test_deps,
-  link_language: 'c'
 )
 test('net4_ports', test_filter_net4_ports, suite: ['filter'])
 
@@ -60,7 +55,6 @@ test_filter_net6_overlap = executable('net6_overlap',
   ['net6_overlap.c'],
   c_args: yanet_test_c_args,
   dependencies: test_deps,
-  link_language: 'c'
 )
 test('net6_overlap', test_filter_net6_overlap, suite: ['filter'])
 
@@ -69,7 +63,6 @@ test_filter_memory = executable('memory',
   ['memory.c'],
   c_args: yanet_test_c_args,
   dependencies: test_deps,
-  link_language: 'c'
 )
 test('memory', test_filter_memory, suite: ['filter'])
 
@@ -78,7 +71,6 @@ test_filter_context_names = executable('context_names',
   ['context_names.c'],
   c_args: yanet_test_c_args,
   dependencies: test_deps,
-  link_language: 'c'
 )
 test('context_names', test_filter_context_names, suite: ['filter'])
 
@@ -87,7 +79,6 @@ test_filter_vlan = executable('basic_vlan',
   ['basic_vlan.c'],
   c_args: yanet_test_c_args,
   dependencies: test_deps,
-  link_language: 'c'
 )
 test('basic_vlan', test_filter_vlan, suite: ['filter'])
 
@@ -96,7 +87,6 @@ filter_macros = executable(
   'macros',
   ['macros.c'],
   dependencies: test_deps,
-  link_language: 'c',
   include_directories: include_directories('..'),
 )
 test('macros', filter_macros, suite: ['filter'])
@@ -105,7 +95,6 @@ basic_proto_range = executable('basic_proto_range',
   ['basic_proto_range.c'],
   c_args: yanet_test_c_args,
   dependencies: test_deps,
-  link_language: 'c'
 )
 test('basic_proto_range', basic_proto_range, suite: ['filter'])
 
@@ -114,13 +103,11 @@ subdir('shm')
 executable('bench_net4',
   ['bench_net4.c'], 
   dependencies: test_deps,
-  link_language: 'c'
 )
 
 executable('bench_net6',
   ['bench_net6.c'],
   dependencies: test_deps,
-  link_language: 'c'
 )
 
 # Allocation-failure injection sweep. The compiler sources are recompiled
@@ -161,6 +148,5 @@ test_filter_oom_sweep = executable('oom_sweep',
   ['oom_sweep.c'],
   c_args: oom_shim_c_args,
   dependencies: oom_sweep_deps,
-  link_language: 'c'
 )
 test('oom_sweep', test_filter_oom_sweep, suite: ['filter'])

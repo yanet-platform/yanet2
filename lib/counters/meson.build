@@ -135,7 +135,6 @@ if not dataplane_only
     'counter_pattern_test.c',
     dependencies: [lib_counter_pattern_dep, lib_common_dep, lib_logging_dep],
     include_directories: yanet_rootdir,
-    link_language: 'c',
   )
   test('counter_pattern', test_counter_pattern, suite: ['lib'])
 endif
@@ -146,7 +145,6 @@ test_counters_histogram = executable(
   'tests.c',
   dependencies: [lib_counters_dep, lib_common_dep, lib_logging_dep],
   include_directories: yanet_rootdir,
-  link_language: 'c',
 )
 test('counters', test_counters_histogram, suite: ['lib'])
 
@@ -155,6 +153,5 @@ counter_storage_test = executable(
   'storage_test.c',
   dependencies: [lib_counters_dep, lib_common_dep, lib_logging_dep],
   include_directories: yanet_rootdir,
-  link_language: 'c',
 )
 test('counter_storage_oom', counter_storage_test, suite: ['lib'])

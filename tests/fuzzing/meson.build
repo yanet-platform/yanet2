@@ -21,7 +21,6 @@ foreach target_name, target_info : fuzzing_targets
     sources: [target_info['source']] + nofuzz_sources,
     dependencies: [libdpdk_dep] + target_info['deps'],
     include_directories: [yanet_rootdir, target_info['module_dir']],
-    link_language: 'c',
   )
 
   # Create a test for the fuzzing target
