@@ -49,7 +49,6 @@ if not dataplane_only
       lib_logging_dep,
     ],
     include_directories: yanet_rootdir,
-    link_language: 'c',
   )
   test('agent_attach', test_agent_attach, suite: ['lib'])
 endif

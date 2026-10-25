@@ -13,7 +13,6 @@ compiler = executable('compiler',
     c_args: yanet_test_c_args,
     dependencies: deps,
     include_directories: yanet_rootdir,
-    link_language: 'c'
 )
 
 filter = executable('filter',
@@ -21,7 +20,6 @@ filter = executable('filter',
     c_args: yanet_test_c_args,
     dependencies: deps,
     include_directories: yanet_rootdir,
-    link_language: 'c'
 )
 
 python = find_program('python3', required: true)

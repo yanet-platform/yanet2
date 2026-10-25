@@ -12,7 +12,6 @@ classify_smoke = executable(
   'classify_smoke',
   ['smoke.c'],
   dependencies: test_deps,
-  link_language: 'c',
   include_directories: yanet_rootdir,
 )
 
@@ -23,7 +22,6 @@ classify_net6 = executable(
   ['net6.c'],
   c_args: yanet_test_c_args,
   dependencies: test_deps,
-  link_language: 'c',
   include_directories: yanet_rootdir,
 )
 
@@ -34,7 +32,6 @@ classify_core = executable(
   ['core.c'],
   c_args: yanet_test_c_args,
   dependencies: test_deps,
-  link_language: 'c',
   include_directories: yanet_rootdir,
 )
 
@@ -45,7 +42,6 @@ classify_fragment = executable(
   ['fragment.c'],
   c_args: yanet_test_c_args,
   dependencies: test_deps,
-  link_language: 'c',
   include_directories: yanet_rootdir,
 )
 
@@ -56,7 +52,6 @@ classify_context_names = executable(
   ['context_names.c'],
   c_args: yanet_test_c_args,
   dependencies: test_deps,
-  link_language: 'c',
   include_directories: yanet_rootdir,
 )
 
