@@ -336,6 +336,11 @@ agent_attach(
 		);
 	}
 
+	// The registry structure and the predecessor chains belong to the
+	// agent lock: the listing walks them without the configuration
+	// lock, so the splice below must exclude it.
+	spinlock_lock(&cp_config->agent_lock);
+
 	struct cp_agent_registry *old_registry =
 		ADDR_OF(&cp_config->agent_registry);
 	bool found = false;
@@ -367,6 +372,7 @@ agent_attach(
 				err,
 				"failed to allocate memory for agent registry"
 			);
+			spinlock_unlock(&cp_config->agent_lock);
 			agent_cleanup(new_agent);
 			new_agent = NULL;
 			goto unlock;
@@ -396,6 +402,7 @@ agent_attach(
 	}
 
 	cp_config_reclaim_unused_agents_locked(cp_config);
+	spinlock_unlock(&cp_config->agent_lock);
 
 unlock:
 	cp_config_unlock(cp_config);
@@ -521,11 +528,13 @@ agent_extend(struct agent *agent, uint64_t size, yanet_error **err) {
 	struct cp_config *cp_config = ADDR_OF(&agent->cp_config);
 
 	cp_config_lock(cp_config);
+	spinlock_lock(&cp_config->agent_lock);
 	int ret = agent_extend_locked(agent, size, err);
-	// Every completed hold of the configuration lock sweeps, so a final
-	// generation release that finds the lock busy is never left waiting
-	// for a holder that will not reclaim.
+	// Every completed mutation of agent state sweeps under the agent
+	// lock, so a final generation release that finds the lock busy is
+	// postponed at most until a mutating holder releases it.
 	cp_config_reclaim_unused_agents_locked(cp_config);
+	spinlock_unlock(&cp_config->agent_lock);
 	cp_config_unlock(cp_config);
 
 	return ret;
@@ -1510,7 +1519,10 @@ cp_agent_list_info_free(struct cp_agent_list_info *agent_list_info) {
 struct cp_agent_list_info *
 yanet_get_cp_agent_list_info(struct dp_config *dp_config) {
 	struct cp_config *cp_config = ADDR_OF(&dp_config->cp_config);
-	cp_config_lock(cp_config);
+	// The listing is a pure read of agent state, so it takes the agent
+	// lock alone: it never waits behind a configuration update, whose
+	// lock an install can hold across the worker generation round-trip.
+	spinlock_lock(&cp_config->agent_lock);
 
 	struct cp_agent_registry *agent_registry =
 		ADDR_OF(&cp_config->agent_registry);
@@ -1573,11 +1585,10 @@ yanet_get_cp_agent_list_info(struct dp_config *dp_config) {
 	}
 
 unlock:
-	// Every completed hold of the configuration lock sweeps, so a final
-	// generation release that finds the lock busy is never left waiting
-	// for a holder that will not reclaim.
-	cp_config_reclaim_unused_agents_locked(cp_config);
-	cp_config_unlock(cp_config);
+	// A pure reader does not sweep: reclamation is left to the mutation
+	// paths and the final generation release, so holding the agent lock
+	// here never delays or waits on anything but other agent-state work.
+	spinlock_unlock(&cp_config->agent_lock);
 	return agent_list_info;
 }
 
@@ -1679,11 +1690,11 @@ agent_free_unused_agents(struct agent *agent) {
 	}
 
 	// Registry-wide reclamation mutates predecessor chains and returns
-	// whole arenas, so the sweep runs under the configuration lock.
+	// whole arenas, so the sweep runs under the agent lock.
 	struct cp_config *cp_config = ADDR_OF(&agent->cp_config);
-	cp_config_lock(cp_config);
+	spinlock_lock(&cp_config->agent_lock);
 	cp_config_reclaim_unused_agents_locked(cp_config);
-	cp_config_unlock(cp_config);
+	spinlock_unlock(&cp_config->agent_lock);
 }
 
 struct dp_config *
@@ -1752,6 +1763,9 @@ set_prev:
 	return 0;
 }
 
+// The caller must hold the agent lock (the registry structure belongs
+// to it); a configuration-lock holder also suffices, since every splice
+// takes both.
 static struct agent *
 find_agent_locked(struct cp_config *cp_config, const char *name) {
 	struct cp_agent_registry *registry =
@@ -1787,6 +1801,7 @@ yanet_shm_extend_agent(
 	}
 
 	cp_config_lock(cp_config);
+	spinlock_lock(&cp_config->agent_lock);
 
 	int ret = 1;
 	struct agent *agent = find_agent_locked(cp_config, name);
@@ -1797,10 +1812,11 @@ yanet_shm_extend_agent(
 		}
 	}
 
-	// Every completed hold of the configuration lock sweeps, so a final
-	// generation release that finds the lock busy is never left waiting
-	// for a holder that will not reclaim.
+	// Every completed mutation of agent state sweeps under the agent
+	// lock, so a final generation release that finds the lock busy is
+	// postponed at most until a mutating holder releases it.
 	cp_config_reclaim_unused_agents_locked(cp_config);
+	spinlock_unlock(&cp_config->agent_lock);
 	cp_config_unlock(cp_config);
 
 	return ret;

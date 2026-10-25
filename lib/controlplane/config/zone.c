@@ -260,15 +260,17 @@ cp_config_gen_release(
 
 	cp_config_gen_free(cp_config, config_gen);
 
-	// The teardown may have left a superseded agent unreferenced. Reclaim
-	// it opportunistically, without waiting on an active update: a busy
-	// lock means its holder — a publish, an attach, an extension or the
-	// agent listing — is on a path that sweeps before releasing it, and a
-	// caller already holding the lock runs its own sweep.
-	if (cp_config_locked_by_thread != cp_config &&
-	    cp_config_try_lock(cp_config)) {
+	// The teardown may have left a superseded agent unreferenced, and
+	// this release is the last event guaranteed to observe it, so the
+	// sweep waits for the agent lock rather than leaving reclamation to
+	// a later mutation. Blocking is safe: no agent-lock holder ever
+	// waits for the configuration lock, and every agent-lock section is
+	// short. A thread already holding the configuration lock is an
+	// install, whose update path sweeps before releasing it.
+	if (cp_config_locked_by_thread != cp_config) {
+		spinlock_lock(&cp_config->agent_lock);
 		cp_config_reclaim_unused_agents_locked(cp_config);
-		cp_config_unlock(cp_config);
+		spinlock_unlock(&cp_config->agent_lock);
 	}
 }
 
@@ -311,7 +313,9 @@ cp_config_gen_install(
 	dp_config_wait_for_gen(dp_config, new_config_gen);
 
 	cp_config_gen_release(cp_config, old_config_gen);
+	spinlock_lock(&cp_config->agent_lock);
 	cp_config_reclaim_unused_agents_locked(cp_config);
+	spinlock_unlock(&cp_config->agent_lock);
 
 	return 0;
 }
@@ -371,6 +375,31 @@ cp_config_update_modules(
 	yanet_error **err
 ) {
 	cp_config_lock(cp_config);
+
+	// Refuse modules owned by a superseded agent: creating through a
+	// superseded agent would raise a predecessor's loaded count from
+	// zero and race the sweep's reclamation, and the superseding attach
+	// already ended the owner's lifetime anyway. The owner and its name
+	// live in the predecessor's arena, which the sweep may free under
+	// the agent lock alone, so the reads take that lock too.
+	spinlock_lock(&cp_config->agent_lock);
+	for (uint64_t idx = 0; idx < module_count; ++idx) {
+		struct agent *owner = ADDR_OF(&cp_modules[idx]->agent);
+		if (owner != NULL && !agent_is_current(cp_config, owner)) {
+			yanet_error_add_kind(
+				err,
+				YANET_ERROR_FAILED_PRECONDITION,
+				"module '%s:%s' is owned by superseded agent "
+				"'%s'",
+				cp_modules[idx]->type,
+				cp_modules[idx]->name,
+				owner->name
+			);
+			spinlock_unlock(&cp_config->agent_lock);
+			goto error_unlock;
+		}
+	}
+	spinlock_unlock(&cp_config->agent_lock);
 
 	struct cp_config_gen *old_config_gen = cp_config_current_gen(cp_config);
 	struct cp_config_gen *new_config_gen =
@@ -785,6 +814,26 @@ cp_config_update_devices(
 	// TODO weight clamp
 	cp_config_lock(cp_config);
 
+	// Refuse devices owned by a superseded agent; see the module update
+	// path for why creation through a predecessor is refused and why
+	// the owner reads take the agent lock.
+	spinlock_lock(&cp_config->agent_lock);
+	for (uint64_t idx = 0; idx < device_count; ++idx) {
+		struct agent *owner = ADDR_OF(&devices[idx]->agent);
+		if (owner != NULL && !agent_is_current(cp_config, owner)) {
+			yanet_error_add_kind(
+				err,
+				YANET_ERROR_FAILED_PRECONDITION,
+				"device '%s' is owned by superseded agent '%s'",
+				devices[idx]->name,
+				owner->name
+			);
+			spinlock_unlock(&cp_config->agent_lock);
+			goto error_unlock;
+		}
+	}
+	spinlock_unlock(&cp_config->agent_lock);
+
 	struct cp_config_gen *old_config_gen = cp_config_current_gen(cp_config);
 	struct cp_config_gen *new_config_gen =
 		cp_config_gen_new_from(cp_config, old_config_gen, err);
@@ -890,6 +939,28 @@ cp_config_update_objects(
 	yanet_error **err
 ) {
 	cp_config_lock(cp_config);
+
+	// Refuse objects owned by a superseded agent; see the module update
+	// path for why creation through a predecessor is refused and why
+	// the owner reads take the agent lock.
+	spinlock_lock(&cp_config->agent_lock);
+	for (uint64_t idx = 0; idx < object_count; ++idx) {
+		struct agent *owner = ADDR_OF(&objects[idx]->agent);
+		if (owner != NULL && !agent_is_current(cp_config, owner)) {
+			yanet_error_add_kind(
+				err,
+				YANET_ERROR_FAILED_PRECONDITION,
+				"object '%s:%s' is owned by superseded agent "
+				"'%s'",
+				objects[idx]->type,
+				objects[idx]->name,
+				owner->name
+			);
+			spinlock_unlock(&cp_config->agent_lock);
+			goto error_unlock;
+		}
+	}
+	spinlock_unlock(&cp_config->agent_lock);
 
 	struct cp_config_gen *old_config_gen = cp_config_current_gen(cp_config);
 	struct cp_config_gen *new_config_gen =

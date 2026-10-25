@@ -89,9 +89,11 @@ dp_storage_init(
 	cp_agent_registry->count = 0;
 	SET_OFFSET_OF(&cp_config->agent_registry, cp_agent_registry);
 
-	// The publication lock starts unlocked; freshly created zones arrive
-	// zeroed, so this only keeps hand-built test zones honest.
+	// The publication and agent locks start unlocked; freshly created
+	// zones arrive zeroed, so this only keeps hand-built test zones
+	// honest.
 	spinlock_init(&cp_config->gen_lock);
+	spinlock_init(&cp_config->agent_lock);
 
 	SET_OFFSET_OF(&dp_config->cp_config, cp_config);
 	SET_OFFSET_OF(&cp_config->dp_config, dp_config);
