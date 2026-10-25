@@ -49,7 +49,7 @@ package dataplaneut
 #cgo LDFLAGS: -L../../../build/lib/l3state
 #cgo LDFLAGS: -lblackhole_dp -ll3b_dp -ldecap_dp -ldscp_dp -lacl_dp -lfwstate_dp -lfwstate_objects -ll3b_objects -lring_objects -lforward_dp -lmirror_dp -lroute_dp -lroute_mpls_dp -lnat64_dp -lpdump_dp -lunrdup_dp
 #cgo LDFLAGS: -lplain_dp -lvlan_dp -lvxlan_dp
-#cgo LDFLAGS: -ldataplane_ut -lpipeline -lmodule -lworker_dp -lconfig_dp -lpacket
+#cgo LDFLAGS: -ldataplane_ut -lpipeline -lmodule -lworker_dp -lconfig_dp -ldp_zone -lpacket
 #cgo LDFLAGS: -llogging -lagent -lconfig_cp -lcounters -lerrors -lclassify_compiler -lfilter_compiler -lfwstate -lstatemap -ll3state -llib_utils
 #cgo LDFLAGS: -lagent_counters -lcounter_pattern -lrure
 #cgo LDFLAGS: -Wl,--end-group

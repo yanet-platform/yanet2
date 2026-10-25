@@ -9,6 +9,7 @@ package testutils
 #cgo LDFLAGS: -L../../../../build/objects/l3b/api -ll3b_objects
 #cgo LDFLAGS: -L../../../../build/lib/classify -lclassify_compiler
 #cgo LDFLAGS: -L../../../../build/lib/dataplane/config -lconfig_dp
+#cgo LDFLAGS: -L../../../../build/lib/dataplane/config -ldp_zone
 #cgo LDFLAGS: -L../../../../build/lib/dataplane/module -lmodule
 #cgo LDFLAGS: -L../../../../build/lib/dataplane/packet -lpacket
 #cgo LDFLAGS: -L../../../../build/lib/controlplane/agent -lagent

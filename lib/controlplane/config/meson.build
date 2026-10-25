@@ -1,7 +1,7 @@
 dependencies = [
   lib_counters_dep,
   lib_module_dp_dep,
-  lib_pipeline_dp_dep,
+  lib_dp_zone_dep,
   lib_errors_dep,
 ]
 
@@ -28,6 +28,6 @@ lib_config_cp = static_library(
 
 lib_config_cp_dep = declare_dependency(
   link_with: lib_config_cp,
-  dependencies : [lib_counters_dep, lib_errors_dep],
+  dependencies : [lib_counters_dep, lib_errors_dep, lib_dp_zone_dep],
   include_directories: yanet_rootdir,
 )

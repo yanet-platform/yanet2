@@ -1,7 +1,7 @@
 dependencies = [
   lib_common_dep,
-  lib_config_dp_dep,
   lib_config_cp_dep,
+  lib_dp_zone_dep,
   lib_errors_dep,
 ]
 

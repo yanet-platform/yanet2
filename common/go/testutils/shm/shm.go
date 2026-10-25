@@ -5,6 +5,7 @@ package testshm
 #cgo CFLAGS: -I../../../..
 #cgo LDFLAGS: -Wl,--start-group
 #cgo LDFLAGS: -L../../../../build/lib/dataplane/config -lconfig_dp
+#cgo LDFLAGS: -L../../../../build/lib/dataplane/config -ldp_zone
 #cgo LDFLAGS: -L../../../../build/lib/dataplane/module -lmodule
 #cgo LDFLAGS: -L../../../../build/lib/dataplane/packet -lpacket
 #cgo LDFLAGS: -L../../../../build/lib/controlplane/agent -lagent

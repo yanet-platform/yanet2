@@ -4,8 +4,7 @@ package ffi
 //#cgo LDFLAGS: -L../../build/lib/controlplane/agent -lagent
 //#cgo LDFLAGS: -L../../build/lib/controlplane/config -lconfig_cp
 //#cgo LDFLAGS: -L../../build/lib/counters -lcounters
-//#cgo LDFLAGS: -L../../build/lib/dataplane/config -lconfig_dp
-//#cgo LDFLAGS: -L../../build/lib/dataplane/pipeline -lpipeline
+//#cgo LDFLAGS: -L../../build/lib/dataplane/config -ldp_zone
 //#cgo LDFLAGS: -L../../build/lib/errors -lerrors
 //#include "api/agent.h"
 //#include "api/counter.h"
