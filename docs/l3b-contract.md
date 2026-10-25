@@ -52,10 +52,10 @@ representation and the protobuf/C consequences.
 | F18 | `session_timeouts.other` and container | Optional uint32 seconds; omission 60; explicit 0 retained. A permitted ICMP-error refresh uses now plus `other`; Echo, query and OPS never refresh. All classes expire at deadline <= now, and a configuration replacement does not rewrite old deadlines. The timeout container absent, null or `{}` means all children absent and resolves each default above; a scalar or list container rejects. |
 | F19 | VS source bases M4 and M6 | VS-owned; omission materializes 0.0.0.0 and ::, with no interface or link fallback; supplied dormant values are retained; full replacement omission resets them. A partial real update preserves the materialized bases. Structural validation applies even to dormant families. |
 | F20 | Optional IPv4 source override | Absent differs from explicit 0; a native bare IPv4 host address with no prefix metadata; the literal override or M4 supplies the outer source. A present zero override is structurally valid and fails output admission for a configured IPv4 outer family. |
-| F21 | Optional IPv6 source template | Absent differs from present; present requires a raw address, omitted prefix means 128, prefix domain 0..128 including non-byte lengths, host bits preserved, the byte-splice algorithm of section 11, and rejection of any generated unspecified or mapped output for the configured family. Raw template and prefix presence, not a normalized network. No per-real override and no new blacklist. |
+| F21 | Optional IPv6 source template | Absent differs from present; present requires a raw address, omitted prefix means 128, prefix domain 0..128 including non-byte lengths, host bits preserved, the byte-splice algorithm of section 11, and rejection of any generated unspecified, mapped or multicast output for the configured family. Raw template and prefix presence, not a normalized network. No per-real override or additional address-class exclusions. |
 | F22 | Service policy binding | Required on VS create and full replacement: source-scoped identity (source namespace plus policy key), immutable revision and complete native ACL content, or an explicit empty-policy choice with the same metadata. Missing or null binding, identity, revision, or content without the explicit empty choice rejects as `InvalidArgument`; omission never means KEEP or allow-all. Explicit empty is deny-all. Partial real state/weight operations preserve the binding. Full semantics in sections 13-16. |
 | F23 | Destination bindings | Nonempty ordered exact VS name and incarnation bindings, or explicit empty that unlinks without deleting the VS; duplicates reject; order affects accepted equality; the VIP, protocol and optional port come from the immutable VS identity; broad or contradictory selectors reject. Separate ICMP paths are not ordinary TCP/UDP bindings. |
-| F24 | `mss_fix` | Typed boolean, default false, dormant for UDP. For a TCP SYN without RST, including SYN-ACK, an existing MSS above 1220 is clamped to 1220 and a smaller value including 0 is preserved; 536 is inserted when the option is absent and four option bytes fit; a valid full header without room stays unchanged. Options are validated before mutation, EOL stops parsing, the MSS option length is 4, and a malformed enabled-policy packet or a missing buffer counted-drops. The constants 1220 and 536 are not path-MTU guarantees. No public numeric MSS knob. |
+| F24 | `mss_fix` | Typed boolean, default false, dormant for UDP. For a TCP SYN without RST, including SYN-ACK, validate all options through EOL/end before mutation. Valid MD5 Signature or TCP-AO bypasses only MSS processing with the inner segment unchanged, as specified in section 12. Otherwise the first valid MSS above 1220 is clamped to 1220 and a smaller value including 0 is preserved; 536 is inserted when absent and four option bytes fit; a valid full header without room stays unchanged. MSS length is 4; malformed eligible enabled-policy options or a required missing buffer counted-drop. The constants 1220 and 536 are not path-MTU guarantees. No public numeric MSS knob. |
 | F25 | DSCP ownership | Per-VS DSCP policy is outside the l3b API. l3b inherits the inner traffic class and ECN into the outer header; the `dscp` module after l3b owns optional marking with its own configuration and readback, no shared VS token and no atomic two-module update. Destination-prefix marking cannot distinguish two VSes sharing a real, so this is pipeline and real-prefix scope, not per-VS equivalence. Marking must preserve ECN in both families and update the IPv4 checksum. Old packed or per-VS DSCP inputs reject even as null or 0. |
 | F26 | Session size | Omitted or zero creation size resolves the current `l3b.policy.session_default_slots` (initially 65536) once at creation; that default or explicit positive input 1..1073741824 rounds upward to a power of two with a minimum actual size of 16 (1 becomes 16, 1000 becomes 1024); the size is shared across the workers of one VS in one instance. Resize omission or zero is `InvalidArgument`; a raw target below the accepted size is `FailedPrecondition` before rounding; an exactly equal target is a no-op; only a larger target rounds. A later default change never resizes a live VS, and no resource-driven downsize exists. Bounds are not allocation or flow qualification. |
 | F27 | Encapsulation and NAT | Typed VS mode IPIP or GRE with IPIP as default; unknown or explicitly unspecified values reject. Minimal GRE v0 with a four-byte header and no optional key, checksum or sequence. The existing IPIP and GRE helpers are reused with no new header builders and no required separate pipeline hop; MSS precedes encapsulation. NAT is outside the reviewed mode set and is rejected rather than mapped to GRE. |
@@ -1168,13 +1168,24 @@ are not exit/re-entry.
   traffic. For each outer family present among configured reals, including
   disabled, zero-weight and health-ineligible reals, the selected source
   branch is validated before publication: the IPv4 output must not be exactly
-  0.0.0.0, and the IPv6 output must not be able to equal :: or belong to the
-  mapped range for any derivation input. Structurally valid dormant-family
+  0.0.0.0 or belong to 224.0.0.0/4, and the IPv6 output must not be able to equal
+  :: or belong to the mapped range or ff00::/8 for any derivation input.
+  Structurally valid dormant-family
   inputs are stored but their output check is skipped while that family has no
   configured real. A failure rejects the complete candidate of one VS create
   or replacement with `InvalidArgument` and preserves the accepted and active
   state and its token; it does not rewrite a source, unmap it, choose an
   interface fallback or add a per-packet guard.
+- This validates the selected generated output, not every raw base/template.
+  Every active IPv6 template with p=0 fails admission: R can supply first byte
+  ff even when both raw template B and base M6 are unicast. With p>=1 the first
+  byte comes from B; without an override it comes from M6. A raw multicast M6
+  is not alone a rejection when the selected template uses only its last two
+  bytes and its generated outputs pass validation. The structural prefix domain
+  remains 0..128 for storage, equality and round-trip, including dormant p=0;
+  only active generated-output admission excludes p=0. No ACL exception, global
+  VIP/real destination ban, additional excluded class or universally valid-source
+  guarantee follows from these checks.
 
 ## 12. Packet Surfaces
 
@@ -1196,7 +1207,14 @@ are not exit/re-entry.
   Lookup/selection alone is not a session commit; the same late-commit boundary
   applies to permitted reverse-session delivery refresh. Echo and ICMP errors use the separate paths below,
   not ordinary TCP/UDP VS or service-policy admission.
-- Echo eligibility aggregates only VSes linked in the invoked ModuleConfig's
+- An Echo Request to a multicast destination VIP (IPv4 224.0.0.0/4 or IPv6
+  ff00::/8) consumes and counted-drops the original before generating a reply.
+  It performs no response-counter increment, session lookup/write, real selection,
+  encapsulation or fanout. This does not change F02 or ordinary TCP/UDP admission,
+  add an alternative reply source or extend IPv4 broadcast policy. It is an
+  explicit product limitation, not full RFC endpoint compliance: RFC 4443 says
+  multicast Echo requests SHOULD receive replies, whose source MUST be unicast.
+- Unicast Echo eligibility aggregates only VSes linked in the invoked ModuleConfig's
   protected coherent configuration, not necessarily the latest published one.
   At least one configured real among those VSes at the addressed family/VIP
   makes it active, regardless of administrative enablement, weight or health.
@@ -1437,14 +1455,27 @@ The following vectors are required and **NOT RUN**:
 
 - The MSS policy is the typed boolean of F24 with the behavior recorded there.
   Option parsing stops at EOL, skips NOP, checks the other lengths, and the
-  MSS option has length 4; the first valid MSS is used. A malformed
-  enabled-policy packet, or failure to obtain packet-buffer space for an
+  MSS option has length 4. On enabled eligible TCP SYN&&!RST (including SYN-ACK),
+  walk all options through EOL/end before mutation, remembering only the first
+  valid MSS. A malformed option tail even after that MSS, or failure to obtain
+  packet-buffer space for an
   otherwise required MSS modification, is a counted drop with no partial
   modification. Insufficient logical TCP option space for the four-byte
   insertion is not such a failure: a valid header remains unchanged by the MSS
-  step. A disabled policy adds no MSS-specific rejection. Lengths and the necessary checksums are
-  corrected. The constants 1220 and 536 are not path-MTU guarantees.
-  When no MSS is found under this parser, a valid TCP header of at most 56 bytes
+  step. A disabled policy or noneligible flags add no MSS-specific validation or
+  rejection, including for malformed authentication options. Mutations correct
+  lengths and necessary checksums. The constants 1220 and 536 are not path-MTU guarantees.
+  A structurally valid TCP MD5 Signature (kind 19, length 18) or TCP-AO
+  (kind 29, length at least 4 and within option bounds) anywhere before EOL
+  bypasses MSS insertion and clamping: leave the entire inner segment unchanged
+  in this step. Invalid MD5 length, AO length below 4 or a truncated option is
+  malformed under the enabled eligible parser, not a bypass. EOL terminates
+  parsing; padding after it is not authentication. No keys, authentication
+  verification or new knob is introduced. Although MD5 clamping can be safe,
+  the uniform bypass is deliberately simpler: insertion breaks MD5/AO, and AO
+  may cover other options depending on hidden MKT state. Bypass skips only MSS,
+  never normal ACL, session processing or encapsulation; live AH still drops.
+  With no authentication bypass and no MSS, a valid TCP header of at most 56 bytes
   grows by four bytes: insert MSS 536 at TCP offset 20, before the old options.
   Do not reuse EOL/padding space. Preserve all original option and payload bytes
   with their packet-relative offsets increased by four; correct TCP data offset,
@@ -1453,6 +1484,8 @@ The following vectors are required and **NOT RUN**:
   including SYN-ACK; only the first valid MSS is processed, with later duplicate
   MSS values unchanged, not rejected merely for duplication or all clamped.
   Buffer-failure atomicity and the late session-commit boundary still apply.
+  Malformed-option drops precede session commit and cause no partial packet
+  mutation; this does not promise that a preceding PURR selection never advances.
 - DSCP is not an l3b policy in the new API. l3b transfers the inner traffic
   class into the outer header and preserves ECN; the configured `dscp` module
   after l3b performs any marking, with its own configuration and readback, no
@@ -2059,7 +2092,23 @@ Packet disposition vectors (all **NOT RUN**):
   A complete traversed chain and required ports with absent original payload does
   not fail merely for that absent body. Repeat at eight/nine extensions and retain
   HBH-position/fragment rules; ordinary TCP/UDP checksum behavior is unchanged.
-- Enabled eligible no-MSS TCP: 20-byte header plus payload grows to 24; 24-byte
+- Authentication/MSS vectors (NOT RUN): valid MD5 length18 and AO length4 or
+  longer before/after the first MSS, and without MSS, leave the entire segment
+  unchanged at the MSS step, while normal ACL/session/encapsulation still applies.
+  Wrong MD5 lengths, AO<4, truncated options and malformed tails after first MSS
+  counted-drop before session commit with no partial mutation when enabled and
+  eligible. Include SYN-ACK, duplicates, disabled policy and noneligible flags
+  (no new MSS-specific check), and auth-shaped EOL padding (not a bypass).
+- Generated-source vectors (NOT RUN): IPv4 literal224/4 rejects; unicast B/M6
+  with p=0 and R starting ff proves every active p=0 rejects, dormant p=0 retains
+  structural equality/round-trip; p>=1 with B starting ff rejects. Raw M6 starting
+  ff with an active valid-B template using only its last two bytes is not rejected
+  solely for that raw base. Cover disabled/unhealthy/zero-weight configured reals,
+  VS create/replace InvalidArgument and unchanged old state/token.
+- Multicast Echo vectors (NOT RUN): both multicast destination families with
+  nonempty configured reals drop original without response/count/session/selection/
+  encapsulation/fanout; unicast header/admission/accounting vectors remain unchanged.
+- Enabled eligible no-MSS TCP without authentication bypass: 20-byte header plus payload grows to 24; 24-byte
   header with EOL padding grows to 28; 56 grows to 60; padded 60 stays unchanged.
   Insert MSS536 at offset20, preserving old options/payload at offsets +4 and
   checking data offset, lengths and checksums. Duplicate MSS values [1000,1460]
@@ -2247,6 +2296,12 @@ Required discriminating vectors include:
   detachment/free/growth nor bypasses reader rights, RCU grace, physical accounting
   until release, growth rejection while a back physically exists, or the one-back/
   no-third-table rule. Terminal deletion still waits for reader rights, not expiry.
+- Capacity/refill vectors (NOT RUN): invalid whole-config burst<n preserves prior
+  state. Independently exercise runtime n>burst: immediate not-ready counted-drop,
+  no clones/reservation despite elapsed time. Only configuration or peer-group
+  change permitting full funding exits; no implicit growth, accepted-invalid
+  external update or corruption-only assumption. Contrast n<=burst with temporary
+  credit shortage, where refill can fund n; policy/peers/local/budget stay coherent.
 - Clone bucket fractional refill/cap, shared-worker contention, new-state full
   versus surviving control-plane restart/takeover, old-rate update accrual and
   carry/clamp, unchanged policy and peer churn, zero/exact/insufficient funding,
