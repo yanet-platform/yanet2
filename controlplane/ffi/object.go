@@ -1,7 +1,6 @@
 package ffi
 
 //#cgo CFLAGS: -I../../
-//#cgo LDFLAGS: -L../../build/lib/controlplane/agent -lagent
 //#include "api/agent.h"
 //#include "lib/controlplane/agent/agent.h"
 import "C"

@@ -1,9 +1,6 @@
 package ringtest
 
 //#cgo CFLAGS: -I../../../../
-//#cgo LDFLAGS: -L../../../../build/objects/ring/tests -lringtest_writer
-//#cgo LDFLAGS: -L../../../../build/objects/ring/api -lring_objects
-//#cgo LDFLAGS: -L../../../../build/lib/controlplane/config -lconfig_cp
 //
 //#include <stdlib.h>
 //

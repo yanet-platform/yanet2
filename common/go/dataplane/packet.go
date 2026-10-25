@@ -1,9 +1,6 @@
 package dataplane
 
 //#cgo CFLAGS: -I../../..
-//#cgo LDFLAGS: -L../../../build/lib/utils -llib_utils
-//#cgo LDFLAGS: -L../../../build/lib/dataplane/packet -lpacket
-//#cgo LDFLAGS: -L../../../build/lib/logging -llogging
 //
 //#include "lib/dataplane/packet/packet.h"
 //#include "lib/dataplane/module/packet_front.h"

@@ -146,7 +146,7 @@ gate_go() {
 	# Packages that hold changed Go files or link changed C; C or build
 	# changes outside a module and module requirement changes reach every
 	# package. The QEMU suite is left to make test-functional.
-	if matching '(^go\.(mod|sum)$|\.proto$)' >/dev/null || matching '(\.[ch]$|(^|/)meson\.build$|^subprojects/)' | grep -qv '^modules/'; then
+	if matching '(^go\.(mod|sum)$|\.proto$|^scripts/go_c(deps|go_flags)\.py$)' >/dev/null || matching '(\.[ch]$|(^|/)meson\.build$|^subprojects/)' | grep -qv '^modules/'; then
 		pkgs=./...
 		[ "$list" = 1 ] || pkgs=$(go list ./... | grep -v '/tests/functional/main$')
 	else
@@ -198,7 +198,7 @@ gate_web() {
 }
 
 c=0
-matching '(\.[ch]$|(^|/)meson\.build$|^meson_options\.txt$|^subprojects/)' >/dev/null && c=1
+matching '(\.[ch]$|(^|/)meson\.build$|^meson_options\.txt$|^subprojects/|^scripts/go_c(deps|go_flags)\.py$)' >/dev/null && c=1
 [ "$c" = 1 ] && gate_c
 if [ "$c" = 1 ] || matching '(\.go$|^go\.(mod|sum)$|\.proto$)' >/dev/null; then gate_go; fi
 matching '(\.rs$|(^|/)Cargo\.(toml|lock)$|^\.rustfmt\.toml$|^\.cargo/|\.proto$)' >/dev/null && gate_rust

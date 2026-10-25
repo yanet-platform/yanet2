@@ -1,8 +1,6 @@
 package cmirror
 
 //#cgo CFLAGS: -I../../../../../
-//#cgo LDFLAGS: -L../../../../../build/modules/mirror/api -lmirror_cp
-//#cgo LDFLAGS: -L../../../../../build/lib/classify -lclassify_compiler
 //
 //#include "api/agent.h"
 //#include "modules/mirror/api/controlplane.h"

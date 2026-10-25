@@ -3,9 +3,6 @@ package testutils
 /*
 #cgo CFLAGS: -I../../../../
 #cgo LDFLAGS: -Wl,--wrap=rte_zmalloc
-#cgo LDFLAGS: -L../../../../build/modules/pdump/dataplane -lpdump_dp
-#cgo LDFLAGS: -L../../../../build/objects/ring/api -lring_objects
-#cgo LDFLAGS: -L../../../../build/subprojects/dpdk/lib -l:librte_bpf.a
 #cgo LDFLAGS: -Wl,-E
 #include <stdlib.h>
 #include "snapshot.h"

@@ -70,3 +70,10 @@ option(
   description: 'Additional module directories under modules/ to build, '
                 + 'beyond the built-in set (for optional or vendored modules).',
 )
+
+option(
+  'go_cgo_flags',
+  type: 'feature',
+  value: 'auto',
+  description: 'Write the CGO link flags of this build directory into the source tree for the go tool; auto writes them only from build/ in the top-level source tree.',
+)

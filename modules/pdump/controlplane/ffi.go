@@ -1,9 +1,6 @@
 package pdump
 
 //#cgo CFLAGS: -I../../../ -I../dataplane -I../../../subprojects/libpcap
-//#cgo LDFLAGS: -L../../../build/modules/pdump/api -lpdump_cp
-//#cgo LDFLAGS: -L../../../build/subprojects/dpdk/lib -l:librte_bpf.a
-//#cgo LDFLAGS: -L../../../build/subprojects/libpcap -l:libpcap_static.a
 //
 //#include <stddef.h>
 //#include <stdlib.h>

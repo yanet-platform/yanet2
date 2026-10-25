@@ -1,4 +1,6 @@
 dependencies = [
+  # The harness loads module plugins.
+  dependency('dl'),
   lib_common_dep,
   lib_logging_dep,
   lib_errors_dep,

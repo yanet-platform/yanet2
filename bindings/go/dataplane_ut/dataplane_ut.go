@@ -2,68 +2,6 @@ package dataplaneut
 
 /*
 #cgo CFLAGS: -I../../../
-#cgo CFLAGS: -I../../../build/subprojects/dpdk/lib
-#cgo CFLAGS: -I../../../build/lib/dataplane_ut
-
-// Library search paths — modules, devices, and support libs.
-#cgo LDFLAGS: -L../../../build/modules/blackhole/dataplane
-#cgo LDFLAGS: -L../../../build/modules/l3b/dataplane
-#cgo LDFLAGS: -L../../../build/modules/decap/dataplane
-#cgo LDFLAGS: -L../../../build/modules/dscp/dataplane
-#cgo LDFLAGS: -L../../../build/modules/acl/dataplane
-#cgo LDFLAGS: -L../../../build/modules/fwstate/dataplane
-#cgo LDFLAGS: -L../../../build/objects/fwstate/api
-#cgo LDFLAGS: -L../../../build/objects/l3b/api
-#cgo LDFLAGS: -L../../../build/objects/ring/api
-#cgo LDFLAGS: -L../../../build/modules/forward/dataplane
-#cgo LDFLAGS: -L../../../build/modules/mirror/dataplane
-#cgo LDFLAGS: -L../../../build/modules/route/dataplane
-#cgo LDFLAGS: -L../../../build/modules/route-mpls/dataplane
-#cgo LDFLAGS: -L../../../build/modules/nat64/dataplane
-#cgo LDFLAGS: -L../../../build/modules/pdump/dataplane
-#cgo LDFLAGS: -L../../../build/modules/unrdup/dataplane
-#cgo LDFLAGS: -L../../../build/devices/plain/dataplane
-#cgo LDFLAGS: -L../../../build/devices/vlan/dataplane
-#cgo LDFLAGS: -L../../../build/devices/vxlan/dataplane
-#cgo LDFLAGS: -L../../../build/lib/dataplane_ut
-#cgo LDFLAGS: -L../../../build/lib/dataplane/pipeline
-#cgo LDFLAGS: -L../../../build/lib/dataplane/module
-#cgo LDFLAGS: -L../../../build/lib/dataplane/worker
-#cgo LDFLAGS: -L../../../build/lib/dataplane/config
-#cgo LDFLAGS: -L../../../build/lib/dataplane/packet
-#cgo LDFLAGS: -L../../../build/lib/logging
-#cgo LDFLAGS: -L../../../build/lib/controlplane/agent
-#cgo LDFLAGS: -L../../../build/lib/controlplane/config
-#cgo LDFLAGS: -L../../../build/lib/counters
-#cgo LDFLAGS: -L../../../build/lib/errors
-#cgo LDFLAGS: -L../../../build/lib/filter
-#cgo LDFLAGS: -L../../../build/lib/fwstate
-#cgo LDFLAGS: -L../../../build/lib/utils
-
-// Link all static libs inside a group so the linker resolves circular
-// references between them (fwstate->acl, worker->pipeline, etc.).
-// fwstate depends on acl — acl must come first inside the group.
-#cgo LDFLAGS: -Wl,--start-group
-#cgo LDFLAGS: -L../../../build/lib/classify
-#cgo LDFLAGS: -L../../../build/lib/statemap
-#cgo LDFLAGS: -L../../../build/lib/l3state
-#cgo LDFLAGS: -lblackhole_dp -ll3b_dp -ldecap_dp -ldscp_dp -lacl_dp -lfwstate_dp -lfwstate_objects -ll3b_objects -lring_objects -lforward_dp -lmirror_dp -lroute_dp -lroute_mpls_dp -lnat64_dp -lpdump_dp -lunrdup_dp
-#cgo LDFLAGS: -lplain_dp -lvlan_dp -lvxlan_dp
-#cgo LDFLAGS: -ldataplane_ut -lpipeline -lmodule -lworker_dp -lconfig_dp -ldp_zone -lpacket
-#cgo LDFLAGS: -llogging -lagent -lconfig_cp -lcounters -lerrors -lclassify_compiler -lfilter_compiler -lfwstate -lstatemap -ll3state -llib_utils
-#cgo LDFLAGS: -lagent_counters -lcounter_pattern -lrure
-#cgo LDFLAGS: -Wl,--end-group
-
-// DPDK code the dataplane libraries and the test mempool call into: mbuf,
-// mempool, bpf and the EAL parts they reference. The harness never
-// initializes EAL (no rte_eal_init, no hugepages); its mempool keeps
-// objects on the heap behind its own ops (lib/dataplane_ut/mempool.h).
-#cgo LDFLAGS: -L../../../build/subprojects/dpdk/lib
-#cgo LDFLAGS: -l:librte_bpf.a -l:librte_mbuf.a -l:librte_mempool.a -l:librte_ring.a
-#cgo LDFLAGS: -l:librte_eal.a -l:librte_kvargs.a -l:librte_telemetry.a -l:librte_log.a
-
-#cgo LDFLAGS: -lnuma
-#cgo LDFLAGS: -ldl
 
 #cgo LDFLAGS: -Wl,-E
 

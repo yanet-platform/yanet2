@@ -1,8 +1,6 @@
 package cnat64
 
 //#cgo CFLAGS: -I../../../../../
-//#cgo LDFLAGS: -L../../../../../build/modules/nat64/api -lnat64_cp
-//#cgo LDFLAGS: -L../../../../../build/lib/logging/ -llogging
 //
 //#include "api/agent.h"
 //#include "modules/nat64/api/nat64cp.h"

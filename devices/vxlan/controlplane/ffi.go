@@ -1,8 +1,6 @@
 package vxlan
 
 //#cgo CFLAGS: -I../../../ -I../../../lib
-//#cgo LDFLAGS: -L../../../build/devices/vxlan/api -ldev_vxlan_api
-//#cgo LDFLAGS: -L../../../build/lib/logging/ -llogging
 //
 //#include "api/agent.h"
 //#include "api/config.h"

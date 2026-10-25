@@ -118,6 +118,17 @@ Custom Meson modules must append their existing protobuf targets to
 `build_by_default: true` alone does not add a generator to the Go test preparation
 closure.
 
+A package's `libraries`, with the project libraries they depend on, and its
+`archives`, external archives such as DPDK's linked as they are, become the link
+flags of its generated `zz_yanet_cgo.go`, so no tracked Go file names a build
+directory. Only `build/` in the top-level source tree writes these files
+(`-Dgo_cgo_flags=enabled` makes another build directory write them). A Go target
+outside this project that builds its CGO packages must depend on
+`cgo_controlplane_deps`, or `cgo_test_deps` for the test packages: these run
+after the generated flags and every archive they name. Before building a
+revision older than the generated flags in the same checkout, remove them with
+`find . -name zz_yanet_cgo.go -delete`.
+
 ### Testing
 
 ```bash

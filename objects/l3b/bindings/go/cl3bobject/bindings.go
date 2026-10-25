@@ -3,11 +3,6 @@ package cl3bobject
 
 //#cgo CFLAGS: -I../../../../../
 //#cgo CFLAGS: -I../../../../../lib
-//#cgo LDFLAGS: -L../../../../../build/objects/l3b/api -ll3b_objects
-//#cgo LDFLAGS: -L../../../../../build/lib/classify -lclassify_compiler
-//#cgo LDFLAGS: -L../../../../../build/lib/statemap -lstatemap
-//#cgo LDFLAGS: -L../../../../../build/lib/l3state -ll3state
-//#cgo LDFLAGS: -L../../../../../build/lib/counters -lcounters
 //
 //#include "api/agent.h"
 //#include "lib/l3state/l3state.h"

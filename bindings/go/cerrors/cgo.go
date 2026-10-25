@@ -6,7 +6,6 @@
 package cerrors
 
 //#cgo CFLAGS: -I../../../
-//#cgo LDFLAGS: -L../../../build/lib/errors -lerrors
 //
 //#include <stdlib.h>
 //#include "lib/errors/errors.h"
