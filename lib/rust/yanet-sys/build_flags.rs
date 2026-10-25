@@ -39,8 +39,20 @@ const ABI_OPTIONS: &[&str] = &[
     "-funsigned-char",
 ];
 
-/// Repository directories whose C headers the bindings read.
-const C_HEADER_DIRS: &[&str] = &["common", "lib/controlplane", "lib/counters", "lib/dataplane"];
+/// Repository directories whose C headers the bindings and the shim read,
+/// DPDK's among them (`rte_mbuf_core.h` and what the routing helpers reach).
+const C_HEADER_DIRS: &[&str] = &[
+    "common",
+    "lib/controlplane",
+    "lib/counters",
+    "lib/dataplane",
+    "lib/errors",
+    "subprojects/dpdk/config",
+    "subprojects/dpdk/lib",
+];
+
+/// DPDK's generated configuration header, relative to the build directory.
+const DPDK_BUILD_CONFIG: &str = "subprojects/dpdk/rte_build_config.h";
 
 /// First tokens of a compiler command that wrap the compiler.
 const COMPILER_WRAPPERS: &[&str] = &["ccache", "sccache", "distcc", "icecc"];
@@ -90,6 +102,7 @@ impl CFlags {
         });
         let path = dir.join("compile_commands.json");
         println!("cargo:rerun-if-changed={}", path.display());
+        println!("cargo:rerun-if-changed={}", dir.join(DPDK_BUILD_CONFIG).display());
         let text = fs::read_to_string(&path).unwrap_or_else(|err| {
             panic!(
                 "cannot read {}: {err} (run `meson setup build` at the repository root, or set {BUILD_DIR_ENV})",

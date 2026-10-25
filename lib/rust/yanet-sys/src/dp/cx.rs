@@ -91,38 +91,10 @@ pub struct Cx<'id, M: Module> {
 /// A counter's value of the context's worker, resolved once at commit.
 ///
 /// Holds the address of the value, as a C module holds the pointer
-/// `counter_get_address` returned, so adding is one load and one store of
-/// the value. Neither `Send` nor `Sync`: the value is this
-/// worker's.
-///
-/// A handle belongs to its worker and is not sent to another thread:
-///
-/// ```compile_fail,E0277
-/// # use yanet_sdk_testing::dp::Model;
-/// # use yanet_sys::dp::{Counter, CounterRef};
-/// # type Mine = Model<Counter>;
-/// fn send(hits: CounterRef<'_>) {
-///     std::thread::scope(|scope| {
-///         scope.spawn(move || hits.add(1));
-///     });
-/// }
-/// ```
-///
-/// Only a plain value crosses the thread, and the handle stays where it was
-/// made:
-///
-/// ```
-/// # use yanet_sdk_testing::dp::Model;
-/// # use yanet_sys::dp::{Counter, CounterRef};
-/// # type Mine = Model<Counter>;
-/// fn send(hits: CounterRef<'_>) {
-///     let amount = 1u64;
-///     std::thread::scope(|scope| {
-///         scope.spawn(move || amount);
-///     });
-///     hits.add(amount);
-/// }
-/// ```
+/// `counter_get_address` returned. `Send`, so a prepared value holding it can
+/// travel from the assigner thread to its worker, but it does not write:
+/// the handler binds it to its context and adds through the bound view,
+/// which stays on the worker. Binding is free: the view is the same address.
 ///
 /// A handle does not outlive the prepare context that made it:
 ///
@@ -150,11 +122,92 @@ pub struct CounterRef<'p> {
     value: NonNull<u64>,
     // Invariant brand: values of two different contexts never unify, so they cannot be mixed.
     _brand: PhantomData<fn(&'p ()) -> &'p ()>,
+}
+
+// SAFETY: the handle is an address and writes nothing; only the bound view
+// writes, and binding needs the call context of the same invariant brand,
+// that of the worker's call whose prepared value holds the handle; the
+// context is neither `Send` nor `Sync`, so every write happens on that
+// worker in its call.
+unsafe impl Send for CounterRef<'_> {}
+
+impl<'id> CounterRef<'id> {
+    /// The handle bound to the call's context, to add through.
+    ///
+    /// Only the call context binds: the prepare context does not, so a
+    /// handle never writes on the assigner thread:
+    ///
+    /// ```compile_fail,E0308
+    /// # use yanet_sdk_testing::dp::Model;
+    /// # use yanet_sys::dp::{CommitCx, Counter};
+    /// # type Mine = Model<Counter>;
+    /// fn early<'p>(cx: &CommitCx<'p, Mine>) {
+    ///     cx.config().resolve(cx).bind(cx).add(1);
+    /// }
+    /// ```
+    ///
+    /// The handler binds the handle of its prepared value:
+    ///
+    /// ```
+    /// use yanet_sys::dp::{Batch, CommitCx, Counter, CounterRef, Cx, Module};
+    /// struct Mine;
+    /// impl Module for Mine {
+    ///     const NAME: &'static str = "mine";
+    ///     type Config = Counter;
+    ///     type Prepared<'p> = CounterRef<'p>;
+    ///     fn handle<'id>(cx: &mut Cx<'id, Self>, _: &mut Batch<'id>) {
+    ///         cx.prepared().bind(cx).add(1);
+    ///     }
+    ///     fn prepare<'p>(cx: &CommitCx<'p, Self>) -> CounterRef<'p> {
+    ///         cx.config().resolve(cx)
+    ///     }
+    /// }
+    /// ```
+    #[inline(always)]
+    pub fn bind<M: Module>(&self, _cx: &Cx<'id, M>) -> BoundCounter<'id> {
+        BoundCounter {
+            value: self.value,
+            _brand: PhantomData,
+            _local: PhantomData,
+        }
+    }
+}
+
+/// A counter handle bound to the worker's call: adds to the worker's copy.
+///
+/// Neither `Send` nor `Sync`: the value is this worker's.
+///
+/// A bound handle is not sent to another thread:
+///
+/// ```compile_fail,E0277
+/// # use yanet_sys::dp::BoundCounter;
+/// fn send(hits: BoundCounter<'_>) {
+///     std::thread::scope(|scope| {
+///         scope.spawn(move || hits.add(1));
+///     });
+/// }
+/// ```
+///
+/// The unbound handle travels:
+///
+/// ```
+/// # use yanet_sys::dp::CounterRef;
+/// fn send(hits: CounterRef<'_>) {
+///     std::thread::scope(|scope| {
+///         scope.spawn(move || hits);
+///     });
+/// }
+/// ```
+#[derive(Clone, Copy)]
+pub struct BoundCounter<'id> {
+    value: NonNull<u64>,
+    // Invariant brand: values of two different contexts never unify, so they cannot be mixed.
+    _brand: PhantomData<fn(&'id ()) -> &'id ()>,
     // Neither Send nor Sync on purpose, independent of the pointer fields.
     _local: PhantomData<*mut ()>,
 }
 
-impl CounterRef<'_> {
+impl BoundCounter<'_> {
     /// Adds to the worker's copy of the counter.
     ///
     /// A plain add, as the `+=` of a C module: only this worker writes its
@@ -370,7 +423,6 @@ impl Counter {
             // address zero.
             value: unsafe { NonNull::new_unchecked(value) },
             _brand: PhantomData,
-            _local: PhantomData,
         }
     }
 }

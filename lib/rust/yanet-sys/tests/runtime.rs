@@ -352,7 +352,7 @@ impl Module for Tallier {
 
     fn handle<'id>(cx: &mut Cx<'id, Self>, batch: &mut Batch<'id>) {
         let config = cx.config();
-        let held = cx.prepared();
+        let held = cx.prepared().bind(cx);
         batch.dispatch(|packet| {
             config.by_value[usize::from(packet.data()[0] % 3)].add(cx, 1);
             held.add(2);

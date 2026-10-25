@@ -172,10 +172,12 @@ pub unsafe fn new_module<M: Module>(
 /// Exports a module to the dataplane plugin loader.
 ///
 /// Emits `new_module_<name>`, `yanet_module_abi_version` and the C handler
-/// and commit trampolines. The name must equal the module's declared name, or
-/// the build fails. Generated into each plugin crate as its only line; the
-/// input grammar (identifiers and `::`-separated paths) is part of the safety
-/// boundary, used outside the macro's `unsafe`.
+/// and commit trampolines. The name is the module's declared name with each
+/// `-` written as `_`, as the dataplane's module list names the loader
+/// (`route-mpls` by `new_module_route_mpls`), or the build fails. Generated
+/// into each plugin crate as its only line; the input grammar (identifiers and
+/// `::`-separated paths) is part of the safety boundary, used outside the
+/// macro's `unsafe`.
 ///
 /// The module is exported under its own name only:
 ///
@@ -192,6 +194,21 @@ pub unsafe fn new_module<M: Module>(
 /// # type Mine = Model<u64>;
 /// yanet_sys::export_module!(name = mine, module = Mine);
 /// ```
+///
+/// A declared name with a `-` is exported with a `_` in its place:
+///
+/// ```
+/// use yanet_sys::dp::{Batch, CommitCx, Cx, Module};
+/// struct RouteMpls;
+/// impl Module for RouteMpls {
+///     const NAME: &'static str = "route-mpls";
+///     type Config = u64;
+///     type Prepared<'p> = ();
+///     fn handle(_: &mut Cx<Self>, _: &mut Batch) {}
+///     fn prepare(_: &CommitCx<'_, Self>) {}
+/// }
+/// yanet_sys::export_module!(name = route_mpls, module = RouteMpls);
+/// ```
 #[macro_export]
 macro_rules! export_module {
     (name = $name:ident, module = $($module:ident)::+ $(,)?) => {
@@ -199,11 +216,11 @@ macro_rules! export_module {
             type __ExportedModule = $($module)::+;
 
             const _: () = ::core::assert!(
-                $crate::dp::__private::same_name(
-                    <__ExportedModule as $crate::dp::Module>::NAME,
+                $crate::dp::__private::names_module(
                     ::core::stringify!($name),
+                    <__ExportedModule as $crate::dp::Module>::NAME,
                 ),
-                "export_module!: the module is exported under another name than its Module::NAME",
+                "export_module!: the name is not Module::NAME with each '-' written as '_'",
             );
             const _: () = $crate::dp::__private::check_prepared::<__ExportedModule>();
             const _: () = ::core::assert!(

@@ -1,5 +1,8 @@
 #include "dp_shim.h"
 
+// The size tripwires every plugin compiles, so a plugin struct resized
+// without a YANET_MODULE_ABI_VERSION bump fails this build too.
+#include "lib/dataplane/config/plugin_abi_assert.h" // IWYU pragma: keep
 #include "lib/dataplane/pipeline/schedule.h"
 
 void

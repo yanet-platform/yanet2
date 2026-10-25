@@ -30,7 +30,25 @@ pub trait Module: Sized + 'static {
     ///
     /// Holds plain values and the handles only the prepare context makes,
     /// which carry the lifetime `'p`, so none outlives the context that made
-    /// it. It needs no drop and must not be aligned beyond what the block
+    /// it. It is made on the assigner thread and read on the worker, so it is
+    /// `Send`; a value that may not change threads is refused:
+    ///
+    /// ```compile_fail,E0277
+    /// use core::marker::PhantomData;
+    /// use yanet_sys::dp::{Batch, CommitCx, Cx, Module};
+    /// struct Mine;
+    /// impl Module for Mine {
+    ///     const NAME: &'static str = "mine";
+    ///     type Config = u64;
+    ///     type Prepared<'p> = PhantomData<*const ()>;
+    ///     fn handle(_: &mut Cx<Self>, _: &mut Batch) {}
+    ///     fn prepare(_: &CommitCx<'_, Self>) -> PhantomData<*const ()> {
+    ///         PhantomData
+    ///     }
+    /// }
+    /// ```
+    ///
+    /// It needs no drop and must not be aligned beyond what the block
     /// allocator guarantees; `export_module!` fails the build otherwise:
     ///
     /// ```compile_fail,E0080
@@ -68,7 +86,7 @@ pub trait Module: Sized + 'static {
     /// }
     /// yanet_sys::export_module!(name = mine, module = Mine);
     /// ```
-    type Prepared<'p>;
+    type Prepared<'p>: Send;
 
     /// Handles one batch of packets.
     ///
@@ -78,9 +96,12 @@ pub trait Module: Sized + 'static {
 
     /// Makes the prepared value from the configuration.
     ///
-    /// Runs on the dataplane once per worker context of a generation, before
-    /// the context reaches its worker, which may still run the previous
-    /// generation; the runtime writes the value into the context's buffer.
+    /// Runs on the dataplane's assigner thread once per worker context of a
+    /// generation, before the context reaches its worker, which may still run
+    /// the previous generation; the runtime writes the value into the
+    /// context's buffer. A zero-sized prepared value has no buffer, and C
+    /// runs no commit hook for a context without one, so for it this is not
+    /// called.
     /// It resolves what the handler would otherwise resolve per call, as a C
     /// module's commit handler does, and must not reach a worker's memory:
     /// the handles it makes only hold addresses. A module without a prepared

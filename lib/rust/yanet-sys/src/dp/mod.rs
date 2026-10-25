@@ -54,7 +54,7 @@ pub mod module;
 pub mod rt;
 
 pub use batch::{Batch, DeviceRef, Packet, Verdict};
-pub use cx::{CommitCx, CounterRef, Cx};
+pub use cx::{BoundCounter, CommitCx, CounterRef, Cx};
 pub use fields::{Counter, Device};
 pub use module::{Module, ModuleConfig};
 
@@ -96,15 +96,18 @@ pub mod __private {
         true
     }
 
-    /// Compile-time string equality, for the export macro's module-name check.
-    pub const fn same_name(a: &str, b: &str) -> bool {
-        let (a, b) = (a.as_bytes(), b.as_bytes());
-        if a.len() != b.len() {
+    /// Reports whether a loader symbol suffix names a module: the module name
+    /// with every `-` written as `_`, as the dataplane's module list names
+    /// `route-mpls` by `new_module_route_mpls`.
+    pub const fn names_module(symbol: &str, name: &str) -> bool {
+        let (symbol, name) = (symbol.as_bytes(), name.as_bytes());
+        if symbol.len() != name.len() {
             return false;
         }
         let mut idx = 0;
-        while idx < a.len() {
-            if a[idx] != b[idx] {
+        while idx < name.len() {
+            let expected = if name[idx] == b'-' { b'_' } else { name[idx] };
+            if symbol[idx] != expected {
                 return false;
             }
             idx += 1;
