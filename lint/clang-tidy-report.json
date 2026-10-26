@@ -1,0 +1,30 @@
+{
+  "name": "native-correctness-trial",
+  "report_only": true,
+  "llvm_major": 19,
+  "checks": [
+    "clang-analyzer-core.BitwiseShift",
+    "clang-analyzer-core.CallAndMessage",
+    "clang-analyzer-core.DivideZero",
+    "clang-analyzer-core.NonNullParamChecker",
+    "clang-analyzer-core.NullDereference",
+    "clang-analyzer-core.StackAddressEscape",
+    "clang-analyzer-core.UndefinedBinaryOperatorResult",
+    "clang-analyzer-core.VLASize",
+    "clang-analyzer-core.uninitialized.ArraySubscript",
+    "clang-analyzer-core.uninitialized.Assign",
+    "clang-analyzer-core.uninitialized.Branch",
+    "clang-analyzer-core.uninitialized.UndefReturn",
+    "clang-analyzer-unix.API",
+    "clang-analyzer-unix.Malloc",
+    "clang-analyzer-unix.MallocSizeof",
+    "clang-analyzer-unix.MismatchedDeallocator",
+    "clang-analyzer-unix.Stream",
+    "clang-analyzer-unix.StdCLibraryFunctions",
+    "clang-analyzer-unix.cstring.BadSizeArg",
+    "clang-analyzer-unix.cstring.NullArg",
+    "bugprone-sizeof-expression",
+    "bugprone-suspicious-memset-usage",
+    "bugprone-infinite-loop"
+  ]
+}

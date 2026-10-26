@@ -2,6 +2,9 @@ CARGO ?= cargo
 
 # Compile database consumed by lint/clang-syntax.
 COMPILE_DB ?= build/compile_commands.json
+CLANG_TIDY ?= clang-tidy-19
+CLANG_TIDY_BUILD ?= build
+CLANG_TIDY_JOBS ?= 8
 # The cgo preprocessor flags meson builds Go with, which go test needs as well.
 YANET_CGO_CPPFLAGS = $$(cat build/yanet_cgo_cppflags)
 
@@ -118,6 +121,7 @@ CLI_RELEASE_BINARIES := $(addprefix $(RELEASE_DIR)/,$(CLI_BINARIES))
 	proto-go \
 	lint-go \
 	lint/clang-syntax \
+	lint/clang-tidy \
 	lint-commit \
 	gate \
 	hooks \
@@ -215,6 +219,9 @@ lint/clang-syntax:
 	n=$$(wc -l < "$$tmpdir/cmds.txt"); \
 	echo "clang-syntax: parsing $$n translation units with $$(clang --version | head -1)"; \
 	(cd "$$dir" && xargs -a "$$tmpdir/cmds.txt" -d '\n' -P "$$(nproc)" -I{} sh -c '{}')
+
+lint/clang-tidy:
+	python3 -B scripts/clang_tidy.py --build-dir "$(CLANG_TIDY_BUILD)" --clang-tidy "$(CLANG_TIDY)" --jobs "$(CLANG_TIDY_JOBS)"
 
 lint-commit:
 	lint/commit/commitlint_test.sh

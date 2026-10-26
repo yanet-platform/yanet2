@@ -24,5 +24,3 @@ CheckOptions:
   readability-identifier-naming.TypedefCase: lower_case
   readability-identifier-naming.UnionCase: lower_case
   readability-identifier-naming.VariableCase: lower_case
-  #
-  readability-braces-around-statements: true
