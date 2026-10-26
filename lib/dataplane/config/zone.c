@@ -78,14 +78,22 @@ dp_config_wait_for_worker_ectx(
 // outcome and skip — the single-writer guarantee the handlers rely on.
 static pthread_mutex_t commit_lock = PTHREAD_MUTEX_INITIALIZER;
 
+// Equality probe accepting the exact item pointer, so carried-over
+// detection matches by identity rather than by the slot an item
+// occupies.
+static int
+dp_config_commit_item_is(const struct registry_item *item, const void *data) {
+	return item != data;
+}
+
 // Runs the module commit handlers of a generation.
 //
 // Modules are visited in registry order; an item whose dataplane
 // slot index falls outside the loaded array is skipped with an error
 // logged. That path is unreachable in practice — the indices are
 // validated when the config is built — so the skip is purely
-// defensive. An item the previous generation carries at the same
-// index was already committed and is skipped.
+// defensive. An item the previous generation also holds was already
+// committed and is skipped, wherever either generation places it.
 static void
 dp_config_commit_gen_modules(
 	struct dp_config *dp_config,
@@ -103,10 +111,15 @@ dp_config_commit_gen_modules(
 		if (item == NULL) {
 			continue;
 		}
+		uint64_t prev_idx;
 		if (prev_gen != NULL &&
-		    idx < prev_gen->module_registry.registry.capacity &&
-		    registry_get(&prev_gen->module_registry.registry, idx) ==
-			    item) {
+		    !registry_lookup(
+			    &prev_gen->module_registry.registry,
+			    NULL,
+			    dp_config_commit_item_is,
+			    item,
+			    &prev_idx
+		    )) {
 			continue;
 		}
 		struct cp_module *cp_module =
@@ -148,10 +161,15 @@ dp_config_commit_gen_devices(
 		if (item == NULL) {
 			continue;
 		}
+		uint64_t prev_idx;
 		if (prev_gen != NULL &&
-		    idx < prev_gen->device_registry.registry.capacity &&
-		    registry_get(&prev_gen->device_registry.registry, idx) ==
-			    item) {
+		    !registry_lookup(
+			    &prev_gen->device_registry.registry,
+			    NULL,
+			    dp_config_commit_item_is,
+			    item,
+			    &prev_idx
+		    )) {
 			continue;
 		}
 		struct cp_device *cp_device =
