@@ -60,7 +60,7 @@ option(
   'dataplane_only',
   type: 'boolean',
   value: false,
-  description: 'Build only the dataplane binary, skip Go/protobuf targets.',
+  description: 'Skip the control plane (Go, protobuf, cgo, Rust, the module and device control-plane libraries and the control-plane C tests) and every C test outside lib/ and dataplane/.',
 )
 
 option(
