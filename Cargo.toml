@@ -14,6 +14,7 @@ members = [
     "common/rust/readinesspb",
     "common/rust/ynpb",
     "cli/ync-build",
+    "cli/rpc",
     "cli/core",
     "cli/modules/common",
     "cli/modules/inspect",

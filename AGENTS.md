@@ -46,7 +46,7 @@ modules/<name>/
   bindings/go/   CGO wrapper consumed by controlplane
   controlplane/  <name>pb/ protos, mod.go (BuiltInModule, New(opts)), backend.go (shm write path), service.go (+_test), cfg.go
   dataplane/     config.h (shm config struct), dataplane.c/h (entry; hot paths are static inline in headers)
-  cli/           Rust crate (build.rs runs tonic-prost-build)
+  cli/           Rust crate (build.rs runs ync-build)
   tests/  fuzzing/  [internal/]
 ```
 

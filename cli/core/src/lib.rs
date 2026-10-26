@@ -26,6 +26,9 @@ pub mod progress;
 pub mod timeout;
 pub mod yaml;
 
+/// The gRPC call path the generated clients share.
+pub use ync_rpc as rpc;
+
 #[cfg(unix)]
 mod pager;
 mod signal;

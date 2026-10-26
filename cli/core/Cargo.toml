@@ -24,6 +24,7 @@ tonic = { version = "0.14", features = ["gzip", "zstd", "tls-aws-lc", "tls-nativ
 tonic-prost = "0.14"
 rustls = { version = "0.23", default-features = false, features = ["std", "aws_lc_rs"] }
 ynpb = { path = "../../common/rust/ynpb", package = "yanet-ynpb" }
+ync-rpc = { path = "../rpc", package = "yanet-cli-rpc" }
 commonpb = { path = "../../common/rust/commonpb", package = "yanet-commonpb" }
 tower = { version = "0.5", features = ["util"] }
 http = "1"

@@ -18,7 +18,6 @@ clap_complete = { version = "4.5", features = ["unstable-dynamic"] }
 prost = "0.14"
 serde = { version = "1", features = ["derive"] }
 tonic = { version = "0.14", features = ["gzip", "zstd"] }
-tonic-prost = "0.14"
 serde_yaml = "0.9"
 
 [build-dependencies]

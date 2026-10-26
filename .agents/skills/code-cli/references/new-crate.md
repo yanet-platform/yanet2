@@ -41,7 +41,6 @@ netip = "0.3"
 prost = "0.14"
 serde = { version = "1", features = ["derive"] }
 tonic = { version = "0.14", features = ["gzip", "zstd"] }
-tonic-prost = "0.14"
 
 [build-dependencies]
 ync-build = { path = "../../../cli/ync-build", package = "yanet-cli-build" }
@@ -76,9 +75,10 @@ fn main() -> Result<(), Box<dyn Error>> {
 }
 ```
 
-`ync_build::client` builds the generated client and server modules, maps the
-shared packages (`common.commonpb.v1`, `common.filterpb.v1`) to their crates
-and watches the listed protos; a proto they import is not watched.
+`ync_build::client` generates the messages, a client per service whose calls
+run through `ync::rpc`, and a server module holding only the service name; it
+maps the shared packages (`common.commonpb.v1`, `common.filterpb.v1`) to their
+crates and watches the listed protos; a proto they import is not watched.
 
 ## src/main.rs
 

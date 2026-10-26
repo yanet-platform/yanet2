@@ -16,7 +16,6 @@ log = "0.4"
 serde = { version = "1", features = ["derive"] }
 tokio = { version = "1", features = ["rt", "macros", "signal"] }
 tonic = { version = "0.14", features = ["gzip", "zstd"] }
-tonic-prost = "0.14"
 prost = "0.14"
 ync = { path = "../../../cli/core", package = "yanet-cli" }
 # Pinned exactly: semver sorts rc.N below rc1, so a caret requirement

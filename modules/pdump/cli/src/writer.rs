@@ -18,8 +18,8 @@ use pcap_file::{
 };
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
-use tonic::{Status, codec::Streaming};
-use ync::errors::root_cause;
+use tonic::Status;
+use ync::{errors::root_cause, rpc::Streaming};
 
 use crate::{args::DumpOutputFormat, pdumppb, printer};
 

@@ -14,8 +14,8 @@ prost = "0.14"
 prost-types = "0.14"
 serde = { version = "1", features = ["derive"] }
 tonic = { version = "0.14", features = ["gzip", "zstd"] }
-tonic-prost = "0.14"
 commonpb = { path = "../commonpb", package = "yanet-commonpb" }
+ync-rpc = { path = "../../../cli/rpc", package = "yanet-cli-rpc" }
 
 [build-dependencies]
-tonic-prost-build = { version = "0.14", default-features = false, features = ["transport"] }
+ync-build = { path = "../../../cli/ync-build", package = "yanet-cli-build" }

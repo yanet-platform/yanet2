@@ -20,7 +20,6 @@ colored = "3"
 serde = "1"
 tabled = { version = "0.22", default-features = false, features = ["ansi", "derive"] }
 tonic = { version = "0.14", features = ["gzip", "zstd"] }
-tonic-prost = "0.14"
 
 [build-dependencies]
 ync-build = { path = "../../../../cli/ync-build", package = "yanet-cli-build" }
