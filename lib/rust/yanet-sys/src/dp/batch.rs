@@ -95,8 +95,9 @@ pub struct ResizeError;
 /// A tunnel operation the C routine refused.
 ///
 /// The inner or outer headers are not ones it handles, the packet has no
-/// parsed network header (every encapsulation refuses one), the packet is a
-/// fragment (decapsulation), or the headroom is spent.
+/// parsed network header (every encapsulation refuses one), the packet is
+/// chained (UDP encapsulation), the packet is a fragment (decapsulation), or
+/// the headroom is spent.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct TunnelError;
 
@@ -624,6 +625,14 @@ impl Packet<'_> {
         }
     }
 
+    /// Whether the packet's mbuf continues in further segments.
+    #[inline(always)]
+    fn chained(&self) -> bool {
+        // SAFETY: an owned packet's descriptor and mbuf are this call's
+        // (attach: packet).
+        unsafe { !(*(*self.raw.as_ptr()).mbuf).next.is_null() }
+    }
+
     /// Grows the frame at the end, into the tailroom of a single-segment
     /// packet, and returns the new bytes, as `rte_pktmbuf_append` does.
     ///
@@ -724,9 +733,12 @@ impl Packet<'_> {
     /// `packet_ip4_encap_udp` does.
     ///
     /// The UDP checksum is computed. The packet needs its network header
-    /// parsed: an unparsed one is refused. Two headers are prepended one
-    /// after the other, so a spent headroom may leave the UDP header
-    /// written: the caller drops a packet it could not wrap.
+    /// parsed: an unparsed one is refused, and so is a chained packet, whose
+    /// UDP length and checksum C computes over the first segment only (yanet2
+    /// #2145, mpls-over-udp encapsulation sizes and checksums the head mbuf
+    /// segment only). Two headers are prepended one after the other, so a
+    /// spent headroom may leave the UDP header written: the caller drops a
+    /// packet it could not wrap.
     #[inline]
     pub fn encap_ipv4_udp(
         &mut self,
@@ -735,6 +747,9 @@ impl Packet<'_> {
         src_port: u16,
         dst_port: u16,
     ) -> Result<(), TunnelError> {
+        if self.chained() {
+            return Err(TunnelError);
+        }
         // SAFETY: as for `encap_ipv4`.
         self.prepend_at_network(|raw| unsafe {
             bindings::yanet_sys_dp_ip4_encap_udp(raw, src.as_ptr(), dst.as_ptr(), src_port, dst_port)
@@ -744,7 +759,7 @@ impl Packet<'_> {
     /// Wraps the packet in UDP over IPv6, as [`Packet::encap_ipv4_udp`] does
     /// over IPv4.
     ///
-    /// The network header must be parsed, as there.
+    /// The network header must be parsed and the packet unchained, as there.
     #[inline]
     pub fn encap_ipv6_udp(
         &mut self,
@@ -753,6 +768,9 @@ impl Packet<'_> {
         src_port: u16,
         dst_port: u16,
     ) -> Result<(), TunnelError> {
+        if self.chained() {
+            return Err(TunnelError);
+        }
         // SAFETY: as for `encap_ipv4`.
         self.prepend_at_network(|raw| unsafe {
             bindings::yanet_sys_dp_ip6_encap_udp(raw, src.as_ptr(), dst.as_ptr(), src_port, dst_port)
@@ -1062,5 +1080,41 @@ mod tests {
                 f(data_off, len);
             }
         }
+    }
+
+    /// verifies that both UDP encapsulations refuse a chained packet and leave
+    /// it unchanged, since C would size and checksum the first segment only.
+    #[test]
+    fn test_encap_udp_refuses_a_chained_packet() {
+        let f = |encap: fn(&mut Packet<'_>) -> Result<(), TunnelError>| {
+            let (mut head_buffer, mut tail_buffer) = ([0u8; 512], [0u8; 512]);
+            let mut tail = mbuf(&mut tail_buffer, 256, 60);
+            let mut head = bindings::rte_mbuf {
+                next: &raw mut tail,
+                ..mbuf(&mut head_buffer, 256, 60)
+            };
+            let mut descriptor = bindings::packet {
+                mbuf: &raw mut head,
+                data_len: 60,
+                network_header: bindings::network_header { type_: 0x0800u16.to_be(), offset: 14 },
+                ..Default::default()
+            };
+            let mut packet = Packet {
+                raw: NonNull::from(&mut descriptor),
+                _brand: PhantomData,
+                _local: PhantomData,
+            };
+
+            assert_eq!(Err(TunnelError), encap(&mut packet));
+            assert_eq!(
+                (256, 60, 14),
+                (head.data_off, head.data_len, descriptor.network_header.offset)
+            );
+        };
+
+        // UDP over IPv4.
+        f(|packet| packet.encap_ipv4_udp([10, 0, 0, 1], [10, 0, 0, 2], 4789, 4789));
+        // UDP over IPv6.
+        f(|packet| packet.encap_ipv6_udp([1; 16], [2; 16], 4789, 4789));
     }
 }
