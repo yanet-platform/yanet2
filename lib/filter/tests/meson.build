@@ -70,7 +70,13 @@ test('memory', test_filter_memory, suite: ['filter'])
 test_filter_context_names = executable('context_names',
   ['context_names.c'],
   c_args: yanet_test_c_args,
-  dependencies: test_deps,
+  dependencies: [
+    lib_common_dep,
+    lib_filter_compiler_dep,
+    lib_errors_dep,
+    lib_logging_dep,
+    libdpdk_inc_dep,
+  ],
 )
 test('context_names', test_filter_context_names, suite: ['filter'])
 

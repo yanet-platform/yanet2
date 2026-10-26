@@ -14,9 +14,7 @@ sources = files(
 lib_fwstate_objects = static_library(
   'fwstate_objects',
   sources,
-  # The fwstate dependency only copies its registry into this archive,
-  # which is all that consumers need from it.
-  dependencies: cp_dependencies + [lib_fwstate_dep],
+  dependencies: cp_dependencies + [lib_fwstate_registry_dep],
   include_directories: includes,
   install: false,
 )

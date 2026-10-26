@@ -473,6 +473,22 @@ if not dataplane_only
   alias_target('go-test-prepare', go_proto_targets + cgo_test_deps)
 endif
 
+# Each project archive an executable links must be used by its own objects, by
+# a symbol its link line forces, or by another archive on that line.
+#
+# Meson writes introspection data only into the top-level build directory, so
+# the check runs only when this is the top-level project.
+if not meson.is_subproject()
+  test(
+    'link-deps',
+    python3,
+    # -B keeps the helper it imports from writing bytecode into the source tree.
+    args: ['-B', files('scripts/check_link_deps.py'), '--build-root', meson.project_build_root()],
+    suite: 'lint',
+    timeout: 120,
+  )
+endif
+
 # Define a default test setup that excludes large tests
 add_test_setup(
   'default',

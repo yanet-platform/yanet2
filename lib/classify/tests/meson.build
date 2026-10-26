@@ -1,15 +1,7 @@
-test_deps = [
-  lib_common_dep,
-  lib_classify_compiler_dep,
-  lib_lib_utils_dep,
-  lib_logging_dep,
-  libdpdk_inc_dep,
-]
-
 classify_smoke = executable(
   'classify_smoke',
   ['smoke.c'],
-  dependencies: test_deps,
+  dependencies: [lib_common_dep, libdpdk_inc_dep],
   include_directories: yanet_rootdir,
 )
 
@@ -19,7 +11,7 @@ classify_net6 = executable(
   'classify_net6',
   ['net6.c'],
   c_args: yanet_test_c_args,
-  dependencies: test_deps,
+  dependencies: [lib_common_dep, lib_classify_compiler_dep, lib_lib_utils_dep, libdpdk_inc_dep],
   include_directories: yanet_rootdir,
 )
 
@@ -29,7 +21,7 @@ classify_core = executable(
   'classify_core',
   ['core.c'],
   c_args: yanet_test_c_args,
-  dependencies: test_deps,
+  dependencies: [lib_common_dep, lib_classify_compiler_dep, lib_lib_utils_dep, libdpdk_inc_dep],
   include_directories: yanet_rootdir,
 )
 
@@ -39,7 +31,7 @@ classify_fragment = executable(
   'classify_fragment',
   ['fragment.c'],
   c_args: yanet_test_c_args,
-  dependencies: test_deps,
+  dependencies: [lib_common_dep, lib_classify_compiler_dep, libdpdk_inc_dep],
   include_directories: yanet_rootdir,
 )
 
@@ -49,7 +41,7 @@ classify_context_names = executable(
   'classify_context_names',
   ['context_names.c'],
   c_args: yanet_test_c_args,
-  dependencies: test_deps,
+  dependencies: [lib_common_dep, lib_classify_compiler_dep, lib_logging_dep, libdpdk_inc_dep],
   include_directories: yanet_rootdir,
 )
 

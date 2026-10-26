@@ -14,7 +14,7 @@ numutils_test = executable(
   'numutils_test',
   ['numutils_test.c'],
   c_args: yanet_test_c_args,
-  dependencies: dependencies,
+  dependencies: lib_common_dep,
 )
 test('numutils', numutils_test, suite: ['common'])
 
@@ -22,7 +22,7 @@ lpm_test = executable(
   'lpm_test',
   ['lpm_test.c',],
   c_args: yanet_test_c_args,
-  dependencies: dependencies,
+  dependencies: lib_common_dep,
 )
 test('lpm', lpm_test, suite: ['common'])
 
@@ -30,7 +30,7 @@ lpm_wide_test = executable(
   'lpm_wide_test',
   ['lpm_wide_test.c',],
   c_args: yanet_test_c_args,
-  dependencies: dependencies,
+  dependencies: lib_common_dep,
 )
 test('lpm_wide', lpm_wide_test, suite: ['common'])
 
@@ -38,7 +38,7 @@ radix_test = executable(
   'radix_test',
   ['radix_test.c',],
   c_args: yanet_test_c_args,
-  dependencies: dependencies,
+  dependencies: lib_common_dep,
 )
 test('radix', radix_test, suite: ['common'])
 
@@ -46,7 +46,7 @@ table_test = executable(
   'table_test',
   ['value_table.c'],
   c_args: yanet_test_c_args,
-  dependencies: dependencies
+  dependencies: lib_common_dep
 )
 test('value_table', table_test, suite: ['common'])
 
