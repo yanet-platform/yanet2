@@ -262,11 +262,11 @@ func TestL3b_DropsTcpWithoutVirtualService(t *testing.T) {
 // encapsulated inner packet with the original frame.
 const ethHeaderLen = 14
 
-// newVirtualService creates a session table and an explicitly enabled service,
-// leaving the scheduler ring and publication to the caller.
+// newVirtualService creates a session table and a virtual service with every
+// configured real server enabled.
 //
-// Tearndown is wired so cleanup attempts to free the service before the table
-// it borrows.
+// The caller installs the scheduler ring and publishes the service. Teardown
+// attempts to free the service before the session table it borrows.
 func newVirtualService(
 	t *testing.T,
 	agent *ffi.Agent,

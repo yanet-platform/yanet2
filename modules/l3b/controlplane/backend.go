@@ -483,8 +483,10 @@ func (m *backend) UpdateService(service *l3bpb.VirtualService) error {
 		return err
 	}
 
-	// shortcut: session pins remain address-keyed until incarnation-aware
-	// resolution is implemented.
+	// State and weight follow surviving destination addresses across replacement.
+	//
+	// shortcut: address-keyed session pins can revive on explicit re-enable;
+	// incarnation isolation requires incarnation-aware resolution.
 	weights, enabled := existing.ReplacementState(config)
 	object, err := m.publishService(config, name, existing.SessionTable(), weights, enabled)
 	if err != nil {
