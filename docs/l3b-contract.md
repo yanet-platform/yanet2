@@ -233,17 +233,37 @@ orders.
 
 ### Complete Identity Non-Reuse
 
-Complete identities never repeat within these domains; components remain opaque:
+The identified context describes what an identity denotes, not a boundary after
+which its opaque value may be recycled. Complete identities must remain
+non-aliasing to their validators or consumers; components remain opaque:
 
-| Identity | Non-reuse domain |
-| --- | --- |
-| Mutation token | Instance, object kind/incarnation, owner epoch, accepted version |
-| Create permit | Instance, owner epoch, kind, name, absence interval, individual grant |
-| Object incarnation | Instance, object kind, creation lifetime |
-| Real incarnation | Instance, VS incarnation, full real key, membership lifetime |
-| Membership revision | Instance, owner epoch, list kind |
-| Session-chain generation | Instance, VS incarnation, topology lifetime |
-| Allocation identity | Existing instance/allocation-serial reservation domain |
+| Identity | Identified context | Non-reuse constraint |
+| --- | --- | --- |
+| Mutation token | Instance, object kind, name, incarnation, owner epoch, accepted version | Historical and current grants must be distinguishable from the complete presented token plus actually supplied and validated request context, across versions, takeover and same-name recreation. |
+| Create permit | Instance, owner epoch, kind, name, absence interval, individual grant | A later grant or absence interval must not revive an expired, consumed or invalidated permit in the presented/validated context. |
+| Object incarnation | Instance, object kind, creation lifetime | Distinct creation lifetimes must not alias through the complete identity and its validated context; name reuse does not revive an old incarnation. |
+| Real incarnation | Instance, VS incarnation, full real key, membership lifetime | Removal and readdition must not revive the old membership identity in the complete validated context. |
+| Membership revision | Instance, owner epoch, list kind | A changed membership or epoch must not make an invalidated continuation current again; separate list-kind scopes remain independent. |
+| Session-chain generation | Instance, VS incarnation, topology lifetime | A later topology must not revive an invalidated chain identity or continuation in the complete validated context. |
+| Allocation identity | Existing instance/allocation-serial reservation domain | Preserve non-reuse of the complete allocation identity in that domain; storage-location reuse is not identity reuse. |
+
+For mutation requests carrying a name and expected token, the same complete token
+bytes MUST NOT become valid again across accepted versions, owner takeover,
+same-name delete/recreate or endpoint reuse when the actually supplied and
+validated request context cannot distinguish the historical grant from the current
+one. Version, epoch and incarnation are not reset boundaries. Changing only
+server-hidden version, incarnation, instance or epoch does not distinguish the
+input; returning a read-only incarnation beside the token does not supply that
+incarnation on a later mutation. This protection survives full reclamation of the
+old object's state, not only the lifetime of its retained storage.
+
+Wrong-context tokens still reject with `Aborted` under the existing error order.
+A different RPC kind or instance label alone does not prove that validation can
+reject a token from the other context: the actual presented value/context must
+distinguish the grants. Local components may repeat only when the complete
+presented and validated context remains distinguishable without weakening these
+checks. This does not require global byte uniqueness across all names or systems,
+choose a codec or new RPC field, or promise cryptographic unforgeability.
 
 Issuance metadata survives takeover. Parent domains must distinguish old requests
 even after endpoint reuse and fence old validators/participants before a new domain
@@ -252,6 +272,13 @@ returns `Unavailable`, never resets a sequence because a registry is empty.
 This promises neither infinite issuance, automatic epoch rollover, UUID collision
 immunity, a permanent per-value ledger nor a history TTL. ABA names/content do not
 restore old identities.
+
+Fencing is required but does not replace non-aliasing: a delayed old client request
+must not become valid at the new owner. Permit TTL expiry, consumption and record
+reclamation likewise do not authorize reuse that revives an old grant. The existing
+`AlreadyExists` precedence for a present create target and `Aborted` for an absent
+target with an old permit remain unchanged. Counter accumulation is a separate
+consumer-visible identity under section 6, with its own group-only unavailability.
 
 Known exhaustion of a required new identity returns `ResourceExhausted` at resource
 admission, after normal validation, token checks, preconditions and no-op equality.
@@ -1962,6 +1989,12 @@ qualification.
 
 ### Byte-Page Framing, Cursor Errors And Read-Only Identities
 
+F28 mutation tokens retain the complete-value non-reuse rule in section 5.
+Response-only incarnation metadata is not an additional expected-incarnation
+input for name-plus-token mutations. Opaque cursor context must actually travel
+with the request and be validated; hidden current server state is not a substitute.
+This selects no encoding or additional request field and changes no cursor errors.
+
 Byte pages compute end = offset + chunk byte length with checked arithmetic
 and require 0 <= offset <= end <= total. `complete` is true if and only if
 end == total; the next cursor is empty if and only if complete. An incomplete
@@ -2058,13 +2091,39 @@ The following additional bounded vectors are **NOT RUN**:
   A delayed success/failure from checker config revision A cannot affect B even
   with the same continuity marker. Proven reconnect/restoration keeps history;
   threshold revision does not mutate the VS token or override admin/expiry.
-- Exhaust all seven identity domains: stale plus exhausted is Aborted; validated
-  no-op needs no new identity; a valid changing operation is ResourceExhausted.
-  Lost metadata is Unavailable/no reset; parent reuse requires fencing. Kind-scoped
+- Exhaust required issuance for all seven identity classes: stale plus known
+  exhaustion is Aborted; validated no-op needs no new identity; an otherwise valid
+  changing operation needing a fresh identity is ResourceExhausted. Lost metadata
+  is Unavailable/no reset; parent reuse requires distinguishability and fencing. Kind-scoped
   name revisions do not cross-invalidate; exhausted detach stays pending/accounted
   without a third table. Delayed packet preparation crosses expiry; final attempt
   uses one fresh t for expiry/deadline, repreparation resamples; shorter/zero,
   OPS stored deadlines and reverse-ICMP restrictions remain.
+- Mutation-token anti-revival (**NOT RUN**): for ModuleConfig name N, incarnation
+  I1, accepted v1 and token T, delay `DeleteModuleConfig(N, T)`. Accept v2 with U;
+  a v3 candidate MUST NOT issue T again in indistinguishable request context, even
+  if v3's content equals v1. The delayed delete returns `Aborted` and preserves the
+  existing object. Repeat across owner takeover with unchanged configuration.
+- Delete N/I1, fully reclaim its state, then recreate N/I2: T MUST NOT be issued
+  as a valid complete opaque token for N/I2 in that same request context. Delayed
+  `DeleteModuleConfig(N, T)` is `Aborted` while N/I2 exists; genuinely absent N
+  still returns `NotFound`. Repeat the protection for VS mutations. Returning I2
+  in readback, without it being a mutation input, is not a distinguishing check.
+- Exercise wrong-kind and wrong-instance tokens and endpoint reuse against the
+  actual presented/validated request context, not a server-only domain assertion.
+  Historical and current grants must remain distinguishable; local-component
+  repetition is permitted only when the full context proves that distinction and
+  wrong-context rejection. Fencing alone cannot make identical old input safe.
+- With known issuance exhausted, a stale request is still `Aborted`; a current,
+  otherwise valid changing request needing a fresh identity is `ResourceExhausted`
+  at admission, without partial acceptance. A validated current-token no-op keeps
+  its token and issues nothing. Unknown issuance metadata instead keeps the
+  recovery gate `Unavailable`, even with an empty registry, without reset.
+- Create-permit anti-revival (**NOT RUN**): after expiry, consumption, record
+  reclamation, takeover or a later absence interval, a new grant cannot make an
+  old presented permit valid again. Otherwise valid create while present remains
+  `AlreadyExists`; absent with the old permit remains `Aborted`. Assert identities,
+  state preservation and status codes, not human-readable output strings.
 - O16 individual-source unavailability versus whole-authority failure, cleanup
   disappearance ->continuation Aborted then fresh NotFound, protected in-flight
   completion and traversal-complete-but-cleanup-pending. Counters read continuing
