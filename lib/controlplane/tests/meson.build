@@ -303,26 +303,23 @@ dangling_objects_test = executable(
 )
 
 test('dangling_objects', dangling_objects_test, suite: ['lib'])
+
 superseded_agent_test = executable(
   'superseded_agent_test',
   ['superseded_agent_test.c'],
-  link_args: [
-    '-Wl,-E',
-    '-Wl,--undefined=new_device_plain',
-    '-Wl,--export-dynamic-symbol=new_device_plain',
-    '-Wl,--undefined=new_module_decap',
-    '-Wl,--export-dynamic-symbol=new_module_decap',
-  ],
   dependencies: [
     lib_dataplane_ut_dep,
     lib_logging_dep,
     lib_errors_dep,
-    lib_dev_plain_api,
+    lib_dev_plain_api_dep,
     lib_decap_cp_dep,
     lib_fwstate_objects_dep,
-    libdpdk_dep,
+    lib_agent_cp_dep,
+    lib_config_cp_dep,
+    lib_dev_plain_dp_dep,
+    lib_decap_dp_dep,
+    libdpdk_test_dep,
   ],
-  link_with: [lib_dev_plain_dp, lib_decap_dp],
   include_directories: yanet_rootdir,
 )
 
@@ -333,20 +330,17 @@ agent_list_race_thread_dep = dependency('threads')
 agent_list_race_test = executable(
   'agent_list_race_test',
   ['agent_list_race_test.c'],
-  link_args: [
-    '-Wl,-E',
-    '-Wl,--undefined=new_device_plain',
-    '-Wl,--export-dynamic-symbol=new_device_plain',
-  ],
   dependencies: [
     lib_dataplane_ut_dep,
     lib_logging_dep,
     lib_errors_dep,
-    lib_dev_plain_api,
-    libdpdk_dep,
+    lib_dev_plain_api_dep,
+    lib_agent_cp_dep,
+    lib_config_cp_dep,
+    lib_dev_plain_dp_dep,
+    libdpdk_test_dep,
     agent_list_race_thread_dep,
   ],
-  link_with: [lib_dev_plain_dp],
   include_directories: yanet_rootdir,
 )
 
