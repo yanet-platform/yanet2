@@ -3,6 +3,7 @@ cp_dependencies = [
   lib_errors_dep,
   lib_logging_dep,
   lib_config_cp_dep,
+  lib_agent_cp_dep,
 ]
 
 includes = include_directories('../dataplane')
