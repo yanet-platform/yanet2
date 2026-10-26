@@ -10,6 +10,5 @@ fuzzing_targets += {
       lib_counters_dep,
       lib_statemap_dep,
     ],
-    'module_dir': '..',
   }
 }

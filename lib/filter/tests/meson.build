@@ -13,7 +13,6 @@ test_filter_basic_ports = executable(
   'basic_ports',
   ['basic_ports.c'],
   dependencies: test_deps,
-  include_directories: include_directories('..'),
 )
 test('basic_ports', test_filter_basic_ports, suite: ['filter'])
 
@@ -93,7 +92,6 @@ filter_macros = executable(
   'macros',
   ['macros.c'],
   dependencies: test_deps,
-  include_directories: include_directories('..'),
 )
 test('macros', filter_macros, suite: ['filter'])
 
@@ -127,14 +125,12 @@ filter_compiler_oom_shim = static_library(
   'filter_compiler_oom_shim',
   filter_compiler_sources,
   c_args: oom_shim_c_args,
-  include_directories: include_directories('..'),
   dependencies: [lib_common_dep, lib_errors_dep],
   install: false,
 )
 
 filter_compiler_oom_shim_dep = declare_dependency(
   link_with: filter_compiler_oom_shim,
-  include_directories: include_directories('..'),
   dependencies: [lib_common_dep, lib_errors_dep],
 )
 

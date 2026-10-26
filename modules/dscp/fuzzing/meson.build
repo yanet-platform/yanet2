@@ -7,6 +7,5 @@ fuzzing_targets += {
       lib_dscp_dp_dep,
       lib_dscp_cp_dep,
     ],
-    'module_dir': '..',
   }
 }

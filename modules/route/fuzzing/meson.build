@@ -8,6 +8,5 @@ fuzzing_targets += {
       lib_route_cp_dep,
       lib_counters_dep,
     ],
-    'module_dir': '..',
   }
 }

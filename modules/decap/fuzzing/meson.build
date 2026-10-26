@@ -7,6 +7,5 @@ fuzzing_targets += {
       lib_decap_dp_dep,
       lib_decap_cp_dep,
     ],
-    'module_dir': '..',
   }
 }

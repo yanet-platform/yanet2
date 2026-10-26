@@ -11,7 +11,6 @@ lib_classify_compiler = static_library(
 
 lib_classify_compiler_dep = declare_dependency(
   link_with: lib_classify_compiler,
-  include_directories: include_directories('.'),
   dependencies: [lib_common_dep],
 )
 

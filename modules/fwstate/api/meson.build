@@ -5,8 +5,6 @@ cp_dependencies = [
   lib_counters_dep,
 ]
 
-includes = include_directories('../dataplane', '../../..')
-
 sources = files(
   'fwstate_cp.c',
 )
@@ -15,7 +13,6 @@ lib_fwstate_cp = static_library(
   'fwstate_cp',
   sources,
   dependencies: cp_dependencies,
-  include_directories: includes,
   install: false,
 )
 

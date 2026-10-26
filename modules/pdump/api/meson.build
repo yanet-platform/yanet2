@@ -44,7 +44,7 @@ lib_pdump_cp = static_library(
   'pdump_cp',
   api_sources,
   dependencies: cp_dependencies,
-  include_directories: [yanet_rootdir, pdump_dataplane_inc],
+  include_directories: pdump_dataplane_inc,
   install: false,
 )
 lib_pdump_cp_dep = declare_dependency(
