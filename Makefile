@@ -107,6 +107,7 @@ CLI_RELEASE_BINARIES := $(addprefix $(RELEASE_DIR)/,$(CLI_BINARIES))
 	setup \
 	setup-debug \
 	setup-asan \
+	build \
 	dataplane \
 	go-test-prepare \
 	install \
@@ -140,7 +141,7 @@ CLI_RELEASE_BINARIES := $(addprefix $(RELEASE_DIR)/,$(CLI_BINARIES))
 # intermediate file once cli-install/% depends on it.
 .PRECIOUS: cli/%
 
-all: dataplane cli
+all: build cli
 
 proto-lint:
 	@if command -v buf >/dev/null 2>&1; then \
@@ -243,8 +244,13 @@ setup-debug:
 setup-asan:
 	meson setup -Dbuildtype=debug -Doptimization=0 -Db_sanitize=address,undefined $(EXTRA_MODULES_FLAG) build
 
-dataplane:
+# Everything meson builds: the dataplane, the Go binaries, the cgo link flags and
+# the C tests.
+build:
 	meson compile -C build
+
+# The older name of build.
+dataplane: build
 
 go-test-prepare:
 	meson compile -C build go-test-prepare
@@ -367,7 +373,7 @@ fuzz:
 		./build/tests/fuzzing/$(MODULE) corpus/; \
 	fi
 
-install: dataplane cli-install
+install: build cli-install
 	meson install -C build --skip-subprojects
 
 clean: go-cache-clean cli-clean

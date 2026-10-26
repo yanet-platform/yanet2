@@ -13,16 +13,20 @@ default:
     @just --list
 
 # === Build Targets ===
+#
+# The build, build-debug and fuzz recipes call the make targets, which also
+# pass the private modules to meson. Separate make runs keep setup before the
+# build even under a parallel MAKEFLAGS.
 
 # Build all targets
 build:
-    @meson setup build
-    @meson compile -C build
+    @make setup
+    @make build
 
-# Build all targets in debug
+# Build all targets in debug with ASan and UBSan
 build-debug:
-    @meson setup -Dbuildtype=debug -Doptimization=0 -Db_sanitize=address,undefined build
-    @meson compile -C build
+    @make setup-asan
+    @make build
 
 # Setup build environment with optional coverage
 setup COVERAGE_MODE="false":
@@ -51,24 +55,7 @@ lab *ARGS:
 # Usage: just fuzz [MODULE]
 # Example: just fuzz dscp
 fuzz MODULE="":
-    #!/usr/bin/env bash
-    set -euo pipefail
-    if [ -d build ] && ! meson introspect build --buildoptions | jq -er '.[] | select(.name=="fuzzing") | .value' | grep -q enabled; then
-        echo "Wiping build for fuzzing..."
-        rm -rf build
-    fi
-    if [ ! -d build ]; then
-        env CC=clang CXX=clang++ meson setup -Dbuildtype=debug -Doptimization=0 -Dfuzzing=enabled build
-    else
-        env CC=clang CXX=clang++ meson setup -Dbuildtype=debug -Doptimization=0 -Dfuzzing=enabled --reconfigure build
-    fi
-    env CC=clang CXX=clang++ meson compile -C build
-    echo "Ready to fuzz the following modules:"
-    find build/tests/fuzzing/ -type f -executable -printf '%f\n'
-    if [ -n "{{ MODULE }}" ]; then
-        mkdir -p corpus
-        ./build/tests/fuzzing/{{ MODULE }} corpus/
-    fi
+    @make fuzz MODULE={{ MODULE }}
 
 # Clean coverage data
 # clean *.gcno file manually after remove c file

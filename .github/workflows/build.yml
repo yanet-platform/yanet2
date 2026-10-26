@@ -166,7 +166,7 @@ jobs:
           flags=$(DEB_BUILD_MAINT_OPTIONS=hardening=+all DEB_CFLAGS_MAINT_APPEND=-fno-lto DEB_LDFLAGS_MAINT_APPEND=-fno-lto dpkg-buildflags --export=sh)
           eval "$flags"
           meson setup build -Dbuildtype=release
-          make dataplane
+          make build
           make test-only
 
       - name: Show meson test log
@@ -398,7 +398,7 @@ jobs:
       - name: Build and run tests (release)
         run: |
           meson setup build -Dbuildtype=release
-          make dataplane
+          make build
           make test-only
 
       - name: Show meson test log
