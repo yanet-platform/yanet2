@@ -2,8 +2,28 @@
 #include "config.h"
 #include "lib/dataplane/packet/packet.h"
 
+#include <errno.h>
 #include <fcntl.h>
+#include <stdlib.h>
 #include <string.h>
+
+static size_t refused_device_allocation_size;
+static unsigned refused_device_allocations;
+
+void *
+__real_realloc(void *ptr, size_t size);
+
+// Refuse only the device-array allocation selected by the current scenario.
+void *
+__wrap_realloc(void *ptr, size_t size) {
+	if (refused_device_allocation_size != 0 &&
+	    size == refused_device_allocation_size) {
+		++refused_device_allocations;
+		errno = ENOMEM;
+		return NULL;
+	}
+	return __real_realloc(ptr, size);
+}
 
 static void
 check_instance(
@@ -25,6 +45,45 @@ parse_yaml(const char *yaml, struct dataplane_config **config) {
 	int rc = dataplane_config_init(f, config);
 	fclose(f);
 	return rc;
+}
+
+static const char devices_yaml[] = "dataplane:\n"
+				   "  devices:\n"
+				   "    - port_name: eth0\n"
+				   "      workers:\n"
+				   "        - core_id: 1\n"
+				   "    - port_name: eth1\n";
+
+// Verifies that failed array growth reclaims previously initialized devices.
+static void
+test_device_allocation_failure(size_t device_count) {
+	refused_device_allocation_size =
+		device_count * sizeof(struct dataplane_device_config);
+	refused_device_allocations = 0;
+	struct dataplane_config *config = NULL;
+	int rc = parse_yaml(devices_yaml, &config);
+	refused_device_allocation_size = 0;
+
+	assert(refused_device_allocations == 1);
+	assert(rc == -1);
+	assert(config == NULL);
+}
+
+// Verifies that successful device growth preserves owned worker declarations.
+static void
+test_device_allocation_success(void) {
+	struct dataplane_config *config = NULL;
+	assert(parse_yaml(devices_yaml, &config) == 0);
+	assert(config->device_count == 2);
+	assert(strcmp(config->devices[0].port_name, "eth0") == 0);
+	assert(strcmp(config->devices[1].port_name, "eth1") == 0);
+	assert(config->devices[0].worker_count == 1);
+	assert(config->devices[0].workers[0].core_id == 1);
+	assert(config->devices[1].worker_count == 0);
+	assert(config->devices[1].workers == NULL);
+	assert(config->worker_count == 1);
+	assert(config->workers[0].assignments[0].device_id == 0);
+	dataplane_config_free(config);
 }
 
 struct numeric_field {
@@ -315,6 +374,9 @@ main(int argc, char **argv) {
 	(void)argv;
 
 	test_valid_config();
+	test_device_allocation_failure(1);
+	test_device_allocation_failure(2);
+	test_device_allocation_success();
 	test_objects_list();
 	test_numeric_field_maximum_values();
 	test_packet_recirc_limit_default_and_bounds();
