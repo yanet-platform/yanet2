@@ -28,13 +28,13 @@ endif
 lib_config_cp = static_library(
   'config_cp',
   sources,
-  c_args: yanet_c_args + registry_sanitize_args,
+  c_args: registry_sanitize_args,
   dependencies: dependencies,
   install: false,
 )
 
 lib_config_cp_dep = declare_dependency(
   link_with: lib_config_cp,
-  dependencies : [lib_counters_dep, lib_errors_dep, lib_dp_zone_dep],
+  dependencies: dependencies,
   include_directories: yanet_rootdir,
 )

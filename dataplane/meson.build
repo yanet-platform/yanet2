@@ -41,8 +41,6 @@ lib_dataplane_dep = declare_dependency(
 )
 
 dependencies = [
-  dependency('threads'),
-  dependency('yaml-0.1'),
   lib_common_dep,
   lib_logging_dep,
   libdpdk_dep,
