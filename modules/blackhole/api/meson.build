@@ -12,7 +12,6 @@ lib_blackhole_cp = static_library(
   'blackhole_cp',
   sources,
   dependencies: cp_dependencies,
-  include_directories: includes,
   install: false,
 )
 

@@ -78,10 +78,11 @@ yanet_stamp.set_quoted('YANET_BUILD_DATE', build_date.stdout().strip())
 
 dataplane_only = get_option('dataplane_only')
 
+python3 = find_program('python3', required: true, version: '>=3.8', native: true)
+
 if not dataplane_only
   # Define common programs once to avoid duplication
   go = find_program('go', required: true)
-  python3 = find_program('python3', required: true, version: '>=3.8', native: true)
   ar = find_program('ar', required: true)
   go_cdeps = [
     python3,
@@ -99,8 +100,6 @@ endif
 
 # Build CGO flags based on b_sanitize option
 yanet_go_env = {}
-yanet_cgo_cflags = []
-yanet_cgo_ldflags = []
 sanitize_link_args = []
 b_sanitize = get_option('b_sanitize')
 # Every sanitizer the C tree is instrumented with, as the version banner
@@ -130,8 +129,6 @@ if b_sanitize != 'none'
             'CGO_CFLAGS': cgo_flags,
             'CGO_LDFLAGS': cgo_flags + ' -Wl,-rpath,$ORIGIN',
         }
-        yanet_cgo_cflags += cgo_flags
-        yanet_cgo_ldflags += cgo_flags
         sanitize_link_args = ['-Wl,-rpath,$ORIGIN']
     endif
 endif
@@ -162,8 +159,6 @@ if get_option('fuzzing').enabled()
       'CGO_CFLAGS': cgo_flags,
       'CGO_LDFLAGS': cgo_flags,
   }
-  yanet_cgo_cflags += cgo_flags
-  yanet_cgo_ldflags += cgo_flags
 endif
 
 yanet_rootdir = include_directories('.')

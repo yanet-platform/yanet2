@@ -113,18 +113,18 @@ The project integrates the filter in two places with two libraries:
 - Query (header-only):
   - Use for dataplane/runtime classification
   - Interface headers: [`lib/filter/query.h`](lib/filter/query.h) and [`lib/filter/filter.h`](lib/filter/filter.h)
-  - Meson dependency: [`lib_filter_query_dep`](lib/filter/meson.build:1) (include-only, no link objects)
+  - Meson: no library to link; the headers need the repository root and the DPDK headers (`lib_common_dep`, `libdpdk_inc_dep`)
 - Compiler:
   - Use for controlplane to build the filter instance from rules
   - Interface: [`lib/filter/compiler.h`](lib/filter/compiler.h) (implementation under `lib/filter/compiler/*.c`)
-  - Meson target/dep: [`lib_filter_compiler`](lib/filter/meson.build:16) / [`lib_filter_compiler_dep`](lib/filter/meson.build:25)
+  - Meson target/dep: [`lib_filter_compiler`](lib/filter/meson.build:12) / [`lib_filter_compiler_dep`](lib/filter/meson.build:19)
 
 ### Meson integration
 
 - Dataplane (query-only):
-  - Add include dependency only:
+  - Add the include dependencies only:
     ```
-    deps += [lib_filter_query_dep]
+    deps += [lib_common_dep, libdpdk_inc_dep]
     ```
 - Controlplane (needs compiler):
   - Add both include and link dependency to the static library:
