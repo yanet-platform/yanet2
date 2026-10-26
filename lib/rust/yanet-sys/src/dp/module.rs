@@ -35,13 +35,15 @@ pub trait Module: Sized + 'static {
     ///
     /// ```compile_fail,E0277
     /// use core::marker::PhantomData;
-    /// use yanet_sys::dp::{Batch, CommitCx, Cx, Module};
+    /// use yanet_sys::dp::{Batch, CommitCx, Cx, Module, Verdict};
     /// struct Mine;
     /// impl Module for Mine {
     ///     const NAME: &'static str = "mine";
     ///     type Config = u64;
     ///     type Prepared<'p> = PhantomData<*const ()>;
-    ///     fn handle(_: &mut Cx<Self>, _: &mut Batch) {}
+    ///     fn handle(_: &mut Cx<Self>, batch: &mut Batch) {
+    ///         batch.dispatch(|_| Verdict::Pass);
+    ///     }
     ///     fn prepare(_: &CommitCx<'_, Self>) -> PhantomData<*const ()> {
     ///         PhantomData
     ///     }
@@ -52,7 +54,7 @@ pub trait Module: Sized + 'static {
     /// allocator guarantees; `export_module!` fails the build otherwise:
     ///
     /// ```compile_fail,E0080
-    /// use yanet_sys::dp::{Batch, CommitCx, Cx, Module};
+    /// use yanet_sys::dp::{Batch, CommitCx, Cx, Module, Verdict};
     /// #[repr(align(128))]
     /// struct Wide(u64);
     /// struct Mine;
@@ -60,7 +62,9 @@ pub trait Module: Sized + 'static {
     ///     const NAME: &'static str = "mine";
     ///     type Config = u64;
     ///     type Prepared<'p> = Wide;
-    ///     fn handle(_: &mut Cx<Self>, _: &mut Batch) {}
+    ///     fn handle(_: &mut Cx<Self>, batch: &mut Batch) {
+    ///         batch.dispatch(|_| Verdict::Pass);
+    ///     }
     ///     fn prepare(_: &CommitCx<'_, Self>) -> Wide {
     ///         Wide(0)
     ///     }
@@ -71,7 +75,7 @@ pub trait Module: Sized + 'static {
     /// A prepared value within the allocator's alignment is accepted:
     ///
     /// ```
-    /// use yanet_sys::dp::{Batch, CommitCx, Cx, Module};
+    /// use yanet_sys::dp::{Batch, CommitCx, Cx, Module, Verdict};
     /// #[repr(align(64))]
     /// struct Line(u64);
     /// struct Mine;
@@ -79,7 +83,9 @@ pub trait Module: Sized + 'static {
     ///     const NAME: &'static str = "mine";
     ///     type Config = u64;
     ///     type Prepared<'p> = Line;
-    ///     fn handle(_: &mut Cx<Self>, _: &mut Batch) {}
+    ///     fn handle(_: &mut Cx<Self>, batch: &mut Batch) {
+    ///         batch.dispatch(|_| Verdict::Pass);
+    ///     }
     ///     fn prepare(_: &CommitCx<'_, Self>) -> Line {
     ///         Line(0)
     ///     }
