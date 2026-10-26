@@ -85,8 +85,9 @@ struct agent {
 	// Set once a newer generation of this agent's name replaces it
 	// in the registry.
 	//
-	// From that moment the agent exists for nothing but reclamation,
-	// and its arenas are freed wholesale once the loaded count above
+	// From that moment the agent exists for nothing but reclamation:
+	// constructing, growing and storing through it is refused, and
+	// its arenas are freed wholesale once the loaded count above
 	// drains to zero. The store runs at the superseding attach under
 	// the configuration and agent locks, before any sweep those locks
 	// admit; readers pair it with an acquire load, so a refusal is
@@ -103,13 +104,13 @@ struct agent {
 struct dp_config *
 agent_dp_config(struct agent *agent);
 
-// Refuse a storage write through a superseded agent generation.
+// Refuse a memory change through a superseded agent generation.
 //
 // A superseded generation's only purpose is to be reclaimed once its
-// loaded count reaches zero: a value a caller would still store
-// through it would race the sweep's wholesale free of the arenas or
-// outlive every handle the caller holds, so the write fails fast
-// instead.
+// loaded count reaches zero: anything a caller would still create,
+// grow or store through it would race the sweep's wholesale free of
+// the arenas or outlive every handle the caller holds. Entity
+// construction, growth and storage therefore fail fast instead.
 //
 // An agent that never enters the registry, like the dataplane's own,
 // is never replaced and always passes.

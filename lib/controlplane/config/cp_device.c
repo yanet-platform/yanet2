@@ -138,6 +138,13 @@ cp_device_init(
 	const struct cp_device_config *cfg,
 	yanet_error **err
 ) {
+	// A superseded owner is frozen: the device would live in arenas the
+	// sweep may free wholesale, so construction fails before the
+	// entity takes shape in them.
+	if (agent_reject_superseded(agent, err)) {
+		return -1;
+	}
+
 	struct dp_config *dp_config = ADDR_OF(&agent->dp_config);
 
 	if (dp_config_lookup_device(

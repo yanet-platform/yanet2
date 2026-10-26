@@ -18,6 +18,13 @@ cp_object_init(
 	const char *name,
 	yanet_error **err
 ) {
+	// A superseded owner is frozen: the object would live in arenas the
+	// sweep may free wholesale, so construction fails before the
+	// entity takes shape in them.
+	if (agent_reject_superseded(agent, err)) {
+		return -1;
+	}
+
 	memset(self, 0, sizeof(struct cp_object));
 
 	struct dp_config *dp_config = ADDR_OF(&agent->dp_config);

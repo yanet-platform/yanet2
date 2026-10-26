@@ -1,12 +1,14 @@
 /*
- * Updates through a superseded agent are refused.
+ * A superseded agent generation is frozen until its reclamation.
  *
- * A same-name attach ends the previous owner's lifetime: items it would
- * still create would raise a predecessor's loaded count from zero and
- * race the sweep's reclamation, which runs under the agent lock alone.
- * The module, device and object update paths therefore refuse items
- * owned by a superseded agent before building a generation, leaving the
- * published configuration and the owner's loaded count untouched.
+ * A same-name attach ends the previous owner's writer life: every path
+ * that would change its memory — constructing a module, device or
+ * object, growing the arenas, writing storage, and registering items it
+ * owns — refuses with failed precondition, so nothing can raise a
+ * predecessor's loaded count from zero or race the sweep's wholesale
+ * free of its arenas. Once the successor's update drains the final
+ * reference, the sweep reclaims the predecessor, its only remaining
+ * purpose.
  */
 
 #include "api/agent.h"
@@ -47,7 +49,9 @@ static int
 run_superseded_refusal_test(struct yanet_shm *shm) {
 	yanet_error *err = NULL;
 
-	// Agent A installs a device; a same-name attach then supersedes A.
+	// Agent A installs a device, writes storage and constructs a second
+	// batch of items while it is still the current generation; a
+	// same-name attach then supersedes A.
 	struct agent *agent_a = agent_attach(
 		shm, 0, "superseded", SUPERSEDED_TEST_MEMORY_LIMIT, &err
 	);
@@ -64,6 +68,31 @@ run_superseded_refusal_test(struct yanet_shm *shm) {
 		"update_devices failed for agent A"
 	);
 
+	char marker[] = "frozen";
+	TEST_ASSERT_SUCCESS(
+		agent_storage_put(
+			agent_a, "marker", marker, sizeof(marker), &err
+		),
+		"storage put failed for agent A"
+	);
+
+	// The items below stay unregistered: their updates run only after
+	// the supersession, where they must be refused.
+	struct cp_device *dev_a2 = new_plain_device(agent_a, "dev1", &err);
+	TEST_ASSERT_NOT_NULL(dev_a2, "device new failed for agent A");
+	struct cp_device *devs_a2[] = {dev_a2};
+	struct cp_module *mod_a = decap_module_config_new(agent_a, "m0", &err);
+	TEST_ASSERT_NOT_NULL(mod_a, "module config new failed for agent A");
+	struct cp_module *mods_a[] = {mod_a};
+	struct cp_object *obj_a =
+		fwstate_map_v4_object_config_new(agent_a, "o0", &err);
+	TEST_ASSERT_NOT_NULL(
+		obj_a,
+		"object config new failed for agent A: %s",
+		err ? yanet_error_message(err) : "?"
+	);
+	struct cp_object *objs_a[] = {obj_a};
+
 	struct agent *agent_b = agent_attach(
 		shm, 0, "superseded", SUPERSEDED_TEST_MEMORY_LIMIT, &err
 	);
@@ -77,16 +106,54 @@ run_superseded_refusal_test(struct yanet_shm *shm) {
 		"agent B must be the registry head"
 	);
 
-	// A device still created through agent A must be refused, and the
-	// refusal must leave the published generation and A's loaded count
-	// untouched: no new generation was built, no reference was gained.
-	struct cp_device *dev_a2 = new_plain_device(agent_a, "dev1", &err);
-	TEST_ASSERT_NOT_NULL(dev_a2, "device new failed for agent A");
-	struct cp_device *devs_a2[] = {dev_a2};
 	struct cp_config_gen *gen_before = cp_config_current_gen(cp_config);
 	uint64_t count_before = agent_a->loaded_entity_count;
 
+	// Constructing through the frozen generation is refused before any
+	// entity takes shape in its arenas.
 	yanet_error *refuse_err = NULL;
+	TEST_ASSERT_NULL(
+		new_plain_device(agent_a, "dev2", &refuse_err),
+		"device construction through a superseded agent must fail"
+	);
+	TEST_ASSERT_EQUAL(
+		yanet_error_kind(refuse_err),
+		YANET_ERROR_FAILED_PRECONDITION,
+		"the construction refusal must carry the failed-precondition "
+		"kind"
+	);
+	yanet_error_free(refuse_err);
+
+	refuse_err = NULL;
+	TEST_ASSERT_NULL(
+		decap_module_config_new(agent_a, "m1", &refuse_err),
+		"module construction through a superseded agent must fail"
+	);
+	TEST_ASSERT_EQUAL(
+		yanet_error_kind(refuse_err),
+		YANET_ERROR_FAILED_PRECONDITION,
+		"the module construction refusal must carry the "
+		"failed-precondition kind"
+	);
+	yanet_error_free(refuse_err);
+
+	refuse_err = NULL;
+	TEST_ASSERT_NULL(
+		fwstate_map_v4_object_config_new(agent_a, "o1", &refuse_err),
+		"object construction through a superseded agent must fail"
+	);
+	TEST_ASSERT_EQUAL(
+		yanet_error_kind(refuse_err),
+		YANET_ERROR_FAILED_PRECONDITION,
+		"the object construction refusal must carry the "
+		"failed-precondition kind"
+	);
+	yanet_error_free(refuse_err);
+
+	// Registering items the frozen generation owns is refused before a
+	// generation is built, leaving the published configuration and the
+	// loaded count untouched.
+	refuse_err = NULL;
 	TEST_ASSERT(
 		cp_config_update_devices(
 			dp_config, cp_config, 1, devs_a2, &refuse_err
@@ -99,23 +166,6 @@ run_superseded_refusal_test(struct yanet_shm *shm) {
 		"the refusal must carry the failed-precondition kind"
 	);
 	yanet_error_free(refuse_err);
-
-	TEST_ASSERT(
-		cp_config_current_gen(cp_config) == gen_before,
-		"a refused update must not publish a generation"
-	);
-	TEST_ASSERT_EQUAL(
-		agent_a->loaded_entity_count,
-		count_before,
-		"a refused update must not gain a reference for the superseded "
-		"owner"
-	);
-
-	// A module created through agent A must be refused the same way,
-	// leaving the published generation untouched.
-	struct cp_module *mod_a = decap_module_config_new(agent_a, "m0", &err);
-	TEST_ASSERT_NOT_NULL(mod_a, "module config new failed for agent A");
-	struct cp_module *mods_a[] = {mod_a};
 
 	refuse_err = NULL;
 	TEST_ASSERT(
@@ -130,20 +180,6 @@ run_superseded_refusal_test(struct yanet_shm *shm) {
 		"the module refusal must carry the failed-precondition kind"
 	);
 	yanet_error_free(refuse_err);
-	TEST_ASSERT(
-		cp_config_current_gen(cp_config) == gen_before,
-		"a refused module update must not publish a generation"
-	);
-
-	// An object created through agent A must be refused the same way.
-	struct cp_object *obj_a =
-		fwstate_map_v4_object_config_new(agent_a, "o0", &err);
-	TEST_ASSERT_NOT_NULL(
-		obj_a,
-		"object config new failed for agent A: %s",
-		err ? yanet_error_message(err) : "?"
-	);
-	struct cp_object *objs_a[] = {obj_a};
 
 	refuse_err = NULL;
 	TEST_ASSERT(
@@ -158,19 +194,85 @@ run_superseded_refusal_test(struct yanet_shm *shm) {
 		"the object refusal must carry the failed-precondition kind"
 	);
 	yanet_error_free(refuse_err);
+
 	TEST_ASSERT(
 		cp_config_current_gen(cp_config) == gen_before,
-		"a refused object update must not publish a generation"
+		"a refused update must not publish a generation"
+	);
+	TEST_ASSERT_EQUAL(
+		agent_a->loaded_entity_count,
+		count_before,
+		"a refused update must not gain a reference for the superseded "
+		"owner"
 	);
 
-	// The successor's own update still succeeds and retires the
-	// generation holding agent A's device.
+	// Growing the frozen generation is refused without moving its
+	// limit or recording an arena.
+	uint64_t limit_before = agent_memory_limit(agent_a);
+	uint64_t arena_count_before = agent_a->arena_count;
+	refuse_err = NULL;
+	TEST_ASSERT(
+		agent_extend(agent_a, 1u << 20, &refuse_err) == -1,
+		"growing a superseded agent must fail"
+	);
+	TEST_ASSERT_EQUAL(
+		yanet_error_kind(refuse_err),
+		YANET_ERROR_FAILED_PRECONDITION,
+		"the growth refusal must carry the failed-precondition kind"
+	);
+	yanet_error_free(refuse_err);
+	TEST_ASSERT_EQUAL(
+		agent_memory_limit(agent_a),
+		limit_before,
+		"a refused growth must not move the limit"
+	);
+	TEST_ASSERT_EQUAL(
+		agent_a->arena_count,
+		arena_count_before,
+		"a refused growth must not record an arena"
+	);
+
+	// Storage writes into the frozen generation are refused, while
+	// what it stored while current stays readable until reclamation.
+	char replacement[] = "melting";
+	refuse_err = NULL;
+	TEST_ASSERT(
+		agent_storage_put(
+			agent_a,
+			"marker",
+			replacement,
+			sizeof(replacement),
+			&refuse_err
+		) == -1,
+		"writing storage of a superseded agent must fail"
+	);
+	TEST_ASSERT_EQUAL(
+		yanet_error_kind(refuse_err),
+		YANET_ERROR_FAILED_PRECONDITION,
+		"the storage refusal must carry the failed-precondition kind"
+	);
+	yanet_error_free(refuse_err);
+	const void *stored = agent_storage_read(agent_a, "marker");
+	TEST_ASSERT_NOT_NULL(stored, "frozen storage must stay readable");
+	TEST_ASSERT_EQUAL(
+		memcmp(stored, marker, sizeof(marker)),
+		0,
+		"frozen storage must keep the bytes it had at supersession"
+	);
+
+	// The successor's own update still succeeds; it retires the
+	// generation holding A's device, and the drained predecessor is
+	// reclaimed — the only thing it was still waiting for.
 	struct cp_device *dev_b = new_plain_device(agent_b, "dev0", &err);
 	TEST_ASSERT_NOT_NULL(dev_b, "device new failed for agent B");
 	struct cp_device *devs_b[] = {dev_b};
 	TEST_ASSERT_SUCCESS(
 		cp_config_update_devices(dp_config, cp_config, 1, devs_b, &err),
 		"update_devices failed for agent B"
+	);
+	TEST_ASSERT_NULL(
+		ADDR_OF(&agent_b->prev),
+		"a predecessor drained to zero references must be reclaimed"
 	);
 
 	return TEST_SUCCESS;

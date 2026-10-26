@@ -536,7 +536,13 @@ agent_extend(struct agent *agent, uint64_t size, yanet_error **err) {
 
 	cp_config_lock(cp_config);
 	spinlock_lock(&cp_config->agent_lock);
-	int ret = agent_extend_locked(agent, size, err);
+	// A superseded generation exists only to be reclaimed: its arenas
+	// die wholesale at the next drain-to-zero sweep, so growth is
+	// refused before any arena is reserved.
+	int ret = agent_reject_superseded(agent, err);
+	if (ret == 0) {
+		ret = agent_extend_locked(agent, size, err);
+	}
 	// Every completed mutation of agent state sweeps under the agent
 	// lock, so a final generation release that finds the lock busy is
 	// postponed at most until a mutating holder releases it.
