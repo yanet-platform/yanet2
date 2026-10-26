@@ -23,7 +23,7 @@ pdump_capture_test_exe = executable(
     libdpdk_test_dep,
     libpcap_dep,
   ],
-  include_directories: [yanet_rootdir, pdump_dataplane_inc],
+  include_directories: yanet_rootdir,
 )
 
 test(
@@ -50,7 +50,7 @@ pdump_bench_exe = executable(
     libdpdk_test_dep,
     libpcap_dep,
   ],
-  include_directories: [yanet_rootdir, pdump_dataplane_inc],
+  include_directories: yanet_rootdir,
 )
 
 benchmark('pdump_bench', pdump_bench_exe, timeout: 300)

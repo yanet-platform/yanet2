@@ -11,5 +11,5 @@ lib_errors = static_library(
 
 lib_errors_dep = declare_dependency(
   link_with: lib_errors,
-  include_directories: [include_directories('.'), yanet_rootdir],
+  include_directories: [yanet_rootdir],
 )

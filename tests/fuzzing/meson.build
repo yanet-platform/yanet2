@@ -20,7 +20,7 @@ foreach target_name, target_info : fuzzing_targets
     link_args: fuzz_args,
     sources: [target_info['source']] + nofuzz_sources,
     dependencies: [libdpdk_test_dep] + target_info['deps'] + [lib_logging_dep],
-    include_directories: [yanet_rootdir, target_info['module_dir']],
+    include_directories: yanet_rootdir,
   )
 
   # Create a test for the fuzzing target

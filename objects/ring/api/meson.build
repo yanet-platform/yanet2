@@ -4,8 +4,6 @@ cp_dependencies = [
   lib_errors_dep,
 ]
 
-includes = include_directories('../../..')
-
 sources = files(
   'ring_object.c',
 )
@@ -14,13 +12,11 @@ lib_ring_objects = static_library(
   'ring_objects',
   sources,
   dependencies: cp_dependencies,
-  include_directories: includes,
   install: false,
 )
 
 lib_ring_objects_dep = declare_dependency(
   link_with: [lib_ring_objects],
-  include_directories: include_directories('.'),
   link_args: [
     '-Wl,--require-defined=new_object_ring',
     '-Wl,--export-dynamic-symbol=new_object_ring',

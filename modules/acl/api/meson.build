@@ -6,8 +6,6 @@ cp_dependencies = [
   lib_counters_dep,
 ]
 
-includes = include_directories('../dataplane', '../../..')
-
 sources = files(
   'controlplane.c',
 )
@@ -16,7 +14,6 @@ lib_acl_cp = static_library(
   'acl_cp',
   sources,
   dependencies: cp_dependencies,
-  include_directories: includes,
   install: false,
 )
 

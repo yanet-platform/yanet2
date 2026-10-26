@@ -16,7 +16,7 @@ l3b_test_deps = [
 l3b_test = executable(
   'l3b_test',
   'l3b_test.c',
-  include_directories: [yanet_rootdir, '../../dataplane'],
+  include_directories: yanet_rootdir,
   dependencies: [libdpdk_test_dep] + l3b_test_deps,
 )
 
@@ -25,7 +25,7 @@ test('l3b', l3b_test, suite: 'l3b')
 l3b_guard_test = executable(
   'l3b_guard_test',
   'l3b_guard_test.c',
-  include_directories: [yanet_rootdir, '../../dataplane'],
+  include_directories: yanet_rootdir,
   dependencies: [
     libdpdk_inc_dep,
     lib_common_dep,
