@@ -246,7 +246,10 @@ jobs:
     container: ghcr.io/yanet-platform/yanet2-ci@sha256:81927a6bf8adabade5c16d5b1bd698e2ca5535ffd88175b58a5934e647834e25
     env:
       # Every meson-built binary the functional tests and lab scenarios copy
-      # into their VMs.
+      # into their VMs, and all that this job builds.
+      #
+      # Each entry is the build path of the meson target that makes it; the
+      # release test job builds and tests the rest of the tree.
       FUNCTIONAL_BINARIES: |
         build/dataplane/yanet-dataplane
         build/controlplane/yanet-controlplane
@@ -261,13 +264,15 @@ jobs:
           persist-credentials: false
           submodules: true
 
+      # The release test job compiles the whole tree and is the one that saves
+      # this cache.
       - uses: hendrikmuhs/ccache-action@f09c25b45002a07be2955cbe52e8cee55643f89d # v1.2.24
         name: ccache
         with:
           key: ${{ runner.os }}-build-release-artifacts-image-cache
           max-size: 2G
           verbose: 2
-          save: ${{ github.ref == 'refs/heads/main' }}
+          save: false
 
       - name: Restore Go module cache
         uses: ./.github/actions/go-modcache
@@ -283,7 +288,8 @@ jobs:
       - name: Build YANET (release)
         run: |
           meson setup build -Dbuildtype=release
-          make dataplane
+          mapfile -t targets < <(sed -n 's#^build/##p' <<<"$FUNCTIONAL_BINARIES")
+          meson compile -C build "${targets[@]}"
 
       - name: Check functional test binaries
         run: |
@@ -365,14 +371,14 @@ jobs:
           persist-credentials: false
           submodules: true
 
-      # The artifacts job compiles the same tree and saves this cache.
+      # The artifacts job compiles part of this tree and restores this cache.
       - uses: hendrikmuhs/ccache-action@f09c25b45002a07be2955cbe52e8cee55643f89d # v1.2.24
         name: ccache
         with:
           key: ${{ runner.os }}-build-release-artifacts-image-cache
           max-size: 2G
           verbose: 2
-          save: false
+          save: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Restore Go module cache
         id: go-modcache
