@@ -50,7 +50,10 @@ test_basic_init(void) {
 	LOG(INFO, "Running test_basic_init...");
 
 	rcu_t rcu;
-	rcu_init(&rcu, &g_mctx, TEST_WORKERS);
+	TEST_ASSERT(
+		rcu_init(&rcu, &g_mctx, TEST_WORKERS) == 0,
+		"RCU initialization failed"
+	);
 
 	// Check global epoch is 0
 	unsigned global_epoch =
@@ -90,7 +93,10 @@ test_single_reader(void) {
 	LOG(INFO, "Running test_single_reader...");
 
 	rcu_t rcu;
-	rcu_init(&rcu, &g_mctx, TEST_WORKERS);
+	TEST_ASSERT(
+		rcu_init(&rcu, &g_mctx, TEST_WORKERS) == 0,
+		"RCU initialization failed"
+	);
 	atomic_ulong value = 42;
 
 	rcu_worker_t *workers = ADDR_OF(&rcu.workers);
@@ -129,7 +135,10 @@ test_single_writer(void) {
 	LOG(INFO, "Running test_single_writer...");
 
 	rcu_t rcu;
-	rcu_init(&rcu, &g_mctx, TEST_WORKERS);
+	TEST_ASSERT(
+		rcu_init(&rcu, &g_mctx, TEST_WORKERS) == 0,
+		"RCU initialization failed"
+	);
 	atomic_ulong value = 10;
 
 	// Update value
@@ -160,7 +169,10 @@ test_multiple_updates(void) {
 	LOG(INFO, "Running test_multiple_updates...");
 
 	rcu_t rcu;
-	rcu_init(&rcu, &g_mctx, TEST_WORKERS);
+	TEST_ASSERT(
+		rcu_init(&rcu, &g_mctx, TEST_WORKERS) == 0,
+		"RCU initialization failed"
+	);
 	atomic_ulong value = 0;
 
 	// Perform multiple updates
@@ -185,7 +197,10 @@ test_reader_writer_interaction(void) {
 	LOG(INFO, "Running test_reader_writer_interaction...");
 
 	rcu_t rcu;
-	rcu_init(&rcu, &g_mctx, TEST_WORKERS);
+	TEST_ASSERT(
+		rcu_init(&rcu, &g_mctx, TEST_WORKERS) == 0,
+		"RCU initialization failed"
+	);
 	atomic_ulong value = 100;
 
 	// Start read-side critical section
@@ -219,7 +234,10 @@ test_multiple_workers(void) {
 	LOG(INFO, "Running test_multiple_workers...");
 
 	rcu_t rcu;
-	rcu_init(&rcu, &g_mctx, TEST_WORKERS);
+	TEST_ASSERT(
+		rcu_init(&rcu, &g_mctx, TEST_WORKERS) == 0,
+		"RCU initialization failed"
+	);
 	atomic_ulong value = 777;
 
 	rcu_worker_t *workers = ADDR_OF(&rcu.workers);
@@ -266,7 +284,10 @@ test_epoch_synchronization(void) {
 	LOG(INFO, "Running test_epoch_synchronization...");
 
 	rcu_t rcu;
-	rcu_init(&rcu, &g_mctx, TEST_WORKERS);
+	TEST_ASSERT(
+		rcu_init(&rcu, &g_mctx, TEST_WORKERS) == 0,
+		"RCU initialization failed"
+	);
 	atomic_ulong value = 1;
 
 	rcu_worker_t *workers = ADDR_OF(&rcu.workers);
@@ -341,7 +362,10 @@ test_concurrent_readers(void) {
 	LOG(INFO, "Running test_concurrent_readers...");
 
 	rcu_t rcu;
-	rcu_init(&rcu, &g_mctx, TEST_WORKERS);
+	TEST_ASSERT(
+		rcu_init(&rcu, &g_mctx, TEST_WORKERS) == 0,
+		"RCU initialization failed"
+	);
 	atomic_ulong value = 42;
 	atomic_uint error_count = 0;
 
@@ -416,7 +440,10 @@ test_concurrent_readers_with_writer(void) {
 	LOG(INFO, "Running test_concurrent_readers_with_writer...");
 
 	rcu_t rcu;
-	rcu_init(&rcu, &g_mctx, TEST_WORKERS);
+	TEST_ASSERT(
+		rcu_init(&rcu, &g_mctx, TEST_WORKERS) == 0,
+		"RCU initialization failed"
+	);
 	atomic_ulong value = 0;
 	atomic_bool stop = false;
 	atomic_uint read_count = 0;
@@ -476,7 +503,10 @@ test_rapid_updates(void) {
 	LOG(INFO, "Running test_rapid_updates...");
 
 	rcu_t rcu;
-	rcu_init(&rcu, &g_mctx, TEST_WORKERS);
+	TEST_ASSERT(
+		rcu_init(&rcu, &g_mctx, TEST_WORKERS) == 0,
+		"RCU initialization failed"
+	);
 	atomic_ulong value = 0;
 
 	// Perform many rapid updates
@@ -516,7 +546,10 @@ test_all_workers_active(void) {
 	LOG(INFO, "Running test_all_workers_active...");
 
 	rcu_t rcu;
-	rcu_init(&rcu, &g_mctx, TEST_WORKERS);
+	TEST_ASSERT(
+		rcu_init(&rcu, &g_mctx, TEST_WORKERS) == 0,
+		"RCU initialization failed"
+	);
 	atomic_ulong value = 999;
 
 	rcu_worker_t *workers = ADDR_OF(&rcu.workers);
@@ -558,7 +591,10 @@ test_memory_ordering(void) {
 	LOG(INFO, "Running test_memory_ordering...");
 
 	rcu_t rcu;
-	rcu_init(&rcu, &g_mctx, TEST_WORKERS);
+	TEST_ASSERT(
+		rcu_init(&rcu, &g_mctx, TEST_WORKERS) == 0,
+		"RCU initialization failed"
+	);
 	atomic_ulong value = 0;
 	atomic_ulong auxiliary = 0;
 
@@ -588,7 +624,10 @@ test_rcu_load(void) {
 	LOG(INFO, "Running test_rcu_load...");
 
 	rcu_t rcu;
-	rcu_init(&rcu, &g_mctx, TEST_WORKERS);
+	TEST_ASSERT(
+		rcu_init(&rcu, &g_mctx, TEST_WORKERS) == 0,
+		"RCU initialization failed"
+	);
 	atomic_ulong value = 555;
 
 	// Test rcu_load
@@ -659,7 +698,10 @@ test_aggressive_race_detection(void) {
 	LOG(INFO, "Running test_aggressive_race_detection...");
 
 	rcu_t rcu;
-	rcu_init(&rcu, &g_mctx, TEST_WORKERS);
+	TEST_ASSERT(
+		rcu_init(&rcu, &g_mctx, TEST_WORKERS) == 0,
+		"RCU initialization failed"
+	);
 	atomic_ulong value = 0;
 	atomic_bool stop = false;
 	atomic_uint stale_reads = 0;

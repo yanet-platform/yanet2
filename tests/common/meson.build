@@ -83,6 +83,27 @@ rcu_bench = executable(
 )
 benchmark('rcu_bench', rcu_bench, timeout: 300)
 
+rcu_setup_failure_test = executable(
+  'rcu_setup_failure_test',
+  ['rcu_setup_failure_test.c'],
+  c_args: yanet_test_c_args,
+  dependencies: dependencies + [thread_dep],
+)
+test('rcu_setup_failure', rcu_setup_failure_test, suite: ['common'])
+
+rcu_bench_setup_failure_test = executable(
+  'rcu_bench_setup_failure_test',
+  ['rcu_setup_failure_test.c'],
+  c_args: yanet_test_c_args + ['-DRCU_SETUP_FAILURE_BENCH'],
+  dependencies: dependencies + [thread_dep],
+)
+test(
+  'rcu_bench_setup_failure',
+  rcu_bench_setup_failure_test,
+  suite: ['common'],
+  timeout: 180,
+)
+
 balloc_test = executable(
   'balloc_test',
   ['balloc_test.c'],

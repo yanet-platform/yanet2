@@ -66,20 +66,23 @@ benchmark_reader_func(void *arg) {
 	return NULL;
 }
 
-static void
+static int
 benchmark_multiworker_throughput(size_t num_workers) {
 	if (num_workers > BENCH_WORKERS) {
 		LOG(ERROR,
 		    "Cannot benchmark with %zu workers (max: %d)",
 		    num_workers,
 		    BENCH_WORKERS);
-		return;
+		return 0;
 	}
 
 	LOG(INFO, "Benchmarking RCU with %zu workers...", num_workers);
 
 	rcu_t rcu;
-	rcu_init(&rcu, &g_mctx, BENCH_WORKERS);
+	if (rcu_init(&rcu, &g_mctx, BENCH_WORKERS) != 0) {
+		LOG(ERROR, "RCU initialization failed");
+		return -1;
+	}
 	atomic_ulong value = 0;
 	atomic_bool stop = false;
 	atomic_ullong total_reads = 0;
@@ -100,7 +103,7 @@ benchmark_multiworker_throughput(size_t num_workers) {
 		);
 		if (res != 0) {
 			LOG(ERROR, "Failed to create thread %zu", i);
-			return;
+			return 0;
 		}
 	}
 
@@ -152,6 +155,7 @@ benchmark_multiworker_throughput(size_t num_workers) {
 	LOG(INFO, "  Update throughput: %.2f ops/sec", updates_per_sec);
 	LOG(INFO, "  Avg update latency: %.2f µs", avg_update_latency_us);
 	LOG(INFO, "%s", "");
+	return 0;
 }
 
 // Benchmark 2: Contention and Fairness
@@ -184,12 +188,15 @@ contention_worker_func(void *arg) {
 	return NULL;
 }
 
-static void
+static int
 benchmark_contention(void) {
 	LOG(INFO, "Running contention benchmark...");
 
 	rcu_t rcu;
-	rcu_init(&rcu, &g_mctx, BENCH_WORKERS);
+	if (rcu_init(&rcu, &g_mctx, BENCH_WORKERS) != 0) {
+		LOG(ERROR, "RCU initialization failed");
+		return -1;
+	}
 	atomic_ulong value = 0;
 	atomic_ullong total_ops = 0;
 	uint64_t worker_times[BENCH_WORKERS] = {0};
@@ -215,7 +222,7 @@ benchmark_contention(void) {
 		);
 		if (res != 0) {
 			LOG(ERROR, "Failed to create thread %zu", i);
-			return;
+			return 0;
 		}
 	}
 
@@ -267,16 +274,20 @@ benchmark_contention(void) {
 	    avg_time / 1000.0);
 	LOG(INFO, "  Fairness index: %.3f (1.0 = perfect)", fairness);
 	LOG(INFO, "%s", "");
+	return 0;
 }
 
 // Benchmark 3: Latency Distribution
 
-static void
+static int
 benchmark_latency_distribution(void) {
 	LOG(INFO, "Running latency distribution benchmark...");
 
 	rcu_t rcu;
-	rcu_init(&rcu, &g_mctx, BENCH_WORKERS);
+	if (rcu_init(&rcu, &g_mctx, BENCH_WORKERS) != 0) {
+		LOG(ERROR, "RCU initialization failed");
+		return -1;
+	}
 	atomic_ulong value = 0;
 
 	const size_t num_samples = 10000;
@@ -332,6 +343,7 @@ benchmark_latency_distribution(void) {
 	LOG(INFO, "  P99 latency: %lu µs", p99);
 	LOG(INFO, "  Max latency: %lu µs", max_lat);
 	LOG(INFO, "%s", "");
+	return 0;
 }
 
 // Benchmark 4: Reader/Writer Thread Interaction
@@ -397,14 +409,14 @@ writer_bench_func(void *arg) {
 	return NULL;
 }
 
-static void
+static int
 benchmark_reader_writer_interaction(size_t num_readers) {
 	if (num_readers >= BENCH_WORKERS) {
 		LOG(ERROR,
 		    "Need at least 1 worker for writer (readers: %zu, max: %d)",
 		    num_readers,
 		    BENCH_WORKERS - 1);
-		return;
+		return 0;
 	}
 
 	LOG(INFO,
@@ -412,7 +424,10 @@ benchmark_reader_writer_interaction(size_t num_readers) {
 	    num_readers);
 
 	rcu_t rcu;
-	rcu_init(&rcu, &g_mctx, BENCH_WORKERS);
+	if (rcu_init(&rcu, &g_mctx, BENCH_WORKERS) != 0) {
+		LOG(ERROR, "RCU initialization failed");
+		return -1;
+	}
 	atomic_ulong value = 0;
 	atomic_bool stop = false;
 	atomic_ullong total_reads = 0;
@@ -442,7 +457,7 @@ benchmark_reader_writer_interaction(size_t num_readers) {
 		);
 		if (res != 0) {
 			LOG(ERROR, "Failed to create reader thread %zu", i);
-			return;
+			return 0;
 		}
 	}
 
@@ -459,7 +474,7 @@ benchmark_reader_writer_interaction(size_t num_readers) {
 	);
 	if (res != 0) {
 		LOG(ERROR, "Failed to create writer thread");
-		return;
+		return 0;
 	}
 
 	// Run for fixed duration
@@ -524,6 +539,7 @@ benchmark_reader_writer_interaction(size_t num_readers) {
 	    max_update_lat);
 	LOG(INFO, "  Read/Update ratio: %.2f:1", (double)reads / updates);
 	LOG(INFO, "%s", "");
+	return 0;
 }
 
 // Main Benchmark Runner
@@ -542,14 +558,15 @@ main(void) {
 		LOG(ERROR, "failed to allocate benchmark arena");
 		return 1;
 	}
+	int result = 1;
 	if (block_allocator_init(&g_balloc) != 0) {
 		LOG(ERROR, "block_allocator_init failed");
-		return 1;
+		goto out_arena;
 	}
 	block_allocator_put_arena(&g_balloc, arena, arena_size);
 	if (memory_context_init(&g_mctx, "rcu_bench", &g_balloc) < 0) {
 		LOG(ERROR, "memory_context_init failed");
-		return 1;
+		goto out_arena;
 	}
 
 	// Benchmark 1: Throughput with varying worker counts
@@ -558,17 +575,24 @@ main(void) {
 	for (size_t i = 0; i < sizeof(worker_counts) / sizeof(worker_counts[0]);
 	     i++) {
 		if (worker_counts[i] <= BENCH_WORKERS) {
-			benchmark_multiworker_throughput(worker_counts[i]);
+			if (benchmark_multiworker_throughput(worker_counts[i]
+			    ) != 0) {
+				goto out_context;
+			}
 		}
 	}
 
 	// Benchmark 2: Contention and fairness
 	LOG(INFO, "--- Benchmark 2: Contention and Fairness ---");
-	benchmark_contention();
+	if (benchmark_contention() != 0) {
+		goto out_context;
+	}
 
 	// Benchmark 3: Latency distribution
 	LOG(INFO, "--- Benchmark 3: Latency Distribution ---");
-	benchmark_latency_distribution();
+	if (benchmark_latency_distribution() != 0) {
+		goto out_context;
+	}
 
 	// Benchmark 4: Reader/writer interaction
 	LOG(INFO, "--- Benchmark 4: Reader/Writer Interaction ---");
@@ -576,14 +600,19 @@ main(void) {
 	for (size_t i = 0; i < sizeof(reader_counts) / sizeof(reader_counts[0]);
 	     i++) {
 		if (reader_counts[i] < BENCH_WORKERS) {
-			benchmark_reader_writer_interaction(reader_counts[i]);
+			if (benchmark_reader_writer_interaction(reader_counts[i]
+			    ) != 0) {
+				goto out_context;
+			}
 		}
 	}
 
 	LOG(INFO, "=== Benchmark Suite Completed ===");
+	result = 0;
 
+out_context:
 	memory_context_fini(&g_mctx);
+out_arena:
 	free(arena);
-
-	return 0;
+	return result;
 }
