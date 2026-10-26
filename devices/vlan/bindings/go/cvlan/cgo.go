@@ -1,10 +1,11 @@
-package vlan
+// Package cvlan is the Go binding for the vlan device.
+package cvlan
 
-//#cgo CFLAGS: -I../../../
+//#cgo CFLAGS: -I../../../../../
 //
-//#include "api/agent.h"
-//#include "api/config.h"
-//#include "devices/vlan/api/controlplane.h"
+// #include "api/agent.h"
+// #include "api/config.h"
+// #include "devices/vlan/api/controlplane.h"
 import "C"
 
 import (
@@ -12,25 +13,29 @@ import (
 	"unsafe"
 
 	"github.com/yanet-platform/yanet2/bindings/go/cerrors"
-	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 )
 
-// DeviceConfig wraps C module configuration
+// Pipeline is a weighted input/output pipeline assignment for the device.
+type Pipeline struct {
+	Name   string
+	Weight uint64
+}
+
+// DeviceConfig is an opaque handle to the vlan device configuration in
+// shared memory.
 type DeviceConfig struct {
 	ptr ffi.ShmDeviceConfig
 }
 
-// NewDeviceConfig creates a new balancer module configuration
+// NewDeviceConfig allocates a new vlan device configuration via the C API.
 func NewDeviceConfig(
 	agent *ffi.Agent,
 	name string,
-	device *commonpb.Device,
-	vlan uint16,
-) (
-	*DeviceConfig,
-	error,
-) {
+	input []Pipeline,
+	output []Pipeline,
+	vlanID uint16,
+) (*DeviceConfig, error) {
 	if agent == nil {
 		return nil, fmt.Errorf("agent cannot be nil")
 	}
@@ -38,41 +43,50 @@ func NewDeviceConfig(
 	cName := C.CString(name)
 	defer C.free(unsafe.Pointer(cName))
 
-	input := device.GetInput()
-	output := device.GetOutput()
-
 	var cErr *C.struct_yanet_error
-	cCfg := C.cp_device_vlan_config_new(cName, C.uint64_t(len(input)), C.uint64_t(len(output)), C.uint16_t(vlan), &cErr)
+	cCfg := C.cp_device_vlan_config_new(
+		cName,
+		C.uint64_t(len(input)),
+		C.uint64_t(len(output)),
+		C.uint16_t(vlanID),
+		&cErr,
+	)
 	if cCfg == nil {
-		return nil, fmt.Errorf("failed to initialize vlan device config: %w", cerrors.FromC(unsafe.Pointer(cErr)))
+		return nil, fmt.Errorf(
+			"failed to initialize vlan device config: %w",
+			cerrors.FromC(unsafe.Pointer(cErr)),
+		)
 	}
 	defer C.cp_device_vlan_config_free(cCfg)
 
 	for idx, pipeline := range input {
-		cName := C.CString(pipeline.GetName())
+		cName := C.CString(pipeline.Name)
 		defer C.free(unsafe.Pointer(cName))
 		C.cp_device_vlan_config_set_input_pipeline(
 			cCfg,
 			C.uint64_t(idx),
 			cName,
-			C.uint64_t(pipeline.GetWeight()),
+			C.uint64_t(pipeline.Weight),
 		)
 	}
 
 	for idx, pipeline := range output {
-		cName := C.CString(pipeline.GetName())
+		cName := C.CString(pipeline.Name)
 		defer C.free(unsafe.Pointer(cName))
 		C.cp_device_vlan_config_set_output_pipeline(
 			cCfg,
 			C.uint64_t(idx),
 			cName,
-			C.uint64_t(pipeline.GetWeight()),
+			C.uint64_t(pipeline.Weight),
 		)
 	}
 
 	ptr := C.cp_device_vlan_new((*C.struct_agent)(agent.AsRawPtr()), cCfg, &cErr)
 	if ptr == nil {
-		return nil, fmt.Errorf("failed to create vlan device: %w", cerrors.FromC(unsafe.Pointer(cErr)))
+		return nil, fmt.Errorf(
+			"failed to create vlan device: %w",
+			cerrors.FromC(unsafe.Pointer(cErr)),
+		)
 	}
 
 	return &DeviceConfig{
@@ -102,7 +116,7 @@ func LookupVlan(agent *ffi.Agent, name string) (uint16, error) {
 	return uint16(cVlan), nil
 }
 
-// AsFFIDevice returns the module configuration as an FFI module
+// AsFFIDevice returns the underlying shared-memory device config handle.
 func (m *DeviceConfig) AsFFIDevice() ffi.ShmDeviceConfig {
 	return m.ptr
 }

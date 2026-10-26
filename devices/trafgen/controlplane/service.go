@@ -39,6 +39,8 @@ type Backend interface {
 	// It returns the freshly published handle. The caller owns the handle
 	// and must Free it once a newer generation has superseded it.
 	UpdateDevice(name string, input, output []Pipeline, frames []byte, lengths []uint32, ratePps uint64) (*ctrafgen.DeviceConfig, error)
+	// DeleteDevice removes the named device from the dataplane registry.
+	DeleteDevice(name string) error
 }
 
 type config struct {
@@ -102,6 +104,18 @@ func (m *TrafgenService) UpdateDevice(
 	}
 
 	return &trafgenpb.UpdateDeviceResponse{}, nil
+}
+
+// DeleteDevice unpublishes the named device, removing it from the
+// dataplane registry, and releases the handle kept for it along with the
+// loaded frames and rate.
+//
+// The registry delete runs before the entry is withdrawn, so a delete the
+// dataplane refuses leaves the published device and its handle in place.
+func (m *TrafgenService) DeleteDevice(name string) error {
+	return m.configs.Delete(name, func(*config) error {
+		return m.backend.DeleteDevice(name)
+	})
 }
 
 // ListConfigs returns all known config names of the dataplane instance.

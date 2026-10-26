@@ -11,6 +11,7 @@ import (
 
 	dataplaneut "github.com/yanet-platform/yanet2/bindings/go/dataplane_ut"
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
+	"github.com/yanet-platform/yanet2/controlplane/configstore"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/devices/plain/controlplane/plainpb/v1"
 	vlan "github.com/yanet-platform/yanet2/devices/vlan/controlplane"
@@ -38,7 +39,7 @@ func TestUpdateDevice_ReclaimsSupersededDevice(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = agent.CleanUp() })
 
-	service := NewDevicePlainService(agent)
+	service := NewDevicePlainService(NewBackend(agent))
 	request := &plainpb.UpdateDevicePlainRequest{
 		Name:   "d0",
 		Device: &commonpb.Device{},
@@ -91,7 +92,7 @@ func TestUpdateDevice_ReclaimsAcrossMultipleNames(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = agent.CleanUp() })
 
-	service := NewDevicePlainService(agent)
+	service := NewDevicePlainService(NewBackend(agent))
 	names := []string{"d0", "d1"}
 
 	var previousFreeBytes uint64
@@ -140,7 +141,7 @@ func Test_DevicePlainService_ShowDevice_UnknownName(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = agent.CleanUp() })
 
-	service := NewDevicePlainService(agent)
+	service := NewDevicePlainService(NewBackend(agent))
 
 	resp, err := service.ShowDevice(t.Context(), &plainpb.ShowDevicePlainRequest{Name: "absent"})
 
@@ -171,7 +172,7 @@ func Test_DevicePlainService_ShowDevice_ReportsLiveBindings(t *testing.T) {
 	require.NoError(t, agent.UpdatePipeline(ffi.PipelineConfig{Name: "p-in"}))
 	require.NoError(t, agent.UpdatePipeline(ffi.PipelineConfig{Name: "p-out"}))
 
-	service := NewDevicePlainService(agent)
+	service := NewDevicePlainService(NewBackend(agent))
 
 	_, err = service.UpdateDevice(t.Context(), &plainpb.UpdateDevicePlainRequest{
 		Name: "d0",
@@ -223,7 +224,7 @@ func Test_DevicePlainService_ShowDevice_IgnoresOtherDeviceTypes(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = vlanAgent.CleanUp() })
 
-	_, err = vlan.NewDeviceVlanService(vlanAgent).UpdateDevice(t.Context(), &vlanpb.UpdateDeviceVlanRequest{
+	_, err = vlan.NewDeviceVlanService(vlan.NewBackend(vlanAgent)).UpdateDevice(t.Context(), &vlanpb.UpdateDeviceVlanRequest{
 		Name:   "v0",
 		Device: &commonpb.Device{},
 		Vlan:   100,
@@ -234,12 +235,84 @@ func Test_DevicePlainService_ShowDevice_IgnoresOtherDeviceTypes(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = plainAgent.CleanUp() })
 
-	service := NewDevicePlainService(plainAgent)
+	service := NewDevicePlainService(NewBackend(plainAgent))
 
 	resp, err := service.ShowDevice(t.Context(), &plainpb.ShowDevicePlainRequest{Name: "v0"})
 
 	require.Nil(t, resp)
 	require.Equal(t, codes.NotFound, status.Code(err))
+}
+
+// TestDeleteDevice_ReleasesPublishedDevice verifies that deleting a
+// device removes it from the dataplane registry and forgets the published
+// entry, so the handle is reclaimed rather than left for a later update
+// under the same name.
+func TestDeleteDevice_ReleasesPublishedDevice(t *testing.T) {
+	harness, err := dataplaneut.NewHarness(dataplaneut.Config{
+		CPMemory:      uint64(datasize.MB * 32),
+		DPMemory:      uint64(datasize.MB * 4),
+		WorkerCount:   1,
+		DevicesToLoad: []string{"plain"},
+	})
+	require.NoError(t, err)
+	t.Cleanup(harness.Free)
+
+	shm := harness.SharedMemory()
+	agent, err := shm.AgentAttach("plain", 0, datasize.MB*2)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = agent.CleanUp() })
+
+	service := NewDevicePlainService(NewBackend(agent))
+	_, err = service.UpdateDevice(
+		t.Context(),
+		&plainpb.UpdateDevicePlainRequest{Name: "extra", Device: &commonpb.Device{}},
+	)
+	require.NoError(t, err)
+	_, err = service.ShowDevice(t.Context(), &plainpb.ShowDevicePlainRequest{Name: "extra"})
+	require.NoError(t, err)
+
+	require.NoError(t, service.DeleteDevice("extra"))
+
+	_, err = service.ShowDevice(t.Context(), &plainpb.ShowDevicePlainRequest{Name: "extra"})
+	require.Equal(t, codes.NotFound, status.Code(err))
+	err = service.DeleteDevice("extra")
+	require.ErrorIs(t, err, configstore.ErrNotFound)
+}
+
+// TestDeleteDevice_RefusedDeleteKeepsEntry verifies that a delete the
+// dataplane refuses leaves the published entry in place: the registry
+// delete runs before the entry is withdrawn, so a retried delete reaches
+// the registry again instead of reporting the name as unknown.
+func TestDeleteDevice_RefusedDeleteKeepsEntry(t *testing.T) {
+	harness, err := dataplaneut.NewHarness(dataplaneut.Config{
+		CPMemory:      uint64(datasize.MB * 32),
+		DPMemory:      uint64(datasize.MB * 4),
+		WorkerCount:   1,
+		Devices:       []string{"d0"},
+		DevicesToLoad: []string{"plain"},
+	})
+	require.NoError(t, err)
+	t.Cleanup(harness.Free)
+
+	shm := harness.SharedMemory()
+	agent, err := shm.AgentAttach("plain", 0, datasize.MB*2)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = agent.CleanUp() })
+
+	service := NewDevicePlainService(NewBackend(agent))
+	_, err = service.UpdateDevice(
+		t.Context(),
+		&plainpb.UpdateDevicePlainRequest{Name: "d0", Device: &commonpb.Device{}},
+	)
+	require.NoError(t, err)
+
+	err = service.DeleteDevice("d0")
+	require.ErrorIs(t, err, ffi.ErrFailedPrecondition)
+	err = service.DeleteDevice("d0")
+	require.ErrorIs(t, err, ffi.ErrFailedPrecondition)
+
+	_, err = service.ShowDevice(t.Context(), &plainpb.ShowDevicePlainRequest{Name: "d0"})
+	require.NoError(t, err)
 }
 
 // freeBytesForAgent returns the free byte count reported for the named

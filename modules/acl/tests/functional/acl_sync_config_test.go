@@ -19,7 +19,7 @@ import (
 	"github.com/yanet-platform/yanet2/common/go/xerror"
 	"github.com/yanet-platform/yanet2/common/go/xpacket"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
-	plain "github.com/yanet-platform/yanet2/devices/plain/controlplane"
+	cplain "github.com/yanet-platform/yanet2/devices/plain/bindings/go/cplain"
 	"github.com/yanet-platform/yanet2/modules/acl/bindings/go/cacl"
 	acl "github.com/yanet-platform/yanet2/modules/acl/controlplane"
 	"github.com/yanet-platform/yanet2/modules/forward/bindings/go/cforward"
@@ -687,7 +687,7 @@ func Test_ACL_FWState_ConfigOnTwoDevicesEmitsOnce(t *testing.T) {
 			Output: []ffi.DevicePipelineConfig{{Name: "dummy", Weight: 1}},
 		})
 	}
-	_, err = plain.UpdateDevices(agent, devices)
+	_, err = cplain.UpdateDevices(agent, devices)
 	require.NoError(t, err)
 	h.SetCurrentTime(time.Unix(1, 0))
 
@@ -783,7 +783,7 @@ func wireACLFWStateSyncPipeline(t *testing.T, agent *ffi.Agent, aclName, fwstate
 	}))
 	require.NoError(t, agent.UpdatePipeline(ffi.PipelineConfig{Name: aclName, Functions: []string{aclName}}))
 	require.NoError(t, agent.UpdatePipeline(ffi.PipelineConfig{Name: "dummy"}))
-	_, err = plain.UpdateDevices(agent, []ffi.DeviceConfig{{
+	_, err = cplain.UpdateDevices(agent, []ffi.DeviceConfig{{
 		Name:   "port0",
 		Input:  []ffi.DevicePipelineConfig{{Name: aclName, Weight: 1}},
 		Output: []ffi.DevicePipelineConfig{{Name: "dummy", Weight: 1}},
@@ -827,7 +827,7 @@ func wireACLForwardFWStatePipeline(t *testing.T, agent *ffi.Agent, aclName strin
 	}))
 	require.NoError(t, agent.UpdatePipeline(ffi.PipelineConfig{Name: aclName, Functions: []string{aclName}}))
 	require.NoError(t, agent.UpdatePipeline(ffi.PipelineConfig{Name: "dummy"}))
-	_, err := plain.UpdateDevices(agent, []ffi.DeviceConfig{{
+	_, err := cplain.UpdateDevices(agent, []ffi.DeviceConfig{{
 		Name:   "port0",
 		Input:  []ffi.DevicePipelineConfig{{Name: aclName, Weight: 1}},
 		Output: []ffi.DevicePipelineConfig{{Name: "dummy", Weight: 1}},

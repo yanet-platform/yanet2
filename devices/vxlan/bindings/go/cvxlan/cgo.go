@@ -1,10 +1,11 @@
-package vxlan
+// Package cvxlan is the Go binding for the vxlan device.
+package cvxlan
 
-//#cgo CFLAGS: -I../../../ -I../../../lib
+//#cgo CFLAGS: -I../../../../../ -I../../../../../lib
 //
-//#include "api/agent.h"
-//#include "api/config.h"
-//#include "devices/vxlan/api/controlplane.h"
+// #include "api/agent.h"
+// #include "api/config.h"
+// #include "devices/vxlan/api/controlplane.h"
 import "C"
 
 import (
@@ -15,9 +16,14 @@ import (
 	"unsafe"
 
 	"github.com/yanet-platform/yanet2/bindings/go/cerrors"
-	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 )
+
+// Pipeline is a weighted input/output pipeline assignment for the device.
+type Pipeline struct {
+	Name   string
+	Weight uint64
+}
 
 // Settings are the tunnel parameters copied verbatim into the shared-memory
 // configuration.
@@ -77,21 +83,20 @@ func (m Settings) toC(pinner *runtime.Pinner) (*C.struct_cp_device_vxlan_setting
 	return settings, nil
 }
 
-// DeviceConfig wraps C module configuration
+// DeviceConfig is an opaque handle to the vxlan device configuration in
+// shared memory.
 type DeviceConfig struct {
 	ptr ffi.ShmDeviceConfig
 }
 
-// NewDeviceConfig creates a new vxlan device configuration
+// NewDeviceConfig allocates a new vxlan device configuration via the C API.
 func NewDeviceConfig(
 	agent *ffi.Agent,
 	name string,
-	device *commonpb.Device,
+	input []Pipeline,
+	output []Pipeline,
 	settings Settings,
-) (
-	*DeviceConfig,
-	error,
-) {
+) (*DeviceConfig, error) {
 	if agent == nil {
 		return nil, fmt.Errorf("agent cannot be nil")
 	}
@@ -107,9 +112,6 @@ func NewDeviceConfig(
 	cName := C.CString(name)
 	defer C.free(unsafe.Pointer(cName))
 
-	input := device.GetInput()
-	output := device.GetOutput()
-
 	var cErr *C.struct_yanet_error
 	cCfg := C.cp_device_vxlan_config_new(
 		cName,
@@ -119,39 +121,45 @@ func NewDeviceConfig(
 		&cErr,
 	)
 	if cCfg == nil {
-		return nil, fmt.Errorf("failed to initialize vxlan device config: %w", cerrors.FromC(unsafe.Pointer(cErr)))
+		return nil, fmt.Errorf(
+			"failed to initialize vxlan device config: %w",
+			cerrors.FromC(unsafe.Pointer(cErr)),
+		)
 	}
 	defer C.cp_device_vxlan_config_free(cCfg)
 
 	for idx, pipeline := range input {
-		cName := C.CString(pipeline.GetName())
+		cName := C.CString(pipeline.Name)
 		defer C.free(unsafe.Pointer(cName))
 		if rc := C.cp_device_vxlan_config_set_input_pipeline(
 			cCfg,
 			C.uint64_t(idx),
 			cName,
-			C.uint64_t(pipeline.GetWeight()),
+			C.uint64_t(pipeline.Weight),
 		); rc != 0 {
-			return nil, fmt.Errorf("failed to set input pipeline %q at index %d", pipeline.GetName(), idx)
+			return nil, fmt.Errorf("failed to set input pipeline %q at index %d", pipeline.Name, idx)
 		}
 	}
 
 	for idx, pipeline := range output {
-		cName := C.CString(pipeline.GetName())
+		cName := C.CString(pipeline.Name)
 		defer C.free(unsafe.Pointer(cName))
 		if rc := C.cp_device_vxlan_config_set_output_pipeline(
 			cCfg,
 			C.uint64_t(idx),
 			cName,
-			C.uint64_t(pipeline.GetWeight()),
+			C.uint64_t(pipeline.Weight),
 		); rc != 0 {
-			return nil, fmt.Errorf("failed to set output pipeline %q at index %d", pipeline.GetName(), idx)
+			return nil, fmt.Errorf("failed to set output pipeline %q at index %d", pipeline.Name, idx)
 		}
 	}
 
 	ptr := C.cp_device_vxlan_new((*C.struct_agent)(agent.AsRawPtr()), cCfg, &cErr)
 	if ptr == nil {
-		return nil, fmt.Errorf("failed to create vxlan device: %w", cerrors.FromC(unsafe.Pointer(cErr)))
+		return nil, fmt.Errorf(
+			"failed to create vxlan device: %w",
+			cerrors.FromC(unsafe.Pointer(cErr)),
+		)
 	}
 
 	return &DeviceConfig{
@@ -159,7 +167,7 @@ func NewDeviceConfig(
 	}, nil
 }
 
-// AsFFIDevice returns the module configuration as an FFI module
+// AsFFIDevice returns the underlying shared-memory device config handle.
 func (m *DeviceConfig) AsFFIDevice() ffi.ShmDeviceConfig {
 	return m.ptr
 }

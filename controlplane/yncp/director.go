@@ -138,6 +138,16 @@ func NewDirector(cfg *Config, options ...DirectorOption) (*Director, error) {
 		return nil, fmt.Errorf("failed to initialize bundle: %w", err)
 	}
 
+	// A device deleted through the Device service is reclaimed through
+	// the hosted service that published it, so its handle is released
+	// with the registry entry.
+	var deviceOwners []builtin.DeviceOwner
+	for _, service := range bundle.Services() {
+		if owner, ok := service.(builtin.DeviceOwner); ok {
+			deviceOwners = append(deviceOwners, owner)
+		}
+	}
+
 	gatewayOptions := []gateway.GatewayOption{
 		gateway.WithBuiltinService(
 			builtin.NewLogging(opts.LogLevel,
@@ -158,7 +168,7 @@ func NewDirector(cfg *Config, options ...DirectorOption) (*Director, error) {
 			builtin.NewCounters(cfg.Gateway.InstanceID.Unwrap(), shm, builtin.WithCountersLog(log)),
 		),
 		gateway.WithBuiltinService(
-			builtin.NewDevice(cfg.Gateway.InstanceID.Unwrap(), shm),
+			builtin.NewDevice(cfg.Gateway.InstanceID.Unwrap(), shm, cfg.MemoryPath, deviceOwners...),
 		),
 		gateway.WithBuiltinService(
 			builtin.NewMemory(cfg.Gateway.InstanceID.Unwrap(), shm),

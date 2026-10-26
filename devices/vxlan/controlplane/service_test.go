@@ -13,6 +13,7 @@ import (
 
 	dataplaneut "github.com/yanet-platform/yanet2/bindings/go/dataplane_ut"
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
+	"github.com/yanet-platform/yanet2/controlplane/configstore"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	vxlan "github.com/yanet-platform/yanet2/devices/vxlan/controlplane"
 	"github.com/yanet-platform/yanet2/devices/vxlan/controlplane/vxlanpb/v1"
@@ -65,7 +66,7 @@ func attachVxlanAgent(t *testing.T) (*ffi.SharedMemory, *ffi.Agent) {
 func TestUpdateDevice_DrainsSupersededDevices(t *testing.T) {
 	shm, agent := attachVxlanAgent(t)
 
-	service := vxlan.NewDeviceVxlanService(agent)
+	service := vxlan.NewDeviceVxlanService(vxlan.NewBackend(agent))
 	request := newTunnelRequest("d0")
 
 	const updateCount = 32
@@ -97,7 +98,7 @@ func TestUpdateDevice_DrainsSupersededDevices(t *testing.T) {
 // TestUpdateDevice_InvalidArguments verifies that malformed tunnel fields are
 // rejected before any shared-memory call.
 //
-// The service holds a nil agent, so a request that reached the FFI layer
+// The service holds a nil backend, so a request that reached the FFI layer
 // would panic instead of failing a validation assertion.
 func TestUpdateDevice_InvalidArguments(t *testing.T) {
 	service := vxlan.NewDeviceVxlanService(nil)
@@ -164,7 +165,7 @@ func TestUpdateDevice_InvalidArguments(t *testing.T) {
 func TestUpdateDevice_NameLengthBoundary(t *testing.T) {
 	_, agent := attachVxlanAgent(t)
 
-	service := vxlan.NewDeviceVxlanService(agent)
+	service := vxlan.NewDeviceVxlanService(vxlan.NewBackend(agent))
 
 	longest := strings.Repeat("d", commonpb.MaxDeviceNameLen-1)
 	request := newTunnelRequest(longest)
@@ -194,7 +195,7 @@ func TestUpdateDevice_NameLengthBoundary(t *testing.T) {
 func TestUpdateDevice_ConcurrentUpdates(t *testing.T) {
 	_, agent := attachVxlanAgent(t)
 
-	service := vxlan.NewDeviceVxlanService(agent)
+	service := vxlan.NewDeviceVxlanService(vxlan.NewBackend(agent))
 
 	const goroutineCount = 4
 	const updateCount = 8
@@ -255,7 +256,7 @@ func TestGetDevice_UnknownName(t *testing.T) {
 func TestGetDevice_RoundTrip(t *testing.T) {
 	_, agent := attachVxlanAgent(t)
 
-	service := vxlan.NewDeviceVxlanService(agent)
+	service := vxlan.NewDeviceVxlanService(vxlan.NewBackend(agent))
 
 	request := newTunnelRequest("d0")
 	_, err := service.UpdateDevice(t.Context(), request)
@@ -285,7 +286,7 @@ func TestGetDevice_RoundTrip(t *testing.T) {
 func TestGetDevice_ReflectsLatestUpdate(t *testing.T) {
 	_, agent := attachVxlanAgent(t)
 
-	service := vxlan.NewDeviceVxlanService(agent)
+	service := vxlan.NewDeviceVxlanService(vxlan.NewBackend(agent))
 
 	first := newTunnelRequest("d0")
 	first.Vni = 100
@@ -330,7 +331,7 @@ func TestGetDevice_ReflectsLatestUpdate(t *testing.T) {
 func TestGetDevice_ConcurrentWithUpdates(t *testing.T) {
 	_, agent := attachVxlanAgent(t)
 
-	service := vxlan.NewDeviceVxlanService(agent)
+	service := vxlan.NewDeviceVxlanService(vxlan.NewBackend(agent))
 
 	first := newTunnelRequest("d0")
 	first.Vni = 100
@@ -385,4 +386,29 @@ func TestGetDevice_ConcurrentWithUpdates(t *testing.T) {
 		return nil
 	})
 	require.NoError(t, group.Wait())
+}
+
+// TestDeleteDevice_ReleasesPublishedDevice verifies that deleting a
+// device removes it from the dataplane registry and forgets the published
+// entry, so a read of the name reports not found rather than serving the
+// retired configuration.
+func TestDeleteDevice_ReleasesPublishedDevice(t *testing.T) {
+	shm, agent := attachVxlanAgent(t)
+
+	service := vxlan.NewDeviceVxlanService(vxlan.NewBackend(agent))
+	_, err := service.UpdateDevice(t.Context(), newTunnelRequest("t0"))
+	require.NoError(t, err)
+	_, err = service.GetDevice(t.Context(), &vxlanpb.GetDeviceVxlanRequest{Name: "t0"})
+	require.NoError(t, err)
+	_, ok := shm.DPConfig(0).Device("vxlan", "t0")
+	require.True(t, ok)
+
+	require.NoError(t, service.DeleteDevice("t0"))
+
+	_, ok = shm.DPConfig(0).Device("vxlan", "t0")
+	require.False(t, ok)
+	_, err = service.GetDevice(t.Context(), &vxlanpb.GetDeviceVxlanRequest{Name: "t0"})
+	require.Equal(t, codes.NotFound, status.Code(err))
+	err = service.DeleteDevice("t0")
+	require.ErrorIs(t, err, configstore.ErrNotFound)
 }

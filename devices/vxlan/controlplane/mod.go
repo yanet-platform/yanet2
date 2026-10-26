@@ -57,7 +57,7 @@ func NewDeviceVxlanDevice(cfg *Config, options ...Option) (*DeviceVxlanDevice, e
 	return &DeviceVxlanDevice{
 		cfg:        cfg,
 		attachment: attachment,
-		service:    NewDeviceVxlanService(agent),
+		service:    NewDeviceVxlanService(NewBackend(agent)),
 	}, nil
 }
 
@@ -84,4 +84,21 @@ func (m *DeviceVxlanDevice) RegisterService(server *grpc.Server) {
 // Close closes the device and releases all resources
 func (m *DeviceVxlanDevice) Close() error {
 	return m.attachment.Close()
+}
+
+// DeviceType returns the registry type of the devices this module owns.
+func (m *DeviceVxlanDevice) DeviceType() string {
+	return "vxlan"
+}
+
+// Dataplane returns the shared-memory path and instance this module's
+// agent serves.
+func (m *DeviceVxlanDevice) Dataplane() (string, uint32) {
+	return m.cfg.MemoryPath.Unwrap(), m.cfg.InstanceID.Unwrap()
+}
+
+// DeleteDevice releases the device service's handle for the named device;
+// the Device service calls it as it deletes the device.
+func (m *DeviceVxlanDevice) DeleteDevice(name string) error {
+	return m.service.DeleteDevice(name)
 }

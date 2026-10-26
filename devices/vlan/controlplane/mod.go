@@ -50,7 +50,7 @@ func NewDeviceVlanDevice(cfg *Config, options ...Option) (*DeviceVlanDevice, err
 	}
 	agent := attachment.Agent
 
-	vlanService := NewDeviceVlanService(agent)
+	vlanService := NewDeviceVlanService(NewBackend(agent))
 
 	return &DeviceVlanDevice{
 		cfg:        cfg,
@@ -78,4 +78,21 @@ func (m *DeviceVlanDevice) RegisterService(server *grpc.Server) {
 // Close closes the device and releases all resources
 func (m *DeviceVlanDevice) Close() error {
 	return m.attachment.Close()
+}
+
+// DeviceType returns the registry type of the devices this module owns.
+func (m *DeviceVlanDevice) DeviceType() string {
+	return "vlan"
+}
+
+// Dataplane returns the shared-memory path and instance this module's
+// agent serves.
+func (m *DeviceVlanDevice) Dataplane() (string, uint32) {
+	return m.cfg.MemoryPath.Unwrap(), m.cfg.InstanceID.Unwrap()
+}
+
+// DeleteDevice releases the device service's handle for the named device;
+// the Device service calls it as it deletes the device.
+func (m *DeviceVlanDevice) DeleteDevice(name string) error {
+	return m.service.DeleteDevice(name)
 }

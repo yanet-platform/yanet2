@@ -1,10 +1,11 @@
-package plain
+// Package cplain is the Go binding for the plain device.
+package cplain
 
-//#cgo CFLAGS: -I../../../
+//#cgo CFLAGS: -I../../../../../
 //
-//#include "api/agent.h"
-//#include "api/config.h"
-//#include "devices/plain/api/controlplane.h"
+// #include "api/agent.h"
+// #include "api/config.h"
+// #include "devices/plain/api/controlplane.h"
 import "C"
 
 import (
@@ -12,24 +13,28 @@ import (
 	"unsafe"
 
 	"github.com/yanet-platform/yanet2/bindings/go/cerrors"
-	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 )
 
-// DeviceConfig wraps C module configuration
+// Pipeline is a weighted input/output pipeline assignment for the device.
+type Pipeline struct {
+	Name   string
+	Weight uint64
+}
+
+// DeviceConfig is an opaque handle to the plain device configuration in
+// shared memory.
 type DeviceConfig struct {
 	ptr ffi.ShmDeviceConfig
 }
 
-// NewDeviceConfig creates a new balancer module configuration
+// NewDeviceConfig allocates a new plain device configuration via the C API.
 func NewDeviceConfig(
 	agent *ffi.Agent,
 	name string,
-	device *commonpb.Device,
-) (
-	*DeviceConfig,
-	error,
-) {
+	input []Pipeline,
+	output []Pipeline,
+) (*DeviceConfig, error) {
 	if agent == nil {
 		return nil, fmt.Errorf("agent cannot be nil")
 	}
@@ -37,41 +42,49 @@ func NewDeviceConfig(
 	cName := C.CString(name)
 	defer C.free(unsafe.Pointer(cName))
 
-	input := device.GetInput()
-	output := device.GetOutput()
-
 	var cErr *C.struct_yanet_error
-	cCfg := C.cp_device_plain_config_new(cName, C.uint64_t(len(input)), C.uint64_t(len(output)), &cErr)
+	cCfg := C.cp_device_plain_config_new(
+		cName,
+		C.uint64_t(len(input)),
+		C.uint64_t(len(output)),
+		&cErr,
+	)
 	if cCfg == nil {
-		return nil, fmt.Errorf("failed to initialize plain device config: %w", cerrors.FromC(unsafe.Pointer(cErr)))
+		return nil, fmt.Errorf(
+			"failed to initialize plain device config: %w",
+			cerrors.FromC(unsafe.Pointer(cErr)),
+		)
 	}
 	defer C.cp_device_plain_config_free(cCfg)
 
 	for idx, pipeline := range input {
-		cName := C.CString(pipeline.GetName())
+		cName := C.CString(pipeline.Name)
 		defer C.free(unsafe.Pointer(cName))
 		C.cp_device_plain_config_set_input_pipeline(
 			cCfg,
 			C.uint64_t(idx),
 			cName,
-			C.uint64_t(pipeline.GetWeight()),
+			C.uint64_t(pipeline.Weight),
 		)
 	}
 
 	for idx, pipeline := range output {
-		cName := C.CString(pipeline.GetName())
+		cName := C.CString(pipeline.Name)
 		defer C.free(unsafe.Pointer(cName))
 		C.cp_device_plain_config_set_output_pipeline(
 			cCfg,
 			C.uint64_t(idx),
 			cName,
-			C.uint64_t(pipeline.GetWeight()),
+			C.uint64_t(pipeline.Weight),
 		)
 	}
 
 	ptr := C.cp_device_plain_new((*C.struct_agent)(agent.AsRawPtr()), cCfg, &cErr)
 	if ptr == nil {
-		return nil, fmt.Errorf("failed to create plain device: %w", cerrors.FromC(unsafe.Pointer(cErr)))
+		return nil, fmt.Errorf(
+			"failed to create plain device: %w",
+			cerrors.FromC(unsafe.Pointer(cErr)),
+		)
 	}
 
 	return &DeviceConfig{
@@ -79,7 +92,7 @@ func NewDeviceConfig(
 	}, nil
 }
 
-// AsFFIDevice returns the module configuration as an FFI module
+// AsFFIDevice returns the underlying shared-memory device config handle.
 func (m *DeviceConfig) AsFFIDevice() ffi.ShmDeviceConfig {
 	return m.ptr
 }
@@ -119,21 +132,16 @@ func UpdateDevices(agent *ffi.Agent, devices []ffi.DeviceConfig) ([]*DeviceConfi
 
 	configs := make([]ffi.ShmDeviceConfig, 0, len(devices))
 	for _, deviceCfg := range devices {
-		common := &commonpb.Device{}
+		input := make([]Pipeline, 0, len(deviceCfg.Input))
 		for _, pipeline := range deviceCfg.Input {
-			common.Input = append(common.Input, &commonpb.DevicePipeline{
-				Name:   pipeline.Name,
-				Weight: pipeline.Weight,
-			})
+			input = append(input, Pipeline{Name: pipeline.Name, Weight: pipeline.Weight})
 		}
+		output := make([]Pipeline, 0, len(deviceCfg.Output))
 		for _, pipeline := range deviceCfg.Output {
-			common.Output = append(common.Output, &commonpb.DevicePipeline{
-				Name:   pipeline.Name,
-				Weight: pipeline.Weight,
-			})
+			output = append(output, Pipeline{Name: pipeline.Name, Weight: pipeline.Weight})
 		}
 
-		device, err := NewDeviceConfig(agent, deviceCfg.Name, common)
+		device, err := NewDeviceConfig(agent, deviceCfg.Name, input, output)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create plain device %q: %w", deviceCfg.Name, err)
 		}

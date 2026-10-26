@@ -14,14 +14,33 @@ import (
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
 	"github.com/yanet-platform/yanet2/controlplane/configstore"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
+	"github.com/yanet-platform/yanet2/devices/vxlan/bindings/go/cvxlan"
 	"github.com/yanet-platform/yanet2/devices/vxlan/controlplane/vxlanpb/v1"
 )
+
+// Pipeline is a weighted input/output pipeline assignment for the device.
+type Pipeline struct {
+	Name   string
+	Weight uint64
+}
+
+// Backend abstracts shared memory operations.
+type Backend interface {
+	// UpdateDevice publishes a device config with the given pipelines and
+	// tunnel settings to the dataplane.
+	//
+	// It returns the freshly published handle. The caller owns the handle
+	// and must Free it once a newer generation has superseded it.
+	UpdateDevice(name string, input, output []Pipeline, settings cvxlan.Settings) (*cvxlan.DeviceConfig, error)
+	// DeleteDevice removes the named device from the dataplane registry.
+	DeleteDevice(name string) error
+}
 
 // DeviceVxlanService implements the DeviceVxlan gRPC service.
 type DeviceVxlanService struct {
 	vxlanpb.UnimplementedDeviceVxlanServiceServer
 
-	agent   *ffi.Agent
+	backend Backend
 	configs *configstore.Store[*DeviceEntry]
 }
 
@@ -29,15 +48,15 @@ type DeviceVxlanService struct {
 // shared-memory device owned by the store, and the request fields served
 // back by GetDevice.
 type DeviceEntry struct {
-	config   DeviceConfig
+	handle   *cvxlan.DeviceConfig
 	device   *commonpb.Device
-	settings Settings
+	settings cvxlan.Settings
 }
 
 // Free releases the shared-memory device the entry owns, reporting
 // ffi.ErrStillReferenced while a live generation still holds it.
 func (m *DeviceEntry) Free() error {
-	return m.config.Free()
+	return m.handle.Free()
 }
 
 // GetResponse renders the entry as a GetDevice reply. The entry never
@@ -57,10 +76,10 @@ func (m *DeviceEntry) GetResponse(name string) *vxlanpb.GetDeviceVxlanResponse {
 }
 
 // NewDeviceVxlanService creates a service publishing devices through the
-// given agent.
-func NewDeviceVxlanService(agent *ffi.Agent) *DeviceVxlanService {
+// given backend.
+func NewDeviceVxlanService(backend Backend) *DeviceVxlanService {
 	return &DeviceVxlanService{
-		agent:   agent,
+		backend: backend,
 		configs: configstore.NewStore[*DeviceEntry](),
 	}
 }
@@ -76,17 +95,12 @@ func (m *DeviceVxlanService) UpdateDevice(
 	if err != nil {
 		return nil, status.Error(codes.InvalidArgument, err.Error())
 	}
+	input := pipelinesFromProto(request.GetDevice().GetInput())
+	output := pipelinesFromProto(request.GetDevice().GetOutput())
 
 	err = m.configs.Update(name, func(*DeviceEntry, bool) (*DeviceEntry, error) {
-		deviceConfig, err := NewDeviceConfig(m.agent, name, request.GetDevice(), settings)
+		handle, err := m.backend.UpdateDevice(name, input, output, settings)
 		if err != nil {
-			return nil, fmt.Errorf("failed to create device config: %w", err)
-		}
-
-		if err := m.agent.UpdateDevices([]ffi.ShmDeviceConfig{deviceConfig.AsFFIDevice()}); err != nil {
-			if freeErr := deviceConfig.Free(); freeErr != nil {
-				return nil, fmt.Errorf("failed to update device and free the unpublished replacement: %w (update error: %v)", freeErr, err)
-			}
 			code := codes.Internal
 			if errors.Is(err, ffi.ErrFailedPrecondition) {
 				// The device names an entity of the graph it runs that the
@@ -97,7 +111,7 @@ func (m *DeviceVxlanService) UpdateDevice(
 		}
 
 		return &DeviceEntry{
-			config:   *deviceConfig,
+			handle:   handle,
 			device:   copyDevice(request.GetDevice()),
 			settings: settings,
 		}, nil
@@ -107,6 +121,17 @@ func (m *DeviceVxlanService) UpdateDevice(
 	}
 
 	return &vxlanpb.UpdateDeviceVxlanResponse{}, nil
+}
+
+// DeleteDevice unpublishes the named device, removing it from the
+// dataplane registry, and releases the handle kept for it.
+//
+// The registry delete runs before the entry is withdrawn, so a delete the
+// dataplane refuses leaves the published device and its handle in place.
+func (m *DeviceVxlanService) DeleteDevice(name string) error {
+	return m.configs.Delete(name, func(*DeviceEntry) error {
+		return m.backend.DeleteDevice(name)
+	})
 }
 
 // GetDevice returns the last applied configuration of the named device.
@@ -122,6 +147,19 @@ func (m *DeviceVxlanService) GetDevice(
 	return cached.GetResponse(request.GetName()), nil
 }
 
+// pipelinesFromProto converts the wire pipeline assignments into the service
+// representation.
+func pipelinesFromProto(pipelines []*commonpb.DevicePipeline) []Pipeline {
+	out := make([]Pipeline, 0, len(pipelines))
+	for _, pipeline := range pipelines {
+		out = append(out, Pipeline{
+			Name:   pipeline.GetName(),
+			Weight: pipeline.GetWeight(),
+		})
+	}
+	return out
+}
+
 // copyDevice deep-copies a request's pipeline bindings, so a reused or
 // mutated request cannot change what GetDevice serves.
 func copyDevice(device *commonpb.Device) *commonpb.Device {
@@ -135,45 +173,45 @@ func copyDevice(device *commonpb.Device) *commonpb.Device {
 // newSettings validates the tunnel fields of a request and converts them
 // into the Settings representation.
 //
-// Every field is checked before any CGO call, so an invalid request never
-// reaches shared memory.
-func newSettings(request *vxlanpb.UpdateDeviceVxlanRequest) (Settings, error) {
+// Every field is checked before any shared-memory call, so an invalid
+// request never reaches shared memory.
+func newSettings(request *vxlanpb.UpdateDeviceVxlanRequest) (cvxlan.Settings, error) {
 	vni := request.GetVni()
 	if vni > 0xFFFFFF {
-		return Settings{}, fmt.Errorf("vni %d exceeds the 24-bit limit", vni)
+		return cvxlan.Settings{}, fmt.Errorf("vni %d exceeds the 24-bit limit", vni)
 	}
 
 	dstPort := request.GetDstPort()
 	if dstPort == 0 || dstPort > 0xFFFF {
-		return Settings{}, fmt.Errorf("destination port %d must be in 1..65535", dstPort)
+		return cvxlan.Settings{}, fmt.Errorf("destination port %d must be in 1..65535", dstPort)
 	}
 
 	srcMAC, err := parseMAC(request.GetSrcMac())
 	if err != nil {
-		return Settings{}, fmt.Errorf("invalid source mac: %w", err)
+		return cvxlan.Settings{}, fmt.Errorf("invalid source mac: %w", err)
 	}
 	dstMAC, err := parseMAC(request.GetDstMac())
 	if err != nil {
-		return Settings{}, fmt.Errorf("invalid destination mac: %w", err)
+		return cvxlan.Settings{}, fmt.Errorf("invalid destination mac: %w", err)
 	}
 
 	srcIP, err := netip.ParseAddr(request.GetSrcIp())
 	if err != nil {
-		return Settings{}, fmt.Errorf("invalid source ip: %w", err)
+		return cvxlan.Settings{}, fmt.Errorf("invalid source ip: %w", err)
 	}
 	if !srcIP.Is4() {
-		return Settings{}, fmt.Errorf("source ip %q must be an IPv4 address", request.GetSrcIp())
+		return cvxlan.Settings{}, fmt.Errorf("source ip %q must be an IPv4 address", request.GetSrcIp())
 	}
 
 	dstIP, err := netip.ParseAddr(request.GetDstIp())
 	if err != nil {
-		return Settings{}, fmt.Errorf("invalid destination ip: %w", err)
+		return cvxlan.Settings{}, fmt.Errorf("invalid destination ip: %w", err)
 	}
 	if !dstIP.Is4() {
-		return Settings{}, fmt.Errorf("destination ip %q must be an IPv4 address", request.GetDstIp())
+		return cvxlan.Settings{}, fmt.Errorf("destination ip %q must be an IPv4 address", request.GetDstIp())
 	}
 
-	return Settings{
+	return cvxlan.Settings{
 		VNI:     vni,
 		DstPort: uint16(dstPort),
 		SrcMAC:  srcMAC,
