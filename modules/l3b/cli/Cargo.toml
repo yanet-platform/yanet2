@@ -15,8 +15,6 @@ commonpb = { path = "../../../common/rust/commonpb", package = "yanet-commonpb" 
 filterpb = { path = "../../../common/rust/filterpb", package = "yanet-filterpb" }
 log = "0.4"
 clap = { version = "4.5", features = ["derive"] }
-clap_complete = { version = "4.5", features = ["unstable-dynamic"] }
-tokio = { version = "1", features = ["rt", "net", "time", "macros", "sync"] }
 prost = "0.14"
 tonic = { version = "0.14", features = ["gzip", "zstd"] }
 tonic-prost = "0.14"

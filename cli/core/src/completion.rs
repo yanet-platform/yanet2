@@ -6,6 +6,7 @@
 //! proto rename breaks the build instead of silently degrading completion
 //! into a no-op — this is the whole point of [`candidates`]'s shape.
 
+use core::{future::Future, pin::Pin};
 use std::ffi::OsString;
 
 use clap::{Args, Command, FromArgMatches};
@@ -27,11 +28,7 @@ use crate::{
 /// ...user words...]`, exactly the argv clap itself parses. Returns an
 /// empty vector if `args` is empty or contains no `--`, since neither shape
 /// carries any words to recover.
-fn user_words<I>(args: I) -> Vec<OsString>
-where
-    I: IntoIterator<Item = OsString>,
-{
-    let mut args: Vec<OsString> = args.into_iter().collect();
+fn user_words(mut args: Vec<OsString>) -> Vec<OsString> {
     if args.is_empty() {
         return args;
     }
@@ -54,11 +51,8 @@ where
 /// Falls back to [`default_connection_args`] whenever recovery is
 /// impossible: no `--` in `args`, an unparsable line, or a `Cmd` that does
 /// not flatten [`ConnectionArgs`] at all.
-fn recover_connection_args<I>(command: impl FnOnce() -> Command, args: I) -> ConnectionArgs
-where
-    I: IntoIterator<Item = OsString>,
-{
-    command()
+fn recover_connection_args(command: Command, args: Vec<OsString>) -> ConnectionArgs {
+    command
         .ignore_errors(true)
         .try_get_matches_from(user_words(args))
         .ok()
@@ -85,7 +79,7 @@ fn default_connection_args() -> ConnectionArgs {
 /// are parsed out of the real completer argv, falling back to their defaults
 /// (`YANET_ENDPOINT` included) when the mid-typed line cannot be parsed.
 pub fn connection_args(command: impl FnOnce() -> Command) -> ConnectionArgs {
-    recover_connection_args(command, std::env::args_os())
+    recover_connection_args(command(), std::env::args_os().collect())
 }
 
 /// Best-effort completion candidates for a config-name argument.
@@ -103,7 +97,21 @@ where
     B: FnOnce(LayeredChannel) -> C,
     F: AsyncFnOnce(C) -> Result<Vec<String>, Status>,
 {
-    let connection = connection_args(command);
+    let lookup: Lookup<'_> = Box::new(move |channel| Box::pin(lookup(build(channel))) as LookupFuture<'_>);
+
+    lookup_candidates(command(), lookup)
+}
+
+/// A config-name lookup over a connected channel, with its client and method
+/// erased.
+type Lookup<'a> = Box<dyn FnOnce(LayeredChannel) -> LookupFuture<'a> + 'a>;
+
+type LookupFuture<'a> = Pin<Box<dyn Future<Output = Result<Vec<String>, Status>> + 'a>>;
+
+// The lookup arrives type-erased, so the runtime, the connect and the argument
+// recovery below compile once here instead of in every binary.
+fn lookup_candidates(command: Command, lookup: Lookup<'_>) -> Vec<CompletionCandidate> {
+    let connection = recover_connection_args(command, std::env::args_os().collect());
 
     let Ok(runtime) = tokio::runtime::Builder::new_current_thread().enable_all().build() else {
         return Vec::new();
@@ -112,7 +120,7 @@ where
     let attempt = async move {
         let channel = client::connect(&connection).await.ok()?;
 
-        lookup(build(channel)).await.ok()
+        lookup(channel).await.ok()
     };
 
     // `tokio::time::timeout` captures the current runtime's timer handle as
@@ -189,7 +197,7 @@ mod test {
     }
 
     fn recovered_endpoint(argv: &[&str]) -> Option<String> {
-        recover_connection_args(TestCmd::command, words(argv)).endpoint
+        recover_connection_args(TestCmd::command(), words(argv)).endpoint
     }
 
     #[test]

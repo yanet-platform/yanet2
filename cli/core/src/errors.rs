@@ -104,9 +104,13 @@ impl Error {
         endpoint: impl Into<String>,
         service: impl Into<String>,
     ) -> Self {
-        let action = action.into();
-        let endpoint = endpoint.into();
-        let service = service.into();
+        Self::status_parts(status, action.into(), endpoint.into(), service.into())
+    }
+
+    // Each constructor converts its arguments and forwards to a non-generic
+    // body, which then compiles once here instead of in every binary.
+
+    fn status_parts(status: tonic::Status, action: String, endpoint: String, service: String) -> Self {
         let raw_message = status.message().to_owned();
         let message = match (raw_message.as_str(), core::error::Error::source(&status)) {
             ("transport error", Some(source)) => root_cause(source).to_string(),
@@ -131,8 +135,10 @@ impl Error {
 
     /// Build an [`Error`] from a [`ConnectionError`].
     pub fn from_connection(err: ConnectionError, action: impl Into<String>, endpoint: impl Into<String>) -> Self {
-        let action = action.into();
-        let endpoint = endpoint.into();
+        Self::connection_parts(err, action.into(), endpoint.into())
+    }
+
+    fn connection_parts(err: ConnectionError, action: String, endpoint: String) -> Self {
         let message = err.to_string();
 
         let (kind, hint) = match err {
@@ -178,7 +184,10 @@ impl Error {
     /// unreadable or malformed file. Pass `args.endpoint.clone()` otherwise,
     /// since even an alias that turned out unknown is worth showing.
     pub fn from_config(err: config::Error, action: impl Into<String>, endpoint: Option<String>) -> Self {
-        let action = action.into();
+        Self::config_parts(err, action.into(), endpoint)
+    }
+
+    fn config_parts(err: config::Error, action: String, endpoint: Option<String>) -> Self {
         let message = err.to_string();
         let hint = config_error_hint(&err);
 
@@ -209,11 +218,15 @@ impl Error {
         endpoint: impl Into<String>,
         message: impl Into<String>,
     ) -> Self {
+        Self::parts(kind, action.into(), endpoint.into(), message.into())
+    }
+
+    fn parts(kind: ErrorKind, action: String, endpoint: String, message: String) -> Self {
         Self(Box::new(Details {
-            action: action.into(),
+            action,
             kind,
-            message: message.into(),
-            endpoint: Some(endpoint.into()),
+            message,
+            endpoint: Some(endpoint),
             service: None,
             hint: default_hint(kind),
             raw_code: None,
@@ -403,6 +416,10 @@ pub fn map_not_found(
     service: &'static str,
     resource: &str,
 ) -> Error {
+    not_found_parts(status, action.into(), endpoint.into(), service, resource)
+}
+
+fn not_found_parts(status: Status, action: String, endpoint: String, service: &'static str, resource: &str) -> Error {
     if status.code() == Code::NotFound && !is_unknown_service_status(&status) {
         return Error::from_status(
             Status::not_found(format!("{resource} not found")),

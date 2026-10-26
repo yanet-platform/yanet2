@@ -1,7 +1,7 @@
-use core::future::Future;
+use core::{future::Future, pin::Pin};
 use std::process::{ExitCode, Termination};
 
-use clap::{ArgAction, Args, Parser};
+use clap::{ArgAction, ArgMatches, Args, Command, Parser};
 use clap_complete::CompleteEnv;
 
 use crate::{
@@ -85,13 +85,30 @@ where
     Fut: Future<Output = Result<Success, Error>>,
     Success: Termination,
 {
-    entrypoint_with(
-        || CompleteEnv::with_factory(C::command).complete(),
-        C::parse,
-        options,
-        crate::init,
-        run,
-    )
+    entrypoint_with(|| complete(C::command), parse::<C>, options, crate::init, run)
+}
+
+// The lifecycle steps take the command factory as a function pointer and the
+// command future boxed, so completion, parsing and the runtime compile once
+// here, not per binary.
+
+fn complete(command: fn() -> Command) {
+    CompleteEnv::with_factory(command).complete();
+}
+
+/// Parses the process arguments like `Parser::parse`.
+fn parse<C: Parser>() -> C {
+    let mut matches = matches(C::command);
+
+    C::from_arg_matches_mut(&mut matches).unwrap_or_else(|err| exit(err, C::command))
+}
+
+fn matches(command: fn() -> Command) -> ArgMatches {
+    command().get_matches()
+}
+
+fn exit(err: clap::Error, command: fn() -> Command) -> ! {
+    err.format(&mut command()).exit()
 }
 
 fn entrypoint_with<C, O, Complete, Parse, Options, Initialise, Run, Fut, Success>(
@@ -116,13 +133,19 @@ where
     let (verbosity, format) = options(&cmd);
     initialise(verbosity, format);
 
+    execute(Box::pin(async move { run(cmd).await.map(Termination::report) }))
+}
+
+/// Drives the command on a current-thread runtime and turns its outcome into
+/// the process status.
+fn execute(command: Pin<Box<dyn Future<Output = Result<ExitCode, Error>> + '_>>) -> ExitCode {
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
         .expect("failed to build the CLI runtime");
 
-    match runtime.block_on(async move { run(cmd).await }) {
-        Ok(success) => success.report(),
+    match runtime.block_on(command) {
+        Ok(code) => code,
         Err(err) => {
             output::failure(&err);
 

@@ -383,10 +383,17 @@ pub fn resolve_label(args: &ConnectionArgs, action: &str) -> Result<String, Erro
 
 /// Resolves the configuration, then connects with all interceptors
 /// pre-applied.
-pub async fn connect(args: &ConnectionArgs) -> Result<LayeredChannel, ConnectionError> {
-    let settings = config::resolve(args, &config::Sources::from_process_env())?;
+///
+/// The future is boxed so its body is compiled once in this crate rather than
+/// in every CLI binary.
+pub fn connect(
+    args: &ConnectionArgs,
+) -> Pin<Box<dyn Future<Output = Result<LayeredChannel, ConnectionError>> + Send + '_>> {
+    Box::pin(async move {
+        let settings = config::resolve(args, &config::Sources::from_process_env())?;
 
-    establish(&settings).await
+        establish(&settings).await
+    })
 }
 
 /// An established, authenticated channel to one endpoint.
@@ -401,8 +408,8 @@ pub struct Connection {
 
 impl Connection {
     /// Resolve the target and establish an authenticated channel to it.
-    pub async fn connect(args: &ConnectionArgs) -> Result<Self, Error> {
-        Self::connect_for(args, "connect").await
+    pub fn connect(args: &ConnectionArgs) -> Pin<Box<dyn Future<Output = Result<Self, Error>> + Send + '_>> {
+        Self::connect_for(args, "connect")
     }
 
     /// Establish the channel, blaming a failure on `action` rather than the
@@ -413,11 +420,16 @@ impl Connection {
     /// does a CLI that connects once and then dispatches several RPCs over
     /// that one connection: a connect failure must read the same as an RPC
     /// failure of the same command.
-    pub async fn connect_for(args: &ConnectionArgs, action: &str) -> Result<Self, Error> {
-        let settings = config::resolve(args, &config::Sources::from_process_env())
-            .map_err(|err| Error::from_config(err, action, args.endpoint.clone()))?;
+    pub fn connect_for<'a>(
+        args: &'a ConnectionArgs,
+        action: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<Self, Error>> + Send + 'a>> {
+        Box::pin(async move {
+            let settings = config::resolve(args, &config::Sources::from_process_env())
+                .map_err(|err| Error::from_config(err, action, args.endpoint.clone()))?;
 
-        Self::connect_settings(&settings, action).await
+            Self::connect_settings(&settings, action).await
+        })
     }
 
     /// Establish the channel from an already-resolved [`Settings`], blaming
@@ -426,13 +438,18 @@ impl Connection {
     /// For a caller that has its own reason to resolve first (to reuse the
     /// resolved label, say) rather than resolving twice via
     /// [`Connection::connect_for`].
-    pub async fn connect_settings(settings: &Settings, action: &str) -> Result<Self, Error> {
-        let endpoint = settings.label();
+    pub fn connect_settings<'a>(
+        settings: &'a Settings,
+        action: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<Self, Error>> + Send + 'a>> {
+        Box::pin(async move {
+            let endpoint = settings.label();
 
-        establish(settings)
-            .await
-            .map(|channel| Self { channel, endpoint: endpoint.clone() })
-            .map_err(|err| Error::from_connection(err, action, endpoint))
+            establish(settings)
+                .await
+                .map(|channel| Self { channel, endpoint: endpoint.clone() })
+                .map_err(|err| Error::from_connection(err, action, endpoint))
+        })
     }
 
     /// The resolved endpoint this connection reached: `<alias> (<uri>)`
@@ -690,9 +707,9 @@ impl<C> Service<C> {
         Map: FnOnce(Status) -> Error,
         Call: AsyncFnOnce(&mut C, Req) -> Result<Response<Resp>, Status>,
     {
-        log::trace!("{action} request: {request:?}");
+        trace(action, "request", &request);
         let response = call(&mut self.client, request).await.map_err(map)?.into_inner();
-        log::trace!("{action} response: {response:?}");
+        trace(action, "response", &response);
 
         Ok(response)
     }
@@ -706,6 +723,12 @@ impl<C> Service<C> {
 
         move |status| map_not_found(status, action, endpoint, name, &resource)
     }
+}
+
+/// Logs one side of an RPC at trace level, compiled once here rather than in
+/// every binary.
+fn trace(action: &str, side: &str, message: &dyn Debug) {
+    log::trace!("{action} {side}: {message:?}");
 }
 
 /// Invoke a unary RPC on an arbitrary gRPC service by its fully-qualified
