@@ -30,4 +30,3 @@ tempfile = "3"
 
 [build-dependencies]
 ync-build = { path = "../../../cli/ync-build", package = "yanet-cli-build" }
-bindgen = "0.72"
