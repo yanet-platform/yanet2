@@ -123,7 +123,6 @@ CLI_RELEASE_BINARIES := $(addprefix $(RELEASE_DIR)/,$(CLI_BINARIES))
 	dataplane \
 	go-test-prepare \
 	install \
-	install1 \
 	clean \
 	go-cache-clean \
 	proto-lint \
@@ -251,7 +250,7 @@ setup-debug:
 	@if [ ! -d "build" ]; then \
 		meson setup -Dbuildtype=debug -Doptimization=0 $(EXTRA_MODULES_FLAG) build; \
 	else \
-		meson configure -Dbuildtype=debug -Doptimization=0 -Db_sanitize="" $(EXTRA_MODULES_FLAG) build; \
+		meson configure -Dbuildtype=debug -Doptimization=0 -Db_sanitize=none -Dfuzzing=disabled $(EXTRA_MODULES_FLAG) build; \
 	fi
 
 setup-asan:
@@ -347,7 +346,7 @@ test-tsan:
 	else \
 		meson configure -Dbuildtype=debug -Doptimization=0 -Db_sanitize=thread $(EXTRA_MODULES_FLAG) build-tsan; \
 	fi
-	meson test -C build-tsan --suite common --suit fwstate --no-suite large
+	meson test -C build-tsan --suite common --suite fwstate --no-suite large
 
 test-functional:
 	@echo "Running functional tests..."
@@ -381,15 +380,10 @@ fuzz:
 		./build/tests/fuzzing/$(MODULE) corpus/; \
 	fi
 
-install1:
-	cp build/dataplane/yanet-dataplane /usr/bin
-	cp build/controlplane/yanet-controlplane /usr/bin
-	$(MAKE) cli-install PREFIX=/usr
-
 install: dataplane cli-install
 	meson install -C build --skip-subprojects
 
 clean: go-cache-clean cli-clean
 	@echo "Cleaning build directories..."
 	rm -rf build/
-	rm -rf buildfuzz/
+	rm -rf build-tsan/
