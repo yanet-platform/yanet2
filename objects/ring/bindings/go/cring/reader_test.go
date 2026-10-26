@@ -569,9 +569,11 @@ func Test_Reader_Read_SteadyStateAllocatesOnlyReturnedRecords(t *testing.T) {
 
 	_, err := writer.WriteRecord(payload)
 	require.NoError(t, err)
+	partialReturned := 0
 	partial := testing.AllocsPerRun(1, func() {
-		require.Empty(t, reader.Read(8))
+		partialReturned += len(reader.Read(8))
 	})
+	require.Zero(t, partialReturned, "a partial read must not return a record")
 	require.Zero(t, partial, "a call completing no record must not allocate")
 }
 
