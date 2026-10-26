@@ -2,6 +2,9 @@ name: Rust SDK
 
 # Checks of the Rust module SDK workspace (lib/rust): formatting, lints, the
 # 1.88 test suite, std-freedom of the SDK crates and the extractable packet.
+# Clippy with the bare-metal check and the 1.88 tests also run on arm64, where
+# the C bindings and the layouts they check can differ; the rest does not
+# depend on the architecture and runs on x86_64 only.
 #
 # The bindings crate's build script runs bindgen and the C shim over the
 # repository's C headers with the flags of a meson configuration's
@@ -9,9 +12,9 @@ name: Rust SDK
 # and every job that compiles the SDK runs in the CI image (ci/README.md) and
 # configures meson first (nothing is compiled).
 #
-# Each cargo cache family has exactly one job that writes it, from main only,
-# since a cache written on a pull-request ref is readable only from that pull
-# request.
+# Each cargo cache family has exactly one job per architecture that writes it
+# (the cache key names the host), from main only, since a cache written on a
+# pull-request ref is readable only from that pull request.
 
 on:
   push:
@@ -82,9 +85,15 @@ jobs:
   # Every check on this toolchain runs in this one job, which owns the
   # rust-sdk cache family for the host and bare-metal builds.
   clippy:
-    name: cargo clippy and std-free crates
-    runs-on: ubuntu-24.04
+    name: cargo clippy and std-free crates (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {arch: x86_64, runner: ubuntu-24.04, target: x86_64-unknown-none}
+          - {arch: arm64, runner: ubuntu-24.04-arm, target: aarch64-unknown-none}
     container: ghcr.io/yanet-platform/yanet2-ci@sha256:81927a6bf8adabade5c16d5b1bd698e2ca5535ffd88175b58a5934e647834e25
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -94,7 +103,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@d124f86f28ff42855784ff3319f48ac182c248f8 # 1.99.1
         with:
           components: clippy
-          targets: x86_64-unknown-none
+          targets: ${{ matrix.target }}
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           workspaces: lib/rust
@@ -110,14 +119,22 @@ jobs:
       - working-directory: lib/rust
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
       # A bare-metal target has no std: the crates compile only if nothing
-      # pulls std or alloc in.
-      - working-directory: lib/rust
-        run: cargo check --locked --target x86_64-unknown-none -p yanet-shm -p yanet-sys -p yanet-packet
+      # pulls std or alloc in. The bindings follow the meson configuration of
+      # the machine, so an arm64 row on a runner that is not arm64 skips it.
+      - if: matrix.arch != 'arm64' || runner.arch == 'ARM64'
+        working-directory: lib/rust
+        run: cargo check --locked --target ${{ matrix.target }} -p yanet-shm -p yanet-sys -p yanet-packet
 
   test:
-    name: cargo test (1.88)
-    runs-on: ubuntu-24.04
+    name: cargo test (1.88) (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {arch: x86_64, runner: ubuntu-24.04}
+          - {arch: arm64, runner: ubuntu-24.04-arm}
     container: ghcr.io/yanet-platform/yanet2-ci@sha256:81927a6bf8adabade5c16d5b1bd698e2ca5535ffd88175b58a5934e647834e25
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
