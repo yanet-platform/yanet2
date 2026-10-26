@@ -25,6 +25,9 @@ const TARGET_DIR: &str = "/libpacket.a.p/";
 const ABI_OPTIONS: &[&str] = &[
     "-std=",
     "-march=",
+    // On AArch64 the CPU selects ISA features (CRC, crypto) that the headers
+    // test by predefined macro.
+    "-mcpu=",
     "-mabi=",
     "-m32",
     "-m64",
