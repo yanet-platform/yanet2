@@ -17,21 +17,27 @@ lib_fwstate = static_library(
   install: false,
 )
 
-# The registry translation unit holds only a constructor registering the
-# domain callbacks; link_whole on the dependency forces it into every binary
-# consuming the library, so the registration always runs.
+# The registry of fwstate's fwmap callbacks, which a binary that uses fwstate
+# maps links whole so that its constructor runs.
+#
+# Table creators also call its exported ensure function, for processes that
+# reach the tables without running the constructor.
 lib_fwstate_registry = static_library(
   'fwstate_registry',
   'registry.c',
-  # Headers only: whole-archive propagation must not drag the dataplane
-  # dependency closure into consumers.
   dependencies: [lib_statemap_dep],
   install: false,
 )
 
+# The registry alone, for code that uses fwstate maps without the rest of the
+# library.
+lib_fwstate_registry_dep = declare_dependency(
+  link_whole: [lib_fwstate_registry],
+  dependencies: [lib_statemap_dep],
+)
+
 lib_fwstate_dep = declare_dependency(
   link_with: lib_fwstate,
-  link_whole: [lib_fwstate_registry],
   include_directories: yanet_rootdir,
-  dependencies: dependencies,
+  dependencies: dependencies + [lib_fwstate_registry_dep],
 )

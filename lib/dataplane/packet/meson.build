@@ -1,8 +1,12 @@
 dependencies = [
   lib_common_dep,
-  lib_logging_dep,
   libdpdk_inc_dep,
 ]
+
+# The parser logs only in a trace build.
+if get_option('trace').enabled()
+  dependencies += lib_logging_dep
+endif
 
 sources = files(
   'decap.c',
