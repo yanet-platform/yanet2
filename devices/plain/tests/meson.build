@@ -2,7 +2,7 @@ plain_leak_test = executable(
   'plain_leak_test',
   'leak_test.c',
   dependencies: [
-    lib_dev_plain_api,
+    lib_dev_plain_api_dep,
     lib_common_dep,
     lib_logging_dep,
   ],

@@ -25,16 +25,16 @@ cgo_packages += {
     'libraries': [lib_logging],
   },
   'controlplane/ffi': {
-    'libraries': [lib_dev_plain_api_static, lib_dev_vlan_api_static, lib_agent_counters],
+    'libraries': [lib_dev_plain_api, lib_dev_vlan_api, lib_agent_counters],
   },
   'devices/plain/controlplane': {
-    'libraries': [lib_dev_plain_api_static],
+    'libraries': [lib_dev_plain_api],
   },
   'devices/trafgen/bindings/go/ctrafgen': {
     'libraries': [lib_dev_trafgen_api],
   },
   'devices/vlan/controlplane': {
-    'libraries': [lib_dev_vlan_api_static],
+    'libraries': [lib_dev_vlan_api],
   },
   'devices/vxlan/controlplane': {
     'libraries': [lib_dev_vxlan_api],

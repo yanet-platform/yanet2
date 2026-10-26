@@ -11,7 +11,7 @@ sources = files(
   'controlplane.c',
 )
 
-lib_dev_vlan_api_static = static_library(
+lib_dev_vlan_api = static_library(
   'dev_vlan_api',
   sources,
   dependencies: cp_dependencies,
@@ -19,7 +19,7 @@ lib_dev_vlan_api_static = static_library(
   install: false,
 )
 
-lib_dev_vlan_api = declare_dependency(
-  link_with: lib_dev_vlan_api_static,
+lib_dev_vlan_api_dep = declare_dependency(
+  link_with: lib_dev_vlan_api,
   dependencies: cp_dependencies,
 )

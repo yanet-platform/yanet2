@@ -19,12 +19,9 @@ pcap_opts.add_cmake_defines({
   'CMAKE_MESSAGE_LOG_LEVEL': 'WARNING',
   'CMAKE_SUPPRESS_DEVELOPER_WARNINGS': 'ON',
 })
-# Don't propagate -Werror/-Wall/-Wextra into the third-party subproject;
-# also drop the project-wide -D_GNU_SOURCE because libpcap defines it itself
-# in ftmacros.h, which would otherwise trigger -Wmacro-redefined.
+# Don't propagate -Werror/-Wall/-Wextra into the third-party subproject.
 pcap_opts.set_override_option('werror', 'false')
 pcap_opts.set_override_option('warning_level', '0')
-pcap_opts.append_compile_args('c', '-U_GNU_SOURCE')
 libpcap_project = cmake.subproject('libpcap', options: pcap_opts)
 libpcap_dep = libpcap_project.dependency('pcap_static')
 lib_pcap_static = libpcap_project.target('pcap_static')

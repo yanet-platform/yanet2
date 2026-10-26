@@ -10,7 +10,7 @@ smoke_test_dependencies = [
 if not dataplane_only
   smoke_test_c_args += ['-DYANET_DATAPLANE_UT_CONTROLPLANE']
   smoke_test_dependencies += [
-    lib_dev_plain_api,
+    lib_dev_plain_api_dep,
     lib_decap_cp_dep,
     lib_dscp_cp_dep,
     lib_forward_cp_dep,
