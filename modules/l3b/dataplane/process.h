@@ -170,13 +170,11 @@ l3b_csum_add(uint16_t sum, uint16_t value) {
 }
 
 /*
- * Answer an ICMP echo request in place, the same way the first-generation
- * balancer did: flip the message type to echo reply, swap the source and
- * destination addresses, restart the TTL at 64 and update the checksums
- * incrementally — swapping both addresses of the pseudo-header keeps its
- * sum, so only the type field change enters the ICMP checksum.
+ * Answer an admitted Echo request in place with initial TTL/Hop Limit 65.
  *
- * Returns 0 on success, -1 on a malformed packet.
+ * Swapping the pseudo-header addresses preserves their sum; the checksum
+ * delta covers both type and code. All other message bytes stay unchanged.
+ * Returns 0 on success, -1 for an unsupported network family before mutation.
  */
 static inline int
 l3b_icmp_echo_reply(struct packet *packet) {
@@ -195,7 +193,9 @@ l3b_icmp_echo_reply(struct packet *packet) {
 			packet->transport_header.offset
 		);
 
-		uint16_t before = rte_cpu_to_be_16((uint16_t)ICMP_ECHO << 8);
+		uint16_t before = rte_cpu_to_be_16(
+			((uint16_t)icmp->icmp_type << 8) | icmp->icmp_code
+		);
 		icmp->icmp_type = ICMP_ECHOREPLY;
 		icmp->icmp_code = 0;
 		uint16_t after =
@@ -204,12 +204,11 @@ l3b_icmp_echo_reply(struct packet *packet) {
 		uint32_t tmp = ip->src_addr;
 		ip->src_addr = ip->dst_addr;
 		ip->dst_addr = tmp;
-		ip->time_to_live = 64;
+		ip->time_to_live = 65;
 
 		ip->hdr_checksum = 0;
 		ip->hdr_checksum = rte_ipv4_cksum(ip);
 
-		// The reply is a fresh datagram: its checksum starts anew.
 		uint16_t sum = l3b_csum_add(~icmp->icmp_cksum, ~before);
 		icmp->icmp_cksum = ~l3b_csum_add(sum, after);
 		return 0;
@@ -228,8 +227,9 @@ l3b_icmp_echo_reply(struct packet *packet) {
 			packet->transport_header.offset
 		);
 
-		uint16_t before =
-			rte_cpu_to_be_16((uint16_t)RTE_ICMP6_ECHO_REQUEST << 8);
+		uint16_t before = rte_cpu_to_be_16(
+			((uint16_t)icmp6->icmp6_type << 8) | icmp6->icmp6_code
+		);
 		icmp6->icmp6_type = RTE_ICMP6_ECHO_REPLY;
 		icmp6->icmp6_code = 0;
 		uint16_t after =
@@ -239,10 +239,8 @@ l3b_icmp_echo_reply(struct packet *packet) {
 		memcpy(tmp, ip6->src_addr, sizeof(tmp));
 		memcpy(ip6->src_addr, ip6->dst_addr, sizeof(tmp));
 		memcpy(ip6->dst_addr, tmp, sizeof(tmp));
-		ip6->hop_limits = 64;
+		ip6->hop_limits = 65;
 
-		// Swapping both pseudo-header addresses keeps its checksum,
-		// so the type change alone enters incrementally.
 		uint16_t sum = l3b_csum_add(~icmp6->icmp6_cksum, ~before);
 		icmp6->icmp6_cksum = ~l3b_csum_add(sum, after);
 		return 0;

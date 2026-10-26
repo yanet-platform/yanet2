@@ -1223,9 +1223,10 @@ type echoPCAPPair struct {
 	reply   gopacket.Packet
 }
 
-// loadEchoPCAPPairs adapts pinned Ethernet fixtures without rewriting L3 bytes.
+// loadEchoPCAPPairs adapts pinned fixtures to the local Echo handoff contract.
 //
 // VLAN tags are removed; reply MACs follow the request in the local harness.
+// Reply TTL/Hop Limit becomes 65, with the IPv4 header checksum corrected.
 // The captures, not the upstream generator, define identifiers and payloads.
 func loadEchoPCAPPairs(t *testing.T, batch string) []echoPCAPPair {
 	t.Helper()
@@ -1269,6 +1270,17 @@ func loadEchoPCAPPairs(t *testing.T, batch string) []echoPCAPPair {
 				copy(adapted[:12], pairs[idx].request.Data()[:12])
 			}
 			require.Equal(t, frame[18:], adapted[14:])
+			if direction == 1 {
+				if adapted[14]>>4 == 4 {
+					require.EqualValues(t, 64, adapted[22])
+					adapted[22] = 65
+					adapted[24], adapted[25] = 0, 0
+					binary.BigEndian.PutUint16(adapted[24:26], echoChecksum(adapted[14:14+int(adapted[14]&15)*4]))
+				} else {
+					require.EqualValues(t, 64, adapted[21])
+					adapted[21] = 65
+				}
+			}
 			packet := gopacket.NewPacket(adapted, layers.LayerTypeEthernet, gopacket.Default)
 			require.Nil(t, packet.ErrorLayer())
 			if direction == 0 {
@@ -1561,7 +1573,7 @@ func Test_L3b_ConfiguredRealsGateEcho(t *testing.T) {
 								&layers.ICMPv4{TypeCode: layers.CreateICMPv4TypeCode(layers.ICMPv4TypeEchoRequest, 0), Id: 0x1234, Seq: 7}, payload,
 							)
 							reply = xpacket.LayersToPacket(t, &ethernet,
-								&layers.IPv4{Version: 4, TTL: 64, Protocol: layers.IPProtocolICMPv4, SrcIP: destination, DstIP: net.ParseIP("10.0.0.1")},
+								&layers.IPv4{Version: 4, TTL: 65, Protocol: layers.IPProtocolICMPv4, SrcIP: destination, DstIP: net.ParseIP("10.0.0.1")},
 								&layers.ICMPv4{TypeCode: layers.CreateICMPv4TypeCode(layers.ICMPv4TypeEchoReply, 0), Id: 0x1234, Seq: 7}, payload,
 							)
 						} else {
@@ -1576,7 +1588,7 @@ func Test_L3b_ConfiguredRealsGateEcho(t *testing.T) {
 							request = xpacket.LayersToPacket(t, &ethernet, &requestIP, &requestICMP,
 								&layers.ICMPv6Echo{Identifier: 0x1234, SeqNumber: 7}, payload,
 							)
-							replyIP := layers.IPv6{Version: 6, HopLimit: 64, NextHeader: layers.IPProtocolICMPv6, SrcIP: destination, DstIP: net.ParseIP("2001:db8::1")}
+							replyIP := layers.IPv6{Version: 6, HopLimit: 65, NextHeader: layers.IPProtocolICMPv6, SrcIP: destination, DstIP: net.ParseIP("2001:db8::1")}
 							replyICMP := layers.ICMPv6{TypeCode: layers.CreateICMPv6TypeCode(layers.ICMPv6TypeEchoReply, 0)}
 							require.NoError(t, replyICMP.SetNetworkLayerForChecksum(&replyIP))
 							reply = xpacket.LayersToPacket(t, &ethernet, &replyIP, &replyICMP,
@@ -1653,6 +1665,169 @@ func Test_L3b_ConfiguredRealsGateEcho(t *testing.T) {
 				})
 			}
 		})
+	}
+}
+
+// echoChecksum computes the Internet checksum over complete wire bytes.
+func echoChecksum(data []byte) uint16 {
+	var sum uint32
+	for len(data) >= 2 {
+		sum += uint32(binary.BigEndian.Uint16(data))
+		data = data[2:]
+	}
+	if len(data) != 0 {
+		sum += uint32(data[0]) << 8
+	}
+	for sum>>16 != 0 {
+		sum = sum&0xffff + sum>>16
+	}
+	return ^uint16(sum)
+}
+
+// Test_L3b_EchoReplyRetainsBytes verifies that admitted Echo replies change only
+// contracted fields, without enabling reals, seeding traffic or creating sessions.
+func Test_L3b_EchoReplyRetainsBytes(t *testing.T) {
+	harness, agent := setupL3bHarness(t, "port0", "test")
+	wirePipeline(t, agent, "port0", "test")
+	harness.SetCurrentTime(time.Unix(1700000000, 0))
+	service, _ := newVirtualService(t, agent, "svc", cl3bobject.VirtualServiceConfig{
+		RealServers: []cl3bobject.RealServer{{
+			Type: cl3bobject.IPv4, DestinationAddress: netip.MustParseAddr("172.16.0.10"),
+			SourceNet: xnetip.MustParseNetwork("192.0.2.0/24"),
+		}},
+		RingCapacity: 1000,
+	})
+	require.NoError(t, service.SetRealServerState(0, false))
+	require.NoError(t, service.UpdateRing(nil))
+	require.NoError(t, service.Publish(agent))
+	info, err := service.Inspect()
+	require.NoError(t, err)
+	require.Len(t, info.RealServers, 1)
+	require.False(t, info.RealServers[0].Enabled)
+	module, err := cl3b.NewModuleConfig(agent, "test")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = module.Free() })
+	require.NoError(t, module.Update([]cl3b.DestinationFilterRule{{
+		Net4s:          []xnetip.Contiguous[xnetip.Network4]{xnetip.MustParseContiguous4("192.168.1.1/32")},
+		ProtoRanges:    filter.ProtoRanges{filter.NewProtoRange(1, filter.ExactSubtype(8))},
+		VirtualService: "svc",
+	}, {
+		Net6s:          []xnetip.BiContiguous{xnetip.MustParseBiContiguous("2001:db8:1::1/128")},
+		ProtoRanges:    filter.ProtoRanges{filter.NewProtoRange(58, filter.ExactSubtype(128))},
+		VirtualService: "svc",
+	}}))
+	require.NoError(t, agent.UpdateModules([]ffi.ModuleConfig{module.AsFFIModule()}))
+	executionContext, err := harness.PublishedExecutionContext(0)
+	require.NoError(t, err)
+	for _, family := range []string{"IPv4", "IPv6"} {
+		for _, code := range []byte{0, 1, 255} {
+			for _, extended := range []bool{false, true} {
+				for _, payload := range [][]byte{nil, {0, 0xff, 0x80, 0, 1, 2, 3}} {
+					name := fmt.Sprintf("%s/code_%d/extended_%t/payload_%d", family, code, extended, len(payload))
+					t.Run(name, func(t *testing.T) {
+						request := classifyFrame("10.0.0.1", "192.168.1.1", 0, 0, 1, 8, payload)
+						headerLength := 20
+						replyType := byte(0)
+						if family == "IPv6" {
+							request = classifyFrame("2001:db8::1", "2001:db8:1::1", 0, 0, 58, 128, payload)
+							headerLength, replyType = 40, 129
+						}
+						if extended {
+							extensions := []byte{1, 1, 0, 0}
+							if family == "IPv6" {
+								// Hop-by-Hop, Routing SL0, Destination Options, atomic fragment.
+								extensions = []byte{
+									43, 0, 1, 4, 0, 0, 0, 0,
+									60, 0, 253, 0, 0, 0, 0, 0,
+									44, 0, 1, 4, 0, 0, 0, 0,
+									58, 0, 0, 0, 0x12, 0x34, 0x56, 0x78,
+								}
+								request[20] = 0
+							}
+							request = append(request[:ethHeaderLen+headerLength], append(extensions, request[ethHeaderLen+headerLength:]...)...)
+							headerLength += len(extensions)
+						}
+						network := request[ethHeaderLen:]
+						message := network[headerLength:]
+						message[1] = code
+						binary.BigEndian.PutUint16(message[4:6], 0xa1b2)
+						binary.BigEndian.PutUint16(message[6:8], 0xc3d4)
+						var pseudoHeader []byte
+						if family == "IPv4" {
+							network[0], network[1], network[8] = 0x40|byte(headerLength/4), 0xab, 1
+							binary.BigEndian.PutUint16(network[2:4], uint16(len(network)))
+							binary.BigEndian.PutUint16(network[4:6], 0x9876)
+							binary.BigEndian.PutUint16(network[6:8], 0x4000)
+							binary.BigEndian.PutUint16(network[10:12], echoChecksum(network[:headerLength]))
+						} else {
+							binary.BigEndian.PutUint32(network[:4], 0x6ab12345)
+							binary.BigEndian.PutUint16(network[4:6], uint16(len(network)-40))
+							network[7] = 1
+							pseudoHeader = make([]byte, 40)
+							copy(pseudoHeader, network[8:40])
+							binary.BigEndian.PutUint32(pseudoHeader[32:36], uint32(len(message)))
+							pseudoHeader[39] = 58
+						}
+						binary.BigEndian.PutUint16(message[2:4], echoChecksum(append(bytes.Clone(pseudoHeader), message...)))
+						for _, split := range []string{"contiguous", "inside_echo_header"} {
+							t.Run(split, func(t *testing.T) {
+								segments := [][]byte{request}
+								if split != "contiguous" {
+									boundary := ethHeaderLen + headerLength + 7
+									segments = [][]byte{request[:boundary], request[boundary:]}
+								}
+								repliedBefore, _, err := cl3bobject.ReadServiceCounter(executionContext, "svc", "icmp_replied")
+								require.NoError(t, err)
+								result, err := harness.HandleSegmentedPackets(segments)
+								require.NoError(t, err)
+								repliedAfter, _, err := cl3bobject.ReadServiceCounter(executionContext, "svc", "icmp_replied")
+								require.NoError(t, err)
+								if split == "inside_echo_header" {
+									require.Empty(t, result.Output)
+									// Chained drop observations expose only the head segment.
+									require.Equal(t, [][]byte{segments[0]}, result.Drop)
+									require.Equal(t, repliedBefore, repliedAfter)
+								} else {
+									require.Empty(t, result.Drop)
+									require.Len(t, result.Output, 1)
+									require.Equal(t, repliedBefore+1, repliedAfter)
+									reply := result.Output[0]
+									require.Len(t, reply, len(request))
+									expected := bytes.Clone(request)
+									replyNetwork := reply[ethHeaderLen:]
+									if family == "IPv4" {
+										require.Zero(t, echoChecksum(replyNetwork[:headerLength]))
+										expected[22] = 65
+										copy(expected[26:30], request[30:34])
+										copy(expected[30:34], request[26:30])
+										copy(expected[24:26], reply[24:26])
+									} else {
+										expected[21] = 65
+										copy(expected[22:38], request[38:54])
+										copy(expected[38:54], request[22:38])
+										copy(pseudoHeader, replyNetwork[8:40])
+									}
+									require.Zero(t, echoChecksum(append(bytes.Clone(pseudoHeader), replyNetwork[headerLength:]...)))
+									offset := ethHeaderLen + headerLength
+									expected[offset], expected[offset+1] = replyType, 0
+									copy(expected[offset+2:offset+4], reply[offset+2:offset+4])
+									require.Equal(t, expected, reply)
+								}
+								sessions, cursors := readEchoSessions(t, agent, service, harness.CurrentTime())
+								require.Empty(t, sessions)
+								require.Equal(t, []uint64{0}, cursors)
+								for _, counter := range []string{"real/0", "ring_empty", "real_disabled"} {
+									packets, bytes, err := cl3bobject.ReadServiceCounter(executionContext, "svc", counter)
+									require.NoError(t, err)
+									require.Zero(t, packets, counter)
+									require.Zero(t, bytes, counter)
+								}
+							})
+						}
+					})
+				}
+			}
+		}
 	}
 }
 
@@ -2797,10 +2972,10 @@ func Test_L3b_ClassifyExemptPacketsPassthrough(t *testing.T) {
 			require.Len(t, result.Output[0], len(frame))
 			if tc.protocol == 1 {
 				require.EqualValues(t, 0, result.Output[0][34])
-				require.EqualValues(t, 64, result.Output[0][22])
+				require.EqualValues(t, 65, result.Output[0][22])
 			} else {
 				require.EqualValues(t, 129, result.Output[0][54])
-				require.EqualValues(t, 64, result.Output[0][21])
+				require.EqualValues(t, 65, result.Output[0][21])
 			}
 			repliedAfter, repliedBytesAfter := counterOf(t, harness, "svc", "icmp_replied")
 			require.Equal(t, repliedBefore+1, repliedAfter)
