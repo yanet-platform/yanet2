@@ -8,12 +8,35 @@
 #include <common/ttlmap/ttlmap.h>
 
 #include <assert.h>
+#include <errno.h>
+#include <fcntl.h>
 #include <pthread.h>
 #include <stdalign.h>
+#include <stdarg.h>
 #include <stdbool.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
+#include <sys/wait.h>
 #include <unistd.h>
+
+static unsigned fail_stat_write;
+static unsigned stat_write_calls;
+
+// Refuses one selected formatting call while forwarding all other writes.
+int
+__wrap_dprintf(int fd, const char *format, ...) {
+	++stat_write_calls;
+	if (fail_stat_write != 0 && stat_write_calls == fail_stat_write) {
+		errno = ENOMEM;
+		return -1;
+	}
+	va_list args;
+	va_start(args, format);
+	int res = vdprintf(fd, format, args);
+	va_end(args);
+	return res;
+}
 
 void
 bucket_basic() {
@@ -261,6 +284,91 @@ typedef struct test_value {
 	size_t counter1;
 	size_t counter2;
 } test_value_t;
+
+// Verifies that statistics report write failures and preserve borrowed files.
+static void
+ttlmap_print_stat_errors(void *memory, size_t memory_size) {
+	struct block_allocator alloc;
+	assert(block_allocator_init(&alloc) == 0);
+	block_allocator_put_arena(&alloc, memory, memory_size);
+	struct memory_context mctx;
+	assert(memory_context_init(&mctx, "stat_errors", &alloc) == 0);
+	ttlmap_t map;
+	assert(TTLMAP_INIT(&map, &mctx, test_key_t, test_value_t, 16) == 0);
+
+	assert(TTLMAP_PRINT_STAT(&map, test_key_t, test_value_t, -1) == EOF);
+	assert(errno == EBADF);
+
+	FILE *output = tmpfile();
+	assert(output != NULL);
+	int fd = fileno(output);
+	for (unsigned failure = 1; failure <= 3; failure += 2) {
+		stat_write_calls = 0;
+		fail_stat_write = failure;
+		int res = TTLMAP_PRINT_STAT(&map, test_key_t, test_value_t, fd);
+		int error = errno;
+		fail_stat_write = 0;
+		assert(res == EOF);
+		assert(error == ENOMEM);
+		assert(stat_write_calls == failure);
+		assert(fcntl(fd, F_GETFD) >= 0);
+	}
+
+	struct stat status;
+	assert(fstat(fd, &status) == 0);
+	off_t size_before = status.st_size;
+	assert(TTLMAP_PRINT_STAT(&map, test_key_t, test_value_t, fd) == 0);
+	assert(fstat(fd, &status) == 0);
+	assert(status.st_size > size_before);
+	assert(fputc('\n', output) != EOF);
+	assert(fclose(output) == 0);
+
+	int full = open("/dev/full", O_WRONLY);
+	assert(full >= 0);
+	stat_write_calls = 0;
+	assert(TTLMAP_PRINT_STAT(&map, test_key_t, test_value_t, full) == EOF);
+	assert(errno == ENOSPC);
+	assert(stat_write_calls == 1);
+	assert(fcntl(full, F_GETFD) >= 0);
+	assert(close(full) == 0);
+
+	TTLMAP_FREE(&map);
+	memory_context_fini(&mctx);
+}
+
+// Verifies that statistics leave the caller's process-associated lock intact.
+static void
+ttlmap_print_stat_preserves_file_lock(void *memory, size_t memory_size) {
+	struct block_allocator alloc;
+	assert(block_allocator_init(&alloc) == 0);
+	block_allocator_put_arena(&alloc, memory, memory_size);
+	struct memory_context mctx;
+	assert(memory_context_init(&mctx, "stat_lock", &alloc) == 0);
+	ttlmap_t map;
+	assert(TTLMAP_INIT(&map, &mctx, test_key_t, test_value_t, 16) == 0);
+
+	FILE *output = tmpfile();
+	assert(output != NULL);
+	int fd = fileno(output);
+	struct flock lock = {.l_type = F_WRLCK, .l_whence = SEEK_SET};
+	assert(fcntl(fd, F_SETLK, &lock) == 0);
+	assert(TTLMAP_PRINT_STAT(&map, test_key_t, test_value_t, fd) == 0);
+	pid_t child = fork();
+	assert(child >= 0);
+	if (child == 0) {
+		int res = fcntl(fd, F_GETLK, &lock);
+		_exit(res == 0 && lock.l_type == F_WRLCK &&
+				      lock.l_pid == getppid()
+			      ? 0
+			      : 1);
+	}
+	int status;
+	assert(waitpid(child, &status, 0) == child);
+	assert(WIFEXITED(status) && WEXITSTATUS(status) == 0);
+	assert(fclose(output) == 0);
+	TTLMAP_FREE(&map);
+	memory_context_fini(&mctx);
+}
 
 void
 ttlmap_init(void *memory, size_t memory_size, size_t kv_entries) {
@@ -841,6 +949,9 @@ main() {
 	// ttlmap
 	size_t memory_size = 1 << 30;
 	void *memory = malloc(memory_size);
+	assert(memory != NULL);
+	ttlmap_print_stat_errors(memory, memory_size);
+	ttlmap_print_stat_preserves_file_lock(memory, memory_size);
 	LOG(INFO, "test ttlmap_init...");
 	ttlmap_init(memory, memory_size, 100);
 

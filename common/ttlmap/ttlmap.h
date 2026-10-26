@@ -37,6 +37,10 @@ struct ttlmap_bucket_iter {
 #define TTLMAP_REMOVE(key_type, value_ptr)                                     \
 	__TTLMAP_INVALIDATE_INTERNAL(key_type, value_ptr)
 
+// Writes statistics without taking ownership of the output descriptor.
+//
+// Returns zero on success or EOF with the first error in errno. Failure may
+// leave a partial report in the destination.
 #define TTLMAP_PRINT_STAT(map_ptr, key_type, value_type, fd)                   \
 	__TTLMAP_PRINT_STAT_INTERNAL(map_ptr, key_type, value_type, fd)
 

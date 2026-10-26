@@ -222,41 +222,84 @@ __ttlmap_init_internal( // NOLINT
 
 #include <stdio.h>
 
+// Stop formatting at the first write failure, preserving its error.
+#define __TTLMAP_STAT_WRITE(fd, error_label, ...)                              \
+	do {                                                                   \
+		if (dprintf((fd), __VA_ARGS__) < 0) {                          \
+			goto error_label;                                      \
+		}                                                              \
+	} while (0)
+
 #define __TTLMAP_PRINT_STAT_INTERNAL(map_ptr, key_type, value_type, fd)        \
 	__extension__({                                                        \
+		__label__ __done;                                              \
+		int __res = EOF;                                               \
+		int __fd = (fd);                                               \
 		size_t __bucket_size = __extension__({                         \
 			__TTLMAP_BUCKET_DECLARE(key_type, value_type);         \
 			sizeof(__bucket_t);                                    \
 		});                                                            \
-		FILE *__file = fdopen(fd, "w");                                \
-		fprintf(__file, "======= ttlmap stat =======\n");              \
-		fprintf(__file, "\tKey size: %lu bytes\n", sizeof(key_type));  \
-		fprintf(__file,                                                \
+		__TTLMAP_STAT_WRITE(                                           \
+			__fd, __done, "======= ttlmap stat =======\n"          \
+		);                                                             \
+		__TTLMAP_STAT_WRITE(                                           \
+			__fd,                                                  \
+			__done,                                                \
+			"\tKey size: %lu bytes\n",                             \
+			sizeof(key_type)                                       \
+		);                                                             \
+		__TTLMAP_STAT_WRITE(                                           \
+			__fd,                                                  \
+			__done,                                                \
 			"\tValue size: %lu bytes\n",                           \
-			sizeof(value_type));                                   \
-		fprintf(__file, "\tBucket size: %lu bytes\n", __bucket_size);  \
-		fprintf(__file,                                                \
+			sizeof(value_type)                                     \
+		);                                                             \
+		__TTLMAP_STAT_WRITE(                                           \
+			__fd,                                                  \
+			__done,                                                \
+			"\tBucket size: %lu bytes\n",                          \
+			__bucket_size                                          \
+		);                                                             \
+		__TTLMAP_STAT_WRITE(                                           \
+			__fd,                                                  \
+			__done,                                                \
 			"\tMemory used: %lu bytes\n",                          \
-			(map_ptr)->mctx.balloc_size);                          \
-		fprintf(__file,                                                \
+			(map_ptr)->mctx.balloc_size                            \
+		);                                                             \
+		__TTLMAP_STAT_WRITE(                                           \
+			__fd,                                                  \
+			__done,                                                \
 			"\tKey-Value pairs per Bucket: %u\n",                  \
-			__TTLMAP_BUCKET_ENTRIES);                              \
-		fprintf(__file,                                                \
+			__TTLMAP_BUCKET_ENTRIES                                \
+		);                                                             \
+		__TTLMAP_STAT_WRITE(                                           \
+			__fd,                                                  \
+			__done,                                                \
 			"\tNumber of Buckets: %llu\n",                         \
-			(1ull << (map_ptr)->buckets_exp));                     \
-		fprintf(__file,                                                \
+			(1ull << (map_ptr)->buckets_exp)                       \
+		);                                                             \
+		__TTLMAP_STAT_WRITE(                                           \
+			__fd,                                                  \
+			__done,                                                \
 			"\tPer Bucker memory overhead: %.2lf%%\n",             \
 			100.0 * (double)__bucket_size /                        \
 				(__TTLMAP_BUCKET_ENTRIES *                     \
-				 (sizeof(key_type) + sizeof(value_type))));    \
-		fprintf(__file,                                                \
+				 (sizeof(key_type) + sizeof(value_type)))      \
+		);                                                             \
+		__TTLMAP_STAT_WRITE(                                           \
+			__fd,                                                  \
+			__done,                                                \
 			"\tAdditional Buckets memory overhead: %.2lf%%\n",     \
 			100.0 * (double)(map_ptr)->mctx.balloc_size /          \
 				(__bucket_size *                               \
-				 (1ull << (map_ptr)->buckets_exp)));           \
-		fprintf(__file,                                                \
+				 (1ull << (map_ptr)->buckets_exp))             \
+		);                                                             \
+		__TTLMAP_STAT_WRITE(                                           \
+			__fd,                                                  \
+			__done,                                                \
 			"\tNumber of Buckers per Chunk: %llu\n",               \
-			(1ull << (map_ptr)->buckets_per_chunk_exp));           \
+			(1ull << (map_ptr)->buckets_per_chunk_exp)             \
+		);                                                             \
 		size_t __touched_counts[1 + __TTLMAP_BUCKET_ENTRIES];          \
 		memset(__touched_counts, 0, sizeof(__touched_counts));         \
 		for (size_t __i = 0; __i < (1ull << (map_ptr)->buckets_exp);   \
@@ -266,35 +309,47 @@ __ttlmap_init_internal( // NOLINT
 			);                                                     \
 			++__touched_counts[__elems];                           \
 		}                                                              \
-		fprintf(__file,                                                \
+		__TTLMAP_STAT_WRITE(                                           \
+			__fd,                                                  \
+			__done,                                                \
 			"\tNumber of Buckers per Number of touched elements "  \
 			"(0-%u): [",                                           \
-			__TTLMAP_BUCKET_ENTRIES);                              \
+			__TTLMAP_BUCKET_ENTRIES                                \
+		);                                                             \
 		for (size_t __i = 0; __i <= __TTLMAP_BUCKET_ENTRIES; ++__i) {  \
-			fprintf(__file, "%zu", __touched_counts[__i]);         \
+			__TTLMAP_STAT_WRITE(                                   \
+				__fd, __done, "%zu", __touched_counts[__i]     \
+			);                                                     \
 			if (__i < __TTLMAP_BUCKET_ENTRIES) {                   \
-				fprintf(__file, ", ");                         \
+				__TTLMAP_STAT_WRITE(__fd, __done, ", ");       \
 			} else {                                               \
-				fprintf(__file, "]\n");                        \
+				__TTLMAP_STAT_WRITE(__fd, __done, "]\n");      \
 			}                                                      \
 		}                                                              \
-		fprintf(__file, "\tChunk sizes: [");                           \
+		__TTLMAP_STAT_WRITE(__fd, __done, "\tChunk sizes: [");         \
 		for (size_t __i = 0; __i < __TTLMAP_MAX_CHUNKS; ++__i) {       \
 			if (__i == 0 || __i + 1 == __TTLMAP_MAX_CHUNKS ||      \
 			    (map_ptr)->chunk_sizes[__i] !=                     \
 				    (map_ptr)->chunk_sizes[__i - 1]) {         \
-				fprintf(__file,                                \
+				__TTLMAP_STAT_WRITE(                           \
+					__fd,                                  \
+					__done,                                \
 					"%zu",                                 \
-					(map_ptr)->chunk_sizes[__i]);          \
+					(map_ptr)->chunk_sizes[__i]            \
+				);                                             \
 				if (__i + 1 < __TTLMAP_MAX_CHUNKS) {           \
-					fprintf(__file, ", ");                 \
+					__TTLMAP_STAT_WRITE(                   \
+						__fd, __done, ", "             \
+					);                                     \
 				}                                              \
 			}                                                      \
 			if (__i + 1 == __TTLMAP_MAX_CHUNKS) {                  \
-				fprintf(__file, "]\n");                        \
+				__TTLMAP_STAT_WRITE(__fd, __done, "]\n");      \
 			}                                                      \
 		}                                                              \
-		fflush(__file);                                                \
+		__res = 0;                                                     \
+	__done:                                                                \
+		__res;                                                         \
 	})
 
 static inline size_t
