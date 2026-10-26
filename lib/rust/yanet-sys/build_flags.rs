@@ -14,9 +14,10 @@ use serde_json::Value;
 /// Environment variable naming the meson build directory.
 pub const BUILD_DIR_ENV: &str = "YANET_BUILD_DIR";
 
-/// Private directory of the target that builds the pipeline library, whose
-/// objects' compile command the bindings follow.
-const TARGET_DIR: &str = "/libpipeline.a.p/";
+/// Private directory of the target that builds the packet library, whose
+/// objects' compile command the bindings follow: it compiles against DPDK,
+/// and its sources are the ones the shim builds into the plugin.
+const TARGET_DIR: &str = "/libpacket.a.p/";
 
 /// Options, matched by prefix, that change the layout of the types or the
 /// predefined macros the headers read. bindgen must lay the types out as the C
@@ -113,7 +114,7 @@ impl CFlags {
     }
 
     /// Takes the flags from the entry of a compilation database that builds
-    /// an object of the pipeline library.
+    /// an object of the packet library.
     pub fn parse(root: PathBuf, text: &str) -> Result<Self, String> {
         let database: Value = serde_json::from_str(text).map_err(|err| format!("not a compilation database: {err}"))?;
         let entries = database.as_array().ok_or("not a list of entries")?;
