@@ -26,26 +26,23 @@ lib_agent_cp_dep = declare_dependency(
 # agent API that needs the name matcher, and through it a Rust toolchain.
 # Keeping it apart is what lets a dataplane-only build skip both.
 if not dataplane_only
+  agent_counters_deps = [
+    lib_common_dep,
+    lib_config_cp_dep,
+    lib_errors_dep,
+    lib_counter_pattern_dep,
+  ]
+
   lib_agent_counters = static_library(
     'agent_counters',
     files('counters.c'),
-    dependencies: [
-      lib_common_dep,
-      lib_config_cp_dep,
-      lib_errors_dep,
-      lib_counter_pattern_dep,
-    ],
+    dependencies: agent_counters_deps,
     install: false,
   )
 
   lib_agent_counters_dep = declare_dependency(
     link_with: lib_agent_counters,
-    dependencies: [
-      lib_common_dep,
-      lib_config_cp_dep,
-      lib_errors_dep,
-      lib_counter_pattern_dep,
-    ],
+    dependencies: agent_counters_deps,
     include_directories: yanet_rootdir,
   )
 
