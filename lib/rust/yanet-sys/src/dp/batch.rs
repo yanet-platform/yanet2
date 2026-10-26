@@ -1051,9 +1051,10 @@ mod tests {
         f(descriptor + 8, 9);
         // Data starting inside the descriptor: no room at all.
         f(descriptor - 1, 0);
-        // The dataplane's default headroom, used up and overrun.
-        f(256, 256 - descriptor);
-        f(256, 600);
+        // The dataplane's headroom, used up and overrun.
+        let headroom = bindings::RTE_PKTMBUF_HEADROOM as u16;
+        f(headroom, headroom - descriptor);
+        f(headroom, 600);
         // Every offset and length around the descriptor, and across the
         // headroom.
         for data_off in (0..=descriptor + 40).chain([255, 256, 600]) {
