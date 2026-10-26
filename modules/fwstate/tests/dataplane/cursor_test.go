@@ -1,113 +1,83 @@
-package fwstate
+package fwstate_test
 
 import (
 	"encoding/binary"
-	"net"
+	"net/netip"
 	"testing"
+	"time"
 
-	"github.com/c2h5oh/datasize"
+	"github.com/gopacket/gopacket/layers"
 	"github.com/stretchr/testify/require"
-
-	"github.com/yanet-platform/yanet2/common/go/testutils"
 )
 
-// IPPROTO constants matching C definitions.
-const (
-	protoTCP uint16 = 6
-)
+// Test_FWStateCursor_KeyDataCorrectness verifies that handler-created IPv4
+// entries retain every protocol, port and address byte through the cursor.
+func Test_FWStateCursor_KeyDataCorrectness(t *testing.T) {
+	config := newFWStateFixture(t, 0)
+	frame := createSyncFrame(layers.IPProtocolTCP, 4, 12345, 8080, nil, nil, WithFrameFlags(0x02))
+	source := netip.MustParseAddr("172.16.5.10").As4()
+	destination := netip.MustParseAddr("10.20.30.40").As4()
+	copy(frame[4:8], source[:])
+	copy(frame[0:4], destination[:])
+	worker := config.Worker(0)
+	nextRound(worker)
+	stashEvents(config, worker, localEvent{frame})
+	runConfig(config, worker, false)
+	entries, _, _, err := config.Fixture.Maps[0].ReadForward(0, 0, true, uint64(config.Fixture.Harness.CurrentTime().UnixNano()), 1)
+	require.NoError(t, err)
+	require.Len(t, entries, 1)
+	key := entries[0].Key
+	require.Equal(t, uint32(6), key.Proto)
+	require.Equal(t, uint32(12345), key.SrcPort)
+	require.Equal(t, uint32(8080), key.DstPort)
+	require.Equal(t, binary.NativeEndian.Uint32(source[:]), binary.NativeEndian.Uint32(key.SrcAddr))
+	require.Equal(t, binary.NativeEndian.Uint32(destination[:]), binary.NativeEndian.Uint32(key.DstAddr))
 
-// TCP flag constants matching C FWSTATE_ definitions.
-const (
-	flagACK uint8 = 0x08
-	flagSYN uint8 = 0x02
-)
-
-// Match fwstateModuleConfig sync timeouts (nanoseconds).
-const (
-	ttlTCPNs = uint64(120e9)
-)
-
-// ipToUint32 converts an IPv4 string to a uint32 in network byte order.
-func ipToUint32(s string) uint32 {
-	ip := net.ParseIP(s).To4()
-	if ip == nil {
-		panic("invalid IPv4 address: " + s)
-	}
-	return binary.LittleEndian.Uint32(ip)
+	state := GetStateValue(config, layers.IPProtocolTCP, 12345, 8080, "172.16.5.10", "10.20.30.40")
+	require.True(t, state.Found)
+	require.False(t, state.External)
+	require.Equal(t, uint32(0x02), state.Flags)
+	require.Equal(t, uint64(1), state.PacketsForward)
+	require.Equal(t, uint64(config.Fixture.Harness.CurrentTime().UnixNano())+config.Sync.TcpSyn, state.Deadline)
 }
 
-func TestCursorKeyDataCorrectness(t *testing.T) {
-	memCtx := testutils.NewMemoryContext("cursor_key", datasize.MB*64)
-	defer memCtx.Free()
-	cpModule, storage := fwstateModuleConfig(memCtx)
-	defer fwstateCounterStorageFree(storage)
-
-	now := uint64(GetCurrentTime())
-
-	srcAddr := ipToUint32("172.16.5.10")
-	dstAddr := ipToUint32("10.20.30.40")
-
-	err := insertFw4Entry(cpModule,
-		protoTCP, 12345, 8080,
-		srcAddr, dstAddr,
-		flagSYN, 0,
-		now, now, ttlTCPNs,
-	)
+// Test_FWStateCursor_ValueDataCorrectness verifies that real handler updates
+// expose their exact timestamp and forward/backward packet totals.
+func Test_FWStateCursor_ValueDataCorrectness(t *testing.T) {
+	config := newFWStateFixture(t, 0)
+	frame := createSyncFrame(layers.IPProtocolTCP, 4, 9000, 80, nil, nil, WithFrameFlags(0x88))
+	source := netip.MustParseAddr("10.0.0.1").As4()
+	destination := netip.MustParseAddr("192.168.0.1").As4()
+	copy(frame[4:8], source[:])
+	copy(frame[0:4], destination[:])
+	worker := config.Worker(0)
+	nextRound(worker)
+	stashEvents(config, worker, localEvent{frame})
+	runConfig(config, worker, false)
+	now := uint64(config.Fixture.Harness.CurrentTime().UnixNano())
+	entries, _, _, err := config.Fixture.Maps[0].ReadForward(0, 0, true, now, 1)
 	require.NoError(t, err)
+	require.Len(t, entries, 1)
+	require.Equal(t, now, entries[0].Value.UpdatedAt)
+	require.Equal(t, uint64(1), entries[0].Value.PacketsForward)
+	require.Equal(t, uint64(0), entries[0].Value.PacketsBackward)
 
-	results, _, err := readCursorForward(cpModule,
-		false, 0, 0, true, now, 1,
-	)
+	config.Fixture.Harness.AdvanceTime(999 * time.Nanosecond)
+	nextRound(worker)
+	stashEvents(config, worker, localEvent{frame})
+	runConfig(config, worker, false)
+	entries, _, _, err = config.Fixture.Maps[0].ReadForward(0, 0, true, now+1000, 1)
 	require.NoError(t, err)
-	require.Len(t, results, 1)
-
-	r := results[0]
-	require.Equal(t, protoTCP, r.Proto)
-	require.Equal(t, uint16(12345), r.SrcPort)
-	require.Equal(t, uint16(8080), r.DstPort)
-	require.Equal(t, srcAddr, r.SrcAddr)
-	require.Equal(t, dstAddr, r.DstAddr)
+	require.Len(t, entries, 1)
+	require.Equal(t, now, entries[0].Value.CreatedAt)
+	require.Equal(t, now+1000, entries[0].Value.UpdatedAt)
+	require.Equal(t, uint64(2), entries[0].Value.PacketsForward)
+	require.Zero(t, entries[0].Value.PacketsBackward)
 }
 
-func TestCursorValueDataCorrectness(t *testing.T) {
-	memCtx := testutils.NewMemoryContext("cursor_val", datasize.MB*64)
-	defer memCtx.Free()
-	cpModule, storage := fwstateModuleConfig(memCtx)
-	defer fwstateCounterStorageFree(storage)
-
-	now := uint64(GetCurrentTime())
-
-	err := insertFw4Entry(cpModule,
-		protoTCP, 9000, 80,
-		ipToUint32("10.0.0.1"), ipToUint32("192.168.0.1"),
-		flagACK, flagACK,
-		now-1000, now, ttlTCPNs,
-	)
-	require.NoError(t, err)
-
-	results, _, err := readCursorForward(cpModule,
-		false, 0, 0, true, now, 1,
-	)
-	require.NoError(t, err)
-	require.Len(t, results, 1)
-
-	r := results[0]
-	require.Equal(t, uint64(now), r.UpdatedAt)
-	require.Equal(t, uint64(1), r.PktForward)
-	require.Equal(t, uint64(0), r.PktBackward)
-}
-
-func TestCursorInvalidLayer(t *testing.T) {
-	memCtx := testutils.NewMemoryContext("cursor_inv", datasize.MB*64)
-	defer memCtx.Free()
-	cpModule, storage := fwstateModuleConfig(memCtx)
-	defer fwstateCounterStorageFree(storage)
-
-	now := uint64(GetCurrentTime())
-
-	// The layer index 99 should fail.
-	_, _, err := readCursorForward(cpModule,
-		false, 99, 0, true, now, 10,
-	)
+// Test_FWStateCursor_InvalidLayer verifies that a missing layer is rejected.
+func Test_FWStateCursor_InvalidLayer(t *testing.T) {
+	config := newFWStateFixture(t, 0)
+	_, _, _, err := config.Fixture.Maps[0].ReadForward(99, 0, true, uint64(config.Fixture.Harness.CurrentTime().UnixNano()), 10)
 	require.Error(t, err)
 }
