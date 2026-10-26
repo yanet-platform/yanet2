@@ -82,6 +82,16 @@ struct agent {
 	// the loaded entities down individually first.
 	uint64_t loaded_entity_count;
 	struct agent *prev;
+	// Set once a newer generation of this agent's name replaces it
+	// in the registry.
+	//
+	// From that moment the agent exists for nothing but reclamation,
+	// and its arenas are freed wholesale once the loaded count above
+	// drains to zero. The store runs at the superseding attach under
+	// the configuration and agent locks, before any sweep those locks
+	// admit; readers pair it with an acquire load, so a refusal is
+	// ordered after the splice that ended the agent's writer life.
+	bool superseded;
 	char name[AGENT_NAME_LEN];
 
 	uint64_t arena_count;
@@ -92,6 +102,34 @@ struct agent {
 
 struct dp_config *
 agent_dp_config(struct agent *agent);
+
+// Refuse a storage write through a superseded agent generation.
+//
+// A superseded generation's only purpose is to be reclaimed once its
+// loaded count reaches zero: a value a caller would still store
+// through it would race the sweep's wholesale free of the arenas or
+// outlive every handle the caller holds, so the write fails fast
+// instead.
+//
+// An agent that never enters the registry, like the dataplane's own,
+// is never replaced and always passes.
+//
+// @return 0 while no newer generation has replaced the agent, -1 with
+// a failed-precondition error once one has.
+static inline int
+agent_reject_superseded(struct agent *agent, yanet_error **err) {
+	if (!__atomic_load_n(&agent->superseded, __ATOMIC_ACQUIRE)) {
+		return 0;
+	}
+
+	yanet_error_add_kind(
+		err,
+		YANET_ERROR_FAILED_PRECONDITION,
+		"agent \"%s\" has been superseded by a newer generation",
+		agent->name
+	);
+	return -1;
+}
 
 void
 agent_cleanup(struct agent *agent);

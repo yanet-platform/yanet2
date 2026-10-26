@@ -354,6 +354,13 @@ agent_attach(
 				&old_registry->agents[agent_idx], new_agent
 			);
 			SET_OFFSET_OF(&new_agent->prev, old_agent);
+			// The replacement ends the old generation's
+			// writer life; the release store pairs with the
+			// refusal paths' acquire loads, so every caller
+			// that has seen the splice refuses from then on.
+			__atomic_store_n(
+				&old_agent->superseded, true, __ATOMIC_RELEASE
+			);
 			break;
 		}
 	}
@@ -1722,6 +1729,19 @@ agent_storage_put(
 	size_t size,
 	yanet_error **err
 ) {
+	struct cp_config *cp_config = ADDR_OF(&agent->cp_config);
+
+	// The storage list belongs to the agent state the sweep guards.
+	// The whole mutation runs under the agent lock, so a concurrent
+	// reclaim cannot free the list or the arenas underneath it, and a
+	// superseded generation — one whose only remaining purpose is
+	// reclamation — refuses the write outright.
+	spinlock_lock(&cp_config->agent_lock);
+	if (agent_reject_superseded(agent, err) != 0) {
+		spinlock_unlock(&cp_config->agent_lock);
+		return -1;
+	}
+
 	struct agent_storage *storage = ADDR_OF(&agent->storage);
 	struct agent_storage *prev = NULL;
 	struct memory_context *mctx = &agent->memory_context;
@@ -1730,6 +1750,7 @@ agent_storage_put(
 		memory_balloc(mctx, sizeof(struct agent_storage) + size);
 	if (new_storage == NULL) {
 		yanet_error_add(err, "memory not enough");
+		spinlock_unlock(&cp_config->agent_lock);
 		return -1;
 	}
 
@@ -1759,6 +1780,8 @@ set_prev:
 	} else {
 		SET_OFFSET_OF(&agent->storage, new_storage);
 	}
+
+	spinlock_unlock(&cp_config->agent_lock);
 
 	return 0;
 }
