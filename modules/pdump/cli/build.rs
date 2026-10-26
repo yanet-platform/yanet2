@@ -2,6 +2,9 @@ use core::error::Error;
 use std::{env, fs, path::PathBuf};
 
 /// The dataplane header that defines the capture mode bits.
+///
+/// It is the one input outside the crate a CLI build reads besides the protos,
+/// so the CI key of the built CLI names it too.
 const MODE_HEADER: &str = "../dataplane/mode.h";
 
 fn main() -> Result<(), Box<dyn Error>> {
