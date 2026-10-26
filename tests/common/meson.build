@@ -62,6 +62,7 @@ ttlmap_test = executable(
   'ttlmap_test',
   ['ttlmap_test.c'],
   c_args: yanet_test_c_args,
+  link_args: ['-Wl,--wrap=dprintf'],
   dependencies: dependencies + [libdpdk_inc_dep],
   include_directories: yanet_rootdir
 )
