@@ -331,10 +331,10 @@ configure_file(output: build_stamp, configuration: yanet_stamp)
 
 # CGO packages by source directory, with what each links and hashes.
 #
-# 'libraries' are project libraries, which meson extends with their
-# dependencies; 'archives' are external archives linked as they are, with
-# DPDK's system libraries; 'inputs' are further native inputs the marker
-# hashes.
+# 'libraries' are the project libraries a package uses directly; meson adds
+# what they depend on. 'archives' are external archives linked as they are,
+# with DPDK's system libraries; 'inputs' are further native inputs the
+# marker hashes.
 cgo_packages = {}
 go_proto_targets = []
 subdir('common')
