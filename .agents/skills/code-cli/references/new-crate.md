@@ -291,7 +291,10 @@ local struct the handlers take instead of the alias.
 Three files move together; missing the last two builds green and never
 installs the binary.
 
-1. Root `Cargo.toml`: add the crate path to `[workspace] members`.
+1. Root `Cargo.toml`: add the crate path to `[workspace] members`, and the
+   package name to `[profile.ci.package]`: `opt-level = "s"`, plus
+   `codegen-units = 1` for a binary-only crate (a missing entry only makes the
+   CI build slower).
 2. Root `Makefile`: add the suffix (`<x>`, `device-<x>`, `operator-<x>`) to
    `CLI_MODULES`; a `cli/modules/<x>` crate goes to `CLI_CORE_MODULES`.
 3. `debian/yanet2-cli.install`: add `usr/bin/yanet-cli-<suffix>`.

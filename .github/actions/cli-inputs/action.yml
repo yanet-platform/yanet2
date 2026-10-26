@@ -1,6 +1,6 @@
 name: CLI inputs
 description: >-
-  Hashes the repository inputs of the release CLI build: the workspace members,
+  Hashes the repository inputs of the CI build of the CLI: the workspace members,
   the manifests, lock file and cargo config, every proto, the dataplane header
   a CLI build script reads, and the Makefile, workflow and actions that set the
   build up. The runner image (its C compiler, the packaging flags) is not

@@ -231,15 +231,15 @@ jobs:
         if: steps.built.outputs.cache-hit != 'true'
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
-          shared-key: build-release-arm64
+          shared-key: build-ci-arm64
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
-      - name: Build CLI (release, packaging flags)
+      - name: Build CLI (ci profile, packaging flags)
         if: steps.built.outputs.cache-hit != 'true'
         run: |
           flags=$(DEB_BUILD_MAINT_OPTIONS=hardening=+all DEB_CFLAGS_MAINT_APPEND=-fno-lto DEB_LDFLAGS_MAINT_APPEND=-fno-lto dpkg-buildflags --export=sh)
           eval "$flags"
-          make cli
+          make cli CLI_PROFILE=ci
 
       - name: Mark the build
         if: github.ref == 'refs/heads/main' && steps.built.outputs.cache-hit != 'true'
@@ -373,9 +373,9 @@ jobs:
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
-            target/release/yanet-cli
-            target/release/yanet-cli-*
-            !target/release/*.d
+            target/ci/yanet-cli
+            target/ci/yanet-cli-*
+            !target/ci/*.d
           key: cli-bin-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.inputs.outputs.hash }}
 
       - uses: ./.github/actions/protoc
@@ -392,16 +392,16 @@ jobs:
         if: steps.binaries.outputs.cache-hit != 'true'
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
-          shared-key: build-release
+          shared-key: build-ci
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
-      - name: Build CLI (release)
+      - name: Build CLI (ci profile)
         if: steps.binaries.outputs.cache-hit != 'true'
-        run: make cli
+        run: make cli CLI_PROFILE=ci
 
       - name: Verify CLI crypto linkage
         run: |
-          for binary in target/release/yanet-cli target/release/yanet-cli-*; do
+          for binary in target/ci/yanet-cli target/ci/yanet-cli-*; do
             if [ ! -x "$binary" ]; then
               continue
             fi
@@ -416,12 +416,12 @@ jobs:
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
-            target/release/yanet-cli
-            target/release/yanet-cli-*
-            !target/release/*.d
+            target/ci/yanet-cli
+            target/ci/yanet-cli-*
+            !target/ci/*.d
           key: cli-bin-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.inputs.outputs.hash }}
 
-      # Artifacts keep paths relative to the release directory and drop the
+      # Artifacts keep paths relative to the profile directory and drop the
       # executable bit; the functional test job restores both.
       - name: Upload YANET CLI
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -429,9 +429,9 @@ jobs:
           name: yanet2-cli
           if-no-files-found: error
           path: |
-            target/release/yanet-cli
-            target/release/yanet-cli-*
-            !target/release/*.d
+            target/ci/yanet-cli
+            target/ci/yanet-cli-*
+            !target/ci/*.d
 
   test-release:
     runs-on: ubuntu-24.04
