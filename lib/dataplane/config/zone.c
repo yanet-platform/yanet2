@@ -9,7 +9,7 @@
 #include "lib/controlplane/config/cp_module.h"
 #include "lib/controlplane/config/registry.h"
 #include "lib/controlplane/config/zone.h"
-#include "lib/dataplane/pipeline/pipeline.h"
+#include "lib/dataplane/config/gen_resolve.h"
 #include "lib/logging/log.h"
 
 struct dp_config *

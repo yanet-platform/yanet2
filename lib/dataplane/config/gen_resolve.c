@@ -1,4 +1,4 @@
-#include "lib/dataplane/pipeline/pipeline.h"
+#include "gen_resolve.h"
 
 #include "lib/dataplane/pipeline/econtext.h"
 
@@ -350,19 +350,6 @@ device_entry_ectx_resolve_absolutes(
 	}
 }
 
-// Derive the absolute addresses the packet hot path runs on: the
-// counter pointers of every stage, resolved from the counter registry
-// ids and the stage counter storages; the stage hop addresses, copied
-// or recoded from the controlplane-owned relative arrays; every
-// object's controlplane counterpart and private per-context buffer,
-// the buffer filled by the object's execution-context commit handler
-// when one is registered; and each module's private per-context
-// buffer, filled by its execution-context commit handler when one is
-// registered.
-//
-// Runs in the dataplane process before the context is released to the
-// worker, and recomputes everything from controlplane-owned data, so a
-// re-run never corrupts a previous derivation.
 void
 config_gen_ectx_resolve_counters(struct config_gen_ectx *config_gen_ectx) {
 	struct object_ectx **objects = ADDR_OF(&config_gen_ectx->objects);
