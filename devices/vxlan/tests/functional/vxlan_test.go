@@ -22,7 +22,7 @@ import (
 	"github.com/yanet-platform/yanet2/common/go/xerror"
 	"github.com/yanet-platform/yanet2/common/go/xpacket"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
-	plain "github.com/yanet-platform/yanet2/devices/plain/controlplane"
+	cplain "github.com/yanet-platform/yanet2/devices/plain/bindings/go/cplain"
 	vxlan "github.com/yanet-platform/yanet2/devices/vxlan/controlplane"
 	"github.com/yanet-platform/yanet2/devices/vxlan/controlplane/vxlanpb/v1"
 	"github.com/yanet-platform/yanet2/modules/blackhole/bindings/go/cblackhole"
@@ -92,7 +92,7 @@ func setupVxlanHarness(t *testing.T) (*dataplaneut.Harness, *ffi.Agent, *vxlan.D
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = agent.CleanUp() })
 
-	return harness, agent, vxlan.NewDeviceVxlanService(agent)
+	return harness, agent, vxlan.NewDeviceVxlanService(vxlan.NewBackend(agent))
 }
 
 // createTunnel installs the "tun0" device through the control-plane service.
@@ -249,7 +249,7 @@ func wireVxlanPipelines(t *testing.T, agent *ffi.Agent) {
 func wirePortInput(t *testing.T, agent *ffi.Agent, pipeline string) {
 	t.Helper()
 
-	_, err := plain.UpdateDevices(agent, []ffi.DeviceConfig{{
+	_, err := cplain.UpdateDevices(agent, []ffi.DeviceConfig{{
 		Name:   "port0",
 		Input:  []ffi.DevicePipelineConfig{{Name: pipeline, Weight: 1}},
 		Output: []ffi.DevicePipelineConfig{{Name: "port-dummy", Weight: 1}},

@@ -11,7 +11,7 @@ import (
 
 	dataplaneut "github.com/yanet-platform/yanet2/bindings/go/dataplane_ut"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
-	plain "github.com/yanet-platform/yanet2/devices/plain/controlplane"
+	cplain "github.com/yanet-platform/yanet2/devices/plain/bindings/go/cplain"
 )
 
 // Memory sizes and topology for the query harness.
@@ -49,7 +49,7 @@ func installQuerySurface(t *testing.T) *ffi.DPConfig {
 		require.NoError(t, agent.UpdatePipeline(ffi.PipelineConfig{Name: name}))
 		input[idx] = ffi.DevicePipelineConfig{Name: name, Weight: 1}
 	}
-	_, err = plain.UpdateDevices(agent, []ffi.DeviceConfig{{
+	_, err = cplain.UpdateDevices(agent, []ffi.DeviceConfig{{
 		Name:  "port0",
 		Input: input,
 	}})

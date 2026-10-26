@@ -19,7 +19,7 @@ import (
 	"github.com/yanet-platform/yanet2/common/go/xerror"
 	"github.com/yanet-platform/yanet2/common/go/xpacket"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
-	plain "github.com/yanet-platform/yanet2/devices/plain/controlplane"
+	cplain "github.com/yanet-platform/yanet2/devices/plain/bindings/go/cplain"
 	"github.com/yanet-platform/yanet2/modules/forward/bindings/go/cforward"
 	forward "github.com/yanet-platform/yanet2/modules/forward/controlplane"
 	forwardpb "github.com/yanet-platform/yanet2/modules/forward/controlplane/forwardpb/v1"
@@ -221,7 +221,7 @@ func wireForwardPipeline(
 		})
 	}
 
-	_, err = plain.UpdateDevices(agent, allDevices)
+	_, err = cplain.UpdateDevices(agent, allDevices)
 	require.NoError(t, err)
 }
 
@@ -597,7 +597,7 @@ func Test_Forward_ModeInCrossDeviceLoopAttributesDropToTarget(t *testing.T) {
 		}))
 	}
 
-	_, err := plain.UpdateDevices(agent, []ffi.DeviceConfig{
+	_, err := cplain.UpdateDevices(agent, []ffi.DeviceConfig{
 		{
 			Name:   "port0",
 			Input:  []ffi.DevicePipelineConfig{{Name: "loop0", Weight: 1}},
@@ -688,7 +688,7 @@ func Test_Forward_MixedModeLoopSharesTotalLimit(t *testing.T) {
 		Name: "dummy_out_port1",
 	}))
 
-	_, err := plain.UpdateDevices(agent, []ffi.DeviceConfig{
+	_, err := cplain.UpdateDevices(agent, []ffi.DeviceConfig{
 		{
 			Name:   "port0",
 			Input:  []ffi.DevicePipelineConfig{{Name: "to_input_in", Weight: 1}},
@@ -760,7 +760,7 @@ func Test_Forward_ModeOutSelfTargetStopsAtTotalLimit(t *testing.T) {
 		}))
 	}
 
-	_, err := plain.UpdateDevices(agent, []ffi.DeviceConfig{{
+	_, err := cplain.UpdateDevices(agent, []ffi.DeviceConfig{{
 		Name:   "port0",
 		Input:  []ffi.DevicePipelineConfig{{Name: "feeder", Weight: 1}},
 		Output: []ffi.DevicePipelineConfig{{Name: "loop", Weight: 1}},
@@ -832,7 +832,7 @@ func Test_Forward_ModeOutCrossDeviceLoopAttributesDropToTarget(t *testing.T) {
 			Functions: []string{route.name},
 		}))
 	}
-	_, err := plain.UpdateDevices(agent, []ffi.DeviceConfig{
+	_, err := cplain.UpdateDevices(agent, []ffi.DeviceConfig{
 		{
 			Name:   "port0",
 			Input:  []ffi.DevicePipelineConfig{{Name: "feeder", Weight: 1}},

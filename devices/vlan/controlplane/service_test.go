@@ -11,6 +11,7 @@ import (
 
 	dataplaneut "github.com/yanet-platform/yanet2/bindings/go/dataplane_ut"
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
+	"github.com/yanet-platform/yanet2/controlplane/configstore"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	plain "github.com/yanet-platform/yanet2/devices/plain/controlplane"
 	"github.com/yanet-platform/yanet2/devices/plain/controlplane/plainpb/v1"
@@ -38,7 +39,7 @@ func TestUpdateDevice_DrainsUnusedDevices(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = agent.CleanUp() })
 
-	service := NewDeviceVlanService(agent)
+	service := NewDeviceVlanService(NewBackend(agent))
 	request := &vlanpb.UpdateDeviceVlanRequest{
 		Name:   "d0",
 		Device: &commonpb.Device{},
@@ -88,7 +89,7 @@ func Test_DeviceVlanService_ShowDevice_UnknownName(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = agent.CleanUp() })
 
-	service := NewDeviceVlanService(agent)
+	service := NewDeviceVlanService(NewBackend(agent))
 
 	resp, err := service.ShowDevice(t.Context(), &vlanpb.ShowDeviceVlanRequest{Name: "absent"})
 
@@ -119,7 +120,7 @@ func Test_DeviceVlanService_ShowDevice_ReportsVlanAndBindings(t *testing.T) {
 	require.NoError(t, agent.UpdatePipeline(ffi.PipelineConfig{Name: "p-in"}))
 	require.NoError(t, agent.UpdatePipeline(ffi.PipelineConfig{Name: "p-out"}))
 
-	service := NewDeviceVlanService(agent)
+	service := NewDeviceVlanService(NewBackend(agent))
 
 	_, err = service.UpdateDevice(t.Context(), &vlanpb.UpdateDeviceVlanRequest{
 		Name: "d0",
@@ -175,7 +176,7 @@ func Test_DeviceVlanService_ShowDevice_IgnoresOtherDeviceTypes(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = plainAgent.CleanUp() })
 
-	_, err = plain.NewDevicePlainService(plainAgent).UpdateDevice(t.Context(), &plainpb.UpdateDevicePlainRequest{
+	_, err = plain.NewDevicePlainService(plain.NewBackend(plainAgent)).UpdateDevice(t.Context(), &plainpb.UpdateDevicePlainRequest{
 		Name:   "p0",
 		Device: &commonpb.Device{},
 	})
@@ -185,7 +186,7 @@ func Test_DeviceVlanService_ShowDevice_IgnoresOtherDeviceTypes(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = vlanAgent.CleanUp() })
 
-	service := NewDeviceVlanService(vlanAgent)
+	service := NewDeviceVlanService(NewBackend(vlanAgent))
 
 	resp, err := service.ShowDevice(t.Context(), &vlanpb.ShowDeviceVlanRequest{Name: "p0"})
 
@@ -207,4 +208,65 @@ func freeBytesForAgent(t *testing.T, shm *ffi.SharedMemory, name string) uint64 
 
 	t.Fatalf("agent %q not found in dataplane config", name)
 	return 0
+}
+
+// TestDeleteDevice_ReleasesPublishedDevice verifies that deleting a
+// device removes it from the dataplane registry and forgets the published
+// entry, so the handle is reclaimed rather than left for a later update
+// under the same name.
+func TestDeleteDevice_ReleasesPublishedDevice(t *testing.T) {
+	harness, err := dataplaneut.NewHarness(dataplaneut.Config{
+		CPMemory:      uint64(datasize.MB * 32),
+		DPMemory:      uint64(datasize.MB * 4),
+		WorkerCount:   1,
+		DevicesToLoad: []string{"vlan"},
+	})
+	require.NoError(t, err)
+	t.Cleanup(harness.Free)
+
+	shm := harness.SharedMemory()
+	agent, err := shm.AgentAttach("vlan", 0, datasize.MB*2)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = agent.CleanUp() })
+
+	service := NewDeviceVlanService(NewBackend(agent))
+	_, err = service.UpdateDevice(t.Context(), &vlanpb.UpdateDeviceVlanRequest{
+		Name:   "v0",
+		Device: &commonpb.Device{},
+		Vlan:   100,
+	})
+	require.NoError(t, err)
+	_, err = service.ShowDevice(t.Context(), &vlanpb.ShowDeviceVlanRequest{Name: "v0"})
+	require.NoError(t, err)
+
+	require.NoError(t, service.DeleteDevice("v0"))
+
+	_, err = service.ShowDevice(t.Context(), &vlanpb.ShowDeviceVlanRequest{Name: "v0"})
+	require.Equal(t, codes.NotFound, status.Code(err))
+	err = service.DeleteDevice("v0")
+	require.ErrorIs(t, err, configstore.ErrNotFound)
+}
+
+// TestDeleteDevice_MissingDevice verifies that deleting a name nothing is
+// published under reports not found without reaching the dataplane.
+func TestDeleteDevice_MissingDevice(t *testing.T) {
+	harness, err := dataplaneut.NewHarness(dataplaneut.Config{
+		CPMemory:      uint64(datasize.MB * 32),
+		DPMemory:      uint64(datasize.MB * 4),
+		WorkerCount:   1,
+		DevicesToLoad: []string{"vlan"},
+	})
+	require.NoError(t, err)
+	t.Cleanup(harness.Free)
+
+	shm := harness.SharedMemory()
+	agent, err := shm.AgentAttach("vlan", 0, datasize.MB*2)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = agent.CleanUp() })
+
+	service := NewDeviceVlanService(NewBackend(agent))
+
+	err = service.DeleteDevice("absent")
+
+	require.ErrorIs(t, err, configstore.ErrNotFound)
 }

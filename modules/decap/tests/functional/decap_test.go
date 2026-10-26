@@ -19,7 +19,7 @@ import (
 	"github.com/yanet-platform/yanet2/common/go/xerror"
 	"github.com/yanet-platform/yanet2/common/go/xpacket"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
-	plain "github.com/yanet-platform/yanet2/devices/plain/controlplane"
+	cplain "github.com/yanet-platform/yanet2/devices/plain/bindings/go/cplain"
 	decap "github.com/yanet-platform/yanet2/modules/decap/controlplane"
 	"github.com/yanet-platform/yanet2/modules/forward/bindings/go/cforward"
 	forward "github.com/yanet-platform/yanet2/modules/forward/controlplane"
@@ -109,7 +109,7 @@ func wireDecapPipeline(t *testing.T, agent *ffi.Agent, configName string) {
 		Functions: []string{configName},
 	}))
 	require.NoError(t, agent.UpdatePipeline(ffi.PipelineConfig{Name: "dummy"}))
-	_, err = plain.UpdateDevices(agent, []ffi.DeviceConfig{{
+	_, err = cplain.UpdateDevices(agent, []ffi.DeviceConfig{{
 		Name:   "port0",
 		Input:  []ffi.DevicePipelineConfig{{Name: configName, Weight: 1}},
 		Output: []ffi.DevicePipelineConfig{{Name: "dummy", Weight: 1}},
@@ -796,7 +796,7 @@ func Test_Decap_NestedIPIPFiveLayersReachOutput(t *testing.T) {
 		Functions: []string{"nested"},
 	}))
 	require.NoError(t, agent.UpdatePipeline(ffi.PipelineConfig{Name: "nested-dummy"}))
-	_, err = plain.UpdateDevices(agent, []ffi.DeviceConfig{{
+	_, err = cplain.UpdateDevices(agent, []ffi.DeviceConfig{{
 		Name:   "port0",
 		Input:  []ffi.DevicePipelineConfig{{Name: "nested", Weight: 1}},
 		Output: []ffi.DevicePipelineConfig{{Name: "nested-dummy", Weight: 1}},
@@ -902,7 +902,7 @@ func Test_Decap_NestedIPIPStopsAtTotalLimit(t *testing.T) {
 				Functions: []string{"nested"},
 			}))
 			require.NoError(t, agent.UpdatePipeline(ffi.PipelineConfig{Name: "dummy"}))
-			_, err = plain.UpdateDevices(agent, []ffi.DeviceConfig{{
+			_, err = cplain.UpdateDevices(agent, []ffi.DeviceConfig{{
 				Name:   "port0",
 				Input:  []ffi.DevicePipelineConfig{{Name: "nested", Weight: 1}},
 				Output: []ffi.DevicePipelineConfig{{Name: "dummy", Weight: 1}},
@@ -977,7 +977,7 @@ func Test_Decap_MissDoesNotRenewTotalLimit(t *testing.T) {
 		Functions: []string{"miss"},
 	}))
 	require.NoError(t, agent.UpdatePipeline(ffi.PipelineConfig{Name: "dummy"}))
-	_, err = plain.UpdateDevices(agent, []ffi.DeviceConfig{{
+	_, err = cplain.UpdateDevices(agent, []ffi.DeviceConfig{{
 		Name:   "port0",
 		Input:  []ffi.DevicePipelineConfig{{Name: "miss", Weight: 1}},
 		Output: []ffi.DevicePipelineConfig{{Name: "dummy", Weight: 1}},

@@ -52,6 +52,10 @@ func (m *backend) UpdateDevice(
 	return device, nil
 }
 
+func (m *backend) DeleteDevice(name string) error {
+	return m.agent.DeleteDevice(name)
+}
+
 // toBindingPipelines converts service pipeline assignments into the binding
 // representation consumed by the C API.
 func toBindingPipelines(pipelines []Pipeline) []ctrafgen.Pipeline {

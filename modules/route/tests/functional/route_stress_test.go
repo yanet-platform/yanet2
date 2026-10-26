@@ -15,7 +15,7 @@ import (
 
 	"github.com/yanet-platform/yanet2/common/go/xpacket"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
-	plain "github.com/yanet-platform/yanet2/devices/plain/controlplane"
+	cplain "github.com/yanet-platform/yanet2/devices/plain/bindings/go/cplain"
 	route "github.com/yanet-platform/yanet2/modules/route/controlplane"
 	"github.com/yanet-platform/yanet2/modules/route/controlplane/routepb/v1"
 )
@@ -109,10 +109,10 @@ func stressUpdateRequest(tb testing.TB, version stressVersion) *routepb.UpdateFI
 // route config unreferenced by any live chain so DeleteConfig can delete
 // it, a module a chain still names refuses to delete. Returns the device
 // handles the caller owns from then on.
-func unwireRouteInput(tb testing.TB, agent *ffi.Agent, deviceName string) []*plain.DeviceConfig {
+func unwireRouteInput(tb testing.TB, agent *ffi.Agent, deviceName string) []*cplain.DeviceConfig {
 	tb.Helper()
 
-	devices, err := plain.UpdateDevices(agent, []ffi.DeviceConfig{{Name: deviceName}})
+	devices, err := cplain.UpdateDevices(agent, []ffi.DeviceConfig{{Name: deviceName}})
 	require.NoError(tb, err)
 	require.NoError(tb, agent.DeletePipeline(stressConfigName))
 	require.NoError(tb, agent.DeletePipeline("dummy"))
@@ -123,7 +123,7 @@ func unwireRouteInput(tb testing.TB, agent *ffi.Agent, deviceName string) []*pla
 // freeSuperseded frees every device handle whose config a later publish
 // replaced and keeps the rest, the one still published refusing as it
 // should.
-func freeSuperseded(handles []*plain.DeviceConfig) []*plain.DeviceConfig {
+func freeSuperseded(handles []*cplain.DeviceConfig) []*cplain.DeviceConfig {
 	kept := handles[:0]
 	for _, handle := range handles {
 		if err := handle.Free(); errors.Is(err, ffi.ErrStillReferenced) {
@@ -162,7 +162,7 @@ func TestRouteStress_ConcurrentUpdatesReadsAndPacketsLeaveNoLeak(t *testing.T) {
 	// a teardown, the device config with its bindings cleared, so the
 	// baseline is what a full cycle returns the arena to. Device handles
 	// are kept and freed once a later publish supersedes them.
-	var devices []*plain.DeviceConfig
+	var devices []*cplain.DeviceConfig
 	_, err := service.UpdateFIB(ctx, stressUpdateRequest(t, versions[0]))
 	require.NoError(t, err)
 	devices = append(devices, wirePipeline(t, agent, "port0", stressConfigName)...)

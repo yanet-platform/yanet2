@@ -50,7 +50,7 @@ func NewDevicePlainDevice(cfg *Config, options ...Option) (*DevicePlainDevice, e
 	}
 	agent := attachment.Agent
 
-	plainService := NewDevicePlainService(agent)
+	plainService := NewDevicePlainService(NewBackend(agent))
 
 	return &DevicePlainDevice{
 		cfg:        cfg,
@@ -78,4 +78,21 @@ func (m *DevicePlainDevice) RegisterService(server *grpc.Server) {
 // Close closes the device and releases all resources
 func (m *DevicePlainDevice) Close() error {
 	return m.attachment.Close()
+}
+
+// DeviceType returns the registry type of the devices this module owns.
+func (m *DevicePlainDevice) DeviceType() string {
+	return "plain"
+}
+
+// Dataplane returns the shared-memory path and instance this module's
+// agent serves.
+func (m *DevicePlainDevice) Dataplane() (string, uint32) {
+	return m.cfg.MemoryPath.Unwrap(), m.cfg.InstanceID.Unwrap()
+}
+
+// DeleteDevice releases the device service's handle for the named device;
+// the Device service calls it as it deletes the device.
+func (m *DevicePlainDevice) DeleteDevice(name string) error {
+	return m.service.DeleteDevice(name)
 }

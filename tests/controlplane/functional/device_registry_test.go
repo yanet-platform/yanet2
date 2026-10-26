@@ -7,10 +7,9 @@ import (
 	"github.com/stretchr/testify/require"
 
 	dataplaneut "github.com/yanet-platform/yanet2/bindings/go/dataplane_ut"
-	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
-	plain "github.com/yanet-platform/yanet2/devices/plain/controlplane"
-	vlan "github.com/yanet-platform/yanet2/devices/vlan/controlplane"
+	cplain "github.com/yanet-platform/yanet2/devices/plain/bindings/go/cplain"
+	cvlan "github.com/yanet-platform/yanet2/devices/vlan/bindings/go/cvlan"
 )
 
 func TestDeviceRegistryRejectsSameNameAcrossTypes(t *testing.T) {
@@ -34,9 +33,9 @@ func TestDeviceRegistryRejectsSameNameAcrossTypes(t *testing.T) {
 	require.Len(t, devicesBefore, 1)
 	require.Equal(t, "plain", devicesBefore[0].Type)
 	require.Equal(t, "d0", devicesBefore[0].Name)
-	plainConfig, err := plain.NewDeviceConfig(agent, "d0", &commonpb.Device{})
+	plainConfig, err := cplain.NewDeviceConfig(agent, "d0", nil, nil)
 	require.NoError(t, err)
-	vlanConfig, err := vlan.NewDeviceConfig(agent, "d0", &commonpb.Device{}, 100)
+	vlanConfig, err := cvlan.NewDeviceConfig(agent, "d0", nil, nil, 100)
 	require.NoError(t, err)
 
 	updateErr := agent.UpdateDevices([]ffi.ShmDeviceConfig{

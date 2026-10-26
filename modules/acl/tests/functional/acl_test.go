@@ -25,7 +25,7 @@ import (
 	"github.com/yanet-platform/yanet2/common/go/xerror"
 	"github.com/yanet-platform/yanet2/common/go/xpacket"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
-	plain "github.com/yanet-platform/yanet2/devices/plain/controlplane"
+	cplain "github.com/yanet-platform/yanet2/devices/plain/bindings/go/cplain"
 	"github.com/yanet-platform/yanet2/modules/acl/bindings/go/cacl"
 	acl "github.com/yanet-platform/yanet2/modules/acl/controlplane"
 	"github.com/yanet-platform/yanet2/modules/acl/controlplane/aclpb/v1"
@@ -229,7 +229,7 @@ func wireACLPipeline(
 	require.NoError(tb, agent.UpdatePipeline(ffi.PipelineConfig{
 		Name: "dummy",
 	}))
-	_, err = plain.UpdateDevices(agent, []ffi.DeviceConfig{{
+	_, err = cplain.UpdateDevices(agent, []ffi.DeviceConfig{{
 		Name:   device,
 		Input:  []ffi.DevicePipelineConfig{{Name: configName, Weight: 1}},
 		Output: []ffi.DevicePipelineConfig{{Name: "dummy", Weight: 1}},
@@ -463,7 +463,7 @@ func Test_ACLService_UpdateConfig_ConcurrentCompiles(t *testing.T) {
 			{config: "b", denies: !denyA},
 		}
 		for _, tc := range cases {
-			_, err := plain.UpdateDevices(agent, []ffi.DeviceConfig{{
+			_, err := cplain.UpdateDevices(agent, []ffi.DeviceConfig{{
 				Name:   "port0",
 				Input:  []ffi.DevicePipelineConfig{{Name: tc.config, Weight: 1}},
 				Output: []ffi.DevicePipelineConfig{{Name: "dummy", Weight: 1}},

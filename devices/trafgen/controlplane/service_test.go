@@ -16,6 +16,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
+	"github.com/yanet-platform/yanet2/controlplane/configstore"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/devices/trafgen/bindings/go/ctrafgen"
 	trafgenpb "github.com/yanet-platform/yanet2/devices/trafgen/controlplane/trafgenpb/v1"
@@ -30,6 +31,14 @@ type recordingBackend struct {
 	output  []Pipeline
 	calls   int
 	err     error
+
+	deletedNames []string
+	deleteErr    error
+}
+
+func (m *recordingBackend) DeleteDevice(name string) error {
+	m.deletedNames = append(m.deletedNames, name)
+	return m.deleteErr
 }
 
 func (m *recordingBackend) UpdateDevice(
@@ -342,4 +351,60 @@ func Test_TrafgenService_RefusedWrite(t *testing.T) {
 			})
 		}
 	}
+}
+
+// Test_TrafgenService_DeleteDevice_RemovesConfig verifies that deleting a
+// device removes its name from the listed configs and reaches the
+// dataplane through the backend.
+func Test_TrafgenService_DeleteDevice_RemovesConfig(t *testing.T) {
+	svc, backend := newTestService()
+	ctx := t.Context()
+
+	_, err := svc.UpdateDevice(ctx, &trafgenpb.UpdateDeviceRequest{Name: "trafgen0"})
+	require.NoError(t, err)
+
+	list, err := svc.ListConfigs(ctx, &trafgenpb.ListConfigsRequest{})
+	require.NoError(t, err)
+	require.Equal(t, []string{"trafgen0"}, list.Configs)
+
+	require.NoError(t, svc.DeleteDevice("trafgen0"))
+
+	require.Equal(t, []string{"trafgen0"}, backend.deletedNames)
+	list, err = svc.ListConfigs(ctx, &trafgenpb.ListConfigsRequest{})
+	require.NoError(t, err)
+	require.Empty(t, list.Configs)
+	_, err = svc.ShowConfig(ctx, &trafgenpb.ShowConfigRequest{Name: "trafgen0"})
+	require.Equal(t, codes.NotFound, status.Code(err))
+}
+
+// Test_TrafgenService_DeleteDevice_MissingConfig verifies that deleting a
+// name nothing is published under reports not found without reaching the
+// backend.
+func Test_TrafgenService_DeleteDevice_MissingConfig(t *testing.T) {
+	svc, backend := newTestService()
+
+	err := svc.DeleteDevice("absent")
+
+	require.ErrorIs(t, err, configstore.ErrNotFound)
+	require.Empty(t, backend.deletedNames)
+}
+
+// Test_TrafgenService_DeleteDevice_RefusedDeleteKeepsConfig verifies that
+// a delete the dataplane refuses leaves the config listed, so a retried
+// delete reaches the dataplane again instead of reporting the name as
+// unknown.
+func Test_TrafgenService_DeleteDevice_RefusedDeleteKeepsConfig(t *testing.T) {
+	svc, backend := newTestService()
+	ctx := t.Context()
+
+	_, err := svc.UpdateDevice(ctx, &trafgenpb.UpdateDeviceRequest{Name: "trafgen0"})
+	require.NoError(t, err)
+
+	backend.deleteErr = ffi.ErrFailedPrecondition
+	err = svc.DeleteDevice("trafgen0")
+	require.ErrorIs(t, err, ffi.ErrFailedPrecondition)
+
+	list, err := svc.ListConfigs(ctx, &trafgenpb.ListConfigsRequest{})
+	require.NoError(t, err)
+	require.Equal(t, []string{"trafgen0"}, list.Configs)
 }
