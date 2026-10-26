@@ -40,48 +40,19 @@ lib_dataplane_dep = declare_dependency(
   dependencies: lib_dependencies,
 )
 
-dependencies = [
+# Startup finds each built-in module, object and device by its constructor's
+# name; each appended dependency links that constructor in and exports it.
+dataplane_exe_deps = [
   lib_common_dep,
   lib_logging_dep,
   libdpdk_dep,
   lib_dataplane_dep,
-
-  # modules
-  lib_decap_dp_dep,
-  lib_dscp_dp_dep,
-  lib_acl_dp_dep,
-  lib_forward_dp_dep,
-  lib_mirror_dp_dep,
-  lib_route_dp_dep,
-  lib_route_mpls_dp_dep,
-  lib_nat64_dp_dep,
-  lib_pdump_dp_dep,
-  lib_fwstate_dp_dep,
-  lib_blackhole_dp_dep,
-  lib_unrdup_dp_dep,
-  lib_l3b_dp_dep,
-
-  # objects
-  # Startup resolves these constructors by dlsym on this executable, so they must be linked in and exported.
-  lib_fwstate_objects_dep,
-  lib_l3b_objects_dep,
-  lib_ring_objects_dep,
-
-  #devices
-  lib_dev_plain_dp_dep,
-  lib_dev_vlan_dp_dep,
-  lib_dev_trafgen_dp_dep,
-  lib_dev_vxlan_dp_dep,
-]
-
-sources = files(
-  'main.c',
-)
+] + dataplane_module_deps + dataplane_object_deps + dataplane_device_deps
 
 executable(
   'yanet-dataplane',
-  sources,
-  dependencies: dependencies,
+  files('main.c'),
+  dependencies: dataplane_exe_deps,
   install: true,
   # Plugins loaded at run time resolve the dataplane symbols they call against
   # this executable.

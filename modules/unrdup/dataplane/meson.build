@@ -24,3 +24,5 @@ lib_unrdup_dp_dep = declare_dependency(
         '-Wl,--export-dynamic-symbol=new_module_unrdup',
     ],
 )
+
+dataplane_module_deps += lib_unrdup_dp_dep

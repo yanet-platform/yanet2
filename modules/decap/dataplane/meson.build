@@ -23,3 +23,5 @@ lib_decap_dp_dep = declare_dependency(
     ],
     dependencies: dp_dependencies,
 )
+
+dataplane_module_deps += lib_decap_dp_dep

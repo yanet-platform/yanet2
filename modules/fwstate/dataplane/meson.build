@@ -27,3 +27,5 @@ lib_fwstate_dp_dep = declare_dependency(
   ],
   dependencies: dp_dependencies,
 )
+
+dataplane_module_deps += lib_fwstate_dp_dep

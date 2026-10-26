@@ -23,3 +23,5 @@ lib_mirror_dp_dep = declare_dependency(
     '-Wl,--export-dynamic-symbol=new_module_mirror',
   ],
 )
+
+dataplane_module_deps += lib_mirror_dp_dep

@@ -168,6 +168,12 @@ yanet_rootdir = include_directories('.')
 # Modules will populate this with their fuzzing targets
 fuzzing_targets = {}
 
+# The modules, objects and devices built into the dataplane executable: each
+# one appends the dependency that links and registers it.
+dataplane_module_deps = []
+dataplane_object_deps = []
+dataplane_device_deps = []
+
 yanet_dpdk_platform = get_option('dpdk_platform')
 libdpdk_default_options = [
   'platform=' + yanet_dpdk_platform,
@@ -351,10 +357,14 @@ cgo_packages = {}
 go_proto_targets = []
 subdir('common')
 subdir('lib')
-module_test_dirs = []
+subdir('devices')
 subdir('objects')
 subdir('modules')
-subdir('devices')
+# Tests that link modules and devices.
+subdir('lib/dataplane_ut/tests')
+if not dataplane_only
+  subdir('lib/controlplane/tests')
+endif
 
 if not dataplane_only
   subdir('bindings/go')
@@ -440,7 +450,6 @@ if not dataplane_only
   endforeach
 endif
 
-subdir('lib/dataplane_ut/tests')
 subdir('dataplane')
 
 install_data(
@@ -450,7 +459,6 @@ install_data(
 )
 
 if not dataplane_only
-  subdir('lib/controlplane/tests')
   # Operator proto targets must exist before their consumers are declared.
   #
   # Meson resolves variables in subdir traversal order, so the control-plane
@@ -461,9 +469,6 @@ if not dataplane_only
   subdir('operators/route/operatorpb')
   subdir('controlplane')
   subdir('operators')
-  foreach dir : module_test_dirs
-    subdir(dir)
-  endforeach
   subdir('tests')
   alias_target('go-test-prepare', go_proto_targets + cgo_test_deps)
 endif

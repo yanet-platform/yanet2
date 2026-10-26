@@ -1,6 +1,8 @@
+# The public modules. The Makefile reads this list; the dataplane's default
+# module set and the .gitignore whitelist repeat it by hand.
 subdir('decap')
 subdir('fwstate')
-subdir('acl') # depends on fwstate
+subdir('acl')
 subdir('route')
 subdir('route-mpls')
 subdir('forward')

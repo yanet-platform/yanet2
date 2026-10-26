@@ -25,3 +25,5 @@ lib_route_dp_dep = declare_dependency(
     '-Wl,--export-dynamic-symbol=new_object_route_fib',
   ],
 )
+
+dataplane_module_deps += lib_route_dp_dep

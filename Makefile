@@ -62,24 +62,11 @@ CLI_MODULES := \
 	operator-pipeline \
 	operator-route
 
-# Public module directories, whitelisted in .gitignore under /modules/*.
+# Public module directories: the ones modules/meson.build names.
 #
-# Anything under modules/ that is not listed here is a private, gitignored
-# module (see modules/meson.build's extra_modules option).
-PUBLIC_MODULES := \
-	acl \
-	blackhole \
-	decap \
-	dscp \
-	forward \
-	fwstate \
-	l3b \
-	mirror \
-	nat64 \
-	pdump \
-	route \
-	route-mpls \
-	unrdup
+# Anything else under modules/ is a private, gitignored module (see
+# modules/meson.build's extra_modules option).
+PUBLIC_MODULES := $(shell sed -n "s/^[[:space:]\#]*subdir('\([^']*\)').*/\1/p" modules/meson.build)
 
 # All directories under modules/, public and private alike.
 MODULE_DIRS := $(notdir $(patsubst %/,%,$(wildcard modules/*/)))
