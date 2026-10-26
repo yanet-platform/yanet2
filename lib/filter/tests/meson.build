@@ -104,6 +104,7 @@ test('basic_proto_range', basic_proto_range, suite: ['filter'])
 
 subdir('shm')
 
+# Run by hand only: each maps about 11 GiB of hugepages (some 5,500 2 MiB pages).
 executable('bench_net4',
   ['bench_net4.c'], 
   dependencies: test_deps,

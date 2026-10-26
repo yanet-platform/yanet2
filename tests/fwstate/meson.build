@@ -18,14 +18,15 @@ fwmap_bench_test = executable(
   ['fwmap_bench_test.c'],
   dependencies: fwmap_test_deps,
 )
-test('fwmap_bench-st', fwmap_bench_test, suite: ['fwstate', 'large'])
+benchmark('fwmap_bench-st', fwmap_bench_test, suite: ['fwstate'], timeout: 300)
 
 fwmap_heavy_bench_test = executable(
   'fwmap_heavy_bench_test',
   ['fwmap_heavy_bench_test.c'],
   dependencies: fwmap_test_deps,
 )
-test('fwmap_heavy_bench-mt', fwmap_heavy_bench_test, suite: ['fwstate', 'large'])
+# Needs a 1 GiB arena on a hugetlbfs mount at /dev/hugepages.
+benchmark('fwmap_heavy_bench-mt', fwmap_heavy_bench_test, suite: ['fwstate'], timeout: 300)
 
 fwtable_test = executable(
   'fwtable_test',

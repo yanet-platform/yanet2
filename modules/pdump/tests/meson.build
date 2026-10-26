@@ -58,7 +58,7 @@ benchmark('pdump_bench', pdump_bench_exe, timeout: 300)
 limit_test_exe = executable(
   'pdump_limit_test',
   sources: files('limit_test.c'),
-  c_args: yanet_test_c_args + ['-UNDEBUG'],
+  c_args: yanet_test_c_args,
   include_directories: yanet_rootdir,
 )
 
