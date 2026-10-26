@@ -4,7 +4,7 @@ deps = [
   lib_lib_utils_dep,
   lib_errors_dep,
   lib_logging_dep,
-  libdpdk_dep,
+  libdpdk_inc_dep,
 ]
 
 compiler = executable('compiler',

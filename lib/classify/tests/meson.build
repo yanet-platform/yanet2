@@ -3,7 +3,7 @@ test_deps = [
   lib_classify_compiler_dep,
   lib_lib_utils_dep,
   lib_logging_dep,
-  libdpdk_dep,
+  libdpdk_inc_dep,
 ]
 
 classify_smoke = executable(

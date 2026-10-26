@@ -19,7 +19,7 @@ foreach target_name, target_info : fuzzing_targets
     c_args: fuzz_args,
     link_args: fuzz_args,
     sources: [target_info['source']] + nofuzz_sources,
-    dependencies: [libdpdk_dep] + target_info['deps'] + [lib_logging_dep],
+    dependencies: [libdpdk_test_dep] + target_info['deps'] + [lib_logging_dep],
     include_directories: [yanet_rootdir, target_info['module_dir']],
   )
 

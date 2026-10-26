@@ -26,7 +26,7 @@ vxlan_dataplane_test = executable(
     lib_dp_zone_dep,
     lib_dev_vxlan_dp_dep,
     lib_dev_plain_dp_dep,
-    libdpdk_dep,
+    libdpdk_test_dep,
   ],
   include_directories: yanet_rootdir,
 )

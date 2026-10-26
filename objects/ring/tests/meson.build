@@ -8,7 +8,7 @@ ring_object_test = executable(
     lib_ring_objects_dep,
     lib_agent_cp_dep,
     lib_config_cp_dep,
-    libdpdk_dep,
+    libdpdk_test_dep,
   ],
   include_directories: yanet_rootdir,
 )
