@@ -984,13 +984,7 @@ mod tests {
     /// packet was taken.
     #[test]
     fn test_pass_all_rust_twin_matches_c() {
-        for (inputs, outputs, counts) in [
-            (0, 0, [0, 0, 0, 0]),
-            (3, 0, [3, 180, 0, 0]),
-            (0, 2, [0, 0, 2, 120]),
-            (2, 2, [2, 120, 2, 120]),
-            (1, 1, [3, 180, 1, 60]),
-        ] {
+        let f = |inputs: usize, outputs: usize, counts: [u64; 4]| {
             let mut c_packets = vec![bindings::packet::default(); inputs + outputs];
             let mut rust_packets = vec![bindings::packet::default(); inputs + outputs];
             let (c_in, c_out) = c_packets.split_at_mut(inputs);
@@ -1010,7 +1004,18 @@ mod tests {
                 observe(&in_rust, &rust_packets),
                 "{inputs} input, {outputs} output, counters {counts:?}"
             );
-        }
+        };
+
+        // Empty front.
+        f(0, 0, [0, 0, 0, 0]);
+        // Input only.
+        f(3, 0, [3, 180, 0, 0]);
+        // Output only.
+        f(0, 2, [0, 0, 2, 120]);
+        // Input appended after output.
+        f(2, 2, [2, 120, 2, 120]);
+        // Input counters still counting packets taken before the pass.
+        f(1, 1, [3, 180, 1, 60]);
     }
 
     /// verifies that the Rust twin of `packet_headroom_prepend` accepts and
@@ -1018,26 +1023,42 @@ mod tests {
     /// around the descriptor boundary and across the headroom range.
     #[test]
     fn test_grow_front_rust_twin_matches_c() {
+        let f = |data_off: u16, len: u16| {
+            let (mut c_buffer, mut rust_buffer) = ([0u8; 1024], [0u8; 1024]);
+            let (mut in_c, mut in_rust) = (mbuf(&mut c_buffer, data_off, 7), mbuf(&mut rust_buffer, data_off, 7));
+
+            // SAFETY: valid mbufs of this test.
+            let (c, rust) = unsafe {
+                (
+                    !bindings::yanet_sys_dp_headroom_prepend(&raw mut in_c, len).is_null(),
+                    grow_front(&raw mut in_rust, len),
+                )
+            };
+
+            assert_eq!(
+                (c, in_c.data_off, in_c.data_len, in_c.pkt_len),
+                (rust, in_rust.data_off, in_rust.data_len, in_rust.pkt_len),
+                "offset {data_off}, len {len}"
+            );
+        };
+
         let descriptor = size_of::<bindings::packet>() as u16;
-        let (mut c_buffer, mut rust_buffer) = ([0u8; 1024], [0u8; 1024]);
+        // Nothing to grow, the data starting right after the descriptor.
+        f(descriptor, 0);
+        // Exactly the room the headroom holds beyond the descriptor.
+        f(descriptor + 8, 8);
+        // One byte more than that room.
+        f(descriptor + 8, 9);
+        // Data starting inside the descriptor: no room at all.
+        f(descriptor - 1, 0);
+        // The dataplane's default headroom, used up and overrun.
+        f(256, 256 - descriptor);
+        f(256, 600);
+        // Every offset and length around the descriptor, and across the
+        // headroom.
         for data_off in (0..=descriptor + 40).chain([255, 256, 600]) {
             for len in (0..=descriptor + 40).chain([255, 256, 600]) {
-                let (mut in_c, mut in_rust) = (mbuf(&mut c_buffer, data_off, 7), mbuf(&mut rust_buffer, data_off, 7));
-
-                // SAFETY: valid mbufs of this test.
-                let (c, rust) = unsafe {
-                    (
-                        !bindings::yanet_sys_dp_headroom_prepend(&raw mut in_c, len).is_null(),
-                        grow_front(&raw mut in_rust, len),
-                    )
-                };
-
-                assert_eq!(c, rust, "offset {data_off}, len {len}");
-                assert_eq!(
-                    (in_c.data_off, in_c.data_len, in_c.pkt_len),
-                    (in_rust.data_off, in_rust.data_len, in_rust.pkt_len),
-                    "offset {data_off}, len {len}"
-                );
+                f(data_off, len);
             }
         }
     }
