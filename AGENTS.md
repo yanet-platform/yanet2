@@ -12,7 +12,7 @@ Data flow: CLI (Rust) → gRPC → gateway (Go) → gRPC → module control plan
 
 ```bash
 git submodule update --init && meson setup build   # once; DPDK is a meson subproject
-make all | make build | make cli                   # everything | meson compile -C build | cargo build --release --workspace
+make all | make build | make cli                   # everything | meson compile -C build | cargo build --release --workspace --bins
 npm ci && npm run build -w web                     # web is an npm workspace: install at repo root
 make setup-debug | make setup-asan                 # debug / ASan+UBSan builds
 make test | make test-asan | make test-tsan        # Go + meson tests
