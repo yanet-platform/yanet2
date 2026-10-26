@@ -45,6 +45,14 @@
 //! - **align**: the block allocator aligns a block to at least the smaller of
 //!   `MAX_ALIGN` and its size rounded up to a power of two, so the prepared
 //!   buffer is aligned for every type the export checks admit.
+//!
+//! # Module obligations
+//!
+//! What a module owes the pipeline. Module documentation cites them by name,
+//! as `(module: <name>)`.
+//!
+//! - **drain**: when a handler returns, its input is empty: every input packet
+//!   has been passed, dropped or routed to a device through the batch.
 
 pub mod batch;
 pub mod cx;

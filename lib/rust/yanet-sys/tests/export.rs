@@ -10,7 +10,7 @@ use yanet_sdk_testing as _;
 use yanet_shm as _;
 use yanet_sys::{
     bindings,
-    dp::{Batch, CommitCx, Cx, Module},
+    dp::{Batch, CommitCx, Cx, Module, Verdict},
 };
 
 /// A module with a prepared value of eight bytes.
@@ -20,7 +20,9 @@ impl Module for Exported {
     const NAME: &'static str = "exported";
     type Config = u64;
     type Prepared<'p> = u64;
-    fn handle(_: &mut Cx<Self>, _: &mut Batch) {}
+    fn handle(_: &mut Cx<Self>, batch: &mut Batch) {
+        batch.dispatch(|_| Verdict::Pass);
+    }
     fn prepare(_: &CommitCx<'_, Self>) -> u64 {
         0
     }

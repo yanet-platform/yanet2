@@ -198,13 +198,15 @@ pub unsafe fn new_module<M: Module>(
 /// A declared name with a `-` is exported with a `_` in its place:
 ///
 /// ```
-/// use yanet_sys::dp::{Batch, CommitCx, Cx, Module};
+/// use yanet_sys::dp::{Batch, CommitCx, Cx, Module, Verdict};
 /// struct RouteMpls;
 /// impl Module for RouteMpls {
 ///     const NAME: &'static str = "route-mpls";
 ///     type Config = u64;
 ///     type Prepared<'p> = ();
-///     fn handle(_: &mut Cx<Self>, _: &mut Batch) {}
+///     fn handle(_: &mut Cx<Self>, batch: &mut Batch) {
+///         batch.dispatch(|_| Verdict::Pass);
+///     }
 ///     fn prepare(_: &CommitCx<'_, Self>) {}
 /// }
 /// yanet_sys::export_module!(name = route_mpls, module = RouteMpls);

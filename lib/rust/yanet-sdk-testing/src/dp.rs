@@ -17,13 +17,13 @@ use core::{
 use yanet_shm::{rel::RelPtr, shm::ShmLayout};
 use yanet_sys::{
     bindings,
-    dp::{Batch, CommitCx, Cx, Module, ModuleConfig, rt},
+    dp::{Batch, CommitCx, Cx, Module, ModuleConfig, Verdict, rt},
 };
 
 use crate::BlockArena;
 
-/// A module that does nothing and has the configuration `C`, the module of
-/// the doc examples of the runtime.
+/// A module that passes every packet and has the configuration `C`, the
+/// module of the doc examples of the runtime.
 #[doc(hidden)]
 pub struct Model<C>(PhantomData<fn() -> C>);
 
@@ -32,7 +32,9 @@ impl<C: ShmLayout + Sync + 'static> Module for Model<C> {
     type Config = C;
     type Prepared<'p> = ();
 
-    fn handle(_: &mut Cx<Self>, _: &mut Batch) {}
+    fn handle(_: &mut Cx<Self>, batch: &mut Batch) {
+        batch.dispatch(|_| Verdict::Pass);
+    }
 
     fn prepare(_: &CommitCx<'_, Self>) {}
 }
@@ -116,7 +118,7 @@ impl TestPacket {
 pub enum Fate {
     Output,
     Drop,
-    /// Not taken: still on the input list.
+    /// Still on the input list, against the drain obligation of a module.
     Input,
     /// On no list of the front: taken and never disposed of.
     Lost,

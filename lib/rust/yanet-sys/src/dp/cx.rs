@@ -149,14 +149,15 @@ impl<'id> CounterRef<'id> {
     /// The handler binds the handle of its prepared value:
     ///
     /// ```
-    /// use yanet_sys::dp::{Batch, CommitCx, Counter, CounterRef, Cx, Module};
+    /// use yanet_sys::dp::{Batch, CommitCx, Counter, CounterRef, Cx, Module, Verdict};
     /// struct Mine;
     /// impl Module for Mine {
     ///     const NAME: &'static str = "mine";
     ///     type Config = Counter;
     ///     type Prepared<'p> = CounterRef<'p>;
-    ///     fn handle<'id>(cx: &mut Cx<'id, Self>, _: &mut Batch<'id>) {
+    ///     fn handle<'id>(cx: &mut Cx<'id, Self>, batch: &mut Batch<'id>) {
     ///         cx.prepared().bind(cx).add(1);
+    ///         batch.dispatch(|_| Verdict::Pass);
     ///     }
     ///     fn prepare<'p>(cx: &CommitCx<'p, Self>) -> CounterRef<'p> {
     ///         cx.config().resolve(cx)

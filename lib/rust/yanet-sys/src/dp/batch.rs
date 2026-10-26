@@ -2,8 +2,8 @@
 //!
 //! The packet lists stay C's and are used as a C handler uses them: taking
 //! a packet pops it off the input list, and its verdict moves it to the
-//! output or drop list or routes it to a device. A packet the handler does
-//! not take stays on the input list.
+//! output or drop list or routes it to a device. A handler takes every input
+//! packet (module: drain).
 
 use core::{marker::PhantomData, ptr::NonNull};
 
