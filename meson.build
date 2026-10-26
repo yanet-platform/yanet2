@@ -249,6 +249,14 @@ yanet_go_env += {
   'CGO_CPPFLAGS': yanet_cache_line_arg,
 }
 
+# The same cgo preprocessor flags for Go builds outside meson, which the
+# Makefile, the gate and direct go test runs read from this file.
+configure_file(
+  output: 'yanet_cgo_cppflags',
+  command: ['echo', yanet_go_env['CGO_CPPFLAGS']],
+  capture: true,
+)
+
 # gRPC-only operators never touch shared memory and link no cgo.
 #
 # Building them with cgo disabled turns a stray import of a module control
