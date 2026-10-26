@@ -258,10 +258,16 @@ go-test-prepare:
 
 cli: cli-build
 
+# Cargo profile of the workspace CLI build; CI passes `ci`.
+#
+# The ci profile puts the workspace binaries in $(TARGET_DIR)/ci, where
+# cli-install does not look; private module CLIs always build with release.
+CLI_PROFILE ?= release
+
 # Binaries only: the build scripts compile their helper for the host, so it
 # needs no second, target-side build.
 cli-build:
-	$(CARGO) build --release --workspace --bins
+	$(CARGO) build --profile $(CLI_PROFILE) --workspace --bins
 	@set -eu; \
 	for m in $(EXTRA_CLI_MODULES); do \
 		CARGO_TARGET_DIR=$(abspath $(TARGET_DIR)) $(CARGO) build --release --manifest-path modules/$$m/cli/Cargo.toml; \

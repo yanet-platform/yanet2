@@ -58,3 +58,55 @@ std_instead_of_core = "deny"
 
 [profile.release]
 panic = "abort"
+
+# CI builds the CLI with `--profile ci`; packages and local builds use release.
+#
+# LLVM spends most of a CLI build optimising the workspace crates, which are
+# glue around dependencies that keep the release settings (TLS, compression,
+# HTTP/2, YAML). Built for size, each binary-only crate in one codegen unit,
+# they compile in about three quarters of the time, at a few percent of run
+# time on the largest outputs. A new CLI crate gets an entry here; a missing
+# one only builds slower, a stale one makes cargo warn. The build-script
+# helper has none: like release, it builds unoptimised.
+[profile.ci]
+inherits = "release"
+
+[profile.ci.package]
+yanet-cli = { opt-level = "s" }
+yanet-cli-acl = { opt-level = "s", codegen-units = 1 }
+yanet-cli-blackhole = { opt-level = "s", codegen-units = 1 }
+yanet-cli-common = { opt-level = "s", codegen-units = 1 }
+yanet-cli-counters = { opt-level = "s", codegen-units = 1 }
+yanet-cli-decap = { opt-level = "s", codegen-units = 1 }
+yanet-cli-device-delete = { opt-level = "s", codegen-units = 1 }
+yanet-cli-device-list = { opt-level = "s", codegen-units = 1 }
+yanet-cli-device-plain = { opt-level = "s", codegen-units = 1 }
+yanet-cli-device-trafgen = { opt-level = "s", codegen-units = 1 }
+yanet-cli-device-vlan = { opt-level = "s", codegen-units = 1 }
+yanet-cli-device-vxlan = { opt-level = "s", codegen-units = 1 }
+yanet-cli-dscp = { opt-level = "s", codegen-units = 1 }
+yanet-cli-forward = { opt-level = "s", codegen-units = 1 }
+yanet-cli-function = { opt-level = "s", codegen-units = 1 }
+yanet-cli-fwstate = { opt-level = "s", codegen-units = 1 }
+yanet-cli-fwstatemap = { opt-level = "s", codegen-units = 1 }
+yanet-cli-gateway = { opt-level = "s", codegen-units = 1 }
+yanet-cli-inspect = { opt-level = "s", codegen-units = 1 }
+yanet-cli-l3b = { opt-level = "s", codegen-units = 1 }
+yanet-cli-metrics = { opt-level = "s", codegen-units = 1 }
+yanet-cli-mirror = { opt-level = "s", codegen-units = 1 }
+yanet-cli-nat64 = { opt-level = "s", codegen-units = 1 }
+yanet-cli-operator-neighbour = { opt-level = "s", codegen-units = 1 }
+yanet-cli-operator-pipeline = { opt-level = "s", codegen-units = 1 }
+yanet-cli-operator-route = { opt-level = "s", codegen-units = 1 }
+yanet-cli-pdump = { opt-level = "s", codegen-units = 1 }
+yanet-cli-pipeline = { opt-level = "s", codegen-units = 1 }
+yanet-cli-ready = { opt-level = "s", codegen-units = 1 }
+yanet-cli-ring = { opt-level = "s", codegen-units = 1 }
+yanet-cli-route = { opt-level = "s", codegen-units = 1 }
+yanet-cli-route-mpls = { opt-level = "s", codegen-units = 1 }
+yanet-cli-rpc = { opt-level = "s" }
+yanet-cli-unrdup = { opt-level = "s", codegen-units = 1 }
+yanet-commonpb = { opt-level = "s" }
+yanet-filterpb = { opt-level = "s" }
+yanet-readinesspb = { opt-level = "s" }
+yanet-ynpb = { opt-level = "s" }
