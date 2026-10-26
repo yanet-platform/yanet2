@@ -1,14 +1,14 @@
 #include "cp_device.h"
-#include "reclaim.h"
 
 #include "common/container_of.h"
 
 #include "lib/controlplane/agent/agent.h"
 #include "lib/dataplane/config/zone.h"
 
+#include "lib/controlplane/config/cp_entity.h"
 #include "lib/controlplane/config/zone.h"
 
-#include <errno.h>
+#include <stddef.h>
 #include <stdlib.h>
 
 int
@@ -417,59 +417,93 @@ cp_device_fini(struct cp_device *self) {
 	memory_context_fini(&self->memory_context);
 }
 
-struct cp_device_cmp_data {
-	const char *type;
-	const char *name;
+// The item-to-owner mapping for the generic registry wrapper layer,
+// including its allocation-free teardown fallback.
+static struct agent *
+device_item_owner(struct registry_item *item) {
+	struct cp_device *device =
+		container_of(item, struct cp_device, config_item);
+	return ADDR_OF(&device->agent);
+}
+
+static int
+cp_device_registry_item_cmp(const struct registry_item *item, const void *data);
+static uint64_t
+cp_device_registry_key_hash(const void *data);
+static uint64_t
+cp_device_registry_item_hash(const struct registry_item *item);
+
+// Counter continuity of a device upsert: the device's counters continue
+// from the displaced device's.
+static int
+cp_device_link_counters(
+	struct registry_item *new_item,
+	struct registry_item *old_item,
+	yanet_error **err
+) {
+	struct cp_device *new_device =
+		container_of(new_item, struct cp_device, config_item);
+	struct cp_device *old_device =
+		(old_item != NULL)
+			? container_of(old_item, struct cp_device, config_item)
+			: NULL;
+
+	if (counter_registry_link(
+		    &new_device->counter_registry,
+		    (old_device != NULL) ? &old_device->counter_registry : NULL,
+		    err
+	    )) {
+		yanet_error_add(
+			err,
+			"failed to link counter registry for device '%s'",
+			new_device->name
+		);
+		return -1;
+	}
+
+	return 0;
+}
+
+static const struct cp_entity_desc cp_device_entity_desc = {
+	.keys =
+		{
+			.cmp = cp_device_registry_item_cmp,
+			.key_hash = cp_device_registry_key_hash,
+			.item_hash = cp_device_registry_item_hash,
+		},
+	.noun = "device",
+	.item_owner = device_item_owner,
+	.name_offset = offsetof(struct cp_device, name),
+	.name_len = CP_DEVICE_NAME_LEN,
+	.type_offset = offsetof(struct cp_device, type),
+	.type_len = CP_DEVICE_TYPE_LEN,
+	.link_counters = cp_device_link_counters,
 };
 
 static int
 cp_device_registry_item_cmp(
 	const struct registry_item *item, const void *data
 ) {
-	const struct cp_device *device =
-		container_of(item, struct cp_device, config_item);
-	const struct cp_device_cmp_data *cmp_data =
-		(const struct cp_device_cmp_data *)data;
-
-	int cmp = strncmp(device->name, cmp_data->name, sizeof(device->name));
-	if (cmp) {
-		return cmp;
-	}
-
-	return strncmp(device->type, cmp_data->type, sizeof(device->type));
+	return cp_entity_item_cmp(&cp_device_entity_desc, item, data);
 }
 
 static uint64_t
 cp_device_registry_key_hash(const void *data) {
-	const struct cp_device_cmp_data *cmp_data =
-		(const struct cp_device_cmp_data *)data;
-
-	return registry_hash_name_pair(
-		cmp_data->name,
-		CP_DEVICE_NAME_LEN,
-		cmp_data->type,
-		CP_DEVICE_TYPE_LEN
-	);
+	return cp_entity_key_hash(&cp_device_entity_desc, data);
 }
 
 static uint64_t
 cp_device_registry_item_hash(const struct registry_item *item) {
-	const struct cp_device *device =
-		container_of(item, struct cp_device, config_item);
-
-	return registry_hash_name_pair(
-		device->name,
-		sizeof(device->name),
-		device->type,
-		sizeof(device->type)
-	);
+	return cp_entity_item_hash(&cp_device_entity_desc, item);
 }
 
-static const struct registry_keys cp_device_registry_keys = {
-	.cmp = cp_device_registry_item_cmp,
-	.key_hash = cp_device_registry_key_hash,
-	.item_hash = cp_device_registry_item_hash,
-};
+// Name-only comparison backing delete, whose key is the name alone.
+static int
+cp_device_registry_name_cmp(
+	const struct registry_item *item, const void *data
+) {
+	return cp_entity_name_cmp(&cp_device_entity_desc, item, data);
+}
 
 int
 cp_device_registry_init(
@@ -478,10 +512,13 @@ cp_device_registry_init(
 	struct cp_device_registry *new_device_registry,
 	yanet_error **err
 ) {
-	if (registry_init(
-		    memory_context, owner, &new_device_registry->registry, 8
+	if (cp_entity_registry_init(
+		    memory_context,
+		    owner,
+		    &new_device_registry->registry,
+		    &cp_device_entity_desc,
+		    err
 	    )) {
-		yanet_error_add(err, "failed to initialize device registry");
 		return -1;
 	}
 
@@ -496,147 +533,31 @@ cp_device_registry_copy(
 	struct cp_device_registry *old_device_registry,
 	yanet_error **err
 ) {
-	if (registry_copy(
+	if (cp_entity_registry_copy(
 		    memory_context,
-		    &cp_device_registry_keys,
 		    &new_device_registry->registry,
-		    &old_device_registry->registry
+		    &old_device_registry->registry,
+		    &cp_device_entity_desc,
+		    err
 	    )) {
-		yanet_error_add(err, "failed to copy device registry");
 		return -1;
-	};
-
-	SET_OFFSET_OF(&new_device_registry->memory_context, memory_context);
-
-	// Mirror each copied item's new generation reference into its own
-	// agent.
-	//
-	// This keeps the per-agent live count tracking references from a
-	// live configuration generation rather than the creator's own hold,
-	// which a dead creator would otherwise never release.
-	for (uint64_t idx = 0; idx < new_device_registry->registry.capacity;
-	     ++idx) {
-		struct cp_device *device =
-			cp_device_registry_get(new_device_registry, idx);
-		if (device == NULL) {
-			continue;
-		}
-		struct agent *agent = ADDR_OF(&device->agent);
-		if (agent != NULL) {
-			__atomic_add_fetch(
-				&agent->loaded_entity_count, 1, __ATOMIC_RELAXED
-			);
-		}
 	}
 
+	SET_OFFSET_OF(&new_device_registry->memory_context, memory_context);
 	return 0;
 }
 
 int
 cp_device_try_destroy(struct cp_device *self, yanet_error **err) {
-	struct agent *agent = ADDR_OF(&self->agent);
-	struct cp_config *cp_config =
-		(agent != NULL) ? ADDR_OF(&agent->cp_config) : NULL;
-
-	char type[80];
-	char name[CP_DEVICE_NAME_LEN];
-
-	if (cp_config != NULL) {
-		cp_config_lock(cp_config);
-		spinlock_lock(&cp_config->agent_lock);
-	}
-
-	// Everything read from the item happens under the locks, including
-	// the identity copies for the refusal.
-	//
-	// Once they are gone, a final generation release may tear the item's
-	// registries down and an agent sweep may reclaim the arena the item
-	// lives in. The hold below must also be atomic against the sweep's
-	// zero check of the owner's loaded count, which runs under the agent
-	// lock alone, so the acquisition takes that lock too.
-	strtcpy(type, self->type, sizeof(type));
-	strtcpy(name, self->name, sizeof(name));
-
-	uint64_t refcnt =
-		__atomic_load_n(&self->config_item.refcnt, __ATOMIC_RELAXED);
-
-	if (refcnt == 0) {
-		if (agent != NULL) {
-			// Hold the owner against reclamation for the caller's
-			// typed destroy: the destructor and the caller's error
-			// reporting run unlocked, on storage only this count
-			// keeps alive.
-			__atomic_add_fetch(
-				&agent->loaded_entity_count, 1, __ATOMIC_RELAXED
-			);
-		}
-	}
-
-	if (cp_config != NULL) {
-		// Every completed hold of the locks sweeps: what the gate
-		// leaves unreferenced is reclaimed by its own exit, not by
-		// an unrelated later holder.
-		cp_config_reclaim_unused_agents_locked(cp_config);
-		spinlock_unlock(&cp_config->agent_lock);
-		cp_config_unlock(cp_config);
-	}
-
-	if (refcnt != 0) {
-		// errno is set last, right before the return, so the error
-		// formatting above cannot clobber what the caller reads.
-		yanet_error_add_kind(
-			err,
-			YANET_ERROR_BUSY,
-			"device '%s:%s' is still referenced by a live "
-			"generation",
-			type,
-			name
-		);
-		errno = EAGAIN;
-		return -1;
-	}
-
-	return 0;
-}
-
-// The item-to-owner mapping for the registry teardown fallback below.
-static struct agent *
-device_item_owner(struct registry_item *item) {
-	struct cp_device *device =
-		container_of(item, struct cp_device, config_item);
-	return ADDR_OF(&device->agent);
+	return cp_entity_try_destroy(
+		&self->config_item, &cp_device_entity_desc, err
+	);
 }
 
 void
 cp_device_registry_fini(struct cp_device_registry *device_registry) {
-	// Mirror each remaining item's dropped generation reference into its
-	// own agent, with every dereference of agent-owned storage done
-	// before the loaded count can drop; see the module finaliser for
-	// the ordering argument.
-	if (ADDR_OF(&device_registry->registry.items) == NULL) {
-		return;
-	}
-
-	uint64_t capacity = device_registry->registry.capacity;
-	struct agent **owners = malloc(sizeof(*owners) * capacity);
-	if (owners != NULL) {
-		for (uint64_t idx = 0; idx < capacity; ++idx) {
-			struct cp_device *device =
-				cp_device_registry_get(device_registry, idx);
-			owners[idx] =
-				device != NULL ? ADDR_OF(&device->agent) : NULL;
-		}
-		registry_fini(&device_registry->registry, NULL, NULL);
-		agent_unload_references(owners, capacity);
-		free(owners);
-		return;
-	}
-
-	// Teardown could not snapshot the owners; release the items and
-	// drop the owners' references in allocation-free batches that keep
-	// the same dereferences-before-drops order per batch.
-	agent_release_registry_items(
-		&device_registry->registry, device_item_owner
+	cp_entity_registry_fini(
+		&device_registry->registry, &cp_device_entity_desc
 	);
 }
 
@@ -652,65 +573,22 @@ cp_device_registry_get(
 	return container_of(item, struct cp_device, config_item);
 }
 
-static int
-cp_device_registry_name_cmp(
-	const struct registry_item *item, const void *data
-) {
-	const struct cp_device *device =
-		container_of(item, struct cp_device, config_item);
-
-	return strncmp(device->name, (const char *)data, CP_DEVICE_NAME_LEN);
-}
-
-// Name-only lookup backing delete, whose key is the name alone.
-static struct cp_device *
-cp_device_registry_lookup_name(
-	struct cp_device_registry *device_registry, const char *name
-) {
-	uint64_t index;
-	if (registry_lookup(
-		    &device_registry->registry,
-		    &cp_device_registry_keys,
-		    cp_device_registry_name_cmp,
-		    name,
-		    &index
-	    )) {
-		return NULL;
-	}
-
-	return container_of(
-		registry_get(&device_registry->registry, index),
-		struct cp_device,
-		config_item
-	);
-}
-
 struct cp_device *
 cp_device_registry_lookup(
 	struct cp_device_registry *device_registry,
 	const char *type,
 	const char *name
 ) {
-	struct cp_device_cmp_data cmp_data = {
-		.type = type,
-		.name = name,
-	};
-	uint64_t index;
-	if (registry_lookup(
-		    &device_registry->registry,
-		    &cp_device_registry_keys,
-		    cp_device_registry_item_cmp,
-		    &cmp_data,
-		    &index
-	    )) {
+	struct cp_entity_key key;
+	cp_entity_key_set(&key, type, name);
+
+	struct registry_item *item = cp_entity_registry_lookup(
+		&device_registry->registry, &cp_device_entity_desc, &key
+	);
+	if (item == NULL) {
 		return NULL;
 	}
-
-	return container_of(
-		registry_get(&device_registry->registry, index),
-		struct cp_device,
-		config_item
-	);
+	return container_of(item, struct cp_device, config_item);
 }
 
 int
@@ -721,97 +599,26 @@ cp_device_registry_upsert(
 	struct cp_device *new_device,
 	yanet_error **err
 ) {
-	struct cp_device_cmp_data cmp_data = {
-		.type = type,
-		.name = name,
-	};
-	struct cp_device *old_device =
-		cp_device_registry_lookup(device_registry, type, name);
+	struct cp_entity_key key;
+	cp_entity_key_set(&key, type, name);
 
-	if (counter_registry_link(
-		    &new_device->counter_registry,
-		    (old_device != NULL) ? &old_device->counter_registry : NULL,
-		    err
-	    )) {
-		yanet_error_add(
-			err,
-			"failed to link counter registry for device '%s'",
-			name
-		);
-		return -1;
-	}
-
-	if (registry_replace(
-		    &device_registry->registry,
-		    &cp_device_registry_keys,
-		    cp_device_registry_item_cmp,
-		    &cmp_data,
-		    &new_device->config_item,
-		    NULL,
-		    NULL
-	    )) {
-		yanet_error_add(err, "failed to replace device in registry");
-		return -1;
-	}
-
-	// Mirror this upsert's generation-reference changes into each
-	// affected device's own agent.
-	//
-	// Gaining a reference through upsert only ever happens here, and
-	// losing one to a displacing upsert only ever happens here too, so
-	// the per-agent live count must track both in this one place.
-	struct agent *new_agent = ADDR_OF(&new_device->agent);
-	if (new_agent != NULL) {
-		__atomic_add_fetch(
-			&new_agent->loaded_entity_count, 1, __ATOMIC_RELAXED
-		);
-	}
-	if (old_device != NULL) {
-		struct agent *old_agent = ADDR_OF(&old_device->agent);
-		if (old_agent != NULL) {
-			__atomic_sub_fetch(
-				&old_agent->loaded_entity_count,
-				1,
-				__ATOMIC_RELEASE
-			);
-		}
-	}
-
-	return 0;
+	return cp_entity_registry_upsert(
+		&device_registry->registry,
+		&cp_device_entity_desc,
+		&key,
+		&new_device->config_item,
+		err
+	);
 }
 
 int
 cp_device_registry_delete(
 	struct cp_device_registry *device_registry, const char *name
 ) {
-	struct cp_device *old_device =
-		cp_device_registry_lookup_name(device_registry, name);
-
-	if (registry_replace(
-		    &device_registry->registry,
-		    &cp_device_registry_keys,
-		    cp_device_registry_name_cmp,
-		    name,
-		    NULL,
-		    NULL,
-		    NULL
-	    )) {
-		return -1;
-	}
-
-	// Mirror the generation reference this delete drops into the removed
-	// device's own agent, matching the decrement upsert performs when it
-	// displaces an entry.
-	if (old_device != NULL) {
-		struct agent *old_agent = ADDR_OF(&old_device->agent);
-		if (old_agent != NULL) {
-			__atomic_sub_fetch(
-				&old_agent->loaded_entity_count,
-				1,
-				__ATOMIC_RELEASE
-			);
-		}
-	}
-
-	return 0;
+	return cp_entity_registry_delete(
+		&device_registry->registry,
+		&cp_device_entity_desc,
+		cp_device_registry_name_cmp,
+		name
+	);
 }
