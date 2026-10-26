@@ -1,24 +1,9 @@
-proto_dir = join_paths(meson.current_source_dir(), 'v1')
-root_dir = meson.project_source_root()
-proto_files = [join_paths(proto_dir, 'pdump.proto')]
-
-protoc_gen = custom_target(
+pdump_protoc_gen = custom_target(
   'pdump-protoc',
   output: 'pdump.protoset',
   depfile: 'pdump.protoset.d',
-  input: proto_files,
-  command: [
-    protoc,
-    '--experimental_allow_proto3_optional',
-    '-I', proto_dir,
-    '-I', root_dir,
-    '--go_out=paths=source_relative:' + proto_dir,
-    '--go-grpc_out=paths=source_relative:' + proto_dir,
-    '--descriptor_set_out=@OUTPUT@',
-    '--dependency_out=@DEPFILE@',
-    '@INPUT@',
-  ],
+  input: meson.current_source_dir() / 'v1/pdump.proto',
+  command: go_protoc + ['--dependency_out=@DEPFILE@', '@INPUT@'],
   build_by_default: true,
 )
-go_proto_targets += protoc_gen
-pdump_protoc_gen = protoc_gen
+go_proto_targets += pdump_protoc_gen
