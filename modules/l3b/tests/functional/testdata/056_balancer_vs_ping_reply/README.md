@@ -21,8 +21,11 @@ adaptation happens only in memory:
 - Require TPID `0x8100` and VLAN TCI 100 (send) or 200 (expect), then remove
   exactly bytes 12:16.
 - Copy the matching request's first 12 bytes over the expected frame's MACs.
-- Assert source bytes 18 onward equal adapted bytes 14 onward. No L3
-  reserialization, checksum recalculation, or padding is allowed.
+- Assert source bytes 18 onward equal adapted bytes 14 onward before the
+  explicit reply-lifetime adaptation: require captured TTL/Hop Limit 64,
+  change it to 65, and recompute only the IPv4 header checksum. This follows
+  the approved Echo handoff change in #3124; all other L3 bytes remain exact.
+  No L3 reserialization or padding is allowed.
 - Compare raw harness output, including the 42-byte empty-payload IPv4
   frame; the parsed result path pads it to 60 bytes.
 
@@ -54,7 +57,7 @@ and 21 packet subcases; the original 11 states and 15 packets remain.
 Exact VIP rules supplement the generated destination
 rules. UDP seed encapsulation uses source networks `192.0.2.0/24` and
 `2001:db8:3::/64`, not the source balancer's outer addresses; Echo L3 bytes
-remain unchanged.
+remain unchanged except for the explicit reply-lifetime adaptation above.
 
 ## State invariants
 
