@@ -397,14 +397,14 @@ checksum = "f0805222e57f7521d6a62e36fa9163bc891acd422f971defe97d64e70d0a4fe5"
 
 [[package]]
 name = "xtask"
-version = "0.1.0"
+version = "0.3.0"
 dependencies = [
  "regex",
 ]
 
 [[package]]
 name = "yanet-packet"
-version = "0.1.0"
+version = "0.3.0"
 dependencies = [
  "netip",
  "proptest",
@@ -413,7 +413,7 @@ dependencies = [
 
 [[package]]
 name = "yanet-sdk-testing"
-version = "0.1.0"
+version = "0.3.0"
 dependencies = [
  "yanet-shm",
  "yanet-sys",
@@ -421,14 +421,14 @@ dependencies = [
 
 [[package]]
 name = "yanet-shm"
-version = "0.1.0"
+version = "0.3.0"
 dependencies = [
  "yanet-sdk-testing",
 ]
 
 [[package]]
 name = "yanet-sys"
-version = "0.1.0"
+version = "0.3.0"
 dependencies = [
  "bindgen",
  "cc",
