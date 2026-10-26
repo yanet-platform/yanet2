@@ -39,8 +39,23 @@ const ABI_OPTIONS: &[&str] = &[
     "-funsigned-char",
 ];
 
-/// Repository directories whose C headers the bindings read.
-const C_HEADER_DIRS: &[&str] = &["common"];
+/// Repository directories whose C headers the bindings and the shim read,
+/// DPDK's among them (`rte_mbuf_core.h` and what the routing helpers reach).
+const C_HEADER_DIRS: &[&str] = &[
+    "common",
+    "lib/controlplane",
+    "lib/counters",
+    "lib/dataplane",
+    "lib/errors",
+    "subprojects/dpdk/config",
+    "subprojects/dpdk/lib",
+];
+
+/// DPDK's generated configuration header, relative to the build directory.
+const DPDK_BUILD_CONFIG: &str = "subprojects/dpdk/rte_build_config.h";
+
+/// First tokens of a compiler command that wrap the compiler.
+const COMPILER_WRAPPERS: &[&str] = &["ccache", "sccache", "distcc", "icecc"];
 
 /// Options that name an include directory, given joined or as the next
 /// argument.
@@ -52,17 +67,25 @@ const PATH_OPTIONS: &[&str] = &["-include", "--sysroot"];
 /// Options with a value that is not a path.
 const VALUE_OPTIONS: &[&str] = &["-D", "-U"];
 
-/// Header options of the dataplane's C sources.
+/// Options that pass an argument to another tool, not warning options.
+const TOOL_OPTIONS: &[&str] = &["-Wa,", "-Wl,", "-Wp,"];
+
+/// Compiler and header options of the dataplane's C sources.
 #[derive(Debug, PartialEq, Eq)]
 pub struct CFlags {
     /// Repository root: the directory the C sources and headers are under.
     pub root: PathBuf,
+    pub compiler: String,
     /// The options that change how headers are read, in command order. A
     /// value follows its option as an argument of its own, except in the
     /// joined ABI options such as `-std=`; paths are absolute, but for a
     /// forced include not found relative to the build directory, which the
     /// compiler finds through the include directories.
     args: Vec<String>,
+    /// The warning options, `-Werror` among them: the shim compiles with the
+    /// warnings the C build does. Kept apart because the bindings are read
+    /// by libclang, which is no judge of the headers.
+    warnings: Vec<String>,
 }
 
 impl CFlags {
@@ -79,6 +102,7 @@ impl CFlags {
         });
         let path = dir.join("compile_commands.json");
         println!("cargo:rerun-if-changed={}", path.display());
+        println!("cargo:rerun-if-changed={}", dir.join(DPDK_BUILD_CONFIG).display());
         let text = fs::read_to_string(&path).unwrap_or_else(|err| {
             panic!(
                 "cannot read {}: {err} (run `meson setup build` at the repository root, or set {BUILD_DIR_ENV})",
@@ -103,15 +127,23 @@ impl CFlags {
                     .then(|| (directory, command_tokens(entry)))
             })
             .ok_or_else(|| format!("no entry builds an object under {TARGET_DIR}"))?;
-        Ok(Self {
-            root,
-            args: header_args(directory, tokens?.into_iter()),
-        })
+        let mut tokens = tokens?.into_iter();
+        let compiler = tokens
+            .by_ref()
+            .find(|token| !COMPILER_WRAPPERS.contains(&file_name(token)))
+            .ok_or("the command names no compiler")?;
+        let (args, warnings) = reduce(directory, tokens);
+        Ok(Self { root, compiler, args, warnings })
     }
 
     /// Flags that reproduce how the dataplane reads headers.
     pub fn header_args(&self) -> &[String] {
         &self.args
+    }
+
+    /// The warning options of the dataplane's C sources.
+    pub fn warning_args(&self) -> &[String] {
+        &self.warnings
     }
 
     /// Path inside the repository.
@@ -126,6 +158,13 @@ impl CFlags {
             println!("cargo:rerun-if-changed={}", self.source(dir).display());
         }
     }
+}
+
+fn file_name(token: &str) -> &str {
+    Path::new(token)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or(token)
 }
 
 /// The command of an entry: its `arguments` list, or its `command` split as
@@ -148,14 +187,15 @@ fn command_tokens(entry: &Value) -> Result<Vec<String>, String> {
     shlex::split(command).ok_or_else(|| "the command is not a valid shell command".to_owned())
 }
 
-/// Keeps the options that change how headers are read. Paths are resolved
+/// Splits the options into the ones that change how headers are read and the
+/// warning options, dropping the rest. Paths are resolved
 /// against the directory the command ran in; include directories are
 /// canonicalised and, when missing, dropped: meson adds per-target private
 /// directories that may not exist after setup and hold no header.
-fn header_args(directory: &Path, tokens: impl Iterator<Item = String>) -> Vec<String> {
+fn reduce(directory: &Path, tokens: impl Iterator<Item = String>) -> (Vec<String>, Vec<String>) {
     let resolve = |path: &str| directory.join(path);
     let mut tokens = tokens;
-    let mut args = Vec::new();
+    let (mut args, mut warnings) = (Vec::new(), Vec::new());
     while let Some(token) = tokens.next() {
         let option = INCLUDE_DIR_OPTIONS
             .iter()
@@ -165,6 +205,8 @@ fn header_args(directory: &Path, tokens: impl Iterator<Item = String>) -> Vec<St
         let Some((option, joined)) = option else {
             if ABI_OPTIONS.iter().any(|&option| token.starts_with(option)) {
                 args.push(token);
+            } else if token.starts_with("-W") && !TOOL_OPTIONS.iter().any(|tool| token.starts_with(tool)) {
+                warnings.push(token);
             }
             continue;
         };
@@ -199,5 +241,5 @@ fn header_args(directory: &Path, tokens: impl Iterator<Item = String>) -> Vec<St
         };
         args.extend([option.to_owned(), value]);
     }
-    args
+    (args, warnings)
 }

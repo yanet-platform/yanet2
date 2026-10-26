@@ -3,12 +3,14 @@ name: Rust SDK
 # Checks of the Rust module SDK workspace (lib/rust): formatting, lints, the
 # 1.88 test suite, std-freedom of the SDK crates and the extractable packet.
 #
-# The bindings crate's build script runs bindgen over the repository's C
-# headers with the flags of a meson configuration's compilation database, so
-# C header and meson changes re-run the jobs and every job that compiles the
-# SDK configures meson first (nothing is compiled); each
-# cargo cache family has exactly one job that writes it, from main only, since
-# a cache written on a pull-request ref is readable only from that pull
+# The bindings crate's build script runs bindgen and the C shim over the
+# repository's C headers with the flags of a meson configuration's
+# compilation database. C header and meson changes therefore re-run the jobs,
+# and every job that compiles the SDK runs in the CI image (ci/README.md) and
+# configures meson first (nothing is compiled).
+#
+# Each cargo cache family has exactly one job that writes it, from main only,
+# since a cache written on a pull-request ref is readable only from that pull
 # request.
 
 on:
@@ -19,12 +21,11 @@ on:
       - ".cargo/config.toml"
       - ".rustfmt.toml"
       - "common/**.h"
+      - "lib/**.h"
       - "subprojects/dpdk"
       - "**/meson.build"
       - "meson_options.txt"
       - ".github/workflows/rust-sdk.yml"
-      - ".github/actions/apt-packages/**"
-      - ".github/actions/apt-failover/**"
   pull_request:
     # A stacked pull request has a non-main base, so a main-only filter would skip it.
     branches: ["**"]
@@ -33,30 +34,39 @@ on:
       - ".cargo/config.toml"
       - ".rustfmt.toml"
       - "common/**.h"
+      - "lib/**.h"
       - "subprojects/dpdk"
       - "**/meson.build"
       - "meson_options.txt"
       - ".github/workflows/rust-sdk.yml"
-      - ".github/actions/apt-packages/**"
-      - ".github/actions/apt-failover/**"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
   cancel-in-progress: true
 
 env:
-  # bindgen needs a clang and a libclang of the same LLVM major; the -dev
-  # package is not needed.
+  # bindgen needs a clang and a libclang of the same LLVM major, both in the
+  # CI image.
   CLANG_PATH: /usr/bin/clang-18
   LIBCLANG_PATH: /usr/lib/llvm-18/lib
-  APT_PACKAGES: meson clang-18 libclang1-18 cmake python3-pyelftools libnuma-dev libpcap-dev libyaml-dev
+
+defaults:
+  run:
+    # The runner's default shell, which container jobs would replace with sh.
+    shell: bash -e {0}
+
+permissions:
+  contents: read
 
 jobs:
   fmt:
     name: cargo fmt
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       # Pinned with the root workspace's formatter, see rust-check.yml.
       - uses: dtolnay/rust-toolchain@2c76c034f9e32a5d6e2c104dc4df23a22476db04 # nightly
         with:
@@ -70,14 +80,13 @@ jobs:
   clippy:
     name: cargo clippy and std-free crates
     runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    container: ghcr.io/yanet-platform/yanet2-ci@sha256:81927a6bf8adabade5c16d5b1bd698e2ca5535ffd88175b58a5934e647834e25
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
           submodules: true
-      - uses: ./.github/actions/apt-packages
-        timeout-minutes: 10
-        with:
-          packages: ${{ env.APT_PACKAGES }}
       - uses: dtolnay/rust-toolchain@d124f86f28ff42855784ff3319f48ac182c248f8 # 1.99.1
         with:
           components: clippy
@@ -104,14 +113,13 @@ jobs:
   test:
     name: cargo test (1.88)
     runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    container: ghcr.io/yanet-platform/yanet2-ci@sha256:81927a6bf8adabade5c16d5b1bd698e2ca5535ffd88175b58a5934e647834e25
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
           submodules: true
-      - uses: ./.github/actions/apt-packages
-        timeout-minutes: 10
-        with:
-          packages: ${{ env.APT_PACKAGES }}
       - uses: dtolnay/rust-toolchain@360a4e93673de6630fac2478bc9e35244b01a759 # 1.88.0
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
@@ -126,8 +134,11 @@ jobs:
   packet:
     name: yanet-packet standalone
     runs-on: ubuntu-24.04
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - uses: dtolnay/rust-toolchain@360a4e93673de6630fac2478bc9e35244b01a759 # 1.88.0
         with:
           targets: x86_64-unknown-none
