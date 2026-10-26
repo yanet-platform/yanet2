@@ -34,6 +34,7 @@ on:
       - ".github/actions/go-modcache/**"
       - ".github/actions/go-buildcache/**"
       - ".github/actions/protoc/**"
+      - ".github/actions/cli-inputs/**"
       - "tests/functional/**"
   pull_request:
     # A stacked pull request has a non-main base, so a main-only filter would skip it.
@@ -69,6 +70,7 @@ on:
       - ".github/actions/go-modcache/**"
       - ".github/actions/go-buildcache/**"
       - ".github/actions/protoc/**"
+      - ".github/actions/cli-inputs/**"
       - "tests/functional/**"
 
 concurrency:
@@ -191,25 +193,54 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Hash the CLI inputs
+        id: inputs
+        uses: ./.github/actions/cli-inputs
+
+      # Main records each CLI input state it built, so a change that leaves
+      # the inputs alone has nothing new to build.
+      - name: Look up a build of the same inputs
+        id: built
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: target/cli-built
+          key: cli-ok-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.inputs.outputs.hash }}
+          lookup-only: true
+
       - uses: ./.github/actions/protoc
+        if: steps.built.outputs.cache-hit != 'true'
         timeout-minutes: 5
 
       - name: Install Rust toolchain
+        if: steps.built.outputs.cache-hit != 'true'
         uses: dtolnay/rust-toolchain@d124f86f28ff42855784ff3319f48ac182c248f8 # 1.99.1
 
       # A cache written on a pull-request ref is readable only from that
       # same pull request, so only main writes this one.
       - name: Cache rust
+        if: steps.built.outputs.cache-hit != 'true'
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           shared-key: build-release-arm64
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Build CLI (release, packaging flags)
+        if: steps.built.outputs.cache-hit != 'true'
         run: |
           flags=$(DEB_BUILD_MAINT_OPTIONS=hardening=+all DEB_CFLAGS_MAINT_APPEND=-fno-lto DEB_LDFLAGS_MAINT_APPEND=-fno-lto dpkg-buildflags --export=sh)
           eval "$flags"
           make cli
+
+      - name: Mark the build
+        if: github.ref == 'refs/heads/main' && steps.built.outputs.cache-hit != 'true'
+        run: touch target/cli-built
+
+      - name: Record the build
+        if: github.ref == 'refs/heads/main' && steps.built.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: target/cli-built
+          key: cli-ok-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.inputs.outputs.hash }}
 
   build-tsan-test:
     runs-on: ubuntu-24.04
@@ -321,21 +352,41 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Hash the CLI inputs
+        id: inputs
+        uses: ./.github/actions/cli-inputs
+
+      # Main saves the binaries of each CLI input state it built, so a change
+      # that leaves the inputs alone reuses them instead of building.
+      - name: Restore the CLI built from the same inputs
+        id: binaries
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            target/release/yanet-cli
+            target/release/yanet-cli-*
+            !target/release/*.d
+          key: cli-bin-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.inputs.outputs.hash }}
+
       - uses: ./.github/actions/protoc
+        if: steps.binaries.outputs.cache-hit != 'true'
         timeout-minutes: 5
 
       - name: Install Rust toolchain
+        if: steps.binaries.outputs.cache-hit != 'true'
         uses: dtolnay/rust-toolchain@d124f86f28ff42855784ff3319f48ac182c248f8 # 1.99.1
 
       # A cache written on a pull-request ref is readable only from that
       # same pull request, so only main writes this one.
       - name: Cache rust
+        if: steps.binaries.outputs.cache-hit != 'true'
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           shared-key: build-release
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Build CLI (release)
+        if: steps.binaries.outputs.cache-hit != 'true'
         run: make cli
 
       - name: Verify CLI crypto linkage
@@ -349,6 +400,16 @@ jobs:
               exit 1
             fi
           done
+
+      - name: Save the CLI
+        if: github.ref == 'refs/heads/main' && steps.binaries.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            target/release/yanet-cli
+            target/release/yanet-cli-*
+            !target/release/*.d
+          key: cli-bin-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.inputs.outputs.hash }}
 
       # Artifacts keep paths relative to the release directory and drop the
       # executable bit; the functional test job restores both.

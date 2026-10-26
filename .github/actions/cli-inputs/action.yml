@@ -1,0 +1,39 @@
+name: CLI inputs
+description: >-
+  Hashes the repository inputs of the release CLI build: the workspace members,
+  the manifests, lock file and cargo config, every proto, the dataplane header
+  a CLI build script reads, and the Makefile, workflow and actions that set the
+  build up. The runner image (its C compiler, the packaging flags) is not
+  hashed.
+
+outputs:
+  hash:
+    description: The hash of the inputs, for a cache key.
+    value: ${{ steps.hash.outputs.hash }}
+
+runs:
+  using: composite
+  steps:
+    # The index lists each path with its mode and content hash, so a rename or
+    # a new file changes the key as much as an edit does.
+    #
+    # A member list that cannot be read, a member that is not a crate
+    # directory, or a listed path that no longer exists would silently leave
+    # sources out of the key, so each fails the step.
+    - id: hash
+      shell: bash
+      run: |
+        set -euo pipefail
+        members=$(python3 -I -c 'import tomllib; print("\n".join(tomllib.load(open("Cargo.toml", "rb"))["workspace"]["members"]))')
+        for member in $members; do
+          if [ ! -f "$member/Cargo.toml" ]; then
+            echo "::error::workspace member $member is not a crate directory" >&2
+            exit 1
+          fi
+        done
+        # shellcheck disable=SC2086
+        hash=$(git ls-files -s --error-unmatch -- Cargo.toml Cargo.lock .cargo Makefile \
+          .github/workflows/build.yml .github/actions/protoc .github/actions/cli-inputs \
+          ':(glob)**/*.proto' modules/pdump/dataplane/mode.h $members |
+          sha256sum | cut -c1-40)
+        echo "hash=$hash" >>"$GITHUB_OUTPUT"
