@@ -329,6 +329,12 @@ yanet_stamp.set_quoted(
 build_stamp = 'yanet_build_stamp.h'
 configure_file(output: build_stamp, configuration: yanet_stamp)
 
+# CGO packages by source directory, with what each links and hashes.
+#
+# 'libraries' are project libraries, which meson extends with their
+# dependencies; 'archives' are external archives linked as they are, with
+# DPDK's system libraries; 'inputs' are further native inputs the marker
+# hashes.
 cgo_packages = {}
 go_proto_targets = []
 subdir('common')
@@ -340,12 +346,60 @@ subdir('devices')
 
 if not dataplane_only
   subdir('bindings/go')
+
+  # Meson computes the link closure of each package for a probe program.
+  #
+  # The closure becomes the package's generated #cgo flags, so no tracked Go
+  # file names a build directory.
+  cgo_probes = {}
+  cgo_flags_args = []
+  foreach package_path, package : cgo_packages
+    if package.has_key('libraries') or package.has_key('archives')
+      cgo_probes += {package_path: executable(
+        'cgo-link-' + package_path.replace('/', '__'),
+        files('scripts/cgo_link_probe.c'),
+        link_with: package.get('libraries', []),
+        link_args: package.has_key('archives') ? dpdk_extra_ldflags : [],
+        build_by_default: false,
+      )}
+    endif
+    # External archives link alone, without the libraries meson records
+    # behind them.
+    foreach archive : package.get('archives', [])
+      cgo_flags_args += ['--archive', package_path, archive.full_path()]
+    endforeach
+  endforeach
+
+  # The build directories of one checkout share the generated files, so only
+  # build/ in the top-level source tree writes them unless the option says
+  # otherwise.
+  fs = import('fs')
+  cgo_flags_option = get_option('go_cgo_flags')
+  if cgo_flags_option.enabled() or (cgo_flags_option.auto()
+      and fs.is_samepath(meson.global_build_root(), meson.global_source_root() / 'build'))
+    go_cgo_flags = [custom_target(
+      'go-cgo-flags',
+      output: 'go-cgo-flags.stamp',
+      command: [
+        python3, files('scripts/go_cgo_flags.py'),
+        '--root', meson.project_source_root(),
+        '--build-root', meson.global_build_root(),
+        '--stamp', '@OUTPUT@',
+      ] + cgo_flags_args + cgo_packages.keys(),
+      build_always_stale: true,
+      build_by_default: true,
+    )]
+  else
+    go_cgo_flags = []
+  endif
+
   cgo_controlplane_deps = []
   cgo_test_deps = []
   foreach package_path, package : cgo_packages
-    cgo_native_inputs = package.get('inputs', []) + package.get('libraries', [])
+    cgo_libraries = package.get('libraries', []) + package.get('archives', [])
+    cgo_native_inputs = package.get('inputs', []) + cgo_libraries
     cgo_inputs = cgo_native_inputs
-    foreach library : package.get('libraries', [])
+    foreach library : cgo_libraries
       # Thin archives keep member contents in separate object files.
       cgo_inputs += library.extract_all_objects(recursive: true)
     endforeach
@@ -361,6 +415,9 @@ if not dataplane_only
         '--stamp', '@OUTPUT@',
       ] + cgo_native_inputs,
       env: yanet_go_env,
+      # The marker hashes every archive the package's CGO flags name: the
+      # probe builds the project ones, the marker's inputs the external ones.
+      depends: go_cgo_flags + (cgo_probes.has_key(package_path) ? [cgo_probes[package_path]] : []),
       build_always_stale: true,
       build_by_default: true,
     )

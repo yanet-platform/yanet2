@@ -4,23 +4,6 @@ package testutils
 /*
 #cgo CFLAGS: -I../../../../
 #cgo LDFLAGS: -Wl,-E
-#cgo LDFLAGS: -Wl,--start-group
-#cgo LDFLAGS: -L../../../../build/modules/l3b/dataplane -ll3b_dp
-#cgo LDFLAGS: -L../../../../build/objects/l3b/api -ll3b_objects
-#cgo LDFLAGS: -L../../../../build/lib/classify -lclassify_compiler
-#cgo LDFLAGS: -L../../../../build/lib/dataplane/config -lconfig_dp
-#cgo LDFLAGS: -L../../../../build/lib/dataplane/config -ldp_zone
-#cgo LDFLAGS: -L../../../../build/lib/dataplane/module -lmodule
-#cgo LDFLAGS: -L../../../../build/lib/dataplane/packet -lpacket
-#cgo LDFLAGS: -L../../../../build/lib/controlplane/agent -lagent
-#cgo LDFLAGS: -L../../../../build/lib/controlplane/config -lconfig_cp
-#cgo LDFLAGS: -L../../../../build/lib/filter -lfilter_compiler
-#cgo LDFLAGS: -L../../../../build/lib/statemap -lstatemap
-#cgo LDFLAGS: -L../../../../build/lib/l3state -ll3state
-#cgo LDFLAGS: -L../../../../build/lib/counters -lcounters
-#cgo LDFLAGS: -L../../../../build/lib/errors -lerrors
-#cgo LDFLAGS: -L../../../../build/lib/logging -llogging
-#cgo LDFLAGS: -Wl,--end-group -ldl
 
 #include <stdlib.h>
 #include "lib/dataplane/module/module.h"

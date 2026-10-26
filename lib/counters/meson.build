@@ -109,10 +109,10 @@ if not dataplane_only
 
   # The engine archive itself, for targets meson cannot see the link line of.
   #
-  # A Go binary names -lrure through cgo, which is a plain string to meson,
-  # so nothing orders the two. Depending on lib_counter_pattern is not
-  # enough either: a static library records what it will be linked against
-  # rather than linking it.
+  # A Go binary built outside this project links the archive through cgo
+  # flags, which are plain strings to meson, so nothing orders the two.
+  # Depending on lib_counter_pattern is not enough either: a static library
+  # records what it will be linked against rather than linking it.
   librure_targets = [librure]
 
   lib_counter_pattern = static_library(

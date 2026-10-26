@@ -1,11 +1,6 @@
 package nat64_test
 
 //#cgo CFLAGS: -I../../../.. -I../../../../common
-//#cgo LDFLAGS: -L../../../../build/modules/nat64/dataplane -lnat64_dp
-//#cgo LDFLAGS: -L../../../../build/modules/nat64/api -lnat64_cp
-//#cgo LDFLAGS: -L../../../../build/lib/dataplane/packet -lpacket
-//#cgo LDFLAGS: -L../../../../build/lib/logging -llogging
-//#cgo LDFLAGS: -L../../../../build/lib/errors -lerrors
 /*
 #include <errno.h>
 #include <stdint.h>
@@ -56,9 +51,9 @@ cp_module_try_destroy(struct cp_module *cp_module, yanet_error **err) {
 	return 0;
 }
 
-// The destroy hold lives in the configuration library, which this
-// harness does not link; the stub agent is never reclaimed, so a no-op
-// body stands in.
+// The destroy hold lives in the configuration library, whose module code
+// would collide with the stand-ins above; the stub agent is never
+// reclaimed, so a no-op body stands in.
 void
 agent_destroy_released(struct agent *agent) {
 	(void)agent;

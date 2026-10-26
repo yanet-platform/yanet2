@@ -1,7 +1,6 @@
 package ringtest
 
 //#cgo CFLAGS: -I../../../../
-//#cgo LDFLAGS: -L../../../../build/lib/controlplane/config -lconfig_cp
 //
 //#include "lib/controlplane/config/cp_module.h"
 import "C"

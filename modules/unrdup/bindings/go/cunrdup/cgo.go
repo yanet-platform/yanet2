@@ -1,8 +1,6 @@
 package cunrdup
 
 //#cgo CFLAGS: -I../../../../../ -I../../../../../lib
-//#cgo LDFLAGS: -L../../../../../build/modules/unrdup/api -lunrdup_cp
-//#cgo LDFLAGS: -L../../../../../build/lib/filter -lfilter_compiler
 //
 //#include <stdlib.h>
 //#include "modules/unrdup/api/controlplane.h"

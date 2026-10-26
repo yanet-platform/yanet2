@@ -14,6 +14,9 @@ lib_dp_zone_dep = declare_dependency(
 )
 
 dependencies = [
+  # The plugin loader opens shared objects and the loaders look up
+  # constructors in them.
+  dependency('dl'),
   lib_dp_zone_dep,
   lib_errors_dep,
   lib_logging_dep,

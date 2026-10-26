@@ -3,9 +3,6 @@ package cl3b
 
 //#cgo CFLAGS: -I../../../../../
 //#cgo CFLAGS: -I../../../../../lib
-//#cgo LDFLAGS: -L../../../../../build/modules/l3b/api -ll3b_cp
-//#cgo LDFLAGS: -L../../../../../build/lib/classify -lclassify_compiler
-//#cgo LDFLAGS: -L../../../../../build/lib/statemap -lstatemap
 //
 //#include "api/agent.h"
 //#include "modules/l3b/api/controlplane.h"

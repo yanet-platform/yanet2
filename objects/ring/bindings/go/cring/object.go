@@ -6,7 +6,6 @@
 package cring
 
 //#cgo CFLAGS: -I../../../../../
-//#cgo LDFLAGS: -L../../../../../build/objects/ring/api -lring_objects
 //
 //#include "api/agent.h"
 //#include "objects/ring/api/ring_object.h"

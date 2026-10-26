@@ -2,7 +2,6 @@
 package ctrafgen
 
 //#cgo CFLAGS: -I../../../../../
-//#cgo LDFLAGS: -L../../../../../build/devices/trafgen/api -ldev_trafgen_api
 //
 // #include "api/agent.h"
 // #include "devices/trafgen/api/controlplane.h"

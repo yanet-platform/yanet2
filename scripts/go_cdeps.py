@@ -104,8 +104,27 @@ def input_name(root, build_root, path):
     raise ValueError(f"native input is outside the source and build roots: {path}")
 
 
-def discover(root, package, go, output, stamp, build_root=None):
-    """Use active CGO sources and compiler includes as the dependency authority."""
+def linked_archives(flags):
+    """The archives a package's LDFLAGS name as -l:<file> in its -L directories.
+
+    go list reports the -L directories as absolute paths. An archive not
+    built yet is skipped: the link that needs it fails on its own.
+    """
+    directories = [Path(flag[2:]) for flag in flags if flag.startswith("-L")]
+    archives = set()
+    for flag in flags:
+        if not flag.startswith("-l:"):
+            continue
+        for directory in directories:
+            path = directory / flag[3:]
+            if path.is_file():
+                archives.add(path.resolve())
+                break
+    return archives
+
+
+def discover(root, package, go, output, stamp, ar, build_root=None):
+    """Use CGO sources, compiler includes and linked archives as the dependency authority."""
     directory = (root / package).resolve(strict=True)
     directory.relative_to(root)
     metadata = json.loads(run([go, "list", "-find", "-json", "."], directory))
@@ -201,7 +220,16 @@ def discover(root, package, go, output, stamp, build_root=None):
             if scratch in path.parents:
                 continue
             paths.add(path)
-        return paths
+    # Archives outside both roots (a superproject's DPDK build) stay unhashed,
+    # like any other input the marker does not own.
+    linked = set()
+    for archive in linked_archives(metadata.get("CgoLDFLAGS", [])):
+        try:
+            input_name(root, build_root, archive)
+        except ValueError:
+            continue
+        linked.add(archive)
+    return paths | native_inputs(root, linked, ar, build_root)
 
 
 def native_inputs(root, inputs, ar, build_root=None):
@@ -323,7 +351,7 @@ def main():
         if args.package.is_absolute():
             raise ValueError("package must be a path relative to the project root")
         inputs = set(inputs) | discover(
-            root, args.package, args.go, output, stamp, build_root,
+            root, args.package, args.go, output, stamp, args.ar, build_root,
         )
         publish(root, inputs, output, stamp, args.build_tag, build_root)
     except (OSError, RuntimeError, ValueError) as error:

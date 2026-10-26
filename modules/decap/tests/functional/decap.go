@@ -2,7 +2,6 @@ package decap_test
 
 /*
 #cgo CFLAGS: -I../../../../
-#cgo LDFLAGS: -L../../../../build/lib/controlplane/config -lconfig_cp
 
 #include "lib/controlplane/agent/agent.h"
 #include "lib/controlplane/config/zone.h"

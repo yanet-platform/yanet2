@@ -1,7 +1,6 @@
 package fwstate_test
 
 //#cgo CFLAGS: -I../../../../ -I../../../../lib
-//#cgo LDFLAGS: -L../../../../build/lib/counters -lcounters
 //
 //#include <string.h>
 //

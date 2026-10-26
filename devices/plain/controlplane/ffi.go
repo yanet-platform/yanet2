@@ -1,8 +1,6 @@
 package plain
 
 //#cgo CFLAGS: -I../../../
-//#cgo LDFLAGS: -L../../../build/devices/plain/api -ldev_plain_api
-//#cgo LDFLAGS: -L../../../build/lib/logging/ -llogging
 //
 //#include "api/agent.h"
 //#include "api/config.h"

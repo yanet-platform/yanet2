@@ -1,23 +1,6 @@
 package fwstate
 
 //#cgo CFLAGS: -I../../../.. -I../../../../lib
-//#cgo LDFLAGS: -L../../../../build/lib/dataplane_ut -ldataplane_ut
-//#cgo LDFLAGS: -L../../../../build/modules/fwstate/dataplane -lfwstate_dp
-//#cgo LDFLAGS: -L../../../../build/modules/fwstate/api -lfwstate_cp
-//#cgo LDFLAGS: -L../../../../build/lib/statemap -lstatemap
-//#cgo LDFLAGS: -L../../../../build/objects/fwstate/api -lfwstate_objects
-//#cgo LDFLAGS: -L../../../../build/lib/controlplane/config -lconfig_cp
-//#cgo LDFLAGS: -L../../../../build/lib/dataplane/config -ldp_zone
-//#cgo LDFLAGS: -L../../../../build/lib/counters -lcounters
-//#cgo LDFLAGS: -L../../../../build/lib/dataplane/worker -lworker_dp
-//#cgo LDFLAGS: -L../../../../build/lib/dataplane/packet -lpacket
-//#cgo LDFLAGS: -L../../../../build/lib/fwstate -lfwstate
-//#cgo LDFLAGS: -L../../../../build/lib/logging -llogging
-//#cgo LDFLAGS: -L../../../../build/lib/errors -lerrors
-//#cgo LDFLAGS: -L../../../../build/subprojects/dpdk/lib
-//#cgo LDFLAGS: -l:librte_mbuf.a -l:librte_mempool.a -l:librte_ring.a
-//#cgo LDFLAGS: -l:librte_eal.a -l:librte_kvargs.a -l:librte_telemetry.a -l:librte_log.a
-//#cgo LDFLAGS: -lnuma
 /*
 #include <harness.h>
 */

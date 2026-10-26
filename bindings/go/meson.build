@@ -3,9 +3,14 @@ foreach library : libdpdk.get_variable('dpdk_static_libraries')
   dpdk_static_libraries += {library.name(): library}
 endforeach
 lib_rte_bpf = dpdk_static_libraries['rte_bpf']
+# The system libraries DPDK archives call into.
+dpdk_extra_ldflags = libdpdk.get_variable('dpdk_extra_ldflags')
 
-# The DPDK runtime that cgo test packages linking dataplane libraries
-# list in their LDFLAGS.
+# The DPDK code that cgo test packages linking dataplane libraries call into.
+#
+# Mbuf, mempool and the EAL parts they reference suffice: the harnesses never
+# initialize EAL (no rte_eal_init, no hugepages), and the dataplane_ut mempool
+# keeps objects on the heap behind its own ops (lib/dataplane_ut/mempool.h).
 dpdk_runtime_libraries = []
 foreach name : ['mbuf', 'mempool', 'ring', 'eal', 'kvargs', 'telemetry', 'log']
   dpdk_runtime_libraries += dpdk_static_libraries['rte_' + name]
@@ -81,7 +86,8 @@ cgo_packages += {
     'libraries': [lib_nat64_cp, lib_logging],
   },
   'modules/pdump/controlplane': {
-    'libraries': [lib_pdump_cp, lib_rte_bpf, lib_pcap_static],
+    'libraries': [lib_pdump_cp],
+    'archives': [lib_rte_bpf, lib_pcap_static],
   },
   'modules/route/bindings/go/croute': {
     'libraries': [lib_route_cp],
@@ -148,8 +154,8 @@ cgo_packages += {
       lib_lib_utils,
       lib_agent_counters,
       lib_counter_pattern,
-      lib_rte_bpf,
-    ] + dpdk_runtime_libraries,
+    ],
+    'archives': [lib_rte_bpf] + dpdk_runtime_libraries,
     'inputs': [librure],
   },
   'common/go/dataplane': {
@@ -199,7 +205,8 @@ cgo_packages += {
       lib_fwstate,
       lib_logging,
       lib_errors,
-    ] + dpdk_runtime_libraries,
+    ],
+    'archives': dpdk_runtime_libraries,
   },
   'modules/fwstate/tests/functional': {
     'libraries': [lib_counters],
@@ -230,7 +237,8 @@ cgo_packages += {
     'libraries': [lib_nat64_dp, lib_nat64_cp, lib_packet_dp, lib_logging, lib_errors],
   },
   'modules/pdump/internal/testutils': {
-    'libraries': [lib_pdump_dp, lib_ring_objects, lib_rte_bpf],
+    'libraries': [lib_pdump_dp, lib_ring_objects],
+    'archives': [lib_rte_bpf],
   },
   'objects/ring/tests/ringtest': {
     'libraries': [lib_config_cp, lib_ringtest_writer, lib_ring_objects],
