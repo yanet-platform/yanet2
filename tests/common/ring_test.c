@@ -154,10 +154,11 @@ publish_checked(struct ring_worker *ring, const uint8_t *data) {
 // The prepare step writes the header in two pieces, and a reader that
 // copies it out gets the length and sequence number back whole.
 static int
-run_ring_wrap_splits_header_test() {
+check_ring_wrap_splits_header(uint8_t **owned_data) {
 	const uint32_t ring_size = 32;
 	uint8_t *data;
 	struct ring_worker ring = init_test_ring(ring_size, &data);
+	*owned_data = data;
 	TEST_ASSERT_NOT_NULL(data, "failed to allocate ring data");
 
 	// Start 4 bytes before the end. The header takes [28,32) then [0,4),
@@ -194,8 +195,16 @@ run_ring_wrap_splits_header_test() {
 		"the payload must follow the split header"
 	);
 
-	free(data);
 	return TEST_SUCCESS;
+}
+
+// Keep the data owned until the scenario's return-style assertions finish.
+static int
+run_ring_wrap_splits_header_test(void) {
+	uint8_t *data = NULL;
+	int result = check_ring_wrap_splits_header(&data);
+	free(data);
+	return result;
 }
 
 // Commit one fixed-size record without publishing it.
@@ -247,11 +256,12 @@ write_fixed_record(
 // needs the space of several. The bytes of every record that stays do not
 // change.
 static int
-run_ring_overwrite_evicts_whole_records_test() {
+check_ring_overwrite_evicts_whole_records(uint8_t **owned_data) {
 	const uint32_t ring_size = 64;
 	const uint32_t record_len = 16;
 	uint8_t *data;
 	struct ring_worker ring = init_test_ring(ring_size, &data);
+	*owned_data = data;
 	TEST_ASSERT_NOT_NULL(data, "failed to allocate ring data");
 
 	// Fill the ring exactly with four 16-byte records, one fill byte each.
@@ -318,8 +328,16 @@ run_ring_overwrite_evicts_whole_records_test() {
 		published_write(&ring), 80L, "prepare must not move write_idx"
 	);
 
-	free(data);
 	return TEST_SUCCESS;
+}
+
+// Keep the data owned until the scenario's return-style assertions finish.
+static int
+run_ring_overwrite_evicts_whole_records_test(void) {
+	uint8_t *data = NULL;
+	int result = check_ring_overwrite_evicts_whole_records(&data);
+	free(data);
+	return result;
 }
 
 // A corrupt length in the oldest record drops all published records.
@@ -389,10 +407,11 @@ run_ring_eviction_corrupt_length_catches_up_test() {
 //
 // It refuses it before it changes any position or any data byte.
 static int
-run_ring_prepare_rejects_undersize_test() {
+check_ring_prepare_rejects_undersize(uint8_t **owned_data) {
 	const uint32_t ring_size = 32;
 	uint8_t *data;
 	struct ring_worker ring = init_test_ring(ring_size, &data);
+	*owned_data = data;
 	TEST_ASSERT_NOT_NULL(data, "failed to allocate ring data");
 
 	int rc = ring_worker_prepare(&ring, data, RING_RECORD_FRAME_SIZE - 1);
@@ -412,8 +431,16 @@ run_ring_prepare_rejects_undersize_test() {
 		"a rejected prepare must not move readable_idx"
 	);
 
-	free(data);
 	return TEST_SUCCESS;
+}
+
+// Keep the data owned until the scenario's return-style assertions finish.
+static int
+run_ring_prepare_rejects_undersize_test(void) {
+	uint8_t *data = NULL;
+	int result = check_ring_prepare_rejects_undersize(&data);
+	free(data);
+	return result;
 }
 
 // The writer refuses a length above the batch limit as too big.

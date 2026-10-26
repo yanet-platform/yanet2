@@ -176,6 +176,15 @@ ring_test = executable(
 )
 test('ring', ring_test, suite: ['common'])
 
+ring_fixture_cleanup_test = executable(
+  'ring_fixture_cleanup_test',
+  ['ring_fixture_cleanup_test.c'],
+  c_args: yanet_test_c_args,
+  dependencies: dependencies,
+  include_directories: yanet_rootdir,
+)
+test('ring_fixture_cleanup', ring_fixture_cleanup_test, suite: ['common'])
+
 ring_bench = executable(
   'ring_bench',
   ['ring_bench.c'],
