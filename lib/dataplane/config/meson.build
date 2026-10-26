@@ -1,18 +1,3 @@
-# The generation zone: the dataplane side of config publication that the
-# controlplane libraries call into, kept apart from the packet hot path.
-lib_dp_zone = static_library(
-  'dp_zone',
-  files('gen_resolve.c', 'zone.c'),
-  dependencies: [lib_logging_dep],
-  install: false,
-)
-
-lib_dp_zone_dep = declare_dependency(
-  link_with: [lib_dp_zone],
-  include_directories: yanet_rootdir,
-  dependencies: [lib_logging_dep],
-)
-
 dependencies = [
   # The plugin loader opens shared objects and the loaders look up
   # constructors in them.
@@ -21,6 +6,7 @@ dependencies = [
   lib_errors_dep,
   lib_logging_dep,
   lib_counters_dep,
+  lib_config_cp_dep,
 ]
 
 sources = files(

@@ -1,2 +1,0 @@
-subdir('config')
-subdir('agent')
