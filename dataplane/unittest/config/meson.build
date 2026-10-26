@@ -6,5 +6,6 @@ dp_config_test = executable(
   ],
   include_directories: yanet_rootdir,
   dependencies: lib_dataplane_dep,
+  link_args: ['-Wl,--wrap=realloc'],
 )
 test('dataplane_config', dp_config_test)

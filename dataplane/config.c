@@ -761,11 +761,10 @@ dataplane_config_init(FILE *file, struct dataplane_config **config) {
 				break;
 			}
 			case state_devices: {
-				dataplane->device_count++;
 				void *mem = realloc(
 					dataplane->devices,
 					sizeof(struct dataplane_device_config) *
-						dataplane->device_count
+						(dataplane->device_count + 1)
 				);
 				if (mem == NULL) {
 					goto error;
@@ -773,8 +772,9 @@ dataplane_config_init(FILE *file, struct dataplane_config **config) {
 				dataplane->devices =
 					(struct dataplane_device_config *)mem;
 				device = dataplane->devices +
-					 dataplane->device_count - 1;
+					 dataplane->device_count;
 				memset(device, 0, sizeof(*device));
+				++dataplane->device_count;
 				state = state_device;
 				break;
 			}
