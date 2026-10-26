@@ -18,7 +18,13 @@ extern crate alloc;
 pub mod dp;
 
 use alloc::{boxed::Box, vec::Vec};
-use core::{alloc::Layout, cell::RefCell, marker::PhantomData, ptr::NonNull};
+use core::{
+    alloc::Layout,
+    cell::RefCell,
+    marker::PhantomData,
+    mem::{align_of, size_of},
+    ptr::NonNull,
+};
 #[cfg(miri)]
 use core::{
     ptr,
@@ -175,6 +181,44 @@ impl BlockArena {
             let start = block.as_ptr().addr();
             (addr >= start && addr < start + layout.size()).then_some((start, layout.size()))
         })
+    }
+
+    /// Pointer to a `T` at `addr`, which must lie in one live block, aligned.
+    ///
+    /// The pointer has root provenance, so a write through it is in bounds of
+    /// the block it names under every model.
+    fn checked_ptr<T>(&'static self, addr: usize) -> *mut T {
+        let inside = self
+            .block_of(addr)
+            .is_some_and(|(start, len)| addr.checked_add(size_of::<T>()).is_some_and(|end| end <= start + len));
+        assert!(inside, "the value is not inside one live block of the arena");
+        assert!(addr.is_multiple_of(align_of::<T>()), "the value is misaligned");
+        self.root().ptr(addr)
+    }
+
+    /// Writes `value` at `addr`, as the control plane or C would store it.
+    ///
+    /// The old bytes are overwritten, not dropped. The write is raw, so a
+    /// reference to the block that outlives it is the caller's to avoid: an
+    /// invocation forbids writes to its configuration while it lives.
+    ///
+    /// # Panics
+    ///
+    /// Unless the bytes of the value lie in one live block and `addr` is
+    /// aligned for `T`.
+    fn write<T: Copy>(&'static self, addr: usize, value: T) {
+        let ptr = self.checked_ptr::<T>(addr);
+        // SAFETY: the pointer is aligned and in bounds of a live block
+        // (checked), and a block is plain zeroed or written memory.
+        unsafe { ptr.write(value) }
+    }
+
+    /// Reads the 8-byte word at `addr`; the panics are those of
+    /// [`BlockArena::write`].
+    fn read_word(&'static self, addr: usize) -> u64 {
+        let ptr = self.checked_ptr::<u64>(addr);
+        // SAFETY: as for `write`; every bit pattern is a `u64`.
+        unsafe { ptr.read() }
     }
 
     /// Number of live blocks.

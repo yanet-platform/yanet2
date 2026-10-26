@@ -29,4 +29,6 @@ pub mod dp;
 
 // Test-only dependencies are visible to the library's own test target.
 #[cfg(test)]
+use yanet_packet as _;
+#[cfg(test)]
 use yanet_sdk_testing as _;

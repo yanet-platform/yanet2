@@ -2,10 +2,10 @@
 //!
 //! The packet lists stay C's and are used as a C handler uses them: taking
 //! a packet pops it off the input list, and its verdict moves it to the
-//! output or drop list or routes it to a device. A handler takes every input
-//! packet (module: drain).
+//! output or drop list or routes it to a device. Every input packet is
+//! passed, dropped or routed to a device (module: drain).
 
-use core::{marker::PhantomData, ptr::NonNull};
+use core::{marker::PhantomData, mem::size_of, ptr::NonNull};
 
 use crate::bindings;
 
@@ -38,13 +38,15 @@ use crate::bindings;
 pub struct Batch<'id> {
     front: NonNull<bindings::packet_front>,
     ectx: NonNull<bindings::module_ectx>,
+    worker: NonNull<bindings::dp_worker>,
     // Invariant brand: values of two different contexts never unify, so they cannot be mixed.
     _brand: PhantomData<fn(&'id ()) -> &'id ()>,
     // Neither Send nor Sync on purpose, independent of the pointer fields.
     _local: PhantomData<*mut ()>,
 }
 
-/// A packet taken from the batch, owned until it is disposed of.
+/// A packet taken from or allocated by the batch, owned until it is
+/// disposed of.
 ///
 /// Not `Copy` or `Clone`; consumed by passing, dropping or redirecting it. A
 /// packet that is never disposed of is on no list
@@ -74,6 +76,44 @@ pub struct Packet<'id> {
     _brand: PhantomData<fn(&'id ()) -> &'id ()>,
     // Neither Send nor Sync on purpose, independent of the pointer fields.
     _local: PhantomData<*mut ()>,
+}
+
+/// Read-only view of an input packet the handler has not taken.
+///
+/// Lives while the batch is borrowed for [`Batch::peek`], so no input packet
+/// is taken, disposed of or written meanwhile.
+#[derive(Clone, Copy)]
+pub struct PacketView<'b> {
+    raw: NonNull<bindings::packet>,
+    _batch: PhantomData<&'b ()>,
+}
+
+/// A resize the packet's buffer cannot take; the packet is unchanged.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ResizeError;
+
+/// A tunnel operation the C routine refused.
+///
+/// The inner or outer headers are not ones it handles, the packet has no
+/// parsed network header (every encapsulation refuses one), the packet is a
+/// fragment (decapsulation), or the headroom is spent.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TunnelError;
+
+/// How an encapsulation takes the inner DSCP, the C `DSCP_MARK_*` values
+/// (lib/dataplane/packet/dscp.h).
+///
+/// The inner ECN bits reach the outer header whichever is chosen.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u8)]
+pub enum DscpMark {
+    /// The outer DSCP is zero.
+    Never = 0,
+    /// The outer DSCP is zero, as for `Never`; the value of a module
+    /// configuration that names no marking.
+    Default = 1,
+    /// The outer DSCP is the inner one.
+    Always = 2,
 }
 
 /// Routing target of a device for the running generation.
@@ -138,6 +178,25 @@ pub enum Verdict<'d> {
     Redirect(DeviceRef<'d>),
 }
 
+// The packet allocator and copy of the host dataplane (lib/dataplane/worker),
+// exported by its executable; the plugin resolves them at load time.
+unsafe extern "C" {
+    /// Allocates a packet from the worker's pool, null when it is empty; the
+    /// packet metadata is zeroed and the mbuf empty.
+    fn worker_packet_alloc(worker: *mut bindings::dp_worker) -> *mut bindings::packet;
+
+    /// Copies a packet into a new one from the worker's pool, null when it
+    /// is empty.
+    ///
+    /// The source's recirculation budget, initialised to the limit when
+    /// unset, is split between the two.
+    fn worker_clone_packet(
+        worker: *mut bindings::dp_worker,
+        packet: *mut bindings::packet,
+        packet_recirc_limit: u16,
+    ) -> *mut bindings::packet;
+}
+
 impl<'id> Batch<'id> {
     /// Wraps the front of one handler call.
     ///
@@ -145,16 +204,127 @@ impl<'id> Batch<'id> {
     ///
     /// The front must be the one C passed to the running handler, valid and
     /// exclusively owned by this call, with well-formed lists of packets that
-    /// are themselves exclusively owned; the execution context must be the
-    /// call's.
+    /// are themselves exclusively owned; the execution context and the worker
+    /// must be the call's.
     #[inline(always)]
-    pub(crate) unsafe fn new(front: NonNull<bindings::packet_front>, ectx: NonNull<bindings::module_ectx>) -> Self {
+    pub(crate) unsafe fn new(
+        front: NonNull<bindings::packet_front>,
+        ectx: NonNull<bindings::module_ectx>,
+        worker: NonNull<bindings::dp_worker>,
+    ) -> Self {
         Self {
             front,
             ectx,
+            worker,
             _brand: PhantomData,
             _local: PhantomData,
         }
+    }
+
+    /// Allocates an empty packet from the worker's pool, `None` when the
+    /// pool is exhausted, as C's `worker_packet_alloc` does.
+    ///
+    /// The packet is owned like a taken one: it is passed (emitted after
+    /// the input packets already passed), dropped or redirected; one left
+    /// alone never returns to the pool. Its frame starts empty, with the
+    /// pool's headroom in front; grow it with [`Packet::append`] and
+    /// [`Packet::prepend`]. Its metadata starts zeroed, so its headers count
+    /// as unparsed.
+    #[inline(always)]
+    pub fn alloc(&mut self) -> Option<Packet<'id>> {
+        // SAFETY: the call's worker (constructor contract).
+        let raw = NonNull::new(unsafe { worker_packet_alloc(self.worker.as_ptr()) })?;
+        Some(Packet {
+            raw,
+            _brand: PhantomData,
+            _local: PhantomData,
+        })
+    }
+
+    /// Copies a packet into a new one from the worker's pool, `None` when
+    /// the pool is exhausted, as C's `worker_clone_packet` does.
+    ///
+    /// The copy carries the frame and metadata of the source and is owned
+    /// like an allocated packet: it ends by its verdict. C splits the
+    /// source's recirculation budget between the two; nothing else of the
+    /// source changes.
+    #[inline(always)]
+    pub fn clone(&mut self, packet: &Packet<'id>) -> Option<Packet<'id>> {
+        // SAFETY: the call's worker and context (constructor contract), the
+        // context frozen (attach: frozen); the source is an owned packet of
+        // this call, and no Rust reference covers the metadata C updates.
+        let raw = NonNull::new(unsafe {
+            worker_clone_packet(
+                self.worker.as_ptr(),
+                packet.raw.as_ptr(),
+                (*self.ectx.as_ptr()).packet_recirc_limit,
+            )
+        })?;
+        Some(Packet {
+            raw,
+            _brand: PhantomData,
+            _local: PhantomData,
+        })
+    }
+
+    /// Passes every input packet not yet taken, with the front's input
+    /// counters, as C's `packet_front_pass` does.
+    ///
+    /// The input counters count the whole input, so, as in C
+    /// (lib/dataplane/module/packet_front.h), a handler calls this before it
+    /// takes any packet: packets taken first are counted again in the output.
+    /// Core tracks this in yanet2 #3078 (keep a front's input counters in
+    /// step with its input list).
+    #[inline(always)]
+    pub fn pass_all(&mut self) {
+        let front = self.front.as_ptr();
+        // SAFETY: the front and its packets are exclusively this call's
+        // (constructor contract).
+        unsafe {
+            concat(&raw mut (*front).output, &raw mut (*front).input);
+            (*front).output_count += (*front).input_count;
+            (*front).output_bytes += (*front).input_bytes;
+            (*front).input_count = 0;
+            (*front).input_bytes = 0;
+        }
+    }
+
+    /// Walks the input packets the handler has not taken, in order,
+    /// without taking them.
+    ///
+    /// No packet is taken while the walk lives:
+    ///
+    /// ```compile_fail
+    /// use yanet_sys::dp::Batch;
+    /// fn peek_and_take(batch: &mut Batch<'_>) {
+    ///     let mut views = batch.peek();
+    ///     let taken = batch.next();
+    ///     let _ = (views.next(), taken);
+    /// }
+    /// ```
+    ///
+    /// Taking after the walk is accepted:
+    ///
+    /// ```
+    /// use yanet_sys::dp::Batch;
+    /// fn peek_then_take(batch: &mut Batch<'_>) {
+    ///     if batch.peek().count() > 1 {
+    ///         if let Some(packet) = batch.next() {
+    ///             batch.drop(packet);
+    ///         }
+    ///     }
+    /// }
+    /// ```
+    #[inline(always)]
+    pub fn peek(&self) -> impl Iterator<Item = PacketView<'_>> {
+        let view = |raw| PacketView { raw, _batch: PhantomData };
+        // SAFETY: the input list is exclusively this call's (constructor
+        // contract) and stays unchanged while the batch is borrowed.
+        let first = unsafe { (*self.front.as_ptr()).input.first };
+        core::iter::successors(NonNull::new(first).map(view), move |current: &PacketView<'_>| {
+            // SAFETY: as above.
+            NonNull::new(unsafe { (*current.raw.as_ptr()).next }).map(view)
+        })
     }
 
     /// Takes the next input packet.
@@ -198,10 +368,11 @@ impl<'id> Batch<'id> {
         let raw = packet.raw.as_ptr();
         let front = self.front.as_ptr();
         // SAFETY: an owned packet of this batch is on no list and
-        // exclusively ours (only taking creates one, and its value is
-        // consumed once); the front is this call's, and a redirect target is
-        // a present target of this call's context (device reference
-        // contract) on which the C routing runs (attach: unwind).
+        // exclusively ours (only taking, allocating and copying create one,
+        // and its value is consumed once); the front is this call's, and a
+        // redirect target is a present target of this call's context
+        // (device reference contract) on which the C routing runs
+        // (attach: unwind).
         unsafe {
             match verdict {
                 Verdict::Pass => {
@@ -282,6 +453,115 @@ unsafe fn push(list: *mut bindings::packet_list, packet: *mut bindings::packet) 
     }
 }
 
+/// Moves every packet of one intrusive list to the end of another, leaving
+/// the source empty.
+///
+/// As the C `packet_list_concat` does (lib/dataplane/packet/packet.h).
+///
+/// # Safety
+///
+/// Both lists must be valid and exclusively owned with their packets.
+#[inline(always)]
+unsafe fn concat(dst: *mut bindings::packet_list, src: *mut bindings::packet_list) {
+    // SAFETY: guaranteed by the caller.
+    unsafe {
+        if (*src).first.is_null() {
+            return;
+        }
+        if (*dst).first.is_null() {
+            (*dst).first = (*src).first;
+        } else {
+            *(*dst).last = (*src).first;
+        }
+        (*dst).last = (*src).last;
+        (*src).first = core::ptr::null_mut();
+        (*src).last = core::ptr::null_mut();
+    }
+}
+
+/// Grows the first segment of an mbuf at the front, into the headroom beyond
+/// the packet descriptor; reports whether it did, else the mbuf is unchanged.
+///
+/// The Rust twin of C's `packet_headroom_prepend`
+/// (lib/dataplane/packet/data.h) over `rte_pktmbuf_prepend`, inlined here; a
+/// test compares the two.
+///
+/// # Safety
+///
+/// The mbuf must be the valid mbuf of an exclusively owned packet whose
+/// descriptor shares the buffer.
+#[inline(always)]
+unsafe fn grow_front(mbuf: *mut bindings::rte_mbuf, len: u16) -> bool {
+    // SAFETY: guaranteed by the caller.
+    unsafe {
+        if usize::from((*mbuf).data_off) < size_of::<bindings::packet>() + usize::from(len) {
+            return false;
+        }
+        (*mbuf).data_off -= len;
+        (*mbuf).data_len += len;
+        (*mbuf).pkt_len += u32::from(len);
+    }
+    true
+}
+
+/// Start and length of the first segment of a packet's frame: C's
+/// `packet_data` and `packet_data_len` (lib/dataplane/packet/data.h).
+///
+/// # Safety
+///
+/// The packet must be valid, with its mbuf.
+#[inline(always)]
+unsafe fn segment(packet: *mut bindings::packet) -> (*mut u8, usize) {
+    // SAFETY: guaranteed by the caller.
+    unsafe {
+        let mbuf = (*packet).mbuf;
+        (
+            (*mbuf).buf_addr.cast::<u8>().add(usize::from((*mbuf).data_off)),
+            usize::from((*mbuf).data_len),
+        )
+    }
+}
+
+/// Reports whether the parser found a header: an unparsed one is all zero,
+/// as an allocated packet's are.
+#[inline(always)]
+fn parsed(type_: u16, offset: u16) -> bool {
+    type_ != 0 || offset != 0
+}
+
+/// End of what the parser vouches for, from the start of the frame; zero for
+/// an unparsed packet.
+///
+/// That is (attach: packet) the start of a parsed network or transport
+/// header, the fixed IPv4 or IPv6 header and an available TCP or UDP header.
+///
+/// # Safety
+///
+/// The packet must be valid.
+#[inline(always)]
+unsafe fn parsed_end(packet: *mut bindings::packet) -> usize {
+    // SAFETY: guaranteed by the caller.
+    let (network, transport) = unsafe { ((*packet).network_header, (*packet).transport_header) };
+    let network_len = match u16::from_be(network.type_) {
+        0x0800 => 20,
+        0x86dd => 40,
+        _ => 0,
+    };
+    let available = u32::from(transport.type_) & bindings::PACKET_TRANSPORT_HEADER_UNAVAILABLE == 0;
+    let transport_len = match (available, transport.type_ & 0xff) {
+        (true, 6) => 20,
+        (true, 17) => 8,
+        _ => 0,
+    };
+    (usize::from(network.offset) + network_len).max(usize::from(transport.offset) + transport_len)
+}
+
+/// Maps the C result of a tunnel routine: zero is success.
+#[inline(always)]
+fn check(result: core::ffi::c_int) -> Result<(), TunnelError> {
+    if result == 0 { Ok(()) } else { Err(TunnelError) }
+}
+
 impl Packet<'_> {
     /// Bytes of the first segment of the frame.
     #[inline(always)]
@@ -302,20 +582,224 @@ impl Packet<'_> {
         unsafe { core::slice::from_raw_parts_mut(start, len) }
     }
 
-    /// Start and length of the first segment of the frame: C's
-    /// `packet_data` and `packet_data_len` (lib/dataplane/packet/data.h).
     #[inline(always)]
     fn segment(&self) -> (*mut u8, usize) {
         // SAFETY: the packet and its first mbuf segment are valid for the
         // call (attach: packet).
+        unsafe { segment(self.raw.as_ptr()) }
+    }
+
+    /// Grows the frame at the front, into the headroom, and returns the new
+    /// bytes; parsed header offsets move with the frame.
+    ///
+    /// Header views read the same headers and unparsed headers stay
+    /// unparsed. The packet descriptor shares the buffer with the headroom,
+    /// as in C, so the room is what the headroom holds beyond the
+    /// descriptor; beyond it the packet is left unchanged.
+    #[inline]
+    pub fn prepend(&mut self, len: usize) -> Result<&mut [u8], ResizeError> {
+        let raw = self.raw.as_ptr();
+        let len16 = u16::try_from(len).map_err(|_| ResizeError)?;
+        // SAFETY: the packet, its mbuf and buffer are exclusively ours for
+        // the call (attach: packet); the new bytes lie in the first
+        // segment's headroom. A parsed offset points into the buffer
+        // (`data_off + offset <= buf_len`, a trim moves neither), so the
+        // shifted one does not overflow.
         unsafe {
-            let mbuf = (*self.raw.as_ptr()).mbuf;
-            let buf_addr = (*mbuf).buf_addr;
-            (
-                buf_addr.cast::<u8>().add(usize::from((*mbuf).data_off)),
-                usize::from((*mbuf).data_len),
-            )
+            if !grow_front((*raw).mbuf, len16) {
+                return Err(ResizeError);
+            }
+            // `packet_refresh_data_len`: the packet is on no counted list.
+            (*raw).data_len = (*(*raw).mbuf).data_len;
+            let network = &raw mut (*raw).network_header;
+            if parsed((*network).type_, (*network).offset) {
+                (*network).offset += len16;
+            }
+            let transport = &raw mut (*raw).transport_header;
+            if parsed((*transport).type_, (*transport).offset) {
+                (*transport).offset += len16;
+            }
+            let (start, _) = segment(raw);
+            Ok(core::slice::from_raw_parts_mut(start, len))
         }
+    }
+
+    /// Grows the frame at the end, into the tailroom of a single-segment
+    /// packet, and returns the new bytes, as `rte_pktmbuf_append` does.
+    ///
+    /// Beyond the tailroom, or on a chained packet, the packet is left
+    /// unchanged.
+    #[inline]
+    pub fn append(&mut self, len: usize) -> Result<&mut [u8], ResizeError> {
+        let raw = self.raw.as_ptr();
+        // SAFETY: as for prepending; the new bytes lie in the tailroom of
+        // the only segment.
+        unsafe {
+            let mbuf = (*raw).mbuf;
+            if !(*mbuf).next.is_null() {
+                return Err(ResizeError);
+            }
+            let used = usize::from((*mbuf).data_off) + usize::from((*mbuf).data_len);
+            if len > usize::from((*mbuf).buf_len) - used {
+                return Err(ResizeError);
+            }
+            let (start, old_len) = segment(raw);
+            (*mbuf).data_len += len as u16;
+            (*mbuf).pkt_len += len as u32;
+            (*raw).data_len = (*mbuf).data_len;
+            Ok(core::slice::from_raw_parts_mut(start.add(old_len), len))
+        }
+    }
+
+    /// Shrinks the frame of a single-segment packet at the end, as
+    /// `rte_pktmbuf_trim` does, without breaking what the parser vouches for.
+    ///
+    /// Modules read headers at their offsets unchecked (attach: packet), so
+    /// a trim must leave every parsed header starting no later than the end
+    /// of the frame and the fixed IPv4 or IPv6 header and an available TCP or
+    /// UDP header whole. A trim that would not, one beyond the frame length,
+    /// or one on a chained packet leaves the packet unchanged.
+    #[inline]
+    pub fn trim(&mut self, len: usize) -> Result<(), ResizeError> {
+        let raw = self.raw.as_ptr();
+        // SAFETY: as for prepending.
+        unsafe {
+            let mbuf = (*raw).mbuf;
+            let data_len = usize::from((*mbuf).data_len);
+            if !(*mbuf).next.is_null() || len > data_len || data_len - len < parsed_end(raw) {
+                return Err(ResizeError);
+            }
+            (*mbuf).data_len -= len as u16;
+            (*mbuf).pkt_len -= len as u32;
+            (*raw).data_len = (*mbuf).data_len;
+        }
+        Ok(())
+    }
+
+    /// Prepends an outer IPv4 header to an IPv4 or IPv6 packet, as the C
+    /// `packet_ip4_encap` does.
+    ///
+    /// The outer TTL, protocol (IP-in-IP or IPv6-in-IP) and length come from
+    /// the inner header, and the outer checksum is computed. The network
+    /// header offset stays, now at the outer header, and a parsed transport
+    /// header offset moves with the inner packet. The refusal of an
+    /// unsupported inner type (an unparsed packet's included) or of a spent
+    /// headroom leaves the packet unchanged.
+    #[inline]
+    pub fn encap_ipv4(&mut self, dst: [u8; 4], src: [u8; 4], dscp: DscpMark) -> Result<(), TunnelError> {
+        // SAFETY: the packet is exclusively ours for the call (attach:
+        // packet), handed over by `prepend_at_network` with its network
+        // offset in bounds; the address arrays outlive the call.
+        self.prepend_at_network(|raw| unsafe {
+            bindings::yanet_sys_dp_ip4_encap(raw, dst.as_ptr(), src.as_ptr(), dscp as u8)
+        })
+    }
+
+    /// Prepends an outer IPv6 header to an IPv4 or IPv6 packet, as
+    /// [`Packet::encap_ipv4`] does with IPv4, through `packet_ip6_encap`.
+    #[inline]
+    pub fn encap_ipv6(&mut self, dst: [u8; 16], src: [u8; 16], dscp: DscpMark) -> Result<(), TunnelError> {
+        // SAFETY: as for `encap_ipv4`.
+        self.prepend_at_network(|raw| unsafe {
+            bindings::yanet_sys_dp_ip6_encap(raw, dst.as_ptr(), src.as_ptr(), dscp as u8)
+        })
+    }
+
+    /// Prepends one MPLS label stack entry in front of the network header,
+    /// as the C `packet_mpls_encap` does.
+    ///
+    /// The label is taken modulo 2^20 (C shifts the high bits out) and the
+    /// traffic class modulo 8. The packet needs its network header parsed: an
+    /// unparsed one is refused. A spent headroom leaves the packet
+    /// unchanged.
+    #[inline]
+    pub fn encap_mpls(&mut self, label: u32, traffic_class: u8, bottom: bool, ttl: u8) -> Result<(), TunnelError> {
+        // SAFETY: as for `encap_ipv4`.
+        self.prepend_at_network(|raw| unsafe {
+            bindings::yanet_sys_dp_mpls_encap(raw, label, traffic_class & 0x7, u8::from(bottom), ttl)
+        })
+    }
+
+    /// Wraps the packet from its network header on in UDP over IPv4, as the C
+    /// `packet_ip4_encap_udp` does.
+    ///
+    /// The UDP checksum is computed. The packet needs its network header
+    /// parsed: an unparsed one is refused. Two headers are prepended one
+    /// after the other, so a spent headroom may leave the UDP header
+    /// written: the caller drops a packet it could not wrap.
+    #[inline]
+    pub fn encap_ipv4_udp(
+        &mut self,
+        src: [u8; 4],
+        dst: [u8; 4],
+        src_port: u16,
+        dst_port: u16,
+    ) -> Result<(), TunnelError> {
+        // SAFETY: as for `encap_ipv4`.
+        self.prepend_at_network(|raw| unsafe {
+            bindings::yanet_sys_dp_ip4_encap_udp(raw, src.as_ptr(), dst.as_ptr(), src_port, dst_port)
+        })
+    }
+
+    /// Wraps the packet in UDP over IPv6, as [`Packet::encap_ipv4_udp`] does
+    /// over IPv4.
+    ///
+    /// The network header must be parsed, as there.
+    #[inline]
+    pub fn encap_ipv6_udp(
+        &mut self,
+        src: [u8; 16],
+        dst: [u8; 16],
+        src_port: u16,
+        dst_port: u16,
+    ) -> Result<(), TunnelError> {
+        // SAFETY: as for `encap_ipv4`.
+        self.prepend_at_network(|raw| unsafe {
+            bindings::yanet_sys_dp_ip6_encap_udp(raw, src.as_ptr(), dst.as_ptr(), src_port, dst_port)
+        })
+    }
+
+    /// Runs a C encapsulation that prepends at the network offset on a packet
+    /// with a parsed network header; an unparsed transport header stays so.
+    ///
+    /// Zero means unparsed: a parsed Ethernet frame has the offset of at
+    /// least the Ethernet header, and an allocated packet has none. The C
+    /// routines copy the bytes before the network offset and the UDP ones
+    /// checksum the frame from it, which stays in bounds because a parsed
+    /// network offset is no later than the end of the frame (attach: packet).
+    /// They move the transport offset unconditionally, which would make an
+    /// unparsed one look parsed.
+    #[inline(always)]
+    fn prepend_at_network(
+        &mut self,
+        encap: impl FnOnce(*mut bindings::packet) -> core::ffi::c_int,
+    ) -> Result<(), TunnelError> {
+        if self.network_offset() == 0 {
+            return Err(TunnelError);
+        }
+        let raw = self.raw.as_ptr();
+        // SAFETY: the packet is exclusively ours for the call (attach:
+        // packet).
+        let transport = unsafe { (*raw).transport_header };
+        let result = encap(raw);
+        if !parsed(transport.type_, transport.offset) {
+            // SAFETY: as above.
+            unsafe { (*raw).transport_header = transport };
+        }
+        check(result)
+    }
+
+    /// Removes the IP-in-IP or GRE tunnel headers the parser found, as the C
+    /// `packet_decap` does.
+    ///
+    /// The inner IPv4 or IPv6 packet is left behind the Ethernet header. The
+    /// frame is unchanged when the packet is a fragment, the tunnel is of
+    /// another kind, or the inner header is truncated; C may still have
+    /// updated the packet's parse metadata (hash, fragment fields).
+    #[inline]
+    pub fn decap(&mut self) -> Result<(), TunnelError> {
+        // SAFETY: the packet is exclusively ours for the call (attach: packet).
+        check(unsafe { bindings::yanet_sys_dp_decap(self.raw.as_ptr()) })
     }
 
     /// Ether type of the network header the parser found, host order.
@@ -367,5 +851,194 @@ impl Packet<'_> {
     pub fn transport_offset(&self) -> u16 {
         // SAFETY: as above.
         unsafe { (*self.raw.as_ptr()).transport_header.offset }
+    }
+}
+
+impl<'b> PacketView<'b> {
+    /// Bytes of the first segment of the frame.
+    #[inline(always)]
+    pub fn data(&self) -> &'b [u8] {
+        // SAFETY: an input packet of the borrowed batch is valid with its
+        // mbuf (attach: packet), and nothing writes it while the batch is
+        // borrowed.
+        unsafe {
+            let (start, len) = segment(self.raw.as_ptr());
+            core::slice::from_raw_parts(start, len)
+        }
+    }
+
+    /// Ether type of the network header the parser found, host order.
+    #[inline(always)]
+    pub fn network_type(&self) -> u16 {
+        // SAFETY: as above.
+        u16::from_be(unsafe { (*self.raw.as_ptr()).network_header.type_ })
+    }
+
+    /// Offset of the network header from the start of the frame.
+    #[inline(always)]
+    pub fn network_offset(&self) -> u16 {
+        // SAFETY: as above.
+        unsafe { (*self.raw.as_ptr()).network_header.offset }
+    }
+
+    /// Raw transport tag the parser wrote, as [`Packet::transport_type`].
+    #[inline(always)]
+    pub fn transport_type(&self) -> u16 {
+        // SAFETY: as above.
+        unsafe { (*self.raw.as_ptr()).transport_header.type_ }
+    }
+
+    /// Offset of the transport header from the start of the frame.
+    #[inline(always)]
+    pub fn transport_offset(&self) -> u16 {
+        // SAFETY: as above.
+        unsafe { (*self.raw.as_ptr()).transport_header.offset }
+    }
+}
+
+#[cfg(all(test, not(miri)))]
+mod tests {
+    extern crate std;
+
+    use std::{vec, vec::Vec};
+
+    use super::*;
+
+    /// An mbuf with the given offset and lengths over a buffer of the test,
+    /// zeroed otherwise.
+    fn mbuf(buffer: &mut [u8], data_off: u16, data_len: u16) -> bindings::rte_mbuf {
+        bindings::rte_mbuf {
+            buf_addr: buffer.as_mut_ptr().cast(),
+            buf_len: buffer.len() as u16,
+            data_off,
+            data_len,
+            pkt_len: u32::from(data_len),
+            ..Default::default()
+        }
+    }
+
+    /// A front whose input and output lists hold the given packets and whose
+    /// counters are the given values, which need not match the lists.
+    fn front(
+        input: &mut [bindings::packet],
+        output: &mut [bindings::packet],
+        counts: [u64; 4],
+    ) -> bindings::packet_front {
+        let mut front = bindings::packet_front {
+            input: list(input),
+            output: list(output),
+            ..Default::default()
+        };
+        [
+            front.input_count,
+            front.input_bytes,
+            front.output_count,
+            front.output_bytes,
+        ] = counts;
+        front
+    }
+
+    /// An intrusive list of the packets in order, as the C append builds it;
+    /// the packets stay where they are.
+    fn list(packets: &mut [bindings::packet]) -> bindings::packet_list {
+        let mut next: *mut bindings::packet = core::ptr::null_mut();
+        let mut last: *mut *mut bindings::packet = core::ptr::null_mut();
+        for packet in packets.iter_mut().rev() {
+            packet.next = next;
+            if last.is_null() {
+                last = &raw mut packet.next;
+            }
+            next = packet;
+        }
+        bindings::packet_list { first: next, last }
+    }
+
+    /// Indices into `packets` of a front's output list in order, its counters
+    /// and whether its input list is empty.
+    fn observe(front: &bindings::packet_front, packets: &[bindings::packet]) -> (Vec<usize>, [u64; 4], bool) {
+        let index = |cursor: *mut bindings::packet| {
+            packets
+                .iter()
+                .position(|packet| core::ptr::eq(packet, cursor))
+                .expect("a packet of this test")
+        };
+        let mut order = Vec::new();
+        let mut cursor = front.output.first;
+        while !cursor.is_null() {
+            let idx = index(cursor);
+            order.push(idx);
+            cursor = packets[idx].next;
+        }
+        let counts = [
+            front.input_count,
+            front.input_bytes,
+            front.output_count,
+            front.output_bytes,
+        ];
+        (order, counts, front.input.first.is_null() && front.input.last.is_null())
+    }
+
+    /// verifies that the Rust twin of `packet_front_pass` moves the same
+    /// packets and counters as the C routine, for empty and filled lists and
+    /// for counters that already disagree with the input list, as after a
+    /// packet was taken.
+    #[test]
+    fn test_pass_all_rust_twin_matches_c() {
+        for (inputs, outputs, counts) in [
+            (0, 0, [0, 0, 0, 0]),
+            (3, 0, [3, 180, 0, 0]),
+            (0, 2, [0, 0, 2, 120]),
+            (2, 2, [2, 120, 2, 120]),
+            (1, 1, [3, 180, 1, 60]),
+        ] {
+            let mut c_packets = vec![bindings::packet::default(); inputs + outputs];
+            let mut rust_packets = vec![bindings::packet::default(); inputs + outputs];
+            let (c_in, c_out) = c_packets.split_at_mut(inputs);
+            let (rust_in, rust_out) = rust_packets.split_at_mut(inputs);
+            let mut in_c = front(c_in, c_out, counts);
+            let mut in_rust = front(rust_in, rust_out, counts);
+
+            // SAFETY: the fronts are this test's; the batch reads only its
+            // front, and the context and worker it is given are never read.
+            unsafe {
+                bindings::yanet_sys_dp_front_pass(&raw mut in_c);
+                Batch::new(NonNull::from(&mut in_rust), NonNull::dangling(), NonNull::dangling()).pass_all();
+            }
+
+            assert_eq!(
+                observe(&in_c, &c_packets),
+                observe(&in_rust, &rust_packets),
+                "{inputs} input, {outputs} output, counters {counts:?}"
+            );
+        }
+    }
+
+    /// verifies that the Rust twin of `packet_headroom_prepend` accepts and
+    /// refuses exactly what the C routine does, and moves the same fields,
+    /// around the descriptor boundary and across the headroom range.
+    #[test]
+    fn test_grow_front_rust_twin_matches_c() {
+        let descriptor = size_of::<bindings::packet>() as u16;
+        let (mut c_buffer, mut rust_buffer) = ([0u8; 1024], [0u8; 1024]);
+        for data_off in (0..=descriptor + 40).chain([255, 256, 600]) {
+            for len in (0..=descriptor + 40).chain([255, 256, 600]) {
+                let (mut in_c, mut in_rust) = (mbuf(&mut c_buffer, data_off, 7), mbuf(&mut rust_buffer, data_off, 7));
+
+                // SAFETY: valid mbufs of this test.
+                let (c, rust) = unsafe {
+                    (
+                        !bindings::yanet_sys_dp_headroom_prepend(&raw mut in_c, len).is_null(),
+                        grow_front(&raw mut in_rust, len),
+                    )
+                };
+
+                assert_eq!(c, rust, "offset {data_off}, len {len}");
+                assert_eq!(
+                    (in_c.data_off, in_c.data_len, in_c.pkt_len),
+                    (in_rust.data_off, in_rust.data_len, in_rust.pkt_len),
+                    "offset {data_off}, len {len}"
+                );
+            }
+        }
     }
 }

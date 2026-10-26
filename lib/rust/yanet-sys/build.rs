@@ -38,15 +38,25 @@ fn main() {
     flags.rerun_on_headers();
 }
 
+/// C sources of `lib/dataplane/packet` the shim's encapsulation calls.
+const PACKET_SOURCES: [&str; 3] = [
+    "lib/dataplane/packet/encap.c",
+    "lib/dataplane/packet/decap.c",
+    "lib/dataplane/packet/packet.c",
+];
+
 /// Compiles the dataplane shim with the flags of the dataplane's C sources.
 ///
-/// The shim wraps header-inline C routing helpers. It is linked into every
-/// module plugin with hidden visibility, so a plugin exports nothing of it.
+/// The shim wraps header-inline C routing helpers and the packet
+/// encapsulation routines, whose sources it compiles in. It is linked into
+/// every module plugin with hidden visibility, so a plugin exports nothing of
+/// it and imports none of the encapsulation from the host.
 fn build_shim(flags: &CFlags, shim_dir: &Path) {
     let mut build = cc::Build::new();
     build
         .compiler(&flags.compiler)
         .file(shim_dir.join("dp_shim.c"))
+        .files(PACKET_SOURCES.map(|source| flags.source(source)))
         .include(shim_dir)
         .opt_level(2)
         // Not silencing: drops cc-rs's own warning set, so the build's options alone apply.
@@ -79,7 +89,14 @@ fn generate_bindings(flags: &CFlags, shim_dir: &Path, out: &Path) {
         .use_core()
         .ctypes_prefix("core::ffi")
         .derive_debug(false)
-        .derive_default(false)
+        // Default zero-fills a struct where it cannot be derived, so C enums
+        // stay integer constants.
+        //
+        // Zero is a valid value of every field bindgen makes from C (integers,
+        // bools, bitfield units, raw pointers, arrays, unions, Option function
+        // pointers); a Rust enum without a zero variant would make it UB.
+        .default_enum_style(bindgen::EnumVariation::Consts)
+        .derive_default(true)
         .wrap_unsafe_ops(true)
         .generate_comments(false)
         .layout_tests(true)
@@ -96,10 +113,12 @@ fn generate_bindings(flags: &CFlags, shim_dir: &Path, out: &Path) {
         .allowlist_type("packet_list")
         .allowlist_type("packet_front")
         .allowlist_type("rte_mbuf")
-        .allowlist_function("yanet_sys_dp_redirect")
+        .allowlist_function("yanet_sys_dp_.*")
         .allowlist_var("LPM_.*")
         .allowlist_var("YANET_MODULE_ABI_VERSION")
         .allowlist_var("MODULE_TYPE_LEN")
+        .allowlist_var("MBUF_MAX_SIZE")
+        .allowlist_var("RTE_PKTMBUF_HEADROOM")
         .allowlist_var("PACKET_TRANSPORT_HEADER_UNAVAILABLE")
         // Reached only behind pointers the SDK never follows, their own bytes
         // never read.

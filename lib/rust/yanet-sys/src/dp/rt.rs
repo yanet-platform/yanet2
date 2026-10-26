@@ -70,8 +70,9 @@ pub unsafe fn invoke<M: Module>(
     // absolute fields were derived before release (attach: call, frozen,
     // publish).
     let (config, prepared) = unsafe { ((*ectx.as_ptr()).abs_cp_module, (*ectx.as_ptr()).abs_module_prepared) };
-    // SAFETY: the front and context belong to this call (attach: call).
-    let mut batch = unsafe { Batch::new(front, ectx) };
+    // SAFETY: the front, context and worker belong to this call (attach:
+    // call).
+    let mut batch = unsafe { Batch::new(front, ectx, worker) };
     let prepared = if size_of::<M::Prepared<'_>>() == 0 {
         // C allocates no buffer for a module without a prepared size.
         NonNull::dangling()

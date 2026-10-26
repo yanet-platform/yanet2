@@ -20,4 +20,5 @@ serde_json = "1"
 shlex = "1"
 
 [dev-dependencies]
+yanet-packet = { path = "../yanet-packet" }
 yanet-sdk-testing = { path = "../yanet-sdk-testing", features = ["dp"] }
