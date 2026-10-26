@@ -17,10 +17,9 @@ log = "0.4"
 clap = { version = "4.5", features = ["derive"] }
 prost = "0.14"
 tonic = { version = "0.14", features = ["gzip", "zstd"] }
-tonic-prost = "0.14"
 serde = { version = "1", features = ["derive"] }
 serde_yaml = "0.9"
 tabled = { version = "0.22", default-features = false, features = ["ansi", "derive"] }
 
 [build-dependencies]
-tonic-prost-build = { version = "0.14", default-features = false, features = ["transport"] }
+ync-build = { path = "../../../cli/ync-build", package = "yanet-cli-build" }

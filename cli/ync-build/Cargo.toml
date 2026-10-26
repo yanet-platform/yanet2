@@ -10,4 +10,5 @@ rust-version = "1.99"
 workspace = true
 
 [dependencies]
+prost-build = "0.14"
 tonic-prost-build = { version = "0.14", default-features = false, features = ["transport"] }

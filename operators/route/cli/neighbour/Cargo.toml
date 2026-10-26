@@ -19,7 +19,6 @@ netip = "0.3"
 serde = { version = "1", features = ["derive"] }
 tabled = { version = "0.22", default-features = false, features = ["ansi"] }
 tonic = { version = "0.14", features = ["gzip", "zstd"] }
-tonic-prost = "0.14"
 
 [dev-dependencies]
 serde_json = "1"

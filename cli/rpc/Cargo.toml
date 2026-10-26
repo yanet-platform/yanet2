@@ -1,0 +1,17 @@
+[package]
+name = "yanet-cli-rpc"
+version = "0.2.0"
+edition = "2024"
+publish = false
+
+rust-version = "1.99"
+
+[lints]
+workspace = true
+
+[dependencies]
+bytes = "1"
+http = "1"
+prost = "0.14"
+tonic = { version = "0.14", features = ["gzip", "zstd"] }
+tower = { version = "0.5", features = ["util"] }

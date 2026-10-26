@@ -22,12 +22,7 @@
 //!     .accept_compressed(CompressionEncoding::Gzip);
 //! ```
 
-use core::{
-    fmt::Debug,
-    pin::Pin,
-    task::{Context, Poll},
-    time::Duration,
-};
+use core::{fmt::Debug, pin::Pin, time::Duration};
 use std::{
     fs,
     path::{Path, PathBuf},
@@ -50,7 +45,13 @@ use tonic::{
     transport::{Certificate, Channel, ClientTlsConfig, Endpoint, Identity},
 };
 use tonic_prost::ProstCodec;
-use tower::{BoxError, Layer, ServiceExt, util::BoxCloneSyncService};
+use tower::{Layer, ServiceExt, util::BoxCloneSyncService};
+/// Channel type with all interceptors applied.
+///
+/// Generated clients take it, e.g. `MyServiceClient<LayeredChannel>`. The
+/// interceptors and the transport sit behind one boxed service built in this
+/// crate, so a CLI binary does not compile its own copy of them.
+pub use ync_rpc::Channel as LayeredChannel;
 
 use crate::{
     auth::{self, AuthArgs},
@@ -59,29 +60,6 @@ use crate::{
     progress::ProgressService,
     timeout::TimeoutLayer,
 };
-
-/// Channel type with all interceptors applied.
-///
-/// Use this as the type parameter for tonic-generated clients, e.g.
-/// `MyServiceClient<LayeredChannel>`. The interceptors and the transport
-/// sit behind one boxed service built in this crate, so a CLI binary does
-/// not compile its own copy of them.
-#[derive(Clone)]
-pub struct LayeredChannel(BoxCloneSyncService<http::Request<Body>, http::Response<Body>, BoxError>);
-
-impl tower::Service<http::Request<Body>> for LayeredChannel {
-    type Response = http::Response<Body>;
-    type Error = BoxError;
-    type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
-
-    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.0.poll_ready(cx)
-    }
-
-    fn call(&mut self, request: http::Request<Body>) -> Self::Future {
-        self.0.call(request)
-    }
-}
 
 /// TLS material supplied explicitly by the user.
 #[derive(Debug, Clone, Default, clap::Args)]
@@ -362,7 +340,7 @@ fn establish(
 
         let layered = ProgressService::new(TimeoutLayer::new(settings.timeout.value).layer(auth_service));
 
-        Ok(LayeredChannel(BoxCloneSyncService::new(
+        Ok(LayeredChannel::new(BoxCloneSyncService::new(
             layered.map_response(|response| response.map(Body::new)),
         )))
     })
@@ -561,7 +539,7 @@ impl Connection {
 
 /// A connected gRPC client bundled with its endpoint and service name.
 ///
-/// Wraps a tonic-generated client together with the endpoint it reached and
+/// Wraps a generated client together with the endpoint it reached and
 /// its fully-qualified service name. This lets a CLI stop threading
 /// `endpoint` through its own service struct and stop re-declaring the
 /// per-command error-mapping helpers: [`status`](Service::status) and
@@ -592,7 +570,7 @@ impl<C> Service<C> {
     /// Wrap a `name` service client over an existing [`Connection`].
     ///
     /// `build` receives a clone of the connection's channel and returns the
-    /// tonic-generated client (compression and message sizes are configured
+    /// generated client (compression and message sizes are configured
     /// there — they are inherent client methods and cannot be defaulted here).
     /// A CLI driving several services connects once and calls this per client.
     pub fn new<F>(connection: &Connection, name: &'static str, build: F) -> Self

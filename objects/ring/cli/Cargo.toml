@@ -18,7 +18,6 @@ prost = "0.14"
 serde = { version = "1", features = ["derive"] }
 tabled = { version = "0.22", default-features = false, features = ["ansi"] }
 tonic = { version = "0.14", features = ["gzip", "zstd"] }
-tonic-prost = "0.14"
 
 [build-dependencies]
 ync-build = { path = "../../../cli/ync-build", package = "yanet-cli-build" }

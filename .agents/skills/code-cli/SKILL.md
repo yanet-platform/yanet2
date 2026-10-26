@@ -37,8 +37,9 @@ yanet2 submodule, so a `ync` API change reaches them only on their next bump.
   where `type <X>Service = Service<<X>ServiceClient<LayeredChannel>>`, each
   returning `Result<(), Error>`. A crate talking to several services keeps
   a local struct holding them.
-- The tonic build generates both client and server modules, so the CLI imports
-  `SERVICE_NAME` from the generated `<x>_service_server` module. A crate that
+- The build generates a client over the shared gRPC runtime (`ync::rpc`) and a
+  `<x>_service_server` module holding only `SERVICE_NAME`, which the CLI
+  imports from there. A crate that
   builds its client at a single site keeps the builder inline:
   `|channel| <X>ServiceClient::new(channel).send_compressed(Zstd)
   .accept_compressed(Zstd).accept_compressed(Gzip)`. Once the crate builds it at

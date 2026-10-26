@@ -2536,6 +2536,7 @@ dependencies = [
  "tonic-prost",
  "tower",
  "uuid",
+ "yanet-cli-rpc",
  "yanet-commonpb",
  "yanet-ynpb",
 ]
@@ -2552,7 +2553,6 @@ dependencies = [
  "tabled",
  "tokio",
  "tonic",
- "tonic-prost",
  "yanet-cli",
  "yanet-cli-build",
  "yanet-commonpb",
@@ -2568,7 +2568,6 @@ dependencies = [
  "prost",
  "serde",
  "tonic",
- "tonic-prost",
  "yanet-cli",
  "yanet-cli-build",
 ]
@@ -2577,6 +2576,7 @@ dependencies = [
 name = "yanet-cli-build"
 version = "0.2.0"
 dependencies = [
+ "prost-build",
  "tonic-prost-build",
 ]
 
@@ -2616,7 +2616,6 @@ dependencies = [
  "prost",
  "serde",
  "tonic",
- "tonic-prost",
  "yanet-cli",
  "yanet-cli-build",
  "yanet-commonpb",
@@ -2654,7 +2653,6 @@ dependencies = [
  "serde",
  "tabled",
  "tonic",
- "tonic-prost",
  "yanet-cli",
  "yanet-cli-build",
  "yanet-commonpb",
@@ -2670,7 +2668,6 @@ dependencies = [
  "prost",
  "serde",
  "tonic",
- "tonic-prost",
  "yanet-cli",
  "yanet-cli-build",
  "yanet-commonpb",
@@ -2686,7 +2683,6 @@ dependencies = [
  "serde",
  "tabled",
  "tonic",
- "tonic-prost",
  "yanet-cli",
  "yanet-cli-build",
  "yanet-commonpb",
@@ -2704,7 +2700,6 @@ dependencies = [
  "serde",
  "tabled",
  "tonic",
- "tonic-prost",
  "yanet-cli",
  "yanet-cli-build",
  "yanet-commonpb",
@@ -2721,7 +2716,6 @@ dependencies = [
  "prost",
  "serde",
  "tonic",
- "tonic-prost",
  "yanet-cli",
  "yanet-cli-build",
  "yanet-commonpb",
@@ -2737,7 +2731,6 @@ dependencies = [
  "serde",
  "serde_yaml",
  "tonic",
- "tonic-prost",
  "yanet-cli",
  "yanet-cli-build",
  "yanet-commonpb",
@@ -2768,7 +2761,6 @@ dependencies = [
  "prost",
  "serde",
  "tonic",
- "tonic-prost",
  "yanet-cli",
  "yanet-cli-build",
  "yanet-commonpb",
@@ -2786,7 +2778,6 @@ dependencies = [
  "serde",
  "serde_json",
  "tonic",
- "tonic-prost",
  "yanet-cli",
  "yanet-cli-build",
  "yanet-commonpb",
@@ -2828,9 +2819,8 @@ dependencies = [
  "serde_yaml",
  "tabled",
  "tonic",
- "tonic-prost",
- "tonic-prost-build",
  "yanet-cli",
+ "yanet-cli-build",
  "yanet-commonpb",
  "yanet-filterpb",
 ]
@@ -2856,7 +2846,6 @@ dependencies = [
  "serde",
  "serde_yaml",
  "tonic",
- "tonic-prost",
  "yanet-cli",
  "yanet-cli-build",
  "yanet-commonpb",
@@ -2873,7 +2862,6 @@ dependencies = [
  "prost",
  "serde",
  "tonic",
- "tonic-prost",
  "yanet-cli",
  "yanet-cli-build",
  "yanet-commonpb",
@@ -2891,7 +2879,6 @@ dependencies = [
  "serde_json",
  "tabled",
  "tonic",
- "tonic-prost",
  "yanet-cli",
  "yanet-cli-build",
  "yanet-commonpb",
@@ -2917,7 +2904,6 @@ dependencies = [
  "serde",
  "tabled",
  "tonic",
- "tonic-prost",
  "yanet-cli",
  "yanet-cli-build",
  "yanet-commonpb",
@@ -2938,7 +2924,6 @@ dependencies = [
  "tokio",
  "tokio-util",
  "tonic",
- "tonic-prost",
  "yanet-cli",
  "yanet-cli-build",
 ]
@@ -2983,7 +2968,6 @@ dependencies = [
  "serde",
  "tabled",
  "tonic",
- "tonic-prost",
  "yanet-cli",
  "yanet-cli-build",
 ]
@@ -3001,7 +2985,6 @@ dependencies = [
  "serde_yaml",
  "tabled",
  "tonic",
- "tonic-prost",
  "yanet-cli",
  "yanet-cli-build",
  "yanet-commonpb",
@@ -3018,10 +3001,20 @@ dependencies = [
  "serde",
  "serde_yaml",
  "tonic",
- "tonic-prost",
  "yanet-cli",
  "yanet-cli-build",
  "yanet-commonpb",
+]
+
+[[package]]
+name = "yanet-cli-rpc"
+version = "0.2.0"
+dependencies = [
+ "bytes",
+ "http",
+ "prost",
+ "tonic",
+ "tower",
 ]
 
 [[package]]
@@ -3034,7 +3027,6 @@ dependencies = [
  "serde",
  "serde_yaml",
  "tonic",
- "tonic-prost",
  "yanet-cli",
  "yanet-cli-build",
  "yanet-commonpb",
@@ -3085,8 +3077,8 @@ dependencies = [
  "prost-types",
  "serde",
  "tonic",
- "tonic-prost",
- "tonic-prost-build",
+ "yanet-cli-build",
+ "yanet-cli-rpc",
  "yanet-commonpb",
 ]
 
