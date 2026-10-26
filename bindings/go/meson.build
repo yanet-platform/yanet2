@@ -155,9 +155,6 @@ cgo_packages += {
   'modules/l3b/tests/internal/probe': {
     'libraries': [lib_l3b_objects, lib_l3state],
   },
-  'modules/nat64/tests/dataplane': {
-    'libraries': [lib_nat64_dp, lib_nat64_cp, lib_packet_dp],
-  },
   'modules/pdump/internal/testutils': {
     'libraries': [lib_pdump_dp],
     'archives': [lib_rte_bpf],

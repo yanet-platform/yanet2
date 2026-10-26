@@ -4,6 +4,7 @@
 #include <string.h>
 
 /* Project headers */
+#include "api/agent.h"
 #include "common.h"
 #include "config.h"
 #include "nat64cp.h"
@@ -107,6 +108,34 @@ nat64_module_config_free(struct cp_module *cp_module, yanet_error **err) {
 
 	nat64_module_config_destroy(cp_module);
 	agent_destroy_released(owner);
+	return 0;
+}
+
+int
+nat64_module_config_malformed_packets(
+	struct yanet_shm *shm,
+	uint32_t instance_idx,
+	const char *name,
+	uint64_t *value
+) {
+	struct dp_config *dp_config = yanet_shm_dp_config(shm, instance_idx);
+	struct cp_config *cp_config = ADDR_OF(&dp_config->cp_config);
+	cp_config_lock(cp_config);
+	struct cp_config_gen *generation = cp_config_current_gen(cp_config);
+	struct cp_module *module =
+		cp_config_gen_lookup_module(generation, "nat64", name);
+	if (module == NULL) {
+		cp_config_unlock(cp_config);
+		errno = ENOENT;
+		return -1;
+	}
+
+	struct nat64_module_config *config =
+		container_of(module, struct nat64_module_config, cp_module);
+	*value = __atomic_load_n(
+		&config->stats.malformed_packets, __ATOMIC_RELAXED
+	);
+	cp_config_unlock(cp_config);
 	return 0;
 }
 

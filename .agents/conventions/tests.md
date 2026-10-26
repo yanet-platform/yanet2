@@ -21,6 +21,7 @@ Every test names the behaviour it pins and, where the name alone is not enough, 
 - **Table cases describe themselves**: each `name:`/`#[case]`/`it("…")` field is a self-contained sentence fragment (`"nil range"`, `"family mismatch"`, `"rejects overlong counter"`), never `"case 1"`/`"ok"`/`"error"`. A reader running a filtered run against a failure must know what broke without opening the file.
 - **One assertion per invariant**: a table case fails for one reason and the name says which. Bundling unrelated asserts into one case to save lines hides which invariant regressed; split the case.
 - **Helpers are documented**: a test helper (`newTestService`, `flakyBackend`, a `run_…_test` scenario, a `create_ipv4_tcp_frame` fixture) gets a one-line brief stating the shape it returns and the invariant it assumes, so a reader does not reverse-engineer the fixture.
+- **Dataplane harness ownership**: shared `dataplane_ut` stays module-agnostic and owns generic execution, fault injection and lifetime; concrete module/object setup and inspection belong in owner APIs and bindings. Do not invent nil/freed-handle contracts for fixture helpers whose callers guarantee valid lifetimes; preserve genuine input and range contracts.
 - **No comment restate**: a doc comment that paraphrases the function name (`// Test_BlackholeService tests BlackholeService`) is deleted; the comment earns its line by stating what the name cannot. If the name already states the invariant, no comment is added.
 
 ## Per-language naming
