@@ -116,7 +116,7 @@ impl TestPacket {
 pub enum Fate {
     Output,
     Drop,
-    /// Not taken: still on the input list.
+    /// Still on the input list, against the drain obligation of a module.
     Input,
     /// On no list of the front: taken and never disposed of.
     Lost,

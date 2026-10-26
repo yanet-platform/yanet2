@@ -90,8 +90,8 @@ pub trait Module: Sized + 'static {
 
     /// Handles one batch of packets.
     ///
-    /// As in a C handler, a packet the handler takes ends where its verdict
-    /// puts it, and one it does not take stays on the input list.
+    /// The handler takes every input packet and gives each a verdict
+    /// (module: drain); a packet ends where its verdict puts it.
     fn handle<'id>(cx: &mut Cx<'id, Self>, batch: &mut Batch<'id>);
 
     /// Makes the prepared value from the configuration.

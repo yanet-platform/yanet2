@@ -1,7 +1,6 @@
 //! The dataplane runtime over the invocation harness: a verdict puts a
-//! packet in exactly one list, a packet the handler does not take stays on
-//! the input list, and the contexts reach the worker, the prepared value,
-//! the counters and the devices as a C module reaches them.
+//! packet in exactly one list, and the contexts reach the worker, the prepared
+//! value, the counters and the devices as a C module reaches them.
 //!
 //! Configurations are laid out by hand in the arena, as the control plane
 //! would write them: the test writes the counter ids and device indices.
@@ -122,33 +121,6 @@ impl Module for Dispatched {
     }
 }
 
-/// Takes nothing.
-struct Idle;
-
-impl Module for Idle {
-    const NAME: &'static str = "idle";
-    type Config = Word;
-    type Prepared<'p> = ();
-    fn prepare(_: &CommitCx<'_, Self>) {}
-    fn handle(_: &mut Cx<Self>, _: &mut Batch) {}
-}
-
-/// Takes one packet and passes it, leaving the rest on the input list.
-struct TakesOne;
-
-impl Module for TakesOne {
-    const NAME: &'static str = "takes_one";
-    type Config = Word;
-    type Prepared<'p> = ();
-    fn prepare(_: &CommitCx<'_, Self>) {}
-
-    fn handle(_: &mut Cx<Self>, batch: &mut Batch) {
-        if let Some(packet) = batch.next() {
-            batch.pass(packet);
-        }
-    }
-}
-
 /// verifies that a packet the handler takes and forgets is on no list, with
 /// the front counting only the passed one.
 #[test]
@@ -203,34 +175,6 @@ fn test_batch_dispatch_applies_every_verdict() {
             outcome.front.drop_bytes
         )
     );
-}
-
-/// verifies that a handler that takes nothing leaves every packet on the
-/// input list with its counters.
-#[test]
-fn test_batch_untaken_packets_stay_on_input() {
-    let outcome = run::<Idle>(2);
-
-    assert_eq!(vec![Fate::Input, Fate::Input], outcome.fates);
-    assert_eq!(
-        (2, 120, 0, 0),
-        (
-            outcome.front.input_count,
-            outcome.front.input_bytes,
-            outcome.front.output_count,
-            outcome.front.drop_count
-        )
-    );
-}
-
-/// verifies that taking one packet leaves the others on the input list, in
-/// order, and the handler's own packet in the output.
-#[test]
-fn test_batch_partial_take_leaves_the_rest_on_input() {
-    let outcome = run::<TakesOne>(3);
-
-    assert_eq!(vec![Fate::Output, Fate::Input, Fate::Input], outcome.fates);
-    assert_eq!(1, outcome.front.output_count);
 }
 
 /// Drops the packets of worker 3 and the packets of any worker once the
