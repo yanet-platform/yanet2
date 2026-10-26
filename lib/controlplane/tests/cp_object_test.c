@@ -610,6 +610,132 @@ test_cp_object_index_many_keys(struct yanet_shm *shm) {
 	return TEST_SUCCESS;
 }
 
+// Verifies that a hole survives a copy and is handed out first: an
+// object upserted into the copy lands in the slot the deletion
+// vacated in the original.
+static int
+test_cp_object_hole_reuse_across_copy(struct yanet_shm *shm) {
+	yanet_error *err = NULL;
+
+	struct agent *agent = agent_attach(
+		shm, 0, "cp-object-hole", CP_OBJECT_GATE_MEMORY_LIMIT, &err
+	);
+	TEST_ASSERT_NOT_NULL(agent, "agent_attach failed");
+
+	struct cp_object_registry registry;
+	TEST_ASSERT_SUCCESS(
+		cp_object_registry_init(
+			&agent->memory_context, NULL, &registry, &err
+		),
+		"object registry init failed: %s",
+		err ? yanet_error_message(err) : "?"
+	);
+
+	struct cp_object *objects[3];
+	for (uint64_t idx = 0; idx < 3; ++idx) {
+		objects[idx] = (struct cp_object *)memory_balloc(
+			&agent->memory_context, sizeof(struct cp_object)
+		);
+		TEST_ASSERT_NOT_NULL(objects[idx], "object allocation failed");
+		char name[2] = {(char)('a' + idx), 0};
+		TEST_ASSERT_SUCCESS(
+			cp_object_init(objects[idx], agent, "test", name, &err),
+			"cp_object_init failed: %s",
+			err ? yanet_error_message(err) : "?"
+		);
+		TEST_ASSERT_SUCCESS(
+			cp_object_registry_upsert(
+				&registry, "test", name, objects[idx], &err
+			),
+			"upsert(%c) failed: %s",
+			name[0],
+			err ? yanet_error_message(err) : "?"
+		);
+	}
+
+	uint64_t middle_index;
+	TEST_ASSERT_SUCCESS(
+		cp_object_registry_lookup_index(
+			&registry, "test", "b", &middle_index
+		),
+		"lookup(b) failed"
+	);
+	TEST_ASSERT_SUCCESS(
+		cp_object_registry_delete(&registry, "test", "b"),
+		"delete(b) failed"
+	);
+
+	struct cp_object_registry copied;
+	TEST_ASSERT_SUCCESS(
+		cp_object_registry_copy(
+			&agent->memory_context, &copied, &registry, &err
+		),
+		"cp_object_registry_copy failed: %s",
+		err ? yanet_error_message(err) : "?"
+	);
+
+	struct cp_object *fresh = (struct cp_object *)memory_balloc(
+		&agent->memory_context, sizeof(struct cp_object)
+	);
+	TEST_ASSERT_NOT_NULL(fresh, "fresh object allocation failed");
+	TEST_ASSERT_SUCCESS(
+		cp_object_init(fresh, agent, "test", "d", &err),
+		"cp_object_init(fresh) failed: %s",
+		err ? yanet_error_message(err) : "?"
+	);
+	TEST_ASSERT_SUCCESS(
+		cp_object_registry_upsert(&copied, "test", "d", fresh, &err),
+		"upsert(d) into copy failed: %s",
+		err ? yanet_error_message(err) : "?"
+	);
+
+	uint64_t fresh_index;
+	TEST_ASSERT_SUCCESS(
+		cp_object_registry_lookup_index(
+			&copied, "test", "d", &fresh_index
+		),
+		"lookup(d) in copy failed"
+	);
+	TEST_ASSERT_EQUAL(
+		(long)fresh_index,
+		(long)middle_index,
+		"the copy must hand out the vacated slot first"
+	);
+
+	// Finalizing both registries drops every generation reference; the
+	// deleted object has none left already.
+	cp_object_registry_fini(&copied);
+	cp_object_registry_fini(&registry);
+	TEST_ASSERT_EQUAL(
+		agent->loaded_entity_count,
+		0,
+		"loaded_entity_count must balance to 0 after both registries "
+		"are finalized"
+	);
+
+	struct agent *owners[4];
+	struct cp_object *all[4] = {objects[0], objects[1], objects[2], fresh};
+	for (uint64_t idx = 0; idx < 4; ++idx) {
+		owners[idx] = ADDR_OF(&all[idx]->agent);
+	}
+	for (uint64_t idx = 0; idx < 4; ++idx) {
+		TEST_ASSERT_SUCCESS(
+			cp_object_try_destroy(all[idx], &err),
+			"dangling object must be destroyable"
+		);
+	}
+	for (uint64_t idx = 0; idx < 4; ++idx) {
+		cp_object_fini(all[idx]);
+		memory_bfree(
+			&agent->memory_context, all[idx], sizeof(*all[idx])
+		);
+		agent_destroy_released(owners[idx]);
+	}
+
+	agent_detach(agent);
+	return TEST_SUCCESS;
+}
+
 // The agent_attach reclamation gate must spare a previous agent that still
 // owns live cp_objects: agent_cleanup frees the arena wholesale and cannot
 // run per-object teardown, so an agent is only reclaimed once every loaded
@@ -920,6 +1046,9 @@ main(void) {
 	}
 	if (res == TEST_SUCCESS) {
 		res = test_cp_object_index_many_keys(shm);
+	}
+	if (res == TEST_SUCCESS) {
+		res = test_cp_object_hole_reuse_across_copy(shm);
 	}
 	if (res == TEST_SUCCESS) {
 		res = test_cp_object_attach_gate(shm);

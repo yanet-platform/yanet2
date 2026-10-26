@@ -3,6 +3,7 @@
 #include <assert.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <stdlib.h>
 
 #include "common/hash_index.h"
 #include "common/memory.h"
@@ -140,9 +141,18 @@ struct registry {
 	struct cp_config *owner;
 	uint64_t capacity;
 	struct registry_item **items;
+	// Head of the free chain threaded through the empty slots.
+	struct registry_item *free_list;
 	struct hash_index key_index;
 };
 
+// A free slot's own word carries the address of the next free slot,
+// the same intrusive chain the block allocator threads through freed
+// blocks; the head lives in the registry.
+//
+// A link resolves back inside the items block, and a live item never
+// does — the block allocator's blocks never overlap — so the accessor
+// below classifies link words as free without any extra marking.
 static inline struct registry_item *
 registry_get(struct registry *registry, uint64_t idx) {
 #ifdef REGISTRY_SANITIZE
@@ -150,7 +160,16 @@ registry_get(struct registry *registry, uint64_t idx) {
 		return NULL;
 	}
 #endif
-	return ADDR_OF(ADDR_OF(&registry->items) + idx);
+	struct registry_item **items = ADDR_OF(&registry->items);
+	struct registry_item *item = ADDR_OF(items + idx);
+	if (item == NULL) {
+		return NULL;
+	}
+	if ((uintptr_t)item >= (uintptr_t)items &&
+	    (uintptr_t)item < (uintptr_t)(items + registry->capacity)) {
+		return NULL;
+	}
+	return item;
 }
 
 static inline void
@@ -163,6 +182,30 @@ registry_set(
 	}
 #endif
 	SET_OFFSET_OF(ADDR_OF(&registry->items) + idx, item);
+}
+
+// Pop the first free slot, or report the registry full.
+static inline int
+registry_free_pop(struct registry *registry, uint64_t *index) {
+	struct registry_item **items = ADDR_OF(&registry->items);
+	struct registry_item *head = ADDR_OF(&registry->free_list);
+	if (head == NULL) {
+		return -1;
+	}
+
+	struct registry_item *next = ADDR_OF((struct registry_item **)head);
+	SET_OFFSET_OF(&registry->free_list, next);
+	*index = ((uintptr_t)head - (uintptr_t)items) / sizeof(*items);
+	return 0;
+}
+
+// Return a slot to the head of the free chain.
+static inline void
+registry_free_push(struct registry *registry, uint64_t index) {
+	struct registry_item **slot = ADDR_OF(&registry->items) + index;
+	struct registry_item *head = ADDR_OF(&registry->free_list);
+	SET_OFFSET_OF((struct registry_item **)slot, head);
+	SET_OFFSET_OF(&registry->free_list, (struct registry_item *)slot);
 }
 
 // Equality probe of the side index: a bucket payload is an items-array
@@ -220,10 +263,6 @@ registry_sanitize_index(
 	struct registry *registry, const struct registry_keys *keys
 ) {
 #ifndef NDEBUG
-	if (keys == NULL) {
-		return;
-	}
-
 	uint64_t live = 0;
 	for (uint64_t slot = 0; slot < registry->capacity; ++slot) {
 		struct registry_item *item = registry_get(registry, slot);
@@ -231,20 +270,49 @@ registry_sanitize_index(
 			continue;
 		}
 
-		uint32_t expected = (uint32_t)slot;
-		uint32_t found = hash_index_lookup(
-			&registry->key_index,
-			registry_hash_fold(keys->item_hash(item)),
-			registry_sanitize_slot_eq,
-			&expected
-		);
-		assert(found == expected);
+		if (keys != NULL) {
+			uint32_t expected = (uint32_t)slot;
+			uint32_t found = hash_index_lookup(
+				&registry->key_index,
+				registry_hash_fold(keys->item_hash(item)),
+				registry_sanitize_slot_eq,
+				&expected
+			);
+			assert(found == expected);
+		}
 		live += 1;
 	}
 
-	assert((uint64_t)registry->key_index.count == live);
+	// The free chain must thread exactly the empty slots: no slot
+	// twice, every chained slot reading as empty, and every empty
+	// slot on the chain. The check covers unindexed registries too.
+	unsigned char *on_chain = calloc(registry->capacity, 1);
+	assert(on_chain != NULL);
+	uint64_t chained = 0;
+	struct registry_item *node = ADDR_OF(&registry->free_list);
+	struct registry_item **items = ADDR_OF(&registry->items);
+	while (node != NULL) {
+		uint64_t slot =
+			((uintptr_t)node - (uintptr_t)items) / sizeof(*items);
+		assert(slot < registry->capacity);
+		assert(!on_chain[slot]);
+		on_chain[slot] = 1;
+		++chained;
+		node = ADDR_OF((struct registry_item **)node);
+	}
+	assert(chained + live == registry->capacity);
+	for (uint64_t slot = 0; slot < registry->capacity; ++slot) {
+		assert(on_chain[slot] == (registry_get(registry, slot) == NULL)
+		);
+	}
+	free(on_chain);
+
+	if (keys != NULL) {
+		assert((uint64_t)registry->key_index.count == live);
+	}
 #else
 	(void)registry;
+	(void)keys;
 #endif
 }
 #endif
@@ -271,9 +339,12 @@ registry_init(
 		return -1;
 	}
 	SET_OFFSET_OF(&registry->items, items);
+	SET_OFFSET_OF(&registry->free_list, NULL);
 
-	for (uint64_t idx = 0; idx < capacity; ++idx) {
-		registry_set(registry, idx, NULL);
+	// Descending pushes leave the chain ascending, so a fresh registry
+	// hands out slots from the front.
+	for (uint64_t idx = capacity; idx-- > 0;) {
+		registry_free_push(registry, idx);
 	}
 
 	if (hash_index_init(
@@ -369,6 +440,17 @@ registry_copy(
 		registry_set(new_registry, idx, item);
 	}
 
+	// The placements above trampled the chain built at init, so the
+	// free chain is rethreaded over the surviving holes; descending
+	// pushes keep the copy handing out its lowest hole first, as its
+	// predecessor did.
+	SET_OFFSET_OF(&new_registry->free_list, NULL);
+	for (uint64_t idx = new_registry->capacity; idx-- > 0;) {
+		if (registry_get(new_registry, idx) == NULL) {
+			registry_free_push(new_registry, idx);
+		}
+	}
+
 	if (keys != NULL) {
 		for (uint64_t idx = 0; idx < old_registry->capacity; ++idx) {
 			struct registry_item *item =
@@ -417,11 +499,16 @@ registry_extend(struct registry *registry) {
 	for (uint64_t idx = 0; idx < old_capacity; ++idx) {
 		SET_OFFSET_OF(new_items + idx, ADDR_OF(old_items + idx));
 	}
-	for (uint64_t idx = old_capacity; idx < new_capacity; ++idx) {
-		SET_OFFSET_OF(new_items + idx, NULL);
-	}
 
 	SET_OFFSET_OF(&registry->items, new_items);
+
+	// Reached only with the free chain empty — every copied word is a
+	// live item offset, never a link into the array being freed. The
+	// fresh tail joins the chain, so the next acquisition takes the
+	// first new slot.
+	for (uint64_t idx = new_capacity; idx-- > old_capacity;) {
+		registry_free_push(registry, idx);
+	}
 
 	memory_bfree(
 		memory_context,
@@ -479,17 +566,17 @@ registry_lookup(
 	return -1;
 }
 
+// Take a slot for an item: the first free slot, or the first slot of a
+// doubled array when none is free.
 static inline int
-registry_get_unused_index(struct registry *registry, uint64_t *index) {
-	*index = 0;
-	while (*index < registry->capacity) {
-		if (registry_get(registry, *index) == NULL) {
-			return 0;
-		}
-		*index += 1;
+registry_acquire_slot(struct registry *registry, uint64_t *index) {
+	if (!registry_free_pop(registry, index)) {
+		return 0;
 	}
-
-	return registry_extend(registry);
+	if (registry_extend(registry)) {
+		return -1;
+	}
+	return registry_free_pop(registry, index);
 }
 
 static inline int
@@ -499,10 +586,13 @@ registry_insert(
 	struct registry_item *new_item
 ) {
 	uint64_t index;
-	if (registry_get_unused_index(registry, &index)) {
+	if (registry_acquire_slot(registry, &index)) {
 		return -1;
 	}
 	if (keys != NULL && registry_index_ensure(registry)) {
+		// The taken slot returns to the chain, so a failed mutation
+		// leaves the registry exactly as it was.
+		registry_free_push(registry, index);
 		return -1;
 	}
 
@@ -548,10 +638,13 @@ registry_replace(
 			return -1;
 		}
 
-		if (registry_get_unused_index(registry, &index)) {
+		if (registry_acquire_slot(registry, &index)) {
 			return -1;
 		}
 		if (keys != NULL && registry_index_ensure(registry)) {
+			// The taken slot returns to the chain, so a failed
+			// mutation leaves the registry exactly as it was.
+			registry_free_push(registry, index);
 			return -1;
 		}
 	}
@@ -561,7 +654,11 @@ registry_replace(
 		registry_item_ref(new_item, ADDR_OF(&registry->owner));
 	}
 
-	registry_set(registry, index, new_item);
+	if (new_item != NULL) {
+		registry_set(registry, index, new_item);
+	} else {
+		registry_free_push(registry, index);
+	}
 
 	// The side index is maintained before the old item is released, so
 	// its key stays readable while the slot's entry is swapped.
