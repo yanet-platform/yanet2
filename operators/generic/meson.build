@@ -15,11 +15,7 @@ install_data(
     install_dir: '/etc/yanet2/decap.d',
 )
 
-# Not a fuzz target, and nothing in the fuzz suite runs it, so the
-# fuzzing configuration skips it to save build time.
-if not get_option('fuzzing').enabled()
-  # The binary links every gateway-facing proto package, so it depends on
-  # every protoc generator.
+if yanet_go_binaries
   custom_target(
       'yanet-generic-operator',
       output: 'yanet-generic-operator',
