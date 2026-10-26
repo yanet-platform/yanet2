@@ -1,9 +1,6 @@
 counters_uaf_test = executable(
   'counters_uaf_test',
   ['counters_test.c'],
-  link_args: [
-    '-Wl,-E',
-  ],
   dependencies: [
     lib_dataplane_ut_dep,
     lib_agent_counters_dep,
@@ -25,9 +22,6 @@ counters_lock_thread_dep = dependency('threads')
 counters_lock_test = executable(
   'counters_lock_test',
   ['counters_lock_test.c'],
-  link_args: [
-    '-Wl,-E',
-  ],
   dependencies: [
     lib_dataplane_ut_dep,
     lib_agent_counters_dep,
@@ -53,9 +47,6 @@ test(
 counter_workers_test = executable(
   'counter_workers_test',
   ['counter_workers_test.c'],
-  link_args: [
-    '-Wl,-E',
-  ],
   dependencies: [
     lib_dataplane_ut_dep,
     lib_agent_counters_dep,
@@ -76,9 +67,6 @@ test('counter_workers', counter_workers_test, suite: ['lib'])
 loaded_counts_test = executable(
   'loaded_counts_test',
   ['loaded_counts_test.c'],
-  link_args: [
-    '-Wl,-E',
-  ],
   dependencies: [
     lib_dataplane_ut_dep,
     lib_logging_dep,
@@ -99,9 +87,6 @@ gen_pin_race_thread_dep = dependency('threads')
 gen_pin_race_test = executable(
   'gen_pin_race_test',
   ['gen_pin_race_test.c'],
-  link_args: [
-    '-Wl,-E',
-  ],
   dependencies: [
     lib_dataplane_ut_dep,
     lib_logging_dep,
@@ -129,7 +114,6 @@ device_list_test = executable(
   'device_list_test',
   ['device_list_test.c'],
   link_args: [
-    '-Wl,-E',
     '-Wl,--wrap=malloc',
     '-Wl,--wrap=calloc',
   ],
@@ -169,8 +153,10 @@ test('module_registry_fini_guard', module_registry_fini_guard_test, suite: ['lib
 cp_object_test = executable(
   'cp_object_test',
   ['cp_object_test.c'],
+  # The object loader looks up the test's own constructor by name in the
+  # executable.
   link_args: [
-    '-Wl,-E',
+    '-Wl,--export-dynamic-symbol=new_object_test',
   ],
   dependencies: [
     lib_dataplane_ut_dep,
@@ -190,8 +176,10 @@ test('cp_object', cp_object_test, suite: ['lib'])
 cp_object_gen_test = executable(
   'cp_object_gen_test',
   ['cp_object_gen_test.c'],
+  # The object loader looks up the test's own constructor by name in the
+  # executable.
   link_args: [
-    '-Wl,-E',
+    '-Wl,--export-dynamic-symbol=new_object_test',
   ],
   dependencies: [
     lib_dataplane_ut_dep,
@@ -214,9 +202,6 @@ test('cp_object_gen', cp_object_gen_test, suite: ['lib'])
 prepare_test = executable(
   'prepare_test',
   ['prepare_test.c'],
-  link_args: [
-    '-Wl,-E',
-  ],
   dependencies: [
     lib_dataplane_ut_dep,
     lib_logging_dep,
@@ -240,8 +225,11 @@ test('prepare', prepare_test, suite: ['lib'])
 object_prepare_test = executable(
   'object_prepare_test',
   ['object_prepare_test.c'],
+  # The object loader looks up the test's own constructors by name in the
+  # executable.
   link_args: [
-    '-Wl,-E',
+    '-Wl,--export-dynamic-symbol=new_object_hook',
+    '-Wl,--export-dynamic-symbol=new_object_inert',
   ],
   dependencies: [
     lib_dataplane_ut_dep,
@@ -261,9 +249,6 @@ test('object_prepare', object_prepare_test, suite: ['lib'])
 dangling_modules_test = executable(
   'dangling_modules_test',
   ['dangling_modules_test.c'],
-  link_args: [
-    '-Wl,-E',
-  ],
   dependencies: [
     lib_dataplane_ut_dep,
     lib_logging_dep,
@@ -284,9 +269,6 @@ test('dangling_modules', dangling_modules_test, suite: ['lib'])
 dangling_devices_test = executable(
   'dangling_devices_test',
   ['dangling_devices_test.c'],
-  link_args: [
-    '-Wl,-E',
-  ],
   dependencies: [
     lib_dataplane_ut_dep,
     lib_logging_dep,
@@ -307,9 +289,6 @@ test('dangling_devices', dangling_devices_test, suite: ['lib'])
 dangling_objects_test = executable(
   'dangling_objects_test',
   ['dangling_objects_test.c'],
-  link_args: [
-    '-Wl,-E',
-  ],
   dependencies: [
     lib_dataplane_ut_dep,
     lib_logging_dep,

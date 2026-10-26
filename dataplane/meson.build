@@ -85,6 +85,8 @@ executable(
   sources,
   dependencies: dependencies,
   install: true,
+  # Plugins loaded at run time resolve the dataplane symbols they call against
+  # this executable.
   export_dynamic: true,
 )
 
