@@ -134,7 +134,8 @@ if b_sanitize != 'none'
     endif
 endif
 
-yanet_test_c_args = ['-O0']
+# Tests check their results with assert(), so no build may compile it out.
+yanet_test_c_args = ['-O0', '-UNDEBUG']
 yanet_c_args = []
 yanet_link_args = sanitize_link_args
 if get_option('fuzzing').enabled()
@@ -488,10 +489,3 @@ if not meson.is_subproject()
     timeout: 120,
   )
 endif
-
-# Define a default test setup that excludes large tests
-add_test_setup(
-  'default',
-  exclude_suites: ['large'],
-  is_default: true,
-)

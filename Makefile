@@ -333,7 +333,7 @@ test-tsan:
 	else \
 		meson configure -Dbuildtype=debug -Doptimization=0 -Db_sanitize=thread $(EXTRA_MODULES_FLAG) build-tsan; \
 	fi
-	meson test -C build-tsan --suite common --suite fwstate --no-suite large
+	meson test -C build-tsan --suite common --suite fwstate
 
 test-functional:
 	@echo "Running functional tests..."

@@ -4,7 +4,7 @@ thread_dep = dependency('threads')
 token_bucket_test = executable(
   'token_bucket_test',
   ['token_bucket_test.c'],
-  c_args: yanet_test_c_args + ['-UNDEBUG'],
+  c_args: yanet_test_c_args,
   dependencies: [thread_dep],
   include_directories: yanet_rootdir,
 )
@@ -75,11 +75,12 @@ rcu_test = executable(
 )
 test('rcu', rcu_test, suite: ['common'])
 
-executable(
+rcu_bench = executable(
   'rcu_bench',
   ['rcu_bench.c'],
   dependencies: dependencies
 )
+benchmark('rcu_bench', rcu_bench, timeout: 300)
 
 balloc_test = executable(
   'balloc_test',
@@ -105,11 +106,12 @@ balloc_thread_stress_test = executable(
 )
 test('balloc_thread_stress', balloc_thread_stress_test, suite: ['common'])
 
-executable(
+balloc_bench = executable(
   'balloc_bench',
   ['balloc_bench.c'],
   dependencies: dependencies
 )
+benchmark('balloc_bench', balloc_bench, timeout: 300)
 
 big_array_test = executable(
   'big_array_test',
