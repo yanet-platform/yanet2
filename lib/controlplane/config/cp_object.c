@@ -1,14 +1,13 @@
 #include "cp_object.h"
-#include "reclaim.h"
 
 #include "common/container_of.h"
 #include "lib/dataplane/config/zone.h"
 
 #include "lib/controlplane/agent/agent.h"
+#include "lib/controlplane/config/cp_entity.h"
 #include "lib/controlplane/config/zone.h"
 
-#include <errno.h>
-#include <stdlib.h>
+#include <stddef.h>
 #include <string.h>
 
 int
@@ -85,55 +84,102 @@ cp_object_fini(struct cp_object *self) {
 	memory_context_fini(&self->memory_context);
 }
 
+// The item-to-owner mapping for the generic registry wrapper layer,
+// including its allocation-free teardown fallback.
+static struct agent *
+object_item_owner(struct registry_item *item) {
+	struct cp_object *object =
+		container_of(item, struct cp_object, config_item);
+	return ADDR_OF(&object->agent);
+}
+
+static int
+cp_object_registry_item_cmp(const struct registry_item *item, const void *data);
+static uint64_t
+cp_object_registry_key_hash(const void *data);
+static uint64_t
+cp_object_registry_item_hash(const struct registry_item *item);
+
+// Counter continuity of an object upsert: both the object's own counters
+// and its link counters continue from the displaced object's.
+static int
+cp_object_link_counters(
+	struct registry_item *new_item,
+	struct registry_item *old_item,
+	yanet_error **err
+) {
+	struct cp_object *new_object =
+		container_of(new_item, struct cp_object, config_item);
+	struct cp_object *old_object =
+		(old_item != NULL)
+			? container_of(old_item, struct cp_object, config_item)
+			: NULL;
+
+	if (counter_registry_link(
+		    &new_object->counter_registry,
+		    (old_object != NULL) ? &old_object->counter_registry : NULL,
+		    err
+	    )) {
+		yanet_error_add(
+			err,
+			"failed to link counter registry for object '%s:%s'",
+			new_object->type,
+			new_object->name
+		);
+		return -1;
+	}
+
+	if (counter_registry_link(
+		    &new_object->link_counter_registry,
+		    (old_object != NULL) ? &old_object->link_counter_registry
+					 : NULL,
+		    err
+	    )) {
+		yanet_error_add(
+			err,
+			"failed to link link counter registry for object "
+			"'%s:%s'",
+			new_object->type,
+			new_object->name
+		);
+		return -1;
+	}
+
+	return 0;
+}
+
+static const struct cp_entity_desc cp_object_entity_desc = {
+	.keys =
+		{
+			.cmp = cp_object_registry_item_cmp,
+			.key_hash = cp_object_registry_key_hash,
+			.item_hash = cp_object_registry_item_hash,
+		},
+	.noun = "object",
+	.item_owner = object_item_owner,
+	.name_offset = offsetof(struct cp_object, name),
+	.name_len = CP_OBJECT_NAME_LEN,
+	.type_offset = offsetof(struct cp_object, type),
+	.type_len = CP_OBJECT_TYPE_LEN,
+	.link_counters = cp_object_link_counters,
+};
+
 static int
 cp_object_registry_item_cmp(
 	const struct registry_item *item, const void *data
 ) {
-	const struct cp_object *object =
-		container_of(item, struct cp_object, config_item);
-
-	const struct cp_object_cmp_data *cmp_data =
-		(const struct cp_object_cmp_data *)data;
-
-	int cmp = strncmp(object->name, cmp_data->name, sizeof(object->name));
-	if (cmp) {
-		return cmp;
-	}
-
-	return strncmp(object->type, cmp_data->type, sizeof(object->type));
+	return cp_entity_item_cmp(&cp_object_entity_desc, item, data);
 }
 
 static uint64_t
 cp_object_registry_key_hash(const void *data) {
-	const struct cp_object_cmp_data *cmp_data =
-		(const struct cp_object_cmp_data *)data;
-
-	return registry_hash_name_pair(
-		cmp_data->name,
-		sizeof(cmp_data->name),
-		cmp_data->type,
-		sizeof(cmp_data->type)
-	);
+	return cp_entity_key_hash(&cp_object_entity_desc, data);
 }
 
 static uint64_t
 cp_object_registry_item_hash(const struct registry_item *item) {
-	const struct cp_object *object =
-		container_of(item, struct cp_object, config_item);
-
-	return registry_hash_name_pair(
-		object->name,
-		sizeof(object->name),
-		object->type,
-		sizeof(object->type)
-	);
+	return cp_entity_item_hash(&cp_object_entity_desc, item);
 }
-
-static const struct registry_keys cp_object_registry_keys = {
-	.cmp = cp_object_registry_item_cmp,
-	.key_hash = cp_object_registry_key_hash,
-	.item_hash = cp_object_registry_item_hash,
-};
 
 int
 cp_object_registry_init(
@@ -142,8 +188,13 @@ cp_object_registry_init(
 	struct cp_object_registry *new_registry,
 	yanet_error **err
 ) {
-	if (registry_init(memory_context, owner, &new_registry->registry, 8)) {
-		yanet_error_add(err, "failed to initialize object registry");
+	if (cp_entity_registry_init(
+		    memory_context,
+		    owner,
+		    &new_registry->registry,
+		    &cp_object_entity_desc,
+		    err
+	    )) {
 		return -1;
 	}
 
@@ -158,145 +209,30 @@ cp_object_registry_copy(
 	struct cp_object_registry *old_registry,
 	yanet_error **err
 ) {
-	if (registry_copy(
+	if (cp_entity_registry_copy(
 		    memory_context,
-		    &cp_object_registry_keys,
 		    &new_registry->registry,
-		    &old_registry->registry
+		    &old_registry->registry,
+		    &cp_object_entity_desc,
+		    err
 	    )) {
-		yanet_error_add(err, "failed to copy object registry");
 		return -1;
 	}
 
 	SET_OFFSET_OF(&new_registry->memory_context, memory_context);
-
-	// Mirror each copied item's new generation reference into its own
-	// agent.
-	//
-	// The reference count now counts exactly these registry references,
-	// so the per-agent live count and the items' reference counts move in
-	// lockstep: both track only references that can outlive a creator.
-	for (uint64_t idx = 0; idx < new_registry->registry.capacity; ++idx) {
-		struct cp_object *object =
-			cp_object_registry_get(new_registry, idx);
-		if (object == NULL) {
-			continue;
-		}
-		struct agent *agent = ADDR_OF(&object->agent);
-		if (agent != NULL) {
-			__atomic_add_fetch(
-				&agent->loaded_entity_count, 1, __ATOMIC_RELAXED
-			);
-		}
-	}
-
 	return 0;
 }
 
 int
 cp_object_try_destroy(struct cp_object *self, yanet_error **err) {
-	struct agent *agent = ADDR_OF(&self->agent);
-	struct cp_config *cp_config =
-		(agent != NULL) ? ADDR_OF(&agent->cp_config) : NULL;
-
-	char type[CP_OBJECT_TYPE_LEN];
-	char name[CP_OBJECT_NAME_LEN];
-
-	if (cp_config != NULL) {
-		cp_config_lock(cp_config);
-		spinlock_lock(&cp_config->agent_lock);
-	}
-
-	// Everything read from the item happens under the locks, including
-	// the identity copies for the refusal.
-	//
-	// Once they are gone, a final generation release may tear the item's
-	// registries down and an agent sweep may reclaim the arena the item
-	// lives in. The hold below must also be atomic against the sweep's
-	// zero check of the owner's loaded count, which runs under the agent
-	// lock alone, so the acquisition takes that lock too.
-	strtcpy(type, self->type, sizeof(type));
-	strtcpy(name, self->name, sizeof(name));
-
-	uint64_t refcnt =
-		__atomic_load_n(&self->config_item.refcnt, __ATOMIC_RELAXED);
-
-	if (refcnt == 0) {
-		if (agent != NULL) {
-			// Hold the owner against reclamation for the caller's
-			// typed destroy: the destructor and the caller's error
-			// reporting run unlocked, on storage only this count
-			// keeps alive.
-			__atomic_add_fetch(
-				&agent->loaded_entity_count, 1, __ATOMIC_RELAXED
-			);
-		}
-	}
-
-	if (cp_config != NULL) {
-		// Every completed hold of the locks sweeps: what the gate
-		// leaves unreferenced is reclaimed by its own exit, not by
-		// an unrelated later holder.
-		cp_config_reclaim_unused_agents_locked(cp_config);
-		spinlock_unlock(&cp_config->agent_lock);
-		cp_config_unlock(cp_config);
-	}
-
-	if (refcnt != 0) {
-		// errno is set last, right before the return, so the error
-		// formatting above cannot clobber what the caller reads.
-		yanet_error_add_kind(
-			err,
-			YANET_ERROR_BUSY,
-			"object '%s:%s' is still referenced by a live "
-			"generation",
-			type,
-			name
-		);
-		errno = EAGAIN;
-		return -1;
-	}
-
-	return 0;
-}
-
-// The item-to-owner mapping for the registry teardown fallback below.
-static struct agent *
-object_item_owner(struct registry_item *item) {
-	struct cp_object *object =
-		container_of(item, struct cp_object, config_item);
-	return ADDR_OF(&object->agent);
+	return cp_entity_try_destroy(
+		&self->config_item, &cp_object_entity_desc, err
+	);
 }
 
 void
 cp_object_registry_fini(struct cp_object_registry *registry) {
-	// Mirror each remaining item's dropped generation reference into its
-	// own agent, with every dereference of agent-owned storage done
-	// before the loaded count can drop; see the module finaliser for
-	// the ordering argument.
-	if (ADDR_OF(&registry->registry.items) == NULL) {
-		return;
-	}
-
-	uint64_t capacity = registry->registry.capacity;
-	struct agent **owners = malloc(sizeof(*owners) * capacity);
-	if (owners != NULL) {
-		for (uint64_t idx = 0; idx < capacity; ++idx) {
-			struct cp_object *object =
-				cp_object_registry_get(registry, idx);
-			owners[idx] =
-				object != NULL ? ADDR_OF(&object->agent) : NULL;
-		}
-		registry_fini(&registry->registry, NULL, NULL);
-		agent_unload_references(owners, capacity);
-		free(owners);
-		return;
-	}
-
-	// Teardown could not snapshot the owners; release the items and
-	// drop the owners' references in allocation-free batches that keep
-	// the same dereferences-before-drops order per batch.
-	agent_release_registry_items(&registry->registry, object_item_owner);
+	cp_entity_registry_fini(&registry->registry, &cp_object_entity_desc);
 }
 
 struct cp_object *
@@ -315,16 +251,11 @@ cp_object_registry_lookup_index(
 	const char *object_name,
 	uint64_t *index
 ) {
-	struct cp_object_cmp_data cmp_data;
-	strtcpy(cmp_data.type, object_type, sizeof(cmp_data.type));
-	strtcpy(cmp_data.name, object_name, sizeof(cmp_data.name));
+	struct cp_entity_key key;
+	cp_entity_key_set(&key, object_type, object_name);
 
-	return registry_lookup(
-		&registry->registry,
-		&cp_object_registry_keys,
-		cp_object_registry_item_cmp,
-		&cmp_data,
-		index
+	return cp_entity_registry_lookup_index(
+		&registry->registry, &cp_object_entity_desc, &key, index
 	);
 }
 
@@ -334,18 +265,16 @@ cp_object_registry_lookup(
 	const char *object_type,
 	const char *object_name
 ) {
-	uint64_t index;
-	if (cp_object_registry_lookup_index(
-		    registry, object_type, object_name, &index
-	    )) {
+	struct cp_entity_key key;
+	cp_entity_key_set(&key, object_type, object_name);
+
+	struct registry_item *item = cp_entity_registry_lookup(
+		&registry->registry, &cp_object_entity_desc, &key
+	);
+	if (item == NULL) {
 		return NULL;
 	}
-
-	return container_of(
-		registry_get(&registry->registry, index),
-		struct cp_object,
-		config_item
-	);
+	return container_of(item, struct cp_object, config_item);
 }
 
 int
@@ -356,80 +285,16 @@ cp_object_registry_upsert(
 	struct cp_object *new_object,
 	yanet_error **err
 ) {
-	struct cp_object *old_object =
-		cp_object_registry_lookup(registry, object_type, object_name);
+	struct cp_entity_key key;
+	cp_entity_key_set(&key, object_type, object_name);
 
-	if (counter_registry_link(
-		    &new_object->counter_registry,
-		    (old_object != NULL) ? &old_object->counter_registry : NULL,
-		    err
-	    )) {
-		yanet_error_add(
-			err,
-			"failed to link counter registry for object '%s:%s'",
-			object_type,
-			object_name
-		);
-		return -1;
-	}
-
-	if (counter_registry_link(
-		    &new_object->link_counter_registry,
-		    (old_object != NULL) ? &old_object->link_counter_registry
-					 : NULL,
-		    err
-	    )) {
-		yanet_error_add(
-			err,
-			"failed to link link counter registry for object "
-			"'%s:%s'",
-			object_type,
-			object_name
-		);
-		return -1;
-	}
-
-	// Mirror this upsert's generation-reference changes into each
-	// affected object's own agent.
-	//
-	// Gaining a reference through upsert only ever happens here, and
-	// losing one to a displacing upsert only ever happens here too, so
-	// the per-agent live count must track both in this one place.
-	struct cp_object_cmp_data cmp_data;
-	strtcpy(cmp_data.type, object_type, sizeof(cmp_data.type));
-	strtcpy(cmp_data.name, object_name, sizeof(cmp_data.name));
-
-	if (registry_replace(
-		    &registry->registry,
-		    &cp_object_registry_keys,
-		    cp_object_registry_item_cmp,
-		    &cmp_data,
-		    &new_object->config_item,
-		    NULL,
-		    NULL
-	    )) {
-		yanet_error_add(err, "failed to replace object in registry");
-		return -1;
-	}
-
-	struct agent *new_agent = ADDR_OF(&new_object->agent);
-	if (new_agent != NULL) {
-		__atomic_add_fetch(
-			&new_agent->loaded_entity_count, 1, __ATOMIC_RELAXED
-		);
-	}
-	if (old_object != NULL) {
-		struct agent *old_agent = ADDR_OF(&old_object->agent);
-		if (old_agent != NULL) {
-			__atomic_sub_fetch(
-				&old_agent->loaded_entity_count,
-				1,
-				__ATOMIC_RELEASE
-			);
-		}
-	}
-
-	return 0;
+	return cp_entity_registry_upsert(
+		&registry->registry,
+		&cp_object_entity_desc,
+		&key,
+		&new_object->config_item,
+		err
+	);
 }
 
 int
@@ -438,38 +303,13 @@ cp_object_registry_delete(
 	const char *object_type,
 	const char *object_name
 ) {
-	struct cp_object *old_object =
-		cp_object_registry_lookup(registry, object_type, object_name);
+	struct cp_entity_key key;
+	cp_entity_key_set(&key, object_type, object_name);
 
-	struct cp_object_cmp_data cmp_data;
-	strtcpy(cmp_data.type, object_type, sizeof(cmp_data.type));
-	strtcpy(cmp_data.name, object_name, sizeof(cmp_data.name));
-
-	if (registry_replace(
-		    &registry->registry,
-		    &cp_object_registry_keys,
-		    cp_object_registry_item_cmp,
-		    &cmp_data,
-		    NULL,
-		    NULL,
-		    NULL
-	    )) {
-		return -1;
-	}
-
-	// Mirror the generation reference this delete drops into the removed
-	// object's own agent, matching the decrement upsert performs when it
-	// displaces an entry.
-	if (old_object != NULL) {
-		struct agent *old_agent = ADDR_OF(&old_object->agent);
-		if (old_agent != NULL) {
-			__atomic_sub_fetch(
-				&old_agent->loaded_entity_count,
-				1,
-				__ATOMIC_RELEASE
-			);
-		}
-	}
-
-	return 0;
+	return cp_entity_registry_delete(
+		&registry->registry,
+		&cp_object_entity_desc,
+		cp_object_entity_desc.keys.cmp,
+		&key
+	);
 }

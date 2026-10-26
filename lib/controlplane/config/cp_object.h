@@ -101,13 +101,6 @@ struct cp_object_registry {
 	struct registry registry;
 };
 
-// Lookup key for a registry slot: the object identity is the (type, name)
-// pair, mirroring the cp_module (type, name) key.
-struct cp_object_cmp_data {
-	char type[CP_OBJECT_TYPE_LEN];
-	char name[CP_OBJECT_NAME_LEN];
-};
-
 int
 cp_object_registry_init(
 	struct memory_context *memory_context,

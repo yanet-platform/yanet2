@@ -1,5 +1,4 @@
 #include "cp_module.h"
-#include "reclaim.h"
 
 #include "common/container_of.h"
 
@@ -7,10 +6,10 @@
 #include "lib/dataplane/config/zone.h"
 
 #include "lib/controlplane/agent/agent.h"
+#include "lib/controlplane/config/cp_entity.h"
 #include "lib/controlplane/config/zone.h"
 
-#include <errno.h>
-#include <stdlib.h>
+#include <stddef.h>
 
 int
 cp_module_init(
@@ -385,192 +384,8 @@ cp_module_link_object(
 	return 0;
 }
 
-int
-cp_module_try_destroy(struct cp_module *cp_module, yanet_error **err) {
-	struct agent *agent = ADDR_OF(&cp_module->agent);
-	struct cp_config *cp_config =
-		(agent != NULL) ? ADDR_OF(&agent->cp_config) : NULL;
-
-	char type[80];
-	char name[CP_MODULE_NAME_LEN];
-
-	if (cp_config != NULL) {
-		cp_config_lock(cp_config);
-		spinlock_lock(&cp_config->agent_lock);
-	}
-
-	// Everything read from the item happens under the locks, including
-	// the identity copies for the refusal.
-	//
-	// Once they are gone, a final generation release may tear the item's
-	// registries down and an agent sweep may reclaim the arena the item
-	// lives in. The hold below must also be atomic against the sweep's
-	// zero check of the owner's loaded count, which runs under the agent
-	// lock alone, so the acquisition takes that lock too.
-	strtcpy(type, cp_module->type, sizeof(type));
-	strtcpy(name, cp_module->name, sizeof(name));
-
-	uint64_t refcnt = __atomic_load_n(
-		&cp_module->config_item.refcnt, __ATOMIC_RELAXED
-	);
-
-	if (refcnt == 0) {
-		if (agent != NULL) {
-			// Hold the owner against reclamation for the caller's
-			// typed destroy: the destructor and the caller's error
-			// reporting run unlocked, on storage only this count
-			// keeps alive.
-			__atomic_add_fetch(
-				&agent->loaded_entity_count, 1, __ATOMIC_RELAXED
-			);
-		}
-	}
-
-	if (cp_config != NULL) {
-		// Every completed hold of the locks sweeps: what the gate
-		// leaves unreferenced is reclaimed by its own exit, not by
-		// an unrelated later holder.
-		cp_config_reclaim_unused_agents_locked(cp_config);
-		spinlock_unlock(&cp_config->agent_lock);
-		cp_config_unlock(cp_config);
-	}
-
-	if (refcnt != 0) {
-		// errno is set last, right before the return, so the error
-		// formatting above cannot clobber what the caller reads.
-		yanet_error_add_kind(
-			err,
-			YANET_ERROR_BUSY,
-			"module '%s:%s' is still referenced by a live "
-			"generation",
-			type,
-			name
-		);
-		errno = EAGAIN;
-		return -1;
-	}
-
-	return 0;
-}
-
-struct cp_module_cmp_data {
-	const char *type;
-	const char *name;
-};
-
-static int
-cp_module_registry_item_cmp(
-	const struct registry_item *item, const void *data
-) {
-	const struct cp_module *module =
-		container_of(item, struct cp_module, config_item);
-
-	const struct cp_module_cmp_data *cmp_data =
-		(const struct cp_module_cmp_data *)data;
-
-	int cmp = strncmp(module->name, cmp_data->name, sizeof(module->name));
-
-	if (cmp) {
-		return cmp;
-	}
-
-	return strncmp(module->type, cmp_data->type, sizeof(module->type));
-}
-
-static uint64_t
-cp_module_registry_key_hash(const void *data) {
-	const struct cp_module_cmp_data *cmp_data =
-		(const struct cp_module_cmp_data *)data;
-
-	return registry_hash_name_pair(
-		cmp_data->name,
-		CP_MODULE_NAME_LEN,
-		cmp_data->type,
-		CP_MODULE_TYPE_LEN
-	);
-}
-
-static uint64_t
-cp_module_registry_item_hash(const struct registry_item *item) {
-	const struct cp_module *module =
-		container_of(item, struct cp_module, config_item);
-
-	return registry_hash_name_pair(
-		module->name,
-		sizeof(module->name),
-		module->type,
-		sizeof(module->type)
-	);
-}
-
-static const struct registry_keys cp_module_registry_keys = {
-	.cmp = cp_module_registry_item_cmp,
-	.key_hash = cp_module_registry_key_hash,
-	.item_hash = cp_module_registry_item_hash,
-};
-
-int
-cp_module_registry_init(
-	struct memory_context *memory_context,
-	struct cp_config *owner,
-	struct cp_module_registry *new_module_registry,
-	yanet_error **err
-) {
-	if (registry_init(
-		    memory_context, owner, &new_module_registry->registry, 8
-	    )) {
-		yanet_error_add(err, "failed to initialize module registry");
-		return -1;
-	}
-
-	SET_OFFSET_OF(&new_module_registry->memory_context, memory_context);
-	return 0;
-}
-
-int
-cp_module_registry_copy(
-	struct memory_context *memory_context,
-	struct cp_module_registry *new_module_registry,
-	struct cp_module_registry *old_module_registry,
-	yanet_error **err
-) {
-	if (registry_copy(
-		    memory_context,
-		    &cp_module_registry_keys,
-		    &new_module_registry->registry,
-		    &old_module_registry->registry
-	    )) {
-		yanet_error_add(err, "failed to copy module registry");
-		return -1;
-	};
-
-	SET_OFFSET_OF(&new_module_registry->memory_context, memory_context);
-
-	// Mirror each copied item's new generation reference into its own
-	// agent.
-	//
-	// The reference count now counts exactly these registry references,
-	// so the per-agent live count and the items' reference counts move in
-	// lockstep: both track only references that can outlive a creator.
-	for (uint64_t idx = 0; idx < new_module_registry->registry.capacity;
-	     ++idx) {
-		struct cp_module *module =
-			cp_module_registry_get(new_module_registry, idx);
-		if (module == NULL) {
-			continue;
-		}
-		struct agent *agent = ADDR_OF(&module->agent);
-		if (agent != NULL) {
-			__atomic_add_fetch(
-				&agent->loaded_entity_count, 1, __ATOMIC_RELAXED
-			);
-		}
-	}
-
-	return 0;
-}
-
-// The item-to-owner mapping for the registry teardown fallback below.
+// The item-to-owner mapping for the generic registry wrapper layer,
+// including its allocation-free teardown fallback.
 static struct agent *
 module_item_owner(struct registry_item *item) {
 	struct cp_module *module =
@@ -578,119 +393,29 @@ module_item_owner(struct registry_item *item) {
 	return ADDR_OF(&module->agent);
 }
 
-void
-cp_module_registry_fini(struct cp_module_registry *module_registry) {
-	// Mirror each remaining item's dropped generation reference into its
-	// own agent.
-	//
-	// The order is strict: every dereference of agent-owned storage —
-	// snapshotting the owners, releasing the item references — happens
-	// while the loaded count still carries these references, and the
-	// count drops only afterwards, one subtraction per distinct agent.
-	// A count reaching zero makes the agent reclaimable by a concurrent
-	// sweep, which frees the agent and its arena wholesale, so the
-	// subtraction is the final touch of anything the agent owns.
-	//
-	// The zero transition releases nothing by itself: an item that
-	// leaves its last registry becomes dangling and is destroyed by its
-	// owner's next free attempt, or reclaimed with the agent's arena if
-	// that owner is gone.
-	if (ADDR_OF(&module_registry->registry.items) == NULL) {
-		return;
-	}
+static int
+cp_module_registry_item_cmp(const struct registry_item *item, const void *data);
+static uint64_t
+cp_module_registry_key_hash(const void *data);
+static uint64_t
+cp_module_registry_item_hash(const struct registry_item *item);
 
-	uint64_t capacity = module_registry->registry.capacity;
-	struct agent **owners = malloc(sizeof(*owners) * capacity);
-	if (owners != NULL) {
-		for (uint64_t idx = 0; idx < capacity; ++idx) {
-			struct cp_module *module =
-				cp_module_registry_get(module_registry, idx);
-			owners[idx] =
-				module != NULL ? ADDR_OF(&module->agent) : NULL;
-		}
-		registry_fini(&module_registry->registry, NULL, NULL);
-		agent_unload_references(owners, capacity);
-		free(owners);
-		return;
-	}
-
-	// Teardown could not snapshot the owners; release the items and
-	// drop the owners' references in allocation-free batches that keep
-	// the same dereferences-before-drops order per batch.
-	agent_release_registry_items(
-		&module_registry->registry, module_item_owner
-	);
-}
-
-struct cp_module *
-cp_module_registry_get(
-	struct cp_module_registry *module_registry, uint64_t index
-) {
-	struct registry_item *item =
-		registry_get(&module_registry->registry, index);
-	if (item == NULL) {
-		return NULL;
-	}
-	return container_of(item, struct cp_module, config_item);
-}
-
-int
-cp_module_registry_lookup_index(
-	struct cp_module_registry *module_registry,
-	const char *type,
-	const char *name,
-	uint64_t *index
-) {
-	struct cp_module_cmp_data cmp_data = {
-		.type = type,
-		.name = name,
-	};
-
-	return registry_lookup(
-		&module_registry->registry,
-		&cp_module_registry_keys,
-		cp_module_registry_item_cmp,
-		&cmp_data,
-		index
-	);
-}
-
-struct cp_module *
-cp_module_registry_lookup(
-	struct cp_module_registry *module_registry,
-	const char *type,
-	const char *name
-) {
-	uint64_t index;
-
-	if (cp_module_registry_lookup_index(
-		    module_registry, type, name, &index
-	    )) {
-		return NULL;
-	}
-
-	return container_of(
-		registry_get(&module_registry->registry, index),
-		struct cp_module,
-		config_item
-	);
-}
-
-int
-cp_module_registry_upsert(
-	struct cp_module_registry *module_registry,
-	const char *type,
-	const char *name,
-	struct cp_module *new_module,
+// Counter continuity of a module upsert: the module's own counters, and
+// each tagged runtime registry against the displaced module's
+// matching-tag registry, continue across the replacement so per-rule
+// counters survive a config rebuild that leaves the layout unchanged.
+static int
+cp_module_link_counters(
+	struct registry_item *new_item,
+	struct registry_item *old_item,
 	yanet_error **err
 ) {
-	struct cp_module_cmp_data cmp_data = {
-		.type = type,
-		.name = name,
-	};
-
+	struct cp_module *new_module =
+		container_of(new_item, struct cp_module, config_item);
 	struct cp_module *old_module =
-		cp_module_registry_lookup(module_registry, type, name);
+		(old_item != NULL)
+			? container_of(old_item, struct cp_module, config_item)
+			: NULL;
 
 	if (counter_registry_link(
 		    &new_module->counter_registry,
@@ -701,9 +426,6 @@ cp_module_registry_upsert(
 		return -1;
 	}
 
-	// Link each new runtime registry against the matching-tag registry on
-	// the displaced module so per-rule counters survive a config rebuild
-	// that leaves the layout unchanged.
 	struct cp_module_counter_registry **new_runtime =
 		ADDR_OF(&new_module->runtime_counter_registries);
 	for (uint64_t idx = 0; idx < new_module->runtime_counter_registry_count;
@@ -744,43 +466,146 @@ cp_module_registry_upsert(
 		}
 	}
 
-	if (registry_replace(
-		    &module_registry->registry,
-		    &cp_module_registry_keys,
-		    cp_module_registry_item_cmp,
-		    &cmp_data,
-		    &new_module->config_item,
-		    NULL,
-		    NULL
+	return 0;
+}
+
+static const struct cp_entity_desc cp_module_entity_desc = {
+	.keys =
+		{
+			.cmp = cp_module_registry_item_cmp,
+			.key_hash = cp_module_registry_key_hash,
+			.item_hash = cp_module_registry_item_hash,
+		},
+	.noun = "module",
+	.item_owner = module_item_owner,
+	.name_offset = offsetof(struct cp_module, name),
+	.name_len = CP_MODULE_NAME_LEN,
+	.type_offset = offsetof(struct cp_module, type),
+	.type_len = CP_MODULE_TYPE_LEN,
+	.link_counters = cp_module_link_counters,
+};
+
+static int
+cp_module_registry_item_cmp(
+	const struct registry_item *item, const void *data
+) {
+	return cp_entity_item_cmp(&cp_module_entity_desc, item, data);
+}
+
+static uint64_t
+cp_module_registry_key_hash(const void *data) {
+	return cp_entity_key_hash(&cp_module_entity_desc, data);
+}
+
+static uint64_t
+cp_module_registry_item_hash(const struct registry_item *item) {
+	return cp_entity_item_hash(&cp_module_entity_desc, item);
+}
+
+int
+cp_module_try_destroy(struct cp_module *cp_module, yanet_error **err) {
+	return cp_entity_try_destroy(
+		&cp_module->config_item, &cp_module_entity_desc, err
+	);
+}
+
+int
+cp_module_registry_init(
+	struct memory_context *memory_context,
+	struct cp_config *owner,
+	struct cp_module_registry *new_module_registry,
+	yanet_error **err
+) {
+	if (cp_entity_registry_init(
+		    memory_context,
+		    owner,
+		    &new_module_registry->registry,
+		    &cp_module_entity_desc,
+		    err
 	    )) {
-		yanet_error_add(err, "failed to replace module in registry");
 		return -1;
 	}
 
-	// Mirror this upsert's generation-reference changes into each
-	// affected module's own agent.
-	//
-	// Gaining a reference through upsert only ever happens here, and
-	// losing one to a displacing upsert only ever happens here too, so
-	// the per-agent live count must track both in this one place.
-	struct agent *new_agent = ADDR_OF(&new_module->agent);
-	if (new_agent != NULL) {
-		__atomic_add_fetch(
-			&new_agent->loaded_entity_count, 1, __ATOMIC_RELAXED
-		);
-	}
-	if (old_module != NULL) {
-		struct agent *old_agent = ADDR_OF(&old_module->agent);
-		if (old_agent != NULL) {
-			__atomic_sub_fetch(
-				&old_agent->loaded_entity_count,
-				1,
-				__ATOMIC_RELEASE
-			);
-		}
+	SET_OFFSET_OF(&new_module_registry->memory_context, memory_context);
+	return 0;
+}
+
+int
+cp_module_registry_copy(
+	struct memory_context *memory_context,
+	struct cp_module_registry *new_module_registry,
+	struct cp_module_registry *old_module_registry,
+	yanet_error **err
+) {
+	if (cp_entity_registry_copy(
+		    memory_context,
+		    &new_module_registry->registry,
+		    &old_module_registry->registry,
+		    &cp_module_entity_desc,
+		    err
+	    )) {
+		return -1;
 	}
 
+	SET_OFFSET_OF(&new_module_registry->memory_context, memory_context);
 	return 0;
+}
+
+void
+cp_module_registry_fini(struct cp_module_registry *module_registry) {
+	cp_entity_registry_fini(
+		&module_registry->registry, &cp_module_entity_desc
+	);
+}
+
+struct cp_module *
+cp_module_registry_get(
+	struct cp_module_registry *module_registry, uint64_t index
+) {
+	struct registry_item *item =
+		registry_get(&module_registry->registry, index);
+	if (item == NULL) {
+		return NULL;
+	}
+	return container_of(item, struct cp_module, config_item);
+}
+
+struct cp_module *
+cp_module_registry_lookup(
+	struct cp_module_registry *module_registry,
+	const char *type,
+	const char *name
+) {
+	struct cp_entity_key key;
+	cp_entity_key_set(&key, type, name);
+
+	struct registry_item *item = cp_entity_registry_lookup(
+		&module_registry->registry, &cp_module_entity_desc, &key
+	);
+	if (item == NULL) {
+		return NULL;
+	}
+	return container_of(item, struct cp_module, config_item);
+}
+
+int
+cp_module_registry_upsert(
+	struct cp_module_registry *module_registry,
+	const char *type,
+	const char *name,
+	struct cp_module *new_module,
+	yanet_error **err
+) {
+	struct cp_entity_key key;
+	cp_entity_key_set(&key, type, name);
+
+	return cp_entity_registry_upsert(
+		&module_registry->registry,
+		&cp_module_entity_desc,
+		&key,
+		&new_module->config_item,
+		err
+	);
 }
 
 int
@@ -789,41 +614,15 @@ cp_module_registry_delete(
 	const char *type,
 	const char *name
 ) {
-	struct cp_module_cmp_data cmp_data = {
-		.type = type,
-		.name = name,
-	};
+	struct cp_entity_key key;
+	cp_entity_key_set(&key, type, name);
 
-	struct cp_module *old_module =
-		cp_module_registry_lookup(module_registry, type, name);
-
-	if (registry_replace(
-		    &module_registry->registry,
-		    &cp_module_registry_keys,
-		    cp_module_registry_item_cmp,
-		    &cmp_data,
-		    NULL,
-		    NULL,
-		    NULL
-	    )) {
-		return -1;
-	}
-
-	// Mirror the generation reference this delete drops into the removed
-	// module's own agent, matching the decrement upsert performs when it
-	// displaces an entry.
-	if (old_module != NULL) {
-		struct agent *old_agent = ADDR_OF(&old_module->agent);
-		if (old_agent != NULL) {
-			__atomic_sub_fetch(
-				&old_agent->loaded_entity_count,
-				1,
-				__ATOMIC_RELEASE
-			);
-		}
-	}
-
-	return 0;
+	return cp_entity_registry_delete(
+		&module_registry->registry,
+		&cp_module_entity_desc,
+		cp_module_entity_desc.keys.cmp,
+		&key
+	);
 }
 
 size_t
