@@ -5,6 +5,7 @@
 #include "lib/logging/log.h"
 
 #include <assert.h>
+#include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -571,6 +572,57 @@ test_last_subarray_size_optimization(void) {
 	return TEST_SUCCESS;
 }
 
+// Verifies that exhausted arenas leave no owned blocks or child context.
+static int
+test_init_allocation_failure(size_t arena_size) {
+	struct block_allocator ba;
+	void *raw_mem = NULL;
+	if (arena_size != 0) {
+		TEST_ASSERT(
+			setup_allocator(&ba, &raw_mem, arena_size) ==
+				TEST_SUCCESS,
+			"setup_allocator failed"
+		);
+	} else {
+		TEST_ASSERT(
+			block_allocator_init(&ba) == 0, "allocator init failed"
+		);
+	}
+
+	struct memory_context mctx;
+	memory_context_init(&mctx, "big_array_allocation_failure", &ba);
+	size_t free_before = block_allocator_free_size(&ba);
+	struct big_array array;
+	memset(&array, 0xa5, sizeof(array));
+
+	int res = big_array_init(&array, 4096, &mctx);
+	bool cleared = array.subarrays == NULL && array.subarrays_count == 0 &&
+		       array.size == 0;
+	bool detached = mctx.first_child == NULL;
+	size_t free_after = block_allocator_free_size(&ba);
+	size_t pointer_pool = block_allocator_pool_index(
+		&ba, sizeof(void *) + 2 * ASAN_RED_ZONE
+	);
+	uint64_t metadata_allocations = ba.pools[pointer_pool].allocate;
+	big_array_fini(&array);
+	memory_context_fini(&mctx);
+	free(raw_mem);
+
+	TEST_ASSERT(
+		res == -1, "initialization should fail with exhausted arena"
+	);
+	TEST_ASSERT(cleared, "failed initialization should clear array state");
+	TEST_ASSERT(
+		detached, "failed initialization should detach child context"
+	);
+	TEST_ASSERT(free_after == free_before, "partial allocations leaked");
+	TEST_ASSERT(
+		metadata_allocations == (arena_size != 0 ? 1u : 0u),
+		"unexpected number of successful metadata allocations"
+	);
+	return TEST_SUCCESS;
+}
+
 // Main test runner
 
 int
@@ -581,6 +633,16 @@ main(void) {
 	LOG(INFO,
 	    "MEMORY_BLOCK_ALLOCATOR_MAX_SIZE = %zu",
 	    (size_t)MEMORY_BLOCK_ALLOCATOR_MAX_SIZE);
+
+	if (test_init_allocation_failure(0) != TEST_SUCCESS) {
+		LOG(ERROR, "first allocation failure cleanup failed");
+		return -1;
+	}
+
+	if (test_init_allocation_failure(1024) != TEST_SUCCESS) {
+		LOG(ERROR, "later allocation failure cleanup failed");
+		return -1;
+	}
 
 	if (test_init_and_free_basic() != TEST_SUCCESS) {
 		LOG(ERROR, "test_init_and_free_basic failed");

@@ -168,6 +168,7 @@ big_array_init(
 	struct big_array *array, size_t size, struct memory_context *mctx
 ) {
 	memory_context_init_from(&array->mctx, mctx, "big_array");
+	array->subarrays = NULL;
 	array->size = size;
 	array->subarray_len_exp =
 		63 - __builtin_clzll(MEMORY_BLOCK_ALLOCATOR_MAX_SIZE);
@@ -176,7 +177,6 @@ big_array_init(
 
 	// Handle zero size case - no subarrays needed
 	if (array->subarrays_count == 0) {
-		array->subarrays = NULL;
 		return 0;
 	}
 
