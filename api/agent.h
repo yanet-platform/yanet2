@@ -85,7 +85,7 @@ agent_dp_config_ready(struct yanet_shm *shm, uint32_t instance_idx);
 // A name longer than 79 characters is rejected.
 //
 // Attaching under a name replaces that name's previous generation: the
-// previous agent's further storage writes are refused and its memory is
+// previous agent's further writes are refused and its memory is
 // reclaimed once nothing references it. A same-name attach is valid only
 // once the previous generation's process has exited and will never call
 // through its handle again — a late write may land in reclaimed, reused
