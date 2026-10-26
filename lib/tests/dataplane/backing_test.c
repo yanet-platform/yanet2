@@ -18,6 +18,7 @@
 #include "lib/controlplane/config/cp_device.h"
 #include "lib/controlplane/config/econtext.h"
 #include "lib/controlplane/config/registry.h"
+#include "lib/controlplane/config/registry_sanitize.h"
 #include "lib/controlplane/config/zone.h"
 #include "lib/counters/counters.h"
 #include "lib/dataplane/config/zone.h"
@@ -109,9 +110,11 @@ backing_test_add_device(
 	SET_OFFSET_OF(&cp_device->input_pipelines, entries[0]);
 	SET_OFFSET_OF(&cp_device->output_pipelines, entries[1]);
 
-	return registry_insert(
+	int ret = registry_insert(
 		&gen->device_registry.registry, NULL, &cp_device->config_item
 	);
+	registry_sanitize_index(&gen->device_registry.registry, NULL);
+	return ret;
 }
 
 // Builds a generation whose registries live on the fixture memory
