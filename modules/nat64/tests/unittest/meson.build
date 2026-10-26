@@ -1,30 +1,19 @@
-dependencies = [
-  libdpdk_test_dep,
-  lib_common_dep,
-  lib_config_cp_dep,
-  lib_logging_dep,
-  lib_packet_dp_dep,
-  lib_errors_dep,
-]
-
-
-sources = files(
-  '../../api/nat64cp.c',
-  '../../dataplane/nat64dp.c',
-  'commands.c',
-  'main.c',
-  'nat64_test.c',
-)
-
-u = executable(
-  'unittest',
-  sources: sources,
+nat64_unittest = executable(
+  'nat64_unittest',
+  files('commands.c', 'main.c', 'nat64_test.c'),
   c_args: yanet_test_c_args,
-  include_directories: [yanet_rootdir, '.', '../..', '../../..', '../../dataplane'],
-  dependencies: dependencies,
+  include_directories: [yanet_rootdir, '../..', '../../dataplane'],
+  dependencies: [
+    libdpdk_test_dep,
+    lib_common_dep,
+    lib_logging_dep,
+    lib_nat64_cp_dep,
+    lib_nat64_dp_dep,
+    lib_packet_dp_dep,
+  ],
 )
 
-test('nat64 unittest', u, env: [
+test('nat64_unittest', nat64_unittest, env: [
   'YANET_TEST=nat64_autotest',
   'UBSAN_OPTIONS=halt_on_error=0:print_stacktrace=0',
   'LSAN_OPTIONS=detect_leaks=0',
