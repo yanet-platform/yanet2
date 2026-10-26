@@ -36,6 +36,11 @@ on:
       - ".github/actions/protoc/**"
       - ".github/actions/cli-inputs/**"
       - "tests/functional/**"
+      # The Rust module SDK is a workspace of its own that neither meson nor
+      # the CLI builds; its own workflows check it.
+      #
+      # A negation applies only to the patterns above it, so it stays last.
+      - "!lib/rust/**"
   pull_request:
     # A stacked pull request has a non-main base, so a main-only filter would skip it.
     branches: ["**"]
@@ -72,6 +77,11 @@ on:
       - ".github/actions/protoc/**"
       - ".github/actions/cli-inputs/**"
       - "tests/functional/**"
+      # The Rust module SDK is a workspace of its own that neither meson nor
+      # the CLI builds; its own workflows check it.
+      #
+      # A negation applies only to the patterns above it, so it stays last.
+      - "!lib/rust/**"
 
 concurrency:
   # The run_id fallback keeps non-PR runs from cancelling each other.

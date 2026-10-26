@@ -19,6 +19,11 @@ on:
       - ".cargo/config.toml"
       - ".github/workflows/rust-check.yml"
       - ".github/actions/protoc/**"
+      # The Rust module SDK is a workspace of its own that neither meson nor
+      # the CLI builds; its own workflows check it.
+      #
+      # A negation applies only to the patterns above it, so it stays last.
+      - "!lib/rust/**"
   pull_request:
     # A stacked pull request has a non-main base, so a main-only filter would skip it.
     branches: ["**"]
@@ -31,6 +36,11 @@ on:
       - ".cargo/config.toml"
       - ".github/workflows/rust-check.yml"
       - ".github/actions/protoc/**"
+      # The Rust module SDK is a workspace of its own that neither meson nor
+      # the CLI builds; its own workflows check it.
+      #
+      # A negation applies only to the patterns above it, so it stays last.
+      - "!lib/rust/**"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
