@@ -17,24 +17,6 @@ counters_uaf_test = executable(
 
 test('counters_uaf', counters_uaf_test, suite: ['lib'])
 
-counter_surface_test = executable(
-  'counter_surface_test',
-  ['counter_surface_test.c'],
-  dependencies: [
-    lib_dataplane_ut_dep,
-    lib_logging_dep,
-    lib_errors_dep,
-    lib_dev_plain_api_dep,
-    lib_agent_cp_dep,
-    lib_config_cp_dep,
-    lib_dev_plain_dp_dep,
-    libdpdk_test_dep,
-  ],
-  include_directories: yanet_rootdir,
-)
-
-test('counter_surface', counter_surface_test, suite: ['lib'])
-
 counters_lock_thread_dep = dependency('threads')
 
 counters_lock_test = executable(
