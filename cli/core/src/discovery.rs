@@ -8,7 +8,7 @@
 //! named, what a short alias resolves against, and what an error hint
 //! suggests.
 
-use core::time::Duration;
+use core::{future::Future, pin::Pin, time::Duration};
 use std::collections::BTreeMap;
 
 use clap::Command;
@@ -97,8 +97,8 @@ impl Family {
 
     /// Lists the fully-qualified names of the registered services in this
     /// family, sorted.
-    pub async fn list(&self, connection: &Connection) -> Result<Vec<String>, Error> {
-        list_services(connection, self.suffix).await
+    pub fn list<'a>(&'a self, connection: &'a Connection) -> Discovery<'a, Result<Vec<String>, Error>> {
+        list_services(connection, self.suffix)
     }
 
     /// Resolves a short alias against `services`.
@@ -142,14 +142,16 @@ impl Family {
     ///
     /// A name containing `.` is assumed already fully qualified and returned
     /// without any lookup.
-    pub async fn resolve(&self, connection: &Connection, name: &str) -> Result<String, Error> {
-        if name.contains('.') {
-            return Ok(name.to_owned());
-        }
+    pub fn resolve<'a>(&'a self, connection: &'a Connection, name: &'a str) -> Discovery<'a, Result<String, Error>> {
+        Box::pin(async move {
+            if name.contains('.') {
+                return Ok(name.to_owned());
+            }
 
-        let services = self.list(connection).await?;
+            let services = self.list(connection).await?;
 
-        self.resolve_among(connection.endpoint(), name, &services)
+            self.resolve_among(connection.endpoint(), name, &services)
+        })
     }
 
     /// Adds the discovered services to `err`'s hint when it reads like the
@@ -158,15 +160,17 @@ impl Family {
     /// Best-effort: a failed discovery leaves `err` exactly as it was, so a
     /// gateway that is down still surfaces the original probe error rather
     /// than a second, more confusing one.
-    pub async fn suggest(&self, connection: &Connection, err: Error) -> Error {
-        if !matches!(err.kind(), ErrorKind::ServiceUnregistered | ErrorKind::NotFound) {
-            return err;
-        }
+    pub fn suggest<'a>(&'a self, connection: &'a Connection, err: Error) -> Discovery<'a, Error> {
+        Box::pin(async move {
+            if !matches!(err.kind(), ErrorKind::ServiceUnregistered | ErrorKind::NotFound) {
+                return err;
+            }
 
-        match self.list(connection).await {
-            Ok(services) => err.with_hint(self.hint(&services)),
-            Err(..) => err,
-        }
+            match self.list(connection).await {
+                Ok(services) => err.with_hint(self.hint(&services)),
+                Err(..) => err,
+            }
+        })
     }
 
     /// Adds the discovered services to `err`'s hint, discovering them fresh
@@ -174,11 +178,13 @@ impl Family {
     ///
     /// For an error raised before any [`Connection`] exists — such as no
     /// service named at all — where [`Family::suggest`] has nothing to reuse.
-    pub async fn suggest_within(&self, args: &ConnectionArgs, err: Error) -> Error {
-        match discover_within(args, self.suffix, DISCOVERY_TIMEOUT).await {
-            Ok(services) => err.with_hint(self.hint(&services)),
-            Err(..) => err,
-        }
+    pub fn suggest_within<'a>(&'a self, args: &'a ConnectionArgs, err: Error) -> Discovery<'a, Error> {
+        Box::pin(async move {
+            match discover_within(args, self.suffix, DISCOVERY_TIMEOUT).await {
+                Ok(services) => err.with_hint(self.hint(&services)),
+                Err(..) => err,
+            }
+        })
     }
 
     /// Completion candidates for a positional naming a service of this
@@ -204,34 +210,40 @@ impl Family {
 ///
 /// The sort makes probing order — and hence rendered blocks — stable across
 /// runs, since the registry itself is unordered.
-pub async fn list_services(connection: &Connection, suffix: &str) -> Result<Vec<String>, Error> {
-    let mut service = Service::new(connection, GATEWAY_SERVICE, |channel: LayeredChannel| {
-        GatewayClient::new(channel)
-            .send_compressed(CompressionEncoding::Zstd)
-            .accept_compressed(CompressionEncoding::Zstd)
-            .accept_compressed(CompressionEncoding::Gzip)
-    });
+pub fn list_services<'a>(connection: &'a Connection, suffix: &'a str) -> Discovery<'a, Result<Vec<String>, Error>> {
+    Box::pin(async move {
+        let mut service = Service::new(connection, GATEWAY_SERVICE, |channel: LayeredChannel| {
+            GatewayClient::new(channel)
+                .send_compressed(CompressionEncoding::Zstd)
+                .accept_compressed(CompressionEncoding::Zstd)
+                .accept_compressed(CompressionEncoding::Gzip)
+        });
 
-    let response = service
-        .unary("discover", ListServicesRequest {}, async |client, request| {
-            client.list_services(request).await
-        })
-        .await?;
+        let response = service
+            .unary("discover", ListServicesRequest {}, async |client, request| {
+                client.list_services(request).await
+            })
+            .await?;
 
-    let mut services: Vec<String> = response
-        .services
-        .iter()
-        .filter_map(|registered| registered.backend.as_ref())
-        .map(|backend| backend.name.as_str())
-        .filter(|name| has_suffix(name, suffix))
-        .map(str::to_owned)
-        .collect();
+        let mut services: Vec<String> = response
+            .services
+            .iter()
+            .filter_map(|registered| registered.backend.as_ref())
+            .map(|backend| backend.name.as_str())
+            .filter(|name| has_suffix(name, suffix))
+            .map(str::to_owned)
+            .collect();
 
-    services.sort();
-    services.dedup();
+        services.sort();
+        services.dedup();
 
-    Ok(services)
+        Ok(services)
+    })
 }
+
+/// A discovery future, boxed so its body compiles once in this crate rather
+/// than in every binary that awaits it.
+type Discovery<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
 /// Reports whether a registered service belongs to a family: its own name —
 /// the last segment of the fully-qualified one — ends with the family name.
@@ -331,30 +343,36 @@ pub fn alias_map(services: &[String]) -> BTreeMap<String, String> {
 /// why the budget is a parameter here rather than fixed at the call sites.
 /// Discovery the user asked for runs over the [`Connection`] the probe
 /// already established and is deliberately unbounded.
-pub async fn discover_within(args: &ConnectionArgs, suffix: &str, budget: Duration) -> Result<Vec<String>, Error> {
-    // Resolved once, up front, and reused by both the connect attempt and
-    // the timeout arm: a bad file or an unknown alias is a config error
-    // reported as such, and the label must not shift, or the file be read
-    // twice, between the attempt and a timeout.
-    let settings = config::resolve(args, &config::Sources::from_process_env())
-        .map_err(|err| Error::from_config(err, "discover", args.endpoint.clone()))?;
-    let endpoint = settings.label();
+pub fn discover_within<'a>(
+    args: &'a ConnectionArgs,
+    suffix: &'a str,
+    budget: Duration,
+) -> Discovery<'a, Result<Vec<String>, Error>> {
+    Box::pin(async move {
+        // Resolved once, up front, and reused by both the connect attempt and
+        // the timeout arm: a bad file or an unknown alias is a config error
+        // reported as such, and the label must not shift, or the file be read
+        // twice, between the attempt and a timeout.
+        let settings = config::resolve(args, &config::Sources::from_process_env())
+            .map_err(|err| Error::from_config(err, "discover", args.endpoint.clone()))?;
+        let endpoint = settings.label();
 
-    let lookup = async {
-        let connection = Connection::connect_settings(&settings, "discover").await?;
+        let lookup = async {
+            let connection = Connection::connect_settings(&settings, "discover").await?;
 
-        list_services(&connection, suffix).await
-    };
+            list_services(&connection, suffix).await
+        };
 
-    match tokio::time::timeout(budget, lookup).await {
-        Ok(services) => services,
-        Err(..) => {
-            let formatted_budget = humantime::format_duration(budget);
-            let message = format!("gateway did not answer within {formatted_budget}");
+        match tokio::time::timeout(budget, lookup).await {
+            Ok(services) => services,
+            Err(..) => {
+                let formatted_budget = humantime::format_duration(budget);
+                let message = format!("gateway did not answer within {formatted_budget}");
 
-            Err(Error::new(ErrorKind::Unavailable, "discover", endpoint, message))
+                Err(Error::new(ErrorKind::Unavailable, "discover", endpoint, message))
+            }
         }
-    }
+    })
 }
 
 /// Formats a hint listing `services` one per line under a greyed `caption`.

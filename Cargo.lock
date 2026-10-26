@@ -2822,13 +2822,11 @@ name = "yanet-cli-l3b"
 version = "0.2.0"
 dependencies = [
  "clap",
- "clap_complete",
  "log",
  "prost",
  "serde",
  "serde_yaml",
  "tabled",
- "tokio",
  "tonic",
  "tonic-prost",
  "tonic-prost-build",

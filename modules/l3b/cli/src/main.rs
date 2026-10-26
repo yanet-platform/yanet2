@@ -1,8 +1,7 @@
 use core::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::path::{Path, PathBuf};
 
-use clap::{ArgAction, CommandFactory, Parser};
-use clap_complete::CompleteEnv;
+use clap::{ArgAction, Parser};
 use l3bpb::{
     CreateServiceRequest, DeleteServiceRequest, GetServiceRequest, ListModuleConfigsRequest, ListServicesRequest,
     ListSessionsRequest, ModuleConfig, UpdateModuleConfigRequest, UpdateRealServerStateRequest,
@@ -520,16 +519,8 @@ impl From<&l3bpb::RealServerState> for RealServerRow {
     }
 }
 
-#[tokio::main(flavor = "current_thread")]
-pub async fn main() {
-    CompleteEnv::with_factory(Cmd::command).complete();
-    let cmd = Cmd::parse();
-    ync::init(cmd.verbose, cmd.format);
-
-    if let Err(err) = run(cmd).await {
-        output::failure(&err);
-        std::process::exit(err.exit_code());
-    }
+fn main() -> std::process::ExitCode {
+    ync::entrypoint(|cmd: &Cmd| (cmd.verbose, cmd.format), run)
 }
 
 async fn run(cmd: Cmd) -> Result<(), Error> {
