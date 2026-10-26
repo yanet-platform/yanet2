@@ -4,8 +4,10 @@
 
 use core::mem::{offset_of, size_of};
 
+// The workspace denies unused crate dependencies; this test names no crate it
+// imports `as _`.
+use yanet_packet as _;
 use yanet_sdk_testing::{BlockArena, View};
-// The workspace denies unused crate dependencies and this test never names the crate.
 use yanet_shm as _;
 use yanet_sys::{bindings, common::lpm::Lpm4};
 

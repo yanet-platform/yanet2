@@ -8,8 +8,8 @@ share, the C bindings with the dataplane runtime and the packet header views.
 | Crate | Environment | Role |
 |-------|-------------|------|
 | `yanet-shm` | `no_std`, no `alloc` | the provenance root, relative-pointer field types, `Opaque`, `ShmLayout` leaves |
-| `yanet-sys` | `no_std`, no `alloc` | the C bindings of the SDK, modules mirroring the C tree, one bindgen output (generated into `OUT_DIR`, only here) and one module per C library: `common` (LPM type with its lookup), `counters` (the counter value address), `dp` (bindings of `lib/dataplane`, the `Module` trait, `Cx`/`CommitCx`, `Batch`/`Packet`, counters and devices, the handler runtime and `export_module!`); the dataplane C shim |
-| `yanet-sdk-testing` | `no_std` + `alloc`, dev-only | the block arena and resolving context of the tests, Miri included; with the `dp` feature (enabled only by `yanet-sys`' tests) the dataplane invocation harness |
+| `yanet-sys` | `no_std`, no `alloc` | the C bindings of the SDK, modules mirroring the C tree, one bindgen output (generated into `OUT_DIR`, only here) and one module per C library: `common` (LPM type with its lookup), `counters` (the counter value address), `dp` (bindings of `lib/dataplane`, the `Module` trait, `Cx`/`CommitCx`, `Batch`/`Packet` with the packet operations (allocation, copy, resizing, tunnels), counters and devices, the handler runtime and `export_module!`); the dataplane C shim |
+| `yanet-sdk-testing` | `no_std` + `alloc`, dev-only | the block arena and resolving context of the tests, Miri included; with the `dp` feature (enabled only by `yanet-sys`' tests) the dataplane invocation harness and its packet pool |
 | `yanet-packet` | `no_std` | packet header views, extractable to its own repository |
 
 ## Build
@@ -20,8 +20,11 @@ that `meson setup build` writes at the repository root; `YANET_BUILD_DIR`
 names another build directory, and `.cargo/config.toml` of this directory
 defaults it to `build`. It also needs a clang
 and a libclang of one LLVM major (`CLANG_PATH`, `LIBCLANG_PATH`); CI uses 18.
-The same build script compiles the dataplane C shim with hidden
-visibility and the warning options of the C build, `-Werror` included. The
+The same build script compiles the dataplane C shim, with the packet
+encapsulation sources of `lib/dataplane/packet` it calls, with hidden
+visibility and the warning options of the C build, `-Werror` included. A
+plugin imports the packet allocator and copy (`worker_packet_alloc`,
+`worker_clone_packet`) from the dataplane executable, which exports them. The
 tests of `yanet-shm` need neither the compilation database nor a C compiler.
 
 ```sh

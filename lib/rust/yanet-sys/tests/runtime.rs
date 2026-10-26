@@ -7,6 +7,7 @@
 
 use core::mem::offset_of;
 
+use yanet_packet as _;
 use yanet_sdk_testing::{
     BlockArena,
     dp::{Fate, Invocation, Outcome, TestPacket, alloc_config, write_body_word},
@@ -57,7 +58,8 @@ fn packets(count: usize) -> Vec<TestPacket> {
         .collect()
 }
 
-/// Forgets one packet, drops one value unused and passes the third.
+/// Forgets one packet, drops one value unused and passes the third: a module
+/// that breaks the drain obligation on purpose, which the safe API survives.
 struct Forgetful;
 
 impl Module for Forgetful {
@@ -82,7 +84,8 @@ impl Module for Forgetful {
     }
 }
 
-/// Takes every packet first, then disposes of them out of order.
+/// Takes three packets first, then disposes of them out of order, and passes
+/// the rest.
 struct Shuffled;
 
 impl Module for Shuffled {
@@ -92,12 +95,17 @@ impl Module for Shuffled {
     fn prepare(_: &CommitCx<'_, Self>) {}
 
     fn handle(_: &mut Cx<Self>, batch: &mut Batch) {
-        let (Some(first), Some(second), Some(third)) = (batch.next(), batch.next(), batch.next()) else {
-            return;
-        };
-        batch.pass(second);
-        batch.drop(first);
-        batch.pass(third);
+        let (first, second, third) = (batch.next(), batch.next(), batch.next());
+        if let Some(packet) = second {
+            batch.pass(packet);
+        }
+        if let Some(packet) = first {
+            batch.drop(packet);
+        }
+        if let Some(packet) = third {
+            batch.pass(packet);
+        }
+        batch.dispatch(|_| Verdict::Pass);
     }
 }
 
@@ -426,6 +434,7 @@ fn test_batch_transport_protocol_masks_the_unavailable_mark() {
     let mut invocation = unsafe { Invocation::<Udp>::new(arena, config, 0) };
     let tagged = |transport_type| TestPacket {
         transport_type,
+        transport_offset: 34,
         ..TestPacket::ether(0x0800, vec![0; 60])
     };
 
@@ -459,7 +468,7 @@ fn test_packet_data_mut_writes_the_frame() {
 
     assert_eq!(
         vec![0xee, 0xee],
-        outcome.frames.iter().map(|frame| frame[0]).collect::<Vec<_>>()
+        outcome.frames.iter().map(|frame| frame.bytes[0]).collect::<Vec<_>>()
     );
 }
 

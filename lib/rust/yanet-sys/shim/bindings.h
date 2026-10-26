@@ -16,4 +16,6 @@
 
 #include <rte_mbuf_core.h>
 
+#include "yanet_build_config.h"
+
 #include "dp_shim.h"

@@ -18,6 +18,7 @@ const SUITES: &[(&str, Option<&str>)] = &[
     ("yanet-sys", None),
     ("yanet-sys", Some("export")),
     ("yanet-sys", Some("lpm")),
+    ("yanet-sys", Some("packet")),
     ("yanet-sys", Some("runtime")),
     ("yanet-packet", None),
 ];

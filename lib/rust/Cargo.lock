@@ -434,6 +434,7 @@ dependencies = [
  "cc",
  "serde_json",
  "shlex 1.3.0",
+ "yanet-packet",
  "yanet-sdk-testing",
  "yanet-shm",
 ]
