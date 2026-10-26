@@ -2813,16 +2813,24 @@ name = "yanet-cli-l3b"
 version = "0.2.0"
 dependencies = [
  "clap",
+ "http-body-util",
+ "hyper",
+ "hyper-util",
  "log",
  "prost",
  "serde",
+ "serde_json",
  "serde_yaml",
  "tabled",
+ "tempfile",
+ "tokio",
  "tonic",
+ "unsafe-libyaml",
  "yanet-cli",
  "yanet-cli-build",
  "yanet-commonpb",
  "yanet-filterpb",
+ "zstd",
 ]
 
 [[package]]

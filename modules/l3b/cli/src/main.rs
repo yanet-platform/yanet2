@@ -18,6 +18,12 @@ use ync::{
     output::{self, CommonFormat},
 };
 
+mod document;
+
+// These dependencies are exercised by the public-command integration tests.
+#[cfg(test)]
+use {http_body_util as _, hyper as _, hyper_util as _, serde_json as _, tempfile as _, tokio as _, zstd as _};
+
 #[allow(clippy::std_instead_of_core, non_snake_case)]
 pub mod l3bpb {
     use serde::Serialize;
@@ -162,6 +168,7 @@ pub struct WeightCmd {
 /// `hash-mask`/`index-mask` stay command flags; the document carries only
 /// what has no natural flag form.
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct ServiceDocument {
     /// Real servers the service dispatches to.
     real_servers: Vec<RealServerDoc>,
@@ -169,15 +176,15 @@ struct ServiceDocument {
     source_filter_rules: Vec<SourceFilterRuleDoc>,
     /// Hash index size of the service's session table; the default when
     /// omitted.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "document::scalar")]
     session_index_size: u32,
     /// Scheduling mode bits; 1 selects one-packet scheduling from the
     /// module link packet counter.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "document::scalar")]
     scheduler_flags: u32,
     /// Service behavior flags; 1 clamps the TCP MSS option of SYN packets
     /// and 2 selects pure L3 balancing.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "document::scalar")]
     flags: u32,
     /// Outer-header DSCP marking: never, onlyDefault or always with a
     /// 6-bit value.
@@ -191,12 +198,13 @@ struct ServiceDocument {
 
 /// Outer-header DSCP marking of a service.
 #[derive(Debug, Deserialize)]
-#[serde(rename_all = "lowercase")]
+#[serde(rename_all = "lowercase", deny_unknown_fields)]
 struct DSCPMarkingDoc {
     /// never inherits the inner DSCP, onlyDefault marks a zero DSCP and
     /// always marks unconditionally.
     mode: DSCPMarkMode,
     /// The 6-bit DSCP value to mark with.
+    #[serde(deserialize_with = "document::scalar")]
     value: u8,
 }
 
@@ -211,29 +219,31 @@ enum DSCPMarkMode {
 
 /// Session lifetime policy, in seconds.
 #[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct SessionTimeoutsDoc {
     /// Established TCP flows.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "document::scalar")]
     tcp: u32,
     /// A SYN alone.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "document::scalar")]
     tcp_syn: u32,
     /// A SYN+ACK.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "document::scalar")]
     tcp_syn_ack: u32,
     /// A flow whose FIN was seen.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "document::scalar")]
     tcp_fin: u32,
     /// UDP flows.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "document::scalar")]
     udp: u32,
     /// Everything else.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "document::scalar")]
     other: u32,
 }
 
 /// One real server tunnel endpoint.
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct RealServerDoc {
     /// Tunnel destination address of the real server.
     destination_address: IpAddr,
@@ -243,6 +253,7 @@ struct RealServerDoc {
 
 /// One source-side match rule.
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct SourceFilterRuleDoc {
     /// IPv6 source networks the rule accepts.
     net6s: Vec<commonpb::pb::IPv6Network>,
@@ -254,8 +265,11 @@ struct SourceFilterRuleDoc {
 
 /// An inclusive numeric range.
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct RangeDoc {
+    #[serde(deserialize_with = "document::scalar")]
     from: u16,
+    #[serde(deserialize_with = "document::scalar")]
     to: u16,
 }
 
@@ -263,6 +277,7 @@ struct RangeDoc {
 /// rules routing traffic to services; the linked services are exactly those
 /// the rules name.
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct ModuleConfigDocument {
     /// Destination rules, in rule order.
     destination_filter_rules: Vec<DestinationRuleDoc>,
@@ -293,6 +308,7 @@ impl ModuleConfigDocument {
 
 /// One destination-side classification rule.
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct DestinationRuleDoc {
     /// IPv6 destination networks the rule matches.
     net6s: Vec<commonpb::pb::IPv6Network>,
@@ -301,6 +317,7 @@ struct DestinationRuleDoc {
     /// Transport protocol ranges the rule matches.
     proto_ranges: Vec<ProtoRangeDoc>,
     /// Name of the virtual service matched traffic is routed to.
+    #[serde(deserialize_with = "document::scalar")]
     service: String,
 }
 
@@ -309,14 +326,15 @@ struct DestinationRuleDoc {
 /// `tcp` with the default subtypes selects every TCP packet regardless of
 /// flags; a number selects that protocol directly.
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct ProtoRangeDoc {
     /// The transport protocol.
     proto: ProtocolDoc,
     /// First matched subtype byte; defaults to 0.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "document::scalar")]
     subtype_from: Option<u8>,
     /// Last matched subtype byte; defaults to 255.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "document::scalar")]
     subtype_to: Option<u8>,
 }
 
@@ -433,9 +451,11 @@ fn load_document<T: for<'de> Deserialize<'de>>(
     verb: &'static str,
     service: &L3BService,
 ) -> Result<T, Error> {
-    let file = std::fs::File::open(path)
-        .map_err(|err| service.invalid(verb, format!("failed to open {}: {err}", path.display())))?;
-    serde_yaml::from_reader(file)
+    let content = std::fs::read_to_string(path)
+        .map_err(|err| service.invalid(verb, format!("failed to read {}: {err}", path.display())))?;
+    document::validate(&content)
+        .map_err(|err| service.invalid(verb, format!("invalid document {}: {err}", path.display())))?;
+    serde_yaml::from_str(&content)
         .map_err(|err| service.invalid(verb, format!("invalid document {}: {err}", path.display())))
 }
 
@@ -699,9 +719,12 @@ impl L3BService {
 
         if let Some(path) = &cmd.file {
             let document: ModuleConfigDocument = load_document(path, "update-module-config", self)?;
-            config.destination_filter_rules = document
-                .try_rules()
-                .map_err(|err| self.invalid("update-module-config", err))?;
+            config.destination_filter_rules = document.try_rules().map_err(|err| {
+                self.invalid(
+                    "update-module-config",
+                    format!("invalid document {}: destination_filter_rules: {err}", path.display()),
+                )
+            })?;
         }
 
         let request = UpdateModuleConfigRequest { config: Some(config) };
