@@ -2,8 +2,9 @@ name: Rust SDK
 
 # Checks of the Rust module SDK workspace (lib/rust): formatting, lints, the
 # 1.88 test suite, std-freedom of the SDK crates and the extractable packet.
-# Every check that compiles the SDK runs on x86_64 and on arm64, each with the
-# bare-metal target of its architecture.
+# Clippy with the bare-metal check and the 1.88 tests also run on arm64, where
+# the C bindings and the layouts they check can differ; the rest does not
+# depend on the architecture and runs on x86_64 only.
 #
 # The bindings crate's build script runs bindgen and the C shim over the
 # repository's C headers with the flags of a meson configuration's
@@ -152,22 +153,16 @@ jobs:
         run: cargo test --workspace --locked
 
   packet:
-    name: yanet-packet standalone${{ matrix.arch == 'arm64' && ' (arm64)' || '' }}
-    runs-on: ${{ matrix.runner }}
+    name: yanet-packet standalone
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - {arch: x86_64, runner: ubuntu-24.04, target: x86_64-unknown-none}
-          - {arch: arm64, runner: ubuntu-24.04-arm, target: aarch64-unknown-none}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@360a4e93673de6630fac2478bc9e35244b01a759 # 1.88.0
         with:
-          targets: ${{ matrix.target }}
+          targets: x86_64-unknown-none
       # Built outside the workspace, as its own repository would be: a path
       # dependency or workspace inheritance fails this build.
       - name: Test outside the workspace
@@ -175,4 +170,4 @@ jobs:
           cp -r lib/rust/yanet-packet "$RUNNER_TEMP/yanet-packet"
           cd "$RUNNER_TEMP/yanet-packet"
           cargo test
-          cargo check --target ${{ matrix.target }}
+          cargo check --target x86_64-unknown-none

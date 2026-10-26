@@ -48,15 +48,14 @@ permissions:
 
 jobs:
   miri:
-    name: miri (${{ matrix.model }} borrows)${{ matrix.arch == 'arm64' && ' (arm64)' || '' }}
-    runs-on: ${{ matrix.arch == 'arm64' && 'ubuntu-24.04-arm' || 'ubuntu-24.04' }}
+    name: miri (${{ matrix.model }} borrows)
+    runs-on: ubuntu-24.04
     timeout-minutes: 45
     container: ghcr.io/yanet-platform/yanet2-ci@sha256:81927a6bf8adabade5c16d5b1bd698e2ca5535ffd88175b58a5934e647834e25
     strategy:
       fail-fast: false
       matrix:
         model: [stacked, tree]
-        arch: [x86_64, arm64]
     env:
       # bindgen needs a libclang and a clang of the same LLVM major.
       CLANG_PATH: /usr/bin/clang-18
