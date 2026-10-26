@@ -32,13 +32,12 @@ lib_config_dp_dep = declare_dependency(
   dependencies: dependencies,
 )
 
-# Source that exports a module .so's compiled-against ABI version, for a
-# future module shared_module() target to pull in. Deliberately kept out
-# of lib_config_dp: linking it into every statically-linked built-in
-# module would make the final dataplane binary define
-# yanet_module_abi_version more than once. A shared_module() target picks
-# this up by adding lib_module_abi_export_sources to its own sources (or
-# lib_module_abi_export_dep to its dependencies) exactly once per .so.
+# The ABI version a plugin .so was built against, which the loader checks
+# before it accepts the plugin; the loader test's plugin takes it.
+#
+# Each plugin takes it exactly once, as a source or through the dependency
+# below. The built-in modules never link it, so the dataplane binary defines
+# no version symbol of its own.
 lib_module_abi_export_sources = files('plugin_abi_export.c')
 
 lib_module_abi_export_dep = declare_dependency(

@@ -21,20 +21,9 @@ lib_counters_dep = declare_dependency(
   dependencies: dependencies,
 )
 
+# Counter-name pattern matching is control-plane only: resolving rure pulls in
+# a Rust toolchain, which a dataplane-only build promises not to need.
 if not dataplane_only
-  # Counter-name pattern matching is a separate target on purpose.
-  #
-  # lib_counters_dep reaches the dataplane binary through lib/dataplane's
-  # config and worker libraries, and the dataplane never filters counters
-  # by name. Keeping the matcher apart is what stops a regex engine being
-  # linked into the packet path.
-  #
-  # The whole block is control-plane only: resolving rure pulls in a Rust
-  # toolchain, which a dataplane-only build promises not to need.
-  #
-  # Patterns are answered by string comparison wherever the shape allows,
-  # and by a linear-time automaton otherwise.
-
   # The regex engine ships no build meson can consume, so cargo builds it.
   regex_root = meson.project_source_root() / 'subprojects' / 'regex'
   cargo = find_program('cargo', required: true)
@@ -115,6 +104,11 @@ if not dataplane_only
   # records what it will be linked against rather than linking it.
   librure_targets = [librure]
 
+  # Kept apart from the counters library, which the dataplane links but never
+  # uses to filter counters by name, so no regex engine reaches the packet path.
+  #
+  # Patterns are answered by string comparison wherever the shape allows, and
+  # by a linear-time automaton otherwise.
   lib_counter_pattern = static_library(
     'counter_pattern',
     files('counter_pattern.c'),

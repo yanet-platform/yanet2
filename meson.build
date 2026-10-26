@@ -35,12 +35,13 @@ yanet_conf.set('MBUF_MAX_SIZE', get_option('mbuf_max_size'))
 build_cfg = 'yanet_build_config.h'
 configure_file(output: build_cfg, configuration: yanet_conf)
 
-# Volatile config: version/commit/timestamp change on essentially every
-# build. Kept out of yanet_build_config.h and included only by the version
-# banner, so it does not poison ccache manifests across the rest of the tree.
+# Volatile config: the commit and the timestamp, read when meson configures the
+# tree and re-read on every reconfigure.
 #
-# The header itself is written further down, once the DPDK subproject has
-# resolved the target ISA and the sanitizer set is final.
+# Kept out of yanet_build_config.h and included only by the version banner, so
+# it does not poison ccache manifests across the rest of the tree. The header
+# itself is written further down, once the DPDK subproject has resolved the
+# target ISA and the sanitizer set is final.
 yanet_stamp = configuration_data()
 
 # Version and build info
