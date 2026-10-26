@@ -119,7 +119,7 @@ oom_shim_c_args = yanet_test_c_args + [
 
 filter_compiler_oom_shim = static_library(
   'filter_compiler_oom_shim',
-  compiler_sources,
+  filter_compiler_sources,
   c_args: oom_shim_c_args,
   include_directories: include_directories('..'),
   dependencies: [lib_common_dep, lib_errors_dep],

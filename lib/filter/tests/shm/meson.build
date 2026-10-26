@@ -1,4 +1,4 @@
-deps = [
+shm_deps = [
   lib_common_dep,
   lib_filter_compiler_dep,
   lib_lib_utils_dep,
@@ -7,27 +7,24 @@ deps = [
   libdpdk_inc_dep,
 ]
 
-compiler = executable('compiler',
+shm_compiler = executable('compiler',
     ['compiler.c'],
     c_args: yanet_test_c_args,
-    dependencies: deps,
+    dependencies: shm_deps,
     include_directories: yanet_rootdir,
 )
 
-filter = executable('filter',
+shm_filter = executable('filter',
     ['filter.c'],
     c_args: yanet_test_c_args,
-    dependencies: deps,
+    dependencies: shm_deps,
     include_directories: yanet_rootdir,
 )
-
-python = find_program('python3', required: true)
 
 test(
     'shm',
-    python,
-    args: [files('test.py'), meson.current_build_dir() + '/compiler', meson.current_build_dir() + '/filter'],
-    depends: [compiler, filter],
+    python3,
+    args: [files('test.py'), shm_compiler, shm_filter],
     timeout: 10,
     suite: ['filter']
 )

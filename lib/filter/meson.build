@@ -1,8 +1,4 @@
-lib_filter_query_dep = declare_dependency(
-  include_directories: include_directories('.'),
-)
-
-compiler_sources = files(
+filter_compiler_sources = files(
   'compiler/helper.c',
   'compiler/device.c',
   'compiler/net4.c',
@@ -15,7 +11,7 @@ compiler_sources = files(
 
 lib_filter_compiler = static_library(
   'filter_compiler',
-  compiler_sources,
+  filter_compiler_sources,
   dependencies: [lib_common_dep, lib_errors_dep],
   install: false,
 )

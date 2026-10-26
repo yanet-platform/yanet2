@@ -1,5 +1,5 @@
-counters_test = executable(
-  'counters_test',
+counters_uaf_test = executable(
+  'counters_uaf_test',
   ['counters_test.c'],
   link_args: [
     '-Wl,-E',
@@ -18,7 +18,7 @@ counters_test = executable(
   include_directories: yanet_rootdir,
 )
 
-test('counters_uaf', counters_test, suite: ['lib'])
+test('counters_uaf', counters_uaf_test, suite: ['lib'])
 
 counters_lock_thread_dep = dependency('threads')
 

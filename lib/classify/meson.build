@@ -1,14 +1,10 @@
-lib_classify_query_dep = declare_dependency(
-  include_directories: include_directories('.'),
-)
-
-compiler_sources = files(
+classify_compiler_sources = files(
   'compiler/helper.c',
 )
 
 lib_classify_compiler = static_library(
   'classify_compiler',
-  compiler_sources,
+  classify_compiler_sources,
   dependencies: [lib_common_dep],
   install: false,
 )
