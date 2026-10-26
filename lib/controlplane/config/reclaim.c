@@ -12,6 +12,23 @@ void
 agent_cleanup(struct agent *agent) {
 	struct cp_config *cp_config = ADDR_OF(&agent->cp_config);
 
+	// The storage nodes go back through the agent's own context,
+	// before the arenas they live in return to the pool.
+	//
+	// After the arenas return, the nodes are interior offsets of
+	// blocks that belong to somebody else, and freeing them through
+	// the controlplane pool would corrupt it.
+	struct agent_storage *storage = ADDR_OF(&agent->storage);
+	while (storage != NULL) {
+		struct agent_storage *next = ADDR_OF(&storage->next);
+		memory_bfree(
+			&agent->memory_context,
+			storage,
+			sizeof(struct agent_storage) + storage->size
+		);
+		storage = next;
+	}
+
 	// Child contexts may be backed by the arenas reclaimed below.
 	memory_context_fini(&agent->memory_context);
 
@@ -30,17 +47,6 @@ agent_cleanup(struct agent *agent) {
 			arenas,
 			sizeof(struct agent_arena) * agent->arena_count
 		);
-	}
-
-	struct agent_storage *storage = ADDR_OF(&agent->storage);
-	while (storage != NULL) {
-		struct agent_storage *next = ADDR_OF(&storage->next);
-		memory_bfree(
-			&cp_config->memory_context,
-			storage,
-			sizeof(struct agent_storage) + storage->size
-		);
-		storage = next;
 	}
 
 	memory_bfree(&cp_config->memory_context, agent, sizeof(struct agent));

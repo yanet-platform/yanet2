@@ -330,6 +330,33 @@ test('superseded_agent', superseded_agent_test, suite: ['lib'])
 
 agent_list_race_thread_dep = dependency('threads')
 
+storage_race_test = executable(
+  'storage_race_test',
+  ['storage_race_test.c'],
+  link_args: [
+    '-Wl,-E',
+    '-Wl,--undefined=new_device_plain',
+    '-Wl,--export-dynamic-symbol=new_device_plain',
+  ],
+  dependencies: [
+    lib_dataplane_ut_dep,
+    lib_logging_dep,
+    lib_errors_dep,
+    lib_dev_plain_api_dep,
+    libdpdk_dep,
+    agent_list_race_thread_dep,
+  ],
+  link_with: [lib_dev_plain_dp],
+  include_directories: yanet_rootdir,
+)
+
+test(
+  'storage_race',
+  storage_race_test,
+  suite: ['lib'],
+  timeout: 90,
+)
+
 agent_list_race_test = executable(
   'agent_list_race_test',
   ['agent_list_race_test.c'],

@@ -49,6 +49,19 @@ struct agent_storage {
 	uint8_t data[];
 };
 
+// One generation of a module agent: the handle its process attaches,
+// creates entities and stores values through.
+//
+// Replacement is whole-process: a successor is attached under the
+// same name only once the previous generation's process has exited
+// and will never call through its handle again. The library does
+// not check this — the deployment managing the processes owns it —
+// and reclamation leans on it: a write after the arenas return to
+// the pool lands in memory another owner may already hold, even
+// reading the superseded mark below as false again. Within a
+// still-live process the refusals freeze a superseded handle,
+// safely only for as long as live references keep its generation
+// from the sweep.
 struct agent {
 	struct block_allocator block_allocator;
 	struct memory_context memory_context;
@@ -82,6 +95,17 @@ struct agent {
 	// the loaded entities down individually first.
 	uint64_t loaded_entity_count;
 	struct agent *prev;
+	// Set once a newer generation of this agent's name replaces it
+	// in the registry.
+	//
+	// From that moment the agent exists for nothing but reclamation:
+	// constructing, growing and storing through it is refused, and
+	// its arenas are freed wholesale once the loaded count above
+	// drains to zero. The store runs at the superseding attach under
+	// the configuration and agent locks, before any sweep those locks
+	// admit; readers pair it with an acquire load, so a refusal is
+	// ordered after the splice that ended the agent's writer life.
+	bool superseded;
 	char name[AGENT_NAME_LEN];
 
 	uint64_t arena_count;
@@ -92,6 +116,34 @@ struct agent {
 
 struct dp_config *
 agent_dp_config(struct agent *agent);
+
+// Refuse a memory change through a superseded agent generation.
+//
+// A superseded generation's only purpose is to be reclaimed once its
+// loaded count reaches zero: anything a caller would still create,
+// grow or store through it would race the sweep's wholesale free of
+// the arenas or outlive every handle the caller holds. Entity
+// construction, growth and storage therefore fail fast instead.
+//
+// An agent that never enters the registry, like the dataplane's own,
+// is never replaced and always passes.
+//
+// @return 0 while no newer generation has replaced the agent, -1 with
+// a failed-precondition error once one has.
+static inline int
+agent_reject_superseded(struct agent *agent, yanet_error **err) {
+	if (!__atomic_load_n(&agent->superseded, __ATOMIC_ACQUIRE)) {
+		return 0;
+	}
+
+	yanet_error_add_kind(
+		err,
+		YANET_ERROR_FAILED_PRECONDITION,
+		"agent \"%s\" has been superseded by a newer generation",
+		agent->name
+	);
+	return -1;
+}
 
 void
 agent_cleanup(struct agent *agent);
