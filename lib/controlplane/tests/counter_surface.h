@@ -28,10 +28,17 @@ install_pipelines(
 	TEST_ASSERT_NOT_NULL(cfgs, "failed to allocate pipeline config array");
 
 	for (size_t idx = 0; idx < count; ++idx) {
-		cfgs[idx] = calloc(1, sizeof(struct cp_pipeline_config));
+		struct cp_pipeline_config *cfg = calloc(1, sizeof(*cfg));
+		if (cfg == NULL) {
+			for (size_t prev = 0; prev < idx; ++prev) {
+				free(cfgs[prev]);
+			}
+			free(cfgs);
+		}
 		TEST_ASSERT_NOT_NULL(
-			cfgs[idx], "failed to allocate pipeline config %zu", idx
+			cfg, "failed to allocate pipeline config %zu", idx
 		);
+		cfgs[idx] = cfg;
 		snprintf(
 			cfgs[idx]->name,
 			CP_PIPELINE_NAME_LEN,
