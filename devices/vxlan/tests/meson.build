@@ -13,9 +13,6 @@ test('vxlan_leak', vxlan_leak_test, suite: 'devices')
 vxlan_dataplane_test = executable(
   'vxlan_dataplane_test',
   'dataplane_test.c',
-  link_args: [
-    '-Wl,-E',
-  ],
   dependencies: [
     lib_dataplane_ut_dep,
     lib_dev_vxlan_api_dep,

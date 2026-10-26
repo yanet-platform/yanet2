@@ -6,9 +6,6 @@ smoke_test_dependencies = [
   lib_agent_cp_dep,
   libdpdk_test_dep,
 ]
-smoke_test_link_args = [
-  '-Wl,-E',
-]
 
 if not dataplane_only
   smoke_test_c_args += ['-DYANET_DATAPLANE_UT_CONTROLPLANE']
@@ -29,7 +26,6 @@ smoke_test = executable(
   'dataplane_ut_smoke_test',
   ['smoke_test.c'],
   c_args: smoke_test_c_args,
-  link_args: smoke_test_link_args,
   dependencies: smoke_test_dependencies,
   include_directories: yanet_rootdir,
 )
@@ -57,7 +53,6 @@ loader_test = executable(
   c_args: [
     '-DLOADER_PLUGIN_DIR="@0@"'.format(loader_probe_plugin_dir),
   ],
-  link_args: ['-Wl,-E'],
   dependencies: [
     lib_dataplane_ut_dep,
     lib_logging_dep,
