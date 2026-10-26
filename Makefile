@@ -327,6 +327,10 @@ test-asan:
 	$(MAKE) test-asan-only
 
 # Set a default sanitizer policy while preserving inherited Go flags and tags.
+#
+# -asan instruments the Go side too, so a Go access through unsafe past a C
+# allocation, or into a block the C allocator freed, aborts the test. It also
+# turns on the leak check at exit, so C memory a test never frees fails it.
 test-asan-only:
 	@if [ ! -d "build" ]; then \
 		$(MAKE) setup-asan; \
@@ -339,7 +343,7 @@ test-asan-only:
 	export CGO_CFLAGS="-fsanitize=address,undefined"; \
 	export CGO_LDFLAGS="-fsanitize=address,undefined"; \
 	export UBSAN_OPTIONS="$${UBSAN_OPTIONS:-halt_on_error=1:abort_on_error=1:print_summary=1:print_stacktrace=1}"; \
-	go test -count=1 $$(go list ./... | grep -v '^github.com/yanet-platform/yanet2/tests/functional/main')
+	go test -asan -count=1 $$(go list ./... | grep -v '^github.com/yanet-platform/yanet2/tests/functional/main')
 	meson test -C build
 
 test-tsan:
