@@ -2,8 +2,8 @@ CARGO ?= cargo
 
 # Compile database consumed by lint/clang-syntax.
 COMPILE_DB ?= build/compile_commands.json
-RTE_CONFIG ?= build/subprojects/dpdk/rte_build_config.h
-YANET_CACHE_LINE_CPPFLAG = -DYANET_CACHE_LINE_SIZE=$$(awk '$$2 == "RTE_CACHE_LINE_SIZE" { print $$3; exit }' "$(RTE_CONFIG)")
+# The cgo preprocessor flags meson builds Go with, which go test needs as well.
+YANET_CGO_CPPFLAGS = $$(cat build/yanet_cgo_cppflags)
 
 # Default PREFIX for debian packaging
 PREFIX ?= /usr
@@ -254,6 +254,7 @@ dataplane: build
 
 go-test-prepare:
 	meson compile -C build go-test-prepare
+	@test -f build/yanet_cgo_cppflags || { echo "ERROR: build/yanet_cgo_cppflags not found: go tests need this checkout's own build/, not a link to another one (remove it and run 'meson setup build')"; exit 1; }
 
 cli: cli-build
 
@@ -311,7 +312,7 @@ test:
 	$(MAKE) test-only
 
 test-only: go-test-prepare
-	CGO_CPPFLAGS="$(strip $(CGO_CPPFLAGS) $(YANET_CACHE_LINE_CPPFLAG))" go test -count=1 $$(go list ./... | grep -v '^github.com/yanet-platform/yanet2/tests/functional/main')
+	CGO_CPPFLAGS="$(strip $(CGO_CPPFLAGS) $(YANET_CGO_CPPFLAGS))" go test -count=1 $$(go list ./... | grep -v '^github.com/yanet-platform/yanet2/tests/functional/main')
 	meson test -C build
 
 test-asan:
@@ -326,7 +327,7 @@ test-asan-only:
 	fi
 	$(MAKE) go-test-prepare
 	@set -eu; \
-	export CGO_CPPFLAGS="$(strip $(CGO_CPPFLAGS) $(YANET_CACHE_LINE_CPPFLAG))"; \
+	export CGO_CPPFLAGS="$(strip $(CGO_CPPFLAGS) $(YANET_CGO_CPPFLAGS))"; \
 	export CGO_CFLAGS="-fsanitize=address,undefined"; \
 	export CGO_LDFLAGS="-fsanitize=address,undefined"; \
 	export UBSAN_OPTIONS="$${UBSAN_OPTIONS:-halt_on_error=1:abort_on_error=1:print_summary=1:print_stacktrace=1}"; \
@@ -352,7 +353,7 @@ test-functional:
 #   benchstat old.txt new.txt
 bench:
 	$(MAKE) go-test-prepare
-	CGO_CPPFLAGS="$(strip $(CGO_CPPFLAGS) $(YANET_CACHE_LINE_CPPFLAG))" go test -run='^$$' -bench=. -benchmem ./bindings/go/dataplane_ut/... ./modules/acl/tests/functional/...
+	CGO_CPPFLAGS="$(strip $(CGO_CPPFLAGS) $(YANET_CGO_CPPFLAGS))" go test -run='^$$' -bench=. -benchmem ./bindings/go/dataplane_ut/... ./modules/acl/tests/functional/...
 
 # Reconfigure an existing fuzz build so its Go targets keep current flags.
 fuzz:

@@ -101,12 +101,13 @@ YANET employs a multi-language approach to leverage the strengths of different p
 Meson rebuilds native inputs and refreshes CGO dependency fingerprints. After
 changing C code, project headers or linked archives, run `make go-test-prepare`
 (equivalent to `meson compile -C build go-test-prepare`) before direct Go
-commands. Use the same cache-line and sanitizer CGO flags as the configured build.
-For an unsanitized build with 64-byte cache lines:
+commands. Use the same CGO flags as the configured build: the build writes its
+preprocessor flags to `build/yanet_cgo_cppflags`, and a sanitized build also
+needs its sanitizer flags. For an unsanitized build:
 
 ```bash
 make go-test-prepare
-CGO_CPPFLAGS=-DYANET_CACHE_LINE_SIZE=64 go test -count=1 ./modules/route/...
+CGO_CPPFLAGS="$(cat build/yanet_cgo_cppflags)" go test -count=1 ./modules/route/...
 ```
 
 The root `make test`, `make test-asan` and `make bench` targets prepare these

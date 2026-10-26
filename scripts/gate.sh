@@ -126,7 +126,7 @@ gate_c() {
 }
 
 gate_go() {
-	local files pkgs cache_line proto
+	local files pkgs cppflags proto
 	if [ ! -f subprojects/dpdk/meson.build ] || [ ! -d build ]; then
 		fail go "cgo packages typecheck against the DPDK sources and a configured build/; run 'git submodule update --init && meson setup build'"
 		return 1
@@ -168,10 +168,14 @@ gate_go() {
 			return 1
 		fi
 		step go-test-prepare meson compile -C build go-test-prepare || return 1
+		if [ "$list" != 1 ] && [ ! -f build/yanet_cgo_cppflags ]; then
+			fail go-test "build/ has no yanet_cgo_cppflags, so cgo would build with the default cache-line size; remove it and run 'meson setup build'"
+			return 1
+		fi
 	fi
-	cache_line=$(awk '$2 == "RTE_CACHE_LINE_SIZE" { print $3; exit }' build/subprojects/dpdk/rte_build_config.h 2>/dev/null)
+	cppflags=$(cat build/yanet_cgo_cppflags 2>/dev/null)
 	# shellcheck disable=SC2086
-	step go-test env CGO_CPPFLAGS="${CGO_CPPFLAGS:-} -DYANET_CACHE_LINE_SIZE=$cache_line" go test -count=1 $pkgs || return 1
+	step go-test env CGO_CPPFLAGS="${CGO_CPPFLAGS:-} $cppflags" go test -count=1 $pkgs || return 1
 	if command -v golangci-lint >/dev/null; then
 		step golangci-lint golangci-lint run ./...
 	else
