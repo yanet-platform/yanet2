@@ -23,3 +23,5 @@ lib_pdump_dp_dep = declare_dependency(
     '-Wl,--export-dynamic-symbol=new_module_pdump',
   ],
 )
+
+dataplane_module_deps += lib_pdump_dp_dep

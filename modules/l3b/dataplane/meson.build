@@ -25,3 +25,5 @@ lib_l3b_dp_dep = declare_dependency(
     '-Wl,--export-dynamic-symbol=new_module_l3b',
   ],
 )
+
+dataplane_module_deps += lib_l3b_dp_dep

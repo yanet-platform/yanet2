@@ -23,3 +23,5 @@ lib_route_mpls_dp_dep = declare_dependency(
     '-Wl,--export-dynamic-symbol=new_module_route_mpls',
   ],
 )
+
+dataplane_module_deps += lib_route_mpls_dp_dep

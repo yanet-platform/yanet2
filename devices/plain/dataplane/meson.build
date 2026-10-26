@@ -21,3 +21,5 @@ lib_dev_plain_dp_dep = declare_dependency(
   ],
   dependencies: dp_dependencies,
 )
+
+dataplane_device_deps += lib_dev_plain_dp_dep

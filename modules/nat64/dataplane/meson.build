@@ -22,3 +22,5 @@ lib_nat64_dp_dep = declare_dependency(
     '-Wl,--export-dynamic-symbol=new_module_nat64',
   ],
 )
+
+dataplane_module_deps += lib_nat64_dp_dep

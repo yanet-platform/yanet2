@@ -33,3 +33,5 @@ lib_l3b_objects_dep = declare_dependency(
   ],
   dependencies: cp_dependencies,
 )
+
+dataplane_object_deps += lib_l3b_objects_dep
