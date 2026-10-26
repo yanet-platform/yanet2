@@ -155,7 +155,8 @@ if get_option('fuzzing').enabled()
     endif
   endforeach
 
-  # Add sanitizer flags to CGO for Go binaries
+  # The cgo flags of a fuzzing build: the cgo dependency markers scan the cgo
+  # sources with them.
   cgo_flags = '-fsanitize=address -g'
   yanet_go_env = {
       'CGO_CFLAGS': cgo_flags,
@@ -242,6 +243,10 @@ yanet_go_env += {
 # Because it snapshots the Go build environment above, it must stay
 # below the last assignment to that environment.
 yanet_go_nocgo_env = yanet_go_env + {'CGO_ENABLED': '0'}
+
+# The Go binaries are not fuzz targets and the fuzz suite runs none of them,
+# so a fuzzing build skips them to save build time.
+yanet_go_binaries = not get_option('fuzzing').enabled()
 
 # Taking only the include directories strips the compile args carried
 # by dpdk_dep, including -include rte_config.h, so it has to be
@@ -355,6 +360,11 @@ configure_file(output: build_stamp, configuration: yanet_stamp)
 # with DPDK's system libraries; 'inputs' are further native inputs the
 # marker hashes.
 cgo_packages = {}
+
+# Every protoc generator in the tree; each Go binary depends on all of them.
+#
+# No Go binary can then be built before a generated package it imports, and
+# the extra edges are cheap: a generator run takes a fraction of a second.
 go_proto_targets = []
 subdir('common')
 subdir('lib')
