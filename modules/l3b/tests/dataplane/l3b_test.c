@@ -286,6 +286,12 @@ publish_service(void) {
 		log_error(&err, "failed to create the virtual service");
 		return -1;
 	}
+	if (l3b_virtual_service_set_real_server_state(
+		    service_object, 0, true, &err
+	    )) {
+		log_error(&err, "failed to enable the real server");
+		return -1;
+	}
 
 	const uint32_t ring_indexes[1] = {0};
 	if (l3b_virtual_service_update_ring(

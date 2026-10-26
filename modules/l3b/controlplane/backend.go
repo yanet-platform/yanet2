@@ -187,16 +187,31 @@ func (m *managedService) Replace(
 	object *retainedHandle,
 	config cl3bobject.VirtualServiceConfig,
 	weights []uint32,
+	enabled []bool,
 ) *retainedHandle {
 	previous := m.object
 	m.object = object
 	m.config = config
 	m.weights = weights
-	m.enabled = make([]bool, len(weights))
-	for idx := range m.enabled {
-		m.enabled[idx] = true
-	}
+	m.enabled = enabled
 	return previous
+}
+
+// ReplacementState carries overrides only from the current accepted membership.
+func (m *managedService) ReplacementState(config cl3bobject.VirtualServiceConfig) ([]uint32, []bool) {
+	previous := map[netip.Addr]int{}
+	for idx, real := range m.config.RealServers {
+		previous[real.DestinationAddress] = idx
+	}
+	weights := defaultWeights(len(config.RealServers))
+	enabled := make([]bool, len(weights))
+	for idx, real := range config.RealServers {
+		if oldIndex, ok := previous[real.DestinationAddress]; ok {
+			weights[idx] = m.weights[oldIndex]
+			enabled[idx] = m.enabled[oldIndex]
+		}
+	}
+	return weights, enabled
 }
 
 // PublishTarget selects the generation affected by serialized runtime updates.
@@ -432,7 +447,9 @@ func (m *backend) CreateService(service *l3bpb.VirtualService) error {
 		return fmt.Errorf("failed to create session table %q: %w", name, err)
 	}
 
-	object, weights, err := m.publishService(config, name, table)
+	weights := defaultWeights(len(config.RealServers))
+	enabled := make([]bool, len(weights))
+	object, err := m.publishService(config, name, table, weights, enabled)
 	if err != nil {
 		// A failed candidate leaves its table outside the published view.
 		m.deferOrFree(table)
@@ -440,7 +457,7 @@ func (m *backend) CreateService(service *l3bpb.VirtualService) error {
 	}
 
 	managed := &managedService{sessionTable: &retainedHandle{handle: table}}
-	managed.Replace(&retainedHandle{handle: object}, config, weights)
+	managed.Replace(&retainedHandle{handle: object}, config, weights, enabled)
 	m.mu.Lock()
 	m.services[name] = managed
 	m.snapshots[name] = managed.Snapshot()
@@ -466,9 +483,10 @@ func (m *backend) UpdateService(service *l3bpb.VirtualService) error {
 		return err
 	}
 
-	// The replacement reuses the live session table. Existing pins survive only
-	// for destinations that remain listed and enabled in the replacement.
-	object, weights, err := m.publishService(config, name, existing.SessionTable())
+	// shortcut: session pins remain address-keyed until incarnation-aware
+	// resolution is implemented.
+	weights, enabled := existing.ReplacementState(config)
+	object, err := m.publishService(config, name, existing.SessionTable(), weights, enabled)
 	if err != nil {
 		return err
 	}
@@ -476,7 +494,7 @@ func (m *backend) UpdateService(service *l3bpb.VirtualService) error {
 	// The upsert swapped the registry slot atomically; the superseded service
 	// stays alive until admitted readers and referencing generations drain.
 	m.mu.Lock()
-	oldObject := existing.Replace(&retainedHandle{handle: object}, config, weights)
+	oldObject := existing.Replace(&retainedHandle{handle: object}, config, weights, enabled)
 	m.snapshots[name] = existing.Snapshot()
 	m.mu.Unlock()
 	m.retire(oldObject)
@@ -485,31 +503,43 @@ func (m *backend) UpdateService(service *l3bpb.VirtualService) error {
 }
 
 // publishService builds a fresh virtual service object under the given name,
-// installs its default scheduler ring and upserts it into the dataplane.
+// installs its administrative state and scheduler ring before publication.
 //
 // The service borrows the session table, and the caller holds the writer lock.
 func (m *backend) publishService(
 	config cl3bobject.VirtualServiceConfig,
 	name string,
 	table SessionTableHandle,
-) (VirtualServiceHandle, []uint32, error) {
+	weights []uint32,
+	enabled []bool,
+) (VirtualServiceHandle, error) {
 	object, err := m.operations.CreateVirtualService(name, config, table)
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to create virtual service %q: %w", name, err)
+		return nil, fmt.Errorf("failed to create virtual service %q: %w", name, err)
 	}
 
-	weights := defaultWeights(len(config.RealServers))
-	if err := object.UpdateRing(RingFromWeights(weights)); err != nil {
+	effective := make([]uint32, len(weights))
+	for idx, active := range enabled {
+		if !active {
+			continue
+		}
+		if err := object.SetRealServerState(uint32(idx), true); err != nil {
+			m.deferOrFree(object)
+			return nil, fmt.Errorf("failed to initialize real server state: %w", err)
+		}
+		effective[idx] = weights[idx]
+	}
+	if err := object.UpdateRing(RingFromWeights(effective)); err != nil {
 		m.deferOrFree(object)
-		return nil, nil, fmt.Errorf("failed to populate real server ring: %w", err)
+		return nil, fmt.Errorf("failed to populate real server ring: %w", err)
 	}
 
 	if err := object.Publish(); err != nil {
 		m.deferOrFree(object)
-		return nil, nil, fmt.Errorf("failed to publish virtual service %q: %w", name, err)
+		return nil, fmt.Errorf("failed to publish virtual service %q: %w", name, err)
 	}
 
-	return object, weights, nil
+	return object, nil
 }
 
 func (m *backend) DeleteService(name string) error {
@@ -805,11 +835,16 @@ func buildVirtualServiceConfig(
 	policy := service.GetSessionTimeouts()
 
 	realServers := make([]cl3bobject.RealServer, 0, len(service.GetRealServers()))
+	seen := map[netip.Addr]struct{}{}
 	for _, server := range service.GetRealServers() {
 		destinationAddress, ok := netip.AddrFromSlice(server.GetDestinationAddress())
 		if !ok {
 			return cl3bobject.VirtualServiceConfig{}, invalid("real server destination address is not a valid 4- or 16-byte IP address")
 		}
+		if _, ok := seen[destinationAddress]; ok {
+			return cl3bobject.VirtualServiceConfig{}, invalid("duplicate real server destination address")
+		}
+		seen[destinationAddress] = struct{}{}
 
 		sourceNet, err := server.GetSourceNetwork().ToNetwork()
 		if err != nil {
