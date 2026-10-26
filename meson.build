@@ -97,6 +97,21 @@ if not dataplane_only
   protoc = find_program('protoc', required: true)
   find_program('protoc-gen-go', required: true, version: '>=1.36.5')
   find_program('protoc-gen-go-grpc', required: true, version: '>=1.5.1')
+
+  # protoc as make proto-go runs it: every proto is named by its path from the
+  # repository root and gets its Go code next to it.
+  #
+  # A target appends its inputs, and a depfile when it compiles a single proto:
+  # protoc writes a depfile only for a single input. The protoc Ubuntu 22.04
+  # ships still wants an explicit opt-in for proto3 optional fields.
+  go_protoc = [
+    protoc,
+    '--experimental_allow_proto3_optional',
+    '-I', meson.project_source_root(),
+    '--go_out=paths=source_relative:' + meson.project_source_root(),
+    '--go-grpc_out=paths=source_relative:' + meson.project_source_root(),
+    '--descriptor_set_out=@OUTPUT@',
+  ]
 endif
 
 # Build CGO flags based on b_sanitize option
