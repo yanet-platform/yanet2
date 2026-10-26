@@ -85,7 +85,7 @@ jobs:
   # Every check on this toolchain runs in this one job, which owns the
   # rust-sdk cache family for the host and bare-metal builds.
   clippy:
-    name: cargo clippy and std-free crates${{ matrix.arch == 'arm64' && ' (arm64)' || '' }}
+    name: cargo clippy and std-free crates (${{ matrix.arch }})
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
     strategy:
@@ -126,7 +126,7 @@ jobs:
         run: cargo check --locked --target ${{ matrix.target }} -p yanet-shm -p yanet-sys -p yanet-packet
 
   test:
-    name: cargo test (1.88)${{ matrix.arch == 'arm64' && ' (arm64)' || '' }}
+    name: cargo test (1.88) (${{ matrix.arch }})
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
     strategy:
