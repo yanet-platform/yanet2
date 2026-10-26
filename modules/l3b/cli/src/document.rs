@@ -32,7 +32,7 @@ pub fn validate(content: &str) -> Result<(), String> {
                     let problem = if parser.problem.is_null() {
                         "invalid YAML".into()
                     } else {
-                        CStr::from_ptr(parser.problem).to_string_lossy()
+                        CStr::from_ptr(parser.problem.cast()).to_string_lossy()
                     };
                     let mark = parser.problem_mark;
                     return Err(format!(
