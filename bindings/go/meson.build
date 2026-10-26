@@ -142,10 +142,6 @@ cgo_packages += {
   'modules/decap/tests/functional': {
     'libraries': [lib_config_cp],
   },
-  'modules/fwstate/tests/dataplane': {
-    'libraries': [lib_dataplane_ut, lib_fwstate_dp, lib_fwstate_cp],
-    'archives': dpdk_runtime_libraries,
-  },
   'modules/fwstate/tests/functional': {
     'libraries': [lib_counters],
   },

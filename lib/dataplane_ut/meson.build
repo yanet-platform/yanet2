@@ -15,6 +15,7 @@ dependencies = [
 
 sources = files(
   'dataplane_ut.c',
+  'stages.c',
   'pool.c',
   'tx_pipe.c',
   'tx_stage.c',

@@ -8,6 +8,14 @@ package cfwstate
 //#include "lib/statemap/fwmap.h"
 //#include "lib/fwstate/fwstate_cursor.h"
 //#include "lib/errors/errors.h"
+//#include "lib/dataplane/packet/packet.h"
+//#include "modules/fwstate/dataplane/config.h"
+//
+//static inline uint64_t
+//cfwstate_stash_position_count(struct cp_module *module) {
+//	struct fwstate_module_config *config = (struct fwstate_module_config *)module;
+//	return ADDR_OF(&config->positions) == NULL ? 0 : config->worker_count;
+//}
 import "C"
 
 import (
@@ -107,5 +115,14 @@ func (m *ModuleConfig) Free() error {
 		var cErr *C.yanet_error
 		rc, errno := C.fwstate_module_config_free((*C.struct_cp_module)(ptr), &cErr)
 		return int(rc), unsafe.Pointer(cErr), errno
-	})
+	},
+	)
+}
+
+// SyncInternalPacketFlag marks a local emission for downstream pass-through.
+const SyncInternalPacketFlag = uint16(1 << C.PACKET_FLAG_FWSTATE_SYNC_INTERNAL)
+
+// StashPositionCount reports the worker cursors actually allocated by a config.
+func (m *ModuleConfig) StashPositionCount() uint64 {
+	return uint64(C.cfwstate_stash_position_count(m.asRawPtr()))
 }

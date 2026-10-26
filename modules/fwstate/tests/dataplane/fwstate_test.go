@@ -1,20 +1,18 @@
-package fwstate
+package fwstate_test
 
 import (
 	"net"
 	"testing"
 
-	"github.com/c2h5oh/datasize"
 	"github.com/gopacket/gopacket"
 	"github.com/gopacket/gopacket/layers"
 	"github.com/stretchr/testify/require"
 
-	"github.com/yanet-platform/yanet2/common/go/testutils"
 	"github.com/yanet-platform/yanet2/common/go/xerror"
 	"github.com/yanet-platform/yanet2/common/go/xpacket"
 )
 
-// SyncPacketOption is a functional option for createSyncPacket
+// SyncPacketOption customizes the state carried by a synchronization packet.
 type SyncPacketOption func(*syncPacketConfig)
 
 type syncPacketConfig struct {
@@ -26,7 +24,7 @@ type syncPacketConfig struct {
 	fib     uint8
 }
 
-// WithPorts sets custom source and destination ports
+// WithPorts sets custom source and destination ports.
 func WithPorts(srcPort, dstPort uint16) SyncPacketOption {
 	return func(c *syncPacketConfig) {
 		c.srcPort = srcPort
@@ -34,7 +32,7 @@ func WithPorts(srcPort, dstPort uint16) SyncPacketOption {
 	}
 }
 
-// WithAddrs sets custom source and destination addresses
+// WithAddrs sets custom source and destination addresses.
 func WithAddrs(srcAddr, dstAddr string) SyncPacketOption {
 	return func(c *syncPacketConfig) {
 		c.srcAddr = srcAddr
@@ -42,24 +40,23 @@ func WithAddrs(srcAddr, dstAddr string) SyncPacketOption {
 	}
 }
 
-// WithFlags sets raw TCP flags byte on the embedded sync frame
+// WithFlags sets raw TCP flags byte on the embedded sync frame.
 func WithFlags(flags uint8) SyncPacketOption {
 	return func(c *syncPacketConfig) {
 		c.flags = flags
 	}
 }
 
-// WithFib sets fib (direction) on the embedded sync frame: 0=forward, 1=backward
+// WithFib sets fib (direction) on the embedded sync frame: 0=forward,
+// 1=backward
 func WithFib(fib uint8) SyncPacketOption {
 	return func(c *syncPacketConfig) {
 		c.fib = fib
 	}
 }
 
-// createSyncPacket creates a firewall state sync packet
-// with VLAN + IPv6 + UDP + sync frame structure
+// createSyncPacket wraps one state frame in VLAN, IPv6 and UDP headers.
 func createSyncPacket(t *testing.T, proto layers.IPProtocol, opts ...SyncPacketOption) gopacket.Packet {
-	// Apply defaults
 	cfg := syncPacketConfig{
 		srcPort: 12345,
 		dstPort: 9999,
@@ -67,7 +64,6 @@ func createSyncPacket(t *testing.T, proto layers.IPProtocol, opts ...SyncPacketO
 		dstAddr: "2001:db8::2",
 	}
 
-	// Apply options
 	for _, opt := range opts {
 		opt(&cfg)
 	}
@@ -101,7 +97,6 @@ func createSyncPacket(t *testing.T, proto layers.IPProtocol, opts ...SyncPacketO
 	}
 	udp.SetNetworkLayerForChecksum(&ip6)
 
-	// Create sync frame using the helper function
 	dstIP6 := net.ParseIP(cfg.dstAddr)
 	srcIP6 := net.ParseIP(cfg.srcAddr)
 	syncFrame := createSyncFrame(
@@ -121,11 +116,8 @@ func createSyncPacket(t *testing.T, proto layers.IPProtocol, opts ...SyncPacketO
 func Test_FWState_FlaggedPacketPassesThrough(t *testing.T) {
 	pkt := createSyncPacket(t, layers.IPProtocolTCP)
 
-	memCtx := testutils.NewMemoryContext("fwstate_test", datasize.MB*64)
-	defer memCtx.Free()
-	cpModule, storage := fwstateModuleConfig(memCtx)
-	defer fwstateCounterStorageFree(storage)
-	result := xerror.Unwrap(fwstateHandleFlaggedPackets(cpModule, storage, pkt))
+	cpModule := newFWStateFixture(t, 0)
+	result := xerror.Unwrap(fwstateHandleFlaggedPackets(cpModule, pkt))
 
 	require.Equal(t, [][]byte{pkt.Data()}, result.Output)
 	require.Empty(t, result.Drop)
@@ -133,8 +125,8 @@ func Test_FWState_FlaggedPacketPassesThrough(t *testing.T) {
 		CheckStateExists(cpModule, layers.IPProtocolTCP, 12345, 9999, "2001:db8::1", "2001:db8::2"),
 		"a local emission must not be applied again",
 	)
-	require.Equal(t, uint64(1), moduleCounter(cpModule, storage, "fwstate_passthrough"))
-	require.Zero(t, moduleCounter(cpModule, storage, "fwstate_sync"))
+	require.Equal(t, uint64(1), moduleCounter(cpModule, "fwstate_passthrough"))
+	require.Zero(t, moduleCounter(cpModule, "fwstate_sync"))
 }
 
 // Test_FWStateLocalEvent_UnicastOnly verifies that a stashed event is still
@@ -142,14 +134,11 @@ func Test_FWState_FlaggedPacketPassesThrough(t *testing.T) {
 func Test_FWStateLocalEvent_UnicastOnly(t *testing.T) {
 	pkt := createSyncPacket(t, layers.IPProtocolTCP)
 
-	memCtx := testutils.NewMemoryContext("fwstate_test", datasize.MB*64)
-	defer memCtx.Free()
-	cpModule, storage := fwstateModuleConfig(memCtx)
-	defer fwstateCounterStorageFree(storage)
+	cpModule := newFWStateFixture(t, 0)
 	ClearSyncDestination(cpModule)
 	SetSyncUnicastDestination(cpModule)
 
-	result := xerror.Unwrap(fwstateHandleLocalEvents(cpModule, storage, pkt))
+	result := xerror.Unwrap(fwstateHandleLocalEvents(cpModule, pkt))
 	require.Len(t, result.Output, 1, "unicast-only local event should be emitted")
 	require.Empty(t, result.Drop)
 
@@ -167,40 +156,39 @@ func Test_FWStateLocalEvent_UnicastOnly(t *testing.T) {
 func Test_FWState_WirePacketWithUnspecifiedSource(t *testing.T) {
 	pkt := createSyncPacket(t, layers.IPProtocolUDP)
 
-	memCtx := testutils.NewMemoryContext("fwstate_test", datasize.MB*64)
-	defer memCtx.Free()
-	cpModule, storage := fwstateModuleConfig(memCtx)
-	defer fwstateCounterStorageFree(storage)
-	result := xerror.Unwrap(fwstateHandleWirePackets(cpModule, storage, pkt))
+	cpModule := newFWStateFixture(t, 0)
+	result := xerror.Unwrap(fwstateHandleWirePackets(cpModule, pkt))
 
 	require.Empty(t, result.Output, "wire packet must not be emitted")
 	require.NotEmpty(t, result.Drop, "wire packet must be consumed")
+	require.True(t, GetStateValue(cpModule, layers.IPProtocolUDP, 12345, 9999, "2001:db8::1", "2001:db8::2").External)
 }
 
-// Test_FWStateModule_UnconfiguredSync_AppliesLocalEventWithoutEmission
-// verifies that a module carrying no sync destination still applies a
-// stashed event but takes no mbuf from the pool and emits nothing for it.
+// Test_FWStateModule_UnconfiguredSync_AppliesLocalEventWithoutEmission verifies
+// that absent endpoints allow state updates without allocation or emission.
 func Test_FWStateModule_UnconfiguredSync_AppliesLocalEventWithoutEmission(t *testing.T) {
 	pkt := createSyncPacket(t, layers.IPProtocolUDP)
 
-	memCtx := testutils.NewMemoryContext("fwstate_test", datasize.MB*64)
-	defer memCtx.Free()
-	cpModule, storage := fwstateModuleConfig(memCtx)
-	defer fwstateCounterStorageFree(storage)
+	cpModule := newFWStateFixture(t, 0)
 	ClearSyncDestination(cpModule)
+	limitPool(cpModule.Worker(0), 0)
+	defer unlimitPool(cpModule.Worker(0))
 
-	outstanding := poolOutstanding(testWorker(0))
-	result := xerror.Unwrap(fwstateHandleLocalEvents(cpModule, storage, pkt))
+	outstanding := poolOutstanding(cpModule.Worker(0))
+	result := xerror.Unwrap(fwstateHandleLocalEvents(cpModule, pkt))
 
-	require.Equal(t, outstanding, poolOutstanding(testWorker(0)),
-		"no endpoint means no mbuf is allocated")
+	require.Equal(t, outstanding, poolOutstanding(cpModule.Worker(0)),
+		"no endpoint means no mbuf is allocated",
+	)
 	require.Empty(t, result.Output, "no endpoint means no emission")
 	require.Empty(t, result.Drop, "no packet exists to drop")
 	require.True(t,
 		CheckStateExists(cpModule, layers.IPProtocolUDP, 12345, 9999, "2001:db8::1", "2001:db8::2"),
 		"the event must still be applied",
 	)
-	require.Zero(t, moduleCounter(cpModule, storage, "fwstate_internal_forwarded"))
+	require.Zero(t, moduleCounter(cpModule, "fwstate_internal_forwarded"))
+	require.Zero(t, moduleCounter(cpModule, "fwstate_sync_alloc_failed"))
+	require.False(t, GetStateValue(cpModule, layers.IPProtocolUDP, 12345, 9999, "2001:db8::1", "2001:db8::2").External)
 }
 
 // Test_FWState_WirePacketWithoutMulticastEndpoint verifies that disabling the
@@ -208,18 +196,17 @@ func Test_FWStateModule_UnconfiguredSync_AppliesLocalEventWithoutEmission(t *tes
 func Test_FWState_WirePacketWithoutMulticastEndpoint(t *testing.T) {
 	pkt := createSyncPacket(t, layers.IPProtocolUDP)
 
-	memCtx := testutils.NewMemoryContext("fwstate_test", datasize.MB*64)
-	defer memCtx.Free()
-	cpModule, storage := fwstateModuleConfig(memCtx)
-	defer fwstateCounterStorageFree(storage)
+	cpModule := newFWStateFixture(t, 0)
 	ClearSyncDestination(cpModule)
-	result := xerror.Unwrap(fwstateHandleWirePackets(cpModule, storage, pkt))
+	result := xerror.Unwrap(fwstateHandleWirePackets(cpModule, pkt))
 
 	require.Len(t, result.Output, 1, "wire receive is disabled without multicast")
 	require.Empty(t, result.Drop)
 }
 
-func TestFWStateNonSyncPacket(t *testing.T) {
+// Test_FWState_NonSyncPacket verifies that ordinary packets pass through
+// unchanged.
+func Test_FWState_NonSyncPacket(t *testing.T) {
 	// Create a regular (non-sync) packet
 	eth := layers.Ethernet{
 		SrcMAC:       xerror.Unwrap(net.ParseMAC("00:00:00:00:00:01")),
@@ -245,63 +232,48 @@ func TestFWStateNonSyncPacket(t *testing.T) {
 	pkt := xpacket.LayersToPacket(t, &eth, &ip4, &udp, &payload)
 	t.Log("Non-sync packet:", pkt)
 
-	memCtx := testutils.NewMemoryContext("fwstate_test", datasize.MB*64)
-	defer memCtx.Free()
-	cpModule, storage := fwstateModuleConfig(memCtx)
-	defer fwstateCounterStorageFree(storage)
-	result := xerror.Unwrap(fwstateHandleWirePackets(cpModule, storage, pkt))
+	cpModule := newFWStateFixture(t, 0)
+	result := xerror.Unwrap(fwstateHandleWirePackets(cpModule, pkt))
 
-	// Non-sync packets should pass through
 	require.NotEmpty(t, result.Output, "Non-sync packet should pass through")
 	require.Empty(t, result.Drop, "Non-sync packet should not be dropped")
 }
 
-// Test layer insertion: old state should be visible after adding new layer
-func TestFWStateLayerInsertionOldStateVisible(t *testing.T) {
-	memCtx := testutils.NewMemoryContext("fwstate_layer_test", datasize.MB*64)
-	defer memCtx.Free()
-	cpModule, storage := fwstateModuleConfig(memCtx)
-	defer fwstateCounterStorageFree(storage)
+// Test_FWState_LayerInsertionOldStateVisible verifies that older states remain
+// visible after a layer is inserted.
+func Test_FWState_LayerInsertionOldStateVisible(t *testing.T) {
+	cpModule := newFWStateFixture(t, 0)
 
-	// Create initial state in the first layer
 	pkt1 := createSyncPacket(t, layers.IPProtocolTCP)
-	result1 := xerror.Unwrap(fwstateHandleLocalEvents(cpModule, storage, pkt1))
+	result1 := xerror.Unwrap(fwstateHandleLocalEvents(cpModule, pkt1))
 	require.NotEmpty(t, result1.Output, "First packet should be forwarded")
 
-	// Verify initial state exists
 	stateExists := CheckStateExists(cpModule, layers.IPProtocolTCP, 12345, 9999, "2001:db8::1", "2001:db8::2")
 	require.True(t, stateExists, "Initial state should exist")
 
-	// Insert new layer
 	InsertNewLayer(cpModule)
 
-	// Old state should still be visible through the new layer
 	stateStillExists := CheckStateExists(cpModule, layers.IPProtocolTCP, 12345, 9999, "2001:db8::1", "2001:db8::2")
 	require.True(t, stateStillExists, "Old state should be visible after layer insertion")
 }
 
-// Test layer insertion: new states override old states
-func TestFWStateLayerInsertionNewStateOverridesOld(t *testing.T) {
-	memCtx := testutils.NewMemoryContext("fwstate_layer_test", datasize.MB*64)
-	defer memCtx.Free()
-	cpModule, storage := fwstateModuleConfig(memCtx)
-	defer fwstateCounterStorageFree(storage)
+// Test_FWState_LayerInsertionNewStateOverridesOld verifies that a state updated
+// in a new layer gets a newer deadline.
+func Test_FWState_LayerInsertionNewStateOverridesOld(t *testing.T) {
+	cpModule := newFWStateFixture(t, 0)
 
-	// Create initial state with specific deadline
 	pkt1 := createSyncPacket(t, layers.IPProtocolTCP)
-	result1 := xerror.Unwrap(fwstateHandleLocalEvents(cpModule, storage, pkt1))
+	result1 := xerror.Unwrap(fwstateHandleLocalEvents(cpModule, pkt1))
 	require.NotEmpty(t, result1.Output, "First packet should be forwarded")
 
-	// Get initial deadline
 	oldDeadline := GetStateDeadline(cpModule, layers.IPProtocolTCP, 12345, 9999, "2001:db8::1", "2001:db8::2")
 	require.Greater(t, oldDeadline, uint64(0), "Initial state should have deadline")
 
-	// Insert new layer
 	InsertNewLayer(cpModule)
 
 	// Add same state to new layer (should override old one)
 	pkt2 := createSyncPacket(t, layers.IPProtocolTCP)
-	result2 := xerror.Unwrap(fwstateHandleLocalEvents(cpModule, storage, pkt2))
+	result2 := xerror.Unwrap(fwstateHandleLocalEvents(cpModule, pkt2))
 	require.NotEmpty(t, result2.Output, "Second packet should be forwarded")
 
 	// New deadline should be different (newer)
@@ -309,41 +281,32 @@ func TestFWStateLayerInsertionNewStateOverridesOld(t *testing.T) {
 	require.Greater(t, newDeadline, oldDeadline, "New state should have newer deadline")
 }
 
-// Test trim functionality: stale layers should be removed
-func TestFWStateTrimStaleLayers(t *testing.T) {
-	memCtx := testutils.NewMemoryContext("fwstate_trim_test", datasize.MB*64)
-	defer memCtx.Free()
-	cpModule, storage := fwstateModuleConfig(memCtx)
-	defer fwstateCounterStorageFree(storage)
+// Test_FWState_TrimStaleLayers verifies that reclaiming expired tail layers
+// removes only their states.
+func Test_FWState_TrimStaleLayers(t *testing.T) {
+	cpModule := newFWStateFixture(t, 0)
 
-	// Create state in first layer with short TTL
 	pkt1 := createSyncPacket(t, layers.IPProtocolTCP)
-	result1 := xerror.Unwrap(fwstateHandleLocalEvents(cpModule, storage, pkt1))
+	result1 := xerror.Unwrap(fwstateHandleLocalEvents(cpModule, pkt1))
 	require.NotEmpty(t, result1.Output)
 
-	// Insert new layer
 	InsertNewLayer(cpModule)
 
-	// Add different state to new layer
 	pkt2 := createSyncPacket(t, layers.IPProtocolUDP, WithPorts(54321, 8888), WithAddrs("2001:db8::3", "2001:db8::4"))
-	result2 := xerror.Unwrap(fwstateHandleLocalEvents(cpModule, storage, pkt2))
+	result2 := xerror.Unwrap(fwstateHandleLocalEvents(cpModule, pkt2))
 	require.NotEmpty(t, result2.Output)
 
-	// Check layer count before trim
 	_, layerCountBefore := GetLayerCount(cpModule)
 	require.Equal(t, uint32(2), layerCountBefore, "Should have 2 layers before trim")
 
 	// Simulate time passing (beyond TTL of old layer)
-	futureTime := GetCurrentTime() + 200e9 // 200 seconds in the future
+	futureTime := uint64(cpModule.Fixture.Harness.CurrentTime().UnixNano()) + 200e9 // 200 seconds in the future
 
-	// Trim stale layers
 	require.NoError(t, TrimStaleLayers(cpModule, futureTime))
 
-	// Check layer count after trim
 	_, layerCountAfter := GetLayerCount(cpModule)
 	require.Equal(t, uint32(1), layerCountAfter, "Should have 1 layer after trim")
 
-	// New state should still exist
 	newStateExists := CheckStateExists(cpModule, layers.IPProtocolUDP, 54321, 8888, "2001:db8::3", "2001:db8::4")
 	require.True(t, newStateExists, "New state should still exist after trim")
 
@@ -352,74 +315,50 @@ func TestFWStateTrimStaleLayers(t *testing.T) {
 	require.False(t, oldStateExists, "Old state should not exist after trim")
 }
 
-// TestFWStateUpdateAccumulatesFlags verifies that on subsequent sync frames for
-// the same 5-tuple in the SAME active layer, TCP flags accumulate (logical OR)
-// rather than being overwritten.
-//
-// This is a regression test for a bug previously present in
-// fwmap_update_value_fwstate() (formerly fwmap_copy_value_fwstate): when the
-// entry already existed in the active layer (dst_empty=false), the function
-// did *d = *s and only preserved created_at, fully clobbering flags /
-// packets_* / external with the incoming frame and dropping previously
-// accumulated state.
-//
-// Expected behavior:
-//   - First sync frame sets SYN.
-//   - Second sync frame (for the same key) sets ACK.
-//   - After processing both, stored flags must contain SYN|ACK.
-func TestFWStateUpdateAccumulatesFlags(t *testing.T) {
-	memCtx := testutils.NewMemoryContext("fwstate_acc_flags_test", datasize.MB*64)
-	defer memCtx.Free()
-	cpModule, storage := fwstateModuleConfig(memCtx)
-	defer fwstateCounterStorageFree(storage)
+// Test_FWState_UpdateAccumulatesFlags verifies that successive local state
+// updates accumulate TCP flags.
+func Test_FWState_UpdateAccumulatesFlags(t *testing.T) {
+	cpModule := newFWStateFixture(t, 0)
 
 	const synBit = 0x02 // FWSTATE_SYN, src nibble
 	const ackBit = 0x08 // FWSTATE_ACK, src nibble
 
 	pktSyn := createSyncPacket(t, layers.IPProtocolTCP, WithFlags(synBit))
-	_, err := fwstateHandleLocalEvents(cpModule, storage, pktSyn)
+	_, err := fwstateHandleLocalEvents(cpModule, pktSyn)
 	require.NoError(t, err)
 
 	snap1 := GetStateValue(cpModule, layers.IPProtocolTCP, 12345, 9999, "2001:db8::1", "2001:db8::2")
 	require.True(t, snap1.Found, "state must exist after first sync")
-	require.Equal(t, uint8(synBit), snap1.FlagsRaw, "after first sync only SYN must be set")
+	require.Equal(t, uint32(synBit), snap1.Flags, "after first sync only SYN must be set")
 
 	pktAck := createSyncPacket(t, layers.IPProtocolTCP, WithFlags(ackBit))
-	_, err = fwstateHandleLocalEvents(cpModule, storage, pktAck)
+	_, err = fwstateHandleLocalEvents(cpModule, pktAck)
 	require.NoError(t, err)
 
 	snap2 := GetStateValue(cpModule, layers.IPProtocolTCP, 12345, 9999, "2001:db8::1", "2001:db8::2")
 	require.True(t, snap2.Found, "state must still exist after second sync")
-	require.Equalf(t, uint8(synBit|ackBit), snap2.FlagsRaw,
+	require.Equalf(t, uint32(synBit|ackBit), snap2.Flags,
 		"flags must accumulate via OR across updates in the same layer (got 0x%02x, want 0x%02x)",
-		snap2.FlagsRaw, synBit|ackBit)
+		snap2.Flags, synBit|ackBit,
+	)
 }
 
-// TestFWStateUpdateAccumulatesPacketCounters verifies that packets_forward /
-// packets_backward counters accumulate across updates in the same active layer
-// rather than being reset to the last sync frame's contribution.
-//
-// Each incoming sync frame contributes +1 to either packets_forward (fib=0) or
-// packets_backward (fib=1) — see fwstate_build_value() in
-// modules/fwstate/dataplane/dataplane.c. Sending N sync frames for the same
-// key MUST result in totals equal to the sum of all per-frame contributions.
-func TestFWStateUpdateAccumulatesPacketCounters(t *testing.T) {
-	memCtx := testutils.NewMemoryContext("fwstate_acc_counters_test", datasize.MB*64)
-	defer memCtx.Free()
-	cpModule, storage := fwstateModuleConfig(memCtx)
-	defer fwstateCounterStorageFree(storage)
+// Test_FWState_UpdateAccumulatesPacketCounters verifies that both direction
+// counters sum all local updates.
+func Test_FWState_UpdateAccumulatesPacketCounters(t *testing.T) {
+	cpModule := newFWStateFixture(t, 0)
 
 	const forwardCount = 3
 	const backwardCount = 2
 
 	for range forwardCount {
 		pkt := createSyncPacket(t, layers.IPProtocolTCP, WithFib(0))
-		_, err := fwstateHandleLocalEvents(cpModule, storage, pkt)
+		_, err := fwstateHandleLocalEvents(cpModule, pkt)
 		require.NoError(t, err)
 	}
 	for range backwardCount {
 		pkt := createSyncPacket(t, layers.IPProtocolTCP, WithFib(1))
-		_, err := fwstateHandleLocalEvents(cpModule, storage, pkt)
+		_, err := fwstateHandleLocalEvents(cpModule, pkt)
 		require.NoError(t, err)
 	}
 
@@ -428,24 +367,21 @@ func TestFWStateUpdateAccumulatesPacketCounters(t *testing.T) {
 
 	require.Equalf(t, uint64(forwardCount), snap.PacketsForward,
 		"packets_forward must accumulate (got %d, want %d)",
-		snap.PacketsForward, forwardCount)
+		snap.PacketsForward, forwardCount,
+	)
 	require.Equalf(t, uint64(backwardCount), snap.PacketsBackward,
 		"packets_backward must accumulate (got %d, want %d)",
-		snap.PacketsBackward, backwardCount)
+		snap.PacketsBackward, backwardCount,
+	)
 }
 
-// TestFWStateUpdatePreservesCreatedAt verifies that the original created_at
-// timestamp is preserved across updates within the same active layer by
-// fwmap_update_value_fwstate(). Pairs with the accumulation tests above to
-// pin down all preservation/merge semantics on the in-layer update path.
-func TestFWStateUpdatePreservesCreatedAt(t *testing.T) {
-	memCtx := testutils.NewMemoryContext("fwstate_created_at_test", datasize.MB*64)
-	defer memCtx.Free()
-	cpModule, storage := fwstateModuleConfig(memCtx)
-	defer fwstateCounterStorageFree(storage)
+// Test_FWState_UpdatePreservesCreatedAt verifies that successive updates retain
+// the original creation time.
+func Test_FWState_UpdatePreservesCreatedAt(t *testing.T) {
+	cpModule := newFWStateFixture(t, 0)
 
 	pkt1 := createSyncPacket(t, layers.IPProtocolTCP)
-	_, err := fwstateHandleLocalEvents(cpModule, storage, pkt1)
+	_, err := fwstateHandleLocalEvents(cpModule, pkt1)
 	require.NoError(t, err)
 
 	snap1 := GetStateValue(cpModule, layers.IPProtocolTCP, 12345, 9999, "2001:db8::1", "2001:db8::2")
@@ -453,38 +389,29 @@ func TestFWStateUpdatePreservesCreatedAt(t *testing.T) {
 	createdAt := snap1.CreatedAt
 	require.Greater(t, createdAt, uint64(0))
 
-	// Sleep a tiny bit so that current_time advances between calls.
-	// Even without an explicit sleep, the next call uses clock_get_time_ns()
-	// which is monotonic — but we rely on observable difference only for
-	// updated_at, not for the test assertion itself.
 	pkt2 := createSyncPacket(t, layers.IPProtocolTCP)
-	_, err = fwstateHandleLocalEvents(cpModule, storage, pkt2)
+	_, err = fwstateHandleLocalEvents(cpModule, pkt2)
 	require.NoError(t, err)
 
 	snap2 := GetStateValue(cpModule, layers.IPProtocolTCP, 12345, 9999, "2001:db8::1", "2001:db8::2")
 	require.True(t, snap2.Found)
 
 	require.Equal(t, createdAt, snap2.CreatedAt,
-		"created_at must be preserved across updates")
+		"created_at must be preserved across updates",
+	)
 }
 
-// TestFWStateMergeFromStaleLayer verifies that when an entry exists only in a
-// stale (next) layer and a new sync arrives in a fresh active layer, the
-// cross-layer promotion path (fwmap_promote_value_fwstate) is used: flags are
-// OR-ed and packet counters are summed. This pins the cross-layer merge
-// behaviour so that a regression turning it back into "overwrite" is caught.
-func TestFWStateMergeFromStaleLayer(t *testing.T) {
-	memCtx := testutils.NewMemoryContext("fwstate_merge_stale_test", datasize.MB*64)
-	defer memCtx.Free()
-	cpModule, storage := fwstateModuleConfig(memCtx)
-	defer fwstateCounterStorageFree(storage)
+// Test_FWState_MergeFromStaleLayer verifies that promotion merges flags and
+// direction counters from the old layer.
+func Test_FWState_MergeFromStaleLayer(t *testing.T) {
+	cpModule := newFWStateFixture(t, 0)
 
 	const synBit = 0x02
 	const ackBit = 0x08
 
 	// Populate stale layer with SYN + 1 forward packet.
 	pkt1 := createSyncPacket(t, layers.IPProtocolTCP, WithFlags(synBit), WithFib(0))
-	_, err := fwstateHandleLocalEvents(cpModule, storage, pkt1)
+	_, err := fwstateHandleLocalEvents(cpModule, pkt1)
 	require.NoError(t, err)
 
 	// Push that layer down, allocate a new active layer.
@@ -492,36 +419,36 @@ func TestFWStateMergeFromStaleLayer(t *testing.T) {
 
 	// Insert into the fresh active layer with ACK + 1 backward packet.
 	pkt2 := createSyncPacket(t, layers.IPProtocolTCP, WithFlags(ackBit), WithFib(1))
-	_, err = fwstateHandleLocalEvents(cpModule, storage, pkt2)
+	_, err = fwstateHandleLocalEvents(cpModule, pkt2)
 	require.NoError(t, err)
 
 	snap := GetStateValue(cpModule, layers.IPProtocolTCP, 12345, 9999, "2001:db8::1", "2001:db8::2")
 	require.True(t, snap.Found, "merged state must be visible from active layer")
-	require.Equalf(t, uint8(synBit|ackBit), snap.FlagsRaw,
+	require.Equalf(t, uint32(synBit|ackBit), snap.Flags,
 		"flags must be merged across layers (got 0x%02x, want 0x%02x)",
-		snap.FlagsRaw, synBit|ackBit)
+		snap.Flags, synBit|ackBit,
+	)
 	require.Equalf(t, uint64(1), snap.PacketsForward,
-		"packets_forward from stale layer must be carried over (got %d)", snap.PacketsForward)
+		"packets_forward from stale layer must be carried over (got %d)", snap.PacketsForward,
+	)
 	require.Equalf(t, uint64(1), snap.PacketsBackward,
-		"packets_backward from active layer must be summed in (got %d)", snap.PacketsBackward)
+		"packets_backward from active layer must be summed in (got %d)", snap.PacketsBackward,
+	)
 }
 
-// TestFWStateSyncSuppression verifies that a fully suppressed local event is
-// not emitted.
-func TestFWStateSyncSuppression(t *testing.T) {
-	memCtx := testutils.NewMemoryContext("fwstate_suppress_test", datasize.MB*64)
-	defer memCtx.Free()
-	cpModule, storage := fwstateModuleConfig(memCtx)
-	defer fwstateCounterStorageFree(storage)
+// Test_FWState_SyncSuppression verifies that a suppressed refresh changes
+// neither timestamps nor deadline.
+func Test_FWState_SyncSuppression(t *testing.T) {
+	cpModule := newFWStateFixture(t, 0)
 
-	// 60s window: any second frame arriving within the test's real-time span
+	// 60s window: any second frame arriving within the test's consecutive rounds
 	// is well inside the window and must be suppressed.
 	const suppressNs = uint64(60e9)
 	SetSyncSuppressTimeout(cpModule, suppressNs)
 
 	// First frame: entry does not exist yet, so it is applied and forwarded.
 	pkt1 := createSyncPacket(t, layers.IPProtocolTCP)
-	res1 := xerror.Unwrap(fwstateHandleLocalEvents(cpModule, storage, pkt1))
+	res1 := xerror.Unwrap(fwstateHandleLocalEvents(cpModule, pkt1))
 	require.NotEmpty(t, res1.Output, "first frame must be forwarded")
 	require.Empty(t, res1.Drop, "first frame must not be dropped")
 
@@ -529,10 +456,10 @@ func TestFWStateSyncSuppression(t *testing.T) {
 	require.True(t, snap1.Found, "state must exist after first frame")
 	require.Greater(t, snap1.Deadline, uint64(0))
 
-	// Second frame, same 5-tuple, arrives immediately: within the window, so
-	// the state record and the wire are both left untouched.
+	// Second frame, same 5-tuple, arrives immediately: within the window, so the
+	// state record and the wire are both left untouched.
 	pkt2 := createSyncPacket(t, layers.IPProtocolTCP)
-	res2 := xerror.Unwrap(fwstateHandleLocalEvents(cpModule, storage, pkt2))
+	res2 := xerror.Unwrap(fwstateHandleLocalEvents(cpModule, pkt2))
 	require.Empty(t, res2.Output)
 	require.Empty(t, res2.Drop)
 	require.Equal(t, recordSuppressed, stashRecordStatus(cpModule, true, 0, 0))
@@ -540,114 +467,102 @@ func TestFWStateSyncSuppression(t *testing.T) {
 	snap2 := GetStateValue(cpModule, layers.IPProtocolTCP, 12345, 9999, "2001:db8::1", "2001:db8::2")
 	require.True(t, snap2.Found)
 	require.Equal(t, snap1.UpdatedAt, snap2.UpdatedAt,
-		"updated_at must not change when the frame is suppressed")
+		"updated_at must not change when the frame is suppressed",
+	)
 	require.Equal(t, snap1.Deadline, snap2.Deadline,
-		"deadline must not change when the frame is suppressed")
+		"deadline must not change when the frame is suppressed",
+	)
 }
 
-// TestFWStateSyncSuppressionDisabled verifies that a zero window refreshes the
-// state record on every frame.
-func TestFWStateSyncSuppressionDisabled(t *testing.T) {
-	memCtx := testutils.NewMemoryContext("fwstate_suppress_off_test", datasize.MB*64)
-	defer memCtx.Free()
-	cpModule, storage := fwstateModuleConfig(memCtx)
-	defer fwstateCounterStorageFree(storage)
+// Test_FWState_SyncSuppressionDisabled verifies that disabling suppression
+// permits every refresh.
+func Test_FWState_SyncSuppressionDisabled(t *testing.T) {
+	cpModule := newFWStateFixture(t, 0)
 	// suppress left at its default of 0 (disabled)
 
 	pkt1 := createSyncPacket(t, layers.IPProtocolTCP)
-	res1 := xerror.Unwrap(fwstateHandleLocalEvents(cpModule, storage, pkt1))
+	res1 := xerror.Unwrap(fwstateHandleLocalEvents(cpModule, pkt1))
 	require.NotEmpty(t, res1.Output, "first frame must be forwarded")
 	snap1 := GetStateValue(cpModule, layers.IPProtocolTCP, 12345, 9999, "2001:db8::1", "2001:db8::2")
 	require.True(t, snap1.Found)
 
 	pkt2 := createSyncPacket(t, layers.IPProtocolTCP)
-	xerror.Unwrap(fwstateHandleLocalEvents(cpModule, storage, pkt2))
+	xerror.Unwrap(fwstateHandleLocalEvents(cpModule, pkt2))
 	snap2 := GetStateValue(cpModule, layers.IPProtocolTCP, 12345, 9999, "2001:db8::1", "2001:db8::2")
 	require.True(t, snap2.Found)
 	require.GreaterOrEqual(t, snap2.UpdatedAt, snap1.UpdatedAt,
-		"updated_at must advance when the frame is applied")
+		"updated_at must advance when the frame is applied",
+	)
 }
 
-// TestFWStateSyncSuppressionAllowsShorterTTL verifies that a frame carrying a
-// shorter TTL (a teardown transition such as FIN) is applied even when it
-// arrives inside the suppress window, instead of being suppressed and leaving
-// the entry on its longer established deadline.
-func TestFWStateSyncSuppressionAllowsShorterTTL(t *testing.T) {
-	memCtx := testutils.NewMemoryContext("fwstate_suppress_ttl_test", datasize.MB*64)
-	defer memCtx.Free()
-	cpModule, storage := fwstateModuleConfig(memCtx)
-	defer fwstateCounterStorageFree(storage)
+// Test_FWState_SyncSuppressionAllowsShorterTTL verifies that a shorter TTL
+// shrinks the deadline inside the suppression window.
+func Test_FWState_SyncSuppressionAllowsShorterTTL(t *testing.T) {
+	cpModule := newFWStateFixture(t, 0)
 
-	// Established TTL much longer than the FIN TTL, so the FIN's new expiry
-	// lands below the current deadline and must not be suppressed.
+	// Established TTL much longer than the FIN TTL, so the FIN's new expiry lands
+	// below the current deadline and must not be suppressed.
 	SetSyncTCPTimeouts(cpModule, 120e9, 10e9)
 	SetSyncSuppressTimeout(cpModule, 60e9)
 
 	// Established frame (no flags): entry created on the long TTL.
 	pkt1 := createSyncPacket(t, layers.IPProtocolTCP)
-	res1 := xerror.Unwrap(fwstateHandleLocalEvents(cpModule, storage, pkt1))
+	res1 := xerror.Unwrap(fwstateHandleLocalEvents(cpModule, pkt1))
 	require.NotEmpty(t, res1.Output, "established frame must be forwarded")
 	snap1 := GetStateValue(cpModule, layers.IPProtocolTCP, 12345, 9999, "2001:db8::1", "2001:db8::2")
 	require.True(t, snap1.Found)
 
-	// FIN frame immediately after: shorter TTL must be applied, not
-	// suppressed, so the deadline shrinks toward the FIN timeout.
+	// FIN frame immediately after: shorter TTL must be applied, not suppressed, so
+	// the deadline shrinks toward the FIN timeout.
 	const finBit = 0x01 // FWSTATE_FIN, src nibble
 	pkt2 := createSyncPacket(t, layers.IPProtocolTCP, WithFlags(finBit))
-	xerror.Unwrap(fwstateHandleLocalEvents(cpModule, storage, pkt2))
+	xerror.Unwrap(fwstateHandleLocalEvents(cpModule, pkt2))
 
 	snap2 := GetStateValue(cpModule, layers.IPProtocolTCP, 12345, 9999, "2001:db8::1", "2001:db8::2")
 	require.True(t, snap2.Found)
 	require.Less(t, snap2.Deadline, snap1.Deadline,
-		"FIN (shorter TTL) must shrink the deadline instead of being suppressed")
+		"FIN (shorter TTL) must shrink the deadline instead of being suppressed",
+	)
 }
 
-// TestFWStateSyncSuppressionAppliesFlagChanges verifies that a frame carrying
-// a flag bit the entry has not yet seen is applied even when its TTL is
-// identical to the current one (so the deadline predicate alone would
-// suppress it). In the default test config tcp_syn == tcp_syn_ack, so a SYN
-// followed by an ACK has the same deadline; the ACK must still merge.
-func TestFWStateSyncSuppressionAppliesFlagChanges(t *testing.T) {
-	memCtx := testutils.NewMemoryContext("fwstate_suppress_flags_test", datasize.MB*64)
-	defer memCtx.Free()
-	cpModule, storage := fwstateModuleConfig(memCtx)
-	defer fwstateCounterStorageFree(storage)
+// Test_FWState_SyncSuppressionAppliesFlagChanges verifies that new flag bits
+// are applied inside the suppression window.
+func Test_FWState_SyncSuppressionAppliesFlagChanges(t *testing.T) {
+	cpModule := newFWStateFixture(t, 0)
 
-	// Default test config sets tcp_syn == tcp_syn_ack, so both frames below
-	// pick the same TTL.
+	// The default SYN and SYN-ACK timeouts match, so both frames below pick the
+	// same TTL.
 	SetSyncSuppressTimeout(cpModule, 60e9)
 
 	const synBit = 0x02 // FWSTATE_SYN, src nibble
 	const ackBit = 0x08 // FWSTATE_ACK, src nibble
 
 	pkt1 := createSyncPacket(t, layers.IPProtocolTCP, WithFlags(synBit))
-	xerror.Unwrap(fwstateHandleLocalEvents(cpModule, storage, pkt1))
+	xerror.Unwrap(fwstateHandleLocalEvents(cpModule, pkt1))
 	snap1 := GetStateValue(cpModule, layers.IPProtocolTCP, 12345, 9999, "2001:db8::1", "2001:db8::2")
 	require.True(t, snap1.Found)
-	require.Equal(t, uint8(synBit), snap1.FlagsRaw)
+	require.Equal(t, uint32(synBit), snap1.Flags)
 
-	// ACK frame, same TTL, within the window: must not be suppressed because
-	// it carries a new flag bit that the merge path must record.
+	// ACK frame, same TTL, within the window: must not be suppressed because it
+	// carries a new flag bit that the merge path must record.
 	pkt2 := createSyncPacket(t, layers.IPProtocolTCP, WithFlags(ackBit))
-	xerror.Unwrap(fwstateHandleLocalEvents(cpModule, storage, pkt2))
+	xerror.Unwrap(fwstateHandleLocalEvents(cpModule, pkt2))
 
 	snap2 := GetStateValue(cpModule, layers.IPProtocolTCP, 12345, 9999, "2001:db8::1", "2001:db8::2")
 	require.True(t, snap2.Found)
-	require.Equalf(t, uint8(synBit|ackBit), snap2.FlagsRaw,
+	require.Equalf(t, uint32(synBit|ackBit), snap2.Flags,
 		"ACK must merge into flags even at an unchanged TTL within the window (got 0x%02x)",
-		snap2.FlagsRaw)
+		snap2.Flags,
+	)
 }
 
 // Test_FWState_StashEmission_BatchesByDefaultMTU verifies that 30 applied
 // records on one TX device leave in packets of 25 and 5 frames, each frame
 // byte-identical to its record and in record order.
 func Test_FWState_StashEmission_BatchesByDefaultMTU(t *testing.T) {
-	memCtx := testutils.NewMemoryContext("fwstate_stash_test", datasize.MB*64)
-	defer memCtx.Free()
-	cpModule, storage := fwstateModuleConfig(memCtx)
-	defer fwstateCounterStorageFree(storage)
+	cpModule := newFWStateFixture(t, 0)
 
-	worker := testWorker(0)
+	worker := cpModule.Worker(0)
 	nextRound(worker)
 	var events []localEvent
 	var want []byte
@@ -658,7 +573,7 @@ func Test_FWState_StashEmission_BatchesByDefaultMTU(t *testing.T) {
 	}
 	require.Equal(t, len(events), stashEvents(cpModule, worker, events...))
 
-	result := runHandler(cpModule, storage, worker, false)
+	result := runConfig(cpModule, worker, false)
 
 	require.Len(t, result.Output, 2)
 	var got []byte
@@ -670,26 +585,23 @@ func Test_FWState_StashEmission_BatchesByDefaultMTU(t *testing.T) {
 	}
 	require.Equal(t, []int{25, 5}, frames)
 	require.Equal(t, want, got)
-	require.Equal(t, uint64(30), moduleCounter(cpModule, storage, "fwstate_sync_v6_inserted"))
-	require.Equal(t, uint64(2), moduleCounter(cpModule, storage, "fwstate_internal_forwarded"))
+	require.Equal(t, uint64(30), moduleCounter(cpModule, "fwstate_sync_v6_inserted"))
+	require.Equal(t, uint64(2), moduleCounter(cpModule, "fwstate_internal_forwarded"))
 }
 
 // Test_FWState_StashEmission_BatchesByCustomMTU verifies that a sync MTU
 // holding two frames splits five records into packets of 2, 2 and 1.
 func Test_FWState_StashEmission_BatchesByCustomMTU(t *testing.T) {
-	memCtx := testutils.NewMemoryContext("fwstate_stash_test", datasize.MB*64)
-	defer memCtx.Free()
-	cpModule, storage := fwstateModuleConfig(memCtx)
-	defer fwstateCounterStorageFree(storage)
+	cpModule := newFWStateFixture(t, 0)
 	SetSyncMTU(cpModule, uint16(40+8+2*frameSize))
 
-	worker := testWorker(0)
+	worker := cpModule.Worker(0)
 	nextRound(worker)
 	for idx := range 5 {
 		require.Equal(t, 1, stashEvents(cpModule, worker, v6Event(uint16(2000+idx))))
 	}
 
-	result := runHandler(cpModule, storage, worker, false)
+	result := runConfig(cpModule, worker, false)
 
 	var frames []int
 	for _, raw := range result.Output {
@@ -699,22 +611,19 @@ func Test_FWState_StashEmission_BatchesByCustomMTU(t *testing.T) {
 	require.Equal(t, []int{2, 2, 1}, frames)
 }
 
-// Test_FWState_StashEmission_BothEndpoints verifies that every batch is
-// emitted once to the multicast and once to the unicast endpoint.
+// Test_FWState_StashEmission_BothEndpoints verifies that every batch is emitted
+// once to the multicast and once to the unicast endpoint.
 func Test_FWState_StashEmission_BothEndpoints(t *testing.T) {
-	memCtx := testutils.NewMemoryContext("fwstate_stash_test", datasize.MB*64)
-	defer memCtx.Free()
-	cpModule, storage := fwstateModuleConfig(memCtx)
-	defer fwstateCounterStorageFree(storage)
+	cpModule := newFWStateFixture(t, 0)
 	SetSyncUnicastDestination(cpModule)
 
-	worker := testWorker(0)
+	worker := cpModule.Worker(0)
 	nextRound(worker)
 	for idx := range 30 {
 		require.Equal(t, 1, stashEvents(cpModule, worker, v6Event(uint16(4000+idx))))
 	}
 
-	result := runHandler(cpModule, storage, worker, false)
+	result := runConfig(cpModule, worker, false)
 
 	type emitted struct {
 		destination string
@@ -731,52 +640,48 @@ func Test_FWState_StashEmission_BothEndpoints(t *testing.T) {
 		{"2001:db8::3", 10000, 25},
 		{"ff02::1", 9999, 5},
 		{"2001:db8::3", 10000, 5},
-	}, got)
+	}, got,
+	)
 }
 
-// Test_FWState_StashEmission_PacksBothFamilies verifies that v4 and v6
-// records of one round share a packet, v4 first, and are applied to their
-// own family tables.
+// Test_FWState_StashEmission_PacksBothFamilies verifies that both families
+// share one emitted packet.
+//
+// IPv4 records precede IPv6 records, and each updates its own family table.
 func Test_FWState_StashEmission_PacksBothFamilies(t *testing.T) {
-	memCtx := testutils.NewMemoryContext("fwstate_stash_test", datasize.MB*64)
-	defer memCtx.Free()
-	cpModule, storage := fwstateModuleConfig(memCtx)
-	defer fwstateCounterStorageFree(storage)
+	cpModule := newFWStateFixture(t, 0)
 
-	worker := testWorker(0)
+	worker := cpModule.Worker(0)
 	nextRound(worker)
 	event6 := v6Event(5000)
 	event4 := v4Event(5001)
 	require.Equal(t, 2, stashEvents(cpModule, worker, event6, event4))
 
-	result := runHandler(cpModule, storage, worker, false)
+	result := runConfig(cpModule, worker, false)
 
 	require.Len(t, result.Output, 1)
 	_, _, payload := syncPayload(result.Output[0])
 	require.Equal(t, append(append([]byte(nil), event4.frame...), event6.frame...), payload)
-	require.Equal(t, uint64(1), moduleCounter(cpModule, storage, "fwstate_sync_v4_inserted"))
-	require.Equal(t, uint64(1), moduleCounter(cpModule, storage, "fwstate_sync_v6_inserted"))
+	require.Equal(t, uint64(1), moduleCounter(cpModule, "fwstate_sync_v4_inserted"))
+	require.Equal(t, uint64(1), moduleCounter(cpModule, "fwstate_sync_v6_inserted"))
 }
 
 // Test_FWState_Stash_RepeatInvocationHandlesOnlyNewRecords verifies that
-// invoking one configuration again in the same round, as a redirect or a
-// second placement does, handles only the records appended since its
-// previous invocation.
+// same-round calls handle only newly appended records.
+//
+// Redirects and additional placements resume after the previously read records.
 func Test_FWState_Stash_RepeatInvocationHandlesOnlyNewRecords(t *testing.T) {
-	memCtx := testutils.NewMemoryContext("fwstate_stash_test", datasize.MB*64)
-	defer memCtx.Free()
-	cpModule, storage := fwstateModuleConfig(memCtx)
-	defer fwstateCounterStorageFree(storage)
+	cpModule := newFWStateFixture(t, 0)
 
-	worker := testWorker(0)
+	worker := cpModule.Worker(0)
 	nextRound(worker)
 	require.Equal(t, 2, stashEvents(cpModule, worker, v6Event(6000), v6Event(6001)))
-	first := runHandler(cpModule, storage, worker, false)
+	first := runConfig(cpModule, worker, false)
 
 	event := v6Event(6002)
 	require.Equal(t, 1, stashEvents(cpModule, worker, event))
-	second := runHandler(cpModule, storage, worker, false)
-	third := runHandler(cpModule, storage, worker, false)
+	second := runConfig(cpModule, worker, false)
+	third := runConfig(cpModule, worker, false)
 
 	require.Len(t, first.Output, 1)
 	_, _, firstPayload := syncPayload(first.Output[0])
@@ -785,36 +690,34 @@ func Test_FWState_Stash_RepeatInvocationHandlesOnlyNewRecords(t *testing.T) {
 	_, _, secondPayload := syncPayload(second.Output[0])
 	require.Equal(t, event.frame, secondPayload)
 	require.Empty(t, third.Output)
-	require.Equal(t, uint64(3), moduleCounter(cpModule, storage, "fwstate_sync_v6_inserted"))
+	require.Equal(t, uint64(3), moduleCounter(cpModule, "fwstate_sync_v6_inserted"))
 }
 
-// Test_FWState_Stash_SecondConfigEmitsWithoutDeciding verifies that a
-// second configuration on the same map passes the first one's emission
-// through, never inserts or suppresses a record again, and emits exactly
-// the applied records to its own endpoint.
+// Test_FWState_Stash_SecondConfigEmitsWithoutDeciding verifies that a second
+// config emits applied records without making their state decisions again.
+//
+// It passes the first emission through and emits to its own endpoint without
+// repeating insertion or suppression.
 func Test_FWState_Stash_SecondConfigEmitsWithoutDeciding(t *testing.T) {
-	memCtx := testutils.NewMemoryContext("fwstate_stash_test", datasize.MB*64)
-	defer memCtx.Free()
-	first, firstStorage := fwstateModuleConfig(memCtx)
-	defer fwstateCounterStorageFree(firstStorage)
+	first := newFWStateFixture(t, 0)
 	SetSyncSuppressTimeout(first, 60e9)
-	second, secondStorage := fwstateSiblingModuleConfig(first, "second")
-	defer fwstateCounterStorageFree(secondStorage)
+	second := fwstateSiblingModuleConfig(first, "second")
 
-	worker := testWorker(0)
+	worker := first.Worker(0)
 
 	// Round one: two new records, both applied by the first config.
 	nextRound(worker)
 	refreshed := v6Event(7000)
 	require.Equal(t, 2, stashEvents(first, worker, refreshed, v6Event(7001)))
-	firstRound := runHandler(first, firstStorage, worker, false)
+	firstRound := runConfig(first, worker, false)
 	require.Len(t, firstRound.Output, 1)
 	upstream := gopacket.NewPacket(firstRound.Output[0], layers.LayerTypeEthernet, gopacket.Default)
-	secondRound := runHandler(second, secondStorage, worker, true, upstream)
+	secondRound := runConfig(second, worker, true, upstream)
 
 	require.Len(t, secondRound.Output, 2)
 	require.Equal(t, firstRound.Output[0], secondRound.Output[0],
-		"the upstream emission must pass through unchanged")
+		"the upstream emission must pass through unchanged",
+	)
 	destination, port, payload := syncPayload(secondRound.Output[1])
 	require.Equal(t, "2001:db8::3", destination.String())
 	require.Equal(t, uint16(10000), port)
@@ -825,8 +728,8 @@ func Test_FWState_Stash_SecondConfigEmitsWithoutDeciding(t *testing.T) {
 	nextRound(worker)
 	fresh := v6Event(7002)
 	require.Equal(t, 2, stashEvents(first, worker, refreshed, fresh))
-	firstRound = runHandler(first, firstStorage, worker, false)
-	secondRound = runHandler(second, secondStorage, worker, false)
+	firstRound = runConfig(first, worker, false)
+	secondRound = runConfig(second, worker, false)
 
 	require.Equal(t, recordSuppressed, stashRecordStatus(first, true, 0, 0))
 	require.Equal(t, recordApplied, stashRecordStatus(first, true, 0, 1))
@@ -837,75 +740,67 @@ func Test_FWState_Stash_SecondConfigEmitsWithoutDeciding(t *testing.T) {
 	_, _, payload = syncPayload(secondRound.Output[0])
 	require.Equal(t, fresh.frame, payload)
 
-	require.Equal(t, uint64(3), moduleCounter(first, firstStorage, "fwstate_sync_v6_inserted"))
-	require.Equal(t, uint64(1), moduleCounter(first, firstStorage, "fwstate_sync_v6_suppressed"))
-	require.Zero(t, moduleCounter(second, secondStorage, "fwstate_sync_v6_inserted"))
-	require.Zero(t, moduleCounter(second, secondStorage, "fwstate_sync_v6_suppressed"))
-	require.Equal(t, uint64(1), moduleCounter(second, secondStorage, "fwstate_passthrough"))
+	require.Equal(t, uint64(3), moduleCounter(first, "fwstate_sync_v6_inserted"))
+	require.Equal(t, uint64(1), moduleCounter(first, "fwstate_sync_v6_suppressed"))
+	require.Zero(t, moduleCounter(second, "fwstate_sync_v6_inserted"))
+	require.Zero(t, moduleCounter(second, "fwstate_sync_v6_suppressed"))
+	require.Equal(t, uint64(1), moduleCounter(second, "fwstate_passthrough"))
 }
 
-// Test_FWState_Stash_NewRoundDropsUnprocessedRecords verifies that records
-// left unprocessed when a round ends are never applied or emitted.
+// Test_FWState_Stash_NewRoundDropsUnprocessedRecords verifies that records left
+// unprocessed when a round ends are never applied or emitted.
 func Test_FWState_Stash_NewRoundDropsUnprocessedRecords(t *testing.T) {
-	memCtx := testutils.NewMemoryContext("fwstate_stash_test", datasize.MB*64)
-	defer memCtx.Free()
-	cpModule, storage := fwstateModuleConfig(memCtx)
-	defer fwstateCounterStorageFree(storage)
+	cpModule := newFWStateFixture(t, 0)
 
-	worker := testWorker(0)
+	worker := cpModule.Worker(0)
 	nextRound(worker)
 	require.Equal(t, 1, stashEvents(cpModule, worker, v6Event(8000)))
 	nextRound(worker)
 
-	result := runHandler(cpModule, storage, worker, false)
+	result := runConfig(cpModule, worker, false)
 
 	require.Empty(t, result.Output)
 	require.Zero(t, stashSlotCount(cpModule, true, 0))
 	require.False(t, CheckStateExists(cpModule, layers.IPProtocolTCP, 8000, 80, "2001:db8::1", "2001:db8::2"))
 }
 
-// Test_FWState_Stash_CursorRestartsEachRound verifies that a cursor left at
-// the end of an earlier round starts from the first record of the next.
+// Test_FWState_Stash_CursorRestartsEachRound verifies that a cursor left at the
+// end of an earlier round starts from the first record of the next.
 func Test_FWState_Stash_CursorRestartsEachRound(t *testing.T) {
-	memCtx := testutils.NewMemoryContext("fwstate_stash_test", datasize.MB*64)
-	defer memCtx.Free()
-	cpModule, storage := fwstateModuleConfig(memCtx)
-	defer fwstateCounterStorageFree(storage)
+	cpModule := newFWStateFixture(t, 0)
 
-	worker := testWorker(0)
+	worker := cpModule.Worker(0)
 	nextRound(worker)
 	require.Equal(t, 2, stashEvents(cpModule, worker, v6Event(9000), v6Event(9001)))
-	runHandler(cpModule, storage, worker, false)
+	runConfig(cpModule, worker, false)
 
 	nextRound(worker)
 	event := v6Event(9002)
 	require.Equal(t, 1, stashEvents(cpModule, worker, event))
-	result := runHandler(cpModule, storage, worker, false)
+	result := runConfig(cpModule, worker, false)
 
 	require.Len(t, result.Output, 1)
 	_, _, payload := syncPayload(result.Output[0])
 	require.Equal(t, event.frame, payload)
 }
 
-// Test_FWState_Stash_WorkersAreIsolated verifies that a worker handles only
-// its own slot, and that the slot headers of different workers sit on
-// separate 64-byte aligned cache lines, each pointing at its own
-// non-overlapping 64-byte aligned records array.
+// Test_FWState_Stash_WorkersAreIsolated verifies that each worker consumes
+// only its own records.
+//
+// Slot headers occupy separate 64-byte aligned cache lines; their record
+// buffers are also 64-byte aligned and do not overlap.
 func Test_FWState_Stash_WorkersAreIsolated(t *testing.T) {
-	memCtx := testutils.NewMemoryContext("fwstate_stash_test", datasize.MB*64)
-	defer memCtx.Free()
-	cpModule, storage := fwstateModuleConfig(memCtx)
-	defer fwstateCounterStorageFree(storage)
+	cpModule := newFWStateFixture(t, 0)
 
-	worker0 := testWorker(0)
-	worker1 := testWorker(1)
+	worker0 := cpModule.Worker(0)
+	worker1 := cpModule.Worker(1)
 	nextRound(worker0)
 	nextRound(worker1)
 	event := v6Event(9100)
 	require.Equal(t, 1, stashEvents(cpModule, worker1, event))
 
-	idle := runHandler(cpModule, storage, worker0, false)
-	busy := runHandler(cpModule, storage, worker1, false)
+	idle := runConfig(cpModule, worker0, false)
+	busy := runConfig(cpModule, worker1, false)
 
 	require.Empty(t, idle.Output)
 	require.Len(t, busy.Output, 1)
@@ -933,15 +828,12 @@ func Test_FWState_Stash_WorkersAreIsolated(t *testing.T) {
 	}
 }
 
-// Test_FWState_Stash_LayerInsertionKeepsRecords verifies that growing the
-// map's layer chain leaves the stashed records of the round in place.
+// Test_FWState_Stash_LayerInsertionKeepsRecords verifies that growing the map's
+// layer chain leaves the stashed records of the round in place.
 func Test_FWState_Stash_LayerInsertionKeepsRecords(t *testing.T) {
-	memCtx := testutils.NewMemoryContext("fwstate_stash_test", datasize.MB*64)
-	defer memCtx.Free()
-	cpModule, storage := fwstateModuleConfig(memCtx)
-	defer fwstateCounterStorageFree(storage)
+	cpModule := newFWStateFixture(t, 0)
 
-	worker := testWorker(0)
+	worker := cpModule.Worker(0)
 	nextRound(worker)
 	event := v6Event(9200)
 	require.Equal(t, 1, stashEvents(cpModule, worker, event))
@@ -949,54 +841,50 @@ func Test_FWState_Stash_LayerInsertionKeepsRecords(t *testing.T) {
 	InsertNewLayer(cpModule)
 
 	require.Equal(t, 1, stashSlotCount(cpModule, true, 0))
-	result := runHandler(cpModule, storage, worker, false)
+	result := runConfig(cpModule, worker, false)
 	require.Len(t, result.Output, 1)
 	_, _, payload := syncPayload(result.Output[0])
 	require.Equal(t, event.frame, payload)
 }
 
-// Test_FWState_StashEmission_AllocationFailureKeepsState verifies that when
-// no mbuf can be allocated for a batch, the records are still decided and
-// applied, nothing is emitted, and no mbuf stays taken from the pool.
+// Test_FWState_StashEmission_AllocationFailureKeepsState verifies that state
+// updates survive a failed packet allocation.
+//
+// Records are decided and applied without emission or retained pool objects.
 func Test_FWState_StashEmission_AllocationFailureKeepsState(t *testing.T) {
-	memCtx := testutils.NewMemoryContext("fwstate_stash_test", datasize.MB*64)
-	defer memCtx.Free()
-	cpModule, storage := fwstateModuleConfig(memCtx)
-	defer fwstateCounterStorageFree(storage)
+	cpModule := newFWStateFixture(t, 0)
 
-	worker := testWorker(0)
+	worker := cpModule.Worker(0)
 	nextRound(worker)
 	require.Equal(t, 2, stashEvents(cpModule, worker, v6Event(9300), v6Event(9301)))
 
 	outstanding := poolOutstanding(worker)
 	limitPool(worker, 0)
 	t.Cleanup(func() { unlimitPool(worker) })
-	result := runHandler(cpModule, storage, worker, false)
+	result := runConfig(cpModule, worker, false)
 
 	require.Empty(t, result.Output)
 	require.Empty(t, result.Drop)
 	require.Equal(t, outstanding, poolOutstanding(worker), "a failed batch must not hold an mbuf")
 	require.Equal(t, recordApplied, stashRecordStatus(cpModule, true, 0, 0))
 	require.Equal(t, recordApplied, stashRecordStatus(cpModule, true, 0, 1))
-	require.Equal(t, uint64(2), moduleCounter(cpModule, storage, "fwstate_sync_v6_inserted"))
-	require.Zero(t, moduleCounter(cpModule, storage, "fwstate_internal_forwarded"))
-	require.Equal(t, uint64(1), moduleCounter(cpModule, storage, "fwstate_sync_alloc_failed"))
+	require.Equal(t, uint64(2), moduleCounter(cpModule, "fwstate_sync_v6_inserted"))
+	require.Zero(t, moduleCounter(cpModule, "fwstate_internal_forwarded"))
+	require.Equal(t, uint64(1), moduleCounter(cpModule, "fwstate_sync_alloc_failed"))
 	require.True(t, CheckStateExists(cpModule, layers.IPProtocolTCP, 9300, 80, "2001:db8::1", "2001:db8::2"))
 	require.True(t, CheckStateExists(cpModule, layers.IPProtocolTCP, 9301, 80, "2001:db8::1", "2001:db8::2"))
 }
 
 // Test_FWState_StashEmission_CloneFailureKeepsMulticastCopy verifies that
-// when the unicast clone cannot be allocated, the multicast packet is still
-// emitted with every applied frame, the state is kept, and the only mbuf
-// taken from the pool is the emitted one.
+// multicast emission survives failure to allocate its unicast clone.
+//
+// The emitted packet retains every applied frame and is the only live pool
+// object; state updates remain applied.
 func Test_FWState_StashEmission_CloneFailureKeepsMulticastCopy(t *testing.T) {
-	memCtx := testutils.NewMemoryContext("fwstate_stash_test", datasize.MB*64)
-	defer memCtx.Free()
-	cpModule, storage := fwstateModuleConfig(memCtx)
-	defer fwstateCounterStorageFree(storage)
+	cpModule := newFWStateFixture(t, 0)
 	SetSyncUnicastDestination(cpModule)
 
-	worker := testWorker(0)
+	worker := cpModule.Worker(0)
 	nextRound(worker)
 	events := []localEvent{v6Event(9400), v4Event(9401)}
 	require.Equal(t, 2, stashEvents(cpModule, worker, events...))
@@ -1004,38 +892,38 @@ func Test_FWState_StashEmission_CloneFailureKeepsMulticastCopy(t *testing.T) {
 	outstanding := poolOutstanding(worker)
 	limitPool(worker, 1)
 	t.Cleanup(func() { unlimitPool(worker) })
-	result := runHandler(cpModule, storage, worker, false)
+	result := runConfig(cpModule, worker, false)
 
 	require.Len(t, result.Output, 1, "only the multicast copy survives")
 	destination, port, payload := syncPayload(result.Output[0])
 	require.Equal(t, "ff02::1", destination.String())
 	require.Equal(t, uint16(9999), port)
 	require.Equal(t, append(append([]byte(nil), events[1].frame...), events[0].frame...), payload)
-	require.Equal(t, outstanding+1, poolOutstanding(worker), "only the emitted packet holds an mbuf")
+	require.Equal(t, outstanding+1, result.OutstandingMbufs, "only the emitted packet holds an mbuf")
+	require.Equal(t, outstanding, poolOutstanding(worker), "disposing the result returns the emitted mbuf")
 	require.Equal(t, recordApplied, stashRecordStatus(cpModule, true, 0, 0))
 	require.Equal(t, recordApplied, stashRecordStatus(cpModule, false, 0, 0))
-	require.Equal(t, uint64(1), moduleCounter(cpModule, storage, "fwstate_sync_v6_inserted"))
-	require.Equal(t, uint64(1), moduleCounter(cpModule, storage, "fwstate_sync_v4_inserted"))
-	require.Equal(t, uint64(1), moduleCounter(cpModule, storage, "fwstate_internal_forwarded"))
-	require.Equal(t, uint64(1), moduleCounter(cpModule, storage, "fwstate_sync_alloc_failed"),
-		"the failed unicast clone is an mbuf allocation failure")
+	require.Equal(t, uint64(1), moduleCounter(cpModule, "fwstate_sync_v6_inserted"))
+	require.Equal(t, uint64(1), moduleCounter(cpModule, "fwstate_sync_v4_inserted"))
+	require.Equal(t, uint64(1), moduleCounter(cpModule, "fwstate_internal_forwarded"))
+	require.Equal(t, uint64(1), moduleCounter(cpModule, "fwstate_sync_alloc_failed"),
+		"the failed unicast clone is an mbuf allocation failure",
+	)
 	require.True(t, CheckStateExists(cpModule, layers.IPProtocolTCP, 9400, 80, "2001:db8::1", "2001:db8::2"))
 }
 
-// Test_FWState_StashEmission_BatchLargerThanOneMbuf verifies that when the
-// sync MTU allows more frames than one mbuf holds, every applied frame is
-// still emitted, in record order, across several packets that each fit an
-// mbuf.
+// Test_FWState_StashEmission_BatchLargerThanOneMbuf verifies that a batch
+// exceeding one mbuf preserves every frame.
+//
+// Even when the MTU permits a larger batch, emitted packets each fit an mbuf
+// and retain the original record order.
 func Test_FWState_StashEmission_BatchLargerThanOneMbuf(t *testing.T) {
 	const recordCount = 300
 
-	memCtx := testutils.NewMemoryContext("fwstate_stash_test", datasize.MB*64)
-	defer memCtx.Free()
-	cpModule, storage := fwstateModuleConfigWithStashSize(memCtx, 512*uint64(syncRecordSize))
-	defer fwstateCounterStorageFree(storage)
+	cpModule := newFWStateFixture(t, 512*uint64(syncRecordSize))
 	SetSyncMTU(cpModule, 65535)
 
-	worker := testWorker(0)
+	worker := cpModule.Worker(0)
 	nextRound(worker)
 	var want []byte
 	for idx := range recordCount {
@@ -1044,7 +932,7 @@ func Test_FWState_StashEmission_BatchLargerThanOneMbuf(t *testing.T) {
 		want = append(want, event.frame...)
 	}
 
-	result := runHandler(cpModule, storage, worker, false)
+	result := runConfig(cpModule, worker, false)
 
 	require.Greater(t, len(result.Output), 1, "one mbuf cannot hold every frame")
 	var got []byte
@@ -1054,25 +942,23 @@ func Test_FWState_StashEmission_BatchLargerThanOneMbuf(t *testing.T) {
 		got = append(got, payload...)
 	}
 	require.Equal(t, want, got)
-	require.Equal(t, uint64(recordCount), moduleCounter(cpModule, storage, "fwstate_sync_v6_inserted"))
+	require.Equal(t, uint64(recordCount), moduleCounter(cpModule, "fwstate_sync_v6_inserted"))
 }
 
-// Test_FWState_Stash_ContextsOfOneConfigShareReadPosition verifies that two
-// execution contexts of one config on the same worker, as one config
-// placed at two points of a round has, emit each record once between them
-// and each pick up only what the other has not read.
+// Test_FWState_Stash_ContextsOfOneConfigShareReadPosition verifies that
+// placements of one config share progress on the same worker.
+//
+// Each record is emitted once across both placements, and either placement
+// can consume records appended since their previous calls.
 func Test_FWState_Stash_ContextsOfOneConfigShareReadPosition(t *testing.T) {
-	memCtx := testutils.NewMemoryContext("fwstate_stash_test", datasize.MB*64)
-	defer memCtx.Free()
-	cpModule, storage := fwstateModuleConfig(memCtx)
-	defer fwstateCounterStorageFree(storage)
+	cpModule := newFWStateFixture(t, 0)
 
-	worker := testWorker(0)
+	worker := cpModule.Worker(0)
 	nextRound(worker)
 	require.Equal(t, 2, stashEvents(cpModule, worker, v6Event(9500), v6Event(9501)))
 
-	first := runHandlerInContext(cpModule, storage, worker, 0, false)
-	second := runHandlerInContext(cpModule, storage, worker, 1, false)
+	first := runConfigPlacement(cpModule, worker, 0, false)
+	second := runConfigPlacement(cpModule, worker, 1, false)
 	require.Len(t, first.Output, 1)
 	_, _, payload := syncPayload(first.Output[0])
 	require.Len(t, payload, 2*frameSize)
@@ -1080,11 +966,42 @@ func Test_FWState_Stash_ContextsOfOneConfigShareReadPosition(t *testing.T) {
 
 	event := v6Event(9502)
 	require.Equal(t, 1, stashEvents(cpModule, worker, event))
-	second = runHandlerInContext(cpModule, storage, worker, 1, false)
-	first = runHandlerInContext(cpModule, storage, worker, 0, false)
+	second = runConfigPlacement(cpModule, worker, 1, false)
+	first = runConfigPlacement(cpModule, worker, 0, false)
 	require.Len(t, second.Output, 1)
 	_, _, payload = syncPayload(second.Output[0])
 	require.Equal(t, event.frame, payload)
 	require.Empty(t, first.Output)
-	require.Equal(t, uint64(2), moduleCounter(cpModule, storage, "fwstate_internal_forwarded"))
+	require.Equal(t, uint64(2), moduleCounter(cpModule, "fwstate_internal_forwarded"))
+}
+
+// Test_FWState_StashEmission_RepeatedBatchingReturnsPoolObjects verifies that
+// more than 512 calls reclaim every emitted mbuf and preserve exact batches.
+func Test_FWState_StashEmission_RepeatedBatchingReturnsPoolObjects(t *testing.T) {
+	config := newFWStateFixture(t, 0)
+	worker := config.Worker(0)
+	var events []localEvent
+	var expected []byte
+	for idx := range 30 {
+		event := v6Event(uint16(12000 + idx))
+		events = append(events, event)
+		expected = append(expected, event.frame...)
+	}
+	for range 600 {
+		nextRound(worker)
+		require.Equal(t, len(events), stashEvents(config, worker, events...))
+		result := runConfig(config, worker, false)
+		require.Len(t, result.Output, 2)
+		require.Equal(t, uint64(2), result.OutstandingMbufs)
+		var actual []byte
+		for idx, raw := range result.Output {
+			_, _, payload := syncPayload(raw)
+			actual = append(actual, payload...)
+			require.Equal(t, uint16(2), result.OutputFlags[idx])
+		}
+		require.Equal(t, expected, actual)
+		require.Zero(t, poolOutstanding(worker))
+	}
+	require.Equal(t, uint64(18000), moduleCounter(config, "fwstate_sync_v6_inserted"))
+	require.Equal(t, uint64(1200), moduleCounter(config, "fwstate_internal_forwarded"))
 }

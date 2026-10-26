@@ -4,156 +4,177 @@ import (
 	"syscall"
 	"testing"
 
-	"github.com/c2h5oh/datasize"
 	"github.com/stretchr/testify/require"
 
-	"github.com/yanet-platform/yanet2/common/go/testutils"
-	fwstate "github.com/yanet-platform/yanet2/modules/fwstate/tests/dataplane"
+	dataplaneut "github.com/yanet-platform/yanet2/bindings/go/dataplane_ut"
+	"github.com/yanet-platform/yanet2/common/go/xerror"
+	"github.com/yanet-platform/yanet2/controlplane/ffi"
+	modulefwstate "github.com/yanet-platform/yanet2/modules/fwstate/bindings/go/cfwstate"
+	fwstate "github.com/yanet-platform/yanet2/objects/fwstate/bindings/go/cfwstate"
 )
 
-// verifies that map-object layers are charged to the object's own memory
-// context: growing and reclaiming the layer chain moves only the object's
-// accounting counters, never the agent's.
+// Test_MapObjectMemory_LayerBytesChargedToObjectContext verifies that layers
+// allocate and release memory through their owning object.
+//
+// Growing and reclaiming the chain changes the object accounting while the
+// agent context counters remain unchanged.
 func Test_MapObjectMemory_LayerBytesChargedToObjectContext(t *testing.T) {
-	memCtx := testutils.NewMemoryContext("fwstate_map_obj_mem", datasize.MB*64)
-	defer memCtx.Free()
+	harness, agent := newHarnessAgent(t)
 
-	agent := fwstate.NewHarnessAgent(memCtx)
-	require.NotNil(t, agent)
+	object, err := fwstate.NewMapObjectConfig(agent, "mem_v4", fwstate.KindV4)
+	require.NoError(t, err)
+	err = object.CreateMap(fwstate.MapConfig{IndexSize: 1024, ExtraBucketCount: 64, WorkerCount: 2})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, object.Free()) })
 
-	object := fwstate.NewMapV4Object(agent, "mem_v4")
-	require.NotNil(t, object)
+	agentBefore := memoryNode(t, harness, "")
+	objectBefore := memoryNode(t, harness, object.Name())
 
-	agentBefore := fwstate.AgentMemCounters(agent)
-	objectBefore := fwstate.ObjectMemCounters(object)
+	require.NoError(t, object.InsertLayer(1024, 64, 2))
 
-	require.Zero(t, fwstate.InsertMapV4Layer(object, 1024, 64, 1))
-
-	agentAfter := fwstate.AgentMemCounters(agent)
-	objectAfter := fwstate.ObjectMemCounters(object)
-	require.Greater(t, objectAfter.BallocSize, objectBefore.BallocSize)
+	agentAfter := memoryNode(t, harness, "")
+	objectAfter := memoryNode(t, harness, object.Name())
+	require.Greater(t, objectAfter.BAllocSize, objectBefore.BAllocSize)
 	require.Equal(t, agentBefore, agentAfter)
 
-	// A far-future expiry parks the empty tail layer; releasing it must
-	// charge the same context the layer was allocated from.
-	require.Zero(t, fwstate.UnlinkStaleMapV4Layers(object, 1<<62))
-	fwstate.FreeStaleMapV4Layers(object)
+	// A far-future expiry parks the empty tail layer; releasing it must charge the
+	// same context the layer was allocated from.
+	require.NoError(t, object.UnlinkStaleLayers(1<<62))
+	require.NoError(t, object.FreeStaleLayers())
 
-	agentAfter = fwstate.AgentMemCounters(agent)
-	objectAfter = fwstate.ObjectMemCounters(object)
-	require.Greater(t, objectAfter.BfreeSize, objectBefore.BfreeSize)
+	agentAfter = memoryNode(t, harness, "")
+	objectAfter = memoryNode(t, harness, object.Name())
+	require.Greater(t, objectAfter.BFreeSize, objectBefore.BFreeSize)
 	require.Equal(t, agentBefore, agentAfter)
 }
 
-// verifies that a zero stash size selects the default of 64 records, that
-// a map is created only once and refuses a zero worker count or an
-// out-of-range stash size, and that destroying the object returns every
-// byte the stash, the layer and the object took.
+// Test_MapObjectMemory_StashCreatedOnceAndFreedWithObject verifies that stash
+// creation and destruction preserve the allocation contract.
+//
+// Zero size selects 64 records; invalid sizes or worker counts and duplicate
+// creation are refused. Destruction returns all object, layer and stash bytes.
 func Test_MapObjectMemory_StashCreatedOnceAndFreedWithObject(t *testing.T) {
-	memCtx := testutils.NewMemoryContext("fwstate_map_obj_stash", datasize.MB*64)
-	defer memCtx.Free()
+	_, agent := newHarnessAgent(t)
+	freeBefore := agent.BlockAllocatorFreeSize()
 
-	agent := fwstate.NewHarnessAgent(memCtx)
-	require.NotNil(t, agent)
-	freeBefore := fwstate.AgentFreeBytes(agent)
+	object, err := fwstate.NewMapObjectConfig(agent, "stash_v4", fwstate.KindV4)
+	require.NoError(t, err)
 
-	object := fwstate.NewBareMapV4Object(agent, "stash_v4")
-	require.NotNil(t, object)
-
-	for _, invalid := range []struct {
+	for _, tc := range []struct {
 		workerCount uint16
 		stashSize   uint64
 	}{
 		{workerCount: 2, stashSize: 1<<20 + 1},
-		{workerCount: 2, stashSize: fwstate.StashRecordSize - 1},
+		{workerCount: 2, stashSize: uint64(fwstate.StashRecordSize) - 1},
 		{workerCount: 0, stashSize: 0},
 	} {
-		rc, err := fwstate.CreateMapV4(object, invalid.workerCount, 1024, invalid.stashSize)
-		require.Equal(t, -1, rc)
+		err = object.CreateMap(fwstate.MapConfig{WorkerCount: tc.workerCount, IndexSize: 1024, ExtraBucketCount: 64, StashSize: tc.stashSize})
+		requireCreateStatus(t, err, -1)
 		require.ErrorIs(t, err, syscall.EINVAL)
-		require.Zero(t, fwstate.MapV4StashSize(object))
+		require.Zero(t, xerror.Unwrap(object.StashLayout(0)).StashSize)
 	}
 
-	rc, _ := fwstate.CreateMapV4(object, 2, 1024, 0)
-	require.Zero(t, rc)
-	require.Equal(t, 64*fwstate.StashRecordSize, fwstate.MapV4StashSize(object))
-	require.Equal(t, fwstate.DefaultStashSize, fwstate.MapV4StashSize(object))
+	require.NoError(t, object.CreateMap(fwstate.MapConfig{WorkerCount: 2, IndexSize: 1024, ExtraBucketCount: 64}))
+	require.Equal(t, uint64(64*fwstate.StashRecordSize), xerror.Unwrap(object.StashLayout(0)).StashSize)
+	require.Equal(t, fwstate.DefaultStashSize, xerror.Unwrap(object.StashLayout(0)).StashSize)
 
-	rc, err := fwstate.CreateMapV4(object, 2, 1024, 1024)
-	require.Equal(t, -1, rc)
+	err = object.CreateMap(fwstate.MapConfig{WorkerCount: 2, IndexSize: 1024, ExtraBucketCount: 64, StashSize: 1024})
+	requireCreateStatus(t, err, -1)
 	require.ErrorIs(t, err, syscall.EEXIST)
-	require.Equal(t, fwstate.DefaultStashSize, fwstate.MapV4StashSize(object))
-	require.Less(t, fwstate.AgentFreeBytes(agent), freeBefore)
+	require.Equal(t, fwstate.DefaultStashSize, xerror.Unwrap(object.StashLayout(0)).StashSize)
+	require.Less(t, agent.BlockAllocatorFreeSize(), freeBefore)
 
-	fwstate.DestroyMapV4Object(agent, object)
-	require.Equal(t, freeBefore, fwstate.AgentFreeBytes(agent))
+	require.NoError(t, object.Free())
+	require.Equal(t, freeBefore, agent.BlockAllocatorFreeSize())
 }
 
-// verifies that a module config holds one read position per dataplane
-// worker and that creating and destroying it returns every byte it took,
-// the positions included, to the allocator.
+// Test_ModuleConfigMemory_FreedWithConfig verifies that destroying a config
+// returns every allocated byte, including its worker cursors.
+//
+// A live config owns one allocated read position per dataplane worker.
 func Test_ModuleConfigMemory_FreedWithConfig(t *testing.T) {
-	memCtx := testutils.NewMemoryContext("fwstate_config_cycle", datasize.MB*64)
-	defer memCtx.Free()
+	_, agent := newHarnessAgent(t)
 
-	agent := fwstate.NewHarnessAgent(memCtx)
-	require.NotNil(t, agent)
-
-	before := fwstate.AgentFreeBytes(agent)
-	positions, err := fwstate.CreateAndFreeModuleConfig(agent)
+	before := agent.BlockAllocatorFreeSize()
+	config, err := modulefwstate.NewModuleConfig(agent, "cycle", nil, "", "")
 	require.NoError(t, err)
-	require.Equal(t, uint64(fwstate.HarnessWorkerCount), positions)
-	require.Equal(t, before, fwstate.AgentFreeBytes(agent))
+	require.Equal(t, uint64(2), config.StashPositionCount())
+	require.NoError(t, config.Free())
+	require.Equal(t, before, agent.BlockAllocatorFreeSize())
 }
 
-// verifies that a stash whose buffers run out of memory part way frees
-// everything it allocated, leaves the object without a stash and lets a
-// later, smaller create succeed.
+// Test_MapObjectMemory_FailedStashCreateUnwinds verifies that partial stash
+// allocation failure releases every completed allocation.
+//
+// The object retains no stash, and a later smaller create succeeds.
 func Test_MapObjectMemory_FailedStashCreateUnwinds(t *testing.T) {
-	memCtx := testutils.NewMemoryContext("fwstate_map_obj_stash_fail", datasize.MB*64)
-	defer memCtx.Free()
+	_, agent := newHarnessAgent(t)
+	object, err := fwstate.NewMapObjectConfig(agent, "stash_fail_v4", fwstate.KindV4)
+	require.NoError(t, err)
+	freeBefore := agent.BlockAllocatorFreeSize()
 
-	agent := fwstate.NewHarnessAgent(memCtx)
-	require.NotNil(t, agent)
-	object := fwstate.NewBareMapV4Object(agent, "stash_fail_v4")
-	require.NotNil(t, object)
-	freeBefore := fwstate.AgentFreeBytes(agent)
-
-	// 65535 workers with a default buffer each need far more than the
-	// arena.
-	rc, err := fwstate.CreateMapV4(object, 65535, 1024, 0)
-	require.Equal(t, -1, rc)
+	// 65535 workers with a default buffer each need far more than the arena.
+	err = object.CreateMap(fwstate.MapConfig{WorkerCount: 65535, IndexSize: 1024, ExtraBucketCount: 64})
+	requireCreateStatus(t, err, -1)
 	require.ErrorIs(t, err, syscall.ENOMEM)
-	require.Equal(t, freeBefore, fwstate.AgentFreeBytes(agent))
-	require.Zero(t, fwstate.MapV4StashSize(object))
+	require.Equal(t, freeBefore, agent.BlockAllocatorFreeSize())
+	require.Zero(t, xerror.Unwrap(object.StashLayout(0)).StashSize)
 
-	rc, _ = fwstate.CreateMapV4(object, 2, 1024, 0)
-	require.Zero(t, rc)
-	require.Equal(t, fwstate.DefaultStashSize, fwstate.MapV4StashSize(object))
+	require.NoError(t, object.CreateMap(fwstate.MapConfig{WorkerCount: 2, IndexSize: 1024, ExtraBucketCount: 64}))
+	require.Equal(t, fwstate.DefaultStashSize, xerror.Unwrap(object.StashLayout(0)).StashSize)
 
-	fwstate.DestroyMapV4Object(agent, object)
+	require.NoError(t, object.Free())
 }
 
-// verifies that a map whose first layer cannot be built frees the stash it
-// had already allocated and stays uncreated.
+// Test_MapObjectMemory_FailedLayerCreateFreesStash verifies that first-layer
+// allocation failure releases the already allocated stash.
+//
+// The map stays uncreated and can subsequently be created with a smaller layer.
 func Test_MapObjectMemory_FailedLayerCreateFreesStash(t *testing.T) {
-	memCtx := testutils.NewMemoryContext("fwstate_map_obj_layer_fail", datasize.MB*64)
-	defer memCtx.Free()
-
-	agent := fwstate.NewHarnessAgent(memCtx)
-	require.NotNil(t, agent)
-	object := fwstate.NewBareMapV4Object(agent, "layer_fail_v4")
-	require.NotNil(t, object)
-	freeBefore := fwstate.AgentFreeBytes(agent)
+	_, agent := newHarnessAgent(t)
+	object, err := fwstate.NewMapObjectConfig(agent, "layer_fail_v4", fwstate.KindV4)
+	require.NoError(t, err)
+	freeBefore := agent.BlockAllocatorFreeSize()
 
 	// An index far beyond the arena cannot be allocated.
-	rc, _ := fwstate.CreateMapV4(object, 2, 1<<30, 0)
-	require.Equal(t, -1, rc)
-	require.Equal(t, freeBefore, fwstate.AgentFreeBytes(agent))
-	require.Zero(t, fwstate.MapV4StashSize(object))
+	err = object.CreateMap(fwstate.MapConfig{WorkerCount: 2, IndexSize: 1 << 30, ExtraBucketCount: 64})
+	requireCreateStatus(t, err, -1)
+	require.Error(t, err)
+	require.Equal(t, freeBefore, agent.BlockAllocatorFreeSize())
+	require.Zero(t, xerror.Unwrap(object.StashLayout(0)).StashSize)
 
-	rc, _ = fwstate.CreateMapV4(object, 2, 1024, 0)
-	require.Zero(t, rc)
+	require.NoError(t, object.CreateMap(fwstate.MapConfig{WorkerCount: 2, IndexSize: 1024, ExtraBucketCount: 64}))
 
-	fwstate.DestroyMapV4Object(agent, object)
+	require.NoError(t, object.Free())
+}
+
+// memoryNode selects exact context accounting from the production agent view.
+func memoryNode(t *testing.T, harness *dataplaneut.Harness, name string) ffi.AgentMemoryNode {
+	t.Helper()
+	for _, agent := range harness.SharedMemory().DPConfig(0).Agents() {
+		if agent.Name != "fwstate-test" {
+			continue
+		}
+		require.Len(t, agent.Instances, 1)
+		nodes := agent.Instances[0].MemoryTree
+		require.NotEmpty(t, nodes)
+		if name == "" {
+			return nodes[0]
+		}
+		for _, node := range nodes[1:] {
+			if node.Name == name && node.ParentIdx == 0 {
+				return node
+			}
+		}
+	}
+	t.Fatalf("memory context %q not found", name)
+	return ffi.AgentMemoryNode{}
+}
+
+// requireCreateStatus checks the native status without losing errno matching.
+func requireCreateStatus(t *testing.T, err error, status int) {
+	t.Helper()
+	var failure *fwstate.CreateMapError
+	require.ErrorAs(t, err, &failure)
+	require.Equal(t, status, failure.Status)
 }
