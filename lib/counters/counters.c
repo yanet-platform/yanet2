@@ -556,16 +556,3 @@ counter_storage_free(struct counter_storage *storage) {
 
 	memory_bfree(memory_context, storage, sizeof(struct counter_storage));
 }
-
-void
-counter_handle_accum(
-	uint64_t *accum,
-	size_t counter_size,
-	struct counter_value_handle *handle
-) {
-	// counter_size is the number of uint64_t elements, not bytes
-	uint64_t *value = counter_handle_get_value(handle);
-	for (size_t idx = 0; idx < counter_size; ++idx) {
-		accum[idx] = value[idx];
-	}
-}
