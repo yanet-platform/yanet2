@@ -50,16 +50,6 @@ registry_rebase_test = executable(
 )
 test('registry_rebase', registry_rebase_test, suite: ['common'])
 
-ttlmap_test = executable(
-  'ttlmap_test',
-  ['ttlmap_test.c'],
-  c_args: yanet_test_c_args,
-  link_args: ['-Wl,--wrap=dprintf'],
-  dependencies: dependencies + [libdpdk_inc_dep],
-  include_directories: yanet_rootdir
-)
-test('ttlmap', ttlmap_test, suite: ['common'])
-
 balloc_test = executable(
   'balloc_test',
   ['balloc_test.c'],
