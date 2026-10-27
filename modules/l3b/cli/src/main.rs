@@ -20,9 +20,12 @@ use ync::{
 
 mod document;
 
+#[cfg(test)]
+mod test;
+
 // These dependencies are exercised by the public-command integration tests.
 #[cfg(test)]
-use {http_body_util as _, hyper as _, hyper_util as _, serde_json as _, tempfile as _, tokio as _, zstd as _};
+use {serde_json as _, tokio as _};
 
 #[allow(clippy::std_instead_of_core, non_snake_case)]
 pub mod l3bpb {
@@ -444,19 +447,63 @@ impl TryFrom<&DestinationRuleDoc> for l3bpb::DestinationFilterRule {
     }
 }
 
-/// Reads and parses a YAML document from a file, attributing failures to the
-/// given verb as invalid input.
-fn load_document<T: for<'de> Deserialize<'de>>(
-    path: &Path,
-    verb: &'static str,
-    service: &L3BService,
-) -> Result<T, Error> {
-    let content = std::fs::read_to_string(path)
-        .map_err(|err| service.invalid(verb, format!("failed to read {}: {err}", path.display())))?;
-    document::validate(&content)
-        .map_err(|err| service.invalid(verb, format!("invalid document {}: {err}", path.display())))?;
-    serde_yaml::from_str(&content)
-        .map_err(|err| service.invalid(verb, format!("invalid document {}: {err}", path.display())))
+/// Reads a strict YAML document, retaining its source in every error.
+fn load_document<T: for<'de> Deserialize<'de>>(path: &Path) -> Result<T, String> {
+    let content = std::fs::read_to_string(path).map_err(|err| format!("failed to read {}: {err}", path.display()))?;
+    document::validate(&content).map_err(|err| format!("invalid document {}: {err}", path.display()))?;
+    serde_yaml::from_str(&content).map_err(|err| format!("invalid document {}: {err}", path.display()))
+}
+
+impl ServiceCmd {
+    /// Builds the wire configuration from command flags and an optional
+    /// document.
+    pub fn load(&self) -> Result<VirtualService, String> {
+        let mut service = VirtualService {
+            name: self.name.clone(),
+            hash_mask: self.hash_mask,
+            index_mask: self.index_mask,
+            ..Default::default()
+        };
+
+        if let Some(path) = &self.file {
+            let document: ServiceDocument = load_document(path)?;
+            service.real_servers = document.real_servers.iter().map(Into::into).collect();
+            service.source_filter_rules = document.source_filter_rules.iter().map(Into::into).collect();
+            service.session_index_size = document.session_index_size;
+            service.scheduler_flags = document.scheduler_flags;
+            service.flags = document.flags;
+            if let Some(marking) = &document.dscp {
+                service.dscp_flags = marking.dscp_flags();
+            }
+            service.session_timeouts = Some(l3bpb::SessionTimeouts {
+                tcp: document.session_timeouts.tcp,
+                tcp_syn: document.session_timeouts.tcp_syn,
+                tcp_syn_ack: document.session_timeouts.tcp_syn_ack,
+                tcp_fin: document.session_timeouts.tcp_fin,
+                udp: document.session_timeouts.udp,
+                other: document.session_timeouts.other,
+            });
+        }
+
+        Ok(service)
+    }
+}
+
+impl ModuleConfigCmd {
+    /// Builds destination rules without issuing a mutation.
+    pub fn load(&self) -> Result<ModuleConfig, String> {
+        let mut config = ModuleConfig {
+            name: self.name.clone(),
+            ..Default::default()
+        };
+        if let Some(path) = &self.file {
+            let document: ModuleConfigDocument = load_document(path)?;
+            config.destination_filter_rules = document
+                .try_rules()
+                .map_err(|err| format!("invalid document {}: destination_filter_rules: {err}", path.display()))?;
+        }
+        Ok(config)
+    }
 }
 
 /// One rendered session row: the client flow and its pinned backend.
@@ -583,7 +630,7 @@ impl L3BService {
     }
 
     pub async fn create_service(&mut self, cmd: ServiceCmd) -> Result<(), Error> {
-        let service = self.virtual_service(&cmd, "create-service").await?;
+        let service = cmd.load().map_err(|err| self.invalid("create-service", err))?;
         let request = CreateServiceRequest { service: Some(service) };
         log::trace!("create service request: {request:?}");
         self.service
@@ -596,7 +643,7 @@ impl L3BService {
     }
 
     pub async fn update_service(&mut self, cmd: ServiceCmd) -> Result<(), Error> {
-        let service = self.virtual_service(&cmd, "update-service").await?;
+        let service = cmd.load().map_err(|err| self.invalid("update-service", err))?;
         let request = UpdateServiceRequest { service: Some(service) };
         log::trace!("update service request: {request:?}");
         self.service
@@ -606,40 +653,6 @@ impl L3BService {
             .map_err(self.service.status("update-service"))?;
         output::success("update-service", format_args!("Updated service {}.", cmd.name));
         Ok(())
-    }
-
-    /// Builds a virtual service request from the flags, populating the real
-    /// servers and source filter rules from the document when one is given.
-    /// Errors attribute to the given verb.
-    async fn virtual_service(&mut self, cmd: &ServiceCmd, verb: &'static str) -> Result<VirtualService, Error> {
-        let mut service = VirtualService {
-            name: cmd.name.clone(),
-            hash_mask: cmd.hash_mask,
-            index_mask: cmd.index_mask,
-            ..Default::default()
-        };
-
-        if let Some(path) = &cmd.file {
-            let document: ServiceDocument = load_document(path, verb, self)?;
-            service.real_servers = document.real_servers.iter().map(Into::into).collect();
-            service.source_filter_rules = document.source_filter_rules.iter().map(Into::into).collect();
-            service.session_index_size = document.session_index_size;
-            service.scheduler_flags = document.scheduler_flags;
-            service.flags = document.flags;
-            if let Some(marking) = &document.dscp {
-                service.dscp_flags = marking.dscp_flags();
-            }
-            service.session_timeouts = Some(l3bpb::SessionTimeouts {
-                tcp: document.session_timeouts.tcp,
-                tcp_syn: document.session_timeouts.tcp_syn,
-                tcp_syn_ack: document.session_timeouts.tcp_syn_ack,
-                tcp_fin: document.session_timeouts.tcp_fin,
-                udp: document.session_timeouts.udp,
-                other: document.session_timeouts.other,
-            });
-        }
-
-        Ok(service)
     }
 
     pub async fn delete_service(&mut self, cmd: NameCmd) -> Result<(), Error> {
@@ -712,21 +725,7 @@ impl L3BService {
     }
 
     pub async fn update_module_config(&mut self, cmd: ModuleConfigCmd) -> Result<(), Error> {
-        let mut config = ModuleConfig {
-            name: cmd.name.clone(),
-            ..Default::default()
-        };
-
-        if let Some(path) = &cmd.file {
-            let document: ModuleConfigDocument = load_document(path, "update-module-config", self)?;
-            config.destination_filter_rules = document.try_rules().map_err(|err| {
-                self.invalid(
-                    "update-module-config",
-                    format!("invalid document {}: destination_filter_rules: {err}", path.display()),
-                )
-            })?;
-        }
-
+        let config = cmd.load().map_err(|err| self.invalid("update-module-config", err))?;
         let request = UpdateModuleConfigRequest { config: Some(config) };
         log::trace!("update module config request: {request:?}");
         self.service
