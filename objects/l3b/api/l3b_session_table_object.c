@@ -51,7 +51,9 @@ l3b_session_table_object_create(
 	l3s_config(worker_count, index_size, extra_bucket_count, &config);
 
 	if (fwtable_insert_layer_cp(
-		    &object->table, &config, &object->cp_object.memory_context
+		    &object->table,
+		    &config,
+		    &object->cp_object.entity.memory_context
 	    )) {
 		yanet_error_add(err, "failed to insert session table layer");
 		cp_object_fini(&object->cp_object);
@@ -77,16 +79,18 @@ l3b_session_table_object_destroy(struct cp_object *cp_object) {
 
 	// Destruction runs with no concurrent readers: release the parked
 	// layers first, then the whole active chain.
-	fwtable_free_stale(&object->table, &object->cp_object.memory_context);
+	fwtable_free_stale(
+		&object->table, &object->cp_object.entity.memory_context
+	);
 	fwmap_t *layer = ADDR_OF(&object->table.head);
 	while (layer != NULL) {
 		fwmap_t *next = (fwmap_t *)ADDR_OF(&layer->next);
-		fwmap_free(layer, &object->cp_object.memory_context);
+		fwmap_free(layer, &object->cp_object.entity.memory_context);
 		layer = next;
 	}
 
 	// Capture agent before fini zeroes it.
-	struct agent *agent = ADDR_OF(&cp_object->agent);
+	struct agent *agent = ADDR_OF(&cp_object->entity.agent);
 
 	cp_object_fini(cp_object);
 	memory_bfree(
@@ -102,7 +106,7 @@ l3b_session_table_object_free(struct cp_object *cp_object, yanet_error **err) {
 		return -1;
 	}
 
-	struct agent *owner = ADDR_OF(&cp_object->agent);
+	struct agent *owner = ADDR_OF(&cp_object->entity.agent);
 
 	l3b_session_table_object_destroy(cp_object);
 	agent_destroy_released(owner);

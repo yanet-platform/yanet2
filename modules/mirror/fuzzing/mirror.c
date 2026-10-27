@@ -38,20 +38,20 @@ mirror_test_config(struct cp_module **cp_module, yanet_error **err) {
 		"mirror_test",
 		sizeof(config->cp_module.name));
 	memory_context_init_from(
-		&config->cp_module.memory_context,
+		&config->cp_module.entity.memory_context,
 		&fuzz_params.mctx,
 		"mirror_test"
 	);
 
 	config->cp_module.dp_module_idx = 0;
-	config->cp_module.agent = NULL;
+	config->cp_module.entity.agent = NULL;
 
 	// Initialize counter registry.
 	//
 	// Needed by "mirror_module_config_update".
 	if (counter_registry_init(
 		    &config->cp_module.counter_registry,
-		    &config->cp_module.memory_context,
+		    &config->cp_module.entity.memory_context,
 		    0
 	    )) {
 		goto fail;

@@ -387,7 +387,7 @@ l3b_virtual_service_create(
 	// Every allocation below is attributed to the object's own memory
 	// context so the accounting travels with the object.
 	struct memory_context *memory_context =
-		&object->cp_object.memory_context;
+		&object->cp_object.entity.memory_context;
 	struct virtual_service *vs = &object->virtual_service;
 
 	// Zero initialization makes empty and partial classifier cleanup safe.
@@ -605,7 +605,8 @@ l3b_virtual_service_object_destroy(struct cp_object *cp_object) {
 		cp_object, struct l3b_virtual_service_object, cp_object
 	);
 	struct virtual_service *vs = &object->virtual_service;
-	struct memory_context *memory_context = &cp_object->memory_context;
+	struct memory_context *memory_context =
+		&cp_object->entity.memory_context;
 
 	// Classifier release is safe for zeroed families of a rule-less
 	// service.
@@ -637,7 +638,7 @@ l3b_virtual_service_object_destroy(struct cp_object *cp_object) {
 	}
 
 	// Capture agent before fini zeroes it.
-	struct agent *agent = ADDR_OF(&cp_object->agent);
+	struct agent *agent = ADDR_OF(&cp_object->entity.agent);
 
 	cp_object_fini(cp_object);
 	memory_bfree(
@@ -653,7 +654,7 @@ l3b_virtual_service_free(struct cp_object *cp_object, yanet_error **err) {
 		return -1;
 	}
 
-	struct agent *owner = ADDR_OF(&cp_object->agent);
+	struct agent *owner = ADDR_OF(&cp_object->entity.agent);
 
 	// The session table outlives the service and is destroyed through its
 	// own handle.

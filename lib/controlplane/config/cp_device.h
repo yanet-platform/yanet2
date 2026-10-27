@@ -4,6 +4,7 @@
 
 #include "lib/counters/counters.h"
 
+#include "lib/controlplane/config/cp_entity.h"
 #include "lib/controlplane/config/defines.h"
 
 #include "lib/controlplane/config/registry.h"
@@ -31,23 +32,23 @@ struct cp_device_entry {
 };
 
 struct cp_device {
-	struct registry_item config_item;
+	struct cp_entity entity;
 	char type[CP_DEVICE_TYPE_LEN];
 	char name[CP_DEVICE_NAME_LEN];
 
 	uint64_t dp_device_idx;
-
-	// Agent that owns this device. Set by cp_device_init; used by the
-	// typed free routine to resolve the memory context for reclamation.
-	struct agent *agent;
-
-	struct memory_context memory_context;
 
 	struct counter_registry counter_registry;
 
 	struct cp_device_entry *input_pipelines;
 	struct cp_device_entry *output_pipelines;
 };
+// The entity base must sit at offset zero: registry items hand out bare
+// pointers into it.
+_Static_assert(
+	offsetof(struct cp_device, entity) == 0,
+	"struct cp_device must embed the entity base at offset zero"
+);
 
 struct dp_config;
 struct cp_config_gen;
@@ -128,15 +129,16 @@ cp_device_fini(struct cp_device *self);
 // with errno EAGAIN while a live generation still holds the device; the
 // caller must keep its handle and retry once the generations drain.
 //
-// A successful call also marks the device destroying, holding it against
-// a racing re-registration, and takes one destruction hold of the owning
+// A successful call also takes one destruction hold of the owning
 // agent: the caller must run the device's typed destructor and then
 // return that hold with agent_destroy_released, on storage only the hold
 // keeps alive.
 //
-// The count is read under the configuration lock, which every registry
-// mutation also runs under, so the answer is stable against concurrent
-// generation installs and releases in other processes.
+// Gains and registry mutations run under the configuration lock; the
+// final release of a retired generation drops references without it, so
+// a racing drop can lower the count after the read — which can only
+// postpone a destroy attempt, never free an item a registry still
+// holds.
 int
 cp_device_try_destroy(struct cp_device *self, yanet_error **err);
 
@@ -148,8 +150,7 @@ cp_device_try_destroy(struct cp_device *self, yanet_error **err);
  */
 
 struct cp_device_registry {
-	struct memory_context *memory_context;
-	struct registry registry;
+	struct cp_entity_registry entity_registry;
 };
 
 int
@@ -199,5 +200,5 @@ cp_device_registry_delete(
 
 static inline uint64_t
 cp_device_registry_capacity(struct cp_device_registry *device_registry) {
-	return device_registry->registry.capacity;
+	return device_registry->entity_registry.registry.capacity;
 }

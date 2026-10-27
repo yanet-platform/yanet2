@@ -84,12 +84,14 @@ backing_test_add_device(
 ) {
 	struct dp_config *cfg = &fixture->dp_config;
 	memset(cp_device, 0, sizeof(*cp_device));
-	registry_item_init(&cp_device->config_item);
+	registry_item_init(&cp_device->entity.config_item);
 	snprintf(cp_device->type, sizeof(cp_device->type), "%s", "test");
 	snprintf(cp_device->name, sizeof(cp_device->name), "%s", name);
 	cp_device->dp_device_idx = 0;
 	memory_context_init(
-		&cp_device->memory_context, name, &fixture->block_allocator
+		&cp_device->entity.memory_context,
+		name,
+		&fixture->block_allocator
 	);
 	if (counter_registry_init(
 		    &cp_device->counter_registry, &cfg->memory_context, 1
@@ -111,9 +113,13 @@ backing_test_add_device(
 	SET_OFFSET_OF(&cp_device->output_pipelines, entries[1]);
 
 	int ret = registry_insert(
-		&gen->device_registry.registry, NULL, &cp_device->config_item
+		&gen->device_registry.entity_registry.registry,
+		NULL,
+		&cp_device->entity.config_item
 	);
-	registry_sanitize_index(&gen->device_registry.registry, NULL);
+	registry_sanitize_index(
+		&gen->device_registry.entity_registry.registry, NULL
+	);
 	return ret;
 }
 
@@ -132,37 +138,40 @@ backing_test_gen_init(
 	if (registry_init(
 		    &cfg->memory_context,
 		    NULL,
-		    &gen->module_registry.registry,
+		    &gen->module_registry.entity_registry.registry,
 		    BACKING_TEST_REGISTRY_CAPACITY
 	    )) {
 		return -1;
 	}
 	SET_OFFSET_OF(
-		&gen->module_registry.memory_context, &cfg->memory_context
+		&gen->module_registry.entity_registry.memory_context,
+		&cfg->memory_context
 	);
 
 	if (registry_init(
 		    &cfg->memory_context,
 		    NULL,
-		    &gen->device_registry.registry,
+		    &gen->device_registry.entity_registry.registry,
 		    BACKING_TEST_REGISTRY_CAPACITY
 	    )) {
 		return -1;
 	}
 	SET_OFFSET_OF(
-		&gen->device_registry.memory_context, &cfg->memory_context
+		&gen->device_registry.entity_registry.memory_context,
+		&cfg->memory_context
 	);
 
 	if (registry_init(
 		    &cfg->memory_context,
 		    NULL,
-		    &gen->object_registry.registry,
+		    &gen->object_registry.entity_registry.registry,
 		    BACKING_TEST_REGISTRY_CAPACITY
 	    )) {
 		return -1;
 	}
 	SET_OFFSET_OF(
-		&gen->object_registry.memory_context, &cfg->memory_context
+		&gen->object_registry.entity_registry.memory_context,
+		&cfg->memory_context
 	);
 
 	return 0;
