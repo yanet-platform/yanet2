@@ -1808,67 +1808,6 @@ agent_dp_config(struct agent *agent) {
 	return ADDR_OF(&agent->dp_config);
 }
 
-void *
-agent_storage_read(struct agent *agent, const char *name) {
-	struct agent_storage *storage = ADDR_OF(&agent->storage);
-	while (storage != NULL) {
-		if (strncmp(storage->name, name, 80) == 0) {
-			return storage->data;
-		}
-		storage = ADDR_OF(&storage->next);
-	}
-	return NULL;
-}
-
-int
-agent_storage_put(
-	struct agent *agent,
-	const char *name,
-	void *data,
-	size_t size,
-	yanet_error **err
-) {
-	struct agent_storage *storage = ADDR_OF(&agent->storage);
-	struct agent_storage *prev = NULL;
-	struct memory_context *mctx = &agent->memory_context;
-
-	struct agent_storage *new_storage =
-		memory_balloc(mctx, sizeof(struct agent_storage) + size);
-	if (new_storage == NULL) {
-		yanet_error_add(err, "memory not enough");
-		return -1;
-	}
-
-	memcpy(new_storage->data, data, size);
-	strtcpy(new_storage->name, name, sizeof(new_storage->name));
-	new_storage->size = size;
-	new_storage->next = NULL;
-
-	while (storage != NULL) {
-		struct agent_storage *next = ADDR_OF(&storage->next);
-		if (strncmp(storage->name, name, 80) == 0) {
-			memory_bfree(
-				mctx,
-				storage,
-				sizeof(struct agent_storage) + storage->size
-			);
-			SET_OFFSET_OF(&new_storage->next, next);
-			goto set_prev;
-		}
-		prev = storage;
-		storage = next;
-	}
-
-set_prev:
-	if (prev != NULL) {
-		SET_OFFSET_OF(&prev->next, new_storage);
-	} else {
-		SET_OFFSET_OF(&agent->storage, new_storage);
-	}
-
-	return 0;
-}
-
 // The caller must hold the agent lock (the registry structure belongs
 // to it); a configuration-lock holder also suffices, since every splice
 // takes both.

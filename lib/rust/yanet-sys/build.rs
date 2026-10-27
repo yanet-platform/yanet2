@@ -127,7 +127,6 @@ fn generate_bindings(flags: &CFlags, shim_dir: &Path, out: &Path) {
         .opaque_type("dp_config")
         .opaque_type("cp_config")
         .opaque_type("agent")
-        .opaque_type("agent_storage")
         .opaque_type("cp_config_gen")
         .opaque_type("config_gen_ectx")
         .opaque_type("device_entry_ectx")
