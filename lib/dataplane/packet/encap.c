@@ -12,22 +12,6 @@
 #include "common/network.h"
 #include "lib/dataplane/packet/data.h"
 
-int
-packet_prepend(struct packet *packet, const void *header, const size_t size) {
-	struct rte_mbuf *mbuf = packet_to_mbuf(packet);
-
-	if (packet_headroom_prepend(mbuf, size) == NULL) {
-		return -1;
-	}
-	memcpy(rte_pktmbuf_mtod(mbuf, char *), header, size);
-
-	packet->network_header.offset += size;
-	packet->transport_header.offset += size;
-	packet_refresh_data_len(packet);
-
-	return 0;
-}
-
 static int
 packet_network_prepend(
 	struct packet *packet,
