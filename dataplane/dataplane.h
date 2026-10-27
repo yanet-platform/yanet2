@@ -59,16 +59,7 @@ dataplane_start(struct dataplane *dataplane);
 int
 dataplane_stop(struct dataplane *dataplane);
 
-struct dp_config;
-struct cp_config_gen;
 struct packet_list;
-
-void
-dataplane_route_pipeline(
-	struct dp_config *dp_config,
-	struct cp_config_gen *cp_config_gen,
-	struct packet_list *packets
-);
 
 void
 dataplane_drop_packets(
