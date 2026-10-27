@@ -208,33 +208,6 @@ parse_ipv6_header(struct packet *packet, uint16_t *type, uint16_t *offset);
 int
 parse_packet(struct packet *packet);
 
-void
-packet_list_print(struct packet_list *list);
-
-/**
- * @brief Print contents of an rte_mbuf packet in a detailed format if
- * ENABLE_TRACE_LOG is defined
- *
- * Prints detailed information about DPDK mbuf packet contents using LOG_TRACE
- * including:
- * - Ethernet header fields (MAC addresses, ether type)
- * - ARP header fields (if packet is ARP)
- * - IP header fields (v4 or v6, including addresses, protocol, TTL/hop limit)
- * - Protocol header fields:
- *   - UDP (ports, length, checksum)
- *   - TCP (ports, sequence numbers, flags, window)
- *   - ICMP (type, code, checksum)
- *   - ICMPv6 (type, code, checksum)
- * - Final packet data length
- *
- * Used for detailed packet inspection during debugging, development and
- * verification of packet processing.
- *
- * @param mbuf Pointer to the DPDK mbuf structure containing packet to print
- */
-void
-logtrace_rte_mbuf(struct rte_mbuf *mbuf);
-
 struct yanet_ipv6_ext_2byte {
 	uint8_t next_header;
 	uint8_t extension_length;
