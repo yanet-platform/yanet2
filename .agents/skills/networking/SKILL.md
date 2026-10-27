@@ -27,7 +27,7 @@ fresh subagent and return only the analysis.
 
 NAT64 (RFC 6146/6052/7915), MPLS (RFC 3031/3032/5332), stateful ACL and connection tracking, load balancing (Maglev, ECMP, DSR, IPIP/GRE), routing (LPM, ECMP, next-hop resolution), decapsulation (RFC 2003/2784/7348), DSCP/DiffServ (RFC 2474/2597/3246); DPDK `rte_mbuf`, `rte_lpm`, `rte_hash`, RSS/RETA, PMD offloads, hugepages/NUMA/mempool caching, run-to-completion workers with RCU config swaps; parsing order L2→VLAN→L3→L4, checksums (incremental for NAT), MTU/PTB signalling, TTL handling.
 
-YANET specifics: modules receive a `packet_front` and emit through `packet_front_output`/`packet_front_drop`; config is a pointer swap in shared memory; `fwstate` uses `common/ttlmap/` 5-tuple tables coupled with `acl`.
+YANET specifics: modules receive a `packet_front` and emit through `packet_front_output`/`packet_front_drop`; config is a pointer swap in shared memory; `fwstate` keeps 5-tuple state in `lib/statemap` tables, held in standalone fwstate-map objects that `acl` and `fwstate` configs link by name.
 
 ## Answer (≤ 40 lines, skip empty dimensions)
 
