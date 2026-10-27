@@ -44,11 +44,13 @@ l3b_test_config(struct cp_module **cp_module) {
 		"l3b_test",
 		sizeof(config->cp_module.name));
 	memory_context_init_from(
-		&config->cp_module.memory_context, &fuzz_params.mctx, "l3b_test"
+		&config->cp_module.entity.memory_context,
+		&fuzz_params.mctx,
+		"l3b_test"
 	);
 
 	config->cp_module.dp_module_idx = 0;
-	config->cp_module.agent = NULL;
+	config->cp_module.entity.agent = NULL;
 
 	*cp_module = (struct cp_module *)config;
 	return 0;
