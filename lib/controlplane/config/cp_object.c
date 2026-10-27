@@ -192,9 +192,7 @@ static const struct cp_entity_desc cp_object_entity_desc = {
 		},
 	.noun = "object",
 	.name_offset = offsetof(struct cp_object, name),
-	.name_len = CP_OBJECT_NAME_LEN,
 	.type_offset = offsetof(struct cp_object, type),
-	.type_len = CP_OBJECT_TYPE_LEN,
 	.link_counters = cp_object_link_counters,
 };
 
