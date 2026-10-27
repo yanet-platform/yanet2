@@ -40,9 +40,9 @@ cp_object_init(
 		&self->memory_context, &agent->memory_context, name
 	);
 
-	registry_item_init(&self->config_item);
+	registry_item_init(&self->entity.config_item);
 
-	SET_OFFSET_OF(&self->agent, agent);
+	SET_OFFSET_OF(&self->entity.agent, agent);
 
 	if (counter_registry_init(
 		    &self->counter_registry, &self->memory_context, 0
@@ -79,26 +79,61 @@ cp_object_fini(struct cp_object *self) {
 	counter_registry_fini(&self->link_counter_registry);
 	counter_registry_fini(&self->counter_registry);
 
-	SET_OFFSET_OF(&self->agent, NULL);
+	SET_OFFSET_OF(&self->entity.agent, NULL);
 
 	memory_context_fini(&self->memory_context);
 }
 
-// The item-to-owner mapping for the generic registry wrapper layer,
-// including its allocation-free teardown fallback.
-static struct agent *
-object_item_owner(struct registry_item *item) {
-	struct cp_object *object =
-		container_of(item, struct cp_object, config_item);
-	return ADDR_OF(&object->agent);
-}
+// Lookup key for a registry slot: the object identity is the (type, name)
+// pair.
+struct cp_object_cmp_data {
+	char type[CP_OBJECT_TYPE_LEN];
+	char name[CP_OBJECT_NAME_LEN];
+};
 
 static int
-cp_object_registry_item_cmp(const struct registry_item *item, const void *data);
+cp_object_registry_item_cmp(
+	const struct registry_item *item, const void *data
+) {
+	const struct cp_object *object =
+		container_of(item, struct cp_object, entity);
+
+	const struct cp_object_cmp_data *cmp_data =
+		(const struct cp_object_cmp_data *)data;
+
+	int cmp = strncmp(object->name, cmp_data->name, sizeof(object->name));
+	if (cmp) {
+		return cmp;
+	}
+
+	return strncmp(object->type, cmp_data->type, sizeof(object->type));
+}
+
 static uint64_t
-cp_object_registry_key_hash(const void *data);
+cp_object_registry_key_hash(const void *data) {
+	const struct cp_object_cmp_data *cmp_data =
+		(const struct cp_object_cmp_data *)data;
+
+	return registry_hash_name_pair(
+		cmp_data->name,
+		sizeof(cmp_data->name),
+		cmp_data->type,
+		sizeof(cmp_data->type)
+	);
+}
+
 static uint64_t
-cp_object_registry_item_hash(const struct registry_item *item);
+cp_object_registry_item_hash(const struct registry_item *item) {
+	const struct cp_object *object =
+		container_of(item, struct cp_object, entity);
+
+	return registry_hash_name_pair(
+		object->name,
+		sizeof(object->name),
+		object->type,
+		sizeof(object->type)
+	);
+}
 
 // Counter continuity of an object upsert: both the object's own counters
 // and its link counters continue from the displaced object's.
@@ -109,10 +144,10 @@ cp_object_link_counters(
 	yanet_error **err
 ) {
 	struct cp_object *new_object =
-		container_of(new_item, struct cp_object, config_item);
+		container_of(new_item, struct cp_object, entity);
 	struct cp_object *old_object =
 		(old_item != NULL)
-			? container_of(old_item, struct cp_object, config_item)
+			? container_of(old_item, struct cp_object, entity)
 			: NULL;
 
 	if (counter_registry_link(
@@ -156,30 +191,12 @@ static const struct cp_entity_desc cp_object_entity_desc = {
 			.item_hash = cp_object_registry_item_hash,
 		},
 	.noun = "object",
-	.item_owner = object_item_owner,
 	.name_offset = offsetof(struct cp_object, name),
 	.name_len = CP_OBJECT_NAME_LEN,
 	.type_offset = offsetof(struct cp_object, type),
 	.type_len = CP_OBJECT_TYPE_LEN,
 	.link_counters = cp_object_link_counters,
 };
-
-static int
-cp_object_registry_item_cmp(
-	const struct registry_item *item, const void *data
-) {
-	return cp_entity_item_cmp(&cp_object_entity_desc, item, data);
-}
-
-static uint64_t
-cp_object_registry_key_hash(const void *data) {
-	return cp_entity_key_hash(&cp_object_entity_desc, data);
-}
-
-static uint64_t
-cp_object_registry_item_hash(const struct registry_item *item) {
-	return cp_entity_item_hash(&cp_object_entity_desc, item);
-}
 
 int
 cp_object_registry_init(
@@ -226,13 +243,13 @@ cp_object_registry_copy(
 int
 cp_object_try_destroy(struct cp_object *self, yanet_error **err) {
 	return cp_entity_try_destroy(
-		&self->config_item, &cp_object_entity_desc, err
+		&self->entity.config_item, &cp_object_entity_desc, err
 	);
 }
 
 void
 cp_object_registry_fini(struct cp_object_registry *registry) {
-	cp_entity_registry_fini(&registry->registry, &cp_object_entity_desc);
+	cp_entity_registry_fini(&registry->registry);
 }
 
 struct cp_object *
@@ -241,7 +258,7 @@ cp_object_registry_get(struct cp_object_registry *registry, uint64_t index) {
 	if (item == NULL) {
 		return NULL;
 	}
-	return container_of(item, struct cp_object, config_item);
+	return container_of(item, struct cp_object, entity);
 }
 
 int
@@ -251,11 +268,16 @@ cp_object_registry_lookup_index(
 	const char *object_name,
 	uint64_t *index
 ) {
-	struct cp_entity_key key;
-	cp_entity_key_set(&key, object_type, object_name);
+	struct cp_object_cmp_data cmp_data;
+	strtcpy(cmp_data.type, object_type, sizeof(cmp_data.type));
+	strtcpy(cmp_data.name, object_name, sizeof(cmp_data.name));
 
-	return cp_entity_registry_lookup_index(
-		&registry->registry, &cp_object_entity_desc, &key, index
+	return registry_lookup(
+		&registry->registry,
+		&cp_object_entity_desc.keys,
+		cp_object_registry_item_cmp,
+		&cmp_data,
+		index
 	);
 }
 
@@ -265,16 +287,18 @@ cp_object_registry_lookup(
 	const char *object_type,
 	const char *object_name
 ) {
-	struct cp_entity_key key;
-	cp_entity_key_set(&key, object_type, object_name);
-
-	struct registry_item *item = cp_entity_registry_lookup(
-		&registry->registry, &cp_object_entity_desc, &key
-	);
-	if (item == NULL) {
+	uint64_t index;
+	if (cp_object_registry_lookup_index(
+		    registry, object_type, object_name, &index
+	    )) {
 		return NULL;
 	}
-	return container_of(item, struct cp_object, config_item);
+
+	return container_of(
+		registry_get(&registry->registry, index),
+		struct cp_object,
+		entity
+	);
 }
 
 int
@@ -285,14 +309,16 @@ cp_object_registry_upsert(
 	struct cp_object *new_object,
 	yanet_error **err
 ) {
-	struct cp_entity_key key;
-	cp_entity_key_set(&key, object_type, object_name);
+	struct cp_object_cmp_data cmp_data;
+	strtcpy(cmp_data.type, object_type, sizeof(cmp_data.type));
+	strtcpy(cmp_data.name, object_name, sizeof(cmp_data.name));
 
 	return cp_entity_registry_upsert(
 		&registry->registry,
 		&cp_object_entity_desc,
-		&key,
-		&new_object->config_item,
+		cp_object_registry_item_cmp,
+		&cmp_data,
+		&new_object->entity.config_item,
 		err
 	);
 }
@@ -303,13 +329,14 @@ cp_object_registry_delete(
 	const char *object_type,
 	const char *object_name
 ) {
-	struct cp_entity_key key;
-	cp_entity_key_set(&key, object_type, object_name);
+	struct cp_object_cmp_data cmp_data;
+	strtcpy(cmp_data.type, object_type, sizeof(cmp_data.type));
+	strtcpy(cmp_data.name, object_name, sizeof(cmp_data.name));
 
 	return cp_entity_registry_delete(
 		&registry->registry,
 		&cp_object_entity_desc,
-		cp_object_entity_desc.keys.cmp,
-		&key
+		cp_object_registry_item_cmp,
+		&cmp_data
 	);
 }

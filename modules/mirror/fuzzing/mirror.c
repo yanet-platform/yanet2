@@ -44,7 +44,7 @@ mirror_test_config(struct cp_module **cp_module, yanet_error **err) {
 	);
 
 	config->cp_module.dp_module_idx = 0;
-	config->cp_module.agent = NULL;
+	config->cp_module.entity.agent = NULL;
 
 	// Initialize counter registry.
 	//

@@ -16,7 +16,7 @@ route_fib_object_of(struct cp_object *cp_object) {
 static void
 route_fib_object_destroy(struct cp_object *cp_object) {
 	struct route_fib_object *self = route_fib_object_of(cp_object);
-	struct agent *agent = ADDR_OF(&cp_object->agent);
+	struct agent *agent = ADDR_OF(&cp_object->entity.agent);
 
 	route_fib_fini(&self->fib, &cp_object->memory_context);
 	cp_object_fini(cp_object);
@@ -72,7 +72,7 @@ route_fib_object_free(struct cp_object *cp_object, yanet_error **err) {
 		return -1;
 	}
 
-	struct agent *owner = ADDR_OF(&cp_object->agent);
+	struct agent *owner = ADDR_OF(&cp_object->entity.agent);
 
 	route_fib_object_destroy(cp_object);
 	agent_destroy_released(owner);

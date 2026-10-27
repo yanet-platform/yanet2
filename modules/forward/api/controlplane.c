@@ -61,7 +61,7 @@ forward_module_config_destroy(struct cp_module *cp_module) {
 	memset(net6, 0, sizeof(*net6));
 
 	// Capture agent before fini zeroes it.
-	struct agent *agent = ADDR_OF(&cp_module->agent);
+	struct agent *agent = ADDR_OF(&cp_module->entity.agent);
 
 	cp_module_fini(cp_module);
 
@@ -118,7 +118,7 @@ forward_module_config_free(struct cp_module *cp_module, yanet_error **err) {
 		return -1;
 	}
 
-	struct agent *owner = ADDR_OF(&cp_module->agent);
+	struct agent *owner = ADDR_OF(&cp_module->entity.agent);
 
 	forward_module_config_destroy(cp_module);
 	agent_destroy_released(owner);

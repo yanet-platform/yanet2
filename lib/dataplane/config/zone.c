@@ -110,7 +110,7 @@ dp_config_commit_gen_modules(
 			continue;
 		}
 		struct cp_module *cp_module =
-			container_of(item, struct cp_module, config_item);
+			container_of(item, struct cp_module, entity);
 		if (cp_module->dp_module_idx >= dp_config->module_count) {
 			LOG(ERROR,
 			    "commit skipped for module '%s:%s': no dataplane "
@@ -155,7 +155,7 @@ dp_config_commit_gen_devices(
 			continue;
 		}
 		struct cp_device *cp_device =
-			container_of(item, struct cp_device, config_item);
+			container_of(item, struct cp_device, entity);
 		if (cp_device->dp_device_idx >= dp_config->device_count) {
 			LOG(ERROR,
 			    "commit skipped for device '%s:%s': no dataplane "

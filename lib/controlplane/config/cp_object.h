@@ -4,6 +4,7 @@
 
 #include "lib/counters/counters.h"
 
+#include "lib/controlplane/config/cp_entity.h"
 #include "lib/controlplane/config/defines.h"
 #include "lib/controlplane/config/registry.h"
 
@@ -24,7 +25,7 @@ struct cp_object;
  * purpose is to be referenced by name from other entities.
  */
 struct cp_object {
-	struct registry_item config_item;
+	struct cp_entity entity;
 
 	char type[CP_OBJECT_TYPE_LEN];
 	char name[CP_OBJECT_NAME_LEN];
@@ -39,9 +40,6 @@ struct cp_object {
 	// its own counter storage from this registry, keeping the counter
 	// definitions on the object and the per-link values independent.
 	struct counter_registry link_counter_registry;
-
-	// Controlplane agent the configuration belongs to.
-	struct agent *agent;
 
 	// Memory context for the object's own allocations.
 	struct memory_context memory_context;
