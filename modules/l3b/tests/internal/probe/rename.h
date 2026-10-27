@@ -17,3 +17,4 @@
 #define classify_join_compact l3b_probe_classify_join_compact
 #define classify_coverage_map l3b_probe_classify_coverage_map
 #define classify_decode l3b_probe_classify_decode
+#define classify_join_rules l3b_probe_classify_join_rules

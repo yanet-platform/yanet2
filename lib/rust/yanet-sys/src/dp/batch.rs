@@ -14,7 +14,8 @@ use crate::bindings;
 /// Neither `Send` nor `Sync`; packets it hands out carry its brand `'id`
 /// and are accepted back only by the batch of the same call.
 ///
-/// A packet of one call's batch is refused by the batch of another call:
+/// A packet of one call's batch is refused by the batch of another call (a
+/// lifetime error, which has no code):
 ///
 /// ```compile_fail
 /// use yanet_sys::dp::Batch;
@@ -52,7 +53,8 @@ pub struct Batch<'id> {
 /// packet that is never disposed of is on no list
 /// after the call, as one a C handler forgets.
 ///
-/// A packet cannot be kept beyond the call it was taken in:
+/// A packet cannot be kept beyond the call it was taken in (a lifetime error,
+/// which has no code):
 ///
 /// ```compile_fail
 /// use yanet_sys::dp::{Batch, Packet};
@@ -122,13 +124,16 @@ pub enum DscpMark {
 /// Branded with the call it was made in, invariantly, so a batch redirects
 /// only to a target of its own call's context.
 ///
-/// A target of one call's context is refused by the batch of another call:
+/// A target of one call's context is refused by the batch of another call (a
+/// lifetime error, which has no code):
 ///
 /// ```compile_fail
-/// # use yanet_sdk_testing::dp::Model;
-/// # use yanet_sys::dp::{Batch, Cx, Device};
-/// # type Mine = Model<Device>;
-/// fn cross<'a, 'b>(cx: &Cx<'a, Mine>, device: &'a Device, batch: &mut Batch<'b>) {
+/// # use yanet_sys::dp::{Batch, Cx, Device, Module};
+/// fn cross<'a, 'b, M: Module<Config = Device>>(
+///     cx: &Cx<'a, M>,
+///     device: &'a Device,
+///     batch: &mut Batch<'b>,
+/// ) {
 ///     if let (Some(packet), Some(target)) = (batch.next(), device.resolve(cx)) {
 ///         batch.redirect(packet, target);
 ///     }
@@ -138,10 +143,12 @@ pub enum DscpMark {
 /// Redirecting within the call is accepted:
 ///
 /// ```
-/// # use yanet_sdk_testing::dp::Model;
-/// # use yanet_sys::dp::{Batch, Cx, Device};
-/// # type Mine = Model<Device>;
-/// fn cross<'a, 'b>(cx: &Cx<'a, Mine>, device: &'a Device, batch: &mut Batch<'a>) {
+/// # use yanet_sys::dp::{Batch, Cx, Device, Module};
+/// fn cross<'a, M: Module<Config = Device>>(
+///     cx: &Cx<'a, M>,
+///     device: &'a Device,
+///     batch: &mut Batch<'a>,
+/// ) {
 ///     if let (Some(packet), Some(target)) = (batch.next(), device.resolve(cx)) {
 ///         batch.redirect(packet, target);
 ///     }
@@ -295,7 +302,7 @@ impl<'id> Batch<'id> {
     ///
     /// No packet is taken while the walk lives:
     ///
-    /// ```compile_fail
+    /// ```compile_fail,E0502
     /// use yanet_sys::dp::Batch;
     /// fn peek_and_take(batch: &mut Batch<'_>) {
     ///     let mut views = batch.peek();
@@ -914,207 +921,5 @@ impl<'b> PacketView<'b> {
     }
 }
 
-#[cfg(all(test, not(miri)))]
-mod tests {
-    extern crate std;
-
-    use std::{vec, vec::Vec};
-
-    use super::*;
-
-    /// An mbuf with the given offset and lengths over a buffer of the test,
-    /// zeroed otherwise.
-    fn mbuf(buffer: &mut [u8], data_off: u16, data_len: u16) -> bindings::rte_mbuf {
-        bindings::rte_mbuf {
-            buf_addr: buffer.as_mut_ptr().cast(),
-            buf_len: buffer.len() as u16,
-            data_off,
-            data_len,
-            pkt_len: u32::from(data_len),
-            ..Default::default()
-        }
-    }
-
-    /// A front whose input and output lists hold the given packets and whose
-    /// counters are the given values, which need not match the lists.
-    fn front(
-        input: &mut [bindings::packet],
-        output: &mut [bindings::packet],
-        counts: [u64; 4],
-    ) -> bindings::packet_front {
-        let mut front = bindings::packet_front {
-            input: list(input),
-            output: list(output),
-            ..Default::default()
-        };
-        [
-            front.input_count,
-            front.input_bytes,
-            front.output_count,
-            front.output_bytes,
-        ] = counts;
-        front
-    }
-
-    /// An intrusive list of the packets in order, as the C append builds it;
-    /// the packets stay where they are.
-    fn list(packets: &mut [bindings::packet]) -> bindings::packet_list {
-        let mut next: *mut bindings::packet = core::ptr::null_mut();
-        let mut last: *mut *mut bindings::packet = core::ptr::null_mut();
-        for packet in packets.iter_mut().rev() {
-            packet.next = next;
-            if last.is_null() {
-                last = &raw mut packet.next;
-            }
-            next = packet;
-        }
-        bindings::packet_list { first: next, last }
-    }
-
-    /// Indices into `packets` of a front's output list in order, its counters
-    /// and whether its input list is empty.
-    fn observe(front: &bindings::packet_front, packets: &[bindings::packet]) -> (Vec<usize>, [u64; 4], bool) {
-        let index = |cursor: *mut bindings::packet| {
-            packets
-                .iter()
-                .position(|packet| core::ptr::eq(packet, cursor))
-                .expect("a packet of this test")
-        };
-        let mut order = Vec::new();
-        let mut cursor = front.output.first;
-        while !cursor.is_null() {
-            let idx = index(cursor);
-            order.push(idx);
-            cursor = packets[idx].next;
-        }
-        let counts = [
-            front.input_count,
-            front.input_bytes,
-            front.output_count,
-            front.output_bytes,
-        ];
-        (order, counts, front.input.first.is_null() && front.input.last.is_null())
-    }
-
-    /// verifies that the Rust twin of `packet_front_pass` moves the same
-    /// packets and counters as the C routine, for empty and filled lists and
-    /// for counters that already disagree with the input list, as after a
-    /// packet was taken.
-    #[test]
-    fn test_pass_all_rust_twin_matches_c() {
-        let f = |inputs: usize, outputs: usize, counts: [u64; 4]| {
-            let mut c_packets = vec![bindings::packet::default(); inputs + outputs];
-            let mut rust_packets = vec![bindings::packet::default(); inputs + outputs];
-            let (c_in, c_out) = c_packets.split_at_mut(inputs);
-            let (rust_in, rust_out) = rust_packets.split_at_mut(inputs);
-            let mut in_c = front(c_in, c_out, counts);
-            let mut in_rust = front(rust_in, rust_out, counts);
-
-            // SAFETY: the fronts are this test's; the batch reads only its
-            // front, and the context and worker it is given are never read.
-            unsafe {
-                bindings::yanet_sys_dp_front_pass(&raw mut in_c);
-                Batch::new(NonNull::from(&mut in_rust), NonNull::dangling(), NonNull::dangling()).pass_all();
-            }
-
-            assert_eq!(
-                observe(&in_c, &c_packets),
-                observe(&in_rust, &rust_packets),
-                "{inputs} input, {outputs} output, counters {counts:?}"
-            );
-        };
-
-        // Empty front.
-        f(0, 0, [0, 0, 0, 0]);
-        // Input only.
-        f(3, 0, [3, 180, 0, 0]);
-        // Output only.
-        f(0, 2, [0, 0, 2, 120]);
-        // Input appended after output.
-        f(2, 2, [2, 120, 2, 120]);
-        // Input counters still counting packets taken before the pass.
-        f(1, 1, [3, 180, 1, 60]);
-    }
-
-    /// verifies that the Rust twin of `packet_headroom_prepend` accepts and
-    /// refuses exactly what the C routine does, and moves the same fields,
-    /// around the descriptor boundary and across the headroom range.
-    #[test]
-    fn test_grow_front_rust_twin_matches_c() {
-        let f = |data_off: u16, len: u16| {
-            let (mut c_buffer, mut rust_buffer) = ([0u8; 1024], [0u8; 1024]);
-            let (mut in_c, mut in_rust) = (mbuf(&mut c_buffer, data_off, 7), mbuf(&mut rust_buffer, data_off, 7));
-
-            // SAFETY: valid mbufs of this test.
-            let (c, rust) = unsafe {
-                (
-                    !bindings::yanet_sys_dp_headroom_prepend(&raw mut in_c, len).is_null(),
-                    grow_front(&raw mut in_rust, len),
-                )
-            };
-
-            assert_eq!(
-                (c, in_c.data_off, in_c.data_len, in_c.pkt_len),
-                (rust, in_rust.data_off, in_rust.data_len, in_rust.pkt_len),
-                "offset {data_off}, len {len}"
-            );
-        };
-
-        let descriptor = size_of::<bindings::packet>() as u16;
-        // Nothing to grow, the data starting right after the descriptor.
-        f(descriptor, 0);
-        // Exactly the room the headroom holds beyond the descriptor.
-        f(descriptor + 8, 8);
-        // One byte more than that room.
-        f(descriptor + 8, 9);
-        // Data starting inside the descriptor: no room at all.
-        f(descriptor - 1, 0);
-        // The dataplane's headroom, used up and overrun.
-        let headroom = bindings::RTE_PKTMBUF_HEADROOM as u16;
-        f(headroom, headroom - descriptor);
-        f(headroom, 600);
-        // Every offset and length around the descriptor, and across the
-        // headroom.
-        for data_off in (0..=descriptor + 40).chain([255, 256, 600]) {
-            for len in (0..=descriptor + 40).chain([255, 256, 600]) {
-                f(data_off, len);
-            }
-        }
-    }
-
-    /// verifies that both UDP encapsulations refuse a chained packet and leave
-    /// it unchanged, since C would size and checksum the first segment only.
-    #[test]
-    fn test_encap_udp_refuses_a_chained_packet() {
-        let f = |encap: fn(&mut Packet<'_>) -> Result<(), TunnelError>| {
-            let (mut head_buffer, mut tail_buffer) = ([0u8; 512], [0u8; 512]);
-            let mut tail = mbuf(&mut tail_buffer, 256, 60);
-            let mut head = bindings::rte_mbuf {
-                next: &raw mut tail,
-                ..mbuf(&mut head_buffer, 256, 60)
-            };
-            let mut descriptor = bindings::packet {
-                mbuf: &raw mut head,
-                data_len: 60,
-                network_header: bindings::network_header { type_: 0x0800u16.to_be(), offset: 14 },
-                ..Default::default()
-            };
-            let mut packet = Packet {
-                raw: NonNull::from(&mut descriptor),
-                _brand: PhantomData,
-                _local: PhantomData,
-            };
-
-            assert_eq!(Err(TunnelError), encap(&mut packet));
-            assert_eq!(
-                (256, 60, 14),
-                (head.data_off, head.data_len, descriptor.network_header.offset)
-            );
-        };
-
-        // UDP over IPv4.
-        f(|packet| packet.encap_ipv4_udp([10, 0, 0, 1], [10, 0, 0, 2], 4789, 4789));
-        // UDP over IPv6.
-        f(|packet| packet.encap_ipv6_udp([1; 16], [2; 16], 4789, 4789));
-    }
-}
+#[cfg(test)]
+mod tests;

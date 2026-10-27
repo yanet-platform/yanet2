@@ -6,6 +6,7 @@
 #include "lib/counters/counters.h"
 
 #include "lib/controlplane/agent/agent.h"
+#include "lib/controlplane/config/cp_entity.h"
 #include "lib/controlplane/config/defines.h"
 #include "lib/controlplane/config/registry.h"
 
@@ -41,7 +42,7 @@ struct cp_module_object {
 };
 
 struct cp_module {
-	struct registry_item config_item;
+	struct cp_entity entity;
 
 	// Reference to dataplane module
 	uint64_t dp_module_idx;
@@ -85,10 +86,6 @@ struct cp_module {
 
 	// Link to the previous instance of the module configuration
 	struct cp_module *prev;
-	// Controlplane agent the configuration belongs to
-	struct agent *agent;
-	// Memory context for additional resources inside the configuration
-	struct memory_context memory_context;
 
 	uint64_t device_count;
 	struct cp_module_device *devices;
@@ -98,6 +95,12 @@ struct cp_module {
 	uint64_t object_count;
 	struct cp_module_object *objects;
 };
+// The entity base must sit at offset zero: registry items hand out bare
+// pointers into it.
+_Static_assert(
+	offsetof(struct cp_module, entity) == 0,
+	"struct cp_module must embed the entity base at offset zero"
+);
 
 /**
  * Link a device to a module configuration.
@@ -204,21 +207,21 @@ cp_module_counter_registry(
 // with errno EAGAIN while a live generation still holds the module; the
 // caller must keep its handle and retry once the generations drain.
 //
-// A successful call also marks the module destroying, holding it against
-// a racing re-registration, and takes one destruction hold of the owning
+// A successful call also takes one destruction hold of the owning
 // agent: the caller must run the module's typed destructor and then
 // return that hold with agent_destroy_released, on storage only the hold
 // keeps alive.
 //
-// The count is read under the configuration lock, which every registry
-// mutation also runs under, so the answer is stable against concurrent
-// generation installs and releases in other processes.
+// Gains and registry mutations run under the configuration lock; the
+// final release of a retired generation drops references without it, so
+// a racing drop can lower the count after the read — which can only
+// postpone a destroy attempt, never free an item a registry still
+// holds.
 int
 cp_module_try_destroy(struct cp_module *cp_module, yanet_error **err);
 
 struct cp_module_registry {
-	struct memory_context *memory_context;
-	struct registry registry;
+	struct cp_entity_registry entity_registry;
 };
 
 /**

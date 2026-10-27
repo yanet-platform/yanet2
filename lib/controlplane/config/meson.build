@@ -11,6 +11,7 @@ sources = files(
   'cp_pipeline.c',
   'cp_device.c',
   'cp_object.c',
+  'cp_entity.c',
   'cp_counter.c',
   'econtext.c',
   'reclaim.c',

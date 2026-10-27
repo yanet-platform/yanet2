@@ -32,17 +32,6 @@ agent_cleanup(struct agent *agent) {
 		);
 	}
 
-	struct agent_storage *storage = ADDR_OF(&agent->storage);
-	while (storage != NULL) {
-		struct agent_storage *next = ADDR_OF(&storage->next);
-		memory_bfree(
-			&cp_config->memory_context,
-			storage,
-			sizeof(struct agent_storage) + storage->size
-		);
-		storage = next;
-	}
-
 	memory_bfree(&cp_config->memory_context, agent, sizeof(struct agent));
 }
 

@@ -54,7 +54,7 @@ cp_device_trafgen_new(
 		uint64_t states_size =
 			sizeof(struct trafgen_worker_state) * worker_count;
 		struct trafgen_worker_state *states = memory_balloc(
-			&cp_device_trafgen->cp_device.memory_context,
+			&cp_device_trafgen->cp_device.entity.memory_context,
 			states_size
 		);
 		if (states == NULL) {
@@ -80,7 +80,7 @@ cp_device_trafgen_free(struct cp_device *cp_device, yanet_error **err) {
 		return -1;
 	}
 
-	struct agent *owner = ADDR_OF(&cp_device->agent);
+	struct agent *owner = ADDR_OF(&cp_device->entity.agent);
 
 	cp_device_trafgen_destroy(cp_device);
 	agent_destroy_released(owner);
@@ -93,7 +93,8 @@ static void
 cp_device_trafgen_destroy(struct cp_device *cp_device) {
 	struct cp_device_trafgen *config =
 		container_of(cp_device, struct cp_device_trafgen, cp_device);
-	struct memory_context *memory_context = &cp_device->memory_context;
+	struct memory_context *memory_context =
+		&cp_device->entity.memory_context;
 
 	struct trafgen_worker_state *states = ADDR_OF(&config->worker_states);
 	if (states != NULL) {
@@ -128,7 +129,7 @@ cp_device_trafgen_destroy(struct cp_device *cp_device) {
 		);
 	}
 
-	struct agent *agent = ADDR_OF(&cp_device->agent);
+	struct agent *agent = ADDR_OF(&cp_device->entity.agent);
 	cp_device_fini(cp_device);
 	memory_bfree(
 		&agent->memory_context,
@@ -227,7 +228,8 @@ cp_device_trafgen_set_frames(
 ) {
 	struct cp_device_trafgen *config =
 		container_of(cp_device, struct cp_device_trafgen, cp_device);
-	struct memory_context *memory_context = &cp_device->memory_context;
+	struct memory_context *memory_context =
+		&cp_device->entity.memory_context;
 
 	if (frame_count == 0 || frames_size == 0) {
 		return 0;

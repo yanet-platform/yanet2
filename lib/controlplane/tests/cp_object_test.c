@@ -350,10 +350,10 @@ test_cp_object_index_stability(struct yanet_shm *shm) {
 	// Each successful gate takes one destruction hold of the owner, so
 	// the owners are captured before any teardown can free the objects
 	// and the holds are returned once each typed destroy is done.
-	struct agent *foo_owner = ADDR_OF(&foo->agent);
-	struct agent *bar_owner = ADDR_OF(&bar->agent);
-	struct agent *foo2_owner = ADDR_OF(&foo2->agent);
-	struct agent *bar2_owner = ADDR_OF(&bar2->agent);
+	struct agent *foo_owner = ADDR_OF(&foo->entity.agent);
+	struct agent *bar_owner = ADDR_OF(&bar->entity.agent);
+	struct agent *foo2_owner = ADDR_OF(&foo2->entity.agent);
+	struct agent *bar2_owner = ADDR_OF(&bar2->entity.agent);
 	TEST_ASSERT_SUCCESS(
 		cp_object_try_destroy(foo, &free_err),
 		"dangling object must be destroyable"
@@ -574,7 +574,7 @@ test_cp_object_index_many_keys(struct yanet_shm *shm) {
 		"are finalized"
 	);
 
-	struct agent *object_owner = ADDR_OF(&objects[0]->agent);
+	struct agent *object_owner = ADDR_OF(&objects[0]->entity.agent);
 	for (uint64_t idx = 0; idx < MANY; ++idx) {
 		TEST_ASSERT_SUCCESS(
 			cp_object_try_destroy(objects[idx], &err),
@@ -716,7 +716,7 @@ test_cp_object_hole_reuse_across_copy(struct yanet_shm *shm) {
 	struct agent *owners[4];
 	struct cp_object *all[4] = {objects[0], objects[1], objects[2], fresh};
 	for (uint64_t idx = 0; idx < 4; ++idx) {
-		owners[idx] = ADDR_OF(&all[idx]->agent);
+		owners[idx] = ADDR_OF(&all[idx]->entity.agent);
 	}
 	for (uint64_t idx = 0; idx < 4; ++idx) {
 		TEST_ASSERT_SUCCESS(
@@ -910,9 +910,8 @@ new_object_test(void) {
 
 static struct agent *
 batch_test_item_owner(struct registry_item *item) {
-	struct cp_object *object =
-		container_of(item, struct cp_object, config_item);
-	return ADDR_OF(&object->agent);
+	struct cp_object *object = container_of(item, struct cp_object, entity);
+	return ADDR_OF(&object->entity.agent);
 }
 
 static int
@@ -969,14 +968,16 @@ test_cp_object_batched_release(struct yanet_shm *shm) {
 		"every upsert must take one generation reference"
 	);
 
-	agent_release_registry_items(&registry.registry, batch_test_item_owner);
+	agent_release_registry_items(
+		&registry.entity_registry.registry, batch_test_item_owner
+	);
 	TEST_ASSERT_EQUAL(
 		agent->loaded_entity_count,
 		0,
 		"the batched release must mirror every dropped reference"
 	);
 	TEST_ASSERT_NULL(
-		ADDR_OF(&registry.registry.items),
+		ADDR_OF(&registry.entity_registry.registry.items),
 		"the batched release must discard the registry storage"
 	);
 

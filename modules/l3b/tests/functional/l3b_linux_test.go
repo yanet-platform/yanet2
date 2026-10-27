@@ -137,6 +137,8 @@ func Test_L3bBackend_RequiredCounterFailurePreservesActiveState(t *testing.T) {
 			}
 			require.NoError(t, backend.CreateService(request))
 			require.NoError(t, backend.UpdateRealServerWeight("svc", 1, 0))
+			require.NoError(t, backend.UpdateRealServerState("svc", 0, true))
+			require.NoError(t, backend.UpdateRealServerState("svc", 1, true))
 			module := publishModuleConfig(t, agent, "test", "svc")
 			t.Cleanup(func() { _ = module.Free() })
 			link := testutils.CounterLink{Device: "port0", Pipeline: "test", Function: "test", Chain: "test_chain", ModuleType: "l3b", Module: "test"}
@@ -219,8 +221,9 @@ func Test_L3bBackend_RequiredCounterFailurePreservesActiveState(t *testing.T) {
 			view, err := backend.GetService("svc")
 			require.NoError(t, err)
 			require.EqualValues(t, 1, view.GetIndexMask())
+			require.Zero(t, view.RealServers[1].Weight)
 			require.Equal(t, "172.16.0.10", outerDestination(flow))
-			require.Equal(t, "172.16.0.11", outerDestination(packetOf(54321)))
+			require.Equal(t, "172.16.0.10", outerDestination(packetOf(54321)))
 			sessions, next, _, err := backend.ListSessions("svc", 0, 100)
 			require.NoError(t, err)
 			require.Zero(t, next)
@@ -229,7 +232,7 @@ func Test_L3bBackend_RequiredCounterFailurePreservesActiveState(t *testing.T) {
 				pins[session.SourcePort] = session.RealAddress.String()
 			}
 			require.Equal(t, "172.16.0.10", pins[12345])
-			require.Equal(t, "172.16.0.11", pins[54321])
+			require.Equal(t, "172.16.0.10", pins[54321])
 		})
 	}
 }

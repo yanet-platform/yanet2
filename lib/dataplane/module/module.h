@@ -37,7 +37,13 @@
 // 43: struct registry_item lost the destroying flag, changing the layout
 // of every module, device and object embedding it.
 // 44: struct module and struct dp_module lost config_layout.
-#define YANET_MODULE_ABI_VERSION 44
+// 45: the acl filter structs carry interned first-match rule tables
+// in place of the path joints with their decoders.
+// 46: struct cp_module, cp_device and cp_object gained the embedded
+// cp_entity base holding the registry item, the agent pointer and the
+// memory context; the former config_item, agent and memory_context
+// members are reached through the base now.
+#define YANET_MODULE_ABI_VERSION 46
 
 // Symbol name a module .so exports carrying its compiled-against
 // YANET_MODULE_ABI_VERSION, as a uint32_t global.

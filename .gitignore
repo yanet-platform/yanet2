@@ -208,3 +208,4 @@ deploy/packages/
 !/modules/route/
 !/modules/route-mpls/
 !/modules/unrdup/
+scripts/__pycache__/

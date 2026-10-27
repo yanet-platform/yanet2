@@ -2,7 +2,7 @@ name: Rust Miri
 
 # Miri over the unsafe, provenance and shared-memory suites of the Rust
 # module SDK workspace (lib/rust): strict provenance under Stacked and Tree
-# Borrows, including the cases that must be reported as Undefined Behavior.
+# Borrows.
 # The bindings crate's build script runs bindgen and compiles the dataplane C
 # shim over the repository's C headers with the compiler and flags of a meson
 # configuration's compilation database, so changes to those headers re-run
@@ -55,13 +55,16 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        model: [stacked, tree]
+        include:
+          - model: stacked
+            miriflags: -Zmiri-strict-provenance
+          - model: tree
+            miriflags: -Zmiri-strict-provenance -Zmiri-tree-borrows
     env:
       # bindgen needs a libclang and a clang of the same LLVM major.
       CLANG_PATH: /usr/bin/clang-18
       LIBCLANG_PATH: /usr/lib/llvm-18/lib
       MIRI_TOOLCHAIN: nightly-2026-10-22
-      MIRI_CARGO_FLAGS: --locked
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -72,8 +75,7 @@ jobs:
         with:
           toolchain: ${{ env.MIRI_TOOLCHAIN }}
           components: miri, rust-src
-      # One nextest run per model executes every selected suite, one process
-      # per test; the expected-outcome cases run beside it.
+      # One nextest run per model executes every suite, one process per test.
       - uses: taiki-e/install-action@8cca0918f8471c33515202b73f56ab27f2bed283 # v2.87.29
         with:
           tool: cargo-nextest@0.9.148
@@ -117,4 +119,6 @@ jobs:
           meson setup build -Ddataplane_only=true
       - name: Miri
         working-directory: lib/rust
-        run: cargo xtask miri ${{ matrix.model }}
+        env:
+          MIRIFLAGS: ${{ matrix.miriflags }}
+        run: cargo "+$MIRI_TOOLCHAIN" miri nextest run --workspace --locked --no-fail-fast

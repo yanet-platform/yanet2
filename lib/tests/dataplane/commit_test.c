@@ -62,8 +62,12 @@ commit_test_device_count(
 // library's sanitize flag, so the checks are explicit.
 static void
 commit_test_check(struct cp_config_gen *gen) {
-	registry_sanitize_index(&gen->module_registry.registry, NULL);
-	registry_sanitize_index(&gen->device_registry.registry, NULL);
+	registry_sanitize_index(
+		&gen->module_registry.entity_registry.registry, NULL
+	);
+	registry_sanitize_index(
+		&gen->device_registry.entity_registry.registry, NULL
+	);
 }
 
 // Builds an empty generation with ownerless module and device
@@ -78,25 +82,27 @@ commit_test_gen_init(
 	if (registry_init(
 		    &cfg->memory_context,
 		    NULL,
-		    &gen->module_registry.registry,
+		    &gen->module_registry.entity_registry.registry,
 		    COMMIT_TEST_REGISTRY_CAPACITY
 	    )) {
 		return -1;
 	}
 	SET_OFFSET_OF(
-		&gen->module_registry.memory_context, &cfg->memory_context
+		&gen->module_registry.entity_registry.memory_context,
+		&cfg->memory_context
 	);
 
 	if (registry_init(
 		    &cfg->memory_context,
 		    NULL,
-		    &gen->device_registry.registry,
+		    &gen->device_registry.entity_registry.registry,
 		    COMMIT_TEST_REGISTRY_CAPACITY
 	    )) {
 		return -1;
 	}
 	SET_OFFSET_OF(
-		&gen->device_registry.memory_context, &cfg->memory_context
+		&gen->device_registry.entity_registry.memory_context,
+		&cfg->memory_context
 	);
 
 	return 0;
@@ -124,7 +130,7 @@ commit_test_add_module(
 	SET_OFFSET_OF(&cfg->dp_modules, dp_modules);
 
 	memset(cp_module, 0, sizeof(*cp_module));
-	registry_item_init(&cp_module->config_item);
+	registry_item_init(&cp_module->entity.config_item);
 	snprintf(cp_module->type, sizeof(cp_module->type), "%s", "test");
 	snprintf(cp_module->name, sizeof(cp_module->name), "%s", "m0");
 	cp_module->dp_module_idx = cfg->module_count - 1;
@@ -134,7 +140,9 @@ commit_test_add_module(
 	dp_module->commit_handler = commit_handler;
 
 	int ret = registry_insert(
-		&gen->module_registry.registry, NULL, &cp_module->config_item
+		&gen->module_registry.entity_registry.registry,
+		NULL,
+		&cp_module->entity.config_item
 	);
 	commit_test_check(gen);
 	return ret;
@@ -161,7 +169,7 @@ commit_test_add_device(
 	SET_OFFSET_OF(&cfg->dp_devices, dp_devices);
 
 	memset(cp_device, 0, sizeof(*cp_device));
-	registry_item_init(&cp_device->config_item);
+	registry_item_init(&cp_device->entity.config_item);
 	snprintf(cp_device->type, sizeof(cp_device->type), "%s", "test");
 	snprintf(cp_device->name, sizeof(cp_device->name), "%s", "d0");
 	cp_device->dp_device_idx = cfg->device_count - 1;
@@ -171,7 +179,9 @@ commit_test_add_device(
 	dp_device->commit_handler = commit_handler;
 
 	int ret = registry_insert(
-		&gen->device_registry.registry, NULL, &cp_device->config_item
+		&gen->device_registry.entity_registry.registry,
+		NULL,
+		&cp_device->entity.config_item
 	);
 	commit_test_check(gen);
 	return ret;
@@ -258,17 +268,17 @@ test_commit_runs_once_per_gen(void) {
 	);
 	TEST_ASSERT_SUCCESS(
 		registry_insert(
-			&next_gen.module_registry.registry,
+			&next_gen.module_registry.entity_registry.registry,
 			NULL,
-			&cp_module.config_item
+			&cp_module.entity.config_item
 		),
 		"carry module failed"
 	);
 	TEST_ASSERT_SUCCESS(
 		registry_insert(
-			&next_gen.device_registry.registry,
+			&next_gen.device_registry.entity_registry.registry,
 			NULL,
-			&cp_device.config_item
+			&cp_device.entity.config_item
 		),
 		"carry device failed"
 	);
@@ -373,17 +383,17 @@ test_commit_runs_for_new_items_only(void) {
 	);
 	TEST_ASSERT_SUCCESS(
 		registry_insert(
-			&inserted_gen.module_registry.registry,
+			&inserted_gen.module_registry.entity_registry.registry,
 			NULL,
-			&replaced_module.config_item
+			&replaced_module.entity.config_item
 		),
 		"carry module failed"
 	);
 	TEST_ASSERT_SUCCESS(
 		registry_insert(
-			&inserted_gen.device_registry.registry,
+			&inserted_gen.device_registry.entity_registry.registry,
 			NULL,
-			&replaced_device.config_item
+			&replaced_device.entity.config_item
 		),
 		"carry device failed"
 	);

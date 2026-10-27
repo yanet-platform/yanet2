@@ -1,6 +1,3 @@
-[alias]
-xtask = "run --locked --package xtask --"
-
 [env]
 # The meson build directory, whose compile_commands.json gives the C flags
 # of the dataplane; `meson setup build` at the repository root writes it. A

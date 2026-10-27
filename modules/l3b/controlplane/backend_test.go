@@ -21,6 +21,7 @@ import (
 	"github.com/yanet-platform/yanet2/modules/l3b/bindings/go/cl3b"
 	controlplane "github.com/yanet-platform/yanet2/modules/l3b/controlplane"
 	l3bpb "github.com/yanet-platform/yanet2/modules/l3b/controlplane/l3bpb/v1"
+	"github.com/yanet-platform/yanet2/modules/l3b/internal/testutils"
 	"github.com/yanet-platform/yanet2/objects/l3b/bindings/go/cl3bobject"
 )
 
@@ -290,8 +291,10 @@ func (m *recordedModule) AssertRetired(t *testing.T) {
 // capturingServiceOps retains the real service handle for C-backed inspection.
 type capturingServiceOps struct {
 	controlplane.SharedMemoryOps
-	Agent   *ffi.Agent
-	Service *capturedService
+	Agent              *ffi.Agent
+	Service            *capturedService
+	Fail               string
+	ConstructedEnabled []bool
 }
 
 func (m *capturingServiceOps) CreateVirtualService(name string, config cl3bobject.VirtualServiceConfig, table controlplane.SessionTableHandle) (controlplane.VirtualServiceHandle, error) {
@@ -303,7 +306,15 @@ func (m *capturingServiceOps) CreateVirtualService(name string, config cl3bobjec
 	if err != nil {
 		return nil, err
 	}
-	m.Service = &capturedService{VirtualServiceObject: object, Agent: m.Agent}
+	info, err := object.Inspect()
+	if err != nil {
+		return nil, errors.Join(err, object.Free())
+	}
+	m.ConstructedEnabled = nil
+	for _, real := range info.RealServers {
+		m.ConstructedEnabled = append(m.ConstructedEnabled, real.Enabled)
+	}
+	m.Service = &capturedService{VirtualServiceObject: object, Agent: m.Agent, Fail: m.Fail}
 	return m.Service, nil
 }
 
@@ -311,10 +322,28 @@ func (m *capturingServiceOps) CreateVirtualService(name string, config cl3bobjec
 type capturedService struct {
 	*cl3bobject.VirtualServiceObject
 	Agent *ffi.Agent
+	Fail  string
 }
 
 func (m *capturedService) Publish() error {
+	if m.Fail == "publish-service" {
+		return errFakeRing
+	}
 	return m.VirtualServiceObject.Publish(m.Agent)
+}
+
+func (m *capturedService) UpdateRing(indexes []uint32) error {
+	if m.Fail == "update-ring" {
+		return errFakeRing
+	}
+	return m.VirtualServiceObject.UpdateRing(indexes)
+}
+
+func (m *capturedService) SetRealServerState(index uint32, enabled bool) error {
+	if m.Fail == "set-state" {
+		return errFakeRing
+	}
+	return m.VirtualServiceObject.SetRealServerState(index, enabled)
 }
 
 func (m *capturedService) ReadSessions(cursor uint64, limit uint32) ([]cl3bobject.Session, uint64, uint64, error) {
@@ -437,7 +466,7 @@ func Test_Backend_CreateService_FilterErrorNotNested(t *testing.T) {
 	require.NotContains(t, status.Convert(err).Message(), "rpc error")
 }
 
-// serviceWithRealServer returns a service with one enabled IPv4 destination.
+// serviceWithRealServer returns a descriptor with one IPv4 destination.
 func serviceWithRealServer(name string) *l3bpb.VirtualService {
 	service := sampleService(name)
 	service.RealServers = []*l3bpb.RealServer{{
@@ -487,6 +516,7 @@ func Test_Backend_Reads_DuringStalledMutations(t *testing.T) {
 			operations := &fakeSharedMemory{}
 			backend := controlplane.NewBackendWithSharedMemory(operations)
 			require.NoError(t, backend.CreateService(serviceWithRealServer("vs0")))
+			require.NoError(t, backend.UpdateRealServerState("vs0", 0, true))
 			require.NoError(t, backend.UpdateModuleConfig(&l3bpb.ModuleConfig{Name: "cfg0"}))
 
 			entered := make(chan struct{})
@@ -644,7 +674,7 @@ func Test_Backend_RuntimeUpdates_AdvanceSnapshot(t *testing.T) {
 		enabled bool
 		weight  uint32
 	}{
-		{name: "new service starts enabled with unit weight", enabled: true, weight: 1},
+		{name: "new service starts disabled with unit weight", weight: 1},
 		{
 			name:   "disabling preserves the configured weight",
 			mutate: func() error { return backend.UpdateRealServerState("vs0", 1, false) },
@@ -670,7 +700,7 @@ func Test_Backend_RuntimeUpdates_AdvanceSnapshot(t *testing.T) {
 			require.NoError(t, err)
 			require.Len(t, response.RealServers, 2)
 			require.Equal(t, []byte{192, 0, 2, 1}, response.RealServers[0].DestinationAddress)
-			require.True(t, response.RealServers[0].Enabled)
+			require.False(t, response.RealServers[0].Enabled)
 			require.Equal(t, uint32(1), response.RealServers[0].Weight)
 			require.Equal(t, netip.MustParseAddr("2001:db8:1::2").AsSlice(), response.RealServers[1].DestinationAddress)
 			require.Equal(t, tc.enabled, response.RealServers[1].Enabled)
@@ -750,7 +780,7 @@ func Test_Backend_GetService_PreservesDescriptorsAcrossReplacement(t *testing.T)
 				require.Equal(t, netip.MustParseAddr(descriptor.SourceAddress).AsSlice(), sourceNetwork.Addr().AsSlice())
 				require.Equal(t, netip.MustParseAddr(descriptor.SourceMask).AsSlice(), sourceNetwork.Mask().AsSlice())
 				require.Equal(t, uint32(1), realServer.Weight)
-				require.True(t, realServer.Enabled)
+				require.False(t, realServer.Enabled)
 			}
 		})
 	}
@@ -1046,6 +1076,7 @@ func Test_Backend_SchedulerError_PublishesAppliedState(t *testing.T) {
 	operations := &fakeSharedMemory{}
 	backend := controlplane.NewBackendWithSharedMemory(operations)
 	require.NoError(t, backend.CreateService(serviceWithRealServer("vs0")))
+	require.NoError(t, backend.UpdateRealServerState("vs0", 0, true))
 	operations.Hook = func(operation string) error {
 		if operation == "update-ring" {
 			return errFakeRing
@@ -1158,4 +1189,174 @@ func Test_Backend_FailedPublication_KeepsPublishedView(t *testing.T) {
 	require.Equal(t, int32(1), operations.Services[1].FreeCalls.Load())
 	require.Equal(t, int32(1), operations.Services[2].FreeCalls.Load())
 	require.Equal(t, int32(1), operations.Tables[1].FreeCalls.Load())
+}
+
+// requireRealStates compares accepted state with C records and installed indexes.
+func requireRealStates(t *testing.T, backend controlplane.Backend, service *capturedService, enabled []bool, weights, ring []uint32) {
+	t.Helper()
+	response, err := backend.GetService("vs0")
+	require.NoError(t, err)
+	info, err := service.Inspect()
+	require.NoError(t, err)
+	require.Len(t, response.RealServers, len(enabled))
+	require.Len(t, info.RealServers, len(enabled))
+	for idx, active := range enabled {
+		require.Equal(t, active, response.RealServers[idx].Enabled)
+		require.Equal(t, active, info.RealServers[idx].Enabled)
+		require.Equal(t, weights[idx], response.RealServers[idx].Weight)
+		require.Equal(t, info.RealServers[idx].DestinationAddress.AsSlice(), response.RealServers[idx].DestinationAddress)
+	}
+	indexes, err := testutils.ReadRealRing(service.Agent, "vs0", 32)
+	require.NoError(t, err)
+	require.Equal(t, ring, indexes)
+}
+
+// Test_Backend_Replacement_RealIdentityContinuity verifies that only accepted
+// surviving keys retain overrides and that construction never enables a real.
+func Test_Backend_Replacement_RealIdentityContinuity(t *testing.T) {
+	agent := newTestAgent(t)
+	operations := &capturingServiceOps{SharedMemoryOps: controlplane.NewSharedMemoryOps(agent), Agent: agent}
+	backend := controlplane.NewBackendWithSharedMemory(operations)
+	first := serviceWithRealServer("vs0").RealServers[0]
+	second := &l3bpb.RealServer{
+		DestinationAddress: netip.MustParseAddr("2001:db8::1").AsSlice(),
+		SourceNetwork:      commonpb.NewIPNetworkFrom(xnetip.MustParseNetwork("2001:db8:2::/64")),
+	}
+	third := &l3bpb.RealServer{
+		DestinationAddress: netip.MustParseAddr("192.0.2.2").AsSlice(),
+		SourceNetwork:      first.SourceNetwork,
+	}
+	request := sampleService("vs0")
+	request.RealServers = []*l3bpb.RealServer{first, second}
+	require.NoError(t, backend.CreateService(request))
+	require.Equal(t, []bool{false, false}, operations.ConstructedEnabled)
+	requireRealStates(t, backend, operations.Service, []bool{false, false}, []uint32{1, 1}, []uint32{})
+
+	for _, weight := range []uint32{0, 3} {
+		require.NoError(t, backend.UpdateRealServerWeight("vs0", 0, weight))
+		requireRealStates(t, backend, operations.Service, []bool{false, false}, []uint32{weight, 1}, []uint32{})
+	}
+	require.NoError(t, backend.UpdateRealServerWeight("vs0", 1, 0))
+	require.NoError(t, backend.UpdateRealServerState("vs0", 0, true))
+	require.NoError(t, backend.UpdateRealServerState("vs0", 1, true))
+
+	for _, tc := range []struct {
+		name          string
+		reals         []*l3bpb.RealServer
+		enabled       []bool
+		weights, ring []uint32
+	}{
+		{"reorder retains enabled positive and zero weights", []*l3bpb.RealServer{second, first}, []bool{true, true}, []uint32{0, 3}, []uint32{1, 1, 1}},
+		{"new key cannot inherit enabled position", []*l3bpb.RealServer{third, second, first}, []bool{false, true, true}, []uint32{1, 0, 3}, []uint32{2, 2, 2}},
+		{"committed removal forgets the override", []*l3bpb.RealServer{third, second}, []bool{false, true}, []uint32{1, 0}, []uint32{}},
+		{"readded key starts disabled with default weight", []*l3bpb.RealServer{first, second, third}, []bool{false, true, false}, []uint32{1, 0, 1}, []uint32{}},
+		{"empty membership clears selection", nil, nil, nil, []uint32{}},
+		{"readdition after empty has no survivors", []*l3bpb.RealServer{first, second}, []bool{false, false}, []uint32{1, 1}, []uint32{}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			request.RealServers = tc.reals
+			require.NoError(t, backend.UpdateService(request))
+			for _, enabled := range operations.ConstructedEnabled {
+				require.False(t, enabled)
+			}
+			requireRealStates(t, backend, operations.Service, tc.enabled, tc.weights, tc.ring)
+		})
+	}
+	require.NoError(t, backend.UpdateRealServerState("vs0", 0, true))
+	require.NoError(t, backend.UpdateRealServerWeight("vs0", 0, 7))
+	require.NoError(t, backend.UpdateRealServerWeight("vs0", 1, 5))
+	first.SourceNetwork = commonpb.NewIPNetworkFrom(xnetip.MustParseNetwork("203.0.113.0/24"))
+	require.NoError(t, backend.UpdateService(request))
+	requireRealStates(t, backend, operations.Service, []bool{true, false}, []uint32{7, 5}, []uint32{0, 0, 0, 0, 0, 0, 0})
+	info, err := operations.Service.Inspect()
+	require.NoError(t, err)
+	require.Equal(t, xnetip.MustParseNetwork("203.0.113.0/24"), info.RealServers[0].SourceNet)
+	response, err := backend.GetService("vs0")
+	require.NoError(t, err)
+	source, err := response.RealServers[0].SourceNetwork.ToNetwork()
+	require.NoError(t, err)
+	require.Equal(t, info.RealServers[0].SourceNet, source)
+	require.NoError(t, backend.DeleteService("vs0"))
+	require.NoError(t, backend.CreateService(request))
+	requireRealStates(t, backend, operations.Service, []bool{false, false}, []uint32{1, 1}, []uint32{})
+}
+
+// Test_Backend_Replacement_FailurePreservesRealState verifies that unpublished
+// candidates cannot change selection or the source of later state carryover.
+func Test_Backend_Replacement_FailurePreservesRealState(t *testing.T) {
+	for _, failure := range []string{"set-state", "update-ring", "publish-service"} {
+		t.Run(failure, func(t *testing.T) {
+			agent := newTestAgent(t)
+			operations := &capturingServiceOps{SharedMemoryOps: controlplane.NewSharedMemoryOps(agent), Agent: agent}
+			backend := controlplane.NewBackendWithSharedMemory(operations)
+			request := serviceWithRealServer("vs0")
+			require.NoError(t, backend.CreateService(request))
+			require.NoError(t, backend.UpdateRealServerState("vs0", 0, true))
+			require.NoError(t, backend.UpdateRealServerWeight("vs0", 0, 3))
+			previous := operations.Service
+			operations.Fail = failure
+			capacity := agent.BlockAllocatorFreeSize()
+			for range 3 {
+				require.ErrorIs(t, backend.UpdateService(request), errFakeRing)
+				require.Equal(t, capacity, agent.BlockAllocatorFreeSize())
+				requireRealStates(t, backend, previous, []bool{true}, []uint32{3}, []uint32{0, 0, 0})
+			}
+
+			operations.Fail = "publish-service"
+			require.ErrorIs(t, backend.UpdateService(sampleService("vs0")), errFakeRing)
+			operations.Fail = ""
+			require.NoError(t, backend.UpdateService(request))
+			requireRealStates(t, backend, operations.Service, []bool{true}, []uint32{3}, []uint32{0, 0, 0})
+			require.NoError(t, backend.UpdateService(sampleService("vs0")))
+			operations.Fail = "publish-service"
+			require.ErrorIs(t, backend.UpdateService(request), errFakeRing)
+			operations.Fail = ""
+			require.NoError(t, backend.UpdateService(request))
+			requireRealStates(t, backend, operations.Service, []bool{false}, []uint32{1}, []uint32{})
+		})
+	}
+}
+
+// Test_Backend_RealKeys_RejectDuplicatesBeforeAllocation verifies that duplicate
+// destinations reject whole candidates while native and mapped IPv4 stay distinct.
+func Test_Backend_RealKeys_RejectDuplicatesBeforeAllocation(t *testing.T) {
+	for _, address := range []string{"192.0.2.1", "2001:db8::1", "::ffff:192.0.2.1"} {
+		t.Run(address, func(t *testing.T) {
+			operations := &fakeSharedMemory{}
+			backend := controlplane.NewBackendWithSharedMemory(operations)
+			request := serviceWithRealServer("vs0")
+			real := request.RealServers[0]
+			real.DestinationAddress = netip.MustParseAddr(address).AsSlice()
+			if netip.MustParseAddr(address).Is6() {
+				real.SourceNetwork = commonpb.NewIPNetworkFrom(xnetip.MustParseNetwork("2001:db8::/64"))
+			}
+			request.RealServers = append(request.RealServers, real)
+			require.Equal(t, codes.InvalidArgument, status.Code(backend.CreateService(request)))
+			require.Empty(t, operations.Tables)
+			require.Empty(t, operations.Services)
+			request.RealServers = request.RealServers[:1]
+			require.NoError(t, backend.CreateService(request))
+			require.NoError(t, backend.UpdateRealServerWeight("vs0", 0, 7))
+			request.RealServers = append(request.RealServers, real)
+			require.Equal(t, codes.InvalidArgument, status.Code(backend.UpdateService(request)))
+			require.Len(t, operations.Services, 1)
+			response, err := backend.GetService("vs0")
+			require.NoError(t, err)
+			require.Equal(t, uint32(7), response.RealServers[0].Weight)
+		})
+	}
+	operations := &fakeSharedMemory{}
+	backend := controlplane.NewBackendWithSharedMemory(operations)
+	request := serviceWithRealServer("vs0")
+	require.NoError(t, backend.CreateService(request))
+	require.NoError(t, backend.UpdateRealServerState("vs0", 0, true))
+	request.RealServers = append(request.RealServers, &l3bpb.RealServer{
+		DestinationAddress: netip.MustParseAddr("::ffff:192.0.2.1").AsSlice(),
+		SourceNetwork:      commonpb.NewIPNetworkFrom(xnetip.MustParseNetwork("2001:db8::/64")),
+	})
+	require.NoError(t, backend.UpdateService(request))
+	response, err := backend.GetService("vs0")
+	require.NoError(t, err)
+	require.True(t, response.RealServers[0].Enabled)
+	require.False(t, response.RealServers[1].Enabled)
 }

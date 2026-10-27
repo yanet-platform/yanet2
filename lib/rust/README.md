@@ -9,7 +9,7 @@ share, the C bindings with the dataplane runtime and the packet header views.
 |-------|-------------|------|
 | `yanet-shm` | `no_std`, no `alloc` | the provenance root, relative-pointer field types, `Opaque`, `ShmLayout` leaves |
 | `yanet-sys` | `no_std`, no `alloc` | the C bindings of the SDK, modules mirroring the C tree, one bindgen output (generated into `OUT_DIR`, only here) and one module per C library: `common` (LPM type with its lookup), `counters` (the counter value address), `dp` (bindings of `lib/dataplane`, the `Module` trait, `Cx`/`CommitCx`, `Batch`/`Packet` with the packet operations (allocation, copy, resizing, tunnels), counters and devices, the handler runtime and `export_module!`); the dataplane C shim |
-| `yanet-sdk-testing` | `no_std` + `alloc`, dev-only | the block arena and resolving context of the tests, Miri included; with the `dp` feature (enabled only by `yanet-sys`' tests) the dataplane invocation harness and its packet pool |
+| `yanet-sdk-testing` | `std`, dev-only | the block arena (one region, as one mapping) and resolving context of the tests, Miri included |
 | `yanet-packet` | `no_std` | packet header views, extractable to its own repository |
 
 ## Build
@@ -32,5 +32,5 @@ meson setup build
 cd lib/rust
 export CLANG_PATH=/usr/bin/clang-18 LIBCLANG_PATH=/usr/lib/llvm-18/lib
 cargo test --workspace                      # native suites
-cargo xtask miri [stacked|tree|all]        # Miri, strict provenance, both models in parallel
+MIRIFLAGS="-Zmiri-strict-provenance" cargo +nightly-2026-10-22 miri nextest run --workspace   # Miri (cargo-nextest); add -Zmiri-tree-borrows for Tree Borrows
 ```

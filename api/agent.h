@@ -287,15 +287,3 @@ agent_delete_object(
 	const char *object_name,
 	yanet_error **err
 );
-
-void *
-agent_storage_read(struct agent *agent, const char *name);
-
-int
-agent_storage_put(
-	struct agent *agent,
-	const char *name,
-	void *data,
-	size_t size,
-	yanet_error **err
-);

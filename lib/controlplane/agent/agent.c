@@ -284,8 +284,11 @@ agent_attach(
 	SET_OFFSET_OF(&new_agent->cp_config, cp_config);
 	new_agent->pid = getpid();
 
-	struct cp_config_gen *config_gen = cp_config_current_gen(cp_config);
+	// The stamp reads the generation through a pin, so no
+	// dereference can touch a generation some other path retires.
+	struct cp_config_gen *config_gen = cp_config_gen_acquire(cp_config);
 	new_agent->gen = config_gen->gen;
+	cp_config_gen_release(cp_config, config_gen);
 
 	block_allocator_init(&new_agent->block_allocator);
 	memory_context_init(
@@ -1039,8 +1042,8 @@ yanet_get_cp_module_list_info(struct dp_config *dp_config) {
 	struct cp_module_list_info *module_list_info =
 		(struct cp_module_list_info *)malloc(
 			sizeof(struct cp_module_list_info) +
-			sizeof(struct cp_module_info) *
-				module_registry->registry.capacity
+			sizeof(struct cp_module_info
+			) * module_registry->entity_registry.registry.capacity
 		);
 	if (module_list_info == NULL) {
 		goto release;
@@ -1049,7 +1052,7 @@ yanet_get_cp_module_list_info(struct dp_config *dp_config) {
 	module_list_info->module_count = 0;
 
 	for (uint64_t module_idx = 0;
-	     module_idx < module_registry->registry.capacity;
+	     module_idx < module_registry->entity_registry.registry.capacity;
 	     ++module_idx) {
 		struct cp_module_info *info = module_list_info->modules +
 					      module_list_info->module_count;
@@ -1399,7 +1402,7 @@ yanet_get_cp_device_list_info(struct dp_config *dp_config) {
 	size_t device_list_info_size =
 		sizeof(struct cp_device_list_info) +
 		sizeof(struct cp_device_info *) *
-			device_registry->registry.capacity;
+			device_registry->entity_registry.registry.capacity;
 	struct cp_device_list_info *device_list_info =
 		(struct cp_device_list_info *)malloc(device_list_info_size);
 	if (device_list_info == NULL) {
@@ -1408,7 +1411,8 @@ yanet_get_cp_device_list_info(struct dp_config *dp_config) {
 
 	memset(device_list_info, 0, device_list_info_size);
 	device_list_info->device_count = 0;
-	for (uint64_t idx = 0; idx < device_registry->registry.capacity;
+	for (uint64_t idx = 0;
+	     idx < device_registry->entity_registry.registry.capacity;
 	     ++idx) {
 		struct cp_device *cp_device =
 			cp_config_gen_get_device(cp_config_gen, idx);
@@ -1806,67 +1810,6 @@ agent_free_unused_agents(struct agent *agent) {
 struct dp_config *
 agent_dp_config(struct agent *agent) {
 	return ADDR_OF(&agent->dp_config);
-}
-
-void *
-agent_storage_read(struct agent *agent, const char *name) {
-	struct agent_storage *storage = ADDR_OF(&agent->storage);
-	while (storage != NULL) {
-		if (strncmp(storage->name, name, 80) == 0) {
-			return storage->data;
-		}
-		storage = ADDR_OF(&storage->next);
-	}
-	return NULL;
-}
-
-int
-agent_storage_put(
-	struct agent *agent,
-	const char *name,
-	void *data,
-	size_t size,
-	yanet_error **err
-) {
-	struct agent_storage *storage = ADDR_OF(&agent->storage);
-	struct agent_storage *prev = NULL;
-	struct memory_context *mctx = &agent->memory_context;
-
-	struct agent_storage *new_storage =
-		memory_balloc(mctx, sizeof(struct agent_storage) + size);
-	if (new_storage == NULL) {
-		yanet_error_add(err, "memory not enough");
-		return -1;
-	}
-
-	memcpy(new_storage->data, data, size);
-	strtcpy(new_storage->name, name, sizeof(new_storage->name));
-	new_storage->size = size;
-	new_storage->next = NULL;
-
-	while (storage != NULL) {
-		struct agent_storage *next = ADDR_OF(&storage->next);
-		if (strncmp(storage->name, name, 80) == 0) {
-			memory_bfree(
-				mctx,
-				storage,
-				sizeof(struct agent_storage) + storage->size
-			);
-			SET_OFFSET_OF(&new_storage->next, next);
-			goto set_prev;
-		}
-		prev = storage;
-		storage = next;
-	}
-
-set_prev:
-	if (prev != NULL) {
-		SET_OFFSET_OF(&prev->next, new_storage);
-	} else {
-		SET_OFFSET_OF(&agent->storage, new_storage);
-	}
-
-	return 0;
 }
 
 // The caller must hold the agent lock (the registry structure belongs

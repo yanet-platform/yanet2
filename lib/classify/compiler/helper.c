@@ -622,3 +622,304 @@ error_free_pairs:
 
 	return -1;
 }
+
+struct final_row_ctx {
+	const uint32_t *const *distinct;
+	const uint32_t *row;
+	uint32_t h_dim;
+};
+
+/*
+ * Heap open-addressing set of the join build.
+ *
+ * The shared-memory arena only carries what the finished table
+ * publishes, so the pair and row interning scratch lives and dies with
+ * the build on the heap.
+ */
+struct join_index {
+	uint32_t *hashes;
+	uint32_t *slots;
+	uint32_t mask;
+};
+
+static inline int
+join_index_init(struct join_index *index, uint32_t expected) {
+	uint32_t capacity = 1;
+	while (capacity < expected * 2) {
+		capacity <<= 1;
+	}
+	index->hashes = calloc(capacity, sizeof(uint32_t));
+	index->slots = malloc((size_t)capacity * sizeof(uint32_t));
+	index->mask = capacity - 1;
+	if (index->hashes == NULL || index->slots == NULL) {
+		return -1;
+	}
+	return 0;
+}
+
+// A stored hash of zero marks the empty slot, so a real zero hash is
+// stored as one.
+//
+// The capacity holds at least twice the expected count, so the probe
+// below always terminates on an empty slot. The equality predicate
+// returns non-zero to accept the slot payload, zero to keep probing.
+static inline uint32_t
+join_index_find(
+	const struct join_index *index,
+	uint32_t hash,
+	int (*eq)(uint32_t slot, const void *data),
+	const void *data
+) {
+	uint32_t stored = hash ? hash : 1;
+	for (uint32_t slot = stored & index->mask;;
+	     slot = (slot + 1) & index->mask) {
+		if (index->hashes[slot] == 0) {
+			return UINT32_MAX;
+		}
+		if (index->hashes[slot] == stored &&
+		    eq(index->slots[slot], data)) {
+			return index->slots[slot];
+		}
+	}
+}
+
+static inline void
+join_index_put(struct join_index *index, uint32_t hash, uint32_t value) {
+	uint32_t stored = hash ? hash : 1;
+	uint32_t slot = stored & index->mask;
+	while (index->hashes[slot] != 0) {
+		slot = (slot + 1) & index->mask;
+	}
+	index->hashes[slot] = stored;
+	index->slots[slot] = value;
+}
+
+// A stored row matches the candidate when every cell agrees.
+static int
+join_row_eq(uint32_t row, const void *data) {
+	const struct final_row_ctx *ctx = data;
+	return memcmp(ctx->distinct[row],
+		      ctx->row,
+		      (size_t)ctx->h_dim * sizeof(uint32_t)) == 0;
+}
+
+// A pair matches the stored one of its slot when both group sides agree.
+static int
+join_pair_eq(uint32_t pair, const void *data) {
+	const struct merge_pair_ctx *ctx = data;
+	return ctx->pair_group1[pair] == ctx->group1 &&
+	       ctx->pair_group2[pair] == ctx->group2;
+}
+
+// Builds immutable first-match rows without enumerating final classes.
+//
+// Only distinct group pairs are inverted onto the left classes. Each row is
+// completed in rule order and interned by content in heap scratch; the
+// distinct rows become the compact class list and the original left
+// classes map onto it. Heap scratch is never published or charged to
+// the shared-memory arena, and a failed build leaves every owned
+// pointer of the table NULL, releasable by rule_table_free.
+int
+classify_join_rules(
+	struct memory_context *memory_context,
+	const char *name,
+	const struct classifier *left,
+	const struct classifier *right,
+	const struct classifier_rule *const *rules,
+	uint32_t rule_count,
+	struct rule_table *table
+) {
+	// The output is releasable from the first statement on: a failed
+	// allocation below frees it exactly like a released table.
+	memset(table, 0, sizeof(*table));
+	uint32_t v_dim = value_registry_capacity(&left->registry);
+	uint32_t h_dim = value_registry_capacity(&right->registry);
+
+	size_t pair_size =
+		(size_t)(rule_count ? rule_count : 1) * sizeof(uint32_t);
+	uint32_t *group1 = malloc(pair_size);
+	uint32_t *group2 = malloc(pair_size);
+	uint32_t *first = malloc(pair_size);
+	size_t *offsets = calloc((size_t)v_dim + 1, sizeof(size_t));
+	size_t *cursor = malloc((size_t)v_dim * sizeof(size_t));
+	uint32_t *row = malloc((size_t)h_dim * sizeof(uint32_t));
+	uint32_t *dir_idx = malloc((size_t)v_dim * sizeof(uint32_t));
+	uint32_t **distinct = malloc((size_t)v_dim * sizeof(uint32_t *));
+	uint32_t *edges = NULL;
+	struct join_index pairs = {0};
+	struct join_index rows = {0};
+	uint32_t distinct_count = 0;
+	int rc = -1;
+	if (group1 == NULL || group2 == NULL || first == NULL ||
+	    offsets == NULL || cursor == NULL || row == NULL ||
+	    dir_idx == NULL || distinct == NULL) {
+		goto done;
+	}
+	if (rule_table_init(table, memory_context, name, v_dim, h_dim) ||
+	    join_index_init(&pairs, rule_count ? rule_count : 1) ||
+	    join_index_init(&rows, v_dim)) {
+		goto done;
+	}
+	struct value_range *left_ranges = ADDR_OF(&left->registry.ranges);
+	struct value_range *right_ranges = ADDR_OF(&right->registry.ranges);
+	uint32_t pair_count = 0;
+	for (uint32_t r = 0; r < rule_count; ++r) {
+		uint32_t g1 = left->rule_groups[r];
+		uint32_t g2 = right->rule_groups[r];
+		if (rules[r] == NULL || g1 == FILTER_GROUP_INVALID ||
+		    g2 == FILTER_GROUP_INVALID) {
+			continue;
+		}
+		struct merge_pair_ctx ctx = {group1, group2, g1, g2};
+		uint32_t hash = merge_group_pair_hash(g1, g2);
+		if (join_index_find(&pairs, hash, join_pair_eq, &ctx) !=
+		    UINT32_MAX) {
+			continue;
+		}
+		join_index_put(&pairs, hash, pair_count);
+		group1[pair_count] = g1;
+		group2[pair_count] = g2;
+		first[pair_count++] = r;
+		const struct value_range *range = left_ranges + g1;
+		const uint32_t *values = ADDR_OF(&range->values);
+		for (uint64_t i = 0; i < range->count; ++i) {
+			++offsets[values[i] + 1];
+		}
+	}
+	for (uint32_t v = 0; v < v_dim; ++v) {
+		offsets[v + 1] += offsets[v];
+		cursor[v] = offsets[v];
+	}
+	size_t edge_count = offsets[v_dim];
+	if (edge_count > SIZE_MAX / sizeof(uint32_t)) {
+		goto done;
+	}
+	edges = malloc((edge_count ? edge_count : 1) * sizeof(uint32_t));
+	if (edges == NULL) {
+		goto done;
+	}
+	for (uint32_t p = 0; p < pair_count; ++p) {
+		const struct value_range *range = left_ranges + group1[p];
+		const uint32_t *values = ADDR_OF(&range->values);
+		for (uint64_t i = 0; i < range->count; ++i) {
+			edges[cursor[values[i]]++] = p;
+		}
+	}
+	// A left class no projected pair covers resolves to the all-empty
+	// row, interned once and shared by every uncovered class - a
+	// projection covering few classes of a large family never walks
+	// the whole class cross.
+	uint32_t empty_class = UINT32_MAX;
+	for (uint32_t v = 0; v < v_dim; ++v) {
+		if (offsets[v] == offsets[v + 1]) {
+			if (empty_class == UINT32_MAX) {
+				memset(row,
+				       0xff,
+				       (size_t)h_dim * sizeof(uint32_t));
+				uint32_t *stored =
+					malloc((size_t)h_dim * sizeof(uint32_t)
+					);
+				if (stored == NULL) {
+					goto done;
+				}
+				memcpy(stored,
+				       row,
+				       (size_t)h_dim * sizeof(uint32_t));
+				distinct[distinct_count] = stored;
+				join_index_put(&rows, 0, distinct_count);
+				empty_class = distinct_count++;
+			}
+			dir_idx[v] = empty_class;
+			continue;
+		}
+		memset(row, 0xff, (size_t)h_dim * sizeof(uint32_t));
+		uint32_t hash = 0;
+		for (size_t e = offsets[v]; e < offsets[v + 1]; ++e) {
+			uint32_t p = edges[e];
+			const struct value_range *range =
+				right_ranges + group2[p];
+			const uint32_t *columns = ADDR_OF(&range->values);
+			for (uint64_t i = 0; i < range->count; ++i) {
+				uint32_t h = columns[i];
+				if (row[h] == FILTER_RULE_INVALID) {
+					row[h] = first[p];
+					hash ^= merge_group_pair_hash(
+						h, first[p]
+					);
+				}
+			}
+		}
+		struct final_row_ctx ctx = {
+			(const uint32_t *const *)distinct, row, h_dim
+		};
+		uint32_t canonical =
+			join_index_find(&rows, hash, join_row_eq, &ctx);
+		if (canonical == UINT32_MAX) {
+			uint32_t *stored =
+				malloc((size_t)h_dim * sizeof(uint32_t));
+			if (stored == NULL) {
+				goto done;
+			}
+			memcpy(stored, row, (size_t)h_dim * sizeof(uint32_t));
+			distinct[distinct_count] = stored;
+			join_index_put(&rows, hash, distinct_count);
+			dir_idx[v] = distinct_count++;
+		} else {
+			dir_idx[v] = canonical;
+		}
+	}
+
+	// The compact class rows are published chunk by chunk out of the
+	// heap scratch, and the class map goes in only once every row is
+	// in, so a failure above leaves the map empty.
+	struct memory_context *table_context = ADDR_OF(&table->memory_context);
+	uint32_t **interned = memory_balloc(
+		table_context, distinct_count * sizeof(uint32_t *)
+	);
+	if (interned == NULL) {
+		goto done;
+	}
+	memset(interned, 0, distinct_count * sizeof(uint32_t *));
+	SET_OFFSET_OF(&table->rows, interned);
+	table->class_count = distinct_count;
+	for (uint32_t d = 0; d < distinct_count; ++d) {
+		uint32_t *stored = memory_balloc(
+			table_context, (size_t)h_dim * sizeof(uint32_t)
+		);
+		if (stored == NULL) {
+			goto done;
+		}
+		memcpy(stored, distinct[d], (size_t)h_dim * sizeof(uint32_t));
+		SET_OFFSET_OF(interned + d, stored);
+	}
+	if (vline_init(&table->class_map, table_context, "classes", v_dim)) {
+		goto done;
+	}
+	for (uint32_t v = 0; v < v_dim; ++v) {
+		*vline_get_ptr(&table->class_map, v) = dir_idx[v];
+	}
+	rc = 0;
+done:
+	free(rows.hashes);
+	free(rows.slots);
+	free(pairs.hashes);
+	free(pairs.slots);
+	if (distinct != NULL) {
+		for (uint32_t d = 0; d < distinct_count; ++d) {
+			free(distinct[d]);
+		}
+	}
+	free(distinct);
+	free(dir_idx);
+	free(edges);
+	free(row);
+	free(cursor);
+	free(offsets);
+	free(first);
+	free(group2);
+	free(group1);
+	if (rc != 0) {
+		rule_table_free(table);
+	}
+	return rc;
+}

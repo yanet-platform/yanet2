@@ -262,11 +262,11 @@ func TestL3b_DropsTcpWithoutVirtualService(t *testing.T) {
 // encapsulated inner packet with the original frame.
 const ethHeaderLen = 14
 
-// newVirtualService creates a session table and a virtual service borrowing
-// it, leaving the scheduler ring and the publish to the caller.
+// newVirtualService creates a session table and a virtual service with every
+// configured real server enabled.
 //
-// Tearndown is wired so cleanup attempts to free the service before the table
-// it borrows.
+// The caller installs the scheduler ring and publishes the service. Teardown
+// attempts to free the service before the session table it borrows.
 func newVirtualService(
 	t *testing.T,
 	agent *ffi.Agent,
@@ -282,6 +282,9 @@ func newVirtualService(
 	service, err := cl3bobject.CreateVirtualService(agent, name, config, table)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = service.Free() })
+	for idx := range config.RealServers {
+		require.NoError(t, service.SetRealServerState(uint32(idx), true))
+	}
 
 	return service, table
 }
@@ -812,6 +815,9 @@ func TestL3b_SessionSurvivesServiceUpdate(t *testing.T) {
 	replacement, err := cl3bobject.CreateVirtualService(agent, "svc", serviceConfig, table)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = replacement.Free() })
+	for idx := range serviceConfig.RealServers {
+		require.NoError(t, replacement.SetRealServerState(uint32(idx), true))
+	}
 	require.NoError(t, replacement.UpdateRing([]uint32{1}))
 	require.NoError(t, replacement.Publish(agent))
 	require.NoError(t, service.Free())
@@ -867,6 +873,9 @@ func TestL3b_SessionSurvivesServiceUpdate(t *testing.T) {
 	relisted, err := cl3bobject.CreateVirtualService(agent, "svc", replacementConfig, table)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = relisted.Free() })
+	for idx := range replacementConfig.RealServers {
+		require.NoError(t, relisted.SetRealServerState(uint32(idx), true))
+	}
 	require.NoError(t, relisted.UpdateRing([]uint32{0}))
 	require.NoError(t, relisted.Publish(agent))
 	require.NoError(t, replacement.Free())
@@ -976,6 +985,9 @@ func TestL3b_FailedReplacementKeepsSessionTable(t *testing.T) {
 	replacement, err := cl3bobject.CreateVirtualService(agent, "svc", serviceConfig, table)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = replacement.Free() })
+	for idx := range serviceConfig.RealServers {
+		require.NoError(t, replacement.SetRealServerState(uint32(idx), true))
+	}
 	require.NoError(t, replacement.UpdateRing([]uint32{1}))
 	require.NoError(t, replacement.Publish(agent))
 	require.NoError(t, service.Free())
