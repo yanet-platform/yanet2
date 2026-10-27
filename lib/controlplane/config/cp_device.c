@@ -538,7 +538,14 @@ cp_device_registry_copy(
 
 int
 cp_device_try_destroy(struct cp_device *self, yanet_error **err) {
-	if (cp_entity_try_destroy(&self->entity)) {
+	struct cp_entity_id id = {
+		.type = self->type,
+		.type_len = sizeof(self->type),
+		.name = self->name,
+		.name_len = sizeof(self->name),
+	};
+
+	if (cp_entity_try_destroy(&self->entity, &id)) {
 		// errno is set last, right before the return, so the error
 		// formatting above cannot clobber what the caller reads.
 		yanet_error_add_kind(
@@ -546,8 +553,8 @@ cp_device_try_destroy(struct cp_device *self, yanet_error **err) {
 			YANET_ERROR_BUSY,
 			"device '%s:%s' is still referenced by a live "
 			"generation",
-			self->type,
-			self->name
+			id.type_out,
+			id.name_out
 		);
 		errno = EAGAIN;
 		return -1;

@@ -44,8 +44,7 @@ struct cp_device {
 	struct cp_device_entry *output_pipelines;
 };
 // The entity base must sit at offset zero: registry items hand out bare
-// pointers into it, and the destroy gate's identity offsets are relative
-// to the struct start.
+// pointers into it.
 _Static_assert(
 	offsetof(struct cp_device, entity) == 0,
 	"struct cp_device must embed the entity base at offset zero"
@@ -135,9 +134,11 @@ cp_device_fini(struct cp_device *self);
 // return that hold with agent_destroy_released, on storage only the hold
 // keeps alive.
 //
-// The count is read under the configuration lock, which every registry
-// mutation also runs under, so the answer is stable against concurrent
-// generation installs and releases in other processes.
+// Gains and registry mutations run under the configuration lock; the
+// final release of a retired generation drops references without it, so
+// a racing drop can lower the count after the read — which can only
+// postpone a destroy attempt, never free an item a registry still
+// holds.
 int
 cp_device_try_destroy(struct cp_device *self, yanet_error **err);
 

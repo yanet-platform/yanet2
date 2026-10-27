@@ -503,7 +503,14 @@ static const struct registry_keys cp_module_registry_keys = {
 };
 int
 cp_module_try_destroy(struct cp_module *cp_module, yanet_error **err) {
-	if (cp_entity_try_destroy(&cp_module->entity)) {
+	struct cp_entity_id id = {
+		.type = cp_module->type,
+		.type_len = sizeof(cp_module->type),
+		.name = cp_module->name,
+		.name_len = sizeof(cp_module->name),
+	};
+
+	if (cp_entity_try_destroy(&cp_module->entity, &id)) {
 		// errno is set last, right before the return, so the error
 		// formatting above cannot clobber what the caller reads.
 		yanet_error_add_kind(
@@ -511,8 +518,8 @@ cp_module_try_destroy(struct cp_module *cp_module, yanet_error **err) {
 			YANET_ERROR_BUSY,
 			"module '%s:%s' is still referenced by a live "
 			"generation",
-			cp_module->type,
-			cp_module->name
+			id.type_out,
+			id.name_out
 		);
 		errno = EAGAIN;
 		return -1;
