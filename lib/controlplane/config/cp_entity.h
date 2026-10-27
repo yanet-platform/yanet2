@@ -102,33 +102,12 @@ cp_entity_registry_replace(
 	struct registry_item *new_item
 );
 
-// Identity fields for the destroy gate, named by the kind because the
-// generic layer cannot locate them, with the gate's under-lock copies.
-//
-// The copies exist because after the gate releases its locks a final
-// generation release may drop the item's last reference and a sweep may
-// free the arena the item lives in, so a refusal message read from the
-// item itself would race that teardown.
-struct cp_entity_id {
-	const char *type;
-	size_t type_len;
-	const char *name;
-	size_t name_len;
-
-	char type_out[80];
-	char name_out[80];
-};
-
 // Try to take a dangling entity out of circulation for destruction.
 //
 // The item's reference count is the number of live configuration
 // generations that registered it; construction never takes a reference of
 // its own. Zero therefore means dangling: the item is registered nowhere,
 // no reader can reach it, and only its owner still knows it exists.
-//
-// The identity fields named by id are copied under the gate's locks into
-// id's output buffers; a caller formatting a refusal reads the copies,
-// never the item.
 //
 // Returns 0 when the count is zero, granting the caller the exclusive
 // right to run the item's typed destroy routine immediately, and taking
@@ -137,5 +116,11 @@ struct cp_entity_id {
 // agent_destroy_released, on storage only the hold keeps alive. Returns
 // -1 while a live generation still holds the item; the caller must keep
 // its handle and retry once the generations drain.
+//
+// After the gate's locks are gone a final generation release may drop the
+// item's last reference and a sweep may free the arena the item lives
+// in, so a caller reporting the item's identity on a refusal snapshots
+// it before the call, under the same entry discipline as capturing the
+// owner pointer.
 int
-cp_entity_try_destroy(struct cp_entity *self, struct cp_entity_id *id);
+cp_entity_try_destroy(struct cp_entity *self);

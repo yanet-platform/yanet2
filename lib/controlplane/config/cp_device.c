@@ -538,14 +538,15 @@ cp_device_registry_copy(
 
 int
 cp_device_try_destroy(struct cp_device *self, yanet_error **err) {
-	struct cp_entity_id id = {
-		.type = self->type,
-		.type_len = sizeof(self->type),
-		.name = self->name,
-		.name_len = sizeof(self->name),
-	};
+	// The refusal message reads entry snapshots of the identity, not
+	// the item: after the gate a final generation release may free the
+	// arena the item lives in.
+	char type[CP_DEVICE_TYPE_LEN];
+	char name[CP_DEVICE_NAME_LEN];
+	strtcpy(type, self->type, sizeof(type));
+	strtcpy(name, self->name, sizeof(name));
 
-	if (cp_entity_try_destroy(&self->entity, &id)) {
+	if (cp_entity_try_destroy(&self->entity)) {
 		// errno is set last, right before the return, so the error
 		// formatting above cannot clobber what the caller reads.
 		yanet_error_add_kind(
@@ -553,8 +554,8 @@ cp_device_try_destroy(struct cp_device *self, yanet_error **err) {
 			YANET_ERROR_BUSY,
 			"device '%s:%s' is still referenced by a live "
 			"generation",
-			id.type_out,
-			id.name_out
+			type,
+			name
 		);
 		errno = EAGAIN;
 		return -1;

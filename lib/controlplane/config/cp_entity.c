@@ -33,7 +33,7 @@ cp_entity_item_owner(struct registry_item *item) {
 }
 
 int
-cp_entity_try_destroy(struct cp_entity *self, struct cp_entity_id *id) {
+cp_entity_try_destroy(struct cp_entity *self) {
 	struct agent *agent = ADDR_OF(&self->agent);
 	struct cp_config *cp_config =
 		(agent != NULL) ? ADDR_OF(&agent->cp_config) : NULL;
@@ -43,13 +43,10 @@ cp_entity_try_destroy(struct cp_entity *self, struct cp_entity_id *id) {
 		spinlock_lock(&cp_config->agent_lock);
 	}
 
-	// Everything read from the item happens under the locks, including
-	// the identity copies for the refusal: once the locks are gone, a
-	// final generation release may tear the item's registries down and
-	// a sweep may reclaim the arena the item lives in.
-	strtcpy(id->type_out, id->type, sizeof(id->type_out));
-	strtcpy(id->name_out, id->name, sizeof(id->name_out));
-
+	// Everything the gate reads from the item happens under the locks:
+	// once they are gone, a final generation release may tear the
+	// item's registries down and a sweep may reclaim the arena the
+	// item lives in.
 	uint64_t refcnt =
 		__atomic_load_n(&self->config_item.refcnt, __ATOMIC_RELAXED);
 
