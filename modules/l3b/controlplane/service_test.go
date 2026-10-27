@@ -1,15 +1,19 @@
 package l3b_test
 
 import (
+	"context"
+	"math"
 	"net/netip"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 	"github.com/yanet-platform/xnetip"
+	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
+	"github.com/yanet-platform/yanet2/common/go/xgrpc"
 	controlplane "github.com/yanet-platform/yanet2/modules/l3b/controlplane"
 	l3bpb "github.com/yanet-platform/yanet2/modules/l3b/controlplane/l3bpb/v1"
 	"github.com/yanet-platform/yanet2/objects/l3b/bindings/go/cl3bobject"
@@ -145,6 +149,33 @@ func Test_L3BService_CreateAndListService(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, []string{"vs0"}, resp.Services)
 	require.Len(t, backend.services, 1)
+}
+
+// Test_L3BService_CreateService_CapacityValidation verifies interceptor rejection
+// before the handler and preservation of direct-backend status by the service.
+func Test_L3BService_CreateService_CapacityValidation(t *testing.T) {
+	operations := &fakeSharedMemory{}
+	backend := controlplane.NewBackendWithSharedMemory(operations)
+	require.NoError(t, backend.CreateService(sampleService("existing")))
+	service := controlplane.NewL3BService(backend)
+	for _, name := range []string{"absent", "existing"} {
+		request := &l3bpb.CreateServiceRequest{Service: sampleService(name)}
+		request.Service.SessionIndexSize = math.MaxUint32
+		called := false
+		_, err := xgrpc.ValidateUnaryInterceptor()(
+			t.Context(), request, &grpc.UnaryServerInfo{},
+			func(ctx context.Context, message any) (any, error) {
+				called = true
+				return service.CreateService(ctx, message.(*l3bpb.CreateServiceRequest))
+			},
+		)
+		require.Equal(t, codes.InvalidArgument, status.Code(err))
+		require.False(t, called)
+		_, err = service.CreateService(t.Context(), request)
+		require.Equal(t, codes.InvalidArgument, status.Code(err))
+		require.Len(t, operations.Tables, 1)
+		require.Len(t, operations.Services, 1)
+	}
 }
 
 func Test_L3BService_UpdateServiceMissing(t *testing.T) {

@@ -2,6 +2,7 @@ package l3b_test
 
 import (
 	"errors"
+	"math"
 	"net/netip"
 	"sync"
 	"sync/atomic"
@@ -120,7 +121,7 @@ func (m *fakeSharedMemory) CreateSessionTable(name string, workers uint16, size 
 	if err := m.Call("create-table"); err != nil {
 		return nil, err
 	}
-	table := &fakeSessionTable{Operations: m}
+	table := &fakeSessionTable{Operations: m, SessionIndexSize: size}
 	m.Tables = append(m.Tables, table)
 	return table, nil
 }
@@ -189,9 +190,10 @@ func (m *fakeVirtualService) ReadSessions(cursor uint64, limit uint32) ([]cl3bob
 
 // fakeSessionTable records a table's lifetime across service generations.
 type fakeSessionTable struct {
-	Operations   *fakeSharedMemory
-	FreeCalls    atomic.Int32
-	Destructions atomic.Int32
+	Operations       *fakeSharedMemory
+	SessionIndexSize uint32
+	FreeCalls        atomic.Int32
+	Destructions     atomic.Int32
 }
 
 func (m *fakeSessionTable) Free() error {
@@ -464,6 +466,157 @@ func Test_Backend_CreateService_FilterErrorNotNested(t *testing.T) {
 	err := backend.CreateService(service)
 	require.Equal(t, codes.InvalidArgument, status.Code(err))
 	require.NotContains(t, status.Convert(err).Message(), "rpc error")
+}
+
+// Test_Backend_CreateService_SessionCapacity verifies raw forwarding and rejection
+// before shared-memory work, including when the requested name already exists.
+func Test_Backend_CreateService_SessionCapacity(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		size  uint32
+		valid bool
+	}{
+		{"zero selects default", 0, true},
+		{"minimum positive rounds natively", 1, true},
+		{"minimum native size", 16, true},
+		{"non power of two", 1000, true},
+		{"maximum admitted input", 1073741824, true},
+		{"above maximum", 1073741825, false},
+		{"maximum uint32", math.MaxUint32, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			operations := &fakeSharedMemory{}
+			backend := controlplane.NewBackendWithSharedMemory(operations)
+			require.NoError(t, backend.CreateService(sampleService("existing")))
+			var calls []string
+			operations.Hook = func(operation string) error {
+				calls = append(calls, operation)
+				return nil
+			}
+			request := sampleService("candidate")
+			request.SessionIndexSize = tc.size
+			err := backend.CreateService(request)
+			if tc.valid {
+				require.NoError(t, err)
+				require.Len(t, operations.Tables, 2)
+				require.Equal(t, tc.size, operations.Tables[1].SessionIndexSize)
+			} else {
+				require.Equal(t, codes.InvalidArgument, status.Code(err))
+				require.Empty(t, calls)
+				require.Len(t, operations.Tables, 1)
+				require.Len(t, operations.Services, 1)
+				require.Equal(t, []string{"existing"}, backend.ListServices())
+			}
+			require.Equal(t, tc.size, request.SessionIndexSize)
+
+			calls = nil
+			request.Name = "existing"
+			err = backend.CreateService(request)
+			if tc.valid {
+				require.Equal(t, codes.AlreadyExists, status.Code(err))
+			} else {
+				require.Equal(t, codes.InvalidArgument, status.Code(err))
+			}
+			require.Empty(t, calls)
+		})
+	}
+}
+
+// Test_Backend_CreateService_InvalidCapacitySkipsReclamation verifies that an
+// invalid request leaves even reclaimable retired handles untouched.
+func Test_Backend_CreateService_InvalidCapacitySkipsReclamation(t *testing.T) {
+	operations := &fakeSharedMemory{}
+	backend := controlplane.NewBackendWithSharedMemory(operations)
+	require.NoError(t, backend.CreateService(sampleService("vs0")))
+	retired := operations.Services[0]
+	retired.Refusals.Store(1)
+	require.NoError(t, backend.UpdateService(sampleService("vs0")))
+	require.Zero(t, retired.Destructions.Load())
+	retired.Refusals.Store(0)
+	freeCalls := retired.FreeCalls.Load()
+	request := sampleService("vs1")
+	request.SessionIndexSize = math.MaxUint32
+	require.Equal(t, codes.InvalidArgument, status.Code(backend.CreateService(request)))
+	require.Equal(t, freeCalls, retired.FreeCalls.Load())
+	require.Zero(t, retired.Destructions.Load())
+	request.SessionIndexSize = 16
+	require.NoError(t, backend.CreateService(request))
+	require.EqualValues(t, 1, retired.Destructions.Load())
+}
+
+// Test_Backend_UpdateService_PreservesSessionCapacity verifies that the creation
+// bound does not add resizing or validation to the legacy replacement path.
+func Test_Backend_UpdateService_PreservesSessionCapacity(t *testing.T) {
+	operations := &fakeSharedMemory{}
+	backend := controlplane.NewBackendWithSharedMemory(operations)
+	request := sampleService("vs0")
+	request.SessionIndexSize = 16
+	require.NoError(t, backend.CreateService(request))
+	table := operations.Tables[0]
+	request.SessionIndexSize = math.MaxUint32
+	require.NoError(t, backend.UpdateService(request))
+	require.Len(t, operations.Tables, 1)
+	require.Same(t, table, operations.Tables[0])
+	require.Equal(t, uint32(16), table.SessionIndexSize)
+	require.Zero(t, table.Destructions.Load())
+}
+
+// Test_Backend_CreateService_SmallCapacity verifies that default and small
+// positive requests still construct and publish through the native path.
+func Test_Backend_CreateService_SmallCapacity(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		size uint32
+	}{
+		{"default", 0},
+		{"minimum positive", 1},
+		{"minimum native size", 16},
+		{"non power of two", 1000},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			backend := newTestBackend(t)
+			request := serviceWithRealServer("vs0")
+			request.SessionIndexSize = tc.size
+			require.NoError(t, backend.CreateService(request))
+			view, err := backend.GetService("vs0")
+			require.NoError(t, err)
+			require.False(t, view.RealServers[0].Enabled)
+			require.Equal(t, tc.size, request.SessionIndexSize)
+			require.NoError(t, backend.DeleteService("vs0"))
+		})
+	}
+}
+
+// Test_Backend_CreateService_InvalidCapacityPreservesNativeState verifies that
+// rejected creation cannot consume arena space or replace accepted native state.
+func Test_Backend_CreateService_InvalidCapacityPreservesNativeState(t *testing.T) {
+	backend, agent, harness := newTestBackendFixture(t)
+	request := serviceWithRealServer("existing")
+	request.SessionIndexSize = 16
+	require.NoError(t, backend.CreateService(request))
+	t.Cleanup(func() { require.NoError(t, backend.DeleteService("existing")) })
+	before, err := backend.GetService("existing")
+	require.NoError(t, err)
+	require.False(t, before.RealServers[0].Enabled)
+	capacity := agent.BlockAllocatorFreeSize()
+	generation, err := harness.PublishedExecutionContext(0)
+	require.NoError(t, err)
+	require.NotZero(t, generation)
+	for _, name := range []string{"absent", "existing"} {
+		for _, size := range []uint32{1073741825, math.MaxUint32} {
+			request := sampleService(name)
+			request.SessionIndexSize = size
+			require.Equal(t, codes.InvalidArgument, status.Code(backend.CreateService(request)))
+			require.Equal(t, capacity, agent.BlockAllocatorFreeSize())
+			after, err := backend.GetService("existing")
+			require.NoError(t, err)
+			require.Equal(t, before, after)
+			current, err := harness.PublishedExecutionContext(0)
+			require.NoError(t, err)
+			require.Equal(t, generation, current)
+			require.Equal(t, []string{"existing"}, backend.ListServices())
+		}
+	}
 }
 
 // serviceWithRealServer returns a descriptor with one IPv4 destination.
