@@ -120,7 +120,8 @@ l3b_module_config_destroy(struct cp_module *cp_module) {
 	struct module_config *config =
 		container_of(cp_module, struct module_config, cp_module);
 
-	struct memory_context *memory_context = &cp_module->memory_context;
+	struct memory_context *memory_context =
+		&cp_module->entity.memory_context;
 
 	l3b_destination_classifier_ip4_free(
 		memory_context, &config->classifier_ip4
@@ -228,7 +229,7 @@ l3b_module_init_destination(
 	yanet_error **err
 ) {
 	struct memory_context *memory_context =
-		&config->cp_module.memory_context;
+		&config->cp_module.entity.memory_context;
 	const struct classifier_rule **rule_ptrs = l3b_rule_ptrs_project(
 		destination_filter_rules, rule_count, family_is_ip4
 	);
@@ -367,7 +368,8 @@ l3b_module_config_update(
 ) {
 	struct module_config *config =
 		container_of(cp_module, struct module_config, cp_module);
-	struct memory_context *memory_context = &cp_module->memory_context;
+	struct memory_context *memory_context =
+		&cp_module->entity.memory_context;
 
 	// Link the virtual service each rule names and record the per-rule link
 	// index; rules naming the same service share one link, and the

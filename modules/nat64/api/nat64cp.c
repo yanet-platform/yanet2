@@ -36,7 +36,7 @@ nat64_module_config_destroy(struct cp_module *cp_module) {
 		container_of(cp_module, struct nat64_module_config, cp_module);
 
 	nat64_module_config_data_destroy(
-		config, &config->cp_module.memory_context
+		config, &config->cp_module.entity.memory_context
 	);
 
 	// Capture agent before fini zeroes it.
@@ -76,7 +76,7 @@ nat64_module_config_create(
 	}
 
 	if (nat64_module_config_data_init(
-		    config, &config->cp_module.memory_context
+		    config, &config->cp_module.entity.memory_context
 	    )) {
 		yanet_error_add(err, "failed to init config data");
 		// Frees directly instead of going through the type destructor.
@@ -236,7 +236,7 @@ nat64_module_config_add_mapping(
 	// Expand mapping array
 	struct ip4to6 *mappings = ADDR_OF(&config->mappings.list);
 	if (mem_array_expand_exp(
-		    &config->cp_module.memory_context,
+		    &config->cp_module.entity.memory_context,
 		    (void **)&mappings,
 		    sizeof(*mappings),
 		    &config->mappings.count
@@ -297,7 +297,7 @@ nat64_module_config_add_prefix(
 	// Expand prefix array
 	struct nat64_prefix *prefixes = ADDR_OF(&config->prefixes.prefixes);
 	if (mem_array_expand_exp(
-		    &config->cp_module.memory_context,
+		    &config->cp_module.entity.memory_context,
 		    (void **)&prefixes,
 		    sizeof(*prefixes),
 		    &config->prefixes.count

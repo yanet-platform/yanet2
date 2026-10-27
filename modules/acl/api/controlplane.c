@@ -30,7 +30,8 @@ static void
 acl_module_config_destroy(struct cp_module *cp_module) {
 	struct acl_module_config *config =
 		container_of(cp_module, struct acl_module_config, cp_module);
-	struct memory_context *memory_context = &cp_module->memory_context;
+	struct memory_context *memory_context =
+		&cp_module->entity.memory_context;
 
 	memory_bfree(
 		memory_context,
@@ -613,7 +614,8 @@ acl_module_build_l2(
 ) {
 	struct acl_module_config *config =
 		container_of(cp_module, struct acl_module_config, cp_module);
-	struct memory_context *memory_context = &cp_module->memory_context;
+	struct memory_context *memory_context =
+		&cp_module->entity.memory_context;
 	struct acl_classifier_l2 *cls = &config->classifier_l2;
 	const struct classifier_rule **rule_ptrs = acl_rule_ptrs_project(
 		acl_rules, acl_rule_count, check_acl_rule_l2
@@ -663,7 +665,8 @@ acl_module_derive_l2(
 ) {
 	struct acl_module_config *config =
 		container_of(cp_module, struct acl_module_config, cp_module);
-	struct memory_context *memory_context = &cp_module->memory_context;
+	struct memory_context *memory_context =
+		&cp_module->entity.memory_context;
 	const struct classifier_rule **rule_ptrs = acl_rule_ptrs_project(
 		acl_rules, acl_rule_count, check_acl_rule_l2
 	);
@@ -724,7 +727,8 @@ acl_module_build_ip4_classifier(
 ) {
 	struct acl_module_config *config =
 		container_of(cp_module, struct acl_module_config, cp_module);
-	struct memory_context *memory_context = &cp_module->memory_context;
+	struct memory_context *memory_context =
+		&cp_module->entity.memory_context;
 	struct acl_classifier_core4 *cls = &config->classifier_core4;
 	const struct classifier_rule **rule_ptrs =
 		acl_rule_ptrs_project(acl_rules, acl_rule_count, check_has_ip4);
@@ -880,7 +884,8 @@ acl_module_derive_ip4(
 ) {
 	struct acl_module_config *config =
 		container_of(cp_module, struct acl_module_config, cp_module);
-	struct memory_context *memory_context = &cp_module->memory_context;
+	struct memory_context *memory_context =
+		&cp_module->entity.memory_context;
 	const struct classifier_rule **rule_ptrs = acl_rule_ptrs_project(
 		acl_rules, acl_rule_count, check_acl_rule_plain
 	);
@@ -921,7 +926,8 @@ acl_module_build_ip6_classifier(
 ) {
 	struct acl_module_config *config =
 		container_of(cp_module, struct acl_module_config, cp_module);
-	struct memory_context *memory_context = &cp_module->memory_context;
+	struct memory_context *memory_context =
+		&cp_module->entity.memory_context;
 	struct acl_classifier_core6 *cls = &config->classifier_core6;
 	const struct classifier_rule **rule_ptrs =
 		acl_rule_ptrs_project(acl_rules, acl_rule_count, check_has_ip6);
@@ -1077,7 +1083,8 @@ acl_module_derive_ip6(
 ) {
 	struct acl_module_config *config =
 		container_of(cp_module, struct acl_module_config, cp_module);
-	struct memory_context *memory_context = &cp_module->memory_context;
+	struct memory_context *memory_context =
+		&cp_module->entity.memory_context;
 	const struct classifier_rule **rule_ptrs =
 		acl_rule_ptrs_project(acl_rules, acl_rule_count, check_has_ip6);
 	if (rule_ptrs == NULL) {
@@ -1214,7 +1221,8 @@ acl_module_build_paths(
 	struct acl_rule *acl_rules,
 	uint32_t acl_rule_count
 ) {
-	struct memory_context *memory_context = &cp_module->memory_context;
+	struct memory_context *memory_context =
+		&cp_module->entity.memory_context;
 
 	// The memory context names of the compile below: the family prefix
 	// of the build with the role of each object.
@@ -1519,7 +1527,7 @@ acl_module_compile_rules(
 	struct acl_target *targets = NULL;
 	if (rule_count > 0) {
 		targets = (struct acl_target *)memory_balloc(
-			&cp_module->memory_context,
+			&cp_module->entity.memory_context,
 			sizeof(struct acl_target) * rule_count
 		);
 		if (targets == NULL) {
@@ -1709,8 +1717,12 @@ acl_module_compile_rules(
 		}
 	}
 
-	classifier_fini(&core4_stage, &cp_module->memory_context, rule_count);
-	classifier_fini(&core6_stage, &cp_module->memory_context, rule_count);
+	classifier_fini(
+		&core4_stage, &cp_module->entity.memory_context, rule_count
+	);
+	classifier_fini(
+		&core6_stage, &cp_module->entity.memory_context, rule_count
+	);
 
 	clock_gettime(CLOCK_MONOTONIC, &ts_end);
 	config->compilation_time_ns =
@@ -1750,12 +1762,16 @@ acl_module_compile_rules(
 	return 0;
 
 error_target:
-	classifier_fini(&core4_stage, &cp_module->memory_context, rule_count);
-	classifier_fini(&core6_stage, &cp_module->memory_context, rule_count);
+	classifier_fini(
+		&core4_stage, &cp_module->entity.memory_context, rule_count
+	);
+	classifier_fini(
+		&core6_stage, &cp_module->entity.memory_context, rule_count
+	);
 
 	if (targets != NULL) {
 		memory_bfree(
-			&cp_module->memory_context,
+			&cp_module->entity.memory_context,
 			targets,
 			sizeof(struct acl_target) * rule_count
 		);

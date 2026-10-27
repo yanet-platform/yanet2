@@ -210,7 +210,7 @@ unrdup_slots_add(
 void
 unrdup_module_config_data_fini(struct unrdup_module_config *config) {
 	struct memory_context *memory_context =
-		&config->cp_module.memory_context;
+		&config->cp_module.entity.memory_context;
 
 	unrdup_family_clear(
 		memory_context,
@@ -418,7 +418,8 @@ unrdup_family_publish(
 	struct unrdup_family_view *view,
 	yanet_error **err
 ) {
-	struct memory_context *memory_context = &cp_module->memory_context;
+	struct memory_context *memory_context =
+		&cp_module->entity.memory_context;
 
 	memset(view, 0, sizeof(*view));
 
@@ -535,7 +536,8 @@ unrdup_module_config_update_services(
 ) {
 	struct unrdup_module_config *config =
 		container_of(cp_module, struct unrdup_module_config, cp_module);
-	struct memory_context *memory_context = &cp_module->memory_context;
+	struct memory_context *memory_context =
+		&cp_module->entity.memory_context;
 
 	if (service_count == 0) {
 		unrdup_module_config_data_fini(config);

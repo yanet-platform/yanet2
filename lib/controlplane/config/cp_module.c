@@ -9,7 +9,7 @@
 #include "lib/controlplane/config/cp_entity.h"
 #include "lib/controlplane/config/zone.h"
 
-#include <stddef.h>
+#include <errno.h>
 
 int
 cp_module_init(
@@ -36,16 +36,13 @@ cp_module_init(
 
 	strtcpy(cp_module->type, module_type, sizeof(cp_module->type));
 	strtcpy(cp_module->name, module_name, sizeof(cp_module->name));
-	memory_context_init_from(
-		&cp_module->memory_context, &agent->memory_context, module_name
-	);
 
-	SET_OFFSET_OF(&cp_module->entity.agent, agent);
-
-	registry_item_init(&cp_module->entity.config_item);
+	cp_entity_init(&cp_module->entity, agent, module_name);
 
 	if (counter_registry_init(
-		    &cp_module->counter_registry, &cp_module->memory_context, 0
+		    &cp_module->counter_registry,
+		    &cp_module->entity.memory_context,
+		    0
 	    )) {
 		yanet_error_add(
 			err,
@@ -147,13 +144,13 @@ cp_module_fini(struct cp_module *cp_module) {
 				ADDR_OF(runtime_registries + i);
 			counter_registry_fini(&entry->registry);
 			memory_bfree(
-				&cp_module->memory_context,
+				&cp_module->entity.memory_context,
 				entry,
 				sizeof(*entry)
 			);
 		}
 		memory_bfree(
-			&cp_module->memory_context,
+			&cp_module->entity.memory_context,
 			runtime_registries,
 			sizeof(*runtime_registries) *
 				cp_module->runtime_counter_registry_count
@@ -165,7 +162,7 @@ cp_module_fini(struct cp_module *cp_module) {
 	struct cp_module_device *devices = ADDR_OF(&cp_module->devices);
 	if (devices != NULL) {
 		memory_bfree(
-			&cp_module->memory_context,
+			&cp_module->entity.memory_context,
 			devices,
 			sizeof(struct cp_module_device) *
 				cp_module->device_count
@@ -177,7 +174,7 @@ cp_module_fini(struct cp_module *cp_module) {
 	struct cp_module_object *objects = ADDR_OF(&cp_module->objects);
 	if (objects != NULL) {
 		memory_bfree(
-			&cp_module->memory_context,
+			&cp_module->entity.memory_context,
 			objects,
 			sizeof(struct cp_module_object) *
 				cp_module->object_count
@@ -186,9 +183,7 @@ cp_module_fini(struct cp_module *cp_module) {
 	SET_OFFSET_OF(&cp_module->objects, NULL);
 	cp_module->object_count = 0;
 
-	SET_OFFSET_OF(&cp_module->entity.agent, NULL);
-
-	memory_context_fini(&cp_module->memory_context);
+	cp_entity_fini(&cp_module->entity);
 }
 
 struct counter_registry *
@@ -220,7 +215,7 @@ cp_module_counter_registry(
 	// intact and usable.
 	struct cp_module_counter_registry *slot =
 		(struct cp_module_counter_registry *)memory_balloc(
-			&cp_module->memory_context, sizeof(*slot)
+			&cp_module->entity.memory_context, sizeof(*slot)
 		);
 	if (slot == NULL) {
 		yanet_error_add(
@@ -235,9 +230,11 @@ cp_module_counter_registry(
 	}
 	strtcpy(slot->tag, tag, sizeof(slot->tag));
 	if (counter_registry_init(
-		    &slot->registry, &cp_module->memory_context, 0
+		    &slot->registry, &cp_module->entity.memory_context, 0
 	    )) {
-		memory_bfree(&cp_module->memory_context, slot, sizeof(*slot));
+		memory_bfree(
+			&cp_module->entity.memory_context, slot, sizeof(*slot)
+		);
 		yanet_error_add(
 			err,
 			"failed to initialize counter registry '%s' for module "
@@ -251,12 +248,14 @@ cp_module_counter_registry(
 
 	struct cp_module_counter_registry **new_registries =
 		(struct cp_module_counter_registry **)memory_balloc(
-			&cp_module->memory_context,
+			&cp_module->entity.memory_context,
 			sizeof(*new_registries) * new_count
 		);
 	if (new_registries == NULL) {
 		counter_registry_fini(&slot->registry);
-		memory_bfree(&cp_module->memory_context, slot, sizeof(*slot));
+		memory_bfree(
+			&cp_module->entity.memory_context, slot, sizeof(*slot)
+		);
 		yanet_error_add(
 			err,
 			"failed to allocate counter registry '%s' for module "
@@ -281,7 +280,7 @@ cp_module_counter_registry(
 	SET_OFFSET_OF(new_registries + old_count, slot);
 
 	memory_bfree(
-		&cp_module->memory_context,
+		&cp_module->entity.memory_context,
 		runtime_registries,
 		sizeof(*runtime_registries) * old_count
 	);
@@ -310,7 +309,7 @@ cp_module_link_device(
 	}
 
 	devices = (struct cp_module_device *)memory_brealloc(
-		&cp_module->memory_context,
+		&cp_module->entity.memory_context,
 		devices,
 		sizeof(struct cp_module_device) * cp_module->device_count,
 		sizeof(struct cp_module_device) * (cp_module->device_count + 1)
@@ -356,7 +355,7 @@ cp_module_link_object(
 	}
 
 	objects = (struct cp_module_object *)memory_brealloc(
-		&cp_module->memory_context,
+		&cp_module->entity.memory_context,
 		objects,
 		sizeof(struct cp_module_object) * cp_module->object_count,
 		sizeof(struct cp_module_object) * (cp_module->object_count + 1)
@@ -440,16 +439,10 @@ cp_module_registry_item_hash(const struct registry_item *item) {
 // counters survive a config rebuild that leaves the layout unchanged.
 static int
 cp_module_link_counters(
-	struct registry_item *new_item,
-	struct registry_item *old_item,
+	struct cp_module *new_module,
+	struct cp_module *old_module,
 	yanet_error **err
 ) {
-	struct cp_module *new_module =
-		container_of(new_item, struct cp_module, entity);
-	struct cp_module *old_module =
-		(old_item != NULL)
-			? container_of(old_item, struct cp_module, entity)
-			: NULL;
 
 	if (counter_registry_link(
 		    &new_module->counter_registry,
@@ -503,24 +496,29 @@ cp_module_link_counters(
 	return 0;
 }
 
-static const struct cp_entity_desc cp_module_entity_desc = {
-	.keys =
-		{
-			.cmp = cp_module_registry_item_cmp,
-			.key_hash = cp_module_registry_key_hash,
-			.item_hash = cp_module_registry_item_hash,
-		},
-	.noun = "module",
-	.name_offset = offsetof(struct cp_module, name),
-	.type_offset = offsetof(struct cp_module, type),
-	.link_counters = cp_module_link_counters,
+static const struct registry_keys cp_module_registry_keys = {
+	.cmp = cp_module_registry_item_cmp,
+	.key_hash = cp_module_registry_key_hash,
+	.item_hash = cp_module_registry_item_hash,
 };
-
 int
 cp_module_try_destroy(struct cp_module *cp_module, yanet_error **err) {
-	return cp_entity_try_destroy(
-		&cp_module->entity.config_item, &cp_module_entity_desc, err
-	);
+	if (cp_entity_try_destroy(&cp_module->entity)) {
+		// errno is set last, right before the return, so the error
+		// formatting above cannot clobber what the caller reads.
+		yanet_error_add_kind(
+			err,
+			YANET_ERROR_BUSY,
+			"module '%s:%s' is still referenced by a live "
+			"generation",
+			cp_module->type,
+			cp_module->name
+		);
+		errno = EAGAIN;
+		return -1;
+	}
+
+	return 0;
 }
 
 int
@@ -531,16 +529,12 @@ cp_module_registry_init(
 	yanet_error **err
 ) {
 	if (cp_entity_registry_init(
-		    memory_context,
-		    owner,
-		    &new_module_registry->registry,
-		    &cp_module_entity_desc,
-		    err
+		    memory_context, owner, &new_module_registry->entity_registry
 	    )) {
+		yanet_error_add(err, "failed to initialize module registry");
 		return -1;
 	}
 
-	SET_OFFSET_OF(&new_module_registry->memory_context, memory_context);
 	return 0;
 }
 
@@ -553,21 +547,20 @@ cp_module_registry_copy(
 ) {
 	if (cp_entity_registry_copy(
 		    memory_context,
-		    &new_module_registry->registry,
-		    &old_module_registry->registry,
-		    &cp_module_entity_desc,
-		    err
+		    &cp_module_registry_keys,
+		    &new_module_registry->entity_registry,
+		    &old_module_registry->entity_registry
 	    )) {
+		yanet_error_add(err, "failed to copy module registry");
 		return -1;
 	}
 
-	SET_OFFSET_OF(&new_module_registry->memory_context, memory_context);
 	return 0;
 }
 
 void
 cp_module_registry_fini(struct cp_module_registry *module_registry) {
-	cp_entity_registry_fini(&module_registry->registry);
+	cp_entity_registry_fini(&module_registry->entity_registry);
 }
 
 struct cp_module *
@@ -575,7 +568,7 @@ cp_module_registry_get(
 	struct cp_module_registry *module_registry, uint64_t index
 ) {
 	struct registry_item *item =
-		registry_get(&module_registry->registry, index);
+		registry_get(&module_registry->entity_registry.registry, index);
 	if (item == NULL) {
 		return NULL;
 	}
@@ -595,8 +588,8 @@ cp_module_registry_lookup(
 	uint64_t index;
 
 	if (registry_lookup(
-		    &module_registry->registry,
-		    &cp_module_entity_desc.keys,
+		    &module_registry->entity_registry.registry,
+		    &cp_module_registry_keys,
 		    cp_module_registry_item_cmp,
 		    &cmp_data,
 		    &index
@@ -605,7 +598,7 @@ cp_module_registry_lookup(
 	}
 
 	return container_of(
-		registry_get(&module_registry->registry, index),
+		registry_get(&module_registry->entity_registry.registry, index),
 		struct cp_module,
 		entity
 	);
@@ -624,14 +617,25 @@ cp_module_registry_upsert(
 		.name = name,
 	};
 
-	return cp_entity_registry_upsert(
-		&module_registry->registry,
-		&cp_module_entity_desc,
-		cp_module_registry_item_cmp,
-		&cmp_data,
-		&new_module->entity.config_item,
-		err
-	);
+	struct cp_module *old_module =
+		cp_module_registry_lookup(module_registry, type, name);
+
+	if (cp_module_link_counters(new_module, old_module, err)) {
+		return -1;
+	}
+
+	if (cp_entity_registry_replace(
+		    &module_registry->entity_registry,
+		    &cp_module_registry_keys,
+		    cp_module_registry_item_cmp,
+		    &cmp_data,
+		    &new_module->entity.config_item
+	    )) {
+		yanet_error_add(err, "failed to replace module in registry");
+		return -1;
+	}
+
+	return 0;
 }
 
 int
@@ -645,15 +649,16 @@ cp_module_registry_delete(
 		.name = name,
 	};
 
-	return cp_entity_registry_delete(
-		&module_registry->registry,
-		&cp_module_entity_desc,
+	return cp_entity_registry_replace(
+		&module_registry->entity_registry,
+		&cp_module_registry_keys,
 		cp_module_registry_item_cmp,
-		&cmp_data
+		&cmp_data,
+		NULL
 	);
 }
 
 size_t
 cp_module_registry_size(struct cp_module_registry *module_registry) {
-	return module_registry->registry.capacity;
+	return module_registry->entity_registry.registry.capacity;
 }

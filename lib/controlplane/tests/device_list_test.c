@@ -706,7 +706,8 @@ run_snapshot_allocation_failures_test(struct yanet_shm *shm) {
 		{"device list",
 		 SNAPSHOT_DEVICES,
 		 sizeof(struct cp_device_list_info) +
-			 generation->device_registry.registry.capacity *
+			 generation->device_registry.entity_registry.registry
+					 .capacity *
 				 sizeof(struct cp_device_info *),
 		 0},
 		{"first device",

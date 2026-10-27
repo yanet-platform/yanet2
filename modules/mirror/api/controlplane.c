@@ -20,7 +20,8 @@ static void
 mirror_module_config_destroy(struct cp_module *cp_module) {
 	struct mirror_module_config *config =
 		container_of(cp_module, struct mirror_module_config, cp_module);
-	struct memory_context *memory_context = &cp_module->memory_context;
+	struct memory_context *memory_context =
+		&cp_module->entity.memory_context;
 
 	memory_bfree(
 		memory_context,
@@ -286,7 +287,8 @@ mirror_module_init_l2(
 ) {
 	struct mirror_module_config *config =
 		container_of(cp_module, struct mirror_module_config, cp_module);
-	struct memory_context *memory_context = &cp_module->memory_context;
+	struct memory_context *memory_context =
+		&cp_module->entity.memory_context;
 	struct mirror_classifier_vlan *cls = &config->classifier_vlan;
 	const struct classifier_rule **rule_ptrs = mirror_rule_ptrs_project(
 		mirror_rules, mirror_rule_count, check_mirror_rule_l2
@@ -384,7 +386,8 @@ mirror_module_init_ip4(
 ) {
 	struct mirror_module_config *config =
 		container_of(cp_module, struct mirror_module_config, cp_module);
-	struct memory_context *memory_context = &cp_module->memory_context;
+	struct memory_context *memory_context =
+		&cp_module->entity.memory_context;
 	struct mirror_classifier_ip4 *cls = &config->classifier_ip4;
 	const struct classifier_rule **rule_ptrs = mirror_rule_ptrs_project(
 		mirror_rules, mirror_rule_count, check_mirror_rule_ip4
@@ -532,7 +535,8 @@ mirror_module_init_ip6(
 ) {
 	struct mirror_module_config *config =
 		container_of(cp_module, struct mirror_module_config, cp_module);
-	struct memory_context *memory_context = &cp_module->memory_context;
+	struct memory_context *memory_context =
+		&cp_module->entity.memory_context;
 	struct mirror_classifier_ip6 *cls = &config->classifier_ip6;
 	const struct classifier_rule **rule_ptrs = mirror_rule_ptrs_project(
 		mirror_rules, mirror_rule_count, check_mirror_rule_ip6
@@ -673,7 +677,7 @@ mirror_module_config_update(
 		container_of(cp_module, struct mirror_module_config, cp_module);
 
 	struct mirror_target *targets = (struct mirror_target *)memory_balloc(
-		&cp_module->memory_context,
+		&cp_module->entity.memory_context,
 		sizeof(struct mirror_target) * rule_count
 	);
 	if (targets == NULL) {
@@ -726,7 +730,7 @@ mirror_module_config_update(
 
 error_target:
 	memory_bfree(
-		&cp_module->memory_context,
+		&cp_module->entity.memory_context,
 		targets,
 		sizeof(struct mirror_target) * rule_count
 	);

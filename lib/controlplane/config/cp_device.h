@@ -38,8 +38,6 @@ struct cp_device {
 
 	uint64_t dp_device_idx;
 
-	struct memory_context memory_context;
-
 	struct counter_registry counter_registry;
 
 	struct cp_device_entry *input_pipelines;
@@ -151,8 +149,7 @@ cp_device_try_destroy(struct cp_device *self, yanet_error **err);
  */
 
 struct cp_device_registry {
-	struct memory_context *memory_context;
-	struct registry registry;
+	struct cp_entity_registry entity_registry;
 };
 
 int
@@ -202,5 +199,5 @@ cp_device_registry_delete(
 
 static inline uint64_t
 cp_device_registry_capacity(struct cp_device_registry *device_registry) {
-	return device_registry->registry.capacity;
+	return device_registry->entity_registry.registry.capacity;
 }

@@ -86,8 +86,6 @@ struct cp_module {
 
 	// Link to the previous instance of the module configuration
 	struct cp_module *prev;
-	// Memory context for additional resources inside the configuration
-	struct memory_context memory_context;
 
 	uint64_t device_count;
 	struct cp_module_device *devices;
@@ -222,8 +220,7 @@ int
 cp_module_try_destroy(struct cp_module *cp_module, yanet_error **err);
 
 struct cp_module_registry {
-	struct memory_context *memory_context;
-	struct registry registry;
+	struct cp_entity_registry entity_registry;
 };
 
 /**

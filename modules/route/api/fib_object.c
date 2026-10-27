@@ -18,7 +18,7 @@ route_fib_object_destroy(struct cp_object *cp_object) {
 	struct route_fib_object *self = route_fib_object_of(cp_object);
 	struct agent *agent = ADDR_OF(&cp_object->entity.agent);
 
-	route_fib_fini(&self->fib, &cp_object->memory_context);
+	route_fib_fini(&self->fib, &cp_object->entity.memory_context);
 	cp_object_fini(cp_object);
 
 	memory_bfree(
@@ -49,7 +49,9 @@ route_fib_object_new(struct agent *agent, const char *name, yanet_error **err) {
 		return NULL;
 	}
 
-	if (route_fib_init(&self->fib, &self->cp_object.memory_context)) {
+	if (route_fib_init(
+		    &self->fib, &self->cp_object.entity.memory_context
+	    )) {
 		yanet_error_add(err, "failed to init route fib object data");
 		// A failed table setup never reaches a state its own teardown
 		// could walk, and nothing has observed the object yet, so the
@@ -109,7 +111,7 @@ route_fib_object_add_route(
 
 	int route_idx = route_fib_add_route(
 		&self->fib,
-		&cp_object->memory_context,
+		&cp_object->entity.memory_context,
 		dst_addr,
 		src_addr,
 		device_index,
@@ -133,7 +135,7 @@ route_fib_object_add_route_list(
 ) {
 	struct route_fib_object *self = route_fib_object_of(cp_object);
 	return route_fib_add_route_list(
-		&self->fib, &cp_object->memory_context, count, indexes
+		&self->fib, &cp_object->entity.memory_context, count, indexes
 	);
 }
 

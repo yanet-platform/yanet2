@@ -8,7 +8,7 @@
 #include "lib/controlplane/config/cp_entity.h"
 #include "lib/controlplane/config/zone.h"
 
-#include <stddef.h>
+#include <errno.h>
 #include <stdlib.h>
 
 int
@@ -153,13 +153,10 @@ cp_device_init(
 	}
 	strtcpy(self->type, cfg->type, sizeof(self->type));
 	strtcpy(self->name, cfg->name, sizeof(self->name));
-	memory_context_init_from(
-		&self->memory_context, &agent->memory_context, cfg->name
-	);
 
-	SET_OFFSET_OF(&self->entity.agent, agent);
+	cp_entity_init(&self->entity, agent, cfg->name);
 
-	struct memory_context *memory_context = &self->memory_context;
+	struct memory_context *memory_context = &self->entity.memory_context;
 
 	struct cp_device_entry *input =
 		cp_device_entry_new(memory_context, cfg->input_pipelines, err);
@@ -184,8 +181,6 @@ cp_device_init(
 		goto err_out;
 	}
 	SET_OFFSET_OF(&self->output_pipelines, output);
-
-	registry_item_init(&self->entity.config_item);
 
 	if (counter_registry_init(&self->counter_registry, memory_context, 0)) {
 		yanet_error_add(
@@ -401,7 +396,7 @@ cp_device_entry_free(
 
 void
 cp_device_fini(struct cp_device *self) {
-	struct memory_context *memory_context = &self->memory_context;
+	struct memory_context *memory_context = &self->entity.memory_context;
 
 	// Release the device's counter table.
 	counter_registry_fini(&self->counter_registry);
@@ -412,9 +407,7 @@ cp_device_fini(struct cp_device *self) {
 	cp_device_entry_free(memory_context, ADDR_OF(&self->input_pipelines));
 	SET_OFFSET_OF(&self->input_pipelines, NULL);
 
-	SET_OFFSET_OF(&self->entity.agent, NULL);
-
-	memory_context_fini(&self->memory_context);
+	cp_entity_fini(&self->entity);
 }
 
 struct cp_device_cmp_data {
@@ -480,16 +473,10 @@ cp_device_registry_name_cmp(
 // from the displaced device's.
 static int
 cp_device_link_counters(
-	struct registry_item *new_item,
-	struct registry_item *old_item,
+	struct cp_device *new_device,
+	struct cp_device *old_device,
 	yanet_error **err
 ) {
-	struct cp_device *new_device =
-		container_of(new_item, struct cp_device, entity);
-	struct cp_device *old_device =
-		(old_item != NULL)
-			? container_of(old_item, struct cp_device, entity)
-			: NULL;
 
 	if (counter_registry_link(
 		    &new_device->counter_registry,
@@ -507,19 +494,11 @@ cp_device_link_counters(
 	return 0;
 }
 
-static const struct cp_entity_desc cp_device_entity_desc = {
-	.keys =
-		{
-			.cmp = cp_device_registry_item_cmp,
-			.key_hash = cp_device_registry_key_hash,
-			.item_hash = cp_device_registry_item_hash,
-		},
-	.noun = "device",
-	.name_offset = offsetof(struct cp_device, name),
-	.type_offset = offsetof(struct cp_device, type),
-	.link_counters = cp_device_link_counters,
+static const struct registry_keys cp_device_registry_keys = {
+	.cmp = cp_device_registry_item_cmp,
+	.key_hash = cp_device_registry_key_hash,
+	.item_hash = cp_device_registry_item_hash,
 };
-
 int
 cp_device_registry_init(
 	struct memory_context *memory_context,
@@ -528,16 +507,12 @@ cp_device_registry_init(
 	yanet_error **err
 ) {
 	if (cp_entity_registry_init(
-		    memory_context,
-		    owner,
-		    &new_device_registry->registry,
-		    &cp_device_entity_desc,
-		    err
+		    memory_context, owner, &new_device_registry->entity_registry
 	    )) {
+		yanet_error_add(err, "failed to initialize device registry");
 		return -1;
 	}
 
-	SET_OFFSET_OF(&new_device_registry->memory_context, memory_context);
 	return 0;
 }
 
@@ -550,28 +525,40 @@ cp_device_registry_copy(
 ) {
 	if (cp_entity_registry_copy(
 		    memory_context,
-		    &new_device_registry->registry,
-		    &old_device_registry->registry,
-		    &cp_device_entity_desc,
-		    err
+		    &cp_device_registry_keys,
+		    &new_device_registry->entity_registry,
+		    &old_device_registry->entity_registry
 	    )) {
+		yanet_error_add(err, "failed to copy device registry");
 		return -1;
 	}
 
-	SET_OFFSET_OF(&new_device_registry->memory_context, memory_context);
 	return 0;
 }
 
 int
 cp_device_try_destroy(struct cp_device *self, yanet_error **err) {
-	return cp_entity_try_destroy(
-		&self->entity.config_item, &cp_device_entity_desc, err
-	);
+	if (cp_entity_try_destroy(&self->entity)) {
+		// errno is set last, right before the return, so the error
+		// formatting above cannot clobber what the caller reads.
+		yanet_error_add_kind(
+			err,
+			YANET_ERROR_BUSY,
+			"device '%s:%s' is still referenced by a live "
+			"generation",
+			self->type,
+			self->name
+		);
+		errno = EAGAIN;
+		return -1;
+	}
+
+	return 0;
 }
 
 void
 cp_device_registry_fini(struct cp_device_registry *device_registry) {
-	cp_entity_registry_fini(&device_registry->registry);
+	cp_entity_registry_fini(&device_registry->entity_registry);
 }
 
 struct cp_device *
@@ -579,7 +566,7 @@ cp_device_registry_get(
 	struct cp_device_registry *device_registry, uint64_t index
 ) {
 	struct registry_item *item =
-		registry_get(&device_registry->registry, index);
+		registry_get(&device_registry->entity_registry.registry, index);
 	if (item == NULL) {
 		return NULL;
 	}
@@ -598,8 +585,8 @@ cp_device_registry_lookup(
 	};
 	uint64_t index;
 	if (registry_lookup(
-		    &device_registry->registry,
-		    &cp_device_entity_desc.keys,
+		    &device_registry->entity_registry.registry,
+		    &cp_device_registry_keys,
 		    cp_device_registry_item_cmp,
 		    &cmp_data,
 		    &index
@@ -608,7 +595,7 @@ cp_device_registry_lookup(
 	}
 
 	return container_of(
-		registry_get(&device_registry->registry, index),
+		registry_get(&device_registry->entity_registry.registry, index),
 		struct cp_device,
 		entity
 	);
@@ -627,24 +614,36 @@ cp_device_registry_upsert(
 		.name = name,
 	};
 
-	return cp_entity_registry_upsert(
-		&device_registry->registry,
-		&cp_device_entity_desc,
-		cp_device_registry_item_cmp,
-		&cmp_data,
-		&new_device->entity.config_item,
-		err
-	);
+	struct cp_device *old_device =
+		cp_device_registry_lookup(device_registry, type, name);
+
+	if (cp_device_link_counters(new_device, old_device, err)) {
+		return -1;
+	}
+
+	if (cp_entity_registry_replace(
+		    &device_registry->entity_registry,
+		    &cp_device_registry_keys,
+		    cp_device_registry_item_cmp,
+		    &cmp_data,
+		    &new_device->entity.config_item
+	    )) {
+		yanet_error_add(err, "failed to replace device in registry");
+		return -1;
+	}
+
+	return 0;
 }
 
 int
 cp_device_registry_delete(
 	struct cp_device_registry *device_registry, const char *name
 ) {
-	return cp_entity_registry_delete(
-		&device_registry->registry,
-		&cp_device_entity_desc,
+	return cp_entity_registry_replace(
+		&device_registry->entity_registry,
+		&cp_device_registry_keys,
 		cp_device_registry_name_cmp,
-		name
+		name,
+		NULL
 	);
 }

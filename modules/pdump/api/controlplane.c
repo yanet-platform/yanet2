@@ -167,7 +167,7 @@ pdump_module_config_new(
 
 	// Initialize the module data
 	if (pdump_module_config_data_init(
-		    config, &config->cp_module.memory_context
+		    config, &config->cp_module.entity.memory_context
 	    )) {
 		yanet_error_add(err, "failed to init config data");
 		// Frees directly instead of going through the type destructor.

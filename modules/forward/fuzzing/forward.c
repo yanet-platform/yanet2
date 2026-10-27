@@ -38,7 +38,7 @@ forward_test_config(struct cp_module **cp_module, yanet_error **err) {
 		"forward_test",
 		sizeof(config->cp_module.name));
 	memory_context_init_from(
-		&config->cp_module.memory_context,
+		&config->cp_module.entity.memory_context,
 		&fuzz_params.mctx,
 		"forward_test"
 	);
@@ -51,7 +51,7 @@ forward_test_config(struct cp_module **cp_module, yanet_error **err) {
 	// Needed by "forward_module_config_update".
 	if (counter_registry_init(
 		    &config->cp_module.counter_registry,
-		    &config->cp_module.memory_context,
+		    &config->cp_module.entity.memory_context,
 		    0
 	    )) {
 		goto fail;

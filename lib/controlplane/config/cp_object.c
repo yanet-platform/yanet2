@@ -7,7 +7,7 @@
 #include "lib/controlplane/config/cp_entity.h"
 #include "lib/controlplane/config/zone.h"
 
-#include <stddef.h>
+#include <errno.h>
 #include <string.h>
 
 int
@@ -36,16 +36,10 @@ cp_object_init(
 	strtcpy(self->type, object_type, sizeof(self->type));
 	strtcpy(self->name, name, CP_OBJECT_NAME_LEN);
 
-	memory_context_init_from(
-		&self->memory_context, &agent->memory_context, name
-	);
-
-	registry_item_init(&self->entity.config_item);
-
-	SET_OFFSET_OF(&self->entity.agent, agent);
+	cp_entity_init(&self->entity, agent, name);
 
 	if (counter_registry_init(
-		    &self->counter_registry, &self->memory_context, 0
+		    &self->counter_registry, &self->entity.memory_context, 0
 	    )) {
 		yanet_error_add(
 			err,
@@ -56,7 +50,9 @@ cp_object_init(
 	}
 
 	if (counter_registry_init(
-		    &self->link_counter_registry, &self->memory_context, 0
+		    &self->link_counter_registry,
+		    &self->entity.memory_context,
+		    0
 	    )) {
 		yanet_error_add(
 			err,
@@ -79,9 +75,7 @@ cp_object_fini(struct cp_object *self) {
 	counter_registry_fini(&self->link_counter_registry);
 	counter_registry_fini(&self->counter_registry);
 
-	SET_OFFSET_OF(&self->entity.agent, NULL);
-
-	memory_context_fini(&self->memory_context);
+	cp_entity_fini(&self->entity);
 }
 
 // Lookup key for a registry slot: the object identity is the (type, name)
@@ -135,20 +129,20 @@ cp_object_registry_item_hash(const struct registry_item *item) {
 	);
 }
 
+static const struct registry_keys cp_object_registry_keys = {
+	.cmp = cp_object_registry_item_cmp,
+	.key_hash = cp_object_registry_key_hash,
+	.item_hash = cp_object_registry_item_hash,
+};
+
 // Counter continuity of an object upsert: both the object's own counters
 // and its link counters continue from the displaced object's.
 static int
 cp_object_link_counters(
-	struct registry_item *new_item,
-	struct registry_item *old_item,
+	struct cp_object *new_object,
+	struct cp_object *old_object,
 	yanet_error **err
 ) {
-	struct cp_object *new_object =
-		container_of(new_item, struct cp_object, entity);
-	struct cp_object *old_object =
-		(old_item != NULL)
-			? container_of(old_item, struct cp_object, entity)
-			: NULL;
 
 	if (counter_registry_link(
 		    &new_object->counter_registry,
@@ -183,19 +177,6 @@ cp_object_link_counters(
 	return 0;
 }
 
-static const struct cp_entity_desc cp_object_entity_desc = {
-	.keys =
-		{
-			.cmp = cp_object_registry_item_cmp,
-			.key_hash = cp_object_registry_key_hash,
-			.item_hash = cp_object_registry_item_hash,
-		},
-	.noun = "object",
-	.name_offset = offsetof(struct cp_object, name),
-	.type_offset = offsetof(struct cp_object, type),
-	.link_counters = cp_object_link_counters,
-};
-
 int
 cp_object_registry_init(
 	struct memory_context *memory_context,
@@ -204,16 +185,12 @@ cp_object_registry_init(
 	yanet_error **err
 ) {
 	if (cp_entity_registry_init(
-		    memory_context,
-		    owner,
-		    &new_registry->registry,
-		    &cp_object_entity_desc,
-		    err
+		    memory_context, owner, &new_registry->entity_registry
 	    )) {
+		yanet_error_add(err, "failed to initialize object registry");
 		return -1;
 	}
 
-	SET_OFFSET_OF(&new_registry->memory_context, memory_context);
 	return 0;
 }
 
@@ -226,33 +203,46 @@ cp_object_registry_copy(
 ) {
 	if (cp_entity_registry_copy(
 		    memory_context,
-		    &new_registry->registry,
-		    &old_registry->registry,
-		    &cp_object_entity_desc,
-		    err
+		    &cp_object_registry_keys,
+		    &new_registry->entity_registry,
+		    &old_registry->entity_registry
 	    )) {
+		yanet_error_add(err, "failed to copy object registry");
 		return -1;
 	}
 
-	SET_OFFSET_OF(&new_registry->memory_context, memory_context);
 	return 0;
 }
 
 int
 cp_object_try_destroy(struct cp_object *self, yanet_error **err) {
-	return cp_entity_try_destroy(
-		&self->entity.config_item, &cp_object_entity_desc, err
-	);
+	if (cp_entity_try_destroy(&self->entity)) {
+		// errno is set last, right before the return, so the error
+		// formatting above cannot clobber what the caller reads.
+		yanet_error_add_kind(
+			err,
+			YANET_ERROR_BUSY,
+			"object '%s:%s' is still referenced by a live "
+			"generation",
+			self->type,
+			self->name
+		);
+		errno = EAGAIN;
+		return -1;
+	}
+
+	return 0;
 }
 
 void
 cp_object_registry_fini(struct cp_object_registry *registry) {
-	cp_entity_registry_fini(&registry->registry);
+	cp_entity_registry_fini(&registry->entity_registry);
 }
 
 struct cp_object *
 cp_object_registry_get(struct cp_object_registry *registry, uint64_t index) {
-	struct registry_item *item = registry_get(&registry->registry, index);
+	struct registry_item *item =
+		registry_get(&registry->entity_registry.registry, index);
 	if (item == NULL) {
 		return NULL;
 	}
@@ -271,8 +261,8 @@ cp_object_registry_lookup_index(
 	strtcpy(cmp_data.name, object_name, sizeof(cmp_data.name));
 
 	return registry_lookup(
-		&registry->registry,
-		&cp_object_entity_desc.keys,
+		&registry->entity_registry.registry,
+		&cp_object_registry_keys,
 		cp_object_registry_item_cmp,
 		&cmp_data,
 		index
@@ -293,7 +283,7 @@ cp_object_registry_lookup(
 	}
 
 	return container_of(
-		registry_get(&registry->registry, index),
+		registry_get(&registry->entity_registry.registry, index),
 		struct cp_object,
 		entity
 	);
@@ -311,14 +301,25 @@ cp_object_registry_upsert(
 	strtcpy(cmp_data.type, object_type, sizeof(cmp_data.type));
 	strtcpy(cmp_data.name, object_name, sizeof(cmp_data.name));
 
-	return cp_entity_registry_upsert(
-		&registry->registry,
-		&cp_object_entity_desc,
-		cp_object_registry_item_cmp,
-		&cmp_data,
-		&new_object->entity.config_item,
-		err
-	);
+	struct cp_object *old_object =
+		cp_object_registry_lookup(registry, object_type, object_name);
+
+	if (cp_object_link_counters(new_object, old_object, err)) {
+		return -1;
+	}
+
+	if (cp_entity_registry_replace(
+		    &registry->entity_registry,
+		    &cp_object_registry_keys,
+		    cp_object_registry_item_cmp,
+		    &cmp_data,
+		    &new_object->entity.config_item
+	    )) {
+		yanet_error_add(err, "failed to replace object in registry");
+		return -1;
+	}
+
+	return 0;
 }
 
 int
@@ -331,10 +332,11 @@ cp_object_registry_delete(
 	strtcpy(cmp_data.type, object_type, sizeof(cmp_data.type));
 	strtcpy(cmp_data.name, object_name, sizeof(cmp_data.name));
 
-	return cp_entity_registry_delete(
-		&registry->registry,
-		&cp_object_entity_desc,
+	return cp_entity_registry_replace(
+		&registry->entity_registry,
+		&cp_object_registry_keys,
 		cp_object_registry_item_cmp,
-		&cmp_data
+		&cmp_data,
+		NULL
 	);
 }

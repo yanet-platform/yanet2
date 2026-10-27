@@ -41,7 +41,7 @@ fwstate_module_positions_new(
 		return 0;
 	}
 	struct fwstate_stash_position *positions = fwstate_stash_zalloc(
-		&config->cp_module.memory_context,
+		&config->cp_module.entity.memory_context,
 		sizeof(struct fwstate_stash_position) * worker_count
 	);
 	if (positions == NULL) {
@@ -58,7 +58,7 @@ fwstate_module_positions_free(struct fwstate_module_config *config) {
 	struct fwstate_stash_position *positions = ADDR_OF(&config->positions);
 	if (positions != NULL) {
 		fwstate_stash_zfree(
-			&config->cp_module.memory_context,
+			&config->cp_module.entity.memory_context,
 			positions,
 			sizeof(struct fwstate_stash_position) *
 				config->worker_count

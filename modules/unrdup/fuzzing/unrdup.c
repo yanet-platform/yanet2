@@ -98,7 +98,7 @@ unrdup_test_config(struct cp_module **cp_module, yanet_error **err) {
 		"unrdup_test",
 		sizeof(config->cp_module.name));
 	memory_context_init_from(
-		&config->cp_module.memory_context,
+		&config->cp_module.entity.memory_context,
 		&unrdup_fuzz_mctx,
 		"unrdup_test"
 	);

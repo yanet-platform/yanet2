@@ -1039,8 +1039,8 @@ yanet_get_cp_module_list_info(struct dp_config *dp_config) {
 	struct cp_module_list_info *module_list_info =
 		(struct cp_module_list_info *)malloc(
 			sizeof(struct cp_module_list_info) +
-			sizeof(struct cp_module_info) *
-				module_registry->registry.capacity
+			sizeof(struct cp_module_info
+			) * module_registry->entity_registry.registry.capacity
 		);
 	if (module_list_info == NULL) {
 		goto release;
@@ -1049,7 +1049,7 @@ yanet_get_cp_module_list_info(struct dp_config *dp_config) {
 	module_list_info->module_count = 0;
 
 	for (uint64_t module_idx = 0;
-	     module_idx < module_registry->registry.capacity;
+	     module_idx < module_registry->entity_registry.registry.capacity;
 	     ++module_idx) {
 		struct cp_module_info *info = module_list_info->modules +
 					      module_list_info->module_count;
@@ -1399,7 +1399,7 @@ yanet_get_cp_device_list_info(struct dp_config *dp_config) {
 	size_t device_list_info_size =
 		sizeof(struct cp_device_list_info) +
 		sizeof(struct cp_device_info *) *
-			device_registry->registry.capacity;
+			device_registry->entity_registry.registry.capacity;
 	struct cp_device_list_info *device_list_info =
 		(struct cp_device_list_info *)malloc(device_list_info_size);
 	if (device_list_info == NULL) {
@@ -1408,7 +1408,8 @@ yanet_get_cp_device_list_info(struct dp_config *dp_config) {
 
 	memset(device_list_info, 0, device_list_info_size);
 	device_list_info->device_count = 0;
-	for (uint64_t idx = 0; idx < device_registry->registry.capacity;
+	for (uint64_t idx = 0;
+	     idx < device_registry->entity_registry.registry.capacity;
 	     ++idx) {
 		struct cp_device *cp_device =
 			cp_config_gen_get_device(cp_config_gen, idx);

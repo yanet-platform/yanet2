@@ -64,7 +64,8 @@ ring_object_fini(struct ring_object *self) {
 	if (agent != NULL) {
 		// The frees below must run before the common teardown, because
 		// that teardown zeroes the memory context they free into.
-		struct memory_context *ctx = &self->cp_object.memory_context;
+		struct memory_context *ctx =
+			&self->cp_object.entity.memory_context;
 		struct ring_worker *workers = ADDR_OF(&self->workers);
 		if (workers != NULL) {
 			for (uint16_t idx = 0; idx < self->worker_count;
@@ -288,7 +289,7 @@ ring_object_create(
 	}
 	uint16_t worker_count = (uint16_t)dp_worker_count;
 
-	struct memory_context *ctx = &self->cp_object.memory_context;
+	struct memory_context *ctx = &self->cp_object.entity.memory_context;
 
 	void *raw;
 	uint64_t raw_size;

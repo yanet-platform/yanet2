@@ -23,18 +23,20 @@ static int
 route_test_fib(yanet_error **err) {
 	memset(&fuzz_fib, 0, sizeof(fuzz_fib));
 	memory_context_init_from(
-		&fuzz_fib.cp_object.memory_context,
+		&fuzz_fib.cp_object.entity.memory_context,
 		&fuzz_params.mctx,
 		"route_test_fib"
 	);
 	if (counter_registry_init(
 		    &fuzz_fib.cp_object.link_counter_registry,
-		    &fuzz_fib.cp_object.memory_context,
+		    &fuzz_fib.cp_object.entity.memory_context,
 		    0
 	    )) {
 		return -1;
 	}
-	if (route_fib_init(&fuzz_fib.fib, &fuzz_fib.cp_object.memory_context)) {
+	if (route_fib_init(
+		    &fuzz_fib.fib, &fuzz_fib.cp_object.entity.memory_context
+	    )) {
 		return -1;
 	}
 
@@ -47,7 +49,7 @@ route_test_fib(yanet_error **err) {
 
 	int route_idx = route_fib_add_route(
 		&fuzz_fib.fib,
-		&fuzz_fib.cp_object.memory_context,
+		&fuzz_fib.cp_object.entity.memory_context,
 		(struct ether_addr){
 			.addr = {0x01, 0x02, 0x03, 0x04, 0x05, 0x06},
 		},
@@ -63,7 +65,7 @@ route_test_fib(yanet_error **err) {
 
 	int route_list_idx = route_fib_add_route_list(
 		&fuzz_fib.fib,
-		&fuzz_fib.cp_object.memory_context,
+		&fuzz_fib.cp_object.entity.memory_context,
 		1,
 		(uint32_t[]){route_idx}
 	);
@@ -125,7 +127,9 @@ route_test_fib(yanet_error **err) {
 	return 0;
 
 error_table:
-	route_fib_fini(&fuzz_fib.fib, &fuzz_fib.cp_object.memory_context);
+	route_fib_fini(
+		&fuzz_fib.fib, &fuzz_fib.cp_object.entity.memory_context
+	);
 	return -1;
 }
 
@@ -145,7 +149,7 @@ route_test_config(struct cp_module **cp_module, yanet_error **err) {
 		"route_test",
 		sizeof(config->cp_module.name));
 	memory_context_init_from(
-		&config->cp_module.memory_context,
+		&config->cp_module.entity.memory_context,
 		&fuzz_params.mctx,
 		"route_test"
 	);
@@ -161,7 +165,7 @@ route_test_config(struct cp_module **cp_module, yanet_error **err) {
 	// Needed by route_module_config_register_counters.
 	if (counter_registry_init(
 		    &config->cp_module.counter_registry,
-		    &config->cp_module.memory_context,
+		    &config->cp_module.entity.memory_context,
 		    0
 	    )) {
 		goto error_config;

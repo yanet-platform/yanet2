@@ -28,7 +28,7 @@ nat64_test_config(struct cp_module **cp_module) {
 		"nat64_test",
 		sizeof(config->cp_module.name));
 	memory_context_init_from(
-		&config->cp_module.memory_context,
+		&config->cp_module.entity.memory_context,
 		&fuzz_params.mctx,
 		"nat64_test"
 	);
@@ -43,7 +43,7 @@ nat64_test_config(struct cp_module **cp_module) {
 	config->mtu.ipv6 = 1280;
 
 	struct memory_context *memory_context =
-		&config->cp_module.memory_context;
+		&config->cp_module.entity.memory_context;
 	if (lpm_init(&config->mappings.v4_to_v6, memory_context, "v4_to_v6")) {
 		goto error_config;
 	}
@@ -103,14 +103,14 @@ nat64_test_config(struct cp_module **cp_module) {
 error_mappings:
 	if (config->mappings.list) {
 		memory_bfree(
-			&config->cp_module.memory_context,
+			&config->cp_module.entity.memory_context,
 			config->mappings.list,
 			sizeof(struct ip4to6) * config->mappings.count
 		);
 	}
 	if (config->prefixes.prefixes) {
 		memory_bfree(
-			&config->cp_module.memory_context,
+			&config->cp_module.entity.memory_context,
 			config->prefixes.prefixes,
 			sizeof(struct nat64_prefix) * config->prefixes.count
 		);

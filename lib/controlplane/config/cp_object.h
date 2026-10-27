@@ -40,9 +40,6 @@ struct cp_object {
 	// its own counter storage from this registry, keeping the counter
 	// definitions on the object and the per-link values independent.
 	struct counter_registry link_counter_registry;
-
-	// Memory context for the object's own allocations.
-	struct memory_context memory_context;
 };
 // The entity base must sit at offset zero: registry items hand out bare
 // pointers into it, and the destroy gate's identity offsets are relative
@@ -101,8 +98,7 @@ int
 cp_object_try_destroy(struct cp_object *self, yanet_error **err);
 
 struct cp_object_registry {
-	struct memory_context *memory_context;
-	struct registry registry;
+	struct cp_entity_registry entity_registry;
 };
 
 int
@@ -160,5 +156,5 @@ cp_object_registry_delete(
 
 static inline uint64_t
 cp_object_registry_capacity(struct cp_object_registry *registry) {
-	return registry->registry.capacity;
+	return registry->entity_registry.registry.capacity;
 }

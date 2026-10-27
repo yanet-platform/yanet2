@@ -968,14 +968,16 @@ test_cp_object_batched_release(struct yanet_shm *shm) {
 		"every upsert must take one generation reference"
 	);
 
-	agent_release_registry_items(&registry.registry, batch_test_item_owner);
+	agent_release_registry_items(
+		&registry.entity_registry.registry, batch_test_item_owner
+	);
 	TEST_ASSERT_EQUAL(
 		agent->loaded_entity_count,
 		0,
 		"the batched release must mirror every dropped reference"
 	);
 	TEST_ASSERT_NULL(
-		ADDR_OF(&registry.registry.items),
+		ADDR_OF(&registry.entity_registry.registry.items),
 		"the batched release must discard the registry storage"
 	);
 

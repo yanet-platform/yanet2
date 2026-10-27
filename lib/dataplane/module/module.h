@@ -40,8 +40,9 @@
 // 45: the acl filter structs carry interned first-match rule tables
 // in place of the path joints with their decoders.
 // 46: struct cp_module, cp_device and cp_object gained the embedded
-// cp_entity base holding the registry item and the agent pointer; the
-// former config_item and agent members are reached through the base now.
+// cp_entity base holding the registry item, the agent pointer and the
+// memory context; the former config_item, agent and memory_context
+// members are reached through the base now.
 #define YANET_MODULE_ABI_VERSION 46
 
 // Symbol name a module .so exports carrying its compiled-against

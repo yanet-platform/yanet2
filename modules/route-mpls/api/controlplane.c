@@ -21,7 +21,7 @@ target_memory_size(uint64_t nexthop_map_size) {
 static void
 route_mpls_module_config_fini(struct module_config *config) {
 	struct memory_context *memory_context =
-		&config->cp_module.memory_context;
+		&config->cp_module.entity.memory_context;
 
 	filter_free(&config->filter_ip6, FILTER_IP6_TAG);
 	memset(&config->filter_ip6, 0, sizeof(config->filter_ip6));
@@ -210,7 +210,7 @@ route_mpls_module_init_ip4(
 		FILTER_IP4_TAG,
 		filter_rule_ptrs,
 		route_mpls_rule_count,
-		&cp_module->memory_context,
+		&cp_module->entity.memory_context,
 		"filter_ip4",
 		err
 	);
@@ -245,7 +245,7 @@ route_mpls_module_init_ip6(
 		FILTER_IP6_TAG,
 		filter_rule_ptrs,
 		route_mpls_rule_count,
-		&cp_module->memory_context,
+		&cp_module->entity.memory_context,
 		"filter_ip6",
 		err
 	);
@@ -262,7 +262,8 @@ route_mpls_rule_target_new(
 	struct route_mpls_rule *route_mpls_rule,
 	yanet_error **err
 ) {
-	struct memory_context *memory_context = &cp_module->memory_context;
+	struct memory_context *memory_context =
+		&cp_module->entity.memory_context;
 
 	uint64_t map_size = 0;
 
@@ -363,7 +364,8 @@ route_mpls_module_config_update(
 	uint64_t route_mpls_rule_count,
 	yanet_error **err
 ) {
-	struct memory_context *memory_context = &cp_module->memory_context;
+	struct memory_context *memory_context =
+		&cp_module->entity.memory_context;
 
 	struct module_config *config =
 		container_of(cp_module, struct module_config, cp_module);
