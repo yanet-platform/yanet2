@@ -1702,61 +1702,6 @@ unlock:
 	return agent_list_info;
 }
 
-struct cp_device_config *
-cp_device_config_create(
-	const char *name,
-	uint64_t input_pipeline_count,
-	uint64_t output_pipeline_count
-) {
-	struct cp_device_config *config =
-		(struct cp_device_config *)malloc(sizeof(struct cp_device_config
-		));
-
-	if (config == NULL) {
-		return NULL;
-	}
-
-	memset(config, 0, sizeof(struct cp_device_config));
-	strtcpy(config->name, name, CP_DEVICE_NAME_LEN);
-	config->input_pipelines = (struct cp_device_entry_config *)malloc(
-		sizeof(struct cp_device_entry_config) +
-		sizeof(struct cp_pipeline_weight_config) * input_pipeline_count
-	);
-	if (config->input_pipelines == NULL) {
-		cp_device_config_free(config);
-		return NULL;
-	}
-	memset(config->input_pipelines,
-	       0,
-	       sizeof(struct cp_device_entry_config) +
-		       sizeof(struct cp_pipeline_weight_config) *
-			       input_pipeline_count);
-	config->input_pipelines->count = input_pipeline_count;
-
-	config->output_pipelines = (struct cp_device_entry_config *)malloc(
-		sizeof(struct cp_device_entry_config) +
-		sizeof(struct cp_pipeline_weight_config) * output_pipeline_count
-	);
-	if (config->output_pipelines == NULL) {
-		cp_device_config_free(config);
-		return NULL;
-	}
-	memset(config->output_pipelines,
-	       0,
-	       sizeof(struct cp_device_entry_config) +
-		       sizeof(struct cp_pipeline_weight_config) *
-			       output_pipeline_count);
-	config->output_pipelines->count = output_pipeline_count;
-
-	return config;
-}
-
-void
-cp_device_config_free(struct cp_device_config *config) {
-	cp_device_config_fini(config);
-	free(config);
-}
-
 int
 cp_device_config_set_input_pipeline(
 	struct cp_device_config *device,
