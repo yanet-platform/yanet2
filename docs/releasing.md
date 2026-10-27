@@ -90,7 +90,8 @@ sets pass artifact and exact-version checks and the sidecar build succeeds,
 the six package-backed images build and push under the same staging tag.
 Each of the seven images builds once. Once all seven pushes succeed,
 it copies those exact image manifests to the `X.Y.Z`
-tags and creates the GitHub Release with the verified DEBs. The workflow
+tags and creates the GitHub Release, named exactly `vX.Y.Z` like its tag
+(a release created by hand is renamed), with the verified DEBs. The workflow
 refuses to replace an existing final tag with a different digest. There are
 no moving `X.Y`, `X`, or `latest` aliases. A failed preflight publishes nothing.
 Releases made with this workflow list each final image, digest, manifest size
