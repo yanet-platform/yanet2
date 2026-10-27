@@ -170,6 +170,73 @@ run_uncovered_classes_test(void) {
 	free(memory);
 }
 
+// Rows spanning several bitmap words resolve columns across the word
+// and rank boundaries.
+static void
+run_word_boundary_test(void) {
+	void *memory;
+	assert(posix_memalign(&memory, 1 << 21, 2 << 20) == 0);
+	struct block_allocator allocator;
+	block_allocator_init(&allocator);
+	block_allocator_put_arena(&allocator, memory, 2 << 20);
+	struct memory_context ctx;
+	memory_context_init(&ctx, "boundary", &allocator);
+	size_t initial = block_allocator_free_size(&allocator);
+	struct classifier left = {0}, right = {0};
+	assert(classifier_init(&left, &ctx, 2) == 0);
+	assert(classifier_init(&right, &ctx, 2) == 0);
+	assert(value_registry_init(&left.registry, &ctx, "left") == 0);
+	assert(value_registry_init(&right.registry, &ctx, "right") == 0);
+	// The right space crosses three words: columns 0, 31 and 32 sit on
+	// the first and the second word boundary, column 70 on the partial
+	// last word of the 33-column-spanning 70-wide space.
+	assert(value_registry_start(&left.registry) == 0);
+	assert(value_registry_collect(&left.registry, 0) == 0);
+	assert(value_registry_collect(&left.registry, 1) == 0);
+	assert(value_registry_start(&left.registry) == 0);
+	assert(value_registry_collect(&left.registry, 2) == 0);
+	// The right groups pin columns 0, 31 and 32 across the first and
+	// the second bitmap word boundary, and column 70 on the partial
+	// last word of the 71-column space.
+	assert(value_registry_start(&right.registry) == 0);
+	assert(value_registry_collect(&right.registry, 0) == 0);
+	assert(value_registry_collect(&right.registry, 31) == 0);
+	assert(value_registry_collect(&right.registry, 32) == 0);
+	assert(value_registry_start(&right.registry) == 0);
+	assert(value_registry_collect(&right.registry, 70) == 0);
+	// Rule 0 covers left classes 0-1 through its word-boundary
+	// columns; rule 1 covers left class 2 through column 70 only.
+	memcpy(left.rule_groups, (uint32_t[]){0, 1}, 2 * sizeof(uint32_t));
+	memcpy(right.rule_groups, (uint32_t[]){0, 1}, 2 * sizeof(uint32_t));
+	struct classifier_rule dummy_a = {};
+	struct classifier_rule dummy_b = {};
+	const struct classifier_rule *rules[] = {&dummy_a, &dummy_b};
+	struct rule_table table = {0};
+	assert(classify_join_rules(
+		       &ctx, "join", &left, &right, rules, 2, &table
+	       ) == 0);
+	assert(table.class_count == 2);
+	for (uint32_t h = 0; h < 71; ++h) {
+		uint32_t want = FILTER_RULE_INVALID;
+		if (h == 0 || h == 31 || h == 32) {
+			want = 0;
+		}
+		assert(rule_table_get(&table, 0, h) == want);
+		assert(rule_table_get(&table, 1, h) == want);
+		want = FILTER_RULE_INVALID;
+		if (h == 70) {
+			want = 1;
+		}
+		assert(rule_table_get(&table, 2, h) == want);
+	}
+	rule_table_free(&table);
+	classifier_fini(&left, &ctx, 2);
+	classifier_fini(&right, &ctx, 2);
+	assert(block_allocator_free_size(&allocator) == initial);
+	memory_context_fini(&ctx);
+	free(memory);
+}
+
 static void
 run_failed_join_cleanup_test(void) {
 	// The classifiers live under a roomy arena; the joint builds under
@@ -247,8 +314,9 @@ main(void) {
 	run_first_match_projection_test();
 	run_duplicate_rows_fit_test();
 	run_uncovered_classes_test();
+	run_word_boundary_test();
 	run_failed_join_cleanup_test();
-	puts("first-match/projection, duplicate rows and failed-build "
-	     "cleanup: PASS");
+	puts("first-match/projection, duplicate rows, word boundaries and "
+	     "failed-build cleanup: PASS");
 	return 0;
 }
