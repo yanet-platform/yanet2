@@ -70,7 +70,7 @@ export const computeModulesInUse = (instance: InstanceInfo): number => {
 
 export type AgentKind = 'module' | 'system' | 'meta';
 
-/** Aggregated memory and generation metrics for one named agent. */
+/** Aggregated memory metrics for one named agent. */
 export interface AgentUsage {
     name: string;
     kind: AgentKind;
@@ -78,7 +78,6 @@ export interface AgentUsage {
     limit: number;
     free: number;
     pct: number;
-    gen: number;
     instances: number;
 }
 
@@ -165,13 +164,10 @@ export const computeAgentUsage = (instance: InstanceInfo): Map<string, AgentUsag
 
         let limit = 0;
         let free = 0;
-        let maxGen = 0;
         const instanceList = agent.instances ?? [];
         for (const inst of instanceList) {
             limit += Number(inst.memory_limit ?? 0);
             free += Number(inst.free_bytes ?? 0);
-            const g = Number(inst.generation ?? 0);
-            if (g > maxGen) maxGen = g;
         }
         const used = Math.max(0, limit - free);
 
@@ -183,7 +179,6 @@ export const computeAgentUsage = (instance: InstanceInfo): Map<string, AgentUsag
             limit: (prev?.limit ?? 0) + limit,
             free: (prev?.free ?? 0) + free,
             pct: 0,
-            gen: Math.max(prev?.gen ?? 0, maxGen),
             instances: (prev?.instances ?? 0) + instanceList.length,
         });
         const current = result.get(resultName);

@@ -284,9 +284,6 @@ agent_attach(
 	SET_OFFSET_OF(&new_agent->cp_config, cp_config);
 	new_agent->pid = getpid();
 
-	struct cp_config_gen *config_gen = cp_config_current_gen(cp_config);
-	new_agent->gen = config_gen->gen;
-
 	block_allocator_init(&new_agent->block_allocator);
 	memory_context_init(
 		&new_agent->memory_context,
@@ -1548,7 +1545,6 @@ build_instance_info(struct agent *agent) {
 	}
 	info->pid = agent->pid;
 	info->memory_limit = agent->memory_limit;
-	info->gen = agent->gen;
 	// For agent_attach'd agents, &agent->block_allocator is the same
 	// allocator as alloc above, and its spinlock is not reentrant, so this
 	// call must run strictly outside the locked sections above and below.

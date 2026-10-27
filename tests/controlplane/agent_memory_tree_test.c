@@ -54,7 +54,6 @@ test_memory_tree_exported(void) {
 	strtcpy(ag->name, "myagent", sizeof(ag->name));
 	ag->memory_limit = 65536;
 	ag->pid = 42;
-	ag->gen = 1;
 	SET_OFFSET_OF(&ag->dp_config, dp);
 	SET_OFFSET_OF(&ag->cp_config, cp);
 	block_allocator_init(&ag->block_allocator);
@@ -223,7 +222,6 @@ test_memory_tree_after_fini(void) {
 	strtcpy(ag->name, "fini-agent", sizeof(ag->name));
 	ag->memory_limit = 65536;
 	ag->pid = 7;
-	ag->gen = 1;
 	SET_OFFSET_OF(&ag->dp_config, dp);
 	SET_OFFSET_OF(&ag->cp_config, cp);
 	block_allocator_init(&ag->block_allocator);

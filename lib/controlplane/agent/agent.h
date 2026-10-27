@@ -49,7 +49,6 @@ struct agent {
 	struct cp_config *cp_config;
 	pid_t pid;
 	uint64_t memory_limit;
-	uint64_t gen;
 	// Count of live generation references to this agent's modules,
 	// devices and objects.
 	//

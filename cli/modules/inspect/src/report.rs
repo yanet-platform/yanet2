@@ -165,7 +165,7 @@ fn memory_records(info: &InstanceInfo, details: bool, unicode: bool) -> Vec<Reco
             rows.push(Record::new("memory", name(&agent.name), fields));
         }
         let mut instances: Vec<_> = agent.instances.iter().collect();
-        instances.sort_by_key(|instance| (instance.pid, instance.generation));
+        instances.sort_by_key(|instance| instance.pid);
         for instance in instances {
             let used = instance.memory_limit.saturating_sub(instance.free_bytes);
             let mut usage = Field::new("", "-");
@@ -186,7 +186,6 @@ fn memory_records(info: &InstanceInfo, details: bool, unicode: bool) -> Vec<Reco
                 name(&agent.name),
                 vec![
                     Field::new("pid", instance.pid.to_string()),
-                    Field::new("gen", instance.generation.to_string()),
                     Field::new("used", format!("{} / {}", bytes(used), bytes(instance.memory_limit))),
                     Field::new("free", bytes(instance.free_bytes)),
                     usage,

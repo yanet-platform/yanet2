@@ -390,7 +390,6 @@ func (m *DPConfig) Agents() []AgentInfo {
 				PID:         uint32(instanceInfo.pid),
 				MemoryLimit: uint64(instanceInfo.memory_limit),
 				FreeBytes:   uint64(instanceInfo.free_bytes),
-				Gen:         uint64(instanceInfo.gen),
 				MemoryTree:  memoryTree,
 			}
 		}
@@ -449,7 +448,6 @@ type AgentInstanceInfo struct {
 	PID         uint32
 	MemoryLimit uint64
 	FreeBytes   uint64
-	Gen         uint64
 	// MemoryTree is a flat depth-first snapshot of the agent's
 	// memory-context tree.
 	//

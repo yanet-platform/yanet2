@@ -65,7 +65,7 @@ struct SetLogLevelCmd {
 
 #[derive(Debug, Clone, Subcommand)]
 enum MemoryCmd {
-    /// List the memory every agent generation holds.
+    /// List the memory every agent instance holds.
     List,
     /// Grow the memory of a live agent.
     Extend(ExtendCmd),
@@ -235,15 +235,11 @@ async fn run_memory(connection: &ConnectionArgs, mode: MemoryCmd) -> Result<(), 
     Ok(())
 }
 
-/// Orders each agent's generations newest first; a tie keeps the order the
-/// service sent, so the live arena stays ahead of the ones it replaced.
+/// Orders the rows by agent, keeping the order the service sent within
+/// one agent, so the live arena stays ahead of the ones it replaced.
 fn arena_rows(arenas: &[ArenaInfo]) -> Vec<ArenaRow> {
     let mut rows: Vec<ArenaRow> = arenas.iter().map(ArenaRow::from).collect();
-    rows.sort_by(|left, right| {
-        left.agent
-            .cmp(&right.agent)
-            .then(right.generation.cmp(&left.generation))
-    });
+    rows.sort_by(|left, right| left.agent.cmp(&right.agent));
     rows
 }
 
@@ -251,8 +247,6 @@ fn arena_rows(arenas: &[ArenaInfo]) -> Vec<ArenaRow> {
 struct ArenaRow {
     #[tabled(rename = "Agent")]
     agent: String,
-    #[tabled(rename = "Generation")]
-    generation: u64,
     #[tabled(rename = "PID")]
     pid: u32,
     #[tabled(rename = "Limit")]
@@ -267,7 +261,6 @@ impl From<&ArenaInfo> for ArenaRow {
     fn from(arena: &ArenaInfo) -> Self {
         Self {
             agent: arena.agent.clone(),
-            generation: arena.generation,
             pid: arena.pid,
             limit: ByteSize::b(arena.memory_limit).to_string(),
             free: ByteSize::b(arena.free_bytes).to_string(),

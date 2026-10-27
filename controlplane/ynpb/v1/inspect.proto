@@ -226,11 +226,7 @@ message AgentInstanceInfo {
   // resources.
   uint64 memory_limit = 2;
   reserved 3, 4; // were 'allocated' and 'freed' (partial top-level mctx, dropped)
-  // Generation number of this agent instance.
-  //
-  // Incremented when the agent performs a major configuration update,
-  // allowing the dataplane to coordinate atomic configuration switches.
-  uint64 generation = 5;
+  reserved 5; // was 'generation' (the attach-time config generation, never acted on)
   // Bytes still available for allocation in this agent instance.
   //
   // Subtract from memory_limit to find how much memory is currently in use.

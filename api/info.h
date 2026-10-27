@@ -211,7 +211,6 @@ struct cp_memory_node_info {
 struct cp_agent_instance_info {
 	pid_t pid;
 	uint64_t memory_limit;
-	uint64_t gen;
 	// Bytes still available in the agent's allocator.
 	//
 	// Subtract from memory_limit to see how much memory the agent is

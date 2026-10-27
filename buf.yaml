@@ -24,3 +24,9 @@ lint:
 breaking:
   use:
     - PACKAGE
+  # The agent instance generation removal (reserved fields in these two
+  # files) is an intentional, breaking-marked deletion.
+  ignore_only:
+    FIELD_NO_DELETE:
+      - controlplane/ynpb/v1/inspect.proto
+      - controlplane/ynpb/v1/memory.proto

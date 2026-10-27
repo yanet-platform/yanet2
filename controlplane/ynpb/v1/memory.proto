@@ -27,7 +27,7 @@ message ListArenasResponse { repeated ArenaInfo arenas = 1; }
 // InspectService.Inspect, to avoid a second source of truth for it.
 message ArenaInfo {
   string agent = 1;
-  uint64 generation = 2;
+  reserved 2; // was 'generation' (the attach-time config generation, never acted on)
   uint32 pid = 3;
   uint64 memory_limit = 4;
   uint64 free_bytes = 5;

@@ -47,7 +47,7 @@ func (m *Memory) RegisterService(server *grpc.Server) {
 	ynpb.RegisterMemoryServiceServer(server, m)
 }
 
-// ListArenas returns arena utilization for every agent generation.
+// ListArenas returns arena utilization for every agent instance.
 func (m *Memory) ListArenas(
 	ctx context.Context,
 	request *ynpb.ListArenasRequest,
@@ -57,14 +57,13 @@ func (m *Memory) ListArenas(
 
 	arenas := make([]*ynpb.ArenaInfo, 0)
 	for _, agent := range agents {
-		for genIdx, instance := range agent.Instances {
+		for instIdx, instance := range agent.Instances {
 			arenas = append(arenas, &ynpb.ArenaInfo{
 				Agent:       agent.Name,
-				Generation:  instance.Gen,
 				Pid:         instance.PID,
 				MemoryLimit: instance.MemoryLimit,
 				FreeBytes:   instance.FreeBytes,
-				Retired:     genIdx > 0,
+				Retired:     instIdx > 0,
 			})
 		}
 	}

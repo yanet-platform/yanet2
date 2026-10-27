@@ -172,7 +172,6 @@ func (m *Inspect) agents(dpConfig *ffi.DPConfig) []*ynpb.AgentInfo {
 				Pid:         instance.PID,
 				MemoryLimit: instance.MemoryLimit,
 				FreeBytes:   instance.FreeBytes,
-				Generation:  instance.Gen,
 				MemoryTree:  memoryTree,
 			}
 		}
