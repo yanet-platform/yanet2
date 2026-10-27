@@ -68,21 +68,6 @@ ttlmap_test = executable(
 )
 test('ttlmap', ttlmap_test, suite: ['common'])
 
-rcu_test = executable(
-  'rcu_test',
-  ['rcu_test.c'],
-  c_args: yanet_test_c_args,
-  dependencies: dependencies
-)
-test('rcu', rcu_test, suite: ['common'])
-
-rcu_bench = executable(
-  'rcu_bench',
-  ['rcu_bench.c'],
-  dependencies: dependencies
-)
-benchmark('rcu_bench', rcu_bench, timeout: 300)
-
 balloc_test = executable(
   'balloc_test',
   ['balloc_test.c'],
