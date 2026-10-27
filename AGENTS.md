@@ -25,6 +25,8 @@ make hooks                                         # install git hooks (once per
 make fuzz [MODULE=<name>]
 ```
 
+[Shared Docker caches](docs/docker-cache.md).
+
 ## Layout
 
 - `dataplane/` — DPDK binary (`main.c`, `config.c`, `dpdk.c`, `worker.c`, `drivers/`).
