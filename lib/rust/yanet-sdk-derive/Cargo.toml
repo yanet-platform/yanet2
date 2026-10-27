@@ -1,0 +1,21 @@
+[package]
+name = "yanet-sdk-derive"
+description = "Derive macros of the Rust module SDK."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[lib]
+proc-macro = true
+
+[lints]
+workspace = true
+
+[dependencies]
+proc-macro2 = "1"
+quote = "1"
+syn = "2"
+
+[dev-dependencies]
+yanet-sdk = { path = "../yanet-sdk" }

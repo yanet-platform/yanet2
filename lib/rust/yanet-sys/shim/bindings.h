@@ -18,4 +18,5 @@
 
 #include "yanet_build_config.h"
 
+#include "common_shim.h"
 #include "dp_shim.h"

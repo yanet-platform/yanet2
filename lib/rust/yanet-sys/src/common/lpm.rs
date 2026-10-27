@@ -3,7 +3,8 @@
 //! [`Lpm`] mirrors `struct lpm` with its embedded memory context opaque, so
 //! a reference to it stays sound while C rewrites the context's sibling
 //! link. The lookup is a Rust port of the C one, compiling to the same loads,
-//! over a table the C builder made.
+//! over a table the C routines of `common/` build: the configuration builder
+//! embeds one by calling them.
 
 use core::mem::{align_of, offset_of, size_of};
 
@@ -23,6 +24,57 @@ use crate::bindings;
 /// union holds a raw pointer, which would make `Lpm` neither `Send` nor
 /// `Sync`, while a module configuration must be `Sync`.
 type Page = [u64; 256];
+
+/// An inclusive range of keys of `K` big-endian bytes and the value it maps
+/// to, as the C insert takes them.
+///
+/// Values keep the C semantics documented on [`Lpm::lookup`]: bit 31 is lost.
+///
+/// `from <= to` is required: the C insert does not check it, and a reversed
+/// range wraps round. Ranges are inserted in slice order, and on an overlap
+/// the later range wins, so a broad range goes before the narrow ones in it.
+///
+/// The ranges are borrowed for the whole build, so they are made before it
+/// starts, for a table in a box or a slice too.
+#[derive(Clone, Copy, Debug)]
+pub struct LpmRange<const K: usize> {
+    /// First key of the range.
+    pub from: [u8; K],
+    /// Last key of the range.
+    pub to: [u8; K],
+    /// Value every key of the range maps to.
+    pub value: u32,
+}
+
+impl<const K: usize> LpmRange<K> {
+    /// The range of the `len` leading bits of `addr`, mapped to `value`.
+    ///
+    /// The bits of `addr` past `len` are ignored.
+    ///
+    /// ```
+    /// use yanet_sys::common::lpm::LpmRange;
+    ///
+    /// let range = LpmRange::prefix([10, 1, 2, 3], 12, 7);
+    /// assert_eq!(([10, 0, 0, 0], [10, 15, 255, 255]), (range.from, range.to));
+    /// ```
+    ///
+    /// # Panics
+    ///
+    /// `len` is more than the `8 * K` bits of a key.
+    #[must_use]
+    pub fn prefix(addr: [u8; K], len: usize, value: u32) -> Self {
+        assert!(len <= 8 * K, "a prefix of {len} bits in a key of {K} bytes");
+        let mut from = addr;
+        let mut to = addr;
+        for (idx, (from, to)) in from.iter_mut().zip(&mut to).enumerate() {
+            let kept = len.saturating_sub(idx * 8).min(8);
+            let host = (0xffu16 >> kept) as u8;
+            *from &= !host;
+            *to |= host;
+        }
+        Self { from, to, value }
+    }
+}
 
 /// Longest-prefix-match table over big-endian keys of `K` bytes.
 #[repr(C)]

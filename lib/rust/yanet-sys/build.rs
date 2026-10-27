@@ -3,8 +3,9 @@
 //! One source of C truth: the compiler, include directories, defines,
 //! warning options and forced includes of the dataplane's C sources, which
 //! meson's compilation database in `YANET_BUILD_DIR` records, drive bindgen
-//! and the dataplane C shim. The bindings carry bindgen's own compile-time
-//! layout assertions. Generated files land in `OUT_DIR` only.
+//! and the C shims of `common/` and the dataplane. The bindings carry
+//! bindgen's own compile-time layout assertions. Generated files land in
+//! `OUT_DIR` only.
 
 #[path = "build_flags.rs"]
 mod build_flags;
@@ -45,17 +46,19 @@ const PACKET_SOURCES: [&str; 3] = [
     "lib/dataplane/packet/packet.c",
 ];
 
-/// Compiles the dataplane shim with the flags of the dataplane's C sources,
-/// their optimisation level among them.
+/// Compiles the shims with the flags of the dataplane's C sources, their
+/// optimisation level among them.
 ///
-/// The shim wraps header-inline C routing helpers and the packet
-/// encapsulation routines, whose sources it compiles in. It is linked into
+/// The dataplane shim wraps header-inline C routing helpers and the packet
+/// encapsulation routines, whose sources it compiles in; the common shim wraps
+/// the header-inline LPM and memory routines of `common/`. They are linked into
 /// every module plugin with hidden visibility, so a plugin exports nothing of
-/// it and imports none of the encapsulation from the host.
+/// them and imports none of the encapsulation from the host.
 fn build_shim(flags: &CFlags, shim_dir: &Path) {
     let mut build = cc::Build::new();
     build
         .compiler(&flags.compiler)
+        .file(shim_dir.join("common_shim.c"))
         .file(shim_dir.join("dp_shim.c"))
         .files(PACKET_SOURCES.map(|source| flags.source(source)))
         .include(shim_dir)
@@ -66,9 +69,16 @@ fn build_shim(flags: &CFlags, shim_dir: &Path) {
     for arg in flags.header_args().iter().chain(flags.warning_args()) {
         build.flag(arg);
     }
-    println!("cargo:rerun-if-changed={}", shim_dir.join("dp_shim.c").display());
-    println!("cargo:rerun-if-changed={}", shim_dir.join("dp_shim.h").display());
-    build.compile("yanet_sys_dp_shim");
+    for file in [
+        "common_shim.c",
+        "common_shim.h",
+        "dp_shim.c",
+        "dp_shim.h",
+        "shim_visibility.h",
+    ] {
+        println!("cargo:rerun-if-changed={}", shim_dir.join(file).display());
+    }
+    build.compile("yanet_sys_shims");
 }
 
 fn generate_bindings(flags: &CFlags, shim_dir: &Path, out: &Path) {
@@ -114,12 +124,16 @@ fn generate_bindings(flags: &CFlags, shim_dir: &Path, out: &Path) {
         .allowlist_type("packet_list")
         .allowlist_type("packet_front")
         .allowlist_type("rte_mbuf")
+        .allowlist_type("block_allocator")
+        .allowlist_function("yanet_sys_common_.*")
         .allowlist_function("yanet_sys_dp_.*")
         .allowlist_var("LPM_.*")
         .allowlist_var("YANET_MODULE_ABI_VERSION")
         .allowlist_var("MODULE_TYPE_LEN")
         .allowlist_var("MBUF_MAX_SIZE")
         .allowlist_var("RTE_PKTMBUF_HEADROOM")
+        .allowlist_var("MEMORY_BLOCK_MAX_ALIGN")
+        .allowlist_var("MEMORY_BLOCK_ALLOCATOR_MAX_SIZE")
         .allowlist_var("PACKET_TRANSPORT_HEADER_UNAVAILABLE")
         // Reached only behind pointers the SDK never follows, their own bytes
         // never read.

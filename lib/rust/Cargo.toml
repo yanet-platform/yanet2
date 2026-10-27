@@ -5,6 +5,8 @@
 [workspace]
 resolver = "3"
 members = [
+    "yanet-sdk",
+    "yanet-sdk-derive",
     "yanet-sdk-testing",
     "yanet-shm",
     "yanet-sys",

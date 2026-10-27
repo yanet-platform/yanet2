@@ -2,18 +2,25 @@
 //!
 //! A configuration is a `#[repr(C)]` struct implementing `ShmLayout`. The
 //! trait is `unsafe`; this crate implements it for an allow-list of leaves,
-//! arrays and the owned edges, and a struct implements it by hand, so every
-//! implementor is valid for every bit pattern C may write, has no implicit
-//! padding, needs no drop and is aligned to at most 64.
+//! arrays and the owned edges, and a struct gets it from
+//! `#[derive(ShmLayout)]`, so every implementor is valid for every bit pattern
+//! C may write, has no implicit padding, needs no drop and is aligned to at
+//! most 64.
 
 use core::sync::atomic::{AtomicI8, AtomicI16, AtomicI32, AtomicI64, AtomicU8, AtomicU16, AtomicU32, AtomicU64};
 
 use crate::rel::{ShmBox, ShmSlice};
 
-/// Largest alignment a shared-memory type may require: the block allocator
-/// aligns a block to at least the smaller of this and its size rounded up to
-/// a power of two, so a type aligned to at most this is aligned in any block
-/// of at least its size.
+/// Largest alignment a shared-memory type may require.
+///
+/// The block allocator aligns a block to at least the smaller of this and its
+/// size rounded up to a power of two, so a type aligned to at most this is
+/// aligned in any block of at least its size.
+///
+/// C's `MEMORY_BLOCK_MAX_ALIGN` (`common/memory_block.h`): blocks are
+/// naturally aligned up to the 2 MiB hugepage, but an ASan build shifts each
+/// one by its 64-byte red zone. This crate has no C, so `yanet-sys` asserts
+/// the two are equal.
 pub const MAX_ALIGN: usize = 64;
 
 /// Marks a type that may live in shared memory.
