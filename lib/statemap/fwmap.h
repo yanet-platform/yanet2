@@ -1175,8 +1175,8 @@ stop_lookup:
 		last_bucket->next = new_bucket_idx;
 
 		fwmap_bucket_t *new_bucket = &extra[new_bucket_idx];
-		// Free extra buckets are already zero-initialized (zeroed at
-		// creation and during clear calls).
+		// Free extra buckets are still zero from map creation: a
+		// claimed bucket is never handed back.
 		new_bucket->next = 0;
 
 		bucket_to_insert = new_bucket;
@@ -1243,47 +1243,6 @@ fwmap_put(
 	update_value_fn(entry.value, value, entry.empty, map->value_size);
 
 	return (int64_t)entry.idx;
-}
-
-static inline void
-fwmap_clear(fwmap_t *map) {
-	if (!map) {
-		return;
-	}
-
-	// 1. Clear all primary buckets.
-	fwmap_bucket_t **chunks = ADDR_OF(&map->buckets);
-	if (chunks) {
-		uint32_t chunk_count =
-			(map->index_mask >> map->buckets_chunk_shift) + 1;
-		size_t index_chunk_size =
-			sizeof(fwmap_bucket_t) *
-			((map->index_mask & FWMAP_CHUNK_INDEX_MASK) + 1);
-
-		for (uint32_t i = 0; i < chunk_count; i++) {
-			fwmap_bucket_t *buckets = ADDR_OF(&chunks[i]);
-			if (buckets) {
-				memset(buckets, 0, index_chunk_size);
-			}
-		}
-	}
-
-	// 2. Clear extra buckets.
-	if (map->extra_buckets) {
-		fwmap_bucket_t *extra_buckets = ADDR_OF(&map->extra_buckets);
-		memset(extra_buckets,
-		       0,
-		       sizeof(fwmap_bucket_t) * map->extra_size);
-	}
-
-	// 3. Reset extra bucket free index.
-	map->extra_free_idx = 1;
-
-	// 4. Reset key cursor.
-	map->key_cursor = 0;
-
-	// 5. Reset counters.
-	memset(map->counters, 0, sizeof(fwmap_counter_t) * map->worker_count);
 }
 
 /**
