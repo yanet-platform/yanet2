@@ -528,7 +528,9 @@ test_cp_module_link_object(struct yanet_shm *shm) {
 	TEST_ASSERT_NOT_NULL(module, "module allocation failed");
 	memset(module, 0, sizeof(struct cp_module));
 	memory_context_init_from(
-		&module->memory_context, &agent->memory_context, "test-module"
+		&module->entity.memory_context,
+		&agent->memory_context,
+		"test-module"
 	);
 
 	uint64_t idx1;

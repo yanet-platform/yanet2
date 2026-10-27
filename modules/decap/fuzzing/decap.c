@@ -25,16 +25,16 @@ decap_test_config(struct cp_module **cp_module) {
 		"decap_test",
 		sizeof(config->cp_module.name));
 	memory_context_init_from(
-		&config->cp_module.memory_context,
+		&config->cp_module.entity.memory_context,
 		&fuzz_params.mctx,
 		"decap_test"
 	);
 
 	config->cp_module.dp_module_idx = 0;
-	config->cp_module.agent = NULL;
+	config->cp_module.entity.agent = NULL;
 
 	struct memory_context *memory_context =
-		&config->cp_module.memory_context;
+		&config->cp_module.entity.memory_context;
 	if (lpm_init(&config->prefixes4, memory_context, "prefixes4")) {
 		goto error_lpm_v4;
 	}

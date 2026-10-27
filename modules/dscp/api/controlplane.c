@@ -19,7 +19,7 @@ dscp_module_config_destroy(struct cp_module *cp_module) {
 
 	dscp_module_config_data_fini(config);
 
-	struct agent *agent = ADDR_OF(&cp_module->agent);
+	struct agent *agent = ADDR_OF(&cp_module->entity.agent);
 
 	cp_module_fini(cp_module);
 
@@ -57,7 +57,7 @@ dscp_module_config_new(
 	}
 
 	if (dscp_module_config_data_init(
-		    config, &config->cp_module.memory_context
+		    config, &config->cp_module.entity.memory_context
 	    )) {
 		yanet_error_add(err, "failed to init config data");
 		// Frees directly instead of going through the type destructor.
@@ -85,7 +85,7 @@ dscp_module_config_free(struct cp_module *cp_module, yanet_error **err) {
 		return -1;
 	}
 
-	struct agent *owner = ADDR_OF(&cp_module->agent);
+	struct agent *owner = ADDR_OF(&cp_module->entity.agent);
 
 	dscp_module_config_destroy(cp_module);
 	agent_destroy_released(owner);

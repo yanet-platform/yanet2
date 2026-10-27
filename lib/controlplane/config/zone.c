@@ -384,7 +384,7 @@ cp_config_update_modules(
 	// the agent lock alone, so the reads take that lock too.
 	spinlock_lock(&cp_config->agent_lock);
 	for (uint64_t idx = 0; idx < module_count; ++idx) {
-		struct agent *owner = ADDR_OF(&cp_modules[idx]->agent);
+		struct agent *owner = ADDR_OF(&cp_modules[idx]->entity.agent);
 		if (owner != NULL && !agent_is_current(cp_config, owner)) {
 			yanet_error_add_kind(
 				err,
@@ -844,7 +844,7 @@ cp_config_update_devices(
 	// the owner reads take the agent lock.
 	spinlock_lock(&cp_config->agent_lock);
 	for (uint64_t idx = 0; idx < device_count; ++idx) {
-		struct agent *owner = ADDR_OF(&devices[idx]->agent);
+		struct agent *owner = ADDR_OF(&devices[idx]->entity.agent);
 		if (owner != NULL && !agent_is_current(cp_config, owner)) {
 			yanet_error_add_kind(
 				err,
@@ -980,7 +980,7 @@ cp_config_update_objects(
 	// the owner reads take the agent lock.
 	spinlock_lock(&cp_config->agent_lock);
 	for (uint64_t idx = 0; idx < object_count; ++idx) {
-		struct agent *owner = ADDR_OF(&objects[idx]->agent);
+		struct agent *owner = ADDR_OF(&objects[idx]->entity.agent);
 		if (owner != NULL && !agent_is_current(cp_config, owner)) {
 			yanet_error_add_kind(
 				err,

@@ -4,6 +4,7 @@
 
 #include "lib/counters/counters.h"
 
+#include "lib/controlplane/config/cp_entity.h"
 #include "lib/controlplane/config/defines.h"
 #include "lib/controlplane/config/registry.h"
 
@@ -24,7 +25,7 @@ struct cp_object;
  * purpose is to be referenced by name from other entities.
  */
 struct cp_object {
-	struct registry_item config_item;
+	struct cp_entity entity;
 
 	char type[CP_OBJECT_TYPE_LEN];
 	char name[CP_OBJECT_NAME_LEN];
@@ -39,13 +40,13 @@ struct cp_object {
 	// its own counter storage from this registry, keeping the counter
 	// definitions on the object and the per-link values independent.
 	struct counter_registry link_counter_registry;
-
-	// Controlplane agent the configuration belongs to.
-	struct agent *agent;
-
-	// Memory context for the object's own allocations.
-	struct memory_context memory_context;
 };
+// The entity base must sit at offset zero: registry items hand out bare
+// pointers into it.
+_Static_assert(
+	offsetof(struct cp_object, entity) == 0,
+	"struct cp_object must embed the entity base at offset zero"
+);
 
 // Initialize object resources: sub-context, identity, and counter registry.
 //
@@ -84,28 +85,21 @@ cp_object_fini(struct cp_object *self);
 // with errno EAGAIN while a live generation still holds the object; the
 // caller must keep its handle and retry once the generations drain.
 //
-// A successful call also marks the object destroying, holding it against
-// a racing re-registration, and takes one destruction hold of the owning
+// A successful call also takes one destruction hold of the owning
 // agent: the caller must run the object's typed destructor and then
 // return that hold with agent_destroy_released, on storage only the hold
 // keeps alive.
 //
-// The count is read under the configuration lock, which every registry
-// mutation also runs under, so the answer is stable against concurrent
-// generation installs and releases in other processes.
+// Gains and registry mutations run under the configuration lock; the
+// final release of a retired generation drops references without it, so
+// a racing drop can lower the count after the read — which can only
+// postpone a destroy attempt, never free an item a registry still
+// holds.
 int
 cp_object_try_destroy(struct cp_object *self, yanet_error **err);
 
 struct cp_object_registry {
-	struct memory_context *memory_context;
-	struct registry registry;
-};
-
-// Lookup key for a registry slot: the object identity is the (type, name)
-// pair, mirroring the cp_module (type, name) key.
-struct cp_object_cmp_data {
-	char type[CP_OBJECT_TYPE_LEN];
-	char name[CP_OBJECT_NAME_LEN];
+	struct cp_entity_registry entity_registry;
 };
 
 int
@@ -163,5 +157,5 @@ cp_object_registry_delete(
 
 static inline uint64_t
 cp_object_registry_capacity(struct cp_object_registry *registry) {
-	return registry->registry.capacity;
+	return registry->entity_registry.registry.capacity;
 }

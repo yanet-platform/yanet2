@@ -53,7 +53,7 @@ module_init(
 	block_allocator_init(allocator);
 	block_allocator_put_arena(allocator, arena_buffer, arena_size);
 	memory_context_init(
-		&module->memory_context, "cp-module-test", allocator
+		&module->entity.memory_context, "cp-module-test", allocator
 	);
 	strtcpy(module->type, "test", sizeof(module->type));
 	strtcpy(module->name, "test0", sizeof(module->name));
@@ -129,8 +129,9 @@ run_first_registry_survives_growth_test(void) {
 		"failed to link the first registry"
 	);
 
-	struct counter_storage *storage =
-		counter_storage_spawn(&module.memory_context, NULL, first);
+	struct counter_storage *storage = counter_storage_spawn(
+		&module.entity.memory_context, NULL, first
+	);
 	TEST_ASSERT_NOT_NULL(
 		storage, "failed to spawn storage for the first registry"
 	);

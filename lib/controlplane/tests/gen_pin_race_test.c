@@ -141,7 +141,8 @@ race_reader_thread(void *arg) {
 		struct cp_device_registry *registry = &gen->device_registry;
 		bool found = false;
 		for (uint64_t idx = 0;
-		     idx < registry->registry.capacity && !found;
+		     idx < registry->entity_registry.registry.capacity &&
+		     !found;
 		     ++idx) {
 			struct cp_device *device =
 				cp_config_gen_get_device(gen, idx);

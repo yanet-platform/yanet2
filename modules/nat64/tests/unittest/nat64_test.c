@@ -235,7 +235,7 @@ test_setup(void) {
 	);
 
 	test_params.memory_context =
-		&test_params.module_config.cp_module.memory_context;
+		&test_params.module_config.cp_module.entity.memory_context;
 	memory_context_init(
 		test_params.memory_context, "nat64 tests", &test_params.ba
 	);

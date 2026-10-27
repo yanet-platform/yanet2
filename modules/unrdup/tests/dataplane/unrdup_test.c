@@ -1602,7 +1602,9 @@ test_service_update_alloc_failure(void) {
 	struct unrdup_module_config subject;
 	memset(&subject, 0, sizeof(subject));
 	memory_context_init_from(
-		&subject.cp_module.memory_context, &ctx, "unrdup_alloc_cfg"
+		&subject.cp_module.entity.memory_context,
+		&ctx,
+		"unrdup_alloc_cfg"
 	);
 	SET_OFFSET_OF(&subject.services, NULL);
 
@@ -1639,7 +1641,7 @@ test_service_update_alloc_failure(void) {
 	size_t block_count = 0;
 	while (block_count < ALLOC_MAX_BLOCKS) {
 		void *block = memory_balloc(
-			&subject.cp_module.memory_context, ALLOC_CHUNK
+			&subject.cp_module.entity.memory_context, ALLOC_CHUNK
 		);
 		if (block == NULL) {
 			break;
@@ -1664,7 +1666,7 @@ test_service_update_alloc_failure(void) {
 
 	for (size_t idx = 0; idx < block_count; ++idx) {
 		memory_bfree(
-			&subject.cp_module.memory_context,
+			&subject.cp_module.entity.memory_context,
 			blocks[idx],
 			ALLOC_CHUNK
 		);
@@ -1673,8 +1675,8 @@ test_service_update_alloc_failure(void) {
 	unrdup_module_config_data_fini(&subject);
 
 	TEST_ASSERT_EQUAL(
-		subject.cp_module.memory_context.balloc_count,
-		subject.cp_module.memory_context.bfree_count,
+		subject.cp_module.entity.memory_context.balloc_count,
+		subject.cp_module.entity.memory_context.bfree_count,
 		"every allocation of the failed update is released"
 	);
 
@@ -1915,7 +1917,9 @@ setup_counters(void) {
 
 	memset(&config, 0, sizeof(config));
 	memory_context_init_from(
-		&config.cp_module.memory_context, &test_mctx, "unrdup_config"
+		&config.cp_module.entity.memory_context,
+		&test_mctx,
+		"unrdup_config"
 	);
 
 	if (counter_registry_init(
@@ -1947,7 +1951,9 @@ test_empty_service_update(void) {
 	struct unrdup_module_config subject;
 	memset(&subject, 0, sizeof(subject));
 	memory_context_init_from(
-		&subject.cp_module.memory_context, &test_mctx, "unrdup_empty"
+		&subject.cp_module.entity.memory_context,
+		&test_mctx,
+		"unrdup_empty"
 	);
 	SET_OFFSET_OF(&subject.services, NULL);
 

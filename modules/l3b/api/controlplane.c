@@ -120,7 +120,8 @@ l3b_module_config_destroy(struct cp_module *cp_module) {
 	struct module_config *config =
 		container_of(cp_module, struct module_config, cp_module);
 
-	struct memory_context *memory_context = &cp_module->memory_context;
+	struct memory_context *memory_context =
+		&cp_module->entity.memory_context;
 
 	l3b_destination_classifier_ip4_free(
 		memory_context, &config->classifier_ip4
@@ -149,7 +150,7 @@ l3b_module_config_destroy(struct cp_module *cp_module) {
 	}
 
 	// Capture agent before fini zeroes it.
-	struct agent *agent = ADDR_OF(&config->cp_module.agent);
+	struct agent *agent = ADDR_OF(&config->cp_module.entity.agent);
 
 	cp_module_fini(&config->cp_module);
 	memory_bfree(
@@ -163,7 +164,7 @@ l3b_module_config_free(struct cp_module *cp_module, yanet_error **err) {
 		return -1;
 	}
 
-	struct agent *owner = ADDR_OF(&cp_module->agent);
+	struct agent *owner = ADDR_OF(&cp_module->entity.agent);
 
 	l3b_module_config_destroy(cp_module);
 	agent_destroy_released(owner);
@@ -228,7 +229,7 @@ l3b_module_init_destination(
 	yanet_error **err
 ) {
 	struct memory_context *memory_context =
-		&config->cp_module.memory_context;
+		&config->cp_module.entity.memory_context;
 	const struct classifier_rule **rule_ptrs = l3b_rule_ptrs_project(
 		destination_filter_rules, rule_count, family_is_ip4
 	);
@@ -333,7 +334,7 @@ static uint64_t
 l3b_linked_service_counter_id(
 	const struct cp_module *cp_module, const char *name
 ) {
-	struct agent *agent = ADDR_OF(&cp_module->agent);
+	struct agent *agent = ADDR_OF(&cp_module->entity.agent);
 	if (agent == NULL) {
 		return COUNTER_INVALID;
 	}
@@ -367,7 +368,8 @@ l3b_module_config_update(
 ) {
 	struct module_config *config =
 		container_of(cp_module, struct module_config, cp_module);
-	struct memory_context *memory_context = &cp_module->memory_context;
+	struct memory_context *memory_context =
+		&cp_module->entity.memory_context;
 
 	// Link the virtual service each rule names and record the per-rule link
 	// index; rules naming the same service share one link, and the

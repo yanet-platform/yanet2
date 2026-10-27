@@ -98,12 +98,12 @@ unrdup_test_config(struct cp_module **cp_module, yanet_error **err) {
 		"unrdup_test",
 		sizeof(config->cp_module.name));
 	memory_context_init_from(
-		&config->cp_module.memory_context,
+		&config->cp_module.entity.memory_context,
 		&unrdup_fuzz_mctx,
 		"unrdup_test"
 	);
 	config->cp_module.dp_module_idx = 0;
-	config->cp_module.agent = NULL;
+	config->cp_module.entity.agent = NULL;
 
 	struct unrdup_peer_config peers[2] = {0};
 	peers[0].family = ip_family_ip4;

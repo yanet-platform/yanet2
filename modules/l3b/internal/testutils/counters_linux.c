@@ -273,7 +273,7 @@ l3b_test_counter_state_read(
 	out->service = (uintptr_t)object;
 	out->table = (uintptr_t)table;
 	out->table_references = __atomic_load_n(
-		&table->cp_object.config_item.refcnt, __ATOMIC_RELAXED
+		&table->cp_object.entity.config_item.refcnt, __ATOMIC_RELAXED
 	);
 	out->object_storage = (uintptr_t)object_storage;
 	out->link_storage = (uintptr_t)link_storage;

@@ -13,7 +13,7 @@
 // Destroy a vlan device: base teardown, then the wrapper allocation.
 static void
 cp_device_vlan_destroy(struct cp_device *cp_device) {
-	struct agent *agent = ADDR_OF(&cp_device->agent);
+	struct agent *agent = ADDR_OF(&cp_device->entity.agent);
 	cp_device_fini(cp_device);
 	memory_bfree(
 		&agent->memory_context, cp_device, sizeof(struct cp_device_vlan)
@@ -62,7 +62,7 @@ cp_device_vlan_free(struct cp_device *cp_device, yanet_error **err) {
 		return -1;
 	}
 
-	struct agent *owner = ADDR_OF(&cp_device->agent);
+	struct agent *owner = ADDR_OF(&cp_device->entity.agent);
 
 	cp_device_vlan_destroy(cp_device);
 	agent_destroy_released(owner);
