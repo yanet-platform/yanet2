@@ -166,6 +166,7 @@ jobs:
         uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3
         with:
           tag_name: ${{ needs.preflight.outputs.release_tag }}
+          name: ${{ needs.preflight.outputs.release_tag }}
           body_path: release-body.md
           fail_on_unmatched_files: true
           overwrite_files: false
