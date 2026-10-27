@@ -225,6 +225,38 @@ dpdk_port_init(
 }
 
 int
+dpdk_port_set_rss_reta(
+	uint16_t port_id, const uint16_t *queues, uint16_t queue_count
+) {
+	struct rte_eth_dev_info dev_info;
+	memset(&dev_info, 0, sizeof(dev_info));
+	if (rte_eth_dev_info_get(port_id, &dev_info) || queue_count == 0) {
+		return -1;
+	}
+	if (dev_info.reta_size == 0 ||
+	    dev_info.reta_size > RTE_ETH_RSS_RETA_SIZE_512) {
+		return -1;
+	}
+
+	struct rte_eth_rss_reta_entry64
+		reta_conf[RTE_ETH_RSS_RETA_SIZE_512 / RTE_ETH_RETA_GROUP_SIZE];
+	memset(reta_conf, 0, sizeof(reta_conf));
+	for (uint16_t idx = 0; idx < dev_info.reta_size; ++idx) {
+		struct rte_eth_rss_reta_entry64 *group =
+			reta_conf + idx / RTE_ETH_RETA_GROUP_SIZE;
+		group->mask |= UINT64_C(1) << (idx % RTE_ETH_RETA_GROUP_SIZE);
+		group->reta[idx % RTE_ETH_RETA_GROUP_SIZE] =
+			queues[idx % queue_count];
+	}
+
+	return rte_eth_dev_rss_reta_update(
+		       port_id, reta_conf, dev_info.reta_size
+	       )
+		       ? -1
+		       : 0;
+}
+
+int
 dpdk_port_start(uint16_t port_id) {
 	rte_eth_promiscuous_enable(port_id);
 	return rte_eth_dev_start(port_id);

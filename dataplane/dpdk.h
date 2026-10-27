@@ -40,6 +40,16 @@ dpdk_port_init(
 int
 dpdk_port_start(uint16_t port_id);
 
+// Fill the port's whole redirection table round-robin with the given
+// queues.
+//
+// Queues left out are then reachable only through flow rules. Returns
+// non-zero when the driver has no redirection table or refuses the update.
+int
+dpdk_port_set_rss_reta(
+	uint16_t port_id, const uint16_t *queues, uint16_t queue_count
+);
+
 int
 dpdk_port_stop(uint16_t port_id);
 

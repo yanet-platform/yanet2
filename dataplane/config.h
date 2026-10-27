@@ -16,12 +16,31 @@ struct dataplane_instance_config {
 	uint64_t cp_memory;
 };
 
+// Which traffic the NIC delivers to a port queue.
+//
+// A queue left out of the RSS table is a steering queue: it receives only
+// the classes steered to it, through rte_flow rules.
+struct dataplane_queue_role {
+	// Whether the queue is in the port's RSS table.
+	uint8_t rss;
+
+	// The steered classes. Bit n of dscp steers DSCP value n, in IPv4 and
+	// IPv6; nd covers ICMPv6 types 133-136; l2_control covers the IEEE
+	// 802.1 link-local block 01:80:c2:00:00:0X (STP, LACP, LLDP).
+	uint64_t dscp;
+	uint8_t arp;
+	uint8_t nd;
+	uint8_t l2_control;
+};
+
 struct dataplane_device_worker_config {
 	uint16_t core_id;
 	uint16_t instance_id;
 	uint16_t rx_queue_len;
 	uint16_t tx_queue_len;
 	uint32_t num_mbufs;
+
+	struct dataplane_queue_role role;
 };
 
 // One (device, queue) pair a worker polls.
@@ -54,9 +73,9 @@ struct dataplane_device_config {
 	uint64_t rss_hash;
 
 	// The workers declared inside the device; also the device's queue
-	// count, with worker i polling queue i. Expanded into the flat
-	// top-level worker list (one single-assignment worker per entry) by
-	// dataplane_config_init.
+	// count, with worker i polling queue i. At config load they expand
+	// into the flat top-level worker list, where declarations on the same
+	// core become one worker polling all their queues.
 	uint32_t worker_count;
 	struct dataplane_device_worker_config *workers;
 };
@@ -116,3 +135,8 @@ dataplane_config_init(FILE *file, struct dataplane_config **config);
 
 void
 dataplane_config_free(struct dataplane_config *config);
+
+// Whether a device declares any queue role other than the default: a queue
+// out of the RSS table or a steered class.
+int
+dataplane_device_config_has_roles(const struct dataplane_device_config *device);

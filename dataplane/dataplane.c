@@ -167,45 +167,19 @@ collect_device_assignments(
 	return 0;
 }
 
+// Wire pipes from the source assignments to the destination ones.
+//
+// Each source assignment gets at least one pipe into the destination
+// device, and each destination assignment at least one incoming pipe.
 static int
-dataplane_connect_device(
+dataplane_connect_refs(
 	struct dataplane *dataplane,
-	struct dataplane_device *from_device,
-	struct dataplane_device *to_device
+	struct dataplane_device *to_device,
+	struct device_assignment_ref *from_refs,
+	uint32_t from_count,
+	struct device_assignment_ref *to_refs,
+	uint32_t to_count
 ) {
-	/*
-	 * Each assignment on the source device should have at least one
-	 * connection to the destination device. Also create at least one
-	 * incoming connection from the source device for each destination
-	 * device assignment.
-	 */
-	struct device_assignment_ref *from_refs;
-	uint32_t from_count;
-	if (collect_device_assignments(
-		    dataplane, from_device->device_id, &from_refs, &from_count
-	    )) {
-		return -1;
-	}
-	struct device_assignment_ref *to_refs;
-	uint32_t to_count;
-	if (collect_device_assignments(
-		    dataplane, to_device->device_id, &to_refs, &to_count
-	    )) {
-		free(from_refs);
-		return -1;
-	}
-
-	if (from_count == 0 || to_count == 0) {
-		LOG(ERROR,
-		    "cannot connect device %s to device %s: a device with no "
-		    "assigned queue cannot carry connections",
-		    from_device->port_name,
-		    to_device->port_name);
-		free(from_refs);
-		free(to_refs);
-		return -1;
-	}
-
 	size_t pipe_count = from_count;
 	if (to_count > pipe_count) {
 		pipe_count = to_count;
@@ -238,21 +212,173 @@ dataplane_connect_device(
 			    to_ref->assignment->port_id,
 			    to_ref->assignment->queue_id
 		    )) {
-			LOG(ERROR,
-			    "failed to connect workers from device %s to "
-			    "device %s",
-			    from_device->port_name,
-			    to_device->port_name);
-			free(from_refs);
-			free(to_refs);
 			return -1;
-		};
+		}
+	}
+
+	return 0;
+}
+
+// Whether a worker polls any steering queue, which makes it a steering
+// worker.
+static int
+dataplane_worker_is_steering(
+	const struct dataplane *dataplane, const struct dataplane_worker *worker
+) {
+	for (uint32_t asgn_idx = 0; asgn_idx < worker->assignment_count;
+	     ++asgn_idx) {
+		const struct worker_assignment *assignment =
+			worker->assignments + asgn_idx;
+		if (dataplane_device_queue_is_steering(
+			    dataplane->devices + assignment->device_id,
+			    assignment->queue_id
+		    )) {
+			return 1;
+		}
+	}
+	return 0;
+}
+
+static void
+swap_refs(struct device_assignment_ref *refs, uint32_t lhs, uint32_t rhs) {
+	struct device_assignment_ref tmp = refs[lhs];
+	refs[lhs] = refs[rhs];
+	refs[rhs] = tmp;
+}
+
+// Wire pipes into a device with steering queues, by the source worker's
+// role.
+//
+// A steering worker pipes into the destination's steering queues, or its
+// RSS queues when it has none; a data worker pipes into RSS queues only,
+// so data never lands on a steering queue. Validation keeps queue 0 an RSS
+// queue, so the RSS part is never empty. Reorders both ref arrays.
+static int
+dataplane_connect_by_role(
+	struct dataplane *dataplane,
+	struct dataplane_device *to_device,
+	struct device_assignment_ref *from_refs,
+	uint32_t from_count,
+	struct device_assignment_ref *to_refs,
+	uint32_t to_count
+) {
+	// Steering sources and steering queues first.
+	uint32_t from_steering = 0;
+	for (uint32_t idx = 0; idx < from_count; ++idx) {
+		if (dataplane_worker_is_steering(
+			    dataplane, from_refs[idx].worker
+		    )) {
+			swap_refs(from_refs, from_steering++, idx);
+		}
+	}
+	uint32_t to_steering = 0;
+	for (uint32_t idx = 0; idx < to_count; ++idx) {
+		if (dataplane_device_queue_is_steering(
+			    to_device, to_refs[idx].assignment->queue_id
+		    )) {
+			swap_refs(to_refs, to_steering++, idx);
+		}
+	}
+
+	struct device_assignment_ref *to_rss = to_refs + to_steering;
+	uint32_t to_rss_count = to_count - to_steering;
+	if (to_rss_count == 0) {
+		return -1;
+	}
+
+	if (from_steering < from_count && dataplane_connect_refs(
+						  dataplane,
+						  to_device,
+						  from_refs + from_steering,
+						  from_count - from_steering,
+						  to_rss,
+						  to_rss_count
+					  )) {
+		return -1;
+	}
+	if (from_steering == 0) {
+		return 0;
+	}
+	// Without steering queues, steering sources fall back to RSS queues.
+	struct device_assignment_ref *steering_refs =
+		to_steering ? to_refs : to_rss;
+	uint32_t steering_count = to_steering ? to_steering : to_rss_count;
+	return dataplane_connect_refs(
+		dataplane,
+		to_device,
+		from_refs,
+		from_steering,
+		steering_refs,
+		steering_count
+	);
+}
+
+static int
+dataplane_connect_device(
+	struct dataplane *dataplane,
+	struct dataplane_device *from_device,
+	struct dataplane_device *to_device
+) {
+	struct device_assignment_ref *from_refs;
+	uint32_t from_count;
+	if (collect_device_assignments(
+		    dataplane, from_device->device_id, &from_refs, &from_count
+	    )) {
+		return -1;
+	}
+	struct device_assignment_ref *to_refs;
+	uint32_t to_count;
+	if (collect_device_assignments(
+		    dataplane, to_device->device_id, &to_refs, &to_count
+	    )) {
+		free(from_refs);
+		return -1;
+	}
+
+	if (from_count == 0 || to_count == 0) {
+		LOG(ERROR,
+		    "cannot connect device %s to device %s: a device with no "
+		    "assigned queue cannot carry connections",
+		    from_device->port_name,
+		    to_device->port_name);
+		free(from_refs);
+		free(to_refs);
+		return -1;
+	}
+
+	// A device without steering queues takes pipes from every source
+	// assignment on any of its queues.
+	int rc;
+	if (to_device->queue_roles == NULL) {
+		rc = dataplane_connect_refs(
+			dataplane,
+			to_device,
+			from_refs,
+			from_count,
+			to_refs,
+			to_count
+		);
+	} else {
+		rc = dataplane_connect_by_role(
+			dataplane,
+			to_device,
+			from_refs,
+			from_count,
+			to_refs,
+			to_count
+		);
+	}
+	if (rc != 0) {
+		LOG(ERROR,
+		    "failed to connect workers from device %s to device %s",
+		    from_device->port_name,
+		    to_device->port_name);
 	}
 
 	free(from_refs);
 	free(to_refs);
 
-	return 0;
+	return rc;
 }
 
 /*
@@ -1039,7 +1165,8 @@ dataplane_init(
 				    dp_config,
 				    device_idx,
 				    dataplane->devices[device_idx].queue_count,
-				    dataplane->devices[device_idx].queue_count
+				    dataplane->devices[device_idx]
+					    .rss_queue_count
 			    ) != 0) {
 				LOG(ERROR,
 				    "failed to set dp_topology queue counts "
