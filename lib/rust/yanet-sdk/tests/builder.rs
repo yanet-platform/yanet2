@@ -884,6 +884,25 @@ fn test_build_releases_a_fib_when_an_sdk_block_cannot_be_allocated() {
     assert_eq!(4, fits);
 }
 
+/// verifies that a build refuses an LPM range that ends before it starts and
+/// returns what was built before the table.
+#[cfg(not(miri))]
+#[test]
+fn test_build_refuses_a_reversed_lpm_range_and_releases_everything() {
+    let owner = TestOwner::new();
+    let mut input = fib_input();
+    input.v4.push(LpmRange {
+        from: [10, 1, 2, 3],
+        to: [10, 1, 2, 2],
+        value: 0,
+    });
+
+    let err = build_fib(&owner, &input).expect_err("refused range");
+
+    assert_eq!(BuildError::Refused(Refusal::InvalidRange), err);
+    owner.assert_released();
+}
+
 /// verifies that a build returns every C page when the C memory runs out at
 /// any point: the first table, its growth, and the second table after the
 /// first was written.

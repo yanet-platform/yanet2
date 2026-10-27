@@ -1,15 +1,14 @@
 //! Module-crate surface of the Rust module SDK.
 //!
 //! A module is one `impl Module` in a `#![no_std]`, `#![forbid(unsafe_code)]`
-//! crate: shared-memory types derive [`ShmLayout`], the handler receives
-//! the invocation context [`Cx`] and the packet [`Batch`], and edges of the
-//! configuration resolve through the context, which the edge's method takes as
-//! an argument. The control plane builds a configuration in place: the derive
-//! generates the `<Type>Parts` struct that a build closure returns, and the
-//! scope the closure receives allocates the owned blocks and registers
-//! counters and devices. A device is registered once and the [`Registered`] it
-//! returns is copied into every entry that uses it. The parts of a table are
-//! the author's ranges, borrowed for the build:
+//! crate: shared-memory types derive [`ShmLayout`], the handler receives the
+//! invocation context [`Cx`] and the packet [`Batch`], and edges of the
+//! configuration resolve through the context. The control plane builds a
+//! configuration in place: the derive generates the `<Type>Parts` struct that a
+//! build closure returns, and the scope the closure receives allocates the
+//! owned blocks and registers counters and devices. A device is registered once
+//! and the [`Registered`] it returns is copied into every entry that uses it.
+//! The parts of a table are the author's ranges, borrowed for the build:
 //!
 //! ```
 //! use yanet_sdk::{Device, Lpm4, LpmRange, ShmBox, ShmLayout, ShmSlice};
@@ -39,153 +38,6 @@
 //!         entries: scope.slice(3, |i| Ok(EntryParts { device: eth0, weight: [1, 2, 3][i] }))?,
 //!         routes: ranges,
 //!     })
-//! }
-//! ```
-//!
-//! A block belongs to the build that allocated it. Another build refuses it:
-//!
-//! ```compile_fail
-//! # use yanet_sdk::{prelude::*, BuildError, Builder};
-//! # use yanet_sdk_testing::cp::{TestError, TestOwner};
-//! # struct Outer;
-//! # impl Module for Outer {
-//! #     const NAME: &'static str = "outer";
-//! #     type Config = u64;
-//! #     type Prepared<'p> = ();
-//! #     fn prepare(_: &yanet_sdk::CommitCx<'_, Self>) {}
-//! #     fn handle<'id>(_: &mut Cx<'id, Self>, batch: &mut Batch<'id>) {
-//! #         batch.dispatch(|_| Verdict::Pass);
-//! #     }
-//! # }
-//! # struct Inner;
-//! # impl Module for Inner {
-//! #     const NAME: &'static str = "inner";
-//! #     type Config = ShmBox<u64>;
-//! #     type Prepared<'p> = ();
-//! #     fn prepare(_: &yanet_sdk::CommitCx<'_, Self>) {}
-//! #     fn handle<'id>(_: &mut Cx<'id, Self>, batch: &mut Batch<'id>) {
-//! #         batch.dispatch(|_| Verdict::Pass);
-//! #     }
-//! # }
-//! # fn main() {
-//! let owner = TestOwner::new();
-//! Builder::<Outer>::build::<BuildError<TestError>, _>(&owner, "outer", |outer| {
-//!     let block = outer.boxed::<u64>(1)?;
-//!     Builder::<Inner>::build::<BuildError<TestError>, _>(&owner, "inner", |_| Ok(block))?;
-//!     Ok(0)
-//! })
-//! .unwrap();
-//! # }
-//! ```
-//!
-//! Nor can a block outlive its build:
-//!
-//! ```compile_fail,E0521
-//! # use yanet_sdk::{prelude::*, BuildError, Builder};
-//! # use yanet_sdk_testing::cp::{TestError, TestOwner};
-//! # struct Mine;
-//! # impl Module for Mine {
-//! #     const NAME: &'static str = "mine";
-//! #     type Config = u64;
-//! #     type Prepared<'p> = ();
-//! #     fn prepare(_: &yanet_sdk::CommitCx<'_, Self>) {}
-//! #     fn handle<'id>(_: &mut Cx<'id, Self>, batch: &mut Batch<'id>) {
-//! #         batch.dispatch(|_| Verdict::Pass);
-//! #     }
-//! # }
-//! # fn main() {
-//! let owner = TestOwner::new();
-//! let mut leaked = None;
-//! Builder::<Mine>::build::<BuildError<TestError>, _>(&owner, "mine", |scope| {
-//!     leaked = Some(scope.boxed::<u64>(1)?);
-//!     Ok(0)
-//! })
-//! .unwrap();
-//! # }
-//! ```
-//!
-//! The parts of a table borrow the ranges of the author, which outlive the
-//! build. Ranges made inside the closure die with it, so they are refused:
-//!
-//! ```compile_fail,E0515
-//! # use yanet_sdk::{prelude::*, BuildError, Builder, Lpm4, LpmRange};
-//! # use yanet_sdk_testing::cp::{TestError, TestOwner};
-//! # struct Mine;
-//! # impl Module for Mine {
-//! #     const NAME: &'static str = "mine";
-//! #     type Config = Lpm4;
-//! #     type Prepared<'p> = ();
-//! #     fn prepare(_: &yanet_sdk::CommitCx<'_, Self>) {}
-//! #     fn handle<'id>(_: &mut Cx<'id, Self>, batch: &mut Batch<'id>) {
-//! #         batch.dispatch(|_| Verdict::Pass);
-//! #     }
-//! # }
-//! # fn main() {
-//! let owner = TestOwner::new();
-//! Builder::<Mine>::build::<BuildError<TestError>, _>(&owner, "mine", |_| {
-//!     let ranges = [LpmRange { from: [0; 4], to: [255; 4], value: 1 }];
-//!     Ok(&ranges[..])
-//! })
-//! .unwrap();
-//! # }
-//! ```
-//!
-//! Ranges made before the build are accepted:
-//!
-//! ```
-//! # use yanet_sdk::{prelude::*, BuildError, Builder, Lpm4, LpmRange};
-//! # use yanet_sdk_testing::cp::{TestError, TestOwner};
-//! # struct Mine;
-//! # impl Module for Mine {
-//! #     const NAME: &'static str = "mine";
-//! #     type Config = Lpm4;
-//! #     type Prepared<'p> = ();
-//! #     fn prepare(_: &yanet_sdk::CommitCx<'_, Self>) {}
-//! #     fn handle<'id>(_: &mut Cx<'id, Self>, batch: &mut Batch<'id>) {
-//! #         batch.dispatch(|_| Verdict::Pass);
-//! #     }
-//! # }
-//! # fn main() {
-//! let owner = TestOwner::new();
-//! let ranges = [LpmRange { from: [0; 4], to: [255; 4], value: 1 }];
-//! Builder::<Mine>::build::<BuildError<TestError>, _>(&owner, "mine", |_| Ok(&ranges[..]))
-//!     .unwrap();
-//! # }
-//! ```
-//!
-//! A block of a zero-sized type is refused at compile time, as C has no block
-//! of no bytes:
-//!
-//! ```compile_fail,E0080
-//! # use yanet_sdk::{prelude::*, BuildError, Builder};
-//! # use yanet_sdk_testing::cp::{TestError, TestOwner};
-//! # struct Mine;
-//! # impl Module for Mine {
-//! #     const NAME: &'static str = "mine";
-//! #     type Config = ShmBox<()>;
-//! #     type Prepared<'p> = ();
-//! #     fn prepare(_: &yanet_sdk::CommitCx<'_, Self>) {}
-//! #     fn handle<'id>(_: &mut Cx<'id, Self>, batch: &mut Batch<'id>) {
-//! #         batch.dispatch(|_| Verdict::Pass);
-//! #     }
-//! # }
-//! # fn main() {
-//! let owner = TestOwner::new();
-//! Builder::<Mine>::build::<BuildError<TestError>, _>(&owner, "mine", |scope| scope.boxed::<()>(())).unwrap();
-//! # }
-//! ```
-//!
-//! A build runs on one thread, whatever the owner, since the per-header state
-//! of the C control plane takes no concurrent calls, which `W: Sync` does not
-//! promise; so its blocks never cross to another:
-//!
-//! ```compile_fail,E0277
-//! use yanet_sdk::{Owned, Owner};
-//!
-//! fn sendable<T: Send>() {}
-//!
-//! fn owned_on_any_thread<W: Owner + Sync>() {
-//!     sendable::<Owned<'static, u64, W>>();
 //! }
 //! ```
 
@@ -227,3 +79,159 @@ pub mod __private {
 // Test-only dependencies are visible to the library's own test target.
 #[cfg(test)]
 use yanet_sdk_testing as _;
+
+/// Doc tests that pin what a build refuses, with the compile error each
+/// refusal produces, and the accepted twin of the ranges case.
+#[cfg(doctest)]
+mod doctests {
+
+    /// A block belongs to the build that allocated it; another build refuses
+    /// it.
+    ///
+    /// ```compile_fail
+    /// # use yanet_sdk::{prelude::*, BuildError, Builder};
+    /// # use yanet_sdk_testing::cp::{TestError, TestOwner};
+    /// # struct Outer;
+    /// # impl Module for Outer {
+    /// #     const NAME: &'static str = "outer";
+    /// #     type Config = u64;
+    /// #     type Prepared<'p> = ();
+    /// #     fn prepare(_: &yanet_sdk::CommitCx<'_, Self>) {}
+    /// #     fn handle<'id>(_: &mut Cx<'id, Self>, batch: &mut Batch<'id>) {
+    /// #         batch.dispatch(|_| Verdict::Pass);
+    /// #     }
+    /// # }
+    /// # struct Inner;
+    /// # impl Module for Inner {
+    /// #     const NAME: &'static str = "inner";
+    /// #     type Config = ShmBox<u64>;
+    /// #     type Prepared<'p> = ();
+    /// #     fn prepare(_: &yanet_sdk::CommitCx<'_, Self>) {}
+    /// #     fn handle<'id>(_: &mut Cx<'id, Self>, batch: &mut Batch<'id>) {
+    /// #         batch.dispatch(|_| Verdict::Pass);
+    /// #     }
+    /// # }
+    /// # fn main() {
+    /// let owner = TestOwner::new();
+    /// Builder::<Outer>::build::<BuildError<TestError>, _>(&owner, "outer", |outer| {
+    ///     let block = outer.boxed::<u64>(1)?;
+    ///     Builder::<Inner>::build::<BuildError<TestError>, _>(&owner, "inner", |_| Ok(block))?;
+    ///     Ok(0)
+    /// })
+    /// .unwrap();
+    /// # }
+    /// ```
+    struct BlockOfAnotherBuildRefused;
+
+    /// A block cannot outlive the build that allocated it.
+    ///
+    /// ```compile_fail,E0521
+    /// # use yanet_sdk::{prelude::*, BuildError, Builder};
+    /// # use yanet_sdk_testing::cp::{TestError, TestOwner};
+    /// # struct Mine;
+    /// # impl Module for Mine {
+    /// #     const NAME: &'static str = "mine";
+    /// #     type Config = u64;
+    /// #     type Prepared<'p> = ();
+    /// #     fn prepare(_: &yanet_sdk::CommitCx<'_, Self>) {}
+    /// #     fn handle<'id>(_: &mut Cx<'id, Self>, batch: &mut Batch<'id>) {
+    /// #         batch.dispatch(|_| Verdict::Pass);
+    /// #     }
+    /// # }
+    /// # fn main() {
+    /// let owner = TestOwner::new();
+    /// let mut leaked = None;
+    /// Builder::<Mine>::build::<BuildError<TestError>, _>(&owner, "mine", |scope| {
+    ///     leaked = Some(scope.boxed::<u64>(1)?);
+    ///     Ok(0)
+    /// })
+    /// .unwrap();
+    /// # }
+    /// ```
+    struct BlockOutlivingBuildRefused;
+
+    /// Ranges made inside the closure die with it, so a table refuses them.
+    ///
+    /// ```compile_fail,E0515
+    /// # use yanet_sdk::{prelude::*, BuildError, Builder, Lpm4, LpmRange};
+    /// # use yanet_sdk_testing::cp::{TestError, TestOwner};
+    /// # struct Mine;
+    /// # impl Module for Mine {
+    /// #     const NAME: &'static str = "mine";
+    /// #     type Config = Lpm4;
+    /// #     type Prepared<'p> = ();
+    /// #     fn prepare(_: &yanet_sdk::CommitCx<'_, Self>) {}
+    /// #     fn handle<'id>(_: &mut Cx<'id, Self>, batch: &mut Batch<'id>) {
+    /// #         batch.dispatch(|_| Verdict::Pass);
+    /// #     }
+    /// # }
+    /// # fn main() {
+    /// let owner = TestOwner::new();
+    /// Builder::<Mine>::build::<BuildError<TestError>, _>(&owner, "mine", |_| {
+    ///     let ranges = [LpmRange { from: [0; 4], to: [255; 4], value: 1 }];
+    ///     Ok(&ranges[..])
+    /// })
+    /// .unwrap();
+    /// # }
+    /// ```
+    struct RangesMadeInBuildRefused;
+
+    /// Ranges made before the build outlive it, so a table accepts them.
+    ///
+    /// ```
+    /// # use yanet_sdk::{prelude::*, BuildError, Builder, Lpm4, LpmRange};
+    /// # use yanet_sdk_testing::cp::{TestError, TestOwner};
+    /// # struct Mine;
+    /// # impl Module for Mine {
+    /// #     const NAME: &'static str = "mine";
+    /// #     type Config = Lpm4;
+    /// #     type Prepared<'p> = ();
+    /// #     fn prepare(_: &yanet_sdk::CommitCx<'_, Self>) {}
+    /// #     fn handle<'id>(_: &mut Cx<'id, Self>, batch: &mut Batch<'id>) {
+    /// #         batch.dispatch(|_| Verdict::Pass);
+    /// #     }
+    /// # }
+    /// # fn main() {
+    /// let owner = TestOwner::new();
+    /// let ranges = [LpmRange { from: [0; 4], to: [255; 4], value: 1 }];
+    /// Builder::<Mine>::build::<BuildError<TestError>, _>(&owner, "mine", |_| Ok(&ranges[..]))
+    ///     .unwrap();
+    /// # }
+    /// ```
+    struct RangesMadeBeforeBuildAccepted;
+
+    /// A block of a zero-sized type is refused at compile time, as C has none.
+    ///
+    /// ```compile_fail,E0080
+    /// # use yanet_sdk::{prelude::*, BuildError, Builder};
+    /// # use yanet_sdk_testing::cp::{TestError, TestOwner};
+    /// # struct Mine;
+    /// # impl Module for Mine {
+    /// #     const NAME: &'static str = "mine";
+    /// #     type Config = ShmBox<()>;
+    /// #     type Prepared<'p> = ();
+    /// #     fn prepare(_: &yanet_sdk::CommitCx<'_, Self>) {}
+    /// #     fn handle<'id>(_: &mut Cx<'id, Self>, batch: &mut Batch<'id>) {
+    /// #         batch.dispatch(|_| Verdict::Pass);
+    /// #     }
+    /// # }
+    /// # fn main() {
+    /// let owner = TestOwner::new();
+    /// Builder::<Mine>::build::<BuildError<TestError>, _>(&owner, "mine", |scope| scope.boxed::<()>(())).unwrap();
+    /// # }
+    /// ```
+    struct ZeroSizedBlockRefused;
+
+    /// A build runs on one thread, so its blocks never cross to another.
+    ///
+    /// ```compile_fail,E0277
+    /// use yanet_sdk::{Owned, Owner};
+    ///
+    /// fn sendable<T: Send>() {}
+    ///
+    /// fn owned_on_any_thread<W: Owner + Sync>() {
+    ///     sendable::<Owned<'static, u64, W>>();
+    /// }
+    /// ```
+    struct OwnedAcrossThreadsRefused;
+}

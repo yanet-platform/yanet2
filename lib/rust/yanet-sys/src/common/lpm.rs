@@ -30,9 +30,10 @@ type Page = [u64; 256];
 ///
 /// Values keep the C semantics documented on [`Lpm::lookup`]: bit 31 is lost.
 ///
-/// `from <= to` is required: the C insert does not check it, and a reversed
-/// range wraps round. Ranges are inserted in slice order, and on an overlap
-/// the later range wins, so a broad range goes before the narrow ones in it.
+/// `from <= to` is required: the C insert does not check it and a reversed
+/// range would wrap round, so a build refuses one. Ranges are inserted in slice
+/// order, and on an overlap the later range wins, so a broad range goes before
+/// the narrow ones in it.
 ///
 /// The ranges are borrowed for the whole build, so they are made before it
 /// starts, for a table in a box or a slice too.

@@ -16,6 +16,8 @@ pub enum Refusal {
     /// An owned block whose byte size overflows or exceeds the C block
     /// allocator's largest block; `YANET_ERROR_INVALID_ARGUMENT`.
     BlockTooLarge,
+    /// An LPM range that ends before it starts; `YANET_ERROR_INVALID_ARGUMENT`.
+    InvalidRange,
 }
 
 impl fmt::Display for Refusal {
@@ -23,6 +25,7 @@ impl fmt::Display for Refusal {
         f.write_str(match self {
             Self::OutOfMemory => "the shared memory is exhausted",
             Self::BlockTooLarge => "an owned block larger than the largest block of the allocator",
+            Self::InvalidRange => "an LPM range ends before it starts",
         })
     }
 }

@@ -313,10 +313,9 @@ unsafe impl<const K: usize> Build for Lpm<K> {
         addr: usize,
     ) -> Result<(), Refusal> {
         const { assert!(K >= 1 && K <= 16, "LPM keys are 1 to 16 bytes") };
-        debug_assert!(
-            parts.iter().all(|range| range.from <= range.to),
-            "an LPM range ends before it starts"
-        );
+        if parts.iter().any(|range| range.from > range.to) {
+            return Err(Refusal::InvalidRange);
+        }
         let root = memory.root();
         let lpm = root.ptr::<bindings::lpm>(addr);
         // SAFETY: the table lies in a block of the build (caller contract),
