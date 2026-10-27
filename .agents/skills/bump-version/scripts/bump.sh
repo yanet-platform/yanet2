@@ -183,6 +183,11 @@ cmd_next() {
 	if [[ ${next%.*} == "${latest%.*}" && $latest != "$base" ]]; then
 		fail "v$latest is not on the history of $target, release $next from release/${latest%.*} by hand"
 	fi
+	# Release preflight publishes a patch only after the previous one, so a line
+	# has one next version: the patch after the latest tag, or X.Y.0 when new.
+	local line_next=${next%.*}.0
+	[[ ${next%.*} != "${latest%.*}" ]] || line_next=$(bump "$latest" patch)
+	[[ $next == "$line_next" ]] || fail "$next skips a patch, the next release on its line is $line_next"
 	if [[ -n $agreed && -n $auto ]] && version_gt "$auto" "$agreed"; then
 		echo "bump.sh: the commits now call for $auto, above the agreed $agreed" >&2
 		exit 5
