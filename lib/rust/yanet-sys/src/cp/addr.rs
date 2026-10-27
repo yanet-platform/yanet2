@@ -63,7 +63,7 @@ impl Header {
 
     /// The memory context the header embeds.
     pub fn context(self) -> Context {
-        Context(self.0 + offset_of!(bindings::cp_module, memory_context))
+        Context(self.0 + offset_of!(bindings::cp_module, entity.memory_context))
     }
 
     /// The address as an integer, to resolve through the owner's root.
