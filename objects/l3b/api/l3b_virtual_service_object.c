@@ -507,7 +507,7 @@ l3b_virtual_service_create(
 					.destination_addr;
 			real_servers[idx].source_net =
 				virtual_service->real_servers[idx].source_net;
-			real_servers[idx].state = real_state_enabled;
+			real_servers[idx].state = real_state_disabled;
 		}
 		SET_OFFSET_OF(&vs->real_servers, real_servers);
 	}

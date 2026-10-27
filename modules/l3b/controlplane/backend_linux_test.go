@@ -50,6 +50,13 @@ func Test_Backend_CreateService_RequiredCounterFailurePublishesNothing(t *testin
 			view, err := backend.GetService("svc")
 			require.NoError(t, err)
 			require.Len(t, view.GetRealServers(), 2)
+			for _, real := range view.GetRealServers() {
+				require.False(t, real.Enabled)
+				require.Equal(t, uint32(1), real.Weight)
+			}
+			ring, err := testutils.ReadRealRing(agent, "svc", 2)
+			require.NoError(t, err)
+			require.Empty(t, ring)
 			current, err := harness.PublishedExecutionContext(0)
 			require.NoError(t, err)
 			require.NotZero(t, current)
