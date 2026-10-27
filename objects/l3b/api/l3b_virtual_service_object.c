@@ -637,7 +637,7 @@ l3b_virtual_service_object_destroy(struct cp_object *cp_object) {
 	}
 
 	// Capture agent before fini zeroes it.
-	struct agent *agent = ADDR_OF(&cp_object->agent);
+	struct agent *agent = ADDR_OF(&cp_object->entity.agent);
 
 	cp_object_fini(cp_object);
 	memory_bfree(
@@ -653,7 +653,7 @@ l3b_virtual_service_free(struct cp_object *cp_object, yanet_error **err) {
 		return -1;
 	}
 
-	struct agent *owner = ADDR_OF(&cp_object->agent);
+	struct agent *owner = ADDR_OF(&cp_object->entity.agent);
 
 	// The session table outlives the service and is destroyed through its
 	// own handle.

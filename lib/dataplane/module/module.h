@@ -39,7 +39,10 @@
 // 44: struct module and struct dp_module lost config_layout.
 // 45: the acl filter structs carry interned first-match rule tables
 // in place of the path joints with their decoders.
-#define YANET_MODULE_ABI_VERSION 45
+// 46: struct cp_module, cp_device and cp_object gained the embedded
+// cp_entity base holding the registry item and the agent pointer; the
+// former config_item and agent members are reached through the base now.
+#define YANET_MODULE_ABI_VERSION 46
 
 // Symbol name a module .so exports carrying its compiled-against
 // YANET_MODULE_ABI_VERSION, as a uint32_t global.

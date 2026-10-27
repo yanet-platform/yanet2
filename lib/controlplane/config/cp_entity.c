@@ -10,52 +10,13 @@
 #include <stdlib.h>
 #include <string.h>
 
-int
-cp_entity_item_cmp(
-	const struct cp_entity_desc *desc,
-	const struct registry_item *item,
-	const struct cp_entity_key *key
-) {
-	const char *item_name = (const char *)item + desc->name_offset;
-	const char *item_type = (const char *)item + desc->type_offset;
+// Longest identity field the destroy gate's refusal buffers hold; every
+// kind's name and type fields are this length today.
+#define CP_ENTITY_ID_LEN 80
 
-	int cmp = strncmp(item_name, key->name, desc->name_len);
-	if (cmp) {
-		return cmp;
-	}
-
-	return strncmp(item_type, key->type, desc->type_len);
-}
-
-int
-cp_entity_name_cmp(
-	const struct cp_entity_desc *desc,
-	const struct registry_item *item,
-	const char *name
-) {
-	const char *item_name = (const char *)item + desc->name_offset;
-	return strncmp(item_name, name, desc->name_len);
-}
-
-uint64_t
-cp_entity_key_hash(
-	const struct cp_entity_desc *desc, const struct cp_entity_key *key
-) {
-	return registry_hash_name_pair(
-		key->name, desc->name_len, key->type, desc->type_len
-	);
-}
-
-uint64_t
-cp_entity_item_hash(
-	const struct cp_entity_desc *desc, const struct registry_item *item
-) {
-	return registry_hash_name_pair(
-		(const char *)item + desc->name_offset,
-		desc->name_len,
-		(const char *)item + desc->type_offset,
-		desc->type_len
-	);
+struct agent *
+cp_entity_item_owner(struct registry_item *item) {
+	return ADDR_OF(&cp_entity_of(item)->agent);
 }
 
 int
@@ -64,12 +25,12 @@ cp_entity_try_destroy(
 	const struct cp_entity_desc *desc,
 	yanet_error **err
 ) {
-	struct agent *agent = desc->item_owner(item);
+	struct agent *agent = cp_entity_item_owner(item);
 	struct cp_config *cp_config =
 		(agent != NULL) ? ADDR_OF(&agent->cp_config) : NULL;
 
-	char type[CP_ENTITY_KEY_LEN];
-	char name[CP_ENTITY_KEY_LEN];
+	char type[CP_ENTITY_ID_LEN];
+	char name[CP_ENTITY_ID_LEN];
 
 	if (cp_config != NULL) {
 		cp_config_lock(cp_config);
@@ -172,7 +133,7 @@ cp_entity_registry_copy(
 		if (item == NULL) {
 			continue;
 		}
-		struct agent *agent = desc->item_owner(item);
+		struct agent *agent = cp_entity_item_owner(item);
 		if (agent != NULL) {
 			__atomic_add_fetch(
 				&agent->loaded_entity_count, 1, __ATOMIC_RELAXED
@@ -184,9 +145,7 @@ cp_entity_registry_copy(
 }
 
 void
-cp_entity_registry_fini(
-	struct registry *registry, const struct cp_entity_desc *desc
-) {
+cp_entity_registry_fini(struct registry *registry) {
 	// Mirror each remaining item's dropped generation reference into its
 	// own agent.
 	//
@@ -212,8 +171,9 @@ cp_entity_registry_fini(
 		for (uint64_t idx = 0; idx < capacity; ++idx) {
 			struct registry_item *item =
 				registry_get(registry, idx);
-			owners[idx] =
-				(item != NULL) ? desc->item_owner(item) : NULL;
+			owners[idx] = (item != NULL)
+					      ? cp_entity_item_owner(item)
+					      : NULL;
 		}
 		registry_fini(registry, NULL, NULL);
 		agent_unload_references(owners, capacity);
@@ -224,45 +184,23 @@ cp_entity_registry_fini(
 	// Teardown could not snapshot the owners; release the items and
 	// drop the owners' references in allocation-free batches that keep
 	// the same dereferences-before-drops order per batch.
-	agent_release_registry_items(registry, desc->item_owner);
-}
-
-int
-cp_entity_registry_lookup_index(
-	struct registry *registry,
-	const struct cp_entity_desc *desc,
-	const struct cp_entity_key *key,
-	uint64_t *index
-) {
-	return registry_lookup(
-		registry, &desc->keys, desc->keys.cmp, key, index
-	);
-}
-
-struct registry_item *
-cp_entity_registry_lookup(
-	struct registry *registry,
-	const struct cp_entity_desc *desc,
-	const struct cp_entity_key *key
-) {
-	uint64_t index;
-	if (cp_entity_registry_lookup_index(registry, desc, key, &index)) {
-		return NULL;
-	}
-
-	return registry_get(registry, index);
+	agent_release_registry_items(registry, cp_entity_item_owner);
 }
 
 int
 cp_entity_registry_upsert(
 	struct registry *registry,
 	const struct cp_entity_desc *desc,
-	const struct cp_entity_key *key,
+	registry_item_cmp_func cmp,
+	const void *cmp_data,
 	struct registry_item *new_item,
 	yanet_error **err
 ) {
-	struct registry_item *old_item =
-		cp_entity_registry_lookup(registry, desc, key);
+	uint64_t index;
+	struct registry_item *old_item = NULL;
+	if (!registry_lookup(registry, &desc->keys, cmp, cmp_data, &index)) {
+		old_item = registry_get(registry, index);
+	}
 
 	if (desc->link_counters != NULL &&
 	    desc->link_counters(new_item, old_item, err)) {
@@ -270,13 +208,7 @@ cp_entity_registry_upsert(
 	}
 
 	if (registry_replace(
-		    registry,
-		    &desc->keys,
-		    desc->keys.cmp,
-		    key,
-		    new_item,
-		    NULL,
-		    NULL
+		    registry, &desc->keys, cmp, cmp_data, new_item, NULL, NULL
 	    )) {
 		yanet_error_add(
 			err, "failed to replace %s in registry", desc->noun
@@ -290,14 +222,14 @@ cp_entity_registry_upsert(
 	// Gaining a reference through upsert only ever happens here, and
 	// losing one to a displacing upsert only ever happens here too, so
 	// the per-agent live count must track both in this one place.
-	struct agent *new_agent = desc->item_owner(new_item);
+	struct agent *new_agent = cp_entity_item_owner(new_item);
 	if (new_agent != NULL) {
 		__atomic_add_fetch(
 			&new_agent->loaded_entity_count, 1, __ATOMIC_RELAXED
 		);
 	}
 	if (old_item != NULL) {
-		struct agent *old_agent = desc->item_owner(old_item);
+		struct agent *old_agent = cp_entity_item_owner(old_item);
 		if (old_agent != NULL) {
 			__atomic_sub_fetch(
 				&old_agent->loaded_entity_count,
@@ -333,7 +265,7 @@ cp_entity_registry_delete(
 	// item's own agent, matching the decrement upsert performs when it
 	// displaces an entry.
 	if (old_item != NULL) {
-		struct agent *old_agent = desc->item_owner(old_item);
+		struct agent *old_agent = cp_entity_item_owner(old_item);
 		if (old_agent != NULL) {
 			__atomic_sub_fetch(
 				&old_agent->loaded_entity_count,

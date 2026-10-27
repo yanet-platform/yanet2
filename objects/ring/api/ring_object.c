@@ -27,7 +27,7 @@ ring_object_destroy(struct cp_object *cp_object) {
 	struct ring_object *self =
 		container_of(cp_object, struct ring_object, cp_object);
 
-	struct agent *agent = ADDR_OF(&cp_object->agent);
+	struct agent *agent = ADDR_OF(&cp_object->entity.agent);
 
 	ring_object_fini(self);
 	ring_object_free(self, agent);
@@ -60,7 +60,7 @@ ring_object_fini(struct ring_object *self) {
 		return;
 	}
 
-	struct agent *agent = ADDR_OF(&self->cp_object.agent);
+	struct agent *agent = ADDR_OF(&self->cp_object.entity.agent);
 	if (agent != NULL) {
 		// The frees below must run before the common teardown, because
 		// that teardown zeroes the memory context they free into.
@@ -152,7 +152,7 @@ ring_object_config_free(struct cp_object *cp_object, yanet_error **err) {
 		return -1;
 	}
 
-	struct agent *owner = ADDR_OF(&cp_object->agent);
+	struct agent *owner = ADDR_OF(&cp_object->entity.agent);
 
 	ring_object_destroy(cp_object);
 	agent_destroy_released(owner);
@@ -261,7 +261,7 @@ ring_object_create(
 		return -1;
 	}
 
-	struct agent *agent = ADDR_OF(&self->cp_object.agent);
+	struct agent *agent = ADDR_OF(&self->cp_object.entity.agent);
 	struct dp_config *dp_config = ADDR_OF(&agent->dp_config);
 	uint64_t dp_worker_count = dp_config->worker_count;
 	if (dp_worker_count == 0) {

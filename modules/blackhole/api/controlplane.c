@@ -8,7 +8,7 @@
 static void
 blackhole_module_config_destroy(struct cp_module *config) {
 	// Capture agent before fini zeroes it.
-	struct agent *agent = ADDR_OF(&config->agent);
+	struct agent *agent = ADDR_OF(&config->entity.agent);
 
 	cp_module_fini(config);
 	memory_bfree(&agent->memory_context, config, sizeof(*config));
@@ -41,7 +41,7 @@ blackhole_module_config_free(struct cp_module *config, yanet_error **err) {
 		return -1;
 	}
 
-	struct agent *owner = ADDR_OF(&config->agent);
+	struct agent *owner = ADDR_OF(&config->entity.agent);
 
 	blackhole_module_config_destroy(config);
 	agent_destroy_released(owner);

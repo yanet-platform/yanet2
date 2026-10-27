@@ -151,7 +151,7 @@ route_test_config(struct cp_module **cp_module, yanet_error **err) {
 	);
 
 	config->cp_module.dp_module_idx = 0;
-	config->cp_module.agent = NULL;
+	config->cp_module.entity.agent = NULL;
 	config->cp_module.device_count = 0;
 	SET_OFFSET_OF(&config->cp_module.devices, NULL);
 

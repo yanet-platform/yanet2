@@ -4,6 +4,7 @@
 
 #include "lib/counters/counters.h"
 
+#include "lib/controlplane/config/cp_entity.h"
 #include "lib/controlplane/config/defines.h"
 
 #include "lib/controlplane/config/registry.h"
@@ -31,15 +32,11 @@ struct cp_device_entry {
 };
 
 struct cp_device {
-	struct registry_item config_item;
+	struct cp_entity entity;
 	char type[CP_DEVICE_TYPE_LEN];
 	char name[CP_DEVICE_NAME_LEN];
 
 	uint64_t dp_device_idx;
-
-	// Agent that owns this device. Set by cp_device_init; used by the
-	// typed free routine to resolve the memory context for reclamation.
-	struct agent *agent;
 
 	struct memory_context memory_context;
 

@@ -63,7 +63,7 @@ static int
 pdump_module_config_update_filter_str(struct cp_module *module, char *filter) {
 	struct pdump_module_config *config =
 		container_of(module, struct pdump_module_config, cp_module);
-	struct agent *agent = ADDR_OF(&config->cp_module.agent);
+	struct agent *agent = ADDR_OF(&config->cp_module.entity.agent);
 
 	char *old_filter = ADDR_OF(&config->filter);
 	if (old_filter != filter) {
@@ -111,7 +111,7 @@ pdump_module_config_destroy(struct cp_module *module) {
 	struct pdump_module_config *config =
 		container_of(module, struct pdump_module_config, cp_module);
 
-	struct agent *agent = ADDR_OF(&module->agent);
+	struct agent *agent = ADDR_OF(&module->entity.agent);
 	void *rate_bucket_raw = ADDR_OF(&config->rate_bucket_raw);
 	if (rate_bucket_raw != NULL) {
 		memory_bfree(
@@ -207,7 +207,7 @@ pdump_module_config_free(struct cp_module *module, yanet_error **err) {
 		return -1;
 	}
 
-	struct agent *owner = ADDR_OF(&module->agent);
+	struct agent *owner = ADDR_OF(&module->entity.agent);
 
 	pdump_module_config_destroy(module);
 	agent_destroy_released(owner);
@@ -221,7 +221,7 @@ pdump_module_config_set_filter(
 	callback_handle = cb;
 	struct pdump_module_config *config =
 		container_of(module, struct pdump_module_config, cp_module);
-	struct agent *agent = ADDR_OF(&config->cp_module.agent);
+	struct agent *agent = ADDR_OF(&config->cp_module.entity.agent);
 
 	size_t snaplen =
 		config->snaplen > 0 ? config->snaplen : default_snaplen;
@@ -329,7 +329,7 @@ pdump_module_config_set_rate(struct cp_module *module, uint64_t rate_pps) {
 	struct pdump_module_config *config =
 		container_of(module, struct pdump_module_config, cp_module);
 	if (rate_pps != 0) {
-		struct agent *agent = ADDR_OF(&module->agent);
+		struct agent *agent = ADDR_OF(&module->entity.agent);
 		struct dp_config *dp_config = ADDR_OF(&agent->dp_config);
 		uint64_t timestamp;
 		if (dataplane_instance_current_time(dp_config, &timestamp) !=

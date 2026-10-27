@@ -6,6 +6,7 @@
 #include "lib/counters/counters.h"
 
 #include "lib/controlplane/agent/agent.h"
+#include "lib/controlplane/config/cp_entity.h"
 #include "lib/controlplane/config/defines.h"
 #include "lib/controlplane/config/registry.h"
 
@@ -41,7 +42,7 @@ struct cp_module_object {
 };
 
 struct cp_module {
-	struct registry_item config_item;
+	struct cp_entity entity;
 
 	// Reference to dataplane module
 	uint64_t dp_module_idx;
@@ -85,8 +86,6 @@ struct cp_module {
 
 	// Link to the previous instance of the module configuration
 	struct cp_module *prev;
-	// Controlplane agent the configuration belongs to
-	struct agent *agent;
 	// Memory context for additional resources inside the configuration
 	struct memory_context memory_context;
 

@@ -257,7 +257,7 @@ fwstate_map_v4_object_destroy(struct cp_object *cp_object) {
 		cp_object, struct fwstate_map_v4_object, cp_object
 	);
 
-	struct agent *agent = ADDR_OF(&cp_object->agent);
+	struct agent *agent = ADDR_OF(&cp_object->entity.agent);
 
 	fwstate_map_v4_object_fini(self);
 	fwstate_map_v4_object_free(self, agent);
@@ -294,7 +294,7 @@ fwstate_map_v4_object_fini(struct fwstate_map_v4_object *self) {
 		return;
 	}
 
-	struct agent *agent = ADDR_OF(&self->cp_object.agent);
+	struct agent *agent = ADDR_OF(&self->cp_object.entity.agent);
 	if (agent != NULL) {
 		// Runs before the common teardown zeroes the object's memory
 		// context, which the table free must still charge.
@@ -347,7 +347,7 @@ fwstate_map_v4_object_config_free(
 		return -1;
 	}
 
-	struct agent *owner = ADDR_OF(&cp_object->agent);
+	struct agent *owner = ADDR_OF(&cp_object->entity.agent);
 
 	fwstate_map_v4_object_destroy(cp_object);
 	agent_destroy_released(owner);
@@ -489,7 +489,7 @@ fwstate_map_v6_object_destroy(struct cp_object *cp_object) {
 		cp_object, struct fwstate_map_v6_object, cp_object
 	);
 
-	struct agent *agent = ADDR_OF(&cp_object->agent);
+	struct agent *agent = ADDR_OF(&cp_object->entity.agent);
 
 	fwstate_map_v6_object_fini(self);
 	fwstate_map_v6_object_free(self, agent);
@@ -524,7 +524,7 @@ fwstate_map_v6_object_fini(struct fwstate_map_v6_object *self) {
 		return;
 	}
 
-	struct agent *agent = ADDR_OF(&self->cp_object.agent);
+	struct agent *agent = ADDR_OF(&self->cp_object.entity.agent);
 	if (agent != NULL) {
 		// Runs before the common teardown zeroes the object's memory
 		// context, which the table free must still charge.
@@ -577,7 +577,7 @@ fwstate_map_v6_object_config_free(
 		return -1;
 	}
 
-	struct agent *owner = ADDR_OF(&cp_object->agent);
+	struct agent *owner = ADDR_OF(&cp_object->entity.agent);
 
 	fwstate_map_v6_object_destroy(cp_object);
 	agent_destroy_released(owner);

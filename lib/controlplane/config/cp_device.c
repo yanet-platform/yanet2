@@ -157,7 +157,7 @@ cp_device_init(
 		&self->memory_context, &agent->memory_context, cfg->name
 	);
 
-	SET_OFFSET_OF(&self->agent, agent);
+	SET_OFFSET_OF(&self->entity.agent, agent);
 
 	struct memory_context *memory_context = &self->memory_context;
 
@@ -185,7 +185,7 @@ cp_device_init(
 	}
 	SET_OFFSET_OF(&self->output_pipelines, output);
 
-	registry_item_init(&self->config_item);
+	registry_item_init(&self->entity.config_item);
 
 	if (counter_registry_init(&self->counter_registry, memory_context, 0)) {
 		yanet_error_add(
@@ -412,26 +412,69 @@ cp_device_fini(struct cp_device *self) {
 	cp_device_entry_free(memory_context, ADDR_OF(&self->input_pipelines));
 	SET_OFFSET_OF(&self->input_pipelines, NULL);
 
-	SET_OFFSET_OF(&self->agent, NULL);
+	SET_OFFSET_OF(&self->entity.agent, NULL);
 
 	memory_context_fini(&self->memory_context);
 }
 
-// The item-to-owner mapping for the generic registry wrapper layer,
-// including its allocation-free teardown fallback.
-static struct agent *
-device_item_owner(struct registry_item *item) {
-	struct cp_device *device =
-		container_of(item, struct cp_device, config_item);
-	return ADDR_OF(&device->agent);
-}
+struct cp_device_cmp_data {
+	const char *type;
+	const char *name;
+};
 
 static int
-cp_device_registry_item_cmp(const struct registry_item *item, const void *data);
+cp_device_registry_item_cmp(
+	const struct registry_item *item, const void *data
+) {
+	const struct cp_device *device =
+		container_of(item, struct cp_device, entity);
+	const struct cp_device_cmp_data *cmp_data =
+		(const struct cp_device_cmp_data *)data;
+
+	int cmp = strncmp(device->name, cmp_data->name, sizeof(device->name));
+	if (cmp) {
+		return cmp;
+	}
+
+	return strncmp(device->type, cmp_data->type, sizeof(device->type));
+}
+
 static uint64_t
-cp_device_registry_key_hash(const void *data);
+cp_device_registry_key_hash(const void *data) {
+	const struct cp_device_cmp_data *cmp_data =
+		(const struct cp_device_cmp_data *)data;
+
+	return registry_hash_name_pair(
+		cmp_data->name,
+		CP_DEVICE_NAME_LEN,
+		cmp_data->type,
+		CP_DEVICE_TYPE_LEN
+	);
+}
+
 static uint64_t
-cp_device_registry_item_hash(const struct registry_item *item);
+cp_device_registry_item_hash(const struct registry_item *item) {
+	const struct cp_device *device =
+		container_of(item, struct cp_device, entity);
+
+	return registry_hash_name_pair(
+		device->name,
+		sizeof(device->name),
+		device->type,
+		sizeof(device->type)
+	);
+}
+
+// Name-only comparison backing delete, whose key is the name alone.
+static int
+cp_device_registry_name_cmp(
+	const struct registry_item *item, const void *data
+) {
+	const struct cp_device *device =
+		container_of(item, struct cp_device, entity);
+
+	return strncmp(device->name, (const char *)data, CP_DEVICE_NAME_LEN);
+}
 
 // Counter continuity of a device upsert: the device's counters continue
 // from the displaced device's.
@@ -442,10 +485,10 @@ cp_device_link_counters(
 	yanet_error **err
 ) {
 	struct cp_device *new_device =
-		container_of(new_item, struct cp_device, config_item);
+		container_of(new_item, struct cp_device, entity);
 	struct cp_device *old_device =
 		(old_item != NULL)
-			? container_of(old_item, struct cp_device, config_item)
+			? container_of(old_item, struct cp_device, entity)
 			: NULL;
 
 	if (counter_registry_link(
@@ -472,38 +515,12 @@ static const struct cp_entity_desc cp_device_entity_desc = {
 			.item_hash = cp_device_registry_item_hash,
 		},
 	.noun = "device",
-	.item_owner = device_item_owner,
 	.name_offset = offsetof(struct cp_device, name),
 	.name_len = CP_DEVICE_NAME_LEN,
 	.type_offset = offsetof(struct cp_device, type),
 	.type_len = CP_DEVICE_TYPE_LEN,
 	.link_counters = cp_device_link_counters,
 };
-
-static int
-cp_device_registry_item_cmp(
-	const struct registry_item *item, const void *data
-) {
-	return cp_entity_item_cmp(&cp_device_entity_desc, item, data);
-}
-
-static uint64_t
-cp_device_registry_key_hash(const void *data) {
-	return cp_entity_key_hash(&cp_device_entity_desc, data);
-}
-
-static uint64_t
-cp_device_registry_item_hash(const struct registry_item *item) {
-	return cp_entity_item_hash(&cp_device_entity_desc, item);
-}
-
-// Name-only comparison backing delete, whose key is the name alone.
-static int
-cp_device_registry_name_cmp(
-	const struct registry_item *item, const void *data
-) {
-	return cp_entity_name_cmp(&cp_device_entity_desc, item, data);
-}
 
 int
 cp_device_registry_init(
@@ -550,15 +567,13 @@ cp_device_registry_copy(
 int
 cp_device_try_destroy(struct cp_device *self, yanet_error **err) {
 	return cp_entity_try_destroy(
-		&self->config_item, &cp_device_entity_desc, err
+		&self->entity.config_item, &cp_device_entity_desc, err
 	);
 }
 
 void
 cp_device_registry_fini(struct cp_device_registry *device_registry) {
-	cp_entity_registry_fini(
-		&device_registry->registry, &cp_device_entity_desc
-	);
+	cp_entity_registry_fini(&device_registry->registry);
 }
 
 struct cp_device *
@@ -570,7 +585,7 @@ cp_device_registry_get(
 	if (item == NULL) {
 		return NULL;
 	}
-	return container_of(item, struct cp_device, config_item);
+	return container_of(item, struct cp_device, entity);
 }
 
 struct cp_device *
@@ -579,16 +594,26 @@ cp_device_registry_lookup(
 	const char *type,
 	const char *name
 ) {
-	struct cp_entity_key key;
-	cp_entity_key_set(&key, type, name);
-
-	struct registry_item *item = cp_entity_registry_lookup(
-		&device_registry->registry, &cp_device_entity_desc, &key
-	);
-	if (item == NULL) {
+	struct cp_device_cmp_data cmp_data = {
+		.type = type,
+		.name = name,
+	};
+	uint64_t index;
+	if (registry_lookup(
+		    &device_registry->registry,
+		    &cp_device_entity_desc.keys,
+		    cp_device_registry_item_cmp,
+		    &cmp_data,
+		    &index
+	    )) {
 		return NULL;
 	}
-	return container_of(item, struct cp_device, config_item);
+
+	return container_of(
+		registry_get(&device_registry->registry, index),
+		struct cp_device,
+		entity
+	);
 }
 
 int
@@ -599,14 +624,17 @@ cp_device_registry_upsert(
 	struct cp_device *new_device,
 	yanet_error **err
 ) {
-	struct cp_entity_key key;
-	cp_entity_key_set(&key, type, name);
+	struct cp_device_cmp_data cmp_data = {
+		.type = type,
+		.name = name,
+	};
 
 	return cp_entity_registry_upsert(
 		&device_registry->registry,
 		&cp_device_entity_desc,
-		&key,
-		&new_device->config_item,
+		cp_device_registry_item_cmp,
+		&cmp_data,
+		&new_device->entity.config_item,
 		err
 	);
 }

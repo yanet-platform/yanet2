@@ -40,9 +40,9 @@ cp_module_init(
 		&cp_module->memory_context, &agent->memory_context, module_name
 	);
 
-	SET_OFFSET_OF(&cp_module->agent, agent);
+	SET_OFFSET_OF(&cp_module->entity.agent, agent);
 
-	registry_item_init(&cp_module->config_item);
+	registry_item_init(&cp_module->entity.config_item);
 
 	if (counter_registry_init(
 		    &cp_module->counter_registry, &cp_module->memory_context, 0
@@ -186,7 +186,7 @@ cp_module_fini(struct cp_module *cp_module) {
 	SET_OFFSET_OF(&cp_module->objects, NULL);
 	cp_module->object_count = 0;
 
-	SET_OFFSET_OF(&cp_module->agent, NULL);
+	SET_OFFSET_OF(&cp_module->entity.agent, NULL);
 
 	memory_context_fini(&cp_module->memory_context);
 }
@@ -384,21 +384,55 @@ cp_module_link_object(
 	return 0;
 }
 
-// The item-to-owner mapping for the generic registry wrapper layer,
-// including its allocation-free teardown fallback.
-static struct agent *
-module_item_owner(struct registry_item *item) {
-	struct cp_module *module =
-		container_of(item, struct cp_module, config_item);
-	return ADDR_OF(&module->agent);
-}
+struct cp_module_cmp_data {
+	const char *type;
+	const char *name;
+};
 
 static int
-cp_module_registry_item_cmp(const struct registry_item *item, const void *data);
+cp_module_registry_item_cmp(
+	const struct registry_item *item, const void *data
+) {
+	const struct cp_module *module =
+		container_of(item, struct cp_module, entity);
+
+	const struct cp_module_cmp_data *cmp_data =
+		(const struct cp_module_cmp_data *)data;
+
+	int cmp = strncmp(module->name, cmp_data->name, sizeof(module->name));
+
+	if (cmp) {
+		return cmp;
+	}
+
+	return strncmp(module->type, cmp_data->type, sizeof(module->type));
+}
+
 static uint64_t
-cp_module_registry_key_hash(const void *data);
+cp_module_registry_key_hash(const void *data) {
+	const struct cp_module_cmp_data *cmp_data =
+		(const struct cp_module_cmp_data *)data;
+
+	return registry_hash_name_pair(
+		cmp_data->name,
+		CP_MODULE_NAME_LEN,
+		cmp_data->type,
+		CP_MODULE_TYPE_LEN
+	);
+}
+
 static uint64_t
-cp_module_registry_item_hash(const struct registry_item *item);
+cp_module_registry_item_hash(const struct registry_item *item) {
+	const struct cp_module *module =
+		container_of(item, struct cp_module, entity);
+
+	return registry_hash_name_pair(
+		module->name,
+		sizeof(module->name),
+		module->type,
+		sizeof(module->type)
+	);
+}
 
 // Counter continuity of a module upsert: the module's own counters, and
 // each tagged runtime registry against the displaced module's
@@ -411,10 +445,10 @@ cp_module_link_counters(
 	yanet_error **err
 ) {
 	struct cp_module *new_module =
-		container_of(new_item, struct cp_module, config_item);
+		container_of(new_item, struct cp_module, entity);
 	struct cp_module *old_module =
 		(old_item != NULL)
-			? container_of(old_item, struct cp_module, config_item)
+			? container_of(old_item, struct cp_module, entity)
 			: NULL;
 
 	if (counter_registry_link(
@@ -477,7 +511,6 @@ static const struct cp_entity_desc cp_module_entity_desc = {
 			.item_hash = cp_module_registry_item_hash,
 		},
 	.noun = "module",
-	.item_owner = module_item_owner,
 	.name_offset = offsetof(struct cp_module, name),
 	.name_len = CP_MODULE_NAME_LEN,
 	.type_offset = offsetof(struct cp_module, type),
@@ -485,27 +518,10 @@ static const struct cp_entity_desc cp_module_entity_desc = {
 	.link_counters = cp_module_link_counters,
 };
 
-static int
-cp_module_registry_item_cmp(
-	const struct registry_item *item, const void *data
-) {
-	return cp_entity_item_cmp(&cp_module_entity_desc, item, data);
-}
-
-static uint64_t
-cp_module_registry_key_hash(const void *data) {
-	return cp_entity_key_hash(&cp_module_entity_desc, data);
-}
-
-static uint64_t
-cp_module_registry_item_hash(const struct registry_item *item) {
-	return cp_entity_item_hash(&cp_module_entity_desc, item);
-}
-
 int
 cp_module_try_destroy(struct cp_module *cp_module, yanet_error **err) {
 	return cp_entity_try_destroy(
-		&cp_module->config_item, &cp_module_entity_desc, err
+		&cp_module->entity.config_item, &cp_module_entity_desc, err
 	);
 }
 
@@ -553,9 +569,7 @@ cp_module_registry_copy(
 
 void
 cp_module_registry_fini(struct cp_module_registry *module_registry) {
-	cp_entity_registry_fini(
-		&module_registry->registry, &cp_module_entity_desc
-	);
+	cp_entity_registry_fini(&module_registry->registry);
 }
 
 struct cp_module *
@@ -567,7 +581,7 @@ cp_module_registry_get(
 	if (item == NULL) {
 		return NULL;
 	}
-	return container_of(item, struct cp_module, config_item);
+	return container_of(item, struct cp_module, entity);
 }
 
 struct cp_module *
@@ -576,16 +590,27 @@ cp_module_registry_lookup(
 	const char *type,
 	const char *name
 ) {
-	struct cp_entity_key key;
-	cp_entity_key_set(&key, type, name);
+	struct cp_module_cmp_data cmp_data = {
+		.type = type,
+		.name = name,
+	};
+	uint64_t index;
 
-	struct registry_item *item = cp_entity_registry_lookup(
-		&module_registry->registry, &cp_module_entity_desc, &key
-	);
-	if (item == NULL) {
+	if (registry_lookup(
+		    &module_registry->registry,
+		    &cp_module_entity_desc.keys,
+		    cp_module_registry_item_cmp,
+		    &cmp_data,
+		    &index
+	    )) {
 		return NULL;
 	}
-	return container_of(item, struct cp_module, config_item);
+
+	return container_of(
+		registry_get(&module_registry->registry, index),
+		struct cp_module,
+		entity
+	);
 }
 
 int
@@ -596,14 +621,17 @@ cp_module_registry_upsert(
 	struct cp_module *new_module,
 	yanet_error **err
 ) {
-	struct cp_entity_key key;
-	cp_entity_key_set(&key, type, name);
+	struct cp_module_cmp_data cmp_data = {
+		.type = type,
+		.name = name,
+	};
 
 	return cp_entity_registry_upsert(
 		&module_registry->registry,
 		&cp_module_entity_desc,
-		&key,
-		&new_module->config_item,
+		cp_module_registry_item_cmp,
+		&cmp_data,
+		&new_module->entity.config_item,
 		err
 	);
 }
@@ -614,14 +642,16 @@ cp_module_registry_delete(
 	const char *type,
 	const char *name
 ) {
-	struct cp_entity_key key;
-	cp_entity_key_set(&key, type, name);
+	struct cp_module_cmp_data cmp_data = {
+		.type = type,
+		.name = name,
+	};
 
 	return cp_entity_registry_delete(
 		&module_registry->registry,
 		&cp_module_entity_desc,
-		cp_module_entity_desc.keys.cmp,
-		&key
+		cp_module_registry_item_cmp,
+		&cmp_data
 	);
 }
 

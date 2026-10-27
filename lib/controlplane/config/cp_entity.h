@@ -1,6 +1,6 @@
 #pragma once
 
-#include "common/strutils.h"
+#include "common/container_of.h"
 
 #include "lib/controlplane/config/registry.h"
 
@@ -9,36 +9,43 @@
 struct agent;
 struct registry_item;
 
-// Longest identity field the generic key buffers hold; every kind's name
-// and type fields are this length today.
-#define CP_ENTITY_KEY_LEN 80
+// Embedded base of every agent-owned config entity: the registry item
+// and the owning agent back-pointer.
+//
+// The base is always the kind struct's first member, so a holder recovers
+// it from a bare registry item with one container_of step, and the typed
+// kind struct is one more step from there.
+struct cp_entity {
+	struct registry_item config_item;
 
-// Canonical (name, type) lookup key shared by the agent-owned config
-// entity kinds.
-struct cp_entity_key {
-	char name[CP_ENTITY_KEY_LEN];
-	char type[CP_ENTITY_KEY_LEN];
+	// Controlplane agent the configuration belongs to.
+	struct agent *agent;
 };
+
+// Recover the embedded base of any item an entity registry hands out.
+static inline struct cp_entity *
+cp_entity_of(struct registry_item *item) {
+	return container_of(item, struct cp_entity, config_item);
+}
+
+// The item-to-owner mapping shared by every entity registry, including
+// the allocation-free teardown fallback.
+struct agent *
+cp_entity_item_owner(struct registry_item *item);
 
 // How one agent-owned config entity kind plugs into the generic registry
 // wrapper layer.
-//
-// The identity field offsets are relative to the kind struct's first
-// member, its registry item, which is also what lets a holder recover the
-// typed struct from a bare item pointer.
 struct cp_entity_desc {
-	// Key set driving the registry's hash side-index. The comparison
-	// must be the kind's trampoline over cp_entity_item_cmp: the
-	// indexed lookup path recognises the canonical comparison by
-	// function identity.
+	// Key set driving the registry's hash side-index, built from the
+	// kind's own comparison and hash handlers.
 	struct registry_keys keys;
 
 	// Noun naming the kind in error messages.
 	const char *noun;
 
-	// Maps one registry item to the agent that owns it.
-	struct agent *(*item_owner)(struct registry_item *item);
-
+	// Offsets of the identity fields within the kind struct, relative
+	// to its first member (the embedded base); the destroy gate's
+	// refusal message is the only reader.
 	size_t name_offset;
 	size_t name_len;
 	size_t type_offset;
@@ -53,41 +60,6 @@ struct cp_entity_desc {
 		yanet_error **err
 	);
 };
-
-// Fill a key from the kind's identity strings.
-static inline void
-cp_entity_key_set(
-	struct cp_entity_key *key, const char *type, const char *name
-) {
-	strtcpy(key->name, name, sizeof(key->name));
-	strtcpy(key->type, type, sizeof(key->type));
-}
-
-// Compare an item's identity against a key: name first, then type.
-int
-cp_entity_item_cmp(
-	const struct cp_entity_desc *desc,
-	const struct registry_item *item,
-	const struct cp_entity_key *key
-);
-
-// Compare an item's name alone; backs the name-keyed delete path.
-int
-cp_entity_name_cmp(
-	const struct cp_entity_desc *desc,
-	const struct registry_item *item,
-	const char *name
-);
-
-uint64_t
-cp_entity_key_hash(
-	const struct cp_entity_desc *desc, const struct cp_entity_key *key
-);
-
-uint64_t
-cp_entity_item_hash(
-	const struct cp_entity_desc *desc, const struct registry_item *item
-);
 
 // Try to take a dangling item out of circulation for destruction.
 //
@@ -137,34 +109,17 @@ cp_entity_registry_copy(
 
 // Release every item and free the registry storage.
 void
-cp_entity_registry_fini(
-	struct registry *registry, const struct cp_entity_desc *desc
-);
+cp_entity_registry_fini(struct registry *registry);
 
-// Find the slot of the item matching the canonical key.
-int
-cp_entity_registry_lookup_index(
-	struct registry *registry,
-	const struct cp_entity_desc *desc,
-	const struct cp_entity_key *key,
-	uint64_t *index
-);
-
-// Find the item matching the canonical key, or NULL.
-struct registry_item *
-cp_entity_registry_lookup(
-	struct registry *registry,
-	const struct cp_entity_desc *desc,
-	const struct cp_entity_key *key
-);
-
-// Insert or replace by the canonical key, running the kind's counter
-// linking against the displaced item first.
+// Insert or replace by the given comparison shape — the kind's canonical
+// comparison, so the indexed lookup path recognises it — running the
+// kind's counter linking against the displaced item first.
 int
 cp_entity_registry_upsert(
 	struct registry *registry,
 	const struct cp_entity_desc *desc,
-	const struct cp_entity_key *key,
+	registry_item_cmp_func cmp,
+	const void *cmp_data,
 	struct registry_item *new_item,
 	yanet_error **err
 );

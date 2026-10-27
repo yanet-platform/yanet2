@@ -149,7 +149,7 @@ l3b_module_config_destroy(struct cp_module *cp_module) {
 	}
 
 	// Capture agent before fini zeroes it.
-	struct agent *agent = ADDR_OF(&config->cp_module.agent);
+	struct agent *agent = ADDR_OF(&config->cp_module.entity.agent);
 
 	cp_module_fini(&config->cp_module);
 	memory_bfree(
@@ -163,7 +163,7 @@ l3b_module_config_free(struct cp_module *cp_module, yanet_error **err) {
 		return -1;
 	}
 
-	struct agent *owner = ADDR_OF(&cp_module->agent);
+	struct agent *owner = ADDR_OF(&cp_module->entity.agent);
 
 	l3b_module_config_destroy(cp_module);
 	agent_destroy_released(owner);
@@ -333,7 +333,7 @@ static uint64_t
 l3b_linked_service_counter_id(
 	const struct cp_module *cp_module, const char *name
 ) {
-	struct agent *agent = ADDR_OF(&cp_module->agent);
+	struct agent *agent = ADDR_OF(&cp_module->entity.agent);
 	if (agent == NULL) {
 		return COUNTER_INVALID;
 	}

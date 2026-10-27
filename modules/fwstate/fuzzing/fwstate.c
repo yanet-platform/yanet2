@@ -145,7 +145,7 @@ fwstate_test_config(struct cp_module **cp_module) {
 	);
 
 	config->cp_module.dp_module_idx = 0;
-	config->cp_module.agent = NULL;
+	config->cp_module.entity.agent = NULL;
 
 	// The fwstate handler unconditionally resolves per-worker counter
 	// addresses via counter_get_address(), so a valid counter_registry and
