@@ -15,7 +15,7 @@ struct yanet_error {
 // distinguished from heap-allocated errors by its address, so
 // yanet_error_free() can skip it safely.
 //
-// It is legal to pass as a cause to yanet_error_wrap().
+// Adding a frame wraps it like any other error.
 static yanet_error err_oom = {
 	.message = (char *)"out of memory",
 	.kind = YANET_ERROR_NONE,
@@ -48,41 +48,9 @@ yanet_error_vwrap(
 	return err;
 }
 
-// Wraps an existing error with a new frame that prepends context.
-//
-// Ownership of `cause` is transferred to the returned error.
-//
-// If allocation fails, `cause` is returned unchanged: the chain is preserved,
-// only the new frame is lost. The `cause` MAY be NULL, in which case this
-// behaves like yanet_error_new().
-yanet_error *
-yanet_error_wrap(yanet_error *cause, const char *fmt, ...) {
-	va_list ap;
-	va_start(ap, fmt);
-	yanet_error *err = yanet_error_vwrap(cause, YANET_ERROR_NONE, fmt, ap);
-	va_end(ap);
-	return err;
-}
-
 static yanet_error *
 yanet_error_vnew(enum yanet_error_kind kind, const char *fmt, va_list ap) {
 	return yanet_error_vwrap(NULL, kind, fmt, ap);
-}
-
-// Creates a leaf error with a printf-formatted message.
-//
-// On allocation failure a static out-of-memory singleton is returned, so the
-// caller never needs to check the result for NULL.
-//
-// The returned pointer must eventually be passed to yanet_error_free()
-// (directly or by being wrapped into another error).
-yanet_error *
-yanet_error_new(const char *fmt, ...) {
-	va_list ap;
-	va_start(ap, fmt);
-	yanet_error *err = yanet_error_vwrap(NULL, YANET_ERROR_NONE, fmt, ap);
-	va_end(ap);
-	return err;
 }
 
 void

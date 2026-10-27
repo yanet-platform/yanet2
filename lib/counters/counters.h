@@ -135,13 +135,3 @@ counter_get_address(uint64_t counter_id, struct counter_storage *storage) {
 
 	return counter_handle_get_value(value_handle);
 }
-
-struct counter_handle;
-
-// Copies a single counter's values into `accum`.
-void
-counter_handle_accum(
-	uint64_t *accum,
-	size_t counter_size,
-	struct counter_value_handle *handle
-);
