@@ -396,13 +396,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f0805222e57f7521d6a62e36fa9163bc891acd422f971defe97d64e70d0a4fe5"
 
 [[package]]
-name = "xtask"
-version = "0.3.0"
-dependencies = [
- "regex",
-]
-
-[[package]]
 name = "yanet-packet"
 version = "0.3.0"
 dependencies = [
@@ -416,7 +409,6 @@ name = "yanet-sdk-testing"
 version = "0.3.0"
 dependencies = [
  "yanet-shm",
- "yanet-sys",
 ]
 
 [[package]]
@@ -434,7 +426,6 @@ dependencies = [
  "cc",
  "serde_json",
  "shlex 1.3.0",
- "yanet-packet",
  "yanet-sdk-testing",
  "yanet-shm",
 ]

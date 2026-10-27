@@ -1,13 +1,9 @@
 //! Provenance root of the shared-memory mapping.
 //!
 //! Every pointer into shared memory the SDK dereferences is minted from a
-//! root: a raw pointer received from C whose provenance covers the whole
-//! mapping. Stored offsets and absolute addresses contribute only their
-//! address (`with_addr`), so no exposed provenance is ever used. Under Miri a
-//! root may instead resolve through a block table, one Rust allocation per
-//! block, which lets Miri report cross-block accesses and accesses to
-//! addresses no live block holds, such as those of a freed block. Only Miri
-//! compiles that path, so no build of a product can reach it.
+//! root: a raw pointer whose provenance covers the whole mapping. Stored
+//! offsets and absolute addresses contribute only their address
+//! (`with_addr`), so no exposed provenance is ever used.
 
 use core::ptr::NonNull;
 
@@ -18,48 +14,25 @@ use core::ptr::NonNull;
 #[derive(Clone, Copy)]
 pub struct ShmRoot {
     base: NonNull<u8>,
-    #[cfg(miri)]
-    blocks: Option<&'static dyn BlockLookup>,
 }
 
 impl ShmRoot {
-    /// Root over the mapping C handed to the SDK.
+    /// Root over the shared mapping.
     ///
     /// # Safety
     ///
-    /// `base` must be a raw pointer received from C, never derived from a
-    /// Rust reference, whose provenance covers every byte of the mapping
-    /// any pointer of this root is used to access, and the mapping is one
-    /// contiguous mapping.
+    /// `base` must be a raw pointer, never derived from a Rust reference,
+    /// whose provenance covers every byte of the one contiguous mapping any
+    /// pointer of this root is used to access (in a product, C's shared
+    /// mapping).
     #[inline(always)]
     pub const unsafe fn from_mapping(base: NonNull<u8>) -> Self {
-        Self {
-            base,
-            #[cfg(miri)]
-            blocks: None,
-        }
-    }
-
-    /// Root resolving through a block table, for Miri tests.
-    ///
-    /// # Safety
-    ///
-    /// `fallback` provides the provenance of addresses no block contains, so
-    /// accesses through them are reported by Miri.
-    #[cfg(miri)]
-    pub unsafe fn from_blocks(lookup: &'static dyn BlockLookup, fallback: NonNull<u8>) -> Self {
-        Self { base: fallback, blocks: Some(lookup) }
+        Self { base }
     }
 
     /// Pointer with root provenance at an absolute address.
     #[inline(always)]
     pub fn ptr<T>(self, addr: usize) -> *mut T {
-        #[cfg(miri)]
-        if let Some(blocks) = self.blocks {
-            if let Some(block) = blocks.find(addr) {
-                return block.as_ptr().with_addr(addr).cast();
-            }
-        }
         self.base.as_ptr().with_addr(addr).cast()
     }
 
@@ -69,12 +42,4 @@ impl ShmRoot {
     pub fn rel<T>(self, slot_addr: usize, offset: isize) -> *mut T {
         self.ptr(slot_addr.wrapping_add_signed(offset))
     }
-}
-
-/// Block table of a test arena: finds the allocation holding an address.
-#[cfg(miri)]
-pub trait BlockLookup {
-    /// Start of the live block containing `addr`, carrying that block's
-    /// provenance, or `None`.
-    fn find(&self, addr: usize) -> Option<NonNull<u8>>;
 }

@@ -1,6 +1,6 @@
 [package]
 name = "yanet-sdk-testing"
-description = "Test support of the Rust module SDK: the block arena that serves tests as shared memory and the dataplane invocation harness."
+description = "Test support of the Rust module SDK: the block arena that serves tests as shared memory."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -9,11 +9,5 @@ publish.workspace = true
 [lints]
 workspace = true
 
-[features]
-# The dataplane invocation harness; it links the C bindings, which is why the
-# shm crate's tests leave it off.
-dp = ["dep:yanet-sys"]
-
 [dependencies]
 yanet-shm = { path = "../yanet-shm" }
-yanet-sys = { path = "../yanet-sys", optional = true }

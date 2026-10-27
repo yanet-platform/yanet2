@@ -9,7 +9,6 @@ members = [
     "yanet-shm",
     "yanet-sys",
     "yanet-packet",
-    "xtask",
 ]
 
 [workspace.package]

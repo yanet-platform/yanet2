@@ -28,13 +28,12 @@ const DEVICE_ABSENT: u16 = u16::MAX;
 /// they outlive uses of the context itself.
 ///
 /// A slot of one call's configuration is not resolved through the context of
-/// another call:
+/// another call (a lifetime error, which has no code):
 ///
 /// ```compile_fail
-/// # use yanet_sdk_testing::dp::Model;
-/// # use yanet_sys::dp::Cx;
-/// # type Mine = Model<yanet_shm::rel::ShmBox<u64>>;
-/// fn cross<'a, 'b>(a: &mut Cx<'a, Mine>, b: &mut Cx<'b, Mine>) -> u64 {
+/// # use yanet_shm::rel::ShmBox;
+/// # use yanet_sys::dp::{Cx, Module};
+/// fn cross<'a, 'b, M: Module<Config = ShmBox<u64>>>(a: &mut Cx<'a, M>, b: &mut Cx<'b, M>) -> u64 {
 ///     *a.config().get(b)
 /// }
 /// ```
@@ -42,10 +41,9 @@ const DEVICE_ABSENT: u16 = u16::MAX;
 /// Through its own context it is:
 ///
 /// ```
-/// # use yanet_sdk_testing::dp::Model;
-/// # use yanet_sys::dp::Cx;
-/// # type Mine = Model<yanet_shm::rel::ShmBox<u64>>;
-/// fn own<'a>(a: &mut Cx<'a, Mine>) -> u64 {
+/// # use yanet_shm::rel::ShmBox;
+/// # use yanet_sys::dp::{Cx, Module};
+/// fn own<'a, M: Module<Config = ShmBox<u64>>>(a: &mut Cx<'a, M>) -> u64 {
 ///     *a.config().get(a)
 /// }
 /// ```
@@ -53,10 +51,8 @@ const DEVICE_ABSENT: u16 = u16::MAX;
 /// The context is not shared with another thread:
 ///
 /// ```compile_fail,E0277
-/// # use yanet_sdk_testing::dp::Model;
-/// # use yanet_sys::dp::Cx;
-/// # type Mine = Model<yanet_shm::rel::ShmBox<u64>>;
-/// fn share(cx: &Cx<Mine>) {
+/// # use yanet_sys::dp::{Cx, Module};
+/// fn share<M: Module>(cx: &Cx<M>) {
 ///     std::thread::scope(|scope| {
 ///         scope.spawn(move || cx.now());
 ///     });
@@ -66,10 +62,8 @@ const DEVICE_ABSENT: u16 = u16::MAX;
 /// Only a value read from the context crosses the thread:
 ///
 /// ```
-/// # use yanet_sdk_testing::dp::Model;
-/// # use yanet_sys::dp::Cx;
-/// # type Mine = Model<yanet_shm::rel::ShmBox<u64>>;
-/// fn share(cx: &Cx<Mine>) {
+/// # use yanet_sys::dp::{Cx, Module};
+/// fn share<M: Module>(cx: &Cx<M>) {
 ///     let now = cx.now();
 ///     std::thread::scope(|scope| {
 ///         scope.spawn(move || now);
@@ -96,13 +90,15 @@ pub struct Cx<'id, M: Module> {
 /// the handler binds it to its context and adds through the bound view,
 /// which stays on the worker. Binding is free: the view is the same address.
 ///
-/// A handle does not outlive the prepare context that made it:
+/// A handle does not outlive the prepare context that made it (a lifetime
+/// error, which has no code):
 ///
 /// ```compile_fail
-/// # use yanet_sdk_testing::dp::Model;
-/// # use yanet_sys::dp::{CommitCx, Counter, CounterRef};
-/// # type Mine = Model<Counter>;
-/// fn keep<'p>(cx: &CommitCx<'p, Mine>, kept: &mut Option<CounterRef<'static>>) {
+/// # use yanet_sys::dp::{CommitCx, Counter, CounterRef, Module};
+/// fn keep<'p, M: Module<Config = Counter>>(
+///     cx: &CommitCx<'p, M>,
+///     kept: &mut Option<CounterRef<'static>>,
+/// ) {
 ///     *kept = Some(cx.config().resolve(cx));
 /// }
 /// ```
@@ -110,10 +106,11 @@ pub struct Cx<'id, M: Module> {
 /// Kept for the context's lifetime, it is accepted:
 ///
 /// ```
-/// # use yanet_sdk_testing::dp::Model;
-/// # use yanet_sys::dp::{CommitCx, Counter, CounterRef};
-/// # type Mine = Model<Counter>;
-/// fn keep<'p>(cx: &CommitCx<'p, Mine>, kept: &mut Option<CounterRef<'p>>) {
+/// # use yanet_sys::dp::{CommitCx, Counter, CounterRef, Module};
+/// fn keep<'p, M: Module<Config = Counter>>(
+///     cx: &CommitCx<'p, M>,
+///     kept: &mut Option<CounterRef<'p>>,
+/// ) {
 ///     *kept = Some(cx.config().resolve(cx));
 /// }
 /// ```
@@ -138,10 +135,8 @@ impl<'id> CounterRef<'id> {
     /// handle never writes on the assigner thread:
     ///
     /// ```compile_fail,E0308
-    /// # use yanet_sdk_testing::dp::Model;
-    /// # use yanet_sys::dp::{CommitCx, Counter};
-    /// # type Mine = Model<Counter>;
-    /// fn early<'p>(cx: &CommitCx<'p, Mine>) {
+    /// # use yanet_sys::dp::{CommitCx, Counter, Module};
+    /// fn early<'p, M: Module<Config = Counter>>(cx: &CommitCx<'p, M>) {
     ///     cx.config().resolve(cx).bind(cx).add(1);
     /// }
     /// ```
@@ -397,10 +392,8 @@ impl Counter {
     /// The handle is made with the prepare context, not the invocation context:
     ///
     /// ```compile_fail,E0308
-    /// # use yanet_sdk_testing::dp::Model;
-    /// # use yanet_sys::dp::{Counter, Cx};
-    /// # type Mine = Model<Counter>;
-    /// fn wrong<'id>(cx: &Cx<'id, Mine>) {
+    /// # use yanet_sys::dp::{Counter, Cx, Module};
+    /// fn wrong<'id, M: Module<Config = Counter>>(cx: &Cx<'id, M>) {
     ///     let _ = cx.config().resolve(cx);
     /// }
     /// ```
@@ -408,10 +401,8 @@ impl Counter {
     /// With the prepare context it is accepted:
     ///
     /// ```
-    /// # use yanet_sdk_testing::dp::Model;
-    /// # use yanet_sys::dp::{CommitCx, Counter};
-    /// # type Mine = Model<Counter>;
-    /// fn right<'p>(cx: &CommitCx<'p, Mine>) {
+    /// # use yanet_sys::dp::{CommitCx, Counter, Module};
+    /// fn right<'p, M: Module<Config = Counter>>(cx: &CommitCx<'p, M>) {
     ///     let _ = cx.config().resolve(cx);
     /// }
     /// ```
