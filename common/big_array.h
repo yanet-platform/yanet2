@@ -23,11 +23,11 @@
  *
  * ## Architecture
  * The big_array splits a large logical array into multiple subarrays. All
- * subarrays except the last have size equal to MEMORY_BLOCK_ALLOCATOR_MAX_SIZE
- * (typically 64MB). The last subarray is allocated with only the remaining size
- * to avoid wasting memory. The implementation uses bit manipulation to
- * efficiently calculate which subarray contains a given index and the offset
- * within that subarray.
+ * subarrays except the last have the largest power-of-two size that fits one
+ * allocator block (typically 64MB, 32MB under AddressSanitizer). The last
+ * subarray is allocated with only the remaining size to avoid wasting memory.
+ * The implementation uses bit manipulation to efficiently calculate which
+ * subarray contains a given index and the offset within that subarray.
  *
  * Memory layout:
  * ```
@@ -109,9 +109,9 @@ struct big_array {
 	 * @brief Log2 of subarray size (exponent)
 	 *
 	 * Each subarray (except possibly the last) has size (1 <<
-	 * subarray_len_exp), which equals MEMORY_BLOCK_ALLOCATOR_MAX_SIZE. This
-	 * allows efficient index calculation using bit shifts instead of
-	 * division.
+	 * subarray_len_exp), the largest power of two not above
+	 * MEMORY_BLOCK_ALLOCATOR_MAX_SIZE. This allows efficient index
+	 * calculation using bit shifts instead of division.
 	 */
 	size_t subarray_len_exp;
 
@@ -141,9 +141,8 @@ big_array_fini(struct big_array *array);
  *
  * Allocates and initializes a big_array capable of holding 'size' bytes.
  * The array is split into multiple subarrays. All subarrays except the last
- * have size MEMORY_BLOCK_ALLOCATOR_MAX_SIZE. The last subarray is allocated
- * with only the remaining size (size % MEMORY_BLOCK_ALLOCATOR_MAX_SIZE) to
- * avoid wasting memory.
+ * have the largest power-of-two size that fits one allocator block. The last
+ * subarray is allocated with only the remaining size to avoid wasting memory.
  *
  * @param array Pointer to uninitialized big_array structure
  * @param size Total size in bytes for the array
@@ -265,7 +264,7 @@ big_array_get(struct big_array *array, size_t index) {
  *
  * Each subarray is freed with its actual allocated size. The last subarray
  * may have a smaller size than the others if the total array size was not
- * evenly divisible by MEMORY_BLOCK_ALLOCATOR_MAX_SIZE.
+ * a multiple of the subarray size.
  *
  * @param array Pointer to big_array to finalize
  *
@@ -316,9 +315,4 @@ big_array_fini(struct big_array *array) {
 
 	memory_context_fini(&array->mctx);
 	memset(array, 0, sizeof(struct big_array));
-}
-
-static inline size_t
-big_array_memory_usage(struct big_array *array) {
-	return array->mctx.balloc_size - array->mctx.bfree_size;
 }
