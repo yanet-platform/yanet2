@@ -512,9 +512,7 @@ static const struct cp_entity_desc cp_module_entity_desc = {
 		},
 	.noun = "module",
 	.name_offset = offsetof(struct cp_module, name),
-	.name_len = CP_MODULE_NAME_LEN,
 	.type_offset = offsetof(struct cp_module, type),
-	.type_len = CP_MODULE_TYPE_LEN,
 	.link_counters = cp_module_link_counters,
 };
 

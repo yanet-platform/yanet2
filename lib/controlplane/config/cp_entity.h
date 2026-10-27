@@ -18,7 +18,9 @@ struct registry_item;
 struct cp_entity {
 	struct registry_item config_item;
 
-	// Controlplane agent the configuration belongs to.
+	// Controlplane agent the configuration belongs to. Set by the kind's
+	// init; the typed free routines resolve it to return their
+	// destruction hold and to reclaim the entity's arena.
 	struct agent *agent;
 };
 
@@ -47,9 +49,7 @@ struct cp_entity_desc {
 	// to its first member (the embedded base); the destroy gate's
 	// refusal message is the only reader.
 	size_t name_offset;
-	size_t name_len;
 	size_t type_offset;
-	size_t type_len;
 
 	// Counter-continuity step of an upsert: links the new item's
 	// counter registries against the displaced item's. NULL skips

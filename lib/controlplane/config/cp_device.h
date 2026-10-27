@@ -45,6 +45,13 @@ struct cp_device {
 	struct cp_device_entry *input_pipelines;
 	struct cp_device_entry *output_pipelines;
 };
+// The entity base must sit at offset zero: registry items hand out bare
+// pointers into it, and the destroy gate's identity offsets are relative
+// to the struct start.
+_Static_assert(
+	offsetof(struct cp_device, entity) == 0,
+	"struct cp_device must embed the entity base at offset zero"
+);
 
 struct dp_config;
 struct cp_config_gen;
@@ -125,8 +132,7 @@ cp_device_fini(struct cp_device *self);
 // with errno EAGAIN while a live generation still holds the device; the
 // caller must keep its handle and retry once the generations drain.
 //
-// A successful call also marks the device destroying, holding it against
-// a racing re-registration, and takes one destruction hold of the owning
+// A successful call also takes one destruction hold of the owning
 // agent: the caller must run the device's typed destructor and then
 // return that hold with agent_destroy_released, on storage only the hold
 // keeps alive.

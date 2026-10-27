@@ -516,9 +516,7 @@ static const struct cp_entity_desc cp_device_entity_desc = {
 		},
 	.noun = "device",
 	.name_offset = offsetof(struct cp_device, name),
-	.name_len = CP_DEVICE_NAME_LEN,
 	.type_offset = offsetof(struct cp_device, type),
-	.type_len = CP_DEVICE_TYPE_LEN,
 	.link_counters = cp_device_link_counters,
 };
 

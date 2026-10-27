@@ -97,6 +97,13 @@ struct cp_module {
 	uint64_t object_count;
 	struct cp_module_object *objects;
 };
+// The entity base must sit at offset zero: registry items hand out bare
+// pointers into it, and the destroy gate's identity offsets are relative
+// to the struct start.
+_Static_assert(
+	offsetof(struct cp_module, entity) == 0,
+	"struct cp_module must embed the entity base at offset zero"
+);
 
 /**
  * Link a device to a module configuration.
@@ -203,8 +210,7 @@ cp_module_counter_registry(
 // with errno EAGAIN while a live generation still holds the module; the
 // caller must keep its handle and retry once the generations drain.
 //
-// A successful call also marks the module destroying, holding it against
-// a racing re-registration, and takes one destruction hold of the owning
+// A successful call also takes one destruction hold of the owning
 // agent: the caller must run the module's typed destructor and then
 // return that hold with agent_destroy_released, on storage only the hold
 // keeps alive.
