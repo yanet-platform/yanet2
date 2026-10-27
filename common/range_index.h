@@ -3,7 +3,6 @@
 #include "memory.h"
 #include "numutils.h"
 #include "radix.h"
-#include "value.h"
 
 #include "key.h"
 #include "lpm.h"
@@ -98,17 +97,6 @@ range_index_insert(
 	}
 
 	return 0;
-}
-
-static inline void
-range_index_remap(
-	struct range_index *range_index, struct value_table *value_table
-) {
-	uint32_t *values = ADDR_OF(&range_index->values);
-
-	for (uint32_t idx = 0; idx < range_index->count; ++idx) {
-		values[idx] = value_table_get(value_table, 0, values[idx]);
-	}
 }
 
 static inline void
