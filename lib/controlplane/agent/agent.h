@@ -59,7 +59,11 @@ struct agent {
 	// creating process. An item whose count reaches zero is dangling —
 	// known only to its owner — and its memory returns either through
 	// the owner's typed destroy or, if the owner is gone, with this
-	// agent's wholesale reclaim.
+	// agent's wholesale reclaim. A superseded agent is dead to its
+	// former owner: the owner abandons its remaining items, refused
+	// destroy attempts included, and their memory returns the same
+	// wholesale way — the config entities' destroy gates rely on
+	// this, a gate call implying its item's arena is alive at entry.
 	//
 	// The count moves with relaxed atomics, so generation teardown may
 	// drop references without the config lock. A racing drop unseen by

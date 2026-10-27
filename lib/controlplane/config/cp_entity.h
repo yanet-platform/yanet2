@@ -105,22 +105,26 @@ cp_entity_registry_replace(
 // Try to take a dangling entity out of circulation for destruction.
 //
 // The item's reference count is the number of live configuration
-// generations that registered it; construction never takes a reference of
-// its own. Zero therefore means dangling: the item is registered nowhere,
-// no reader can reach it, and only its owner still knows it exists.
-//
-// Returns 0 when the count is zero, granting the caller the exclusive
-// right to run the item's typed destroy routine immediately, and taking
-// one destruction hold of the owning agent — the caller must run the
-// item's typed destructor and then return that hold with
-// agent_destroy_released, on storage only the hold keeps alive. Returns
-// -1 while a live generation still holds the item; the caller must keep
-// its handle and retry once the generations drain.
-//
-// After the gate's locks are gone a final generation release may drop the
-// item's last reference and a sweep may free the arena the item lives
-// in, so a caller reporting the item's identity on a refusal snapshots
-// it before the call, under the same entry discipline as capturing the
-// owner pointer.
+// generations that registered it; construction never takes a reference
+// of its own, so zero means dangling: registered nowhere, beyond every
+// reader's reach, known only to its owner. Returns 0 when the count is
+// zero, granting the exclusive right to run the item's typed destroy
+// routine immediately and taking one destruction hold of the owning
+// agent — returned with agent_destroy_released after the destructor,
+// on storage only the hold keeps alive. Returns -1 while a live
+// generation still holds the item; the caller may retry once the
+// generations drain, but only while its agent remains the live one for
+// that identity.
+// The gate runs under an ownership contract: only the item's owner may
+// call it, and only while its agent is the live one. A superseded
+// agent is dead to its former owner — its remaining items, refused
+// destroy attempts included, are abandoned rather than retried, and
+// their memory returns wholesale with the agent's reclamation — so a
+// gate call implies the item's arena is alive at entry and stays alive
+// for the caller, because the sweep only reclaims superseded agents.
+// That is what makes the caller's unlocked entry reads safe — the
+// owner-pointer capture and the identity snapshots a refusal reports —
+// since behind the gate a final generation release may yet drop the
+// item's last reference and free the arena with a sweep.
 int
 cp_entity_try_destroy(struct cp_entity *self);
