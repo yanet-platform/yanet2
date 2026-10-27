@@ -6,7 +6,6 @@ use core::{
     mem::size_of,
 };
 
-use yanet_packet as _;
 use yanet_sdk_testing as _;
 use yanet_shm as _;
 use yanet_sys::{

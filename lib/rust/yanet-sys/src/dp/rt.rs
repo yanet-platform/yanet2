@@ -30,35 +30,18 @@ unsafe extern "C" {
 ///
 /// Must be called with the arguments the dataplane passes to a module
 /// handler, for a module registered as the type parameter. The
-/// execution context pointer is the provenance root of the shared mapping, so
-/// it must come straight from C.
+/// execution context pointer is the provenance root of the shared mapping: a
+/// raw pointer, never derived from a Rust reference, whose provenance covers
+/// every byte of the one contiguous mapping any pointer of the root is used
+/// to access (in a product, C's shared mapping).
 #[inline(always)]
 pub unsafe fn handle<M: Module>(
     worker: *mut bindings::dp_worker,
     ectx: *mut bindings::module_ectx,
     front: *mut bindings::packet_front,
 ) {
-    // SAFETY: C passes a non-null context inside the shared mapping with
-    // mapping-wide provenance (attach: call, mapping).
-    let root = unsafe { ShmRoot::from_mapping(NonNull::new_unchecked(ectx).cast()) };
-    // SAFETY: forwarded caller contract.
-    unsafe { invoke::<M>(root, worker, ectx, front) };
-}
-
-/// Runs one handler call over an explicit root.
-///
-/// # Safety
-///
-/// As for the handler body, with the root covering the memory the context
-/// reaches.
-#[inline(always)]
-pub unsafe fn invoke<M: Module>(
-    root: ShmRoot,
-    worker: *mut bindings::dp_worker,
-    ectx: *mut bindings::module_ectx,
-    front: *mut bindings::packet_front,
-) {
-    // SAFETY: C passes non-null worker, context and front (attach: call).
+    // SAFETY: the caller passes non-null worker, context and front (attach:
+    // call).
     let (worker, ectx, front) = unsafe {
         (
             NonNull::new_unchecked(worker),
@@ -66,6 +49,9 @@ pub unsafe fn invoke<M: Module>(
             NonNull::new_unchecked(front),
         )
     };
+    // SAFETY: the context lies inside the shared mapping and its pointer
+    // has mapping-wide provenance (attach: call, mapping).
+    let root = unsafe { ShmRoot::from_mapping(ectx.cast()) };
     // SAFETY: the context is frozen once handed to the worker and its
     // absolute fields were derived before release (attach: call, frozen,
     // publish).
@@ -96,33 +82,22 @@ pub unsafe fn invoke<M: Module>(
 /// # Safety
 ///
 /// Must be called with the arguments the dataplane passes to a commit
-/// handler of a module registered as the type parameter, straight from C.
+/// handler of a module registered as the type parameter. The execution
+/// context pointer is the provenance root of the shared mapping: a raw
+/// pointer, never derived from a Rust reference, whose provenance covers
+/// every byte of the one contiguous mapping any pointer of the root is used
+/// to access (in a product, C's shared mapping).
 #[inline(always)]
 pub unsafe fn commit_ectx<M: Module>(ectx: *mut bindings::module_ectx, cp_module: *mut bindings::cp_module) {
-    // SAFETY: as for the handler.
-    let root = unsafe { ShmRoot::from_mapping(NonNull::new_unchecked(ectx).cast()) };
-    // SAFETY: forwarded caller contract.
-    unsafe { commit_with::<M>(root, ectx, cp_module) };
-}
-
-/// Makes and stores the prepared value of one context over an explicit root.
-///
-/// # Safety
-///
-/// As for the commit handler body, with the root covering the memory the
-/// context reaches.
-#[inline(always)]
-pub unsafe fn commit_with<M: Module>(
-    root: ShmRoot,
-    ectx: *mut bindings::module_ectx,
-    cp_module: *mut bindings::cp_module,
-) {
     if size_of::<M::Prepared<'_>>() == 0 {
         // C allocates no buffer for a module without a prepared size.
         return;
     }
-    // SAFETY: C passes a non-null context (attach: call).
+    // SAFETY: the caller passes a non-null context inside the mapping with
+    // mapping-wide provenance (attach: call, mapping).
     let ectx = unsafe { NonNull::new_unchecked(ectx) };
+    // SAFETY: as above.
+    let root = unsafe { ShmRoot::from_mapping(ectx.cast()) };
     // SAFETY: the context is frozen except for the prepared buffer, which
     // the single commit pass owns until release to the worker, and the pass
     // runs only for a context whose buffer is allocated (attach: call,
@@ -180,23 +155,25 @@ pub unsafe fn new_module<M: Module>(
 /// `::`-separated paths) is part of the safety boundary, used outside the
 /// macro's `unsafe`.
 ///
-/// The module is exported under its own name only:
+/// The module is exported under its own name only; the check is a const
+/// assertion, which rustc reports as E0080:
 ///
 /// ```compile_fail,E0080
-/// # use yanet_sdk_testing::dp::Model;
-/// # type Mine = Model<u64>;
+/// use yanet_sys::dp::{Batch, CommitCx, Cx, Module, Verdict};
+/// struct Mine;
+/// impl Module for Mine {
+///     const NAME: &'static str = "mine";
+///     type Config = u64;
+///     type Prepared<'p> = ();
+///     fn handle(_: &mut Cx<Self>, batch: &mut Batch) {
+///         batch.dispatch(|_| Verdict::Pass);
+///     }
+///     fn prepare(_: &CommitCx<'_, Self>) {}
+/// }
 /// yanet_sys::export_module!(name = other, module = Mine);
 /// ```
 ///
-/// Under its declared name it is accepted:
-///
-/// ```
-/// # use yanet_sdk_testing::dp::Model;
-/// # type Mine = Model<u64>;
-/// yanet_sys::export_module!(name = mine, module = Mine);
-/// ```
-///
-/// A declared name with a `-` is exported with a `_` in its place:
+/// Under its declared name, with a `_` in place of each `-`, it is accepted:
 ///
 /// ```
 /// use yanet_sys::dp::{Batch, CommitCx, Cx, Module, Verdict};
