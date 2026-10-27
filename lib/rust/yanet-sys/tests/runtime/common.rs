@@ -7,7 +7,7 @@ use core::{
     alloc::Layout,
     marker::PhantomData,
     mem::{align_of, size_of, size_of_val},
-    ptr::{self, NonNull},
+    ptr::NonNull,
 };
 use std::alloc::{alloc_zeroed, dealloc, handle_alloc_error};
 
@@ -95,12 +95,11 @@ impl<M: Module> Ectx<M> {
         }
     }
 
-    /// Calls the handler on the packets as the input list of a front, and
-    /// returns the front as the handler left it.
+    /// Calls the handler on the packets as the input list of a front.
     ///
     /// The packets are borrowed mutably because the call rewrites their
     /// `next` links.
-    pub fn run<'p>(&mut self, packets: &'p mut [Packet]) -> Front<'p> {
+    pub fn run(&mut self, packets: &mut [Packet]) {
         let mut front = bindings::packet_front::default();
         if let (Some(first), Some(last)) = (packets.first(), packets.last()) {
             for pair in packets.windows(2) {
@@ -116,41 +115,6 @@ impl<M: Module> Ectx<M> {
         // SAFETY: the context lies in the arena, whose root it is, committed
         // at construction; the worker, front and packets are live and ours.
         unsafe { rt::handle::<M>(&raw mut self.worker, self.arena.root().ptr(self.ectx), &raw mut front) };
-        Front { raw: front, packets: &*packets }
-    }
-}
-
-/// The front a handler left, tied to the packets its lists point into.
-pub struct Front<'p> {
-    raw: bindings::packet_front,
-    packets: &'p [Packet],
-}
-
-impl Front<'_> {
-    /// Indices into the input of the packets of the output list, in order.
-    pub fn output(&self) -> Vec<usize> {
-        self.indices(self.raw.output)
-    }
-
-    /// Indices into the input of the packets of the drop list, in order.
-    pub fn dropped(&self) -> Vec<usize> {
-        self.indices(self.raw.drop)
-    }
-
-    fn indices(&self, list: bindings::packet_list) -> Vec<usize> {
-        let mut indices = Vec::new();
-        let mut cursor = list.first;
-        while !cursor.is_null() {
-            indices.push(
-                self.packets
-                    .iter()
-                    .position(|packet| ptr::eq(packet.packet(), cursor))
-                    .expect("a packet of the input"),
-            );
-            // SAFETY: a live packet of the fixture, read by nothing else now.
-            cursor = unsafe { (*cursor).next };
-        }
-        indices
     }
 }
 

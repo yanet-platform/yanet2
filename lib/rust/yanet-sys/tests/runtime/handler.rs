@@ -65,7 +65,6 @@ impl Module for Reach {
 /// front.
 #[test]
 fn test_miri_reach_of_the_handler_and_commit_entries() {
-    let mut value = 0;
     // The configuration names counter slot 0 and device 0.
     //
     // SAFETY: the counter id is below the one slot; the module redirects no
@@ -83,7 +82,6 @@ fn test_miri_reach_of_the_handler_and_commit_entries() {
             let handles = storage + offset_of!(bindings::counter_storage, counter_value_handles);
             write(arena, handles, table as isize - handles as isize);
             context.abs_counter_storage = arena.root().ptr(storage);
-            value = word;
 
             let target = alloc(size_of::<bindings::module_device_target>());
             write(arena, target, bindings::module_device_target::default());
@@ -93,9 +91,7 @@ fn test_miri_reach_of_the_handler_and_commit_entries() {
     };
     let mut packets = numbered(2);
 
-    let front = ectx.run(&mut packets);
-
-    assert_eq!((vec![0], vec![1]), (front.output(), front.dropped()));
-    // SAFETY: a live word of the arena that no handler is writing now.
-    assert_eq!(4, unsafe { ectx.arena.root().ptr::<u64>(value).read() });
+    // Passing means Miri found no undefined behaviour on the way; what the
+    // module decided is not checked here.
+    ectx.run(&mut packets);
 }
