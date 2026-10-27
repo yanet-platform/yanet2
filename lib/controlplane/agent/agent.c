@@ -284,8 +284,11 @@ agent_attach(
 	SET_OFFSET_OF(&new_agent->cp_config, cp_config);
 	new_agent->pid = getpid();
 
-	struct cp_config_gen *config_gen = cp_config_current_gen(cp_config);
+	// The stamp reads the generation through a pin, so no
+	// dereference can touch a generation some other path retires.
+	struct cp_config_gen *config_gen = cp_config_gen_acquire(cp_config);
 	new_agent->gen = config_gen->gen;
+	cp_config_gen_release(cp_config, config_gen);
 
 	block_allocator_init(&new_agent->block_allocator);
 	memory_context_init(
