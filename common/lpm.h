@@ -28,8 +28,6 @@
 #define LPM_CHUNK_SIZE 16
 // Max LPM key size in bytes (IPv6 address).
 #define LPM_KEY_SIZE_MAX 16
-// Lanes processed per chunk by lpm_lookup_batch().
-#define LPM_LOOKUP_BATCH_LANES 32
 
 struct lpm_page;
 
@@ -296,88 +294,6 @@ lpm_lookup(const struct lpm *lpm, uint8_t key_size, const uint8_t *key) {
 	return LPM_VALUE_GET(value->value);
 }
 
-/*
- * Batched variant of lpm_lookup.
- *
- * The single-key walk is a serially dependent chain: the address of the
- * next hop's slot is only known once the current hop's load returns, so
- * one lookup alone cannot hide its latency. This routine walks hop-major
- * — all keys advance one hop per step — which lets the out-of-order
- * engine overlap the chains of independent keys. Explicit prefetching
- * does not help here (measured: it only adds overhead), so none is done.
- *
- * @param keys    count consecutive keys, key_size bytes each
- * @param results count consecutive result slots
- */
-static inline void
-lpm_lookup_batch(
-	const struct lpm *lpm,
-	uint8_t key_size,
-	const uint8_t *keys,
-	uint32_t *results,
-	size_t count
-) {
-	while (count > 0) {
-		size_t lane_count = count < LPM_LOOKUP_BATCH_LANES
-					    ? count
-					    : LPM_LOOKUP_BATCH_LANES;
-
-		struct lpm_page *pages[LPM_LOOKUP_BATCH_LANES];
-		uint64_t values[LPM_LOOKUP_BATCH_LANES];
-		bool done[LPM_LOOKUP_BATCH_LANES];
-		size_t remaining = lane_count;
-
-		for (size_t lane = 0; lane < lane_count; ++lane) {
-			pages[lane] = lpm_page(lpm, 0);
-			done[lane] = false;
-		}
-
-		for (uint8_t hop = 0; hop < key_size && remaining > 0; ++hop) {
-			for (size_t lane = 0; lane < lane_count; ++lane) {
-				if (done[lane]) {
-					continue;
-				}
-
-				union lpm_value *value =
-					pages[lane]->values +
-					keys[lane * key_size + hop];
-				if (value->value & LPM_VALUE_FLAG) {
-					values[lane] = value->value;
-					done[lane] = true;
-					--remaining;
-				} else if (hop + 1 < key_size) {
-					// An intermediate node (flag clear)
-					// always has a child page, so the
-					// relative pointer is never NULL here —
-					// same contract as lpm_lookup.
-					pages[lane] =
-						ADDR_OF_NONNULL(&value->page);
-				} else {
-					// No deeper hop is possible, so a clear
-					// flag at the last key byte still
-					// terminates the walk — the raw value
-					// is returned as lpm_lookup() would.
-					values[lane] = value->value;
-					done[lane] = true;
-					--remaining;
-				}
-			}
-		}
-
-		for (size_t lane = 0; lane < lane_count; ++lane) {
-			// The shift runs on the full 64-bit slot and only the
-			// result is narrowed, matching the single-key walk
-			// bit-for-bit — the empty sentinel must narrow to the
-			// same value.
-			results[lane] = (uint32_t)LPM_VALUE_GET(values[lane]);
-		}
-
-		keys += lane_count * key_size;
-		results += lane_count;
-		count -= lane_count;
-	}
-}
-
 static inline size_t
 lpm_memory_usage(struct lpm *lpm) {
 	return lpm->memory_context.balloc_size - lpm->memory_context.bfree_size;
@@ -531,113 +447,6 @@ out:
 		return true;
 	}
 	return false;
-}
-
-typedef int (*lpm_walk_func)(
-	uint8_t key_size,
-	const uint8_t *from,
-	const uint8_t *to,
-	uint32_t value,
-	void *data
-);
-
-static inline int
-lpm_walk(
-	const struct lpm *lpm,
-	uint8_t key_size,
-	const uint8_t *from,
-	const uint8_t *to,
-	lpm_walk_func walk_func,
-	void *walk_func_data
-) {
-	uint8_t key[key_size];
-	memset(key, 0, key_size);
-	struct lpm_page *pages[key_size];
-
-	int8_t hop = 0;
-	int8_t hi_limit = 0;
-
-	key[hop] = from[hop];
-	pages[hop] = lpm_page(lpm, 0);
-	int8_t max_hop = 0;
-
-	uint32_t prev_value = LPM_VALUE_INVALID;
-	uint8_t prev_from[key_size];
-	memcpy(prev_from, from, key_size);
-	uint8_t prev_to[key_size];
-
-	while (1) {
-		union lpm_value *value = pages[hop]->values + key[hop];
-		if (value->value & LPM_VALUE_FLAG) {
-			if (prev_value != LPM_VALUE_GET(value->value)) {
-				if (prev_value != LPM_VALUE_INVALID) {
-					if (walk_func(
-						    key_size,
-						    prev_from,
-						    prev_to,
-						    prev_value,
-						    walk_func_data
-					    )) {
-						return -1;
-					}
-				}
-
-				prev_value = LPM_VALUE_GET(value->value);
-				memcpy(prev_from, key, key_size);
-				memset(prev_from + hop + 1,
-				       0x00,
-				       key_size - hop - 1);
-			}
-			memcpy(prev_to, key, key_size);
-			memset(prev_to + hop + 1, 0xff, key_size - hop - 1);
-		} else {
-			if (key[hop] == to[hop] && hop == hi_limit) {
-				++hi_limit;
-			}
-
-			++hop;
-			if (hop > max_hop) {
-				key[hop] = from[hop];
-				max_hop = hop;
-			} else {
-				key[hop] = 0;
-			}
-			pages[hop] = ADDR_OF(&value->page);
-			continue;
-		}
-
-		do {
-			key[hop]++;
-			uint8_t upper_bound = 0xff;
-			if (hop == hi_limit) {
-				upper_bound = to[hop];
-			}
-			if (key[hop] == (uint8_t)(upper_bound + 1)) {
-				if (hop == hi_limit) {
-					goto out;
-				}
-				--hop;
-			} else {
-				break;
-			}
-		} while (1);
-	}
-
-out:
-
-	if (prev_value != LPM_VALUE_INVALID) {
-		if (walk_func(
-			    key_size,
-			    prev_from,
-			    prev_to,
-			    prev_value,
-			    walk_func_data
-		    )) {
-			return -1;
-		}
-	}
-
-	return 0;
 }
 
 /*
@@ -828,16 +637,6 @@ lpm8_lookup(const struct lpm *lpm8, const uint8_t *key) {
 	return lpm_lookup(lpm8, 8, key);
 }
 
-static inline void
-lpm8_lookup_batch(
-	const struct lpm *lpm8,
-	const uint8_t *keys,
-	uint32_t *results,
-	size_t count
-) {
-	lpm_lookup_batch(lpm8, 8, keys, results, count);
-}
-
 static inline int
 lpm8_collect_values(
 	const struct lpm *lpm8,
@@ -849,17 +648,6 @@ lpm8_collect_values(
 	return lpm_collect_values(
 		lpm8, 8, from, to, collect_func, collect_func_data
 	);
-}
-
-static inline int
-lpm8_walk(
-	const struct lpm *lpm8,
-	const uint8_t *from,
-	const uint8_t *to,
-	lpm_walk_func walk_func,
-	void *walk_func_data
-) {
-	return lpm_walk(lpm8, 8, from, to, walk_func, walk_func_data);
 }
 
 static inline void
@@ -884,16 +672,6 @@ lpm4_lookup(const struct lpm *lpm4, const uint8_t *key) {
 	return lpm_lookup(lpm4, 4, key);
 }
 
-static inline void
-lpm4_lookup_batch(
-	const struct lpm *lpm4,
-	const uint8_t *keys,
-	uint32_t *results,
-	size_t count
-) {
-	lpm_lookup_batch(lpm4, 4, keys, results, count);
-}
-
 static inline int
 lpm4_collect_values(
 	const struct lpm *lpm4,
@@ -905,17 +683,6 @@ lpm4_collect_values(
 	return lpm_collect_values(
 		lpm4, 4, from, to, collect_func, collect_func_data
 	);
-}
-
-static inline int
-lpm4_walk(
-	const struct lpm *lpm4,
-	const uint8_t *from,
-	const uint8_t *to,
-	lpm_walk_func walk_func,
-	void *walk_func_data
-) {
-	return lpm_walk(lpm4, 4, from, to, walk_func, walk_func_data);
 }
 
 static inline void

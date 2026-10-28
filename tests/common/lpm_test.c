@@ -22,38 +22,6 @@ write_u32(uint8_t *p, uint32_t v) {
 	memcpy(p, &v, sizeof(v));
 }
 
-static int
-walk_func(
-	uint8_t key_size,
-	const uint8_t *from,
-	const uint8_t *to,
-	uint32_t value,
-	void *check
-) {
-	(void)key_size;
-
-	if (read_u32(from + 8) != htobe32(value * 256)) {
-		return -1;
-	}
-	if (from[15] != 4) {
-		return -1;
-	}
-
-	if (read_u32(to + 8) != htobe32(value * 256)) {
-		return -1;
-	}
-	if (to[15] != 8) {
-		return -1;
-	}
-
-	if (value != *(uint32_t *)check) {
-		return -1;
-	}
-
-	++(*(uint32_t *)check);
-	return 0;
-}
-
 // Broad prefix value must survive when a narrower overlapping prefix is
 // inserted afterwards.
 static int
@@ -103,138 +71,6 @@ test_overlapping_prefixes(void) {
 	return rc;
 }
 
-static uint64_t
-batch_test_rand(uint64_t *state) {
-	uint64_t x = *state;
-	x ^= x << 13;
-	x ^= x >> 7;
-	x ^= x << 17;
-	*state = x;
-	return x;
-}
-
-// Batched lookup must return exactly what the single-key walk returns,
-// for every key and across lane-chunk boundaries (partial last chunk).
-static int
-test_lookup_batch_matches_scalar(void) {
-	void *arena = malloc(16 << 20);
-	if (arena == NULL) {
-		return -1;
-	}
-
-	struct block_allocator ba;
-	block_allocator_init(&ba);
-	block_allocator_put_arena(&ba, arena, 16 << 20);
-
-	struct memory_context mctx;
-	memory_context_init(&mctx, "lpm_batch", &ba);
-
-	int rc = -1;
-	uint64_t rand_state = 0x12345678;
-
-	uint8_t prefixes[300][16];
-	const int key_sizes[] = {16, 8, 4};
-	size_t counts[] = {1, 31, 32, 33, 100, 1000};
-	uint8_t *keys = malloc(1000 * 16);
-	uint32_t *results = malloc(1000 * sizeof(uint32_t));
-	if (keys == NULL || results == NULL) {
-		goto out;
-	}
-
-	// Covers the sizes the dataplane actually walks: 16-byte and 4-byte
-	// generic keys, and the 8-byte halves of the net6 classifiers.
-	for (size_t ks = 0; ks < sizeof(key_sizes) / sizeof(key_sizes[0]);
-	     ++ks) {
-		const int key_size = key_sizes[ks];
-		struct lpm tree;
-		if (lpm_init(&tree, &mctx, "lpm")) {
-			goto out;
-		}
-
-		// Prefixes at every depth, alternating full-range tail bytes
-		// with single-byte tails so both page splits and slot runs are
-		// covered.
-		for (size_t i = 0; i < 300; i++) {
-			uint8_t depth =
-				1 + batch_test_rand(&rand_state) % key_size;
-			memset(prefixes[i], 0x00, 16);
-			for (uint8_t b = 0; b < depth; b++) {
-				prefixes[i][b] =
-					(uint8_t)batch_test_rand(&rand_state);
-			}
-			uint8_t from[16], to[16];
-			memcpy(from, prefixes[i], depth);
-			memset(from + depth, 0x00, key_size - depth);
-			memcpy(to, prefixes[i], depth);
-			memset(to + depth, 0xff, key_size - depth);
-			if (lpm_insert(&tree, key_size, from, to, i)) {
-				lpm_free(&tree);
-				goto out;
-			}
-		}
-
-		for (size_t c = 0; c < sizeof(counts) / sizeof(counts[0]);
-		     c++) {
-			size_t count = counts[c];
-			for (size_t k = 0; k < count; k++) {
-				// Alternate keys inside an inserted prefix
-				// (narrow-tail randomization) with keys fully
-				// outside the mapped space (default value hit).
-				size_t idx = batch_test_rand(&rand_state) % 300;
-				if (k % 3 != 0) {
-					memcpy(keys + k * key_size,
-					       prefixes[idx],
-					       key_size);
-					for (uint8_t b = key_size - 2;
-					     b < key_size;
-					     b++) {
-						keys[k * key_size +
-						     b] ^= (uint8_t
-						)batch_test_rand(&rand_state);
-					}
-				} else {
-					for (uint8_t b = 0; b < key_size; b++) {
-						keys[k * key_size +
-						     b] = (uint8_t
-						)batch_test_rand(&rand_state);
-					}
-				}
-			}
-
-			lpm_lookup_batch(&tree, key_size, keys, results, count);
-			for (size_t k = 0; k < count; k++) {
-				uint32_t scalar = lpm_lookup(
-					&tree, key_size, keys + k * key_size
-				);
-				if (scalar != results[k]) {
-					fprintf(stdout,
-						"key_size %d count %zu key "
-						"%zu: "
-						"batch %u != scalar %u\n",
-						key_size,
-						count,
-						k,
-						results[k],
-						scalar);
-					lpm_free(&tree);
-					goto out;
-				}
-			}
-		}
-
-		lpm_free(&tree);
-	}
-
-	rc = 0;
-
-out:
-	free(keys);
-	free(results);
-	memory_context_fini(&mctx);
-	free(arena);
-	return rc;
-}
-
 int
 main(int argc, char **argv) {
 	(void)argc;
@@ -242,11 +78,6 @@ main(int argc, char **argv) {
 
 	if (test_overlapping_prefixes()) {
 		fprintf(stdout, "test_overlapping_prefixes: FAILED\n");
-		return -1;
-	}
-
-	if (test_lookup_batch_matches_scalar()) {
-		fprintf(stdout, "test_lookup_batch_matches_scalar: FAILED\n");
 		return -1;
 	}
 
@@ -321,19 +152,8 @@ main(int argc, char **argv) {
 	}
 
 	fail_idx = idx;
-	idx = 0;
-	memset(from, 0, 16);
-	memset(to, 0xff, 16);
-	if (lpm_walk(&lpm, 16, from, to, walk_func, &idx)) {
-		fprintf(stdout, "walk verification failed\n");
-		return -1;
-	}
-	if (idx != fail_idx) {
-		fprintf(stdout, "invalid value count\n");
-		return -1;
-	}
 
-	// Verify the pull-based iterator produces the same results.
+	// Verify the pull-based iterator yields every inserted range in order.
 	struct lpm_iter it;
 	memset(from, 0, 16);
 	memset(to, 0xff, 16);
