@@ -37,15 +37,6 @@ var expectedIPv6Sources = []string{
 	"[2001:db8:1::10]:20002",
 }
 
-// expectedIPv4Sources returns the sources of expectedEntries in listing order.
-func expectedIPv4Sources() []string {
-	sources := make([]string, 0, len(expectedEntries))
-	for _, entry := range expectedEntries {
-		sources = append(sources, entry.src)
-	}
-	return sources
-}
-
 // decodeJSONLines decodes the CLI's newline-delimited JSON output.
 func decodeJSONLines[T any](t *testing.T, output string) []T {
 	t.Helper()
