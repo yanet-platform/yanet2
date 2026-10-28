@@ -1,6 +1,6 @@
 use std::fs;
 
-use super::{ModuleConfigCmd, ServiceCmd, l3bpb};
+use super::{ModuleConfigCmd, ModuleConfigDocument, ServiceCmd, ServiceDocument, document, l3bpb};
 
 const SERVICE: &str = "real_servers: []\nsource_filter_rules: []\n";
 const MODULE: &str = "destination_filter_rules: []\n";
@@ -9,18 +9,216 @@ const SOURCE: &str =
 const DESTINATION: &str =
     "destination_filter_rules:\n- net4s: []\n  net6s: []\n  proto_ranges: [{proto: tcp}]\n  service: backend\n";
 
+#[test]
+fn test_document_unknown_fields_warn_preserve_wire_and_reject_in_strict_mode() {
+    for (is_module, base, extended, path) in [
+        (false, SERVICE.to_owned(), format!("{SERVICE}future: VALUE"), "future"),
+        (false, format!("{SERVICE}session_timeouts: {{tcp: 10}}"), format!("{SERVICE}session_timeouts: {{tcp: 10, future: VALUE}}"), "session_timeouts.future"),
+        (false, format!("{SERVICE}dscp: {{mode: always, value: 7}}"), format!("{SERVICE}dscp: {{mode: always, value: 7, future: VALUE}}"), "dscp.future"),
+        (false, "real_servers: [{destination_address: 192.0.2.1, source_network: 192.0.2.0/24}]\nsource_filter_rules: []".into(), "real_servers: [{destination_address: 192.0.2.1, source_network: 192.0.2.0/24, future: VALUE}]\nsource_filter_rules: []".into(), "real_servers[0].future"),
+        (false, SOURCE.into(), SOURCE.replace("net4s: []", "net4s: []\n  future: VALUE"), "source_filter_rules[0].future"),
+        (false, SOURCE.into(), SOURCE.replace("from: 0", "from: 0, future: VALUE"), "source_filter_rules[0].port_ranges[0].future"),
+        (true, MODULE.into(), format!("{MODULE}future: VALUE"), "future"),
+        (true, DESTINATION.into(), DESTINATION.replace("service: backend", "service: backend\n  future: VALUE"), "destination_filter_rules[0].future"),
+        (true, DESTINATION.into(), DESTINATION.replace("proto: tcp", "proto: tcp, future: VALUE"), "destination_filter_rules[0].proto_ranges[0].future"),
+    ] {
+        for value in ["null", "secret-value", "-1", "-0", "+1", "0x10", "1.5", "'1'", "!!int '1'", "18446744073709551616", "{nested: [-1, 0x10, null, {password: secret-value}]}" ] {
+            let extended = extended.replace("VALUE", value);
+            let directory = tempfile::tempdir().unwrap();
+            let file = directory.path().join("document.yaml");
+            fs::write(&file, &extended).unwrap();
+            let (warnings, error) = if is_module {
+                let cmd = ModuleConfigCmd { name: "test".into(), file: Some(file) };
+                assert_eq!(module(&base).unwrap(), cmd.load(false).unwrap(), "{path}: {value}");
+                (document::parse::<ModuleConfigDocument>(&extended, false).unwrap().1, cmd.load(true).unwrap_err())
+            } else {
+                let cmd = ServiceCmd { name: "test".into(), hash_mask: 0, index_mask: 0, file: Some(file) };
+                assert_eq!(service(&base).unwrap(), cmd.load(false).unwrap(), "{path}: {value}");
+                (document::parse::<ServiceDocument>(&extended, false).unwrap().1, cmd.load(true).unwrap_err())
+            };
+            assert_eq!(vec![format!("ignoring unknown field {path}")], warnings);
+            assert!(error.contains(path), "{error}");
+            assert!(error.contains("document.yaml"), "{error}");
+            assert!(!error.contains("secret-value"), "{error}");
+        }
+    }
+}
+
+#[test]
+fn test_document_unknown_subtrees_retain_structural_validation() {
+    for extra in [
+        "future: null\nfuture: 1",
+        "future: null\n\"fut\\u0075re\": 1",
+        "future: {nested: [{key: 1, key: 2}]}",
+        "future: {nested: [{key: 1, \"k\\u0065y\": 2}]}",
+        "future: {1: a, 0x1: b}",
+        "future: {1: a, !!int '1': b}",
+        "future: {! 1: a, 1: b}",
+        "future: {true: a, True: b}",
+        "future: {null: a, ~: b}",
+        "future: {1.5: a, 1.50: b}",
+        "future: {nested: [{<<: {key: 1}}]}",
+        "future: {nested: [{!!merge '<<': {key: 1}}]}",
+        "future: {'<<': 1, !!str <<: 2}",
+        "future: {nested: !custom []}",
+        "future: {nested: !custom secret-value}",
+        "future: &anchor [*anchor]",
+        "future: *missing",
+        "future: {nested: [!<tag:example.org,2026:custom> {}]}",
+    ] {
+        assert!(service(&format!("{SERVICE}{extra}")).is_err(), "{extra}");
+        assert!(module(&format!("{MODULE}{extra}")).is_err(), "{extra}");
+    }
+}
+
+#[test]
+fn test_document_unknown_mapping_keys_preserve_yaml_types() {
+    for value in [
+        "{1: a, '1': b}",
+        "{! 1: a, '1': b}",
+        "{true: a, 'true': b}",
+        "{null: a, 'null': b}",
+        "{0x1: a, !!str 0x1: b}",
+        "{---: a, null: b}",
+    ] {
+        let content = format!("{SERVICE}future: {value}");
+        assert_eq!(
+            vec!["ignoring unknown field future"],
+            document::parse::<ServiceDocument>(&content, false).unwrap().1
+        );
+        assert!(document::parse::<ServiceDocument>(&content, true).is_err());
+    }
+}
+
+#[test]
+fn test_document_string_merge_lookalikes_are_unknown_fields_not_merge_keys() {
+    for key in ["'<<'", "\"<<\"", "!!str <<", "! <<"] {
+        for nested in [false, true] {
+            let extra = if nested {
+                format!("future: {{nested: [{{{key}: secret-value}}]}}")
+            } else {
+                format!("{key}: secret-value")
+            };
+            for base in [SERVICE, MODULE] {
+                let content = format!("{base}{extra}");
+                let (warnings, error) = if base == SERVICE {
+                    (
+                        document::parse::<ServiceDocument>(&content, false).unwrap().1,
+                        document::parse::<ServiceDocument>(&content, true).unwrap_err(),
+                    )
+                } else {
+                    (
+                        document::parse::<ModuleConfigDocument>(&content, false).unwrap().1,
+                        document::parse::<ModuleConfigDocument>(&content, true).unwrap_err(),
+                    )
+                };
+                assert_eq!(1, warnings.len());
+                assert!(warnings[0].contains(if nested { "future" } else { "<<" }));
+                assert!(!warnings[0].contains("secret-value"));
+                assert!(error.starts_with("unknown field"), "{error}");
+            }
+        }
+    }
+}
+
+#[test]
+fn test_document_unknown_numeric_field_in_second_server_preserves_wire() {
+    let base = "real_servers:\n- destination_address: 192.0.2.1\n  source_network: 192.0.2.0/24\n- destination_address: 192.0.2.2\n  source_network: 192.0.2.0/24\nsource_filter_rules: []\n";
+    let extended = base.replace("source_filter_rules: []", "  future: 0x10\nsource_filter_rules: []");
+    let directory = tempfile::tempdir().unwrap();
+    let file = directory.path().join("document.yaml");
+    fs::write(&file, &extended).unwrap();
+    let cmd = ServiceCmd {
+        name: "test".into(),
+        hash_mask: 0,
+        index_mask: 0,
+        file: Some(file),
+    };
+    assert_eq!(service(base).unwrap(), cmd.load(false).unwrap());
+    assert_eq!(
+        vec!["ignoring unknown field real_servers[1].future"],
+        document::parse::<ServiceDocument>(&extended, false).unwrap().1
+    );
+    assert!(cmd.load(true).unwrap_err().contains("real_servers[1].future"));
+}
+
+#[test]
+fn test_document_deep_unknown_subtree_is_ignored_but_still_checked() {
+    let prefix = format!("{SERVICE}future: {}", "[".repeat(2048));
+    let suffix = "]".repeat(2048);
+    let content = format!("{prefix}-1{suffix}");
+    assert_eq!(
+        vec!["ignoring unknown field future"],
+        document::parse::<ServiceDocument>(&content, false).unwrap().1
+    );
+    assert!(document::parse::<ServiceDocument>(&content, true).is_err());
+    for strict in [false, true] {
+        assert!(document::parse::<ServiceDocument>(&format!("{prefix}{{key: 1, key: 2}}{suffix}"), strict).is_err());
+    }
+}
+
+#[test]
+fn test_document_unknown_fields_do_not_hide_invalid_known_values() {
+    for extra in ["future: {flags: -1}", "'session_timeouts.tcp': 0x10", "'flags': null"] {
+        assert!(service(&format!("{SERVICE}{extra}\nsession_timeouts: {{tcp: 0x10}}\n")).is_err());
+    }
+    assert!(
+        module(&format!(
+            "{}future: null",
+            DESTINATION.replace("proto: tcp", "proto: 0")
+        ))
+        .is_err()
+    );
+}
+
+#[test]
+fn test_document_warnings_escape_and_bound_paths_without_values() {
+    let extended = format!(
+        "{SERVICE}\"line\\nkey\\u001b\": secret-value\n'{}': secret-value",
+        "x".repeat(512)
+    );
+    let (_, warnings) = document::parse::<ServiceDocument>(&extended, false).unwrap();
+    assert_eq!(2, warnings.len());
+    for warning in &warnings {
+        assert!(
+            warning.is_ascii() && !warning.chars().any(char::is_control),
+            "{warning:?}"
+        );
+        assert!(warning.len() <= 282, "{}", warning.len());
+        assert!(!warning.contains("secret-value"));
+    }
+    assert!(warnings[0].contains("line"));
+    assert!(warnings[1].ends_with("..."));
+    let extended = format!(
+        "{SERVICE}{}",
+        (0..20)
+            .map(|i| format!("future{i}: secret-value\n"))
+            .collect::<String>()
+    );
+    let (_, warnings) = document::parse::<ServiceDocument>(&extended, false).unwrap();
+    assert_eq!(17, warnings.len());
+    assert_eq!("4 additional unknown fields ignored", warnings[16]);
+    assert!(document::parse::<ServiceDocument>(&extended, true).is_err());
+}
+
 /// Loads a service through the same file and conversion path as both commands.
 fn service(document: &str) -> Result<l3bpb::VirtualService, String> {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("document.yaml");
     fs::write(&path, document).unwrap();
-    ServiceCmd {
+    let cmd = ServiceCmd {
         name: "test".into(),
         hash_mask: 0,
         index_mask: 0,
         file: Some(path),
+    };
+    let result = cmd.load(false);
+    let strict = cmd.load(true);
+    assert_eq!(result.is_ok(), strict.is_ok());
+    if result.is_ok() {
+        assert_eq!(result, strict);
     }
-    .load()
+    result
 }
 
 /// Loads a module through the command's file and conversion path.
@@ -28,29 +226,28 @@ fn module(document: &str) -> Result<l3bpb::ModuleConfig, String> {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("document.yaml");
     fs::write(&path, document).unwrap();
-    ModuleConfigCmd {
+    let cmd = ModuleConfigCmd {
         name: "test".into(),
         file: Some(path),
+    };
+    let result = cmd.load(false);
+    let strict = cmd.load(true);
+    assert_eq!(result.is_ok(), strict.is_ok());
+    if result.is_ok() {
+        assert_eq!(result, strict);
     }
-    .load()
+    result
 }
 
 #[test]
-fn test_service_load_rejects_unknown_duplicate_and_null_members() {
+fn test_service_load_rejects_duplicate_and_null_members() {
     for document in [
-        format!("{SERVICE}unknown: null\n"),
-        format!("{SERVICE}realServers: []\n"),
         format!("{SERVICE}real_servers: []\n"),
         format!("{SERVICE}\"real\\u005fservers\": []\n"),
-        format!("{SERVICE}session_timeouts: {{typo: null}}\n"),
         format!("{SERVICE}session_timeouts: {{tcp: 1, tcp: 2}}\n"),
-        format!("{SERVICE}dscp: {{mode: never, value: 0, typo: null}}\n"),
         format!("{SERVICE}dscp: {{mode: never, mode: always, value: 0}}\n"),
-        "real_servers: [{destination_address: 192.0.2.1, source_network: 192.0.2.0/24, typo: null}]\nsource_filter_rules: []".into(),
         "real_servers: [{destination_address: 192.0.2.1, destination_address: 192.0.2.2, source_network: 192.0.2.0/24}]\nsource_filter_rules: []".into(),
-        SOURCE.replace("net4s: []", "net4s: []\n  typo: null"),
         SOURCE.replace("net4s: []", "net4s: []\n  net4s: []"),
-        SOURCE.replace("from: 0", "from: 0, typo: null"),
         SOURCE.replace("from: 0", "from: 0, from: 1"),
         SERVICE.replace("real_servers: []", "real_servers: [null]"),
         SERVICE.replace("source_filter_rules: []", "source_filter_rules: [null]"),
@@ -66,14 +263,10 @@ fn test_service_load_rejects_unknown_duplicate_and_null_members() {
 }
 
 #[test]
-fn test_module_load_rejects_unknown_duplicate_null_and_scalar_coercion() {
+fn test_module_load_rejects_duplicate_null_and_scalar_coercion() {
     for document in [
-        format!("{MODULE}unknown: null"),
-        format!("{MODULE}destinationFilterRules: []"),
         format!("{MODULE}{MODULE}"),
-        DESTINATION.replace("service: backend", "service: backend\n  typo: null"),
         DESTINATION.replace("service: backend", "service: backend\n  service: other"),
-        DESTINATION.replace("proto: tcp", "proto: tcp, typo: null"),
         DESTINATION.replace("proto: tcp", "proto: tcp, proto: udp"),
         "destination_filter_rules: [null]".into(),
         DESTINATION.replace("net4s: []", "net4s: [null]"),
@@ -400,13 +593,13 @@ fn test_command_load_preserves_flags_and_absent_document() {
             index_mask: 31,
             ..Default::default()
         },
-        cmd.load().unwrap()
+        cmd.load(false).unwrap()
     );
     assert_eq!(
         l3bpb::ModuleConfig {
             name: "test".into(),
             ..Default::default()
         },
-        ModuleConfigCmd { name: "test".into(), file: None }.load().unwrap()
+        ModuleConfigCmd { name: "test".into(), file: None }.load(false).unwrap()
     );
 }
