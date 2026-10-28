@@ -43,7 +43,7 @@ jobs:
     name: Run Go race tests
     runs-on: ubuntu-24.04
     timeout-minutes: 45
-    container: ghcr.io/yanet-platform/yanet2-ci@sha256:81927a6bf8adabade5c16d5b1bd698e2ca5535ffd88175b58a5934e647834e25
+    container: ghcr.io/yanet-platform/yanet2-ci@sha256:3cbb2aae05beb4efc16f160cfa4d5307deba5d3110005d6557fdb49e5e2ee7a1
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

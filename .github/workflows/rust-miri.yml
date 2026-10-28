@@ -51,7 +51,7 @@ jobs:
     name: miri (${{ matrix.model }} borrows)
     runs-on: ubuntu-24.04
     timeout-minutes: 45
-    container: ghcr.io/yanet-platform/yanet2-ci@sha256:81927a6bf8adabade5c16d5b1bd698e2ca5535ffd88175b58a5934e647834e25
+    container: ghcr.io/yanet-platform/yanet2-ci@sha256:3cbb2aae05beb4efc16f160cfa4d5307deba5d3110005d6557fdb49e5e2ee7a1
     strategy:
       fail-fast: false
       matrix:
@@ -62,8 +62,8 @@ jobs:
             miriflags: -Zmiri-strict-provenance -Zmiri-tree-borrows
     env:
       # bindgen needs a libclang and a clang of the same LLVM major.
-      CLANG_PATH: /usr/bin/clang-18
-      LIBCLANG_PATH: /usr/lib/llvm-18/lib
+      CLANG_PATH: /usr/bin/clang-23
+      LIBCLANG_PATH: /usr/lib/llvm-23/lib
       MIRI_TOOLCHAIN: nightly-2026-10-22
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
