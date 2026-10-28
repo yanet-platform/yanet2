@@ -249,6 +249,25 @@ yanet_go_env += {
   'CGO_CPPFLAGS': yanet_cache_line_arg,
 }
 
+# cgo in meson's Go builds compiles and links with meson's C compiler.
+#
+# A sanitized build then links the sanitizer runtime of the compiler that
+# instrumented its libraries. A plain cc or gcc is left to Go's default, gcc,
+# so its cgo packages share the build cache with Go runs outside meson. Go runs
+# the first word of CC alone to probe linker flags and to key that cache, so CC
+# names the compiler without the compiler cache meson may put first.
+yanet_go_cc = []
+foreach word : cc.cmd_array()
+  if (yanet_go_cc.length() > 0
+      or import('fs').name(word) not in ['ccache', 'sccache'])
+    yanet_go_cc += word
+  endif
+endforeach
+if not (cc.get_id() == 'gcc' and yanet_go_cc.length() == 1
+        and import('fs').name(yanet_go_cc[0]) in ['cc', 'gcc'])
+  yanet_go_env += {'CC': ' '.join(yanet_go_cc)}
+endif
+
 # The same cgo preprocessor flags for Go builds outside meson, which the
 # Makefile, the gate and direct go test runs read from this file.
 configure_file(
