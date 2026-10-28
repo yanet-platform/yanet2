@@ -5,7 +5,6 @@ dependencies = [
 
 sources = files(
   'counters.c',
-  'histogram.c'
 )
 
 lib_counters = static_library(
@@ -134,14 +133,6 @@ if not dataplane_only
 endif
 
 # Tests
-test_counters_histogram = executable(
-  'counters_test',
-  'tests.c',
-  dependencies: [lib_counters_dep, lib_common_dep, lib_logging_dep],
-  include_directories: yanet_rootdir,
-)
-test('counters', test_counters_histogram, suite: ['lib'])
-
 counter_storage_test = executable(
   'counter_storage_test',
   'storage_test.c',
