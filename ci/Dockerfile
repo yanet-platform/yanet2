@@ -16,6 +16,7 @@ ARG RUSTUP_VERSION=1.29.2
 ARG RUSTUP_SHA256_AMD64=5be191e8c70a5007074254cb74d78dbfdd25cd5a61c27de7b8e5410122ec24f4
 ARG RUSTUP_SHA256_ARM64=a9c168dbea81a84671c6b7a5c1795cb0eb699020110d107ddfca427bd797e697
 ARG RUST_VERSION=1.99.1
+ARG LLVM_VERSION=23
 ARG PROTOC_GEN_GO_VERSION=v1.36.11
 ARG PROTOC_GEN_GO_GRPC_VERSION=v1.6.1
 
@@ -29,10 +30,9 @@ ENV DEBIAN_FRONTEND=noninteractive \
 
 # Recommended packages stay out, so everything the builds use is listed.
 #
-# The protobuf headers carry the well-known types the protos import, the
-# compiler runtime carries libFuzzer and clang's sanitizers, and without zstd
-# workflow caches fall back to gzip and no longer match the entries that jobs
-# on the hosted runner save.
+# The protobuf headers carry the well-known types the protos import, and
+# without zstd workflow caches fall back to gzip and no longer match the
+# entries that jobs on the hosted runner save.
 RUN set -x \
  && apt-get update \
  && apt-get install -y --no-install-recommends \
@@ -40,13 +40,11 @@ RUN set -x \
         build-essential \
         ca-certificates \
         ccache \
-        clang \
         cmake \
         curl \
         flex \
         git \
         jq \
-        libclang-rt-18-dev \
         libnuma-dev \
         libpcap-dev \
         libprotobuf-dev \
@@ -59,6 +57,27 @@ RUN set -x \
         xz-utils \
         zstd \
  && rm -rf /var/lib/apt/lists/*
+
+# One LLVM serves every clang user: the asan suite, libFuzzer, the syntax
+# sweep and bindgen.
+#
+# The asan suite needs a sanitizer runtime that does not race global
+# registration against thread start. LLVM comes from its own archive, checked
+# against the key committed beside this file, and the unversioned tool names
+# point at it.
+COPY llvm-snapshot.gpg.key /etc/apt/keyrings/llvm.asc
+RUN set -x \
+ && echo "deb [signed-by=/etc/apt/keyrings/llvm.asc] https://apt.llvm.org/noble/ llvm-toolchain-noble-${LLVM_VERSION} main" \
+        >/etc/apt/sources.list.d/llvm.list \
+ && apt-get update \
+ && apt-get install -y --no-install-recommends \
+        clang-${LLVM_VERSION} \
+        libclang-rt-${LLVM_VERSION}-dev \
+        llvm-${LLVM_VERSION} \
+ && rm -rf /var/lib/apt/lists/* \
+ && for tool in clang clang++ llvm-symbolizer; do \
+        ln -s "/usr/bin/${tool}-${LLVM_VERSION}" "/usr/local/bin/${tool}"; \
+    done
 
 # Jobs build as root in a workspace the runner user owns.
 RUN git config --system --add safe.directory '*'

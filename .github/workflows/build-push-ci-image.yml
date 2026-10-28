@@ -94,7 +94,7 @@ jobs:
             ref="$IMAGE@$DIGEST"
           fi
           # Each probe fails when the image lacks something the builds rely on:
-          # the well-known protobuf types, libFuzzer, the sanitizer runtimes.
+          # the protobuf well-known types, libFuzzer, sanitizers, a symbolizer.
           docker run --rm -i "$ref" sh -eux <<'EOF'
           cd "$(mktemp -d)"
           printf '%s\n' 'syntax = "proto3";' 'import "google/protobuf/timestamp.proto";' 'message Probe { google.protobuf.Timestamp at = 1; }' >probe.proto
@@ -105,6 +105,9 @@ jobs:
           printf '%s\n' 'int main(void) { return 0; }' >main.c
           gcc -fsanitize=address,undefined -o main main.c
           ./main
+          clang -fsanitize=address,undefined -o main-clang main.c
+          ./main-clang
+          llvm-symbolizer --version
           EOF
           # Jobs on the hosted runner install the Go that ci/go-version names, so
           # the image must carry the same one.
