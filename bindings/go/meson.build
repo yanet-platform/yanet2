@@ -122,7 +122,6 @@ cgo_packages += {
   'common/go/dataplane': {
     'libraries': [lib_lib_utils],
   },
-  'common/go/testutils': {},
   'common/go/testutils/shm': {
     'libraries': [
       lib_config_dp,
