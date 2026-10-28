@@ -20,6 +20,34 @@
 #define CP_MEMORY (4 << 20)
 #define STORAGE_SIZE (DP_MEMORY + CP_MEMORY)
 
+// Verifies that an API snapshot preserves every size class and free count.
+static int
+assert_allocator_info(
+	const struct cp_allocator_info *info, struct block_allocator *allocator
+) {
+	struct block_allocator_stats expected;
+	block_allocator_get_stats(allocator, &expected);
+	TEST_ASSERT(
+		info->free_bytes == expected.free_bytes &&
+			info->largest_free_block_bytes ==
+				expected.largest_free_block_bytes,
+		"allocator summary differs from its internal snapshot"
+	);
+	for (size_t idx = 0; idx < CP_ALLOCATOR_POOL_COUNT; ++idx) {
+		const struct cp_allocator_pool_info *pool = &info->pools[idx];
+		size_t size = block_allocator_pool_size(allocator, idx);
+		TEST_ASSERT(
+			pool->block_size_bytes == size,
+			"allocator block size differs from its size class"
+		);
+		TEST_ASSERT(
+			pool->free_blocks == expected.free_blocks[idx],
+			"allocator free block count differs from its size class"
+		);
+	}
+	return TEST_SUCCESS;
+}
+
 // Verifies that an agent exports its context tree and its own free capacity.
 //
 // The tree and allocator share a non-reentrant lock, so reading capacity
@@ -130,21 +158,18 @@ test_memory_tree_exported(void) {
 	rc = yanet_get_cp_agent_instance_info(ai, 0, &inst);
 	TEST_ASSERT(rc == 0, "yanet_get_cp_agent_instance_info failed");
 	TEST_ASSERT_NOT_NULL(inst, "instance info is NULL");
-	struct block_allocator_stats expected;
-	block_allocator_get_stats(&ag->block_allocator, &expected);
-	TEST_ASSERT(
-		memcmp(&inst->allocator, &expected, sizeof(expected)) == 0,
+	TEST_ASSERT_SUCCESS(
+		assert_allocator_info(&inst->allocator, &ag->block_allocator),
 		"agent allocator snapshot differs from its own allocator"
 	);
 	TEST_ASSERT(
 		inst->free_bytes == inst->allocator.free_bytes,
 		"legacy free bytes must use the same snapshot"
 	);
-	struct block_allocator_stats shared;
+	struct cp_allocator_info shared;
 	yanet_get_cp_allocator_stats(dp, &shared);
-	block_allocator_get_stats(&cp->block_allocator, &expected);
-	TEST_ASSERT(
-		memcmp(&shared, &expected, sizeof(expected)) == 0,
+	TEST_ASSERT_SUCCESS(
+		assert_allocator_info(&shared, &cp->block_allocator),
 		"shared allocator snapshot differs from the CP allocator"
 	);
 
