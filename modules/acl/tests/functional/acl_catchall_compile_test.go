@@ -86,7 +86,13 @@ func catchAllRuleset() []cacl.ACLRule {
 // catchAllSanitizedRuntime reports whether the address sanitizer
 // runtime is loaded into this process, which the shared memory block
 // allocator compensates with per allocation red zones.
+//
+// A -asan build always carries it, and clang links it into the binary;
+// otherwise the gcc runtime shows up as a mapped library.
 func catchAllSanitizedRuntime() bool {
+	if asanBuild {
+		return true
+	}
 	maps, err := os.ReadFile("/proc/self/maps")
 	return err == nil && bytes.Contains(maps, []byte("libasan"))
 }
