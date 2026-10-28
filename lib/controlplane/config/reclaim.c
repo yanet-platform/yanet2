@@ -52,6 +52,10 @@ agent_owner_cmp(const void *left, const void *right) {
 
 void
 agent_unload_references(struct agent **owners, uint64_t count) {
+	if (owners == NULL || count == 0) {
+		return;
+	}
+
 	// Sort the scratch snapshot and apply one subtraction per run of
 	// equal pointers: teardown runs synchronously on the final release,
 	// so aggregating must stay near-linear in the registry size rather
@@ -87,8 +91,8 @@ agent_unload_references(struct agent **owners, uint64_t count) {
 // Report whether agent is still the registry head of its name — the one a
 // same-name attach would splice a successor over.
 //
-// The caller must hold the configuration lock, which every registry splice
-// also holds, so the structure cannot change under the scan. A false
+// The caller must hold the agent lock, which every registry mutation
+// also takes, so the structure cannot change under the scan. A false
 // return means the owner was superseded: items it still creates would
 // raise a predecessor's loaded count from zero and race the sweep's
 // reclamation, so update paths must refuse them.
