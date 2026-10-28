@@ -110,19 +110,19 @@ pub struct View<'g> {
 }
 
 impl View<'_> {
-    /// View resolving through `root`.
+    /// View resolving through a test root.
     ///
     /// # Safety
     ///
     /// The [`Resolve`] contract: every `'g` reference passed to the view
-    /// belongs to a well-formed built graph, inside the memory `root`
-    /// covers, and stays frozen for `'g`.
+    /// belongs to a well-formed built graph, inside the memory the root
+    /// covers, and stays frozen for the view's lifetime.
     pub unsafe fn new(root: ShmRoot) -> Self {
         Self { root, _brand: PhantomData }
     }
 }
 
-// SAFETY: forwarded to the caller of `View::new`.
+// SAFETY: forwarded to the caller that made the view.
 unsafe impl<'g> Resolve<'g> for View<'g> {
     fn shm_root(&self) -> ShmRoot {
         self.root

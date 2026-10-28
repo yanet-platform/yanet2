@@ -80,7 +80,7 @@ impl Error for TestError {}
 struct Block {
     addr: BlockAddr,
     size: usize,
-    /// Memory context it came from: `None` for `alloc`.
+    /// Memory context it came from: none for a block of the root allocator.
     context: Option<Context>,
 }
 
@@ -98,7 +98,7 @@ pub struct TestOwner {
     /// Calls left before each kind fails, for good; `None` never fails.
     countdowns: [Cell<Option<usize>>; 3],
     /// What the owner caught the builder doing wrong. The routines that run
-    /// from `Drop` record instead of panicking.
+    /// from destructors record instead of panicking.
     violations: RefCell<Vec<String>>,
 }
 
@@ -118,7 +118,7 @@ impl TestOwner {
         Self::over(BlockArena::new())
     }
 
-    /// As [`TestOwner::new`], with `capacity` bytes of C memory.
+    /// As [`TestOwner::new`], with the given number of bytes of C memory.
     #[cfg(not(miri))]
     pub fn with_c_memory(capacity: usize) -> Self {
         let arena = BlockArena::new();
@@ -153,7 +153,8 @@ impl TestOwner {
         }
     }
 
-    /// Makes every call of the kind fail after `count` more succeed.
+    /// Makes every call of the kind fail after the given number more
+    /// succeed.
     pub fn fail_after(&self, call: Call, count: usize) {
         self.countdowns[call as usize].set(Some(count));
     }
@@ -210,14 +211,15 @@ impl TestOwner {
         self.violations.borrow_mut().push(what.into());
     }
 
-    /// A block of `size` bytes filled with [`FILL`], `None` when the call
+    /// A block of the given size filled with [`FILL`], `None` when the call
     /// fails.
     fn take_block(&self, context: Option<Context>, size: usize) -> Option<BlockAddr> {
         if self.fails(Call::Alloc) {
             return None;
         }
         let block = self.arena.alloc(size);
-        // SAFETY: the arena returned a block of at least `size.max(1)` bytes.
+        // SAFETY: the arena returned a block of at least the size, or one byte
+        // for an empty request.
         unsafe { block.as_ptr().write_bytes(FILL, size.max(1)) };
         // SAFETY: the arena block is the payload this owner hands out.
         let addr = unsafe { BlockAddr::new(block.as_ptr().addr()) };
@@ -255,7 +257,7 @@ impl TestOwner {
 
 // SAFETY: the arena aligns every block to 64, which covers any size, and keeps
 // it until the arena is dropped, which is never; `root` is the arena's, which
-// covers every block. The routines called from `Drop` do not panic: they
+// covers every block. The routines called from destructors do not panic: they
 // record what they find wrong. Natively, header initialisation puts a real C
 // memory context over a real C block allocator on the header, so the C routines
 // an embedded object calls work on memory they own. Miri runs no C, so there a

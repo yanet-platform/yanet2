@@ -44,7 +44,7 @@ struct Route {
     counter: Counter,
 }
 
-/// A run of `count` entries of the route index, from `start`.
+/// A run of entries of the route index, given by a start and a count.
 #[derive(ShmLayout)]
 #[repr(C)]
 struct RouteList {
@@ -55,8 +55,8 @@ struct RouteList {
 /// A FIB with the fields of C's `route_fib`, in its order: two LPM tables
 /// mapping a destination to a route list, and the routes the lists select from.
 ///
-/// The bytes differ from C's: a `ShmSlice` is a pointer then a length, where
-/// `route_fib` keeps a count then a pointer.
+/// The bytes differ from C's: a shared-memory slice is a pointer then a length,
+/// where `route_fib` keeps a count then a pointer.
 #[derive(ShmLayout)]
 #[repr(C)]
 struct RouteFib {
@@ -124,7 +124,7 @@ unsafe impl Build for Flaky {
         if parts.fails {
             return Err(Refusal::OutOfMemory);
         }
-        // SAFETY: aligned and exclusive (caller contract).
+        // SAFETY: the address is aligned and exclusive (caller contract).
         unsafe { memory.root().ptr::<u64>(addr).write(parts.word) };
         Ok(())
     }
@@ -156,8 +156,8 @@ struct Faulty {
     tail: ShmSlice<u64>,
 }
 
-/// A module whose configuration is `C`: the builder reads only its name and
-/// its configuration type.
+/// A module with a given configuration type: the builder reads only its name
+/// and that type.
 struct Fixture<C>(PhantomData<fn() -> C>);
 
 impl<C: Build + Sync> Module for Fixture<C> {
@@ -261,8 +261,8 @@ fn fib_input() -> FibInput {
     }
 }
 
-/// The parts of a FIB of `input`, registering each device once, copied into
-/// the routes that use it, and a counter per route.
+/// The parts of a FIB of the given input, registering each device once, copied
+/// into the routes that use it, and a counter per route.
 fn fib<'b, E: From<Failure>>(
     b: Scope<'b, '_, TestOwner, E>,
     input: &'b FibInput,
@@ -293,8 +293,8 @@ fn fib<'b, E: From<Failure>>(
     })
 }
 
-/// The parts of a policy with the rules `(id, ports)` and a default rule
-/// without ports.
+/// The parts of a policy with rules, each an id and its ports, and a default
+/// rule without ports.
 fn policy<'b, E: From<Failure>>(
     b: Scope<'b, '_, TestOwner, E>,
     rules: &[(u64, &[u64])],
@@ -313,7 +313,7 @@ fn policy<'b, E: From<Failure>>(
     })
 }
 
-/// Builds a configuration of `M` with the closure, failing with the SDK's
+/// Builds a configuration of a module with the closure, failing with the SDK's
 /// own errors.
 fn build<'env, M: Module>(
     owner: &TestOwner,
@@ -322,7 +322,7 @@ fn build<'env, M: Module>(
     Builder::<M>::build(owner, M::NAME, f)
 }
 
-/// Builds the FIB configuration of `input`.
+/// Builds the FIB configuration of the given input.
 fn build_fib(owner: &TestOwner, input: &FibInput) -> Result<Built<FibModule, TestOwner>, Failure> {
     build::<FibModule>(owner, |b| fib(b, input))
 }
@@ -332,8 +332,8 @@ fn build_policy(owner: &TestOwner, rules: &[(u64, &[u64])]) -> Result<Built<Poli
     build::<PolicyModule>(owner, |b| policy(b, rules))
 }
 
-/// The body of the configuration of `built`, resolved through a view of the
-/// owner's arena.
+/// The body of a built configuration, resolved through a view of the owner's
+/// arena.
 ///
 /// The references live no longer than the borrow of the built configuration,
 /// so releasing it while they live does not compile.
@@ -346,7 +346,7 @@ fn body<'a, M: Module>(owner: &'a TestOwner, built: &'a Built<M, TestOwner>) -> 
     }
 }
 
-/// Releases a configuration of `M` built in `owner`.
+/// Releases a configuration of a module built in the given owner.
 fn release<M: Module>(owner: &TestOwner, built: Built<M, TestOwner>) {
     // SAFETY: handed over by the builder, unreferenced, released once.
     unsafe { built.destroy(owner) };
@@ -411,7 +411,7 @@ fn test_destroy_releases_nested_blocks() {
     owner.assert_released();
 }
 
-/// An owner whose allocations fail after `allowed` have succeeded.
+/// An owner whose allocations fail after a given number have succeeded.
 fn owner_failing_alloc_after(allowed: usize) -> TestOwner {
     let owner = TestOwner::new();
     owner.fail_after(Call::Alloc, allowed);
@@ -683,8 +683,8 @@ fn test_blocks_scope_and_parts_are_debug_for_any_owner() {
     is_debug::<PolicyParts<'static, TestOwner>>();
 }
 
-/// Parts of an entry whose word is number `position` of the build, which
-/// fails when that is `fail_at`.
+/// Parts of the entry at a given position in the build, which fails when that
+/// is the failing position.
 fn entry<'b>(
     b: Scope<'b, '_, TestOwner>,
     device: Registered<'b, Device>,
@@ -703,7 +703,7 @@ fn entry<'b>(
 }
 
 /// The parts of a configuration whose refusable words are numbered in the
-/// order the closure makes them, and of which the one at `fail_at` fails.
+/// order the closure makes them, and of which the one chosen to fail fails.
 ///
 /// The box and the slice are written inside the closure, the array and the
 /// root words by the final write, so the numbering is also that of the writes.

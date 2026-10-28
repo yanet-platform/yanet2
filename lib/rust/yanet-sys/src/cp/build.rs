@@ -45,37 +45,38 @@ type Brand<'b> = PhantomData<fn(&'b ()) -> &'b ()>;
 ///
 /// # Safety
 ///
-/// [`Build::write`] either writes the whole value at the address given and
-/// returns `Ok`, or returns `Err` with nothing at the address owning anything:
-/// it has returned what it allocated for the value and released its parts and
-/// the blocks in them. It writes nothing else but the links of the C memory
-/// context tree under the build's header, as an embedded C object does when it
-/// opens its context, and does not panic. [`Build::free`] returns exactly the
-/// blocks `write` handed to the value, each once, and reads only inside the
-/// value, those blocks and the links of that tree, and writes those links as an
-/// embedded C object does when it closes its context, which may reach a
-/// sibling's context in another value. The SDK and its derive implement it, so
-/// that a value of every type is written and released by code that knows its
-/// layout. Implementing it is gated by `unsafe trait`, which module crates
-/// cannot write directly under `#![forbid(unsafe_code)]`; `write` and `free`
-/// are `unsafe fn`, so calling them is gated too.
+/// Writing either puts the whole value at the given address and succeeds, or
+/// fails with nothing at the address owning anything: it has returned what it
+/// allocated for the value and released its parts and the blocks in them. It
+/// writes nothing else but the links of the C memory context tree under the
+/// build's header, as an embedded C object does when it opens its context, and
+/// does not panic. Freeing returns exactly the blocks the write handed to the
+/// value, each once, and reads only inside the value, those blocks and the
+/// links of that tree, and writes those links as an embedded C object does
+/// when it closes its context, which may reach a sibling's context in another
+/// value. The SDK and its derive implement the trait, so that a value of every
+/// type is written and released by code that knows its layout. Implementing it
+/// is gated by `unsafe trait`, which module crates cannot write directly under
+/// `#![forbid(unsafe_code)]`; writing and freeing are unsafe functions, so
+/// calling them is gated too.
 pub unsafe trait Build: ShmLayout {
-    /// What the author supplies for a value of this type inside build `'b` of
-    /// owner `W`.
+    /// What the author supplies for a value of this type inside a build of an
+    /// owner.
     type Parts<'b, W: Owner>;
 
-    /// Writes `parts` as a `Self` at `addr`, with the blocks of `memory`.
+    /// Writes the parts as a value at an address, with the blocks of a memory
+    /// context.
     ///
     /// # Errors
     ///
-    /// The memory is exhausted. Nothing at `addr` owns anything then, and the
-    /// parts are released.
+    /// The memory is exhausted. Nothing at the address owns anything then,
+    /// and the parts are released.
     ///
     /// # Safety
     ///
-    /// `addr` is aligned for `Self`, and the `size_of::<Self>()` bytes there
-    /// lie in a block of the build that made every block and registration in
-    /// `parts`, which nobody else accesses; `memory` is that build's.
+    /// The address is aligned for the value, and the value's bytes there lie
+    /// in a block of the build that made every block and registration in the
+    /// parts, which nobody else accesses; the memory context is that build's.
     #[doc(hidden)]
     unsafe fn write<W: Owner>(
         parts: Self::Parts<'_, W>,
@@ -83,15 +84,15 @@ pub unsafe trait Build: ShmLayout {
         addr: usize,
     ) -> Result<(), Refusal>;
 
-    /// Returns to `memory` every block the `Self` at `addr` owns, as the
-    /// `*_free` functions of C do; the storage of the value itself belongs to
-    /// its parent.
+    /// Returns to a memory context every block the value at an address owns,
+    /// as the `*_free` functions of C do; the storage of the value itself
+    /// belongs to its parent.
     ///
     /// # Safety
     ///
-    /// `addr` holds a `Self` written whole by [`Build::write`], every block it
-    /// owns was allocated from `memory` with the exact size of its payload and
-    /// is still live, and nothing references them.
+    /// The address holds a value written whole by [`Build::write`], every
+    /// block it owns was allocated from the memory context with the exact size
+    /// of its payload and is still live, and nothing references them.
     #[doc(hidden)]
     unsafe fn free<W: Owner>(addr: usize, memory: &MemoryContext<'_, W>);
 }
@@ -106,14 +107,13 @@ pub struct MemoryContext<'o, W: Owner> {
     /// one thread.
     ///
     /// What it protects is the per-header C state, the memory context and
-    /// the registries, which `W: Sync` does not promise to take concurrent
-    /// calls.
+    /// the registries, which the owner's `Sync` does not promise to take
+    /// concurrent calls.
     _local: PhantomData<*const ()>,
 }
 
 impl<'o, W: Owner> MemoryContext<'o, W> {
-    /// The context the module header at `header` embeds, which `owner` has
-    /// initialised.
+    /// The context the module header embeds, which the owner has initialised.
     fn new(owner: &'o W, header: Header) -> Self {
         Self {
             owner,
@@ -127,11 +127,11 @@ impl<'o, W: Owner> MemoryContext<'o, W> {
         self.owner.root()
     }
 
-    /// Returns a block of `size` payload bytes.
+    /// Returns a block of the given payload size.
     ///
     /// # Safety
     ///
-    /// `addr` was allocated from this context with `size` and is not
+    /// The block was allocated from this context with that size and is not
     /// referenced any longer.
     pub unsafe fn free(&self, addr: usize, size: usize) {
         // SAFETY: the context belongs to an initialised header and the block
@@ -139,7 +139,7 @@ impl<'o, W: Owner> MemoryContext<'o, W> {
         unsafe { self.owner.free_in(self.context, BlockAddr::new(addr), size) }
     }
 
-    /// Allocates a block of `size` payload bytes.
+    /// Allocates a block of the given payload size.
     fn alloc(&self, size: usize) -> Option<usize> {
         // SAFETY: the header is initialised, so its context is.
         unsafe { self.owner.alloc_in(self.context, size) }.map(BlockAddr::get)
@@ -157,7 +157,7 @@ macro_rules! plain_build {
                 memory: &MemoryContext<'_, W>,
                 addr: usize,
             ) -> Result<(), Refusal> {
-                // SAFETY: aligned and exclusive (caller contract).
+                // SAFETY: aligned and exclusive address (caller contract).
                 unsafe { memory.root().ptr::<Self>(addr).write(parts) };
                 Ok(())
             }
@@ -186,7 +186,8 @@ unsafe impl<T: Build, const N: usize> Build for [T; N] {
         // SAFETY: no element is written yet.
         let mut partial = unsafe { Partial::<T, W>::new(memory, addr, 0) };
         for part in parts {
-            // SAFETY: element `written` lies in the array (caller contract).
+            // SAFETY: the element being written lies in the array (caller
+            // contract).
             unsafe { T::write::<W>(part, memory, addr + partial.written * size_of::<T>())? };
             partial.written += 1;
         }
@@ -211,8 +212,7 @@ unsafe impl<T: Build> Build for ShmBox<T> {
     ) -> Result<(), Refusal> {
         let target = parts.into_raw();
         debug_assert_ne!(0, target, "a box points at a block");
-        // SAFETY: the word is the box's, aligned and exclusive (caller
-        // contract).
+        // SAFETY: the offset word is aligned and exclusive (caller contract).
         unsafe { memory.root().ptr::<isize>(addr).write(offset_to(target, addr)) };
         Ok(())
     }
@@ -220,7 +220,8 @@ unsafe impl<T: Build> Build for ShmBox<T> {
     unsafe fn free<W: Owner>(addr: usize, memory: &MemoryContext<'_, W>) {
         // SAFETY: the offset word was written whole (caller contract).
         let offset = unsafe { memory.root().ptr::<isize>(addr).read() };
-        // SAFETY: the offset leads to the live block of one `T` the box owns.
+        // SAFETY: the offset leads to the live block of one value the box
+        // owns.
         unsafe { free_block::<T, W>(target_of(offset, addr), 1, memory) }
     }
 }
@@ -237,7 +238,7 @@ unsafe impl<T: Build> Build for ShmSlice<T> {
     ) -> Result<(), Refusal> {
         let root = memory.root();
         let (target, len) = parts.into_raw();
-        // SAFETY: the words are the slice's, aligned and exclusive (caller
+        // SAFETY: the offset and count words are aligned and exclusive (caller
         // contract).
         unsafe {
             root.ptr::<isize>(addr).write(offset_to(target, addr));
@@ -256,8 +257,8 @@ unsafe impl<T: Build> Build for ShmSlice<T> {
             )
         };
         if offset != 0 {
-            // SAFETY: a non-empty slice owns the live block of `len`
-            // elements the offset leads to.
+            // SAFETY: a non-empty slice owns the live block of as many
+            // elements as its count, which the offset leads to.
             unsafe { free_block::<T, W>(target_of(offset, addr), len as usize, memory) }
         }
     }
@@ -272,8 +273,8 @@ unsafe impl Build for Counter {
         memory: &MemoryContext<'_, W>,
         addr: usize,
     ) -> Result<(), Refusal> {
-        // SAFETY: the id is the counter's only word, aligned and exclusive
-        // (caller contract).
+        // SAFETY: the registry index is the counter's only word, aligned and
+        // exclusive (caller contract).
         unsafe { memory.root().ptr::<u64>(addr).write(parts.index) };
         Ok(())
     }
@@ -290,8 +291,8 @@ unsafe impl Build for Device {
         memory: &MemoryContext<'_, W>,
         addr: usize,
     ) -> Result<(), Refusal> {
-        // SAFETY: the index is the device's only word, aligned and exclusive
-        // (caller contract).
+        // SAFETY: the device index is the device's only word, aligned and
+        // exclusive (caller contract).
         unsafe { memory.root().ptr::<u64>(addr).write(parts.index) };
         Ok(())
     }
@@ -300,7 +301,7 @@ unsafe impl Build for Device {
 }
 
 // SAFETY: the C table is the whole value. Its routines write inside it, in the
-// blocks of its own memory context, which `free` returns, and in the links of
+// blocks of its own memory context, which freeing returns, and in the links of
 // the context tree under the header, which opening and closing a context
 // update (`common/memory.h`).
 unsafe impl<const K: usize> Build for Lpm<K> {
@@ -324,7 +325,7 @@ unsafe impl<const K: usize> Build for Lpm<K> {
             let context = root.ptr::<bindings::memory_context>(memory.context.get());
             bindings::yanet_sys_common_lpm_init(lpm, context, c"lpm".as_ptr()) == 0
         };
-        // SAFETY: an initialised table takes ranges of `K` bytes.
+        // SAFETY: an initialised table takes ranges of the key size.
         let built = initialised
             && parts.iter().all(|range| unsafe {
                 bindings::yanet_sys_common_lpm_insert(lpm, K as u8, range.from.as_ptr(), range.to.as_ptr(), range.value)
@@ -423,7 +424,7 @@ impl<W: Owner> fmt::Debug for MemoryContext<'_, W> {
     }
 }
 
-/// Self-relative offset from the word at `slot` to `target`, 0 for none.
+/// Self-relative offset from a word to its target, 0 for none.
 fn offset_to(target: usize, slot: usize) -> isize {
     if target == 0 {
         0
@@ -432,7 +433,8 @@ fn offset_to(target: usize, slot: usize) -> isize {
     }
 }
 
-/// Inverse of [`offset_to`].
+/// The target address a self-relative offset leads to from its word; the
+/// inverse of the offset computation, 0 for none.
 fn target_of(offset: isize, slot: usize) -> usize {
     if offset == 0 {
         0
@@ -441,11 +443,11 @@ fn target_of(offset: isize, slot: usize) -> usize {
     }
 }
 
-/// Returns what the `len` elements at `addr` own.
+/// Returns what a run of consecutive elements owns.
 ///
 /// # Safety
 ///
-/// As for [`Build::free`], for each element.
+/// As for [`Build::free`], for each element of the run.
 unsafe fn free_elements<T: Build, W: Owner>(addr: usize, len: usize, memory: &MemoryContext<'_, W>) {
     // Newest first: C prepends child memory contexts and unlinks from the
     // head, so this order is linear.
@@ -455,12 +457,13 @@ unsafe fn free_elements<T: Build, W: Owner>(addr: usize, len: usize, memory: &Me
     }
 }
 
-/// Returns the block of `len` elements at `addr` and what they own.
+/// Returns a block of consecutive elements and what they own.
 ///
 /// # Safety
 ///
-/// The block was allocated from `memory` with `len * size_of::<T>()` bytes,
-/// is live and unreferenced, and its elements were written whole.
+/// The block was allocated from the memory context with exactly the bytes of
+/// its elements, is live and unreferenced, and its elements were written
+/// whole.
 unsafe fn free_block<T: Build, W: Owner>(addr: usize, len: usize, memory: &MemoryContext<'_, W>) {
     // SAFETY: the elements were written whole (caller contract).
     unsafe { free_elements::<T, W>(addr, len, memory) };
@@ -476,9 +479,9 @@ fn failed<W: Owner, E: From<BuildError<W::Error>>>(err: W::Error) -> E {
     BuildError::Owner(err).into()
 }
 
-/// A run of elements of which the first `written` are written, with the block
-/// they lie in, if any; returns what they own and the block when dropped, also
-/// while unwinding.
+/// A run of elements of which a prefix is written, with the block they lie in,
+/// if any; returns what they own and the block when dropped, also while
+/// unwinding.
 ///
 /// It guards the elements of a slice and their block, the elements of an
 /// array, and each written field of a derived struct as a run of one. Forget
@@ -493,13 +496,12 @@ pub struct Partial<'a, T: Build, W: Owner> {
 }
 
 impl<'a, T: Build, W: Owner> Partial<'a, T, W> {
-    /// Guards the `written` elements at `addr`, which lie in a larger value.
+    /// Guards the written prefix of a run that lies in a larger value.
     ///
     /// # Safety
     ///
-    /// The first `written` elements at `addr` were written whole, and they
-    /// are owned by nothing else; `memory` is the context the blocks they own
-    /// came from.
+    /// The prefix was written whole, and it is owned by nothing else; the
+    /// memory context is the one the blocks it owns came from.
     pub unsafe fn new(memory: &'a MemoryContext<'a, W>, addr: usize, written: usize) -> Self {
         Self {
             memory,
@@ -513,8 +515,8 @@ impl<'a, T: Build, W: Owner> Partial<'a, T, W> {
 
 impl<T: Build, W: Owner> Drop for Partial<'_, T, W> {
     fn drop(&mut self) {
-        // SAFETY: the first `written` elements were written whole, and the
-        // block, if any, was allocated with `block` bytes and is ours alone.
+        // SAFETY: the written prefix was written whole, and the block, if any,
+        // was allocated with its recorded size and is ours alone.
         unsafe {
             free_elements::<T, W>(self.addr, self.written, self.memory);
             if self.block != 0 {
@@ -527,13 +529,13 @@ impl<T: Build, W: Owner> Drop for Partial<'_, T, W> {
 /// Construction services of one build: allocates blocks and registers
 /// counters and devices.
 ///
-/// A copyable handle shaped like a `&std::thread::Scope`. `'b` is the build
-/// the scope belongs to, fresh for every [`Builder::build`] and invariant, so
-/// nothing made by one build is accepted by another or outlives its own;
-/// `'env` is what the build's closure borrows from outside it, which the
-/// parts of a value may borrow for the build, such as the ranges of a table;
-/// `E` is the error type of the author's closure, which the methods return in
-/// place of the SDK's own.
+/// A copyable handle shaped like a `&std::thread::Scope`. The build lifetime
+/// is fresh for every [`Builder::build`] and invariant, so nothing made by one
+/// build is accepted by another or outlives its own; the environment lifetime
+/// is what the build's closure borrows from outside it, which the parts of a
+/// value may borrow for the build, such as the ranges of a table; the error
+/// type is that of the author's closure, which the methods return in place of
+/// the SDK's own.
 pub struct Scope<'b, 'env: 'b, W: Owner, E = BuildError<<W as Owner>::Error>> {
     memory: &'b MemoryContext<'b, W>,
     header: Header,
@@ -557,20 +559,20 @@ impl<W: Owner, E> fmt::Debug for Scope<'_, '_, W, E> {
 }
 
 impl<'b, W: Owner, E: From<BuildError<W::Error>>> Scope<'b, '_, W, E> {
-    /// Allocates a block holding one `T`, written from `parts`.
+    /// Allocates a block holding one value, written from its parts.
     ///
-    /// A zero-sized `T` does not compile: C has no block of no bytes.
+    /// A zero-sized type does not compile: C has no block of no bytes.
     ///
     /// # Errors
     ///
     /// The memory is exhausted, or the write of the value is refused; the
-    /// blocks in `parts` and the block of the value are returned.
+    /// blocks in the parts and the block of the value are returned.
     pub fn boxed<T: Build>(self, parts: T::Parts<'b, W>) -> Result<Owned<'b, T, W>, E> {
         const { assert!(size_of::<T>() != 0, "a block of a zero-sized type") };
         let addr = self.alloc(size_of::<T>())?;
-        // SAFETY: the fresh block holds one `T`, aligned (see `alloc`), and
-        // every block and registration in the parts belongs to this build by
-        // the brand.
+        // SAFETY: the fresh block holds one value, aligned by the allocation,
+        // and every block and registration in the parts belongs to this build
+        // by the brand.
         if let Err(refusal) = unsafe { T::write::<W>(parts, self.memory, addr) } {
             // SAFETY: the block is ours, and the refused write left nothing
             // in it.
@@ -585,16 +587,17 @@ impl<'b, W: Owner, E: From<BuildError<W::Error>>> Scope<'b, '_, W, E> {
         })
     }
 
-    /// Allocates one block of `len` elements, each written in place.
+    /// Allocates one block of the given number of elements, each written in
+    /// place.
     ///
-    /// `fill` is called once per index, in order, and returns the parts of
-    /// that element. An empty slice allocates nothing. A zero-sized `T` does
-    /// not compile.
+    /// The callback is called once per index, in order, and returns the parts
+    /// of that element. An empty slice allocates nothing. A zero-sized type
+    /// does not compile.
     ///
     /// # Errors
     ///
-    /// The size overflows, the memory is exhausted, `fill` fails, which is
-    /// returned as it is, or the write of an element is refused. The
+    /// The size overflows, the memory is exhausted, the callback fails, which
+    /// is returned as it is, or the write of an element is refused. The
     /// elements written so far and the block are returned.
     pub fn slice<T: Build>(
         self,
@@ -618,9 +621,9 @@ impl<'b, W: Owner, E: From<BuildError<W::Error>>> Scope<'b, '_, W, E> {
         };
         for idx in 0..len {
             let parts = fill(idx)?;
-            // SAFETY: element `idx < len` of the fresh block, aligned (see
-            // `alloc`), and every block and registration in the parts belongs
-            // to this build by the brand.
+            // SAFETY: the element lies in the fresh block, aligned by the
+            // allocation, and every block and registration in the parts
+            // belongs to this build by the brand.
             unsafe { T::write::<W>(parts, self.memory, addr + idx * size_of::<T>()) }.map_err(refused::<W, E>)?;
             partial.written += 1;
         }
@@ -628,7 +631,7 @@ impl<'b, W: Owner, E: From<BuildError<W::Error>>> Scope<'b, '_, W, E> {
         Ok(self.owned_slice(addr, len))
     }
 
-    /// Registers a single-value counter named `name` with the module.
+    /// Registers a single-value counter of the given name with the module.
     ///
     /// # Errors
     ///
@@ -639,7 +642,7 @@ impl<'b, W: Owner, E: From<BuildError<W::Error>>> Scope<'b, '_, W, E> {
         Ok(Registered::new(id))
     }
 
-    /// Links the device named `name` to the module.
+    /// Links the device of the given name to the module.
     ///
     /// # Errors
     ///
@@ -650,11 +653,12 @@ impl<'b, W: Owner, E: From<BuildError<W::Error>>> Scope<'b, '_, W, E> {
         Ok(Registered::new(index))
     }
 
-    /// Allocates a block of `size` payload bytes.
+    /// Allocates a block of the given payload size.
     ///
     /// The size is a multiple of the alignment of the type it holds, so the
     /// allocator's alignment, the smaller of 64 and the size rounded up to a
-    /// power of two, is at least that of the type, which `MAX_ALIGN` bounds.
+    /// power of two, is at least that of the type, which the maximum supported
+    /// alignment bounds.
     /// A size beyond the C block allocator's largest block is refused before
     /// the owner is asked, as no free memory could serve it.
     fn alloc(self, size: usize) -> Result<usize, E> {
@@ -687,8 +691,9 @@ impl<T: Build, W: Owner> Owned<'_, T, W> {
 
 impl<T: Build, W: Owner> Drop for Owned<'_, T, W> {
     fn drop(&mut self) {
-        // SAFETY: the block holds one `T` written whole and was allocated
-        // from `memory` with its exact size; nothing but this value owns it.
+        // SAFETY: the block holds one value written whole and was allocated
+        // from the memory context with its exact size; nothing but this value
+        // owns it.
         unsafe { free_block::<T, W>(self.addr, 1, self.memory) }
     }
 }
@@ -705,9 +710,9 @@ impl<T: Build, W: Owner> OwnedSlice<'_, T, W> {
 impl<T: Build, W: Owner> Drop for OwnedSlice<'_, T, W> {
     fn drop(&mut self) {
         if self.addr != 0 {
-            // SAFETY: the block holds `len` elements written whole and was
-            // allocated from `memory` with its exact size; nothing but this
-            // value owns it.
+            // SAFETY: the block holds its elements written whole and was
+            // allocated from the memory context with its exact size; nothing
+            // but this value owns it.
             unsafe { free_block::<T, W>(self.addr, self.len, self.memory) }
         }
     }
@@ -723,13 +728,13 @@ impl<T> Registered<'_, T> {
     }
 }
 
-/// Entry point of the construction of configurations of module `M`; never
+/// Entry point of the construction of configurations of a module; never
 /// constructed.
 pub struct Builder<M>(PhantomData<fn() -> M>);
 
 impl<M: Module> Builder<M> {
-    /// Builds a configuration named `name`; the caller owns it and publishes
-    /// it.
+    /// Builds a configuration of the given name; the caller owns it and
+    /// publishes it.
     ///
     /// The closure builds blocks and registrations through its scope and
     /// returns the parts of the body, which may borrow what the closure
@@ -766,8 +771,8 @@ impl<M: Module> Builder<M> {
         let header = unsafe { Header::at(block) };
         // SAFETY: the block is ours and the header sits at its start.
         if let Err(err) = unsafe { owner.init_header(header, M::NAME, name) } {
-            // SAFETY: the block came from `alloc` with this size, and a
-            // refused header leaves nothing to finalise.
+            // SAFETY: the block came from the owner's allocation with this
+            // size, and a refused header leaves nothing to finalise.
             unsafe { owner.free(block, size) };
             return Err(failed::<W, E>(err));
         }
@@ -792,12 +797,12 @@ impl<M: Module> Builder<M> {
     }
 }
 
-/// A configuration of module `M` that [`Builder::build`] handed over in the
-/// memory of owner type `W`: its header address, to publish, and the right to
+/// A configuration of a module that [`Builder::build`] handed over in the
+/// memory of an owner type: its header address, to publish, and the right to
 /// release it.
 ///
 /// Not freed on drop, as the configuration is shared once published; release
-/// it with [`Built::destroy`], which takes an owner of type `W` only.
+/// it with [`Built::destroy`], which takes an owner of that type only.
 #[must_use]
 pub struct Built<M, W> {
     header: Header,
@@ -823,7 +828,7 @@ impl<M: Module, W: Owner> Built<M, W> {
     ///
     /// # Safety
     ///
-    /// `owner` is the one that built it, and nothing references the
+    /// The owner is the one that built it, and nothing references the
     /// configuration any longer.
     pub unsafe fn destroy(self, owner: &W) {
         let memory = MemoryContext::new(owner, self.header);
@@ -854,14 +859,13 @@ impl<W: Owner> Drop for Release<'_, W> {
     }
 }
 
-/// Finalises the header at `header` and returns its root block of `size`
-/// bytes.
+/// Finalises a header and returns its root block.
 ///
 /// # Safety
 ///
-/// `header` is a module header initialised by `owner` at the start of a root
-/// block allocated with `size`, every block of its context is returned or
-/// never referenced again, and nothing references the header.
+/// The header is a module header initialised by the owner at the start of a
+/// root block allocated with the given size, every block of its context is
+/// returned or never referenced again, and nothing references the header.
 unsafe fn release_root<W: Owner>(owner: &W, header: Header, size: usize) {
     // SAFETY: guaranteed by the caller; the header is the start of the block.
     unsafe {

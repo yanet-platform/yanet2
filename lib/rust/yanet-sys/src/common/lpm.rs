@@ -30,10 +30,10 @@ type Page = [u64; 256];
 ///
 /// Values keep the C semantics documented on [`Lpm::lookup`]: bit 31 is lost.
 ///
-/// `from <= to` is required: the C insert does not check it and a reversed
-/// range would wrap round, so a build refuses one. Ranges are inserted in slice
-/// order, and on an overlap the later range wins, so a broad range goes before
-/// the narrow ones in it.
+/// The first key must not exceed the last: the C insert does not check it and
+/// a reversed range would wrap round, so a build refuses one. Ranges are
+/// inserted in slice order, and on an overlap the later range wins, so a broad
+/// range goes before the narrow ones in it.
 ///
 /// The ranges are borrowed for the whole build, so they are made before it
 /// starts, for a table in a box or a slice too.
@@ -48,9 +48,9 @@ pub struct LpmRange<const K: usize> {
 }
 
 impl<const K: usize> LpmRange<K> {
-    /// The range of the `len` leading bits of `addr`, mapped to `value`.
+    /// The range of the leading bits of an address, mapped to a value.
     ///
-    /// The bits of `addr` past `len` are ignored.
+    /// The bits of the address past the prefix length are ignored.
     ///
     /// ```
     /// use yanet_sys::common::lpm::LpmRange;
@@ -61,7 +61,7 @@ impl<const K: usize> LpmRange<K> {
     ///
     /// # Panics
     ///
-    /// `len` is more than the `8 * K` bits of a key.
+    /// The prefix length is more than the bits of a key.
     #[must_use]
     pub fn prefix(addr: [u8; K], len: usize, value: u32) -> Self {
         assert!(len <= 8 * K, "a prefix of {len} bits in a key of {K} bytes");

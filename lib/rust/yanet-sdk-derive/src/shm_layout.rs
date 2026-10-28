@@ -5,7 +5,7 @@ use quote::{format_ident, quote, quote_spanned};
 use syn::{Data, DeriveInput, Fields, spanned::Spanned};
 
 /// Checks the representation: `C`, optionally with an alignment; the
-/// expansion bounds the alignment by `MAX_ALIGN`.
+/// expansion bounds the alignment by the maximum shared-memory alignment.
 fn check_repr(input: &DeriveInput) -> syn::Result<()> {
     let mut repr_c = false;
     for attr in input.attrs.iter().filter(|a| a.path().is_ident("repr")) {
@@ -127,8 +127,8 @@ pub fn expand(input: &DeriveInput) -> syn::Result<TokenStream> {
 
         // SAFETY: a non-generic repr(C) struct, not packed, aligned to at
         // most 64, without padding (size equals the sum of its fields) or
-        // drop glue, whose every field is ShmLayout (checked above), accepts
-        // every bit pattern.
+        // drop glue, whose every field is shared-memory data (checked above),
+        // accepts every bit pattern.
         unsafe impl #p::ShmLayout for #name {}
 
         #[doc = #parts_doc]

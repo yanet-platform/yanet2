@@ -52,7 +52,7 @@ pub struct Context(usize);
 pub struct BlockAddr(usize);
 
 impl Header {
-    /// The header at the start of the root `block`.
+    /// The header at the start of a root block.
     ///
     /// # Safety
     ///
@@ -80,11 +80,11 @@ impl Context {
 }
 
 impl BlockAddr {
-    /// The block whose payload starts at `addr`.
+    /// The block whose payload starts at an address.
     ///
     /// # Safety
     ///
-    /// `addr` is the payload of a block of the owner.
+    /// The address is the payload of a block of the owner.
     pub unsafe fn new(addr: usize) -> Self {
         Self(addr)
     }

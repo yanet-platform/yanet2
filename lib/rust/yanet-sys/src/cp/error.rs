@@ -33,7 +33,7 @@ impl fmt::Display for Refusal {
 impl Error for Refusal {}
 
 /// The error of building a configuration: a refusal of the SDK or a failure
-/// of the owner `E`.
+/// of the owner.
 #[derive(Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum BuildError<E> {

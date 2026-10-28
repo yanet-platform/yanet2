@@ -15,8 +15,8 @@ struct block_allocator;
 struct lpm;
 struct memory_context;
 
-// lpm_init (common/lpm.h): opens an LPM at lpm as a child of the memory
-// context, named name, with its first page.
+// lpm_init (common/lpm.h): opens an LPM at the given address as a child of
+// the given memory context, with a name and its first page.
 //
 // Returns 0, or -1 with errno ENOMEM when the context's memory is exhausted.
 // The LPM is then not usable but must still be passed to
@@ -26,8 +26,8 @@ yanet_sys_common_lpm_init(
 	struct lpm *lpm, struct memory_context *memory_context, const char *name
 );
 
-// lpm_insert (common/lpm.h): maps the inclusive big-endian range from..to of
-// key_size bytes to value.
+// lpm_insert (common/lpm.h): maps an inclusive big-endian range of keys of
+// the given size to a value.
 //
 // Returns 0, or -1 with errno ENOMEM when a page cannot be allocated; the
 // LPM then stays valid for yanet_sys_common_lpm_free.
@@ -53,8 +53,8 @@ yanet_sys_common_lpm_free(struct lpm *lpm);
 YANET_SYS_HIDDEN int
 yanet_sys_common_block_allocator_init(struct block_allocator *allocator);
 
-// block_allocator_put_arena (common/memory_block.h): hands the allocator the
-// size bytes at arena to allocate from.
+// block_allocator_put_arena (common/memory_block.h): hands the allocator a
+// byte range of the given size to allocate from.
 //
 // The bytes are cut into blocks by their alignment, so the usable size
 // depends on the arena's. Cannot fail.
@@ -68,8 +68,8 @@ yanet_sys_common_block_allocator_put_arena(
 YANET_SYS_HIDDEN size_t
 yanet_sys_common_block_allocator_free_size(struct block_allocator *allocator);
 
-// memory_context_init (common/memory.h): makes a root memory context named
-// name over the allocator.
+// memory_context_init (common/memory.h): makes a root memory context with a
+// name over a block allocator.
 //
 // Returns 0, always.
 YANET_SYS_HIDDEN int

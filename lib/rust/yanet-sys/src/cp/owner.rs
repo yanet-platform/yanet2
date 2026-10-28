@@ -21,7 +21,7 @@ use super::addr::{BlockAddr, Context, Header};
 /// name.
 ///
 /// [`Owner::free`], [`Owner::free_in`] and [`Owner::fini_header`] must not
-/// panic: the builder calls them from `Drop`, also while unwinding.
+/// panic: the builder calls them from destructors, also while unwinding.
 /// [`Owner::init_header`] must not panic either: the root block is not yet
 /// guarded when it runs.
 ///
@@ -29,10 +29,10 @@ use super::addr::{BlockAddr, Context, Header};
 /// over memory of this owner, as `cp_module_init` does: an embedded C object
 /// opens its own context under it.
 ///
-/// The builder never makes two calls on one header at once, though `&W` may
-/// be shared, because the header's memory context and registries are not
-/// promised to take concurrent calls; an owner may rely on that, and a bound
-/// `W: Sync` alone does not say it.
+/// The builder never makes two calls on one header at once, though the owner
+/// may be shared, because the header's memory context and registries are not
+/// promised to take concurrent calls; an owner may rely on that, and being
+/// `Sync` alone does not say it.
 pub unsafe trait Owner: 'static {
     /// The failure of a C routine.
     type Error: Error;
@@ -40,23 +40,23 @@ pub unsafe trait Owner: 'static {
     /// Provenance root of the owner's memory.
     fn root(&self) -> ShmRoot;
 
-    /// Block of `size` bytes, `None` when the memory is exhausted.
+    /// Block of the given size in bytes, `None` when the memory is exhausted.
     fn alloc(&self, size: usize) -> Option<BlockAddr>;
 
     /// Returns a block.
     ///
     /// # Safety
     ///
-    /// `addr` must come from [`Owner::alloc`] with the same size and be no
+    /// The block must come from [`Owner::alloc`] with the same size and be no
     /// longer referenced.
     unsafe fn free(&self, addr: BlockAddr, size: usize);
 
-    /// Block of `size` bytes from the memory context at `context`, the one a
-    /// C header of this owner embeds, `None` when the memory is exhausted.
+    /// Block of the given size in bytes from a memory context, the one a C
+    /// header of this owner embeds, `None` when the memory is exhausted.
     ///
     /// # Safety
     ///
-    /// `context` must be the memory context of an initialised header of
+    /// The context must be the memory context of an initialised header of
     /// this owner.
     unsafe fn alloc_in(&self, context: Context, size: usize) -> Option<BlockAddr>;
 
@@ -64,17 +64,17 @@ pub unsafe trait Owner: 'static {
     ///
     /// # Safety
     ///
-    /// `addr` must come from [`Owner::alloc_in`] of the same context with
+    /// The block must come from [`Owner::alloc_in`] of the same context with
     /// the same size, the context must still be initialised, and the block
     /// must be no longer referenced.
     unsafe fn free_in(&self, context: Context, addr: BlockAddr, size: usize);
 
-    /// Initialises the C module header of a configuration of module type
-    /// `module` named `name`, as `cp_module_init` does.
+    /// Initialises the C module header of a configuration of a module type
+    /// and name, as `cp_module_init` does.
     ///
     /// # Safety
     ///
-    /// `header` must be at the start of a block of this owner, large enough
+    /// The header must be at the start of a block of this owner, large enough
     /// for the header, which the routine overwrites whole.
     unsafe fn init_header(&self, header: Header, module: &str, name: &str) -> Result<(), Self::Error>;
 
@@ -83,7 +83,7 @@ pub unsafe trait Owner: 'static {
     ///
     /// # Safety
     ///
-    /// `header` must have been initialised by this owner and be no longer
+    /// The header must have been initialised by this owner and be no longer
     /// referenced.
     unsafe fn fini_header(&self, header: Header);
 
@@ -92,7 +92,7 @@ pub unsafe trait Owner: 'static {
     ///
     /// # Safety
     ///
-    /// `header` must be initialised by this owner and not published.
+    /// The header must be initialised by this owner and not published.
     unsafe fn register_counter(&self, header: Header, name: &str) -> Result<u64, Self::Error>;
 
     /// Links a device to the module and returns its index.
