@@ -331,6 +331,9 @@ test-asan:
 # -asan instruments the Go side too, so a Go access through unsafe past a C
 # allocation, or into a block the C allocator freed, aborts the test. It also
 # turns on the leak check at exit, so C memory a test never frees fails it.
+# Go test binaries do not register globals: the ASan runtime in use races that
+# against thread start and crashes random tests (llvm/llvm-project#87324), so
+# their globals go unchecked while the meson C tests keep checking theirs.
 test-asan-only:
 	@if [ ! -d "build" ]; then \
 		$(MAKE) setup-asan; \
@@ -343,6 +346,7 @@ test-asan-only:
 	export CGO_CFLAGS="-fsanitize=address,undefined"; \
 	export CGO_LDFLAGS="-fsanitize=address,undefined"; \
 	export UBSAN_OPTIONS="$${UBSAN_OPTIONS:-halt_on_error=1:abort_on_error=1:print_summary=1:print_stacktrace=1}"; \
+	export ASAN_OPTIONS="report_globals=0$${ASAN_OPTIONS:+:$$ASAN_OPTIONS}"; \
 	go test -asan -count=1 $$(go list ./... | grep -v '^github.com/yanet-platform/yanet2/tests/functional/main')
 	meson test -C build
 
