@@ -44,6 +44,8 @@ An image published from `main` is tagged with the full SHA of the commit it was 
 
 `ci/go-version` names the Go that every Go setup step of the workflows installs, and the image build fails when the image carries a different one. A Go bump therefore changes `ci/go-version` and `ci/Dockerfile` (version and checksums) in the same pull request; until the follow-up pin lands, the jobs in the image still run the previous Go. A manual release rerun that builds an older tag takes the file from the workflow's own commit, since the tag may predate it.
 
+`LLVM_VERSION` in `ci/Dockerfile` names the one LLVM the image carries, from the LLVM archive at apt.llvm.org, which `ci/llvm-snapshot.gpg.key` verifies (fingerprint `6084 F3CF 814B 57C1 CF12 EFD5 15CF 4D18 AF4F 7421`). The archive builds snapshots of the release branch, so every image build takes its newest one; the digest pin keeps a job on one build. The unversioned `clang`, `clang++` and `llvm-symbolizer` point at it, but bindgen in `rust-sdk.yml` and `rust-miri.yml` names its versioned paths, as does `lib/rust/README.md`, so the pull request that pins an LLVM bump updates them too.
+
 Rust and the protobuf generators must match what the jobs on the hosted runner install (the Rust toolchain steps, `.github/actions/protoc-plugins`) for as long as both kinds of jobs exist.
 
 The jobs in the image do not run under act: act runs JavaScript actions inside the job container, and the image carries no Node.js.
