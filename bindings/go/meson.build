@@ -133,9 +133,6 @@ cgo_packages += {
       lib_l3state,
     ],
   },
-  'lib/utils/go': {
-    'libraries': [lib_lib_utils],
-  },
   'modules/acl/tests/functional/fwtable': {
     'libraries': [lib_fwstate_objects],
   },
