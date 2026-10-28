@@ -16,12 +16,6 @@ type MapStats struct {
 	StaleLayerCount  uint32
 }
 
-// MapsStats stores IPv4 and IPv6 fwmap statistics.
-type MapsStats struct {
-	IPv4 MapStats
-	IPv6 MapStats
-}
-
 // fwmapStatsOrZero returns stats for the given head fwmap, or zero stats
 // when head is nil (no map attached).
 func fwmapStatsOrZero(head *C.fwmap_t) C.struct_fwmap_stats {
