@@ -453,7 +453,7 @@ func (m *DPConfig) CPMemory() *CPMemoryInfo {
 // CPAllocatorStats returns a lock-consistent snapshot of the shared
 // control-plane allocator, including space not reserved by any agent.
 func (m *DPConfig) CPAllocatorStats() AllocatorStats {
-	var stats C.struct_block_allocator_stats
+	var stats C.struct_cp_allocator_info
 	var pinner runtime.Pinner
 	pinner.Pin(&stats)
 	defer pinner.Unpin()
@@ -461,12 +461,12 @@ func (m *DPConfig) CPAllocatorStats() AllocatorStats {
 	return allocatorStats(&stats)
 }
 
-func allocatorStats(stats *C.struct_block_allocator_stats) AllocatorStats {
-	pools := make([]AllocatorPoolStats, len(stats.free_blocks))
+func allocatorStats(stats *C.struct_cp_allocator_info) AllocatorStats {
+	pools := make([]AllocatorPoolStats, len(stats.pools))
 	for idx := range pools {
 		pools[idx] = AllocatorPoolStats{
-			BlockSizeBytes: uint64(1) << (C.MEMORY_BLOCK_ALLOCATOR_MIN_BITS + idx),
-			FreeBlocks:     uint64(stats.free_blocks[idx]),
+			BlockSizeBytes: uint64(stats.pools[idx].block_size_bytes),
+			FreeBlocks:     uint64(stats.pools[idx].free_blocks),
 		}
 	}
 	return AllocatorStats{
