@@ -47,11 +47,14 @@ yanet-cli l3b validate-module-config module.yaml
 ```
 
 These commands require a document and use the same loaders and wire conversion
-as the operational commands. They do not load connection settings, contact a
-Gateway or send any RPC. Connection flags do not affect validation. Success
-exits 0; invalid documents exit 1, with the usual human or `--format json`
-output. This checks local document validity, not server state or deployment
-readiness. CI must use a binary/schema that knows the fields being introduced.
+as the operational commands. They do not read connection configuration files,
+resolve endpoints, contact a Gateway or send any RPC. The shared CLI parser
+still requires valid flag and environment-variable syntax: for example,
+`--timeout 0` or `YANET_TIMEOUT=garbage` is a usage error (exit 2) before document
+validation. Valid connection options are otherwise unused. Success exits 0;
+invalid documents exit 1, with the usual human or `--format json` output. This
+checks local document validity, not server state or deployment readiness. CI
+must use a binary/schema that knows the fields being introduced.
 
 ## Configuration-First Rollout
 
