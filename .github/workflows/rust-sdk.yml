@@ -54,8 +54,8 @@ concurrency:
 env:
   # bindgen needs a clang and a libclang of the same LLVM major, both in the
   # CI image.
-  CLANG_PATH: /usr/bin/clang-18
-  LIBCLANG_PATH: /usr/lib/llvm-18/lib
+  CLANG_PATH: /usr/bin/clang-23
+  LIBCLANG_PATH: /usr/lib/llvm-23/lib
 
 defaults:
   run:
@@ -94,7 +94,7 @@ jobs:
         include:
           - {arch: x86_64, runner: ubuntu-24.04, target: x86_64-unknown-none}
           - {arch: arm64, runner: ubuntu-24.04-arm, target: aarch64-unknown-none}
-    container: ghcr.io/yanet-platform/yanet2-ci@sha256:81927a6bf8adabade5c16d5b1bd698e2ca5535ffd88175b58a5934e647834e25
+    container: ghcr.io/yanet-platform/yanet2-ci@sha256:3cbb2aae05beb4efc16f160cfa4d5307deba5d3110005d6557fdb49e5e2ee7a1
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -135,7 +135,7 @@ jobs:
         include:
           - {arch: x86_64, runner: ubuntu-24.04}
           - {arch: arm64, runner: ubuntu-24.04-arm}
-    container: ghcr.io/yanet-platform/yanet2-ci@sha256:81927a6bf8adabade5c16d5b1bd698e2ca5535ffd88175b58a5934e647834e25
+    container: ghcr.io/yanet-platform/yanet2-ci@sha256:3cbb2aae05beb4efc16f160cfa4d5307deba5d3110005d6557fdb49e5e2ee7a1
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

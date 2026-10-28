@@ -19,7 +19,7 @@ The build script of `yanet-sys` reads the C flags of the dataplane
 that `meson setup build` writes at the repository root; `YANET_BUILD_DIR`
 names another build directory, and `.cargo/config.toml` of this directory
 defaults it to `build`. It also needs a clang
-and a libclang of one LLVM major (`CLANG_PATH`, `LIBCLANG_PATH`); CI uses 18.
+and a libclang of one LLVM major (`CLANG_PATH`, `LIBCLANG_PATH`); CI uses 23.
 The same build script compiles the dataplane C shim, with the packet
 encapsulation sources of `lib/dataplane/packet` it calls, with hidden
 visibility and the warning options of the C build, `-Werror` included. A
@@ -30,7 +30,7 @@ tests of `yanet-shm` need neither the compilation database nor a C compiler.
 ```sh
 meson setup build
 cd lib/rust
-export CLANG_PATH=/usr/bin/clang-18 LIBCLANG_PATH=/usr/lib/llvm-18/lib
+export CLANG_PATH=/usr/bin/clang-23 LIBCLANG_PATH=/usr/lib/llvm-23/lib
 cargo test --workspace                      # native suites
 MIRIFLAGS="-Zmiri-strict-provenance" cargo +nightly-2026-10-22 miri nextest run --workspace   # Miri (cargo-nextest); add -Zmiri-tree-borrows for Tree Borrows
 ```
