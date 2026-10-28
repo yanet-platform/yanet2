@@ -22,8 +22,8 @@ use tonic::{
 };
 // Production dependencies are exercised through the public executable.
 use {
-    clap as _, commonpb as _, filterpb as _, log as _, prost as _, serde as _, serde_yaml as _, tabled as _,
-    unsafe_libyaml as _, ync as _,
+    clap as _, commonpb as _, filterpb as _, log as _, prost as _, serde as _, serde_ignored as _, serde_yaml as _,
+    tabled as _, unsafe_libyaml as _, ync as _,
 };
 
 /// Records RPC paths and returns a recognizable remote rejection.
@@ -83,10 +83,10 @@ async fn test_document_commands_reject_before_mutation_rpc() {
             ),
         ] {
             let cases = [
-                format!("{valid}unknown: null"),
                 format!("{valid}{valid}"),
                 format!("!custom\n{valid}"),
                 "[unterminated".into(),
+                format!("{valid}future: {{password: secret-value}}"),
                 valid.to_owned(),
             ];
             for (index, document) in cases.iter().enumerate() {
@@ -112,9 +112,14 @@ async fn test_document_commands_reject_before_mutation_rpc() {
                     "{}",
                     String::from_utf8_lossy(&output.stderr)
                 );
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                if index == cases.len() - 2 {
+                    assert!(stderr.contains("ignoring unknown field future"), "{stderr}");
+                    assert!(!stderr.contains("secret-value"), "{stderr}");
+                }
                 let output: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
                 let error = &output["error"];
-                if index == cases.len() - 1 {
+                if index >= cases.len() - 2 {
                     assert_eq!("PermissionDenied", error["code"], "{error}");
                     assert_eq!(
                         vec![format!("/{}/{method}", Recorder::NAME)],
@@ -137,4 +142,58 @@ async fn test_document_commands_reject_before_mutation_rpc() {
         result = server => panic!("test endpoint stopped: {result:?}"),
         () = commands => {}
     }
+}
+
+#[tokio::test]
+async fn test_strict_validation_commands_are_offline_and_do_not_mutate() {
+    let incoming = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let endpoint = format!("grpc://{}", incoming.local_addr().unwrap());
+    // A listener without a server makes any accidental connection wait or fail.
+    let directory = tempfile::tempdir().unwrap();
+    let file = directory.path().join("document.yaml");
+    for (command, valid, invalid) in [
+        (
+            "validate-service",
+            "real_servers: []\nsource_filter_rules: []\n",
+            "real_servers: null\nsource_filter_rules: []\n",
+        ),
+        (
+            "validate-module-config",
+            "destination_filter_rules: []\n",
+            "destination_filter_rules: null\n",
+        ),
+    ] {
+        for (document, expected) in [
+            (valid.to_owned(), 0),
+            (format!("{valid}future: null"), 1),
+            (invalid.to_owned(), 1),
+        ] {
+            fs::write(&file, document).unwrap();
+            let output = timeout(
+                Duration::from_secs(5),
+                Command::new(env!("CARGO_BIN_EXE_yanet-cli-l3b"))
+                    .env_clear()
+                    .env("YANET_CONFIG", directory.path().join("missing-cli-config"))
+                    .args(["--endpoint", &endpoint, "--format", "json", command])
+                    .arg(&file)
+                    .kill_on_drop(true)
+                    .output(),
+            )
+            .await
+            .unwrap()
+            .unwrap();
+            assert_eq!(
+                Some(expected),
+                output.status.code(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            let result: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+            if expected != 0 {
+                assert_eq!("invalid_argument", result["error"]["kind"]);
+                assert!(result["error"]["message"].as_str().unwrap().contains("document.yaml"));
+            }
+        }
+    }
+    assert!(timeout(Duration::from_millis(20), incoming.accept()).await.is_err());
 }

@@ -5,13 +5,22 @@ current YAML documents and `--file` option. This is not a migration to a new
 protobuf API or ProtoJSON format. Existing field names, default values, wire
 requests and native network parsing remain unchanged.
 
-Documents are strict: unknown fields (even when null), duplicate keys, YAML
-merge keys, custom tags, alias references and null list members are rejected.
-Only the existing snake_case field names are accepted; there are no additional
-camelCase aliases. Comments, quoted strings and native network values are not
-scanned as YAML syntax.
+Unknown fields at L3B-owned nesting levels are ignored by default, including
+null values and entire unknown subtrees. Warnings on stderr identify their
+field paths, never their values; paths are escaped and truncated after 256
+characters, and at most 16 paths plus a summary are reported per document.
+Machine-readable stdout is unchanged. An ignored field is not sent to the
+server. Existing snake_case names remain the supported names; camelCase
+spellings are not aliases.
 
-Integer fields require unquoted nonnegative decimal scalars made of ASCII
+Known fields still reject invalid types and values. Duplicate keys, YAML merge
+keys, custom tags and alias references are rejected throughout the document,
+including ignored subtrees. Mapping keys must be scalars. Null members of known
+lists remain invalid. Unknown values have no known field schema and are not
+subject to the integer rules below. Comments, quoted values and native network
+values are not scanned as YAML syntax.
+
+Known integer fields require unquoted nonnegative decimal scalars made of ASCII
 digits and within the field's existing range. Hexadecimal, octal, binary,
 signed, floating-point, boolean and quoted numeric forms are rejected. Leading
 zero forms that YAML treats as strings remain invalid for integer fields.
@@ -24,8 +33,38 @@ null protocol subtype endpoints select their existing defaults. In contrast,
 `session_timeouts: null` is not a valid structure; omit it or use `{}` for the
 current defaults. Imported native network semantics are unchanged.
 
-These are deliberate input-validation incompatibilities: documents previously
-accepted by ignoring unknown fields or normalizing disallowed YAML must be
-corrected. Invalid documents produce an invalid-input failure with their source
-file and location and do not send a mutation RPC. A connection may already have
-been opened before document parsing.
+Invalid documents produce an invalid-input failure with their source file and
+location or field path and do not send a mutation RPC. A connection may already
+have been opened before parsing by an operational command.
+
+## Strict Configuration CI
+
+Use the explicit offline validation commands to reject unknown fields:
+
+```sh
+yanet-cli l3b validate-service service.yaml
+yanet-cli l3b validate-module-config module.yaml
+```
+
+These commands require a document and use the same loaders and wire conversion
+as the operational commands. They do not load connection settings, contact a
+Gateway or send any RPC. Connection flags do not affect validation. Success
+exits 0; invalid documents exit 1, with the usual human or `--format json`
+output. This checks local document validity, not server state or deployment
+readiness. CI must use a binary/schema that knows the fields being introduced.
+
+## Configuration-First Rollout
+
+Additive configuration can precede supporting binaries only after this
+compatibility policy has reached the binaries applying it. Already released
+strict binaries still reject unknown fields until upgraded; this change does
+not fix them retroactively.
+
+An unsupported field is ignored when the configuration is applied, not stored
+for later activation. It takes effect only when a supporting binary reapplies
+the configuration. Ignoring a security- or routing-critical requirement is not
+proof that it is enforced: verify enforcement before relying on it.
+
+Renaming or removing existing fields, or changing their meaning, is not made
+compatible by ignoring additions. Compatibility between a new CLI and an old
+backend is a separate concern; this policy does not negotiate backend features.

@@ -18,6 +18,7 @@ clap = { version = "4.5", features = ["derive"] }
 prost = "0.14"
 tonic = { version = "0.14", features = ["gzip", "zstd"] }
 serde = { version = "1", features = ["derive"] }
+serde_ignored = "0.1"
 serde_yaml = "0.9"
 unsafe-libyaml = "0.2"
 tabled = { version = "0.22", default-features = false, features = ["ansi", "derive"] }

@@ -62,6 +62,10 @@ pub enum ModeCmd {
     ListServices,
     /// Install a named module configuration.
     UpdateModuleConfig(ModuleConfigCmd),
+    /// Strictly validate a service document without contacting a Gateway.
+    ValidateService(ValidateCmd),
+    /// Strictly validate a module document without contacting a Gateway.
+    ValidateModuleConfig(ValidateCmd),
     /// List module configuration names.
     ListModuleConfigs,
     /// Enable or disable a real server within a named virtual service.
@@ -82,6 +86,8 @@ impl ModeCmd {
             Self::DeleteService(..) => "delete-service",
             Self::ListServices => "list-services",
             Self::UpdateModuleConfig(..) => "update-module-config",
+            Self::ValidateService(..) => "validate-service",
+            Self::ValidateModuleConfig(..) => "validate-module-config",
             Self::ListModuleConfigs => "list-module-configs",
             Self::UpdateRealServerState(..) => "update-real-server-state",
             Self::UpdateRealServerWeight(..) => "update-real-server-weight",
@@ -89,6 +95,12 @@ impl ModeCmd {
             Self::ShowService(..) => "show-service",
         }
     }
+}
+
+#[derive(Debug, Clone, Parser)]
+pub struct ValidateCmd {
+    /// YAML document to validate against this binary's schema.
+    pub path: PathBuf,
 }
 
 #[derive(Debug, Clone, Parser)]
@@ -171,7 +183,6 @@ pub struct WeightCmd {
 /// `hash-mask`/`index-mask` stay command flags; the document carries only
 /// what has no natural flag form.
 #[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
 struct ServiceDocument {
     /// Real servers the service dispatches to.
     real_servers: Vec<RealServerDoc>,
@@ -201,7 +212,7 @@ struct ServiceDocument {
 
 /// Outer-header DSCP marking of a service.
 #[derive(Debug, Deserialize)]
-#[serde(rename_all = "lowercase", deny_unknown_fields)]
+#[serde(rename_all = "lowercase")]
 struct DSCPMarkingDoc {
     /// never inherits the inner DSCP, onlyDefault marks a zero DSCP and
     /// always marks unconditionally.
@@ -222,7 +233,6 @@ enum DSCPMarkMode {
 
 /// Session lifetime policy, in seconds.
 #[derive(Debug, Default, Deserialize)]
-#[serde(deny_unknown_fields)]
 struct SessionTimeoutsDoc {
     /// Established TCP flows.
     #[serde(default, deserialize_with = "document::scalar")]
@@ -246,7 +256,6 @@ struct SessionTimeoutsDoc {
 
 /// One real server tunnel endpoint.
 #[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
 struct RealServerDoc {
     /// Tunnel destination address of the real server.
     destination_address: IpAddr,
@@ -256,7 +265,6 @@ struct RealServerDoc {
 
 /// One source-side match rule.
 #[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
 struct SourceFilterRuleDoc {
     /// IPv6 source networks the rule accepts.
     net6s: Vec<commonpb::pb::IPv6Network>,
@@ -268,7 +276,6 @@ struct SourceFilterRuleDoc {
 
 /// An inclusive numeric range.
 #[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
 struct RangeDoc {
     #[serde(deserialize_with = "document::scalar")]
     from: u16,
@@ -280,7 +287,6 @@ struct RangeDoc {
 /// rules routing traffic to services; the linked services are exactly those
 /// the rules name.
 #[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
 struct ModuleConfigDocument {
     /// Destination rules, in rule order.
     destination_filter_rules: Vec<DestinationRuleDoc>,
@@ -311,7 +317,6 @@ impl ModuleConfigDocument {
 
 /// One destination-side classification rule.
 #[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
 struct DestinationRuleDoc {
     /// IPv6 destination networks the rule matches.
     net6s: Vec<commonpb::pb::IPv6Network>,
@@ -329,7 +334,6 @@ struct DestinationRuleDoc {
 /// `tcp` with the default subtypes selects every TCP packet regardless of
 /// flags; a number selects that protocol directly.
 #[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
 struct ProtoRangeDoc {
     /// The transport protocol.
     proto: ProtocolDoc,
@@ -447,17 +451,21 @@ impl TryFrom<&DestinationRuleDoc> for l3bpb::DestinationFilterRule {
     }
 }
 
-/// Reads a strict YAML document, retaining its source in every error.
-fn load_document<T: for<'de> Deserialize<'de>>(path: &Path) -> Result<T, String> {
+/// Retains the source file in errors and emits value-free warnings on stderr.
+fn load_document<T: for<'de> Deserialize<'de>>(path: &Path, strict: bool) -> Result<T, String> {
     let content = std::fs::read_to_string(path).map_err(|err| format!("failed to read {}: {err}", path.display()))?;
-    document::validate(&content).map_err(|err| format!("invalid document {}: {err}", path.display()))?;
-    serde_yaml::from_str(&content).map_err(|err| format!("invalid document {}: {err}", path.display()))
+    let (document, warnings) =
+        document::parse(&content, strict).map_err(|err| format!("invalid document {}: {err}", path.display()))?;
+    for warning in warnings {
+        log::warn!("{warning}");
+    }
+    Ok(document)
 }
 
 impl ServiceCmd {
     /// Builds the wire configuration from command flags and an optional
     /// document.
-    pub fn load(&self) -> Result<VirtualService, String> {
+    pub fn load(&self, strict: bool) -> Result<VirtualService, String> {
         let mut service = VirtualService {
             name: self.name.clone(),
             hash_mask: self.hash_mask,
@@ -466,7 +474,7 @@ impl ServiceCmd {
         };
 
         if let Some(path) = &self.file {
-            let document: ServiceDocument = load_document(path)?;
+            let document: ServiceDocument = load_document(path, strict)?;
             service.real_servers = document.real_servers.iter().map(Into::into).collect();
             service.source_filter_rules = document.source_filter_rules.iter().map(Into::into).collect();
             service.session_index_size = document.session_index_size;
@@ -491,13 +499,13 @@ impl ServiceCmd {
 
 impl ModuleConfigCmd {
     /// Builds destination rules without issuing a mutation.
-    pub fn load(&self) -> Result<ModuleConfig, String> {
+    pub fn load(&self, strict: bool) -> Result<ModuleConfig, String> {
         let mut config = ModuleConfig {
             name: self.name.clone(),
             ..Default::default()
         };
         if let Some(path) = &self.file {
-            let document: ModuleConfigDocument = load_document(path)?;
+            let document: ModuleConfigDocument = load_document(path, strict)?;
             config.destination_filter_rules = document
                 .try_rules()
                 .map_err(|err| format!("invalid document {}: destination_filter_rules: {err}", path.display()))?;
@@ -592,6 +600,31 @@ fn main() -> std::process::ExitCode {
 
 async fn run(cmd: Cmd) -> Result<(), Error> {
     let action = cmd.mode.action();
+    match &cmd.mode {
+        ModeCmd::ValidateService(validation) => {
+            ServiceCmd {
+                name: String::new(),
+                hash_mask: 0,
+                index_mask: 0,
+                file: Some(validation.path.clone()),
+            }
+            .load(true)
+            .map_err(|err| Error::invalid_argument(action, "local", err))?;
+            output::success(action, format_args!("Service document is valid."));
+            return Ok(());
+        }
+        ModeCmd::ValidateModuleConfig(validation) => {
+            ModuleConfigCmd {
+                name: String::new(),
+                file: Some(validation.path.clone()),
+            }
+            .load(true)
+            .map_err(|err| Error::invalid_argument(action, "local", err))?;
+            output::success(action, format_args!("Module document is valid."));
+            return Ok(());
+        }
+        _ => {}
+    }
     let mut service = L3BService::new(&cmd.connection, action).await?;
 
     match cmd.mode {
@@ -605,6 +638,7 @@ async fn run(cmd: Cmd) -> Result<(), Error> {
         ModeCmd::UpdateRealServerWeight(cmd) => service.update_real_server_weight(cmd).await,
         ModeCmd::ListSessions(cmd) => service.list_sessions(cmd).await,
         ModeCmd::ShowService(cmd) => service.show_service(cmd).await,
+        ModeCmd::ValidateService(..) | ModeCmd::ValidateModuleConfig(..) => unreachable!(),
     }
 }
 
@@ -630,7 +664,7 @@ impl L3BService {
     }
 
     pub async fn create_service(&mut self, cmd: ServiceCmd) -> Result<(), Error> {
-        let service = cmd.load().map_err(|err| self.invalid("create-service", err))?;
+        let service = cmd.load(false).map_err(|err| self.invalid("create-service", err))?;
         let request = CreateServiceRequest { service: Some(service) };
         log::trace!("create service request: {request:?}");
         self.service
@@ -643,7 +677,7 @@ impl L3BService {
     }
 
     pub async fn update_service(&mut self, cmd: ServiceCmd) -> Result<(), Error> {
-        let service = cmd.load().map_err(|err| self.invalid("update-service", err))?;
+        let service = cmd.load(false).map_err(|err| self.invalid("update-service", err))?;
         let request = UpdateServiceRequest { service: Some(service) };
         log::trace!("update service request: {request:?}");
         self.service
@@ -725,7 +759,9 @@ impl L3BService {
     }
 
     pub async fn update_module_config(&mut self, cmd: ModuleConfigCmd) -> Result<(), Error> {
-        let config = cmd.load().map_err(|err| self.invalid("update-module-config", err))?;
+        let config = cmd
+            .load(false)
+            .map_err(|err| self.invalid("update-module-config", err))?;
         let request = UpdateModuleConfigRequest { config: Some(config) };
         log::trace!("update module config request: {request:?}");
         self.service
