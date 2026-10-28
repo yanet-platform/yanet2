@@ -44,7 +44,6 @@ humantime = "2"
 libc = "0.2"
 
 [dev-dependencies]
-tower = { version = "0.5", features = ["util"] }
 tokio = { version = "1", features = ["macros", "test-util"] }
 tokio-stream = { version = "0.1", features = ["net"] }
 tonic-health = "0.14"

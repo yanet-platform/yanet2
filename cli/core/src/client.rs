@@ -393,11 +393,10 @@ impl Connection {
     /// Establish the channel, blaming a failure on `action` rather than the
     /// connect step.
     ///
-    /// The dynamic-dispatch helpers report the verb the user asked for (e.g.
-    /// `ready`) all the way through, so they name their own action here. So
-    /// does a CLI that connects once and then dispatches several RPCs over
-    /// that one connection: a connect failure must read the same as an RPC
-    /// failure of the same command.
+    /// A CLI that connects once and then dispatches several RPCs over that
+    /// one connection names the verb the user asked for (e.g. `ready`) here:
+    /// a connect failure must read the same as an RPC failure of the same
+    /// command.
     pub fn connect_for<'a>(
         args: &'a ConnectionArgs,
         action: &'a str,
@@ -436,11 +435,15 @@ impl Connection {
         &self.endpoint
     }
 
-    /// Invoke a unary RPC on an arbitrary gRPC service over this connection.
+    /// Invoke a unary RPC on an arbitrary gRPC service over this connection,
+    /// without a generated client.
     ///
-    /// The dispatch is the free [`invoke_unary`]'s, minus the connect: a CLI
-    /// probing several services builds one [`Connection`] and calls this per
-    /// service, so they all share a single channel.
+    /// The service goes by its fully-qualified name and the method by its
+    /// wire name (e.g. `"Ready"`); a failure is reported under the
+    /// user-facing verb (e.g. `"ready"`). The request and response are any
+    /// `prost` messages — the shared codec is built from them. A CLI probing
+    /// several services calls this per service, so they all share a single
+    /// channel.
     pub async fn invoke_unary<Req, Resp>(
         &self,
         action: &str,
@@ -479,13 +482,14 @@ impl Connection {
     }
 
     /// Invoke a server-streaming RPC on an arbitrary gRPC service over this
-    /// connection.
+    /// connection, without a generated client.
     ///
-    /// The dispatch is the free [`invoke_server_stream`]'s, minus the
-    /// connect: a CLI watching several services builds one [`Connection`]
-    /// and calls this per service, so they all share a single channel.
-    /// `tonic::Streaming` never leaks to the caller — all stream state is
-    /// contained here.
+    /// The service, the method (e.g. `"Watch"`) and the verb a failure is
+    /// reported under are given as for a unary call. Each received message
+    /// goes to the callback, and the call succeeds once the server closes the
+    /// stream cleanly. A CLI watching several services calls this per
+    /// service, so they all share a single channel. `tonic::Streaming` never
+    /// leaks to the caller — all stream state is contained here.
     pub async fn invoke_server_stream<Req, Resp, F>(
         &self,
         action: &str,
@@ -707,58 +711,6 @@ impl<C> Service<C> {
 /// every binary.
 fn trace(action: &str, side: &str, message: &dyn Debug) {
     log::trace!("{action} {side}: {message:?}");
-}
-
-/// Invoke a unary RPC on an arbitrary gRPC service by its fully-qualified
-/// name, without a generated client.
-///
-/// `action` is the user-facing verb used in error messages (e.g. `"ready"`),
-/// `service` is the service FQN, `method` is the wire method name (e.g.
-/// `"Ready"`). The request and response are any `prost` messages — the
-/// shared codec is built from them.
-pub async fn invoke_unary<Req, Resp>(
-    connection: &ConnectionArgs,
-    action: &str,
-    service: &str,
-    method: &str,
-    request: Req,
-) -> Result<Resp, Error>
-where
-    Req: Message + 'static,
-    Resp: Message + Default + 'static,
-{
-    Connection::connect_for(connection, action)
-        .await?
-        .invoke_unary(action, service, method, request)
-        .await
-}
-
-/// Invoke a server-streaming RPC on an arbitrary gRPC service by its
-/// fully-qualified name, without a generated client.
-///
-/// `action` is the user-facing verb used in error messages (e.g. `"ready"`),
-/// `service` is the service FQN, `method` is the wire method name (e.g.
-/// `"Watch"`). Each received message is delivered to `on_message`; the
-/// function returns `Ok(())` when the server closes the stream cleanly.
-/// `tonic::Streaming` never leaks to the caller — all stream state is
-/// contained here.
-pub async fn invoke_server_stream<Req, Resp, F>(
-    connection: &ConnectionArgs,
-    action: &str,
-    service: &str,
-    method: &str,
-    request: Req,
-    on_message: F,
-) -> Result<(), Error>
-where
-    Req: Message + Send + Sync + 'static,
-    Resp: Message + Default + Send + Sync + 'static,
-    F: FnMut(Resp),
-{
-    Connection::connect_for(connection, action)
-        .await?
-        .invoke_server_stream(action, service, method, request, on_message)
-        .await
 }
 
 #[cfg(test)]
