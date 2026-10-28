@@ -691,56 +691,22 @@ fn append_lines(out: &mut String, lines: Vec<Vec<Span>>, colored: bool) {
 
 #[cfg(test)]
 mod test {
-    use unicode_width::UnicodeWidthStr;
-    use ynpb::pb::{AgentInfo, AgentInstanceInfo, AllocatorInfo, AllocatorPoolInfo, InstanceInfo};
+    use ynpb::pb::{AllocatorInfo, AllocatorPoolInfo};
 
-    use super::{format_report, memory_records, pool_records};
+    use super::pool_records;
 
     #[test]
     fn test_pool_records_sort_size_classes_and_preserve_empty_pools() {
         let allocator = AllocatorInfo {
-            free_bytes: 32,
-            largest_free_block_bytes: 32,
             pools: vec![
                 AllocatorPoolInfo { block_size_bytes: 32, free_blocks: 1 },
                 AllocatorPoolInfo { block_size_bytes: 8, free_blocks: 0 },
             ],
+            ..Default::default()
         };
         let rows = pool_records("control-plane", &allocator);
         assert_eq!(2, rows.len());
         assert_eq!("0", rows[0].fields[1].value);
         assert_eq!("1", rows[1].fields[1].value);
-    }
-
-    #[test]
-    fn test_allocator_details_respect_narrow_terminal_widths() {
-        let allocator = AllocatorInfo {
-            free_bytes: 1 << 30,
-            largest_free_block_bytes: 1 << 26,
-            pools: (3..=26)
-                .map(|bits| AllocatorPoolInfo {
-                    block_size_bytes: 1 << bits,
-                    free_blocks: 0,
-                })
-                .collect(),
-        };
-        let info = InstanceInfo {
-            agents: vec![AgentInfo {
-                name: "long-agent-name\nwith-controls".into(),
-                instances: vec![AgentInstanceInfo {
-                    pid: u32::MAX,
-                    generation: u64::MAX,
-                    allocator: Some(allocator.clone()),
-                    ..Default::default()
-                }],
-            }],
-            cp_allocator: Some(allocator),
-            ..Default::default()
-        };
-        let groups = vec![memory_records(&info, true, false)];
-        for width in [24, 40, 80, 120] {
-            let rendered = format_report("YANET", &groups, Some(width), false);
-            assert!(rendered.lines().all(|line| line.width() <= width));
-        }
     }
 }

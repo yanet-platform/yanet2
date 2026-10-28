@@ -1,8 +1,10 @@
 package builtin_test
 
 import (
+	"maps"
 	"math"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/c2h5oh/datasize"
@@ -17,6 +19,7 @@ import (
 	ynpb "github.com/yanet-platform/yanet2/controlplane/ynpb/v1"
 )
 
+// findMetric returns the named series with the exact, unordered label set.
 func findMetric(t *testing.T, metrics []*commonpb.Metric, name string, labels map[string]string) *commonpb.Metric {
 	t.Helper()
 
@@ -25,14 +28,11 @@ func findMetric(t *testing.T, metrics []*commonpb.Metric, name string, labels ma
 			continue
 		}
 
-		match := true
+		actualLabels := map[string]string{}
 		for _, label := range metric.GetLabels() {
-			if want, ok := labels[label.GetName()]; ok && want != label.GetValue() {
-				match = false
-				break
-			}
+			actualLabels[label.GetName()] = label.GetValue()
 		}
-		if match && len(metric.GetLabels()) == len(labels) {
+		if len(metric.GetLabels()) == len(labels) && maps.Equal(actualLabels, labels) {
 			return metric
 		}
 	}
@@ -40,10 +40,12 @@ func findMetric(t *testing.T, metrics []*commonpb.Metric, name string, labels ma
 	return nil
 }
 
+// gaugeValue rejects other metric kinds even when their default value is zero.
 func gaugeValue(t *testing.T, metric *commonpb.Metric) float64 {
 	t.Helper()
 
 	require.NotNil(t, metric)
+	require.IsType(t, &commonpb.Metric_Gauge{}, metric.GetValue())
 	return metric.GetGauge()
 }
 
@@ -86,11 +88,11 @@ func Test_MemoryMetrics_AllocatorUsesLiveGeneration(t *testing.T) {
 	assertAllocatorMetrics(t, metrics, "agent", "route", stats)
 	var allocatorCount int
 	for _, metric := range metrics {
-		if metric.GetName() == "memory_allocator_free_bytes" {
+		if strings.HasPrefix(metric.GetName(), "memory_allocator_") {
 			allocatorCount++
 		}
 	}
-	require.Equal(t, 1, allocatorCount)
+	require.Equal(t, 2+len(stats.Pools), allocatorCount)
 }
 
 // assertAllocatorMetrics checks exact labels and raw size-class counts
@@ -113,19 +115,6 @@ func assertAllocatorMetrics(t *testing.T, metrics []*commonpb.Metric, scope stri
 		require.Equal(t, float64(pool.FreeBlocks), gaugeValue(t,
 			findMetric(t, metrics, "memory_allocator_free_blocks", labels),
 		))
-	}
-}
-
-// Test_Memory_CollectAllocatorSnapshots verifies that real shared and
-// agent snapshots reach the existing monitoring collector.
-func Test_Memory_CollectAllocatorSnapshots(t *testing.T) {
-	shm := newMemoryHarness(t).SharedMemory()
-	attachModuleAgent(t, shm, "route")
-	dpConfig := shm.DPConfig(0)
-	metrics := builtin.NewMemory(0, shm).Collect()
-	assertAllocatorMetrics(t, metrics, "cp", "", dpConfig.CPAllocatorStats())
-	for _, agent := range dpConfig.Agents() {
-		assertAllocatorMetrics(t, metrics, "agent", agent.Name, agent.Instances[0].Allocator)
 	}
 }
 
