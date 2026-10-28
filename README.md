@@ -72,6 +72,7 @@ YANET employs a multi-language approach to leverage the strengths of different p
 - Ninja build system.
 - CMake 3.5+.
 - GCC/Clang.
+- For `make test-asan`: clang 19 or newer with its sanitizer runtime, as `clang` or named by `ASAN_CC` and `ASAN_CXX` (the CI image takes it from apt.llvm.org).
 
 ### Build Instructions
 
@@ -103,7 +104,8 @@ changing C code, project headers or linked archives, run `make go-test-prepare`
 (equivalent to `meson compile -C build go-test-prepare`) before direct Go
 commands. Use the same CGO flags as the configured build: the build writes its
 preprocessor flags to `build/yanet_cgo_cppflags`, and a sanitized build also
-needs its sanitizer flags. For an unsanitized build:
+needs its sanitizer flags and, when clang built it, `CC=clang`. For an
+unsanitized build:
 
 ```bash
 make go-test-prepare

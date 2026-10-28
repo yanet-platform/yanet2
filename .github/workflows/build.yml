@@ -8,6 +8,7 @@ on:
       - "**.c"
       - "**/meson.build"
       - "meson_options.txt"
+      - "ubsan-ignorelist.txt"
       - "subprojects/**"
       - ".gitmodules"
       # Protoc-generated Go is a build product, not a tracked file.
@@ -49,6 +50,7 @@ on:
       - "**.c"
       - "**/meson.build"
       - "meson_options.txt"
+      - "ubsan-ignorelist.txt"
       - "subprojects/**"
       - ".gitmodules"
       # Protoc-generated Go is a build product, not a tracked file.
