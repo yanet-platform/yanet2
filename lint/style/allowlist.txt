@@ -87,16 +87,6 @@ receiver:common/go/metrics/metric.go:Labels.Clone:1  # legacy: rename the receiv
 receiver:common/go/metrics/metric.go:Labels.Equals:1  # legacy: rename the receiver to m
 receiver:common/go/metrics/metric.go:MetricID.Clone:1  # legacy: rename the receiver to m
 receiver:common/go/metrics/metric.go:MetricID.Equals:1  # legacy: rename the receiver to m
-receiver:lib/utils/go/packet.go:Packet.Data:1  # legacy: rename the receiver to m
-receiver:lib/utils/go/packet.go:Packet.Info:1  # legacy: rename the receiver to m
-receiver:lib/utils/go/packet.go:PacketData.asRaw:1  # legacy: rename the receiver to m
-receiver:lib/utils/go/packet.go:PacketFront.DropList:1  # legacy: rename the receiver to m
-receiver:lib/utils/go/packet.go:PacketFront.InputList:1  # legacy: rename the receiver to m
-receiver:lib/utils/go/packet.go:PacketFront.OutputList:1  # legacy: rename the receiver to m
-receiver:lib/utils/go/packet.go:PacketList.Add:1  # legacy: rename the receiver to m
-receiver:lib/utils/go/packet.go:PacketList.Free:1  # legacy: rename the receiver to m
-receiver:lib/utils/go/packet.go:PacketList.Iter:1  # legacy: rename the receiver to m
-receiver:lib/utils/go/packet.go:PacketListIter.Next:1  # legacy: rename the receiver to m
 receiver:lint/protobuf/cmd/protolint/main.go:excludeList.Set:1  # legacy: rename the receiver to m
 receiver:lint/protobuf/cmd/protolint/main.go:excludeList.String:1  # legacy: rename the receiver to m
 receiver:modules/pdump/controlplane/ffi.go:errorCallbackContext.Close:1  # legacy: rename the receiver to m
