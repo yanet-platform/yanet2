@@ -214,7 +214,10 @@ fn validate(content: &str, ignored: Option<&HashSet<&[Component]>>) -> Result<()
                                                 .unwrap_or_else(|_| Value::String(key.clone()))
                                             }
                                         };
-                                        if key == "<<" {
+                                        if key == "<<"
+                                            && scalar.style == unsafe_yaml::YAML_PLAIN_SCALAR_STYLE
+                                            && tag.is_none()
+                                        {
                                             error = Some("YAML merge keys are not supported");
                                         } else if !keys.insert(identity) {
                                             error = Some("duplicate mapping key");

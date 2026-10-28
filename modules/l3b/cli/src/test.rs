@@ -58,6 +58,8 @@ fn test_document_unknown_subtrees_retain_structural_validation() {
         "future: {null: a, ~: b}",
         "future: {1.5: a, 1.50: b}",
         "future: {nested: [{<<: {key: 1}}]}",
+        "future: {nested: [{!!merge '<<': {key: 1}}]}",
+        "future: {'<<': 1, !!str <<: 2}",
         "future: {nested: !custom []}",
         "future: {nested: !custom secret-value}",
         "future: &anchor [*anchor]",
@@ -85,6 +87,37 @@ fn test_document_unknown_mapping_keys_preserve_yaml_types() {
             document::parse::<ServiceDocument>(&content, false).unwrap().1
         );
         assert!(document::parse::<ServiceDocument>(&content, true).is_err());
+    }
+}
+
+#[test]
+fn test_document_string_merge_lookalikes_are_unknown_fields_not_merge_keys() {
+    for key in ["'<<'", "\"<<\"", "!!str <<", "! <<"] {
+        for nested in [false, true] {
+            let extra = if nested {
+                format!("future: {{nested: [{{{key}: secret-value}}]}}")
+            } else {
+                format!("{key}: secret-value")
+            };
+            for base in [SERVICE, MODULE] {
+                let content = format!("{base}{extra}");
+                let (warnings, error) = if base == SERVICE {
+                    (
+                        document::parse::<ServiceDocument>(&content, false).unwrap().1,
+                        document::parse::<ServiceDocument>(&content, true).unwrap_err(),
+                    )
+                } else {
+                    (
+                        document::parse::<ModuleConfigDocument>(&content, false).unwrap().1,
+                        document::parse::<ModuleConfigDocument>(&content, true).unwrap_err(),
+                    )
+                };
+                assert_eq!(1, warnings.len());
+                assert!(warnings[0].contains(if nested { "future" } else { "<<" }));
+                assert!(!warnings[0].contains("secret-value"));
+                assert!(error.starts_with("unknown field"), "{error}");
+            }
+        }
     }
 }
 
