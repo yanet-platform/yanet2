@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"iter"
+	"runtime"
 	"strings"
 	"unsafe"
 
@@ -390,6 +391,7 @@ func (m *DPConfig) Agents() []AgentInfo {
 				PID:         uint32(instanceInfo.pid),
 				MemoryLimit: uint64(instanceInfo.memory_limit),
 				FreeBytes:   uint64(instanceInfo.free_bytes),
+				Allocator:   allocatorStats(&instanceInfo.allocator),
 				Gen:         uint64(instanceInfo.gen),
 				MemoryTree:  memoryTree,
 			}
@@ -448,6 +450,49 @@ func (m *DPConfig) CPMemory() *CPMemoryInfo {
 	}
 }
 
+// CPAllocatorStats returns a lock-consistent snapshot of the shared
+// control-plane allocator, including space not reserved by any agent.
+func (m *DPConfig) CPAllocatorStats() AllocatorStats {
+	var stats C.struct_block_allocator_stats
+	var pinner runtime.Pinner
+	pinner.Pin(&stats)
+	defer pinner.Unpin()
+	C.yanet_get_cp_allocator_stats(m.ptr, &stats)
+	return allocatorStats(&stats)
+}
+
+func allocatorStats(stats *C.struct_block_allocator_stats) AllocatorStats {
+	pools := make([]AllocatorPoolStats, len(stats.free_blocks))
+	for idx := range pools {
+		pools[idx] = AllocatorPoolStats{
+			BlockSizeBytes: uint64(1) << (C.MEMORY_BLOCK_ALLOCATOR_MIN_BITS + idx),
+			FreeBlocks:     uint64(stats.free_blocks[idx]),
+		}
+	}
+	return AllocatorStats{
+		FreeBytes:             uint64(stats.free_bytes),
+		LargestFreeBlockBytes: uint64(stats.largest_free_block_bytes),
+		Pools:                 pools,
+	}
+}
+
+// AllocatorStats is a consistent free-capacity snapshot of one allocator.
+//
+// Sizes include allocator rounding and sanitizer red zones, so the largest
+// free block is not necessarily the maximum user payload.
+type AllocatorStats struct {
+	FreeBytes             uint64
+	LargestFreeBlockBytes uint64
+	Pools                 []AllocatorPoolStats
+}
+
+// AllocatorPoolStats describes one power-of-two size class, including empty
+// classes so monitoring can distinguish zero capacity from missing data.
+type AllocatorPoolStats struct {
+	BlockSizeBytes uint64
+	FreeBlocks     uint64
+}
+
 // DPModule represents a dataplane module in the YANET configuration.
 type DPModule struct {
 	name string
@@ -493,6 +538,7 @@ type AgentInstanceInfo struct {
 	PID         uint32
 	MemoryLimit uint64
 	FreeBytes   uint64
+	Allocator   AllocatorStats
 	Gen         uint64
 	// MemoryTree is a flat depth-first snapshot of the agent's
 	// memory-context tree.

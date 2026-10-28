@@ -9,6 +9,7 @@
 #include "spinlock.h"
 
 #include "memory_address.h"
+#include "memory_block_stats.h"
 
 #define MEMORY_BLOCK_MAX_ALIGN 64
 
@@ -22,7 +23,6 @@ static_assert(
 	ASAN_RED_ZONE == 0 || ASAN_RED_ZONE >= 8, "invalid red zone size"
 );
 
-#define MEMORY_BLOCK_ALLOCATOR_EXP 24
 #define MEMORY_BLOCK_ALLOCATOR_MIN_BITS 3
 #define MEMORY_BLOCK_ALLOCATOR_MAX_BITS                                        \
 	(MEMORY_BLOCK_ALLOCATOR_MIN_BITS + MEMORY_BLOCK_ALLOCATOR_EXP - 1)
@@ -289,4 +289,23 @@ block_allocator_free_size(struct block_allocator *alloc) {
 	}
 	spinlock_unlock(&alloc->lock);
 	return size;
+}
+
+static inline void
+block_allocator_get_stats(
+	struct block_allocator *allocator, struct block_allocator_stats *stats
+) {
+	stats->free_bytes = 0;
+	stats->largest_free_block_bytes = 0;
+	spinlock_lock(&allocator->lock);
+	for (size_t idx = 0; idx < MEMORY_BLOCK_ALLOCATOR_EXP; ++idx) {
+		uint64_t count = allocator->pools[idx].free;
+		uint64_t size = block_allocator_pool_size(allocator, idx);
+		stats->free_blocks[idx] = count;
+		stats->free_bytes += count * size;
+		if (count != 0) {
+			stats->largest_free_block_bytes = size;
+		}
+	}
+	spinlock_unlock(&allocator->lock);
 }
