@@ -184,10 +184,6 @@ func (f *TestFramework) CommonConfigCommands() []string {
 	}
 }
 
-// CommonConfigCommands is the package-level variable for backward compatibility.
-// Uses default 9P paths. In pool mode tests use fw.CommonConfigCommands() instead.
-var CommonConfigCommands = (&TestFramework{Paths: DefaultGuestPaths()}).CommonConfigCommands()
-
 // MustParseMAC parses a MAC address string and panics if parsing fails.
 // This utility function is designed for use with known-good MAC address constants
 // where parsing failure indicates a programming error rather than runtime input error.
