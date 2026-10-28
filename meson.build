@@ -138,9 +138,9 @@ if b_sanitize != 'none'
     if sanitize_flags.length() > 0
         sanitize_str = ','.join(sanitize_flags)
         cgo_flags = '-fsanitize=' + sanitize_str + ' -g'
-        # The toolchain links the shared sanitizer runtimes and copies each
-        # one beside the executable without adding a runpath; $ORIGIN makes
-        # that staged copy load wherever the binary is deployed.
+        # gcc links the shared sanitizer runtimes without adding a runpath;
+        # $ORIGIN lets a binary load copies staged beside it wherever it is
+        # deployed.
         yanet_go_env = {
             'CGO_CFLAGS': cgo_flags,
             'CGO_LDFLAGS': cgo_flags + ' -Wl,-rpath,$ORIGIN',
@@ -217,6 +217,29 @@ libdpdk_default_options = [
 ]
 if host_machine.cpu_family() == 'x86_64'
   libdpdk_default_options += 'cpu_instruction_set=' + get_option('cpu_arch')
+endif
+
+# clang's undefined behaviour checks skip the DPDK spots the list names.
+#
+# They report code there that gcc's checks pass over. Only global arguments
+# reach the sources of a subproject, and a subproject may not set them itself.
+# ccache hashes the arguments but not the list they name, so the list is
+# copied under a name that carries its content hash: an edited list changes
+# every compile command and misses the cache.
+if (cc.get_id() == 'clang' and b_sanitize.contains('undefined')
+    and not meson.is_subproject())
+  ubsan_ignorelist = 'ubsan-ignorelist-@0@.txt'.format(
+    import('fs').hash('ubsan-ignorelist.txt', 'md5'),
+  )
+  configure_file(
+    input: 'ubsan-ignorelist.txt',
+    output: ubsan_ignorelist,
+    copy: true,
+  )
+  add_global_arguments(
+    '-fsanitize-ignorelist=' + meson.current_build_dir() / ubsan_ignorelist,
+    language: 'c',
+  )
 endif
 
 libdpdk = subproject(

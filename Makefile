@@ -107,6 +107,7 @@ CLI_RELEASE_BINARIES := $(addprefix $(RELEASE_DIR)/,$(CLI_BINARIES))
 	setup \
 	setup-debug \
 	setup-asan \
+	setup-asan-clang \
 	build \
 	dataplane \
 	go-test-prepare \
@@ -185,10 +186,11 @@ lint-go:
 
 # Reparses the configured build's compile database with clang -fsyntax-only.
 #
-# Every C job in CI builds with gcc, so a construct gcc accepts and clang
-# rejects otherwise only surfaces overnight in the fuzzing workflow. This
-# is front-end only, no codegen, so replaying it here costs seconds and
-# needs no extra toolchain beyond the clang already on the job's image.
+# The release build compiles with gcc, and clang sees the tree only in the
+# asan job and the overnight fuzzing build, under other flags; a construct gcc
+# accepts and clang rejects under the release flags surfaces here instead.
+# This is front-end only, no codegen, so replaying it costs seconds and needs
+# no extra toolchain beyond the clang already on the job's image.
 lint/clang-syntax:
 	@command -v clang >/dev/null 2>&1 || { echo "ERROR: clang not found (install: apt install clang)"; exit 1; }
 	@command -v jq >/dev/null 2>&1 || { echo "ERROR: jq not found (install: apt install jq)"; exit 1; }
@@ -326,19 +328,40 @@ test-only: go-test-prepare
 test-asan:
 	$(MAKE) test-asan-only
 
+# The compilers of the asan suite: clang 19 or newer.
+#
+# Go test binaries built with -asan register their globals during package
+# init while threads already start, which the runtimes of gcc 14 and clang 18
+# race (llvm/llvm-project#87324); a test of the suite fails on such a runtime.
+ASAN_CC ?= clang
+ASAN_CXX ?= clang++
+CCACHE ?= $(if $(shell command -v ccache 2>/dev/null),ccache)
+
+# Sets up build/ for the asan suite with its compilers.
+#
+# Meson adds ccache only to a compiler it picks itself, so the compilers name
+# it here. clang links its sanitizer runtime only into executables, so shared
+# libraries link with the runtime's symbols left undefined.
+setup-asan-clang:
+	@version=$$($(ASAN_CC) -dumpversion 2>/dev/null | cut -d. -f1); \
+	if [ -z "$$version" ] || [ "$$version" -lt 19 ] || ! $(ASAN_CC) --version 2>/dev/null | grep -q clang; then \
+		echo "ERROR: the asan suite needs clang 19 or newer, but ASAN_CC=$(ASAN_CC) is not one (install e.g. clang-23 and libclang-rt-23-dev from apt.llvm.org and set ASAN_CC=clang-23 ASAN_CXX=clang++-23)"; \
+		exit 1; \
+	fi
+	CC="$(strip $(CCACHE) $(ASAN_CC))" CXX="$(strip $(CCACHE) $(ASAN_CXX))" meson setup -Dbuildtype=debug -Doptimization=0 -Db_sanitize=address,undefined -Db_lundef=false $(EXTRA_MODULES_FLAG) build
+
 # Set a default sanitizer policy while preserving inherited Go flags and tags.
 #
 # -asan instruments the Go side too, so a Go access through unsafe past a C
 # allocation, or into a block the C allocator freed, aborts the test. It also
 # turns on the leak check at exit, so C memory a test never frees fails it.
-# Go test binaries do not register globals: the ASan runtime in use races that
-# against thread start and crashes random tests (llvm/llvm-project#87324), so
-# their globals go unchecked while the meson C tests keep checking theirs.
 test-asan-only:
 	@if [ ! -d "build" ]; then \
-		$(MAKE) setup-asan; \
+		$(MAKE) setup-asan-clang; \
 	else \
-		meson configure -Dbuildtype=debug -Doptimization=0 -Dfuzzing=disabled -Db_sanitize=address,undefined $(EXTRA_MODULES_FLAG) build; \
+		python3 -c 'import json, sys; sys.exit(json.load(open(sys.argv[1]))["host"]["c"]["exelist"][-1] != sys.argv[2])' build/meson-info/intro-compilers.json '$(ASAN_CC)' \
+			|| { echo "ERROR: build/ compiles C with another compiler than $(ASAN_CC); remove it and run 'make test-asan' again"; exit 1; }; \
+		meson configure -Dbuildtype=debug -Doptimization=0 -Dfuzzing=disabled -Db_sanitize=address,undefined -Db_lundef=false $(EXTRA_MODULES_FLAG) build; \
 	fi
 	$(MAKE) go-test-prepare
 	@set -eu; \
@@ -346,7 +369,7 @@ test-asan-only:
 	export CGO_CFLAGS="-fsanitize=address,undefined"; \
 	export CGO_LDFLAGS="-fsanitize=address,undefined"; \
 	export UBSAN_OPTIONS="$${UBSAN_OPTIONS:-halt_on_error=1:abort_on_error=1:print_summary=1:print_stacktrace=1}"; \
-	export ASAN_OPTIONS="report_globals=0$${ASAN_OPTIONS:+:$$ASAN_OPTIONS}"; \
+	export CC="$(ASAN_CC)" CXX="$(ASAN_CXX)"; \
 	go test -asan -count=1 $$(go list ./... | grep -v '^github.com/yanet-platform/yanet2/tests/functional/main')
 	meson test -C build
 

@@ -202,7 +202,7 @@ gate_web() {
 }
 
 c=0
-matching '(\.[ch]$|(^|/)meson\.build$|^meson_options\.txt$|^subprojects/|^scripts/(go_c(deps|go_flags)|check_link_deps)\.py$)' >/dev/null && c=1
+matching '(\.[ch]$|(^|/)meson\.build$|^meson_options\.txt$|^ubsan-ignorelist\.txt$|^subprojects/|^scripts/(go_c(deps|go_flags)|check_link_deps)\.py$)' >/dev/null && c=1
 [ "$c" = 1 ] && gate_c
 if [ "$c" = 1 ] || matching '(\.go$|^go\.(mod|sum)$|\.proto$)' >/dev/null; then gate_go; fi
 matching '(\.rs$|(^|/)Cargo\.(toml|lock)$|^\.rustfmt\.toml$|^\.cargo/|\.proto$)' >/dev/null && gate_rust
