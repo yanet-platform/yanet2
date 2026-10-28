@@ -154,7 +154,7 @@ struct dp_worker {
 // against a different layout of the control-plane zone or the dataplane
 // structures recognises a foreign magic and refuses the attach instead
 // of misreading shifted fields. Bump it on every layout change.
-#define DP_CONFIG_READY_MAGIC UINT64_C(0xDEAD10CC00000008)
+#define DP_CONFIG_READY_MAGIC UINT64_C(0xDEAD10CC00000009)
 
 struct dp_config {
 	uint32_t instance_count;
@@ -290,11 +290,21 @@ dp_config_lookup_object(
 
 // Count of workers bound to device_id, across every instance.
 //
-// O(1), reading a count dp_topology_set_device_worker_count publishes per
+// O(1), reading a count dp_topology_set_device_queue_counts publishes per
 // device. Zero for an out-of-range device_id or one whose count was never
 // set.
 uint64_t
 dp_config_device_worker_count(struct dp_config *dp_config, uint32_t device_id);
+
+// Count of device_id's queues the RSS table spreads traffic over.
+//
+// O(1), reading a count dp_topology_set_device_queue_counts publishes
+// per device. Zero for an out-of-range device_id or one whose count was
+// never set.
+uint64_t
+dp_config_device_rss_queue_count(
+	struct dp_config *dp_config, uint32_t device_id
+);
 
 // Run the commit handlers of the generation's new config items once.
 //

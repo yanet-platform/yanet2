@@ -385,3 +385,14 @@ dp_config_device_worker_count(struct dp_config *dp_config, uint32_t device_id) {
 	struct dp_port *devices = ADDR_OF(&dp_config->dp_topology.devices);
 	return devices[device_id].worker_count;
 }
+
+uint64_t
+dp_config_device_rss_queue_count(
+	struct dp_config *dp_config, uint32_t device_id
+) {
+	if (device_id >= dp_config->dp_topology.device_count) {
+		return 0;
+	}
+	struct dp_port *devices = ADDR_OF(&dp_config->dp_topology.devices);
+	return devices[device_id].rss_queue_count;
+}

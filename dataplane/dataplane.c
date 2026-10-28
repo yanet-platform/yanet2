@@ -1035,13 +1035,14 @@ dataplane_init(
 		for (uint64_t device_idx = 0;
 		     device_idx < dataplane->device_count;
 		     ++device_idx) {
-			if (dp_topology_set_device_worker_count(
+			if (dp_topology_set_device_queue_counts(
 				    dp_config,
 				    device_idx,
+				    dataplane->devices[device_idx].queue_count,
 				    dataplane->devices[device_idx].queue_count
 			    ) != 0) {
 				LOG(ERROR,
-				    "failed to set dp_topology worker count "
+				    "failed to set dp_topology queue counts "
 				    "for device %lu",
 				    device_idx);
 				return -1;

@@ -64,6 +64,6 @@ _Static_assert(
 	"struct dp_worker size changed, bump YANET_MODULE_ABI_VERSION"
 );
 _Static_assert(
-	sizeof(struct dp_port) == 120,
+	sizeof(struct dp_port) == 128,
 	"struct dp_port size changed, bump YANET_MODULE_ABI_VERSION"
 );

@@ -88,8 +88,11 @@ dp_topology_set_device_rss(
 }
 
 int
-dp_topology_set_device_worker_count(
-	struct dp_config *dp_config, uint32_t device_id, uint64_t worker_count
+dp_topology_set_device_queue_counts(
+	struct dp_config *dp_config,
+	uint32_t device_id,
+	uint64_t worker_count,
+	uint64_t rss_queue_count
 ) {
 	uint64_t device_count = dp_config->dp_topology.device_count;
 
@@ -103,6 +106,7 @@ dp_topology_set_device_worker_count(
 
 	struct dp_port *devices = ADDR_OF(&dp_config->dp_topology.devices);
 	devices[device_id].worker_count = worker_count;
+	devices[device_id].rss_queue_count = rss_queue_count;
 
 	return 0;
 }
