@@ -93,6 +93,10 @@ pub struct CFlags {
     /// warnings the C build does. Kept apart because the bindings are read
     /// by libclang, which is no judge of the headers.
     warnings: Vec<String>,
+    /// The optimisation level, the value of the last `-O` option, `0` when
+    /// there is none, as the compiler reads it: the shim is compiled as the
+    /// C sources around it are.
+    opt_level: String,
 }
 
 impl CFlags {
@@ -140,8 +144,14 @@ impl CFlags {
             .by_ref()
             .find(|token| !COMPILER_WRAPPERS.contains(&file_name(token)))
             .ok_or("the command names no compiler")?;
-        let (args, warnings) = reduce(directory, tokens);
-        Ok(Self { root, compiler, args, warnings })
+        let (args, warnings, opt_level) = reduce(directory, tokens);
+        Ok(Self {
+            root,
+            compiler,
+            args,
+            warnings,
+            opt_level,
+        })
     }
 
     /// Flags that reproduce how the dataplane reads headers.
@@ -152,6 +162,12 @@ impl CFlags {
     /// The warning options of the dataplane's C sources.
     pub fn warning_args(&self) -> &[String] {
         &self.warnings
+    }
+
+    /// The optimisation level of the dataplane's C sources, as cc-rs takes it:
+    /// `2` for `-O2`, `s` for `-Os`.
+    pub fn opt_level(&self) -> &str {
+        &self.opt_level
     }
 
     /// Path inside the repository.
@@ -195,15 +211,15 @@ fn command_tokens(entry: &Value) -> Result<Vec<String>, String> {
     shlex::split(command).ok_or_else(|| "the command is not a valid shell command".to_owned())
 }
 
-/// Splits the options into the ones that change how headers are read and the
-/// warning options, dropping the rest. Paths are resolved
-/// against the directory the command ran in; include directories are
+/// Splits the options into the ones that change how headers are read, the
+/// warning options and the optimisation level, dropping the rest. Paths are
+/// resolved against the directory the command ran in; include directories are
 /// canonicalised and, when missing, dropped: meson adds per-target private
 /// directories that may not exist after setup and hold no header.
-fn reduce(directory: &Path, tokens: impl Iterator<Item = String>) -> (Vec<String>, Vec<String>) {
+fn reduce(directory: &Path, tokens: impl Iterator<Item = String>) -> (Vec<String>, Vec<String>, String) {
     let resolve = |path: &str| directory.join(path);
     let mut tokens = tokens;
-    let (mut args, mut warnings) = (Vec::new(), Vec::new());
+    let (mut args, mut warnings, mut opt_level) = (Vec::new(), Vec::new(), "0".to_owned());
     while let Some(token) = tokens.next() {
         let option = INCLUDE_DIR_OPTIONS
             .iter()
@@ -215,6 +231,9 @@ fn reduce(directory: &Path, tokens: impl Iterator<Item = String>) -> (Vec<String
                 args.push(token);
             } else if token.starts_with("-W") && !TOOL_OPTIONS.iter().any(|tool| token.starts_with(tool)) {
                 warnings.push(token);
+            } else if let Some(level) = token.strip_prefix("-O") {
+                // A bare `-O` is `-O1`.
+                opt_level = if level.is_empty() { "1" } else { level }.to_owned();
             }
             continue;
         };
@@ -249,5 +268,5 @@ fn reduce(directory: &Path, tokens: impl Iterator<Item = String>) -> (Vec<String
         };
         args.extend([option.to_owned(), value]);
     }
-    (args, warnings)
+    (args, warnings, opt_level)
 }

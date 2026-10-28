@@ -45,7 +45,8 @@ const PACKET_SOURCES: [&str; 3] = [
     "lib/dataplane/packet/packet.c",
 ];
 
-/// Compiles the dataplane shim with the flags of the dataplane's C sources.
+/// Compiles the dataplane shim with the flags of the dataplane's C sources,
+/// their optimisation level among them.
 ///
 /// The shim wraps header-inline C routing helpers and the packet
 /// encapsulation routines, whose sources it compiles in. It is linked into
@@ -58,7 +59,7 @@ fn build_shim(flags: &CFlags, shim_dir: &Path) {
         .file(shim_dir.join("dp_shim.c"))
         .files(PACKET_SOURCES.map(|source| flags.source(source)))
         .include(shim_dir)
-        .opt_level(2)
+        .opt_level_str(flags.opt_level())
         // Not silencing: drops cc-rs's own warning set, so the build's options alone apply.
         .warnings(false)
         .flag("-fvisibility=hidden");
