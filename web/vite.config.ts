@@ -23,9 +23,9 @@ const devPort = parseInt(process.env.VITE_DEV_PORT || '3000', 10);
 // Serve the SPA shell for HTML navigations whose path collides with a
 // co-located source directory.
 //
-// Built-in pages live under web/builtin/<page>/ with an index.ts barrel while
-// their routes are /builtin/<page>. On a hard reload the dev server otherwise
-// resolves the bare path to that directory's index module and serves it as
+// Built-in pages live under web/builtin/<page>/ while their routes are
+// /builtin/<page>. On a hard reload the dev server otherwise resolves the bare
+// path to that directory's index module, when it has one, and serves it as
 // JavaScript instead of index.html. Rewriting extensionless HTML GET requests
 // to / forces the SPA fallback before that directory-index resolution runs.
 const spaHtmlFallback = (): Plugin => ({
