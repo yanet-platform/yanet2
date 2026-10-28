@@ -48,7 +48,7 @@ if [[ "$tool" == test ]]; then
         printf '%s status=2\n' "$record" >> "$COMPARISON_ERRORS"
         exit 2
     fi
-    exec /usr/bin/test "$@"
+    exec /bin/test "$@"
 fi
 printf '%s\n' "$record" >> "$EFFECTS"
 
@@ -171,7 +171,6 @@ expect_go() {
     expected=$(printf 'go image=%q debug=%q' "$selected" fixture-debug; printf ' %q' "$@")
     actual=$(< "$effects")
     [[ "$actual" == "$expected" ]] || fail 'Go argv or environment changed'
-    printf 'argv/env: %s\n' "$actual"
 }
 
 # Local tests retain every dependency probe in order before the unchanged Go argv.
@@ -188,7 +187,6 @@ expect_local_go() {
         printf '\n'
     } > "$fixture/expected-effects"
     cmp -s "$fixture/expected-effects" "$effects" || fail 'full local dependency/Go sequence changed'
-    while IFS= read -r line; do printf 'local argv/env: %s\n' "$line"; done < "$effects"
 }
 
 # Expected records retain the same argument boundaries as the fake subprocesses.
@@ -270,7 +268,6 @@ expect_local_prepare() {
     } | LC_ALL=C sort > "$fixture/expected-effects"
     LC_ALL=C sort "$effects" > "$fixture/sorted-effects"
     cmp -s "$fixture/expected-effects" "$fixture/sorted-effects" || fail 'full local preparation effect log changed'
-    while IFS= read -r line; do printf 'local argv/env: %s\n' "$line"; done < "$effects"
 }
 
 # Existing local media leaves only directory creation and the selected debug launch.
@@ -281,7 +278,6 @@ expect_local_debug() {
         write_qemu_effect "$selected" "$mode"
     } > "$fixture/expected-effects"
     cmp -s "$fixture/expected-effects" "$effects" || fail 'full local debug effect log changed'
-    while IFS= read -r line; do printf 'local argv/env: %s\n' "$line"; done < "$effects"
 }
 
 # Local cleanup retains its exact removal order and one cache-clear command.
@@ -301,7 +297,6 @@ expect_local_cleanup() {
         if [[ "$target" == clean-all ]]; then write_effect rm "$selected" -f "$ubuntu"; fi
     } > "$fixture/expected-effects"
     cmp -s "$fixture/expected-effects" "$effects" || fail 'full local cleanup effect log changed'
-    while IFS= read -r line; do printf 'local argv/env: %s\n' "$line"; done < "$effects"
 }
 
 # Cleanup may only probe the local VM tree, remove fixture paths and clear Go's cache.
@@ -310,7 +305,7 @@ expect_cleanup() {
     expected=$(printf 'go image=%q debug=%q clean -testcache' "$selected" fixture-debug)
     while IFS= read -r line; do
         case "$line" in
-            rm\ *) printf 'destructive argv/env: %s\n' "$line";;
+            rm\ *) ;;
             find\ *) ;;
             go\ *)
                 [[ "$line" == "$expected" ]] || fail 'cleanup Go argv or environment changed'
@@ -320,6 +315,27 @@ expect_cleanup() {
         esac
     done < "$effects"
     [[ "$go_calls" == 1 ]] || fail 'cleanup omitted or repeated Go cache clearing'
+}
+
+# Build the exact shared cleanup sequence, optionally skipping or replacing an artifact.
+write_shared_cleanup() {
+    local goal=$1 changed=${2-} replacement=${3-} path removal
+    write_scan_effect "$image"
+    for path in "${artifacts[@]}"; do
+        removal="$work/$path"
+        if [[ "$path" == "$changed" ]]; then
+            [[ -n "$replacement" ]] || continue
+            removal=$replacement
+        fi
+        write_effect rm "$image" -f -- "$removal"
+    done
+    if [[ "$goal" == clean-all ]]; then
+        removal="$work/$ubuntu"
+        if [[ "$ubuntu" == "$changed" ]]; then removal=$replacement; fi
+        [[ -z "$removal" ]] || write_effect rm "$image" -f -- "$removal"
+    fi
+    write_effect rm "$image" -rf "$sandbox/vm"
+    write_effect go "$image" clean -testcache
 }
 
 # External base and adjacent snapshots remain byte-for-byte fixture data.
@@ -483,18 +499,7 @@ test_empty_operand() {
     esac
     seed_local
     run_make "$image" "$goal" "$variable=" || fail 'empty optional artifact blocked cleanup'
-    {
-        write_scan_effect "$image"
-        for path in "${artifacts[@]}"; do
-            [[ "$path" != "$disabled" ]] || continue
-            write_effect rm "$image" -f -- "$work/$path"
-        done
-        if [[ "$goal" == clean-all && "$variable" != UBUNTU_IMAGE ]]; then
-            write_effect rm "$image" -f -- "$work/$ubuntu"
-        fi
-        write_effect rm "$image" -rf "$sandbox/vm"
-        write_effect go "$image" clean -testcache
-    } > "$fixture/expected-effects"
+    write_shared_cleanup "$goal" "$disabled" > "$fixture/expected-effects"
     cmp -s "$fixture/expected-effects" "$effects" || fail 'empty optional name changed remaining cleanup effects'
     for path in "${artifacts[@]}" "$ubuntu"; do
         if [[ "$path" == "$disabled" || ( "$path" == "$ubuntu" && "$goal" == clean ) ]]; then
@@ -533,12 +538,7 @@ test_mixed_cleanup() {
         expect_no_effects
         [[ -f "$work/test_run.log" && -f "$sandbox/vm/log" ]] || fail 'all-clean preflight occurred after removal'
     else
-        {
-            write_scan_effect "$image"
-            for path in "${artifacts[@]}"; do write_effect rm "$image" -f -- "$work/$path"; done
-            write_effect rm "$image" -rf "$sandbox/vm"
-            write_effect go "$image" clean -testcache
-        } > "$fixture/expected-effects"
+        write_shared_cleanup clean > "$fixture/expected-effects"
         cmp -s "$fixture/expected-effects" "$effects" || fail 'later Ubuntu refusal duplicated or changed the prior safe cleanup'
         [[ ! -e "$work/test_run.log" && ! -e "$sandbox/vm" && -f "$work/$ubuntu" ]] || fail 'mixed cleanup lost the independent-clean contract'
     fi
@@ -766,7 +766,7 @@ test_media_collision() {
 # Verifies that Make references expand once into quoted cleanup data,
 # including escaped dollars.
 test_make_operand() {
-    local variable=$1 goal=$2 spelling=$3 name disabled path shadow value operand removal
+    local variable=$1 goal=$2 spelling=$3 name disabled path shadow value
     seed_local
     case "$variable" in
         QEMU_IMAGE) name=independent.qcow2; disabled=yanet-test.qcow2;;
@@ -781,21 +781,7 @@ test_make_operand() {
     /bin/cp "$sandbox/neighbor.expected" "$shadow"
     value='$(CURDIR)/'"${name//\$/\$\$}"
     run_make "$image" "$goal" "$variable=$value" || fail 'expanded artifact cleanup rejected'
-    {
-        write_scan_effect "$image"
-        for operand in "${artifacts[@]}"; do
-            removal="$work/$operand"
-            [[ "$operand" != "$disabled" ]] || removal=$path
-            write_effect rm "$image" -f -- "$removal"
-        done
-        if [[ "$goal" == clean-all ]]; then
-            removal="$work/$ubuntu"
-            [[ "$variable" != UBUNTU_IMAGE ]] || removal=$path
-            write_effect rm "$image" -f -- "$removal"
-        fi
-        write_effect rm "$image" -rf "$sandbox/vm"
-        write_effect go "$image" clean -testcache
-    } > "$fixture/expected-effects"
+    write_shared_cleanup "$goal" "$disabled" "$path" > "$fixture/expected-effects"
     cmp -s "$fixture/expected-effects" "$effects" || fail 'expanded artifact changed the complete cleanup sequence'
     expect_cleanup "$image"
     [[ ! -e "$path" && -f "$work/$disabled" ]] || fail 'cleanup did not select the expanded artifact'
@@ -824,18 +810,12 @@ test_make_protected_operand() {
         if [[ "$variable" == CLOUD_INIT_AUTOLOGIN_ISO ]]; then ln -s "$image" "$path"; else ln "$image" "$path"; fi
         value='$(CURDIR)/expanded-alias'
         run_make "$image" clean-all "$variable=$value" || fail 'expanded alias blocked independent cleanup'
-        {
-            write_scan_effect "$image"
-            for name in "${artifacts[@]}"; do
-                case "$variable:$name" in
-                    QEMU_IMAGE:yanet-test.qcow2|CLOUD_INIT_AUTOLOGIN_ISO:cloud-init-autologin.iso) continue;;
-                esac
-                write_effect rm "$image" -f -- "$work/$name"
-            done
-            [[ "$variable" == UBUNTU_IMAGE ]] || write_effect rm "$image" -f -- "$work/$ubuntu"
-            write_effect rm "$image" -rf "$sandbox/vm"
-            write_effect go "$image" clean -testcache
-        } > "$fixture/expected-effects"
+        case "$variable" in
+            QEMU_IMAGE) name=yanet-test.qcow2;;
+            CLOUD_INIT_AUTOLOGIN_ISO) name=cloud-init-autologin.iso;;
+            UBUNTU_IMAGE) name=$ubuntu;;
+        esac
+        write_shared_cleanup clean-all "$name" > "$fixture/expected-effects"
         cmp -s "$fixture/expected-effects" "$effects" || fail 'expanded alias changed the complete cleanup sequence'
         expect_cleanup "$image"
         [[ "$path" -ef "$image" && ! -e "$work/test_run.log" && ! -e "$sandbox/vm" ]] || fail 'expanded alias removed or independent cleanup suppressed'

@@ -43,26 +43,15 @@ make -C tests/functional prepare-vm
 make -C tests/functional test-main
 ```
 
-A nonempty override must be an absolute path to a readable regular file.
-Relative, missing, unreadable, directory and whitespace-only values fail without
-falling back to local preparation. Paths containing spaces are supported.
-Unset or empty overrides retain local image creation and cleanup behavior.
+A nonempty override must be an absolute path to a readable regular file; invalid
+paths fail without local fallback. Unset or empty values retain local preparation.
+Shared `prepare-vm` only validates the image, while test targets still require Go,
+QEMU and prepared guest artifacts. `check-deps` checks local tools.
 
-In shared mode, `prepare-vm` only validates the input: it does not download
-Ubuntu, create a disk or cloud-init ISO, start QEMU, or require Go, QEMU or an
-ISO generator. `test` and `test-main` validate before their existing Go commands;
-`test-run TEST=...` validates without adding local bootstrap. The exact exported
-image path reaches the test process unchanged, including ordinary command-line
-`YANET_QEMU_IMAGE=...` assignments and environment overrides with `make -e`.
-Explicit `:=` and `::=` command-line assignments expand before Makefile loading
-and are outside this literal-input guarantee. Running tests still requires Go,
-QEMU and prepared guest artifacts; `check-deps` remains the local tool check.
-With direct invocation of this functional Makefile, supported image expressions
-stay literal through trusted artifact initialization and parse-time host checks.
-Use the direct commands above for this guarantee; repository-root wrappers are
-outside this contract.
-Local media targets and their QEMU helpers are not declared in shared mode, so
-artifact names cannot replace validation or attach local bootstrap prerequisites.
+With direct invocation of this Makefile, exported values, ordinary command-line
+assignments and `make -e` preserve the image path literally. Command-line `:=`
+and `::=` assignments expand before Makefile loading; repository-root wrappers
+are outside this guarantee.
 
 Read-only preparation does not make runtime caches read-only. The harness writes
 templates beside the selected image and opens a writable sibling lock even when
@@ -75,37 +64,22 @@ Run host functional tests serially across worktrees. The main package uses fixed
 VM pool names, so sharing an image does not provide concurrent-session isolation;
 an already-running same-named VM is rejected by the runtime.
 
-Shared-mode `clean` and `clean-all` preserve the input, its symlink/hardlink
-aliases and neighboring snapshots/sidecars without traversing shared storage.
-Independent local images, templates, ISO and logs remain eligible for cleanup;
-only `clean-all` also removes an independent local Ubuntu download. Combined
-`make -j4 clean clean-all` goals use one cleanup pass. The same all-clean intent
-applies when `clean-all` is a prerequisite of another target. All actual deletion paths,
-including artifact-variable overrides with spaces, newlines or leading dashes,
-are checked before removal. Relative overrides use the physical working directory,
-independent of `CDPATH`; every input symlink hop retains pathname bytes. Already
-absent independent artifacts do not block cleanup, and dangling symlinks are retained.
-Empty optional artifact names are skipped without suppressing remaining cleanup.
-`QEMU_IMAGE`, `CLOUD_INIT_AUTOLOGIN_ISO` and `UBUNTU_IMAGE` are trusted Make
-configuration: overrides use ordinary Make expansion before quoted cleanup
-checks, including `$(CURDIR)`. Escape a literal dollar as `$$` in Make assignments.
-This differs from `YANET_QEMU_IMAGE`, whose exact supplied value remains literal
-and is frozen before parse-time shell evaluation.
-If `clean` has already finished, `clean-all` preflights and removes only a remaining
-independent Ubuntu download, without repeating local removals or Go cache clearing.
-Each stage validates its own operands before removal; a separately requested safe
-`clean` may finish before a later protected Ubuntu operand is refused.
-Cleanup refuses when the working directory or a non-protected operand's parent
-is the shared image directory, comparing filesystem identity rather than just
-path spelling. Deliberate artifact overrides into nested subdirectories are not
-protected by the direct-parent guard. A recursive VM directory that contains or
-is inside a protected directory also causes refusal; this is not a blanket
-refusal of every local subdirectory under a shared ancestor. Symlinks and
-selected-image inode aliases are retained, including a regular file at the
-static VM cleanup root. The VM directory is retained if it contains symlinks or
-selected-image aliases.
-These are Make cleanup guards, not runtime cache/pruning guards. The shared
-input must remain available for cleanup validation.
+Shared `clean` and `clean-all` preserve the input, its symlink and hardlink
+aliases, and neighboring snapshots and sidecars. Independent local artifacts
+remain eligible for removal; only `clean-all` also removes an independent Ubuntu
+download. Combined goals use one cleanup pass. Each stage checks its operands
+before removal, so a separate `clean` can finish before `clean-all` refuses an
+unsafe Ubuntu operand. Cleanup requires the input to remain available.
+
+Cleanup refuses unsafe overlaps with the image directory and protected VM paths.
+It retains symlinks and selected-image inode aliases, including a VM directory
+containing them. The direct-parent guard does not protect deliberate overrides
+into nested shared subdirectories. These guards do not restrict runtime pruning.
+
+Artifact overrides support spaces, newlines and leading dashes; relative paths
+are resolved from the physical working directory. Unlike `YANET_QEMU_IMAGE`,
+`QEMU_IMAGE`, `CLOUD_INIT_AUTOLOGIN_ISO` and `UBUNTU_IMAGE` use normal Make
+expansion. Escape a literal dollar as `$$` in Make assignments.
 
 `debug-vm` and `debug-vm-ssh` explicitly reject nonempty overrides before any
 image creation or QEMU startup. Unset the override to use these local-image
@@ -122,17 +96,9 @@ bash tests/functional/test-makefile.sh
 bash tests/functional/test-makefile.sh /path/to/baseline.Makefile
 ```
 
-The optional argument selects another Makefile for the same regression, preserving
-pathname bytes even when its basename or parent ends in newlines. The
-script masks tools, sanitizes inherited Make settings and the image export,
-and neutralizes caller `CDPATH` before startup path resolution. It
-redirects the static VM directory into disposable fixtures, and checks exact
-test argv/environment and cleanup effects. Its whitespace-free fixture root is
-created under `/tmp` independently of the caller's `TMPDIR`, so legacy unquoted
-recipes are exercised safely even when that setting contains spaces. Fixture
-bytes and the full local dependency/Go sequence are checked without stripping
-trailing newlines or discarding effect records. This manual gate does not run
-the VM suite and is not automatically wired into CI.
+The optional argument selects another Makefile. Disposable fixtures and fake
+tools check command arguments, environment and cleanup effects. This manual
+gate does not run the VM suite and is not automatically wired into CI.
 
 The script reports the selected Make/Bash versions. Its optional second argument
 selects recipe mode: `bash` (the default) uses the invoking Bash, while `default`
