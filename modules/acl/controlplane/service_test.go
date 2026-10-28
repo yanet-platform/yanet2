@@ -51,13 +51,12 @@ func waitOnChan(t *testing.T, ch <-chan struct{}, msg string) {
 
 // fakeHandle is an in-memory implementation of acl.ModuleHandle for tests.
 type fakeHandle struct {
-	mu          sync.Mutex
-	name        string
-	rules       []cacl.ACLRule
-	fw4MapName  string
-	fw6MapName  string
-	freeCount   int
-	transferred bool
+	mu         sync.Mutex
+	name       string
+	rules      []cacl.ACLRule
+	fw4MapName string
+	fw6MapName string
+	freeCount  int
 }
 
 func (m *fakeHandle) Free() error {
