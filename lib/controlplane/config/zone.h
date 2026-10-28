@@ -136,14 +136,17 @@ struct cp_config {
 	 * the array below and every name's predecessor chain — and the
 	 * agent structures it reaches (arenas, storage, memory contexts)
 	 * against the sweep's reclamation, an attach's supersession
-	 * splice and an extension's arena growth. The agent listing
-	 * takes this lock alone, so reading agent state never waits
-	 * behind a configuration update; a mutation path takes the
-	 * configuration lock first and this one second, and the sweep
-	 * runs under this lock alone — a superseded agent's loaded
-	 * count cannot rise past an in-flight zero check, because
-	 * updates through a superseded agent are refused and a destroy
-	 * gate's hold takes this lock with the sweep's check.
+	 * splice, a destroy's unlinks and an extension's arena growth.
+	 * Agent maintenance — attach, extend, destroy, the listing and
+	 * the sweep — runs under this lock alone, so it never waits
+	 * behind a configuration update. A configuration mutation takes
+	 * the configuration lock first and this one second for the
+	 * brief crossings it needs: the superseded-owner refusal scan
+	 * and the exit sweep. The sweep runs under this lock alone —
+	 * a superseded agent's loaded count cannot rise past an
+	 * in-flight zero check, because updates through a superseded
+	 * agent are refused and a destroy gate's hold takes this lock
+	 * with the sweep's check.
 	 */
 	struct spinlock agent_lock;
 

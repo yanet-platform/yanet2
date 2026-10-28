@@ -2,6 +2,7 @@
 
 #include <errno.h>
 #include <sched.h>
+#include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 
@@ -376,12 +377,33 @@ cp_config_update_modules(
 ) {
 	cp_config_lock(cp_config);
 
+	struct agent **owners = NULL;
+	if (module_count > 0) {
+		owners =
+			(struct agent **)malloc(sizeof(*owners) * module_count);
+		if (owners == NULL) {
+			yanet_error_add_kind(
+				err,
+				YANET_ERROR_RESOURCE_EXHAUSTED,
+				"failed to allocate owner holds"
+			);
+			goto error_unlock;
+		}
+	}
+
 	// Refuse modules owned by a superseded agent: creating through a
 	// superseded agent would raise a predecessor's loaded count from
 	// zero and race the sweep's reclamation, and the superseding attach
 	// already ended the owner's lifetime anyway. The owner and its name
 	// live in the predecessor's arena, which the sweep may free under
 	// the agent lock alone, so the reads take that lock too.
+	//
+	// Each validated owner also gains a registration hold on the spot:
+	// the count gain for a first registration lands only when the
+	// upserts run, and without the hold a same-name attach could
+	// supersede and sweep the still-zero owner between this validation
+	// and that gain, leaving the upserts to touch freed arenas. Every
+	// exit of the update drops the holds again.
 	spinlock_lock(&cp_config->agent_lock);
 	for (uint64_t idx = 0; idx < module_count; ++idx) {
 		struct agent *owner = ADDR_OF(&cp_modules[idx]->entity.agent);
@@ -395,8 +417,17 @@ cp_config_update_modules(
 				cp_modules[idx]->name,
 				owner->name
 			);
+			agent_unload_references(owners, idx);
 			spinlock_unlock(&cp_config->agent_lock);
+			free(owners);
+			owners = NULL;
 			goto error_unlock;
+		}
+		owners[idx] = owner;
+		if (owner != NULL) {
+			__atomic_add_fetch(
+				&owner->loaded_entity_count, 1, __ATOMIC_RELEASE
+			);
 		}
 	}
 	spinlock_unlock(&cp_config->agent_lock);
@@ -465,6 +496,14 @@ cp_config_update_modules(
 		}
 	}
 
+	// The holds outlive the upserts' own gains but not the install:
+	// a displaced owner whose hold was the last reference drains here,
+	// and the install's sweep reclaims it at once instead of leaving
+	// the reclamation to an unrelated later mutation.
+	agent_unload_references(owners, module_count);
+	free(owners);
+	owners = NULL;
+
 	if (cp_config_gen_install(dp_config, cp_config, new_config_gen, err)) {
 		goto error_free;
 	}
@@ -475,6 +514,10 @@ cp_config_update_modules(
 error_free:
 	cp_config_gen_free(cp_config, new_config_gen);
 error_unlock:
+	if (owners != NULL) {
+		agent_unload_references(owners, module_count);
+		free(owners);
+	}
 	// Every completed hold of the configuration lock sweeps, failed
 	// builds included.
 	spinlock_lock(&cp_config->agent_lock);
@@ -839,9 +882,30 @@ cp_config_update_devices(
 	// TODO weight clamp
 	cp_config_lock(cp_config);
 
+	struct agent **owners = NULL;
+	if (device_count > 0) {
+		owners =
+			(struct agent **)malloc(sizeof(*owners) * device_count);
+		if (owners == NULL) {
+			yanet_error_add_kind(
+				err,
+				YANET_ERROR_RESOURCE_EXHAUSTED,
+				"failed to allocate owner holds"
+			);
+			goto error_unlock;
+		}
+	}
+
 	// Refuse devices owned by a superseded agent; see the module update
 	// path for why creation through a predecessor is refused and why
 	// the owner reads take the agent lock.
+	//
+	// Each validated owner also gains a registration hold on the spot:
+	// the count gain for a first registration lands only when the
+	// upserts run, and without the hold a same-name attach could
+	// supersede and sweep the still-zero owner between this validation
+	// and that gain, leaving the upserts to touch freed arenas. Every
+	// exit of the update drops the holds again.
 	spinlock_lock(&cp_config->agent_lock);
 	for (uint64_t idx = 0; idx < device_count; ++idx) {
 		struct agent *owner = ADDR_OF(&devices[idx]->entity.agent);
@@ -853,8 +917,17 @@ cp_config_update_devices(
 				devices[idx]->name,
 				owner->name
 			);
+			agent_unload_references(owners, idx);
 			spinlock_unlock(&cp_config->agent_lock);
+			free(owners);
+			owners = NULL;
 			goto error_unlock;
+		}
+		owners[idx] = owner;
+		if (owner != NULL) {
+			__atomic_add_fetch(
+				&owner->loaded_entity_count, 1, __ATOMIC_RELEASE
+			);
 		}
 	}
 	spinlock_unlock(&cp_config->agent_lock);
@@ -883,6 +956,14 @@ cp_config_update_devices(
 		}
 	}
 
+	// The holds outlive the upserts' own gains but not the install:
+	// a displaced owner whose hold was the last reference drains here,
+	// and the install's sweep reclaims it at once instead of leaving
+	// the reclamation to an unrelated later mutation.
+	agent_unload_references(owners, device_count);
+	free(owners);
+	owners = NULL;
+
 	if (cp_config_gen_install(dp_config, cp_config, new_config_gen, err)) {
 		goto error_free;
 	}
@@ -893,6 +974,10 @@ cp_config_update_devices(
 error_free:
 	cp_config_gen_free(cp_config, new_config_gen);
 error_unlock:
+	if (owners != NULL) {
+		agent_unload_references(owners, device_count);
+		free(owners);
+	}
 	// Every completed hold of the configuration lock sweeps, failed
 	// builds included.
 	spinlock_lock(&cp_config->agent_lock);
@@ -975,9 +1060,30 @@ cp_config_update_objects(
 ) {
 	cp_config_lock(cp_config);
 
+	struct agent **owners = NULL;
+	if (object_count > 0) {
+		owners =
+			(struct agent **)malloc(sizeof(*owners) * object_count);
+		if (owners == NULL) {
+			yanet_error_add_kind(
+				err,
+				YANET_ERROR_RESOURCE_EXHAUSTED,
+				"failed to allocate owner holds"
+			);
+			goto error_unlock;
+		}
+	}
+
 	// Refuse objects owned by a superseded agent; see the module update
 	// path for why creation through a predecessor is refused and why
 	// the owner reads take the agent lock.
+	//
+	// Each validated owner also gains a registration hold on the spot:
+	// the count gain for a first registration lands only when the
+	// upserts run, and without the hold a same-name attach could
+	// supersede and sweep the still-zero owner between this validation
+	// and that gain, leaving the upserts to touch freed arenas. Every
+	// exit of the update drops the holds again.
 	spinlock_lock(&cp_config->agent_lock);
 	for (uint64_t idx = 0; idx < object_count; ++idx) {
 		struct agent *owner = ADDR_OF(&objects[idx]->entity.agent);
@@ -991,8 +1097,17 @@ cp_config_update_objects(
 				objects[idx]->name,
 				owner->name
 			);
+			agent_unload_references(owners, idx);
 			spinlock_unlock(&cp_config->agent_lock);
+			free(owners);
+			owners = NULL;
 			goto error_unlock;
+		}
+		owners[idx] = owner;
+		if (owner != NULL) {
+			__atomic_add_fetch(
+				&owner->loaded_entity_count, 1, __ATOMIC_RELEASE
+			);
 		}
 	}
 	spinlock_unlock(&cp_config->agent_lock);
@@ -1022,6 +1137,14 @@ cp_config_update_objects(
 		}
 	}
 
+	// The holds outlive the upserts' own gains but not the install:
+	// a displaced owner whose hold was the last reference drains here,
+	// and the install's sweep reclaims it at once instead of leaving
+	// the reclamation to an unrelated later mutation.
+	agent_unload_references(owners, object_count);
+	free(owners);
+	owners = NULL;
+
 	if (cp_config_gen_install(dp_config, cp_config, new_config_gen, err)) {
 		goto error_free;
 	}
@@ -1032,6 +1155,10 @@ cp_config_update_objects(
 error_free:
 	cp_config_gen_free(cp_config, new_config_gen);
 error_unlock:
+	if (owners != NULL) {
+		agent_unload_references(owners, object_count);
+		free(owners);
+	}
 	// Every completed hold of the configuration lock sweeps, failed
 	// builds included.
 	spinlock_lock(&cp_config->agent_lock);

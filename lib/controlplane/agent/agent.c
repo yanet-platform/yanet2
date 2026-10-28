@@ -248,11 +248,11 @@ agent_attach(
 
 	// Guard against attaching before the dataplane finishes initialising
 	// the shared memory instance. A zeroed segment has ready_magic == 0,
-	// so ADDR_OF(&dp_config->cp_config) would yield NULL and the subsequent
-	// cp_config_lock call would fault. Acquire ordering pairs with the
-	// release store in dp_config_mark_ready, published once the dataplane
-	// has released cp_config, guaranteeing the cp_config offset pointer is
-	// fully visible once we pass this check.
+	// so ADDR_OF(&dp_config->cp_config) would yield NULL and the
+	// subsequent dereferences would fault. Acquire ordering pairs with
+	// the release store in dp_config_mark_ready, published once the
+	// dataplane has released cp_config, guaranteeing the cp_config
+	// offset pointer is fully visible once we pass this check.
 	uint64_t magic =
 		__atomic_load_n(&dp_config->ready_magic, __ATOMIC_ACQUIRE);
 	if (magic != DP_CONFIG_READY_MAGIC) {
@@ -267,8 +267,11 @@ agent_attach(
 
 	struct cp_config *cp_config = ADDR_OF(&dp_config->cp_config);
 
-	cp_config_lock(cp_config);
-
+	// Agent maintenance runs under the agent lock alone: the pool
+	// draws below are allocator-locked, the stamp is pinned, and the
+	// registry structure belongs to the agent lock. Nothing here reads
+	// or writes configuration content, so nothing waits for a
+	// configuration update to finish.
 	struct agent *new_agent = (struct agent *)memory_balloc(
 		&cp_config->memory_context, sizeof(struct agent)
 	);
@@ -283,12 +286,6 @@ agent_attach(
 	SET_OFFSET_OF(&new_agent->dp_config, dp_config);
 	SET_OFFSET_OF(&new_agent->cp_config, cp_config);
 	new_agent->pid = getpid();
-
-	// The stamp reads the generation through a pin, so no
-	// dereference can touch a generation some other path retires.
-	struct cp_config_gen *config_gen = cp_config_gen_acquire(cp_config);
-	new_agent->gen = config_gen->gen;
-	cp_config_gen_release(cp_config, config_gen);
 
 	block_allocator_init(&new_agent->block_allocator);
 	memory_context_init(
@@ -344,6 +341,15 @@ agent_attach(
 	// lock, so the splice below must exclude it.
 	spinlock_lock(&cp_config->agent_lock);
 
+	// The stamp is taken under the same lock as the splice, so a
+	// stalled attach cannot register an older generation's stamp
+	// above a successor stamped later. The pin keeps the read off a
+	// generation some other path retires, and is released outside
+	// this section: a last-drop release tears the generation down
+	// under the agent lock, which this holder must not re-acquire.
+	struct cp_config_gen *config_gen = cp_config_gen_acquire(cp_config);
+	new_agent->gen = config_gen->gen;
+
 	struct cp_agent_registry *old_registry =
 		ADDR_OF(&cp_config->agent_registry);
 	bool found = false;
@@ -376,6 +382,7 @@ agent_attach(
 				"failed to allocate memory for agent registry"
 			);
 			spinlock_unlock(&cp_config->agent_lock);
+			cp_config_gen_release(cp_config, config_gen);
 			agent_cleanup(new_agent);
 			new_agent = NULL;
 			goto unlock;
@@ -405,23 +412,23 @@ agent_attach(
 	}
 
 	spinlock_unlock(&cp_config->agent_lock);
+	cp_config_gen_release(cp_config, config_gen);
 
 unlock:
-	// Every completed hold of the configuration lock sweeps, the
-	// failed attaches included. No incoming path holds the agent lock
-	// here: the failure legs release it before jumping, and the
-	// success path falls through from its release above.
+	// Every completed agent mutation sweeps, the failed attaches
+	// included. No incoming path holds the agent lock here: the
+	// failure legs release it before jumping, and the success path
+	// falls through from its release above.
 	spinlock_lock(&cp_config->agent_lock);
 	cp_config_reclaim_unused_agents_locked(cp_config);
 	spinlock_unlock(&cp_config->agent_lock);
-	cp_config_unlock(cp_config);
 
 	return new_agent;
 }
 
 uint64_t
 agent_memory_limit(struct agent *agent) {
-	// The limit only ever grows, and always while the config lock is
+	// The limit only ever grows, and always while the agent lock is
 	// held, so an unlocked reader needs nothing stronger than an atomic
 	// load to observe a value that was valid at some point.
 	return __atomic_load_n(&agent->memory_limit, __ATOMIC_ACQUIRE);
@@ -536,7 +543,6 @@ int
 agent_extend(struct agent *agent, uint64_t size, yanet_error **err) {
 	struct cp_config *cp_config = ADDR_OF(&agent->cp_config);
 
-	cp_config_lock(cp_config);
 	spinlock_lock(&cp_config->agent_lock);
 	int ret = agent_extend_locked(agent, size, err);
 	// Every completed mutation of agent state sweeps under the agent
@@ -544,7 +550,6 @@ agent_extend(struct agent *agent, uint64_t size, yanet_error **err) {
 	// postponed at most until a mutating holder releases it.
 	cp_config_reclaim_unused_agents_locked(cp_config);
 	spinlock_unlock(&cp_config->agent_lock);
-	cp_config_unlock(cp_config);
 
 	return ret;
 }
@@ -568,7 +573,6 @@ agent_destroy(struct agent *agent) {
 		return 0;
 	}
 
-	cp_config_lock(cp_config);
 	spinlock_lock(&cp_config->agent_lock);
 
 	// Remove every registry reference to the agent, so no later sweep
@@ -619,7 +623,6 @@ agent_destroy(struct agent *agent) {
 				);
 			if (new_registry == NULL) {
 				spinlock_unlock(&cp_config->agent_lock);
-				cp_config_unlock(cp_config);
 				errno = ENOMEM;
 				return -1;
 			}
@@ -649,10 +652,10 @@ agent_destroy(struct agent *agent) {
 	}
 
 	agent_cleanup(agent);
-	// Every completed hold of the locks sweeps, this holder included.
+	// Every completed hold of the agent lock sweeps, this holder
+	// included.
 	cp_config_reclaim_unused_agents_locked(cp_config);
 	spinlock_unlock(&cp_config->agent_lock);
-	cp_config_unlock(cp_config);
 	return 0;
 }
 
@@ -1802,9 +1805,8 @@ agent_dp_config(struct agent *agent) {
 	return ADDR_OF(&agent->dp_config);
 }
 
-// The caller must hold the agent lock (the registry structure belongs
-// to it); a configuration-lock holder also suffices, since every splice
-// takes both.
+// The caller must hold the agent lock: the registry structure belongs
+// to it, and agent maintenance mutates it under that lock alone.
 static struct agent *
 find_agent_locked(struct cp_config *cp_config, const char *name) {
 	struct cp_agent_registry *registry =
@@ -1839,7 +1841,6 @@ yanet_shm_extend_agent(
 		return -1;
 	}
 
-	cp_config_lock(cp_config);
 	spinlock_lock(&cp_config->agent_lock);
 
 	int ret = 1;
@@ -1856,7 +1857,6 @@ yanet_shm_extend_agent(
 	// postponed at most until a mutating holder releases it.
 	cp_config_reclaim_unused_agents_locked(cp_config);
 	spinlock_unlock(&cp_config->agent_lock);
-	cp_config_unlock(cp_config);
 
 	return ret;
 }

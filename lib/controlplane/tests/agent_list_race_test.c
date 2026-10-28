@@ -6,10 +6,13 @@
  * chains a successor and sweeps the drained predecessors — and
  * periodically publish a device so some predecessors stay referenced
  * until a later retirement releases them, driving sweeps from the
- * generation install and release paths too. Readers hammer the agent
- * listing, which walks the registry and every prev chain without the
- * configuration lock: a listing that slipped onto a swept agent shows
- * up as a crash or as a torn snapshot under the race detectors.
+ * generation install and release paths too. A destroyer repeatedly
+ * attaches an entity-free agent and destroys it, so the registry array
+ * grows and is rebuilt under the agent lock while every other thread
+ * walks or splices it. Readers hammer the agent listing, which walks
+ * the registry and every prev chain without the configuration lock: a
+ * listing that slipped onto a swept agent shows up as a crash or as a
+ * torn snapshot under the race detectors.
  */
 
 #include "api/agent.h"
@@ -36,6 +39,7 @@
 #define LIST_RACE_WRITERS 2
 #define LIST_RACE_READERS 2
 #define LIST_RACE_ATTACHES_PER_WRITER 200
+#define LIST_RACE_DESTROY_ROUNDS 200
 
 struct list_race_state {
 	struct yanet_shm *shm;
@@ -121,6 +125,39 @@ race_writer_thread(void *arg) {
 }
 
 static void *
+race_destroyer_thread(void *arg) {
+	struct list_race_state *state = (struct list_race_state *)arg;
+	for (unsigned round = 0; round < LIST_RACE_DESTROY_ROUNDS; ++round) {
+		yanet_error *err = NULL;
+		struct agent *agent = agent_attach(
+			state->shm, 0, state->name, LIST_RACE_AGENT_MEMORY, &err
+		);
+		if (agent == NULL) {
+			fprintf(stderr,
+				"destroyer attach failed: %s\n",
+				err ? yanet_error_message(err) : "?");
+			yanet_error_free(err);
+			atomic_store_explicit(
+				&state->writer_failed,
+				true,
+				memory_order_release
+			);
+			return NULL;
+		}
+		if (agent_destroy(agent)) {
+			fprintf(stderr, "destroyer destroy failed\n");
+			atomic_store_explicit(
+				&state->writer_failed,
+				true,
+				memory_order_release
+			);
+			return NULL;
+		}
+	}
+	return NULL;
+}
+
+static void *
 race_reader_thread(void *arg) {
 	struct list_race_state *state = (struct list_race_state *)arg;
 	while (!atomic_load_explicit(&state->stop, memory_order_acquire)) {
@@ -172,6 +209,12 @@ run_agent_list_race_test(struct yanet_shm *shm) {
 			.name = "list-race-b",
 		},
 	};
+	struct list_race_state destroyer_state = {
+		.shm = shm,
+		.dp_config = dp_config,
+		.cp_config = cp_config,
+		.name = "list-race-d",
+	};
 
 	pthread_t writers[LIST_RACE_WRITERS];
 	for (size_t idx = 0; idx < LIST_RACE_WRITERS; ++idx) {
@@ -179,34 +222,82 @@ run_agent_list_race_test(struct yanet_shm *shm) {
 		atomic_init(&states[idx].writer_failed, false);
 		atomic_init(&states[idx].reader_failed, false);
 	}
+	atomic_init(&destroyer_state.stop, false);
+	atomic_init(&destroyer_state.writer_failed, false);
+	atomic_init(&destroyer_state.reader_failed, false);
 
+	// Every thread that starts is stopped and joined before any
+	// assertion can leave: a failed create must not strand running
+	// threads in a fixture the caller is about to tear down.
 	pthread_t readers[LIST_RACE_READERS];
-	for (size_t idx = 0; idx < LIST_RACE_READERS; ++idx) {
-		int rc = pthread_create(
-			&readers[idx], NULL, race_reader_thread, &states[0]
+	size_t readers_started = 0;
+	int create_rc = 0;
+	for (; readers_started < LIST_RACE_READERS; ++readers_started) {
+		create_rc = pthread_create(
+			&readers[readers_started],
+			NULL,
+			race_reader_thread,
+			&states[0]
 		);
-		TEST_ASSERT_EQUAL(rc, 0, "pthread_create failed for reader");
+		if (create_rc != 0) {
+			break;
+		}
 	}
 
-	for (size_t idx = 0; idx < LIST_RACE_WRITERS; ++idx) {
-		int rc = pthread_create(
-			&writers[idx], NULL, race_writer_thread, &states[idx]
-		);
-		TEST_ASSERT_EQUAL(rc, 0, "pthread_create failed for writer");
+	size_t writers_started = 0;
+	if (create_rc == 0) {
+		for (; writers_started < LIST_RACE_WRITERS; ++writers_started) {
+			create_rc = pthread_create(
+				&writers[writers_started],
+				NULL,
+				race_writer_thread,
+				&states[writers_started]
+			);
+			if (create_rc != 0) {
+				break;
+			}
+		}
 	}
 
-	for (size_t idx = 0; idx < LIST_RACE_WRITERS; ++idx) {
-		int rc = pthread_join(writers[idx], NULL);
-		TEST_ASSERT_EQUAL(rc, 0, "pthread_join failed for writer");
+	pthread_t destroyer;
+	bool destroyer_started = false;
+	if (create_rc == 0) {
+		create_rc = pthread_create(
+			&destroyer,
+			NULL,
+			race_destroyer_thread,
+			&destroyer_state
+		);
+		destroyer_started = (create_rc == 0);
 	}
 
-	for (size_t idx = 0; idx < LIST_RACE_READERS; ++idx) {
-		atomic_store_explicit(
-			&states[0].stop, true, memory_order_release
+	for (size_t idx = 0; idx < writers_started; ++idx) {
+		TEST_ASSERT_EQUAL(
+			pthread_join(writers[idx], NULL),
+			0,
+			"pthread_join failed for writer"
 		);
-		int rc = pthread_join(readers[idx], NULL);
-		TEST_ASSERT_EQUAL(rc, 0, "pthread_join failed for reader");
 	}
+	if (destroyer_started) {
+		TEST_ASSERT_EQUAL(
+			pthread_join(destroyer, NULL),
+			0,
+			"pthread_join failed for destroyer"
+		);
+	}
+
+	atomic_store_explicit(&states[0].stop, true, memory_order_release);
+	for (size_t idx = 0; idx < readers_started; ++idx) {
+		TEST_ASSERT_EQUAL(
+			pthread_join(readers[idx], NULL),
+			0,
+			"pthread_join failed for reader"
+		);
+	}
+
+	TEST_ASSERT_EQUAL(
+		create_rc, 0, "pthread_create failed for a race thread"
+	);
 
 	TEST_ASSERT(
 		!atomic_load_explicit(
@@ -214,6 +305,10 @@ run_agent_list_race_test(struct yanet_shm *shm) {
 		) &&
 			!atomic_load_explicit(
 				&states[1].writer_failed, memory_order_acquire
+			) &&
+			!atomic_load_explicit(
+				&destroyer_state.writer_failed,
+				memory_order_acquire
 			),
 		"a writer failed during the race"
 	);
