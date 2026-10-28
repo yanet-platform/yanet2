@@ -20,12 +20,10 @@
 #define CP_MEMORY (4 << 20)
 #define STORAGE_SIZE (DP_MEMORY + CP_MEMORY)
 
-// Verifies that memory_context_count_nodes and memory_context_fill_nodes
-// export a correct depth-first tree via yanet_get_cp_agent_list_info. Models
-// an agent_attach'd agent: the memory_context tree is rooted at the agent's
-// own block_allocator, the same allocator build_instance_info queries via
-// block_allocator_free_size, so a future regression that moves that call
-// inside the tree-walk lock would deadlock this test instead of passing.
+// Verifies that an agent exports its context tree and its own free capacity.
+//
+// The tree and allocator share a non-reentrant lock, so reading capacity
+// inside a locked tree traversal would deadlock this scenario.
 static int
 test_memory_tree_exported(void) {
 	void *storage = calloc(1, STORAGE_SIZE);
@@ -132,6 +130,23 @@ test_memory_tree_exported(void) {
 	rc = yanet_get_cp_agent_instance_info(ai, 0, &inst);
 	TEST_ASSERT(rc == 0, "yanet_get_cp_agent_instance_info failed");
 	TEST_ASSERT_NOT_NULL(inst, "instance info is NULL");
+	struct block_allocator_stats expected;
+	block_allocator_get_stats(&ag->block_allocator, &expected);
+	TEST_ASSERT(
+		memcmp(&inst->allocator, &expected, sizeof(expected)) == 0,
+		"agent allocator snapshot differs from its own allocator"
+	);
+	TEST_ASSERT(
+		inst->free_bytes == inst->allocator.free_bytes,
+		"legacy free bytes must use the same snapshot"
+	);
+	struct block_allocator_stats shared;
+	yanet_get_cp_allocator_stats(dp, &shared);
+	block_allocator_get_stats(&cp->block_allocator, &expected);
+	TEST_ASSERT(
+		memcmp(&shared, &expected, sizeof(expected)) == 0,
+		"shared allocator snapshot differs from the CP allocator"
+	);
 
 	// The tree has root "myagent", child "mod", grandchild "lpm" — 3 nodes.
 	TEST_ASSERT(inst->memory_node_count == 3, "expected 3 memory nodes");

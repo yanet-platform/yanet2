@@ -70,6 +70,55 @@ Semantics:
   the whole `Workers` call fails and `Collect()` omits the worker
   family — so a version skew can never masquerade as a real occupancy.
 
+## Shared-memory allocator capacity
+
+The built-in memory service exports these gauges through the instance
+metrics endpoint, alongside the existing per-agent arena gauges:
+
+| Metric | Value | Labels |
+| --- | --- | --- |
+| `memory_allocator_free_bytes` | Sum of the sizes of all free blocks, in bytes. | `scope`, `agent` |
+| `memory_allocator_largest_free_block_bytes` | Largest currently free block, or zero when exhausted. | `scope`, `agent` |
+| `memory_allocator_free_blocks` | Number of free blocks in one size class, not a cumulative histogram. | `scope`, `agent`, `block_size_bytes` |
+
+`scope="cp", agent=""` identifies the shared control-plane allocator. It
+backs execution contexts, counter registries, counter values and the
+arenas reserved by agents. `scope="agent", agent="<name>"` identifies the
+live generation of an agent's own allocator. Retired generations remain
+visible through `memory_retired_arena_bytes`, without PID or generation
+labels on the new series. A system agent without its own arena has zero
+capacity here; its CP-backed allocations belong to the shared allocator.
+
+Each allocator exposes all 24 size classes, from 8 bytes to 64 MiB,
+including zero counts. The extra series count is 26 per allocator, with
+no labels derived from configuration generations or memory-context paths.
+Existing `memory_arena_free_bytes{agent}` series retain their labels and
+values. The shared allocator excludes space already reserved by agents;
+agent free capacity is not available to an unrelated shared CP request.
+
+A snapshot takes the allocator lock for a bounded scan of its pool
+counters, without walking free lists or allocating from shared memory.
+The total, largest block and all class counts describe the same instant
+within one allocator; different allocators are sampled independently.
+Sizes are internal block sizes, including allocator rounding and ASan red
+zones when enabled, rather than maximum usable payload sizes.
+
+For a valid request rounded to a block size `B`, `free_bytes >= B` with
+`largest_free_block_bytes < B` identifies insufficient large blocks
+despite enough total free space. Compare that condition with the required
+block size, not the unrounded request. A single fragmentation percentage
+is misleading because even an unfragmented arena consists of blocks no
+larger than 64 MiB. Scrapes can miss transient allocation peaks.
+
+The same snapshots are available in `yanet-cli-inspect`: the summary shows
+shared CP free capacity and the largest free block for CP and agents;
+`--memory` adds every size class alongside the memory-context trees.
+`--format json` includes `instance_info.cp_allocator` and each agent
+instance's `allocator` irrespective of `--memory`. With an older server,
+absent snapshots remain absent and the agent's largest block is `n/a`,
+not an exhausted-allocator zero. Rebuild native info-library consumers
+with the updated headers; the shared-memory layout is unchanged.
+
 ## Port metrics
 
 One series per DPDK port and xstat counter, cumulative:

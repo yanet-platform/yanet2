@@ -21,7 +21,7 @@ use ynpb::pb::{
 #[command(version = ync::version(), about)]
 #[command(flatten_help = true)]
 pub struct Cmd {
-    /// Include detailed memory contexts in human output.
+    /// Include memory contexts and allocator size classes in human output.
     #[arg(long)]
     pub memory: bool,
     #[command(flatten)]

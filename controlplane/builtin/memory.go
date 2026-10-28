@@ -3,6 +3,7 @@ package builtin
 import (
 	"context"
 	"errors"
+	"strconv"
 
 	"github.com/c2h5oh/datasize"
 	"google.golang.org/grpc"
@@ -106,11 +107,11 @@ func (m *Memory) ExtendAgent(
 	}, nil
 }
 
-// Collect returns arena occupancy and memory-context attribution gauges
-// for every agent, plus the controlplane zone's own gauges.
+// Collect returns shared and per-agent allocator capacity, arena occupancy
+// and memory-context attribution gauges.
 //
 // The free-byte count is the authoritative measure of how full an arena
-// is: the buddy allocator behind the memory-context tree rounds each
+// is: the block allocator behind the memory-context tree rounds each
 // request up to a pool size, and an out-of-order module teardown can
 // drop a live subtree from the tree walk, so the tree is attribution
 // only.
@@ -119,6 +120,33 @@ func (m *Memory) Collect() []*commonpb.Metric {
 	metrics := MemoryMetrics(dpConfig.Agents())
 	if cp := dpConfig.CPMemory(); cp != nil {
 		metrics = append(metrics, CPMemoryMetrics(*cp)...)
+	}
+	return append(metrics, CPAllocatorMetrics(dpConfig.CPAllocatorStats())...)
+}
+
+// CPAllocatorMetrics reports shared control-plane capacity independently of
+// whether any agent has attached.
+func CPAllocatorMetrics(stats ffi.AllocatorStats) []*commonpb.Metric {
+	return allocatorMetrics("cp", "", stats)
+}
+
+func allocatorMetrics(scope string, agent string, stats ffi.AllocatorStats) []*commonpb.Metric {
+	labels := []*commonpb.Label{
+		commonpb.NewLabel("scope", scope),
+		commonpb.NewLabel("agent", agent),
+	}
+	metrics := []*commonpb.Metric{
+		commonpb.NewMetricGauge("memory_allocator_free_bytes", float64(stats.FreeBytes), labels...),
+		commonpb.NewMetricGauge("memory_allocator_largest_free_block_bytes", float64(stats.LargestFreeBlockBytes), labels...),
+	}
+	for _, pool := range stats.Pools {
+		metrics = append(metrics, commonpb.NewMetricGauge(
+			"memory_allocator_free_blocks",
+			float64(pool.FreeBlocks),
+			labels[0],
+			labels[1],
+			commonpb.NewLabel("block_size_bytes", strconv.FormatUint(pool.BlockSizeBytes, 10)),
+		))
 	}
 	return metrics
 }
@@ -146,6 +174,7 @@ func MemoryMetrics(agents []ffi.AgentInfo) []*commonpb.Metric {
 			commonpb.NewMetricGauge("memory_retired_arena_bytes", float64(retiredBytes), agentLabel),
 		)
 		metrics = append(metrics, contextUsedMetrics(agent.Name, live.MemoryTree)...)
+		metrics = append(metrics, allocatorMetrics("agent", agent.Name, live.Allocator)...)
 	}
 
 	return metrics

@@ -73,6 +73,24 @@ message InstanceInfo {
   // the ectx and counter-storage contexts, the system agent's subtree and
   // the configuration generations.
   CPMemoryInfo cp_memory = 9;
+  // Shared control-plane capacity, outside the arenas reserved by agents.
+  AllocatorInfo cp_allocator = 10;
+}
+
+// AllocatorInfo is a lock-consistent snapshot of free capacity.
+//
+// Block sizes include allocator rounding and sanitizer red zones. Separate
+// allocators are sampled independently, not at one global instant.
+message AllocatorInfo {
+  uint64 free_bytes = 1;
+  uint64 largest_free_block_bytes = 2;
+  repeated AllocatorPoolInfo pools = 3;
+}
+
+// AllocatorPoolInfo describes a power-of-two size class, including empty ones.
+message AllocatorPoolInfo {
+  uint64 block_size_bytes = 1;
+  uint64 free_blocks = 2;
 }
 
 // DPModuleInfo contains information about a dataplane module.
@@ -248,6 +266,8 @@ message AgentInstanceInfo {
   // parent_idx. Best-effort: a concurrent update may make a node appear or
   // vanish between traversal passes.
   repeated MemoryNode memory_tree = 7;
+  // Free capacity of this agent's own allocator.
+  AllocatorInfo allocator = 8;
 }
 
 // CPMemoryInfo describes the controlplane memory zone of one instance.

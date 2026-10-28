@@ -59,6 +59,7 @@ func (m *Inspect) Inspect(
 		Agents:      m.agents(dpConfig),
 		Devices:     m.devices(dpConfig),
 		CpMemory:    m.cpMemory(dpConfig),
+		CpAllocator: allocatorInfo(dpConfig.CPAllocatorStats()),
 	}
 
 	response := &ynpb.InspectResponse{
@@ -164,6 +165,7 @@ func (m *Inspect) agents(dpConfig *ffi.DPConfig) []*ynpb.AgentInfo {
 				FreeBytes:   instance.FreeBytes,
 				Generation:  instance.Gen,
 				MemoryTree:  memoryTree(instance.MemoryTree),
+				Allocator:   allocatorInfo(instance.Allocator),
 			}
 		}
 
@@ -197,6 +199,21 @@ func memoryTree(nodes []ffi.MemoryNode) []*ynpb.MemoryNode {
 		}
 	}
 	return out
+}
+
+func allocatorInfo(stats ffi.AllocatorStats) *ynpb.AllocatorInfo {
+	pools := make([]*ynpb.AllocatorPoolInfo, len(stats.Pools))
+	for idx, pool := range stats.Pools {
+		pools[idx] = &ynpb.AllocatorPoolInfo{
+			BlockSizeBytes: pool.BlockSizeBytes,
+			FreeBlocks:     pool.FreeBlocks,
+		}
+	}
+	return &ynpb.AllocatorInfo{
+		FreeBytes:             stats.FreeBytes,
+		LargestFreeBlockBytes: stats.LargestFreeBlockBytes,
+		Pools:                 pools,
+	}
 }
 
 func (m *Inspect) devices(dpConfig *ffi.DPConfig) []*ynpb.DeviceInfo {

@@ -2,6 +2,7 @@ package builtin_test
 
 import (
 	"math"
+	"strconv"
 	"testing"
 
 	"github.com/c2h5oh/datasize"
@@ -44,6 +45,88 @@ func gaugeValue(t *testing.T, metric *commonpb.Metric) float64 {
 
 	require.NotNil(t, metric)
 	return metric.GetGauge()
+}
+
+// Test_CPAllocatorMetrics_AllocatorCapacity verifies that shared capacity is
+// exported even without agents and zero-valued classes are not omitted.
+func Test_CPAllocatorMetrics_AllocatorCapacity(t *testing.T) {
+	stats := ffi.AllocatorStats{
+		FreeBytes:             48,
+		LargestFreeBlockBytes: 32,
+		Pools: []ffi.AllocatorPoolStats{
+			{BlockSizeBytes: 8, FreeBlocks: 2},
+			{BlockSizeBytes: 16, FreeBlocks: 0},
+			{BlockSizeBytes: 32, FreeBlocks: 1},
+		},
+	}
+	metrics := builtin.CPAllocatorMetrics(stats)
+	require.Len(t, metrics, 2+len(stats.Pools))
+	assertAllocatorMetrics(t, metrics, "cp", "", stats)
+}
+
+// Test_MemoryMetrics_AllocatorUsesLiveGeneration verifies that retired
+// arenas do not produce duplicate series or inflate live free capacity.
+func Test_MemoryMetrics_AllocatorUsesLiveGeneration(t *testing.T) {
+	stats := ffi.AllocatorStats{
+		FreeBytes:             64,
+		LargestFreeBlockBytes: 32,
+		Pools: []ffi.AllocatorPoolStats{
+			{BlockSizeBytes: 16, FreeBlocks: 0},
+			{BlockSizeBytes: 32, FreeBlocks: 2},
+		},
+	}
+	agents := []ffi.AgentInfo{{
+		Name: "route",
+		Instances: []ffi.AgentInstanceInfo{
+			{Allocator: stats},
+			{Allocator: ffi.AllocatorStats{FreeBytes: 1024, LargestFreeBlockBytes: 512}},
+		},
+	}}
+	metrics := builtin.MemoryMetrics(agents)
+	assertAllocatorMetrics(t, metrics, "agent", "route", stats)
+	var allocatorCount int
+	for _, metric := range metrics {
+		if metric.GetName() == "memory_allocator_free_bytes" {
+			allocatorCount++
+		}
+	}
+	require.Equal(t, 1, allocatorCount)
+}
+
+// assertAllocatorMetrics checks exact labels and raw size-class counts
+// without introducing PID or generation labels into monitoring.
+func assertAllocatorMetrics(t *testing.T, metrics []*commonpb.Metric, scope string, agent string, stats ffi.AllocatorStats) {
+	t.Helper()
+	labels := map[string]string{"scope": scope, "agent": agent}
+	require.Equal(t, float64(stats.FreeBytes), gaugeValue(t,
+		findMetric(t, metrics, "memory_allocator_free_bytes", labels),
+	))
+	require.Equal(t, float64(stats.LargestFreeBlockBytes), gaugeValue(t,
+		findMetric(t, metrics, "memory_allocator_largest_free_block_bytes", labels),
+	))
+	for _, pool := range stats.Pools {
+		labels := map[string]string{
+			"scope":            scope,
+			"agent":            agent,
+			"block_size_bytes": strconv.FormatUint(pool.BlockSizeBytes, 10),
+		}
+		require.Equal(t, float64(pool.FreeBlocks), gaugeValue(t,
+			findMetric(t, metrics, "memory_allocator_free_blocks", labels),
+		))
+	}
+}
+
+// Test_Memory_CollectAllocatorSnapshots verifies that real shared and
+// agent snapshots reach the existing monitoring collector.
+func Test_Memory_CollectAllocatorSnapshots(t *testing.T) {
+	shm := newMemoryHarness(t).SharedMemory()
+	attachModuleAgent(t, shm, "route")
+	dpConfig := shm.DPConfig(0)
+	metrics := builtin.NewMemory(0, shm).Collect()
+	assertAllocatorMetrics(t, metrics, "cp", "", dpConfig.CPAllocatorStats())
+	for _, agent := range dpConfig.Agents() {
+		assertAllocatorMetrics(t, metrics, "agent", agent.Name, agent.Instances[0].Allocator)
+	}
 }
 
 // TestMemoryMetricsContextPathResolution verifies that the root node of
