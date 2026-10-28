@@ -38,9 +38,6 @@ type LargeCommunity struct {
 // This information helps compute route costs, enabling the data plane to select
 // the optimal route for traffic forwarding
 type Route struct {
-	// SessionID identifies the session that added this route to the rib, used
-	// for cleanup of stale routes.
-	SessionID uint64
 	// Prefix is used as a key in routing databases (RIB and FIB), represented as
 	// an IPv6 network prefix. IPv4 addresses are stored as IPv6-mapped addresses.
 	Prefix netip.Prefix
