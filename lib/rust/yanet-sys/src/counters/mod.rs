@@ -8,6 +8,10 @@ use yanet_shm::root::ShmRoot;
 
 use crate::bindings;
 
+/// The counter id C reports a failure with, its `(uint64_t)-1` cast macro that
+/// bindgen does not bind.
+pub const COUNTER_INVALID: u64 = u64::MAX;
+
 /// Address of a counter's value in a counter storage, bit for bit like
 /// the C `counter_get_address` (`lib/counters/counters.h`) without its
 /// `COUNTERS_CHECK` null test.

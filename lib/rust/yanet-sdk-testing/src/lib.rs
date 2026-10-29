@@ -3,7 +3,8 @@
 //! [`BlockArena`] carves every block out of one region and roots its
 //! pointers at the region's base, as a product roots them at its one
 //! mapping. [`View`] resolves edges through the arena's root. The `cp` module
-//! (feature `cp`) is the owner of the configuration builder built on it.
+//! (feature `cp`) is the owner of the configuration builder built on it, with
+//! no C memory.
 
 extern crate alloc;
 

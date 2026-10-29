@@ -28,6 +28,7 @@ mod addr;
 mod build;
 mod error;
 mod owner;
+mod record;
 
 pub use addr::{BlockAddr, Context, Header};
 pub use build::{Build, Builder, Built, Owned, OwnedSlice, Registered, Scope};
@@ -35,3 +36,4 @@ pub use build::{Build, Builder, Built, Owned, OwnedSlice, Registered, Scope};
 pub use build::{MemoryContext, Partial};
 pub use error::{BuildError, Refusal};
 pub use owner::Owner;
+pub use record::FfiRecord;

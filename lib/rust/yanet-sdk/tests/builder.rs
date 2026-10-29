@@ -1,16 +1,12 @@
-//! The configuration builder over the test owner: in-place construction of a
-//! route FIB with its two C LPM tables and of nested blocks, its refusals, and
-//! the release of everything a finished or a failed build allocated.
+//! The configuration builder over the test owner: in-place construction of
+//! nested blocks, its refusals, and the release of everything a finished or a
+//! failed build allocated.
 //!
-//! Everything runs under Miri except the tests marked `cfg(not(miri))`, which
-//! build the FIB: its LPM tables are real C objects, and Miri runs no C. Those
-//! run natively against the owner's real C memory. The FIB tests that run under
-//! Miri fail before any C runs: the registrations and the header are refused,
-//! or the root block cannot be allocated, and the LPM tables are written only
-//! after all of those.
+//! The owner sets up no C memory, so everything here runs under Miri and
+//! natively alike. A configuration that embeds a C object, such as the route
+//! FIB with its LPM tables, is built over the real agent in the C harness: see
+//! the Go tests over `bindings/go/dataplane_ut`.
 
-#[cfg(not(miri))]
-use core::net::Ipv6Addr;
 use core::{
     marker::PhantomData,
     sync::atomic::{AtomicU32, Ordering},
@@ -18,8 +14,8 @@ use core::{
 
 use yanet_packet as _;
 use yanet_sdk::{
-    Batch, Build, CommitCx, Counter, Cx, Device, Lpm4, Lpm6, LpmRange, Module, Refusal, Registered, ShmBox, ShmLayout,
-    ShmSlice, Verdict,
+    Batch, Build, CommitCx, Counter, Cx, Device, Module, OwnedSlice, Refusal, Registered, ShmBox, ShmLayout, ShmSlice,
+    Verdict,
 };
 use yanet_sdk_derive as _;
 use yanet_sdk_testing::{
@@ -31,41 +27,6 @@ use yanet_sys::{
     cp::{BuildError, Builder, Built, MemoryContext, Owner, Scope},
     dp::ModuleConfig,
 };
-
-/// A route as the C FIB keeps it: the neighbour's addresses, where it goes
-/// and what counts it.
-#[derive(ShmLayout)]
-#[repr(C)]
-struct Route {
-    dst_addr: [u8; 6],
-    src_addr: [u8; 6],
-    pad: u32,
-    device: Device,
-    counter: Counter,
-}
-
-/// A run of entries of the route index, given by a start and a count.
-#[derive(ShmLayout)]
-#[repr(C)]
-struct RouteList {
-    start: u64,
-    count: u64,
-}
-
-/// A FIB with the fields of C's `route_fib`, in its order: two LPM tables
-/// mapping a destination to a route list, and the routes the lists select from.
-///
-/// The bytes differ from C's: a shared-memory slice is a pointer then a length,
-/// where `route_fib` keeps a count then a pointer.
-#[derive(ShmLayout)]
-#[repr(C)]
-struct RouteFib {
-    lpm_v6: Lpm6,
-    lpm_v4: Lpm4,
-    routes: ShmSlice<Route>,
-    route_lists: ShmSlice<RouteList>,
-    route_indexes: ShmSlice<u64>,
-}
 
 /// A rule owning its own block of ports.
 #[derive(ShmLayout)]
@@ -172,12 +133,18 @@ impl<C: Build + Sync> Module for Fixture<C> {
     }
 }
 
-type FibModule = Fixture<RouteFib>;
 type PolicyModule = Fixture<Policy>;
 type HygieneModule = Fixture<Hygiene>;
 type WordsModule = Fixture<ShmSlice<u64>>;
 type LanesModule = Fixture<Lanes>;
 type FaultyModule = Fixture<Faulty>;
+type EntriesModule = Fixture<ShmSlice<Entry>>;
+
+/// An owner of an empty arena.
+fn owner() -> TestOwner {
+    // SAFETY: no configuration of this file embeds a C object.
+    unsafe { TestOwner::new() }
+}
 
 type Failure = BuildError<TestError>;
 
@@ -192,105 +159,6 @@ impl From<Failure> for AuthorError {
     fn from(err: Failure) -> Self {
         Self::Build(err)
     }
-}
-
-/// A route of the input: its neighbour, the index of its device in the device
-/// list and the name of its counter.
-struct RouteSpec {
-    dst_addr: [u8; 6],
-    device: usize,
-    counter: &'static str,
-}
-
-/// What the FIB is built from, made at run time and borrowed by the build.
-struct FibInput {
-    devices: Vec<&'static str>,
-    routes: Vec<RouteSpec>,
-    lists: Vec<(u64, u64)>,
-    indexes: Vec<u64>,
-    v6: Vec<LpmRange<16>>,
-    v4: Vec<LpmRange<4>>,
-}
-
-/// A FIB of three routes over two devices, two route lists (routes 0 and 2,
-/// then route 1), overlapping IPv4 prefixes and enough IPv6 /64 prefixes under
-/// a /32 for the table to need a second chunk of pages.
-///
-/// Ranges are in insertion order, the broad before the narrow, as the later
-/// insert wins on an overlap.
-fn fib_input() -> FibInput {
-    let mut v6 = vec![LpmRange::prefix(
-        [0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-        32,
-        0,
-    )];
-    for subnet in 1..=12 {
-        v6.push(LpmRange::prefix(
-            [0x20, 0x01, 0x0d, 0xb8, 0, subnet, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-            64,
-            1,
-        ));
-    }
-    FibInput {
-        devices: vec!["eth0", "eth1"],
-        routes: vec![
-            RouteSpec {
-                dst_addr: [0, 0, 0, 0, 0, 1],
-                device: 0,
-                counter: "via_eth0",
-            },
-            RouteSpec {
-                dst_addr: [0, 0, 0, 0, 0, 2],
-                device: 1,
-                counter: "via_eth1",
-            },
-            RouteSpec {
-                dst_addr: [0, 0, 0, 0, 0, 3],
-                device: 0,
-                counter: "via_eth0_backup",
-            },
-        ],
-        lists: vec![(0, 2), (2, 1)],
-        indexes: vec![0, 2, 1],
-        v6,
-        v4: vec![
-            LpmRange::prefix([10, 0, 0, 0], 8, 0),
-            LpmRange::prefix([10, 1, 0, 0], 16, 1),
-            LpmRange::prefix([10, 1, 2, 0], 24, 0),
-        ],
-    }
-}
-
-/// The parts of a FIB of the given input, registering each device once, copied
-/// into the routes that use it, and a counter per route.
-fn fib<'b, E: From<Failure>>(
-    b: Scope<'b, '_, TestOwner, E>,
-    input: &'b FibInput,
-) -> Result<RouteFibParts<'b, TestOwner>, E> {
-    let devices = input
-        .devices
-        .iter()
-        .map(|&name| b.device(name))
-        .collect::<Result<Vec<_>, E>>()?;
-    Ok(RouteFibParts {
-        lpm_v6: &input.v6,
-        lpm_v4: &input.v4,
-        routes: b.slice(input.routes.len(), |idx| {
-            let route = &input.routes[idx];
-            Ok(RouteParts {
-                dst_addr: route.dst_addr,
-                src_addr: [0xee; 6],
-                pad: 0,
-                device: devices[route.device],
-                counter: b.counter(route.counter)?,
-            })
-        })?,
-        route_lists: b.slice(input.lists.len(), |idx| {
-            let (start, count) = input.lists[idx];
-            Ok(RouteListParts { start, count })
-        })?,
-        route_indexes: b.slice(input.indexes.len(), |idx| Ok(input.indexes[idx]))?,
-    })
 }
 
 /// The parts of a policy with rules, each an id and its ports, and a default
@@ -313,6 +181,20 @@ fn policy<'b, E: From<Failure>>(
     })
 }
 
+/// Entries over two devices, registered once each, and a counter per entry:
+/// five registrations.
+fn entries<'b>(b: Scope<'b, '_, TestOwner>) -> Result<OwnedSlice<'b, Entry, TestOwner>, Failure> {
+    let devices = [b.device("eth0")?, b.device("eth1")?];
+    b.slice(3, |idx| {
+        Ok(EntryParts {
+            device: devices[idx % 2],
+            counter: b.counter(["a", "b", "c"][idx])?,
+            ports: b.slice(0, |_| Ok(0))?,
+            word: FlakyParts { word: 0, fails: false },
+        })
+    })
+}
+
 /// Builds a configuration of a module with the closure, failing with the SDK's
 /// own errors.
 fn build<'env, M: Module>(
@@ -320,11 +202,6 @@ fn build<'env, M: Module>(
     f: impl for<'b> FnOnce(Scope<'b, 'env, TestOwner>) -> Result<<M::Config as Build>::Parts<'b, TestOwner>, Failure>,
 ) -> Result<Built<M, TestOwner>, Failure> {
     Builder::<M>::build(owner, M::NAME, f)
-}
-
-/// Builds the FIB configuration of the given input.
-fn build_fib(owner: &TestOwner, input: &FibInput) -> Result<Built<FibModule, TestOwner>, Failure> {
-    build::<FibModule>(owner, |b| fib(b, input))
 }
 
 /// Builds the policy configuration with the rules, each an id and its ports.
@@ -354,7 +231,7 @@ fn release<M: Module>(owner: &TestOwner, built: Built<M, TestOwner>) {
 
 #[test]
 fn test_build_writes_nested_slices_and_a_box() {
-    let owner = TestOwner::new();
+    let owner = owner();
 
     let built = build_policy(&owner, &[(1, &[80, 443]), (2, &[]), (3, &[53])]).expect("built");
 
@@ -386,7 +263,7 @@ fn test_build_writes_nested_slices_and_a_box() {
 
 #[test]
 fn test_build_leaves_an_empty_slice_null_and_unallocated() {
-    let owner = TestOwner::new();
+    let owner = owner();
 
     let built = build::<WordsModule>(&owner, |b| b.slice(0, |_| Ok(0))).expect("built");
 
@@ -400,7 +277,7 @@ fn test_build_leaves_an_empty_slice_null_and_unallocated() {
 
 #[test]
 fn test_destroy_releases_nested_blocks() {
-    let owner = TestOwner::new();
+    let owner = owner();
     let built = build_policy(&owner, &[(1, &[80, 443]), (2, &[]), (3, &[53])]).expect("built");
     // The root block, the rules, the default rule, and the ports of two
     // rules.
@@ -413,7 +290,7 @@ fn test_destroy_releases_nested_blocks() {
 
 /// An owner whose allocations fail after a given number have succeeded.
 fn owner_failing_alloc_after(allowed: usize) -> TestOwner {
-    let owner = TestOwner::new();
+    let owner = owner();
     owner.fail_after(Call::Alloc, allowed);
     owner
 }
@@ -457,13 +334,11 @@ fn test_build_releases_everything_when_memory_runs_out_at_each_allocation() {
 
 #[test]
 fn test_build_releases_everything_when_a_registration_fails_at_each_call() {
-    let input = fib_input();
-    // Two devices and a counter per route.
     for allowed in 0..5 {
-        let owner = TestOwner::new();
+        let owner = owner();
         owner.fail_after(Call::Registration, allowed);
 
-        let err = build_fib(&owner, &input).expect_err("refused registration");
+        let err = build::<EntriesModule>(&owner, entries).expect_err("refused registration");
 
         assert_eq!(BuildError::Owner(TestError::Registration), err);
         owner.assert_released();
@@ -472,10 +347,10 @@ fn test_build_releases_everything_when_a_registration_fails_at_each_call() {
 
 #[test]
 fn test_build_frees_the_root_block_of_a_refused_header() {
-    let owner = TestOwner::new();
+    let owner = owner();
     owner.fail_after(Call::Header, 0);
 
-    let err = build_fib(&owner, &fib_input()).expect_err("refused header");
+    let err = build::<EntriesModule>(&owner, entries).expect_err("refused header");
 
     assert!(matches!(err, BuildError::Owner(_)), "{err:?}");
     owner.assert_released();
@@ -483,10 +358,10 @@ fn test_build_frees_the_root_block_of_a_refused_header() {
 
 #[test]
 fn test_build_reports_exhausted_memory_for_the_root_block() {
-    let owner = TestOwner::new();
+    let owner = owner();
     owner.fail_after(Call::Alloc, 0);
 
-    let err = build_fib(&owner, &fib_input()).expect_err("no memory");
+    let err = build::<EntriesModule>(&owner, entries).expect_err("no memory");
 
     assert_eq!(BuildError::Refused(Refusal::OutOfMemory), err);
     owner.assert_released();
@@ -494,7 +369,7 @@ fn test_build_reports_exhausted_memory_for_the_root_block() {
 
 #[test]
 fn test_build_refuses_a_slice_whose_size_overflows() {
-    let owner = TestOwner::new();
+    let owner = owner();
 
     let err = build::<WordsModule>(&owner, |b| b.slice(usize::MAX, |_| Ok(0))).expect_err("overflowing slice");
 
@@ -504,7 +379,7 @@ fn test_build_refuses_a_slice_whose_size_overflows() {
 
 #[test]
 fn test_build_refuses_a_slice_beyond_the_largest_block_without_asking_the_owner() {
-    let owner = TestOwner::new();
+    let owner = owner();
     let len = yanet_sys::bindings::MEMORY_BLOCK_ALLOCATOR_MAX_SIZE as usize / size_of::<u64>() + 1;
     // The root block can be allocated; a request for any further block would
     // exhaust the memory.
@@ -518,7 +393,7 @@ fn test_build_refuses_a_slice_beyond_the_largest_block_without_asking_the_owner(
 
 #[test]
 fn test_build_returns_the_error_of_a_slice_item_and_releases() {
-    let owner = TestOwner::new();
+    let owner = owner();
 
     let err = Builder::<PolicyModule>::build::<AuthorError, _>(&owner, "policy0", |b| {
         Ok(PolicyParts {
@@ -546,7 +421,7 @@ fn test_build_returns_the_error_of_a_slice_item_and_releases() {
 fn test_build_releases_everything_when_the_closure_panics() {
     use std::panic::{AssertUnwindSafe, catch_unwind};
 
-    let owner = TestOwner::new();
+    let owner = owner();
 
     let result = catch_unwind(AssertUnwindSafe(|| {
         Builder::<PolicyModule>::build::<Failure, _>(&owner, "policy0", |b| {
@@ -564,7 +439,7 @@ fn test_build_releases_everything_when_the_closure_panics() {
 
 #[test]
 fn test_build_releases_everything_when_an_item_of_a_nested_slice_fails() {
-    let owner = TestOwner::new();
+    let owner = owner();
 
     // Rule 1 owns a finished ports block when rule 2's ports fail halfway.
     let err = Builder::<PolicyModule>::build::<AuthorError, _>(&owner, "policy0", |b| {
@@ -598,7 +473,7 @@ fn test_build_releases_everything_when_an_item_of_a_nested_slice_fails() {
 fn test_build_releases_everything_when_a_nested_fill_panics() {
     use std::panic::{AssertUnwindSafe, catch_unwind};
 
-    let owner = TestOwner::new();
+    let owner = owner();
 
     let result = catch_unwind(AssertUnwindSafe(|| {
         Builder::<PolicyModule>::build::<Failure, _>(&owner, "policy0", |b| {
@@ -626,7 +501,7 @@ fn test_build_releases_everything_when_a_nested_fill_panics() {
 
 #[test]
 fn test_build_frees_a_block_dropped_unused_at_once() {
-    let owner = TestOwner::new();
+    let owner = owner();
 
     let built = build::<WordsModule>(&owner, |b| {
         let before = owner.live_blocks();
@@ -649,7 +524,7 @@ fn test_build_frees_a_block_dropped_unused_at_once() {
 
 #[test]
 fn test_derive_expansion_is_hygienic_for_field_names() {
-    let owner = TestOwner::new();
+    let owner = owner();
 
     let built = build::<HygieneModule>(&owner, |b| {
         Ok(HygieneParts {
@@ -723,7 +598,7 @@ const FAULTY_WORDS: usize = 7;
 
 #[test]
 fn test_build_writes_an_array_of_edges() {
-    let owner = TestOwner::new();
+    let owner = owner();
 
     let built = build::<LanesModule>(&owner, |b| {
         Ok(LanesParts {
@@ -747,7 +622,7 @@ fn test_build_writes_an_array_of_edges() {
 #[test]
 fn test_build_returns_everything_when_a_write_is_refused_at_each_word() {
     for fail_at in 0..FAULTY_WORDS {
-        let owner = TestOwner::new();
+        let owner = owner();
 
         let err = build::<FaultyModule>(&owner, |b| faulty(b, fail_at)).expect_err("refused write");
 
@@ -758,7 +633,7 @@ fn test_build_returns_everything_when_a_write_is_refused_at_each_word() {
 
 #[test]
 fn test_build_writes_every_word_of_a_faulty_config_when_none_is_refused() {
-    let owner = TestOwner::new();
+    let owner = owner();
 
     // One past the last word, which proves the sweep reached every one.
     let built = build::<FaultyModule>(&owner, |b| faulty(b, FAULTY_WORDS)).expect("built");
@@ -794,133 +669,4 @@ fn test_build_writes_every_word_of_a_faulty_config_when_none_is_refused() {
     );
     release::<FaultyModule>(&owner, built);
     owner.assert_released();
-}
-
-/// Pages the C allocator gave the table, by the table's own count.
-#[cfg(not(miri))]
-fn c_page_count(lpm: &Lpm6) -> usize {
-    // SAFETY: the table mirrors `struct lpm`, which C initialised, and nothing
-    // writes it meanwhile.
-    unsafe { (&raw const (*core::ptr::from_ref(lpm).cast::<yanet_sys::bindings::lpm>()).page_count).read() }
-}
-
-/// The routes a route list selects, each as its neighbour, device index and
-/// counter id.
-#[cfg(not(miri))]
-fn resolve<'a>(config: &'a RouteFib, view: &View<'a>, list: u32) -> Vec<(u8, u64, u64)> {
-    let list = &config.route_lists.as_slice(view)[list as usize];
-    let routes = config.routes.as_slice(view);
-    config.route_indexes.as_slice(view)[list.start as usize..][..list.count as usize]
-        .iter()
-        .map(|&index| {
-            let route = &routes[index as usize];
-            (route.dst_addr[5], route.device.index(), route.counter.id())
-        })
-        .collect()
-}
-
-#[cfg(not(miri))]
-#[test]
-fn test_build_writes_a_fib_whose_prefixes_resolve_to_routes() {
-    let owner = TestOwner::new();
-    let input = fib_input();
-
-    let built = build_fib(&owner, &input).expect("built");
-
-    let (config, view) = body::<FibModule>(&owner, &built);
-    let v4 = |key: [u8; 4]| {
-        config
-            .lpm_v4
-            .lookup(&view, &key)
-            .map(|list| resolve(config, &view, list))
-    };
-    let v6 = |key: &str| {
-        let key = key.parse::<Ipv6Addr>().expect("address").octets();
-        config
-            .lpm_v6
-            .lookup(&view, &key)
-            .map(|list| resolve(config, &view, list))
-    };
-    // The devices are registered first and shared by routes 0 and 2, then a
-    // counter per route.
-    let first_list = vec![(1, 0, 2), (3, 0, 4)];
-    let second_list = vec![(2, 1, 3)];
-    assert!(c_page_count(&config.lpm_v6) > 16);
-    assert_eq!(
-        [
-            Some(first_list.clone()),
-            Some(second_list.clone()),
-            Some(first_list.clone()),
-            None
-        ],
-        [
-            v4([10, 9, 9, 9]),
-            v4([10, 1, 9, 9]),
-            v4([10, 1, 2, 3]),
-            v4([11, 0, 0, 1])
-        ],
-    );
-    assert_eq!(
-        [Some(second_list), Some(first_list.clone()), Some(first_list), None],
-        [
-            v6("2001:db8:3::1"),
-            v6("2001:db8:3:1::1"),
-            v6("2001:db8:ffff::1"),
-            v6("2002::1")
-        ],
-    );
-    release::<FibModule>(&owner, built);
-    owner.assert_released();
-}
-
-#[cfg(not(miri))]
-#[test]
-fn test_build_releases_a_fib_when_an_sdk_block_cannot_be_allocated() {
-    let input = fib_input();
-
-    let fits = sweep_limits(0..16, owner_failing_alloc_after, |owner| build_fib(owner, &input));
-
-    // The root block and the three slices.
-    assert_eq!(4, fits);
-}
-
-/// verifies that a build refuses an LPM range that ends before it starts and
-/// returns what was built before the table.
-#[cfg(not(miri))]
-#[test]
-fn test_build_refuses_a_reversed_lpm_range_and_releases_everything() {
-    let owner = TestOwner::new();
-    let mut input = fib_input();
-    input.v4.push(LpmRange {
-        from: [10, 1, 2, 3],
-        to: [10, 1, 2, 2],
-        value: 0,
-    });
-
-    let err = build_fib(&owner, &input).expect_err("refused range");
-
-    assert_eq!(BuildError::Refused(Refusal::InvalidRange), err);
-    owner.assert_released();
-}
-
-/// verifies that a build returns every C page when the C memory runs out at
-/// any point: the first table, its growth, and the second table after the
-/// first was written.
-///
-/// A buddy allocator fails monotonically with its capacity, so a sweep up in
-/// steps well below a page chunk crosses each failure point in turn.
-#[cfg(not(miri))]
-#[test]
-fn test_build_releases_a_fib_when_c_memory_runs_out_at_each_capacity() {
-    let input = fib_input();
-
-    let fits = sweep_limits((0..480 << 10).step_by(4 << 10), TestOwner::with_c_memory, |owner| {
-        build_fib(owner, &input)
-    });
-
-    // The IPv6 table grows into two chunks of pages and the IPv4 table takes
-    // one, so the sweep crossed the first table's init, its growth and the
-    // second table's init after the first was written.
-    let chunk = yanet_sys::bindings::LPM_CHUNK_SIZE as usize * size_of::<yanet_sys::bindings::lpm_page>();
-    assert!(3 * chunk <= fits, "{fits} bytes fit, below three chunks of {chunk}");
 }

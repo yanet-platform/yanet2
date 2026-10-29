@@ -119,12 +119,16 @@ jobs:
       # operations in unsafe functions.
       - working-directory: lib/rust
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      # The plugin examples need the `plugin` feature and the plugin profile
+      # (a `no_std` cdylib cannot unwind), so the run above never sees them.
+      - working-directory: lib/rust
+        run: cargo clippy --profile plugin -p yanet-sdk-fixture --features plugin --examples --locked -- -D warnings
       # A bare-metal target has no std: the crates compile only if nothing
       # pulls std or alloc in. The bindings follow the meson configuration of
       # the machine, so an arm64 row on a runner that is not arm64 skips it.
       - if: matrix.arch != 'arm64' || runner.arch == 'ARM64'
         working-directory: lib/rust
-        run: cargo check --locked --target ${{ matrix.target }} -p yanet-shm -p yanet-sys -p yanet-sdk -p yanet-packet
+        run: cargo check --locked --target ${{ matrix.target }} -p yanet-shm -p yanet-sys -p yanet-sdk -p yanet-sdk-plugin -p yanet-packet
 
   test:
     name: cargo test (1.88) (${{ matrix.arch }})

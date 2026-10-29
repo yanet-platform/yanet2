@@ -77,3 +77,10 @@ option(
   value: 'auto',
   description: 'Write the CGO link flags of this build directory into the source tree for the go tool; auto writes them only from build/ in the top-level source tree.',
 )
+
+option(
+  'sdk_rust_fixtures',
+  type: 'feature',
+  value: 'disabled',
+  description: 'Configure the Rust SDK fixture targets (the api archive and the plugins the Go tests load); needs cargo and a control-plane build.',
+)

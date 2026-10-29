@@ -34,9 +34,9 @@ class GoCdepsTest(unittest.TestCase):
         self.output = self.package / "zz_yanet_cdeps.c"
         self.stamp = self.build / "cdeps.stamp"
 
-    def invoke(self, include=None, build_root=None):
+    def invoke(self, include=None, build_root=None, tag=None, goflags=""):
         """Run the CLI against a minimal nested CGO package using real compiler discovery."""
-        env = dict(os.environ, GOWORK="off", GOENV="off", GOFLAGS="",
+        env = dict(os.environ, GOWORK="off", GOENV="off", GOFLAGS=goflags,
                    GOTOOLCHAIN="local", CGO_ENABLED="1", CC="cc",
                    CGO_CPPFLAGS=f"-I{include or self.build}",
                    CGO_CFLAGS="", CGO_LDFLAGS="")
@@ -44,8 +44,26 @@ class GoCdepsTest(unittest.TestCase):
             sys.executable, str(Path(go_cdeps.__file__).resolve()),
             "--root", str(self.root), "--build-root", str(build_root or self.build),
             "--go", shutil.which("go"), "--package", "bindings",
-            "--output", str(self.output), "--stamp", str(self.stamp), str(self.archive),
-        ], env=env, text=True, capture_output=True)
+            "--output", str(self.output), "--stamp", str(self.stamp),
+        ] + (["--build-tag", tag] if tag else []) + [str(self.archive)],
+            env=env, text=True, capture_output=True)
+
+    def tag_package(self):
+        """Put every Go file of the package under the build constraint `tagged`."""
+        source = self.package / "binding.go"
+        source.write_text("//go:build tagged\n\n" + source.read_text())
+
+    def test_tagged_package_is_discovered_under_its_tag(self):
+        self.tag_package()
+        tagged = self.invoke(tag="tagged", goflags="-tags=tagged")
+        self.assertEqual(tagged.returncode, 0, tagged.stderr)
+        self.assertTrue(self.output.read_bytes().startswith(b"//go:build tagged\n\n"))
+
+    def test_tagged_package_without_its_tag_is_excluded(self):
+        self.tag_package()
+        untagged = self.invoke(tag="tagged")
+        self.assertNotEqual(untagged.returncode, 0)
+        self.assertIn("build constraints exclude all Go files", untagged.stderr)
 
     def test_nested_build_tracks_generated_header_changes(self):
         first = self.invoke()

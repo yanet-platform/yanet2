@@ -1,6 +1,11 @@
 extern crate std;
 
-use std::{vec, vec::Vec};
+use core::alloc::Layout;
+use std::{
+    alloc::{alloc_zeroed, dealloc},
+    vec,
+    vec::Vec,
+};
 
 use super::*;
 
@@ -234,43 +239,59 @@ fn test_encap_udp_refuses_a_chained_packet() {
     f(|packet| packet.encap_ipv6_udp([1; 16], [2; 16], 4789, 4789));
 }
 
-/// A single-segment packet over a buffer of its own: the descriptor's
-/// room, the headroom, the frame and the tailroom, in this order.
+/// A single-segment packet over a buffer of its own, laid out as the worker
+/// pool lays one out: the descriptor in the buffer's first bytes, then the
+/// headroom, the frame and the tailroom.
 ///
-/// The buffer is exactly that long, so Miri reports a write past its
-/// ends. The descriptor is a field of its own, not inside the buffer. The
-/// pointers between the parts are set when the packet is taken, where
-/// the fixture then stays.
+/// The buffer is exactly that long and aligned for the descriptor, so Miri
+/// reports a write past its ends, and a write into the descriptor's room by a
+/// prepend or a growth bug changes the offsets the tests read. The pointers
+/// between the parts are set when the packet is taken, where the fixture then
+/// stays.
 struct Frame {
-    buffer: Vec<u8>,
+    base: NonNull<u8>,
+    layout: Layout,
     mbuf: bindings::rte_mbuf,
-    descriptor: bindings::packet,
 }
 
 impl Frame {
     fn new(descriptor: bindings::packet, headroom: u16, frame: &[u8], tailroom: u16) -> Self {
         let data_off = size_of::<bindings::packet>() as u16 + headroom;
         let len = u16::try_from(frame.len()).expect("the frame exceeds the mbuf geometry");
-        let mut buffer = vec![0; usize::from(data_off) + frame.len() + usize::from(tailroom)];
-        buffer[data_off.into()..][..frame.len()].copy_from_slice(frame);
+        let size = usize::from(data_off) + frame.len() + usize::from(tailroom);
+        let layout = Layout::from_size_align(size, align_of::<bindings::packet>()).expect("a valid layout");
+        // SAFETY: the size is not zero, as the descriptor is in it.
+        let base = NonNull::new(unsafe { alloc_zeroed(layout) }).expect("the buffer is allocated");
+        // SAFETY: the buffer is zeroed, exclusive and aligned for the
+        // descriptor, and holds it and then the frame.
+        unsafe {
+            base.cast::<bindings::packet>()
+                .write(bindings::packet { data_len: len, ..descriptor });
+            base.as_ptr()
+                .add(data_off.into())
+                .copy_from_nonoverlapping(frame.as_ptr(), frame.len());
+        }
         Self {
+            base,
+            layout,
             mbuf: bindings::rte_mbuf {
-                buf_len: u16::try_from(buffer.len()).expect("the buffer exceeds the mbuf geometry"),
+                buf_len: u16::try_from(size).expect("the buffer exceeds the mbuf geometry"),
                 data_off,
                 data_len: len,
                 pkt_len: u32::from(len),
                 ..Default::default()
             },
-            descriptor: bindings::packet { data_len: len, ..descriptor },
-            buffer,
         }
     }
 
     /// The descriptor, linked to the mbuf and the mbuf to the buffer.
     fn link(&mut self) -> &mut bindings::packet {
-        self.mbuf.buf_addr = self.buffer.as_mut_ptr().cast();
-        self.descriptor.mbuf = &raw mut self.mbuf;
-        &mut self.descriptor
+        self.mbuf.buf_addr = self.base.as_ptr().cast();
+        // SAFETY: the descriptor is initialised, in the buffer, and borrowed
+        // exclusively through this fixture.
+        let descriptor = unsafe { &mut *self.base.cast::<bindings::packet>().as_ptr() };
+        descriptor.mbuf = &raw mut self.mbuf;
+        descriptor
     }
 
     fn packet(&mut self) -> Packet<'_> {
@@ -283,15 +304,28 @@ impl Frame {
 
     /// The frame as the mbuf describes it now.
     fn frame(&self) -> &[u8] {
-        &self.buffer[self.mbuf.data_off.into()..][..self.mbuf.data_len.into()]
+        // SAFETY: the mbuf describes bytes of the buffer, which no packet
+        // borrowed from this fixture writes while it is borrowed here.
+        unsafe {
+            core::slice::from_raw_parts(
+                self.base.as_ptr().add(self.mbuf.data_off.into()),
+                self.mbuf.data_len.into(),
+            )
+        }
     }
 
     /// Network and transport header offsets as they are now.
     fn offsets(&self) -> (u16, u16) {
-        (
-            self.descriptor.network_header.offset,
-            self.descriptor.transport_header.offset,
-        )
+        // SAFETY: the descriptor is initialised, in the buffer.
+        let descriptor = unsafe { &*self.base.cast::<bindings::packet>().as_ptr() };
+        (descriptor.network_header.offset, descriptor.transport_header.offset)
+    }
+}
+
+impl Drop for Frame {
+    fn drop(&mut self) {
+        // SAFETY: the buffer came from `alloc_zeroed` with this layout.
+        unsafe { dealloc(self.base.as_ptr(), self.layout) };
     }
 }
 
