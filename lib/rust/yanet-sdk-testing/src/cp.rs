@@ -1,9 +1,8 @@
 //! A configuration owner over the block arena, for the builder tests under
 //! Miri and natively alike.
 //!
-//! It sets up no C memory context and calls no C: a configuration that embeds a
-//! C object, such as an LPM, is built over the real agent in the C harness,
-//! from Go tests.
+//! It sets up no C memory context and calls no C, so configurations containing
+//! embedded C objects cannot be built over this owner.
 
 use alloc::vec::Vec;
 use core::{

@@ -49,8 +49,10 @@ registrations. Finished configurations retain no input borrow. Release walks
 owning edges in reverse construction order; allocations contain only payload.
 The original owner and absence of readers are required for explicit destruction.
 
-The C-free test owner initializes no C contexts. Embedded C objects and native
-registrations are tested with the real agent through the shared Go harness.
+The C-free test owner initializes no C contexts and cannot build configurations
+containing embedded C objects. This PR provides the generic construction layer;
+a real-agent owner adapter and product integration are separate work and may
+live in an out-of-tree integration crate.
 
 Build the repository's native libraries before testing this workspace. The
 workspace supports Rust 1.88. Formatting uses nightly-2026-10-22. CI runs native

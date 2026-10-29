@@ -350,11 +350,20 @@ use yanet_sdk_derive as _;
 use yanet_shm as _;
 
 #[test]
-fn test_owner_error_converts_to_the_domain_error_without_losing_the_cause() {
+fn test_sdk_refusal_converts_to_the_domain_error() {
     let owner = owner();
     owner.fail_after(Call::Alloc, 0);
     let error = build_config::<Fixture<u64>, _, DomainError>(&owner, "domain", 7u64).unwrap_err();
     assert_eq!(DomainError::Build(Error::Refused(Refusal::OutOfMemory)), error);
+    owner.assert_released();
+}
+
+#[test]
+fn test_owner_error_converts_to_the_domain_error_without_losing_the_cause() {
+    let owner = owner();
+    owner.fail_after(Call::Header, 0);
+    let error = build_config::<Fixture<u64>, _, DomainError>(&owner, "domain", 7u64).unwrap_err();
+    assert_eq!(DomainError::Build(Error::Owner(TestError::Header)), error);
     owner.assert_released();
 }
 
