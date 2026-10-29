@@ -913,6 +913,14 @@ impl<'b> PacketView<'b> {
         unsafe { (*self.raw.as_ptr()).transport_header.type_ }
     }
 
+    /// Offset of the packet's fragment in its datagram, in the units of its
+    /// header: nonzero for a fragment after the first.
+    #[inline(always)]
+    pub fn fragment_offset(&self) -> u16 {
+        // SAFETY: as above.
+        unsafe { (*self.raw.as_ptr()).fragment_offset }
+    }
+
     /// Offset of the transport header from the start of the frame.
     #[inline(always)]
     pub fn transport_offset(&self) -> u16 {

@@ -9,7 +9,7 @@ use crate::{
     counters::counter_get_address,
     dp::{
         batch::DeviceRef,
-        fields::{Counter, Device},
+        fields::{Counter, CounterPair, Device},
         module::Module,
     },
 };
@@ -82,13 +82,15 @@ pub struct Cx<'id, M: Module> {
     _local: PhantomData<*mut ()>,
 }
 
-/// A counter's value of the context's worker, resolved once at commit.
+/// A counter's value of the context's worker, resolved once at commit, of a
+/// [`Counter`] or a [`CounterPair`].
 ///
-/// Holds the address of the value, as a C module holds the pointer
-/// `counter_get_address` returned. `Send`, so a prepared value holding it can
-/// travel from the assigner thread to its worker, but it does not write:
-/// the handler binds it to its context and adds through the bound view,
-/// which stays on the worker. Binding is free: the view is the same address.
+/// Holds the address of the value, the first of the two of a pair, as a C
+/// module holds the pointer `counter_get_address` returned. `Send`, so a
+/// prepared value holding it can travel from the assigner thread to its worker,
+/// but it does not write: the handler binds it to its context and adds through
+/// the bound view, which stays on the worker. Binding is free: the view is the
+/// same address.
 ///
 /// A handle does not outlive the prepare context that made it (a lifetime
 /// error, which has no code):
@@ -114,21 +116,30 @@ pub struct Cx<'id, M: Module> {
 ///     *kept = Some(cx.config().resolve(cx));
 /// }
 /// ```
-#[derive(Clone, Copy)]
-pub struct CounterRef<'p> {
+pub struct CounterRef<'p, C = Counter> {
     value: NonNull<u64>,
     // Invariant brand: values of two different contexts never unify, so they cannot be mixed.
     _brand: PhantomData<fn(&'p ()) -> &'p ()>,
+    // The counter's kind, which sets how many values it adds to.
+    _kind: PhantomData<fn() -> C>,
 }
+
+impl<C> Clone for CounterRef<'_, C> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl<C> Copy for CounterRef<'_, C> {}
 
 // SAFETY: the handle is an address and writes nothing; only the bound view
 // writes, and binding needs the call context of the same invariant brand,
 // that of the worker's call whose prepared value holds the handle; the
 // context is neither `Send` nor `Sync`, so every write happens on that
 // worker in its call.
-unsafe impl Send for CounterRef<'_> {}
+unsafe impl<C> Send for CounterRef<'_, C> {}
 
-impl<'id> CounterRef<'id> {
+impl<'id, C> CounterRef<'id, C> {
     /// The handle bound to the call's context, to add through.
     ///
     /// Only the call context binds: the prepare context does not, so a
@@ -160,11 +171,12 @@ impl<'id> CounterRef<'id> {
     /// }
     /// ```
     #[inline(always)]
-    pub fn bind<M: Module>(&self, _cx: &Cx<'id, M>) -> BoundCounter<'id> {
+    pub fn bind<M: Module>(&self, _cx: &Cx<'id, M>) -> BoundCounter<'id, C> {
         BoundCounter {
             value: self.value,
             _brand: PhantomData,
             _local: PhantomData,
+            _kind: PhantomData,
         }
     }
 }
@@ -194,14 +206,23 @@ impl<'id> CounterRef<'id> {
 ///     });
 /// }
 /// ```
-#[derive(Clone, Copy)]
-pub struct BoundCounter<'id> {
+pub struct BoundCounter<'id, C = Counter> {
     value: NonNull<u64>,
     // Invariant brand: values of two different contexts never unify, so they cannot be mixed.
     _brand: PhantomData<fn(&'id ()) -> &'id ()>,
     // Neither Send nor Sync on purpose, independent of the pointer fields.
     _local: PhantomData<*mut ()>,
+    // The counter's kind, which sets how many values it adds to.
+    _kind: PhantomData<fn() -> C>,
 }
+
+impl<C> Clone for BoundCounter<'_, C> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl<C> Copy for BoundCounter<'_, C> {}
 
 impl BoundCounter<'_> {
     /// Adds to the worker's copy of the counter.
@@ -214,6 +235,15 @@ impl BoundCounter<'_> {
     }
 }
 
+impl BoundCounter<'_, CounterPair> {
+    /// Adds packets and bytes to the worker's copy of the pair, as
+    /// [`BoundCounter::add`] adds to a single value.
+    #[inline(always)]
+    pub fn add(&self, packets: u64, bytes: u64) {
+        add_pair_to(self.value.as_ptr(), packets, bytes);
+    }
+}
+
 /// Adds to the worker's counter value in place.
 #[inline(always)]
 fn add_to(slot: *mut u64, value: u64) {
@@ -223,6 +253,15 @@ fn add_to(slot: *mut u64, value: u64) {
     // control plane reads it with memcpy (lib/controlplane/agent/counters.c),
     // as it does for the plain `+=` of a C module.
     unsafe { *slot = (*slot).wrapping_add(value) };
+}
+
+/// Adds packets and bytes to the worker's pair of counter values in place.
+#[inline(always)]
+fn add_pair_to(slot: *mut u64, packets: u64, bytes: u64) {
+    add_to(slot, packets);
+    // A pair is registered with two values, which its storage keeps next to
+    // each other, packets first, as a C module indexes them.
+    add_to(slot.wrapping_add(1), bytes);
 }
 
 impl<'id, M: Module> Cx<'id, M> {
@@ -278,6 +317,15 @@ impl<'id, M: Module> Cx<'id, M> {
         // SAFETY: the worker structure is live for the call (attach: call) and
         // its index is fixed at startup.
         unsafe { (*self.worker.as_ptr()).idx }
+    }
+
+    /// Index of the module device the call runs under, which a C lookup
+    /// classifies the device of its packets by.
+    #[inline(always)]
+    pub(crate) fn module_device_id(&self) -> u32 {
+        // SAFETY: the execution context is the call's and frozen (attach:
+        // call, frozen).
+        unsafe { (*self.ectx.as_ptr()).module_device_id }
     }
 
     /// Time of the worker's current round, in nanoseconds; the only time
@@ -415,6 +463,33 @@ impl Counter {
             // address zero.
             value: unsafe { NonNull::new_unchecked(value) },
             _brand: PhantomData,
+            _kind: PhantomData,
+        }
+    }
+}
+
+impl CounterPair {
+    /// Adds packets and bytes to the current worker's copy of the pair, one of
+    /// a data-indexed set, as [`Counter::add`] adds to a single value.
+    #[inline(always)]
+    pub fn add<'id, M: Module>(&'id self, cx: &Cx<'id, M>, packets: u64, bytes: u64) {
+        // SAFETY: as for a single value; a built pair id indexes a counter of
+        // two values.
+        add_pair_to(unsafe { counter_value(cx.root, cx.ectx, self.id()) }, packets, bytes);
+    }
+
+    /// The context's worker's pair of the counter, for the prepared value, as
+    /// [`Counter::resolve`] gives a single value.
+    #[inline(always)]
+    pub fn resolve<'c, M: Module>(&'c self, cx: &CommitCx<'c, M>) -> CounterRef<'c, CounterPair> {
+        // SAFETY: as for adding, for the pass instead of the call.
+        let value = unsafe { counter_value(cx.root, cx.ectx, self.id()) };
+        CounterRef {
+            // SAFETY: the value lies in the counter storage block, not at
+            // address zero.
+            value: unsafe { NonNull::new_unchecked(value) },
+            _brand: PhantomData,
+            _kind: PhantomData,
         }
     }
 }

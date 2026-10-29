@@ -1,8 +1,8 @@
 //go:build sdk_rust_fixtures
 
-// Package cfixture is the Go binding of the SDK fixture api, the control-plane
-// side of the fixture, tally and fib modules that the SDK's tests run packets
-// through.
+// Package cfixture is the Go binding of the SDK fixture api, the
+// control-plane side of the fixture, tally, fib and firewall modules that the
+// SDK's tests run packets through.
 package cfixture
 
 /*

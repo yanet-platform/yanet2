@@ -14,8 +14,8 @@ use core::{
 
 use yanet_packet as _;
 use yanet_sdk::{
-    Batch, Build, CommitCx, Counter, Cx, Device, Module, OwnedSlice, Refusal, Registered, ShmBox, ShmLayout, ShmSlice,
-    Verdict,
+    Batch, Build, CommitCx, Counter, CounterPair, Cx, Device, Module, OwnedSlice, Refusal, Registered, ShmBox,
+    ShmLayout, ShmSlice, Verdict,
 };
 use yanet_sdk_derive as _;
 use yanet_sdk_testing::{
@@ -117,6 +117,14 @@ struct Faulty {
     tail: ShmSlice<u64>,
 }
 
+/// A counter of hits and one of the packets and bytes of the traffic.
+#[derive(ShmLayout)]
+#[repr(C)]
+struct Counted {
+    hits: Counter,
+    traffic: CounterPair,
+}
+
 /// A module with a given configuration type: the builder reads only its name
 /// and that type.
 struct Fixture<C>(PhantomData<fn() -> C>);
@@ -139,6 +147,7 @@ type WordsModule = Fixture<ShmSlice<u64>>;
 type LanesModule = Fixture<Lanes>;
 type FaultyModule = Fixture<Faulty>;
 type EntriesModule = Fixture<ShmSlice<Entry>>;
+type CountedModule = Fixture<Counted>;
 
 /// An owner of an empty arena.
 fn owner() -> TestOwner {
@@ -595,6 +604,24 @@ fn faulty<'b>(b: Scope<'b, '_, TestOwner>, fail_at: usize) -> Result<FaultyParts
 
 /// Number of refusable words in the configuration.
 const FAULTY_WORDS: usize = 7;
+
+#[test]
+fn test_build_writes_the_ids_of_a_counter_and_a_counter_pair() {
+    let owner = owner();
+
+    let built = build::<CountedModule>(&owner, |b| {
+        Ok(CountedParts {
+            hits: b.counter("hits")?,
+            traffic: b.counter_pair("traffic")?,
+        })
+    })
+    .expect("built");
+
+    let (config, _) = body::<CountedModule>(&owner, &built);
+    assert_eq!((0, 1), (config.hits.id(), config.traffic.id()));
+    release::<CountedModule>(&owner, built);
+    owner.assert_released();
+}
 
 #[test]
 fn test_build_writes_an_array_of_edges() {

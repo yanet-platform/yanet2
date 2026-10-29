@@ -242,7 +242,7 @@ unsafe impl Owner for Agent {
         unsafe { bindings::cp_module_fini(cp_module_at(self, header)) };
     }
 
-    unsafe fn register_counter(&self, header: Header, name: &str) -> Result<u64, ApiError> {
+    unsafe fn register_counter(&self, header: Header, name: &str, size: u64) -> Result<u64, ApiError> {
         let name = c_name::<{ COUNTER_NAME_LEN as usize }>(name)?;
         let mut chain = ptr::null_mut();
         // SAFETY: the header is initialised (caller contract), so its
@@ -252,7 +252,7 @@ unsafe impl Owner for Agent {
             bindings::counter_registry_register(
                 &raw mut (*cp_module_at(self, header)).counter_registry,
                 name.as_ptr().cast::<c_char>(),
-                1,
+                size,
                 &mut chain,
             )
         };

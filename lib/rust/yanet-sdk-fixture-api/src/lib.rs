@@ -14,6 +14,8 @@ use yanet_sdk::{Builder, Built, FfiRecord, LpmRange, Refusal};
 use yanet_sdk_api::{Agent, ApiError, ErrorKind};
 use yanet_sdk_fixture::{ConfigParts, RouteFibParts, RouteListParts, RouteParts, TallyConfigParts};
 
+mod firewall;
+
 /// Bytes of a name in a record, the terminating NUL included.
 pub const FIB_NAME_LEN: usize = 64;
 
@@ -70,7 +72,7 @@ pub struct FibList {
 }
 
 /// The text of a NUL terminated name.
-fn text(name: &[u8; FIB_NAME_LEN]) -> Result<&str, ApiError> {
+fn text<const N: usize>(name: &[u8; N]) -> Result<&str, ApiError> {
     CStr::from_bytes_until_nul(name)
         .ok()
         .and_then(|name| name.to_str().ok())

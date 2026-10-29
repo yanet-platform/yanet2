@@ -25,6 +25,31 @@ type ModuleConfig struct {
 	ptr ffi.ModuleConfig
 }
 
+// Rules is a ruleset in the C layout the module config compiles, with the Go
+// memory it points into pinned until it is freed.
+type Rules struct {
+	rules  []C.struct_acl_rule
+	pinner runtime.Pinner
+}
+
+// NewRules lays the rules out as the C compile reads them.
+//
+// The compile writes the device indices back into the layout, so one layout
+// may serve any number of configs, one compile at a time.
+func NewRules(rules []ACLRule) *Rules {
+	prepared := &Rules{rules: make([]C.struct_acl_rule, len(rules))}
+	for idx, rule := range rules {
+		prepared.rules[idx] = rule.cBuild(&prepared.pinner)
+	}
+	return prepared
+}
+
+// Free unpins the Go memory of the layout; no config may be compiled from it
+// afterwards.
+func (m *Rules) Free() {
+	m.pinner.Unpin()
+}
+
 // NewModuleConfig allocates a new ACL module configuration and compiles
 // the given rules into it in one step: a config handle is constructed
 // once and never updated afterwards.
@@ -40,17 +65,21 @@ func NewModuleConfig(
 	rules []ACLRule,
 	fw4MapName, fw6MapName string,
 ) (*ModuleConfig, error) {
-	pinner := &runtime.Pinner{}
-	defer pinner.Unpin()
+	prepared := NewRules(rules)
+	defer prepared.Free()
+	return NewModuleConfigOfRules(agent, name, prepared, fw4MapName, fw6MapName)
+}
 
-	cRules := make([]C.struct_acl_rule, len(rules))
-	for idx, rule := range rules {
-		cRules[idx] = rule.cBuild(pinner)
-	}
-
+// NewModuleConfigOfRules is NewModuleConfig over rules already laid out.
+func NewModuleConfigOfRules(
+	agent *ffi.Agent,
+	name string,
+	rules *Rules,
+	fw4MapName, fw6MapName string,
+) (*ModuleConfig, error) {
 	var cRulesPtr *C.struct_acl_rule
-	if len(cRules) > 0 {
-		cRulesPtr = &cRules[0]
+	if len(rules.rules) > 0 {
+		cRulesPtr = &rules.rules[0]
 	}
 
 	var cFw4Name *C.char
@@ -73,7 +102,7 @@ func NewModuleConfig(
 		(*C.struct_agent)(agent.AsRawPtr()),
 		cName,
 		cRulesPtr,
-		C.uint32_t(len(cRules)),
+		C.uint32_t(len(rules.rules)),
 		cFw4Name,
 		cFw6Name,
 		&cErr,
