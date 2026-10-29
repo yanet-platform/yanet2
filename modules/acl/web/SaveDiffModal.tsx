@@ -3,6 +3,7 @@ import { Dialog, Text } from '@gravity-ui/uikit';
 import type { Rule } from '@yanet/core/api/acl';
 import { ActionKind } from '@yanet/core/api/acl';
 import { dumpYamlDoc } from '@yanet/core/utils';
+import { protocolEntriesToRanges } from './parseHelpers';
 
 // TODO(acl): structured diff disabled until the per-card layout is reworked.
 
@@ -24,7 +25,9 @@ export const rulesToYamlObjects = (rules: Rule[]): Array<Record<string, unknown>
         });
         const src_port_ranges = (r.src_port_ranges ?? []).map(fmtRange);
         const dst_port_ranges = (r.dst_port_ranges ?? []).map(fmtRange);
-        const proto_ranges = (r.proto_ranges ?? []).map(fmtRange);
+        // Export both authoring forms through their encoded expansion,
+        // the one form the update path and the drawer edit.
+        const proto_ranges = [...(r.proto_ranges ?? []), ...protocolEntriesToRanges(r.protocols)].map(fmtRange);
         const vlan_ranges = (r.vlan_ranges ?? []).map(fmtRange);
         const devices = (r.devices ?? []).map(d => ({ name: d.name ?? '' })).filter(d => d.name !== '');
         const actions = (r.actions ?? []).map(a => ({

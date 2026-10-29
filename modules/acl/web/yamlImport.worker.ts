@@ -10,7 +10,7 @@
 
 import yaml from 'js-yaml';
 import { ActionKind } from '@yanet/core/api/acl';
-import type { Rule } from '@yanet/core/api/acl';
+import type { Protocol, Rule } from '@yanet/core/api/acl';
 import { partitionCidrsToTyped } from './parseHelpers';
 
 /** Raw shape of an action entry in the YAML schema. */
@@ -28,6 +28,7 @@ interface YamlRule {
     destinations6?: unknown;
     src_port_ranges?: unknown;
     dst_port_ranges?: unknown;
+    protocols?: unknown;
     proto_ranges?: unknown;
     vlan_ranges?: unknown;
     devices?: unknown;
@@ -64,6 +65,36 @@ const rangesFromObjects = (val: unknown): Array<{ from: number; to: number }> =>
     return results;
 };
 
+/** Convert an array of structured protocol entries to wire objects,
+ * keeping the authored form; the service expands and validates it. */
+const protocolsFromObjects = (val: unknown): Protocol[] => {
+    if (!Array.isArray(val)) return [];
+    const results: Protocol[] = [];
+    for (const item of val as unknown[]) {
+        if (!item || typeof item !== 'object') continue;
+        const obj = item as Record<string, unknown>;
+        const entry: Protocol = {};
+
+        const number = typeof obj['number'] === 'number' ? obj['number'] : Number(obj['number'] ?? 0);
+        if (!isNaN(number)) entry.number = number;
+
+        if (obj['tcp'] && typeof obj['tcp'] === 'object') {
+            const tcp = obj['tcp'] as Record<string, unknown>;
+            const flags = typeof tcp['flags'] === 'number' ? tcp['flags'] : Number(tcp['flags'] ?? 0);
+            const mask = typeof tcp['mask'] === 'number' ? tcp['mask'] : Number(tcp['mask'] ?? 0);
+            if (!isNaN(flags) && !isNaN(mask)) entry.tcp = { flags, mask };
+        }
+
+        const icmpTypes = rangesFromObjects(obj['icmp_types']);
+        const icmp6Types = rangesFromObjects(obj['icmp6_types']);
+        if (icmpTypes.length > 0) entry.icmp_types = icmpTypes;
+        if (icmp6Types.length > 0) entry.icmp6_types = icmp6Types;
+
+        results.push(entry);
+    }
+    return results;
+};
+
 const convertRow = (r: unknown): Rule => {
     if (!r || typeof r !== 'object') return {};
     const row = r as YamlRule;
@@ -81,6 +112,7 @@ const convertRow = (r: unknown): Rule => {
 
     const src_port_ranges = rangesFromObjects(row.src_port_ranges);
     const dst_port_ranges = rangesFromObjects(row.dst_port_ranges);
+    const protocols = protocolsFromObjects(row.protocols);
     const proto_ranges = rangesFromObjects(row.proto_ranges);
     const vlan_ranges = rangesFromObjects(row.vlan_ranges);
 
@@ -109,6 +141,7 @@ const convertRow = (r: unknown): Rule => {
         destinations6: destinations.v6,
         src_port_ranges,
         dst_port_ranges,
+        ...(protocols.length > 0 ? { protocols } : {}),
         proto_ranges,
         vlan_ranges,
         devices,
