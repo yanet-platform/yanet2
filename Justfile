@@ -30,7 +30,7 @@ build-debug:
 
 # Setup build environment with optional coverage
 setup COVERAGE_MODE="false":
-    @meson setup build -Dbuildtype=debug -Db_coverage={{ COVERAGE_MODE }}
+    @make setup MESON_SETUP_FLAGS="-Dbuildtype=debug -Db_sanitize=none -Db_coverage={{ COVERAGE_MODE }}"
 
 # === Test Targets ===
 
@@ -116,6 +116,9 @@ _docker_run IT *COMMAND:
     set -euo pipefail
     mkdir -p "${DOCKER_CACHE_DIR}/gomodcache" "${DOCKER_CACHE_DIR}/gocache" "${DOCKER_CACHE_DIR}/ccache"
     docker_mounts=(-v "{{ ROOT_DIR }}:/yanet2")
+    if [ "{{ ROOT_DIR }}" != /yanet2 ]; then
+        docker_mounts+=(-v "{{ ROOT_DIR }}:{{ ROOT_DIR }}")
+    fi
     if [ -f "{{ ROOT_DIR }}/.git" ]; then
         # Linked worktrees reference Git metadata outside the source mount.
         git_common_dir="$(git -C "{{ ROOT_DIR }}" rev-parse --path-format=absolute --git-common-dir)"
@@ -141,7 +144,7 @@ _docker_run IT *COMMAND:
         -v "${DOCKER_CACHE_DIR}/gocache:/tmp/gocache:rw" \
         -v "${DOCKER_CACHE_DIR}/ccache:/ccache:rw" \
         {{ TAG }} \
-        sh -c 'cd /yanet2 && git config --global --add safe.directory /yanet2 && export CCACHE_UMASK=000 && {{ COMMAND }}'
+        sh -c 'cd "$1" && git config --global --add safe.directory /yanet2 && git config --global --add safe.directory "$1" && export CCACHE_UMASK=000 && shift && sh -c "$@"' sh "{{ ROOT_DIR }}" "${@:2}"
 
 dsetup COVERAGE_MODE="false":
     @just _docker_run -it "just setup {{ COVERAGE_MODE }}"
@@ -156,9 +159,11 @@ _ccache_setup *OPTIONS:
     @meson setup build {{ OPTIONS }}
     @python3 scripts/check-meson-ccache.py build
 
-# Run tests in Docker
-dtest: dtest-ccache-probe
-    @just _docker_run -it "python3 scripts/test-meson-ccache.py && just _ccache_setup -Dbuildtype=debug -Db_coverage=false && just test"
+# Options select only Go tests; successful runs retain the C build and Meson suite.
+dtest GO_TEST_FLAGS="" GO_TEST_PACKAGES="": dtest-ccache-probe
+    #!/usr/bin/env bash
+    set -euo pipefail
+    just _docker_run -it 'python3 scripts/test-meson-ccache.py && make test-recipes && { test ! -f build/build.ninja || python3 scripts/check-meson-ccache.py build; } && just setup false && python3 scripts/check-meson-ccache.py build && make build && GO_TEST_FLAGS="$1" GO_TEST_PACKAGES="$2" make test' sh "$@"
 
 # Run clang-tidy in Docker
 dtidy *FILES:
