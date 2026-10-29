@@ -149,7 +149,7 @@ func Test_MapObjectMemory_FailedLayerCreateFreesStash(t *testing.T) {
 }
 
 // memoryNode selects exact context accounting from the production agent view.
-func memoryNode(t *testing.T, harness *dataplaneut.Harness, name string) ffi.AgentMemoryNode {
+func memoryNode(t *testing.T, harness *dataplaneut.Harness, name string) ffi.MemoryNode {
 	t.Helper()
 	for _, agent := range harness.SharedMemory().DPConfig(0).Agents() {
 		if agent.Name != "fwstate-test" {
@@ -168,7 +168,7 @@ func memoryNode(t *testing.T, harness *dataplaneut.Harness, name string) ffi.Age
 		}
 	}
 	t.Fatalf("memory context %q not found", name)
-	return ffi.AgentMemoryNode{}
+	return ffi.MemoryNode{}
 }
 
 // requireCreateStatus checks the native status without losing errno matching.

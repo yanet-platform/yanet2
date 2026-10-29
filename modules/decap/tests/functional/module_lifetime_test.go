@@ -69,7 +69,7 @@ func (m *parked) retry() {
 // module actually torn down. The live generation-reference count is not
 // used here: it moves whether or not a teardown ran, so it cannot
 // distinguish a real destroy from a skipped one.
-func agentRootMemoryNode(t *testing.T, shm *ffi.SharedMemory, name string) ffi.AgentMemoryNode {
+func agentRootMemoryNode(t *testing.T, shm *ffi.SharedMemory, name string) ffi.MemoryNode {
 	t.Helper()
 
 	for _, agentInfo := range shm.DPConfig(0).Agents() {
@@ -87,7 +87,7 @@ func agentRootMemoryNode(t *testing.T, shm *ffi.SharedMemory, name string) ffi.A
 	}
 
 	t.Fatalf("agent %q not found in dataplane config", name)
-	return ffi.AgentMemoryNode{}
+	return ffi.MemoryNode{}
 }
 
 // TestModuleLifetime_LiveGeneration_ReleaseDoesNotDestroy verifies that

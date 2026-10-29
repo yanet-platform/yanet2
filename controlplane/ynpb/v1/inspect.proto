@@ -67,6 +67,12 @@ message InstanceInfo {
   // Devices represent physical or virtual network interfaces that
   // send and receive packets.
   repeated DeviceInfo devices = 8;
+  // Snapshot of the controlplane zone's own memory for this instance.
+  //
+  // Covers every memory context placed in the zone outside agent arenas:
+  // the ectx and counter-storage contexts, the system agent's subtree and
+  // the configuration generations.
+  CPMemoryInfo cp_memory = 9;
 }
 
 // DPModuleInfo contains information about a dataplane module.
@@ -185,7 +191,7 @@ message AgentInfo {
   repeated AgentInstanceInfo instances = 2;
 }
 
-// MemoryNode is one entry in a flat depth-first snapshot of an agent's
+// MemoryNode is one entry in a flat depth-first snapshot of a
 // memory-context tree.
 //
 // The tree is produced by the C info API and copied to the heap before
@@ -196,7 +202,8 @@ message MemoryNode {
 
   // Index of the parent node within the same memory_tree array.
   //
-  // UINT32_MAX (0xFFFFFFFF) marks the root node, the agent's own context.
+  // UINT32_MAX (0xFFFFFFFF) marks the root node: the agent's own context,
+  // or the controlplane zone's bootstrap context.
   uint32 parent_idx = 2;
 
   // Number of allocation calls made through this context.
@@ -241,6 +248,22 @@ message AgentInstanceInfo {
   // parent_idx. Best-effort: a concurrent update may make a node appear or
   // vanish between traversal passes.
   repeated MemoryNode memory_tree = 7;
+}
+
+// CPMemoryInfo describes the controlplane memory zone of one instance.
+//
+// The zone backs every memory context that is not an agent arena, so its
+// snapshot attributes the execution contexts, counter storages and
+// configuration generations the agents' own snapshots cannot see.
+message CPMemoryInfo {
+  // Bytes still available for allocation in the zone.
+  uint64 free_bytes = 1;
+  // Flat depth-first snapshot of the zone's memory-context tree.
+  //
+  // Index 0 is the root, the "cp" bootstrap context; each later node
+  // references its parent via parent_idx. Best-effort: a concurrent update
+  // may make a node appear or vanish between traversal passes.
+  repeated MemoryNode memory_tree = 2;
 }
 
 // DeviceInfo contains information about a network device.

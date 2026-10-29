@@ -1702,6 +1702,51 @@ unlock:
 	return agent_list_info;
 }
 
+void
+cp_memory_info_free(struct cp_memory_info *memory_info) {
+	free(memory_info);
+}
+
+// Snapshot the controlplane zone's own memory-context tree, rooted at the
+// "cp" bootstrap context. Every context of the zone shares the zone's
+// block_allocator, whose lock guards the tree splices, so the same
+// two-phase best-effort read as build_instance_info applies: count under
+// lock, malloc outside it, fill under lock bounded by the counted capacity.
+struct cp_memory_info *
+yanet_get_cp_memory_info(struct dp_config *dp_config) {
+	struct cp_config *cp_config = ADDR_OF(&dp_config->cp_config);
+
+	spinlock_lock(&cp_config->block_allocator.lock);
+	uint64_t node_count =
+		memory_context_count_nodes(&cp_config->memory_context);
+	spinlock_unlock(&cp_config->block_allocator.lock);
+
+	struct cp_memory_info *memory_info = (struct cp_memory_info *)malloc(
+		sizeof(struct cp_memory_info) +
+		sizeof(struct cp_memory_node_info) * node_count
+	);
+	if (memory_info == NULL) {
+		return NULL;
+	}
+	// The allocator lock is not reentrant, so this lock-taking call must
+	// run strictly outside the locked sections above and below.
+	memory_info->free_bytes =
+		block_allocator_free_size(&cp_config->block_allocator);
+
+	uint32_t next_idx = 0;
+	spinlock_lock(&cp_config->block_allocator.lock);
+	memory_context_fill_nodes(
+		&cp_config->memory_context,
+		memory_info->memory_nodes,
+		UINT32_MAX,
+		&next_idx,
+		(uint32_t)node_count
+	);
+	spinlock_unlock(&cp_config->block_allocator.lock);
+	memory_info->memory_node_count = next_idx;
+	return memory_info;
+}
+
 int
 cp_device_config_set_input_pipeline(
 	struct cp_device_config *device,
