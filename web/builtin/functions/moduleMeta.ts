@@ -9,7 +9,6 @@ export const MODULE_META: Record<string, ModuleMeta> = {
     acl:         { color: '#6FE0A0', desc: 'Stateless ACL ruleset' },
     decap:       { color: '#5FE0E0', desc: 'Tunnel decapsulation (IPIP/GRE)' },
     nat64:       { color: '#FFB454', desc: 'Stateful NAT64 translation' },
-    balancer:    { color: '#FF8FA3', desc: 'L4 load balancer (DSCP/hash)' },
     forward:     { color: '#B8B0A4', desc: 'Pure forwarding (no transform)' },
     'route-mpls': { color: '#80CFFF', desc: 'MPLS route forwarding' },
     fwstate:     { color: '#A0E080', desc: 'Firewall state tracking' },

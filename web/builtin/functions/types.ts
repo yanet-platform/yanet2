@@ -2,7 +2,7 @@ export type { DragPayload } from '../_shared/lane-editor';
 
 export type ModuleType =
     | 'route' | 'pdump' | 'acl' | 'decap' | 'nat64'
-    | 'balancer' | 'forward' | string;
+    | 'forward' | string;
 
 export type ModuleStatus = 'ok' | 'hot' | 'error' | 'unknown';
 
