@@ -3,10 +3,11 @@
 
 use core::mem::{align_of, size_of};
 
-use yanet_shm::{opaque::Opaque, shm::ShmLayout};
+use yanet_shm::opaque::Opaque;
 
 use crate::{
     bindings,
+    cp::Stored,
     dp::{
         batch::Batch,
         cx::{CommitCx, Cx},
@@ -23,7 +24,7 @@ pub trait Module: Sized + 'static {
     const NAME: &'static str;
 
     /// Configuration body, frozen for a generation and shared by workers.
-    type Config: ShmLayout + Sync;
+    type Config: Stored + Sync;
 
     /// Per-worker value of each placement and generation, made by the
     /// prepare step; the unit type when unused.

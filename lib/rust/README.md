@@ -1,36 +1,61 @@
 # Rust module SDK
 
-A cargo workspace, separate from the CLI workspace at the repository root,
-with its own `Cargo.lock` and `rust-version = "1.88"`, for writing
-dataplane modules in Rust: the boundary crate both sides of the SDK
-share, the C bindings with the dataplane runtime and the packet header views.
+The SDK is a separate Cargo workspace. Module storage and handlers are
+`#![no_std]` and `#![forbid(unsafe_code)]`; API crates can forbid unsafe code too.
+The sys crate owns the trusted C boundary and final-address construction.
 
-| Crate | Environment | Role |
-|-------|-------------|------|
-| `yanet-shm` | `no_std`, no `alloc` | the provenance root, relative-pointer field types, `Opaque`, `ShmLayout` leaves |
-| `yanet-sys` | `no_std`, no `alloc` | the C bindings of the SDK, modules mirroring the C tree, one bindgen output (generated into `OUT_DIR`, only here) and one module per C library: `common` (LPM type with its lookup), `counters` (the counter value address), `dp` (bindings of `lib/dataplane`, the `Module` trait, `Cx`/`CommitCx`, `Batch`/`Packet` with the packet operations (allocation, copy, resizing, tunnels), counters and devices, the handler runtime and `export_module!`); the dataplane C shim |
-| `yanet-sdk-testing` | `std`, dev-only | the block arena (one region, as one mapping) and resolving context of the tests, Miri included |
-| `yanet-packet` | `no_std` | packet header views, extractable to its own repository |
+| Crate | Purpose |
+| --- | --- |
+| `yanet-sdk` | Safe storage, initialization and dataplane facade. |
+| `yanet-sdk-derive` | Checked storage layout, generated initializers and release. |
+| `yanet-shm` | Relative pointers, root provenance and layout contracts. |
+| `yanet-sys` | C bindings, contexts, runtime and direct writer. |
+| `yanet-packet` | Packet header views. |
+| `yanet-sdk-testing` | C-free region and owner for runtime and Miri tests. |
 
-## Build
+Declare storage fields once. The storage derive generates a named initializer
+with the same field visibility; each initializer field must encode the exact
+corresponding storage type. Integer literals in generic initializer fields need
+a width suffix, such as `0u32`; typed values retain their declared widths.
 
-The build script of `yanet-sys` reads the C flags of the dataplane
-(compiler, include directories, defines) from the `compile_commands.json`
-that `meson setup build` writes at the repository root; `YANET_BUILD_DIR`
-names another build directory, and `.cargo/config.toml` of this directory
-defaults it to `build`. It also needs a clang
-and a libclang of one LLVM major (`CLANG_PATH`, `LIBCLANG_PATH`); CI uses 23.
-The same build script compiles the dataplane C shim, with the packet
-encapsulation sources of `lib/dataplane/packet` it calls, with hidden
-visibility and the warning options of the C build, `-Werror` included. A
-plugin imports the packet allocator and copy (`worker_packet_alloc`,
-`worker_clone_packet`) from the dataplane executable, which exports them. The
-tests of `yanet-shm` need neither the compilation database nor a C compiler.
+```rust
+use yanet_sdk::{ShmLayout, ShmSlice, slice};
+type MyError = yanet_sdk::BuildError<core::convert::Infallible>;
 
-```sh
-meson setup build
-cd lib/rust
-export CLANG_PATH=/usr/bin/clang-23 LIBCLANG_PATH=/usr/lib/llvm-23/lib
-cargo test --workspace                      # native suites
-MIRIFLAGS="-Zmiri-strict-provenance" cargo +nightly-2026-10-22 miri nextest run --workspace   # Miri (cargo-nextest); add -Zmiri-tree-borrows for Tree Borrows
+#[derive(ShmLayout)]
+#[repr(C)]
+pub struct Config {
+    pub ports: ShmSlice<u64>,
+}
+
+let ports = [80u64, 443];
+let input = ConfigInit {
+    ports: slice(ports.len(), |index| Ok::<_, MyError>(ports[index])),
+};
+// build_config::<MyModule, _, MyError>(&owner, "policy", input)?;
 ```
+
+A slice callback returns one fallible record at a time. Nested callbacks can
+borrow the original input; there is no intermediate collection, erased callback
+or construction context exposed to authors. `boxed`, `counter`, `device` and
+`lpm` compose with ordinary scalars, arrays and actual atomic values. LPM ranges
+are read and validated once immediately before C insertion. Domain validation
+belongs in the callback and retains the API's error type through
+`From<BuildError<OwnerError>>`.
+
+Completed fields and prefixes remain guarded until their containing value
+succeeds. Failures and panics release partial storage, C objects and header
+registrations. Finished configurations retain no input borrow. Release walks
+owning edges in reverse construction order; allocations contain only payload.
+The original owner and absence of readers are required for explicit destruction.
+
+The C-free test owner initializes no C contexts. Embedded C objects and native
+registrations are tested with the real agent through the shared Go harness.
+
+Build the repository's native libraries before testing this workspace. The
+workspace supports Rust 1.88. Formatting uses nightly-2026-10-22. CI runs native
+unit tests and doctests, Clippy, bare-metal checks and Miri with strict
+provenance under both borrow models.
+
+`yanet-sys` requires clang and libclang from the same LLVM major, selected by
+`CLANG_PATH` and `LIBCLANG_PATH`; CI uses LLVM 23.

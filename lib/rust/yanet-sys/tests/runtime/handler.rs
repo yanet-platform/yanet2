@@ -7,6 +7,7 @@ use core::mem::{offset_of, size_of};
 use yanet_shm::{rel::RelPtr, shm::ShmLayout};
 use yanet_sys::{
     bindings,
+    cp::{MemoryContext, Owner, Stored},
     dp::{Batch, CommitCx, Counter, CounterRef, Cx, Device, Module, Verdict},
 };
 
@@ -22,6 +23,11 @@ struct Config {
 // SAFETY: two registry indices of eight bytes, which accept every bit
 // pattern, with no padding and no drop.
 unsafe impl ShmLayout for Config {}
+
+// SAFETY: the hand-laid configuration owns no descendant blocks.
+unsafe impl Stored for Config {
+    unsafe fn free<W: Owner>(_: usize, _: &MemoryContext<'_, W>) {}
+}
 
 /// Reads everything the runtime hands a module: the configuration, a prepared
 /// counter handle, a counter by value and a device target.

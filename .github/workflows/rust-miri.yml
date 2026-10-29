@@ -1,13 +1,12 @@
 name: Rust Miri
 
-# Miri over the unsafe, provenance and shared-memory suites of the Rust
-# module SDK workspace (lib/rust): strict provenance under Stacked and Tree
-# Borrows.
-# The bindings crate's build script runs bindgen and compiles the dataplane C
-# shim over the repository's C headers with the compiler and flags of a meson
-# configuration's compilation database, so changes to those headers re-run
-# the job, which runs in the CI image (ci/README.md) and configures meson (no
-# compilation) before Miri.
+# Both borrow models check the SDK's unsafe shared-memory code with strict
+# provenance.
+#
+# The C headers and compilation database determine the generated bindings and
+# common/dataplane shims, so changes to either retrigger this job. Meson setup
+# supplies the database and generated headers without building the dataplane;
+# the build script compiles the shims with those flags inside the CI image.
 
 on:
   push:

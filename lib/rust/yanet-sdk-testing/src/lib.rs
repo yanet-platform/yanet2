@@ -1,8 +1,13 @@
 //! Shared memory of the SDK tests, including Miri.
 //!
-//! [`BlockArena`] carves every block out of one region and roots its
-//! pointers at the region's base, as a product roots them at its one
-//! mapping. [`View`] resolves edges through the arena's root.
+//! All blocks share one region and provenance root, matching a production
+//! mapping. Views resolve owning edges through that root. The optional
+//! control-plane feature adds a tracked construction owner over the arena.
+
+extern crate alloc;
+
+#[cfg(feature = "cp")]
+pub mod cp;
 
 use core::{
     alloc::Layout,

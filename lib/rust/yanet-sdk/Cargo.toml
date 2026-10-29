@@ -1,0 +1,19 @@
+[package]
+name = "yanet-sdk"
+description = "Module-crate surface of the Rust module SDK: the Module trait, contexts, batches, shared-memory field types and allocation-free storage derives."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+yanet-packet = { path = "../yanet-packet" }
+yanet-sdk-derive = { path = "../yanet-sdk-derive" }
+yanet-shm = { path = "../yanet-shm" }
+yanet-sys = { path = "../yanet-sys" }
+
+[dev-dependencies]
+yanet-sdk-testing = { path = "../yanet-sdk-testing", features = ["cp"] }

@@ -1,20 +1,14 @@
 name: Rust SDK
 
-# Checks of the Rust module SDK workspace (lib/rust): formatting, lints, the
-# 1.88 test suite, std-freedom of the SDK crates and the extractable packet.
-# Clippy with the bare-metal check and the 1.88 tests also run on arm64, where
-# the C bindings and the layouts they check can differ; the rest does not
-# depend on the architecture and runs on x86_64 only.
+# The SDK must pass its Rust 1.88 tests, lints, formatting and bare-metal build;
+# the packet crate must also build outside the workspace.
 #
-# The bindings crate's build script runs bindgen and the C shim over the
-# repository's C headers with the flags of a meson configuration's
-# compilation database. C header and meson changes therefore re-run the jobs,
-# and every job that compiles the SDK runs in the CI image (ci/README.md) and
-# configures meson first (nothing is compiled).
-#
-# Each cargo cache family has exactly one job per architecture that writes it
-# (the cache key names the host), from main only, since a cache written on a
-# pull-request ref is readable only from that pull request.
+# Tests, lints and bare-metal checks cover both host architectures because C
+# bindings and layouts can differ. C headers and Meson flags determine the
+# bindings and common/dataplane shims, so changes to either retrigger the jobs.
+# Meson setup supplies the database and generated headers without building the
+# dataplane; the build script compiles the shims inside the CI image. Each
+# cache family has one writer per architecture, on main, so later PRs can read it.
 
 on:
   push:
@@ -118,12 +112,13 @@ jobs:
       # operations in unsafe functions.
       - working-directory: lib/rust
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
-      # A bare-metal target has no std: the crates compile only if nothing
-      # pulls std or alloc in. The bindings follow the meson configuration of
-      # the machine, so an arm64 row on a runner that is not arm64 skips it.
+      # The bare-metal build checks compatibility without the standard library.
+      #
+      # Bindings follow the host's Meson configuration, so the arm64 check
+      # requires an arm64 runner.
       - if: matrix.arch != 'arm64' || runner.arch == 'ARM64'
         working-directory: lib/rust
-        run: cargo check --locked --target ${{ matrix.target }} -p yanet-shm -p yanet-sys -p yanet-packet
+        run: cargo check --locked --target ${{ matrix.target }} -p yanet-shm -p yanet-sys -p yanet-sdk -p yanet-packet
 
   test:
     name: cargo test (1.88) (${{ matrix.arch }})

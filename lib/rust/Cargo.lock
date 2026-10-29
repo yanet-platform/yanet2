@@ -405,10 +405,33 @@ dependencies = [
 ]
 
 [[package]]
+name = "yanet-sdk"
+version = "0.3.0"
+dependencies = [
+ "yanet-packet",
+ "yanet-sdk-derive",
+ "yanet-sdk-testing",
+ "yanet-shm",
+ "yanet-sys",
+]
+
+[[package]]
+name = "yanet-sdk-derive"
+version = "0.3.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
+ "yanet-sdk",
+ "yanet-sys",
+]
+
+[[package]]
 name = "yanet-sdk-testing"
 version = "0.3.0"
 dependencies = [
  "yanet-shm",
+ "yanet-sys",
 ]
 
 [[package]]

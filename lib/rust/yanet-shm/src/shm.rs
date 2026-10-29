@@ -2,18 +2,23 @@
 //!
 //! A configuration is a `#[repr(C)]` struct implementing `ShmLayout`. The
 //! trait is `unsafe`; this crate implements it for an allow-list of leaves,
-//! arrays and the owned edges, and a struct implements it by hand, so every
-//! implementor is valid for every bit pattern C may write, has no implicit
-//! padding, needs no drop and is aligned to at most 64.
+//! arrays and the owned edges, and a struct gets it from
+//! `#[derive(ShmLayout)]`, so every implementor is valid for every bit pattern
+//! C may write, has no implicit padding, needs no drop and is aligned to at
+//! most 64.
 
 use core::sync::atomic::{AtomicI8, AtomicI16, AtomicI32, AtomicI64, AtomicU8, AtomicU16, AtomicU32, AtomicU64};
 
 use crate::rel::{ShmBox, ShmSlice};
 
-/// Largest alignment a shared-memory type may require: the block allocator
-/// aligns a block to at least the smaller of this and its size rounded up to
-/// a power of two, so a type aligned to at most this is aligned in any block
-/// of at least its size.
+/// Largest alignment a shared-memory type may require.
+///
+/// Allocation alignment is at least the smaller of this limit and the block
+/// size rounded up to a power of two. Every permitted value fitting the block
+/// therefore receives its required alignment. ASan red zones shift blocks by 64
+/// bytes, limiting the guarantee even when the underlying hugepage is more
+/// aligned. The C binding crate checks this limit against the allocator's
+/// constant.
 pub const MAX_ALIGN: usize = 64;
 
 /// Marks a type that may live in shared memory.
