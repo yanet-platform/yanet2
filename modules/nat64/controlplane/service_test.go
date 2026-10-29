@@ -13,6 +13,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
+	"github.com/yanet-platform/yanet2/controlplane/crud"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	nat64pb "github.com/yanet-platform/yanet2/modules/nat64/controlplane/nat64pb/v1"
 )
@@ -51,7 +52,7 @@ type mockBackend struct {
 	deletedName string
 }
 
-func (m *mockBackend) UpdateModule(name string, cfg *NAT64Config) (ModuleHandle, error) {
+func (m *mockBackend) Update(name string, cfg *NAT64Config) (crud.Handle, error) {
 	if m.failAt != 0 && len(m.configs)+1 == m.failAt {
 		return nil, errInjectedBackend
 	}
@@ -70,7 +71,7 @@ func mustIPv6Prefix(t *testing.T, value string) *commonpb.IPv6Prefix {
 	return prefix
 }
 
-func (m *mockBackend) DeleteModule(name string) error {
+func (m *mockBackend) Delete(name string) error {
 	m.deletedName = name
 	return nil
 }
@@ -82,7 +83,7 @@ type refusingDeleteBackend struct {
 	err error
 }
 
-func (m *refusingDeleteBackend) DeleteModule(name string) error {
+func (m *refusingDeleteBackend) Delete(name string) error {
 	m.deletedName = name
 	return m.err
 }
@@ -95,11 +96,11 @@ type parkingBackend struct {
 	first    refusingOnceHandle
 }
 
-func (m *parkingBackend) UpdateModule(name string, cfg *NAT64Config) (ModuleHandle, error) {
+func (m *parkingBackend) Update(name string, cfg *NAT64Config) (crud.Handle, error) {
 	if m.numCalls.Add(1) == 1 {
 		return &m.first, nil
 	}
-	return m.mockBackend.UpdateModule(name, cfg)
+	return m.mockBackend.Update(name, cfg)
 }
 
 // Test_NAT64Service_AddShowRemove verifies basic config lifecycle operations.

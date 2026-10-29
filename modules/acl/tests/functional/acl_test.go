@@ -205,7 +205,7 @@ func wireACLPipeline(
 			Counter: "sink6",
 		},
 	}
-	sinkHandle, err := forward.NewBackend(agent).UpdateModule(sinkName, sinkRules)
+	sinkHandle, err := forward.NewBackend(agent).Update(sinkName, forward.RuleSet{Compiled: sinkRules})
 	require.NoError(tb, err)
 	tb.Cleanup(func() { _ = sinkHandle.Free() })
 

@@ -1,8 +1,8 @@
 package vxlan
 
 import (
-	"fmt"
-
+	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
+	"github.com/yanet-platform/yanet2/controlplane/crud"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/devices/vxlan/bindings/go/cvxlan"
 )
@@ -19,42 +19,32 @@ func NewBackend(agent *ffi.Agent) Backend {
 	}
 }
 
-func (m *backend) UpdateDevice(
-	name string,
-	input []Pipeline,
-	output []Pipeline,
-	settings cvxlan.Settings,
-) (*cvxlan.DeviceConfig, error) {
+func (m *backend) Update(name string, payload DeviceState) (crud.Handle, error) {
 	device, err := cvxlan.NewDeviceConfig(
 		m.agent,
 		name,
-		toBindingPipelines(input),
-		toBindingPipelines(output),
-		settings,
+		toBindingPipelines(payload.Input),
+		toBindingPipelines(payload.Output),
+		payload.Settings,
 	)
 	if err != nil {
 		return nil, err
 	}
 
-	if err := m.agent.UpdateDevices(
-		[]ffi.ShmDeviceConfig{device.AsFFIDevice()},
-	); err != nil {
-		if err := device.Free(); err != nil {
-			return nil, fmt.Errorf("failed to free abandoned config: %w", err)
-		}
+	if err := crud.PublishDevice(m.agent, device); err != nil {
 		return nil, err
 	}
 
 	return device, nil
 }
 
-func (m *backend) DeleteDevice(name string) error {
+func (m *backend) Delete(name string) error {
 	return m.agent.DeleteDevice(name)
 }
 
 // toBindingPipelines converts service pipeline assignments into the binding
 // representation consumed by the C API.
-func toBindingPipelines(pipelines []Pipeline) []cvxlan.Pipeline {
+func toBindingPipelines(pipelines []commonpb.Pipeline) []cvxlan.Pipeline {
 	out := make([]cvxlan.Pipeline, 0, len(pipelines))
 	for idx := range pipelines {
 		out = append(out, cvxlan.Pipeline{

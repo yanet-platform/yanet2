@@ -126,7 +126,7 @@ func Test_HarnessStages_InvalidPacketsLeaveRoundUsable(t *testing.T) {
 // runs its scheduled output through the same production dispatch and counters.
 func Test_HarnessStages_RedirectMatchesOrdinaryRound(t *testing.T) {
 	harness, agent := newStageHarness(t)
-	_, err := forward.NewBackend(agent).UpdateModule("redirect", []cforward.ForwardRule{{Target: "port0", Mode: cforward.ModeOut, Counter: "forwarded"}})
+	_, err := forward.NewBackend(agent).Update("redirect", forward.RuleSet{Compiled: []cforward.ForwardRule{{Target: "port0", Mode: cforward.ModeOut, Counter: "forwarded"}}})
 	require.NoError(t, err)
 	require.NoError(t, agent.UpdateFunction(ffi.FunctionConfig{Name: "redirect", Chains: []ffi.FunctionChainConfig{{Weight: 1, Chain: ffi.ChainConfig{Name: "redirect", Modules: []ffi.ChainModuleConfig{{Type: "forward", Name: "redirect"}}}}}}))
 	require.NoError(t, agent.UpdatePipeline(ffi.PipelineConfig{Name: "redirect", Functions: []string{"redirect"}}))
@@ -152,7 +152,7 @@ func Test_HarnessStages_RedirectMatchesOrdinaryRound(t *testing.T) {
 // published logical entry can run even when its index exceeds the wire ports.
 func Test_HarnessStages_LogicalDeviceBeyondPhysicalTopology(t *testing.T) {
 	harness, agent := newStageHarness(t)
-	_, err := forward.NewBackend(agent).UpdateModule("logical-route", []cforward.ForwardRule{{Target: "port0", Mode: cforward.ModeOut, Counter: "forwarded"}})
+	_, err := forward.NewBackend(agent).Update("logical-route", forward.RuleSet{Compiled: []cforward.ForwardRule{{Target: "port0", Mode: cforward.ModeOut, Counter: "forwarded"}}})
 	require.NoError(t, err)
 	require.NoError(t, agent.UpdateFunction(ffi.FunctionConfig{Name: "logical-route", Chains: []ffi.FunctionChainConfig{{Weight: 1, Chain: ffi.ChainConfig{Name: "logical-route", Modules: []ffi.ChainModuleConfig{{Type: "forward", Name: "logical-route"}}}}}}))
 	require.NoError(t, agent.UpdatePipeline(ffi.PipelineConfig{Name: "logical-route", Functions: []string{"logical-route"}}))

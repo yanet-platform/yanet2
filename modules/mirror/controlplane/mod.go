@@ -4,7 +4,7 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 
-	cpffi "github.com/yanet-platform/yanet2/controlplane/ffi"
+	"github.com/yanet-platform/yanet2/controlplane/modulebase"
 	mirrorpb "github.com/yanet-platform/yanet2/modules/mirror/controlplane/mirrorpb/v1"
 )
 
@@ -14,73 +14,29 @@ const (
 )
 
 // Option configures the MirrorModule constructor.
-type Option func(*moduleOptions)
-
-type moduleOptions struct {
-	Log *zap.Logger
-}
-
-func newModuleOptions() *moduleOptions {
-	return &moduleOptions{
-		Log: zap.NewNop(),
-	}
-}
+type Option = modulebase.Option
 
 // WithLog sets the logger for the mirror module.
 func WithLog(log *zap.Logger) Option {
-	return func(o *moduleOptions) {
-		o.Log = log
-	}
+	return modulebase.WithLog(log)
 }
 
 // MirrorModule is a control-plane component of a module that is responsible for
 // mirroring traffic between devices.
 type MirrorModule struct {
-	cfg           *Config
-	attachment    *cpffi.Attachment
-	mirrorService *MirrorService
+	*modulebase.Base
 }
 
 func NewMirrorModule(cfg *Config, options ...Option) (*MirrorModule, error) {
-	opts := newModuleOptions()
-	for _, o := range options {
-		o(opts)
-	}
-
-	log := opts.Log.With(zap.String("module", mirrorpb.MirrorService_ServiceDesc.ServiceName))
-
-	attachment, err := cpffi.Attach(cfg.AttachConfig, agentName, log)
+	base, err := modulebase.NewBase(cfg.AttachConfig, agentName, cfg.Endpoint.Unwrap(), options...)
 	if err != nil {
 		return nil, err
 	}
-	agent := attachment.Agent
 
-	mirrorService := NewMirrorService(NewBackend(agent))
+	mirrorService := NewMirrorService(NewBackend(base.Agent()))
+	base.AddService(mirrorpb.MirrorService_ServiceDesc.ServiceName, func(server *grpc.Server) {
+		mirrorpb.RegisterMirrorServiceServer(server, mirrorService)
+	})
 
-	return &MirrorModule{
-		cfg:           cfg,
-		attachment:    attachment,
-		mirrorService: mirrorService,
-	}, nil
-}
-
-func (m *MirrorModule) Name() string {
-	return moduleType
-}
-
-func (m *MirrorModule) Endpoint() string {
-	return m.cfg.Endpoint.Unwrap()
-}
-
-func (m *MirrorModule) ServicesNames() []string {
-	return []string{mirrorpb.MirrorService_ServiceDesc.ServiceName}
-}
-
-func (m *MirrorModule) RegisterService(server *grpc.Server) {
-	mirrorpb.RegisterMirrorServiceServer(server, m.mirrorService)
-}
-
-// Close closes the module.
-func (m *MirrorModule) Close() error {
-	return m.attachment.Close()
+	return &MirrorModule{Base: base}, nil
 }

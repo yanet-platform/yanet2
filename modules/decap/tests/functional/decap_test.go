@@ -87,7 +87,7 @@ func wireDecapPipeline(t *testing.T, agent *ffi.Agent, configName string) {
 			Devices: filter.Devices{{Name: "port0"}},
 		},
 	}
-	sinkHandle, err := forward.NewBackend(agent).UpdateModule(sinkName, sinkRules)
+	sinkHandle, err := forward.NewBackend(agent).Update(sinkName, forward.RuleSet{Compiled: sinkRules})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = sinkHandle.Free() })
 
@@ -117,6 +117,19 @@ func wireDecapPipeline(t *testing.T, agent *ffi.Agent, configName string) {
 	require.NoError(t, err)
 }
 
+// prefixSets splits a flat prefix list into its family sets.
+func prefixSets(prefixes []netip.Prefix) decap.PrefixSets {
+	sets := decap.PrefixSets{}
+	for _, prefix := range prefixes {
+		if prefix.Addr().Is4() {
+			sets.Prefixes4 = append(sets.Prefixes4, prefix)
+		} else {
+			sets.Prefixes6 = append(sets.Prefixes6, prefix)
+		}
+	}
+	return sets
+}
+
 func applyDecapConfig(
 	t *testing.T,
 	backend decap.Backend,
@@ -126,7 +139,7 @@ func applyDecapConfig(
 ) {
 	t.Helper()
 
-	handle, err := backend.UpdateModule(name, prefixes)
+	handle, err := backend.Update(name, prefixSets(prefixes))
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = handle.Free() })
 	wireDecapPipeline(t, agent, name)
@@ -741,25 +754,25 @@ func TestDecap_NonIPPacket_UnchangedOutput(t *testing.T) {
 // verifies that five nested tunnel removals can redirect to the final packet.
 func Test_Decap_NestedIPIPFiveLayersReachOutput(t *testing.T) {
 	h, agent, decapBackend := setupDecapHarness(t)
-	decapHandle, err := decapBackend.UpdateModule(
+	decapHandle, err := decapBackend.Update(
 		"nested",
-		[]netip.Prefix{netip.MustParsePrefix("4.5.6.0/24")},
+		decap.PrefixSets{Prefixes4: []netip.Prefix{netip.MustParsePrefix("4.5.6.0/24")}},
 	)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = decapHandle.Free() })
 
 	forwardBackend := forward.NewBackend(agent)
-	loopHandle, err := forwardBackend.UpdateModule("nested-loop", []cforward.ForwardRule{{
+	loopHandle, err := forwardBackend.Update("nested-loop", forward.RuleSet{Compiled: []cforward.ForwardRule{{
 		Target:  "port0",
 		Mode:    cforward.ModeIn,
 		Counter: "loop",
 		Src4s:   []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
 		Dst4s:   []xnetip.Contiguous[xnetip.Network4]{xnetip.MustParseContiguous4("4.5.6.0/24")},
-	}})
+	}}})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = loopHandle.Free() })
 
-	sinkHandle, err := forwardBackend.UpdateModule("nested-sink", []cforward.ForwardRule{
+	sinkHandle, err := forwardBackend.Update("nested-sink", forward.RuleSet{Compiled: []cforward.ForwardRule{
 		{
 			Target:  "port0",
 			Mode:    cforward.ModeOut,
@@ -773,7 +786,7 @@ func Test_Decap_NestedIPIPFiveLayersReachOutput(t *testing.T) {
 			Counter: "sink_l2",
 			Devices: filter.Devices{{Name: "port0"}},
 		},
-	})
+	}})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = sinkHandle.Free() })
 
@@ -864,23 +877,22 @@ func Test_Decap_NestedIPIPStopsAtTotalLimit(t *testing.T) {
 		t.Run(testCase.name, func(t *testing.T) {
 			limit := testCase.limit
 			h, agent, decapBackend := setupDecapHarnessWithLimit(t, testCase.configured)
-			decapHandle, err := decapBackend.UpdateModule(
+			decapHandle, err := decapBackend.Update(
 				"nested",
-				[]netip.Prefix{netip.MustParsePrefix("4.5.6.0/24")},
+				decap.PrefixSets{Prefixes4: []netip.Prefix{netip.MustParsePrefix("4.5.6.0/24")}},
 			)
 			require.NoError(t, err)
 			t.Cleanup(func() { _ = decapHandle.Free() })
 
-			forwardHandle, err := forward.NewBackend(agent).UpdateModule(
-				"loop",
-				[]cforward.ForwardRule{{
+			forwardHandle, err := forward.NewBackend(agent).Update(
+				"loop", forward.RuleSet{Compiled: []cforward.ForwardRule{{
 					Target:  "port0",
 					Mode:    cforward.ModeIn,
 					Counter: "loop",
 					Src4s:   []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
 					Dst4s:   []xnetip.Contiguous[xnetip.Network4]{xnetip.MustParseContiguous4("4.5.6.0/24")},
 				}},
-			)
+				})
 			require.NoError(t, err)
 			t.Cleanup(func() { _ = forwardHandle.Free() })
 
@@ -939,23 +951,22 @@ func Test_Decap_NestedIPIPStopsAtTotalLimit(t *testing.T) {
 // verifies that a no-op decap does not add packet-lineage redirect credits.
 func Test_Decap_MissDoesNotRenewTotalLimit(t *testing.T) {
 	h, agent, decapBackend := setupDecapHarnessWithLimit(t, 4)
-	decapHandle, err := decapBackend.UpdateModule(
+	decapHandle, err := decapBackend.Update(
 		"miss",
-		[]netip.Prefix{netip.MustParsePrefix("203.0.113.0/24")},
+		decap.PrefixSets{Prefixes4: []netip.Prefix{netip.MustParsePrefix("203.0.113.0/24")}},
 	)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = decapHandle.Free() })
 
-	forwardHandle, err := forward.NewBackend(agent).UpdateModule(
-		"loop",
-		[]cforward.ForwardRule{{
+	forwardHandle, err := forward.NewBackend(agent).Update(
+		"loop", forward.RuleSet{Compiled: []cforward.ForwardRule{{
 			Target:  "port0",
 			Mode:    cforward.ModeIn,
 			Counter: "loop",
 			Src4s:   []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
 			Dst4s:   []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
 		}},
-	)
+		})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = forwardHandle.Free() })
 

@@ -16,6 +16,7 @@ import (
 	"github.com/yanet-platform/yanet2/common/go/grpcmetrics"
 	"github.com/yanet-platform/yanet2/common/go/metrics"
 	"github.com/yanet-platform/yanet2/controlplane/configstore"
+	"github.com/yanet-platform/yanet2/controlplane/crud"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/modules/acl/bindings/go/cacl"
 	aclpb "github.com/yanet-platform/yanet2/modules/acl/controlplane/aclpb/v1"
@@ -85,14 +86,14 @@ func WithMetrics(factory grpcmetrics.Factory) Option {
 // the published config, so nothing is compiled or published.
 var errUnchanged = errors.New("config unchanged")
 
+// aclConfig is the published payload: the accepted rule document with
+// its fwstate-map object names, and the compile metadata captured when
+// the module was built, so metrics never call into a handle.
 type aclConfig struct {
 	rules      []*aclpb.Rule
-	acl        ModuleHandle
 	fw4MapName string
 	fw6MapName string
-	// info is the compile metadata copied out of the module before it
-	// was published, so metrics never call into a handle.
-	info cacl.ACLConfigInfo
+	info       cacl.ACLConfigInfo
 }
 
 // Rules returns the rules held by the config.
@@ -115,14 +116,52 @@ func (m *aclConfig) Fw6MapName() string {
 	return m.fw6MapName
 }
 
-// Free releases the module handle held by the config.
+// CaptureInfo copies the compile metadata out of the published module,
+// so reads never call into a handle.
+func (m *aclConfig) CaptureInfo(handle ModuleHandle) {
+	m.info = *handle.GetInfo()
+}
+
+// publishBackend adapts the two-phase compile and publish seam of the ACL
+// backend to the single update of the shared core.
 //
-// It is safe to call even when no handle is held.
-func (m *aclConfig) Free() error {
-	if m.acl == nil {
-		return nil
+// The update captures the module's compile metadata into the payload
+// before the core stores it, keeping the handle opaque to the reads.
+type publishBackend struct {
+	backend Backend
+	log     *zap.Logger
+}
+
+func (m *publishBackend) Update(name string, payload *aclConfig) (crud.Handle, error) {
+	rules, err := convertRules(payload.Rules())
+	if err != nil {
+		return nil, err
 	}
-	return m.acl.Free()
+
+	handle, err := m.backend.NewModule(
+		name, rules, payload.Fw4MapName(), payload.Fw6MapName(),
+	)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to create module config: %v", err)
+	}
+
+	if err := m.backend.UpdateModule(handle); err != nil {
+		if err := handle.Free(); err != nil {
+			m.log.Error("failed to free unpublished acl module",
+				zap.Error(err))
+		}
+		if errors.Is(err, ffi.ErrFailedPrecondition) {
+			return nil, status.Errorf(codes.FailedPrecondition, "failed to update module: %v", err)
+		}
+		return nil, status.Errorf(codes.Internal, "failed to update module: %v", err)
+	}
+
+	payload.CaptureInfo(handle)
+	return handle, nil
+}
+
+func (m *publishBackend) Delete(name string) error {
+	return m.backend.DeleteModule(name)
 }
 
 // ACLService implements the gRPC ACL service.
@@ -130,7 +169,7 @@ type ACLService struct {
 	aclpb.UnimplementedACLServiceServer
 
 	backend Backend
-	configs *configstore.Store[*aclConfig]
+	core    *crud.Core[*aclConfig]
 	metrics *grpcmetrics.ServerMetrics
 
 	// moduleMetricsFlight coalesces concurrent structural counter
@@ -153,8 +192,11 @@ func NewACLService(backend Backend, options ...Option) *ACLService {
 	}
 
 	m := &ACLService{
-		backend:             backend,
-		configs:             configstore.NewStore[*aclConfig](),
+		backend: backend,
+		core: crud.NewCore[*aclConfig](&publishBackend{
+			backend: backend,
+			log:     opts.Log,
+		}),
 		moduleMetricsFlight: newMetricsFlight[[]*commonpb.Metric]("module_metrics"),
 		ruleMetricsFlight:   newMetricsFlight[[]ffi.CounterGroup]("rule_metrics"),
 		log:                 opts.Log,
@@ -178,7 +220,7 @@ func (m *ACLService) UnaryServerInterceptor() grpc.UnaryServerInterceptor {
 
 // retention keeps metrics for active configs.
 func (m *ACLService) retention() func(metrics.MetricID) bool {
-	names := m.configs.Names()
+	names := m.core.List()
 	live := make(map[string]struct{}, len(names))
 	for _, name := range names {
 		live[name] = struct{}{}
@@ -197,10 +239,10 @@ func (m *ACLService) retention() func(metrics.MetricID) bool {
 
 // configInfos returns the compile metadata of every published config.
 func (m *ACLService) configInfos() map[string]cacl.ACLConfigInfo {
-	names := m.configs.Names()
+	names := m.core.List()
 	infos := make(map[string]cacl.ACLConfigInfo, len(names))
 	for _, name := range names {
-		if config, ok := m.configs.Get(name); ok {
+		if config, ok := m.core.Get(name); ok {
 			infos[name] = config.Info()
 		}
 	}
@@ -302,42 +344,17 @@ func (m *ACLService) UpdateConfig(
 	fw4MapName := req.GetFwtableNameV4()
 	fw6MapName := req.GetFwtableNameV6()
 
-	err := m.configs.Update(name, func(current *aclConfig, ok bool) (*aclConfig, error) {
+	err := m.core.Mutate(name, func(current *aclConfig, ok bool) (*aclConfig, error) {
 		if ok && rulesEqual(current.Rules(), req.Rules) &&
 			current.Fw4MapName() == fw4MapName &&
 			current.Fw6MapName() == fw6MapName {
 			return nil, errUnchanged
 		}
 
-		rules, err := convertRules(req.Rules)
-		if err != nil {
-			return nil, err
-		}
-
-		handle, err := m.backend.NewModule(
-			name, rules, fw4MapName, fw6MapName,
-		)
-		if err != nil {
-			return nil, status.Errorf(codes.Internal, "failed to create module config: %v", err)
-		}
-
-		if err := m.backend.UpdateModule(handle); err != nil {
-			if err := handle.Free(); err != nil {
-				m.log.Error("failed to free unpublished acl module",
-					zap.Error(err))
-			}
-			if errors.Is(err, ffi.ErrFailedPrecondition) {
-				return nil, status.Errorf(codes.FailedPrecondition, "failed to update module: %v", err)
-			}
-			return nil, status.Errorf(codes.Internal, "failed to update module: %v", err)
-		}
-
 		return &aclConfig{
 			rules:      req.Rules,
-			acl:        handle,
 			fw4MapName: fw4MapName,
 			fw6MapName: fw6MapName,
-			info:       *handle.GetInfo(),
 		}, nil
 	})
 	if err != nil && !errors.Is(err, errUnchanged) {
@@ -352,7 +369,7 @@ func (m *ACLService) ShowConfig(
 	req *aclpb.ShowConfigRequest,
 ) (*aclpb.ShowConfigResponse, error) {
 	name := req.GetName()
-	config, ok := m.configs.Get(name)
+	config, ok := m.core.Get(name)
 	if !ok {
 		return nil, status.Errorf(codes.NotFound, "config %q not found", name)
 	}
@@ -371,7 +388,7 @@ func (m *ACLService) ListConfigs(
 	ctx context.Context,
 	req *aclpb.ListConfigsRequest,
 ) (*aclpb.ListConfigsResponse, error) {
-	return &aclpb.ListConfigsResponse{Configs: m.configs.Names()}, nil
+	return &aclpb.ListConfigsResponse{Configs: m.core.List()}, nil
 }
 
 func (m *ACLService) DeleteConfig(
@@ -379,25 +396,19 @@ func (m *ACLService) DeleteConfig(
 	req *aclpb.DeleteConfigRequest,
 ) (*aclpb.DeleteConfigResponse, error) {
 	name := req.GetName()
-	err := m.configs.Delete(name, func(*aclConfig) error {
-		if err := m.backend.DeleteModule(name); err != nil {
-			code := codes.Internal
-			if errors.Is(err, ffi.ErrFailedPrecondition) {
-				// A chain still references the config.
-				code = codes.FailedPrecondition
-			}
-			return status.Errorf(code, "could not delete acl module config '%s': %v", name, err)
-		}
-		m.log.Info("successfully deleted ACL module config", zap.String("name", name))
-
-		return nil
-	})
+	err := m.core.Delete(name)
 	if errors.Is(err, configstore.ErrNotFound) {
 		return nil, status.Errorf(codes.NotFound, "config %q not found", name)
 	}
 	if err != nil {
-		return nil, err
+		code := codes.Internal
+		if errors.Is(err, ffi.ErrFailedPrecondition) {
+			// A chain still references the config.
+			code = codes.FailedPrecondition
+		}
+		return nil, status.Errorf(code, "could not delete acl module config '%s': %v", name, err)
 	}
+	m.log.Info("successfully deleted ACL module config", zap.String("name", name))
 
 	return &aclpb.DeleteConfigResponse{}, nil
 }
@@ -416,7 +427,7 @@ func (m *ACLService) GetRulesCounters(
 	name := req.GetName()
 
 	if name != "" {
-		if _, ok := m.configs.Get(name); !ok {
+		if _, ok := m.core.Get(name); !ok {
 			return nil, status.Errorf(codes.NotFound, "config %q not found", name)
 		}
 	}

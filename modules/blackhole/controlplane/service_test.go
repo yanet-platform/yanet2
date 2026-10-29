@@ -12,6 +12,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	"github.com/yanet-platform/yanet2/controlplane/crud"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	blackholepb "github.com/yanet-platform/yanet2/modules/blackhole/controlplane/blackholepb/v1"
 )
@@ -26,11 +27,11 @@ func (m *mockModuleHandle) Free() error {
 
 type mockBackend struct{}
 
-func (m *mockBackend) UpdateModule(name string) (ModuleHandle, error) {
+func (m *mockBackend) Update(name string, payload struct{}) (crud.Handle, error) {
 	return &mockModuleHandle{}, nil
 }
 
-func (m *mockBackend) DeleteModule(name string) error {
+func (m *mockBackend) Delete(name string) error {
 	return nil
 }
 
@@ -44,14 +45,14 @@ type flakyBackend struct {
 	numCalls atomic.Int64
 }
 
-func (m *flakyBackend) UpdateModule(name string) (ModuleHandle, error) {
+func (m *flakyBackend) Update(name string, payload struct{}) (crud.Handle, error) {
 	if m.numCalls.Add(1) >= 2 {
 		return nil, errInjectedBackend
 	}
 	return &mockModuleHandle{}, nil
 }
 
-func (m *flakyBackend) DeleteModule(name string) error {
+func (m *flakyBackend) Delete(name string) error {
 	return nil
 }
 
@@ -123,7 +124,7 @@ type refusingDeleteBackend struct {
 	err error
 }
 
-func (m *refusingDeleteBackend) DeleteModule(name string) error {
+func (m *refusingDeleteBackend) Delete(name string) error {
 	return m.err
 }
 

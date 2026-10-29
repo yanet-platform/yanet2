@@ -17,6 +17,7 @@ import (
 	"go.uber.org/zap/zaptest/observer"
 	"golang.org/x/sync/errgroup"
 
+	cpdump "github.com/yanet-platform/yanet2/modules/pdump/bindings/go/cpdump"
 	"github.com/yanet-platform/yanet2/modules/pdump/controlplane/pdumppb/v1"
 	"github.com/yanet-platform/yanet2/objects/ring/bindings/go/cring"
 )
@@ -24,13 +25,13 @@ import (
 // Test_MaxMode_MatchesC verifies that the pure-Go mode bound matches the
 // dataplane bitmap bound.
 func Test_MaxMode_MatchesC(t *testing.T) {
-	require.Equal(t, uint32(pdumppb.MaxMode), maxMode)
+	require.Equal(t, uint32(pdumppb.MaxMode), cpdump.MaxMode)
 }
 
 // Test_MaxRatePPS_MatchesC verifies that request validation and the C setter
 // reject rates above the same maximum.
 func Test_MaxRatePPS_MatchesC(t *testing.T) {
-	require.Equal(t, uint64(pdumppb.MaxRatePPS), maxRatePPS)
+	require.Equal(t, uint64(pdumppb.MaxRatePPS), cpdump.MaxRatePPS)
 }
 
 // stubSourceCapacity comfortably fits every test's small, non-wrapping
@@ -130,8 +131,8 @@ func newRecordFrame(meta, data []byte, seqno uint32) []byte {
 // newRecordMeta builds the 32-byte pdump metadata block
 // (modules/pdump/dataplane/record.h) with a valid magic.
 func newRecordMeta(packetLen, workerIdx uint32) []byte {
-	buf := make([]byte, pdumpRecordHdrSize)
-	binary.LittleEndian.PutUint32(buf[0:4], pdumpRecordMagic)
+	buf := make([]byte, cpdump.RecordHdrSize)
+	binary.LittleEndian.PutUint32(buf[0:4], cpdump.RecordMagic)
 	binary.LittleEndian.PutUint32(buf[4:8], packetLen)
 	binary.LittleEndian.PutUint32(buf[16:20], workerIdx)
 	return buf
@@ -170,7 +171,7 @@ func Test_Ring_ParseRecordMeta_ValidRecord(t *testing.T) {
 // Test_Ring_ParseRecordMeta_ShortRecord verifies that a payload shorter
 // than the metadata block is dropped rather than read out of bounds.
 func Test_Ring_ParseRecordMeta_ShortRecord(t *testing.T) {
-	_, _, ok := parseRecordMeta(make([]byte, pdumpRecordHdrSize-1))
+	_, _, ok := parseRecordMeta(make([]byte, cpdump.RecordHdrSize-1))
 	require.False(t, ok)
 }
 

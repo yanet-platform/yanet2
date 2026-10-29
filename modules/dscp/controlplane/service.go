@@ -3,7 +3,6 @@ package dscp
 import (
 	"cmp"
 	"context"
-	"errors"
 	"net/netip"
 	"slices"
 
@@ -11,30 +10,23 @@ import (
 	"google.golang.org/grpc/status"
 
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
-	"github.com/yanet-platform/yanet2/controlplane/configstore"
-	"github.com/yanet-platform/yanet2/controlplane/ffi"
+	"github.com/yanet-platform/yanet2/controlplane/crud"
 	"github.com/yanet-platform/yanet2/modules/dscp/controlplane/dscppb/v1"
 )
 
-// ModuleHandle is a handle to a module configuration.
-type ModuleHandle interface {
-	Free() error
-}
-
 // Backend abstracts shared memory operations.
 type Backend interface {
-	// UpdateModule creates a module config, applies mutations, and publishes it
-	// to the dataplane.
-	UpdateModule(name string, prefixes []netip.Prefix, flag uint8, mark uint8) (ModuleHandle, error)
-	// DeleteModule removes a module config.
-	DeleteModule(name string) error
+	// Update builds a module config from the prefix sets and the marking
+	// and publishes it to the dataplane.
+	Update(name string, payload *config) (crud.Handle, error)
+	// Delete removes a module config.
+	Delete(name string) error
 }
 
 type DscpService struct {
 	dscppb.UnimplementedDscpServiceServer
 
-	backend Backend
-	configs *configstore.Store[*config]
+	core *crud.Core[*config]
 }
 
 type config struct {
@@ -44,22 +36,9 @@ type config struct {
 	Prefixes6 []netip.Prefix
 	// Config is the DSCP marking configuration.
 	Config dscpConfig
-	// Module is the shared-memory handle of the published config.
-	Module ModuleHandle
 }
 
-// Free releases the module handle held by the config.
-//
-// It is safe to call even when no handle is held.
-func (m *config) Free() error {
-	if m.Module == nil {
-		return nil
-	}
-	return m.Module.Free()
-}
-
-// Clone copies the prefix sets and marking but never the published handle,
-// so a copy never inherits ownership of the shared-memory config.
+// Clone copies the prefix sets and marking.
 func (m *config) Clone() *config {
 	return &config{
 		Prefixes4: slices.Clone(m.Prefixes4),
@@ -75,8 +54,7 @@ type dscpConfig struct {
 
 func NewDscpService(backend Backend) *DscpService {
 	return &DscpService{
-		backend: backend,
-		configs: configstore.NewStore[*config](),
+		core: crud.NewCore(backend),
 	}
 }
 
@@ -84,7 +62,7 @@ func (m *DscpService) ListConfigs(
 	ctx context.Context,
 	request *dscppb.ListConfigsRequest,
 ) (*dscppb.ListConfigsResponse, error) {
-	return &dscppb.ListConfigsResponse{Configs: m.configs.Names()}, nil
+	return &dscppb.ListConfigsResponse{Configs: m.core.List()}, nil
 }
 
 func (m *DscpService) ShowConfig(
@@ -94,16 +72,16 @@ func (m *DscpService) ShowConfig(
 	name := request.GetName()
 	response := &dscppb.ShowConfigResponse{}
 
-	config, ok := m.configs.Get(name)
+	published, ok := m.core.Get(name)
 	if !ok {
 		return nil, status.Errorf(codes.NotFound, "config %q not found", name)
 	}
 
-	prefixes4, err := commonpb.NewIPv4PrefixesFromPrefixes(config.Prefixes4)
+	prefixes4, err := commonpb.NewIPv4PrefixesFromPrefixes(published.Prefixes4)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to convert prefixes: %v", err)
 	}
-	prefixes6, err := commonpb.NewIPv6PrefixesFromPrefixes(config.Prefixes6)
+	prefixes6, err := commonpb.NewIPv6PrefixesFromPrefixes(published.Prefixes6)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to convert prefixes: %v", err)
 	}
@@ -112,8 +90,8 @@ func (m *DscpService) ShowConfig(
 		Prefixes4: prefixes4,
 		Prefixes6: prefixes6,
 		DscpConfig: &dscppb.DscpConfig{
-			Flag: uint32(config.Config.Flag),
-			Mark: uint32(config.Config.Mark),
+			Flag: uint32(published.Config.Flag),
+			Mark: uint32(published.Config.Mark),
 		},
 	}
 
@@ -226,20 +204,8 @@ func (m *DscpService) DeleteConfig(
 	request *dscppb.DeleteConfigRequest,
 ) (*dscppb.DeleteConfigResponse, error) {
 	name := request.GetName()
-
-	err := m.configs.Delete(name, func(*config) error {
-		return m.backend.DeleteModule(name)
-	})
-	if errors.Is(err, configstore.ErrNotFound) {
-		return nil, status.Errorf(codes.NotFound, "config %q not found", name)
-	}
-	if err != nil {
-		code := codes.Internal
-		if errors.Is(err, ffi.ErrFailedPrecondition) {
-			// A chain still references the config.
-			code = codes.FailedPrecondition
-		}
-		return nil, status.Errorf(code, "failed to delete module config %q: %v", name, err)
+	if err := m.core.Delete(name); err != nil {
+		return nil, crud.DeleteError(name, err)
 	}
 
 	return &dscppb.DeleteConfigResponse{}, nil
@@ -248,24 +214,12 @@ func (m *DscpService) DeleteConfig(
 // publish applies a mutation to a copy of the named config, starting from
 // an empty one when the name is new, and publishes the result.
 func (m *DscpService) publish(name string, mutate func(cfg *config)) error {
-	return m.configs.Update(name, func(current *config, ok bool) (*config, error) {
+	return m.core.Mutate(name, func(current *config, ok bool) (*config, error) {
 		cfg := &config{}
 		if ok {
 			cfg = current.Clone()
 		}
 		mutate(cfg)
-
-		module, err := m.backend.UpdateModule(
-			name,
-			slices.Concat(cfg.Prefixes4, cfg.Prefixes6),
-			cfg.Config.Flag,
-			cfg.Config.Mark,
-		)
-		if err != nil {
-			return nil, err
-		}
-		cfg.Module = module
-
 		return cfg, nil
 	})
 }

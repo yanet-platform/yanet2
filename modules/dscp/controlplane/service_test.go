@@ -14,6 +14,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
+	"github.com/yanet-platform/yanet2/controlplane/crud"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/modules/dscp/controlplane/dscppb/v1"
 )
@@ -93,18 +94,13 @@ type mockBackend struct {
 	deletedName string
 }
 
-func (m *mockBackend) UpdateModule(
-	name string,
-	prefixes []netip.Prefix,
-	flag uint8,
-	mark uint8,
-) (ModuleHandle, error) {
+func (m *mockBackend) Update(name string, payload *config) (crud.Handle, error) {
 	handle := &mockModuleHandle{}
 	m.lastHandle.Store(handle)
 	return handle, nil
 }
 
-func (m *mockBackend) DeleteModule(name string) error {
+func (m *mockBackend) Delete(name string) error {
 	m.deletedName = name
 	return nil
 }
@@ -121,7 +117,7 @@ type refusingDeleteBackend struct {
 	err error
 }
 
-func (m *refusingDeleteBackend) DeleteModule(name string) error {
+func (m *refusingDeleteBackend) Delete(name string) error {
 	m.deletedName = name
 	return m.err
 }
@@ -134,12 +130,7 @@ type parkingBackend struct {
 	first    refusingOnceHandle
 }
 
-func (m *parkingBackend) UpdateModule(
-	name string,
-	prefixes []netip.Prefix,
-	flag uint8,
-	mark uint8,
-) (ModuleHandle, error) {
+func (m *parkingBackend) Update(name string, payload *config) (crud.Handle, error) {
 	if m.numCalls.Add(1) == 1 {
 		return &m.first, nil
 	}
@@ -152,12 +143,7 @@ type flakyBackend struct {
 	backend  mockBackend
 }
 
-func (m *flakyBackend) UpdateModule(
-	name string,
-	prefixes []netip.Prefix,
-	flag uint8,
-	mark uint8,
-) (ModuleHandle, error) {
+func (m *flakyBackend) Update(name string, payload *config) (crud.Handle, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -166,10 +152,10 @@ func (m *flakyBackend) UpdateModule(
 		return nil, errBackendFailure
 	}
 
-	return m.backend.UpdateModule(name, prefixes, flag, mark)
+	return m.backend.Update(name, payload)
 }
 
-func (m *flakyBackend) DeleteModule(name string) error {
+func (m *flakyBackend) Delete(name string) error {
 	return nil
 }
 

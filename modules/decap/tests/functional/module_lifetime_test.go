@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	dataplaneut "github.com/yanet-platform/yanet2/bindings/go/dataplane_ut"
+	"github.com/yanet-platform/yanet2/controlplane/crud"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	decap "github.com/yanet-platform/yanet2/modules/decap/controlplane"
 )
@@ -38,11 +39,11 @@ func newLifetimeHarness(t *testing.T) *dataplaneut.Harness {
 // still referenced them, mirroring what each module control plane keeps:
 // the owner remembers the handle and retries it once the generations
 // drain.
-type parked []decap.ModuleHandle // owner: the test itself
+type parked []crud.Handle // owner: the test itself
 
 // freeOrPark frees the handle when it is dangling and parks it when the
 // free is refused.
-func (m *parked) freeOrPark(handle decap.ModuleHandle) {
+func (m *parked) freeOrPark(handle crud.Handle) {
 	if err := handle.Free(); errors.Is(err, ffi.ErrStillReferenced) {
 		*m = append(*m, handle)
 	}
@@ -105,8 +106,8 @@ func TestModuleLifetime_LiveGeneration_ReleaseDoesNotDestroy(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = agent.CleanUp() })
 
-	handle, err := decap.NewBackend(agent).UpdateModule(
-		"decap0", []netip.Prefix{netip.MustParsePrefix("2001:db8::/32")},
+	handle, err := decap.NewBackend(agent).Update(
+		"decap0", decap.PrefixSets{Prefixes6: []netip.Prefix{netip.MustParsePrefix("2001:db8::/32")}},
 	)
 	require.NoError(t, err)
 
@@ -140,16 +141,16 @@ func TestModuleLifetime_Superseded_DestroyedOnceGenerationRetires(t *testing.T) 
 
 	backend := decap.NewBackend(agent)
 
-	first, err := backend.UpdateModule(
-		"decap0", []netip.Prefix{netip.MustParsePrefix("2001:db8::/32")},
+	first, err := backend.Update(
+		"decap0", decap.PrefixSets{Prefixes6: []netip.Prefix{netip.MustParsePrefix("2001:db8::/32")}},
 	)
 	require.NoError(t, err)
 	first.Free()
 
 	mid := agentRootMemoryNode(t, shm, "cpml-supersede")
 
-	second, err := backend.UpdateModule(
-		"decap0", []netip.Prefix{netip.MustParsePrefix("2001:db9::/32")},
+	second, err := backend.Update(
+		"decap0", decap.PrefixSets{Prefixes6: []netip.Prefix{netip.MustParsePrefix("2001:db9::/32")}},
 	)
 	require.NoError(t, err)
 
@@ -177,8 +178,8 @@ func TestModuleLifetime_Superseded_DestroyedOnceGenerationRetires(t *testing.T) 
 		"the live generation's own module must not be destroyed by its refused free",
 	)
 
-	_, err = backend.UpdateModule(
-		"decap0", []netip.Prefix{netip.MustParsePrefix("2001:dba::/32")},
+	_, err = backend.Update(
+		"decap0", decap.PrefixSets{Prefixes6: []netip.Prefix{netip.MustParsePrefix("2001:dba::/32")}},
 	)
 	require.NoError(t, err)
 	parkedHandles.retry()
@@ -209,8 +210,8 @@ func TestModuleLifetime_PinnedGeneration_DefersDestruction(t *testing.T) {
 
 	backend := decap.NewBackend(agent)
 
-	first, err := backend.UpdateModule(
-		"decap0", []netip.Prefix{netip.MustParsePrefix("2001:db8::/32")},
+	first, err := backend.Update(
+		"decap0", decap.PrefixSets{Prefixes6: []netip.Prefix{netip.MustParsePrefix("2001:db8::/32")}},
 	)
 	require.NoError(t, err)
 
@@ -225,8 +226,8 @@ func TestModuleLifetime_PinnedGeneration_DefersDestruction(t *testing.T) {
 
 	mid := agentRootMemoryNode(t, shm, "cpml-pinned")
 
-	second, err := backend.UpdateModule(
-		"decap0", []netip.Prefix{netip.MustParsePrefix("2001:db9::/32")},
+	second, err := backend.Update(
+		"decap0", decap.PrefixSets{Prefixes6: []netip.Prefix{netip.MustParsePrefix("2001:db9::/32")}},
 	)
 	require.NoError(t, err)
 	parkedHandles.freeOrPark(second)
@@ -246,8 +247,8 @@ func TestModuleLifetime_PinnedGeneration_DefersDestruction(t *testing.T) {
 		"dropping the pin must not destroy the module directly: only its owner's free may",
 	)
 
-	_, err = backend.UpdateModule(
-		"decap0", []netip.Prefix{netip.MustParsePrefix("2001:dba::/32")},
+	_, err = backend.Update(
+		"decap0", decap.PrefixSets{Prefixes6: []netip.Prefix{netip.MustParsePrefix("2001:dba::/32")}},
 	)
 	require.NoError(t, err)
 

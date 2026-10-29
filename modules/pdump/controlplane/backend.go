@@ -5,7 +5,9 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/yanet-platform/yanet2/controlplane/crud"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
+	cpdump "github.com/yanet-platform/yanet2/modules/pdump/bindings/go/cpdump"
 )
 
 // Settings are the capture parameters a module config is built from.
@@ -67,25 +69,15 @@ func NewBackend(agent *ffi.Agent, options ...BackendOption) Backend {
 // this only records the link; it does not check the ring exists or fits a
 // record. On error nothing stays allocated.
 func (m *backend) UpdateModule(name string, settings Settings) (Module, error) {
-	config, err := NewModuleConfig(m.agent, name)
+	config, err := cpdump.NewModuleConfig(m.agent, name)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create %q module config: %w", name, err)
 	}
 
-	if err := m.apply(name, config, settings); err != nil {
-		if err := config.Free(); err != nil {
-			m.log.Error("failed to free unpublished pdump module",
-				zap.String("name", name), zap.Error(err))
-		}
+	if err := crud.PublishModule(m.agent, config, func(config *cpdump.ModuleConfig) error {
+		return m.apply(name, config, settings)
+	}); err != nil {
 		return nil, err
-	}
-
-	if err := m.agent.UpdateModules([]ffi.ModuleConfig{config.AsFFIModule()}); err != nil {
-		if err := config.Free(); err != nil {
-			m.log.Error("failed to free unpublished pdump module",
-				zap.String("name", name), zap.Error(err))
-		}
-		return nil, fmt.Errorf("failed to update module %s: %w", name, err)
 	}
 
 	return &shmModule{config: config}, nil
@@ -100,7 +92,7 @@ func (m *backend) DeleteModule(name string) error {
 
 // apply writes the settings into an unpublished module config and links
 // its ring.
-func (m *backend) apply(name string, config *ModuleConfig, settings Settings) error {
+func (m *backend) apply(name string, config *cpdump.ModuleConfig, settings Settings) error {
 	m.log.Debug("set dump mode", zap.String("module", name))
 	if err := config.SetDumpMode(settings.Mode); err != nil {
 		return fmt.Errorf("failed to set dump mode for %s: %w", name, err)
@@ -130,7 +122,7 @@ func (m *backend) apply(name string, config *ModuleConfig, settings Settings) er
 
 // shmModule is a published module config.
 type shmModule struct {
-	config *ModuleConfig
+	config *cpdump.ModuleConfig
 }
 
 func (m *shmModule) Free() error {

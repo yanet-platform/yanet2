@@ -15,6 +15,7 @@ import (
 	"github.com/yanet-platform/yanet2/bindings/go/filter"
 	"github.com/yanet-platform/yanet2/common/go/xerror"
 	"github.com/yanet-platform/yanet2/common/go/xpacket"
+	"github.com/yanet-platform/yanet2/controlplane/crud"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	cplain "github.com/yanet-platform/yanet2/devices/plain/bindings/go/cplain"
 	"github.com/yanet-platform/yanet2/modules/forward/bindings/go/cforward"
@@ -73,7 +74,7 @@ func setupMirrorHarnessWithLimit(
 	return h, agent, backend
 }
 
-// applyRules pushes the given rules via backend.UpdateModule.
+// applyRules pushes the given rules via the backend.
 //
 // The module handle is freed via t.Cleanup. The caller must wire the pipeline
 // after calling applyRules, because the mirror module config must exist in
@@ -83,10 +84,10 @@ func applyRules(
 	backend mirror.Backend,
 	name string,
 	rules []cmirror.MirrorRule,
-) mirror.ModuleHandle {
+) crud.Handle {
 	t.Helper()
 
-	handle, err := backend.UpdateModule(name, rules)
+	handle, err := backend.Update(name, mirror.RuleSet{Compiled: rules})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = handle.Free() })
 	return handle
@@ -143,7 +144,7 @@ func wireMirrorPipeline(
 	// packets that pass through (originals and ModeNone mirrors) reach the
 	// output stage.
 	primarySink := configName + "-sink"
-	primarySinkHandle, err := fwdBackend.UpdateModule(primarySink, catchAllForwardRules(primaryDevice))
+	primarySinkHandle, err := fwdBackend.Update(primarySink, forward.RuleSet{Compiled: catchAllForwardRules(primaryDevice)})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = primarySinkHandle.Free() })
 
@@ -151,7 +152,7 @@ func wireMirrorPipeline(
 	// sink so mirrored packets re-routed via ModeIn reach the output stage.
 	for _, dev := range extraDevices {
 		sinkName := configName + "-sink-" + dev
-		sinkHandle, err := fwdBackend.UpdateModule(sinkName, catchAllForwardRules(dev))
+		sinkHandle, err := fwdBackend.Update(sinkName, forward.RuleSet{Compiled: catchAllForwardRules(dev)})
 		require.NoError(t, err)
 		t.Cleanup(func() { _ = sinkHandle.Free() })
 
@@ -280,12 +281,12 @@ func TestMirror_NoMatch(t *testing.T) {
 	require.Empty(t, result.Drop, "unmatched packet must not be dropped")
 }
 
-// Test_MirrorBackend_UpdateModuleEmptyRules verifies that an empty ruleset is
-// rejected with an actionable error.
-func Test_MirrorBackend_UpdateModuleEmptyRules(t *testing.T) {
+// Test_MirrorBackend_UpdateWithEmptyRules verifies that an empty ruleset
+// is rejected with an actionable error.
+func Test_MirrorBackend_UpdateWithEmptyRules(t *testing.T) {
 	_, _, backend := setupMirrorHarness(t, []string{"port0"})
 
-	_, err := backend.UpdateModule("test", nil)
+	_, err := backend.Update("test", mirror.RuleSet{})
 	require.EqualError(
 		t,
 		err,
@@ -661,10 +662,8 @@ func Test_Mirror_OutputSelfLoopHasBoundedPopulation(t *testing.T) {
 		Src4s:   []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
 		Dst4s:   []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
 	}})
-	forwardHandle, err := forward.NewBackend(agent).UpdateModule(
-		"sink",
-		catchAllForwardRules("port0"),
-	)
+	forwardHandle, err := forward.NewBackend(agent).Update(
+		"sink", forward.RuleSet{Compiled: catchAllForwardRules("port0")})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = forwardHandle.Free() })
 
@@ -786,9 +785,9 @@ func TestMirrorConfigMemoryLeak(t *testing.T) {
 // generation still referenced them, mirroring what the module control
 // plane keeps: the owner remembers the handle and retries it once the
 // generations drain.
-type modulePark []mirror.ModuleHandle
+type modulePark []crud.Handle
 
-func (m *modulePark) freeOrPark(handle mirror.ModuleHandle) {
+func (m *modulePark) freeOrPark(handle crud.Handle) {
 	if handle == nil {
 		return
 	}

@@ -17,6 +17,26 @@ const MaxDeviceNameLen = 80
 // terminating NUL.
 const MaxPipelineNameLen = 80
 
+// Pipeline is a weighted input/output pipeline assignment of a device,
+// the control-plane representation of a DevicePipeline message.
+type Pipeline struct {
+	Name   string
+	Weight uint64
+}
+
+// PipelinesFromProto converts wire pipeline assignments into their
+// control-plane representation.
+func PipelinesFromProto(pipelines []*DevicePipeline) []Pipeline {
+	out := make([]Pipeline, 0, len(pipelines))
+	for _, pipeline := range pipelines {
+		out = append(out, Pipeline{
+			Name:   pipeline.GetName(),
+			Weight: pipeline.GetWeight(),
+		})
+	}
+	return out
+}
+
 // ValidateDeviceName checks that a device name is present and fits the C name
 // buffer.
 func ValidateDeviceName(field, name string) error {

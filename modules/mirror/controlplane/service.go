@@ -2,87 +2,63 @@ package mirror
 
 import (
 	"context"
-	"errors"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
 	filterpbconv "github.com/yanet-platform/yanet2/bindings/go/filterpbconv/v1"
-	"github.com/yanet-platform/yanet2/controlplane/configstore"
-	"github.com/yanet-platform/yanet2/controlplane/ffi"
+	"github.com/yanet-platform/yanet2/controlplane/crud"
 	"github.com/yanet-platform/yanet2/modules/mirror/bindings/go/cmirror"
 	mirrorpb "github.com/yanet-platform/yanet2/modules/mirror/controlplane/mirrorpb/v1"
 )
 
-// ModuleHandle is a handle to a module configuration.
-type ModuleHandle interface {
-	Free() error
+// RuleSet is the published payload: the accepted rule document together
+// with its shared-memory representation.
+type RuleSet struct {
+	// Rules is the rule document exactly as accepted, echoed by reads.
+	Rules []*mirrorpb.Rule
+	// Compiled is the rule document in the representation shared memory
+	// publishes.
+	Compiled []cmirror.MirrorRule
 }
 
 // Backend abstracts shared memory operations.
 type Backend interface {
-	// UpdateModule creates a module config, writes rules, and publishes
-	// it to the dataplane.
-	UpdateModule(name string, rules []cmirror.MirrorRule) (ModuleHandle, error)
-	// DeleteModule removes a module config.
-	DeleteModule(name string) error
-}
-
-type mirrorConfig struct {
-	Rules  []*mirrorpb.Rule
-	Module ModuleHandle
-}
-
-// Free releases the module handle held by the config.
-//
-// It is safe to call even when no handle is held.
-func (m *mirrorConfig) Free() error {
-	if m.Module == nil {
-		return nil
-	}
-	return m.Module.Free()
+	// Update builds a module config from the compiled rules and
+	// publishes it to the dataplane.
+	Update(name string, payload RuleSet) (crud.Handle, error)
+	// Delete removes a module config.
+	Delete(name string) error
 }
 
 type MirrorService struct {
 	mirrorpb.UnimplementedMirrorServiceServer
 
-	backend Backend
-	configs *configstore.Store[*mirrorConfig]
+	core *crud.Core[RuleSet]
 }
 
 func NewMirrorService(backend Backend) *MirrorService {
 	return &MirrorService{
-		backend: backend,
-		configs: configstore.NewStore[*mirrorConfig](),
+		core: crud.NewCore(backend),
 	}
 }
 
 func (m *MirrorService) ListConfigs(
 	ctx context.Context, request *mirrorpb.ListConfigsRequest,
 ) (*mirrorpb.ListConfigsResponse, error) {
-	response := &mirrorpb.ListConfigsResponse{
-		Configs: m.configs.Names(),
-	}
-
-	return response, nil
+	return &mirrorpb.ListConfigsResponse{Configs: m.core.List()}, nil
 }
 
 func (m *MirrorService) ShowConfig(
 	ctx context.Context,
 	req *mirrorpb.ShowConfigRequest,
 ) (*mirrorpb.ShowConfigResponse, error) {
-	name := req.GetName()
-	config, ok := m.configs.Get(name)
+	ruleSet, ok := m.core.Get(req.GetName())
 	if !ok {
-		return nil, status.Errorf(codes.NotFound, "config %q not found", name)
+		return nil, status.Errorf(codes.NotFound, "config %q not found", req.GetName())
 	}
 
-	response := &mirrorpb.ShowConfigResponse{
-		Name:  req.Name,
-		Rules: config.Rules,
-	}
-
-	return response, nil
+	return &mirrorpb.ShowConfigResponse{Name: req.Name, Rules: ruleSet.Rules}, nil
 }
 
 func (m *MirrorService) UpdateConfig(
@@ -143,14 +119,7 @@ func (m *MirrorService) UpdateConfig(
 		rules = append(rules, rule)
 	}
 
-	err := m.configs.Update(name, func(*mirrorConfig, bool) (*mirrorConfig, error) {
-		module, err := m.backend.UpdateModule(name, rules)
-		if err != nil {
-			return nil, err
-		}
-		return &mirrorConfig{Rules: reqRules, Module: module}, nil
-	})
-	if err != nil {
+	if err := m.core.Replace(name, RuleSet{Rules: reqRules, Compiled: rules}); err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to update module config: %v", err)
 	}
 
@@ -162,18 +131,8 @@ func (m *MirrorService) DeleteConfig(
 	req *mirrorpb.DeleteConfigRequest,
 ) (*mirrorpb.DeleteConfigResponse, error) {
 	name := req.GetName()
-	err := m.configs.Delete(name, func(*mirrorConfig) error {
-		return m.backend.DeleteModule(name)
-	})
-	if errors.Is(err, configstore.ErrNotFound) {
-		return nil, status.Errorf(codes.NotFound, "config %q not found", name)
-	}
-	if err != nil {
-		code := codes.Internal
-		if errors.Is(err, ffi.ErrFailedPrecondition) {
-			code = codes.FailedPrecondition
-		}
-		return nil, status.Errorf(code, "failed to delete module config %q: %v", name, err)
+	if err := m.core.Delete(name); err != nil {
+		return nil, crud.DeleteError(name, err)
 	}
 
 	return &mirrorpb.DeleteConfigResponse{}, nil

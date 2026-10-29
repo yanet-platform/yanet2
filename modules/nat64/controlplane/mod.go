@@ -4,78 +4,34 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 
-	"github.com/yanet-platform/yanet2/controlplane/ffi"
+	"github.com/yanet-platform/yanet2/controlplane/modulebase"
 	nat64pb "github.com/yanet-platform/yanet2/modules/nat64/controlplane/nat64pb/v1"
 )
 
 // Option configures the NAT64Module constructor.
-type Option func(*moduleOptions)
-
-type moduleOptions struct {
-	Log *zap.Logger
-}
-
-func newModuleOptions() *moduleOptions {
-	return &moduleOptions{
-		Log: zap.NewNop(),
-	}
-}
+type Option = modulebase.Option
 
 // WithLog sets the logger for the nat64 module.
 func WithLog(log *zap.Logger) Option {
-	return func(o *moduleOptions) {
-		o.Log = log
-	}
+	return modulebase.WithLog(log)
 }
 
 // NAT64Module is a control-plane component responsible for NAT64 translation
 type NAT64Module struct {
-	cfg          *Config
-	attachment   *ffi.Attachment
-	nat64Service *NAT64Service
+	*modulebase.Base
 }
 
 // NewNAT64Module creates a new NAT64 module instance
 func NewNAT64Module(cfg *Config, options ...Option) (*NAT64Module, error) {
-	opts := newModuleOptions()
-	for _, o := range options {
-		o(opts)
-	}
-
-	log := opts.Log.With(zap.String("module", nat64pb.NAT64Service_ServiceDesc.ServiceName))
-
-	attachment, err := ffi.Attach(cfg.AttachConfig, "nat64", log)
+	base, err := modulebase.NewBase(cfg.AttachConfig, moduleType, cfg.Endpoint.Unwrap(), options...)
 	if err != nil {
 		return nil, err
 	}
-	agent := attachment.Agent
 
-	nat64Service := NewNAT64Service(NewBackend(agent), WithNAT64ServiceLog(log))
+	nat64Service := NewNAT64Service(NewBackend(base.Agent()), WithNAT64ServiceLog(base.Log()))
+	base.AddService(nat64pb.NAT64Service_ServiceDesc.ServiceName, func(server *grpc.Server) {
+		nat64pb.RegisterNAT64ServiceServer(server, nat64Service)
+	})
 
-	return &NAT64Module{
-		cfg:          cfg,
-		attachment:   attachment,
-		nat64Service: nat64Service,
-	}, nil
-}
-
-func (m *NAT64Module) Name() string {
-	return "nat64"
-}
-
-func (m *NAT64Module) Endpoint() string {
-	return m.cfg.Endpoint.Unwrap()
-}
-
-func (m *NAT64Module) ServicesNames() []string {
-	return []string{nat64pb.NAT64Service_ServiceDesc.ServiceName}
-}
-
-func (m *NAT64Module) RegisterService(server *grpc.Server) {
-	nat64pb.RegisterNAT64ServiceServer(server, m.nat64Service)
-}
-
-// Close closes the module and releases all resources
-func (m *NAT64Module) Close() error {
-	return m.attachment.Close()
+	return &NAT64Module{Base: base}, nil
 }
