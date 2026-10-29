@@ -326,7 +326,9 @@ fwstate_test_config(struct cp_module **cp_module) {
 
 	// Configure sync settings: one multicast endpoint, both for receive
 	// matching of the wrapper packets and for local emission.
-	uint8_t src_addr[16] = {0xfd, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1};
+	uint8_t src_addr[16] = {
+		0xfd, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1
+	};
 	uint8_t multicast_addr[16] = {
 		0xff, 0x02, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x01
 	};

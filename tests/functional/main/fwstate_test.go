@@ -133,10 +133,7 @@ func testFWStateMapListEntries(t *testing.T, fw *framework.TestFramework) {
 			framework.CLIFWState + " update --name fwstate0" +
 				" --map-name-v4 " + mapV4 +
 				" --map-name-v6 " + mapV6 +
-				" --src-addr 2001:db8::100" +
-				" --dst-ether 33:33:00:00:00:01" +
-				" --dst-addr-multicast ff02::1" +
-				" --port-multicast 9999" +
+				" --endpoint 2001:db8::100@ff02::1:9999" +
 				" --tcp 120s --tcp-syn 60s --tcp-syn-ack 60s --tcp-fin 60s" +
 				" --udp 30s --default 16s",
 		}
@@ -399,10 +396,7 @@ func testFWStateCheckState(t *testing.T, fw *framework.TestFramework) {
 			framework.CLIFWState + " update --name fwstate0" +
 				" --map-name-v4 fwstate0-v4" +
 				" --map-name-v6 fwstate0-v6" +
-				" --src-addr 2001:db8::100" +
-				" --dst-ether 33:33:00:00:00:01" +
-				" --dst-addr-multicast ff02::1" +
-				" --port-multicast 9999" +
+				" --endpoint 2001:db8::100@ff02::1:9999" +
 				" --tcp 120s --tcp-syn 60s --tcp-syn-ack 60s --tcp-fin 60s" +
 				" --udp 30s --default 16s",
 		}
@@ -571,10 +565,7 @@ func testFWStateUDPEndianness(t *testing.T, fw *framework.TestFramework) {
 			framework.CLIFWState + " update --name fwstate_udp" +
 				" --map-name-v4 fwstate_udp-v4" +
 				" --map-name-v6 fwstate_udp-v6" +
-				" --src-addr 2001:db8::100" +
-				" --dst-ether 33:33:00:00:00:01" +
-				" --dst-addr-multicast ff02::1" +
-				" --port-multicast 9999" +
+				" --endpoint 2001:db8::100@ff02::1:9999" +
 				" --tcp 120s --tcp-syn 60s --tcp-syn-ack 60s --tcp-fin 60s" +
 				" --udp 30s --default 16s",
 		}
@@ -820,10 +811,7 @@ func testFWStateExternalSyncFrame(t *testing.T, fw *framework.TestFramework) {
 			framework.CLIFWState + " update --name fwstate_ext" +
 				" --map-name-v4 fwstate_ext-v4" +
 				" --map-name-v6 fwstate_ext-v6" +
-				" --src-addr 2001:db8::100" +
-				" --dst-ether 33:33:00:00:00:01" +
-				" --dst-addr-multicast ff02::1" +
-				" --port-multicast 9999" +
+				" --endpoint 2001:db8::100@ff02::1:9999" +
 				" --tcp 120s --tcp-syn 60s --tcp-syn-ack 60s --tcp-fin 60s" +
 				" --udp 30s --default 16s",
 		}

@@ -51,10 +51,7 @@ const MaxSyncEndpoints = int(C.FWSTATE_SYNC_ENDPOINTS_MAX)
 
 func newSyncConfigFromC(cCfg *C.struct_fwstate_sync_config) SyncConfig {
 	var syncCfg SyncConfig
-	count := int(cCfg.endpoint_count)
-	if count > MaxSyncEndpoints {
-		count = MaxSyncEndpoints
-	}
+	count := min(int(cCfg.endpoint_count), MaxSyncEndpoints)
 	for idx := 0; idx < count; idx++ {
 		cEndpoint := &cCfg.endpoints[idx]
 		var endpoint SyncEndpoint
@@ -76,10 +73,7 @@ func newSyncConfigFromC(cCfg *C.struct_fwstate_sync_config) SyncConfig {
 
 func (m SyncConfig) toC() C.struct_fwstate_sync_config {
 	var cSyncConfig C.struct_fwstate_sync_config
-	count := len(m.Endpoints)
-	if count > MaxSyncEndpoints {
-		count = MaxSyncEndpoints
-	}
+	count := min(len(m.Endpoints), MaxSyncEndpoints)
 	cSyncConfig.endpoint_count = C.uint32_t(count)
 	for idx := 0; idx < count; idx++ {
 		endpoint := &m.Endpoints[idx]

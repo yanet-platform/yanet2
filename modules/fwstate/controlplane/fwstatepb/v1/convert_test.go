@@ -23,7 +23,7 @@ func Test_SyncConfig_Merge(t *testing.T) {
 		return &commonpb.IPAddress{Addr: []byte{0x20, 1, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2}}
 	}
 	endpoint := func(dst *commonpb.IPAddress, port uint32) *SyncEndpoint {
-		return &SyncEndpoint{SrcAddr: source(), DstAddr: dst, Port: proto.Uint32(port)}
+		return &SyncEndpoint{SrcAddr: source(), DstAddr: dst, Port: new(port)}
 	}
 	stored := func() *SyncConfig {
 		return &SyncConfig{

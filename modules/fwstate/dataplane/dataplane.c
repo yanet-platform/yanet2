@@ -500,7 +500,8 @@ struct fwstate_emitter {
 	const struct fwstate_counters *counters;
 	// Enabled endpoints, in configuration order; emission addresses one
 	// copy of every built packet to each of them.
-	const struct fwstate_sync_endpoint *endpoints[FWSTATE_SYNC_ENDPOINTS_MAX];
+	const struct fwstate_sync_endpoint
+		*endpoints[FWSTATE_SYNC_ENDPOINTS_MAX];
 	uint32_t endpoint_count;
 	struct fwstate_sync_batch batch;
 };

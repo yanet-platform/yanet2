@@ -45,7 +45,7 @@ func Test_FWStateService_UpdateConfig_SetsAllFieldsAndClearsSync(t *testing.T) {
 	publishConfig(t, service, &fwstatepb.UpdateConfigRequest{
 		Name:       name,
 		MapNameV6:  new(""),
-		SyncConfig: &fwstatepb.SyncConfig{NoEndpoints: proto.Bool(true)},
+		SyncConfig: &fwstatepb.SyncConfig{NoEndpoints: new(true)},
 	})
 	stored = showConfig(t, service, name)
 	require.Empty(t, stored.GetMapNameV6())
@@ -158,7 +158,7 @@ func Test_FWStateService_UpdateConfig_EndpointListReplacesWholesale(t *testing.T
 
 	publishConfig(t, service, &fwstatepb.UpdateConfigRequest{
 		Name:       name,
-		SyncConfig: &fwstatepb.SyncConfig{NoEndpoints: proto.Bool(true)},
+		SyncConfig: &fwstatepb.SyncConfig{NoEndpoints: new(true)},
 	})
 	stored = showConfig(t, service, name).GetSyncConfig()
 	require.Empty(t, stored.GetEndpoints())
@@ -320,7 +320,7 @@ func Test_FWStateService_UpdateConfig_ClearsLastSyncEndpoint(t *testing.T) {
 
 	_, err = service.UpdateConfig(t.Context(), &fwstatepb.UpdateConfigRequest{
 		Name:       configName,
-		SyncConfig: &fwstatepb.SyncConfig{NoEndpoints: proto.Bool(true)},
+		SyncConfig: &fwstatepb.SyncConfig{NoEndpoints: new(true)},
 	})
 	require.NoError(t, err)
 
