@@ -6,6 +6,7 @@ import (
 	"net/netip"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 	"unsafe"
@@ -518,6 +519,36 @@ func Test_Backend_CreateService_SessionCapacity(t *testing.T) {
 				require.Equal(t, codes.InvalidArgument, status.Code(err))
 			}
 			require.Empty(t, calls)
+		})
+	}
+}
+
+// Test_Parity_SessionCapacity verifies native and request admission agree without
+// allocating a table, using an empty allocator to distinguish admission from rejection.
+func Test_Parity_SessionCapacity(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		size uint32
+		want syscall.Errno
+	}{
+		{"default", 0, syscall.ENOMEM},
+		{"minimum positive", 1, syscall.ENOMEM},
+		{"minimum native size", 16, syscall.ENOMEM},
+		{"non power of two", 1000, syscall.ENOMEM},
+		{"maximum admitted", l3bpb.MaxSessionIndexSize, syscall.ENOMEM},
+		{"above maximum", l3bpb.MaxSessionIndexSize + 1, syscall.EINVAL},
+		{"maximum uint32", math.MaxUint32, syscall.EINVAL},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			require.Equal(t, tc.want, testutils.SessionCapacityErrno(tc.size))
+			err := (&l3bpb.CreateServiceRequest{Service: &l3bpb.VirtualService{
+				Name: "vs0", SessionIndexSize: tc.size,
+			}}).Validate()
+			if tc.want == syscall.ENOMEM {
+				require.NoError(t, err)
+			} else {
+				require.Error(t, err)
+			}
 		})
 	}
 }
