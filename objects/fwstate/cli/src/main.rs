@@ -1,4 +1,8 @@
-use core::{fmt, net::IpAddr};
+use core::{fmt, net::IpAddr, time::Duration};
+use std::{
+    borrow::Cow,
+    time::{SystemTime, UNIX_EPOCH},
+};
 
 use args::{CreateCmd, DeleteCmd, DirectionArg, EntriesCmd, InsertLayerCmd, ListCmd, ModeCmd, StatsCmd};
 use clap::{CommandFactory, Parser};
@@ -9,13 +13,14 @@ use fwstatemappb::{
     ListMapsRequest, fw_state_map_service_client::FwStateMapServiceClient, fw_state_map_service_server::SERVICE_NAME,
 };
 use serde::Serialize;
+use tabled::Tabled;
 use tonic::codec::CompressionEncoding;
 use ync::{
     GlobalArgs,
     client::{LayeredChannel, Service},
     completion, display,
-    errors::Error,
-    output,
+    errors::{Error, ErrorKind},
+    humanfmt, output,
 };
 
 mod args;
@@ -110,15 +115,10 @@ async fn map_list(service: &mut FWStateMapService, _cmd: ListCmd) -> Result<(), 
 
     // The wire response's kinds map has no defined iteration order and
     // HashMap serialization is keyed by name only, so a stable payload
-    // pairs each name with its family in the listing's own order. A
+    // pairs each name with its family, sorted by name. A
     // kind the enum does not know (a server ahead of this CLI) reads
     // as "unknown" rather than silently pretending to be a family.
-    #[derive(Serialize)]
-    struct ListedMap<'a> {
-        name: &'a str,
-        kind: &'a str,
-    }
-    let listed: Vec<ListedMap> = response
+    let mut listed: Vec<ListedMap> = response
         .maps
         .iter()
         .map(|name| ListedMap {
@@ -132,19 +132,46 @@ async fn map_list(service: &mut FWStateMapService, _cmd: ListCmd) -> Result<(), 
             },
         })
         .collect();
+    listed.sort_by(|a, b| a.name.cmp(b.name));
 
     output::data(
         || &listed,
         || {
-            display::print_names_with_hint(
-                &response.maps,
-                format_args!("No fwstate-map objects found."),
-                format_args!("create one with 'yanet-cli-fwstatemap create --name <name> --kind <v4|v6>'"),
-            )
+            if listed.is_empty() {
+                output::empty_with_hint(
+                    format_args!("No fwstate-map objects found."),
+                    format_args!("create one with 'yanet-cli-fwstatemap create --name <name> --kind <v4|v6>'"),
+                );
+                return;
+            }
+
+            display::print_table_from_entries(&listed);
         },
     );
 
     Ok(())
+}
+
+/// One map of a `list`: its name paired with its address family.
+#[derive(Serialize)]
+struct ListedMap<'a> {
+    name: &'a str,
+    kind: &'a str,
+}
+
+impl Tabled for ListedMap<'_> {
+    const LENGTH: usize = 2;
+
+    fn fields(&self) -> Vec<Cow<'_, str>> {
+        vec![
+            Cow::Owned(display::escape_wire_text(self.name)),
+            Cow::Borrowed(self.kind),
+        ]
+    }
+
+    fn headers() -> Vec<Cow<'static, str>> {
+        vec![Cow::Borrowed("NAME"), Cow::Borrowed("KIND")]
+    }
 }
 
 async fn map_stats(service: &mut FWStateMapService, cmd: StatsCmd) -> Result<(), Error> {
@@ -158,17 +185,70 @@ async fn map_stats(service: &mut FWStateMapService, cmd: StatsCmd) -> Result<(),
         )
         .await?;
 
+    let Some(stats) = &response.stats else {
+        return Err(Error::new(
+            ErrorKind::Rpc,
+            "stats",
+            service.endpoint(),
+            format!("the service answered without stats of map '{}'", cmd.map_name),
+        ));
+    };
+
     output::data(
         || &response,
         || {
-            println!(
-                "{}",
-                serde_json::to_string_pretty(&response).expect("fwstate-map stats JSON serialization must not fail")
-            );
+            let mut block = display::KeyValue::new()
+                .row("index size", stats.index_size)
+                .row("extra buckets", stats.extra_bucket_count)
+                .row("max chain length", stats.max_chain_length)
+                .row("layers", stats.layer_count)
+                .row("stale layers", stats.stale_layer_count)
+                .row("elements", stats.total_elements)
+                .row("max deadline", format_deadline(stats.max_deadline, SystemTime::now()))
+                .row("memory used", bytesize::ByteSize::b(stats.memory_used));
+            if !stats.note.is_empty() {
+                block = block.row("note", &stats.note);
+            }
+            block.print();
         },
     );
 
     Ok(())
+}
+
+/// Formats a dataplane deadline, Unix nanoseconds, as an RFC 3339 instant
+/// with the time left until it relative to `now`.
+///
+/// Zero means no entry holds a deadline and reads as `-`; a deadline
+/// already reached reads as passed.
+fn format_deadline(deadline_ns: u64, now: SystemTime) -> String {
+    if deadline_ns == 0 {
+        return "-".to_owned();
+    }
+
+    let deadline = UNIX_EPOCH + Duration::from_nanos(deadline_ns);
+    let instant = humantime::format_rfc3339_seconds(deadline);
+    match deadline.duration_since(now) {
+        Ok(left) => {
+            let left = humantime::format_duration(Duration::from_secs(left.as_secs())).to_string();
+            let left = left.split_whitespace().take(2).collect::<Vec<_>>().join(" ");
+            format!("{instant} (in {left})")
+        }
+        Err(..) => format!("{instant} (passed)"),
+    }
+}
+
+/// Formats the time elapsed since a dataplane timestamp, Unix nanoseconds,
+/// relative to `now`.
+///
+/// Zero means the timestamp was never set and reads as `-`.
+fn format_age_ns(timestamp_ns: u64, now: SystemTime) -> String {
+    if timestamp_ns == 0 {
+        return "-".to_owned();
+    }
+
+    let seconds = i64::try_from(timestamp_ns / 1_000_000_000).expect("u64 nanoseconds in seconds fit i64");
+    humanfmt::age_since(seconds, now)
 }
 
 async fn map_insert_layer(service: &mut FWStateMapService, cmd: InsertLayerCmd) -> Result<(), Error> {
@@ -203,7 +283,7 @@ async fn map_entries(service: &mut FWStateMapService, cmd: EntriesCmd) -> Result
 
     let limit = usize::try_from(cmd.count).expect("a count fits usize");
     let mut generation = None;
-    let mut rows = output::rows(print_entries_header, print_entry);
+    let mut rows = output::rows(print_entries_header, |entry| print_entry(entry, SystemTime::now()));
 
     // Plain cursor pagination: each request carries the full cursor
     // and the response's index feeds the next call until has_more is
@@ -336,12 +416,13 @@ impl fmt::Display for FwStateFlags {
 
 fn print_entries_header() {
     println!(
-        "{:<6} {:<48} {:<48} {:<8} {:<9} {:<7}",
-        "IDX", "SRC", "DST", "PROTO", "FLAGS S|D", "EXPRD"
+        "{:<6} {:<48} {:<48} {:<8} {:<9} {:<14} {:<14} {:>12} {:>12} {:<3} {:<5}",
+        "IDX", "SRC", "DST", "PROTO", "FLAGS S|D", "AGE", "IDLE", "FWD PKTS", "BWD PKTS", "EXT", "EXPRD"
     );
 }
 
-fn print_entry(entry: &fwstatemappb::FwStateEntry) {
+/// Prints one entry, its age and idle time counted to `now`.
+fn print_entry(entry: &fwstatemappb::FwStateEntry, now: SystemTime) {
     let (src, dst, proto) = match &entry.key {
         Some(key) => (
             format_endpoint(key.src_addr.as_ref(), key.src_port),
@@ -351,15 +432,20 @@ fn print_entry(entry: &fwstatemappb::FwStateEntry) {
         None => (format_endpoint(None, 0), format_endpoint(None, 0), 0),
     };
 
-    let flags = entry.value.as_ref().map(|v| v.flags).unwrap_or(0);
+    let value = entry.value.unwrap_or_default();
 
     println!(
-        "{:<6} {:<48} {:<48} {:<8} {:<9} {:<7}",
+        "{:<6} {:<48} {:<48} {:<8} {:<9} {:<14} {:<14} {:>12} {:>12} {:<3} {:<5}",
         entry.idx,
         src,
         dst,
         format_proto(proto),
-        FwStateFlags(flags),
+        FwStateFlags(value.flags),
+        format_age_ns(value.created_at, now),
+        format_age_ns(value.updated_at, now),
+        value.packets_forward,
+        value.packets_backward,
+        if value.external { "yes" } else { "no" },
         if entry.expired { "yes" } else { "no" },
     );
 }
@@ -427,5 +513,28 @@ mod tests {
 
         assert_eq!("?:0", format_endpoint(None, 0));
         assert_eq!("invalid:80", format_endpoint(Some(&malformed), 80));
+    }
+
+    #[test]
+    fn test_format_deadline_future_passed_and_unset() {
+        let now = UNIX_EPOCH + Duration::from_secs(1_700_000_000);
+        let ahead = 1_700_000_090_500_000_000;
+        let behind = 1_699_999_990_000_000_000;
+
+        assert_eq!("2023-11-14T22:14:50Z (in 1m 30s)", format_deadline(ahead, now));
+        assert_eq!("2023-11-14T22:13:10Z (passed)", format_deadline(behind, now));
+        assert_eq!("-", format_deadline(0, now));
+        assert_eq!(
+            "2023-11-17T01:17:25Z (in 2days 3h)",
+            format_deadline(1_700_183_845_000_000_000, now)
+        );
+    }
+
+    #[test]
+    fn test_format_age_ns_elapsed_and_unset() {
+        let now = UNIX_EPOCH + Duration::from_secs(1_700_000_000);
+
+        assert_eq!("42s", format_age_ns(1_699_999_958_900_000_000, now));
+        assert_eq!("-", format_age_ns(0, now));
     }
 }
