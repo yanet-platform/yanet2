@@ -55,7 +55,6 @@ func newSyncConfigFromC(cCfg *C.struct_fwstate_sync_config) SyncConfig {
 	if count > MaxSyncEndpoints {
 		count = MaxSyncEndpoints
 	}
-	syncCfg.Endpoints = make([]SyncEndpoint, 0, count)
 	for idx := 0; idx < count; idx++ {
 		cEndpoint := &cCfg.endpoints[idx]
 		var endpoint SyncEndpoint
