@@ -644,6 +644,36 @@ func Test_FWState_StashEmission_BothEndpoints(t *testing.T) {
 	)
 }
 
+// Test_FWState_StashEmission_RandomSourcePortsAndNeutralEthernet verifies the
+// per-copy emission invariants: the UDP source port is randomized into the
+// ephemeral range so the flow hash spreads over equal-cost paths, the IPv6
+// source names the endpoint, and the Ethernet destination stays zeroed for
+// the route module downstream to resolve.
+func Test_FWState_StashEmission_RandomSourcePortsAndNeutralEthernet(t *testing.T) {
+	cpModule := newFWStateFixture(t, 0)
+	SetSyncUnicastDestination(cpModule)
+
+	worker := cpModule.Worker(0)
+	nextRound(worker)
+	require.Equal(t, 1, stashEvents(cpModule, worker, v6Event(6000)))
+
+	result := runConfig(cpModule, worker, false)
+	require.Len(t, result.Output, 2)
+
+	for _, raw := range result.Output {
+		parsed := gopacket.NewPacket(raw, layers.LayerTypeEthernet, gopacket.Default)
+		ethernet, ok := parsed.Layer(layers.LayerTypeEthernet).(*layers.Ethernet)
+		require.True(t, ok)
+		require.Equal(t, net.HardwareAddr{0, 0, 0, 0, 0, 0}, ethernet.DstMAC)
+		ipv6, ok := parsed.Layer(layers.LayerTypeIPv6).(*layers.IPv6)
+		require.True(t, ok)
+		require.Equal(t, net.ParseIP("fd00::1"), ipv6.SrcIP)
+		udp, ok := parsed.Layer(layers.LayerTypeUDP).(*layers.UDP)
+		require.True(t, ok)
+		require.GreaterOrEqual(t, uint16(udp.SrcPort), uint16(1024))
+	}
+}
+
 // Test_FWState_StashEmission_PacksBothFamilies verifies that both families
 // share one emitted packet.
 //

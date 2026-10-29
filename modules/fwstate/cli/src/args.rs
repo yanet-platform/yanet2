@@ -5,25 +5,50 @@ use core::{
 
 use clap::Parser;
 use clap_complete::engine::ArgValueCandidates;
-use netip::MacAddr;
 
 /// Parse duration from string (e.g., "60s", "5m", "1h")
 fn parse_duration(s: &str) -> Result<Duration, String> {
     humantime::parse_duration(s).map_err(|e| e.to_string())
 }
 
-fn parse_sync_endpoint(value: &str) -> Result<SocketAddrV6, String> {
-    let endpoint = value.parse::<SocketAddrV6>().map_err(|err| err.to_string())?;
-    if endpoint.port() == 0 {
-        return Err("endpoint port must be in 1..=65535".to_string());
-    }
-    if endpoint.scope_id() != 0 {
-        return Err("IPv6 scope IDs are not supported".to_string());
-    }
-    Ok(endpoint)
+/// One synchronization endpoint: the source stamped on emitted packets, the
+/// destination, and the destination port.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SyncEndpoint {
+    pub src: Ipv6Addr,
+    pub dst: Ipv6Addr,
+    pub port: u16,
 }
 
-#[expect(clippy::large_enum_variant)]
+/// Parse "SRC@DST:PORT"; DST:PORT accepts both "[dst]:port" and "dst:port".
+pub(crate) fn parse_sync_endpoint(value: &str) -> Result<SyncEndpoint, String> {
+    let (src, rest) = value.split_once('@').ok_or("endpoint must be SRC@DST:PORT")?;
+    let src: Ipv6Addr = src.parse().map_err(|err| format!("invalid source address: {err}"))?;
+
+    let (dst, port) = match rest.parse::<SocketAddrV6>() {
+        Ok(endpoint) => {
+            if endpoint.scope_id() != 0 {
+                return Err("IPv6 scope IDs are not supported".to_string());
+            }
+            (*endpoint.ip(), endpoint.port())
+        }
+        Err(_) => {
+            let (dst, port) = rest.rsplit_once(':').ok_or("endpoint must name a port")?;
+            let dst: Ipv6Addr = dst
+                .parse()
+                .map_err(|err| format!("invalid destination address: {err}"))?;
+            let port: u16 = port
+                .parse()
+                .map_err(|_| "endpoint port must be in 1..=65535".to_string())?;
+            (dst, port)
+        }
+    };
+    if port == 0 {
+        return Err("endpoint port must be in 1..=65535".to_string());
+    }
+    Ok(SyncEndpoint { src, dst, port })
+}
+
 #[derive(Debug, Clone, Parser)]
 pub enum ModeCmd {
     /// List all fwstate configurations.
@@ -75,58 +100,15 @@ pub struct UpdateCmd {
     #[arg(long)]
     pub map_name_v6: Option<String>,
 
-    /// Source IPv6 address (e.g., "2001:db8::1").
-    #[arg(long)]
-    pub src_addr: Option<Ipv6Addr>,
+    /// Synchronization endpoint (e.g., "fd00::1@ff02::1:9999"): packets are
+    /// emitted from the source toward the destination port. Repeatable; an
+    /// update carrying endpoints replaces the whole list.
+    #[arg(long = "endpoint", value_name = "SRC@DST:PORT", value_parser = parse_sync_endpoint)]
+    pub endpoint: Vec<SyncEndpoint>,
 
-    /// Destination MAC address (e.g., "00:11:22:33:44:55").
-    #[arg(long)]
-    pub dst_ether: Option<MacAddr>,
-
-    /// Multicast synchronization endpoint (e.g., "[ff02::1]:9999").
-    #[arg(
-        long,
-        value_name = "[ADDR]:PORT",
-        value_parser = parse_sync_endpoint,
-        conflicts_with_all = ["dst_addr_multicast", "port_multicast", "no_multicast"]
-    )]
-    pub multicast: Option<SocketAddrV6>,
-
-    /// Unicast synchronization endpoint (e.g., "[2001:db8::2]:9999").
-    #[arg(
-        long,
-        value_name = "[ADDR]:PORT",
-        value_parser = parse_sync_endpoint,
-        conflicts_with_all = ["dst_addr_unicast", "port_unicast", "no_unicast"]
-    )]
-    pub unicast: Option<SocketAddrV6>,
-
-    /// Deprecated: use --multicast instead.
-    #[arg(long)]
-    pub dst_addr_multicast: Option<Ipv6Addr>,
-
-    /// Deprecated: use --multicast instead.
-    #[arg(long)]
-    pub port_multicast: Option<u16>,
-
-    /// Deprecated: use --unicast instead.
-    #[arg(long)]
-    pub dst_addr_unicast: Option<Ipv6Addr>,
-
-    /// Deprecated: use --unicast instead.
-    #[arg(long)]
-    pub port_unicast: Option<u16>,
-
-    /// Remove the multicast synchronization endpoint.
-    #[arg(
-        long,
-        conflicts_with_all = ["multicast", "dst_addr_multicast", "port_multicast"]
-    )]
-    pub no_multicast: bool,
-
-    /// Remove the unicast synchronization endpoint.
-    #[arg(long, conflicts_with_all = ["unicast", "dst_addr_unicast", "port_unicast"])]
-    pub no_unicast: bool,
+    /// Remove every synchronization endpoint.
+    #[arg(long, conflicts_with = "endpoint")]
+    pub no_endpoints: bool,
 
     /// TCP SYN-ACK timeout (e.g., "60s", "5m", "1h").
     #[arg(long, value_parser = parse_duration)]

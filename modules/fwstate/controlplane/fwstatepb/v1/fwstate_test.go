@@ -91,10 +91,12 @@ func Test_UpdateConfigRequest_Validate(t *testing.T) {
 		{
 			name: "sync config delegation",
 			request: &UpdateConfigRequest{
-				Name:       "fwstate0",
-				SyncConfig: &SyncConfig{PortMulticast: proto.Uint32(65536)},
+				Name: "fwstate0",
+				SyncConfig: &SyncConfig{Endpoints: []*SyncEndpoint{
+					{Port: proto.Uint32(65536)},
+				}},
 			},
-			message: "sync_config: port_multicast 65536 exceeds maximum allowed value 65535",
+			message: "sync_config: endpoints[0].port must be in 1..65535, got 65536",
 		},
 		{
 			name: "timeout overflow",
@@ -121,10 +123,12 @@ func Test_UpdateConfigRequest_Validate(t *testing.T) {
 			message: "sync_config: sync_suppress_timeout 281474976710656 exceeds maximum allowed value 281474976710655",
 		},
 		{
-			name: "partial destination left to merged validation",
+			name: "port without addresses left to merged validation",
 			request: &UpdateConfigRequest{
-				Name:       "fwstate0",
-				SyncConfig: &SyncConfig{PortMulticast: proto.Uint32(9999)},
+				Name: "fwstate0",
+				SyncConfig: &SyncConfig{Endpoints: []*SyncEndpoint{
+					{Port: proto.Uint32(9999)},
+				}},
 			},
 		},
 	}
@@ -211,8 +215,8 @@ func Test_SyncConfig_ValidateTimeouts(t *testing.T) {
 }
 
 // Test_SyncConfig_ValidateFields_RejectsUnusableValues verifies that values
-// outside the stored representation and an address with a zero port are
-// rejected.
+// outside the stored representation and incomplete or conflicting endpoint
+// lists are rejected.
 func Test_SyncConfig_ValidateFields_RejectsUnusableValues(t *testing.T) {
 	addr := func(size int) *commonpb.IPAddress {
 		return &commonpb.IPAddress{Addr: make([]byte, size)}
@@ -224,54 +228,71 @@ func Test_SyncConfig_ValidateFields_RejectsUnusableValues(t *testing.T) {
 		message string
 	}{
 		{name: "nothing set", config: &SyncConfig{}},
-		{name: "boundary port", config: &SyncConfig{PortMulticast: proto.Uint32(65535)}},
 		{
-			name:    "port above the boundary",
-			config:  &SyncConfig{PortMulticast: proto.Uint32(65536)},
-			message: "port_multicast 65536 exceeds maximum allowed value 65535",
+			name: "boundary port",
+			config: &SyncConfig{Endpoints: []*SyncEndpoint{
+				{Port: proto.Uint32(65535)},
+			}},
 		},
 		{
-			name:    "unicast port above the boundary",
-			config:  &SyncConfig{PortUnicast: proto.Uint32(65536)},
-			message: "port_unicast 65536 exceeds maximum allowed value 65535",
+			name: "port above the boundary",
+			config: &SyncConfig{Endpoints: []*SyncEndpoint{
+				{Port: proto.Uint32(65536)},
+			}},
+			message: "endpoints[0].port must be in 1..65535, got 65536",
 		},
 		{
-			name:    "MAC outside EUI-48",
-			config:  &SyncConfig{DstEther: &commonpb.MACAddress{Addr: 0x100333300000001}},
-			message: "dst_ether must be an EUI-48 address",
+			name: "zero port",
+			config: &SyncConfig{Endpoints: []*SyncEndpoint{
+				{Port: proto.Uint32(0)},
+			}},
+			message: "endpoints[0].port must be in 1..65535, got 0",
 		},
 		{
-			name:    "short source address",
-			config:  &SyncConfig{SrcAddr: addr(4)},
-			message: "src_addr must be a 16-byte IPv6 address, got 4 bytes",
+			name: "short source address",
+			config: &SyncConfig{Endpoints: []*SyncEndpoint{
+				{SrcAddr: addr(4), Port: proto.Uint32(1)},
+			}},
+			message: "endpoints[0].src_addr must be a 16-byte IPv6 address, got 4 bytes",
 		},
 		{
-			name:    "short multicast address",
-			config:  &SyncConfig{DstAddrMulticast: addr(4), PortMulticast: proto.Uint32(1)},
-			message: "dst_addr_multicast must be a 16-byte IPv6 address, got 4 bytes",
+			name: "short destination address",
+			config: &SyncConfig{Endpoints: []*SyncEndpoint{
+				{DstAddr: addr(4), Port: proto.Uint32(1)},
+			}},
+			message: "endpoints[0].dst_addr must be a 16-byte IPv6 address, got 4 bytes",
 		},
 		{
-			name:    "long unicast address",
-			config:  &SyncConfig{DstAddrUnicast: addr(17), PortUnicast: proto.Uint32(1)},
-			message: "dst_addr_unicast must be a 16-byte IPv6 address, got 17 bytes",
+			name: "no_endpoints combined with endpoints",
+			config: &SyncConfig{
+				NoEndpoints: proto.Bool(true),
+				Endpoints:   []*SyncEndpoint{{Port: proto.Uint32(1)}},
+			},
+			message: "no_endpoints cannot be combined with endpoints",
 		},
 		{
-			name:   "address without port left to merged validation",
-			config: &SyncConfig{DstAddrMulticast: addr(16)},
+			name:   "no_endpoints alone",
+			config: &SyncConfig{NoEndpoints: proto.Bool(true)},
 		},
 		{
-			name:   "zero port without address clears the endpoint",
-			config: &SyncConfig{PortMulticast: proto.Uint32(0)},
+			name: "endpoint list above the bound",
+			config: &SyncConfig{
+				Endpoints: func() []*SyncEndpoint {
+					endpoints := make([]*SyncEndpoint, MaxSyncEndpoints+1)
+					for idx := range endpoints {
+						endpoints[idx] = &SyncEndpoint{Port: proto.Uint32(1)}
+					}
+					return endpoints
+				}(),
+			},
+			message: "at most 8 sync endpoints are supported, got 9",
 		},
 		{
-			name:    "multicast address with zero port",
-			config:  &SyncConfig{DstAddrMulticast: addr(16), PortMulticast: proto.Uint32(0)},
-			message: "dst_addr_multicast cannot be combined with a zero port_multicast",
-		},
-		{
-			name:    "unicast address with zero port",
-			config:  &SyncConfig{DstAddrUnicast: addr(16), PortUnicast: proto.Uint32(0)},
-			message: "dst_addr_unicast cannot be combined with a zero port_unicast",
+			name: "addresses without a port",
+			config: &SyncConfig{Endpoints: []*SyncEndpoint{
+				{SrcAddr: addr(16), DstAddr: addr(16)},
+			}},
+			message: "endpoints[0].port must be in 1..65535, got 0",
 		},
 	}
 
@@ -288,11 +309,11 @@ func Test_SyncConfig_ValidateFields_RejectsUnusableValues(t *testing.T) {
 	}
 }
 
-// Test_SyncConfig_ValidateMerged_DestinationIsAllOrNothing verifies that a
-// merged config naming part of the sync destination is rejected.
+// Test_SyncConfig_ValidateMerged_EndpointsAreAllOrNothing verifies that a
+// merged config naming part of an endpoint is rejected.
 //
-// One naming all of an endpoint, or none of the endpoints, is accepted.
-func Test_SyncConfig_ValidateMerged_DestinationIsAllOrNothing(t *testing.T) {
+// Endpoints naming everything, or an empty list, are accepted.
+func Test_SyncConfig_ValidateMerged_EndpointsAreAllOrNothing(t *testing.T) {
 	addr := func() *commonpb.IPAddress {
 		return &commonpb.IPAddress{Addr: []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}}
 	}
@@ -300,75 +321,88 @@ func Test_SyncConfig_ValidateMerged_DestinationIsAllOrNothing(t *testing.T) {
 		return &commonpb.IPAddress{Addr: make([]byte, 16)}
 	}
 
-	t.Run("missing multicast address", func(t *testing.T) {
-		config := &SyncConfig{SrcAddr: addr(), PortMulticast: proto.Uint32(1)}
+	t.Run("missing source address", func(t *testing.T) {
+		config := &SyncConfig{Endpoints: []*SyncEndpoint{
+			{DstAddr: addr(), Port: proto.Uint32(1)},
+		}}
 
-		require.ErrorContains(t, config.ValidateMerged(), "dst_addr_multicast")
+		require.ErrorContains(t, config.ValidateMerged(), "endpoints[0].src_addr")
 	})
 
-	t.Run("zero multicast port", func(t *testing.T) {
-		config := &SyncConfig{SrcAddr: addr(), DstAddrMulticast: addr()}
+	t.Run("missing destination address", func(t *testing.T) {
+		config := &SyncConfig{Endpoints: []*SyncEndpoint{
+			{SrcAddr: addr(), Port: proto.Uint32(1)},
+		}}
 
-		require.ErrorContains(t, config.ValidateMerged(), "port_multicast")
+		require.ErrorContains(t, config.ValidateMerged(), "endpoints[0].dst_addr")
 	})
 
-	t.Run("only the source address", func(t *testing.T) {
-		// Source/MAC values can remain stored after the last destination is
-		// removed; without an endpoint they are inert and synchronization is
-		// disabled.
-		require.NoError(t, (&SyncConfig{SrcAddr: addr()}).ValidateMerged())
+	t.Run("zero port", func(t *testing.T) {
+		config := &SyncConfig{Endpoints: []*SyncEndpoint{
+			{SrcAddr: addr(), DstAddr: addr()},
+		}}
+
+		require.ErrorContains(t, config.ValidateMerged(), "endpoints[0].port")
 	})
 
-	t.Run("no destination at all", func(t *testing.T) {
+	t.Run("no endpoint at all", func(t *testing.T) {
 		require.NoError(t, (&SyncConfig{}).ValidateMerged())
 	})
 
 	// The stored form of an unset address, which every merge over a
 	// config without synchronization produces.
-	t.Run("zero-filled addresses", func(t *testing.T) {
+	t.Run("zero-filled addresses name no endpoint", func(t *testing.T) {
 		require.NoError(t, (&SyncConfig{
-			SrcAddr:          zeroAddr(),
-			DstAddrMulticast: zeroAddr(),
+			Endpoints: []*SyncEndpoint{},
 		}).ValidateMerged())
 	})
 
-	t.Run("complete destination", func(t *testing.T) {
+	t.Run("zero-filled address bytes of a carried endpoint", func(t *testing.T) {
+		config := &SyncConfig{Endpoints: []*SyncEndpoint{
+			{SrcAddr: zeroAddr(), DstAddr: zeroAddr(), Port: proto.Uint32(1)},
+		}}
+
+		require.ErrorContains(t, config.ValidateMerged(), "endpoints[0].src_addr")
+	})
+
+	t.Run("complete multicast endpoint", func(t *testing.T) {
 		require.NoError(t, (&SyncConfig{
-			SrcAddr:          addr(),
-			DstEther:         &commonpb.MACAddress{Addr: 0x333300000001},
-			DstAddrMulticast: addr(),
-			PortMulticast:    proto.Uint32(1),
+			Endpoints: []*SyncEndpoint{
+				{
+					SrcAddr: addr(),
+					DstAddr: &commonpb.IPAddress{Addr: []byte{0xff, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}},
+					Port:    proto.Uint32(1),
+				},
+			},
 		}).ValidateMerged())
 	})
 
-	t.Run("complete unicast destination", func(t *testing.T) {
+	t.Run("complete unicast endpoint", func(t *testing.T) {
 		require.NoError(t, (&SyncConfig{
-			SrcAddr:        addr(),
-			DstEther:       &commonpb.MACAddress{Addr: 0x333300000001},
-			DstAddrUnicast: addr(),
-			PortUnicast:    proto.Uint32(1),
+			Endpoints: []*SyncEndpoint{
+				{SrcAddr: addr(), DstAddr: addr(), Port: proto.Uint32(1)},
+			},
 		}).ValidateMerged())
 	})
 
-	t.Run("unicast address without port", func(t *testing.T) {
-		config := &SyncConfig{SrcAddr: addr(), DstAddrUnicast: addr()}
-
-		require.ErrorContains(t, config.ValidateMerged(), "port_unicast")
+	t.Run("several complete endpoints", func(t *testing.T) {
+		require.NoError(t, (&SyncConfig{
+			Endpoints: []*SyncEndpoint{
+				{SrcAddr: addr(), DstAddr: addr(), Port: proto.Uint32(1)},
+				{SrcAddr: addr(), DstAddr: addr(), Port: proto.Uint32(2)},
+			},
+		}).ValidateMerged())
 	})
 
-	t.Run("unicast port without address", func(t *testing.T) {
-		config := &SyncConfig{SrcAddr: addr(), PortUnicast: proto.Uint32(2)}
+	t.Run("second endpoint incomplete", func(t *testing.T) {
+		config := &SyncConfig{
+			Endpoints: []*SyncEndpoint{
+				{SrcAddr: addr(), DstAddr: addr(), Port: proto.Uint32(1)},
+				{SrcAddr: addr(), Port: proto.Uint32(2)},
+			},
+		}
 
-		require.ErrorContains(t, config.ValidateMerged(), "dst_addr_unicast")
-	})
-
-	t.Run("unicast multicast address", func(t *testing.T) {
-		require.ErrorContains(t, (&SyncConfig{
-			SrcAddr:        addr(),
-			DstEther:       &commonpb.MACAddress{Addr: 0x333300000001},
-			DstAddrUnicast: &commonpb.IPAddress{Addr: []byte{0xff, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}},
-			PortUnicast:    proto.Uint32(1),
-		}).ValidateMerged(), "dst_addr_unicast")
+		require.ErrorContains(t, config.ValidateMerged(), "endpoints[1].dst_addr")
 	})
 }
 

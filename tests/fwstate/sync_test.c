@@ -4,8 +4,9 @@
  * Verifies transport-port byte order in the captured frame, the refusal to
  * capture a packet without a transport header, and that the multi-frame
  * builder packs frames byte-identically, clamps to the mbuf tailroom and
- * keeps configurable outer destinations without changing the packet
- * metadata.
+ * stamps the configured outer source and destination while leaving the
+ * Ethernet destination zeroed for the route module and randomizing the UDP
+ * source port.
  */
 
 #include <assert.h>
@@ -31,9 +32,6 @@
 #define TEST_SRC_PORT 12345
 #define TEST_DST_PORT 80
 
-static const struct ether_addr test_dst_ether = {
-	.addr = {0x02, 0x00, 0x00, 0x00, 0x00, 0x02},
-};
 static struct rte_mempool *test_pool;
 
 /*
@@ -159,6 +157,25 @@ test_sync_packet_destination(void) {
 	struct rte_mbuf *sync_mbuf = rte_pktmbuf_alloc(test_pool);
 	assert(sync_mbuf != NULL);
 	struct packet sync_pkt = {.mbuf = sync_mbuf};
+	/* src: 2001:db8::1, dst: 2001:db8::2 */
+	const uint8_t src_addr[16] = {
+		0x20,
+		0x01,
+		0x0d,
+		0xb8,
+		0,
+		0,
+		0,
+		0,
+		0,
+		0,
+		0,
+		0,
+		0,
+		0,
+		0,
+		1,
+	};
 	const uint8_t dst_addr[16] = {
 		0x20,
 		0x01,
@@ -184,9 +201,7 @@ test_sync_packet_destination(void) {
 		&src_pkt, SYNC_INGRESS, &record, &sync_pkt
 	);
 	assert(rc == 0);
-	fwstate_sync_set_destination(
-		&sync_pkt, &test_dst_ether, dst_addr, dst_port
-	);
+	fwstate_sync_set_destination(&sync_pkt, src_addr, dst_addr, dst_port);
 
 	struct rte_ether_hdr *ether_hdr =
 		rte_pktmbuf_mtod(sync_mbuf, struct rte_ether_hdr *);
@@ -201,13 +216,19 @@ test_sync_packet_destination(void) {
 	);
 	const uint16_t payload_len =
 		sizeof(struct rte_udp_hdr) + sizeof(struct fw_state_sync_frame);
+	const uint16_t src_port = rte_be_to_cpu_16(udp_hdr->src_port);
+	static const uint8_t zero_mac[RTE_ETHER_ADDR_LEN] = {0};
 
-	assert(memcmp(&ether_hdr->dst_addr,
-		      &test_dst_ether,
-		      sizeof(test_dst_ether)) == 0);
+	/* The Ethernet destination stays zeroed: the route module downstream
+	 * resolves and stamps the MAC addresses. */
+	assert(memcmp(ether_hdr->dst_addr.addr_bytes, zero_mac, sizeof(zero_mac)
+	       ) == 0);
+	assert(memcmp(ipv6_hdr->src_addr, src_addr, sizeof(src_addr)) == 0);
 	assert(memcmp(ipv6_hdr->dst_addr, dst_addr, sizeof(dst_addr)) == 0);
 	assert(ipv6_hdr->payload_len == rte_cpu_to_be_16(payload_len));
-	assert(udp_hdr->src_port == dst_port);
+	/* The source port is randomized per packet in the ephemeral range;
+	 * only the destination port names the endpoint. */
+	assert(src_port >= 1024);
 	assert(udp_hdr->dst_port == dst_port);
 	assert(udp_hdr->dgram_len == rte_cpu_to_be_16(payload_len));
 	assert((sync_pkt.flags & (1U << PACKET_FLAG_FWSTATE_SYNC_INTERNAL)) == 0

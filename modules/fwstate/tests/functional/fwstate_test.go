@@ -65,17 +65,19 @@ func setupFWStateHarness(t *testing.T) (*dataplaneut.Harness, *ffi.Agent) {
 // fwstateTestSyncConfig enables synchronization with production timeouts.
 func fwstateTestSyncConfig() cfwstate.SyncConfig {
 	return cfwstate.SyncConfig{
-		DstEther: [6]byte{0x33, 0x33, 0x00, 0x00, 0x00, 0x01},
-		DstAddrMulticast: [16]byte{
-			0xff, 0x02, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x01,
-		},
-		PortMulticast: syncPort,
-		TcpSynAck:     uint64(120e9),
-		TcpSyn:        uint64(120e9),
-		TcpFin:        uint64(120e9),
-		Tcp:           uint64(120e9),
-		Udp:           uint64(30e9),
-		Default:       uint64(16e9),
+		Endpoints: []cfwstate.SyncEndpoint{{
+			SrcAddr: [16]byte{0xfd, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1},
+			DstAddr: [16]byte{
+				0xff, 0x02, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x01,
+			},
+			Port: syncPort,
+		}},
+		TcpSynAck: uint64(120e9),
+		TcpSyn:    uint64(120e9),
+		TcpFin:    uint64(120e9),
+		Tcp:       uint64(120e9),
+		Udp:       uint64(30e9),
+		Default:   uint64(16e9),
 	}
 }
 

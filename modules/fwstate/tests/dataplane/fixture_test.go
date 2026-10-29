@@ -93,7 +93,11 @@ func newFWStateFixture(t *testing.T, stashSize uint64) *testConfig {
 		fixture.Maps[idx] = object
 	}
 	config := &testConfig{Fixture: fixture, Name: "test", Devices: []uint16{0, 1}, Sync: modulefwstate.SyncConfig{
-		DstEther: [6]byte{0x33, 0x33, 0, 0, 0, 1}, DstAddrMulticast: netip.MustParseAddr("ff02::1").As16(), PortMulticast: 9999,
+		Endpoints: []modulefwstate.SyncEndpoint{{
+			SrcAddr: netip.MustParseAddr("fd00::1").As16(),
+			DstAddr: netip.MustParseAddr("ff02::1").As16(),
+			Port:    9999,
+		}},
 		TcpSynAck: 120e9, TcpSyn: 120e9, TcpFin: 120e9, Tcp: 120e9, Udp: 30e9, Default: 16e9,
 	}}
 	fixture.Configs = append(fixture.Configs, config)
@@ -221,18 +225,19 @@ func SetSyncSuppressTimeout(config *testConfig, timeout uint64) {
 	config.Sync.SyncSuppressTimeout = timeout
 }
 
-// ClearSyncDestination disables both endpoints before publication.
+// ClearSyncDestination disables every endpoint before publication.
 func ClearSyncDestination(config *testConfig) {
-	config.Sync.PortMulticast = 0
-	config.Sync.DstAddrMulticast = [16]byte{}
-	config.Sync.PortUnicast = 0
-	config.Sync.DstAddrUnicast = [16]byte{}
+	config.Sync.Endpoints = nil
 }
 
-// SetSyncUnicastDestination enables the second endpoint before publication.
+// SetSyncUnicastDestination enables the unicast endpoint in addition to the
+// configured ones before publication.
 func SetSyncUnicastDestination(config *testConfig) {
-	config.Sync.DstAddrUnicast = netip.MustParseAddr("2001:db8::3").As16()
-	config.Sync.PortUnicast = 10000
+	config.Sync.Endpoints = append(config.Sync.Endpoints, modulefwstate.SyncEndpoint{
+		SrcAddr: netip.MustParseAddr("fd00::1").As16(),
+		DstAddr: netip.MustParseAddr("2001:db8::3").As16(),
+		Port:    10000,
+	})
 }
 
 // SetSyncTCPTimeouts makes established and closing deadlines distinguishable.

@@ -324,12 +324,16 @@ fwstate_test_config(struct cp_module **cp_module) {
 		&fuzz_params.module_ectx, &config->cp_module
 	);
 
-	// Configure sync settings
+	// Configure sync settings: one multicast endpoint, both for receive
+	// matching of the wrapper packets and for local emission.
+	uint8_t src_addr[16] = {0xfd, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1};
 	uint8_t multicast_addr[16] = {
 		0xff, 0x02, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x01
 	};
-	memcpy(config->sync_config.dst_addr_multicast, multicast_addr, 16);
-	config->sync_config.port_multicast = rte_cpu_to_be_16(9999);
+	config->sync_config.endpoint_count = 1;
+	memcpy(config->sync_config.endpoints[0].src_addr, src_addr, 16);
+	memcpy(config->sync_config.endpoints[0].dst_addr, multicast_addr, 16);
+	config->sync_config.endpoints[0].port = rte_cpu_to_be_16(9999);
 
 	// Set timeouts
 	config->sync_config.timeouts.tcp_syn_ack = 120000000000ULL;

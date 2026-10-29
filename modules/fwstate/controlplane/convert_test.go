@@ -12,60 +12,64 @@ import (
 	fwstatepb "github.com/yanet-platform/yanet2/modules/fwstate/controlplane/fwstatepb/v1"
 )
 
-// Test_SyncConfig_EmitFieldsRoundTrip verifies that both destinations survive
-// the protobuf-to-native round trip.
-func Test_SyncConfig_EmitFieldsRoundTrip(t *testing.T) {
-	const portMulticast uint32 = 4789
-	const portUnicast uint32 = 4790
-	destinationEther := [6]byte{0x33, 0x33, 0, 0, 0, 1}
-	destinationUnicast := []byte{0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2}
+// Test_SyncConfig_EndpointsRoundTrip verifies that the whole endpoint list
+// survives the protobuf-to-native round trip.
+func Test_SyncConfig_EndpointsRoundTrip(t *testing.T) {
+	source := []byte{0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}
+	multicast := []byte{0xff, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}
+	unicast := []byte{0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2}
 
 	syncConfig := &fwstatepb.SyncConfig{
-		SrcAddr:          &commonpb.IPAddress{Addr: make([]byte, 16)},
-		DstEther:         commonpb.NewMACAddressEUI48(destinationEther),
-		DstAddrMulticast: &commonpb.IPAddress{Addr: make([]byte, 16)},
-		PortMulticast:    proto.Uint32(portMulticast),
-		DstAddrUnicast:   &commonpb.IPAddress{Addr: destinationUnicast},
-		PortUnicast:      proto.Uint32(portUnicast),
+		Endpoints: []*fwstatepb.SyncEndpoint{
+			{
+				SrcAddr: &commonpb.IPAddress{Addr: source},
+				DstAddr: &commonpb.IPAddress{Addr: multicast},
+				Port:    proto.Uint32(4789),
+			},
+			{
+				SrcAddr: &commonpb.IPAddress{Addr: source},
+				DstAddr: &commonpb.IPAddress{Addr: unicast},
+				Port:    proto.Uint32(4790),
+			},
+		},
 	}
 
 	nativeConfig := fwstate.SyncConfigToC(syncConfig)
 	got := fwstate.SyncConfigFromC(nativeConfig)
 
-	require.Equal(t, portMulticast, got.GetPortMulticast())
-	require.Equal(t, destinationEther, got.DstEther.EUI48())
-	require.Equal(t, destinationUnicast, got.DstAddrUnicast.Addr)
-	require.Equal(t, portUnicast, got.GetPortUnicast())
+	require.Len(t, got.GetEndpoints(), 2)
+	require.Equal(t, source, got.GetEndpoints()[0].GetSrcAddr().Addr)
+	require.Equal(t, multicast, got.GetEndpoints()[0].GetDstAddr().Addr)
+	require.EqualValues(t, 4789, got.GetEndpoints()[0].GetPort())
+	require.Equal(t, unicast, got.GetEndpoints()[1].GetDstAddr().Addr)
+	require.EqualValues(t, 4790, got.GetEndpoints()[1].GetPort())
 }
 
-// Test_SyncConfig_SingleDestinationRoundTrip verifies that conversion retains
-// destination addresses only when their ports are nonzero.
-func Test_SyncConfig_SingleDestinationRoundTrip(t *testing.T) {
+// Test_SyncConfig_DisabledEndpointsDroppedRoundTrip verifies that conversion
+// skips the endpoints a zero port disables.
+func Test_SyncConfig_DisabledEndpointsDroppedRoundTrip(t *testing.T) {
+	source := [16]byte{0x20, 1, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}
 	multicast := [16]byte{0xff, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}
 	unicast := [16]byte{0x20, 1, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2}
 	tests := []struct {
-		name          string
-		config        cfwstate.SyncConfig
-		wantMulticast bool
-		wantUnicast   bool
+		name      string
+		config    cfwstate.SyncConfig
+		wantCount int
 	}{
 		{
-			name: "multicast only",
-			config: cfwstate.SyncConfig{
-				DstAddrMulticast: multicast,
-				PortMulticast:    9999,
-				DstAddrUnicast:   unicast,
-			},
-			wantMulticast: true,
+			name: "enabled endpoint kept, disabled one dropped",
+			config: cfwstate.SyncConfig{Endpoints: []cfwstate.SyncEndpoint{
+				{SrcAddr: source, DstAddr: multicast, Port: 9999},
+				{SrcAddr: source, DstAddr: unicast},
+			}},
+			wantCount: 1,
 		},
 		{
-			name: "unicast only",
-			config: cfwstate.SyncConfig{
-				DstAddrMulticast: multicast,
-				DstAddrUnicast:   unicast,
-				PortUnicast:      10000,
-			},
-			wantUnicast: true,
+			name: "all endpoints disabled",
+			config: cfwstate.SyncConfig{Endpoints: []cfwstate.SyncEndpoint{
+				{SrcAddr: source, DstAddr: unicast},
+			}},
+			wantCount: 0,
 		},
 	}
 
@@ -73,22 +77,12 @@ func Test_SyncConfig_SingleDestinationRoundTrip(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			syncConfig := fwstate.SyncConfigFromC(tc.config)
 
-			require.Equal(t, tc.wantMulticast, syncConfig.DstAddrMulticast != nil)
-			require.Equal(t, tc.wantUnicast, syncConfig.DstAddrUnicast != nil)
+			require.Len(t, syncConfig.GetEndpoints(), tc.wantCount)
 			roundTrip := fwstate.SyncConfigToC(syncConfig)
-			if tc.wantMulticast {
-				require.Equal(t, multicast, roundTrip.DstAddrMulticast)
-				require.Equal(t, uint16(9999), roundTrip.PortMulticast)
-			} else {
-				require.Zero(t, roundTrip.DstAddrMulticast)
-				require.Zero(t, roundTrip.PortMulticast)
-			}
-			if tc.wantUnicast {
-				require.Equal(t, unicast, roundTrip.DstAddrUnicast)
-				require.Equal(t, uint16(10000), roundTrip.PortUnicast)
-			} else {
-				require.Zero(t, roundTrip.DstAddrUnicast)
-				require.Zero(t, roundTrip.PortUnicast)
+			require.Len(t, roundTrip.Endpoints, tc.wantCount)
+			if tc.wantCount > 0 {
+				require.Equal(t, uint16(9999), roundTrip.Endpoints[0].Port)
+				require.Equal(t, multicast, roundTrip.Endpoints[0].DstAddr)
 			}
 		})
 	}
