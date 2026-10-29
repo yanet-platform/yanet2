@@ -1,8 +1,7 @@
-// Helpers over the C of `common/` that the SDK builds embedded objects with.
+// Hidden wrappers for native table construction and context allocation.
 //
-// One wrapper per C routine, header-inline in C, compiled into the shim
-// library with hidden visibility as the dataplane shim is. The routines are
-// those needed to construct and release embedded LPM tables.
+// Inline allocation follows the host's sanitizer flags so shared-memory
+// red zones and payload layout agree on both sides of the boundary.
 #pragma once
 
 #include <stddef.h>
@@ -43,3 +42,17 @@ yanet_sys_common_lpm_insert(
 // Cannot fail. Sound after a failed init or insert.
 YANET_SYS_HIDDEN void
 yanet_sys_common_lpm_free(struct lpm *lpm);
+
+// memory_balloc (common/memory.h): a block of size bytes from the memory
+// context, rounded up as its allocator does.
+//
+// Returns NULL when the context's memory is exhausted.
+YANET_SYS_HIDDEN void *
+yanet_sys_common_memory_balloc(struct memory_context *context, size_t size);
+
+// memory_bfree (common/memory.h): returns a block of size bytes that
+// yanet_sys_common_memory_balloc took from the same context.
+YANET_SYS_HIDDEN void
+yanet_sys_common_memory_bfree(
+	struct memory_context *context, void *block, size_t size
+);

@@ -6,7 +6,12 @@
 resolver = "3"
 members = [
     "yanet-sdk",
+    "yanet-sdk-api",
+    "yanet-sdk-build",
     "yanet-sdk-derive",
+    "yanet-sdk-fixture",
+    "yanet-sdk-fixture-api",
+    "yanet-sdk-plugin",
     "yanet-sdk-testing",
     "yanet-shm",
     "yanet-sys",
@@ -26,3 +31,21 @@ unused_crate_dependencies = "deny"
 [workspace.lints.clippy]
 std_instead_of_core = "deny"
 undocumented_unsafe_blocks = "deny"
+
+# Plugins and the api archive build with thin LTO, the rest of the workspace
+# without.
+#
+# The precompiled `core` references the unwinder's personality routine, which
+# a `no_std` plugin does not define and the loader would fail to resolve; and
+# an api staticlib bundles the module crate's handlers, which call the
+# dataplane's packet routines, though no export reaches them. Whole-program
+# optimisation drops both. A `no_std` cdylib cannot unwind, while an api
+# staticlib needs unwinding for the panic guards of its exports.
+[profile.plugin]
+inherits = "release"
+lto = "thin"
+panic = "abort"
+
+[profile.api]
+inherits = "release"
+lto = "thin"

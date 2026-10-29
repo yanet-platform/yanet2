@@ -6,6 +6,7 @@
 #pragma once
 
 #include "common/lpm.h"
+#include "lib/controlplane/agent/agent.h"
 #include "lib/controlplane/config/cp_module.h"
 #include "lib/counters/counters.h"
 #include "lib/dataplane/config/zone.h"
@@ -13,6 +14,7 @@
 #include "lib/dataplane/module/packet_front.h"
 #include "lib/dataplane/packet/packet.h"
 #include "lib/dataplane/pipeline/econtext.h"
+#include "lib/errors/errors.h"
 
 #include <rte_mbuf_core.h>
 
@@ -20,3 +22,4 @@
 
 #include "common_shim.h"
 #include "dp_shim.h"
+#include <errno.h>

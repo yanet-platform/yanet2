@@ -20,11 +20,10 @@ impl Counter {
     }
 }
 
-/// A device linked to the module configuration, by its index in the
-/// module's device list.
+/// An index relative to a module configuration's device namespace.
 ///
 /// The dataplane resolves it to the device's routing target of the running
-/// generation, which is absent when the device is not part of it.
+/// generation, which is absent when the index or device is not part of it.
 #[repr(C)]
 pub struct Device {
     index: u64,
@@ -42,6 +41,6 @@ impl Device {
 // writes the id the module's counter registry assigned.
 unsafe impl ShmLayout for Counter {}
 
-// SAFETY: a device index accepts every bit pattern; the control plane writes
-// the index the module's device list assigned.
+// SAFETY: every device index is a valid word; resolution checks namespace
+// bounds.
 unsafe impl ShmLayout for Device {}

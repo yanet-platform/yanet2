@@ -7,10 +7,12 @@
 
 #![forbid(unsafe_code)]
 
+mod api;
+mod ffi_record;
 mod shm_layout;
 
 use proc_macro::TokenStream;
-use syn::{DeriveInput, parse_macro_input};
+use syn::{DeriveInput, ItemImpl, parse_macro_input};
 
 /// Derives checked shared-memory layout and ownership release.
 ///
@@ -43,14 +45,101 @@ pub fn derive_shm_layout(input: TokenStream) -> TokenStream {
         .into()
 }
 
+/// Derives the C input-record contract for a concrete named-field struct.
+///
+/// The record requires plain C representation, without explicit alignment or
+/// packing. Every field must be an integer, an array of input records or
+/// another derived input record. Padding is never read as a field; explicitly
+/// selected records are declared in the generated C header.
+#[proc_macro_derive(FfiRecord)]
+pub fn derive_ffi_record(input: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(input as DeriveInput);
+    ffi_record::expand(&input)
+        .unwrap_or_else(syn::Error::into_compile_error)
+        .into()
+}
+
+/// Exports public inherent methods and configuration release to C.
+///
+/// Methods accept one agent plus strings, input records, slices and supported
+/// integers, and return a built configuration or native error. Generated
+/// exports preserve argument order, add an optional trailing error output and
+/// contain panics. Release retains a busy configuration with EAGAIN for a later
+/// retry. Authored crates keep their unsafe-code prohibition; the SDK README
+/// documents the ABI and examples.
+#[proc_macro_attribute]
+pub fn api(args: TokenStream, item: TokenStream) -> TokenStream {
+    let args = parse_macro_input!(args as api::Args);
+    let item = parse_macro_input!(item as ItemImpl);
+    api::expand(args, item)
+        .unwrap_or_else(syn::Error::into_compile_error)
+        .into()
+}
+
 // Doc tests are the only users of the facade, which depends on this crate.
 #[cfg(test)]
-use {yanet_sdk as _, yanet_sys as _};
+use {yanet_sdk as _, yanet_sdk_api as _, yanet_sys as _};
 
 /// Doc tests that pin what the derive refuses, with the compile error each
 /// refusal produces, and the accepted twin of each.
 #[cfg(doctest)]
 mod doctests {
+    /// FFI input records preserve their declared C representation.
+    ///
+    /// ```
+    /// use yanet_sdk::FfiRecord;
+    ///
+    /// #[derive(FfiRecord)]
+    /// #[repr(C)]
+    /// struct Range {
+    ///     from: [u8; 4],
+    ///     to: [u8; 4],
+    ///     value: u32,
+    /// }
+    /// ```
+    struct FfiRecordInputAccepted;
+
+    /// Typed API exports preserve the author crate's ban on unsafe code.
+    ///
+    /// ```no_run
+    /// #![forbid(unsafe_code)]
+    ///
+    /// use yanet_sdk::{Batch, Built, CommitCx, Cx, FfiRecord, Module, Verdict};
+    /// use yanet_sdk_api::{Agent, ApiError};
+    ///
+    /// struct Mine;
+    /// impl Module for Mine {
+    ///     const NAME: &'static str = "mine";
+    ///     type Config = u64;
+    ///     type Prepared<'p> = ();
+    ///     fn prepare(_: &CommitCx<'_, Self>) {}
+    ///     fn handle<'id>(_: &mut Cx<'id, Self>, batch: &mut Batch<'id>) {
+    ///         batch.dispatch(|_| Verdict::Pass);
+    ///     }
+    /// }
+    ///
+    /// #[derive(FfiRecord)]
+    /// #[repr(C)]
+    /// pub struct Input {
+    ///     weight: u64,
+    /// }
+    ///
+    /// pub struct MineApi;
+    ///
+    /// #[yanet_sdk::api(module = Mine)]
+    /// impl MineApi {
+    ///     pub fn new(
+    ///         agent: &Agent,
+    ///         name: &str,
+    ///         input: &Input,
+    ///         ranges: &[u32],
+    ///     ) -> Result<Built<Mine, Agent>, ApiError> {
+    ///         agent.build_config::<Mine>(name, input.weight + ranges.len() as u64)
+    ///     }
+    /// }
+    /// ```
+    struct ApiExportsForbidUnsafe;
+
     /// A field that is not shared-memory data, such as `bool`, is refused.
     ///
     /// ```compile_fail,E0277

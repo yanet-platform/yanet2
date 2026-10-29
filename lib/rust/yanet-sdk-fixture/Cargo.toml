@@ -1,0 +1,41 @@
+[package]
+name = "yanet-sdk-fixture"
+description = "Minimal modules for the tests of the SDK, and the dataplane plugins that carry them."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[lib]
+test = false
+doctest = false
+
+[dependencies]
+yanet-sdk = { path = "../yanet-sdk" }
+yanet-sdk-plugin = { path = "../yanet-sdk-plugin", optional = true }
+
+[features]
+# The no_std plugin examples require the aborting plugin profile.
+#
+# Build on request with cargo build --profile plugin -p yanet-sdk-fixture --features
+# plugin --examples.
+plugin = ["dep:yanet-sdk-plugin"]
+
+# The plugins, which the dataplane loader maps to module names by file name.
+[[example]]
+name = "fixture_dp"
+crate-type = ["cdylib"]
+required-features = ["plugin"]
+
+[[example]]
+name = "tally_dp"
+crate-type = ["cdylib"]
+required-features = ["plugin"]
+
+[[example]]
+name = "fib_dp"
+crate-type = ["cdylib"]
+required-features = ["plugin"]

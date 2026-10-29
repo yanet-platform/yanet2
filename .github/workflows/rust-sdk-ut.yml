@@ -1,0 +1,193 @@
+name: Rust SDK dataplane tests
+
+# The Go tests of the Rust module SDK fixtures (lib/rust) over the C dataplane
+# harness, natively and under AddressSanitizer with the Rust code instrumented.
+#
+# They are separate from build.yml, which excludes lib/rust and installs no
+# Rust toolchain, while the meson build of these tests runs cargo. A change to
+# what the archive, the plugins and the tests are built from or link re-runs
+# the rows. Each row writes its own ccache and cargo caches, from main only,
+# since a cache written on a pull-request ref is readable only from that pull
+# request. The Go build cache has profiles of its own, since the cgo package
+# of the fixtures is not in build.yml's.
+
+on:
+  push:
+    branches: ["main"]
+    paths:
+      - "lib/rust/**"
+      - "api/**.c"
+      - "api/**.h"
+      - "common/**.c"
+      - "common/**.h"
+      - "devices/plain/**.c"
+      - "devices/plain/**.h"
+      - "lib/**.c"
+      - "lib/**.h"
+      - "bindings/go/cerrors/**"
+      - "bindings/go/dataplane_ut/**"
+      - "common/go/dataplane/**"
+      - "controlplane/ffi/**"
+      - "devices/plain/bindings/go/cplain/**"
+      - "**/meson.build"
+      - "meson_options.txt"
+      - "Makefile"
+      - "scripts/go_cdeps.py"
+      - "scripts/go_cgo_flags.py"
+      - ".golangci.yml"
+      - "go.mod"
+      - "go.sum"
+      - "subprojects/dpdk"
+      - ".github/actions/go-buildcache/**"
+      - ".github/actions/go-modcache/**"
+      - ".github/workflows/rust-sdk-ut.yml"
+  pull_request:
+    # Stacked pull requests are tested for every target branch.
+    branches: ["**"]
+    paths:
+      - "lib/rust/**"
+      - "api/**.c"
+      - "api/**.h"
+      - "common/**.c"
+      - "common/**.h"
+      - "devices/plain/**.c"
+      - "devices/plain/**.h"
+      - "lib/**.c"
+      - "lib/**.h"
+      - "bindings/go/cerrors/**"
+      - "bindings/go/dataplane_ut/**"
+      - "common/go/dataplane/**"
+      - "controlplane/ffi/**"
+      - "devices/plain/bindings/go/cplain/**"
+      - "**/meson.build"
+      - "meson_options.txt"
+      - "Makefile"
+      - "scripts/go_cdeps.py"
+      - "scripts/go_cgo_flags.py"
+      - ".golangci.yml"
+      - "go.mod"
+      - "go.sum"
+      - "subprojects/dpdk"
+      - ".github/actions/go-buildcache/**"
+      - ".github/actions/go-modcache/**"
+      - ".github/workflows/rust-sdk-ut.yml"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
+env:
+  # bindgen needs a clang and a libclang of the same LLVM major, both in the
+  # CI image.
+  CLANG_PATH: /usr/bin/clang-23
+  LIBCLANG_PATH: /usr/lib/llvm-23/lib
+
+defaults:
+  run:
+    # The runner's default shell, which container jobs would replace with sh.
+    shell: bash -e {0}
+
+permissions:
+  contents: read
+
+jobs:
+  fixtures:
+    name: fixture tests (${{ matrix.mode }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - mode: native
+            profile: rust-sdk-release
+          - mode: asan
+            profile: rust-sdk-asan
+    container: ghcr.io/yanet-platform/yanet2-ci@sha256:3cbb2aae05beb4efc16f160cfa4d5307deba5d3110005d6557fdb49e5e2ee7a1
+    env:
+      # The Makefile runs just these Go packages, and no meson tests.
+      GO_TEST_PACKAGES: ./lib/rust/yanet-sdk-fixture-api/bindings/go/cfixture ./lib/rust/yanet-sdk-fixture-api/bindings/go/coexist
+      # Pinned with the rustfmt nightly, see rust-miri.yml.
+      ASAN_TOOLCHAIN: nightly-2026-10-22
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          submodules: true
+
+      - uses: hendrikmuhs/ccache-action@f09c25b45002a07be2955cbe52e8cee55643f89d # v1.2.24
+        name: ccache
+        with:
+          key: ${{ runner.os }}-rust-sdk-ut-${{ matrix.mode }}-image-cache
+          max-size: 2G
+          verbose: 2
+          save: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Restore Go module cache
+        uses: ./.github/actions/go-modcache
+
+      - name: Restore Go build cache
+        if: ${{ !env.ACT }}
+        id: go-buildcache
+        uses: ./.github/actions/go-buildcache
+        with:
+          profile: ${{ matrix.profile }}
+
+      - if: matrix.mode == 'native'
+        uses: dtolnay/rust-toolchain@d124f86f28ff42855784ff3319f48ac182c248f8 # 1.99.1
+
+      - if: matrix.mode == 'asan'
+        uses: dtolnay/rust-toolchain@2c76c034f9e32a5d6e2c104dc4df23a22476db04 # nightly
+        with:
+          toolchain: ${{ env.ASAN_TOOLCHAIN }}
+
+      - name: Configure meson
+        run: |
+          if [ "${{ matrix.mode }}" = asan ]; then
+            export CC="ccache clang" CXX="ccache clang++"
+          fi
+          meson setup build -Dsdk_rust_fixtures=enabled
+
+      # Meson has cargo build into this target directory.
+      - name: Cache rust
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: lib/rust -> ../../build/lib/rust/cargo-target
+          shared-key: rust-sdk-ut-${{ matrix.mode }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Test
+        if: matrix.mode == 'native'
+        run: make test-only
+
+      - name: Check CGO pointer contracts
+        if: matrix.mode == 'native'
+        run: GOEXPERIMENT=cgocheck2 make test-only
+
+      - name: Configure lint
+        if: matrix.mode == 'native'
+        run: echo "CGO_CPPFLAGS=$(cat build/yanet_cgo_cppflags)" >> "$GITHUB_ENV"
+
+      # go-lint.yml cannot type-check this package: its files carry a build tag
+      # and its header exists only after the build above.
+      - name: Lint
+        if: matrix.mode == 'native'
+        uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9
+        with:
+          version: v2.15.0
+          args: --timeout 5m --build-tags sdk_rust_fixtures ./lib/rust/...
+
+      # The target configures the sanitizers itself; meson then builds the
+      # Rust code with the sanitizer of the nightly toolchain named here.
+      - name: Test (ASan)
+        if: matrix.mode == 'asan'
+        env:
+          RUSTUP_TOOLCHAIN: ${{ env.ASAN_TOOLCHAIN }}
+        run: make test-asan-only
+
+      - name: Save Go build cache
+        if: success() && github.ref == 'refs/heads/main' && steps.go-buildcache.outputs.cache-hit != 'true' && !env.ACT
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ steps.go-buildcache.outputs.path }}
+          key: ${{ steps.go-buildcache.outputs.key }}

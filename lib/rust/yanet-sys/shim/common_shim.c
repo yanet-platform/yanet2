@@ -2,6 +2,7 @@
 
 #include "common/lpm.h"
 #include "common/memory.h"
+#include "common/memory_block.h"
 
 int
 yanet_sys_common_lpm_init(
@@ -24,4 +25,16 @@ yanet_sys_common_lpm_insert(
 void
 yanet_sys_common_lpm_free(struct lpm *lpm) {
 	lpm_free(lpm);
+}
+
+void *
+yanet_sys_common_memory_balloc(struct memory_context *context, size_t size) {
+	return memory_balloc(context, size);
+}
+
+void
+yanet_sys_common_memory_bfree(
+	struct memory_context *context, void *block, size_t size
+) {
+	memory_bfree(context, block, size);
 }

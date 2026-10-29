@@ -10,7 +10,7 @@
 
 /// Packet header views, the `yanet-packet` crate.
 pub use yanet_packet as packet;
-pub use yanet_sdk_derive::ShmLayout;
+pub use yanet_sdk_derive::{FfiRecord, ShmLayout, api};
 pub use yanet_shm::{
     rel::{ShmBox, ShmSlice},
     resolve::Resolve,
@@ -18,7 +18,10 @@ pub use yanet_shm::{
 };
 pub use yanet_sys::{
     common::lpm::{Lpm4, Lpm6, LpmRange},
-    cp::{BuildError, Built, Encode as Init, Refusal, boxed, build_config, counter, device, lpm, slice},
+    cp::{
+        BuildError, Built, DeviceIndex, DeviceMap, Encode as Init, FfiRecord, Refusal, boxed, build_config, counter,
+        device, lpm, slice, with_devices,
+    },
     dp::{
         Batch, CommitCx, Counter, CounterRef, Cx, Device, DeviceRef, DscpMark, Module, Packet, PacketView, ResizeError,
         TunnelError, Verdict,
@@ -34,7 +37,7 @@ pub mod prelude {
 #[doc(hidden)]
 pub mod __private {
     pub use yanet_shm::shm::{MAX_ALIGN, ShmLayout};
-    pub use yanet_sys::cp::{BuildError, Encode, MemoryContext, Owner, Stored, Writer};
+    pub use yanet_sys::cp::{BuildError, Encode, FfiRecord, MemoryContext, Owner, Stored, Writer};
 }
 
 // Test-only dependencies are visible to the library's own test target.

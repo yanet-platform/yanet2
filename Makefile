@@ -4,6 +4,14 @@ CARGO ?= cargo
 COMPILE_DB ?= build/compile_commands.json
 # The cgo preprocessor flags meson builds Go with, which go test needs as well.
 YANET_CGO_CPPFLAGS = $$(cat build/yanet_cgo_cppflags)
+# The Go tests of the Rust SDK fixtures build only where the configured build/
+# defines their targets (meson option sdk_rust_fixtures).
+GO_FIXTURE_TAGS = $$(grep -qs '^build sdk-rust-fixtures:' build/build.ninja && echo -tags=sdk_rust_fixtures)
+
+# The Go packages the test targets run, every one when empty.
+#
+# A job that tests part of the tree sets it, and the meson tests are left out.
+GO_TEST_PACKAGES ?=
 
 # Default PREFIX for debian packaging
 PREFIX ?= /usr
@@ -313,8 +321,8 @@ test:
 	$(MAKE) test-only
 
 test-only: go-test-prepare
-	CGO_CPPFLAGS="$(strip $(CGO_CPPFLAGS) $(YANET_CGO_CPPFLAGS))" go test -count=1 $$(go list ./... | grep -v '^github.com/yanet-platform/yanet2/tests/functional/main')
-	meson test -C build
+	CGO_CPPFLAGS="$(strip $(CGO_CPPFLAGS) $(YANET_CGO_CPPFLAGS))" go test $(GO_FIXTURE_TAGS) -count=1 $(or $(GO_TEST_PACKAGES),$$(go list $(GO_FIXTURE_TAGS) ./... | grep -v '^github.com/yanet-platform/yanet2/tests/functional/main'))
+	$(if $(GO_TEST_PACKAGES),,meson test -C build)
 
 test-asan:
 	$(MAKE) test-asan-only
@@ -361,8 +369,8 @@ test-asan-only:
 	export CGO_LDFLAGS="-fsanitize=address,undefined"; \
 	export UBSAN_OPTIONS="$${UBSAN_OPTIONS:-halt_on_error=1:abort_on_error=1:print_summary=1:print_stacktrace=1}"; \
 	export CC="$(ASAN_CC)" CXX="$(ASAN_CXX)"; \
-	go test -asan -count=1 $$(go list ./... | grep -v '^github.com/yanet-platform/yanet2/tests/functional/main')
-	meson test -C build
+	go test -asan $(GO_FIXTURE_TAGS) -count=1 $(or $(GO_TEST_PACKAGES),$$(go list $(GO_FIXTURE_TAGS) ./... | grep -v '^github.com/yanet-platform/yanet2/tests/functional/main'))
+	$(if $(GO_TEST_PACKAGES),,meson test -C build)
 
 test-tsan:
 	@if [ ! -d "build-tsan" ]; then \

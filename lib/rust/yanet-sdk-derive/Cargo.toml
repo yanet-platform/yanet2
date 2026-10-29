@@ -15,8 +15,9 @@ workspace = true
 [dependencies]
 proc-macro2 = "1"
 quote = "1"
-syn = { version = "2", features = ["visit-mut"] }
+syn = { version = "2", features = ["full", "visit-mut"] }
 
 [dev-dependencies]
 yanet-sdk = { path = "../yanet-sdk" }
 yanet-sys = { path = "../yanet-sys" }
+yanet-sdk-api = { path = "../yanet-sdk-api" }

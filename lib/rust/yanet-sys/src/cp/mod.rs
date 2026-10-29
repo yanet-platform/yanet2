@@ -10,12 +10,17 @@ mod addr;
 mod error;
 mod init;
 mod owner;
+mod record;
 mod write;
 
 pub use addr::{BlockAddr, Context, Header};
 pub use error::{BuildError, Refusal};
-pub use init::{Boxed, CounterName, DeviceName, LpmInit, Slice, boxed, counter, device, lpm, slice};
+pub use init::{
+    Boxed, CounterName, DeviceIndex, DeviceMap, DeviceName, LpmInit, Slice, WithDevices, boxed, counter, device, lpm,
+    slice, with_devices,
+};
 pub use owner::Owner;
+pub use record::FfiRecord;
 pub use write::{Built, Stored, build_config};
 #[doc(hidden)]
 pub use write::{Encode, FieldGuard, MemoryContext, Writer};

@@ -383,11 +383,17 @@ impl<'o, W: Owner> Writer<'o, W> {
     ///
     /// As for [`Encode::encode`], for a device's destination.
     pub unsafe fn device(&mut self, name: &str, destination: *mut Device) -> Result<(), BuildError<W::Error>> {
-        // SAFETY: construction serialises the initialised, unpublished header.
-        let id = unsafe { self.memory.owner.link_device(self.header, name) }.map_err(BuildError::Owner)?;
+        let id = self.link_device(name)?;
         // SAFETY: the registry index is the field's entire representation.
         unsafe { destination.cast::<u64>().write(id) };
         Ok(())
+    }
+
+    /// Links a device in this configuration's unpublished namespace.
+    #[doc(hidden)]
+    pub fn link_device(&mut self, name: &str) -> Result<u64, BuildError<W::Error>> {
+        // SAFETY: construction serialises the initialised, unpublished header.
+        unsafe { self.memory.owner.link_device(self.header, name) }.map_err(BuildError::Owner)
     }
 
     /// Consumes and validates each returned range once, immediately before C.
@@ -608,6 +614,17 @@ impl<M, W> fmt::Debug for Built<M, W> {
 impl<M, W> Built<M, W> {
     pub fn header(&self) -> Header {
         self.header
+    }
+
+    /// Recovers release authority for a complete configuration returned by C.
+    ///
+    /// # Safety
+    ///
+    /// The header must identify a complete configuration built for this module
+    /// and owner type. Its original owner and mapping must remain live, and no
+    /// other value may retain release authority for the configuration.
+    pub unsafe fn from_header(header: Header) -> Self {
+        Self { header, _kind: PhantomData }
     }
 }
 

@@ -179,6 +179,11 @@ type Config struct {
 	// its index — the harness's long-standing single-device behavior.
 	// When set, its length must equal WorkerCount.
 	Workers []WorkerSpec
+	// ReclaimLostPackets frees round inputs absent from both result lists.
+	//
+	// Enable this only for modules that deliberately forget packets and retain
+	// none beyond the round.
+	ReclaimLostPackets bool
 }
 
 // Result of one pipeline round.
@@ -195,6 +200,20 @@ type Result struct {
 type RawResult struct {
 	Output [][]byte
 	Drop   [][]byte
+	// OutputDescriptors and DropDescriptors preserve their corresponding packet-
+	// list order.
+	OutputDescriptors []PacketDescriptor
+	DropDescriptors   []PacketDescriptor
+}
+
+// PacketDescriptor records parser and recirculation metadata beside the frame.
+type PacketDescriptor struct {
+	// NetworkOffset and TransportOffset locate parsed headers from the start of
+	// the frame.
+	NetworkOffset   uint16
+	TransportOffset uint16
+	// RecircRemaining is what is left of the packet's recirculation budget.
+	RecircRemaining uint16
 }
 
 // Harness is a handle to an in-process dataplane harness.
@@ -209,7 +228,8 @@ type Harness struct {
 	deviceCount int
 	// Registered worker count. Worker indices passed to run calls must
 	// stay below it.
-	workerCount int
+	workerCount        int
+	reclaimLostPackets bool
 }
 
 // NewHarness constructs a Harness from cfg.
@@ -324,7 +344,12 @@ func NewHarness(cfg Config) (*Harness, error) {
 		return nil, fmt.Errorf("failed to create dataplane harness: dataplane_ut_new returned NULL")
 	}
 
-	return &Harness{ptr: ptr, deviceCount: deviceCount, workerCount: int(cfg.WorkerCount)}, nil
+	return &Harness{
+		ptr:                ptr,
+		deviceCount:        deviceCount,
+		workerCount:        int(cfg.WorkerCount),
+		reclaimLostPackets: cfg.ReclaimLostPackets,
+	}, nil
 }
 
 // Free tears down the harness. Nil-safe.
@@ -543,6 +568,20 @@ func (m *Harness) HandleSegmentedPacketsOnDevice(
 	return m.handleSegmentedPackets(worker, deviceID, packets...)
 }
 
+func freeLostPackets(packets []*dataplane.Packet, lists ...*dataplane.PacketList) {
+	listed := map[*dataplane.Packet]struct{}{}
+	for _, list := range lists {
+		for packet := list.First(); packet != nil; packet = packet.Next() {
+			listed[packet] = struct{}{}
+		}
+	}
+	for _, packet := range packets {
+		if _, ok := listed[packet]; !ok {
+			packet.Free()
+		}
+	}
+}
+
 // handleSegmentedPackets is the shared implementation for the
 // HandleSegmentedPackets* variants.
 func (m *Harness) handleSegmentedPackets(
@@ -602,6 +641,10 @@ func (m *Harness) handleSegmentedPackets(
 	output := (*dataplane.PacketList)(unsafe.Pointer(&result.output))
 	drop := (*dataplane.PacketList)(unsafe.Pointer(&result.drop))
 
+	if m.reclaimLostPackets {
+		freeLostPackets(builtPackets, output, drop)
+	}
+
 	rawBytes := func(list *dataplane.PacketList) [][]byte {
 		data := list.Data()
 		out := make([][]byte, 0, len(data))
@@ -613,9 +656,24 @@ func (m *Harness) handleSegmentedPackets(
 		return out
 	}
 
+	descriptors := func(list *dataplane.PacketList) []PacketDescriptor {
+		out := make([]PacketDescriptor, 0, list.Count())
+		for packet := list.First(); packet != nil; packet = packet.Next() {
+			cPacket := (*C.struct_packet)(unsafe.Pointer(packet))
+			out = append(out, PacketDescriptor{
+				NetworkOffset:   uint16(cPacket.network_header.offset),
+				TransportOffset: uint16(cPacket.transport_header.offset),
+				RecircRemaining: uint16(cPacket.recirc_remaining),
+			})
+		}
+		return out
+	}
+
 	return &RawResult{
-		Output: rawBytes(output),
-		Drop:   rawBytes(drop),
+		Output:            rawBytes(output),
+		Drop:              rawBytes(drop),
+		OutputDescriptors: descriptors(output),
+		DropDescriptors:   descriptors(drop),
 	}, nil
 }
 

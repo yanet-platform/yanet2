@@ -46,6 +46,7 @@ const ABI_OPTIONS: &[&str] = &[
 /// Repository directories whose C headers the bindings and the shim read,
 /// DPDK's among them (`rte_mbuf_core.h` and what the routing helpers reach).
 const C_HEADER_DIRS: &[&str] = &[
+    "api",
     "common",
     "lib/controlplane",
     "lib/counters",
@@ -62,7 +63,7 @@ const DPDK_BUILD_CONFIG: &str = "subprojects/dpdk/rte_build_config.h";
 const YANET_BUILD_CONFIG: &str = "yanet_build_config.h";
 
 /// First tokens of a compiler command that wrap the compiler.
-const COMPILER_WRAPPERS: &[&str] = &["ccache", "sccache", "distcc", "icecc"];
+const COMPILER_WRAPPERS: &[&str] = &["ccache", "sccache", "distcc", "icecc", "env"];
 
 /// Options that name an include directory, given joined or as the next
 /// argument.
@@ -93,6 +94,8 @@ pub struct CFlags {
     /// warnings the C build does. Kept apart because the bindings are read
     /// by libclang, which is no judge of the headers.
     warnings: Vec<String>,
+    /// Captured host sanitizer flags, shared by shim compilation and bindings.
+    sanitizers: Vec<String>,
     /// The optimisation level, the value of the last `-O` option, `0` when
     /// there is none, as the compiler reads it: the shim is compiled as the
     /// C sources around it are.
@@ -144,12 +147,13 @@ impl CFlags {
             .by_ref()
             .find(|token| !COMPILER_WRAPPERS.contains(&file_name(token)))
             .ok_or("the command names no compiler")?;
-        let (args, warnings, opt_level) = reduce(directory, tokens);
+        let (args, warnings, sanitizers, opt_level) = reduce(directory, tokens);
         Ok(Self {
             root,
             compiler,
             args,
             warnings,
+            sanitizers,
             opt_level,
         })
     }
@@ -162,6 +166,15 @@ impl CFlags {
     /// The warning options of the dataplane's C sources.
     pub fn warning_args(&self) -> &[String] {
         &self.warnings
+    }
+
+    /// Returns the sanitizer flags captured from the native build.
+    ///
+    /// Shim compilation and binding generation use them unconditionally to
+    /// preserve the native allocator layout. Final linking must supply any
+    /// sanitizer runtime the captured flags require.
+    pub fn sanitizer_args(&self) -> &[String] {
+        &self.sanitizers
     }
 
     /// The optimisation level of the dataplane's C sources, as cc-rs takes it:
@@ -211,15 +224,15 @@ fn command_tokens(entry: &Value) -> Result<Vec<String>, String> {
     shlex::split(command).ok_or_else(|| "the command is not a valid shell command".to_owned())
 }
 
-/// Splits the options into the ones that change how headers are read, the
-/// warning options and the optimisation level, dropping the rest. Paths are
-/// resolved against the directory the command ran in; include directories are
-/// canonicalised and, when missing, dropped: meson adds per-target private
-/// directories that may not exist after setup and hold no header.
-fn reduce(directory: &Path, tokens: impl Iterator<Item = String>) -> (Vec<String>, Vec<String>, String) {
+/// Retains native header, warning, sanitizer and optimisation options.
+///
+/// Paths resolve relative to the original compilation directory. Include
+/// directories are canonicalized and missing private target directories are
+/// omitted because they contain no generated header after setup.
+fn reduce(directory: &Path, tokens: impl Iterator<Item = String>) -> (Vec<String>, Vec<String>, Vec<String>, String) {
     let resolve = |path: &str| directory.join(path);
     let mut tokens = tokens;
-    let (mut args, mut warnings, mut opt_level) = (Vec::new(), Vec::new(), "0".to_owned());
+    let (mut args, mut warnings, mut sanitizers, mut opt_level) = (Vec::new(), Vec::new(), Vec::new(), "0".to_owned());
     while let Some(token) = tokens.next() {
         let option = INCLUDE_DIR_OPTIONS
             .iter()
@@ -229,6 +242,8 @@ fn reduce(directory: &Path, tokens: impl Iterator<Item = String>) -> (Vec<String
         let Some((option, joined)) = option else {
             if ABI_OPTIONS.iter().any(|&option| token.starts_with(option)) {
                 args.push(token);
+            } else if token.starts_with("-fsanitize=") {
+                sanitizers.push(token);
             } else if token.starts_with("-W") && !TOOL_OPTIONS.iter().any(|tool| token.starts_with(tool)) {
                 warnings.push(token);
             } else if let Some(level) = token.strip_prefix("-O") {
@@ -268,5 +283,5 @@ fn reduce(directory: &Path, tokens: impl Iterator<Item = String>) -> (Vec<String
         };
         args.extend([option.to_owned(), value]);
     }
-    (args, warnings, opt_level)
+    (args, warnings, sanitizers, opt_level)
 }

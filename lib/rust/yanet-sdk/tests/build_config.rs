@@ -3,7 +3,7 @@
 use core::{cell::Cell, marker::PhantomData, panic::AssertUnwindSafe, sync::atomic::Ordering};
 use std::panic::catch_unwind;
 
-use yanet_sdk::{BuildError, Built, Module, Refusal, ShmSlice, boxed, build_config, slice};
+use yanet_sdk::{BuildError, Built, Module, Refusal, ShmSlice, boxed, build_config, slice, with_devices};
 use yanet_sdk_testing::{
     View,
     cp::{Call, TestError, TestOwner},
@@ -390,4 +390,122 @@ fn test_callback_destructor_panic_releases_completed_nested_payloads() {
         assert!(result.is_err());
         owner.assert_released();
     }
+}
+
+#[test]
+fn test_bulk_devices_read_names_once_before_the_nested_initializer() {
+    let owner = owner();
+    let reads = Cell::new(0);
+    let built = build_config::<Fixture<yanet_sdk::Device>, _, Error>(
+        &owner,
+        "devices",
+        with_devices(
+            3,
+            |index| {
+                assert_eq!(index, reads.get());
+                reads.set(index + 1);
+                Ok(["eth0", "eth1", "eth2"][index])
+            },
+            |devices| {
+                assert_eq!(3, reads.get());
+                assert!(devices.get(3).is_none());
+                Ok(devices.get(2).unwrap())
+            },
+        ),
+    )
+    .unwrap();
+    assert_eq!(2, body(&owner, &built).0.index());
+    release(&owner, built);
+    owner.assert_released();
+}
+
+#[test]
+fn test_bulk_devices_partial_registration_errors_release_the_root() {
+    for limit in 0..3 {
+        let owner = owner();
+        owner.fail_after(Call::Registration, limit);
+        let input = with_devices(3, |index| Ok(["eth0", "eth1", "eth2"][index]), |_| Ok(7u64));
+        let error = build_config::<Fixture<u64>, _, Error>(&owner, "devices", input).unwrap_err();
+        assert_eq!(BuildError::Owner(TestError::Registration), error);
+        owner.assert_released();
+    }
+}
+
+#[test]
+fn test_bulk_devices_name_and_constructor_domain_errors_release_the_root() {
+    let owner = owner();
+    let input = with_devices(
+        3,
+        |index| {
+            if index == 2 {
+                Err(DomainError::InvalidRecord(index))
+            } else {
+                Ok(["eth0", "eth1", "eth2"][index])
+            }
+        },
+        |_| Ok(7u64),
+    );
+    let error = build_config::<Fixture<u64>, _, DomainError>(&owner, "devices", input).unwrap_err();
+    assert_eq!(DomainError::InvalidRecord(2), error);
+    owner.assert_released();
+
+    let input = with_devices(
+        3,
+        |index| Ok(["eth0", "eth1", "eth2"][index]),
+        |_| Err::<u64, _>(DomainError::InvalidRecord(3)),
+    );
+    let error = build_config::<Fixture<u64>, _, DomainError>(&owner, "devices", input).unwrap_err();
+    assert_eq!(DomainError::InvalidRecord(3), error);
+    owner.assert_released();
+}
+
+#[test]
+fn test_bulk_devices_name_callback_drop_precedes_constructor_and_releases_the_root() {
+    struct Capture;
+    impl Capture {
+        fn name(&self, index: usize) -> &'static str {
+            ["eth0", "eth1", "eth2"][index]
+        }
+    }
+    impl Drop for Capture {
+        fn drop(&mut self) {
+            panic!("device names callback destructor");
+        }
+    }
+    for len in [0, 3] {
+        let owner = owner();
+        let capture = Capture;
+        let made = Cell::new(false);
+        let input = with_devices(
+            len,
+            move |index| Ok(capture.name(index)),
+            |_| {
+                made.set(true);
+                Ok(7u64)
+            },
+        );
+        let result = catch_unwind(AssertUnwindSafe(|| {
+            build_config::<Fixture<u64>, _, Error>(&owner, "devices", input)
+        }));
+        assert!(result.is_err());
+        assert!(!made.get());
+        owner.assert_released();
+    }
+}
+
+#[test]
+fn test_bulk_devices_constructor_panic_releases_the_root() {
+    let owner = owner();
+    let input = with_devices(
+        2,
+        |index| Ok(["eth0", "eth1"][index]),
+        |_| -> Result<u64, Error> {
+            panic!("device constructor");
+        },
+    );
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        build_config::<Fixture<u64>, _, Error>(&owner, "devices", input)
+    }));
+    assert!(result.is_err());
+    owner.assert_released();
 }

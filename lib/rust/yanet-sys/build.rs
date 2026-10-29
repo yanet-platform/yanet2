@@ -50,12 +50,14 @@ const PACKET_SOURCES: [&str; 3] = [
 ///
 /// The dataplane shim wraps header-inline C routing helpers and the packet
 /// encapsulation routines, whose sources it compiles in; the common shim wraps
-/// the header-inline LPM routines. They are linked into
-/// every module plugin with hidden visibility, so a plugin exports nothing of
-/// them and imports none of the encapsulation from the host.
+/// LPM construction and allocation in native memory contexts. They are linked
+/// into every module plugin with hidden visibility, so a plugin exports nothing
+/// of them and imports none of the encapsulation from the host.
 fn build_shim(flags: &CFlags, shim_dir: &Path) {
     let mut build = cc::Build::new();
+    let arch = env::var("CARGO_CFG_TARGET_ARCH").expect("target architecture");
     build
+        .target(&format!("{arch}-unknown-linux-gnu"))
         .compiler(&flags.compiler)
         .file(shim_dir.join("common_shim.c"))
         .file(shim_dir.join("dp_shim.c"))
@@ -66,6 +68,9 @@ fn build_shim(flags: &CFlags, shim_dir: &Path) {
         .warnings(false)
         .flag("-fvisibility=hidden");
     for arg in flags.header_args().iter().chain(flags.warning_args()) {
+        build.flag(arg);
+    }
+    for arg in flags.sanitizer_args() {
         build.flag(arg);
     }
     for file in [
@@ -89,6 +94,7 @@ fn generate_bindings(flags: &CFlags, shim_dir: &Path, out: &Path) {
         .header(shim_dir.join("bindings.h").display().to_string())
         .clang_arg(format!("--target={arch}-unknown-linux-gnu"))
         .clang_args(flags.header_args())
+        .clang_args(flags.sanitizer_args())
         .clang_arg(format!("-I{}", shim_dir.display()))
         // bindgen omits a hidden-visibility function; the attribute is for
         // the C compiler that builds the shim, not for the Rust binding.
@@ -123,6 +129,17 @@ fn generate_bindings(flags: &CFlags, shim_dir: &Path, out: &Path) {
         .allowlist_type("packet_list")
         .allowlist_type("packet_front")
         .allowlist_type("rte_mbuf")
+        .allowlist_type("agent")
+        .allowlist_type("yanet_error")
+        .allowlist_type("yanet_error_kind")
+        .allowlist_function("cp_module_(init|fini|try_destroy|link_device)")
+        .allowlist_function("counter_registry_register")
+        .allowlist_function("agent_destroy_released")
+        .allowlist_function("yanet_error_(free|message|cause|kind|add_kind)")
+        .allowlist_var("CP_(MODULE_TYPE|MODULE_NAME|DEVICE_NAME)_LEN")
+        .allowlist_var("COUNTER_NAME_LEN")
+        .allowlist_function("__errno_location")
+        .allowlist_var("E(AGAIN|INVAL|IO)")
         .allowlist_function("yanet_sys_common_.*")
         .allowlist_function("yanet_sys_dp_.*")
         .allowlist_var("LPM_.*")
@@ -139,7 +156,6 @@ fn generate_bindings(flags: &CFlags, shim_dir: &Path, out: &Path) {
         .opaque_type("rte_mbuf_ext_shared_info")
         .opaque_type("dp_config")
         .opaque_type("cp_config")
-        .opaque_type("agent")
         .opaque_type("cp_config_gen")
         .opaque_type("config_gen_ectx")
         .opaque_type("device_entry_ectx")
