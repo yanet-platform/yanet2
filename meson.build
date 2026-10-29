@@ -484,7 +484,7 @@ if not dataplane_only
     # External archives link alone, without the libraries meson records
     # behind them.
     foreach archive : package.get('archives', []) + package.get('generated_archives', [])
-      cgo_flags_args += ['--archive', package_path, archive.full_path()]
+      cgo_flags_args += ['--archive', package_path, archive]
     endforeach
     if package.has_key('build_tag')
       cgo_flags_args += ['--build-tag', package_path, package['build_tag']]
