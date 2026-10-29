@@ -85,6 +85,54 @@ use yanet_sdk_testing as _;
 #[cfg(doctest)]
 mod doctests {
 
+    /// A caller's replacement alignment limit cannot admit over-aligned
+    /// storage.
+    ///
+    /// ```compile_fail,E0080
+    /// #![forbid(unsafe_code)]
+    /// extern crate self as yanet_sdk;
+    /// extern crate yanet_sdk as sdk_real;
+    /// pub mod __private {
+    ///     pub use sdk_real::__private::*;
+    ///     pub const MAX_ALIGN: usize = 128;
+    /// }
+    /// #[derive(sdk_real::ShmLayout)]
+    /// #[repr(C, align(128))]
+    /// struct Wide {
+    ///     words: [u64; 16],
+    /// }
+    /// fn main() {}
+    /// ```
+    struct CallerAlignmentLimitRefused;
+
+    /// Caller aliases cannot replace the checks applied to valid storage.
+    ///
+    /// ```
+    /// #![forbid(unsafe_code)]
+    /// extern crate core as core_real;
+    /// extern crate self as core;
+    /// extern crate self as yanet_sdk;
+    /// extern crate yanet_sdk as sdk_real;
+    /// pub use core_real::*;
+    /// pub mod mem {
+    ///     pub use core_real::mem::*;
+    ///     pub const fn align_of<T>() -> usize {
+    ///         128
+    ///     }
+    /// }
+    /// pub mod __private {
+    ///     pub use sdk_real::__private::*;
+    ///     pub const MAX_ALIGN: usize = 0;
+    /// }
+    /// #[derive(sdk_real::ShmLayout)]
+    /// #[repr(C, align(64))]
+    /// struct Wide {
+    ///     words: [u64; 8],
+    /// }
+    /// fn main() {}
+    /// ```
+    struct CallerAliasesKeepValidAlignment;
+
     /// A block belongs to the build that allocated it; another build refuses
     /// it.
     ///

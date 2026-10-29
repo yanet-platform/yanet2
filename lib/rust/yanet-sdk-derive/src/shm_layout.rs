@@ -56,7 +56,9 @@ pub fn expand(input: &DeriveInput) -> syn::Result<TokenStream> {
         ));
     }
     check_repr(input)?;
-    let p = quote!(::yanet_sdk::__private);
+    let sdk = format_ident!("__yanet_sdk_for_{}", name);
+    let core = format_ident!("__yanet_core_for_{}", name);
+    let p = quote!(#sdk::__private);
 
     let mut bounds = Vec::new();
     let mut sizes = Vec::new();
@@ -77,25 +79,25 @@ pub fn expand(input: &DeriveInput) -> syn::Result<TokenStream> {
         bounds.push(quote_spanned! {ty.span()=>
             __field_is_build::<#ty>();
         });
-        sizes.push(quote!(+ ::core::mem::size_of::<#ty>()));
+        sizes.push(quote!(+ #core::mem::size_of::<#ty>()));
         parts_fields.push(quote_spanned!(ty.span()=> #vis #ident: <#ty as #p::Build>::Parts<'b, __W>));
-        debug_bounds.push(quote_spanned!(ty.span()=> <#ty as #p::Build>::Parts<'b, __W>: ::core::fmt::Debug));
+        debug_bounds.push(quote_spanned!(ty.span()=> <#ty as #p::Build>::Parts<'b, __W>: #core::fmt::Debug));
         writes.push(quote_spanned! {ty.span()=>
             <#ty as #p::Build>::write::<__W>(
                 #binding,
                 __memory,
-                __addr + ::core::mem::offset_of!(#name, #ident),
+                __addr + #core::mem::offset_of!(#name, #ident),
             )?;
             let #guard = #p::Partial::<#ty, __W>::new(
                 __memory,
-                __addr + ::core::mem::offset_of!(#name, #ident),
+                __addr + #core::mem::offset_of!(#name, #ident),
                 1,
             );
         });
         guards.push(guard);
         frees.push(quote_spanned! {ty.span()=>
             <#ty as #p::Build>::free::<__W>(
-                __addr + ::core::mem::offset_of!(#name, #ident),
+                __addr + #core::mem::offset_of!(#name, #ident),
                 __memory,
             );
         });
@@ -112,17 +114,22 @@ pub fn expand(input: &DeriveInput) -> syn::Result<TokenStream> {
     let parts_doc = format!("Parts of [`{name}`]: one per field, each written at the field's place.");
 
     Ok(quote! {
+        #[allow(non_snake_case)]
+        extern crate yanet_sdk as #sdk;
+        #[allow(non_snake_case)]
+        extern crate core as #core;
+
         const _: () = {
             fn __field_is_build<T: #p::Build>() {}
             fn __fields() {
                 #(#bounds)*
             }
-            ::core::assert!(
-                ::core::mem::size_of::<#name>() == 0 #(#sizes)*,
+            #core::assert!(
+                #core::mem::size_of::<#name>() == 0 #(#sizes)*,
                 #padding_msg,
             );
-            ::core::assert!(!::core::mem::needs_drop::<#name>(), #drop_msg);
-            ::core::assert!(::core::mem::align_of::<#name>() <= #p::MAX_ALIGN, #align_msg);
+            #core::assert!(!#core::mem::needs_drop::<#name>(), #drop_msg);
+            #core::assert!(#core::mem::align_of::<#name>() <= #p::MAX_ALIGN, #align_msg);
         };
 
         // SAFETY: a non-generic repr(C) struct, not packed, aligned to at
@@ -136,11 +143,11 @@ pub fn expand(input: &DeriveInput) -> syn::Result<TokenStream> {
             #(#parts_fields),*
         }
 
-        impl<'b, __W: #p::Owner> ::core::fmt::Debug for #parts_name<'b, __W>
+        impl<'b, __W: #p::Owner> #core::fmt::Debug for #parts_name<'b, __W>
         where
             #(#debug_bounds,)*
         {
-            fn fmt(&self, __f: &mut ::core::fmt::Formatter<'_>) -> ::core::result::Result<(), ::core::fmt::Error> {
+            fn fmt(&self, __f: &mut #core::fmt::Formatter<'_>) -> #core::result::Result<(), #core::fmt::Error> {
                 __f.debug_struct(#name_str)
                     #(.field(#field_names, &self.#field_idents))*
                     .finish()
@@ -159,16 +166,16 @@ pub fn expand(input: &DeriveInput) -> syn::Result<TokenStream> {
                 __parts: #parts_name<'_, __W>,
                 __memory: &#p::MemoryContext<'_, __W>,
                 __addr: usize,
-            ) -> ::core::result::Result<(), #p::Refusal> {
+            ) -> #core::result::Result<(), #p::Refusal> {
                 let #parts_name { #(#idents),* } = __parts;
                 // SAFETY: each field lies in the value at the address, which
                 // the caller vouches for, and a guard covers the field just
                 // written.
                 unsafe {
                     #(#writes)*
-                    #(::core::mem::forget(#guards);)*
+                    #(#core::mem::forget(#guards);)*
                 }
-                ::core::result::Result::Ok(())
+                #core::result::Result::Ok(())
             }
 
             unsafe fn free<__W: #p::Owner>(

@@ -2,9 +2,9 @@
 //!
 //! The derive is the only implementation of the `unsafe` layout trait a module
 //! crate has; its expansion is audited by review, since `forbid(unsafe_code)`
-//! in a module crate does not see macro output. It accepts no user-supplied
-//! crate path: generated code names `::yanet_sdk::__private` only. Use it
-//! through the `yanet-sdk` crate.
+//! in a module crate does not see macro output. SDK and core paths bind
+//! explicitly to external crates so caller aliases cannot replace trusted
+//! checks or helpers. Use it through the `yanet-sdk` crate.
 
 #![forbid(unsafe_code)]
 
