@@ -61,6 +61,12 @@ func NewModuleConfig(
 
 	var cSync *C.struct_fwstate_sync_config
 	if syncConfig != nil {
+		if len(syncConfig.Endpoints) > MaxSyncEndpoints {
+			return nil, fmt.Errorf(
+				"at most %d sync endpoints are supported, got %d",
+				MaxSyncEndpoints, len(syncConfig.Endpoints),
+			)
+		}
 		cSyncConfig := syncConfig.toC()
 		cSync = &cSyncConfig
 	}

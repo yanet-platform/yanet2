@@ -14,16 +14,22 @@ import (
 // TTL48Max is the largest TTL (ns) storable in fw_state_value::last_ttl.
 const TTL48Max = uint64(C.FWSTATE_TTL48_MAX)
 
+// SyncEndpoint is one synchronization destination: the source stamped on
+// packets emitted toward it, the destination address, and the destination
+// port in host byte order. A zero Port disables the endpoint.
+type SyncEndpoint struct {
+	SrcAddr [16]byte
+	DstAddr [16]byte
+	Port    uint16
+}
+
 // SyncConfig defines how fwstate receives synchronization packets and emits
-// locally generated synchronization events. The multicast endpoint is used
-// for both reception and emission; the unicast endpoint is emission-only.
+// locally generated synchronization events. Every endpoint is used for
+// emission; an endpoint with a multicast destination is matched on the wire
+// for reception as well.
 type SyncConfig struct {
-	SrcAddr             [16]byte
-	DstEther            [6]byte
-	DstAddrMulticast    [16]byte
-	PortMulticast       uint16
-	DstAddrUnicast      [16]byte
-	PortUnicast         uint16
+	// Endpoints carries at most MaxSyncEndpoints entries.
+	Endpoints           []SyncEndpoint
 	TcpSynAck           uint64
 	TcpSyn              uint64
 	TcpFin              uint64
@@ -39,14 +45,25 @@ type SyncConfig struct {
 // MinSyncMTU is the smallest sync MTU that carries one frame.
 const MinSyncMTU = uint16(C.FWSTATE_SYNC_MIN_MTU)
 
+// MaxSyncEndpoints mirrors the C FWSTATE_SYNC_ENDPOINTS_MAX bound of the
+// endpoint array in the shared-memory config.
+const MaxSyncEndpoints = int(C.FWSTATE_SYNC_ENDPOINTS_MAX)
+
 func newSyncConfigFromC(cCfg *C.struct_fwstate_sync_config) SyncConfig {
 	var syncCfg SyncConfig
-	copy(syncCfg.SrcAddr[:], unsafe.Slice((*byte)(unsafe.Pointer(&cCfg.src_addr[0])), 16))
-	copy(syncCfg.DstEther[:], unsafe.Slice((*byte)(unsafe.Pointer(&cCfg.dst_ether)), 6))
-	copy(syncCfg.DstAddrMulticast[:], unsafe.Slice((*byte)(unsafe.Pointer(&cCfg.dst_addr_multicast[0])), 16))
-	syncCfg.PortMulticast = uint16(ntohs(uint16(cCfg.port_multicast)))
-	copy(syncCfg.DstAddrUnicast[:], unsafe.Slice((*byte)(unsafe.Pointer(&cCfg.dst_addr_unicast[0])), 16))
-	syncCfg.PortUnicast = uint16(ntohs(uint16(cCfg.port_unicast)))
+	count := int(cCfg.endpoint_count)
+	if count > MaxSyncEndpoints {
+		count = MaxSyncEndpoints
+	}
+	syncCfg.Endpoints = make([]SyncEndpoint, 0, count)
+	for idx := 0; idx < count; idx++ {
+		cEndpoint := &cCfg.endpoints[idx]
+		var endpoint SyncEndpoint
+		copy(endpoint.SrcAddr[:], unsafe.Slice((*byte)(unsafe.Pointer(&cEndpoint.src_addr[0])), 16))
+		copy(endpoint.DstAddr[:], unsafe.Slice((*byte)(unsafe.Pointer(&cEndpoint.dst_addr[0])), 16))
+		endpoint.Port = uint16(ntohs(uint16(cEndpoint.port)))
+		syncCfg.Endpoints = append(syncCfg.Endpoints, endpoint)
+	}
 	syncCfg.TcpSynAck = uint64(cCfg.timeouts.tcp_syn_ack)
 	syncCfg.TcpSyn = uint64(cCfg.timeouts.tcp_syn)
 	syncCfg.TcpFin = uint64(cCfg.timeouts.tcp_fin)
@@ -60,12 +77,18 @@ func newSyncConfigFromC(cCfg *C.struct_fwstate_sync_config) SyncConfig {
 
 func (m SyncConfig) toC() C.struct_fwstate_sync_config {
 	var cSyncConfig C.struct_fwstate_sync_config
-	copy(unsafe.Slice((*byte)(unsafe.Pointer(&cSyncConfig.src_addr[0])), 16), m.SrcAddr[:])
-	copy(unsafe.Slice((*byte)(unsafe.Pointer(&cSyncConfig.dst_ether)), 6), m.DstEther[:])
-	copy(unsafe.Slice((*byte)(unsafe.Pointer(&cSyncConfig.dst_addr_multicast[0])), 16), m.DstAddrMulticast[:])
-	cSyncConfig.port_multicast = C.uint16_t(htons(uint16(m.PortMulticast)))
-	copy(unsafe.Slice((*byte)(unsafe.Pointer(&cSyncConfig.dst_addr_unicast[0])), 16), m.DstAddrUnicast[:])
-	cSyncConfig.port_unicast = C.uint16_t(htons(uint16(m.PortUnicast)))
+	count := len(m.Endpoints)
+	if count > MaxSyncEndpoints {
+		count = MaxSyncEndpoints
+	}
+	cSyncConfig.endpoint_count = C.uint32_t(count)
+	for idx := 0; idx < count; idx++ {
+		endpoint := &m.Endpoints[idx]
+		cEndpoint := &cSyncConfig.endpoints[idx]
+		copy(unsafe.Slice((*byte)(unsafe.Pointer(&cEndpoint.src_addr[0])), 16), endpoint.SrcAddr[:])
+		copy(unsafe.Slice((*byte)(unsafe.Pointer(&cEndpoint.dst_addr[0])), 16), endpoint.DstAddr[:])
+		cEndpoint.port = C.uint16_t(htons(uint16(endpoint.Port)))
+	}
 	cSyncConfig.timeouts.tcp_syn_ack = C.uint64_t(m.TcpSynAck)
 	cSyncConfig.timeouts.tcp_syn = C.uint64_t(m.TcpSyn)
 	cSyncConfig.timeouts.tcp_fin = C.uint64_t(m.TcpFin)

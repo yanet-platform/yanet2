@@ -224,15 +224,19 @@ func TestDeleteModuleConfigUsesRegisteredType(t *testing.T) {
 }
 
 func validDeleteTestUpdateRequest(name, fw4MapName, fw6MapName string) *fwstatepb.UpdateConfigRequest {
+	addr := func() *commonpb.IPAddress {
+		return &commonpb.IPAddress{Addr: []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}}
+	}
 	return &fwstatepb.UpdateConfigRequest{
 		Name:      name,
 		MapNameV4: new(fw4MapName),
 		MapNameV6: new(fw6MapName),
 		SyncConfig: &fwstatepb.SyncConfig{
-			SrcAddr:          &commonpb.IPAddress{Addr: []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}},
-			DstEther:         &commonpb.MACAddress{Addr: 0x333300000001},
-			DstAddrMulticast: &commonpb.IPAddress{Addr: []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}},
-			PortMulticast:    proto.Uint32(9999),
+			Endpoints: []*fwstatepb.SyncEndpoint{{
+				SrcAddr: addr(),
+				DstAddr: addr(),
+				Port:    proto.Uint32(9999),
+			}},
 		},
 	}
 }

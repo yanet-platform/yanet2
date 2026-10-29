@@ -21,29 +21,43 @@ struct fwstate_timeouts {
 	uint64_t default_;    // 16
 };
 
-struct fwstate_sync_config {
-	// IPv6 source stamped on locally emitted sync frames.
+// Largest number of synchronization endpoints one config carries. The
+// controlplane refuses longer lists before the config reaches shm.
+#define FWSTATE_SYNC_ENDPOINTS_MAX 8
+
+/**
+ * One synchronization endpoint: a source and destination IPv6 address and
+ * the destination port of locally emitted sync packets.
+ *
+ * A multicast destination doubles as the receive contract: an incoming
+ * packet is claimed when it matches any endpoint's destination address and
+ * port (and carries a multicast Ethernet destination). A unicast
+ * destination is emission-only. The Ethernet header of emitted packets
+ * stays zeroed: the module downstream of fwstate, route, resolves and
+ * stamps both MAC addresses.
+ */
+struct fwstate_sync_endpoint {
+	// IPv6 source stamped on packets emitted toward dst_addr.
 	uint8_t src_addr[16];
 
-	// Ethernet destination shared by multicast and unicast emission.
-	struct ether_addr dst_ether;
-	// Multicast IPv6 destination used for wire matching and emission.
-	uint8_t dst_addr_multicast[16];
+	// IPv6 destination of emitted packets.
+	uint8_t dst_addr[16];
+
 	/**
-	 * Multicast destination port in network byte order (big-endian).
-	 * Stored in BE so it can be used directly in UDP header fields
-	 * and compared with udp_hdr->dst_port without conversion.
-	 * The controlplane performs the host-to-network conversion when
-	 * populating this field.
+	 * Destination port in network byte order (big-endian). Stored in BE
+	 * so it can be used directly in UDP header fields and compared with
+	 * udp_hdr->dst_port without conversion. The controlplane performs
+	 * the host-to-network conversion when populating this field. Zero
+	 * disables the endpoint.
 	 */
-	uint16_t port_multicast;
-	// Unicast IPv6 destination used only for local emission.
-	uint8_t dst_addr_unicast[16];
-	/**
-	 * Unicast destination port in network byte order (big-endian).
-	 * The control plane converts it before publishing the config.
-	 */
-	uint16_t port_unicast;
+	uint16_t port;
+};
+
+struct fwstate_sync_config {
+	// Synchronization endpoints; the first endpoint_count entries are
+	// initialized.
+	struct fwstate_sync_endpoint endpoints[FWSTATE_SYNC_ENDPOINTS_MAX];
+	uint32_t endpoint_count;
 
 	struct fwstate_timeouts timeouts;
 

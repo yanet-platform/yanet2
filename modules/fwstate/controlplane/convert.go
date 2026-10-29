@@ -14,14 +14,13 @@ func SyncConfigToC(syncConfig *fwstatepb.SyncConfig) cfwstate.SyncConfig {
 	}
 
 	var nativeConfig cfwstate.SyncConfig
-	sourceAddress := syncConfig.GetSrcAddr().GetAddr()
-	copy(nativeConfig.SrcAddr[:], sourceAddress)
-	destinationEther := syncConfig.GetDstEther().EUI48()
-	copy(nativeConfig.DstEther[:], destinationEther[:])
-	copy(nativeConfig.DstAddrMulticast[:], syncConfig.GetDstAddrMulticast().GetAddr())
-	nativeConfig.PortMulticast = uint16(syncConfig.GetPortMulticast())
-	copy(nativeConfig.DstAddrUnicast[:], syncConfig.GetDstAddrUnicast().GetAddr())
-	nativeConfig.PortUnicast = uint16(syncConfig.GetPortUnicast())
+	for _, endpoint := range syncConfig.GetEndpoints() {
+		var native cfwstate.SyncEndpoint
+		copy(native.SrcAddr[:], endpoint.GetSrcAddr().GetAddr())
+		copy(native.DstAddr[:], endpoint.GetDstAddr().GetAddr())
+		native.Port = uint16(endpoint.GetPort())
+		nativeConfig.Endpoints = append(nativeConfig.Endpoints, native)
+	}
 	nativeConfig.TcpSynAck = syncConfig.GetTcpSynAck()
 	nativeConfig.TcpSyn = syncConfig.GetTcpSyn()
 	nativeConfig.TcpFin = syncConfig.GetTcpFin()
@@ -33,28 +32,29 @@ func SyncConfigToC(syncConfig *fwstatepb.SyncConfig) cfwstate.SyncConfig {
 	return nativeConfig
 }
 
-// SyncConfigFromC makes every scalar present and retains destination addresses
-// only when their ports are nonzero.
+// SyncConfigFromC makes every scalar present and lists the stored endpoints,
+// skipping the entries a zero port disables.
 func SyncConfigFromC(nativeConfig cfwstate.SyncConfig) *fwstatepb.SyncConfig {
 	syncConfig := &fwstatepb.SyncConfig{
-		SrcAddr:             &commonpb.IPAddress{Addr: append([]byte(nil), nativeConfig.SrcAddr[:]...)},
-		DstEther:            commonpb.NewMACAddressEUI48(nativeConfig.DstEther),
-		PortMulticast:       new(uint32(nativeConfig.PortMulticast)),
-		PortUnicast:         new(uint32(nativeConfig.PortUnicast)),
-		TcpSynAck:           new(nativeConfig.TcpSynAck),
-		TcpSyn:              new(nativeConfig.TcpSyn),
-		TcpFin:              new(nativeConfig.TcpFin),
-		Tcp:                 new(nativeConfig.Tcp),
-		Udp:                 new(nativeConfig.Udp),
-		Default:             new(nativeConfig.Default),
-		SyncSuppressTimeout: new(nativeConfig.SyncSuppressTimeout),
+		Endpoints:           make([]*fwstatepb.SyncEndpoint, 0, len(nativeConfig.Endpoints)),
+		TcpSynAck:           new(uint64(nativeConfig.TcpSynAck)),
+		TcpSyn:              new(uint64(nativeConfig.TcpSyn)),
+		TcpFin:              new(uint64(nativeConfig.TcpFin)),
+		Tcp:                 new(uint64(nativeConfig.Tcp)),
+		Udp:                 new(uint64(nativeConfig.Udp)),
+		Default:             new(uint64(nativeConfig.Default)),
+		SyncSuppressTimeout: new(uint64(nativeConfig.SyncSuppressTimeout)),
 		SyncMtu:             new(uint32(nativeConfig.SyncMTU)),
 	}
-	if nativeConfig.PortMulticast != 0 {
-		syncConfig.DstAddrMulticast = &commonpb.IPAddress{Addr: append([]byte(nil), nativeConfig.DstAddrMulticast[:]...)}
-	}
-	if nativeConfig.PortUnicast != 0 {
-		syncConfig.DstAddrUnicast = &commonpb.IPAddress{Addr: append([]byte(nil), nativeConfig.DstAddrUnicast[:]...)}
+	for _, endpoint := range nativeConfig.Endpoints {
+		if endpoint.Port == 0 {
+			continue
+		}
+		syncConfig.Endpoints = append(syncConfig.Endpoints, &fwstatepb.SyncEndpoint{
+			SrcAddr: &commonpb.IPAddress{Addr: append([]byte(nil), endpoint.SrcAddr[:]...)},
+			DstAddr: &commonpb.IPAddress{Addr: append([]byte(nil), endpoint.DstAddr[:]...)},
+			Port:    new(uint32(uint32(endpoint.Port))),
+		})
 	}
 	return syncConfig
 }
