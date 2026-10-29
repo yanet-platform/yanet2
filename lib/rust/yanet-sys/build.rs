@@ -51,13 +51,17 @@ const PACKET_SOURCES: [&str; 3] = [
 ///
 /// The dataplane shim wraps header-inline C routing helpers and the packet
 /// encapsulation routines, whose sources it compiles in; the common shim wraps
-/// the header-inline LPM and memory routines of `common/`. They are linked into
-/// every module plugin with hidden visibility, so a plugin exports nothing of
-/// them and imports none of the encapsulation from the host.
+/// the header-inline LPM and memory routines of `common/`; the classify shims
+/// wrap the compiles and the lookups of `lib/classify`, in an object each, so
+/// a plugin pulls only the lookups. They are linked into every module plugin
+/// with hidden visibility, so a plugin exports nothing of them and imports
+/// none of the encapsulation from the host.
 fn build_shim(flags: &CFlags, shim_dir: &Path) {
     let mut build = cc::Build::new();
     build
         .compiler(&flags.compiler)
+        .file(shim_dir.join("classify_cp_shim.c"))
+        .file(shim_dir.join("classify_dp_shim.c"))
         .file(shim_dir.join("common_shim.c"))
         .file(shim_dir.join("dp_shim.c"))
         .files(PACKET_SOURCES.map(|source| flags.source(source)))
@@ -75,6 +79,9 @@ fn build_shim(flags: &CFlags, shim_dir: &Path) {
         }
     }
     for file in [
+        "classify_cp_shim.c",
+        "classify_dp_shim.c",
+        "classify_shim.h",
         "common_shim.c",
         "common_shim.h",
         "dp_shim.c",
@@ -134,6 +141,7 @@ fn generate_bindings(flags: &CFlags, shim_dir: &Path, out: &Path) {
         .allowlist_type("yanet_error_kind")
         .allowlist_function("yanet_sys_common_.*")
         .allowlist_function("yanet_sys_dp_.*")
+        .allowlist_function("yanet_sys_classify_.*")
         // The agent owner of the configuration builder: the C routines a C
         // module's control-plane API calls for the same steps.
         .allowlist_function("cp_module_(init|fini|try_destroy|link_device)")
@@ -153,6 +161,8 @@ fn generate_bindings(flags: &CFlags, shim_dir: &Path, out: &Path) {
         .allowlist_var("MEMORY_BLOCK_MAX_ALIGN")
         .allowlist_var("MEMORY_BLOCK_ALLOCATOR_MAX_SIZE")
         .allowlist_var("PACKET_TRANSPORT_HEADER_UNAVAILABLE")
+        .allowlist_var("YANET_SYS_CLASSIFY_.*")
+        .allowlist_var("filter_ip_fragment_.*")
         // Reached only behind pointers the SDK never follows, their own bytes
         // never read.
         .opaque_type("rte_mempool")

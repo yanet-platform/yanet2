@@ -87,13 +87,13 @@ pub unsafe trait Owner: 'static {
     /// referenced.
     unsafe fn fini_header(&self, header: Header);
 
-    /// Registers a single-value counter (C size 1) with the module's
-    /// registry and returns its id.
+    /// Registers a counter of the given number of values (C size) with the
+    /// module's registry and returns its id.
     ///
     /// # Safety
     ///
     /// The header must be initialised by this owner and not published.
-    unsafe fn register_counter(&self, header: Header, name: &str) -> Result<u64, Self::Error>;
+    unsafe fn register_counter(&self, header: Header, name: &str, size: u64) -> Result<u64, Self::Error>;
 
     /// Links a device to the module and returns its index.
     ///

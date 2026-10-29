@@ -6,6 +6,13 @@
 #pragma once
 
 #include "common/lpm.h"
+#include "lib/classify/classifiers/device.h"
+#include "lib/classify/classifiers/ipfrag.h"
+#include "lib/classify/classifiers/line.h"
+#include "lib/classify/classifiers/net4.h"
+#include "lib/classify/classifiers/net6.h"
+#include "lib/classify/classifiers/port.h"
+#include "lib/classify/rule_table.h"
 #include "lib/controlplane/agent/agent.h"
 #include "lib/controlplane/config/cp_device.h"
 #include "lib/controlplane/config/cp_module.h"
@@ -22,5 +29,6 @@
 
 #include "yanet_build_config.h"
 
+#include "classify_shim.h"
 #include "common_shim.h"
 #include "dp_shim.h"

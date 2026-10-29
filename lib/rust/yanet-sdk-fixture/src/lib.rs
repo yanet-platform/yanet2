@@ -4,7 +4,8 @@
 //! [`Fixture`] is a test program in module form: it has no prepared value, and
 //! its configuration's mode word selects what it does with a batch. [`Tally`]
 //! has a prepared value made at commit, and counts. [`Fib`] forwards by a
-//! route FIB.
+//! route FIB. [`firewall::Firewall`] filters by the rules of a classifier of
+//! the C ACL's shape.
 
 #![no_std]
 #![forbid(unsafe_code)]
@@ -13,6 +14,8 @@ use yanet_sdk::{Batch, CommitCx, Counter, CounterRef, Cx, Device, Lpm4, Lpm6, Mo
 // The plugin examples use it.
 #[cfg(feature = "plugin")]
 use yanet_sdk_plugin as _;
+
+pub mod firewall;
 
 // What the fixture module does with a batch, as values of its mode word. The
 // names are prefixed because the api crate's C header carries them as macros.

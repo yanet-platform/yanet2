@@ -188,7 +188,7 @@ unsafe impl Owner for TestOwner {
         }
     }
 
-    unsafe fn register_counter(&self, _header: Header, _name: &str) -> Result<u64, TestError> {
+    unsafe fn register_counter(&self, _header: Header, _name: &str, _size: u64) -> Result<u64, TestError> {
         self.register()
     }
 

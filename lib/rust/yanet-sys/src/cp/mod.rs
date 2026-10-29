@@ -4,7 +4,8 @@
 //! Builds module configurations in the shared memory of an [`Owner`]. The
 //! owner is the seam to the C control plane (agent memory, the module header
 //! and its registries); this module calls C only for the objects a
-//! configuration embeds, such as the LPM, through the shims of `common/`.
+//! configuration embeds, such as the LPM, through the shims of `common/`, and
+//! the classifiers of `lib/classify`.
 //! `no_std` without `alloc`: the owner supplies the memory.
 //!
 //! # Construction
@@ -31,6 +32,7 @@ mod owner;
 mod record;
 
 pub use addr::{BlockAddr, Context, Header};
+pub(crate) use build::refused;
 pub use build::{Build, Builder, Built, Owned, OwnedSlice, Registered, Scope};
 #[doc(hidden)]
 pub use build::{MemoryContext, Partial};

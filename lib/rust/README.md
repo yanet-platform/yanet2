@@ -9,14 +9,14 @@ builder, the derive, the module-crate facade and the packet header views.
 | Crate | Environment | Role |
 |-------|-------------|------|
 | `yanet-shm` | `no_std`, no `alloc` | the provenance root, relative-pointer field types, `Opaque`, `ShmLayout` leaves |
-| `yanet-sys` | `no_std`, no `alloc` | the C bindings of the SDK, modules mirroring the C tree, one bindgen output (generated into `OUT_DIR`, only here) and one module per C library: `common` (LPM type with its lookup, and its construction by the C routines), `counters` (the counter value address), `dp` (bindings of `lib/dataplane`, the `Module` trait, `Cx`/`CommitCx`, `Batch`/`Packet` with the packet operations (allocation, copy, resizing, tunnels), counters and devices, the handler runtime and `export_module!`), `cp` (mirror of `lib/controlplane`: the configuration `Builder` with its `Copy` `Scope` handle and the `Owned`/`OwnedSlice` blocks it allocates, the `Built` configuration it returns, the `Owner` seam to the C control plane (`Header`, `Context` and `BlockAddr` newtypes for its addresses) and the release of a build by walking its owning edges; makes no C call itself but those of the C objects a configuration embeds, such as the LPM); the C shims of `common/` and the dataplane |
+| `yanet-sys` | `no_std`, no `alloc` | the C bindings of the SDK, modules mirroring the C tree, one bindgen output (generated into `OUT_DIR`, only here) and one module per C library: `common` (LPM type with its lookup, and its construction by the C routines), `counters` (the counter value address), `classify` (the classifiers, joints and rule tables of `lib/classify` as field types, which a build compiles, joins and decodes by the C routines through `Scope`, with the views of the rules they compile from and the C batch lookups), `dp` (bindings of `lib/dataplane`, the `Module` trait, `Cx`/`CommitCx`, `Batch`/`Packet` with the packet operations (allocation, copy, resizing, tunnels), counters and devices, the handler runtime and `export_module!`), `cp` (mirror of `lib/controlplane`: the configuration `Builder` with its `Copy` `Scope` handle and the `Owned`/`OwnedSlice` blocks it allocates, the `Built` configuration it returns, the `Owner` seam to the C control plane (`Header`, `Context` and `BlockAddr` newtypes for its addresses) and the release of a build by walking its owning edges; makes no C call itself but those of the C objects a configuration embeds, such as the LPM and the classifiers); the C shims of `common/`, the dataplane and `lib/classify` |
 | `yanet-sdk-derive` | proc macro | `#[derive(ShmLayout)]`: the layout contract check, `Build` and the `<Type>Parts` struct a build writes from; `#[derive(FfiRecord)]` and `#[yanet_sdk::api]` |
 | `yanet-sdk` | `no_std`, `forbid(unsafe_code)` | the module-crate surface: `Module`, contexts, batches, field types, the derive and the builder |
 | `yanet-sdk-api` | `std` | the control-plane side of a module: `Agent`, a non-owning handle on an attached C agent that owns the configurations a module's API builds (the builder's `Owner` over the C routines a C module's API calls, and the release of a configuration as those do), `ApiError`, the C error chain, and the guards and conversions the exports of `#[yanet_sdk::api]` expand to (`catch_unwind`, so an api crate is built with unwinding); a crate of its own because a dataplane plugin never links these C calls |
 | `yanet-sdk-build` | `std`, build-dependency | `generate_header`: an api crate's `build.rs` writes the C header of its records and constants |
 | `yanet-sdk-plugin` | `no_std` | a dataplane plugin's runtime: the panic handler (C `abort`) and `export_module!`, so a plugin is a `#![no_std]` cdylib of one line, built under `--profile plugin` (`panic = "abort"`) |
 | `yanet-sdk-testing` | `std`, dev-only | the block arena (one region, as one mapping) and resolving context of the tests, Miri included; with the `cp` feature `TestOwner`, the owner of the configuration builder under Miri and natively, with no C memory |
-| `yanet-sdk-fixture` | library `no_std`, `forbid(unsafe_code)` | three minimal modules, `Fixture` (a test program whose mode word selects what it does with a batch), `Tally` (a prepared value and counters) and `Fib` (forwards by a route FIB of two C LPM tables), with no tests; their plugins `lib{fixture,tally,fib}_dp.so` are examples of one line over `yanet-sdk-plugin`, built on request (`--features plugin`, `--profile plugin`) |
+| `yanet-sdk-fixture` | library `no_std`, `forbid(unsafe_code)` | four minimal modules, `Fixture` (a test program whose mode word selects what it does with a batch), `Tally` (a prepared value and counters), `Fib` (forwards by a route FIB of two C LPM tables) and `Firewall` (applies the actions of the first matching rule, classified and applied as the C ACL module does), with no tests; their plugins `lib{fixture,tally,fib,firewall}_dp.so` are examples of one line over `yanet-sdk-plugin`, built on request (`--features plugin`, `--profile plugin`) |
 | `yanet-sdk-fixture-api` | `std`, `forbid(unsafe_code)` | the api crate of the fixture modules: the records and the `build` and `free` exports per module that the Go tests call to build configurations over an agent; its header carries the records and the modes |
 | `yanet-packet` | `no_std` | packet header views, extractable to its own repository |
 
@@ -95,9 +95,9 @@ plugins and build configurations through the exports of
 
 Meson builds what they need, through cargo, only when its option is on: the
 api archive with only its exports global, its header, and the directory of the
-plugins `lib{fixture,tally,fib}_dp.so`, which holds nothing else. `cargo test`
-and Miri never build the plugins: a `no_std` cdylib cannot be built with
-unwinding, so they have a profile of their own.
+plugins `lib{fixture,tally,fib,firewall}_dp.so`, which holds nothing else.
+`cargo test` and Miri never build the plugins: a `no_std` cdylib cannot be
+built with unwinding, so they have a profile of their own.
 
 ```sh
 meson setup -Dsdk_rust_fixtures=enabled build  # or `meson configure` in place
@@ -113,6 +113,22 @@ out the red zones of the block allocator. That takes a nightly toolchain:
 
 ```sh
 RUSTUP_TOOLCHAIN=nightly-2026-10-22 make test-asan
+```
+
+The package also benchmarks the SDK builds against the C ones from the same
+input: `BenchmarkFibBuild` (100k prefixes against the route module's FIB
+object) and `BenchmarkFirewallBuild` (17k and 54k rules of
+`modules/acl/tests/rulegen` against the ACL module's config, whose last builds
+must give the same verdicts). Each op is one build, so `-benchtime=1x` runs
+one. The 54k ruleset holds 8.09 GiB of its agent's arena, so the benchmark
+configures 14 GiB of control-plane shared memory and a 12 GiB agent for it.
+`BenchmarkFirewallRound` times the harness rounds of 128 flows of the 17k
+ruleset through either module. The numbers mean something on a meson
+`-Dbuildtype=release` build only:
+
+```sh
+go test -tags sdk_rust_fixtures -run '^$' -bench Build -benchtime=1x ./lib/rust/yanet-sdk-fixture-api/bindings/go/cfixture
+go test -tags sdk_rust_fixtures -run '^$' -bench Round ./lib/rust/yanet-sdk-fixture-api/bindings/go/cfixture
 ```
 
 Miri stays the layer for the language rules of the unsafe code; these tests

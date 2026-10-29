@@ -53,20 +53,27 @@ pub use yanet_shm::{
     shm::ShmLayout,
 };
 pub use yanet_sys::{
+    classify::{
+        Attribute, DeviceAttr, Devices, FragAttr, Fragment, Joint, LineAttr, LineRange, Lines, NO_RULE, Net4, Net4Attr,
+        Net6, Net6Attr, Nets4, Nets6, PortAttr, PortRange, Ports, RuleDevice, RuleMap, RuleTable, Stage, Staged,
+        results_min,
+    },
     common::lpm::{Lpm4, Lpm6, LpmRange},
     cp::{
         BlockAddr, Build, BuildError, Builder, Built, Context, FfiRecord, Header, Owned, OwnedSlice, Owner, Refusal,
         Registered, Scope,
     },
     dp::{
-        Batch, CommitCx, Counter, CounterRef, Cx, Device, DeviceRef, DscpMark, Module, Packet, PacketView, ResizeError,
-        TunnelError, Verdict,
+        Batch, CommitCx, Counter, CounterPair, CounterRef, Cx, Device, DeviceRef, DscpMark, Module, Packet, PacketView,
+        ResizeError, TunnelError, Verdict,
     },
 };
 
 /// Everything a module crate usually imports.
 pub mod prelude {
-    pub use crate::{Batch, Counter, CounterRef, Cx, Device, Module, Packet, ShmBox, ShmLayout, ShmSlice, Verdict};
+    pub use crate::{
+        Batch, Counter, CounterPair, CounterRef, Cx, Device, Module, Packet, ShmBox, ShmLayout, ShmSlice, Verdict,
+    };
 }
 
 /// Paths the derive expands to; not part of the API.

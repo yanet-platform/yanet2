@@ -20,6 +20,24 @@ impl Counter {
     }
 }
 
+/// Per-worker pair of packet and byte counts of the module, registered by the
+/// control plane as a counter of two values (C size 2).
+///
+/// A C module counts a packet with the same pair: the packets first, then
+/// their bytes, as the predefined counters of every module do.
+#[repr(C)]
+pub struct CounterPair {
+    id: u64,
+}
+
+impl CounterPair {
+    /// Index in the module's counter registry.
+    #[inline(always)]
+    pub fn id(&self) -> u64 {
+        self.id
+    }
+}
+
 /// A device linked to the module configuration, by its index in the
 /// module's device list.
 ///
@@ -41,6 +59,9 @@ impl Device {
 // SAFETY: a registry index accepts every bit pattern; the control plane
 // writes the id the module's counter registry assigned.
 unsafe impl ShmLayout for Counter {}
+
+// SAFETY: as for a single-value counter.
+unsafe impl ShmLayout for CounterPair {}
 
 // SAFETY: a device index accepts every bit pattern; the control plane writes
 // the index the module's device list assigned.

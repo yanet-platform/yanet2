@@ -35,7 +35,7 @@ use super::{
 use crate::{
     bindings,
     common::lpm::{Lpm, LpmRange},
-    dp::{Counter, Device, Module, ModuleConfig},
+    dp::{Counter, CounterPair, Device, Module, ModuleConfig},
 };
 
 /// Invariant lifetime brand: values of two builds never unify.
@@ -125,6 +125,11 @@ impl<'o, W: Owner> MemoryContext<'o, W> {
     /// Provenance root of the context's memory.
     pub fn root(&self) -> ShmRoot {
         self.owner.root()
+    }
+
+    /// The context itself, for a C routine that allocates in it.
+    pub(crate) fn context(&self) -> Context {
+        self.context
     }
 
     /// Returns a block of the given payload size.
@@ -274,6 +279,24 @@ unsafe impl Build for Counter {
         addr: usize,
     ) -> Result<(), Refusal> {
         // SAFETY: the registry index is the counter's only word, aligned and
+        // exclusive (caller contract).
+        unsafe { memory.root().ptr::<u64>(addr).write(parts.index) };
+        Ok(())
+    }
+
+    unsafe fn free<W: Owner>(_: usize, _: &MemoryContext<'_, W>) {}
+}
+
+// SAFETY: the registry index is the whole value.
+unsafe impl Build for CounterPair {
+    type Parts<'b, W: Owner> = Registered<'b, CounterPair>;
+
+    unsafe fn write<W: Owner>(
+        parts: Self::Parts<'_, W>,
+        memory: &MemoryContext<'_, W>,
+        addr: usize,
+    ) -> Result<(), Refusal> {
+        // SAFETY: the registry index is the pair's only word, aligned and
         // exclusive (caller contract).
         unsafe { memory.root().ptr::<u64>(addr).write(parts.index) };
         Ok(())
@@ -471,7 +494,7 @@ unsafe fn free_block<T: Build, W: Owner>(addr: usize, len: usize, memory: &Memor
     unsafe { memory.free(addr, len * size_of::<T>()) };
 }
 
-fn refused<W: Owner, E: From<BuildError<W::Error>>>(refusal: Refusal) -> E {
+pub(crate) fn refused<W: Owner, E: From<BuildError<W::Error>>>(refusal: Refusal) -> E {
     BuildError::<W::Error>::Refused(refusal).into()
 }
 
@@ -638,7 +661,20 @@ impl<'b, W: Owner, E: From<BuildError<W::Error>>> Scope<'b, '_, W, E> {
     /// The owner refuses the registration.
     pub fn counter(self, name: &str) -> Result<Registered<'b, Counter>, E> {
         // SAFETY: the header is initialised and not yet published.
-        let id = unsafe { self.memory.owner.register_counter(self.header, name) }.map_err(failed::<W, E>)?;
+        let id = unsafe { self.memory.owner.register_counter(self.header, name, 1) }.map_err(failed::<W, E>)?;
+        Ok(Registered::new(id))
+    }
+
+    /// Registers a counter of packets and bytes of the given name with the
+    /// module, two values as C modules register theirs.
+    ///
+    /// # Errors
+    ///
+    /// The owner refuses the registration, as C does for a name registered
+    /// before with another size.
+    pub fn counter_pair(self, name: &str) -> Result<Registered<'b, CounterPair>, E> {
+        // SAFETY: the header is initialised and not yet published.
+        let id = unsafe { self.memory.owner.register_counter(self.header, name, 2) }.map_err(failed::<W, E>)?;
         Ok(Registered::new(id))
     }
 
@@ -661,13 +697,19 @@ impl<'b, W: Owner, E: From<BuildError<W::Error>>> Scope<'b, '_, W, E> {
     /// alignment bounds.
     /// A size beyond the C block allocator's largest block is refused before
     /// the owner is asked, as no free memory could serve it.
-    fn alloc(self, size: usize) -> Result<usize, E> {
+    pub(crate) fn alloc(self, size: usize) -> Result<usize, E> {
         if size > bindings::MEMORY_BLOCK_ALLOCATOR_MAX_SIZE as usize {
             return Err(refused::<W, E>(Refusal::BlockTooLarge));
         }
         self.memory
             .alloc(size)
             .ok_or_else(|| refused::<W, E>(Refusal::OutOfMemory))
+    }
+
+    /// The memory context of the build, for a C routine that writes a value
+    /// of it in place.
+    pub(crate) fn memory(self) -> &'b MemoryContext<'b, W> {
+        self.memory
     }
 
     fn owned_slice<T: Build>(self, addr: usize, len: usize) -> OwnedSlice<'b, T, W> {
@@ -681,7 +723,22 @@ impl<'b, W: Owner, E: From<BuildError<W::Error>>> Scope<'b, '_, W, E> {
     }
 }
 
-impl<T: Build, W: Owner> Owned<'_, T, W> {
+impl<'b, T: Build, W: Owner> Owned<'b, T, W> {
+    /// Takes over a block of the build that a C routine wrote a value into.
+    ///
+    /// # Safety
+    ///
+    /// The block was allocated from the memory context with the size of one
+    /// `T`, holds a value written whole, and nothing else owns it.
+    pub(crate) unsafe fn from_raw(addr: usize, memory: &'b MemoryContext<'b, W>) -> Self {
+        Self {
+            addr,
+            memory,
+            _brand: PhantomData,
+            _value: PhantomData,
+        }
+    }
+
     /// Hands the block over to the field it is written into: its address,
     /// without returning it.
     fn into_raw(self) -> usize {
@@ -719,6 +776,11 @@ impl<T: Build, W: Owner> Drop for OwnedSlice<'_, T, W> {
 }
 
 impl<T> Registered<'_, T> {
+    /// The registry index, for a C routine that takes it.
+    pub(crate) fn index(self) -> u64 {
+        self.index
+    }
+
     fn new(index: u64) -> Self {
         Self {
             index,
