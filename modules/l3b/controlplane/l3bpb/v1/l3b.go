@@ -13,6 +13,9 @@ const maxNameLength = 79
 // MaxRealServerWeight is the largest supported real server scheduler weight.
 const MaxRealServerWeight uint32 = 1000
 
+// MaxSessionIndexSize bounds initial capacity before native rounding or allocation.
+const MaxSessionIndexSize uint32 = 1 << 30
+
 func validateName(field, name string) error {
 	if name == "" {
 		return errors.New(field + " is required")
@@ -114,6 +117,9 @@ func (m *CreateServiceRequest) Validate() error {
 	}
 	if err := service.Validate(); err != nil {
 		return fmt.Errorf("service: %w", err)
+	}
+	if service.GetSessionIndexSize() > MaxSessionIndexSize {
+		return fmt.Errorf("service: session_index_size must be at most %d", MaxSessionIndexSize)
 	}
 	return nil
 }

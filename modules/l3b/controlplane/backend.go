@@ -421,6 +421,9 @@ func (m *backend) service(name string) (*managedService, bool) {
 }
 
 func (m *backend) CreateService(service *l3bpb.VirtualService) error {
+	if service.GetSessionIndexSize() > l3bpb.MaxSessionIndexSize {
+		return status.Errorf(codes.InvalidArgument, "session_index_size must be at most %d", l3bpb.MaxSessionIndexSize)
+	}
 	name := service.GetName()
 
 	m.writerMu.Lock()

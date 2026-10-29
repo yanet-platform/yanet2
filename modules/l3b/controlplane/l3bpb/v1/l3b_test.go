@@ -1,6 +1,7 @@
 package l3bpb_test
 
 import (
+	"math"
 	"strings"
 	"testing"
 
@@ -74,6 +75,36 @@ func Test_CreateServiceRequest_Validate(t *testing.T) {
 			} else {
 				require.EqualError(t, err, tc.message)
 			}
+		})
+	}
+}
+
+// Test_CreateServiceRequest_SessionCapacity verifies the creation-only domain
+// without changing the raw input or imposing it on replacement descriptors.
+func Test_CreateServiceRequest_SessionCapacity(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		size  uint32
+		valid bool
+	}{
+		{"zero selects default", 0, true},
+		{"minimum positive rounds natively", 1, true},
+		{"minimum native size", 16, true},
+		{"non power of two", 1000, true},
+		{"maximum admitted input", 1073741824, true},
+		{"above maximum", 1073741825, false},
+		{"maximum uint32", math.MaxUint32, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			service := &l3bpb.VirtualService{Name: "vs0", SessionIndexSize: tc.size}
+			err := (&l3bpb.CreateServiceRequest{Service: service}).Validate()
+			if tc.valid {
+				require.NoError(t, err)
+			} else {
+				require.Error(t, err)
+			}
+			require.Equal(t, tc.size, service.GetSessionIndexSize())
+			require.NoError(t, (&l3bpb.UpdateServiceRequest{Service: service}).Validate())
 		})
 	}
 }
