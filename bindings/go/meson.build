@@ -145,6 +145,9 @@ cgo_packages += {
   'modules/fwstate/tests/functional': {
     'libraries': [lib_counters],
   },
+  'modules/fwstate/tests/dataplane/probe': {
+    'libraries': [lib_statemap],
+  },
   'modules/l3b/internal/testutils': {
     'libraries': [lib_l3b_dp, lib_l3b_objects, lib_config_dp, lib_agent_cp, lib_filter_compiler],
   },
