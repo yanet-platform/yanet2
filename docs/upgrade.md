@@ -21,7 +21,7 @@ MAC is the derived multicast MAC (for example `33:33:00:00:00:01` for
 the ephemeral range, so sync traffic spreads over equal-cost paths.
 
 The CLI replaces `--src-addr`, `--dst-ether`, `--multicast` and `--unicast`
-with a repeatable `--endpoint SRC@DST:PORT` (for example
+with a repeatable `--sync-endpoint SRC@DST:PORT` (for example
 `fd00::1@ff02::1:9999`, the destination also accepts brackets) and
 `--no-endpoints`. Upgrade `yanet2-cli`, the control plane and the web UI
 together: an old CLI's endpoint flags fail as unknown, and an old service

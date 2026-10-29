@@ -148,11 +148,11 @@ fn update_request(cmd: &UpdateCmd) -> Result<UpdateConfigRequest, &'static str> 
 
 /// Fills in the endpoint list the caller supplied.
 ///
-/// `--endpoint` replaces the whole list on the server; `--no-endpoints` asks
-/// the server to remove it.
+/// `--sync-endpoint` replaces the whole list on the server;
+/// `--no-sync-endpoints` asks the server to remove it.
 fn update_sync_endpoints(sync_config: &mut SyncConfig, cmd: &UpdateCmd) {
     sync_config.endpoints = cmd
-        .endpoint
+        .sync_endpoint
         .iter()
         .map(|endpoint| SyncEndpoint {
             src_addr: Some(IpAddress::from(IpAddr::V6(endpoint.src))),
@@ -160,7 +160,7 @@ fn update_sync_endpoints(sync_config: &mut SyncConfig, cmd: &UpdateCmd) {
             port: Some(u32::from(endpoint.port)),
         })
         .collect();
-    if cmd.no_endpoints {
+    if cmd.no_sync_endpoints {
         sync_config.no_endpoints = Some(true);
     }
 }
@@ -270,8 +270,8 @@ mod tests {
             config_name: config_name.to_string(),
             map_name_v4: map_name_v4.map(str::to_string),
             map_name_v6: map_name_v6.map(str::to_string),
-            endpoint: Vec::new(),
-            no_endpoints: false,
+            sync_endpoint: Vec::new(),
+            no_sync_endpoints: false,
             tcp_syn_ack: None,
             tcp_syn: None,
             tcp_fin: None,
@@ -397,7 +397,7 @@ mod tests {
     #[test]
     fn test_update_request_endpoints_replace_the_list() {
         let mut cmd = update_cmd("cfg", None, None);
-        cmd.endpoint = vec![
+        cmd.sync_endpoint = vec![
             args::SyncEndpoint {
                 src: "fd00::1".parse().unwrap(),
                 dst: "ff02::1".parse().unwrap(),
@@ -434,7 +434,7 @@ mod tests {
     #[test]
     fn test_update_request_no_endpoints_removes_the_list() {
         let mut cmd = update_cmd("cfg", None, None);
-        cmd.no_endpoints = true;
+        cmd.no_sync_endpoints = true;
 
         let request = update_request(&cmd).unwrap();
 
