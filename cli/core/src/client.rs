@@ -107,7 +107,7 @@ pub struct ConnectionArgs {
     /// Falls back to the `endpoint` key of the configuration file,
     /// /etc/yanet2/cli.yaml merged with $XDG_CONFIG_HOME/yanet2/cli.yaml
     /// (~/.config by default) or the single file named by YANET_CONFIG,
-    /// then to grpc://[::1]:8080. A value without :// is an alias from
+    /// then to `grpc://[::1]:8080`. A value without :// is an alias from
     /// the file's `endpoints:` map.
     #[arg(long, global = true, env = "YANET_ENDPOINT")]
     pub endpoint: Option<String>,
