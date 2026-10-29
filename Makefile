@@ -133,7 +133,6 @@ CLI_RELEASE_BINARIES := $(addprefix $(RELEASE_DIR)/,$(CLI_BINARIES))
 	cli \
 	cli-build \
 	cli-install \
-	cli-core-install \
 	cli-clean
 
 # cli/% is a chained prerequisite of cli-install/%.
@@ -296,9 +295,6 @@ cli-install:
 		install -m 755 "$$src" "$$dst"; \
 	done
 
-# Backward-compatible name.
-cli-core-install: cli-install
-
 # Installs one module CLI binary:
 #   make cli-install/acl
 #
@@ -312,11 +308,6 @@ cli-install/%: cli/%
 
 cli-clean:
 	$(CARGO) clean
-
-# Cargo does not have per-package clean on stable in a useful universal form,
-# so keep this as a compatibility target.
-cli-clean/%:
-	$(CARGO) clean || true
 
 test:
 	$(MAKE) test-only
