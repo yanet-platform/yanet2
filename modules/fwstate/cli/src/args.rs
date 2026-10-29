@@ -102,13 +102,15 @@ pub struct UpdateCmd {
 
     /// Synchronization endpoint (e.g., "fd00::1@ff02::1:9999"): packets are
     /// emitted from the source toward the destination port. Repeatable; an
-    /// update carrying endpoints replaces the whole list.
-    #[arg(long = "endpoint", value_name = "SRC@DST:PORT", value_parser = parse_sync_endpoint)]
-    pub endpoint: Vec<SyncEndpoint>,
+    /// update carrying endpoints replaces the whole list. Named
+    /// --sync-endpoint because the shared global --endpoint names the
+    /// gateway.
+    #[arg(long = "sync-endpoint", value_name = "SRC@DST:PORT", value_parser = parse_sync_endpoint)]
+    pub sync_endpoint: Vec<SyncEndpoint>,
 
     /// Remove every synchronization endpoint.
-    #[arg(long, conflicts_with = "endpoint")]
-    pub no_endpoints: bool,
+    #[arg(long, conflicts_with = "sync_endpoint")]
+    pub no_sync_endpoints: bool,
 
     /// TCP SYN-ACK timeout (e.g., "60s", "5m", "1h").
     #[arg(long, value_parser = parse_duration)]

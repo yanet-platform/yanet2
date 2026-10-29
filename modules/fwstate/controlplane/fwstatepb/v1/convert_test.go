@@ -73,11 +73,11 @@ func Test_SyncConfig_Merge(t *testing.T) {
 		},
 		{
 			name:   "no_endpoints removes the stored list",
-			update: &SyncConfig{NoEndpoints: proto.Bool(true)},
+			update: &SyncConfig{NoEndpoints: new(true)},
 			want: func() *SyncConfig {
 				cfg := stored()
 				cfg.Endpoints = nil
-				cfg.NoEndpoints = proto.Bool(true)
+				cfg.NoEndpoints = new(true)
 				return cfg
 			}(),
 		},

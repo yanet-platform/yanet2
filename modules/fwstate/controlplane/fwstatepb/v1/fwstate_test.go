@@ -265,14 +265,14 @@ func Test_SyncConfig_ValidateFields_RejectsUnusableValues(t *testing.T) {
 		{
 			name: "no_endpoints combined with endpoints",
 			config: &SyncConfig{
-				NoEndpoints: proto.Bool(true),
+				NoEndpoints: new(true),
 				Endpoints:   []*SyncEndpoint{{Port: proto.Uint32(1)}},
 			},
 			message: "no_endpoints cannot be combined with endpoints",
 		},
 		{
 			name:   "no_endpoints alone",
-			config: &SyncConfig{NoEndpoints: proto.Bool(true)},
+			config: &SyncConfig{NoEndpoints: new(true)},
 		},
 		{
 			name: "endpoint list above the bound",
