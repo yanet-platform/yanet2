@@ -267,6 +267,39 @@ unsafe impl Owner for Agent {
         Ok(id)
     }
 
+    unsafe fn register_counter_pair(&self, header: Header, registry: &str, name: &str) -> Result<(u64, u64), ApiError> {
+        let registry = c_name::<{ COUNTER_NAME_LEN as usize }>(registry)?;
+        let name = c_name::<{ COUNTER_NAME_LEN as usize }>(name)?;
+        let mut chain = ptr::null_mut();
+        let mut registry_id = 0;
+        // SAFETY: this unpublished header owns its registries.
+        //
+        // Names are complete C strings; output locations are exclusive and
+        // initialized.
+        let storage = unsafe {
+            bindings::cp_module_counter_registry(
+                cp_module_at(self, header),
+                registry.as_ptr().cast::<c_char>(),
+                &mut registry_id,
+                &mut chain,
+            )
+        };
+        if storage.is_null() {
+            // SAFETY: the failed native call transferred this chain
+            // exclusively.
+            return Err(unsafe { from_c_chain(chain) });
+        }
+        // SAFETY: the live registry allocates exactly two adjacent values per
+        // name.
+        let id = unsafe { bindings::counter_registry_register(storage, name.as_ptr().cast::<c_char>(), 2, &mut chain) };
+        if id == COUNTER_INVALID {
+            // SAFETY: the failed native call transferred this chain
+            // exclusively.
+            return Err(unsafe { from_c_chain(chain) });
+        }
+        Ok((registry_id, id))
+    }
+
     unsafe fn link_device(&self, header: Header, name: &str) -> Result<u64, ApiError> {
         let name = c_name::<{ CP_DEVICE_NAME_LEN as usize }>(name)?;
         let (mut index, mut chain) = (0, ptr::null_mut());

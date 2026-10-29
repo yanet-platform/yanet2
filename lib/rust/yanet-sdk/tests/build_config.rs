@@ -509,3 +509,28 @@ fn test_bulk_devices_constructor_panic_releases_the_root() {
     assert!(result.is_err());
     owner.assert_released();
 }
+
+#[test]
+fn test_counter_pair_owned_name_drop_panic_releases_header() {
+    struct Name;
+    impl AsRef<str> for Name {
+        fn as_ref(&self) -> &str {
+            "counted"
+        }
+    }
+    impl Drop for Name {
+        fn drop(&mut self) {
+            panic!("counter name destructor");
+        }
+    }
+    let owner = owner();
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        build_config::<Fixture<yanet_sdk::CounterPair>, _, Error>(
+            &owner,
+            "counter",
+            yanet_sdk::counter_pair("rules", Name),
+        )
+    }));
+    assert!(result.is_err());
+    owner.assert_released();
+}

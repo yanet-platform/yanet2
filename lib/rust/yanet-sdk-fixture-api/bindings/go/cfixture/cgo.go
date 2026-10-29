@@ -13,6 +13,8 @@ package cfixture
 
 #include "api/agent.h"
 #include "lib/dataplane/packet/packet.h"
+#include "common/network.h"
+typedef struct net4 net4;
 #include "yanet_sdk_fixture_api.h"
 #include "yanet_sdk_fixture_paths.h"
 

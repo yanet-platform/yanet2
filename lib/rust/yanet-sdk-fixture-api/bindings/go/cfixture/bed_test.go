@@ -5,8 +5,13 @@ package cfixture_test
 import (
 	"bytes"
 	"fmt"
+	"os"
 	"slices"
+	"strconv"
+	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/stretchr/testify/require"
@@ -25,7 +30,7 @@ const (
 // bed is a harness with the fixture plugins loaded and one agent attached,
 // and the free size of that agent before it built anything.
 type bed struct {
-	t        *testing.T
+	t        testing.TB
 	harness  *dataplaneut.Harness
 	agent    *ffi.Agent
 	baseline uint64
@@ -35,7 +40,7 @@ type bed struct {
 //
 // Optional adjustments apply before startup. Cleanup frees configurations
 // before the harness and its attached agent.
-func newBed(t *testing.T, adjust ...func(*dataplaneut.Config)) *bed {
+func newBed(t testing.TB, adjust ...func(*dataplaneut.Config)) *bed {
 	t.Helper()
 
 	config := dataplaneut.Config{
@@ -62,13 +67,26 @@ func newBed(t *testing.T, adjust ...func(*dataplaneut.Config)) *bed {
 
 // attach attaches an agent of that name and memory to the harness and destroys
 // it when the test ends, after everything registered since.
-func attach(t *testing.T, harness *dataplaneut.Harness, name string, memory datasize.ByteSize) *ffi.Agent {
+func attach(t testing.TB, harness *dataplaneut.Harness, name string, memory datasize.ByteSize) *ffi.Agent {
 	t.Helper()
 
 	agent, err := harness.SharedMemory().AgentAttach(name, 0, memory)
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, agent.CleanUp()) })
 	return agent
+}
+
+// withAgent attaches an independent allocation budget to the shared harness.
+func (m *bed) withAgent(name string, memory datasize.ByteSize) *bed {
+	m.t.Helper()
+
+	agent := attach(m.t, m.harness, name, memory)
+	return &bed{t: m.t, harness: m.harness, agent: agent, baseline: agent.BlockAllocatorFreeSize()}
+}
+
+// on routes failures and new cleanup registrations to a subtest or benchmark.
+func (m *bed) on(t testing.TB) *bed {
+	return &bed{t: t, harness: m.harness, agent: m.agent, baseline: m.baseline}
 }
 
 // used returns the bytes of the bed's agent memory taken since the bed started.
@@ -123,8 +141,11 @@ func (m *bed) fixture(options fixtureOptions) *cfixture.ModuleConfig {
 type instance struct {
 	moduleType string
 	name       string
-	config     *cfixture.ModuleConfig
-	path       dataplaneut.CounterPath
+	config     interface {
+		AsFFIModule() ffi.ModuleConfig
+		Free() error
+	}
+	path dataplaneut.CounterPath
 }
 
 func (m *bed) fixtureInstance(options fixtureOptions) *instance {
@@ -377,4 +398,105 @@ func requireUntagged(t *testing.T, err error) {
 	} {
 		require.NotErrorIs(t, err, kind, fmt.Sprint(err))
 	}
+}
+
+// buildable is a configuration a build benchmark frees.
+type buildable interface {
+	Free() error
+}
+
+// benchmarkBuild times construction, with release and memory use reported apart.
+//
+// Inputs are already prepared. The allocation peak is sampled every 10 ms;
+// the process resident peak includes shared memory and resets per iteration.
+// Optional inspection sees the final configuration before release. Every
+// uninspected release must restore the allocator's original free capacity.
+func (m *bed) benchmarkBuild(b *testing.B, build func() (buildable, error), inspect func(buildable)) {
+	b.Helper()
+
+	var used, peak, resident uint64
+	var freeing time.Duration
+	b.StopTimer()
+	b.ResetTimer()
+	for idx := range b.N {
+		require.NoError(b, os.WriteFile("/proc/self/clear_refs", []byte("5"), 0))
+		before := m.agent.BlockAllocatorFreeSize()
+		lowest := m.sampleFreeSize()
+		b.StartTimer()
+		config, err := build()
+		b.StopTimer()
+		low := lowest()
+		require.NoError(b, err)
+		used += before - m.agent.BlockAllocatorFreeSize()
+		peak += before - low
+		resident += residentPeak(b)
+		inspected := inspect != nil && idx == b.N-1
+		if inspected {
+			inspect(config)
+		}
+		start := time.Now()
+		require.NoError(b, config.Free())
+		freeing += time.Since(start)
+		if !inspected {
+			require.Equal(b, before, m.agent.BlockAllocatorFreeSize())
+		}
+	}
+	ops := float64(b.N)
+	b.ReportMetric(float64(freeing.Nanoseconds())/ops, "free-ns/op")
+	b.ReportMetric(float64(used)/ops, "arena-B/op")
+	b.ReportMetric(float64(peak)/ops, "arena-peak-B/op")
+	b.ReportMetric(float64(resident)/ops, "rss-peak-B/op")
+}
+
+// sampleFreeSize returns a stop function for 10 ms allocator sampling.
+//
+// Stopping joins the sampler and includes one final free-capacity sample before
+// returning the smallest observation.
+func (m *bed) sampleFreeSize() func() uint64 {
+	var lowest atomic.Uint64
+	lowest.Store(m.agent.BlockAllocatorFreeSize())
+	record := func() {
+		if free := m.agent.BlockAllocatorFreeSize(); free < lowest.Load() {
+			lowest.Store(free)
+		}
+	}
+	stop := make(chan struct{})
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		ticker := time.NewTicker(10 * time.Millisecond)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-stop:
+				return
+			case <-ticker.C:
+				record()
+			}
+		}
+	}()
+	return func() uint64 {
+		close(stop)
+		<-done
+		record()
+		return lowest.Load()
+	}
+}
+
+// residentPeak returns the peak resident set of the process since its last
+// reset, in bytes, shared memory pages included.
+func residentPeak(t testing.TB) uint64 {
+	t.Helper()
+
+	status, err := os.ReadFile("/proc/self/status")
+	require.NoError(t, err)
+	for line := range strings.SplitSeq(string(status), "\n") {
+		if rest, ok := strings.CutPrefix(line, "VmHWM:"); ok {
+			kilobytes, err := strconv.ParseUint(strings.TrimSuffix(strings.TrimSpace(rest), " kB"), 10, 64)
+			require.NoError(t, err)
+			return kilobytes << 10
+		}
+	}
+	require.FailNow(t, "no peak resident set in the process status")
+	return 0
 }

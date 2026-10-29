@@ -10,6 +10,7 @@ use crate::bindings;
 
 /// The counter id C reports a failure with, its `(uint64_t)-1` cast macro that
 /// bindgen does not bind.
+#[doc = "cbindgen:ignore"]
 pub const COUNTER_INVALID: u64 = u64::MAX;
 
 /// Address of a counter's value in a counter storage, bit for bit like

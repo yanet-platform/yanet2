@@ -49,6 +49,7 @@ const C_HEADER_DIRS: &[&str] = &[
     "api",
     "common",
     "lib/controlplane",
+    "lib/classify",
     "lib/counters",
     "lib/dataplane",
     "lib/errors",

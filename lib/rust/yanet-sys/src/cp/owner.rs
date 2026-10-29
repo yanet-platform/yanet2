@@ -85,6 +85,18 @@ pub unsafe trait Owner: 'static {
     /// The header must be initialised by this owner and remain unpublished.
     unsafe fn register_counter(&self, header: Header, name: &str) -> Result<u64, Self::Error>;
 
+    /// Registers a packet/byte pair in a named runtime counter registry.
+    ///
+    /// # Safety
+    /// The header must be initialized by this owner and remain unpublished.
+    /// Successful indices must identify two adjacent values in that registry.
+    unsafe fn register_counter_pair(
+        &self,
+        header: Header,
+        registry: &str,
+        name: &str,
+    ) -> Result<(u64, u64), Self::Error>;
+
     /// Links a device to the module and returns its index.
     ///
     /// # Safety

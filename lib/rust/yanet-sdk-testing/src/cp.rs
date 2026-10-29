@@ -189,6 +189,15 @@ unsafe impl Owner for TestOwner {
         self.register()
     }
 
+    unsafe fn register_counter_pair(
+        &self,
+        _header: Header,
+        _registry: &str,
+        _name: &str,
+    ) -> Result<(u64, u64), TestError> {
+        self.register().map(|counter| (0, counter))
+    }
+
     unsafe fn link_device(&self, _header: Header, _name: &str) -> Result<u64, TestError> {
         self.register()
     }

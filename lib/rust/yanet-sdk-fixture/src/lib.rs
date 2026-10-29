@@ -9,6 +9,9 @@
 #![no_std]
 #![forbid(unsafe_code)]
 
+pub mod firewall;
+pub mod firewall4;
+
 use yanet_sdk::{Batch, CommitCx, Counter, CounterRef, Cx, Device, Lpm4, Lpm6, Module, ShmLayout, ShmSlice, Verdict};
 // The plugin examples use it.
 #[cfg(feature = "plugin")]

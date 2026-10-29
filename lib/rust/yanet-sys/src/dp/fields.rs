@@ -12,6 +12,25 @@ pub struct Counter {
     id: u64,
 }
 
+/// A packet/byte pair in a module's named runtime counter registry.
+#[repr(C)]
+pub struct CounterPair {
+    registry: u64,
+    id: u64,
+}
+
+impl CounterPair {
+    pub(crate) fn registry(&self) -> u64 {
+        self.registry
+    }
+    pub(crate) fn id(&self) -> u64 {
+        self.id
+    }
+}
+
+// SAFETY: two integer words have no invalid pattern, padding or drop glue.
+unsafe impl ShmLayout for CounterPair {}
+
 impl Counter {
     /// Index in the module's counter registry.
     #[inline(always)]

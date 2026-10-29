@@ -23,6 +23,7 @@ pub mod bindings {
     include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
 }
 
+pub mod classify;
 pub mod common;
 pub mod counters;
 pub mod cp;

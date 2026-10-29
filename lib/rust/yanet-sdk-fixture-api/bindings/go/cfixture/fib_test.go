@@ -5,7 +5,10 @@ package cfixture_test
 import (
 	"errors"
 	"fmt"
+	"math/rand/v2"
+	"net"
 	"net/netip"
+	"slices"
 	"testing"
 
 	"github.com/c2h5oh/datasize"
@@ -15,6 +18,7 @@ import (
 	dataplaneut "github.com/yanet-platform/yanet2/bindings/go/dataplane_ut"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/lib/rust/yanet-sdk-fixture-api/bindings/go/cfixture"
+	"github.com/yanet-platform/yanet2/modules/route/bindings/go/croute"
 )
 
 func prefix4(prefix string, value uint32) cfixture.Range4 {
@@ -486,4 +490,204 @@ func Test_Fib_DeviceDeclarations_DefaultAtEitherEndAndEmptyTableRelease(t *testi
 			require.Equal(t, bed.baseline, bed.agent.BlockAllocatorFreeSize())
 		})
 	}
+}
+
+// fibRoute is a neighbour of the benchmark FIB: its address, its device and
+// the counter it counts in.
+type fibRoute struct {
+	neighbour byte
+	device    uint16
+	counter   string
+}
+
+var fibBenchDevices = []string{"eth0", "eth1", "eth2", "eth3"}
+
+// fibBenchRoutes are eight neighbours, two per device.
+var fibBenchRoutes = func() []fibRoute {
+	routes := make([]fibRoute, 0, 8)
+	for idx := range 8 {
+		routes = append(routes, fibRoute{
+			neighbour: byte(idx + 1),
+			device:    uint16(idx % len(fibBenchDevices)),
+			counter:   fmt.Sprintf("nexthop_%d", idx),
+		})
+	}
+	return routes
+}()
+
+// fibBenchLists are the next-hop lists of the benchmark FIB, single routes
+// and ECMP groups of two and four.
+var fibBenchLists = [][]uint32{{0}, {1}, {2, 3}, {4, 5}, {0, 2, 4, 6}, {1, 3, 5, 7}}
+
+// fibPrefix is a prefix of the benchmark FIB and the list it routes to.
+type fibPrefix struct {
+	prefix netip.Prefix
+	list   uint32
+}
+
+// fibBenchPrefixes returns deterministic prefixes with a 3:1 IPv6/IPv4 mix.
+//
+// IPv4 lengths favor /24 and /22../23; IPv6 favors /48, /32../47 and /56../64.
+// Stable broad-first ordering lets later narrow ranges override earlier ones.
+func fibBenchPrefixes(seed uint64, count int) []fibPrefix {
+	random := rand.New(rand.NewPCG(seed, 0xf1b))
+	prefixes := make([]fibPrefix, 0, count)
+	for idx := range count {
+		var prefix netip.Prefix
+		if idx%4 == 0 {
+			var bits int
+			switch pick := random.IntN(100); {
+			case pick < 60:
+				bits = 24
+			case pick < 80:
+				bits = 22 + random.IntN(2)
+			case pick < 92:
+				bits = 16 + random.IntN(6)
+			case pick < 97:
+				bits = 25 + random.IntN(8)
+			default:
+				bits = 8 + random.IntN(8)
+			}
+			addr := [4]byte{byte(1 + random.IntN(223)), byte(random.IntN(256)), byte(random.IntN(256)), byte(random.IntN(256))}
+			prefix = netip.PrefixFrom(netip.AddrFrom4(addr), bits).Masked()
+		} else {
+			var bits int
+			switch pick := random.IntN(100); {
+			case pick < 45:
+				bits = 48
+			case pick < 70:
+				bits = 32 + random.IntN(16)
+			case pick < 95:
+				bits = 56 + random.IntN(9)
+			default:
+				bits = 19 + random.IntN(13)
+			}
+			addr := [16]byte{0x20 | byte(random.IntN(16)), byte(random.IntN(256))}
+			for octet := 2; octet < 8; octet++ {
+				addr[octet] = byte(random.IntN(256))
+			}
+			prefix = netip.PrefixFrom(netip.AddrFrom16(addr), bits).Masked()
+		}
+		prefixes = append(prefixes, fibPrefix{prefix: prefix, list: uint32(random.IntN(len(fibBenchLists)))})
+	}
+	slices.SortStableFunc(prefixes, func(left, right fibPrefix) int {
+		return left.prefix.Bits() - right.prefix.Bits()
+	})
+	return prefixes
+}
+
+// lastAddr returns the inclusive upper endpoint of the prefix.
+func lastAddr(prefix netip.Prefix) netip.Addr {
+	network, _ := xnetip.NetworkFromPrefix(prefix)
+	return network.LastAddr()
+}
+
+// sdkFibInput returns the SDK FIB of the benchmark devices, routes and lists
+// over the prefixes.
+func sdkFibInput(b *testing.B, prefixes []fibPrefix) cfixture.Fib {
+	b.Helper()
+
+	var input cfixture.Fib
+	for _, name := range fibBenchDevices {
+		device, err := cfixture.NewFibDevice(name)
+		require.NoError(b, err)
+		input.Devices = append(input.Devices, device)
+	}
+	for _, route := range fibBenchRoutes {
+		record, err := cfixture.NewFibRoute([6]byte{0, 0, 0, 0, 0, route.neighbour}, route.device, route.counter)
+		require.NoError(b, err)
+		input.Routes = append(input.Routes, record)
+	}
+	for _, list := range fibBenchLists {
+		input.Lists = append(input.Lists, cfixture.NewFibList(uint64(len(input.Indexes)), uint64(len(list))))
+		for _, route := range list {
+			input.Indexes = append(input.Indexes, uint64(route))
+		}
+	}
+	for _, item := range prefixes {
+		if item.prefix.Addr().Is4() {
+			input.V4 = append(input.V4, prefix4(item.prefix.String(), item.list))
+		} else {
+			input.V6 = append(input.V6, prefix6(item.prefix.String(), item.list))
+		}
+	}
+	return input
+}
+
+// fibRange is a prefix of the benchmark FIB as the C object takes it: its
+// first and last addresses, and its list.
+type fibRange struct {
+	from, to netip.Addr
+	list     uint32
+}
+
+// cFibRanges preserves input ordering and inclusive prefix endpoints.
+func cFibRanges(prefixes []fibPrefix) []fibRange {
+	ranges := make([]fibRange, 0, len(prefixes))
+	for _, item := range prefixes {
+		ranges = append(ranges, fibRange{from: item.prefix.Addr(), to: lastAddr(item.prefix), list: item.list})
+	}
+	return ranges
+}
+
+// buildCFib builds the C route FIB object of the benchmark devices, routes
+// and lists over the ranges, the way the route module builds one.
+//
+// The C API takes one call per route, list and range, so those calls are part
+// of what a C build costs.
+func buildCFib(agent *ffi.Agent, ranges []fibRange) (*croute.FIBObject, error) {
+	object, err := croute.NewFIBObject(agent, "fib")
+	if err != nil {
+		return nil, err
+	}
+	fail := func(err error) (*croute.FIBObject, error) {
+		_ = object.Free()
+		return nil, err
+	}
+	src := net.HardwareAddr{0xee, 0xee, 0xee, 0xee, 0xee, 0xee}
+	for _, route := range fibBenchRoutes {
+		dst := net.HardwareAddr{0, 0, 0, 0, 0, route.neighbour}
+		if _, err := object.AddRoute(src, dst, uint32(route.device), route.counter); err != nil {
+			return fail(err)
+		}
+	}
+	for _, list := range fibBenchLists {
+		if _, err := object.AddRouteList(list); err != nil {
+			return fail(err)
+		}
+	}
+	for _, item := range ranges {
+		if err := object.AddRange(item.from, item.to, item.list); err != nil {
+			return fail(err)
+		}
+	}
+	return object, nil
+}
+
+// BenchmarkFibBuild measures identical 100k-prefix C and Direct Writer builds.
+//
+// Four devices, eight neighbours and six lists share a 3:1 IPv6/IPv4 prefix mix.
+// Input preparation precedes timing; release and memory use are separate metrics.
+func BenchmarkFibBuild(b *testing.B) {
+	prefixes := fibBenchPrefixes(1, 100_000)
+	bed := newBed(b, func(config *dataplaneut.Config) {
+		config.CPMemory = uint64(2 * datasize.GB)
+		config.WorkerCount = 1
+		config.ObjectsToLoad = []string{"route_fib"}
+	}).withAgent("fib-bench", 1536*datasize.MB)
+
+	b.Run("impl=c", func(b *testing.B) {
+		bed := bed.on(b)
+		ranges := cFibRanges(prefixes)
+		bed.benchmarkBuild(b, func() (buildable, error) {
+			return buildCFib(bed.agent, ranges)
+		}, nil)
+	})
+	b.Run("impl=sdk", func(b *testing.B) {
+		bed := bed.on(b)
+		input := sdkFibInput(b, prefixes)
+		bed.benchmarkBuild(b, func() (buildable, error) {
+			return cfixture.NewFibConfig(bed.agent, "fib", input)
+		}, nil)
+	})
 }

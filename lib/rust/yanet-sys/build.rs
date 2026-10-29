@@ -46,13 +46,11 @@ const PACKET_SOURCES: [&str; 3] = [
     "lib/dataplane/packet/packet.c",
 ];
 
-/// Compiles both shims with the dataplane's flags and optimisation level.
+/// Compiles native helpers with the dataplane's flags and optimisation level.
 ///
-/// The dataplane shim wraps header-inline C routing helpers and the packet
-/// encapsulation routines, whose sources it compiles in; the common shim wraps
-/// LPM construction and allocation in native memory contexts. They are linked
-/// into every module plugin with hidden visibility, so a plugin exports nothing
-/// of them and imports none of the encapsulation from the host.
+/// Classifier helpers compile prepared borrowed views into embedded attributes.
+/// Packet helpers wrap native routing and include encapsulation sources.
+/// Hidden visibility keeps their definitions private in each linked artifact.
 fn build_shim(flags: &CFlags, shim_dir: &Path) {
     let mut build = cc::Build::new();
     let arch = env::var("CARGO_CFG_TARGET_ARCH").expect("target architecture");
@@ -60,6 +58,9 @@ fn build_shim(flags: &CFlags, shim_dir: &Path) {
         .target(&format!("{arch}-unknown-linux-gnu"))
         .compiler(&flags.compiler)
         .file(shim_dir.join("common_shim.c"))
+        .file(shim_dir.join("classify_cp_shim.c"))
+        .file(shim_dir.join("classify_dp_shim.c"))
+        .file(flags.source("lib/classify/compiler/helper.c"))
         .file(shim_dir.join("dp_shim.c"))
         .files(PACKET_SOURCES.map(|source| flags.source(source)))
         .include(shim_dir)
@@ -75,6 +76,9 @@ fn build_shim(flags: &CFlags, shim_dir: &Path) {
     }
     for file in [
         "common_shim.c",
+        "classify_shim.h",
+        "classify_cp_shim.c",
+        "classify_dp_shim.c",
         "common_shim.h",
         "dp_shim.c",
         "dp_shim.h",
@@ -116,6 +120,10 @@ fn generate_bindings(flags: &CFlags, shim_dir: &Path, out: &Path) {
         .wrap_unsafe_ops(true)
         .generate_comments(false)
         .layout_tests(true)
+        .allowlist_type("(classifier|classify_.*|yanet_sys_.*_input|filter_.*|net[46]|value_table|vline|rule_table)")
+        .opaque_type("classifier_rule")
+        .allowlist_function("yanet_sys_classify_.*")
+        .allowlist_function("classify_(join|join_rules|decode)")
         .allowlist_type("lpm")
         .allowlist_type("lpm_page")
         .allowlist_type("lpm_value")
@@ -132,7 +140,7 @@ fn generate_bindings(flags: &CFlags, shim_dir: &Path, out: &Path) {
         .allowlist_type("agent")
         .allowlist_type("yanet_error")
         .allowlist_type("yanet_error_kind")
-        .allowlist_function("cp_module_(init|fini|try_destroy|link_device)")
+        .allowlist_function("cp_module_(init|fini|try_destroy|link_device|counter_registry)")
         .allowlist_function("counter_registry_register")
         .allowlist_function("agent_destroy_released")
         .allowlist_function("yanet_error_(free|message|cause|kind|add_kind)")

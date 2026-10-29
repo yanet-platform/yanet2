@@ -17,27 +17,33 @@ pub use yanet_shm::{
     shm::ShmLayout,
 };
 pub use yanet_sys::{
+    classify,
     common::lpm::{Lpm4, Lpm6, LpmRange},
     cp::{
         BuildError, Built, DeviceIndex, DeviceMap, Encode as Init, FfiRecord, Refusal, boxed, build_config, counter,
-        device, lpm, slice, with_devices,
+        counter_pair, device, lpm, slice, with_devices,
     },
     dp::{
-        Batch, CommitCx, Counter, CounterRef, Cx, Device, DeviceRef, DscpMark, Module, Packet, PacketView, ResizeError,
-        TunnelError, Verdict,
+        Batch, CommitCx, Counter, CounterPair, CounterRef, Cx, Device, DeviceRef, DscpMark, Module, Packet, PacketView,
+        ResizeError, TunnelError, Verdict,
     },
 };
 
 /// Everything a module crate usually imports.
 pub mod prelude {
-    pub use crate::{Batch, Counter, CounterRef, Cx, Device, Module, Packet, ShmBox, ShmLayout, ShmSlice, Verdict};
+    pub use crate::{
+        Batch, Counter, CounterPair, CounterRef, Cx, Device, Module, Packet, ShmBox, ShmLayout, ShmSlice, Verdict,
+    };
 }
 
 /// Paths the derive expands to; not part of the API.
 #[doc(hidden)]
 pub mod __private {
     pub use yanet_shm::shm::{MAX_ALIGN, ShmLayout};
-    pub use yanet_sys::cp::{BuildError, Encode, FfiRecord, MemoryContext, Owner, Stored, Writer};
+    pub use yanet_sys::{
+        bindings::net4,
+        cp::{BuildError, Encode, FfiRecord, MemoryContext, Owner, Stored, Writer},
+    };
 }
 
 // Test-only dependencies are visible to the library's own test target.

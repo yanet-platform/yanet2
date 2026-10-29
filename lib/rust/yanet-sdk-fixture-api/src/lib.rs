@@ -6,6 +6,10 @@
 
 #![forbid(unsafe_code)]
 
+pub mod firewall;
+pub mod firewall4;
+pub mod firewall_faults;
+
 use core::ffi::CStr;
 
 use yanet_sdk::{Built, FfiRecord, LpmRange, Refusal, counter, device, lpm, slice, with_devices};
@@ -260,7 +264,7 @@ fn checked_range<const K: usize>(range: LpmRange<K>, lists: usize) -> Result<Lpm
 struct PanicOnDrop;
 impl Drop for PanicOnDrop {
     fn drop(&mut self) {
-        panic!("fixture panic payload destructor");
+        std::panic::panic_any(String::from("fixture panic payload destructor"));
     }
 }
 

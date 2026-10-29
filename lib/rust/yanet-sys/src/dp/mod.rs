@@ -73,7 +73,7 @@ pub mod rt;
 
 pub use batch::{Batch, DeviceRef, DscpMark, Packet, PacketView, ResizeError, TunnelError, Verdict};
 pub use cx::{BoundCounter, CommitCx, CounterRef, Cx};
-pub use fields::{Counter, Device};
+pub use fields::{Counter, CounterPair, Device};
 pub use module::{Module, ModuleConfig};
 
 /// Items the export macro names; not part of the API.

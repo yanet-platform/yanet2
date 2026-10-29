@@ -21,6 +21,8 @@ pub enum Refusal {
     /// Device declarations repeat an index or do not form a contiguous table;
     /// `YANET_ERROR_INVALID_ARGUMENT`.
     InvalidDeviceTable,
+    /// A classifier input exceeds its domain or has an invalid network mask.
+    InvalidClassifyInput,
 }
 
 impl Refusal {
@@ -30,6 +32,7 @@ impl Refusal {
             Self::BlockTooLarge => "an owned block larger than the largest block of the allocator",
             Self::InvalidRange => "an LPM range ends before it starts",
             Self::InvalidDeviceTable => "device declarations are repeated or noncontiguous",
+            Self::InvalidClassifyInput => "a classifier input is invalid",
         }
     }
 }

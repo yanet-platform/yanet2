@@ -27,7 +27,7 @@ use super::{
 use crate::{
     bindings,
     common::lpm::{Lpm, LpmRange},
-    dp::{Counter, Device, Module, ModuleConfig},
+    dp::{Counter, CounterPair, Device, Module, ModuleConfig},
 };
 
 /// Releases the owning edges of a complete shared-memory value.
@@ -118,6 +118,10 @@ impl<'o, W: Owner> MemoryContext<'o, W> {
         self.owner.root()
     }
 
+    pub(crate) fn native_context(&self) -> *mut bindings::memory_context {
+        self.root().ptr(self.context.get())
+    }
+
     /// Returns an unreferenced block with its original payload size.
     ///
     /// # Safety
@@ -150,6 +154,7 @@ leaves!(
     i64,
     (),
     Counter,
+    CounterPair,
     Device,
     AtomicU8,
     AtomicU16,
@@ -270,6 +275,10 @@ pub struct Writer<'o, W: Owner> {
 }
 
 impl<'o, W: Owner> Writer<'o, W> {
+    pub(crate) fn memory(&self) -> MemoryContext<'o, W> {
+        self.memory
+    }
+
     /// Encodes one final field and guards it until its containing record
     /// succeeds.
     ///
@@ -374,6 +383,28 @@ impl<'o, W: Owner> Writer<'o, W> {
         let id = unsafe { self.memory.owner.register_counter(self.header, name) }.map_err(BuildError::Owner)?;
         // SAFETY: the registry index is the field's entire representation.
         unsafe { destination.cast::<u64>().write(id) };
+        Ok(())
+    }
+
+    /// Registers a packet/byte pair before storing its two namespace indices.
+    ///
+    /// # Safety
+    /// As for the complete encoder, for a pair's exclusive final field.
+    pub unsafe fn counter_pair(
+        &mut self,
+        registry: &str,
+        name: &str,
+        destination: *mut CounterPair,
+    ) -> Result<(), BuildError<W::Error>> {
+        // SAFETY: construction serializes this initialized unpublished header.
+        let (registry, id) = unsafe { self.memory.owner.register_counter_pair(self.header, registry, name) }
+            .map_err(BuildError::Owner)?;
+        // SAFETY: these two scalar words are the field's complete
+        // representation.
+        unsafe {
+            destination.cast::<u64>().write(registry);
+            destination.cast::<u64>().add(1).write(id);
+        }
         Ok(())
     }
 

@@ -880,6 +880,12 @@ impl Packet<'_> {
 }
 
 impl<'b> PacketView<'b> {
+    /// Native fragment offset; an initial fragment with MF set has offset0.
+    #[inline(always)]
+    pub fn fragment_offset(&self) -> u16 {
+        // SAFETY: the batch retains this parser-owned packet descriptor.
+        unsafe { (*self.raw.as_ptr()).fragment_offset }
+    }
     /// Bytes of the first segment of the frame.
     #[inline(always)]
     pub fn data(&self) -> &'b [u8] {

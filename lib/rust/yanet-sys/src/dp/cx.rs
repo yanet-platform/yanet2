@@ -9,7 +9,7 @@ use crate::{
     counters::counter_get_address,
     dp::{
         batch::DeviceRef,
-        fields::{Counter, Device},
+        fields::{Counter, CounterPair, Device},
         module::Module,
     },
 };
@@ -80,6 +80,12 @@ pub struct Cx<'id, M: Module> {
     _brand: PhantomData<fn(&'id ()) -> &'id ()>,
     // Neither Send nor Sync on purpose, independent of the pointer fields.
     _local: PhantomData<*mut ()>,
+}
+impl<M: Module> Cx<'_, M> {
+    pub(crate) fn classify_device(&self) -> u32 {
+        // SAFETY: the runtime retains this invocation's live execution context.
+        unsafe { self.ectx.as_ref().module_device_id }
+    }
 }
 
 /// A counter's value of the context's worker, resolved once at commit.
@@ -454,5 +460,23 @@ fn device_target<'id, M: Module>(cx: &Cx<'id, M>, device: &'id Device, input: bo
             return None;
         }
         Some(DeviceRef::new(NonNull::new_unchecked(target), input))
+    }
+}
+
+impl CounterPair {
+    /// Adds a packet/byte observation to the current worker's named registry.
+    #[inline(always)]
+    pub fn add<'id, M: Module>(&'id self, cx: &Cx<'id, M>, packets: u64, bytes: u64) {
+        // SAFETY: the owner registered both private indices with width two.
+        // Publication froze this worker's complete registry and handle arrays.
+        unsafe {
+            let base = (*cx.ectx.as_ptr()).abs_runtime_counter_storages_base;
+            let storages = cx.root.ptr::<usize>(base.addr());
+            let address = storages.add(self.registry() as usize).read();
+            let storage = cx.root.ptr::<bindings::counter_storage>(address);
+            let values = counter_get_address(cx.root, storage, self.id());
+            add_to(values, packets);
+            add_to(values.add(1), bytes);
+        }
     }
 }

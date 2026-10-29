@@ -16,8 +16,8 @@ mod write;
 pub use addr::{BlockAddr, Context, Header};
 pub use error::{BuildError, Refusal};
 pub use init::{
-    Boxed, CounterName, DeviceIndex, DeviceMap, DeviceName, LpmInit, Slice, WithDevices, boxed, counter, device, lpm,
-    slice, with_devices,
+    Boxed, CounterName, CounterPairName, DeviceIndex, DeviceMap, DeviceName, LpmInit, Slice, WithDevices, boxed,
+    counter, counter_pair, device, lpm, slice, with_devices,
 };
 pub use owner::Owner;
 pub use record::FfiRecord;

@@ -23,3 +23,5 @@
 #include "common_shim.h"
 #include "dp_shim.h"
 #include <errno.h>
+
+#include "classify_shim.h"

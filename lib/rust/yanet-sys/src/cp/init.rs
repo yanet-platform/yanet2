@@ -5,7 +5,7 @@ use yanet_shm::rel::{ShmBox, ShmSlice};
 use super::{BuildError, Encode, Owner, Refusal, Writer};
 use crate::{
     common::lpm::{Lpm, LpmRange},
-    dp::{Counter, Device},
+    dp::{Counter, CounterPair, Device},
 };
 
 /// Streams fallible records without retaining an intermediate collection.
@@ -177,6 +177,13 @@ impl DeviceMap {
 /// A namespace-relative device index obtained from a declaration table.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct DeviceIndex(u64);
+impl DeviceIndex {
+    /// Namespace-relative condition data; this word does not prove registration
+    /// in another module configuration and grants no ownership authority.
+    pub fn value(self) -> u64 {
+        self.0
+    }
+}
 
 // SAFETY: device indices are scalar words; resolution checks namespace bounds.
 unsafe impl<E> Encode<E> for DeviceIndex {
@@ -253,6 +260,28 @@ where
     {
         // SAFETY: the caller supplies the exclusive final table field.
         unsafe { writer.lpm(self.len, self.fill, destination) }
+    }
+}
+
+/// Registers two adjacent packet/byte values in a named runtime registry.
+pub fn counter_pair<N: AsRef<str>>(registry: &str, name: N) -> CounterPairName<'_, N> {
+    CounterPairName { registry, name }
+}
+
+pub struct CounterPairName<'a, N> {
+    registry: &'a str,
+    name: N,
+}
+// SAFETY: the owner registers both values before the private indices are
+// stored.
+unsafe impl<E, N: AsRef<str>> Encode<E> for CounterPairName<'_, N> {
+    type Output = CounterPair;
+    unsafe fn encode<W: Owner>(self, writer: &mut Writer<'_, W>, destination: *mut CounterPair) -> Result<(), E>
+    where
+        E: From<BuildError<W::Error>>,
+    {
+        // SAFETY: the caller supplies the pair's exclusive final field.
+        unsafe { writer.counter_pair(self.registry, self.name.as_ref(), destination) }.map_err(E::from)
     }
 }
 

@@ -39,3 +39,13 @@ required-features = ["plugin"]
 name = "fib_dp"
 crate-type = ["cdylib"]
 required-features = ["plugin"]
+
+[[example]]
+name = "firewall_dp"
+crate-type = ["cdylib"]
+required-features = ["plugin"]
+
+[[example]]
+name = "firewall4_dp"
+crate-type = ["cdylib"]
+required-features = ["plugin"]
