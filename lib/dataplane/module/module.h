@@ -43,7 +43,8 @@
 // cp_entity base holding the registry item, the agent pointer and the
 // memory context; the former config_item, agent and memory_context
 // members are reached through the base now.
-#define YANET_MODULE_ABI_VERSION 46
+// 47: struct dp_port gained rss_queue_count.
+#define YANET_MODULE_ABI_VERSION 47
 
 // Symbol name a module .so exports carrying its compiled-against
 // YANET_MODULE_ABI_VERSION, as a uint32_t global.

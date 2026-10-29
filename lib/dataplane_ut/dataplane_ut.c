@@ -413,14 +413,15 @@ dataplane_ut_new(const struct dataplane_ut_config *cfg) {
 		}
 		for (size_t device_idx = 0; device_idx < effective_device_count;
 		     ++device_idx) {
-			if (dp_topology_set_device_worker_count(
+			if (dp_topology_set_device_queue_counts(
 				    ut->dp_config,
 				    device_idx,
+				    device_worker_counts[device_idx],
 				    device_worker_counts[device_idx]
 			    ) != 0) {
 				LOG(ERROR,
 				    "dataplane_ut_new: failed to set "
-				    "dp_topology worker count for device "
+				    "dp_topology queue counts for device "
 				    "%zu",
 				    device_idx);
 				free(device_worker_counts);
