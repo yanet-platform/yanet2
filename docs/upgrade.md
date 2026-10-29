@@ -3,6 +3,30 @@
 Manual steps required when upgrading an existing deployment. The packaging
 does not perform these automatically.
 
+## FWState synchronization moves to an endpoint list
+
+`SyncConfig` replaces its flat source, destination MAC and multicast/unicast
+endpoint fields with a repeated `endpoints` list: each entry carries its own
+source and destination IPv6 address and a destination port. An update that
+carries endpoints replaces the whole list; `no_endpoints` clears it. The
+shared-memory config layout changes, so the dataplane and the control plane
+must be upgraded together.
+
+The `dst_ether` field is gone: emitted sync packets leave their Ethernet
+header zeroed, and the route module downstream of fwstate resolves and stamps
+both MAC addresses. A fwstate config must sit in front of route in the
+pipeline, and a multicast sync group needs a covering route whose next-hop
+MAC is the derived multicast MAC (for example `33:33:00:00:00:01` for
+`ff02::1`). The UDP source port of every emitted packet is randomized into
+the ephemeral range, so sync traffic spreads over equal-cost paths.
+
+The CLI replaces `--src-addr`, `--dst-ether`, `--multicast` and `--unicast`
+with a repeatable `--endpoint SRC@DST:PORT` (for example
+`fd00::1@ff02::1:9999`, the destination also accepts brackets) and
+`--no-endpoints`. Upgrade `yanet2-cli`, the control plane and the web UI
+together: an old CLI's endpoint flags fail as unknown, and an old service
+rejects the new request's endpoint list as incomplete.
+
 ## Gateway HTTP rejects cross-origin browser calls from untrusted origins
 
 The gateway's HTTP server no longer sends `Access-Control-Allow-Origin: *`.
