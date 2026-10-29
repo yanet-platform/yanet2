@@ -32,11 +32,11 @@ make fuzz [MODULE=<name>]
 - `dataplane/` — DPDK binary (`main.c`, `config.c`, `dpdk.c`, `worker.c`, `drivers/`).
 - `controlplane/` — `gateway/`, built-in services (`builtin/`), CGO shm bindings (`ffi/`), published-config store (`configstore/`), root protos (`ynpb/`), `yncp/`, entrypoint `cmd/yncp-director`.
 - `modules/` — packet-processing modules; `devices/` — device adapters (`plain`, `vlan`, `trafgen`, `vxlan`), same layout.
-- `operators/` — Go daemons above the gateway: `pipeline`, `decap`, `forward`, `route` (`cmd/` + `internal/` + `operatorpb/` + `cli/`), `bird-adapter`, `neighbours` (web only here).
+- `operators/` — Go daemons above the gateway: `pipeline`, `route` (`cmd/` + `internal/` + `operatorpb/` + `cli/`), `generic`, `bird-adapter`, `neighbour-sidecar`, `neighbours` (web only here).
 - `lib/` — C support libs (`controlplane`, `dataplane`, `dataplane_ut`, `filter`, `fwstate`, …), `rust/` (Rust module SDK, own cargo workspace); `api/` — public C API headers; `bindings/go/` — root CGO agent bindings.
 - `common/` — shared code: `go/` (`xcfg`, `xcmd`, `xerror`, `xgrpc`, `logging`, …), `rust/`, `commonpb/`, `filterpb/`, C headers (`lpm.h`, `hash.h`, `memory*.h`).
 - `cli/` — Rust CLI workspace: `core/` (crate `yanet-cli`, aliased `ync`), `modules/{inspect,pipeline,function,counters,common}`.
-- `lint/` — repo linters (`style`, `commit`, `protobuf`); `docs/`, `deploy/`, `debian/`, `etc/`, `subprojects/dpdk/`.
+- `lint/` — repo linters (`style`, `commit`, `protobuf`); `docs/`, `deploy/`, `debian/`, `subprojects/dpdk/`.
 
 - `lab/` — local QEMU lab library; `cmd/yanet-lab/` — developer-only lab CLI (not packaged); `tests/functional/framework/` — QEMU harness shared by functional tests and the lab (imports `testing`).
 
@@ -52,7 +52,7 @@ modules/<name>/
   tests/  fuzzing/  [internal/]
 ```
 
-Active modules: `route, acl, l3b, blackhole, forward, decap, nat64, fwstate, dscp, pdump, route-mpls, mirror`. Legacy shape: `pdump` (CGO in `controlplane/ffi.go`, no `bindings/`); `fwstate` partially migrated. The `l3b` module links virtual-service and session-table objects under `objects/l3b/`. Dataplane symbols are exported via meson `--require-defined=new_module_<name>`.
+Active modules: `route, acl, l3b, blackhole, forward, decap, nat64, fwstate, dscp, pdump, route-mpls, mirror, unrdup`. Legacy shape: `pdump` (CGO in `controlplane/ffi.go`, no `bindings/`); `fwstate` partially migrated. The `l3b` module links virtual-service and session-table objects under `objects/l3b/`. Dataplane symbols are exported via meson `--require-defined=new_module_<name>`.
 
 Shared-memory pattern: `ffi.SharedMemory` → `shm.AgentAttach(name, instanceIdx, size)` → write the C config through FFI (`<name>_module_config_update()`) with Go memory pinned by `runtime.Pinner` → the dataplane reads it atomically. Exported Go APIs whose arguments index C arrays (device IDs, queue/worker indices) validate the range on the Go side.
 
