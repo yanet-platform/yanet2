@@ -1275,8 +1275,8 @@ fwmap_put(
 ) {
 	fwmap_copy_key_fn_t copy_key_fn =
 		(fwmap_copy_key_fn_t)fwmap_func_registry[map->copy_key_fn_id];
-	fwmap_update_value_fn_t update_value_fn = (fwmap_update_value_fn_t)
-		fwmap_func_registry[map->update_value_fn_id];
+	fwmap_update_value_fn_t update_value_fn = (fwmap_update_value_fn_t
+	)fwmap_func_registry[map->update_value_fn_id];
 
 	fwmap_entry_t entry = fwmap_entry(map, worker_idx, now, ttl, key, lock);
 	if (!entry.key) {

@@ -137,10 +137,9 @@ fwmap_probe_entry(
 	if (scenario == MATCH_LIVE || scenario == MATCH_EQUAL_DEADLINE ||
 	    scenario == MATCH_EXPIRED) {
 		count = 1;
-	} else if (
-		scenario == REUSE_EQUAL_DEADLINE || scenario == REUSE_EXPIRED ||
-		scenario == KEY_EXHAUSTED_AFTER_LINK
-	) {
+	} else if (scenario == REUSE_EQUAL_DEADLINE ||
+		   scenario == REUSE_EXPIRED ||
+		   scenario == KEY_EXHAUSTED_AFTER_LINK) {
 		count = 4;
 	} else if (scenario == OVERFLOW_EXHAUSTED) {
 		count = FWMAP_PROBE_EXTRA * FWMAP_BUCKET_ENTRIES;
@@ -164,11 +163,9 @@ fwmap_probe_entry(
 		if (i == 0 && (scenario == MATCH_EQUAL_DEADLINE ||
 			       scenario == REUSE_EQUAL_DEADLINE)) {
 			deadline = 100;
-		} else if (
-			i == 0 && (scenario == MATCH_EXPIRED ||
-				   scenario == REUSE_EXPIRED ||
-				   scenario == MATCH_AFTER_EXPIRED)
-		) {
+		} else if (i == 0 && (scenario == MATCH_EXPIRED ||
+				      scenario == REUSE_EXPIRED ||
+				      scenario == MATCH_AFTER_EXPIRED)) {
 			deadline = 99;
 		}
 		if (fwmap_put(map, 0, 1, deadline - 1, &key, &value, NULL) !=
@@ -194,10 +191,8 @@ fwmap_probe_entry(
 	if (scenario == MATCH_LIVE || scenario == MATCH_EQUAL_DEADLINE ||
 	    scenario == MATCH_EXPIRED) {
 		key = first;
-	} else if (
-		scenario == MATCH_AFTER_EXPIRED ||
-		scenario == ZERO_DEADLINE_TERMINATES
-	) {
+	} else if (scenario == MATCH_AFTER_EXPIRED ||
+		   scenario == ZERO_DEADLINE_TERMINATES) {
 		key = later;
 	}
 	if (scenario == KEY_EXHAUSTED_AFTER_LINK) {
