@@ -563,6 +563,68 @@ func TestHandlePacketsOnWorker_InvalidWorker(t *testing.T) {
 	require.Nil(t, result)
 }
 
+// Test_HandleSegmentedPackets_ReportsParsedOffsets verifies that a result
+// reports, beside the bytes of each packet, the header offsets the parser set
+// on it.
+func Test_HandleSegmentedPackets_ReportsParsedOffsets(t *testing.T) {
+	h, err := NewHarness(Config{
+		CPMemory:    uint64(datasize.MB * 32),
+		DPMemory:    uint64(datasize.MB * 4),
+		WorkerCount: 1,
+	})
+	require.NoError(t, err)
+	t.Cleanup(h.Free)
+	packet := xpacket.LayersToPacket(
+		t,
+		&layers.Ethernet{
+			SrcMAC:       xerror.Unwrap(net.ParseMAC("aa:bb:cc:dd:ee:ff")),
+			DstMAC:       xerror.Unwrap(net.ParseMAC("11:22:33:44:55:66")),
+			EthernetType: layers.EthernetTypeIPv4,
+		},
+		&layers.IPv4{
+			Version:  4,
+			TTL:      64,
+			Protocol: layers.IPProtocolICMPv4,
+			SrcIP:    net.ParseIP("1.2.3.4"),
+			DstIP:    net.ParseIP("10.0.0.5"),
+		},
+		&layers.ICMPv4{
+			TypeCode: layers.CreateICMPv4TypeCode(layers.ICMPv4TypeEchoRequest, 0),
+		},
+	)
+
+	result, err := h.HandleSegmentedPackets([][]byte{packet.Data()})
+
+	require.NoError(t, err)
+	require.Empty(t, result.Output)
+	require.Equal(
+		t,
+		[]PacketDescriptor{{NetworkOffset: 14, TransportOffset: 34}},
+		result.DropDescriptors,
+	)
+}
+
+// Test_HandleSegmentedPackets_ReclaimLostPackets_KeepsListedPackets verifies
+// that a round which reclaims the packets it left on no list still returns,
+// and does not free, the packets it left on a list.
+func Test_HandleSegmentedPackets_ReclaimLostPackets_KeepsListedPackets(t *testing.T) {
+	h, err := NewHarness(Config{
+		CPMemory:           uint64(datasize.MB * 32),
+		DPMemory:           uint64(datasize.MB * 4),
+		WorkerCount:        1,
+		ReclaimLostPackets: true,
+	})
+	require.NoError(t, err)
+	t.Cleanup(h.Free)
+	frame := make([]byte, 60)
+	frame[0] = 0x42
+
+	result, err := h.HandleSegmentedPackets([][]byte{frame})
+
+	require.NoError(t, err)
+	require.Equal(t, [][]byte{frame}, result.Drop)
+}
+
 // TestHandleSegmentedPacketsOnDevice_ForwardDeviceScopedRule verifies that
 // Config.Workers assigns each worker's own device and that
 // HandleSegmentedPacketsOnDevice stamps the injected packet's ingress

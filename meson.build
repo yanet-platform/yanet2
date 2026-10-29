@@ -78,6 +78,9 @@ build_date = run_command(
 yanet_stamp.set_quoted('YANET_BUILD_DATE', build_date.stdout().strip())
 
 dataplane_only = get_option('dataplane_only')
+if dataplane_only and get_option('sdk_rust_fixtures').enabled()
+  error('sdk_rust_fixtures needs the control-plane build, not dataplane_only')
+endif
 
 python3 = find_program('python3', required: true, version: '>=3.8', native: true)
 
@@ -291,6 +294,15 @@ if not (cc.get_id() == 'gcc' and yanet_go_cc.length() == 1
   yanet_go_env += {'CC': ' '.join(yanet_go_cc)}
 endif
 
+if get_option('sdk_rust_fixtures').enabled()
+  yanet_go_env += {
+    'CGO_CPPFLAGS': yanet_go_env['CGO_CPPFLAGS']
+      + ' "-I' + meson.project_source_root() + '"'
+      + ' "-I' + (meson.project_build_root() / 'lib/rust') + '"'
+      + ' "-I' + (meson.global_build_root() / 'subprojects/dpdk') + '"',
+  }
+endif
+
 # The same cgo preprocessor flags for Go builds outside meson, which the
 # Makefile, the gate and direct go test runs read from this file.
 configure_file(
@@ -422,8 +434,10 @@ configure_file(output: build_stamp, configuration: yanet_stamp)
 #
 # 'libraries' are the project libraries a package uses directly; meson adds
 # what they depend on. 'archives' are external archives linked as they are,
-# with DPDK's system libraries; 'inputs' are further native inputs the
-# marker hashes.
+# with DPDK's system libraries; 'generated_archives' are the same for
+# archives a custom target makes, which have no member objects to extract;
+# 'inputs' are further native inputs the marker hashes; 'build_tag' is the Go
+# build constraint of every file of the package.
 cgo_packages = {}
 
 # Every protoc generator in the tree; each Go binary depends on all of them.
@@ -445,6 +459,12 @@ endif
 if not dataplane_only
   subdir('bindings/go')
 
+  # The Rust SDK fixtures, off by default.
+  #
+  # Their cgo package is test-only, so the directory is entered after the
+  # production closure of the control plane is fixed.
+  subdir('lib/rust')
+
   # Meson computes the link closure of each package for a probe program.
   #
   # The closure becomes the package's generated #cgo flags, so no tracked Go
@@ -463,9 +483,12 @@ if not dataplane_only
     endif
     # External archives link alone, without the libraries meson records
     # behind them.
-    foreach archive : package.get('archives', [])
+    foreach archive : package.get('archives', []) + package.get('generated_archives', [])
       cgo_flags_args += ['--archive', package_path, archive.full_path()]
     endforeach
+    if package.has_key('build_tag')
+      cgo_flags_args += ['--build-tag', package_path, package['build_tag']]
+    endif
   endforeach
 
   # The build directories of one checkout share the generated files, so only
@@ -495,23 +518,33 @@ if not dataplane_only
   cgo_test_deps = []
   foreach package_path, package : cgo_packages
     cgo_libraries = package.get('libraries', []) + package.get('archives', [])
-    cgo_native_inputs = package.get('inputs', []) + cgo_libraries
+    cgo_native_inputs = (package.get('inputs', []) + package.get('generated_archives', [])
+      + cgo_libraries)
     cgo_inputs = cgo_native_inputs
     foreach library : cgo_libraries
       # Thin archives keep member contents in separate object files.
       cgo_inputs += library.extract_all_objects(recursive: true)
     endforeach
     cgo_name = package_path.replace('/', '-') + '-go-cdeps'
+    cgo_command = go_cdeps
+    if package.has_key('build_tag')
+      cgo_command = [
+        'sh', '-c',
+        'set -eu; sdk_go_flags=$("$1" env GOFLAGS); export GOFLAGS="$sdk_go_flags -tags=$2"; shift 2; exec "$@"',
+        'sh', go.full_path(), package['build_tag'],
+      ] + cgo_command
+    endif
     # Content checks also catch restored mtimes and a deleted package marker.
     cgo_target = custom_target(
       cgo_name,
       input: cgo_inputs,
       output: cgo_name + '.stamp',
-      command: go_cdeps + [
+      command: cgo_command + [
         '--package', package_path,
         '--output', join_paths(meson.project_source_root(), package_path, 'zz_yanet_cdeps.c'),
         '--stamp', '@OUTPUT@',
-      ] + cgo_native_inputs,
+      ] + (package.has_key('build_tag') ? ['--build-tag', package['build_tag']] : [])
+      + cgo_native_inputs,
       env: yanet_go_env,
       # The marker hashes every archive the package's CGO flags name: the
       # probe builds the project ones, the marker's inputs the external ones.

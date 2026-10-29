@@ -816,6 +816,18 @@ impl<M, W> fmt::Debug for Built<M, W> {
 }
 
 impl<M, W> Built<M, W> {
+    /// The configuration whose header is at `header`, for a C caller that
+    /// kept only the header's address.
+    ///
+    /// # Safety
+    ///
+    /// `header` is the header of a configuration of module `M` that a
+    /// [`Builder::build`] in the memory of an owner of type `W` handed over,
+    /// not released since, and no other `Built` of it is used.
+    pub unsafe fn from_header(header: Header) -> Self {
+        Self { header, _kind: PhantomData }
+    }
+
     /// Address of the module header, which is what the control plane
     /// publishes.
     pub fn header(&self) -> Header {

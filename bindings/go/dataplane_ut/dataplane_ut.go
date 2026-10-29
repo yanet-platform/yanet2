@@ -179,6 +179,13 @@ type Config struct {
 	// its index — the harness's long-standing single-device behavior.
 	// When set, its length must equal WorkerCount.
 	Workers []WorkerSpec
+	// ReclaimLostPackets makes the HandleSegmentedPackets* rounds free the
+	// input packets a round leaves on neither the output nor the drop list.
+	//
+	// For a module that forgets packets on purpose, which would leak them
+	// otherwise. Leave it off for a module that keeps packets beyond the
+	// round: it would free what the module still holds.
+	ReclaimLostPackets bool
 }
 
 // Result of one pipeline round.
@@ -195,6 +202,21 @@ type Result struct {
 type RawResult struct {
 	Output [][]byte
 	Drop   [][]byte
+	// OutputDescriptors and DropDescriptors hold the descriptor of each packet
+	// of Output and Drop, in the same order.
+	OutputDescriptors []PacketDescriptor
+	DropDescriptors   []PacketDescriptor
+}
+
+// PacketDescriptor is what the dataplane keeps about a packet beside its
+// bytes.
+type PacketDescriptor struct {
+	// NetworkOffset and TransportOffset are where the parser put the headers,
+	// from the start of the frame.
+	NetworkOffset   uint16
+	TransportOffset uint16
+	// RecircRemaining is what is left of the packet's recirculation budget.
+	RecircRemaining uint16
 }
 
 // Harness is a handle to an in-process dataplane harness.
@@ -210,6 +232,8 @@ type Harness struct {
 	// Registered worker count. Worker indices passed to run calls must
 	// stay below it.
 	workerCount int
+	// Whether a segmented round frees the input packets left on no list.
+	reclaimLostPackets bool
 }
 
 // NewHarness constructs a Harness from cfg.
@@ -324,7 +348,12 @@ func NewHarness(cfg Config) (*Harness, error) {
 		return nil, fmt.Errorf("failed to create dataplane harness: dataplane_ut_new returned NULL")
 	}
 
-	return &Harness{ptr: ptr, deviceCount: deviceCount, workerCount: int(cfg.WorkerCount)}, nil
+	return &Harness{
+		ptr:                ptr,
+		deviceCount:        deviceCount,
+		workerCount:        int(cfg.WorkerCount),
+		reclaimLostPackets: cfg.ReclaimLostPackets,
+	}, nil
 }
 
 // Free tears down the harness. Nil-safe.
@@ -543,6 +572,21 @@ func (m *Harness) HandleSegmentedPacketsOnDevice(
 	return m.handleSegmentedPackets(worker, deviceID, packets...)
 }
 
+// freeLostPackets frees the packets that are on neither list.
+func freeLostPackets(packets []*dataplane.Packet, lists ...*dataplane.PacketList) {
+	listed := map[*dataplane.Packet]struct{}{}
+	for _, list := range lists {
+		for packet := list.First(); packet != nil; packet = packet.Next() {
+			listed[packet] = struct{}{}
+		}
+	}
+	for _, packet := range packets {
+		if _, ok := listed[packet]; !ok {
+			packet.Free()
+		}
+	}
+}
+
 // handleSegmentedPackets is the shared implementation for the
 // HandleSegmentedPackets* variants.
 func (m *Harness) handleSegmentedPackets(
@@ -602,6 +646,10 @@ func (m *Harness) handleSegmentedPackets(
 	output := (*dataplane.PacketList)(unsafe.Pointer(&result.output))
 	drop := (*dataplane.PacketList)(unsafe.Pointer(&result.drop))
 
+	if m.reclaimLostPackets {
+		freeLostPackets(builtPackets, output, drop)
+	}
+
 	rawBytes := func(list *dataplane.PacketList) [][]byte {
 		data := list.Data()
 		out := make([][]byte, 0, len(data))
@@ -613,9 +661,24 @@ func (m *Harness) handleSegmentedPackets(
 		return out
 	}
 
+	descriptors := func(list *dataplane.PacketList) []PacketDescriptor {
+		out := make([]PacketDescriptor, 0, list.Count())
+		for packet := list.First(); packet != nil; packet = packet.Next() {
+			cPacket := (*C.struct_packet)(unsafe.Pointer(packet))
+			out = append(out, PacketDescriptor{
+				NetworkOffset:   uint16(cPacket.network_header.offset),
+				TransportOffset: uint16(cPacket.transport_header.offset),
+				RecircRemaining: uint16(cPacket.recirc_remaining),
+			})
+		}
+		return out
+	}
+
 	return &RawResult{
-		Output: rawBytes(output),
-		Drop:   rawBytes(drop),
+		Output:            rawBytes(output),
+		Drop:              rawBytes(drop),
+		OutputDescriptors: descriptors(output),
+		DropDescriptors:   descriptors(drop),
 	}, nil
 }
 

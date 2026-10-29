@@ -14,5 +14,6 @@ yanet-shm = { path = "../yanet-shm" }
 yanet-sys = { path = "../yanet-sys", optional = true }
 
 [features]
-# The configuration owner of the builder tests; it links the C bindings.
+# The configuration owner of the builder tests, which runs under Miri: it
+# names the owner seam of the C bindings and calls no C.
 cp = ["dep:yanet-sys"]

@@ -20,13 +20,21 @@ pub enum Refusal {
     InvalidRange,
 }
 
-impl fmt::Display for Refusal {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
-        f.write_str(match self {
+impl Refusal {
+    /// The refusal's message, which `Display` writes and a C error frame
+    /// carries.
+    pub fn message(self) -> &'static str {
+        match self {
             Self::OutOfMemory => "the shared memory is exhausted",
             Self::BlockTooLarge => "an owned block larger than the largest block of the allocator",
             Self::InvalidRange => "an LPM range ends before it starts",
-        })
+        }
+    }
+}
+
+impl fmt::Display for Refusal {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
+        f.write_str(self.message())
     }
 }
 
