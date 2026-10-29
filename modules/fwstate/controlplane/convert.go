@@ -53,7 +53,7 @@ func SyncConfigFromC(nativeConfig cfwstate.SyncConfig) *fwstatepb.SyncConfig {
 		syncConfig.Endpoints = append(syncConfig.Endpoints, &fwstatepb.SyncEndpoint{
 			SrcAddr: &commonpb.IPAddress{Addr: append([]byte(nil), endpoint.SrcAddr[:]...)},
 			DstAddr: &commonpb.IPAddress{Addr: append([]byte(nil), endpoint.DstAddr[:]...)},
-			Port:    new(uint32(uint32(endpoint.Port))),
+			Port:    new(uint32(endpoint.Port)),
 		})
 	}
 	return syncConfig
