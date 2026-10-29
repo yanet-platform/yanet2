@@ -7,6 +7,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <string.h>
+#include <sys/stat.h>
 
 #include <dlfcn.h>
 #include <pthread.h>
@@ -525,6 +526,34 @@ dataplane_init(
 	int mem_fd = open(
 		config->storage, O_CREAT | O_TRUNC | O_RDWR, S_IRUSR | S_IWUSR
 	);
+	if (mem_fd >= 0) {
+		// Provision the sticky directory the module control planes
+		// keep their per-name lease files in: every attacher can
+		// create a file there, nobody but the owner can unlink one.
+		char *lease_dir_end = strrchr(config->storage, '/');
+		if (lease_dir_end != NULL) {
+			char lease_dir[PATH_MAX];
+			size_t dir_len = lease_dir_end - config->storage;
+			if (snprintf(
+				    lease_dir,
+				    sizeof(lease_dir),
+				    "%.*s/yanet-agent-locks",
+				    (int)dir_len,
+				    config->storage
+			    ) < (int)sizeof(lease_dir) &&
+			    mkdir(lease_dir, 01777) != 0 && errno != EEXIST) {
+				LOG(ERROR,
+				    "failed to create the agent lease "
+				    "directory %s: %s",
+				    lease_dir,
+				    strerror(errno));
+			} else {
+				// The creating umask would tighten a fresh
+				// directory; pin the intended mode.
+				(void)chmod(lease_dir, 01777);
+			}
+		}
+	}
 	if (mem_fd < 0) {
 		LOG(ERROR,
 		    "failed to open storage at %s: %s",

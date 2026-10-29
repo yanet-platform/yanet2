@@ -84,6 +84,19 @@ agent_dp_config_ready(struct yanet_shm *shm, uint32_t instance_idx);
 // The agent provides module-specific operations and memory management.
 // A name longer than 79 characters is rejected.
 //
+// Attaching under a name replaces that name's previous generation: the
+// previous agent's further writes are refused and its memory is reclaimed
+// once nothing references it. The replacement is guarded — while the
+// previous holder process is alive, the attach fails with failed
+// precondition instead. The guard is a lock on a zero-size file beside the
+// segment's storage, released by the kernel when the holder exits by any
+// means, so the answer holds across the process and IPC namespaces of a
+// containerized deployment. A clean detach or destroy of the agent hands
+// the name over without waiting. The guard is keyed by the segment's
+// canonical path: spellings that resolve to one file arbitrate together,
+// while genuinely different paths to the same storage arbitrate
+// separately and must not be mixed.
+//
 // @param shm Handle to shared memory segment
 // @param instance_idx Index of the dataplane instance where the agent should
 // operate

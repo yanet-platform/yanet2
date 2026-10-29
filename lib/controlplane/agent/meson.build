@@ -7,6 +7,7 @@ dependencies = [
 
 sources = files(
   'agent.c',
+  'lease.c',
 )
 
 lib_agent_cp = static_library(

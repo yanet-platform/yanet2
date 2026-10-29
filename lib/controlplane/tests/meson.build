@@ -351,6 +351,28 @@ superseded_agent_test = executable(
 
 test('superseded_agent', superseded_agent_test, suite: ['lib'])
 
+agent_lease_test = executable(
+  'agent_lease_test',
+  ['agent_lease_test.c'],
+  link_args: [
+    '-Wl,-E',
+    '-Wl,--undefined=new_device_plain',
+    '-Wl,--export-dynamic-symbol=new_device_plain',
+  ],
+  dependencies: [
+    lib_dataplane_ut_dep,
+    lib_logging_dep,
+    lib_errors_dep,
+    lib_config_cp_dep,
+    libdpdk_dep,
+  ],
+  link_with: [lib_dev_plain_dp],
+  include_directories: yanet_rootdir,
+)
+
+test('agent_lease', agent_lease_test, suite: ['lib'])
+
+
 agent_list_race_thread_dep = dependency('threads')
 
 agent_list_race_test = executable(

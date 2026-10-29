@@ -35,6 +35,10 @@ struct agent;
 struct yanet_shm {
 	void *base;
 	size_t size;
+	// Path of the backing storage file, kept from the attach call so
+	// agent operations can derive per-name files beside it; a harness
+	// that backs the segment with its own memory leaves it NULL.
+	char *path;
 };
 
 struct agent_arena {

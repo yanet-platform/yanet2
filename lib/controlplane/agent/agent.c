@@ -27,6 +27,8 @@
 
 #include "lib/errors/errors.h"
 
+#include "lease.h"
+
 #include "api/agent.h"
 #include "api/info.h"
 
@@ -62,6 +64,22 @@ yanet_shm_attach(const char *path) {
 	}
 	shm->base = ptr;
 	shm->size = size;
+	// The stored path is canonicalized: the agent name leases derive
+	// per-name files from it, so every process reaching one segment
+	// through any spelling of its path must derive the same files.
+	// A segment that cannot be resolved falls back to the path as
+	// given.
+	shm->path = realpath(path, NULL);
+	if (shm->path == NULL) {
+		shm->path = strdup(path);
+	}
+	if (shm->path == NULL) {
+		int saved_errno = errno;
+		munmap(ptr, size);
+		free(shm);
+		errno = saved_errno;
+		return NULL;
+	}
 	return shm;
 }
 
@@ -71,6 +89,7 @@ yanet_shm_detach(struct yanet_shm *shm) {
 	// way to retry with a better length, so keeping the handle alive
 	// would only turn a leaked mapping into a dangling pointer as well.
 	int rc = munmap(shm->base, shm->size);
+	free(shm->path);
 	free(shm);
 	return rc;
 }
@@ -281,6 +300,21 @@ agent_attach(
 	}
 	memset(new_agent, 0, sizeof(struct agent));
 
+	// The name lease guards everything below: while a live process
+	// holds the name, this attach fails here instead of superseding
+	// the holder's agent and reclaiming memory its calls may touch.
+	if (agent_lease_acquire(
+		    new_agent, shm, instance_idx, agent_name, err
+	    ) != 0) {
+		memory_bfree(
+			&cp_config->memory_context,
+			new_agent,
+			sizeof(struct agent)
+		);
+		new_agent = NULL;
+		goto unlock;
+	}
+
 	strtcpy(new_agent->name, agent_name, sizeof(new_agent->name));
 	new_agent->memory_limit = memory_limit;
 	SET_OFFSET_OF(&new_agent->dp_config, dp_config);
@@ -301,6 +335,7 @@ agent_attach(
 	);
 	if (arenas == NULL) {
 		yanet_error_add(err, "failed to allocate memory for arenas");
+		agent_lease_release(new_agent);
 		agent_cleanup(new_agent);
 		new_agent = NULL;
 		goto unlock;
@@ -320,6 +355,7 @@ agent_attach(
 			arenas,
 			sizeof(struct agent_arena) * arena_count
 		);
+		agent_lease_release(new_agent);
 		agent_cleanup(new_agent);
 		new_agent = NULL;
 		goto unlock;
@@ -383,6 +419,7 @@ agent_attach(
 			);
 			spinlock_unlock(&cp_config->agent_lock);
 			cp_config_gen_release(cp_config, config_gen);
+			agent_lease_release(new_agent);
 			agent_cleanup(new_agent);
 			new_agent = NULL;
 			goto unlock;
@@ -556,8 +593,9 @@ agent_extend(struct agent *agent, uint64_t size, yanet_error **err) {
 
 int
 agent_detach(struct agent *agent) {
-	(void)agent;
-	// NOTE: Currently a no-op.
+	// The name lease drops here: a clean handoff that frees the name
+	// for the next attach without waiting for this process to exit.
+	agent_lease_release(agent);
 	return 0;
 }
 
@@ -569,6 +607,7 @@ agent_destroy(struct agent *agent) {
 
 	struct cp_config *cp_config = ADDR_OF(&agent->cp_config);
 	if (cp_config == NULL) {
+		agent_lease_release(agent);
 		agent_cleanup(agent);
 		return 0;
 	}
@@ -653,7 +692,10 @@ agent_destroy(struct agent *agent) {
 
 	agent_cleanup(agent);
 	// Every completed hold of the agent lock sweeps, this holder
-	// included.
+	// included. The lease drops only now that the destruction has
+	// succeeded — a registry that cannot shrink leaves the agent
+	// registered and its name guarded for a retry.
+	agent_lease_release(agent);
 	cp_config_reclaim_unused_agents_locked(cp_config);
 	spinlock_unlock(&cp_config->agent_lock);
 	return 0;
