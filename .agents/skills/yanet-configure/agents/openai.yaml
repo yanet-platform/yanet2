@@ -1,0 +1,4 @@
+interface:
+  display_name: "Configure YANET"
+  short_description: "Configure and bring up a YANET box for its common deployment roles"
+  default_prompt: "Use $yanet-configure to write dataplane/controlplane/operator configs, enable modules and wire functions, pipelines and devices for a YANET deployment."
