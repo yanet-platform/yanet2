@@ -4,7 +4,7 @@ use bytesize::ByteSize;
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 use ync::{display, output};
-use ynpb::pb::{DevicePipelineInfo, InspectResponse, InstanceInfo, MemoryNode};
+use ynpb::pb::{CpMemoryInfo, DevicePipelineInfo, InspectResponse, InstanceInfo, MemoryNode};
 
 use crate::memory::{MemoryTree, node_live};
 
@@ -199,7 +199,33 @@ fn memory_records(info: &InstanceInfo, details: bool, unicode: bool) -> Vec<Reco
             }
         }
     }
+    rows.extend(cp_memory_records(&info.cp_memory, details, unicode));
     nonempty(rows, "memory")
+}
+
+/// The controlplane zone backs every context that is not an agent arena;
+/// it has no pid, generation or arena limit of its own, only the zone
+/// allocator's free byte count and the context tree.
+fn cp_memory_records(cp_memory: &Option<CpMemoryInfo>, details: bool, unicode: bool) -> Vec<Record> {
+    let Some(cp_memory) = cp_memory else {
+        return Vec::new();
+    };
+    let row = Record::new(
+        "memory",
+        name("cp"),
+        vec![
+            Field::new("pid", "-"),
+            Field::new("gen", "-"),
+            Field::new("used", "-"),
+            Field::new("free", bytes(cp_memory.free_bytes)),
+            Field::new("", "-"),
+        ],
+    );
+    if details {
+        memory_tree_records(row, "cp", &cp_memory.memory_tree, unicode)
+    } else {
+        vec![row]
+    }
 }
 
 fn bindings(pipelines: &[DevicePipelineInfo]) -> String {

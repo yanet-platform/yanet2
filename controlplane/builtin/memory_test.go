@@ -55,7 +55,7 @@ func TestMemoryMetricsContextPathResolution(t *testing.T) {
 			Name: "acl",
 			Instances: []ffi.AgentInstanceInfo{
 				{
-					MemoryTree: []ffi.AgentMemoryNode{
+					MemoryTree: []ffi.MemoryNode{
 						{Name: "acl", ParentIdx: math.MaxUint32, BAllocSize: 100},
 						{Name: "acl-in", ParentIdx: 0, BAllocSize: 60},
 						{Name: "filter", ParentIdx: 1, BAllocSize: 40},
@@ -86,7 +86,7 @@ func TestMemoryMetricsContextDistinguishesSiblingSubtrees(t *testing.T) {
 			Name: "acl",
 			Instances: []ffi.AgentInstanceInfo{
 				{
-					MemoryTree: []ffi.AgentMemoryNode{
+					MemoryTree: []ffi.MemoryNode{
 						{Name: "acl", ParentIdx: math.MaxUint32},
 						{Name: "acl-in", ParentIdx: 0},
 						{Name: "filter", ParentIdx: 1},
@@ -120,7 +120,7 @@ func TestMemoryMetricsContextClampsUnderflow(t *testing.T) {
 			Name: "acl",
 			Instances: []ffi.AgentInstanceInfo{
 				{
-					MemoryTree: []ffi.AgentMemoryNode{
+					MemoryTree: []ffi.MemoryNode{
 						{Name: "root", ParentIdx: math.MaxUint32, BAllocSize: 10, BFreeSize: 20},
 					},
 				},
@@ -183,7 +183,7 @@ func TestMemoryMetricsNonDecreasingParentResolvesToRoot(t *testing.T) {
 			Name: "acl",
 			Instances: []ffi.AgentInstanceInfo{
 				{
-					MemoryTree: []ffi.AgentMemoryNode{
+					MemoryTree: []ffi.MemoryNode{
 						{Name: "out-of-range", ParentIdx: 99, BAllocSize: 10},
 						{Name: "self-ref", ParentIdx: 1, BAllocSize: 20},
 						{Name: "forward-ref", ParentIdx: 3, BAllocSize: 30},
@@ -226,7 +226,7 @@ func TestMemoryMetricsContextAggregatesDuplicateLabels(t *testing.T) {
 			Name: "acl",
 			Instances: []ffi.AgentInstanceInfo{
 				{
-					MemoryTree: []ffi.AgentMemoryNode{
+					MemoryTree: []ffi.MemoryNode{
 						{Name: "root", ParentIdx: math.MaxUint32, BAllocSize: 100},
 						{Name: "filter", ParentIdx: 0, BAllocSize: 30},
 						{Name: "filter", ParentIdx: 0, BAllocSize: 20},
@@ -260,7 +260,7 @@ func TestMemoryMetricsContextClampsBeforeAggregating(t *testing.T) {
 			Name: "acl",
 			Instances: []ffi.AgentInstanceInfo{
 				{
-					MemoryTree: []ffi.AgentMemoryNode{
+					MemoryTree: []ffi.MemoryNode{
 						{Name: "root", ParentIdx: math.MaxUint32, BAllocSize: 100},
 						{Name: "filter", ParentIdx: 0, BAllocSize: 100, BFreeSize: 0},
 						{Name: "filter", ParentIdx: 0, BAllocSize: 10, BFreeSize: 40},
@@ -288,6 +288,63 @@ func TestMemoryMetricsSkipsAgentWithNoInstances(t *testing.T) {
 		metrics := builtin.MemoryMetrics(agents)
 		require.Empty(t, metrics)
 	})
+}
+
+// TestCPMemoryMetricsZoneTree verifies that the controlplane zone's own
+// snapshot exports the allocator's free byte count and per-path context
+// gauges rooted at the "cp" bootstrap context.
+func TestCPMemoryMetricsZoneTree(t *testing.T) {
+	cp := ffi.CPMemoryInfo{
+		FreeBytes: 4096,
+		MemoryTree: []ffi.MemoryNode{
+			{Name: "cp", ParentIdx: math.MaxUint32, BAllocSize: 100},
+			{Name: "ectx", ParentIdx: 0, BAllocSize: 60, BFreeSize: 10},
+			{Name: "counter_storage", ParentIdx: 0, BAllocSize: 20},
+			{Name: "dataplane", ParentIdx: 0, BAllocSize: 15},
+		},
+	}
+
+	metrics := builtin.CPMemoryMetrics(cp)
+
+	free := findMetric(t, metrics, "memory_cp_free_bytes", map[string]string{})
+	require.Equal(t, float64(4096), gaugeValue(t, free))
+
+	root := findMetric(t, metrics, "memory_cp_context_used_bytes",
+		map[string]string{"path": "/cp"})
+	require.Equal(t, float64(100), gaugeValue(t, root))
+
+	ectx := findMetric(t, metrics, "memory_cp_context_used_bytes",
+		map[string]string{"path": "/cp/ectx"})
+	require.Equal(t, float64(50), gaugeValue(t, ectx))
+
+	counters := findMetric(t, metrics, "memory_cp_context_used_bytes",
+		map[string]string{"path": "/cp/counter_storage"})
+	require.Equal(t, float64(20), gaugeValue(t, counters))
+
+	systemAgent := findMetric(t, metrics, "memory_cp_context_used_bytes",
+		map[string]string{"path": "/cp/dataplane"})
+	require.Equal(t, float64(15), gaugeValue(t, systemAgent))
+}
+
+// Test_Memory_Collect_ExportsCPZone verifies that a live instance's
+// exported gauges carry the controlplane zone: a positive free-byte gauge
+// and context gauges for the zone's fixed ectx and counter-storage
+// contexts.
+func Test_Memory_Collect_ExportsCPZone(t *testing.T) {
+	shm := newMemoryHarness(t).SharedMemory()
+	svc := builtin.NewMemory(0, shm)
+
+	metrics := svc.Collect()
+
+	free := findMetric(t, metrics, "memory_cp_free_bytes", map[string]string{})
+	require.NotNil(t, free)
+	require.Greater(t, gaugeValue(t, free), float64(0))
+
+	for _, path := range []string{"/cp", "/cp/ectx", "/cp/counter_storage"} {
+		context := findMetric(t, metrics, "memory_cp_context_used_bytes",
+			map[string]string{"path": path})
+		require.NotNil(t, context, "path %q must be exported", path)
+	}
 }
 
 // moduleAgentSize is the arena a test module agent is attached with, far

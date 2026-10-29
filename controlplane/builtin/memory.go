@@ -107,7 +107,7 @@ func (m *Memory) ExtendAgent(
 }
 
 // Collect returns arena occupancy and memory-context attribution gauges
-// for every agent.
+// for every agent, plus the controlplane zone's own gauges.
 //
 // The free-byte count is the authoritative measure of how full an arena
 // is: the buddy allocator behind the memory-context tree rounds each
@@ -116,7 +116,11 @@ func (m *Memory) ExtendAgent(
 // only.
 func (m *Memory) Collect() []*commonpb.Metric {
 	dpConfig := m.shm.DPConfig(m.instanceID)
-	return MemoryMetrics(dpConfig.Agents())
+	metrics := MemoryMetrics(dpConfig.Agents())
+	if cp := dpConfig.CPMemory(); cp != nil {
+		metrics = append(metrics, CPMemoryMetrics(*cp)...)
+	}
+	return metrics
 }
 
 // MemoryMetrics converts a shared-memory agent snapshot into gauges.
@@ -155,10 +159,59 @@ func MemoryMetrics(agents []ffi.AgentInfo) []*commonpb.Metric {
 // stay distinguishable. Nodes that still resolve to an identical path
 // are summed into one series instead of being emitted as duplicates,
 // which a scraper would otherwise reject.
-func contextUsedMetrics(agent string, tree []ffi.AgentMemoryNode) []*commonpb.Metric {
+func contextUsedMetrics(agent string, tree []ffi.MemoryNode) []*commonpb.Metric {
+	usage := contextPathUsed(tree)
+
+	metrics := make([]*commonpb.Metric, 0, len(usage))
+	for _, entry := range usage {
+		metrics = append(metrics, commonpb.NewMetricGauge(
+			"memory_context_used_bytes",
+			float64(entry.Used),
+			commonpb.NewLabel("agent", agent),
+			commonpb.NewLabel("path", entry.Path),
+		))
+	}
+
+	return metrics
+}
+
+// CPMemoryMetrics converts the controlplane zone's own memory snapshot
+// into gauges.
+//
+// The zone is not an agent arena, and a path key alone cannot separate it
+// from an agent of the same name, so its gauges live under memory_cp_*
+// names instead of the agent-labelled memory_* ones.
+func CPMemoryMetrics(cp ffi.CPMemoryInfo) []*commonpb.Metric {
+	usage := contextPathUsed(cp.MemoryTree)
+
+	metrics := make([]*commonpb.Metric, 0, len(usage)+1)
+	metrics = append(metrics,
+		commonpb.NewMetricGauge("memory_cp_free_bytes", float64(cp.FreeBytes)),
+	)
+	for _, entry := range usage {
+		metrics = append(metrics, commonpb.NewMetricGauge(
+			"memory_cp_context_used_bytes",
+			float64(entry.Used),
+			commonpb.NewLabel("path", entry.Path),
+		))
+	}
+
+	return metrics
+}
+
+// contextUsage is one summed per-path live-byte total.
+type contextUsage struct {
+	Path string
+	Used uint64
+}
+
+// contextPathUsed sums live bytes (balloc minus bfree) per full
+// root-to-node path over a depth-first tree snapshot, preserving first
+// appearance order.
+func contextPathUsed(tree []ffi.MemoryNode) []contextUsage {
 	paths := make([]string, len(tree))
-	used := make(map[string]uint64, len(tree))
-	order := make([]string, 0, len(tree))
+	index := make(map[string]int, len(tree))
+	usage := make([]contextUsage, 0, len(tree))
 
 	for idx, node := range tree {
 		path := "/" + node.Name
@@ -172,21 +225,13 @@ func contextUsedMetrics(agent string, tree []ffi.AgentMemoryNode) []*commonpb.Me
 			nodeUsed = node.BAllocSize - node.BFreeSize
 		}
 
-		if _, ok := used[path]; !ok {
-			order = append(order, path)
+		if entryIdx, ok := index[path]; ok {
+			usage[entryIdx].Used += nodeUsed
+			continue
 		}
-		used[path] += nodeUsed
+		index[path] = len(usage)
+		usage = append(usage, contextUsage{Path: path, Used: nodeUsed})
 	}
 
-	metrics := make([]*commonpb.Metric, 0, len(order))
-	for _, path := range order {
-		metrics = append(metrics, commonpb.NewMetricGauge(
-			"memory_context_used_bytes",
-			float64(used[path]),
-			commonpb.NewLabel("agent", agent),
-			commonpb.NewLabel("path", path),
-		))
-	}
-
-	return metrics
+	return usage
 }

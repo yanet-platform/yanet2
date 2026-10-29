@@ -58,6 +58,7 @@ func (m *Inspect) Inspect(
 		Functions:   m.functions(dpConfig),
 		Agents:      m.agents(dpConfig),
 		Devices:     m.devices(dpConfig),
+		CpMemory:    m.cpMemory(dpConfig),
 	}
 
 	response := &ynpb.InspectResponse{
@@ -157,29 +158,44 @@ func (m *Inspect) agents(dpConfig *ffi.DPConfig) []*ynpb.AgentInfo {
 		}
 
 		for instanceIdx, instance := range agent.Instances {
-			memoryTree := make([]*ynpb.MemoryNode, len(instance.MemoryTree))
-			for nodeIdx, node := range instance.MemoryTree {
-				memoryTree[nodeIdx] = &ynpb.MemoryNode{
-					Name:        node.Name,
-					ParentIdx:   node.ParentIdx,
-					BallocCount: node.BAllocCount,
-					BfreeCount:  node.BFreeCount,
-					BallocSize:  node.BAllocSize,
-					BfreeSize:   node.BFreeSize,
-				}
-			}
 			agentInfo.Instances[instanceIdx] = &ynpb.AgentInstanceInfo{
 				Pid:         instance.PID,
 				MemoryLimit: instance.MemoryLimit,
 				FreeBytes:   instance.FreeBytes,
 				Generation:  instance.Gen,
-				MemoryTree:  memoryTree,
+				MemoryTree:  memoryTree(instance.MemoryTree),
 			}
 		}
 
 		out[idx] = agentInfo
 	}
 
+	return out
+}
+
+func (m *Inspect) cpMemory(dpConfig *ffi.DPConfig) *ynpb.CPMemoryInfo {
+	cp := dpConfig.CPMemory()
+	if cp == nil {
+		return nil
+	}
+	return &ynpb.CPMemoryInfo{
+		FreeBytes:  cp.FreeBytes,
+		MemoryTree: memoryTree(cp.MemoryTree),
+	}
+}
+
+func memoryTree(nodes []ffi.MemoryNode) []*ynpb.MemoryNode {
+	out := make([]*ynpb.MemoryNode, len(nodes))
+	for idx, node := range nodes {
+		out[idx] = &ynpb.MemoryNode{
+			Name:        node.Name,
+			ParentIdx:   node.ParentIdx,
+			BallocCount: node.BAllocCount,
+			BfreeCount:  node.BFreeCount,
+			BallocSize:  node.BAllocSize,
+			BfreeSize:   node.BFreeSize,
+		}
+	}
 	return out
 }
 

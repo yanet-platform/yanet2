@@ -460,6 +460,126 @@ test_get_port_counters_zero_port_count_returns_empty_list() {
 	return TEST_SUCCESS;
 }
 
+// Verify that the controlplane zone snapshot is rooted at the "cp" bootstrap
+// context, carries the zone's fixed children (ectx, counter storage, the
+// system agent) with their allocation accounting, and never folds a
+// separately attached agent's own arena into the zone tree.
+static int
+test_get_cp_memory_info_reports_zone_tree() {
+	void *storage = calloc(1, TEST_STORAGE_SIZE);
+	TEST_ASSERT_NOT_NULL(storage, "calloc failed");
+
+	struct dp_config *dp_config = NULL;
+	struct cp_config *cp_config = NULL;
+	int rc = dp_storage_init(
+		0,
+		0,
+		storage,
+		TEST_DP_MEMORY,
+		TEST_CP_MEMORY,
+		&dp_config,
+		&cp_config
+	);
+	TEST_ASSERT(rc == 0, "dp_storage_init failed");
+
+	cp_config_lock(cp_config);
+	struct agent *sys_agent =
+		dp_system_agent_new(cp_config, dp_config, "dataplane");
+	TEST_ASSERT_NOT_NULL(sys_agent, "dp_system_agent_new failed");
+
+	yanet_error *err = NULL;
+	struct cp_config_gen *config_gen = cp_config_gen_new(sys_agent, &err);
+	TEST_ASSERT_NOT_NULL(config_gen, "cp_config_gen_new failed");
+	cp_config_publish_gen(cp_config, config_gen);
+	cp_config_unlock(cp_config);
+
+	dp_config->instance_count = 1;
+	dp_config_mark_ready(dp_config);
+
+	void *block = memory_balloc(&cp_config->ectx_memory_context, 256);
+	TEST_ASSERT_NOT_NULL(block, "ectx allocation failed");
+
+	struct yanet_shm shm = {.base = storage, .size = TEST_STORAGE_SIZE};
+	struct agent *probe = agent_attach(&shm, 0, "probe", 4096, &err);
+	TEST_ASSERT_NOT_NULL(probe, "agent_attach failed");
+	TEST_ASSERT_NOT_NULL(
+		memory_balloc(&probe->memory_context, 128),
+		"probe arena allocation failed"
+	);
+
+	struct cp_memory_info *memory_info =
+		yanet_get_cp_memory_info(dp_config);
+	TEST_ASSERT_NOT_NULL(memory_info, "yanet_get_cp_memory_info failed");
+	TEST_ASSERT(
+		memory_info->memory_node_count >= 4,
+		"the zone tree must hold at least cp, ectx, counter_storage "
+		"and the system agent"
+	);
+
+	const struct cp_memory_node_info *root = &memory_info->memory_nodes[0];
+	TEST_ASSERT(
+		root->parent_idx == UINT32_MAX && !strncmp(root->name, "cp", 3),
+		"node 0 must be the cp bootstrap root"
+	);
+
+	int has_ectx = 0;
+	int has_counter_storage = 0;
+	int has_system_agent = 0;
+	int has_probe = 0;
+	for (uint64_t idx = 1; idx < memory_info->memory_node_count; ++idx) {
+		const struct cp_memory_node_info *node =
+			&memory_info->memory_nodes[idx];
+		TEST_ASSERT(
+			node->parent_idx < idx,
+			"every zone node after the root must name an earlier "
+			"parent"
+		);
+		if (!strncmp(node->name, "ectx", sizeof(node->name))) {
+			has_ectx = 1;
+			TEST_ASSERT(
+				node->balloc_size >= 256 &&
+					node->balloc_count >= 1,
+				"the ectx node must account for the allocation "
+				"above"
+			);
+		}
+		if (!strncmp(
+			    node->name, "counter_storage", sizeof(node->name)
+		    )) {
+			has_counter_storage = 1;
+		}
+		if (!strncmp(node->name, "dataplane", sizeof(node->name))) {
+			has_system_agent = 1;
+		}
+		if (!strncmp(node->name, "probe", sizeof(node->name))) {
+			has_probe = 1;
+		}
+	}
+	TEST_ASSERT(has_ectx, "the ectx context must be in the zone tree");
+	TEST_ASSERT(
+		has_counter_storage,
+		"the counter storage context must be present"
+	);
+	TEST_ASSERT(
+		has_system_agent, "the system agent subtree must be present"
+	);
+	TEST_ASSERT(
+		!has_probe,
+		"an attached agent draws from its own arena and must stay out "
+		"of the zone tree"
+	);
+
+	TEST_ASSERT(
+		memory_info->free_bytes > 0 &&
+			memory_info->free_bytes <= TEST_CP_MEMORY,
+		"the reported free bytes must sit within the zone"
+	);
+
+	cp_memory_info_free(memory_info);
+	free(storage);
+	return TEST_SUCCESS;
+}
+
 // Reports whether the page at the given address is still mapped in this
 // process.
 //
@@ -991,6 +1111,12 @@ main() {
 		LOG(ERROR,
 		    "test_get_port_counters_zero_port_count_returns_empty_list "
 		    "failed");
+	}
+
+	++tests_count;
+	if (test_get_cp_memory_info_reports_zone_tree() != TEST_SUCCESS) {
+		++tests_failed;
+		LOG(ERROR, "test_get_cp_memory_info_reports_zone_tree failed");
 	}
 
 	++tests_count;

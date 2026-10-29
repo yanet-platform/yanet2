@@ -191,7 +191,7 @@ yanet_get_cp_device_output_pipeline_info(
 // Length of a memory_context name, matching sizeof(memory_context::name).
 #define CP_MCTX_NAME_LEN 64
 
-// One node of an agent's memory_context tree.
+// One node of a memory_context tree.
 //
 // Copied to the heap by the info API so the caller never touches shared
 // memory.
@@ -199,7 +199,8 @@ struct cp_memory_node_info {
 	char name[CP_MCTX_NAME_LEN];
 	// Index of this node's parent within the enclosing memory_nodes array.
 	//
-	// UINT32_MAX marks the root node, the agent's own context.
+	// UINT32_MAX marks the root node: the agent's own context, or the
+	// controlplane zone's bootstrap context.
 	uint32_t parent_idx;
 	uint32_t _pad;
 	uint64_t balloc_count;
@@ -259,3 +260,25 @@ cp_agent_list_info_free(struct cp_agent_list_info *agent_list_info);
 
 struct cp_agent_list_info *
 yanet_get_cp_agent_list_info(struct dp_config *dp_config);
+
+// Snapshot of the controlplane zone's own memory: every context placed in
+// the zone outside agent arenas, rooted at the "cp" bootstrap context with
+// the ectx and counter-storage contexts and the system agent's subtree as
+// its children.
+struct cp_memory_info {
+	// Bytes still available in the controlplane zone's allocator.
+	uint64_t free_bytes;
+	// Flat depth-first snapshot of the zone's memory-context tree.
+	//
+	// Node 0 is the root, the "cp" bootstrap context. Every later node's
+	// parent_idx points back into this array. Best-effort: a concurrent
+	// update may make a node appear or vanish between passes.
+	uint64_t memory_node_count;
+	struct cp_memory_node_info memory_nodes[];
+};
+
+void
+cp_memory_info_free(struct cp_memory_info *memory_info);
+
+struct cp_memory_info *
+yanet_get_cp_memory_info(struct dp_config *dp_config);
