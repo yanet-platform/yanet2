@@ -116,7 +116,7 @@ func Test_Firewall4_ProjectionFaultsReleaseEveryNativeStage(t *testing.T) {
 }
 
 // Test_Firewall4_NativeAllocationFailuresReleasePartialOutputs verifies that
-// every crossed shared-memory failure point returns all completed native nodes.
+// failed builds at sampled capacities return all completed native nodes.
 func Test_Firewall4_NativeAllocationFailuresReleasePartialOutputs(t *testing.T) {
 	bed := newBed(
 		t,
@@ -126,10 +126,11 @@ func Test_Firewall4_NativeAllocationFailuresReleasePartialOutputs(t *testing.T) 
 		},
 	)
 	succeeded := false
-	for limit := 0; limit <= 2<<20; limit += cfixture.NativeAllocatorQuantum {
+	for limit := 0; limit < 2<<20; limit += 64 << 10 {
 		complete := func() bool {
 			agent, err := bed.harness.SharedMemory().AgentAttach(fmt.Sprintf("fault-sweep-%d", limit), 0, datasize.ByteSize(limit))
 			if err != nil {
+				require.Zero(t, limit, "the agent attaches at any limit but zero")
 				return false
 			}
 			defer func() { require.NoError(t, agent.CleanUp()) }()
@@ -137,6 +138,8 @@ func Test_Firewall4_NativeAllocationFailuresReleasePartialOutputs(t *testing.T) 
 			config, err := cfixture.NewFirewall4(agent, "rules4", rules4(t), 0)
 			if err == nil {
 				require.NoError(t, config.Free())
+			} else if !exhaustedOrUntagged(err) {
+				require.FailNow(t, "unexpected refusal", "%d bytes: %v", limit, err)
 			}
 			require.Equal(t, before, agent.BlockAllocatorFreeSize(), "allocation budget %d", limit)
 			return err == nil

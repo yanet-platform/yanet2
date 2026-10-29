@@ -231,7 +231,7 @@ func Test_Firewall_LateFailureRestoresAllNodes(t *testing.T) {
 }
 
 // Test_Firewall_AllocationFailureRestoresAllNodes verifies that failed builds
-// return every block while capacity rises by allocator quanta until success.
+// return every block at sampled capacities until a complete build succeeds.
 func Test_Firewall_AllocationFailureRestoresAllNodes(t *testing.T) {
 	bed := newBed(
 		t,
@@ -244,10 +244,11 @@ func Test_Firewall_AllocationFailureRestoresAllNodes(t *testing.T) {
 	require.NoError(t, err)
 
 	fits := false
-	for budget := 0; budget <= 8<<20; budget += cfixture.NativeAllocatorQuantum {
+	for budget := 0; budget < 8<<20; budget += 64 << 10 {
 		complete := func() bool {
 			agent, err := bed.harness.SharedMemory().AgentAttach(fmt.Sprintf("full-fault-%d", budget), 0, datasize.ByteSize(budget))
 			if err != nil {
+				require.Zero(t, budget, "the agent attaches at any limit but zero")
 				return false
 			}
 			defer func() { require.NoError(t, agent.CleanUp()) }()
@@ -255,6 +256,8 @@ func Test_Firewall_AllocationFailureRestoresAllNodes(t *testing.T) {
 			config, err := cfixture.NewFirewallConfig(agent, "full", input)
 			if err == nil {
 				require.NoError(t, config.Free())
+			} else if !exhaustedOrUntagged(err) {
+				require.FailNow(t, "unexpected refusal", "%d bytes: %v", budget, err)
 			}
 			require.Equal(t, before, agent.BlockAllocatorFreeSize(), "budget %d", budget)
 			return err == nil
