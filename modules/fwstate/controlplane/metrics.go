@@ -294,7 +294,7 @@ func (m *FWStateService) retention() func(metrics.MetricID) bool {
 
 func (m *FWStateService) configNamesSet() map[string]struct{} {
 	configNames := map[string]struct{}{}
-	for _, name := range m.configs.Names() {
+	for _, name := range m.core.List() {
 		configNames[name] = struct{}{}
 	}
 	return configNames

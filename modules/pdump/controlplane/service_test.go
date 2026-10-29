@@ -20,6 +20,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
+	cpdump "github.com/yanet-platform/yanet2/modules/pdump/bindings/go/cpdump"
 	pdump "github.com/yanet-platform/yanet2/modules/pdump/controlplane"
 	"github.com/yanet-platform/yanet2/modules/pdump/controlplane/pdumppb/v1"
 	"github.com/yanet-platform/yanet2/objects/ring/bindings/go/cring"
@@ -31,7 +32,7 @@ const testRecordMagic = 0xDEADBEEF
 
 // testRingCapacity is the smallest capacity a ring may have to be bound,
 // for a test that does not care about the capacity check itself.
-const testRingCapacity = pdump.MinRingCapacity
+const testRingCapacity = cpdump.MinRingCapacity
 
 // fakeRing is an in-memory fake ring source a test writes frames into
 // directly. It carries no physical wraparound, unlike a real ring,

@@ -152,7 +152,7 @@ func wireFWSPipeline(t *testing.T, agent *ffi.Agent, name string) {
 			Dst6s:   []xnetip.BiContiguous{filter.UnspecifiedIPv6},
 		},
 	}
-	sinkHandle, err := forward.NewBackend(agent).UpdateModule(sinkName, sinkRules)
+	sinkHandle, err := forward.NewBackend(agent).Update(sinkName, forward.RuleSet{Compiled: sinkRules})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = sinkHandle.Free() })
 

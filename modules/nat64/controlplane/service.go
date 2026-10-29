@@ -13,8 +13,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
-	"github.com/yanet-platform/yanet2/controlplane/configstore"
-	"github.com/yanet-platform/yanet2/controlplane/ffi"
+	"github.com/yanet-platform/yanet2/controlplane/crud"
 	nat64pb "github.com/yanet-platform/yanet2/modules/nat64/controlplane/nat64pb/v1"
 )
 
@@ -46,24 +45,8 @@ func WithNAT64ServiceLog(log *zap.Logger) NAT64ServiceOption {
 type NAT64Service struct {
 	nat64pb.UnimplementedNAT64ServiceServer
 
-	backend Backend
-	configs *configstore.Store[*config]
-	log     *zap.Logger
-}
-
-type config struct {
-	Config NAT64Config
-	Module ModuleHandle
-}
-
-// Free releases the module handle held by the config.
-//
-// It is safe to call even when no handle is held.
-func (m *config) Free() error {
-	if m.Module == nil {
-		return nil
-	}
-	return m.Module.Free()
+	core *crud.Core[*NAT64Config]
+	log  *zap.Logger
 }
 
 // NAT64Config represents the configuration for a NAT64 instance
@@ -126,15 +109,14 @@ func NewNAT64Service(backend Backend, options ...NAT64ServiceOption) *NAT64Servi
 	}
 
 	return &NAT64Service{
-		backend: backend,
-		log:     opts.Log,
-		configs: configstore.NewStore[*config](),
+		core: crud.NewCore(backend),
+		log:  opts.Log,
 	}
 }
 
 func (m *NAT64Service) ListConfigs(ctx context.Context, req *nat64pb.ListConfigsRequest) (*nat64pb.ListConfigsResponse, error) {
 	return &nat64pb.ListConfigsResponse{
-		Configs: m.configs.Names(),
+		Configs: m.core.List(),
 	}, nil
 }
 
@@ -142,12 +124,11 @@ func (m *NAT64Service) ShowConfig(ctx context.Context, req *nat64pb.ShowConfigRe
 	name := req.GetName()
 	response := &nat64pb.ShowConfigResponse{}
 
-	inst, ok := m.configs.Get(name)
+	cfg, ok := m.core.Get(name)
 	if !ok {
 		return nil, status.Errorf(codes.NotFound, "config %q not found", name)
 	}
 
-	cfg := inst.Config
 	response.Config = &nat64pb.Config{
 		Prefixes: make([]*commonpb.IPv6Prefix, 0, len(cfg.Prefixes)),
 		Mappings: make([]*nat64pb.Mapping, 0, len(cfg.Mappings)),
@@ -185,17 +166,17 @@ func (m *NAT64Service) AddPrefix(ctx context.Context, req *nat64pb.AddPrefixRequ
 	}
 
 	name := req.GetName()
-	err = m.configs.Update(name, func(current *config, ok bool) (*config, error) {
+	err = m.core.Mutate(name, func(current *NAT64Config, ok bool) (*NAT64Config, error) {
 		next := nextConfig(current, ok)
-		if slices.ContainsFunc(next.Config.Prefixes, func(existing []byte) bool { return bytes.Equal(existing, prefix) }) {
+		if slices.ContainsFunc(next.Prefixes, func(existing []byte) bool { return bytes.Equal(existing, prefix) }) {
 			return nil, errUnchanged
 		}
-		next.Config.Prefixes = append(next.Config.Prefixes, prefix)
+		next.Prefixes = append(next.Prefixes, prefix)
 
-		return m.publish(name, next)
+		return next, nil
 	})
 	if err != nil && !errors.Is(err, errUnchanged) {
-		return nil, err
+		return nil, crud.MutationError(err)
 	}
 
 	return &nat64pb.AddPrefixResponse{}, nil
@@ -208,14 +189,14 @@ func (m *NAT64Service) RemovePrefix(ctx context.Context, req *nat64pb.RemovePref
 	}
 
 	name := req.GetName()
-	err = m.configs.Update(name, func(current *config, ok bool) (*config, error) {
+	err = m.core.Mutate(name, func(current *NAT64Config, ok bool) (*NAT64Config, error) {
 		if !ok {
 			return nil, status.Errorf(codes.NotFound, "config %q not found", name)
 		}
 		next := nextConfig(current, ok)
 
 		removeIdx := -1
-		for idx, storedPrefix := range next.Config.Prefixes {
+		for idx, storedPrefix := range next.Prefixes {
 			if bytes.Equal(storedPrefix, prefix) {
 				removeIdx = idx
 				break
@@ -225,13 +206,13 @@ func (m *NAT64Service) RemovePrefix(ctx context.Context, req *nat64pb.RemovePref
 			return nil, status.Errorf(codes.NotFound, "prefix not found in config %q", name)
 		}
 
-		next.Config.Prefixes = slices.Delete(next.Config.Prefixes, removeIdx, removeIdx+1)
-		next.Config.Mappings = adjustMappingsAfterPrefixRemove(next.Config.Mappings, uint32(removeIdx))
+		next.Prefixes = slices.Delete(next.Prefixes, removeIdx, removeIdx+1)
+		next.Mappings = adjustMappingsAfterPrefixRemove(next.Mappings, uint32(removeIdx))
 
-		return m.publish(name, next)
+		return next, nil
 	})
 	if err != nil {
-		return nil, err
+		return nil, crud.MutationError(err)
 	}
 
 	return &nat64pb.RemovePrefixResponse{}, nil
@@ -245,27 +226,27 @@ func (m *NAT64Service) AddMapping(ctx context.Context, req *nat64pb.AddMappingRe
 	}
 
 	name := req.GetName()
-	err := m.configs.Update(name, func(current *config, ok bool) (*config, error) {
+	err := m.core.Mutate(name, func(current *NAT64Config, ok bool) (*NAT64Config, error) {
 		next := nextConfig(current, ok)
-		if req.PrefixIndex >= uint32(len(next.Config.Prefixes)) {
+		if req.PrefixIndex >= uint32(len(next.Prefixes)) {
 			return nil, status.Errorf(
 				codes.InvalidArgument,
 				"invalid prefix index: got %d, prefixes count %d",
 				req.PrefixIndex,
-				len(next.Config.Prefixes),
+				len(next.Prefixes),
 			)
 		}
-		next.Config.Mappings = slices.DeleteFunc(next.Config.Mappings, func(existing Mapping) bool { return existing.IPv4 == ipv4 })
-		next.Config.Mappings = append(next.Config.Mappings, Mapping{
+		next.Mappings = slices.DeleteFunc(next.Mappings, func(existing Mapping) bool { return existing.IPv4 == ipv4 })
+		next.Mappings = append(next.Mappings, Mapping{
 			IPv4:        ipv4,
 			IPv6:        ipv6,
 			PrefixIndex: req.PrefixIndex,
 		})
 
-		return m.publish(name, next)
+		return next, nil
 	})
 	if err != nil {
-		return nil, err
+		return nil, crud.MutationError(err)
 	}
 
 	return &nat64pb.AddMappingResponse{}, nil
@@ -275,23 +256,23 @@ func (m *NAT64Service) RemoveMapping(ctx context.Context, req *nat64pb.RemoveMap
 	ipv4 := req.GetIpv4().ToAddr()
 
 	name := req.GetName()
-	err := m.configs.Update(name, func(current *config, ok bool) (*config, error) {
+	err := m.core.Mutate(name, func(current *NAT64Config, ok bool) (*NAT64Config, error) {
 		if !ok {
 			return nil, status.Errorf(codes.NotFound, "config %q not found", name)
 		}
 		next := nextConfig(current, ok)
 
-		next.Config.Mappings = slices.DeleteFunc(next.Config.Mappings, func(mapping Mapping) bool {
+		next.Mappings = slices.DeleteFunc(next.Mappings, func(mapping Mapping) bool {
 			return mapping.IPv4 == ipv4
 		})
-		if len(next.Config.Mappings) == len(current.Config.Mappings) {
+		if len(next.Mappings) == len(current.Mappings) {
 			return nil, status.Errorf(codes.NotFound, "mapping for %s not found in config %q", ipv4, name)
 		}
 
-		return m.publish(name, next)
+		return next, nil
 	})
 	if err != nil {
-		return nil, err
+		return nil, crud.MutationError(err)
 	}
 
 	return &nat64pb.RemoveMappingResponse{}, nil
@@ -299,17 +280,17 @@ func (m *NAT64Service) RemoveMapping(ctx context.Context, req *nat64pb.RemoveMap
 
 func (m *NAT64Service) SetMTU(ctx context.Context, req *nat64pb.SetMTURequest) (*nat64pb.SetMTUResponse, error) {
 	name := req.GetName()
-	err := m.configs.Update(name, func(current *config, ok bool) (*config, error) {
+	err := m.core.Mutate(name, func(current *NAT64Config, ok bool) (*NAT64Config, error) {
 		next := nextConfig(current, ok)
-		next.Config.MTU = MTUConfig{
+		next.MTU = MTUConfig{
 			IPv4MTU: req.Mtu.Ipv4Mtu,
 			IPv6MTU: req.Mtu.Ipv6Mtu,
 		}
 
-		return m.publish(name, next)
+		return next, nil
 	})
 	if err != nil {
-		return nil, err
+		return nil, crud.MutationError(err)
 	}
 
 	return &nat64pb.SetMTUResponse{}, nil
@@ -317,15 +298,15 @@ func (m *NAT64Service) SetMTU(ctx context.Context, req *nat64pb.SetMTURequest) (
 
 func (m *NAT64Service) SetDropUnknown(ctx context.Context, req *nat64pb.SetDropUnknownRequest) (*nat64pb.SetDropUnknownResponse, error) {
 	name := req.GetName()
-	err := m.configs.Update(name, func(current *config, ok bool) (*config, error) {
+	err := m.core.Mutate(name, func(current *NAT64Config, ok bool) (*NAT64Config, error) {
 		next := nextConfig(current, ok)
-		next.Config.DropUnknownPrefix = req.DropUnknownPrefix
-		next.Config.DropUnknownMapping = req.DropUnknownMapping
+		next.DropUnknownPrefix = req.DropUnknownPrefix
+		next.DropUnknownMapping = req.DropUnknownMapping
 
-		return m.publish(name, next)
+		return next, nil
 	})
 	if err != nil {
-		return nil, err
+		return nil, crud.MutationError(err)
 	}
 
 	return &nat64pb.SetDropUnknownResponse{}, nil
@@ -369,19 +350,8 @@ func encodeNAT64Prefix(prefix []byte) (*commonpb.IPv6Prefix, error) {
 // by any pipeline.
 func (m *NAT64Service) DeleteConfig(ctx context.Context, req *nat64pb.DeleteConfigRequest) (*nat64pb.DeleteConfigResponse, error) {
 	name := req.GetName()
-	err := m.configs.Delete(name, func(*config) error {
-		return m.backend.DeleteModule(name)
-	})
-	if errors.Is(err, configstore.ErrNotFound) {
-		return nil, status.Errorf(codes.NotFound, "config %q not found", name)
-	}
-	if err != nil {
-		code := codes.Internal
-		if errors.Is(err, ffi.ErrFailedPrecondition) {
-			// A chain still references the config.
-			code = codes.FailedPrecondition
-		}
-		return nil, status.Errorf(code, "failed to delete module config: %v", err)
+	if err := m.core.Delete(name); err != nil {
+		return nil, crud.DeleteError(name, err)
 	}
 
 	return &nat64pb.DeleteConfigResponse{}, nil
@@ -389,23 +359,13 @@ func (m *NAT64Service) DeleteConfig(ctx context.Context, req *nat64pb.DeleteConf
 
 // nextConfig returns the config a mutation starts from: a deep copy of the
 // current one, or the defaults when the name is new.
-func nextConfig(current *config, ok bool) *config {
+func nextConfig(current *NAT64Config, ok bool) *NAT64Config {
 	if !ok {
-		return &config{Config: defaultNAT64Config()}
+		defaults := defaultNAT64Config()
+		return &defaults
 	}
-	return &config{Config: current.Config.Clone()}
-}
-
-// publish writes the next config to the dataplane and attaches the
-// published handle to it.
-func (m *NAT64Service) publish(name string, next *config) (*config, error) {
-	module, err := m.backend.UpdateModule(name, &next.Config)
-	if err != nil {
-		return nil, status.Errorf(codes.Internal, "failed to update module config: %v", err)
-	}
-	next.Module = module
-
-	return next, nil
+	next := current.Clone()
+	return &next
 }
 
 func adjustMappingsAfterPrefixRemove(mappings []Mapping, removed uint32) []Mapping {

@@ -115,7 +115,7 @@ func wirePipeline(
 
 	sinkName := configName + "-sink"
 	sinkBackend := forward.NewBackend(agent)
-	sinkHandle, err := sinkBackend.UpdateModule(sinkName, catchAllForwardRules(deviceName))
+	sinkHandle, err := sinkBackend.Update(sinkName, forward.RuleSet{Compiled: catchAllForwardRules(deviceName)})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = sinkHandle.Free() })
 

@@ -15,8 +15,8 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	"github.com/yanet-platform/yanet2/controlplane/configstore"
-	"github.com/yanet-platform/yanet2/controlplane/ffi"
+	"github.com/yanet-platform/yanet2/controlplane/crud"
+	cpdump "github.com/yanet-platform/yanet2/modules/pdump/bindings/go/cpdump"
 	"github.com/yanet-platform/yanet2/modules/pdump/controlplane/pdumppb/v1"
 	ring "github.com/yanet-platform/yanet2/objects/ring/controlplane"
 )
@@ -45,14 +45,36 @@ type Backend interface {
 	DeleteModule(name string) error
 }
 
+// publishBackend adapts the settings-publishing seam of the pdump backend
+// to the single update of the shared core.
+//
+// The update hands the published module to the capture itself, so the
+// capture a mutation built is the handle the store owns.
+type publishBackend struct {
+	backend Backend
+}
+
+func (m *publishBackend) Update(name string, payload *capture) (crud.Handle, error) {
+	module, err := m.backend.UpdateModule(name, payload.Settings())
+	if err != nil {
+		return nil, err
+	}
+	payload.AdoptModule(module)
+
+	return payload, nil
+}
+
+func (m *publishBackend) Delete(name string) error {
+	return m.backend.DeleteModule(name)
+}
+
 // PdumpService provides packet capture functionality through a gRPC interface.
 // It manages packet capture configurations and the bindings their streams read.
 type PdumpService struct {
 	pdumppb.UnimplementedPdumpServiceServer
 
-	backend   Backend
 	ringOwner RingOwner
-	configs   *configstore.Store[*capture]
+	core      *crud.Core[*capture]
 	// life ends every stream once the service shuts down.
 	life context.Context
 	stop context.CancelFunc
@@ -92,9 +114,8 @@ func NewPdumpService(backend Backend, ringOwner RingOwner, options ...PdumpServi
 	life, stop := context.WithCancel(context.Background())
 
 	return &PdumpService{
-		backend:   backend,
 		ringOwner: ringOwner,
-		configs:   configstore.NewStore[*capture](),
+		core:      crud.NewCore[*capture](&publishBackend{backend: backend}),
 		life:      life,
 		stop:      stop,
 		log:       opts.Log,
@@ -114,7 +135,7 @@ func (m *PdumpService) ListConfigs(
 	ctx context.Context,
 	request *pdumppb.ListConfigsRequest,
 ) (*pdumppb.ListConfigsResponse, error) {
-	return &pdumppb.ListConfigsResponse{Configs: m.configs.Names()}, nil
+	return &pdumppb.ListConfigsResponse{Configs: m.core.List()}, nil
 }
 
 // ShowConfig retrieves the current configuration for a specific packet capture module.
@@ -124,7 +145,7 @@ func (m *PdumpService) ShowConfig(
 ) (*pdumppb.ShowConfigResponse, error) {
 	name := request.GetName()
 
-	current, ok := m.configs.Get(name)
+	current, ok := m.core.Get(name)
 	if !ok {
 		return nil, status.Errorf(codes.NotFound, "config %q not found", name)
 	}
@@ -147,7 +168,10 @@ func (m *PdumpService) SetConfig(
 ) (*pdumppb.SetConfigResponse, error) {
 	name := request.GetName()
 
-	err := m.configs.Update(name, func(current *capture, ok bool) (*capture, error) {
+	// The binding the mutation acquires or retains is owned by the entry
+	// it publishes, or by the mutation itself when nothing publishes.
+	var pending *binding
+	err := m.core.Mutate(name, func(current *capture, ok bool) (*capture, error) {
 		settings := defaultSettings()
 		if ok {
 			settings = current.Settings()
@@ -194,39 +218,42 @@ func (m *PdumpService) SetConfig(
 			}
 			// A ring below the minimum could refuse a large record, and
 			// the capture would silently miss that packet.
-			if capacity := lease.Capacity(); capacity < MinRingCapacity {
+			if capacity := lease.Capacity(); capacity < cpdump.MinRingCapacity {
 				lease.Release()
 				return nil, status.Errorf(
 					codes.InvalidArgument,
 					"ring %q capacity %d is below the pdump minimum %d",
-					settings.RingName, capacity, MinRingCapacity,
+					settings.RingName, capacity, cpdump.MinRingCapacity,
 				)
 			}
 			b = newBinding(settings.RingName, lease, withBindingLog(m.log))
 		}
+		pending = b
 
 		m.log.Debug("update config", zap.String("module", name))
-		module, err := m.backend.UpdateModule(name, settings)
-		if err != nil {
-			b.Release()
-			code := codes.Internal
-			if errors.Is(err, syscall.EAGAIN) {
-				code = codes.Unavailable
-			}
-			return nil, status.Errorf(code, "failed to update module config %q: %v", name, err)
-		}
-
-		return &capture{
-			settings: settings,
-			module:   module,
-			binding:  b,
-		}, nil
+		return &capture{settings: settings, binding: b}, nil
 	})
-	if err != nil {
-		return nil, err
+	if err == nil {
+		return &pdumppb.SetConfigResponse{}, nil
 	}
 
-	return &pdumppb.SetConfigResponse{}, nil
+	// Nothing published, so the binding the mutation took is its own to
+	// drop: a retained one returns to its previous count, an acquired
+	// one releases its lease.
+	if pending != nil {
+		pending.Release()
+	}
+
+	// A status the mutation itself produced passes through; a backend
+	// failure reports by its own kind.
+	if _, ok := status.FromError(err); ok {
+		return nil, err
+	}
+	code := codes.Internal
+	if errors.Is(err, syscall.EAGAIN) {
+		code = codes.Unavailable
+	}
+	return nil, status.Errorf(code, "failed to update module config %q: %v", name, err)
 }
 
 // DeleteConfig removes a packet capture configuration.
@@ -238,25 +265,10 @@ func (m *PdumpService) DeleteConfig(
 ) (*pdumppb.DeleteConfigResponse, error) {
 	name := request.GetName()
 
-	err := m.configs.Delete(name, func(*capture) error {
-		if err := m.backend.DeleteModule(name); err != nil {
-			code := codes.Internal
-			if errors.Is(err, ffi.ErrFailedPrecondition) {
-				// A chain still references the config.
-				code = codes.FailedPrecondition
-			}
-			return status.Errorf(code, "failed to delete module config %q: %v", name, err)
-		}
-		m.log.Info("deleted pdump config", zap.String("name", name))
-
-		return nil
-	})
-	if errors.Is(err, configstore.ErrNotFound) {
-		return nil, status.Errorf(codes.NotFound, "config %q not found", name)
+	if err := m.core.Delete(name); err != nil {
+		return nil, crud.DeleteError(name, err)
 	}
-	if err != nil {
-		return nil, err
-	}
+	m.log.Info("deleted pdump config", zap.String("name", name))
 
 	return &pdumppb.DeleteConfigResponse{}, nil
 }
@@ -280,7 +292,7 @@ func (m *PdumpService) ReadDump(req *pdumppb.ReadDumpRequest, stream grpc.Server
 	defer context.AfterFunc(m.life, cancel)()
 
 	for {
-		current, ok := m.configs.Get(name)
+		current, ok := m.core.Get(name)
 		if !ok {
 			return status.Errorf(codes.NotFound, "config %q not found", name)
 		}
@@ -306,8 +318,8 @@ func (m *PdumpService) ReadDump(req *pdumppb.ReadDumpRequest, stream grpc.Server
 // The ring name stays unset: a config must carry one to be created.
 func defaultSettings() Settings {
 	return Settings{
-		Mode:    defaultMode,
-		Snaplen: defaultSnaplen,
+		Mode:    cpdump.DefaultMode,
+		Snaplen: cpdump.DefaultSnaplen,
 	}
 }
 
@@ -323,7 +335,7 @@ func mergeSettings(settings Settings, config *pdumppb.Config) Settings {
 	if config.Mode != nil {
 		mode := config.GetMode()
 		if mode == 0 {
-			mode = defaultMode
+			mode = cpdump.DefaultMode
 		}
 		settings.Mode = mode
 	}

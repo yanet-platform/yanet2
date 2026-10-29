@@ -660,7 +660,7 @@ func Test_ACL_FWState_ConfigOnTwoDevicesEmitsOnce(t *testing.T) {
 		{Target: "port0", Mode: cforward.ModeOut, Counter: "sink4"},
 		{Target: "port0", Mode: cforward.ModeOut, Counter: "sink6"},
 	}
-	sinkHandle, err := forward.NewBackend(agent).UpdateModule("shared-sink", sinkRules)
+	sinkHandle, err := forward.NewBackend(agent).Update("shared-sink", forward.RuleSet{Compiled: sinkRules})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = sinkHandle.Free() })
 	require.NoError(t, agent.UpdateFunction(ffi.FunctionConfig{
@@ -763,7 +763,7 @@ func wireACLFWStateSyncPipeline(t *testing.T, agent *ffi.Agent, aclName, fwstate
 		{Target: "port0", Mode: cforward.ModeOut, Counter: "sink4"},
 		{Target: "port0", Mode: cforward.ModeOut, Counter: "sink6"},
 	}
-	sinkHandle, err := forward.NewBackend(agent).UpdateModule(sinkName, sinkRules)
+	sinkHandle, err := forward.NewBackend(agent).Update(sinkName, forward.RuleSet{Compiled: sinkRules})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = sinkHandle.Free() })
 
@@ -805,7 +805,7 @@ func wireACLForwardFWStatePipeline(t *testing.T, agent *ffi.Agent, aclName strin
 	middleName := aclName + "-middle"
 	sinkName := aclName + "-sink"
 	for _, name := range []string{middleName, sinkName} {
-		handle, err := forward.NewBackend(agent).UpdateModule(name, sinkRules)
+		handle, err := forward.NewBackend(agent).Update(name, forward.RuleSet{Compiled: sinkRules})
 		require.NoError(t, err)
 		t.Cleanup(func() { _ = handle.Free() })
 	}

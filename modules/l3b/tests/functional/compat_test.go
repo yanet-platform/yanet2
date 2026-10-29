@@ -588,11 +588,10 @@ func Test_CompatMetabalancerDecap(t *testing.T) {
 	// the balancer's own addresses — the old dstAddresses list; the old
 	// srcPrefixes half of the early-decap contract is not part of the new
 	// module and is dropped from the port.
-	prefixes := []netip.Prefix{
-		netip.MustParsePrefix("1.210.198.65/32"),
-		netip.MustParsePrefix("2222:898:0:320::b2a/128"),
-	}
-	decapHandle, err := decap.NewBackend(agent).UpdateModule("meta", prefixes)
+	decapHandle, err := decap.NewBackend(agent).Update("meta", decap.PrefixSets{
+		Prefixes4: []netip.Prefix{netip.MustParsePrefix("1.210.198.65/32")},
+		Prefixes6: []netip.Prefix{netip.MustParsePrefix("2222:898:0:320::b2a/128")},
+	})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = decapHandle.Free() })
 
@@ -642,7 +641,7 @@ func Test_CompatMetabalancerDecap(t *testing.T) {
 			Dst6s:   []xnetip.BiContiguous{filter.UnspecifiedIPv6},
 		},
 	}
-	sinkHandle, err := forward.NewBackend(agent).UpdateModule("sink", sinkRules)
+	sinkHandle, err := forward.NewBackend(agent).Update("sink", forward.RuleSet{Compiled: sinkRules})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = sinkHandle.Free() })
 

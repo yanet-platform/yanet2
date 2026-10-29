@@ -4,80 +4,39 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 
-	"github.com/yanet-platform/yanet2/controlplane/ffi"
+	"github.com/yanet-platform/yanet2/controlplane/modulebase"
 	"github.com/yanet-platform/yanet2/devices/vlan/controlplane/vlanpb/v1"
 )
 
 // Option configures the DeviceVlanDevice constructor.
-type Option func(*deviceOptions)
-
-type deviceOptions struct {
-	Log *zap.Logger
-}
-
-func newDeviceOptions() *deviceOptions {
-	return &deviceOptions{
-		Log: zap.NewNop(),
-	}
-}
+type Option = modulebase.Option
 
 // WithLog sets the logger for the vlan device.
 func WithLog(log *zap.Logger) Option {
-	return func(o *deviceOptions) {
-		o.Log = log
-	}
+	return modulebase.WithLog(log)
 }
 
-// DeviceVlanDevice is a control-plane component responsible for vlan devices
+// DeviceVlanDevice is the control-plane component of the vlan device.
 type DeviceVlanDevice struct {
-	cfg        *Config
-	attachment *ffi.Attachment
-	service    *DeviceVlanService
+	*modulebase.Base
+
+	cfg     *Config
+	service *DeviceVlanService
 }
 
-// NewDeviceVlanDevice creates a new DeviceVlan device instance
+// NewDeviceVlanDevice creates a new DeviceVlanDevice.
 func NewDeviceVlanDevice(cfg *Config, options ...Option) (*DeviceVlanDevice, error) {
-	opts := newDeviceOptions()
-	for _, o := range options {
-		o(opts)
-	}
-
-	log := opts.Log.With(zap.String("module", vlanpb.DeviceVlanService_ServiceDesc.ServiceName))
-
-	attachment, err := ffi.Attach(cfg.AttachConfig, "vlan", log)
+	base, err := modulebase.NewBase(cfg.AttachConfig, "vlan", cfg.Endpoint.Unwrap(), options...)
 	if err != nil {
 		return nil, err
 	}
-	agent := attachment.Agent
 
-	vlanService := NewDeviceVlanService(NewBackend(agent))
+	service := NewDeviceVlanService(NewBackend(base.Agent()))
+	base.AddService(vlanpb.DeviceVlanService_ServiceDesc.ServiceName, func(server *grpc.Server) {
+		vlanpb.RegisterDeviceVlanServiceServer(server, service)
+	})
 
-	return &DeviceVlanDevice{
-		cfg:        cfg,
-		attachment: attachment,
-		service:    vlanService,
-	}, nil
-}
-
-func (m *DeviceVlanDevice) Name() string {
-	return "vlan"
-}
-
-func (m *DeviceVlanDevice) Endpoint() string {
-	return m.cfg.Endpoint.Unwrap()
-}
-
-func (m *DeviceVlanDevice) ServicesNames() []string {
-	return []string{vlanpb.DeviceVlanService_ServiceDesc.ServiceName}
-}
-
-func (m *DeviceVlanDevice) RegisterService(server *grpc.Server) {
-	vlanpb.RegisterDeviceVlanServiceServer(server, m.service)
-}
-
-// Close closes the device and releases all resources
-func (m *DeviceVlanDevice) Close() error {
-	return m.attachment.Close()
+	return &DeviceVlanDevice{Base: base, cfg: cfg, service: service}, nil
 }
 
 // DeviceType returns the registry type of the devices this module owns.

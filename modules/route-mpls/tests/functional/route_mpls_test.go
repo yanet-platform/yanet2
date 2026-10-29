@@ -493,7 +493,7 @@ func deployChain(
 	t.Cleanup(func() { _ = handle.Free() })
 
 	sinkName := mplsConfigName + "-sink"
-	sinkHandle, err := forward.NewBackend(agent).UpdateModule(sinkName, sinkRules)
+	sinkHandle, err := forward.NewBackend(agent).Update(sinkName, forward.RuleSet{Compiled: sinkRules})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = sinkHandle.Free() })
 

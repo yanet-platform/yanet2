@@ -18,6 +18,7 @@ import (
 
 	"github.com/yanet-platform/xnetip"
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
+	"github.com/yanet-platform/yanet2/controlplane/crud"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/modules/forward/bindings/go/cforward"
 	forward "github.com/yanet-platform/yanet2/modules/forward/controlplane"
@@ -35,14 +36,14 @@ type mockBackend struct {
 	deleteError error
 }
 
-func (m *mockBackend) UpdateModule(name string, rules []cforward.ForwardRule) (forward.ModuleHandle, error) {
+func (m *mockBackend) Update(name string, payload forward.RuleSet) (crud.Handle, error) {
 	if m.updateError != nil {
 		return nil, m.updateError
 	}
 	return &mockModuleHandle{}, nil
 }
 
-func (m *mockBackend) DeleteModule(name string) error {
+func (m *mockBackend) Delete(name string) error {
 	return m.deleteError
 }
 
@@ -62,7 +63,7 @@ func (m *blockingMetricsBackend) ModuleCounters(name string, counterNames []stri
 	return nil
 }
 
-// nilHandleBackend is a Backend whose UpdateModule publishes a config
+// nilHandleBackend is a Backend whose update publishes a config
 // carrying no module handle.
 //
 // It models a Backend that reports success without producing a handle,
@@ -71,11 +72,11 @@ type nilHandleBackend struct {
 	mockBackend
 }
 
-func (m *nilHandleBackend) UpdateModule(name string, rules []cforward.ForwardRule) (forward.ModuleHandle, error) {
+func (m *nilHandleBackend) Update(name string, payload forward.RuleSet) (crud.Handle, error) {
 	return nil, nil
 }
 
-// recordingBackend captures the rules handed to UpdateModule so a test can
+// recordingBackend captures the rules handed to the update so a test can
 // inspect what the service sends to shared memory.
 //
 // Only single-goroutine tests use it. TestForwardServiceConcurrentAccess
@@ -86,8 +87,8 @@ type recordingBackend struct {
 	rules []cforward.ForwardRule
 }
 
-func (m *recordingBackend) UpdateModule(name string, rules []cforward.ForwardRule) (forward.ModuleHandle, error) {
-	m.rules = rules
+func (m *recordingBackend) Update(name string, payload forward.RuleSet) (crud.Handle, error) {
+	m.rules = payload.Compiled
 	return &mockModuleHandle{}, nil
 }
 
@@ -188,7 +189,7 @@ func Test_ForwardService_DeleteConfig_BackendFailureReturnsInternal(t *testing.T
 
 	_, err = service.DeleteConfig(t.Context(), &forwardpb.DeleteConfigRequest{Name: "config"})
 	require.Equal(t, codes.Internal, status.Code(err))
-	require.ErrorContains(t, err, "failed to delete module config \"config\": shared memory unavailable")
+	require.ErrorContains(t, err, "failed to delete config \"config\": shared memory unavailable")
 
 	response, err := service.ShowConfig(t.Context(), &forwardpb.ShowConfigRequest{Name: "config"})
 	require.NoError(t, err)

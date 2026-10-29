@@ -336,8 +336,8 @@ func TestSinglePipelineDeviceForwardsAllPackets(t *testing.T) {
 		Src4s:   []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
 		Dst4s:   []xnetip.Contiguous[xnetip.Network4]{xnetip.MustParseContiguous4("10.0.0.0/8")},
 	}
-	handle, err := forwardBackend.UpdateModule(
-		forwardName, []cforward.ForwardRule{rule},
+	handle, err := forwardBackend.Update(
+		forwardName, forward.RuleSet{Compiled: []cforward.ForwardRule{rule}},
 	)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = handle.Free() })

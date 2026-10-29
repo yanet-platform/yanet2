@@ -2,88 +2,66 @@ package forward
 
 import (
 	"context"
-	"errors"
 	"unicode/utf8"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
 	filterpbconv "github.com/yanet-platform/yanet2/bindings/go/filterpbconv/v1"
-	"github.com/yanet-platform/yanet2/controlplane/configstore"
-	"github.com/yanet-platform/yanet2/controlplane/ffi"
+	"github.com/yanet-platform/yanet2/controlplane/crud"
 	"github.com/yanet-platform/yanet2/modules/forward/bindings/go/cforward"
 	forwardpb "github.com/yanet-platform/yanet2/modules/forward/controlplane/forwardpb/v1"
 )
 
-// ModuleHandle is a handle to a module configuration.
-type ModuleHandle interface {
-	Free() error
+// RuleSet is the published payload: the accepted rule document together
+// with its shared-memory representation.
+type RuleSet struct {
+	// Rules is the rule document exactly as accepted, echoed by reads.
+	Rules []*forwardpb.Rule
+	// Compiled is the rule document in the representation shared memory
+	// publishes.
+	Compiled []cforward.ForwardRule
 }
 
 // Backend abstracts shared memory operations.
 type Backend interface {
-	// UpdateModule creates a module config, writes rules, and publishes
-	// it to the dataplane.
-	UpdateModule(name string, rules []cforward.ForwardRule) (ModuleHandle, error)
-	// DeleteModule removes a module config.
-	DeleteModule(name string) error
+	// Update builds a module config from the compiled rules and
+	// publishes it to the dataplane.
+	Update(name string, payload RuleSet) (crud.Handle, error)
+	// Delete removes a module config.
+	Delete(name string) error
 	// ModuleCounters returns selected dataplane counters collected for a module config.
 	// If counterNames is nil or empty, it returns all counters for the module config.
 	ModuleCounters(name string, counterNames []string) []CounterView
-}
-
-type forwardConfig struct {
-	Rules  []*forwardpb.Rule
-	Module ModuleHandle
-}
-
-// Free releases the module handle held by the config.
-//
-// It is safe to call even when no handle is held.
-func (m *forwardConfig) Free() error {
-	if m.Module == nil {
-		return nil
-	}
-	return m.Module.Free()
 }
 
 type ForwardService struct {
 	forwardpb.UnimplementedForwardServiceServer
 
 	backend Backend
-	configs *configstore.Store[*forwardConfig]
+	core    *crud.Core[RuleSet]
 }
 
 func NewForwardService(backend Backend) *ForwardService {
 	return &ForwardService{
 		backend: backend,
-		configs: configstore.NewStore[*forwardConfig](),
+		core:    crud.NewCore(backend),
 	}
 }
 
 func (m *ForwardService) ListConfigs(
 	ctx context.Context, request *forwardpb.ListConfigsRequest,
 ) (*forwardpb.ListConfigsResponse, error) {
-	response := &forwardpb.ListConfigsResponse{
-		Configs: m.configs.Names(),
-	}
-
-	return response, nil
+	return &forwardpb.ListConfigsResponse{Configs: m.core.List()}, nil
 }
 
 func (m *ForwardService) ShowConfig(ctx context.Context, req *forwardpb.ShowConfigRequest) (*forwardpb.ShowConfigResponse, error) {
-	name := req.GetName()
-	config, ok := m.configs.Get(name)
+	ruleSet, ok := m.core.Get(req.GetName())
 	if !ok {
-		return nil, status.Errorf(codes.NotFound, "config %q not found", name)
+		return nil, status.Errorf(codes.NotFound, "config %q not found", req.GetName())
 	}
 
-	response := &forwardpb.ShowConfigResponse{
-		Name:  req.Name,
-		Rules: config.Rules,
-	}
-
-	return response, nil
+	return &forwardpb.ShowConfigResponse{Name: req.Name, Rules: ruleSet.Rules}, nil
 }
 
 // materializeCounter builds the default counter name for a rule that left
@@ -120,9 +98,9 @@ func (m *ForwardService) UpdateConfig(ctx context.Context, req *forwardpb.Update
 		action := reqRule.GetAction()
 
 		// Assign onto the request's own action message: the ForwardRule
-		// built below and the reqRules stored into m.configs after the
-		// backend call both read this same action, so one assignment here
-		// keeps the shared-memory write and ShowConfig in agreement.
+		// built below and the reqRules published as the payload after
+		// the backend call both read this same action, so one assignment
+		// here keeps the shared-memory write and ShowConfig in agreement.
 		if action.Counter == "" {
 			action.Counter = materializeCounter(action.Target)
 		}
@@ -174,14 +152,7 @@ func (m *ForwardService) UpdateConfig(ctx context.Context, req *forwardpb.Update
 		rules = append(rules, rule)
 	}
 
-	err := m.configs.Update(name, func(*forwardConfig, bool) (*forwardConfig, error) {
-		module, err := m.backend.UpdateModule(name, rules)
-		if err != nil {
-			return nil, err
-		}
-		return &forwardConfig{Rules: reqRules, Module: module}, nil
-	})
-	if err != nil {
+	if err := m.core.Replace(name, RuleSet{Rules: reqRules, Compiled: rules}); err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to update module config: %v", err)
 	}
 
@@ -190,18 +161,8 @@ func (m *ForwardService) UpdateConfig(ctx context.Context, req *forwardpb.Update
 
 func (m *ForwardService) DeleteConfig(ctx context.Context, req *forwardpb.DeleteConfigRequest) (*forwardpb.DeleteConfigResponse, error) {
 	name := req.GetName()
-	err := m.configs.Delete(name, func(*forwardConfig) error {
-		return m.backend.DeleteModule(name)
-	})
-	if errors.Is(err, configstore.ErrNotFound) {
-		return nil, status.Errorf(codes.NotFound, "config %q not found", name)
-	}
-	if err != nil {
-		code := codes.Internal
-		if errors.Is(err, ffi.ErrFailedPrecondition) {
-			code = codes.FailedPrecondition
-		}
-		return nil, status.Errorf(code, "failed to delete module config %q: %v", name, err)
+	if err := m.core.Delete(name); err != nil {
+		return nil, crud.DeleteError(name, err)
 	}
 
 	return &forwardpb.DeleteConfigResponse{}, nil

@@ -17,18 +17,17 @@ import (
 
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
 	"github.com/yanet-platform/yanet2/controlplane/configstore"
+	"github.com/yanet-platform/yanet2/controlplane/crud"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
-	"github.com/yanet-platform/yanet2/devices/trafgen/bindings/go/ctrafgen"
 	trafgenpb "github.com/yanet-platform/yanet2/devices/trafgen/controlplane/trafgenpb/v1"
 )
 
-// recordingBackend captures the arguments of the most recent UpdateDevice call.
+// recordingBackend captures the payload of the most recent update call.
 type recordingBackend struct {
-	frames  []byte
-	lengths []uint32
+	packets [][]byte
 	ratePps uint64
-	input   []Pipeline
-	output  []Pipeline
+	input   []commonpb.Pipeline
+	output  []commonpb.Pipeline
 	calls   int
 	err     error
 
@@ -36,24 +35,17 @@ type recordingBackend struct {
 	deleteErr    error
 }
 
-func (m *recordingBackend) DeleteDevice(name string) error {
+func (m *recordingBackend) Delete(name string) error {
 	m.deletedNames = append(m.deletedNames, name)
 	return m.deleteErr
 }
 
-func (m *recordingBackend) UpdateDevice(
-	name string,
-	input, output []Pipeline,
-	frames []byte,
-	lengths []uint32,
-	ratePps uint64,
-) (*ctrafgen.DeviceConfig, error) {
+func (m *recordingBackend) Update(name string, payload *DeviceState) (crud.Handle, error) {
 	m.calls++
-	m.frames = frames
-	m.lengths = lengths
-	m.ratePps = ratePps
-	m.input = input
-	m.output = output
+	m.packets = payload.Packets
+	m.ratePps = payload.RatePps
+	m.input = payload.Input
+	m.output = payload.Output
 	return nil, m.err
 }
 
@@ -96,8 +88,9 @@ func Test_TrafgenService_UploadSetRateShow(t *testing.T) {
 		Pcap: buildPcap(t, frames),
 	})
 	require.NoError(t, err)
-	require.Equal(t, []uint32{20, 30}, backend.lengths)
-	require.Len(t, backend.frames, 50)
+	require.Len(t, backend.packets, 2)
+	require.Len(t, backend.packets[0], 20)
+	require.Len(t, backend.packets[1], 30)
 
 	_, err = svc.SetRate(ctx, &trafgenpb.SetRateRequest{
 		Name:    "trafgen0",
@@ -126,8 +119,8 @@ func Test_TrafgenService_SetRateKeepsPcap(t *testing.T) {
 	// Changing the rate must republish the same frames without a re-upload.
 	_, err = svc.SetRate(ctx, &trafgenpb.SetRateRequest{Name: "trafgen0", RatePps: 500})
 	require.NoError(t, err)
-	require.Equal(t, []uint32{64}, backend.lengths)
-	require.Len(t, backend.frames, 64)
+	require.Len(t, backend.packets, 1)
+	require.Len(t, backend.packets[0], 64)
 	require.Equal(t, uint64(500), backend.ratePps)
 
 	show, err := svc.ShowConfig(ctx, &trafgenpb.ShowConfigRequest{Name: "trafgen0"})
@@ -158,16 +151,17 @@ func Test_TrafgenService_UpdateDeviceKeepsFramesAndRate(t *testing.T) {
 		},
 	})
 	require.NoError(t, err)
-	require.Equal(t, []Pipeline{{Name: "p0", Weight: 1}}, backend.input)
-	require.Equal(t, []Pipeline{{Name: "p1", Weight: 2}}, backend.output)
-	require.Len(t, backend.frames, 64)
+	require.Equal(t, []commonpb.Pipeline{{Name: "p0", Weight: 1}}, backend.input)
+	require.Equal(t, []commonpb.Pipeline{{Name: "p1", Weight: 2}}, backend.output)
+	require.Len(t, backend.packets, 1)
+	require.Len(t, backend.packets[0], 64)
 	require.Equal(t, uint64(700), backend.ratePps)
 
 	// A later rate change must preserve the bound pipelines.
 	_, err = svc.SetRate(ctx, &trafgenpb.SetRateRequest{Name: "trafgen0", RatePps: 900})
 	require.NoError(t, err)
-	require.Equal(t, []Pipeline{{Name: "p0", Weight: 1}}, backend.input)
-	require.Equal(t, []Pipeline{{Name: "p1", Weight: 2}}, backend.output)
+	require.Equal(t, []commonpb.Pipeline{{Name: "p0", Weight: 1}}, backend.input)
+	require.Equal(t, []commonpb.Pipeline{{Name: "p1", Weight: 2}}, backend.output)
 }
 
 func Test_TrafgenService_SetRateBeforeUpload(t *testing.T) {

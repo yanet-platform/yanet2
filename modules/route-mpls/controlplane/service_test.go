@@ -14,8 +14,8 @@ import (
 	"google.golang.org/grpc/status"
 
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
+	"github.com/yanet-platform/yanet2/controlplane/crud"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
-	"github.com/yanet-platform/yanet2/modules/route-mpls/bindings/go/croutempls"
 	routemplspb "github.com/yanet-platform/yanet2/modules/route-mpls/controlplane/routemplspb/v1"
 )
 
@@ -29,11 +29,11 @@ func (m *mockModuleHandle) Free() error {
 
 type mockBackend struct{}
 
-func (m *mockBackend) UpdateModule(name string, rules []croutempls.Rule) (ModuleHandle, error) {
+func (m *mockBackend) Update(name string, payload *routeMPLSConfig) (crud.Handle, error) {
 	return &mockModuleHandle{}, nil
 }
 
-func (m *mockBackend) DeleteModule(name string) error {
+func (m *mockBackend) Delete(name string) error {
 	return nil
 }
 
@@ -42,14 +42,14 @@ type flakyBackend struct {
 	numCalls atomic.Int64
 }
 
-func (m *flakyBackend) UpdateModule(name string, rules []croutempls.Rule) (ModuleHandle, error) {
+func (m *flakyBackend) Update(name string, payload *routeMPLSConfig) (crud.Handle, error) {
 	if m.numCalls.Add(1) >= 2 {
 		return nil, errInjectedBackend
 	}
 	return &mockModuleHandle{}, nil
 }
 
-func (m *flakyBackend) DeleteModule(name string) error {
+func (m *flakyBackend) Delete(name string) error {
 	return nil
 }
 
@@ -323,7 +323,7 @@ type refusingDeleteBackend struct {
 	err error
 }
 
-func (m *refusingDeleteBackend) DeleteModule(name string) error {
+func (m *refusingDeleteBackend) Delete(name string) error {
 	return m.err
 }
 

@@ -12,6 +12,7 @@ import (
 
 	"github.com/yanet-platform/xnetip"
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
+	"github.com/yanet-platform/yanet2/controlplane/crud"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/modules/unrdup/bindings/go/cunrdup"
 	unrdup "github.com/yanet-platform/yanet2/modules/unrdup/controlplane"
@@ -55,7 +56,7 @@ type fakeBackend struct {
 
 	// nextHandle, when set, is returned by the next successful update
 	// instead of a fresh handle, and is cleared once used.
-	nextHandle unrdup.ModuleHandle
+	nextHandle crud.Handle
 
 	// deleteErr, when set, is returned by every delete until cleared,
 	// modeling a config still referenced by a live generation.
@@ -63,18 +64,14 @@ type fakeBackend struct {
 	deletedName string
 }
 
-func (m *fakeBackend) UpdateModule(
-	name string,
-	sources []xnetip.Network,
-	services []cunrdup.Service,
-) (unrdup.ModuleHandle, error) {
+func (m *fakeBackend) Update(name string, payload *unrdup.ModuleConfig) (crud.Handle, error) {
 	m.calls++
 	if m.err != nil {
 		return nil, m.err
 	}
 
-	m.sources = sources
-	m.services = services
+	m.sources = payload.Sources()
+	m.services = payload.Services
 
 	if m.nextHandle != nil {
 		handle := m.nextHandle
@@ -88,7 +85,7 @@ func (m *fakeBackend) UpdateModule(
 	return handle, nil
 }
 
-func (m *fakeBackend) DeleteModule(name string) error {
+func (m *fakeBackend) Delete(name string) error {
 	m.deletedName = name
 	return m.deleteErr
 }

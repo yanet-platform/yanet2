@@ -109,7 +109,7 @@ func wirePipeline(t *testing.T, agent *ffi.Agent) {
 	t.Helper()
 
 	sinkName := configName + "-sink"
-	sink, err := forward.NewBackend(agent).UpdateModule(sinkName, catchAllRules())
+	sink, err := forward.NewBackend(agent).Update(sinkName, forward.RuleSet{Compiled: catchAllRules()})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = sink.Free() })
 

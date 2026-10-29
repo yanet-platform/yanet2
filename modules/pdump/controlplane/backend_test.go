@@ -10,6 +10,7 @@ import (
 
 	testshm "github.com/yanet-platform/yanet2/common/go/testutils/shm"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
+	cpdump "github.com/yanet-platform/yanet2/modules/pdump/bindings/go/cpdump"
 	pdump "github.com/yanet-platform/yanet2/modules/pdump/controlplane"
 	"github.com/yanet-platform/yanet2/modules/pdump/internal/testutils"
 	ring "github.com/yanet-platform/yanet2/objects/ring/controlplane"
@@ -34,7 +35,7 @@ func newTestBackend(t *testing.T) (pdump.Backend, *ffi.Agent) {
 	ringService := ring.NewRingService(agent)
 	_, err = ringService.CreateRing(t.Context(), &ringpb.CreateRingRequest{
 		Name:     "capture-ring",
-		Capacity: uint64(pdump.MinRingCapacity),
+		Capacity: uint64(cpdump.MinRingCapacity),
 	})
 	require.NoError(t, err)
 	t.Cleanup(func() {

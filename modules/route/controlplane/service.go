@@ -17,6 +17,7 @@ import (
 	"github.com/yanet-platform/yanet2/common/go/grpcmetrics"
 	"github.com/yanet-platform/yanet2/common/go/metrics"
 	"github.com/yanet-platform/yanet2/controlplane/configstore"
+	"github.com/yanet-platform/yanet2/controlplane/crud"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/modules/route/bindings/go/croute"
 	"github.com/yanet-platform/yanet2/modules/route/controlplane/routepb/v1"
@@ -265,16 +266,8 @@ func (m *RouteService) DeleteConfig(
 		}
 		return nil
 	})
-	if errors.Is(err, configstore.ErrNotFound) {
-		return nil, status.Errorf(codes.NotFound, "config %q not found", name)
-	}
 	if err != nil {
-		code := codes.Internal
-		if errors.Is(err, ffi.ErrFailedPrecondition) {
-			// A chain still references the config.
-			code = codes.FailedPrecondition
-		}
-		return nil, status.Errorf(code, "failed to delete config %q: %v", name, err)
+		return nil, crud.DeleteError(name, err)
 	}
 
 	return &routepb.DeleteConfigResponse{}, nil

@@ -57,13 +57,13 @@ func (m *ForwardService) Metrics(tags ...*commonpb.MetricTag) ([]*commonpb.Metri
 // read.
 func (m *ForwardService) collectDataplaneMetrics(tags []*commonpb.MetricTag) ([]*commonpb.Metric, error) {
 	result := make([]*commonpb.Metric, 0)
-	for _, configName := range m.configs.Names() {
+	for _, configName := range m.core.List() {
 		// A config deleted since the listing has no counters to read.
-		config, ok := m.configs.Get(configName)
+		ruleSet, ok := m.core.Get(configName)
 		if !ok {
 			continue
 		}
-		names, read := metrics.Query(tags, metrics.WithEntryCounters(ruleCounterNames(config.Rules)))
+		names, read := metrics.Query(tags, metrics.WithEntryCounters(ruleCounterNames(ruleSet.Rules)))
 		if !read {
 			continue
 		}

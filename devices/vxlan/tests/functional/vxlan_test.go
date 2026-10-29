@@ -158,7 +158,7 @@ func createTunnelWithPipelines(
 func wireVxlanPipelines(t *testing.T, agent *ffi.Agent) {
 	t.Helper()
 
-	sinkHandle, err := forward.NewBackend(agent).UpdateModule("sink", []cforward.ForwardRule{
+	sinkHandle, err := forward.NewBackend(agent).Update("sink", forward.RuleSet{Compiled: []cforward.ForwardRule{
 		{
 			Target:  "port0",
 			Mode:    cforward.ModeOut,
@@ -173,11 +173,11 @@ func wireVxlanPipelines(t *testing.T, agent *ffi.Agent) {
 			Src6s:   []xnetip.BiContiguous{filter.UnspecifiedIPv6},
 			Dst6s:   []xnetip.BiContiguous{filter.UnspecifiedIPv6},
 		},
-	})
+	}})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = sinkHandle.Free() })
 
-	toTunInHandle, err := forward.NewBackend(agent).UpdateModule("to-tun-in", []cforward.ForwardRule{
+	toTunInHandle, err := forward.NewBackend(agent).Update("to-tun-in", forward.RuleSet{Compiled: []cforward.ForwardRule{
 		{
 			Target:  "tun0",
 			Mode:    cforward.ModeIn,
@@ -192,11 +192,11 @@ func wireVxlanPipelines(t *testing.T, agent *ffi.Agent) {
 			Src6s:   []xnetip.BiContiguous{filter.UnspecifiedIPv6},
 			Dst6s:   []xnetip.BiContiguous{filter.UnspecifiedIPv6},
 		},
-	})
+	}})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = toTunInHandle.Free() })
 
-	toTunOutHandle, err := forward.NewBackend(agent).UpdateModule("to-tun-out", []cforward.ForwardRule{
+	toTunOutHandle, err := forward.NewBackend(agent).Update("to-tun-out", forward.RuleSet{Compiled: []cforward.ForwardRule{
 		{
 			Target:  "tun0",
 			Mode:    cforward.ModeOut,
@@ -211,7 +211,7 @@ func wireVxlanPipelines(t *testing.T, agent *ffi.Agent) {
 			Src6s:   []xnetip.BiContiguous{filter.UnspecifiedIPv6},
 			Dst6s:   []xnetip.BiContiguous{filter.UnspecifiedIPv6},
 		},
-	})
+	}})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = toTunOutHandle.Free() })
 
@@ -267,7 +267,7 @@ func wirePortInput(t *testing.T, agent *ffi.Agent, pipeline string) {
 func wireUnderlayPipeline(t *testing.T, agent *ffi.Agent) {
 	t.Helper()
 
-	underlayHandle, err := forward.NewBackend(agent).UpdateModule("underlay-check", []cforward.ForwardRule{
+	underlayHandle, err := forward.NewBackend(agent).Update("underlay-check", forward.RuleSet{Compiled: []cforward.ForwardRule{
 		{
 			Target:  "port0",
 			Mode:    cforward.ModeOut,
@@ -285,7 +285,7 @@ func wireUnderlayPipeline(t *testing.T, agent *ffi.Agent) {
 			Src6s:   []xnetip.BiContiguous{xnetip.MustParseBiContiguous("2001:db8:7654:3210::/64")},
 			Dst6s:   []xnetip.BiContiguous{filter.UnspecifiedIPv6},
 		},
-	})
+	}})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = underlayHandle.Free() })
 
@@ -324,14 +324,14 @@ func wireUnderlayPipeline(t *testing.T, agent *ffi.Agent) {
 func wireUntaggedPipeline(t *testing.T, agent *ffi.Agent) {
 	t.Helper()
 
-	untaggedHandle, err := forward.NewBackend(agent).UpdateModule("untagged-check", []cforward.ForwardRule{
+	untaggedHandle, err := forward.NewBackend(agent).Update("untagged-check", forward.RuleSet{Compiled: []cforward.ForwardRule{
 		{
 			Target:     "port0",
 			Mode:       cforward.ModeOut,
 			Counter:    "untagged_hit",
 			VlanRanges: filter.VlanRanges{{From: 0, To: 0}},
 		},
-	})
+	}})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = untaggedHandle.Free() })
 
@@ -370,13 +370,13 @@ func wireUntaggedPipeline(t *testing.T, agent *ffi.Agent) {
 func wireL2SinkPipeline(t *testing.T, agent *ffi.Agent) {
 	t.Helper()
 
-	l2SinkHandle, err := forward.NewBackend(agent).UpdateModule("l2-sink", []cforward.ForwardRule{
+	l2SinkHandle, err := forward.NewBackend(agent).Update("l2-sink", forward.RuleSet{Compiled: []cforward.ForwardRule{
 		{
 			Target:  "port0",
 			Mode:    cforward.ModeOut,
 			Counter: "l2_sink",
 		},
-	})
+	}})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = l2SinkHandle.Free() })
 

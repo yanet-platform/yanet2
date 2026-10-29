@@ -16,6 +16,7 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
+	"github.com/yanet-platform/yanet2/controlplane/crud"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/modules/decap/controlplane/decappb/v1"
 )
@@ -91,16 +92,13 @@ type mockBackend struct {
 	deletedName string
 }
 
-func (m *mockBackend) UpdateModule(
-	name string,
-	prefixes []netip.Prefix,
-) (ModuleHandle, error) {
+func (m *mockBackend) Update(name string, payload PrefixSets) (crud.Handle, error) {
 	handle := &mockModuleHandle{}
 	m.lastHandle.Store(handle)
 	return handle, nil
 }
 
-func (m *mockBackend) DeleteModule(name string) error {
+func (m *mockBackend) Delete(name string) error {
 	m.deletedName = name
 	return nil
 }
@@ -117,7 +115,7 @@ type refusingDeleteBackend struct {
 	err error
 }
 
-func (m *refusingDeleteBackend) DeleteModule(name string) error {
+func (m *refusingDeleteBackend) Delete(name string) error {
 	m.deletedName = name
 	return m.err
 }
@@ -130,10 +128,7 @@ type parkingBackend struct {
 	first    refusingOnceHandle
 }
 
-func (m *parkingBackend) UpdateModule(
-	name string,
-	prefixes []netip.Prefix,
-) (ModuleHandle, error) {
+func (m *parkingBackend) Update(name string, payload PrefixSets) (crud.Handle, error) {
 	if m.numCalls.Add(1) == 1 {
 		return &m.first, nil
 	}
@@ -148,13 +143,10 @@ type blockingBackend struct {
 	release chan struct{}
 }
 
-func (m *blockingBackend) UpdateModule(
-	name string,
-	prefixes []netip.Prefix,
-) (ModuleHandle, error) {
+func (m *blockingBackend) Update(name string, payload PrefixSets) (crud.Handle, error) {
 	m.entered <- struct{}{}
 	<-m.release
-	return m.mockBackend.UpdateModule(name, prefixes)
+	return m.mockBackend.Update(name, payload)
 }
 
 // flakyBackend succeeds on the first UpdateModule call and fails thereafter.
@@ -162,17 +154,14 @@ type flakyBackend struct {
 	numCalls atomic.Int64
 }
 
-func (m *flakyBackend) UpdateModule(
-	name string,
-	prefixes []netip.Prefix,
-) (ModuleHandle, error) {
+func (m *flakyBackend) Update(name string, payload PrefixSets) (crud.Handle, error) {
 	if m.numCalls.Add(1) >= 2 {
 		return nil, errInjectedBackend
 	}
 	return &mockModuleHandle{}, nil
 }
 
-func (m *flakyBackend) DeleteModule(name string) error {
+func (m *flakyBackend) Delete(name string) error {
 	return nil
 }
 

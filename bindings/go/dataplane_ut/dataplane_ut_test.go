@@ -611,7 +611,7 @@ func TestHandleSegmentedPacketsOnDevice_ForwardDeviceScopedRule(t *testing.T) {
 		Counter: "port1_rule",
 		Devices: filter.Devices{{Name: "port1"}},
 	}
-	moduleHandle, err := backend.UpdateModule("demux", []cforward.ForwardRule{rule})
+	moduleHandle, err := backend.Update("demux", forward.RuleSet{Compiled: []cforward.ForwardRule{rule}})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = moduleHandle.Free() })
 

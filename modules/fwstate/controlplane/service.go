@@ -12,6 +12,7 @@ import (
 	"github.com/yanet-platform/yanet2/common/go/grpcmetrics"
 	"github.com/yanet-platform/yanet2/common/go/metrics"
 	"github.com/yanet-platform/yanet2/controlplane/configstore"
+	"github.com/yanet-platform/yanet2/controlplane/crud"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/modules/fwstate/controlplane/fwstatepb/v1"
 )
@@ -107,31 +108,50 @@ var (
 	FWStateMetricsServiceName = fwstatepb.MetricsService_ServiceDesc.ServiceName
 )
 
-// Mutation phases report a goroutine before it enters the store's
-// writer section, once an admitted mutation is about to touch shared
-// memory inside it, and as that work ends.
-const (
-	mutationWaiting   = "waiting"
-	mutationAcquired  = "acquired"
-	mutationReleasing = "releasing"
-)
+// crudObserver forwards the shared core's mutation lifecycle to this
+// module's observer.
+type crudObserver struct {
+	observer MutationObserver
+}
+
+func (m crudObserver) ObserveMutation(operation, phase string) {
+	m.observer.ObserveFWStateMutation(operation, phase)
+}
+
+// publishBackend publishes fwstate configs through the shared-memory
+// agent.
+type publishBackend struct {
+	agent *ffi.Agent
+}
+
+func (m *publishBackend) Update(name string, payload *FwStateConfig) (crud.Handle, error) {
+	if err := crud.PublishModule(m.agent, payload, nil); err != nil {
+		return nil, err
+	}
+
+	return payload, nil
+}
+
+func (m *publishBackend) Delete(name string) error {
+	return m.agent.DeleteModuleConfig(moduleType, name)
+}
 
 // FWStateService implements the gRPC service for FWState management.
 type FWStateService struct {
 	fwstatepb.UnimplementedFWStateServiceServer
 
-	// configs owns the published configs and the superseded ones whose
+	// core owns the published configs and the superseded ones whose
 	// free was refused because a live configuration generation still
 	// referenced them. It retries those on the next update, and nothing
-	// else remembers them. The store serializes whole mutations per name,
+	// else remembers them. The core serializes whole mutations per name,
 	// publish included, while its read side guards the entries alone and
 	// is never held across a shared-memory call, so read paths stay
 	// responsive while a publish is slow.
-	configs *configstore.Store[*FwStateConfig]
+	core *crud.Core[*FwStateConfig]
 
-	agent    *ffi.Agent
-	observer MutationObserver
-	metrics  *grpcmetrics.ServerMetrics
+	agent *ffi.Agent
+
+	metrics *grpcmetrics.ServerMetrics
 
 	log *zap.Logger
 }
@@ -149,11 +169,16 @@ func NewFWStateService(
 		o(opts)
 	}
 
+	var coreOptions []crud.Option
+	if opts.Observer != nil {
+		coreOptions = append(coreOptions,
+			crud.WithMutationObserver(crudObserver{observer: opts.Observer}))
+	}
+
 	m := &FWStateService{
-		agent:    agent,
-		configs:  configstore.NewStore[*FwStateConfig](),
-		observer: opts.Observer,
-		log:      opts.Log,
+		core:  crud.NewCore[*FwStateConfig](&publishBackend{agent: agent}, coreOptions...),
+		agent: agent,
+		log:   opts.Log,
 	}
 	if opts.Metrics != nil {
 		m.metrics = opts.Metrics(m.retention)
@@ -193,38 +218,28 @@ func (m *FWStateService) UpdateConfig(
 
 	m.log.Debug("update fwstate config", zap.String("config", name))
 
-	m.observeMutation("update", mutationWaiting)
-	err := m.configs.Update(name, func(current *FwStateConfig, ok bool) (*FwStateConfig, error) {
-		m.observeMutation("update", mutationAcquired)
-		defer m.observeMutation("update", mutationReleasing)
-
-		newConfig, err := m.prepareUpdate(name, current, req)
-		if err != nil {
-			return nil, err
-		}
-
-		m.log.Debug("update fwstate module config", zap.String("config", name))
-
-		if err := m.agent.UpdateModules([]ffi.ModuleConfig{newConfig.AsFFIModule()}); err != nil {
-			if err := newConfig.Free(); err != nil {
-				m.log.Error("failed to free unpublished fwstate config",
-					zap.String("config", name), zap.Error(err))
-			}
-			m.log.Error("failed to publish fwstate config", zap.String("config", name), zap.Error(err))
-			if errors.Is(err, ffi.ErrFailedPrecondition) {
-				return nil, status.Errorf(codes.FailedPrecondition, "failed to publish fwstate config: %v", err)
-			}
-			return nil, status.Errorf(codes.Internal, "failed to publish fwstate config: %v", err)
-		}
-
-		return newConfig, nil
+	err := m.core.Mutate(name, func(current *FwStateConfig, ok bool) (*FwStateConfig, error) {
+		return m.prepareUpdate(name, current, req)
 	})
 	if err != nil {
-		return nil, err
+		return nil, m.updateStatus(err)
 	}
 
 	m.log.Info("successfully updated FWState module", zap.String("config", name))
 	return &fwstatepb.UpdateConfigResponse{}, nil
+}
+
+// updateStatus maps a failed mutation to the gRPC status it reports: a
+// status the mutation itself produced passes through, a publish
+// failure reports by its own kind.
+func (m *FWStateService) updateStatus(err error) error {
+	if _, ok := status.FromError(err); ok {
+		return err
+	}
+	if errors.Is(err, ffi.ErrFailedPrecondition) {
+		return status.Errorf(codes.FailedPrecondition, "failed to publish fwstate config: %v", err)
+	}
+	return status.Errorf(codes.Internal, "failed to publish fwstate config: %v", err)
 }
 
 // prepareUpdate builds the replacement config for name in one step.
@@ -271,7 +286,7 @@ func (m *FWStateService) ShowConfig(
 ) (*fwstatepb.ShowConfigResponse, error) {
 	name := req.GetName()
 
-	mapNameV4, mapNameV6, syncConfig, ok := m.configSnapshot(name)
+	config, ok := m.core.Get(name)
 	if !ok {
 		if req.GetOkIfNotFound() {
 			return &fwstatepb.ShowConfigResponse{}, nil
@@ -281,32 +296,19 @@ func (m *FWStateService) ShowConfig(
 
 	response := &fwstatepb.ShowConfigResponse{
 		Name:       name,
-		MapNameV4:  mapNameV4,
-		MapNameV6:  mapNameV6,
-		SyncConfig: syncConfig,
+		MapNameV4:  config.MapNameV4(),
+		MapNameV6:  config.MapNameV6(),
+		SyncConfig: config.GetSyncConfig(),
 	}
 
 	return response, nil
-}
-
-// configSnapshot reads the published state of name in one short store
-// read, so it never waits behind a publish of any name.
-func (m *FWStateService) configSnapshot(
-	name string,
-) (string, string, *fwstatepb.SyncConfig, bool) {
-	config, ok := m.configs.Get(name)
-	if !ok {
-		return "", "", nil, false
-	}
-
-	return config.MapNameV4(), config.MapNameV6(), config.GetSyncConfig(), true
 }
 
 func (m *FWStateService) ListConfigs(
 	ctx context.Context,
 	req *fwstatepb.ListConfigsRequest,
 ) (*fwstatepb.ListConfigsResponse, error) {
-	return &fwstatepb.ListConfigsResponse{Configs: m.configs.Names()}, nil
+	return &fwstatepb.ListConfigsResponse{Configs: m.core.List()}, nil
 }
 
 func (m *FWStateService) DeleteConfig(
@@ -315,17 +317,7 @@ func (m *FWStateService) DeleteConfig(
 ) (*fwstatepb.DeleteConfigResponse, error) {
 	name := req.GetName()
 
-	m.observeMutation("delete", mutationWaiting)
-	err := m.configs.Delete(name, func(*FwStateConfig) error {
-		m.observeMutation("delete", mutationAcquired)
-		defer m.observeMutation("delete", mutationReleasing)
-
-		// DeleteModuleConfig removes the shared-memory publication but
-		// does not free the module. The store removes the entry only
-		// after this returns, letting readers finish against the old
-		// handle before its free is attempted.
-		return m.agent.DeleteModuleConfig(moduleType, name)
-	})
+	err := m.core.Delete(name)
 	if errors.Is(err, configstore.ErrNotFound) {
 		return nil, status.Errorf(codes.NotFound, "config %q not found", name)
 	}
@@ -340,10 +332,4 @@ func (m *FWStateService) DeleteConfig(
 
 	m.log.Info("successfully deleted FWState module config", zap.String("name", name))
 	return &fwstatepb.DeleteConfigResponse{}, nil
-}
-
-func (m *FWStateService) observeMutation(operation, phase string) {
-	if m.observer != nil {
-		m.observer.ObserveFWStateMutation(operation, phase)
-	}
 }

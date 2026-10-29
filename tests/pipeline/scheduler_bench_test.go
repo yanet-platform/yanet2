@@ -128,7 +128,7 @@ func wireRedirect(
 		Src4s:   []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
 		Dst4s:   []xnetip.Contiguous[xnetip.Network4]{xnetip.MustParseContiguous4("10.0.0.0/8")},
 	}
-	handle, err := backend.UpdateModule(name, []cforward.ForwardRule{rule})
+	handle, err := backend.Update(name, forward.RuleSet{Compiled: []cforward.ForwardRule{rule}})
 	require.NoError(b, err)
 	b.Cleanup(func() { _ = handle.Free() })
 

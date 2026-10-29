@@ -13,9 +13,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
-	"github.com/yanet-platform/yanet2/controlplane/configstore"
-	"github.com/yanet-platform/yanet2/controlplane/ffi"
-	"github.com/yanet-platform/yanet2/devices/trafgen/bindings/go/ctrafgen"
+	"github.com/yanet-platform/yanet2/controlplane/crud"
 	trafgenpb "github.com/yanet-platform/yanet2/devices/trafgen/controlplane/trafgenpb/v1"
 )
 
@@ -25,57 +23,38 @@ import (
 // this bound would wrap and corrupt the mbuf. Reject such frames at upload.
 const maxFrameLen = 65535
 
-// Pipeline is a weighted input/output pipeline assignment for the generator.
-type Pipeline struct {
-	Name   string
-	Weight uint64
-}
-
-// Backend abstracts shared memory operations.
-type Backend interface {
-	// UpdateDevice publishes a device config with the given pipelines,
-	// frames and rate to the dataplane.
-	//
-	// It returns the freshly published handle. The caller owns the handle
-	// and must Free it once a newer generation has superseded it.
-	UpdateDevice(name string, input, output []Pipeline, frames []byte, lengths []uint32, ratePps uint64) (*ctrafgen.DeviceConfig, error)
-	// DeleteDevice removes the named device from the dataplane registry.
-	DeleteDevice(name string) error
-}
-
-type config struct {
+// DeviceState is the published payload: the loaded frames, the target
+// rate and the pipeline bindings of the generator, with the frame
+// statistics the reads report.
+type DeviceState struct {
 	RatePps    uint64
 	FrameCount uint32
 	TotalBytes uint64
 	Packets    [][]byte
-	Input      []Pipeline
-	Output     []Pipeline
-	Handle     *ctrafgen.DeviceConfig
+	Input      []commonpb.Pipeline
+	Output     []commonpb.Pipeline
 }
 
-// Free releases the device handle held by the config.
-//
-// It is safe to call even when no handle is held.
-func (m *config) Free() error {
-	if m.Handle == nil {
-		return nil
-	}
-	return m.Handle.Free()
+// Backend abstracts shared memory operations.
+type Backend interface {
+	// Update publishes a device config built from the pipelines, frames
+	// and rate to the dataplane.
+	Update(name string, payload *DeviceState) (crud.Handle, error)
+	// Delete removes the named device from the dataplane registry.
+	Delete(name string) error
 }
 
 // TrafgenService implements the TrafgenService gRPC server.
 type TrafgenService struct {
 	trafgenpb.UnimplementedTrafgenServiceServer
 
-	backend Backend
-	configs *configstore.Store[*config]
+	core *crud.Core[*DeviceState]
 }
 
 // NewTrafgenService constructs a TrafgenService backed by the given Backend.
 func NewTrafgenService(backend Backend) *TrafgenService {
 	return &TrafgenService{
-		backend: backend,
-		configs: configstore.NewStore[*config](),
+		core: crud.NewCore(backend),
 	}
 }
 
@@ -88,11 +67,11 @@ func (m *TrafgenService) UpdateDevice(
 	req *trafgenpb.UpdateDeviceRequest,
 ) (*trafgenpb.UpdateDeviceResponse, error) {
 	name := req.GetName()
-	input := pipelinesFromProto(req.GetDevice().GetInput())
-	output := pipelinesFromProto(req.GetDevice().GetOutput())
+	input := commonpb.PipelinesFromProto(req.GetDevice().GetInput())
+	output := commonpb.PipelinesFromProto(req.GetDevice().GetOutput())
 
-	err := m.publish(name, func(current *config, ok bool) *config {
-		next := &config{Input: input, Output: output}
+	err := m.publish(name, func(current *DeviceState, ok bool) *DeviceState {
+		next := &DeviceState{Input: input, Output: output}
 		if ok {
 			next.Packets = current.Packets
 			next.RatePps = current.RatePps
@@ -113,9 +92,7 @@ func (m *TrafgenService) UpdateDevice(
 // The registry delete runs before the entry is withdrawn, so a delete the
 // dataplane refuses leaves the published device and its handle in place.
 func (m *TrafgenService) DeleteDevice(name string) error {
-	return m.configs.Delete(name, func(*config) error {
-		return m.backend.DeleteDevice(name)
-	})
+	return m.core.Delete(name)
 }
 
 // ListConfigs returns all known config names of the dataplane instance.
@@ -123,7 +100,7 @@ func (m *TrafgenService) ListConfigs(
 	ctx context.Context,
 	req *trafgenpb.ListConfigsRequest,
 ) (*trafgenpb.ListConfigsResponse, error) {
-	return &trafgenpb.ListConfigsResponse{Configs: m.configs.Names()}, nil
+	return &trafgenpb.ListConfigsResponse{Configs: m.core.List()}, nil
 }
 
 // ShowConfig returns the loaded frame statistics and target rate for a config.
@@ -131,16 +108,15 @@ func (m *TrafgenService) ShowConfig(
 	ctx context.Context,
 	req *trafgenpb.ShowConfigRequest,
 ) (*trafgenpb.ShowConfigResponse, error) {
-	name := req.GetName()
-	entry, ok := m.configs.Get(name)
+	state, ok := m.core.Get(req.GetName())
 	if !ok {
-		return nil, status.Errorf(codes.NotFound, "config %q not found", name)
+		return nil, status.Errorf(codes.NotFound, "config %q not found", req.GetName())
 	}
 
 	return &trafgenpb.ShowConfigResponse{
-		RatePps:    entry.RatePps,
-		FrameCount: entry.FrameCount,
-		TotalBytes: entry.TotalBytes,
+		RatePps:    state.RatePps,
+		FrameCount: state.FrameCount,
+		TotalBytes: state.TotalBytes,
 	}, nil
 }
 
@@ -149,14 +125,13 @@ func (m *TrafgenService) ShowPackets(
 	ctx context.Context,
 	req *trafgenpb.ShowPacketsRequest,
 ) (*trafgenpb.ShowPacketsResponse, error) {
-	name := req.GetName()
-	entry, ok := m.configs.Get(name)
+	state, ok := m.core.Get(req.GetName())
 	if !ok {
-		return nil, status.Errorf(codes.NotFound, "config %q not found", name)
+		return nil, status.Errorf(codes.NotFound, "config %q not found", req.GetName())
 	}
 
-	out := make([][]byte, len(entry.Packets))
-	copy(out, entry.Packets)
+	out := make([][]byte, len(state.Packets))
+	copy(out, state.Packets)
 
 	return &trafgenpb.ShowPacketsResponse{Packets: out, Truncated: false}, nil
 }
@@ -176,8 +151,8 @@ func (m *TrafgenService) UploadPcap(
 		return nil, status.Error(codes.InvalidArgument, "pcap contains no packets")
 	}
 
-	err = m.publish(name, func(current *config, ok bool) *config {
-		next := &config{Packets: packets}
+	err = m.publish(name, func(current *DeviceState, ok bool) *DeviceState {
+		next := &DeviceState{Packets: packets}
 		if ok {
 			next.RatePps = current.RatePps
 			next.Input = current.Input
@@ -199,8 +174,8 @@ func (m *TrafgenService) SetRate(
 	req *trafgenpb.SetRateRequest,
 ) (*trafgenpb.SetRateResponse, error) {
 	name := req.GetName()
-	err := m.publish(name, func(current *config, ok bool) *config {
-		next := &config{RatePps: req.GetRatePps()}
+	err := m.publish(name, func(current *DeviceState, ok bool) *DeviceState {
+		next := &DeviceState{RatePps: req.GetRatePps()}
 		if ok {
 			next.Packets = current.Packets
 			next.Input = current.Input
@@ -216,68 +191,33 @@ func (m *TrafgenService) SetRate(
 }
 
 // publish builds the next device state from the current one and writes it
-// to the dataplane, attaching the published handle and frame statistics.
+// to the dataplane, recording the frame statistics of the frames it
+// publishes.
 //
 // The caller's builder returns the packets, rate and pipelines of the new
-// state and may carry any of them over from the current config. A refused
+// state and may carry any of them over from the current state. A refused
 // write is returned as a gRPC status.
-func (m *TrafgenService) publish(name string, next func(current *config, ok bool) *config) error {
-	return m.configs.Update(name, func(current *config, ok bool) (*config, error) {
-		cfg := next(current, ok)
-		frames, lengths := flattenFrames(cfg.Packets)
-
-		handle, err := m.backend.UpdateDevice(name, cfg.Input, cfg.Output, frames, lengths, cfg.RatePps)
-		if err != nil {
-			code := codes.Internal
-			if errors.Is(err, ffi.ErrFailedPrecondition) {
-				// The device names an entity of the graph it runs that the
-				// configuration cannot resolve.
-				code = codes.FailedPrecondition
-			}
-			return nil, status.Errorf(code, "failed to update device config %q: %v", name, err)
-		}
-
-		cfg.FrameCount = uint32(len(cfg.Packets))
-		cfg.TotalBytes = uint64(len(frames))
-		cfg.Handle = handle
-
-		return cfg, nil
+func (m *TrafgenService) publish(name string, next func(current *DeviceState, ok bool) *DeviceState) error {
+	err := m.core.Mutate(name, func(current *DeviceState, ok bool) (*DeviceState, error) {
+		state := next(current, ok)
+		state.FrameCount = uint32(len(state.Packets))
+		state.TotalBytes = totalBytes(state.Packets)
+		return state, nil
 	})
+	if err != nil {
+		return crud.UpdateError(err)
+	}
+
+	return nil
 }
 
-// pipelinesFromProto converts the wire pipeline assignments into the service
-// representation.
-func pipelinesFromProto(pipelines []*commonpb.DevicePipeline) []Pipeline {
-	out := make([]Pipeline, 0, len(pipelines))
-	for _, pipeline := range pipelines {
-		out = append(out, Pipeline{
-			Name:   pipeline.GetName(),
-			Weight: pipeline.GetWeight(),
-		})
-	}
-	return out
-}
-
-// flattenFrames concatenates the per-packet frames into a single buffer and
-// returns it together with the per-frame lengths.
-func flattenFrames(packets [][]byte) ([]byte, []uint32) {
-	if len(packets) == 0 {
-		return nil, nil
-	}
-
-	lengths := make([]uint32, len(packets))
-	total := 0
-	for idx, packet := range packets {
-		lengths[idx] = uint32(len(packet))
-		total += len(packet)
-	}
-
-	frames := make([]byte, 0, total)
+// totalBytes returns the summed length of the frames.
+func totalBytes(packets [][]byte) uint64 {
+	var total uint64
 	for _, packet := range packets {
-		frames = append(frames, packet...)
+		total += uint64(len(packet))
 	}
-
-	return frames, lengths
+	return total
 }
 
 // parsePcap reads every packet from a pcap file's raw bytes, returning the

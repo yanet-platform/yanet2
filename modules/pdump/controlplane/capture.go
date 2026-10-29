@@ -161,6 +161,11 @@ func (m *capture) Binding() *binding {
 	return m.binding
 }
 
+// AdoptModule takes ownership of the published module handle.
+func (m *capture) AdoptModule(module Module) {
+	m.module = module
+}
+
 // Read streams the captured records until the stream ends, the client
 // cannot take them any more or the capture is retired.
 //

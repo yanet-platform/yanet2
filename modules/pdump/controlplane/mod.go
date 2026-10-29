@@ -4,32 +4,20 @@ import (
 	"context"
 
 	"go.uber.org/zap"
-	"go.uber.org/zap/zapcore"
 	"google.golang.org/grpc"
 
-	"github.com/yanet-platform/yanet2/controlplane/ffi"
+	"github.com/yanet-platform/yanet2/controlplane/modulebase"
+	cpdump "github.com/yanet-platform/yanet2/modules/pdump/bindings/go/cpdump"
 	"github.com/yanet-platform/yanet2/modules/pdump/controlplane/pdumppb/v1"
 	ring "github.com/yanet-platform/yanet2/objects/ring/controlplane"
 )
 
 // Option configures the PdumpModule constructor.
-type Option func(*moduleOptions)
-
-type moduleOptions struct {
-	Log *zap.Logger
-}
-
-func newModuleOptions() *moduleOptions {
-	return &moduleOptions{
-		Log: zap.NewNop(),
-	}
-}
+type Option = modulebase.Option
 
 // WithLog sets the logger for the pdump module.
 func WithLog(log *zap.Logger) Option {
-	return func(o *moduleOptions) {
-		o.Log = log
-	}
+	return modulebase.WithLog(log)
 }
 
 // PdumpModule is a control-plane component of a packet dump module.
@@ -37,69 +25,46 @@ func WithLog(log *zap.Logger) Option {
 // It also hosts the ring service. That service owns the standalone named
 // rings created through this agent.
 type PdumpModule struct {
+	*modulebase.Base
+
 	cfg         *Config
-	attachment  *ffi.Attachment
 	service     *PdumpService
 	ringService *ring.RingService
 	log         *zap.Logger
 }
 
 func NewPdumpModule(cfg *Config, options ...Option) (*PdumpModule, error) {
-	opts := newModuleOptions()
-	for _, o := range options {
-		o(opts)
-	}
-
-	log := opts.Log.With(zap.String("module", pdumppb.PdumpService_ServiceDesc.ServiceName))
-
-	// setup CGO export logger
-	logger = log.WithOptions(
-		zap.WithCaller(false),
-		zap.AddStacktrace(zapcore.FatalLevel),
-	)
-	debugEBPF = cfg.DebugEBPF
-
-	attachment, err := ffi.Attach(cfg.AttachConfig, moduleType, log)
+	base, err := modulebase.NewBase(cfg.AttachConfig, moduleType, cfg.Endpoint.Unwrap(), options...)
 	if err != nil {
 		return nil, err
 	}
-	agent := attachment.Agent
 
-	ringService := ring.NewRingService(agent, ring.WithLog(log))
+	// The C library's log callback writes to the bindings package's
+	// logger, so it must be set before any C call that can log.
+	cpdump.SetLogger(base.Log())
+	cpdump.SetDebugEBPF(cfg.DebugEBPF)
+
+	ringService := ring.NewRingService(base.Agent(), ring.WithLog(base.Log()))
 
 	service := NewPdumpService(
-		NewBackend(agent, WithBackendLog(log)),
+		NewBackend(base.Agent(), WithBackendLog(base.Log())),
 		newRingOwner(ringService),
-		WithPdumpServiceLog(log),
+		WithPdumpServiceLog(base.Log()),
 	)
+	base.AddService(pdumppb.PdumpService_ServiceDesc.ServiceName, func(server *grpc.Server) {
+		pdumppb.RegisterPdumpServiceServer(server, service)
+	})
+	base.AddService(ring.ServiceName, func(server *grpc.Server) {
+		ringService.Register(server)
+	})
 
 	return &PdumpModule{
+		Base:        base,
 		cfg:         cfg,
-		attachment:  attachment,
 		service:     service,
 		ringService: ringService,
-		log:         log,
+		log:         base.Log(),
 	}, nil
-}
-
-func (m *PdumpModule) Name() string {
-	return moduleType
-}
-
-func (m *PdumpModule) Endpoint() string {
-	return m.cfg.Endpoint.Unwrap()
-}
-
-func (m *PdumpModule) ServicesNames() []string {
-	return []string{
-		pdumppb.PdumpService_ServiceDesc.ServiceName,
-		ring.ServiceName,
-	}
-}
-
-func (m *PdumpModule) RegisterService(server *grpc.Server) {
-	pdumppb.RegisterPdumpServiceServer(server, m.service)
-	m.ringService.Register(server)
 }
 
 // Run runs the module until the specified context is canceled.
@@ -109,9 +74,4 @@ func (m *PdumpModule) Run(ctx context.Context) error {
 	m.log.Info("closing pdump service")
 	m.service.Shutdown()
 	return nil
-}
-
-// Close closes the module.
-func (m *PdumpModule) Close() error {
-	return m.attachment.Close()
 }

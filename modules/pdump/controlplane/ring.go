@@ -8,6 +8,7 @@ import (
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
 
+	cpdump "github.com/yanet-platform/yanet2/modules/pdump/bindings/go/cpdump"
 	"github.com/yanet-platform/yanet2/modules/pdump/controlplane/pdumppb/v1"
 	"github.com/yanet-platform/yanet2/objects/ring/bindings/go/cring"
 )
@@ -16,7 +17,7 @@ import (
 // worker's ring before its records are sent on.
 //
 // So one very busy worker cannot starve the others for long.
-var readChunkBytes = defaultSnaplen * 32
+var readChunkBytes = cpdump.DefaultSnaplen * 32
 
 // wakerStartInterval is the waker's poll interval right after any reader
 // found data, and what a poll that finds data resets it to.
@@ -34,14 +35,14 @@ const wakerMaxInterval = 10 * time.Millisecond
 // trusting bytes that are not really metadata. The returned data is the
 // payload bytes behind the block.
 func parseRecordMeta(payload []byte) (meta *pdumppb.RecordMeta, data []byte, ok bool) {
-	if uint64(len(payload)) < uint64(pdumpRecordHdrSize) {
+	if uint64(len(payload)) < uint64(cpdump.RecordHdrSize) {
 		return nil, nil, false
 	}
-	if binary.LittleEndian.Uint32(payload[0:4]) != pdumpRecordMagic {
+	if binary.LittleEndian.Uint32(payload[0:4]) != cpdump.RecordMagic {
 		return nil, nil, false
 	}
 
-	data = payload[pdumpRecordHdrSize:]
+	data = payload[cpdump.RecordHdrSize:]
 	meta = &pdumppb.RecordMeta{
 		PacketLen:   binary.LittleEndian.Uint32(payload[4:8]),
 		Timestamp:   binary.LittleEndian.Uint64(payload[8:16]),

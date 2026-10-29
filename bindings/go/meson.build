@@ -66,7 +66,7 @@ cgo_packages += {
   'modules/nat64/bindings/go/cnat64': {
     'libraries': [lib_nat64_cp],
   },
-  'modules/pdump/controlplane': {
+  'modules/pdump/bindings/go/cpdump': {
     'libraries': [lib_pdump_cp],
     'archives': [lib_rte_bpf, lib_pcap_static],
   },

@@ -1,6 +1,6 @@
-package pdump
+package cpdump
 
-//#cgo CFLAGS: -I../../../ -I../dataplane -I../../../subprojects/libpcap
+//#cgo CFLAGS: -I../../../../../ -I../../../dataplane -I../../../../../subprojects/libpcap
 //
 //#include <stddef.h>
 //#include <stdlib.h>
@@ -25,13 +25,37 @@ var (
 	logger    *zap.Logger
 	debugEBPF bool
 
-	defaultSnaplen = uint32(C.default_snaplen)
-	replacer       = strings.NewReplacer("\n", "\\n")
-
-	defaultMode uint32 = C.PDUMP_INPUT
-	maxMode     uint32 = C.PDUMP_ALL
-	maxRatePPS  uint64 = C.PDUMP_RATE_PPS_MAX
+	replacer = strings.NewReplacer("\n", "\\n")
 )
+
+// SetLogger installs the sink the C library's log callback writes to.
+//
+// The dataplane's rte_log messages arrive on a callback this package
+// exports, so the logger must be set before any C call that can log.
+func SetLogger(log *zap.Logger) {
+	logger = log.WithOptions(
+		zap.WithCaller(false),
+		zap.AddStacktrace(zap.FatalLevel),
+	)
+}
+
+// SetDebugEBPF controls whether the C library's BPF debug lines reach
+// the logger.
+func SetDebugEBPF(enabled bool) {
+	debugEBPF = enabled
+}
+
+// DefaultSnaplen is the system snapshot length the dataplane suggests.
+var DefaultSnaplen = uint32(C.default_snaplen)
+
+// DefaultMode captures every packet on input.
+const DefaultMode = uint32(C.PDUMP_INPUT)
+
+// MaxMode is the largest mode bitmap the pdump dataplane accepts.
+const MaxMode = uint32(C.PDUMP_ALL)
+
+// MaxRatePPS is the largest capture rate the pdump dataplane accepts.
+const MaxRatePPS = uint64(C.PDUMP_RATE_PPS_MAX)
 
 // MinRingCapacity is the smallest ring capacity a pdump config may capture
 // into, so every record pdump writes fits the ring.
@@ -40,17 +64,17 @@ var (
 // through cgo.
 const MinRingCapacity = uint32(C.PDUMP_MIN_RING_CAPACITY)
 
-// pdumpRecordHdrSize is the size of the fixed metadata block a record
+// RecordHdrSize is the size of the fixed metadata block a record
 // carries behind the ring's own frame.
 //
 // It mirrors struct pdump_record_hdr (modules/pdump/dataplane/record.h).
-const pdumpRecordHdrSize = uint32(C.sizeof_struct_pdump_record_hdr)
+const RecordHdrSize = uint32(C.sizeof_struct_pdump_record_hdr)
 
-// pdumpRecordMagic identifies a pdump record's metadata block. A reader
+// RecordMagic identifies a pdump record's metadata block. A reader
 // checks it before trusting the rest of the block.
 //
 // It mirrors PDUMP_RECORD_MAGIC (modules/pdump/dataplane/record.h).
-var pdumpRecordMagic = uint32(C.pdump_record_magic)
+var RecordMagic = uint32(C.pdump_record_magic)
 
 //export pdumpGoControlplaneLog
 func pdumpGoControlplaneLog(level C.uint32_t, msg *C.char) {
@@ -60,9 +84,9 @@ func pdumpGoControlplaneLog(level C.uint32_t, msg *C.char) {
 	goMsg := C.GoString(msg)
 	switch level {
 	case C.log_emerg, C.log_alert, C.log_crit:
-		logger.Sugar().Errorf("CRIT: %s", replacer.Replace(goMsg))
+		logger.Error("CRIT: " + replacer.Replace(goMsg))
 	case C.log_error:
-		logger.Sugar().Errorf("%s", goMsg) // format for suppressing trace
+		logger.Error(goMsg)
 
 	case C.log_warn:
 		logger.Warn(replacer.Replace(goMsg))
@@ -101,24 +125,27 @@ func newErrorCallbackContext() *errorCallbackContext {
 }
 
 // Handle returns the CGO handle that can be passed to C functions.
-func (e *errorCallbackContext) Handle() C.uintptr_t {
-	return C.uintptr_t(e.handle)
+func (m *errorCallbackContext) Handle() C.uintptr_t {
+	return C.uintptr_t(m.handle)
 }
 
 // Reason returns the accumulated error messages from C code.
-func (e *errorCallbackContext) Reason() string {
-	return e.buf.String()
+func (m *errorCallbackContext) Reason() string {
+	return m.buf.String()
 }
 
 // Close releases the CGO handle. Must be called to prevent handle leaks.
-func (e *errorCallbackContext) Close() {
-	e.handle.Delete()
+func (m *errorCallbackContext) Close() {
+	m.handle.Delete()
 }
 
+// ModuleConfig is a pdump module config under construction in shared
+// memory, ready to be published to the dataplane.
 type ModuleConfig struct {
 	ptr ffi.ModuleConfig
 }
 
+// NewModuleConfig creates a module config for the named capture.
 func NewModuleConfig(agent *ffi.Agent, name string) (*ModuleConfig, error) {
 	cName := C.CString(name)
 	defer C.free(unsafe.Pointer(cName))
@@ -139,6 +166,7 @@ func (m *ModuleConfig) asRawPtr() *C.struct_cp_module {
 	return (*C.struct_cp_module)(m.ptr.AsRawPtr())
 }
 
+// AsFFIModule returns the shared-memory module config this wrapper owns.
 func (m *ModuleConfig) AsFFIModule() ffi.ModuleConfig {
 	return m.ptr
 }
@@ -153,6 +181,7 @@ func (m *ModuleConfig) Free() error {
 	})
 }
 
+// SetFilter compiles the pcap filter expression into the config.
 func (m *ModuleConfig) SetFilter(filter string) error {
 	cFilter := C.CString(filter)
 	defer C.free(unsafe.Pointer(cFilter))
@@ -174,6 +203,8 @@ func (m *ModuleConfig) SetFilter(filter string) error {
 	return nil
 }
 
+// SetDumpMode selects what the capture copies: input packets, drops, or
+// both.
 func (m *ModuleConfig) SetDumpMode(pbMode uint32) error {
 	if pbMode > C.PDUMP_ALL {
 		return fmt.Errorf("unknown pdump mode %x (max known %x)", pbMode, C.PDUMP_ALL)
@@ -204,6 +235,7 @@ func (m *ModuleConfig) SetDumpMode(pbMode uint32) error {
 	return nil
 }
 
+// SetSnapLen bounds each captured record to the given bytes.
 func (m *ModuleConfig) SetSnapLen(snaplen uint32) error {
 	errCtx := newErrorCallbackContext()
 	defer errCtx.Close()
@@ -222,6 +254,8 @@ func (m *ModuleConfig) SetSnapLen(snaplen uint32) error {
 	return nil
 }
 
+// SetRate bounds the capture to the given packets per second, or
+// disables the bound at zero.
 func (m *ModuleConfig) SetRate(ratePPS uint64) error {
 	rc, err := C.pdump_module_config_set_rate(m.asRawPtr(), C.uint64_t(ratePPS))
 	if rc != 0 {

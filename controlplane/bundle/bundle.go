@@ -163,7 +163,7 @@ func buildServices(
 			Name:       "fwstate module",
 			Configured: modulesCfg.FWState.Unwrap() != nil,
 			New: func() (gateway.Service, error) {
-				return fwstate.NewFWStateModule(modulesCfg.FWState.Unwrap(), fwstate.WithLog(log))
+				return fwstate.NewFWStateModule(modulesCfg.FWState.Unwrap(), fwstate.WithModuleLog(log))
 			},
 		},
 		{

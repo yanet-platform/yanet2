@@ -2,7 +2,6 @@ package route_mpls
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"net/netip"
 	"slices"
@@ -16,8 +15,7 @@ import (
 	"github.com/yanet-platform/yanet2/bindings/go/filter"
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
 	"github.com/yanet-platform/yanet2/common/go/maptrie"
-	"github.com/yanet-platform/yanet2/controlplane/configstore"
-	"github.com/yanet-platform/yanet2/controlplane/ffi"
+	"github.com/yanet-platform/yanet2/controlplane/crud"
 	"github.com/yanet-platform/yanet2/modules/route-mpls/bindings/go/croutempls"
 	"github.com/yanet-platform/yanet2/modules/route-mpls/controlplane/routemplspb/v1"
 )
@@ -47,8 +45,7 @@ func WithRouteMPLSServiceLog(log *zap.Logger) RouteMPLSServiceOption {
 type RouteMPLSService struct {
 	routemplspb.UnimplementedRouteMPLSServiceServer
 
-	backend Backend
-	configs *configstore.Store[*routeMPLSConfig]
+	core *crud.Core[*routeMPLSConfig]
 
 	log *zap.Logger
 }
@@ -99,19 +96,10 @@ func (m *NextHopList) Remove(nextHop NextHop) {
 	}
 }
 
+// routeMPLSConfig is the published payload: the prefix trie of the
+// module's forwarding state.
 type routeMPLSConfig struct {
 	Prefixes maptrie.MapTrie[netip.Prefix, netip.Addr, NextHopList]
-	Handle   ModuleHandle
-}
-
-// Free releases the module handle held by the config.
-//
-// It is safe to call even when no handle is held.
-func (m *routeMPLSConfig) Free() error {
-	if m.Handle == nil {
-		return nil
-	}
-	return m.Handle.Free()
 }
 
 // BuildRules iterates the maptrie from longest to shortest prefix and
@@ -184,9 +172,8 @@ func NewRouteMPLSService(backend Backend, options ...RouteMPLSServiceOption) *Ro
 	}
 
 	return &RouteMPLSService{
-		backend: backend,
-		configs: configstore.NewStore[*routeMPLSConfig](),
-		log:     opts.Log,
+		core: crud.NewCore(backend),
+		log:  opts.Log,
 	}
 }
 
@@ -196,7 +183,7 @@ func (m *RouteMPLSService) ListConfigs(
 	ctx context.Context,
 	request *routemplspb.ListConfigsRequest,
 ) (*routemplspb.ListConfigsResponse, error) {
-	return &routemplspb.ListConfigsResponse{Configs: m.configs.Names()}, nil
+	return &routemplspb.ListConfigsResponse{Configs: m.core.List()}, nil
 }
 
 // ShowConfig returns the rules currently stored for the requested configuration.
@@ -205,7 +192,7 @@ func (m *RouteMPLSService) ShowConfig(
 	req *routemplspb.ShowConfigRequest,
 ) (*routemplspb.ShowConfigResponse, error) {
 	name := req.GetName()
-	config, ok := m.configs.Get(name)
+	config, ok := m.core.Get(name)
 	if !ok {
 		return nil, status.Errorf(codes.NotFound, "config %q not found", name)
 	}
@@ -245,19 +232,8 @@ func (m *RouteMPLSService) DeleteConfig(
 	req *routemplspb.DeleteConfigRequest,
 ) (*routemplspb.DeleteConfigResponse, error) {
 	name := req.GetName()
-	err := m.configs.Delete(name, func(*routeMPLSConfig) error {
-		return m.backend.DeleteModule(name)
-	})
-	if errors.Is(err, configstore.ErrNotFound) {
-		return nil, status.Errorf(codes.NotFound, "config %q not found", name)
-	}
-	if err != nil {
-		code := codes.Internal
-		if errors.Is(err, ffi.ErrFailedPrecondition) {
-			// A chain still references the config.
-			code = codes.FailedPrecondition
-		}
-		return nil, status.Errorf(code, "failed to delete module config %q: %v", name, err)
+	if err := m.core.Delete(name); err != nil {
+		return nil, crud.DeleteError(name, err)
 	}
 
 	return &routemplspb.DeleteConfigResponse{}, nil
@@ -301,16 +277,8 @@ func (m *RouteMPLSService) CreateConfig(
 		Prefixes: prefixes,
 	}
 
-	err := m.configs.Update(name, func(*routeMPLSConfig, bool) (*routeMPLSConfig, error) {
-		handle, err := m.backend.UpdateModule(name, config.BuildRules())
-		if err != nil {
-			return nil, status.Errorf(codes.Internal, "failed to update module config: %v", err)
-		}
-		config.Handle = handle
-		return config, nil
-	})
-	if err != nil {
-		return nil, err
+	if err := m.core.Replace(name, config); err != nil {
+		return nil, crud.MutationError(err)
 	}
 
 	return &routemplspb.CreateConfigResponse{}, nil
@@ -323,7 +291,7 @@ func (m *RouteMPLSService) UpdateConfig(
 	req *routemplspb.UpdateConfigRequest,
 ) (*routemplspb.UpdateConfigResponse, error) {
 	name := req.Name
-	err := m.configs.Update(name, func(current *routeMPLSConfig, ok bool) (*routeMPLSConfig, error) {
+	err := m.core.Mutate(name, func(current *routeMPLSConfig, ok bool) (*routeMPLSConfig, error) {
 		// Every mutation below copies the nexthop list it touches, since
 		// the trie clone shares the lists with the published config.
 		//
@@ -385,15 +353,10 @@ func (m *RouteMPLSService) UpdateConfig(
 			}
 		}
 
-		handle, err := m.backend.UpdateModule(name, config.BuildRules())
-		if err != nil {
-			return nil, status.Errorf(codes.Internal, "failed to update module config: %v", err)
-		}
-		config.Handle = handle
 		return config, nil
 	})
 	if err != nil {
-		return nil, err
+		return nil, crud.MutationError(err)
 	}
 
 	return &routemplspb.UpdateConfigResponse{}, nil
