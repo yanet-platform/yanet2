@@ -2,11 +2,15 @@
 //! entries run over a hand-laid context, so that Miri executes the reads of
 //! the absolute pointers they follow. No module behaviour is tested here.
 
-use core::mem::{offset_of, size_of};
+use core::{
+    convert::Infallible,
+    mem::{offset_of, size_of},
+};
 
 use yanet_shm::{rel::RelPtr, shm::ShmLayout};
 use yanet_sys::{
     bindings,
+    cp::{Build, MemoryContext, Owner, Refusal},
     dp::{Batch, CommitCx, Counter, CounterRef, Cx, Device, Module, Verdict},
 };
 
@@ -22,6 +26,18 @@ struct Config {
 // SAFETY: two registry indices of eight bytes, which accept every bit
 // pattern, with no padding and no drop.
 unsafe impl ShmLayout for Config {}
+
+// SAFETY: the configuration is laid out by hand and never built: its parts
+// cannot exist, so nothing is ever written, and it owns no block to free.
+unsafe impl Build for Config {
+    type Parts<'b, W: Owner> = Infallible;
+
+    unsafe fn write<W: Owner>(parts: Infallible, _: &MemoryContext<'_, W>, _: usize) -> Result<(), Refusal> {
+        match parts {}
+    }
+
+    unsafe fn free<W: Owner>(_: usize, _: &MemoryContext<'_, W>) {}
+}
 
 /// Reads everything the runtime hands a module: the configuration, a prepared
 /// counter handle, a counter by value and a device target.

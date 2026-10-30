@@ -4,8 +4,8 @@
 //! C struct is one Rust type). The modules mirror the C tree; a C structure a
 //! module configuration embeds is a hand-written `#[repr(C)]` mirror whose
 //! size, alignment and field offsets are asserted against the bindgen type.
-//! `common` mirrors `common/`. `no_std` without `alloc`: module crates and
-//! dataplane plugins depend on it.
+//! `common` mirrors `common/`, `cp` mirrors `lib/controlplane/`. `no_std`
+//! without `alloc`: module crates and dataplane plugins depend on it.
 
 #![no_std]
 
@@ -25,6 +25,7 @@ pub mod bindings {
 
 pub mod common;
 pub mod counters;
+pub mod cp;
 pub mod dp;
 
 // Test-only dependencies are visible to the library's own test target.

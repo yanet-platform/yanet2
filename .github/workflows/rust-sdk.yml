@@ -6,11 +6,12 @@ name: Rust SDK
 # the C bindings and the layouts they check can differ; the rest does not
 # depend on the architecture and runs on x86_64 only.
 #
-# The bindings crate's build script runs bindgen and the C shim over the
-# repository's C headers with the flags of a meson configuration's
-# compilation database. C header and meson changes therefore re-run the jobs,
-# and every job that compiles the SDK runs in the CI image (ci/README.md) and
-# configures meson first (nothing is compiled).
+# The bindings crate's build script runs bindgen and compiles the C shims of
+# common/ and of the dataplane, built into one library, over the repository's
+# C headers with the flags of a meson configuration's compilation database.
+# C header and meson changes therefore re-run the jobs, and every job that
+# compiles the SDK runs in the CI image (ci/README.md) and configures meson
+# first (nothing is compiled).
 #
 # Each cargo cache family has exactly one job per architecture that writes it
 # (the cache key names the host), from main only, since a cache written on a
@@ -123,7 +124,7 @@ jobs:
       # the machine, so an arm64 row on a runner that is not arm64 skips it.
       - if: matrix.arch != 'arm64' || runner.arch == 'ARM64'
         working-directory: lib/rust
-        run: cargo check --locked --target ${{ matrix.target }} -p yanet-shm -p yanet-sys -p yanet-packet
+        run: cargo check --locked --target ${{ matrix.target }} -p yanet-shm -p yanet-sys -p yanet-sdk -p yanet-packet
 
   test:
     name: cargo test (1.88) (${{ matrix.arch }})

@@ -3,13 +3,16 @@
 A cargo workspace, separate from the CLI workspace at the repository root,
 with its own `Cargo.lock` and `rust-version = "1.88"`, for writing
 dataplane modules in Rust: the boundary crate both sides of the SDK
-share, the C bindings with the dataplane runtime and the packet header views.
+share, the C bindings with the dataplane runtime and the configuration
+builder, the derive, the module-crate facade and the packet header views.
 
 | Crate | Environment | Role |
 |-------|-------------|------|
 | `yanet-shm` | `no_std`, no `alloc` | the provenance root, relative-pointer field types, `Opaque`, `ShmLayout` leaves |
-| `yanet-sys` | `no_std`, no `alloc` | the C bindings of the SDK, modules mirroring the C tree, one bindgen output (generated into `OUT_DIR`, only here) and one module per C library: `common` (LPM type with its lookup), `counters` (the counter value address), `dp` (bindings of `lib/dataplane`, the `Module` trait, `Cx`/`CommitCx`, `Batch`/`Packet` with the packet operations (allocation, copy, resizing, tunnels), counters and devices, the handler runtime and `export_module!`); the dataplane C shim |
-| `yanet-sdk-testing` | `std`, dev-only | the block arena (one region, as one mapping) and resolving context of the tests, Miri included |
+| `yanet-sys` | `no_std`, no `alloc` | the C bindings of the SDK, modules mirroring the C tree, one bindgen output (generated into `OUT_DIR`, only here) and one module per C library: `common` (LPM type with its lookup, and its construction by the C routines), `counters` (the counter value address), `dp` (bindings of `lib/dataplane`, the `Module` trait, `Cx`/`CommitCx`, `Batch`/`Packet` with the packet operations (allocation, copy, resizing, tunnels), counters and devices, the handler runtime and `export_module!`), `cp` (mirror of `lib/controlplane`: the configuration `Builder` with its `Copy` `Scope` handle and the `Owned`/`OwnedSlice` blocks it allocates, the `Built` configuration it returns, the `Owner` seam to the C control plane (`Header`, `Context` and `BlockAddr` newtypes for its addresses) and the release of a build by walking its owning edges; makes no C call itself but those of the C objects a configuration embeds, such as the LPM); the C shims of `common/` and the dataplane |
+| `yanet-sdk-derive` | proc macro | `#[derive(ShmLayout)]`: the layout contract check, `Build` and the `<Type>Parts` struct a build writes from |
+| `yanet-sdk` | `no_std`, `forbid(unsafe_code)` | the module-crate surface: `Module`, contexts, batches, field types, the derive and the builder |
+| `yanet-sdk-testing` | `std`, dev-only | the block arena (one region, as one mapping) and resolving context of the tests, Miri included; with the `cp` feature `TestOwner`, the owner of the configuration builder, which uses real C memory natively |
 | `yanet-packet` | `no_std` | packet header views, extractable to its own repository |
 
 ## Build

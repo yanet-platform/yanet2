@@ -1,6 +1,6 @@
 [package]
 name = "yanet-sdk-testing"
-description = "Test support of the Rust module SDK: the block arena that serves tests as shared memory."
+description = "Test support of the Rust module SDK: the block arena that serves tests as shared memory and the configuration owner."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -11,3 +11,8 @@ workspace = true
 
 [dependencies]
 yanet-shm = { path = "../yanet-shm" }
+yanet-sys = { path = "../yanet-sys", optional = true }
+
+[features]
+# The configuration owner of the builder tests; it links the C bindings.
+cp = ["dep:yanet-sys"]
