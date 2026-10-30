@@ -15,7 +15,7 @@ use yanet_shm::{
     shm::{MAX_ALIGN, ShmLayout},
 };
 
-use crate::bindings;
+use crate::{bindings, cp::FfiRecord};
 
 /// One LPM trie page, as bytes: 256 slots indexed by a key byte.
 ///
@@ -36,8 +36,10 @@ type Page = [u64; 256];
 /// range goes before the narrow ones in it.
 ///
 /// The ranges are borrowed for the whole build, so they are made before it
-/// starts, for a table in a box or a slice too.
+/// starts, for a table in a box or a slice too. A range is also a record of an
+/// api crate: the ranges C hands in are borrowed by the build as they are.
 #[derive(Clone, Copy, Debug)]
+#[repr(C)]
 pub struct LpmRange<const K: usize> {
     /// First key of the range.
     pub from: [u8; K],
@@ -76,6 +78,10 @@ impl<const K: usize> LpmRange<K> {
         Self { from, to, value }
     }
 }
+
+// SAFETY: `#[repr(C)]` over byte arrays and an integer, without drop glue;
+// every bit pattern is a range, a reversed one refused by the build.
+unsafe impl<const K: usize> FfiRecord for LpmRange<K> {}
 
 /// Longest-prefix-match table over big-endian keys of `K` bytes.
 #[repr(C)]

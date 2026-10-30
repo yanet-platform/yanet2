@@ -3,7 +3,7 @@ description: 'Restore compatible Go compilation snapshots for the selected build
 
 inputs:
   profile:
-    description: 'Build profile: release, asan, or race'
+    description: 'Build profile: release, asan, race, rust-sdk-release, or rust-sdk-asan'
     required: true
 
 outputs:
@@ -29,7 +29,7 @@ runs:
       run: |
         set -euo pipefail
         case "$CACHE_PROFILE" in
-          release|asan|race) ;;
+          release|asan|race|rust-sdk-release|rust-sdk-asan) ;;
           *) echo "Unsupported Go build cache profile: $CACHE_PROFILE" >&2; exit 1 ;;
         esac
 

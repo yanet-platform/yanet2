@@ -69,6 +69,11 @@ fn build_shim(flags: &CFlags, shim_dir: &Path) {
     for arg in flags.header_args().iter().chain(flags.warning_args()) {
         build.flag(arg);
     }
+    if env::var_os("CARGO_CFG_SANITIZE").is_some() {
+        for arg in flags.sanitizer_args() {
+            build.flag(arg);
+        }
+    }
     for file in [
         "common_shim.c",
         "common_shim.h",
@@ -124,10 +129,23 @@ fn generate_bindings(flags: &CFlags, shim_dir: &Path, out: &Path) {
         .allowlist_type("packet_list")
         .allowlist_type("packet_front")
         .allowlist_type("rte_mbuf")
-        .allowlist_type("block_allocator")
+        .allowlist_type("agent")
+        .allowlist_type("yanet_error")
+        .allowlist_type("yanet_error_kind")
         .allowlist_function("yanet_sys_common_.*")
         .allowlist_function("yanet_sys_dp_.*")
+        // The agent owner of the configuration builder: the C routines a C
+        // module's control-plane API calls for the same steps.
+        .allowlist_function("cp_module_(init|fini|try_destroy|link_device)")
+        .allowlist_function("counter_registry_register")
+        .allowlist_function("agent_destroy_released")
+        .allowlist_function("yanet_error_(free|message|cause|kind|add_kind)")
+        // errno of a failed C-facing export, set by the API side.
+        .allowlist_function("__errno_location")
+        .allowlist_var("E(AGAIN|INVAL|IO)")
         .allowlist_var("LPM_.*")
+        .allowlist_var("CP_(MODULE_TYPE|MODULE_NAME|DEVICE_NAME)_LEN")
+        .allowlist_var("COUNTER_NAME_LEN")
         .allowlist_var("YANET_MODULE_ABI_VERSION")
         .allowlist_var("MODULE_TYPE_LEN")
         .allowlist_var("MBUF_MAX_SIZE")
@@ -141,7 +159,6 @@ fn generate_bindings(flags: &CFlags, shim_dir: &Path, out: &Path) {
         .opaque_type("rte_mbuf_ext_shared_info")
         .opaque_type("dp_config")
         .opaque_type("cp_config")
-        .opaque_type("agent")
         .opaque_type("cp_config_gen")
         .opaque_type("config_gen_ectx")
         .opaque_type("device_entry_ectx")

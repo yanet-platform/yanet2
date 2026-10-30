@@ -8,10 +8,12 @@
 
 #![forbid(unsafe_code)]
 
+mod api;
+mod ffi_record;
 mod shm_layout;
 
 use proc_macro::TokenStream;
-use syn::{DeriveInput, parse_macro_input};
+use syn::{DeriveInput, ItemImpl, parse_macro_input};
 
 /// Derives `ShmLayout` and `Build`, with the `<Type>Parts` struct a build
 /// writes the value from, for a shared-memory struct.
@@ -57,9 +59,114 @@ pub fn derive_shm_layout(input: TokenStream) -> TokenStream {
         .into()
 }
 
+/// Derives `FfiRecord` for a struct an api crate's exports take by pointer.
+///
+/// Accepts only a non-generic struct with named fields and the plain
+/// `#[repr(C)]` (no alignment or packing), every field of which is a record: a
+/// fixed-width integer, an array of records or another derived struct. Padding
+/// is never read as a field, so it needs no naming. The C header generated for
+/// the api crate declares the struct.
+///
+/// ```
+/// use yanet_sdk::FfiRecord;
+///
+/// #[derive(FfiRecord)]
+/// #[repr(C)]
+/// struct Range {
+///     from: [u8; 4],
+///     to: [u8; 4],
+///     value: u32,
+/// }
+/// ```
+#[proc_macro_derive(FfiRecord)]
+pub fn derive_ffi_record(input: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(input as DeriveInput);
+    ffi_record::expand(&input)
+        .unwrap_or_else(syn::Error::into_compile_error)
+        .into()
+}
+
+/// Exports the `pub` functions of an inherent impl to C.
+///
+/// `#[yanet_sdk::api(module = M)]` goes on an impl of a local type of an api
+/// crate and turns each `pub fn` into an `extern "C"` function named
+/// `yanet_cp_<crate>__<snake type>_<fn>`, where `<crate>` is the crate's name
+/// (`CARGO_CRATE_NAME`); the impl itself is kept as written, and a private fn
+/// stays an ordinary one. The impl gains
+/// `yanet_cp_<crate>__<snake type>_free(struct cp_module *, struct yanet_error
+/// **)`, which releases a configuration, as a C module's
+/// `<name>_module_config_free` does: 0, or -1 with errno `EAGAIN` and a busy
+/// error while a live generation holds it, the handle then staying valid.
+///
+/// Parameters keep their order and a trailing `struct yanet_error **err`
+/// follows them (null for "no error wanted"; a chain already in `*err` stays
+/// as the cause of the new error, as `yanet_error_add` keeps it):
+///
+/// | Rust | C |
+/// |------|---|
+/// | `&Agent` (exactly one) | `struct agent *` |
+/// | `&str` | `const char *`, NUL terminated UTF-8 |
+/// | `&T`, `T: FfiRecord` | `const T *` |
+/// | `&[T]`, `T: FfiRecord` | `const T *x, size_t x_len`; `(NULL, 0)` is empty |
+/// | `u8`..`u64`, `i8`..`i64`, `usize` | the same C integer |
+/// | returns `Result<Built<M, Agent>, ApiError>` | `struct cp_module *`, `NULL` on failure |
+///
+/// Anything else is a compile error at the offending type. A null or
+/// misaligned pointer for an argument is refused as an invalid argument. A
+/// panic of the method is caught and comes back as an error with its message.
+///
+/// The expansion's `unsafe` carries the macro's own spans, so the api crate
+/// keeps `#![forbid(unsafe_code)]`:
+///
+/// ```no_run
+/// #![forbid(unsafe_code)]
+///
+/// use yanet_sdk::{Batch, Builder, Built, CommitCx, Cx, FfiRecord, Module, Verdict};
+/// use yanet_sdk_api::{Agent, ApiError};
+///
+/// struct Mine;
+/// impl Module for Mine {
+///     const NAME: &'static str = "mine";
+///     type Config = u64;
+///     type Prepared<'p> = ();
+///     fn prepare(_: &CommitCx<'_, Self>) {}
+///     fn handle<'id>(_: &mut Cx<'id, Self>, batch: &mut Batch<'id>) {
+///         batch.dispatch(|_| Verdict::Pass);
+///     }
+/// }
+///
+/// #[derive(FfiRecord)]
+/// #[repr(C)]
+/// pub struct Input {
+///     weight: u64,
+/// }
+///
+/// pub struct MineApi;
+///
+/// #[yanet_sdk::api(module = Mine)]
+/// impl MineApi {
+///     pub fn new(
+///         agent: &Agent,
+///         name: &str,
+///         input: &Input,
+///         ranges: &[u32],
+///     ) -> Result<Built<Mine, Agent>, ApiError> {
+///         Builder::<Mine>::build(agent, name, |_| Ok(input.weight + ranges.len() as u64))
+///     }
+/// }
+/// ```
+#[proc_macro_attribute]
+pub fn api(args: TokenStream, item: TokenStream) -> TokenStream {
+    let args = parse_macro_input!(args as api::Args);
+    let item = parse_macro_input!(item as ItemImpl);
+    api::expand(args, item)
+        .unwrap_or_else(syn::Error::into_compile_error)
+        .into()
+}
+
 // Doc tests are the only users of the facade, which depends on this crate.
 #[cfg(test)]
-use yanet_sdk as _;
+use {yanet_sdk as _, yanet_sdk_api as _};
 
 /// Doc tests that pin what the derive refuses, with the compile error each
 /// refusal produces, and the accepted twin of each.
@@ -380,4 +487,211 @@ mod doctests {
     /// let _ = ConfigParts { first: 1 };
     /// ```
     struct PartsOwnerUnnamedRefused;
+
+    /// A parameter outside the table, such as `bool`, is refused.
+    ///
+    /// ```compile_fail
+    /// # use yanet_sdk::{Batch, Builder, Built, CommitCx, Cx, FfiRecord, Module, Verdict};
+    /// # use yanet_sdk_api::{Agent, ApiError};
+    /// # struct Mine;
+    /// # struct Other;
+    /// # impl Module for Mine {
+    /// #     const NAME: &'static str = "mine";
+    /// #     type Config = u64;
+    /// #     type Prepared<'p> = ();
+    /// #     fn prepare(_: &CommitCx<'_, Self>) {}
+    /// #     fn handle<'id>(_: &mut Cx<'id, Self>, batch: &mut Batch<'id>) {
+    /// #         batch.dispatch(|_| Verdict::Pass);
+    /// #     }
+    /// # }
+    /// # pub struct Api;
+    /// #[yanet_sdk::api(module = Mine)]
+    /// impl Api {
+    ///     pub fn new(agent: &Agent, name: &str, _flag: bool) -> Result<Built<Mine, Agent>, ApiError> {
+    ///         Builder::<Mine>::build(agent, name, |_| Ok(0))
+    ///     }
+    /// }
+    /// ```
+    struct BoolParameterRefused;
+
+    /// A parameter of the table is accepted.
+    ///
+    /// ```no_run
+    /// # use yanet_sdk::{Batch, Builder, Built, CommitCx, Cx, FfiRecord, Module, Verdict};
+    /// # use yanet_sdk_api::{Agent, ApiError};
+    /// # struct Mine;
+    /// # struct Other;
+    /// # impl Module for Mine {
+    /// #     const NAME: &'static str = "mine";
+    /// #     type Config = u64;
+    /// #     type Prepared<'p> = ();
+    /// #     fn prepare(_: &CommitCx<'_, Self>) {}
+    /// #     fn handle<'id>(_: &mut Cx<'id, Self>, batch: &mut Batch<'id>) {
+    /// #         batch.dispatch(|_| Verdict::Pass);
+    /// #     }
+    /// # }
+    /// # pub struct Api;
+    /// #[yanet_sdk::api(module = Mine)]
+    /// impl Api {
+    ///     pub fn new(agent: &Agent, name: &str, _flag: u8) -> Result<Built<Mine, Agent>, ApiError> {
+    ///         Builder::<Mine>::build(agent, name, |_| Ok(0))
+    ///     }
+    /// }
+    /// ```
+    struct IntParameterAccepted;
+
+    /// A result other than the build's is refused.
+    ///
+    /// ```compile_fail
+    /// # use yanet_sdk::{Batch, Builder, Built, CommitCx, Cx, FfiRecord, Module, Verdict};
+    /// # use yanet_sdk_api::{Agent, ApiError};
+    /// # struct Mine;
+    /// # struct Other;
+    /// # impl Module for Mine {
+    /// #     const NAME: &'static str = "mine";
+    /// #     type Config = u64;
+    /// #     type Prepared<'p> = ();
+    /// #     fn prepare(_: &CommitCx<'_, Self>) {}
+    /// #     fn handle<'id>(_: &mut Cx<'id, Self>, batch: &mut Batch<'id>) {
+    /// #         batch.dispatch(|_| Verdict::Pass);
+    /// #     }
+    /// # }
+    /// # pub struct Api;
+    /// #[yanet_sdk::api(module = Mine)]
+    /// impl Api {
+    ///     pub fn new(agent: &Agent, name: &str, _flag: u8) -> u32 {
+    ///         0
+    ///     }
+    /// }
+    /// ```
+    struct PlainResultRefused;
+
+    /// The build's result is accepted.
+    ///
+    /// ```no_run
+    /// # use yanet_sdk::{Batch, Builder, Built, CommitCx, Cx, FfiRecord, Module, Verdict};
+    /// # use yanet_sdk_api::{Agent, ApiError};
+    /// # struct Mine;
+    /// # struct Other;
+    /// # impl Module for Mine {
+    /// #     const NAME: &'static str = "mine";
+    /// #     type Config = u64;
+    /// #     type Prepared<'p> = ();
+    /// #     fn prepare(_: &CommitCx<'_, Self>) {}
+    /// #     fn handle<'id>(_: &mut Cx<'id, Self>, batch: &mut Batch<'id>) {
+    /// #         batch.dispatch(|_| Verdict::Pass);
+    /// #     }
+    /// # }
+    /// # pub struct Api;
+    /// #[yanet_sdk::api(module = Mine)]
+    /// impl Api {
+    ///     pub fn new(agent: &Agent, name: &str, _flag: u8) -> Result<Built<Mine, Agent>, ApiError> {
+    ///         Builder::<Mine>::build(agent, name, |_| Ok(0))
+    ///     }
+    /// }
+    /// ```
+    struct BuiltResultAccepted;
+
+    /// A configuration of another module than the attribute's is refused.
+    ///
+    /// ```compile_fail
+    /// # use yanet_sdk::{Batch, Builder, Built, CommitCx, Cx, FfiRecord, Module, Verdict};
+    /// # use yanet_sdk_api::{Agent, ApiError};
+    /// # struct Mine;
+    /// # struct Other;
+    /// # impl Module for Mine {
+    /// #     const NAME: &'static str = "mine";
+    /// #     type Config = u64;
+    /// #     type Prepared<'p> = ();
+    /// #     fn prepare(_: &CommitCx<'_, Self>) {}
+    /// #     fn handle<'id>(_: &mut Cx<'id, Self>, batch: &mut Batch<'id>) {
+    /// #         batch.dispatch(|_| Verdict::Pass);
+    /// #     }
+    /// # }
+    /// # pub struct Api;
+    /// #[yanet_sdk::api(module = Mine)]
+    /// impl Api {
+    ///     pub fn new(agent: &Agent, name: &str, _flag: u8) -> Result<Built<Other, Agent>, ApiError> {
+    ///         Err(ApiError::from(yanet_sdk::Refusal::OutOfMemory))
+    ///     }
+    /// }
+    /// ```
+    struct OtherModuleRefused;
+
+    /// The attribute's module is accepted.
+    ///
+    /// ```no_run
+    /// # use yanet_sdk::{Batch, Builder, Built, CommitCx, Cx, FfiRecord, Module, Verdict};
+    /// # use yanet_sdk_api::{Agent, ApiError};
+    /// # struct Mine;
+    /// # struct Other;
+    /// # impl Module for Mine {
+    /// #     const NAME: &'static str = "mine";
+    /// #     type Config = u64;
+    /// #     type Prepared<'p> = ();
+    /// #     fn prepare(_: &CommitCx<'_, Self>) {}
+    /// #     fn handle<'id>(_: &mut Cx<'id, Self>, batch: &mut Batch<'id>) {
+    /// #         batch.dispatch(|_| Verdict::Pass);
+    /// #     }
+    /// # }
+    /// # pub struct Api;
+    /// #[yanet_sdk::api(module = Mine)]
+    /// impl Api {
+    ///     pub fn new(agent: &Agent, name: &str, _flag: u8) -> Result<Built<Mine, Agent>, ApiError> {
+    ///         Builder::<Mine>::build(agent, name, |_| Ok(0))
+    ///     }
+    /// }
+    /// ```
+    struct OwnModuleAccepted;
+
+    /// A record without `#[repr(C)]` is refused.
+    ///
+    /// ```compile_fail
+    /// use yanet_sdk::FfiRecord;
+    ///
+    /// #[derive(FfiRecord)]
+    /// struct Record {
+    ///     value: u32,
+    /// }
+    /// ```
+    struct RecordWithoutReprCRefused;
+
+    /// A `repr(C)` record is accepted.
+    ///
+    /// ```
+    /// use yanet_sdk::FfiRecord;
+    ///
+    /// #[derive(FfiRecord)]
+    /// #[repr(C)]
+    /// struct Record {
+    ///     value: u32,
+    /// }
+    /// ```
+    struct ReprCRecordAccepted;
+
+    /// A field that is not a record, such as `bool`, is refused.
+    ///
+    /// ```compile_fail,E0277
+    /// use yanet_sdk::FfiRecord;
+    ///
+    /// #[derive(FfiRecord)]
+    /// #[repr(C)]
+    /// struct Record {
+    ///     flag: bool,
+    /// }
+    /// ```
+    struct BoolFieldRecordRefused;
+
+    /// A field of a fixed-width integer is accepted.
+    ///
+    /// ```
+    /// use yanet_sdk::FfiRecord;
+    ///
+    /// #[derive(FfiRecord)]
+    /// #[repr(C)]
+    /// struct Record {
+    ///     flag: u8,
+    /// }
+    /// ```
+    struct IntFieldRecordAccepted;
 }

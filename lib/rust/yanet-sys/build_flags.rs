@@ -93,6 +93,9 @@ pub struct CFlags {
     /// warnings the C build does. Kept apart because the bindings are read
     /// by libclang, which is no judge of the headers.
     warnings: Vec<String>,
+    /// The sanitizer options, which the shim takes only into a sanitized Rust
+    /// build; see [`CFlags::sanitizer_args`].
+    sanitizers: Vec<String>,
     /// The optimisation level, the value of the last `-O` option, `0` when
     /// there is none, as the compiler reads it: the shim is compiled as the
     /// C sources around it are.
@@ -144,12 +147,13 @@ impl CFlags {
             .by_ref()
             .find(|token| !COMPILER_WRAPPERS.contains(&file_name(token)))
             .ok_or("the command names no compiler")?;
-        let (args, warnings, opt_level) = reduce(directory, tokens);
+        let (args, warnings, sanitizers, opt_level) = reduce(directory, tokens);
         Ok(Self {
             root,
             compiler,
             args,
             warnings,
+            sanitizers,
             opt_level,
         })
     }
@@ -162,6 +166,16 @@ impl CFlags {
     /// The warning options of the dataplane's C sources.
     pub fn warning_args(&self) -> &[String] {
         &self.warnings
+    }
+
+    /// The sanitizer options of the dataplane's C sources, for the shim of a
+    /// Rust build that is sanitized itself.
+    ///
+    /// The block allocator lays out red zones when its C is instrumented, so
+    /// the shim's inline copy of it must be instrumented too; an
+    /// uninstrumented Rust binary has no sanitizer runtime to link it with.
+    pub fn sanitizer_args(&self) -> &[String] {
+        &self.sanitizers
     }
 
     /// The optimisation level of the dataplane's C sources, as cc-rs takes it:
@@ -212,14 +226,15 @@ fn command_tokens(entry: &Value) -> Result<Vec<String>, String> {
 }
 
 /// Splits the options into the ones that change how headers are read, the
-/// warning options and the optimisation level, dropping the rest. Paths are
-/// resolved against the directory the command ran in; include directories are
-/// canonicalised and, when missing, dropped: meson adds per-target private
-/// directories that may not exist after setup and hold no header.
-fn reduce(directory: &Path, tokens: impl Iterator<Item = String>) -> (Vec<String>, Vec<String>, String) {
+/// warning options, the sanitizer options and the optimisation level,
+/// dropping the rest. Paths are resolved against the directory the command ran
+/// in; include directories are canonicalised and, when missing, dropped: meson
+/// adds per-target private directories that may not exist after setup and hold
+/// no header.
+fn reduce(directory: &Path, tokens: impl Iterator<Item = String>) -> (Vec<String>, Vec<String>, Vec<String>, String) {
     let resolve = |path: &str| directory.join(path);
     let mut tokens = tokens;
-    let (mut args, mut warnings, mut opt_level) = (Vec::new(), Vec::new(), "0".to_owned());
+    let (mut args, mut warnings, mut sanitizers, mut opt_level) = (Vec::new(), Vec::new(), Vec::new(), "0".to_owned());
     while let Some(token) = tokens.next() {
         let option = INCLUDE_DIR_OPTIONS
             .iter()
@@ -229,6 +244,8 @@ fn reduce(directory: &Path, tokens: impl Iterator<Item = String>) -> (Vec<String
         let Some((option, joined)) = option else {
             if ABI_OPTIONS.iter().any(|&option| token.starts_with(option)) {
                 args.push(token);
+            } else if token.starts_with("-fsanitize=") {
+                sanitizers.push(token);
             } else if token.starts_with("-W") && !TOOL_OPTIONS.iter().any(|tool| token.starts_with(tool)) {
                 warnings.push(token);
             } else if let Some(level) = token.strip_prefix("-O") {
@@ -268,5 +285,5 @@ fn reduce(directory: &Path, tokens: impl Iterator<Item = String>) -> (Vec<String
         };
         args.extend([option.to_owned(), value]);
     }
-    (args, warnings, opt_level)
+    (args, warnings, sanitizers, opt_level)
 }

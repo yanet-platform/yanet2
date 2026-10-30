@@ -2,8 +2,8 @@
 //
 // One wrapper per C routine, header-inline in C, compiled into the shim
 // library with hidden visibility as the dataplane shim is. The routines are
-// those of the LPM and of the C memory a configuration is built in; the SDK's
-// test owner sets up a C memory context over its memory with the second group.
+// those of the LPM and of the C memory a configuration is built in, which the
+// agent owner allocates from.
 #pragma once
 
 #include <stddef.h>
@@ -11,7 +11,6 @@
 
 #include "shim_visibility.h"
 
-struct block_allocator;
 struct lpm;
 struct memory_context;
 
@@ -47,34 +46,16 @@ yanet_sys_common_lpm_insert(
 YANET_SYS_HIDDEN void
 yanet_sys_common_lpm_free(struct lpm *lpm);
 
-// block_allocator_init (common/memory_block.h): empties the allocator.
+// memory_balloc (common/memory.h): a block of the given size from the
+// memory context, rounded up as its allocator does.
 //
-// Returns 0, always.
-YANET_SYS_HIDDEN int
-yanet_sys_common_block_allocator_init(struct block_allocator *allocator);
+// Returns NULL when the context's memory is exhausted.
+YANET_SYS_HIDDEN void *
+yanet_sys_common_memory_balloc(struct memory_context *context, size_t size);
 
-// block_allocator_put_arena (common/memory_block.h): hands the allocator a
-// byte range of the given size to allocate from.
-//
-// The bytes are cut into blocks by their alignment, so the usable size
-// depends on the arena's. Cannot fail.
+// memory_bfree (common/memory.h): returns a block of the given size that
+// yanet_sys_common_memory_balloc took from the same context.
 YANET_SYS_HIDDEN void
-yanet_sys_common_block_allocator_put_arena(
-	struct block_allocator *allocator, void *arena, size_t size
-);
-
-// block_allocator_free_size (common/memory_block.h): the bytes the allocator
-// holds free, which an allocation takes and a free returns whole.
-YANET_SYS_HIDDEN size_t
-yanet_sys_common_block_allocator_free_size(struct block_allocator *allocator);
-
-// memory_context_init (common/memory.h): makes a root memory context with a
-// name over a block allocator.
-//
-// Returns 0, always.
-YANET_SYS_HIDDEN int
-yanet_sys_common_memory_context_init(
-	struct memory_context *context,
-	const char *name,
-	struct block_allocator *allocator
+yanet_sys_common_memory_bfree(
+	struct memory_context *context, void *block, size_t size
 );

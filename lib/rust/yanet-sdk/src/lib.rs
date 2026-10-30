@@ -46,7 +46,7 @@
 
 /// Packet header views, the `yanet-packet` crate.
 pub use yanet_packet as packet;
-pub use yanet_sdk_derive::ShmLayout;
+pub use yanet_sdk_derive::{FfiRecord, ShmLayout, api};
 pub use yanet_shm::{
     rel::{ShmBox, ShmSlice},
     resolve::Resolve,
@@ -55,8 +55,8 @@ pub use yanet_shm::{
 pub use yanet_sys::{
     common::lpm::{Lpm4, Lpm6, LpmRange},
     cp::{
-        BlockAddr, Build, BuildError, Builder, Built, Context, Header, Owned, OwnedSlice, Owner, Refusal, Registered,
-        Scope,
+        BlockAddr, Build, BuildError, Builder, Built, Context, FfiRecord, Header, Owned, OwnedSlice, Owner, Refusal,
+        Registered, Scope,
     },
     dp::{
         Batch, CommitCx, Counter, CounterRef, Cx, Device, DeviceRef, DscpMark, Module, Packet, PacketView, ResizeError,
@@ -73,7 +73,7 @@ pub mod prelude {
 #[doc(hidden)]
 pub mod __private {
     pub use yanet_shm::shm::{MAX_ALIGN, ShmLayout};
-    pub use yanet_sys::cp::{Build, MemoryContext, Owner, Partial, Refusal};
+    pub use yanet_sys::cp::{Build, FfiRecord, MemoryContext, Owner, Partial, Refusal};
 }
 
 // Test-only dependencies are visible to the library's own test target.
@@ -160,7 +160,8 @@ mod doctests {
     /// #     }
     /// # }
     /// # fn main() {
-    /// let owner = TestOwner::new();
+    /// // SAFETY: no C object is built.
+    /// let owner = unsafe { TestOwner::new() };
     /// Builder::<Outer>::build::<BuildError<TestError>, _>(&owner, "outer", |outer| {
     ///     let block = outer.boxed::<u64>(1)?;
     ///     Builder::<Inner>::build::<BuildError<TestError>, _>(&owner, "inner", |_| Ok(block))?;
@@ -187,7 +188,8 @@ mod doctests {
     /// #     }
     /// # }
     /// # fn main() {
-    /// let owner = TestOwner::new();
+    /// // SAFETY: no C object is built.
+    /// let owner = unsafe { TestOwner::new() };
     /// let mut leaked = None;
     /// Builder::<Mine>::build::<BuildError<TestError>, _>(&owner, "mine", |scope| {
     ///     leaked = Some(scope.boxed::<u64>(1)?);
@@ -213,14 +215,13 @@ mod doctests {
     /// #         batch.dispatch(|_| Verdict::Pass);
     /// #     }
     /// # }
-    /// # fn main() {
-    /// let owner = TestOwner::new();
-    /// Builder::<Mine>::build::<BuildError<TestError>, _>(&owner, "mine", |_| {
-    ///     let ranges = [LpmRange { from: [0; 4], to: [255; 4], value: 1 }];
-    ///     Ok(&ranges[..])
-    /// })
-    /// .unwrap();
-    /// # }
+    /// fn build(owner: &TestOwner) {
+    ///     Builder::<Mine>::build::<BuildError<TestError>, _>(owner, "mine", |_| {
+    ///         let ranges = [LpmRange { from: [0; 4], to: [255; 4], value: 1 }];
+    ///         Ok(&ranges[..])
+    ///     })
+    ///     .unwrap();
+    /// }
     /// ```
     struct RangesMadeInBuildRefused;
 
@@ -239,12 +240,11 @@ mod doctests {
     /// #         batch.dispatch(|_| Verdict::Pass);
     /// #     }
     /// # }
-    /// # fn main() {
-    /// let owner = TestOwner::new();
-    /// let ranges = [LpmRange { from: [0; 4], to: [255; 4], value: 1 }];
-    /// Builder::<Mine>::build::<BuildError<TestError>, _>(&owner, "mine", |_| Ok(&ranges[..]))
-    ///     .unwrap();
-    /// # }
+    /// fn build(owner: &TestOwner) {
+    ///     let ranges = [LpmRange { from: [0; 4], to: [255; 4], value: 1 }];
+    ///     Builder::<Mine>::build::<BuildError<TestError>, _>(owner, "mine", |_| Ok(&ranges[..]))
+    ///         .unwrap();
+    /// }
     /// ```
     struct RangesMadeBeforeBuildAccepted;
 
@@ -264,7 +264,8 @@ mod doctests {
     /// #     }
     /// # }
     /// # fn main() {
-    /// let owner = TestOwner::new();
+    /// // SAFETY: no C object is built.
+    /// let owner = unsafe { TestOwner::new() };
     /// Builder::<Mine>::build::<BuildError<TestError>, _>(&owner, "mine", |scope| scope.boxed::<()>(())).unwrap();
     /// # }
     /// ```
