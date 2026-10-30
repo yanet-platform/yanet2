@@ -72,6 +72,12 @@ func fwstateTestSyncConfig() cfwstate.SyncConfig {
 			},
 			Port: syncPort,
 		}},
+		Listeners: []cfwstate.SyncListenEndpoint{{
+			DstAddr: [16]byte{
+				0xff, 0x02, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x01,
+			},
+			Port: syncPort,
+		}},
 		TcpSynAck: uint64(120e9),
 		TcpSyn:    uint64(120e9),
 		TcpFin:    uint64(120e9),

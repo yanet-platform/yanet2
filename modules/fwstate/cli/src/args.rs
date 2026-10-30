@@ -20,12 +20,9 @@ pub struct SyncEndpoint {
     pub port: u16,
 }
 
-/// Parse "SRC@DST:PORT"; DST:PORT accepts both "[dst]:port" and "dst:port".
-pub(crate) fn parse_sync_endpoint(value: &str) -> Result<SyncEndpoint, String> {
-    let (src, rest) = value.split_once('@').ok_or("endpoint must be SRC@DST:PORT")?;
-    let src: Ipv6Addr = src.parse().map_err(|err| format!("invalid source address: {err}"))?;
-
-    let (dst, port) = match rest.parse::<SocketAddrV6>() {
+/// Parse "DST:PORT"; accepts both "[dst]:port" and "dst:port".
+fn parse_destination_port(what: &str, value: &str) -> Result<(Ipv6Addr, u16), String> {
+    let (dst, port) = match value.parse::<SocketAddrV6>() {
         Ok(endpoint) => {
             if endpoint.scope_id() != 0 {
                 return Err("IPv6 scope IDs are not supported".to_string());
@@ -33,19 +30,38 @@ pub(crate) fn parse_sync_endpoint(value: &str) -> Result<SyncEndpoint, String> {
             (*endpoint.ip(), endpoint.port())
         }
         Err(_) => {
-            let (dst, port) = rest.rsplit_once(':').ok_or("endpoint must name a port")?;
-            let dst: Ipv6Addr = dst
-                .parse()
-                .map_err(|err| format!("invalid destination address: {err}"))?;
-            let port: u16 = port
-                .parse()
-                .map_err(|_| "endpoint port must be in 1..=65535".to_string())?;
+            let (dst, port) = value
+                .rsplit_once(':')
+                .ok_or_else(|| format!("{what} must name a port"))?;
+            let dst: Ipv6Addr = dst.parse().map_err(|err| format!("invalid {what} address: {err}"))?;
+            let port: u16 = port.parse().map_err(|_| format!("{what} port must be in 1..=65535"))?;
             (dst, port)
         }
     };
     if port == 0 {
-        return Err("endpoint port must be in 1..=65535".to_string());
+        return Err(format!("{what} port must be in 1..=65535"));
     }
+    Ok((dst, port))
+}
+
+/// One receive destination: incoming packets naming it by address and port
+/// are claimed as external sync.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SyncListenEndpoint {
+    pub dst: Ipv6Addr,
+    pub port: u16,
+}
+
+pub(crate) fn parse_sync_listen_endpoint(value: &str) -> Result<SyncListenEndpoint, String> {
+    let (dst, port) = parse_destination_port("listener", value)?;
+    Ok(SyncListenEndpoint { dst, port })
+}
+
+/// Parse "SRC@DST:PORT"; DST:PORT accepts both "[dst]:port" and "dst:port".
+pub(crate) fn parse_sync_endpoint(value: &str) -> Result<SyncEndpoint, String> {
+    let (src, rest) = value.split_once('@').ok_or("endpoint must be SRC@DST:PORT")?;
+    let src: Ipv6Addr = src.parse().map_err(|err| format!("invalid source address: {err}"))?;
+    let (dst, port) = parse_destination_port("endpoint", rest)?;
     Ok(SyncEndpoint { src, dst, port })
 }
 
@@ -56,7 +72,7 @@ pub enum ModeCmd {
     /// Delete a fwstate configuration.
     Delete(DeleteCmd),
     /// Create or update only the supplied map and sync settings.
-    Update(UpdateCmd),
+    Update(Box<UpdateCmd>),
     /// Show fwstate configuration.
     Show(ShowCmd),
 }
@@ -111,6 +127,20 @@ pub struct UpdateCmd {
     /// Remove every synchronization endpoint.
     #[arg(long, conflicts_with = "sync_endpoint")]
     pub no_sync_endpoints: bool,
+
+    /// Synchronization listener (e.g., "ff02::1:9999"): incoming packets
+    /// naming this destination and port are claimed as external sync.
+    /// Repeatable; an update carrying listeners replaces the whole list.
+    #[arg(
+        long = "listen-endpoint",
+        value_name = "DST:PORT",
+        value_parser = parse_sync_listen_endpoint
+    )]
+    pub listen_endpoint: Vec<SyncListenEndpoint>,
+
+    /// Remove every synchronization listener.
+    #[arg(long, conflicts_with = "listen_endpoint")]
+    pub no_listen_endpoints: bool,
 
     /// TCP SYN-ACK timeout (e.g., "60s", "5m", "1h").
     #[arg(long, value_parser = parse_duration)]

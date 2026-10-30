@@ -34,6 +34,14 @@ interface DraftSyncEndpoint {
 
 const emptyDraftSyncEndpoint = (): DraftSyncEndpoint => ({ src: '', dst: '', port: '' });
 
+// One sync listener form entry: an all-empty entry is left unconfigured.
+interface DraftSyncListener {
+    dst: string;
+    port: string;
+}
+
+const emptyDraftSyncListener = (): DraftSyncListener => ({ dst: '', port: '' });
+
 // The service refuses longer lists; it mirrors the C endpoint array bound.
 const MAX_SYNC_ENDPOINTS = 8;
 
@@ -41,6 +49,7 @@ interface DraftConfig {
     mapNameV4: string;
     mapNameV6: string;
     endpoints: DraftSyncEndpoint[];
+    listeners: DraftSyncListener[];
     tcpSynAck: string;
     tcpSyn: string;
     tcpFin: string;
@@ -115,6 +124,11 @@ const isDraftEndpointConfigured = (endpoint: DraftSyncEndpoint): boolean => {
     return endpoint.src.trim() !== '' || endpoint.dst.trim() !== '' || endpoint.port.trim() !== '';
 };
 
+// A listener entry is configured when any of its fields is filled in.
+const isDraftListenerConfigured = (listener: DraftSyncListener): boolean => {
+    return listener.dst.trim() !== '' || listener.port.trim() !== '';
+};
+
 // Parse an endpoint port input: null for anything but a decimal integer in
 // 1..65535.
 const parseEndpointPort = (value: string): number | null => {
@@ -162,6 +176,10 @@ const toDraftConfig = (config: Awaited<ReturnType<typeof API.fwstate.showConfig>
             src: endpoint.src_addr ?? '',
             dst: endpoint.dst_addr ?? '',
             port: endpoint.port != null ? String(endpoint.port) : '',
+        })),
+        listeners: (sync?.listeners ?? []).map((listener) => ({
+            dst: listener.dst_addr ?? '',
+            port: listener.port != null ? String(listener.port) : '',
         })),
         tcpSynAck: formatDurationNsAsSeconds(sync?.tcp_syn_ack ?? DEFAULT_NS.tcpSynAck),
         tcpSyn: formatDurationNsAsSeconds(sync?.tcp_syn ?? DEFAULT_NS.tcpSyn),
@@ -1505,17 +1523,57 @@ const FWStatePage: React.FC = () => {
         setDirtyConfigs((prev) => new Set(prev).add(currentName));
     };
 
+    const updateListener = (index: number, patch: Partial<DraftSyncListener>): void => {
+        if (!currentName) return;
+        setConfigs((prev) => ({
+            ...prev,
+            [currentName]: {
+                ...prev[currentName],
+                listeners: prev[currentName].listeners.map((listener, idx) => (idx === index ? { ...listener, ...patch } : listener)),
+            },
+        }));
+        setDirtyConfigs((prev) => new Set(prev).add(currentName));
+    };
+
+    const addListener = (): void => {
+        if (!currentName) return;
+        setConfigs((prev) => {
+            const currentConfig = prev[currentName];
+            if (currentConfig.listeners.length >= MAX_SYNC_ENDPOINTS) return prev;
+            return { ...prev, [currentName]: { ...currentConfig, listeners: [...currentConfig.listeners, emptyDraftSyncListener()] } };
+        });
+        setDirtyConfigs((prev) => new Set(prev).add(currentName));
+    };
+
+    const removeListener = (index: number): void => {
+        if (!currentName) return;
+        setConfigs((prev) => ({
+            ...prev,
+            [currentName]: {
+                ...prev[currentName],
+                listeners: prev[currentName].listeners.filter((_, idx) => idx !== index),
+            },
+        }));
+        setDirtyConfigs((prev) => new Set(prev).add(currentName));
+    };
+
     const validateCurrent = (): boolean => {
         if (!current) return false;
         const durationFields = [current.tcpSynAck, current.tcpSyn, current.tcpFin, current.tcp, current.udp, current.defaultTimeout];
         const configuredEndpoints = current.endpoints.filter(isDraftEndpointConfigured);
+        const configuredListeners = current.listeners.filter(isDraftListenerConfigured);
         if (currentServerMapNames?.v4 && !current.mapNameV4.trim()) return false;
         if (currentServerMapNames?.v6 && !current.mapNameV6.trim()) return false;
         if (configuredEndpoints.length > MAX_SYNC_ENDPOINTS) return false;
+        if (configuredListeners.length > MAX_SYNC_ENDPOINTS) return false;
         if (configuredEndpoints.some((endpoint) => (
             !isValidNonzeroIPv6Address(endpoint.src) ||
             !isValidNonzeroIPv6Address(endpoint.dst) ||
             parseEndpointPort(endpoint.port) === null
+        ))) return false;
+        if (configuredListeners.some((listener) => (
+            !isValidNonzeroIPv6Address(listener.dst) ||
+            parseEndpointPort(listener.port) === null
         ))) return false;
         if (durationFields.some((value) => parseDurationToNs(value) === null)) return false;
         if (!isValidSyncMtuInput(current.syncMtu)) return false;
@@ -1533,14 +1591,21 @@ const FWStatePage: React.FC = () => {
             return;
         }
         const requestName = currentName;
-        // An empty endpoint list removes synchronization on the server.
+        // An empty endpoint or listener list removes that side on the server.
         const configuredEndpoints = current.endpoints.filter(isDraftEndpointConfigured);
+        const configuredListeners = current.listeners.filter(isDraftListenerConfigured);
         const syncConfig = {
             ...(configuredEndpoints.length === 0 ? { no_endpoints: true } : {
                 endpoints: configuredEndpoints.map((endpoint) => ({
                     src_addr: stringToIPAddress(endpoint.src),
                     dst_addr: stringToIPAddress(endpoint.dst),
                     port: parseEndpointPort(endpoint.port) ?? 0,
+                })),
+            }),
+            ...(configuredListeners.length === 0 ? { no_listeners: true } : {
+                listeners: configuredListeners.map((listener) => ({
+                    dst_addr: stringToIPAddress(listener.dst),
+                    port: parseEndpointPort(listener.port) ?? 0,
                 })),
             }),
             tcp_syn_ack: parseDurationToNs(current.tcpSynAck) ?? undefined,
@@ -1790,6 +1855,13 @@ const FWStatePage: React.FC = () => {
                 port: parseEndpointPort(endpoint.port) === null ? 'Integer 1..65535' : undefined,
             };
         });
+        const listenerErrors = current.listeners.map((listener) => {
+            if (!isDraftListenerConfigured(listener)) return {};
+            return {
+                dst: !isValidNonzeroIPv6Address(listener.dst) ? 'Non-zero IPv6 required' : undefined,
+                port: parseEndpointPort(listener.port) === null ? 'Integer 1..65535' : undefined,
+            };
+        });
         const syncMtuError = !isValidSyncMtuInput(current.syncMtu) ? 'Integer 0..65535' : undefined;
 
         return (
@@ -1903,9 +1975,43 @@ const FWStatePage: React.FC = () => {
                                 </Button>
                                 <span className="yn-field__hint">
                                     Emitted sync packets are stamped per endpoint and the Ethernet
-                                    header is left for the route module to resolve; a multicast
-                                    destination is also matched on receive. Up to {MAX_SYNC_ENDPOINTS}
-                                    endpoints, and an update replaces the whole list.
+                                    header is left for the route module to resolve. Up to
+                                    {' '}{MAX_SYNC_ENDPOINTS} endpoints, and an update replaces the whole list.
+                                </span>
+                            </div>
+                            {current.listeners.map((listener, index) => (
+                                <div key={index} className="fwstate-sync-grid__endpoint">
+                                    <div className="fwstate-field">
+                                        <Text variant="caption-2" color="secondary">Listener {index + 1}</Text>
+                                        <div className="fwstate-endpoint-row">
+                                            <label className="fwstate-field">
+                                                <Text variant="caption-2" color="secondary">Destination</Text>
+                                                <TextInput value={listener.dst} onUpdate={(dst) => updateListener(index, { dst })} error={listenerErrors[index]?.dst} placeholder="ff02::1" />
+                                            </label>
+                                            <label className="fwstate-field">
+                                                <Text variant="caption-2" color="secondary">Port</Text>
+                                                <TextInput type="number" value={listener.port} onUpdate={(port) => updateListener(index, { port })} error={listenerErrors[index]?.port} placeholder="9999" />
+                                            </label>
+                                            <Button
+                                                size="s"
+                                                view="outlined"
+                                                onClick={() => removeListener(index)}
+                                                aria-label={`Remove listener ${index + 1}`}
+                                            >
+                                                <TrashIcon />
+                                            </Button>
+                                        </div>
+                                    </div>
+                                </div>
+                            ))}
+                            <div className="fwstate-sync-grid__endpoint">
+                                <Button size="s" view="outlined" disabled={current.listeners.length >= MAX_SYNC_ENDPOINTS} onClick={addListener}>
+                                    <Icon data={Plus} size={14} /> Add listener
+                                </Button>
+                                <span className="yn-field__hint">
+                                    Incoming packets naming a listener by destination and port are
+                                    claimed as external sync; emission and reception are
+                                    independent. A unicast listener names this router's own address.
                                 </span>
                             </div>
                         </div>

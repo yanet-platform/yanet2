@@ -23,13 +23,21 @@ type SyncEndpoint struct {
 	Port    uint16
 }
 
-// SyncConfig defines how fwstate receives synchronization packets and emits
-// locally generated synchronization events. Every endpoint is used for
-// emission; an endpoint with a multicast destination is matched on the wire
-// for reception as well.
+// SyncListenEndpoint is one receive destination: an incoming packet naming
+// it by IPv6 address and UDP port is claimed as external sync. The port is
+// host byte order; a zero Port disables the listener.
+type SyncListenEndpoint struct {
+	DstAddr [16]byte
+	Port    uint16
+}
+
+// SyncConfig defines how fwstate emits locally generated synchronization
+// events and which incoming packets it claims as external sync. Emission
+// endpoints and listeners are independent lists; each carries at most
+// MaxSyncEndpoints entries.
 type SyncConfig struct {
-	// Endpoints carries at most MaxSyncEndpoints entries.
 	Endpoints           []SyncEndpoint
+	Listeners           []SyncListenEndpoint
 	TcpSynAck           uint64
 	TcpSyn              uint64
 	TcpFin              uint64
@@ -64,6 +72,14 @@ func newSyncConfigFromC(cCfg *C.struct_fwstate_sync_config) SyncConfig {
 	syncCfg.TcpSyn = uint64(cCfg.timeouts.tcp_syn)
 	syncCfg.TcpFin = uint64(cCfg.timeouts.tcp_fin)
 	syncCfg.Tcp = uint64(cCfg.timeouts.tcp)
+	listenerCount := min(int(cCfg.listener_count), MaxSyncEndpoints)
+	for idx := range listenerCount {
+		cListener := &cCfg.listeners[idx]
+		var listener SyncListenEndpoint
+		copy(listener.DstAddr[:], unsafe.Slice((*byte)(unsafe.Pointer(&cListener.dst_addr[0])), 16))
+		listener.Port = uint16(ntohs(uint16(cListener.port)))
+		syncCfg.Listeners = append(syncCfg.Listeners, listener)
+	}
 	syncCfg.Udp = uint64(cCfg.timeouts.udp)
 	syncCfg.Default = uint64(cCfg.timeouts.default_)
 	syncCfg.SyncSuppressTimeout = uint64(cCfg.sync_suppress_timeout)
@@ -81,6 +97,14 @@ func (m SyncConfig) toC() C.struct_fwstate_sync_config {
 		copy(unsafe.Slice((*byte)(unsafe.Pointer(&cEndpoint.src_addr[0])), 16), endpoint.SrcAddr[:])
 		copy(unsafe.Slice((*byte)(unsafe.Pointer(&cEndpoint.dst_addr[0])), 16), endpoint.DstAddr[:])
 		cEndpoint.port = C.uint16_t(htons(uint16(endpoint.Port)))
+	}
+	listenerCount := min(len(m.Listeners), MaxSyncEndpoints)
+	cSyncConfig.listener_count = C.uint32_t(listenerCount)
+	for idx := range listenerCount {
+		listener := &m.Listeners[idx]
+		cListener := &cSyncConfig.listeners[idx]
+		copy(unsafe.Slice((*byte)(unsafe.Pointer(&cListener.dst_addr[0])), 16), listener.DstAddr[:])
+		cListener.port = C.uint16_t(htons(uint16(listener.Port)))
 	}
 	cSyncConfig.timeouts.tcp_syn_ack = C.uint64_t(m.TcpSynAck)
 	cSyncConfig.timeouts.tcp_syn = C.uint64_t(m.TcpSyn)

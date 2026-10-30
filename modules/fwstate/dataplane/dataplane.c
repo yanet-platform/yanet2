@@ -73,27 +73,24 @@ fwstate_sync_payload_len(
 // Report whether a packet is an external sync packet this configuration
 // receives.
 //
-// Only packets matching a configured multicast endpoint qualify; the
-// multicast Ethernet destination bit is checked first, so endpoints with a
-// unicast destination never claim arriving traffic. Without an endpoint
-// nothing is claimed. Packets a local fwstate emitted carry the internal
-// flag and are recognized by the caller before this check.
+// Only packets naming a configured listener by IPv6 destination and UDP
+// destination port qualify; without a listener nothing is claimed. The
+// listener addresses carry no multicast requirement: a unicast listener
+// receives point-to-point sync named to the router's own address. Packets
+// a local fwstate emitted carry the internal flag and are recognized by
+// the caller before this check.
 static bool
 is_fw_state_sync_packet(
 	struct packet *packet, struct fwstate_sync_config *sync_config
 ) {
 	struct rte_mbuf *mbuf = packet_to_mbuf(packet);
-	if (sync_config->endpoint_count == 0) {
+	if (sync_config->listener_count == 0) {
 		return false;
 	}
 
+	// Check for VLAN + IPv6 + UDP structure
 	struct rte_ether_hdr *eth_hdr =
 		rte_pktmbuf_mtod(mbuf, struct rte_ether_hdr *);
-	if ((eth_hdr->dst_addr.addr_bytes[0] & 1) == 0) {
-		return false; // Not multicast
-	}
-
-	// Check for VLAN + IPv6 + UDP structure
 	if (eth_hdr->ether_type != rte_cpu_to_be_16(RTE_ETHER_TYPE_VLAN)) {
 		return false;
 	}
@@ -124,27 +121,27 @@ is_fw_state_sync_packet(
 	);
 
 	// Port values are stored in network byte order. The packet must name
-	// one configured endpoint by destination port and address. The count
+	// one configured listener by destination port and address. The count
 	// is bounded by the controlplane but never trusted past the array
 	// size.
-	bool endpoint_matched = false;
-	uint32_t endpoint_count = sync_config->endpoint_count;
-	if (endpoint_count > FWSTATE_SYNC_ENDPOINTS_MAX) {
-		endpoint_count = FWSTATE_SYNC_ENDPOINTS_MAX;
+	bool listener_matched = false;
+	uint32_t listener_count = sync_config->listener_count;
+	if (listener_count > FWSTATE_SYNC_ENDPOINTS_MAX) {
+		listener_count = FWSTATE_SYNC_ENDPOINTS_MAX;
 	}
-	for (uint32_t idx = 0; idx < endpoint_count; ++idx) {
-		const struct fwstate_sync_endpoint *endpoint =
-			&sync_config->endpoints[idx];
-		if (!fwstate_sync_endpoint_enabled(endpoint)) {
+	for (uint32_t idx = 0; idx < listener_count; ++idx) {
+		const struct fwstate_sync_listen_endpoint *listener =
+			&sync_config->listeners[idx];
+		if (listener->port == 0) {
 			continue;
 		}
-		if (udp_hdr->dst_port == endpoint->port &&
-		    memcmp(ipv6_hdr->dst_addr, endpoint->dst_addr, 16) == 0) {
-			endpoint_matched = true;
+		if (udp_hdr->dst_port == listener->port &&
+		    memcmp(ipv6_hdr->dst_addr, listener->dst_addr, 16) == 0) {
+			listener_matched = true;
 			break;
 		}
 	}
-	if (!endpoint_matched) {
+	if (!listener_matched) {
 		return false;
 	}
 

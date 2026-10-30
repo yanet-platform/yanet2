@@ -32,6 +32,10 @@ func Test_SyncConfig_EndpointsRoundTrip(t *testing.T) {
 				Port:    proto.Uint32(4790),
 			},
 		},
+		Listeners: []*fwstatepb.SyncListenEndpoint{
+			{DstAddr: &commonpb.IPAddress{Addr: multicast}, Port: proto.Uint32(4789)},
+			{DstAddr: &commonpb.IPAddress{Addr: unicast}, Port: proto.Uint32(4790)},
+		},
 	}
 
 	nativeConfig := fwstate.SyncConfigToC(syncConfig)
@@ -43,6 +47,12 @@ func Test_SyncConfig_EndpointsRoundTrip(t *testing.T) {
 	require.EqualValues(t, 4789, got.GetEndpoints()[0].GetPort())
 	require.Equal(t, unicast, got.GetEndpoints()[1].GetDstAddr().Addr)
 	require.EqualValues(t, 4790, got.GetEndpoints()[1].GetPort())
+
+	require.Len(t, got.GetListeners(), 2)
+	require.Equal(t, multicast, got.GetListeners()[0].GetDstAddr().Addr)
+	require.EqualValues(t, 4789, got.GetListeners()[0].GetPort())
+	require.Equal(t, unicast, got.GetListeners()[1].GetDstAddr().Addr)
+	require.EqualValues(t, 4790, got.GetListeners()[1].GetPort())
 }
 
 // Test_SyncConfig_DisabledEndpointsDroppedRoundTrip verifies that conversion

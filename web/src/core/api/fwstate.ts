@@ -7,10 +7,20 @@ export interface SyncEndpoint {
     port?: number;
 }
 
+export interface SyncListenEndpoint {
+    // commonpb.IPAddress, serialized by the gateway as a bare IP string.
+    dst_addr?: string;
+    port?: number;
+}
+
 export interface SyncConfig {
     endpoints?: SyncEndpoint[];
     // Removes every stored endpoint when true.
     no_endpoints?: boolean;
+    // Receive destinations; independent of the emission endpoints.
+    listeners?: SyncListenEndpoint[];
+    // Removes every stored listener when true.
+    no_listeners?: boolean;
     tcp_syn_ack?: number;
     tcp_syn?: number;
     tcp_fin?: number;
