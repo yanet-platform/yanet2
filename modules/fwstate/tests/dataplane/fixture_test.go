@@ -262,7 +262,7 @@ func syncNet6(prefix string) [32]byte {
 	}
 	var out [32]byte
 	copy(out[:16], ip)
-	for idx := 0; idx < bits; idx++ {
+	for idx := range bits {
 		out[16+idx/8] |= 1 << (7 - idx%8)
 	}
 	return out
