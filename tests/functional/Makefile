@@ -1,3 +1,9 @@
+# Exported image paths remain literal during parse-time host detection.
+ifneq ("$(value YANET_QEMU_IMAGE)","")
+override YANET_QEMU_IMAGE := $(value YANET_QEMU_IMAGE)
+export YANET_QEMU_IMAGE
+endif
+
 # Test configuration
 QEMU_IMAGE := yanet-test.qcow2
 BOOTED_TEMPLATE := yanet-test-booted-v3.qcow2
@@ -6,6 +12,7 @@ UBUNTU_IMAGE := ubuntu-24.04-minimal-cloudimg-amd64.img
 UBUNTU_URL := https://cloud-images.ubuntu.com/minimal/releases/noble/release/$(UBUNTU_IMAGE)
 CLOUD_INIT_AUTOLOGIN_ISO := cloud-init-autologin.iso
 QEMU_AUTOINIT := -drive file=$(CLOUD_INIT_AUTOLOGIN_ISO),if=virtio,format=raw
+
 # Detect OS
 UNAME_S := $(shell uname -s)
 ifeq ($(UNAME_S),Darwin)
@@ -22,18 +29,29 @@ else
 	endif
 endif
 
-.PHONY: all test clean prepare-vm check-deps test-enhanced test-basic debug-vm debug-dry-run test-login
+.PHONY: all test test-main test-run clean clean-all prepare-vm check-deps check-image test-enhanced test-basic debug-vm debug-vm-ssh debug-dry-run test-login
 
 # Default target
 all: test
 
 
 
-# Prepare test environment: base image only.
-# The versioned booted template overlay is created automatically
-# on the first 'make test-main' run if it does not already exist.
-# To force recreation of snapshot templates: make clean
+# Preparation creates only the local base or validates an external input.
+#
+# Runtime tests create missing snapshot templates beside the selected image.
+# Local-mode cleanup forces local template recreation; Make retains shared caches.
+ifneq ("$(value YANET_QEMU_IMAGE)","")
+prepare-vm: check-image
+test-run: check-image
+
+check-image:
+	@case "$$YANET_QEMU_IMAGE" in /*) ;; *) echo "YANET_QEMU_IMAGE must be absolute" >&2; exit 1;; esac
+	@test -f "$$YANET_QEMU_IMAGE" && test -r "$$YANET_QEMU_IMAGE" || { echo "YANET_QEMU_IMAGE must be a readable regular file" >&2; exit 1; }
+else
 prepare-vm: check-deps $(QEMU_IMAGE)
+endif
+
+prepare-vm:
 	@echo "Test environment ready"
 
 # Install dependencies
@@ -67,6 +85,88 @@ ifdef TEST
 endif
 
 # Clean test artifacts
+ifneq ("$(value YANET_QEMU_IMAGE)","")
+clean-all: CLEAN_ALL_INTENT := yes
+clean-all: clean
+clean clean-all: export CLEAN_QEMU_IMAGE := $(QEMU_IMAGE)
+clean clean-all: export CLEAN_INIT_ISO := $(CLOUD_INIT_AUTOLOGIN_ISO)
+clean clean-all: export CLEAN_UBUNTU_IMAGE := $(UBUNTU_IMAGE)
+clean: check-image
+
+# Every stage preflights its operands; all-clean can finish after a prior local cleanup.
+define clean_shared
+	@set -eu; \
+	capture() { metadata=$$("$$@" && printf .) || return; metadata=$${metadata%.}; }; \
+	physical_dir() { (CDPATH= cd -P "$$1" && capture pwd -P && printf '%s' "$${metadata%?}"); }; \
+	capture physical_dir .; local_dir="$$metadata"; \
+	image="$$YANET_QEMU_IMAGE"; temp_dir=; protected_temp=; \
+	if [ '$(1)' = ubuntu ]; then \
+		if [ -L "$$CLEAN_UBUNTU_IMAGE" ] || [ "$$CLEAN_UBUNTU_IMAGE" -ef "$$image" ] || [ ! -e "$$CLEAN_UBUNTU_IMAGE" ]; then exit 0; fi; \
+		set -- "$$CLEAN_UBUNTU_IMAGE"; \
+	else \
+		set -- "$$CLEAN_QEMU_IMAGE" yanet-test-booted*.qcow2 yanet-test-baseline*.qcow2 \
+			"$$CLEAN_INIT_ISO" qemu_debug.log qemu.log test_output*.log test_run.log; \
+		if [ -n '$(filter yes,$(CLEAN_ALL_INTENT))$(filter clean-all,$(MAKECMDGOALS))' ]; then set -- "$$@" "$$CLEAN_UBUNTU_IMAGE"; fi; \
+		if [ -L /tmp/yanet-test-vm ] || [ /tmp/yanet-test-vm -ef "$$image" ]; then \
+			protected_temp=yes; \
+		elif [ -d /tmp/yanet-test-vm ]; then \
+			capture physical_dir /tmp/yanet-test-vm; temp_dir="$$metadata"; \
+		fi; \
+	fi; \
+	while :; do \
+		capture physical_dir "$${image%/*}/."; parent="$$metadata"; \
+		if [ "$$parent" -ef "$$local_dir" ]; then \
+			echo "Refusing cleanup in the shared image directory" >&2; exit 1; \
+		fi; \
+		if [ -n "$$temp_dir" ]; then \
+			for start in "$$parent" "$$temp_dir"; do \
+				if [ "$$start" = "$$parent" ]; then boundary="$$temp_dir"; else boundary="$$parent"; fi; \
+				dir="$$start"; \
+				while :; do \
+					if [ "$$dir" -ef "$$boundary" ]; then echo "Shared storage overlaps the VM working directory" >&2; exit 1; fi; \
+					capture physical_dir "$$dir/.."; next="$$metadata"; \
+					[ "$$dir" -ef "$$next" ] && break; \
+					dir="$$next"; \
+				done; \
+			done; \
+		fi; \
+		case "$$image" in /tmp/yanet-test-vm/*) echo "Shared image overlaps the VM working directory" >&2; exit 1;; esac; \
+		for path in "$$@" /tmp/yanet-test-vm; do \
+			[ -n "$$path" ] || continue; \
+			case "$$path" in /*) ;; *) path="$$local_dir/$$path";; esac; \
+			if [ -L "$$path" ] || [ "$$path" -ef "$$YANET_QEMU_IMAGE" ]; then continue; fi; \
+			[ -e "$$path" ] || continue; \
+			capture physical_dir "$${path%/*}/."; dir="$$metadata"; \
+			if [ "$$dir" -ef "$$parent" ]; then echo "Cleanup operand is in shared storage: $$path" >&2; exit 1; fi; \
+		done; \
+		[ -L "$$image" ] || break; \
+		capture readlink -n "$$image"; link="$$metadata"; \
+		case "$$link" in /*) image="$$link";; *) image="$$parent/$$link";; esac; \
+	done; \
+	if [ -n "$$temp_dir" ]; then \
+		capture find "$$temp_dir" -exec sh -c 'image=$$1; shift; for path in "$$@"; do if [ -L "$$path" ]; then printf "%s\n" "$$path" || exit "$$?"; elif env test "$$path" -ef "$$image"; then printf "%s\n" "$$path" || exit "$$?"; else status=$$?; [ "$$status" -eq 1 ] || exit "$$status"; fi; done; exit 0' sh "$$image" {} +; protected_temp="$$metadata"; \
+	fi; \
+	for path in "$$@"; do \
+		[ -n "$$path" ] || continue; \
+		case "$$path" in /*) ;; *) path="$$local_dir/$$path";; esac; \
+		if [ -L "$$path" ] || [ "$$path" -ef "$$YANET_QEMU_IMAGE" ]; then \
+			echo "Preserving shared image alias: $$path"; \
+		else rm -f -- "$$path"; fi; \
+	done; \
+	if [ '$(1)' = clean ]; then \
+		if [ -n "$$protected_temp" ]; then \
+			echo "Preserving VM working directory containing possible shared aliases"; \
+		else rm -rf /tmp/yanet-test-vm; fi; \
+	fi
+endef
+
+clean:
+	$(call clean_shared,clean)
+	go clean -testcache
+
+clean-all:
+	$(call clean_shared,ubuntu)
+else
 clean:
 	@echo "Cleaning test artifacts..."
 	rm -f $(QEMU_IMAGE)
@@ -82,7 +182,9 @@ clean-all: clean
 	@echo "Cleaning all artifacts including downloaded images..."
 	rm -f $(UBUNTU_IMAGE)
 	@echo "Full clean completed"
+endif
 
+ifeq ("$(value YANET_QEMU_IMAGE)","")
 # Create QEMU image
 $(QEMU_IMAGE): $(UBUNTU_IMAGE) $(CLOUD_INIT_AUTOLOGIN_ISO)
 	@echo "Creating QEMU image..."
@@ -193,8 +295,13 @@ endif
 $(UBUNTU_IMAGE):
 	@echo "Downloading Ubuntu cloud image..."
 	wget -c $(UBUNTU_URL)
+endif
 
 # Debug targets
+ifneq ("$(value YANET_QEMU_IMAGE)","")
+debug-vm debug-vm-ssh:
+	@echo "Direct debug targets cannot use YANET_QEMU_IMAGE; unset it to use a local image" >&2; exit 1
+else
 debug-vm: $(QEMU_IMAGE)
 	@echo "Starting VM in debug mode with passwordless login..."
 	@echo "VM will start with serial console output and automatic login"
@@ -220,6 +327,7 @@ debug-vm-ssh: $(QEMU_IMAGE)
 
 	# Start QEMU in debug mode (no cloud-init)
 	$(call run_qemu_ssh,)
+endif
 
 # Show help
 help:
@@ -233,6 +341,9 @@ help:
 	@echo ""
 	@echo "  prepare-vm       - Prepare VM environment with autologin"
 	@echo "  check-deps       - Check and install dependencies"
+ifneq ("$(value YANET_QEMU_IMAGE)","")
+	@echo "  check-image      - Validate the existing shared input"
+endif
 	@echo ""
 	@echo "  clean            - Clean test artifacts"
 	@echo "  clean-all        - Clean everything including downloaded images"
@@ -245,4 +356,11 @@ help:
 	@echo "  QEMU_IMAGE: $(QEMU_IMAGE)"
 	@echo "  UBUNTU_IMAGE: $(UBUNTU_IMAGE)"
 	@echo "  CLOUD_INIT_AUTOLOGIN_ISO: $(CLOUD_INIT_AUTOLOGIN_ISO)"
+	@printf '  YANET_QEMU_IMAGE: %s\n' "$${YANET_QEMU_IMAGE-}"
+	@echo ""
+	@echo "Shared input: nonempty YANET_QEMU_IMAGE requires an absolute readable regular file."
+	@echo "  Preparation validates only; unset/empty keeps local image creation."
+	@echo "  Direct debug targets reject shared mode; clean preserves input/aliases/neighbors"
+	@echo "  and independent local cleanup, refusing unsafe overlap."
+	@echo "Sandbox regression: bash test-makefile.sh (no real VM or Go execution)."
 	@echo ""

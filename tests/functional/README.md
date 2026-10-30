@@ -12,7 +12,7 @@ manifests, or built-in packet scenarios, see [`docs/lab.md`](../../docs/lab.md).
 
 - Go version required by the repository.
 - QEMU with `qemu-system-x86_64` and `qemu-img`.
-- `hdiutil` on macOS or `mkisofs` on Linux for the cloud-init image.
+- `hdiutil` on macOS or `mkisofs` on Linux when creating a local cloud-init image.
 - A prepared functional-test image and Linux x86_64 guest artifacts.
 - YANET dataplane, controlplane, operator, and CLI binaries built before the
   VM starts.
@@ -32,6 +32,87 @@ make -C tests/functional test
 
 `make -C tests/functional check-deps` checks the host tools. The test target
 runs `go test -count=1 -v ./main/...` after preparing the image.
+
+### Existing Shared Image
+
+Export an existing image to avoid creating VM media in each worktree:
+
+```bash
+export YANET_QEMU_IMAGE="/srv/yanet/images/functional base.qcow2"
+make -C tests/functional prepare-vm
+make -C tests/functional test-main
+```
+
+A nonempty override must be an absolute path to a readable regular file; invalid
+paths fail without local fallback. Unset or empty values retain local preparation.
+Shared `prepare-vm` only validates the image, while test targets still require Go,
+QEMU and prepared guest artifacts. `check-deps` checks local tools.
+
+With direct invocation of this Makefile, exported values, ordinary command-line
+assignments and `make -e` preserve the image path literally. Command-line `:=`
+and `::=` assignments expand before Makefile loading; repository-root wrappers
+are outside this guarantee.
+
+Read-only preparation does not make runtime caches read-only. The harness writes
+templates beside the selected image and opens a writable sibling lock even when
+reusing a cached baseline. The image directory and cache/lock files must support
+these writes; runtime may replace caches and prune superseded sibling baselines.
+Make validation does not check QCOW2 correctness or discover backing chains.
+Keep backing dependencies outside all cleanup operands.
+
+Run host functional tests serially across worktrees. The main package uses fixed
+VM pool names, so sharing an image does not provide concurrent-session isolation;
+an already-running same-named VM is rejected by the runtime.
+
+Shared `clean` and `clean-all` preserve the input, its symlink and hardlink
+aliases, and neighboring snapshots and sidecars. Independent local artifacts
+remain eligible for removal; only `clean-all` also removes an independent Ubuntu
+download. Combined goals use one cleanup pass. Each stage checks its operands
+before removal, so a separate `clean` can finish before `clean-all` refuses an
+unsafe Ubuntu operand. Cleanup requires the input to remain available.
+
+Cleanup refuses unsafe overlaps with the image directory and protected VM paths.
+It retains symlinks and selected-image inode aliases, including a VM directory
+containing them. The direct-parent guard does not protect deliberate overrides
+into nested shared subdirectories. These guards do not restrict runtime pruning.
+
+Artifact overrides support spaces, newlines and leading dashes; relative paths
+are resolved from the physical working directory. Unlike `YANET_QEMU_IMAGE`,
+`QEMU_IMAGE`, `CLOUD_INIT_AUTOLOGIN_ISO` and `UBUNTU_IMAGE` use normal Make
+expansion. Escape a literal dollar as `$$` in Make assignments.
+
+`debug-vm` and `debug-vm-ssh` explicitly reject nonempty overrides before any
+image creation or QEMU startup. Unset the override to use these local-image
+debug targets.
+
+### Makefile Sandbox Regression
+
+Run the host-only contract checks as an unprivileged user, without real Go,
+QEMU, downloads or ISO generation:
+
+```bash
+bash -n tests/functional/test-makefile.sh
+bash tests/functional/test-makefile.sh
+bash tests/functional/test-makefile.sh /path/to/baseline.Makefile
+```
+
+The optional argument selects another Makefile. Disposable fixtures and fake
+tools check command arguments, environment and cleanup effects. This manual
+gate does not run the VM suite and is not automatically wired into CI.
+
+The script reports the selected Make/Bash versions. Its optional second argument
+selects recipe mode: `bash` (the default) uses the invoking Bash, while `default`
+passes no shell override and exercises Make's normal `/bin/sh` interpreter. Run
+the complete suite with GNU Make 3.81 and 4.4 under both Bash 3.2 and 5.3, in both
+recipe modes; select an alternate Make via `PATH`, without changing fixture tools:
+
+```bash
+PATH="/path/to/make/bin:$PATH" /path/to/bash tests/functional/test-makefile.sh
+bash tests/functional/test-makefile.sh '' default
+```
+
+Default-shell coverage qualifies only the current host's `/bin/sh`; it does not
+qualify a real Linux host or a different Linux shell.
 
 ## Minimal Test Package
 
@@ -252,6 +333,7 @@ tests/functional/
 ├── main/             primary functional test package and TestMain reference
 ├── testdata/         YAML and packet fixtures
 ├── Makefile          image, test, debug, and cleanup targets
+├── test-makefile.sh  standalone fake-tool Makefile regression
 └── README.md         this document
 ```
 
