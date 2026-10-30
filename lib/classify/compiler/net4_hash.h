@@ -2,6 +2,7 @@
 
 #include "common/hash_index.h"
 #include "common/memory.h"
+#include "common/network.h"
 #include "common/registry.h"
 #include "common/value.h"
 
@@ -13,42 +14,42 @@
 #include <string.h>
 
 /*
- * Getter of the IPv4 networks of a module rule - the source or the
- * destination side - filled by the module and adapted to the rule
- * agnostic core through the compile macro below. The same getter type
- * the LPM variant uses, so one field selector serves both variants.
+ * The addresses a module rule names, in the raw big-endian wire form.
  */
-typedef void (*classify_net4_hash_get_net4s_func)(
-	const struct classifier_rule *rule, struct filter_net4s *net
+struct classify_net4_addrs {
+	const uint8_t (*items)[NET4_LEN];
+	uint32_t count;
+};
+
+/*
+ * Getter of the IPv4 addresses of a module rule - the source or the
+ * destination side - filled by the module and adapted to the rule
+ * agnostic core through the compile macro below.
+ */
+typedef void (*classify_net4_hash_get_addrs_func)(
+	const struct classifier_rule *rule, struct classify_net4_addrs *addrs
 );
 
-// The compile scratch of the hashed IPv4 network attribute.
+// The compile scratch of the hashed IPv4 address attribute.
 //
-// The regions are the distinct configured prefixes - a region identifier
-// indexes the parallel keys and lengths arrays and the cell of the value
+// The regions are the distinct configured addresses - a region
+// identifier indexes the parallel keys array and the cell of the value
 // table - plus the one miss region behind them, whose class an address
-// outside every prefix resolves to. The value table cells start zero and
-// the compile core rewrites them into the final classes in place, the
-// same cell flow the LPM variant's table runs.
-//
-// A rule matches every address of a prefix it names, and the addresses
-// of a shorter prefix it contains: the rule iteration below touches
-// every region the rule's prefixes cover, so the class of a region
-// carries the full match set of its addresses and the lookup resolves
-// the longest prefix without losing the containing ones.
+// the ruleset does not name resolves to. The value table cells start
+// zero and the compile core rewrites them into the final classes in
+// place, the same cell flow every attribute of the library runs.
 struct classify_compile_net4_hash {
-	classify_net4_hash_get_net4s_func get_net4s;
+	classify_net4_hash_get_addrs_func get_addrs;
 	const char *name;
 
 	uint32_t region_count;
 	uint32_t *keys;
-	uint32_t *lengths;
 	struct value_table value_table;
 	struct hash_index dedup;
 };
 
 // The dedup equality of the collection pass: the slot value is the
-// region identifier, the data the looked-up masked word.
+// region identifier, the data the looked-up address word.
 struct classify_compile_net4_hash_dedup_ctx {
 	const struct classify_compile_net4_hash *compile;
 	uint32_t key;
@@ -60,21 +61,11 @@ classify_compile_net4_hash_dedup_eq(uint32_t region, const void *data) {
 	return ctx->compile->keys[region] == ctx->key ? 0 : 1;
 }
 
-// The prefix length of one network, zero for the unspecified mask.
 static inline uint32_t
-classify_compile_net4_hash_length(const struct net4 *net4) {
-	uint32_t length = 0;
-	for (uint32_t idx = 0; idx < NET4_LEN; ++idx) {
-		length += __builtin_popcount(net4->mask[idx]);
-	}
-	return length;
-}
-
-static inline uint32_t
-classify_compile_net4_hash_key(const struct net4 *net4) {
+classify_compile_net4_hash_key(const uint8_t addr[NET4_LEN]) {
 	uint32_t key = 0;
 	for (uint32_t idx = 0; idx < NET4_LEN; ++idx) {
-		key = (key << 8) | (net4->addr[idx] & net4->mask[idx]);
+		key = (key << 8) | addr[idx];
 	}
 	return key;
 }
@@ -94,13 +85,6 @@ classify_compile_net4_hash_free(
 			sizeof(uint32_t) * net4_compile->region_count
 		);
 	}
-	if (net4_compile->lengths != NULL) {
-		memory_bfree(
-			memory_context,
-			net4_compile->lengths,
-			sizeof(uint32_t) * net4_compile->region_count
-		);
-	}
 
 	memory_bfree(
 		memory_context,
@@ -114,7 +98,7 @@ classify_compile_net4_hash_create(
 	struct memory_context *memory_context,
 	const struct classifier_rule *const *rules,
 	uint32_t rule_count,
-	classify_net4_hash_get_net4s_func get_net4s,
+	classify_net4_hash_get_addrs_func get_addrs,
 	const char *name
 ) {
 	struct classify_compile_net4_hash *compile =
@@ -126,30 +110,29 @@ classify_compile_net4_hash_create(
 		return NULL;
 	}
 
-	compile->get_net4s = get_net4s;
+	compile->get_addrs = get_addrs;
 	compile->name = name;
 	compile->region_count = 0;
 	compile->keys = NULL;
-	compile->lengths = NULL;
 
-	// The collection upper bound: every network of every rule names its
+	// The collection upper bound: every address of every rule names its
 	// own region until the dedup collapses the shared ones, and the
 	// index refuses to fill to its capacity, so it carries one slot
 	// beyond the bound.
-	uint32_t net_total = 0;
+	uint32_t addr_total = 0;
 	for (uint32_t rule_idx = 0; rule_idx < rule_count; ++rule_idx) {
 		if (rules[rule_idx] == NULL) {
 			continue;
 		}
-		struct filter_net4s nets;
-		get_net4s(rules[rule_idx], &nets);
-		net_total += nets.count;
+		struct classify_net4_addrs addrs;
+		get_addrs(rules[rule_idx], &addrs);
+		addr_total += addrs.count;
 	}
-	if (net_total == 0) {
-		net_total = 1;
+	if (addr_total == 0) {
+		addr_total = 1;
 	}
 
-	if (hash_index_init(&compile->dedup, memory_context, net_total + 1)) {
+	if (hash_index_init(&compile->dedup, memory_context, addr_total + 1)) {
 		memory_bfree(
 			memory_context,
 			compile,
@@ -159,12 +142,9 @@ classify_compile_net4_hash_create(
 	}
 
 	compile->keys = (uint32_t *)memory_balloc(
-		memory_context, sizeof(uint32_t) * net_total
+		memory_context, sizeof(uint32_t) * addr_total
 	);
-	compile->lengths = (uint32_t *)memory_balloc(
-		memory_context, sizeof(uint32_t) * net_total
-	);
-	if (compile->keys == NULL || compile->lengths == NULL) {
+	if (compile->keys == NULL) {
 		classify_compile_net4_hash_free(memory_context, compile);
 		return NULL;
 	}
@@ -175,20 +155,13 @@ classify_compile_net4_hash_create(
 			continue;
 		}
 
-		struct filter_net4s nets;
-		get_net4s(rule, &nets);
-		for (const struct net4 *net4 = nets.items;
-		     net4 < nets.items + nets.count;
-		     ++net4) {
-			// The unspecified network is the rule-is-any case of
-			// the core, not a region.
-			const uint32_t length =
-				classify_compile_net4_hash_length(net4);
-			if (length == 0) {
-				continue;
-			}
-			const uint32_t key =
-				classify_compile_net4_hash_key(net4);
+		struct classify_net4_addrs addrs;
+		get_addrs(rule, &addrs);
+		for (uint32_t addr_idx = 0; addr_idx < addrs.count;
+		     ++addr_idx) {
+			const uint32_t key = classify_compile_net4_hash_key(
+				addrs.items[addr_idx]
+			);
 
 			struct classify_compile_net4_hash_dedup_ctx ctx = {
 				.compile = compile,
@@ -215,7 +188,6 @@ classify_compile_net4_hash_create(
 			}
 
 			compile->keys[compile->region_count] = key;
-			compile->lengths[compile->region_count] = length;
 			++compile->region_count;
 		}
 	}
@@ -255,12 +227,10 @@ classify_compile_net4_hash_rule_is_any(
 ) {
 	const struct classify_compile_net4_hash *net4_compile = compile;
 
-	struct filter_net4s nets;
-	net4_compile->get_net4s(rule, &nets);
+	struct classify_net4_addrs addrs;
+	net4_compile->get_addrs(rule, &addrs);
 
-	return nets.count == 0 ||
-	       (nets.items[0].mask[0] == 0 && nets.items[0].mask[1] == 0 &&
-		nets.items[0].mask[2] == 0 && nets.items[0].mask[3] == 0);
+	return addrs.count == 0;
 }
 
 static inline int
@@ -285,33 +255,6 @@ classify_compile_net4_hash_iter(
 	return 0;
 }
 
-// Reports whether the region names a prefix inside the network: the
-// network is at most as long as the region prefix, and the region key
-// masked to the network length carries the network address.
-static inline int
-classify_compile_net4_hash_contains(
-	const struct classify_compile_net4_hash *net4_compile,
-	uint32_t region,
-	const struct net4 *net4
-) {
-	const uint32_t key = net4_compile->keys[region];
-	const uint32_t length = net4_compile->lengths[region];
-
-	uint32_t net_key = 0;
-	uint32_t net_length = 0;
-	for (uint32_t idx = 0; idx < NET4_LEN; ++idx) {
-		net_key = (net_key << 8) | (net4->addr[idx] & net4->mask[idx]);
-		net_length += __builtin_popcount(net4->mask[idx]);
-	}
-	if (net_length == 0 || net_length > length) {
-		return 0;
-	}
-	const uint32_t net_mask =
-		net_length == 32 ? 0xffffffffu : ~0u << (32 - net_length);
-
-	return (key & net_mask) == net_key;
-}
-
 static inline int
 classify_compile_net4_hash_rule_iter(
 	void *compile,
@@ -321,32 +264,32 @@ classify_compile_net4_hash_rule_iter(
 ) {
 	struct classify_compile_net4_hash *net4_compile = compile;
 
-	struct filter_net4s nets;
-	net4_compile->get_net4s(rule, &nets);
+	struct classify_net4_addrs addrs;
+	net4_compile->get_addrs(rule, &addrs);
 
-	for (const struct net4 *net4 = nets.items;
-	     net4 < nets.items + nets.count;
-	     ++net4) {
-		if (classify_compile_net4_hash_length(net4) == 0) {
+	for (uint32_t addr_idx = 0; addr_idx < addrs.count; ++addr_idx) {
+		const uint32_t key =
+			classify_compile_net4_hash_key(addrs.items[addr_idx]);
+		struct classify_compile_net4_hash_dedup_ctx ctx = {
+			.compile = net4_compile,
+			.key = key,
+		};
+		uint32_t region = hash_index_lookup(
+			&net4_compile->dedup,
+			classify_net4_hash_key_hash(key),
+			classify_compile_net4_hash_dedup_eq,
+			&ctx
+		);
+		if (region == HASH_INDEX_INVALID) {
 			continue;
 		}
-		for (uint32_t region = 0; region < net4_compile->region_count;
-		     ++region) {
-			if (!classify_compile_net4_hash_contains(
-				    net4_compile, region, net4
-			    )) {
-				continue;
-			}
-			if (iter_cb_func(
-				    value_table_get_ptr(
-					    &net4_compile->value_table,
-					    0,
-					    region
-				    ),
-				    cb_func_data
-			    ) < 0) {
-				return -1;
-			}
+		if (iter_cb_func(
+			    value_table_get_ptr(
+				    &net4_compile->value_table, 0, region
+			    ),
+			    cb_func_data
+		    ) < 0) {
+			return -1;
 		}
 	}
 
@@ -359,14 +302,13 @@ classify_compile_net4_hash_hash(
 ) {
 	const struct classify_compile_net4_hash *net4_compile = compile;
 
-	struct filter_net4s nets;
-	net4_compile->get_net4s(rule, &nets);
+	struct classify_net4_addrs addrs;
+	net4_compile->get_addrs(rule, &addrs);
 
-	uint32_t hash = nets.count;
-	for (uint32_t idx = 0; idx < nets.count; ++idx) {
-		const struct net4 *net = nets.items + idx;
-		hash = hash * 31 + classify_compile_net4_hash_key(net);
-		hash = hash * 31 + classify_compile_net4_hash_length(net);
+	uint32_t hash = addrs.count;
+	for (uint32_t idx = 0; idx < addrs.count; ++idx) {
+		hash = hash * 31 +
+		       classify_compile_net4_hash_key(addrs.items[idx]);
 	}
 	return hash;
 }
@@ -379,24 +321,17 @@ classify_compile_net4_hash_compare(
 ) {
 	const struct classify_compile_net4_hash *net4_compile = compile;
 
-	struct filter_net4s first_nets;
-	struct filter_net4s second_nets;
-	net4_compile->get_net4s(first, &first_nets);
-	net4_compile->get_net4s(second, &second_nets);
+	struct classify_net4_addrs first_addrs;
+	struct classify_net4_addrs second_addrs;
+	net4_compile->get_addrs(first, &first_addrs);
+	net4_compile->get_addrs(second, &second_addrs);
 
-	if (first_nets.count != second_nets.count) {
+	if (first_addrs.count != second_addrs.count) {
 		return 1;
 	}
-	for (uint32_t idx = 0; idx < first_nets.count; ++idx) {
-		const uint32_t first_key =
-			classify_compile_net4_hash_key(first_nets.items + idx);
-		const uint32_t second_key =
-			classify_compile_net4_hash_key(second_nets.items + idx);
-		if (first_key != second_key ||
-		    classify_compile_net4_hash_length(first_nets.items + idx) !=
-			    classify_compile_net4_hash_length(
-				    second_nets.items + idx
-			    )) {
+	for (uint32_t idx = 0; idx < first_addrs.count; ++idx) {
+		if (classify_compile_net4_hash_key(first_addrs.items[idx]) !=
+		    classify_compile_net4_hash_key(second_addrs.items[idx])) {
 			return 1;
 		}
 	}
@@ -410,29 +345,6 @@ classify_compile_net4_hash_commit(
 ) {
 	struct classify_compile_net4_hash *net4_compile = compile;
 	struct classify_attr_net4_hash *net4_attr = attr;
-
-	// The probe order: the distinct lengths of the regions, descending.
-	uint32_t lengths[CLASSIFY_NET4_HASH_LENGTH_MAX];
-	uint32_t length_count = 0;
-	for (uint32_t region = 0; region < net4_compile->region_count;
-	     ++region) {
-		const uint32_t length = net4_compile->lengths[region];
-		uint32_t idx = 0;
-		while (idx < length_count && lengths[idx] != length) {
-			++idx;
-		}
-		if (idx < length_count) {
-			continue;
-		}
-		for (idx = 0; idx < length_count && lengths[idx] > length;
-		     ++idx) {
-		}
-		memmove(lengths + idx + 1,
-			lengths + idx,
-			(length_count - idx) * sizeof(uint32_t));
-		lengths[idx] = length;
-		++length_count;
-	}
 
 	// A family no rule names keeps no regions: the attribute stays
 	// zeroed with only the miss class, and the lookup always misses.
@@ -466,19 +378,17 @@ classify_compile_net4_hash_commit(
 			}
 			return -1;
 		}
-	}
-	if (net4_compile->region_count > 0) {
 		memcpy(keys,
 		       net4_compile->keys,
 		       sizeof(uint32_t) * net4_compile->region_count);
-	}
-	// The core rewrote the cells into the final classes in place; the
-	// cell behind the regions is the miss class.
-	for (uint32_t region = 0; region < net4_compile->region_count;
-	     ++region) {
-		classes[region] = *value_table_get_ptr(
-			&net4_compile->value_table, 0, region
-		);
+		// The core rewrote the cells into the final classes in place;
+		// the cell behind the regions is the miss class.
+		for (uint32_t region = 0; region < net4_compile->region_count;
+		     ++region) {
+			classes[region] = *value_table_get_ptr(
+				&net4_compile->value_table, 0, region
+			);
+		}
 	}
 
 	SET_OFFSET_OF(&net4_attr->keys, keys);
@@ -487,45 +397,28 @@ classify_compile_net4_hash_commit(
 	net4_attr->miss_class = *value_table_get_ptr(
 		&net4_compile->value_table, 0, net4_compile->region_count
 	);
-	net4_attr->length_count = length_count;
-	memcpy(net4_attr->lengths, lengths, sizeof(uint32_t) * length_count);
 
-	for (uint32_t length_idx = 0; length_idx < length_count; ++length_idx) {
-		const uint32_t length = lengths[length_idx];
-		uint32_t count = 0;
-		for (uint32_t region = 0; region < net4_compile->region_count;
-		     ++region) {
-			count += net4_compile->lengths[region] == length;
-		}
-
-		char index_name[MEMORY_CONTEXT_NAME_SIZE];
-		classify_leaf_name(
-			index_name,
-			sizeof(index_name),
-			net4_compile->name,
-			"index"
-		);
-		if (hash_index_init(
-			    &net4_attr->index[length_idx],
-			    memory_context,
-			    count + 1
+	char index_name[MEMORY_CONTEXT_NAME_SIZE];
+	classify_leaf_name(
+		index_name, sizeof(index_name), net4_compile->name, "index"
+	);
+	if (hash_index_init(
+		    &net4_attr->index,
+		    memory_context,
+		    net4_compile->region_count + 1
+	    )) {
+		goto error;
+	}
+	for (uint32_t region = 0; region < net4_compile->region_count;
+	     ++region) {
+		if (hash_index_insert(
+			    &net4_attr->index,
+			    classify_net4_hash_key_hash(
+				    net4_compile->keys[region]
+			    ),
+			    region
 		    )) {
 			goto error;
-		}
-		for (uint32_t region = 0; region < net4_compile->region_count;
-		     ++region) {
-			if (net4_compile->lengths[region] != length) {
-				continue;
-			}
-			if (hash_index_insert(
-				    &net4_attr->index[length_idx],
-				    classify_net4_hash_key_hash(
-					    net4_compile->keys[region]
-				    ),
-				    region
-			    )) {
-				goto error;
-			}
 		}
 	}
 
@@ -539,7 +432,7 @@ error:
 }
 
 /*
- * Compiles the hashed IPv4 network classifier of a ruleset into an
+ * Compiles the hashed IPv4 address classifier of a ruleset into an
  * embedded attribute.
  *
  * On success the attribute and the stage are owned by the caller, the
@@ -553,13 +446,13 @@ classify_net4_hash_compile(
 	const char *name,
 	const struct classifier_rule *const *rules,
 	uint32_t rule_count,
-	classify_net4_hash_get_net4s_func get_net4s,
+	classify_net4_hash_get_addrs_func get_addrs,
 	struct classify_attr_net4_hash *attr,
 	struct classifier *cls
 ) {
 	struct classify_compile_net4_hash *compile =
 		classify_compile_net4_hash_create(
-			memory_context, rules, rule_count, get_net4s, name
+			memory_context, rules, rule_count, get_addrs, name
 		);
 	if (compile == NULL) {
 		memset(attr, 0, sizeof(*attr));
@@ -591,10 +484,9 @@ classify_net4_hash_compile(
 }
 
 /*
- * Declares the hashed IPv4 network compile entry of one consumer side,
- * mirroring the LPM variant's declaration.
+ * Declares the hashed IPv4 address compile entry of one consumer side.
  */
-#define CLASSIFY_NET4_HASH_COMPILE(tag, get_net4s)                             \
+#define CLASSIFY_NET4_HASH_COMPILE(tag, get_addrs)                             \
 	static inline int classify_##tag##_compile(                            \
 		struct memory_context *memory_context,                         \
 		const char *name,                                              \
@@ -608,7 +500,7 @@ classify_net4_hash_compile(
 			name,                                                  \
 			rules,                                                 \
 			rule_count,                                            \
-			get_net4s,                                             \
+			get_addrs,                                             \
 			attr,                                                  \
 			cls                                                    \
 		);                                                             \

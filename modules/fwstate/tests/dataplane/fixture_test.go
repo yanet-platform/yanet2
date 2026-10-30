@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"net"
 	"net/netip"
-	"strconv"
-	"strings"
 	"testing"
 	"time"
 
@@ -239,33 +237,16 @@ func ClearSyncDestination(config *testConfig) {
 	config.Sync.Listeners = nil
 }
 
-// SetSyncScope restricts synchronization to the flows of one IPv6
-// source network and one source port span before publication.
+// SetSyncScope restricts synchronization to the flows of two exact
+// IPv6 source addresses and one source port span before publication.
 func SetSyncScope(config *testConfig) {
+	var addrs [2][16]byte
+	copy(addrs[0][:], net.ParseIP("2001:db8::1").To16())
+	copy(addrs[1][:], net.ParseIP("2001:db8::2").To16())
 	config.Rules = []modulefwstate.SyncRule{{
-		Net6s:    [][32]byte{syncNet6("2001:db8::/32")},
+		Addrs6:   addrs[:],
 		SrcPorts: [][2]uint16{{100, 200}},
 	}}
-}
-
-// syncNet6 renders one IPv6 prefix as the addr-then-mask pair the
-// bindings carry.
-func syncNet6(prefix string) [32]byte {
-	groups := strings.Split(prefix, "/")
-	if len(groups) != 2 {
-		panic("prefix")
-	}
-	ip := net.ParseIP(groups[0]).To16()
-	bits, err := strconv.Atoi(groups[1])
-	if err != nil {
-		panic("prefix")
-	}
-	var out [32]byte
-	copy(out[:16], ip)
-	for idx := range bits {
-		out[16+idx/8] |= 1 << (7 - idx%8)
-	}
-	return out
 }
 
 // SetSyncUnicastListener replaces the listeners with one unicast

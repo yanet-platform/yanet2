@@ -44,9 +44,12 @@ fwstate_scope_matches(
 			&scope->net6_rules, &net_class, &port_class, &rule, 1
 		);
 	} else {
-		net_class = classify_net4_hash_lookup1(
-			&scope->net4_attr, frame->src_ip
-		);
+		// The frame carries the source as a raw big-endian word,
+		// exactly the wire form the exact-match attribute probes.
+		uint32_t src_ip;
+		memcpy(&src_ip, &frame->src_ip, sizeof(src_ip));
+		net_class =
+			classify_net4_hash_lookup1(&scope->net4_attr, src_ip);
 		classify_rule_table_lookup(
 			&scope->net4_rules, &net_class, &port_class, &rule, 1
 		);

@@ -9,6 +9,8 @@
 #include "lib/classify/classifiers/net6_hash.h"
 #include "lib/classify/classifiers/port.h"
 #include "lib/classify/classify.h"
+#include "lib/classify/compiler/net4_hash.h"
+#include "lib/classify/compiler/net6_hash.h"
 #include "lib/classify/compiler/u16_ranges.h"
 #include "lib/classify/rule_table.h"
 #include "lib/controlplane/config/zone.h"
@@ -76,8 +78,11 @@ struct fwstate_prepared {
  */
 struct fwstate_sync_rule {
 	struct classifier_rule rule;
-	struct filter_net4s net4s;
-	struct filter_net6s net6s;
+	// The exact source addresses the rule names, raw wire bytes; the
+	// hash attributes of the scope match them without prefix
+	// semantics.
+	struct classify_net4_addrs addrs4;
+	struct classify_net6_addrs addrs6;
 	// The port spans in the u16 attribute's own type: the ranges view
 	// of the compile and the port_ranges view of the filter share the
 	// layout.

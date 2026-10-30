@@ -4,8 +4,6 @@ import (
 	"fmt"
 	"net/netip"
 
-	"github.com/yanet-platform/xnetip"
-
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
 	filterpb "github.com/yanet-platform/yanet2/common/filterpb/v1"
 	"github.com/yanet-platform/yanet2/modules/fwstate/bindings/go/cfwstate"
@@ -53,36 +51,33 @@ func SyncConfigToC(syncConfig *fwstatepb.SyncConfig) (cfwstate.SyncConfig, error
 }
 
 // syncRuleToC converts one scope rule into the flat binding form: the
-// networks as addr-then-mask pairs, the port spans inclusive.
+// exact source addresses of both families, the port spans inclusive.
 func syncRuleToC(rule *fwstatepb.SyncRule) (cfwstate.SyncRule, error) {
 	native := cfwstate.SyncRule{
-		Net4s:    make([][16]byte, 0, len(rule.GetNet4S())),
-		Net6s:    make([][32]byte, 0, len(rule.GetNet6S())),
+		Addrs4:   make([][4]byte, 0, len(rule.GetAddrs())),
+		Addrs6:   make([][16]byte, 0, len(rule.GetAddrs())),
 		SrcPorts: make([][2]uint16, 0, len(rule.GetSrcPorts())),
 	}
-	for idx, net := range rule.GetNet4S() {
-		network, err := net.ToNetwork4()
-		if err != nil {
-			return cfwstate.SyncRule{}, fmt.Errorf("net4s[%d]: %w", idx, err)
+	for idx, addr := range rule.GetAddrs() {
+		addrBytes, ok := netip.AddrFromSlice(addr.GetAddr())
+		if !ok {
+			return cfwstate.SyncRule{}, fmt.Errorf(
+				"addrs[%d]: invalid address bytes",
+				idx,
+			)
 		}
-		var pair [16]byte
-		addr := network.Addr().As4()
-		mask := network.Mask().As4()
-		copy(pair[:4], addr[:])
-		copy(pair[4:8], mask[:])
-		native.Net4s = append(native.Net4s, pair)
-	}
-	for idx, net := range rule.GetNet6S() {
-		network, err := net.ToNetwork6()
-		if err != nil {
-			return cfwstate.SyncRule{}, fmt.Errorf("net6s[%d]: %w", idx, err)
+		if addrBytes.Is4() {
+			native.Addrs4 = append(native.Addrs4, addrBytes.As4())
+			continue
 		}
-		var pair [32]byte
-		addr := network.Addr().As16()
-		mask := network.Mask().As16()
-		copy(pair[:16], addr[:])
-		copy(pair[16:32], mask[:])
-		native.Net6s = append(native.Net6s, pair)
+		if addrBytes.Is6() && !addrBytes.Is4In6() {
+			native.Addrs6 = append(native.Addrs6, addrBytes.As16())
+			continue
+		}
+		return cfwstate.SyncRule{}, fmt.Errorf(
+			"addrs[%d]: not an IPv4 or IPv6 address",
+			idx,
+		)
 	}
 	for idx, span := range rule.GetSrcPorts() {
 		if span.GetFrom() == 0 || span.GetFrom() > span.GetTo() || span.GetTo() > 65535 {
@@ -102,33 +97,18 @@ func syncRuleToC(rule *fwstatepb.SyncRule) (cfwstate.SyncRule, error) {
 // syncRuleFromC renders one stored scope rule back into the proto form.
 func syncRuleFromC(native cfwstate.SyncRule) *fwstatepb.SyncRule {
 	rule := &fwstatepb.SyncRule{
-		Net4S:    make([]*commonpb.IPv4Network, 0, len(native.Net4s)),
-		Net6S:    make([]*commonpb.IPv6Network, 0, len(native.Net6s)),
+		Addrs:    make([]*commonpb.IPAddress, 0, len(native.Addrs4)+len(native.Addrs6)),
 		SrcPorts: make([]*filterpb.PortRange, 0, len(native.SrcPorts)),
 	}
-	for _, pair := range native.Net4s {
-		addr, addrOk := netip.AddrFromSlice(pair[:4])
-		mask, maskOk := netip.AddrFromSlice(pair[4:8])
-		if !addrOk || !maskOk {
-			continue
-		}
-		network, err := xnetip.Network4From(addr, mask)
-		if err != nil {
-			continue
-		}
-		rule.Net4S = append(rule.Net4S, commonpb.NewIPv4NetworkFrom4(network))
+	for _, addr := range native.Addrs4 {
+		rule.Addrs = append(rule.Addrs, &commonpb.IPAddress{
+			Addr: append([]byte(nil), addr[:]...),
+		})
 	}
-	for _, pair := range native.Net6s {
-		addr, addrOk := netip.AddrFromSlice(pair[:16])
-		mask, maskOk := netip.AddrFromSlice(pair[16:32])
-		if !addrOk || !maskOk {
-			continue
-		}
-		network, err := xnetip.Network6From(addr, mask)
-		if err != nil {
-			continue
-		}
-		rule.Net6S = append(rule.Net6S, commonpb.NewIPv6NetworkFrom6(network))
+	for _, addr := range native.Addrs6 {
+		rule.Addrs = append(rule.Addrs, &commonpb.IPAddress{
+			Addr: append([]byte(nil), addr[:]...),
+		})
 	}
 	for _, span := range native.SrcPorts {
 		rule.SrcPorts = append(rule.SrcPorts, &filterpb.PortRange{

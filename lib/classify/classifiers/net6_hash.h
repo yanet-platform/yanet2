@@ -10,33 +10,23 @@
 #include <stdint.h>
 #include <string.h>
 
-// Largest prefix length of the IPv6 hashed network classifier.
-#define CLASSIFY_NET6_HASH_LENGTH_MAX 128
-
 /*
- * IPv6 network classifier over hashed exact prefixes.
+ * IPv6 address classifier over one exact-match hash index.
  *
- * The class space matches the two half LPM variant - one region per
- * distinct match set - but the match resolves through hash lookups:
- * the configured prefixes group by length, and an address probes its
- * sixteen masked bytes against the groups from the longest length to
- * the shortest, so the first hit is the longest prefix match.
+ * The regions are the distinct configured addresses and the match is a
+ * single hash probe on the sixteen exact address bytes, no prefix
+ * semantics: an address resolves iff the ruleset names it.
  *
- * The struct is embedded by value in a consumer classifier; the indexes
+ * The struct is embedded by value in a consumer classifier; the index
  * and the region arrays die with the consumer through the free below.
  */
 struct classify_attr_net6_hash {
-	// The distinct prefix lengths of the regions, descending: the probe
-	// order of the lookup.
-	uint32_t length_count;
-	uint32_t lengths[CLASSIFY_NET6_HASH_LENGTH_MAX];
-	// The class of an address matching no configured prefix.
+	// The exact-match index: the slot value is the region identifier.
+	struct hash_index index;
+	// The class of an address the ruleset does not name.
 	uint32_t miss_class;
-	// One index per distinct length, keyed by the address masked to the
-	// length; the slot value is the region identifier.
-	struct hash_index index[CLASSIFY_NET6_HASH_LENGTH_MAX];
 	uint32_t region_count;
-	// The sixteen masked bytes per region, addressed through
+	// The sixteen address bytes per region, addressed through
 	// SET_OFFSET_OF, so the equality probe of a lookup compares the
 	// stored key of the slot.
 	uint8_t *keys;
@@ -44,16 +34,14 @@ struct classify_attr_net6_hash {
 	uint32_t *classes;
 };
 
-// Releases the internals of an embedded hashed IPv6 network classifier
+// Releases the internals of an embedded hashed IPv6 address classifier
 // and zeroes it, so a destroy path is idempotent.
 static inline void
 classify_attr_net6_hash_free(
 	struct memory_context *memory_context,
 	struct classify_attr_net6_hash *attr
 ) {
-	for (uint32_t idx = 0; idx < attr->length_count; ++idx) {
-		hash_index_fini(&attr->index[idx]);
-	}
+	hash_index_fini(&attr->index);
 
 	uint8_t *keys = ADDR_OF(&attr->keys);
 	if (keys != NULL) {
@@ -73,7 +61,7 @@ classify_attr_net6_hash_free(
 	memset(attr, 0, sizeof(*attr));
 }
 
-// The hash of one sixteen byte masked address: a byte pass of the same
+// The hash of one sixteen byte exact address: a byte pass of the same
 // mixing at insert and lookup time.
 static inline uint32_t
 classify_net6_hash_key_hash(const uint8_t *key) {
@@ -99,51 +87,31 @@ classify_net6_hash_eq(uint32_t region, const void *data) {
 }
 
 // Resolves the class of one address, sixteen bytes as read from the
-// packet header.
+// packet header: a single exact-match probe, the miss class when the
+// ruleset does not name the address.
 static inline uint32_t
 classify_net6_hash_lookup1(
 	const struct classify_attr_net6_hash *attr, const uint8_t *addr
 ) {
-	uint8_t key[NET6_LEN];
-	for (uint32_t idx = 0; idx < attr->length_count; ++idx) {
-		const uint32_t length = attr->lengths[idx];
-		const uint32_t whole_bytes = length / 8;
-		const uint8_t tail_bits = length % 8;
-		// The mask keeps the first length bits: the whole bytes pass
-		// through, the first tail_bits of the tail byte survive and the
-		// rest clear.
-		memcpy(key, addr, whole_bytes);
-		if (whole_bytes < NET6_LEN) {
-			key[whole_bytes] =
-				tail_bits == 0
-					? 0
-					: addr[whole_bytes] &
-						  (0xffu << (8 - tail_bits));
-			memset(key + whole_bytes + 1,
-			       0,
-			       NET6_LEN - whole_bytes - 1);
-		}
+	struct classify_net6_hash_lookup_ctx ctx;
+	memcpy(ctx.key, addr, NET6_LEN);
+	ctx.attr = attr;
 
-		struct classify_net6_hash_lookup_ctx ctx;
-		memcpy(ctx.key, key, NET6_LEN);
-		ctx.attr = attr;
-
-		uint32_t region = hash_index_lookup(
-			&attr->index[idx],
-			classify_net6_hash_key_hash(key),
-			classify_net6_hash_eq,
-			&ctx
-		);
-		if (region != HASH_INDEX_INVALID) {
-			return ADDR_OF(&attr->classes)[region];
-		}
+	uint32_t region = hash_index_lookup(
+		&attr->index,
+		classify_net6_hash_key_hash(addr),
+		classify_net6_hash_eq,
+		&ctx
+	);
+	if (region == HASH_INDEX_INVALID) {
+		return attr->miss_class;
 	}
-	return attr->miss_class;
+	return ADDR_OF(&attr->classes)[region];
 }
 
 /*
- * Resolves the class of every address of a batch through the hashed
- * prefix match.
+ * Resolves the class of every address of a batch through the exact
+ * match.
  *
  * The addresses are whole IPv6 addresses, one per packet.
  */

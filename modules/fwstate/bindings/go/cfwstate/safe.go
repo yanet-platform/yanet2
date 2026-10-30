@@ -60,14 +60,14 @@ const MinSyncMTU = uint16(C.FWSTATE_SYNC_MIN_MTU)
 const MaxSyncEndpoints = int(C.FWSTATE_SYNC_ENDPOINTS_MAX)
 
 // SyncRule is one synchronization scope rule: the flows whose source
-// address falls inside one of the networks and whose source port falls
-// inside one of the port spans are the ones the module syncs. A rule
-// naming neither matches every flow.
+// address is exactly one of the named addresses and whose source port
+// falls inside one of the port spans are the ones the module syncs. A
+// rule naming neither matches every flow.
 type SyncRule struct {
-	// Net4s carries one addr-then-mask big-endian pair per IPv4 network.
-	Net4s [][16]byte
-	// Net6s carries one addr-then-mask pair per IPv6 network.
-	Net6s [][32]byte
+	// Addrs4 carries one big-endian IPv4 address per entry.
+	Addrs4 [][4]byte
+	// Addrs6 carries one big-endian IPv6 address per entry.
+	Addrs6 [][16]byte
 	// SrcPorts carries one inclusive from-to span per source port range.
 	SrcPorts [][2]uint16
 }
@@ -88,22 +88,26 @@ func syncRulesToC(rules []SyncRule) ([]C.struct_fwstate_sync_rule_input, error) 
 	}
 	inputs := make([]C.struct_fwstate_sync_rule_input, len(rules))
 	for idx, rule := range rules {
-		if len(rule.Net4s) > SyncRuleNetsMax ||
-			len(rule.Net6s) > SyncRuleNetsMax ||
+		if len(rule.Addrs4) > SyncRuleNetsMax ||
+			len(rule.Addrs6) > SyncRuleNetsMax ||
 			len(rule.SrcPorts) > SyncRulePortsMax {
 			return nil, fmt.Errorf(
-				"sync rule %d exceeds the per-rule bounds (%d networks per family, %d port spans)",
+				"sync rule %d exceeds the per-rule bounds (%d addresses per family, %d port spans)",
 				idx, SyncRuleNetsMax, SyncRulePortsMax,
 			)
 		}
-		for netIdx, net := range rule.Net4s {
-			inputs[idx].net4s[netIdx] = *(*C.struct_net4)(unsafe.Pointer(&net))
+		for addrIdx, addr := range rule.Addrs4 {
+			for byteIdx, value := range addr {
+				inputs[idx].addrs4[addrIdx][byteIdx] = C.uint8_t(value)
+			}
 		}
-		inputs[idx].net4_count = C.uint32_t(len(rule.Net4s))
-		for netIdx, net := range rule.Net6s {
-			inputs[idx].net6s[netIdx] = *(*C.struct_net6)(unsafe.Pointer(&net))
+		inputs[idx].addr4_count = C.uint32_t(len(rule.Addrs4))
+		for addrIdx, addr := range rule.Addrs6 {
+			for byteIdx, value := range addr {
+				inputs[idx].addrs6[addrIdx][byteIdx] = C.uint8_t(value)
+			}
 		}
-		inputs[idx].net6_count = C.uint32_t(len(rule.Net6s))
+		inputs[idx].addr6_count = C.uint32_t(len(rule.Addrs6))
 		for portIdx, span := range rule.SrcPorts {
 			inputs[idx].src_ports[portIdx].from = C.uint16_t(span[0])
 			inputs[idx].src_ports[portIdx].to = C.uint16_t(span[1])
