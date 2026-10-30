@@ -21,6 +21,12 @@ func SyncConfigToC(syncConfig *fwstatepb.SyncConfig) cfwstate.SyncConfig {
 		native.Port = uint16(endpoint.GetPort())
 		nativeConfig.Endpoints = append(nativeConfig.Endpoints, native)
 	}
+	for _, listener := range syncConfig.GetListeners() {
+		var native cfwstate.SyncListenEndpoint
+		copy(native.DstAddr[:], listener.GetDstAddr().GetAddr())
+		native.Port = uint16(listener.GetPort())
+		nativeConfig.Listeners = append(nativeConfig.Listeners, native)
+	}
 	nativeConfig.TcpSynAck = syncConfig.GetTcpSynAck()
 	nativeConfig.TcpSyn = syncConfig.GetTcpSyn()
 	nativeConfig.TcpFin = syncConfig.GetTcpFin()
@@ -32,11 +38,12 @@ func SyncConfigToC(syncConfig *fwstatepb.SyncConfig) cfwstate.SyncConfig {
 	return nativeConfig
 }
 
-// SyncConfigFromC makes every scalar present and lists the stored endpoints,
-// skipping the entries a zero port disables.
+// SyncConfigFromC makes every scalar present and lists the stored endpoints
+// and listeners, skipping the entries a zero port disables.
 func SyncConfigFromC(nativeConfig cfwstate.SyncConfig) *fwstatepb.SyncConfig {
 	syncConfig := &fwstatepb.SyncConfig{
 		Endpoints:           make([]*fwstatepb.SyncEndpoint, 0, len(nativeConfig.Endpoints)),
+		Listeners:           make([]*fwstatepb.SyncListenEndpoint, 0, len(nativeConfig.Listeners)),
 		TcpSynAck:           new(uint64(nativeConfig.TcpSynAck)),
 		TcpSyn:              new(uint64(nativeConfig.TcpSyn)),
 		TcpFin:              new(uint64(nativeConfig.TcpFin)),
@@ -54,6 +61,15 @@ func SyncConfigFromC(nativeConfig cfwstate.SyncConfig) *fwstatepb.SyncConfig {
 			SrcAddr: &commonpb.IPAddress{Addr: append([]byte(nil), endpoint.SrcAddr[:]...)},
 			DstAddr: &commonpb.IPAddress{Addr: append([]byte(nil), endpoint.DstAddr[:]...)},
 			Port:    new(uint32(endpoint.Port)),
+		})
+	}
+	for _, listener := range nativeConfig.Listeners {
+		if listener.Port == 0 {
+			continue
+		}
+		syncConfig.Listeners = append(syncConfig.Listeners, &fwstatepb.SyncListenEndpoint{
+			DstAddr: &commonpb.IPAddress{Addr: append([]byte(nil), listener.DstAddr[:]...)},
+			Port:    new(uint32(listener.Port)),
 		})
 	}
 	return syncConfig

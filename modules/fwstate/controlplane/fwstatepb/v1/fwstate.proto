@@ -28,8 +28,9 @@ service MetricsService {
 // UpdateConfigRequest changes only the fields it carries, zero values included.
 //
 // An absent field keeps the stored value, and a missing config starts from
-// the defaults. An update carrying sync endpoints replaces the whole list;
-// no_endpoints removes it. The merged config must pass validation.
+// the defaults. An update carrying sync endpoints or listeners replaces the
+// whole list it carries; no_endpoints and no_listeners remove theirs. The
+// merged config must pass validation.
 message UpdateConfigRequest {
   string name = 1;
   // Names of the published fwstate_map_v4 / fwstate_map_v6 objects whose
@@ -64,33 +65,38 @@ message ListConfigsRequest {}
 
 message ListConfigsResponse { repeated string configs = 1; }
 
-// One synchronization destination.
+// One emission destination.
 //
 // Every endpoint receives a copy of each locally emitted sync packet,
-// stamped with the endpoint's source and destination. An endpoint with a
-// multicast destination is also the receive contract: an incoming packet
-// naming it by destination address and port (and carrying a multicast
-// Ethernet destination) is claimed as external sync. A unicast destination
-// is emission-only.
+// stamped with the endpoint's source and destination.
 message SyncEndpoint {
   common.commonpb.v1.IPAddress src_addr = 1; // IPv6 source stamped on packets emitted toward dst_addr;
   common.commonpb.v1.IPAddress dst_addr = 2; // IPv6 destination of emitted packets;
   optional uint32 port = 3;                  // Destination port, 1..65535;
 }
 
-// SyncConfig carries receive matching and local emission parameters:
-// incoming-packet matching, state updates, connection timeouts and the
-// suppression window.
+// One receive destination: an incoming packet naming it by IPv6 address and
+// UDP port is claimed as external sync. Emission and reception are
+// independent: a config listens without emitting, emits without listening,
+// or does both on different addresses. A unicast listener names the
+// router's own address and receives point-to-point sync.
+message SyncListenEndpoint {
+  common.commonpb.v1.IPAddress dst_addr = 1; // IPv6 destination matched on the wire;
+  optional uint32 port = 2;                  // Destination port, 1..65535;
+}
+
+// SyncConfig carries the emission destinations, the receive listeners and
+// the state-update parameters: timeouts and the suppression window.
 //
-// Synchronization is optional: a config naming no endpoint does not claim
-// external sync traffic; state events ACL stashes in the linked maps are
-// still applied, only nothing is emitted for them. Each endpoint needs a
-// source, a destination and a port because fwstate stamps emitted frames
-// per endpoint. An update carrying endpoints replaces the whole list;
-// no_endpoints removes it.
+// Both lists are optional: a config naming no endpoint emits nothing, one
+// naming no listener claims no external sync traffic; state events ACL
+// stashes in the linked maps are applied either way. An update carrying a
+// list replaces it whole; no_endpoints and no_listeners remove theirs.
 message SyncConfig {
   repeated SyncEndpoint endpoints = 1;
-  optional bool no_endpoints = 2; // Removes every endpoint when true;
+  optional bool no_endpoints = 2;               // Removes every emission endpoint when true;
+  repeated SyncListenEndpoint listeners = 3;    // Receive contract, independent of emission;
+  optional bool no_listeners = 4;               // Removes every listener when true;
 
   // Connection timeouts
   optional uint64 tcp_syn_ack = 7; // TCP SYN-ACK timeout in nanoseconds;

@@ -25,11 +25,18 @@ func Test_SyncConfig_Merge(t *testing.T) {
 	endpoint := func(dst *commonpb.IPAddress, port uint32) *SyncEndpoint {
 		return &SyncEndpoint{SrcAddr: source(), DstAddr: dst, Port: new(port)}
 	}
+	listener := func(dst *commonpb.IPAddress, port uint32) *SyncListenEndpoint {
+		return &SyncListenEndpoint{DstAddr: dst, Port: new(port)}
+	}
 	stored := func() *SyncConfig {
 		return &SyncConfig{
 			Endpoints: []*SyncEndpoint{
 				endpoint(multicast(), 9999),
 				endpoint(unicast(), 10000),
+			},
+			Listeners: []*SyncListenEndpoint{
+				listener(multicast(), 9999),
+				listener(unicast(), 10000),
 			},
 			Tcp:                 proto.Uint64(120e9),
 			SyncSuppressTimeout: proto.Uint64(8e9),
@@ -78,6 +85,27 @@ func Test_SyncConfig_Merge(t *testing.T) {
 				cfg := stored()
 				cfg.Endpoints = nil
 				cfg.NoEndpoints = new(true)
+				return cfg
+			}(),
+		},
+		{
+			name: "listener list replaces the stored list wholesale",
+			update: &SyncConfig{
+				Listeners: []*SyncListenEndpoint{listener(multicast(), 7777)},
+			},
+			want: func() *SyncConfig {
+				cfg := stored()
+				cfg.Listeners = []*SyncListenEndpoint{listener(multicast(), 7777)}
+				return cfg
+			}(),
+		},
+		{
+			name:   "no_listeners removes the stored list",
+			update: &SyncConfig{NoListeners: new(true)},
+			want: func() *SyncConfig {
+				cfg := stored()
+				cfg.Listeners = nil
+				cfg.NoListeners = new(true)
 				return cfg
 			}(),
 		},

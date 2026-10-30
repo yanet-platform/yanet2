@@ -98,6 +98,10 @@ func newFWStateFixture(t *testing.T, stashSize uint64) *testConfig {
 			DstAddr: netip.MustParseAddr("ff02::1").As16(),
 			Port:    9999,
 		}},
+		Listeners: []modulefwstate.SyncListenEndpoint{{
+			DstAddr: netip.MustParseAddr("ff02::1").As16(),
+			Port:    9999,
+		}},
 		TcpSynAck: 120e9, TcpSyn: 120e9, TcpFin: 120e9, Tcp: 120e9, Udp: 30e9, Default: 16e9,
 	}}
 	fixture.Configs = append(fixture.Configs, config)
@@ -225,9 +229,20 @@ func SetSyncSuppressTimeout(config *testConfig, timeout uint64) {
 	config.Sync.SyncSuppressTimeout = timeout
 }
 
-// ClearSyncDestination disables every endpoint before publication.
+// ClearSyncDestination disables every endpoint and listener before
+// publication.
 func ClearSyncDestination(config *testConfig) {
 	config.Sync.Endpoints = nil
+	config.Sync.Listeners = nil
+}
+
+// SetSyncUnicastListener replaces the listeners with one unicast
+// destination before publication.
+func SetSyncUnicastListener(config *testConfig) {
+	config.Sync.Listeners = []modulefwstate.SyncListenEndpoint{{
+		DstAddr: netip.MustParseAddr("2001:db8::5").As16(),
+		Port:    9998,
+	}}
 }
 
 // SetSyncUnicastDestination enables the unicast endpoint in addition to the

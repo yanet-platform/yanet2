@@ -275,6 +275,34 @@ func Test_SyncConfig_ValidateFields_RejectsUnusableValues(t *testing.T) {
 			config: &SyncConfig{NoEndpoints: new(true)},
 		},
 		{
+			name: "listener port above the boundary",
+			config: &SyncConfig{Listeners: []*SyncListenEndpoint{
+				{Port: proto.Uint32(65536)},
+			}},
+			message: "listeners[0].port must be in 1..65535, got 65536",
+		},
+		{
+			name: "no_listeners combined with listeners",
+			config: &SyncConfig{
+				NoListeners: new(true),
+				Listeners:   []*SyncListenEndpoint{{Port: proto.Uint32(1)}},
+			},
+			message: "no_listeners cannot be combined with listeners",
+		},
+		{
+			name: "listener list above the bound",
+			config: &SyncConfig{
+				Listeners: func() []*SyncListenEndpoint {
+					listeners := make([]*SyncListenEndpoint, MaxSyncEndpoints+1)
+					for idx := range listeners {
+						listeners[idx] = &SyncListenEndpoint{Port: proto.Uint32(1)}
+					}
+					return listeners
+				}(),
+			},
+			message: "at most 8 sync listeners are supported, got 9",
+		},
+		{
 			name: "endpoint list above the bound",
 			config: &SyncConfig{
 				Endpoints: func() []*SyncEndpoint {
@@ -390,6 +418,20 @@ func Test_SyncConfig_ValidateMerged_EndpointsAreAllOrNothing(t *testing.T) {
 			Endpoints: []*SyncEndpoint{
 				{SrcAddr: addr(), DstAddr: addr(), Port: proto.Uint32(1)},
 				{SrcAddr: addr(), DstAddr: addr(), Port: proto.Uint32(2)},
+			},
+		}).ValidateMerged())
+	})
+
+	t.Run("listener without destination address", func(t *testing.T) {
+		config := &SyncConfig{Listeners: []*SyncListenEndpoint{{Port: proto.Uint32(9999)}}}
+
+		require.ErrorContains(t, config.ValidateMerged(), "listeners[0].dst_addr")
+	})
+
+	t.Run("complete listener", func(t *testing.T) {
+		require.NoError(t, (&SyncConfig{
+			Listeners: []*SyncListenEndpoint{
+				{DstAddr: addr(), Port: proto.Uint32(9999)},
 			},
 		}).ValidateMerged())
 	})

@@ -150,10 +150,30 @@ func validateSyncEndpoint(idx int, endpoint *SyncEndpoint) error {
 	return nil
 }
 
-// validateEndpointList checks the endpoint list's form an update states.
-func (m *SyncConfig) validateEndpointList() error {
+// validateSyncListener checks one update-carried listener's form.
+func validateSyncListener(idx int, listener *SyncListenEndpoint) error {
+	if err := validateAddrWidth(
+		fmt.Sprintf("listeners[%d].dst_addr", idx),
+		listener.GetDstAddr().GetAddr(),
+	); err != nil {
+		return err
+	}
+	if port := listener.GetPort(); port == 0 || port > maxSyncPort {
+		return fmt.Errorf(
+			"listeners[%d].port must be in 1..%d, got %d",
+			idx, maxSyncPort, port,
+		)
+	}
+	return nil
+}
+
+// validateEndpointLists checks the form of the lists an update states.
+func (m *SyncConfig) validateEndpointLists() error {
 	if m.GetNoEndpoints() && len(m.GetEndpoints()) > 0 {
 		return errors.New("no_endpoints cannot be combined with endpoints")
+	}
+	if m.GetNoListeners() && len(m.GetListeners()) > 0 {
+		return errors.New("no_listeners cannot be combined with listeners")
 	}
 	if len(m.GetEndpoints()) > MaxSyncEndpoints {
 		return fmt.Errorf(
@@ -161,8 +181,19 @@ func (m *SyncConfig) validateEndpointList() error {
 			MaxSyncEndpoints, len(m.GetEndpoints()),
 		)
 	}
+	if len(m.GetListeners()) > MaxSyncEndpoints {
+		return fmt.Errorf(
+			"at most %d sync listeners are supported, got %d",
+			MaxSyncEndpoints, len(m.GetListeners()),
+		)
+	}
 	for idx, endpoint := range m.GetEndpoints() {
 		if err := validateSyncEndpoint(idx, endpoint); err != nil {
+			return err
+		}
+	}
+	for idx, listener := range m.GetListeners() {
+		if err := validateSyncListener(idx, listener); err != nil {
 			return err
 		}
 	}
@@ -204,22 +235,22 @@ func (m *SyncConfig) ValidateFields() error {
 		}
 	}
 
-	return m.validateEndpointList()
+	return m.validateEndpointLists()
 }
 
 // ValidateMerged reports whether the settings are installable as they stand,
 // which is what the request merged over the config it replaces must be.
 //
-// Synchronization is optional. A config naming no endpoint leaves external
-// traffic in ordinary processing, while locally stashed events are applied
-// without emission. An endpoint naming only part of its source, destination
-// and port is refused because it cannot be matched or emitted safely.
+// Both lists are optional. A config naming no endpoint emits nothing while
+// locally stashed events are still applied, and a config naming no listener
+// leaves external traffic in ordinary processing. An entry naming only part
+// of its fields is refused because it cannot be matched or emitted safely.
 func (m *SyncConfig) ValidateMerged() error {
 	if m == nil {
 		return nil
 	}
 
-	if err := m.validateEndpointList(); err != nil {
+	if err := m.validateEndpointLists(); err != nil {
 		return err
 	}
 
@@ -233,6 +264,14 @@ func (m *SyncConfig) ValidateMerged() error {
 		}
 		if endpoint.GetPort() == 0 {
 			missing = append(missing, fmt.Sprintf("endpoints[%d].port", idx))
+		}
+	}
+	for idx, listener := range m.GetListeners() {
+		if !isAddrSet(listener.GetDstAddr().GetAddr()) {
+			missing = append(missing, fmt.Sprintf("listeners[%d].dst_addr", idx))
+		}
+		if listener.GetPort() == 0 {
+			missing = append(missing, fmt.Sprintf("listeners[%d].port", idx))
 		}
 	}
 	if len(missing) > 0 {

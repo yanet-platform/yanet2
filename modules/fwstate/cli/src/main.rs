@@ -6,7 +6,8 @@ use clap_complete::engine::CompletionCandidate;
 use commonpb::pb::IpAddress;
 use fwstatepb::{
     DeleteConfigRequest, ListConfigsRequest, ShowConfigRequest, ShowConfigResponse, SyncConfig, SyncEndpoint,
-    UpdateConfigRequest, fw_state_service_client::FwStateServiceClient, fw_state_service_server::SERVICE_NAME,
+    SyncListenEndpoint, UpdateConfigRequest, fw_state_service_client::FwStateServiceClient,
+    fw_state_service_server::SERVICE_NAME,
 };
 use tonic::codec::CompressionEncoding;
 use ync::{
@@ -77,6 +78,11 @@ fn config_block(response: &ShowConfigResponse) -> display::KeyValue {
             .row(&format!("endpoint {idx} dst addr"), address(endpoint.dst_addr.as_ref()))
             .row(&format!("endpoint {idx} port"), endpoint.port.unwrap_or_default());
     }
+    for (idx, listener) in sync_config.listeners.iter().enumerate() {
+        block = block
+            .row(&format!("listener {idx} dst addr"), address(listener.dst_addr.as_ref()))
+            .row(&format!("listener {idx} port"), listener.port.unwrap_or_default());
+    }
 
     for (setting, nanos) in [
         ("tcp syn-ack timeout", sync_config.tcp_syn_ack),
@@ -146,10 +152,11 @@ fn update_request(cmd: &UpdateCmd) -> Result<UpdateConfigRequest, &'static str> 
     Ok(request)
 }
 
-/// Fills in the endpoint list the caller supplied.
+/// Fills in the endpoint and listener lists the caller supplied.
 ///
-/// `--sync-endpoint` replaces the whole list on the server;
-/// `--no-sync-endpoints` asks the server to remove it.
+/// `--sync-endpoint` and `--listen-endpoint` replace their whole list on
+/// the server; `--no-sync-endpoints` and `--no-listen-endpoints` ask the
+/// server to remove theirs.
 fn update_sync_endpoints(sync_config: &mut SyncConfig, cmd: &UpdateCmd) {
     sync_config.endpoints = cmd
         .sync_endpoint
@@ -162,6 +169,17 @@ fn update_sync_endpoints(sync_config: &mut SyncConfig, cmd: &UpdateCmd) {
         .collect();
     if cmd.no_sync_endpoints {
         sync_config.no_endpoints = Some(true);
+    }
+    sync_config.listeners = cmd
+        .listen_endpoint
+        .iter()
+        .map(|listener| SyncListenEndpoint {
+            dst_addr: Some(IpAddress::from(IpAddr::V6(listener.dst))),
+            port: Some(u32::from(listener.port)),
+        })
+        .collect();
+    if cmd.no_listen_endpoints {
+        sync_config.no_listeners = Some(true);
     }
 }
 
@@ -225,8 +243,8 @@ async fn delete_config(service: &mut FWStateService, cmd: DeleteCmd) -> Result<(
     Ok(())
 }
 
-async fn update_config(service: &mut FWStateService, cmd: UpdateCmd) -> Result<(), Error> {
-    let request = update_request(&cmd).map_err(|err| service.invalid("update", err))?;
+async fn update_config(service: &mut FWStateService, cmd: &UpdateCmd) -> Result<(), Error> {
+    let request = update_request(cmd).map_err(|err| service.invalid("update", err))?;
     service
         .unary("update", request, async |client, request| {
             client.update_config(request).await
@@ -245,7 +263,7 @@ async fn run(cmd: Cmd) -> Result<(), Error> {
     match cmd.mode {
         ModeCmd::List => list_configs(&mut service).await,
         ModeCmd::Delete(cmd) => delete_config(&mut service, cmd).await,
-        ModeCmd::Update(cmd) => update_config(&mut service, cmd).await,
+        ModeCmd::Update(cmd) => update_config(&mut service, &cmd).await,
         ModeCmd::Show(cmd) => show_config(&mut service, cmd).await,
     }
 }
@@ -272,6 +290,8 @@ mod tests {
             map_name_v6: map_name_v6.map(str::to_string),
             sync_endpoint: Vec::new(),
             no_sync_endpoints: false,
+            listen_endpoint: Vec::new(),
+            no_listen_endpoints: false,
             tcp_syn_ack: None,
             tcp_syn: None,
             tcp_fin: None,
@@ -432,6 +452,51 @@ mod tests {
     }
 
     #[test]
+    fn test_update_request_listen_endpoints_replace_the_list() {
+        let mut cmd = update_cmd("cfg", None, None);
+        cmd.listen_endpoint = vec![
+            args::SyncListenEndpoint {
+                dst: "ff02::1".parse().unwrap(),
+                port: 9999,
+            },
+            args::SyncListenEndpoint {
+                dst: "2001:db8::4".parse().unwrap(),
+                port: 10001,
+            },
+        ];
+
+        let request = update_request(&cmd).unwrap();
+
+        let sync_config = request.sync_config.unwrap();
+        assert_eq!(
+            vec![
+                SyncListenEndpoint {
+                    dst_addr: Some(IpAddress::from(IpAddr::V6("ff02::1".parse().unwrap()))),
+                    port: Some(9999),
+                },
+                SyncListenEndpoint {
+                    dst_addr: Some(IpAddress::from(IpAddr::V6("2001:db8::4".parse().unwrap()))),
+                    port: Some(10001),
+                },
+            ],
+            sync_config.listeners
+        );
+        assert_eq!(None, sync_config.no_listeners);
+    }
+
+    #[test]
+    fn test_update_request_no_listen_endpoints_removes_the_list() {
+        let mut cmd = update_cmd("cfg", None, None);
+        cmd.no_listen_endpoints = true;
+
+        let request = update_request(&cmd).unwrap();
+
+        let sync_config = request.sync_config.unwrap();
+        assert_eq!(Some(true), sync_config.no_listeners);
+        assert!(sync_config.listeners.is_empty());
+    }
+
+    #[test]
     fn test_update_request_no_endpoints_removes_the_list() {
         let mut cmd = update_cmd("cfg", None, None);
         cmd.no_sync_endpoints = true;
@@ -500,6 +565,20 @@ mod tests {
             args::parse_sync_endpoint("fd00::1@[ff02::1]:9999")
         );
         assert_eq!(Ok(expected), args::parse_sync_endpoint("fd00::1@ff02::1:9999"));
+    }
+
+    #[test]
+    fn test_parse_sync_listen_endpoint_accepts_bracketed_and_bare() {
+        use args::SyncListenEndpoint as Listener;
+
+        let expected = Listener {
+            dst: "ff02::1".parse().unwrap(),
+            port: 9999,
+        };
+        assert_eq!(Ok(expected.clone()), args::parse_sync_listen_endpoint("[ff02::1]:9999"));
+        assert_eq!(Ok(expected), args::parse_sync_listen_endpoint("ff02::1:9999"));
+        assert!(args::parse_sync_listen_endpoint("ff02::1").is_err(), "missing port");
+        assert!(args::parse_sync_listen_endpoint("ff02::1:0").is_err(), "zero port");
     }
 
     #[test]
