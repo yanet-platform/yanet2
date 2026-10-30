@@ -451,28 +451,36 @@ classify_compile_net6_hash_commit(
 		++length_count;
 	}
 
-	uint8_t *keys = (uint8_t *)memory_balloc(
-		memory_context, NET6_LEN * net6_compile->region_count
-	);
-	uint32_t *classes = (uint32_t *)memory_balloc(
-		memory_context, sizeof(uint32_t) * net6_compile->region_count
-	);
-	if (keys == NULL || classes == NULL) {
-		if (keys != NULL) {
-			memory_bfree(
-				memory_context,
-				keys,
-				NET6_LEN * net6_compile->region_count
-			);
+	// A family no rule names keeps no regions: the attribute stays
+	// zeroed with only the miss class, and the lookup always misses.
+	uint8_t *keys = NULL;
+	uint32_t *classes = NULL;
+	if (net6_compile->region_count > 0) {
+		keys = (uint8_t *)memory_balloc(
+			memory_context, NET6_LEN * net6_compile->region_count
+		);
+		classes = (uint32_t *)memory_balloc(
+			memory_context,
+			sizeof(uint32_t) * net6_compile->region_count
+		);
+		if (keys == NULL || classes == NULL) {
+			if (keys != NULL) {
+				memory_bfree(
+					memory_context,
+					keys,
+					NET6_LEN * net6_compile->region_count
+				);
+			}
+			if (classes != NULL) {
+				memory_bfree(
+					memory_context,
+					classes,
+					sizeof(uint32_t) *
+						net6_compile->region_count
+				);
+			}
+			return -1;
 		}
-		if (classes != NULL) {
-			memory_bfree(
-				memory_context,
-				classes,
-				sizeof(uint32_t) * net6_compile->region_count
-			);
-		}
-		return -1;
 	}
 	memcpy(keys, net6_compile->keys, NET6_LEN * net6_compile->region_count);
 	// The core rewrote the cells into the final classes in place; the

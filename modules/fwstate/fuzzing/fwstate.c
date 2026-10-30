@@ -194,6 +194,7 @@ fwstate_test_config(struct cp_module **cp_module) {
 		{"fwstate_sync_alloc_failed",
 		 1,
 		 &config->sync_alloc_failed_counter_id},
+		{"fwstate_scope_dropped", 2, &config->scope_dropped_counter_id},
 	};
 
 	for (size_t i = 0; i < sizeof(counters) / sizeof(counters[0]); ++i) {
@@ -295,6 +296,11 @@ fwstate_test_config(struct cp_module **cp_module) {
 
 	config->v4_object_link_idx = 0;
 	config->v6_object_link_idx = 1;
+	// The stand-in allocates the config itself and balloc does not
+	// zero: the absent scope must read as matching everything.
+	memset(&config->scope, 0, sizeof(config->scope));
+	SET_OFFSET_OF(&config->rules, NULL);
+	config->rule_count = 0;
 
 	fwstate_fuzz_stash_init(
 		&fuzz_map_v4.stash, &fuzz_slot_v4, &fuzz_records_v4[0]

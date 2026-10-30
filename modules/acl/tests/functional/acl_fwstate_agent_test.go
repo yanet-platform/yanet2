@@ -55,7 +55,7 @@ func setupACLFWStateHarness(tb testing.TB) (*ffi.Agent, acl.Backend) {
 func TestACL_FWStateAgentSharing_TypedDestroyIsolatedPerModule(t *testing.T) {
 	agent, backend := setupACLFWStateHarness(t)
 
-	fwCfg, err := cfwstate.NewModuleConfig(agent, "fw0", nil, "", "")
+	fwCfg, err := cfwstate.NewModuleConfig(agent, "fw0", nil, nil, "", "")
 	require.NoError(t, err)
 	require.NoError(t, agent.UpdateModules([]ffi.ModuleConfig{fwCfg.AsFFIModule()}))
 

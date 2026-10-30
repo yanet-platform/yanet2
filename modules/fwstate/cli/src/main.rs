@@ -1,12 +1,13 @@
-use core::net::IpAddr;
+use core::{net::IpAddr, str::FromStr};
 
 use args::{DeleteCmd, ModeCmd, ShowCmd, UpdateCmd};
 use clap::{CommandFactory, Parser};
 use clap_complete::engine::CompletionCandidate;
-use commonpb::pb::IpAddress;
+use commonpb::pb::{IPv4Network, IPv6Network, IpAddress};
+use filterpb::pb::PortRange;
 use fwstatepb::{
     DeleteConfigRequest, ListConfigsRequest, ShowConfigRequest, ShowConfigResponse, SyncConfig, SyncEndpoint,
-    SyncListenEndpoint, UpdateConfigRequest, fw_state_service_client::FwStateServiceClient,
+    SyncListenEndpoint, SyncRule, UpdateConfigRequest, fw_state_service_client::FwStateServiceClient,
     fw_state_service_server::SERVICE_NAME,
 };
 use tonic::codec::CompressionEncoding;
@@ -84,6 +85,23 @@ fn config_block(response: &ShowConfigResponse) -> display::KeyValue {
             .row(&format!("listener {idx} port"), listener.port.unwrap_or_default());
     }
 
+    for (idx, rule) in sync_config.rules.iter().enumerate() {
+        let networks: Vec<String> = rule
+            .net4s
+            .iter()
+            .map(|net| net.to_string())
+            .chain(rule.net6s.iter().map(|net| net.to_string()))
+            .collect();
+        let ports: Vec<String> = rule
+            .src_ports
+            .iter()
+            .map(|span| format!("{}-{}", span.from, span.to))
+            .collect();
+        block = block
+            .row(&format!("rule {idx} networks"), networks.join(", "))
+            .row(&format!("rule {idx} src ports"), ports.join(","));
+    }
+
     for (setting, nanos) in [
         ("tcp syn-ack timeout", sync_config.tcp_syn_ack),
         ("tcp syn timeout", sync_config.tcp_syn),
@@ -113,7 +131,7 @@ fn effective_sync_mtu(sync_mtu: Option<u32>) -> u32 {
 }
 
 /// Builds a partial update carrying only the fields the caller supplied.
-fn update_request(cmd: &UpdateCmd) -> Result<UpdateConfigRequest, &'static str> {
+fn update_request(cmd: &UpdateCmd) -> Result<UpdateConfigRequest, String> {
     let mut request = UpdateConfigRequest {
         name: cmd.config_name.clone(),
         map_name_v4: cmd.map_name_v4.clone(),
@@ -123,7 +141,7 @@ fn update_request(cmd: &UpdateCmd) -> Result<UpdateConfigRequest, &'static str> 
     // The getter generated for the optional default timeout shadows the
     // associated constructor, so the trait method is reached through inference.
     let mut sync_config: fwstatepb::SyncConfig = Default::default();
-    update_sync_endpoints(&mut sync_config, cmd);
+    update_sync_endpoints(&mut sync_config, cmd)?;
     if let Some(value) = cmd.tcp_syn_ack {
         sync_config.tcp_syn_ack = Some(value.as_nanos() as u64);
     }
@@ -157,7 +175,7 @@ fn update_request(cmd: &UpdateCmd) -> Result<UpdateConfigRequest, &'static str> 
 /// `--sync-endpoint` and `--listen-endpoint` replace their whole list on
 /// the server; `--no-sync-endpoints` and `--no-listen-endpoints` ask the
 /// server to remove theirs.
-fn update_sync_endpoints(sync_config: &mut SyncConfig, cmd: &UpdateCmd) {
+fn update_sync_endpoints(sync_config: &mut SyncConfig, cmd: &UpdateCmd) -> Result<(), String> {
     sync_config.endpoints = cmd
         .sync_endpoint
         .iter()
@@ -181,6 +199,41 @@ fn update_sync_endpoints(sync_config: &mut SyncConfig, cmd: &UpdateCmd) {
     if cmd.no_listen_endpoints {
         sync_config.no_listeners = Some(true);
     }
+    if !cmd.sync_rule.is_empty() {
+        sync_config.rules = cmd
+            .sync_rule
+            .iter()
+            .map(|spec| parse_sync_rule_spec(spec))
+            .collect::<Result<Vec<_>, _>>()?;
+    }
+    if cmd.no_sync_rules {
+        sync_config.no_rules = Some(true);
+    }
+    Ok(())
+}
+
+/// Parses one `--sync-rule` value into the proto rule: comma-separated
+/// networks of either family and one port=FROM-TO range.
+fn parse_sync_rule_spec(spec: &str) -> Result<SyncRule, String> {
+    let mut rule = SyncRule::default();
+    for part in spec.split(',') {
+        let part = part.trim();
+        if let Some(range) = part.strip_prefix("port=") {
+            let (from, to) = range.split_once('-').ok_or("port range must be FROM-TO")?;
+            let from: u32 = from.parse().map_err(|_| "invalid port range from")?;
+            let to: u32 = to.parse().map_err(|_| "invalid port range to")?;
+            rule.src_ports.push(PortRange { from, to });
+            continue;
+        }
+        if part.contains(':') {
+            rule.net6s
+                .push(IPv6Network::from_str(part).map_err(|err| err.to_string())?);
+        } else {
+            rule.net4s
+                .push(IPv4Network::from_str(part).map_err(|err| err.to_string())?);
+        }
+    }
+    Ok(rule)
 }
 
 type FWStateService = Service<FwStateServiceClient<LayeredChannel>>;
@@ -292,6 +345,8 @@ mod tests {
             no_sync_endpoints: false,
             listen_endpoint: Vec::new(),
             no_listen_endpoints: false,
+            sync_rule: Vec::new(),
+            no_sync_rules: false,
             tcp_syn_ack: None,
             tcp_syn: None,
             tcp_fin: None,
