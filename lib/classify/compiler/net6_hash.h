@@ -482,7 +482,11 @@ classify_compile_net6_hash_commit(
 			return -1;
 		}
 	}
-	memcpy(keys, net6_compile->keys, NET6_LEN * net6_compile->region_count);
+	if (net6_compile->region_count > 0) {
+		memcpy(keys,
+		       net6_compile->keys,
+		       NET6_LEN * net6_compile->region_count);
+	}
 	// The core rewrote the cells into the final classes in place; the
 	// cell behind the regions is the miss class.
 	for (uint32_t region = 0; region < net6_compile->region_count;

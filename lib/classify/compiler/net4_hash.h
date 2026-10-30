@@ -467,9 +467,11 @@ classify_compile_net4_hash_commit(
 			return -1;
 		}
 	}
-	memcpy(keys,
-	       net4_compile->keys,
-	       sizeof(uint32_t) * net4_compile->region_count);
+	if (net4_compile->region_count > 0) {
+		memcpy(keys,
+		       net4_compile->keys,
+		       sizeof(uint32_t) * net4_compile->region_count);
+	}
 	// The core rewrote the cells into the final classes in place; the
 	// cell behind the regions is the miss class.
 	for (uint32_t region = 0; region < net4_compile->region_count;
