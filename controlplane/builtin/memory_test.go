@@ -1,7 +1,10 @@
 package builtin_test
 
 import (
+	"maps"
 	"math"
+	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/c2h5oh/datasize"
@@ -16,6 +19,7 @@ import (
 	ynpb "github.com/yanet-platform/yanet2/controlplane/ynpb/v1"
 )
 
+// findMetric returns the named series with the exact, unordered label set.
 func findMetric(t *testing.T, metrics []*commonpb.Metric, name string, labels map[string]string) *commonpb.Metric {
 	t.Helper()
 
@@ -24,14 +28,11 @@ func findMetric(t *testing.T, metrics []*commonpb.Metric, name string, labels ma
 			continue
 		}
 
-		match := true
+		actualLabels := map[string]string{}
 		for _, label := range metric.GetLabels() {
-			if want, ok := labels[label.GetName()]; ok && want != label.GetValue() {
-				match = false
-				break
-			}
+			actualLabels[label.GetName()] = label.GetValue()
 		}
-		if match && len(metric.GetLabels()) == len(labels) {
+		if len(metric.GetLabels()) == len(labels) && maps.Equal(actualLabels, labels) {
 			return metric
 		}
 	}
@@ -39,11 +40,82 @@ func findMetric(t *testing.T, metrics []*commonpb.Metric, name string, labels ma
 	return nil
 }
 
+// gaugeValue rejects other metric kinds even when their default value is zero.
 func gaugeValue(t *testing.T, metric *commonpb.Metric) float64 {
 	t.Helper()
 
 	require.NotNil(t, metric)
+	require.IsType(t, &commonpb.Metric_Gauge{}, metric.GetValue())
 	return metric.GetGauge()
+}
+
+// Test_CPAllocatorMetrics_AllocatorCapacity verifies that shared capacity is
+// exported even without agents and zero-valued classes are not omitted.
+func Test_CPAllocatorMetrics_AllocatorCapacity(t *testing.T) {
+	stats := ffi.AllocatorStats{
+		FreeBytes:             48,
+		LargestFreeBlockBytes: 32,
+		Pools: []ffi.AllocatorPoolStats{
+			{BlockSizeBytes: 8, FreeBlocks: 2},
+			{BlockSizeBytes: 16, FreeBlocks: 0},
+			{BlockSizeBytes: 32, FreeBlocks: 1},
+		},
+	}
+	metrics := builtin.CPAllocatorMetrics(stats)
+	require.Len(t, metrics, 2+len(stats.Pools))
+	assertAllocatorMetrics(t, metrics, "cp", "", stats)
+}
+
+// Test_MemoryMetrics_AllocatorUsesLiveGeneration verifies that retired
+// arenas do not produce duplicate series or inflate live free capacity.
+func Test_MemoryMetrics_AllocatorUsesLiveGeneration(t *testing.T) {
+	stats := ffi.AllocatorStats{
+		FreeBytes:             64,
+		LargestFreeBlockBytes: 32,
+		Pools: []ffi.AllocatorPoolStats{
+			{BlockSizeBytes: 16, FreeBlocks: 0},
+			{BlockSizeBytes: 32, FreeBlocks: 2},
+		},
+	}
+	agents := []ffi.AgentInfo{{
+		Name: "route",
+		Instances: []ffi.AgentInstanceInfo{
+			{Allocator: stats},
+			{Allocator: ffi.AllocatorStats{FreeBytes: 1024, LargestFreeBlockBytes: 512}},
+		},
+	}}
+	metrics := builtin.MemoryMetrics(agents)
+	assertAllocatorMetrics(t, metrics, "agent", "route", stats)
+	var allocatorCount int
+	for _, metric := range metrics {
+		if strings.HasPrefix(metric.GetName(), "memory_allocator_") {
+			allocatorCount++
+		}
+	}
+	require.Equal(t, 2+len(stats.Pools), allocatorCount)
+}
+
+// assertAllocatorMetrics checks exact labels and raw size-class counts
+// without introducing PID or generation labels into monitoring.
+func assertAllocatorMetrics(t *testing.T, metrics []*commonpb.Metric, scope string, agent string, stats ffi.AllocatorStats) {
+	t.Helper()
+	labels := map[string]string{"scope": scope, "agent": agent}
+	require.Equal(t, float64(stats.FreeBytes), gaugeValue(t,
+		findMetric(t, metrics, "memory_allocator_free_bytes", labels),
+	))
+	require.Equal(t, float64(stats.LargestFreeBlockBytes), gaugeValue(t,
+		findMetric(t, metrics, "memory_allocator_largest_free_block_bytes", labels),
+	))
+	for _, pool := range stats.Pools {
+		labels := map[string]string{
+			"scope":            scope,
+			"agent":            agent,
+			"block_size_bytes": strconv.FormatUint(pool.BlockSizeBytes, 10),
+		}
+		require.Equal(t, float64(pool.FreeBlocks), gaugeValue(t,
+			findMetric(t, metrics, "memory_allocator_free_blocks", labels),
+		))
+	}
 }
 
 // TestMemoryMetricsContextPathResolution verifies that the root node of

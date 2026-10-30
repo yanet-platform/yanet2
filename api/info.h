@@ -209,6 +209,22 @@ struct cp_memory_node_info {
 	uint64_t bfree_size;
 };
 
+#define CP_ALLOCATOR_POOL_COUNT 24
+
+struct cp_allocator_pool_info {
+	uint64_t block_size_bytes;
+	uint64_t free_blocks;
+};
+
+// A lock-consistent copy of free capacity, including empty size classes.
+//
+// Block sizes include sanitizer red zones, not just usable payload bytes.
+struct cp_allocator_info {
+	uint64_t free_bytes;
+	uint64_t largest_free_block_bytes;
+	struct cp_allocator_pool_info pools[CP_ALLOCATOR_POOL_COUNT];
+};
+
 struct cp_agent_instance_info {
 	pid_t pid;
 	uint64_t memory_limit;
@@ -218,6 +234,7 @@ struct cp_agent_instance_info {
 	// Subtract from memory_limit to see how much memory the agent is
 	// currently using.
 	uint64_t free_bytes;
+	struct cp_allocator_info allocator;
 	// Flat depth-first snapshot of the agent instance's memory-context
 	// subtree.
 	//
@@ -282,3 +299,10 @@ cp_memory_info_free(struct cp_memory_info *memory_info);
 
 struct cp_memory_info *
 yanet_get_cp_memory_info(struct dp_config *dp_config);
+
+// Copies the shared control-plane allocator's free capacity without waiting
+// for configuration publication or allocating from shared memory.
+void
+yanet_get_cp_allocator_stats(
+	struct dp_config *dp_config, struct cp_allocator_info *info
+);

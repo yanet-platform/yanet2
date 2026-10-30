@@ -1522,6 +1522,26 @@ memory_context_fill_nodes(
 	}
 }
 
+static_assert(
+	CP_ALLOCATOR_POOL_COUNT == MEMORY_BLOCK_ALLOCATOR_EXP,
+	"API allocator size classes must match the internal snapshot"
+);
+
+static void
+allocator_fill_info(
+	struct block_allocator *allocator, struct cp_allocator_info *info
+) {
+	struct block_allocator_stats stats;
+	block_allocator_get_stats(allocator, &stats);
+	info->free_bytes = stats.free_bytes;
+	info->largest_free_block_bytes = stats.largest_free_block_bytes;
+	for (size_t idx = 0; idx < CP_ALLOCATOR_POOL_COUNT; ++idx) {
+		info->pools[idx].block_size_bytes =
+			block_allocator_pool_size(allocator, idx);
+		info->pools[idx].free_blocks = stats.free_blocks[idx];
+	}
+}
+
 // Build the heap-side instance info for one agent, including its
 // memory-context tree snapshot.
 //
@@ -1556,12 +1576,11 @@ build_instance_info(struct agent *agent) {
 	info->pid = agent->pid;
 	info->memory_limit = agent->memory_limit;
 	info->gen = agent->gen;
-	// For agent_attach'd agents, &agent->block_allocator is the same
-	// allocator as alloc above, and its spinlock is not reentrant, so this
-	// call must run strictly outside the locked sections above and below.
-	// For dp_system_agent_new agents the two allocators differ, but running
-	// it here uniformly keeps the call site the same for both shapes.
-	info->free_bytes = block_allocator_free_size(&agent->block_allocator);
+	// Agent-owned arenas share a non-reentrant lock with their context
+	// tree, so free-capacity sampling must remain outside locked tree
+	// traversal.
+	allocator_fill_info(&agent->block_allocator, &info->allocator);
+	info->free_bytes = info->allocator.free_bytes;
 
 	uint32_t next_idx = 0;
 	spinlock_lock(&alloc->lock);
@@ -1748,6 +1767,14 @@ yanet_get_cp_memory_info(struct dp_config *dp_config) {
 	spinlock_unlock(&cp_config->block_allocator.lock);
 	memory_info->memory_node_count = next_idx;
 	return memory_info;
+}
+
+void
+yanet_get_cp_allocator_stats(
+	struct dp_config *dp_config, struct cp_allocator_info *info
+) {
+	struct cp_config *cp_config = ADDR_OF(&dp_config->cp_config);
+	allocator_fill_info(&cp_config->block_allocator, info);
 }
 
 int
