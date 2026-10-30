@@ -1,9 +1,9 @@
-use core::{net::IpAddr, str::FromStr};
+use core::net::IpAddr;
 
 use args::{DeleteCmd, ModeCmd, ShowCmd, UpdateCmd};
 use clap::{CommandFactory, Parser};
 use clap_complete::engine::CompletionCandidate;
-use commonpb::pb::{IPv4Network, IPv6Network, IpAddress};
+use commonpb::pb::IpAddress;
 use filterpb::pb::PortRange;
 use fwstatepb::{
     DeleteConfigRequest, ListConfigsRequest, ShowConfigRequest, ShowConfigResponse, SyncConfig, SyncEndpoint,
@@ -86,11 +86,18 @@ fn config_block(response: &ShowConfigResponse) -> display::KeyValue {
     }
 
     for (idx, rule) in sync_config.rules.iter().enumerate() {
-        let networks: Vec<String> = rule
-            .net4s
+        let addresses: Vec<String> = rule
+            .addrs
             .iter()
-            .map(|net| net.to_string())
-            .chain(rule.net6s.iter().map(|net| net.to_string()))
+            .map(|addr| match addr.addr.len() {
+                4 => format!("{}.{}.{}.{}", addr.addr[0], addr.addr[1], addr.addr[2], addr.addr[3]),
+                _ => addr
+                    .addr
+                    .iter()
+                    .map(|b| format!("{b:02x}"))
+                    .collect::<Vec<_>>()
+                    .join(":"),
+            })
             .collect();
         let ports: Vec<String> = rule
             .src_ports
@@ -98,7 +105,7 @@ fn config_block(response: &ShowConfigResponse) -> display::KeyValue {
             .map(|span| format!("{}-{}", span.from, span.to))
             .collect();
         block = block
-            .row(&format!("rule {idx} networks"), networks.join(", "))
+            .row(&format!("rule {idx} addresses"), addresses.join(", "))
             .row(&format!("rule {idx} src ports"), ports.join(","));
     }
 
@@ -213,7 +220,7 @@ fn update_sync_endpoints(sync_config: &mut SyncConfig, cmd: &UpdateCmd) -> Resul
 }
 
 /// Parses one `--sync-rule` value into the proto rule: comma-separated
-/// networks of either family and one port=FROM-TO range.
+/// exact addresses of either family and one port=FROM-TO range.
 fn parse_sync_rule_spec(spec: &str) -> Result<SyncRule, String> {
     let mut rule = SyncRule::default();
     for part in spec.split(',') {
@@ -225,13 +232,13 @@ fn parse_sync_rule_spec(spec: &str) -> Result<SyncRule, String> {
             rule.src_ports.push(PortRange { from, to });
             continue;
         }
-        if part.contains(':') {
-            rule.net6s
-                .push(IPv6Network::from_str(part).map_err(|err| err.to_string())?);
-        } else {
-            rule.net4s
-                .push(IPv4Network::from_str(part).map_err(|err| err.to_string())?);
-        }
+        let addr: core::net::IpAddr = part.parse().map_err(|err| format!("invalid address {part:?}: {err}"))?;
+        rule.addrs.push(IpAddress {
+            addr: match addr {
+                core::net::IpAddr::V4(v4) => v4.octets().to_vec(),
+                core::net::IpAddr::V6(v6) => v6.octets().to_vec(),
+            },
+        });
     }
     Ok(rule)
 }

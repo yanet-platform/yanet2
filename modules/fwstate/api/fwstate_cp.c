@@ -50,7 +50,7 @@ fwstate_module_positions_new(
 		return 0;
 	}
 	struct fwstate_stash_position *positions = fwstate_stash_zalloc(
-		&config->cp_module.memory_context,
+		&config->cp_module.entity.memory_context,
 		sizeof(struct fwstate_stash_position) * worker_count
 	);
 	if (positions == NULL) {
@@ -67,7 +67,7 @@ fwstate_module_positions_free(struct fwstate_module_config *config) {
 	struct fwstate_stash_position *positions = ADDR_OF(&config->positions);
 	if (positions != NULL) {
 		fwstate_stash_zfree(
-			&config->cp_module.memory_context,
+			&config->cp_module.entity.memory_context,
 			positions,
 			sizeof(struct fwstate_stash_position) *
 				config->worker_count
@@ -104,21 +104,21 @@ fwstate_module_link_table(
 // Field selectors of the scope rule: the module rule is handed to the
 // classify compilers directly, every attribute through its getter.
 static inline void
-fwstate_rule_get_net4s(
-	const struct classifier_rule *rule, struct filter_net4s *nets
+fwstate_rule_get_addrs4(
+	const struct classifier_rule *rule, struct classify_net4_addrs *addrs
 ) {
 	const struct fwstate_sync_rule *sync_rule =
 		container_of(rule, struct fwstate_sync_rule, rule);
-	*nets = sync_rule->net4s;
+	*addrs = sync_rule->addrs4;
 }
 
 static inline void
-fwstate_rule_get_net6s(
-	const struct classifier_rule *rule, struct filter_net6s *nets
+fwstate_rule_get_addrs6(
+	const struct classifier_rule *rule, struct classify_net6_addrs *addrs
 ) {
 	const struct fwstate_sync_rule *sync_rule =
 		container_of(rule, struct fwstate_sync_rule, rule);
-	*nets = sync_rule->net6s;
+	*addrs = sync_rule->addrs6;
 }
 
 static inline void
@@ -130,8 +130,8 @@ fwstate_rule_get_src_ports(
 	*ports = sync_rule->src_ports;
 }
 
-CLASSIFY_NET4_HASH_COMPILE(fwstate_net4, fwstate_rule_get_net4s)
-CLASSIFY_NET6_HASH_COMPILE(fwstate_net6, fwstate_rule_get_net6s)
+CLASSIFY_NET4_HASH_COMPILE(fwstate_net4, fwstate_rule_get_addrs4)
+CLASSIFY_NET6_HASH_COMPILE(fwstate_net6, fwstate_rule_get_addrs6)
 CLASSIFY_U16_RANGES_COMPILE(
 	fwstate_port, struct classify_attr_port, fwstate_rule_get_src_ports
 )
@@ -188,31 +188,35 @@ fwstate_scope_compile(
 		const struct fwstate_sync_rule_input *input = inputs + rule_idx;
 		struct fwstate_sync_rule *rule = rules + rule_idx;
 
-		if (input->net4_count > 0) {
-			rule->net4s.items = (struct net4 *)memory_balloc(
-				memory_context,
-				sizeof(struct net4) * input->net4_count
-			);
-			if (rule->net4s.items == NULL) {
+		if (input->addr4_count > 0) {
+			uint8_t(*items)[NET4_LEN] =
+				(uint8_t(*)[NET4_LEN])memory_balloc(
+					memory_context,
+					NET4_LEN * input->addr4_count
+				);
+			if (items == NULL) {
 				goto error;
 			}
-			memcpy(rule->net4s.items,
-			       input->net4s,
-			       sizeof(struct net4) * input->net4_count);
-			rule->net4s.count = input->net4_count;
+			memcpy(items,
+			       input->addrs4,
+			       NET4_LEN * input->addr4_count);
+			rule->addrs4.items = items;
+			rule->addrs4.count = input->addr4_count;
 		}
-		if (input->net6_count > 0) {
-			rule->net6s.items = (struct net6 *)memory_balloc(
-				memory_context,
-				sizeof(struct net6) * input->net6_count
-			);
-			if (rule->net6s.items == NULL) {
+		if (input->addr6_count > 0) {
+			uint8_t(*items)[NET6_LEN] =
+				(uint8_t(*)[NET6_LEN])memory_balloc(
+					memory_context,
+					NET6_LEN * input->addr6_count
+				);
+			if (items == NULL) {
 				goto error;
 			}
-			memcpy(rule->net6s.items,
-			       input->net6s,
-			       sizeof(struct net6) * input->net6_count);
-			rule->net6s.count = input->net6_count;
+			memcpy(items,
+			       input->addrs6,
+			       NET6_LEN * input->addr6_count);
+			rule->addrs6.items = items;
+			rule->addrs6.count = input->addr6_count;
 		}
 		if (input->src_port_count > 0) {
 			rule->src_ports.items =
@@ -517,7 +521,7 @@ fwstate_module_config_destroy(struct cp_module *cp_module) {
 	);
 
 	// Capture agent before fini zeroes it.
-	struct agent *agent = ADDR_OF(&cp_module->agent);
+	struct agent *agent = ADDR_OF(&cp_module->entity.agent);
 
 	// The linked fwstate-map objects own the tables and the stashes; the
 	// config owns its read positions, its scope rules and the compiled
@@ -543,7 +547,7 @@ fwstate_module_config_free(struct cp_module *cp_module, yanet_error **err) {
 		return -1;
 	}
 
-	struct agent *owner = ADDR_OF(&cp_module->agent);
+	struct agent *owner = ADDR_OF(&cp_module->entity.agent);
 
 	fwstate_module_config_destroy(cp_module);
 	agent_destroy_released(owner);

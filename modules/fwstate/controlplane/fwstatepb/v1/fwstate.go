@@ -221,16 +221,10 @@ func (m *SyncConfig) validateEndpointLists() error {
 
 // validateSyncScopeRule checks one update-carried scope rule's form.
 func validateSyncScopeRule(idx int, rule *SyncRule) error {
-	if len(rule.GetNet4S()) > MaxSyncRuleNets {
+	if len(rule.GetAddrs()) > 2*MaxSyncRuleNets {
 		return fmt.Errorf(
-			"rules[%d].net4s: at most %d networks per rule, got %d",
-			idx, MaxSyncRuleNets, len(rule.GetNet4S()),
-		)
-	}
-	if len(rule.GetNet6S()) > MaxSyncRuleNets {
-		return fmt.Errorf(
-			"rules[%d].net6s: at most %d networks per rule, got %d",
-			idx, MaxSyncRuleNets, len(rule.GetNet6S()),
+			"rules[%d].addrs: at most %d addresses per rule, got %d",
+			idx, 2*MaxSyncRuleNets, len(rule.GetAddrs()),
 		)
 	}
 	if len(rule.GetSrcPorts()) > MaxSyncRulePortRanges {

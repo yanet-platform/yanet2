@@ -105,7 +105,7 @@ fwstate_fuzz_cleanup(void) {
 
 	struct fwstate_module_config *config =
 		(struct fwstate_module_config *)fuzz_params.cp_module;
-	struct memory_context *ctx = &config->cp_module.memory_context;
+	struct memory_context *ctx = &config->cp_module.entity.memory_context;
 
 	fwstate_fuzz_free_chain(&fuzz_map_v4.table, ctx);
 	fwstate_fuzz_free_chain(&fuzz_map_v6.table, ctx);
@@ -139,13 +139,13 @@ fwstate_test_config(struct cp_module **cp_module) {
 		"fwstate_test",
 		sizeof(config->cp_module.name));
 	memory_context_init_from(
-		&config->cp_module.memory_context,
+		&config->cp_module.entity.memory_context,
 		&fuzz_params.mctx,
 		"fwstate_test"
 	);
 
 	config->cp_module.dp_module_idx = 0;
-	config->cp_module.agent = NULL;
+	config->cp_module.entity.agent = NULL;
 
 	// The fwstate handler unconditionally resolves per-worker counter
 	// addresses via counter_get_address(), so a valid counter_registry and
@@ -154,7 +154,7 @@ fwstate_test_config(struct cp_module **cp_module) {
 	// [packets].
 	if (counter_registry_init(
 		    &config->cp_module.counter_registry,
-		    &config->cp_module.memory_context,
+		    &config->cp_module.entity.memory_context,
 		    0
 	    )) {
 		goto error_config;
@@ -247,7 +247,7 @@ fwstate_test_config(struct cp_module **cp_module) {
 	if (fwtable_insert_layer_cp(
 		    &fuzz_map_v4.table,
 		    &fw4config,
-		    &config->cp_module.memory_context
+		    &config->cp_module.entity.memory_context
 	    )) {
 		goto error_storage;
 	}
@@ -269,7 +269,7 @@ fwstate_test_config(struct cp_module **cp_module) {
 	if (fwtable_insert_layer_cp(
 		    &fuzz_map_v6.table,
 		    &fw6config,
-		    &config->cp_module.memory_context
+		    &config->cp_module.entity.memory_context
 	    )) {
 		goto error_table_v4;
 	}
@@ -365,7 +365,7 @@ fwstate_test_config(struct cp_module **cp_module) {
 
 error_table_v4:
 	fwstate_fuzz_free_chain(
-		&fuzz_map_v4.table, &config->cp_module.memory_context
+		&fuzz_map_v4.table, &config->cp_module.entity.memory_context
 	);
 
 error_storage:

@@ -78,12 +78,8 @@ fn parse_sync_rule(value: &str) -> Result<String, String> {
             }
             continue;
         }
-        let parsed: core::net::IpAddr = part
-            .parse()
-            .map_err(|err| format!("invalid network address {part:?}: {err}"))?;
-        if parsed.is_ipv4() && !part.contains('/') {
-            return Err("IPv4 networks must carry a prefix length".to_string());
-        }
+        part.parse::<core::net::IpAddr>()
+            .map_err(|err| format!("invalid address {part:?}: {err}"))?;
     }
     Ok(value.to_string())
 }
@@ -181,7 +177,7 @@ pub struct UpdateCmd {
     /// syncs everything.
     #[arg(
         long = "sync-rule",
-        value_name = "NET[,NET...][,port=FROM-TO]",
+        value_name = "ADDR[,ADDR...][,port=FROM-TO]",
         value_parser = parse_sync_rule
     )]
     pub sync_rule: Vec<String>,

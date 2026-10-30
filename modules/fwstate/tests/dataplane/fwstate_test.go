@@ -226,43 +226,54 @@ func Test_FWState_WirePacketWithoutListener(t *testing.T) {
 // one outside stays local, and an external frame outside the scope is
 // counted and skipped rather than applied.
 func Test_FWState_ScopeFiltersSync(t *testing.T) {
-	cpModule := newFWStateFixture(t, 0)
+	cpModule := newFWStateFixture(t, uint64(8*syncRecordSize))
 	SetSyncScope(cpModule)
 
 	inScope := createSyncPacket(t, layers.IPProtocolTCP,
-		WithPorts(150, 80), WithAddrs("2001:db8::1", "2001:db8::2"),
+		WithPorts(150, 80), WithAddrs("2001:db8::1", "2001:db8::9"),
 	)
 	outside := createSyncPacket(t, layers.IPProtocolTCP,
-		WithPorts(9999, 80), WithAddrs("2001:db8::1", "2001:db8::2"),
+		WithPorts(9999, 80), WithAddrs("2001:db8::1", "2001:db8::9"),
+	)
+	otherAddr := createSyncPacket(t, layers.IPProtocolTCP,
+		WithPorts(150, 80), WithAddrs("2001:db8::7", "2001:db8::9"),
 	)
 
-	// Local events: the in-scope record is emitted, the out-of-scope
-	// one is applied but not emitted.
-	result := xerror.Unwrap(fwstateHandleLocalEvents(cpModule, inScope, outside))
+	// Local events: the in-scope record is emitted; the wrong-port and
+	// the wrong-address ones are applied but not emitted.
+	result := xerror.Unwrap(fwstateHandleLocalEvents(cpModule, inScope, outside, otherAddr))
 	require.Len(t, result.Output, 1, "only the in-scope record is emitted")
 	require.Empty(t, result.Drop)
 	require.True(t,
-		CheckStateExists(cpModule, layers.IPProtocolTCP, 150, 80, "2001:db8::1", "2001:db8::2"),
-		"both records are applied locally",
+		CheckStateExists(cpModule, layers.IPProtocolTCP, 150, 80, "2001:db8::1", "2001:db8::9"),
+		"all records are applied locally",
 	)
 	require.True(t,
-		CheckStateExists(cpModule, layers.IPProtocolTCP, 9999, 80, "2001:db8::1", "2001:db8::2"),
-		"both records are applied locally",
+		CheckStateExists(cpModule, layers.IPProtocolTCP, 9999, 80, "2001:db8::1", "2001:db8::9"),
+		"all records are applied locally",
+	)
+	require.True(t,
+		CheckStateExists(cpModule, layers.IPProtocolTCP, 150, 80, "2001:db8::7", "2001:db8::9"),
+		"all records are applied locally",
 	)
 
 	// External frames: the claimed packets are consumed, but only the
 	// in-scope frame is applied as external state; the out-of-scope one
 	// is counted and skipped.
-	scoped := xerror.Unwrap(fwstateHandleWirePackets(cpModule, inScope, outside))
-	require.Len(t, scoped.Drop, 2, "claimed sync packets are consumed")
+	scoped := xerror.Unwrap(fwstateHandleWirePackets(cpModule, inScope, outside, otherAddr))
+	require.Len(t, scoped.Drop, 3, "claimed sync packets are consumed")
 	require.Empty(t, scoped.Output)
 	require.True(t,
-		GetStateValue(cpModule, layers.IPProtocolTCP, 150, 80, "2001:db8::1", "2001:db8::2").External,
+		GetStateValue(cpModule, layers.IPProtocolTCP, 150, 80, "2001:db8::1", "2001:db8::9").External,
 		"the in-scope frame is applied as external",
 	)
 	require.False(t,
-		GetStateValue(cpModule, layers.IPProtocolTCP, 9999, 80, "2001:db8::1", "2001:db8::2").External,
-		"the out-of-scope frame is not applied",
+		GetStateValue(cpModule, layers.IPProtocolTCP, 9999, 80, "2001:db8::1", "2001:db8::9").External,
+		"the wrong-port frame is not applied",
+	)
+	require.False(t,
+		GetStateValue(cpModule, layers.IPProtocolTCP, 150, 80, "2001:db8::7", "2001:db8::9").External,
+		"the wrong-address frame is not applied",
 	)
 }
 
