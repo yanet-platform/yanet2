@@ -3,6 +3,15 @@
 #include "fwstate_cp.h"
 
 #include "common/container_of.h"
+#include "lib/classify/classifiers/net4_hash.h"
+#include "lib/classify/classifiers/net6_hash.h"
+#include "lib/classify/classifiers/port.h"
+#include "lib/classify/classify.h"
+#include "lib/classify/compiler/helper.h"
+#include "lib/classify/compiler/net4_hash.h"
+#include "lib/classify/compiler/net6_hash.h"
+#include "lib/classify/compiler/u16_ranges.h"
+#include "lib/classify/rule_table.h"
 #include "lib/controlplane/agent/agent.h"
 #include "lib/controlplane/config/zone.h"
 #include "lib/dataplane/config/zone.h"
@@ -92,6 +101,211 @@ fwstate_module_link_table(
 	);
 }
 
+// Field selectors of the scope rule: the module rule is handed to the
+// classify compilers directly, every attribute through its getter.
+static inline void
+fwstate_rule_get_addrs4(
+	const struct classifier_rule *rule, struct classify_net4_addrs *addrs
+) {
+	const struct fwstate_sync_rule *sync_rule =
+		container_of(rule, struct fwstate_sync_rule, rule);
+	*addrs = sync_rule->addrs4;
+}
+
+static inline void
+fwstate_rule_get_addrs6(
+	const struct classifier_rule *rule, struct classify_net6_addrs *addrs
+) {
+	const struct fwstate_sync_rule *sync_rule =
+		container_of(rule, struct fwstate_sync_rule, rule);
+	*addrs = sync_rule->addrs6;
+}
+
+static inline void
+fwstate_rule_get_src_ports(
+	const struct classifier_rule *rule, struct filter_u16_ranges *ports
+) {
+	const struct fwstate_sync_rule *sync_rule =
+		container_of(rule, struct fwstate_sync_rule, rule);
+	*ports = sync_rule->src_ports;
+}
+
+CLASSIFY_NET4_HASH_COMPILE(fwstate_net4, fwstate_rule_get_addrs4)
+CLASSIFY_NET6_HASH_COMPILE(fwstate_net6, fwstate_rule_get_addrs6)
+CLASSIFY_U16_RANGES_COMPILE(
+	fwstate_port, struct classify_attr_port, fwstate_rule_get_src_ports
+)
+
+// Releases the compiled scope; safe on a zeroed one, so a destroy path
+// is idempotent.
+static void
+fwstate_scope_free(
+	struct memory_context *memory_context,
+	struct fwstate_scope *scope,
+	uint32_t rule_count
+) {
+	rule_table_free(&scope->net6_rules);
+	classify_attr_net6_hash_free(memory_context, &scope->net6_attr);
+	classifier_fini(&scope->net6_cls, memory_context, rule_count);
+
+	rule_table_free(&scope->net4_rules);
+	classify_attr_net4_hash_free(memory_context, &scope->net4_attr);
+	classifier_fini(&scope->net4_cls, memory_context, rule_count);
+
+	classify_attr_port_free(memory_context, &scope->port_attr);
+	classifier_fini(&scope->port_cls, memory_context, rule_count);
+
+	memset(scope, 0, sizeof(*scope));
+}
+
+// Copies the flat input rules into the config's memory tree and
+// compiles them into the scope. A zero rule count leaves the scope
+// zeroed - matching everything - without touching the classifiers.
+//
+// Returns -1 with the rules and the scope freed on failure.
+static int
+fwstate_scope_compile(
+	struct memory_context *memory_context,
+	struct fwstate_module_config *config,
+	const struct fwstate_sync_rule_input *inputs,
+	uint32_t rule_count
+) {
+	if (rule_count == 0) {
+		return 0;
+	}
+
+	struct fwstate_sync_rule *rules =
+		(struct fwstate_sync_rule *)memory_balloc(
+			memory_context,
+			sizeof(struct fwstate_sync_rule) * rule_count
+		);
+	if (rules == NULL) {
+		return -1;
+	}
+	memset(rules, 0, sizeof(struct fwstate_sync_rule) * rule_count);
+
+	for (uint32_t rule_idx = 0; rule_idx < rule_count; ++rule_idx) {
+		const struct fwstate_sync_rule_input *input = inputs + rule_idx;
+		struct fwstate_sync_rule *rule = rules + rule_idx;
+
+		if (input->addr4_count > 0) {
+			uint8_t(*items)[NET4_LEN] =
+				(uint8_t(*)[NET4_LEN])memory_balloc(
+					memory_context,
+					NET4_LEN * input->addr4_count
+				);
+			if (items == NULL) {
+				goto error;
+			}
+			memcpy(items,
+			       input->addrs4,
+			       NET4_LEN * input->addr4_count);
+			rule->addrs4.items = items;
+			rule->addrs4.count = input->addr4_count;
+		}
+		if (input->addr6_count > 0) {
+			uint8_t(*items)[NET6_LEN] =
+				(uint8_t(*)[NET6_LEN])memory_balloc(
+					memory_context,
+					NET6_LEN * input->addr6_count
+				);
+			if (items == NULL) {
+				goto error;
+			}
+			memcpy(items,
+			       input->addrs6,
+			       NET6_LEN * input->addr6_count);
+			rule->addrs6.items = items;
+			rule->addrs6.count = input->addr6_count;
+		}
+		if (input->src_port_count > 0) {
+			rule->src_ports.items =
+				(const struct filter_u16_span *)memory_balloc(
+					memory_context,
+					sizeof(struct filter_u16_span) *
+						input->src_port_count
+				);
+			if (rule->src_ports.items == NULL) {
+				goto error;
+			}
+			memcpy((void *)rule->src_ports.items,
+			       input->src_ports,
+			       sizeof(struct filter_u16_span) *
+				       input->src_port_count);
+			rule->src_ports.count = input->src_port_count;
+		}
+	}
+
+	const struct classifier_rule *rule_ptrs[FWSTATE_SYNC_RULES_MAX];
+	for (uint32_t rule_idx = 0; rule_idx < rule_count; ++rule_idx) {
+		rule_ptrs[rule_idx] = &rules[rule_idx].rule;
+	}
+
+	struct fwstate_scope *scope = &config->scope;
+	if (classify_fwstate_net4_compile(
+		    memory_context,
+		    "scope4",
+		    rule_ptrs,
+		    rule_count,
+		    &scope->net4_attr,
+		    &scope->net4_cls
+	    )) {
+		goto error;
+	}
+	if (classify_fwstate_net6_compile(
+		    memory_context,
+		    "scope6",
+		    rule_ptrs,
+		    rule_count,
+		    &scope->net6_attr,
+		    &scope->net6_cls
+	    )) {
+		goto error;
+	}
+	if (classify_fwstate_port_compile(
+		    memory_context,
+		    "scopep",
+		    rule_ptrs,
+		    rule_count,
+		    &scope->port_attr,
+		    &scope->port_cls
+	    )) {
+		goto error;
+	}
+	if (classify_join_rules(
+		    memory_context,
+		    "scope4",
+		    &scope->net4_cls,
+		    &scope->port_cls,
+		    rule_ptrs,
+		    rule_count,
+		    &scope->net4_rules
+	    )) {
+		goto error;
+	}
+	if (classify_join_rules(
+		    memory_context,
+		    "scope6",
+		    &scope->net6_cls,
+		    &scope->port_cls,
+		    rule_ptrs,
+		    rule_count,
+		    &scope->net6_rules
+	    )) {
+		goto error;
+	}
+
+	config->rules = rules;
+	config->rule_count = rule_count;
+	return 0;
+
+error:
+	// The partial scope unwinds through the scope free; the rules stay
+	// in the config's memory tree, freed with the config itself.
+	fwstate_scope_free(memory_context, &config->scope, rule_count);
+	return -1;
+}
+
 // One-shot construction: install the caller's sync config (or the
 // defaults) and declare the named map-object links. A config handle is
 // built exactly once and never updated afterwards.
@@ -99,6 +313,8 @@ static int
 fwstate_module_setup(
 	struct fwstate_module_config *config,
 	const struct fwstate_sync_config *sync_config,
+	const struct fwstate_sync_rule_input *rules,
+	uint32_t rule_count,
 	const char *fw4_map_name,
 	const char *fw6_map_name,
 	yanet_error **err
@@ -107,6 +323,12 @@ fwstate_module_setup(
 
 	if (sync_config != NULL) {
 		config->sync_config = *sync_config;
+	}
+
+	if (fwstate_scope_compile(
+		    &cp_module->entity.memory_context, config, rules, rule_count
+	    )) {
+		return -1;
 	}
 
 	if (fw4_map_name != NULL && fw4_map_name[0] != '\0') {
@@ -141,6 +363,8 @@ fwstate_module_config_new(
 	struct agent *agent,
 	const char *name,
 	const struct fwstate_sync_config *sync_config,
+	const struct fwstate_sync_rule_input *rules,
+	uint32_t rule_count,
 	const char *fw4_map_name,
 	const char *fw6_map_name,
 	yanet_error **err
@@ -152,6 +376,20 @@ fwstate_module_config_new(
 		);
 	if (config == NULL) {
 		yanet_error_add(err, "failed to allocate config");
+		return NULL;
+	}
+
+	if (rule_count > FWSTATE_SYNC_RULES_MAX) {
+		yanet_error_add(
+			err,
+			"at most %d sync scope rules are supported",
+			FWSTATE_SYNC_RULES_MAX
+		);
+		memory_bfree(
+			&agent->memory_context,
+			config,
+			sizeof(struct fwstate_module_config)
+		);
 		return NULL;
 	}
 
@@ -172,6 +410,9 @@ fwstate_module_config_new(
 	config->v6_object_link_idx = FWSTATE_OBJECT_LINK_NONE;
 	config->worker_count = 0;
 	SET_OFFSET_OF(&config->positions, NULL);
+	memset(&config->scope, 0, sizeof(config->scope));
+	SET_OFFSET_OF(&config->rules, NULL);
+	config->rule_count = 0;
 	fwstate_config_set_defaults(&config->sync_config);
 
 	// Register module-level counters.
@@ -211,6 +452,7 @@ fwstate_module_config_new(
 		{"fwstate_sync_alloc_failed",
 		 1,
 		 &config->sync_alloc_failed_counter_id},
+		{"fwstate_scope_dropped", 2, &config->scope_dropped_counter_id},
 	};
 
 	for (size_t i = 0; i < sizeof(counters) / sizeof(counters[0]); ++i) {
@@ -257,7 +499,13 @@ fwstate_module_config_new(
 	// including the per-worker read positions; the config owns no table
 	// memory.
 	if (fwstate_module_setup(
-		    config, sync_config, fw4_map_name, fw6_map_name, err
+		    config,
+		    sync_config,
+		    rules,
+		    rule_count,
+		    fw4_map_name,
+		    fw6_map_name,
+		    err
 	    )) {
 		fwstate_module_config_destroy(&config->cp_module);
 		return NULL;
@@ -276,7 +524,13 @@ fwstate_module_config_destroy(struct cp_module *cp_module) {
 	struct agent *agent = ADDR_OF(&cp_module->entity.agent);
 
 	// The linked fwstate-map objects own the tables and the stashes; the
-	// config owns only its read positions.
+	// config owns its read positions, its scope rules and the compiled
+	// scope.
+	fwstate_scope_free(
+		&cp_module->entity.memory_context,
+		&config->scope,
+		config->rule_count
+	);
 	fwstate_module_positions_free(config);
 	cp_module_fini(cp_module);
 

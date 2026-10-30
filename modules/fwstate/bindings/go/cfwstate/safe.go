@@ -8,22 +8,38 @@ import "C"
 
 import (
 	"encoding/binary"
+	"fmt"
 	"unsafe"
 )
 
 // TTL48Max is the largest TTL (ns) storable in fw_state_value::last_ttl.
 const TTL48Max = uint64(C.FWSTATE_TTL48_MAX)
 
-// SyncConfig defines how fwstate receives synchronization packets and emits
-// locally generated synchronization events. The multicast endpoint is used
-// for both reception and emission; the unicast endpoint is emission-only.
+// SyncEndpoint is one synchronization destination: the source stamped on
+// packets emitted toward it, the destination address, and the destination
+// port in host byte order. A zero Port disables the endpoint.
+type SyncEndpoint struct {
+	SrcAddr [16]byte
+	DstAddr [16]byte
+	Port    uint16
+}
+
+// SyncListenEndpoint is one receive destination: an incoming packet naming
+// it by IPv6 address and UDP port is claimed as external sync. The port is
+// host byte order; a zero Port disables the listener.
+type SyncListenEndpoint struct {
+	DstAddr [16]byte
+	Port    uint16
+}
+
+// SyncConfig defines how fwstate emits locally generated synchronization
+// events and which incoming packets it claims as external sync. Emission
+// endpoints and listeners are independent lists; each carries at most
+// MaxSyncEndpoints entries.
 type SyncConfig struct {
-	SrcAddr             [16]byte
-	DstEther            [6]byte
-	DstAddrMulticast    [16]byte
-	PortMulticast       uint16
-	DstAddrUnicast      [16]byte
-	PortUnicast         uint16
+	Endpoints           []SyncEndpoint
+	Listeners           []SyncListenEndpoint
+	Rules               []SyncRule
 	TcpSynAck           uint64
 	TcpSyn              uint64
 	TcpFin              uint64
@@ -39,18 +55,91 @@ type SyncConfig struct {
 // MinSyncMTU is the smallest sync MTU that carries one frame.
 const MinSyncMTU = uint16(C.FWSTATE_SYNC_MIN_MTU)
 
+// MaxSyncEndpoints mirrors the C FWSTATE_SYNC_ENDPOINTS_MAX bound of the
+// endpoint array in the shared-memory config.
+const MaxSyncEndpoints = int(C.FWSTATE_SYNC_ENDPOINTS_MAX)
+
+// SyncRule is one synchronization scope rule: the flows whose source
+// address is exactly one of the named addresses and whose source port
+// falls inside one of the port spans are the ones the module syncs. A
+// rule naming neither matches every flow.
+type SyncRule struct {
+	// Addrs4 carries one big-endian IPv4 address per entry.
+	Addrs4 [][4]byte
+	// Addrs6 carries one big-endian IPv6 address per entry.
+	Addrs6 [][16]byte
+	// SrcPorts carries one inclusive from-to span per source port range.
+	SrcPorts [][2]uint16
+}
+
+// Bounds mirroring the C input struct.
+const (
+	SyncRuleNetsMax  = int(C.FWSTATE_SYNC_RULE_NETS_MAX)
+	SyncRulePortsMax = int(C.FWSTATE_SYNC_RULE_PORTS_MAX)
+	SyncRulesMax     = int(C.FWSTATE_SYNC_RULES_MAX)
+)
+
+func syncRulesToC(rules []SyncRule) ([]C.struct_fwstate_sync_rule_input, error) {
+	if len(rules) > SyncRulesMax {
+		return nil, fmt.Errorf(
+			"at most %d sync scope rules are supported, got %d",
+			SyncRulesMax, len(rules),
+		)
+	}
+	inputs := make([]C.struct_fwstate_sync_rule_input, len(rules))
+	for idx, rule := range rules {
+		if len(rule.Addrs4) > SyncRuleNetsMax ||
+			len(rule.Addrs6) > SyncRuleNetsMax ||
+			len(rule.SrcPorts) > SyncRulePortsMax {
+			return nil, fmt.Errorf(
+				"sync rule %d exceeds the per-rule bounds (%d addresses per family, %d port spans)",
+				idx, SyncRuleNetsMax, SyncRulePortsMax,
+			)
+		}
+		for addrIdx, addr := range rule.Addrs4 {
+			for byteIdx, value := range addr {
+				inputs[idx].addrs4[addrIdx][byteIdx] = C.uint8_t(value)
+			}
+		}
+		inputs[idx].addr4_count = C.uint32_t(len(rule.Addrs4))
+		for addrIdx, addr := range rule.Addrs6 {
+			for byteIdx, value := range addr {
+				inputs[idx].addrs6[addrIdx][byteIdx] = C.uint8_t(value)
+			}
+		}
+		inputs[idx].addr6_count = C.uint32_t(len(rule.Addrs6))
+		for portIdx, span := range rule.SrcPorts {
+			inputs[idx].src_ports[portIdx].from = C.uint16_t(span[0])
+			inputs[idx].src_ports[portIdx].to = C.uint16_t(span[1])
+		}
+		inputs[idx].src_port_count = C.uint32_t(len(rule.SrcPorts))
+	}
+	return inputs, nil
+}
+
 func newSyncConfigFromC(cCfg *C.struct_fwstate_sync_config) SyncConfig {
 	var syncCfg SyncConfig
-	copy(syncCfg.SrcAddr[:], unsafe.Slice((*byte)(unsafe.Pointer(&cCfg.src_addr[0])), 16))
-	copy(syncCfg.DstEther[:], unsafe.Slice((*byte)(unsafe.Pointer(&cCfg.dst_ether)), 6))
-	copy(syncCfg.DstAddrMulticast[:], unsafe.Slice((*byte)(unsafe.Pointer(&cCfg.dst_addr_multicast[0])), 16))
-	syncCfg.PortMulticast = uint16(ntohs(uint16(cCfg.port_multicast)))
-	copy(syncCfg.DstAddrUnicast[:], unsafe.Slice((*byte)(unsafe.Pointer(&cCfg.dst_addr_unicast[0])), 16))
-	syncCfg.PortUnicast = uint16(ntohs(uint16(cCfg.port_unicast)))
+	count := min(int(cCfg.endpoint_count), MaxSyncEndpoints)
+	for idx := range count {
+		cEndpoint := &cCfg.endpoints[idx]
+		var endpoint SyncEndpoint
+		copy(endpoint.SrcAddr[:], unsafe.Slice((*byte)(unsafe.Pointer(&cEndpoint.src_addr[0])), 16))
+		copy(endpoint.DstAddr[:], unsafe.Slice((*byte)(unsafe.Pointer(&cEndpoint.dst_addr[0])), 16))
+		endpoint.Port = uint16(ntohs(uint16(cEndpoint.port)))
+		syncCfg.Endpoints = append(syncCfg.Endpoints, endpoint)
+	}
 	syncCfg.TcpSynAck = uint64(cCfg.timeouts.tcp_syn_ack)
 	syncCfg.TcpSyn = uint64(cCfg.timeouts.tcp_syn)
 	syncCfg.TcpFin = uint64(cCfg.timeouts.tcp_fin)
 	syncCfg.Tcp = uint64(cCfg.timeouts.tcp)
+	listenerCount := min(int(cCfg.listener_count), MaxSyncEndpoints)
+	for idx := range listenerCount {
+		cListener := &cCfg.listeners[idx]
+		var listener SyncListenEndpoint
+		copy(listener.DstAddr[:], unsafe.Slice((*byte)(unsafe.Pointer(&cListener.dst_addr[0])), 16))
+		listener.Port = uint16(ntohs(uint16(cListener.port)))
+		syncCfg.Listeners = append(syncCfg.Listeners, listener)
+	}
 	syncCfg.Udp = uint64(cCfg.timeouts.udp)
 	syncCfg.Default = uint64(cCfg.timeouts.default_)
 	syncCfg.SyncSuppressTimeout = uint64(cCfg.sync_suppress_timeout)
@@ -60,12 +149,23 @@ func newSyncConfigFromC(cCfg *C.struct_fwstate_sync_config) SyncConfig {
 
 func (m SyncConfig) toC() C.struct_fwstate_sync_config {
 	var cSyncConfig C.struct_fwstate_sync_config
-	copy(unsafe.Slice((*byte)(unsafe.Pointer(&cSyncConfig.src_addr[0])), 16), m.SrcAddr[:])
-	copy(unsafe.Slice((*byte)(unsafe.Pointer(&cSyncConfig.dst_ether)), 6), m.DstEther[:])
-	copy(unsafe.Slice((*byte)(unsafe.Pointer(&cSyncConfig.dst_addr_multicast[0])), 16), m.DstAddrMulticast[:])
-	cSyncConfig.port_multicast = C.uint16_t(htons(uint16(m.PortMulticast)))
-	copy(unsafe.Slice((*byte)(unsafe.Pointer(&cSyncConfig.dst_addr_unicast[0])), 16), m.DstAddrUnicast[:])
-	cSyncConfig.port_unicast = C.uint16_t(htons(uint16(m.PortUnicast)))
+	count := min(len(m.Endpoints), MaxSyncEndpoints)
+	cSyncConfig.endpoint_count = C.uint32_t(count)
+	for idx := range count {
+		endpoint := &m.Endpoints[idx]
+		cEndpoint := &cSyncConfig.endpoints[idx]
+		copy(unsafe.Slice((*byte)(unsafe.Pointer(&cEndpoint.src_addr[0])), 16), endpoint.SrcAddr[:])
+		copy(unsafe.Slice((*byte)(unsafe.Pointer(&cEndpoint.dst_addr[0])), 16), endpoint.DstAddr[:])
+		cEndpoint.port = C.uint16_t(htons(uint16(endpoint.Port)))
+	}
+	listenerCount := min(len(m.Listeners), MaxSyncEndpoints)
+	cSyncConfig.listener_count = C.uint32_t(listenerCount)
+	for idx := range listenerCount {
+		listener := &m.Listeners[idx]
+		cListener := &cSyncConfig.listeners[idx]
+		copy(unsafe.Slice((*byte)(unsafe.Pointer(&cListener.dst_addr[0])), 16), listener.DstAddr[:])
+		cListener.port = C.uint16_t(htons(uint16(listener.Port)))
+	}
 	cSyncConfig.timeouts.tcp_syn_ack = C.uint64_t(m.TcpSynAck)
 	cSyncConfig.timeouts.tcp_syn = C.uint64_t(m.TcpSyn)
 	cSyncConfig.timeouts.tcp_fin = C.uint64_t(m.TcpFin)

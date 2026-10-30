@@ -24,3 +24,8 @@ lint:
 breaking:
   use:
     - PACKAGE
+  ignore:
+    # TODO: drop once the endpoint-list cutover (#3224) reaches main; the
+    # flat source/multicast/unicast fields are replaced by the repeated
+    # endpoints message.
+    - modules/fwstate/controlplane/fwstatepb/v1/fwstate.proto

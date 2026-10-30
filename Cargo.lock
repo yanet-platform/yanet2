@@ -2767,13 +2767,13 @@ dependencies = [
  "clap",
  "clap_complete",
  "humantime",
- "netip",
  "prost",
  "serde",
  "tonic",
  "yanet-cli",
  "yanet-cli-build",
  "yanet-commonpb",
+ "yanet-filterpb",
 ]
 
 [[package]]

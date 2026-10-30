@@ -1,6 +1,7 @@
 #include <rte_ether.h>
 #include <rte_ip.h>
 #include <rte_mbuf.h>
+#include <rte_random.h>
 #include <rte_tcp.h>
 #include <rte_udp.h>
 
@@ -233,25 +234,27 @@ fwstate_build_sync_packet(
 void
 fwstate_sync_set_destination(
 	struct packet *packet,
-	const struct ether_addr *dst_ether,
+	const uint8_t src_addr[16],
 	const uint8_t dst_addr[16],
 	uint16_t dst_port
 ) {
 	struct rte_mbuf *mbuf = packet_to_mbuf(packet);
-	struct rte_ether_hdr *ether_hdr =
-		rte_pktmbuf_mtod(mbuf, struct rte_ether_hdr *);
-	struct ether_addr *ether_dst =
-		(struct ether_addr *)&ether_hdr->dst_addr;
-	*ether_dst = *dst_ether;
+	// The Ethernet header stays zeroed: the route module downstream
+	// resolves and stamps both MAC addresses.
 	struct rte_ipv6_hdr *ipv6_hdr = rte_pktmbuf_mtod_offset(
 		mbuf, struct rte_ipv6_hdr *, packet->network_header.offset
 	);
+	rte_memcpy(ipv6_hdr->src_addr, src_addr, 16);
 	rte_memcpy(ipv6_hdr->dst_addr, dst_addr, 16);
 
 	struct rte_udp_hdr *udp_hdr = rte_pktmbuf_mtod_offset(
 		mbuf, struct rte_udp_hdr *, packet->transport_header.offset
 	);
-	udp_hdr->src_port = dst_port;
+	// A random ephemeral source port keeps the flow hash of every emitted
+	// packet distinct, spreading sync traffic over equal-cost paths; the
+	// receiving side matches on the destination address and port only.
+	uint16_t src_port = 1024 + rte_rand() % (65535 - 1024 + 1);
+	udp_hdr->src_port = rte_cpu_to_be_16(src_port);
 	udp_hdr->dst_port = dst_port;
 	udp_hdr->dgram_cksum = 0;
 }

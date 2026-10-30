@@ -1,10 +1,34 @@
 #pragma once
 
+#include "common/filter_views.h"
+#include "common/network.h"
+
+#include "lib/classify/compiler/u16_ranges.h"
 #include "lib/errors/errors.h"
+
+#include <stdint.h>
 
 struct agent;
 struct cp_module;
 struct fwstate_sync_config;
+
+// Bounds of one synchronization scope rule and of the rule list. The
+// control plane refuses larger lists before the config is built.
+#define FWSTATE_SYNC_RULE_NETS_MAX 16
+#define FWSTATE_SYNC_RULE_PORTS_MAX 8
+#define FWSTATE_SYNC_RULES_MAX 64
+
+// One synchronization scope rule in the flat form the control plane
+// FFI carries it: the flow's source networks of both families and its
+// source port ranges. A rule naming none of them matches every flow.
+struct fwstate_sync_rule_input {
+	uint8_t addrs4[FWSTATE_SYNC_RULE_NETS_MAX][NET4_LEN];
+	uint32_t addr4_count;
+	uint8_t addrs6[FWSTATE_SYNC_RULE_NETS_MAX][NET6_LEN];
+	uint32_t addr6_count;
+	struct filter_u16_span src_ports[FWSTATE_SYNC_RULE_PORTS_MAX];
+	uint32_t src_port_count;
+};
 
 // Clear all synchronization fields, then install the production timeouts.
 void
@@ -15,6 +39,10 @@ fwstate_config_set_defaults(struct fwstate_sync_config *config);
 //
 // sync_config is the sync config to install, or NULL to
 // keep the defaults.
+//
+// rules is the synchronization scope - the flows whose state the module
+// syncs - in the flat input form above, or NULL with rule_count zero
+// for no scope: an unscoped module syncs everything.
 //
 // fw4_map_name and fw6_map_name name standalone fwstate_map_v4 /
 // fwstate_map_v6 objects whose fwtables the module inserts synced state
@@ -30,6 +58,8 @@ fwstate_module_config_new(
 	struct agent *agent,
 	const char *name,
 	const struct fwstate_sync_config *sync_config,
+	const struct fwstate_sync_rule_input *rules,
+	uint32_t rule_count,
 	const char *fw4_map_name,
 	const char *fw6_map_name,
 	yanet_error **err

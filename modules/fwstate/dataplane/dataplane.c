@@ -19,6 +19,7 @@
 #include "lib/dataplane/pipeline/econtext.h"
 #include "lib/dataplane/time/clock.h"
 #include "lib/dataplane/worker/worker.h"
+#include "lib/fwstate/scope.h"
 #include "lib/fwstate/stash.h"
 #include "lib/fwstate/stash_ectx.h"
 #include "lib/fwstate/sync.h"
@@ -73,26 +74,24 @@ fwstate_sync_payload_len(
 // Report whether a packet is an external sync packet this configuration
 // receives.
 //
-// Only packets matching the configured multicast receive contract
-// qualify; without a multicast endpoint nothing is claimed. Packets a
-// local fwstate emitted carry the internal flag and are recognized by
+// Only packets naming a configured listener by IPv6 destination and UDP
+// destination port qualify; without a listener nothing is claimed. The
+// listener addresses carry no multicast requirement: a unicast listener
+// receives point-to-point sync named to the router's own address. Packets
+// a local fwstate emitted carry the internal flag and are recognized by
 // the caller before this check.
 static bool
 is_fw_state_sync_packet(
 	struct packet *packet, struct fwstate_sync_config *sync_config
 ) {
 	struct rte_mbuf *mbuf = packet_to_mbuf(packet);
-	if (!fwstate_sync_multicast_enabled(sync_config)) {
+	if (sync_config->listener_count == 0) {
 		return false;
 	}
 
+	// Check for VLAN + IPv6 + UDP structure
 	struct rte_ether_hdr *eth_hdr =
 		rte_pktmbuf_mtod(mbuf, struct rte_ether_hdr *);
-	if ((eth_hdr->dst_addr.addr_bytes[0] & 1) == 0) {
-		return false; // Not multicast
-	}
-
-	// Check for VLAN + IPv6 + UDP structure
 	if (eth_hdr->ether_type != rte_cpu_to_be_16(RTE_ETHER_TYPE_VLAN)) {
 		return false;
 	}
@@ -122,13 +121,28 @@ is_fw_state_sync_packet(
 			sizeof(struct rte_ipv6_hdr)
 	);
 
-	// Port values are stored in network byte order.
-	if (udp_hdr->dst_port != sync_config->port_multicast) {
-		return false;
+	// Port values are stored in network byte order. The packet must name
+	// one configured listener by destination port and address. The count
+	// is bounded by the controlplane but never trusted past the array
+	// size.
+	bool listener_matched = false;
+	uint32_t listener_count = sync_config->listener_count;
+	if (listener_count > FWSTATE_SYNC_ENDPOINTS_MAX) {
+		listener_count = FWSTATE_SYNC_ENDPOINTS_MAX;
 	}
-
-	if (memcmp(ipv6_hdr->dst_addr, sync_config->dst_addr_multicast, 16) !=
-	    0) {
+	for (uint32_t idx = 0; idx < listener_count; ++idx) {
+		const struct fwstate_sync_listen_endpoint *listener =
+			&sync_config->listeners[idx];
+		if (listener->port == 0) {
+			continue;
+		}
+		if (udp_hdr->dst_port == listener->port &&
+		    memcmp(ipv6_hdr->dst_addr, listener->dst_addr, 16) == 0) {
+			listener_matched = true;
+			break;
+		}
+	}
+	if (!listener_matched) {
 		return false;
 	}
 
@@ -150,15 +164,21 @@ is_fw_state_sync_packet(
 	return true;
 }
 
-static inline void
+// Stamp one built sync packet for its endpoint.
+//
+// Fills the outer addressing and checksum, then re-parses the packet: the
+// parse computes the flow hash the route module and the worker pipelines
+// select paths by, which a locally built packet would otherwise lack. The
+// parse resets the flags, so the internal marker is set after it.
+//
+// Returns false only when the parse rejects a packet this module has just
+// built, which cannot happen unless the builder and the parser disagree.
+static inline bool
 fwstate_finalize_internal_sync(
-	struct packet *packet,
-	const struct fwstate_sync_config *sync_config,
-	const uint8_t dst_addr[16],
-	uint16_t dst_port
+	struct packet *packet, const struct fwstate_sync_endpoint *endpoint
 ) {
 	fwstate_sync_set_destination(
-		packet, &sync_config->dst_ether, dst_addr, dst_port
+		packet, endpoint->src_addr, endpoint->dst_addr, endpoint->port
 	);
 	const uint16_t ipv6_offset =
 		sizeof(struct rte_ether_hdr) + sizeof(struct rte_vlan_hdr);
@@ -167,14 +187,18 @@ fwstate_finalize_internal_sync(
 	struct rte_ipv6_hdr *ipv6_hdr = rte_pktmbuf_mtod_offset(
 		mbuf, struct rte_ipv6_hdr *, ipv6_offset
 	);
-	rte_memcpy(ipv6_hdr->src_addr, sync_config->src_addr, 16);
 	struct rte_udp_hdr *udp_hdr =
 		rte_pktmbuf_mtod_offset(mbuf, struct rte_udp_hdr *, udp_offset);
 	udp_hdr->dgram_cksum = 0;
 	udp_hdr->dgram_cksum = rte_ipv6_udptcp_cksum(ipv6_hdr, udp_hdr);
+
+	if (parse_packet(packet) != 0) {
+		return false;
+	}
 	// The flag marks the packet as a local emission, so a downstream
 	// fwstate passes it through instead of applying it as external.
 	packet->flags |= 1U << PACKET_FLAG_FWSTATE_SYNC_INTERNAL;
+	return true;
 }
 
 // Build fw_state_value from sync frame
@@ -472,57 +496,55 @@ struct fwstate_emitter {
 	struct packet_front *packet_front;
 	const struct fwstate_sync_config *sync_config;
 	const struct fwstate_counters *counters;
-	bool emit_multicast;
-	bool emit_unicast;
+	const struct fwstate_scope *scope;
+	// Enabled endpoints, in configuration order; emission addresses one
+	// copy of every built packet to each of them.
+	const struct fwstate_sync_endpoint
+		*endpoints[FWSTATE_SYNC_ENDPOINTS_MAX];
+	uint32_t endpoint_count;
 	struct fwstate_sync_batch batch;
 };
 
 // Stamp one built sync packet for every enabled endpoint and push the
 // copies to the output.
 //
-// With both endpoints the packet is cloned for the unicast copy; a clone
-// failure loses only that copy.
+// The clones of every endpoint after the first are taken while the packet
+// is still destination-neutral; a clone or finalize failure loses only
+// that endpoint's copy.
 static void
 fwstate_emit_sync_packet(
 	struct fwstate_emitter *emitter, struct packet *packet
 ) {
-	const struct fwstate_sync_config *sync_config = emitter->sync_config;
+	const uint32_t count = emitter->endpoint_count;
 
-	struct packet *sync_copy = NULL;
-	if (emitter->emit_multicast && emitter->emit_unicast) {
-		sync_copy = worker_clone_packet(
+	struct packet *copies[FWSTATE_SYNC_ENDPOINTS_MAX] = {packet};
+	for (uint32_t idx = 1; idx < count; ++idx) {
+		struct packet *copy = worker_clone_packet(
 			emitter->dp_worker,
 			packet,
 			emitter->module_ectx->packet_recirc_limit
 		);
-		if (unlikely(sync_copy == NULL)) {
+		if (unlikely(copy == NULL)) {
 			emitter->counters->sync_alloc_failed[0] += 1;
 		}
+		copies[idx] = copy;
 	}
 
-	const uint8_t *dst_addr = emitter->emit_multicast
-					  ? sync_config->dst_addr_multicast
-					  : sync_config->dst_addr_unicast;
-	uint16_t dst_port = emitter->emit_multicast
-				    ? sync_config->port_multicast
-				    : sync_config->port_unicast;
-	fwstate_finalize_internal_sync(packet, sync_config, dst_addr, dst_port);
-	emitter->counters->internal_forwarded[0] += 1;
-	emitter->counters->internal_forwarded[1] +=
-		packet_to_mbuf(packet)->pkt_len;
-	packet_front_output(emitter->packet_front, packet);
-
-	if (sync_copy != NULL) {
-		fwstate_finalize_internal_sync(
-			sync_copy,
-			sync_config,
-			sync_config->dst_addr_unicast,
-			sync_config->port_unicast
-		);
+	for (uint32_t idx = 0; idx < count; ++idx) {
+		struct packet *copy = copies[idx];
+		if (copy == NULL) {
+			continue;
+		}
+		if (!fwstate_finalize_internal_sync(
+			    copy, emitter->endpoints[idx]
+		    )) {
+			worker_packet_free(copy);
+			continue;
+		}
 		emitter->counters->internal_forwarded[0] += 1;
 		emitter->counters->internal_forwarded[1] +=
-			packet_to_mbuf(sync_copy)->pkt_len;
-		packet_front_output(emitter->packet_front, sync_copy);
+			packet_to_mbuf(copy)->pkt_len;
+		packet_front_output(emitter->packet_front, copy);
 	}
 }
 
@@ -608,7 +630,7 @@ fwstate_consume_records(
 	const struct fwstate_family_counters *counters
 ) {
 	uint16_t worker_idx = (uint16_t)emitter->dp_worker->idx;
-	bool emit = emitter->emit_multicast || emitter->emit_unicast;
+	bool emit = emitter->endpoint_count != 0;
 
 	uint32_t count = stash->slot->count;
 	for (uint32_t idx = *processed; idx < count; ++idx) {
@@ -631,6 +653,12 @@ fwstate_consume_records(
 		}
 
 		if (emit && record->status == FWSTATE_SYNC_RECORD_APPLIED) {
+			if (!fwstate_scope_matches(
+				    emitter->scope, &record->frame
+			    )) {
+				emitter->counters->scope_dropped[0] += 1;
+				continue;
+			}
 			fwstate_sync_batch_add(emitter, record);
 		}
 	}
@@ -731,6 +759,11 @@ fwstate_receive_external(
 					idx * sizeof(struct fw_state_sync_frame)
 			);
 
+		if (!fwstate_scope_matches(emitter->scope, sync_frame)) {
+			counters->scope_dropped[0] += 1;
+			continue;
+		}
+
 		if (sync_frame->addr_type == FW_STATE_ADDR_TYPE_IP4) {
 			fwstate_process_sync_v4(
 				fw4table,
@@ -795,8 +828,22 @@ fwstate_handle_packets(
 	emitter.packet_front = packet_front;
 	emitter.sync_config = sync_config;
 	emitter.counters = counters;
-	emitter.emit_multicast = fwstate_sync_multicast_enabled(sync_config);
-	emitter.emit_unicast = fwstate_sync_unicast_enabled(sync_config);
+	emitter.scope = &fwstate_module->scope;
+	// Only the enabled endpoints are collected; endpoint_count is bounded
+	// by the controlplane but never trusted past the array size.
+	emitter.endpoint_count = 0;
+	uint32_t config_endpoints = sync_config->endpoint_count;
+	if (config_endpoints > FWSTATE_SYNC_ENDPOINTS_MAX) {
+		config_endpoints = FWSTATE_SYNC_ENDPOINTS_MAX;
+	}
+	for (uint32_t idx = 0; idx < config_endpoints; ++idx) {
+		const struct fwstate_sync_endpoint *endpoint =
+			&sync_config->endpoints[idx];
+		if (!fwstate_sync_endpoint_enabled(endpoint)) {
+			continue;
+		}
+		emitter.endpoints[emitter.endpoint_count++] = endpoint;
+	}
 	emitter.batch.count = 0;
 	emitter.batch.limit =
 		fwstate_sync_frames_per_packet(sync_config->sync_mtu);
@@ -917,6 +964,8 @@ fwstate_module_commit_ectx(
 	counters->sync_alloc_failed = counter_get_address(
 		config->sync_alloc_failed_counter_id, storage
 	);
+	counters->scope_dropped =
+		counter_get_address(config->scope_dropped_counter_id, storage);
 
 	// Without the worker's read position nothing may be consumed, so the
 	// stashes stay unlinked while the tables still serve received sync.

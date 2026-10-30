@@ -15,17 +15,18 @@ import (
 )
 
 // Test_FWStateService_UpdateConfig_SetsAllFieldsAndClearsSync verifies that
-// every carried field installs its value and zero ports clear synchronization.
+// every carried field installs its value and no_endpoints clears the list.
 func Test_FWStateService_UpdateConfig_SetsAllFieldsAndClearsSync(t *testing.T) {
 	const name = "update-all"
 	_, agent := newDeleteTestHarness(t, []string{"fwstate"}, name)
 	maps := newFWStateTestMaps(t, agent, name, 1024)
 	service := fwstate.NewFWStateService(agent)
 	syncConfig := &fwstatepb.SyncConfig{
-		SrcAddr: syncTestAddr(), DstAddrMulticast: syncTestAddr(),
-		DstEther:       &commonpb.MACAddress{Addr: 0x333300000001},
-		DstAddrUnicast: syncTestAddr(), PortUnicast: proto.Uint32(10000),
-		PortMulticast: proto.Uint32(9999), TcpSynAck: proto.Uint64(11), TcpSyn: proto.Uint64(12),
+		Endpoints: []*fwstatepb.SyncEndpoint{
+			{SrcAddr: syncTestAddr(), DstAddr: syncTestAddr(), Port: proto.Uint32(9999)},
+			{SrcAddr: syncTestAddr(), DstAddr: syncTestAddr(), Port: proto.Uint32(10000)},
+		},
+		TcpSynAck: proto.Uint64(11), TcpSyn: proto.Uint64(12),
 		TcpFin: proto.Uint64(13), Tcp: proto.Uint64(14), Udp: proto.Uint64(15),
 		Default: proto.Uint64(16), SyncSuppressTimeout: proto.Uint64(17),
 		SyncMtu: proto.Uint32(9000),
@@ -42,20 +43,14 @@ func Test_FWStateService_UpdateConfig_SetsAllFieldsAndClearsSync(t *testing.T) {
 	require.True(t, proto.Equal(syncConfig, stored.GetSyncConfig()), "got %v", stored.GetSyncConfig())
 
 	publishConfig(t, service, &fwstatepb.UpdateConfigRequest{
-		Name:      name,
-		MapNameV6: new(""),
-		SyncConfig: &fwstatepb.SyncConfig{
-			PortMulticast: proto.Uint32(0),
-			PortUnicast:   proto.Uint32(0),
-		},
+		Name:       name,
+		MapNameV6:  new(""),
+		SyncConfig: &fwstatepb.SyncConfig{NoEndpoints: new(true)},
 	})
 	stored = showConfig(t, service, name)
 	require.Empty(t, stored.GetMapNameV6())
 	require.Equal(t, maps.v4Name(), stored.GetMapNameV4())
-	require.Zero(t, stored.GetSyncConfig().GetPortMulticast())
-	require.Nil(t, stored.GetSyncConfig().GetDstAddrMulticast())
-	require.Nil(t, stored.GetSyncConfig().GetDstAddrUnicast())
-	require.Zero(t, stored.GetSyncConfig().GetPortUnicast())
+	require.Empty(t, stored.GetSyncConfig().GetEndpoints())
 	require.Equal(t, syncConfig.GetTcp(), stored.GetSyncConfig().GetTcp())
 }
 
@@ -124,40 +119,50 @@ func Test_FWStateService_UpdateConfig_ZeroValuesOverwriteAndAbsentFieldsKeep(t *
 	require.True(t, proto.Equal(stored, showConfig(t, service, name)))
 }
 
-// Test_FWStateService_UpdateConfig_EndpointsPreserveOtherDestination verifies
-// that editing one endpoint leaves the other active, including clears.
-func Test_FWStateService_UpdateConfig_EndpointsPreserveOtherDestination(t *testing.T) {
+// Test_FWStateService_UpdateConfig_EndpointListReplacesWholesale verifies
+// that an update carrying endpoints replaces the stored list, an update
+// carrying none keeps it, and no_endpoints removes it.
+func Test_FWStateService_UpdateConfig_EndpointListReplacesWholesale(t *testing.T) {
 	const name = "update-endpoints"
 	_, agent := newDeleteTestHarness(t, []string{"fwstate"}, name)
 	service := fwstate.NewFWStateService(agent)
 	publishConfig(t, service, &fwstatepb.UpdateConfigRequest{
 		Name: name,
 		SyncConfig: &fwstatepb.SyncConfig{
-			SrcAddr: syncTestAddr(), DstEther: &commonpb.MACAddress{Addr: 0x333300000001},
-			DstAddrMulticast: syncTestAddr(), PortMulticast: proto.Uint32(9999),
-			DstAddrUnicast: syncTestAddr(), PortUnicast: proto.Uint32(10000),
+			Endpoints: []*fwstatepb.SyncEndpoint{
+				{SrcAddr: syncTestAddr(), DstAddr: syncTestAddr(), Port: proto.Uint32(9999)},
+				{SrcAddr: syncTestAddr(), DstAddr: syncTestAddr(), Port: proto.Uint32(10000)},
+			},
 		},
 	})
 	before := showConfig(t, service, name).GetSyncConfig()
-	publishConfig(t, service, &fwstatepb.UpdateConfigRequest{
-		Name:       name,
-		SyncConfig: &fwstatepb.SyncConfig{PortUnicast: proto.Uint32(10001)},
-	})
-	stored := showConfig(t, service, name).GetSyncConfig()
-	require.EqualValues(t, 10001, stored.GetPortUnicast())
-	require.Equal(t, before.GetDstAddrUnicast().GetAddr(), stored.GetDstAddrUnicast().GetAddr())
-	require.Equal(t, before.GetDstAddrMulticast().GetAddr(), stored.GetDstAddrMulticast().GetAddr())
-	require.Equal(t, before.GetPortMulticast(), stored.GetPortMulticast())
 
 	publishConfig(t, service, &fwstatepb.UpdateConfigRequest{
 		Name:       name,
-		SyncConfig: &fwstatepb.SyncConfig{PortMulticast: proto.Uint32(0)},
+		SyncConfig: &fwstatepb.SyncConfig{Udp: proto.Uint64(30e9)},
+	})
+	stored := showConfig(t, service, name).GetSyncConfig()
+	require.True(t, proto.Equal(before, stored), "a timeout-only update must keep the list, got %v", stored)
+
+	publishConfig(t, service, &fwstatepb.UpdateConfigRequest{
+		Name: name,
+		SyncConfig: &fwstatepb.SyncConfig{
+			Endpoints: []*fwstatepb.SyncEndpoint{
+				{SrcAddr: syncTestAddr(), DstAddr: syncTestAddr(), Port: proto.Uint32(10001)},
+			},
+		},
 	})
 	stored = showConfig(t, service, name).GetSyncConfig()
-	require.Nil(t, stored.GetDstAddrMulticast())
-	require.Zero(t, stored.GetPortMulticast())
-	require.Equal(t, before.GetDstAddrUnicast().GetAddr(), stored.GetDstAddrUnicast().GetAddr())
-	require.EqualValues(t, 10001, stored.GetPortUnicast())
+	require.Len(t, stored.GetEndpoints(), 1)
+	require.EqualValues(t, 10001, stored.GetEndpoints()[0].GetPort())
+
+	publishConfig(t, service, &fwstatepb.UpdateConfigRequest{
+		Name:       name,
+		SyncConfig: &fwstatepb.SyncConfig{NoEndpoints: new(true)},
+	})
+	stored = showConfig(t, service, name).GetSyncConfig()
+	require.Empty(t, stored.GetEndpoints())
+	require.EqualValues(t, 30e9, stored.GetUdp())
 }
 
 // Test_FWStateService_UpdateConfig_InvalidMergedConfigDoesNotPublish verifies
@@ -181,12 +186,16 @@ func Test_FWStateService_UpdateConfig_InvalidMergedConfigDoesNotPublish(t *testi
 		syncConfig *fwstatepb.SyncConfig
 	}{
 		{
-			name:       "port without a stored address",
-			syncConfig: &fwstatepb.SyncConfig{PortMulticast: proto.Uint32(9999)},
+			name: "port without stored addresses",
+			syncConfig: &fwstatepb.SyncConfig{Endpoints: []*fwstatepb.SyncEndpoint{
+				{Port: proto.Uint32(9999)},
+			}},
 		},
 		{
-			name:       "address without a stored port",
-			syncConfig: &fwstatepb.SyncConfig{DstAddrMulticast: syncTestAddr()},
+			name: "addresses without a stored port",
+			syncConfig: &fwstatepb.SyncConfig{Endpoints: []*fwstatepb.SyncEndpoint{
+				{SrcAddr: syncTestAddr(), DstAddr: syncTestAddr()},
+			}},
 		},
 		{
 			name:       "suppression overflows stored timeout",
@@ -251,9 +260,7 @@ func Test_FWStateService_UpdateConfig_CreatesConfigWithoutSyncOrMaps(t *testing.
 	stored := showConfig(t, service, configName)
 	require.Empty(t, stored.GetMapNameV4())
 	require.Empty(t, stored.GetMapNameV6())
-	require.Zero(t, stored.GetSyncConfig().GetPortMulticast())
-	require.Equal(t, make([]byte, 16), stored.GetSyncConfig().GetSrcAddr().GetAddr())
-	require.Nil(t, stored.GetSyncConfig().GetDstAddrMulticast())
+	require.Empty(t, stored.GetSyncConfig().GetEndpoints())
 
 	// The timeouts are not part of the sync destination and always carry
 	// the defaults, so an unconfigured config is still a usable one.
@@ -279,10 +286,11 @@ func Test_FWStateService_UpdateConfig_AttachesMapsAndSyncLater(t *testing.T) {
 		MapNameV4: new(maps.v4Name()),
 		MapNameV6: new(maps.v6Name()),
 		SyncConfig: &fwstatepb.SyncConfig{
-			SrcAddr:          syncTestAddr(),
-			DstEther:         &commonpb.MACAddress{Addr: 0x333300000001},
-			DstAddrMulticast: syncTestAddr(),
-			PortMulticast:    proto.Uint32(syncTestPort),
+			Endpoints: []*fwstatepb.SyncEndpoint{{
+				SrcAddr: syncTestAddr(),
+				DstAddr: syncTestAddr(),
+				Port:    proto.Uint32(syncTestPort),
+			}},
 		},
 	})
 	require.NoError(t, err)
@@ -290,12 +298,14 @@ func Test_FWStateService_UpdateConfig_AttachesMapsAndSyncLater(t *testing.T) {
 	stored := showConfig(t, service, configName)
 	require.Equal(t, maps.v4Name(), stored.GetMapNameV4())
 	require.Equal(t, maps.v6Name(), stored.GetMapNameV6())
-	require.EqualValues(t, syncTestPort, stored.GetSyncConfig().GetPortMulticast())
-	require.Equal(t, syncTestAddr().GetAddr(), stored.GetSyncConfig().GetDstAddrMulticast().GetAddr())
+	endpoints := stored.GetSyncConfig().GetEndpoints()
+	require.Len(t, endpoints, 1)
+	require.EqualValues(t, syncTestPort, endpoints[0].GetPort())
+	require.Equal(t, syncTestAddr().GetAddr(), endpoints[0].GetDstAddr().GetAddr())
 }
 
-// Test_FWStateService_UpdateConfig_ClearsLastSyncEndpoint verifies that a zero
-// port disables the last configured endpoint in the installed config.
+// Test_FWStateService_UpdateConfig_ClearsLastSyncEndpoint verifies that
+// no_endpoints removes the configured endpoints in the installed config.
 func Test_FWStateService_UpdateConfig_ClearsLastSyncEndpoint(t *testing.T) {
 	const configName = "fwstate-clear-last-endpoint"
 
@@ -310,15 +320,12 @@ func Test_FWStateService_UpdateConfig_ClearsLastSyncEndpoint(t *testing.T) {
 
 	_, err = service.UpdateConfig(t.Context(), &fwstatepb.UpdateConfigRequest{
 		Name:       configName,
-		SyncConfig: &fwstatepb.SyncConfig{PortMulticast: proto.Uint32(0)},
+		SyncConfig: &fwstatepb.SyncConfig{NoEndpoints: new(true)},
 	})
 	require.NoError(t, err)
 
 	stored := showConfig(t, service, configName)
-	require.Nil(t, stored.GetSyncConfig().GetDstAddrMulticast())
-	require.Zero(t, stored.GetSyncConfig().GetPortMulticast())
-	require.Empty(t, stored.GetSyncConfig().GetDstAddrUnicast())
-	require.Zero(t, stored.GetSyncConfig().GetPortUnicast())
+	require.Empty(t, stored.GetSyncConfig().GetEndpoints())
 }
 
 // Test_FWStateService_UpdateConfig_KeepsUnnamedLinksAndUntouchedSync
@@ -353,8 +360,10 @@ func Test_FWStateService_UpdateConfig_KeepsUnnamedLinksAndUntouchedSync(t *testi
 	require.Equal(t, maps.v4Name(), stored.GetMapNameV4())
 	require.Equal(t, maps.v6Name(), stored.GetMapNameV6())
 	require.EqualValues(t, udpTimeout, stored.GetSyncConfig().GetUdp())
-	require.EqualValues(t, syncTestPort, stored.GetSyncConfig().GetPortMulticast())
-	require.Equal(t, syncTestAddr().GetAddr(), stored.GetSyncConfig().GetSrcAddr().GetAddr())
+	endpoints := stored.GetSyncConfig().GetEndpoints()
+	require.Len(t, endpoints, 1)
+	require.EqualValues(t, syncTestPort, endpoints[0].GetPort())
+	require.Equal(t, syncTestAddr().GetAddr(), endpoints[0].GetSrcAddr().GetAddr())
 
 	// An update carrying no sync settings at all keeps them too.
 	_, err = service.UpdateConfig(t.Context(), &fwstatepb.UpdateConfigRequest{
@@ -366,8 +375,10 @@ func Test_FWStateService_UpdateConfig_KeepsUnnamedLinksAndUntouchedSync(t *testi
 
 	stored = showConfig(t, service, configName)
 	require.EqualValues(t, udpTimeout, stored.GetSyncConfig().GetUdp())
-	require.EqualValues(t, syncTestPort, stored.GetSyncConfig().GetPortMulticast())
-	require.Equal(t, syncTestAddr().GetAddr(), stored.GetSyncConfig().GetDstAddrMulticast().GetAddr())
+	endpoints = stored.GetSyncConfig().GetEndpoints()
+	require.Len(t, endpoints, 1)
+	require.EqualValues(t, syncTestPort, endpoints[0].GetPort())
+	require.Equal(t, syncTestAddr().GetAddr(), endpoints[0].GetDstAddr().GetAddr())
 }
 
 // Test_FWStateService_UpdateConfig_DefaultSyncMTU verifies that a config

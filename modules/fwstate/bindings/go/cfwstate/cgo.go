@@ -54,6 +54,7 @@ func NewModuleConfig(
 	agent *ffi.Agent,
 	name string,
 	syncConfig *SyncConfig,
+	rules []SyncRule,
 	fw4MapName, fw6MapName string,
 ) (*ModuleConfig, error) {
 	cName := C.CString(name)
@@ -61,8 +62,31 @@ func NewModuleConfig(
 
 	var cSync *C.struct_fwstate_sync_config
 	if syncConfig != nil {
+		if len(syncConfig.Endpoints) > MaxSyncEndpoints {
+			return nil, fmt.Errorf(
+				"at most %d sync endpoints are supported, got %d",
+				MaxSyncEndpoints, len(syncConfig.Endpoints),
+			)
+		}
 		cSyncConfig := syncConfig.toC()
 		cSync = &cSyncConfig
+	}
+
+	// The scope rides with the sync config; the standalone rules
+	// parameter of the C entry stays for the direct construction path.
+	cInputs, err := syncRulesToC(rules)
+	if err != nil {
+		return nil, err
+	}
+	if len(cInputs) == 0 && syncConfig != nil {
+		cInputs, err = syncRulesToC(syncConfig.Rules)
+		if err != nil {
+			return nil, err
+		}
+	}
+	var cRules *C.struct_fwstate_sync_rule_input
+	if len(cInputs) > 0 {
+		cRules = &cInputs[0]
 	}
 
 	var cFw4Name *C.char
@@ -82,6 +106,8 @@ func NewModuleConfig(
 		(*C.struct_agent)(agent.AsRawPtr()),
 		cName,
 		cSync,
+		cRules,
+		C.uint32_t(len(cInputs)),
 		cFw4Name,
 		cFw6Name,
 		&cErr,

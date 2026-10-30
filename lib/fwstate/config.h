@@ -21,29 +21,66 @@ struct fwstate_timeouts {
 	uint64_t default_;    // 16
 };
 
-struct fwstate_sync_config {
-	// IPv6 source stamped on locally emitted sync frames.
+// Largest number of emission endpoints or listeners one config carries.
+// The controlplane refuses longer lists before the config reaches shm.
+#define FWSTATE_SYNC_ENDPOINTS_MAX 8
+
+/**
+ * One emission endpoint: the source and destination IPv6 addresses and the
+ * destination port of locally emitted sync packets.
+ *
+ * The Ethernet header of emitted packets stays zeroed: the module
+ * downstream of fwstate, route, resolves and stamps both MAC addresses.
+ */
+struct fwstate_sync_endpoint {
+	// IPv6 source stamped on packets emitted toward dst_addr.
 	uint8_t src_addr[16];
 
-	// Ethernet destination shared by multicast and unicast emission.
-	struct ether_addr dst_ether;
-	// Multicast IPv6 destination used for wire matching and emission.
-	uint8_t dst_addr_multicast[16];
+	// IPv6 destination of emitted packets.
+	uint8_t dst_addr[16];
+
 	/**
-	 * Multicast destination port in network byte order (big-endian).
-	 * Stored in BE so it can be used directly in UDP header fields
-	 * and compared with udp_hdr->dst_port without conversion.
+	 * Destination port in network byte order (big-endian). Stored in BE
+	 * so it can be used directly in UDP header fields without conversion.
 	 * The controlplane performs the host-to-network conversion when
-	 * populating this field.
+	 * populating this field. Zero disables the endpoint.
 	 */
-	uint16_t port_multicast;
-	// Unicast IPv6 destination used only for local emission.
-	uint8_t dst_addr_unicast[16];
+	uint16_t port;
+};
+
+/**
+ * One listener: a destination an incoming packet must name by IPv6 address
+ * and UDP port to be claimed as external sync.
+ *
+ * Emission and reception are independent contracts: a config may emit to
+ * any destinations while listening on others, listen without emitting, or
+ * emit without listening. An empty listener list claims nothing. Nothing
+ * distinguishes a listener address as multicast; a unicast listener names
+ * the router's own address and receives point-to-point sync.
+ */
+struct fwstate_sync_listen_endpoint {
+	// IPv6 destination matched on the wire.
+	uint8_t dst_addr[16];
+
 	/**
-	 * Unicast destination port in network byte order (big-endian).
-	 * The control plane converts it before publishing the config.
+	 * Destination port in network byte order (big-endian), compared with
+	 * udp_hdr->dst_port without conversion. The controlplane performs
+	 * the host-to-network conversion when populating this field. Zero
+	 * disables the listener.
 	 */
-	uint16_t port_unicast;
+	uint16_t port;
+};
+
+struct fwstate_sync_config {
+	// Emission endpoints; the first endpoint_count entries are
+	// initialized.
+	struct fwstate_sync_endpoint endpoints[FWSTATE_SYNC_ENDPOINTS_MAX];
+	uint32_t endpoint_count;
+
+	// Receive endpoints; the first listener_count entries are initialized.
+	struct fwstate_sync_listen_endpoint
+		listeners[FWSTATE_SYNC_ENDPOINTS_MAX];
+	uint32_t listener_count;
 
 	struct fwstate_timeouts timeouts;
 

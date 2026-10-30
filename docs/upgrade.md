@@ -3,6 +3,38 @@
 Manual steps required when upgrading an existing deployment. The packaging
 does not perform these automatically.
 
+## FWState synchronization splits emission from reception
+
+`SyncConfig` replaces its flat source, destination MAC and multicast/unicast
+endpoint fields with two independent lists: a repeated `endpoints` list,
+each entry carrying its own source and destination IPv6 address and a
+destination port, drives emission, and a repeated `listeners` list, each
+entry carrying a destination address and port, is the receive contract. An
+update carrying either list replaces it whole; `no_endpoints` and
+`no_listeners` clear theirs. Reception no longer derives from emission and
+no longer requires a multicast Ethernet destination: a unicast listener
+names the router's own address and receives point-to-point sync. A config
+without listeners claims nothing. The shared-memory config layout changes,
+so the dataplane and the control plane must be upgraded together.
+
+The `dst_ether` field is gone: emitted sync packets leave their Ethernet
+header zeroed, and the route module downstream of fwstate resolves and stamps
+both MAC addresses. A fwstate config must sit in front of route in the
+pipeline, and a multicast sync group needs a covering route whose next-hop
+MAC is the derived multicast MAC (for example `33:33:00:00:00:01` for
+`ff02::1`). The UDP source port of every emitted packet is randomized into
+the ephemeral range, so sync traffic spreads over equal-cost paths.
+
+The CLI replaces `--src-addr`, `--dst-ether`, `--multicast` and `--unicast`
+with a repeatable `--sync-endpoint SRC@DST:PORT` (for example
+`fd00::1@ff02::1:9999`, the destination also accepts brackets), a repeatable
+`--listen-endpoint DST:PORT`, and their `--no-sync-endpoints` /
+`--no-listen-endpoints` counterparts. Where a deployment previously relied on
+the multicast endpoint receiving, it must now name the listener explicitly.
+Upgrade `yanet2-cli`, the control plane and the web UI together: an old CLI's
+endpoint flags fail as unknown, and an old service rejects the new request's
+lists as incomplete.
+
 ## Gateway HTTP rejects cross-origin browser calls from untrusted origins
 
 The gateway's HTTP server no longer sends `Access-Control-Allow-Origin: *`.

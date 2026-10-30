@@ -194,6 +194,7 @@ fwstate_test_config(struct cp_module **cp_module) {
 		{"fwstate_sync_alloc_failed",
 		 1,
 		 &config->sync_alloc_failed_counter_id},
+		{"fwstate_scope_dropped", 2, &config->scope_dropped_counter_id},
 	};
 
 	for (size_t i = 0; i < sizeof(counters) / sizeof(counters[0]); ++i) {
@@ -295,6 +296,11 @@ fwstate_test_config(struct cp_module **cp_module) {
 
 	config->v4_object_link_idx = 0;
 	config->v6_object_link_idx = 1;
+	// The stand-in allocates the config itself and balloc does not
+	// zero: the absent scope must read as matching everything.
+	memset(&config->scope, 0, sizeof(config->scope));
+	SET_OFFSET_OF(&config->rules, NULL);
+	config->rule_count = 0;
 
 	fwstate_fuzz_stash_init(
 		&fuzz_map_v4.stash, &fuzz_slot_v4, &fuzz_records_v4[0]
@@ -324,12 +330,22 @@ fwstate_test_config(struct cp_module **cp_module) {
 		&fuzz_params.module_ectx, &config->cp_module
 	);
 
-	// Configure sync settings
+	// Configure sync settings: one multicast emission endpoint and one
+	// listener on the same address, so the wrapper packets are received
+	// and the stash consumer emits.
+	uint8_t src_addr[16] = {
+		0xfd, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1
+	};
 	uint8_t multicast_addr[16] = {
 		0xff, 0x02, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x01
 	};
-	memcpy(config->sync_config.dst_addr_multicast, multicast_addr, 16);
-	config->sync_config.port_multicast = rte_cpu_to_be_16(9999);
+	config->sync_config.endpoint_count = 1;
+	memcpy(config->sync_config.endpoints[0].src_addr, src_addr, 16);
+	memcpy(config->sync_config.endpoints[0].dst_addr, multicast_addr, 16);
+	config->sync_config.endpoints[0].port = rte_cpu_to_be_16(9999);
+	config->sync_config.listener_count = 1;
+	memcpy(config->sync_config.listeners[0].dst_addr, multicast_addr, 16);
+	config->sync_config.listeners[0].port = rte_cpu_to_be_16(9999);
 
 	// Set timeouts
 	config->sync_config.timeouts.tcp_syn_ack = 120000000000ULL;
