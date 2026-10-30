@@ -97,22 +97,20 @@ bash tests/functional/test-makefile.sh /path/to/baseline.Makefile
 ```
 
 The optional argument selects another Makefile. Disposable fixtures and fake
-tools check command arguments, environment and cleanup effects. This manual
-gate does not run the VM suite and is not automatically wired into CI.
+tools check image selection and cleanup effects. CI runs this sandbox without
+the VM suite.
 
-The script reports the selected Make/Bash versions. Its optional second argument
-selects recipe mode: `bash` (the default) uses the invoking Bash, while `default`
-passes no shell override and exercises Make's normal `/bin/sh` interpreter. Run
-the complete suite with GNU Make 3.81 and 4.4 under both Bash 3.2 and 5.3, in both
-recipe modes; select an alternate Make via `PATH`, without changing fixture tools:
+The optional second argument selects recipe mode: `bash` (the default) uses the
+invoking Bash; `default` uses Make's normal `/bin/sh` interpreter. Select an
+alternate Make via `PATH`:
 
 ```bash
 PATH="/path/to/make/bin:$PATH" /path/to/bash tests/functional/test-makefile.sh
 bash tests/functional/test-makefile.sh '' default
 ```
 
-Default-shell coverage qualifies only the current host's `/bin/sh`; it does not
-qualify a real Linux host or a different Linux shell.
+Default-shell coverage uses the current host's `/bin/sh`; CI exercises it on
+Ubuntu. It does not cover every Linux shell.
 
 ## Minimal Test Package
 
