@@ -16,6 +16,7 @@ import (
 	"github.com/yanet-platform/xnetip"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
 
 	dataplaneut "github.com/yanet-platform/yanet2/bindings/go/dataplane_ut"
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
@@ -1344,6 +1345,126 @@ func Test_Backend_Writers_SerializeAcrossPublicationAndFree(t *testing.T) {
 			workers.Release(0)
 			require.NoError(t, waitForBackendResult(t, first))
 			require.NoError(t, waitForBackendResult(t, second))
+		})
+	}
+}
+
+// Test_Backend_CreateService_ConcurrentSameName verifies that competing creates
+// retain one accepted descriptor and its handles until explicit deletion.
+func Test_Backend_CreateService_ConcurrentSameName(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		hashMask uint32
+	}{
+		{"equal descriptors", 0xff},
+		{"different descriptors", 0x55},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			operations := &fakeSharedMemory{}
+			backend := controlplane.NewBackendWithSharedMemory(operations)
+			winner := serviceWithRealServer("vs0")
+			winner.SessionIndexSize = 16
+			contender := serviceWithRealServer("vs0")
+			contender.SessionIndexSize = 16
+			contender.HashMask = tc.hashMask
+			require.NoError(t, (&l3bpb.CreateServiceRequest{Service: winner}).Validate())
+			require.NoError(t, (&l3bpb.CreateServiceRequest{Service: contender}).Validate())
+			entered := make(chan struct{})
+			release := make(chan struct{})
+			workers := newBackendWorkers(t, release)
+			extraAllocation := make(chan struct{}, 1)
+			var tableCalls, serviceCalls, publications atomic.Int32
+			operations.Hook = func(operation string) error {
+				var allocationCalls int32
+				switch operation {
+				case "create-table":
+					allocationCalls = tableCalls.Add(1)
+				case "create-service":
+					allocationCalls = serviceCalls.Add(1)
+				case "publish-service":
+					if publications.Add(1) == 1 {
+						close(entered)
+						<-release
+					}
+				}
+				if allocationCalls > 1 {
+					select {
+					case extraAllocation <- struct{}{}:
+					default:
+					}
+				}
+				return nil
+			}
+			var firstError, contenderError error
+			first := workers.Start(func() { firstError = backend.CreateService(winner) })
+			waitForBackendSignal(t, entered)
+			require.NotEmpty(t, operations.Services)
+			require.NotEmpty(t, operations.Tables)
+			firstService, firstTable := operations.Services[0], operations.Tables[0]
+			started := make(chan struct{})
+			second := workers.Start(func() {
+				close(started)
+				contenderError = backend.CreateService(contender)
+			})
+			waitForBackendSignal(t, started)
+			contenderProgress := false
+			select {
+			case <-second:
+				contenderProgress = true
+			case <-extraAllocation:
+				contenderProgress = true
+			case <-time.After(100 * time.Millisecond):
+			}
+			workers.Release(0)
+			waitForBackendSignal(t, first)
+			waitForBackendSignal(t, second)
+			names := backend.ListServices()
+			snapshot, snapshotError := backend.GetService("vs0")
+			beforeDelete := [4]int32{
+				firstService.FreeCalls.Load(), firstService.Destructions.Load(),
+				firstTable.FreeCalls.Load(), firstTable.Destructions.Load(),
+			}
+			deleteError := backend.DeleteService("vs0")
+			afterDelete := [4]int32{
+				firstService.FreeCalls.Load(), firstService.Destructions.Load(),
+				firstTable.FreeCalls.Load(), firstTable.Destructions.Load(),
+			}
+			t.Run("no contender progress observed during publication probe", func(t *testing.T) {
+				require.False(t, contenderProgress)
+			})
+			t.Run("first create wins and contender already exists", func(t *testing.T) {
+				require.Equal(t, []codes.Code{codes.OK, codes.AlreadyExists}, []codes.Code{
+					status.Code(firstError), status.Code(contenderError),
+				})
+			})
+			t.Run("only winner allocates and publishes", func(t *testing.T) {
+				require.Equal(t, [2]int32{1, 1}, [2]int32{tableCalls.Load(), serviceCalls.Load()})
+				require.Len(t, operations.Tables, 1)
+				require.Len(t, operations.Services, 1)
+				require.Equal(t, int32(1), publications.Load())
+				require.Equal(t, []string{"vs0"}, names)
+			})
+			t.Run("winner snapshot is preserved", func(t *testing.T) {
+				require.NoError(t, snapshotError)
+				expected := &l3bpb.GetServiceResponse{
+					HashMask:  0xff,
+					IndexMask: 0x0f,
+					RealServers: []*l3bpb.RealServerState{{
+						DestinationAddress: []byte{192, 0, 2, 1},
+						SourceNetwork:      commonpb.NewIPNetworkFrom(xnetip.MustParseNetwork("198.51.100.0/24")),
+						Weight:             1,
+						Enabled:            false,
+					}},
+				}
+				require.True(t, proto.Equal(expected, snapshot), "got %v", snapshot)
+			})
+			t.Run("winner handles remain owned before deletion", func(t *testing.T) {
+				require.Equal(t, [4]int32{}, beforeDelete)
+			})
+			t.Run("deletion frees each winner handle exactly once", func(t *testing.T) {
+				require.NoError(t, deleteError)
+				require.Equal(t, [4]int32{1, 1, 1, 1}, afterDelete)
+			})
 		})
 	}
 }
