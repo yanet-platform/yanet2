@@ -49,6 +49,21 @@ var failedFixtureBuilds = []struct {
 		wantKind: ffi.ErrInvalidArgument,
 	},
 	{
+		name:     "name with a NUL",
+		options:  fixtureOptions{name: "con\x00fig", counter: "hits", device: "port0"},
+		wantKind: ffi.ErrInvalidArgument,
+	},
+	{
+		name:     "counter name with a NUL",
+		options:  fixtureOptions{name: "config", counter: "hits\x00x", device: "port0"},
+		wantKind: ffi.ErrInvalidArgument,
+	},
+	{
+		name:     "device name with a NUL",
+		options:  fixtureOptions{name: "config", counter: "hits", device: "port0\x00x"},
+		wantKind: ffi.ErrInvalidArgument,
+	},
+	{
 		name:     "overlong counter name",
 		options:  fixtureOptions{name: "config", counter: strings.Repeat("c", 128), device: "port0"},
 		wantKind: ffi.ErrInvalidArgument,

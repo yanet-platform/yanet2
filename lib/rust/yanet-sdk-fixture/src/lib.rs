@@ -26,7 +26,8 @@ pub const FIXTURE_MODE_FORGET: u64 = 1;
 /// Takes three packets first, disposes of them out of order and passes the
 /// rest.
 pub const FIXTURE_MODE_SHUFFLE: u64 = 2;
-/// Passes the packets whose first byte is even and drops the others.
+/// Passes the packets whose first byte is even and drops the others, an empty
+/// one included.
 pub const FIXTURE_MODE_PARITY: u64 = 3;
 /// Drops everything of worker 3 and everything once the round time has
 /// passed 1000, and passes the rest.
@@ -40,12 +41,13 @@ pub const FIXTURE_MODE_RESOLVE: u64 = 6;
 /// As [`FIXTURE_MODE_RESOLVE`], for an input target.
 pub const FIXTURE_MODE_RESOLVE_INPUT: u64 = 7;
 /// Redirects a packet to the input of its configured device once, marking
-/// it by the top bit of its first byte, and passes a marked one.
+/// it by the top bit of its first byte, passes a marked one and drops an
+/// empty one.
 pub const FIXTURE_MODE_REENTER: u64 = 8;
 /// Passes the input, makes a packet of one byte 0x5a and passes it, and
 /// makes another and drops it.
 pub const FIXTURE_MODE_EMIT: u64 = 9;
-/// Passes every packet and a copy of it, whose first byte is 0xff.
+/// Passes every packet and a copy of it, whose first byte, if any, is 0xff.
 pub const FIXTURE_MODE_CLONE: u64 = 10;
 /// Passes the input, and makes a packet and prepends as many bytes as the
 /// configuration's argument says, filled with 0xbb; passes it when
@@ -101,12 +103,9 @@ impl Module for Fixture {
                 }
                 batch.dispatch(|_| Verdict::Pass);
             }
-            FIXTURE_MODE_PARITY => batch.dispatch(|packet| {
-                if packet.data()[0] % 2 == 0 {
-                    Verdict::Pass
-                } else {
-                    Verdict::Drop
-                }
+            FIXTURE_MODE_PARITY => batch.dispatch(|packet| match packet.data().first() {
+                Some(byte) if byte % 2 == 0 => Verdict::Pass,
+                _ => Verdict::Drop,
             }),
             FIXTURE_MODE_WORKER => {
                 let drop_all = cx.worker() == 3 || cx.now() > 1000;
@@ -138,12 +137,13 @@ impl Module for Fixture {
             }
             FIXTURE_MODE_REENTER => {
                 let device = &cx.config().device;
-                batch.dispatch(|packet| {
-                    if packet.data()[0] & 0x80 != 0 {
-                        return Verdict::Pass;
+                batch.dispatch(|packet| match packet.data_mut().first_mut() {
+                    Some(byte) if *byte & 0x80 != 0 => Verdict::Pass,
+                    Some(byte) => {
+                        *byte |= 0x80;
+                        device.resolve_input(cx).map_or(Verdict::Drop, Verdict::Redirect)
                     }
-                    packet.data_mut()[0] |= 0x80;
-                    device.resolve_input(cx).map_or(Verdict::Drop, Verdict::Redirect)
+                    None => Verdict::Drop,
                 });
             }
             FIXTURE_MODE_EMIT => {
@@ -162,7 +162,9 @@ impl Module for Fixture {
             FIXTURE_MODE_CLONE => {
                 while let Some(packet) = batch.next() {
                     if let Some(mut copy) = batch.clone(&packet) {
-                        copy.data_mut()[0] = 0xff;
+                        if let Some(byte) = copy.data_mut().first_mut() {
+                            *byte = 0xff;
+                        }
                         batch.pass(copy);
                     }
                     batch.pass(packet);
@@ -204,9 +206,9 @@ pub struct Stamp<'p> {
     stamp: u64,
 }
 
-/// Counts each packet in the counter its first byte selects, by value, and
-/// in the held counter, through the handle made at commit. Passes the packets
-/// when the stamp is 14 and drops them otherwise.
+/// Counts each packet in the counter its first byte selects, by value, unless
+/// it is empty, and in the held counter, through the handle made at commit.
+/// Passes the packets when the stamp is 14 and drops them otherwise.
 pub struct Tally;
 
 impl Module for Tally {
@@ -220,7 +222,9 @@ impl Module for Tally {
         let held = prepared.held.bind(cx);
         let pass = prepared.stamp == 14;
         batch.dispatch(|packet| {
-            config.by_value[usize::from(packet.data()[0] % 3)].add(cx, 1);
+            if let Some(byte) = packet.data().first() {
+                config.by_value[usize::from(byte % 3)].add(cx, 1);
+            }
             held.add(2);
             if pass { Verdict::Pass } else { Verdict::Drop }
         });

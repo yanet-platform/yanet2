@@ -98,7 +98,7 @@ const (
 	// and passes the rest.
 	ModeShuffle Mode = C.FIXTURE_MODE_SHUFFLE
 	// ModeParity passes the packets whose first byte is even and drops the
-	// others.
+	// others, an empty one included.
 	ModeParity Mode = C.FIXTURE_MODE_PARITY
 	// ModeWorker drops everything of worker 3 and everything once the round
 	// time has passed 1000, and passes the rest.
@@ -113,13 +113,14 @@ const (
 	// target of the generation, and drops it otherwise.
 	ModeResolveInput Mode = C.FIXTURE_MODE_RESOLVE_INPUT
 	// ModeReenter redirects a packet to the input of its configured device
-	// once, marking it by the top bit of its first byte, and passes a marked
-	// one.
+	// once, marking it by the top bit of its first byte, passes a marked one
+	// and drops an empty one.
 	ModeReenter Mode = C.FIXTURE_MODE_REENTER
 	// ModeEmit passes the input, makes a packet of one byte 0x5a and passes
 	// it, and makes another and drops it.
 	ModeEmit Mode = C.FIXTURE_MODE_EMIT
-	// ModeClone passes every packet and a copy of it, whose first byte is 0xff.
+	// ModeClone passes every packet and a copy of it, whose first byte, if
+	// any, is 0xff.
 	ModeClone Mode = C.FIXTURE_MODE_CLONE
 	// ModeAllocPrepend passes the input, makes a packet and prepends as many
 	// bytes as the argument says, filled with 0xbb, and passes it when
@@ -223,11 +224,22 @@ func bytesOf[T any](array *T) []byte {
 	return unsafe.Slice((*byte)(unsafe.Pointer(array)), unsafe.Sizeof(*array))
 }
 
+// refuseNUL refuses the strings as invalid arguments when one holds a NUL,
+// at which C would end it short.
+func refuseNUL(values ...string) error {
+	for _, value := range values {
+		if strings.IndexByte(value, 0) >= 0 {
+			return fmt.Errorf("%q holds a NUL: %w", value, ffi.ErrInvalidArgument)
+		}
+	}
+	return nil
+}
+
 // setName writes the name and its terminator into the field, which starts
 // zeroed.
 func setName(field []byte, name string) error {
-	if strings.IndexByte(name, 0) >= 0 {
-		return fmt.Errorf("%q holds a NUL", name)
+	if err := refuseNUL(name); err != nil {
+		return err
 	}
 	if len(name) >= len(field) {
 		return fmt.Errorf("%d bytes do not fit %d with the terminator", len(name), len(field))
@@ -278,6 +290,9 @@ func NewFixtureConfig(
 	spec *FixtureSpec,
 	ranges []Range4,
 ) (*ModuleConfig, error) {
+	if err := refuseNUL(name, counter, device); err != nil {
+		return nil, fmt.Errorf("failed to build fixture config: %w", err)
+	}
 	cName := C.CString(name)
 	defer C.free(unsafe.Pointer(cName))
 	cCounter := C.CString(counter)
@@ -336,6 +351,9 @@ func freeFixture(ptr unsafe.Pointer) (int, unsafe.Pointer, error) {
 // NewTallyConfig builds a tally configuration named name over word in the
 // memory of the agent.
 func NewTallyConfig(agent *ffi.Agent, name string, word uint64) (*ModuleConfig, error) {
+	if err := refuseNUL(name); err != nil {
+		return nil, fmt.Errorf("failed to build tally config: %w", err)
+	}
 	cName := C.CString(name)
 	defer C.free(unsafe.Pointer(cName))
 
@@ -381,6 +399,9 @@ type Fib struct {
 // NewFibConfig builds a FIB configuration named name from the devices, routes,
 // lists and ranges in the memory of the agent, with a counter per route.
 func NewFibConfig(agent *ffi.Agent, name string, fib Fib) (*ModuleConfig, error) {
+	if err := refuseNUL(name); err != nil {
+		return nil, fmt.Errorf("failed to build fib config: %w", err)
+	}
 	cName := C.CString(name)
 	defer C.free(unsafe.Pointer(cName))
 
