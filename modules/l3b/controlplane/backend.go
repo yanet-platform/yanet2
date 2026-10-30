@@ -557,6 +557,9 @@ func (m *backend) DeleteService(name string) error {
 	}
 
 	if err := m.operations.DeleteVirtualService(name); err != nil {
+		if errors.Is(err, ffi.ErrBusy) {
+			return status.Errorf(codes.FailedPrecondition, "failed to delete virtual service %q: %v", name, err)
+		}
 		return fmt.Errorf("failed to delete virtual service %q: %w", name, err)
 	}
 
