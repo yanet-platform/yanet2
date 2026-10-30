@@ -2,10 +2,12 @@
 #include "dataplane.h"
 
 #include <pthread.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "common/strutils.h"
 #include "dpdk.h"
+#include "flow.h"
 #include "lib/dataplane/config/topology.h"
 #include "lib/logging/log.h"
 
@@ -61,6 +63,53 @@ dataplane_device_start_query_rss(
 	}
 }
 
+// Apply the queue roles to a started port: the RSS table over the RSS
+// queues only, then the rte_flow rules for the steered classes.
+//
+// The table is rewritten only when the port hashes and some queue is left
+// out of it. Without RSS nothing is hashed: unmatched traffic lands on
+// queue 0, which validation keeps an RSS queue. A rule the driver rejects
+// fails the start, as does a driver with no flow API.
+static int
+dataplane_device_steer(struct dataplane_device *device) {
+	uint16_t rss_queues[device->queue_count];
+	uint16_t rss_queue_count = 0;
+	for (uint32_t idx = 0; idx < device->queue_count; ++idx) {
+		if (device->queue_roles[idx].rss) {
+			rss_queues[rss_queue_count++] = (uint16_t)idx;
+		}
+	}
+	if (device->rss_hash != 0 && rss_queue_count < device->queue_count &&
+	    dpdk_port_set_rss_reta(
+		    device->port_id, rss_queues, rss_queue_count
+	    ) != 0) {
+		LOG(ERROR,
+		    "device %s: failed to keep RSS off the steering queues",
+		    device->port_name);
+		return -1;
+	}
+
+	int rc = dataplane_flow_steer(
+		device->port_id,
+		device->rss_hash,
+		device->queue_roles,
+		(uint16_t)device->queue_count
+	);
+	if (rc != 0) {
+		LOG(ERROR,
+		    "device %s: failed to install the steering rules",
+		    device->port_name);
+		return -1;
+	}
+	LOG(INFO,
+	    "device %s: queue roles applied, %u of %u queues are RSS "
+	    "queues",
+	    device->port_name,
+	    rss_queue_count,
+	    device->queue_count);
+	return 0;
+}
+
 int
 dataplane_device_start(
 	struct dataplane *dataplane, struct dataplane_device *device
@@ -76,6 +125,11 @@ dataplane_device_start(
 		    device->device_id,
 		    device->port_name,
 		    rc);
+		return -1;
+	}
+
+	if (device->queue_roles != NULL &&
+	    dataplane_device_steer(device) != 0) {
 		return -1;
 	}
 
@@ -100,6 +154,27 @@ dataplane_device_init(
 
 	device->device_id = device_id;
 	device->queue_count = config->worker_count;
+	device->rss_hash = config->rss_hash;
+	device->queue_roles = NULL;
+	strtcpy(device->port_name, config->port_name, 80);
+
+	if (dataplane_device_config_has_roles(config)) {
+		device->queue_roles = (struct dataplane_queue_role *)malloc(
+			sizeof(struct dataplane_queue_role) *
+			config->worker_count
+		);
+		if (device->queue_roles == NULL) {
+			return -1;
+		}
+		for (uint32_t idx = 0; idx < config->worker_count; ++idx) {
+			device->queue_roles[idx] = config->workers[idx].role;
+		}
+	}
+	device->rss_queue_count = 0;
+	for (uint32_t idx = 0; idx < device->queue_count; ++idx) {
+		device->rss_queue_count +=
+			!dataplane_device_queue_is_steering(device, idx);
+	}
 
 	if (dpdk_port_init(
 		    config->port_name,
@@ -114,8 +189,6 @@ dataplane_device_init(
 		LOG(ERROR, "failed to init dpdk port %s", config->port_name);
 		return -1;
 	}
-
-	strtcpy(device->port_name, config->port_name, 80);
 
 	return 0;
 }

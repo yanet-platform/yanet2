@@ -22,6 +22,7 @@ lib_sources = files(
   'dataplane.c',
   'device.c',
   'dpdk.c',
+  'flow.c',
   'instance.c',
   'worker.c',
   'numa.c',
