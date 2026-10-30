@@ -2,6 +2,15 @@
 
 #define FWSTATE_MODULE_NAME "fwstate"
 
+#include "common/filter_views.h"
+#include "common/network.h"
+
+#include "lib/classify/classifiers/net4_hash.h"
+#include "lib/classify/classifiers/net6_hash.h"
+#include "lib/classify/classifiers/port.h"
+#include "lib/classify/classify.h"
+#include "lib/classify/compiler/u16_ranges.h"
+#include "lib/classify/rule_table.h"
 #include "lib/controlplane/config/zone.h"
 
 #include "lib/fwstate/config.h"
@@ -40,6 +49,7 @@ struct fwstate_counters {
 	uint64_t *external_dropped;
 	uint64_t *internal_forwarded;
 	uint64_t *sync_alloc_failed;
+	uint64_t *scope_dropped;
 };
 
 // Per-worker links of one execution context, set by the module's commit
@@ -52,6 +62,40 @@ struct fwstate_prepared {
 	struct fwstate_map_link map[2];
 	struct fwstate_counters counters;
 	struct fwstate_stash_position *position;
+};
+
+/*
+ * One synchronization scope rule: the flows a rule names are the ones
+ * the module syncs. The networks match the flow's source address and
+ * the port ranges its source port; a rule naming neither matches every
+ * flow. An empty rule list syncs everything.
+ *
+ * The rule lives in the module config's memory tree: the views point
+ * into the net and port arrays the control plane allocates alongside
+ * the rule itself.
+ */
+struct fwstate_sync_rule {
+	struct classifier_rule rule;
+	struct filter_net4s net4s;
+	struct filter_net6s net6s;
+	// The port spans in the u16 attribute's own type: the ranges view
+	// of the compile and the port_ranges view of the filter share the
+	// layout.
+	struct filter_u16_ranges src_ports;
+};
+
+// The compiled scope: the hashed network attributes of both families
+// joined with the port attribute through first-match rule tables. The
+// zeroed struct - no rules - matches everything.
+struct fwstate_scope {
+	struct classify_attr_net4_hash net4_attr;
+	struct classifier net4_cls;
+	struct classify_attr_net6_hash net6_attr;
+	struct classifier net6_cls;
+	struct classify_attr_port port_attr;
+	struct classifier port_cls;
+	struct rule_table net4_rules;
+	struct rule_table net6_rules;
 };
 
 struct fwstate_module_config {
@@ -69,6 +113,12 @@ struct fwstate_module_config {
 	// Synchronization parameters for receive matching, state updates,
 	// suppression, and local emission.
 	struct fwstate_sync_config sync_config;
+
+	// The synchronization scope rules and their compiled classifier;
+	// an absent rule list leaves the scope matching everything.
+	struct fwstate_sync_rule *rules;
+	uint32_t rule_count;
+	struct fwstate_scope scope;
 
 	// Stash read positions, one per dataplane worker, allocated zeroed
 	// with the config and freed with it.
@@ -90,4 +140,5 @@ struct fwstate_module_config {
 	uint64_t external_dropped_counter_id;
 	uint64_t internal_forwarded_counter_id;
 	uint64_t sync_alloc_failed_counter_id;
+	uint64_t scope_dropped_counter_id;
 };

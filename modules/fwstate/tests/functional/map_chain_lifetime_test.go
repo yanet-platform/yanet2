@@ -52,7 +52,7 @@ func newMapChainConfig(
 
 	syncConfig := fwstateTestSyncConfig()
 	modCfg, err := cfwstate.NewModuleConfig(
-		agent, name, &syncConfig, fw4MapName, fw6MapName,
+		agent, name, &syncConfig, nil, fw4MapName, fw6MapName,
 	)
 	require.NoError(t, err)
 
@@ -106,7 +106,7 @@ func TestFWStateUpdate_SecondUpdateKeepsLiveMaps(t *testing.T) {
 
 	syncConfig := fwstateTestSyncConfig()
 	v2, err := cfwstate.NewModuleConfig(
-		agent, "fw0", &syncConfig, mapV4.Name(), mapV6.Name(),
+		agent, "fw0", &syncConfig, nil, mapV4.Name(), mapV6.Name(),
 	)
 	require.NoError(t, err)
 	require.NoError(t, agent.UpdateModules([]ffi.ModuleConfig{v2.AsFFIModule()}))
@@ -116,7 +116,7 @@ func TestFWStateUpdate_SecondUpdateKeepsLiveMaps(t *testing.T) {
 	// Construct a module of this type on an unrelated name and free it
 	// right away. It was never published, so it is dangling: the free
 	// must destroy exactly this one config and nothing else.
-	other, err := cfwstate.NewModuleConfig(agent, "fw1", nil, "", "")
+	other, err := cfwstate.NewModuleConfig(agent, "fw1", nil, nil, "", "")
 	require.NoError(t, err)
 
 	afterUnrelatedCreate := mapChainAgentRootMemoryNode(t, shm, agentName)
@@ -148,7 +148,7 @@ func TestFWStateUpdate_SecondUpdateKeepsLiveMaps(t *testing.T) {
 	// One more construction of this type must find nothing left to
 	// destroy: each earlier config was already destroyed by its own
 	// owner, and the linked map objects were never theirs to destroy.
-	other2, err := cfwstate.NewModuleConfig(agent, "fw2", nil, "", "")
+	other2, err := cfwstate.NewModuleConfig(agent, "fw2", nil, nil, "", "")
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = other2.Free() })
 

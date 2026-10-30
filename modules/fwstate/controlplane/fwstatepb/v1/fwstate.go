@@ -22,6 +22,11 @@ const (
 	// endpoint array in the shared-memory config.
 	MaxSyncEndpoints = 8
 
+	// Bounds of the synchronization scope, mirroring the C input struct.
+	MaxSyncRules          = 8 * 8
+	MaxSyncRuleNets       = 16
+	MaxSyncRulePortRanges = 8
+
 	// syncAddrLen is the width every sync address is stored at: the
 	// module matches and stamps IPv6 addresses only.
 	syncAddrLen = 16
@@ -195,6 +200,52 @@ func (m *SyncConfig) validateEndpointLists() error {
 	for idx, listener := range m.GetListeners() {
 		if err := validateSyncListener(idx, listener); err != nil {
 			return err
+		}
+	}
+	if m.GetNoRules() && len(m.GetRules()) > 0 {
+		return errors.New("no_rules cannot be combined with rules")
+	}
+	if len(m.GetRules()) > MaxSyncRules {
+		return fmt.Errorf(
+			"at most %d sync scope rules are supported, got %d",
+			MaxSyncRules, len(m.GetRules()),
+		)
+	}
+	for idx, rule := range m.GetRules() {
+		if err := validateSyncScopeRule(idx, rule); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// validateSyncScopeRule checks one update-carried scope rule's form.
+func validateSyncScopeRule(idx int, rule *SyncRule) error {
+	if len(rule.GetNet4S()) > MaxSyncRuleNets {
+		return fmt.Errorf(
+			"rules[%d].net4s: at most %d networks per rule, got %d",
+			idx, MaxSyncRuleNets, len(rule.GetNet4S()),
+		)
+	}
+	if len(rule.GetNet6S()) > MaxSyncRuleNets {
+		return fmt.Errorf(
+			"rules[%d].net6s: at most %d networks per rule, got %d",
+			idx, MaxSyncRuleNets, len(rule.GetNet6S()),
+		)
+	}
+	if len(rule.GetSrcPorts()) > MaxSyncRulePortRanges {
+		return fmt.Errorf(
+			"rules[%d].src_ports: at most %d ranges per rule, got %d",
+			idx, MaxSyncRulePortRanges, len(rule.GetSrcPorts()),
+		)
+	}
+	for spanIdx, span := range rule.GetSrcPorts() {
+		if span.GetFrom() == 0 || span.GetFrom() > span.GetTo() ||
+			span.GetTo() > maxSyncPort {
+			return fmt.Errorf(
+				"rules[%d].src_ports[%d]: from must be in 1..to and to in from..%d",
+				idx, spanIdx, maxSyncPort,
+			)
 		}
 	}
 	return nil

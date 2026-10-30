@@ -250,10 +250,15 @@ func (m *FWStateService) prepareUpdate(
 	// and declares the map-name links: the names resolve against
 	// published objects when the new generation installs, so an unknown
 	// name surfaces from the publish, not from here.
+	nativeSyncConfig, err := SyncConfigToC(syncConfig)
+	if err != nil {
+		m.log.Error("invalid sync config", zap.String("config", name), zap.Error(err))
+		return nil, status.Errorf(codes.InvalidArgument, "invalid sync config: %v", err)
+	}
 	newConfig, err := newFWStateModuleConfig(
 		m.agent,
 		name,
-		SyncConfigToC(syncConfig),
+		nativeSyncConfig,
 		mapNameV4,
 		mapNameV6,
 	)

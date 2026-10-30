@@ -7,6 +7,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
+	filterpb "github.com/yanet-platform/yanet2/common/filterpb/v1"
 )
 
 // Test_SyncConfig_Merge verifies that an update overwrites only the settings
@@ -37,6 +38,9 @@ func Test_SyncConfig_Merge(t *testing.T) {
 			Listeners: []*SyncListenEndpoint{
 				listener(multicast(), 9999),
 				listener(unicast(), 10000),
+			},
+			Rules: []*SyncRule{
+				{SrcPorts: []*filterpb.PortRange{{From: 1, To: 65535}}},
 			},
 			Tcp:                 proto.Uint64(120e9),
 			SyncSuppressTimeout: proto.Uint64(8e9),
@@ -106,6 +110,27 @@ func Test_SyncConfig_Merge(t *testing.T) {
 				cfg := stored()
 				cfg.Listeners = nil
 				cfg.NoListeners = new(true)
+				return cfg
+			}(),
+		},
+		{
+			name: "rules replace the stored list wholesale",
+			update: &SyncConfig{
+				Rules: []*SyncRule{{SrcPorts: []*filterpb.PortRange{{From: 100, To: 200}}}},
+			},
+			want: func() *SyncConfig {
+				cfg := stored()
+				cfg.Rules = []*SyncRule{{SrcPorts: []*filterpb.PortRange{{From: 100, To: 200}}}}
+				return cfg
+			}(),
+		},
+		{
+			name:   "no_rules removes the stored list",
+			update: &SyncConfig{NoRules: new(true)},
+			want: func() *SyncConfig {
+				cfg := stored()
+				cfg.Rules = nil
+				cfg.NoRules = new(true)
 				return cfg
 			}(),
 		},

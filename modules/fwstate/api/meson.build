@@ -1,5 +1,6 @@
 cp_dependencies = [
   lib_common_dep,
+  lib_classify_compiler_dep,
   lib_errors_dep,
   lib_config_cp_dep,
   lib_counters_dep,
@@ -17,6 +18,6 @@ lib_fwstate_cp = static_library(
 )
 
 lib_fwstate_cp_dep = declare_dependency(
-  link_with: [lib_fwstate_cp],
+  link_with: [lib_fwstate_cp, lib_classify_compiler],
   dependencies: cp_dependencies,
 )

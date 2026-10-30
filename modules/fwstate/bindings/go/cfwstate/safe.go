@@ -8,6 +8,7 @@ import "C"
 
 import (
 	"encoding/binary"
+	"fmt"
 	"unsafe"
 )
 
@@ -38,6 +39,7 @@ type SyncListenEndpoint struct {
 type SyncConfig struct {
 	Endpoints           []SyncEndpoint
 	Listeners           []SyncListenEndpoint
+	Rules               []SyncRule
 	TcpSynAck           uint64
 	TcpSyn              uint64
 	TcpFin              uint64
@@ -56,6 +58,60 @@ const MinSyncMTU = uint16(C.FWSTATE_SYNC_MIN_MTU)
 // MaxSyncEndpoints mirrors the C FWSTATE_SYNC_ENDPOINTS_MAX bound of the
 // endpoint array in the shared-memory config.
 const MaxSyncEndpoints = int(C.FWSTATE_SYNC_ENDPOINTS_MAX)
+
+// SyncRule is one synchronization scope rule: the flows whose source
+// address falls inside one of the networks and whose source port falls
+// inside one of the port spans are the ones the module syncs. A rule
+// naming neither matches every flow.
+type SyncRule struct {
+	// Net4s carries one addr-then-mask big-endian pair per IPv4 network.
+	Net4s [][16]byte
+	// Net6s carries one addr-then-mask pair per IPv6 network.
+	Net6s [][32]byte
+	// SrcPorts carries one inclusive from-to span per source port range.
+	SrcPorts [][2]uint16
+}
+
+// Bounds mirroring the C input struct.
+const (
+	SyncRuleNetsMax  = int(C.FWSTATE_SYNC_RULE_NETS_MAX)
+	SyncRulePortsMax = int(C.FWSTATE_SYNC_RULE_PORTS_MAX)
+	SyncRulesMax     = int(C.FWSTATE_SYNC_RULES_MAX)
+)
+
+func syncRulesToC(rules []SyncRule) ([]C.struct_fwstate_sync_rule_input, error) {
+	if len(rules) > SyncRulesMax {
+		return nil, fmt.Errorf(
+			"at most %d sync scope rules are supported, got %d",
+			SyncRulesMax, len(rules),
+		)
+	}
+	inputs := make([]C.struct_fwstate_sync_rule_input, len(rules))
+	for idx, rule := range rules {
+		if len(rule.Net4s) > SyncRuleNetsMax ||
+			len(rule.Net6s) > SyncRuleNetsMax ||
+			len(rule.SrcPorts) > SyncRulePortsMax {
+			return nil, fmt.Errorf(
+				"sync rule %d exceeds the per-rule bounds (%d networks per family, %d port spans)",
+				idx, SyncRuleNetsMax, SyncRulePortsMax,
+			)
+		}
+		for netIdx, net := range rule.Net4s {
+			inputs[idx].net4s[netIdx] = *(*C.struct_net4)(unsafe.Pointer(&net))
+		}
+		inputs[idx].net4_count = C.uint32_t(len(rule.Net4s))
+		for netIdx, net := range rule.Net6s {
+			inputs[idx].net6s[netIdx] = *(*C.struct_net6)(unsafe.Pointer(&net))
+		}
+		inputs[idx].net6_count = C.uint32_t(len(rule.Net6s))
+		for portIdx, span := range rule.SrcPorts {
+			inputs[idx].src_ports[portIdx].from = C.uint16_t(span[0])
+			inputs[idx].src_ports[portIdx].to = C.uint16_t(span[1])
+		}
+		inputs[idx].src_port_count = C.uint32_t(len(rule.SrcPorts))
+	}
+	return inputs, nil
+}
 
 func newSyncConfigFromC(cCfg *C.struct_fwstate_sync_config) SyncConfig {
 	var syncCfg SyncConfig

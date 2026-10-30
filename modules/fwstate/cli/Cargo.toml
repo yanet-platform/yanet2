@@ -18,6 +18,7 @@ prost = "0.14"
 tonic = { version = "0.14", features = ["gzip", "zstd"] }
 serde = { version = "1", features = ["derive"] }
 humantime = "2"
+filterpb = { path = "../../../common/rust/filterpb", package = "yanet-filterpb" }
 
 [build-dependencies]
 ync-build = { path = "../../../cli/ync-build", package = "yanet-cli-build" }

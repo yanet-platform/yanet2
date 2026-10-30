@@ -41,4 +41,18 @@ func (m *SyncConfig) Merge(update *SyncConfig) {
 	default:
 		m.Listeners = storedListeners
 	}
+
+	storedRules := m.GetRules()
+	switch {
+	case update.GetNoRules():
+		m.Rules = nil
+	case len(update.GetRules()) > 0:
+		rules := make([]*SyncRule, len(update.GetRules()))
+		for idx, rule := range update.GetRules() {
+			rules[idx] = proto.CloneOf(rule)
+		}
+		m.Rules = rules
+	default:
+		m.Rules = storedRules
+	}
 }

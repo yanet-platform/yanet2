@@ -3,7 +3,10 @@ syntax = "proto3";
 package modules.fwstate.controlplane.fwstatepb.v1;
 
 import "common/commonpb/v1/ipaddr.proto";
+import "common/commonpb/v1/ipv4network.proto";
+import "common/commonpb/v1/ipv6network.proto";
 import "common/commonpb/v1/metric.proto";
+import "common/filterpb/v1/filter.proto";
 
 option go_package = "github.com/yanet-platform/yanet2/modules/fwstate/controlplane/fwstatepb/v1;fwstatepb";
 
@@ -29,8 +32,8 @@ service MetricsService {
 //
 // An absent field keeps the stored value, and a missing config starts from
 // the defaults. An update carrying sync endpoints or listeners replaces the
-// whole list it carries; no_endpoints and no_listeners remove theirs. The
-// merged config must pass validation.
+// whole list it carries; no_endpoints, no_listeners and no_rules remove
+// theirs. The merged config must pass validation.
 message UpdateConfigRequest {
   string name = 1;
   // Names of the published fwstate_map_v4 / fwstate_map_v6 objects whose
@@ -85,6 +88,19 @@ message SyncListenEndpoint {
   optional uint32 port = 2;                  // Destination port, 1..65535;
 }
 
+// One synchronization scope rule: the flows whose source address falls
+// inside one of the networks and whose source port inside one of the
+// port ranges are the ones the module syncs. A rule naming neither
+// matches every flow; a config without rules syncs everything.
+//
+// The source networks classify through hash-indexed exact-prefix
+// attributes joined with the port attribute, not through the LPM ones.
+message SyncRule {
+  repeated common.commonpb.v1.IPv4Network net4s = 1; // Source IPv4 networks;
+  repeated common.commonpb.v1.IPv6Network net6s = 2; // Source IPv6 networks;
+  repeated common.filterpb.v1.PortRange src_ports = 3; // Inclusive source port ranges;
+}
+
 // SyncConfig carries the emission destinations, the receive listeners and
 // the state-update parameters: timeouts and the suppression window.
 //
@@ -97,6 +113,8 @@ message SyncConfig {
   optional bool no_endpoints = 2;               // Removes every emission endpoint when true;
   repeated SyncListenEndpoint listeners = 3;    // Receive contract, independent of emission;
   optional bool no_listeners = 4;               // Removes every listener when true;
+  repeated SyncRule rules = 5;                  // Synchronization scope; an update carrying rules replaces the whole list;
+  optional bool no_rules = 6;                  // Removes every scope rule when true;
 
   // Connection timeouts
   optional uint64 tcp_syn_ack = 7; // TCP SYN-ACK timeout in nanoseconds;

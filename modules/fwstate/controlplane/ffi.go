@@ -40,7 +40,11 @@ func NewFWStateModuleConfig(
 	fw4MapName, fw6MapName string,
 ) (*FwStateConfig, error) {
 	merged := mergedSyncConfig(old, syncConfig)
-	return newFWStateModuleConfig(agent, name, SyncConfigToC(merged), fw4MapName, fw6MapName)
+	native, err := SyncConfigToC(merged)
+	if err != nil {
+		return nil, err
+	}
+	return newFWStateModuleConfig(agent, name, native, fw4MapName, fw6MapName)
 }
 
 // newFWStateModuleConfig installs the already merged values verbatim.
@@ -54,6 +58,7 @@ func newFWStateModuleConfig(
 		agent,
 		name,
 		&syncConfig,
+		nil,
 		fw4MapName,
 		fw6MapName,
 	)

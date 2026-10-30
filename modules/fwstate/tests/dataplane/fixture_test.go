@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"net"
 	"net/netip"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -42,6 +44,7 @@ type testConfig struct {
 	Fixture *fwstateFixture
 	Name    string
 	Sync    modulefwstate.SyncConfig
+	Rules   []modulefwstate.SyncRule
 	Devices []uint16
 }
 
@@ -121,7 +124,7 @@ func (m *fwstateFixture) Publish() {
 		devices[idx] = ffi.DeviceConfig{Name: fmt.Sprintf("port%d", idx), Input: []ffi.DevicePipelineConfig{{Name: "empty", Weight: 1}}}
 	}
 	for _, config := range m.Configs {
-		module, err := modulefwstate.NewModuleConfig(m.Agent, config.Name, &config.Sync, m.Maps[0].Name(), m.Maps[1].Name())
+		module, err := modulefwstate.NewModuleConfig(m.Agent, config.Name, &config.Sync, config.Rules, m.Maps[0].Name(), m.Maps[1].Name())
 		require.NoError(m.Testing, err)
 		require.NoError(m.Testing, m.Agent.UpdateModules([]ffi.ModuleConfig{module.AsFFIModule()}))
 		require.NoError(m.Testing, m.Agent.UpdateFunction(ffi.FunctionConfig{
@@ -234,6 +237,35 @@ func SetSyncSuppressTimeout(config *testConfig, timeout uint64) {
 func ClearSyncDestination(config *testConfig) {
 	config.Sync.Endpoints = nil
 	config.Sync.Listeners = nil
+}
+
+// SetSyncScope restricts synchronization to the flows of one IPv6
+// source network and one source port span before publication.
+func SetSyncScope(config *testConfig) {
+	config.Rules = []modulefwstate.SyncRule{{
+		Net6s:    [][32]byte{syncNet6("2001:db8::/32")},
+		SrcPorts: [][2]uint16{{100, 200}},
+	}}
+}
+
+// syncNet6 renders one IPv6 prefix as the addr-then-mask pair the
+// bindings carry.
+func syncNet6(prefix string) [32]byte {
+	groups := strings.Split(prefix, "/")
+	if len(groups) != 2 {
+		panic("prefix")
+	}
+	ip := net.ParseIP(groups[0]).To16()
+	bits, err := strconv.Atoi(groups[1])
+	if err != nil {
+		panic("prefix")
+	}
+	var out [32]byte
+	copy(out[:16], ip)
+	for idx := 0; idx < bits; idx++ {
+		out[16+idx/8] |= 1 << (7 - idx%8)
+	}
+	return out
 }
 
 // SetSyncUnicastListener replaces the listeners with one unicast

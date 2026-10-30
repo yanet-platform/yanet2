@@ -57,6 +57,37 @@ pub(crate) fn parse_sync_listen_endpoint(value: &str) -> Result<SyncListenEndpoi
     Ok(SyncListenEndpoint { dst, port })
 }
 
+/// Parses one scope rule: comma-separated CIDR networks of either
+/// family and one port=FROM-TO range; the parser validates the pieces,
+/// the value stays a string the request builder re-parses through the
+/// shared proto types.
+fn parse_sync_rule(value: &str) -> Result<String, String> {
+    for part in value.split(',') {
+        let part = part.trim();
+        if part.is_empty() {
+            return Err("empty rule element".to_string());
+        }
+        if let Some(range) = part.strip_prefix("port=") {
+            let (from, to) = range.split_once('-').ok_or("port range must be FROM-TO")?;
+            let from: u16 = from
+                .parse()
+                .map_err(|_| "port range from must be 1..=65535".to_string())?;
+            let to: u16 = to.parse().map_err(|_| "port range to must be 1..=65535".to_string())?;
+            if from == 0 || from > to {
+                return Err("port range must satisfy 1 <= from <= to".to_string());
+            }
+            continue;
+        }
+        let parsed: core::net::IpAddr = part
+            .parse()
+            .map_err(|err| format!("invalid network address {part:?}: {err}"))?;
+        if parsed.is_ipv4() && !part.contains('/') {
+            return Err("IPv4 networks must carry a prefix length".to_string());
+        }
+    }
+    Ok(value.to_string())
+}
+
 /// Parse "SRC@DST:PORT"; DST:PORT accepts both "[dst]:port" and "dst:port".
 pub(crate) fn parse_sync_endpoint(value: &str) -> Result<SyncEndpoint, String> {
     let (src, rest) = value.split_once('@').ok_or("endpoint must be SRC@DST:PORT")?;
@@ -141,6 +172,23 @@ pub struct UpdateCmd {
     /// Remove every synchronization listener.
     #[arg(long, conflicts_with = "listen_endpoint")]
     pub no_listen_endpoints: bool,
+
+    /// Synchronization scope rule (e.g.,
+    /// "2001:db8::/32,10.0.0.0/8,port=100-200"): only the flows whose
+    /// source address falls inside one of the networks and whose source
+    /// port inside one of the port ranges are synced. Repeatable; an update
+    /// carrying rules replaces the whole list, and a config without rules
+    /// syncs everything.
+    #[arg(
+        long = "sync-rule",
+        value_name = "NET[,NET...][,port=FROM-TO]",
+        value_parser = parse_sync_rule
+    )]
+    pub sync_rule: Vec<String>,
+
+    /// Remove every synchronization scope rule.
+    #[arg(long, conflicts_with = "sync_rule")]
+    pub no_sync_rules: bool,
 
     /// TCP SYN-ACK timeout (e.g., "60s", "5m", "1h").
     #[arg(long, value_parser = parse_duration)]

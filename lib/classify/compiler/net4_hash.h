@@ -434,28 +434,38 @@ classify_compile_net4_hash_commit(
 		++length_count;
 	}
 
-	uint32_t *keys = (uint32_t *)memory_balloc(
-		memory_context, sizeof(uint32_t) * net4_compile->region_count
-	);
-	uint32_t *classes = (uint32_t *)memory_balloc(
-		memory_context, sizeof(uint32_t) * net4_compile->region_count
-	);
-	if (keys == NULL || classes == NULL) {
-		if (keys != NULL) {
-			memory_bfree(
-				memory_context,
-				keys,
-				sizeof(uint32_t) * net4_compile->region_count
-			);
+	// A family no rule names keeps no regions: the attribute stays
+	// zeroed with only the miss class, and the lookup always misses.
+	uint32_t *keys = NULL;
+	uint32_t *classes = NULL;
+	if (net4_compile->region_count > 0) {
+		keys = (uint32_t *)memory_balloc(
+			memory_context,
+			sizeof(uint32_t) * net4_compile->region_count
+		);
+		classes = (uint32_t *)memory_balloc(
+			memory_context,
+			sizeof(uint32_t) * net4_compile->region_count
+		);
+		if (keys == NULL || classes == NULL) {
+			if (keys != NULL) {
+				memory_bfree(
+					memory_context,
+					keys,
+					sizeof(uint32_t) *
+						net4_compile->region_count
+				);
+			}
+			if (classes != NULL) {
+				memory_bfree(
+					memory_context,
+					classes,
+					sizeof(uint32_t) *
+						net4_compile->region_count
+				);
+			}
+			return -1;
 		}
-		if (classes != NULL) {
-			memory_bfree(
-				memory_context,
-				classes,
-				sizeof(uint32_t) * net4_compile->region_count
-			);
-		}
-		return -1;
 	}
 	memcpy(keys,
 	       net4_compile->keys,

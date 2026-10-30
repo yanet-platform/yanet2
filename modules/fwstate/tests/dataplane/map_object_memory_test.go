@@ -96,7 +96,7 @@ func Test_ModuleConfigMemory_FreedWithConfig(t *testing.T) {
 	_, agent := newHarnessAgent(t)
 
 	before := agent.BlockAllocatorFreeSize()
-	config, err := modulefwstate.NewModuleConfig(agent, "cycle", nil, "", "")
+	config, err := modulefwstate.NewModuleConfig(agent, "cycle", nil, nil, "", "")
 	require.NoError(t, err)
 	require.Equal(t, uint64(2), config.StashPositionCount())
 	require.NoError(t, config.Free())

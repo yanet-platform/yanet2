@@ -19,6 +19,7 @@
 #include "lib/dataplane/pipeline/econtext.h"
 #include "lib/dataplane/time/clock.h"
 #include "lib/dataplane/worker/worker.h"
+#include "lib/fwstate/scope.h"
 #include "lib/fwstate/stash.h"
 #include "lib/fwstate/stash_ectx.h"
 #include "lib/fwstate/sync.h"
@@ -495,6 +496,7 @@ struct fwstate_emitter {
 	struct packet_front *packet_front;
 	const struct fwstate_sync_config *sync_config;
 	const struct fwstate_counters *counters;
+	const struct fwstate_scope *scope;
 	// Enabled endpoints, in configuration order; emission addresses one
 	// copy of every built packet to each of them.
 	const struct fwstate_sync_endpoint
@@ -651,6 +653,12 @@ fwstate_consume_records(
 		}
 
 		if (emit && record->status == FWSTATE_SYNC_RECORD_APPLIED) {
+			if (!fwstate_scope_matches(
+				    emitter->scope, &record->frame
+			    )) {
+				emitter->counters->scope_dropped[0] += 1;
+				continue;
+			}
 			fwstate_sync_batch_add(emitter, record);
 		}
 	}
@@ -751,6 +759,11 @@ fwstate_receive_external(
 					idx * sizeof(struct fw_state_sync_frame)
 			);
 
+		if (!fwstate_scope_matches(emitter->scope, sync_frame)) {
+			counters->scope_dropped[0] += 1;
+			continue;
+		}
+
 		if (sync_frame->addr_type == FW_STATE_ADDR_TYPE_IP4) {
 			fwstate_process_sync_v4(
 				fw4table,
@@ -815,6 +828,7 @@ fwstate_handle_packets(
 	emitter.packet_front = packet_front;
 	emitter.sync_config = sync_config;
 	emitter.counters = counters;
+	emitter.scope = &fwstate_module->scope;
 	// Only the enabled endpoints are collected; endpoint_count is bounded
 	// by the controlplane but never trusted past the array size.
 	emitter.endpoint_count = 0;
@@ -950,6 +964,8 @@ fwstate_module_commit_ectx(
 	counters->sync_alloc_failed = counter_get_address(
 		config->sync_alloc_failed_counter_id, storage
 	);
+	counters->scope_dropped =
+		counter_get_address(config->scope_dropped_counter_id, storage);
 
 	// Without the worker's read position nothing may be consumed, so the
 	// stashes stay unlinked while the tables still serve received sync.

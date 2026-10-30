@@ -404,7 +404,7 @@ func Test_ACL_FWState_StashedEventEmitsConfiguredDestinations(t *testing.T) {
 			syncConfig.SyncSuppressTimeout = uint64(time.Minute)
 
 			fwConfig, err := cfwstate.NewModuleConfig(
-				agent, "sync-fwstate", &syncConfig, map4.Name(), map6.Name(),
+				agent, "sync-fwstate", &syncConfig, nil, map4.Name(), map6.Name(),
 			)
 			require.NoError(t, err)
 			t.Cleanup(func() { _ = fwConfig.Free() })
@@ -497,7 +497,7 @@ func Test_ACL_FWStateChain_DecidesOnceAndEmitsPerConfig(t *testing.T) {
 		{name: "fwstate-down", config: downstreamConfig},
 	} {
 		fwConfig, err := cfwstate.NewModuleConfig(
-			agent, cfg.name, &cfg.config, map4.Name(), map6.Name(),
+			agent, cfg.name, &cfg.config, nil, map4.Name(), map6.Name(),
 		)
 		require.NoError(t, err)
 		t.Cleanup(func() { _ = fwConfig.Free() })
@@ -592,7 +592,7 @@ func Test_ACL_FWState_SecondWorkerUsesItsOwnSlotAndCursor(t *testing.T) {
 	syncConfig.Endpoints = []cfwstate.SyncEndpoint{
 		{SrcAddr: syncSource, DstAddr: syncMulticast, Port: 9999},
 	}
-	fwConfig, err := cfwstate.NewModuleConfig(agent, "sync-fwstate", &syncConfig, map4.Name(), "")
+	fwConfig, err := cfwstate.NewModuleConfig(agent, "sync-fwstate", &syncConfig, nil, map4.Name(), "")
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = fwConfig.Free() })
 	require.NoError(t, agent.UpdateModules([]ffi.ModuleConfig{fwConfig.AsFFIModule()}))
@@ -649,7 +649,7 @@ func Test_ACL_FWState_ConfigOnTwoDevicesEmitsOnce(t *testing.T) {
 	syncConfig.Endpoints = []cfwstate.SyncEndpoint{
 		{SrcAddr: syncSource, DstAddr: syncMulticast, Port: 9999},
 	}
-	fwConfig, err := cfwstate.NewModuleConfig(agent, "shared-fwstate", &syncConfig, map4.Name(), map6.Name())
+	fwConfig, err := cfwstate.NewModuleConfig(agent, "shared-fwstate", &syncConfig, nil, map4.Name(), map6.Name())
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = fwConfig.Free() })
 	require.NoError(t, agent.UpdateModules([]ffi.ModuleConfig{fwConfig.AsFFIModule()}))

@@ -125,6 +125,7 @@ func configureFWState(t *testing.T, agent *ffi.Agent, name string) {
 		agent,
 		name,
 		&syncConfig,
+		nil,
 		mapV4.Name(),
 		mapV6.Name(),
 	)
