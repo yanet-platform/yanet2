@@ -115,6 +115,80 @@ func Test_L3bVirtualService_RealServerAllocationFailureReclaimsCandidate(t *test
 	require.Equal(t, initialCapacity, agent.BlockAllocatorFreeSize())
 }
 
+// Test_L3bVirtualService_InvalidRealFamilyPreservesActiveState verifies that
+// rejecting a later real preserves linked state and the borrowed table through retry.
+func Test_L3bVirtualService_InvalidRealFamilyPreservesActiveState(t *testing.T) {
+	harness, agent := setupL3bHarness(t, "port0", "test")
+	wirePipeline(t, agent, "port0", "test")
+	table, err := cl3bobject.CreateSessionTable(agent, "svc", 1, 64)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = table.Free() })
+	service, err := cl3bobject.CreateVirtualService(agent, "svc", counterServiceConfig(), table)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = service.Free() })
+	require.NoError(t, service.Publish(agent))
+	module := publishModuleConfig(t, agent, "test", "svc")
+	t.Cleanup(func() { _ = module.Free() })
+	link := testutils.CounterLink{Device: "port0", Pipeline: "test", Function: "test", Chain: "test_chain", ModuleType: "l3b", Module: "test"}
+	generation, err := harness.PublishedExecutionContext(0)
+	require.NoError(t, err)
+	require.NotZero(t, generation)
+	before, err := testutils.ReadCounterState(generation, "svc", link)
+	require.NoError(t, err)
+	require.NotZero(t, before.Service)
+	require.NotZero(t, before.Table)
+	require.Positive(t, before.TableReferences)
+	view, err := service.Inspect()
+	require.NoError(t, err)
+	for _, real := range view.RealServers {
+		require.False(t, real.Enabled)
+	}
+	retry, err := cl3bobject.CreateVirtualService(agent, "svc", counterServiceConfig(), table)
+	require.NoError(t, err)
+	require.NoError(t, retry.Free())
+	capacity := agent.BlockAllocatorFreeSize()
+	for _, tc := range []struct {
+		name string
+		real cl3bobject.RealServer
+	}{
+		{"family mismatch", cl3bobject.RealServer{Type: cl3bobject.IPv6, DestinationAddress: netip.MustParseAddr("2001:db8::1"), SourceNet: xnetip.MustParseNetwork("192.0.2.0/24")}},
+		{"invalid destination", cl3bobject.RealServer{Type: cl3bobject.IPv4, SourceNet: xnetip.MustParseNetwork("192.0.2.0/24")}},
+		{"unsupported type", cl3bobject.RealServer{Type: cl3bobject.IPFamily(99), DestinationAddress: netip.MustParseAddr("192.0.2.1"), SourceNet: xnetip.MustParseNetwork("192.0.2.0/24")}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			for range 3 {
+				config := counterServiceConfig()
+				config.RealServers[1] = tc.real
+				var candidate *cl3bobject.VirtualServiceObject
+				var err error
+				require.NotPanics(t, func() {
+					candidate, err = cl3bobject.CreateVirtualService(agent, "svc", config, table)
+				})
+				if candidate != nil {
+					t.Cleanup(func() { _ = candidate.Free() })
+				}
+				require.ErrorContains(t, err, "real server 1")
+				require.Nil(t, candidate)
+				require.Equal(t, capacity, agent.BlockAllocatorFreeSize())
+				current, err := harness.PublishedExecutionContext(0)
+				require.NoError(t, err)
+				require.Equal(t, generation, current)
+				after, err := testutils.ReadCounterState(current, "svc", link)
+				require.NoError(t, err)
+				require.Equal(t, before, after)
+				observed, err := service.Inspect()
+				require.NoError(t, err)
+				require.Equal(t, view, observed)
+				require.ErrorIs(t, table.Free(), ffi.ErrStillReferenced)
+				retry, err := cl3bobject.CreateVirtualService(agent, "svc", counterServiceConfig(), table)
+				require.NoError(t, err)
+				require.NoError(t, retry.Free())
+				require.Equal(t, capacity, agent.BlockAllocatorFreeSize())
+			}
+		})
+	}
+}
+
 // Test_L3bBackend_RequiredCounterFailurePreservesActiveState verifies that a
 // real rejected update keeps accepted state, accounting and pins through retry.
 func Test_L3bBackend_RequiredCounterFailurePreservesActiveState(t *testing.T) {

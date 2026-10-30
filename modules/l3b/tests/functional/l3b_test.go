@@ -2128,6 +2128,82 @@ func newCapacityAgent(t *testing.T) *ffi.Agent {
 	return agent
 }
 
+// Test_L3bVirtualService_RealServerFamilies verifies that tunnel types and
+// address families agree before construction, without normalizing valid inputs.
+func Test_L3bVirtualService_RealServerFamilies(t *testing.T) {
+	agent := newCapacityAgent(t)
+	table, err := cl3bobject.CreateSessionTable(agent, "families", 1, 64)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, table.Free()) })
+	source4 := xnetip.MustParseNetwork("192.0.2.0/24")
+	source6 := xnetip.MustParseNetwork("2001:db8::/64")
+	mappedSource := xnetip.MustParseNetwork("::ffff:192.0.2.0/120")
+	destination4 := netip.MustParseAddr("198.51.100.1")
+	destination6 := netip.MustParseAddr("2001:db8:1::1")
+	mappedDestination := netip.MustParseAddr("::ffff:198.51.100.1")
+	for _, tc := range []struct {
+		name        string
+		family      cl3bobject.IPFamily
+		destination netip.Addr
+		source      xnetip.Network
+		valid       bool
+	}{
+		{"native IPv4", cl3bobject.IPv4, destination4, source4, true},
+		{"native IPv6", cl3bobject.IPv6, destination6, source6, true},
+		{"mapped IPv6", cl3bobject.IPv6, mappedDestination, mappedSource, true},
+		{"mapped destination native IPv6 source", cl3bobject.IPv6, mappedDestination, source6, true},
+		{"native IPv6 destination mapped source", cl3bobject.IPv6, destination6, mappedSource, true},
+		{"zero IPv6 network", cl3bobject.IPv6, destination6, xnetip.Network{}, true},
+		{"IPv4 zero mask", cl3bobject.IPv4, destination4, xnetip.MustParseNetwork("0.0.0.0/0"), true},
+		{"IPv4 arbitrary mask", cl3bobject.IPv4, destination4, xnetip.MustParseNetwork("192.0.2.0/255.0.255.0"), true},
+		{"IPv6 arbitrary mask", cl3bobject.IPv6, destination6, xnetip.MustParseNetwork("2001:db8::/ffff:0:ffff::"), true},
+		{"IPv4 source IPv6 destination", cl3bobject.IPv6, destination6, source4, false},
+		{"IPv6 source IPv4 destination", cl3bobject.IPv4, destination4, source6, false},
+		{"IPv4 source mapped destination", cl3bobject.IPv4, mappedDestination, source4, false},
+		{"mapped source IPv4 destination", cl3bobject.IPv6, destination4, mappedSource, false},
+		{"IPv4 addresses IPv6 type", cl3bobject.IPv6, destination4, source4, false},
+		{"IPv6 addresses IPv4 type", cl3bobject.IPv4, destination6, source6, false},
+		{"unsupported type", cl3bobject.IPFamily(99), destination4, source4, false},
+		{"invalid destination IPv4 source", cl3bobject.IPv4, netip.Addr{}, source4, false},
+		{"invalid destination IPv6 source", cl3bobject.IPv6, netip.Addr{}, source6, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			config := cl3bobject.VirtualServiceConfig{RealServers: []cl3bobject.RealServer{{
+				Type: tc.family, DestinationAddress: tc.destination, SourceNet: tc.source,
+			}}}
+			capacity := agent.BlockAllocatorFreeSize()
+			var candidate *cl3bobject.VirtualServiceObject
+			var err error
+			require.NotPanics(t, func() {
+				candidate, err = cl3bobject.CreateVirtualService(agent, "families", config, table)
+			})
+			if candidate != nil {
+				t.Cleanup(func() { require.NoError(t, candidate.Free()) })
+			}
+			if !tc.valid {
+				require.ErrorContains(t, err, "real server 0")
+				require.Nil(t, candidate)
+				require.Equal(t, capacity, agent.BlockAllocatorFreeSize())
+				return
+			}
+			require.NoError(t, err)
+			info, err := candidate.Inspect()
+			require.NoError(t, err)
+			require.Equal(t, []cl3bobject.RealServerInfo{{
+				Family: tc.family, DestinationAddress: tc.destination, SourceNet: tc.source,
+			}}, info.RealServers)
+		})
+	}
+	t.Run("empty real collection", func(t *testing.T) {
+		candidate, err := cl3bobject.CreateVirtualService(agent, "empty", cl3bobject.VirtualServiceConfig{}, table)
+		require.NoError(t, err)
+		t.Cleanup(func() { require.NoError(t, candidate.Free()) })
+		info, err := candidate.Inspect()
+		require.NoError(t, err)
+		require.Empty(t, info.RealServers)
+	})
+}
+
 // Test_L3bProbe_ServiceSmoke verifies that included constructors compile both
 // address families while leaving their caller-owned table intact on release.
 func Test_L3bProbe_ServiceSmoke(t *testing.T) {
