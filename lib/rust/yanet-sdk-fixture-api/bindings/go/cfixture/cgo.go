@@ -12,6 +12,7 @@ package cfixture
 
 #include "api/agent.h"
 #include "lib/dataplane/packet/packet.h"
+#include "lib/errors/errors.h"
 #include "yanet_sdk_fixture_api.h"
 #include "yanet_sdk_fixture_paths.h"
 
@@ -52,6 +53,12 @@ int
 yanet_cp_yanet_sdk_fixture_api__fib_free(
 	struct cp_module *module, yanet_error **err
 );
+
+// cgo cannot call the variadic yanet_error_add.
+static void
+add_cause(yanet_error **err, const char *cause) {
+	yanet_error_add(err, "%s", cause);
+}
 */
 import "C"
 
@@ -304,6 +311,20 @@ func NewFixtureConfig(
 		ptr:  ffi.NewModuleConfig(unsafe.Pointer(ptr)),
 		free: freeFixture,
 	}, nil
+}
+
+// RefusedBuildOverCause calls the fixture build without an agent, which the
+// api refuses, with a chain of one frame holding cause already in the error
+// argument, as a C caller adding context to an earlier failure passes it, and
+// returns the chain the call leaves there.
+func RefusedBuildOverCause(cause string) error {
+	cCause := C.CString(cause)
+	defer C.free(unsafe.Pointer(cCause))
+
+	var cErr *C.yanet_error
+	C.add_cause(&cErr, cCause)
+	C.yanet_cp_yanet_sdk_fixture_api__fixture_build(nil, nil, nil, nil, nil, nil, 0, &cErr)
+	return cerrors.FromC(unsafe.Pointer(cErr))
 }
 
 func freeFixture(ptr unsafe.Pointer) (int, unsafe.Pointer, error) {

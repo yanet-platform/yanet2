@@ -125,11 +125,21 @@ fn guarded<T>(body: impl FnOnce() -> Result<T, ApiError>) -> Result<T, ApiError>
     catch_unwind(AssertUnwindSafe(body)).unwrap_or_else(|payload| Err(panic_error(payload)))
 }
 
-/// Hands `error` to C: written to `err` unless it is null or misaligned.
+/// Hands `error` to C at `err` unless it is null or misaligned: as the chain
+/// there when it holds none, and otherwise over the chain it holds, which stays
+/// as the cause.
 fn set_err(err: ErrOut, error: ApiError) {
-    if !err.is_null() && err.is_aligned() {
-        // SAFETY: `err` is null or writable (export contract).
-        unsafe { err.write(error.into_c_chain()) };
+    if err.is_null() || !err.is_aligned() {
+        return;
+    }
+    // SAFETY: `err` is writable and holds null or a chain C owns (export
+    // contract).
+    let chain = unsafe { &mut *err };
+    if chain.is_null() {
+        *chain = error.into_c_chain();
+    } else {
+        // SAFETY: as above.
+        unsafe { error.wrap_c_chain(chain) };
     }
 }
 
@@ -152,7 +162,8 @@ fn errno_of(kind: ErrorKind) -> c_int {
 /// # Safety
 ///
 /// The export contract: `agent` is null, misaligned or an attached agent
-/// (see [`Agent::from_raw`]); `err` is null or writable.
+/// (see [`Agent::from_raw`]); `err` is null or writable and holds null or a
+/// chain C owns.
 pub unsafe fn build<M>(
     agent_pointer: *mut bindings::agent,
     err: ErrOut,
@@ -176,7 +187,7 @@ pub unsafe fn build<M>(
 ///
 /// The export contract: `module` is null, misaligned or a configuration of
 /// module `M` an export of this crate returned and nothing released; `err` is
-/// null or writable.
+/// null or writable and holds null or a chain C owns.
 pub unsafe fn free<M: Module>(module: *mut bindings::cp_module, err: ErrOut) -> c_int {
     // A release the live generation refused is busy whatever its chain says:
     // the chain has no kind when C could not allocate the frame.

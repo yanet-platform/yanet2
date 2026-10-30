@@ -108,6 +108,17 @@ impl ApiError {
         self.chain.take().map_or(ptr::null_mut(), NonNull::as_ptr)
     }
 
+    /// Adds the error over the chain at `chain` as one frame of its kind and
+    /// whole message, so that chain stays as its cause.
+    ///
+    /// # Safety
+    ///
+    /// `*chain` is null or a chain the caller owns.
+    pub(crate) unsafe fn wrap_c_chain(self, chain: &mut *mut yanet_error) {
+        // SAFETY: caller contract.
+        unsafe { add_frame(chain, self.kind(), &self.to_string()) };
+    }
+
     /// The kind of the outermost frame that carries one.
     pub fn kind(&self) -> ErrorKind {
         let Some(chain) = self.chain else {
@@ -148,19 +159,30 @@ impl From<Refusal> for ApiError {
 /// The message ends at its first NUL byte, as C reads it.
 pub fn from_str(kind: ErrorKind, message: &str) -> ApiError {
     let mut chain = ptr::null_mut();
-    // SAFETY: the out-parameter points at a null chain, and the format takes
-    // the length and the bytes of one string.
+    // SAFETY: the chain is null.
+    unsafe { add_frame(&mut chain, kind, message) };
+    // SAFETY: the chain is the one just made, ours alone.
+    unsafe { from_c_chain(chain) }
+}
+
+/// Adds a frame holding `message`, which needs no terminator, over the chain
+/// at `chain`, as `yanet_error_add` does; a null chain gets a new one.
+///
+/// # Safety
+///
+/// `*chain` is null or a chain the caller owns.
+unsafe fn add_frame(chain: &mut *mut yanet_error, kind: ErrorKind, message: &str) {
+    // SAFETY: the chain by the caller contract, and the format takes the
+    // length and the bytes of one string.
     unsafe {
         bindings::yanet_error_add_kind(
-            &mut chain,
+            chain,
             kind.to_c(),
             c"%.*s".as_ptr(),
             message.len().min(c_int::MAX as usize) as c_int,
             message.as_ptr(),
         )
     };
-    // SAFETY: the chain is the one just made, ours alone.
-    unsafe { from_c_chain(chain) }
 }
 
 impl Drop for ApiError {

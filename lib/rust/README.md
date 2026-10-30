@@ -32,7 +32,9 @@ and errors as `yanet_error` chains. Every `pub fn` of the impl becomes an
 `extern "C"` export named `yanet_cp_<crate>__<snake type>_<fn>` (`<crate>` is
 the crate name; the crate name has no `__` and does not end in `_`); a private
 fn stays ordinary. The parameters keep their order and a trailing
-`struct yanet_error **err` follows (null for "no error wanted"):
+`struct yanet_error **err` follows (null for "no error wanted"; a chain
+already in `*err` stays as the cause of the new error, as `yanet_error_add`
+keeps it):
 
 | Rust | C |
 |------|---|

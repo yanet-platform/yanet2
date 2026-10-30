@@ -99,7 +99,8 @@ pub fn derive_ffi_record(input: TokenStream) -> TokenStream {
 /// error while a live generation holds it, the handle then staying valid.
 ///
 /// Parameters keep their order and a trailing `struct yanet_error **err`
-/// follows them (null for "no error wanted"):
+/// follows them (null for "no error wanted"; a chain already in `*err` stays
+/// as the cause of the new error, as `yanet_error_add` keeps it):
 ///
 /// | Rust | C |
 /// |------|---|

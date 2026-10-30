@@ -198,6 +198,16 @@ func Test_FixtureConfig_Build_NullSpec_IsInvalidArgument(t *testing.T) {
 	require.ErrorIs(t, err, ffi.ErrInvalidArgument)
 }
 
+// Test_FixtureConfig_Build_Failure_KeepsTheCallersChainAsCause verifies that a
+// refused build adds its error over a chain the caller passed in, which stays
+// as its cause.
+func Test_FixtureConfig_Build_Failure_KeepsTheCallersChainAsCause(t *testing.T) {
+	err := cfixture.RefusedBuildOverCause("earlier failure")
+
+	require.ErrorIs(t, err, ffi.ErrInvalidArgument)
+	require.EqualError(t, err, "argument `agent` is null or misaligned: earlier failure")
+}
+
 // exhaustedBuild builds a fixture with a table of many ranges in an agent too
 // small for it.
 func exhaustedBuild(t *testing.T) error {
