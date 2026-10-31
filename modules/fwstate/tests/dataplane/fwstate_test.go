@@ -1,6 +1,7 @@
 package fwstate_test
 
 import (
+	"fmt"
 	"net"
 	"testing"
 
@@ -10,7 +11,82 @@ import (
 
 	"github.com/yanet-platform/yanet2/common/go/xerror"
 	"github.com/yanet-platform/yanet2/common/go/xpacket"
+	"github.com/yanet-platform/yanet2/modules/fwstate/tests/dataplane/probe"
 )
+
+// Test_FWMapEntry_DiscoveryAndCommit verifies the mutation boundary, slot
+// selection, reservation failures, counters and caller-owned lock.
+func Test_FWMapEntry_DiscoveryAndCommit(t *testing.T) {
+	cases := []struct {
+		name                        string
+		scenario                    int
+		index, cursor, extra, next  uint32
+		found, empty                bool
+		total, chain, deadline      uint64
+		rootDeadline, extraDeadline [4]uint64
+		rootIndex, extraIndex       [4]uint32
+	}{
+		{"fresh slot", probe.Fresh, 0, 1, 1, 0, true, true, 1, 1, 150, [4]uint64{150}, [4]uint64{}, [4]uint32{}, [4]uint32{}},
+		{"live match", probe.MatchLive, 0, 1, 1, 0, true, false, 1, 1, 200, [4]uint64{150}, [4]uint64{}, [4]uint32{}, [4]uint32{}},
+		{"matching deadline equal to now", probe.MatchEqualDeadline, 0, 1, 1, 0, true, true, 1, 1, 150, [4]uint64{150}, [4]uint64{}, [4]uint32{}, [4]uint32{}},
+		{"expired match", probe.MatchExpired, 0, 1, 1, 0, true, true, 1, 1, 150, [4]uint64{150}, [4]uint64{}, [4]uint32{}, [4]uint32{}},
+		{"different key at equal deadline allocates overflow", probe.ReuseEqualDeadline, 4, 5, 2, 1, true, true, 5, 2, 200, [4]uint64{100, 200, 200, 200}, [4]uint64{150}, [4]uint32{0, 1, 2, 3}, [4]uint32{4}},
+		{"different expired key reuses index", probe.ReuseExpired, 0, 4, 1, 0, true, true, 4, 1, 200, [4]uint64{150, 200, 200, 200}, [4]uint64{}, [4]uint32{0, 1, 2, 3}, [4]uint32{}},
+		{"zero ttl", probe.ZeroTTL, 0, 1, 1, 0, true, true, 1, 1, 100, [4]uint64{100}, [4]uint64{}, [4]uint32{}, [4]uint32{}},
+		{"overflow exhausted", probe.OverflowExhausted, 0, 256, 64, 1, false, false, 256, 64, 200, [4]uint64{200, 200, 200, 200}, [4]uint64{200, 200, 200, 200}, [4]uint32{0, 1, 2, 3}, [4]uint32{4, 5, 6, 7}},
+		{"key exhausted after linking overflow", probe.KeyExhaustedAfterLink, 0, 1024, 2, 1, false, false, 4, 1, 200, [4]uint64{200, 200, 200, 200}, [4]uint64{}, [4]uint32{0, 1, 2, 3}, [4]uint32{}},
+		{"live overflow match wins over earlier expired slot", probe.MatchAfterExpired, 4, 5, 2, 1, true, false, 5, 2, 200, [4]uint64{99, 200, 200, 200}, [4]uint64{150}, [4]uint32{0, 1, 2, 3}, [4]uint32{4}},
+		{"zero deadline stops discovery before later match", probe.ZeroDeadlineTerminates, 2, 3, 1, 0, true, true, 3, 1, 200, [4]uint64{150, 200}, [4]uint64{}, [4]uint32{2, 1}, [4]uint32{}},
+	}
+	for _, tc := range cases {
+		for _, locked := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/locked=%t", tc.name, locked), func(t *testing.T) {
+				config := newFWStateFixture(t, 0)
+				result, err := probe.Entry(config.Fixture.Maps[0].ResolveMap(0), tc.scenario, locked)
+				require.NoError(t, err)
+				require.Equal(t, result.Before.Bytes, result.Discovered.Bytes)
+				if tc.scenario == probe.OverflowExhausted {
+					require.Equal(t, result.Before.Bytes, result.Committed.Bytes)
+				}
+				require.Equal(t, result.Before.Keys, result.Committed.Keys)
+				require.Equal(t, result.Before.Values, result.Committed.Values)
+				require.Equal(t, tc.index, result.Index)
+				require.Equal(t, tc.found, result.HasKey)
+				require.Equal(t, tc.found, result.HasValue)
+				require.Equal(t, tc.empty, result.Empty)
+				require.Equal(t, tc.cursor, result.Committed.KeyCursor)
+				require.Equal(t, tc.extra, result.Committed.ExtraFree)
+				require.Equal(t, tc.next, result.Committed.RootNext)
+				require.Equal(t, [2]uint64{tc.total, 0}, result.Committed.Total)
+				require.Equal(t, [2]uint64{tc.chain, 0}, result.Committed.Chain)
+				require.Equal(t, [2]uint64{tc.deadline, 0}, result.Committed.Deadline)
+				require.Equal(t, tc.rootDeadline, result.Committed.RootDeadline)
+				require.Equal(t, tc.extraDeadline, result.Committed.ExtraDeadline)
+				require.Equal(t, tc.rootIndex, result.Committed.RootIndex)
+				require.Equal(t, tc.extraIndex, result.Committed.ExtraIndex)
+				if tc.scenario == probe.MatchAfterExpired {
+					require.Equal(t, result.Before.RootBytes, result.Committed.RootBytes)
+					require.Equal(t, uint32(1), result.MatchingSlots)
+				}
+				if tc.found && tc.scenario != probe.ZeroTTL {
+					require.Equal(t, int64(tc.index), result.LookupIndex)
+					require.Equal(t, uint64(13), result.LookupPackets)
+				} else {
+					require.Equal(t, int64(-1), result.LookupIndex)
+				}
+				require.Equal(t, locked, result.LockIsRoot)
+				require.Zero(t, result.LockBefore)
+				lockValue := 0
+				if locked {
+					lockValue = 2
+				}
+				require.Equal(t, lockValue, result.LockDiscovered)
+				require.Equal(t, lockValue, result.LockCommitted)
+				require.Zero(t, result.LockReleased)
+			})
+		}
+	}
+}
 
 // SyncPacketOption customizes the state carried by a synchronization packet.
 type SyncPacketOption func(*syncPacketConfig)
@@ -424,6 +500,11 @@ func Test_FWState_MergeFromStaleLayer(t *testing.T) {
 
 	snap := GetStateValue(cpModule, layers.IPProtocolTCP, 12345, 9999, "2001:db8::1", "2001:db8::2")
 	require.True(t, snap.Found, "merged state must be visible from active layer")
+	entries, _, _, err := cpModule.Fixture.Maps[1].ReadForward(0, 0, true, uint64(cpModule.Fixture.Harness.CurrentTime().UnixNano()), 1)
+	require.NoError(t, err)
+	require.Len(t, entries, 1)
+	require.Equal(t, uint64(1), entries[0].Value.PacketsForward)
+	require.Equal(t, uint64(1), entries[0].Value.PacketsBackward)
 	require.Equalf(t, uint32(synBit|ackBit), snap.Flags,
 		"flags must be merged across layers (got 0x%02x, want 0x%02x)",
 		snap.Flags, synBit|ackBit,

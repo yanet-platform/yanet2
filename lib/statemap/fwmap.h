@@ -1055,14 +1055,21 @@ fwmap_get(
 	return fwmap_get_value_and_deadline(map, now, key, value, lock, NULL);
 }
 
-static inline fwmap_entry_t
-fwmap_entry(
-	fwmap_t *map,
-	uint16_t worker_idx,
-	uint64_t now,
-	uint64_t ttl,
-	const void *key,
-	rwlock_t **lock
+// The root write lock or external serialization must span discovery and commit.
+struct fwmap_entry_discovery {
+	fwmap_bucket_t *bucket;
+	fwmap_bucket_t *last_bucket;
+	uint8_t *key;
+	size_t chain_length;
+	uint32_t idx;
+	uint32_t slot;
+	uint16_t sig;
+	bool matched;
+};
+
+static inline struct fwmap_entry_discovery
+fwmap_entry_discover(
+	fwmap_t *map, uint64_t now, const void *key, rwlock_t **lock
 ) {
 	fwmap_hash_fn_t hash_fn =
 		(fwmap_hash_fn_t)fwmap_func_registry[map->hash_fn_id];
@@ -1081,8 +1088,6 @@ fwmap_entry(
 		(hash & map->index_mask) >> map->buckets_chunk_shift;
 	uint32_t bucket_idx = hash & map->index_mask & FWMAP_CHUNK_INDEX_MASK;
 
-	uint64_t deadline = now + ttl;
-
 	fwmap_bucket_t *extra = ADDR_OF(&map->extra_buckets);
 	fwmap_bucket_t **chunks = ADDR_OF(&map->buckets);
 	fwmap_bucket_t *buckets = ADDR_OF(&chunks[chunk_idx]);
@@ -1098,15 +1103,10 @@ fwmap_entry(
 	fwmap_bucket_t *bucket_to_insert = NULL;
 	fwmap_bucket_t *last_bucket = bucket;
 
-	/*
-	 * The loop looks for a given key and returns containing bucket:slot
-	 * or the first free location in case if het key was not found.
-	 */
 	while (bucket) {
 		last_bucket = bucket;
 		chain_length += 1;
 
-		// Search for and update existing key.
 		for (uint32_t i = 0; i < FWMAP_BUCKET_ENTRIES; i++) {
 			if (bucket->deadline[i] < now &&
 			    bucket_to_insert == NULL) {
@@ -1118,22 +1118,15 @@ fwmap_entry(
 				uint32_t idx = bucket->idx[i];
 				uint8_t *other = fwmap_get_key(map, idx);
 				if (key_equal_fn(key, other, map->key_size)) {
-					bool empty = bucket->deadline[i] <= now;
-					bucket->deadline[i] = deadline;
-
-					fwmap_update_counters(
-						map,
-						worker_idx,
-						chain_length,
-						0,
-						deadline
-					);
-
-					return (fwmap_entry_t
-					){.idx = idx,
-					  .key = other,
-					  .value = fwmap_get_value(map, idx),
-					  .empty = empty};
+					return (struct fwmap_entry_discovery){
+						.bucket = bucket,
+						.key = other,
+						.chain_length = chain_length,
+						.idx = idx,
+						.slot = i,
+						.sig = sig,
+						.matched = true,
+					};
 				}
 			}
 
@@ -1151,6 +1144,43 @@ fwmap_entry(
 		bucket = bucket->next ? &extra[bucket->next] : NULL;
 	}
 stop_lookup:
+	return (struct fwmap_entry_discovery){
+		.bucket = bucket_to_insert,
+		.last_bucket = last_bucket,
+		.chain_length = chain_length,
+		.slot = vacant_slot,
+		.sig = sig,
+	};
+}
+
+static inline fwmap_entry_t
+fwmap_entry_commit(
+	fwmap_t *map,
+	uint16_t worker_idx,
+	uint64_t now,
+	uint64_t ttl,
+	struct fwmap_entry_discovery discovery
+) {
+	fwmap_bucket_t *bucket_to_insert = discovery.bucket;
+	size_t chain_length = discovery.chain_length;
+	uint32_t vacant_slot = discovery.slot;
+	uint16_t sig = discovery.sig;
+	uint64_t deadline = now + ttl;
+
+	if (discovery.matched) {
+		uint32_t idx = discovery.idx;
+		bool empty = bucket_to_insert->deadline[vacant_slot] <= now;
+		bucket_to_insert->deadline[vacant_slot] = deadline;
+		fwmap_update_counters(
+			map, worker_idx, chain_length, 0, deadline
+		);
+		return (fwmap_entry_t){
+			.idx = idx,
+			.key = discovery.key,
+			.value = fwmap_get_value(map, idx),
+			.empty = empty,
+		};
+	}
 
 	// key was not found
 	if (bucket_to_insert == NULL) {
@@ -1172,8 +1202,9 @@ stop_lookup:
 			return (fwmap_entry_t){0};
 		}
 
-		last_bucket->next = new_bucket_idx;
+		discovery.last_bucket->next = new_bucket_idx;
 
+		fwmap_bucket_t *extra = ADDR_OF(&map->extra_buckets);
 		fwmap_bucket_t *new_bucket = &extra[new_bucket_idx];
 		// Free extra buckets are still zero from map creation: a
 		// claimed bucket is never handed back.
@@ -1216,6 +1247,20 @@ stop_lookup:
 		.value = fwmap_get_value(map, (uint32_t)idx),
 		.empty = true,
 	};
+}
+
+static inline fwmap_entry_t
+fwmap_entry(
+	fwmap_t *map,
+	uint16_t worker_idx,
+	uint64_t now,
+	uint64_t ttl,
+	const void *key,
+	rwlock_t **lock
+) {
+	struct fwmap_entry_discovery discovery =
+		fwmap_entry_discover(map, now, key, lock);
+	return fwmap_entry_commit(map, worker_idx, now, ttl, discovery);
 }
 
 static inline int64_t
