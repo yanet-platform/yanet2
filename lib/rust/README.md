@@ -83,7 +83,7 @@ meson setup build
 cd lib/rust
 export CLANG_PATH=/usr/bin/clang-23 LIBCLANG_PATH=/usr/lib/llvm-23/lib
 cargo test --workspace                      # native suites
-MIRIFLAGS="-Zmiri-strict-provenance" cargo +nightly-2026-10-22 miri nextest run --workspace   # Miri (cargo-nextest); add -Zmiri-tree-borrows for Tree Borrows
+MIRIFLAGS="-Zmiri-strict-provenance" cargo +nightly-2026-10-22 miri nextest run --workspace --exclude yanet-packet   # Miri (cargo-nextest); add -Zmiri-tree-borrows for Tree Borrows; yanet-packet forbids unsafe code
 ```
 
 ## Tests against the C dataplane
@@ -118,5 +118,6 @@ RUSTUP_TOOLCHAIN=nightly-2026-10-22 make test-asan
 ```
 
 Miri stays the layer for the language rules of the unsafe code; these tests
-add bounds, use after free and the C behaviour, on real memory. CI runs both
-in `.github/workflows/rust-sdk-ut.yml`.
+add bounds, use after free and the C behaviour, on real memory. CI runs them
+natively in `.github/workflows/rust-sdk-ut.yml` and under ASan in
+`.github/workflows/rust-sdk-ut-asan.yml`.

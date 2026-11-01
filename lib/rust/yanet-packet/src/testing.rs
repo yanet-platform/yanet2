@@ -8,8 +8,9 @@ use crate::{ParseError, checksum};
 
 /// Run configuration without a failure file in the source tree.
 ///
-/// Under Miri a property runs few cases: interpretation is slow, the crate
-/// forbids unsafe code, and the example tests already drive every cast.
+/// The CI Miri job excludes this crate; a manual Miri run keeps few cases per
+/// property: interpretation is slow, the crate forbids unsafe code, and the
+/// example tests already drive every cast.
 pub fn config() -> ProptestConfig {
     ProptestConfig {
         cases: if cfg!(miri) { 4 } else { 512 },
