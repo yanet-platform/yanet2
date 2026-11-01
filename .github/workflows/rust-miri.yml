@@ -7,8 +7,13 @@ name: Rust Miri
 # The bindings crate's build script runs bindgen and compiles both C shims, of
 # common/ and of the dataplane, into one shim library over the repository's C
 # headers with the compiler and flags of a meson configuration's compilation
-# database, so changes to those headers re-run the job, which runs in the CI
-# image (ci/README.md) and configures meson (no compilation) before Miri.
+# database. The job runs in the CI image (ci/README.md) and configures meson
+# (no compilation) before Miri.
+#
+# Miri interprets only Rust: no C runs under it, so C changes reach the suites
+# only through bindgen layouts and signatures, which the Rust SDK workflow
+# builds and tests on every such change. The job therefore runs on Rust
+# changes only.
 
 on:
   push:
@@ -16,11 +21,6 @@ on:
     paths:
       - "lib/rust/**"
       - ".cargo/config.toml"
-      - "common/**.h"
-      - "lib/**.h"
-      - "subprojects/dpdk"
-      - "**/meson.build"
-      - "meson_options.txt"
       - ".github/workflows/rust-miri.yml"
   pull_request:
     # A stacked pull request has a non-main base, so a main-only filter would skip it.
@@ -28,11 +28,6 @@ on:
     paths:
       - "lib/rust/**"
       - ".cargo/config.toml"
-      - "common/**.h"
-      - "lib/**.h"
-      - "subprojects/dpdk"
-      - "**/meson.build"
-      - "meson_options.txt"
       - ".github/workflows/rust-miri.yml"
 
 concurrency:
@@ -118,8 +113,11 @@ jobs:
       - name: Configure meson
         run: |
           meson setup build -Ddataplane_only=true
+      # yanet-packet forbids unsafe code and its zerocopy casts are sound by
+      # construction, so Miri has nothing to check there, while its header
+      # tests took over 90% of the interpreted time.
       - name: Miri
         working-directory: lib/rust
         env:
           MIRIFLAGS: ${{ matrix.miriflags }}
-        run: cargo "+$MIRI_TOOLCHAIN" miri nextest run --workspace --locked --no-fail-fast
+        run: cargo "+$MIRI_TOOLCHAIN" miri nextest run --workspace --exclude yanet-packet --locked --no-fail-fast
