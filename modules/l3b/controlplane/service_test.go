@@ -182,6 +182,28 @@ func Test_L3BService_CreateService_CapacityValidation(t *testing.T) {
 	}
 }
 
+// Test_L3BService_CreateService_DuplicateName verifies that a repeated name
+// keeps the backend's duplicate status rather than an internal failure.
+func Test_L3BService_CreateService_DuplicateName(t *testing.T) {
+	service := controlplane.NewL3BService(
+		controlplane.NewBackendWithSharedMemory(&fakeSharedMemory{}),
+	)
+
+	response, err := service.CreateService(
+		t.Context(),
+		&l3bpb.CreateServiceRequest{Service: sampleService("vs0")},
+	)
+	require.NoError(t, err)
+	require.NotNil(t, response)
+
+	response, err = service.CreateService(
+		t.Context(),
+		&l3bpb.CreateServiceRequest{Service: sampleService("vs0")},
+	)
+	require.Equal(t, codes.AlreadyExists, status.Code(err))
+	require.Nil(t, response)
+}
+
 func Test_L3BService_UpdateServiceMissing(t *testing.T) {
 	svc, _ := newTestService(t)
 
