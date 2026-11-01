@@ -37,7 +37,7 @@ filterpb = { path = "../../../common/rust/filterpb", package = "yanet-filterpb" 
 ync = { path = "../../../cli/core", package = "yanet-cli" }
 clap = { version = "4.5", features = ["derive", "wrap_help"] }
 clap_complete = { version = "4.5", features = ["unstable-dynamic"] }
-netip = "0.3"
+netip = "0.4"
 prost = "0.14"
 serde = { version = "1", features = ["derive"] }
 tonic = { version = "0.14", features = ["gzip", "zstd"] }
