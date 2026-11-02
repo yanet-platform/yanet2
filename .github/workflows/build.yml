@@ -109,7 +109,7 @@ jobs:
         run: |
           test "$(id -u)" -ne 0
           bash tests/functional/test-makefile.sh
-          bash tests/functional/test-makefile.sh '' default
+          bash tests/functional/test-makefile.sh default
 
   build-asan-test:
     runs-on: ubuntu-24.04

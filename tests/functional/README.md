@@ -58,28 +58,15 @@ templates beside the selected image and opens a writable sibling lock even when
 reusing a cached baseline. The image directory and cache/lock files must support
 these writes; runtime may replace caches and prune superseded sibling baselines.
 Make validation does not check QCOW2 correctness or discover backing chains.
-Keep backing dependencies outside all cleanup operands.
 
 Run host functional tests serially across worktrees. The main package uses fixed
 VM pool names, so sharing an image does not provide concurrent-session isolation;
 an already-running same-named VM is rejected by the runtime.
 
-Shared `clean` and `clean-all` preserve the input, its symlink and hardlink
-aliases, and neighboring snapshots and sidecars. Independent local artifacts
-remain eligible for removal; only `clean-all` also removes an independent Ubuntu
-download. Combined goals use one cleanup pass. Each stage checks its operands
-before removal, so a separate `clean` can finish before `clean-all` refuses an
-unsafe Ubuntu operand. Cleanup requires the input to remain available.
-
-Cleanup refuses unsafe overlaps with the image directory and protected VM paths.
-It retains symlinks and selected-image inode aliases, including a VM directory
-containing them. The direct-parent guard does not protect deliberate overrides
-into nested shared subdirectories. These guards do not restrict runtime pruning.
-
-Artifact overrides support spaces, newlines and leading dashes; relative paths
-are resolved from the physical working directory. Unlike `YANET_QEMU_IMAGE`,
-`QEMU_IMAGE`, `CLOUD_INIT_AUTOLOGIN_ISO` and `UBUNTU_IMAGE` use normal Make
-expansion. Escape a literal dollar as `$$` in Make assignments.
+With a nonempty `YANET_QEMU_IMAGE`, `clean` and `clean-all` fail without deleting
+files or running Go, even when the selected image is missing. Local artifacts
+are left in place too. This restriction does not prevent runtime cache writes
+or pruning.
 
 `debug-vm` and `debug-vm-ssh` explicitly reject nonempty overrides before any
 image creation or QEMU startup. Unset the override to use these local-image
@@ -93,21 +80,15 @@ QEMU, downloads or ISO generation:
 ```bash
 bash -n tests/functional/test-makefile.sh
 bash tests/functional/test-makefile.sh
-bash tests/functional/test-makefile.sh /path/to/baseline.Makefile
+bash tests/functional/test-makefile.sh default
 ```
 
-The optional argument selects another Makefile. Disposable fixtures and fake
-tools check image selection and cleanup effects. CI runs this sandbox without
-the VM suite.
-
-The optional second argument selects recipe mode: `bash` (the default) uses the
-invoking Bash; `default` uses Make's normal `/bin/sh` interpreter. Select an
-alternate Make via `PATH`:
-
-```bash
-PATH="/path/to/make/bin:$PATH" /path/to/bash tests/functional/test-makefile.sh
-bash tests/functional/test-makefile.sh '' default
-```
+The optional argument selects recipe mode: `bash` (the default) uses the
+invoking Bash; `default` uses Make's normal `/bin/sh` interpreter. Disposable
+fixtures check the adjacent Makefile's image selection and refusal contracts.
+Go is recorded; destructive and bootstrap tools record their invocation and
+fail without acting. Local cleanup and cold preparation are checked only up
+to the first blocked tool, not emulated. CI runs both modes without the VM suite.
 
 Default-shell coverage uses the current host's `/bin/sh`; CI exercises it on
 Ubuntu. It does not cover every Linux shell.

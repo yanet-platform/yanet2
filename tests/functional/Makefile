@@ -86,86 +86,8 @@ endif
 
 # Clean test artifacts
 ifneq ("$(value YANET_QEMU_IMAGE)","")
-clean-all: CLEAN_ALL_INTENT := yes
-clean-all: clean
-clean clean-all: export CLEAN_QEMU_IMAGE := $(QEMU_IMAGE)
-clean clean-all: export CLEAN_INIT_ISO := $(CLOUD_INIT_AUTOLOGIN_ISO)
-clean clean-all: export CLEAN_UBUNTU_IMAGE := $(UBUNTU_IMAGE)
-clean: check-image
-
-# Every stage preflights its operands; all-clean can finish after a prior local cleanup.
-define clean_shared
-	@set -eu; \
-	capture() { metadata=$$("$$@" && printf .) || return; metadata=$${metadata%.}; }; \
-	physical_dir() { (CDPATH= cd -P "$$1" && capture pwd -P && printf '%s' "$${metadata%?}"); }; \
-	capture physical_dir .; local_dir="$$metadata"; \
-	image="$$YANET_QEMU_IMAGE"; temp_dir=; protected_temp=; \
-	if [ '$(1)' = ubuntu ]; then \
-		if [ -L "$$CLEAN_UBUNTU_IMAGE" ] || [ "$$CLEAN_UBUNTU_IMAGE" -ef "$$image" ] || [ ! -e "$$CLEAN_UBUNTU_IMAGE" ]; then exit 0; fi; \
-		set -- "$$CLEAN_UBUNTU_IMAGE"; \
-	else \
-		set -- "$$CLEAN_QEMU_IMAGE" yanet-test-booted*.qcow2 yanet-test-baseline*.qcow2 \
-			"$$CLEAN_INIT_ISO" qemu_debug.log qemu.log test_output*.log test_run.log; \
-		if [ -n '$(filter yes,$(CLEAN_ALL_INTENT))$(filter clean-all,$(MAKECMDGOALS))' ]; then set -- "$$@" "$$CLEAN_UBUNTU_IMAGE"; fi; \
-		if [ -L /tmp/yanet-test-vm ] || [ /tmp/yanet-test-vm -ef "$$image" ]; then \
-			protected_temp=yes; \
-		elif [ -d /tmp/yanet-test-vm ]; then \
-			capture physical_dir /tmp/yanet-test-vm; temp_dir="$$metadata"; \
-		fi; \
-	fi; \
-	while :; do \
-		capture physical_dir "$${image%/*}/."; parent="$$metadata"; \
-		if [ "$$parent" -ef "$$local_dir" ]; then \
-			echo "Refusing cleanup in the shared image directory" >&2; exit 1; \
-		fi; \
-		if [ -n "$$temp_dir" ]; then \
-			for start in "$$parent" "$$temp_dir"; do \
-				if [ "$$start" = "$$parent" ]; then boundary="$$temp_dir"; else boundary="$$parent"; fi; \
-				dir="$$start"; \
-				while :; do \
-					if [ "$$dir" -ef "$$boundary" ]; then echo "Shared storage overlaps the VM working directory" >&2; exit 1; fi; \
-					capture physical_dir "$$dir/.."; next="$$metadata"; \
-					[ "$$dir" -ef "$$next" ] && break; \
-					dir="$$next"; \
-				done; \
-			done; \
-		fi; \
-		case "$$image" in /tmp/yanet-test-vm/*) echo "Shared image overlaps the VM working directory" >&2; exit 1;; esac; \
-		for path in "$$@" /tmp/yanet-test-vm; do \
-			[ -n "$$path" ] || continue; \
-			case "$$path" in /*) ;; *) path="$$local_dir/$$path";; esac; \
-			if [ -L "$$path" ] || [ "$$path" -ef "$$YANET_QEMU_IMAGE" ]; then continue; fi; \
-			[ -e "$$path" ] || continue; \
-			capture physical_dir "$${path%/*}/."; dir="$$metadata"; \
-			if [ "$$dir" -ef "$$parent" ]; then echo "Cleanup operand is in shared storage: $$path" >&2; exit 1; fi; \
-		done; \
-		[ -L "$$image" ] || break; \
-		capture readlink -n "$$image"; link="$$metadata"; \
-		case "$$link" in /*) image="$$link";; *) image="$$parent/$$link";; esac; \
-	done; \
-	if [ -n "$$temp_dir" ]; then \
-		capture find "$$temp_dir" -exec sh -c 'image=$$1; shift; for path in "$$@"; do if [ -L "$$path" ]; then printf "%s\n" "$$path" || exit "$$?"; elif env test "$$path" -ef "$$image"; then printf "%s\n" "$$path" || exit "$$?"; else status=$$?; [ "$$status" -eq 1 ] || exit "$$status"; fi; done; exit 0' sh "$$image" {} +; protected_temp="$$metadata"; \
-	fi; \
-	for path in "$$@"; do \
-		[ -n "$$path" ] || continue; \
-		case "$$path" in /*) ;; *) path="$$local_dir/$$path";; esac; \
-		if [ -L "$$path" ] || [ "$$path" -ef "$$YANET_QEMU_IMAGE" ]; then \
-			echo "Preserving shared image alias: $$path"; \
-		else rm -f -- "$$path"; fi; \
-	done; \
-	if [ '$(1)' = clean ]; then \
-		if [ -n "$$protected_temp" ]; then \
-			echo "Preserving VM working directory containing possible shared aliases"; \
-		else rm -rf /tmp/yanet-test-vm; fi; \
-	fi
-endef
-
-clean:
-	$(call clean_shared,clean)
-	go clean -testcache
-
-clean-all:
-	$(call clean_shared,ubuntu)
+clean clean-all:
+	@echo "Cleanup is disabled while YANET_QEMU_IMAGE is set; no files were removed" >&2; exit 1
 else
 clean:
 	@echo "Cleaning test artifacts..."
@@ -360,7 +282,6 @@ endif
 	@echo ""
 	@echo "Shared input: nonempty YANET_QEMU_IMAGE requires an absolute readable regular file."
 	@echo "  Preparation validates only; unset/empty keeps local image creation."
-	@echo "  Direct debug targets reject shared mode; clean preserves input/aliases/neighbors"
-	@echo "  and independent local cleanup, refusing unsafe overlap."
+	@echo "  Direct debug and cleanup targets reject shared mode without changing files."
 	@echo "Sandbox regression: bash test-makefile.sh (no real VM or Go execution)."
 	@echo ""
