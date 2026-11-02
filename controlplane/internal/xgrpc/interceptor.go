@@ -128,8 +128,7 @@ func logCompletion(
 // A call over an in-process memory listener, a bufconn one in the gateway,
 // is reported as memory, never plain, so plain entries are exactly the calls
 // served on a plaintext gRPC listener. HTTP requests reach every service
-// through such a listener and are logged as memory, or as tls when they
-// carry the TLS state of the browser connection they arrived on.
+// through such a listener and are logged as memory.
 func connectionFields(ctx context.Context) []zap.Field {
 	transport, address := "plain", ""
 	if info, ok := peer.FromContext(ctx); ok && info.Addr != nil {
