@@ -10,10 +10,9 @@ import (
 	"github.com/yanet-platform/yanet2/controlplane/internal/auth/core"
 )
 
-const (
-	// authMetadataKey is the metadata header key for authentication tokens.
-	authMetadataKey = "x-yanet-authentication"
-)
+// TokenMetadataKey is the metadata key a caller sends its authentication
+// token under.
+const TokenMetadataKey = "x-yanet-authentication"
 
 // ExtractCredential collects what the request presents for authentication:
 // the token from gRPC metadata and the TLS state of the peer connection.
@@ -24,7 +23,7 @@ func ExtractCredential(ctx context.Context) core.Credential {
 
 	if md, ok := metadata.FromIncomingContext(ctx); ok {
 		// TODO: should we allow passing multiple tokens at once?
-		if values := md.Get(authMetadataKey); len(values) > 0 {
+		if values := md.Get(TokenMetadataKey); len(values) > 0 {
 			credential.Token = values[0]
 		}
 	}
