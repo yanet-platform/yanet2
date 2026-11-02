@@ -630,9 +630,9 @@ func NewGateway(cfg Config, options ...GatewayOption) (*Gateway, error) {
 	//
 	// No network hop is involved, and the interceptor chain still runs on
 	// every request that comes through them. An in-memory connection runs no
-	// TLS: the one opened for a browser TLS connection carries that
-	// connection's TLS state instead. External backends each get a network
-	// connection of their own when they register.
+	// TLS: the one opened for a browser TLS connection with a verified client
+	// certificate carries that connection's TLS state instead. External
+	// backends each get a network connection of their own when they register.
 	memoryListener := newMemoryListener()
 	defaultLoopback, err := dialMemoryBackend(endpoint, memoryListener, insecure.NewCredentials())
 	if err != nil {
@@ -640,11 +640,11 @@ func NewGateway(cfg Config, options ...GatewayOption) (*Gateway, error) {
 	}
 	loopback := &loopbackBackend{backend: defaultLoopback}
 
-	// Only a browser that may present a client certificate needs a way of its
-	// own into the loopback server.
+	// Only a browser that presents a verified client certificate needs a way
+	// of its own into the loopback server.
 	var browsers *browserConnections
 	if clientCAs != nil && plan.HTTP.TLS != nil {
-		browsers = newBrowserConnections(loopbackServer, endpoint)
+		browsers = newBrowserConnections(loopbackServer, endpoint, defaultLoopback)
 	}
 
 	for _, service := range []string{
@@ -943,8 +943,8 @@ func (m *Gateway) runHTTPServer(ctx context.Context) error {
 			),
 		),
 	}
-	// A browser TLS connection reaches the loopback server over a way of its
-	// own for as long as it stays open.
+	// A browser TLS connection with a verified client certificate reaches the
+	// loopback server over a way of its own for as long as it stays open.
 	if m.browsers != nil {
 		server.ConnContext = m.browsers.Track
 		server.ConnState = m.browsers.Forget
