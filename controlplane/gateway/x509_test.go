@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/base64"
+	"encoding/json"
 	"io"
 	"net/http"
 	"os"
@@ -231,49 +232,139 @@ func Test_Gateway_X509_UntrustedCertificateFailsHandshake(t *testing.T) {
 	require.Equal(t, codes.Unavailable, status.Code(err))
 }
 
-// Test_Gateway_HTTPS_NeverRequestsClientCertificate verifies that the HTTP
-// listener does not ask for a client certificate even when the gRPC one
-// does, so a browser never sees a certificate prompt.
-func Test_Gateway_HTTPS_NeverRequestsClientCertificate(t *testing.T) {
-	t.Parallel()
+// postUntilAnswered posts an empty JSON body to the given URL until the
+// gateway answers, returning the response with its body read out.
+func postUntilAnswered(t *testing.T, client *http.Client, url string) (*http.Response, []byte) {
+	t.Helper()
 
-	ca := tlscert.NewCA(t)
-	cfg := gateway.DefaultConfig()
-	cfg.Auth = newX509AuthConfig(t, ca)
-	cfg.Server.HTTPEndpoint = newFreeAddress(t)
-	startX509Gateway(t, ca, cfg)
-
-	var requested atomic.Bool
-	client := &http.Client{
-		Transport: &http.Transport{
-			TLSClientConfig: &tls.Config{
-				RootCAs:    ca.Pool(),
-				MinVersion: tls.VersionTLS12,
-				GetClientCertificate: func(*tls.CertificateRequestInfo) (*tls.Certificate, error) {
-					requested.Store(true)
-					return &tls.Certificate{}, nil
-				},
-			},
-		},
-		Timeout: 5 * time.Second,
-	}
-	url := "https://" + cfg.Server.HTTPEndpoint + "/api/controlplane.ynpb.v1.Gateway/ListServices"
-
-	var statusCode int
+	var answer *http.Response
+	var body []byte
 	require.Eventually(t, func() bool {
-		response, postErr := client.Post(url, "application/json", strings.NewReader("{}"))
-		if postErr != nil {
+		response, err := client.Post(url, "application/json", strings.NewReader("{}"))
+		if err != nil {
 			return false
 		}
 		defer func() { _ = response.Body.Close() }()
 
-		_, postErr = io.ReadAll(response.Body)
-		statusCode = response.StatusCode
-		return postErr == nil
+		body, err = io.ReadAll(response.Body)
+		answer = response
+		return err == nil
 	}, 5*time.Second, 50*time.Millisecond, "HTTP proxy did not answer")
 
-	require.Equal(t, http.StatusOK, statusCode)
-	require.False(t, requested.Load(), "HTTP listener requested a client certificate")
+	return answer, body
+}
+
+// Test_Gateway_HTTPS_RequestsClientCertificateOnlyForX509 verifies that the
+// HTTPS listener asks for a client certificate only with an x509
+// authenticator, and serves a client that presents none either way.
+func Test_Gateway_HTTPS_RequestsClientCertificateOnlyForX509(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name string
+		x509 bool
+	}{
+		{name: "with an x509 authenticator", x509: true},
+		{name: "without an x509 authenticator", x509: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			ca := tlscert.NewCA(t)
+			cfg := gateway.DefaultConfig()
+			if tc.x509 {
+				cfg.Auth = newX509AuthConfig(t, ca)
+			}
+			cfg.Server.HTTPEndpoint = newFreeAddress(t)
+			startX509Gateway(t, ca, cfg)
+
+			var requested atomic.Bool
+			client := &http.Client{
+				Transport: &http.Transport{
+					TLSClientConfig: &tls.Config{
+						RootCAs:    ca.Pool(),
+						MinVersion: tls.VersionTLS12,
+						GetClientCertificate: func(*tls.CertificateRequestInfo) (*tls.Certificate, error) {
+							requested.Store(true)
+							return &tls.Certificate{}, nil
+						},
+					},
+				},
+				Timeout: 5 * time.Second,
+			}
+			url := "https://" + cfg.Server.HTTPEndpoint + "/api/controlplane.ynpb.v1.Gateway/ListServices"
+
+			response, body := postUntilAnswered(t, client, url)
+			require.Equal(t, http.StatusOK, response.StatusCode, string(body))
+			require.Equal(t, tc.x509, requested.Load(), "whether the HTTPS listener asked for a client certificate")
+		})
+	}
+}
+
+// Test_Gateway_HTTPS_ClientCertificateBecomesPrincipal verifies that an
+// HTTP call is authenticated as the client certificate of its HTTPS
+// connection over either HTTP version, and as anonymous without one.
+func Test_Gateway_HTTPS_ClientCertificateBecomesPrincipal(t *testing.T) {
+	t.Parallel()
+
+	ca := tlscert.NewCA(t)
+	server := ca.IssueServer(t, "127.0.0.1")
+	client := ca.IssueClient(t, "route-operator")
+	httpAddress, httpsAddress := newFreeAddress(t), newFreeAddress(t)
+	cfg := gateway.DefaultConfig()
+	cfg.Auth = newX509AuthConfig(t, ca)
+	cfg.Server.HTTP = &gateway.ListenerConfig{
+		Endpoint: httpAddress,
+		TLS:      newTLSListenerConfig(t, httpsAddress, server.CertFile, server.KeyFile),
+	}
+	runGateway(t, cfg, gateway.WithListener(NewTestListener(t)))
+
+	for _, tc := range []struct {
+		name         string
+		origin       string
+		certificates []tls.Certificate
+		http2        bool
+		user         string
+	}{
+		{
+			name:         "trusted certificate over https with http/2",
+			origin:       "https://" + httpsAddress,
+			certificates: []tls.Certificate{client.Certificate},
+			http2:        true,
+			user:         "route-operator",
+		},
+		{
+			name:         "trusted certificate over https with http/1.1",
+			origin:       "https://" + httpsAddress,
+			certificates: []tls.Certificate{client.Certificate},
+			user:         "route-operator",
+		},
+		{name: "no certificate over https", origin: "https://" + httpsAddress, http2: true, user: "anonymous"},
+		{name: "plaintext http", origin: "http://" + httpAddress, user: "anonymous"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			httpClient := &http.Client{
+				Transport: &http.Transport{
+					TLSClientConfig: &tls.Config{
+						RootCAs:      ca.Pool(),
+						Certificates: tc.certificates,
+						MinVersion:   tls.VersionTLS12,
+					},
+					ForceAttemptHTTP2: tc.http2,
+				},
+				Timeout: 5 * time.Second,
+			}
+			url := tc.origin + "/api" + ynpb.AuthService_IntrospectToken_FullMethodName
+
+			response, body := postUntilAnswered(t, httpClient, url)
+			require.Equal(t, http.StatusOK, response.StatusCode, string(body))
+			require.Equal(t, tc.http2, response.ProtoMajor == 2, "whether the call went over HTTP/2")
+
+			var introspection ynpb.IntrospectTokenResponse
+			require.NoError(t, json.Unmarshal(body, &introspection))
+			require.Equal(t, tc.user, introspection.GetPrincipal().GetUser())
+		})
+	}
 }
 
 // Test_NewGateway_X509RequiresServerTLS verifies that an x509 authenticator

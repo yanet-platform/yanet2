@@ -59,7 +59,16 @@ func newCertificateStore(
 }
 
 // serverCredentials returns gRPC server transport credentials serving the
-// certificates of the store.
+// certificates of the store the way every gateway TLS listener does.
+func serverCredentials(
+	certificates *xgrpc.CertificateStore,
+	clientCAs func() *x509.CertPool,
+) credentials.TransportCredentials {
+	return credentials.NewTLS(serverTLSConfig(certificates, clientCAs))
+}
+
+// serverTLSConfig returns the configuration a gateway TLS listener serves
+// the certificates of the store with.
 //
 // Session tickets are off, since a resumed session carries over the client
 // certificate of the handshake it resumes. Given a source of client
@@ -68,10 +77,10 @@ func newCertificateStore(
 // handshake, so a reloaded pool applies to new connections without a
 // restart. A client without a certificate is still accepted and
 // authenticates by other means.
-func serverCredentials(
+func serverTLSConfig(
 	certificates *xgrpc.CertificateStore,
 	clientCAs func() *x509.CertPool,
-) credentials.TransportCredentials {
+) *tls.Config {
 	config := &tls.Config{
 		GetCertificate:         certificates.GetCertificate,
 		MinVersion:             tls.VersionTLS12,
@@ -87,7 +96,7 @@ func serverCredentials(
 		}
 	}
 
-	return credentials.NewTLS(config)
+	return config
 }
 
 // listenerCertificates is the certificate store one TLS listener serves

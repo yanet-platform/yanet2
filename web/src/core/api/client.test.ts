@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { createService, ApiError, loadKnownConfigs } from './client';
+import { createService, createStreamingService, ApiError, loadKnownConfigs } from './client';
 
 describe('ApiError', () => {
     beforeEach(() => {
@@ -167,5 +167,34 @@ describe('loadKnownConfigs', () => {
                 ),
             ])
         ).rejects.toBe(serverError);
+    });
+});
+
+describe('API calls', () => {
+    beforeEach(() => {
+        vi.unstubAllGlobals();
+    });
+
+    it('carry the browser credentials, so a gateway on another origin receives the client certificate', async () => {
+        const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) });
+        vi.stubGlobal('fetch', fetchMock);
+
+        await createService('test.Service').call('Method');
+
+        expect(fetchMock.mock.calls[0][1]).toMatchObject({ credentials: 'include' });
+    });
+
+    it('carry the browser credentials on a streaming call too', () => {
+        const fetchMock = vi.fn().mockResolvedValue({
+            ok: false,
+            status: 500,
+            statusText: 'Internal Server Error',
+            text: async () => '',
+        });
+        vi.stubGlobal('fetch', fetchMock);
+
+        createStreamingService('test.Service').stream('Method', {}, { onMessage: () => {}, onError: () => {} });
+
+        expect(fetchMock.mock.calls[0][1]).toMatchObject({ credentials: 'include' });
     });
 });

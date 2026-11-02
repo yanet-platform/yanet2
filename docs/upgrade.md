@@ -3,6 +3,34 @@
 Manual steps required when upgrading an existing deployment. The packaging
 does not perform these automatically.
 
+## Gateway HTTPS asks browsers for a client certificate
+
+With an x509 authenticator configured, the gateway's HTTPS listener now
+asks every client for a certificate, as its gRPC TLS listener does, and
+the gateway's own services authenticate a browser call by it. A browser
+holding a certificate from a trusted authority shows its certificate
+picker on the first visit; a client without one is still served as an
+anonymous caller. Without an x509 authenticator the listener asks for no
+certificate, as before. An x509 authenticator may now run with
+`server.http.tls` alone, without a gRPC TLS listener.
+
+Two HTTPS clients that used to be served change with it, as on the gRPC
+TLS listener: a client presenting a certificate from an authority outside
+the pool fails the handshake, and in enabled mode a trusted certificate
+whose name no identity provider knows is refused with 401 instead of being
+served as anonymous. A browser keeps the certificate of its connection
+until it reconnects; expiry and revocation still apply to every call.
+
+The web UI now sends its API calls with the browser's credentials, and a
+gateway on another origin must allow them: from this version on it answers
+its trusted origins with `Access-Control-Allow-Credentials: true`. Upgrade
+every gateway that a standalone UI or the UI's Gateway drawer reaches
+before the UI itself, or the browser rejects the older gateway's
+responses.
+
+Calls to module, device and operator services over HTTP still skip
+authentication, and the gateway warns about it at startup.
+
 ## Gateway HTTP rejects cross-origin browser calls from untrusted origins
 
 The gateway's HTTP server no longer sends `Access-Control-Allow-Origin: *`.
@@ -203,8 +231,8 @@ gateway:
 
 Adding `grpc.endpoint` on another address then serves plaintext gRPC beside
 TLS for the clients that have not moved yet. An x509 authenticator needs
-the gRPC TLS listener: only that listener asks for client certificates,
-plaintext callers stay anonymous, and HTTPS never asks for one.
+a TLS listener to ask for client certificates, and plaintext callers stay
+anonymous.
 
 Environment overrides follow the keys: `YANET_GATEWAY_SERVER_GRPC_ENDPOINT`,
 `YANET_GATEWAY_SERVER_GRPC_TLS_ENDPOINT`,

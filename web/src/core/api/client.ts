@@ -26,6 +26,13 @@ export class ApiError extends Error {
 
 let apiBase = '';
 
+/** Credentials mode of every API call.
+ *
+ * A gateway on another origin receives the browser's client certificate
+ * only with a credentialed request.
+ */
+const apiCredentials: RequestCredentials = 'include';
+
 /** Set the base URL prefix for all API calls. An empty string means same-origin. */
 export const setApiBase = (base: string): void => {
     apiBase = base;
@@ -82,6 +89,7 @@ const callGRPCServiceWithBody = async <T>(
         headers,
         body: requestBody,
         signal: options?.signal,
+        credentials: apiCredentials,
     });
 
     if (!response.ok) {
@@ -221,6 +229,7 @@ const streamGRPCService = async <T>(
             },
             body: JSON.stringify(body),
             signal,
+            credentials: apiCredentials,
         });
 
         if (!response.ok) {

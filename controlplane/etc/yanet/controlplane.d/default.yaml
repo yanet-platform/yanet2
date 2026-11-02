@@ -45,8 +45,8 @@ gateway:
     # picked up within an hour without a restart: replace them by rename or
     # symlink swap, since a key and certificate written one after the other
     # keep the old pair until both match. Key pair paths cannot be set from
-    # the environment. The gRPC TLS listener alone asks for client
-    # certificates; HTTPS never does.
+    # the environment. With an x509 authenticator both TLS listeners, gRPC
+    # and HTTPS, ask clients for an optional certificate.
     # grpc:
     #   endpoint: "[::1]:8080"
     #   tls:
@@ -105,10 +105,12 @@ gateway:
     #   # verified common name.
     #   #
     #   # Enabled mode requires this name in the identities file; audit records
-    #   # it directly. Requires a gRPC TLS listener (server.grpc.tls, or the
-    #   # deprecated server.tls), the only listener that checks certificates;
-    #   # plaintext callers stay anonymous. Revocation lists are optional and
-    #   # must be signed by one of the authorities.
+    #   # it directly. Requires a TLS listener (server.grpc.tls,
+    #   # server.http.tls, or the deprecated server.tls), the only listeners
+    #   # that check certificates; plaintext callers stay anonymous. Over
+    #   # HTTPS the certificate authenticates calls to the gateway's own
+    #   # services. Revocation lists are optional and must be signed by one of
+    #   # the authorities.
     #   - type: x509
     #     config:
     #       ca_sources:
