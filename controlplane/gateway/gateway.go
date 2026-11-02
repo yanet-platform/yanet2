@@ -324,6 +324,19 @@ func NewGateway(cfg Config, options ...GatewayOption) (*Gateway, error) {
 		)
 	}
 
+	// An active policy does not cover HTTP calls to module, device and
+	// operator services.
+	//
+	// The HTTP server calls a service through its registry backend, and only
+	// the backend of a framework service leads into the gateway's own gRPC
+	// server and its interceptors. The other services run on servers of
+	// their own.
+	if authManager.Mode() != auth.ModeDisabled && plan.HTTP.Serves() {
+		log.Warn("http server skips authentication and authorization for module, device and operator services",
+			zap.String("mode", string(authManager.Mode())),
+		)
+	}
+
 	authService := NewAuthService(authManager)
 
 	director := func(ctx context.Context, fullMethodName string) (proxy.Mode, []proxy.Backend, error) {
@@ -683,7 +696,7 @@ func (m *Gateway) Run(ctx context.Context) error {
 	wg.Go(func() error {
 		return serve(m.server, m.memoryListener)
 	})
-	if m.http.Endpoint != "" || m.http.TLS != nil {
+	if m.http.Serves() {
 		wg.Go(func() error {
 			return m.runHTTPServer(ctx)
 		})
