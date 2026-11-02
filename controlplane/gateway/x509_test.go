@@ -80,8 +80,9 @@ func newX509AuthConfig(t *testing.T, ca *tlscert.CA) auth.Config {
 }
 
 // startX509Gateway runs a gateway serving TLS with a certificate issued by
-// ca on a pre-bound listener and returns the address to dial.
-func startX509Gateway(t *testing.T, ca *tlscert.CA, cfg gateway.Config) string {
+// ca on a pre-bound listener, with any further options, and returns the
+// address to dial.
+func startX509Gateway(t *testing.T, ca *tlscert.CA, cfg gateway.Config, options ...gateway.GatewayOption) string {
 	t.Helper()
 
 	server := ca.IssueServer(t, "127.0.0.1")
@@ -90,7 +91,8 @@ func startX509Gateway(t *testing.T, ca *tlscert.CA, cfg gateway.Config) string {
 	}
 
 	listener := NewTestListener(t)
-	gw, err := gateway.NewGateway(cfg, gateway.WithLog(zap.NewNop()), gateway.WithListener(listener))
+	defaults := []gateway.GatewayOption{gateway.WithLog(zap.NewNop()), gateway.WithListener(listener)}
+	gw, err := gateway.NewGateway(cfg, append(defaults, options...)...)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = gw.Close() })
 
@@ -275,8 +277,9 @@ func Test_Gateway_HTTPS_RequestsClientCertificateOnlyForX509(t *testing.T) {
 			if tc.x509 {
 				cfg.Auth = newX509AuthConfig(t, ca)
 			}
-			cfg.Server.HTTPEndpoint = newFreeAddress(t)
-			startX509Gateway(t, ca, cfg)
+			httpListener := NewTestListener(t)
+			cfg.Server.HTTPEndpoint = httpListener.Addr().String()
+			startX509Gateway(t, ca, cfg, gateway.WithHTTPListener(httpListener))
 
 			var requested atomic.Bool
 			client := &http.Client{
@@ -310,14 +313,19 @@ func Test_Gateway_HTTPS_ClientCertificateBecomesPrincipal(t *testing.T) {
 	ca := tlscert.NewCA(t)
 	server := ca.IssueServer(t, "127.0.0.1")
 	client := ca.IssueClient(t, "route-operator")
-	httpAddress, httpsAddress := newFreeAddress(t), newFreeAddress(t)
+	httpListener, httpsListener := NewTestListener(t), NewTestListener(t)
+	httpAddress, httpsAddress := httpListener.Addr().String(), httpsListener.Addr().String()
 	cfg := gateway.DefaultConfig()
 	cfg.Auth = newX509AuthConfig(t, ca)
 	cfg.Server.HTTP = &gateway.ListenerConfig{
 		Endpoint: httpAddress,
 		TLS:      newTLSListenerConfig(t, httpsAddress, server.CertFile, server.KeyFile),
 	}
-	runGateway(t, cfg, gateway.WithListener(NewTestListener(t)))
+	runGateway(t, cfg,
+		gateway.WithListener(NewTestListener(t)),
+		gateway.WithHTTPListener(httpListener),
+		gateway.WithHTTPSListener(httpsListener),
+	)
 
 	for _, tc := range []struct {
 		name         string

@@ -161,14 +161,19 @@ func Test_Gateway_HTTPProxy_ReachesBuiltinOverTLS(t *testing.T) {
 
 	certFile, keyFile, pool := newTestServerTLS(t)
 
+	httpListener := NewTestListener(t)
 	cfg := gateway.DefaultConfig()
-	cfg.Server.HTTPEndpoint = newFreeAddress(t)
+	cfg.Server.HTTPEndpoint = httpListener.Addr().String()
 	cfg.Server.TLS = &gateway.TLSConfig{
 		KeyPairs: []xgrpc.KeyPairConfig{tlscert.FileKeyPair(t, certFile, keyFile)},
 	}
 
 	listener := NewTestListener(t)
-	gw, err := gateway.NewGateway(cfg, gateway.WithLog(zap.NewNop()), gateway.WithListener(listener))
+	gw, err := gateway.NewGateway(cfg,
+		gateway.WithLog(zap.NewNop()),
+		gateway.WithListener(listener),
+		gateway.WithHTTPListener(httpListener),
+	)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = gw.Close() })
 
@@ -473,7 +478,8 @@ func Test_Gateway_TLSOnly_HTTPSReachesBuiltin(t *testing.T) {
 
 	certFile, keyFile, pool := newTestServerTLS(t)
 	secure := NewTestListener(t)
-	httpsAddress := newFreeAddress(t)
+	httpsListener := NewTestListener(t)
+	httpsAddress := httpsListener.Addr().String()
 
 	cfg := gateway.DefaultConfig()
 	cfg.Server.GRPC = &gateway.ListenerConfig{
@@ -482,7 +488,7 @@ func Test_Gateway_TLSOnly_HTTPSReachesBuiltin(t *testing.T) {
 	cfg.Server.HTTP = &gateway.ListenerConfig{
 		TLS: newTLSListenerConfig(t, httpsAddress, certFile, keyFile),
 	}
-	runGateway(t, cfg, gateway.WithTLSListener(secure))
+	runGateway(t, cfg, gateway.WithTLSListener(secure), gateway.WithHTTPSListener(httpsListener))
 
 	requireListServices(t, dialGateway(t, secure.Addr().String(), newClientTLSCredentials(pool)))
 
@@ -528,16 +534,21 @@ func Test_Gateway_HTTP_RejectsCrossOriginFromUntrustedOrigin(t *testing.T) {
 	t.Parallel()
 
 	const trustedOrigin = "https://ui.example"
-	httpAddress := newFreeAddress(t)
+	grpcListener, httpListener := NewTestListener(t), NewTestListener(t)
+	httpAddress := httpListener.Addr().String()
 	health := &countingHealthService{}
 
 	cfg := gateway.DefaultConfig()
-	cfg.Server.GRPC = &gateway.ListenerConfig{Endpoint: newFreeAddress(t)}
+	cfg.Server.GRPC = &gateway.ListenerConfig{Endpoint: grpcListener.Addr().String()}
 	cfg.Server.HTTP = &gateway.ListenerConfig{
 		Endpoint:       httpAddress,
 		TrustedOrigins: []string{trustedOrigin},
 	}
-	runGateway(t, cfg, gateway.WithBuiltinService(health))
+	runGateway(t, cfg,
+		gateway.WithBuiltinService(health),
+		gateway.WithListener(grpcListener),
+		gateway.WithHTTPListener(httpListener),
+	)
 
 	url := "http://" + httpAddress + "/api/" + grpc_health_v1.Health_Check_FullMethodName[1:]
 	client := &http.Client{Timeout: 5 * time.Second}
@@ -885,6 +896,51 @@ func TestGateway_Run_BindsOwnListenerWhenNoneInjected(t *testing.T) {
 	t.Cleanup(func() { _ = gw.Close() })
 
 	require.ErrorContains(t, gw.Run(t.Context()), "failed to initialize gRPC listener")
+}
+
+// Test_Gateway_Run_BindsConfiguredHTTPListeners verifies that the gateway
+// binds every HTTP endpoint it was configured with and not handed.
+//
+// Each endpoint points at an address a held-open listener keeps occupied, so
+// the bind deterministically fails rather than racing another process for
+// the port.
+func Test_Gateway_Run_BindsConfiguredHTTPListeners(t *testing.T) {
+	t.Parallel()
+
+	certFile, keyFile, _ := newTestServerTLS(t)
+	for _, tc := range []struct {
+		name string
+		http func(endpoint string) *gateway.ListenerConfig
+	}{
+		{
+			name: "plaintext endpoint",
+			http: func(endpoint string) *gateway.ListenerConfig {
+				return &gateway.ListenerConfig{Endpoint: endpoint}
+			},
+		},
+		{
+			name: "tls endpoint",
+			http: func(endpoint string) *gateway.ListenerConfig {
+				return &gateway.ListenerConfig{TLS: newTLSListenerConfig(t, endpoint, certFile, keyFile)}
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			occupied := NewTestListener(t)
+			cfg := gateway.DefaultConfig()
+			cfg.Server.HTTP = tc.http(occupied.Addr().String())
+
+			gw, err := gateway.NewGateway(cfg, gateway.WithLog(zap.NewNop()), gateway.WithListener(NewTestListener(t)))
+			require.NoError(t, err)
+			t.Cleanup(func() { _ = gw.Close() })
+
+			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+			defer cancel()
+			require.ErrorContains(t, gw.Run(ctx), "address already in use")
+		})
+	}
 }
 
 // TestGateway_Director_RegistryMissCarriesReasonTrailer verifies that a
@@ -1482,8 +1538,9 @@ func Test_Gateway_HTTPProxy_ForwardsAuthenticationHeader(t *testing.T) {
 	trustPath := writeTestFile(t, "ssh-ca.pub", string(ssh.MarshalAuthorizedKey(authority.PublicKey())))
 	cfg := gateway.DefaultConfig()
 	require.NoError(t, yaml.Unmarshal([]byte("mode: audit\nauthenticators:\n  - type: sshcert\n    config:\n      ca_sources: ["+trustPath+"]\n"), &cfg.Auth))
-	cfg.Server.HTTP = &gateway.ListenerConfig{Endpoint: newFreeAddress(t)}
-	runGateway(t, cfg, gateway.WithListener(NewTestListener(t)))
+	httpListener := NewTestListener(t)
+	cfg.Server.HTTP = &gateway.ListenerConfig{Endpoint: httpListener.Addr().String()}
+	runGateway(t, cfg, gateway.WithListener(NewTestListener(t)), gateway.WithHTTPListener(httpListener))
 
 	method := ynpb.AuthService_IntrospectToken_FullMethodName
 	token := signAuditToken(t, authority, signer, method)
@@ -1537,7 +1594,8 @@ func Test_Gateway_HTTPProxy_AuthorizesEveryBackendKind(t *testing.T) {
 
 			ca := tlscert.NewCA(t)
 			server := ca.IssueServer(t, "127.0.0.1")
-			httpAddress, httpsAddress := newFreeAddress(t), newFreeAddress(t)
+			httpListener, httpsListener := NewTestListener(t), NewTestListener(t)
+			httpAddress, httpsAddress := httpListener.Addr().String(), httpsListener.Addr().String()
 			cfg := gateway.DefaultConfig()
 			cfg.Auth = newX509AuthConfig(t, ca)
 			cfg.Server.HTTP = &gateway.ListenerConfig{
@@ -1547,7 +1605,11 @@ func Test_Gateway_HTTPProxy_AuthorizesEveryBackendKind(t *testing.T) {
 
 			health := &countingHealthService{}
 			listener := NewTestListener(t)
-			options := []gateway.GatewayOption{gateway.WithListener(listener)}
+			options := []gateway.GatewayOption{
+				gateway.WithListener(listener),
+				gateway.WithHTTPListener(httpListener),
+				gateway.WithHTTPSListener(httpsListener),
+			}
 			switch kind.kind {
 			case gateway.BackendKindBuiltin:
 				options = append(options, gateway.WithBuiltinService(health))
@@ -1647,11 +1709,11 @@ func Test_Gateway_HTTPProxy_AuthorizesEveryBackendKind(t *testing.T) {
 func Test_Gateway_HTTPProxy_KeepsLoopbackWhenItsNamesAreTakenOver(t *testing.T) {
 	t.Parallel()
 
-	httpAddress := newFreeAddress(t)
+	httpListener := NewTestListener(t)
+	httpAddress := httpListener.Addr().String()
 	cfg := gateway.DefaultConfig()
-	cfg.Server.HTTP = &gateway.ListenerConfig{Endpoint: httpAddress}
 	listener := NewTestListener(t)
-	runGateway(t, cfg, gateway.WithListener(listener))
+	runGateway(t, cfg, gateway.WithListener(listener), gateway.WithHTTPListener(httpListener))
 
 	connection, err := grpc.NewClient(listener.Addr().String(), grpc.WithTransportCredentials(insecure.NewCredentials()))
 	require.NoError(t, err)

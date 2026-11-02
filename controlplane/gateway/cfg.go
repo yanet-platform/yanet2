@@ -59,7 +59,8 @@ type ServerConfig struct {
 	// access to gRPC services for web clients.
 	//
 	// It replaces the deprecated HTTP endpoint and TLS keys for HTTP. No
-	// HTTP server runs without it or the deprecated HTTP endpoint.
+	// HTTP server runs without it, the deprecated HTTP endpoint or a
+	// listener handed to the gateway.
 	HTTP *ListenerConfig `yaml:"http,omitempty"`
 	// Endpoint is the gRPC endpoint, "[::1]:8080" when neither it nor the
 	// gRPC section is given.
