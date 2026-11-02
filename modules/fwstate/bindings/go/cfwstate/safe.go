@@ -115,7 +115,7 @@ func syncRulesToC(rules []SyncRule) ([]C.struct_fwstate_sync_rule_input, error) 
 
 func newSyncConfigFromC(cCfg *C.struct_fwstate_sync_config) SyncConfig {
 	var syncCfg SyncConfig
-	endpoints := unsafe.Slice((*C.struct_fwstate_sync_endpoint)(unsafe.Pointer(uintptr(unsafe.Pointer(cCfg))+C.FWSTATE_SYNC_ENDPOINTS_OFF)), int(cCfg.endpoint_count))
+	endpoints := unsafe.Slice((*C.struct_fwstate_sync_endpoint)(unsafe.Add(unsafe.Pointer(cCfg), C.FWSTATE_SYNC_ENDPOINTS_OFF)), int(cCfg.endpoint_count))
 	for idx := range endpoints {
 		cEndpoint := &endpoints[idx]
 		var endpoint SyncEndpoint
@@ -128,7 +128,7 @@ func newSyncConfigFromC(cCfg *C.struct_fwstate_sync_config) SyncConfig {
 	syncCfg.TcpSyn = uint64(cCfg.timeouts.tcp_syn)
 	syncCfg.TcpFin = uint64(cCfg.timeouts.tcp_fin)
 	syncCfg.Tcp = uint64(cCfg.timeouts.tcp)
-	listeners := unsafe.Slice((*C.struct_fwstate_sync_listen_endpoint)(unsafe.Pointer(uintptr(unsafe.Pointer(cCfg))+C.FWSTATE_SYNC_LISTENERS_OFF)), int(cCfg.listener_count))
+	listeners := unsafe.Slice((*C.struct_fwstate_sync_listen_endpoint)(unsafe.Add(unsafe.Pointer(cCfg), C.FWSTATE_SYNC_LISTENERS_OFF)), int(cCfg.listener_count))
 	for idx := range listeners {
 		cListener := &listeners[idx]
 		var listener SyncListenEndpoint
