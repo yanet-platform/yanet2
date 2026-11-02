@@ -11,7 +11,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/siderolabs/grpc-proxy/proxy"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
@@ -24,16 +23,20 @@ import (
 	ynpb "github.com/yanet-platform/yanet2/controlplane/ynpb/v1"
 )
 
-// emptyRegistry is a BackendRegistry that never has a matching backend,
-// simulating a service that is missing from the gateway's registry.
+// emptyRegistry is a BackendRegistry that knows no service, simulating a
+// service that is missing from the gateway's registry.
 type emptyRegistry struct{}
-
-func (m emptyRegistry) GetBackend(_ string) (proxy.Backend, func(), bool) {
-	return nil, func() {}, false
-}
 
 func (m emptyRegistry) HasBackend(_ string) bool {
 	return false
+}
+
+// everyServiceRegistry is a BackendRegistry that knows every service,
+// simulating a service registered with the gateway.
+type everyServiceRegistry struct{}
+
+func (m everyServiceRegistry) HasBackend(_ string) bool {
+	return true
 }
 
 // TestServeHTTP_UnknownService verifies that a registry miss is answered
@@ -64,7 +67,7 @@ func TestServeHTTP_UnknownService(t *testing.T) {
 		t.Run(testCase.name, func(t *testing.T) {
 			t.Parallel()
 
-			handler := httpproxy.NewHTTPHandler(emptyRegistry{})
+			handler := httpproxy.NewHTTPHandler(nil, emptyRegistry{})
 
 			req := httptest.NewRequest(http.MethodPost, testCase.path, strings.NewReader("{}"))
 			recorder := httptest.NewRecorder()
@@ -113,7 +116,7 @@ func TestServeHTTP_UnknownService_DoesNotReadBody(t *testing.T) {
 		t.Run(testCase.name, func(t *testing.T) {
 			t.Parallel()
 
-			handler := httpproxy.NewHTTPHandler(emptyRegistry{})
+			handler := httpproxy.NewHTTPHandler(nil, emptyRegistry{})
 
 			req := httptest.NewRequest(http.MethodPost, testCase.path, explodingBody{t: t})
 			recorder := httptest.NewRecorder()
@@ -125,7 +128,7 @@ func TestServeHTTP_UnknownService_DoesNotReadBody(t *testing.T) {
 	}
 }
 
-// unreachableBackend is a proxy.Backend whose GetConnection always fails,
+// unreachableBackend is a Backend whose GetConnection always fails,
 // simulating a registered service whose upstream connection cannot be
 // established.
 type unreachableBackend struct {
@@ -136,36 +139,9 @@ type unreachableBackend struct {
 	called *bool
 }
 
-func (m unreachableBackend) String() string {
-	return "unreachable-backend"
-}
-
 func (m unreachableBackend) GetConnection(_ context.Context, _ string) (context.Context, *grpc.ClientConn, error) {
 	*m.called = true
 	return nil, nil, m.err
-}
-
-func (m unreachableBackend) AppendInfo(_ bool, resp []byte) ([]byte, error) {
-	return resp, nil
-}
-
-func (m unreachableBackend) BuildError(_ bool, _ error) ([]byte, error) {
-	return nil, nil
-}
-
-// unreachableRegistry is a BackendRegistry that always resolves to an
-// unreachableBackend, simulating a service that is registered but whose
-// control plane connection is currently down.
-type unreachableRegistry struct {
-	backend unreachableBackend
-}
-
-func (m unreachableRegistry) GetBackend(_ string) (proxy.Backend, func(), bool) {
-	return m.backend, func() {}, true
-}
-
-func (m unreachableRegistry) HasBackend(_ string) bool {
-	return true
 }
 
 // TestServeHTTP_BackendUnreachable verifies that a GetConnection failure is
@@ -194,7 +170,7 @@ func TestServeHTTP_BackendUnreachable(t *testing.T) {
 
 			called := false
 			backend := unreachableBackend{err: errors.New("connection refused"), called: &called}
-			handler := httpproxy.NewHTTPHandler(unreachableRegistry{backend: backend})
+			handler := httpproxy.NewHTTPHandler(backend, everyServiceRegistry{})
 
 			req := httptest.NewRequest(http.MethodPost, testCase.path, strings.NewReader("{}"))
 			recorder := httptest.NewRecorder()
@@ -273,7 +249,7 @@ func newRecordingProxy(t *testing.T) (string, chan metadata.MD) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = conn.Close() })
 
-	server := httptest.NewServer(httpproxy.NewHTTPHandler(singleBackendRegistry{backend: passthroughBackend{conn: conn}}))
+	server := httptest.NewServer(httpproxy.NewHTTPHandler(passthroughBackend{conn: conn}, everyServiceRegistry{}))
 	t.Cleanup(server.Close)
 
 	return server.URL, calls
@@ -370,7 +346,7 @@ func Test_TransparentWebGRPCProxy_RejectsMalformedAuthenticationHeader(t *testin
 func Test_TransparentWebGRPCProxy_AllowsCredentialsOnlyForTrustedOrigin(t *testing.T) {
 	t.Parallel()
 
-	handler := httpproxy.NewHTTPHandler(emptyRegistry{}, httpproxy.WithTrustedOrigins([]string{"https://ui.example"}))
+	handler := httpproxy.NewHTTPHandler(nil, emptyRegistry{}, httpproxy.WithTrustedOrigins([]string{"https://ui.example"}))
 	for _, tc := range []struct {
 		name        string
 		origin      string

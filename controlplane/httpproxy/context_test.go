@@ -9,7 +9,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/siderolabs/grpc-proxy/proxy"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
@@ -56,38 +55,16 @@ func (m *watchProbeServer) Watch(_ *readinesspb.ReadyRequest, stream ynpb.Readin
 	return ctx.Err()
 }
 
-// passthroughBackend is a proxy.Backend that hands the given ctx straight
+// passthroughBackend is a Backend that hands the given ctx straight
 // through to a real gRPC connection, standing in for the ctx-derivation the
 // gateway's own backend performs.
 type passthroughBackend struct {
 	conn *grpc.ClientConn
 }
 
-func (m passthroughBackend) String() string { return "passthrough-backend" }
-
 func (m passthroughBackend) GetConnection(ctx context.Context, _ string) (context.Context, *grpc.ClientConn, error) {
 	return ctx, m.conn, nil
 }
-
-func (m passthroughBackend) AppendInfo(_ bool, resp []byte) ([]byte, error) {
-	return resp, nil
-}
-
-func (m passthroughBackend) BuildError(_ bool, _ error) ([]byte, error) {
-	return nil, nil
-}
-
-// singleBackendRegistry is a BackendRegistry that always resolves to the
-// same backend, regardless of the requested service.
-type singleBackendRegistry struct {
-	backend proxy.Backend
-}
-
-func (m singleBackendRegistry) GetBackend(_ string) (proxy.Backend, func(), bool) {
-	return m.backend, func() {}, true
-}
-
-func (m singleBackendRegistry) HasBackend(_ string) bool { return true }
 
 // TestServeHTTP_ClientAbortPropagatesToBackendCtx verifies that aborting an
 // in-flight HTTP request cancels the backend gRPC handler's context.
@@ -108,7 +85,7 @@ func TestServeHTTP_ClientAbortPropagatesToBackendCtx(t *testing.T) {
 	conn, err := grpc.NewClient(listener.Addr().String(), grpc.WithTransportCredentials(insecure.NewCredentials()))
 	require.NoError(t, err)
 
-	handler := httpproxy.NewHTTPHandler(singleBackendRegistry{backend: passthroughBackend{conn: conn}})
+	handler := httpproxy.NewHTTPHandler(passthroughBackend{conn: conn}, everyServiceRegistry{})
 	server := httptest.NewServer(handler)
 	// The conn.Close call must run before server.Close: server.Close drains the
 	// in-flight HTTP request, which stays outstanding until closing conn
@@ -179,7 +156,7 @@ func TestServeHTTP_ClientAbortPropagatesToBackendCtx_Streaming(t *testing.T) {
 	conn, err := grpc.NewClient(listener.Addr().String(), grpc.WithTransportCredentials(insecure.NewCredentials()))
 	require.NoError(t, err)
 
-	handler := httpproxy.NewHTTPHandler(singleBackendRegistry{backend: passthroughBackend{conn: conn}})
+	handler := httpproxy.NewHTTPHandler(passthroughBackend{conn: conn}, everyServiceRegistry{})
 	server := httptest.NewServer(handler)
 	t.Cleanup(server.Close)
 	t.Cleanup(func() { _ = conn.Close() })
