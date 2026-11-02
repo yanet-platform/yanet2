@@ -27,22 +27,25 @@ import (
 // token, under the same key gRPC callers send it as metadata.
 const authenticationHeader = "x-yanet-authentication"
 
-// BackendRegistry is the subset of backend lookup API required by the HTTP proxy.
+// Backend returns the gRPC connection a call goes over and the context the
+// call runs under, derived from the given one.
+type Backend interface {
+	GetConnection(ctx context.Context, fullMethodName string) (context.Context, *grpc.ClientConn, error)
+}
+
+// BackendRegistry tells the HTTP proxy which services are registered.
 //
-// GetBackend leases the returned backend: the caller must call the release
-// function exactly once when it is done using the backend, or the
-// connection may be kept open past the point it should have closed.
-// HasBackend performs the same lookup without leasing, so a handler can
-// reject an unregistered service before it pays for reading the request
-// body.
+// A handler asks it before it reads the request body, so a call to an
+// unregistered service costs no read, and asks again once the body is read.
 type BackendRegistry interface {
-	GetBackend(service string) (proxy.Backend, func(), bool)
 	HasBackend(service string) bool
 }
 
 // TransparentWebGRPCProxy is an HTTP handler that translates HTTP requests
 // with binary protobuf payloads to gRPC calls.
 type TransparentWebGRPCProxy struct {
+	// backend carries every call of a registered service.
+	backend  Backend
 	registry BackendRegistry
 	// trustedOrigins are the origins that get CORS headers.
 	trustedOrigins map[string]struct{}
@@ -81,8 +84,9 @@ func WithLog(log *zap.Logger) Option {
 	}
 }
 
-// NewHTTPHandler creates a new HTTPHandler.
-func NewHTTPHandler(registry BackendRegistry, options ...Option) *TransparentWebGRPCProxy {
+// NewHTTPHandler creates a new HTTPHandler that sends every call of a
+// service the registry knows to the backend.
+func NewHTTPHandler(backend Backend, registry BackendRegistry, options ...Option) *TransparentWebGRPCProxy {
 	opts := newHandlerOptions()
 	for _, o := range options {
 		o(opts)
@@ -94,6 +98,7 @@ func NewHTTPHandler(registry BackendRegistry, options ...Option) *TransparentWeb
 	}
 
 	return &TransparentWebGRPCProxy{
+		backend:        backend,
 		registry:       registry,
 		trustedOrigins: trustedOrigins,
 		log:            opts.Log,
@@ -191,12 +196,11 @@ func (m *TransparentWebGRPCProxy) handleUnary(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	backend, release, ok := m.registry.GetBackend(service)
-	if !ok {
+	// The service may have left the registry while its request was read.
+	if !m.registry.HasBackend(service) {
 		m.writeRegistryMissError(w, service)
 		return
 	}
-	defer release()
 
 	requestMsg, err := m.jsonToProtobuf(fullMethodName, body, true)
 	if err != nil {
@@ -215,7 +219,7 @@ func (m *TransparentWebGRPCProxy) handleUnary(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	outCtx, conn, err := backend.GetConnection(ctx, fullMethodName)
+	outCtx, conn, err := m.backend.GetConnection(ctx, fullMethodName)
 	if err != nil {
 		m.writeBackendUnreachableError(w, service, method, err)
 		return
@@ -407,12 +411,11 @@ func (m *TransparentWebGRPCProxy) handleServerStreaming(w http.ResponseWriter, r
 		return
 	}
 
-	backend, release, ok := m.registry.GetBackend(service)
-	if !ok {
+	// The service may have left the registry while its request was read.
+	if !m.registry.HasBackend(service) {
 		m.writeRegistryMissError(w, service)
 		return
 	}
-	defer release()
 
 	requestMsg, err := m.jsonToProtobuf(fullMethodName, body, true)
 	if err != nil {
@@ -431,7 +434,7 @@ func (m *TransparentWebGRPCProxy) handleServerStreaming(w http.ResponseWriter, r
 		return
 	}
 
-	outCtx, conn, err := backend.GetConnection(ctx, fullMethodName)
+	outCtx, conn, err := m.backend.GetConnection(ctx, fullMethodName)
 	if err != nil {
 		m.writeBackendUnreachableError(w, service, method, err)
 		return

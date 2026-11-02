@@ -943,11 +943,18 @@ const httpIdleTimeout = 2 * time.Minute
 //
 // A listener that fails to bind or to serve ends the run with its error.
 func (m *Gateway) runHTTPServer(ctx context.Context) error {
+	// Every call goes into the loopback server, whose interceptors check it
+	// before it reaches its service.
+	//
+	// A service the registry does not know is answered without reading the
+	// request; one that leaves the registry after the handler last checked it
+	// is answered as an unknown service of the gateway.
 	server := &http.Server{
 		Handler: m.crossOrigin.Handler(
 			httpproxy.GzipMiddleware(
 				httpproxy.NewHTTPHandler(
-					&loopbackRegistry{registry: m.registry, loopback: m.loopback},
+					m.loopback,
+					m.registry,
 					httpproxy.WithTrustedOrigins(m.http.TrustedOrigins),
 					httpproxy.WithLog(m.log),
 				),
