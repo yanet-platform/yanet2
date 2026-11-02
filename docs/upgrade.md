@@ -3,6 +3,16 @@
 Manual steps required when upgrading an existing deployment. The packaging
 does not perform these automatically.
 
+## Gateway backends no longer receive the caller's token
+
+The gateway now drops the `x-yanet-authentication` metadata from every call
+it proxies to a module, device or operator backend; the rest of the
+caller's metadata still reaches the backend. The gateway authenticates a
+call before proxying it, and a process registered under a service's name
+would otherwise collect the token of every caller. A backend of your own
+that reads the token has to stop relying on it; none in this repository
+does.
+
 ## Gateway HTTP authenticates calls to every service
 
 With authentication in audit or enabled mode, HTTP calls to module, device

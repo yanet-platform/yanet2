@@ -16,6 +16,7 @@ import (
 	"google.golang.org/grpc/test/bufconn"
 
 	"github.com/yanet-platform/yanet2/common/go/xgrpc"
+	"github.com/yanet-platform/yanet2/controlplane/internal/auth"
 )
 
 // memoryListenerBufferSize is the per-connection buffer of an in-memory
@@ -119,17 +120,23 @@ func (m *backend) Endpoint() string {
 }
 
 // GetConnection returns the underlying gRPC connection, forwarding incoming
-// metadata as outgoing metadata.
+// metadata as outgoing metadata, all but the authentication token.
 //
-// A caller without incoming metadata, such as the HTTP surface, keeps the
-// outgoing metadata it attached itself.
+// The gateway has authenticated the call by then, and a backend registered
+// under the service's name would otherwise collect the token of every
+// caller. A caller without incoming metadata, such as the HTTP surface,
+// keeps the outgoing metadata it attached itself, token included, since its
+// call is still to be authenticated by the gateway.
 func (m *backend) GetConnection(ctx context.Context, _ string) (context.Context, *grpc.ClientConn, error) {
 	md, ok := metadata.FromIncomingContext(ctx)
 	if !ok {
 		return ctx, m.conn, nil
 	}
 
-	return metadata.NewOutgoingContext(ctx, md.Copy()), m.conn, nil
+	outgoing := md.Copy()
+	delete(outgoing, auth.TokenMetadataKey)
+
+	return metadata.NewOutgoingContext(ctx, outgoing), m.conn, nil
 }
 
 // AppendInfo passes the response bytes through unchanged.

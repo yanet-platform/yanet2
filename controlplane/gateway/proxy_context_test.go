@@ -11,6 +11,7 @@ import (
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/metadata"
 	"google.golang.org/protobuf/types/known/emptypb"
 
 	"github.com/yanet-platform/yanet2/controlplane/gateway"
@@ -25,12 +26,13 @@ const cancelProbeServiceName = "yanet.test.CancelProbe"
 // fake module backend's Probe handler.
 const cancelProbeFullMethod = "/" + cancelProbeServiceName + "/Probe"
 
-// ctxObservation is what a cancelProbeServer handler saw once the request
-// context it was given terminated.
+// ctxObservation is what a cancelProbeServer handler saw: the metadata it
+// was called with and the state its request context terminated in.
 type ctxObservation struct {
 	err         error
 	deadline    time.Time
 	hasDeadline bool
+	incoming    metadata.MD
 }
 
 // cancelProbeServer is the interface the registered handler is dispatched
@@ -40,7 +42,8 @@ type cancelProbeServer interface {
 }
 
 // probeServer blocks its Probe handler on the request context, signaling
-// entry and then publishing the context's terminal state.
+// entry and then publishing the incoming metadata and the context's
+// terminal state.
 type probeServer struct {
 	entered chan struct{}
 	results chan ctxObservation
@@ -48,9 +51,10 @@ type probeServer struct {
 
 func (m *probeServer) Probe(ctx context.Context, _ *emptypb.Empty) (*emptypb.Empty, error) {
 	deadline, hasDeadline := ctx.Deadline()
+	incoming, _ := metadata.FromIncomingContext(ctx)
 	m.entered <- struct{}{}
 	<-ctx.Done()
-	m.results <- ctxObservation{err: ctx.Err(), deadline: deadline, hasDeadline: hasDeadline}
+	m.results <- ctxObservation{err: ctx.Err(), deadline: deadline, hasDeadline: hasDeadline, incoming: incoming}
 	return nil, ctx.Err()
 }
 
@@ -260,5 +264,49 @@ func TestGateway_ProxiedRPC_ClientDeadlinePropagatesToBackendCtx(t *testing.T) {
 		require.WithinDuration(t, clientDeadline, observation.deadline, 50*time.Millisecond)
 	case <-time.After(5 * time.Second):
 		t.Fatal("backend handler did not observe the deadline expiring")
+	}
+}
+
+// Test_Gateway_ProxiedRPC_WithholdsTokenFromBackend verifies that a call
+// proxied to a module backend carries the caller's metadata but not its
+// authentication token.
+//
+// The gateway has authenticated the call by then, and any process allowed
+// to register under the service's name would otherwise collect the token of
+// every caller.
+func Test_Gateway_ProxiedRPC_WithholdsTokenFromBackend(t *testing.T) {
+	t.Parallel()
+
+	gatewayAddr, entered, results := startCancelProbeGateway(t)
+
+	conn, err := grpc.NewClient(gatewayAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = conn.Close() })
+
+	outgoing := metadata.AppendToOutgoingContext(
+		t.Context(),
+		"x-yanet-authentication", "secret-token",
+		"x-yanet-test", "forwarded",
+	)
+	ctx, cancel := context.WithCancel(outgoing)
+	defer cancel()
+
+	go func() {
+		_ = conn.Invoke(ctx, cancelProbeFullMethod, &emptypb.Empty{}, &emptypb.Empty{})
+	}()
+
+	select {
+	case <-entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("backend handler was never entered")
+	}
+	cancel()
+
+	select {
+	case observation := <-results:
+		require.Equal(t, []string{"forwarded"}, observation.incoming.Get("x-yanet-test"))
+		require.Empty(t, observation.incoming.Get("x-yanet-authentication"))
+	case <-time.After(5 * time.Second):
+		t.Fatal("backend handler did not return")
 	}
 }
