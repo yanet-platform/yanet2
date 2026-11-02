@@ -433,3 +433,108 @@ func Test_QEMUManager_StopAfterStartupError_RestoresForceStop(t *testing.T) {
 		require.Equal(t, forceStop, manager.forceStop)
 	}
 }
+
+// Test_OverlayDriveArgs_SkipsHostFlushes verifies that the scratch overlay
+// is attached with host flushes off, so saving a snapshot never waits on
+// the host disk.
+func Test_OverlayDriveArgs_SkipsHostFlushes(t *testing.T) {
+	require.Equal(
+		t,
+		[]string{"-drive", "file=/tmp/yvm-main/overlay.qcow2,if=virtio,format=qcow2,cache=unsafe"},
+		overlayDriveArgs("/tmp/yvm-main/overlay.qcow2"),
+	)
+}
+
+// scriptedMonitor is an in-memory monitor connection that echoes each command
+// followed by a prompt, as a command with empty output does, and records the
+// deadline in force when each command was written.
+type scriptedMonitor struct {
+	deadline       time.Time
+	commands       []string
+	writeDeadlines []time.Time
+	reply          []byte
+}
+
+// Read returns the pending reply, or a timeout once nothing is pending.
+func (m *scriptedMonitor) Read(buffer []byte) (int, error) {
+	if len(m.reply) == 0 {
+		return 0, os.ErrDeadlineExceeded
+	}
+	count := copy(buffer, m.reply)
+	m.reply = m.reply[count:]
+	return count, nil
+}
+
+// Write records the command and queues its echo and the next prompt.
+func (m *scriptedMonitor) Write(data []byte) (int, error) {
+	command := strings.TrimSuffix(string(data), "\n")
+	m.commands = append(m.commands, command)
+	m.writeDeadlines = append(m.writeDeadlines, m.deadline)
+	m.reply = []byte(command + "\r\n(qemu) ")
+	return len(data), nil
+}
+
+// Close accepts closing the in-memory monitor.
+func (m *scriptedMonitor) Close() error {
+	return nil
+}
+
+// LocalAddr returns the in-memory monitor endpoint.
+func (m *scriptedMonitor) LocalAddr() net.Addr {
+	return testAddress("local")
+}
+
+// RemoteAddr returns the in-memory QEMU endpoint.
+func (m *scriptedMonitor) RemoteAddr() net.Addr {
+	return testAddress("qemu")
+}
+
+// SetDeadline records the deadline for the next command.
+func (m *scriptedMonitor) SetDeadline(deadline time.Time) error {
+	m.deadline = deadline
+	return nil
+}
+
+// SetReadDeadline accepts read deadlines for the in-memory monitor.
+func (m *scriptedMonitor) SetReadDeadline(time.Time) error {
+	return nil
+}
+
+// SetWriteDeadline accepts write deadlines for the in-memory monitor.
+func (m *scriptedMonitor) SetWriteDeadline(time.Time) error {
+	return nil
+}
+
+// Test_QEMUManager_SendMonitorCommand_SnapshotTimeout verifies that saving or
+// loading a snapshot is sent under the long snapshot deadline, while every
+// other command keeps the default one.
+func Test_QEMUManager_SendMonitorCommand_SnapshotTimeout(t *testing.T) {
+	cases := []struct {
+		name    string
+		command string
+		timeout time.Duration
+	}{
+		{name: "snapshot save", command: "savevm preyanet", timeout: snapshotMonitorTimeout},
+		{name: "snapshot load", command: "loadvm baseline", timeout: snapshotMonitorTimeout},
+		{name: "resume", command: "cont", timeout: defaultMonitorTimeout},
+		{name: "pause", command: "stop", timeout: defaultMonitorTimeout},
+		{name: "network query", command: "info usernet", timeout: defaultMonitorTimeout},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			monitor := &scriptedMonitor{}
+			manager := &QEMUManager{monitorConn: monitor, log: zap.NewNop().Sugar()}
+
+			sent := time.Now()
+			response, err := manager.SendMonitorCommand(tc.command)
+			answered := time.Now()
+
+			require.NoError(t, err)
+			require.Empty(t, response)
+			require.Equal(t, []string{tc.command}, monitor.commands)
+			deadline := monitor.writeDeadlines[0]
+			require.False(t, deadline.Before(sent.Add(tc.timeout)), "deadline %v is shorter than %v", deadline.Sub(sent), tc.timeout)
+			require.False(t, deadline.After(answered.Add(tc.timeout)), "deadline %v is longer than %v", deadline.Sub(answered), tc.timeout)
+		})
+	}
+}
