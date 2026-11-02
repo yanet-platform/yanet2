@@ -2,7 +2,6 @@ package gateway
 
 import (
 	"context"
-	"crypto/tls"
 	"crypto/x509"
 	"errors"
 	"fmt"
@@ -183,24 +182,32 @@ type serviceRunner interface {
 // Think of it as gRPC middleware if it were a single process.
 type Gateway struct {
 	cfg Config
-	// server is the plaintext gRPC server, which also serves the in-memory
-	// loopback.
+	// server is the plaintext gRPC server.
 	server *grpc.Server
 	// secureServer is the TLS gRPC server, nil without a gRPC TLS listener.
-	secureServer  *grpc.Server
-	grpcListeners []grpcListener
-	http          ListenerConfig
+	secureServer *grpc.Server
+	// loopbackServer serves the gateway's own services to the HTTP surface
+	// over in-memory connections.
+	loopbackServer *grpc.Server
+	grpcListeners  []grpcListener
+	http           ListenerConfig
 	// crossOrigin rejects cross-origin browser requests to the HTTP server
 	// from every origin but the trusted ones.
 	crossOrigin *http.CrossOriginProtection
 	// httpsCertificates is the store the HTTPS listener serves from, nil
 	// without one.
 	httpsCertificates *commonxgrpc.CertificateStore
-	memoryListener    *bufconn.Listener
-	runners           []serviceRunner
-	registry          *BackendRegistry
-	readinessTracker  *readiness.Tracker
-	log               *zap.Logger
+	// clientCAs returns the authorities client certificates are verified
+	// against, nil without an x509 authenticator.
+	clientCAs func() *x509.CertPool
+	// browsers tracks the way of every browser TLS connection into the
+	// loopback server, nil unless HTTPS asks for client certificates.
+	browsers         *browserConnections
+	memoryListener   *bufconn.Listener
+	runners          []serviceRunner
+	registry         *BackendRegistry
+	readinessTracker *readiness.Tracker
+	log              *zap.Logger
 }
 
 // grpcListener is a network listener of one of the gateway's gRPC servers.
@@ -310,15 +317,15 @@ func NewGateway(cfg Config, options ...GatewayOption) (*Gateway, error) {
 	}
 
 	// A client certificate is only ever verified in a TLS handshake, so an
-	// authenticator that reads one is dead without a gRPC TLS listener.
-	if authManager.ClientCAs() != nil && plan.GRPC.TLS == nil {
-		return nil, errors.New("x509 authenticator requires server.tls or server.grpc.tls")
+	// authenticator that reads one is dead without a TLS listener.
+	if authManager.ClientCAs() != nil && plan.GRPC.TLS == nil && plan.HTTP.TLS == nil {
+		return nil, errors.New("x509 authenticator requires server.tls, server.grpc.tls or server.http.tls")
 	}
 
 	// A connection keeps the client certificate of its handshake, so
 	// without a bounded age a renewed one reaches the gateway only when its
 	// client reconnects.
-	if authManager.ClientCAs() != nil && plan.GRPC.TLS.MaxConnectionAge == 0 {
+	if authManager.ClientCAs() != nil && plan.GRPC.TLS != nil && plan.GRPC.TLS.MaxConnectionAge == 0 {
 		log.Warn("gRPC TLS connection age is unbounded, clients keep their certificate until they reconnect",
 			zap.String("key", "server.grpc.tls.max_connection_age"),
 		)
@@ -496,8 +503,8 @@ func NewGateway(cfg Config, options ...GatewayOption) (*Gateway, error) {
 		}
 	}
 
-	// Both gRPC servers share the options, the interceptor instances and
-	// the services, and differ only in transport credentials.
+	// Every gRPC server shares the options, the interceptor instances and
+	// the services, and adds only transport options of its own.
 	newServer := func(options ...grpc.ServerOption) *grpc.Server {
 		server := grpc.NewServer(slices.Concat(serverOpts, options)...)
 		ynpb.RegisterGatewayServer(server, gatewayService)
@@ -512,9 +519,13 @@ func NewGateway(cfg Config, options ...GatewayOption) (*Gateway, error) {
 		return server
 	}
 
-	// The plaintext server runs even without a plaintext gRPC listener: it
-	// serves the in-memory loopback.
+	// The plaintext server exists even without a plaintext gRPC listener,
+	// since the service filter and the metrics retention read the services
+	// registered on it.
 	server = newServer()
+	// The loopback server learns from each in-memory connection the TLS
+	// state of the browser connection it serves, if any.
+	loopbackServer := newServer(grpc.Creds(newLoopbackCredentials()))
 
 	var grpcListeners []grpcListener
 	if plaintext {
@@ -526,14 +537,15 @@ func NewGateway(cfg Config, options ...GatewayOption) (*Gateway, error) {
 		})
 	}
 
-	// Client certificates are asked for on the TLS server alone.
+	// Client certificates are asked for on the TLS listeners alone, and only
+	// with an x509 authenticator to verify them.
+	var clientCAs func() *x509.CertPool
+	if authManager.ClientCAs() != nil {
+		clientCAs = authManager.ClientCAs
+	}
+
 	var secureServer *grpc.Server
 	if plan.GRPC.TLS != nil {
-		var clientCAs func() *x509.CertPool
-		if authManager.ClientCAs() != nil {
-			clientCAs = authManager.ClientCAs
-		}
-
 		secureOptions := []grpc.ServerOption{grpc.Creds(serverCredentials(grpcsCertificates, clientCAs))}
 		// A bounded age makes every client reconnect and present its current
 		// certificate. The grace stays unlimited, so calls in flight run to
@@ -560,19 +572,26 @@ func NewGateway(cfg Config, options ...GatewayOption) (*Gateway, error) {
 		endpoint = grpcListeners[0].Listener.Addr().String()
 	}
 
-	// Gateway-hosted services are reached through one in-memory connection
-	// back into the plaintext server, a backend for the HTTP surface and the
-	// registry.
+	// Gateway-hosted services are reached through in-memory connections into
+	// the loopback server, a backend for the HTTP surface and the registry.
 	//
-	// No network hop is involved, and the interceptor chain still runs on every
-	// request that comes through it. External backends (from the Register RPC)
-	// each get their own network connection via RegisterBackend in the
-	// registration loop. A connection that never leaves the process runs no
-	// TLS.
+	// No network hop is involved, and the interceptor chain still runs on
+	// every request that comes through them. An in-memory connection runs no
+	// TLS: the one opened for a browser TLS connection carries that
+	// connection's TLS state instead. External backends each get a network
+	// connection of their own when they register.
 	memoryListener := newMemoryListener()
-	loopback, err := dialMemoryBackend(endpoint, memoryListener, insecure.NewCredentials())
+	defaultLoopback, err := dialMemoryBackend(endpoint, memoryListener, insecure.NewCredentials())
 	if err != nil {
 		return nil, fmt.Errorf("failed to create loopback backend for gateway-hosted services: %w", err)
+	}
+	loopback := &loopbackBackend{backend: defaultLoopback}
+
+	// Only a browser that may present a client certificate needs a way of its
+	// own into the loopback server.
+	var browsers *browserConnections
+	if clientCAs != nil && plan.HTTP.TLS != nil {
+		browsers = newBrowserConnections(loopbackServer, endpoint)
 	}
 
 	for _, service := range []string{
@@ -618,10 +637,13 @@ func NewGateway(cfg Config, options ...GatewayOption) (*Gateway, error) {
 		cfg:               cfg,
 		server:            server,
 		secureServer:      secureServer,
+		loopbackServer:    loopbackServer,
 		grpcListeners:     grpcListeners,
 		http:              plan.HTTP,
 		crossOrigin:       crossOrigin,
 		httpsCertificates: httpsCertificates,
+		clientCAs:         clientCAs,
+		browsers:          browsers,
 		memoryListener:    memoryListener,
 		runners:           runners,
 		registry:          registry,
@@ -694,7 +716,7 @@ func (m *Gateway) Run(ctx context.Context) error {
 		})
 	}
 	wg.Go(func() error {
-		return serve(m.server, m.memoryListener)
+		return serve(m.loopbackServer, m.memoryListener)
 	})
 	if m.http.Serves() {
 		wg.Go(func() error {
@@ -760,7 +782,7 @@ func (m *Gateway) Run(ctx context.Context) error {
 	// The servers stop in parallel, so a shutdown waits out one grace period
 	// rather than one per server.
 	var stops errgroup.Group
-	for _, server := range []*grpc.Server{m.server, m.secureServer} {
+	for _, server := range []*grpc.Server{m.server, m.secureServer, m.loopbackServer} {
 		if server == nil {
 			continue
 		}
@@ -859,6 +881,12 @@ func (m *Gateway) runHTTPServer(ctx context.Context) error {
 			),
 		),
 	}
+	// A browser TLS connection reaches the loopback server over a way of its
+	// own for as long as it stays open.
+	if m.browsers != nil {
+		server.ConnContext = m.browsers.Track
+		server.ConnState = m.browsers.Forget
+	}
 
 	type httpListener struct {
 		Scheme   string
@@ -879,15 +907,12 @@ func (m *Gateway) runHTTPServer(ctx context.Context) error {
 		if err != nil {
 			return fmt.Errorf("failed to serve: %w", err)
 		}
-		// The TLS config leaves client authentication at its default of
-		// none, so HTTPS never asks for a client certificate. It names h2, so
-		// HTTP/2 is set up whether this listener or the plaintext one starts
-		// serving first.
-		server.TLSConfig = &tls.Config{
-			GetCertificate: m.httpsCertificates.GetCertificate,
-			MinVersion:     tls.VersionTLS12,
-			NextProtos:     []string{"h2", "http/1.1"},
-		}
+		// HTTPS asks for a client certificate just as the gRPC TLS listener
+		// does. The config names h2, so HTTP/2 is set up whether this listener
+		// or the plaintext one starts serving first.
+		tlsConfig := serverTLSConfig(m.httpsCertificates, m.clientCAs)
+		tlsConfig.NextProtos = []string{"h2", "http/1.1"}
+		server.TLSConfig = tlsConfig
 		serveTLS := func(listener net.Listener) error {
 			return server.ServeTLS(listener, "", "")
 		}

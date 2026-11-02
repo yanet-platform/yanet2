@@ -108,6 +108,9 @@ func (m *TransparentWebGRPCProxy) ServeHTTP(w http.ResponseWriter, r *http.Reque
 	origin := r.Header.Get("Origin")
 	if _, ok := m.trustedOrigins[origin]; ok {
 		w.Header().Set("Access-Control-Allow-Origin", origin)
+		// A trusted page sends its calls with the browser's credentials, so
+		// its client certificate reaches a gateway on another origin.
+		w.Header().Set("Access-Control-Allow-Credentials", "true")
 		w.Header().Set("Access-Control-Allow-Methods", "POST, GET, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
 	}
@@ -153,12 +156,12 @@ func (m *TransparentWebGRPCProxy) writeRegistryMissError(w http.ResponseWriter, 
 // writeBackendUnreachableError responds to a GetConnection failure with 503,
 // not 500.
 //
-// The only proxy.Backend the gateway builds (controlplane/gateway/backend.go)
-// returns a nil error unconditionally, so this branch is unreachable in
-// production. 503 is what keeps it consistent with the outage that does
-// happen: that backend's grpc.NewClient dials lazily, so a down control
-// plane surfaces later at conn.Invoke as codes.Unavailable, which
-// grpcCodeToHTTPStatus turns into 503 on the unary path.
+// A gateway backend fails only a call that arrives after its browser
+// connection has closed, or whose way into the gateway cannot be opened.
+// 503 is what keeps it consistent with the outage that does happen: a
+// backend dials lazily, so a down control plane surfaces later at
+// conn.Invoke as codes.Unavailable, which grpcCodeToHTTPStatus turns into
+// 503 on the unary path.
 func (m *TransparentWebGRPCProxy) writeBackendUnreachableError(w http.ResponseWriter, service, method string, err error) {
 	m.log.Error("failed to get connection to backend",
 		zap.String("service", service),

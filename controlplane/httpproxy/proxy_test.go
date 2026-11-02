@@ -363,3 +363,32 @@ func Test_TransparentWebGRPCProxy_RejectsMalformedAuthenticationHeader(t *testin
 		})
 	}
 }
+
+// Test_TransparentWebGRPCProxy_AllowsCredentialsOnlyForTrustedOrigin
+// verifies that only a trusted origin may send its calls with the browser's
+// credentials.
+func Test_TransparentWebGRPCProxy_AllowsCredentialsOnlyForTrustedOrigin(t *testing.T) {
+	t.Parallel()
+
+	handler := httpproxy.NewHTTPHandler(emptyRegistry{}, httpproxy.WithTrustedOrigins([]string{"https://ui.example"}))
+	for _, tc := range []struct {
+		name        string
+		origin      string
+		credentials string
+	}{
+		{name: "trusted origin", origin: "https://ui.example", credentials: "true"},
+		{name: "untrusted origin", origin: "https://evil.example", credentials: ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			request := httptest.NewRequest(http.MethodOptions, "/api/some.Service/Method", nil)
+			request.Header.Set("Origin", tc.origin)
+			recorder := httptest.NewRecorder()
+			handler.ServeHTTP(recorder, request)
+
+			require.Equal(t, http.StatusOK, recorder.Code)
+			require.Equal(t, tc.credentials, recorder.Header().Get("Access-Control-Allow-Credentials"))
+		})
+	}
+}
