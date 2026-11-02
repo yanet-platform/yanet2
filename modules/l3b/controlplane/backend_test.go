@@ -857,10 +857,6 @@ func Test_Backend_UpdateModuleConfig_PreservesAcceptedHandles(t *testing.T) {
 // Test_Backend_UpdateModuleConfig_IdenticalReplayReplacesGeneration
 // verifies that replaying identical content republishes a fresh module
 // generation.
-//
-// The current API intentionally replaces an identical replay as the interim
-// behavior tracked by #2724. The target versioned no-op remains blocked on
-// #2718.
 func Test_Backend_UpdateModuleConfig_IdenticalReplayReplacesGeneration(t *testing.T) {
 	_, agent, harness := newTestBackendFixture(t)
 	operations := &recordingModuleOps{SharedMemoryOps: controlplane.NewSharedMemoryOps(agent)}
