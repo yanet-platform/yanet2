@@ -203,7 +203,9 @@ configuration hooks complete. For a custom package:
 3. Use `WithBootedVM` for tests that can start from the captured template.
 4. Use `Restore` when the package needs the baseline fast path and fallback.
 5. Use `PrepareLocalStorage`, `SaveSnapshot`, and `RestoreAndReconnect` only
-   when the test owns an additional snapshot lifecycle.
+   when the test owns an additional snapshot lifecycle. Calling
+   `PrepareLocalStorage` again after restoring such a snapshot refreshes the
+   guest's local copies from the current build.
 
 `SaveSnapshot` captures full VM state. 9P shares must be unmounted before a
 manual save; the framework handles this for its standard snapshot helpers.

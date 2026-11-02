@@ -5,10 +5,13 @@ import (
 	"context"
 	"encoding/binary"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -366,4 +369,237 @@ func Test_Framework_Run_Process(t *testing.T) {
 	t.Run("fresh", func(t *testing.T) {
 		owner.ForTest(t).Run("step", func(_ *TestFramework, t *testing.T) {})
 	})
+}
+
+// recordingConsole is an in-memory guest console whose shell runs every
+// command successfully, and which records each command it was given.
+type recordingConsole struct {
+	manager  *QEMUManager
+	commands []string
+}
+
+// Write records the command inside the completion markers and completes it.
+func (m *recordingConsole) Write(data []byte) (int, error) {
+	start := string(regexp.MustCompile(`CMD_START_\d+`).Find(data))
+	end := string(regexp.MustCompile(`CMD_END_\d+`).Find(data))
+	_, command, _ := strings.Cut(string(data), "echo '"+start+"'; ")
+	command, _, _ = strings.Cut(command, "; status=$?;")
+	m.commands = append(m.commands, command)
+	m.manager.serialBuffer.WriteString(start + "\n=0=" + end + "\n")
+	return len(data), nil
+}
+
+// Read reports an idle console.
+func (m *recordingConsole) Read([]byte) (int, error) {
+	return 0, io.EOF
+}
+
+// Close accepts closing the in-memory console.
+func (m *recordingConsole) Close() error {
+	return nil
+}
+
+// LocalAddr returns the in-memory console endpoint.
+func (m *recordingConsole) LocalAddr() net.Addr {
+	return testAddress("local")
+}
+
+// RemoteAddr returns the in-memory guest endpoint.
+func (m *recordingConsole) RemoteAddr() net.Addr {
+	return testAddress("guest")
+}
+
+// SetDeadline accepts deadlines for the in-memory console.
+func (m *recordingConsole) SetDeadline(time.Time) error {
+	return nil
+}
+
+// SetReadDeadline accepts read deadlines for the in-memory console.
+func (m *recordingConsole) SetReadDeadline(time.Time) error {
+	return nil
+}
+
+// SetWriteDeadline accepts write deadlines for the in-memory console.
+func (m *recordingConsole) SetWriteDeadline(time.Time) error {
+	return nil
+}
+
+// Test_TestFramework_PrepareLocalStorage_LocalModeCopiesFromShares verifies
+// that a guest already running from local copies, as one restored from a
+// snapshot, is refreshed by one command reading the 9P shares, rather than
+// by commands whose CLI sources point at the local copies themselves.
+func Test_TestFramework_PrepareLocalStorage_LocalModeCopiesFromShares(t *testing.T) {
+	manager := &QEMUManager{
+		Name:    "local-storage",
+		Command: &exec.Cmd{Process: &os.Process{Pid: os.Getpid()}},
+		log:     zap.NewNop().Sugar(),
+	}
+	console := &recordingConsole{manager: manager}
+	manager.serialConn = console
+	manager.setVMReady(true)
+	manager.Ninepmounted.Store(true)
+	framework := &TestFramework{
+		qemu:  manager,
+		cli:   &CLIManager{inner: &cliManagerInner{qemu: manager}, log: zap.NewNop().Sugar()},
+		log:   zap.NewNop().Sugar(),
+		Paths: LocalGuestPaths(),
+	}
+
+	require.NoError(t, framework.PrepareLocalStorage())
+
+	require.Equal(
+		t,
+		[]string{localStorageCommand(DefaultGuestPaths(), LocalGuestPaths(), CLIBinaryNames)},
+		console.commands,
+	)
+	require.Equal(t, LocalGuestPaths(), framework.Paths)
+}
+
+// rootedGuestPaths returns paths with every directory moved under root, so
+// a guest command can run against a host directory tree.
+func rootedGuestPaths(root string, paths GuestPaths) GuestPaths {
+	paths.CLIBase = root + paths.CLIBase
+	paths.BuildDir = root + paths.BuildDir
+	paths.PluginDir = root + paths.PluginDir
+	paths.ConfigDir = root + paths.ConfigDir
+	paths.LogDir = root + paths.LogDir
+	paths.DPDKDevbindDir = root + paths.DPDKDevbindDir
+	paths.ForwardYAML = root + paths.ForwardYAML
+	return paths
+}
+
+// localStorageFixture is a host directory tree standing in for the guest:
+// shared holds one non-executable file of every kind a build stages, and
+// local is still empty.
+type localStorageFixture struct {
+	shared   GuestPaths
+	local    GuestPaths
+	cliNames []string
+	// copies maps each staged file to the local copy it must end up as.
+	copies map[string]string
+}
+
+// newLocalStorageFixture stages the fixture's build, skipping the test where
+// the host lacks the GNU coreutils that the guest image ships.
+func newLocalStorageFixture(t *testing.T) *localStorageFixture {
+	t.Helper()
+	if err := exec.Command("stat", "--version").Run(); err != nil {
+		t.Skip("the guest's GNU coreutils are not available on this host")
+	}
+
+	root := t.TempDir()
+	fixture := &localStorageFixture{
+		shared:   rootedGuestPaths(root, DefaultGuestPaths()),
+		local:    rootedGuestPaths(root, LocalGuestPaths()),
+		cliNames: []string{"yanet-cli", "yanet-cli-route"},
+	}
+	shared, local := fixture.shared, fixture.local
+	fixture.copies = map[string]string{
+		shared.BuildDir + "/dataplane/yanet-dataplane":                     local.BuildDir + "/dataplane/yanet-dataplane",
+		shared.BuildDir + "/controlplane/yanet-controlplane":               local.BuildDir + "/controlplane/yanet-controlplane",
+		shared.BuildDir + "/dataplane/libasan.so.8":                        local.BuildDir + "/dataplane/libasan.so.8",
+		shared.DPDKDevbindDir + "/dpdk-devbind.py":                         local.DPDKDevbindDir + "/dpdk-devbind.py",
+		shared.BuildDir + "/modules/route/dataplane/libroute_dp_plugin.so": local.PluginDir + "/libroute_dp.so",
+		shared.CLIBase + "/yanet-cli":                                      local.CLIBase + "/yanet-cli",
+		shared.CLIBase + "/yanet-cli-route":                                local.CLIBase + "/yanet-cli-route",
+	}
+	for source := range fixture.copies {
+		require.NoError(t, os.MkdirAll(filepath.Dir(source), 0o755))
+		require.NoError(t, os.WriteFile(source, []byte("build 1 of "+filepath.Base(source)), 0o644))
+	}
+	return fixture
+}
+
+// mirror runs the local storage command against the fixture's tree.
+func (m *localStorageFixture) mirror() error {
+	output, err := exec.Command("bash", "-c", localStorageCommand(m.shared, m.local, m.cliNames)).CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("%w: %s", err, output)
+	}
+	return nil
+}
+
+// Test_LocalStorageCommand_CopiesBuild verifies that every staged file lands
+// at its local path with its content, renamed where the guest expects
+// another name.
+func Test_LocalStorageCommand_CopiesBuild(t *testing.T) {
+	fixture := newLocalStorageFixture(t)
+
+	require.NoError(t, fixture.mirror())
+
+	for source, copied := range fixture.copies {
+		want, err := os.ReadFile(source)
+		require.NoError(t, err)
+		got, err := os.ReadFile(copied)
+		require.NoError(t, err, "missing copy of %s", source)
+		require.Equal(t, want, got, "copy of %s", source)
+	}
+}
+
+// Test_LocalStorageCommand_MakesBinariesExecutable verifies that the CLIs
+// and the dataplane and controlplane binaries are executable even when the
+// build staged them without the executable bit.
+func Test_LocalStorageCommand_MakesBinariesExecutable(t *testing.T) {
+	fixture := newLocalStorageFixture(t)
+
+	require.NoError(t, fixture.mirror())
+
+	for _, copied := range []string{
+		fixture.local.BuildDir + "/dataplane/yanet-dataplane",
+		fixture.local.BuildDir + "/controlplane/yanet-controlplane",
+		fixture.local.CLIBase + "/yanet-cli-route",
+	} {
+		info, err := os.Stat(copied)
+		require.NoError(t, err)
+		require.NotZero(t, info.Mode()&0o111, "%s is not executable", copied)
+	}
+}
+
+// Test_LocalStorageCommand_KeepsCurrentCopy verifies that a second mirror
+// of an unchanged build copies nothing, which keeps refreshing a restored
+// guest to one metadata pass.
+func Test_LocalStorageCommand_KeepsCurrentCopy(t *testing.T) {
+	fixture := newLocalStorageFixture(t)
+	require.NoError(t, fixture.mirror())
+	copied := fixture.local.CLIBase + "/yanet-cli-route"
+	mirrored, err := os.Stat(copied)
+	require.NoError(t, err)
+	// Other bytes of the same size and time: only a repeated copy undoes them.
+	marker := bytes.Repeat([]byte{'x'}, int(mirrored.Size()))
+	require.NoError(t, os.WriteFile(copied, marker, 0o755))
+	require.NoError(t, os.Chtimes(copied, mirrored.ModTime(), mirrored.ModTime()))
+
+	require.NoError(t, fixture.mirror())
+
+	got, err := os.ReadFile(copied)
+	require.NoError(t, err)
+	require.Equal(t, marker, got)
+}
+
+// Test_LocalStorageCommand_ReplacesCopyOfAnotherBuild verifies that a copy
+// left by another build, as a reused snapshot holds, is replaced by the
+// current build.
+func Test_LocalStorageCommand_ReplacesCopyOfAnotherBuild(t *testing.T) {
+	fixture := newLocalStorageFixture(t)
+	require.NoError(t, fixture.mirror())
+	source := fixture.shared.BuildDir + "/dataplane/yanet-dataplane"
+	rebuilt := []byte("build 2 of yanet-dataplane")
+	require.NoError(t, os.WriteFile(source, rebuilt, 0o644))
+	later := time.Now().Add(time.Hour)
+	require.NoError(t, os.Chtimes(source, later, later))
+
+	require.NoError(t, fixture.mirror())
+
+	got, err := os.ReadFile(fixture.local.BuildDir + "/dataplane/yanet-dataplane")
+	require.NoError(t, err)
+	require.Equal(t, rebuilt, got)
+}
+
+// Test_LocalStorageCommand_FailsOnMissingSource verifies that a file the
+// build did not stage fails the command instead of leaving a stale copy.
+func Test_LocalStorageCommand_FailsOnMissingSource(t *testing.T) {
+	fixture := newLocalStorageFixture(t)
+	fixture.cliNames = append(fixture.cliNames, "yanet-cli-unbuilt")
+
+	require.Error(t, fixture.mirror())
 }
