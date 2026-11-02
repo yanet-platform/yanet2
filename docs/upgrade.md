@@ -3,11 +3,28 @@
 Manual steps required when upgrading an existing deployment. The packaging
 does not perform these automatically.
 
+## Gateway HTTP authenticates calls to every service
+
+With authentication in audit or enabled mode, HTTP calls to module, device
+and operator services now pass the gateway's authentication and
+authorization, as their gRPC calls always did; before, the HTTP server
+called them without either. In enabled mode a caller the permissions do
+not cover is refused with 403, so a web UI or a script that relied on the
+open HTTP surface stops working until its callers are covered.
+
+A browser covers itself with a client certificate over HTTPS, see below. A
+browser on a plaintext HTTP listener carries no certificate and calls as
+the user `anonymous`, which gets only the permissions the permissions file
+grants it; those permissions apply to anonymous gRPC callers as well. The
+gateway warns at startup when a plaintext HTTP listener runs under an
+active policy. A script authenticates with the `X-Yanet-Authentication`
+header, the HTTP counterpart of the gRPC metadata of the same name.
+
 ## Gateway HTTPS asks browsers for a client certificate
 
 With an x509 authenticator configured, the gateway's HTTPS listener now
 asks every client for a certificate, as its gRPC TLS listener does, and
-the gateway's own services authenticate a browser call by it. A browser
+the gateway authenticates a browser call by it. A browser
 holding a certificate from a trusted authority shows its certificate
 picker on the first visit; a client without one is still served as an
 anonymous caller. Without an x509 authenticator the listener asks for no
@@ -27,9 +44,6 @@ its trusted origins with `Access-Control-Allow-Credentials: true`. Upgrade
 every gateway that a standalone UI or the UI's Gateway drawer reaches
 before the UI itself, or the browser rejects the older gateway's
 responses.
-
-Calls to module, device and operator services over HTTP still skip
-authentication, and the gateway warns about it at startup.
 
 ## Gateway HTTP rejects cross-origin browser calls from untrusted origins
 

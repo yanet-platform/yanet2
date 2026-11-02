@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"sync"
 
+	"github.com/siderolabs/grpc-proxy/proxy"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
@@ -235,4 +236,32 @@ func (m *loopbackBackend) GetConnection(ctx context.Context, fullMethodName stri
 	}
 
 	return peer.GetConnection(ctx, fullMethodName)
+}
+
+// loopbackRegistry routes every call of the HTTP surface into the loopback
+// server, whose interceptors check it before it reaches its service.
+//
+// A service the registry does not know stays a miss, so the HTTP surface
+// answers it without reading the request; one that leaves the registry
+// after this check is answered as an unknown service of the gateway.
+type loopbackRegistry struct {
+	registry *BackendRegistry
+	loopback *loopbackBackend
+}
+
+// GetBackend returns the loopback for a registered service.
+//
+// The gateway holds the loopback for its whole run, so the release does
+// nothing.
+func (m *loopbackRegistry) GetBackend(service string) (proxy.Backend, func(), bool) {
+	if !m.registry.HasBackend(service) {
+		return nil, func() {}, false
+	}
+
+	return m.loopback, func() {}, true
+}
+
+// HasBackend reports whether the service is registered.
+func (m *loopbackRegistry) HasBackend(service string) bool {
+	return m.registry.HasBackend(service)
 }

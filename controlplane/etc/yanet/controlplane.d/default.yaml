@@ -108,9 +108,9 @@ gateway:
     #   # it directly. Requires a TLS listener (server.grpc.tls,
     #   # server.http.tls, or the deprecated server.tls), the only listeners
     #   # that check certificates; plaintext callers stay anonymous. Over
-    #   # HTTPS the certificate authenticates calls to the gateway's own
-    #   # services. Revocation lists are optional and must be signed by one of
-    #   # the authorities.
+    #   # HTTPS the certificate authenticates the calls of a browser.
+    #   # Revocation lists are optional and must be signed by one of the
+    #   # authorities.
     #   - type: x509
     #     config:
     #       ca_sources:
