@@ -4,6 +4,7 @@ import (
 	"compress/gzip"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -23,10 +24,6 @@ import (
 	ynpb "github.com/yanet-platform/yanet2/controlplane/ynpb/v1"
 )
 
-// authenticationHeader names the request header that carries the caller's
-// token, under the same key gRPC callers send it as metadata.
-const authenticationHeader = "x-yanet-authentication"
-
 // Backend returns the gRPC connection a call goes over and the context the
 // call runs under, derived from the given one.
 type Backend interface {
@@ -41,9 +38,25 @@ type BackendRegistry interface {
 	HasBackend(service string) bool
 }
 
+// Admission is what an HTTP call is let in with before its body is read.
+type Admission struct {
+	// Metadata is what the call carries to its backend, in place of any
+	// request header.
+	Metadata metadata.MD
+	// MaxBodySize bounds the body of the call.
+	MaxBodySize int64
+	// Release ends the admission once the call is done, however it ended.
+	Release func()
+}
+
+// Admitter lets an HTTP call in before its body is read, or refuses it with
+// a status error.
+type Admitter func(r *http.Request, fullMethodName string) (Admission, error)
+
 // TransparentWebGRPCProxy is an HTTP handler that translates HTTP requests
 // with binary protobuf payloads to gRPC calls.
 type TransparentWebGRPCProxy struct {
+	admitter Admitter
 	// backend carries every call of a registered service.
 	backend  Backend
 	registry BackendRegistry
@@ -85,8 +98,8 @@ func WithLog(log *zap.Logger) Option {
 }
 
 // NewHTTPHandler creates a new HTTPHandler that sends every call of a
-// service the registry knows to the backend.
-func NewHTTPHandler(backend Backend, registry BackendRegistry, options ...Option) *TransparentWebGRPCProxy {
+// service the registry knows and the admitter lets in to the backend.
+func NewHTTPHandler(backend Backend, registry BackendRegistry, admitter Admitter, options ...Option) *TransparentWebGRPCProxy {
 	opts := newHandlerOptions()
 	for _, o := range options {
 		o(opts)
@@ -98,6 +111,7 @@ func NewHTTPHandler(backend Backend, registry BackendRegistry, options ...Option
 	}
 
 	return &TransparentWebGRPCProxy{
+		admitter:       admitter,
 		backend:        backend,
 		registry:       registry,
 		trustedOrigins: trustedOrigins,
@@ -126,6 +140,7 @@ func (m *TransparentWebGRPCProxy) ServeHTTP(w http.ResponseWriter, r *http.Reque
 	}
 
 	if r.Method != http.MethodPost {
+		closeUnreadBody(w, r)
 		http.Error(w, "Method not allowed. Only POST is supported", http.StatusMethodNotAllowed)
 		return
 	}
@@ -181,16 +196,31 @@ func (m *TransparentWebGRPCProxy) writeBackendUnreachableError(w http.ResponseWr
 func (m *TransparentWebGRPCProxy) handleUnary(w http.ResponseWriter, r *http.Request, fullMethodName string) {
 	service, method, err := xgrpc.ParseFullMethod(fullMethodName)
 	if err != nil {
+		closeUnreadBody(w, r)
 		http.Error(w, fmt.Sprintf("Invalid method name: %v", err), http.StatusBadRequest)
 		return
 	}
 
 	if !m.registry.HasBackend(service) {
+		closeUnreadBody(w, r)
 		m.writeRegistryMissError(w, service)
 		return
 	}
 
-	body, err := io.ReadAll(r.Body)
+	admission, err := m.admitter(r, fullMethodName)
+	if err != nil {
+		closeUnreadBody(w, r)
+		http.Error(w, status.Convert(err).Message(), grpcCodeToHTTPStatus(status.Code(err)))
+		return
+	}
+	defer admission.Release()
+
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, admission.MaxBodySize))
+	if tooLarge, ok := errors.AsType[*http.MaxBytesError](err); ok {
+		closeUnreadBody(w, r)
+		http.Error(w, fmt.Sprintf("Request body exceeds %d bytes", tooLarge.Limit), http.StatusRequestEntityTooLarge)
+		return
+	}
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Failed to read request body: %v", err), http.StatusBadRequest)
 		return
@@ -213,12 +243,7 @@ func (m *TransparentWebGRPCProxy) handleUnary(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	ctx, ok := newOutgoingContext(r)
-	if !ok {
-		http.Error(w, "Malformed authentication header", http.StatusBadRequest)
-		return
-	}
-
+	ctx := metadata.NewOutgoingContext(r.Context(), admission.Metadata)
 	outCtx, conn, err := m.backend.GetConnection(ctx, fullMethodName)
 	if err != nil {
 		m.writeBackendUnreachableError(w, service, method, err)
@@ -284,25 +309,15 @@ func (m *TransparentWebGRPCProxy) handleUnary(w http.ResponseWriter, r *http.Req
 	}
 }
 
-// newOutgoingContext returns the request context with the caller's token as
-// outgoing gRPC metadata, or false for a token metadata cannot carry.
+// closeUnreadBody makes an HTTP/1 response to a call with a body close its
+// connection, so the server answers before reading a body the call ignores.
 //
-// No other header is forwarded: no backend reads one, and gRPC metadata
-// accepts only printable ASCII, while an HTTP header value may also hold
-// tabs and non-ASCII bytes.
-func newOutgoingContext(r *http.Request) (context.Context, bool) {
-	tokens := r.Header.Values(authenticationHeader)
-	if len(tokens) == 0 {
-		return r.Context(), true
+// Otherwise the server first reads the rest of the body. An HTTP/2 stream is
+// reset on its own once its handler returns.
+func closeUnreadBody(w http.ResponseWriter, r *http.Request) {
+	if r.ProtoMajor == 1 && r.ContentLength != 0 {
+		w.Header().Set("Connection", "close")
 	}
-
-	for _, token := range tokens {
-		if strings.ContainsFunc(token, func(char rune) bool { return char < ' ' || char > '~' }) {
-			return nil, false
-		}
-	}
-
-	return metadata.NewOutgoingContext(r.Context(), metadata.MD{authenticationHeader: tokens}), true
 }
 
 // jsonToProtobuf converts JSON to protobuf message for the given method.
@@ -396,16 +411,31 @@ func (m *TransparentWebGRPCProxy) getMessageType(fullMethodName string, isReques
 func (m *TransparentWebGRPCProxy) handleServerStreaming(w http.ResponseWriter, r *http.Request, fullMethodName string) {
 	service, method, err := xgrpc.ParseFullMethod(fullMethodName)
 	if err != nil {
+		closeUnreadBody(w, r)
 		http.Error(w, fmt.Sprintf("Invalid method name: %v", err), http.StatusBadRequest)
 		return
 	}
 
 	if !m.registry.HasBackend(service) {
+		closeUnreadBody(w, r)
 		m.writeRegistryMissError(w, service)
 		return
 	}
 
-	body, err := io.ReadAll(r.Body)
+	admission, err := m.admitter(r, fullMethodName)
+	if err != nil {
+		closeUnreadBody(w, r)
+		http.Error(w, status.Convert(err).Message(), grpcCodeToHTTPStatus(status.Code(err)))
+		return
+	}
+	defer admission.Release()
+
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, admission.MaxBodySize))
+	if tooLarge, ok := errors.AsType[*http.MaxBytesError](err); ok {
+		closeUnreadBody(w, r)
+		http.Error(w, fmt.Sprintf("Request body exceeds %d bytes", tooLarge.Limit), http.StatusRequestEntityTooLarge)
+		return
+	}
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Failed to read request body: %v", err), http.StatusBadRequest)
 		return
@@ -428,12 +458,7 @@ func (m *TransparentWebGRPCProxy) handleServerStreaming(w http.ResponseWriter, r
 		return
 	}
 
-	ctx, ok := newOutgoingContext(r)
-	if !ok {
-		http.Error(w, "Malformed authentication header", http.StatusBadRequest)
-		return
-	}
-
+	ctx := metadata.NewOutgoingContext(r.Context(), admission.Metadata)
 	outCtx, conn, err := m.backend.GetConnection(ctx, fullMethodName)
 	if err != nil {
 		m.writeBackendUnreachableError(w, service, method, err)
@@ -629,22 +654,50 @@ func (m *gzipResponseWriter) Flush() {
 	}
 }
 
+// gzipRequestBody decompresses a request body from its first read on, so a
+// handler that refuses a call before reading reads none of its body.
+type gzipRequestBody struct {
+	compressed io.Reader
+	reader     *gzip.Reader
+	err        error
+}
+
+// Read decompresses the next part of the body, failing as the decompressor
+// does on a malformed one.
+func (m *gzipRequestBody) Read(p []byte) (int, error) {
+	if m.reader == nil && m.err == nil {
+		m.reader, m.err = gzip.NewReader(m.compressed)
+	}
+	if m.err != nil {
+		return 0, m.err
+	}
+
+	return m.reader.Read(p)
+}
+
+// Close closes the decompressor, if a read started one. The server closes
+// the compressed body itself.
+func (m *gzipRequestBody) Close() error {
+	if m.reader == nil {
+		return nil
+	}
+
+	return m.reader.Close()
+}
+
 // GzipMiddleware compresses HTTP responses and decompresses requests.
 //
 // It handles both request decompression (Content-Encoding: gzip) and
-// response compression (Accept-Encoding: gzip).
+// response compression (Accept-Encoding: gzip). A compressed request body
+// is decompressed only once the handler reads it.
 //
 // Requests without compression are handled normally for backward compatibility.
 func GzipMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Content-Encoding") == "gzip" {
-			gr, err := gzip.NewReader(r.Body)
-			if err != nil {
-				http.Error(w, "failed to decompress request", http.StatusBadRequest)
-				return
-			}
-			defer gr.Close()
-			r.Body = io.NopCloser(gr)
+			body := &gzipRequestBody{compressed: r.Body}
+			defer body.Close()
+			r.Body = body
 			r.Header.Del("Content-Encoding")
 		}
 

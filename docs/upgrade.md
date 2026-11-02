@@ -3,6 +3,23 @@
 Manual steps required when upgrading an existing deployment. The packaging
 does not perform these automatically.
 
+## Gateway HTTP checks a call before reading its body
+
+The gateway's HTTP surface now authenticates and authorizes a call from its
+`X-Yanet-Authentication` header and its TLS connection before it reads the
+request body, so it reads no body of a call it refuses. A refused call gets
+its status code and a plain-text message, a server-streaming call too,
+where a stream used to answer 200 and then send an `error` event. A
+refusal over HTTP/1 closes its connection, since the gateway does not read
+the rest of a body it refused.
+
+In enabled mode an anonymous caller may send a body of at most 1 MiB and
+gets 413 beyond it. Any other call may send up to 256 MiB of JSON, as many
+bytes as the gRPC servers accept for one protobuf message, which encodes
+the same request in fewer bytes; an upload near that bound may have to go
+over gRPC. A token that is not valid text no longer gets 400 up front: it
+is checked like any other token.
+
 ## Gateway backends no longer receive the caller's token
 
 The gateway now drops the `x-yanet-authentication` metadata from every call

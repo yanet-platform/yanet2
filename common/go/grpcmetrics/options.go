@@ -91,11 +91,12 @@ func WithPerServiceMethodLimit(limit int) Option {
 // services get recorded at all.
 //
 // It runs first, before any series or per-service method bookkeeping is
-// allocated for a call. This is essential for transparent proxies whose
-// interceptors run ahead of routing and auth: an unauthenticated caller
-// probing random service names would otherwise create a permanent metric
-// series and a permanent methods-map entry for each one, since Retention
-// only prunes series for services the server once knew but later removed.
+// allocated for a call, intercepted or refused. This is essential for
+// transparent proxies that count calls ahead of routing and auth: an
+// unauthenticated caller probing random service names would otherwise
+// create a permanent metric series and a permanent methods-map entry for
+// each one, since Retention only prunes series for services the server once
+// knew but later removed.
 // The default accepts every service.
 func WithServiceFilter(filter func(service string) bool) Option {
 	return func(o *options) {

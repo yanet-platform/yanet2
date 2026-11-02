@@ -13,6 +13,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -35,6 +36,7 @@ import (
 	"google.golang.org/protobuf/types/known/wrapperspb"
 	"gopkg.in/yaml.v3"
 
+	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
 	"github.com/yanet-platform/yanet2/common/go/testutils/tlscert"
 	"github.com/yanet-platform/yanet2/common/go/xcfg"
 	"github.com/yanet-platform/yanet2/common/go/xgrpc"
@@ -1528,9 +1530,9 @@ func Test_Gateway_Audit_LogsVerifiedAndAnonymousRPCOutcomes(t *testing.T) {
 	}
 }
 
-// Test_Gateway_HTTPProxy_ForwardsAuthenticationHeader verifies that
+// Test_Gateway_HTTPProxy_AuthenticatesHeaderToken verifies that
 // introspecting an HTTP call reports the principal of its token.
-func Test_Gateway_HTTPProxy_ForwardsAuthenticationHeader(t *testing.T) {
+func Test_Gateway_HTTPProxy_AuthenticatesHeaderToken(t *testing.T) {
 	t.Parallel()
 
 	authority := newAuditSigner(t)
@@ -1751,4 +1753,133 @@ func Test_Gateway_HTTPProxy_KeepsLoopbackWhenItsNamesAreTakenOver(t *testing.T) 
 	}, 5*time.Second, 50*time.Millisecond, "HTTP server did not answer")
 
 	require.Equal(t, http.StatusOK, statusCode, string(body))
+}
+
+// startEnforcingHTTPGateway runs a gateway enforcing the x509 test policy
+// and returns its HTTP base URL, once it answers, and its gRPC address.
+//
+// Both listeners are plaintext.
+func startEnforcingHTTPGateway(t *testing.T) (string, string) {
+	t.Helper()
+
+	ca := tlscert.NewCA(t)
+	server := ca.IssueServer(t, "127.0.0.1")
+	httpListener, httpsListener := NewTestListener(t), NewTestListener(t)
+	cfg := gateway.DefaultConfig()
+	cfg.Auth = newX509AuthConfig(t, ca)
+	cfg.Server.HTTP = &gateway.ListenerConfig{
+		Endpoint: httpListener.Addr().String(),
+		TLS:      newTLSListenerConfig(t, httpsListener.Addr().String(), server.CertFile, server.KeyFile),
+	}
+	grpcListener := NewTestListener(t)
+	runGateway(t, cfg,
+		gateway.WithListener(grpcListener),
+		gateway.WithHTTPListener(httpListener),
+		gateway.WithHTTPSListener(httpsListener),
+	)
+
+	url := "http://" + httpListener.Addr().String()
+	response, body := postUntilAnswered(t, &http.Client{Timeout: 5 * time.Second}, url+"/api"+ynpb.Gateway_ListServices_FullMethodName)
+	require.Equal(t, http.StatusOK, response.StatusCode, string(body))
+
+	return url, grpcListener.Addr().String()
+}
+
+// Test_Gateway_HTTPProxy_RefusesCallBeforeItsBody verifies that an HTTP call
+// its caller may not make is answered before its body arrives.
+func Test_Gateway_HTTPProxy_RefusesCallBeforeItsBody(t *testing.T) {
+	t.Parallel()
+
+	url, _ := startEnforcingHTTPGateway(t)
+
+	// The body never arrives; past the wait it fails, so a gateway that reads
+	// it first fails the call instead of hanging.
+	body, writer := io.Pipe()
+	t.Cleanup(func() { _ = writer.Close() })
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	stop := context.AfterFunc(ctx, func() { _ = writer.CloseWithError(ctx.Err()) })
+	defer stop()
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, url+"/api"+ynpb.Gateway_Register_FullMethodName, body)
+	require.NoError(t, err)
+
+	response, err := http.DefaultClient.Do(request)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = response.Body.Close() })
+	require.Equal(t, http.StatusForbidden, response.StatusCode)
+}
+
+// Test_Gateway_HTTPProxy_BoundsAnonymousBody verifies that an anonymous HTTP
+// call may send a body of a mebibyte at most, an authenticated one more.
+//
+// The bound holds while authentication is enforced.
+func Test_Gateway_HTTPProxy_BoundsAnonymousBody(t *testing.T) {
+	t.Parallel()
+
+	url, _ := startEnforcingHTTPGateway(t)
+	body := "{}" + strings.Repeat(" ", 1<<20)
+
+	for _, tc := range []struct {
+		name   string
+		token  string
+		status int
+	}{
+		{name: "anonymous caller", status: http.StatusRequestEntityTooLarge},
+		{name: "authenticated caller", token: "basic " + base64.StdEncoding.EncodeToString([]byte("alice:s3cret")), status: http.StatusOK},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			request, err := http.NewRequest(http.MethodPost, url+"/api"+ynpb.Gateway_ListServices_FullMethodName, strings.NewReader(body))
+			require.NoError(t, err)
+			if tc.token != "" {
+				request.Header.Set("X-Yanet-Authentication", tc.token)
+			}
+
+			response, err := (&http.Client{Timeout: 10 * time.Second}).Do(request)
+			require.NoError(t, err)
+			_, err = io.Copy(io.Discard, response.Body)
+			require.NoError(t, err)
+			require.NoError(t, response.Body.Close())
+			require.Equal(t, tc.status, response.StatusCode)
+		})
+	}
+}
+
+// Test_Gateway_HTTPProxy_CountsRefusedCall verifies that an HTTP call refused
+// before its body is read is still counted as handled with its code.
+func Test_Gateway_HTTPProxy_CountsRefusedCall(t *testing.T) {
+	t.Parallel()
+
+	url, grpcAddress := startEnforcingHTTPGateway(t)
+	response, err := http.Post(url+"/api"+ynpb.Gateway_Register_FullMethodName, "application/json", strings.NewReader("{}"))
+	require.NoError(t, err)
+	_, err = io.Copy(io.Discard, response.Body)
+	require.NoError(t, err)
+	require.NoError(t, response.Body.Close())
+	require.Equal(t, http.StatusForbidden, response.StatusCode)
+
+	conn := dialGateway(t, grpcAddress, insecure.NewCredentials())
+	token := "basic " + base64.StdEncoding.EncodeToString([]byte("alice:s3cret"))
+	ctx := metadata.AppendToOutgoingContext(t.Context(), "x-yanet-authentication", token)
+	metrics, err := ynpb.NewMetricsServiceClient(conn).GetMetrics(ctx, &commonpb.GetMetricsRequest{})
+	require.NoError(t, err)
+
+	want := map[string]string{
+		"grpc_type":    "unary",
+		"grpc_service": ynpb.Gateway_ServiceDesc.ServiceName,
+		"grpc_method":  "Register",
+		"grpc_code":    codes.PermissionDenied.String(),
+	}
+	require.True(t, slices.ContainsFunc(metrics.GetMetrics(), func(metric *commonpb.Metric) bool {
+		if metric.GetName() != "grpc_server_handled_total" || len(metric.GetLabels()) != len(want) {
+			return false
+		}
+		for _, label := range metric.GetLabels() {
+			if want[label.GetName()] != label.GetValue() {
+				return false
+			}
+		}
+		return metric.GetCounter() == 1
+	}), "no handled series %v counting the refusal", want)
 }

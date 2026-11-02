@@ -817,3 +817,48 @@ func TestServiceFilterDefaultAcceptsAll(t *testing.T) {
 	})
 	require.NotNil(t, started, "the default filter should accept every service")
 }
+
+// Test_ServerMetrics_RecordRefused_CountsAsHandled verifies that a refused
+// call is counted as started and as handled with its code.
+//
+// It is counted under the type its stream flags give, and a service the
+// filter rejects records nothing.
+func Test_ServerMetrics_RecordRefused_CountsAsHandled(t *testing.T) {
+	serverMetrics := New(WithServiceFilter(func(service string) bool {
+		return service != "rejected"
+	}))
+	serverMetrics.RecordRefused("/svc/Unary", false, false, codes.PermissionDenied)
+	serverMetrics.RecordRefused("/svc/Bidi", true, true, codes.Unauthenticated)
+	serverMetrics.RecordRefused("/rejected/Method", false, false, codes.PermissionDenied)
+	out := serverMetrics.Collect()
+
+	for _, tc := range []struct {
+		name     string
+		method   string
+		grpcType string
+		code     codes.Code
+	}{
+		{name: "unary call", method: "Unary", grpcType: "unary", code: codes.PermissionDenied},
+		{name: "bidirectional stream", method: "Bidi", grpcType: "bidi_stream", code: codes.Unauthenticated},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			labels := map[string]string{"grpc_type": tc.grpcType, "grpc_service": "svc", "grpc_method": tc.method}
+			started := findMetric(out, "grpc_server_started_total", labels)
+			require.NotNil(t, started, "grpc_server_started_total should be present")
+			assert.Equal(t, uint64(1), counterValue(started))
+
+			labels["grpc_code"] = tc.code.String()
+			handled := findMetric(out, "grpc_server_handled_total", labels)
+			require.NotNil(t, handled, "grpc_server_handled_total should be present")
+			assert.Equal(t, uint64(1), counterValue(handled))
+		})
+	}
+
+	t.Run("service the filter rejects", func(t *testing.T) {
+		for _, metric := range out {
+			for _, label := range metric.GetLabels() {
+				assert.NotEqual(t, "rejected", label.GetValue(), "series %s", metric.GetName())
+			}
+		}
+	})
+}

@@ -5,83 +5,41 @@ import (
 
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
-
-	"github.com/yanet-platform/yanet2/controlplane/internal/auth/core"
 )
 
 // UnaryServerInterceptor returns a gRPC unary server interceptor that performs
 // authentication and authorization.
+//
+// A call that carries an admission runs as the admission's principal,
+// authorized again for the method; any other call is checked on the
+// credential it presents.
 func UnaryServerInterceptor(
 	manager *Manager,
 	log *zap.Logger,
 ) grpc.UnaryServerInterceptor {
 	return func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
-		credential := ExtractCredential(ctx)
-
-		requestInfo := &core.RequestInfo{
-			FullMethod: info.FullMethod,
-		}
-
-		// Authenticate the request.
-		principal, err := manager.AuthenticateRequest(ctx, credential, requestInfo)
+		ctx, err := admitIncoming(ctx, manager, log, info.FullMethod)
 		if err != nil {
-			log.Warn("authentication failed",
-				zap.String("method", info.FullMethod),
-				zap.Error(err),
-			)
-			return nil, status.Errorf(codes.Unauthenticated, "authentication failed: %v", err)
+			return nil, err
 		}
 
-		// Authorize the request.
-		if err := manager.Authorize(ctx, principal, info.FullMethod); err != nil {
-			log.Warn("authorization failed",
-				zap.String("method", info.FullMethod),
-				zap.String("user", principal.User),
-				zap.Error(err),
-			)
-			return nil, status.Errorf(codes.PermissionDenied, "authorization failed: %v", err)
-		}
-
-		return handler(core.WithPrincipal(ctx, principal), req)
+		return handler(ctx, req)
 	}
 }
 
 // StreamServerInterceptor returns a gRPC stream server interceptor that performs authentication and authorization.
+//
+// It admits a call as UnaryServerInterceptor does.
 func StreamServerInterceptor(manager *Manager, log *zap.Logger) grpc.StreamServerInterceptor {
 	return func(srv any, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
-		ctx := ss.Context()
-
-		credential := ExtractCredential(ctx)
-
-		requestInfo := &core.RequestInfo{
-			FullMethod: info.FullMethod,
-		}
-
-		// Authenticate the request.
-		principal, err := manager.AuthenticateRequest(ctx, credential, requestInfo)
+		ctx, err := admitIncoming(ss.Context(), manager, log, info.FullMethod)
 		if err != nil {
-			log.Warn("authentication failed",
-				zap.String("method", info.FullMethod),
-				zap.Error(err),
-			)
-			return status.Errorf(codes.Unauthenticated, "authentication failed: %v", err)
-		}
-
-		// Authorize the request.
-		if err := manager.Authorize(ctx, principal, info.FullMethod); err != nil {
-			log.Warn("authorization failed",
-				zap.String("method", info.FullMethod),
-				zap.String("user", principal.User),
-				zap.Error(err),
-			)
-			return status.Errorf(codes.PermissionDenied, "authorization failed: %v", err)
+			return err
 		}
 
 		wrapped := &wrappedServerStream{
 			ServerStream: ss,
-			ctx:          core.WithPrincipal(ctx, principal),
+			ctx:          ctx,
 		}
 
 		return handler(srv, wrapped)
