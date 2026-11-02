@@ -217,11 +217,11 @@ type Gateway struct {
 	server *grpc.Server
 	// secureServer is the TLS gRPC server, nil without a gRPC TLS listener.
 	secureServer *grpc.Server
-	// loopbackServer serves every call of the HTTP surface over in-memory
-	// connections, through the interceptors of the network servers.
+	// loopbackServer serves every call of the HTTP surface over an in-memory
+	// connection, through the interceptors of the network servers.
 	loopbackServer *grpc.Server
 	// loopback is the HTTP surface's way into the loopback server.
-	loopback *loopbackBackend
+	loopback *backend
 	// releaseLoopback ends the gateway's own lease on the loopback.
 	releaseLoopback func()
 	grpcListeners   []grpcListener
@@ -240,10 +240,7 @@ type Gateway struct {
 	httpsCertificates *commonxgrpc.CertificateStore
 	// clientCAs returns the authorities client certificates are verified
 	// against, nil without an x509 authenticator.
-	clientCAs func() *x509.CertPool
-	// browsers tracks the way of every browser TLS connection into the
-	// loopback server, nil unless HTTPS asks for client certificates.
-	browsers      *browserConnections
+	clientCAs     func() *x509.CertPool
 	authManager   *auth.Manager
 	serverMetrics *grpcmetrics.ServerMetrics
 	// methods returns how each method the loopback server serves itself
@@ -582,9 +579,7 @@ func NewGateway(cfg Config, options ...GatewayOption) (*Gateway, error) {
 	// since the service filter and the metrics retention read the services
 	// registered on it.
 	server = newServer()
-	// The loopback server learns from each in-memory connection the TLS
-	// state of the browser connection it serves, if any.
-	loopbackServer := newServer(grpc.Creds(newLoopbackCredentials()))
+	loopbackServer := newServer()
 	// The method types are read at the first refused HTTP call, by when
 	// every service is registered.
 	methods := sync.OnceValue(func() map[string]grpc.MethodInfo {
@@ -646,22 +641,13 @@ func NewGateway(cfg Config, options ...GatewayOption) (*Gateway, error) {
 	// connection and is served or proxied there as on a network server.
 	//
 	// No network hop is involved, and the interceptor chain still runs on
-	// every request that comes through them. An in-memory connection runs no
-	// TLS: the one opened for a browser TLS connection with a verified client
-	// certificate carries that connection's TLS state instead. External
-	// backends each get a network connection of their own when they register.
+	// every request that comes through it. The in-memory connection runs no
+	// TLS. External backends each get a network connection of their own when
+	// they register.
 	memoryListener := newMemoryListener()
-	defaultLoopback, err := dialMemoryBackend(endpoint, memoryListener, insecure.NewCredentials())
+	loopback, err := dialMemoryBackend(endpoint, memoryListener, insecure.NewCredentials())
 	if err != nil {
 		return nil, fmt.Errorf("failed to create loopback backend for gateway-hosted services: %w", err)
-	}
-	loopback := &loopbackBackend{backend: defaultLoopback}
-
-	// Only a browser that presents a verified client certificate gets a way
-	// of its own into the loopback server, which carries its TLS state.
-	var browsers *browserConnections
-	if clientCAs != nil && plan.HTTP.TLS != nil {
-		browsers = newBrowserConnections(loopbackServer, endpoint, defaultLoopback)
 	}
 
 	for _, service := range []string{
@@ -721,7 +707,6 @@ func NewGateway(cfg Config, options ...GatewayOption) (*Gateway, error) {
 		crossOrigin:       crossOrigin,
 		httpsCertificates: httpsCertificates,
 		clientCAs:         clientCAs,
-		browsers:          browsers,
 		authManager:       authManager,
 		serverMetrics:     serverMetrics,
 		methods:           methods,
@@ -991,12 +976,6 @@ func (m *Gateway) runHTTPServer(ctx context.Context) error {
 		),
 		ReadHeaderTimeout: httpReadHeaderTimeout,
 		IdleTimeout:       httpIdleTimeout,
-	}
-	// A browser TLS connection with a verified client certificate reaches the
-	// loopback server over a way of its own for as long as it stays open.
-	if m.browsers != nil {
-		server.ConnContext = m.browsers.Track
-		server.ConnState = m.browsers.Forget
 	}
 
 	type httpListener struct {

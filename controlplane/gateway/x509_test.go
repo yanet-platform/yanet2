@@ -376,18 +376,20 @@ func Test_Gateway_HTTPS_ClientCertificateBecomesPrincipal(t *testing.T) {
 	}
 }
 
-// Test_Gateway_HTTPS_AnonymousConnectionsShareTheLoopback verifies that an
-// HTTPS connection kept open after a call without a client certificate holds
-// no in-process gRPC connection of its own.
+// Test_Gateway_HTTPS_ConnectionsShareTheLoopback verifies that an HTTPS
+// connection kept open after a call holds no in-process gRPC connection.
 //
-// One would cost about nine goroutines and 2 MiB of buffers for as long as
-// the client keeps the connection open, before any authentication.
-func Test_Gateway_HTTPS_AnonymousConnectionsShareTheLoopback(t *testing.T) {
+// That holds with or without a client certificate. Such a gRPC connection
+// would cost about nine goroutines and 2 MiB of buffers for as long as the
+// client keeps its HTTPS connection open, before any authentication when the
+// client presents no certificate.
+func Test_Gateway_HTTPS_ConnectionsShareTheLoopback(t *testing.T) {
 	// Not parallel: it counts the goroutines of the whole process.
 	const connections = 20
 
 	ca := tlscert.NewCA(t)
 	server := ca.IssueServer(t, "127.0.0.1")
+	client := ca.IssueClient(t, "route-operator")
 	httpsListener := NewTestListener(t)
 	cfg := gateway.DefaultConfig()
 	cfg.Auth = newX509AuthConfig(t, ca)
@@ -399,9 +401,13 @@ func Test_Gateway_HTTPS_AnonymousConnectionsShareTheLoopback(t *testing.T) {
 	url := "https://" + httpsListener.Addr().String() + "/api" + ynpb.AuthService_IntrospectToken_FullMethodName
 	// Each client has a transport of its own, so each opens a connection of
 	// its own and keeps it open until the test ends.
-	newClient := func() *http.Client {
+	newClient := func(certificates []tls.Certificate) *http.Client {
 		transport := &http.Transport{
-			TLSClientConfig:   &tls.Config{RootCAs: ca.Pool(), MinVersion: tls.VersionTLS12},
+			TLSClientConfig: &tls.Config{
+				RootCAs:      ca.Pool(),
+				Certificates: certificates,
+				MinVersion:   tls.VersionTLS12,
+			},
 			ForceAttemptHTTP2: true,
 		}
 		t.Cleanup(transport.CloseIdleConnections)
@@ -410,25 +416,37 @@ func Test_Gateway_HTTPS_AnonymousConnectionsShareTheLoopback(t *testing.T) {
 	}
 
 	// The first call opens the shared way into the loopback server.
-	response, body := postUntilAnswered(t, newClient(), url)
+	response, body := postUntilAnswered(t, newClient(nil), url)
 	require.Equal(t, http.StatusOK, response.StatusCode, string(body))
 
-	before := runtime.NumGoroutine()
-	for range connections {
-		response, err := newClient().Post(url, "application/json", strings.NewReader("{}"))
-		require.NoError(t, err)
-		_, err = io.Copy(io.Discard, response.Body)
-		require.NoError(t, err)
-		require.NoError(t, response.Body.Close())
-		require.Equal(t, http.StatusOK, response.StatusCode)
-	}
+	for _, tc := range []struct {
+		name         string
+		certificates []tls.Certificate
+	}{
+		{name: "without a client certificate"},
+		{name: "with a client certificate", certificates: []tls.Certificate{client.Certificate}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			before := runtime.NumGoroutine()
+			for range connections {
+				response, err := newClient(tc.certificates).Post(url, "application/json", strings.NewReader("{}"))
+				require.NoError(t, err)
+				_, err = io.Copy(io.Discard, response.Body)
+				require.NoError(t, err)
+				require.NoError(t, response.Body.Close())
+				require.Equal(t, http.StatusOK, response.StatusCode)
+			}
 
-	// An open HTTP/2 connection costs its client and the HTTP server about
-	// three goroutines, a way of its own into the loopback server about nine
-	// more.
-	require.Less(t, runtime.NumGoroutine()-before, connections*6,
-		"goroutines added by the open anonymous HTTPS connections",
-	)
+			// An open HTTP/2 connection costs its client and the HTTP
+			// server about three goroutines.
+			//
+			// A way of its own into the loopback server would cost about
+			// nine more.
+			require.Less(t, runtime.NumGoroutine()-before, connections*6,
+				"goroutines added by the open HTTPS connections",
+			)
+		})
+	}
 }
 
 // Test_NewGateway_X509RequiresServerTLS verifies that an x509 authenticator

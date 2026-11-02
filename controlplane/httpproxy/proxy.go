@@ -176,12 +176,10 @@ func (m *TransparentWebGRPCProxy) writeRegistryMissError(w http.ResponseWriter, 
 // writeBackendUnreachableError responds to a GetConnection failure with 503,
 // not 500.
 //
-// A gateway backend fails only a call that arrives after its browser
-// connection has closed, or whose way into the gateway cannot be opened.
-// 503 is what keeps it consistent with the outage that does happen: a
-// backend dials lazily, so a down control plane surfaces later at
-// conn.Invoke as codes.Unavailable, which grpcCodeToHTTPStatus turns into
-// 503 on the unary path.
+// The gateway's backend opens nothing here and never fails, since it dials
+// lazily: a down control plane surfaces later, at conn.Invoke, as
+// codes.Unavailable, which grpcCodeToHTTPStatus turns into 503 on the unary
+// path. 503 keeps any other backend's failure here consistent with that.
 func (m *TransparentWebGRPCProxy) writeBackendUnreachableError(w http.ResponseWriter, service, method string, err error) {
 	m.log.Error("failed to get connection to backend",
 		zap.String("service", service),
