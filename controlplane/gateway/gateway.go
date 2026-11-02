@@ -927,6 +927,17 @@ func (m *Gateway) runRegistrySweeper(ctx context.Context) error {
 	}
 }
 
+// httpReadHeaderTimeout bounds how long a client of the HTTP server may take
+// over its TLS handshake and, over HTTP/1, its request headers.
+//
+// No read or write timeout bounds the rest, since a large config upload and
+// a server stream take as long as they need.
+const httpReadHeaderTimeout = 10 * time.Second
+
+// httpIdleTimeout is how long the HTTP server keeps a connection open with
+// no request in flight.
+const httpIdleTimeout = 2 * time.Minute
+
 // runHTTPServer runs the HTTP server that provides access to gRPC services
 // via HTTP, one server on its plaintext and TLS listeners alike.
 //
@@ -942,6 +953,8 @@ func (m *Gateway) runHTTPServer(ctx context.Context) error {
 				),
 			),
 		),
+		ReadHeaderTimeout: httpReadHeaderTimeout,
+		IdleTimeout:       httpIdleTimeout,
 	}
 	// A browser TLS connection with a verified client certificate reaches the
 	// loopback server over a way of its own for as long as it stays open.
