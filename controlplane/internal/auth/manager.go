@@ -337,6 +337,12 @@ func (m *Manager) AuthenticateRequest(
 	}, nil
 }
 
+// Mode returns the policy the manager applies, with an omitted mode already
+// resolved from the deprecated input or to disabled.
+func (m *Manager) Mode() Mode {
+	return m.mode
+}
+
 // ClientCAs returns the authorities the x509 authenticator verifies client
 // certificates against, nil when none is configured.
 //

@@ -102,6 +102,11 @@ func (m *ListenerConfig) Validate() error {
 	return err
 }
 
+// Serves reports whether the configuration names any listener.
+func (m *ListenerConfig) Serves() bool {
+	return m.Endpoint != "" || m.TLS != nil
+}
+
 // newCrossOriginProtection returns the protection that rejects cross-origin
 // browser requests from every origin but the trusted ones.
 func newCrossOriginProtection(origins []string) (*http.CrossOriginProtection, error) {
@@ -138,7 +143,8 @@ type TLSListenerConfig struct {
 type listenerPlan struct {
 	// GRPC is where gRPC is served.
 	GRPC ListenerConfig
-	// HTTP is where HTTP is served; zero when no HTTP server runs.
+	// HTTP is where HTTP is served; it names no listener when no HTTP server
+	// runs.
 	HTTP ListenerConfig
 	// Mapped names the deprecated keys the plan serves.
 	Mapped []string
