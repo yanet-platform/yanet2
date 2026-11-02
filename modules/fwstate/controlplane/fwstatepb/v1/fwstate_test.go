@@ -397,3 +397,16 @@ func Test_SyncConfig_ValidateFields_SyncMTU(t *testing.T) {
 		})
 	}
 }
+
+// Test_DefaultSyncConfig_ReturnsIndependentConfigs verifies that changing one
+// returned config, its address bytes included, leaves later ones at the
+// defaults.
+func Test_DefaultSyncConfig_ReturnsIndependentConfigs(t *testing.T) {
+	want := DefaultSyncConfig()
+	changed := DefaultSyncConfig()
+	changed.Tcp = proto.Uint64(1)
+	changed.GetSrcAddr().Addr[15] = 1
+	got := DefaultSyncConfig()
+
+	require.True(t, proto.Equal(want, got), "want %v, got %v", want, got)
+}

@@ -96,7 +96,7 @@ func mergedSyncConfig(
 	old *FwStateConfig,
 	update *fwstatepb.SyncConfig,
 ) *fwstatepb.SyncConfig {
-	merged := SyncConfigFromC(cfwstate.DefaultSyncConfig())
+	merged := fwstatepb.DefaultSyncConfig()
 	if old != nil {
 		merged = old.GetSyncConfig()
 	}

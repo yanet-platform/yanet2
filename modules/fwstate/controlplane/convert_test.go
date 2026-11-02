@@ -111,3 +111,12 @@ func Test_SyncConfig_SyncMTURoundTrip(t *testing.T) {
 
 	require.Equal(t, uint32(9000), got.GetSyncMtu())
 }
+
+// Test_DefaultSyncConfig_MatchesC verifies that the Go defaults equal the
+// config the C module reports before any update.
+func Test_DefaultSyncConfig_MatchesC(t *testing.T) {
+	want := fwstate.SyncConfigFromC(cfwstate.DefaultSyncConfig())
+	got := fwstatepb.DefaultSyncConfig()
+
+	require.True(t, proto.Equal(want, got), "want %v, got %v", want, got)
+}
