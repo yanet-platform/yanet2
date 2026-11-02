@@ -2,6 +2,7 @@ package httpproxy
 
 import (
 	"compress/gzip"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -21,6 +22,10 @@ import (
 	"github.com/yanet-platform/yanet2/controlplane/internal/xgrpc"
 	ynpb "github.com/yanet-platform/yanet2/controlplane/ynpb/v1"
 )
+
+// authenticationHeader names the request header that carries the caller's
+// token, under the same key gRPC callers send it as metadata.
+const authenticationHeader = "x-yanet-authentication"
 
 // BackendRegistry is the subset of backend lookup API required by the HTTP proxy.
 //
@@ -201,15 +206,11 @@ func (m *TransparentWebGRPCProxy) handleUnary(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	ctx := r.Context()
-	md := metadata.New(nil)
-	for k, v := range r.Header {
-		k = strings.ToLower(k)
-		if !strings.HasPrefix(k, "sec-") && k != "host" && k != "connection" {
-			md.Set(k, v...)
-		}
+	ctx, ok := newOutgoingContext(r)
+	if !ok {
+		http.Error(w, "Malformed authentication header", http.StatusBadRequest)
+		return
 	}
-	ctx = metadata.NewOutgoingContext(ctx, md)
 
 	outCtx, conn, err := backend.GetConnection(ctx, fullMethodName)
 	if err != nil {
@@ -274,6 +275,27 @@ func (m *TransparentWebGRPCProxy) handleUnary(w http.ResponseWriter, r *http.Req
 			zap.Error(err),
 		)
 	}
+}
+
+// newOutgoingContext returns the request context with the caller's token as
+// outgoing gRPC metadata, or false for a token metadata cannot carry.
+//
+// No other header is forwarded: no backend reads one, and gRPC metadata
+// accepts only printable ASCII, while an HTTP header value may also hold
+// tabs and non-ASCII bytes.
+func newOutgoingContext(r *http.Request) (context.Context, bool) {
+	tokens := r.Header.Values(authenticationHeader)
+	if len(tokens) == 0 {
+		return r.Context(), true
+	}
+
+	for _, token := range tokens {
+		if strings.ContainsFunc(token, func(char rune) bool { return char < ' ' || char > '~' }) {
+			return nil, false
+		}
+	}
+
+	return metadata.NewOutgoingContext(r.Context(), metadata.MD{authenticationHeader: tokens}), true
 }
 
 // jsonToProtobuf converts JSON to protobuf message for the given method.
@@ -400,15 +422,11 @@ func (m *TransparentWebGRPCProxy) handleServerStreaming(w http.ResponseWriter, r
 		return
 	}
 
-	ctx := r.Context()
-	md := metadata.New(nil)
-	for k, v := range r.Header {
-		k = strings.ToLower(k)
-		if !strings.HasPrefix(k, "sec-") && k != "host" && k != "connection" {
-			md.Set(k, v...)
-		}
+	ctx, ok := newOutgoingContext(r)
+	if !ok {
+		http.Error(w, "Malformed authentication header", http.StatusBadRequest)
+		return
 	}
-	ctx = metadata.NewOutgoingContext(ctx, md)
 
 	outCtx, conn, err := backend.GetConnection(ctx, fullMethodName)
 	if err != nil {

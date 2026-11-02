@@ -1471,3 +1471,49 @@ func Test_Gateway_Audit_LogsVerifiedAndAnonymousRPCOutcomes(t *testing.T) {
 		}
 	}
 }
+
+// Test_Gateway_HTTPProxy_ForwardsAuthenticationHeader verifies that
+// introspecting an HTTP call reports the principal of its token.
+func Test_Gateway_HTTPProxy_ForwardsAuthenticationHeader(t *testing.T) {
+	t.Parallel()
+
+	authority := newAuditSigner(t)
+	signer := newAuditSigner(t)
+	trustPath := writeTestFile(t, "ssh-ca.pub", string(ssh.MarshalAuthorizedKey(authority.PublicKey())))
+	cfg := gateway.DefaultConfig()
+	require.NoError(t, yaml.Unmarshal([]byte("mode: audit\nauthenticators:\n  - type: sshcert\n    config:\n      ca_sources: ["+trustPath+"]\n"), &cfg.Auth))
+	cfg.Server.HTTP = &gateway.ListenerConfig{Endpoint: newFreeAddress(t)}
+	runGateway(t, cfg, gateway.WithListener(NewTestListener(t)))
+
+	method := ynpb.AuthService_IntrospectToken_FullMethodName
+	token := signAuditToken(t, authority, signer, method)
+	url := "http://" + cfg.Server.HTTP.Endpoint + "/api" + method
+	client := &http.Client{Timeout: 5 * time.Second}
+
+	var body []byte
+	var statusCode int
+	require.Eventually(t, func() bool {
+		request, requestErr := http.NewRequest(http.MethodPost, url, strings.NewReader("{}"))
+		if requestErr != nil {
+			return false
+		}
+		request.Header.Set("Content-Type", "application/json")
+		request.Header.Set("X-Yanet-Authentication", token)
+
+		response, postErr := client.Do(request)
+		if postErr != nil {
+			return false
+		}
+		defer func() { _ = response.Body.Close() }()
+
+		body, postErr = io.ReadAll(response.Body)
+		statusCode = response.StatusCode
+		return postErr == nil
+	}, 5*time.Second, 50*time.Millisecond, "HTTP proxy did not answer")
+	require.Equal(t, http.StatusOK, statusCode, string(body))
+
+	var response ynpb.IntrospectTokenResponse
+	require.NoError(t, json.Unmarshal(body, &response))
+	require.Equal(t, "verified-operator", response.GetPrincipal().GetUser())
+	require.Equal(t, "sshcert", response.GetPrincipal().GetAuthMethod())
+}
