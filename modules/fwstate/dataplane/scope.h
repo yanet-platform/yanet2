@@ -2,7 +2,6 @@
 
 #include "lib/fwstate/types.h"
 
-#include "lib/classify/classifiers/net4_hash.h"
 #include "lib/classify/classifiers/net6_hash.h"
 #include "lib/classify/classify.h"
 #include "lib/classify/query.h"
@@ -26,7 +25,7 @@ fwstate_scope_matches(
 	const struct fwstate_scope *scope,
 	const struct fw_state_sync_frame *frame
 ) {
-	if (scope->net4_rules.rows == NULL && scope->net6_rules.rows == NULL) {
+	if (scope->net6_rules.rows == NULL) {
 		return true;
 	}
 
@@ -34,26 +33,19 @@ fwstate_scope_matches(
 		(struct vline *)&scope->port_attr.line, frame->src_port
 	);
 
-	uint32_t net_class;
 	uint32_t rule = FILTER_RULE_INVALID;
 	if (frame->addr_type == FW_STATE_ADDR_TYPE_IP6) {
-		net_class = classify_net6_hash_lookup1(
+		uint32_t net_class = classify_net6_hash_lookup1(
 			&scope->net6_attr, frame->src_ip6
 		);
 		classify_rule_table_lookup(
 			&scope->net6_rules, &net_class, &port_class, &rule, 1
 		);
 	} else {
-		// The frame carries the source as a raw big-endian word,
-		// exactly the wire form the exact-match attribute probes.
-		uint32_t src_ip;
-		memcpy(&src_ip, &frame->src_ip, sizeof(src_ip));
-		net_class =
-			classify_net4_hash_lookup1(&scope->net4_attr, src_ip);
-		classify_rule_table_lookup(
-			&scope->net4_rules, &net_class, &port_class, &rule, 1
+		// IPv4 frames resolve through the port-only decode.
+		rule = vline_get(
+			(struct vline *)&scope->port_rule_map, port_class
 		);
 	}
-
 	return rule != FILTER_RULE_INVALID;
 }

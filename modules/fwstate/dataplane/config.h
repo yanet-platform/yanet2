@@ -2,15 +2,15 @@
 
 #define FWSTATE_MODULE_NAME "fwstate"
 
+#include <netinet/in.h>
+
 #include "common/filter_views.h"
 #include "common/memory.h"
 #include "common/network.h"
 
-#include "lib/classify/classifiers/net4_hash.h"
 #include "lib/classify/classifiers/net6_hash.h"
 #include "lib/classify/classifiers/port.h"
 #include "lib/classify/classify.h"
-#include "lib/classify/compiler/net4_hash.h"
 #include "lib/classify/compiler/net6_hash.h"
 #include "lib/classify/compiler/u16_ranges.h"
 #include "lib/classify/rule_table.h"
@@ -74,6 +74,46 @@ struct fwstate_sync_listen_endpoint {
 	 */
 	uint16_t port;
 };
+
+// Default state timeout for TCP families without a dedicated value.
+#define FW_STATE_DEFAULT_TIMEOUT (uint64_t)120e9
+
+// Connection timeouts of the fwstate state machinery: the module owns
+// both their configuration and the entry TTL selection below.
+struct fwstate_timeouts {
+	uint64_t tcp_syn_ack; // default
+	uint64_t tcp_syn;     // default
+	uint64_t tcp_fin;     // default
+	uint64_t tcp;	      // default (120)
+	uint64_t udp;	      // 30
+	uint64_t default_;    // 16
+};
+
+// Select the TTL of one state entry from its frame's protocol and TCP
+// flags.
+static inline uint64_t
+fwstate_entry_ttl(
+	uint16_t proto, uint8_t raw_flags, const struct fwstate_timeouts *t
+) {
+	union fw_state_flags_u flags = {.raw = raw_flags};
+
+	uint64_t ttl = t->default_;
+	if (proto == IPPROTO_UDP) {
+		ttl = t->udp;
+	} else if (proto == IPPROTO_TCP) {
+		ttl = t->tcp;
+
+		uint8_t tcp_flags = flags.tcp.src | flags.tcp.dst;
+		if (tcp_flags & FWSTATE_ACK) {
+			ttl = t->tcp_syn_ack;
+		} else if (tcp_flags & FWSTATE_SYN) {
+			ttl = t->tcp_syn;
+		} else if (tcp_flags & FWSTATE_FIN) {
+			ttl = t->tcp_fin;
+		}
+	}
+	return ttl;
+}
 
 // Reports whether one endpoint participates in emission; a zero port
 // disables it.
@@ -178,10 +218,9 @@ struct fwstate_prepared {
  */
 struct fwstate_sync_rule {
 	struct classifier_rule rule;
-	// The exact source addresses the rule names, raw wire bytes; the
-	// hash attributes of the scope match them without prefix
-	// semantics.
-	struct classify_net4_addrs addrs4;
+	// The exact IPv6 source addresses the rule names, raw wire bytes;
+	// the hashed address attribute of the scope matches them without
+	// prefix semantics. IPv4 frames classify by port only.
 	struct classify_net6_addrs addrs6;
 	// The port spans in the u16 attribute's own type: the ranges view
 	// of the compile and the port_ranges view of the filter share the
@@ -189,18 +228,19 @@ struct fwstate_sync_rule {
 	struct filter_u16_ranges src_ports;
 };
 
-// The compiled scope: the hashed network attributes of both families
-// joined with the port attribute through first-match rule tables. The
-// zeroed struct - no rules - matches everything.
+// The compiled scope: the hashed IPv6 address attribute joined with
+// the port attribute through a first-match rule table, plus the
+// port-only decode IPv4 frames resolve through - rules cannot name
+// IPv4 addresses, so every rule is address-any for them and the port
+// classes alone decide. The zeroed struct - no rules - matches
+// everything.
 struct fwstate_scope {
-	struct classify_attr_net4_hash net4_attr;
-	struct classifier net4_cls;
 	struct classify_attr_net6_hash net6_attr;
 	struct classifier net6_cls;
 	struct classify_attr_port port_attr;
 	struct classifier port_cls;
-	struct rule_table net4_rules;
 	struct rule_table net6_rules;
+	struct vline port_rule_map;
 };
 
 struct fwstate_module_config {

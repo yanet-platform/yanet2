@@ -218,11 +218,20 @@ func (m *SyncConfig) validateEndpointLists() error {
 
 // validateSyncScopeRule checks one update-carried scope rule's form.
 func validateSyncScopeRule(idx int, rule *SyncRule) error {
-	if len(rule.GetAddrs()) > 2*MaxSyncRuleNets {
+	if len(rule.GetAddrs()) > MaxSyncRuleNets {
 		return fmt.Errorf(
 			"rules[%d].addrs: at most %d addresses per rule, got %d",
-			idx, 2*MaxSyncRuleNets, len(rule.GetAddrs()),
+			idx, MaxSyncRuleNets, len(rule.GetAddrs()),
 		)
+	}
+	for addrIdx, addr := range rule.GetAddrs() {
+		parsed, ok := netip.AddrFromSlice(addr.GetAddr())
+		if !ok || !parsed.Is6() || parsed.Is4In6() {
+			return fmt.Errorf(
+				"rules[%d].addrs[%d]: must be an IPv6 address, not IPv4 or the mapped form",
+				idx, addrIdx,
+			)
+		}
 	}
 	if len(rule.GetSrcPorts()) > MaxSyncRulePortRanges {
 		return fmt.Errorf(

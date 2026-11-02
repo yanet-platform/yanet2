@@ -22,8 +22,6 @@ struct cp_module;
 // FFI carries it: the flow's source networks of both families and its
 // source port ranges. A rule naming none of them matches every flow.
 struct fwstate_sync_rule_input {
-	uint8_t addrs4[FWSTATE_SYNC_RULE_NETS_MAX][NET4_LEN];
-	uint32_t addr4_count;
 	uint8_t addrs6[FWSTATE_SYNC_RULE_NETS_MAX][NET6_LEN];
 	uint32_t addr6_count;
 	struct filter_u16_span src_ports[FWSTATE_SYNC_RULE_PORTS_MAX];

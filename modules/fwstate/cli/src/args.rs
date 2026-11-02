@@ -78,8 +78,10 @@ fn parse_sync_rule(value: &str) -> Result<String, String> {
             }
             continue;
         }
-        part.parse::<core::net::IpAddr>()
-            .map_err(|err| format!("invalid address {part:?}: {err}"))?;
+        let parsed: core::net::IpAddr = part.parse().map_err(|err| format!("invalid address {part:?}: {err}"))?;
+        if !parsed.is_ipv6() {
+            return Err("scope rule addresses must be IPv6".to_string());
+        }
     }
     Ok(value.to_string())
 }
@@ -170,10 +172,11 @@ pub struct UpdateCmd {
     pub no_listen_endpoints: bool,
 
     /// Synchronization scope rule (e.g.,
-    /// "2001:db8::/32,10.0.0.0/8,port=100-200"): only the flows whose
-    /// source address falls inside one of the networks and whose source
-    /// port inside one of the port ranges are synced. Repeatable; an update
-    /// carrying rules replaces the whole list, and a config without rules
+    /// "2001:db8::1,2001:db8::2,port=100-200"): only the flows whose
+    /// source address is exactly one of the named IPv6 addresses and whose
+    /// source port inside one of the port ranges are synced - IPv4 flows
+    /// classify by port only. Repeatable; an update carrying rules replaces
+    /// the whole list, and a config without rules
     /// syncs everything.
     #[arg(
         long = "sync-rule",

@@ -114,8 +114,8 @@ func Test_SyncConfig_SyncRulesRoundTrip(t *testing.T) {
 	syncConfig := &fwstatepb.SyncConfig{
 		Rules: []*fwstatepb.SyncRule{{
 			Addrs: []*commonpb.IPAddress{
-				{Addr: netip.MustParseAddr("10.1.0.1").AsSlice()},
 				{Addr: netip.MustParseAddr("2001:db8::1").AsSlice()},
+				{Addr: netip.MustParseAddr("2001:db8::2").AsSlice()},
 			},
 			SrcPorts: []*filterpb.PortRange{
 				{From: 100, To: 200},
@@ -131,8 +131,8 @@ func Test_SyncConfig_SyncRulesRoundTrip(t *testing.T) {
 	require.Len(t, got.GetRules(), 1)
 	rule := got.GetRules()[0]
 	require.Len(t, rule.GetAddrs(), 2)
-	require.Equal(t, netip.MustParseAddr("10.1.0.1").AsSlice(), rule.GetAddrs()[0].GetAddr())
-	require.Equal(t, netip.MustParseAddr("2001:db8::1").AsSlice(), rule.GetAddrs()[1].GetAddr())
+	require.Equal(t, netip.MustParseAddr("2001:db8::1").AsSlice(), rule.GetAddrs()[0].GetAddr())
+	require.Equal(t, netip.MustParseAddr("2001:db8::2").AsSlice(), rule.GetAddrs()[1].GetAddr())
 	require.Len(t, rule.GetSrcPorts(), 2)
 	require.Equal(t, uint32(100), rule.GetSrcPorts()[0].GetFrom())
 	require.Equal(t, uint32(200), rule.GetSrcPorts()[0].GetTo())

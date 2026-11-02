@@ -52,6 +52,8 @@ func SyncConfigToC(syncConfig *fwstatepb.SyncConfig) (cfwstate.SyncConfig, error
 
 // ipv6AddrBytes renders one endpoint address in the raw wire form the
 // bindings carry; an absent address renders the zero address.
+// ipv6AddrBytes renders one endpoint address in the raw wire form the
+// bindings carry; an absent address renders the zero address.
 func ipv6AddrBytes(addr *commonpb.IPv6Address) []byte {
 	raw := addr.ToAddr().As16()
 	return raw[:]
@@ -61,30 +63,18 @@ func ipv6AddrBytes(addr *commonpb.IPv6Address) []byte {
 // exact source addresses of both families, the port spans inclusive.
 func syncRuleToC(rule *fwstatepb.SyncRule) (cfwstate.SyncRule, error) {
 	native := cfwstate.SyncRule{
-		Addrs4:   make([][4]byte, 0, len(rule.GetAddrs())),
 		Addrs6:   make([][16]byte, 0, len(rule.GetAddrs())),
 		SrcPorts: make([][2]uint16, 0, len(rule.GetSrcPorts())),
 	}
 	for idx, addr := range rule.GetAddrs() {
-		addrBytes, ok := netip.AddrFromSlice(addr.GetAddr())
-		if !ok {
+		parsed, ok := netip.AddrFromSlice(addr.GetAddr())
+		if !ok || !parsed.Is6() || parsed.Is4In6() {
 			return cfwstate.SyncRule{}, fmt.Errorf(
-				"addrs[%d]: invalid address bytes",
+				"addrs[%d]: must be an IPv6 address, not IPv4 or the mapped form",
 				idx,
 			)
 		}
-		if addrBytes.Is4() {
-			native.Addrs4 = append(native.Addrs4, addrBytes.As4())
-			continue
-		}
-		if addrBytes.Is6() && !addrBytes.Is4In6() {
-			native.Addrs6 = append(native.Addrs6, addrBytes.As16())
-			continue
-		}
-		return cfwstate.SyncRule{}, fmt.Errorf(
-			"addrs[%d]: not an IPv4 or IPv6 address",
-			idx,
-		)
+		native.Addrs6 = append(native.Addrs6, parsed.As16())
 	}
 	for idx, span := range rule.GetSrcPorts() {
 		if span.GetFrom() == 0 || span.GetFrom() > span.GetTo() || span.GetTo() > 65535 {
@@ -104,13 +94,8 @@ func syncRuleToC(rule *fwstatepb.SyncRule) (cfwstate.SyncRule, error) {
 // syncRuleFromC renders one stored scope rule back into the proto form.
 func syncRuleFromC(native cfwstate.SyncRule) *fwstatepb.SyncRule {
 	rule := &fwstatepb.SyncRule{
-		Addrs:    make([]*commonpb.IPAddress, 0, len(native.Addrs4)+len(native.Addrs6)),
+		Addrs:    make([]*commonpb.IPAddress, 0, len(native.Addrs6)),
 		SrcPorts: make([]*filterpb.PortRange, 0, len(native.SrcPorts)),
-	}
-	for _, addr := range native.Addrs4 {
-		rule.Addrs = append(rule.Addrs, &commonpb.IPAddress{
-			Addr: append([]byte(nil), addr[:]...),
-		})
 	}
 	for _, addr := range native.Addrs6 {
 		rule.Addrs = append(rule.Addrs, &commonpb.IPAddress{

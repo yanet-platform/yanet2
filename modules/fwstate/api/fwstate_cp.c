@@ -8,7 +8,6 @@
 #include "lib/classify/classifiers/port.h"
 #include "lib/classify/classify.h"
 #include "lib/classify/compiler/helper.h"
-#include "lib/classify/compiler/net4_hash.h"
 #include "lib/classify/compiler/net6_hash.h"
 #include "lib/classify/compiler/u16_ranges.h"
 #include "lib/classify/rule_table.h"
@@ -106,15 +105,6 @@ fwstate_module_link_table(
 // Field selectors of the scope rule: the module rule is handed to the
 // classify compilers directly, every attribute through its getter.
 static inline void
-fwstate_rule_get_addrs4(
-	const struct classifier_rule *rule, struct classify_net4_addrs *addrs
-) {
-	const struct fwstate_sync_rule *sync_rule =
-		container_of(rule, struct fwstate_sync_rule, rule);
-	*addrs = sync_rule->addrs4;
-}
-
-static inline void
 fwstate_rule_get_addrs6(
 	const struct classifier_rule *rule, struct classify_net6_addrs *addrs
 ) {
@@ -132,7 +122,6 @@ fwstate_rule_get_src_ports(
 	*ports = sync_rule->src_ports;
 }
 
-CLASSIFY_NET4_HASH_COMPILE(fwstate_net4, fwstate_rule_get_addrs4)
 CLASSIFY_NET6_HASH_COMPILE(fwstate_net6, fwstate_rule_get_addrs6)
 CLASSIFY_U16_RANGES_COMPILE(
 	fwstate_port, struct classify_attr_port, fwstate_rule_get_src_ports
@@ -150,12 +139,9 @@ fwstate_scope_free(
 	classify_attr_net6_hash_free(memory_context, &scope->net6_attr);
 	classifier_fini(&scope->net6_cls, memory_context, rule_count);
 
-	rule_table_free(&scope->net4_rules);
-	classify_attr_net4_hash_free(memory_context, &scope->net4_attr);
-	classifier_fini(&scope->net4_cls, memory_context, rule_count);
-
 	classify_attr_port_free(memory_context, &scope->port_attr);
 	classifier_fini(&scope->port_cls, memory_context, rule_count);
+	vline_free(&scope->port_rule_map);
 
 	memset(scope, 0, sizeof(*scope));
 }
@@ -190,21 +176,6 @@ fwstate_scope_compile(
 		const struct fwstate_sync_rule_input *input = inputs + rule_idx;
 		struct fwstate_sync_rule *rule = rules + rule_idx;
 
-		if (input->addr4_count > 0) {
-			uint8_t(*items)[NET4_LEN] =
-				(uint8_t(*)[NET4_LEN])memory_balloc(
-					memory_context,
-					NET4_LEN * input->addr4_count
-				);
-			if (items == NULL) {
-				goto error;
-			}
-			memcpy(items,
-			       input->addrs4,
-			       NET4_LEN * input->addr4_count);
-			rule->addrs4.items = items;
-			rule->addrs4.count = input->addr4_count;
-		}
 		if (input->addr6_count > 0) {
 			uint8_t(*items)[NET6_LEN] =
 				(uint8_t(*)[NET6_LEN])memory_balloc(
@@ -244,16 +215,6 @@ fwstate_scope_compile(
 	}
 
 	struct fwstate_scope *scope = &config->scope;
-	if (classify_fwstate_net4_compile(
-		    memory_context,
-		    "scope4",
-		    rule_ptrs,
-		    rule_count,
-		    &scope->net4_attr,
-		    &scope->net4_cls
-	    )) {
-		goto error;
-	}
 	if (classify_fwstate_net6_compile(
 		    memory_context,
 		    "scope6",
@@ -274,14 +235,15 @@ fwstate_scope_compile(
 	    )) {
 		goto error;
 	}
-	if (classify_join_rules(
+	// IPv4 frames resolve through the port classes alone: no rule can
+	// name an IPv4 address, so every rule is address-any for them.
+	if (classify_decode(
 		    memory_context,
 		    "scope4",
-		    &scope->net4_cls,
 		    &scope->port_cls,
 		    rule_ptrs,
 		    rule_count,
-		    &scope->net4_rules
+		    &scope->port_rule_map
 	    )) {
 		goto error;
 	}

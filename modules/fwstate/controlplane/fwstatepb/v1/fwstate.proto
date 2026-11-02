@@ -88,15 +88,16 @@ message SyncListenEndpoint {
 }
 
 // One synchronization scope rule: the flows whose source address is
-// exactly one of the named addresses and whose source port inside one
-// of the port ranges are the ones the module syncs. A rule naming
+// exactly one of the named IPv6 addresses and whose source port inside
+// one of the port ranges are the ones the module syncs; IPv4 flows
+// classify by port only. A rule naming
 // neither matches every flow; a config without rules syncs everything.
 //
 // The source addresses classify through hash-indexed exact-match
 // attributes joined with the port attribute - one flat probe per
 // lookup, no prefix semantics.
 message SyncRule {
-  repeated common.commonpb.v1.IPAddress addrs = 1; // Exact source addresses, either family;
+  repeated common.commonpb.v1.IPAddress addrs = 1; // Exact source IPv6 addresses;
   repeated common.filterpb.v1.PortRange src_ports = 2; // Inclusive source port ranges;
 }
 

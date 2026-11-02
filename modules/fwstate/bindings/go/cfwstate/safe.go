@@ -60,9 +60,8 @@ const MinSyncMTU = uint16(C.FWSTATE_SYNC_MIN_MTU)
 // falls inside one of the port spans are the ones the module syncs. A
 // rule naming neither matches every flow.
 type SyncRule struct {
-	// Addrs4 carries one big-endian IPv4 address per entry.
-	Addrs4 [][4]byte
-	// Addrs6 carries one big-endian IPv6 address per entry.
+	// Addrs6 carries one big-endian IPv6 address per entry; IPv4 flows
+	// classify by port only.
 	Addrs6 [][16]byte
 	// SrcPorts carries one inclusive from-to span per source port range.
 	SrcPorts [][2]uint16
@@ -84,20 +83,13 @@ func syncRulesToC(rules []SyncRule) ([]C.struct_fwstate_sync_rule_input, error) 
 	}
 	inputs := make([]C.struct_fwstate_sync_rule_input, len(rules))
 	for idx, rule := range rules {
-		if len(rule.Addrs4) > SyncRuleNetsMax ||
-			len(rule.Addrs6) > SyncRuleNetsMax ||
+		if len(rule.Addrs6) > SyncRuleNetsMax ||
 			len(rule.SrcPorts) > SyncRulePortsMax {
 			return nil, fmt.Errorf(
-				"sync rule %d exceeds the per-rule bounds (%d addresses per family, %d port spans)",
+				"sync rule %d exceeds the per-rule bounds (%d addresses per rule, %d port spans)",
 				idx, SyncRuleNetsMax, SyncRulePortsMax,
 			)
 		}
-		for addrIdx, addr := range rule.Addrs4 {
-			for byteIdx, value := range addr {
-				inputs[idx].addrs4[addrIdx][byteIdx] = C.uint8_t(value)
-			}
-		}
-		inputs[idx].addr4_count = C.uint32_t(len(rule.Addrs4))
 		for addrIdx, addr := range rule.Addrs6 {
 			for byteIdx, value := range addr {
 				inputs[idx].addrs6[addrIdx][byteIdx] = C.uint8_t(value)
