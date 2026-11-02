@@ -282,10 +282,7 @@ func (q *QEMUManager) Start() (bool, error) {
 		}
 	}
 
-	// Drive configuration.
-	args = append(args,
-		"-drive", fmt.Sprintf("file=%s,if=virtio,format=qcow2", overlayPath),
-	)
+	args = append(args, overlayDriveArgs(overlayPath)...)
 
 	// When booting from a template overlay, restore VM state instantly via -loadvm.
 	if fromSnapshot {
@@ -454,6 +451,22 @@ func (q *QEMUManager) Start() (bool, error) {
 	}
 
 	return fromSnapshot, nil
+}
+
+// overlayDriveArgs attaches the VM's writable overlay as its disk, with host
+// flushes turned off.
+//
+// The overlay is scratch state that is deleted with its VM, so durability
+// across a host crash buys nothing. Flushes are not free: the first snapshot
+// saved after a restore copies the restored snapshot's clusters on write, and
+// with flushes on, each metadata update in that copy waits for the host disk,
+// which on a busy shared disk took over two minutes. Pausing the VM still
+// hands QEMU's own caches to the host, so a paused VM's overlay copies
+// consistently.
+func overlayDriveArgs(overlayPath string) []string {
+	return []string{
+		"-drive", fmt.Sprintf("file=%s,if=virtio,format=qcow2,cache=unsafe", overlayPath),
+	}
 }
 
 func (q *QEMUManager) stopAfterStartupError(startErr error) error {
@@ -1252,6 +1265,28 @@ func (q *QEMUManager) setVMReady(ready bool) {
 	q.isReady = ready
 }
 
+const (
+	// snapshotMonitorTimeout bounds saving or loading a VM snapshot.
+	//
+	// Their duration follows the host disk rather than the command: a
+	// snapshot moves the whole guest memory through the overlay, and a busy
+	// shared disk stretched one save past two minutes.
+	snapshotMonitorTimeout = 10 * time.Minute
+	// defaultMonitorTimeout bounds every other monitor command.
+	defaultMonitorTimeout = 120 * time.Second
+)
+
+// monitorTimeout returns how long the monitor may take to answer command.
+func monitorTimeout(command string) time.Duration {
+	verb, _, _ := strings.Cut(command, " ")
+	switch verb {
+	case "savevm", "loadvm":
+		return snapshotMonitorTimeout
+	default:
+		return defaultMonitorTimeout
+	}
+}
+
 // SendMonitorCommand sends a command to the QEMU monitor (HMP) and returns
 // the response. The monitor socket must already be connected via Start().
 // Commands are terminated with a newline; the method waits for the next
@@ -1273,8 +1308,7 @@ func (q *QEMUManager) SendMonitorCommand(cmd string) (string, error) {
 		}
 	}
 
-	// Set a generous timeout for monitor operations (snapshots can be slow).
-	if err := q.monitorConn.SetDeadline(time.Now().Add(120 * time.Second)); err != nil {
+	if err := q.monitorConn.SetDeadline(time.Now().Add(monitorTimeout(cmd))); err != nil {
 		return "", fmt.Errorf("failed to set monitor deadline: %w", err)
 	}
 	defer func() {
