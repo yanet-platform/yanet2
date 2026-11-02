@@ -256,9 +256,18 @@ func (m *recordingModuleOps) UpdateModules(modules []ffi.ModuleConfig) error {
 type recordedModule struct {
 	controlplane.ModuleHandle
 	Token        unsafe.Pointer
+	Updates      [][]cl3b.DestinationFilterRule
 	FreeCalls    int
 	FreeResults  []error
 	Destructions int
+}
+
+func (m *recordedModule) Update(rules []cl3b.DestinationFilterRule) error {
+	if err := m.ModuleHandle.Update(rules); err != nil {
+		return err
+	}
+	m.Updates = append(m.Updates, append([]cl3b.DestinationFilterRule(nil), rules...))
+	return nil
 }
 
 func (m *recordedModule) Free() error {
@@ -796,6 +805,8 @@ func Test_Backend_UpdateModuleConfig_PreservesAcceptedHandles(t *testing.T) {
 			require.Len(t, operations.Submissions, 3)
 			replacement := operations.Modules[2]
 			require.NotNil(t, replacement.Token)
+			require.Len(t, replacement.Updates, 1)
+			require.Empty(t, replacement.Updates[0])
 			require.ElementsMatch(t, []unsafe.Pointer{replacement.Token, unrelated.Token}, operations.Submissions[2])
 			require.Equal(t, []string{"cfg0", "cfg1"}, backend.ListModuleConfigs())
 			var registry []string
@@ -841,6 +852,62 @@ func Test_Backend_UpdateModuleConfig_PreservesAcceptedHandles(t *testing.T) {
 			unrelated.AssertRetired(t)
 		})
 	}
+}
+
+// Test_Backend_UpdateModuleConfig_IdenticalReplayReplacesGeneration
+// verifies that replaying identical content republishes a fresh module
+// generation.
+//
+// The current API intentionally replaces an identical replay as the interim
+// behavior tracked by #2724. The target versioned no-op remains blocked on
+// #2718.
+func Test_Backend_UpdateModuleConfig_IdenticalReplayReplacesGeneration(t *testing.T) {
+	_, agent, harness := newTestBackendFixture(t)
+	operations := &recordingModuleOps{SharedMemoryOps: controlplane.NewSharedMemoryOps(agent)}
+	backend := controlplane.NewBackendWithSharedMemory(operations)
+	require.NoError(t, backend.CreateService(serviceWithRealServer("vs0")))
+
+	config := func() *l3bpb.ModuleConfig {
+		return &l3bpb.ModuleConfig{
+			Name:                   "cfg0",
+			DestinationFilterRules: []*l3bpb.DestinationFilterRule{{Service: "vs0"}},
+		}
+	}
+	generation := harness.PublishedGeneration()
+	require.NoError(t, backend.UpdateModuleConfig(config()))
+	require.Greater(t, harness.PublishedGeneration(), generation)
+	generation = harness.PublishedGeneration()
+	first := operations.Modules[0]
+	require.NotNil(t, first.Token)
+	require.ElementsMatch(t, []unsafe.Pointer{first.Token}, operations.Submissions[0])
+	require.Len(t, first.Updates, 1)
+	require.Len(t, first.Updates[0], 1)
+	require.Empty(t, first.Updates[0][0].Net6s)
+	require.Empty(t, first.Updates[0][0].Net4s)
+	require.Empty(t, first.Updates[0][0].ProtoRanges)
+	require.Equal(t, "vs0", first.Updates[0][0].VirtualService)
+
+	require.NoError(t, backend.UpdateModuleConfig(config()))
+	require.Greater(t, harness.PublishedGeneration(), generation)
+	require.Len(t, operations.Modules, 2)
+	require.Len(t, operations.Submissions, 2)
+	replay := operations.Modules[1]
+	require.NotNil(t, replay.Token)
+	require.NotEqual(t, first.Token, replay.Token)
+	require.ElementsMatch(t, []unsafe.Pointer{replay.Token}, operations.Submissions[1])
+	require.Len(t, replay.Updates, 1)
+	require.Equal(t, first.Updates, replay.Updates)
+	require.Equal(t, []string{"cfg0"}, backend.ListModuleConfigs())
+	var registry []string
+	for _, config := range agent.DPConfig().CPConfigs() {
+		registry = append(registry, config.Type+"/"+config.Name)
+	}
+	require.ElementsMatch(t, []string{"l3b/cfg0"}, registry)
+	require.Zero(t, replay.FreeCalls)
+	require.Zero(t, replay.Destructions)
+	require.Equal(t, 1, first.FreeCalls)
+	require.Equal(t, 1, first.Destructions)
+	first.AssertRetired(t)
 }
 
 // Test_Backend_RuntimeUpdates_AdvanceSnapshot verifies that successful mutations
