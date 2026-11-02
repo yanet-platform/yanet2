@@ -4,7 +4,6 @@ package cfwstate
 //
 //#include "api/agent.h"
 //#include "modules/fwstate/api/fwstate_cp.h"
-//#include "lib/fwstate/config.h"
 //#include "lib/statemap/fwmap.h"
 //#include "lib/fwstate/fwstate_cursor.h"
 //#include "lib/errors/errors.h"
@@ -61,19 +60,23 @@ func NewModuleConfig(
 	defer C.free(unsafe.Pointer(cName))
 
 	var cSync *C.struct_fwstate_sync_config
+	var cEndpoints []C.struct_fwstate_sync_endpoint
+	var cListeners []C.struct_fwstate_sync_listen_endpoint
 	if syncConfig != nil {
-		if len(syncConfig.Endpoints) > MaxSyncEndpoints {
-			return nil, fmt.Errorf(
-				"at most %d sync endpoints are supported, got %d",
-				MaxSyncEndpoints, len(syncConfig.Endpoints),
-			)
-		}
 		cSyncConfig := syncConfig.toC()
 		cSync = &cSyncConfig
+		cEndpoints = syncConfig.endpointsToC()
+		cListeners = syncConfig.listenersToC()
+	}
+	var cEndpointsPtr *C.struct_fwstate_sync_endpoint
+	if len(cEndpoints) > 0 {
+		cEndpointsPtr = &cEndpoints[0]
+	}
+	var cListenersPtr *C.struct_fwstate_sync_listen_endpoint
+	if len(cListeners) > 0 {
+		cListenersPtr = &cListeners[0]
 	}
 
-	// The scope rides with the sync config; the standalone rules
-	// parameter of the C entry stays for the direct construction path.
 	cInputs, err := syncRulesToC(rules)
 	if err != nil {
 		return nil, err
@@ -106,6 +109,10 @@ func NewModuleConfig(
 		(*C.struct_agent)(agent.AsRawPtr()),
 		cName,
 		cSync,
+		cEndpointsPtr,
+		C.uint32_t(len(cEndpoints)),
+		cListenersPtr,
+		C.uint32_t(len(cListeners)),
 		cRules,
 		C.uint32_t(len(cInputs)),
 		cFw4Name,

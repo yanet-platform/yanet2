@@ -18,11 +18,6 @@ const (
 	// matching the width of the C-side uint16 port fields.
 	maxSyncPort uint32 = 65535
 
-	// MaxSyncEndpoints is the largest number of endpoints one config
-	// carries. It mirrors the C FWSTATE_SYNC_ENDPOINTS_MAX bound of the
-	// endpoint array in the shared-memory config.
-	MaxSyncEndpoints = 8
-
 	// Bounds of the synchronization scope, mirroring the C input struct.
 	MaxSyncRules          = 8 * 8
 	MaxSyncRuleNets       = 16
@@ -193,18 +188,6 @@ func (m *SyncConfig) validateEndpointLists() error {
 	}
 	if m.GetNoListeners() && len(m.GetListeners()) > 0 {
 		return errors.New("no_listeners cannot be combined with listeners")
-	}
-	if len(m.GetEndpoints()) > MaxSyncEndpoints {
-		return fmt.Errorf(
-			"at most %d sync endpoints are supported, got %d",
-			MaxSyncEndpoints, len(m.GetEndpoints()),
-		)
-	}
-	if len(m.GetListeners()) > MaxSyncEndpoints {
-		return fmt.Errorf(
-			"at most %d sync listeners are supported, got %d",
-			MaxSyncEndpoints, len(m.GetListeners()),
-		)
 	}
 	for idx, endpoint := range m.GetEndpoints() {
 		if err := validateSyncEndpoint(idx, endpoint); err != nil {

@@ -221,6 +221,32 @@ func Test_FWState_WirePacketWithoutListener(t *testing.T) {
 	require.Empty(t, result.Drop)
 }
 
+// Test_FWState_StashEmission_TwelveEndpoints verifies that a config may
+// name more endpoints than any former fixed bound: one local event is
+// emitted once per endpoint, twelve copies in total.
+func Test_FWState_StashEmission_TwelveEndpoints(t *testing.T) {
+	cpModule := newFWStateFixture(t, 8*uint64(syncRecordSize))
+	SetSyncManyEndpoints(cpModule, 11)
+
+	worker := cpModule.Worker(0)
+	nextRound(worker)
+	require.Equal(t, 1, stashEvents(cpModule, worker, v6Event(7000)))
+
+	result := runConfig(cpModule, worker, false)
+	require.Len(t, result.Output, 12, "every endpoint gets one copy")
+	require.Empty(t, result.Drop)
+
+	seen := map[uint16]bool{}
+	for _, raw := range result.Output {
+		_, port, _ := syncPayload(raw)
+		seen[port] = true
+	}
+	require.True(t, seen[9999], "the multicast endpoint emitted")
+	for idx := range 11 {
+		require.True(t, seen[uint16(10000+idx)], "unicast endpoint %d emitted", idx)
+	}
+}
+
 // Test_FWState_ScopeFiltersSync verifies that a scoped config syncs only
 // the flows its rules name: a stashed event inside the scope is emitted,
 // one outside stays local, and an external frame outside the scope is

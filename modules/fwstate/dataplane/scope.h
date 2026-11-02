@@ -1,6 +1,6 @@
 #pragma once
 
-#include "types.h"
+#include "lib/fwstate/types.h"
 
 #include "lib/classify/classifiers/net4_hash.h"
 #include "lib/classify/classifiers/net6_hash.h"

@@ -5,7 +5,18 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include "config.h"
+// Max TTL (ns) storable in fw_state_value::last_ttl.
+#define FWSTATE_TTL48_MAX ((uint64_t)((1ULL << 48) - 1))
+
+// Connection timeouts of the fwstate state machinery.
+struct fwstate_timeouts {
+	uint64_t tcp_syn_ack; // default
+	uint64_t tcp_syn;     // default
+	uint64_t tcp_fin;     // default
+	uint64_t tcp;	      // default (120)
+	uint64_t udp;	      // 30
+	uint64_t default_;    // 16
+};
 
 #define FW_STATE_ADDR_TYPE_IP4 4
 #define FW_STATE_ADDR_TYPE_IP6 6

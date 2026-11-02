@@ -5,12 +5,12 @@
 
 #include "lib/classify/compiler/u16_ranges.h"
 #include "lib/errors/errors.h"
+#include "modules/fwstate/dataplane/config.h"
 
 #include <stdint.h>
 
 struct agent;
 struct cp_module;
-struct fwstate_sync_config;
 
 // Bounds of one synchronization scope rule and of the rule list. The
 // control plane refuses larger lists before the config is built.
@@ -37,12 +37,12 @@ fwstate_config_set_defaults(struct fwstate_sync_config *config);
 // Allocate an fwstate module config fully built in one step: a config
 // handle is created once and never updated afterwards.
 //
-// sync_config is the sync config to install, or NULL to
-// keep the defaults.
-//
-// rules is the synchronization scope - the flows whose state the module
-// syncs - in the flat input form above, or NULL with rule_count zero
-// for no scope: an unscoped module syncs everything.
+// sync_config carries the scalar settings - timeouts, suppression
+// window, sync MTU - or NULL to keep the defaults; its array members
+// are ignored. The endpoints, listeners and rules arrive as separately
+// sized arrays, copied into the config's memory tree with no fixed
+// bound; endpoints and listeners may be NULL with zero counts, and
+// rules likewise leaves an unscoped module that syncs everything.
 //
 // fw4_map_name and fw6_map_name name standalone fwstate_map_v4 /
 // fwstate_map_v6 objects whose fwtables the module inserts synced state
@@ -58,6 +58,10 @@ fwstate_module_config_new(
 	struct agent *agent,
 	const char *name,
 	const struct fwstate_sync_config *sync_config,
+	const struct fwstate_sync_endpoint *endpoints,
+	uint32_t endpoint_count,
+	const struct fwstate_sync_listen_endpoint *listeners,
+	uint32_t listener_count,
 	const struct fwstate_sync_rule_input *rules,
 	uint32_t rule_count,
 	const char *fw4_map_name,
@@ -71,6 +75,3 @@ fwstate_module_config_new(
 // the module; the caller must keep its handle and retry later.
 int
 fwstate_module_config_free(struct cp_module *cp_module, yanet_error **err);
-
-struct fwstate_sync_config
-fwstate_config_get_sync_config(const struct cp_module *cp_module);

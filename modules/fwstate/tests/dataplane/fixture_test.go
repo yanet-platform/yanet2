@@ -258,6 +258,25 @@ func SetSyncUnicastListener(config *testConfig) {
 	}}
 }
 
+// SetSyncManyEndpoints replaces the endpoints with count unicast ones
+// before publication, for exercising lists beyond any former bound.
+func SetSyncManyEndpoints(config *testConfig, count int) {
+	endpoints := make([]modulefwstate.SyncEndpoint, 0, count+1)
+	endpoints = append(endpoints, modulefwstate.SyncEndpoint{
+		SrcAddr: netip.MustParseAddr("fd00::1").As16(),
+		DstAddr: netip.MustParseAddr("ff02::1").As16(),
+		Port:    9999,
+	})
+	for idx := range count {
+		endpoints = append(endpoints, modulefwstate.SyncEndpoint{
+			SrcAddr: netip.MustParseAddr("fd00::1").As16(),
+			DstAddr: netip.MustParseAddr("2001:db8::1").As16(),
+			Port:    uint16(10000 + idx),
+		})
+	}
+	config.Sync.Endpoints = endpoints
+}
+
 // SetSyncUnicastDestination enables the unicast endpoint in addition to the
 // configured ones before publication.
 func SetSyncUnicastDestination(config *testConfig) {

@@ -1,6 +1,5 @@
 #pragma once
 
-#include "config.h"
 #include "stash.h"
 #include "types.h"
 #include <stdbool.h>
@@ -17,11 +16,6 @@ enum sync_packet_direction {
 	SYNC_EGRESS,
 	// NOLINTEND(readability-identifier-naming)
 };
-
-static inline bool
-fwstate_sync_endpoint_enabled(const struct fwstate_sync_endpoint *endpoint) {
-	return endpoint->port != 0;
-}
 
 // Wire overhead of one sync packet on top of its frames: the IPv6 and UDP
 // headers counted by the sync MTU.

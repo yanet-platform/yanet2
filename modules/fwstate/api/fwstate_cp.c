@@ -16,14 +16,16 @@
 #include "lib/controlplane/config/zone.h"
 #include "lib/dataplane/config/zone.h"
 #include "lib/errors/errors.h"
-#include "lib/fwstate/config.h"
 #include "lib/fwstate/stash.h"
 #include "lib/fwstate/sync.h"
+#include "lib/fwstate/types.h"
 #include "modules/fwstate/dataplane/config.h"
 #include "objects/fwstate/api/fwstate_map_v4_object.h"
 #include "objects/fwstate/api/fwstate_map_v6_object.h"
 
-// Set default timeout values for fwstate configuration
+// Set default timeout values for fwstate configuration; the arrays
+// stay empty, and a raw-zeroed pointer field reads as NULL under
+// ADDR_OF, so the destroy path stays safe.
 void
 fwstate_config_set_defaults(struct fwstate_sync_config *config) {
 	memset(config, 0, sizeof(struct fwstate_sync_config));
@@ -313,6 +315,10 @@ static int
 fwstate_module_setup(
 	struct fwstate_module_config *config,
 	const struct fwstate_sync_config *sync_config,
+	const struct fwstate_sync_endpoint *endpoints,
+	uint32_t endpoint_count,
+	const struct fwstate_sync_listen_endpoint *listeners,
+	uint32_t listener_count,
 	const struct fwstate_sync_rule_input *rules,
 	uint32_t rule_count,
 	const char *fw4_map_name,
@@ -320,9 +326,54 @@ fwstate_module_setup(
 	yanet_error **err
 ) {
 	struct cp_module *cp_module = &config->cp_module;
+	struct memory_context *memory_context =
+		&cp_module->entity.memory_context;
 
-	if (sync_config != NULL) {
-		config->sync_config = *sync_config;
+	// The scalar settings arrive in the sync config; its array members
+	// are the caller's and never copied. The endpoints and listeners
+	// land in freshly sized arrays of the config's memory tree.
+	config->sync_config.timeouts = sync_config != NULL
+					       ? sync_config->timeouts
+					       : config->sync_config.timeouts;
+	config->sync_config.sync_suppress_timeout =
+		sync_config != NULL ? sync_config->sync_suppress_timeout
+				    : config->sync_config.sync_suppress_timeout;
+	config->sync_config.sync_mtu = sync_config != NULL
+					       ? sync_config->sync_mtu
+					       : config->sync_config.sync_mtu;
+
+	if (endpoint_count > 0) {
+		struct fwstate_sync_endpoint *copy =
+			(struct fwstate_sync_endpoint *)memory_balloc(
+				memory_context,
+				sizeof(struct fwstate_sync_endpoint) *
+					endpoint_count
+			);
+		if (copy == NULL) {
+			return -1;
+		}
+		memcpy(copy,
+		       endpoints,
+		       sizeof(struct fwstate_sync_endpoint) * endpoint_count);
+		SET_OFFSET_OF(&config->sync_config.endpoints, copy);
+		config->sync_config.endpoint_count = endpoint_count;
+	}
+	if (listener_count > 0) {
+		struct fwstate_sync_listen_endpoint *copy =
+			(struct fwstate_sync_listen_endpoint *)memory_balloc(
+				memory_context,
+				sizeof(struct fwstate_sync_listen_endpoint) *
+					listener_count
+			);
+		if (copy == NULL) {
+			return -1;
+		}
+		memcpy(copy,
+		       listeners,
+		       sizeof(struct fwstate_sync_listen_endpoint) *
+			       listener_count);
+		SET_OFFSET_OF(&config->sync_config.listeners, copy);
+		config->sync_config.listener_count = listener_count;
 	}
 
 	if (fwstate_scope_compile(
@@ -363,6 +414,10 @@ fwstate_module_config_new(
 	struct agent *agent,
 	const char *name,
 	const struct fwstate_sync_config *sync_config,
+	const struct fwstate_sync_endpoint *endpoints,
+	uint32_t endpoint_count,
+	const struct fwstate_sync_listen_endpoint *listeners,
+	uint32_t listener_count,
 	const struct fwstate_sync_rule_input *rules,
 	uint32_t rule_count,
 	const char *fw4_map_name,
@@ -413,6 +468,10 @@ fwstate_module_config_new(
 	memset(&config->scope, 0, sizeof(config->scope));
 	SET_OFFSET_OF(&config->rules, NULL);
 	config->rule_count = 0;
+	SET_OFFSET_OF(&config->sync_config.endpoints, NULL);
+	config->sync_config.endpoint_count = 0;
+	SET_OFFSET_OF(&config->sync_config.listeners, NULL);
+	config->sync_config.listener_count = 0;
 	fwstate_config_set_defaults(&config->sync_config);
 
 	// Register module-level counters.
@@ -501,6 +560,10 @@ fwstate_module_config_new(
 	if (fwstate_module_setup(
 		    config,
 		    sync_config,
+		    endpoints,
+		    endpoint_count,
+		    listeners,
+		    listener_count,
 		    rules,
 		    rule_count,
 		    fw4_map_name,
@@ -552,13 +615,4 @@ fwstate_module_config_free(struct cp_module *cp_module, yanet_error **err) {
 	fwstate_module_config_destroy(cp_module);
 	agent_destroy_released(owner);
 	return 0;
-}
-
-struct fwstate_sync_config
-fwstate_config_get_sync_config(const struct cp_module *cp_module) {
-	struct fwstate_module_config *config = container_of(
-		cp_module, struct fwstate_module_config, cp_module
-	);
-
-	return config->sync_config;
 }

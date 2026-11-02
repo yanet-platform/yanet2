@@ -19,7 +19,6 @@
 #include "lib/dataplane/pipeline/econtext.h"
 #include "lib/dataplane/time/clock.h"
 #include "lib/dataplane/worker/worker.h"
-#include "lib/fwstate/scope.h"
 #include "lib/fwstate/stash.h"
 #include "lib/fwstate/stash_ectx.h"
 #include "lib/fwstate/sync.h"
@@ -28,6 +27,7 @@
 #include "lib/statemap/fwtable.h"
 #include "objects/fwstate/api/fwstate_map_v4_object.h"
 #include "objects/fwstate/api/fwstate_map_v6_object.h"
+#include "scope.h"
 
 #include "config.h"
 #include "dataplane.h"
@@ -122,17 +122,13 @@ is_fw_state_sync_packet(
 	);
 
 	// Port values are stored in network byte order. The packet must name
-	// one configured listener by destination port and address. The count
-	// is bounded by the controlplane but never trusted past the array
-	// size.
+	// one configured listener by destination port and address.
 	bool listener_matched = false;
-	uint32_t listener_count = sync_config->listener_count;
-	if (listener_count > FWSTATE_SYNC_ENDPOINTS_MAX) {
-		listener_count = FWSTATE_SYNC_ENDPOINTS_MAX;
-	}
-	for (uint32_t idx = 0; idx < listener_count; ++idx) {
+	const struct fwstate_sync_listen_endpoint *listeners =
+		ADDR_OF(&sync_config->listeners);
+	for (uint32_t idx = 0; idx < sync_config->listener_count; ++idx) {
 		const struct fwstate_sync_listen_endpoint *listener =
-			&sync_config->listeners[idx];
+			&listeners[idx];
 		if (listener->port == 0) {
 			continue;
 		}
@@ -497,10 +493,12 @@ struct fwstate_emitter {
 	const struct fwstate_sync_config *sync_config;
 	const struct fwstate_counters *counters;
 	const struct fwstate_scope *scope;
-	// Enabled endpoints, in configuration order; emission addresses one
-	// copy of every built packet to each of them.
-	const struct fwstate_sync_endpoint
-		*endpoints[FWSTATE_SYNC_ENDPOINTS_MAX];
+	// Whether any emission endpoint is enabled; the batch flushes only
+	// then.
+	bool emit_any;
+	// The config's endpoints, in configuration order; emission addresses
+	// one copy of every built packet to each enabled one.
+	const struct fwstate_sync_endpoint *endpoints;
 	uint32_t endpoint_count;
 	struct fwstate_sync_batch batch;
 };
@@ -515,36 +513,42 @@ static void
 fwstate_emit_sync_packet(
 	struct fwstate_emitter *emitter, struct packet *packet
 ) {
-	const uint32_t count = emitter->endpoint_count;
-
-	struct packet *copies[FWSTATE_SYNC_ENDPOINTS_MAX] = {packet};
-	for (uint32_t idx = 1; idx < count; ++idx) {
-		struct packet *copy = worker_clone_packet(
-			emitter->dp_worker,
-			packet,
-			emitter->module_ectx->packet_recirc_limit
-		);
-		if (unlikely(copy == NULL)) {
-			emitter->counters->sync_alloc_failed[0] += 1;
-		}
-		copies[idx] = copy;
-	}
-
-	for (uint32_t idx = 0; idx < count; ++idx) {
-		struct packet *copy = copies[idx];
-		if (copy == NULL) {
+	// The original packet serves the first endpoint that accepts it and
+	// every further endpoint gets a clone; a disabled endpoint or a
+	// failed clone or finalize skips that endpoint's copy alone, and the
+	// original is freed when no endpoint consumed it.
+	bool consumed = false;
+	for (uint32_t idx = 0; idx < emitter->endpoint_count; ++idx) {
+		const struct fwstate_sync_endpoint *endpoint =
+			&emitter->endpoints[idx];
+		if (endpoint->port == 0) {
 			continue;
 		}
-		if (!fwstate_finalize_internal_sync(
-			    copy, emitter->endpoints[idx]
-		    )) {
+
+		struct packet *copy = packet;
+		if (consumed) {
+			copy = worker_clone_packet(
+				emitter->dp_worker,
+				packet,
+				emitter->module_ectx->packet_recirc_limit
+			);
+			if (unlikely(copy == NULL)) {
+				emitter->counters->sync_alloc_failed[0] += 1;
+				continue;
+			}
+		}
+		if (!fwstate_finalize_internal_sync(copy, endpoint)) {
 			worker_packet_free(copy);
 			continue;
 		}
+		consumed = true;
 		emitter->counters->internal_forwarded[0] += 1;
 		emitter->counters->internal_forwarded[1] +=
 			packet_to_mbuf(copy)->pkt_len;
 		packet_front_output(emitter->packet_front, copy);
+	}
+	if (!consumed) {
+		worker_packet_free(packet);
 	}
 }
 
@@ -630,7 +634,7 @@ fwstate_consume_records(
 	const struct fwstate_family_counters *counters
 ) {
 	uint16_t worker_idx = (uint16_t)emitter->dp_worker->idx;
-	bool emit = emitter->endpoint_count != 0;
+	bool emit = emitter->emit_any;
 
 	uint32_t count = stash->slot->count;
 	for (uint32_t idx = *processed; idx < count; ++idx) {
@@ -829,21 +833,17 @@ fwstate_handle_packets(
 	emitter.sync_config = sync_config;
 	emitter.counters = counters;
 	emitter.scope = &fwstate_module->scope;
-	// Only the enabled endpoints are collected; endpoint_count is bounded
-	// by the controlplane but never trusted past the array size.
-	emitter.endpoint_count = 0;
-	uint32_t config_endpoints = sync_config->endpoint_count;
-	if (config_endpoints > FWSTATE_SYNC_ENDPOINTS_MAX) {
-		config_endpoints = FWSTATE_SYNC_ENDPOINTS_MAX;
+	// Emission skips the disabled entries at emit time; batching only
+	// needs to know whether any endpoint is enabled at all.
+	emitter.endpoints = ADDR_OF(&sync_config->endpoints);
+	emitter.endpoint_count = sync_config->endpoint_count;
+	bool any_enabled = false;
+	for (uint32_t idx = 0; idx < emitter.endpoint_count && !any_enabled;
+	     ++idx) {
+		any_enabled =
+			fwstate_sync_endpoint_enabled(&emitter.endpoints[idx]);
 	}
-	for (uint32_t idx = 0; idx < config_endpoints; ++idx) {
-		const struct fwstate_sync_endpoint *endpoint =
-			&sync_config->endpoints[idx];
-		if (!fwstate_sync_endpoint_enabled(endpoint)) {
-			continue;
-		}
-		emitter.endpoints[emitter.endpoint_count++] = endpoint;
-	}
+	emitter.emit_any = any_enabled;
 	emitter.batch.count = 0;
 	emitter.batch.limit =
 		fwstate_sync_frames_per_packet(sync_config->sync_mtu);

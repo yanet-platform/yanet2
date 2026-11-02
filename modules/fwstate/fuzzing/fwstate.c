@@ -13,7 +13,6 @@
 
 #include "lib/counters/counters.h"
 #include "lib/dataplane/time/clock.h"
-#include "lib/fwstate/config.h"
 #include "lib/fwstate/stash.h"
 #include "lib/fwstate/types.h"
 #include "lib/statemap/fwmap.h"
@@ -339,13 +338,27 @@ fwstate_test_config(struct cp_module **cp_module) {
 	uint8_t multicast_addr[16] = {
 		0xff, 0x02, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x01
 	};
+	struct fwstate_sync_endpoint *endpoint =
+		(struct fwstate_sync_endpoint *)memory_balloc(
+			&fuzz_params.mctx, sizeof(struct fwstate_sync_endpoint)
+		);
+	struct fwstate_sync_listen_endpoint *listener =
+		(struct fwstate_sync_listen_endpoint *)memory_balloc(
+			&fuzz_params.mctx,
+			sizeof(struct fwstate_sync_listen_endpoint)
+		);
+	if (endpoint == NULL || listener == NULL) {
+		return -ENOMEM;
+	}
+	memcpy(endpoint->src_addr, src_addr, 16);
+	memcpy(endpoint->dst_addr, multicast_addr, 16);
+	endpoint->port = rte_cpu_to_be_16(9999);
+	SET_OFFSET_OF(&config->sync_config.endpoints, endpoint);
 	config->sync_config.endpoint_count = 1;
-	memcpy(config->sync_config.endpoints[0].src_addr, src_addr, 16);
-	memcpy(config->sync_config.endpoints[0].dst_addr, multicast_addr, 16);
-	config->sync_config.endpoints[0].port = rte_cpu_to_be_16(9999);
+	memcpy(listener->dst_addr, multicast_addr, 16);
+	listener->port = rte_cpu_to_be_16(9999);
+	SET_OFFSET_OF(&config->sync_config.listeners, listener);
 	config->sync_config.listener_count = 1;
-	memcpy(config->sync_config.listeners[0].dst_addr, multicast_addr, 16);
-	config->sync_config.listeners[0].port = rte_cpu_to_be_16(9999);
 
 	// Set timeouts
 	config->sync_config.timeouts.tcp_syn_ack = 120000000000ULL;

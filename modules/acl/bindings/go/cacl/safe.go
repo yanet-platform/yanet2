@@ -1,7 +1,7 @@
 package cacl
 
 //#include "modules/acl/api/controlplane.h"
-//#include "lib/fwstate/config.h"
+//#include "lib/fwstate/types.h"
 import "C"
 
 import (

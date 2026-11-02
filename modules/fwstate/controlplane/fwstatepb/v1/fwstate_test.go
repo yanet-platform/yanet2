@@ -327,32 +327,7 @@ func Test_SyncConfig_ValidateFields_RejectsUnusableValues(t *testing.T) {
 			},
 			message: "no_listeners cannot be combined with listeners",
 		},
-		{
-			name: "listener list above the bound",
-			config: &SyncConfig{
-				Listeners: func() []*SyncListenEndpoint {
-					listeners := make([]*SyncListenEndpoint, MaxSyncEndpoints+1)
-					for idx := range listeners {
-						listeners[idx] = &SyncListenEndpoint{Port: proto.Uint32(1)}
-					}
-					return listeners
-				}(),
-			},
-			message: "at most 8 sync listeners are supported, got 9",
-		},
-		{
-			name: "endpoint list above the bound",
-			config: &SyncConfig{
-				Endpoints: func() []*SyncEndpoint {
-					endpoints := make([]*SyncEndpoint, MaxSyncEndpoints+1)
-					for idx := range endpoints {
-						endpoints[idx] = &SyncEndpoint{Port: proto.Uint32(1)}
-					}
-					return endpoints
-				}(),
-			},
-			message: "at most 8 sync endpoints are supported, got 9",
-		},
+
 		{
 			name: "addresses without a port",
 			config: &SyncConfig{Endpoints: []*SyncEndpoint{

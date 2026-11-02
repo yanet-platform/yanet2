@@ -3,6 +3,7 @@
 #define FWSTATE_MODULE_NAME "fwstate"
 
 #include "common/filter_views.h"
+#include "common/memory.h"
 #include "common/network.h"
 
 #include "lib/classify/classifiers/net4_hash.h"
@@ -15,8 +16,107 @@
 #include "lib/classify/rule_table.h"
 #include "lib/controlplane/config/zone.h"
 
-#include "lib/fwstate/config.h"
+#include "lib/fwstate/types.h"
 #include "objects/fwstate/api/fwstate_map_object.h"
+
+/**
+ * FWState synchronization configuration, owned by the module.
+ *
+ * The endpoints and listeners are dynamically sized arrays in the
+ * config's memory tree: the control plane allocates exactly what the
+ * configuration names, with no fixed bound.
+ */
+
+/**
+ * One emission endpoint: the source and destination IPv6 addresses and
+ * the destination port of locally emitted sync packets.
+ *
+ * The Ethernet header of emitted packets stays zeroed: the module
+ * downstream of fwstate, route, resolves and stamps both MAC addresses.
+ */
+struct fwstate_sync_endpoint {
+	// IPv6 source stamped on packets emitted toward dst_addr.
+	uint8_t src_addr[16];
+
+	// IPv6 destination of emitted packets.
+	uint8_t dst_addr[16];
+
+	/**
+	 * Destination port in network byte order (big-endian). Stored in BE
+	 * so it can be used directly in UDP header fields without
+	 * conversion. The controlplane performs the host-to-network
+	 * conversion when populating this field. Zero disables the
+	 * endpoint.
+	 */
+	uint16_t port;
+};
+
+/**
+ * One listener: a destination an incoming packet must name by IPv6
+ * address and UDP port to be claimed as external sync.
+ *
+ * Emission and reception are independent contracts: a config may emit
+ * to any destinations while listening on others, listen without
+ * emitting, or emit without listening. An empty listener list claims
+ * nothing. Nothing distinguishes a listener address as multicast; a
+ * unicast listener names the router's own address and receives
+ * point-to-point sync.
+ */
+struct fwstate_sync_listen_endpoint {
+	// IPv6 destination matched on the wire.
+	uint8_t dst_addr[16];
+
+	/**
+	 * Destination port in network byte order (big-endian), compared
+	 * with udp_hdr->dst_port without conversion. The controlplane
+	 * performs the host-to-network conversion when populating this
+	 * field. Zero disables the listener.
+	 */
+	uint16_t port;
+};
+
+// Reports whether one endpoint participates in emission; a zero port
+// disables it.
+static inline bool
+fwstate_sync_endpoint_enabled(const struct fwstate_sync_endpoint *endpoint) {
+	return endpoint->port != 0;
+}
+
+// Byte offsets of the array members inside struct fwstate_sync_config:
+// FFI consumers receive the struct by value and locate the arrays
+// behind its offset-pointer members through these.
+#include <stddef.h>
+#define FWSTATE_SYNC_ENDPOINTS_OFF                                             \
+	offsetof(struct fwstate_sync_config, endpoints)
+#define FWSTATE_SYNC_LISTENERS_OFF                                             \
+	offsetof(struct fwstate_sync_config, listeners)
+
+struct fwstate_sync_config {
+	// The emission endpoints, endpoint_count of them, allocated in the
+	// config's memory tree.
+	struct fwstate_sync_endpoint *endpoints;
+	uint32_t endpoint_count;
+
+	// The receive endpoints, listener_count of them.
+	struct fwstate_sync_listen_endpoint *listeners;
+	uint32_t listener_count;
+
+	struct fwstate_timeouts timeouts;
+
+	// Sync suppression window in nanoseconds. A sync frame for an
+	// already alive entry whose new expiry deadline lands within this
+	// window of the entry's current deadline is discarded (the fwmap
+	// record is left untouched), debouncing refreshes for frequently
+	// touched sessions. Every entry TTL is inflated by this value so
+	// the effective keep-alive never falls below the configured
+	// timeout. Zero disables suppression.
+	uint64_t sync_suppress_timeout;
+
+	// Largest IPv6 packet, headers included, of one locally emitted
+	// sync packet; it bounds how many frames a packet batches. Zero
+	// selects the default of 1500.
+	uint16_t sync_mtu;
+};
 
 // Sentinel for "no object link at this slot". object_link_get_address
 // returns NULL for any index >= object_link_count, so a config with no
