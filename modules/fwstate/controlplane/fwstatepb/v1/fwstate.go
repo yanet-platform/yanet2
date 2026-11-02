@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net/netip"
+	"time"
 
 	fwstatemappb "github.com/yanet-platform/yanet2/objects/fwstate/controlplane/fwstatemappb/v1"
 
@@ -36,7 +37,44 @@ const (
 
 	// maxSyncMTU matches the width of the C-side uint16 sync_mtu field.
 	maxSyncMTU uint32 = 65535
+
+	// defaultTCPTimeout is the timeout of every TCP state in a new config.
+	// It mirrors the C FW_STATE_DEFAULT_TIMEOUT.
+	defaultTCPTimeout = uint64(120 * time.Second)
+
+	// defaultUDPTimeout and defaultTimeout are the UDP and fallback
+	// timeouts of a new config.
+	defaultUDPTimeout = uint64(30 * time.Second)
+	defaultTimeout    = uint64(16 * time.Second)
+
+	// defaultSyncMTU is the sync MTU of a new config, which a zero sync MTU
+	// also selects. It mirrors the C FWSTATE_SYNC_DEFAULT_MTU.
+	defaultSyncMTU uint32 = 1500
 )
+
+// DefaultSyncConfig returns the sync settings a new module config starts
+// with.
+//
+// It names no endpoint and carries the production timeouts and sync MTU,
+// with every scalar present, as the module reports a fresh config. The
+// values mirror the defaults the C module installs, so a consumer can build
+// a complete config on them without the native bindings.
+func DefaultSyncConfig() *SyncConfig {
+	return &SyncConfig{
+		SrcAddr:             &commonpb.IPAddress{Addr: make([]byte, syncAddrLen)},
+		DstEther:            commonpb.NewMACAddressEUI48([6]byte{}),
+		PortMulticast:       new(uint32(0)),
+		PortUnicast:         new(uint32(0)),
+		TcpSynAck:           new(defaultTCPTimeout),
+		TcpSyn:              new(defaultTCPTimeout),
+		TcpFin:              new(defaultTCPTimeout),
+		Tcp:                 new(defaultTCPTimeout),
+		Udp:                 new(defaultUDPTimeout),
+		Default:             new(defaultTimeout),
+		SyncSuppressTimeout: new(uint64(0)),
+		SyncMtu:             new(defaultSyncMTU),
+	}
+}
 
 // Validate checks the values an update carries.
 //
