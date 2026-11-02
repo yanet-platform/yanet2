@@ -78,11 +78,13 @@ const errorReasonMetadataKey = "x-yanet-error-reason"
 const errorReasonServiceUnregistered = "service-unregistered"
 
 type gatewayOptions struct {
-	Services    []serviceEntry
-	Log         *zap.Logger
-	LogLevel    *zap.AtomicLevel
-	Listener    net.Listener
-	TLSListener net.Listener
+	Services      []serviceEntry
+	Log           *zap.Logger
+	LogLevel      *zap.AtomicLevel
+	Listener      net.Listener
+	TLSListener   net.Listener
+	HTTPListener  net.Listener
+	HTTPSListener net.Listener
 }
 
 func newGatewayOptions() *gatewayOptions {
@@ -150,6 +152,34 @@ func WithTLSListener(listener net.Listener) GatewayOption {
 	}
 }
 
+// WithHTTPListener hands the Gateway an already-open listener to serve HTTP
+// on instead of binding the HTTP endpoint the config names.
+//
+// It stands in for server.http.endpoint and serves plaintext, or for the
+// deprecated server.http_endpoint, which serves TLS while the deprecated
+// server.tls is set; with neither the HTTP section nor that endpoint it
+// serves plaintext. Run serves this listener directly and never calls
+// net.Listen for it. The HTTP server closes it when it shuts down — close
+// it yourself only if Run never serves it.
+func WithHTTPListener(listener net.Listener) GatewayOption {
+	return func(o *gatewayOptions) {
+		o.HTTPListener = listener
+	}
+}
+
+// WithHTTPSListener hands the Gateway an already-open listener to serve
+// HTTPS on instead of binding server.http.tls.endpoint.
+//
+// It requires the server.http.tls section, whose certificate it serves.
+// Run serves this listener directly and never calls net.Listen for it. The
+// HTTP server closes it when it shuts down — close it yourself only if Run
+// never serves it.
+func WithHTTPSListener(listener net.Listener) GatewayOption {
+	return func(o *gatewayOptions) {
+		o.HTTPSListener = listener
+	}
+}
+
 // serviceRunner runs one hosted Service for the gateway's lifetime.
 //
 // The gateway starts every runner, waits for every runner to become ready
@@ -195,6 +225,12 @@ type Gateway struct {
 	releaseLoopback func()
 	grpcListeners   []grpcListener
 	http            ListenerConfig
+	// httpListener is the injected plaintext HTTP listener, nil when Run
+	// binds the configured endpoint.
+	httpListener net.Listener
+	// httpsListener is the injected HTTPS listener, nil when Run binds the
+	// configured endpoint.
+	httpsListener net.Listener
 	// crossOrigin rejects cross-origin browser requests to the HTTP server
 	// from every origin but the trusted ones.
 	crossOrigin *http.CrossOriginProtection
@@ -259,6 +295,19 @@ func NewGateway(cfg Config, options ...GatewayOption) (*Gateway, error) {
 	plaintext := listener != nil || plan.GRPC.Endpoint != ""
 	if !plaintext && plan.GRPC.TLS == nil {
 		return nil, errors.New("server.grpc needs an endpoint or a tls listener")
+	}
+
+	// An injected HTTPS listener stands in for the endpoint of the HTTPS
+	// section and serves that section's certificate.
+	if opts.HTTPSListener != nil && (cfg.Server.HTTP == nil || cfg.Server.HTTP.TLS == nil) {
+		return nil, errors.New("HTTPS listener requires server.http.tls")
+	}
+
+	// The deprecated HTTP endpoint serves TLS while the deprecated TLS
+	// material is set, and so does a listener injected in its place.
+	httpListener, httpsListener := opts.HTTPListener, opts.HTTPSListener
+	if cfg.Server.HTTP == nil && plan.HTTP.TLS != nil {
+		httpListener, httpsListener = nil, opts.HTTPListener
 	}
 
 	// Only the gRPC TLS server bounds connection age, so an age given to
@@ -337,10 +386,14 @@ func NewGateway(cfg Config, options ...GatewayOption) (*Gateway, error) {
 
 	// A plaintext HTTP listener stays a valid choice under an active policy,
 	// but no client certificate reaches the gateway over it.
-	if authManager.Mode() != auth.ModeDisabled && plan.HTTP.Endpoint != "" {
+	plaintextHTTP := plan.HTTP.Endpoint
+	if httpListener != nil {
+		plaintextHTTP = httpListener.Addr().String()
+	}
+	if authManager.Mode() != auth.ModeDisabled && plaintextHTTP != "" {
 		log.Warn("plaintext http listener carries no client certificates, browser calls over it are anonymous",
 			zap.String("mode", string(authManager.Mode())),
-			zap.String("endpoint", plan.HTTP.Endpoint),
+			zap.String("endpoint", plaintextHTTP),
 		)
 	}
 
@@ -646,6 +699,8 @@ func NewGateway(cfg Config, options ...GatewayOption) (*Gateway, error) {
 		releaseLoopback:   releaseLoopback,
 		grpcListeners:     grpcListeners,
 		http:              plan.HTTP,
+		httpListener:      httpListener,
+		httpsListener:     httpsListener,
 		crossOrigin:       crossOrigin,
 		httpsCertificates: httpsCertificates,
 		clientCAs:         clientCAs,
@@ -725,7 +780,7 @@ func (m *Gateway) Run(ctx context.Context) error {
 	wg.Go(func() error {
 		return serve(m.loopbackServer, m.memoryListener)
 	})
-	if m.http.Serves() {
+	if m.http.Serves() || m.httpListener != nil {
 		wg.Go(func() error {
 			return m.runHTTPServer(ctx)
 		})
@@ -902,15 +957,15 @@ func (m *Gateway) runHTTPServer(ctx context.Context) error {
 	}
 
 	var listeners []httpListener
-	if endpoint := m.http.Endpoint; endpoint != "" {
-		listener, err := net.Listen("tcp", endpoint)
+	if m.httpListener != nil || m.http.Endpoint != "" {
+		listener, err := listenUnlessInjected(m.httpListener, m.http.Endpoint)
 		if err != nil {
 			return fmt.Errorf("failed to serve: %w", err)
 		}
 		listeners = append(listeners, httpListener{Scheme: "http", Listener: listener, Serve: server.Serve})
 	}
 	if config := m.http.TLS; config != nil {
-		listener, err := net.Listen("tcp", config.Endpoint.Unwrap())
+		listener, err := listenUnlessInjected(m.httpsListener, config.Endpoint.Unwrap())
 		if err != nil {
 			return fmt.Errorf("failed to serve: %w", err)
 		}
@@ -960,4 +1015,14 @@ func (m *Gateway) runHTTPServer(ctx context.Context) error {
 	}
 
 	return group.Wait()
+}
+
+// listenUnlessInjected returns the injected listener, or binds the endpoint
+// when none was injected.
+func listenUnlessInjected(injected net.Listener, endpoint string) (net.Listener, error) {
+	if injected != nil {
+		return injected, nil
+	}
+
+	return net.Listen("tcp", endpoint)
 }
