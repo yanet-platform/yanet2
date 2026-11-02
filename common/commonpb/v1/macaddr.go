@@ -1,10 +1,10 @@
 package commonpb
 
 import (
-	"encoding/binary"
 	"encoding/json"
 	"fmt"
-	"net"
+
+	"github.com/yanet-platform/xnetip"
 )
 
 // eui48TextLen is the length of the separated EUI-48 text form,
@@ -14,31 +14,27 @@ const eui48TextLen = 17
 // NewMACAddressEUI48 creates a MACAddress from a 6-byte EUI-48
 // address.
 func NewMACAddressEUI48(addr [6]byte) *MACAddress {
-	buf := [8]byte{}
-	copy(buf[2:], addr[:])
-
 	return &MACAddress{
-		Addr: binary.BigEndian.Uint64(buf[:]),
+		Addr: xnetip.MacAddrFrom6(addr).Uint64(),
 	}
 }
 
-// EUI48 extracts a 6-byte EUI-48 address from the MACAddress.
+// EUI48 extracts the lower 48 bits in network order, treating a nil
+// address as zero.
 func (m *MACAddress) EUI48() [6]byte {
-	buf := [8]byte{}
-	binary.BigEndian.PutUint64(buf[:], m.GetAddr())
-
-	return [6]byte(buf[2:])
+	address, _ := xnetip.MacAddrFromUint64(m.GetAddr() & 0xffffffffffff)
+	return address.As6()
 }
 
 // eui48Text renders the address as six colon-separated lowercase hex
 // octets, rejecting set upper 16 bits instead of truncating them.
 func (m *MACAddress) eui48Text() (string, error) {
-	if m.GetAddr()>>48 != 0 {
+	address, ok := xnetip.MacAddrFromUint64(m.GetAddr())
+	if !ok {
 		return "", fmt.Errorf("upper 16 bits are set for MAC address")
 	}
 
-	eui48 := m.EUI48()
-	return net.HardwareAddr(eui48[:]).String(), nil
+	return address.String(), nil
 }
 
 // AsLogValue implements xgrpc.ProtoLogValue for compact gRPC logging.
@@ -75,11 +71,11 @@ func (m *MACAddress) UnmarshalJSON(data []byte) error {
 		return fmt.Errorf("invalid MAC address format: expected EUI-48 xx:xx:xx:xx:xx:xx, got %q", raw)
 	}
 
-	parsed, err := net.ParseMAC(raw)
+	parsed, err := xnetip.ParseMacAddr(raw)
 	if err != nil {
 		return err
 	}
 
-	*m = *NewMACAddressEUI48([6]byte(parsed))
+	*m = MACAddress{Addr: parsed.Uint64()}
 	return nil
 }
