@@ -298,7 +298,7 @@ func convertRules(reqRules []*aclpb.Rule) ([]cacl.ACLRule, error) {
 		if err != nil {
 			return nil, err
 		}
-		actions, err := aclpb.ToActions(reqRule.Actions)
+		actions, err := toActions(reqRule.Actions)
 		if err != nil {
 			return nil, status.Errorf(codes.InvalidArgument, "invalid actions in rule: %v", err)
 		}
