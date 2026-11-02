@@ -30,7 +30,7 @@ build-debug:
 
 # Setup build environment with optional coverage
 setup COVERAGE_MODE="false":
-    @make setup MESON_SETUP_FLAGS="-Dbuildtype=debug -Db_sanitize=none -Db_coverage={{ COVERAGE_MODE }}"
+    @make setup MESON_SETUP_FLAGS="-Dbuildtype=debug -Db_sanitize=none -Dfuzzing=disabled -Ddataplane_only=false -Db_coverage={{ COVERAGE_MODE }}"
 
 # === Test Targets ===
 
@@ -144,7 +144,7 @@ _docker_run IT *COMMAND:
         -v "${DOCKER_CACHE_DIR}/gocache:/tmp/gocache:rw" \
         -v "${DOCKER_CACHE_DIR}/ccache:/ccache:rw" \
         {{ TAG }} \
-        sh -c 'cd "$1" && git config --global --add safe.directory /yanet2 && git config --global --add safe.directory "$1" && export CCACHE_UMASK=000 && shift && sh -c "$@"' sh "{{ ROOT_DIR }}" "${@:2}"
+        sh -c 'cd "$1" && git config --global --add safe.directory /yanet2 && git config --global --add safe.directory "$1" && export CCACHE_UMASK=000 && shift && sh -c "$*"' sh "{{ ROOT_DIR }}" "${@:2}"
 
 dsetup COVERAGE_MODE="false":
     @just _docker_run -it "just setup {{ COVERAGE_MODE }}"
@@ -159,11 +159,9 @@ _ccache_setup *OPTIONS:
     @meson setup build {{ OPTIONS }}
     @python3 scripts/check-meson-ccache.py build
 
-# Options select only Go tests; successful runs retain the C build and Meson suite.
-dtest GO_TEST_FLAGS="" GO_TEST_PACKAGES="": dtest-ccache-probe
-    #!/usr/bin/env bash
-    set -euo pipefail
-    just _docker_run -it 'python3 scripts/test-meson-ccache.py && make test-recipes && { test ! -f build/build.ninja || python3 scripts/check-meson-ccache.py build; } && just setup false && python3 scripts/check-meson-ccache.py build && make build && GO_TEST_FLAGS="$1" GO_TEST_PACKAGES="$2" make test' sh "$@"
+# Run the complete Go and Meson suites after building their dependencies.
+dtest: dtest-ccache-probe
+    @just _docker_run -it "python3 scripts/test-meson-ccache.py && make test-recipes && { test ! -f build/build.ninja || python3 scripts/check-meson-ccache.py build; } && just setup false && python3 scripts/check-meson-ccache.py build && make build && make test GO_TEST_PACKAGES="
 
 # Run clang-tidy in Docker
 dtidy *FILES:

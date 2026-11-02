@@ -26,11 +26,6 @@ override GOFLAGS := $(value GOFLAGS)
 export GOFLAGS
 endif
 
-# Test arguments are whitespace-separated data, never shell or make expressions.
-override GO_TEST_FLAGS := $(value GO_TEST_FLAGS)
-override GO_TEST_PACKAGES := $(value GO_TEST_PACKAGES)
-export GO_TEST_FLAGS GO_TEST_PACKAGES
-
 # Core CLI packages/binaries that live in cli workspace.
 CLI_CORE_MODULES := \
 	common \
@@ -329,92 +324,19 @@ cli-clean:
 test:
 	$(MAKE) test-only
 
-# Discovery and tests share build context without reinterpreting option data.
-#
-# Go 1.27.1 option arity separates build flags from test-only values and literal
-# binary tails; unknown automatic-selection options fail explicitly.
+# A failed package listing must not turn into an empty successful test run.
 test-only: go-test-prepare
 	@set -eu; set -f; \
 	export CGO_CPPFLAGS="$(strip $(CGO_CPPFLAGS) $(YANET_CGO_CPPFLAGS))"; \
-	packages="$$GO_TEST_PACKAGES"; \
-	set -- $$GO_TEST_FLAGS; \
-	while [ "$$#" -gt 0 ]; do \
-		option=$$1; shift; \
-		case "$$option" in \
-			-args|--args|--) break ;; \
-			-C|-C=*|--C|--C=*) printf '%s\n' 'ERROR: -C is not supported in GO_TEST_FLAGS' >&2; exit 1 ;; \
-			*=*) ;; \
-			-asmflags|--asmflags|-buildmode|--buildmode|-compiler|--compiler|-covermode|--covermode|-coverpkg|--coverpkg| \
-			-gccgoflags|--gccgoflags|-gcflags|--gcflags|-installsuffix|--installsuffix|-ldflags|--ldflags|-mod|--mod| \
-			-modfile|--modfile|-overlay|--overlay|-p|--p|-pgo|--pgo|-pkgdir|--pkgdir|-tags|--tags|-toolexec|--toolexec| \
-			-bench|--bench|-benchtime|--benchtime|-blockprofile|--blockprofile|-blockprofilerate|--blockprofilerate| \
-			-count|--count|-coverprofile|--coverprofile|-cpu|--cpu|-cpuprofile|--cpuprofile|-exec|--exec| \
-			-fuzz|--fuzz|-fuzzminimizetime|--fuzzminimizetime|-fuzztime|--fuzztime|-list|--list| \
-			-memprofile|--memprofile|-memprofilerate|--memprofilerate|-mutexprofile|--mutexprofile| \
-			-mutexprofilefraction|--mutexprofilefraction|-o|--o|-outputdir|--outputdir|-parallel|--parallel| \
-			-run|--run|-shuffle|--shuffle|-skip|--skip|-timeout|--timeout|-trace|--trace|-vet|--vet| \
-			-test.bench|--test.bench|-test.benchtime|--test.benchtime|-test.blockprofile|--test.blockprofile| \
-			-test.blockprofilerate|--test.blockprofilerate|-test.count|--test.count|-test.coverprofile|--test.coverprofile| \
-			-test.cpu|--test.cpu|-test.cpuprofile|--test.cpuprofile|-test.fuzz|--test.fuzz| \
-			-test.fuzzminimizetime|--test.fuzzminimizetime|-test.fuzztime|--test.fuzztime|-test.list|--test.list| \
-			-test.memprofile|--test.memprofile|-test.memprofilerate|--test.memprofilerate|-test.mutexprofile|--test.mutexprofile| \
-			-test.mutexprofilefraction|--test.mutexprofilefraction|-test.outputdir|--test.outputdir| \
-			-test.parallel|--test.parallel|-test.run|--test.run|-test.shuffle|--test.shuffle|-test.skip|--test.skip| \
-			-test.timeout|--test.timeout|-test.trace|--test.trace) \
-				if [ "$$#" -gt 0 ]; then shift; fi ;; \
-		esac; \
-	done; \
+	packages="$(GO_TEST_PACKAGES)"; \
 	if [ -z "$$packages" ]; then \
-		list_flags=; set -- $$GO_TEST_FLAGS; \
-		while [ "$$#" -gt 0 ]; do \
-			option=$$1; shift; \
-			case "$$option" in -args|--args|--) break ;; esac; \
-			case "$$option" in \
-				--*) name=$${option#--} ;; \
-				-*) name=$${option#-} ;; \
-				*) printf 'ERROR: unsupported automatic Go selection argument: %s\n' "$$option" >&2; exit 1 ;; \
-			esac; \
-			name=$${name%%=*}; project=false; \
-			case "$$name" in \
-				a|asan|buildvcs|cover|linkshared|modcacherw|msan|race|trimpath|work|x) \
-					project=true; arity=bool ;; \
-				asmflags|buildmode|compiler|covermode|coverpkg|gccgoflags|gcflags|installsuffix|ldflags|mod|modfile|overlay|p|pgo|pkgdir|tags|toolexec) \
-					project=true; arity=value ;; \
-				artifacts|benchmem|c|failfast|fullpath|json|short|v|test.artifacts|test.benchmem|test.failfast|test.fullpath|test.short|test.v) \
-					arity=bool ;; \
-				bench|benchtime|blockprofile|blockprofilerate|count|coverprofile|cpu|cpuprofile|exec|fuzz|fuzzminimizetime|fuzztime|list| \
-				memprofile|memprofilerate|mutexprofile|mutexprofilefraction|o|outputdir|parallel|run|shuffle|skip|timeout|trace|vet| \
-				test.bench|test.benchtime|test.blockprofile|test.blockprofilerate|test.count|test.coverprofile|test.cpu|test.cpuprofile| \
-				test.fuzz|test.fuzzminimizetime|test.fuzztime|test.list|test.memprofile|test.memprofilerate|test.mutexprofile| \
-				test.mutexprofilefraction|test.outputdir|test.parallel|test.run|test.shuffle|test.skip|test.timeout|test.trace) \
-					arity=value ;; \
-				*) printf 'ERROR: unsupported automatic Go selection option: %s\n' "$$option" >&2; exit 1 ;; \
-			esac; \
-			case "$$option" in \
-				*=*) value=$${option#*=} ;; \
-				*) value=true; \
-					if [ "$$arity" = value ]; then \
-						if [ "$$#" -eq 0 ]; then \
-							printf 'ERROR: Go selection option needs a value: %s\n' "$$option" >&2; exit 1; \
-						fi; \
-						value=$$1; shift; \
-					fi ;; \
-			esac; \
-			if [ "$$project" = true ]; then list_flags="$$list_flags -$$name=$$value"; fi; \
-		done; \
-		packages=$$(go list $(GO_FIXTURE_TAGS) -f '{{.ImportPath}}' -json=false $$list_flags ./...); \
-		packages=$$(printf '%s\n' "$$packages" | grep -v '^github.com/yanet-platform/yanet2/tests/functional/main'); \
+		packages=$$(go list $(GO_FIXTURE_TAGS) -f '{{.ImportPath}}' -json=false ./...); \
+		packages=$$(printf '%s\n' "$$packages" | grep -v '^github.com/yanet-platform/yanet2/tests/functional/main' || test "$$?" -eq 1); \
 	fi; \
-	set -- $$packages; \
-	if [ "$$#" -eq 0 ]; then \
+	if [ -z "$$packages" ]; then \
 		printf '%s\n' 'ERROR: no Go test packages selected' >&2; exit 1; \
 	fi; \
-	for package in "$$@"; do \
-		case "$$package" in \
-			-*) printf 'ERROR: option-shaped Go package entry: %s\n' "$$package" >&2; exit 1 ;; \
-		esac; \
-	done; \
-	go test $(GO_FIXTURE_TAGS) -count=1 "$$@" $$GO_TEST_FLAGS
+	go test $(GO_FIXTURE_TAGS) -count=1 $$packages
 	$(if $(GO_TEST_PACKAGES),,meson test -C build)
 
 test-recipes:
