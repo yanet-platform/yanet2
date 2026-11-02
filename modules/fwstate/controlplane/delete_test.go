@@ -224,8 +224,8 @@ func TestDeleteModuleConfigUsesRegisteredType(t *testing.T) {
 }
 
 func validDeleteTestUpdateRequest(name, fw4MapName, fw6MapName string) *fwstatepb.UpdateConfigRequest {
-	addr := func() *commonpb.IPAddress {
-		return &commonpb.IPAddress{Addr: []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}}
+	addr := func() *commonpb.IPv6Address {
+		return commonpb.NewIPv6Address([16]byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16})
 	}
 	return &fwstatepb.UpdateConfigRequest{
 		Name:      name,

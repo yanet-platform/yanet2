@@ -28,14 +28,14 @@ func SyncConfigToC(syncConfig *fwstatepb.SyncConfig) (cfwstate.SyncConfig, error
 	}
 	for _, endpoint := range syncConfig.GetEndpoints() {
 		var native cfwstate.SyncEndpoint
-		copy(native.SrcAddr[:], endpoint.GetSrcAddr().GetAddr())
-		copy(native.DstAddr[:], endpoint.GetDstAddr().GetAddr())
+		copy(native.SrcAddr[:], ipv6AddrBytes(endpoint.GetSrcAddr()))
+		copy(native.DstAddr[:], ipv6AddrBytes(endpoint.GetDstAddr()))
 		native.Port = uint16(endpoint.GetPort())
 		nativeConfig.Endpoints = append(nativeConfig.Endpoints, native)
 	}
 	for _, listener := range syncConfig.GetListeners() {
 		var native cfwstate.SyncListenEndpoint
-		copy(native.DstAddr[:], listener.GetDstAddr().GetAddr())
+		copy(native.DstAddr[:], ipv6AddrBytes(listener.GetDstAddr()))
 		native.Port = uint16(listener.GetPort())
 		nativeConfig.Listeners = append(nativeConfig.Listeners, native)
 	}
@@ -48,6 +48,13 @@ func SyncConfigToC(syncConfig *fwstatepb.SyncConfig) (cfwstate.SyncConfig, error
 	nativeConfig.SyncSuppressTimeout = syncConfig.GetSyncSuppressTimeout()
 	nativeConfig.SyncMTU = uint16(syncConfig.GetSyncMtu())
 	return nativeConfig, nil
+}
+
+// ipv6AddrBytes renders one endpoint address in the raw wire form the
+// bindings carry; an absent address renders the zero address.
+func ipv6AddrBytes(addr *commonpb.IPv6Address) []byte {
+	raw := addr.ToAddr().As16()
+	return raw[:]
 }
 
 // syncRuleToC converts one scope rule into the flat binding form: the
@@ -139,8 +146,8 @@ func SyncConfigFromC(nativeConfig cfwstate.SyncConfig) *fwstatepb.SyncConfig {
 			continue
 		}
 		syncConfig.Endpoints = append(syncConfig.Endpoints, &fwstatepb.SyncEndpoint{
-			SrcAddr: &commonpb.IPAddress{Addr: append([]byte(nil), endpoint.SrcAddr[:]...)},
-			DstAddr: &commonpb.IPAddress{Addr: append([]byte(nil), endpoint.DstAddr[:]...)},
+			SrcAddr: commonpb.NewIPv6Address(endpoint.SrcAddr),
+			DstAddr: commonpb.NewIPv6Address(endpoint.DstAddr),
 			Port:    new(uint32(endpoint.Port)),
 		})
 	}
@@ -152,7 +159,7 @@ func SyncConfigFromC(nativeConfig cfwstate.SyncConfig) *fwstatepb.SyncConfig {
 			continue
 		}
 		syncConfig.Listeners = append(syncConfig.Listeners, &fwstatepb.SyncListenEndpoint{
-			DstAddr: &commonpb.IPAddress{Addr: append([]byte(nil), listener.DstAddr[:]...)},
+			DstAddr: commonpb.NewIPv6Address(listener.DstAddr),
 			Port:    new(uint32(listener.Port)),
 		})
 	}

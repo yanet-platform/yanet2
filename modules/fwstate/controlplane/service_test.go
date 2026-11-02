@@ -216,10 +216,10 @@ func Test_FWStateService_UpdateConfig_InvalidMergedConfigDoesNotPublish(t *testi
 
 // syncTestAddr is the address both ends of a test sync destination use;
 // only its presence matters to the validation under test.
-func syncTestAddr() *commonpb.IPAddress {
-	return &commonpb.IPAddress{
-		Addr: []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16},
-	}
+func syncTestAddr() *commonpb.IPv6Address {
+	return commonpb.NewIPv6Address([16]byte{
+		1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16,
+	})
 }
 
 const syncTestPort = 9999
@@ -301,7 +301,7 @@ func Test_FWStateService_UpdateConfig_AttachesMapsAndSyncLater(t *testing.T) {
 	endpoints := stored.GetSyncConfig().GetEndpoints()
 	require.Len(t, endpoints, 1)
 	require.EqualValues(t, syncTestPort, endpoints[0].GetPort())
-	require.Equal(t, syncTestAddr().GetAddr(), endpoints[0].GetDstAddr().GetAddr())
+	require.Equal(t, syncTestAddr().ToAddr().As16(), endpoints[0].GetDstAddr().ToAddr().As16())
 }
 
 // Test_FWStateService_UpdateConfig_ClearsLastSyncEndpoint verifies that
@@ -363,7 +363,7 @@ func Test_FWStateService_UpdateConfig_KeepsUnnamedLinksAndUntouchedSync(t *testi
 	endpoints := stored.GetSyncConfig().GetEndpoints()
 	require.Len(t, endpoints, 1)
 	require.EqualValues(t, syncTestPort, endpoints[0].GetPort())
-	require.Equal(t, syncTestAddr().GetAddr(), endpoints[0].GetSrcAddr().GetAddr())
+	require.Equal(t, syncTestAddr().ToAddr().As16(), endpoints[0].GetSrcAddr().ToAddr().As16())
 
 	// An update carrying no sync settings at all keeps them too.
 	_, err = service.UpdateConfig(t.Context(), &fwstatepb.UpdateConfigRequest{
@@ -378,7 +378,7 @@ func Test_FWStateService_UpdateConfig_KeepsUnnamedLinksAndUntouchedSync(t *testi
 	endpoints = stored.GetSyncConfig().GetEndpoints()
 	require.Len(t, endpoints, 1)
 	require.EqualValues(t, syncTestPort, endpoints[0].GetPort())
-	require.Equal(t, syncTestAddr().GetAddr(), endpoints[0].GetDstAddr().GetAddr())
+	require.Equal(t, syncTestAddr().ToAddr().As16(), endpoints[0].GetDstAddr().ToAddr().As16())
 }
 
 // Test_FWStateService_UpdateConfig_DefaultSyncMTU verifies that a config

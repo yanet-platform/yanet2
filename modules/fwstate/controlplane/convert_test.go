@@ -21,22 +21,27 @@ func Test_SyncConfig_EndpointsRoundTrip(t *testing.T) {
 	multicast := []byte{0xff, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}
 	unicast := []byte{0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2}
 
+	v6 := func(raw []byte) *commonpb.IPv6Address {
+		var value [16]byte
+		copy(value[:], raw)
+		return commonpb.NewIPv6Address(value)
+	}
 	syncConfig := &fwstatepb.SyncConfig{
 		Endpoints: []*fwstatepb.SyncEndpoint{
 			{
-				SrcAddr: &commonpb.IPAddress{Addr: source},
-				DstAddr: &commonpb.IPAddress{Addr: multicast},
+				SrcAddr: v6(source),
+				DstAddr: v6(multicast),
 				Port:    proto.Uint32(4789),
 			},
 			{
-				SrcAddr: &commonpb.IPAddress{Addr: source},
-				DstAddr: &commonpb.IPAddress{Addr: unicast},
+				SrcAddr: v6(source),
+				DstAddr: v6(unicast),
 				Port:    proto.Uint32(4790),
 			},
 		},
 		Listeners: []*fwstatepb.SyncListenEndpoint{
-			{DstAddr: &commonpb.IPAddress{Addr: multicast}, Port: proto.Uint32(4789)},
-			{DstAddr: &commonpb.IPAddress{Addr: unicast}, Port: proto.Uint32(4790)},
+			{DstAddr: v6(multicast), Port: proto.Uint32(4789)},
+			{DstAddr: v6(unicast), Port: proto.Uint32(4790)},
 		},
 	}
 
@@ -45,16 +50,16 @@ func Test_SyncConfig_EndpointsRoundTrip(t *testing.T) {
 	got := fwstate.SyncConfigFromC(nativeConfig)
 
 	require.Len(t, got.GetEndpoints(), 2)
-	require.Equal(t, source, got.GetEndpoints()[0].GetSrcAddr().Addr)
-	require.Equal(t, multicast, got.GetEndpoints()[0].GetDstAddr().Addr)
+	require.Equal(t, netip.MustParseAddr("2001:db8::1"), got.GetEndpoints()[0].GetSrcAddr().ToAddr())
+	require.Equal(t, netip.MustParseAddr("ff02::1"), got.GetEndpoints()[0].GetDstAddr().ToAddr())
 	require.EqualValues(t, 4789, got.GetEndpoints()[0].GetPort())
-	require.Equal(t, unicast, got.GetEndpoints()[1].GetDstAddr().Addr)
+	require.Equal(t, netip.MustParseAddr("2001:db8::2"), got.GetEndpoints()[1].GetDstAddr().ToAddr())
 	require.EqualValues(t, 4790, got.GetEndpoints()[1].GetPort())
 
 	require.Len(t, got.GetListeners(), 2)
-	require.Equal(t, multicast, got.GetListeners()[0].GetDstAddr().Addr)
+	require.Equal(t, netip.MustParseAddr("ff02::1"), got.GetListeners()[0].GetDstAddr().ToAddr())
 	require.EqualValues(t, 4789, got.GetListeners()[0].GetPort())
-	require.Equal(t, unicast, got.GetListeners()[1].GetDstAddr().Addr)
+	require.Equal(t, netip.MustParseAddr("2001:db8::2"), got.GetListeners()[1].GetDstAddr().ToAddr())
 	require.EqualValues(t, 4790, got.GetListeners()[1].GetPort())
 }
 

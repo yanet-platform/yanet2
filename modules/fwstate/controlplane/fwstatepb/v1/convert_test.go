@@ -14,19 +14,19 @@ import (
 // it carries, that endpoints replace the stored list wholesale, and that
 // no_endpoints removes it.
 func Test_SyncConfig_Merge(t *testing.T) {
-	multicast := func() *commonpb.IPAddress {
-		return &commonpb.IPAddress{Addr: []byte{0xff, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}}
+	multicast := func() *commonpb.IPv6Address {
+		return commonpb.NewIPv6Address([16]byte{0xff, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1})
 	}
-	source := func() *commonpb.IPAddress {
-		return &commonpb.IPAddress{Addr: []byte{0x20, 1, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}}
+	source := func() *commonpb.IPv6Address {
+		return commonpb.NewIPv6Address([16]byte{0x20, 1, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1})
 	}
-	unicast := func() *commonpb.IPAddress {
-		return &commonpb.IPAddress{Addr: []byte{0x20, 1, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2}}
+	unicast := func() *commonpb.IPv6Address {
+		return commonpb.NewIPv6Address([16]byte{0x20, 1, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2})
 	}
-	endpoint := func(dst *commonpb.IPAddress, port uint32) *SyncEndpoint {
+	endpoint := func(dst *commonpb.IPv6Address, port uint32) *SyncEndpoint {
 		return &SyncEndpoint{SrcAddr: source(), DstAddr: dst, Port: new(port)}
 	}
-	listener := func(dst *commonpb.IPAddress, port uint32) *SyncListenEndpoint {
+	listener := func(dst *commonpb.IPv6Address, port uint32) *SyncListenEndpoint {
 		return &SyncListenEndpoint{DstAddr: dst, Port: new(port)}
 	}
 	stored := func() *SyncConfig {

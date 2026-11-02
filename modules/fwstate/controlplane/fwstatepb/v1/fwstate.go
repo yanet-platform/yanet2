@@ -3,6 +3,7 @@ package fwstatepb
 import (
 	"errors"
 	"fmt"
+	"net/netip"
 
 	fwstatemappb "github.com/yanet-platform/yanet2/objects/fwstate/controlplane/fwstatemappb/v1"
 
@@ -132,17 +133,30 @@ func (m *SyncConfig) ValidateTimeouts() error {
 	return nil
 }
 
+// validateIPv6Addr checks one endpoint address: the sync wire format is
+// IPv6 only - an IPv4 address, including the IPv4-mapped IPv6 form,
+// cannot name an endpoint.
+func validateIPv6Addr(field string, addr *commonpb.IPv6Address) error {
+	if addr == nil {
+		return fmt.Errorf("%s must be an IPv6 address", field)
+	}
+	if parsed := addr.ToAddr(); parsed.Is4In6() {
+		return fmt.Errorf("%s must not be an IPv4-mapped IPv6 address", field)
+	}
+	return nil
+}
+
 // validateSyncEndpoint checks one update-carried endpoint's form.
 func validateSyncEndpoint(idx int, endpoint *SyncEndpoint) error {
-	if err := validateAddrWidth(
+	if err := validateIPv6Addr(
 		fmt.Sprintf("endpoints[%d].src_addr", idx),
-		endpoint.GetSrcAddr().GetAddr(),
+		endpoint.GetSrcAddr(),
 	); err != nil {
 		return err
 	}
-	if err := validateAddrWidth(
+	if err := validateIPv6Addr(
 		fmt.Sprintf("endpoints[%d].dst_addr", idx),
-		endpoint.GetDstAddr().GetAddr(),
+		endpoint.GetDstAddr(),
 	); err != nil {
 		return err
 	}
@@ -157,9 +171,9 @@ func validateSyncEndpoint(idx int, endpoint *SyncEndpoint) error {
 
 // validateSyncListener checks one update-carried listener's form.
 func validateSyncListener(idx int, listener *SyncListenEndpoint) error {
-	if err := validateAddrWidth(
+	if err := validateIPv6Addr(
 		fmt.Sprintf("listeners[%d].dst_addr", idx),
-		listener.GetDstAddr().GetAddr(),
+		listener.GetDstAddr(),
 	); err != nil {
 		return err
 	}
@@ -301,10 +315,10 @@ func (m *SyncConfig) ValidateMerged() error {
 
 	var missing []string
 	for idx, endpoint := range m.GetEndpoints() {
-		if !isAddrSet(endpoint.GetSrcAddr().GetAddr()) {
+		if !isIPv6AddrSet(endpoint.GetSrcAddr()) {
 			missing = append(missing, fmt.Sprintf("endpoints[%d].src_addr", idx))
 		}
-		if !isAddrSet(endpoint.GetDstAddr().GetAddr()) {
+		if !isIPv6AddrSet(endpoint.GetDstAddr()) {
 			missing = append(missing, fmt.Sprintf("endpoints[%d].dst_addr", idx))
 		}
 		if endpoint.GetPort() == 0 {
@@ -312,7 +326,7 @@ func (m *SyncConfig) ValidateMerged() error {
 		}
 	}
 	for idx, listener := range m.GetListeners() {
-		if !isAddrSet(listener.GetDstAddr().GetAddr()) {
+		if !isIPv6AddrSet(listener.GetDstAddr()) {
 			missing = append(missing, fmt.Sprintf("listeners[%d].dst_addr", idx))
 		}
 		if listener.GetPort() == 0 {
@@ -341,22 +355,16 @@ func validateSyncMTU(mtu uint32) error {
 	return nil
 }
 
-// validateAddrWidth accepts empty addresses and full-width IPv6 addresses.
-func validateAddrWidth(field string, addr []byte) error {
-	if len(addr) == 0 || len(addr) == syncAddrLen {
-		return nil
-	}
-
-	return fmt.Errorf(
-		"%s must be a %d-byte IPv6 address, got %d bytes",
-		field, syncAddrLen, len(addr),
-	)
-}
-
 // isAddrSet reports whether an address is stored at full width and is
 // not the all-zero one that stands for unset.
 func isAddrSet(addr []byte) bool {
 	return len(addr) == syncAddrLen && !isAllZeroBytes(addr)
+}
+
+// isIPv6AddrSet reports whether an endpoint address is present and is
+// not the zero address that stands for unset.
+func isIPv6AddrSet(addr *commonpb.IPv6Address) bool {
+	return addr != nil && addr.ToAddr() != netip.MustParseAddr("::")
 }
 
 // isAllZeroBytes reports whether every byte of the slice is zero.

@@ -1,9 +1,9 @@
-use core::net::IpAddr;
+use core::net::Ipv6Addr;
 
 use args::{DeleteCmd, ModeCmd, ShowCmd, UpdateCmd};
 use clap::{CommandFactory, Parser};
 use clap_complete::engine::CompletionCandidate;
-use commonpb::pb::IpAddress;
+use commonpb::pb::{IPv6Address, IpAddress};
 use filterpb::pb::PortRange;
 use fwstatepb::{
     DeleteConfigRequest, ListConfigsRequest, ShowConfigRequest, ShowConfigResponse, SyncConfig, SyncEndpoint,
@@ -72,16 +72,16 @@ fn config_block(response: &ShowConfigResponse) -> display::KeyValue {
         return block;
     };
 
-    let address = |addr: Option<&IpAddress>| addr.map_or_else(|| "-".to_string(), ToString::to_string);
+    let v6 = |addr: Option<&IPv6Address>| addr.map_or_else(|| "-".to_string(), |addr| Ipv6Addr::from(addr).to_string());
     for (idx, endpoint) in sync_config.endpoints.iter().enumerate() {
         block = block
-            .row(&format!("endpoint {idx} src addr"), address(endpoint.src_addr.as_ref()))
-            .row(&format!("endpoint {idx} dst addr"), address(endpoint.dst_addr.as_ref()))
+            .row(&format!("endpoint {idx} src addr"), v6(endpoint.src_addr.as_ref()))
+            .row(&format!("endpoint {idx} dst addr"), v6(endpoint.dst_addr.as_ref()))
             .row(&format!("endpoint {idx} port"), endpoint.port.unwrap_or_default());
     }
     for (idx, listener) in sync_config.listeners.iter().enumerate() {
         block = block
-            .row(&format!("listener {idx} dst addr"), address(listener.dst_addr.as_ref()))
+            .row(&format!("listener {idx} dst addr"), v6(listener.dst_addr.as_ref()))
             .row(&format!("listener {idx} port"), listener.port.unwrap_or_default());
     }
 
@@ -187,8 +187,8 @@ fn update_sync_endpoints(sync_config: &mut SyncConfig, cmd: &UpdateCmd) -> Resul
         .sync_endpoint
         .iter()
         .map(|endpoint| SyncEndpoint {
-            src_addr: Some(IpAddress::from(IpAddr::V6(endpoint.src))),
-            dst_addr: Some(IpAddress::from(IpAddr::V6(endpoint.dst))),
+            src_addr: Some(IPv6Address::from(endpoint.src)),
+            dst_addr: Some(IPv6Address::from(endpoint.dst)),
             port: Some(u32::from(endpoint.port)),
         })
         .collect();
@@ -199,7 +199,7 @@ fn update_sync_endpoints(sync_config: &mut SyncConfig, cmd: &UpdateCmd) -> Resul
         .listen_endpoint
         .iter()
         .map(|listener| SyncListenEndpoint {
-            dst_addr: Some(IpAddress::from(IpAddr::V6(listener.dst))),
+            dst_addr: Some(IPv6Address::from(listener.dst)),
             port: Some(u32::from(listener.port)),
         })
         .collect();
@@ -407,13 +407,13 @@ mod tests {
             sync_config: Some(fwstatepb::SyncConfig {
                 endpoints: vec![
                     SyncEndpoint {
-                        src_addr: Some(IpAddress::from(IpAddr::V6(core::net::Ipv6Addr::LOCALHOST))),
-                        dst_addr: Some(IpAddress::from(IpAddr::V6(core::net::Ipv6Addr::UNSPECIFIED))),
+                        src_addr: Some(IPv6Address::from(core::net::Ipv6Addr::LOCALHOST)),
+                        dst_addr: Some(IPv6Address::from(core::net::Ipv6Addr::UNSPECIFIED)),
                         port: Some(9999),
                     },
                     SyncEndpoint {
-                        src_addr: Some(IpAddress::from(IpAddr::V6(core::net::Ipv6Addr::LOCALHOST))),
-                        dst_addr: Some(IpAddress::from(IpAddr::V6(core::net::Ipv6Addr::LOCALHOST))),
+                        src_addr: Some(IPv6Address::from(core::net::Ipv6Addr::LOCALHOST)),
+                        dst_addr: Some(IPv6Address::from(core::net::Ipv6Addr::LOCALHOST)),
                         port: Some(10000),
                     },
                 ],
@@ -498,13 +498,13 @@ mod tests {
         assert_eq!(
             vec![
                 SyncEndpoint {
-                    src_addr: Some(IpAddress::from(IpAddr::V6("fd00::1".parse().unwrap()))),
-                    dst_addr: Some(IpAddress::from(IpAddr::V6("ff02::1".parse().unwrap()))),
+                    src_addr: Some(IPv6Address::from("fd00::1".parse::<core::net::Ipv6Addr>().unwrap())),
+                    dst_addr: Some(IPv6Address::from("ff02::1".parse::<core::net::Ipv6Addr>().unwrap())),
                     port: Some(9999),
                 },
                 SyncEndpoint {
-                    src_addr: Some(IpAddress::from(IpAddr::V6("fd00::1".parse().unwrap()))),
-                    dst_addr: Some(IpAddress::from(IpAddr::V6("2001:db8::2".parse().unwrap()))),
+                    src_addr: Some(IPv6Address::from("fd00::1".parse::<core::net::Ipv6Addr>().unwrap())),
+                    dst_addr: Some(IPv6Address::from("2001:db8::2".parse::<core::net::Ipv6Addr>().unwrap())),
                     port: Some(10000),
                 },
             ],
@@ -533,11 +533,11 @@ mod tests {
         assert_eq!(
             vec![
                 SyncListenEndpoint {
-                    dst_addr: Some(IpAddress::from(IpAddr::V6("ff02::1".parse().unwrap()))),
+                    dst_addr: Some(IPv6Address::from("ff02::1".parse::<core::net::Ipv6Addr>().unwrap())),
                     port: Some(9999),
                 },
                 SyncListenEndpoint {
-                    dst_addr: Some(IpAddress::from(IpAddr::V6("2001:db8::4".parse().unwrap()))),
+                    dst_addr: Some(IPv6Address::from("2001:db8::4".parse::<core::net::Ipv6Addr>().unwrap())),
                     port: Some(10001),
                 },
             ],

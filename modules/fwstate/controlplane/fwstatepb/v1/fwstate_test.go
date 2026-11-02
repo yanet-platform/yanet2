@@ -1,6 +1,7 @@
 package fwstatepb
 
 import (
+	"net/netip"
 	"strings"
 	"testing"
 
@@ -63,6 +64,11 @@ func Test_DeleteConfigRequest_Validate(t *testing.T) {
 // Test_UpdateConfigRequest_Validate verifies that request-local FWState rules
 // run without applying state-dependent merged configuration checks.
 func Test_UpdateConfigRequest_Validate(t *testing.T) {
+	addr := func() *commonpb.IPv6Address {
+		return commonpb.NewIPv6Address([16]byte{
+			1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16,
+		})
+	}
 	cases := []struct {
 		name    string
 		request *UpdateConfigRequest
@@ -93,7 +99,11 @@ func Test_UpdateConfigRequest_Validate(t *testing.T) {
 			request: &UpdateConfigRequest{
 				Name: "fwstate0",
 				SyncConfig: &SyncConfig{Endpoints: []*SyncEndpoint{
-					{Port: proto.Uint32(65536)},
+					{
+						SrcAddr: addr(),
+						DstAddr: addr(),
+						Port:    proto.Uint32(65536),
+					},
 				}},
 			},
 			message: "sync_config: endpoints[0].port must be in 1..65535, got 65536",
@@ -123,13 +133,14 @@ func Test_UpdateConfigRequest_Validate(t *testing.T) {
 			message: "sync_config: sync_suppress_timeout 281474976710656 exceeds maximum allowed value 281474976710655",
 		},
 		{
-			name: "port without addresses left to merged validation",
+			name: "endpoint without addresses is refused outright",
 			request: &UpdateConfigRequest{
 				Name: "fwstate0",
 				SyncConfig: &SyncConfig{Endpoints: []*SyncEndpoint{
 					{Port: proto.Uint32(9999)},
 				}},
 			},
+			message: "sync_config: endpoints[0].src_addr must be an IPv6 address",
 		},
 	}
 
@@ -218,8 +229,10 @@ func Test_SyncConfig_ValidateTimeouts(t *testing.T) {
 // outside the stored representation and incomplete or conflicting endpoint
 // lists are rejected.
 func Test_SyncConfig_ValidateFields_RejectsUnusableValues(t *testing.T) {
-	addr := func(size int) *commonpb.IPAddress {
-		return &commonpb.IPAddress{Addr: make([]byte, size)}
+	addr := func() *commonpb.IPv6Address {
+		return commonpb.NewIPv6Address([16]byte{
+			1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16,
+		})
 	}
 
 	cases := []struct {
@@ -231,36 +244,61 @@ func Test_SyncConfig_ValidateFields_RejectsUnusableValues(t *testing.T) {
 		{
 			name: "boundary port",
 			config: &SyncConfig{Endpoints: []*SyncEndpoint{
-				{Port: proto.Uint32(65535)},
+				{SrcAddr: addr(), DstAddr: addr(), Port: proto.Uint32(65535)},
 			}},
 		},
 		{
 			name: "port above the boundary",
 			config: &SyncConfig{Endpoints: []*SyncEndpoint{
-				{Port: proto.Uint32(65536)},
+				{SrcAddr: addr(), DstAddr: addr(), Port: proto.Uint32(65536)},
 			}},
 			message: "endpoints[0].port must be in 1..65535, got 65536",
 		},
 		{
 			name: "zero port",
 			config: &SyncConfig{Endpoints: []*SyncEndpoint{
-				{Port: proto.Uint32(0)},
+				{SrcAddr: addr(), DstAddr: addr(), Port: proto.Uint32(0)},
 			}},
 			message: "endpoints[0].port must be in 1..65535, got 0",
 		},
 		{
-			name: "short source address",
+			name: "absent source address",
 			config: &SyncConfig{Endpoints: []*SyncEndpoint{
-				{SrcAddr: addr(4), Port: proto.Uint32(1)},
+				{DstAddr: addr(), Port: proto.Uint32(1)},
 			}},
-			message: "endpoints[0].src_addr must be a 16-byte IPv6 address, got 4 bytes",
+			message: "endpoints[0].src_addr must be an IPv6 address",
 		},
 		{
-			name: "short destination address",
+			name: "absent destination address",
 			config: &SyncConfig{Endpoints: []*SyncEndpoint{
-				{DstAddr: addr(4), Port: proto.Uint32(1)},
+				{SrcAddr: addr(), Port: proto.Uint32(1)},
 			}},
-			message: "endpoints[0].dst_addr must be a 16-byte IPv6 address, got 4 bytes",
+			message: "endpoints[0].dst_addr must be an IPv6 address",
+		},
+		{
+			name: "IPv4-mapped source address",
+			config: &SyncConfig{Endpoints: []*SyncEndpoint{
+				{
+					SrcAddr: commonpb.NewIPv6Address(
+						netip.MustParseAddr("::ffff:10.0.0.1").As16(),
+					),
+					DstAddr: addr(),
+					Port:    proto.Uint32(1),
+				},
+			}},
+			message: "endpoints[0].src_addr must not be an IPv4-mapped IPv6 address",
+		},
+		{
+			name: "IPv4-mapped listener address",
+			config: &SyncConfig{Listeners: []*SyncListenEndpoint{
+				{
+					DstAddr: commonpb.NewIPv6Address(
+						netip.MustParseAddr("::ffff:192.0.2.1").As16(),
+					),
+					Port: proto.Uint32(1),
+				},
+			}},
+			message: "listeners[0].dst_addr must not be an IPv4-mapped IPv6 address",
 		},
 		{
 			name: "no_endpoints combined with endpoints",
@@ -277,7 +315,7 @@ func Test_SyncConfig_ValidateFields_RejectsUnusableValues(t *testing.T) {
 		{
 			name: "listener port above the boundary",
 			config: &SyncConfig{Listeners: []*SyncListenEndpoint{
-				{Port: proto.Uint32(65536)},
+				{DstAddr: addr(), Port: proto.Uint32(65536)},
 			}},
 			message: "listeners[0].port must be in 1..65535, got 65536",
 		},
@@ -318,7 +356,7 @@ func Test_SyncConfig_ValidateFields_RejectsUnusableValues(t *testing.T) {
 		{
 			name: "addresses without a port",
 			config: &SyncConfig{Endpoints: []*SyncEndpoint{
-				{SrcAddr: addr(16), DstAddr: addr(16)},
+				{SrcAddr: addr(), DstAddr: addr()},
 			}},
 			message: "endpoints[0].port must be in 1..65535, got 0",
 		},
@@ -342,11 +380,11 @@ func Test_SyncConfig_ValidateFields_RejectsUnusableValues(t *testing.T) {
 //
 // Endpoints naming everything, or an empty list, are accepted.
 func Test_SyncConfig_ValidateMerged_EndpointsAreAllOrNothing(t *testing.T) {
-	addr := func() *commonpb.IPAddress {
-		return &commonpb.IPAddress{Addr: []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}}
+	addr := func() *commonpb.IPv6Address {
+		return commonpb.NewIPv6Address([16]byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16})
 	}
-	zeroAddr := func() *commonpb.IPAddress {
-		return &commonpb.IPAddress{Addr: make([]byte, 16)}
+	zeroAddr := func() *commonpb.IPv6Address {
+		return commonpb.NewIPv6Address([16]byte{})
 	}
 
 	t.Run("missing source address", func(t *testing.T) {
@@ -393,12 +431,30 @@ func Test_SyncConfig_ValidateMerged_EndpointsAreAllOrNothing(t *testing.T) {
 		require.ErrorContains(t, config.ValidateMerged(), "endpoints[0].src_addr")
 	})
 
+	t.Run("IPv4-mapped endpoint address", func(t *testing.T) {
+		config := &SyncConfig{Endpoints: []*SyncEndpoint{
+			{
+				SrcAddr: addr(),
+				DstAddr: commonpb.NewIPv6Address(
+					netip.MustParseAddr("::ffff:10.0.0.1").As16(),
+				),
+				Port: proto.Uint32(1),
+			},
+		}}
+
+		require.ErrorContains(
+			t,
+			config.ValidateMerged(),
+			"endpoints[0].dst_addr must not be an IPv4-mapped",
+		)
+	})
+
 	t.Run("complete multicast endpoint", func(t *testing.T) {
 		require.NoError(t, (&SyncConfig{
 			Endpoints: []*SyncEndpoint{
 				{
 					SrcAddr: addr(),
-					DstAddr: &commonpb.IPAddress{Addr: []byte{0xff, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}},
+					DstAddr: commonpb.NewIPv6Address([16]byte{0xff, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}),
 					Port:    proto.Uint32(1),
 				},
 			},

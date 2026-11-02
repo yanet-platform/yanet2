@@ -3,6 +3,7 @@ syntax = "proto3";
 package modules.fwstate.controlplane.fwstatepb.v1;
 
 import "common/commonpb/v1/ipaddr.proto";
+import "common/commonpb/v1/ipv6addr.proto";
 import "common/commonpb/v1/metric.proto";
 import "common/filterpb/v1/filter.proto";
 
@@ -71,9 +72,9 @@ message ListConfigsResponse { repeated string configs = 1; }
 // Every endpoint receives a copy of each locally emitted sync packet,
 // stamped with the endpoint's source and destination.
 message SyncEndpoint {
-  common.commonpb.v1.IPAddress src_addr = 1; // IPv6 source stamped on packets emitted toward dst_addr;
-  common.commonpb.v1.IPAddress dst_addr = 2; // IPv6 destination of emitted packets;
-  optional uint32 port = 3;                  // Destination port, 1..65535;
+  common.commonpb.v1.IPv6Address src_addr = 1; // IPv6 source stamped on packets emitted toward dst_addr;
+  common.commonpb.v1.IPv6Address dst_addr = 2; // IPv6 destination of emitted packets;
+  optional uint32 port = 3;                    // Destination port, 1..65535;
 }
 
 // One receive destination: an incoming packet naming it by IPv6 address and
@@ -82,8 +83,8 @@ message SyncEndpoint {
 // or does both on different addresses. A unicast listener names the
 // router's own address and receives point-to-point sync.
 message SyncListenEndpoint {
-  common.commonpb.v1.IPAddress dst_addr = 1; // IPv6 destination matched on the wire;
-  optional uint32 port = 2;                  // Destination port, 1..65535;
+  common.commonpb.v1.IPv6Address dst_addr = 1; // IPv6 destination matched on the wire;
+  optional uint32 port = 2;                    // Destination port, 1..65535;
 }
 
 // One synchronization scope rule: the flows whose source address is
