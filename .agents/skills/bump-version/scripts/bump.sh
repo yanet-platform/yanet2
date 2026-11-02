@@ -177,8 +177,14 @@ cmd_next() {
 		"$base" "$base_sha" "$target_sha" "$latest" "$computed" "$level" "$auto" "$next" "$expect"
 	((${#lines[@]} == 0)) || printf '%s\n' "${lines[@]}"
 
-	[[ $computed != none ]] || { echo "bump.sh: no commits since v$base" >&2; exit 3; }
-	[[ -n $next ]] || { echo "bump.sh: only internal commits since v$base, pass a level to release anyway" >&2; exit 4; }
+	[[ $computed != none ]] || {
+		echo "bump.sh: no commits since v$base" >&2
+		exit 3
+	}
+	[[ -n $next ]] || {
+		echo "bump.sh: only internal commits since v$base, pass a level to release anyway" >&2
+		exit 4
+	}
 	version_gt "$next" "$latest" || fail "$next is not above the latest release v$latest"
 	if [[ ${next%.*} == "${latest%.*}" && $latest != "$base" ]]; then
 		fail "v$latest is not on the history of $target, release $next from release/${latest%.*} by hand"
@@ -194,6 +200,18 @@ cmd_next() {
 	fi
 }
 
+cargo_version() {
+	local file=$1 section=$2
+	if [[ $section == package ]] && sed -n '/^\[package\]/,/^\[/p' "$file" |
+		grep -E -e '^version\.workspace[[:space:]]*=[[:space:]]*true' \
+			-e '^version[[:space:]]*=[[:space:]]*\{[[:space:]]*workspace[[:space:]]*=[[:space:]]*true' >/dev/null; then
+		# Locating the workspace reads manifests without resolving dependencies or locks.
+		file=$(cargo locate-project --workspace --message-format plain --offline --manifest-path "$file") || return
+		section='workspace\.package'
+	fi
+	sed -n -E "/^\[$section\]/,/^\[/ s/^version = \"([^\"]*)\"/\1/p" "$file"
+}
+
 cmd_apply() {
 	local version=${1:-}
 	[[ $version =~ ^$semver$ ]] || usage
@@ -201,8 +219,13 @@ cmd_apply() {
 
 	sed -i -E "1,/^\)/ s/^(  version: )'[^']*'/\1'$version'/" meson.build
 	git ls-files -z '*Cargo.toml' |
-		xargs -0 sed -i -E "/^\[package\]/,/^\[/ s/^version = \"[^\"]*\"/version = \"$version\"/"
-	cargo update --workspace --offline --quiet
+		xargs -0 sed -i -E \
+			-e "/^\[package\]/,/^\[/ s/^version = \"[^\"]*\"/version = \"$version\"/" \
+			-e "/^\[workspace\.package\]/,/^\[/ s/^version = \"[^\"]*\"/version = \"$version\"/"
+	local file
+	while IFS= read -r -d '' file; do
+		cargo update --workspace --offline --quiet --manifest-path "${file%Cargo.lock}Cargo.toml"
+	done < <(git ls-files -z '*Cargo.lock')
 	sed -i -E "s/^(    \"version\": )\"[^\"]*\"/\1\"$version\"/" web/package.json
 	sed -i -E "/^        \"web\": \{$/,/^        \}/ s/^(            \"version\": )\"[^\"]*\"/\1\"$version\"/" package-lock.json
 
@@ -222,7 +245,7 @@ cmd_apply() {
 }
 
 cmd_check() {
-	local version=${1:-} bad=0 file
+	local version=${1:-} bad=0 file package got
 	[[ $version =~ ^$semver$ ]] || usage
 	cd "$(git rev-parse --show-toplevel)"
 
@@ -233,19 +256,25 @@ cmd_check() {
 	}
 	expect meson.build "$(sed -n -E "1,/^\)/ s/^  version: '([^']*)',/\1/p" meson.build)"
 	while IFS= read -r -d '' file; do
+		if grep -q '^\[workspace\.package\]' "$file"; then
+			expect "$file (workspace.package)" "$(cargo_version "$file" 'workspace\.package')"
+		fi
 		grep -q '^\[package\]' "$file" || continue
-		expect "$file" "$(sed -n -E '/^\[package\]/,/^\[/ s/^version = "([^"]*)"/\1/p' "$file")"
+		got=$(cargo_version "$file" package)
+		expect "$file" "$got"
 	done < <(git ls-files -z '*Cargo.toml')
 	# Workspace members are the only Cargo.lock packages without a source.
-	while read -r file got; do
-		expect "Cargo.lock ($file)" "$got"
-	done < <(awk '
-		function flush() { if (name != "" && src == "") print name, ver }
-		/^\[\[package\]\]$/ { flush(); name = ""; ver = ""; src = "" }
-		/^name = / { name = $3 }
-		/^version = / { ver = $3 }
-		/^source = / { src = $3 }
-		END { flush() }' Cargo.lock | tr -d '"')
+	while IFS= read -r -d '' file; do
+		while read -r package got; do
+			expect "$file ($package)" "$got"
+		done < <(awk '
+			function flush() { if (name != "" && src == "") print name, ver }
+			/^\[\[package\]\]$/ { flush(); name = ""; ver = ""; src = "" }
+			/^name = / { name = $3 }
+			/^version = / { ver = $3 }
+			/^source = / { src = $3 }
+			END { flush() }' "$file" | tr -d '"')
+	done < <(git ls-files -z '*Cargo.lock')
 	expect web/package.json "$(jq -r .version web/package.json)"
 	expect package-lock.json "$(jq -r '.packages.web.version' package-lock.json)"
 	expect debian/changelog "$(sed -n -E '1s/^yanet2 \(([^)]*)\).*/\1/p' debian/changelog)"
