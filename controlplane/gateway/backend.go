@@ -120,8 +120,15 @@ func (m *backend) Endpoint() string {
 
 // GetConnection returns the underlying gRPC connection, forwarding incoming
 // metadata as outgoing metadata.
+//
+// A caller without incoming metadata, such as the HTTP surface, keeps the
+// outgoing metadata it attached itself.
 func (m *backend) GetConnection(ctx context.Context, _ string) (context.Context, *grpc.ClientConn, error) {
-	md, _ := metadata.FromIncomingContext(ctx)
+	md, ok := metadata.FromIncomingContext(ctx)
+	if !ok {
+		return ctx, m.conn, nil
+	}
+
 	return metadata.NewOutgoingContext(ctx, md.Copy()), m.conn, nil
 }
 

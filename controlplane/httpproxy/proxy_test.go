@@ -3,17 +3,23 @@ package httpproxy_test
 import (
 	"context"
 	"errors"
+	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/siderolabs/grpc-proxy/proxy"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/metadata"
 	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/reflect/protoregistry"
 
+	readinesspb "github.com/yanet-platform/yanet2/common/readinesspb/v1"
 	"github.com/yanet-platform/yanet2/controlplane/httpproxy"
 	ynpb "github.com/yanet-platform/yanet2/controlplane/ynpb/v1"
 )
@@ -219,4 +225,141 @@ func TestReadinessServiceWatch_IsServerStreaming(t *testing.T) {
 	methodDesc := svcDesc.Methods().ByName("Watch")
 	require.NotNil(t, methodDesc)
 	require.True(t, methodDesc.IsStreamingServer())
+}
+
+// workersRecorder answers CountersService.Workers at once, publishing the
+// incoming metadata of each call.
+type workersRecorder struct {
+	ynpb.UnimplementedCountersServiceServer
+	calls chan metadata.MD
+}
+
+func (m *workersRecorder) Workers(ctx context.Context, request *ynpb.WorkerCountersRequest) (*ynpb.WorkerCountersResponse, error) {
+	md, _ := metadata.FromIncomingContext(ctx)
+	m.calls <- md
+	return &ynpb.WorkerCountersResponse{}, nil
+}
+
+// watchRecorder ends ReadinessService.Watch at once, publishing the incoming
+// metadata of each call.
+type watchRecorder struct {
+	ynpb.UnimplementedReadinessServiceServer
+	calls chan metadata.MD
+}
+
+func (m *watchRecorder) Watch(request *readinesspb.ReadyRequest, stream ynpb.ReadinessService_WatchServer) error {
+	md, _ := metadata.FromIncomingContext(stream.Context())
+	m.calls <- md
+	return nil
+}
+
+// newRecordingProxy returns the URL of a proxy in front of both recorders.
+//
+// Every call the recorders receive is published on the returned channel.
+func newRecordingProxy(t *testing.T) (string, chan metadata.MD) {
+	t.Helper()
+
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+
+	calls := make(chan metadata.MD, 1)
+	grpcServer := grpc.NewServer()
+	ynpb.RegisterCountersServiceServer(grpcServer, &workersRecorder{calls: calls})
+	ynpb.RegisterReadinessServiceServer(grpcServer, &watchRecorder{calls: calls})
+	go func() { _ = grpcServer.Serve(listener) }()
+	t.Cleanup(grpcServer.Stop)
+
+	conn, err := grpc.NewClient(listener.Addr().String(), grpc.WithTransportCredentials(insecure.NewCredentials()))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = conn.Close() })
+
+	server := httptest.NewServer(httpproxy.NewHTTPHandler(singleBackendRegistry{backend: passthroughBackend{conn: conn}}))
+	t.Cleanup(server.Close)
+
+	return server.URL, calls
+}
+
+// postWithHeaders sends an empty JSON body to the given URL with the given
+// headers and returns the response status once the body is drained.
+func postWithHeaders(t *testing.T, url string, headers map[string]string) int {
+	t.Helper()
+
+	request, err := http.NewRequest(http.MethodPost, url, strings.NewReader("{}"))
+	require.NoError(t, err)
+	for key, value := range headers {
+		request.Header.Set(key, value)
+	}
+
+	client := &http.Client{Timeout: 5 * time.Second}
+	response, err := client.Do(request)
+	require.NoError(t, err)
+	_, err = io.ReadAll(response.Body)
+	require.NoError(t, err)
+	require.NoError(t, response.Body.Close())
+
+	return response.StatusCode
+}
+
+// Test_TransparentWebGRPCProxy_ForwardsOnlyAuthenticationHeader verifies
+// that a call reaches its backend with the token as its only header.
+//
+// A header gRPC metadata cannot carry, such as a UTF-8 cookie, therefore
+// does not fail the call.
+func Test_TransparentWebGRPCProxy_ForwardsOnlyAuthenticationHeader(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name   string
+		method string
+	}{
+		{name: "unary call", method: ynpb.CountersService_Workers_FullMethodName},
+		{name: "server-streaming call", method: ynpb.ReadinessService_Watch_FullMethodName},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			url, calls := newRecordingProxy(t)
+			statusCode := postWithHeaders(t, url+"/api"+tc.method, map[string]string{
+				"X-Yanet-Authentication": "basic dXNlcjpwYXNz",
+				"Cookie":                 "name=Иван",
+				"X-Custom":               "value",
+			})
+			require.Equal(t, http.StatusOK, statusCode)
+
+			var md metadata.MD
+			select {
+			case md = <-calls:
+			case <-time.After(5 * time.Second):
+				t.Fatal("backend was never called")
+			}
+			require.Equal(t, []string{"basic dXNlcjpwYXNz"}, md.Get("x-yanet-authentication"))
+			require.Empty(t, md.Get("cookie"))
+			require.Empty(t, md.Get("x-custom"))
+		})
+	}
+}
+
+// Test_TransparentWebGRPCProxy_RejectsMalformedAuthenticationHeader verifies
+// that a token metadata cannot carry gets 400 without calling the backend.
+func Test_TransparentWebGRPCProxy_RejectsMalformedAuthenticationHeader(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name   string
+		method string
+	}{
+		{name: "unary call", method: ynpb.CountersService_Workers_FullMethodName},
+		{name: "server-streaming call", method: ynpb.ReadinessService_Watch_FullMethodName},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			url, calls := newRecordingProxy(t)
+			statusCode := postWithHeaders(t, url+"/api"+tc.method, map[string]string{
+				"X-Yanet-Authentication": "basic Иван",
+			})
+			require.Equal(t, http.StatusBadRequest, statusCode)
+			require.Empty(t, calls)
+		})
+	}
 }
