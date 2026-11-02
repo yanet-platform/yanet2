@@ -74,6 +74,11 @@ fwstate_sync_payload_len(
 // Report whether a packet is an external sync packet this configuration
 // receives.
 //
+// The module's packet contract: a packet this returns true for is
+// claimed - its frames update the fwmap and the packet is then dropped,
+// never forwarded; emission happens only from fwmap stash reads; every
+// other packet crosses the module untouched.
+//
 // Only packets naming a configured listener by IPv6 destination and UDP
 // destination port qualify; without a listener nothing is claimed. The
 // listener addresses carry no multicast requirement: a unicast listener
@@ -747,7 +752,11 @@ fwstate_receive_external(
 	if (!fwstate_sync_payload_len(
 		    mbuf, ipv6_hdr, payload_offset, &udp_payload_len
 	    )) {
-		packet_front_output(emitter->packet_front, packet);
+		// A claimed packet never leaves the module: the matcher ran
+		// this same validation, so this only guards the invariant.
+		counters->external_dropped[0] += 1;
+		counters->external_dropped[1] += mbuf->pkt_len;
+		packet_front_drop(emitter->packet_front, packet);
 		return;
 	}
 	size_t frame_count =
