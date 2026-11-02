@@ -84,19 +84,29 @@ type browserPeerConn struct {
 }
 
 // browserConnection is the way into the loopback server for the calls of
-// one browser TLS connection, opened by its first call.
+// one browser TLS connection.
+//
+// A connection that presented a verified client certificate gets a way of
+// its own, opened by its first call. Any other connection holds no
+// in-process gRPC connection of its own: its TLS state authenticates no one,
+// so its calls share the default way.
 type browserConnection struct {
 	tlsConn  *tls.Conn
 	server   *grpc.Server
 	endpoint string
+	// shared is the default way into the loopback server.
+	shared   *backend
 	mu       sync.Mutex
 	backend  *backend
 	listener *bufconn.Listener
 	closed   bool
 }
 
-// Backend returns the connection into the loopback server that carries the
-// TLS state of the browser connection, opening it on first use.
+// Backend returns the connection into the loopback server for the calls of
+// the browser connection.
+//
+// A browser connection with a verified client certificate gets one that
+// carries its TLS state, opened on first use; any other gets the shared one.
 func (m *browserConnection) Backend() (*backend, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -111,6 +121,10 @@ func (m *browserConnection) Backend() (*backend, error) {
 	// A browser connection serves calls only once its handshake is done, so
 	// the state is final here.
 	state := m.tlsConn.ConnectionState()
+	if len(state.VerifiedChains) == 0 {
+		return m.shared, nil
+	}
+
 	listener := newMemoryListener()
 	go func() {
 		_ = serve(m.server, &browserPeerListener{Listener: listener, state: &state})
@@ -126,8 +140,8 @@ func (m *browserConnection) Backend() (*backend, error) {
 	return peer, nil
 }
 
-// Close closes the way into the loopback server, and every call made after
-// it fails.
+// Close closes the connection's own way into the loopback server, if it
+// opened one, and every call made after it fails.
 func (m *browserConnection) Close() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -157,16 +171,19 @@ func browserConnectionFromContext(ctx context.Context) (*browserConnection, bool
 type browserConnections struct {
 	server      *grpc.Server
 	endpoint    string
+	shared      *backend
 	mu          sync.Mutex
 	connections map[net.Conn]*browserConnection
 }
 
 // newBrowserConnections returns a tracker opening its ways into the loopback
-// server, each labeled with the address the gateway is reachable at.
-func newBrowserConnections(server *grpc.Server, endpoint string) *browserConnections {
+// server, each labeled with the address the gateway is reachable at, and
+// sending connections without a verified client certificate the shared way.
+func newBrowserConnections(server *grpc.Server, endpoint string, shared *backend) *browserConnections {
 	return &browserConnections{
 		server:      server,
 		endpoint:    endpoint,
+		shared:      shared,
 		connections: map[net.Conn]*browserConnection{},
 	}
 }
@@ -181,14 +198,14 @@ func (m *browserConnections) Track(ctx context.Context, conn net.Conn) context.C
 		return ctx
 	}
 
-	browser := &browserConnection{tlsConn: tlsConn, server: m.server, endpoint: m.endpoint}
+	browser := &browserConnection{tlsConn: tlsConn, server: m.server, endpoint: m.endpoint, shared: m.shared}
 	m.add(conn, browser)
 
 	return context.WithValue(ctx, browserConnectionKey{}, browser)
 }
 
-// Forget closes the way into the loopback server of a connection that
-// closed or left the HTTP server.
+// Forget closes a connection's own way into the loopback server, if it
+// opened one, once the connection closes or leaves the HTTP server.
 func (m *browserConnections) Forget(conn net.Conn, state http.ConnState) {
 	if state != http.StateClosed && state != http.StateHijacked {
 		return
