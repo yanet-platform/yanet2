@@ -186,11 +186,15 @@ type Gateway struct {
 	server *grpc.Server
 	// secureServer is the TLS gRPC server, nil without a gRPC TLS listener.
 	secureServer *grpc.Server
-	// loopbackServer serves the gateway's own services to the HTTP surface
-	// over in-memory connections.
+	// loopbackServer serves every call of the HTTP surface over in-memory
+	// connections, through the interceptors of the network servers.
 	loopbackServer *grpc.Server
-	grpcListeners  []grpcListener
-	http           ListenerConfig
+	// loopback is the HTTP surface's way into the loopback server.
+	loopback *loopbackBackend
+	// releaseLoopback ends the gateway's own lease on the loopback.
+	releaseLoopback func()
+	grpcListeners   []grpcListener
+	http            ListenerConfig
 	// crossOrigin rejects cross-origin browser requests to the HTTP server
 	// from every origin but the trusted ones.
 	crossOrigin *http.CrossOriginProtection
@@ -331,16 +335,12 @@ func NewGateway(cfg Config, options ...GatewayOption) (*Gateway, error) {
 		)
 	}
 
-	// An active policy does not cover HTTP calls to module, device and
-	// operator services.
-	//
-	// The HTTP server calls a service through its registry backend, and only
-	// the backend of a framework service leads into the gateway's own gRPC
-	// server and its interceptors. The other services run on servers of
-	// their own.
-	if authManager.Mode() != auth.ModeDisabled && plan.HTTP.Serves() {
-		log.Warn("http server skips authentication and authorization for module, device and operator services",
+	// A plaintext HTTP listener stays a valid choice under an active policy,
+	// but no client certificate reaches the gateway over it.
+	if authManager.Mode() != auth.ModeDisabled && plan.HTTP.Endpoint != "" {
+		log.Warn("plaintext http listener carries no client certificates, browser calls over it are anonymous",
 			zap.String("mode", string(authManager.Mode())),
+			zap.String("endpoint", plan.HTTP.Endpoint),
 		)
 	}
 
@@ -572,8 +572,8 @@ func NewGateway(cfg Config, options ...GatewayOption) (*Gateway, error) {
 		endpoint = grpcListeners[0].Listener.Addr().String()
 	}
 
-	// Gateway-hosted services are reached through in-memory connections into
-	// the loopback server, a backend for the HTTP surface and the registry.
+	// Every HTTP call goes into the loopback server over an in-memory
+	// connection and is served or proxied there as on a network server.
 	//
 	// No network hop is involved, and the interceptor chain still runs on
 	// every request that comes through them. An in-memory connection runs no
@@ -608,6 +608,10 @@ func NewGateway(cfg Config, options ...GatewayOption) (*Gateway, error) {
 		)
 	}
 
+	// The gateway holds a lease of its own on the loopback, which the HTTP
+	// surface needs even once external backends take over all its names.
+	_, releaseLoopback, _ := registry.GetBackend(ynpb.Gateway_ServiceDesc.ServiceName)
+
 	var runners []serviceRunner
 
 	for _, entry := range opts.Services {
@@ -638,6 +642,8 @@ func NewGateway(cfg Config, options ...GatewayOption) (*Gateway, error) {
 		server:            server,
 		secureServer:      secureServer,
 		loopbackServer:    loopbackServer,
+		loopback:          loopback,
+		releaseLoopback:   releaseLoopback,
 		grpcListeners:     grpcListeners,
 		http:              plan.HTTP,
 		crossOrigin:       crossOrigin,
@@ -662,6 +668,7 @@ func (m *Gateway) Close() error {
 		}
 	}
 
+	m.releaseLoopback()
 	if err := m.registry.Close(); err != nil {
 		errs = append(errs, fmt.Errorf("failed to close backend registry: %w", err))
 	}
@@ -874,7 +881,7 @@ func (m *Gateway) runHTTPServer(ctx context.Context) error {
 		Handler: m.crossOrigin.Handler(
 			httpproxy.GzipMiddleware(
 				httpproxy.NewHTTPHandler(
-					m.registry,
+					&loopbackRegistry{registry: m.registry, loopback: m.loopback},
 					httpproxy.WithTrustedOrigins(m.http.TrustedOrigins),
 					httpproxy.WithLog(m.log),
 				),

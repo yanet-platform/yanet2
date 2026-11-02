@@ -495,8 +495,8 @@ func Test_Gateway_TLSOnly_HTTPSReachesBuiltin(t *testing.T) {
 	requireHTTPListServices(t, client, "https://"+httpsAddress)
 }
 
-// countingHealthService is a builtin Service whose health checker counts
-// the checks that reach it.
+// countingHealthService is a Service whose health checker counts the checks
+// that reach it.
 type countingHealthService struct {
 	grpc_health_v1.UnimplementedHealthServer
 	checks atomic.Int32
@@ -1516,4 +1516,177 @@ func Test_Gateway_HTTPProxy_ForwardsAuthenticationHeader(t *testing.T) {
 	require.NoError(t, json.Unmarshal(body, &response))
 	require.Equal(t, "verified-operator", response.GetPrincipal().GetUser())
 	require.Equal(t, "sshcert", response.GetPrincipal().GetAuthMethod())
+}
+
+// Test_Gateway_HTTPProxy_AuthorizesEveryBackendKind verifies that a caller
+// the permissions do not cover never reaches a service over HTTP.
+func Test_Gateway_HTTPProxy_AuthorizesEveryBackendKind(t *testing.T) {
+	t.Parallel()
+
+	operatorToken := "basic " + base64.StdEncoding.EncodeToString([]byte("alice:s3cret"))
+	for _, kind := range []struct {
+		name string
+		kind gateway.BackendKind
+	}{
+		{name: "framework service", kind: gateway.BackendKindBuiltin},
+		{name: "in-process module", kind: gateway.BackendKindInProcess},
+		{name: "external operator", kind: gateway.BackendKindExternal},
+	} {
+		t.Run(kind.name, func(t *testing.T) {
+			t.Parallel()
+
+			ca := tlscert.NewCA(t)
+			server := ca.IssueServer(t, "127.0.0.1")
+			httpAddress, httpsAddress := newFreeAddress(t), newFreeAddress(t)
+			cfg := gateway.DefaultConfig()
+			cfg.Auth = newX509AuthConfig(t, ca)
+			cfg.Server.HTTP = &gateway.ListenerConfig{
+				Endpoint: httpAddress,
+				TLS:      newTLSListenerConfig(t, httpsAddress, server.CertFile, server.KeyFile),
+			}
+
+			health := &countingHealthService{}
+			listener := NewTestListener(t)
+			options := []gateway.GatewayOption{gateway.WithListener(listener)}
+			switch kind.kind {
+			case gateway.BackendKindBuiltin:
+				options = append(options, gateway.WithBuiltinService(health))
+			case gateway.BackendKindInProcess:
+				options = append(options, gateway.WithService(health))
+			}
+			runGateway(t, cfg, options...)
+
+			if kind.kind == gateway.BackendKindExternal {
+				backendListener := NewTestListener(t)
+				backend := grpc.NewServer()
+				grpc_health_v1.RegisterHealthServer(backend, health)
+				go func() { _ = backend.Serve(backendListener) }()
+				t.Cleanup(backend.Stop)
+
+				connection, err := grpc.NewClient(listener.Addr().String(), grpc.WithTransportCredentials(insecure.NewCredentials()))
+				require.NoError(t, err)
+				t.Cleanup(func() { _ = connection.Close() })
+				registerContext := metadata.AppendToOutgoingContext(t.Context(), "x-yanet-authentication", operatorToken)
+				_, err = ynpb.NewGatewayClient(connection).Register(registerContext, &ynpb.RegisterRequest{
+					Backend: &ynpb.BackendDesc{
+						Name:     grpc_health_v1.Health_ServiceDesc.ServiceName,
+						Endpoint: backendListener.Addr().String(),
+					},
+				}, grpc.WaitForReady(true))
+				require.NoError(t, err)
+			}
+
+			method := "/api" + grpc_health_v1.Health_Check_FullMethodName
+			for _, tc := range []struct {
+				name         string
+				url          string
+				token        string
+				certificates []tls.Certificate
+				status       int
+			}{
+				{name: "anonymous over plaintext", url: "http://" + httpAddress + method, status: http.StatusForbidden},
+				{name: "operator token over plaintext", url: "http://" + httpAddress + method, token: operatorToken, status: http.StatusOK},
+				{
+					name:         "trusted certificate over https",
+					url:          "https://" + httpsAddress + method,
+					certificates: []tls.Certificate{ca.IssueClient(t, "route-operator").Certificate},
+					status:       http.StatusOK,
+				},
+			} {
+				t.Run(tc.name, func(t *testing.T) {
+					client := &http.Client{
+						Transport: &http.Transport{
+							TLSClientConfig: &tls.Config{
+								RootCAs:      ca.Pool(),
+								Certificates: tc.certificates,
+								MinVersion:   tls.VersionTLS12,
+							},
+							ForceAttemptHTTP2: true,
+						},
+						Timeout: 5 * time.Second,
+					}
+					before := health.checks.Load()
+
+					var body []byte
+					var statusCode int
+					require.Eventually(t, func() bool {
+						request, requestErr := http.NewRequest(http.MethodPost, tc.url, strings.NewReader("{}"))
+						if requestErr != nil {
+							return false
+						}
+						request.Header.Set("Content-Type", "application/json")
+						if tc.token != "" {
+							request.Header.Set("X-Yanet-Authentication", tc.token)
+						}
+
+						response, postErr := client.Do(request)
+						if postErr != nil {
+							return false
+						}
+						defer func() { _ = response.Body.Close() }()
+
+						body, postErr = io.ReadAll(response.Body)
+						statusCode = response.StatusCode
+						return postErr == nil && statusCode != http.StatusServiceUnavailable
+					}, 5*time.Second, 50*time.Millisecond, "HTTP proxy did not reach the service")
+
+					require.Equal(t, tc.status, statusCode, string(body))
+					wantChecks := before
+					if tc.status == http.StatusOK {
+						wantChecks++
+					}
+					require.Equal(t, wantChecks, health.checks.Load())
+				})
+			}
+		})
+	}
+}
+
+// Test_Gateway_HTTPProxy_KeepsLoopbackWhenItsNamesAreTakenOver verifies that
+// the gateway's own services stay reachable over HTTP after such a takeover.
+func Test_Gateway_HTTPProxy_KeepsLoopbackWhenItsNamesAreTakenOver(t *testing.T) {
+	t.Parallel()
+
+	httpAddress := newFreeAddress(t)
+	cfg := gateway.DefaultConfig()
+	cfg.Server.HTTP = &gateway.ListenerConfig{Endpoint: httpAddress}
+	listener := NewTestListener(t)
+	runGateway(t, cfg, gateway.WithListener(listener))
+
+	connection, err := grpc.NewClient(listener.Addr().String(), grpc.WithTransportCredentials(insecure.NewCredentials()))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = connection.Close() })
+	client := ynpb.NewGatewayClient(connection)
+	foreignEndpoint := NewTestListener(t).Addr().String()
+	for _, service := range []string{
+		ynpb.Gateway_ServiceDesc.ServiceName,
+		ynpb.AuthService_ServiceDesc.ServiceName,
+		ynpb.ReadinessService_ServiceDesc.ServiceName,
+		ynpb.MetricsService_ServiceDesc.ServiceName,
+		ynpb.PortMetricsService_ServiceDesc.ServiceName,
+	} {
+		_, err := client.Register(t.Context(), &ynpb.RegisterRequest{
+			Backend: &ynpb.BackendDesc{Name: service, Endpoint: foreignEndpoint},
+		}, grpc.WaitForReady(true))
+		require.NoError(t, err)
+	}
+
+	httpClient := &http.Client{Timeout: 5 * time.Second}
+	url := "http://" + httpAddress + "/api" + ynpb.Gateway_ListServices_FullMethodName
+
+	var body []byte
+	var statusCode int
+	require.Eventually(t, func() bool {
+		response, postErr := httpClient.Post(url, "application/json", strings.NewReader("{}"))
+		if postErr != nil {
+			return false
+		}
+		defer func() { _ = response.Body.Close() }()
+
+		body, postErr = io.ReadAll(response.Body)
+		statusCode = response.StatusCode
+		return postErr == nil
+	}, 5*time.Second, 50*time.Millisecond, "HTTP server did not answer")
+
+	require.Equal(t, http.StatusOK, statusCode, string(body))
 }
