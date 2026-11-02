@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/x509"
 	"fmt"
+	"sync"
 	"time"
 
 	"go.uber.org/zap"
@@ -64,7 +65,10 @@ type Manager struct {
 	authorizer       Authorizer
 	clientCAs        func() *x509.CertPool
 	mode             Mode
-	log              *zap.Logger
+	// admissions holds, by id, the calls Admit let in that no server has
+	// taken yet.
+	admissions sync.Map
+	log        *zap.Logger
 }
 
 // NewManager creates a new auth Manager.

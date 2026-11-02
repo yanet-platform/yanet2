@@ -85,7 +85,7 @@ func TestServeHTTP_ClientAbortPropagatesToBackendCtx(t *testing.T) {
 	conn, err := grpc.NewClient(listener.Addr().String(), grpc.WithTransportCredentials(insecure.NewCredentials()))
 	require.NoError(t, err)
 
-	handler := httpproxy.NewHTTPHandler(passthroughBackend{conn: conn}, everyServiceRegistry{})
+	handler := httpproxy.NewHTTPHandler(passthroughBackend{conn: conn}, everyServiceRegistry{}, admitAll)
 	server := httptest.NewServer(handler)
 	// The conn.Close call must run before server.Close: server.Close drains the
 	// in-flight HTTP request, which stays outstanding until closing conn
@@ -156,7 +156,7 @@ func TestServeHTTP_ClientAbortPropagatesToBackendCtx_Streaming(t *testing.T) {
 	conn, err := grpc.NewClient(listener.Addr().String(), grpc.WithTransportCredentials(insecure.NewCredentials()))
 	require.NoError(t, err)
 
-	handler := httpproxy.NewHTTPHandler(passthroughBackend{conn: conn}, everyServiceRegistry{})
+	handler := httpproxy.NewHTTPHandler(passthroughBackend{conn: conn}, everyServiceRegistry{}, admitAll)
 	server := httptest.NewServer(handler)
 	t.Cleanup(server.Close)
 	t.Cleanup(func() { _ = conn.Close() })

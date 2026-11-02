@@ -14,11 +14,26 @@ import (
 // token under.
 const TokenMetadataKey = "x-yanet-authentication"
 
+// credentialKey keys in a call's context the credential the call was let in
+// with before it reached the server.
+type credentialKey struct{}
+
+// WithCredential records in ctx the credential a call was let in with before
+// it reached the server.
+func WithCredential(ctx context.Context, credential core.Credential) context.Context {
+	return context.WithValue(ctx, credentialKey{}, credential)
+}
+
 // ExtractCredential collects what the request presents for authentication:
 // the token from gRPC metadata and the TLS state of the peer connection.
 //
-// Either part is left empty when absent.
+// A call let in before it reached the server presents the credential it was
+// let in with instead. Either part is left empty when absent.
 func ExtractCredential(ctx context.Context) core.Credential {
+	if credential, ok := ctx.Value(credentialKey{}).(core.Credential); ok {
+		return credential
+	}
+
 	var credential core.Credential
 
 	if md, ok := metadata.FromIncomingContext(ctx); ok {

@@ -119,14 +119,14 @@ func (m *backend) Endpoint() string {
 	return m.endpoint
 }
 
-// GetConnection returns the underlying gRPC connection, forwarding incoming
-// metadata as outgoing metadata, all but the authentication token.
+// GetConnection returns the underlying gRPC connection, forwarding the
+// incoming metadata but for the caller's token and admission.
 //
-// The gateway has authenticated the call by then, and a backend registered
-// under the service's name would otherwise collect the token of every
-// caller. A caller without incoming metadata, such as the HTTP surface,
-// keeps the outgoing metadata it attached itself, token included, since its
-// call is still to be authenticated by the gateway.
+// The gateway has authenticated the call by then: a backend registered under
+// the service's name would otherwise collect the token of every caller, and
+// an admission means something to the gateway alone. A caller without
+// incoming metadata, such as the HTTP surface, keeps the outgoing metadata it
+// attached itself, the admission the loopback server lets its call in by.
 func (m *backend) GetConnection(ctx context.Context, _ string) (context.Context, *grpc.ClientConn, error) {
 	md, ok := metadata.FromIncomingContext(ctx)
 	if !ok {
@@ -135,6 +135,7 @@ func (m *backend) GetConnection(ctx context.Context, _ string) (context.Context,
 
 	outgoing := md.Copy()
 	delete(outgoing, auth.TokenMetadataKey)
+	delete(outgoing, auth.AdmissionMetadataKey)
 
 	return metadata.NewOutgoingContext(ctx, outgoing), m.conn, nil
 }

@@ -29,6 +29,7 @@ import (
 	readinesspb "github.com/yanet-platform/yanet2/common/readinesspb/v1"
 	"github.com/yanet-platform/yanet2/controlplane/httpproxy"
 	"github.com/yanet-platform/yanet2/controlplane/internal/auth"
+	"github.com/yanet-platform/yanet2/controlplane/internal/auth/core"
 	"github.com/yanet-platform/yanet2/controlplane/internal/xgrpc"
 	ynpb "github.com/yanet-platform/yanet2/controlplane/ynpb/v1"
 )
@@ -242,7 +243,12 @@ type Gateway struct {
 	clientCAs func() *x509.CertPool
 	// browsers tracks the way of every browser TLS connection into the
 	// loopback server, nil unless HTTPS asks for client certificates.
-	browsers         *browserConnections
+	browsers      *browserConnections
+	authManager   *auth.Manager
+	serverMetrics *grpcmetrics.ServerMetrics
+	// methods returns how each method the loopback server serves itself
+	// streams.
+	methods          func() map[string]grpc.MethodInfo
 	memoryListener   *bufconn.Listener
 	runners          []serviceRunner
 	registry         *BackendRegistry
@@ -579,6 +585,17 @@ func NewGateway(cfg Config, options ...GatewayOption) (*Gateway, error) {
 	// The loopback server learns from each in-memory connection the TLS
 	// state of the browser connection it serves, if any.
 	loopbackServer := newServer(grpc.Creds(newLoopbackCredentials()))
+	// The method types are read at the first refused HTTP call, by when
+	// every service is registered.
+	methods := sync.OnceValue(func() map[string]grpc.MethodInfo {
+		methods := map[string]grpc.MethodInfo{}
+		for service, info := range loopbackServer.GetServiceInfo() {
+			for _, method := range info.Methods {
+				methods["/"+service+"/"+method.Name] = method
+			}
+		}
+		return methods
+	})
 
 	var grpcListeners []grpcListener
 	if plaintext {
@@ -640,8 +657,8 @@ func NewGateway(cfg Config, options ...GatewayOption) (*Gateway, error) {
 	}
 	loopback := &loopbackBackend{backend: defaultLoopback}
 
-	// Only a browser that presents a verified client certificate needs a way
-	// of its own into the loopback server.
+	// Only a browser that presents a verified client certificate gets a way
+	// of its own into the loopback server, which carries its TLS state.
 	var browsers *browserConnections
 	if clientCAs != nil && plan.HTTP.TLS != nil {
 		browsers = newBrowserConnections(loopbackServer, endpoint, defaultLoopback)
@@ -705,6 +722,9 @@ func NewGateway(cfg Config, options ...GatewayOption) (*Gateway, error) {
 		httpsCertificates: httpsCertificates,
 		clientCAs:         clientCAs,
 		browsers:          browsers,
+		authManager:       authManager,
+		serverMetrics:     serverMetrics,
+		methods:           methods,
 		memoryListener:    memoryListener,
 		runners:           runners,
 		registry:          registry,
@@ -927,6 +947,14 @@ func (m *Gateway) runRegistrySweeper(ctx context.Context) error {
 	}
 }
 
+// maxAnonymousBodySize bounds the body of an HTTP call an anonymous caller
+// makes while authentication is enforced.
+const maxAnonymousBodySize = 1 << 20
+
+// maxBodySize bounds the body of every other HTTP call, at as many bytes of
+// JSON as the gRPC servers accept for one protobuf message.
+const maxBodySize = 256 << 20
+
 // httpReadHeaderTimeout bounds how long a client of the HTTP server may take
 // over its TLS handshake and, over HTTP/1, its request headers.
 //
@@ -943,8 +971,8 @@ const httpIdleTimeout = 2 * time.Minute
 //
 // A listener that fails to bind or to serve ends the run with its error.
 func (m *Gateway) runHTTPServer(ctx context.Context) error {
-	// Every call goes into the loopback server, whose interceptors check it
-	// before it reaches its service.
+	// Every call is admitted before its body is read, and goes into the
+	// loopback server, which lets it in by its admission.
 	//
 	// A service the registry does not know is answered without reading the
 	// request; one that leaves the registry after the handler last checked it
@@ -955,6 +983,7 @@ func (m *Gateway) runHTTPServer(ctx context.Context) error {
 				httpproxy.NewHTTPHandler(
 					m.loopback,
 					m.registry,
+					m.admitHTTP,
 					httpproxy.WithTrustedOrigins(m.http.TrustedOrigins),
 					httpproxy.WithLog(m.log),
 				),
@@ -1035,6 +1064,56 @@ func (m *Gateway) runHTTPServer(ctx context.Context) error {
 	}
 
 	return group.Wait()
+}
+
+// admitHTTP lets an HTTP call in, before its body is read, on the token
+// header and the TLS state of its request.
+//
+// The admission travels on to the loopback server that serves the call.
+// While authentication is enforced, an anonymous caller may send a body of
+// at most a mebibyte, so a caller that proved nothing cannot make the
+// gateway buffer and decode a large one.
+func (m *Gateway) admitHTTP(r *http.Request, fullMethodName string) (httpproxy.Admission, error) {
+	var credential core.Credential
+	if tokens := r.Header.Values(auth.TokenMetadataKey); len(tokens) > 0 {
+		credential.Token = tokens[0]
+	}
+	if r.TLS != nil {
+		state := *r.TLS
+		credential.TLS = &state
+	}
+
+	principal, id, release, err := m.authManager.Admit(r.Context(), credential, fullMethodName)
+	if err != nil {
+		// The refusal never reaches the loopback server, so it is counted
+		// as the loopback server would have counted it.
+		//
+		// That is under the type a gateway service declares for its method,
+		// or as the bidirectional stream the proxy serves every other call as.
+		method, ok := m.methods()[fullMethodName]
+		if !ok {
+			method = grpc.MethodInfo{IsClientStream: true, IsServerStream: true}
+		}
+		m.serverMetrics.RecordRefused(
+			fullMethodName,
+			method.IsClientStream,
+			method.IsServerStream,
+			status.Code(err),
+		)
+
+		return httpproxy.Admission{}, err
+	}
+
+	size := int64(maxBodySize)
+	if principal.IsAnonymous && m.authManager.Mode() == auth.ModeEnabled {
+		size = maxAnonymousBodySize
+	}
+
+	return httpproxy.Admission{
+		Metadata:    metadata.Pairs(auth.AdmissionMetadataKey, id),
+		MaxBodySize: size,
+		Release:     release,
+	}, nil
 }
 
 // listenUnlessInjected returns the injected listener, or binds the endpoint

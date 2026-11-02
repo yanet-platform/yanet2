@@ -77,9 +77,10 @@ var DefaultBuckets = []float64{
 //
 // It is called once per RPC before the handler runs. A nil return means no
 // extra labels are attached. Stream calls have no single request message, so
-// StreamServerInterceptor invokes the Labeler with a nil req. A Labeler that
-// only type-switches on req (the common case) naturally yields no extra
-// labels for streams.
+// StreamServerInterceptor invokes the Labeler with a nil req, as RecordRefused
+// does for a call whose request was never read. A Labeler that only
+// type-switches on req (the common case) naturally yields no extra labels
+// for those.
 type Labeler func(fullMethod string, req any) metrics.Labels
 
 // Retention reports which series to keep when pruning stale metrics.
@@ -343,6 +344,38 @@ func streamGRPCType(info *grpc.StreamServerInfo) string {
 	default:
 		return grpcTypeBidiStream
 	}
+}
+
+// RecordRefused records a call refused before it reached the interceptors,
+// as started and handled with its code.
+//
+// An HTTP call refused before its body is read is such a call. It is counted
+// under the method and the type its stream flags give, as an interceptor
+// would have counted it, so a refusal stays visible where refusals were
+// always counted. A unary call has neither flag. Its request was never read,
+// so the Labeler gets a nil request. The service filter and the per-service
+// method limit apply as to an intercepted call.
+func (m *ServerMetrics) RecordRefused(fullMethod string, clientStream, serverStream bool, code codes.Code) {
+	service, method := splitFullMethod(fullMethod)
+	if !m.serviceFilter(service) {
+		return
+	}
+
+	start := m.clock()
+
+	grpcType := grpcTypeUnary
+	if clientStream || serverStream {
+		grpcType = streamGRPCType(&grpc.StreamServerInfo{IsClientStream: clientStream, IsServerStream: serverStream})
+	}
+	extra := m.labeler(fullMethod, nil)
+
+	method = m.resolveMethod(service, method)
+	callID := m.callID(grpcType, service, method, extra)
+	call := m.calls.GetOrCreate(callID, func() *callSeries {
+		return newCallSeries(m.buckets)
+	})
+	call.RecordStart()
+	m.recordExit(grpcType, call, service, method, extra, code, start)
 }
 
 func (m *ServerMetrics) recordExit(

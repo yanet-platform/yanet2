@@ -21,9 +21,9 @@ var errBrowserConnectionClosed = errors.New("browser connection closed")
 // loopbackCredentials are the transport credentials of the loopback server.
 //
 // An in-memory connection opened for a browser TLS connection reports that
-// connection's TLS state as its peer, so the client certificate the browser
-// presented authenticates the calls made over it. Any other in-memory
-// connection runs no transport security.
+// connection's TLS state as its peer, which the access log reports as the
+// transport of the calls made over it. Any other in-memory connection runs
+// no transport security.
 type loopbackCredentials struct {
 	credentials.TransportCredentials
 }
@@ -86,9 +86,9 @@ type browserPeerConn struct {
 // one browser TLS connection.
 //
 // A connection that presented a verified client certificate gets a way of
-// its own, opened by its first call. Any other connection holds no
-// in-process gRPC connection of its own: its TLS state authenticates no one,
-// so its calls share the default way.
+// its own, opened by its first call, which carries its TLS state. Any other
+// connection holds no in-process gRPC connection of its own, and its calls
+// share the default way.
 type browserConnection struct {
 	tlsConn  *tls.Conn
 	server   *grpc.Server
