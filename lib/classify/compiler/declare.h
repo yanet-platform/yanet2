@@ -7,6 +7,7 @@
 #include "lib/classify/classify.h"
 #include "lib/classify/rule.h"
 
+#include <stdio.h>
 #include <string.h>
 
 /*
