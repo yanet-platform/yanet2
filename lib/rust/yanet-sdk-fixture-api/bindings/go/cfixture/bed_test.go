@@ -398,3 +398,89 @@ func requireUntagged(t *testing.T, err error) {
 		require.NotErrorIs(t, err, kind, fmt.Sprint(err))
 	}
 }
+
+// largePool is the smallest pool of the requests a held build replays: the
+// requests below it are served from the small-block stock given back for
+// each smaller pool.
+const largePool = 11
+
+// smallStock is how many blocks of each small pool a held build gives back.
+//
+// It is more than a build of the tests here ever takes at once.
+const smallStock = 256
+
+// heldFill is the byte a held build fills the blocks it gives back with, so
+// a request served from one finds bytes it did not write rather than zeros.
+const heldFill = 0xa5
+
+// heldBuild runs a build with every free block held except the blocks given
+// back, and returns the large-pool allocations and the build error.
+//
+// The blocks given back are the small-block stock of each pool below the
+// first replayed pool and one block of each given large pool, all filled with
+// the held byte. A build that succeeds is freed. Either way the agent must
+// get back all the free memory it had.
+func heldBuild(
+	t *testing.T,
+	agent *ffi.Agent,
+	build func(agent *ffi.Agent) (*cfixture.ModuleConfig, error),
+	large []int,
+) (uint64, error) {
+	t.Helper()
+
+	baseline := agent.BlockAllocatorFreeSize()
+	hold, err := dataplaneut.HoldAllocator(agent)
+	require.NoError(t, err)
+	for pool := range largePool {
+		require.NoError(t, hold.Give(pool, smallStock, heldFill))
+	}
+	for _, pool := range large {
+		require.NoError(t, hold.Give(pool, 1, heldFill))
+	}
+
+	before := dataplaneut.PoolAllocations(agent)
+	config, buildErr := build(agent)
+	after := dataplaneut.PoolAllocations(agent)
+	if buildErr == nil {
+		require.NoError(t, config.Free())
+	}
+	hold.Release()
+
+	require.Equal(t, baseline, agent.BlockAllocatorFreeSize(), "a build given %v", large)
+	var served uint64
+	for pool := largePool; pool < dataplaneut.AllocatorPools; pool++ {
+		served += after[pool] - before[pool]
+	}
+	return served, buildErr
+}
+
+// sweepLargeRequests checks each exhausted budget until the build succeeds.
+//
+// Each retry adds the smallest block that advances the build. Freed blocks
+// can serve later requests, so the budget grows only when reuse falls short.
+// Repeated splits require enough arena space because blocks never merge.
+func sweepLargeRequests(
+	t *testing.T,
+	agent *ffi.Agent,
+	build func(agent *ffi.Agent) (*cfixture.ModuleConfig, error),
+) {
+	t.Helper()
+
+	var large []int
+	for {
+		served, err := heldBuild(t, agent, build, large)
+		if err == nil {
+			require.NotEmpty(t, large, "the sweep must exercise an allocation failure")
+			return
+		}
+		require.ErrorContains(t, err, "the shared memory is exhausted", "given %d large blocks", len(large))
+		pool := largePool
+		for ; pool < dataplaneut.AllocatorPools; pool++ {
+			if more, _ := heldBuild(t, agent, build, append(large, pool)); more > served {
+				break
+			}
+		}
+		require.Less(t, pool, dataplaneut.AllocatorPools, "no pool serves request %d: %v", len(large), err)
+		large = append(large, pool)
+	}
+}

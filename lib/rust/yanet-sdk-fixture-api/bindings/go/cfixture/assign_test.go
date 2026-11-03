@@ -4,6 +4,7 @@ package cfixture_test
 
 import (
 	"encoding/binary"
+	"fmt"
 	"testing"
 
 	"github.com/c2h5oh/datasize"
@@ -495,4 +496,72 @@ func Test_Assign_Build_MemoryRunsOut_ReturnsMemoryToBaseline(t *testing.T) {
 	fits := sweep(t, bed, build, 0, 16<<20, 16<<10)
 
 	require.NotZero(t, fits, "the build fits within the sweep")
+}
+
+// Test_Assign_Build_FailedCompile_ReleasesItsStage verifies that a compile
+// that fails right after it allocated its stage's rule groups gives them back.
+//
+// The rule groups and the next request of the compile are both four bytes per
+// rule, so with enough rules they are larger than anything the build asked
+// for before. With smaller blocks plenty, one block of their size and none
+// larger, the rule groups take the block and the next request fails, a
+// failure C leaves to its caller to release the stage after.
+func Test_Assign_Build_FailedCompile_ReleasesItsStage(t *testing.T) {
+	bed := newBed(t, func(config *dataplaneut.Config) {
+		config.CPMemory = uint64(256 * datasize.MB)
+	})
+	agent, err := bed.harness.SharedMemory().AgentAttach("stage", 0, 64*datasize.MB)
+	require.NoError(t, err)
+	const ruleCount = 32 << 10
+	rules := make([]assignRule, ruleCount)
+	for idx := range rules {
+		rules[idx] = assignRule{family: cfixture.AssignFamilyIPv6, counter: fmt.Sprintf("rule %d", idx)}
+	}
+	assign := assignOf(t, rules...)
+	groups := dataplaneut.AllocatorPoolOf(4 * ruleCount)
+	baseline := agent.BlockAllocatorFreeSize()
+	hold, err := dataplaneut.HoldAllocator(agent)
+	require.NoError(t, err)
+	for pool := range groups {
+		require.NoError(t, hold.Give(pool, 64, heldFill))
+	}
+	require.NoError(t, hold.Give(groups, 1, heldFill))
+
+	before := dataplaneut.PoolAllocations(agent)
+	_, err = cfixture.NewAssignConfig(agent, "config", assign)
+	after := dataplaneut.PoolAllocations(agent)
+	hold.Release()
+
+	require.ErrorContains(t, err, "the shared memory is exhausted")
+	require.Equal(t, uint64(1), after[groups]-before[groups], "the rule groups take the one block")
+	require.Equal(t, baseline, agent.BlockAllocatorFreeSize())
+}
+
+// Test_Assign_Build_EachLargeRequestRefused_ReturnsMemoryToBaseline verifies
+// that a build refused at any of its large requests, in memory that holds
+// stale bytes, gives back all it took and frees nothing it did not allocate.
+//
+// The IPv6 rule's networks need more trie chunks than the compiles before it
+// free, so the sweep fails the IPv6 commit while it builds its first trie,
+// where C frees the classifier's other fields whatever they hold.
+func Test_Assign_Build_EachLargeRequestRefused_ReturnsMemoryToBaseline(t *testing.T) {
+	bed := newBed(t, func(config *dataplaneut.Config) {
+		config.CPMemory = uint64(256 * datasize.MB)
+	})
+	agent, err := bed.harness.SharedMemory().AgentAttach("large", 0, 128*datasize.MB)
+	require.NoError(t, err)
+	var nets6 []any
+	for idx := range 32 {
+		addr := [16]byte{0x20, 0x01, byte(idx), byte(idx * 7), byte(idx * 13), byte(idx * 31), 7: 1}
+		nets6 = append(nets6, net6(addr, 64))
+	}
+	assign := assignOf(t,
+		assignRule{family: cfixture.AssignFamilyIPv4, src: []any{net4([4]byte{10}, 8)}, counter: "v4"},
+		assignRule{family: cfixture.AssignFamilyIPv6, src: nets6, counter: "v6"},
+		assignRule{family: cfixture.AssignFamilyAny, ports: []cfixture.PortRange{cfixture.NewPortRange(53, 53)}, counter: "any"},
+	)
+	build := func(agent *ffi.Agent) (*cfixture.ModuleConfig, error) {
+		return cfixture.NewAssignConfig(agent, "config", assign)
+	}
+	sweepLargeRequests(t, agent, build)
 }
