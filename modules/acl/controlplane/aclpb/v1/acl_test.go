@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
 
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
 	filterpb "github.com/yanet-platform/yanet2/common/filterpb/v1"
@@ -222,6 +223,29 @@ func Test_UpdateConfigRequest_Validate(t *testing.T) {
 			}
 		})
 	}
+}
+
+// Test_UpdateConfigRequest_DecodeLegacyWireForm pins the wire contract of the
+// reserved sync slots: an update an old client still fills carries the removed
+// sync_config in field 5; the decoder must skip the slot and the request must
+// stay valid, so the cutover never strands an old client on a decode error.
+func Test_UpdateConfigRequest_DecodeLegacyWireForm(t *testing.T) {
+	base := &aclpb.UpdateConfigRequest{
+		Name:  "acl0",
+		Rules: []*aclpb.Rule{{}},
+	}
+	wire, err := proto.Marshal(base)
+	require.NoError(t, err)
+
+	// Field 5, wire type 2 (tag 0x2a), wrapping an embedded message with
+	// field 2 set to 1000: the shape of the removed SyncConfig - a source
+	// address with a multicast port - an old client still sends.
+	wire = append(wire, 0x2a, 0x03, 0x10, 0xe8, 0x07)
+
+	var request aclpb.UpdateConfigRequest
+	require.NoError(t, proto.Unmarshal(wire, &request))
+	require.NoError(t, request.Validate())
+	require.Equal(t, "acl0", request.GetName())
 }
 
 // Test_DeleteConfigRequest_Validate verifies that an empty configuration name
