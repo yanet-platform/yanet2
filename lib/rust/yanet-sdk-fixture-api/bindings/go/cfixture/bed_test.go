@@ -46,7 +46,7 @@ func newBed(t *testing.T, adjust ...func(*dataplaneut.Config)) *bed {
 		DPMemory:      uint64(4 * datasize.MB),
 		WorkerCount:   workerCount,
 		Devices:       []string{"port0"},
-		Modules:       []string{"fixture", "tally", "fib"},
+		Modules:       []string{"fixture", "tally", "fib", "assign"},
 		DevicesToLoad: []string{"plain"},
 		PluginDir:     cfixture.PluginDir,
 		// The fixture forgets packets on purpose and keeps none beyond a round.

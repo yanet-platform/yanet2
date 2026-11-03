@@ -7,6 +7,22 @@
 # the alias sdk-rust-fixtures builds just them.
 sdk_rust_fixtures = get_option('sdk_rust_fixtures')
 
+# The classify shims of the SDK, which the plugins compile in through cargo,
+# built here against the C library to pin that their lookups stay inside the
+# objects they index.
+classify_shim_guard_test = executable(
+  'classify_shim_guard_test',
+  [
+    'yanet-sys/shim/tests/classify_guard_test.c',
+    'yanet-sys/shim/classify_cp_shim.c',
+    'yanet-sys/shim/classify_dp_shim.c',
+  ],
+  c_args: yanet_test_c_args,
+  dependencies: [lib_common_dep, lib_classify_compiler_dep, libdpdk_inc_dep],
+  include_directories: [yanet_rootdir, include_directories('yanet-sys/shim')],
+)
+test('classify_shim_guard', classify_shim_guard_test, suite: ['filter'])
+
 if sdk_rust_fixtures.enabled()
   rust_sdk_fixture_paths = configuration_data()
   rust_sdk_fixture_paths.set_quoted('YANET_SDK_FIXTURE_PLUGIN_DIR', meson.current_build_dir() / 'plugins')
@@ -126,12 +142,12 @@ if sdk_rust_fixtures.enabled()
   # The wrapper of the api exports and the Go tests of the SDK.
   #
   # The archive needs the C routines of the control plane that the api crate
-  # calls, and the header and the plugins are hashed so that a change reaches
-  # Go's build.
+  # calls, the joins of the classification library among them, and the header
+  # and the plugins are hashed so that a change reaches Go's build.
   cgo_packages += {
     'lib/rust/yanet-sdk-fixture-api/bindings/go/cfixture': {
       'build_tag': 'sdk_rust_fixtures',
-      'libraries': [lib_config_cp, lib_counters, lib_errors],
+      'libraries': [lib_classify_compiler, lib_config_cp, lib_counters, lib_errors],
       'generated_archives': [rust_sdk_fixture_api_archive],
       'inputs': [rust_sdk_fixture_api_header, rust_sdk_fixture_paths_header, rust_sdk_fixture_plugins],
     },

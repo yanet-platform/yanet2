@@ -8,5 +8,7 @@
 //! (`bindings/go/dataplane_ut`). The packet allocator and copy of the
 //! dataplane are not linked and no test reaches them.
 
+use netip as _;
+
 mod common;
 mod handler;

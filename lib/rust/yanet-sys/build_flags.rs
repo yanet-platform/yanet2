@@ -47,6 +47,7 @@ const ABI_OPTIONS: &[&str] = &[
 /// DPDK's among them (`rte_mbuf_core.h` and what the routing helpers reach).
 const C_HEADER_DIRS: &[&str] = &[
     "common",
+    "lib/classify",
     "lib/controlplane",
     "lib/counters",
     "lib/dataplane",

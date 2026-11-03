@@ -8,6 +8,8 @@
 
 #![forbid(unsafe_code)]
 
+pub mod assign;
+
 use core::ffi::CStr;
 
 use yanet_sdk::{Builder, Built, FfiRecord, LpmRange, Refusal};
