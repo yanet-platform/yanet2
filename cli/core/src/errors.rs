@@ -374,41 +374,11 @@ fn default_hint(kind: ErrorKind) -> Option<String> {
     }
 }
 
-/// Maps a gRPC status to a resource-specific not-found error for one service.
-pub struct NotFoundMapper {
-    service: &'static str,
-    default_resource: &'static str,
-}
-
-impl NotFoundMapper {
-    /// Creates a mapper for the given service and default resource label.
-    pub const fn new(service: &'static str, default_resource: &'static str) -> Self {
-        Self { service, default_resource }
-    }
-
-    /// Maps `status` to an [`Error`], rewriting a genuine resource `NotFound`
-    /// into a friendly `"<resource> not found"` message and passing everything
-    /// else (including a registry-miss `NotFound`, whether recognised by
-    /// trailer or by the compatibility fallback) through unchanged.
-    pub fn map(
-        &self,
-        status: Status,
-        action: impl Into<String>,
-        endpoint: impl Into<String>,
-        resource: Option<&str>,
-    ) -> Error {
-        map_not_found(
-            status,
-            action,
-            endpoint,
-            self.service,
-            resource.unwrap_or(self.default_resource),
-        )
-    }
-}
-
 /// Maps `status` to an [`Error`] for `service`, rewriting a genuine resource
-/// `NotFound` into `<resource> not found` and passing the rest through.
+/// `NotFound` into `<resource> not found`.
+///
+/// Everything else passes through unchanged, including a registry-miss
+/// `NotFound`, whether recognised by trailer or by the compatibility fallback.
 pub fn map_not_found(
     status: Status,
     action: impl Into<String>,
@@ -438,9 +408,7 @@ mod test {
 
     use tonic::{Code, Status, metadata::MetadataMap};
 
-    use super::{Error, ErrorKind, NotFoundMapper};
-
-    const MAPPER: NotFoundMapper = NotFoundMapper::new("test.Service", "requested item");
+    use super::{Error, ErrorKind, map_not_found};
 
     /// Builds a `NotFound` `Status` carrying the gateway's registry-miss
     /// trailer, pinned to the literal wire values rather than the
@@ -450,6 +418,17 @@ mod test {
         metadata.insert("x-yanet-error-reason", "service-unregistered".parse().unwrap());
 
         Status::with_metadata(Code::NotFound, message, metadata)
+    }
+
+    /// Maps a status the way a command addressing item 'x' does.
+    fn map_item(status: Status) -> Error {
+        map_not_found(
+            status,
+            "show item",
+            "http://localhost:50051",
+            "test.Service",
+            "item 'x'",
+        )
     }
 
     #[test]
@@ -474,43 +453,34 @@ mod test {
     }
 
     #[test]
-    fn not_found_resource_is_rewritten() {
+    fn test_not_found_resource_is_rewritten() {
         let status = Status::not_found("some resource missing");
-        let err = MAPPER.map(status, "show item", "http://localhost:50051", Some("item 'x'"));
+        let err = map_item(status);
 
         assert_eq!(ErrorKind::NotFound, err.0.kind);
         assert_eq!("item 'x' not found", err.0.message);
     }
 
     #[test]
-    fn not_found_uses_default_resource_when_none_given() {
-        let status = Status::not_found("some resource missing");
-        let err = MAPPER.map(status, "show item", "http://localhost:50051", None);
-
-        assert_eq!(ErrorKind::NotFound, err.0.kind);
-        assert_eq!("requested item not found", err.0.message);
-    }
-
-    #[test]
-    fn unknown_service_not_found_passes_through_as_service_unregistered() {
+    fn test_unknown_service_not_found_passes_through_as_service_unregistered() {
         let status = unregistered_status("unknown service test.Service");
-        let err = MAPPER.map(status, "show item", "http://localhost:50051", None);
+        let err = map_item(status);
 
         assert_eq!(ErrorKind::ServiceUnregistered, err.0.kind);
     }
 
     #[test]
-    fn unknown_service_message_without_the_trailer_is_the_compatibility_fallback() {
+    fn test_unknown_service_message_without_the_trailer_is_the_compatibility_fallback() {
         let status = Status::not_found("unknown service");
-        let err = MAPPER.map(status, "show item", "http://localhost:50051", None);
+        let err = map_item(status);
 
         assert_eq!(ErrorKind::ServiceUnregistered, err.0.kind);
     }
 
     #[test]
-    fn trailer_is_service_unregistered_even_with_a_config_name_message() {
+    fn test_trailer_is_service_unregistered_even_with_a_config_name_message() {
         let status = unregistered_status(r#"config "unknown service" not found"#);
-        let err = MAPPER.map(status, "show item", "http://localhost:50051", Some("item 'x'"));
+        let err = map_item(status);
 
         assert_eq!(ErrorKind::ServiceUnregistered, err.0.kind);
     }
@@ -524,18 +494,18 @@ mod test {
     }
 
     #[test]
-    fn config_name_containing_the_marker_is_rewritten_by_the_mapper() {
+    fn test_config_name_containing_the_marker_is_rewritten_by_the_mapper() {
         let status = Status::not_found(r#"config "unknown service" not found"#);
-        let err = MAPPER.map(status, "show item", "http://localhost:50051", Some("item 'x'"));
+        let err = map_item(status);
 
         assert_eq!(ErrorKind::NotFound, err.0.kind);
         assert_eq!("item 'x' not found", err.0.message);
     }
 
     #[test]
-    fn non_not_found_status_passes_through_unchanged() {
+    fn test_non_not_found_status_passes_through_unchanged() {
         let status = Status::unavailable("backend down");
-        let err = MAPPER.map(status, "show item", "http://localhost:50051", None);
+        let err = map_item(status);
 
         assert_eq!(ErrorKind::Unavailable, err.0.kind);
     }
