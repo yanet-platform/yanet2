@@ -38,6 +38,10 @@ use crate::{
     dp::{Counter, CounterLayout, Device, Module, ModuleConfig},
 };
 
+mod classify;
+
+pub use classify::{Stage, Staged};
+
 /// Invariant lifetime brand: values of two builds never unify.
 type Brand<'b> = PhantomData<fn(&'b ()) -> &'b ()>;
 

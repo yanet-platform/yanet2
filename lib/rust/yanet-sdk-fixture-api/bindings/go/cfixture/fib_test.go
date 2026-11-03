@@ -342,7 +342,7 @@ func Test_Fib_Build_ReversedRange_IsInvalidArgument(t *testing.T) {
 	_, err := cfixture.NewFibConfig(bed.agent, "fib", input)
 
 	require.ErrorIs(t, err, ffi.ErrInvalidArgument)
-	require.ErrorContains(t, err, "an LPM range ends before it starts")
+	require.ErrorContains(t, err, "a range ends before it starts")
 }
 
 // Test_Fib_Build_ReversedRange_ReturnsMemoryToBaseline verifies that a build

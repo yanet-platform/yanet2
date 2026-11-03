@@ -16,8 +16,19 @@ pub enum Refusal {
     /// An owned block whose byte size overflows or exceeds the C block
     /// allocator's largest block; `YANET_ERROR_INVALID_ARGUMENT`.
     BlockTooLarge,
-    /// An LPM range that ends before it starts; `YANET_ERROR_INVALID_ARGUMENT`.
+    /// A range that ends before it starts, of an LPM or of a classifier's
+    /// rule; `YANET_ERROR_INVALID_ARGUMENT`.
     InvalidRange,
+    /// A network mask of a classifier's rule that is not a prefix, which the
+    /// C compile would read as another network;
+    /// `YANET_ERROR_INVALID_ARGUMENT`.
+    InvalidMask,
+    /// A set or a ruleset of more items than C counts, `u32::MAX`;
+    /// `YANET_ERROR_INVALID_ARGUMENT`.
+    TooManyItems,
+    /// A join or a decode of stages or a projection over rulesets of
+    /// different sizes; `YANET_ERROR_INVALID_ARGUMENT`.
+    RuleSetMismatch,
 }
 
 impl Refusal {
@@ -27,7 +38,10 @@ impl Refusal {
         match self {
             Self::OutOfMemory => "the shared memory is exhausted",
             Self::BlockTooLarge => "an owned block larger than the largest block of the allocator",
-            Self::InvalidRange => "an LPM range ends before it starts",
+            Self::InvalidRange => "a range ends before it starts",
+            Self::InvalidMask => "a network mask is not a prefix",
+            Self::TooManyItems => "more items than C counts",
+            Self::RuleSetMismatch => "a join or a decode over rulesets of different sizes",
         }
     }
 }

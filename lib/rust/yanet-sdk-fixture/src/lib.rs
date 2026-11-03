@@ -4,10 +4,13 @@
 //! [`Fixture`] is a test program in module form: it has no prepared value, and
 //! its configuration's mode word selects what it does with a batch. [`Tally`]
 //! has a prepared value made at commit, and counts. [`Fib`] forwards by a
-//! route FIB.
+//! route FIB. [`assign::Assign`] passes or drops by the first rule a packet
+//! matches, through the classify bindings.
 
 #![no_std]
 #![forbid(unsafe_code)]
+
+pub mod assign;
 
 use yanet_sdk::{
     Batch, CommitCx, Counter, CounterRef, Cx, Device, Lpm4, Lpm6, Module, ShmLayout, ShmSlice, Traffic, Verdict,

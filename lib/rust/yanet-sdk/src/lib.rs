@@ -53,10 +53,14 @@ pub use yanet_shm::{
     shm::ShmLayout,
 };
 pub use yanet_sys::{
+    classify::{
+        Attribute, Joint, LineAttr, LineRange, Lines, NO_RULE, Net4, Net4Attr, Net6, Net6Attr, Nets4, Nets6, PortAttr,
+        PortRange, Ports, RuleMap, RuleTable, results_min,
+    },
     common::lpm::{Lpm4, Lpm6, LpmRange},
     cp::{
         BlockAddr, Build, BuildError, Builder, Built, Context, FfiRecord, Header, Owned, OwnedSlice, Owner, Refusal,
-        Registered, Scope,
+        Registered, Scope, Stage, Staged,
     },
     dp::{
         Batch, CommitCx, Counter, CounterLayout, CounterRef, Cx, Device, DeviceRef, DscpMark, Module, Packet,
