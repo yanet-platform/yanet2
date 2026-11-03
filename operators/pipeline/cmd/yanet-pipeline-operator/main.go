@@ -14,7 +14,7 @@ func main() {
 	err := operator.Run(
 		"yanet-pipeline-operator",
 		"YANET pipeline operator — manages pipelines and device bindings",
-		build,
+		factory,
 	)
 	if err != nil {
 		fmt.Printf("ERROR: %v\n", err)
@@ -22,6 +22,6 @@ func main() {
 	}
 }
 
-func build(cfg *op.Config, log *zap.Logger) (operator.Runnable, error) {
+func factory(cfg *op.Config, log *zap.Logger) (operator.Runnable, error) {
 	return op.NewOperator(cfg, op.WithLog(log))
 }
