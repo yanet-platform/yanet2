@@ -5,7 +5,9 @@
 // the LPM variant over a ruleset of host routes: for fully specified
 // addresses the two must resolve the same first-match rules, and the
 // hash address classes must join with a port attribute into the same
-// rule rows the LPM classes join into.
+// rule rows the LPM classes join into. Rules share addresses, so the
+// collection of the hashed side collapses the repeats into single
+// regions the join must resolve the same way.
 
 #include "lib/classify/classifiers/net4.h"
 #include "lib/classify/classifiers/net4_hash.h"
@@ -118,14 +120,17 @@ host6_of(struct net6 *net6, const uint8_t *addr) {
 int
 main(void) {
 	// The ruleset, each network carrying exactly the addresses the
-	// hashed rule names:
+	// hashed rule names; rules 1 and 2 share 10.0.0.2 and 2a0d::1 and
+	// rules 0 and 2 share 2a02::1, so the collection dedup of the
+	// hashed side has repeats to collapse:
 	//   rule 0: 10.0.0.1, 2a02::1; any port.
-	//   rule 1: 10.0.0.2; ports 100..200.
-	//   rule 2: 192.168.0.1, 2a0d::1; ports 300..400.
-	struct net4 hosts4[3];
+	//   rule 1: 10.0.0.2, 2a0d::1; ports 100..200.
+	//   rule 2: 192.168.0.1, 10.0.0.2, 2a02::1, 2a0d::1; ports 300..400.
+	struct net4 hosts4[4];
 	host4_of(&hosts4[0], 10, 0, 0, 1);
 	host4_of(&hosts4[1], 10, 0, 0, 2);
 	host4_of(&hosts4[2], 192, 168, 0, 1);
+	host4_of(&hosts4[3], 10, 0, 0, 2);
 
 	uint8_t host6_a[NET6_LEN] = {0};
 	host6_a[0] = 0x2a;
@@ -135,18 +140,22 @@ main(void) {
 	host6_b[0] = 0x2a;
 	host6_b[1] = 0x0d;
 	host6_b[15] = 0x01;
-	struct net6 hosts6[2];
+	struct net6 hosts6[3];
 	host6_of(&hosts6[0], host6_a);
 	host6_of(&hosts6[1], host6_b);
+	host6_of(&hosts6[2], host6_a);
 
-	uint8_t addrs4[3][NET4_LEN] = {
+	uint8_t addrs4[4][NET4_LEN] = {
 		{10, 0, 0, 1},
 		{10, 0, 0, 2},
 		{192, 168, 0, 1},
+		{10, 0, 0, 2},
 	};
-	uint8_t addrs6[2][NET6_LEN];
+	uint8_t addrs6[4][NET6_LEN];
 	memcpy(addrs6[0], host6_a, NET6_LEN);
 	memcpy(addrs6[1], host6_b, NET6_LEN);
+	memcpy(addrs6[2], host6_a, NET6_LEN);
+	memcpy(addrs6[3], host6_b, NET6_LEN);
 
 	struct filter_u16_span port_spans[3] = {
 		{100, 200},
@@ -166,18 +175,22 @@ main(void) {
 	rules[0].addrs6.count = 1;
 	rules[1].net4s.items = &hosts4[1];
 	rules[1].net4s.count = 1;
+	rules[1].net6s.items = &hosts6[1];
+	rules[1].net6s.count = 1;
 	rules[1].addrs4.items = &addrs4[1];
 	rules[1].addrs4.count = 1;
+	rules[1].addrs6.items = &addrs6[3];
+	rules[1].addrs6.count = 1;
 	rules[1].port_ranges.items = &port_spans[0];
 	rules[1].port_ranges.count = 1;
 	rules[2].net4s.items = &hosts4[2];
-	rules[2].net4s.count = 1;
+	rules[2].net4s.count = 2;
 	rules[2].net6s.items = &hosts6[1];
-	rules[2].net6s.count = 1;
+	rules[2].net6s.count = 2;
 	rules[2].addrs4.items = &addrs4[2];
-	rules[2].addrs4.count = 1;
+	rules[2].addrs4.count = 2;
 	rules[2].addrs6.items = &addrs6[1];
-	rules[2].addrs6.count = 1;
+	rules[2].addrs6.count = 2;
 	rules[2].port_ranges.items = &port_spans[1];
 	rules[2].port_ranges.count = 1;
 
@@ -252,15 +265,16 @@ main(void) {
 		0,
 		0,
 		0,
-		// 10.0.0.2: rule 1 on 100..200 only.
+		// 10.0.0.2: named by rules 1 and 2, each inside its own port
+		// window only.
 		FILTER_RULE_INVALID,
 		FILTER_RULE_INVALID,
 		1,
 		1,
 		FILTER_RULE_INVALID,
 		FILTER_RULE_INVALID,
-		FILTER_RULE_INVALID,
-		FILTER_RULE_INVALID,
+		2,
+		2,
 		FILTER_RULE_INVALID,
 		// 192.168.0.1: rule 2 on 300..400 only.
 		FILTER_RULE_INVALID,
