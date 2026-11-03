@@ -418,8 +418,8 @@ const heldFill = 0xa5
 //
 // The blocks given back are the small-block stock of each pool below the
 // first replayed pool and one block of each given large pool, all filled with
-// the held byte. A build that succeeds is freed. Either way the agent must get back all the
-// free memory it had.
+// the held byte. A build that succeeds is freed. Either way the agent must
+// get back all the free memory it had.
 func heldBuild(
 	t *testing.T,
 	agent *ffi.Agent,
