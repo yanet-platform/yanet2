@@ -2997,7 +2997,6 @@ dependencies = [
  "netip",
  "prost",
  "serde",
- "serde_json",
  "serde_yaml",
  "tabled",
  "tonic",

@@ -1,43 +1,57 @@
 //! Support code for `fib show`.
 //!
-//! [`render`] turns the wire's `FibEntry` rows -- see
-//! [`crate::routepb::FibEntry`] -- into the human table, one row per entry
-//! or one row per nexthop for an ECMP group, in wire order. `--format
-//! json` serializes `FibEntry` directly instead: `build.rs` derives
-//! `Serialize` on it, so there is no view of its own here for that format.
-//! The server validates every range before ShowFIB's response can carry
-//! it, and the data itself comes from an LPM dump that cannot produce a
-//! malformed or inverted pair, so [`render`] does not reclassify or decode
-//! a range either. This module only holds the formatting helper
-//! [`render`] uses: [`range_endpoints`] for a range's two endpoints.
+//! The human view renders the wire entries in wire order, by range or,
+//! under `--cidr`, by the prefixes covering each range. JSON serializes the
+//! wire entries directly and never decomposes a range. The server validates
+//! every range before the response carries it, so the range view prints
+//! the endpoints as they arrive. A range the CIDR view cannot decompose
+//! still prints, as a single `invalid` prefix.
 
 pub mod render;
 
 use commonpb::pb::{IpAddress, IpRange};
 
-/// The literal rendered for a range endpoint that is absent.
+/// The literal rendered for an address or prefix a range cannot supply.
 ///
 /// Matches the literal [`commonpb::pb::IpAddress`]'s own `Display` falls
 /// back to for a malformed byte length, so an absent endpoint and a
 /// malformed one render identically instead of the absent one silently
 /// becoming an empty cell.
-const INVALID_ENDPOINT: &str = "invalid";
+const INVALID: &str = "invalid";
 
 /// Renders a range's two endpoints.
 ///
 /// An absent `range`, or an absent endpoint within a present one, renders
-/// as [`INVALID_ENDPOINT`] -- the same literal a present-but-malformed
-/// endpoint's `Display` already falls back to.
+/// as [`INVALID`] -- the same literal a present-but-malformed endpoint's
+/// `Display` already falls back to.
 pub(crate) fn range_endpoints(range: Option<&IpRange>) -> (String, String) {
     let start = range.and_then(|range| range.start.as_ref());
     let end = range.and_then(|range| range.end.as_ref());
     (format_endpoint(start), format_endpoint(end))
 }
 
-/// Renders one range endpoint, or [`INVALID_ENDPOINT`] if it is absent.
+/// Renders one range endpoint, or [`INVALID`] if it is absent.
 fn format_endpoint(addr: Option<&IpAddress>) -> String {
-    addr.map(IpAddress::to_string)
-        .unwrap_or_else(|| INVALID_ENDPOINT.to_owned())
+    addr.map(IpAddress::to_string).unwrap_or_else(|| INVALID.to_owned())
+}
+
+/// Renders the CIDR prefixes that cover a range, in ascending order.
+///
+/// A range that yields no prefix, such as an absent, inverted or malformed
+/// one, renders as the single prefix `invalid`, so its entry keeps its rows
+/// instead of vanishing from the listing.
+pub fn range_prefixes(range: Option<&IpRange>) -> Vec<String> {
+    let prefixes: Vec<String> = range
+        .into_iter()
+        .flat_map(IpRange::cidrs)
+        .map(|prefix| prefix.to_string())
+        .collect();
+
+    if prefixes.is_empty() {
+        return vec![INVALID.to_owned()];
+    }
+
+    prefixes
 }
 
 #[cfg(test)]
@@ -75,5 +89,10 @@ mod test {
             ("10.0.0.1".to_owned(), "invalid".to_owned()),
             range_endpoints(Some(&range))
         );
+    }
+
+    #[test]
+    fn test_range_prefixes_absent_range_is_invalid() {
+        assert_eq!(vec!["invalid".to_owned()], range_prefixes(None));
     }
 }
