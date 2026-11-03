@@ -61,6 +61,11 @@ present() { matching "$1" | while IFS= read -r f; do [ -f "$f" ] && printf '%s\n
 
 log=$(mktemp)
 trap 'rm -f "$log"' EXIT
+
+# The Rust SDK fixture tests build only under their tag, which the configured
+# build/ supports when it defines the fixtures target, as make test decides.
+fixtures=0
+grep -qs '^build sdk-rust-fixtures:' build/build.ninja && fixtures=1
 failed=0
 passed=()
 skipped=()
@@ -131,11 +136,9 @@ gate_go() {
 		fail go "cgo packages typecheck against the DPDK sources and a configured build/; run 'git submodule update --init && meson setup build'"
 		return 1
 	fi
-	# The Rust SDK fixture tests build only under their tag, which the
-	# configured build/ supports when it defines the fixtures target, as
-	# make test decides; without it their package is invisible to go list
-	# and go test. Vet and the repository lint stay untagged, as in CI.
-	if grep -qs '^build sdk-rust-fixtures:' build/build.ninja; then
+	# Without the fixture tag the fixture package is invisible to go list and
+	# go test. Vet and the repository lint stay untagged, as in CI.
+	if [ "$fixtures" = 1 ]; then
 		tags=(-tags=sdk_rust_fixtures)
 	elif matching '^lib/rust/.*\.go$' >/dev/null; then
 		skipped+=("sdk fixture Go tests (build/ without -Dsdk_rust_fixtures=enabled)")
@@ -164,6 +167,11 @@ gate_go() {
 				go list "${tags[@]}" "./$d" >/dev/null 2>&1 && echo "./$d"
 			done
 			matching '^modules/[^/]+/.*(\.[ch]|meson\.build)$' | cut -d / -f 1-2 | sed 's|^|./|; s|$|/...|'
+			# An SDK change reaches the dataplane through the fixture
+			# plugins, as the SDK fixture workflow tests it.
+			if [ ${#tags[@]} -ne 0 ] && matching '^lib/rust/' >/dev/null; then
+				echo ./lib/rust/yanet-sdk-fixture-api/bindings/go/cfixture
+			fi
 		} | grep -v '^\./tests/functional/main$' | sort -u)
 	fi
 	[ -n "$pkgs" ] || return 0
@@ -226,7 +234,31 @@ gate_sdk() {
 		skipped+=("sdk-no-std ($target not installed)")
 	fi
 	step sdk-test env -C lib/rust cargo test --workspace --locked || return 1
+	# The packet crate is meant to build on its own: a copy outside the
+	# workspace has no workspace metadata or path dependency to lean on, as
+	# the SDK workflow checks it.
+	if matching '^lib/rust/yanet-packet/' >/dev/null; then
+		sdk_packet "$target" || return 1
+	fi
 	skipped+=("sdk miri and sanitizers (CI)")
+}
+
+# Builds and tests a copy of the packet crate outside the workspace, then
+# removes the copy.
+sdk_packet() {
+	local target=$1 copy rc=0
+	copy=$(mktemp -d)
+	cp -r lib/rust/yanet-packet "$copy/" || rc=1
+	[ "$rc" = 0 ] && { step sdk-packet-test env -C "$copy/yanet-packet" cargo test || rc=1; }
+	if [ "$rc" = 0 ]; then
+		if rustup target list --installed 2>/dev/null | grep -qx "$target"; then
+			step sdk-packet-no-std env -C "$copy/yanet-packet" cargo check --target "$target" || rc=1
+		else
+			skipped+=("sdk-packet-no-std ($target not installed)")
+		fi
+	fi
+	rm -rf "$copy"
+	return "$rc"
 }
 
 gate_web() {
@@ -242,7 +274,16 @@ gate_web() {
 c=0
 matching '(\.[ch]$|(^|/)meson\.build$|^meson_options\.txt$|^ubsan-ignorelist\.txt$|^subprojects/|^scripts/(go_c(deps|go_flags)|check_link_deps)\.py$)' >/dev/null && c=1
 [ "$c" = 1 ] && gate_c
-if [ "$c" = 1 ] || matching '(\.go$|^go\.(mod|sum)$|\.proto$)' >/dev/null; then gate_go; fi
+if [ "$c" = 1 ] || matching '(\.go$|^go\.(mod|sum)$|\.proto$)' >/dev/null; then
+	gate_go
+elif matching '^lib/rust/' >/dev/null; then
+	# The SDK fixture tests run only over a build/ configured with them.
+	if [ "$fixtures" = 1 ]; then
+		gate_go
+	else
+		skipped+=("sdk fixture Go tests (build/ without -Dsdk_rust_fixtures=enabled)")
+	fi
+fi
 matching '(\.rs$|(^|/)Cargo\.(toml|lock)$|^\.rustfmt\.toml$|^\.cargo/|\.proto$)' >/dev/null && gate_rust
 # The paths the Rust SDK workflow runs on: the SDK and the C it binds.
 matching '(^lib/rust/|^\.cargo/config\.toml$|^\.rustfmt\.toml$|^(common|lib)/.*\.h$|^lib/dataplane/packet/.*\.c$|^subprojects/dpdk|(^|/)meson\.build$|^meson_options\.txt$|^\.github/workflows/rust-sdk\.yml$)' >/dev/null && gate_sdk
