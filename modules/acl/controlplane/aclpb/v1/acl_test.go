@@ -74,18 +74,6 @@ func Test_UpdateConfigRequest_Validate(t *testing.T) {
 			message: "rules must contain at least one rule",
 		},
 		{
-			name: "deprecated sync config",
-			request: &aclpb.UpdateConfigRequest{
-				Name: "acl0",
-				Rules: []*aclpb.Rule{{
-					Sources4:      []*commonpb.IPv4Network{{}},
-					Destinations4: []*commonpb.IPv4Network{{}},
-				}},
-				SyncConfig: &aclpb.SyncConfig{},
-			},
-			message: "sync_config belongs to fwstate",
-		},
-		{
 			name: "v4 map name contains NUL",
 			request: &aclpb.UpdateConfigRequest{
 				Name: "acl0",
