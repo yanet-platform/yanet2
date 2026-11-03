@@ -2767,7 +2767,6 @@ dependencies = [
  "clap",
  "clap_complete",
  "humantime",
- "netip",
  "prost",
  "serde",
  "tonic",

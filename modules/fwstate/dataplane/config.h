@@ -2,10 +2,153 @@
 
 #define FWSTATE_MODULE_NAME "fwstate"
 
+#include <netinet/in.h>
+
+#include "common/filter_views.h"
+#include "common/memory.h"
+#include "common/network.h"
+
 #include "lib/controlplane/config/zone.h"
 
-#include "lib/fwstate/config.h"
+#include "lib/fwstate/types.h"
 #include "objects/fwstate/api/fwstate_map_object.h"
+
+/**
+ * FWState synchronization configuration, owned by the module.
+ *
+ * The endpoints and listeners are dynamically sized arrays in the
+ * config's memory tree: the control plane allocates exactly what the
+ * configuration names, with no fixed bound.
+ */
+
+/**
+ * One emission endpoint: the source and destination IPv6 addresses and
+ * the destination port of locally emitted sync packets.
+ *
+ * The Ethernet header of emitted packets stays zeroed: the module
+ * downstream of fwstate, route, resolves and stamps both MAC addresses.
+ */
+struct fwstate_sync_endpoint {
+	// IPv6 source stamped on packets emitted toward dst_addr.
+	uint8_t src_addr[16];
+
+	// IPv6 destination of emitted packets.
+	uint8_t dst_addr[16];
+
+	/**
+	 * Destination port in network byte order (big-endian). Stored in BE
+	 * so it can be used directly in UDP header fields without
+	 * conversion. The controlplane performs the host-to-network
+	 * conversion when populating this field; the constructor rejects a
+	 * zero port, so every entry emits.
+	 */
+	uint16_t port;
+};
+
+/**
+ * One listener: a destination an incoming packet must name by IPv6
+ * address and UDP port to be claimed as external sync.
+ *
+ * Emission and reception are independent contracts: a config may emit
+ * to any destinations while listening on others, listen without
+ * emitting, or emit without listening. An empty listener list claims
+ * nothing. Nothing distinguishes a listener address as multicast; a
+ * unicast listener names the router's own address and receives
+ * point-to-point sync.
+ */
+struct fwstate_sync_listen_endpoint {
+	// IPv6 destination matched on the wire.
+	uint8_t dst_addr[16];
+
+	/**
+	 * Destination port in network byte order (big-endian), compared
+	 * with udp_hdr->dst_port without conversion. The controlplane
+	 * performs the host-to-network conversion when populating this
+	 * field; the constructor rejects a zero port, so every entry
+	 * claims.
+	 */
+	uint16_t port;
+};
+
+// Default state timeout for TCP families without a dedicated value.
+#define FW_STATE_DEFAULT_TIMEOUT (uint64_t)120e9
+
+// Connection timeouts of the fwstate state machinery: the module owns
+// both their configuration and the entry TTL selection below.
+struct fwstate_timeouts {
+	uint64_t tcp_syn_ack; // default
+	uint64_t tcp_syn;     // default
+	uint64_t tcp_fin;     // default
+	uint64_t tcp;	      // default (120)
+	uint64_t udp;	      // 30
+	uint64_t default_;    // 16
+};
+
+// Select the TTL of one state entry from its frame's protocol and TCP
+// flags.
+static inline uint64_t
+fwstate_entry_ttl(
+	uint16_t proto, uint8_t raw_flags, const struct fwstate_timeouts *t
+) {
+	union fw_state_flags_u flags = {.raw = raw_flags};
+
+	uint64_t ttl = t->default_;
+	if (proto == IPPROTO_UDP) {
+		ttl = t->udp;
+	} else if (proto == IPPROTO_TCP) {
+		ttl = t->tcp;
+
+		uint8_t tcp_flags = flags.tcp.src | flags.tcp.dst;
+		if (tcp_flags & FWSTATE_ACK) {
+			ttl = t->tcp_syn_ack;
+		} else if (tcp_flags & FWSTATE_SYN) {
+			ttl = t->tcp_syn;
+		}
+		// A FIN closes the entry whatever it rides on - the usual
+		// FIN+ACK combination must land on the closing timeout, not
+		// the handshake one.
+		if (tcp_flags & FWSTATE_FIN) {
+			ttl = t->tcp_fin;
+		}
+	}
+	return ttl;
+}
+
+// Byte offsets of the array members inside struct fwstate_sync_config:
+// FFI consumers receive the struct by value and locate the arrays
+// behind its offset-pointer members through these.
+#include <stddef.h>
+#define FWSTATE_SYNC_ENDPOINTS_OFF                                             \
+	offsetof(struct fwstate_sync_config, endpoints)
+#define FWSTATE_SYNC_LISTENERS_OFF                                             \
+	offsetof(struct fwstate_sync_config, listeners)
+
+struct fwstate_sync_config {
+	// The emission endpoints, endpoint_count of them, allocated in the
+	// config's memory tree.
+	struct fwstate_sync_endpoint *endpoints;
+	uint32_t endpoint_count;
+
+	// The receive endpoints, listener_count of them.
+	struct fwstate_sync_listen_endpoint *listeners;
+	uint32_t listener_count;
+
+	struct fwstate_timeouts timeouts;
+
+	// Sync suppression window in nanoseconds. A sync frame for an
+	// already alive entry whose new expiry deadline lands within this
+	// window of the entry's current deadline is discarded (the fwmap
+	// record is left untouched), debouncing refreshes for frequently
+	// touched sessions. Every entry TTL is inflated by this value so
+	// the effective keep-alive never falls below the configured
+	// timeout. Zero disables suppression.
+	uint64_t sync_suppress_timeout;
+
+	// Largest IPv6 packet, headers included, of one locally emitted
+	// sync packet; it bounds how many frames a packet batches. Zero
+	// selects the default of 1500.
+	uint16_t sync_mtu;
+};
 
 // Sentinel for "no object link at this slot". object_link_get_address
 // returns NULL for any index >= object_link_count, so a config with no
