@@ -16,8 +16,8 @@ updates:
       github-actions:
         patterns: ["*"]
     ignore:
-      # The toolchain versions are deliberate pins: the MSRV build, the
-      # clippy release and the rustfmt nightly move only with the code.
+      # The toolchain versions are deliberate pins: the stable release and
+      # the rustfmt nightly move only with the code.
       - dependency-name: dtolnay/rust-toolchain
 
   # The CI image pins its Ubuntu base by codename and digest.

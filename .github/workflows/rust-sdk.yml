@@ -1,8 +1,8 @@
 name: Rust SDK
 
 # Checks of the Rust module SDK workspace (lib/rust): formatting, lints, the
-# 1.88 test suite, std-freedom of the SDK crates and the extractable packet.
-# Clippy with the bare-metal check and the 1.88 tests also run on arm64, where
+# test suite, std-freedom of the SDK crates and the extractable packet.
+# Clippy with the bare-metal check and the tests also run on arm64, where
 # the C bindings and the layouts they check can differ; the rest does not
 # depend on the architecture and runs on x86_64 only.
 #
@@ -131,7 +131,7 @@ jobs:
         run: cargo check --locked --target ${{ matrix.target }} -p yanet-shm -p yanet-sys -p yanet-sdk -p yanet-sdk-plugin -p yanet-packet
 
   test:
-    name: cargo test (1.88) (${{ matrix.arch }})
+    name: cargo test (${{ matrix.arch }})
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
     strategy:
@@ -146,11 +146,11 @@ jobs:
         with:
           persist-credentials: false
           submodules: true
-      - uses: dtolnay/rust-toolchain@360a4e93673de6630fac2478bc9e35244b01a759 # 1.88.0
+      - uses: dtolnay/rust-toolchain@d124f86f28ff42855784ff3319f48ac182c248f8 # 1.99.1
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           workspaces: lib/rust
-          shared-key: rust-sdk-msrv
+          shared-key: rust-sdk-test
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - run: |
           meson setup build -Ddataplane_only=true
@@ -165,7 +165,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: dtolnay/rust-toolchain@360a4e93673de6630fac2478bc9e35244b01a759 # 1.88.0
+      - uses: dtolnay/rust-toolchain@d124f86f28ff42855784ff3319f48ac182c248f8 # 1.99.1
         with:
           targets: x86_64-unknown-none
       # Built outside the workspace, as its own repository would be: a path

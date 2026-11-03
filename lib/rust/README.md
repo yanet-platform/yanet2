@@ -1,7 +1,7 @@
 # Rust module SDK
 
 A cargo workspace, separate from the CLI workspace at the repository root,
-with its own `Cargo.lock` and `rust-version = "1.88"`, for writing
+with its own `Cargo.lock` and `rust-version = "1.99"`, for writing
 dataplane modules in Rust: the boundary crate both sides of the SDK
 share, the C bindings with the dataplane runtime and the configuration
 builder, the derive, the module-crate facade and the packet header views.
