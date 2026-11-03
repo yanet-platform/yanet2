@@ -66,6 +66,14 @@ trap 'rm -f "$log"' EXIT
 # build/ supports when it defines the fixtures target, as make test decides.
 fixtures=0
 grep -qs '^build sdk-rust-fixtures:' build/build.ninja && fixtures=1
+
+# Changes the SDK fixture workflow runs on: the SDK and every layer its fixture
+# tests link or load.
+fixture_paths='(^lib/rust/|^(api|common|lib|devices/plain)/.*\.[ch]$|^bindings/go/(cerrors|dataplane_ut)/|^common/go/dataplane/|^controlplane/ffi/|^devices/plain/bindings/go/cplain/|(^|/)meson\.build$|^meson_options\.txt$|^Makefile$|^scripts/go_c(deps|go_flags)\.py$|^\.golangci\.yml$|^go\.(mod|sum)$|^\.github/workflows/rust-sdk-ut\.yml$)'
+
+# The pinned Rust toolchain of the SDK workflow, which the SDK's minimum
+# version follows; a newer local default could accept what CI refuses.
+sdk_stable=$(sed -n 's/^ *- uses: dtolnay\/rust-toolchain@[0-9a-f]* # \([0-9][0-9.]*\)$/\1/p' .github/workflows/rust-sdk.yml 2>/dev/null | head -n 1)
 failed=0
 passed=()
 skipped=()
@@ -140,7 +148,7 @@ gate_go() {
 	# go test. Vet and the repository lint stay untagged, as in CI.
 	if [ "$fixtures" = 1 ]; then
 		tags=(-tags=sdk_rust_fixtures)
-	elif matching '^lib/rust/.*\.go$' >/dev/null; then
+	elif matching "$fixture_paths" >/dev/null; then
 		skipped+=("sdk fixture Go tests (build/ without -Dsdk_rust_fixtures=enabled)")
 	fi
 	proto=$(git ls-files '*.proto' | head -n 1)
@@ -167,9 +175,9 @@ gate_go() {
 				go list "${tags[@]}" "./$d" >/dev/null 2>&1 && echo "./$d"
 			done
 			matching '^modules/[^/]+/.*(\.[ch]|meson\.build)$' | cut -d / -f 1-2 | sed 's|^|./|; s|$|/...|'
-			# An SDK change reaches the dataplane through the fixture
-			# plugins, as the SDK fixture workflow tests it.
-			if [ ${#tags[@]} -ne 0 ] && matching '^lib/rust/' >/dev/null; then
+			# The fixture tests cover the SDK and the layers they link,
+			# as the SDK fixture workflow runs them.
+			if [ ${#tags[@]} -ne 0 ] && matching "$fixture_paths" >/dev/null; then
 				echo ./lib/rust/yanet-sdk-fixture-api/bindings/go/cfixture
 			fi
 		} | grep -v '^\./tests/functional/main$' | sort -u)
@@ -218,27 +226,32 @@ gate_rust() {
 # directory, so every step runs there; Miri and the sanitizer runs are left
 # to CI.
 gate_sdk() {
-	local toolchain target
+	local toolchain target stable=()
 	if [ ! -d build ] || [ -L build ]; then
 		fail sdk "the SDK's bindings read this checkout's own build/; run 'meson setup build' (AGENTS.md, Worktrees)"
 		return 1
 	fi
 	toolchain=$(sed -n 's/^ *toolchain: *\(nightly-[0-9-]*\).*/\1/p' .github/workflows/rust-sdk.yml | head -n 1)
+	if [ -n "$sdk_stable" ] && rustup run "$sdk_stable" rustc --version >/dev/null 2>&1; then
+		stable=("+$sdk_stable")
+	else
+		skipped+=("sdk on Rust ${sdk_stable:-?} (not installed; ran the default toolchain)")
+	fi
 	step sdk-fmt env -C lib/rust cargo "+$toolchain" fmt -- --check || return 1
-	step sdk-clippy env -C lib/rust cargo clippy --workspace --all-targets --locked -- -D warnings || return 1
-	step sdk-clippy-plugin env -C lib/rust cargo clippy --profile plugin -p yanet-sdk-fixture --features plugin --examples --locked -- -D warnings || return 1
+	step sdk-clippy env -C lib/rust cargo "${stable[@]}" clippy --workspace --all-targets --locked -- -D warnings || return 1
+	step sdk-clippy-plugin env -C lib/rust cargo "${stable[@]}" clippy --profile plugin -p yanet-sdk-fixture --features plugin --examples --locked -- -D warnings || return 1
 	target="$(uname -m)-unknown-none"
 	if rustup target list --installed 2>/dev/null | grep -qx "$target"; then
-		step sdk-no-std env -C lib/rust cargo check --locked --target "$target" -p yanet-shm -p yanet-sys -p yanet-sdk -p yanet-sdk-plugin -p yanet-packet || return 1
+		step sdk-no-std env -C lib/rust cargo "${stable[@]}" check --locked --target "$target" -p yanet-shm -p yanet-sys -p yanet-sdk -p yanet-sdk-plugin -p yanet-packet || return 1
 	else
 		skipped+=("sdk-no-std ($target not installed)")
 	fi
-	step sdk-test env -C lib/rust cargo test --workspace --locked || return 1
+	step sdk-test env -C lib/rust cargo "${stable[@]}" test --workspace --locked || return 1
 	# The packet crate is meant to build on its own: a copy outside the
 	# workspace has no workspace metadata or path dependency to lean on, as
 	# the SDK workflow checks it.
 	if matching '^lib/rust/yanet-packet/' >/dev/null; then
-		sdk_packet "$target" || return 1
+		sdk_packet "$target" "${stable[@]}" || return 1
 	fi
 	skipped+=("sdk miri and sanitizers (CI)")
 }
@@ -247,12 +260,16 @@ gate_sdk() {
 # removes the copy.
 sdk_packet() {
 	local target=$1 copy rc=0
-	copy=$(mktemp -d)
+	shift
+	copy=$(mktemp -d) && [ -n "$copy" ] && [ -d "$copy" ] || {
+		fail sdk-packet "could not make a temporary directory for the packet crate copy"
+		return 1
+	}
 	cp -r lib/rust/yanet-packet "$copy/" || rc=1
-	[ "$rc" = 0 ] && { step sdk-packet-test env -C "$copy/yanet-packet" cargo test || rc=1; }
+	[ "$rc" = 0 ] && { step sdk-packet-test env -C "$copy/yanet-packet" cargo "$@" test || rc=1; }
 	if [ "$rc" = 0 ]; then
 		if rustup target list --installed 2>/dev/null | grep -qx "$target"; then
-			step sdk-packet-no-std env -C "$copy/yanet-packet" cargo check --target "$target" || rc=1
+			step sdk-packet-no-std env -C "$copy/yanet-packet" cargo "$@" check --target "$target" || rc=1
 		else
 			skipped+=("sdk-packet-no-std ($target not installed)")
 		fi
@@ -276,7 +293,7 @@ matching '(\.[ch]$|(^|/)meson\.build$|^meson_options\.txt$|^ubsan-ignorelist\.tx
 [ "$c" = 1 ] && gate_c
 if [ "$c" = 1 ] || matching '(\.go$|^go\.(mod|sum)$|\.proto$)' >/dev/null; then
 	gate_go
-elif matching '^lib/rust/' >/dev/null; then
+elif matching "$fixture_paths" >/dev/null; then
 	# The SDK fixture tests run only over a build/ configured with them.
 	if [ "$fixtures" = 1 ]; then
 		gate_go

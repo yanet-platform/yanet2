@@ -7,6 +7,26 @@ package dataplaneut
 
 #include "lib/controlplane/agent/agent.h"
 
+// Takes one block of the size from the agent's allocator, counts the bytes of
+// its payload that differ from fill, and returns the block.
+//
+// The first word of the payload is skipped: without ASan it is the word the
+// allocator linked the free block through. Returns -1 when no block serves.
+static int64_t
+dataplane_ut_alloc_probe_fill(struct agent *agent, uint64_t size, uint8_t fill) {
+	struct block_allocator *allocator = &agent->block_allocator;
+	uint8_t *block = block_allocator_balloc(allocator, size);
+	if (block == NULL) {
+		return -1;
+	}
+	int64_t differ = 0;
+	for (uint64_t idx = sizeof(void *); idx < size; ++idx) {
+		differ += block[idx] != fill;
+	}
+	block_allocator_bfree(allocator, block, size);
+	return differ;
+}
+
 // Keep the agent's free blocks in another allocator, whose existing pool
 // operations also split held blocks when a test gives back a smaller one.
 struct dataplane_ut_alloc_hold {
@@ -122,9 +142,13 @@ func AllocatorPoolSize(pool int) uint64 {
 
 // AllocatorPoolOf returns the pool a request of size bytes is served from.
 //
-// The size includes the red zones an ASan build adds on each side; a request
-// larger than the largest block returns AllocatorPools.
+// The red zones an ASan build adds on each side count toward the size. A
+// request the allocator refuses, empty or larger than its largest request,
+// returns AllocatorPools.
 func AllocatorPoolOf(size uint64) int {
+	if size == 0 || size > uint64(C.MEMORY_BLOCK_ALLOCATOR_MAX_SIZE) {
+		return AllocatorPools
+	}
 	size += 2 * uint64(C.ASAN_RED_ZONE)
 	for pool := range AllocatorPools {
 		if size <= AllocatorPoolSize(pool) {
@@ -143,6 +167,23 @@ func PoolAllocations(agent *ffi.Agent) []uint64 {
 		(*C.uint64_t)(unsafe.Pointer(&counts[0])),
 	)
 	return counts
+}
+
+// ProbeFill takes one block of size bytes from the agent's allocator, counts
+// the bytes of it that differ from fill, and returns the block.
+//
+// The first word of the block is not counted: the allocator may have linked
+// the block through it while it was free.
+func ProbeFill(agent *ffi.Agent, size uint64, fill byte) (int, error) {
+	differ := C.dataplane_ut_alloc_probe_fill(
+		(*C.struct_agent)(agent.AsRawPtr()),
+		C.uint64_t(size),
+		C.uint8_t(fill),
+	)
+	if differ < 0 {
+		return 0, fmt.Errorf("no block of %d bytes was served", size)
+	}
+	return int(differ), nil
 }
 
 // AllocatorHold is a fault injection: a test's hold on every free block of

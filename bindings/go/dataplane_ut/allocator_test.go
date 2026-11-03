@@ -96,3 +96,49 @@ func Test_AllocatorHold_EmptyHold_FailsTheAgentsRequests(t *testing.T) {
 		}
 	})
 }
+
+// Test_AllocatorHold_Give_FillsTheBlocks verifies that a block given back
+// holds the fill byte where a request served from it reads, and that the
+// probe tells a block of another fill apart.
+func Test_AllocatorHold_Give_FillsTheBlocks(t *testing.T) {
+	const size = 300
+	pool := dataplaneut.AllocatorPoolOf(size)
+	for _, tc := range []struct {
+		name   string
+		fill   byte
+		differ bool
+	}{
+		{name: "block of the probed fill", fill: 0xa5, differ: false},
+		{name: "block of another fill", fill: 0, differ: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			agent := heldAgent(t)
+			hold, err := dataplaneut.HoldAllocator(agent)
+			require.NoError(t, err)
+			t.Cleanup(hold.Release)
+			require.NoError(t, hold.Give(pool, 1, tc.fill))
+
+			differ, err := dataplaneut.ProbeFill(agent, size, 0xa5)
+
+			require.NoError(t, err)
+			require.Equal(t, tc.differ, differ != 0, "%d bytes differ", differ)
+		})
+	}
+}
+
+// Test_AllocatorPoolOf_RefusedSizes_HaveNoPool verifies that a size the
+// allocator refuses, empty or beyond its largest request, maps to no pool.
+func Test_AllocatorPoolOf_RefusedSizes_HaveNoPool(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		size uint64
+	}{
+		{name: "empty request", size: 0},
+		{name: "beyond the largest block", size: dataplaneut.AllocatorPoolSize(dataplaneut.AllocatorPools-1) + 1},
+		{name: "near the largest integer", size: ^uint64(0) - 8},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			require.Equal(t, dataplaneut.AllocatorPools, dataplaneut.AllocatorPoolOf(tc.size))
+		})
+	}
+}
