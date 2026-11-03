@@ -293,6 +293,98 @@ test_resolve_connections_empty_device_name(void) {
 	fclose(f);
 }
 
+// Verifies that queue roles are parsed per worker entry, with a queue in
+// the RSS table and steering nothing by default.
+static void
+test_queue_roles_parsed(void) {
+	const char yaml[] = "dataplane:\n"
+			    "  devices:\n"
+			    "    - port_name: eth0\n"
+			    "      workers:\n"
+			    "        - core_id: 1\n"
+			    "        - core_id: 5\n"
+			    "          rss: false\n"
+			    "          steer:\n"
+			    "            dscp: [48, 56]\n"
+			    "            arp: true\n"
+			    "            nd: false\n"
+			    "            l2_control: true\n"
+			    "    - port_name: virtio_user_kni0\n"
+			    "      workers:\n"
+			    "        - core_id: 6\n";
+
+	struct dataplane_config *config = NULL;
+	assert(parse_yaml(yaml, &config) == 0);
+
+	const struct dataplane_device_config *port = config->devices;
+	assert(port->workers[0].role.rss);
+	assert(port->workers[0].role.dscp == 0);
+	assert(!port->workers[0].role.arp);
+	assert(!port->workers[1].role.rss);
+	assert(port->workers[1].role.dscp ==
+	       ((UINT64_C(1) << 48) | (UINT64_C(1) << 56)));
+	assert(port->workers[1].role.arp);
+	assert(!port->workers[1].role.nd);
+	assert(port->workers[1].role.l2_control);
+	assert(dataplane_device_config_has_roles(port));
+	assert(!dataplane_device_config_has_roles(config->devices + 1));
+
+	dataplane_config_free(config);
+}
+
+// Verifies that queue roles a port cannot carry are rejected.
+static void
+test_queue_roles_rejected(void) {
+	const struct {
+		const char *name;
+		const char *yaml;
+	} cases[] = {
+		{"queue 0 out of the RSS table",
+		 "dataplane:\n"
+		 "  devices:\n"
+		 "    - port_name: eth0\n"
+		 "      workers:\n"
+		 "        - core_id: 5\n"
+		 "          rss: false\n"
+		 "          steer: {arp: true}\n"
+		 "        - core_id: 1\n"},
+		{"a steering queue with no class",
+		 "dataplane:\n"
+		 "  devices:\n"
+		 "    - port_name: eth0\n"
+		 "      workers:\n"
+		 "        - core_id: 1\n"
+		 "        - core_id: 5\n"
+		 "          rss: false\n"},
+		{"dscp 0, which is all unmarked traffic",
+		 "dataplane:\n"
+		 "  devices:\n"
+		 "    - port_name: eth0\n"
+		 "      workers:\n"
+		 "        - core_id: 1\n"
+		 "        - core_id: 5\n"
+		 "          rss: false\n"
+		 "          steer: {dscp: 0}\n"},
+		{"nd and a dscp value on different queues",
+		 "dataplane:\n"
+		 "  devices:\n"
+		 "    - port_name: eth0\n"
+		 "      workers:\n"
+		 "        - core_id: 1\n"
+		 "          steer: {nd: true}\n"
+		 "        - core_id: 5\n"
+		 "          rss: false\n"
+		 "          steer: {dscp: 48}\n"},
+	};
+
+	for (size_t idx = 0; idx < sizeof(cases) / sizeof(cases[0]); ++idx) {
+		fprintf(stderr, "rejects %s:\n", cases[idx].name);
+		struct dataplane_config *config = NULL;
+		assert(parse_yaml(cases[idx].yaml, &config) == -1);
+		assert(config == NULL);
+	}
+}
+
 // The object list keeps every configured type name in order, as the
 // module list does, and refuses a name the loader could not use whole.
 static void
@@ -384,6 +476,8 @@ main(int argc, char **argv) {
 	test_resolve_connections_unknown_device();
 	test_resolve_connections_duplicate_device();
 	test_resolve_connections_empty_device_name();
+	test_queue_roles_parsed();
+	test_queue_roles_rejected();
 
 	return 0;
 }

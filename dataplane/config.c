@@ -71,6 +71,24 @@ parse_unsigned(
 	return 0;
 }
 
+static int
+parse_bool(
+	const char *field, const char *value, size_t length, uint8_t *result
+) {
+	if (length == 4 && !strncmp(value, "true", length)) {
+		*result = 1;
+		return 0;
+	}
+	if (length == 5 && !strncmp(value, "false", length)) {
+		*result = 0;
+		return 0;
+	}
+	fprintf(stderr, "invalid %s value ", field);
+	print_scalar(value, length);
+	fprintf(stderr, ": expected true or false\n");
+	return -1;
+}
+
 // A memory size is bytes with an optional binary unit: "1073741824",
 // "1 GiB" and "1GiB" spell the same size.
 static int
@@ -151,6 +169,88 @@ resolve_connections(struct dataplane_config *config) {
 	return 0;
 }
 
+static int
+is_virtual_port(const char *port_name) {
+	return !strncmp(port_name, "virtio_user_", strlen("virtio_user_")) ||
+	       !strncmp(port_name, "net_ring_", strlen("net_ring_"));
+}
+
+int
+dataplane_device_config_has_roles(const struct dataplane_device_config *device
+) {
+	for (uint32_t idx = 0; idx < device->worker_count; ++idx) {
+		const struct dataplane_queue_role *role =
+			&device->workers[idx].role;
+		if (!role->rss || role->dscp != 0 || role->arp || role->nd ||
+		    role->l2_control) {
+			return 1;
+		}
+	}
+	return 0;
+}
+
+// Rejects queue roles a device cannot carry.
+//
+// Unmatched traffic lands on queue 0 when the port hashes nothing, so
+// queue 0 stays in the RSS table, and a queue out of the table must steer
+// some class or it would receive nothing. An ND packet may carry any DSCP
+// value and the NIC's choice between overlapping rules is undefined, so ND
+// and the steered DSCP values must target the same queues.
+static int
+validate_device_steering(const struct dataplane_device_config *device) {
+	if (!dataplane_device_config_has_roles(device)) {
+		return 0;
+	}
+	if (is_virtual_port(device->port_name)) {
+		fprintf(stderr,
+			"device %s: virtio_user and ring ports have no "
+			"queue roles\n",
+			device->device_name);
+		return -1;
+	}
+	if (!device->workers[0].role.rss) {
+		fprintf(stderr,
+			"device %s: queue 0 must stay in the RSS table\n",
+			device->device_name);
+		return -1;
+	}
+
+	uint64_t dscp = 0;
+	int nd = 0;
+	for (uint32_t idx = 0; idx < device->worker_count; ++idx) {
+		const struct dataplane_queue_role *role =
+			&device->workers[idx].role;
+		if (!role->rss && role->dscp == 0 && !role->arp && !role->nd &&
+		    !role->l2_control) {
+			fprintf(stderr,
+				"device %s: queue %u is out of the RSS table "
+				"but steers no class\n",
+				device->device_name,
+				idx);
+			return -1;
+		}
+		dscp |= role->dscp;
+		nd |= role->nd;
+	}
+
+	// With ND steered, each queue lists either ND and every steered DSCP
+	// value, or neither.
+	for (uint32_t idx = 0; nd && idx < device->worker_count; ++idx) {
+		const struct dataplane_queue_role *role =
+			&device->workers[idx].role;
+		if (role->dscp != (role->nd ? dscp : 0)) {
+			fprintf(stderr,
+				"device %s: queue %u: nd and the steered dscp "
+				"values can match one packet and must go to "
+				"the same queues\n",
+				device->device_name,
+				idx);
+			return -1;
+		}
+	}
+	return 0;
+}
+
 // Expand the nested devices[].workers[] declarations into the flat
 // top-level worker list.
 //
@@ -221,6 +321,17 @@ expand_workers(struct dataplane_config *config) {
 	return 0;
 }
 
+// Rejects queue roles the devices cannot carry.
+static int
+validate_steering(const struct dataplane_config *config) {
+	for (uint64_t dev_idx = 0; dev_idx < config->device_count; ++dev_idx) {
+		if (validate_device_steering(config->devices + dev_idx) != 0) {
+			return -1;
+		}
+	}
+	return 0;
+}
+
 enum state {
 	state_empty,
 	state_dataplane,
@@ -251,6 +362,11 @@ enum state {
 	state_worker_rx_queue_len,
 	state_worker_tx_queue_len,
 	state_worker_num_mbufs,
+
+	state_worker_rss,
+	state_steer,
+	state_steer_dscp,
+	state_steer_flag,
 
 	state_connections,
 	state_connection,
@@ -290,6 +406,12 @@ dataplane_config_init(FILE *file, struct dataplane_config **config) {
 	struct dataplane_instance_config *instance = NULL;
 	struct dataplane_device_config *device = NULL;
 	struct dataplane_device_worker_config *worker = NULL;
+	// Whether the steered DSCP values come as a list rather than a single
+	// value.
+	int dscp_list = 0;
+	// The steered class flag a boolean scalar sets, and its field name.
+	uint8_t *steer_flag = NULL;
+	const char *steer_flag_name = NULL;
 	struct dataplane_connection_config *connection = NULL;
 
 	char *start = NULL;
@@ -577,6 +699,47 @@ dataplane_config_init(FILE *file, struct dataplane_config **config) {
 				state = state_worker;
 				break;
 
+			case state_worker_rss:
+				if (parse_bool(
+					    "workers.rss",
+					    start,
+					    scalar_length,
+					    &worker->role.rss
+				    ) != 0) {
+					goto error;
+				}
+				state = state_worker;
+				break;
+			case state_steer_dscp:
+				// DSCP 0 is all unmarked traffic, so it is
+				// never steered.
+				if (parse_unsigned(
+					    "workers.steer.dscp",
+					    start,
+					    scalar_length,
+					    1,
+					    63,
+					    &value
+				    ) != 0) {
+					goto error;
+				}
+				worker->role.dscp |= UINT64_C(1) << value;
+				if (!dscp_list) {
+					state = state_steer;
+				}
+				break;
+			case state_steer_flag:
+				if (parse_bool(
+					    steer_flag_name,
+					    start,
+					    scalar_length,
+					    steer_flag
+				    ) != 0) {
+					goto error;
+				}
+				state = state_steer;
+				break;
+
 			case state_connection_src:
 				strtcpy(connection->src_device,
 					start,
@@ -670,6 +833,31 @@ dataplane_config_init(FILE *file, struct dataplane_config **config) {
 					state = state_worker_tx_queue_len;
 				} else if (!strcmp("num_mbufs", start)) {
 					state = state_worker_num_mbufs;
+				} else if (!strcmp("rss", start)) {
+					state = state_worker_rss;
+				} else if (!strcmp("steer", start)) {
+					state = state_steer;
+				} else {
+					goto error;
+				}
+
+				break;
+			case state_steer:
+				if (!strcmp("dscp", start)) {
+					state = state_steer_dscp;
+				} else if (!strcmp("arp", start)) {
+					steer_flag = &worker->role.arp;
+					steer_flag_name = "workers.steer.arp";
+					state = state_steer_flag;
+				} else if (!strcmp("nd", start)) {
+					steer_flag = &worker->role.nd;
+					steer_flag_name = "workers.steer.nd";
+					state = state_steer_flag;
+				} else if (!strcmp("l2_control", start)) {
+					steer_flag = &worker->role.l2_control;
+					steer_flag_name =
+						"workers.steer.l2_control";
+					state = state_steer_flag;
 				} else {
 					goto error;
 				}
@@ -699,6 +887,9 @@ dataplane_config_init(FILE *file, struct dataplane_config **config) {
 				break;
 			case state_workers:
 				break;
+			case state_steer_dscp:
+				dscp_list = 1;
+				break;
 			case state_connections:
 				break;
 			case state_modules:
@@ -719,6 +910,10 @@ dataplane_config_init(FILE *file, struct dataplane_config **config) {
 				break;
 			case state_workers:
 				state = state_device;
+				break;
+			case state_steer_dscp:
+				dscp_list = 0;
+				state = state_steer;
 				break;
 			case state_connections:
 				state = state_dataplane;
@@ -795,10 +990,13 @@ dataplane_config_init(FILE *file, struct dataplane_config **config) {
 				worker = device->workers +
 					 device->worker_count - 1;
 				memset(worker, 0, sizeof(*worker));
+				worker->role.rss = 1;
 
 				state = state_worker;
 				break;
 			}
+			case state_steer:
+				break;
 			case state_connections: {
 				dataplane->connection_count++;
 				void *mem = realloc(
@@ -847,6 +1045,9 @@ dataplane_config_init(FILE *file, struct dataplane_config **config) {
 			case state_worker:
 				state = state_workers;
 				break;
+			case state_steer:
+				state = state_worker;
+				break;
 			case state_connection:
 				state = state_connections;
 				break;
@@ -874,6 +1075,10 @@ dataplane_config_init(FILE *file, struct dataplane_config **config) {
 	}
 
 	if (expand_workers(dataplane) != 0) {
+		goto error;
+	}
+
+	if (validate_steering(dataplane) != 0) {
 		goto error;
 	}
 
