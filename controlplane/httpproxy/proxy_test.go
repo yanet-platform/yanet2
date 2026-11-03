@@ -25,6 +25,7 @@ import (
 
 	readinesspb "github.com/yanet-platform/yanet2/common/readinesspb/v1"
 	"github.com/yanet-platform/yanet2/controlplane/httpproxy"
+	"github.com/yanet-platform/yanet2/controlplane/internal/auth"
 	ynpb "github.com/yanet-platform/yanet2/controlplane/ynpb/v1"
 )
 
@@ -522,6 +523,38 @@ func Test_TransparentWebGRPCProxy_AllowsCredentialsOnlyForTrustedOrigin(t *testi
 
 			require.Equal(t, http.StatusOK, recorder.Code)
 			require.Equal(t, tc.credentials, recorder.Header().Get("Access-Control-Allow-Credentials"))
+		})
+	}
+}
+
+// Test_TransparentWebGRPCProxy_PreflightAllowsRequestHeaders verifies that a
+// trusted origin's preflight lets its page send each header a call may carry.
+func Test_TransparentWebGRPCProxy_PreflightAllowsRequestHeaders(t *testing.T) {
+	t.Parallel()
+
+	handler := httpproxy.NewHTTPHandler(nil, emptyRegistry{}, admitAll, httpproxy.WithTrustedOrigins([]string{"https://ui.example"}))
+	request := httptest.NewRequest(http.MethodOptions, "/api/some.Service/Method", nil)
+	request.Header.Set("Origin", "https://ui.example")
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, request)
+
+	var allowed []string
+	for header := range strings.SplitSeq(recorder.Header().Get("Access-Control-Allow-Headers"), ",") {
+		allowed = append(allowed, http.CanonicalHeaderKey(strings.TrimSpace(header)))
+	}
+	for _, tc := range []struct {
+		name   string
+		header string
+	}{
+		{name: "json body", header: "Content-Type"},
+		{name: "gzip body", header: "Content-Encoding"},
+		{name: "gateway token", header: auth.TokenMetadataKey},
+		{name: "authorization header", header: "Authorization"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			require.Contains(t, allowed, http.CanonicalHeaderKey(tc.header))
 		})
 	}
 }

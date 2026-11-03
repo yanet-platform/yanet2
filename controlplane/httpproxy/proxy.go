@@ -130,8 +130,21 @@ func (m *TransparentWebGRPCProxy) ServeHTTP(w http.ResponseWriter, r *http.Reque
 		// A trusted page sends its calls with the browser's credentials, so
 		// its client certificate reaches a gateway on another origin.
 		w.Header().Set("Access-Control-Allow-Credentials", "true")
-		w.Header().Set("Access-Control-Allow-Methods", "POST, GET, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+		w.Header().Set("Access-Control-Allow-Methods", "POST")
+		// A trusted page may send its token and a compressed body.
+		//
+		// Authorization is allowed only so that a page which sends it passes
+		// the preflight: no call is authenticated by it.
+		w.Header().Set(
+			"Access-Control-Allow-Headers",
+			"Content-Type, Content-Encoding, Authorization, X-Yanet-Authentication",
+		)
+		// A browser may reuse this answer for up to two hours, the longest
+		// Chrome keeps one, where by default it asks again after 5 seconds.
+		//
+		// A kept answer opens nothing: a page may send a plain POST with no
+		// preflight at all, so an untrusted origin is refused by the server.
+		w.Header().Set("Access-Control-Max-Age", "7200")
 	}
 
 	if r.Method == http.MethodOptions {
