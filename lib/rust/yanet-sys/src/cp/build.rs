@@ -35,7 +35,7 @@ use super::{
 use crate::{
     bindings,
     common::lpm::{Lpm, LpmRange},
-    dp::{Counter, Device, Module, ModuleConfig},
+    dp::{Counter, CounterLayout, Device, Module, ModuleConfig},
 };
 
 /// Invariant lifetime brand: values of two builds never unify.
@@ -265,8 +265,8 @@ unsafe impl<T: Build> Build for ShmSlice<T> {
 }
 
 // SAFETY: the registry index is the whole value.
-unsafe impl Build for Counter {
-    type Parts<'b, W: Owner> = Registered<'b, Counter>;
+unsafe impl<T: CounterLayout> Build for Counter<T> {
+    type Parts<'b, W: Owner> = Registered<'b, Counter<T>>;
 
     unsafe fn write<W: Owner>(
         parts: Self::Parts<'_, W>,
@@ -631,14 +631,18 @@ impl<'b, W: Owner, E: From<BuildError<W::Error>>> Scope<'b, '_, W, E> {
         Ok(self.owned_slice(addr, len))
     }
 
-    /// Registers a single-value counter of the given name with the module.
+    /// Registers a counter of the given name with the module, of as many
+    /// values as its layout holds; the layout usually comes from the field the
+    /// counter is built into.
     ///
     /// # Errors
     ///
-    /// The owner refuses the registration.
-    pub fn counter(self, name: &str) -> Result<Registered<'b, Counter>, E> {
+    /// The owner refuses the registration, as C does for a name registered
+    /// before with another size.
+    pub fn counter<T: CounterLayout>(self, name: &str) -> Result<Registered<'b, Counter<T>>, E> {
+        let size = T::VALUES as u64;
         // SAFETY: the header is initialised and not yet published.
-        let id = unsafe { self.memory.owner.register_counter(self.header, name) }.map_err(failed::<W, E>)?;
+        let id = unsafe { self.memory.owner.register_counter(self.header, name, size) }.map_err(failed::<W, E>)?;
         Ok(Registered::new(id))
     }
 

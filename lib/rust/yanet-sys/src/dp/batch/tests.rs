@@ -515,6 +515,21 @@ fn test_transport_protocol_masks_the_unavailable_mark() {
     }
 }
 
+/// verifies that the fragment offset is the parser's, zero for a packet that
+/// is not a fragment after the first.
+#[test]
+fn test_fragment_offset_reports_the_parsers_offset() {
+    for offset in [0, 1, 0x1fff] {
+        let descriptor = bindings::packet {
+            fragment_offset: offset,
+            ..headers(0x0800, 17, 34)
+        };
+        let mut frame = Frame::new(descriptor, 0, &[0; 60], 0);
+
+        assert_eq!(offset, frame.packet().fragment_offset());
+    }
+}
+
 /// verifies that peeking reads every input packet in order without taking
 /// one, so the packets taken afterwards are the whole input.
 #[test]

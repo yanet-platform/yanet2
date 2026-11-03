@@ -59,14 +59,16 @@ pub use yanet_sys::{
         Registered, Scope,
     },
     dp::{
-        Batch, CommitCx, Counter, CounterRef, Cx, Device, DeviceRef, DscpMark, Module, Packet, PacketView, ResizeError,
-        TunnelError, Verdict,
+        Batch, CommitCx, Counter, CounterLayout, CounterRef, Cx, Device, DeviceRef, DscpMark, Module, Packet,
+        PacketView, ResizeError, Traffic, TunnelError, Verdict,
     },
 };
 
 /// Everything a module crate usually imports.
 pub mod prelude {
-    pub use crate::{Batch, Counter, CounterRef, Cx, Device, Module, Packet, ShmBox, ShmLayout, ShmSlice, Verdict};
+    pub use crate::{
+        Batch, Counter, CounterRef, Cx, Device, Module, Packet, ShmBox, ShmLayout, ShmSlice, Traffic, Verdict,
+    };
 }
 
 /// Paths the derive expands to; not part of the API.

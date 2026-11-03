@@ -50,6 +50,8 @@ pub struct TestOwner {
     blocks: RefCell<Vec<(BlockAddr, usize, Option<Context>)>>,
     headers: RefCell<Vec<Header>>,
     registered: Cell<u64>,
+    /// Size of each counter registered, in the order of the registrations.
+    counter_sizes: RefCell<Vec<u64>>,
     /// Calls left before each kind fails, for good; `None` never fails.
     countdowns: [Cell<Option<usize>>; 3],
     /// What the builder did wrong; recorded, as the returns run from
@@ -71,6 +73,7 @@ impl TestOwner {
             blocks: RefCell::default(),
             headers: RefCell::default(),
             registered: Cell::new(0),
+            counter_sizes: RefCell::default(),
             countdowns: Default::default(),
             violations: RefCell::default(),
         }
@@ -80,6 +83,12 @@ impl TestOwner {
     /// succeed.
     pub fn fail_after(&self, call: Call, count: usize) {
         self.countdowns[call as usize].set(Some(count));
+    }
+
+    /// Size of each counter registered, in the order of the registrations,
+    /// those refused included.
+    pub fn counter_sizes(&self) -> Vec<u64> {
+        self.counter_sizes.borrow().clone()
     }
 
     pub fn live_blocks(&self) -> usize {
@@ -188,7 +197,8 @@ unsafe impl Owner for TestOwner {
         }
     }
 
-    unsafe fn register_counter(&self, _header: Header, _name: &str) -> Result<u64, TestError> {
+    unsafe fn register_counter(&self, _header: Header, _name: &str, size: u64) -> Result<u64, TestError> {
+        self.counter_sizes.borrow_mut().push(size);
         self.register()
     }
 

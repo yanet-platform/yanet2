@@ -9,7 +9,7 @@ use crate::{
     counters::counter_get_address,
     dp::{
         batch::DeviceRef,
-        fields::{Counter, Device},
+        fields::{Counter, CounterLayout, Device},
         module::Module,
     },
 };
@@ -82,13 +82,14 @@ pub struct Cx<'id, M: Module> {
     _local: PhantomData<*mut ()>,
 }
 
-/// A counter's value of the context's worker, resolved once at commit.
+/// A counter's values of the context's worker, resolved once at commit, of a
+/// [`Counter`] of the layout `T`.
 ///
-/// Holds the address of the value, as a C module holds the pointer
+/// Holds the address of the first value, as a C module holds the pointer
 /// `counter_get_address` returned. `Send`, so a prepared value holding it can
-/// travel from the assigner thread to its worker, but it does not write:
-/// the handler binds it to its context and adds through the bound view,
-/// which stays on the worker. Binding is free: the view is the same address.
+/// travel from the assigner thread to its worker, but it does not write: the
+/// handler binds it to its context and adds through the bound view, which
+/// stays on the worker. Binding is free: the view is the same address.
 ///
 /// A handle does not outlive the prepare context that made it (a lifetime
 /// error, which has no code):
@@ -114,21 +115,30 @@ pub struct Cx<'id, M: Module> {
 ///     *kept = Some(cx.config().resolve(cx));
 /// }
 /// ```
-#[derive(Clone, Copy)]
-pub struct CounterRef<'p> {
+pub struct CounterRef<'p, T = u64> {
     value: NonNull<u64>,
     // Invariant brand: values of two different contexts never unify, so they cannot be mixed.
     _brand: PhantomData<fn(&'p ()) -> &'p ()>,
+    // The counter's layout, which sets the values it adds to.
+    _layout: PhantomData<fn() -> T>,
 }
+
+impl<T> Clone for CounterRef<'_, T> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl<T> Copy for CounterRef<'_, T> {}
 
 // SAFETY: the handle is an address and writes nothing; only the bound view
 // writes, and binding needs the call context of the same invariant brand,
 // that of the worker's call whose prepared value holds the handle; the
 // context is neither `Send` nor `Sync`, so every write happens on that
 // worker in its call.
-unsafe impl Send for CounterRef<'_> {}
+unsafe impl<T> Send for CounterRef<'_, T> {}
 
-impl<'id> CounterRef<'id> {
+impl<'id, T> CounterRef<'id, T> {
     /// The handle bound to the call's context, to add through.
     ///
     /// Only the call context binds: the prepare context does not, so a
@@ -160,11 +170,12 @@ impl<'id> CounterRef<'id> {
     /// }
     /// ```
     #[inline(always)]
-    pub fn bind<M: Module>(&self, _cx: &Cx<'id, M>) -> BoundCounter<'id> {
+    pub fn bind<M: Module>(&self, _cx: &Cx<'id, M>) -> BoundCounter<'id, T> {
         BoundCounter {
             value: self.value,
             _brand: PhantomData,
             _local: PhantomData,
+            _layout: PhantomData,
         }
     }
 }
@@ -194,35 +205,36 @@ impl<'id> CounterRef<'id> {
 ///     });
 /// }
 /// ```
-#[derive(Clone, Copy)]
-pub struct BoundCounter<'id> {
+pub struct BoundCounter<'id, T = u64> {
     value: NonNull<u64>,
     // Invariant brand: values of two different contexts never unify, so they cannot be mixed.
     _brand: PhantomData<fn(&'id ()) -> &'id ()>,
     // Neither Send nor Sync on purpose, independent of the pointer fields.
     _local: PhantomData<*mut ()>,
+    // The counter's layout, which sets the values it adds to.
+    _layout: PhantomData<fn() -> T>,
 }
 
-impl BoundCounter<'_> {
-    /// Adds to the worker's copy of the counter.
+impl<T> Clone for BoundCounter<'_, T> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl<T> Copy for BoundCounter<'_, T> {}
+
+impl<T: CounterLayout> BoundCounter<'_, T> {
+    /// Adds the value to the worker's copy of the counter.
     ///
     /// A plain add, as the `+=` of a C module: only this worker writes its
     /// copy.
     #[inline(always)]
-    pub fn add(&self, value: u64) {
-        add_to(self.value.as_ptr(), value);
+    pub fn add(&self, value: T) {
+        // SAFETY: the handle holds the first value of this worker's counter
+        // of the layout `T`, resolved for the generation the call runs
+        // (bound to the call context of the same brand).
+        unsafe { value.add_to(self.value.as_ptr()) };
     }
-}
-
-/// Adds to the worker's counter value in place.
-#[inline(always)]
-fn add_to(slot: *mut u64, value: u64) {
-    // SAFETY: the address is the aligned value of this worker's counter
-    // storage, written only by this worker and live as long as the
-    // generation the address was resolved for (callers' contract). The
-    // control plane reads it with memcpy (lib/controlplane/agent/counters.c),
-    // as it does for the plain `+=` of a C module.
-    unsafe { *slot = (*slot).wrapping_add(value) };
 }
 
 impl<'id, M: Module> Cx<'id, M> {
@@ -371,23 +383,24 @@ unsafe fn counter_value(root: ShmRoot, ectx: NonNull<bindings::module_ectx>, id:
     }
 }
 
-impl Counter {
-    /// Adds to the current worker's copy of the counter, one of a
+impl<T: CounterLayout> Counter<T> {
+    /// Adds the value to the current worker's copy of the counter, one of a
     /// data-indexed set the handler picks by value; a counter named by a
     /// single field is added to through a handle in the prepared value.
     ///
     /// The same plain add as the handle's.
     #[inline(always)]
-    pub fn add<'id, M: Module>(&'id self, cx: &Cx<'id, M>, value: u64) {
+    pub fn add<'id, M: Module>(&'id self, cx: &Cx<'id, M>, value: T) {
         // SAFETY: the context is frozen for the call and its counter storage
         // address was derived before release to the worker (attach: call,
         // frozen, publish); a built counter id indexes the module's counter
-        // registry, whose storage of this context holds one aligned value per
-        // counter.
-        add_to(unsafe { counter_value(cx.root, cx.ectx, self.id()) }, value);
+        // registry, whose storage of this context holds the counter's
+        // aligned values next to each other, as many as the layout's, the
+        // size it was registered with.
+        unsafe { value.add_to(counter_value(cx.root, cx.ectx, self.id())) };
     }
 
-    /// The context's worker's value of the counter, for the prepared value.
+    /// The context's worker's values of the counter, for the prepared value.
     ///
     /// The handle is made with the prepare context, not the invocation context:
     ///
@@ -407,7 +420,7 @@ impl Counter {
     /// }
     /// ```
     #[inline(always)]
-    pub fn resolve<'c, M: Module>(&'c self, cx: &CommitCx<'c, M>) -> CounterRef<'c> {
+    pub fn resolve<'c, M: Module>(&'c self, cx: &CommitCx<'c, M>) -> CounterRef<'c, T> {
         // SAFETY: as for adding, for the pass instead of the call.
         let value = unsafe { counter_value(cx.root, cx.ectx, self.id()) };
         CounterRef {
@@ -415,6 +428,7 @@ impl Counter {
             // address zero.
             value: unsafe { NonNull::new_unchecked(value) },
             _brand: PhantomData,
+            _layout: PhantomData,
         }
     }
 }

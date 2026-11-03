@@ -9,7 +9,9 @@
 #![no_std]
 #![forbid(unsafe_code)]
 
-use yanet_sdk::{Batch, CommitCx, Counter, CounterRef, Cx, Device, Lpm4, Lpm6, Module, ShmLayout, ShmSlice, Verdict};
+use yanet_sdk::{
+    Batch, CommitCx, Counter, CounterRef, Cx, Device, Lpm4, Lpm6, Module, ShmLayout, ShmSlice, Traffic, Verdict,
+};
 // The plugin examples use it.
 #[cfg(feature = "plugin")]
 use yanet_sdk_plugin as _;
@@ -190,13 +192,15 @@ impl Module for Fixture {
 }
 
 /// The configuration of [`Tally`]: a word the commit derives from, three
-/// counters picked by value and one held by a handle.
+/// counters picked by value, one held by a handle and one of the packets and
+/// bytes.
 #[derive(ShmLayout)]
 #[repr(C)]
 pub struct TallyConfig {
     pub word: u64,
     pub by_value: [Counter; 3],
     pub held: Counter,
+    pub traffic: Counter<Traffic>,
 }
 
 /// What [`Tally`] makes at commit: the handle of the held counter and twice
@@ -207,8 +211,9 @@ pub struct Stamp<'p> {
 }
 
 /// Counts each packet in the counter its first byte selects, by value, unless
-/// it is empty, and in the held counter, through the handle made at commit.
-/// Passes the packets when the stamp is 14 and drops them otherwise.
+/// it is empty, in the held counter, through the handle made at commit, and
+/// its bytes in the traffic. Passes the packets when the stamp is 14 and
+/// drops them otherwise.
 pub struct Tally;
 
 impl Module for Tally {
@@ -226,6 +231,7 @@ impl Module for Tally {
                 config.by_value[usize::from(byte % 3)].add(cx, 1);
             }
             held.add(2);
+            config.traffic.add(cx, Traffic::packet(packet.data().len() as u64));
             if pass { Verdict::Pass } else { Verdict::Drop }
         });
     }
