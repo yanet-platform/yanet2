@@ -465,7 +465,6 @@ impl ACLService {
             rules: config.rules,
             fwtable_name_v4,
             fwtable_name_v6,
-            ..Default::default()
         };
         self.service
             .unary("update", request, async |client, request| {
