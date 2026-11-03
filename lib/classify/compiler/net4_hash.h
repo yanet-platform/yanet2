@@ -43,6 +43,10 @@ struct classify_compile_net4_hash {
 	const char *name;
 
 	uint32_t region_count;
+	// The allocated slot count of the keys row - the collection upper
+	// bound, because the dedup collapses the shared addresses and the
+	// release must return the whole row.
+	uint32_t keys_capacity;
 	uint32_t *keys;
 	struct value_table value_table;
 	struct hash_index dedup;
@@ -82,7 +86,7 @@ classify_compile_net4_hash_free(
 		memory_bfree(
 			memory_context,
 			net4_compile->keys,
-			sizeof(uint32_t) * net4_compile->region_count
+			sizeof(uint32_t) * net4_compile->keys_capacity
 		);
 	}
 
@@ -110,10 +114,13 @@ classify_compile_net4_hash_create(
 		return NULL;
 	}
 
+	// The scratch is releasable from the first statement on: every
+	// failure below unwinds through the shared destructor, which
+	// releases a not yet built member like an empty one.
+	memset(compile, 0, sizeof(*compile));
+
 	compile->get_addrs = get_addrs;
 	compile->name = name;
-	compile->region_count = 0;
-	compile->keys = NULL;
 
 	// The collection upper bound: every address of every rule names its
 	// own region until the dedup collapses the shared ones, and the
@@ -133,11 +140,7 @@ classify_compile_net4_hash_create(
 	}
 
 	if (hash_index_init(&compile->dedup, memory_context, addr_total + 1)) {
-		memory_bfree(
-			memory_context,
-			compile,
-			sizeof(struct classify_compile_net4_hash)
-		);
+		classify_compile_net4_hash_free(memory_context, compile);
 		return NULL;
 	}
 
@@ -148,6 +151,7 @@ classify_compile_net4_hash_create(
 		classify_compile_net4_hash_free(memory_context, compile);
 		return NULL;
 	}
+	compile->keys_capacity = addr_total;
 
 	for (uint32_t rule_idx = 0; rule_idx < rule_count; ++rule_idx) {
 		const struct classifier_rule *rule = rules[rule_idx];
@@ -376,6 +380,9 @@ classify_compile_net4_hash_commit(
 						net4_compile->region_count
 				);
 			}
+			// Nothing moved into the attribute yet: the entry
+			// contract still returns it zeroed on failure.
+			memset(net4_attr, 0, sizeof(*net4_attr));
 			return -1;
 		}
 		memcpy(keys,
