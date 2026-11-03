@@ -10,20 +10,33 @@ import (
 )
 
 // Test_SyncConfig_Merge verifies that an update overwrites only the settings
-// it carries and that a zero port clears its endpoint address.
+// it carries, that endpoints replace the stored list wholesale, and that
 func Test_SyncConfig_Merge(t *testing.T) {
-	multicast := func() *commonpb.IPAddress {
-		return &commonpb.IPAddress{Addr: []byte{0xff, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}}
+	multicast := func() *commonpb.IPv6Address {
+		return commonpb.NewIPv6Address([16]byte{0xff, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1})
 	}
-	unicast := func() *commonpb.IPAddress {
-		return &commonpb.IPAddress{Addr: []byte{0x20, 1, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2}}
+	source := func() *commonpb.IPv6Address {
+		return commonpb.NewIPv6Address([16]byte{0x20, 1, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1})
+	}
+	unicast := func() *commonpb.IPv6Address {
+		return commonpb.NewIPv6Address([16]byte{0x20, 1, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2})
+	}
+	endpoint := func(dst *commonpb.IPv6Address, port uint32) *SyncEndpoint {
+		return &SyncEndpoint{SrcAddr: source(), DstAddr: dst, Port: new(port)}
+	}
+	listener := func(dst *commonpb.IPv6Address, port uint32) *SyncListenEndpoint {
+		return &SyncListenEndpoint{DstAddr: dst, Port: new(port)}
 	}
 	stored := func() *SyncConfig {
 		return &SyncConfig{
-			DstAddrMulticast:    multicast(),
-			PortMulticast:       proto.Uint32(9999),
-			DstAddrUnicast:      unicast(),
-			PortUnicast:         proto.Uint32(10000),
+			Endpoints: []*SyncEndpoint{
+				endpoint(multicast(), 9999),
+				endpoint(unicast(), 10000),
+			},
+			Listeners: []*SyncListenEndpoint{
+				listener(multicast(), 9999),
+				listener(unicast(), 10000),
+			},
 			Tcp:                 proto.Uint64(120e9),
 			SyncSuppressTimeout: proto.Uint64(8e9),
 		}
@@ -40,45 +53,70 @@ func Test_SyncConfig_Merge(t *testing.T) {
 			want:   stored(),
 		},
 		{
-			name:   "empty update keeps every setting",
+			name:   "empty update clears both lists and keeps the scalars",
 			update: &SyncConfig{},
-			want:   stored(),
+			want: func() *SyncConfig {
+				cfg := stored()
+				cfg.Endpoints = nil
+				cfg.Listeners = nil
+				return cfg
+			}(),
 		},
 		{
-			name:   "explicit zero timeout overwrites the stored one",
+			name:   "explicit zero timeout overwrites the stored one and clears the lists",
 			update: &SyncConfig{SyncSuppressTimeout: proto.Uint64(0)},
 			want: func() *SyncConfig {
 				cfg := stored()
+				cfg.Endpoints = nil
+				cfg.Listeners = nil
 				cfg.SyncSuppressTimeout = proto.Uint64(0)
 				return cfg
 			}(),
 		},
 		{
-			name:   "address replaces the stored address and keeps the port",
-			update: &SyncConfig{DstAddrMulticast: unicast()},
+			name: "endpoint list carried alone replaces it and clears the listeners",
+			update: &SyncConfig{
+				Endpoints: []*SyncEndpoint{endpoint(multicast(), 7777)},
+			},
 			want: func() *SyncConfig {
 				cfg := stored()
-				cfg.DstAddrMulticast = unicast()
+				cfg.Endpoints = []*SyncEndpoint{endpoint(multicast(), 7777)}
+				cfg.Listeners = nil
 				return cfg
 			}(),
 		},
 		{
-			name:   "zero multicast port clears the multicast endpoint only",
-			update: &SyncConfig{PortMulticast: proto.Uint32(0)},
+			name:   "empty endpoint list clears the stored one",
+			update: &SyncConfig{Endpoints: []*SyncEndpoint{}},
 			want: func() *SyncConfig {
 				cfg := stored()
-				cfg.DstAddrMulticast = nil
-				cfg.PortMulticast = proto.Uint32(0)
+				cfg.Endpoints = nil
+				cfg.Listeners = nil
 				return cfg
 			}(),
 		},
 		{
-			name:   "zero unicast port clears the unicast endpoint only",
-			update: &SyncConfig{PortUnicast: proto.Uint32(0)},
+			name: "listener list carried alone replaces it and clears the endpoints",
+			update: &SyncConfig{
+				Listeners: []*SyncListenEndpoint{listener(multicast(), 7777)},
+			},
 			want: func() *SyncConfig {
 				cfg := stored()
-				cfg.DstAddrUnicast = nil
-				cfg.PortUnicast = proto.Uint32(0)
+				cfg.Listeners = []*SyncListenEndpoint{listener(multicast(), 7777)}
+				cfg.Endpoints = nil
+				return cfg
+			}(),
+		},
+		{
+			name: "listener list carried with the endpoints keeps both whole",
+			update: &SyncConfig{
+				Endpoints: []*SyncEndpoint{endpoint(multicast(), 7777)},
+				Listeners: []*SyncListenEndpoint{listener(unicast(), 10001)},
+			},
+			want: func() *SyncConfig {
+				cfg := stored()
+				cfg.Endpoints = []*SyncEndpoint{endpoint(multicast(), 7777)}
+				cfg.Listeners = []*SyncListenEndpoint{listener(unicast(), 10001)}
 				return cfg
 			}(),
 		},

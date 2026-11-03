@@ -92,12 +92,25 @@ func Test_FWMapEntry_DiscoveryAndCommit(t *testing.T) {
 type SyncPacketOption func(*syncPacketConfig)
 
 type syncPacketConfig struct {
-	srcPort uint16
-	dstPort uint16
-	srcAddr string
-	dstAddr string
-	flags   uint8
-	fib     uint8
+	srcPort   uint16
+	dstPort   uint16
+	srcAddr   string
+	dstAddr   string
+	flags     uint8
+	fib       uint8
+	outerAddr string
+	outerPort uint16
+	outerMAC  string
+}
+
+// WithOuter overrides the packet's outer wire destination: IPv6 address,
+// UDP port and Ethernet destination MAC.
+func WithOuter(addr string, port uint16, mac string) SyncPacketOption {
+	return func(c *syncPacketConfig) {
+		c.outerAddr = addr
+		c.outerPort = port
+		c.outerMAC = mac
+	}
 }
 
 // WithPorts sets custom source and destination ports.
@@ -134,19 +147,22 @@ func WithFib(fib uint8) SyncPacketOption {
 // createSyncPacket wraps one state frame in VLAN, IPv6 and UDP headers.
 func createSyncPacket(t *testing.T, proto layers.IPProtocol, opts ...SyncPacketOption) gopacket.Packet {
 	cfg := syncPacketConfig{
-		srcPort: 12345,
-		dstPort: 9999,
-		srcAddr: "2001:db8::1",
-		dstAddr: "2001:db8::2",
+		srcPort:   12345,
+		dstPort:   9999,
+		srcAddr:   "2001:db8::1",
+		dstAddr:   "2001:db8::2",
+		outerAddr: "ff02::1",
+		outerPort: 9999,
+		outerMAC:  "33:33:00:00:00:01",
 	}
 
 	for _, opt := range opts {
 		opt(&cfg)
 	}
 
-	dstMAC := xerror.Unwrap(net.ParseMAC("33:33:00:00:00:01"))
-	outerDstIP := net.ParseIP("ff02::1")
-	outerDstPort := layers.UDPPort(9999)
+	dstMAC := xerror.Unwrap(net.ParseMAC(cfg.outerMAC))
+	outerDstIP := net.ParseIP(cfg.outerAddr)
+	outerDstPort := layers.UDPPort(cfg.outerPort)
 
 	eth := layers.Ethernet{
 		SrcMAC:       xerror.Unwrap(net.ParseMAC("02:00:00:00:00:00")),
@@ -267,17 +283,66 @@ func Test_FWStateModule_UnconfiguredSync_AppliesLocalEventWithoutEmission(t *tes
 	require.False(t, GetStateValue(cpModule, layers.IPProtocolUDP, 12345, 9999, "2001:db8::1", "2001:db8::2").External)
 }
 
-// Test_FWState_WirePacketWithoutMulticastEndpoint verifies that disabling the
-// receive endpoint leaves matching wire packets in ordinary processing.
-func Test_FWState_WirePacketWithoutMulticastEndpoint(t *testing.T) {
+// Test_FWState_WirePacketWithoutListener verifies that a config without
+// listeners leaves matching wire packets in ordinary processing, even while
+// its emission endpoint names the same destination.
+func Test_FWState_WirePacketWithoutListener(t *testing.T) {
 	pkt := createSyncPacket(t, layers.IPProtocolUDP)
 
 	cpModule := newFWStateFixture(t, 0)
-	ClearSyncDestination(cpModule)
+	cpModule.Sync.Listeners = nil
 	result := xerror.Unwrap(fwstateHandleWirePackets(cpModule, pkt))
 
-	require.Len(t, result.Output, 1, "wire receive is disabled without multicast")
+	require.Len(t, result.Output, 1, "wire receive is disabled without a listener")
 	require.Empty(t, result.Drop)
+}
+
+// Test_FWState_StashEmission_TwelveEndpoints verifies that a config may
+// name more endpoints than any former fixed bound: one local event is
+// emitted once per endpoint, twelve copies in total.
+func Test_FWState_StashEmission_TwelveEndpoints(t *testing.T) {
+	cpModule := newFWStateFixture(t, 8*uint64(syncRecordSize))
+	SetSyncManyEndpoints(cpModule, 11)
+
+	worker := cpModule.Worker(0)
+	nextRound(worker)
+	require.Equal(t, 1, stashEvents(cpModule, worker, v6Event(7000)))
+
+	result := runConfig(cpModule, worker, false)
+	require.Len(t, result.Output, 12, "every endpoint gets one copy")
+	require.Empty(t, result.Drop)
+
+	seen := map[uint16]bool{}
+	for _, raw := range result.Output {
+		_, port, _ := syncPayload(raw)
+		seen[port] = true
+	}
+	require.True(t, seen[9999], "the multicast endpoint emitted")
+	for idx := range 11 {
+		require.True(t, seen[uint16(10000+idx)], "unicast endpoint %d emitted", idx)
+	}
+}
+
+// Test_FWState_WirePacketUnicastListener verifies that a unicast listener
+// claims point-to-point sync carried by a packet with a unicast Ethernet
+// destination.
+func Test_FWState_WirePacketUnicastListener(t *testing.T) {
+	pkt := createSyncPacket(t, layers.IPProtocolUDP,
+		WithOuter("2001:db8::5", 9998, "02:00:00:00:00:99"),
+	)
+
+	cpModule := newFWStateFixture(t, 0)
+	SetSyncUnicastListener(cpModule)
+	result := xerror.Unwrap(fwstateHandleWirePackets(cpModule, pkt))
+
+	require.Empty(t, result.Output, "received sync packets are consumed")
+	require.Len(t, result.Drop, 1)
+	require.True(t,
+		CheckStateExists(cpModule, layers.IPProtocolUDP, 12345, 9999, "2001:db8::1", "2001:db8::2"),
+		"unicast-listened sync must be applied",
+	)
+	require.True(t, GetStateValue(cpModule, layers.IPProtocolUDP, 12345, 9999, "2001:db8::1", "2001:db8::2").External)
+	require.Equal(t, uint64(1), moduleCounter(cpModule, "fwstate_sync"))
 }
 
 // Test_FWState_NonSyncPacket verifies that ordinary packets pass through
@@ -723,6 +788,35 @@ func Test_FWState_StashEmission_BothEndpoints(t *testing.T) {
 		{"2001:db8::3", 10000, 5},
 	}, got,
 	)
+}
+
+// Test_FWState_StashEmission_PortNamesBothEndsAndNeutralEthernet verifies
+// the per-copy emission invariants: the endpoint's port names both UDP ends
+// of the session, the IPv6 source names the endpoint, and the Ethernet
+// destination stays zeroed for the route module downstream to resolve.
+func Test_FWState_StashEmission_PortNamesBothEndsAndNeutralEthernet(t *testing.T) {
+	cpModule := newFWStateFixture(t, 0)
+	SetSyncUnicastDestination(cpModule)
+
+	worker := cpModule.Worker(0)
+	nextRound(worker)
+	require.Equal(t, 1, stashEvents(cpModule, worker, v6Event(6000)))
+
+	result := runConfig(cpModule, worker, false)
+	require.Len(t, result.Output, 2)
+
+	for _, raw := range result.Output {
+		parsed := gopacket.NewPacket(raw, layers.LayerTypeEthernet, gopacket.Default)
+		ethernet, ok := parsed.Layer(layers.LayerTypeEthernet).(*layers.Ethernet)
+		require.True(t, ok)
+		require.Equal(t, net.HardwareAddr{0, 0, 0, 0, 0, 0}, ethernet.DstMAC)
+		ipv6, ok := parsed.Layer(layers.LayerTypeIPv6).(*layers.IPv6)
+		require.True(t, ok)
+		require.Equal(t, net.ParseIP("fd00::1"), ipv6.SrcIP)
+		udp, ok := parsed.Layer(layers.LayerTypeUDP).(*layers.UDP)
+		require.True(t, ok)
+		require.Equal(t, udp.DstPort, udp.SrcPort)
+	}
 }
 
 // Test_FWState_StashEmission_PacksBothFamilies verifies that both families
