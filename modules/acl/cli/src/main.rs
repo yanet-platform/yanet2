@@ -485,11 +485,16 @@ impl ACLService {
         let request = GetRulesCountersRequest {
             name: cmd.config_name.clone().unwrap_or_default(),
         };
+        let resource = cmd.config_name.as_ref().map(|name| format!("config '{name}'"));
         let response = self
             .service
-            .unary("rule-counters", request, async |client, request| {
-                client.get_rules_counters(request).await
-            })
+            .unary_with(
+                "rule-counters",
+                request,
+                self.service
+                    .not_found("rule-counters", resource.as_deref().unwrap_or("requested config")),
+                async |client, request| client.get_rules_counters(request).await,
+            )
             .await?;
 
         output::data(

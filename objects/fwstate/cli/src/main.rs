@@ -262,9 +262,12 @@ async fn map_insert_layer(service: &mut FWStateMapService, cmd: InsertLayerCmd) 
         ..Default::default()
     };
     service
-        .unary("insert-layer", request, async |client, request| {
-            client.insert_layer(request).await
-        })
+        .unary_with(
+            "insert-layer",
+            request,
+            service.not_found("insert-layer", &format!("map '{}'", cmd.map_name)),
+            async |client, request| client.insert_layer(request).await,
+        )
         .await?;
 
     output::success(

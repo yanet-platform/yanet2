@@ -240,9 +240,12 @@ async fn lookup_route(service: &mut RouteService, cmd: RouteLookupCmd) -> Result
     };
 
     let response = service
-        .unary("lookup", request, async |client, request| {
-            client.lookup_route(request).await
-        })
+        .unary_with(
+            "lookup",
+            request,
+            service.not_found("lookup", &format!("config '{}'", cmd.name)),
+            async |client, request| client.lookup_route(request).await,
+        )
         .await?;
 
     output::data(|| &response.routes, || render::lookup_route(&response.routes, cmd.addr));
@@ -300,9 +303,12 @@ async fn remove_route(service: &mut RouteService, cmd: RouteRemoveCmd) -> Result
     };
 
     service
-        .unary("remove", request, async |client, request| {
-            client.delete_route(request).await
-        })
+        .unary_with(
+            "remove",
+            request,
+            service.not_found("remove", &format!("config '{}'", cmd.name)),
+            async |client, request| client.delete_route(request).await,
+        )
         .await?;
 
     let via = cmd
@@ -330,9 +336,12 @@ async fn flush_routes(service: &mut RouteService, cmd: RouteFlushCmd) -> Result<
     let request = FlushRoutesRequest { name: cmd.name.clone() };
 
     service
-        .unary("flush", request, async |client, request| {
-            client.flush_routes(request).await
-        })
+        .unary_with(
+            "flush",
+            request,
+            service.not_found("flush", &format!("config '{}'", cmd.name)),
+            async |client, request| client.flush_routes(request).await,
+        )
         .await?;
 
     output::success("flush", format_args!("Flushed config '{}'.", cmd.name));

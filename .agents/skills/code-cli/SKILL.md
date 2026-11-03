@@ -201,7 +201,11 @@ no `--yes`, no `--dry-run`.
   `Error::invalid_argument(verb, endpoint, message)`; a command addressing an
   existing object passes `service.not_found("<verb>", "<resource>")` as
   the mapper of `unary_with`, so a missing object reads `<resource> not found`
-  and exits 3. Hints via `.with_hint(…)`.
+  and exits 3. A command whose RPC can report `NotFound` for an object other
+  than the one it addresses, an element inside the config (nat64
+  `remove prefix`) or a ring the config refers to (pdump `set`), keeps
+  `status`: one label would misname what is missing. Hints via
+  `.with_hint(…)`.
 
 ## Tests
 

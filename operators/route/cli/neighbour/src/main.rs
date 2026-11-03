@@ -248,9 +248,12 @@ async fn update_neighbour(service: &mut NeighbourService, cmd: AddCmd) -> Result
     };
 
     service
-        .unary("add", request, async |client, request| {
-            client.update_neighbours(request).await
-        })
+        .unary_with(
+            "add",
+            request,
+            service.not_found("add", &format!("table '{table}'")),
+            async |client, request| client.update_neighbours(request).await,
+        )
         .await?;
 
     output::success(
@@ -273,9 +276,12 @@ async fn remove_neighbours(service: &mut NeighbourService, cmd: RemoveCmd) -> Re
     };
 
     service
-        .unary("remove", request, async |client, request| {
-            client.remove_neighbours(request).await
-        })
+        .unary_with(
+            "remove",
+            request,
+            service.not_found("remove", &format!("table '{table}'")),
+            async |client, request| client.remove_neighbours(request).await,
+        )
         .await?;
 
     let next_hops = cmd
@@ -341,9 +347,12 @@ async fn update_table(service: &mut NeighbourService, cmd: UpdateTableCmd) -> Re
     };
 
     service
-        .unary("update table", request, async |client, request| {
-            client.update_table(request).await
-        })
+        .unary_with(
+            "update table",
+            request,
+            service.not_found("update table", &format!("table '{}'", cmd.name)),
+            async |client, request| client.update_table(request).await,
+        )
         .await?;
 
     output::success(
