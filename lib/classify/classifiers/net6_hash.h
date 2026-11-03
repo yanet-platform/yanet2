@@ -26,11 +26,10 @@ struct classify_attr_net6_hash {
 	// The class of an address the ruleset does not name.
 	uint32_t miss_class;
 	uint32_t region_count;
-	// The sixteen address bytes per region, addressed through
-	// SET_OFFSET_OF, so the equality probe of a lookup compares the
-	// stored key of the slot.
+	// The sixteen address bytes per region; the row lives in shared
+	// memory and the pointer relocates on attach.
 	uint8_t *keys;
-	// The class per region, addressed through SET_OFFSET_OF.
+	// The class per region, the same shared-memory row lifetime.
 	uint32_t *classes;
 };
 

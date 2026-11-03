@@ -17,8 +17,8 @@
  * per distinct match set - but the regions are the distinct configured
  * addresses and the match is a single hash probe on the exact address,
  * no prefix semantics: an address resolves iff the ruleset names it.
- * The scope rules of state synchronization name individual hosts, where
- * a flat probe beats both a trie walk and a per-length probe chain.
+ * The scope rules of state synchronization name individual hosts, so a
+ * rule never covers an address it does not spell out.
  *
  * The struct is embedded by value in a consumer classifier; the index
  * and the region arrays die with the consumer through the free below.
@@ -29,11 +29,10 @@ struct classify_attr_net4_hash {
 	// The class of an address the ruleset does not name.
 	uint32_t miss_class;
 	uint32_t region_count;
-	// The exact address per region as a host-order word, addressed
-	// through SET_OFFSET_OF, so the equality probe of a lookup compares
-	// the stored key of the slot.
+	// The exact address per region as a host-order word; the row lives
+	// in shared memory and the pointer relocates on attach.
 	uint32_t *keys;
-	// The class per region, addressed through SET_OFFSET_OF.
+	// The class per region, the same shared-memory row lifetime.
 	uint32_t *classes;
 };
 
@@ -67,7 +66,7 @@ classify_attr_net4_hash_free(
 }
 
 // The hash of one exact address word: the same mixing at insert and
-// lookup time, so an ordinary multiplicative pass suffices.
+// lookup time, so a key always probes the slot it was placed in.
 static inline uint32_t
 classify_net4_hash_key_hash(uint32_t key) {
 	key ^= key >> 16;
