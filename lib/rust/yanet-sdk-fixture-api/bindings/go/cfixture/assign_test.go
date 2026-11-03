@@ -6,8 +6,11 @@ import (
 	"encoding/binary"
 	"testing"
 
+	"github.com/c2h5oh/datasize"
 	"github.com/stretchr/testify/require"
 
+	dataplaneut "github.com/yanet-platform/yanet2/bindings/go/dataplane_ut"
+	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/lib/rust/yanet-sdk-fixture-api/bindings/go/cfixture"
 )
 
@@ -292,17 +295,17 @@ func Test_Assign_Build_RefusesInvalidRules(t *testing.T) {
 		want   string
 	}{
 		{
-			name: "IPv4 mask that is not a prefix",
+			name: "IPv4 mask that is not contiguous",
 			assign: func(t *testing.T) cfixture.Assign {
 				return assignOf(t, assignRule{
 					family: cfixture.AssignFamilyIPv4,
 					src:    []any{cfixture.NewNet4([4]byte{10}, [4]byte{0xff, 0, 0xff})},
 				})
 			},
-			want: "a network mask is not a prefix",
+			want: "a network mask is not contiguous",
 		},
 		{
-			name: "IPv6 mask that is not a prefix in its low half",
+			name: "IPv6 mask that is not contiguous in its low half",
 			assign: func(t *testing.T) cfixture.Assign {
 				mask := [16]byte{0xff, 0xff, 8: 0x0f}
 				return assignOf(t, assignRule{
@@ -310,7 +313,7 @@ func Test_Assign_Build_RefusesInvalidRules(t *testing.T) {
 					dst:    []any{cfixture.NewNet6(addr6(0, 0), mask)},
 				})
 			},
-			want: "a network mask is not a prefix",
+			want: "a network mask is not contiguous",
 		},
 		{
 			name: "port range that ends before it starts",
@@ -429,44 +432,67 @@ func Test_Assign_AnyFamily_TakesTheEarlierRuleOfBothPaths(t *testing.T) {
 	}
 }
 
-// Test_Assign_Build_RefusedMidway_ReturnsMemoryToBaseline verifies that a build
-// refused after it composed some of its classifiers gives back all it took.
-func Test_Assign_Build_RefusedMidway_ReturnsMemoryToBaseline(t *testing.T) {
-	for _, tc := range []struct {
-		name  string
-		rules []assignRule
-	}{
-		{
-			name: "IPv6 mask refused after the IPv4 classifier",
-			rules: []assignRule{
-				{family: cfixture.AssignFamilyIPv4, src: []any{net4([4]byte{10}, 8)}, counter: "v4"},
-				{
-					family:  cfixture.AssignFamilyIPv6,
-					src:     []any{cfixture.NewNet6(addr6(0, 0), [16]byte{0x0f})},
-					counter: "v6",
-				},
-			},
-		},
-		{
-			name: "range of any family refused after both family classifiers",
-			rules: []assignRule{
-				{family: cfixture.AssignFamilyIPv4, counter: "v4"},
-				{family: cfixture.AssignFamilyIPv6, counter: "v6"},
-				{
-					family:  cfixture.AssignFamilyAny,
-					ports:   []cfixture.PortRange{cfixture.NewPortRange(2, 1)},
-					counter: "any",
-				},
-			},
-		},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			bed := newBed(t)
+// Test_Assign_Build_RefusedAfterComposing_ReturnsMemoryToBaseline verifies
+// that a build refused after it composed every classifier and registered some
+// counters gives back all it took.
+//
+// The last rule's counter name is not UTF-8, which the build reads only when
+// it fills the actions, after the classifiers of both families and of any
+// family.
+func Test_Assign_Build_RefusedAfterComposing_ReturnsMemoryToBaseline(t *testing.T) {
+	bed := newBed(t)
+	assign := assignOf(t,
+		assignRule{family: cfixture.AssignFamilyIPv4, src: []any{net4([4]byte{10}, 8)}, counter: "v4"},
+		assignRule{family: cfixture.AssignFamilyIPv6, dst: []any{net6(addr6(1, 0), 120)}, counter: "v6"},
+		assignRule{family: cfixture.AssignFamilyAny, ports: []cfixture.PortRange{cfixture.NewPortRange(53, 53)}, counter: "\xff"},
+	)
 
-			_, err := cfixture.NewAssignConfig(bed.agent, "config", assignOf(t, tc.rules...))
+	_, err := cfixture.NewAssignConfig(bed.agent, "config", assign)
 
-			require.Error(t, err)
-			require.Equal(t, bed.baseline, bed.agent.BlockAllocatorFreeSize())
-		})
+	require.ErrorContains(t, err, "a name is not NUL terminated UTF-8")
+	require.Equal(t, bed.baseline, bed.agent.BlockAllocatorFreeSize())
+}
+
+// Test_Assign_Build_MemoryRunsOut_ReturnsMemoryToBaseline verifies that an
+// assign build whose memory runs out refuses and gives back all it took, at
+// every capacity the sweep tries up to the first that fits.
+//
+// The rules take every path (IPv4 networks, protocols and ports, IPv6
+// networks, rules of any family), so the refusals fall in the attribute
+// compiles, the joins and the decode. A capacity stops a build only where the
+// buddy allocator runs dry, so a failure between two small allocations of one
+// routine is out of a sweep's reach.
+func Test_Assign_Build_MemoryRunsOut_ReturnsMemoryToBaseline(t *testing.T) {
+	bed := newBed(t, func(config *dataplaneut.Config) {
+		config.CPMemory = uint64(512 * datasize.MB)
+	})
+	assign := assignOf(t,
+		assignRule{
+			family:  cfixture.AssignFamilyIPv4,
+			src:     []any{net4([4]byte{10}, 8), net4([4]byte{192, 0, 2}, 24)},
+			dst:     []any{net4([4]byte{198, 51, 100}, 24)},
+			protos:  []cfixture.LineRange{cfixture.NewLineRange(protoUDP, protoUDP)},
+			ports:   []cfixture.PortRange{cfixture.NewPortRange(53, 53), cfixture.NewPortRange(1000, 2000)},
+			counter: "v4",
+		},
+		assignRule{
+			family:  cfixture.AssignFamilyIPv6,
+			src:     []any{net6(addr6(1, 0), 120), net6(addr6(2, 0), 64)},
+			dst:     []any{net6(addr6(3, 0), 96)},
+			counter: "v6",
+		},
+		assignRule{
+			family:  cfixture.AssignFamilyAny,
+			protos:  []cfixture.LineRange{cfixture.NewLineRange(protoTCP, protoTCP)},
+			ports:   []cfixture.PortRange{cfixture.NewPortRange(443, 443)},
+			counter: "any",
+		},
+	)
+	build := func(agent *ffi.Agent) (*cfixture.ModuleConfig, error) {
+		return cfixture.NewAssignConfig(agent, "config", assign)
 	}
+
+	fits := sweep(t, bed, build, 0, 16<<20, 16<<10)
+
+	require.NotZero(t, fits, "the build fits within the sweep")
 }

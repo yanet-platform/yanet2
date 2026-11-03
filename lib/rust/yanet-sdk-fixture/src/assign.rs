@@ -10,8 +10,8 @@
 //! of the rules of both paths.
 
 use yanet_sdk::{
-    Batch, CommitCx, Counter, Cx, Joint, LineAttr, Module, NO_RULE, Net4Attr, Net6Attr, PortAttr, RuleMap, RuleTable,
-    ShmBox, ShmLayout, ShmSlice, Traffic, Verdict, results_min,
+    Addr4, Batch, CommitCx, Counter, Cx, Joint, LineAttr, Module, Net4Attr, Net6Attr, PortAttr, Rule, RuleMap,
+    RuleTable, ShmBox, ShmLayout, ShmSlice, Traffic, Verdict, results_min,
 };
 
 /// The classifier of the IPv4 rules.
@@ -109,7 +109,7 @@ impl Module for Assign {
             let mut rule = [family];
             results_min(&mut rule, &[assign_any(cx, &config.any, proto, port)]);
             let [rule] = rule;
-            let Some(action) = usize::try_from(rule).ok().and_then(|rule| actions.get(rule)) else {
+            let Some(action) = rule.index().and_then(|rule| actions.get(rule)) else {
                 return Verdict::Drop;
             };
             action.counter.add(cx, Traffic::packet(data.len() as u64));
@@ -125,30 +125,24 @@ fn bytes<const N: usize>(data: &[u8], offset: usize) -> Option<[u8; N]> {
     data.get(offset..offset.checked_add(N)?)?.try_into().ok()
 }
 
-/// The first rule of any family the packet matches, [`NO_RULE`] for none.
-fn assign_any<'id>(cx: &Cx<'id, Assign>, any: &'id AssignAny, proto: u8, port: u16) -> u32 {
+/// The first rule of any family the packet matches, [`Rule::NONE`] for none.
+fn assign_any<'id>(cx: &Cx<'id, Assign>, any: &'id AssignAny, proto: u8, port: u16) -> Rule {
     let (mut proto_class, mut port_class, mut transport_class) = ([0], [0], [0]);
     any.proto.get(cx).lookup(cx, &[proto], &mut proto_class);
     any.port.get(cx).lookup(cx, &[port], &mut port_class);
     any.transport
         .get(cx)
         .lookup(cx, &proto_class, &port_class, &mut transport_class);
-    let mut rule = [NO_RULE];
+    let mut rule = [Rule::NONE];
     any.rules.get(cx).lookup(cx, &transport_class, &mut rule);
     rule[0]
 }
 
-/// The first IPv4 rule the packet matches, [`NO_RULE`] for none.
-fn assign4<'id>(cx: &Cx<'id, Assign>, family: &'id Assign4, src: [u8; 4], dst: [u8; 4], proto: u8, port: u16) -> u32 {
+/// The first IPv4 rule the packet matches, [`Rule::NONE`] for none.
+fn assign4<'id>(cx: &Cx<'id, Assign>, family: &'id Assign4, src: [u8; 4], dst: [u8; 4], proto: u8, port: u16) -> Rule {
     let (mut src_class, mut dst_class) = ([0], [0]);
-    family
-        .src
-        .get(cx)
-        .lookup(cx, &[u32::from_ne_bytes(src)], &mut src_class);
-    family
-        .dst
-        .get(cx)
-        .lookup(cx, &[u32::from_ne_bytes(dst)], &mut dst_class);
+    family.src.get(cx).lookup(cx, &[Addr4::from(src)], &mut src_class);
+    family.dst.get(cx).lookup(cx, &[Addr4::from(dst)], &mut dst_class);
     rule(
         cx,
         &family.nets,
@@ -161,8 +155,15 @@ fn assign4<'id>(cx: &Cx<'id, Assign>, family: &'id Assign4, src: [u8; 4], dst: [
     )
 }
 
-/// The first IPv6 rule the packet matches, [`NO_RULE`] for none.
-fn assign6<'id>(cx: &Cx<'id, Assign>, family: &'id Assign6, src: [u8; 16], dst: [u8; 16], proto: u8, port: u16) -> u32 {
+/// The first IPv6 rule the packet matches, [`Rule::NONE`] for none.
+fn assign6<'id>(
+    cx: &Cx<'id, Assign>,
+    family: &'id Assign6,
+    src: [u8; 16],
+    dst: [u8; 16],
+    proto: u8,
+    port: u16,
+) -> Rule {
     let (mut src_class, mut dst_class) = ([0], [0]);
     family.src.get(cx).lookup(cx, &[src], &mut src_class);
     family.dst.get(cx).lookup(cx, &[dst], &mut dst_class);
@@ -190,7 +191,7 @@ fn rule<'id>(
     (proto_attr, port_attr): (&'id ShmBox<LineAttr>, &'id ShmBox<PortAttr>),
     proto: u8,
     port: u16,
-) -> u32 {
+) -> Rule {
     let (mut proto_class, mut port_class) = ([0], [0]);
     proto_attr.get(cx).lookup(cx, &[proto], &mut proto_class);
     port_attr.get(cx).lookup(cx, &[port], &mut port_class);
@@ -199,7 +200,7 @@ fn rule<'id>(
     transport
         .get(cx)
         .lookup(cx, &proto_class, &port_class, &mut transport_class);
-    let mut rule = [NO_RULE];
+    let mut rule = [Rule::NONE];
     rules.get(cx).lookup(cx, &nets_class, &transport_class, &mut rule);
     rule[0]
 }

@@ -89,17 +89,10 @@ impl<'b, W: Owner, E: From<BuildError<W::Error>>> Scope<'b, '_, W, E> {
     ///
     /// # Errors
     ///
-    /// A view is refused before C reads it (a network mask that is not a
-    /// prefix, a range that ends before it starts), the rules are more than C
-    /// counts, or the memory is exhausted; nothing of the compile is left
-    /// allocated.
+    /// The rules are more than C counts, or the memory is exhausted; nothing
+    /// of the compile is left allocated.
     pub fn compile<A: Attribute>(self, name: &CStr, rules: &[Option<&A>]) -> Result<Staged<'b, A::Classifier, W>, E> {
         let count = rule_count(rules.len()).map_err(refused::<W, E>)?;
-        rules
-            .iter()
-            .flatten()
-            .try_for_each(|rule| rule.check())
-            .map_err(refused::<W, E>)?;
         self.staged(count, |memory, stage, classifier| {
             // SAFETY: a rule slot is a nullable pointer to a view the
             // attribute's compile reads as its C view, borrowed for the call.
@@ -203,6 +196,10 @@ impl<'b, W: Owner, E: From<BuildError<W::Error>>> Scope<'b, '_, W, E> {
     /// Allocates the block of a `T` for a C routine of the build's memory
     /// context that writes it whole, returning zero, or leaves it with
     /// nothing allocated.
+    ///
+    /// The block is zeroed first, as C callers zero what they hand a compile:
+    /// a routine that fails part way frees every field of its output, those
+    /// it never reached included, which only a zeroed field makes a no-op.
     fn written<T: Build>(
         self,
         write: impl FnOnce(*mut bindings::memory_context, *mut T) -> c_int,
@@ -210,6 +207,8 @@ impl<'b, W: Owner, E: From<BuildError<W::Error>>> Scope<'b, '_, W, E> {
         let memory = self.memory;
         let addr = self.alloc(size_of::<T>())?;
         let root = memory.root();
+        // SAFETY: the block is ours, of the size of one `T`.
+        unsafe { root.ptr::<u8>(addr).write_bytes(0, size_of::<T>()) };
         if write(root.ptr(memory.context.get()), root.ptr(addr)) != 0 {
             // SAFETY: the block is ours, and the failed routine left nothing
             // in it.
@@ -229,6 +228,10 @@ impl<'b, W: Owner, E: From<BuildError<W::Error>>> Scope<'b, '_, W, E> {
 
     /// As [`Scope::written`], for a routine that also fills a stage over the
     /// rule count.
+    ///
+    /// The stage is zeroed first and finalized when the routine fails: a
+    /// failed compile may leave part of it allocated, which its C callers
+    /// release the same way.
     fn staged<T: Build>(
         self,
         rules: u32,
@@ -236,7 +239,10 @@ impl<'b, W: Owner, E: From<BuildError<W::Error>>> Scope<'b, '_, W, E> {
     ) -> Result<Staged<'b, T, W>, E> {
         let memory = self.memory;
         let addr = self.alloc(size_of::<bindings::classifier>())?;
-        let stage = memory.root().ptr::<bindings::classifier>(addr);
+        let root = memory.root();
+        let stage = root.ptr::<bindings::classifier>(addr);
+        // SAFETY: the block is ours, of the size of one stage.
+        unsafe { stage.write_bytes(0, 1) };
         match self.written(|context, value| write(context, stage, value)) {
             Ok(value) => Ok((
                 value,
@@ -248,10 +254,14 @@ impl<'b, W: Owner, E: From<BuildError<W::Error>>> Scope<'b, '_, W, E> {
                 },
             )),
             Err(err) => {
-                // SAFETY: the stage owns nothing: the routine either did not
-                // run, or failed and left it zeroed; its block is ours, and
-                // freeing it reads none of its bytes.
-                unsafe { memory.free(addr, size_of::<bindings::classifier>()) };
+                // SAFETY: the stage was zeroed and then, if the routine ran,
+                // left by it in a state its C finalizer releases, as it does
+                // a zeroed one, in the build's context, which is live; its
+                // block is ours.
+                unsafe {
+                    bindings::yanet_sys_classify_stage_free(stage, root.ptr(memory.context.get()), rules);
+                    memory.free(addr, size_of::<bindings::classifier>());
+                }
                 Err(err)
             }
         }

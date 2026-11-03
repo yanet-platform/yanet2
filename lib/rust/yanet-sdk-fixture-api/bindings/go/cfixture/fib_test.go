@@ -358,15 +358,20 @@ func Test_Fib_Build_ReversedRange_ReturnsMemoryToBaseline(t *testing.T) {
 	require.Equal(t, bed.baseline, bed.agent.BlockAllocatorFreeSize())
 }
 
-// sweep builds the FIB in a fresh agent of each memory limit in turn, from
-// start up to end in steps, until a build fits, and returns the limit that
-// fits, zero when none does.
+// sweep builds a configuration in a fresh agent of each memory limit in turn,
+// from start up to end in steps, until a build fits, and returns the limit
+// that fits, zero when none does.
 //
 // Each build that fails must be refused as exhausted memory, or by the header's
 // registries, which C reports without a kind, and leave the agent's free memory
 // as it was; the one that fits is freed, which must restore it as well. The
 // agents live as long as the harness does.
-func sweep(t *testing.T, bed *bed, input cfixture.Fib, start, end, stride int) int {
+func sweep(
+	t *testing.T,
+	bed *bed,
+	build func(agent *ffi.Agent) (*cfixture.ModuleConfig, error),
+	start, end, stride int,
+) int {
 	t.Helper()
 
 	for step, limit := 0, start; limit < end; step, limit = step+1, limit+stride {
@@ -378,7 +383,7 @@ func sweep(t *testing.T, bed *bed, input cfixture.Fib, start, end, stride int) i
 		}
 		baseline := agent.BlockAllocatorFreeSize()
 
-		config, err := cfixture.NewFibConfig(agent, "fib", input)
+		config, err := build(agent)
 		if err == nil {
 			require.NoError(t, config.Free())
 		} else if !exhaustedOrUntagged(err) {
@@ -391,6 +396,13 @@ func sweep(t *testing.T, bed *bed, input cfixture.Fib, start, end, stride int) i
 		}
 	}
 	return 0
+}
+
+// buildFib returns the build of a FIB of the input for a sweep.
+func buildFib(input cfixture.Fib) func(agent *ffi.Agent) (*cfixture.ModuleConfig, error) {
+	return func(agent *ffi.Agent) (*cfixture.ModuleConfig, error) {
+		return cfixture.NewFibConfig(agent, "fib", input)
+	}
 }
 
 // exhaustedOrUntagged reports whether the error is a refusal for lack of
@@ -418,7 +430,7 @@ func Test_Fib_Build_NoRoomForBlocksOrHeader_ReturnsMemoryToBaseline(t *testing.T
 		config.CPMemory = uint64(64 * datasize.MB)
 	})
 
-	fits := sweep(t, bed, fibInput(t), 0, 16<<10, 64)
+	fits := sweep(t, bed, buildFib(fibInput(t)), 0, 16<<10, 64)
 
 	require.Zero(t, fits)
 }
@@ -435,7 +447,7 @@ func Test_Fib_Build_CMemoryRunsOut_ReturnsMemoryToBaseline(t *testing.T) {
 	})
 	start := 16 << 10
 
-	fits := sweep(t, bed, fibInput(t), start, 8<<20, 8<<10)
+	fits := sweep(t, bed, buildFib(fibInput(t)), start, 8<<20, 8<<10)
 
 	require.Greater(t, fits, start, "a build fits only above where the first tables fail")
 }

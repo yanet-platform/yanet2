@@ -23,6 +23,7 @@ use core::{
     convert::Infallible,
     marker::PhantomData,
     mem::{align_of, size_of},
+    net::Ipv4Addr,
     ops::Range,
     ptr, slice,
 };
@@ -52,13 +53,57 @@ unsafe impl FfiRecord for PortRange {}
 // SAFETY: as above.
 unsafe impl FfiRecord for LineRange {}
 
-/// The rule a lookup reports for a packet no rule matches.
-pub const NO_RULE: u32 = bindings::YANET_SYS_CLASSIFY_NO_RULE;
+/// The first rule a packet matches, by its index in the ruleset, or none.
+///
+/// The word C writes, so a lookup fills a slice of them in place; no match is
+/// C's invalid rule, which [`Rule::index`] reads as `None`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(transparent)]
+pub struct Rule(u32);
+
+impl Rule {
+    /// No rule: what a lookup reports for a packet no rule matches.
+    pub const NONE: Self = Self(bindings::YANET_SYS_CLASSIFY_NO_RULE);
+
+    /// Index of the rule in the ruleset, `None` for no rule.
+    #[inline(always)]
+    pub fn index(self) -> Option<usize> {
+        (self != Self::NONE).then_some(self.0 as usize)
+    }
+}
+
+impl Default for Rule {
+    fn default() -> Self {
+        Self::NONE
+    }
+}
+
+/// An IPv4 address as the IPv4 lookup takes it: its four bytes in network
+/// order, held as one aligned word.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(transparent)]
+pub struct Addr4(u32);
+
+impl From<[u8; 4]> for Addr4 {
+    #[inline(always)]
+    fn from(octets: [u8; 4]) -> Self {
+        // The word's bytes in memory are the octets, in network order.
+        Self(u32::from_ne_bytes(octets))
+    }
+}
+
+impl From<Ipv4Addr> for Addr4 {
+    #[inline(always)]
+    fn from(addr: Ipv4Addr) -> Self {
+        Self::from(addr.octets())
+    }
+}
 
 /// The views of a rule a compile reads: each borrows the items of the rule's
-/// set for the build, as the C view of a set does.
+/// set for the build, as the C view of a set does, and holds only items the C
+/// compile reads as they say.
 macro_rules! views {
-    ($($(#[$doc:meta])* $name:ident: $raw:ident of $item:ty;)*) => {$(
+    ($($(#[$doc:meta])* $name:ident: $raw:ident of $item:ty, $valid:ident or $refusal:ident;)*) => {$(
         $(#[$doc])*
         #[repr(transparent)]
         pub struct $name<'a> {
@@ -71,9 +116,13 @@ macro_rules! views {
             ///
             /// # Errors
             ///
-            /// The set holds more items than C counts, `u32::MAX`.
+            /// The set holds more items than C counts, `u32::MAX`, or an item
+            /// the C compile would read as other than it says.
             pub fn new(items: &'a [$item]) -> Result<Self, Refusal> {
                 let count = u32::try_from(items.len()).map_err(|_| Refusal::TooManyItems)?;
+                if !items.iter().all($valid) {
+                    return Err(Refusal::$refusal);
+                }
                 Ok(Self {
                     raw: bindings::$raw {
                         // The compile only reads through the pointer.
@@ -96,18 +145,37 @@ macro_rules! views {
 }
 
 views! {
-    /// The IPv4 networks of one side of a rule; none matches every address.
-    Nets4: filter_net4s of Net4;
-    /// The IPv6 networks of one side of a rule; none matches every address.
-    Nets6: filter_net6s of Net6;
+    /// The IPv4 networks of one side of a rule, each of a contiguous mask;
+    /// none matches every address.
+    Nets4: filter_net4s of Net4, net4_valid or InvalidMask;
+    /// The IPv6 networks of one side of a rule, each of a mask contiguous in
+    /// each 64-bit half, as the IPv6 compile ranges the halves apart; none
+    /// matches every address.
+    Nets6: filter_net6s of Net6, net6_valid or InvalidMask;
     /// The port ranges of one side of a rule, closed; none matches every
     /// port.
-    Ports: filter_port_ranges of PortRange;
+    Ports: filter_port_ranges of PortRange, port_range_valid or InvalidRange;
     /// The closed byte ranges of a line attribute of a rule (the protocol
     /// numbers, the TCP flags, the ICMP types), as the control plane that
     /// authors the rules derives them; bounds beyond the byte domain are
     /// clamped to it, and none matches every byte.
-    Lines: classify_line_ranges of LineRange;
+    Lines: classify_line_ranges of LineRange, line_range_valid or InvalidRange;
+}
+
+fn net4_valid(net: &Net4) -> bool {
+    Ipv4Network::from_bits(u32::from_be_bytes(net.addr), u32::from_be_bytes(net.mask)).is_contiguous()
+}
+
+fn net6_valid(net: &Net6) -> bool {
+    Ipv6Network::from_bits(u128::from_be_bytes(net.addr), u128::from_be_bytes(net.mask)).is_bicontiguous()
+}
+
+fn port_range_valid(range: &PortRange) -> bool {
+    range.from <= range.to
+}
+
+fn line_range_valid(range: &LineRange) -> bool {
+    range.from <= range.to
 }
 
 /// A view of one attribute of a rule, which the classifier of the attribute
@@ -117,13 +185,10 @@ views! {
 /// attribute.
 ///
 /// ```compile_fail,E0277
-/// # use yanet_sys::{classify::{Attribute, Net4Attr}, cp::Refusal};
+/// # use yanet_sys::classify::{Attribute, Net4Attr};
 /// struct Mine;
 /// impl Attribute for Mine {
 ///     type Classifier = Net4Attr;
-///     fn check(&self) -> Result<(), Refusal> {
-///         Ok(())
-///     }
 ///     unsafe fn compile(
 ///         _: *mut yanet_sys::bindings::memory_context,
 ///         _: *const core::ffi::c_char,
@@ -139,12 +204,6 @@ views! {
 pub trait Attribute: sealed::Sealed {
     /// The classifier of the attribute.
     type Classifier: Build;
-
-    /// Refuses a view the C compile would read as other than it says: a
-    /// network mask that is not a prefix, a range that ends before it
-    /// starts.
-    #[doc(hidden)]
-    fn check(&self) -> Result<(), Refusal>;
 
     /// Compiles the classifier in place over the rules and fills the stage;
     /// zero on success.
@@ -164,19 +223,8 @@ pub trait Attribute: sealed::Sealed {
     ) -> core::ffi::c_int;
 }
 
-/// Refuses an item of the view that `valid` rejects.
-fn check_all<T>(items: &[T], refusal: Refusal, valid: impl Fn(&T) -> bool) -> Result<(), Refusal> {
-    items.iter().all(valid).then_some(()).ok_or(refusal)
-}
-
 impl Attribute for Nets4<'_> {
     type Classifier = Net4Attr;
-
-    fn check(&self) -> Result<(), Refusal> {
-        check_all(self.as_slice(), Refusal::InvalidMask, |net| {
-            Ipv4Network::from_bits(u32::from_be_bytes(net.addr), u32::from_be_bytes(net.mask)).is_contiguous()
-        })
-    }
 
     unsafe fn compile(
         memory: *mut bindings::memory_context,
@@ -196,14 +244,6 @@ impl Attribute for Nets4<'_> {
 impl Attribute for Nets6<'_> {
     type Classifier = Net6Attr;
 
-    /// The IPv6 compile ranges each half of the address apart, so the mask
-    /// of each half is contiguous on its own.
-    fn check(&self) -> Result<(), Refusal> {
-        check_all(self.as_slice(), Refusal::InvalidMask, |net| {
-            Ipv6Network::from_bits(u128::from_be_bytes(net.addr), u128::from_be_bytes(net.mask)).is_bicontiguous()
-        })
-    }
-
     unsafe fn compile(
         memory: *mut bindings::memory_context,
         name: *const core::ffi::c_char,
@@ -222,10 +262,6 @@ impl Attribute for Nets6<'_> {
 impl Attribute for Ports<'_> {
     type Classifier = PortAttr;
 
-    fn check(&self) -> Result<(), Refusal> {
-        check_all(self.as_slice(), Refusal::InvalidRange, |range| range.from <= range.to)
-    }
-
     unsafe fn compile(
         memory: *mut bindings::memory_context,
         name: *const core::ffi::c_char,
@@ -243,10 +279,6 @@ impl Attribute for Ports<'_> {
 
 impl Attribute for Lines<'_> {
     type Classifier = LineAttr;
-
-    fn check(&self) -> Result<(), Refusal> {
-        check_all(self.as_slice(), Refusal::InvalidRange, |range| range.from <= range.to)
-    }
 
     unsafe fn compile(
         memory: *mut bindings::memory_context,
@@ -375,14 +407,24 @@ fn raw<'g, T, C>(cx: &impl Resolve<'g>, value: &'g T) -> *const C {
     cx.shm_root().ptr::<C>(ptr::from_ref(value).addr())
 }
 
-/// Calls `lookup` over the inputs in runs C counts, of at most `u32::MAX`
-/// each, with the range of each run and its length.
+/// The longest run a lookup passes C: what its `uint32_t` count holds.
+const RUN: usize = u32::MAX as usize;
+
+/// The longest run of IPv6 addresses: C offsets an address by its index times
+/// its sixteen bytes in `uint32_t`, which a longer run would wrap.
+const RUN6: usize = RUN / 16;
+
+// The last address of a run starts below 2^32 bytes.
+const _: () = assert!((RUN6 - 1) * 16 <= u32::MAX as usize);
+
+/// Calls `lookup` over the inputs in runs of at most `max`, with the range of
+/// each run and its length; a batch a dataplane hands a module is one run.
 #[inline(always)]
-fn runs(len: usize, mut lookup: impl FnMut(Range<usize>, u32)) {
+fn runs(len: usize, max: usize, mut lookup: impl FnMut(Range<usize>, u32)) {
     let mut start = 0;
     while start < len {
-        let run = (len - start).min(u32::MAX as usize);
-        // The run fits, as it is at most `u32::MAX`.
+        let run = (len - start).min(max);
+        // The run fits, as `max` is at most `u32::MAX`.
         lookup(start..start + run, run as u32);
         start += run;
     }
@@ -394,21 +436,20 @@ fn runs(len: usize, mut lookup: impl FnMut(Range<usize>, u32)) {
 // the run, into an output run of the same length.
 
 impl Net4Attr {
-    /// The class of each address, given as its four bytes in network order
-    /// read as a word in memory order (`u32::from_ne_bytes`).
+    /// The class of each address.
     ///
     /// # Panics
     ///
     /// The classes are fewer than the addresses.
     #[inline]
-    pub fn lookup<'g>(&'g self, cx: &impl Resolve<'g>, addrs: &[u32], classes: &mut [u32]) {
+    pub fn lookup<'g>(&'g self, cx: &impl Resolve<'g>, addrs: &[Addr4], classes: &mut [u32]) {
         let classes = &mut classes[..addrs.len()];
-        runs(addrs.len(), |run, count| {
+        runs(addrs.len(), RUN, |run, count| {
             // SAFETY: see above.
             unsafe {
                 bindings::yanet_sys_classify_net4_lookup(
                     raw(cx, self),
-                    addrs[run.clone()].as_ptr(),
+                    addrs[run.clone()].as_ptr().cast(),
                     classes[run].as_mut_ptr(),
                     count,
                 );
@@ -426,7 +467,7 @@ impl Net6Attr {
     #[inline]
     pub fn lookup<'g>(&'g self, cx: &impl Resolve<'g>, addrs: &[[u8; 16]], classes: &mut [u32]) {
         let classes = &mut classes[..addrs.len()];
-        runs(addrs.len(), |run, count| {
+        runs(addrs.len(), RUN6, |run, count| {
             // SAFETY: see above; the addresses are consecutive bytes.
             unsafe {
                 bindings::yanet_sys_classify_net6_lookup(
@@ -449,7 +490,7 @@ impl PortAttr {
     #[inline]
     pub fn lookup<'g>(&'g self, cx: &impl Resolve<'g>, ports: &[u16], classes: &mut [u32]) {
         let classes = &mut classes[..ports.len()];
-        runs(ports.len(), |run, count| {
+        runs(ports.len(), RUN, |run, count| {
             // SAFETY: see above; the line spans the whole port domain.
             unsafe {
                 bindings::yanet_sys_classify_port_lookup(
@@ -472,7 +513,7 @@ impl LineAttr {
     #[inline]
     pub fn lookup<'g>(&'g self, cx: &impl Resolve<'g>, bytes: &[u8], classes: &mut [u32]) {
         let classes = &mut classes[..bytes.len()];
-        runs(bytes.len(), |run, count| {
+        runs(bytes.len(), RUN, |run, count| {
             // SAFETY: see above; the line spans the whole byte domain.
             unsafe {
                 bindings::yanet_sys_classify_line_lookup(
@@ -496,7 +537,7 @@ impl Joint {
     #[inline]
     pub fn lookup<'g>(&'g self, cx: &impl Resolve<'g>, left: &[u32], right: &[u32], classes: &mut [u32]) {
         let (right, classes) = (&right[..left.len()], &mut classes[..left.len()]);
-        runs(left.len(), |run, count| {
+        runs(left.len(), RUN, |run, count| {
             // SAFETY: see above; the shim reads a pair outside the joint as
             // class zero.
             unsafe {
@@ -513,16 +554,16 @@ impl Joint {
 }
 
 impl RuleTable {
-    /// The first rule each pair of classes matches, [`NO_RULE`] for none or a
-    /// class outside its stage.
+    /// The first rule each pair of classes matches, [`Rule::NONE`] for none or
+    /// a class outside its stage.
     ///
     /// # Panics
     ///
     /// The right classes or the output are fewer than the left classes.
     #[inline]
-    pub fn lookup<'g>(&'g self, cx: &impl Resolve<'g>, left: &[u32], right: &[u32], rules: &mut [u32]) {
+    pub fn lookup<'g>(&'g self, cx: &impl Resolve<'g>, left: &[u32], right: &[u32], rules: &mut [Rule]) {
         let (right, rules) = (&right[..left.len()], &mut rules[..left.len()]);
-        runs(left.len(), |run, count| {
+        runs(left.len(), RUN, |run, count| {
             // SAFETY: see above; the shim reads a pair outside the table as
             // no rule, and an empty table holds none.
             unsafe {
@@ -530,7 +571,7 @@ impl RuleTable {
                     raw(cx, self),
                     left[run.clone()].as_ptr(),
                     right[run.clone()].as_ptr(),
-                    rules[run].as_mut_ptr(),
+                    rules[run].as_mut_ptr().cast(),
                     count,
                 );
             }
@@ -539,23 +580,23 @@ impl RuleTable {
 }
 
 impl RuleMap {
-    /// The first rule each class matches, [`NO_RULE`] for none or a class
+    /// The first rule each class matches, [`Rule::NONE`] for none or a class
     /// outside its stage.
     ///
     /// # Panics
     ///
     /// The output is shorter than the classes.
     #[inline]
-    pub fn lookup<'g>(&'g self, cx: &impl Resolve<'g>, classes: &[u32], rules: &mut [u32]) {
+    pub fn lookup<'g>(&'g self, cx: &impl Resolve<'g>, classes: &[u32], rules: &mut [Rule]) {
         let rules = &mut rules[..classes.len()];
-        runs(classes.len(), |run, count| {
+        runs(classes.len(), RUN, |run, count| {
             // SAFETY: see above; the shim reads a class outside the map as no
             // rule, and an empty map holds none.
             unsafe {
                 bindings::yanet_sys_classify_resolve(
                     raw(cx, self),
                     classes[run.clone()].as_ptr(),
-                    rules[run].as_mut_ptr(),
+                    rules[run].as_mut_ptr().cast(),
                     count,
                 );
             }
@@ -570,12 +611,118 @@ impl RuleMap {
 ///
 /// The other rules are fewer than the rules.
 #[inline]
-pub fn results_min(rules: &mut [u32], extra: &[u32]) {
+pub fn results_min(rules: &mut [Rule], extra: &[Rule]) {
     let extra = &extra[..rules.len()];
-    runs(rules.len(), |run, count| {
+    runs(rules.len(), RUN, |run, count| {
         // SAFETY: C reads and writes the run of both slices.
         unsafe {
-            bindings::yanet_sys_classify_results_min(rules[run.clone()].as_mut_ptr(), extra[run].as_ptr(), count);
+            bindings::yanet_sys_classify_results_min(
+                rules[run.clone()].as_mut_ptr().cast(),
+                extra[run].as_ptr().cast(),
+                count,
+            );
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    extern crate std;
+
+    use core::net::Ipv4Addr;
+    use std::{vec, vec::Vec};
+
+    use super::{Addr4, LineRange, Lines, Net4, Net6, Nets4, Nets6, PortRange, Ports, Rule, runs};
+    use crate::cp::Refusal;
+
+    /// Collects the runs of an input of the length under a cap.
+    fn collect(len: usize, max: usize) -> Vec<(usize, usize, u32)> {
+        let mut seen = Vec::new();
+        runs(len, max, |run, count| seen.push((run.start, run.end, count)));
+        seen
+    }
+
+    /// verifies that the runs cover the input in order, each at most the cap
+    /// long and its length as its count, and that an empty input makes none.
+    #[test]
+    fn test_runs_cover_the_input_under_the_cap() {
+        assert_eq!(Vec::<(usize, usize, u32)>::new(), collect(0, 4));
+        assert_eq!(vec![(0, 3, 3)], collect(3, 4));
+        assert_eq!(vec![(0, 4, 4)], collect(4, 4));
+        assert_eq!(vec![(0, 4, 4), (4, 8, 4), (8, 10, 2)], collect(10, 4));
+    }
+
+    /// verifies that an IPv4 view takes contiguous masks only, the empty one
+    /// and the full one included.
+    #[test]
+    fn test_nets4_new_refuses_a_mask_that_is_not_contiguous() {
+        for (mask, result) in [
+            ([0, 0, 0, 0], Ok(())),
+            ([0xff, 0xff, 0xf0, 0], Ok(())),
+            ([0xff, 0xff, 0xff, 0xff], Ok(())),
+            ([0xff, 0, 0xff, 0], Err(Refusal::InvalidMask)),
+            ([0x7f, 0, 0, 0], Err(Refusal::InvalidMask)),
+        ] {
+            let nets = [Net4 { addr: [10, 0, 0, 0], mask }];
+            assert_eq!(result, Nets4::new(&nets).map(drop), "{mask:x?}");
+        }
+    }
+
+    /// verifies that an IPv6 view takes a mask contiguous in each 64-bit
+    /// half, a hole at the half boundary included, and refuses a hole inside
+    /// a half.
+    #[test]
+    fn test_nets6_new_refuses_a_hole_inside_a_half() {
+        for (mask, result) in [
+            ([0xff; 16], Ok(())),
+            ([0xff, 0xff, 0, 0, 0, 0, 0, 0, 0xff, 0, 0, 0, 0, 0, 0, 0], Ok(())),
+            (
+                [0xff, 0, 0xff, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+                Err(Refusal::InvalidMask),
+            ),
+            (
+                [
+                    0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x0f, 0, 0, 0, 0, 0, 0, 0,
+                ],
+                Err(Refusal::InvalidMask),
+            ),
+        ] {
+            let nets = [Net6 { addr: [0; 16], mask }];
+            assert_eq!(result, Nets6::new(&nets).map(drop), "{mask:x?}");
+        }
+    }
+
+    /// verifies that port and byte views refuse a range that ends before it
+    /// starts and take a range of one value.
+    #[test]
+    fn test_range_views_refuse_a_reversed_range() {
+        assert_eq!(Ok(()), Ports::new(&[PortRange { from: 53, to: 53 }]).map(drop));
+        assert_eq!(
+            Err(Refusal::InvalidRange),
+            Ports::new(&[PortRange { from: 80, to: 53 }]).map(drop)
+        );
+        assert_eq!(Ok(()), Lines::new(&[LineRange { from: 6, to: 6 }]).map(drop));
+        assert_eq!(
+            Err(Refusal::InvalidRange),
+            Lines::new(&[LineRange { from: 17, to: 6 }]).map(drop)
+        );
+    }
+
+    /// verifies that no rule has no index and any other rule its own.
+    #[test]
+    fn test_rule_index_is_none_for_no_rule_only() {
+        assert_eq!(None, Rule::NONE.index());
+        assert_eq!(None, Rule::default().index());
+        assert_eq!(Some(3), Rule(3).index());
+    }
+
+    /// verifies that an IPv4 address holds its octets in network order in
+    /// memory, whether made from octets or from an address.
+    #[test]
+    fn test_addr4_holds_the_octets_in_network_order() {
+        let addr = Addr4::from([192, 0, 2, 1]);
+
+        assert_eq!(addr, Addr4::from(Ipv4Addr::new(192, 0, 2, 1)));
+        assert_eq!([192, 0, 2, 1], addr.0.to_ne_bytes());
+    }
 }
