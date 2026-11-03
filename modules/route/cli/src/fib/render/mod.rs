@@ -4,8 +4,8 @@
 //! nexthop, or one placeholder row when there is none. The range view
 //! prints a block per entry, the CIDR view a block per prefix covering the
 //! entry, each with all of the entry's nexthops. The table is never
-//! pre-wrapped: as with other borderless CLI tables, a narrow terminal
-//! wraps the output itself.
+//! pre-wrapped: as with other borderless CLI tables, a long line is left to
+//! the terminal or the pager.
 
 use tabled::{
     Table, Tabled,
