@@ -71,7 +71,7 @@ Language rules: `.agents/conventions/{go,rust,c,ts}.md` — read the one for the
 
 ## Worktrees
 
-Use linked worktrees at `.claude/worktrees/` (Claude Code) or `.agent-state/worktrees/` (Codex), on task branches from confirmed `origin/main`. Confirm root and branch first. Keep primary on `main`; write only ignored trees there, by absolute path. Gates using `build/` need their own build and initialized submodules; cargo/npm/lint-only gates may link primary `build/` and `*.pb.go`.
+Use linked worktrees at `.claude/worktrees/` (Claude Code) or `.agent-state/worktrees/` (Codex), on task branches from confirmed `origin/main`. Confirm root and branch first. Keep primary on `main`; write only ignored trees there, by absolute path. Gates using `build/` need their own build and initialized submodules; cargo/npm/lint-only gates (not the `lib/rust` one) may link primary `build/` and `*.pb.go`.
 
 ## Commits & PRs
 
