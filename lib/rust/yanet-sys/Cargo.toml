@@ -11,6 +11,7 @@ publish.workspace = true
 workspace = true
 
 [dependencies]
+netip = "0.4"
 yanet-shm = { path = "../yanet-shm" }
 
 [build-dependencies]

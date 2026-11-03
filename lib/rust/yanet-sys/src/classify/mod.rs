@@ -27,6 +27,7 @@ use core::{
     ptr, slice,
 };
 
+use netip::{Ipv4Network, Ipv6Network};
 use yanet_shm::{
     opaque::Opaque,
     resolve::Resolve,
@@ -163,24 +164,6 @@ pub trait Attribute: sealed::Sealed {
     ) -> core::ffi::c_int;
 }
 
-/// Reports whether the mask is a prefix: ones, then zeros only.
-///
-/// The compiles read a network as the range from its address under the mask
-/// to its address over it, of the prefix length the mask's ones count, which
-/// is the network only for a prefix.
-fn is_prefix(mask: &[u8]) -> bool {
-    let mut ended = false;
-    mask.iter().all(|&byte| {
-        let fits = if ended {
-            byte == 0
-        } else {
-            byte.leading_ones() + byte.trailing_zeros() >= 8
-        };
-        ended |= byte != 0xff;
-        fits
-    })
-}
-
 /// Refuses an item of the view that `valid` rejects.
 fn check_all<T>(items: &[T], refusal: Refusal, valid: impl Fn(&T) -> bool) -> Result<(), Refusal> {
     items.iter().all(valid).then_some(()).ok_or(refusal)
@@ -190,7 +173,9 @@ impl Attribute for Nets4<'_> {
     type Classifier = Net4Attr;
 
     fn check(&self) -> Result<(), Refusal> {
-        check_all(self.as_slice(), Refusal::InvalidMask, |net| is_prefix(&net.mask))
+        check_all(self.as_slice(), Refusal::InvalidMask, |net| {
+            Ipv4Network::from_bits(u32::from_be_bytes(net.addr), u32::from_be_bytes(net.mask)).is_contiguous()
+        })
     }
 
     unsafe fn compile(
@@ -212,11 +197,10 @@ impl Attribute for Nets6<'_> {
     type Classifier = Net6Attr;
 
     /// The IPv6 compile ranges each half of the address apart, so the mask
-    /// of each half is a prefix of its own.
+    /// of each half is contiguous on its own.
     fn check(&self) -> Result<(), Refusal> {
         check_all(self.as_slice(), Refusal::InvalidMask, |net| {
-            let (hi, lo) = net.mask.split_at(8);
-            is_prefix(hi) && is_prefix(lo)
+            Ipv6Network::from_bits(u128::from_be_bytes(net.addr), u128::from_be_bytes(net.mask)).is_bicontiguous()
         })
     }
 
@@ -594,27 +578,4 @@ pub fn results_min(rules: &mut [u32], extra: &[u32]) {
             bindings::yanet_sys_classify_results_min(rules[run.clone()].as_mut_ptr(), extra[run].as_ptr(), count);
         }
     });
-}
-
-#[cfg(test)]
-mod tests {
-    use super::is_prefix;
-
-    /// verifies that a mask is a prefix exactly when its ones all come
-    /// before its zeros.
-    #[test]
-    fn test_is_prefix_accepts_ones_then_zeros_only() {
-        for (mask, prefix) in [
-            ([0, 0, 0, 0], true),
-            ([0xff, 0xff, 0xff, 0xff], true),
-            ([0xff, 0xff, 0xf0, 0], true),
-            ([0x80, 0, 0, 0], true),
-            ([0xff, 0, 0xff, 0], false),
-            ([0xff, 0xf7, 0, 0], false),
-            ([0x7f, 0, 0, 0], false),
-            ([0, 0, 0, 1], false),
-        ] {
-            assert_eq!(prefix, is_prefix(&mask), "{mask:x?}");
-        }
-    }
 }
