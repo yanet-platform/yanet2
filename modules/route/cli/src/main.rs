@@ -252,7 +252,7 @@ async fn show_fib(service: &mut RouteService, cmd: FibShowCmd) -> Result<(), Err
         .await?;
     let entries = response.entries;
 
-    output::data(
+    output::paged(
         || &entries,
         || {
             if entries.is_empty() {
