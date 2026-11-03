@@ -112,5 +112,6 @@ headers to those origins only. Same-origin setups, including the dev proxy,
 need no configuration. A standalone UI, or a gateway added to the Gateway
 drawer that is not the UI's own origin, works only once every such gateway
 lists the UI's origin, e.g. `https://yanet-ui.example.net`. The web client
-automatically skips gzip compression for cross-origin requests to avoid
-CORS preflight issues.
+gzips ACL config saves whatever the gateway's origin; an older gateway on
+another origin refuses them at the CORS preflight, so upgrade the gateways
+before the UI (see `docs/upgrade.md`).

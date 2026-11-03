@@ -3,6 +3,16 @@
 Manual steps required when upgrading an existing deployment. The packaging
 does not perform these automatically.
 
+## Web UI compresses ACL saves to gateways on other origins
+
+The web UI now gzips an ACL config save for a gateway on another origin
+too, as it already did for its own origin, and such a gateway must allow
+it: from this version on it lets its trusted origins send
+`Content-Encoding`. Upgrade every gateway that a standalone UI or the UI's
+Gateway drawer reaches before the UI itself, or the browser refuses every
+ACL save to an older gateway at its CORS preflight. The UI then shows a
+network error with no HTTP status.
+
 ## Gateway HTTP checks a call before reading its body
 
 The gateway's HTTP surface now authenticates and authorizes a call from its
