@@ -20,14 +20,16 @@ use super::addr::{BlockAddr, Context, Header};
 /// rounded up to a power of two; the C-facing methods run the C routines they
 /// name.
 ///
-/// [`Owner::free`], [`Owner::free_in`] and [`Owner::fini_header`] must not
-/// panic: the builder calls them from destructors, also while unwinding.
-/// [`Owner::init_header`] must not panic either: the root block is not yet
-/// guarded when it runs.
+/// [`Owner::free`], [`Owner::free_in`], [`Owner::fini_header`] and
+/// [`Owner::fini_object_header`] must not panic: the builder calls them from
+/// destructors, also while unwinding. [`Owner::init_header`] and
+/// [`Owner::init_object_header`] must not panic either: the root block is not
+/// yet guarded when they run.
 ///
-/// [`Owner::init_header`] must leave a live C memory context in the header,
-/// over memory of this owner, as `cp_module_init` does: an embedded C object
-/// opens its own context under it.
+/// [`Owner::init_header`] and [`Owner::init_object_header`] must leave a live
+/// C memory context in the header, over memory of this owner, as
+/// `cp_module_init` and `cp_object_init` do: an embedded C object opens its
+/// own context under it. A refused initialisation leaves nothing to finalise.
 ///
 /// The builder never makes two calls on one header at once, though the owner
 /// may be shared, because the header's memory context and registries are not
@@ -86,6 +88,24 @@ pub unsafe trait Owner: 'static {
     /// The header must have been initialised by this owner and be no longer
     /// referenced.
     unsafe fn fini_header(&self, header: Header);
+
+    /// Initialises the C object header of an object of a type and name, as
+    /// `cp_object_init` does; the type must be one the dataplane loaded.
+    ///
+    /// # Safety
+    ///
+    /// As for [`Owner::init_header`].
+    unsafe fn init_object_header(&self, header: Header, ty: &str, name: &str) -> Result<(), Self::Error>;
+
+    /// Releases what [`Owner::init_object_header`] set up, as
+    /// `cp_object_fini` does.
+    ///
+    /// # Safety
+    ///
+    /// The header must have been initialised by
+    /// [`Owner::init_object_header`] of this owner and be no longer
+    /// referenced.
+    unsafe fn fini_object_header(&self, header: Header);
 
     /// Registers a counter of the given number of values (C size) with the
     /// module's registry and returns its id.

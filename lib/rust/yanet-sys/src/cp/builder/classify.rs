@@ -13,7 +13,7 @@ use core::{
     mem::size_of,
 };
 
-use super::{Build, BuildError, MemoryContext, Owned, Owner, Refusal, Scope, refused};
+use super::{Build, BuildError, Kind, MemoryContext, Owned, Owner, Refusal, Scope, refused};
 use crate::{
     bindings,
     classify::{Attribute, Joint, RuleMap, RuleTable},
@@ -81,7 +81,7 @@ fn same_ruleset(sizes: &[usize]) -> Result<(), Refusal> {
     }
 }
 
-impl<'b, W: Owner, E: From<BuildError<W::Error>>> Scope<'b, '_, W, E> {
+impl<'b, W: Owner, E: From<BuildError<W::Error>>, K: Kind> Scope<'b, '_, W, E, K> {
     /// Compiles the classifier of an attribute over a ruleset, one view of
     /// the attribute per rule, and returns it with the stage of its classes.
     ///

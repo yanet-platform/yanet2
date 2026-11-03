@@ -7,8 +7,8 @@ use core::mem::offset_of;
 
 use crate::bindings;
 
-/// Address of a module header, which is the start of the root block of a
-/// configuration.
+/// Address of a module or object header, which is the start of the root block
+/// of a configuration.
 ///
 /// A header is not a memory context, so it is refused where a context is
 /// expected:
@@ -38,7 +38,7 @@ use crate::bindings;
 #[repr(transparent)]
 pub struct Header(usize);
 
-/// Address of a C memory context, the one a module header embeds.
+/// Address of a C memory context, the one a module or object header embeds.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(transparent)]
 pub struct Context(usize);
@@ -61,7 +61,8 @@ impl Header {
         Self(block.0)
     }
 
-    /// The memory context the header embeds.
+    /// The memory context the header embeds, at the same offset in a module
+    /// and an object header, as both start with the C entity base.
     pub fn context(self) -> Context {
         Context(self.0 + offset_of!(bindings::cp_module, entity.memory_context))
     }
@@ -94,3 +95,8 @@ impl BlockAddr {
         self.0
     }
 }
+
+// A module and an object header embed their memory context at one offset.
+const _: () = assert!(
+    offset_of!(bindings::cp_module, entity.memory_context) == offset_of!(bindings::cp_object, entity.memory_context)
+);

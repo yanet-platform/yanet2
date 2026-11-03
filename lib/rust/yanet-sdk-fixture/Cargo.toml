@@ -23,7 +23,8 @@ yanet-sdk-plugin = { path = "../yanet-sdk-plugin", optional = true }
 # `cargo build --profile plugin -p yanet-sdk-fixture --features plugin --examples`.
 plugin = ["dep:yanet-sdk-plugin"]
 
-# The plugins, which the dataplane loader maps to module names by file name.
+# The plugins, which the dataplane loader maps to module names by file name;
+# an object type plugin is looked up by its type name.
 [[example]]
 name = "fixture_dp"
 crate-type = ["cdylib"]
@@ -41,5 +42,10 @@ required-features = ["plugin"]
 
 [[example]]
 name = "assign_dp"
+crate-type = ["cdylib"]
+required-features = ["plugin"]
+
+[[example]]
+name = "fixture_state_dp"
 crate-type = ["cdylib"]
 required-features = ["plugin"]

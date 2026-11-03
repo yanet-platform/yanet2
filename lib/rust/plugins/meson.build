@@ -1,12 +1,19 @@
 # The dataplane plugins of the fixture modules, alone in this directory.
 #
 # The dataplane loader maps each lib<name>_dp.so of a directory it scans to the
-# module <name>, so the Go tests are handed this directory and nothing else
-# lives in it. The plugins build under their own profile: a no_std plugin
-# cannot unwind, which the api archive needs.
+# module <name>, and finds an object type of a loaded plugin by its type name,
+# so the Go tests are handed this directory and nothing else lives in it. The
+# plugins build under their own profile: a no_std plugin cannot unwind, which
+# the api archive needs.
 rust_sdk_fixture_plugins = custom_target(
   'rust-sdk-fixture-plugins',
-  output: ['libfixture_dp.so', 'libtally_dp.so', 'libfib_dp.so', 'libassign_dp.so'],
+  output: [
+    'libfixture_dp.so',
+    'libtally_dp.so',
+    'libfib_dp.so',
+    'libassign_dp.so',
+    'libfixture_state_dp.so',
+  ],
   command: [
     'sh', '-c',
     'set -eu; "$1" build --profile plugin --locked --manifest-path "$2" ' +

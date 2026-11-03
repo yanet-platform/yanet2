@@ -24,7 +24,7 @@ pub enum Call {
     Alloc,
     /// Registering a counter or linking a device.
     Registration,
-    /// Initialising the header of a configuration.
+    /// Initialising the header of a configuration or an object.
     Header,
 }
 
@@ -43,12 +43,23 @@ impl fmt::Display for TestError {
 
 impl Error for TestError {}
 
+/// Headers an owner initialised and has not finalised, by kind.
+#[derive(Debug, PartialEq, Eq)]
+pub struct LiveHeaders {
+    /// Module configuration headers.
+    pub modules: usize,
+    /// Object headers.
+    pub objects: usize,
+}
+
 /// Owner whose every block is a block of the arena.
 pub struct TestOwner {
     arena: &'static BlockArena,
     /// Blocks handed out and not yet returned, with their size and context.
     blocks: RefCell<Vec<(BlockAddr, usize, Option<Context>)>>,
-    headers: RefCell<Vec<Header>>,
+    /// Headers initialised and not yet finalised, with whether each is an
+    /// object's.
+    headers: RefCell<Vec<(Header, bool)>>,
     registered: Cell<u64>,
     /// Size of each counter registered, in the order of the registrations.
     counter_sizes: RefCell<Vec<u64>>,
@@ -95,6 +106,21 @@ impl TestOwner {
         self.blocks.borrow().len()
     }
 
+    /// Headers initialised and not yet finalised, by kind.
+    pub fn live_headers(&self) -> LiveHeaders {
+        let headers = self.headers.borrow();
+        let objects = headers.iter().filter(|header| header.1).count();
+        LiveHeaders {
+            modules: headers.len() - objects,
+            objects,
+        }
+    }
+
+    /// What the builder did wrong so far, in the order found.
+    pub fn violations(&self) -> Vec<&'static str> {
+        self.violations.borrow().clone()
+    }
+
     /// Asserts that no block or header is left and the builder broke no rule.
     pub fn assert_released(&self) {
         let left = (self.live_blocks(), self.headers.borrow().len());
@@ -131,6 +157,33 @@ impl TestOwner {
             self.violations
                 .borrow_mut()
                 .push("a block returned that is not live, or to another context or size");
+        }
+    }
+
+    fn init(&self, header: Header, object: bool) -> Result<(), TestError> {
+        (!self.fails(Call::Header))
+            .then(|| self.headers.borrow_mut().push((header, object)))
+            .ok_or(TestError::Header)
+    }
+
+    /// Finalises a header of the kind, recording a header unknown or of the
+    /// other kind, or one whose context has live blocks.
+    fn fini(&self, header: Header, object: bool) {
+        let mut headers = self.headers.borrow_mut();
+        let known = headers
+            .iter()
+            .position(|&known| known == (header, object))
+            .map(|idx| headers.swap_remove(idx));
+        drop(headers);
+        let live = self
+            .blocks
+            .borrow()
+            .iter()
+            .any(|block| block.2 == Some(header.context()));
+        if known.is_none() || live {
+            self.violations
+                .borrow_mut()
+                .push("a header finalised that is unknown, of the other kind or has live blocks");
         }
     }
 
@@ -173,28 +226,19 @@ unsafe impl Owner for TestOwner {
     }
 
     unsafe fn init_header(&self, header: Header, _module: &str, _name: &str) -> Result<(), TestError> {
-        (!self.fails(Call::Header))
-            .then(|| self.headers.borrow_mut().push(header))
-            .ok_or(TestError::Header)
+        self.init(header, false)
     }
 
     unsafe fn fini_header(&self, header: Header) {
-        let mut headers = self.headers.borrow_mut();
-        let known = headers
-            .iter()
-            .position(|&known| known == header)
-            .map(|idx| headers.swap_remove(idx));
-        drop(headers);
-        let live = self
-            .blocks
-            .borrow()
-            .iter()
-            .any(|block| block.2 == Some(header.context()));
-        if known.is_none() || live {
-            self.violations
-                .borrow_mut()
-                .push("a header finalised that is unknown or has live blocks");
-        }
+        self.fini(header, false);
+    }
+
+    unsafe fn init_object_header(&self, header: Header, _ty: &str, _name: &str) -> Result<(), TestError> {
+        self.init(header, true)
+    }
+
+    unsafe fn fini_object_header(&self, header: Header) {
+        self.fini(header, true);
     }
 
     unsafe fn register_counter(&self, _header: Header, _name: &str, size: u64) -> Result<u64, TestError> {

@@ -2,7 +2,7 @@
 
 // Package cfixture is the Go binding of the SDK fixture api, the control-plane
 // side of the fixture, tally, fib and assign modules that the SDK's tests run
-// packets through.
+// packets through, and of the state object type.
 package cfixture
 
 /*
@@ -52,6 +52,35 @@ yanet_cp_yanet_sdk_fixture_api__fib_build(
 int
 yanet_cp_yanet_sdk_fixture_api__fib_free(
 	struct cp_module *module, yanet_error **err
+);
+
+struct cp_object *
+yanet_cp_yanet_sdk_fixture_api__state_build(
+	struct agent *agent, const char *name, uint64_t seed, uint64_t count,
+	uint64_t fault, yanet_error **err
+);
+
+int
+yanet_cp_yanet_sdk_fixture_api__state_slot(
+	struct agent *agent, struct cp_object *state, uint64_t index,
+	uint64_t *out, yanet_error **err
+);
+
+int
+yanet_cp_yanet_sdk_fixture_api__state_add(
+	struct agent *agent, struct cp_object *state, uint64_t index,
+	uint64_t delta, uint64_t *out, yanet_error **err
+);
+
+int
+yanet_cp_yanet_sdk_fixture_api__state_seed(
+	struct agent *agent, struct cp_object *state, uint64_t fault,
+	uint64_t *out, yanet_error **err
+);
+
+int
+yanet_cp_yanet_sdk_fixture_api__state_free(
+	struct cp_object *object, yanet_error **err
 );
 
 // cgo cannot call the variadic yanet_error_add.
@@ -439,5 +468,117 @@ func NewFibConfig(agent *ffi.Agent, name string, fib Fib) (*ModuleConfig, error)
 func freeFib(ptr unsafe.Pointer) (int, unsafe.Pointer, error) {
 	var cErr *C.yanet_error
 	rc, errno := C.yanet_cp_yanet_sdk_fixture_api__fib_free((*C.struct_cp_module)(ptr), &cErr)
+	return int(rc), unsafe.Pointer(cErr), errno
+}
+
+// StateType is the object type of a state object, as its plugin registers it
+// with the dataplane.
+const StateType = "fixture_state"
+
+// StateObject is a state object built by the api in the memory of an agent:
+// atomic slots that outlive the module configurations.
+type StateObject struct {
+	ptr   ffi.ObjectConfig
+	agent *ffi.Agent
+}
+
+// NewStateObject builds a state object named name of count slots, slot n
+// holding seed + n, wrapping, in the memory of the agent; the build fails
+// after it has allocated the slots as fault says.
+func NewStateObject(agent *ffi.Agent, name string, seed, count uint64, fault Fault) (*StateObject, error) {
+	if err := refuseNUL(name); err != nil {
+		return nil, fmt.Errorf("failed to build state object: %w", err)
+	}
+	cName := C.CString(name)
+	defer C.free(unsafe.Pointer(cName))
+
+	var cErr *C.yanet_error
+	ptr := C.yanet_cp_yanet_sdk_fixture_api__state_build(
+		(*C.struct_agent)(agent.AsRawPtr()),
+		cName,
+		C.uint64_t(seed),
+		C.uint64_t(count),
+		C.uint64_t(fault),
+		&cErr,
+	)
+	if ptr == nil {
+		return nil, fmt.Errorf("failed to build state object: %w", cerrors.FromC(unsafe.Pointer(cErr)))
+	}
+
+	return &StateObject{ptr: ffi.NewObjectConfig(unsafe.Pointer(ptr)), agent: agent}, nil
+}
+
+// AsFFIObject returns the handle to publish the object with.
+func (m *StateObject) AsFFIObject() ffi.ObjectConfig {
+	return m.ptr
+}
+
+// Slot returns the value of the slot at index, read through the agent the
+// object was built over.
+func (m *StateObject) Slot(index uint64) (uint64, error) {
+	var value C.uint64_t
+	var cErr *C.yanet_error
+	rc := C.yanet_cp_yanet_sdk_fixture_api__state_slot(
+		(*C.struct_agent)(m.agent.AsRawPtr()),
+		(*C.struct_cp_object)(m.ptr.AsRawPtr()),
+		C.uint64_t(index),
+		&value,
+		&cErr,
+	)
+	if rc != 0 {
+		return 0, fmt.Errorf("failed to read slot %d: %w", index, cerrors.FromC(unsafe.Pointer(cErr)))
+	}
+	return uint64(value), nil
+}
+
+// Add adds delta to the slot at index and returns the sum, wrapping.
+func (m *StateObject) Add(index, delta uint64) (uint64, error) {
+	var value C.uint64_t
+	var cErr *C.yanet_error
+	rc := C.yanet_cp_yanet_sdk_fixture_api__state_add(
+		(*C.struct_agent)(m.agent.AsRawPtr()),
+		(*C.struct_cp_object)(m.ptr.AsRawPtr()),
+		C.uint64_t(index),
+		C.uint64_t(delta),
+		&value,
+		&cErr,
+	)
+	if rc != 0 {
+		return 0, fmt.Errorf("failed to add to slot %d: %w", index, cerrors.FromC(unsafe.Pointer(cErr)))
+	}
+	return uint64(value), nil
+}
+
+// Seed writes the seed of the object at out, unless fault fails the query,
+// which then leaves out as it was.
+//
+// A nil out is passed on as it is, and the api refuses it.
+func (m *StateObject) Seed(fault Fault, out *uint64) error {
+	var cErr *C.yanet_error
+	rc := C.yanet_cp_yanet_sdk_fixture_api__state_seed(
+		(*C.struct_agent)(m.agent.AsRawPtr()),
+		(*C.struct_cp_object)(m.ptr.AsRawPtr()),
+		C.uint64_t(fault),
+		(*C.uint64_t)(unsafe.Pointer(out)),
+		&cErr,
+	)
+	if rc != 0 {
+		return fmt.Errorf("failed to read the seed: %w", cerrors.FromC(unsafe.Pointer(cErr)))
+	}
+	return nil
+}
+
+// Free destroys the object, or reports ffi.ErrStillReferenced while a live
+// generation still holds it.
+//
+// A refused free keeps the handle, so that it can be retried once no
+// generation holds the object. Safe to call multiple times.
+func (m *StateObject) Free() error {
+	return m.ptr.Free(freeState)
+}
+
+func freeState(ptr unsafe.Pointer) (int, unsafe.Pointer, error) {
+	var cErr *C.yanet_error
+	rc, errno := C.yanet_cp_yanet_sdk_fixture_api__state_free((*C.struct_cp_object)(ptr), &cErr)
 	return int(rc), unsafe.Pointer(cErr), errno
 }

@@ -5,15 +5,18 @@
 //! its configuration's mode word selects what it does with a batch. [`Tally`]
 //! has a prepared value made at commit, and counts. [`Fib`] forwards by a
 //! route FIB. [`assign::Assign`] passes or drops by the first rule a packet
-//! matches, through the classify bindings.
+//! matches, through the classify bindings. [`State`] is an object type: state
+//! that outlives the configurations, changed by the control plane.
 
 #![no_std]
 #![forbid(unsafe_code)]
 
 pub mod assign;
 
+use core::sync::atomic::AtomicU64;
+
 use yanet_sdk::{
-    Batch, CommitCx, Counter, CounterRef, Cx, Device, Lpm4, Lpm6, Module, ShmLayout, ShmSlice, Traffic, Verdict,
+    Batch, CommitCx, Counter, CounterRef, Cx, Device, Lpm4, Lpm6, Module, Object, ShmLayout, ShmSlice, Traffic, Verdict,
 };
 // The plugin examples use it.
 #[cfg(feature = "plugin")]
@@ -333,4 +336,22 @@ fn route_indexes<'id>(cx: &Cx<'id, Fib>, fib: &'id RouteFib, frame: &[u8]) -> Op
         .as_slice(cx)
         .get(usize::try_from(list.start).ok()?..)?
         .get(..usize::try_from(list.count).ok()?)
+}
+
+/// The configuration of [`State`]: the seed it was built from and a slot per
+/// item, which the control plane changes while the object is published.
+#[derive(ShmLayout)]
+#[repr(C)]
+pub struct StateConfig {
+    pub seed: u64,
+    pub slots: ShmSlice<AtomicU64>,
+}
+
+/// An object of atomic slots, the shape of state kept across configuration
+/// updates.
+pub struct State;
+
+impl Object for State {
+    const TYPE: &'static str = "fixture_state";
+    type Config = StateConfig;
 }
