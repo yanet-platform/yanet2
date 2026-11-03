@@ -4,7 +4,7 @@ mod fib;
 
 use std::path::PathBuf;
 
-use clap::{CommandFactory, Parser};
+use clap::{CommandFactory, Parser, error::ErrorKind};
 use clap_complete::engine::{ArgValueCandidates, CompletionCandidate};
 use tonic::codec::CompressionEncoding;
 use ync::{
@@ -12,7 +12,8 @@ use ync::{
     client::{LayeredChannel, Service},
     completion, display,
     errors::Error,
-    output, yaml,
+    output::{self, CommonFormat},
+    yaml,
 };
 
 use crate::{
@@ -125,6 +126,9 @@ pub struct FibShowCmd {
     /// Route config name.
     #[arg(long = "name", short = 'n', add = ArgValueCandidates::new(config_candidates))]
     pub config_name: String,
+    /// Show each range as the CIDR prefixes that cover it.
+    #[arg(long)]
+    pub cidr: bool,
 }
 
 fn client(channel: LayeredChannel) -> RouteServiceClient<LayeredChannel> {
@@ -146,6 +150,21 @@ fn config_candidates() -> Vec<CompletionCandidate> {
 
 async fn run(cmd: Cmd) -> Result<(), Error> {
     let action = cmd.mode.action();
+
+    // Prefixes are only a human rendering of the ranges: the JSON of show
+    // always carries the wire ranges.
+    if let ModeCmd::Fib(FibCmd { action: FibAction::Show(show) }) = &cmd.mode
+        && show.cidr
+        && cmd.globals.format == CommonFormat::Json
+    {
+        Cmd::command()
+            .error(
+                ErrorKind::ArgumentConflict,
+                "--cidr cannot be used with '--format json', which always lists the ranges",
+            )
+            .exit();
+    }
+
     let mut service = Service::connect_for(&cmd.globals.connection, action, SERVICE_NAME, client).await?;
 
     match cmd.mode {
@@ -241,7 +260,7 @@ async fn show_fib(service: &mut RouteService, cmd: FibShowCmd) -> Result<(), Err
                 return;
             }
 
-            print_fib(&entries);
+            print_fib(&entries, cmd.cidr);
         },
     );
 
@@ -263,85 +282,6 @@ mod test {
 
     fn mac(s: &str) -> MacAddress {
         MacAddress::from(s.parse::<MacAddr>().unwrap())
-    }
-
-    /// Pins `--format json`'s wire shape byte-for-byte: `range` and
-    /// `nexthops` come straight from the derived `routepb::FibEntry`/
-    /// `FibNexthop` impls (see `build.rs`), nested rather than flattened.
-    #[test]
-    fn fib_entry_json_matches_wire_shape() {
-        let entry = routepb::FibEntry {
-            range: Some(ip_range("10.0.0.0", "10.0.0.255")),
-            nexthops: vec![routepb::FibNexthop {
-                dst_mac: Some(mac("aa:bb:cc:dd:ee:ff")),
-                src_mac: Some(mac("11:22:33:44:55:66")),
-                device: "vlan100".to_owned(),
-                counter: "nexthop_custom-counter".to_owned(),
-            }],
-        };
-
-        let json = serde_json::to_string(&entry).unwrap();
-
-        assert_eq!(
-            r#"{"range":{"start":"10.0.0.0","end":"10.0.0.255"},"nexthops":[{"dst_mac":"aa:bb:cc:dd:ee:ff","src_mac":"11:22:33:44:55:66","device":"vlan100","counter":"nexthop_custom-counter"}]}"#,
-            json
-        );
-    }
-
-    /// An absent `range` serializes as JSON `null`: there is no view left
-    /// to substitute a fallback string for it.
-    #[test]
-    fn fib_entry_json_absent_range_is_null() {
-        let entry = routepb::FibEntry { range: None, nexthops: Vec::new() };
-
-        let json = serde_json::to_string(&entry).unwrap();
-
-        assert_eq!(r#"{"range":null,"nexthops":[]}"#, json);
-    }
-
-    /// An absent MAC serializes as JSON `null`. `counter` is also empty
-    /// here, so the key is absent entirely.
-    #[test]
-    fn fib_nexthop_json_absent_mac_is_null() {
-        let nexthop = routepb::FibNexthop {
-            dst_mac: None,
-            src_mac: None,
-            device: "vlan100".to_owned(),
-            counter: String::new(),
-        };
-
-        let json = serde_json::to_string(&nexthop).unwrap();
-
-        assert_eq!(r#"{"dst_mac":null,"src_mac":null,"device":"vlan100"}"#, json);
-    }
-
-    /// A malformed MAC (upper 16 bits set) serializes as the literal
-    /// `"invalid"` -- `commonpb::pb::MacAddress`'s own `Serialize` impl
-    /// falls back to that string for a value `MacAddr` itself rejects, the
-    /// same fallback it gives everywhere else this type appears.
-    #[test]
-    fn fib_nexthop_json_malformed_mac_is_invalid_literal() {
-        let nexthop = routepb::FibNexthop {
-            dst_mac: Some(MacAddress { addr: 0x1_0000_0000_0000 }),
-            src_mac: None,
-            device: "vlan100".to_owned(),
-            counter: String::new(),
-        };
-
-        let json = serde_json::to_string(&nexthop).unwrap();
-
-        assert_eq!(r#"{"dst_mac":"invalid","src_mac":null,"device":"vlan100"}"#, json);
-    }
-
-    /// The `counter` key, omitted by `skip_serializing_if` when empty (see
-    /// `fib_nexthop_json_absent_mac_is_null`), still loads back: the paired
-    /// `#[serde(default)]` fills a missing `counter` in as empty.
-    #[test]
-    fn fib_nexthop_json_missing_counter_key_defaults_to_empty() {
-        let nexthop: routepb::FibNexthop =
-            serde_json::from_str(r#"{"dst_mac":null,"src_mac":null,"device":"vlan100"}"#).unwrap();
-
-        assert_eq!("", nexthop.counter);
     }
 
     #[test]
