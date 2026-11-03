@@ -404,22 +404,21 @@ func requireUntagged(t *testing.T, err error) {
 // each smaller pool.
 const largePool = 11
 
-// smallStock is how many blocks of each pool below the first replayed pool a
-// held build gives back, more than a build of the tests here ever takes at
-// once.
+// smallStock is how many blocks of each small pool a held build gives back.
+//
+// It is more than a build of the tests here ever takes at once.
 const smallStock = 256
 
 // heldFill is the byte a held build fills the blocks it gives back with, so
 // a request served from one finds bytes it did not write rather than zeros.
 const heldFill = 0xa5
 
-// heldBuild runs a build with every free block of the agent held but the
-// small-block stock of each pool below the first replayed pool and one block
-// of each given large pool, all filled with the held byte, and returns how
-// many blocks the allocator handed out of the replayed pools and the build
-// error.
+// heldBuild runs a build with every free block held except the blocks given
+// back, and returns the large-pool allocations and the build error.
 //
-// A build that succeeds is freed. Either way the agent must get back all the
+// The blocks given back are the small-block stock of each pool below the
+// first replayed pool and one block of each given large pool, all filled with
+// the held byte. A build that succeeds is freed. Either way the agent must get back all the
 // free memory it had.
 func heldBuild(
 	t *testing.T,

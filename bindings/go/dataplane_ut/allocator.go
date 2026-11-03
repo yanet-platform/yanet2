@@ -120,9 +120,10 @@ func AllocatorPoolSize(pool int) uint64 {
 	return uint64(C.MEMORY_BLOCK_ALLOCATOR_MIN_SIZE) << uint(pool)
 }
 
-// AllocatorPoolOf returns the pool a request of size bytes is served from,
-// the red zones an ASan build adds on each side included, or AllocatorPools
-// when the request is larger than the largest block.
+// AllocatorPoolOf returns the pool a request of size bytes is served from.
+//
+// The size includes the red zones an ASan build adds on each side; a request
+// larger than the largest block returns AllocatorPools.
 func AllocatorPoolOf(size uint64) int {
 	size += 2 * uint64(C.ASAN_RED_ZONE)
 	for pool := range AllocatorPools {
@@ -172,11 +173,7 @@ func HoldAllocator(agent *ffi.Agent) (*AllocatorHold, error) {
 // A block is cut from a larger held block when the pool holds none, as the
 // allocator splits one. When the held blocks run out part way, the blocks
 // handed back so far stay with the allocator, and the error says how many.
-// A released hold gives nothing back.
 func (m *AllocatorHold) Give(pool int, count int, fill byte) error {
-	if m.hold == nil {
-		return errors.New("the allocator hold is released")
-	}
 	if pool < 0 || pool >= AllocatorPools || count < 0 {
 		return fmt.Errorf("invalid allocator pool %d or block count %d", pool, count)
 	}
@@ -187,12 +184,9 @@ func (m *AllocatorHold) Give(pool int, count int, fill byte) error {
 	return nil
 }
 
-// Release hands every block still held back to the allocator; a second
-// release does nothing.
+// Release hands every block still held back to the allocator; the hold is
+// not used afterwards.
 func (m *AllocatorHold) Release() {
-	if m.hold == nil {
-		return
-	}
 	C.dataplane_ut_alloc_release(m.hold)
 	m.hold = nil
 }
