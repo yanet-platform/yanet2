@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - '**/*.go'
+      - '**/*.proto'
       - 'lint/style/**'
       - '.golangci.yml'
       - 'ci/go-version'
@@ -15,6 +16,7 @@ on:
   pull_request:
     paths:
       - '**/*.go'
+      - '**/*.proto'
       - 'lint/style/**'
       - '.golangci.yml'
       - 'ci/go-version'
@@ -75,6 +77,11 @@ jobs:
 
       - name: Generate protobuf Go sources
         run: make proto-go
+
+      # External clients import the generated API packages, so they must
+      # build without a C toolchain.
+      - name: Build protobuf packages without cgo
+        run: CGO_ENABLED=0 go build $(git ls-files '*.proto' | xargs -n1 dirname | sort -u | sed 's|^|./|')
 
       # CGO test packages compile production translation units whose headers
       # reach DPDK, so typechecking needs a configured (not built) tree.
