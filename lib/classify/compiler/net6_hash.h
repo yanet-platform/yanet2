@@ -442,13 +442,17 @@ classify_net6_hash_compile(
 	struct classify_attr_net6_hash *attr,
 	struct classifier *cls
 ) {
+	// The outputs start empty, so a failure of the scratch creation or
+	// of any stage of the shared driver before the commit still
+	// returns the zeroed attribute and stage the contract promises.
+	memset(attr, 0, sizeof(*attr));
+	memset(cls, 0, sizeof(*cls));
+
 	struct classify_compile_net6_hash *compile =
 		classify_compile_net6_hash_create(
 			memory_context, rules, rule_count, get_addrs, name
 		);
 	if (compile == NULL) {
-		memset(attr, 0, sizeof(*attr));
-		memset(cls, 0, sizeof(*cls));
 		return -1;
 	}
 
