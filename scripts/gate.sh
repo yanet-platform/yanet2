@@ -61,19 +61,6 @@ present() { matching "$1" | while IFS= read -r f; do [ -f "$f" ] && printf '%s\n
 
 log=$(mktemp)
 trap 'rm -f "$log"' EXIT
-
-# The Rust SDK fixture tests build only under their tag, which the configured
-# build/ supports when it defines the fixtures target, as make test decides.
-fixtures=0
-grep -qs '^build sdk-rust-fixtures:' build/build.ninja && fixtures=1
-
-# Changes the SDK fixture workflow runs on: the SDK and every layer its fixture
-# tests link or load.
-fixture_paths='(^lib/rust/|^(api|common|lib|devices/plain)/.*\.[ch]$|^bindings/go/(cerrors|dataplane_ut)/|^common/go/dataplane/|^controlplane/ffi/|^devices/plain/bindings/go/cplain/|(^|/)meson\.build$|^meson_options\.txt$|^Makefile$|^scripts/go_c(deps|go_flags)\.py$|^\.golangci\.yml$|^go\.(mod|sum)$|^\.github/workflows/rust-sdk-ut\.yml$)'
-
-# The pinned Rust toolchain of the SDK workflow, which the SDK's minimum
-# version follows; a newer local default could accept what CI refuses.
-sdk_stable=$(sed -n 's/^ *- uses: dtolnay\/rust-toolchain@[0-9a-f]* # \([0-9][0-9.]*\)$/\1/p' .github/workflows/rust-sdk.yml 2>/dev/null | head -n 1)
 failed=0
 passed=()
 skipped=()
@@ -139,17 +126,10 @@ gate_c() {
 }
 
 gate_go() {
-	local files pkgs cppflags proto tags=()
+	local files pkgs cppflags proto
 	if [ ! -f subprojects/dpdk/meson.build ] || [ ! -d build ]; then
 		fail go "cgo packages typecheck against the DPDK sources and a configured build/; run 'git submodule update --init && meson setup build'"
 		return 1
-	fi
-	# Without the fixture tag the fixture package is invisible to go list and
-	# go test. Vet and the repository lint stay untagged, as in CI.
-	if [ "$fixtures" = 1 ]; then
-		tags=(-tags=sdk_rust_fixtures)
-	elif matching "$fixture_paths" >/dev/null; then
-		skipped+=("sdk fixture Go tests (build/ without -Dsdk_rust_fixtures=enabled)")
 	fi
 	proto=$(git ls-files '*.proto' | head -n 1)
 	if matching '\.proto$' >/dev/null || [ ! -f "${proto%.proto}.pb.go" ]; then
@@ -168,18 +148,13 @@ gate_go() {
 	# package. The QEMU suite is left to make test-functional.
 	if matching '(^go\.(mod|sum)$|\.proto$|^scripts/go_c(deps|go_flags)\.py$)' >/dev/null || matching '(\.[ch]$|(^|/)meson\.build$|^subprojects/)' | grep -qv '^modules/'; then
 		pkgs=./...
-		[ "$list" = 1 ] || pkgs=$(go list "${tags[@]}" ./... | grep -v '/tests/functional/main$')
+		[ "$list" = 1 ] || pkgs=$(go list ./... | grep -v '/tests/functional/main$')
 	else
 		pkgs=$({
 			matching '\.go$' | xargs -r -n 1 dirname | sort -u | while IFS= read -r d; do
-				go list "${tags[@]}" "./$d" >/dev/null 2>&1 && echo "./$d"
+				go list "./$d" >/dev/null 2>&1 && echo "./$d"
 			done
 			matching '^modules/[^/]+/.*(\.[ch]|meson\.build)$' | cut -d / -f 1-2 | sed 's|^|./|; s|$|/...|'
-			# The fixture tests cover the SDK and the layers they link,
-			# as the SDK fixture workflow runs them.
-			if [ ${#tags[@]} -ne 0 ] && matching "$fixture_paths" >/dev/null; then
-				echo ./lib/rust/yanet-sdk-fixture-api/bindings/go/cfixture
-			fi
 		} | grep -v '^\./tests/functional/main$' | sort -u)
 	fi
 	[ -n "$pkgs" ] || return 0
@@ -187,7 +162,7 @@ gate_go() {
 	# A package that links cgo needs this checkout's own build/: preparing it
 	# writes the native archives and the cgo dependency sources the link uses.
 	# shellcheck disable=SC2086
-	if [ "$list" = 1 ] || [ -n "$(go list "${tags[@]}" -deps -test -f '{{if .CgoFiles}}{{.ImportPath}}{{end}}' $pkgs 2>/dev/null | head -n 1)" ]; then
+	if [ "$list" = 1 ] || [ -n "$(go list -deps -test -f '{{if .CgoFiles}}{{.ImportPath}}{{end}}' $pkgs 2>/dev/null | head -n 1)" ]; then
 		if [ -L build ]; then
 			fail go-test "packages that link cgo need this checkout's own build/, not a link to another one; run 'meson setup build' (AGENTS.md, Worktrees)"
 			return 1
@@ -200,14 +175,9 @@ gate_go() {
 	fi
 	cppflags=$(cat build/yanet_cgo_cppflags 2>/dev/null)
 	# shellcheck disable=SC2086
-	step go-test env CGO_CPPFLAGS="${CGO_CPPFLAGS:-} $cppflags" go test "${tags[@]}" -count=1 $pkgs || return 1
+	step go-test env CGO_CPPFLAGS="${CGO_CPPFLAGS:-} $cppflags" go test -count=1 $pkgs || return 1
 	if command -v golangci-lint >/dev/null; then
-		step golangci-lint golangci-lint run ./... || return 1
-		# The fixture package type-checks only against the built header,
-		# as the Rust SDK fixture job lints it.
-		if [ ${#tags[@]} -ne 0 ]; then
-			step golangci-lint-sdk env CGO_CPPFLAGS="${CGO_CPPFLAGS:-} $cppflags" golangci-lint run --build-tags sdk_rust_fixtures ./lib/rust/...
-		fi
+		step golangci-lint golangci-lint run ./...
 	else
 		skipped+=("golangci-lint (not installed)")
 	fi
@@ -219,63 +189,6 @@ gate_rust() {
 	step cargo-fmt cargo "+$toolchain" fmt --all -- --check || return 1
 	step clippy cargo clippy --workspace --all-targets --locked -- -D warnings || return 1
 	step cargo-test cargo test --workspace --locked
-}
-
-# The Rust SDK workspace (lib/rust), as the Rust SDK workflow checks it. Its
-# cargo config, which points bindgen at build/, is found from the working
-# directory, so every step runs there; Miri and the sanitizer runs are left
-# to CI.
-gate_sdk() {
-	local toolchain target stable=()
-	if [ ! -d build ] || [ -L build ]; then
-		fail sdk "the SDK's bindings read this checkout's own build/; run 'meson setup build' (AGENTS.md, Worktrees)"
-		return 1
-	fi
-	toolchain=$(sed -n 's/^ *toolchain: *\(nightly-[0-9-]*\).*/\1/p' .github/workflows/rust-sdk.yml | head -n 1)
-	if [ -n "$sdk_stable" ] && rustup run "$sdk_stable" rustc --version >/dev/null 2>&1; then
-		stable=("+$sdk_stable")
-	else
-		skipped+=("sdk on Rust ${sdk_stable:-?} (not installed; ran the default toolchain)")
-	fi
-	step sdk-fmt env -C lib/rust cargo "+$toolchain" fmt -- --check || return 1
-	step sdk-clippy env -C lib/rust cargo "${stable[@]}" clippy --workspace --all-targets --locked -- -D warnings || return 1
-	step sdk-clippy-plugin env -C lib/rust cargo "${stable[@]}" clippy --profile plugin -p yanet-sdk-fixture --features plugin --examples --locked -- -D warnings || return 1
-	target="$(uname -m)-unknown-none"
-	if rustup target list --installed 2>/dev/null | grep -qx "$target"; then
-		step sdk-no-std env -C lib/rust cargo "${stable[@]}" check --locked --target "$target" -p yanet-shm -p yanet-sys -p yanet-sdk -p yanet-sdk-plugin -p yanet-packet || return 1
-	else
-		skipped+=("sdk-no-std ($target not installed)")
-	fi
-	step sdk-test env -C lib/rust cargo "${stable[@]}" test --workspace --locked || return 1
-	# The packet crate is meant to build on its own: a copy outside the
-	# workspace has no workspace metadata or path dependency to lean on, as
-	# the SDK workflow checks it.
-	if matching '^lib/rust/yanet-packet/' >/dev/null; then
-		sdk_packet "$target" "${stable[@]}" || return 1
-	fi
-	skipped+=("sdk miri and sanitizers (CI)")
-}
-
-# Builds and tests a copy of the packet crate outside the workspace, then
-# removes the copy.
-sdk_packet() {
-	local target=$1 copy rc=0
-	shift
-	copy=$(mktemp -d) && [ -n "$copy" ] && [ -d "$copy" ] || {
-		fail sdk-packet "could not make a temporary directory for the packet crate copy"
-		return 1
-	}
-	cp -r lib/rust/yanet-packet "$copy/" || rc=1
-	[ "$rc" = 0 ] && { step sdk-packet-test env -C "$copy/yanet-packet" cargo "$@" test || rc=1; }
-	if [ "$rc" = 0 ]; then
-		if rustup target list --installed 2>/dev/null | grep -qx "$target"; then
-			step sdk-packet-no-std env -C "$copy/yanet-packet" cargo "$@" check --target "$target" || rc=1
-		else
-			skipped+=("sdk-packet-no-std ($target not installed)")
-		fi
-	fi
-	rm -rf "$copy"
-	return "$rc"
 }
 
 gate_web() {
@@ -291,19 +204,8 @@ gate_web() {
 c=0
 matching '(\.[ch]$|(^|/)meson\.build$|^meson_options\.txt$|^ubsan-ignorelist\.txt$|^subprojects/|^scripts/(go_c(deps|go_flags)|check_link_deps)\.py$)' >/dev/null && c=1
 [ "$c" = 1 ] && gate_c
-if [ "$c" = 1 ] || matching '(\.go$|^go\.(mod|sum)$|\.proto$)' >/dev/null; then
-	gate_go
-elif matching "$fixture_paths" >/dev/null; then
-	# The SDK fixture tests run only over a build/ configured with them.
-	if [ "$fixtures" = 1 ]; then
-		gate_go
-	else
-		skipped+=("sdk fixture Go tests (build/ without -Dsdk_rust_fixtures=enabled)")
-	fi
-fi
+if [ "$c" = 1 ] || matching '(\.go$|^go\.(mod|sum)$|\.proto$)' >/dev/null; then gate_go; fi
 matching '(\.rs$|(^|/)Cargo\.(toml|lock)$|^\.rustfmt\.toml$|^\.cargo/|\.proto$)' >/dev/null && gate_rust
-# The paths the Rust SDK workflow runs on: the SDK and the C it binds.
-matching '(^lib/rust/|^\.cargo/config\.toml$|^\.rustfmt\.toml$|^(common|lib)/.*\.h$|^lib/dataplane/packet/.*\.c$|^subprojects/dpdk|(^|/)meson\.build$|^meson_options\.txt$|^\.github/workflows/rust-sdk\.yml$)' >/dev/null && gate_sdk
 matching '(^|/)web/|^package(-lock)?\.json$' >/dev/null && gate_web
 matching '\.proto$' >/dev/null && step proto-lint make --no-print-directory proto-lint
 [ -n "$(git rev-list "$base"..HEAD)" ] && step commitlint lint/commit/commitlint.sh --range "$base..HEAD"
