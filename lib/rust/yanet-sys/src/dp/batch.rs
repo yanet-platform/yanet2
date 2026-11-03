@@ -871,6 +871,18 @@ impl Packet<'_> {
         u32::from(self.transport_type()) & bindings::PACKET_TRANSPORT_HEADER_UNAVAILABLE == 0
     }
 
+    /// Offset of the packet's fragment in its datagram, as parsed: nonzero
+    /// exactly for a fragment after the first.
+    ///
+    /// The scale is the parser's and differs by the parsed family: IPv4
+    /// counts 8-byte units, IPv6 keeps its header field with the flag bits
+    /// cleared, which is bytes. A tunnel operation leaves it as parsed.
+    #[inline(always)]
+    pub fn fragment_offset(&self) -> u16 {
+        // SAFETY: as above.
+        unsafe { (*self.raw.as_ptr()).fragment_offset }
+    }
+
     /// Offset of the transport header from the start of the frame.
     #[inline(always)]
     pub fn transport_offset(&self) -> u16 {
@@ -911,6 +923,14 @@ impl<'b> PacketView<'b> {
     pub fn transport_type(&self) -> u16 {
         // SAFETY: as above.
         unsafe { (*self.raw.as_ptr()).transport_header.type_ }
+    }
+
+    /// Offset of the packet's fragment in its datagram, as
+    /// [`Packet::fragment_offset`].
+    #[inline(always)]
+    pub fn fragment_offset(&self) -> u16 {
+        // SAFETY: as above.
+        unsafe { (*self.raw.as_ptr()).fragment_offset }
     }
 
     /// Offset of the transport header from the start of the frame.

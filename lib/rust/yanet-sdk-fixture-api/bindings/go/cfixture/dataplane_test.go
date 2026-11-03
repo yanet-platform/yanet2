@@ -149,8 +149,9 @@ func Test_Tally_PreparedValue_DerivesFromItsConfiguration(t *testing.T) {
 }
 
 // Test_Tally_Counters_CountOnTheRunningWorker verifies that a counter added to
-// by value and a counter added to through a handle are those registered under
-// their names, and that only the worker the round ran on counts.
+// by value, a counter added to through a handle and a pair of packets and bytes
+// are those registered under their names, with as many values, and that only
+// the worker the round ran on counts.
 func Test_Tally_Counters_CountOnTheRunningWorker(t *testing.T) {
 	bed := newBed(t)
 	inst := bed.tallyInstance("config", 7)
@@ -166,6 +167,11 @@ func Test_Tally_Counters_CountOnTheRunningWorker(t *testing.T) {
 		{name: "second counter by value", counter: "v1", want: [][]uint64{{0}, {2}, {0}, {0}}},
 		{name: "third counter by value", counter: "v2", want: [][]uint64{{0}, {1}, {0}, {0}}},
 		{name: "counter by handle", counter: "held", want: [][]uint64{{0}, {10}, {0}, {0}}},
+		{
+			name:    "pair of packets and bytes",
+			counter: "traffic",
+			want:    [][]uint64{{0, 0}, packetsAndBytes(5, 300), {0, 0}, {0, 0}},
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			require.Equal(t, tc.want, bed.counter(inst, tc.counter))

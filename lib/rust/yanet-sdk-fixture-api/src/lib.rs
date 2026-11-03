@@ -117,14 +117,21 @@ pub struct Tally;
 #[yanet_sdk::api(module = yanet_sdk_fixture::Tally)]
 impl Tally {
     /// A configuration named `name` over `word`, whose counters are registered
-    /// in the order `held`, `v2`, `v0`, `v1`, an order other than the fields'.
+    /// in the order `held`, `v2`, `v0`, `v1`, an order other than the fields',
+    /// and then `traffic`.
     pub fn build(agent: &Agent, name: &str, word: u64) -> Result<Built<yanet_sdk_fixture::Tally, Agent>, ApiError> {
         Builder::<yanet_sdk_fixture::Tally>::build::<ApiError, _>(agent, name, |scope| {
             let held = scope.counter("held")?;
             let v2 = scope.counter("v2")?;
             let v0 = scope.counter("v0")?;
             let v1 = scope.counter("v1")?;
-            Ok(TallyConfigParts { word, by_value: [v0, v1, v2], held })
+            let traffic = scope.counter("traffic")?;
+            Ok(TallyConfigParts {
+                word,
+                by_value: [v0, v1, v2],
+                held,
+                traffic,
+            })
         })
     }
 }
