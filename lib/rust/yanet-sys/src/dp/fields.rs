@@ -68,9 +68,9 @@ pub trait CounterLayout: Copy + 'static + sealed::Sealed {
     ///
     /// # Safety
     ///
-    /// `slot` is the first of `VALUES` aligned values of this worker's
-    /// counter, next to each other, which only this worker writes and which
-    /// stay live for the call.
+    /// The address is the first of this worker's values of the counter, as
+    /// many as the layout holds, aligned and next to each other, which only
+    /// this worker writes and which stay live for the call.
     #[doc(hidden)]
     unsafe fn add_to(self, slot: *mut u64);
 }
@@ -85,7 +85,7 @@ pub struct Traffic {
 }
 
 impl Traffic {
-    /// One packet of `bytes` bytes.
+    /// One packet of the given length in bytes.
     #[inline(always)]
     pub fn packet(bytes: u64) -> Self {
         Self { packets: 1, bytes }
