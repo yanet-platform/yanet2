@@ -408,6 +408,16 @@ func (m *AdapterService) processBirdImport(
 
 	log := m.log.With(zap.String("config", name))
 
+	// A route-mpls failure must not hold back the IP routes, so it is only
+	// logged: the sync sends the whole table once route-mpls recovers.
+	pushMPLS := func(ctx context.Context) {
+		if err := mplsSync.Push(ctx); err != nil {
+			log.Warn("failed to push mpls routes",
+				zap.Error(err),
+			)
+		}
+	}
+
 	// The onUpdate callback sends route batches over the gRPC stream. The
 	// bird.Export function invokes it.
 	onUpdate := func(ctx context.Context, routes []rib.Route) error {
@@ -462,14 +472,7 @@ func (m *AdapterService) processBirdImport(
 			}
 		}
 
-		// A route-mpls failure must not hold back the IP routes: the MPLS
-		// changes stay queued and a later batch pushes them again, unless
-		// route-mpls rejects them as invalid.
-		if err := mplsSync.Push(ctx); err != nil {
-			log.Warn("failed to push mpls routes",
-				zap.Error(err),
-			)
-		}
+		pushMPLS(ctx)
 
 		return nil
 	}
@@ -485,7 +488,15 @@ func (m *AdapterService) processBirdImport(
 		return nil
 	}
 
-	export := bird.NewExportReader(cfg, onUpdate, onFlush, bird.WithExportReaderLog(clientLog))
+	// Idle ticks push too, so a failed push is retried even while BIRD
+	// sends nothing.
+	export := bird.NewExportReader(
+		cfg,
+		onUpdate,
+		onFlush,
+		bird.WithExportReaderIdle(pushMPLS),
+		bird.WithExportReaderLog(clientLog),
+	)
 
 	holder := newImportHolder(export, cancel, conn, currentStream, cfg.Sockets)
 
