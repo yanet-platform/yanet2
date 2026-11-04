@@ -14,8 +14,8 @@ import (
 //
 // A status the mutation itself produced passes through. A config the
 // dataplane refuses in its current state reports FailedPrecondition, one
-// it has no room for reports ResourceExhausted, and anything else reports
-// Internal.
+// it has no room for reports ResourceExhausted, one refused as wrong in
+// any state reports InvalidArgument, and anything else reports Internal.
 func PublishError(name string, err error) error {
 	if _, ok := status.FromError(err); ok {
 		return err
@@ -27,6 +27,8 @@ func PublishError(name string, err error) error {
 		code = codes.FailedPrecondition
 	case errors.Is(err, ffi.ErrResourceExhausted):
 		code = codes.ResourceExhausted
+	case errors.Is(err, ffi.ErrInvalidArgument):
+		code = codes.InvalidArgument
 	}
 	return status.Errorf(code, "failed to update config %q: %v", name, err)
 }
