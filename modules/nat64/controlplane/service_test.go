@@ -12,6 +12,7 @@ import (
 
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
 	"github.com/yanet-platform/yanet2/controlplane/crud"
+	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	nat64pb "github.com/yanet-platform/yanet2/modules/nat64/controlplane/nat64pb/v1"
 )
 
@@ -25,7 +26,8 @@ func (m *mockHandle) Free() error {
 }
 
 // mockBackend records a copy of every published config and can be set to
-// fail every update from a chosen 1-based publish on.
+// fail every update from a chosen 1-based publish on; it finds nothing to
+// delete in the dataplane.
 type mockBackend struct {
 	configs []NAT64Config
 	failAt  int
@@ -49,7 +51,7 @@ func mustIPv6Prefix(t *testing.T, value string) *commonpb.IPv6Prefix {
 }
 
 func (m *mockBackend) Delete(name string) error {
-	return nil
+	return ffi.ErrNotFound
 }
 
 // Test_NAT64Service_AddShowRemove verifies basic config lifecycle operations.

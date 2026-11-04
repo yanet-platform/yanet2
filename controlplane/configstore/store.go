@@ -182,6 +182,21 @@ func (m *Store[E]) Update(
 //
 // A concurrent mutation of the same name waits for this one to finish.
 func (m *Store[E]) Delete(name string, unpublish func(current E) error) error {
+	return m.DeleteOr(name, unpublish, func() error { return ErrNotFound })
+}
+
+// DeleteOr is Delete for a name this store may not hold: when nothing is
+// published under the name, it runs the second callback instead and returns
+// its error.
+//
+// That callback runs under the name's writer lock, so it can remove what an
+// earlier process left in shared memory under the name without racing a
+// mutation of the same name. Nothing is freed or parked for it.
+func (m *Store[E]) DeleteOr(
+	name string,
+	unpublish func(current E) error,
+	absent func() error,
+) error {
 	record, release := m.acquire(name)
 	defer release()
 
@@ -189,7 +204,7 @@ func (m *Store[E]) Delete(name string, unpublish func(current E) error) error {
 
 	current, ok := record.Published()
 	if !ok {
-		return ErrNotFound
+		return absent()
 	}
 	if err := unpublish(current); err != nil {
 		return err

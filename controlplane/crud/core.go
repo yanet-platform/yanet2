@@ -25,7 +25,9 @@ type Backend[P any] interface {
 	// Update builds a config from the payload and publishes it to the
 	// dataplane, returning the handle of the published generation.
 	Update(name string, payload P) (Handle, error)
-	// Delete removes the config published under the name.
+	// Delete removes the config the dataplane runs under the name, also
+	// one an earlier process published, and reports ffi.ErrNotFound when
+	// the dataplane runs none.
 	Delete(name string) error
 }
 
@@ -61,9 +63,9 @@ func (m *Entry[P]) Free() error {
 //
 // A mutation reports waiting before it enters the store's writer
 // section, acquired once the section holds it — with the shared-memory
-// work about to run inside it — and releasing as that work ends. A
-// mutation the store rejects before running it, a delete of an unknown
-// name, reports only the first phase.
+// work about to run inside it — and releasing as that work ends. A delete
+// of a name the store does not hold reports only the first phase, even
+// when it removes a config an earlier process left in shared memory.
 //
 // Replace and Mutate report the update operation, Delete the delete
 // operation. The observer runs synchronously inside the mutation:
@@ -199,14 +201,28 @@ func (m *Core[P]) Mutate(name string, mutate func(current P, ok bool) (P, error)
 //
 // A backend refusal is returned unchanged and keeps the config
 // published; the caller maps it to its gRPC status.
+//
+// A name this process never published, such as one an earlier process
+// left running before a restart, is removed from the dataplane directly;
+// configstore.ErrNotFound is returned only when the dataplane has nothing
+// under the name either.
 func (m *Core[P]) Delete(name string) error {
 	m.observe(OperationDelete, PhaseWaiting)
-	return m.configs.Delete(name, func(*Entry[P]) error {
-		m.observe(OperationDelete, PhaseAcquired)
-		defer m.observe(OperationDelete, PhaseReleasing)
+	return m.configs.DeleteOr(name,
+		func(*Entry[P]) error {
+			m.observe(OperationDelete, PhaseAcquired)
+			defer m.observe(OperationDelete, PhaseReleasing)
 
-		return m.backend.Delete(name)
-	})
+			return m.backend.Delete(name)
+		},
+		func() error {
+			err := m.backend.Delete(name)
+			if errors.Is(err, ffi.ErrNotFound) {
+				return configstore.ErrNotFound
+			}
+			return err
+		},
+	)
 }
 
 // DeleteError maps a failed delete to the gRPC status it reports.

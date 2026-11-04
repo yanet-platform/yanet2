@@ -13,6 +13,7 @@ import (
 
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
 	"github.com/yanet-platform/yanet2/controlplane/crud"
+	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	routemplspb "github.com/yanet-platform/yanet2/modules/route-mpls/controlplane/routemplspb/v1"
 )
 
@@ -24,6 +25,8 @@ func (m *mockModuleHandle) Free() error {
 	return nil
 }
 
+// mockBackend publishes every config and finds nothing to delete in the
+// dataplane.
 type mockBackend struct{}
 
 func (m *mockBackend) Update(name string, payload *routeMPLSConfig) (crud.Handle, error) {
@@ -31,7 +34,7 @@ func (m *mockBackend) Update(name string, payload *routeMPLSConfig) (crud.Handle
 }
 
 func (m *mockBackend) Delete(name string) error {
-	return nil
+	return ffi.ErrNotFound
 }
 
 // flakyBackend publishes the first config and fails every later update.

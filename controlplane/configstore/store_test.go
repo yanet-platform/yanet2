@@ -161,6 +161,25 @@ func Test_Store_Delete_MissingName(t *testing.T) {
 	assert.False(t, called)
 }
 
+// Test_Store_DeleteOr_RunsAbsentForUnknownName verifies that deleting a
+// name nothing is published under runs the fallback callback instead of
+// the unpublishing one and returns its result.
+func Test_Store_DeleteOr_RunsAbsentForUnknownName(t *testing.T) {
+	store := configstore.NewStore[*freeSequence]()
+
+	unpublished := false
+	err := store.DeleteOr("a",
+		func(*freeSequence) error {
+			unpublished = true
+			return nil
+		},
+		func() error { return errInjected },
+	)
+	require.ErrorIs(t, err, errInjected)
+	assert.False(t, unpublished)
+	assert.Empty(t, store.Names())
+}
+
 // Test_Store_Delete_UnpublishFailureKeepsEntry verifies that a refused
 // delete returns its error unchanged and leaves the entry published and
 // unfreed.

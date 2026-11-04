@@ -23,10 +23,10 @@ type Option func(*options)
 // MutationObserver observes a mutation's lifecycle in the config
 // store: before it enters the store's writer section, once an admitted
 // mutation is about to touch shared memory inside that section, and as
-// that work ends. A mutation the store rejects before running it — a
-// delete of an unknown name — reports only the first phase. It
-// observes synchronization but never controls it, and lets tests prove
-// ordering between concurrent mutations.
+// that work ends. A delete of a name the store does not hold reports only
+// the first phase, even when it removes a config an earlier process left
+// in shared memory. It observes synchronization but never controls it,
+// and lets tests prove ordering between concurrent mutations.
 type MutationObserver interface {
 	ObserveFWStateMutation(operation, phase string)
 }

@@ -11,6 +11,7 @@ import (
 	"github.com/yanet-platform/xnetip"
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
 	"github.com/yanet-platform/yanet2/controlplane/crud"
+	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/modules/unrdup/bindings/go/cunrdup"
 	unrdup "github.com/yanet-platform/yanet2/modules/unrdup/controlplane"
 	"github.com/yanet-platform/yanet2/modules/unrdup/controlplane/unrduppb/v1"
@@ -24,7 +25,7 @@ func (m *fakeHandle) Free() error {
 }
 
 // fakeBackend counts updates and records the sources and services of the
-// last published config.
+// last published config; it finds nothing to delete in the dataplane.
 type fakeBackend struct {
 	calls    int
 	sources  []xnetip.Network
@@ -39,7 +40,7 @@ func (m *fakeBackend) Update(name string, payload *unrdup.ModuleConfig) (crud.Ha
 }
 
 func (m *fakeBackend) Delete(name string) error {
-	return nil
+	return ffi.ErrNotFound
 }
 
 // ipAddr returns the address message for valid address text.

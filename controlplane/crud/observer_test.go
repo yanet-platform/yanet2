@@ -69,8 +69,8 @@ func Test_Core_MutationObserver_OrdersPhases(t *testing.T) {
 }
 
 // Test_Core_MutationObserver_DeleteOfUnknownNameReportsWaitingOnly
-// verifies that a delete the store rejects before its writer section
-// reports nothing but the waiting phase.
+// verifies that a delete of a name the store does not hold reports nothing
+// but the waiting phase.
 func Test_Core_MutationObserver_DeleteOfUnknownNameReportsWaitingOnly(t *testing.T) {
 	observer := &recordingObserver{}
 	core := crud.NewCore(&fakeBackend{}, crud.WithMutationObserver(observer))

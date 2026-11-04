@@ -16,6 +16,7 @@ import (
 	"github.com/yanet-platform/xnetip"
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
 	"github.com/yanet-platform/yanet2/controlplane/crud"
+	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/modules/forward/bindings/go/cforward"
 	forward "github.com/yanet-platform/yanet2/modules/forward/controlplane"
 	forwardpb "github.com/yanet-platform/yanet2/modules/forward/controlplane/forwardpb/v1"
@@ -28,8 +29,8 @@ func (m *mockModuleHandle) Free() error {
 	return nil
 }
 
-// mockBackend publishes every config, hands out a fresh handle and reads
-// no counters.
+// mockBackend publishes every config, hands out a fresh handle, reads no
+// counters and finds nothing to delete in the dataplane.
 type mockBackend struct{}
 
 func (m *mockBackend) Update(name string, payload forward.RuleSet) (crud.Handle, error) {
@@ -37,7 +38,7 @@ func (m *mockBackend) Update(name string, payload forward.RuleSet) (crud.Handle,
 }
 
 func (m *mockBackend) Delete(name string) error {
-	return nil
+	return ffi.ErrNotFound
 }
 
 func (m *mockBackend) ModuleCounters(name string, counterNames []string) []forward.CounterView {

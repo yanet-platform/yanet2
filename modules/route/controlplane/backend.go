@@ -87,9 +87,11 @@ type Backend interface {
 	// NewFIB builds a table object from the supplied FIB ranges, naming
 	// devices by their index in the table, without publishing it.
 	NewFIB(name string, devices []string, entries []*routepb.FIBEntry) (FIBHandle, error)
-	// DeleteModule removes a module config from the dataplane.
+	// DeleteModule removes a module config from the dataplane. The error
+	// wraps ffi.ErrNotFound when the dataplane runs none under the name.
 	DeleteModule(name string) error
-	// DeleteFIB removes a table object from the dataplane.
+	// DeleteFIB removes a table object from the dataplane. The error wraps
+	// ffi.ErrNotFound when the dataplane holds none under the name.
 	DeleteFIB(name string) error
 	// DumpFIB reads the published table of the named config. The error
 	// wraps ffi.ErrNotFound when the config is not published.

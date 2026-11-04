@@ -10,6 +10,7 @@ import (
 	"github.com/yanet-platform/xnetip"
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
 	"github.com/yanet-platform/yanet2/controlplane/crud"
+	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/modules/mirror/bindings/go/cmirror"
 	mirror "github.com/yanet-platform/yanet2/modules/mirror/controlplane"
 	mirrorpb "github.com/yanet-platform/yanet2/modules/mirror/controlplane/mirrorpb/v1"
@@ -22,7 +23,8 @@ func (m *mockModuleHandle) Free() error {
 	return nil
 }
 
-// mockBackend publishes every config and hands out a fresh handle.
+// mockBackend publishes every config, hands out a fresh handle and finds
+// nothing to delete in the dataplane.
 type mockBackend struct{}
 
 func (m *mockBackend) Update(name string, payload mirror.RuleSet) (crud.Handle, error) {
@@ -30,7 +32,7 @@ func (m *mockBackend) Update(name string, payload mirror.RuleSet) (crud.Handle, 
 }
 
 func (m *mockBackend) Delete(name string) error {
-	return nil
+	return ffi.ErrNotFound
 }
 
 // recordingBackend captures the rules handed to the update so a test
