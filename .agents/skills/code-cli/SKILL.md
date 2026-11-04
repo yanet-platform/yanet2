@@ -98,8 +98,8 @@ yanet2 submodule, so a `ync` API change reaches them only on their next bump.
   and parses on its own.
 - Flags: `--name/-n` names the object the binary manages (a config, a map,
   a sessions state) and nothing else; `-4/-6` family filters, mutually
-  exclusive (nat64's address pair excepted); `--endpoint` and `--auth`
-  exist only through `ConnectionArgs`. A short flag has one meaning across
+  exclusive; `--endpoint` and `--auth` exist only through
+  `ConnectionArgs`. A short flag has one meaning across
   all binaries: `-d` device, `-p` pipeline, or prefix in a binary without
   pipelines, `-f` function, `-c` chain, `-t` tag, `-i`/`-o` input and
   output, `-m` module name, `-r` rate. A subcommand flag never shadows the
@@ -202,9 +202,9 @@ no `--yes`, no `--dry-run`.
   existing object passes `service.not_found("<verb>", "<resource>")` as
   the mapper of `unary_with`, so a missing object reads `<resource> not found`
   and exits 3. A command whose RPC can report `NotFound` for an object other
-  than the one it addresses, an element inside the config (nat64
-  `remove prefix`) or a ring the config refers to (pdump `set`), keeps
-  `status`: one label would misname what is missing. Hints via
+  than the one it addresses, an element inside the config or a ring the
+  config refers to (pdump `set`), keeps `status`: one label would misname
+  what is missing. Hints via
   `.with_hint(…)`.
 
 ## Tests

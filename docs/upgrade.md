@@ -3,6 +3,47 @@
 Manual steps required when upgrading an existing deployment. The packaging
 does not perform these automatically.
 
+## NAT64 configs are replaced as a whole
+
+The NAT64 service now answers Unimplemented to `AddPrefix`, `RemovePrefix`,
+`AddMapping`, `RemoveMapping`, `SetMTU` and `SetDropUnknown`; `UpdateConfig`
+replaces the whole config instead. Those calls started from an empty config
+for a name the control plane did not hold, so after a control-plane restart
+the first of them replaced the full config the dataplane still ran with an
+almost empty one. They also followed their own rules: a repeated prefix was
+ignored, a repeated IPv4 address replaced its mapping, and removing a prefix
+shifted the prefix indexes the mappings refer to.
+
+- `yanet-cli-nat64 prefix`, `mapping`, `mtu` and `drop` are replaced by
+  `yanet-cli-nat64 update --name <name> <file>`, whose file is the update
+  request in YAML. A redirected `yanet-cli-nat64 show --name <name>` prints
+  one to start from; keep it, since after a control-plane restart `show`
+  knows nothing of the config the dataplane still runs:
+
+  ```yaml
+  config:
+    prefixes:
+      - 64:ff9b::/96
+    mappings:
+      - ipv4: 192.0.2.1
+        ipv6: 2001:db8::1
+        prefix_index: 0
+    mtu:
+      ipv4_mtu: 1450
+      ipv6_mtu: 1280
+    drop_unknown_prefix: false
+    drop_unknown_mapping: true
+  ```
+
+  The file replaces the whole config: prefixes and mappings it leaves out
+  are removed, an absent `mtu` takes the defaults shown, a value left out
+  of a present `mtu` is 0, which turns that clamp off, and an absent flag
+  is false. A prefix or an IPv4 address listed twice is rejected.
+- Upgrade `yanet2-cli` together with the control plane: the old commands
+  fail against the new control plane, and `update` against an older one.
+- Scripts and clients of the retired calls send the whole config through
+  `UpdateConfig`.
+
 ## dscp configs change only through a whole-config update
 
 The dscp control plane now answers `AddPrefixes`, `RemovePrefixes` and
@@ -24,6 +65,7 @@ yanet-cli-dscp update --name dscp0 --prefix 10.0.0.0/24 --prefix 2001:db8::/32 -
 - Scripts that changed part of a config must keep the whole desired
   config and pass it to `update`: after a control-plane restart `show`
   knows nothing of the config the dataplane still runs.
+
 
 ## MPLS tunnels take the address family of their next hop
 
