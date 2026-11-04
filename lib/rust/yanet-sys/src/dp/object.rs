@@ -54,6 +54,23 @@ pub trait Object: Sized + 'static {
     /// yanet_sys::export_object!(name = mine, object = Mine);
     /// ```
     ///
+    /// A zero-sized prepared value is never made, so its type must have one:
+    ///
+    /// ```compile_fail,E0080
+    /// use yanet_sys::dp::{Object, ObjectCommitCx};
+    /// enum Never {}
+    /// struct Mine;
+    /// impl Object for Mine {
+    ///     const TYPE: &'static str = "mine";
+    ///     type Config = u64;
+    ///     type Prepared<'p> = Never;
+    ///     fn prepare(_: &ObjectCommitCx<'_, Self>) -> Never {
+    ///         panic!()
+    ///     }
+    /// }
+    /// yanet_sys::export_object!(name = mine, object = Mine);
+    /// ```
+    ///
     /// A prepared value within the allocator's alignment is accepted:
     ///
     /// ```

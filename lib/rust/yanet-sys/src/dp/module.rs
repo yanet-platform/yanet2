@@ -74,6 +74,26 @@ pub trait Module: Sized + 'static {
     /// yanet_sys::export_module!(name = mine, module = Mine);
     /// ```
     ///
+    /// A zero-sized prepared value is never made, so its type must have one:
+    ///
+    /// ```compile_fail,E0080
+    /// use yanet_sys::dp::{Batch, CommitCx, Cx, Module, Verdict};
+    /// enum Never {}
+    /// struct Mine;
+    /// impl Module for Mine {
+    ///     const NAME: &'static str = "mine";
+    ///     type Config = u64;
+    ///     type Prepared<'p> = Never;
+    ///     fn handle(_: &mut Cx<Self>, batch: &mut Batch) {
+    ///         batch.dispatch(|_| Verdict::Pass);
+    ///     }
+    ///     fn prepare(_: &CommitCx<'_, Self>) -> Never {
+    ///         panic!()
+    ///     }
+    /// }
+    /// yanet_sys::export_module!(name = mine, module = Mine);
+    /// ```
+    ///
     /// A prepared value within the allocator's alignment is accepted:
     ///
     /// ```

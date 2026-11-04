@@ -91,7 +91,8 @@ pub mod __private {
 
     /// Fails const evaluation when the prepared value of a module cannot live
     /// in the dataplane's buffer: the dataplane never drops it, and the block
-    /// allocator aligns it to at most `MAX_ALIGN`.
+    /// allocator aligns it to at most `MAX_ALIGN`; a zero-sized one has a
+    /// value.
     pub const fn check_prepared<M: crate::dp::Module>() {
         const {
             assert!(
@@ -101,6 +102,18 @@ pub mod __private {
             assert!(
                 core::mem::align_of::<M::Prepared<'static>>() <= yanet_shm::shm::MAX_ALIGN,
                 "Module::Prepared is aligned beyond what the block allocator guarantees"
+            );
+            // A zero-sized value is never written, so the runtime lends one
+            // it never made: the type must have a value. `Option` of a type
+            // without one has only `None`, which rustc lays out in no bytes.
+            assert!(
+                core::mem::size_of::<Option<core::convert::Infallible>>() == 0,
+                "rustc no longer lays out Option of a type without a value in no bytes"
+            );
+            assert!(
+                core::mem::size_of::<M::Prepared<'static>>() != 0
+                    || core::mem::size_of::<Option<M::Prepared<'static>>>() != 0,
+                "Module::Prepared is a zero-sized type without a value"
             );
         }
     }
@@ -116,6 +129,18 @@ pub mod __private {
             assert!(
                 core::mem::align_of::<O::Prepared<'static>>() <= yanet_shm::shm::MAX_ALIGN,
                 "Object::Prepared is aligned beyond what the block allocator guarantees"
+            );
+            // A zero-sized value is never written, so the runtime lends one
+            // it never made: the type must have a value. `Option` of a type
+            // without one has only `None`, which rustc lays out in no bytes.
+            assert!(
+                core::mem::size_of::<Option<core::convert::Infallible>>() == 0,
+                "rustc no longer lays out Option of a type without a value in no bytes"
+            );
+            assert!(
+                core::mem::size_of::<O::Prepared<'static>>() != 0
+                    || core::mem::size_of::<Option<O::Prepared<'static>>>() != 0,
+                "Object::Prepared is a zero-sized type without a value"
             );
         }
     }
