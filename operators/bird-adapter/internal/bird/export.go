@@ -90,11 +90,8 @@ func (m *Export) Run(ctx context.Context) error {
 		return nil
 	}
 
-	// Any value greater then zero will be sufficient for the channel capacity.
-	// A buffered channel will reduce concurrency pressure, but it seems that
-	// the reading part can easily keep up with the parsing part.
-	// On the other hand, if RIBUpdater.BulkUpdate cannot catch up with the
-	// parser's speed, there is no reason to hold too many routes in memory.
+	// Any capacity above zero works; a small one keeps parsed routes from
+	// piling up in memory when the batch processor falls behind.
 	updates := make(chan *rib.Route, 10)
 	defer close(updates)
 

@@ -48,9 +48,11 @@ message ImportConfig {
   // DumpThreshold configures the threshold beyond which routes are
   // forcibly dumped.
   int32 dump_threshold = 4;
-  // LogLevel configures the log level for this client's logger.
-  // Valid values: "debug", "info", "warn", "error".
-  // If empty or invalid, no logging will be performed (nop logger).
+  // LogLevel sets the level of this import's own log of BIRD routes:
+  // "debug", "info", "warn" or "error".
+  //
+  // Empty or invalid leaves that log off; the service log, which reports
+  // the import's failures, is written regardless.
   string log_level = 5;
 }
 
