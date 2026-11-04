@@ -1,6 +1,6 @@
 //! The configuration builder over the test owner: in-place construction of
 //! nested blocks, its refusals, and the release of everything a finished or a
-//! failed build allocated.
+//! failed build allocated, for module configurations and objects alike.
 //!
 //! The owner sets up no C memory, so everything here runs under Miri and
 //! natively alike. A configuration that embeds a C object, such as the route
@@ -14,17 +14,17 @@ use core::{
 
 use yanet_packet as _;
 use yanet_sdk::{
-    Batch, Build, CommitCx, Counter, Cx, Device, Module, OwnedSlice, Refusal, Registered, ShmBox, ShmLayout, ShmSlice,
-    Traffic, Verdict,
+    Batch, Build, BuiltObject, CommitCx, Counter, Cx, Device, Kind, Module, Object, ObjectBuilder, OwnedSlice, Refusal,
+    Registered, ShmBox, ShmLayout, ShmSlice, Traffic, Verdict,
 };
 use yanet_sdk_derive as _;
 use yanet_sdk_testing::{
     View,
-    cp::{Call, TestError, TestOwner},
+    cp::{Call, LiveHeaders, TestError, TestOwner},
 };
 use yanet_shm as _;
 use yanet_sys::{
-    cp::{BuildError, Builder, Built, MemoryContext, Owner, Scope},
+    cp::{BuildError, Builder, Built, Header, MemoryContext, Owner, Scope},
     dp::ModuleConfig,
 };
 
@@ -172,8 +172,8 @@ impl From<Failure> for AuthorError {
 
 /// The parts of a policy with rules, each an id and its ports, and a default
 /// rule without ports.
-fn policy<'b, E: From<Failure>>(
-    b: Scope<'b, '_, TestOwner, E>,
+fn policy<'b, E: From<Failure>, K: Kind>(
+    b: Scope<'b, '_, TestOwner, E, K>,
     rules: &[(u64, &[u64])],
 ) -> Result<PolicyParts<'b, TestOwner>, E> {
     Ok(PolicyParts {
@@ -701,4 +701,192 @@ fn test_build_writes_every_word_of_a_faulty_config_when_none_is_refused() {
     );
     release::<FaultyModule>(&owner, built);
     owner.assert_released();
+}
+
+/// An object of policy state: the builder reads only its type name and its
+/// configuration type.
+struct PolicyState;
+
+impl Object for PolicyState {
+    const TYPE: &'static str = "policy_state";
+    type Config = Policy;
+}
+
+/// Builds the policy object with the rules, each an id and its ports.
+fn build_policy_object(
+    owner: &TestOwner,
+    rules: &[(u64, &[u64])],
+) -> Result<BuiltObject<PolicyState, TestOwner>, Failure> {
+    ObjectBuilder::<PolicyState>::build(owner, "state0", |b| policy(b, rules))
+}
+
+/// Releases an object built in the given owner.
+fn release_object(owner: &TestOwner, built: BuiltObject<PolicyState, TestOwner>) {
+    // SAFETY: handed over by the builder, unreferenced, released once.
+    unsafe { built.destroy(owner) };
+}
+
+#[test]
+fn test_object_build_writes_nested_slices_and_a_box() {
+    let owner = owner();
+
+    let built = build_policy_object(&owner, &[(1, &[80, 443]), (2, &[])]).expect("built");
+
+    // SAFETY: the object was built in this owner's memory; the view resolves
+    // through the root of the arena it lives in, frozen for the test.
+    let (config, view) = unsafe { (built.config(&owner), View::new(owner.root())) };
+    let rules: Vec<_> = config
+        .rules
+        .as_slice(&view)
+        .iter()
+        .map(|rule| (rule.id, rule.ports.as_slice(&view).to_vec()))
+        .collect();
+    assert_eq!(
+        (vec![(1, vec![80, 443]), (2, vec![])], 0, 0xa5),
+        (rules, config.default.get(&view).id, config.mask.load(Ordering::Relaxed))
+    );
+    release_object(&owner, built);
+    owner.assert_released();
+}
+
+#[test]
+fn test_object_build_initialises_an_object_header() {
+    let owner = owner();
+
+    let built = build_policy_object(&owner, &[(1, &[80])]).expect("built");
+
+    assert_eq!(LiveHeaders { modules: 0, objects: 1 }, owner.live_headers());
+    release_object(&owner, built);
+    owner.assert_released();
+}
+
+#[test]
+fn test_object_destroy_releases_nested_blocks_and_the_object_header() {
+    let owner = owner();
+    let built = build_policy_object(&owner, &[(1, &[80, 443]), (2, &[]), (3, &[53])]).expect("built");
+
+    release_object(&owner, built);
+
+    owner.assert_released();
+}
+
+#[test]
+fn test_object_build_releases_everything_when_memory_runs_out_at_each_allocation() {
+    let fits = (0..64)
+        .find(|&limit| {
+            let owner = owner_failing_alloc_after(limit);
+            let result = build_policy_object(&owner, &[(1, &[80, 443]), (2, &[]), (3, &[53])]);
+            let fits = match result {
+                Ok(built) => {
+                    release_object(&owner, built);
+                    true
+                }
+                Err(err) => {
+                    assert_eq!(BuildError::Refused(Refusal::OutOfMemory), err);
+                    false
+                }
+            };
+            owner.assert_released();
+            fits
+        })
+        .expect("a limit lets the build succeed");
+
+    // The root block, the rules, the ports of two rules and the default rule.
+    assert_eq!(5, fits);
+}
+
+#[test]
+fn test_object_build_frees_the_root_block_of_a_refused_header() {
+    let owner = owner();
+    owner.fail_after(Call::Header, 0);
+
+    let err = build_policy_object(&owner, &[(1, &[80])]).expect_err("refused header");
+
+    assert_eq!(BuildError::Owner(TestError::Header), err);
+    owner.assert_released();
+}
+
+#[test]
+fn test_object_build_returns_the_error_of_the_closure_and_releases() {
+    let owner = owner();
+
+    let err = ObjectBuilder::<PolicyState>::build::<AuthorError, _>(&owner, "state0", |b| {
+        let _rules = b.slice::<Rule>(1, |_| {
+            Ok(RuleParts {
+                id: 1,
+                ports: b.slice(1, |_| Ok(80))?,
+            })
+        })?;
+        Err(AuthorError::Input("the state is invalid"))
+    })
+    .expect_err("invalid state");
+
+    assert_eq!(AuthorError::Input("the state is invalid"), err);
+    owner.assert_released();
+}
+
+// Unwinding is std-only.
+#[allow(clippy::std_instead_of_core)]
+#[test]
+fn test_object_build_releases_everything_when_the_closure_panics() {
+    use std::panic::{AssertUnwindSafe, catch_unwind};
+
+    let owner = owner();
+
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        ObjectBuilder::<PolicyState>::build::<Failure, _>(&owner, "state0", |b| {
+            let _rule = b.boxed::<Rule>(RuleParts {
+                id: 1,
+                ports: b.slice(1, |_| Ok(80))?,
+            })?;
+            panic!("the closure of the author panics")
+        })
+    }));
+
+    assert!(result.is_err());
+    owner.assert_released();
+}
+
+#[test]
+fn test_object_build_returns_everything_when_a_write_is_refused() {
+    struct FlakyState;
+
+    impl Object for FlakyState {
+        const TYPE: &'static str = "flaky_state";
+        type Config = [Flaky; 2];
+    }
+
+    let owner = owner();
+
+    let err = ObjectBuilder::<FlakyState>::build::<Failure, _>(&owner, "state0", |_| {
+        Ok([
+            FlakyParts { word: 1, fails: false },
+            FlakyParts { word: 2, fails: true },
+        ])
+    })
+    .expect_err("refused write");
+
+    assert_eq!(BuildError::Refused(Refusal::OutOfMemory), err);
+    owner.assert_released();
+}
+
+/// verifies that the test owner records a header finalised as the other kind
+/// than it was initialised as, which a builder mixing the kinds would do.
+#[test]
+fn test_test_owner_records_a_header_finalised_as_the_other_kind() {
+    let owner = owner();
+    let block = owner.alloc(64).expect("block");
+    // SAFETY: the block is the owner's and large enough for the test owner,
+    // which reads no header bytes.
+    let header = unsafe { Header::at(block) };
+    // SAFETY: as above.
+    unsafe { owner.init_header(header, "fixture", "config0") }.expect("header");
+
+    // SAFETY: the header is the owner's and unreferenced.
+    unsafe { owner.fini_object_header(header) };
+
+    assert_eq!(
+        vec!["a header finalised that is unknown, of the other kind or has live blocks"],
+        owner.violations()
+    );
 }

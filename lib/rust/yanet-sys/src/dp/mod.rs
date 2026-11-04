@@ -68,6 +68,7 @@ pub mod batch;
 pub mod cx;
 pub mod fields;
 pub mod module;
+pub mod object;
 #[doc(hidden)]
 pub mod rt;
 
@@ -75,8 +76,9 @@ pub use batch::{Batch, DeviceRef, DscpMark, Packet, PacketView, ResizeError, Tun
 pub use cx::{BoundCounter, CommitCx, CounterRef, Cx};
 pub use fields::{Counter, CounterLayout, Device, Traffic};
 pub use module::{Module, ModuleConfig};
+pub use object::{Object, ObjectConfig};
 
-/// Items the export macro names; not part of the API.
+/// Items the export macros name; not part of the API.
 #[doc(hidden)]
 pub mod __private {
     pub use crate::bindings;
@@ -107,6 +109,47 @@ pub mod __private {
         let mut idx = 0;
         while idx < bytes.len() {
             if bytes[idx] == 0 {
+                return false;
+            }
+            idx += 1;
+        }
+        true
+    }
+
+    /// Reports whether an object type name fits the C object type fields
+    /// (`OBJECT_TYPE_LEN`, `CP_OBJECT_TYPE_LEN`): non-empty, without NUL,
+    /// shorter than either field.
+    pub const fn fits_object_type(name: &str) -> bool {
+        let bytes = name.as_bytes();
+        let len = if bindings::OBJECT_TYPE_LEN < bindings::CP_OBJECT_TYPE_LEN {
+            bindings::OBJECT_TYPE_LEN
+        } else {
+            bindings::CP_OBJECT_TYPE_LEN
+        };
+        if bytes.is_empty() || bytes.len() >= len as usize {
+            return false;
+        }
+        let mut idx = 0;
+        while idx < bytes.len() {
+            if bytes[idx] == 0 {
+                return false;
+            }
+            idx += 1;
+        }
+        true
+    }
+
+    /// Reports whether a loader symbol suffix names an object type: the type
+    /// name as it is, as the dataplane looks a type up by
+    /// `new_object_<type>`.
+    pub const fn names_object(symbol: &str, name: &str) -> bool {
+        let (symbol, name) = (symbol.as_bytes(), name.as_bytes());
+        if symbol.len() != name.len() {
+            return false;
+        }
+        let mut idx = 0;
+        while idx < name.len() {
+            if symbol[idx] != name[idx] {
                 return false;
             }
             idx += 1;

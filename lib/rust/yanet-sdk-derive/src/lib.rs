@@ -98,6 +98,10 @@ pub fn derive_ffi_record(input: TokenStream) -> TokenStream {
 /// `<name>_module_config_free` does: 0, or -1 with errno `EAGAIN` and a busy
 /// error while a live generation holds it, the handle then staying valid.
 ///
+/// `#[yanet_sdk::api(object = O)]` does the same for an object type: its
+/// builds return objects, and its `_free` takes a `struct cp_object *` and
+/// releases an object as a C object's owner does, with the same results.
+///
 /// Parameters keep their order and a trailing `struct yanet_error **err`
 /// follows them (null for "no error wanted"; a chain already in `*err` stays
 /// as the cause of the new error, as `yanet_error_add` keeps it):
@@ -108,12 +112,18 @@ pub fn derive_ffi_record(input: TokenStream) -> TokenStream {
 /// | `&str` | `const char *`, NUL terminated UTF-8 |
 /// | `&T`, `T: FfiRecord` | `const T *` |
 /// | `&[T]`, `T: FfiRecord` | `const T *x, size_t x_len`; `(NULL, 0)` is empty |
+/// | `&BuiltObject<O, Agent>` (`object = O` only) | `struct cp_object *`, an object a build of the crate returned and nothing releases; one of another type is refused |
 /// | `u8`..`u64`, `i8`..`i64`, `usize` | the same C integer |
-/// | returns `Result<Built<M, Agent>, ApiError>` | `struct cp_module *`, `NULL` on failure |
+/// | returns `Result<Built<M, Agent>, ApiError>` (`module = M`) | `struct cp_module *`, `NULL` on failure |
+/// | returns `Result<BuiltObject<O, Agent>, ApiError>` (`object = O`) | `struct cp_object *`, `NULL` on failure |
+/// | returns `Result<u64, ApiError>` (a query) | `int`, 0 or -1 on failure, with a trailing `uint64_t *out` before `err` that a success writes |
 ///
 /// Anything else is a compile error at the offending type. A null or
 /// misaligned pointer for an argument is refused as an invalid argument. A
 /// panic of the method is caught and comes back as an error with its message.
+/// Only a `_free` sets errno, which tells a busy refusal from a failure; a
+/// build or a query reports through its result and `err` alone, and errno is
+/// unspecified after it.
 ///
 /// The expansion's `unsafe` carries the macro's own spans, so the api crate
 /// keeps `#![forbid(unsafe_code)]`:
@@ -643,6 +653,144 @@ mod doctests {
     /// }
     /// ```
     struct OwnModuleAccepted;
+
+    /// An object api builds objects of its type, and its queries take one of
+    /// them.
+    ///
+    /// ```no_run
+    /// # use yanet_sdk::{BuiltObject, Object, ObjectBuilder};
+    /// # use yanet_sdk_api::{Agent, ApiError};
+    /// # struct Mine;
+    /// # impl Object for Mine {
+    /// #     const TYPE: &'static str = "mine";
+    /// #     type Config = u64;
+    /// # }
+    /// # pub struct Api;
+    /// #[yanet_sdk::api(object = Mine)]
+    /// impl Api {
+    ///     pub fn new(
+    ///         agent: &Agent,
+    ///         name: &str,
+    ///         word: u64,
+    ///     ) -> Result<BuiltObject<Mine, Agent>, ApiError> {
+    ///         ObjectBuilder::<Mine>::build(agent, name, |_| Ok(word))
+    ///     }
+    ///
+    ///     pub fn word(agent: &Agent, mine: &BuiltObject<Mine, Agent>) -> Result<u64, ApiError> {
+    ///         Ok(agent.read(mine, |_, word| *word))
+    ///     }
+    /// }
+    /// ```
+    struct OwnObjectAccepted;
+
+    /// An object of another type than the attribute's is refused.
+    ///
+    /// ```compile_fail,E0308
+    /// # use yanet_sdk::{BuiltObject, Object, ObjectBuilder};
+    /// # use yanet_sdk_api::{Agent, ApiError};
+    /// # struct Mine;
+    /// # struct Other;
+    /// # impl Object for Mine {
+    /// #     const TYPE: &'static str = "mine";
+    /// #     type Config = u64;
+    /// # }
+    /// # impl Object for Other {
+    /// #     const TYPE: &'static str = "other";
+    /// #     type Config = u64;
+    /// # }
+    /// # pub struct Api;
+    /// #[yanet_sdk::api(object = Mine)]
+    /// impl Api {
+    ///     pub fn new(agent: &Agent, name: &str) -> Result<BuiltObject<Other, Agent>, ApiError> {
+    ///         ObjectBuilder::<Other>::build(agent, name, |_| Ok(0))
+    ///     }
+    /// }
+    /// ```
+    struct OtherObjectRefused;
+
+    /// An object parameter of another type than the attribute's is refused.
+    ///
+    /// ```compile_fail,E0308
+    /// # use yanet_sdk::{BuiltObject, Object};
+    /// # use yanet_sdk_api::{Agent, ApiError};
+    /// # struct Mine;
+    /// # struct Other;
+    /// # impl Object for Mine {
+    /// #     const TYPE: &'static str = "mine";
+    /// #     type Config = u64;
+    /// # }
+    /// # impl Object for Other {
+    /// #     const TYPE: &'static str = "other";
+    /// #     type Config = u64;
+    /// # }
+    /// # pub struct Api;
+    /// #[yanet_sdk::api(object = Mine)]
+    /// impl Api {
+    ///     pub fn word(agent: &Agent, other: &BuiltObject<Other, Agent>) -> Result<u64, ApiError> {
+    ///         Ok(agent.read(other, |_, word| *word))
+    ///     }
+    /// }
+    /// ```
+    struct OtherObjectParameterRefused;
+
+    /// A module api takes no object parameter.
+    ///
+    /// ```compile_fail
+    /// # use yanet_sdk::{Batch, Builder, Built, BuiltObject, CommitCx, Cx, Module, Object, Verdict};
+    /// # use yanet_sdk_api::{Agent, ApiError};
+    /// # struct Mine;
+    /// # impl Module for Mine {
+    /// #     const NAME: &'static str = "mine";
+    /// #     type Config = u64;
+    /// #     type Prepared<'p> = ();
+    /// #     fn prepare(_: &CommitCx<'_, Self>) {}
+    /// #     fn handle<'id>(_: &mut Cx<'id, Self>, batch: &mut Batch<'id>) {
+    /// #         batch.dispatch(|_| Verdict::Pass);
+    /// #     }
+    /// # }
+    /// # impl Object for Mine {
+    /// #     const TYPE: &'static str = "mine";
+    /// #     type Config = u64;
+    /// # }
+    /// # pub struct Api;
+    /// #[yanet_sdk::api(module = Mine)]
+    /// impl Api {
+    ///     pub fn new(agent: &Agent, name: &str, mine: &BuiltObject<Mine, Agent>) -> Result<Built<Mine, Agent>, ApiError> {
+    ///         let word = agent.read(mine, |_, word| *word);
+    ///         Builder::<Mine>::build(agent, name, |_| Ok(word))
+    ///     }
+    /// }
+    /// ```
+    struct ObjectParameterOfModuleApiRefused;
+
+    /// A module configuration is refused from an object api.
+    ///
+    /// ```compile_fail,E0308
+    /// # use yanet_sdk::{Batch, Builder, Built, CommitCx, Cx, Module, Object, Verdict};
+    /// # use yanet_sdk_api::{Agent, ApiError};
+    /// # struct Mine;
+    /// # impl Module for Mine {
+    /// #     const NAME: &'static str = "mine";
+    /// #     type Config = u64;
+    /// #     type Prepared<'p> = ();
+    /// #     fn prepare(_: &CommitCx<'_, Self>) {}
+    /// #     fn handle<'id>(_: &mut Cx<'id, Self>, batch: &mut Batch<'id>) {
+    /// #         batch.dispatch(|_| Verdict::Pass);
+    /// #     }
+    /// # }
+    /// # impl Object for Mine {
+    /// #     const TYPE: &'static str = "mine";
+    /// #     type Config = u64;
+    /// # }
+    /// # pub struct Api;
+    /// #[yanet_sdk::api(object = Mine)]
+    /// impl Api {
+    ///     pub fn new(agent: &Agent, name: &str) -> Result<Built<Mine, Agent>, ApiError> {
+    ///         Builder::<Mine>::build(agent, name, |_| Ok(0))
+    ///     }
+    /// }
+    /// ```
+    struct ModuleFromObjectApiRefused;
 
     /// A record without `#[repr(C)]` is refused.
     ///

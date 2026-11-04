@@ -3,18 +3,22 @@
 //! through.
 //!
 //! Each module has one impl with a build export and the free export the macro
-//! adds. What a test varies is in the records and arguments of the build; the
-//! header carries the records, the mode values and the fault values.
+//! adds, and the state object one with a build, queries and its free. What a
+//! test varies is in the records and arguments of the build; the header
+//! carries the records, the mode values and the fault values.
 
 #![forbid(unsafe_code)]
 
 pub mod assign;
 
-use core::ffi::CStr;
+use core::{
+    ffi::CStr,
+    sync::atomic::{AtomicU64, Ordering},
+};
 
-use yanet_sdk::{Builder, Built, FfiRecord, LpmRange, Refusal};
+use yanet_sdk::{Builder, Built, BuiltObject, FfiRecord, LpmRange, ObjectBuilder, Refusal};
 use yanet_sdk_api::{Agent, ApiError, ErrorKind};
-use yanet_sdk_fixture::{ConfigParts, RouteFibParts, RouteListParts, RouteParts, TallyConfigParts};
+use yanet_sdk_fixture::{ConfigParts, RouteFibParts, RouteListParts, RouteParts, StateConfigParts, TallyConfigParts};
 
 /// Bytes of a name in a record, the terminating NUL included.
 pub const FIB_NAME_LEN: usize = 64;
@@ -186,6 +190,88 @@ impl Fib {
             })
         })
     }
+}
+
+pub struct State;
+
+#[yanet_sdk::api(object = yanet_sdk_fixture::State)]
+impl State {
+    /// An object named `name` of `count` slots, slot n holding `seed` + n,
+    /// wrapping; the fault, a `FIXTURE_FAULT_*` constant, fails the build
+    /// after it has allocated the slots.
+    pub fn build(
+        agent: &Agent,
+        name: &str,
+        seed: u64,
+        count: u64,
+        fault: u64,
+    ) -> Result<BuiltObject<yanet_sdk_fixture::State, Agent>, ApiError> {
+        let count = usize::try_from(count).map_err(|_| ApiError::from(Refusal::TooManyItems))?;
+        ObjectBuilder::<yanet_sdk_fixture::State>::build::<ApiError, _>(agent, name, |scope| {
+            let slots = scope.slice(count, |idx| Ok(AtomicU64::new(seed.wrapping_add(idx as u64))))?;
+            match fault {
+                FIXTURE_FAULT_NONE => {}
+                FIXTURE_FAULT_ERROR => return Err(ApiError::from(Refusal::BlockTooLarge)),
+                FIXTURE_FAULT_PANIC => panic!("fixture fault"),
+                _ => return Err(ApiError::new(ErrorKind::InvalidArgument, "unknown fault")),
+            }
+            Ok(StateConfigParts { seed, slots })
+        })
+    }
+
+    /// The value of slot `index` of the object, read by the control plane
+    /// while the object may be published.
+    pub fn slot(
+        agent: &Agent,
+        state: &BuiltObject<yanet_sdk_fixture::State, Agent>,
+        index: u64,
+    ) -> Result<u64, ApiError> {
+        with_slot(agent, state, index, |slot| slot.load(Ordering::Relaxed))
+    }
+
+    /// Adds `delta` to slot `index` of the object, which may be published,
+    /// and returns the sum, wrapping.
+    pub fn add(
+        agent: &Agent,
+        state: &BuiltObject<yanet_sdk_fixture::State, Agent>,
+        index: u64,
+        delta: u64,
+    ) -> Result<u64, ApiError> {
+        with_slot(agent, state, index, |slot| {
+            slot.fetch_add(delta, Ordering::Relaxed).wrapping_add(delta)
+        })
+    }
+
+    /// The seed of the object, unless the fault, a `FIXTURE_FAULT_*`
+    /// constant, fails the query.
+    pub fn seed(
+        agent: &Agent,
+        state: &BuiltObject<yanet_sdk_fixture::State, Agent>,
+        fault: u64,
+    ) -> Result<u64, ApiError> {
+        match fault {
+            FIXTURE_FAULT_NONE => Ok(agent.read(state, |_, config| config.seed)),
+            FIXTURE_FAULT_ERROR => Err(ApiError::from(Refusal::BlockTooLarge)),
+            FIXTURE_FAULT_PANIC => panic!("fixture fault"),
+            _ => Err(ApiError::new(ErrorKind::InvalidArgument, "unknown fault")),
+        }
+    }
+}
+
+/// Runs `f` over slot `index` of the object.
+fn with_slot(
+    agent: &Agent,
+    state: &BuiltObject<yanet_sdk_fixture::State, Agent>,
+    index: u64,
+    f: impl FnOnce(&AtomicU64) -> u64,
+) -> Result<u64, ApiError> {
+    agent.read(state, |cx, config| {
+        usize::try_from(index)
+            .ok()
+            .and_then(|index| config.slots.as_slice(&cx).get(index))
+            .map(f)
+            .ok_or_else(|| ApiError::new(ErrorKind::InvalidArgument, "the slot is out of the object"))
+    })
 }
 
 struct PanicOnDrop;

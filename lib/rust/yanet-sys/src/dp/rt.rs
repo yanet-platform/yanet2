@@ -14,6 +14,7 @@ use crate::{
         batch::Batch,
         cx::{CommitCx, Cx},
         module::{Module, ModuleConfig},
+        object::Object,
     },
 };
 
@@ -145,6 +146,33 @@ pub unsafe fn new_module<M: Module>(
     }
 }
 
+/// Allocates the object type descriptor the loader copies and frees.
+///
+/// The type has no commit hook and no prepared buffer.
+///
+/// # Safety
+///
+/// `O::TYPE` fits the C type field with its terminator, as the export check
+/// asserts.
+pub unsafe fn new_object<O: Object>() -> *mut bindings::object {
+    let size = size_of::<bindings::object>();
+    // SAFETY: the loader releases the descriptor with C free, so it is
+    // allocated with C malloc and fully initialised before return; the name
+    // and its terminator fit the zeroed field (caller contract).
+    unsafe {
+        let object = malloc(size).cast::<bindings::object>();
+        if object.is_null() {
+            return object;
+        }
+        core::ptr::write_bytes(object.cast::<u8>(), 0, size);
+        let name = &raw mut (*object).name;
+        core::ptr::copy_nonoverlapping(O::TYPE.as_ptr(), name.cast::<u8>(), O::TYPE.len());
+        (*object).commit_ectx_handler = None;
+        (*object).prepared_size = 0;
+        object
+    }
+}
+
 /// Exports a module to the dataplane plugin loader.
 ///
 /// Emits `new_module_<name>`, `yanet_module_abi_version` and the C handler
@@ -237,6 +265,99 @@ macro_rules! export_module {
                         ::core::option::Option::Some(commit_ectx),
                     )
                 }
+            }
+        };
+    };
+}
+
+/// Exports an object type to the dataplane object loader.
+///
+/// Emits `new_object_<name>` and `yanet_module_abi_version`, which the plugin
+/// loader asks of every plugin; an object type is a plugin of its own, as the
+/// two exports of a module and an object in one plugin collide. The name is
+/// the object's type name as it is, as the loader looks a type up by
+/// `new_object_<type>`, or the build fails. Generated into each plugin crate
+/// as its only line; the input grammar (identifiers and `::`-separated paths)
+/// is part of the safety boundary, used outside the macro's `unsafe`.
+///
+/// The type is exported under its own name only; the check is a const
+/// assertion, which rustc reports as E0080:
+///
+/// ```compile_fail,E0080
+/// use yanet_sys::dp::Object;
+/// struct Mine;
+/// impl Object for Mine {
+///     const TYPE: &'static str = "mine";
+///     type Config = u64;
+/// }
+/// yanet_sys::export_object!(name = other, object = Mine);
+/// ```
+///
+/// A type name that no identifier spells, as one with a `-`, is refused:
+///
+/// ```compile_fail,E0080
+/// use yanet_sys::dp::Object;
+/// struct Mine;
+/// impl Object for Mine {
+///     const TYPE: &'static str = "my-state";
+///     type Config = u64;
+/// }
+/// yanet_sys::export_object!(name = my_state, object = Mine);
+/// ```
+///
+/// A type name that does not fit the C type field with its terminator is
+/// refused, not truncated:
+///
+/// ```compile_fail,E0080
+/// use yanet_sys::dp::Object;
+/// struct Mine;
+/// impl Object for Mine {
+///     const TYPE: &'static str =
+///         "state_of_a_name_long_enough_to_overflow_the_eighty_bytes_of_the_c_object_type_field";
+///     type Config = u64;
+/// }
+/// yanet_sys::export_object!(
+///     name = state_of_a_name_long_enough_to_overflow_the_eighty_bytes_of_the_c_object_type_field,
+///     object = Mine
+/// );
+/// ```
+///
+/// Under its type name it is accepted:
+///
+/// ```
+/// use yanet_sys::dp::Object;
+/// struct Mine;
+/// impl Object for Mine {
+///     const TYPE: &'static str = "my_state";
+///     type Config = u64;
+/// }
+/// yanet_sys::export_object!(name = my_state, object = Mine);
+/// ```
+#[macro_export]
+macro_rules! export_object {
+    (name = $name:ident, object = $($object:ident)::+ $(,)?) => {
+        const _: () = {
+            type __ExportedObject = $($object)::+;
+
+            const _: () = ::core::assert!(
+                $crate::dp::__private::names_object(
+                    ::core::stringify!($name),
+                    <__ExportedObject as $crate::dp::Object>::TYPE,
+                ),
+                "export_object!: the name is not Object::TYPE",
+            );
+            const _: () = ::core::assert!(
+                $crate::dp::__private::fits_object_type(<__ExportedObject as $crate::dp::Object>::TYPE),
+                "export_object!: Object::TYPE must be non-empty, without NUL, and fit the C object type fields",
+            );
+
+            #[unsafe(export_name = "yanet_module_abi_version")]
+            pub static YANET_MODULE_ABI_VERSION: u32 = $crate::dp::rt::ABI_VERSION;
+
+            #[unsafe(export_name = ::core::concat!("new_object_", ::core::stringify!($name)))]
+            pub extern "C" fn new_object() -> *mut $crate::dp::__private::bindings::object {
+                // SAFETY: the type name fits the C field, as asserted above.
+                unsafe { $crate::dp::rt::new_object::<__ExportedObject>() }
             }
         };
     };

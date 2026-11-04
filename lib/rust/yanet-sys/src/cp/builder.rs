@@ -35,7 +35,7 @@ use super::{
 use crate::{
     bindings,
     common::lpm::{Lpm, LpmRange},
-    dp::{Counter, CounterLayout, Device, Module, ModuleConfig},
+    dp::{Counter, CounterLayout, Device, Module, ModuleConfig, Object, ObjectConfig},
 };
 
 mod classify;
@@ -44,6 +44,68 @@ pub use classify::{Stage, Staged};
 
 /// Invariant lifetime brand: values of two builds never unify.
 type Brand<'b> = PhantomData<fn(&'b ()) -> &'b ()>;
+
+/// What a build makes, which sets the C header it starts from and what its
+/// scope registers.
+///
+/// Sealed: the kinds are [`ModuleKind`] and [`ObjectKind`].
+pub trait Kind: kind::Sealed + 'static {
+    /// Initialises the header of a build of the type and name.
+    ///
+    /// # Safety
+    ///
+    /// As [`Owner::init_header`].
+    #[doc(hidden)]
+    unsafe fn init<W: Owner>(owner: &W, header: Header, ty: &str, name: &str) -> Result<(), W::Error>;
+
+    /// Releases what [`Kind::init`] set up.
+    ///
+    /// # Safety
+    ///
+    /// As [`Owner::fini_header`].
+    #[doc(hidden)]
+    unsafe fn fini<W: Owner>(owner: &W, header: Header);
+}
+
+/// The kind of a module configuration: its header carries the module's
+/// counter registry and device list, which its scope registers into.
+pub enum ModuleKind {}
+
+/// The kind of an object: its header carries no module registries, so its
+/// scope registers no counter and links no device.
+pub enum ObjectKind {}
+
+impl Kind for ModuleKind {
+    unsafe fn init<W: Owner>(owner: &W, header: Header, ty: &str, name: &str) -> Result<(), W::Error> {
+        // SAFETY: the caller's contract.
+        unsafe { owner.init_header(header, ty, name) }
+    }
+
+    unsafe fn fini<W: Owner>(owner: &W, header: Header) {
+        // SAFETY: the caller's contract.
+        unsafe { owner.fini_header(header) }
+    }
+}
+
+impl Kind for ObjectKind {
+    unsafe fn init<W: Owner>(owner: &W, header: Header, ty: &str, name: &str) -> Result<(), W::Error> {
+        // SAFETY: the caller's contract.
+        unsafe { owner.init_object_header(header, ty, name) }
+    }
+
+    unsafe fn fini<W: Owner>(owner: &W, header: Header) {
+        // SAFETY: the caller's contract.
+        unsafe { owner.fini_object_header(header) }
+    }
+}
+
+mod kind {
+    pub trait Sealed {}
+
+    impl Sealed for super::ModuleKind {}
+
+    impl Sealed for super::ObjectKind {}
+}
 
 /// A shared-memory type and the parts a build writes it from.
 ///
@@ -540,29 +602,30 @@ impl<T: Build, W: Owner> Drop for Partial<'_, T, W> {
 /// value may borrow for the build, such as the ranges of a table; the error
 /// type is that of the author's closure, which the methods return in place of
 /// the SDK's own.
-pub struct Scope<'b, 'env: 'b, W: Owner, E = BuildError<<W as Owner>::Error>> {
+pub struct Scope<'b, 'env: 'b, W: Owner, E = BuildError<<W as Owner>::Error>, K: Kind = ModuleKind> {
     memory: &'b MemoryContext<'b, W>,
     header: Header,
     _brand: Brand<'b>,
     _env: PhantomData<&'env mut &'env ()>,
     _error: PhantomData<fn() -> E>,
+    _kind: PhantomData<fn() -> K>,
 }
 
-impl<W: Owner, E> Clone for Scope<'_, '_, W, E> {
+impl<W: Owner, E, K: Kind> Clone for Scope<'_, '_, W, E, K> {
     fn clone(&self) -> Self {
         *self
     }
 }
 
-impl<W: Owner, E> Copy for Scope<'_, '_, W, E> {}
+impl<W: Owner, E, K: Kind> Copy for Scope<'_, '_, W, E, K> {}
 
-impl<W: Owner, E> fmt::Debug for Scope<'_, '_, W, E> {
+impl<W: Owner, E, K: Kind> fmt::Debug for Scope<'_, '_, W, E, K> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
         f.debug_struct("Scope").field("header", &self.header).finish()
     }
 }
 
-impl<'b, W: Owner, E: From<BuildError<W::Error>>> Scope<'b, '_, W, E> {
+impl<'b, W: Owner, E: From<BuildError<W::Error>>, K: Kind> Scope<'b, '_, W, E, K> {
     /// Allocates a block holding one value, written from its parts.
     ///
     /// A zero-sized type does not compile: C has no block of no bytes.
@@ -635,32 +698,6 @@ impl<'b, W: Owner, E: From<BuildError<W::Error>>> Scope<'b, '_, W, E> {
         Ok(self.owned_slice(addr, len))
     }
 
-    /// Registers a counter of the given name with the module, of as many
-    /// values as its layout holds; the layout usually comes from the field the
-    /// counter is built into.
-    ///
-    /// # Errors
-    ///
-    /// The owner refuses the registration, as C does for a name registered
-    /// before with another size.
-    pub fn counter<T: CounterLayout>(self, name: &str) -> Result<Registered<'b, Counter<T>>, E> {
-        let size = T::VALUES as u64;
-        // SAFETY: the header is initialised and not yet published.
-        let id = unsafe { self.memory.owner.register_counter(self.header, name, size) }.map_err(failed::<W, E>)?;
-        Ok(Registered::new(id))
-    }
-
-    /// Links the device of the given name to the module.
-    ///
-    /// # Errors
-    ///
-    /// The owner refuses the device.
-    pub fn device(self, name: &str) -> Result<Registered<'b, Device>, E> {
-        // SAFETY: the header is initialised and not yet published.
-        let index = unsafe { self.memory.owner.link_device(self.header, name) }.map_err(failed::<W, E>)?;
-        Ok(Registered::new(index))
-    }
-
     /// Allocates a block of the given payload size.
     ///
     /// The size is a multiple of the alignment of the type it holds, so the
@@ -686,6 +723,34 @@ impl<'b, W: Owner, E: From<BuildError<W::Error>>> Scope<'b, '_, W, E> {
             _brand: PhantomData,
             _element: PhantomData,
         }
+    }
+}
+
+impl<'b, W: Owner, E: From<BuildError<W::Error>>> Scope<'b, '_, W, E, ModuleKind> {
+    /// Registers a counter of the given name with the module, of as many
+    /// values as its layout holds; the layout usually comes from the field the
+    /// counter is built into.
+    ///
+    /// # Errors
+    ///
+    /// The owner refuses the registration, as C does for a name registered
+    /// before with another size.
+    pub fn counter<T: CounterLayout>(self, name: &str) -> Result<Registered<'b, Counter<T>>, E> {
+        let size = T::VALUES as u64;
+        // SAFETY: the header is initialised and not yet published.
+        let id = unsafe { self.memory.owner.register_counter(self.header, name, size) }.map_err(failed::<W, E>)?;
+        Ok(Registered::new(id))
+    }
+
+    /// Links the device of the given name to the module.
+    ///
+    /// # Errors
+    ///
+    /// The owner refuses the device.
+    pub fn device(self, name: &str) -> Result<Registered<'b, Device>, E> {
+        // SAFETY: the header is initialised and not yet published.
+        let index = unsafe { self.memory.owner.link_device(self.header, name) }.map_err(failed::<W, E>)?;
+        Ok(Registered::new(index))
     }
 }
 
@@ -772,37 +837,105 @@ impl<M: Module> Builder<M> {
                 "a configuration larger than the largest block of the allocator"
             )
         };
-        let size = size_of::<ModuleConfig<M::Config>>();
-        let block = owner.alloc(size).ok_or_else(|| refused::<W, E>(Refusal::OutOfMemory))?;
-        // SAFETY: the root block holds the header and the body, so it is large
-        // enough for the header.
-        let header = unsafe { Header::at(block) };
-        // SAFETY: the block is ours and the header sits at its start.
-        if let Err(err) = unsafe { owner.init_header(header, M::NAME, name) } {
-            // SAFETY: the block came from the owner's allocation with this
-            // size, and a refused header leaves nothing to finalise.
-            unsafe { owner.free(block, size) };
-            return Err(failed::<W, E>(err));
-        }
-        // The blocks of the closure's values are returned, or leaked, before
-        // this runs.
-        let release = Release { owner, header, size };
-        let memory = MemoryContext::new(owner, header);
-        let parts = f(Scope {
-            memory: &memory,
-            header,
-            _brand: PhantomData,
-            _env: PhantomData,
-            _error: PhantomData,
-        })?;
-
-        let body = header.get() + ModuleConfig::<M::Config>::BODY_OFFSET;
-        // SAFETY: the body lies in the root block, aligned, and the blocks
-        // and registrations in the parts are this build's by the brand.
-        unsafe { M::Config::write::<W>(parts, &memory, body) }.map_err(refused::<W, E>)?;
-        forget(release);
+        let header = build_root::<ModuleKind, M::Config, W, E>(
+            owner,
+            M::NAME,
+            name,
+            size_of::<ModuleConfig<M::Config>>(),
+            ModuleConfig::<M::Config>::BODY_OFFSET,
+            f,
+        )?;
         Ok(Built { header, _kind: PhantomData })
     }
+}
+
+/// Entry point of the construction of objects of a type; never constructed.
+pub struct ObjectBuilder<O>(PhantomData<fn() -> O>);
+
+impl<O: Object> ObjectBuilder<O> {
+    /// Builds an object of the given name; the caller owns it and publishes
+    /// it.
+    ///
+    /// As [`Builder::build`], over an object scope, which registers no counter
+    /// and links no device, as the object's header carries no module
+    /// registries.
+    ///
+    /// # Errors
+    ///
+    /// The owner's memory is exhausted, its header routine refuses the object
+    /// type or the name, the closure fails, or the write of the body is
+    /// refused.
+    pub fn build<'env, E, W>(
+        owner: &W,
+        name: &str,
+        f: impl for<'b> FnOnce(Scope<'b, 'env, W, E, ObjectKind>) -> Result<<O::Config as Build>::Parts<'b, W>, E>,
+    ) -> Result<BuiltObject<O, W>, E>
+    where
+        W: Owner,
+        E: From<BuildError<W::Error>>,
+    {
+        const {
+            assert!(
+                size_of::<ObjectConfig<O::Config>>() <= bindings::MEMORY_BLOCK_ALLOCATOR_MAX_SIZE as usize,
+                "an object larger than the largest block of the allocator"
+            )
+        };
+        let header = build_root::<ObjectKind, O::Config, W, E>(
+            owner,
+            O::TYPE,
+            name,
+            size_of::<ObjectConfig<O::Config>>(),
+            ObjectConfig::<O::Config>::BODY_OFFSET,
+            f,
+        )?;
+        Ok(BuiltObject { header, _kind: PhantomData })
+    }
+}
+
+/// Builds the root block of a module configuration or an object: the header
+/// of the kind at its start, then the body written from the closure's parts at
+/// the body offset; returns the header, or releases everything on failure.
+fn build_root<'env, K: Kind, C: Build, W: Owner, E: From<BuildError<W::Error>>>(
+    owner: &W,
+    ty: &str,
+    name: &str,
+    size: usize,
+    body_offset: usize,
+    f: impl for<'b> FnOnce(Scope<'b, 'env, W, E, K>) -> Result<C::Parts<'b, W>, E>,
+) -> Result<Header, E> {
+    let block = owner.alloc(size).ok_or_else(|| refused::<W, E>(Refusal::OutOfMemory))?;
+    // SAFETY: the root block holds the header and the body, so it is large
+    // enough for the header.
+    let header = unsafe { Header::at(block) };
+    // SAFETY: the block is ours and the header sits at its start.
+    if let Err(err) = unsafe { K::init(owner, header, ty, name) } {
+        // SAFETY: the block came from the owner's allocation with this size,
+        // and a refused header leaves nothing to finalise.
+        unsafe { owner.free(block, size) };
+        return Err(failed::<W, E>(err));
+    }
+    // The blocks of the closure's values are returned, or leaked, before this
+    // runs.
+    let release = Release::<W, K> {
+        owner,
+        header,
+        size,
+        _kind: PhantomData,
+    };
+    let memory = MemoryContext::new(owner, header);
+    let parts = f(Scope {
+        memory: &memory,
+        header,
+        _brand: PhantomData,
+        _env: PhantomData,
+        _error: PhantomData,
+        _kind: PhantomData,
+    })?;
+    // SAFETY: the body lies in the root block, aligned, and the blocks and
+    // registrations in the parts are this build's by the brand.
+    unsafe { C::write::<W>(parts, &memory, header.get() + body_offset) }.map_err(refused::<W, E>)?;
+    forget(release);
+    Ok(header)
 }
 
 /// A configuration of a module that [`Builder::build`] handed over in the
@@ -858,24 +991,96 @@ impl<M: Module, W: Owner> Built<M, W> {
         unsafe { M::Config::free::<W>(body, &memory) };
         // SAFETY: every block the body owns is returned, and a block leaked
         // during the build is never referenced.
-        unsafe { release_root(owner, self.header, size_of::<ModuleConfig<M::Config>>()) }
+        unsafe { release_root::<W, ModuleKind>(owner, self.header, size_of::<ModuleConfig<M::Config>>()) }
+    }
+}
+
+/// An object that [`ObjectBuilder::build`] handed over in the memory of an
+/// owner type: its header address, to publish, and the right to release it.
+///
+/// Not freed on drop, as the object is shared once published; release it with
+/// [`BuiltObject::destroy`], which takes an owner of that type only.
+#[must_use]
+pub struct BuiltObject<O, W> {
+    header: Header,
+    _kind: PhantomData<fn() -> (O, W)>,
+}
+
+impl<O, W> fmt::Debug for BuiltObject<O, W> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
+        f.debug_struct("BuiltObject").field("header", &self.header).finish()
+    }
+}
+
+impl<O, W> BuiltObject<O, W> {
+    /// The object whose header is at `header`, for a C caller that kept only
+    /// the header's address.
+    ///
+    /// # Safety
+    ///
+    /// `header` is the header of an object of type `O` that an
+    /// [`ObjectBuilder::build`] in the memory of an owner of type `W` handed
+    /// over, not released since, and no other `BuiltObject` of it is used.
+    pub unsafe fn from_header(header: Header) -> Self {
+        Self { header, _kind: PhantomData }
+    }
+
+    /// Address of the object header, which is what the control plane
+    /// publishes.
+    pub fn header(&self) -> Header {
+        self.header
+    }
+}
+
+impl<O: Object, W: Owner> BuiltObject<O, W> {
+    /// The object's body, published or not, read as the dataplane reads it:
+    /// its state changes only through the types that allow a shared change,
+    /// as atomics.
+    ///
+    /// # Safety
+    ///
+    /// The owner's memory is the one the object was built in.
+    pub unsafe fn config<'a>(&'a self, owner: &'a W) -> &'a O::Config {
+        let body = self.header.get() + ObjectConfig::<O::Config>::BODY_OFFSET;
+        // SAFETY: the body was written whole by the build and is not released
+        // while `self` lives, as release takes it; it lies in the owner's
+        // memory (caller contract).
+        unsafe { &*owner.root().ptr::<O::Config>(body) }
+    }
+
+    /// Releases the object with everything it owns.
+    ///
+    /// # Safety
+    ///
+    /// The owner is the one that built it, and nothing references the object
+    /// any longer.
+    pub unsafe fn destroy(self, owner: &W) {
+        let memory = MemoryContext::new(owner, self.header);
+        let body = self.header.get() + ObjectConfig::<O::Config>::BODY_OFFSET;
+        // SAFETY: the body was written whole by the build, and every block it
+        // owns came from the header's context (caller contract).
+        unsafe { O::Config::free::<W>(body, &memory) };
+        // SAFETY: every block the body owns is returned, and a block leaked
+        // during the build is never referenced.
+        unsafe { release_root::<W, ObjectKind>(owner, self.header, size_of::<ObjectConfig<O::Config>>()) }
     }
 }
 
 /// Releases the header and root block of an unfinished build when dropped,
 /// also while unwinding.
-struct Release<'a, W: Owner> {
+struct Release<'a, W: Owner, K: Kind> {
     owner: &'a W,
     header: Header,
     size: usize,
+    _kind: PhantomData<fn() -> K>,
 }
 
-impl<W: Owner> Drop for Release<'_, W> {
+impl<W: Owner, K: Kind> Drop for Release<'_, W, K> {
     fn drop(&mut self) {
         // SAFETY: the blocks of the build's context are returned by the drops
         // of the values that owned them, or leaked if forgotten, which C's
         // finalisation allows; the root block is ours.
-        unsafe { release_root(self.owner, self.header, self.size) }
+        unsafe { release_root::<W, K>(self.owner, self.header, self.size) }
     }
 }
 
@@ -883,13 +1088,13 @@ impl<W: Owner> Drop for Release<'_, W> {
 ///
 /// # Safety
 ///
-/// The header is a module header initialised by the owner at the start of a
+/// The header is one of the kind, initialised by the owner at the start of a
 /// root block allocated with the given size, every block of its context is
 /// returned or never referenced again, and nothing references the header.
-unsafe fn release_root<W: Owner>(owner: &W, header: Header, size: usize) {
+unsafe fn release_root<W: Owner, K: Kind>(owner: &W, header: Header, size: usize) {
     // SAFETY: guaranteed by the caller; the header is the start of the block.
     unsafe {
-        owner.fini_header(header);
+        K::fini(owner, header);
         owner.free(BlockAddr::new(header.get()), size);
     }
 }
@@ -897,3 +1102,4 @@ unsafe fn release_root<W: Owner>(owner: &W, header: Header, size: usize) {
 // The root block holds the header and the body, so the header's alignment is
 // the one it needs from the allocator.
 const _: () = assert!(align_of::<ModuleConfig<u64>>() <= MAX_ALIGN);
+const _: () = assert!(align_of::<ObjectConfig<u64>>() <= MAX_ALIGN);

@@ -34,7 +34,8 @@ type bed struct {
 }
 
 // newBed starts a harness of four workers and the device port0, which knows
-// the modules of the fixture, and attaches an agent to it.
+// the modules and the state object type of the fixture, and attaches an agent
+// to it.
 //
 // Each adjust may change the harness configuration before it starts. The
 // harness is freed when the test ends, after everything built over the agent.
@@ -48,6 +49,7 @@ func newBed(t *testing.T, adjust ...func(*dataplaneut.Config)) *bed {
 		Devices:       []string{"port0"},
 		Modules:       []string{"fixture", "tally", "fib", "assign"},
 		DevicesToLoad: []string{"plain"},
+		ObjectsToLoad: []string{cfixture.StateType},
 		PluginDir:     cfixture.PluginDir,
 		// The fixture forgets packets on purpose and keeps none beyond a round.
 		ReclaimLostPackets: true,

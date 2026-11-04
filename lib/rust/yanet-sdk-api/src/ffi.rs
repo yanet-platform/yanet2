@@ -16,12 +16,11 @@ use std::panic::catch_unwind;
 
 use yanet_sys::{
     bindings::{self, yanet_error},
-    cp::{Built, FfiRecord},
-    dp::Module,
+    cp::FfiRecord,
 };
 
 use crate::{
-    agent::{Agent, cp_module_at, release_at},
+    agent::{Agent, Releasable, handle_at, raw_at, release_at},
     error::{ApiError, ErrorKind, from_str},
 };
 
@@ -157,22 +156,23 @@ fn errno_of(kind: ErrorKind) -> c_int {
 }
 
 /// The body of a builder export: runs `body` over the agent and returns the
-/// header of the configuration it built, null with `*err` set on failure.
+/// header of the configuration or the object it built, null with `*err` set
+/// on failure.
 ///
 /// # Safety
 ///
 /// The export contract: `agent` is null, misaligned or an attached agent
 /// (see [`Agent::from_raw`]); `err` is null or writable and holds null or a
 /// chain C owns.
-pub unsafe fn build<M>(
+pub unsafe fn build<B: Releasable>(
     agent_pointer: *mut bindings::agent,
     err: ErrOut,
-    body: impl FnOnce(&Agent) -> Result<Built<M, Agent>, ApiError>,
-) -> *mut bindings::cp_module {
+    body: impl FnOnce(&Agent) -> Result<B, ApiError>,
+) -> *mut B::Raw {
     let header = guarded(|| {
         // SAFETY: the export contract.
         let agent = unsafe { attached(agent_pointer, "agent") }?;
-        Ok(cp_module_at(&agent, body(&agent)?.header()))
+        Ok(raw_at::<B>(&agent, body(&agent)?.header()))
     });
     header.unwrap_or_else(|error| {
         set_err(err, error);
@@ -180,26 +180,56 @@ pub unsafe fn build<M>(
     })
 }
 
-/// The body of a free export: releases the configuration of module `M` at
-/// `module`, -1 with `*err` and errno set when it is not released.
+/// A configuration or an object an export of the crate built, behind the
+/// pointer C passed; one of another type is refused.
 ///
 /// # Safety
 ///
-/// The export contract: `module` is null, misaligned or a configuration of
-/// module `M` an export of this crate returned and nothing released; `err` is
-/// null or writable and holds null or a chain C owns.
-pub unsafe fn free<M: Module>(module: *mut bindings::cp_module, err: ErrOut) -> c_int {
-    // A release the live generation refused is busy whatever its chain says:
-    // the chain has no kind when C could not allocate the frame.
-    let mut busy = false;
-    let released = guarded(|| {
-        let module = checked(module, "module")?;
+/// `pointer` is null, misaligned or a header of the handle's kind (module or
+/// object) an export of this crate returned and nothing released, nor
+/// releases during the call, a pointer of the mapping of the agent of the
+/// call.
+pub unsafe fn handle<B: Releasable>(pointer: *mut B::Raw, argument: &str) -> Result<B, ApiError> {
+    let pointer = checked(pointer, argument)?;
+    // SAFETY: the caller's contract; the handle is only lent to the method,
+    // which cannot release it.
+    unsafe { handle_at::<B>(pointer) }
+}
+
+/// The body of a query export: runs `body` over the agent and writes its
+/// value at `out`, 0, or -1 with `*err` set on failure and `out` untouched.
+///
+/// # Safety
+///
+/// As for [`build`]; `out` is null, misaligned or writable.
+pub unsafe fn query(
+    agent_pointer: *mut bindings::agent,
+    out: *mut u64,
+    err: ErrOut,
+    body: impl FnOnce(&Agent) -> Result<u64, ApiError>,
+) -> c_int {
+    let value = guarded(|| {
+        let out = checked(out, "out")?;
         // SAFETY: the export contract.
-        unsafe { release_at::<M>(module) }.map_err(|retained| {
-            busy = true;
-            retained.error
-        })
+        let agent = unsafe { attached(agent_pointer, "agent") }?;
+        Ok((out, body(&agent)?))
     });
+    match value {
+        Ok((out, value)) => {
+            // SAFETY: writable and aligned (export contract, checked).
+            unsafe { out.write(value) };
+            0
+        }
+        Err(error) => {
+            set_err(err, error);
+            -1
+        }
+    }
+}
+
+/// What a free export returns: 0 for a release, otherwise -1 with `*err` set
+/// and errno EAGAIN for a busy refusal, or the errno of the error's kind.
+fn released_or_errno(released: Result<(), ApiError>, busy: bool, err: ErrOut) -> c_int {
     match released {
         Ok(()) => 0,
         Err(error) => {
@@ -214,4 +244,29 @@ pub unsafe fn free<M: Module>(module: *mut bindings::cp_module, err: ErrOut) -> 
             -1
         }
     }
+}
+
+/// The body of a free export: releases the configuration or the object at
+/// `raw`, -1 with `*err` and errno set when it is not released; one of
+/// another type is refused as an invalid argument and left as it is.
+///
+/// # Safety
+///
+/// The export contract: `raw` is null, misaligned or a header of the handle's
+/// kind (module or object) an export of this crate returned and nothing
+/// released; `err` is null or writable and holds null or a chain C owns.
+pub unsafe fn free<B: Releasable>(raw: *mut B::Raw, err: ErrOut) -> c_int {
+    // A release the live generation refused is busy whatever its chain says:
+    // the chain has no kind when C could not allocate the frame.
+    let mut busy = false;
+    let released = guarded(|| {
+        // SAFETY: the export contract.
+        unsafe { handle::<B>(raw, "handle") }?;
+        // SAFETY: the export contract, and the header is of the handle's type.
+        unsafe { release_at::<B>(NonNull::new_unchecked(raw)) }.map_err(|retained| {
+            busy = true;
+            retained.error
+        })
+    });
+    released_or_errno(released, busy, err)
 }

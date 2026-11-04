@@ -6,8 +6,10 @@
 //! An [`Agent`] is a handle on an agent attached to the shared memory. It owns
 //! the configurations a module's API builds there: it implements the owner of
 //! the configuration builder with the C routines a C module's API calls for
-//! the same steps, and releases a configuration as those do. Every C failure
-//! is an [`ApiError`].
+//! the same steps, and releases a configuration as those do. It owns the
+//! objects built there in the same way, which are released as a C object's
+//! owner releases them and read through [`Agent::read`]. Every C failure is an
+//! [`ApiError`].
 //!
 //! A `std` crate: the exports of `#[yanet_sdk::api]` catch the panic of a
 //! method (`catch_unwind`) and hand it to C as an error, so an api crate is
@@ -17,19 +19,19 @@ mod agent;
 mod error;
 mod ffi;
 
-pub use agent::{Agent, Retained};
+pub use agent::{Agent, ObjectCx, Retained};
 pub use error::{ApiError, ErrorKind};
 
 /// Paths the exports of `#[yanet_sdk::api]` expand to; not part of the API.
 #[doc(hidden)]
 pub mod __private {
     pub use yanet_sys::{
-        bindings::{agent, cp_module, yanet_error},
-        cp::{Built, FfiRecord},
+        bindings::{agent, cp_module, cp_object, yanet_error},
+        cp::{Built, BuiltObject, FfiRecord},
     };
 
     pub use crate::{
         Agent, ApiError,
-        ffi::{build, c_str, free, record, slice_of},
+        ffi::{build, c_str, free, handle, query, record, slice_of},
     };
 }

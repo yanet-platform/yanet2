@@ -40,6 +40,11 @@
 //!     })
 //! }
 //! ```
+//!
+//! State that outlives the configurations, rebuilt whole on every update, is
+//! an [`Object`]: built the same way by [`ObjectBuilder`], over a scope that
+//! registers no counter and links no device, published by name before a
+//! module links it and released by its owner once no generation holds it.
 
 #![no_std]
 #![forbid(unsafe_code)]
@@ -59,12 +64,12 @@ pub use yanet_sys::{
     },
     common::lpm::{Lpm4, Lpm6, LpmRange},
     cp::{
-        BlockAddr, Build, BuildError, Builder, Built, Context, FfiRecord, Header, Owned, OwnedSlice, Owner, Refusal,
-        Registered, Scope, Stage, Staged,
+        BlockAddr, Build, BuildError, Builder, Built, BuiltObject, Context, FfiRecord, Header, Kind, ModuleKind,
+        ObjectBuilder, ObjectKind, Owned, OwnedSlice, Owner, Refusal, Registered, Scope, Stage, Staged,
     },
     dp::{
-        Batch, CommitCx, Counter, CounterLayout, CounterRef, Cx, Device, DeviceRef, DscpMark, Module, Packet,
-        PacketView, ResizeError, Traffic, TunnelError, Verdict,
+        Batch, CommitCx, Counter, CounterLayout, CounterRef, Cx, Device, DeviceRef, DscpMark, Module, Object,
+        ObjectConfig, Packet, PacketView, ResizeError, Traffic, TunnelError, Verdict,
     },
 };
 
@@ -90,6 +95,39 @@ use yanet_sdk_testing as _;
 /// refusal produces, and the accepted twin of the ranges case.
 #[cfg(doctest)]
 mod doctests {
+
+    /// An object scope registers no counter: an object header carries no
+    /// module counter registry.
+    ///
+    /// ```compile_fail,E0599
+    /// use yanet_sdk::{BuildError, ObjectKind, Owner, Scope};
+    /// fn count<W: Owner>(scope: Scope<'_, '_, W, BuildError<W::Error>, ObjectKind>) {
+    ///     let _ = scope.counter::<u64>("hits");
+    /// }
+    /// ```
+    struct ObjectCounterRefused;
+
+    /// An object scope links no device: an object header carries no module
+    /// device list.
+    ///
+    /// ```compile_fail,E0599
+    /// use yanet_sdk::{BuildError, ObjectKind, Owner, Scope};
+    /// fn link<W: Owner>(scope: Scope<'_, '_, W, BuildError<W::Error>, ObjectKind>) {
+    ///     let _ = scope.device("eth0");
+    /// }
+    /// ```
+    struct ObjectDeviceRefused;
+
+    /// A module scope registers both, the accepted twin of the two above.
+    ///
+    /// ```
+    /// use yanet_sdk::{BuildError, ModuleKind, Owner, Scope};
+    /// fn register<W: Owner>(scope: Scope<'_, '_, W, BuildError<W::Error>, ModuleKind>) {
+    ///     let _ = scope.counter::<u64>("hits");
+    ///     let _ = scope.device("eth0");
+    /// }
+    /// ```
+    struct ModuleCounterAndDeviceAccepted;
 
     /// A caller's replacement alignment limit cannot admit over-aligned
     /// storage.
