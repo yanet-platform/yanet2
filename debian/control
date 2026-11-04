@@ -43,6 +43,7 @@ Architecture: amd64 arm64
 Depends: ${shlibs:Depends}
  , ${misc:Depends}
  , libyaml-0-2
+Breaks: yanet2-bird-adapter (<< ${binary:Version})
 Description: Yanet2 controlplane component
  Control plane for Yanet2 network stack.
  .

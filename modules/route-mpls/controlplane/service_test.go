@@ -150,6 +150,28 @@ func Test_RouteMPLSService_UpdateConfig_UpdateAndWithdraw(t *testing.T) {
 	assert.Len(t, show.Rules, 1)
 }
 
+// Test_RouteMPLSService_UpdateConfig_UnknownConfig verifies that changes to a
+// config this service does not hold report NotFound and publish nothing, so
+// they never replace a table the dataplane may still run.
+func Test_RouteMPLSService_UpdateConfig_UnknownConfig(t *testing.T) {
+	svc := newTestService(t)
+	ctx := t.Context()
+
+	_, err := svc.UpdateConfig(ctx, &routemplspb.UpdateConfigRequest{
+		Name: "mpls0",
+		Updates: []*routemplspb.UpdateEvent{
+			{Event: &routemplspb.UpdateEvent_Update{
+				Update: makeRule(t, "10.0.1.0/24", "203.0.113.2", 200),
+			}},
+		},
+	})
+	require.Equal(t, codes.NotFound, status.Code(err))
+
+	list, err := svc.ListConfigs(ctx, &routemplspb.ListConfigsRequest{})
+	require.NoError(t, err)
+	assert.Empty(t, list.Configs)
+}
+
 // Test_RouteMPLSService_UpdateConfig_WithdrawWithoutSourceIP verifies that a
 // withdraw with source, weight, and counter unset still removes the nexthop.
 func Test_RouteMPLSService_UpdateConfig_WithdrawWithoutSourceIP(t *testing.T) {

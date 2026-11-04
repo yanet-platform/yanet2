@@ -32,6 +32,13 @@ func testRouteMPLS(t *testing.T, fw *framework.TestFramework) {
 		t.Logf("Successfully inserted routes 10.0.0.0/8 and ccee::0/16")
 	})
 
+	fw.Run("Create_RouteMPLS_Config", func(fw *framework.TestFramework, t *testing.T) {
+		// Updates change an existing config only, so create it first.
+		output, err := fw.ExecuteCommand(framework.CLIRouteMPLS + " create --name route-mpls")
+		require.NoError(t, err, "Failed to create route-mpls config")
+		t.Logf("Create config output: %s", output)
+	})
+
 	fw.Run("Insert_Static_RouteMPLS-4-4", func(fw *framework.TestFramework, t *testing.T) {
 		// Insert route with the nexthop (do_flush is automatic in insert command)
 		output, err := fw.ExecuteCommand(framework.CLIRouteMPLS + " update --name route-mpls -p 5.0.0.0/9 --dst 10.12.1.1 --src 4.2.4.2 --label 45 --weight 5 --counter 4-4")

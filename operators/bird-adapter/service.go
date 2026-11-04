@@ -396,8 +396,15 @@ func (m *AdapterService) processBirdImport(
 	}
 	currentStream := &stream
 
-	routeMPLSClient := routemplspb.NewRouteMPLSServiceClient(conn)
-	mplsRib := mpls.NewRib()
+	// The sync keeps the route-mpls config in step with the MPLS routes,
+	// across control-plane restarts and failed pushes.
+	mplsSync := mpls.NewSync(
+		name,
+		routemplspb.NewRouteMPLSServiceClient(conn),
+		mplsV4Src,
+		mplsV6Src,
+		mpls.WithLog(clientLog),
+	)
 
 	log := m.log.With(zap.String("config", name))
 
@@ -407,9 +414,6 @@ func (m *AdapterService) processBirdImport(
 		log.Debug("processing BIRD routes",
 			zap.Int("count", len(routes)),
 		)
-
-		// Batch mpls module updates
-		mplsUpdates := make([]*routemplspb.UpdateEvent, 0)
 
 		for idx := range routes {
 			select {
@@ -434,41 +438,7 @@ func (m *AdapterService) processBirdImport(
 
 			if routes[idx].RD != 0 {
 				// Assume it is a MPLS route
-				updates := mplsRib.Apply(routes[idx])
-				for idx := range updates {
-					update := updates[idx]
-					source := mplsV4Src
-					if update.Prefix.Addr().Is6() {
-						source = mplsV6Src
-					}
-					rule, err := rib.ToPBMPLSRoute(&update, source)
-					if err != nil {
-						clientLog.Debug("mpls route cannot be converted to protobuf, skip",
-							zap.String("prefix", update.Prefix.String()),
-							zap.Error(err),
-						)
-						continue
-					}
-					if update.ToRemove {
-						mplsUpdates = append(
-							mplsUpdates,
-							&routemplspb.UpdateEvent{
-								Event: &routemplspb.UpdateEvent_Withdraw{
-									Withdraw: rule,
-								},
-							},
-						)
-					} else {
-						mplsUpdates = append(
-							mplsUpdates,
-							&routemplspb.UpdateEvent{
-								Event: &routemplspb.UpdateEvent_Update{
-									Update: rule,
-								},
-							},
-						)
-					}
-				}
+				mplsSync.Apply(routes[idx])
 				continue
 			}
 
@@ -492,15 +462,13 @@ func (m *AdapterService) processBirdImport(
 			}
 		}
 
-		if len(mplsUpdates) > 0 {
-			// Send mpls routes
-			_, err := routeMPLSClient.UpdateConfig(ctx, &routemplspb.UpdateConfigRequest{
-				Name:    name,
-				Updates: mplsUpdates,
-			})
-			if err != nil {
-				return fmt.Errorf("send BIRD route mpls update failed: %w", err)
-			}
+		// A route-mpls failure must not hold back the IP routes: the MPLS
+		// changes stay queued and a later batch pushes them again, unless
+		// route-mpls rejects them as invalid.
+		if err := mplsSync.Push(ctx); err != nil {
+			log.Warn("failed to push mpls routes",
+				zap.Error(err),
+			)
 		}
 
 		return nil

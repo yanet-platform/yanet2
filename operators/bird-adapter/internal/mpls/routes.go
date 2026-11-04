@@ -269,6 +269,22 @@ func (m mplsRouteList) Update(
 	return m, routeListBestDiff(newRoutes, oldRoutes)
 }
 
+// Best returns the best routes of every prefix, the table a whole-table
+// resend publishes.
+func (m *Rib) Best() []rib.Route {
+	var routes []rib.Route
+	for _, list := range m.routes.Dump() {
+		routes = append(routes, list.Best()...)
+	}
+	return routes
+}
+
+// Best returns the routes that tie for best: equal preference, AS-path
+// length and MED.
+func (m mplsRouteList) Best() []rib.Route {
+	return routeListBest(m.routes)
+}
+
 func (m *Rib) Apply(route rib.Route) []rib.Route {
 	key := mplsRouteKey{
 		destination: route.NextHop,
