@@ -14,8 +14,8 @@ use core::{
 
 use yanet_packet as _;
 use yanet_sdk::{
-    Batch, Build, BuiltObject, CommitCx, Counter, Cx, Device, Kind, Module, Object, ObjectBuilder, OwnedSlice, Refusal,
-    Registered, ShmBox, ShmLayout, ShmSlice, Traffic, Verdict,
+    Batch, Build, BuiltObject, CommitCx, Counter, Cx, Device, Kind, Module, Object, ObjectBuilder, ObjectLink,
+    OwnedSlice, Refusal, Registered, ShmBox, ShmLayout, ShmSlice, Traffic, Verdict,
 };
 use yanet_sdk_derive as _;
 use yanet_sdk_testing::{
@@ -24,6 +24,7 @@ use yanet_sdk_testing::{
 };
 use yanet_shm as _;
 use yanet_sys::{
+    bindings::CP_OBJECT_NAME_LEN,
     cp::{BuildError, Builder, Built, Header, MemoryContext, Owner, Scope},
     dp::ModuleConfig,
 };
@@ -889,4 +890,172 @@ fn test_test_owner_records_a_header_finalised_as_the_other_kind() {
         vec!["a header finalised that is unknown, of the other kind or has live blocks"],
         owner.violations()
     );
+}
+
+/// A block of ports, then links to two policy objects: a refused link leaves
+/// the block before it to be returned.
+#[derive(ShmLayout)]
+#[repr(C)]
+struct Linked {
+    ports: ShmSlice<u64>,
+    primary: ObjectLink<PolicyState>,
+    backup: ObjectLink<PolicyState>,
+}
+
+type LinkedModule = Fixture<Linked>;
+
+/// The parts of a configuration linking the policy objects of the two names.
+fn linked<'b>(b: Scope<'b, '_, TestOwner>, names: [&str; 2]) -> Result<LinkedParts<'b, TestOwner>, Failure> {
+    Ok(LinkedParts {
+        ports: b.slice(2, |idx| Ok(80 + idx as u64))?,
+        primary: b.object(names[0])?,
+        backup: b.object(names[1])?,
+    })
+}
+
+/// verifies that a module build links each object by its type and name and
+/// writes the index the owner assigned.
+#[test]
+fn test_build_links_each_object_by_type_and_name() {
+    let owner = owner();
+
+    let built = build::<LinkedModule>(&owner, |b| linked(b, ["state0", "state1"])).expect("built");
+
+    let (config, _) = body::<LinkedModule>(&owner, &built);
+    assert_eq!(
+        (
+            (0, 1),
+            vec![
+                ("policy_state".to_string(), "state0".to_string()),
+                ("policy_state".to_string(), "state1".to_string())
+            ]
+        ),
+        ((config.primary.index(), config.backup.index()), owner.object_links())
+    );
+    release::<LinkedModule>(&owner, built);
+    owner.assert_released();
+}
+
+/// verifies that a build whose link the owner refuses, at each link, returns
+/// everything it took.
+#[test]
+fn test_build_releases_everything_when_a_link_fails_at_each_call() {
+    for allowed in 0..2 {
+        let owner = owner();
+        owner.fail_after(Call::Registration, allowed);
+
+        let err = build::<LinkedModule>(&owner, |b| linked(b, ["state0", "state1"])).expect_err("refused link");
+
+        assert_eq!(BuildError::Owner(TestError::Registration), err);
+        owner.assert_released();
+    }
+}
+
+/// verifies that an object name C would cut short is refused before the owner
+/// is asked, and the build returns everything it took.
+#[test]
+fn test_build_refuses_an_object_name_that_does_not_fit_its_c_field() {
+    let overlong = "s".repeat(CP_OBJECT_NAME_LEN as usize);
+    for name in [overlong.as_str(), "sta\0te", ""] {
+        let owner = owner();
+
+        let err = build::<LinkedModule>(&owner, |b| linked(b, ["state0", name])).expect_err("refused name");
+
+        assert_eq!(
+            (BuildError::Refused(Refusal::InvalidName), 1),
+            (err, owner.object_links().len())
+        );
+        owner.assert_released();
+    }
+}
+
+/// verifies that an object name filling its C field with the terminator is
+/// linked whole.
+#[test]
+fn test_build_links_an_object_name_that_fills_its_c_field() {
+    let owner = owner();
+    let name = "s".repeat(CP_OBJECT_NAME_LEN as usize - 1);
+
+    let built = build::<LinkedModule>(&owner, |b| linked(b, ["state0", &name])).expect("built");
+
+    assert_eq!(Some(name), owner.object_links().pop().map(|(_, name)| name));
+    release::<LinkedModule>(&owner, built);
+    owner.assert_released();
+}
+
+/// verifies that a pair linked twice is linked once, as C does: both fields
+/// hold the same index.
+#[test]
+fn test_build_links_the_same_object_twice_at_one_index() {
+    let owner = owner();
+
+    let built = build::<LinkedModule>(&owner, |b| linked(b, ["state0", "state0"])).expect("built");
+
+    let (config, _) = body::<LinkedModule>(&owner, &built);
+    assert_eq!(
+        ((0, 0), 1),
+        (
+            (config.primary.index(), config.backup.index()),
+            owner.object_links().len()
+        )
+    );
+    release::<LinkedModule>(&owner, built);
+    owner.assert_released();
+}
+
+/// An object type other than [`PolicyState`] of the same configuration.
+struct OtherState;
+
+impl Object for OtherState {
+    const TYPE: &'static str = "other_state";
+    type Config = Policy;
+}
+
+/// A counter, then links to one name under two object types.
+#[derive(ShmLayout)]
+#[repr(C)]
+struct Mixed {
+    hits: Counter,
+    policy: ObjectLink<PolicyState>,
+    other: ObjectLink<OtherState>,
+}
+
+type MixedModule = Fixture<Mixed>;
+
+/// Builds the mixed configuration, linking `state0` under both types.
+fn build_mixed(owner: &TestOwner) -> Built<MixedModule, TestOwner> {
+    build::<MixedModule>(owner, |b| {
+        Ok(MixedParts {
+            hits: b.counter("hits")?,
+            policy: b.object("state0")?,
+            other: b.object("state0")?,
+        })
+    })
+    .expect("built")
+}
+
+#[test]
+fn test_build_links_one_name_under_two_types_at_distinct_indexes() {
+    let owner = owner();
+
+    let built = build_mixed(&owner);
+
+    let (config, _) = body::<MixedModule>(&owner, &built);
+    assert_eq!((0, 1), (config.policy.index(), config.other.index()));
+    release::<MixedModule>(&owner, built);
+    owner.assert_released();
+}
+
+/// verifies that object links are numbered apart from counters: a counter
+/// registered first leaves the first link at index zero.
+#[test]
+fn test_build_numbers_object_links_apart_from_counters() {
+    let owner = owner();
+
+    let built = build_mixed(&owner);
+
+    let (config, _) = body::<MixedModule>(&owner, &built);
+    assert_eq!((0, 0), (config.hits.id(), config.policy.index()));
+    release::<MixedModule>(&owner, built);
+    owner.assert_released();
 }

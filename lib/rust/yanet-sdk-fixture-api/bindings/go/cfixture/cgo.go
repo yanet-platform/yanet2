@@ -1,8 +1,8 @@
 //go:build sdk_rust_fixtures
 
 // Package cfixture is the Go binding of the SDK fixture api, the control-plane
-// side of the fixture, tally, fib and assign modules that the SDK's tests run
-// packets through, and of the state object type.
+// side of the fixture, tally, fib, assign and stash modules that the SDK's
+// tests run packets through, and of the state object type.
 package cfixture
 
 /*
@@ -51,6 +51,17 @@ yanet_cp_yanet_sdk_fixture_api__fib_build(
 
 int
 yanet_cp_yanet_sdk_fixture_api__fib_free(
+	struct cp_module *module, yanet_error **err
+);
+
+struct cp_module *
+yanet_cp_yanet_sdk_fixture_api__stash_build(
+	struct agent *agent, const char *name, const char *state,
+	yanet_error **err
+);
+
+int
+yanet_cp_yanet_sdk_fixture_api__stash_free(
 	struct cp_module *module, yanet_error **err
 );
 
@@ -468,6 +479,41 @@ func NewFibConfig(agent *ffi.Agent, name string, fib Fib) (*ModuleConfig, error)
 func freeFib(ptr unsafe.Pointer) (int, unsafe.Pointer, error) {
 	var cErr *C.yanet_error
 	rc, errno := C.yanet_cp_yanet_sdk_fixture_api__fib_free((*C.struct_cp_module)(ptr), &cErr)
+	return int(rc), unsafe.Pointer(cErr), errno
+}
+
+// NewStashConfig builds a stash configuration named name over the agent,
+// linking the state object named state, which a generation must hold when the
+// configuration is installed.
+func NewStashConfig(agent *ffi.Agent, name, state string) (*ModuleConfig, error) {
+	if err := refuseNUL(name, state); err != nil {
+		return nil, fmt.Errorf("failed to build stash config: %w", err)
+	}
+	cName := C.CString(name)
+	defer C.free(unsafe.Pointer(cName))
+	cState := C.CString(state)
+	defer C.free(unsafe.Pointer(cState))
+
+	var cErr *C.yanet_error
+	ptr := C.yanet_cp_yanet_sdk_fixture_api__stash_build(
+		(*C.struct_agent)(agent.AsRawPtr()),
+		cName,
+		cState,
+		&cErr,
+	)
+	if ptr == nil {
+		return nil, fmt.Errorf("failed to build stash config: %w", cerrors.FromC(unsafe.Pointer(cErr)))
+	}
+
+	return &ModuleConfig{
+		ptr:  ffi.NewModuleConfig(unsafe.Pointer(ptr)),
+		free: freeStash,
+	}, nil
+}
+
+func freeStash(ptr unsafe.Pointer) (int, unsafe.Pointer, error) {
+	var cErr *C.yanet_error
+	rc, errno := C.yanet_cp_yanet_sdk_fixture_api__stash_free((*C.struct_cp_module)(ptr), &cErr)
 	return int(rc), unsafe.Pointer(cErr), errno
 }
 

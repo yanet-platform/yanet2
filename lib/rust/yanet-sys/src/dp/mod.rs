@@ -22,11 +22,17 @@
 //!   derived, and its prepared buffer is allocated when the module declares a
 //!   prepared size. It calls the commit hook only for an allocated buffer,
 //!   after deriving the context's absolute fields, as the single writer of that
-//!   buffer.
+//!   buffer. It derives the absolute fields of the object contexts a module
+//!   context links before those of the module context
+//!   (`config_gen_ectx_resolve_counters`,
+//!   `lib/dataplane/config/gen_resolve.c`).
 //! - **binding**: the loader registers the descriptor under the module's name
 //!   and the dataplane calls a module's handlers only with contexts of that
 //!   module, whose configuration the control plane built with the body type the
-//!   module declares.
+//!   module declares. An object type is registered under its type name, and the
+//!   plugin exporting it, the api crate building its objects and every module
+//!   linking one use the one Rust type of that name, so the object a link
+//!   resolves to holds the body and prepared value that type declares.
 //! - **frozen**: configuration bytes are frozen after publish and
 //!   execution-context bytes once the context is released to its worker; C
 //!   writes only `Opaque` bytes and atomics of configurations.
@@ -73,8 +79,8 @@ pub mod object;
 pub mod rt;
 
 pub use batch::{Batch, DeviceRef, DscpMark, Packet, PacketView, ResizeError, TunnelError, Verdict};
-pub use cx::{BoundCounter, CommitCx, CounterRef, Cx};
-pub use fields::{Counter, CounterLayout, Device, Traffic};
+pub use cx::{BoundCounter, CommitCx, CounterRef, Cx, ModuleCx};
+pub use fields::{Counter, CounterLayout, Device, ObjectLink, Traffic};
 pub use module::{Module, ModuleConfig};
 pub use object::{Object, ObjectConfig};
 

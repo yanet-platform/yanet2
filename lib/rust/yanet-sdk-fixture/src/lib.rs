@@ -6,17 +6,19 @@
 //! has a prepared value made at commit, and counts. [`Fib`] forwards by a
 //! route FIB. [`assign::Assign`] passes or drops by the first rule a packet
 //! matches, through the classify bindings. [`State`] is an object type: state
-//! that outlives the configurations, changed by the control plane.
+//! that outlives the configurations, changed by the control plane and by
+//! [`Stash`], which links it.
 
 #![no_std]
 #![forbid(unsafe_code)]
 
 pub mod assign;
 
-use core::sync::atomic::AtomicU64;
+use core::sync::atomic::{AtomicU64, Ordering};
 
 use yanet_sdk::{
-    Batch, CommitCx, Counter, CounterRef, Cx, Device, Lpm4, Lpm6, Module, Object, ShmLayout, ShmSlice, Traffic, Verdict,
+    Batch, CommitCx, Counter, CounterRef, Cx, Device, Lpm4, Lpm6, Module, Object, ObjectLink, ShmLayout, ShmSlice,
+    Traffic, Verdict,
 };
 // The plugin examples use it.
 #[cfg(feature = "plugin")]
@@ -354,4 +356,37 @@ pub struct State;
 impl Object for State {
     const TYPE: &'static str = "fixture_state";
     type Config = StateConfig;
+}
+
+/// The configuration of [`Stash`]: the state object it writes, linked by
+/// name.
+#[derive(ShmLayout)]
+#[repr(C)]
+pub struct StashConfig {
+    pub state: ObjectLink<State>,
+}
+
+/// Adds one to the slot of the linked state object that the first byte of a
+/// packet selects, modulo the slot count, and passes every packet; an empty
+/// packet or an object without slots changes nothing.
+pub struct Stash;
+
+impl Module for Stash {
+    const NAME: &'static str = "stash";
+    type Config = StashConfig;
+    type Prepared<'p> = ();
+
+    fn handle<'id>(cx: &mut Cx<'id, Self>, batch: &mut Batch<'id>) {
+        let slots = cx.config().state.get(cx).slots.as_slice(cx);
+        batch.dispatch(|packet| {
+            if let Some(&byte) = packet.data().first()
+                && !slots.is_empty()
+            {
+                slots[usize::from(byte) % slots.len()].fetch_add(1, Ordering::Relaxed);
+            }
+            Verdict::Pass
+        });
+    }
+
+    fn prepare(_: &CommitCx<'_, Self>) {}
 }

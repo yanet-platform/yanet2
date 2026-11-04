@@ -601,4 +601,26 @@ unsafe impl Owner for Agent {
         }
         Ok(index)
     }
+
+    unsafe fn link_object(&self, header: Header, ty: &str, name: &str) -> Result<u64, ApiError> {
+        let ty = c_name::<{ CP_OBJECT_TYPE_LEN as usize }>(ty)?;
+        let name = c_name::<{ CP_OBJECT_NAME_LEN as usize }>(name)?;
+        let (mut index, mut chain) = (0, ptr::null_mut());
+        // SAFETY: the header is initialised (caller contract); the names are
+        // NUL terminated and the out-parameters are valid.
+        if unsafe {
+            bindings::cp_module_link_object(
+                header_at::<bindings::cp_module>(self, header),
+                ty.as_ptr().cast::<c_char>(),
+                name.as_ptr().cast::<c_char>(),
+                &mut index,
+                &mut chain,
+            )
+        } != 0
+        {
+            // SAFETY: the chain C wrote, if any, is ours alone.
+            return Err(unsafe { from_c_chain(chain) });
+        }
+        Ok(index)
+    }
 }

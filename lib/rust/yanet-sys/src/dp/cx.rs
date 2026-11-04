@@ -9,8 +9,9 @@ use crate::{
     counters::counter_get_address,
     dp::{
         batch::DeviceRef,
-        fields::{Counter, CounterLayout, Device},
+        fields::{Counter, CounterLayout, Device, ObjectLink},
         module::Module,
+        object::{Object, ObjectConfig},
     },
 };
 
@@ -364,6 +365,43 @@ unsafe impl<'c, M: Module> Resolve<'c> for CommitCx<'c, M> {
     }
 }
 
+/// A context of a module's call or of its prepare pass, either of which
+/// resolves the module's [`ObjectLink`]s.
+///
+/// Sealed: the contexts are [`Cx`] and [`CommitCx`].
+pub trait ModuleCx<'id>: Resolve<'id> + sealed::Sealed {}
+
+impl<'id, M: Module> ModuleCx<'id> for Cx<'id, M> {}
+
+impl<'c, M: Module> ModuleCx<'c> for CommitCx<'c, M> {}
+
+mod sealed {
+    use core::ptr::NonNull;
+
+    use crate::{bindings, dp::Module};
+
+    /// What a module context holds for the links, out of the public surface.
+    pub trait Sealed {
+        /// The module's execution context, frozen while the context lives,
+        /// with its absolute fields derived.
+        fn module_ectx(&self) -> NonNull<bindings::module_ectx>;
+    }
+
+    impl<M: Module> Sealed for super::Cx<'_, M> {
+        #[inline(always)]
+        fn module_ectx(&self) -> NonNull<bindings::module_ectx> {
+            self.ectx
+        }
+    }
+
+    impl<M: Module> Sealed for super::CommitCx<'_, M> {
+        #[inline(always)]
+        fn module_ectx(&self) -> NonNull<bindings::module_ectx> {
+            self.ectx
+        }
+    }
+}
+
 /// Address of the context's worker's value of a counter, as C's
 /// `counter_get_address(id, ectx->abs_counter_storage)`.
 ///
@@ -468,5 +506,49 @@ fn device_target<'id, M: Module>(cx: &Cx<'id, M>, device: &'id Device, input: bo
             return None;
         }
         Some(DeviceRef::new(NonNull::new_unchecked(target), input))
+    }
+}
+
+impl<O: Object> ObjectLink<O> {
+    /// The linked object's configuration in the running generation, as C's
+    /// `object_link_get_address(...)->abs_object_ectx->abs_cp_object` finds
+    /// it.
+    ///
+    /// Always there: the link was recorded by the build of this configuration,
+    /// and C installs no configuration whose link the generation does not
+    /// resolve to an object of the type and name.
+    #[inline(always)]
+    pub fn get<'id>(&'id self, cx: &impl ModuleCx<'id>) -> &'id O::Config {
+        let root = cx.shm_root();
+        let object_ectx = linked_object_ectx(cx, self.index());
+        // SAFETY: the object context is frozen and its absolute fields were
+        // derived before the module's (attach: call, frozen); the object is
+        // one of type `O`, as C resolves the link by its type name, whose
+        // body is frozen except for its atomics and outlives the generation
+        // (attach: binding, frozen, reclaim).
+        unsafe {
+            let cp_object = (*object_ectx).abs_cp_object;
+            (*root.ptr::<ObjectConfig<O::Config>>(cp_object.addr())).body()
+        }
+    }
+}
+
+/// The execution context of the object behind a link of the module, for the
+/// context's worker.
+#[inline(always)]
+fn linked_object_ectx<'id>(cx: &impl ModuleCx<'id>, index: u64) -> *const bindings::object_ectx {
+    let root = cx.shm_root();
+    let ectx = cx.module_ectx().as_ptr();
+    // SAFETY: the module context is frozen with its absolute fields derived
+    // (attach: frozen, publish); a built link index is below the link count,
+    // as the configuration this context runs recorded the link and C
+    // installed it resolved.
+    unsafe {
+        debug_assert!(
+            index < (*ectx).object_link_count,
+            "an object link beyond the links of the module context"
+        );
+        let links = root.ptr::<bindings::module_object_link_ectx>((*ectx).abs_object_links.addr());
+        root.ptr::<bindings::object_ectx>((*links.add(index as usize)).abs_object_ectx.addr())
     }
 }

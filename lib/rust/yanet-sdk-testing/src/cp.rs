@@ -5,7 +5,10 @@
 //! C object, such as an LPM, is built over the real agent in the C harness,
 //! from Go tests.
 
-use alloc::vec::Vec;
+use alloc::{
+    string::{String, ToString},
+    vec::Vec,
+};
 use core::{
     cell::{Cell, RefCell},
     error::Error,
@@ -22,7 +25,7 @@ use crate::BlockArena;
 pub enum Call {
     /// Allocating a block, the header's included.
     Alloc,
-    /// Registering a counter or linking a device.
+    /// Registering a counter or linking a device or an object.
     Registration,
     /// Initialising the header of a configuration or an object.
     Header,
@@ -69,6 +72,11 @@ pub struct TestOwner {
     registered: Cell<u64>,
     /// Size of each counter registered, in the order of the registrations.
     counter_sizes: RefCell<Vec<u64>>,
+    /// Header, type and name of each object link made, in the order of the
+    /// links; a header's links are numbered in its own order, as C numbers
+    /// them in the module's object list. The arena never reuses a header's
+    /// address, so the links of a finalised header stay recorded.
+    object_links: RefCell<Vec<(Header, String, String)>>,
     /// Calls left before each kind fails, for good; `None` never fails.
     countdowns: [Cell<Option<usize>>; 3],
     /// What the builder did wrong; recorded, as the returns run from
@@ -91,6 +99,7 @@ impl TestOwner {
             headers: RefCell::default(),
             registered: Cell::new(0),
             counter_sizes: RefCell::default(),
+            object_links: RefCell::default(),
             countdowns: Default::default(),
             violations: RefCell::default(),
         }
@@ -106,6 +115,17 @@ impl TestOwner {
     /// those refused included.
     pub fn counter_sizes(&self) -> Vec<u64> {
         self.counter_sizes.borrow().clone()
+    }
+
+    /// Type and name of each object link made, in the order of the links;
+    /// a pair linked again to the same header is listed once, and a refused
+    /// link not at all.
+    pub fn object_links(&self) -> Vec<(String, String)> {
+        self.object_links
+            .borrow()
+            .iter()
+            .map(|(_, ty, name)| (ty.clone(), name.clone()))
+            .collect()
     }
 
     pub fn live_blocks(&self) -> usize {
@@ -254,5 +274,25 @@ unsafe impl Owner for TestOwner {
 
     unsafe fn link_device(&self, _header: Header, _name: &str) -> Result<u64, TestError> {
         self.register()
+    }
+
+    unsafe fn link_object(&self, header: Header, ty: &str, name: &str) -> Result<u64, TestError> {
+        // The links of a header are numbered from zero, apart from its
+        // counters and devices, and a pair linked before gets its index again
+        // with no call that may fail, as `cp_module_link_object` does.
+        let mut links = self.object_links.borrow_mut();
+        let own = links.iter().filter(|link| link.0 == header);
+        if let Some(index) = own
+            .clone()
+            .position(|link| (link.1.as_str(), link.2.as_str()) == (ty, name))
+        {
+            return Ok(index as u64);
+        }
+        let index = own.count() as u64;
+        if self.fails(Call::Registration) {
+            return Err(TestError::Registration);
+        }
+        links.push((header, ty.to_string(), name.to_string()));
+        Ok(index)
     }
 }

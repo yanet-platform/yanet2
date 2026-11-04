@@ -43,8 +43,50 @@
 //!
 //! State that outlives the configurations, rebuilt whole on every update, is
 //! an [`Object`]: built the same way by [`ObjectBuilder`], over a scope that
-//! registers no counter and links no device, published by name before a
-//! module links it and released by its owner once no generation holds it.
+//! registers no counter and links no device or object, published by name
+//! before a module links it and released by its owner once no generation holds
+//! it. A module's scope links it by type and name into an [`ObjectLink`] field,
+//! which the handler resolves to the object's configuration:
+//!
+//! ```
+//! use core::sync::atomic::{AtomicU64, Ordering};
+//!
+//! use yanet_sdk::{Cx, Module, Object, ObjectLink, ShmLayout, ShmSlice};
+//!
+//! #[derive(ShmLayout)]
+//! #[repr(C)]
+//! struct StateConfig {
+//!     slots: ShmSlice<AtomicU64>,
+//! }
+//!
+//! struct State;
+//!
+//! impl Object for State {
+//!     const TYPE: &'static str = "state";
+//!     type Config = StateConfig;
+//! }
+//!
+//! #[derive(ShmLayout)]
+//! #[repr(C)]
+//! struct Config {
+//!     state: ObjectLink<State>,
+//! }
+//!
+//! fn config<'b, W: yanet_sdk::Owner, E: From<yanet_sdk::BuildError<W::Error>>>(
+//!     scope: yanet_sdk::Scope<'b, '_, W, E>,
+//! ) -> Result<ConfigParts<'b, W>, E> {
+//!     Ok(ConfigParts {
+//!         state: scope.object::<State>("state0")?,
+//!     })
+//! }
+//!
+//! fn touch<'id, M: Module<Config = Config>>(cx: &Cx<'id, M>) {
+//!     let state = cx.config().state.get(cx);
+//!     if let Some(slot) = state.slots.as_slice(cx).first() {
+//!         slot.fetch_add(1, Ordering::Relaxed);
+//!     }
+//! }
+//! ```
 
 #![no_std]
 #![forbid(unsafe_code)]
@@ -68,8 +110,8 @@ pub use yanet_sys::{
         ObjectBuilder, ObjectKind, Owned, OwnedSlice, Owner, Refusal, Registered, Scope, Stage, Staged,
     },
     dp::{
-        Batch, CommitCx, Counter, CounterLayout, CounterRef, Cx, Device, DeviceRef, DscpMark, Module, Object,
-        ObjectConfig, Packet, PacketView, ResizeError, Traffic, TunnelError, Verdict,
+        Batch, CommitCx, Counter, CounterLayout, CounterRef, Cx, Device, DeviceRef, DscpMark, Module, ModuleCx, Object,
+        ObjectConfig, ObjectLink, Packet, PacketView, ResizeError, Traffic, TunnelError, Verdict,
     },
 };
 
@@ -118,16 +160,39 @@ mod doctests {
     /// ```
     struct ObjectDeviceRefused;
 
-    /// A module scope registers both, the accepted twin of the two above.
+    /// An object scope links no object: an object header carries no module
+    /// object links.
+    ///
+    /// ```compile_fail,E0599
+    /// use yanet_sdk::{BuildError, Object, ObjectKind, Owner, Scope};
+    /// struct State;
+    /// impl Object for State {
+    ///     const TYPE: &'static str = "state";
+    ///     type Config = u64;
+    /// }
+    /// fn link<W: Owner>(scope: Scope<'_, '_, W, BuildError<W::Error>, ObjectKind>) {
+    ///     let _ = scope.object::<State>("state");
+    /// }
+    /// ```
+    struct ObjectObjectRefused;
+
+    /// A module scope registers all three, the accepted twin of the three
+    /// above.
     ///
     /// ```
-    /// use yanet_sdk::{BuildError, ModuleKind, Owner, Scope};
+    /// use yanet_sdk::{BuildError, ModuleKind, Object, Owner, Scope};
+    /// struct State;
+    /// impl Object for State {
+    ///     const TYPE: &'static str = "state";
+    ///     type Config = u64;
+    /// }
     /// fn register<W: Owner>(scope: Scope<'_, '_, W, BuildError<W::Error>, ModuleKind>) {
     ///     let _ = scope.counter::<u64>("hits");
     ///     let _ = scope.device("eth0");
+    ///     let _ = scope.object::<State>("state");
     /// }
     /// ```
-    struct ModuleCounterAndDeviceAccepted;
+    struct ModuleCounterDeviceAndObjectAccepted;
 
     /// A caller's replacement alignment limit cannot admit over-aligned
     /// storage.

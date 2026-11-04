@@ -47,7 +47,7 @@ func newBed(t *testing.T, adjust ...func(*dataplaneut.Config)) *bed {
 		DPMemory:      uint64(4 * datasize.MB),
 		WorkerCount:   workerCount,
 		Devices:       []string{"port0"},
-		Modules:       []string{"fixture", "tally", "fib", "assign"},
+		Modules:       []string{"fixture", "tally", "fib", "assign", "stash"},
 		DevicesToLoad: []string{"plain"},
 		ObjectsToLoad: []string{cfixture.StateType},
 		PluginDir:     cfixture.PluginDir,

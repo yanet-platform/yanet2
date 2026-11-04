@@ -121,4 +121,13 @@ pub unsafe trait Owner: 'static {
     ///
     /// As for [`Owner::register_counter`].
     unsafe fn link_device(&self, header: Header, name: &str) -> Result<u64, Self::Error>;
+
+    /// Links the object of a type and name to the module and returns its
+    /// index, as `cp_module_link_object` does: a pair linked before keeps its
+    /// index.
+    ///
+    /// # Safety
+    ///
+    /// As for [`Owner::register_counter`].
+    unsafe fn link_object(&self, header: Header, ty: &str, name: &str) -> Result<u64, Self::Error>;
 }

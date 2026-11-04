@@ -29,6 +29,9 @@ pub enum Refusal {
     /// A join or a decode of stages or a projection over rulesets of
     /// different sizes; `YANET_ERROR_INVALID_ARGUMENT`.
     RuleSetMismatch,
+    /// A name that is empty, holds a NUL or does not fit its C field with the
+    /// terminator, which C would cut short; `YANET_ERROR_INVALID_ARGUMENT`.
+    InvalidName,
 }
 
 impl Refusal {
@@ -42,6 +45,7 @@ impl Refusal {
             Self::InvalidMask => "a network mask is not contiguous",
             Self::TooManyItems => "more items than C counts",
             Self::RuleSetMismatch => "a join or a decode over rulesets of different sizes",
+            Self::InvalidName => "a name is empty, holds a NUL or does not fit its C field",
         }
     }
 }
