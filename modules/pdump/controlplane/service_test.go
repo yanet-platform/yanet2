@@ -1005,7 +1005,8 @@ func Test_PdumpService_RefusedFree_ReleasesBindingExactlyOnce(t *testing.T) {
 
 	setRing(t, service, "capture", "A")
 	replaced := backend.Last()
-	replaced.refusals.Store(2) // refuse the first two frees
+	// A live generation pins the old module until the pin drains below.
+	replaced.refusals.Store(1 << 30)
 
 	// A same-object update retires the old module but shares its binding
 	// with the new entry, so the binding must not drop to zero even
@@ -1028,6 +1029,7 @@ func Test_PdumpService_RefusedFree_ReleasesBindingExactlyOnce(t *testing.T) {
 	require.False(t, published.freed.Load(), "the module just published must stay live")
 	require.Equal(t, 2, owner.leaseCount("A"), "capture's retained lease plus other's own lease")
 
+	replaced.refusals.Store(0)
 	setRing(t, service, "another", "A")
 	require.True(t, replaced.freed.Load(), "the module free must keep being retried until it succeeds")
 	require.False(t, published.freed.Load(), "retrying the replaced module's free must never touch the live one")
