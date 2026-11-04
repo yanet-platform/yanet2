@@ -26,6 +26,7 @@ type Export struct {
 	cfg      *Config
 	updater  Updater
 	notifier Notifier
+	onIdle   func(context.Context)
 	log      *zap.Logger
 }
 
@@ -33,12 +34,23 @@ type Export struct {
 type ExportReaderOption func(*exportReaderOptions)
 
 type exportReaderOptions struct {
-	Log *zap.Logger
+	OnIdle func(context.Context)
+	Log    *zap.Logger
 }
 
 func newExportReaderOptions() *exportReaderOptions {
 	return &exportReaderOptions{
-		Log: zap.NewNop(),
+		OnIdle: func(context.Context) {},
+		Log:    zap.NewNop(),
+	}
+}
+
+// WithExportReaderIdle sets the callback the reader runs on every dump tick
+// that finds no routes to dump, so the consumer can retry what an earlier
+// update failed to deliver without waiting for new routes.
+func WithExportReaderIdle(onIdle func(context.Context)) ExportReaderOption {
+	return func(o *exportReaderOptions) {
+		o.OnIdle = onIdle
 	}
 }
 
@@ -67,6 +79,7 @@ func NewExportReader(cfg *Config, onUpdate Updater, onFlush Notifier, options ..
 		cfg:      cfg,
 		updater:  onUpdate,
 		notifier: onFlush,
+		onIdle:   opts.OnIdle,
 		log:      opts.Log,
 	}
 }
@@ -148,6 +161,7 @@ func (m *Export) Run(ctx context.Context) error {
 				tick.Reset(m.cfg.DumpTimeout)
 			case <-tick.C:
 				if len(batch) == 0 {
+					m.onIdle(ctx)
 					continue
 				}
 				timeout = true
