@@ -54,13 +54,6 @@ loopindex:controlplane/ffi/agent.go:Agent.UpdateDevices:i:1  # legacy: rename to
 loopindex:controlplane/ffi/agent.go:Agent.UpdateModules:i:1  # legacy: rename to idx
 loopindex:controlplane/internal/xgrpc/interceptor.go:protoMarshaler.MarshalLogObject:i:1  # legacy: rename to idx
 loopindex:controlplane/internal/xgrpc/interceptor.go:protoMarshaler.MarshalLogObject:i:2  # legacy: rename to idx
-loopindex:modules/dscp/controlplane/service_test.go:Test_DscpService_ConcurrentAccess:i:1  # legacy: rename to idx
-loopindex:modules/forward/controlplane/service_test.go:TestForwardServiceConcurrentAccess:i:1  # legacy: rename to idx
-loopindex:modules/forward/controlplane/service_test.go:TestForwardServiceConcurrentAccess:i:2  # legacy: rename to idx
-loopindex:modules/forward/controlplane/service_test.go:TestForwardServiceConcurrentAccess:i:3  # legacy: rename to idx
-loopindex:modules/mirror/controlplane/service_test.go:TestMirrorServiceConcurrentAccess:i:1  # legacy: rename to idx
-loopindex:modules/mirror/controlplane/service_test.go:TestMirrorServiceConcurrentAccess:i:2  # legacy: rename to idx
-loopindex:modules/mirror/controlplane/service_test.go:TestMirrorServiceConcurrentAccess:i:3  # legacy: rename to idx
 maplit:controlplane/ffi/shm.go:DPConfig.AllModulePositions:map[string][]Chain:1  # legacy: use T{} instead of make(map...)
 maplit:controlplane/ffi/shm.go:DPConfig.AllModulePositions:map[string][]string:1  # legacy: use T{} instead of make(map...)
 maplit:modules/acl/controlplane/metrics.go:ACLService.collectDataplaneMetrics:map[string]struct{}:1  # legacy: use T{} instead of make(map...)
@@ -112,8 +105,6 @@ testctx:controlplane/internal/auth/sshkey/authenticator_test.go:TestAuthenticate
 testctx:controlplane/internal/auth/sshkey/authenticator_test.go:TestAuthenticate_UnknownUser:Background:1  # legacy: migrate to t.Context()
 testctx:controlplane/internal/auth/sshkey/authenticator_test.go:TestAuthenticate_WrongSignature:Background:1  # legacy: migrate to t.Context()
 testctx:controlplane/internal/xgrpc/interceptor_test.go:TestAccessLogInterceptor_ProtoLogValue:Background:1  # legacy: migrate to t.Context()
-testctx:modules/forward/controlplane/service_test.go:TestForwardServiceConcurrentAccess:Background:1  # legacy: migrate to t.Context()
-testctx:modules/mirror/controlplane/service_test.go:TestMirrorServiceConcurrentAccess:Background:1  # legacy: migrate to t.Context()
 testpkg:bindings/go/dataplane_ut/bench_test.go:dataplaneut:1  # legacy: migrate to the external test package
 testpkg:bindings/go/dataplane_ut/dataplane_ut_test.go:dataplaneut:1  # legacy: migrate to the external test package
 testpkg:common/commonpb/v1/ipaddr_test.go:commonpb:1  # legacy: migrate to the external test package

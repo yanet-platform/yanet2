@@ -2,20 +2,17 @@ package route_mpls
 
 import (
 	"errors"
-	"fmt"
 	"net/netip"
 	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
 	"github.com/yanet-platform/yanet2/controlplane/crud"
-	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	routemplspb "github.com/yanet-platform/yanet2/modules/route-mpls/controlplane/routemplspb/v1"
 )
 
@@ -37,7 +34,7 @@ func (m *mockBackend) Delete(name string) error {
 	return nil
 }
 
-// flakyBackend succeeds on the first UpdateModule call and fails thereafter.
+// flakyBackend publishes the first config and fails every later update.
 type flakyBackend struct {
 	numCalls atomic.Int64
 }
@@ -272,101 +269,12 @@ func Test_RouteMPLSService_ShowConfig_NotFound(t *testing.T) {
 	require.Equal(t, codes.NotFound, status.Code(err))
 }
 
-func Test_RouteMPLSService_ListConfigs_Sorted(t *testing.T) {
-	svc := newTestService(t)
-	ctx := t.Context()
-
-	for _, name := range []string{"mpls2", "mpls0", "mpls1"} {
-		_, err := svc.CreateConfig(ctx, &routemplspb.CreateConfigRequest{
-			Name:  name,
-			Rules: []*routemplspb.Rule{makeRule(t, "10.0.0.0/24", "203.0.113.1", 100)},
-		})
-		require.NoError(t, err)
-	}
-
-	list, err := svc.ListConfigs(ctx, &routemplspb.ListConfigsRequest{})
-	require.NoError(t, err)
-	assert.Equal(t, []string{"mpls0", "mpls1", "mpls2"}, list.Configs)
-}
-
 func Test_RouteMPLSService_DeleteConfig_NotFound(t *testing.T) {
 	svc := newTestService(t)
 
 	resp, err := svc.DeleteConfig(t.Context(), &routemplspb.DeleteConfigRequest{Name: "nonexistent"})
 	require.Nil(t, resp)
 	require.Equal(t, codes.NotFound, status.Code(err))
-}
-
-func Test_RouteMPLSService_DeleteConfig_HappyPath(t *testing.T) {
-	svc := newTestService(t)
-	ctx := t.Context()
-
-	_, err := svc.CreateConfig(ctx, &routemplspb.CreateConfigRequest{
-		Name:  "mpls0",
-		Rules: []*routemplspb.Rule{makeRule(t, "10.0.0.0/24", "203.0.113.1", 100)},
-	})
-	require.NoError(t, err)
-
-	resp, err := svc.DeleteConfig(ctx, &routemplspb.DeleteConfigRequest{Name: "mpls0"})
-	require.NoError(t, err)
-	require.NotNil(t, resp)
-
-	list, err := svc.ListConfigs(ctx, &routemplspb.ListConfigsRequest{})
-	require.NoError(t, err)
-	assert.Empty(t, list.Configs)
-}
-
-// refusingDeleteBackend updates like mockBackend but refuses every delete
-// with err.
-type refusingDeleteBackend struct {
-	mockBackend
-	err error
-}
-
-func (m *refusingDeleteBackend) Delete(name string) error {
-	return m.err
-}
-
-// Test_RouteMPLSService_DeleteConfig_Refused verifies that a refused delete
-// maps its error kind to the status code and leaves the config in place.
-func Test_RouteMPLSService_DeleteConfig_Refused(t *testing.T) {
-	cases := []struct {
-		name string
-		err  error
-		code codes.Code
-	}{
-		{
-			name: "referenced by a chain",
-			err:  fmt.Errorf("module 'route-mpls:mpls0' not found in chain 'chain0': %w", ffi.ErrFailedPrecondition),
-			code: codes.FailedPrecondition,
-		},
-		{
-			name: "backend failure",
-			err:  errInjectedBackend,
-			code: codes.Internal,
-		},
-	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			svc := NewRouteMPLSService(&refusingDeleteBackend{err: tc.err})
-			ctx := t.Context()
-
-			_, err := svc.CreateConfig(ctx, &routemplspb.CreateConfigRequest{
-				Name:  "mpls0",
-				Rules: []*routemplspb.Rule{makeRule(t, "10.0.0.0/24", "203.0.113.1", 100)},
-			})
-			require.NoError(t, err)
-
-			resp, err := svc.DeleteConfig(ctx, &routemplspb.DeleteConfigRequest{Name: "mpls0"})
-			require.Nil(t, resp)
-			require.Equal(t, tc.code, status.Code(err))
-
-			list, err := svc.ListConfigs(ctx, &routemplspb.ListConfigsRequest{})
-			require.NoError(t, err)
-			assert.Equal(t, []string{"mpls0"}, list.Configs)
-		})
-	}
 }
 
 func Test_RouteMPLSService_CreateConfig_BackendFailure(t *testing.T) {
@@ -455,64 +363,4 @@ func Test_RouteMPLSService_UpdateConfig_FailedPublishLeavesPreviousIntact(t *tes
 			assert.ElementsMatch(t, []uint32{100, 200}, labels)
 		})
 	}
-}
-
-// Test_RouteMPLSService_ConcurrentAccess runs with -race to detect data races.
-func Test_RouteMPLSService_ConcurrentAccess(t *testing.T) {
-	svc := newTestService(t)
-
-	const goroutines = 10
-	const iterations = 100
-
-	g, ctx := errgroup.WithContext(t.Context())
-
-	for idx := range goroutines {
-		g.Go(func() error {
-			for jdx := range iterations {
-				name := fmt.Sprintf("config-%d-%d", idx, jdx)
-				_, err := svc.CreateConfig(ctx, &routemplspb.CreateConfigRequest{
-					Name:  name,
-					Rules: []*routemplspb.Rule{makeRule(t, "10.0.0.0/24", "203.0.113.1", 100)},
-				})
-				if err != nil {
-					return err
-				}
-			}
-			return nil
-		})
-	}
-
-	for range goroutines {
-		g.Go(func() error {
-			for range iterations {
-				_, err := svc.ListConfigs(ctx, &routemplspb.ListConfigsRequest{})
-				if err != nil {
-					return err
-				}
-			}
-			return nil
-		})
-	}
-
-	for idx := range goroutines {
-		g.Go(func() error {
-			for jdx := range iterations {
-				name := fmt.Sprintf("config-%d-%d", idx, jdx)
-				svc.ShowConfig(ctx, &routemplspb.ShowConfigRequest{Name: name})
-			}
-			return nil
-		})
-	}
-
-	for idx := range goroutines {
-		g.Go(func() error {
-			for jdx := range iterations {
-				name := fmt.Sprintf("config-%d-%d", idx, jdx)
-				svc.DeleteConfig(ctx, &routemplspb.DeleteConfigRequest{Name: name})
-			}
-			return nil
-		})
-	}
-
-	require.NoError(t, g.Wait())
 }

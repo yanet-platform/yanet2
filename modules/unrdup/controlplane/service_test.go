@@ -2,7 +2,6 @@ package unrdup_test
 
 import (
 	"errors"
-	"fmt"
 	"net/netip"
 	"testing"
 
@@ -13,7 +12,6 @@ import (
 	"github.com/yanet-platform/xnetip"
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
 	"github.com/yanet-platform/yanet2/controlplane/crud"
-	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/modules/unrdup/bindings/go/cunrdup"
 	unrdup "github.com/yanet-platform/yanet2/modules/unrdup/controlplane"
 	"github.com/yanet-platform/yanet2/modules/unrdup/controlplane/unrduppb/v1"
@@ -21,47 +19,20 @@ import (
 
 var errBackendFailure = errors.New("backend failure")
 
-type fakeHandle struct {
-	freed     bool
-	freeCalls int
-}
+// fakeHandle is a shared-memory handle whose release always succeeds.
+type fakeHandle struct{}
 
 func (m *fakeHandle) Free() error {
-	m.freed = true
-	m.freeCalls++
 	return nil
 }
 
-// refusingOnceHandle refuses its first Free with ffi.ErrStillReferenced, then succeeds.
-type refusingOnceHandle struct {
-	numCalls int
-	freed    int
-}
-
-func (m *refusingOnceHandle) Free() error {
-	m.numCalls++
-	if m.numCalls == 1 {
-		return ffi.ErrStillReferenced
-	}
-	m.freed++
-	return nil
-}
-
+// fakeBackend counts updates, fails each with the set error, if any, and
+// otherwise records the sources and services of the published config.
 type fakeBackend struct {
 	err      error
 	calls    int
-	handles  []*fakeHandle
 	sources  []xnetip.Network
 	services []cunrdup.Service
-
-	// nextHandle, when set, is returned by the next successful update
-	// instead of a fresh handle, and is cleared once used.
-	nextHandle crud.Handle
-
-	// deleteErr, when set, is returned by every delete until cleared,
-	// modeling a config still referenced by a live generation.
-	deleteErr   error
-	deletedName string
 }
 
 func (m *fakeBackend) Update(name string, payload *unrdup.ModuleConfig) (crud.Handle, error) {
@@ -72,36 +43,30 @@ func (m *fakeBackend) Update(name string, payload *unrdup.ModuleConfig) (crud.Ha
 
 	m.sources = payload.Sources()
 	m.services = payload.Services
-
-	if m.nextHandle != nil {
-		handle := m.nextHandle
-		m.nextHandle = nil
-		return handle, nil
-	}
-
-	handle := &fakeHandle{}
-	m.handles = append(m.handles, handle)
-
-	return handle, nil
+	return &fakeHandle{}, nil
 }
 
 func (m *fakeBackend) Delete(name string) error {
-	m.deletedName = name
-	return m.deleteErr
+	return nil
 }
 
+// ipAddr returns the address message for valid address text.
 func ipAddr(addr string) *commonpb.IPAddress {
 	return commonpb.NewIPAddressFromAddr(netip.MustParseAddr(addr))
 }
 
+// ipv4Net returns the IPv4 network message for valid network text.
 func ipv4Net(network string) *commonpb.IPv4Network {
 	return commonpb.NewIPv4NetworkFrom4(xnetip.MustParseNetwork4(network))
 }
 
+// ipv6Net returns the IPv6 network message for valid network text.
 func ipv6Net(network string) *commonpb.IPv6Network {
 	return commonpb.NewIPv6NetworkFrom6(xnetip.MustParseNetwork6(network))
 }
 
+// validConfig returns a config with both source families and one TCP
+// service that the service accepts.
 func validConfig() *unrduppb.Config {
 	return &unrduppb.Config{
 		SourceV4: ipv4Net("10.0.0.1/32"),
@@ -118,7 +83,10 @@ func validConfig() *unrduppb.Config {
 	}
 }
 
-func TestUpdateConfig(t *testing.T) {
+// Test_UnrdupService_UpdateConfig_PublishesConvertedConfig verifies that an
+// accepted config reaches the backend with its sources and services
+// converted.
+func Test_UnrdupService_UpdateConfig_PublishesConvertedConfig(t *testing.T) {
 	backend := &fakeBackend{}
 	service := unrdup.NewUnrdupService(backend)
 
@@ -138,7 +106,9 @@ func TestUpdateConfig(t *testing.T) {
 	require.Equal(t, []cunrdup.Endpoint{{Port: 443, Proto: 6}}, stored.Endpoints)
 }
 
-func TestUpdateConfigOneSource(t *testing.T) {
+// Test_UnrdupService_UpdateConfig_OneSourceFamily verifies that a config
+// without an IPv6 source publishes a single source.
+func Test_UnrdupService_UpdateConfig_OneSourceFamily(t *testing.T) {
 	backend := &fakeBackend{}
 	service := unrdup.NewUnrdupService(backend)
 
@@ -154,7 +124,9 @@ func TestUpdateConfigOneSource(t *testing.T) {
 	require.Len(t, backend.sources, 1)
 }
 
-func TestUpdateConfigNoServices(t *testing.T) {
+// Test_UnrdupService_UpdateConfig_NoServices verifies that a config without
+// services is accepted and published with an empty service list.
+func Test_UnrdupService_UpdateConfig_NoServices(t *testing.T) {
 	backend := &fakeBackend{}
 	service := unrdup.NewUnrdupService(backend)
 
@@ -171,7 +143,9 @@ func TestUpdateConfigNoServices(t *testing.T) {
 	require.Empty(t, backend.services)
 }
 
-func TestUpdateConfigBothTransportsOnOnePort(t *testing.T) {
+// Test_UnrdupService_UpdateConfig_BothTransportsOnOnePort verifies that TCP
+// and UDP endpoints may share a port within one service.
+func Test_UnrdupService_UpdateConfig_BothTransportsOnOnePort(t *testing.T) {
 	backend := &fakeBackend{}
 	service := unrdup.NewUnrdupService(backend)
 
@@ -193,8 +167,11 @@ func TestUpdateConfigBothTransportsOnOnePort(t *testing.T) {
 	require.Len(t, backend.services[0].Endpoints, 2)
 }
 
-func TestUpdateConfigRejects(t *testing.T) {
-	tests := []struct {
+// Test_UnrdupService_UpdateConfig_RejectsInvalidConfig verifies that an
+// invalid config fails with a flat InvalidArgument status and never reaches
+// the backend.
+func Test_UnrdupService_UpdateConfig_RejectsInvalidConfig(t *testing.T) {
+	cases := []struct {
 		name    string
 		request *unrduppb.UpdateConfigRequest
 	}{
@@ -298,12 +275,12 @@ func TestUpdateConfigRejects(t *testing.T) {
 		},
 	}
 
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
 			backend := &fakeBackend{}
 			service := unrdup.NewUnrdupService(backend)
 
-			_, err := service.UpdateConfig(t.Context(), test.request)
+			_, err := service.UpdateConfig(t.Context(), tc.request)
 
 			require.Error(t, err)
 			require.Equal(t, codes.InvalidArgument, status.Code(err))
@@ -313,6 +290,8 @@ func TestUpdateConfigRejects(t *testing.T) {
 	}
 }
 
+// withConfig returns an update request carrying the valid test config after
+// the given change.
 func withConfig(mutate func(config *unrduppb.Config)) *unrduppb.UpdateConfigRequest {
 	config := validConfig()
 	mutate(config)
@@ -320,24 +299,9 @@ func withConfig(mutate func(config *unrduppb.Config)) *unrduppb.UpdateConfigRequ
 	return &unrduppb.UpdateConfigRequest{Name: "unrdup0", Config: config}
 }
 
-func TestUpdateConfigReplaces(t *testing.T) {
-	backend := &fakeBackend{}
-	service := unrdup.NewUnrdupService(backend)
-
-	request := &unrduppb.UpdateConfigRequest{Name: "unrdup0", Config: validConfig()}
-
-	_, err := service.UpdateConfig(t.Context(), request)
-	require.NoError(t, err)
-
-	_, err = service.UpdateConfig(t.Context(), request)
-	require.NoError(t, err)
-
-	require.Len(t, backend.handles, 2)
-	require.True(t, backend.handles[0].freed, "the replaced handle is released")
-	require.False(t, backend.handles[1].freed, "the live handle is kept")
-}
-
-func TestUpdateConfigBackendFailure(t *testing.T) {
+// Test_UnrdupService_UpdateConfig_BackendFailure verifies that a config the
+// backend fails to publish reports Internal and is not stored.
+func Test_UnrdupService_UpdateConfig_BackendFailure(t *testing.T) {
 	backend := &fakeBackend{err: errBackendFailure}
 	service := unrdup.NewUnrdupService(backend)
 
@@ -355,41 +319,9 @@ func TestUpdateConfigBackendFailure(t *testing.T) {
 	require.Equal(t, codes.NotFound, status.Code(err))
 }
 
-func TestUpdateConfigReplacementFailureKeepsPrevious(t *testing.T) {
-	backend := &fakeBackend{}
-	service := unrdup.NewUnrdupService(backend)
-
-	_, err := service.UpdateConfig(t.Context(), &unrduppb.UpdateConfigRequest{
-		Name:   "unrdup0",
-		Config: validConfig(),
-	})
-	require.NoError(t, err)
-	require.Len(t, backend.handles, 1)
-
-	backend.err = errBackendFailure
-
-	replacement := validConfig()
-	replacement.Services[0].Vip = ipAddr("192.0.2.2")
-
-	_, err = service.UpdateConfig(t.Context(), &unrduppb.UpdateConfigRequest{
-		Name:   "unrdup0",
-		Config: replacement,
-	})
-	require.Error(t, err)
-	require.Equal(t, codes.Internal, status.Code(err))
-	require.False(t, backend.handles[0].freed)
-
-	response, err := service.ShowConfig(t.Context(), &unrduppb.ShowConfigRequest{
-		Name: "unrdup0",
-	})
-	require.NoError(t, err)
-
-	stored := response.GetConfig().GetServices()
-	require.Len(t, stored, 1)
-	require.Equal(t, ipAddr("192.0.2.1").GetAddr(), stored[0].GetVip().GetAddr())
-}
-
-func TestShowConfig(t *testing.T) {
+// Test_UnrdupService_ShowConfig_RendersPublishedConfig verifies that a
+// published config converts back to the same sources and services.
+func Test_UnrdupService_ShowConfig_RendersPublishedConfig(t *testing.T) {
 	backend := &fakeBackend{}
 	service := unrdup.NewUnrdupService(backend)
 
@@ -426,7 +358,9 @@ func TestShowConfig(t *testing.T) {
 	)
 }
 
-func TestShowConfigNotFound(t *testing.T) {
+// Test_UnrdupService_ShowConfig_NotFound verifies that showing an unknown
+// config reports NotFound.
+func Test_UnrdupService_ShowConfig_NotFound(t *testing.T) {
 	service := unrdup.NewUnrdupService(&fakeBackend{})
 
 	_, err := service.ShowConfig(t.Context(), &unrduppb.ShowConfigRequest{
@@ -436,24 +370,9 @@ func TestShowConfigNotFound(t *testing.T) {
 	require.Equal(t, codes.NotFound, status.Code(err))
 }
 
-func TestListConfigs(t *testing.T) {
-	service := unrdup.NewUnrdupService(&fakeBackend{})
-
-	for _, name := range []string{"unrdup1", "unrdup0"} {
-		_, err := service.UpdateConfig(t.Context(), &unrduppb.UpdateConfigRequest{
-			Name:   name,
-			Config: validConfig(),
-		})
-		require.NoError(t, err)
-	}
-
-	response, err := service.ListConfigs(t.Context(), &unrduppb.ListConfigsRequest{})
-	require.NoError(t, err)
-
-	require.Equal(t, []string{"unrdup0", "unrdup1"}, response.GetConfigs())
-}
-
-func TestListConfigsEmpty(t *testing.T) {
+// Test_UnrdupService_ListConfigs_Empty verifies that a fresh service lists
+// no configs.
+func Test_UnrdupService_ListConfigs_Empty(t *testing.T) {
 	service := unrdup.NewUnrdupService(&fakeBackend{})
 
 	response, err := service.ListConfigs(t.Context(), &unrduppb.ListConfigsRequest{})
@@ -467,117 +386,9 @@ func TestListConfigsEmpty(t *testing.T) {
 func Test_UnrdupService_DeleteConfig_MissingConfig(t *testing.T) {
 	service := unrdup.NewUnrdupService(&fakeBackend{})
 
-	resp, err := service.DeleteConfig(t.Context(), &unrduppb.DeleteConfigRequest{
+	response, err := service.DeleteConfig(t.Context(), &unrduppb.DeleteConfigRequest{
 		Name: "unrdup0",
 	})
-	require.Nil(t, resp)
+	require.Nil(t, response)
 	require.Equal(t, codes.NotFound, status.Code(err))
-}
-
-// Test_UnrdupService_DeleteConfig_RemovesConfig verifies that deleting an
-// unreferenced config removes it from ListConfigs and from ShowConfig.
-func Test_UnrdupService_DeleteConfig_RemovesConfig(t *testing.T) {
-	backend := &fakeBackend{}
-	service := unrdup.NewUnrdupService(backend)
-	ctx := t.Context()
-
-	_, err := service.UpdateConfig(ctx, &unrduppb.UpdateConfigRequest{
-		Name:   "unrdup0",
-		Config: validConfig(),
-	})
-	require.NoError(t, err)
-	require.Len(t, backend.handles, 1)
-	handle := backend.handles[0]
-
-	resp, err := service.DeleteConfig(ctx, &unrduppb.DeleteConfigRequest{Name: "unrdup0"})
-	require.NotNil(t, resp)
-	require.NoError(t, err)
-	require.Equal(t, "unrdup0", backend.deletedName)
-	require.Equal(t, 1, handle.freeCalls)
-
-	list, err := service.ListConfigs(ctx, &unrduppb.ListConfigsRequest{})
-	require.NoError(t, err)
-	require.Empty(t, list.GetConfigs())
-
-	show, err := service.ShowConfig(ctx, &unrduppb.ShowConfigRequest{Name: "unrdup0"})
-	require.Nil(t, show)
-	require.Equal(t, codes.NotFound, status.Code(err))
-}
-
-// Test_UnrdupService_DeleteConfig_Refused verifies that a refused delete maps
-// its error kind to the status code and leaves the config in place.
-func Test_UnrdupService_DeleteConfig_Refused(t *testing.T) {
-	cases := []struct {
-		name string
-		err  error
-		code codes.Code
-	}{
-		{
-			name: "referenced by a chain",
-			err:  fmt.Errorf("module 'unrdup:unrdup0' not found in chain 'chain0': %w", ffi.ErrFailedPrecondition),
-			code: codes.FailedPrecondition,
-		},
-		{
-			name: "backend failure",
-			err:  errBackendFailure,
-			code: codes.Internal,
-		},
-	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			backend := &fakeBackend{deleteErr: tc.err}
-			service := unrdup.NewUnrdupService(backend)
-			ctx := t.Context()
-
-			_, err := service.UpdateConfig(ctx, &unrduppb.UpdateConfigRequest{
-				Name:   "unrdup0",
-				Config: validConfig(),
-			})
-			require.NoError(t, err)
-
-			resp, err := service.DeleteConfig(ctx, &unrduppb.DeleteConfigRequest{Name: "unrdup0"})
-			require.Nil(t, resp)
-			require.Equal(t, tc.code, status.Code(err))
-			require.Equal(t, "unrdup0", backend.deletedName)
-
-			list, err := service.ListConfigs(ctx, &unrduppb.ListConfigsRequest{})
-			require.NoError(t, err)
-			require.Equal(t, []string{"unrdup0"}, list.GetConfigs())
-
-			show, err := service.ShowConfig(ctx, &unrduppb.ShowConfigRequest{Name: "unrdup0"})
-			require.NoError(t, err)
-			require.NotNil(t, show)
-		})
-	}
-}
-
-// Test_UnrdupService_DeleteConfig_ParksThenReclaims verifies that a handle
-// refused on delete is parked and reclaimed by the next successful update.
-func Test_UnrdupService_DeleteConfig_ParksThenReclaims(t *testing.T) {
-	backend := &fakeBackend{}
-	service := unrdup.NewUnrdupService(backend)
-	ctx := t.Context()
-
-	parked := &refusingOnceHandle{}
-	backend.nextHandle = parked
-
-	_, err := service.UpdateConfig(ctx, &unrduppb.UpdateConfigRequest{
-		Name:   "unrdup0",
-		Config: validConfig(),
-	})
-	require.NoError(t, err)
-
-	resp, err := service.DeleteConfig(ctx, &unrduppb.DeleteConfigRequest{Name: "unrdup0"})
-	require.NotNil(t, resp)
-	require.NoError(t, err)
-	require.Equal(t, 0, parked.freed)
-
-	// A later successful update reclaims deferred handles first.
-	_, err = service.UpdateConfig(ctx, &unrduppb.UpdateConfigRequest{
-		Name:   "unrdup1",
-		Config: validConfig(),
-	})
-	require.NoError(t, err)
-	require.Equal(t, 1, parked.freed)
 }

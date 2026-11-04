@@ -430,6 +430,7 @@ func Test_Store_Delete_WaitsBehindInFlightCreate(t *testing.T) {
 
 			_, ok := store.Get("a")
 			assert.False(t, ok, "an in-flight create must not be visible to readers")
+			assert.Empty(t, store.Names(), "an in-flight create must not be listed")
 
 			deleteStarted := make(chan struct{})
 			deleteDone := make(chan error, 1)
