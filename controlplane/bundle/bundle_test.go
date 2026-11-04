@@ -7,9 +7,9 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	testshm "github.com/yanet-platform/yanet2/common/go/testutils/shm"
 	"github.com/yanet-platform/yanet2/common/go/xcfg"
 	"github.com/yanet-platform/yanet2/controlplane/bundle"
+	"github.com/yanet-platform/yanet2/controlplane/ffi/ffitest"
 	blackhole "github.com/yanet-platform/yanet2/modules/blackhole/controlplane"
 	decap "github.com/yanet-platform/yanet2/modules/decap/controlplane"
 	dscp "github.com/yanet-platform/yanet2/modules/dscp/controlplane"
@@ -20,7 +20,7 @@ import (
 func Test_NewBundle_ReleasedOnLaterFailure(t *testing.T) {
 	decapConfig := decap.DefaultConfig()
 	decapConfig.InstanceID = xcfg.NewRequired(uint32(0))
-	decapConfig.MemoryPath = xcfg.MustNonEmptyString(testshm.NewStorage(t, testshm.StorageTypes{}))
+	decapConfig.MemoryPath = xcfg.MustNonEmptyString(ffitest.NewStorage(t, ffitest.StorageTypes{}))
 	dscpConfig := dscp.DefaultConfig()
 	dscpConfig.InstanceID = xcfg.NewRequired(uint32(0))
 	dscpConfig.MemoryPath = decapConfig.MemoryPath

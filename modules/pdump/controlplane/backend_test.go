@@ -8,8 +8,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	testshm "github.com/yanet-platform/yanet2/common/go/testutils/shm"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
+	"github.com/yanet-platform/yanet2/controlplane/ffi/ffitest"
 	cpdump "github.com/yanet-platform/yanet2/modules/pdump/bindings/go/cpdump"
 	pdump "github.com/yanet-platform/yanet2/modules/pdump/controlplane"
 	"github.com/yanet-platform/yanet2/modules/pdump/internal/testutils"
@@ -20,7 +20,7 @@ import (
 // newTestBackend returns a real one-worker backend with a published capture ring.
 func newTestBackend(t *testing.T) (pdump.Backend, *ffi.Agent) {
 	t.Helper()
-	storage := testshm.NewStorage(t, testshm.StorageTypes{
+	storage := ffitest.NewStorage(t, ffitest.StorageTypes{
 		Modules: []string{"pdump"},
 		Objects: []string{"ring"},
 	})

@@ -122,7 +122,7 @@ cgo_packages += {
   'common/go/dataplane': {
     'libraries': [lib_lib_utils],
   },
-  'common/go/testutils/shm': {
+  'controlplane/ffi/ffitest': {
     'libraries': [
       lib_config_dp,
       lib_packet_dp,

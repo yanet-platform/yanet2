@@ -7,10 +7,10 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	testshm "github.com/yanet-platform/yanet2/common/go/testutils/shm"
 	"github.com/yanet-platform/yanet2/common/go/testutils/tlscert"
 	"github.com/yanet-platform/yanet2/common/go/xcfg"
 	"github.com/yanet-platform/yanet2/common/go/xgrpc"
+	"github.com/yanet-platform/yanet2/controlplane/ffi/ffitest"
 	"github.com/yanet-platform/yanet2/controlplane/gateway"
 	"github.com/yanet-platform/yanet2/controlplane/yncp"
 	decap "github.com/yanet-platform/yanet2/modules/decap/controlplane"
@@ -21,7 +21,7 @@ import (
 func newDirectorConfig(t *testing.T) *yncp.Config {
 	t.Helper()
 	config := yncp.DefaultConfig()
-	config.MemoryPath = testshm.NewStorage(t, testshm.StorageTypes{})
+	config.MemoryPath = ffitest.NewStorage(t, ffitest.StorageTypes{})
 	config.Gateway.InstanceID = xcfg.NewRequired(uint32(0))
 	config.Gateway.Server.Endpoint = "127.0.0.1:0"
 	config.Gateway.Server.HTTPEndpoint = ""

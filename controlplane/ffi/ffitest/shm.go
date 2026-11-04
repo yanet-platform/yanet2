@@ -1,8 +1,8 @@
-// Package testshm provides file-backed storage for nontraffic admission tests.
-package testshm
+// Package ffitest provides file-backed storage for nontraffic admission tests.
+package ffitest
 
 /*
-#cgo CFLAGS: -I../../../..
+#cgo CFLAGS: -I../../..
 #include <dlfcn.h>
 #include <stdlib.h>
 #include "common/memory_address.h"
