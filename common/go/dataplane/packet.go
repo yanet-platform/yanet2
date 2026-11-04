@@ -7,13 +7,11 @@ package dataplane
 //#include "lib/utils/packet.h"
 import "C"
 import (
-	"bytes"
 	"fmt"
 	"runtime"
 	"unsafe"
 
 	"github.com/gopacket/gopacket"
-	"github.com/yanet-platform/yanet2/tests/functional/framework"
 )
 
 type PacketData struct {
@@ -120,17 +118,6 @@ func (packet *Packet) Data() PacketData {
 	}
 }
 
-func (packet *Packet) Info() *framework.PacketInfo {
-	data := packet.Data()
-	data.Payload = bytes.Clone(data.Payload)
-	info, err := framework.NewPacketParser().ParsePacket(data.Payload)
-	if err != nil {
-		msg := fmt.Sprintf("failed to parse packet: %v", err)
-		panic(msg)
-	}
-	return info
-}
-
 func (packet *Packet) Next() *Packet {
 	return (*Packet)((*C.struct_packet)(packet).next)
 }
@@ -178,19 +165,6 @@ func (packetList *PacketList) Count() int {
 
 func (packetList *PacketList) Add(packet *Packet) {
 	C.packet_list_add((*C.struct_packet_list)(packetList), (*C.struct_packet)(packet))
-}
-
-func (packetList *PacketList) Info() []*framework.PacketInfo {
-	info := make([]*framework.PacketInfo, 0, packetList.Count())
-	packet := packetList.First()
-	for {
-		if packet == nil {
-			break
-		}
-		info = append(info, packet.Info())
-		packet = packet.Next()
-	}
-	return info
 }
 
 func (packetList *PacketList) Data() []PacketData {

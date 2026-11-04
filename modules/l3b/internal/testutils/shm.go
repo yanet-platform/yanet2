@@ -26,7 +26,7 @@ import "C"
 import (
 	"testing"
 
-	testshm "github.com/yanet-platform/yanet2/common/go/testutils/shm"
+	"github.com/yanet-platform/yanet2/controlplane/ffi/ffitest"
 )
 
 // NewStorage loads the production L3B module and inert object types into a
@@ -34,7 +34,7 @@ import (
 func NewStorage(t *testing.T) string {
 	t.Helper()
 	C.retain_l3b_constructors()
-	return testshm.NewStorage(t, testshm.StorageTypes{
+	return ffitest.NewStorage(t, ffitest.StorageTypes{
 		Modules: []string{"l3b"},
 		Objects: []string{"l3b_virtual_service", "l3b_session_table"},
 	})

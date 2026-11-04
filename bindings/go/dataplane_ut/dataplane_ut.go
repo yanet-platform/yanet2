@@ -125,6 +125,7 @@ keep_refs(void **ptrs) {
 */
 import "C"
 import (
+	"bytes"
 	"fmt"
 	"runtime"
 	"sync"
@@ -751,13 +752,35 @@ func (m *Harness) handlePackets(
 
 	pinner.Pin(&result)
 
-	output := (*dataplane.PacketList)(unsafe.Pointer(&result.output))
-	drop := (*dataplane.PacketList)(unsafe.Pointer(&result.drop))
+	output, err := parsePackets((*dataplane.PacketList)(unsafe.Pointer(&result.output)))
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse output packets: %w", err)
+	}
+	drop, err := parsePackets((*dataplane.PacketList)(unsafe.Pointer(&result.drop)))
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse dropped packets: %w", err)
+	}
 
 	return &Result{
-		Output: output.Info(),
-		Drop:   drop.Info(),
+		Output: output,
+		Drop:   drop,
 	}, nil
+}
+
+// parsePackets parses a copy of every packet, so the result outlives the
+// packet list that the round frees.
+func parsePackets(list *dataplane.PacketList) ([]*framework.PacketInfo, error) {
+	data := list.Data()
+	packets := make([]*framework.PacketInfo, 0, len(data))
+	for idx := range data {
+		packet, err := framework.NewPacketParser().ParsePacket(bytes.Clone(data[idx].Payload))
+		if err != nil {
+			return nil, fmt.Errorf("packet %d: %w", idx, err)
+		}
+		packets = append(packets, packet)
+	}
+
+	return packets, nil
 }
 
 // warnUnoptimizedOnce guards the non-optimized build warning so it prints

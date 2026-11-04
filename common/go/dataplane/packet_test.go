@@ -57,18 +57,7 @@ func TestPacket(t *testing.T) {
 
 	packetData := packet.Data()
 	assert.Equal(t, data, packetData)
-
-	packetInfo := packet.Info()
-	clear(packetData.Payload)
 	packet.Free()
-	assert.Equal(t, gopacketData, packetInfo.RawData)
-	assert.Equal(t, packetInfo.DstIP, ip.DstIP)
-	assert.Equal(t, packetInfo.SrcIP, ip.SrcIP)
-	assert.Equal(t, packetInfo.SrcPort, uint16(tcp.SrcPort))
-	assert.Equal(t, packetInfo.DstPort, uint16(tcp.DstPort))
-	assert.Equal(t, []byte("hello"), packetInfo.Payload)
-	assert.Equal(t, packetInfo.SrcMAC, eth.SrcMAC)
-	assert.Equal(t, packetInfo.DstMAC, eth.DstMAC)
 }
 
 func genPackets(t *testing.T, pinner *runtime.Pinner, count uint64) []*Packet {

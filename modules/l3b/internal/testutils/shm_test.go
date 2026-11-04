@@ -5,8 +5,8 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	testshm "github.com/yanet-platform/yanet2/common/go/testutils/shm"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
+	"github.com/yanet-platform/yanet2/controlplane/ffi/ffitest"
 	l3btestutils "github.com/yanet-platform/yanet2/modules/l3b/internal/testutils"
 )
 
@@ -21,7 +21,7 @@ func Test_Storage_L3BInventory(t *testing.T) {
 	modules := config.Modules()
 	require.Len(t, modules, 1)
 	require.Equal(t, "l3b", modules[0].Name())
-	require.ElementsMatch(t, []string{"l3b_virtual_service", "l3b_session_table"}, testshm.LoadedObjectTypes(memory))
+	require.ElementsMatch(t, []string{"l3b_virtual_service", "l3b_session_table"}, ffitest.LoadedObjectTypes(memory))
 	require.Zero(t, config.WorkerCount())
 	require.Empty(t, config.CPConfigs())
 	require.Empty(t, config.Functions())
@@ -32,14 +32,14 @@ func Test_Storage_L3BInventory(t *testing.T) {
 // register valid module and object types in an empty fixture.
 func Test_Storage_LoadersRegisterExistingTypes(t *testing.T) {
 	_ = l3btestutils.NewStorage(t)
-	path := testshm.NewStorage(t, testshm.StorageTypes{})
+	path := ffitest.NewStorage(t, ffitest.StorageTypes{})
 	memory, err := ffi.AttachSharedMemory(path)
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, memory.Detach()) })
 
-	require.NoError(t, testshm.LoadModule(memory, "l3b"))
-	require.NoError(t, testshm.LoadObject(memory, "l3b_virtual_service"))
-	require.NoError(t, testshm.LoadObject(memory, "l3b_session_table"))
+	require.NoError(t, ffitest.LoadModule(memory, "l3b"))
+	require.NoError(t, ffitest.LoadObject(memory, "l3b_virtual_service"))
+	require.NoError(t, ffitest.LoadObject(memory, "l3b_session_table"))
 
 	modules := memory.DPConfig(0).Modules()
 	require.Len(t, modules, 1)
@@ -47,7 +47,7 @@ func Test_Storage_LoadersRegisterExistingTypes(t *testing.T) {
 	require.ElementsMatch(
 		t,
 		[]string{"l3b_virtual_service", "l3b_session_table"},
-		testshm.LoadedObjectTypes(memory),
+		ffitest.LoadedObjectTypes(memory),
 	)
 }
 
@@ -61,13 +61,13 @@ func Test_Storage_MissingTypePreservesInventory(t *testing.T) {
 		{
 			name: "missing module",
 			load: func(memory *ffi.SharedMemory) error {
-				return testshm.LoadModule(memory, "missing_l3b_admission")
+				return ffitest.LoadModule(memory, "missing_l3b_admission")
 			},
 		},
 		{
 			name: "missing object",
 			load: func(memory *ffi.SharedMemory) error {
-				return testshm.LoadObject(memory, "missing_l3b_admission")
+				return ffitest.LoadObject(memory, "missing_l3b_admission")
 			},
 		},
 	} {
@@ -77,10 +77,10 @@ func Test_Storage_MissingTypePreservesInventory(t *testing.T) {
 			require.NoError(t, err)
 			t.Cleanup(func() { require.NoError(t, memory.Detach()) })
 			modules := memory.DPConfig(0).Modules()
-			objects := testshm.LoadedObjectTypes(memory)
+			objects := ffitest.LoadedObjectTypes(memory)
 			require.ErrorContains(t, tc.load(memory), "missing_l3b_admission")
 			require.Equal(t, modules, memory.DPConfig(0).Modules())
-			require.Equal(t, objects, testshm.LoadedObjectTypes(memory))
+			require.Equal(t, objects, ffitest.LoadedObjectTypes(memory))
 		})
 	}
 }

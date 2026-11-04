@@ -7,8 +7,8 @@ import (
 	"github.com/c2h5oh/datasize"
 	"github.com/stretchr/testify/require"
 
-	testshm "github.com/yanet-platform/yanet2/common/go/testutils/shm"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
+	"github.com/yanet-platform/yanet2/controlplane/ffi/ffitest"
 	"github.com/yanet-platform/yanet2/modules/pdump/bindings/go/cpdump"
 	pdumppb "github.com/yanet-platform/yanet2/modules/pdump/controlplane/pdumppb/v1"
 	"github.com/yanet-platform/yanet2/modules/pdump/internal/testutils"
@@ -17,7 +17,7 @@ import (
 // newTestAgent returns a one-worker agent over fresh shared memory.
 func newTestAgent(t *testing.T) *ffi.Agent {
 	t.Helper()
-	storage := testshm.NewStorage(t, testshm.StorageTypes{Modules: []string{"pdump"}})
+	storage := ffitest.NewStorage(t, ffitest.StorageTypes{Modules: []string{"pdump"}})
 	memory, err := ffi.AttachSharedMemory(storage)
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, memory.Detach()) })

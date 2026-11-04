@@ -18,8 +18,8 @@ import (
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sys/unix"
 
-	testshm "github.com/yanet-platform/yanet2/common/go/testutils/shm"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
+	"github.com/yanet-platform/yanet2/controlplane/ffi/ffitest"
 )
 
 // createStorageFile returns the path of a zero-filled file of the given size.
@@ -103,7 +103,7 @@ func Test_SharedMemory_AgentAttach_UninitialisedSegment(t *testing.T) {
 // that an initialized header is not read before readiness is published.
 func Test_SharedMemory_AgentAttach_InitializedSegmentBeforePublication(t *testing.T) {
 	readyInstanceCount := uint32(0)
-	path := testshm.NewStorage(t, testshm.StorageTypes{
+	path := ffitest.NewStorage(t, ffitest.StorageTypes{
 		InstanceCount:      2,
 		ReadyInstanceCount: &readyInstanceCount,
 	})
@@ -124,14 +124,14 @@ func Test_SharedMemory_AgentAttach_InitializedSegmentBeforePublication(t *testin
 // verifies that readiness requires the first instance's publication.
 func Test_SharedMemory_DataplaneReady_RejectsLaterReadyBeforeFirstPublication(t *testing.T) {
 	readyInstanceCount := uint32(0)
-	path := testshm.NewStorage(t, testshm.StorageTypes{
+	path := ffitest.NewStorage(t, ffitest.StorageTypes{
 		InstanceCount:      2,
 		ReadyInstanceCount: &readyInstanceCount,
 	})
 	memory, err := ffi.AttachSharedMemory(path)
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, memory.Detach()) })
-	require.NoError(t, testshm.MarkInstanceReady(memory, 1))
+	require.NoError(t, ffitest.MarkInstanceReady(memory, 1))
 
 	require.False(t, memory.DataplaneReady(1))
 }
@@ -149,7 +149,7 @@ func Test_SharedMemory_AgentAttach_InstanceBounds(t *testing.T) {
 		{name: "maximum index cannot traverse the mapping", instance: math.MaxUint32},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			path := testshm.NewStorage(t, testshm.StorageTypes{InstanceCount: 2})
+			path := ffitest.NewStorage(t, ffitest.StorageTypes{InstanceCount: 2})
 			memory, err := ffi.AttachSharedMemory(path)
 			require.NoError(t, err)
 			t.Cleanup(func() { require.NoError(t, memory.Detach()) })
@@ -181,7 +181,7 @@ func Test_SharedMemory_AgentAttach_InstanceBounds(t *testing.T) {
 // unpublished target instance is rejected after the shared count is available.
 func Test_SharedMemory_AgentAttach_RejectsUnreadyTarget(t *testing.T) {
 	readyInstanceCount := uint32(1)
-	path := testshm.NewStorage(t, testshm.StorageTypes{
+	path := ffitest.NewStorage(t, ffitest.StorageTypes{
 		InstanceCount:      2,
 		ReadyInstanceCount: &readyInstanceCount,
 	})
@@ -206,7 +206,7 @@ func Test_SharedMemory_AgentAttach_RejectsUnreadyTarget(t *testing.T) {
 // Test_SharedMemory_AgentAttach_RejectsNULName verifies that a NUL byte in the
 // agent name is rejected before crossing the C string boundary.
 func Test_SharedMemory_AgentAttach_RejectsNULName(t *testing.T) {
-	path := testshm.NewStorage(t, testshm.StorageTypes{})
+	path := ffitest.NewStorage(t, ffitest.StorageTypes{})
 	memory, err := ffi.AttachSharedMemory(path)
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, memory.Detach()) })
@@ -222,7 +222,7 @@ func Test_SharedMemory_AgentAttach_RejectsNULName(t *testing.T) {
 // Test_SharedMemory_ExtendAgent_RejectsNULName verifies that a NUL byte in an
 // agent name is rejected before crossing the C string boundary.
 func Test_SharedMemory_ExtendAgent_RejectsNULName(t *testing.T) {
-	path := testshm.NewStorage(t, testshm.StorageTypes{})
+	path := ffitest.NewStorage(t, ffitest.StorageTypes{})
 	memory, err := ffi.AttachSharedMemory(path)
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, memory.Detach()) })
