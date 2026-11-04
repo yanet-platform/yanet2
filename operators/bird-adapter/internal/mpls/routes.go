@@ -36,6 +36,8 @@ func NewRib() Rib {
 	}
 }
 
+// Withdraw drops the peer's announcement and returns the next best one when
+// the best goes, the withdraw once no peer is left, or nil otherwise.
 func (m mplsPeerRouteList) Withdraw(
 	route rib.Route,
 ) (
@@ -66,18 +68,21 @@ func (m mplsPeerRouteList) Withdraw(
 	items = slices.Delete(items, idx, idx+1)
 	if len(items) == 0 {
 		delete(m.routes, key)
-	} else {
-		m.routes[key] = items
+		return m, &route
 	}
 
+	m.routes[key] = items
 	if idx == 0 {
-		// The first one route was withdrawn so propagate the change
-		return m, &route
+		// The withdrawn announcement was the best, so the next one takes over.
+		best := items[0]
+		return m, &best
 	}
 
 	return m, nil
 }
 
+// Update records the peer's announcement and returns the best one when it
+// may have changed, or nil when another peer's was the best and still is.
 func (m mplsPeerRouteList) Update(
 	route rib.Route,
 ) (
@@ -90,6 +95,10 @@ func (m mplsPeerRouteList) Update(
 	}
 
 	items := m.routes[key]
+	var bestPeer netip.Addr
+	if len(items) > 0 {
+		bestPeer = items[0].Peer
+	}
 
 	idx := slices.IndexFunc(
 		items,
@@ -118,11 +127,12 @@ func (m mplsPeerRouteList) Update(
 	)
 
 	m.routes[key] = items
-	if items[0].Peer != route.Peer {
+	if items[0].Peer != route.Peer && items[0].Peer == bestPeer {
 		return m, nil
 	}
 
-	return m, &route
+	best := items[0]
+	return m, &best
 }
 
 func routeListBest(

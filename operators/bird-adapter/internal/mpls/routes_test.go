@@ -1,6 +1,7 @@
 package mpls_test
 
 import (
+	"net/netip"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -39,11 +40,52 @@ func Test_Rib_Apply_SharedNexthopWeightChange(t *testing.T) {
 	require.Equal(t, []rib.LargeCommunity{{ASN: 13238, Function: 1, Value: 1}}, last.LargeCommunities)
 }
 
+// Test_Rib_Apply_BestPeerWithdraw verifies that when the preferred peer
+// withdraws a route another peer still announces, that peer's route stays.
+func Test_Rib_Apply_BestPeerWithdraw(t *testing.T) {
+	mplsRib := mpls.NewRib()
+	preferred := peerRoute("198.51.100.1", 200, 1)
+	backup := peerRoute("198.51.100.2", 100, 1)
+
+	mplsRib.Apply(preferred)
+	mplsRib.Apply(backup)
+	preferred.ToRemove = true
+	changes := mplsRib.Apply(preferred)
+
+	require.Empty(t, changes, "the nexthop stays while the backup peer announces it")
+	require.Equal(t, []rib.Route{backup}, mplsRib.Best())
+}
+
+// Test_Rib_Apply_BestPeerDemotion verifies that when an update ranks the
+// preferred peer below another one, that peer's route replaces it.
+func Test_Rib_Apply_BestPeerDemotion(t *testing.T) {
+	mplsRib := mpls.NewRib()
+	preferred := peerRoute("198.51.100.1", 200, 1)
+	backup := peerRoute("198.51.100.2", 100, 2)
+
+	mplsRib.Apply(preferred)
+	mplsRib.Apply(backup)
+	preferred.Pref = 50
+	changes := mplsRib.Apply(preferred)
+
+	require.Equal(t, []rib.Route{backup}, changes, "the backup peer's weight reaches route-mpls")
+	require.Equal(t, []rib.Route{backup}, mplsRib.Best())
+}
+
 // weightedRoute returns an MPLS route to a fixed prefix, address and label
 // under the given RD, carrying the given weight.
 func weightedRoute(rd uint64, weight uint32) rib.Route {
 	route := mplsRoute("2001:db8:1::/48", "2001:db8::1", 100)
 	route.RD = rd
 	route.LargeCommunities = []rib.LargeCommunity{{ASN: 13238, Function: 1, Value: weight}}
+	return route
+}
+
+// peerRoute returns an MPLS route to a fixed prefix, address and label under
+// RD 1, as the given peer announces it at the given preference and weight.
+func peerRoute(peer string, pref uint32, weight uint32) rib.Route {
+	route := weightedRoute(1, weight)
+	route.Peer = netip.MustParseAddr(peer)
+	route.Pref = pref
 	return route
 }
