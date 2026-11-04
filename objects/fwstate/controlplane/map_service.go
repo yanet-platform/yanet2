@@ -150,10 +150,12 @@ type FWStateMapService struct {
 	fwstatemappb.UnimplementedFWStateMapServiceServer
 
 	mu sync.Mutex
-	// deferred holds superseded map objects whose free was refused
-	// because a live configuration generation still referenced them.
-	// This service is their owner: it retries them on its next update,
-	// through ReclaimDeferred, and nothing else remembers them.
+	// deferred holds deleted map objects whose free a live configuration
+	// generation refused.
+	//
+	// This service is their owner and nothing else remembers them: it
+	// retries them before every create, delete and layer insert, after a
+	// successful delete and on every stale-layer sweep.
 	deferred []*cfwstate.MapObjectConfig
 	agent    *ffi.Agent
 	maps     map[string]*FWStateMap
@@ -327,6 +329,10 @@ func (m *FWStateMapService) CreateMap(
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	// Releasing the drained deferred objects first leaves their memory to
+	// the new map, and a failing create cannot keep them.
+	m.reclaimDeferred()
+
 	if _, exists := m.maps[name]; exists {
 		return nil, status.Errorf(codes.AlreadyExists, "fwstate-map %q already exists", name)
 	}
@@ -388,6 +394,8 @@ func (m *FWStateMapService) DeleteMap(
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
+
+	m.reclaimDeferred()
 
 	fwMap, ok := m.maps[name]
 	if !ok {
@@ -495,6 +503,8 @@ func (m *FWStateMapService) InsertLayer(
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
+
+	m.reclaimDeferred()
 
 	fwMap, ok := m.maps[name]
 	if !ok {
@@ -771,8 +781,8 @@ func (m *FWStateMapService) SweepMap(
 	)
 }
 
-// RunStaleLayerSweeper reclaims stale layers until the context is
-// cancelled.
+// RunStaleLayerSweeper reclaims stale layers and retries the deferred map
+// objects until the context is cancelled.
 func (m *FWStateMapService) RunStaleLayerSweeper(
 	ctx context.Context, interval time.Duration,
 ) {
@@ -793,6 +803,7 @@ func (m *FWStateMapService) RunStaleLayerSweeper(
 			return
 		case <-ticker.C:
 			m.SweepStaleLayers(ctx)
+			m.ReclaimDeferred()
 		}
 	}
 }
@@ -908,10 +919,11 @@ func NewFWStateMapServiceForTest(
 }
 
 // ReclaimDeferred retries every deferred map object, dropping the ones
-// whose generations have drained and keeping the rest deferred. It is
-// the reclamation handler for this service's superseded objects; the
-// service itself runs it after each successful delete, and anything else
-// may call it at any time.
+// whose generations have drained and keeping the rest deferred.
+//
+// The service runs it before every create, delete and layer insert, after
+// a successful delete and on every stale-layer sweep; anything else may
+// call it at any time.
 func (m *FWStateMapService) ReclaimDeferred() {
 	m.mu.Lock()
 	defer m.mu.Unlock()

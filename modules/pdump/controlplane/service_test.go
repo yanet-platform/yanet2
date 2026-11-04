@@ -234,6 +234,8 @@ func (m *fakeRingOwner) register(name string, capacity uint32, workerCount int) 
 	return sources
 }
 
+func (m *fakeRingOwner) ReclaimDeferred() {}
+
 func (m *fakeRingOwner) LookupHandle(name string) (pdump.RingHandle, bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()

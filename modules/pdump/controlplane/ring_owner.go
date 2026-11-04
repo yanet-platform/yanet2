@@ -49,6 +49,9 @@ type RingOwner interface {
 	//
 	// It succeeds only if the name still maps to the given handle.
 	Acquire(name string, handle RingHandle) (RingLease, error)
+	// ReclaimDeferred frees the deleted rings whose generations have
+	// drained, returning their memory to the agent.
+	ReclaimDeferred()
 }
 
 // ringOwner resolves rings in the ring service this agent hosts.
@@ -71,6 +74,10 @@ func (m *ringOwner) Acquire(name string, handle RingHandle) (RingLease, error) {
 		return nil, err
 	}
 	return &ringLease{lease: lease}, nil
+}
+
+func (m *ringOwner) ReclaimDeferred() {
+	m.service.ReclaimDeferred()
 }
 
 // ringLease reads a pinned ring through its dataplane object.
