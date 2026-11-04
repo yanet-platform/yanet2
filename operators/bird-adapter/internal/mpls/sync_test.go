@@ -86,8 +86,7 @@ func Test_Sync_Push_UnknownConfigSendsWholeTable(t *testing.T) {
 }
 
 // Test_Sync_Push_FailedPushSendsWholeTable verifies that the push after a
-// failed one sends the whole table, covering the changes the failure lost
-// and those made since, instead of keeping a queue.
+// failed one sends the whole table instead of a queue of changes.
 func Test_Sync_Push_FailedPushSendsWholeTable(t *testing.T) {
 	ctx := t.Context()
 	client := &fakeClient{updateErrs: []error{status.Error(codes.Unavailable, "control plane restarting")}}
@@ -104,4 +103,19 @@ func Test_Sync_Push_FailedPushSendsWholeTable(t *testing.T) {
 
 	require.NoError(t, mplsSync.Push(ctx))
 	require.Len(t, client.creates, 1, "nothing is left to push once delivered")
+}
+
+// Test_Sync_Push_InvalidRuleLeftOut verifies that a route whose label
+// route-mpls cannot carry is left out of the whole table.
+func Test_Sync_Push_InvalidRuleLeftOut(t *testing.T) {
+	ctx := t.Context()
+	client := &fakeClient{updateErrs: []error{status.Error(codes.NotFound, "config not found")}}
+	mplsSync := mpls.NewSync("mpls0", client, sourceV4, sourceV6)
+
+	mplsSync.Apply(mplsRoute("2001:db8:1::/48", "2001:db8::1", 100))
+	mplsSync.Apply(mplsRoute("2001:db8:2::/48", "2001:db8::2", 1<<20))
+	require.NoError(t, mplsSync.Push(ctx))
+
+	require.Len(t, client.creates, 1)
+	require.Len(t, client.creates[0].Rules, 1, "the label route-mpls rejects stays out")
 }

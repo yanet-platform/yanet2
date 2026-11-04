@@ -120,9 +120,19 @@ func NewSync(
 // Apply feeds one route into the RIB and queues the route-mpls events for
 // the best-path changes it causes.
 //
-// Nothing is queued while the whole table is due. A route that cannot be
-// expressed as a rule is logged and left out.
+// A route whose label route-mpls cannot carry counts as a withdraw, so it
+// neither displaces a valid route nor fails a whole-table send. Nothing is
+// queued while the whole table is due, and a route that cannot be expressed
+// as a rule is logged and left out.
 func (m *Sync) Apply(route rib.Route) {
+	if !route.ToRemove && len(route.MplsLabelStack) > 0 && route.MplsLabelStack[0] > routemplspb.MaxMPLSLabel {
+		m.log.Warn("mpls label out of range, treating the route as withdrawn",
+			zap.String("prefix", route.Prefix.String()),
+			zap.Uint32("label", route.MplsLabelStack[0]),
+		)
+		route.ToRemove = true
+	}
+
 	updates := m.rib.Apply(route)
 	if m.resync {
 		return
