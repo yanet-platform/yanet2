@@ -154,6 +154,27 @@ func (m *NAT64Service) ShowConfig(ctx context.Context, req *nat64pb.ShowConfigRe
 	return response, nil
 }
 
+// UpdateConfig replaces the whole named config with the one the request
+// carries.
+//
+// The config is checked by the rules the incremental calls apply to its
+// parts, and an invalid one publishes nothing. A prefix or an IPv4 address
+// listed twice is rejected, which is stricter than the incremental calls:
+// they ignore a present prefix and replace the mapping of a present address.
+func (m *NAT64Service) UpdateConfig(ctx context.Context, req *nat64pb.UpdateConfigRequest) (*nat64pb.UpdateConfigResponse, error) {
+	config, err := decodeConfig(req.GetConfig())
+	if err != nil {
+		return nil, status.Error(codes.InvalidArgument, err.Error())
+	}
+
+	name := req.GetName()
+	if err := m.core.Replace(name, config); err != nil {
+		return nil, crud.PublishError(name, err)
+	}
+
+	return &nat64pb.UpdateConfigResponse{}, nil
+}
+
 func (m *NAT64Service) AddPrefix(ctx context.Context, req *nat64pb.AddPrefixRequest) (*nat64pb.AddPrefixResponse, error) {
 	prefix, err := decodeNAT64Prefix(req.GetPrefix())
 	if err != nil {
@@ -214,29 +235,19 @@ func (m *NAT64Service) RemovePrefix(ctx context.Context, req *nat64pb.RemovePref
 }
 
 func (m *NAT64Service) AddMapping(ctx context.Context, req *nat64pb.AddMappingRequest) (*nat64pb.AddMappingResponse, error) {
-	ipv4 := req.GetIpv4().ToAddr()
-	ipv6 := req.GetIpv6().ToAddr()
-	if ipv6.Is4In6() {
-		return nil, status.Errorf(codes.InvalidArgument, "ipv6 %q is not a pure IPv6 address", ipv6)
+	mapping, err := decodeMapping(req.GetIpv4(), req.GetIpv6(), req.GetPrefixIndex())
+	if err != nil {
+		return nil, status.Error(codes.InvalidArgument, err.Error())
 	}
 
 	name := req.GetName()
-	err := m.core.Mutate(name, func(current *NAT64Config, ok bool) (*NAT64Config, error) {
+	err = m.core.Mutate(name, func(current *NAT64Config, ok bool) (*NAT64Config, error) {
 		next := nextConfig(current, ok)
-		if req.PrefixIndex >= uint32(len(next.Prefixes)) {
-			return nil, status.Errorf(
-				codes.InvalidArgument,
-				"invalid prefix index: got %d, prefixes count %d",
-				req.PrefixIndex,
-				len(next.Prefixes),
-			)
+		if err := checkPrefixIndex(next, mapping); err != nil {
+			return nil, status.Error(codes.InvalidArgument, err.Error())
 		}
-		next.Mappings = slices.DeleteFunc(next.Mappings, func(existing Mapping) bool { return existing.IPv4 == ipv4 })
-		next.Mappings = append(next.Mappings, Mapping{
-			IPv4:        ipv4,
-			IPv6:        ipv6,
-			PrefixIndex: req.PrefixIndex,
-		})
+		next.Mappings = slices.DeleteFunc(next.Mappings, func(existing Mapping) bool { return existing.IPv4 == mapping.IPv4 })
+		next.Mappings = append(next.Mappings, mapping)
 
 		return next, nil
 	})
@@ -341,6 +352,67 @@ func encodeNAT64Prefix(prefix []byte) (*commonpb.IPv6Prefix, error) {
 	}, nil
 }
 
+// decodeConfig converts a whole config by the rules the incremental calls
+// apply to its parts, starting from the defaults a new config has.
+//
+// A prefix or an IPv4 address listed twice is rejected: a whole config
+// states each once, and mappings refer to prefixes by their position.
+func decodeConfig(wireConfig *nat64pb.Config) (*NAT64Config, error) {
+	config := defaultNAT64Config()
+	if wireMTU := wireConfig.GetMtu(); wireMTU != nil {
+		config.MTU = MTUConfig{
+			IPv4MTU: wireMTU.GetIpv4Mtu(),
+			IPv6MTU: wireMTU.GetIpv6Mtu(),
+		}
+	}
+	config.DropUnknownPrefix = wireConfig.GetDropUnknownPrefix()
+	config.DropUnknownMapping = wireConfig.GetDropUnknownMapping()
+
+	for idx, wirePrefix := range wireConfig.GetPrefixes() {
+		prefix, err := decodeNAT64Prefix(wirePrefix)
+		if err != nil {
+			return nil, fmt.Errorf("prefixes[%d]: %w", idx, err)
+		}
+		if slices.ContainsFunc(config.Prefixes, func(existing []byte) bool { return bytes.Equal(existing, prefix) }) {
+			return nil, fmt.Errorf("prefixes[%d]: prefix is listed twice", idx)
+		}
+		config.Prefixes = append(config.Prefixes, prefix)
+	}
+
+	mapped := map[netip.Addr]struct{}{}
+	for idx, wireMapping := range wireConfig.GetMappings() {
+		mapping, err := decodeMapping(wireMapping.GetIpv4(), wireMapping.GetIpv6(), wireMapping.GetPrefixIndex())
+		if err != nil {
+			return nil, fmt.Errorf("mappings[%d]: %w", idx, err)
+		}
+		if err := checkPrefixIndex(&config, mapping); err != nil {
+			return nil, fmt.Errorf("mappings[%d]: %w", idx, err)
+		}
+		if _, ok := mapped[mapping.IPv4]; ok {
+			return nil, fmt.Errorf("mappings[%d]: ipv4 %s is listed twice", idx, mapping.IPv4)
+		}
+		mapped[mapping.IPv4] = struct{}{}
+		config.Mappings = append(config.Mappings, mapping)
+	}
+
+	return &config, nil
+}
+
+// decodeMapping converts the addresses and the prefix index of a mapping,
+// rejecting an IPv4-mapped IPv6 address.
+func decodeMapping(ipv4 *commonpb.IPv4Address, ipv6 *commonpb.IPv6Address, prefixIndex uint32) (Mapping, error) {
+	mapping := Mapping{
+		IPv4:        ipv4.ToAddr(),
+		IPv6:        ipv6.ToAddr(),
+		PrefixIndex: prefixIndex,
+	}
+	if mapping.IPv6.Is4In6() {
+		return Mapping{}, fmt.Errorf("ipv6 %q is not a pure IPv6 address", mapping.IPv6)
+	}
+
+	return mapping, nil
+}
+
 // DeleteConfig removes the named config when it is no longer referenced
 // by any pipeline.
 func (m *NAT64Service) DeleteConfig(ctx context.Context, req *nat64pb.DeleteConfigRequest) (*nat64pb.DeleteConfigResponse, error) {
@@ -375,4 +447,18 @@ func adjustMappingsAfterPrefixRemove(mappings []Mapping, removed uint32) []Mappi
 		out = append(out, mapping)
 	}
 	return out
+}
+
+// checkPrefixIndex rejects a mapping whose prefix index names no prefix of
+// the config.
+func checkPrefixIndex(config *NAT64Config, mapping Mapping) error {
+	if mapping.PrefixIndex >= uint32(len(config.Prefixes)) {
+		return fmt.Errorf(
+			"invalid prefix index: got %d, prefixes count %d",
+			mapping.PrefixIndex,
+			len(config.Prefixes),
+		)
+	}
+
+	return nil
 }

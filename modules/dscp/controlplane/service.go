@@ -98,6 +98,41 @@ func (m *DscpService) ShowConfig(
 	return response, nil
 }
 
+// UpdateConfig replaces the whole named config, its prefix sets and its
+// marking, with the one the request carries.
+//
+// The prefix sets are kept sorted and duplicate-free as the incremental
+// calls keep them, and an invalid prefix publishes nothing.
+func (m *DscpService) UpdateConfig(
+	ctx context.Context,
+	request *dscppb.UpdateConfigRequest,
+) (*dscppb.UpdateConfigResponse, error) {
+	name := request.GetName()
+	desired := request.GetConfig()
+	prefixes4, err := commonpb.PrefixesFromNetworks("prefixes4", desired.GetPrefixes4())
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "failed to convert prefixes: %v", err)
+	}
+	prefixes6, err := commonpb.PrefixesFromNetworks("prefixes6", desired.GetPrefixes6())
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "failed to convert prefixes: %v", err)
+	}
+
+	payload := &config{
+		Prefixes4: mergePrefixes(nil, prefixes4),
+		Prefixes6: mergePrefixes(nil, prefixes6),
+		Config: dscpConfig{
+			Flag: uint8(desired.GetDscpConfig().GetFlag()),
+			Mark: uint8(desired.GetDscpConfig().GetMark()),
+		},
+	}
+	if err := m.core.Replace(name, payload); err != nil {
+		return nil, crud.PublishError(name, err)
+	}
+
+	return &dscppb.UpdateConfigResponse{}, nil
+}
+
 func (m *DscpService) AddPrefixes(
 	ctx context.Context,
 	request *dscppb.AddPrefixesRequest,
