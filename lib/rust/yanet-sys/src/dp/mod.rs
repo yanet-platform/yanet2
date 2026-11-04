@@ -80,7 +80,7 @@ pub mod rt;
 
 pub use batch::{Batch, DeviceRef, DscpMark, Packet, PacketView, ResizeError, TunnelError, Verdict};
 pub use cx::{BoundCounter, CommitCx, CounterRef, Cx, ModuleCx, ObjectCommitCx};
-pub use fields::{Counter, CounterLayout, Device, ObjectLink, Traffic};
+pub use fields::{Counter, CounterLayout, Device, ObjectLink, PerWorker, Traffic};
 pub use module::{Module, ModuleConfig};
 pub use object::{Object, ObjectConfig};
 

@@ -1,8 +1,12 @@
-//! Configuration field types backed by C registries of the module.
+//! Configuration field types backed by C registries of the module, and the
+//! per-worker state of a configuration.
 
 use core::marker::PhantomData;
 
-use yanet_shm::shm::ShmLayout;
+use yanet_shm::{
+    rel::RelPtr,
+    shm::{MAX_ALIGN, ShmLayout},
+};
 
 use crate::dp::object::Object;
 
@@ -200,3 +204,82 @@ unsafe impl ShmLayout for Device {}
 // zero-sized marker; the control plane writes the index the module's object
 // links assigned.
 unsafe impl<O: Object> ShmLayout for ObjectLink<O> {}
+
+/// Bytes of the widest cache line a slot of [`PerWorker`] keeps to itself.
+const SLOT_LINE: usize = 128;
+
+/// One value of `T` per dataplane worker; the control plane builds every slot
+/// from one initial value.
+///
+/// A slot holds only plain values: a value that owns a block, names a registry
+/// entry or embeds a C object is not `Copy`, so it cannot be a slot.
+///
+/// The first slot starts on a 128-byte line and the slots are
+/// [`Self::STRIDE`] apart, so no slot shares a cache line of up to 128 bytes
+/// with another worker's slot or with memory outside the slots.
+///
+/// Slots live as long as the configuration that holds them: a module
+/// configuration rebuilt on an update starts its slots again from the initial
+/// value. State that must survive updates belongs in an object.
+#[repr(C)]
+pub struct PerWorker<T> {
+    slots: RelPtr<T>,
+    workers: u64,
+}
+
+impl<T: Copy + ShmLayout> PerWorker<T> {
+    /// Bytes from one worker's slot to the next: the value rounded up to
+    /// whole 128-byte lines.
+    pub const STRIDE: usize = size_of::<T>().next_multiple_of(SLOT_LINE);
+
+    /// Bytes of the slot block of the given number of workers, `None` when
+    /// the size overflows.
+    ///
+    /// The block starts on a 64-byte line only (a sanitizer build shifts it
+    /// by its red zone), so it holds the slots and the most the first slot
+    /// may lie past the block's start.
+    #[doc(hidden)]
+    pub const fn block_size(workers: usize) -> Option<usize> {
+        match workers.checked_mul(Self::STRIDE) {
+            Some(slots) => slots.checked_add(SLOT_LINE - MAX_ALIGN),
+            None => None,
+        }
+    }
+
+    /// Address of the first slot of the slot block at the given address:
+    /// the next 128-byte line.
+    #[doc(hidden)]
+    #[inline(always)]
+    pub const fn first_slot(block: usize) -> usize {
+        block.wrapping_add(SLOT_LINE - 1) & !(SLOT_LINE - 1)
+    }
+
+    /// Number of slots, one per worker.
+    #[doc(hidden)]
+    #[inline(always)]
+    pub fn worker_count(&self) -> u64 {
+        self.workers
+    }
+
+    /// Stored offset of the slot block, zero when there is none.
+    #[doc(hidden)]
+    #[inline(always)]
+    pub fn offset(&self) -> isize {
+        self.slots.offset()
+    }
+}
+
+// SAFETY: the shared field is an offset and a count, which accept every bit
+// pattern, with no padding and no drop; the slot block is written only by the
+// build, before the value is shared.
+unsafe impl<T: Copy + ShmLayout> Sync for PerWorker<T> {}
+
+// SAFETY: as above; the block it names is owned by the graph and its slots
+// are plain values aligned for `T` by the builder.
+unsafe impl<T: Copy + ShmLayout> ShmLayout for PerWorker<T> {}
+
+// The builder writes the offset word, then the count word right after it.
+const _: () = {
+    assert!(size_of::<PerWorker<u64>>() == 16);
+    assert!(core::mem::offset_of!(PerWorker<u64>, workers) == size_of::<isize>());
+};

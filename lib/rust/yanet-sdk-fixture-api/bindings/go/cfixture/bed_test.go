@@ -379,6 +379,12 @@ func packetsAndBytes(packets, size int) []uint64 {
 	return []uint64{uint64(packets), uint64(size)}
 }
 
+// withWorkers returns an adjust that starts a bed's harness with that many
+// workers.
+func withWorkers(workers uint64) func(*dataplaneut.Config) {
+	return func(config *dataplaneut.Config) { config.WorkerCount = workers }
+}
+
 // withoutModules starts a bed's harness with no module loaded.
 func withoutModules(config *dataplaneut.Config) {
 	config.Modules = nil

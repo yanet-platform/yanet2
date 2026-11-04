@@ -7,12 +7,13 @@
 //! the build that made it by an invariant lifetime, fresh for every build, so
 //! it cannot be used in another build or outlive its own.
 //!
-//! A block is exactly its payload, as in C, which frees a structure by walking
-//! its owning edges. Releasing does the same: [`Build::free`] returns every
-//! block a value owns, reading only values that were written whole. Until a
-//! block is written into its parent it is owned by an [`Owned`] or an
-//! [`OwnedSlice`], which frees it on drop, so a build that stopped anywhere
-//! releases what it took.
+//! A block is its payload, as in C, which frees a structure by walking its
+//! owning edges; a per-worker block also holds the slack that puts its first
+//! slot on a cache line, sized again from its worker count. Releasing does the
+//! same: [`Build::free`] returns every block a value owns, reading only values
+//! that were written whole. Until a block is written into its parent it is
+//! owned by an [`Owned`], an [`OwnedSlice`] or an [`OwnedSlots`], which frees
+//! it on drop, so a build that stopped anywhere releases what it took.
 
 use core::{
     fmt,
@@ -35,7 +36,7 @@ use super::{
 use crate::{
     bindings,
     common::lpm::{Lpm, LpmRange},
-    dp::{Counter, CounterLayout, Device, Module, ModuleConfig, Object, ObjectConfig, ObjectLink},
+    dp::{Counter, CounterLayout, Device, Module, ModuleConfig, Object, ObjectConfig, ObjectLink, PerWorker},
 };
 
 mod classify;
@@ -385,6 +386,46 @@ unsafe impl<O: Object> Build for ObjectLink<O> {
     unsafe fn free<W: Owner>(_: usize, _: &MemoryContext<'_, W>) {}
 }
 
+// SAFETY: the offset and the count words are the whole value; an owner without
+// workers leaves the field NULL with a zero count. The slots are plain values,
+// so the block owns nothing.
+unsafe impl<T: Copy + ShmLayout> Build for PerWorker<T> {
+    type Parts<'b, W: Owner> = OwnedSlots<'b, T, W>;
+
+    unsafe fn write<W: Owner>(
+        parts: Self::Parts<'_, W>,
+        memory: &MemoryContext<'_, W>,
+        addr: usize,
+    ) -> Result<(), Refusal> {
+        let root = memory.root();
+        let (target, workers) = parts.into_raw();
+        // SAFETY: the offset and count words are aligned and exclusive (caller
+        // contract).
+        unsafe {
+            root.ptr::<isize>(addr).write(offset_to(target, addr));
+            root.ptr::<u64>(addr + size_of::<isize>()).write(workers);
+        }
+        Ok(())
+    }
+
+    unsafe fn free<W: Owner>(addr: usize, memory: &MemoryContext<'_, W>) {
+        let root = memory.root();
+        // SAFETY: the words were written whole (caller contract).
+        let (offset, workers) = unsafe {
+            (
+                root.ptr::<isize>(addr).read(),
+                root.ptr::<u64>(addr + size_of::<isize>()).read(),
+            )
+        };
+        if offset != 0 {
+            // SAFETY: the offset leads to the live slot block of as many
+            // workers as the count, which the value owns, allocated with the
+            // size of that count; the slots own nothing.
+            unsafe { memory.free(target_of(offset, addr), slot_block::<T>(workers)) }
+        }
+    }
+}
+
 // SAFETY: the C table is the whole value. Its routines write inside it, in the
 // blocks of its own memory context, which freeing returns, and in the links of
 // the context tree under the header, which opening and closing a context
@@ -475,6 +516,30 @@ pub struct Registered<'b, T> {
     _kind: PhantomData<fn() -> T>,
 }
 
+/// The slot block of a [`PerWorker`] allocated in build `'b`, one slot per
+/// worker of the owner, its parts; empty when the owner has no worker.
+///
+/// Created by a [`Scope`] only. It owns the block until it is written into
+/// the parts of a per-worker field, which takes it over; dropped before that,
+/// it returns the block.
+#[must_use]
+pub struct OwnedSlots<'b, T: Copy + ShmLayout, W: Owner> {
+    addr: usize,
+    workers: u64,
+    memory: &'b MemoryContext<'b, W>,
+    _brand: Brand<'b>,
+    _slot: PhantomData<fn() -> T>,
+}
+
+impl<T: Copy + ShmLayout, W: Owner> fmt::Debug for OwnedSlots<'_, T, W> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
+        f.debug_struct("OwnedSlots")
+            .field("addr", &self.addr)
+            .field("workers", &self.workers)
+            .finish()
+    }
+}
+
 impl<T: Build, W: Owner> fmt::Debug for Owned<'_, T, W> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
         f.debug_struct("Owned").field("addr", &self.addr).finish()
@@ -555,6 +620,12 @@ unsafe fn free_block<T: Build, W: Owner>(addr: usize, len: usize, memory: &Memor
     unsafe { free_elements::<T, W>(addr, len, memory) };
     // SAFETY: the block is the one allocated, and its edges are returned.
     unsafe { memory.free(addr, len * size_of::<T>()) };
+}
+
+/// Bytes of the slot block of a per-worker field of the given workers, which
+/// its build allocated, so the size does not overflow.
+fn slot_block<T: Copy + ShmLayout>(workers: u64) -> usize {
+    PerWorker::<T>::block_size(workers as usize).unwrap_or(usize::MAX)
 }
 
 fn refused<W: Owner, E: From<BuildError<W::Error>>>(refusal: Refusal) -> E {
@@ -718,6 +789,39 @@ impl<'b, W: Owner, E: From<BuildError<W::Error>>, K: Kind> Scope<'b, '_, W, E, K
         Ok(self.owned_slice(addr, len))
     }
 
+    /// Allocates the slots of a per-worker field, one per worker, each
+    /// holding the initial value.
+    ///
+    /// The slots live as long as the configuration that holds them. An owner
+    /// without workers allocates nothing.
+    ///
+    /// # Errors
+    ///
+    /// The block of the slots is larger than the allocator's largest, or the
+    /// memory is exhausted.
+    pub fn per_worker<T: Copy + ShmLayout>(self, init: T) -> Result<OwnedSlots<'b, T, W>, E> {
+        let workers = self.memory.owner.worker_count();
+        if workers == 0 {
+            return Ok(self.owned_slots(0, 0));
+        }
+        let size = usize::try_from(workers)
+            .ok()
+            .and_then(PerWorker::<T>::block_size)
+            .ok_or_else(|| refused::<W, E>(Refusal::BlockTooLarge))?;
+        let addr = self.alloc(size)?;
+        let root = self.memory.root();
+        let first = PerWorker::<T>::first_slot(addr);
+        for idx in 0..workers as usize {
+            // SAFETY: the fresh block is at least 64 bytes, so aligned to 64
+            // by the allocation, and the first slot lies at most 64 bytes past
+            // its start, on a 128-byte line, which the size leaves room for;
+            // each slot is a multiple of the stride further, of 128, and a
+            // layout type is aligned to at most 64.
+            unsafe { root.ptr::<T>(first + idx * PerWorker::<T>::STRIDE).write(init) };
+        }
+        Ok(self.owned_slots(addr, workers))
+    }
+
     /// Allocates a block of the given payload size.
     ///
     /// The size is a multiple of the alignment of the type it holds, so the
@@ -733,6 +837,16 @@ impl<'b, W: Owner, E: From<BuildError<W::Error>>, K: Kind> Scope<'b, '_, W, E, K
         self.memory
             .alloc(size)
             .ok_or_else(|| refused::<W, E>(Refusal::OutOfMemory))
+    }
+
+    fn owned_slots<T: Copy + ShmLayout>(self, addr: usize, workers: u64) -> OwnedSlots<'b, T, W> {
+        OwnedSlots {
+            addr,
+            workers,
+            memory: self.memory,
+            _brand: PhantomData,
+            _slot: PhantomData,
+        }
     }
 
     fn owned_slice<T: Build>(self, addr: usize, len: usize) -> OwnedSlice<'b, T, W> {
@@ -833,6 +947,26 @@ impl<T: Build, W: Owner> Drop for OwnedSlice<'_, T, W> {
             // allocated from the memory context with its exact size; nothing
             // but this value owns it.
             unsafe { free_block::<T, W>(self.addr, self.len, self.memory) }
+        }
+    }
+}
+
+impl<T: Copy + ShmLayout, W: Owner> OwnedSlots<'_, T, W> {
+    /// Hands the block over to the field it is written into: its address and
+    /// slot count, without returning it.
+    fn into_raw(self) -> (usize, u64) {
+        let this = ManuallyDrop::new(self);
+        (this.addr, this.workers)
+    }
+}
+
+impl<T: Copy + ShmLayout, W: Owner> Drop for OwnedSlots<'_, T, W> {
+    fn drop(&mut self) {
+        if self.addr != 0 {
+            // SAFETY: the block was allocated from the memory context with
+            // the size of its slot count, and its slots own nothing; nothing
+            // but this value owns it.
+            unsafe { self.memory.free(self.addr, slot_block::<T>(self.workers)) }
         }
     }
 }

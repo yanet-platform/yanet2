@@ -31,6 +31,11 @@ use super::addr::{BlockAddr, Context, Header};
 /// `cp_module_init` and `cp_object_init` do: an embedded C object opens its
 /// own context under it. A refused initialisation leaves nothing to finalise.
 ///
+/// `Owner::worker_count` must be the number of workers of the dataplane the
+/// configurations are published to, fixed for the life of the shared memory:
+/// a worker reads and writes its per-worker state at its index below it,
+/// unchecked.
+///
 /// The builder never makes two calls on one header at once, though the owner
 /// may be shared, because the header's memory context and registries are not
 /// promised to take concurrent calls; an owner may rely on that, and being
@@ -41,6 +46,11 @@ pub unsafe trait Owner: 'static {
 
     /// Provenance root of the owner's memory.
     fn root(&self) -> ShmRoot;
+
+    /// Number of workers of the dataplane, each indexed from zero; the SDK
+    /// sizes per-worker state by it.
+    #[doc(hidden)]
+    fn worker_count(&self) -> u64;
 
     /// Block of the given size in bytes, `None` when the memory is exhausted.
     fn alloc(&self, size: usize) -> Option<BlockAddr>;

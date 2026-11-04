@@ -14,12 +14,13 @@
 //! derive lives in `yanet-sdk-derive`), which also makes it [`Build`]: the
 //! derive generates a `<Type>Parts` struct with one field per field of the
 //! body. [`Builder::build`] runs the author's closure with a [`Scope`], whose
-//! methods allocate the owned blocks ([`Owned`], [`OwnedSlice`]), register
-//! counters and devices and link objects ([`Registered`]); the closure returns
-//! the parts of the body, which the builder writes in place and hands over as a
-//! [`Built`]. A block is exactly its payload, and a configuration is released
-//! by walking its owning edges, as C does; a block not yet written into its
-//! parent frees itself when dropped.
+//! methods allocate the owned blocks ([`Owned`], [`OwnedSlice`]) and the slots
+//! of per-worker state ([`OwnedSlots`]), register counters and devices and link
+//! objects ([`Registered`]); the closure returns the parts of the body, which
+//! the builder writes in place and hands over as a [`Built`]. A block is
+//! exactly its payload, and a configuration is released by walking its owning
+//! edges, as C does; a block not yet written into its parent frees itself when
+//! dropped.
 //!
 //! Writing a value is fallible, as embedded C objects that allocate are: a
 //! refused write returns the blocks it took and the parts it was given, so the
@@ -42,8 +43,8 @@ mod record;
 
 pub use addr::{BlockAddr, Context, Header};
 pub use builder::{
-    Build, Builder, Built, BuiltObject, Kind, ModuleKind, ObjectBuilder, ObjectKind, Owned, OwnedSlice, Registered,
-    Scope, Stage, Staged,
+    Build, Builder, Built, BuiltObject, Kind, ModuleKind, ObjectBuilder, ObjectKind, Owned, OwnedSlice, OwnedSlots,
+    Registered, Scope, Stage, Staged,
 };
 #[doc(hidden)]
 pub use builder::{MemoryContext, Partial};

@@ -212,8 +212,9 @@ pub struct State;
 #[yanet_sdk::api(object = yanet_sdk_fixture::State)]
 impl State {
     /// An object named `name` of `count` slots, slot n holding `seed` + n,
-    /// wrapping; the fault, a `FIXTURE_FAULT_*` constant, fails the build
-    /// after it has allocated the slots.
+    /// wrapping, and a slot per worker holding `seed`; the fault, a
+    /// `FIXTURE_FAULT_*` constant, fails the build after it has allocated the
+    /// slots.
     pub fn build(
         agent: &Agent,
         name: &str,
@@ -224,13 +225,14 @@ impl State {
         let count = usize::try_from(count).map_err(|_| ApiError::from(Refusal::TooManyItems))?;
         ObjectBuilder::<yanet_sdk_fixture::State>::build::<ApiError, _>(agent, name, |scope| {
             let slots = scope.slice(count, |idx| Ok(AtomicU64::new(seed.wrapping_add(idx as u64))))?;
+            let workers = scope.per_worker(seed)?;
             match fault {
                 FIXTURE_FAULT_NONE => {}
                 FIXTURE_FAULT_ERROR => return Err(ApiError::from(Refusal::BlockTooLarge)),
                 FIXTURE_FAULT_PANIC => panic!("fixture fault"),
                 _ => return Err(ApiError::new(ErrorKind::InvalidArgument, "unknown fault")),
             }
-            Ok(StateConfigParts { seed, slots })
+            Ok(StateConfigParts { seed, slots, workers })
         })
     }
 

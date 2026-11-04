@@ -152,6 +152,10 @@ fn generate_bindings(flags: &CFlags, shim_dir: &Path, out: &Path) {
         .allowlist_function("cp_object_(init|fini|try_destroy)")
         .allowlist_function("counter_registry_register")
         .allowlist_function("agent_destroy_released")
+        // The dataplane's worker count, which sizes per-worker state; the ring
+        // object reads the same `dp_config` field.
+        .allowlist_function("agent_dp_config")
+        .allowlist_function("dataplane_instance_worker_count")
         .allowlist_function("yanet_error_(free|message|cause|kind|add_kind)")
         // errno of a failed C-facing export, set by the API side.
         .allowlist_function("__errno_location")

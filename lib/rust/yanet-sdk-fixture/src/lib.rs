@@ -18,7 +18,7 @@ use core::sync::atomic::{AtomicU64, Ordering};
 
 use yanet_sdk::{
     Batch, CommitCx, Counter, CounterRef, Cx, Device, Lpm4, Lpm6, Module, Object, ObjectCommitCx, ObjectLink,
-    ShmLayout, ShmSlice, Traffic, Verdict,
+    PerWorker, ShmLayout, ShmSlice, Traffic, Verdict,
 };
 // The plugin examples use it.
 #[cfg(feature = "plugin")]
@@ -340,13 +340,15 @@ fn route_indexes<'id>(cx: &Cx<'id, Fib>, fib: &'id RouteFib, frame: &[u8]) -> Op
         .get(..usize::try_from(list.count).ok()?)
 }
 
-/// The configuration of [`State`]: the seed it was built from and a slot per
-/// item, which the control plane changes while the object is published.
+/// The configuration of [`State`]: the seed it was built from, a slot per
+/// item, which the control plane changes while the object is published, and a
+/// slot per worker.
 #[derive(ShmLayout)]
 #[repr(C)]
 pub struct StateConfig {
     pub seed: u64,
     pub slots: ShmSlice<AtomicU64>,
+    pub workers: PerWorker<u64>,
 }
 
 /// An object of atomic slots, the shape of state kept across configuration
