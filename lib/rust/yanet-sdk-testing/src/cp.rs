@@ -52,14 +52,20 @@ pub struct LiveHeaders {
     pub objects: usize,
 }
 
+/// Whether a header is a module configuration's or an object's.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum HeaderKind {
+    Module,
+    Object,
+}
+
 /// Owner whose every block is a block of the arena.
 pub struct TestOwner {
     arena: &'static BlockArena,
     /// Blocks handed out and not yet returned, with their size and context.
     blocks: RefCell<Vec<(BlockAddr, usize, Option<Context>)>>,
-    /// Headers initialised and not yet finalised, with whether each is an
-    /// object's.
-    headers: RefCell<Vec<(Header, bool)>>,
+    /// Headers initialised and not yet finalised, with the kind of each.
+    headers: RefCell<Vec<(Header, HeaderKind)>>,
     registered: Cell<u64>,
     /// Size of each counter registered, in the order of the registrations.
     counter_sizes: RefCell<Vec<u64>>,
@@ -109,7 +115,7 @@ impl TestOwner {
     /// Headers initialised and not yet finalised, by kind.
     pub fn live_headers(&self) -> LiveHeaders {
         let headers = self.headers.borrow();
-        let objects = headers.iter().filter(|header| header.1).count();
+        let objects = headers.iter().filter(|(_, kind)| *kind == HeaderKind::Object).count();
         LiveHeaders {
             modules: headers.len() - objects,
             objects,
@@ -160,19 +166,19 @@ impl TestOwner {
         }
     }
 
-    fn init(&self, header: Header, object: bool) -> Result<(), TestError> {
+    fn init(&self, header: Header, kind: HeaderKind) -> Result<(), TestError> {
         (!self.fails(Call::Header))
-            .then(|| self.headers.borrow_mut().push((header, object)))
+            .then(|| self.headers.borrow_mut().push((header, kind)))
             .ok_or(TestError::Header)
     }
 
     /// Finalises a header of the kind, recording a header unknown or of the
     /// other kind, or one whose context has live blocks.
-    fn fini(&self, header: Header, object: bool) {
+    fn fini(&self, header: Header, kind: HeaderKind) {
         let mut headers = self.headers.borrow_mut();
         let known = headers
             .iter()
-            .position(|&known| known == (header, object))
+            .position(|&known| known == (header, kind))
             .map(|idx| headers.swap_remove(idx));
         drop(headers);
         let live = self
@@ -226,19 +232,19 @@ unsafe impl Owner for TestOwner {
     }
 
     unsafe fn init_header(&self, header: Header, _module: &str, _name: &str) -> Result<(), TestError> {
-        self.init(header, false)
+        self.init(header, HeaderKind::Module)
     }
 
     unsafe fn fini_header(&self, header: Header) {
-        self.fini(header, false);
+        self.fini(header, HeaderKind::Module);
     }
 
     unsafe fn init_object_header(&self, header: Header, _ty: &str, _name: &str) -> Result<(), TestError> {
-        self.init(header, true)
+        self.init(header, HeaderKind::Object)
     }
 
     unsafe fn fini_object_header(&self, header: Header) {
-        self.fini(header, true);
+        self.fini(header, HeaderKind::Object);
     }
 
     unsafe fn register_counter(&self, _header: Header, _name: &str, size: u64) -> Result<u64, TestError> {

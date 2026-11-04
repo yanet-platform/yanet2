@@ -20,20 +20,19 @@ use syn::{
     spanned::Spanned,
 };
 
-/// The attribute: `module = <path>` or `object = <path>`.
-pub struct Args {
-    /// What the impl builds: a module's configurations or objects.
-    object: bool,
-    /// The module or object type.
-    target: Path,
+/// The attribute: what the impl builds, `module = <path>` for a module's
+/// configurations or `object = <path>` for objects of the type.
+pub enum Args {
+    Module(Path),
+    Object(Path),
 }
 
 impl Parse for Args {
     fn parse(input: ParseStream) -> syn::Result<Self> {
         let key: Ident = input.parse()?;
-        let object = match key.to_string().as_str() {
-            "module" => false,
-            "object" => true,
+        let kind: fn(Path) -> Self = match key.to_string().as_str() {
+            "module" => Self::Module,
+            "object" => Self::Object,
             _ => {
                 return Err(syn::Error::new(
                     key.span(),
@@ -46,7 +45,7 @@ impl Parse for Args {
         if !input.is_empty() {
             return Err(input.error("unexpected tokens after the type"));
         }
-        Ok(Self { object, target })
+        Ok(kind(target))
     }
 }
 
@@ -119,7 +118,10 @@ fn snake(name: &str) -> String {
     out
 }
 
-/// Whether a return type is `Result<u64, _>`, that of a query.
+/// Whether a return type is `Result<u64, _>`, that of a query: a method that
+/// reads a value, such as a field of an object, rather than building. Its
+/// export writes the value through a `uint64_t *out` before the error
+/// argument and returns 0, or -1 with the error set.
 fn is_query(output: &ReturnType) -> bool {
     let ReturnType::Type(_, ty) = output else {
         return false;
@@ -190,13 +192,12 @@ fn export(stem: &str, attr: &Args, self_ty: &Ident, method: &ImplItemFn) -> syn:
                 convert.push(quote_spanned!(ms=> let #v = #p::c_str(#c, #label)?;));
             }
             Lowered::Object(object) => {
-                if !attr.object {
+                let Args::Object(target) = attr else {
                     return Err(syn::Error::new(
                         ty.span(),
                         "a module api takes no object: only an object api reads its objects",
                     ));
-                }
-                let target = &attr.target;
+                };
                 c_params.push(quote_spanned!(ms=> #c: *mut #p::cp_object));
                 convert.push(quote_spanned!(ms=>
                     let #v: #p::BuiltObject<#target, #p::Agent> = #p::handle(#c, #label)?;
@@ -253,11 +254,9 @@ fn export(stem: &str, attr: &Args, self_ty: &Ident, method: &ImplItemFn) -> syn:
             }
         });
     }
-    let target = &attr.target;
-    let (built, header) = if attr.object {
-        (quote!(BuiltObject), quote!(cp_object))
-    } else {
-        (quote!(Built), quote!(cp_module))
+    let (built, header, target) = match attr {
+        Args::Module(target) => (quote!(Built), quote!(cp_module), target),
+        Args::Object(target) => (quote!(BuiltObject), quote!(cp_object), target),
     };
     let ret = quote_spanned! {ret_span=>
         ::core::result::Result<#p::#built<#target, #p::Agent>, #p::ApiError>
@@ -324,29 +323,31 @@ pub fn expand(args: Args, item: ItemImpl) -> syn::Result<TokenStream> {
         .collect::<syn::Result<Vec<_>>>()?;
     let free = Ident::new(&format!("{stem}_free"), ms);
     let p = quote_spanned!(ms=> ::yanet_sdk_api::__private);
-    let target = &args.target;
-    let free_fn = if args.object {
-        let doc = format!(" Frees an object `{self_ty}` built, as a C object's owner does.");
-        quote_spanned! {ms=>
-            #[doc = #doc]
-            #[unsafe(no_mangle)]
-            pub unsafe extern "C" fn #free(
-                __object: *mut #p::cp_object,
-                __err: *mut *mut #p::yanet_error,
-            ) -> ::core::ffi::c_int {
-                unsafe { #p::free::<#p::BuiltObject<#target, #p::Agent>>(__object, __err) }
+    let free_fn = match &args {
+        Args::Object(target) => {
+            let doc = format!(" Frees an object `{self_ty}` built, as a C object's owner does.");
+            quote_spanned! {ms=>
+                #[doc = #doc]
+                #[unsafe(no_mangle)]
+                pub unsafe extern "C" fn #free(
+                    __object: *mut #p::cp_object,
+                    __err: *mut *mut #p::yanet_error,
+                ) -> ::core::ffi::c_int {
+                    unsafe { #p::free::<#p::BuiltObject<#target, #p::Agent>>(__object, __err) }
+                }
             }
         }
-    } else {
-        let doc = format!(" Frees a configuration `{self_ty}` built, as a C module's free does.");
-        quote_spanned! {ms=>
-            #[doc = #doc]
-            #[unsafe(no_mangle)]
-            pub unsafe extern "C" fn #free(
-                __module: *mut #p::cp_module,
-                __err: *mut *mut #p::yanet_error,
-            ) -> ::core::ffi::c_int {
-                unsafe { #p::free::<#p::Built<#target, #p::Agent>>(__module, __err) }
+        Args::Module(target) => {
+            let doc = format!(" Frees a configuration `{self_ty}` built, as a C module's free does.");
+            quote_spanned! {ms=>
+                #[doc = #doc]
+                #[unsafe(no_mangle)]
+                pub unsafe extern "C" fn #free(
+                    __module: *mut #p::cp_module,
+                    __err: *mut *mut #p::yanet_error,
+                ) -> ::core::ffi::c_int {
+                    unsafe { #p::free::<#p::Built<#target, #p::Agent>>(__module, __err) }
+                }
             }
         }
     };
