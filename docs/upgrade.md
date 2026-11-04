@@ -3,6 +3,20 @@
 Manual steps required when upgrading an existing deployment. The packaging
 does not perform these automatically.
 
+## route-mpls updates no longer create a config
+
+route-mpls `UpdateConfig` now changes an existing config only and answers
+NotFound for a name the control plane does not hold, instead of starting
+from an empty config. After a control-plane restart that empty start
+replaced the full table the dataplane still ran with the first change.
+
+- Upgrade `yanet2-bird-adapter` before or together with the control plane.
+  The new adapter answers NotFound by sending its whole MPLS table; an
+  older one keeps failing its MPLS updates. The Debian packages enforce the
+  order; container deployments must follow it by hand.
+- Scripts that create a config with `yanet-cli-route-mpls update` must run
+  `yanet-cli-route-mpls create --name <name>` first.
+
 ## Web UI compresses ACL saves to gateways on other origins
 
 The web UI now gzips an ACL config save for a gateway on another origin

@@ -286,23 +286,30 @@ func (m *RouteMPLSService) CreateConfig(
 
 // UpdateConfig applies incremental prefix updates or withdrawals to an
 // existing route-mpls module configuration.
+//
+// A config this process does not hold reports NotFound, so a client sends
+// the whole rule set with CreateConfig first: after a control-plane
+// restart the dataplane may still run a full table this process never
+// saw, which a set of changes alone would replace.
 func (m *RouteMPLSService) UpdateConfig(
 	ctx context.Context,
 	req *routemplspb.UpdateConfigRequest,
 ) (*routemplspb.UpdateConfigResponse, error) {
 	name := req.Name
 	err := m.core.Mutate(name, func(current *routeMPLSConfig, ok bool) (*routeMPLSConfig, error) {
+		if !ok {
+			return nil, status.Errorf(codes.NotFound,
+				"config %q not found; create it first", name,
+			)
+		}
+
 		// Every mutation below copies the nexthop list it touches, since
 		// the trie clone shares the lists with the published config.
 		//
 		// Readers see the published config without a lock, and a failed
 		// publish keeps it live, so an in-place change would both race
 		// with them and corrupt what stays published.
-		prefixes := maptrie.NewMapTrie[netip.Prefix, netip.Addr, NextHopList](0)
-		if ok {
-			prefixes = current.Prefixes.Clone()
-		}
-		config := &routeMPLSConfig{Prefixes: prefixes}
+		config := &routeMPLSConfig{Prefixes: current.Prefixes.Clone()}
 
 		for _, update := range req.Updates {
 			if u := update.GetUpdate(); u != nil {
