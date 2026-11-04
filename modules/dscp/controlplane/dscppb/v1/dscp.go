@@ -42,32 +42,9 @@ func (m *Config) Validate() error {
 	return nil
 }
 
-func (m *AddPrefixesRequest) Validate() error {
-	return commonpb.ValidateModuleName("name", m.GetName())
-}
-
-func (m *RemovePrefixesRequest) Validate() error {
-	return commonpb.ValidateModuleName("name", m.GetName())
-}
-
 // Validate checks that the request names the config to delete.
 func (m *DeleteConfigRequest) Validate() error {
 	return commonpb.ValidateModuleName("name", m.GetName())
-}
-
-func (m *SetDscpMarkingRequest) Validate() error {
-	if err := commonpb.ValidateModuleName("name", m.GetName()); err != nil {
-		return err
-	}
-
-	if m.GetDscpConfig() == nil {
-		return errors.New("dscp_config is required")
-	}
-	if err := m.GetDscpConfig().Validate(); err != nil {
-		return fmt.Errorf("dscp_config: %w", err)
-	}
-
-	return nil
 }
 
 // Validate checks that the flag and mark values are within their valid

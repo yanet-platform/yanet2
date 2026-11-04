@@ -3,6 +3,28 @@
 Manual steps required when upgrading an existing deployment. The packaging
 does not perform these automatically.
 
+## dscp configs change only through a whole-config update
+
+The dscp control plane now answers `AddPrefixes`, `RemovePrefixes` and
+`SetDscpMarking` with Unimplemented; clients send the whole config with
+`UpdateConfig` instead. Each of those calls started from an empty config
+when the control plane did not hold the name, so after a control-plane
+restart the first one replaced the full config the dataplane still ran.
+
+`yanet-cli-dscp` replaces `prefix-add`, `prefix-remove` and `set-marking`
+with `update`, which takes every prefix and the marking at once:
+
+```bash
+yanet-cli-dscp update --name dscp0 --prefix 10.0.0.0/24 --prefix 2001:db8::/32 --flag always --mark 46
+```
+
+- Upgrade `yanet2-cli` together with the control plane: an older CLI can
+  no longer change a dscp config, and an older control plane does not
+  serve `update`.
+- Scripts that changed part of a config must keep the whole desired
+  config and pass it to `update`: after a control-plane restart `show`
+  knows nothing of the config the dataplane still runs.
+
 ## MPLS tunnels take the address family of their next hop
 
 bird-adapter now picks the tunnel family and source address by the next

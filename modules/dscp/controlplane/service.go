@@ -38,15 +38,6 @@ type config struct {
 	Config dscpConfig
 }
 
-// Clone copies the prefix sets and marking.
-func (m *config) Clone() *config {
-	return &config{
-		Prefixes4: slices.Clone(m.Prefixes4),
-		Prefixes6: slices.Clone(m.Prefixes6),
-		Config:    m.Config,
-	}
-}
-
 type dscpConfig struct {
 	Flag uint8
 	Mark uint8
@@ -101,8 +92,8 @@ func (m *DscpService) ShowConfig(
 // UpdateConfig replaces the whole named config, its prefix sets and its
 // marking, with the one the request carries.
 //
-// The prefix sets are kept sorted and duplicate-free as the incremental
-// calls keep them, and an invalid prefix publishes nothing.
+// The prefix sets are kept sorted and duplicate-free, and an invalid prefix
+// publishes nothing.
 func (m *DscpService) UpdateConfig(
 	ctx context.Context,
 	request *dscppb.UpdateConfigRequest,
@@ -119,8 +110,8 @@ func (m *DscpService) UpdateConfig(
 	}
 
 	payload := &config{
-		Prefixes4: mergePrefixes(nil, prefixes4),
-		Prefixes6: mergePrefixes(nil, prefixes6),
+		Prefixes4: sortedPrefixes(prefixes4),
+		Prefixes6: sortedPrefixes(prefixes6),
 		Config: dscpConfig{
 			Flag: uint8(desired.GetDscpConfig().GetFlag()),
 			Mark: uint8(desired.GetDscpConfig().GetMark()),
@@ -133,37 +124,11 @@ func (m *DscpService) UpdateConfig(
 	return &dscppb.UpdateConfigResponse{}, nil
 }
 
-func (m *DscpService) AddPrefixes(
-	ctx context.Context,
-	request *dscppb.AddPrefixesRequest,
-) (*dscppb.AddPrefixesResponse, error) {
-	name := request.GetName()
-	toAdd4, err := commonpb.PrefixesFromNetworks("prefixes4", request.GetPrefixes4())
-	if err != nil {
-		return nil, status.Errorf(codes.InvalidArgument, "failed to convert prefixes: %v", err)
-	}
-	toAdd6, err := commonpb.PrefixesFromNetworks("prefixes6", request.GetPrefixes6())
-	if err != nil {
-		return nil, status.Errorf(codes.InvalidArgument, "failed to convert prefixes: %v", err)
-	}
-
-	err = m.publish(name, func(cfg *config) {
-		cfg.Prefixes4 = mergePrefixes(cfg.Prefixes4, toAdd4)
-		cfg.Prefixes6 = mergePrefixes(cfg.Prefixes6, toAdd6)
-	})
-	if err != nil {
-		return nil, crud.PublishError(name, err)
-	}
-
-	return &dscppb.AddPrefixesResponse{}, nil
-}
-
-// mergePrefixes folds new prefixes into an existing sorted set, keeping it
-// sorted and duplicate-free.
-func mergePrefixes(existing, toAdd []netip.Prefix) []netip.Prefix {
+// sortedPrefixes returns a sorted, duplicate-free copy of the prefixes.
+func sortedPrefixes(prefixes []netip.Prefix) []netip.Prefix {
 	return slices.Compact(
 		slices.SortedFunc(
-			slices.Values(slices.Concat(existing, toAdd)),
+			slices.Values(prefixes),
 			comparePrefixes,
 		),
 	)
@@ -174,62 +139,6 @@ func comparePrefixes(first, second netip.Prefix) int {
 		first.Addr().Compare(second.Addr()),
 		cmp.Compare(first.Bits(), second.Bits()),
 	)
-}
-
-func (m *DscpService) RemovePrefixes(
-	ctx context.Context,
-	request *dscppb.RemovePrefixesRequest,
-) (*dscppb.RemovePrefixesResponse, error) {
-	name := request.GetName()
-	toRemove4, err := commonpb.PrefixesFromNetworks("prefixes4", request.GetPrefixes4())
-	if err != nil {
-		return nil, status.Errorf(codes.InvalidArgument, "failed to convert prefixes: %v", err)
-	}
-	toRemove6, err := commonpb.PrefixesFromNetworks("prefixes6", request.GetPrefixes6())
-	if err != nil {
-		return nil, status.Errorf(codes.InvalidArgument, "failed to convert prefixes: %v", err)
-	}
-
-	err = m.publish(name, func(cfg *config) {
-		cfg.Prefixes4 = removePrefixes(cfg.Prefixes4, toRemove4)
-		cfg.Prefixes6 = removePrefixes(cfg.Prefixes6, toRemove6)
-	})
-	if err != nil {
-		return nil, crud.PublishError(name, err)
-	}
-
-	return &dscppb.RemovePrefixesResponse{}, nil
-}
-
-// removePrefixes drops every listed prefix from an existing set.
-func removePrefixes(existing, toRemove []netip.Prefix) []netip.Prefix {
-	return slices.DeleteFunc(
-		existing,
-		func(prefix netip.Prefix) bool {
-			return slices.Contains(toRemove, prefix)
-		},
-	)
-}
-
-func (m *DscpService) SetDscpMarking(
-	ctx context.Context,
-	request *dscppb.SetDscpMarkingRequest,
-) (*dscppb.SetDscpMarkingResponse, error) {
-	name := request.GetName()
-	flag := uint8(request.GetDscpConfig().GetFlag())
-	mark := uint8(request.GetDscpConfig().GetMark())
-
-	err := m.publish(name, func(cfg *config) {
-		cfg.Config = dscpConfig{
-			Flag: flag,
-			Mark: mark,
-		}
-	})
-	if err != nil {
-		return nil, crud.PublishError(name, err)
-	}
-
-	return &dscppb.SetDscpMarkingResponse{}, nil
 }
 
 // DeleteConfig removes the named config if it is not referenced by any
@@ -244,17 +153,4 @@ func (m *DscpService) DeleteConfig(
 	}
 
 	return &dscppb.DeleteConfigResponse{}, nil
-}
-
-// publish applies a mutation to a copy of the named config, starting from
-// an empty one when the name is new, and publishes the result.
-func (m *DscpService) publish(name string, mutate func(cfg *config)) error {
-	return m.core.Mutate(name, func(current *config, ok bool) (*config, error) {
-		cfg := &config{}
-		if ok {
-			cfg = current.Clone()
-		}
-		mutate(cfg)
-		return cfg, nil
-	})
 }
