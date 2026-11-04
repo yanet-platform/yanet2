@@ -3,6 +3,7 @@ package route_mpls
 import (
 	"context"
 	"fmt"
+	"math/bits"
 	"net/netip"
 	"slices"
 
@@ -114,6 +115,7 @@ func (m *routeMPLSConfig) BuildRules() []croutempls.Rule {
 			for _, nh := range nextHopList.NextHops {
 				nexthops = append(nexthops, nh.ToFFI())
 			}
+			normalizeWeights(nexthops)
 
 			rule := croutempls.Rule{Nexthops: nexthops}
 			if net4, ok := xnetip.ContiguousFromPrefix4(prefix); ok {
@@ -149,6 +151,82 @@ func (m *routeMPLSConfig) BuildRules() []croutempls.Rule {
 	})
 
 	return rules
+}
+
+// maxSelectionSlots bounds the selection map of one rule, which takes eight
+// bytes a slot and one slot per unit of weight.
+//
+// With its header the map then fits a 32 KiB allocator block; 4096 slots
+// would already take a 64 KiB one.
+const maxSelectionSlots = 4000
+
+// normalizeWeights shrinks the weights of one rule's nexthops so their
+// selection map stays within maxSelectionSlots.
+//
+// Dividing by their greatest common divisor keeps every share exact. A sum
+// still above the bound is scaled down in proportion, each nonzero weight
+// keeping at least one slot, and divided again by the new common divisor.
+func normalizeWeights(nexthops []croutempls.Nexthop) {
+	if !divideByCommonDivisor(nexthops) {
+		return
+	}
+
+	var slots uint64
+	var nonzero uint64
+	fits := true
+	total := 0.0
+	for _, nexthop := range nexthops {
+		var carry uint64
+		slots, carry = bits.Add64(slots, nexthop.Weight, 0)
+		fits = fits && carry == 0 && slots <= maxSelectionSlots
+		total += float64(nexthop.Weight)
+		if nexthop.Weight != 0 {
+			nonzero++
+		}
+	}
+	if fits {
+		return
+	}
+
+	// The slots beyond the scaled shares hold the one-slot floors.
+	budget := 0.0
+	if nonzero < maxSelectionSlots {
+		budget = float64(maxSelectionSlots - nonzero)
+	}
+	for idx := range nexthops {
+		if nexthops[idx].Weight == 0 {
+			continue
+		}
+		share := float64(nexthops[idx].Weight) / total
+		nexthops[idx].Weight = max(1, uint64(share*budget))
+	}
+	divideByCommonDivisor(nexthops)
+}
+
+// divideByCommonDivisor divides the weights by their greatest common
+// divisor, reporting false when every weight is zero.
+func divideByCommonDivisor(nexthops []croutempls.Nexthop) bool {
+	var divisor uint64
+	for _, nexthop := range nexthops {
+		divisor = greatestCommonDivisor(divisor, nexthop.Weight)
+	}
+	if divisor == 0 {
+		return false
+	}
+
+	for idx := range nexthops {
+		nexthops[idx].Weight /= divisor
+	}
+	return true
+}
+
+// greatestCommonDivisor returns the greatest common divisor of two weights,
+// zero only when both are zero.
+func greatestCommonDivisor(first uint64, second uint64) uint64 {
+	for second != 0 {
+		first, second = second, first%second
+	}
+	return first
 }
 
 // ToFFI converts the nexthop into its bindings representation for the

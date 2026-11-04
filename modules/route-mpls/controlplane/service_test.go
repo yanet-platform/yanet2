@@ -2,6 +2,7 @@ package route_mpls
 
 import (
 	"errors"
+	"math"
 	"net/netip"
 	"sync/atomic"
 	"testing"
@@ -12,6 +13,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
+	"github.com/yanet-platform/yanet2/common/go/maptrie"
 	"github.com/yanet-platform/yanet2/controlplane/crud"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	routemplspb "github.com/yanet-platform/yanet2/modules/route-mpls/controlplane/routemplspb/v1"
@@ -374,6 +376,52 @@ func Test_RouteMPLSService_UpdateConfig_FailedPublishLeavesPreviousIntact(t *tes
 				show.Rules[1].GetNexthop().GetLabel(),
 			}
 			assert.ElementsMatch(t, []uint32{100, 200}, labels)
+		})
+	}
+}
+
+// Test_RouteMPLSConfig_BuildRules_NormalizesWeights verifies that a rule's
+// nexthop weights keep their shares within a bounded selection map.
+func Test_RouteMPLSConfig_BuildRules_NormalizesWeights(t *testing.T) {
+	cases := []struct {
+		name    string
+		weights []uint64
+		want    []uint64
+	}{
+		{name: "shared divisor removed", weights: []uint64{100000, 300000}, want: []uint64{1, 3}},
+		{name: "zero weights kept", weights: []uint64{0, 6, 9}, want: []uint64{0, 2, 3}},
+		{name: "all zero weights kept", weights: []uint64{0, 0}, want: []uint64{0, 0}},
+		{name: "sum at the bound kept", weights: []uint64{1, 3999}, want: []uint64{1, 3999}},
+		{name: "sum past the bound scaled down", weights: []uint64{0, 1, 1 << 40}, want: []uint64{0, 1, 3997}},
+		{name: "sum past 64 bits scaled down", weights: []uint64{1, math.MaxUint64}, want: []uint64{1, 3998}},
+		{name: "scaled shares reduced again", weights: []uint64{4294967295, 4294967294, 4294967293}, want: []uint64{1, 1, 1}},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			list := NextHopList{}
+			for idx, weight := range tc.weights {
+				list.Insert(NextHop{
+					Source:      netip.MustParseAddr("192.0.2.1"),
+					Destination: netip.AddrFrom4([4]byte{203, 0, 113, byte(idx + 1)}),
+					MPLSLabel:   100,
+					Weight:      weight,
+				})
+			}
+			prefixes := maptrie.NewMapTrie[netip.Prefix, netip.Addr, NextHopList](0)
+			prefixes.InsertOrUpdate(
+				netip.MustParsePrefix("10.0.0.0/8"),
+				func() NextHopList { return list },
+				func(NextHopList) NextHopList { return list },
+			)
+
+			rules := (&routeMPLSConfig{Prefixes: prefixes}).BuildRules()
+
+			weights := make([]uint64, 0, len(tc.weights))
+			for _, nexthop := range rules[0].Nexthops {
+				weights = append(weights, nexthop.Weight)
+			}
+			require.Equal(t, tc.want, weights)
 		})
 	}
 }
