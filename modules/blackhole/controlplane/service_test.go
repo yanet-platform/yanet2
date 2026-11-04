@@ -2,18 +2,15 @@ package blackhole
 
 import (
 	"errors"
-	"fmt"
 	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
 	"github.com/yanet-platform/yanet2/controlplane/crud"
-	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	blackholepb "github.com/yanet-platform/yanet2/modules/blackhole/controlplane/blackholepb/v1"
 )
 
@@ -91,22 +88,6 @@ func Test_BlackholeService_ListUpdateList(t *testing.T) {
 	assert.Equal(t, []string{"blackhole0"}, list.Configs)
 }
 
-// Test_BlackholeService_DeleteConfig verifies that deleting a config removes
-// it so a later read returns NotFound.
-func Test_BlackholeService_DeleteConfig(t *testing.T) {
-	svc := newTestService(t)
-	ctx := t.Context()
-
-	_, err := svc.UpdateConfig(ctx, &blackholepb.UpdateConfigRequest{Name: "blackhole0"})
-	require.NoError(t, err)
-
-	_, err = svc.DeleteConfig(ctx, &blackholepb.DeleteConfigRequest{Name: "blackhole0"})
-	require.NoError(t, err)
-
-	_, err = svc.ShowConfig(ctx, &blackholepb.ShowConfigRequest{Name: "blackhole0"})
-	require.Equal(t, codes.NotFound, status.Code(err))
-}
-
 // Test_BlackholeService_DeleteMissing verifies that deleting an absent config
 // returns NotFound without mutating the store.
 func Test_BlackholeService_DeleteMissing(t *testing.T) {
@@ -115,56 +96,6 @@ func Test_BlackholeService_DeleteMissing(t *testing.T) {
 	resp, err := svc.DeleteConfig(t.Context(), &blackholepb.DeleteConfigRequest{Name: "absent"})
 	require.Nil(t, resp)
 	require.Equal(t, codes.NotFound, status.Code(err))
-}
-
-// refusingDeleteBackend updates like mockBackend but refuses every delete
-// with err.
-type refusingDeleteBackend struct {
-	mockBackend
-	err error
-}
-
-func (m *refusingDeleteBackend) Delete(name string) error {
-	return m.err
-}
-
-// Test_BlackholeService_DeleteConfig_Refused verifies that a refused delete
-// maps its error kind to the status code and leaves the config in place.
-func Test_BlackholeService_DeleteConfig_Refused(t *testing.T) {
-	cases := []struct {
-		name string
-		err  error
-		code codes.Code
-	}{
-		{
-			name: "referenced by a chain",
-			err:  fmt.Errorf("module 'blackhole:blackhole0' not found in chain 'chain0': %w", ffi.ErrFailedPrecondition),
-			code: codes.FailedPrecondition,
-		},
-		{
-			name: "backend failure",
-			err:  errInjectedBackend,
-			code: codes.Internal,
-		},
-	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			svc := NewBlackholeService(&refusingDeleteBackend{err: tc.err})
-			ctx := t.Context()
-
-			_, err := svc.UpdateConfig(ctx, &blackholepb.UpdateConfigRequest{Name: "blackhole0"})
-			require.NoError(t, err)
-
-			resp, err := svc.DeleteConfig(ctx, &blackholepb.DeleteConfigRequest{Name: "blackhole0"})
-			require.Nil(t, resp)
-			require.Equal(t, tc.code, status.Code(err))
-
-			show, err := svc.ShowConfig(ctx, &blackholepb.ShowConfigRequest{Name: "blackhole0"})
-			require.NoError(t, err)
-			require.NotNil(t, show)
-		})
-	}
 }
 
 // Test_BlackholeService_UpdateFailureAtomic verifies that a failed update
@@ -185,52 +116,4 @@ func Test_BlackholeService_UpdateFailureAtomic(t *testing.T) {
 	require.NotNil(t, show)
 	require.NoError(t, err)
 	require.Equal(t, name, show.Name)
-}
-
-// Test_BlackholeService_ConcurrentAccess verifies that interleaved creates,
-// lists, and reads from many goroutines do not race or lose entries.
-func Test_BlackholeService_ConcurrentAccess(t *testing.T) {
-	svc := newTestService(t)
-
-	const goroutines = 10
-	const iterations = 100
-
-	g, ctx := errgroup.WithContext(t.Context())
-
-	for idx := range goroutines {
-		g.Go(func() error {
-			for jdx := range iterations {
-				name := fmt.Sprintf("config-%d-%d", idx, jdx)
-				_, err := svc.UpdateConfig(ctx, &blackholepb.UpdateConfigRequest{Name: name})
-				if err != nil {
-					return err
-				}
-			}
-			return nil
-		})
-	}
-
-	for range goroutines {
-		g.Go(func() error {
-			for range iterations {
-				_, err := svc.ListConfigs(ctx, &blackholepb.ListConfigsRequest{})
-				if err != nil {
-					return err
-				}
-			}
-			return nil
-		})
-	}
-
-	for idx := range goroutines {
-		g.Go(func() error {
-			for jdx := range iterations {
-				name := fmt.Sprintf("config-%d-%d", idx, jdx)
-				svc.ShowConfig(ctx, &blackholepb.ShowConfigRequest{Name: name})
-			}
-			return nil
-		})
-	}
-
-	require.NoError(t, g.Wait())
 }

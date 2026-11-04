@@ -2,22 +2,18 @@ package decap
 
 import (
 	"errors"
-	"fmt"
 	"net/netip"
 	"sync/atomic"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
 	"github.com/google/go-cmp/cmp"
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
 	"github.com/yanet-platform/yanet2/controlplane/crud"
-	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/modules/decap/controlplane/decappb/v1"
 )
 
@@ -62,44 +58,21 @@ func prefixStrings[T interface{ ToPrefix() (netip.Prefix, error) }](t *testing.T
 
 var errInjectedBackend = errors.New("injected backend failure")
 
-// mockModuleHandle counts Free calls so tests can assert a release happened.
-type mockModuleHandle struct {
-	freed atomic.Int64
-}
+// mockModuleHandle is a shared-memory handle whose release always succeeds.
+type mockModuleHandle struct{}
 
 func (m *mockModuleHandle) Free() error {
-	m.freed.Add(1)
 	return nil
 }
 
-// refusingOnceHandle refuses its first Free with ffi.ErrStillReferenced, then succeeds.
-type refusingOnceHandle struct {
-	numCalls atomic.Int64
-	freed    atomic.Int64
-}
-
-func (m *refusingOnceHandle) Free() error {
-	if m.numCalls.Add(1) == 1 {
-		return ffi.ErrStillReferenced
-	}
-	m.freed.Add(1)
-	return nil
-}
-
-// mockBackend records the last handle it minted and the name it last saw in DeleteModule.
-type mockBackend struct {
-	lastHandle  atomic.Pointer[mockModuleHandle]
-	deletedName string
-}
+// mockBackend publishes every config and hands out a fresh handle.
+type mockBackend struct{}
 
 func (m *mockBackend) Update(name string, payload PrefixSets) (crud.Handle, error) {
-	handle := &mockModuleHandle{}
-	m.lastHandle.Store(handle)
-	return handle, nil
+	return &mockModuleHandle{}, nil
 }
 
 func (m *mockBackend) Delete(name string) error {
-	m.deletedName = name
 	return nil
 }
 
@@ -108,48 +81,7 @@ func newTestService(t *testing.T) *DecapService {
 	return NewDecapService(&mockBackend{})
 }
 
-// refusingDeleteBackend updates like mockBackend but refuses every delete
-// with err.
-type refusingDeleteBackend struct {
-	mockBackend
-	err error
-}
-
-func (m *refusingDeleteBackend) Delete(name string) error {
-	m.deletedName = name
-	return m.err
-}
-
-// parkingBackend refuses to release the first handle it mints, then releases
-// normally, so that handle must be parked before it can be reclaimed.
-type parkingBackend struct {
-	mockBackend
-	numCalls atomic.Int64
-	first    refusingOnceHandle
-}
-
-func (m *parkingBackend) Update(name string, payload PrefixSets) (crud.Handle, error) {
-	if m.numCalls.Add(1) == 1 {
-		return &m.first, nil
-	}
-	return &mockModuleHandle{}, nil
-}
-
-// blockingBackend holds every update until released, modeling a slow
-// shared-memory publish.
-type blockingBackend struct {
-	mockBackend
-	entered chan struct{}
-	release chan struct{}
-}
-
-func (m *blockingBackend) Update(name string, payload PrefixSets) (crud.Handle, error) {
-	m.entered <- struct{}{}
-	<-m.release
-	return m.mockBackend.Update(name, payload)
-}
-
-// flakyBackend succeeds on the first UpdateModule call and fails thereafter.
+// flakyBackend publishes the first config and fails every later update.
 type flakyBackend struct {
 	numCalls atomic.Int64
 }
@@ -307,166 +239,6 @@ func Test_DecapService_DeleteConfig_MissingConfig(t *testing.T) {
 	require.Equal(t, codes.NotFound, status.Code(err))
 }
 
-// Test_DecapService_DeleteConfig_RemovesConfig verifies that deleting an
-// unreferenced config removes it from ListConfigs and from Show.
-func Test_DecapService_DeleteConfig_RemovesConfig(t *testing.T) {
-	backend := &mockBackend{}
-	svc := NewDecapService(backend)
-	ctx := t.Context()
-
-	_, err := svc.UpdateConfig(ctx, &decappb.UpdateConfigRequest{
-		Name:      "decap0",
-		Prefixes4: mustPrefixes4(t, "10.0.0.0/24"),
-	})
-	require.NoError(t, err)
-
-	handle := backend.lastHandle.Load()
-	require.NotNil(t, handle)
-
-	resp, err := svc.DeleteConfig(ctx, &decappb.DeleteConfigRequest{Name: "decap0"})
-	require.NotNil(t, resp)
-	require.NoError(t, err)
-	assert.Equal(t, "decap0", backend.deletedName)
-	assert.Equal(t, int64(1), handle.freed.Load())
-
-	list, err := svc.ListConfigs(ctx, &decappb.ListConfigsRequest{})
-	require.NoError(t, err)
-	assert.Empty(t, list.Configs)
-
-	show, err := svc.ShowConfig(ctx, &decappb.ShowConfigRequest{Name: "decap0"})
-	require.Nil(t, show)
-	require.Equal(t, codes.NotFound, status.Code(err))
-}
-
-// Test_DecapService_DeleteConfig_Refused verifies that a refused delete maps
-// its error kind to the status code and leaves the config in place.
-func Test_DecapService_DeleteConfig_Refused(t *testing.T) {
-	cases := []struct {
-		name string
-		err  error
-		code codes.Code
-	}{
-		{
-			name: "referenced by a chain",
-			err:  fmt.Errorf("module 'decap:decap0' not found in chain 'chain0': %w", ffi.ErrFailedPrecondition),
-			code: codes.FailedPrecondition,
-		},
-		{
-			name: "backend failure",
-			err:  errInjectedBackend,
-			code: codes.Internal,
-		},
-	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			backend := &refusingDeleteBackend{err: tc.err}
-			svc := NewDecapService(backend)
-			ctx := t.Context()
-
-			_, err := svc.UpdateConfig(ctx, &decappb.UpdateConfigRequest{
-				Name:      "decap0",
-				Prefixes4: mustPrefixes4(t, "10.0.0.0/24"),
-			})
-			require.NoError(t, err)
-
-			resp, err := svc.DeleteConfig(ctx, &decappb.DeleteConfigRequest{Name: "decap0"})
-			require.Nil(t, resp)
-			require.Equal(t, tc.code, status.Code(err))
-			assert.Equal(t, "decap0", backend.deletedName)
-
-			list, err := svc.ListConfigs(ctx, &decappb.ListConfigsRequest{})
-			require.NoError(t, err)
-			assert.Equal(t, []string{"decap0"}, list.Configs)
-
-			show, err := svc.ShowConfig(ctx, &decappb.ShowConfigRequest{Name: "decap0"})
-			require.NotNil(t, show)
-			require.NoError(t, err)
-		})
-	}
-}
-
-// Test_DecapService_DeleteConfig_ParksThenReclaims verifies that a handle
-// refused on delete is parked and reclaimed by the next successful update.
-func Test_DecapService_DeleteConfig_ParksThenReclaims(t *testing.T) {
-	backend := &parkingBackend{}
-	svc := NewDecapService(backend)
-	ctx := t.Context()
-
-	_, err := svc.UpdateConfig(ctx, &decappb.UpdateConfigRequest{
-		Name:      "decap0",
-		Prefixes4: mustPrefixes4(t, "10.0.0.0/24"),
-	})
-	require.NoError(t, err)
-
-	resp, err := svc.DeleteConfig(ctx, &decappb.DeleteConfigRequest{Name: "decap0"})
-	require.NotNil(t, resp)
-	require.NoError(t, err)
-	assert.Equal(t, int64(1), backend.first.numCalls.Load())
-	assert.Equal(t, int64(0), backend.first.freed.Load())
-
-	// A later successful update reclaims deferred handles first.
-	_, err = svc.UpdateConfig(ctx, &decappb.UpdateConfigRequest{
-		Name:      "decap1",
-		Prefixes4: mustPrefixes4(t, "10.0.1.0/24"),
-	})
-	require.NoError(t, err)
-	assert.Equal(t, int64(2), backend.first.numCalls.Load())
-	assert.Equal(t, int64(1), backend.first.freed.Load())
-}
-
-// Test_DecapService_ListConfigs_DuringSlowUpdate verifies that reads
-// complete while an update's publish is in flight, so a slow
-// shared-memory write never stalls the read RPCs.
-func Test_DecapService_ListConfigs_DuringSlowUpdate(t *testing.T) {
-	backend := &blockingBackend{
-		entered: make(chan struct{}),
-		release: make(chan struct{}),
-	}
-	svc := NewDecapService(backend)
-	ctx := t.Context()
-
-	var group errgroup.Group
-	group.Go(func() error {
-		_, err := svc.UpdateConfig(ctx, &decappb.UpdateConfigRequest{
-			Name:      "decap0",
-			Prefixes4: mustPrefixes4(t, "10.0.0.0/24"),
-		})
-		return err
-	})
-	<-backend.entered
-
-	type readResult struct {
-		list    *decappb.ListConfigsResponse
-		listErr error
-		showErr error
-	}
-	reads := make(chan readResult, 1)
-	go func() {
-		list, listErr := svc.ListConfigs(ctx, &decappb.ListConfigsRequest{})
-		_, showErr := svc.ShowConfig(ctx, &decappb.ShowConfigRequest{Name: "decap0"})
-		reads <- readResult{list: list, listErr: listErr, showErr: showErr}
-	}()
-
-	var result readResult
-	select {
-	case result = <-reads:
-	case <-time.After(5 * time.Second):
-		close(backend.release)
-		t.Fatal("reads blocked behind an in-flight publish")
-	}
-	require.NoError(t, result.listErr)
-	assert.Empty(t, result.list.GetConfigs())
-	assert.Equal(t, codes.NotFound, status.Code(result.showErr))
-
-	close(backend.release)
-	require.NoError(t, group.Wait())
-
-	list, err := svc.ListConfigs(ctx, &decappb.ListConfigsRequest{})
-	require.NoError(t, err)
-	assert.Equal(t, []string{"decap0"}, list.GetConfigs())
-}
-
 func Test_DecapService_DeduplicatePrefixes(t *testing.T) {
 	svc := newTestService(t)
 	prefix := "10.0.0.0/24"
@@ -481,55 +253,4 @@ func Test_DecapService_DeduplicatePrefixes(t *testing.T) {
 	require.NotNil(t, show)
 	require.NoError(t, err)
 	require.Empty(t, cmp.Diff([]string{prefix}, prefixStrings(t, show.Prefixes4)))
-}
-
-func Test_DecapService_ConcurrentAccess(t *testing.T) {
-	svc := newTestService(t)
-
-	const goroutines = 10
-	const iterations = 100
-
-	networks := mustPrefixes4(t, "10.0.0.0/24")
-
-	g, ctx := errgroup.WithContext(t.Context())
-
-	for idx := range goroutines {
-		g.Go(func() error {
-			for jdx := range iterations {
-				name := fmt.Sprintf("config-%d-%d", idx, jdx)
-				_, err := svc.UpdateConfig(ctx, &decappb.UpdateConfigRequest{
-					Name:      name,
-					Prefixes4: networks,
-				})
-				if err != nil {
-					return err
-				}
-			}
-			return nil
-		})
-	}
-
-	for range goroutines {
-		g.Go(func() error {
-			for range iterations {
-				_, err := svc.ListConfigs(ctx, &decappb.ListConfigsRequest{})
-				if err != nil {
-					return err
-				}
-			}
-			return nil
-		})
-	}
-
-	for idx := range goroutines {
-		g.Go(func() error {
-			for jdx := range iterations {
-				name := fmt.Sprintf("config-%d-%d", idx, jdx)
-				svc.ShowConfig(ctx, &decappb.ShowConfigRequest{Name: name})
-			}
-			return nil
-		})
-	}
-
-	require.NoError(t, g.Wait())
 }

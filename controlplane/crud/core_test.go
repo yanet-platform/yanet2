@@ -115,6 +115,21 @@ func Test_Core_Mutate_SeedsCallbackWithCurrent(t *testing.T) {
 	require.Equal(t, "second", payload)
 }
 
+// Test_Core_Mutate_RetiresPrevious verifies that a mutation frees the
+// handle of the generation it retired and keeps the live one.
+func Test_Core_Mutate_RetiresPrevious(t *testing.T) {
+	backend := &fakeBackend{}
+	core := crud.NewCore(backend)
+
+	require.NoError(t, core.Replace("wan", "first"))
+	require.NoError(t, core.Mutate("wan", func(current string, ok bool) (string, error) {
+		return current + " and second", nil
+	}))
+
+	require.Equal(t, 1, backend.handles[0].frees)
+	require.Equal(t, 0, backend.handles[1].frees)
+}
+
 // Test_Core_Mutate_CallbackErrorSkipsBackend verifies that a mutation
 // the callback rejects reaches neither the backend nor the store.
 func Test_Core_Mutate_CallbackErrorSkipsBackend(t *testing.T) {
