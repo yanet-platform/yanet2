@@ -1,6 +1,7 @@
 package mpls_test
 
 import (
+	"fmt"
 	"net/netip"
 	"testing"
 
@@ -70,6 +71,24 @@ func Test_Rib_Apply_BestPeerDemotion(t *testing.T) {
 
 	require.Equal(t, []rib.Route{backup}, changes, "the backup peer's weight reaches route-mpls")
 	require.Equal(t, []rib.Route{backup}, mplsRib.Best())
+}
+
+// Test_Rib_Apply_TiedPeersKeepBest verifies that the best of many equally
+// preferred peers stays put when another of them changes.
+func Test_Rib_Apply_TiedPeersKeepBest(t *testing.T) {
+	mplsRib := mpls.NewRib()
+	// More than twelve, past which an unstable sort reorders equal routes.
+	peers := make([]rib.Route, 13)
+	for idx := range peers {
+		peers[idx] = peerRoute(fmt.Sprintf("198.51.100.%d", idx+1), 100, uint32(idx+1))
+		mplsRib.Apply(peers[idx])
+	}
+
+	peers[1].Pref = 50
+	changes := mplsRib.Apply(peers[1])
+
+	require.Empty(t, changes)
+	require.Equal(t, []rib.Route{peers[0]}, mplsRib.Best())
 }
 
 // weightedRoute returns an MPLS route to a fixed prefix, address and label

@@ -113,7 +113,9 @@ func (m mplsPeerRouteList) Update(
 		items[idx] = route
 	}
 
-	slices.SortFunc(
+	// A stable sort keeps equally preferred routes in order, so their best
+	// stays put while another of them changes.
+	slices.SortStableFunc(
 		items,
 		func(l rib.Route, r rib.Route) int {
 			if l.Pref != r.Pref {
@@ -265,7 +267,7 @@ func (m mplsRouteList) Update(
 		newRoutes[idx] = route
 	}
 
-	slices.SortFunc(
+	slices.SortStableFunc(
 		newRoutes,
 		func(l rib.Route, r rib.Route) int {
 			if l.Pref != r.Pref {
