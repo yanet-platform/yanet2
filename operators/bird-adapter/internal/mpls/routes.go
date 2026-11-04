@@ -1,6 +1,7 @@
 package mpls
 
 import (
+	"maps"
 	"net/netip"
 	"slices"
 
@@ -164,8 +165,9 @@ func getWeight(route rib.Route) uint64 {
 // routeListBestDiff returns the route-mpls changes that turn the old best
 // routes into the new ones.
 //
-// It withdraws every nexthop the new routes lack, then updates every
-// nexthop that is new or has a new weight.
+// It withdraws every nexthop the new routes lack, then updates every route
+// whose nexthop's routes changed. All routes sharing that nexthop are sent
+// again, so the weight route-mpls keeps is one of theirs.
 func routeListBestDiff(
 	newRoutes []rib.Route,
 	oldRoutes []rib.Route,
@@ -187,8 +189,7 @@ func routeListBestDiff(
 	for idx := range newBests {
 		route := newBests[idx]
 
-		idx := slices.IndexFunc(oldBests, sameNexthop(route))
-		if idx == -1 || getWeight(route) != getWeight(oldBests[idx]) {
+		if !maps.Equal(nexthopWeights(newBests, route), nexthopWeights(oldBests, route)) {
 			result = append(result, route)
 		}
 	}
@@ -207,6 +208,19 @@ func sameNexthop(route rib.Route) func(rib.Route) bool {
 		return known.NextHop == route.NextHop &&
 			getLabel(known) == getLabel(route)
 	}
+}
+
+// nexthopWeights returns the weight of every route sharing the given
+// route's nexthop, keyed by RD.
+func nexthopWeights(routes []rib.Route, route rib.Route) map[uint64]uint64 {
+	matches := sameNexthop(route)
+	weights := map[uint64]uint64{}
+	for _, known := range routes {
+		if matches(known) {
+			weights[known.RD] = getWeight(known)
+		}
+	}
+	return weights
 }
 
 func (m mplsRouteList) Withdraw(
