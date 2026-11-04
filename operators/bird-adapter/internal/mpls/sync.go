@@ -199,9 +199,7 @@ func (m *Sync) pushChanges(ctx context.Context) error {
 		return err
 	}
 
-	m.log.Info("route-mpls does not know the config, sending the whole table",
-		zap.String("config", m.name),
-	)
+	m.log.Info("route-mpls does not know the config, sending the whole table")
 	return m.pushTable(ctx)
 }
 
