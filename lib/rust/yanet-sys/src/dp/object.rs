@@ -94,11 +94,8 @@ pub trait Object: Sized + 'static {
     ///
     /// Runs on the dataplane's assigner thread once per worker context of the
     /// object in a generation, before the module contexts linking it are
-    /// prepared. C may run it again for a context a worker already reads, so
-    /// it makes the same value from the same configuration: it reads what the
-    /// build fixed, not the atomics of the state. A zero-sized
-    /// prepared value has no buffer and no commit hook, so for it this is
-    /// not called.
+    /// prepared. A zero-sized prepared value has no buffer and no commit hook,
+    /// so for it this is not called.
     fn prepare<'p>(cx: &ObjectCommitCx<'p, Self>) -> Self::Prepared<'p>;
 }
 
