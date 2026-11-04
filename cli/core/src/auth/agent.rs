@@ -114,13 +114,13 @@ impl SshAgent {
         parse_identities_answer(&response)
     }
 
-    /// Find the certificate whose key id is the given tag.
+    /// Find the first certificate matching the given tag.
     pub async fn find_certificate(&mut self, tag: &str) -> Result<(Certificate, Vec<u8>), AgentError> {
         let identities = self.identities().await?;
 
         for identity in identities {
             if let Some(cert) = identity.certificate()
-                && cert.key_id() == tag
+                && cert.key_id().contains(tag)
             {
                 let blob = identity.to_bytes()?;
 
