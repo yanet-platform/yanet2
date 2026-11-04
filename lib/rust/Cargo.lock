@@ -573,7 +573,7 @@ checksum = "23b97319f7b8343df12cc98938e5c3eb436064524c8d2b4e30a1d3a36eecdf81"
 
 [[package]]
 name = "yanet-packet"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "netip",
  "proptest",
@@ -582,7 +582,7 @@ dependencies = [
 
 [[package]]
 name = "yanet-sdk"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "yanet-packet",
  "yanet-sdk-derive",
@@ -593,7 +593,7 @@ dependencies = [
 
 [[package]]
 name = "yanet-sdk-api"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "yanet-shm",
  "yanet-sys",
@@ -601,14 +601,14 @@ dependencies = [
 
 [[package]]
 name = "yanet-sdk-build"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "cbindgen",
 ]
 
 [[package]]
 name = "yanet-sdk-derive"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -619,7 +619,7 @@ dependencies = [
 
 [[package]]
 name = "yanet-sdk-fixture"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "yanet-sdk",
  "yanet-sdk-plugin",
@@ -627,7 +627,7 @@ dependencies = [
 
 [[package]]
 name = "yanet-sdk-fixture-api"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "yanet-sdk",
  "yanet-sdk-api",
@@ -637,14 +637,14 @@ dependencies = [
 
 [[package]]
 name = "yanet-sdk-plugin"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "yanet-sys",
 ]
 
 [[package]]
 name = "yanet-sdk-testing"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "yanet-shm",
  "yanet-sys",
@@ -652,14 +652,14 @@ dependencies = [
 
 [[package]]
 name = "yanet-shm"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "yanet-sdk-testing",
 ]
 
 [[package]]
 name = "yanet-sys"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "bindgen",
  "cc",
