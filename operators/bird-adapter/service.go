@@ -396,17 +396,20 @@ func (m *AdapterService) processBirdImport(
 	}
 	currentStream := &stream
 
+	log := m.log.With(zap.String("config", name))
+
 	// The sync keeps the route-mpls config in step with the MPLS routes,
 	// across control-plane restarts and failed pushes.
+	//
+	// It logs to the service logger, so a lost route-mpls config or a route
+	// dropped for its label is reported whatever log level the import sets.
 	mplsSync := mpls.NewSync(
 		name,
 		routemplspb.NewRouteMPLSServiceClient(conn),
 		mplsV4Src,
 		mplsV6Src,
-		mpls.WithLog(clientLog),
+		mpls.WithLog(log),
 	)
-
-	log := m.log.With(zap.String("config", name))
 
 	// A route-mpls failure must not hold back the IP routes, so it is only
 	// logged: the sync sends the whole table once route-mpls recovers.
