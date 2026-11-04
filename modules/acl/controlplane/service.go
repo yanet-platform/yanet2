@@ -15,7 +15,6 @@ import (
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
 	"github.com/yanet-platform/yanet2/common/go/grpcmetrics"
 	"github.com/yanet-platform/yanet2/common/go/metrics"
-	"github.com/yanet-platform/yanet2/controlplane/configstore"
 	"github.com/yanet-platform/yanet2/controlplane/crud"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/modules/acl/bindings/go/cacl"
@@ -81,10 +80,6 @@ func WithMetrics(factory grpcmetrics.Factory) Option {
 		o.Metrics = factory
 	}
 }
-
-// errUnchanged is reported by the update callback when the request matches
-// the published config, so nothing is compiled or published.
-var errUnchanged = errors.New("config unchanged")
 
 // aclConfig is the published payload: the accepted rule document with
 // its fwstate-map object names, and the compile metadata captured when
@@ -348,7 +343,7 @@ func (m *ACLService) UpdateConfig(
 		if ok && rulesEqual(current.Rules(), req.Rules) &&
 			current.Fw4MapName() == fw4MapName &&
 			current.Fw6MapName() == fw6MapName {
-			return nil, errUnchanged
+			return nil, crud.ErrUnchanged
 		}
 
 		return &aclConfig{
@@ -357,7 +352,7 @@ func (m *ACLService) UpdateConfig(
 			fw6MapName: fw6MapName,
 		}, nil
 	})
-	if err != nil && !errors.Is(err, errUnchanged) {
+	if err != nil {
 		return nil, err
 	}
 
@@ -396,17 +391,8 @@ func (m *ACLService) DeleteConfig(
 	req *aclpb.DeleteConfigRequest,
 ) (*aclpb.DeleteConfigResponse, error) {
 	name := req.GetName()
-	err := m.core.Delete(name)
-	if errors.Is(err, configstore.ErrNotFound) {
-		return nil, status.Errorf(codes.NotFound, "config %q not found", name)
-	}
-	if err != nil {
-		code := codes.Internal
-		if errors.Is(err, ffi.ErrFailedPrecondition) {
-			// A chain still references the config.
-			code = codes.FailedPrecondition
-		}
-		return nil, status.Errorf(code, "could not delete acl module config '%s': %v", name, err)
+	if err := m.core.Delete(name); err != nil {
+		return nil, crud.DeleteError(name, err)
 	}
 	m.log.Info("successfully deleted ACL module config", zap.String("name", name))
 
