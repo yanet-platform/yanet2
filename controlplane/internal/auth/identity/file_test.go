@@ -46,7 +46,7 @@ func Test_IdentityProvider_MissingLoginIsUnsupported(t *testing.T) {
 }
 
 // Test_IdentityProvider_Includes verifies that composed identity data is
-// available through the public lookup and missing fragments fail loading.
+// available through lookup only while its optional source is present.
 func Test_IdentityProvider_Includes(t *testing.T) {
 	directory := t.TempDir()
 	fragment := filepath.Join(directory, "users.yaml")
@@ -59,6 +59,8 @@ func Test_IdentityProvider_Includes(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, []string{"operators"}, resolved.Groups)
 	require.NoError(t, os.Remove(fragment))
-	_, err = identity.NewIdentityProviderFromFile(path)
-	require.Error(t, err)
+	provider, err = identity.NewIdentityProviderFromFile(path)
+	require.NoError(t, err)
+	_, err = provider.ResolveIdentity(t.Context(), core.Subject{Login: "alice"})
+	require.ErrorIs(t, err, identity.ErrIdentityNotFound)
 }

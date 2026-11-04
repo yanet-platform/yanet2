@@ -412,7 +412,7 @@ func Test_Load_LineErrorUnwrapsFromPathError(t *testing.T) {
 }
 
 // Test_LoadConfig_IncludesBeforeEnvironment verifies that partial files form
-// one validated configuration, with local keys and then environment winning.
+// one validated configuration, with includes and then environment winning.
 func Test_LoadConfig_IncludesBeforeEnvironment(t *testing.T) {
 	type Server struct {
 		Name NonEmptyString `yaml:"name"`
@@ -430,13 +430,13 @@ server: {name: shared, addr: shared}
 	path := filepath.Join(directory, "main.yaml")
 	require.NoError(t, os.WriteFile(path, []byte(`
 include: [shared.yaml]
-server: {name: main}
+server: {name: main, addr: main}
 `), 0o600))
 	t.Setenv("YANET_SERVER_ADDR", "environment")
 	config, err := LoadConfig[Config](path, WithKnownFields(), WithEnv())
 	require.NoError(t, err)
 	require.Equal(t, "shared", config.Inner.Addr.Unwrap())
-	require.Equal(t, "main", config.Server.Name.Unwrap())
+	require.Equal(t, "shared", config.Server.Name.Unwrap())
 	require.Equal(t, "environment", config.Server.Addr.Unwrap())
 }
 
@@ -455,6 +455,7 @@ func Test_LoadConfig_IncludeMountedDirectories(t *testing.T) {
 		[]byte("name: mounted\nitems: [new]\n"), 0o600))
 	require.NoError(t, os.Symlink("..generation", filepath.Join(mount, "..data")))
 	require.NoError(t, os.Symlink("..data/transport.yaml", filepath.Join(mount, "transport.yaml")))
+	require.NoError(t, os.Symlink("..data/optional.yaml", filepath.Join(mount, "optional.yaml")))
 	base := filepath.Join(directory, "conf.d", "10-base")
 	require.NoError(t, os.MkdirAll(base, 0o700))
 	require.NoError(t, os.WriteFile(filepath.Join(base, "config.yml"),

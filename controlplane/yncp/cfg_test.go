@@ -15,15 +15,25 @@ import (
 )
 
 // Test_Config_IncludedListenersAndClientTrust verifies that composition
-// preserves native TLS listeners and the raw client-authenticator settings.
+// replaces generated plaintext listeners and preserves client trust settings.
 func Test_Config_IncludedListenersAndClientTrust(t *testing.T) {
 	certificateAuthority := tlscert.NewCA(t)
 	directory := t.TempDir()
 	fragment := fmt.Sprintf(`gateway:
   server:
     grpc:
+      endpoint: ""
       tls:
         endpoint: "[::1]:8443"
+        key_pairs:
+          - type: file
+            config:
+              cert_file: /pki/server.pem
+              key_file: /pki/server-key.pem
+    http:
+      endpoint: ""
+      tls:
+        endpoint: "[::1]:9443"
         key_pairs:
           - type: file
             config:
@@ -38,7 +48,13 @@ func Test_Config_IncludedListenersAndClientTrust(t *testing.T) {
 `, certificateAuthority.BundleFile())
 	require.NoError(t, os.WriteFile(filepath.Join(directory, "transport.yaml"), []byte(fragment), 0o600))
 	path := filepath.Join(directory, "main.yaml")
-	require.NoError(t, os.WriteFile(path, []byte("include: [transport.yaml]\ngateway:\n  instance_id: 0\n"), 0o600))
+	require.NoError(t, os.WriteFile(path, []byte(`include: [transport.yaml]
+gateway:
+  instance_id: 0
+  server:
+    grpc: {endpoint: '[::]:8080'}
+    http: {endpoint: '[::]:8081'}
+`), 0o600))
 	config, err := xcfg.LoadConfig[yncp.Config](path, xcfg.WithKnownFields())
 	require.NoError(t, err)
 	require.NoError(t, config.Gateway.InstanceID.Validate())
@@ -47,6 +63,10 @@ func Test_Config_IncludedListenersAndClientTrust(t *testing.T) {
 	require.NotNil(t, config.Gateway.Server.GRPC.TLS)
 	require.Equal(t, "[::1]:8443", config.Gateway.Server.GRPC.TLS.Endpoint.Unwrap())
 	require.Len(t, config.Gateway.Server.GRPC.TLS.KeyPairs, 1)
+	require.NotNil(t, config.Gateway.Server.HTTP)
+	require.Empty(t, config.Gateway.Server.HTTP.Endpoint)
+	require.NotNil(t, config.Gateway.Server.HTTP.TLS)
+	require.Equal(t, "[::1]:9443", config.Gateway.Server.HTTP.TLS.Endpoint.Unwrap())
 	require.Len(t, config.Gateway.Auth.Authenticators, 1)
 	settings := &config.Gateway.Auth.Authenticators[0].Config
 	authenticator, err := x509auth.NewFromConfig(settings)

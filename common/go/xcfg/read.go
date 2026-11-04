@@ -21,8 +21,9 @@ const (
 // ReadFile composes a YAML configuration and its top-level include list.
 //
 // Entries name files or directories, relative to the declaring file. Directories
-// contribute visible .yaml/.yml files recursively in lexical order. Later
-// includes override earlier ones; the declaring file overrides its includes.
+// contribute visible .yaml/.yml files recursively in lexical order. Includes
+// override the declaring file; later includes override earlier ones. Missing
+// include paths and empty sources are ignored. The main path remains required.
 // Mappings merge recursively; other values, including lists, replace. Files
 // without includes retain their original bytes and diagnostic line numbers.
 func ReadFile(path string) ([]byte, error) {
@@ -98,10 +99,10 @@ func (m *configReader) Read(path string, depth int) (any, []byte, bool, error) {
 	}
 	delete(config, "include")
 	entries, ok := include.([]any)
-	if !ok {
+	if include != nil && !ok {
 		return nil, nil, false, fmt.Errorf("%s: include must be a list of paths", path)
 	}
-	var merged any = map[any]any{}
+	var merged any = config
 	for _, entry := range entries {
 		name, ok := entry.(string)
 		if !ok || strings.TrimSpace(name) == "" {
@@ -111,6 +112,9 @@ func (m *configReader) Read(path string, depth int) (any, []byte, bool, error) {
 			name = filepath.Join(filepath.Dir(path), name)
 		}
 		fragment, _, _, err := m.Read(name, depth+1)
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
 		if err != nil {
 			return nil, nil, false, fmt.Errorf("%s: include %q: %w", path, entry, err)
 		}
@@ -118,7 +122,7 @@ func (m *configReader) Read(path string, depth int) (any, []byte, bool, error) {
 			merged = mergeConfig(merged, fragment)
 		}
 	}
-	return mergeConfig(merged, config), data, true, nil
+	return merged, data, true, nil
 }
 
 // ReadBytes caps the total input, including files reached more than once.
@@ -146,13 +150,15 @@ func (m *configReader) ReadDirectory(path string, depth int) (any, error) {
 		return nil, err
 	}
 	var merged any = map[any]any{}
-	filesBefore := m.Files
 	for _, entry := range entries {
 		if strings.HasPrefix(entry.Name(), ".") {
 			continue
 		}
 		name := filepath.Join(path, entry.Name())
 		info, err := os.Stat(name)
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
 		if err != nil {
 			return nil, err
 		}
@@ -160,15 +166,15 @@ func (m *configReader) ReadDirectory(path string, depth int) (any, error) {
 			continue
 		}
 		fragment, _, _, err := m.Read(name, depth+1)
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
 		if err != nil {
 			return nil, err
 		}
 		if fragment != nil {
 			merged = mergeConfig(merged, fragment)
 		}
-	}
-	if m.Files == filesBefore {
-		return nil, fmt.Errorf("%s: include directory contains no YAML files", path)
 	}
 	return merged, nil
 }

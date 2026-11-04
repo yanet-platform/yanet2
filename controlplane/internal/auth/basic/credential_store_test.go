@@ -9,6 +9,7 @@ import (
 	"golang.org/x/crypto/bcrypt"
 
 	"github.com/yanet-platform/yanet2/controlplane/internal/auth/basic"
+	"github.com/yanet-platform/yanet2/controlplane/internal/auth/core"
 )
 
 // Test_FileCredentialStore_VerifyCredentials_RememberedMatchAdmitsNothingElse
@@ -59,7 +60,7 @@ func Test_FileCredentialStore_VerifyCredentials_RememberedMatchAdmitsNothingElse
 }
 
 // Test_FileCredentialStore_Includes verifies that composed credentials admit
-// the intended identity and a missing source prevents construction.
+// the intended identity only while its optional source is present.
 func Test_FileCredentialStore_Includes(t *testing.T) {
 	directory := t.TempDir()
 	hash, err := bcrypt.GenerateFromPassword([]byte("alice-secret"), bcrypt.MinCost)
@@ -73,6 +74,7 @@ func Test_FileCredentialStore_Includes(t *testing.T) {
 	require.NoError(t, store.VerifyCredentials("alice", "alice-secret"))
 	require.Error(t, store.VerifyCredentials("alice", "wrong"))
 	require.NoError(t, os.Remove(fragment))
-	_, err = basic.NewFileCredentialStore(path)
-	require.Error(t, err)
+	store, err = basic.NewFileCredentialStore(path)
+	require.NoError(t, err)
+	require.ErrorIs(t, store.VerifyCredentials("alice", "alice-secret"), core.ErrInvalidCredentials)
 }

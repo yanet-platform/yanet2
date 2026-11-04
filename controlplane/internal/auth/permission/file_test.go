@@ -11,7 +11,7 @@ import (
 )
 
 // Test_FilePermissionStore_Includes verifies that included permissions reach
-// user lookups and missing sources prevent an incomplete store from loading.
+// user lookups only while their optional source is present.
 func Test_FilePermissionStore_Includes(t *testing.T) {
 	directory := t.TempDir()
 	fragment := filepath.Join(directory, "users.yaml")
@@ -23,6 +23,7 @@ func Test_FilePermissionStore_Includes(t *testing.T) {
 	require.Len(t, store.GetUserPermissions("alice"), 1)
 	require.Empty(t, store.GetUserPermissions("unknown"))
 	require.NoError(t, os.Remove(fragment))
-	_, err = permission.NewFilePermissionStore(path)
-	require.Error(t, err)
+	store, err = permission.NewFilePermissionStore(path)
+	require.NoError(t, err)
+	require.Empty(t, store.GetUserPermissions("alice"))
 }

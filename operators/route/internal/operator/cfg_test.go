@@ -94,7 +94,7 @@ static:
 }
 
 // Test_Config_IncludedGatewayMTLS verifies that mounted transport settings
-// retain the complete client identity and main-file listener overrides.
+// replace generated endpoints while retaining the complete client identity.
 func Test_Config_IncludedGatewayMTLS(t *testing.T) {
 	directory := t.TempDir()
 	transport := filepath.Join(directory, "transport")
@@ -111,10 +111,11 @@ func Test_Config_IncludedGatewayMTLS(t *testing.T) {
             cert_file: /pki/client.pem
             key_file: /pki/client-key.pem
 server:
+  endpoint: "[::1]:9443"
   advertise_endpoint: operator.example:9443
 `), 0o600))
 	path := filepath.Join(directory, "main.yaml")
-	require.NoError(t, os.WriteFile(path, []byte("include: [transport]\nserver:\n  endpoint: '[::1]:9443'\n"), 0o600))
+	require.NoError(t, os.WriteFile(path, []byte("include: [transport]\nserver:\n  endpoint: '[::1]:8080'\n"), 0o600))
 	config, err := xcfg.LoadConfig[operator.Config](path, xcfg.WithKnownFields())
 	require.NoError(t, err)
 	require.Equal(t, "[::1]:9443", config.Server.Endpoint.Unwrap())

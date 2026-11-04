@@ -29,15 +29,16 @@ func Test_ReadFile_Merge(t *testing.T) {
 	writeConfig(t, directory, "nested/first.yaml", `
 include: [../base.yaml]
 server: {port: 8443, enabled: false}
-items: [replacement]
+items: [removed]
 `)
 	writeConfig(t, directory, "base.yaml", `
-server: {name: original, port: 443, enabled: true}
-items: [removed]
+server: {name: original}
+items: [replacement]
 `)
 	path := writeConfig(t, directory, "main.yaml", `
 include: [nested/first.yaml]
-server: {name: local}
+server: {name: local, port: 80, enabled: true}
+items: [main]
 `)
 	data, err := xcfg.ReadFile(path)
 	require.NoError(t, err)
@@ -50,21 +51,88 @@ server: {name: local}
 		Items []string `yaml:"items"`
 	}
 	require.NoError(t, yaml.Unmarshal(data, &config))
-	require.Equal(t, "local", config.Server.Name)
+	require.Equal(t, "original", config.Server.Name)
 	require.Equal(t, 8443, config.Server.Port)
 	require.False(t, config.Server.Enabled)
 	require.Equal(t, []string{"replacement"}, config.Items)
 }
 
-// Test_ReadFile_InvalidInclude verifies that missing or malformed sources fail
-// before an incomplete configuration can be accepted.
+// Test_ReadFile_IncludeOrder verifies that optional overlays replace main-file
+// defaults in list order regardless of the directive's position.
+func Test_ReadFile_IncludeOrder(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		main string
+	}{
+		{"directive first", "include: [first.yaml, missing.yaml, empty, second.yaml]\nserver: {endpoint: generated, enabled: true, port: 80}\nitems: [generated]\n"},
+		{"directive last", "server: {endpoint: generated, enabled: true, port: 80}\nitems: [generated]\ninclude: [first.yaml, missing.yaml, empty, second.yaml]\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			directory := t.TempDir()
+			require.NoError(t, os.Mkdir(filepath.Join(directory, "empty"), 0o700))
+			writeConfig(t, directory, "first.yaml", "server: {endpoint: first, enabled: false, port: 0}\nitems: [first]\n")
+			writeConfig(t, directory, "second.yaml", "server: {endpoint: last}\nitems: []\n")
+			path := writeConfig(t, directory, "main.yaml", tc.main)
+			data, err := xcfg.ReadFile(path)
+			require.NoError(t, err)
+			require.YAMLEq(t, "server: {endpoint: last, enabled: false, port: 0}\nitems: []\n", string(data))
+		})
+	}
+}
+
+// Test_ReadFile_OptionalIncludes verifies that absent and empty overrides
+// preserve the main configuration.
+func Test_ReadFile_OptionalIncludes(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		include     string
+		files       map[string]string
+		directories []string
+	}{
+		{name: "empty list", include: "[]"},
+		{name: "empty directive", include: ""},
+		{name: "null directive", include: "null"},
+		{name: "missing file", include: "[missing.yaml]"},
+		{name: "missing parent directory", include: "[missing/override.yaml]"},
+		{name: "missing directory", include: "[conf.d]"},
+		{name: "empty file", include: "[override.yaml]", files: map[string]string{"override.yaml": ""}},
+		{name: "comment-only file", include: "[override.yaml]", files: map[string]string{"override.yaml": "# optional overrides\n"}},
+		{name: "empty document", include: "[override.yaml]", files: map[string]string{"override.yaml": "---\nnull\n---\n"}},
+		{name: "empty mapping", include: "[override.yaml]", files: map[string]string{"override.yaml": "{}\n"}},
+		{name: "empty directory", include: "[conf.d]", directories: []string{"conf.d"}},
+		{name: "nested empty directories", include: "[conf.d]", directories: []string{"conf.d/nested"}},
+		{name: "directory without YAML", include: "[conf.d]", files: map[string]string{"conf.d/readme.txt": "not: [YAML"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			directory := t.TempDir()
+			for name, content := range tc.files {
+				writeConfig(t, directory, name, content)
+			}
+			for _, name := range tc.directories {
+				require.NoError(t, os.MkdirAll(filepath.Join(directory, name), 0o700))
+			}
+			path := writeConfig(t, directory, "main.yaml", "include: "+tc.include+"\nserver: {endpoint: generated}\n")
+			data, err := xcfg.ReadFile(path)
+			require.NoError(t, err)
+			require.YAMLEq(t, "server: {endpoint: generated}\n", string(data))
+		})
+	}
+}
+
+// Test_ReadFile_MissingMain verifies that only include sources are optional.
+func Test_ReadFile_MissingMain(t *testing.T) {
+	_, err := xcfg.ReadFile(filepath.Join(t.TempDir(), "missing.yaml"))
+	require.ErrorIs(t, err, os.ErrNotExist)
+}
+
+// Test_ReadFile_InvalidInclude verifies that malformed sources still fail
+// before their values can be accepted.
 func Test_ReadFile_InvalidInclude(t *testing.T) {
 	cases := []struct{ name, main, fragment, message string }{
 		{"requires list", "include: fragment.yaml\n", "{}", "list of paths"},
-		{"rejects null", "include:\n", "{}", "list of paths"},
 		{"requires string", "include: [1]\n", "{}", "non-empty strings"},
 		{"rejects empty path", "include: ['']\n", "{}", "non-empty strings"},
-		{"rejects missing file", "include: [missing.yaml]\n", "{}", "missing.yaml"},
+		{"rejects non-directory parent", "include: [fragment.yaml/override.yaml]\n", "{}", "fragment.yaml/override.yaml"},
 		{"rejects duplicate keys", "include: [fragment.yaml]\n", "key: 1\nkey: 2\n", "already defined"},
 		{"rejects malformed YAML", "include: [fragment.yaml]\n", "key: [", "fragment.yaml"},
 		{"rejects second document", "include: [fragment.yaml]\n", "key: 1\n---\nkey: 2\n", "single YAML document"},
@@ -110,13 +178,6 @@ func Test_ReadFile_Bounds(t *testing.T) {
 		_, err := xcfg.ReadFile(filepath.Join(directory, "0.yaml"))
 		require.ErrorContains(t, err, "include depth")
 	})
-	t.Run("empty directory", func(t *testing.T) {
-		directory := t.TempDir()
-		require.NoError(t, os.Mkdir(filepath.Join(directory, "empty"), 0o700))
-		path := writeConfig(t, directory, "main.yaml", "include: [empty]\n")
-		_, err := xcfg.ReadFile(path)
-		require.ErrorContains(t, err, "no YAML files")
-	})
 }
 
 // Test_ReadFile_NoIncludesRetainsBytes verifies that ordinary files retain
@@ -140,8 +201,8 @@ func Test_ReadFile_UncomposedValues(t *testing.T) {
 	}
 }
 
-// Test_ReadFile_MixedMappingKeys verifies that adding a numeric key does not
-// discard string-keyed siblings in an earlier mapping.
+// Test_ReadFile_MixedMappingKeys verifies that overlays retain both numeric
+// and string-keyed siblings.
 func Test_ReadFile_MixedMappingKeys(t *testing.T) {
 	directory := t.TempDir()
 	writeConfig(t, directory, "base.yaml", "labels: {retained: true, override: old}\n")
@@ -152,7 +213,7 @@ func Test_ReadFile_MixedMappingKeys(t *testing.T) {
 		Labels map[any]any `yaml:"labels"`
 	}
 	require.NoError(t, yaml.Unmarshal(data, &config))
-	require.Equal(t, map[any]any{"retained": true, "override": "new", 1: "numeric"}, config.Labels)
+	require.Equal(t, map[any]any{"retained": true, "override": "old", 1: "numeric"}, config.Labels)
 }
 
 // Test_ReadFile_ByteLimit verifies that cumulative input is bounded even when
@@ -166,10 +227,11 @@ func Test_ReadFile_ByteLimit(t *testing.T) {
 }
 
 // Fuzz_ReadFile_Composition verifies that arbitrary fragment values survive
-// composition while the main document replaces one top-level value.
+// composition while the main document supplies an otherwise absent default.
 func Fuzz_ReadFile_Composition(f *testing.F) {
 	f.Add("settings: {enabled: false, port: 8443}\nitems: [0, null, yes]\n")
 	f.Add("key: &value [one, two]\nother: *value\n")
+	f.Add("local_override: fragment\n")
 	f.Fuzz(func(t *testing.T, content string) {
 		if len(content) > 16<<10 {
 			t.Skip()
@@ -187,7 +249,9 @@ func Fuzz_ReadFile_Composition(f *testing.F) {
 		path := writeConfig(t, directory, "main.yaml", "include: [fragment.yaml]\nlocal_override: main\n")
 		composed, err := xcfg.ReadFile(path)
 		require.NoError(t, err)
-		fragment["local_override"] = "main"
+		if _, exists := fragment["local_override"]; !exists {
+			fragment["local_override"] = "main"
+		}
 		expected, err := yaml.Marshal(fragment)
 		require.NoError(t, err)
 		require.YAMLEq(t, string(expected), string(composed))

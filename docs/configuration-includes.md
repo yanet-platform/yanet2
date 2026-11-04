@@ -6,7 +6,7 @@ accept a top-level `include` list:
 
 ```yaml
 include:
-  - defaults.yaml
+  - overrides.yaml
   - conf.d
 logging:
   level: info
@@ -20,28 +20,37 @@ component's usual decoding and validation.
 
 ## Ordering and merge rules
 
-- Includes are processed in list order; later sources override earlier sources.
+- The declaring file supplies the base; includes override it in list order.
+  Later includes override earlier includes. This applies to nested includes too.
 - A directory contributes visible `.yaml` and `.yml` files, recursively, with
   entries visited in lexicographic order at each level.
-- The declaring file overrides all of its includes, regardless of where the
-  `include` key appears in the file.
+- The position of the `include` key within the declaring file has no effect.
 - Mappings merge recursively. Sequences, scalars, explicit zero/false and null
   replace the earlier value. A sequence is replaced as a whole, including when
   the replacement is empty.
-- Component defaults apply before the resulting document. Existing environment
-  overrides apply afterward.
+- The full precedence order is component defaults, main file, includes, then
+  existing environment overrides. Environment overrides remain opt-in for Go
+  callers through `xcfg.WithEnv` or `xcfg.WithEnvPrefix`.
 
 For example, a fragment with `server: {endpoint: '[::1]:9000',
 advertise_endpoint: 'operator.example:9000'}` and a main file with
-`server: {endpoint: '[::1]:9001'}` retain the advertised address and use port 9001
-for the local listener.
+`server: {endpoint: '[::1]:9001'}` retain the advertised address and use port 9000
+for the local listener. With environment overrides enabled,
+`YANET_SERVER_ENDPOINT='[::1]:9002'` wins over both files and selects port 9002.
 
-Validation runs after composition, so required settings can be supplied by
-different sources. Invalid YAML, duplicate mapping keys, additional nonempty YAML
-documents, missing sources, include cycles and directories containing no YAML
-files fail the load. A later overlay does not make an invalid source optional.
-Hidden entries are ignored, including Kubernetes `..data` generations. Visible
-symlinks are followed, and cycles are checked using resolved paths.
+Missing include paths, empty or comment-only YAML files and directories containing
+no YAML files are ignored. An omitted `include`, `include: []`, `include:` or
+`include: null` adds no overrides. This lets generated main files name optional
+override locations before those files or mounts exist. The main path itself must
+exist. Missing referenced certificate or subnet files are not made optional.
+
+Validation runs after composition and environment overrides, so required settings
+can be supplied by different sources. Invalid YAML, duplicate mapping keys,
+additional nonempty YAML documents, include cycles and other filesystem errors
+still fail the load. The final configuration must satisfy the component's usual
+validation even when optional sources are absent. Hidden entries are ignored,
+including Kubernetes `..data` generations. Visible symlinks are followed, and
+cycles are checked using resolved paths.
 
 One load permits at most 256 file reads, 16 MiB of cumulative file input and 32
 levels below the root source, counting nested directories as levels. Repeated
@@ -95,6 +104,7 @@ main configuration supplies instance IDs, modules and authorization policy:
 gateway:
   server:
     grpc:
+      endpoint: ""
       tls:
         endpoint: "[::]:8443"
         key_pairs:
@@ -103,6 +113,7 @@ gateway:
               cert_file: /etc/yanet2/pki/server.pem
               key_file: /etc/yanet2/pki/server-key.pem
     http:
+      endpoint: ""
       tls:
         endpoint: "[::]:9443"
         key_pairs:
@@ -118,8 +129,10 @@ gateway:
           ca_sources: [/etc/yanet2/pki/client-ca.pem]
 ```
 
-The x509 authenticator supplies client trust; the configured identity and
-permission providers determine which authenticated clients can invoke RPCs.
+The empty plaintext endpoints override any generated plaintext listeners; the
+TLS listeners remain enabled. The x509 authenticator supplies client trust; the
+configured identity and permission providers determine which authenticated
+clients can invoke RPCs.
 Includes do not alter those authentication or authorization rules.
 
 ## Kubernetes directory mounts
