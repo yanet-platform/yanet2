@@ -31,6 +31,7 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/peer"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/emptypb"
 	"google.golang.org/protobuf/types/known/wrapperspb"
@@ -436,6 +437,172 @@ func Test_Gateway_DedicatedTLS_TLSListenerRefusesPlaintextClient(t *testing.T) {
 	client := ynpb.NewGatewayClient(dialGateway(t, tlsAddress, insecure.NewCredentials()))
 	_, err := client.ListServices(ctx, &ynpb.ListServicesRequest{})
 	require.Equal(t, codes.Unavailable, status.Code(err), "%v", err)
+}
+
+// connectionAgeHealthService holds one unary call and a stream until released.
+//
+// Response headers identify the TCP connection serving each unary call.
+type connectionAgeHealthService struct {
+	grpc_health_v1.UnimplementedHealthServer
+	Started chan string
+	Release chan struct{}
+}
+
+func (m *connectionAgeHealthService) Name() string     { return "connection-age-health" }
+func (m *connectionAgeHealthService) Endpoint() string { return "" }
+
+func (m *connectionAgeHealthService) ServicesNames() []string {
+	return []string{grpc_health_v1.Health_ServiceDesc.ServiceName}
+}
+
+func (m *connectionAgeHealthService) RegisterService(server *grpc.Server) {
+	grpc_health_v1.RegisterHealthServer(server, m)
+}
+
+func (m *connectionAgeHealthService) Check(
+	ctx context.Context,
+	request *grpc_health_v1.HealthCheckRequest,
+) (*grpc_health_v1.HealthCheckResponse, error) {
+	remote, ok := peer.FromContext(ctx)
+	if !ok || remote.Addr == nil {
+		return nil, status.Error(codes.Internal, "missing transport peer")
+	}
+	// Committing headers prevents a held call from being transparently replayed.
+	if err := grpc.SendHeader(ctx, metadata.Pairs("test-peer", remote.Addr.String())); err != nil {
+		return nil, err
+	}
+	if request.GetService() == "hold" {
+		select {
+		case m.Started <- remote.Addr.String():
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+		select {
+		case <-m.Release:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+	return &grpc_health_v1.HealthCheckResponse{Status: grpc_health_v1.HealthCheckResponse_SERVING}, nil
+}
+
+func (m *connectionAgeHealthService) Watch(
+	request *grpc_health_v1.HealthCheckRequest,
+	stream grpc.ServerStreamingServer[grpc_health_v1.HealthCheckResponse],
+) error {
+	if err := stream.Send(&grpc_health_v1.HealthCheckResponse{Status: grpc_health_v1.HealthCheckResponse_SERVING}); err != nil {
+		return err
+	}
+	select {
+	case <-m.Release:
+	case <-stream.Context().Done():
+		return stream.Context().Err()
+	}
+	return stream.Send(&grpc_health_v1.HealthCheckResponse{Status: grpc_health_v1.HealthCheckResponse_NOT_SERVING})
+}
+
+// Test_Gateway_TLSConnectionAge_ReconnectsWithoutRPCFailures verifies that
+// repeated TLS retirement preserves active calls and keeps new RPCs successful.
+//
+// One client keeps issuing unary calls while a held call and a stream remain
+// open across reconnects.
+func Test_Gateway_TLSConnectionAge_ReconnectsWithoutRPCFailures(t *testing.T) {
+	t.Parallel()
+
+	ca := tlscert.NewCA(t)
+	server := ca.IssueServer(t, "127.0.0.1")
+	certificate := ca.IssueClient(t, "route-operator")
+	listener := NewTestListener(t)
+	config := gateway.DefaultConfig()
+	config.Auth = newX509AuthConfig(t, ca)
+	config.Server.GRPC = &gateway.ListenerConfig{
+		TLS: newTLSListenerConfig(t, listener.Addr().String(), server.CertFile, server.KeyFile),
+	}
+	config.Server.GRPC.TLS.MaxConnectionAge = time.Second
+	service := &connectionAgeHealthService{
+		Started: make(chan string, 1),
+		Release: make(chan struct{}),
+	}
+	runGateway(t, config,
+		gateway.WithTLSListener(listener),
+		gateway.WithBuiltinService(service),
+	)
+	connection, err := operator.DialGateway(
+		operator.GatewayConfig{
+			Name:     "connection-age",
+			Endpoint: xcfg.MustNonEmptyString(listener.Addr().String()),
+			TLS: &xgrpc.ClientTLSConfig{
+				CAFile: ca.BundleFile(),
+				KeyPairs: []xgrpc.KeyPairConfig{
+					tlscert.FileKeyPair(t, certificate.CertFile, certificate.KeyFile),
+				},
+			},
+		},
+	)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, connection.Close()) })
+	client := grpc_health_v1.NewHealthClient(connection)
+	ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
+	var wg errgroup.Group
+	heldDone := make(chan struct{})
+	defer func() {
+		cancel()
+		_ = wg.Wait()
+	}()
+	wg.Go(func() error {
+		defer close(heldDone)
+		response, err := client.Check(ctx, &grpc_health_v1.HealthCheckRequest{Service: "hold"})
+		if err != nil {
+			return err
+		}
+		if response.GetStatus() != grpc_health_v1.HealthCheckResponse_SERVING {
+			return fmt.Errorf("held call returned %s", response.GetStatus())
+		}
+		return nil
+	})
+	peers := map[string]struct{}{}
+	select {
+	case address := <-service.Started:
+		peers[address] = struct{}{}
+	case <-heldDone:
+		require.NoError(t, wg.Wait(), "held call failed before reaching the gateway")
+		t.Fatal("held call completed before release")
+	case <-ctx.Done():
+		t.Fatal("held call did not reach the gateway:", ctx.Err())
+	}
+	stream, err := client.Watch(ctx, &grpc_health_v1.HealthCheckRequest{})
+	require.NoError(t, err)
+	response, err := stream.Recv()
+	require.NoError(t, err)
+	require.Equal(t, grpc_health_v1.HealthCheckResponse_SERVING, response.GetStatus())
+
+	// Successful calls from four peers prove three usable replacement transports.
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+	for len(peers) < 4 {
+		select {
+		case <-ticker.C:
+		case <-ctx.Done():
+			t.Fatalf("expected three reconnects, saw %d peers: %v", len(peers), ctx.Err())
+		}
+		callContext, cancelCall := context.WithTimeout(ctx, 2*time.Second)
+		var headers metadata.MD
+		response, err := client.Check(callContext, &grpc_health_v1.HealthCheckRequest{}, grpc.Header(&headers))
+		cancelCall()
+		require.NoError(t, err, "unary call failed during TLS retirement")
+		require.Equal(t, grpc_health_v1.HealthCheckResponse_SERVING, response.GetStatus())
+		addresses := headers.Get("test-peer")
+		require.Len(t, addresses, 1)
+		peers[addresses[0]] = struct{}{}
+	}
+
+	close(service.Release)
+	require.NoError(t, wg.Wait(), "held unary call failed across TLS retirement")
+	response, err = stream.Recv()
+	require.NoError(t, err, "stream failed across TLS retirement")
+	require.Equal(t, grpc_health_v1.HealthCheckResponse_NOT_SERVING, response.GetStatus())
+	_, err = stream.Recv()
+	require.ErrorIs(t, err, io.EOF)
 }
 
 // Test_Gateway_SectionsFromYAML_ReplaceDeprecatedEndpoint verifies that Run
