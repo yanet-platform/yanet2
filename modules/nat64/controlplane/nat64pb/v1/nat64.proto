@@ -15,6 +15,10 @@ service NAT64Service {
   // ShowConfig returns the current configuration of the NAT64 module
   rpc ShowConfig(ShowConfigRequest) returns (ShowConfigResponse) {}
 
+  // UpdateConfig replaces the whole named configuration with the one the
+  // request carries.
+  rpc UpdateConfig(UpdateConfigRequest) returns (UpdateConfigResponse) {}
+
   // AddPrefix adds a NAT64 prefix to the configuration.
   //
   // Adding a prefix that is already present is a no-op.
@@ -80,6 +84,22 @@ message Config {
 
 // ShowConfigResponse contains the current configuration
 message ShowConfigResponse { Config config = 1; }
+
+// UpdateConfigRequest carries the whole desired configuration of the named
+// config.
+message UpdateConfigRequest {
+  string name = 1;
+  // Configuration that replaces the whole published one; required.
+  //
+  // Prefixes and mappings absent from it are removed, and an unset MTU
+  // takes the default a new configuration starts with. A prefix or an IPv4
+  // address listed twice is rejected, though AddPrefix ignores a present
+  // prefix and AddMapping replaces the mapping of a present address.
+  Config config = 2;
+}
+
+// UpdateConfigResponse is the response to an UpdateConfig call.
+message UpdateConfigResponse {}
 
 // AddPrefixRequest specifies a prefix to add
 message AddPrefixRequest {

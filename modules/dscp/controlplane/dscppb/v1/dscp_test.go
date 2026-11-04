@@ -31,6 +31,83 @@ func Test_ShowConfigRequest_Validate(t *testing.T) {
 	}
 }
 
+// Test_UpdateConfigRequest_Validate verifies that the name and the config
+// are required and that an out-of-range marking is reported at its field
+// path.
+func Test_UpdateConfigRequest_Validate(t *testing.T) {
+	cases := []struct {
+		name    string
+		request *dscppb.UpdateConfigRequest
+		message string
+	}{
+		{
+			name:    "empty name precedes missing config",
+			request: &dscppb.UpdateConfigRequest{},
+			message: "name is required",
+		},
+		{
+			name:    "missing config",
+			request: &dscppb.UpdateConfigRequest{Name: "dscp0"},
+			message: "config is required",
+		},
+		{
+			name: "marking out of range",
+			request: &dscppb.UpdateConfigRequest{
+				Name:   "dscp0",
+				Config: &dscppb.Config{DscpConfig: &dscppb.DscpConfig{Flag: 3}},
+			},
+			message: "config: dscp_config: flag 3 must be in range 0..2",
+		},
+		{
+			name:    "config without a marking",
+			request: &dscppb.UpdateConfigRequest{Name: "dscp0", Config: &dscppb.Config{}},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := tc.request.Validate()
+			if tc.message == "" {
+				require.NoError(t, err)
+			} else {
+				require.EqualError(t, err, tc.message)
+			}
+		})
+	}
+}
+
+// Test_Config_Validate verifies that a set marking is range-checked at its
+// field path while an unset one is accepted.
+func Test_Config_Validate(t *testing.T) {
+	cases := []struct {
+		name    string
+		config  *dscppb.Config
+		message string
+	}{
+		{name: "no marking", config: &dscppb.Config{}},
+		{
+			name:   "marking at limit",
+			config: &dscppb.Config{DscpConfig: &dscppb.DscpConfig{Flag: 2, Mark: 63}},
+		},
+		{
+			name:    "mark above limit",
+			config:  &dscppb.Config{DscpConfig: &dscppb.DscpConfig{Mark: 64}},
+			message: "dscp_config: mark 64 must be in range 0..63",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := tc.config.Validate()
+			if tc.message == "" {
+				require.NoError(t, err)
+			} else {
+				require.EqualError(t, err, tc.message)
+			}
+		})
+	}
+}
+
 // Test_AddPrefixesRequest_Validate verifies that an empty name is rejected.
 func Test_AddPrefixesRequest_Validate(t *testing.T) {
 	cases := []struct {

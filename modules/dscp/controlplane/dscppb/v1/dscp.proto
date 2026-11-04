@@ -16,6 +16,10 @@ service DscpService {
   // ShowConfig returns the current configuration for the dscp module.
   rpc ShowConfig(ShowConfigRequest) returns (ShowConfigResponse);
 
+  // UpdateConfig replaces the whole named configuration with the one the
+  // request carries.
+  rpc UpdateConfig(UpdateConfigRequest) returns (UpdateConfigResponse);
+
   // AddPrefixes adds prefixes to the dscp module configuration.
   rpc AddPrefixes(AddPrefixesRequest) returns (AddPrefixesResponse);
   // RemovePrefixes removes prefixes from the dscp module configuration.
@@ -52,6 +56,20 @@ message DscpConfig {
 
 // ShowConfigResponse contains the configuration details of the dscp module.
 message ShowConfigResponse { Config config = 1; }
+
+// UpdateConfigRequest carries the whole desired configuration of the named
+// config.
+message UpdateConfigRequest {
+  string name = 1;
+  // Configuration that replaces the whole published one; required.
+  //
+  // Prefixes absent from it are removed, and an unset marking is the zero
+  // one, which never marks.
+  Config config = 2;
+}
+
+// UpdateConfigResponse is the response to an UpdateConfig call.
+message UpdateConfigResponse {}
 
 // AddPrefixesRequest adds prefixes to the input filter of the dscp module.
 message AddPrefixesRequest {
