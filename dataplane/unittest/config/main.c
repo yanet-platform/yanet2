@@ -1,11 +1,15 @@
 #include "assert.h"
 #include "config.h"
+#include "config_source.h"
 #include "lib/dataplane/packet/packet.h"
 
 #include <errno.h>
 #include <fcntl.h>
+#include <limits.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 static size_t refused_device_allocation_size;
 static unsigned refused_device_allocations;
@@ -26,12 +30,8 @@ __wrap_realloc(void *ptr, size_t size) {
 }
 
 static void
-check_instance(
-	struct dataplane_instance_config *config,
-	uint16_t numa_idx,
-	uint64_t dp_memory,
-	uint64_t cp_memory
-) {
+check_instance(struct dataplane_instance_config *config, uint16_t numa_idx,
+	       uint64_t dp_memory, uint64_t cp_memory) {
 	assert(config->numa_idx == numa_idx);
 	assert(config->dp_memory == dp_memory);
 	assert(config->cp_memory == cp_memory);
@@ -93,20 +93,16 @@ struct numeric_field {
 
 static void
 test_numeric_field_rejects_invalid_values(const struct numeric_field *field) {
-	const char *invalid_values[] = {
-		"-1", "\" -1\"", "\"1\\0junk\"", field->overflow, "not-a-number"
-	};
+	const char *invalid_values[] = {"-1", "\" -1\"", "\"1\\0junk\"",
+					field->overflow,
+					"not-a-number"};
 	char yaml[512];
 
 	for (size_t value_idx = 0;
 	     value_idx < sizeof(invalid_values) / sizeof(invalid_values[0]);
 	     ++value_idx) {
-		int length = snprintf(
-			yaml,
-			sizeof(yaml),
-			field->yaml_format,
-			invalid_values[value_idx]
-		);
+		int length = snprintf(yaml, sizeof(yaml), field->yaml_format,
+				      invalid_values[value_idx]);
 		assert(length >= 0 && (size_t)length < sizeof(yaml));
 
 		struct dataplane_config *config = NULL;
@@ -426,8 +422,7 @@ test_objects_list(void) {
 		"  devices:\n"
 		"    - port_name: eth0\n"
 		"  objects:\n"
-		"    - %s\n",
-		long_name
+		"    - %s\n", long_name
 	);
 	config = NULL;
 	assert(parse_yaml(overlong, &config) == -1);
@@ -460,12 +455,200 @@ test_valid_config(void) {
 	fclose(f);
 }
 
+// Verifies that mounted fragment directories compose before native validation.
+static void
+test_config_includes(void) {
+	FILE *file = dataplane_config_open(CONFIG_INCLUDE_PATH);
+	assert(file != NULL);
+	struct dataplane_config *config = NULL;
+	assert(dataplane_config_init(file, &config) == 0);
+	fclose(file);
+	assert(config->packet_recirc_limit == 37);
+	assert(config->dpdk_memory == 200);
+	assert(config->device_count == 1);
+	assert(strcmp(config->devices[0].port_name, "eth0") == 0);
+	dataplane_config_free(config);
+	assert(dataplane_config_open(CONFIG_CYCLE_PATH) == NULL);
+}
+
+// Creates a source owned by the isolated configuration scenario.
+static void
+write_source(const char *directory, const char *name, const char *content) {
+	char path[PATH_MAX];
+	assert(snprintf(path, sizeof(path), "%s/%s", directory, name) > 0);
+	FILE *file = fopen(path, "w");
+	assert(file != NULL);
+	assert(fputs(content, file) >= 0);
+	assert(fclose(file) == 0);
+}
+
+// Verifies that invalid fragments cannot be hidden by a later overlay.
+static void
+test_config_invalid_includes(void) {
+	char directory[] = "/tmp/yanet-config-includes-XXXXXX";
+	assert(mkdtemp(directory) != NULL);
+	const struct {
+		const char *main;
+		const char *fragment;
+	} cases[] = {
+		{"include: fragment.yaml\n", "{}\n"},
+		{"include: null\n", "{}\n"},
+		{"include: ['']\n", "{}\n"},
+		{"include: ['   ']\n", "{}\n"},
+		{"include: [missing.yaml]\n", "{}\n"},
+		{"include: [fragment.yaml]\n", "key: [\n"},
+		{"include: [fragment.yaml]\n", "key: one\nkey: two\n"},
+		{"include: [fragment.yaml]\n", "[one, two]\n"},
+		{"include: [fragment.yaml]\n", "key: one\n---\nkey: two\n"},
+		{"include: [fragment.yaml]\n", "key: one\n---\n---\nkey: two\n"
+		},
+		{"include: [fragment.yaml]\n", "include: [main.yaml]\n"},
+	};
+	char main_path[PATH_MAX], fragment_path[PATH_MAX];
+	snprintf(main_path, sizeof(main_path), "%s/main.yaml", directory);
+	snprintf(fragment_path, sizeof(fragment_path), "%s/fragment.yaml",
+		 directory);
+	write_source(directory, "main.yaml", "include: [fragment.yaml]\n");
+	write_source(directory, "fragment.yaml",
+		     "dataplane: {packet_recirc_limit: 37}\n---\n");
+	FILE *ordinary = dataplane_config_open(main_path);
+	assert(ordinary != NULL);
+	assert(fclose(ordinary) == 0);
+	for (size_t idx = 0; idx < sizeof(cases) / sizeof(cases[0]); ++idx) {
+		write_source(directory, "main.yaml", cases[idx].main);
+		write_source(directory, "fragment.yaml", cases[idx].fragment);
+		assert(dataplane_config_open(main_path) == NULL);
+	}
+	assert(unlink(fragment_path) == 0);
+	write_source(directory, "main.yaml", "include: [fragment.yaml]\n");
+	assert(symlink("main.yaml", fragment_path) == 0);
+	assert(dataplane_config_open(main_path) == NULL);
+	assert(unlink(fragment_path) == 0);
+	assert(mkdir(fragment_path, 0700) == 0);
+	assert(dataplane_config_open(main_path) == NULL);
+	assert(rmdir(fragment_path) == 0);
+	assert(unlink(main_path) == 0);
+	assert(rmdir(directory) == 0);
+}
+
+// Verifies that repeated inputs share one byte budget, including comments.
+static void
+test_config_include_byte_limit(void) {
+	char directory[] = "/tmp/yanet-config-limit-XXXXXX";
+	assert(mkdtemp(directory) != NULL);
+	char fragment_path[PATH_MAX], main_path[PATH_MAX];
+	snprintf(fragment_path, sizeof(fragment_path), "%s/large.yaml",
+		 directory);
+	snprintf(main_path, sizeof(main_path), "%s/main.yaml", directory);
+	FILE *file = fopen(fragment_path, "w");
+	assert(file != NULL);
+	assert(fputc('#', file) != EOF);
+	for (size_t idx = 0; idx < (8u << 20); ++idx) {
+		assert(fputc('x', file) != EOF);
+	}
+	assert(fputc('\n', file) != EOF);
+	assert(fclose(file) == 0);
+	write_source(directory, "main.yaml",
+		     "include: [large.yaml, large.yaml]\n");
+	assert(dataplane_config_open(main_path) == NULL);
+	assert(unlink(fragment_path) == 0);
+	assert(unlink(main_path) == 0);
+	assert(rmdir(directory) == 0);
+}
+
+// Verifies that visible projected keys are read once in lexical order.
+static void
+test_config_projected_includes(void) {
+	char directory[] = "/tmp/yanet-config-projected-XXXXXX";
+	assert(mkdtemp(directory) != NULL);
+	char fragments[PATH_MAX], generation[PATH_MAX], path[PATH_MAX];
+	snprintf(fragments, sizeof(fragments), "%s/fragments", directory);
+	snprintf(generation, sizeof(generation), "%s/fragments/..generation",
+		 directory);
+	assert(mkdir(fragments, 0700) == 0);
+	assert(mkdir(generation, 0700) == 0);
+	write_source(
+		generation, "config.yaml",
+		"dataplane: {packet_recirc_limit: 10, dpdk_memory: 200}\n"
+	);
+	snprintf(path, sizeof(path), "%s/fragments/..data", directory);
+	assert(symlink("..generation", path) == 0);
+	snprintf(path, sizeof(path), "%s/fragments/10-projected.yaml",
+		 directory);
+	assert(symlink("..data/config.yaml", path) == 0);
+	write_source(fragments, "20-later.yml",
+		     "dataplane: {packet_recirc_limit: 20}\n");
+	write_source(fragments, ".ignored.yaml", "include: [missing]\n");
+	write_source(directory, "main.yaml", "include: [fragments]\n");
+	snprintf(path, sizeof(path), "%s/main.yaml", directory);
+	FILE *file = dataplane_config_open(path);
+	assert(file != NULL);
+	struct dataplane_config *config = NULL;
+	assert(dataplane_config_init(file, &config) == 0);
+	assert(fclose(file) == 0);
+	assert(config->dpdk_memory == 200);
+	assert(config->packet_recirc_limit == 20);
+	dataplane_config_free(config);
+	const char *files[] = {"main.yaml", "fragments/10-projected.yaml",
+			       "fragments/20-later.yml",
+			       "fragments/.ignored.yaml",
+			       "fragments/..data",
+			       "fragments/..generation/config.yaml"};
+	for (size_t idx = 0; idx < sizeof(files) / sizeof(files[0]); ++idx) {
+		snprintf(path, sizeof(path), "%s/%s", directory, files[idx]);
+		assert(unlink(path) == 0);
+	}
+	assert(rmdir(generation) == 0);
+	assert(rmdir(fragments) == 0);
+	assert(rmdir(directory) == 0);
+}
+
+// Verifies that acyclic file expansion and deep chains remain bounded.
+static void
+test_config_include_file_and_depth_limits(void) {
+	char directory[] = "/tmp/yanet-config-bounds-XXXXXX";
+	assert(mkdtemp(directory) != NULL);
+	char path[PATH_MAX];
+	snprintf(path, sizeof(path), "%s/main.yaml", directory);
+	FILE *file = fopen(path, "w");
+	assert(file != NULL);
+	assert(fputs("include:\n", file) >= 0);
+	for (size_t idx = 0; idx < 256; ++idx) {
+		assert(fputs("  - fragment.yaml\n", file) >= 0);
+	}
+	assert(fclose(file) == 0);
+	write_source(directory, "fragment.yaml", "{}\n");
+	assert(dataplane_config_open(path) == NULL);
+	assert(unlink(path) == 0);
+	snprintf(path, sizeof(path), "%s/fragment.yaml", directory);
+	assert(unlink(path) == 0);
+	for (unsigned idx = 0; idx < 34; ++idx) {
+		char name[32], content[64];
+		snprintf(name, sizeof(name), "%u.yaml", idx);
+		snprintf(content, sizeof(content), "include: [%u.yaml]\n",
+			 idx + 1);
+		write_source(directory, name, content);
+	}
+	snprintf(path, sizeof(path), "%s/0.yaml", directory);
+	assert(dataplane_config_open(path) == NULL);
+	for (unsigned idx = 0; idx < 34; ++idx) {
+		snprintf(path, sizeof(path), "%s/%u.yaml", directory, idx);
+		assert(unlink(path) == 0);
+	}
+	assert(rmdir(directory) == 0);
+}
+
 int
 main(int argc, char **argv) {
 	(void)argc;
 	(void)argv;
 
 	test_valid_config();
+	test_config_includes();
+	test_config_invalid_includes();
+	test_config_include_byte_limit();
+	test_config_projected_includes();
+	test_config_include_file_and_depth_limits();
 	test_device_allocation_failure(1);
 	test_device_allocation_failure(2);
 	test_device_allocation_success();

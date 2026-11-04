@@ -57,3 +57,22 @@ func Test_FileCredentialStore_VerifyCredentials_RememberedMatchAdmitsNothingElse
 		})
 	}
 }
+
+// Test_FileCredentialStore_Includes verifies that composed credentials admit
+// the intended identity and a missing source prevents construction.
+func Test_FileCredentialStore_Includes(t *testing.T) {
+	directory := t.TempDir()
+	hash, err := bcrypt.GenerateFromPassword([]byte("alice-secret"), bcrypt.MinCost)
+	require.NoError(t, err)
+	fragment := filepath.Join(directory, "users.yaml")
+	require.NoError(t, os.WriteFile(fragment, []byte("credentials:\n  - username: alice\n    password_hash: "+string(hash)+"\n"), 0o600))
+	path := filepath.Join(directory, "main.yaml")
+	require.NoError(t, os.WriteFile(path, []byte("include: [users.yaml]\n"), 0o600))
+	store, err := basic.NewFileCredentialStore(path)
+	require.NoError(t, err)
+	require.NoError(t, store.VerifyCredentials("alice", "alice-secret"))
+	require.Error(t, store.VerifyCredentials("alice", "wrong"))
+	require.NoError(t, os.Remove(fragment))
+	_, err = basic.NewFileCredentialStore(path)
+	require.Error(t, err)
+}

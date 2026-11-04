@@ -135,7 +135,7 @@ pub struct Settings {
     /// Whether the server certificate is accepted unverified; a flag of
     /// one invocation only, never read from the file.
     pub skip_verify: bool,
-    /// Every file consulted while resolving, in system-then-user order.
+    /// Root configurations consulted, in system-then-user order.
     pub files: Vec<ConsultedFile>,
 }
 
@@ -196,6 +196,8 @@ pub enum Error {
     MissingCertTag,
     #[error("invalid \"timeout\" value in {}: {message}", path.display())]
     InvalidTimeout { path: PathBuf, message: String },
+    #[error(transparent)]
+    Includes(#[from] crate::yaml::Error),
 }
 
 impl Error {
@@ -375,10 +377,10 @@ struct MergedFile {
 fn read_file(path: &Path, required: bool) -> Result<(Option<RawFile>, ConsultedFile), Error> {
     use std::io::ErrorKind;
 
-    match fs::read_to_string(path) {
-        Ok(text) => {
-            let raw: RawFile =
-                serde_yaml::from_str(&text).map_err(|source| Error::Parse { path: path.to_owned(), source })?;
+    match fs::metadata(path) {
+        Ok(_) => {
+            let raw: RawFile = serde_yaml::from_value(crate::yaml::read(path)?)
+                .map_err(|source| Error::Parse { path: path.to_owned(), source })?;
 
             Ok((Some(raw), ConsultedFile { path: path.to_owned(), read: true }))
         }
@@ -769,6 +771,48 @@ mod test {
             tls: TlsArgs::default(),
             timeout: None,
         }
+    }
+
+    #[test]
+    fn test_resolve_includes_endpoint_and_mtls_before_main_user_and_arguments() {
+        let directory = scratch_dir("include-transport");
+        let sources = sources(&directory);
+        write(
+            &directory,
+            "transport.yaml",
+            "endpoint: edge\nendpoints:\n  edge:\n    endpoint: grpcs://gateway.example:8443\n    ca: /pki/ca.pem\n    client_cert: /pki/client.pem\n    client_key: /pki/client-key.pem\n    timeout: 2\n",
+        );
+        write(
+            &directory,
+            "system.yaml",
+            "include: [transport.yaml]\nendpoints:\n  edge:\n    timeout: 3\n",
+        );
+        write(
+            &directory,
+            "user.yaml",
+            "endpoints:\n  edge:\n    ca: /pki/user-ca.pem\n",
+        );
+        let settings = resolve(&bare_args(), &sources).unwrap();
+        assert_eq!("grpcs://gateway.example:8443", settings.endpoint.value);
+        assert_eq!(Some(PathBuf::from("/pki/user-ca.pem")), settings.ca.value);
+        assert_eq!(Some(PathBuf::from("/pki/client.pem")), settings.client_cert.value);
+        assert_eq!(Some(PathBuf::from("/pki/client-key.pem")), settings.client_key.value);
+        assert_eq!(Some(Duration::from_secs(3)), settings.timeout.value);
+        let mut arguments = bare_args();
+        arguments.tls.ca = Some("/pki/argument-ca.pem".into());
+        let settings = resolve(&arguments, &sources).unwrap();
+        assert_eq!(Some(PathBuf::from("/pki/argument-ca.pem")), settings.ca.value);
+        assert_eq!(Origin::Argument, settings.ca.origin);
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn test_resolve_missing_include_does_not_fall_back_to_default_endpoint() {
+        let directory = scratch_dir("include-missing");
+        write(&directory, "system.yaml", "include: [missing-transport.yaml]\n");
+        let error = resolve(&bare_args(), &sources(&directory)).unwrap_err();
+        assert!(error.to_string().contains("missing-transport.yaml"), "{error}");
+        fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]

@@ -1,0 +1,6 @@
+dataplane:
+  packet_recirc_limit: 10
+  dpdk_memory: 100
+  devices:
+    - port_name: removed0
+    - port_name: removed1

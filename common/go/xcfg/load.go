@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
 	"reflect"
 	"strings"
 
@@ -99,7 +98,7 @@ func WithEnvPrefix(prefix string) Option {
 // Validation is driven by Decode, which calls Validate() on every field whose
 // type implements it.
 func LoadConfig[T any](path string, options ...Option) (*T, error) {
-	buf, err := os.ReadFile(path)
+	buf, err := ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read config file: %w", err)
 	}

@@ -19,6 +19,7 @@ lib_dependencies = [
 
 lib_sources = files(
   'config.c',
+  'config_source.c',
   'dataplane.c',
   'device.c',
   'dpdk.c',

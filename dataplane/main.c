@@ -7,6 +7,7 @@
 
 #include "common/buildinfo.h"
 #include "config.h"
+#include "config_source.h"
 #include "dataplane.h"
 #include "lib/dataplane/module/module.h"
 #include "lib/logging/log.h"
@@ -44,16 +45,14 @@ print_isa(void) {
 static void
 print_version(void) {
 	printf("yanet-dataplane %s\n", YANET_VERSION);
-	printf("  Compiler:   %s %s\n",
-	       YANET_COMPILER_ID,
+	printf("  Compiler:   %s %s\n", YANET_COMPILER_ID,
 	       YANET_COMPILER_VERSION);
 	printf("  Build type: %s\n", YANET_BUILD_TYPE);
 	printf("  Sanitizers: %s\n", YANET_SANITIZERS);
 	printf("  Built:      %s\n", YANET_BUILD_DATE);
 	printf("  Git commit: %s\n", YANET_GIT_COMMIT);
 	printf("  DPDK:       %s\n", rte_version());
-	printf("  Target:     %s (DPDK platform %s)\n",
-	       YANET_TARGET,
+	printf("  Target:     %s (DPDK platform %s)\n", YANET_TARGET,
 	       YANET_DPDK_PLATFORM);
 	print_isa();
 	printf("  Cache line: %d\n", YANET_CACHE_LINE_SIZE);
@@ -75,12 +74,11 @@ print_usage(const char *prog) {
 
 int
 main(int argc, char **argv) {
-	static struct option long_options[] = {
-		{"config", required_argument, 0, 'c'},
-		{"version", no_argument, 0, 'v'},
-		{"help", no_argument, 0, 'h'},
-		{0, 0, 0, 0}
-	};
+	static struct option long_options[] = {{"config", required_argument, 0,
+						'c'},
+					       {"version", no_argument, 0, 'v'},
+					       {"help", no_argument, 0, 'h'},
+					       {0, 0, 0, 0}};
 
 	const char *config_path = NULL;
 
@@ -128,7 +126,7 @@ main(int argc, char **argv) {
 	}
 
 	struct dataplane_config *config;
-	FILE *config_file = fopen(config_path, "r");
+	FILE *config_file = dataplane_config_open(config_path);
 	if (config_file == NULL) {
 		LOG(ERROR, "failed to open config file: %s", config_path);
 		return -1;

@@ -357,6 +357,7 @@ fn config_error_hint(err: &config::Error) -> Option<String> {
         config::Error::SectionMissingEndpoint { path, .. } => {
             Some(format!("add an \"endpoint\" key to that alias in {}", path.display()))
         }
+        config::Error::Includes(source) => Some(format!("check the configuration file at {}", source.path().display())),
         config::Error::UnknownAlias { .. } | config::Error::AliasChain { .. } | config::Error::MissingCertTag => None,
     }
 }

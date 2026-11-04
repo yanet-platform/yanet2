@@ -454,6 +454,14 @@ impl TryFrom<&DestinationRuleDoc> for l3bpb::DestinationFilterRule {
 /// Retains the source file in errors and emits value-free warnings on stderr.
 fn load_document<T: for<'de> Deserialize<'de>>(path: &Path, strict: bool) -> Result<T, String> {
     let content = std::fs::read_to_string(path).map_err(|err| format!("failed to read {}: {err}", path.display()))?;
+    let includes =
+        document::has_includes(&content).map_err(|err| format!("invalid document {}: {err}", path.display()))?;
+    let content = if includes {
+        let composed = ync::yaml::read_validated(path, document::validate_fragment).map_err(|err| err.to_string())?;
+        serde_yaml::to_string(&composed).map_err(|err| err.to_string())?
+    } else {
+        content
+    };
     let (document, warnings) =
         document::parse(&content, strict).map_err(|err| format!("invalid document {}: {err}", path.display()))?;
     for warning in warnings {

@@ -4,7 +4,6 @@ import (
 	"crypto/sha256"
 	"crypto/subtle"
 	"fmt"
-	"os"
 	"strings"
 	"sync"
 
@@ -12,6 +11,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/yanet-platform/yanet2/common/go/rcucache"
+	"github.com/yanet-platform/yanet2/common/go/xcfg"
 	"github.com/yanet-platform/yanet2/controlplane/internal/auth/core"
 )
 
@@ -86,7 +86,7 @@ func (m *FileCredentialStore) VerifyCredentials(username, password string) error
 
 // load reads and parses the credentials file.
 func (m *FileCredentialStore) load() error {
-	buf, err := os.ReadFile(m.path)
+	buf, err := xcfg.ReadFile(m.path)
 	if err != nil {
 		return fmt.Errorf("failed to read file: %w", err)
 	}
