@@ -155,14 +155,10 @@ func (m *Sync) table() []*routemplspb.Rule {
 	return rules
 }
 
-// rule converts a route to a route-mpls rule tunnelled from the source
-// address of its family, logging a route it cannot convert.
+// rule converts a route to a route-mpls rule, logging a route it cannot
+// convert.
 func (m *Sync) rule(route *rib.Route) (*routemplspb.Rule, error) {
-	source := m.sourceV4
-	if route.Prefix.Addr().Is6() {
-		source = m.sourceV6
-	}
-	rule, err := rib.ToPBMPLSRoute(route, source)
+	rule, err := rib.ToPBMPLSRoute(route, m.sourceV4, m.sourceV6)
 	if err != nil {
 		m.log.Debug("mpls route cannot be converted to protobuf, skip",
 			zap.String("prefix", route.Prefix.String()),

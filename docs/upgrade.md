@@ -3,6 +3,21 @@
 Manual steps required when upgrading an existing deployment. The packaging
 does not perform these automatically.
 
+## MPLS tunnels take the address family of their next hop
+
+bird-adapter now picks the tunnel family and source address by the next
+hop instead of the prefix: an IPv6 route with an IPv4 next hop (6VPE) gets
+an IPv4 tunnel instead of an IPv6 one to the IPv4-mapped address, and an
+IPv4 route with an IPv6 next hop gets the IPv6 source address. route-mpls
+rejects a next hop whose source and destination belong to different
+families.
+
+- Restart the control plane after upgrading `yanet2-bird-adapter`. A
+  running one keeps the tunnels the earlier adapter sent next to the new
+  ones until then.
+- `yanet-cli-route-mpls update` with `--src` and `--dst` of different
+  families now fails.
+
 ## route-mpls updates no longer create a config
 
 route-mpls `UpdateConfig` now changes an existing config only and answers
