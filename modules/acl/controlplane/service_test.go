@@ -329,6 +329,10 @@ func (m *fakeBackend) DeleteModule(name string) error {
 	if m.deleteErr != nil {
 		return m.deleteErr
 	}
+	if _, ok := m.modules[name]; !ok {
+		// Like the dataplane, which runs no module under the name.
+		return ffi.ErrNotFound
+	}
 
 	m.deleteCalls++
 	delete(m.modules, name)
@@ -797,15 +801,14 @@ func TestUpdateConfig_RejectsTypedOutOfClassMasks(t *testing.T) {
 }
 
 // TestDeleteConfig_UnknownConfig verifies that DeleteConfig reports
-// codes.NotFound for a config name that was never applied and does not call
-// the backend.
+// codes.NotFound for a config name neither the service nor the dataplane
+// holds.
 func TestDeleteConfig_UnknownConfig(t *testing.T) {
 	backend := newFakeBackend()
 	svc := newTestService(backend)
 
 	_, err := svc.DeleteConfig(t.Context(), &aclpb.DeleteConfigRequest{Name: "missing"})
 	require.Equal(t, codes.NotFound, status.Code(err))
-	assert.Equal(t, 0, backend.DeleteCalls(), "an unknown target must not reach the backend")
 }
 
 // TestDeleteConfig_LiveNameTombstones verifies that deleting a name with a

@@ -1355,6 +1355,22 @@ func Test_RouteService_UpdateFIB_ModulePublishFailureAfterFirstObjectKeepsObject
 	require.NoError(t, err)
 }
 
+// Test_RouteService_DeleteConfig_RemovesOrphan verifies that deleting a
+// config an earlier process published removes both halves from the
+// dataplane, and that a name the dataplane does not run reports NotFound.
+func Test_RouteService_DeleteConfig_RemovesOrphan(t *testing.T) {
+	backend := newFakeBackend()
+	backend.seedRestart("cfg", []string{"eth0"})
+	service := route.NewRouteService(backend)
+
+	_, err := service.DeleteConfig(t.Context(), &routepb.DeleteConfigRequest{Name: "cfg"})
+	require.NoError(t, err)
+	require.Equal(t, []string{"delete_module", "delete_fib"}, backend.calls["cfg"])
+
+	_, err = service.DeleteConfig(t.Context(), &routepb.DeleteConfigRequest{Name: "cfg"})
+	require.Equal(t, codes.NotFound, status.Code(err))
+}
+
 // DeleteConfig deletes the module before the object and tolerates
 // NotFound on either half.
 func Test_RouteService_DeleteConfig_DeletesModuleBeforeObjectAndToleratesNotFound(t *testing.T) {

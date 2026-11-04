@@ -201,11 +201,11 @@ func Test_Device_Delete_ReclaimsOwnerEntry(t *testing.T) {
 	require.ErrorIs(t, err, configstore.ErrNotFound)
 }
 
-// Test_Device_Delete_FallsBackWithoutOwnerEntry verifies that a device
-// published beside its owner — before a restart or through another
-// writer — is still removed from the registry when the owner knows
-// nothing of the name.
-func Test_Device_Delete_FallsBackWithoutOwnerEntry(t *testing.T) {
+// Test_Device_Delete_RemovesDevicePublishedBesideOwner verifies that a
+// device published beside its owner — before a restart or through another
+// writer — is still removed from the registry when the owner knows nothing
+// of the name.
+func Test_Device_Delete_RemovesDevicePublishedBesideOwner(t *testing.T) {
 	harness := newDeviceHarness(t)
 	shm := harness.SharedMemory()
 

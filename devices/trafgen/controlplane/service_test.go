@@ -22,7 +22,9 @@ import (
 	trafgenpb "github.com/yanet-platform/yanet2/devices/trafgen/controlplane/trafgenpb/v1"
 )
 
-// recordingBackend captures the payload of the most recent update call.
+// recordingBackend captures the payload of the most recent update call and,
+// like the dataplane, reports a delete of a device it does not run as not
+// found.
 type recordingBackend struct {
 	packets [][]byte
 	ratePps uint64
@@ -31,13 +33,21 @@ type recordingBackend struct {
 	calls   int
 	err     error
 
+	running      map[string]bool
 	deletedNames []string
 	deleteErr    error
 }
 
 func (m *recordingBackend) Delete(name string) error {
+	if !m.running[name] {
+		return ffi.ErrNotFound
+	}
 	m.deletedNames = append(m.deletedNames, name)
-	return m.deleteErr
+	if m.deleteErr != nil {
+		return m.deleteErr
+	}
+	delete(m.running, name)
+	return nil
 }
 
 func (m *recordingBackend) Update(name string, payload *DeviceState) (crud.Handle, error) {
@@ -46,7 +56,15 @@ func (m *recordingBackend) Update(name string, payload *DeviceState) (crud.Handl
 	m.ratePps = payload.RatePps
 	m.input = payload.Input
 	m.output = payload.Output
-	return nil, m.err
+	if m.err != nil {
+		return nil, m.err
+	}
+
+	if m.running == nil {
+		m.running = map[string]bool{}
+	}
+	m.running[name] = true
+	return nil, nil
 }
 
 // buildPcap encodes the given ethernet frames into an in-memory pcap file.
@@ -372,21 +390,17 @@ func Test_TrafgenService_DeleteDevice_RemovesConfig(t *testing.T) {
 }
 
 // Test_TrafgenService_DeleteDevice_MissingConfig verifies that deleting a
-// name nothing is published under reports not found without reaching the
-// backend.
+// name neither this service nor the dataplane holds reports not found.
 func Test_TrafgenService_DeleteDevice_MissingConfig(t *testing.T) {
-	svc, backend := newTestService()
+	svc, _ := newTestService()
 
 	err := svc.DeleteDevice("absent")
 
 	require.ErrorIs(t, err, configstore.ErrNotFound)
-	require.Empty(t, backend.deletedNames)
 }
 
 // Test_TrafgenService_DeleteDevice_RefusedDeleteKeepsConfig verifies that
-// a delete the dataplane refuses leaves the config listed, so a retried
-// delete reaches the dataplane again instead of reporting the name as
-// unknown.
+// a delete the dataplane refuses leaves the config listed.
 func Test_TrafgenService_DeleteDevice_RefusedDeleteKeepsConfig(t *testing.T) {
 	svc, backend := newTestService()
 	ctx := t.Context()

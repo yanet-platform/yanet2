@@ -9,6 +9,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/yanet-platform/yanet2/controlplane/crud"
+	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	blackholepb "github.com/yanet-platform/yanet2/modules/blackhole/controlplane/blackholepb/v1"
 )
 
@@ -18,6 +19,8 @@ func (m *mockModuleHandle) Free() error {
 	return nil
 }
 
+// mockBackend publishes every config and finds nothing to delete in the
+// dataplane.
 type mockBackend struct{}
 
 func (m *mockBackend) Update(name string, payload struct{}) (crud.Handle, error) {
@@ -25,7 +28,7 @@ func (m *mockBackend) Update(name string, payload struct{}) (crud.Handle, error)
 }
 
 func (m *mockBackend) Delete(name string) error {
-	return nil
+	return ffi.ErrNotFound
 }
 
 func newTestService(t *testing.T) *BlackholeService {

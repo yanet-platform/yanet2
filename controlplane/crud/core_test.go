@@ -28,10 +28,12 @@ func (m *stubHandle) Free() error {
 	return nil
 }
 
-// fakeBackend records every payload it is asked to publish and hands
-// out one fresh handle per successful update.
+// fakeBackend records every payload it is asked to publish, hands out one
+// fresh handle per successful update and, like the dataplane, reports a
+// delete of a name it does not run as not found.
 type fakeBackend struct {
 	payloads  []string
+	running   map[string]bool
 	deleted   []string
 	handles   []*stubHandle
 	updateErr error
@@ -43,6 +45,10 @@ func (m *fakeBackend) Update(name string, payload string) (crud.Handle, error) {
 		return nil, m.updateErr
 	}
 
+	if m.running == nil {
+		m.running = map[string]bool{}
+	}
+	m.running[name] = true
 	m.payloads = append(m.payloads, payload)
 	handle := &stubHandle{}
 	m.handles = append(m.handles, handle)
@@ -53,7 +59,11 @@ func (m *fakeBackend) Delete(name string) error {
 	if m.deleteErr != nil {
 		return m.deleteErr
 	}
+	if !m.running[name] {
+		return ffi.ErrNotFound
+	}
 
+	delete(m.running, name)
 	m.deleted = append(m.deleted, name)
 	return nil
 }
@@ -164,6 +174,21 @@ func Test_Core_Mutate_UnchangedPublishesNothing(t *testing.T) {
 	payload, ok := core.Get("wan")
 	require.True(t, ok)
 	require.Equal(t, "first", payload)
+}
+
+// Test_Core_Delete_RemovesOrphan verifies that deleting a name this core
+// never published removes what the dataplane still runs under it, and
+// reports not found only when the dataplane has nothing either.
+func Test_Core_Delete_RemovesOrphan(t *testing.T) {
+	backend := &fakeBackend{}
+	// An earlier process published the config before a restart.
+	_, err := backend.Update("wan", "left over")
+	require.NoError(t, err)
+	core := crud.NewCore(backend)
+
+	require.NoError(t, core.Delete("wan"))
+	require.Equal(t, []string{"wan"}, backend.deleted)
+	require.ErrorIs(t, core.Delete("wan"), configstore.ErrNotFound)
 }
 
 // Test_Core_Delete_RefusalKeepsConfigPublished verifies that a delete

@@ -39,8 +39,9 @@ type DeviceOwner interface {
 	// DeleteDevice unpublishes the named device, removing it from the
 	// dataplane registry, and releases the handle kept for it.
 	//
-	// It reports configstore.ErrNotFound when nothing is published under
-	// the name.
+	// It also removes a device the registry holds that the owner never
+	// published, and reports configstore.ErrNotFound only when the
+	// registry holds nothing under the name either.
 	DeleteDevice(name string) error
 }
 
@@ -145,9 +146,8 @@ func (m *Device) Delete(
 		case err == nil:
 			return &ynpb.DeleteDeviceResponse{}, nil
 		case errors.Is(err, configstore.ErrNotFound):
-			// The owner never published the name: the device predates
-			// this process or was created beside it, so only the
-			// registry entry is left to remove.
+			// Neither the owner nor the registry holds the name, which
+			// the direct delete below reports as not found.
 		default:
 			return nil, deleteError(err)
 		}

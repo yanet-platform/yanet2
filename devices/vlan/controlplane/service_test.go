@@ -247,8 +247,8 @@ func TestDeleteDevice_ReleasesPublishedDevice(t *testing.T) {
 	require.ErrorIs(t, err, configstore.ErrNotFound)
 }
 
-// TestDeleteDevice_MissingDevice verifies that deleting a name nothing is
-// published under reports not found without reaching the dataplane.
+// TestDeleteDevice_MissingDevice verifies that deleting a name neither the
+// service nor the dataplane holds reports not found.
 func TestDeleteDevice_MissingDevice(t *testing.T) {
 	harness, err := dataplaneut.NewHarness(dataplaneut.Config{
 		CPMemory:      uint64(datasize.MB * 32),

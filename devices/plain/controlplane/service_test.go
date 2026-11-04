@@ -281,8 +281,7 @@ func TestDeleteDevice_ReleasesPublishedDevice(t *testing.T) {
 
 // TestDeleteDevice_RefusedDeleteKeepsEntry verifies that a delete the
 // dataplane refuses leaves the published entry in place: the registry
-// delete runs before the entry is withdrawn, so a retried delete reaches
-// the registry again instead of reporting the name as unknown.
+// delete runs before the entry is withdrawn.
 func TestDeleteDevice_RefusedDeleteKeepsEntry(t *testing.T) {
 	harness, err := dataplaneut.NewHarness(dataplaneut.Config{
 		CPMemory:      uint64(datasize.MB * 32),
