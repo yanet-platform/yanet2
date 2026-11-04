@@ -664,6 +664,8 @@ mod doctests {
     /// # impl Object for Mine {
     /// #     const TYPE: &'static str = "mine";
     /// #     type Config = u64;
+    /// #     type Prepared<'p> = ();
+    /// #     fn prepare(_: &yanet_sdk::ObjectCommitCx<'_, Self>) {}
     /// # }
     /// # pub struct Api;
     /// #[yanet_sdk::api(object = Mine)]
@@ -693,10 +695,14 @@ mod doctests {
     /// # impl Object for Mine {
     /// #     const TYPE: &'static str = "mine";
     /// #     type Config = u64;
+    /// #     type Prepared<'p> = ();
+    /// #     fn prepare(_: &yanet_sdk::ObjectCommitCx<'_, Self>) {}
     /// # }
     /// # impl Object for Other {
     /// #     const TYPE: &'static str = "other";
     /// #     type Config = u64;
+    /// #     type Prepared<'p> = ();
+    /// #     fn prepare(_: &yanet_sdk::ObjectCommitCx<'_, Self>) {}
     /// # }
     /// # pub struct Api;
     /// #[yanet_sdk::api(object = Mine)]
@@ -718,10 +724,14 @@ mod doctests {
     /// # impl Object for Mine {
     /// #     const TYPE: &'static str = "mine";
     /// #     type Config = u64;
+    /// #     type Prepared<'p> = ();
+    /// #     fn prepare(_: &yanet_sdk::ObjectCommitCx<'_, Self>) {}
     /// # }
     /// # impl Object for Other {
     /// #     const TYPE: &'static str = "other";
     /// #     type Config = u64;
+    /// #     type Prepared<'p> = ();
+    /// #     fn prepare(_: &yanet_sdk::ObjectCommitCx<'_, Self>) {}
     /// # }
     /// # pub struct Api;
     /// #[yanet_sdk::api(object = Mine)]
@@ -751,6 +761,8 @@ mod doctests {
     /// # impl Object for Mine {
     /// #     const TYPE: &'static str = "mine";
     /// #     type Config = u64;
+    /// #     type Prepared<'p> = ();
+    /// #     fn prepare(_: &yanet_sdk::ObjectCommitCx<'_, Self>) {}
     /// # }
     /// # pub struct Api;
     /// #[yanet_sdk::api(module = Mine)]
@@ -781,6 +793,8 @@ mod doctests {
     /// # impl Object for Mine {
     /// #     const TYPE: &'static str = "mine";
     /// #     type Config = u64;
+    /// #     type Prepared<'p> = ();
+    /// #     fn prepare(_: &yanet_sdk::ObjectCommitCx<'_, Self>) {}
     /// # }
     /// # pub struct Api;
     /// #[yanet_sdk::api(object = Mine)]

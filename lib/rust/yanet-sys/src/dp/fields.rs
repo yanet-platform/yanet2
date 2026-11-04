@@ -4,6 +4,8 @@ use core::marker::PhantomData;
 
 use yanet_shm::shm::ShmLayout;
 
+use crate::dp::object::Object;
+
 /// Per-worker counter of the module, registered by the control plane as a C
 /// counter of as many values as its layout `T` holds.
 ///
@@ -164,6 +166,27 @@ impl Device {
     }
 }
 
+/// An object of type `O` linked to the module configuration by name, by its
+/// index in the module's object links.
+///
+/// The dataplane resolves it to the object of that type and name the running
+/// generation holds, which is always there: C installs no configuration whose
+/// link it cannot resolve.
+#[repr(C)]
+pub struct ObjectLink<O> {
+    index: u64,
+    // What the link resolves to; the configuration stores the index only.
+    _object: PhantomData<fn() -> O>,
+}
+
+impl<O> ObjectLink<O> {
+    /// Index in the module's object links.
+    #[inline(always)]
+    pub fn index(&self) -> u64 {
+        self.index
+    }
+}
+
 // SAFETY: a registry index accepts every bit pattern, and the layout is a
 // zero-sized marker; the control plane writes the id the module's counter
 // registry assigned.
@@ -172,3 +195,8 @@ unsafe impl<T: CounterLayout> ShmLayout for Counter<T> {}
 // SAFETY: a device index accepts every bit pattern; the control plane writes
 // the index the module's device list assigned.
 unsafe impl ShmLayout for Device {}
+
+// SAFETY: a link index accepts every bit pattern, and the object type is a
+// zero-sized marker; the control plane writes the index the module's object
+// links assigned.
+unsafe impl<O: Object> ShmLayout for ObjectLink<O> {}

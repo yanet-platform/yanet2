@@ -18,7 +18,9 @@ use core::{
 
 use yanet_sdk::{Builder, Built, BuiltObject, FfiRecord, LpmRange, ObjectBuilder, Refusal};
 use yanet_sdk_api::{Agent, ApiError, ErrorKind};
-use yanet_sdk_fixture::{ConfigParts, RouteFibParts, RouteListParts, RouteParts, StateConfigParts, TallyConfigParts};
+use yanet_sdk_fixture::{
+    ConfigParts, RouteFibParts, RouteListParts, RouteParts, StashConfigParts, StateConfigParts, TallyConfigParts,
+};
 
 /// Bytes of a name in a record, the terminating NUL included.
 pub const FIB_NAME_LEN: usize = 64;
@@ -188,6 +190,19 @@ impl Fib {
                 })?,
                 route_indexes: scope.slice(indexes.len(), |idx| Ok(indexes[idx]))?,
             })
+        })
+    }
+}
+
+pub struct Stash;
+
+#[yanet_sdk::api(module = yanet_sdk_fixture::Stash)]
+impl Stash {
+    /// A configuration named `name` that writes the state object named
+    /// `state`, which a generation must hold when it is installed.
+    pub fn build(agent: &Agent, name: &str, state: &str) -> Result<Built<yanet_sdk_fixture::Stash, Agent>, ApiError> {
+        Builder::<yanet_sdk_fixture::Stash>::build::<ApiError, _>(agent, name, |scope| {
+            Ok(StashConfigParts { state: scope.object(state)? })
         })
     }
 }

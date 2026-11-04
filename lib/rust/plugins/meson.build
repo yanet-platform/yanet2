@@ -13,6 +13,7 @@ rust_sdk_fixture_plugins = custom_target(
     'libfib_dp.so',
     'libassign_dp.so',
     'libfixture_state_dp.so',
+    'libstash_dp.so',
   ],
   command: [
     'sh', '-c',

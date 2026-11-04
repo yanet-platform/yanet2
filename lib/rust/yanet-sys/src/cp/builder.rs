@@ -35,7 +35,7 @@ use super::{
 use crate::{
     bindings,
     common::lpm::{Lpm, LpmRange},
-    dp::{Counter, CounterLayout, Device, Module, ModuleConfig, Object, ObjectConfig},
+    dp::{Counter, CounterLayout, Device, Module, ModuleConfig, Object, ObjectConfig, ObjectLink},
 };
 
 mod classify;
@@ -68,11 +68,12 @@ pub trait Kind: kind::Sealed + 'static {
 }
 
 /// The kind of a module configuration: its header carries the module's
-/// counter registry and device list, which its scope registers into.
+/// counter registry, device list and object links, which its scope registers
+/// into.
 pub enum ModuleKind {}
 
 /// The kind of an object: its header carries no module registries, so its
-/// scope registers no counter and links no device.
+/// scope registers no counter and links no device or object.
 pub enum ObjectKind {}
 
 impl Kind for ModuleKind {
@@ -366,6 +367,24 @@ unsafe impl Build for Device {
     unsafe fn free<W: Owner>(_: usize, _: &MemoryContext<'_, W>) {}
 }
 
+// SAFETY: the link index is the whole value.
+unsafe impl<O: Object> Build for ObjectLink<O> {
+    type Parts<'b, W: Owner> = Registered<'b, ObjectLink<O>>;
+
+    unsafe fn write<W: Owner>(
+        parts: Self::Parts<'_, W>,
+        memory: &MemoryContext<'_, W>,
+        addr: usize,
+    ) -> Result<(), Refusal> {
+        // SAFETY: the link index is the link's only word, aligned and
+        // exclusive (caller contract).
+        unsafe { memory.root().ptr::<u64>(addr).write(parts.index) };
+        Ok(())
+    }
+
+    unsafe fn free<W: Owner>(_: usize, _: &MemoryContext<'_, W>) {}
+}
+
 // SAFETY: the C table is the whole value. Its routines write inside it, in the
 // blocks of its own memory context, which freeing returns, and in the links of
 // the context tree under the header, which opening and closing a context
@@ -443,7 +462,8 @@ pub struct OwnedSlice<'b, T: Build, W: Owner> {
     _element: PhantomData<fn() -> T>,
 }
 
-/// A counter or device registered in build `'b`, by its registry index.
+/// A counter, device or object link registered in build `'b`, by its
+/// registry index.
 ///
 /// Created by a [`Scope`] only. It is copied rather than registered again: C
 /// finds a registration by name with a linear scan of the registry, so a
@@ -592,8 +612,8 @@ impl<T: Build, W: Owner> Drop for Partial<'_, T, W> {
     }
 }
 
-/// Construction services of one build: allocates blocks and registers
-/// counters and devices.
+/// Construction services of one build: allocates blocks, registers counters
+/// and devices and links objects.
 ///
 /// A copyable handle shaped like a `&std::thread::Scope`. The build lifetime
 /// is fresh for every [`Builder::build`] and invariant, so nothing made by one
@@ -752,6 +772,32 @@ impl<'b, W: Owner, E: From<BuildError<W::Error>>> Scope<'b, '_, W, E, ModuleKind
         let index = unsafe { self.memory.owner.link_device(self.header, name) }.map_err(failed::<W, E>)?;
         Ok(Registered::new(index))
     }
+
+    /// Links the object of type `O` and the given name to the module, as C's
+    /// `cp_module_link_object` does: by type and name, linking a pair once.
+    ///
+    /// The object need not exist yet: C resolves the link when it installs the
+    /// configuration and refuses a configuration whose object the generation
+    /// does not hold.
+    ///
+    /// # Errors
+    ///
+    /// The type or the name is empty, holds a NUL or does not fit its C field
+    /// with the terminator, or the owner refuses the link.
+    pub fn object<O: Object>(self, name: &str) -> Result<Registered<'b, ObjectLink<O>>, E> {
+        if !fits_c_field(O::TYPE, bindings::CP_OBJECT_TYPE_LEN) || !fits_c_field(name, bindings::CP_OBJECT_NAME_LEN) {
+            return Err(refused::<W, E>(Refusal::InvalidName));
+        }
+        // SAFETY: the header is initialised and not yet published.
+        let index = unsafe { self.memory.owner.link_object(self.header, O::TYPE, name) }.map_err(failed::<W, E>)?;
+        Ok(Registered::new(index))
+    }
+}
+
+/// Whether a name fits a C field of `len` bytes whole: not empty, no NUL, and
+/// room for the terminator.
+fn fits_c_field(name: &str, len: u32) -> bool {
+    !name.is_empty() && name.len() < len as usize && !name.bytes().any(|byte| byte == 0)
 }
 
 impl<T: Build, W: Owner> Owned<'_, T, W> {
@@ -857,7 +903,7 @@ impl<O: Object> ObjectBuilder<O> {
     /// it.
     ///
     /// As [`Builder::build`], over an object scope, which registers no counter
-    /// and links no device, as the object's header carries no module
+    /// and links no device or object, as the object's header carries no module
     /// registries.
     ///
     /// # Errors

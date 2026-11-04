@@ -95,6 +95,18 @@ impl<M: Module> Ectx<M> {
         }
     }
 
+    /// The prepared value the commit entry wrote into the context's buffer.
+    pub fn prepared(&self) -> &M::Prepared<'static> {
+        assert_ne!(0, size_of::<M::Prepared<'static>>(), "a zero-sized value has no buffer");
+        let root = self.arena.root();
+        // SAFETY: the context and its buffer lie in the arena, committed at
+        // construction and written by nothing while the borrow lives.
+        unsafe {
+            let context = &*root.ptr::<bindings::module_ectx>(self.ectx);
+            &*root.ptr::<M::Prepared<'static>>(context.abs_module_prepared.addr())
+        }
+    }
+
     /// Calls the handler on the packets as the input list of a front.
     ///
     /// The packets are borrowed mutably because the call rewrites their

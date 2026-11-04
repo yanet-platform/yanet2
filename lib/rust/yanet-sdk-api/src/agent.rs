@@ -154,6 +154,8 @@ impl Agent {
     /// # impl Object for Mine {
     /// #     const TYPE: &'static str = "mine";
     /// #     type Config = ShmSlice<u64>;
+    /// #     type Prepared<'p> = ();
+    /// #     fn prepare(_: &yanet_sys::dp::ObjectCommitCx<'_, Self>) {}
     /// # }
     /// fn mixed(agent: &Agent, first: &BuiltObject<Mine, Agent>, second: &BuiltObject<Mine, Agent>) -> usize {
     ///     agent.read(first, |_, outer| agent.read(second, |cx, _| outer.as_slice(&cx).len()))
@@ -170,6 +172,8 @@ impl Agent {
     /// # impl Object for Mine {
     /// #     const TYPE: &'static str = "mine";
     /// #     type Config = ShmSlice<u64>;
+    /// #     type Prepared<'p> = ();
+    /// #     fn prepare(_: &yanet_sys::dp::ObjectCommitCx<'_, Self>) {}
     /// # }
     /// fn escape<'a>(agent: &'a Agent, built: &'a BuiltObject<Mine, Agent>) -> &'a ShmSlice<u64> {
     ///     agent.read(built, |_, config| config)
@@ -186,6 +190,8 @@ impl Agent {
     /// # impl Object for Mine {
     /// #     const TYPE: &'static str = "mine";
     /// #     type Config = ShmSlice<u64>;
+    /// #     type Prepared<'p> = ();
+    /// #     fn prepare(_: &yanet_sys::dp::ObjectCommitCx<'_, Self>) {}
     /// # }
     /// fn escape<'a>(agent: &'a Agent, built: &'a BuiltObject<Mine, Agent>) -> ObjectCx<'a> {
     ///     agent.read(built, |cx, _| cx)
@@ -202,6 +208,8 @@ impl Agent {
     /// # impl Object for Mine {
     /// #     const TYPE: &'static str = "mine";
     /// #     type Config = ShmSlice<u64>;
+    /// #     type Prepared<'p> = ();
+    /// #     fn prepare(_: &yanet_sys::dp::ObjectCommitCx<'_, Self>) {}
     /// # }
     /// fn sum(agent: &Agent, built: &BuiltObject<Mine, Agent>) -> u64 {
     ///     agent.read(built, |cx, config| config.as_slice(&cx).iter().sum())
@@ -590,6 +598,28 @@ unsafe impl Owner for Agent {
         if unsafe {
             bindings::cp_module_link_device(
                 header_at::<bindings::cp_module>(self, header),
+                name.as_ptr().cast::<c_char>(),
+                &mut index,
+                &mut chain,
+            )
+        } != 0
+        {
+            // SAFETY: the chain C wrote, if any, is ours alone.
+            return Err(unsafe { from_c_chain(chain) });
+        }
+        Ok(index)
+    }
+
+    unsafe fn link_object(&self, header: Header, ty: &str, name: &str) -> Result<u64, ApiError> {
+        let ty = c_name::<{ CP_OBJECT_TYPE_LEN as usize }>(ty)?;
+        let name = c_name::<{ CP_OBJECT_NAME_LEN as usize }>(name)?;
+        let (mut index, mut chain) = (0, ptr::null_mut());
+        // SAFETY: the header is initialised (caller contract); the names are
+        // NUL terminated and the out-parameters are valid.
+        if unsafe {
+            bindings::cp_module_link_object(
+                header_at::<bindings::cp_module>(self, header),
+                ty.as_ptr().cast::<c_char>(),
                 name.as_ptr().cast::<c_char>(),
                 &mut index,
                 &mut chain,

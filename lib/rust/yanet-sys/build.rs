@@ -130,6 +130,8 @@ fn generate_bindings(flags: &CFlags, shim_dir: &Path, out: &Path) {
         .allowlist_type("cp_module")
         .allowlist_type("cp_object")
         .allowlist_type("object")
+        .allowlist_type("object_ectx")
+        .allowlist_type("module_object_link_ectx")
         .allowlist_type("module")
         .allowlist_type("module_ectx")
         .allowlist_type("module_device_target")
@@ -146,7 +148,7 @@ fn generate_bindings(flags: &CFlags, shim_dir: &Path, out: &Path) {
         .allowlist_function("yanet_sys_classify_.*")
         // The agent owner of the configuration builder: the C routines a C
         // module's control-plane API calls for the same steps.
-        .allowlist_function("cp_module_(init|fini|try_destroy|link_device)")
+        .allowlist_function("cp_module_(init|fini|try_destroy|link_device|link_object)")
         .allowlist_function("cp_object_(init|fini|try_destroy)")
         .allowlist_function("counter_registry_register")
         .allowlist_function("agent_destroy_released")
@@ -174,7 +176,6 @@ fn generate_bindings(flags: &CFlags, shim_dir: &Path, out: &Path) {
         .opaque_type("cp_config_gen")
         .opaque_type("config_gen_ectx")
         .opaque_type("device_entry_ectx")
-        .opaque_type("module_object_link_ectx")
         .generate()
         .expect("bindgen failed");
     bindings.write_to_file(out).expect("write bindings");

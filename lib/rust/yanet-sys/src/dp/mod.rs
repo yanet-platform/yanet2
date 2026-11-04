@@ -22,11 +22,17 @@
 //!   derived, and its prepared buffer is allocated when the module declares a
 //!   prepared size. It calls the commit hook only for an allocated buffer,
 //!   after deriving the context's absolute fields, as the single writer of that
-//!   buffer.
+//!   buffer. It derives the absolute fields of the object contexts a module
+//!   context links before those of the module context
+//!   (`config_gen_ectx_resolve_counters`,
+//!   `lib/dataplane/config/gen_resolve.c`).
 //! - **binding**: the loader registers the descriptor under the module's name
 //!   and the dataplane calls a module's handlers only with contexts of that
 //!   module, whose configuration the control plane built with the body type the
-//!   module declares.
+//!   module declares. An object type is registered under its type name, and the
+//!   plugin exporting it, the api crate building its objects and every module
+//!   linking one use the one Rust type of that name, so the object a link
+//!   resolves to holds the body and prepared value that type declares.
 //! - **frozen**: configuration bytes are frozen after publish and
 //!   execution-context bytes once the context is released to its worker; C
 //!   writes only `Opaque` bytes and atomics of configurations.
@@ -73,8 +79,8 @@ pub mod object;
 pub mod rt;
 
 pub use batch::{Batch, DeviceRef, DscpMark, Packet, PacketView, ResizeError, TunnelError, Verdict};
-pub use cx::{BoundCounter, CommitCx, CounterRef, Cx};
-pub use fields::{Counter, CounterLayout, Device, Traffic};
+pub use cx::{BoundCounter, CommitCx, CounterRef, Cx, ModuleCx, ObjectCommitCx};
+pub use fields::{Counter, CounterLayout, Device, ObjectLink, Traffic};
 pub use module::{Module, ModuleConfig};
 pub use object::{Object, ObjectConfig};
 
@@ -85,7 +91,8 @@ pub mod __private {
 
     /// Fails const evaluation when the prepared value of a module cannot live
     /// in the dataplane's buffer: the dataplane never drops it, and the block
-    /// allocator aligns it to at most `MAX_ALIGN`.
+    /// allocator aligns it to at most `MAX_ALIGN`; a zero-sized one has a
+    /// value.
     pub const fn check_prepared<M: crate::dp::Module>() {
         const {
             assert!(
@@ -95,6 +102,45 @@ pub mod __private {
             assert!(
                 core::mem::align_of::<M::Prepared<'static>>() <= yanet_shm::shm::MAX_ALIGN,
                 "Module::Prepared is aligned beyond what the block allocator guarantees"
+            );
+            // A zero-sized value is never written, so the runtime lends one
+            // it never made: the type must have a value. `Option` of a type
+            // without one has only `None`, which rustc lays out in no bytes.
+            assert!(
+                core::mem::size_of::<Option<core::convert::Infallible>>() == 0,
+                "rustc no longer lays out Option of a type without a value in no bytes"
+            );
+            assert!(
+                core::mem::size_of::<M::Prepared<'static>>() != 0
+                    || core::mem::size_of::<Option<M::Prepared<'static>>>() != 0,
+                "Module::Prepared is a zero-sized type without a value"
+            );
+        }
+    }
+
+    /// Fails const evaluation when the prepared value of an object cannot
+    /// live in the dataplane's buffer, as for a module's.
+    pub const fn check_object_prepared<O: crate::dp::Object>() {
+        const {
+            assert!(
+                !core::mem::needs_drop::<O::Prepared<'static>>(),
+                "Object::Prepared needs no drop: the dataplane never drops its buffer"
+            );
+            assert!(
+                core::mem::align_of::<O::Prepared<'static>>() <= yanet_shm::shm::MAX_ALIGN,
+                "Object::Prepared is aligned beyond what the block allocator guarantees"
+            );
+            // A zero-sized value is never written, so the runtime lends one
+            // it never made: the type must have a value. `Option` of a type
+            // without one has only `None`, which rustc lays out in no bytes.
+            assert!(
+                core::mem::size_of::<Option<core::convert::Infallible>>() == 0,
+                "rustc no longer lays out Option of a type without a value in no bytes"
+            );
+            assert!(
+                core::mem::size_of::<O::Prepared<'static>>() != 0
+                    || core::mem::size_of::<Option<O::Prepared<'static>>>() != 0,
+                "Object::Prepared is a zero-sized type without a value"
             );
         }
     }

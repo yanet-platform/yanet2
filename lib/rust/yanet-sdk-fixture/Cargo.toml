@@ -49,3 +49,8 @@ required-features = ["plugin"]
 name = "fixture_state_dp"
 crate-type = ["cdylib"]
 required-features = ["plugin"]
+
+[[example]]
+name = "stash_dp"
+crate-type = ["cdylib"]
+required-features = ["plugin"]

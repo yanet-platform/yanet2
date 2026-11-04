@@ -6,17 +6,19 @@
 //! has a prepared value made at commit, and counts. [`Fib`] forwards by a
 //! route FIB. [`assign::Assign`] passes or drops by the first rule a packet
 //! matches, through the classify bindings. [`State`] is an object type: state
-//! that outlives the configurations, changed by the control plane.
+//! that outlives the configurations, changed by the control plane and by
+//! [`Stash`], which links it.
 
 #![no_std]
 #![forbid(unsafe_code)]
 
 pub mod assign;
 
-use core::sync::atomic::AtomicU64;
+use core::sync::atomic::{AtomicU64, Ordering};
 
 use yanet_sdk::{
-    Batch, CommitCx, Counter, CounterRef, Cx, Device, Lpm4, Lpm6, Module, Object, ShmLayout, ShmSlice, Traffic, Verdict,
+    Batch, CommitCx, Counter, CounterRef, Cx, Device, Lpm4, Lpm6, Module, Object, ObjectCommitCx, ObjectLink,
+    ShmLayout, ShmSlice, Traffic, Verdict,
 };
 // The plugin examples use it.
 #[cfg(feature = "plugin")]
@@ -348,10 +350,53 @@ pub struct StateConfig {
 }
 
 /// An object of atomic slots, the shape of state kept across configuration
-/// updates.
+/// updates; prepares its seed, which a module linking it reads per packet.
 pub struct State;
 
 impl Object for State {
     const TYPE: &'static str = "fixture_state";
     type Config = StateConfig;
+    type Prepared<'p> = u64;
+
+    fn prepare(cx: &ObjectCommitCx<'_, Self>) -> u64 {
+        cx.config().seed
+    }
+}
+
+/// The configuration of [`Stash`]: the state object it writes, linked by
+/// name.
+#[derive(ShmLayout)]
+#[repr(C)]
+pub struct StashConfig {
+    pub state: ObjectLink<State>,
+}
+
+/// Adds the seed the linked state object prepared to the slot that the first
+/// byte of a packet selects, modulo the slot count, and passes every packet;
+/// an empty packet or an object without slots changes nothing.
+pub struct Stash;
+
+impl Module for Stash {
+    const NAME: &'static str = "stash";
+    type Config = StashConfig;
+    type Prepared<'p> = ();
+
+    fn handle<'id>(cx: &mut Cx<'id, Self>, batch: &mut Batch<'id>) {
+        let state = &cx.config().state;
+        let slots = state.get(cx).slots.as_slice(cx);
+        let seed = *state.prepared(cx);
+        batch.dispatch(|packet| {
+            let slot = packet
+                .data()
+                .first()
+                .and_then(|&byte| usize::from(byte).checked_rem(slots.len()))
+                .and_then(|idx| slots.get(idx));
+            if let Some(slot) = slot {
+                slot.fetch_add(seed, Ordering::Relaxed);
+            }
+            Verdict::Pass
+        });
+    }
+
+    fn prepare(_: &CommitCx<'_, Self>) {}
 }

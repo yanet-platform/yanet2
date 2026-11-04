@@ -1,6 +1,6 @@
 //! Per-invocation contexts of a module.
 
-use core::{marker::PhantomData, ptr::NonNull};
+use core::{marker::PhantomData, mem::size_of, ptr::NonNull};
 
 use yanet_shm::{resolve::Resolve, root::ShmRoot};
 
@@ -9,8 +9,9 @@ use crate::{
     counters::counter_get_address,
     dp::{
         batch::DeviceRef,
-        fields::{Counter, CounterLayout, Device},
+        fields::{Counter, CounterLayout, Device, ObjectLink},
         module::Module,
+        object::{Object, ObjectConfig},
     },
 };
 
@@ -364,6 +365,89 @@ unsafe impl<'c, M: Module> Resolve<'c> for CommitCx<'c, M> {
     }
 }
 
+/// Context of the prepare pass for one worker context of an object.
+///
+/// Gives the object's configuration, whose edges resolve through it, to the
+/// object's prepare step. Neither `Send` nor `Sync`.
+pub struct ObjectCommitCx<'c, O: Object> {
+    root: ShmRoot,
+    config: &'c O::Config,
+    // Invariant brand: values of two different contexts never unify, so they cannot be mixed.
+    _brand: PhantomData<fn(&'c ()) -> &'c ()>,
+    // Neither Send nor Sync on purpose, independent of the pointer fields.
+    _local: PhantomData<*mut ()>,
+}
+
+impl<'c, O: Object> ObjectCommitCx<'c, O> {
+    /// Assembles the commit context.
+    ///
+    /// # Safety
+    ///
+    /// The root covers the mapping, and the configuration is the published
+    /// one of the object being committed, frozen for the pass but for its
+    /// atomics.
+    #[inline(always)]
+    pub(crate) unsafe fn new(root: ShmRoot, config: &'c O::Config) -> Self {
+        Self {
+            root,
+            config,
+            _brand: PhantomData,
+            _local: PhantomData,
+        }
+    }
+
+    /// The object's configuration in the generation being committed.
+    #[inline(always)]
+    pub fn config(&self) -> &'c O::Config {
+        self.config
+    }
+}
+
+// SAFETY: as for the module's commit context.
+unsafe impl<'c, O: Object> Resolve<'c> for ObjectCommitCx<'c, O> {
+    #[inline(always)]
+    fn shm_root(&self) -> ShmRoot {
+        self.root
+    }
+}
+
+/// A context of a module's call or of its prepare pass, either of which
+/// resolves the module's [`ObjectLink`]s.
+///
+/// Sealed: the contexts are [`Cx`] and [`CommitCx`].
+pub trait ModuleCx<'id>: Resolve<'id> + sealed::Sealed {}
+
+impl<'id, M: Module> ModuleCx<'id> for Cx<'id, M> {}
+
+impl<'c, M: Module> ModuleCx<'c> for CommitCx<'c, M> {}
+
+mod sealed {
+    use core::ptr::NonNull;
+
+    use crate::{bindings, dp::Module};
+
+    /// What a module context holds for the links, out of the public surface.
+    pub trait Sealed {
+        /// The module's execution context, frozen while the context lives,
+        /// with its absolute fields derived.
+        fn module_ectx(&self) -> NonNull<bindings::module_ectx>;
+    }
+
+    impl<M: Module> Sealed for super::Cx<'_, M> {
+        #[inline(always)]
+        fn module_ectx(&self) -> NonNull<bindings::module_ectx> {
+            self.ectx
+        }
+    }
+
+    impl<M: Module> Sealed for super::CommitCx<'_, M> {
+        #[inline(always)]
+        fn module_ectx(&self) -> NonNull<bindings::module_ectx> {
+            self.ectx
+        }
+    }
+}
+
 /// Address of the context's worker's value of a counter, as C's
 /// `counter_get_address(id, ectx->abs_counter_storage)`.
 ///
@@ -468,5 +552,79 @@ fn device_target<'id, M: Module>(cx: &Cx<'id, M>, device: &'id Device, input: bo
             return None;
         }
         Some(DeviceRef::new(NonNull::new_unchecked(target), input))
+    }
+}
+
+impl<O: Object> ObjectLink<O> {
+    /// The linked object's configuration in the running generation, as C's
+    /// `object_link_get_address(...)->abs_object_ectx->abs_cp_object` finds
+    /// it.
+    ///
+    /// Always there: the link was recorded by the build of this configuration,
+    /// and C installs no configuration whose link the generation does not
+    /// resolve to an object of the type and name.
+    #[inline(always)]
+    pub fn get<'id>(&'id self, cx: &impl ModuleCx<'id>) -> &'id O::Config {
+        let root = cx.shm_root();
+        let object_ectx = linked_object_ectx(cx, self.index());
+        // SAFETY: the object context is frozen and its absolute fields were
+        // derived before the module's (attach: call, frozen); the object is
+        // one of type `O`, as C resolves the link by its type name, whose
+        // body is frozen except for its atomics and outlives the generation
+        // (attach: binding, frozen, reclaim).
+        unsafe {
+            let cp_object = (*object_ectx).abs_cp_object;
+            (*root.ptr::<ObjectConfig<O::Config>>(cp_object.addr())).body()
+        }
+    }
+
+    /// The linked object's prepared value for the context's worker in the
+    /// running generation, as the object's prepare step made it.
+    ///
+    /// The step made it under its own commit brand; it is read here under the
+    /// module context's. What it may borrow is the object's memory, which the
+    /// generation the module context runs in holds, so it lives at least as
+    /// long as that context.
+    #[inline(always)]
+    pub fn prepared<'id>(&'id self, cx: &impl ModuleCx<'id>) -> &'id O::Prepared<'id> {
+        if size_of::<O::Prepared<'id>>() == 0 {
+            // C allocates no buffer for an object without a prepared size.
+            // SAFETY: a zero-sized value is read from any aligned address.
+            return unsafe { NonNull::dangling().as_ref() };
+        }
+        let root = cx.shm_root();
+        let object_ectx = linked_object_ectx(cx, self.index());
+        // SAFETY: as for the configuration; the object declares a prepared
+        // size, so C allocated the buffer of every context of the object, and
+        // its commit pass wrote the value before the module contexts linking
+        // it were derived (attach: call, align); the buffer is frozen once the
+        // pass is done. The value borrows at most the object's memory, which
+        // outlives the generation of the call (attach: reclaim), so the
+        // module's brand does not outlive what it borrows.
+        unsafe {
+            let prepared = (*object_ectx).abs_object_prepared;
+            debug_assert!(!prepared.is_null(), "no prepared buffer of an object that declares one");
+            &*root.ptr::<O::Prepared<'id>>(prepared.addr())
+        }
+    }
+}
+
+/// The execution context of the object behind a link of the module, for the
+/// context's worker.
+#[inline(always)]
+fn linked_object_ectx<'id>(cx: &impl ModuleCx<'id>, index: u64) -> *const bindings::object_ectx {
+    let root = cx.shm_root();
+    let ectx = cx.module_ectx().as_ptr();
+    // SAFETY: the module context is frozen with its absolute fields derived
+    // (attach: frozen, publish); a built link index is below the link count,
+    // as the configuration this context runs recorded the link and C
+    // installed it resolved.
+    unsafe {
+        debug_assert!(
+            index < (*ectx).object_link_count,
+            "an object link beyond the links of the module context"
+        );
+        let links = root.ptr::<bindings::module_object_link_ectx>((*ectx).abs_object_links.addr());
+        root.ptr::<bindings::object_ectx>((*links.add(index as usize)).abs_object_ectx.addr())
     }
 }
