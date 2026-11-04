@@ -161,6 +161,11 @@ func getWeight(route rib.Route) uint64 {
 	return 1
 }
 
+// routeListBestDiff returns the route-mpls changes that turn the old best
+// routes into the new ones.
+//
+// It withdraws every nexthop the new routes lack, then updates every
+// nexthop that is new or has a new weight.
 func routeListBestDiff(
 	newRoutes []rib.Route,
 	oldRoutes []rib.Route,
@@ -173,13 +178,7 @@ func routeListBestDiff(
 	for idx := range oldBests {
 		route := oldBests[idx]
 
-		if slices.IndexFunc(
-			newBests,
-			func(known rib.Route) bool {
-				return known.NextHop == route.NextHop &&
-					known.RD == route.RD
-			},
-		) == -1 {
+		if slices.IndexFunc(newBests, sameNexthop(route)) == -1 {
 			route.ToRemove = true
 			result = append(result, route)
 		}
@@ -188,26 +187,26 @@ func routeListBestDiff(
 	for idx := range newBests {
 		route := newBests[idx]
 
-		idx := slices.IndexFunc(
-			oldBests,
-			func(known rib.Route) bool {
-				return known.NextHop == route.NextHop &&
-					known.RD == route.RD
-			},
-		)
-
-		if idx == -1 {
-			result = append(result, route)
-			continue
-		}
-
-		if getLabel(route) != getLabel(oldBests[idx]) ||
-			getWeight(route) != getWeight(oldBests[idx]) {
+		idx := slices.IndexFunc(oldBests, sameNexthop(route))
+		if idx == -1 || getWeight(route) != getWeight(oldBests[idx]) {
 			result = append(result, route)
 		}
 	}
 
 	return result
+}
+
+// sameNexthop matches the routes route-mpls holds as the same nexthop as
+// the given one.
+//
+// route-mpls tells nexthops apart by address and label, not by the RD that
+// tells routes apart here, so a route whose label changes is withdrawn
+// under the old label and added under the new one.
+func sameNexthop(route rib.Route) func(rib.Route) bool {
+	return func(known rib.Route) bool {
+		return known.NextHop == route.NextHop &&
+			getLabel(known) == getLabel(route)
+	}
 }
 
 func (m mplsRouteList) Withdraw(
