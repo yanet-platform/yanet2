@@ -59,7 +59,7 @@ func init() {
 	clientCmd.Flags().StringVarP(&clientCmdArgs.ServerConfigPath, "server-config", "s", "", "Path to the server configuration file (required)")
 	clientCmd.Flags().StringVar(&clientCmdArgs.ConfigName, "config", "", "Configuration name (required)")
 	clientCmd.Flags().StringSliceVar(&clientCmdArgs.Sockets, "sockets", nil, "List of BIRD socket paths (required)")
-	clientCmd.Flags().Var(&clientCmdArgs.LogLevel, "log-level", "Log level for this client. If not set, logging is disabled.")
+	clientCmd.Flags().Var(&clientCmdArgs.LogLevel, "log-level", "Log level of this import's own log. If not set, that log is off; the service log is written regardless.")
 	clientCmd.Flags().StringVar(&clientCmdArgs.SourceV4, "source-v4", "", "MPLS source IPv4 address (required)")
 	clientCmd.Flags().StringVar(&clientCmdArgs.SourceV6, "source-v6", "", "MPLS source IPv6 address (required)")
 
