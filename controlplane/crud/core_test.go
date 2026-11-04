@@ -148,6 +148,24 @@ func Test_Core_Mutate_CallbackErrorSkipsBackend(t *testing.T) {
 	require.Equal(t, "first", payload)
 }
 
+// Test_Core_Mutate_UnchangedPublishesNothing verifies that a mutation whose
+// callback finds nothing to change succeeds without reaching the backend
+// and keeps the published payload.
+func Test_Core_Mutate_UnchangedPublishesNothing(t *testing.T) {
+	backend := &fakeBackend{}
+	core := crud.NewCore(backend)
+
+	require.NoError(t, core.Replace("wan", "first"))
+	require.NoError(t, core.Mutate("wan", func(string, bool) (string, error) {
+		return "", crud.ErrUnchanged
+	}))
+
+	require.Equal(t, []string{"first"}, backend.payloads)
+	payload, ok := core.Get("wan")
+	require.True(t, ok)
+	require.Equal(t, "first", payload)
+}
+
 // Test_Core_Delete_RefusalKeepsConfigPublished verifies that a delete
 // the backend refuses leaves the config published under its name.
 func Test_Core_Delete_RefusalKeepsConfigPublished(t *testing.T) {

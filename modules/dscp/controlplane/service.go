@@ -117,7 +117,7 @@ func (m *DscpService) AddPrefixes(
 		cfg.Prefixes6 = mergePrefixes(cfg.Prefixes6, toAdd6)
 	})
 	if err != nil {
-		return nil, status.Errorf(codes.Internal, "failed to update module config %q: %v", name, err)
+		return nil, crud.PublishError(name, err)
 	}
 
 	return &dscppb.AddPrefixesResponse{}, nil
@@ -160,7 +160,7 @@ func (m *DscpService) RemovePrefixes(
 		cfg.Prefixes6 = removePrefixes(cfg.Prefixes6, toRemove6)
 	})
 	if err != nil {
-		return nil, status.Errorf(codes.Internal, "failed to update module config %q: %v", name, err)
+		return nil, crud.PublishError(name, err)
 	}
 
 	return &dscppb.RemovePrefixesResponse{}, nil
@@ -191,7 +191,7 @@ func (m *DscpService) SetDscpMarking(
 		}
 	})
 	if err != nil {
-		return nil, status.Errorf(codes.Internal, "failed to update module config %q: %v", name, err)
+		return nil, crud.PublishError(name, err)
 	}
 
 	return &dscppb.SetDscpMarkingResponse{}, nil

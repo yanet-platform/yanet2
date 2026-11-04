@@ -153,7 +153,7 @@ func (m *ForwardService) UpdateConfig(ctx context.Context, req *forwardpb.Update
 	}
 
 	if err := m.core.Replace(name, RuleSet{Rules: reqRules, Compiled: rules}); err != nil {
-		return nil, status.Errorf(codes.Internal, "failed to update module config: %v", err)
+		return nil, crud.PublishError(name, err)
 	}
 
 	return &forwardpb.UpdateConfigResponse{}, nil

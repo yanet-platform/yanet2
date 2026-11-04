@@ -56,7 +56,7 @@ func (m *DevicePlainService) UpdateDevice(
 	}
 
 	if err := m.core.Replace(name, pipelines); err != nil {
-		return nil, crud.UpdateError(err)
+		return nil, crud.PublishError(name, err)
 	}
 
 	return &plainpb.UpdateDevicePlainResponse{}, nil

@@ -29,6 +29,10 @@ type Backend[P any] interface {
 	Delete(name string) error
 }
 
+// ErrUnchanged is returned by a mutation callback that finds nothing to
+// change, so the mutation publishes nothing and reports success.
+var ErrUnchanged = errors.New("config unchanged")
+
 // Entry pairs an immutable published payload with the handle of its
 // shared-memory config.
 //
@@ -64,8 +68,7 @@ func (m *Entry[P]) Free() error {
 // Replace and Mutate report the update operation, Delete the delete
 // operation. The observer runs synchronously inside the mutation:
 // blocking in the acquired phase holds the name's writer section until
-// it returns, which is exactly what a test proving serialization
-// pauses on.
+// it returns.
 type MutationObserver interface {
 	ObserveMutation(operation, phase string)
 }
@@ -151,16 +154,8 @@ func (m *Core[P]) Get(name string) (P, bool) {
 // A backend failure is returned unchanged and leaves the store as it
 // was; the caller maps it to its gRPC status.
 func (m *Core[P]) Replace(name string, payload P) error {
-	m.observe(OperationUpdate, PhaseWaiting)
-	return m.configs.Update(name, func(*Entry[P], bool) (*Entry[P], error) {
-		m.observe(OperationUpdate, PhaseAcquired)
-		defer m.observe(OperationUpdate, PhaseReleasing)
-
-		handle, err := m.backend.Update(name, payload)
-		if err != nil {
-			return nil, err
-		}
-		return &Entry[P]{Payload: payload, Handle: handle}, nil
+	return m.Mutate(name, func(P, bool) (P, error) {
+		return payload, nil
 	})
 }
 
@@ -168,13 +163,14 @@ func (m *Core[P]) Replace(name string, payload P) error {
 // the name.
 //
 // The callback is handed the current payload, or the zero one when the
-// name is new, and returns the payload to publish. It must not change
-// the payload it is handed in place: the published payload reaches
-// readers without a lock. Its error, like a backend failure, is
-// returned unchanged and leaves the store as it was.
+// name is new, and returns the payload to publish, or ErrUnchanged to
+// publish nothing and report success. It must not change the payload it
+// is handed in place: the published payload reaches readers without a
+// lock. Its other errors, like a backend failure, are returned unchanged
+// and leave the store as it was.
 func (m *Core[P]) Mutate(name string, mutate func(current P, ok bool) (P, error)) error {
 	m.observe(OperationUpdate, PhaseWaiting)
-	return m.configs.Update(name, func(current *Entry[P], ok bool) (*Entry[P], error) {
+	err := m.configs.Update(name, func(current *Entry[P], ok bool) (*Entry[P], error) {
 		m.observe(OperationUpdate, PhaseAcquired)
 		defer m.observe(OperationUpdate, PhaseReleasing)
 
@@ -192,6 +188,10 @@ func (m *Core[P]) Mutate(name string, mutate func(current P, ok bool) (P, error)
 		}
 		return &Entry[P]{Payload: next, Handle: handle}, nil
 	})
+	if errors.Is(err, ErrUnchanged) {
+		return nil
+	}
+	return err
 }
 
 // Delete removes the config published under the name, releasing its

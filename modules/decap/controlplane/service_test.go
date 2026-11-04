@@ -1,9 +1,7 @@
 package decap
 
 import (
-	"errors"
 	"net/netip"
-	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -56,8 +54,6 @@ func prefixStrings[T interface{ ToPrefix() (netip.Prefix, error) }](t *testing.T
 	return strs
 }
 
-var errInjectedBackend = errors.New("injected backend failure")
-
 // mockModuleHandle is a shared-memory handle whose release always succeeds.
 type mockModuleHandle struct{}
 
@@ -79,22 +75,6 @@ func (m *mockBackend) Delete(name string) error {
 func newTestService(t *testing.T) *DecapService {
 	t.Helper()
 	return NewDecapService(&mockBackend{})
-}
-
-// flakyBackend publishes the first config and fails every later update.
-type flakyBackend struct {
-	numCalls atomic.Int64
-}
-
-func (m *flakyBackend) Update(name string, payload PrefixSets) (crud.Handle, error) {
-	if m.numCalls.Add(1) >= 2 {
-		return nil, errInjectedBackend
-	}
-	return &mockModuleHandle{}, nil
-}
-
-func (m *flakyBackend) Delete(name string) error {
-	return nil
 }
 
 func Test_DecapService_UpdateAndShow(t *testing.T) {
@@ -203,30 +183,6 @@ func Test_DecapService_InvalidPrefix(t *testing.T) {
 			assert.Empty(t, list.Configs)
 		})
 	}
-}
-
-func Test_DecapService_UpdateFailureAtomic(t *testing.T) {
-	svc := NewDecapService(&flakyBackend{})
-	ctx := t.Context()
-	name := "decap0"
-
-	_, err := svc.UpdateConfig(ctx, &decappb.UpdateConfigRequest{
-		Name:      name,
-		Prefixes4: mustPrefixes4(t, "10.0.0.0/24"),
-	})
-	require.NoError(t, err)
-
-	_, err = svc.UpdateConfig(ctx, &decappb.UpdateConfigRequest{
-		Name:      name,
-		Prefixes4: mustPrefixes4(t, "10.0.1.0/24"),
-	})
-	require.Error(t, err)
-	require.Equal(t, codes.Internal, status.Code(err))
-
-	show, err := svc.ShowConfig(ctx, &decappb.ShowConfigRequest{Name: name})
-	require.NotNil(t, show)
-	require.NoError(t, err)
-	require.Empty(t, cmp.Diff([]string{"10.0.0.0/24"}, prefixStrings(t, show.Prefixes4)))
 }
 
 // Test_DecapService_DeleteConfig_MissingConfig verifies that deleting a

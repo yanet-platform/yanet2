@@ -9,24 +9,24 @@ import (
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 )
 
-// UpdateError maps a failed update to the gRPC status it reports.
+// PublishError maps a failed update of the named config to the gRPC
+// status it reports.
 //
-// A config the dataplane refuses to publish — the graph it runs names
-// an entity it cannot resolve — reports FailedPrecondition; anything
-// else reports Internal.
-func UpdateError(err error) error {
-	if errors.Is(err, ffi.ErrFailedPrecondition) {
-		return status.Errorf(codes.FailedPrecondition, "failed to update device: %v", err)
-	}
-	return status.Errorf(codes.Internal, "failed to update device: %v", err)
-}
-
-// MutationError maps a failed mutation to the gRPC status it reports: a
-// status the mutation itself produced passes through, a backend failure
-// reports Internal.
-func MutationError(err error) error {
+// A status the mutation itself produced passes through. A config the
+// dataplane refuses in its current state reports FailedPrecondition, one
+// it has no room for reports ResourceExhausted, and anything else reports
+// Internal.
+func PublishError(name string, err error) error {
 	if _, ok := status.FromError(err); ok {
 		return err
 	}
-	return status.Errorf(codes.Internal, "failed to update module config: %v", err)
+
+	code := codes.Internal
+	switch {
+	case errors.Is(err, ffi.ErrFailedPrecondition):
+		code = codes.FailedPrecondition
+	case errors.Is(err, ffi.ErrResourceExhausted):
+		code = codes.ResourceExhausted
+	}
+	return status.Errorf(code, "failed to update config %q: %v", name, err)
 }

@@ -62,10 +62,7 @@ func (m *BlackholeService) UpdateConfig(
 ) (*blackholepb.UpdateConfigResponse, error) {
 	name := req.GetName()
 	if err := m.core.Replace(name, struct{}{}); err != nil {
-		return nil, status.Errorf(
-			codes.Internal,
-			"failed to update module config %q: %v", name, err,
-		)
+		return nil, crud.PublishError(name, err)
 	}
 
 	return &blackholepb.UpdateConfigResponse{}, nil

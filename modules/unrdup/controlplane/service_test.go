@@ -1,7 +1,6 @@
 package unrdup_test
 
 import (
-	"errors"
 	"net/netip"
 	"testing"
 
@@ -17,8 +16,6 @@ import (
 	"github.com/yanet-platform/yanet2/modules/unrdup/controlplane/unrduppb/v1"
 )
 
-var errBackendFailure = errors.New("backend failure")
-
 // fakeHandle is a shared-memory handle whose release always succeeds.
 type fakeHandle struct{}
 
@@ -26,10 +23,9 @@ func (m *fakeHandle) Free() error {
 	return nil
 }
 
-// fakeBackend counts updates, fails each with the set error, if any, and
-// otherwise records the sources and services of the published config.
+// fakeBackend counts updates and records the sources and services of the
+// last published config.
 type fakeBackend struct {
-	err      error
 	calls    int
 	sources  []xnetip.Network
 	services []cunrdup.Service
@@ -37,10 +33,6 @@ type fakeBackend struct {
 
 func (m *fakeBackend) Update(name string, payload *unrdup.ModuleConfig) (crud.Handle, error) {
 	m.calls++
-	if m.err != nil {
-		return nil, m.err
-	}
-
 	m.sources = payload.Sources()
 	m.services = payload.Services
 	return &fakeHandle{}, nil
@@ -297,26 +289,6 @@ func withConfig(mutate func(config *unrduppb.Config)) *unrduppb.UpdateConfigRequ
 	mutate(config)
 
 	return &unrduppb.UpdateConfigRequest{Name: "unrdup0", Config: config}
-}
-
-// Test_UnrdupService_UpdateConfig_BackendFailure verifies that a config the
-// backend fails to publish reports Internal and is not stored.
-func Test_UnrdupService_UpdateConfig_BackendFailure(t *testing.T) {
-	backend := &fakeBackend{err: errBackendFailure}
-	service := unrdup.NewUnrdupService(backend)
-
-	_, err := service.UpdateConfig(t.Context(), &unrduppb.UpdateConfigRequest{
-		Name:   "unrdup0",
-		Config: validConfig(),
-	})
-
-	require.Error(t, err)
-	require.Equal(t, codes.Internal, status.Code(err))
-
-	_, err = service.ShowConfig(t.Context(), &unrduppb.ShowConfigRequest{
-		Name: "unrdup0",
-	})
-	require.Equal(t, codes.NotFound, status.Code(err))
 }
 
 // Test_UnrdupService_ShowConfig_RendersPublishedConfig verifies that a

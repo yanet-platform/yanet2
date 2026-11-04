@@ -3,7 +3,6 @@ package nat64
 import (
 	"bytes"
 	"context"
-	"errors"
 	"fmt"
 	"net/netip"
 	"slices"
@@ -16,10 +15,6 @@ import (
 	"github.com/yanet-platform/yanet2/controlplane/crud"
 	nat64pb "github.com/yanet-platform/yanet2/modules/nat64/controlplane/nat64pb/v1"
 )
-
-// errUnchanged is reported by a mutation callback that found nothing to
-// publish, so the current config stays as it is.
-var errUnchanged = errors.New("config unchanged")
 
 // NAT64ServiceOption configures the NAT64Service constructor.
 type NAT64ServiceOption func(*nat64ServiceOptions)
@@ -169,14 +164,14 @@ func (m *NAT64Service) AddPrefix(ctx context.Context, req *nat64pb.AddPrefixRequ
 	err = m.core.Mutate(name, func(current *NAT64Config, ok bool) (*NAT64Config, error) {
 		next := nextConfig(current, ok)
 		if slices.ContainsFunc(next.Prefixes, func(existing []byte) bool { return bytes.Equal(existing, prefix) }) {
-			return nil, errUnchanged
+			return nil, crud.ErrUnchanged
 		}
 		next.Prefixes = append(next.Prefixes, prefix)
 
 		return next, nil
 	})
-	if err != nil && !errors.Is(err, errUnchanged) {
-		return nil, crud.MutationError(err)
+	if err != nil {
+		return nil, crud.PublishError(name, err)
 	}
 
 	return &nat64pb.AddPrefixResponse{}, nil
@@ -212,7 +207,7 @@ func (m *NAT64Service) RemovePrefix(ctx context.Context, req *nat64pb.RemovePref
 		return next, nil
 	})
 	if err != nil {
-		return nil, crud.MutationError(err)
+		return nil, crud.PublishError(name, err)
 	}
 
 	return &nat64pb.RemovePrefixResponse{}, nil
@@ -246,7 +241,7 @@ func (m *NAT64Service) AddMapping(ctx context.Context, req *nat64pb.AddMappingRe
 		return next, nil
 	})
 	if err != nil {
-		return nil, crud.MutationError(err)
+		return nil, crud.PublishError(name, err)
 	}
 
 	return &nat64pb.AddMappingResponse{}, nil
@@ -272,7 +267,7 @@ func (m *NAT64Service) RemoveMapping(ctx context.Context, req *nat64pb.RemoveMap
 		return next, nil
 	})
 	if err != nil {
-		return nil, crud.MutationError(err)
+		return nil, crud.PublishError(name, err)
 	}
 
 	return &nat64pb.RemoveMappingResponse{}, nil
@@ -290,7 +285,7 @@ func (m *NAT64Service) SetMTU(ctx context.Context, req *nat64pb.SetMTURequest) (
 		return next, nil
 	})
 	if err != nil {
-		return nil, crud.MutationError(err)
+		return nil, crud.PublishError(name, err)
 	}
 
 	return &nat64pb.SetMTUResponse{}, nil
@@ -306,7 +301,7 @@ func (m *NAT64Service) SetDropUnknown(ctx context.Context, req *nat64pb.SetDropU
 		return next, nil
 	})
 	if err != nil {
-		return nil, crud.MutationError(err)
+		return nil, crud.PublishError(name, err)
 	}
 
 	return &nat64pb.SetDropUnknownResponse{}, nil

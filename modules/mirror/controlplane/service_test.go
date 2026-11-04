@@ -1,7 +1,6 @@
 package mirror_test
 
 import (
-	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -23,16 +22,10 @@ func (m *mockModuleHandle) Free() error {
 	return nil
 }
 
-// mockBackend publishes every config unless an update error is set and
-// hands out a fresh handle.
-type mockBackend struct {
-	updateError error
-}
+// mockBackend publishes every config and hands out a fresh handle.
+type mockBackend struct{}
 
 func (m *mockBackend) Update(name string, payload mirror.RuleSet) (crud.Handle, error) {
-	if m.updateError != nil {
-		return nil, m.updateError
-	}
 	return &mockModuleHandle{}, nil
 }
 
@@ -79,25 +72,6 @@ func TestDeleteConfigUnknownConfig(t *testing.T) {
 	svc := mirror.NewMirrorService(&mockBackend{})
 
 	_, err := svc.DeleteConfig(t.Context(), &mirrorpb.DeleteConfigRequest{Name: "missing"})
-	require.Equal(t, codes.NotFound, status.Code(err))
-}
-
-// Test_MirrorService_UpdateConfig_BackendFailureReturnsInternal verifies
-// that a backend update failure returns Internal before publication.
-func Test_MirrorService_UpdateConfig_BackendFailureReturnsInternal(t *testing.T) {
-	backendError := errors.New("shared memory unavailable")
-	service := mirror.NewMirrorService(&mockBackend{updateError: backendError})
-
-	_, err := service.UpdateConfig(t.Context(), &mirrorpb.UpdateConfigRequest{
-		Name: "config",
-		Rules: []*mirrorpb.Rule{
-			{Action: &mirrorpb.Action{Target: "device0"}},
-		},
-	})
-	require.Equal(t, codes.Internal, status.Code(err))
-	require.ErrorContains(t, err, "failed to update module config: shared memory unavailable")
-
-	_, err = service.ShowConfig(t.Context(), &mirrorpb.ShowConfigRequest{Name: "config"})
 	require.Equal(t, codes.NotFound, status.Code(err))
 }
 

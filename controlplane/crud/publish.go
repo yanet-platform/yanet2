@@ -29,12 +29,12 @@ type Device interface {
 func PublishModule[M Module](agent *ffi.Agent, module M, build func(module M) error) error {
 	if build != nil {
 		if err := build(module); err != nil {
-			return abandonedModule(module, err)
+			return abandoned(module, err)
 		}
 	}
 
 	if err := agent.UpdateModules([]ffi.ModuleConfig{module.AsFFIModule()}); err != nil {
-		return abandonedModule(module, fmt.Errorf("failed to publish module config: %w", err))
+		return abandoned(module, fmt.Errorf("failed to publish module config: %w", err))
 	}
 
 	return nil
@@ -47,25 +47,16 @@ func PublishModule[M Module](agent *ffi.Agent, module M, build func(module M) er
 // free is joined onto the publish error.
 func PublishDevice[D Device](agent *ffi.Agent, device D) error {
 	if err := agent.UpdateDevices([]ffi.ShmDeviceConfig{device.AsFFIDevice()}); err != nil {
-		return abandonedDevice(device, fmt.Errorf("failed to publish device config: %w", err))
+		return abandoned(device, fmt.Errorf("failed to publish device config: %w", err))
 	}
 
 	return nil
 }
 
-// abandonedModule frees the abandoned config, joining a failed free
-// onto the step's error.
-func abandonedModule[M Module](module M, err error) error {
-	if freeErr := module.Free(); freeErr != nil {
-		return fmt.Errorf("%w; also failed to free the abandoned config: %w", err, freeErr)
-	}
-	return err
-}
-
-// abandonedDevice frees the abandoned device, joining a failed free
-// onto the step's error.
-func abandonedDevice[D Device](device D, err error) error {
-	if freeErr := device.Free(); freeErr != nil {
+// abandoned frees an abandoned module or device config, joining a failed
+// free onto the step's error.
+func abandoned(config interface{ Free() error }, err error) error {
+	if freeErr := config.Free(); freeErr != nil {
 		return fmt.Errorf("%w; also failed to free the abandoned config: %w", err, freeErr)
 	}
 	return err
