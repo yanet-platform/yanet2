@@ -158,7 +158,11 @@ func (m *Export) Run(ctx context.Context) error {
 				return ctx.Err()
 			case route := <-updates:
 				batch = append(batch, *route)
-				tick.Reset(m.cfg.DumpTimeout)
+				// A batch waits at most one timeout after its first route:
+				// routes that follow join it without postponing the dump.
+				if len(batch) == 1 {
+					tick.Reset(m.cfg.DumpTimeout)
+				}
 			case <-tick.C:
 				if len(batch) == 0 {
 					m.onIdle(ctx)
