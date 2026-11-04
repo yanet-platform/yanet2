@@ -13,7 +13,6 @@
 #include "lib/dataplane/pipeline/econtext.h"
 #include "lib/dataplane/pipeline/schedule.h"
 
-// A copy of fwstate_stash_worker_idx, as pdump keeps one.
 uint64_t
 yanet_sys_dp_module_worker_idx(struct module_ectx *module_ectx) {
 	struct config_gen_ectx *own = module_ectx->abs_config_gen_ectx;

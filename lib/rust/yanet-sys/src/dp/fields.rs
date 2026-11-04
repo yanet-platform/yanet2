@@ -423,7 +423,9 @@ impl<'id, T: Copy + ShmLayout> WorkerSlot<'id, T> {
     /// Replaces the value of the slot.
     #[inline(always)]
     pub fn set<M: Module>(&self, _cx: &Cx<'id, M>, value: T) {
-        // SAFETY: as for reading.
+        // SAFETY: as for reading; the write is also exclusive: only the
+        // handler of the slot's worker reaches it, one call at a time, and no
+        // reference covers it while the call copies the value in.
         unsafe { self.slot.as_ptr().write(value) }
     }
 
@@ -448,7 +450,9 @@ unsafe impl<T: Copy + ShmLayout> Sync for PerWorker<T> {}
 // are plain values aligned for `T` by the builder.
 unsafe impl<T: Copy + ShmLayout> ShmLayout for PerWorker<T> {}
 
-// The builder writes the offset word, then the count word right after it.
+// The builder writes and frees the field through two raw words, the offset
+// and then the count right after it, not through the struct, so its layout
+// must stay what these assertions state.
 const _: () = {
     assert!(size_of::<PerWorker<u64>>() == 16);
     assert!(core::mem::offset_of!(PerWorker<u64>, workers) == size_of::<isize>());
