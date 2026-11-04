@@ -38,8 +38,8 @@ type LargeCommunity struct {
 // This information helps compute route costs, enabling the data plane to select
 // the optimal route for traffic forwarding
 type Route struct {
-	// Prefix is used as a key in routing databases (RIB and FIB), represented as
-	// an IPv6 network prefix. IPv4 addresses are stored as IPv6-mapped addresses.
+	// Prefix is used as a key in routing databases (RIB and FIB). An IPv4
+	// prefix keeps its 4-byte address.
 	Prefix netip.Prefix
 	// NextHop is the IP address where traffic should be forwarded next.
 	NextHop netip.Addr
@@ -144,9 +144,16 @@ func ToPBRoute(route *Route) (*routepb.Route, error) {
 
 // ToPBMPLSRoute converts an adapter Route to the wire MPLS rule.
 //
-// Returns an error if the route carries an invalid prefix, which the
-// structured wire message cannot represent.
-func ToPBMPLSRoute(route *Route, source netip.Addr) (*routemplspb.Rule, error) {
+// The tunnel takes the family of the nexthop, not of the prefix, and
+// starts at the source address of that family. BIRD hands over an IPv4
+// nexthop as an IPv4-mapped address, for an IPv6 route as well. Returns an
+// error if the route carries an invalid prefix, which the structured wire
+// message cannot represent.
+func ToPBMPLSRoute(
+	route *Route,
+	sourceV4 netip.Addr,
+	sourceV6 netip.Addr,
+) (*routemplspb.Rule, error) {
 	weight := uint64(1)
 	for _, community := range route.LargeCommunities {
 		if community.ASN == 13238 && community.Function == 1 {
@@ -154,10 +161,10 @@ func ToPBMPLSRoute(route *Route, source netip.Addr) (*routemplspb.Rule, error) {
 		}
 	}
 
-	destination := route.NextHop
-	if route.Prefix.Addr().Is4() {
-		// Unmap NextHop in case of V4 nexthop
-		destination = destination.Unmap()
+	destination := route.NextHop.Unmap()
+	source := sourceV6
+	if destination.Is4() {
+		source = sourceV4
 	}
 
 	label := uint32(0)

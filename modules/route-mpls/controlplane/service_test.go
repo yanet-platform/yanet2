@@ -108,6 +108,19 @@ func Test_RouteMPLSService_CreateConfig_InvalidPrefix(t *testing.T) {
 	require.Equal(t, codes.InvalidArgument, status.Code(err))
 }
 
+// Test_RouteMPLSService_CreateConfig_MixedFamilyTunnel verifies that a
+// nexthop tunnelled from an IPv4 source to an IPv6 destination is invalid.
+func Test_RouteMPLSService_CreateConfig_MixedFamilyTunnel(t *testing.T) {
+	service := newTestService(t)
+
+	response, err := service.CreateConfig(t.Context(), &routemplspb.CreateConfigRequest{
+		Name:  "mpls0",
+		Rules: []*routemplspb.Rule{makeRule(t, "10.0.0.0/24", "2001:db8::1", 100)},
+	})
+	require.Nil(t, response)
+	require.Equal(t, codes.InvalidArgument, status.Code(err))
+}
+
 func Test_RouteMPLSService_UpdateConfig_UpdateAndWithdraw(t *testing.T) {
 	svc := newTestService(t)
 	ctx := t.Context()

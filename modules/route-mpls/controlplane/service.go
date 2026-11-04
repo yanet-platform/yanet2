@@ -378,6 +378,11 @@ func makeNextHop(nexthop *routemplspb.NextHop) (NextHop, error) {
 	if err != nil {
 		return NextHop{}, fmt.Errorf("invalid destination_ip (bytes=%x): %w", nexthop.GetDestinationIp().GetAddr(), err)
 	}
+	// The tunnel's outer header takes the destination's family, which the
+	// source must share.
+	if src.BitLen() != dst.BitLen() {
+		return NextHop{}, fmt.Errorf("source_ip %s and destination_ip %s belong to different address families", src, dst)
+	}
 
 	return NextHop{
 		Source:      src,

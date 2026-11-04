@@ -92,12 +92,20 @@ func (m *ModuleConfig) Update(rules []Rule) error {
 				continue
 			}
 
-			if nexthop.Destination.BitLen() == 32 {
+			// The tunnel setters copy as many bytes of each address as the
+			// tunnel's family takes, so both addresses must be of it.
+			switch {
+			case nexthop.Source.Is4() && nexthop.Destination.Is4():
 				cNextHops[jdx].kind = C.ROUTE_MPLS_TYPE_V4
 				C.set_ip4_tunnel(&cNextHops[jdx], (*C.uint8_t)(&nexthop.Source.AsSlice()[0]), (*C.uint8_t)(&nexthop.Destination.AsSlice()[0]))
-			} else {
+			case nexthop.Source.Is6() && nexthop.Destination.Is6():
 				cNextHops[jdx].kind = C.ROUTE_MPLS_TYPE_V6
 				C.set_ip6_tunnel(&cNextHops[jdx], (*C.uint8_t)(&nexthop.Source.AsSlice()[0]), (*C.uint8_t)(&nexthop.Destination.AsSlice()[0]))
+			default:
+				return fmt.Errorf(
+					"rule %d nexthop %d: tunnel source %v and destination %v are not addresses of one family",
+					idx, jdx, nexthop.Source, nexthop.Destination,
+				)
 			}
 
 			cNextHops[jdx].mpls_label = C.uint32_t(nexthop.MPLSLabel)
