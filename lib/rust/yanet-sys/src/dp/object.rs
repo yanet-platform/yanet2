@@ -5,7 +5,7 @@ use core::mem::{align_of, size_of};
 
 use yanet_shm::opaque::Opaque;
 
-use crate::{bindings, cp::Build};
+use crate::{bindings, cp::Build, dp::cx::ObjectCommitCx};
 
 /// A shared object written in Rust: named state that outlives the module
 /// configurations linking it, as C's `cp_object`.
@@ -25,6 +25,64 @@ pub trait Object: Sized + 'static {
     /// Configuration body, the object's state; the control plane builds it
     /// with [`Build`] and may read it while it is published, so it is `Sync`.
     type Config: Build + Sync;
+
+    /// Value of each worker context of the object in a generation, made by
+    /// the prepare step and read by the modules linking the object; the unit
+    /// type when unused.
+    ///
+    /// The prepare step sees the configuration only, so every worker context
+    /// gets the value it makes from it.
+    ///
+    /// The same rules as a module's prepared value: made on the assigner
+    /// thread and read on the worker, so it is `Send`; it needs no drop and
+    /// is aligned within what the block allocator guarantees, which
+    /// `export_object!` checks:
+    ///
+    /// ```compile_fail,E0080
+    /// use yanet_sys::dp::{Object, ObjectCommitCx};
+    /// #[repr(align(128))]
+    /// struct Wide(u64);
+    /// struct Mine;
+    /// impl Object for Mine {
+    ///     const TYPE: &'static str = "mine";
+    ///     type Config = u64;
+    ///     type Prepared<'p> = Wide;
+    ///     fn prepare(_: &ObjectCommitCx<'_, Self>) -> Wide {
+    ///         Wide(0)
+    ///     }
+    /// }
+    /// yanet_sys::export_object!(name = mine, object = Mine);
+    /// ```
+    ///
+    /// A prepared value within the allocator's alignment is accepted:
+    ///
+    /// ```
+    /// use yanet_sys::dp::{Object, ObjectCommitCx};
+    /// #[repr(align(64))]
+    /// struct Line(u64);
+    /// struct Mine;
+    /// impl Object for Mine {
+    ///     const TYPE: &'static str = "mine";
+    ///     type Config = u64;
+    ///     type Prepared<'p> = Line;
+    ///     fn prepare(_: &ObjectCommitCx<'_, Self>) -> Line {
+    ///         Line(0)
+    ///     }
+    /// }
+    /// yanet_sys::export_object!(name = mine, object = Mine);
+    /// ```
+    type Prepared<'p>: Send;
+
+    /// Makes the prepared value from the configuration.
+    ///
+    /// Runs on the dataplane's assigner thread once per worker context of the
+    /// object in a generation, before the module contexts linking it are
+    /// prepared. C may run it again for a context a worker already reads, so
+    /// it makes the same value from the same configuration: it reads what the
+    /// build fixed, not the atomics of the state. A zero-sized
+    /// prepared value has no buffer and no commit hook, so for it this is
+    /// not called.
+    fn prepare<'p>(cx: &ObjectCommitCx<'p, Self>) -> Self::Prepared<'p>;
 }
 
 /// The root block of an object: the C object header, then the body the

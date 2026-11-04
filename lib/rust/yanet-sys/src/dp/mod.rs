@@ -79,7 +79,7 @@ pub mod object;
 pub mod rt;
 
 pub use batch::{Batch, DeviceRef, DscpMark, Packet, PacketView, ResizeError, TunnelError, Verdict};
-pub use cx::{BoundCounter, CommitCx, CounterRef, Cx, ModuleCx};
+pub use cx::{BoundCounter, CommitCx, CounterRef, Cx, ModuleCx, ObjectCommitCx};
 pub use fields::{Counter, CounterLayout, Device, ObjectLink, Traffic};
 pub use module::{Module, ModuleConfig};
 pub use object::{Object, ObjectConfig};
@@ -101,6 +101,21 @@ pub mod __private {
             assert!(
                 core::mem::align_of::<M::Prepared<'static>>() <= yanet_shm::shm::MAX_ALIGN,
                 "Module::Prepared is aligned beyond what the block allocator guarantees"
+            );
+        }
+    }
+
+    /// Fails const evaluation when the prepared value of an object cannot
+    /// live in the dataplane's buffer, as for a module's.
+    pub const fn check_object_prepared<O: crate::dp::Object>() {
+        const {
+            assert!(
+                !core::mem::needs_drop::<O::Prepared<'static>>(),
+                "Object::Prepared needs no drop: the dataplane never drops its buffer"
+            );
+            assert!(
+                core::mem::align_of::<O::Prepared<'static>>() <= yanet_shm::shm::MAX_ALIGN,
+                "Object::Prepared is aligned beyond what the block allocator guarantees"
             );
         }
     }

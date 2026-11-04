@@ -12,9 +12,9 @@ use crate::{
     bindings,
     dp::{
         batch::Batch,
-        cx::{CommitCx, Cx},
+        cx::{CommitCx, Cx, ObjectCommitCx},
         module::{Module, ModuleConfig},
-        object::Object,
+        object::{Object, ObjectConfig},
     },
 };
 
@@ -146,15 +146,48 @@ pub unsafe fn new_module<M: Module>(
     }
 }
 
+/// Body of the exported object execution-context commit handler.
+///
+/// # Safety
+///
+/// Must be called with the arguments the dataplane passes to the commit
+/// handler of an object type registered as the type parameter, which runs it
+/// only for a context whose prepared buffer is allocated. The execution
+/// context pointer is the provenance root of the shared mapping, as for a
+/// module's commit handler.
+#[inline(always)]
+pub unsafe fn commit_object_ectx<O: Object>(ectx: *mut bindings::object_ectx, cp_object: *mut bindings::cp_object) {
+    if size_of::<O::Prepared<'_>>() == 0 {
+        // The descriptor of such a type registers no hook.
+        return;
+    }
+    // SAFETY: the caller passes a non-null context inside the mapping with
+    // mapping-wide provenance (attach: call, mapping).
+    let root = unsafe { ShmRoot::from_mapping(NonNull::new_unchecked(ectx).cast()) };
+    // SAFETY: the context is frozen except for the prepared buffer, which the
+    // single commit pass owns, and the pass runs only for a context whose
+    // buffer is allocated (attach: call, frozen, publish).
+    let out = root.ptr::<O::Prepared<'_>>(unsafe { (*ectx).abs_object_prepared }.addr());
+    // SAFETY: the header is an object of this type, its body frozen but for
+    // its atomics (attach: binding, frozen).
+    let config = unsafe { (*root.ptr::<ObjectConfig<O::Config>>(cp_object.addr())).body() };
+    // SAFETY: root and configuration as stated above.
+    let cx = unsafe { ObjectCommitCx::<O>::new(root, config) };
+    // SAFETY: the buffer holds the prepared value's size, aligned by the
+    // allocator, and is owned by this pass, as for a module (attach: align).
+    unsafe { out.write(O::prepare(&cx)) };
+}
+
 /// Allocates the object type descriptor the loader copies and frees.
 ///
-/// The type has no commit hook and no prepared buffer.
+/// A type with a zero-sized prepared value registers no commit hook and no
+/// prepared buffer, so C runs no hook for it.
 ///
 /// # Safety
 ///
 /// `O::TYPE` fits the C type field with its terminator, as the export check
-/// asserts.
-pub unsafe fn new_object<O: Object>() -> *mut bindings::object {
+/// asserts; the hook is the runtime trampoline of the type parameter.
+pub unsafe fn new_object<O: Object>(commit: bindings::object_commit_ectx_handler) -> *mut bindings::object {
     let size = size_of::<bindings::object>();
     // SAFETY: the loader releases the descriptor with C free, so it is
     // allocated with C malloc and fully initialised before return; the name
@@ -167,8 +200,9 @@ pub unsafe fn new_object<O: Object>() -> *mut bindings::object {
         core::ptr::write_bytes(object.cast::<u8>(), 0, size);
         let name = &raw mut (*object).name;
         core::ptr::copy_nonoverlapping(O::TYPE.as_ptr(), name.cast::<u8>(), O::TYPE.len());
-        (*object).commit_ectx_handler = None;
-        (*object).prepared_size = 0;
+        let prepared_size = size_of::<O::Prepared<'static>>();
+        (*object).commit_ectx_handler = if prepared_size == 0 { None } else { commit };
+        (*object).prepared_size = prepared_size as u64;
         object
     }
 }
@@ -272,23 +306,27 @@ macro_rules! export_module {
 
 /// Exports an object type to the dataplane object loader.
 ///
-/// Emits `new_object_<name>` and `yanet_module_abi_version`, which the plugin
-/// loader asks of every plugin; an object type is a plugin of its own, as the
-/// two exports of a module and an object in one plugin collide. The name is
-/// the object's type name as it is, as the loader looks a type up by
-/// `new_object_<type>`, or the build fails. Generated into each plugin crate
-/// as its only line; the input grammar (identifiers and `::`-separated paths)
-/// is part of the safety boundary, used outside the macro's `unsafe`.
+/// Emits `new_object_<name>`, `yanet_module_abi_version`, which the plugin
+/// loader asks of every plugin, and the C commit trampoline, which the
+/// descriptor registers for a non-zero-sized prepared value; an object type is
+/// a plugin of its own, as the two exports of a module and an object in one
+/// plugin collide. The name is the object's type name as it is, as the loader
+/// looks a type up by `new_object_<type>`, or the build fails. Generated into
+/// each plugin crate as its only line; the input grammar (identifiers and
+/// `::`-separated paths) is part of the safety boundary, used outside the
+/// macro's `unsafe`.
 ///
 /// The type is exported under its own name only; the check is a const
 /// assertion, which rustc reports as E0080:
 ///
 /// ```compile_fail,E0080
-/// use yanet_sys::dp::Object;
+/// use yanet_sys::dp::{Object, ObjectCommitCx};
 /// struct Mine;
 /// impl Object for Mine {
 ///     const TYPE: &'static str = "mine";
 ///     type Config = u64;
+///     type Prepared<'p> = ();
+///     fn prepare(_: &ObjectCommitCx<'_, Self>) {}
 /// }
 /// yanet_sys::export_object!(name = other, object = Mine);
 /// ```
@@ -296,11 +334,13 @@ macro_rules! export_module {
 /// A type name that no identifier spells, as one with a `-`, is refused:
 ///
 /// ```compile_fail,E0080
-/// use yanet_sys::dp::Object;
+/// use yanet_sys::dp::{Object, ObjectCommitCx};
 /// struct Mine;
 /// impl Object for Mine {
 ///     const TYPE: &'static str = "my-state";
 ///     type Config = u64;
+///     type Prepared<'p> = ();
+///     fn prepare(_: &ObjectCommitCx<'_, Self>) {}
 /// }
 /// yanet_sys::export_object!(name = my_state, object = Mine);
 /// ```
@@ -309,12 +349,14 @@ macro_rules! export_module {
 /// refused, not truncated:
 ///
 /// ```compile_fail,E0080
-/// use yanet_sys::dp::Object;
+/// use yanet_sys::dp::{Object, ObjectCommitCx};
 /// struct Mine;
 /// impl Object for Mine {
 ///     const TYPE: &'static str =
 ///         "state_of_a_name_long_enough_to_overflow_the_eighty_bytes_of_the_c_object_type_field";
 ///     type Config = u64;
+///     type Prepared<'p> = ();
+///     fn prepare(_: &ObjectCommitCx<'_, Self>) {}
 /// }
 /// yanet_sys::export_object!(
 ///     name = state_of_a_name_long_enough_to_overflow_the_eighty_bytes_of_the_c_object_type_field,
@@ -325,11 +367,13 @@ macro_rules! export_module {
 /// Under its type name it is accepted:
 ///
 /// ```
-/// use yanet_sys::dp::Object;
+/// use yanet_sys::dp::{Object, ObjectCommitCx};
 /// struct Mine;
 /// impl Object for Mine {
 ///     const TYPE: &'static str = "my_state";
 ///     type Config = u64;
+///     type Prepared<'p> = ();
+///     fn prepare(_: &ObjectCommitCx<'_, Self>) {}
 /// }
 /// yanet_sys::export_object!(name = my_state, object = Mine);
 /// ```
@@ -350,14 +394,26 @@ macro_rules! export_object {
                 $crate::dp::__private::fits_object_type(<__ExportedObject as $crate::dp::Object>::TYPE),
                 "export_object!: Object::TYPE must be non-empty, without NUL, and fit the C object type fields",
             );
+            const _: () = $crate::dp::__private::check_object_prepared::<__ExportedObject>();
 
             #[unsafe(export_name = "yanet_module_abi_version")]
             pub static YANET_MODULE_ABI_VERSION: u32 = $crate::dp::rt::ABI_VERSION;
 
+            unsafe extern "C" fn commit_ectx(
+                ectx: *mut $crate::dp::__private::bindings::object_ectx,
+                cp_object: *mut $crate::dp::__private::bindings::cp_object,
+            ) {
+                // SAFETY: the dataplane calls this with commit arguments.
+                unsafe { $crate::dp::rt::commit_object_ectx::<__ExportedObject>(ectx, cp_object) }
+            }
+
             #[unsafe(export_name = ::core::concat!("new_object_", ::core::stringify!($name)))]
             pub extern "C" fn new_object() -> *mut $crate::dp::__private::bindings::object {
-                // SAFETY: the type name fits the C field, as asserted above.
-                unsafe { $crate::dp::rt::new_object::<__ExportedObject>() }
+                // SAFETY: the type name fits the C field, as asserted above,
+                // and the hook is the runtime's for this type.
+                unsafe {
+                    $crate::dp::rt::new_object::<__ExportedObject>(::core::option::Option::Some(commit_ectx))
+                }
             }
         };
     };

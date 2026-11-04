@@ -46,12 +46,13 @@
 //! registers no counter and links no device or object, published by name
 //! before a module links it and released by its owner once no generation holds
 //! it. A module's scope links it by type and name into an [`ObjectLink`] field,
-//! which the handler resolves to the object's configuration:
+//! which the handler resolves to the object's configuration and to the value
+//! the object's prepare step made for the worker:
 //!
 //! ```
 //! use core::sync::atomic::{AtomicU64, Ordering};
 //!
-//! use yanet_sdk::{Cx, Module, Object, ObjectLink, ShmLayout, ShmSlice};
+//! use yanet_sdk::{Cx, Module, Object, ObjectCommitCx, ObjectLink, ShmLayout, ShmSlice};
 //!
 //! #[derive(ShmLayout)]
 //! #[repr(C)]
@@ -64,6 +65,11 @@
 //! impl Object for State {
 //!     const TYPE: &'static str = "state";
 //!     type Config = StateConfig;
+//!     type Prepared<'p> = u64;
+//!
+//!     fn prepare(cx: &ObjectCommitCx<'_, Self>) -> u64 {
+//!         cx.config().slots.as_slice(cx).len() as u64
+//!     }
 //! }
 //!
 //! #[derive(ShmLayout)]
@@ -81,9 +87,9 @@
 //! }
 //!
 //! fn touch<'id, M: Module<Config = Config>>(cx: &Cx<'id, M>) {
-//!     let state = cx.config().state.get(cx);
-//!     if let Some(slot) = state.slots.as_slice(cx).first() {
-//!         slot.fetch_add(1, Ordering::Relaxed);
+//!     let link = &cx.config().state;
+//!     if let Some(slot) = link.get(cx).slots.as_slice(cx).first() {
+//!         slot.fetch_add(*link.prepared(cx), Ordering::Relaxed);
 //!     }
 //! }
 //! ```
@@ -111,7 +117,7 @@ pub use yanet_sys::{
     },
     dp::{
         Batch, CommitCx, Counter, CounterLayout, CounterRef, Cx, Device, DeviceRef, DscpMark, Module, ModuleCx, Object,
-        ObjectConfig, ObjectLink, Packet, PacketView, ResizeError, Traffic, TunnelError, Verdict,
+        ObjectCommitCx, ObjectConfig, ObjectLink, Packet, PacketView, ResizeError, Traffic, TunnelError, Verdict,
     },
 };
 
@@ -164,11 +170,13 @@ mod doctests {
     /// object links.
     ///
     /// ```compile_fail,E0599
-    /// use yanet_sdk::{BuildError, Object, ObjectKind, Owner, Scope};
+    /// use yanet_sdk::{BuildError, Object, ObjectCommitCx, ObjectKind, Owner, Scope};
     /// struct State;
     /// impl Object for State {
     ///     const TYPE: &'static str = "state";
     ///     type Config = u64;
+    ///     type Prepared<'p> = ();
+    ///     fn prepare(_: &ObjectCommitCx<'_, Self>) {}
     /// }
     /// fn link<W: Owner>(scope: Scope<'_, '_, W, BuildError<W::Error>, ObjectKind>) {
     ///     let _ = scope.object::<State>("state");
@@ -180,11 +188,13 @@ mod doctests {
     /// above.
     ///
     /// ```
-    /// use yanet_sdk::{BuildError, ModuleKind, Object, Owner, Scope};
+    /// use yanet_sdk::{BuildError, ModuleKind, Object, ObjectCommitCx, Owner, Scope};
     /// struct State;
     /// impl Object for State {
     ///     const TYPE: &'static str = "state";
     ///     type Config = u64;
+    ///     type Prepared<'p> = ();
+    ///     fn prepare(_: &ObjectCommitCx<'_, Self>) {}
     /// }
     /// fn register<W: Owner>(scope: Scope<'_, '_, W, BuildError<W::Error>, ModuleKind>) {
     ///     let _ = scope.counter::<u64>("hits");

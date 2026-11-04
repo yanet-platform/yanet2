@@ -14,8 +14,8 @@ use core::{
 
 use yanet_packet as _;
 use yanet_sdk::{
-    Batch, Build, BuiltObject, CommitCx, Counter, Cx, Device, Kind, Module, Object, ObjectBuilder, ObjectLink,
-    OwnedSlice, Refusal, Registered, ShmBox, ShmLayout, ShmSlice, Traffic, Verdict,
+    Batch, Build, BuiltObject, CommitCx, Counter, Cx, Device, Kind, Module, Object, ObjectBuilder, ObjectCommitCx,
+    ObjectLink, OwnedSlice, Refusal, Registered, ShmBox, ShmLayout, ShmSlice, Traffic, Verdict,
 };
 use yanet_sdk_derive as _;
 use yanet_sdk_testing::{
@@ -711,6 +711,9 @@ struct PolicyState;
 impl Object for PolicyState {
     const TYPE: &'static str = "policy_state";
     type Config = Policy;
+    type Prepared<'p> = ();
+
+    fn prepare(_: &ObjectCommitCx<'_, Self>) {}
 }
 
 /// Builds the policy object with the rules, each an id and its ports.
@@ -855,6 +858,9 @@ fn test_object_build_returns_everything_when_a_write_is_refused() {
     impl Object for FlakyState {
         const TYPE: &'static str = "flaky_state";
         type Config = [Flaky; 2];
+        type Prepared<'p> = ();
+
+        fn prepare(_: &ObjectCommitCx<'_, Self>) {}
     }
 
     let owner = owner();
@@ -1009,6 +1015,9 @@ struct OtherState;
 impl Object for OtherState {
     const TYPE: &'static str = "other_state";
     type Config = Policy;
+    type Prepared<'p> = ();
+
+    fn prepare(_: &ObjectCommitCx<'_, Self>) {}
 }
 
 /// A counter, then links to one name under two object types.

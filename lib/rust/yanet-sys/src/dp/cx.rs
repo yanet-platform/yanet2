@@ -1,6 +1,6 @@
 //! Per-invocation contexts of a module.
 
-use core::{marker::PhantomData, ptr::NonNull};
+use core::{marker::PhantomData, mem::size_of, ptr::NonNull};
 
 use yanet_shm::{resolve::Resolve, root::ShmRoot};
 
@@ -365,6 +365,52 @@ unsafe impl<'c, M: Module> Resolve<'c> for CommitCx<'c, M> {
     }
 }
 
+/// Context of the prepare pass for one worker context of an object.
+///
+/// Gives the object's configuration, whose edges resolve through it, to the
+/// object's prepare step. Neither `Send` nor `Sync`.
+pub struct ObjectCommitCx<'c, O: Object> {
+    root: ShmRoot,
+    config: &'c O::Config,
+    // Invariant brand: values of two different contexts never unify, so they cannot be mixed.
+    _brand: PhantomData<fn(&'c ()) -> &'c ()>,
+    // Neither Send nor Sync on purpose, independent of the pointer fields.
+    _local: PhantomData<*mut ()>,
+}
+
+impl<'c, O: Object> ObjectCommitCx<'c, O> {
+    /// Assembles the commit context.
+    ///
+    /// # Safety
+    ///
+    /// The root covers the mapping, and the configuration is the published
+    /// one of the object being committed, frozen for the pass but for its
+    /// atomics.
+    #[inline(always)]
+    pub(crate) unsafe fn new(root: ShmRoot, config: &'c O::Config) -> Self {
+        Self {
+            root,
+            config,
+            _brand: PhantomData,
+            _local: PhantomData,
+        }
+    }
+
+    /// The object's configuration in the generation being committed.
+    #[inline(always)]
+    pub fn config(&self) -> &'c O::Config {
+        self.config
+    }
+}
+
+// SAFETY: as for the module's commit context.
+unsafe impl<'c, O: Object> Resolve<'c> for ObjectCommitCx<'c, O> {
+    #[inline(always)]
+    fn shm_root(&self) -> ShmRoot {
+        self.root
+    }
+}
+
 /// A context of a module's call or of its prepare pass, either of which
 /// resolves the module's [`ObjectLink`]s.
 ///
@@ -529,6 +575,36 @@ impl<O: Object> ObjectLink<O> {
         unsafe {
             let cp_object = (*object_ectx).abs_cp_object;
             (*root.ptr::<ObjectConfig<O::Config>>(cp_object.addr())).body()
+        }
+    }
+
+    /// The linked object's prepared value for the context's worker in the
+    /// running generation, as the object's prepare step made it.
+    ///
+    /// The step made it under its own commit brand; it is read here under the
+    /// module context's. What it may borrow is the object's memory, which the
+    /// generation the module context runs in holds, so it lives at least as
+    /// long as that context.
+    #[inline(always)]
+    pub fn prepared<'id>(&'id self, cx: &impl ModuleCx<'id>) -> &'id O::Prepared<'id> {
+        if size_of::<O::Prepared<'id>>() == 0 {
+            // C allocates no buffer for an object without a prepared size.
+            // SAFETY: a zero-sized value is read from any aligned address.
+            return unsafe { NonNull::dangling().as_ref() };
+        }
+        let root = cx.shm_root();
+        let object_ectx = linked_object_ectx(cx, self.index());
+        // SAFETY: as for the configuration; the object declares a prepared
+        // size, so C allocated the buffer of every context of the object, and
+        // its commit pass wrote the value before the module contexts linking
+        // it were derived (attach: call, align); the buffer is frozen once the
+        // pass is done. The value borrows at most the object's memory, which
+        // outlives the generation of the call (attach: reclaim), so the
+        // module's brand does not outlive what it borrows.
+        unsafe {
+            let prepared = (*object_ectx).abs_object_prepared;
+            debug_assert!(!prepared.is_null(), "no prepared buffer of an object that declares one");
+            &*root.ptr::<O::Prepared<'id>>(prepared.addr())
         }
     }
 }

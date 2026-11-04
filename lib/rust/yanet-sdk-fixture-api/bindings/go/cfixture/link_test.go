@@ -136,7 +136,7 @@ func Test_Stash_DeleteObject_Linked_KeepsTheObjectServed(t *testing.T) {
 
 	bed.run(0, arpFrames(1)...)
 
-	require.Equal(t, []uint64{11, 11, 12, 13}, slots(t, object))
+	require.Equal(t, []uint64{20, 11, 12, 13}, slots(t, object))
 }
 
 // Test_Stash_DeleteObject_Unlinked_Succeeds verifies that an object is
@@ -152,14 +152,31 @@ func Test_Stash_DeleteObject_Unlinked_Succeeds(t *testing.T) {
 	require.NoError(t, err)
 }
 
-// Test_Stash_Run_WritesTheLinkedSlots verifies that the module adds one per
-// packet to the slot of the linked object its first byte selects.
+// Test_Stash_Run_WritesTheLinkedSlots verifies that the module adds, per
+// packet, the seed the linked object prepared for the worker to the slot its
+// first byte selects.
 func Test_Stash_Run_WritesTheLinkedSlots(t *testing.T) {
 	bed, object := servedStash(t)
 
 	bed.run(0, arpFrames(6)...)
 
-	require.Equal(t, []uint64{12, 13, 13, 14}, slots(t, object))
+	require.Equal(t, []uint64{30, 31, 22, 23}, slots(t, object))
+}
+
+// Test_Stash_Run_ObjectWithoutSlots_PassesEveryPacket verifies that the
+// module passes the packets on when the linked object has no slot to write.
+func Test_Stash_Run_ObjectWithoutSlots_PassesEveryPacket(t *testing.T) {
+	bed := newBed(t)
+	object, err := cfixture.NewStateObject(bed.agent, "state", 10, 0, cfixture.FaultNone)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = object.Free() })
+	bed.publishObjects(object)
+	bed.serveBeforeForward(bed.stashInstance("stash", "state"))
+	frames := arpFrames(2)
+
+	result := bed.run(1, frames...)
+
+	require.Equal(t, []fate{fateOutput, fateOutput}, fatesOf(result, frames))
 }
 
 // Test_Stash_Run_PassesEveryPacket verifies that the module passes the packets
@@ -183,7 +200,7 @@ func Test_Stash_Run_AfterObjectReplace_WritesTheNewObject(t *testing.T) {
 
 	bed.run(0, arpFrames(1)...)
 
-	require.Equal(t, [][]uint64{{10, 11, 12, 13}, {21, 21, 22, 23}}, [][]uint64{slots(t, old), slots(t, replacement)})
+	require.Equal(t, [][]uint64{{10, 11, 12, 13}, {40, 21, 22, 23}}, [][]uint64{slots(t, old), slots(t, replacement)})
 }
 
 // Test_Stash_ObjectReplace_ReleasesTheOldObject verifies that an object
@@ -214,5 +231,5 @@ func Test_Stash_ConfigReplace_KeepsTheObjectState(t *testing.T) {
 	bed.publishModules(bed.stashInstance("stash", "state"))
 	bed.run(0, arpFrames(1)...)
 
-	require.Equal(t, []uint64{12, 11, 12, 13}, slots(t, object))
+	require.Equal(t, []uint64{30, 11, 12, 13}, slots(t, object))
 }
