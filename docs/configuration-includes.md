@@ -178,13 +178,18 @@ volumes:
   - name: transport-config
     configMap:
       name: routing-transport
+      optional: true
   - name: routing-config
     configMap:
       name: routing-policy
+      optional: true
   - name: identity
     secret:
       secretName: routing-identity
 ```
+
+The override ConfigMaps are optional so Kubernetes can start the Pod before
+they exist. The main ConfigMap remains required.
 
 Start the component with `/etc/yanet2/config/route.yaml` as its configuration.
 YAML is assembled in memory when loaded; no merged configuration file is written.
