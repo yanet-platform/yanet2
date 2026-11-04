@@ -1,14 +1,19 @@
 //! Configuration field types backed by C registries of the module, and the
 //! per-worker state of a configuration.
 
-use core::marker::PhantomData;
+use core::{marker::PhantomData, ptr::NonNull};
 
 use yanet_shm::{
     rel::RelPtr,
+    root::ShmRoot,
     shm::{MAX_ALIGN, ShmLayout},
 };
 
-use crate::dp::object::Object;
+use crate::dp::{
+    cx::{Cx, PrepareCx},
+    module::Module,
+    object::Object,
+};
 
 /// Per-worker counter of the module, registered by the control plane as a C
 /// counter of as many values as its layout `T` holds.
@@ -209,10 +214,13 @@ unsafe impl<O: Object> ShmLayout for ObjectLink<O> {}
 const SLOT_LINE: usize = 128;
 
 /// One value of `T` per dataplane worker; the control plane builds every slot
-/// from one initial value.
+/// from one initial value, a prepare step makes the handle of its worker's slot
+/// with [`Self::handle`], and the handler reads and writes the slot through it.
 ///
-/// A slot holds only plain values: a value that owns a block, names a registry
-/// entry or embeds a C object is not `Copy`, so it cannot be a slot.
+/// Slots are copied in and out, as a `Cell`: no reference to a slot leaves a
+/// call, so a worker never aliases another's slot, and a slot holds only plain
+/// values. A value that owns a block, names a registry entry or embeds a C
+/// object is not `Copy`, so it cannot be a slot.
 ///
 /// The first slot starts on a 128-byte line and the slots are
 /// [`Self::STRIDE`] apart, so no slot shares a cache line of up to 128 bytes
@@ -267,11 +275,173 @@ impl<T: Copy + ShmLayout> PerWorker<T> {
     pub fn offset(&self) -> isize {
         self.slots.offset()
     }
+
+    /// A handle on the slot of the prepare context's worker, for its prepared
+    /// value: the only way to a slot, which the handler reads and writes
+    /// through it; `None` when a module's context is not among its
+    /// generation's worker contexts.
+    ///
+    /// ```
+    /// use yanet_sys::dp::{Batch, CommitCx, Cx, Module, PerWorker, Verdict, WorkerSlot};
+    /// struct Mine;
+    /// impl Module for Mine {
+    ///     const NAME: &'static str = "mine";
+    ///     type Config = PerWorker<u64>;
+    ///     type Prepared<'p> = Option<WorkerSlot<'p, u64>>;
+    ///     fn handle<'id>(cx: &mut Cx<'id, Self>, batch: &mut Batch<'id>) {
+    ///         if let Some(seen) = cx.prepared() {
+    ///             seen.update(cx, |count| count + 1);
+    ///         }
+    ///         batch.dispatch(|_| Verdict::Pass);
+    ///     }
+    ///     fn prepare<'p>(cx: &CommitCx<'p, Self>) -> Option<WorkerSlot<'p, u64>> {
+    ///         cx.config().handle(cx)
+    ///     }
+    /// }
+    /// ```
+    ///
+    /// Only a prepare context makes one:
+    ///
+    /// ```compile_fail,E0277
+    /// # use yanet_sys::dp::{Cx, Module, PerWorker};
+    /// fn late<'id, M: Module<Config = PerWorker<u64>>>(cx: &Cx<'id, M>) {
+    ///     let _ = cx.config().handle(cx);
+    /// }
+    /// ```
+    #[inline(always)]
+    pub fn handle<'p>(&'p self, cx: &impl PrepareCx<'p>) -> Option<WorkerSlot<'p, T>> {
+        let worker = cx.prepare_worker()?;
+        let slot = self.slot_at(cx.shm_root(), worker);
+        Some(WorkerSlot {
+            // SAFETY: a slot lies in the slot block, not at address zero.
+            slot: unsafe { NonNull::new_unchecked(slot) },
+            _brand: PhantomData,
+        })
+    }
+
+    /// The slot of the worker of the given index.
+    #[inline(always)]
+    fn slot_at(&self, root: ShmRoot, worker: u64) -> *mut T {
+        debug_assert!(worker < self.workers, "a worker past the slots");
+        let field = core::ptr::from_ref(self).addr();
+        let first = Self::first_slot(field.wrapping_add_signed(self.slots.offset()));
+        let slot = root.ptr::<T>(first.wrapping_add((worker as usize).wrapping_mul(Self::STRIDE)));
+        debug_assert!(slot.is_aligned(), "misaligned per-worker slot");
+        slot
+    }
+}
+
+/// The slot of one worker of a [`PerWorker`], made by that worker's prepare
+/// step and kept in its prepared value; the handler reads and writes the slot
+/// through it with its call context, copying in and out.
+///
+/// Only the handler's call context of the same brand reaches the slot: the
+/// one whose prepared value, or linked object's prepared value, the handle
+/// was read from. A prepare step makes and stores the handle but cannot use
+/// it, since it runs while the worker may still run the previous generation,
+/// which shares the slot:
+///
+/// ```compile_fail,E0308
+/// # use yanet_sys::dp::{CommitCx, Module, PerWorker};
+/// fn early<'p, M: Module<Config = PerWorker<u64>>>(cx: &CommitCx<'p, M>) {
+///     if let Some(seen) = cx.config().handle(cx) {
+///         seen.set(cx, 1);
+///     }
+/// }
+/// ```
+///
+/// The handler uses the handle of its prepared value:
+///
+/// ```
+/// # use yanet_sys::dp::{Cx, Module, WorkerSlot};
+/// fn count<'id, M>(cx: &Cx<'id, M>) -> u64
+/// where
+///     M: Module<Prepared<'id> = Option<WorkerSlot<'id, u64>>>,
+/// {
+///     cx.prepared()
+///         .map_or(0, |seen| seen.update(cx, |count| count + 1))
+/// }
+/// ```
+///
+/// Copies and moves are harmless for the same reason, so the handle is `Copy`
+/// and `Send`, as the prepared value travels from the assigner thread to its
+/// worker. It has no `Debug`: it holds only an address, and its value is read
+/// only in the call.
+///
+/// It has no shared-memory layout, so it is never a slot or a configuration
+/// field, which would outlive the block it points into:
+///
+/// ```compile_fail,E0277
+/// # use yanet_shm::shm::ShmLayout;
+/// # use yanet_sys::dp::WorkerSlot;
+/// fn layout<T: ShmLayout>() {}
+/// layout::<WorkerSlot<'static, u64>>();
+/// ```
+///
+/// The field it comes from has one:
+///
+/// ```
+/// # use yanet_shm::shm::ShmLayout;
+/// # use yanet_sys::dp::PerWorker;
+/// fn layout<T: ShmLayout>() {}
+/// layout::<PerWorker<u64>>();
+/// ```
+pub struct WorkerSlot<'p, T: Copy + ShmLayout> {
+    slot: NonNull<T>,
+    // Invariant brand of the context that made or read the handle: only the
+    // call context of the same brand, on the handle's worker, uses it.
+    _brand: PhantomData<fn(&'p ()) -> &'p ()>,
+}
+
+impl<T: Copy + ShmLayout> Clone for WorkerSlot<'_, T> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl<T: Copy + ShmLayout> Copy for WorkerSlot<'_, T> {}
+
+// SAFETY: the handle is an address and touches nothing by itself; every read
+// and write takes the call context of the handle's brand, which is neither
+// `Send` nor `Sync` and runs on the handle's worker.
+unsafe impl<T: Copy + ShmLayout> Send for WorkerSlot<'_, T> {}
+
+impl<'id, T: Copy + ShmLayout> WorkerSlot<'id, T> {
+    /// The value of the slot.
+    #[inline(always)]
+    pub fn get<M: Module>(&self, _cx: &Cx<'id, M>) -> T {
+        // SAFETY: a prepare step made the handle for its context's worker, and
+        // it reached this call only through the prepared value of that context
+        // or of the object context it links, under the call's brand, so the
+        // slot is the call's worker's: aligned, written whole by the build, in
+        // a block the configuration or object holds at least as long as the
+        // call's generation (attach: reclaim), covered by no reference and
+        // touched by no other thread (attach: frozen).
+        unsafe { self.slot.as_ptr().read() }
+    }
+
+    /// Replaces the value of the slot.
+    #[inline(always)]
+    pub fn set<M: Module>(&self, _cx: &Cx<'id, M>, value: T) {
+        // SAFETY: as for reading.
+        unsafe { self.slot.as_ptr().write(value) }
+    }
+
+    /// Replaces the value of the slot with what `f` makes of it, and returns
+    /// the new value.
+    #[inline(always)]
+    pub fn update<M: Module>(&self, cx: &Cx<'id, M>, f: impl FnOnce(T) -> T) -> T {
+        let value = f(self.get(cx));
+        self.set(cx, value);
+        value
+    }
 }
 
 // SAFETY: the shared field is an offset and a count, which accept every bit
-// pattern, with no padding and no drop; the slot block is written only by the
-// build, before the value is shared.
+// pattern, with no padding and no drop; the values live in the slot block,
+// which only the handles reach, each a worker's own slot, used only with that
+// worker's call context, which is neither `Send` nor `Sync` and so never
+// leaves the worker's thread.
 unsafe impl<T: Copy + ShmLayout> Sync for PerWorker<T> {}
 
 // SAFETY: as above; the block it names is owned by the graph and its slots

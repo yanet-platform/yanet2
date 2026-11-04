@@ -30,9 +30,11 @@ use crate::root::ShmRoot;
 /// value that safe code can pass to the resolving methods, whichever context or
 /// graph it came from, must belong to a published graph that
 /// stays frozen (except `Opaque` bytes and atomics) for `'g`, inside the
-/// memory [`Self::shm_root`] covers. The implementor meets it by creating
-/// the context only over a root that covers the whole mapping and by
-/// handing safe code references only into published graphs of that
+/// memory [`Self::shm_root`] covers. Per-worker slots are exempt: no
+/// reference covers them, and only the worker owning a slot reads and writes
+/// it, by copy, through the handle in its prepared value. The implementor meets
+/// it by creating the context only over a root that covers the whole mapping
+/// and by handing safe code references only into published graphs of that
 /// mapping.
 pub unsafe trait Resolve<'g> {
     /// Provenance root of the graph.

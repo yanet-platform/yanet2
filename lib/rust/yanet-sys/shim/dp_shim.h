@@ -22,6 +22,18 @@ struct packet;
 struct packet_front;
 struct rte_mbuf;
 
+// Worker index of a module execution context whose worker is not known.
+#define YANET_SYS_DP_WORKER_IDX_NONE 0xFFFFFFFFFFFFFFFFULL
+
+// fwstate_stash_worker_idx (lib/fwstate/stash_ectx.h): the index of the worker
+// whose execution context holds the module context, for its commit handler.
+//
+// The generation keeps one context per worker at the worker's index, so the
+// index is where the module's own context appears. Returns
+// YANET_SYS_DP_WORKER_IDX_NONE when the context is not among them.
+YANET_SYS_HIDDEN uint64_t
+yanet_sys_dp_module_worker_idx(struct module_ectx *module_ectx);
+
 // Routes a packet to a module device target, to its input entry when the
 // selector is non-zero and to its output entry otherwise.
 //

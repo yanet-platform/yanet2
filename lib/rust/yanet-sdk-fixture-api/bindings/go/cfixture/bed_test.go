@@ -316,6 +316,25 @@ func (m *bed) counter(inst *instance, name string) [][]uint64 {
 	return counters[0].Values
 }
 
+// counterGrowth returns, per worker, how much each value of a counter grew
+// from before to after, both rows of every worker of a bed.
+func counterGrowth(t *testing.T, before, after [][]uint64) [][]uint64 {
+	t.Helper()
+
+	require.Len(t, before, workerCount)
+	require.Len(t, after, workerCount)
+	growth := make([][]uint64, 0, workerCount)
+	for worker := range workerCount {
+		require.Len(t, after[worker], len(before[worker]), "worker %d", worker)
+		row := make([]uint64, 0, len(before[worker]))
+		for idx, value := range before[worker] {
+			row = append(row, after[worker][idx]-value)
+		}
+		growth = append(growth, row)
+	}
+	return growth
+}
+
 // fate is where a frame of a round ended.
 type fate string
 

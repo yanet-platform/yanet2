@@ -60,6 +60,17 @@ const DEVICE_ABSENT: u16 = u16::MAX;
 /// }
 /// ```
 ///
+/// Nor is it sent to another thread:
+///
+/// ```compile_fail,E0277
+/// # use yanet_sys::dp::{Cx, Module};
+/// fn send<M: Module>(cx: Cx<'_, M>) {
+///     std::thread::scope(|scope| {
+///         scope.spawn(move || cx.now());
+///     });
+/// }
+/// ```
+///
 /// Only a value read from the context crosses the thread:
 ///
 /// ```
@@ -355,6 +366,21 @@ impl<'c, M: Module> CommitCx<'c, M> {
     pub fn config(&self) -> &'c M::Config {
         self.config
     }
+
+    /// Index of the worker whose context is being committed, `None` when the
+    /// context is not among its generation's worker contexts.
+    ///
+    /// C does not tell a module's commit its worker; the generation keeps one
+    /// context per worker at the worker's index, so the index is where the
+    /// module's context appears, as C modules find it.
+    #[inline(always)]
+    fn worker(&self) -> Option<u64> {
+        // SAFETY: the context is the one being committed, frozen with its
+        // absolute fields derived, and its generation's contexts with it
+        // (constructor contract, attach: call, frozen).
+        let idx = unsafe { bindings::yanet_sys_dp_module_worker_idx(self.ectx.as_ptr()) };
+        (idx != bindings::YANET_SYS_DP_WORKER_IDX_NONE).then_some(idx)
+    }
 }
 
 // SAFETY: as for the invocation context.
@@ -367,10 +393,11 @@ unsafe impl<'c, M: Module> Resolve<'c> for CommitCx<'c, M> {
 
 /// Context of the prepare pass for one worker context of an object.
 ///
-/// Gives the object's configuration, whose edges resolve through it, to the
-/// object's prepare step. Neither `Send` nor `Sync`.
+/// Gives the object's configuration, whose edges resolve through it, and the
+/// context's worker to the object's prepare step. Neither `Send` nor `Sync`.
 pub struct ObjectCommitCx<'c, O: Object> {
     root: ShmRoot,
+    ectx: NonNull<bindings::object_ectx>,
     config: &'c O::Config,
     // Invariant brand: values of two different contexts never unify, so they cannot be mixed.
     _brand: PhantomData<fn(&'c ()) -> &'c ()>,
@@ -383,13 +410,14 @@ impl<'c, O: Object> ObjectCommitCx<'c, O> {
     ///
     /// # Safety
     ///
-    /// The root covers the mapping, and the configuration is the published
-    /// one of the object being committed, frozen for the pass but for its
-    /// atomics.
+    /// The root covers the mapping, the execution context is the one being
+    /// committed, and the configuration is the published one of the object
+    /// being committed, frozen for the pass but for its atomics.
     #[inline(always)]
-    pub(crate) unsafe fn new(root: ShmRoot, config: &'c O::Config) -> Self {
+    pub(crate) unsafe fn new(root: ShmRoot, ectx: NonNull<bindings::object_ectx>, config: &'c O::Config) -> Self {
         Self {
             root,
+            ectx,
             config,
             _brand: PhantomData,
             _local: PhantomData,
@@ -401,6 +429,15 @@ impl<'c, O: Object> ObjectCommitCx<'c, O> {
     pub fn config(&self) -> &'c O::Config {
         self.config
     }
+
+    /// Index of the worker whose context is being committed, which C records
+    /// in the object's context when it builds it.
+    #[inline(always)]
+    fn worker(&self) -> u64 {
+        // SAFETY: the context is the one being committed, frozen but for its
+        // prepared buffer (constructor contract, attach: frozen).
+        unsafe { (*self.ectx.as_ptr()).worker_idx }
+    }
 }
 
 // SAFETY: as for the module's commit context.
@@ -410,6 +447,16 @@ unsafe impl<'c, O: Object> Resolve<'c> for ObjectCommitCx<'c, O> {
         self.root
     }
 }
+
+/// A context of a prepare pass, of a module or of an object, which makes the
+/// handles of its worker's per-worker slots.
+///
+/// Sealed: the contexts are [`CommitCx`] and [`ObjectCommitCx`].
+pub trait PrepareCx<'p>: Resolve<'p> + sealed::Prepare {}
+
+impl<'p, M: Module> PrepareCx<'p> for CommitCx<'p, M> {}
+
+impl<'p, O: Object> PrepareCx<'p> for ObjectCommitCx<'p, O> {}
 
 /// A context of a module's call or of its prepare pass, either of which
 /// resolves the module's [`ObjectLink`]s.
@@ -444,6 +491,27 @@ mod sealed {
         #[inline(always)]
         fn module_ectx(&self) -> NonNull<bindings::module_ectx> {
             self.ectx
+        }
+    }
+
+    /// What a prepare context holds for the slot handles, out of the public
+    /// surface.
+    pub trait Prepare {
+        /// The worker of the context being committed, if known.
+        fn prepare_worker(&self) -> Option<u64>;
+    }
+
+    impl<M: Module> Prepare for super::CommitCx<'_, M> {
+        #[inline(always)]
+        fn prepare_worker(&self) -> Option<u64> {
+            self.worker()
+        }
+    }
+
+    impl<O: crate::dp::Object> Prepare for super::ObjectCommitCx<'_, O> {
+        #[inline(always)]
+        fn prepare_worker(&self) -> Option<u64> {
+            Some(self.worker())
         }
     }
 }

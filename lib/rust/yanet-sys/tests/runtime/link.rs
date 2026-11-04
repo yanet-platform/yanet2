@@ -153,7 +153,7 @@ fn test_miri_reach_of_an_object_link() {
     let slot = Cell::new(0);
     // SAFETY: the configuration names link 0, which the setup lays out; the
     // module redirects no packet.
-    let mut ectx = unsafe { Ectx::<Linker>::new(&[0], |arena, context| slot.set(link::<Slots>(arena, context))) };
+    let mut ectx = unsafe { Ectx::<Linker>::new(&[0], |arena, _, context| slot.set(link::<Slots>(arena, context))) };
     let mut packets = numbered(3);
 
     ectx.run(&mut packets);
@@ -170,7 +170,8 @@ fn test_miri_reach_of_an_object_link() {
 fn test_miri_reach_of_an_object_link_without_a_prepared_value() {
     let slot = Cell::new(0);
     // SAFETY: as above.
-    let mut ectx = unsafe { Ectx::<PlainLinker>::new(&[0], |arena, context| slot.set(link::<Plain>(arena, context))) };
+    let mut ectx =
+        unsafe { Ectx::<PlainLinker>::new(&[0], |arena, _, context| slot.set(link::<Plain>(arena, context))) };
     let mut packets = numbered(3);
 
     ectx.run(&mut packets);

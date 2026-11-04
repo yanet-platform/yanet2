@@ -30,8 +30,11 @@ pub trait Object: Sized + 'static {
     /// the prepare step and read by the modules linking the object; the unit
     /// type when unused.
     ///
-    /// The prepare step sees the configuration only, so every worker context
-    /// gets the value it makes from it.
+    /// Each worker context of the object has a prepared value of its own,
+    /// which the prepare step makes from the configuration and the context's
+    /// worker, so it may hold a handle on that worker's per-worker slot. A
+    /// module linking the object reads, through the link, the prepared value
+    /// of the object context of its own worker.
     ///
     /// The same rules as a module's prepared value: made on the assigner
     /// thread and read on the worker, so it is `Send`; it needs no drop and
@@ -90,7 +93,8 @@ pub trait Object: Sized + 'static {
     /// ```
     type Prepared<'p>: Send;
 
-    /// Makes the prepared value from the configuration.
+    /// Makes the prepared value from the configuration and the context's
+    /// worker.
     ///
     /// Runs on the dataplane's assigner thread once per worker context of the
     /// object in a generation, before the module contexts linking it are

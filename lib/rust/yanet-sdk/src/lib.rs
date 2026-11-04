@@ -41,10 +41,14 @@
 //! }
 //! ```
 //!
-//! State a worker keeps for itself is a [`PerWorker`] field: a slot per worker,
-//! built from one value with `scope.per_worker(value)`. The slots live as long
-//! as the configuration: one rebuilt on an update starts them again from that
-//! value.
+//! State a worker keeps for itself across batches is a [`PerWorker`] field: a
+//! slot per worker, built from one value with `scope.per_worker(value)`, which
+//! the handler reads and writes for its own worker only, through the
+//! [`WorkerSlot`] handle its prepare step keeps: a [`PrepareCx`], of a module
+//! or an object, makes the handle of its worker's slot, and only the handler's
+//! call uses it. The slots live as long as the
+//! configuration: one rebuilt on an update starts them again from that value;
+//! an object's slots outlive the modules linking it.
 //!
 //! State that outlives the configurations, rebuilt whole on every update, is
 //! an [`Object`]: built the same way by [`ObjectBuilder`], over a scope that
@@ -122,16 +126,16 @@ pub use yanet_sys::{
     },
     dp::{
         Batch, CommitCx, Counter, CounterLayout, CounterRef, Cx, Device, DeviceRef, DscpMark, Module, ModuleCx, Object,
-        ObjectCommitCx, ObjectConfig, ObjectLink, Packet, PacketView, PerWorker, ResizeError, Traffic, TunnelError,
-        Verdict,
+        ObjectCommitCx, ObjectConfig, ObjectLink, Packet, PacketView, PerWorker, PrepareCx, ResizeError, Traffic,
+        TunnelError, Verdict, WorkerSlot,
     },
 };
 
 /// Everything a module crate usually imports.
 pub mod prelude {
     pub use crate::{
-        Batch, Counter, CounterRef, Cx, Device, Module, Packet, PerWorker, ShmBox, ShmLayout, ShmSlice, Traffic,
-        Verdict,
+        Batch, Counter, CounterRef, Cx, Device, Module, Packet, PerWorker, PrepareCx, ShmBox, ShmLayout, ShmSlice,
+        Traffic, Verdict, WorkerSlot,
     };
 }
 

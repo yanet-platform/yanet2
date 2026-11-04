@@ -107,6 +107,7 @@ fn generate_bindings(flags: &CFlags, shim_dir: &Path, out: &Path) {
         // the C compiler that builds the shim, not for the Rust binding.
         .clang_arg("-DYANET_SYS_BINDGEN")
         .parse_callbacks(Box::new(bindgen::CargoCallbacks::new()))
+        .parse_callbacks(Box::new(WorkerIdx))
         .rust_target(bindgen::RustTarget::stable(88, 0).expect("supported Rust target"))
         .rust_edition(bindgen::RustEdition::Edition2024)
         .use_core()
@@ -171,6 +172,7 @@ fn generate_bindings(flags: &CFlags, shim_dir: &Path, out: &Path) {
         .allowlist_var("MEMORY_BLOCK_ALLOCATOR_MAX_SIZE")
         .allowlist_var("PACKET_TRANSPORT_HEADER_UNAVAILABLE")
         .allowlist_var("YANET_SYS_CLASSIFY_.*")
+        .allowlist_var("YANET_SYS_DP_WORKER_IDX_NONE")
         // Reached only behind pointers the SDK never follows, their own bytes
         // never read.
         .opaque_type("rte_mempool")
@@ -183,4 +185,15 @@ fn generate_bindings(flags: &CFlags, shim_dir: &Path, out: &Path) {
         .generate()
         .expect("bindgen failed");
     bindings.write_to_file(out).expect("write bindings");
+}
+
+/// Binds the shim's worker sentinel as the `u64` the shim returns, where
+/// bindgen would narrow the literal to an `i32`.
+#[derive(Debug)]
+struct WorkerIdx;
+
+impl bindgen::callbacks::ParseCallbacks for WorkerIdx {
+    fn int_macro(&self, name: &str, _value: i64) -> Option<bindgen::callbacks::IntKind> {
+        (name == "YANET_SYS_DP_WORKER_IDX_NONE").then_some(bindgen::callbacks::IntKind::U64)
+    }
 }

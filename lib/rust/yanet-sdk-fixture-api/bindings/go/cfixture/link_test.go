@@ -36,11 +36,20 @@ func (m *bed) stashInstance(name, state string) *instance {
 func servedStash(t *testing.T) (*bed, *cfixture.StateObject) {
 	t.Helper()
 
+	bed, object, _ := servedStashInstance(t)
+	return bed, object
+}
+
+// servedStashInstance is servedStash that also returns the stash instance.
+func servedStashInstance(t *testing.T) (*bed, *cfixture.StateObject, *instance) {
+	t.Helper()
+
 	bed := newBed(t)
 	object := bed.state("state", 10)
 	bed.publishObjects(object)
-	bed.serveBeforeForward(bed.stashInstance("stash", "state"))
-	return bed, object
+	stash := bed.stashInstance("stash", "state")
+	bed.serveBeforeForward(stash)
+	return bed, object, stash
 }
 
 // Test_Stash_Build_OverlongStateName_IsInvalidArgument verifies that a link to
@@ -232,4 +241,51 @@ func Test_Stash_ConfigReplace_KeepsTheObjectState(t *testing.T) {
 	bed.run(0, arpFrames(1)...)
 
 	require.Equal(t, []uint64{30, 11, 12, 13}, slots(t, object))
+}
+
+// Test_Stash_ObjectWorkerSlot_CountsPerWorker verifies that the module counts
+// in the linked object's slot of the worker it runs on, from the seed 10 the
+// slots start at: two packets on worker 1 add 11 and 12, one on worker 2 adds
+// 11.
+func Test_Stash_ObjectWorkerSlot_CountsPerWorker(t *testing.T) {
+	bed, _, stash := servedStashInstance(t)
+
+	bed.run(1, arpFrames(2)...)
+	bed.run(2, arpFrames(1)...)
+
+	require.Equal(t, perWorkerValues(map[int]uint64{1: 11 + 12, 2: 11}), bed.counter(stash, "seen"))
+}
+
+// Test_Stash_ObjectWorkerSlot_SurvivesConfigReplace verifies that the
+// object's slot of a worker outlives the configuration linking it: after a
+// replacement, two more packets on worker 1 go on from 12 to 13 and 14, and
+// no other worker counts.
+func Test_Stash_ObjectWorkerSlot_SurvivesConfigReplace(t *testing.T) {
+	bed, _, stash := servedStashInstance(t)
+	bed.run(1, arpFrames(2)...)
+	replacement := bed.stashInstance("stash", "state")
+	replacement.path = stash.path
+	bed.publishModules(replacement)
+	before := bed.counter(replacement, "seen")
+
+	bed.run(1, arpFrames(2)...)
+
+	growth := counterGrowth(t, before, bed.counter(replacement, "seen"))
+	require.Equal(t, perWorkerValues(map[int]uint64{1: 13 + 14}), growth)
+}
+
+// Test_Stash_ObjectWorkerSlot_RestartsWithANewObject verifies that the slots
+// live as long as their object: after a same-name object from seed 20
+// replaces the one counted from seed 10, two packets on worker 1 count 21 and
+// 22.
+func Test_Stash_ObjectWorkerSlot_RestartsWithANewObject(t *testing.T) {
+	bed, _, stash := servedStashInstance(t)
+	bed.run(1, arpFrames(2)...)
+	bed.publishObjects(bed.state("state", 20))
+	before := bed.counter(stash, "seen")
+
+	bed.run(1, arpFrames(2)...)
+
+	growth := counterGrowth(t, before, bed.counter(stash, "seen"))
+	require.Equal(t, perWorkerValues(map[int]uint64{1: 21 + 22}), growth)
 }

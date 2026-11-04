@@ -91,7 +91,7 @@ fn test_miri_reach_of_the_handler_and_commit_entries() {
     // SAFETY: the counter ids are below the two slots, the pair's of two
     // values; the module redirects no packet.
     let mut ectx = unsafe {
-        Ectx::<Reach>::new(&[0, 0, 1], |arena, context| {
+        Ectx::<Reach>::new(&[0, 0, 1], |arena, _, context| {
             let alloc = |size: usize| arena.alloc(size).as_ptr().addr();
             let (storage, table, word, pair) = (
                 alloc(size_of::<bindings::counter_storage>()),

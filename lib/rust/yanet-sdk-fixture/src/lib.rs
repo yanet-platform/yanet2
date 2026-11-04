@@ -3,11 +3,11 @@
 //!
 //! [`Fixture`] is a test program in module form: it has no prepared value, and
 //! its configuration's mode word selects what it does with a batch. [`Tally`]
-//! has a prepared value made at commit, and counts. [`Fib`] forwards by a
-//! route FIB. [`assign::Assign`] passes or drops by the first rule a packet
-//! matches, through the classify bindings. [`State`] is an object type: state
-//! that outlives the configurations, changed by the control plane and by
-//! [`Stash`], which links it.
+//! has a prepared value made at commit and a slot per worker, and counts.
+//! [`Fib`] forwards by a route FIB. [`assign::Assign`] passes or drops by the
+//! first rule a packet matches, through the classify bindings. [`State`] is an
+//! object type: state that outlives the configurations, changed by the control
+//! plane and by [`Stash`], which links it.
 
 #![no_std]
 #![forbid(unsafe_code)]
@@ -18,7 +18,7 @@ use core::sync::atomic::{AtomicU64, Ordering};
 
 use yanet_sdk::{
     Batch, CommitCx, Counter, CounterRef, Cx, Device, Lpm4, Lpm6, Module, Object, ObjectCommitCx, ObjectLink,
-    PerWorker, ShmLayout, ShmSlice, Traffic, Verdict,
+    PerWorker, ShmLayout, ShmSlice, Traffic, Verdict, WorkerSlot,
 };
 // The plugin examples use it.
 #[cfg(feature = "plugin")]
@@ -200,8 +200,9 @@ impl Module for Fixture {
 }
 
 /// The configuration of [`Tally`]: a word the commit derives from, three
-/// counters picked by value, one held by a handle and one of the packets and
-/// bytes.
+/// counters picked by value, one held by a handle, one of the packets and
+/// bytes, the packets each worker has seen and a counter of running sums of
+/// them.
 #[derive(ShmLayout)]
 #[repr(C)]
 pub struct TallyConfig {
@@ -209,19 +210,24 @@ pub struct TallyConfig {
     pub by_value: [Counter; 3],
     pub held: Counter,
     pub traffic: Counter<Traffic>,
+    pub seen: PerWorker<u64>,
+    pub running: Counter,
 }
 
-/// What [`Tally`] makes at commit: the handle of the held counter and twice
-/// the configuration's word.
+/// What [`Tally`] makes at commit: the handle of the held counter, twice the
+/// configuration's word and the handle of the worker's slot of packets seen.
 pub struct Stamp<'p> {
     held: CounterRef<'p>,
     stamp: u64,
+    seen: Option<WorkerSlot<'p, u64>>,
 }
 
 /// Counts each packet in the counter its first byte selects, by value, unless
 /// it is empty, in the held counter, through the handle made at commit, and
-/// its bytes in the traffic. Passes the packets when the stamp is 14 and
-/// drops them otherwise.
+/// its bytes in the traffic; counts it in the worker's slot of packets seen,
+/// through the handle made at commit, and adds the new count to the running
+/// counter, unless the commit found no worker.
+/// Passes the packets when the stamp is 14 and drops them otherwise.
 pub struct Tally;
 
 impl Module for Tally {
@@ -240,6 +246,9 @@ impl Module for Tally {
             }
             held.add(2);
             config.traffic.add(cx, Traffic::packet(packet.data().len() as u64));
+            if let Some(seen) = &prepared.seen {
+                config.running.add(cx, seen.update(cx, |seen| seen + 1));
+            }
             if pass { Verdict::Pass } else { Verdict::Drop }
         });
     }
@@ -249,6 +258,7 @@ impl Module for Tally {
         Stamp {
             held: config.held.resolve(cx),
             stamp: config.word * 2,
+            seen: config.seen.handle(cx),
         }
     }
 }
@@ -358,11 +368,22 @@ pub struct State;
 impl Object for State {
     const TYPE: &'static str = "fixture_state";
     type Config = StateConfig;
-    type Prepared<'p> = u64;
+    type Prepared<'p> = StatePrepared<'p>;
 
-    fn prepare(cx: &ObjectCommitCx<'_, Self>) -> u64 {
-        cx.config().seed
+    fn prepare<'p>(cx: &ObjectCommitCx<'p, Self>) -> StatePrepared<'p> {
+        let config = cx.config();
+        StatePrepared {
+            seed: config.seed,
+            worker: config.workers.handle(cx),
+        }
     }
+}
+
+/// What [`State`] prepares for each worker: its seed and the handle of the
+/// worker's slot.
+pub struct StatePrepared<'p> {
+    pub seed: u64,
+    pub worker: Option<WorkerSlot<'p, u64>>,
 }
 
 /// The configuration of [`Stash`]: the state object it writes, linked by
@@ -371,11 +392,14 @@ impl Object for State {
 #[repr(C)]
 pub struct StashConfig {
     pub state: ObjectLink<State>,
+    pub seen: Counter,
 }
 
 /// Adds the seed the linked state object prepared to the slot that the first
 /// byte of a packet selects, modulo the slot count, and passes every packet;
-/// an empty packet or an object without slots changes nothing.
+/// an empty packet or an object without slots changes nothing. Counts each
+/// packet in the object's slot of the worker and adds the new count to the
+/// seen counter, unless the object's commit made no handle.
 pub struct Stash;
 
 impl Module for Stash {
@@ -386,7 +410,9 @@ impl Module for Stash {
     fn handle<'id>(cx: &mut Cx<'id, Self>, batch: &mut Batch<'id>) {
         let state = &cx.config().state;
         let slots = state.get(cx).slots.as_slice(cx);
-        let seed = *state.prepared(cx);
+        let prepared = state.prepared(cx);
+        let seed = prepared.seed;
+        let seen = &cx.config().seen;
         batch.dispatch(|packet| {
             let slot = packet
                 .data()
@@ -395,6 +421,9 @@ impl Module for Stash {
                 .and_then(|idx| slots.get(idx));
             if let Some(slot) = slot {
                 slot.fetch_add(seed, Ordering::Relaxed);
+            }
+            if let Some(worker) = &prepared.worker {
+                seen.add(cx, worker.update(cx, |count| count + 1));
             }
             Verdict::Pass
         });
