@@ -205,6 +205,44 @@ func Test_Store_Delete_ParksRefusedThenReclaims(t *testing.T) {
 	assert.Equal(t, int64(1), refusing.freed.Load())
 }
 
+// Test_Store_FailedMutation_ReclaimsParked verifies that a mutation that
+// fails still releases a parked entry whose generation has drained, so
+// memory held by parked entries comes back without a successful mutation.
+func Test_Store_FailedMutation_ReclaimsParked(t *testing.T) {
+	cases := []struct {
+		name   string
+		mutate func(store *configstore.Store[*freeSequence]) error
+	}{
+		{
+			name: "failed update",
+			mutate: func(store *configstore.Store[*freeSequence]) error {
+				return store.Update("a", func(*freeSequence, bool) (*freeSequence, error) {
+					return nil, errInjected
+				})
+			},
+		},
+		{
+			name: "delete of a missing name",
+			mutate: func(store *configstore.Store[*freeSequence]) error {
+				return store.Delete("missing", unpublishing(nil))
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			store := configstore.NewStore[*freeSequence]()
+			refusing := newFreeSequence(ffi.ErrStillReferenced)
+			require.NoError(t, store.Update("a", publishing(refusing)))
+			require.NoError(t, store.Update("a", publishing(newFreeSequence())))
+			require.Equal(t, int64(0), refusing.freed.Load())
+
+			require.Error(t, tc.mutate(store))
+			assert.Equal(t, int64(1), refusing.freed.Load())
+		})
+	}
+}
+
 // Test_Store_ReclaimDeferred_RetriesUntilDrained verifies that an
 // explicit reclaim retries a parked entry on every call and drops it once
 // the free succeeds.

@@ -73,9 +73,11 @@ func (m *entry[E]) Unpublish() {
 // callbacks concurrently, and the entry a callback is handed stays the
 // published one for its name until its own publish replaces it. A
 // superseded or deleted entry whose free is refused, because a live
-// generation still references it, is parked and retried on every later
-// successful mutation of any name, and the store is the only place that
-// remembers it.
+// generation still references it, is parked, and the store is the only
+// place that remembers it. Every later mutation of any name retries the
+// parked entries before its callback runs and again after a successful
+// publish, so even a failing mutation releases the ones whose generations
+// have drained.
 //
 // A published entry is handed to readers without any lock, so it must
 // not change after it is stored. Mutation callbacks must not call back
@@ -131,19 +133,24 @@ func (m *Store[E]) Get(name string) (E, bool) {
 // Update publishes a new entry under the name and retires the previous
 // one.
 //
-// The callback is handed the current entry, when one exists, and returns
-// the entry to store. Its error is returned unchanged and leaves the
-// store as it was. On success the new entry atomically replaces the old
-// one, then the parked entries are retried and the old one is freed or
-// parked, so a callback must build a fresh entry rather than hand back the
-// one it was given. A second mutation of the same name waits for this one
-// to finish. Mutations of other names run at the same time.
+// The parked entries are retried first. The callback is then handed the
+// current entry, when one exists, and returns the entry to store. Its
+// error is returned unchanged and leaves the store as it was. On success
+// the new entry atomically replaces the old one, then the parked entries
+// are retried again and the old one is freed or parked, so a callback
+// must build a fresh entry rather than hand back the one it was given. A
+// second mutation of the same name waits for this one to finish.
+// Mutations of other names run at the same time.
 func (m *Store[E]) Update(
 	name string,
 	publish func(current E, ok bool) (E, error),
 ) error {
 	record, release := m.acquire(name)
 	defer release()
+
+	// Releasing the drained parked entries first leaves their shared
+	// memory to the callback, and a failing callback cannot keep them.
+	m.ReclaimDeferred()
 
 	current, ok := record.Published()
 	next, err := publish(current, ok)
@@ -167,15 +174,18 @@ func (m *Store[E]) Update(
 
 // Delete unpublishes the entry under the name and forgets it.
 //
-// ErrNotFound is returned when the name is absent, before the callback
-// runs. The callback's error is returned unchanged and keeps the entry
-// published. On success the entry is atomically removed, then the parked
-// entries are retried and the entry is freed or parked.
+// The parked entries are retried first. ErrNotFound is then returned when
+// the name is absent, before the callback runs. The callback's error is
+// returned unchanged and keeps the entry published. On success the entry
+// is atomically removed, then the parked entries are retried again and
+// the entry is freed or parked.
 //
 // A concurrent mutation of the same name waits for this one to finish.
 func (m *Store[E]) Delete(name string, unpublish func(current E) error) error {
 	record, release := m.acquire(name)
 	defer release()
+
+	m.ReclaimDeferred()
 
 	current, ok := record.Published()
 	if !ok {
@@ -200,8 +210,8 @@ func (m *Store[E]) Delete(name string, unpublish func(current E) error) error {
 // ReclaimDeferred retries every parked entry, dropping the ones whose
 // generations have drained and keeping the rest parked.
 //
-// Every successful mutation runs it, and anything else may call it at
-// any time.
+// Every mutation runs it before its callback and again after a successful
+// publish, and anything else may call it at any time.
 func (m *Store[E]) ReclaimDeferred() {
 	m.deferMu.Lock()
 	defer m.deferMu.Unlock()

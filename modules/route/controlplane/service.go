@@ -629,8 +629,8 @@ func (m *RouteService) collectConfigMetrics() []*commonpb.Metric {
 
 // ReclaimDeferred retries every retired config whose free was refused,
 // dropping the ones whose generations have drained. The store runs it
-// after each successful mutation, and anything else may call it at any
-// time.
+// before every mutation and after each successful one, and anything else
+// may call it at any time.
 func (m *RouteService) ReclaimDeferred() {
 	m.configs.ReclaimDeferred()
 }
