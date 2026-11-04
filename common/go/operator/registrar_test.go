@@ -23,7 +23,7 @@ import (
 	ynpb "github.com/yanet-platform/yanet2/controlplane/ynpb/v1"
 )
 
-// recordingGateway is a fake Gateway reporting the endpoints it is sent.
+// recordingGateway is a fake gateway reporting the endpoints it is sent.
 type recordingGateway struct {
 	ynpb.UnimplementedGatewayServer
 
@@ -48,11 +48,11 @@ func (m *recordingGateway) Register(
 	return &ynpb.RegisterResponse{}, nil
 }
 
-// rejectingGateway is a fake Gateway counting Register calls and rejecting
-// the leading ones with a configured status.
+// rejectingGateway is a fake gateway counting registration requests and
+// rejecting the leading ones with a configured status.
 //
-// A negative failures rejects every call. A non-negative value rejects
-// exactly that many leading calls and then accepts.
+// A negative failure count rejects every request. A non-negative one rejects
+// exactly that many leading requests and then accepts.
 type rejectingGateway struct {
 	ynpb.UnimplementedGatewayServer
 
@@ -75,9 +75,25 @@ func (m *rejectingGateway) Register(
 	}, nil
 }
 
-// serveGateway serves service as a fake Gateway on a loopback port with the
-// given server options, stopping it when the test ends, and returns the
-// endpoint to dial.
+// hungGateway is a fake gateway counting registration requests and answering
+// none of them before the caller gives up.
+type hungGateway struct {
+	ynpb.UnimplementedGatewayServer
+
+	calls atomic.Int64
+}
+
+func (m *hungGateway) Register(
+	ctx context.Context,
+	_ *ynpb.RegisterRequest,
+) (*ynpb.RegisterResponse, error) {
+	m.calls.Add(1)
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+
+// serveGateway serves a fake gateway on a loopback port until the test ends
+// and returns the endpoint to dial.
 func serveGateway(t *testing.T, service ynpb.GatewayServer, options ...grpc.ServerOption) string {
 	t.Helper()
 
@@ -95,11 +111,9 @@ func serveGateway(t *testing.T, service ynpb.GatewayServer, options ...grpc.Serv
 	return listener.Addr().String()
 }
 
-// startRegistration runs a runner registering one service in the gateway
-// at endpoint until the test ends.
-//
-// The interval is long enough for the test to see a single heartbeat cycle.
-func startRegistration(t *testing.T, endpoint string) {
+// startRegistration keeps one service registered in the gateway at the given
+// endpoint, renewing it at the given interval, until the test ends.
+func startRegistration(t *testing.T, endpoint string, interval time.Duration) {
 	t.Helper()
 
 	runner := operator.NewGatewayRegRunner(
@@ -109,7 +123,7 @@ func startRegistration(t *testing.T, endpoint string) {
 		}},
 		[]string{"fake.Service"},
 		"127.0.0.1:1",
-		operator.WithGatewayRegInterval(time.Hour),
+		operator.WithGatewayRegInterval(interval),
 	)
 
 	ctx, cancel := context.WithCancel(t.Context())
@@ -137,8 +151,8 @@ func awaitEndpoint(t *testing.T, service *recordingGateway) string {
 	}
 }
 
-// verifies that the runner registers the given endpoint as written, keeping a
-// name unresolved for the gateway to resolve on each dial.
+// Test_GatewayRegRunner_Run_RegistersGivenEndpointVerbatim verifies that the
+// advertised endpoint reaches the gateway as written, its name unresolved.
 func Test_GatewayRegRunner_Run_RegistersGivenEndpointVerbatim(t *testing.T) {
 	t.Parallel()
 
@@ -205,8 +219,7 @@ func Test_GatewayRegRunner_Run_RegistersOverTLS(t *testing.T) {
 }
 
 // Test_GatewayRegRunner_Run_AbandonsPermanentRejection verifies that a
-// registration the gateway rejects for good is not retried within the
-// heartbeat cycle.
+// registration the gateway rejects for good is not retried in the same cycle.
 func Test_GatewayRegRunner_Run_AbandonsPermanentRejection(t *testing.T) {
 	t.Parallel()
 
@@ -219,7 +232,7 @@ func Test_GatewayRegRunner_Run_AbandonsPermanentRejection(t *testing.T) {
 			t.Parallel()
 
 			service := &rejectingGateway{code: code, failures: -1}
-			startRegistration(t, serveGateway(t, service))
+			startRegistration(t, serveGateway(t, service), time.Hour)
 
 			require.Eventually(t, func() bool {
 				return service.calls.Load() == 1
@@ -234,8 +247,7 @@ func Test_GatewayRegRunner_Run_AbandonsPermanentRejection(t *testing.T) {
 }
 
 // Test_GatewayRegRunner_Run_RetriesTransientRejection verifies that a
-// registration rejected with a code outside the permanent set is retried
-// within the heartbeat cycle until it succeeds.
+// transiently rejected registration is retried until it succeeds.
 func Test_GatewayRegRunner_Run_RetriesTransientRejection(t *testing.T) {
 	t.Parallel()
 
@@ -250,11 +262,24 @@ func Test_GatewayRegRunner_Run_RetriesTransientRejection(t *testing.T) {
 			t.Parallel()
 
 			service := &rejectingGateway{code: code, failures: 1}
-			startRegistration(t, serveGateway(t, service))
+			startRegistration(t, serveGateway(t, service), time.Hour)
 
 			require.Eventually(t, func() bool {
 				return service.calls.Load() == 2
 			}, 10*time.Second, 10*time.Millisecond, "a transient rejection must be retried once before succeeding")
 		})
 	}
+}
+
+// Test_GatewayRegRunner_Run_CutsOffUnansweredRegistration verifies that a
+// registration the gateway never answers does not stall the next cycle.
+func Test_GatewayRegRunner_Run_CutsOffUnansweredRegistration(t *testing.T) {
+	t.Parallel()
+
+	service := &hungGateway{}
+	startRegistration(t, serveGateway(t, service), 200*time.Millisecond)
+
+	require.Eventually(t, func() bool {
+		return service.calls.Load() >= 2
+	}, 10*time.Second, 10*time.Millisecond, "an unanswered registration must not stall the heartbeat")
 }
