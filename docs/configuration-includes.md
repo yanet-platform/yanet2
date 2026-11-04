@@ -1,9 +1,8 @@
 # Configuration includes
 
-File-based YAML configurations can compose functional settings and separately
-mounted transport settings at load time. The Go configuration loader, native
-dataplane, CLI connection configuration and YAML request loaders support the same
-top-level `include` list:
+Go-based YAML configuration, request and authentication-store loaders can compose
+functional settings and separately mounted transport settings at load time. They
+accept a top-level `include` list:
 
 ```yaml
 include:
@@ -30,8 +29,7 @@ component's usual decoding and validation.
   replace the earlier value. A sequence is replaced as a whole, including when
   the replacement is empty.
 - Component defaults apply before the resulting document. Existing environment
-  overrides apply afterward. CLI user-file, alias, environment and flag
-  precedence remains unchanged.
+  overrides apply afterward.
 
 For example, a fragment with `server: {endpoint: '[::1]:9000',
 advertise_endpoint: 'operator.example:9000'}` and a main file with
@@ -47,10 +45,7 @@ symlinks are followed, and cycles are checked using resolved paths.
 
 One load permits at most 256 file reads, 16 MiB of cumulative file input and 32
 levels below the root source, counting nested directories as levels. Repeated
-reads count again. The native loader also bounds YAML expansion to 100,000 copied
-nodes and 64 levels of YAML nesting; it does not support YAML merge keys (`<<`).
-The L3 load-balancer's included request fragments retain its strict YAML syntax
-checks, with nonnegative decimal integer spelling throughout each fragment.
+reads count again.
 
 Includes resolve only include paths. Existing component-specific rules for other
 paths, such as referenced subnet files or certificate files, are unchanged. Use
@@ -126,32 +121,6 @@ gateway:
 The x509 authenticator supplies client trust; the configured identity and
 permission providers determine which authenticated clients can invoke RPCs.
 Includes do not alter those authentication or authorization rules.
-
-## CLI connection settings
-
-The system or personal CLI configuration can include the same kind of mounted
-directory. For example, `/etc/yanet2/cli.yaml`:
-
-```yaml
-include: [cli.d]
-endpoint: edge
-```
-
-And `/etc/yanet2/cli.d/transport.yaml`:
-
-```yaml
-endpoints:
-  edge:
-    endpoint: grpcs://gateway.example:8443
-    ca: /etc/yanet2/pki/ca.pem
-    client_cert: /etc/yanet2/pki/client.pem
-    client_key: /etc/yanet2/pki/client-key.pem
-```
-
-The CLI reports the root system/personal file as the origin of its composed
-settings. Include read and syntax errors name the failing source. Module request
-files use their existing schemas, with an optional top-level include list;
-sequence-root payload files remain ordinary whole-document inputs.
 
 ## Kubernetes directory mounts
 

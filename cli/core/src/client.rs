@@ -986,42 +986,6 @@ mod test {
     }
 
     #[tokio::test]
-    async fn test_connect_included_endpoint_and_identity_complete_required_mtls_rpc() {
-        let server = start_tls_server(true).await;
-        let directory = std::env::temp_dir().join(format!("yanet-cli-mtls-includes-{}", std::process::id()));
-        std::fs::create_dir_all(directory.join("transport")).unwrap();
-        let transport = serde_yaml::to_string(&serde_yaml::Value::Mapping(
-            [
-                ("endpoint", server.endpoint.clone()),
-                ("ca", tls_fixture("ca.pem").display().to_string()),
-                ("client_cert", tls_fixture("client-cert.pem").display().to_string()),
-                ("client_key", tls_fixture("client-key.pem").display().to_string()),
-            ]
-            .into_iter()
-            .map(|(key, value)| (key.into(), value.into()))
-            .collect(),
-        ))
-        .unwrap();
-        std::fs::write(directory.join("transport/identity.yaml"), transport).unwrap();
-        let main = directory.join("cli.yaml");
-        std::fs::write(&main, "include: [transport]\nauth: none\ntimeout: 2\n").unwrap();
-        let sources = config::Sources {
-            system_path: main,
-            user_path: None,
-            config_override: None,
-        };
-        let mut arguments = tls_connection_args(String::new(), TlsArgs::default());
-        arguments.endpoint = None;
-        let settings = config::resolve(&arguments, &sources).unwrap();
-        let channel = establish(&settings).await.unwrap();
-        HealthClient::new(channel)
-            .check(HealthCheckRequest::default())
-            .await
-            .unwrap();
-        std::fs::remove_dir_all(directory).unwrap();
-    }
-
-    #[tokio::test]
     async fn test_connect_native_roots_reject_untrusted_certificate() {
         let server = start_tls_server(false).await;
         let args = tls_connection_args(server.endpoint.clone(), TlsArgs::default());

@@ -1,4 +1,0 @@
-dataplane:
-  dpdk_memory: 200
-  devices:
-    - port_name: eth0

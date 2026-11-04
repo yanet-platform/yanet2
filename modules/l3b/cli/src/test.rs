@@ -10,31 +10,6 @@ const DESTINATION: &str =
     "destination_filter_rules:\n- net4s: []\n  net6s: []\n  proto_ranges: [{proto: tcp}]\n  service: backend\n";
 
 #[test]
-fn test_document_includes_partial_service_and_preserves_source_syntax_checks() {
-    let directory = tempfile::tempdir().unwrap();
-    let main = directory.path().join("main.yaml");
-    fs::write(&main, "include: [fragment.yaml]\nscheduler_flags: 2\n").unwrap();
-    let fragment = directory.path().join("fragment.yaml");
-    fs::write(&fragment, format!("{SERVICE}scheduler_flags: 1\n")).unwrap();
-    let command = ServiceCmd {
-        name: "test".into(),
-        hash_mask: 0,
-        index_mask: 0,
-        file: Some(main),
-    };
-    assert_eq!(2, command.load(true).unwrap().scheduler_flags);
-    for content in [
-        format!("{SERVICE}flags: 0x10\n"),
-        format!("{SERVICE}flags: !!int '10'\n"),
-        format!("{SERVICE}flags: &flag 10\nscheduler_flags: *flag\n"),
-    ] {
-        fs::write(&fragment, content).unwrap();
-        let error = command.load(true).unwrap_err();
-        assert!(error.contains("fragment.yaml"), "{error}");
-    }
-}
-
-#[test]
 fn test_document_unknown_fields_warn_preserve_wire_and_reject_in_strict_mode() {
     for (is_module, base, extended, path) in [
         (false, SERVICE.to_owned(), format!("{SERVICE}future: VALUE"), "future"),
@@ -172,17 +147,6 @@ fn test_document_deep_unknown_subtree_is_ignored_but_still_checked() {
     let prefix = format!("{SERVICE}future: {}", "[".repeat(2048));
     let suffix = "]".repeat(2048);
     let content = format!("{prefix}-1{suffix}");
-    let directory = tempfile::tempdir().unwrap();
-    let file = directory.path().join("document.yaml");
-    fs::write(&file, &content).unwrap();
-    let command = ServiceCmd {
-        name: "test".into(),
-        hash_mask: 0,
-        index_mask: 0,
-        file: Some(file),
-    };
-    assert!(command.load(false).is_ok());
-    assert!(command.load(true).is_err());
     assert_eq!(
         vec!["ignoring unknown field future"],
         document::parse::<ServiceDocument>(&content, false).unwrap().1

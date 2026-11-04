@@ -1,3 +1,0 @@
-include: [includes]
-dataplane:
-  packet_recirc_limit: 37

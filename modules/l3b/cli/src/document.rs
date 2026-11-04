@@ -67,20 +67,6 @@ pub fn parse<'de, T: serde::Deserialize<'de>>(content: &'de str, strict: bool) -
     Ok((document, warnings))
 }
 
-/// Checks fragment syntax before composition loses integer spellings.
-///
-/// Fragments can omit required fields; their shape is decoded after merging.
-/// Decimal integer syntax applies throughout an included fragment.
-pub fn validate_fragment(content: &str) -> Result<(), String> {
-    validate(content, None)?;
-    validate(content, Some(&HashSet::new())).map(|_| ())
-}
-
-/// Detects top-level includes without decoding ignored subtrees recursively.
-pub fn has_includes(content: &str) -> Result<bool, String> {
-    validate(content, None)
-}
-
 fn field_path(path: &[Component]) -> String {
     let mut result = String::new();
     for component in path {
@@ -108,7 +94,7 @@ fn field_path(path: &[Component]) -> String {
 ///
 /// Use the same YAML engine as Serde, before aliases can be expanded or integer
 /// spellings lost. Typed decoding remains responsible for fields and domains.
-fn validate(content: &str, ignored: Option<&HashSet<&[Component]>>) -> Result<bool, String> {
+fn validate(content: &str, ignored: Option<&HashSet<&[Component]>>) -> Result<(), String> {
     // The parser has internal pointers and must stay at its initialized
     // address.
     let mut storage = Box::<unsafe_yaml::yaml_parser_t>::new_uninit();
@@ -122,7 +108,6 @@ fn validate(content: &str, ignored: Option<&HashSet<&[Component]>>) -> Result<bo
         unsafe_yaml::yaml_parser_set_input_string(parser, content.as_ptr(), content.len() as u64);
         let result = (|| {
             let mut document_seen = false;
-            let mut includes = false;
             let mut stack: Vec<Frame> = Vec::new();
             let mut path = Vec::new();
             loop {
@@ -204,9 +189,6 @@ fn validate(content: &str, ignored: Option<&HashSet<&[Component]>>) -> Result<bo
                                             scalar.length as usize,
                                         ))
                                         .into_owned();
-                                        if path.is_empty() && key == "include" {
-                                            includes = true;
-                                        }
                                         let identity = match tag {
                                             Some(b"tag:yaml.org,2002:str") => Value::String(key.clone()),
                                             None | Some(b"!")
@@ -287,7 +269,7 @@ fn validate(content: &str, ignored: Option<&HashSet<&[Component]>>) -> Result<bo
                     return Err(format!("{error} at line {} column {}", mark.line + 1, mark.column + 1));
                 }
                 if end {
-                    return Ok(includes);
+                    return Ok(());
                 }
             }
         })();
