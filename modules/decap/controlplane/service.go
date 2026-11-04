@@ -97,7 +97,7 @@ func (m *DecapService) UpdateConfig(
 		Prefixes6: normalizePrefixes(prefixes6),
 	}
 	if err := m.core.Replace(name, payload); err != nil {
-		return nil, status.Errorf(codes.Internal, "failed to update module config %q: %v", name, err)
+		return nil, crud.PublishError(name, err)
 	}
 
 	return &decappb.UpdateConfigResponse{}, nil

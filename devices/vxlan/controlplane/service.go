@@ -70,7 +70,7 @@ func (m *DeviceVxlanService) UpdateDevice(
 	}
 
 	if err := m.core.Replace(name, state); err != nil {
-		return nil, crud.UpdateError(err)
+		return nil, crud.PublishError(name, err)
 	}
 
 	return &vxlanpb.UpdateDeviceVxlanResponse{}, nil

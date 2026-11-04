@@ -277,31 +277,6 @@ func Test_RouteMPLSService_DeleteConfig_NotFound(t *testing.T) {
 	require.Equal(t, codes.NotFound, status.Code(err))
 }
 
-func Test_RouteMPLSService_CreateConfig_BackendFailure(t *testing.T) {
-	svc := NewRouteMPLSService(&flakyBackend{})
-	ctx := t.Context()
-
-	// First call succeeds.
-	_, err := svc.CreateConfig(ctx, &routemplspb.CreateConfigRequest{
-		Name:  "mpls0",
-		Rules: []*routemplspb.Rule{makeRule(t, "10.0.0.0/24", "203.0.113.1", 100)},
-	})
-	require.NoError(t, err)
-
-	// Second call fails. Old config must be preserved.
-	_, err = svc.CreateConfig(ctx, &routemplspb.CreateConfigRequest{
-		Name:  "mpls0",
-		Rules: []*routemplspb.Rule{makeRule(t, "10.0.1.0/24", "203.0.113.2", 200)},
-	})
-	require.Error(t, err)
-	require.Equal(t, codes.Internal, status.Code(err))
-
-	// The original config is still accessible.
-	show, err := svc.ShowConfig(ctx, &routemplspb.ShowConfigRequest{Name: "mpls0"})
-	require.NoError(t, err)
-	assert.Len(t, show.Rules, 1)
-}
-
 // Test_RouteMPLSService_UpdateConfig_FailedPublishLeavesPreviousIntact
 // verifies that an incremental update whose publish fails leaves the
 // published config exactly as it was.

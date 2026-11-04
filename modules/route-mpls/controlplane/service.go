@@ -278,7 +278,7 @@ func (m *RouteMPLSService) CreateConfig(
 	}
 
 	if err := m.core.Replace(name, config); err != nil {
-		return nil, crud.MutationError(err)
+		return nil, crud.PublishError(name, err)
 	}
 
 	return &routemplspb.CreateConfigResponse{}, nil
@@ -356,7 +356,7 @@ func (m *RouteMPLSService) UpdateConfig(
 		return config, nil
 	})
 	if err != nil {
-		return nil, crud.MutationError(err)
+		return nil, crud.PublishError(name, err)
 	}
 
 	return &routemplspb.UpdateConfigResponse{}, nil

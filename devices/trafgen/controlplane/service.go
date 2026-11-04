@@ -205,7 +205,7 @@ func (m *TrafgenService) publish(name string, next func(current *DeviceState, ok
 		return state, nil
 	})
 	if err != nil {
-		return crud.UpdateError(err)
+		return crud.PublishError(name, err)
 	}
 
 	return nil

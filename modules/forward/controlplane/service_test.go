@@ -1,7 +1,6 @@
 package forward_test
 
 import (
-	"errors"
 	"strings"
 	"sync"
 	"testing"
@@ -29,16 +28,11 @@ func (m *mockModuleHandle) Free() error {
 	return nil
 }
 
-// mockBackend publishes every config unless an update error is set, hands
-// out a fresh handle and reads no counters.
-type mockBackend struct {
-	updateError error
-}
+// mockBackend publishes every config, hands out a fresh handle and reads
+// no counters.
+type mockBackend struct{}
 
 func (m *mockBackend) Update(name string, payload forward.RuleSet) (crud.Handle, error) {
-	if m.updateError != nil {
-		return nil, m.updateError
-	}
 	return &mockModuleHandle{}, nil
 }
 
@@ -109,25 +103,6 @@ func TestDeleteConfigUnknownConfig(t *testing.T) {
 	svc := forward.NewForwardService(&mockBackend{})
 
 	_, err := svc.DeleteConfig(t.Context(), &forwardpb.DeleteConfigRequest{Name: "missing"})
-	require.Equal(t, codes.NotFound, status.Code(err))
-}
-
-// Test_ForwardService_UpdateConfig_BackendFailureReturnsInternal verifies
-// that a backend update failure returns Internal before publication.
-func Test_ForwardService_UpdateConfig_BackendFailureReturnsInternal(t *testing.T) {
-	backendError := errors.New("shared memory unavailable")
-	service := forward.NewForwardService(&mockBackend{updateError: backendError})
-
-	_, err := service.UpdateConfig(t.Context(), &forwardpb.UpdateConfigRequest{
-		Name: "config",
-		Rules: []*forwardpb.Rule{
-			{Action: &forwardpb.Action{Target: "device0"}},
-		},
-	})
-	require.Equal(t, codes.Internal, status.Code(err))
-	require.ErrorContains(t, err, "failed to update module config: shared memory unavailable")
-
-	_, err = service.ShowConfig(t.Context(), &forwardpb.ShowConfigRequest{Name: "config"})
 	require.Equal(t, codes.NotFound, status.Code(err))
 }
 

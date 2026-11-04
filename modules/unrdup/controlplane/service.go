@@ -88,9 +88,7 @@ func (m *UnrdupService) UpdateConfig(
 	}
 
 	if err := m.core.Replace(name, updated); err != nil {
-		return nil, status.Errorf(
-			codes.Internal, "failed to update config %q: %s", name, err,
-		)
+		return nil, crud.PublishError(name, err)
 	}
 
 	return &unrduppb.UpdateConfigResponse{}, nil
