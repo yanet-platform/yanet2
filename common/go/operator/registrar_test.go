@@ -4,13 +4,17 @@ import (
 	"context"
 	"crypto/tls"
 	"net"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
+	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/status"
 
 	"github.com/yanet-platform/yanet2/common/go/operator"
 	"github.com/yanet-platform/yanet2/common/go/testutils/tlscert"
@@ -44,16 +48,42 @@ func (m *recordingGateway) Register(
 	return &ynpb.RegisterResponse{}, nil
 }
 
-// serveRecordingGateway starts a fake Gateway on a loopback port with the
-// given server options, stopping it when the test ends, and returns it with
-// the endpoint to dial.
-func serveRecordingGateway(t *testing.T, options ...grpc.ServerOption) (*recordingGateway, string) {
+// rejectingGateway is a fake Gateway counting Register calls and rejecting
+// the leading ones with a configured status.
+//
+// A negative failures rejects every call. A non-negative value rejects
+// exactly that many leading calls and then accepts.
+type rejectingGateway struct {
+	ynpb.UnimplementedGatewayServer
+
+	code     codes.Code
+	failures int64
+	calls    atomic.Int64
+}
+
+func (m *rejectingGateway) Register(
+	_ context.Context,
+	_ *ynpb.RegisterRequest,
+) (*ynpb.RegisterResponse, error) {
+	call := m.calls.Add(1)
+	if m.failures < 0 || call <= m.failures {
+		return nil, status.Error(m.code, "fake rejection")
+	}
+
+	return &ynpb.RegisterResponse{
+		Status: ynpb.RegistrationStatus_REGISTRATION_STATUS_REGISTERED,
+	}, nil
+}
+
+// serveGateway serves service as a fake Gateway on a loopback port with the
+// given server options, stopping it when the test ends, and returns the
+// endpoint to dial.
+func serveGateway(t *testing.T, service ynpb.GatewayServer, options ...grpc.ServerOption) string {
 	t.Helper()
 
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	require.NoError(t, err)
 
-	service := newRecordingGateway()
 	server := grpc.NewServer(options...)
 	ynpb.RegisterGatewayServer(server, service)
 
@@ -62,7 +92,35 @@ func serveRecordingGateway(t *testing.T, options ...grpc.ServerOption) (*recordi
 	}()
 	t.Cleanup(server.Stop)
 
-	return service, listener.Addr().String()
+	return listener.Addr().String()
+}
+
+// startRegistration runs a runner registering one service in the gateway
+// at endpoint until the test ends.
+//
+// The interval is long enough for the test to see a single heartbeat cycle.
+func startRegistration(t *testing.T, endpoint string) {
+	t.Helper()
+
+	runner := operator.NewGatewayRegRunner(
+		[]operator.GatewayConfig{{
+			Name:     "numa0",
+			Endpoint: xcfg.MustNonEmptyString(endpoint),
+		}},
+		[]string{"fake.Service"},
+		"127.0.0.1:1",
+		operator.WithGatewayRegInterval(time.Hour),
+	)
+
+	ctx, cancel := context.WithCancel(t.Context())
+	var wg errgroup.Group
+	wg.Go(func() error {
+		return runner.Run(ctx)
+	})
+	t.Cleanup(func() {
+		cancel()
+		_ = wg.Wait()
+	})
 }
 
 // awaitEndpoint returns the endpoint of the next registration, failing on
@@ -86,7 +144,8 @@ func Test_GatewayRegRunner_Run_RegistersGivenEndpointVerbatim(t *testing.T) {
 
 	const advertised = "route-operator.yanet.svc.cluster.local:8080"
 
-	service, gatewayEndpoint := serveRecordingGateway(t)
+	service := newRecordingGateway()
+	gatewayEndpoint := serveGateway(t, service)
 
 	runner := operator.NewGatewayRegRunner(
 		[]operator.GatewayConfig{{
@@ -117,7 +176,8 @@ func Test_GatewayRegRunner_Run_RegistersOverTLS(t *testing.T) {
 	ca := tlscert.NewCA(t)
 	server := ca.IssueServer(t, "127.0.0.1")
 
-	service, gatewayEndpoint := serveRecordingGateway(t, grpc.Creds(credentials.NewTLS(&tls.Config{
+	service := newRecordingGateway()
+	gatewayEndpoint := serveGateway(t, service, grpc.Creds(credentials.NewTLS(&tls.Config{
 		Certificates: []tls.Certificate{server.Certificate},
 		MinVersion:   tls.VersionTLS12,
 	})))
@@ -142,4 +202,59 @@ func Test_GatewayRegRunner_Run_RegistersOverTLS(t *testing.T) {
 	}()
 
 	require.Equal(t, "route-operator.yanet:8080", awaitEndpoint(t, service))
+}
+
+// Test_GatewayRegRunner_Run_AbandonsPermanentRejection verifies that a
+// registration the gateway rejects for good is not retried within the
+// heartbeat cycle.
+func Test_GatewayRegRunner_Run_AbandonsPermanentRejection(t *testing.T) {
+	t.Parallel()
+
+	for _, code := range []codes.Code{
+		codes.InvalidArgument,
+		codes.Unauthenticated,
+		codes.PermissionDenied,
+	} {
+		t.Run(code.String(), func(t *testing.T) {
+			t.Parallel()
+
+			service := &rejectingGateway{code: code, failures: -1}
+			startRegistration(t, serveGateway(t, service))
+
+			require.Eventually(t, func() bool {
+				return service.calls.Load() == 1
+			}, 10*time.Second, 10*time.Millisecond, "the gateway received no registration")
+			// A retry would come within 750ms: the default backoff
+			// starts at 500ms with 50% jitter.
+			require.Never(t, func() bool {
+				return service.calls.Load() > 1
+			}, time.Second, 10*time.Millisecond, "a permanent rejection must not be retried")
+		})
+	}
+}
+
+// Test_GatewayRegRunner_Run_RetriesTransientRejection verifies that a
+// registration rejected with a code outside the permanent set is retried
+// within the heartbeat cycle until it succeeds.
+func Test_GatewayRegRunner_Run_RetriesTransientRejection(t *testing.T) {
+	t.Parallel()
+
+	for _, code := range []codes.Code{
+		codes.Unavailable,
+		codes.DeadlineExceeded,
+		codes.Internal,
+		codes.Unimplemented,
+		codes.FailedPrecondition,
+	} {
+		t.Run(code.String(), func(t *testing.T) {
+			t.Parallel()
+
+			service := &rejectingGateway{code: code, failures: 1}
+			startRegistration(t, serveGateway(t, service))
+
+			require.Eventually(t, func() bool {
+				return service.calls.Load() == 2
+			}, 10*time.Second, 10*time.Millisecond, "a transient rejection must be retried once before succeeding")
+		})
+	}
 }
