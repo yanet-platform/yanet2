@@ -1270,7 +1270,7 @@ func Test_Gateway_RunRegistrySweeper_SparesHeartbeatRegistration(t *testing.T) {
 		}},
 		[]string{loopedServiceName},
 		loopedBackendAddr,
-		operator.WithGatewayRegInterval(20*time.Millisecond),
+		operator.WithGatewayRegInterval(100*time.Millisecond),
 	)
 	wg.Go(func() error {
 		return heartbeat.Run(wgContext)

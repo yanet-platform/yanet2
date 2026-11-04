@@ -42,6 +42,8 @@ type GatewayRegRunner struct {
 type GatewayRegRunnerOption func(*gatewayRegRunnerOptions)
 
 // WithGatewayRegInterval sets the period between registration attempts.
+//
+// A non-positive period falls back to the default.
 func WithGatewayRegInterval(d time.Duration) GatewayRegRunnerOption {
 	return func(o *gatewayRegRunnerOptions) {
 		o.Interval = d
@@ -66,6 +68,14 @@ func NewGatewayRegRunner(
 	opts := newGatewayRegRunnerOptions()
 	for _, o := range options {
 		o(opts)
+	}
+
+	if opts.Interval <= 0 {
+		opts.Log.Warn("non-positive gateway registration interval, falling back to default",
+			zap.Duration("configured", opts.Interval),
+			zap.Duration("default", DefaultRegisterInterval),
+		)
+		opts.Interval = DefaultRegisterInterval
 	}
 
 	return &GatewayRegRunner{
@@ -161,74 +171,79 @@ func (m *gatewayHeartbeat) Run(ctx context.Context) error {
 	}
 }
 
-// registerServices registers every service in the gateway concurrently,
-// each at the advertised endpoint.
+// registerServices registers every service in the gateway concurrently.
 //
-// A transient failure is retried with exponential backoff until the next
-// retry would start past half the interval. A permanent rejection abandons
-// the attempt at once.
+// The attempt lasts half the interval at most, so a gateway that never
+// answers cannot hold the heartbeat past it.
 func (m *gatewayHeartbeat) registerServices(ctx context.Context) error {
-	// The backoff itself is left to each retry run, which starts its own:
-	// backoff state must not be shared between the registrations below.
-	var retryOptions []backoff.RetryOption
-	if maxElapsedTime := m.interval / 2; maxElapsedTime > 0 {
-		retryOptions = append(retryOptions, backoff.WithMaxElapsedTime(maxElapsedTime))
-	}
+	ctx, cancel := context.WithTimeout(ctx, m.interval/2)
+	defer cancel()
 
 	wg, ctx := errgroup.WithContext(ctx)
 	for _, name := range m.services {
-		request := &ynpb.RegisterRequest{
-			Backend: &ynpb.BackendDesc{
-				Name:     name,
-				Endpoint: m.backendEndpoint,
-			},
-		}
-
 		wg.Go(func() error {
-			log := m.log.With(zap.String("service", name))
-
-			_, err := backoff.Retry(ctx, func() (*ynpb.RegisterResponse, error) {
-				response, err := m.client.Register(ctx, request)
-				if err != nil {
-					if isPermanentRegisterError(err) {
-						log.Error("gateway rejected registration permanently, abandoning this attempt", zap.Error(err))
-						return nil, backoff.Permanent(fmt.Errorf(
-							"gateway %q permanently rejected registration of service %q: %w",
-							m.gatewayEndpoint, name, err,
-						))
-					}
-					log.Warn("failed to register in gateway", zap.Error(err))
-					return nil, err
-				}
-
-				switch response.GetStatus() {
-				case ynpb.RegistrationStatus_REGISTRATION_STATUS_REGISTERED:
-					log.Info("registered in gateway")
-				case ynpb.RegistrationStatus_REGISTRATION_STATUS_UPDATED:
-					log.Info("updated registration in gateway")
-				case ynpb.RegistrationStatus_REGISTRATION_STATUS_RENEWED:
-					log.Debug("registration renewed in gateway")
-				default:
-					log.Info("registered in gateway")
-				}
-				return response, nil
-			}, retryOptions...)
-
-			return err
+			return m.registerService(ctx, name)
 		})
 	}
 
 	return wg.Wait()
 }
 
-// isPermanentRegisterError reports whether err is a rejection that no retry
-// within the same attempt can turn into success.
-//
-// A retry resends a byte-identical request under the same caller identity,
-// so a rejection of the request's content or of that identity repeats on
-// every retry, and only the next heartbeat cycle tries again. Everything
-// else, including framework statuses such as Unimplemented and ambiguous
-// ones such as Unknown and Internal, fails open toward retrying.
+// registerService registers one service at the advertised endpoint,
+// retrying transient failures until the attempt ends.
+func (m *gatewayHeartbeat) registerService(ctx context.Context, name string) error {
+	request := &ynpb.RegisterRequest{
+		Backend: &ynpb.BackendDesc{
+			Name:     name,
+			Endpoint: m.backendEndpoint,
+		},
+	}
+
+	_, err := backoff.Retry(ctx, func() (*ynpb.RegisterResponse, error) {
+		return m.register(ctx, request)
+	})
+
+	return err
+}
+
+// register makes one registration call and marks a rejection that no retry
+// can fix as permanent.
+func (m *gatewayHeartbeat) register(
+	ctx context.Context,
+	request *ynpb.RegisterRequest,
+) (*ynpb.RegisterResponse, error) {
+	name := request.GetBackend().GetName()
+	log := m.log.With(zap.String("service", name))
+
+	response, err := m.client.Register(ctx, request)
+	if err != nil {
+		if isPermanentRegisterError(err) {
+			log.Error("gateway rejected registration permanently, abandoning this attempt", zap.Error(err))
+			return nil, backoff.Permanent(fmt.Errorf(
+				"gateway %q permanently rejected registration of service %q: %w",
+				m.gatewayEndpoint, name, err,
+			))
+		}
+		log.Warn("failed to register in gateway", zap.Error(err))
+		return nil, err
+	}
+
+	switch response.GetStatus() {
+	case ynpb.RegistrationStatus_REGISTRATION_STATUS_REGISTERED:
+		log.Info("registered in gateway")
+	case ynpb.RegistrationStatus_REGISTRATION_STATUS_UPDATED:
+		log.Info("updated registration in gateway")
+	case ynpb.RegistrationStatus_REGISTRATION_STATUS_RENEWED:
+		log.Debug("registration renewed in gateway")
+	default:
+		log.Info("registered in gateway")
+	}
+
+	return response, nil
+}
+
+// isPermanentRegisterError reports whether the gateway rejected the request
+// itself or the caller's identity, which a retry cannot change.
 func isPermanentRegisterError(err error) bool {
 	switch status.Code(err) {
 	case codes.InvalidArgument,
