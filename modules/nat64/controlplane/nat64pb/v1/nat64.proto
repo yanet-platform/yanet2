@@ -19,32 +19,41 @@ service NAT64Service {
   // request carries.
   rpc UpdateConfig(UpdateConfigRequest) returns (UpdateConfigResponse) {}
 
-  // AddPrefix adds a NAT64 prefix to the configuration.
-  //
-  // Adding a prefix that is already present is a no-op.
-  rpc AddPrefix(AddPrefixRequest) returns (AddPrefixResponse) {}
+  // AddPrefix is retired: the server answers Unimplemented, and
+  // UpdateConfig replaces the whole config instead.
+  rpc AddPrefix(AddPrefixRequest) returns (AddPrefixResponse) {
+    option deprecated = true;
+  }
 
-  // RemovePrefix removes a NAT64 prefix from the configuration.
-  //
-  // Returns NotFound if the config or prefix is absent.
-  rpc RemovePrefix(RemovePrefixRequest) returns (RemovePrefixResponse) {}
+  // RemovePrefix is retired: the server answers Unimplemented, and
+  // UpdateConfig replaces the whole config instead.
+  rpc RemovePrefix(RemovePrefixRequest) returns (RemovePrefixResponse) {
+    option deprecated = true;
+  }
 
-  // AddMapping adds an IPv4-IPv6 address mapping.
-  //
-  // Mappings are keyed by IPv4, so adding one for an already mapped IPv4 replaces it.
-  rpc AddMapping(AddMappingRequest) returns (AddMappingResponse) {}
+  // AddMapping is retired: the server answers Unimplemented, and
+  // UpdateConfig replaces the whole config instead.
+  rpc AddMapping(AddMappingRequest) returns (AddMappingResponse) {
+    option deprecated = true;
+  }
 
-  // RemoveMapping removes an IPv4-IPv6 address mapping.
-  //
-  // Returns NotFound if the config or IPv4 mapping is absent.
-  rpc RemoveMapping(RemoveMappingRequest) returns (RemoveMappingResponse) {}
+  // RemoveMapping is retired: the server answers Unimplemented, and
+  // UpdateConfig replaces the whole config instead.
+  rpc RemoveMapping(RemoveMappingRequest) returns (RemoveMappingResponse) {
+    option deprecated = true;
+  }
 
-  // SetMTU sets MTU values for IPv4/IPv6
-  rpc SetMTU(SetMTURequest) returns (SetMTUResponse) {}
+  // SetMTU is retired: the server answers Unimplemented, and UpdateConfig
+  // replaces the whole config instead.
+  rpc SetMTU(SetMTURequest) returns (SetMTUResponse) {
+    option deprecated = true;
+  }
 
-  // SetDropUnknown sets drop_unknown_prefix and drop_unknown_mapping
-  // flags
-  rpc SetDropUnknown(SetDropUnknownRequest) returns (SetDropUnknownResponse) {}
+  // SetDropUnknown is retired: the server answers Unimplemented, and
+  // UpdateConfig replaces the whole config instead.
+  rpc SetDropUnknown(SetDropUnknownRequest) returns (SetDropUnknownResponse) {
+    option deprecated = true;
+  }
 
   // DeleteConfig removes the named config when it is no longer referenced
   // by any pipeline.
@@ -93,8 +102,7 @@ message UpdateConfigRequest {
   //
   // Prefixes and mappings absent from it are removed, and an unset MTU
   // takes the default a new configuration starts with. A prefix or an IPv4
-  // address listed twice is rejected, though AddPrefix ignores a present
-  // prefix and AddMapping replaces the mapping of a present address.
+  // address listed twice is rejected.
   Config config = 2;
 }
 
