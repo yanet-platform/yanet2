@@ -127,8 +127,8 @@ type RingService struct {
 	//
 	// The free was refused because a live configuration generation still
 	// referenced the ring. Nothing else keeps track of these entries. The
-	// service tries to free them again on every delete and on an explicit
-	// reclaim.
+	// service tries to free them again before every create and delete,
+	// after a successful delete and on an explicit reclaim.
 	deferred []*ringEntry
 	log      *zap.Logger
 }
@@ -159,6 +159,10 @@ func (m *RingService) CreateRing(
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
+
+	// Releasing the drained deferred rings first leaves their memory to the
+	// new ring, and a failing create cannot keep them.
+	m.reclaimDeferred()
 
 	if _, exists := m.rings[name]; exists {
 		return nil, status.Errorf(codes.AlreadyExists, "ring %q already exists", name)
@@ -258,6 +262,8 @@ func (m *RingService) DeleteRing(
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
+
+	m.reclaimDeferred()
 
 	entry, ok := m.rings[name]
 	if !ok {
@@ -376,7 +382,8 @@ func (m *RingService) freeOrDefer(entry *ringEntry) {
 //
 // It keeps only the rings that a live generation still references. A ring
 // whose free fails for another reason is logged and dropped. The service
-// runs it on every delete. Other code may call it at any time.
+// runs it before every create and delete and after a successful delete.
+// Other code may call it at any time.
 func (m *RingService) ReclaimDeferred() {
 	m.mu.Lock()
 	defer m.mu.Unlock()

@@ -168,6 +168,10 @@ func (m *PdumpService) SetConfig(
 ) (*pdumppb.SetConfigResponse, error) {
 	name := request.GetName()
 
+	// Rings live in this agent's memory too: releasing the drained deleted
+	// ones first leaves their memory to the capture's config.
+	m.ringOwner.ReclaimDeferred()
+
 	// The binding the mutation acquires or retains is owned by the entry
 	// it publishes, or by the mutation itself when nothing publishes.
 	var pending *binding

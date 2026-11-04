@@ -359,13 +359,36 @@ func Test_RingService_DeleteRing_RefusedFreeRetried(t *testing.T) {
 	require.ErrorIs(t, err, ring.ErrHandleGone, "the old handle must not admit a lease against the recreated ring")
 	require.NoError(t, f.delete(t, "deferred"))
 
-	ref.Release()
-	f.list(t)
-	require.Less(t, f.agent.BlockAllocatorFreeSize(), baseline, "only a delete retries deferred frees")
-
 	f.create(t, "other", 64)
+	ref.Release()
+	beforeRead := f.agent.BlockAllocatorFreeSize()
+	f.list(t)
+	require.Equal(t, beforeRead, f.agent.BlockAllocatorFreeSize(), "a read must not retry deferred frees")
+
 	require.NoError(t, f.delete(t, "other"))
 	require.Equal(t, baseline, f.agent.BlockAllocatorFreeSize())
+}
+
+// Test_RingService_CreateRing_ReclaimsDeferredBeforeAllocating verifies
+// that a create first frees a deferred ring whose generation has drained.
+//
+// A create that needs that memory then succeeds instead of failing for
+// lack of it.
+func Test_RingService_CreateRing_ReclaimsDeferredBeforeAllocating(t *testing.T) {
+	f := newRingFixture(t)
+
+	f.create(t, "deferred", 64)
+	ref, err := ringtest.Hold(f.agent, "deferred")
+	require.NoError(t, err)
+	require.NoError(t, f.delete(t, "deferred"))
+	ref.Release()
+
+	// Only the deferred ring's memory is left for the next create.
+	hold, err := dataplaneut.HoldAllocator(f.agent)
+	require.NoError(t, err)
+	defer hold.Release()
+
+	f.create(t, "next", 64)
 }
 
 // Test_RingService_LeaseVsDeleteRace runs deletes against concurrent
