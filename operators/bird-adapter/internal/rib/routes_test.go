@@ -9,12 +9,14 @@ import (
 	"github.com/yanet-platform/yanet2/operators/bird-adapter/internal/rib"
 )
 
+var (
+	sourceV4 = netip.MustParseAddr("192.0.2.1")
+	sourceV6 = netip.MustParseAddr("2001:db8:ffff::1")
+)
+
 // Test_ToPBMPLSRoute_TunnelFamily verifies that a tunnel's destination and
 // source take the nexthop's family, whatever the prefix's family.
 func Test_ToPBMPLSRoute_TunnelFamily(t *testing.T) {
-	sourceV4 := netip.MustParseAddr("192.0.2.1")
-	sourceV6 := netip.MustParseAddr("2001:db8:ffff::1")
-
 	cases := []struct {
 		name        string
 		prefix      string
@@ -70,4 +72,21 @@ func Test_ToPBMPLSRoute_TunnelFamily(t *testing.T) {
 			require.Equal(t, tc.source, source)
 		})
 	}
+}
+
+// Test_ToPBMPLSRoute_FirstWeightCommunity verifies that a route carrying two
+// weight communities is sent with the first one's, the weight it is diffed by.
+func Test_ToPBMPLSRoute_FirstWeightCommunity(t *testing.T) {
+	route := rib.Route{
+		Prefix:  netip.MustParsePrefix("2001:db8:1::/48"),
+		NextHop: netip.MustParseAddr("2001:db8::1"),
+		LargeCommunities: []rib.LargeCommunity{
+			{ASN: 13238, Function: 1, Value: 5},
+			{ASN: 13238, Function: 1, Value: 7},
+		},
+	}
+
+	rule, err := rib.ToPBMPLSRoute(&route, sourceV4, sourceV6)
+	require.NoError(t, err)
+	require.Equal(t, uint64(5), rule.GetNexthop().GetWeight())
 }

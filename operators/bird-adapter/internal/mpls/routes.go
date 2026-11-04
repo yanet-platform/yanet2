@@ -152,16 +152,6 @@ func getLabel(route rib.Route) uint32 {
 	return route.MplsLabelStack[0]
 }
 
-func getWeight(route rib.Route) uint64 {
-	for _, community := range route.LargeCommunities {
-		if community.ASN == 13238 && community.Function == 1 {
-			return uint64(community.Value)
-		}
-	}
-
-	return 1
-}
-
 // routeListBestDiff returns the route-mpls changes that turn the old best
 // routes into the new ones.
 //
@@ -217,7 +207,7 @@ func nexthopWeights(routes []rib.Route, route rib.Route) map[uint64]uint64 {
 	weights := map[uint64]uint64{}
 	for _, known := range routes {
 		if matches(known) {
-			weights[known.RD] = getWeight(known)
+			weights[known.RD] = known.Weight()
 		}
 	}
 	return weights

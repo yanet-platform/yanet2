@@ -91,6 +91,18 @@ type Route struct {
 	ToRemove bool
 }
 
+// Weight returns the ECMP weight of the route: the value of its first
+// 13238:1 large community, or 1 when it carries none.
+func (m *Route) Weight() uint64 {
+	for _, community := range m.LargeCommunities {
+		if community.ASN == 13238 && community.Function == 1 {
+			return uint64(community.Value)
+		}
+	}
+
+	return 1
+}
+
 func convertLargeCommunity(community LargeCommunity) *routepb.LargeCommunity {
 	return &routepb.LargeCommunity{
 		GlobalAdministrator: community.ASN,
@@ -154,13 +166,6 @@ func ToPBMPLSRoute(
 	sourceV4 netip.Addr,
 	sourceV6 netip.Addr,
 ) (*routemplspb.Rule, error) {
-	weight := uint64(1)
-	for _, community := range route.LargeCommunities {
-		if community.ASN == 13238 && community.Function == 1 {
-			weight = uint64(community.Value)
-		}
-	}
-
 	destination := route.NextHop.Unmap()
 	source := sourceV6
 	if destination.Is4() {
@@ -185,7 +190,7 @@ func ToPBMPLSRoute(
 			DestinationIp: commonpb.NewIPAddressFromAddr(destination),
 			SourceIp:      commonpb.NewIPAddressFromAddr(source),
 
-			Weight: weight,
+			Weight: route.Weight(),
 
 			Counter: fmt.Sprintf("%s/%s/%d", route.Prefix.String(), destination.String(), label),
 		},
