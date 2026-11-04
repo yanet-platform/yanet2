@@ -311,6 +311,13 @@ route_mpls_rule_target_new(
 		memory_context, target_memory_size(map_size)
 	);
 	if (target == NULL) {
+		yanet_error_add_kind(
+			err,
+			YANET_ERROR_RESOURCE_EXHAUSTED,
+			"failed to allocate a selection map of %" PRIu64
+			" slots",
+			map_size
+		);
 		return NULL;
 	}
 
@@ -322,6 +329,12 @@ route_mpls_rule_target_new(
 		sizeof(struct nexthop) * route_mpls_rule->nexthop_count
 	);
 	if (nexthops == NULL) {
+		yanet_error_add_kind(
+			err,
+			YANET_ERROR_RESOURCE_EXHAUSTED,
+			"failed to allocate %" PRIu64 " nexthops",
+			route_mpls_rule->nexthop_count
+		);
 		goto error_target;
 	}
 
@@ -417,6 +430,12 @@ route_mpls_module_config_update(
 	);
 
 	if (targets == NULL) {
+		yanet_error_add_kind(
+			err,
+			YANET_ERROR_RESOURCE_EXHAUSTED,
+			"failed to allocate %" PRIu64 " rule targets",
+			route_mpls_rule_count
+		);
 		return -1;
 	}
 	memset(targets, 0, sizeof(struct target *) * route_mpls_rule_count);
@@ -440,6 +459,7 @@ route_mpls_module_config_update(
 		sizeof(struct filter_rule) * route_mpls_rule_count
 	);
 	if (filter_rules == NULL) {
+		yanet_error_add(err, "failed to allocate filter rules");
 		goto error;
 	}
 
@@ -452,6 +472,7 @@ route_mpls_module_config_update(
 			sizeof(struct filter_rule *) * route_mpls_rule_count
 		);
 	if (filter_rule_ptrs == NULL) {
+		yanet_error_add(err, "failed to allocate filter rule pointers");
 		goto error_rules;
 	}
 

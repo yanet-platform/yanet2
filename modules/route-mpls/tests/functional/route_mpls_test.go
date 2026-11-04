@@ -774,6 +774,19 @@ func Test_RouteMPLS_WrappingWeights_Refused(t *testing.T) {
 	require.ErrorIs(t, err, ffi.ErrInvalidArgument)
 }
 
+// Test_RouteMPLS_OversizedSelectionMap_ResourceExhausted verifies that a
+// selection map larger than the agent's memory is refused as exhausted.
+func Test_RouteMPLS_OversizedSelectionMap_ResourceExhausted(t *testing.T) {
+	_, agent := newAgent(t, 0)
+
+	// Three million slots take 24 MB, above the 16 MB agent but within one
+	// allocator block.
+	_, err := routempls.NewBackend(agent).UpdateModule(mplsConfigName, []croutempls.Rule{
+		rule4("10.0.0.0/8", tunnel4.nexthop(3_000_000)),
+	})
+	require.ErrorIs(t, err, ffi.ErrResourceExhausted)
+}
+
 // Test_RouteMPLS_ECMP_SelectsByWeightedHash verifies that the packet hash
 // modulo the weight sum selects the nexthop and reaches the UDP source port.
 //
