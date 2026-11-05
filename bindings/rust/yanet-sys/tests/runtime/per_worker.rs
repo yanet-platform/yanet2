@@ -237,8 +237,6 @@ impl Module for Mixed {
     }
 }
 
-/// verifies that a shared borrow of a slot reads what an exclusive borrow of
-/// the same slot left there in the same call.
 #[cfg(miri)]
 #[test]
 fn test_per_worker_get_mut_and_get_see_the_same_value() {

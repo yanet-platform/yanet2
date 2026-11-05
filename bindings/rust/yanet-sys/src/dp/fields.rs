@@ -340,7 +340,7 @@ impl<T: Copy + ShmLayout> PerWorker<T> {
 /// The call context is a branded token of the call and the handle a cell it
 /// owns, as in GhostCell or qcell: every access to a slot needs the context,
 /// so a shared borrow of the context lends the slot shared and a mutable one
-/// lends it exclusive. A small value is copied out with `*slot.get(cx)`.
+/// lends it exclusive. A small value is copied out of a shared borrow.
 ///
 /// Only the handler's call context of the same brand reaches the slot: the
 /// one whose prepared value, or linked object's prepared value, the handle
