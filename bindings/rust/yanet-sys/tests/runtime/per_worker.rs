@@ -1,6 +1,6 @@
 //! Miri reach of per-worker state: a handler reads and writes its worker's
-//! slot, by copy or in place, through the handle a module's or an object's
-//! prepare step made, across calls and next to other workers' slots.
+//! slot, borrowed shared or exclusive, through the handle a module's or an
+//! object's prepare step made, across calls and next to other workers' slots.
 
 use core::{cell::Cell, convert::Infallible};
 
@@ -98,8 +98,9 @@ extern "C" fn yanet_sys_dp_module_worker_idx(_: *mut bindings::module_ectx) -> u
 }
 
 /// Counts the packets of its worker through the handle its prepare step made,
-/// when it made one, and passes them: one of an even first byte by an update,
-/// in the low half, and the others by a read and a write, in the high half.
+/// when it made one, and passes them: one of an even first byte in place, in
+/// the low half, and the others by a copy read out and written back, in the
+/// high half.
 struct Held;
 
 impl Module for Held {
@@ -111,10 +112,11 @@ impl Module for Held {
         let seen = cx.prepared();
         batch.dispatch(|packet| {
             match seen {
-                Some(seen) if packet.data()[0] % 2 == 0 => {
-                    seen.update(cx, |count| count + 1);
+                Some(seen) if packet.data()[0] % 2 == 0 => *seen.get_mut(cx) += 1,
+                Some(seen) => {
+                    let count = *seen.get(cx);
+                    *seen.get_mut(cx) = count + ODD;
                 }
-                Some(seen) => seen.set(cx, seen.get(cx) + ODD),
                 None => {}
             }
             Verdict::Pass
@@ -204,9 +206,9 @@ fn test_per_worker_get_mut_changes_a_slot_in_place_across_calls() {
     );
 }
 
-/// Per packet, counts in the first value of its worker's array slot in place,
-/// copies the slot out to set the second value to ten times the first, and
-/// sets the third in place to one more than the second, then passes it.
+/// Per packet, counts in the first value of its worker's array slot through an
+/// exclusive borrow, sets the second to ten times the first as a shared borrow
+/// reads it, and the third to one more than the second, then passes it.
 #[cfg(miri)]
 struct Mixed;
 
@@ -221,11 +223,10 @@ impl Module for Mixed {
         batch.dispatch(|_| {
             if let Some(seen) = seen {
                 seen.get_mut(cx)[0] += 1;
-                let mut values = seen.get(cx);
-                values[1] = values[0] * 10;
-                seen.set(cx, values);
-                let values = seen.get_mut(cx);
-                values[2] = values[1] + 1;
+                let first = seen.get(cx)[0];
+                seen.get_mut(cx)[1] = first * 10;
+                let second = seen.get(cx)[1];
+                seen.get_mut(cx)[2] = second + 1;
             }
             Verdict::Pass
         });
@@ -236,8 +237,8 @@ impl Module for Mixed {
     }
 }
 
-/// verifies that a copy read from a slot holds what an in-place change left
-/// there, and that an in-place change finds what a write of a copy left.
+/// verifies that a shared borrow of a slot reads what an exclusive borrow of
+/// the same slot left there in the same call.
 #[cfg(miri)]
 #[test]
 fn test_per_worker_get_mut_and_get_see_the_same_value() {
@@ -282,7 +283,7 @@ impl Module for Linked {
         let seen = cx.config().prepared(cx);
         batch.dispatch(|_| {
             if let Some(seen) = seen {
-                seen.update(cx, |count| count + 1);
+                *seen.get_mut(cx) += 1;
             }
             Verdict::Pass
         });
@@ -364,7 +365,7 @@ impl Module for LinkHeld {
         let seen = cx.prepared();
         batch.dispatch(|_| {
             if let Some(seen) = seen {
-                seen.update(cx, |count| count + 1);
+                *seen.get_mut(cx) += 1;
             }
             Verdict::Pass
         });

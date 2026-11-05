@@ -30,9 +30,11 @@ use crate::root::ShmRoot;
 /// value that safe code can pass to the resolving methods, whichever context or
 /// graph it came from, must belong to a published graph that
 /// stays frozen (except `Opaque` bytes and atomics) for `'g`, inside the
-/// memory [`Self::shm_root`] covers. Per-worker slots are exempt: no
-/// reference covers them, and only the worker owning a slot reads and writes
-/// it, by copy, through the handle in its prepared value. The implementor meets
+/// memory [`Self::shm_root`] covers. Per-worker slots are exempt: only the
+/// worker owning a slot reaches it, through the handle in its prepared value,
+/// and a reference into a slot lives only while its call context is borrowed,
+/// shorter than `'g`, so safe code cannot pass it to a resolving method. The
+/// implementor meets
 /// it by creating the context only over a root that covers the whole mapping
 /// and by handing safe code references only into published graphs of that
 /// mapping.

@@ -426,7 +426,10 @@ impl Module for Stash {
                 slot.fetch_add(seed, Ordering::Relaxed);
             }
             if let Some(worker) = &prepared.worker {
-                seen.add(cx, worker.update(cx, |count| count + 1));
+                let count = worker.get_mut(cx);
+                *count += 1;
+                let count = *count;
+                seen.add(cx, count);
             }
             Verdict::Pass
         });

@@ -38,7 +38,8 @@
 //!   writes only `Opaque` bytes and atomics of configurations. The one
 //!   exception the SDK makes is per-worker state: a worker's handler writes its
 //!   own slot, through the handle in its prepared value, and no reference
-//!   covers the slot but the one `get_mut` returns.
+//!   covers the slot but the ones `get` and `get_mut` return, never both kinds
+//!   at once.
 //! - **publish**: C publishes a generation with a release store, workers load
 //!   it with acquire, and the commit pass (with the prepare step) completes
 //!   before the worker's first handler call of that generation. Besides a
