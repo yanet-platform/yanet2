@@ -1,6 +1,6 @@
 //! Miri reach of per-worker state: a handler reads and writes its worker's
-//! slot through the handle a module's or an object's prepare step made, across
-//! calls and next to other workers' slots.
+//! slot, borrowed shared or exclusive, through the handle a module's or an
+//! object's prepare step made, across calls and next to other workers' slots.
 
 use core::{cell::Cell, convert::Infallible};
 
@@ -23,20 +23,24 @@ const WORKERS: usize = 3;
 /// What a packet of an odd first byte adds to its worker's slot.
 const ODD: u64 = 1 << 32;
 
-/// Configuration of the counting module: a slot per worker.
+/// Values in a slot of an array, wide enough that a copy of it costs.
+#[cfg(miri)]
+const VALUES: usize = 96;
+
+/// Configuration of a counting module: a slot of `T` per worker.
 #[repr(C)]
-struct Config {
-    seen: PerWorker<u64>,
+struct Config<T = u64> {
+    seen: PerWorker<T>,
 }
 
 // SAFETY: a per-worker field, an offset and a count, which accept every bit
 // pattern, with no padding and no drop.
-unsafe impl ShmLayout for Config {}
+unsafe impl<T: Copy + ShmLayout> ShmLayout for Config<T> {}
 
 // SAFETY: the configuration is laid out by hand and never built: its parts
 // cannot exist, so nothing is ever written, and its slot block belongs to the
 // test.
-unsafe impl Build for Config {
+unsafe impl<T: Copy + ShmLayout> Build for Config<T> {
     type Parts<'b, W: Owner> = Infallible;
 
     unsafe fn write<W: Owner>(parts: Infallible, _: &MemoryContext<'_, W>, _: usize) -> Result<(), Refusal> {
@@ -46,16 +50,16 @@ unsafe impl Build for Config {
     unsafe fn free<W: Owner>(_: usize, _: &MemoryContext<'_, W>) {}
 }
 
-/// The committed context of a module of the counting configuration over a
-/// slot block of [`WORKERS`] zeroed slots, and the block's address.
-fn seen<M: Module<Config = Config>>() -> (Ectx<M>, usize) {
+/// The committed context of a module of a counting configuration over a slot
+/// block of [`WORKERS`] zeroed slots, and the block's address.
+fn seen<T: Copy + ShmLayout, M: Module<Config = Config<T>>>() -> (Ectx<M>, usize) {
     let mut slots = 0;
     // SAFETY: the words are a null per-worker field the setup points at the
     // slot block before the commit; the module counts no counter and
     // redirects no packet.
     let ectx = unsafe {
         Ectx::<M>::new(&[0, WORKERS as u64], |arena, body, _| {
-            let size = PerWorker::<u64>::block_size(WORKERS).expect("block size");
+            let size = PerWorker::<T>::block_size(WORKERS).expect("block size");
             slots = arena.alloc(size).as_ptr().addr();
             write(arena, body, slots as isize - body as isize);
         })
@@ -63,14 +67,14 @@ fn seen<M: Module<Config = Config>>() -> (Ectx<M>, usize) {
     (ectx, slots)
 }
 
-/// The value in each slot of the block.
-fn slots<M: Module>(ectx: &Ectx<M>, block: usize) -> [u64; WORKERS] {
+/// The value in each slot of a block of slots of `T`.
+fn slots<T: Copy + ShmLayout, M: Module>(ectx: &Ectx<M>, block: usize) -> [T; WORKERS] {
     // SAFETY: each slot lies in the block, aligned, and was zeroed by the
-    // arena or written by a handler that has returned.
+    // arena, which `T` accepts, or written by a handler that has returned.
     core::array::from_fn(|worker| unsafe {
         ectx.arena
             .root()
-            .ptr::<u64>(PerWorker::<u64>::first_slot(block) + worker * PerWorker::<u64>::STRIDE)
+            .ptr::<T>(PerWorker::<T>::first_slot(block) + worker * PerWorker::<T>::STRIDE)
             .read()
     })
 }
@@ -94,8 +98,9 @@ extern "C" fn yanet_sys_dp_module_worker_idx(_: *mut bindings::module_ectx) -> u
 }
 
 /// Counts the packets of its worker through the handle its prepare step made,
-/// when it made one, and passes them: one of an even first byte by an update,
-/// in the low half, and the others by a read and a write, in the high half.
+/// when it made one, and passes them: one of an even first byte in place, in
+/// the low half, and the others by a copy read out and written back, in the
+/// high half.
 struct Held;
 
 impl Module for Held {
@@ -107,10 +112,11 @@ impl Module for Held {
         let seen = cx.prepared();
         batch.dispatch(|packet| {
             match seen {
-                Some(seen) if packet.data()[0] % 2 == 0 => {
-                    seen.update(cx, |count| count + 1);
+                Some(seen) if packet.data()[0] % 2 == 0 => *seen.get_mut(cx) += 1,
+                Some(seen) => {
+                    let count = *seen.get(cx);
+                    *seen.get_mut(cx) = count + ODD;
                 }
-                Some(seen) => seen.set(cx, seen.get(cx) + ODD),
                 None => {}
             }
             Verdict::Pass
@@ -129,7 +135,7 @@ impl Module for Held {
 #[test]
 fn test_per_worker_handle_of_a_module_carries_over_between_calls_of_its_worker() {
     PREPARE_WORKER.with(|worker| worker.set(1));
-    let (mut ectx, block) = seen::<Held>();
+    let (mut ectx, block) = seen::<u64, Held>();
     ectx.set_worker(1);
 
     ectx.run(&mut numbered(2));
@@ -137,19 +143,115 @@ fn test_per_worker_handle_of_a_module_carries_over_between_calls_of_its_worker()
 
     assert!(ectx.prepared().is_some());
     // First bytes 0, 1, then 0, 1, 2: three even and two odd.
-    assert_eq!([0, 3 + 2 * ODD, 0], slots(&ectx, block));
+    assert_eq!([0, 3 + 2 * ODD, 0], slots::<u64, _>(&ectx, block));
 }
 
 /// verifies that a module's prepare step whose context is not among its
 /// generation's worker contexts, here one of no generation, makes no handle.
 #[test]
 fn test_per_worker_handle_of_a_module_without_a_worker_is_none() {
-    let (mut ectx, block) = seen::<Held>();
+    let (mut ectx, block) = seen::<u64, Held>();
 
     ectx.run(&mut numbered(3));
 
     assert!(ectx.prepared().is_none());
-    assert_eq!([0, 0, 0], slots(&ectx, block));
+    assert_eq!([0, 0, 0], slots::<u64, _>(&ectx, block));
+}
+
+/// Counts the packets of its worker in place, in the value of its worker's
+/// array slot that the first byte selects, through the handle its prepare
+/// step made, and passes them.
+#[cfg(miri)]
+struct InPlace;
+
+#[cfg(miri)]
+impl Module for InPlace {
+    const NAME: &'static str = "in_place";
+    type Config = Config<[u64; VALUES]>;
+    type Prepared<'p> = Option<WorkerSlot<'p, [u64; VALUES]>>;
+
+    fn handle<'id>(cx: &mut Cx<'id, Self>, batch: &mut Batch<'id>) {
+        let seen = cx.prepared();
+        batch.dispatch(|packet| {
+            let byte = usize::from(packet.data()[0]);
+            if let Some(seen) = seen {
+                seen.get_mut(cx)[byte] += 1;
+            }
+            Verdict::Pass
+        });
+    }
+
+    fn prepare<'p>(cx: &CommitCx<'p, Self>) -> Self::Prepared<'p> {
+        cx.config().seen.handle(cx)
+    }
+}
+
+/// verifies that a handler changing its worker's array slot in place finds
+/// what its earlier call left there, and that no other slot changes.
+#[cfg(miri)]
+#[test]
+fn test_per_worker_get_mut_changes_a_slot_in_place_across_calls() {
+    PREPARE_WORKER.with(|worker| worker.set(1));
+    let (mut ectx, block) = seen::<[u64; VALUES], InPlace>();
+    ectx.set_worker(1);
+
+    ectx.run(&mut numbered(2));
+    ectx.run(&mut numbered(3));
+
+    let mut counted = [0; VALUES];
+    counted[..3].copy_from_slice(&[2, 2, 1]);
+    assert_eq!(
+        [[0; VALUES], counted, [0; VALUES]],
+        slots::<[u64; VALUES], _>(&ectx, block)
+    );
+}
+
+/// Per packet, counts in the first value of its worker's array slot through an
+/// exclusive borrow, sets the second to ten times the first as a shared borrow
+/// reads it, and the third to one more than the second, then passes it.
+#[cfg(miri)]
+struct Mixed;
+
+#[cfg(miri)]
+impl Module for Mixed {
+    const NAME: &'static str = "mixed";
+    type Config = Config<[u64; VALUES]>;
+    type Prepared<'p> = Option<WorkerSlot<'p, [u64; VALUES]>>;
+
+    fn handle<'id>(cx: &mut Cx<'id, Self>, batch: &mut Batch<'id>) {
+        let seen = cx.prepared();
+        batch.dispatch(|_| {
+            if let Some(seen) = seen {
+                seen.get_mut(cx)[0] += 1;
+                let first = seen.get(cx)[0];
+                seen.get_mut(cx)[1] = first * 10;
+                let second = seen.get(cx)[1];
+                seen.get_mut(cx)[2] = second + 1;
+            }
+            Verdict::Pass
+        });
+    }
+
+    fn prepare<'p>(cx: &CommitCx<'p, Self>) -> Self::Prepared<'p> {
+        cx.config().seen.handle(cx)
+    }
+}
+
+#[cfg(miri)]
+#[test]
+fn test_per_worker_get_mut_and_get_see_the_same_value() {
+    PREPARE_WORKER.with(|worker| worker.set(0));
+    let (mut ectx, block) = seen::<[u64; VALUES], Mixed>();
+    ectx.set_worker(0);
+
+    ectx.run(&mut numbered(3));
+
+    let mut mixed = [0; VALUES];
+    mixed[..3].copy_from_slice(&[3, 30, 31]);
+    assert_eq!(
+        [mixed, [0; VALUES], [0; VALUES]],
+        slots::<[u64; VALUES], _>(&ectx, block)
+    );
 }
 
 /// An object with a slot per worker, which prepares the handle of its
@@ -179,7 +281,7 @@ impl Module for Linked {
         let seen = cx.config().prepared(cx);
         batch.dispatch(|_| {
             if let Some(seen) = seen {
-                seen.update(cx, |count| count + 1);
+                *seen.get_mut(cx) += 1;
             }
             Verdict::Pass
         });
@@ -243,7 +345,7 @@ fn test_per_worker_handle_of_an_object_is_read_through_a_link() {
     ectx.run(&mut numbered(2));
     ectx.run(&mut numbered(1));
 
-    assert_eq!([0, 3, 0], slots(&ectx, block.get()));
+    assert_eq!([0, 3, 0], slots::<u64, _>(&ectx, block.get()));
 }
 
 /// Counts the packets of its worker through the handle its prepare step made
@@ -261,7 +363,7 @@ impl Module for LinkHeld {
         let seen = cx.prepared();
         batch.dispatch(|_| {
             if let Some(seen) = seen {
-                seen.update(cx, |count| count + 1);
+                *seen.get_mut(cx) += 1;
             }
             Verdict::Pass
         });
@@ -286,5 +388,5 @@ fn test_per_worker_handle_of_a_module_on_a_linked_object_counts_in_its_workers_s
 
     ectx.run(&mut numbered(2));
 
-    assert_eq!([0, 0, 2], slots(&ectx, block.get()));
+    assert_eq!([0, 0, 2], slots::<u64, _>(&ectx, block.get()));
 }
