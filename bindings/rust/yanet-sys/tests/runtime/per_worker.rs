@@ -1,6 +1,7 @@
 //! Miri reach of per-worker state: a handler reads and writes its worker's
-//! slot, borrowed shared or exclusive, through the handle a module's or an
-//! object's prepare step made, across calls and next to other workers' slots.
+//! slot or region, borrowed shared or exclusive, through the handle a
+//! module's or an object's prepare step made, across calls and next to other
+//! workers' slots and regions.
 
 use core::{cell::Cell, convert::Infallible};
 
@@ -10,8 +11,8 @@ use yanet_sys::{
     bindings,
     cp::{Build, MemoryContext, Owner, Refusal},
     dp::{
-        Batch, CommitCx, Cx, Module, Object, ObjectCommitCx, ObjectConfig, ObjectLink, PerWorker, Verdict, WorkerSlot,
-        rt,
+        Batch, CommitCx, Cx, Module, Object, ObjectCommitCx, ObjectConfig, ObjectLink, PerWorker, PerWorkerSlice,
+        Verdict, WorkerSlice, WorkerSlot, rt,
     },
 };
 
@@ -389,4 +390,230 @@ fn test_per_worker_handle_of_a_module_on_a_linked_object_counts_in_its_workers_s
     ectx.run(&mut numbered(2));
 
     assert_eq!([0, 0, 2], slots::<u64, _>(&ectx, block.get()));
+}
+
+/// Values in a worker's region.
+const LEN: usize = 5;
+
+/// Configuration of a region-counting module: a region of `u64`s per worker.
+#[repr(C)]
+struct Regions {
+    table: PerWorkerSlice<u64>,
+}
+
+// SAFETY: a per-worker slice field, an offset and two counts, which accept
+// every bit pattern, with no padding and no drop.
+unsafe impl ShmLayout for Regions {}
+
+// SAFETY: as for `Config`: laid out by hand and never built.
+unsafe impl Build for Regions {
+    type Parts<'b, W: Owner> = Infallible;
+
+    unsafe fn write<W: Owner>(parts: Infallible, _: &MemoryContext<'_, W>, _: usize) -> Result<(), Refusal> {
+        match parts {}
+    }
+
+    unsafe fn free<W: Owner>(_: usize, _: &MemoryContext<'_, W>) {}
+}
+
+/// Lays out the table and the [`WORKERS`] zeroed regions of `len` values of a
+/// per-worker slice field at an address, and returns the region blocks.
+///
+/// # Safety
+///
+/// The address is a per-worker slice field in a block of the arena that
+/// nothing references.
+unsafe fn lay_out_regions(arena: &'static BlockArena, field: usize, len: usize) -> [usize; WORKERS] {
+    let table = arena.alloc(WORKERS * size_of::<isize>()).as_ptr().addr();
+    let size = PerWorkerSlice::<u64>::region_block(len).expect("region size");
+    let blocks = core::array::from_fn(|_| arena.alloc(size).as_ptr().addr());
+    // SAFETY: the table holds a word per worker, just allocated, and the
+    // field its three words (caller contract).
+    unsafe {
+        for (worker, block) in blocks.iter().enumerate() {
+            let entry = table + worker * size_of::<isize>();
+            write(arena, entry, *block as isize - entry as isize);
+        }
+        write(
+            arena,
+            field,
+            [table as isize - field as isize, WORKERS as isize, len as isize],
+        );
+    }
+    blocks
+}
+
+/// The values in each region of the blocks.
+fn regions<M: Module>(ectx: &Ectx<M>, blocks: [usize; WORKERS], len: usize) -> [Vec<u64>; WORKERS] {
+    blocks.map(|block| {
+        let first = PerWorkerSlice::<u64>::first_element(block);
+        (0..len)
+            // SAFETY: each value lies in its region, aligned, and was zeroed
+            // by the arena or written by a handler that has returned.
+            .map(|idx| unsafe { ectx.arena.root().ptr::<u64>(first + idx * size_of::<u64>()).read() })
+            .collect()
+    })
+}
+
+/// Counts each packet of its worker in place, in the value of its worker's
+/// region that the first byte selects modulo the number of values before the
+/// last, and keeps in the last one more than the sum of those values it read
+/// before the count, through the handle its prepare step made, and passes the
+/// packets.
+#[cfg(miri)]
+struct Spread;
+
+#[cfg(miri)]
+impl Module for Spread {
+    const NAME: &'static str = "spread";
+    type Config = Regions;
+    type Prepared<'p> = Option<WorkerSlice<'p, u64>>;
+
+    fn handle<'id>(cx: &mut Cx<'id, Self>, batch: &mut Batch<'id>) {
+        let table = *cx.prepared();
+        batch.dispatch(|packet| {
+            let Some(table) = table else {
+                return Verdict::Pass;
+            };
+            let Some(last) = table.len().checked_sub(1) else {
+                return Verdict::Pass;
+            };
+            if let Some(idx) = usize::from(packet.data()[0]).checked_rem(last) {
+                let before: u64 = table.get(cx)[..last].iter().sum();
+                let values = table.get_mut(cx);
+                values[idx] += 1;
+                values[last] = before + 1;
+            }
+            Verdict::Pass
+        });
+    }
+
+    fn prepare<'p>(cx: &CommitCx<'p, Self>) -> Self::Prepared<'p> {
+        cx.config().table.handle(cx)
+    }
+}
+
+/// verifies that a handler changing its worker's region in place finds what
+/// its earlier call left there, shared and mutably, and that no other region
+/// changes.
+#[cfg(miri)]
+#[test]
+fn test_per_worker_slice_get_mut_changes_a_region_in_place_across_calls() {
+    PREPARE_WORKER.with(|worker| worker.set(1));
+    let mut blocks = [0; WORKERS];
+    // SAFETY: the setup lays out the field the configuration starts with; the
+    // module counts no counter and redirects no packet.
+    let mut ectx = unsafe { Ectx::<Spread>::new(&[], |arena, body, _| blocks = lay_out_regions(arena, body, LEN)) };
+    ectx.set_worker(1);
+
+    ectx.run(&mut numbered(7));
+    ectx.run(&mut numbered(3));
+
+    // First bytes 0 to 6, then 0 to 2, modulo four: ten packets in all.
+    assert_eq!(
+        [vec![0; LEN], vec![3, 3, 3, 1, 10], vec![0; LEN]],
+        regions(&ectx, blocks, LEN)
+    );
+}
+
+/// verifies that a field of no values makes the handle of an empty region,
+/// which the handler borrows without touching memory.
+#[cfg(miri)]
+#[test]
+fn test_per_worker_slice_handle_of_no_values_borrows_an_empty_region() {
+    PREPARE_WORKER.with(|worker| worker.set(2));
+    // SAFETY: the words are a field of no table, three workers and no values;
+    // the module counts no counter and redirects no packet.
+    let mut ectx = unsafe { Ectx::<Spread>::new(&[0, WORKERS as u64, 0], |_, _, _| {}) };
+    ectx.set_worker(2);
+
+    ectx.run(&mut numbered(3));
+
+    assert_eq!(Some(0), ectx.prepared().map(|table| table.len()));
+}
+
+/// An object with a region per worker, which prepares the handle of its
+/// context's worker.
+struct Flows;
+
+impl Object for Flows {
+    const TYPE: &'static str = "flows";
+    type Config = Regions;
+    type Prepared<'p> = Option<WorkerSlice<'p, u64>>;
+
+    fn prepare<'p>(cx: &ObjectCommitCx<'p, Self>) -> Self::Prepared<'p> {
+        cx.config().table.handle(cx)
+    }
+}
+
+/// Counts each packet of its worker in the first value of the region the
+/// linked object prepared, and passes them.
+struct LinkedFlows;
+
+impl Module for LinkedFlows {
+    const NAME: &'static str = "linked_flows";
+    type Config = ObjectLink<Flows>;
+    type Prepared<'p> = ();
+
+    fn handle<'id>(cx: &mut Cx<'id, Self>, batch: &mut Batch<'id>) {
+        let table = *cx.config().prepared(cx);
+        batch.dispatch(|_| {
+            if let Some(table) = table {
+                table.get_mut(cx)[0] += 1;
+            }
+            Verdict::Pass
+        });
+    }
+
+    fn prepare(_: &CommitCx<'_, Self>) {}
+}
+
+/// verifies that an object's prepare step makes the handle of the region of
+/// the worker its context records, and that a module linking the object
+/// counts in that region through the object's prepared value.
+#[test]
+fn test_per_worker_slice_handle_of_an_object_is_read_through_a_link() {
+    let blocks = Cell::new([0; WORKERS]);
+    // SAFETY: the configuration names link 0, which the setup lays out; the
+    // module redirects no packet.
+    let mut ectx = unsafe {
+        Ectx::<LinkedFlows>::new(&[0], |arena, _, context| {
+            let root = arena.root();
+            let alloc = |size: usize| arena.alloc(size).as_ptr().addr();
+            let (object, object_ectx, prepared, links) = (
+                alloc(size_of::<ObjectConfig<Regions>>()),
+                alloc(size_of::<bindings::object_ectx>()),
+                alloc(size_of::<Option<WorkerSlice<'static, u64>>>()),
+                alloc(size_of::<bindings::module_object_link_ectx>()),
+            );
+            blocks.set(lay_out_regions(
+                arena,
+                object + ObjectConfig::<Regions>::BODY_OFFSET,
+                LEN,
+            ));
+            let object_context = bindings::object_ectx {
+                abs_cp_object: root.ptr(object),
+                abs_object_prepared: root.ptr(prepared),
+                worker_idx: 1,
+                ..Default::default()
+            };
+            let link = bindings::module_object_link_ectx {
+                abs_object_ectx: root.ptr(object_ectx),
+                ..Default::default()
+            };
+            write(arena, object_ectx, object_context);
+            rt::commit_object_ectx::<Flows>(root.ptr(object_ectx), root.ptr(object));
+            write(arena, links, link);
+            context.object_link_count = 1;
+            context.abs_object_links = root.ptr(links);
+        })
+    };
+    ectx.set_worker(1);
+
+    ectx.run(&mut numbered(2));
+    ectx.run(&mut numbered(1));
+
+    let mut counted = vec![0; LEN];
+    counted[0] = 3;
+    assert_eq!([vec![0; LEN], counted, vec![0; LEN]], regions(&ectx, blocks.get(), LEN));
 }

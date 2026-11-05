@@ -274,6 +274,37 @@ func Test_Stash_ObjectWorkerSlot_SurvivesConfigReplace(t *testing.T) {
 	require.Equal(t, perWorkerValues(map[int]uint64{1: 13 + 14}), growth)
 }
 
+// Test_Stash_ObjectWorkerSlice_FillsTheRegionOfItsWorker verifies that the
+// module changes the linked object's region of the worker it runs on in
+// place: each packet adds one to both values, which start at the seed 10, so
+// two packets on worker 1 sum to 22 and 24, and one on worker 2 to 22.
+func Test_Stash_ObjectWorkerSlice_FillsTheRegionOfItsWorker(t *testing.T) {
+	bed, _, stash := servedStashInstance(t)
+
+	bed.run(1, arpFrames(2)...)
+	bed.run(2, arpFrames(1)...)
+
+	require.Equal(t, perWorkerValues(map[int]uint64{1: 22 + 24, 2: 22}), bed.counter(stash, "filled"))
+}
+
+// Test_Stash_ObjectWorkerSlice_SurvivesConfigReplace verifies that the
+// object's region of a worker outlives the configuration linking it: after a
+// replacement, two more packets on worker 1 go on to sums of 26 and 28, and no
+// other worker counts.
+func Test_Stash_ObjectWorkerSlice_SurvivesConfigReplace(t *testing.T) {
+	bed, _, stash := servedStashInstance(t)
+	bed.run(1, arpFrames(2)...)
+	replacement := bed.stashInstance("stash", "state")
+	replacement.path = stash.path
+	bed.publishModules(replacement)
+	before := bed.counter(replacement, "filled")
+
+	bed.run(1, arpFrames(2)...)
+
+	growth := counterGrowth(t, before, bed.counter(replacement, "filled"))
+	require.Equal(t, perWorkerValues(map[int]uint64{1: 26 + 28}), growth)
+}
+
 // Test_Stash_ObjectWorkerSlot_RestartsWithANewObject verifies that the slots
 // live as long as their object: after a same-name object from seed 20
 // replaces the one counted from seed 10, two packets on worker 1 count 21 and
@@ -288,4 +319,20 @@ func Test_Stash_ObjectWorkerSlot_RestartsWithANewObject(t *testing.T) {
 
 	growth := counterGrowth(t, before, bed.counter(stash, "seen"))
 	require.Equal(t, perWorkerValues(map[int]uint64{1: 21 + 22}), growth)
+}
+
+// Test_Stash_ObjectWorkerSlice_RestartsWithANewObject verifies that the
+// regions live as long as their object: after a same-name object from seed 20
+// replaces the one filled from seed 10, two packets on worker 1 sum to 42 and
+// 44.
+func Test_Stash_ObjectWorkerSlice_RestartsWithANewObject(t *testing.T) {
+	bed, _, stash := servedStashInstance(t)
+	bed.run(1, arpFrames(2)...)
+	bed.publishObjects(bed.state("state", 20))
+	before := bed.counter(stash, "filled")
+
+	bed.run(1, arpFrames(2)...)
+
+	growth := counterGrowth(t, before, bed.counter(stash, "filled"))
+	require.Equal(t, perWorkerValues(map[int]uint64{1: 42 + 44}), growth)
 }

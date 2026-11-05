@@ -9,11 +9,12 @@
 //!
 //! A block is its payload, as in C, which frees a structure by walking its
 //! owning edges; a per-worker block also holds the slack that puts its first
-//! slot on a cache line, sized again from its worker count. Releasing does the
-//! same: [`Build::free`] returns every block a value owns, reading only values
-//! that were written whole. Until a block is written into its parent it is
-//! owned by an [`Owned`], an [`OwnedSlice`] or an [`OwnedSlots`], which frees
-//! it on drop, so a build that stopped anywhere releases what it took.
+//! slot or value on a cache line, sized again from its counts. Releasing does
+//! the same: [`Build::free`] returns every block a value owns, reading only
+//! values that were written whole. Until a block is written into its parent it
+//! is owned by an [`Owned`], an [`OwnedSlice`], an [`OwnedSlots`] or an
+//! [`OwnedRegions`], which frees it on drop, so a build that stopped anywhere
+//! releases what it took.
 
 use core::{
     fmt,
@@ -36,7 +37,10 @@ use super::{
 use crate::{
     bindings,
     common::lpm::{Lpm, LpmRange},
-    dp::{Counter, CounterLayout, Device, Module, ModuleConfig, Object, ObjectConfig, ObjectLink, PerWorker},
+    dp::{
+        Counter, CounterLayout, Device, Module, ModuleConfig, Object, ObjectConfig, ObjectLink, PerWorker,
+        PerWorkerSlice,
+    },
 };
 
 mod classify;
@@ -426,6 +430,48 @@ unsafe impl<T: Copy + ShmLayout> Build for PerWorker<T> {
     }
 }
 
+// SAFETY: the table offset and the two count words are the whole value; a
+// field of no region bytes, or of an owner without workers, leaves the table
+// NULL. The regions are plain values, so their blocks own nothing.
+unsafe impl<T: Copy + ShmLayout> Build for PerWorkerSlice<T> {
+    type Parts<'b, W: Owner> = OwnedRegions<'b, T, W>;
+
+    unsafe fn write<W: Owner>(
+        parts: Self::Parts<'_, W>,
+        memory: &MemoryContext<'_, W>,
+        addr: usize,
+    ) -> Result<(), Refusal> {
+        let root = memory.root();
+        let (table, workers, len) = parts.into_raw();
+        // SAFETY: the offset and count words are aligned and exclusive (caller
+        // contract).
+        unsafe {
+            root.ptr::<isize>(addr).write(offset_to(table, addr));
+            root.ptr::<u64>(addr + size_of::<isize>()).write(workers);
+            root.ptr::<u64>(addr + 2 * size_of::<isize>()).write(len as u64);
+        }
+        Ok(())
+    }
+
+    unsafe fn free<W: Owner>(addr: usize, memory: &MemoryContext<'_, W>) {
+        let root = memory.root();
+        // SAFETY: the words were written whole (caller contract).
+        let (offset, workers, len) = unsafe {
+            (
+                root.ptr::<isize>(addr).read(),
+                root.ptr::<u64>(addr + size_of::<isize>()).read(),
+                root.ptr::<u64>(addr + 2 * size_of::<isize>()).read(),
+            )
+        };
+        if offset != 0 {
+            // SAFETY: the offset leads to the live table of as many workers as
+            // the count, which the value owns with the regions it names, each
+            // allocated with the size of the length.
+            unsafe { free_regions::<T, W>(target_of(offset, addr), workers, len as usize, memory) }
+        }
+    }
+}
+
 // SAFETY: the C table is the whole value. Its routines write inside it, in the
 // blocks of its own memory context, which freeing returns, and in the links of
 // the context tree under the header, which opening and closing a context
@@ -531,6 +577,33 @@ pub struct OwnedSlots<'b, T: Copy + ShmLayout, W: Owner> {
     _slot: PhantomData<fn() -> T>,
 }
 
+/// The region table of a [`PerWorkerSlice`] allocated in build `'b` with the
+/// region of each worker of the owner it names, its parts; empty when the
+/// regions take no bytes or the owner has no worker.
+///
+/// Created by a [`Scope`] only. It owns the blocks until it is written into
+/// the parts of a per-worker field, which takes them over; dropped before
+/// that, it returns them.
+#[must_use]
+pub struct OwnedRegions<'b, T: Copy + ShmLayout, W: Owner> {
+    table: usize,
+    workers: u64,
+    len: usize,
+    memory: &'b MemoryContext<'b, W>,
+    _brand: Brand<'b>,
+    _element: PhantomData<fn() -> T>,
+}
+
+impl<T: Copy + ShmLayout, W: Owner> fmt::Debug for OwnedRegions<'_, T, W> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
+        f.debug_struct("OwnedRegions")
+            .field("table", &self.table)
+            .field("workers", &self.workers)
+            .field("len", &self.len)
+            .finish()
+    }
+}
+
 impl<T: Copy + ShmLayout, W: Owner> fmt::Debug for OwnedSlots<'_, T, W> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
         f.debug_struct("OwnedSlots")
@@ -626,6 +699,45 @@ unsafe fn free_block<T: Build, W: Owner>(addr: usize, len: usize, memory: &Memor
 /// its build allocated, so the size does not overflow.
 fn slot_block<T: Copy + ShmLayout>(workers: u64) -> usize {
     PerWorker::<T>::block_size(workers as usize).unwrap_or(usize::MAX)
+}
+
+/// Returns the region table of a per-worker slice field and every region it
+/// names.
+///
+/// # Safety
+///
+/// The table was allocated from the memory context with a word per worker,
+/// each zero or the offset, from the word, of a live region block allocated
+/// with the size of the length; nothing references the blocks.
+unsafe fn free_regions<T: Copy + ShmLayout, W: Owner>(
+    table: usize,
+    workers: u64,
+    len: usize,
+    memory: &MemoryContext<'_, W>,
+) {
+    let root = memory.root();
+    let region = PerWorkerSlice::<T>::region_block(len).unwrap_or(usize::MAX);
+    let (count, table_size) = region_table(workers).unwrap_or((0, usize::MAX));
+    for worker in (0..count).rev() {
+        let entry = table + worker * size_of::<isize>();
+        // SAFETY: the table's word of the worker (caller contract).
+        let offset = unsafe { root.ptr::<isize>(entry).read() };
+        if offset != 0 {
+            // SAFETY: the region block the word leads to (caller contract).
+            unsafe { memory.free(target_of(offset, entry), region) };
+        }
+    }
+    // SAFETY: the table is the one allocated, and the regions it named are
+    // returned.
+    unsafe { memory.free(table, table_size) };
+}
+
+/// The number of words of the region table of a per-worker slice field of
+/// the given workers, one per worker, and its bytes; `None` when either
+/// overflows.
+fn region_table(workers: u64) -> Option<(usize, usize)> {
+    let count = usize::try_from(workers).ok()?;
+    Some((count, count.checked_mul(size_of::<isize>())?))
 }
 
 fn refused<W: Owner, E: From<BuildError<W::Error>>>(refusal: Refusal) -> E {
@@ -822,6 +934,61 @@ impl<'b, W: Owner, E: From<BuildError<W::Error>>, K: Kind> Scope<'b, '_, W, E, K
         Ok(self.owned_slots(addr, workers))
     }
 
+    /// Allocates the regions of a per-worker slice field, one block per
+    /// worker, each holding `len` copies of the initial value, and the table
+    /// that names them.
+    ///
+    /// The regions live as long as the configuration that holds them. Regions
+    /// of no bytes (no values, or values of a zero-sized type), or an owner
+    /// without workers, allocate nothing, and the field holds no table and a
+    /// length of zero, so its handles are empty.
+    ///
+    /// # Errors
+    ///
+    /// A region or the table is larger than the allocator's largest block,
+    /// refused before anything is allocated, or the memory is exhausted; the
+    /// blocks allocated so far are returned.
+    pub fn per_worker_slice<T: Copy + ShmLayout>(self, len: usize, init: T) -> Result<OwnedRegions<'b, T, W>, E> {
+        let workers = self.memory.owner.worker_count();
+        let max = bindings::MEMORY_BLOCK_ALLOCATOR_MAX_SIZE as usize;
+        let region = PerWorkerSlice::<T>::region_block(len)
+            .filter(|&size| size <= max)
+            .ok_or_else(|| refused::<W, E>(Refusal::BlockTooLarge))?;
+        if region == 0 || workers == 0 {
+            return Ok(self.owned_regions(0, workers, 0));
+        }
+        let (count, table_size) = region_table(workers)
+            .filter(|&(_, size)| size <= max)
+            .ok_or_else(|| refused::<W, E>(Refusal::BlockTooLarge))?;
+        let table = self.alloc(table_size)?;
+        let root = self.memory.root();
+        for worker in 0..count {
+            // SAFETY: the fresh table holds a word per worker, aligned to 8
+            // by the allocation.
+            unsafe { root.ptr::<isize>(table + worker * size_of::<isize>()).write(0) };
+        }
+        // Every word is zero or a region, so dropping it returns what the
+        // loop allocated.
+        let regions = self.owned_regions(table, workers, len);
+        for worker in 0..count {
+            let block = self.alloc(region)?;
+            let entry = table + worker * size_of::<isize>();
+            let first = PerWorkerSlice::<T>::first_element(block);
+            // SAFETY: the word is the table's, as above. The fresh block is
+            // at least 64 bytes, so aligned to 64 by the allocation, and the
+            // first value lies at most 64 bytes past its start, on a 128-byte
+            // line, which the size leaves room for after the values; a layout
+            // type is aligned to at most 64.
+            unsafe {
+                root.ptr::<isize>(entry).write(offset_to(block, entry));
+                for idx in 0..len {
+                    root.ptr::<T>(first + idx * size_of::<T>()).write(init);
+                }
+            }
+        }
+        Ok(regions)
+    }
+
     /// Allocates a block of the given payload size.
     ///
     /// The size is a multiple of the alignment of the type it holds, so the
@@ -837,6 +1004,17 @@ impl<'b, W: Owner, E: From<BuildError<W::Error>>, K: Kind> Scope<'b, '_, W, E, K
         self.memory
             .alloc(size)
             .ok_or_else(|| refused::<W, E>(Refusal::OutOfMemory))
+    }
+
+    fn owned_regions<T: Copy + ShmLayout>(self, table: usize, workers: u64, len: usize) -> OwnedRegions<'b, T, W> {
+        OwnedRegions {
+            table,
+            workers,
+            len,
+            memory: self.memory,
+            _brand: PhantomData,
+            _element: PhantomData,
+        }
     }
 
     fn owned_slots<T: Copy + ShmLayout>(self, addr: usize, workers: u64) -> OwnedSlots<'b, T, W> {
@@ -967,6 +1145,26 @@ impl<T: Copy + ShmLayout, W: Owner> Drop for OwnedSlots<'_, T, W> {
             // the size of its slot count, and its slots own nothing; nothing
             // but this value owns it.
             unsafe { self.memory.free(self.addr, slot_block::<T>(self.workers)) }
+        }
+    }
+}
+
+impl<T: Copy + ShmLayout, W: Owner> OwnedRegions<'_, T, W> {
+    /// Hands the blocks over to the field they are written into: the table's
+    /// address, the worker count and the length, without returning them.
+    fn into_raw(self) -> (usize, u64, usize) {
+        let this = ManuallyDrop::new(self);
+        (this.table, this.workers, this.len)
+    }
+}
+
+impl<T: Copy + ShmLayout, W: Owner> Drop for OwnedRegions<'_, T, W> {
+    fn drop(&mut self) {
+        if self.table != 0 {
+            // SAFETY: the table was allocated from the memory context with a
+            // word per worker, each zero or a region allocated with the size
+            // of the length; nothing but this value owns them.
+            unsafe { free_regions::<T, W>(self.table, self.workers, self.len, self.memory) }
         }
     }
 }
