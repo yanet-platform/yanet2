@@ -103,7 +103,7 @@ tests of `yanet-shm` need neither the compilation database nor a C compiler.
 
 ```sh
 meson setup build
-cd lib/rust
+cd bindings/rust
 export CLANG_PATH=/usr/bin/clang-23 LIBCLANG_PATH=/usr/lib/llvm-23/lib
 cargo test --workspace                      # native suites
 MIRIFLAGS="-Zmiri-strict-provenance" cargo +nightly-2026-10-22 miri nextest run --workspace --exclude yanet-packet   # Miri (cargo-nextest); add -Zmiri-tree-borrows for Tree Borrows; yanet-packet forbids unsafe code

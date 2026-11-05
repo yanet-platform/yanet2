@@ -13,8 +13,8 @@ import (
 	"github.com/yanet-platform/xnetip"
 
 	dataplaneut "github.com/yanet-platform/yanet2/bindings/go/dataplane_ut"
+	"github.com/yanet-platform/yanet2/bindings/rust/yanet-sdk-fixture-api/bindings/go/cfixture"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
-	"github.com/yanet-platform/yanet2/lib/rust/yanet-sdk-fixture-api/bindings/go/cfixture"
 )
 
 // prefix4 returns the range of the IPv4 prefix, mapped to the value.
