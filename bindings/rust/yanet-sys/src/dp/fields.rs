@@ -217,10 +217,11 @@ const SLOT_LINE: usize = 128;
 /// from one initial value, a prepare step makes the handle of its worker's slot
 /// with [`Self::handle`], and the handler reads and writes the slot through it.
 ///
-/// Slots are copied in and out, as a `Cell`: no reference to a slot leaves a
-/// call, so a worker never aliases another's slot, and a slot holds only plain
-/// values. A value that owns a block, names a registry entry or embeds a C
-/// object is not `Copy`, so it cannot be a slot.
+/// Slots are copied in and out, as a `Cell`, or lent in place for one call
+/// that holds the handler's context: no reference to a slot outlives the call
+/// that made it, so a worker never aliases another's slot, and a slot holds
+/// only plain values. A value that owns a block, names a registry entry or
+/// embeds a C object is not `Copy`, so it cannot be a slot.
 ///
 /// The first slot starts on a 128-byte line and the slots are
 /// [`Self::STRIDE`] apart, so no slot shares a cache line of up to 128 bytes
@@ -332,8 +333,13 @@ impl<T: Copy + ShmLayout> PerWorker<T> {
 }
 
 /// The slot of one worker of a [`PerWorker`], made by that worker's prepare
-/// step and kept in its prepared value; the handler reads and writes the slot
-/// through it with its call context, copying in and out.
+/// step and kept in its prepared value; the handler reaches the slot through
+/// it with its call context, copying the value in and out or changing it in
+/// place.
+///
+/// Each read, write and update copies the whole value, which a large one,
+/// such as an array of hundreds of bytes, pays for per packet;
+/// [`Self::with`] lends the slot in place instead.
 ///
 /// Only the handler's call context of the same brand reaches the slot: the
 /// one whose prepared value, or linked object's prepared value, the handle
@@ -436,6 +442,66 @@ impl<'id, T: Copy + ShmLayout> WorkerSlot<'id, T> {
         let value = f(self.get(cx));
         self.set(cx, value);
         value
+    }
+
+    /// Lends the slot to `f` in place, and returns what `f` returns.
+    ///
+    /// Copies nothing, so a large value is changed where it lies rather than
+    /// read and written whole. The context stays lent for the call, so `f`
+    /// reaches no slot, this one through any copy of the handle included:
+    ///
+    /// ```compile_fail,E0502
+    /// # use yanet_sys::dp::{Cx, Module, WorkerSlot};
+    /// fn peek<'id, M>(cx: &mut Cx<'id, M>)
+    /// where
+    ///     M: Module<Prepared<'id> = Option<WorkerSlot<'id, [u64; 96]>>>,
+    /// {
+    ///     if let Some(slot) = cx.prepared() {
+    ///         slot.with(cx, |values| values[0] = slot.get(cx)[1]);
+    ///     }
+    /// }
+    /// ```
+    ///
+    /// Nor does it lend the slot again:
+    ///
+    /// ```compile_fail,E0499
+    /// # use yanet_sys::dp::{Cx, Module, WorkerSlot};
+    /// fn nest<'id, M>(cx: &mut Cx<'id, M>)
+    /// where
+    ///     M: Module<Prepared<'id> = Option<WorkerSlot<'id, [u64; 96]>>>,
+    /// {
+    ///     if let Some(slot) = cx.prepared() {
+    ///         slot.with(cx, |outer| slot.with(cx, |inner| outer[0] = inner[1]));
+    ///     }
+    /// }
+    /// ```
+    ///
+    /// It works on the value it is lent:
+    ///
+    /// ```
+    /// # use yanet_sys::dp::{Cx, Module, WorkerSlot};
+    /// fn shift<'id, M>(cx: &mut Cx<'id, M>) -> u64
+    /// where
+    ///     M: Module<Prepared<'id> = Option<WorkerSlot<'id, [u64; 96]>>>,
+    /// {
+    ///     cx.prepared().map_or(0, |slot| {
+    ///         slot.with(cx, |values| {
+    ///             values.rotate_right(1);
+    ///             values[0]
+    ///         })
+    ///     })
+    /// }
+    /// ```
+    #[inline(always)]
+    pub fn with<M: Module, R>(&self, _cx: &mut Cx<'id, M>, f: impl FnOnce(&mut T) -> R) -> R {
+        // SAFETY: as for reading, the slot is the call's worker's, aligned,
+        // holding a value, live for the call and covered by no shared
+        // reference (attach: frozen). The reference is unique while `f` runs:
+        // the context is lent mutably for the whole call, and every access to
+        // a slot, through this handle or any copy of any handle, takes that
+        // context, so `f` cannot reach the slot again; reads, writes and
+        // updates leave no reference into the slot behind.
+        f(unsafe { &mut *self.slot.as_ptr() })
     }
 }
 

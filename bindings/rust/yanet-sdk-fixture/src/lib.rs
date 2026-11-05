@@ -224,9 +224,9 @@ pub struct Stamp<'p> {
 
 /// Counts each packet in the counter its first byte selects, by value, unless
 /// it is empty, in the held counter, through the handle made at commit, and
-/// its bytes in the traffic; counts it in the worker's slot of packets seen,
-/// through the handle made at commit, and adds the new count to the running
-/// counter, unless the commit found no worker.
+/// its bytes in the traffic; counts it in place in the worker's slot of
+/// packets seen, through the handle made at commit, and adds the new count to
+/// the running counter, unless the commit found no worker.
 /// Passes the packets when the stamp is 14 and drops them otherwise.
 pub struct Tally;
 
@@ -247,7 +247,11 @@ impl Module for Tally {
             held.add(2);
             config.traffic.add(cx, Traffic::packet(packet.data().len() as u64));
             if let Some(seen) = &prepared.seen {
-                config.running.add(cx, seen.update(cx, |seen| seen + 1));
+                let count = seen.with(cx, |seen| {
+                    *seen += 1;
+                    *seen
+                });
+                config.running.add(cx, count);
             }
             if pass { Verdict::Pass } else { Verdict::Drop }
         });
