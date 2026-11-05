@@ -217,11 +217,11 @@ const SLOT_LINE: usize = 128;
 /// from one initial value, a prepare step makes the handle of its worker's slot
 /// with [`Self::handle`], and the handler reads and writes the slot through it.
 ///
-/// Slots are copied in and out, as a `Cell`, or lent in place for one call
-/// that holds the handler's context: no reference to a slot outlives the call
-/// that made it, so a worker never aliases another's slot, and a slot holds
-/// only plain values. A value that owns a block, names a registry entry or
-/// embeds a C object is not `Copy`, so it cannot be a slot.
+/// Slots are copied in and out, as a `Cell`, or borrowed in place while the
+/// handler's context stays mutably borrowed: no reference to a slot outlives
+/// the handler call, so a worker never aliases another's slot, and a slot
+/// holds only plain values. A value that owns a block, names a registry entry
+/// or embeds a C object is not `Copy`, so it cannot be a slot.
 ///
 /// The first slot starts on a 128-byte line and the slots are
 /// [`Self::STRIDE`] apart, so no slot shares a cache line of up to 128 bytes
@@ -339,7 +339,7 @@ impl<T: Copy + ShmLayout> PerWorker<T> {
 ///
 /// Each read, write and update copies the whole value, which a large one,
 /// such as an array of hundreds of bytes, pays for per packet;
-/// [`Self::with`] lends the slot in place instead.
+/// [`Self::get_mut`] borrows the slot in place instead.
 ///
 /// Only the handler's call context of the same brand reaches the slot: the
 /// one whose prepared value, or linked object's prepared value, the handle
@@ -444,11 +444,16 @@ impl<'id, T: Copy + ShmLayout> WorkerSlot<'id, T> {
         value
     }
 
-    /// Lends the slot to `f` in place, and returns what `f` returns.
+    /// The slot itself, borrowed while the call context stays mutably borrowed.
     ///
     /// Copies nothing, so a large value is changed where it lies rather than
-    /// read and written whole. The context stays lent for the call, so `f`
-    /// reaches no slot, this one through any copy of the handle included:
+    /// read and written whole. The call context is a branded token of the
+    /// call and the handle a cell it owns, as in GhostCell or qcell: every
+    /// access to a slot needs the context, so while the context is mutably
+    /// borrowed the returned reference is the only way to the slot. Reads,
+    /// writes and updates stay copies, as for a `Cell`.
+    ///
+    /// While the borrow lives, the context reaches no slot, this one included:
     ///
     /// ```compile_fail,E0502
     /// # use yanet_sys::dp::{Cx, Module, WorkerSlot};
@@ -457,51 +462,66 @@ impl<'id, T: Copy + ShmLayout> WorkerSlot<'id, T> {
     ///     M: Module<Prepared<'id> = Option<WorkerSlot<'id, [u64; 96]>>>,
     /// {
     ///     if let Some(slot) = cx.prepared() {
-    ///         slot.with(cx, |values| values[0] = slot.get(cx)[1]);
+    ///         let values = slot.get_mut(cx);
+    ///         let copy = slot.get(cx);
+    ///         values[0] = copy[1];
     ///     }
     /// }
     /// ```
     ///
-    /// Nor does it lend the slot again:
+    /// Nor does it borrow the slot again, through a copy of the handle either:
     ///
     /// ```compile_fail,E0499
     /// # use yanet_sys::dp::{Cx, Module, WorkerSlot};
-    /// fn nest<'id, M>(cx: &mut Cx<'id, M>)
+    /// fn twice<'id, M>(cx: &mut Cx<'id, M>)
     /// where
     ///     M: Module<Prepared<'id> = Option<WorkerSlot<'id, [u64; 96]>>>,
     /// {
     ///     if let Some(slot) = cx.prepared() {
-    ///         slot.with(cx, |outer| slot.with(cx, |inner| outer[0] = inner[1]));
+    ///         let copy = *slot;
+    ///         let first = slot.get_mut(cx);
+    ///         let second = copy.get_mut(cx);
+    ///         first[0] = second[1];
     ///     }
     /// }
     /// ```
     ///
-    /// It works on the value it is lent:
+    /// The borrow does not outlive the borrow of the context, so it never
+    /// leaves the call:
+    ///
+    /// ```compile_fail,E0621
+    /// # use yanet_sys::dp::{Cx, Module, WorkerSlot};
+    /// fn keep<'id, M: Module>(cx: &mut Cx<'id, M>, slot: WorkerSlot<'id, [u64; 96]>) -> &'id mut [u64; 96] {
+    ///     slot.get_mut(cx)
+    /// }
+    /// ```
+    ///
+    /// Once the borrow is last used, the context is free again:
     ///
     /// ```
-    /// # use yanet_sys::dp::{Cx, Module, WorkerSlot};
-    /// fn shift<'id, M>(cx: &mut Cx<'id, M>) -> u64
+    /// # use yanet_sys::dp::{Counter, Cx, Module, WorkerSlot};
+    /// fn count<'id, M>(cx: &mut Cx<'id, M>)
     /// where
-    ///     M: Module<Prepared<'id> = Option<WorkerSlot<'id, [u64; 96]>>>,
+    ///     M: Module<Config = Counter, Prepared<'id> = Option<WorkerSlot<'id, [u64; 96]>>>,
     /// {
-    ///     cx.prepared().map_or(0, |slot| {
-    ///         slot.with(cx, |values| {
-    ///             values.rotate_right(1);
-    ///             values[0]
-    ///         })
-    ///     })
+    ///     if let Some(slot) = cx.prepared() {
+    ///         let values = slot.get_mut(cx);
+    ///         values[0] += 1;
+    ///         cx.config().add(cx, 1);
+    ///     }
     /// }
     /// ```
     #[inline(always)]
-    pub fn with<M: Module, R>(&self, _cx: &mut Cx<'id, M>, f: impl FnOnce(&mut T) -> R) -> R {
+    pub fn get_mut<'a, M: Module>(&self, _cx: &'a mut Cx<'id, M>) -> &'a mut T {
         // SAFETY: as for reading, the slot is the call's worker's, aligned,
-        // holding a value, live for the call and covered by no shared
-        // reference (attach: frozen). The reference is unique while `f` runs:
-        // the context is lent mutably for the whole call, and every access to
-        // a slot, through this handle or any copy of any handle, takes that
-        // context, so `f` cannot reach the slot again; reads, writes and
-        // updates leave no reference into the slot behind.
-        f(unsafe { &mut *self.slot.as_ptr() })
+        // holding a value and covered by no shared reference (attach: frozen).
+        // The borrow is unique while it lives: the context stays mutably
+        // borrowed for as long, and every access to a slot, through this
+        // handle or any copy of any handle, takes that context, so nothing
+        // else reaches the slot; reads, writes and updates leave no reference
+        // into the slot behind. The context is the call's own, so the borrow
+        // ends within the call, before the slot's generation can be freed.
+        unsafe { &mut *self.slot.as_ptr() }
     }
 }
 

@@ -173,7 +173,7 @@ impl Module for InPlace {
         batch.dispatch(|packet| {
             let byte = usize::from(packet.data()[0]);
             if let Some(seen) = seen {
-                seen.with(cx, |values| values[byte] += 1);
+                seen.get_mut(cx)[byte] += 1;
             }
             Verdict::Pass
         });
@@ -188,7 +188,7 @@ impl Module for InPlace {
 /// what its earlier call left there, and that no other slot changes.
 #[cfg(miri)]
 #[test]
-fn test_per_worker_with_changes_a_slot_in_place_across_calls() {
+fn test_per_worker_get_mut_changes_a_slot_in_place_across_calls() {
     PREPARE_WORKER.with(|worker| worker.set(1));
     let (mut ectx, block) = seen::<[u64; VALUES], InPlace>();
     ectx.set_worker(1);
@@ -220,11 +220,12 @@ impl Module for Mixed {
         let seen = cx.prepared();
         batch.dispatch(|_| {
             if let Some(seen) = seen {
-                seen.with(cx, |values| values[0] += 1);
+                seen.get_mut(cx)[0] += 1;
                 let mut values = seen.get(cx);
                 values[1] = values[0] * 10;
                 seen.set(cx, values);
-                seen.with(cx, |values| values[2] = values[1] + 1);
+                let values = seen.get_mut(cx);
+                values[2] = values[1] + 1;
             }
             Verdict::Pass
         });
@@ -239,7 +240,7 @@ impl Module for Mixed {
 /// there, and that an in-place change finds what a write of a copy left.
 #[cfg(miri)]
 #[test]
-fn test_per_worker_with_and_get_see_the_same_value() {
+fn test_per_worker_get_mut_and_get_see_the_same_value() {
     PREPARE_WORKER.with(|worker| worker.set(0));
     let (mut ectx, block) = seen::<[u64; VALUES], Mixed>();
     ectx.set_worker(0);

@@ -247,10 +247,9 @@ impl Module for Tally {
             held.add(2);
             config.traffic.add(cx, Traffic::packet(packet.data().len() as u64));
             if let Some(seen) = &prepared.seen {
-                let count = seen.with(cx, |seen| {
-                    *seen += 1;
-                    *seen
-                });
+                let count = seen.get_mut(cx);
+                *count += 1;
+                let count = *count;
                 config.running.add(cx, count);
             }
             if pass { Verdict::Pass } else { Verdict::Drop }
