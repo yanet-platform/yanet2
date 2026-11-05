@@ -197,6 +197,25 @@ func Test_StateObject_Free_Unpublished_ReturnsMemoryToBaseline(t *testing.T) {
 	require.Equal(t, bed.baseline, bed.agent.BlockAllocatorFreeSize())
 }
 
+// Test_StateObject_PerWorker_SizedByTheWorkers verifies that the slot per
+// worker of an object takes more memory on a dataplane of more workers, and
+// that the published object gives all of it back once deleted and freed.
+func Test_StateObject_PerWorker_SizedByTheWorkers(t *testing.T) {
+	used := map[uint64]uint64{}
+	for _, workers := range []uint64{1, workerCount} {
+		bed := newBed(t, withWorkers(workers))
+		object := bed.state("state", 10)
+		used[workers] = bed.used()
+		bed.publishObjects(object)
+		require.NoError(t, bed.agent.DeleteObject(cfixture.StateType, "state"))
+
+		require.NoError(t, object.Free())
+
+		require.Equal(t, bed.baseline, bed.agent.BlockAllocatorFreeSize(), "%d workers", workers)
+	}
+	require.Greater(t, used[workerCount], used[1])
+}
+
 // Test_StateObject_Free_Unpublished_LeavesLoadedCountUnchanged verifies that
 // the free returns the destruction hold it takes.
 func Test_StateObject_Free_Unpublished_LeavesLoadedCountUnchanged(t *testing.T) {

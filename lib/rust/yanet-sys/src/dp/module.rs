@@ -122,7 +122,8 @@ pub trait Module: Sized + 'static {
     /// drain); a packet ends where its verdict puts it.
     fn handle<'id>(cx: &mut Cx<'id, Self>, batch: &mut Batch<'id>);
 
-    /// Makes the prepared value from the configuration.
+    /// Makes the prepared value from the configuration and the context's
+    /// worker.
     ///
     /// Runs on the dataplane's assigner thread once per worker context of a
     /// generation, before the context reaches its worker, which may still run

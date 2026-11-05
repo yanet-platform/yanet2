@@ -41,6 +41,15 @@
 //! }
 //! ```
 //!
+//! State a worker keeps for itself across batches is a [`PerWorker`] field: a
+//! slot per worker, built from one value with `scope.per_worker(value)`, which
+//! the handler reads and writes for its own worker only, through the
+//! [`WorkerSlot`] handle its prepare step keeps: a [`PrepareCx`], of a module
+//! or an object, makes the handle of its worker's slot, and only the handler's
+//! call uses it. The slots live as long as the
+//! configuration: one rebuilt on an update starts them again from that value;
+//! an object's slots outlive the modules linking it.
+//!
 //! State that outlives the configurations, rebuilt whole on every update, is
 //! an [`Object`]: built the same way by [`ObjectBuilder`], over a scope that
 //! registers no counter and links no device or object, published by name
@@ -113,18 +122,20 @@ pub use yanet_sys::{
     common::lpm::{Lpm4, Lpm6, LpmRange},
     cp::{
         BlockAddr, Build, BuildError, Builder, Built, BuiltObject, Context, FfiRecord, Header, Kind, ModuleKind,
-        ObjectBuilder, ObjectKind, Owned, OwnedSlice, Owner, Refusal, Registered, Scope, Stage, Staged,
+        ObjectBuilder, ObjectKind, Owned, OwnedSlice, OwnedSlots, Owner, Refusal, Registered, Scope, Stage, Staged,
     },
     dp::{
         Batch, CommitCx, Counter, CounterLayout, CounterRef, Cx, Device, DeviceRef, DscpMark, Module, ModuleCx, Object,
-        ObjectCommitCx, ObjectConfig, ObjectLink, Packet, PacketView, ResizeError, Traffic, TunnelError, Verdict,
+        ObjectCommitCx, ObjectConfig, ObjectLink, Packet, PacketView, PerWorker, PrepareCx, ResizeError, Traffic,
+        TunnelError, Verdict, WorkerSlot,
     },
 };
 
 /// Everything a module crate usually imports.
 pub mod prelude {
     pub use crate::{
-        Batch, Counter, CounterRef, Cx, Device, Module, Packet, ShmBox, ShmLayout, ShmSlice, Traffic, Verdict,
+        Batch, Counter, CounterRef, Cx, Device, Module, Packet, PerWorker, PrepareCx, ShmBox, ShmLayout, ShmSlice,
+        Traffic, Verdict, WorkerSlot,
     };
 }
 
@@ -203,6 +214,38 @@ mod doctests {
     /// }
     /// ```
     struct ModuleCounterDeviceAndObjectAccepted;
+
+    /// A per-worker slot holds plain values only: a slot owning a block is
+    /// not `Copy`, so a configuration with one does not build.
+    ///
+    /// ```compile_fail,E0277
+    /// use yanet_sdk::{PerWorker, ShmLayout, ShmSlice};
+    /// #[derive(ShmLayout)]
+    /// #[repr(C)]
+    /// struct Config {
+    ///     edges: PerWorker<ShmSlice<u64>>,
+    /// }
+    /// ```
+    struct PerWorkerEdgeRefused;
+
+    /// A per-worker slot of plain values builds, the accepted twin of the
+    /// refusal above.
+    ///
+    /// ```
+    /// use yanet_sdk::{PerWorker, ShmLayout};
+    /// #[derive(Clone, Copy, ShmLayout)]
+    /// #[repr(C)]
+    /// struct Budget {
+    ///     tokens: u64,
+    ///     last: u64,
+    /// }
+    /// #[derive(ShmLayout)]
+    /// #[repr(C)]
+    /// struct Config {
+    ///     budgets: PerWorker<Budget>,
+    /// }
+    /// ```
+    struct PerWorkerPlainAccepted;
 
     /// A caller's replacement alignment limit cannot admit over-aligned
     /// storage.

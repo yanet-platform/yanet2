@@ -4,11 +4,32 @@
 // without a YANET_MODULE_ABI_VERSION bump fails this build too.
 #include "lib/dataplane/config/plugin_abi_assert.h" // IWYU pragma: keep
 
+#include "common/memory_address.h"
+#include "lib/controlplane/config/zone.h"
 #include "lib/dataplane/module/packet_front.h"
 #include "lib/dataplane/packet/data.h"
 #include "lib/dataplane/packet/decap.h"
 #include "lib/dataplane/packet/encap.h"
+#include "lib/dataplane/pipeline/econtext.h"
 #include "lib/dataplane/pipeline/schedule.h"
+
+uint64_t
+yanet_sys_dp_module_worker_idx(struct module_ectx *module_ectx) {
+	struct config_gen_ectx *own = module_ectx->abs_config_gen_ectx;
+	if (own == NULL) {
+		return YANET_SYS_DP_WORKER_IDX_NONE;
+	}
+	struct cp_config_gen *config_gen = ADDR_OF(&own->cp_config_gen);
+	if (config_gen == NULL) {
+		return YANET_SYS_DP_WORKER_IDX_NONE;
+	}
+	for (uint64_t idx = 0; idx < config_gen->config_gen_ectx_count; ++idx) {
+		if (cp_config_gen_worker_ectx(config_gen, idx) == own) {
+			return idx;
+		}
+	}
+	return YANET_SYS_DP_WORKER_IDX_NONE;
+}
 
 void
 yanet_sys_dp_redirect(

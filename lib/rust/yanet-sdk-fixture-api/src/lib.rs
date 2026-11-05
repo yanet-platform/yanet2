@@ -126,7 +126,7 @@ pub struct Tally;
 impl Tally {
     /// A configuration named `name` over `word`, whose counters are registered
     /// in the order `held`, `v2`, `v0`, `v1`, an order other than the fields',
-    /// and then `traffic`.
+    /// and then `traffic` and `running`, with no packet seen on any worker.
     pub fn build(agent: &Agent, name: &str, word: u64) -> Result<Built<yanet_sdk_fixture::Tally, Agent>, ApiError> {
         Builder::<yanet_sdk_fixture::Tally>::build::<ApiError, _>(agent, name, |scope| {
             let held = scope.counter("held")?;
@@ -134,11 +134,14 @@ impl Tally {
             let v0 = scope.counter("v0")?;
             let v1 = scope.counter("v1")?;
             let traffic = scope.counter("traffic")?;
+            let running = scope.counter("running")?;
             Ok(TallyConfigParts {
                 word,
                 by_value: [v0, v1, v2],
                 held,
                 traffic,
+                seen: scope.per_worker(0)?,
+                running,
             })
         })
     }
@@ -199,10 +202,14 @@ pub struct Stash;
 #[yanet_sdk::api(module = yanet_sdk_fixture::Stash)]
 impl Stash {
     /// A configuration named `name` that writes the state object named
-    /// `state`, which a generation must hold when it is installed.
+    /// `state`, which a generation must hold when it is installed, and counts
+    /// in `seen`.
     pub fn build(agent: &Agent, name: &str, state: &str) -> Result<Built<yanet_sdk_fixture::Stash, Agent>, ApiError> {
         Builder::<yanet_sdk_fixture::Stash>::build::<ApiError, _>(agent, name, |scope| {
-            Ok(StashConfigParts { state: scope.object(state)? })
+            Ok(StashConfigParts {
+                state: scope.object(state)?,
+                seen: scope.counter("seen")?,
+            })
         })
     }
 }
@@ -212,8 +219,9 @@ pub struct State;
 #[yanet_sdk::api(object = yanet_sdk_fixture::State)]
 impl State {
     /// An object named `name` of `count` slots, slot n holding `seed` + n,
-    /// wrapping; the fault, a `FIXTURE_FAULT_*` constant, fails the build
-    /// after it has allocated the slots.
+    /// wrapping, and a slot per worker holding `seed`; the fault, a
+    /// `FIXTURE_FAULT_*` constant, fails the build after it has allocated the
+    /// slots.
     pub fn build(
         agent: &Agent,
         name: &str,
@@ -224,13 +232,14 @@ impl State {
         let count = usize::try_from(count).map_err(|_| ApiError::from(Refusal::TooManyItems))?;
         ObjectBuilder::<yanet_sdk_fixture::State>::build::<ApiError, _>(agent, name, |scope| {
             let slots = scope.slice(count, |idx| Ok(AtomicU64::new(seed.wrapping_add(idx as u64))))?;
+            let workers = scope.per_worker(seed)?;
             match fault {
                 FIXTURE_FAULT_NONE => {}
                 FIXTURE_FAULT_ERROR => return Err(ApiError::from(Refusal::BlockTooLarge)),
                 FIXTURE_FAULT_PANIC => panic!("fixture fault"),
                 _ => return Err(ApiError::new(ErrorKind::InvalidArgument, "unknown fault")),
             }
-            Ok(StateConfigParts { seed, slots })
+            Ok(StateConfigParts { seed, slots, workers })
         })
     }
 

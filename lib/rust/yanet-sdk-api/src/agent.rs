@@ -476,7 +476,8 @@ fn c_name<const N: usize>(name: &str) -> Result<[u8; N], ApiError> {
 // contract); the blocks come from C's memory contexts, which align them as
 // the contract asks and own them until returned. The routines called from
 // `Drop` do not panic. `cp_module_init` and `cp_object_init` leave a live
-// context in the header over the agent's memory.
+// context in the header over the agent's memory. The worker count is the
+// dataplane's, which C fixes when it starts the instance.
 unsafe impl Owner for Agent {
     type Error = ApiError;
 
@@ -484,6 +485,12 @@ unsafe impl Owner for Agent {
         // SAFETY: the pointer has the provenance of the whole mapping
         // (constructor contract).
         unsafe { ShmRoot::from_mapping(self.agent.cast()) }
+    }
+
+    fn worker_count(&self) -> u64 {
+        // SAFETY: the agent is live (constructor contract), and so is the
+        // dataplane configuration it is attached to.
+        u64::from(unsafe { bindings::dataplane_instance_worker_count(bindings::agent_dp_config(self.agent.as_ptr())) })
     }
 
     fn alloc(&self, size: usize) -> Option<BlockAddr> {

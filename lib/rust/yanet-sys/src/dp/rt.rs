@@ -171,8 +171,8 @@ pub unsafe fn commit_object_ectx<O: Object>(ectx: *mut bindings::object_ectx, cp
     // SAFETY: the header is an object of this type, its body frozen but for
     // its atomics (attach: binding, frozen).
     let config = unsafe { (*root.ptr::<ObjectConfig<O::Config>>(cp_object.addr())).body() };
-    // SAFETY: root and configuration as stated above.
-    let cx = unsafe { ObjectCommitCx::<O>::new(root, config) };
+    // SAFETY: root, context and configuration as stated above.
+    let cx = unsafe { ObjectCommitCx::<O>::new(root, NonNull::new_unchecked(ectx), config) };
     // SAFETY: the buffer holds the prepared value's size, aligned by the
     // allocator, and is owned by this pass, as for a module (attach: align).
     unsafe { out.write(O::prepare(&cx)) };

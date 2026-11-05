@@ -15,7 +15,7 @@ use core::{
 use yanet_packet as _;
 use yanet_sdk::{
     Batch, Build, BuiltObject, CommitCx, Counter, Cx, Device, Kind, Module, Object, ObjectBuilder, ObjectCommitCx,
-    ObjectLink, OwnedSlice, Refusal, Registered, ShmBox, ShmLayout, ShmSlice, Traffic, Verdict,
+    ObjectLink, OwnedSlice, PerWorker, Refusal, Registered, ShmBox, ShmLayout, ShmSlice, Traffic, Verdict,
 };
 use yanet_sdk_derive as _;
 use yanet_sdk_testing::{
@@ -1066,5 +1066,351 @@ fn test_build_numbers_object_links_apart_from_counters() {
     let (config, _) = body::<MixedModule>(&owner, &built);
     assert_eq!((0, 0), (config.hits.id(), config.policy.index()));
     release::<MixedModule>(&owner, built);
+    owner.assert_released();
+}
+
+/// A worker's budget, the shape of per-worker state: three plain words.
+#[derive(Clone, Copy, Debug, PartialEq, ShmLayout)]
+#[repr(C)]
+struct Budget {
+    tokens: u64,
+    last: u64,
+    spent: u64,
+}
+
+/// A value wider than a 64-byte line.
+#[derive(Clone, Copy, Debug, PartialEq, ShmLayout)]
+#[repr(C)]
+struct Wide {
+    words: [u64; 9],
+}
+
+/// A per-worker budget beside a plain word.
+#[derive(ShmLayout)]
+#[repr(C)]
+struct Budgets {
+    word: u64,
+    budgets: PerWorker<Budget>,
+}
+
+type BudgetsModule = Fixture<Budgets>;
+type WideModule = Fixture<PerWorker<Wide>>;
+
+/// An object of per-worker budgets.
+struct BudgetsState;
+
+impl Object for BudgetsState {
+    const TYPE: &'static str = "budgets_state";
+    type Config = Budgets;
+    type Prepared<'p> = ();
+
+    fn prepare(_: &ObjectCommitCx<'_, Self>) {}
+}
+
+const BUDGET: Budget = Budget { tokens: 7, last: 11, spent: 13 };
+
+/// An owner of an empty arena for a dataplane of the given workers.
+fn owner_of_workers(workers: u64) -> TestOwner {
+    owner().with_workers(workers)
+}
+
+/// Builds per-worker budgets, every slot from the same budget.
+fn build_budgets(owner: &TestOwner) -> Result<Built<BudgetsModule, TestOwner>, Failure> {
+    build::<BudgetsModule>(owner, |b| {
+        Ok(BudgetsParts {
+            word: 3,
+            budgets: b.per_worker(BUDGET)?,
+        })
+    })
+}
+
+/// Address of the slot block of a built per-worker field.
+fn slot_block<T: Copy + ShmLayout>(field: &PerWorker<T>) -> usize {
+    core::ptr::from_ref(field).addr().wrapping_add_signed(field.offset())
+}
+
+/// Addresses of the slots of the given workers in a slot block at an address.
+fn slots_in(block: usize, workers: usize, stride: usize) -> Vec<usize> {
+    let first = PerWorker::<u8>::first_slot(block);
+    (0..workers).map(|worker| first + worker * stride).collect()
+}
+
+/// Addresses of the slots of a built per-worker field.
+fn slot_addrs<T: Copy + ShmLayout>(field: &PerWorker<T>) -> Vec<usize> {
+    slots_in(slot_block(field), field.worker_count() as usize, PerWorker::<T>::STRIDE)
+}
+
+/// The value in each slot of a built per-worker field of the owner.
+fn slot_values<T: Copy + ShmLayout>(owner: &TestOwner, field: &PerWorker<T>) -> Vec<T> {
+    slot_addrs(field)
+        .into_iter()
+        // SAFETY: each slot of the field holds a `T` the build wrote, aligned,
+        // and nothing writes it while the test reads.
+        .map(|addr| unsafe { owner.root().ptr::<T>(addr).read() })
+        .collect()
+}
+
+/// The 128-byte lines a value of the size at the address touches.
+fn lines(addr: usize, size: usize) -> core::ops::RangeInclusive<usize> {
+    addr / 128..=(addr + size - 1) / 128
+}
+
+/// Reports whether the slots of `T` of the given workers in a slot block at
+/// an address each touch 128-byte lines of their own, which hold no byte
+/// outside the block.
+fn own_lines<T: Copy + ShmLayout>(block: usize, workers: usize) -> bool {
+    let size = size_of::<T>();
+    let end = block + PerWorker::<T>::block_size(workers).expect("block size");
+    let addrs = slots_in(block, workers, PerWorker::<T>::STRIDE);
+    addrs.iter().enumerate().all(|(idx, &addr)| {
+        let mine = lines(addr, size);
+        *mine.start() * 128 >= block
+            && (*mine.end() + 1) * 128 <= end
+            && addrs[idx + 1..]
+                .iter()
+                .all(|&other| mine.end() < lines(other, size).start())
+    })
+}
+
+#[test]
+fn test_per_worker_build_writes_the_initial_value_into_a_slot_per_worker() {
+    let owner = owner_of_workers(3);
+
+    let built = build_budgets(&owner).expect("built");
+
+    let (config, _) = body::<BudgetsModule>(&owner, &built);
+    assert_eq!(
+        (3, 3, vec![BUDGET; 3]),
+        (
+            config.word,
+            config.budgets.worker_count(),
+            slot_values(&owner, &config.budgets)
+        )
+    );
+    release::<BudgetsModule>(&owner, built);
+    owner.assert_released();
+}
+
+#[test]
+fn test_per_worker_slots_start_on_a_128_byte_line_with_a_stride_of_128_bytes() {
+    let owner = owner_of_workers(4);
+
+    let built = build_budgets(&owner).expect("built");
+
+    let (config, _) = body::<BudgetsModule>(&owner, &built);
+    let addrs = slot_addrs(&config.budgets);
+    assert_eq!((0, 128), (addrs[0] % 128, PerWorker::<Budget>::STRIDE));
+    release::<BudgetsModule>(&owner, built);
+    owner.assert_released();
+}
+
+#[test]
+fn test_per_worker_slots_share_no_128_byte_line_with_each_other_or_outside() {
+    let owner = owner_of_workers(4);
+
+    let built = build::<WideModule>(&owner, |b| b.per_worker(Wide { words: [5; 9] })).expect("built");
+
+    let (config, _) = body::<WideModule>(&owner, &built);
+    assert!(own_lines::<Wide>(slot_block(config), 4));
+    release::<WideModule>(&owner, built);
+    owner.assert_released();
+}
+
+/// verifies that every worker's slot keeps 128-byte lines of its own, holding
+/// no byte outside the block, whether the block starts on a 128-byte line or
+/// 64 bytes past one, as a sanitizer build shifts it.
+#[test]
+fn test_per_worker_layout_keeps_slots_on_own_128_byte_lines_at_either_start() {
+    fn check<T: Copy + ShmLayout>() {
+        for block in [4096, 4096 + 64] {
+            assert!(own_lines::<T>(block, 4), "{} bytes from {block}", size_of::<T>());
+        }
+    }
+
+    check::<u8>();
+    check::<Budget>();
+    check::<[u64; 8]>();
+    check::<Wide>();
+    check::<[u64; 16]>();
+    check::<[u64; 17]>();
+}
+
+#[test]
+fn test_per_worker_stride_is_the_value_rounded_up_to_128_bytes() {
+    assert_eq!(
+        (128, 128, 128, 256),
+        (
+            PerWorker::<Budget>::STRIDE,
+            PerWorker::<Wide>::STRIDE,
+            PerWorker::<[u64; 16]>::STRIDE,
+            PerWorker::<[u64; 17]>::STRIDE,
+        )
+    );
+}
+
+/// Lanes, each with per-worker budgets, in a slice and a box.
+#[derive(ShmLayout)]
+#[repr(C)]
+struct Lane {
+    id: u64,
+    budgets: PerWorker<Budget>,
+}
+
+#[derive(ShmLayout)]
+#[repr(C)]
+struct LaneSet {
+    lanes: ShmSlice<Lane>,
+    spare: ShmBox<Lane>,
+}
+
+type LaneSetModule = Fixture<LaneSet>;
+
+#[test]
+fn test_per_worker_nested_in_owned_blocks_is_released_through_its_parents() {
+    let owner = owner_of_workers(3);
+
+    let built = build::<LaneSetModule>(&owner, |b| {
+        Ok(LaneSetParts {
+            lanes: b.slice(2, |idx| {
+                Ok(LaneParts {
+                    id: idx as u64,
+                    budgets: b.per_worker(BUDGET)?,
+                })
+            })?,
+            spare: b.boxed(LaneParts {
+                id: 9,
+                budgets: b.per_worker(BUDGET)?,
+            })?,
+        })
+    })
+    .expect("built");
+
+    let (config, view) = body::<LaneSetModule>(&owner, &built);
+    let lanes = config.lanes.as_slice(&view);
+    // The root block, the lanes, the spare lane and three slot blocks.
+    assert_eq!(
+        (6, vec![BUDGET; 3], vec![BUDGET; 3]),
+        (
+            owner.live_blocks(),
+            slot_values(&owner, &lanes[1].budgets),
+            slot_values(&owner, &config.spare.get(&view).budgets)
+        )
+    );
+    release::<LaneSetModule>(&owner, built);
+    owner.assert_released();
+}
+
+#[test]
+fn test_per_worker_build_without_workers_leaves_the_field_null_and_unallocated() {
+    let owner = owner_of_workers(0);
+
+    let built = build_budgets(&owner).expect("built");
+
+    let (config, _) = body::<BudgetsModule>(&owner, &built);
+    assert_eq!(
+        (0, 0, 1),
+        (
+            config.budgets.offset(),
+            config.budgets.worker_count(),
+            owner.live_blocks()
+        )
+    );
+    release::<BudgetsModule>(&owner, built);
+    owner.assert_released();
+}
+
+/// verifies that a module build sizes the slot block by the owner's workers.
+#[test]
+fn test_per_worker_module_build_sizes_the_slots_by_the_owners_workers() {
+    let owner = owner_of_workers(5);
+
+    let built = build_budgets(&owner).expect("built");
+
+    let size = PerWorker::<Budget>::block_size(5).expect("block size");
+    assert!(owner.live_block_sizes().contains(&size));
+    release::<BudgetsModule>(&owner, built);
+    owner.assert_released();
+}
+
+/// verifies that an object build sizes the slot block by the owner's workers.
+#[test]
+fn test_per_worker_object_build_sizes_the_slots_by_the_owners_workers() {
+    let owner = owner_of_workers(5);
+
+    let built = ObjectBuilder::<BudgetsState>::build::<Failure, _>(&owner, "state0", |b| {
+        Ok(BudgetsParts {
+            word: 0,
+            budgets: b.per_worker(BUDGET)?,
+        })
+    })
+    .expect("built");
+
+    let size = PerWorker::<Budget>::block_size(5).expect("block size");
+    assert!(owner.live_block_sizes().contains(&size));
+    // SAFETY: handed over by the builder, unreferenced, released once.
+    unsafe { built.destroy(&owner) };
+    owner.assert_released();
+}
+
+#[test]
+fn test_per_worker_build_refuses_slots_beyond_the_largest_block_without_asking_the_owner() {
+    for workers in [
+        yanet_sys::bindings::MEMORY_BLOCK_ALLOCATOR_MAX_SIZE as u64 / PerWorker::<Budget>::STRIDE as u64 + 1,
+        u64::MAX,
+    ] {
+        let owner = owner_of_workers(workers);
+        // The root block can be allocated; a request for any further block
+        // would exhaust the memory.
+        owner.fail_after(Call::Alloc, 1);
+
+        let err = build_budgets(&owner).expect_err("slots beyond the largest block");
+
+        assert_eq!(BuildError::Refused(Refusal::BlockTooLarge), err, "{workers} workers");
+        owner.assert_released();
+    }
+}
+
+#[test]
+fn test_per_worker_build_releases_everything_when_the_slot_block_fails() {
+    let owner = owner_of_workers(4);
+    owner.fail_after(Call::Alloc, 1);
+
+    let err = build_budgets(&owner).expect_err("no memory for the slots");
+
+    assert_eq!(BuildError::Refused(Refusal::OutOfMemory), err);
+    owner.assert_released();
+}
+
+#[test]
+fn test_per_worker_build_returns_the_slots_of_a_failed_closure() {
+    let owner = owner_of_workers(4);
+
+    let err = Builder::<BudgetsModule>::build::<AuthorError, _>(&owner, "budgets0", |b| {
+        let _budgets = b.per_worker(BUDGET)?;
+        Err(AuthorError::Input("the budgets are invalid"))
+    })
+    .expect_err("invalid budgets");
+
+    assert_eq!(AuthorError::Input("the budgets are invalid"), err);
+    owner.assert_released();
+}
+
+#[test]
+fn test_per_worker_object_build_writes_the_slots_and_releases_them() {
+    let owner = owner_of_workers(2);
+
+    let built = ObjectBuilder::<BudgetsState>::build::<Failure, _>(&owner, "state0", |b| {
+        Ok(BudgetsParts {
+            word: 1,
+            budgets: b.per_worker(BUDGET)?,
+        })
+    })
+    .expect("built");
+
+    // SAFETY: the object was built in this owner's memory.
+    let config = unsafe { built.config(&owner) };
+    assert_eq!(vec![BUDGET; 2], slot_values(&owner, &config.budgets));
+    // SAFETY: handed over by the builder, unreferenced, released once.
+    unsafe { built.destroy(&owner) };
     owner.assert_released();
 }

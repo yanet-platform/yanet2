@@ -22,6 +22,19 @@ struct packet;
 struct packet_front;
 struct rte_mbuf;
 
+// Worker index of a module execution context whose worker is not known.
+#define YANET_SYS_DP_WORKER_IDX_NONE 0xFFFFFFFFFFFFFFFFULL
+
+// Index of the worker whose execution context holds the module context, for
+// its commit handler, which is not told its worker.
+//
+// The generation keeps one context per worker at the worker's index, so the
+// index is where the module's own context appears; it must agree with the
+// worker C commit handlers find for the same context. Returns
+// YANET_SYS_DP_WORKER_IDX_NONE when the context is not among them.
+YANET_SYS_HIDDEN uint64_t
+yanet_sys_dp_module_worker_idx(struct module_ectx *module_ectx);
+
 // Routes a packet to a module device target, to its input entry when the
 // selector is non-zero and to its output entry otherwise.
 //

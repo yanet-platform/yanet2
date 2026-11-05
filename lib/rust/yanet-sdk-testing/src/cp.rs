@@ -70,6 +70,8 @@ pub struct TestOwner {
     /// Headers initialised and not yet finalised, with the kind of each.
     headers: RefCell<Vec<(Header, HeaderKind)>>,
     registered: Cell<u64>,
+    /// Workers of the dataplane the owner stands for.
+    workers: u64,
     /// Size of each counter registered, in the order of the registrations.
     counter_sizes: RefCell<Vec<u64>>,
     /// Header, type and name of each object link made, in the order of the
@@ -85,7 +87,7 @@ pub struct TestOwner {
 }
 
 impl TestOwner {
-    /// An owner of an empty arena.
+    /// An owner of an empty arena, for a dataplane of one worker.
     ///
     /// # Safety
     ///
@@ -98,11 +100,17 @@ impl TestOwner {
             blocks: RefCell::default(),
             headers: RefCell::default(),
             registered: Cell::new(0),
+            workers: 1,
             counter_sizes: RefCell::default(),
             object_links: RefCell::default(),
             countdowns: Default::default(),
             violations: RefCell::default(),
         }
+    }
+
+    /// The owner for a dataplane of the given number of workers.
+    pub fn with_workers(self, count: u64) -> Self {
+        Self { workers: count, ..self }
     }
 
     /// Makes every call of the kind fail after the given number more
@@ -130,6 +138,12 @@ impl TestOwner {
 
     pub fn live_blocks(&self) -> usize {
         self.blocks.borrow().len()
+    }
+
+    /// Sizes of the blocks handed out and not yet returned, in the order of
+    /// their allocation but for those returned since.
+    pub fn live_block_sizes(&self) -> Vec<usize> {
+        self.blocks.borrow().iter().map(|block| block.1).collect()
     }
 
     /// Headers initialised and not yet finalised, by kind.
@@ -223,16 +237,21 @@ impl TestOwner {
 }
 
 // SAFETY: the arena aligns every block to 64, which covers any size, and keeps
-// it for good; the root is the arena's, which covers every block. The routines
-// called from destructors do not panic: they record what they find wrong. The
-// owner sets up no C memory context in a header and calls no C, which breaks
-// the contract for a configuration with an embedded C object; the constructor
-// is unsafe, and its caller promises to build none.
+// it for good; the root is the arena's, which covers every block. No dataplane
+// runs over the owner, so the worker count the test sets indexes nothing. The
+// routines called from destructors do not panic: they record what they find
+// wrong. The owner sets up no C memory context in a header and calls no C,
+// which breaks the contract for a configuration with an embedded C object; the
+// constructor is unsafe, and its caller promises to build none.
 unsafe impl Owner for TestOwner {
     type Error = TestError;
 
     fn root(&self) -> ShmRoot {
         self.arena.root()
+    }
+
+    fn worker_count(&self) -> u64 {
+        self.workers
     }
 
     fn alloc(&self, size: usize) -> Option<BlockAddr> {

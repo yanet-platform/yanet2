@@ -40,8 +40,9 @@ pub struct Ectx<M> {
 
 impl<M: Module> Ectx<M> {
     /// Committed context of a module whose configuration starts with the
-    /// words; `setup` fills the context before the commit, with the counter
-    /// storage and the device targets the module reads.
+    /// words, on worker 0; `setup` fills the context before the commit, with
+    /// the counter storage and the device targets the module reads, and may
+    /// write blocks the body, at the address it is given, points to.
     ///
     /// # Safety
     ///
@@ -50,7 +51,10 @@ impl<M: Module> Ectx<M> {
     /// counter ids in it must be below the number of slots `setup` provides.
     /// The handler must not redirect a packet: the targets have no routing
     /// state.
-    pub unsafe fn new(config: &[u64], setup: impl FnOnce(&'static BlockArena, &mut bindings::module_ectx)) -> Self {
+    pub unsafe fn new(
+        config: &[u64],
+        setup: impl FnOnce(&'static BlockArena, usize, &mut bindings::module_ectx),
+    ) -> Self {
         const {
             assert!(
                 align_of::<ModuleConfig<M::Config>>() <= 64,
@@ -80,7 +84,7 @@ impl<M: Module> Ectx<M> {
         if size_of::<M::Prepared<'static>>() != 0 {
             context.abs_module_prepared = root.ptr(alloc(size_of::<M::Prepared<'static>>()));
         }
-        setup(arena, &mut context);
+        setup(arena, cp_module + ModuleConfig::<M::Config>::BODY_OFFSET, &mut context);
         let ectx = alloc(size_of::<bindings::module_ectx>());
         // SAFETY: the context block was just allocated.
         unsafe { write(arena, ectx, context) };
@@ -105,6 +109,11 @@ impl<M: Module> Ectx<M> {
             let context = &*root.ptr::<bindings::module_ectx>(self.ectx);
             &*root.ptr::<M::Prepared<'static>>(context.abs_module_prepared.addr())
         }
+    }
+
+    /// Runs the following calls on the worker of the given index.
+    pub fn set_worker(&mut self, idx: u64) {
+        self.worker.idx = idx;
     }
 
     /// Calls the handler on the packets as the input list of a front.
