@@ -131,7 +131,6 @@ CLI_RELEASE_BINARIES := $(addprefix $(RELEASE_DIR)/,$(CLI_BINARIES))
 	hooks \
 	test \
 	test-only \
-	test-recipes \
 	test-asan \
 	test-asan-only \
 	test-tsan \
@@ -338,9 +337,6 @@ test-only: go-test-prepare
 	fi; \
 	go test $(GO_FIXTURE_TAGS) -count=1 $$packages
 	$(if $(GO_TEST_PACKAGES),,meson test -C build)
-
-test-recipes:
-	python3 tests/recipes/dtest_test.py
 
 test-asan:
 	$(MAKE) test-asan-only

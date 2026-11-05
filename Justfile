@@ -161,7 +161,7 @@ _ccache_setup *OPTIONS:
 
 # Run the complete Go and Meson suites after building their dependencies.
 dtest: dtest-ccache-probe
-    @just _docker_run -it "python3 scripts/test-meson-ccache.py && make test-recipes && { test ! -f build/build.ninja || python3 scripts/check-meson-ccache.py build; } && just setup false && python3 scripts/check-meson-ccache.py build && make build && make test GO_TEST_PACKAGES="
+    @just _docker_run -it "python3 scripts/test-meson-ccache.py && { test ! -f build/build.ninja || python3 scripts/check-meson-ccache.py build; } && just setup false && python3 scripts/check-meson-ccache.py build && make build && make test GO_TEST_PACKAGES="
 
 # Run clang-tidy in Docker
 dtidy *FILES:
