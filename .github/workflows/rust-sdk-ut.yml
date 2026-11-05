@@ -1,10 +1,10 @@
 name: Rust SDK dataplane tests
 
-# The Go tests of the Rust module SDK fixtures (lib/rust) over the C dataplane
+# The Go tests of the Rust module SDK fixtures (bindings/rust) over the C dataplane
 # harness, natively. rust-sdk-ut-asan.yml runs them under AddressSanitizer and
 # shares the setup steps below; change both files together.
 #
-# They are separate from build.yml, which excludes lib/rust and installs no
+# They are separate from build.yml, which excludes bindings/rust and installs no
 # Rust toolchain, while the meson build of these tests runs cargo. A change to
 # what the archive, the plugins and the tests are built from or link re-runs
 # the job. It writes its ccache and cargo caches from main only, since a cache
@@ -16,7 +16,7 @@ on:
   push:
     branches: ["main"]
     paths:
-      - "lib/rust/**"
+      - "bindings/rust/**"
       - "api/**.c"
       - "api/**.h"
       - "common/**.c"
@@ -46,7 +46,7 @@ on:
     # A stacked pull request has a non-main base, so a main-only filter would skip it.
     branches: ["**"]
     paths:
-      - "lib/rust/**"
+      - "bindings/rust/**"
       - "api/**.c"
       - "api/**.h"
       - "common/**.c"
@@ -99,7 +99,7 @@ jobs:
     container: ghcr.io/yanet-platform/yanet2-ci@sha256:3cbb2aae05beb4efc16f160cfa4d5307deba5d3110005d6557fdb49e5e2ee7a1
     env:
       # The Makefile runs just these Go packages, and no meson tests.
-      GO_TEST_PACKAGES: ./lib/rust/yanet-sdk-fixture-api/bindings/go/cfixture
+      GO_TEST_PACKAGES: ./bindings/rust/yanet-sdk-fixture-api/bindings/go/cfixture
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -133,7 +133,7 @@ jobs:
       - name: Cache rust
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
-          workspaces: lib/rust -> ../../build/lib/rust/cargo-target
+          workspaces: bindings/rust -> ../../build/bindings/rust/cargo-target
           shared-key: rust-sdk-ut-native
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
@@ -149,7 +149,7 @@ jobs:
         uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9
         with:
           version: v2.15.0
-          args: --timeout 5m --build-tags sdk_rust_fixtures ./lib/rust/...
+          args: --timeout 5m --build-tags sdk_rust_fixtures ./bindings/rust/...
 
       - name: Save Go build cache
         if: success() && github.ref == 'refs/heads/main' && steps.go-buildcache.outputs.cache-hit != 'true' && !env.ACT

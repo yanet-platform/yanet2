@@ -33,7 +33,7 @@ make fuzz [MODULE=<name>]
 - `controlplane/` — `gateway/`, built-in services (`builtin/`), CGO shm bindings (`ffi/`), published-config store (`configstore/`), root protos (`ynpb/`), `yncp/`, entrypoint `cmd/yncp-director`.
 - `modules/` — packet-processing modules; `devices/` — device adapters (`plain`, `vlan`, `trafgen`, `vxlan`), same layout.
 - `operators/` — Go daemons above the gateway: `pipeline`, `route` (`cmd/` + `internal/` + `operatorpb/` + `cli/`), `generic`, `bird-adapter`, `neighbour-sidecar`, `neighbours` (web only here).
-- `lib/` — C support libs (`controlplane`, `dataplane`, `dataplane_ut`, `filter`, `fwstate`, …), `rust/` (Rust module SDK, own cargo workspace); `api/` — public C API headers; `bindings/go/` — root CGO agent bindings.
+- `lib/` — C support libs (`controlplane`, `dataplane`, `dataplane_ut`, `filter`, `fwstate`, …); `api/` — public C API headers; `bindings/` — `go/` (root CGO agent bindings), `rust/` (Rust module SDK, own workspace).
 - `common/` — shared code: `go/` (`xcfg`, `xcmd`, `xerror`, `xgrpc`, `logging`, …), `rust/`, `commonpb/`, `filterpb/`, C headers (`lpm.h`, `hash.h`, `memory*.h`).
 - `cli/` — Rust CLI workspace: `core/` (crate `yanet-cli`, aliased `ync`), `modules/{inspect,pipeline,function,counters,common}`.
 - `lint/` — repo linters (`style`, `commit`, `protobuf`); `docs/`, `deploy/`, `debian/`, `subprojects/dpdk/`.

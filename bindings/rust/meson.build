@@ -145,7 +145,7 @@ if sdk_rust_fixtures.enabled()
   # calls, the joins of the classification library among them, and the header
   # and the plugins are hashed so that a change reaches Go's build.
   cgo_packages += {
-    'lib/rust/yanet-sdk-fixture-api/bindings/go/cfixture': {
+    'bindings/rust/yanet-sdk-fixture-api/bindings/go/cfixture': {
       'build_tag': 'sdk_rust_fixtures',
       'libraries': [lib_classify_compiler, lib_config_cp, lib_counters, lib_errors],
       'generated_archives': [rust_sdk_fixture_api_archive],
