@@ -449,7 +449,7 @@ unsafe impl<'c, O: Object> Resolve<'c> for ObjectCommitCx<'c, O> {
 }
 
 /// A context of a prepare pass, of a module or of an object, which makes the
-/// handles of its worker's per-worker slots.
+/// handles of its worker's per-worker slots and regions.
 ///
 /// Sealed: the contexts are [`CommitCx`] and [`ObjectCommitCx`].
 pub trait PrepareCx<'p>: Resolve<'p> + sealed::Prepare {}
@@ -494,8 +494,8 @@ mod sealed {
         }
     }
 
-    /// What a prepare context holds for the slot handles, out of the public
-    /// surface.
+    /// What a prepare context holds for the slot and region handles, out of
+    /// the public surface.
     pub trait Prepare {
         /// The worker of the context being committed, if known.
         fn prepare_worker(&self) -> Option<u64>;

@@ -18,7 +18,7 @@ use core::sync::atomic::{AtomicU64, Ordering};
 
 use yanet_sdk::{
     Batch, CommitCx, Counter, CounterRef, Cx, Device, Lpm4, Lpm6, Module, Object, ObjectCommitCx, ObjectLink,
-    PerWorker, ShmLayout, ShmSlice, Traffic, Verdict, WorkerSlot,
+    PerWorker, PerWorkerSlice, ShmLayout, ShmSlice, Traffic, Verdict, WorkerSlice, WorkerSlot,
 };
 // The plugin examples use it.
 #[cfg(feature = "plugin")]
@@ -354,14 +354,15 @@ fn route_indexes<'id>(cx: &Cx<'id, Fib>, fib: &'id RouteFib, frame: &[u8]) -> Op
 }
 
 /// The configuration of [`State`]: the seed it was built from, a slot per
-/// item, which the control plane changes while the object is published, and a
-/// slot per worker.
+/// item, which the control plane changes while the object is published, a
+/// slot per worker and a region per worker.
 #[derive(ShmLayout)]
 #[repr(C)]
 pub struct StateConfig {
     pub seed: u64,
     pub slots: ShmSlice<AtomicU64>,
     pub workers: PerWorker<u64>,
+    pub regions: PerWorkerSlice<u64>,
 }
 
 /// An object of atomic slots, the shape of state kept across configuration
@@ -378,15 +379,17 @@ impl Object for State {
         StatePrepared {
             seed: config.seed,
             worker: config.workers.handle(cx),
+            region: config.regions.handle(cx),
         }
     }
 }
 
-/// What [`State`] prepares for each worker: its seed and the handle of the
-/// worker's slot.
+/// What [`State`] prepares for each worker: its seed and the handles of the
+/// worker's slot and region.
 pub struct StatePrepared<'p> {
     pub seed: u64,
     pub worker: Option<WorkerSlot<'p, u64>>,
+    pub region: Option<WorkerSlice<'p, u64>>,
 }
 
 /// The configuration of [`Stash`]: the state object it writes, linked by
@@ -396,13 +399,16 @@ pub struct StatePrepared<'p> {
 pub struct StashConfig {
     pub state: ObjectLink<State>,
     pub seen: Counter,
+    pub filled: Counter,
 }
 
 /// Adds the seed the linked state object prepared to the slot that the first
 /// byte of a packet selects, modulo the slot count, and passes every packet;
 /// an empty packet or an object without slots changes nothing. Counts each
 /// packet in the object's slot of the worker and adds the new count to the
-/// seen counter, unless the object's commit made no handle.
+/// seen counter, and adds one to every value of the object's region of the
+/// worker and their sum to the filled counter, each unless the object's commit
+/// made no handle.
 pub struct Stash;
 
 impl Module for Stash {
@@ -416,6 +422,7 @@ impl Module for Stash {
         let prepared = state.prepared(cx);
         let seed = prepared.seed;
         let seen = &cx.config().seen;
+        let filled = &cx.config().filled;
         batch.dispatch(|packet| {
             let slot = packet
                 .data()
@@ -430,6 +437,13 @@ impl Module for Stash {
                 *count += 1;
                 let count = *count;
                 seen.add(cx, count);
+            }
+            if let Some(region) = prepared.region {
+                region
+                    .get_mut(cx)
+                    .iter_mut()
+                    .for_each(|value| *value = value.wrapping_add(1));
+                filled.add(cx, region.get(cx).iter().copied().fold(0, u64::wrapping_add));
             }
             Verdict::Pass
         });

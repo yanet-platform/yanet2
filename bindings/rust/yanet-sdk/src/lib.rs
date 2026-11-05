@@ -42,13 +42,18 @@
 //! ```
 //!
 //! State a worker keeps for itself across batches is a [`PerWorker`] field: a
-//! slot per worker, built from one value with `scope.per_worker(value)`, which
+//! slot per worker, built from one value, which
 //! the handler reads and writes for its own worker only, through the
 //! [`WorkerSlot`] handle its prepare step keeps: a [`PrepareCx`], of a module
 //! or an object, makes the handle of its worker's slot, and only the handler's
 //! call uses it. The slots live as long as the
 //! configuration: one rebuilt on an update starts them again from that value;
-//! an object's slots outlive the modules linking it.
+//! an object's slots outlive the modules linking it. State too large for one
+//! block of [`PerWorker`] slots, which all workers share, such as a flow
+//! table, is a [`PerWorkerSlice`] field: a region of values per worker, each
+//! its own block, built from one value repeated over a length chosen at build
+//! time, which the handler borrows in place through the [`WorkerSlice`] handle
+//! its prepare step keeps.
 //!
 //! State that outlives the configurations, rebuilt whole on every update, is
 //! an [`Object`]: built the same way by [`ObjectBuilder`], over a scope that
@@ -122,20 +127,21 @@ pub use yanet_sys::{
     common::lpm::{Lpm4, Lpm6, LpmRange},
     cp::{
         BlockAddr, Build, BuildError, Builder, Built, BuiltObject, Context, FfiRecord, Header, Kind, ModuleKind,
-        ObjectBuilder, ObjectKind, Owned, OwnedSlice, OwnedSlots, Owner, Refusal, Registered, Scope, Stage, Staged,
+        ObjectBuilder, ObjectKind, Owned, OwnedRegions, OwnedSlice, OwnedSlots, Owner, Refusal, Registered, Scope,
+        Stage, Staged,
     },
     dp::{
         Batch, CommitCx, Counter, CounterLayout, CounterRef, Cx, Device, DeviceRef, DscpMark, Module, ModuleCx, Object,
-        ObjectCommitCx, ObjectConfig, ObjectLink, Packet, PacketView, PerWorker, PrepareCx, ResizeError, Traffic,
-        TunnelError, Verdict, WorkerSlot,
+        ObjectCommitCx, ObjectConfig, ObjectLink, Packet, PacketView, PerWorker, PerWorkerSlice, PrepareCx,
+        ResizeError, Traffic, TunnelError, Verdict, WorkerSlice, WorkerSlot,
     },
 };
 
 /// Everything a module crate usually imports.
 pub mod prelude {
     pub use crate::{
-        Batch, Counter, CounterRef, Cx, Device, Module, Packet, PerWorker, PrepareCx, ShmBox, ShmLayout, ShmSlice,
-        Traffic, Verdict, WorkerSlot,
+        Batch, Counter, CounterRef, Cx, Device, Module, Packet, PerWorker, PerWorkerSlice, PrepareCx, ShmBox,
+        ShmLayout, ShmSlice, Traffic, Verdict, WorkerSlice, WorkerSlot,
     };
 }
 
@@ -246,6 +252,37 @@ mod doctests {
     /// }
     /// ```
     struct PerWorkerPlainAccepted;
+
+    /// A per-worker region holds plain values only, as a slot does.
+    ///
+    /// ```compile_fail,E0277
+    /// use yanet_sdk::{PerWorkerSlice, ShmLayout, ShmSlice};
+    /// #[derive(ShmLayout)]
+    /// #[repr(C)]
+    /// struct Config {
+    ///     edges: PerWorkerSlice<ShmSlice<u64>>,
+    /// }
+    /// ```
+    struct PerWorkerSliceEdgeRefused;
+
+    /// A per-worker region of plain values builds, the accepted twin of the
+    /// refusal above.
+    ///
+    /// ```
+    /// use yanet_sdk::{PerWorkerSlice, ShmLayout};
+    /// #[derive(Clone, Copy, ShmLayout)]
+    /// #[repr(C)]
+    /// struct Bucket {
+    ///     key: u64,
+    ///     seen: u64,
+    /// }
+    /// #[derive(ShmLayout)]
+    /// #[repr(C)]
+    /// struct Config {
+    ///     buckets: PerWorkerSlice<Bucket>,
+    /// }
+    /// ```
+    struct PerWorkerSlicePlainAccepted;
 
     /// A caller's replacement alignment limit cannot admit over-aligned
     /// storage.

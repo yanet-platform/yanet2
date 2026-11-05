@@ -15,7 +15,8 @@ use core::{
 use yanet_packet as _;
 use yanet_sdk::{
     Batch, Build, BuiltObject, CommitCx, Counter, Cx, Device, Kind, Module, Object, ObjectBuilder, ObjectCommitCx,
-    ObjectLink, OwnedSlice, PerWorker, Refusal, Registered, ShmBox, ShmLayout, ShmSlice, Traffic, Verdict,
+    ObjectLink, OwnedSlice, PerWorker, PerWorkerSlice, Refusal, Registered, ShmBox, ShmLayout, ShmSlice, Traffic,
+    Verdict,
 };
 use yanet_sdk_derive as _;
 use yanet_sdk_testing::{
@@ -1410,6 +1411,346 @@ fn test_per_worker_object_build_writes_the_slots_and_releases_them() {
     // SAFETY: the object was built in this owner's memory.
     let config = unsafe { built.config(&owner) };
     assert_eq!(vec![BUDGET; 2], slot_values(&owner, &config.budgets));
+    // SAFETY: handed over by the builder, unreferenced, released once.
+    unsafe { built.destroy(&owner) };
+    owner.assert_released();
+}
+
+/// A region of budgets per worker beside a plain word.
+#[derive(ShmLayout)]
+#[repr(C)]
+struct Flows {
+    word: u64,
+    table: PerWorkerSlice<Budget>,
+}
+
+type FlowsModule = Fixture<Flows>;
+
+/// An object of a region of budgets per worker.
+struct FlowsState;
+
+impl Object for FlowsState {
+    const TYPE: &'static str = "flows_state";
+    type Config = Flows;
+    type Prepared<'p> = ();
+
+    fn prepare(_: &ObjectCommitCx<'_, Self>) {}
+}
+
+/// Builds a region of `len` budgets per worker, every one the same budget.
+fn build_flows(owner: &TestOwner, len: usize) -> Result<Built<FlowsModule, TestOwner>, Failure> {
+    build::<FlowsModule>(owner, |b| {
+        Ok(FlowsParts {
+            word: 3,
+            table: b.per_worker_slice(len, BUDGET)?,
+        })
+    })
+}
+
+/// Address of the region block of each worker of a built per-worker slice
+/// field of the owner, read from its table.
+fn region_blocks<T: Copy + ShmLayout>(owner: &TestOwner, field: &PerWorkerSlice<T>) -> Vec<usize> {
+    let table = core::ptr::from_ref(field).addr().wrapping_add_signed(field.offset());
+    (0..field.worker_count() as usize)
+        .map(|worker| {
+            let entry = table + worker * size_of::<isize>();
+            // SAFETY: the table holds a word per worker the build wrote,
+            // aligned, and nothing writes it while the test reads.
+            entry.wrapping_add_signed(unsafe { owner.root().ptr::<isize>(entry).read() })
+        })
+        .collect()
+}
+
+/// The values of the region of each worker of a built per-worker slice field
+/// of the owner.
+fn region_values<T: Copy + ShmLayout>(owner: &TestOwner, field: &PerWorkerSlice<T>) -> Vec<Vec<T>> {
+    region_blocks(owner, field)
+        .into_iter()
+        .map(|block| {
+            let first = PerWorkerSlice::<T>::first_element(block);
+            (0..field.len())
+                // SAFETY: each value of the region holds a `T` the build
+                // wrote, aligned, and nothing writes it while the test reads.
+                .map(|idx| unsafe { owner.root().ptr::<T>(first + idx * size_of::<T>()).read() })
+                .collect()
+        })
+        .collect()
+}
+
+/// Reports whether the region of `len` values of `T` in a block at an address
+/// starts on a 128-byte line and touches 128-byte lines that hold no byte
+/// outside the block.
+fn region_owns_its_lines<T: Copy + ShmLayout>(block: usize, len: usize) -> bool {
+    let first = PerWorkerSlice::<T>::first_element(block);
+    let end = block + PerWorkerSlice::<T>::region_block(len).expect("region size");
+    let mine = lines(first, len * size_of::<T>());
+    first.is_multiple_of(128) && *mine.start() * 128 >= block && (*mine.end() + 1) * 128 <= end
+}
+
+#[test]
+fn test_per_worker_slice_build_writes_the_initial_value_into_a_region_per_worker() {
+    let owner = owner_of_workers(3);
+
+    let built = build_flows(&owner, 5).expect("built");
+
+    let (config, _) = body::<FlowsModule>(&owner, &built);
+    assert_eq!(
+        (3, 3, 5, vec![vec![BUDGET; 5]; 3]),
+        (
+            config.word,
+            config.table.worker_count(),
+            config.table.len(),
+            region_values(&owner, &config.table)
+        )
+    );
+    release::<FlowsModule>(&owner, built);
+    owner.assert_released();
+}
+
+/// verifies that every worker's region is a block of its own, sized for its
+/// values padded to whole 128-byte lines, beside the table of the regions.
+#[test]
+fn test_per_worker_slice_build_allocates_a_block_per_region_and_the_table() {
+    let owner = owner_of_workers(3);
+
+    let built = build_flows(&owner, 5).expect("built");
+
+    let region = PerWorkerSlice::<Budget>::region_block(5).expect("region size");
+    let mut sizes = owner.live_block_sizes();
+    sizes.sort_unstable();
+    let mut expected = vec![region; 3];
+    expected.extend([3 * size_of::<isize>(), size_of::<ModuleConfig<Flows>>()]);
+    expected.sort_unstable();
+    // Five budgets of 24 bytes fill one 128-byte line, and the slack.
+    assert_eq!((128 + 64, expected), (region, sizes));
+    release::<FlowsModule>(&owner, built);
+    owner.assert_released();
+}
+
+#[test]
+fn test_per_worker_slice_regions_start_on_and_keep_to_their_own_128_byte_lines() {
+    let owner = owner_of_workers(4);
+
+    let built = build_flows(&owner, 11).expect("built");
+
+    let (config, _) = body::<FlowsModule>(&owner, &built);
+    let blocks = region_blocks(&owner, &config.table);
+    assert!(blocks.iter().all(|&block| region_owns_its_lines::<Budget>(block, 11)));
+    release::<FlowsModule>(&owner, built);
+    owner.assert_released();
+}
+
+#[test]
+fn test_per_worker_slice_region_blocks_do_not_overlap() {
+    let owner = owner_of_workers(4);
+
+    let built = build_flows(&owner, 11).expect("built");
+
+    let (config, _) = body::<FlowsModule>(&owner, &built);
+    let size = PerWorkerSlice::<Budget>::region_block(11).expect("region size");
+    let mut blocks = region_blocks(&owner, &config.table);
+    blocks.sort_unstable();
+    assert!(blocks.windows(2).all(|pair| pair[0] + size <= pair[1]), "{blocks:x?}");
+    release::<FlowsModule>(&owner, built);
+    owner.assert_released();
+}
+
+#[test]
+fn test_per_worker_slice_write_to_one_region_leaves_the_others_unchanged() {
+    let owner = owner_of_workers(3);
+    let built = build_flows(&owner, 5).expect("built");
+    let (config, _) = body::<FlowsModule>(&owner, &built);
+    let first = PerWorkerSlice::<Budget>::first_element(region_blocks(&owner, &config.table)[1]);
+    let changed = Budget { tokens: 1, last: 2, spent: 3 };
+
+    for idx in 0..5 {
+        // SAFETY: the values of worker 1's region, aligned, which nothing
+        // else reads or writes while the test writes.
+        unsafe {
+            owner
+                .root()
+                .ptr::<Budget>(first + idx * size_of::<Budget>())
+                .write(changed)
+        };
+    }
+
+    assert_eq!(
+        vec![vec![BUDGET; 5], vec![changed; 5], vec![BUDGET; 5]],
+        region_values(&owner, &config.table)
+    );
+    release::<FlowsModule>(&owner, built);
+    owner.assert_released();
+}
+
+/// verifies that a region keeps 128-byte lines of its own, holding no byte
+/// outside its block, whether the block starts on a 128-byte line or 64 bytes
+/// past one, as a sanitizer build shifts it.
+#[test]
+fn test_per_worker_slice_layout_keeps_a_region_on_own_128_byte_lines_at_either_start() {
+    fn check<T: Copy + ShmLayout>(len: usize) {
+        for block in [4096, 4096 + 64] {
+            assert!(
+                region_owns_its_lines::<T>(block, len),
+                "{len} of {} bytes from {block}",
+                size_of::<T>()
+            );
+        }
+    }
+
+    for len in [1, 5, 6, 16, 1000] {
+        check::<u8>(len);
+        check::<Budget>(len);
+        check::<Wide>(len);
+        check::<[u64; 16]>(len);
+    }
+}
+
+#[test]
+fn test_per_worker_slice_build_of_no_values_leaves_the_field_null_and_unallocated() {
+    let owner = owner_of_workers(3);
+
+    let built = build_flows(&owner, 0).expect("built");
+
+    let (config, _) = body::<FlowsModule>(&owner, &built);
+    assert_eq!(
+        (0, 3, 0, 1),
+        (
+            config.table.offset(),
+            config.table.worker_count(),
+            config.table.len(),
+            owner.live_blocks()
+        )
+    );
+    release::<FlowsModule>(&owner, built);
+    owner.assert_released();
+}
+
+/// verifies that a build for an owner without workers allocates nothing and
+/// leaves the field without a table and with a length of zero, so no handle
+/// pairs an empty region with a length.
+#[test]
+fn test_per_worker_slice_build_without_workers_leaves_the_field_null_and_unallocated() {
+    let owner = owner_of_workers(0);
+
+    let built = build_flows(&owner, 5).expect("built");
+
+    let (config, _) = body::<FlowsModule>(&owner, &built);
+    assert_eq!(
+        (0, 0, 0, 1),
+        (
+            config.table.offset(),
+            config.table.worker_count(),
+            config.table.len(),
+            owner.live_blocks()
+        )
+    );
+    release::<FlowsModule>(&owner, built);
+    owner.assert_released();
+}
+
+/// The most `u64`s a region the largest block holds takes: whole 128-byte
+/// lines after the slack.
+fn largest_region_len() -> usize {
+    let max = yanet_sys::bindings::MEMORY_BLOCK_ALLOCATOR_MAX_SIZE as usize;
+    (max - 64) / 128 * 128 / size_of::<u64>()
+}
+
+/// verifies that the largest region the largest block holds passes the size
+/// check: the owner is asked, and its exhausted memory is what fails.
+#[test]
+fn test_per_worker_slice_build_of_the_largest_region_asks_the_owner() {
+    let owner = owner_of_workers(2);
+    // The root block can be allocated; the table cannot.
+    owner.fail_after(Call::Alloc, 1);
+
+    let err = build::<Fixture<PerWorkerSlice<u64>>>(&owner, |b| b.per_worker_slice(largest_region_len(), 0))
+        .expect_err("no memory for the table");
+
+    assert_eq!(BuildError::Refused(Refusal::OutOfMemory), err);
+    owner.assert_released();
+}
+
+/// verifies that a region of one value more than the largest block holds, a
+/// length whose bytes overflow, and the longest length are refused before
+/// anything is allocated.
+#[test]
+fn test_per_worker_slice_build_refuses_a_region_beyond_the_largest_block_without_asking_the_owner() {
+    for len in [largest_region_len() + 1, usize::MAX / size_of::<u64>() + 1, usize::MAX] {
+        let owner = owner_of_workers(2);
+        // The root block can be allocated; a request for any further block
+        // would exhaust the memory.
+        owner.fail_after(Call::Alloc, 1);
+
+        let err = build::<Fixture<PerWorkerSlice<u64>>>(&owner, |b| b.per_worker_slice(len, 0))
+            .expect_err("a region beyond the largest block");
+
+        assert_eq!(BuildError::Refused(Refusal::BlockTooLarge), err, "{len} values");
+        owner.assert_released();
+    }
+}
+
+/// verifies that a table of more workers than the largest block holds a word
+/// for, or of a count that overflows, is refused before anything is
+/// allocated.
+#[test]
+fn test_per_worker_slice_build_refuses_a_table_beyond_the_largest_block_without_asking_the_owner() {
+    let max = yanet_sys::bindings::MEMORY_BLOCK_ALLOCATOR_MAX_SIZE as u64;
+    for workers in [max / size_of::<isize>() as u64 + 1, u64::MAX] {
+        let owner = owner_of_workers(workers);
+        // The root block can be allocated; a request for any further block
+        // would exhaust the memory.
+        owner.fail_after(Call::Alloc, 1);
+
+        let err = build_flows(&owner, 1).expect_err("a table beyond the largest block");
+
+        assert_eq!(BuildError::Refused(Refusal::BlockTooLarge), err, "{workers} workers");
+        owner.assert_released();
+    }
+}
+
+#[test]
+fn test_per_worker_slice_build_releases_everything_when_memory_runs_out_at_each_block() {
+    // The root block, the table and three regions.
+    for allowed in 1..5 {
+        let owner = owner_of_workers(3);
+        owner.fail_after(Call::Alloc, allowed);
+
+        let err = build_flows(&owner, 5).expect_err("no memory for a block");
+
+        assert_eq!(BuildError::Refused(Refusal::OutOfMemory), err, "{allowed} blocks");
+        owner.assert_released();
+    }
+}
+
+#[test]
+fn test_per_worker_slice_build_returns_the_regions_of_a_failed_closure() {
+    let owner = owner_of_workers(4);
+
+    let err = Builder::<FlowsModule>::build::<AuthorError, _>(&owner, "flows0", |b| {
+        let _table = b.per_worker_slice(5, BUDGET)?;
+        Err(AuthorError::Input("the flows are invalid"))
+    })
+    .expect_err("invalid flows");
+
+    assert_eq!(AuthorError::Input("the flows are invalid"), err);
+    owner.assert_released();
+}
+
+#[test]
+fn test_per_worker_slice_object_build_writes_the_regions_and_releases_them() {
+    let owner = owner_of_workers(2);
+
+    let built = ObjectBuilder::<FlowsState>::build::<Failure, _>(&owner, "flows0", |b| {
+        Ok(FlowsParts {
+            word: 1,
+            table: b.per_worker_slice(3, BUDGET)?,
+        })
+    })
+    .expect("built");
+
+    // SAFETY: the object was built in this owner's memory.
+    let config = unsafe { built.config(&owner) };
+    assert_eq!(vec![vec![BUDGET; 3]; 2], region_values(&owner, &config.table));
     // SAFETY: handed over by the builder, unreferenced, released once.
     unsafe { built.destroy(&owner) };
     owner.assert_released();

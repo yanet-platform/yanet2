@@ -35,6 +35,9 @@ pub const FIXTURE_FAULT_PANIC: u64 = 2;
 /// The build panics with a payload whose destructor also panics.
 pub const FIXTURE_FAULT_PANIC_PAYLOAD: u64 = 3;
 
+/// Values in each worker's region of a state object.
+const STATE_REGION_LEN: usize = 2;
+
 /// What a `Fixture` configuration is made of besides its names and ranges.
 #[derive(FfiRecord)]
 #[repr(C)]
@@ -203,12 +206,13 @@ pub struct Stash;
 impl Stash {
     /// A configuration named `name` that writes the state object named
     /// `state`, which a generation must hold when it is installed, and counts
-    /// in `seen`.
+    /// in `seen` and `filled`.
     pub fn build(agent: &Agent, name: &str, state: &str) -> Result<Built<yanet_sdk_fixture::Stash, Agent>, ApiError> {
         Builder::<yanet_sdk_fixture::Stash>::build::<ApiError, _>(agent, name, |scope| {
             Ok(StashConfigParts {
                 state: scope.object(state)?,
                 seen: scope.counter("seen")?,
+                filled: scope.counter("filled")?,
             })
         })
     }
@@ -219,9 +223,10 @@ pub struct State;
 #[yanet_sdk::api(object = yanet_sdk_fixture::State)]
 impl State {
     /// An object named `name` of `count` slots, slot n holding `seed` + n,
-    /// wrapping, and a slot per worker holding `seed`; the fault, a
-    /// `FIXTURE_FAULT_*` constant, fails the build after it has allocated the
-    /// slots.
+    /// wrapping, a slot per worker holding `seed` and a region per worker of
+    /// two values holding `seed`; the fault, a `FIXTURE_FAULT_*`
+    /// constant, fails the build after it has allocated the slots and the
+    /// regions.
     pub fn build(
         agent: &Agent,
         name: &str,
@@ -233,13 +238,14 @@ impl State {
         ObjectBuilder::<yanet_sdk_fixture::State>::build::<ApiError, _>(agent, name, |scope| {
             let slots = scope.slice(count, |idx| Ok(AtomicU64::new(seed.wrapping_add(idx as u64))))?;
             let workers = scope.per_worker(seed)?;
+            let regions = scope.per_worker_slice(STATE_REGION_LEN, seed)?;
             match fault {
                 FIXTURE_FAULT_NONE => {}
                 FIXTURE_FAULT_ERROR => return Err(ApiError::from(Refusal::BlockTooLarge)),
                 FIXTURE_FAULT_PANIC => panic!("fixture fault"),
                 _ => return Err(ApiError::new(ErrorKind::InvalidArgument, "unknown fault")),
             }
-            Ok(StateConfigParts { seed, slots, workers })
+            Ok(StateConfigParts { seed, slots, workers, regions })
         })
     }
 
