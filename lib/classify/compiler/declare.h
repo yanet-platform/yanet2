@@ -202,6 +202,14 @@ classify_attr_compile(
 		memory_context, sizeof(uint32_t) * group_alloc_count
 	);
 	if (group_first_rule == NULL) {
+		// The stage row is already live here: release it so this
+		// failure returns the stage zeroed like every other one.
+		memory_bfree(
+			memory_context,
+			cls->rule_groups,
+			sizeof(uint32_t) * group_alloc_count
+		);
+		cls->rule_groups = NULL;
 		goto error_free_compile;
 	}
 
