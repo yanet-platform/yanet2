@@ -396,9 +396,25 @@ impl<T: Copy + ShmLayout> PerWorker<T> {
 /// ```
 ///
 /// Copies and moves are harmless for the same reason, so the handle is `Copy`
-/// and `Send`, as the prepared value travels from the assigner thread to its
-/// worker. It has no `Debug`: it holds only an address, and its value is read
-/// only in the call.
+/// and, for a `Send` value, `Send`, as the prepared value travels from the
+/// assigner thread to its worker. It has no `Debug`: it holds only an address,
+/// and its value is read only in the call.
+///
+/// The handle of a value tied to its thread is not `Send`, so that value never
+/// moves to the worker:
+///
+/// ```compile_fail,E0277
+/// # use core::marker::PhantomData;
+/// # use yanet_shm::shm::ShmLayout;
+/// # use yanet_sys::dp::WorkerSlot;
+/// #[derive(Clone, Copy)]
+/// #[repr(C)]
+/// struct Local(u64, PhantomData<*const ()>);
+/// // SAFETY: a plain word with no padding and no drop.
+/// unsafe impl ShmLayout for Local {}
+/// fn moves<T: Send>() {}
+/// moves::<WorkerSlot<'static, Local>>();
+/// ```
 ///
 /// It has no shared-memory layout, so it is never a slot or a configuration
 /// field, which would outlive the block it points into:
@@ -435,8 +451,9 @@ impl<T: Copy + ShmLayout> Copy for WorkerSlot<'_, T> {}
 
 // SAFETY: the handle is an address and touches nothing by itself; every read
 // and write takes the call context of the handle's brand, which is neither
-// `Send` nor `Sync` and runs on the handle's worker.
-unsafe impl<T: Copy + ShmLayout> Send for WorkerSlot<'_, T> {}
+// `Send` nor `Sync` and runs on the handle's worker; the value it reaches is
+// `Send`, as it moves to that worker's thread.
+unsafe impl<T: Copy + ShmLayout + Send> Send for WorkerSlot<'_, T> {}
 
 impl<'id, T: Copy + ShmLayout> WorkerSlot<'id, T> {
     /// The slot itself, borrowed shared while the call context stays
@@ -594,8 +611,9 @@ impl<'id, T: Copy + ShmLayout> WorkerSlot<'id, T> {
 // pattern, with no padding and no drop; the values live in the slot block,
 // which only the handles reach, each a worker's own slot, used only with that
 // worker's call context, which is neither `Send` nor `Sync` and so never
-// leaves the worker's thread.
-unsafe impl<T: Copy + ShmLayout> Sync for PerWorker<T> {}
+// leaves the worker's thread; the values are `Send`, as each is reached from
+// its worker's thread.
+unsafe impl<T: Copy + ShmLayout + Send> Sync for PerWorker<T> {}
 
 // SAFETY: as above; the block it names is owned by the graph and its slots
 // are plain values aligned for `T` by the builder.
@@ -783,13 +801,29 @@ impl<T: Copy + ShmLayout> PerWorkerSlice<T> {
 /// }
 /// ```
 ///
-/// The handle is `Copy` and `Send`, as the prepared value travels from the
-/// assigner thread to its worker, and not `Sync`:
+/// The handle is `Copy` and, for `Send` values, `Send`, as the prepared value
+/// travels from the assigner thread to its worker, and not `Sync`:
 ///
 /// ```compile_fail,E0277
 /// # use yanet_sys::dp::WorkerSlice;
 /// fn shared<T: Sync>() {}
 /// shared::<WorkerSlice<'static, u64>>();
+/// ```
+///
+/// The handle of a value tied to its thread is not `Send`, so that value never
+/// moves to the worker:
+///
+/// ```compile_fail,E0277
+/// # use core::marker::PhantomData;
+/// # use yanet_shm::shm::ShmLayout;
+/// # use yanet_sys::dp::WorkerSlice;
+/// #[derive(Clone, Copy)]
+/// #[repr(C)]
+/// struct Local(u64, PhantomData<*const ()>);
+/// // SAFETY: a plain word with no padding and no drop.
+/// unsafe impl ShmLayout for Local {}
+/// fn moves<T: Send>() {}
+/// moves::<WorkerSlice<'static, Local>>();
 /// ```
 ///
 /// It has no shared-memory layout, so it is never a configuration field,
@@ -828,8 +862,9 @@ impl<T: Copy + ShmLayout> Copy for WorkerSlice<'_, T> {}
 
 // SAFETY: the handle is an address and a length and touches nothing by
 // itself; every borrow takes the call context of the handle's brand, which is
-// neither `Send` nor `Sync` and runs on the handle's worker.
-unsafe impl<T: Copy + ShmLayout> Send for WorkerSlice<'_, T> {}
+// neither `Send` nor `Sync` and runs on the handle's worker; the values it
+// reaches are `Send`, as they move to that worker's thread.
+unsafe impl<T: Copy + ShmLayout + Send> Send for WorkerSlice<'_, T> {}
 
 impl<'id, T: Copy + ShmLayout> WorkerSlice<'id, T> {
     /// Number of values in the region.
@@ -987,8 +1022,10 @@ impl<'id, T: Copy + ShmLayout> WorkerSlice<'id, T> {
 // bit pattern, with no padding and no drop; the regions live in their blocks,
 // which only the handles reach, each a worker's own region, used only with
 // that worker's call context, which is neither `Send` nor `Sync` and so never
-// leaves the worker's thread. The table is frozen with the configuration.
-unsafe impl<T: Copy + ShmLayout> Sync for PerWorkerSlice<T> {}
+// leaves the worker's thread; the values are `Send`, as each region is
+// reached from its worker's thread. The table is frozen with the
+// configuration.
+unsafe impl<T: Copy + ShmLayout + Send> Sync for PerWorkerSlice<T> {}
 
 // SAFETY: as above; the table and the regions it names are owned by the graph,
 // and the regions hold plain values aligned for `T` by the builder.
