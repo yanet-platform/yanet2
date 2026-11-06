@@ -7,22 +7,6 @@
 # the alias sdk-rust-fixtures builds just them.
 sdk_rust_fixtures = get_option('sdk_rust_fixtures')
 
-# The classify shims of the SDK, whose lookups the Rust ones are tested
-# against, built here against the C library to pin that those lookups stay
-# inside the objects they index.
-classify_shim_guard_test = executable(
-  'classify_shim_guard_test',
-  [
-    'yanet-sys/shim/tests/classify_guard_test.c',
-    'yanet-sys/shim/classify_cp_shim.c',
-    'yanet-sys/shim/classify_dp_shim.c',
-  ],
-  c_args: yanet_test_c_args,
-  dependencies: [lib_common_dep, lib_classify_compiler_dep, libdpdk_inc_dep],
-  include_directories: [yanet_rootdir, include_directories('yanet-sys/shim')],
-)
-test('classify_shim_guard', classify_shim_guard_test, suite: ['filter'])
-
 if sdk_rust_fixtures.enabled()
   rust_sdk_fixture_paths = configuration_data()
   rust_sdk_fixture_paths.set_quoted('YANET_SDK_FIXTURE_PLUGIN_DIR', meson.current_build_dir() / 'plugins')

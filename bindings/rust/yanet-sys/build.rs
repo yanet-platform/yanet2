@@ -72,24 +72,21 @@ fn c_build(flags: &CFlags, shim_dir: &Path) -> cc::Build {
 ///
 /// The dataplane shim wraps header-inline C routing helpers and the packet
 /// encapsulation routines, whose sources it compiles in; the common shim wraps
-/// the header-inline LPM and memory routines of `common/`; the classify shims
-/// wrap the compiles and the lookups of `lib/classify`, in an object each: the
-/// builder calls the compiles, and the lookups are what the tests hold the
-/// Rust ports to, so a plugin pulls neither. They are linked into every module
-/// plugin with hidden visibility, so a plugin exports nothing of them and
-/// imports none of the encapsulation from the host.
+/// the header-inline LPM and memory routines of `common/`; the classify shim
+/// wraps the compiles, the joins and the decode of `lib/classify`, which the
+/// builder calls, so a plugin pulls none of it. They are linked into every
+/// module plugin with hidden visibility, so a plugin exports nothing of them
+/// and imports none of the encapsulation from the host.
 fn build_shim(flags: &CFlags, shim_dir: &Path) {
     let mut build = c_build(flags, shim_dir);
     build
         .file(shim_dir.join("classify_cp_shim.c"))
-        .file(shim_dir.join("classify_dp_shim.c"))
         .file(shim_dir.join("common_shim.c"))
         .file(shim_dir.join("dp_shim.c"))
         .files(PACKET_SOURCES.map(|source| flags.source(source)))
         .flag("-fvisibility=hidden");
     for file in [
         "classify_cp_shim.c",
-        "classify_dp_shim.c",
         "classify_shim.h",
         "common_shim.c",
         "common_shim.h",

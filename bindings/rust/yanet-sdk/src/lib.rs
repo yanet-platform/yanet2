@@ -121,14 +121,14 @@ pub use yanet_shm::{
 };
 pub use yanet_sys::{
     classify::{
-        Addr4, Attribute, Joint, LineAttr, LineRange, Lines, Net4, Net4Attr, Net6, Net6Attr, Nets4, Nets6, PortAttr,
-        PortRange, Ports, Rule, RuleMap, RuleTable, results_min,
+        Addr4, Attribute, BURST, Decode, Join, LineAttr, LineRange, Lines, Net4, Net4Attr, Net6, Net6Attr, Nets4,
+        Nets6, Node, PortAttr, PortRange, Ports, Rule, Rules, results_min,
     },
     common::lpm::{Lpm4, Lpm6, LpmRange},
     cp::{
-        BlockAddr, Build, BuildError, Builder, Built, BuiltObject, Context, FfiRecord, Header, Kind, ModuleKind,
-        ObjectBuilder, ObjectKind, Owned, OwnedRegions, OwnedSlice, OwnedSlots, Owner, Refusal, Registered, Scope,
-        Stage, Staged,
+        BlockAddr, Branch, Build, BuildError, Builder, Built, BuiltObject, Context, FfiRecord, Header, Kind,
+        ModuleKind, ObjectBuilder, ObjectKind, Owned, OwnedRegions, OwnedSlice, OwnedSlots, Owner, Refusal, Registered,
+        Scope,
     },
     dp::{
         Batch, CommitCx, Counter, CounterLayout, CounterRef, Cx, Device, DeviceRef, DscpMark, Module, ModuleCx, Object,
