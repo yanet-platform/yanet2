@@ -21,37 +21,44 @@ lives in `cli/modules/<x>/`.
 ```toml
 [package]
 name = "yanet-cli-<suffix>"
-version = "0.3.0"
-edition = "2024"
-publish = false
-
-rust-version = "1.99"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+rust-version.workspace = true
 
 [lints]
 workspace = true
 
 [dependencies]
-commonpb = { path = "../../../common/rust/commonpb", package = "yanet-commonpb" }
+commonpb.workspace = true
 # Only when the proto imports common/filterpb.
-filterpb = { path = "../../../common/rust/filterpb", package = "yanet-filterpb" }
-ync = { path = "../../../cli/core", package = "yanet-cli" }
-clap = { version = "4.5", features = ["derive", "wrap_help"] }
-clap_complete = { version = "4.5", features = ["unstable-dynamic"] }
-netip = "0.4"
-prost = "0.14"
-serde = { version = "1", features = ["derive"] }
-tonic = { version = "0.14", features = ["gzip", "zstd"] }
+filterpb.workspace = true
+ync.workspace = true
+clap = { workspace = true, features = ["wrap_help"] }
+clap_complete.workspace = true
+netip.workspace = true
+prost.workspace = true
+serde = { workspace = true, features = ["derive"] }
+tonic.workspace = true
 
 [build-dependencies]
-ync-build = { path = "../../../cli/ync-build", package = "yanet-cli-build" }
+ync-build.workspace = true
 ```
+
+The package fields come from the root `[workspace.package]`. A dependency
+comes from the root `[workspace.dependencies]` when it is a workspace crate,
+when two or more members use it, or when it is a tonic or prost crate
+released with those; a member names only the features it adds. Any other
+dependency keeps its version in the crate's own manifest and moves to the
+root once a second member takes it. An out-of-tree module CLI carries its own
+`[workspace]`, so it spells the package fields and dependencies out instead.
 
 Add a dependency only when the code uses it; `netip` is listed because
 almost every binary parses an address. A binary that prints a table adds
-`tabled = { version = "0.21", default-features = false, features = ["ansi",
-"derive"] }`: default features off, since the default `assert` feature
-links `testing_table` into the binary, and `derive` only when a row type
-derives `Tabled`.
+`tabled.workspace = true`, or `tabled = { workspace = true, features =
+["derive"] }` when a row type derives `Tabled`: the workspace entry turns
+default features off, since the default `assert` feature links
+`testing_table` into the binary.
 
 ## build.rs
 
