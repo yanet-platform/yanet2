@@ -117,12 +117,20 @@ jobs:
           meson setup build -Ddataplane_only=true
       # Workspace lints deny undocumented unsafe blocks and unsafe
       # operations in unsafe functions.
+      #
+      # With CARGO_BUILD_WARNINGS=deny a crate that only warns still builds, so
+      # --keep-going checks its dependents too and the run lists every warning
+      # before it fails.
       - working-directory: bindings/rust
-        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+        run: cargo clippy --workspace --all-targets --locked --keep-going
+        env:
+          CARGO_BUILD_WARNINGS: deny
       # The plugin examples need the `plugin` feature and the plugin profile
       # (a `no_std` cdylib cannot unwind), so the run above never sees them.
       - working-directory: bindings/rust
-        run: cargo clippy --profile plugin -p yanet-sdk-fixture --features plugin --examples --locked -- -D warnings
+        run: cargo clippy --profile plugin -p yanet-sdk-fixture --features plugin --examples --locked --keep-going
+        env:
+          CARGO_BUILD_WARNINGS: deny
       # A bare-metal target has no std: the crates compile only if nothing
       # pulls std or alloc in. The bindings follow the meson configuration of
       # the machine, so an arm64 row on a runner that is not arm64 skips it.

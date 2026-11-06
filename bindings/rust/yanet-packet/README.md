@@ -50,4 +50,4 @@ cargo check --target x86_64-unknown-none     # standalone: no std, no alloc
 ```
 
 Inside the SDK workspace it is also linted by the workspace's
-`cargo clippy --workspace --all-targets -- -D warnings`.
+`CARGO_BUILD_WARNINGS=deny cargo clippy --workspace --all-targets --keep-going`.
