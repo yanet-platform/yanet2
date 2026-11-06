@@ -1,9 +1,9 @@
 //! Bindings of `lib/classify`, the classification library of the C modules.
 //!
 //! A module composes its classifier as a C module does, as one tree ([`Join`],
-//! [`Rules`], [`Decode`]). The control plane compiles a classifier of each
-//! attribute of the rules, joins the classes of two classifiers into the
-//! classes of the next, and ends in a rule table or a rule map that maps the
+//! [`Rules`], [`Decode`], [`Paths`]). The control plane compiles a classifier
+//! of each attribute of the rules, joins the classes of two classifiers into
+//! the classes of the next, and ends in rule tables or rule maps that map the
 //! last classes to the first rule they match. Every classifier, joint, rule
 //! table and rule map is a C object a build writes, its type here a mirror of
 //! its C struct, and each node of the tree holds the classifiers whose classes
@@ -38,7 +38,7 @@ use yanet_shm::{
     shm::{MAX_ALIGN, ShmLayout},
 };
 
-pub use self::tree::{BURST, Decode, Join, Node, Rules, link};
+pub use self::tree::{BURST, Decode, Join, Node, Paths, Rules, link};
 pub use crate::bindings::{
     classify_line_range as LineRange, filter_port_range as PortRange, net4 as Net4, net6 as Net6,
 };
@@ -483,7 +483,8 @@ pub struct Joint {
 }
 
 /// The first rule each pair of classes of two stages matches, C's
-/// `struct rule_table`: the table of a [`Rules`], which the join writes.
+/// `struct rule_table`: the table of a [`Rules`] or of a path of a [`Paths`],
+/// which the join writes.
 #[repr(C)]
 pub struct RuleTable {
     _memory_context: ContextSlot,
@@ -499,7 +500,7 @@ pub struct RuleTable {
 }
 
 /// The first rule each class of a stage matches, C's `struct vline`: the map
-/// of a [`Decode`], which the decode writes.
+/// of a [`Decode`] or of a path of a [`Paths`], which the decode writes.
 #[repr(C)]
 pub struct RuleMap {
     line: Line,
