@@ -18,6 +18,48 @@
 #include "common/remap.h"
 #include "common/value.h"
 
+/*
+ * One interned row of a rule table, encoded as a bitmap with ranks.
+ *
+ * The cells of a row are mostly the not-matched marker, so a row
+ * stores which columns resolve instead of storing every column: a
+ * bitmap word per 32 columns paired with the count of resolved
+ * columns before it, then the resolved rule indices in column order.
+ */
+
+struct rule_row {
+	// The number of resolved columns and bitmap words.
+	uint32_t value_count;
+	uint32_t tuple_count;
+};
+
+// The bitmap word and its rank packed as one aligned load.
+union rule_tuple {
+	uint64_t pair;
+	struct {
+		uint32_t bits;
+		uint32_t rank;
+	} split;
+};
+
+static inline union rule_tuple *
+rule_row_tuples(struct rule_row *row) {
+	return (union rule_tuple *)(row + 1);
+}
+
+// The resolved rule indices start after the bitmap words.
+static inline uint32_t *
+rule_row_values(struct rule_row *row) {
+	return (uint32_t *)(rule_row_tuples(row) + row->tuple_count);
+}
+
+static inline size_t
+rule_row_size(uint32_t tuple_count, uint32_t value_count) {
+	return sizeof(struct rule_row) +
+	       (size_t)tuple_count * sizeof(union rule_tuple) +
+	       (size_t)value_count * sizeof(uint32_t);
+}
+
 struct rule_table {
 	struct memory_context *memory_context;
 	// The original left class space the map is indexed by.
@@ -27,11 +69,10 @@ struct rule_table {
 	// class - the interned row it shares with every class of an equal
 	// first-match row.
 	struct vline class_map;
-	// The compact class rows, one chunk per compact class spanning the
-	// whole right class space. The builder fills them before the map
+	// The compact class rows. The builder fills them before the map
 	// goes in, so a failed build leaves the map empty and the free
 	// below safe.
-	uint32_t **rows;
+	struct rule_row **rows;
 	uint32_t class_count;
 };
 
@@ -47,24 +88,26 @@ rule_table_free(struct rule_table *rule_table) {
 		return;
 	}
 
-	uint32_t **rows = ADDR_OF(&rule_table->rows);
+	struct rule_row **rows = ADDR_OF(&rule_table->rows);
 	if (rows != NULL) {
 		for (uint32_t idx = 0; idx < rule_table->class_count; ++idx) {
-			uint32_t *row = ADDR_OF(rows + idx);
+			struct rule_row *row = ADDR_OF(rows + idx);
 			if (row == NULL) {
 				continue;
 			}
 			memory_bfree(
 				memory_context,
 				row,
-				rule_table->h_dim * sizeof(uint32_t)
+				rule_row_size(
+					row->tuple_count, row->value_count
+				)
 			);
 			SET_OFFSET_OF(rows + idx, NULL);
 		}
 		memory_bfree(
 			memory_context,
 			rows,
-			rule_table->class_count * sizeof(uint32_t *)
+			rule_table->class_count * sizeof(struct rule_row *)
 		);
 		SET_OFFSET_OF(&rule_table->rows, NULL);
 	}
@@ -120,7 +163,16 @@ rule_table_get(
 	// path they are never NULL.
 	struct rule_table *table = (struct rule_table *)rule_table;
 	uint32_t compact = vline_get(&table->class_map, v_idx);
-	uint32_t **rows = ADDR_OF_NONNULL(&table->rows);
-	uint32_t *row = ADDR_OF_NONNULL(rows + compact);
-	return row[h_idx];
+	struct rule_row **rows = ADDR_OF_NONNULL(&table->rows);
+	struct rule_row *row = ADDR_OF_NONNULL(rows + compact);
+	union rule_tuple *tuples = rule_row_tuples(row);
+	union rule_tuple tuple = tuples[h_idx / 32];
+	uint32_t bit = 1u << (h_idx % 32);
+	if ((tuple.split.bits & bit) == 0) {
+		return UINT32_MAX;
+	}
+	uint32_t *values = rule_row_values(row);
+	return values
+		[tuple.split.rank +
+		 __builtin_popcount(tuple.split.bits & (bit - 1))];
 }

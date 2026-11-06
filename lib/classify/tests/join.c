@@ -170,6 +170,69 @@ run_uncovered_classes_test(void) {
 	free(memory);
 }
 
+// Rows spanning several bitmap words resolve columns across the word
+// and rank boundaries: the row below changes its rule between the
+// first and the second word, so a rank that lost the count of the
+// earlier words would resolve the later columns to the earlier rule.
+static void
+run_word_boundary_test(void) {
+	void *memory;
+	assert(posix_memalign(&memory, 1 << 21, 2 << 20) == 0);
+	struct block_allocator allocator;
+	block_allocator_init(&allocator);
+	block_allocator_put_arena(&allocator, memory, 2 << 20);
+	struct memory_context ctx;
+	memory_context_init(&ctx, "boundary", &allocator);
+	size_t initial = block_allocator_free_size(&allocator);
+	struct classifier left = {0}, right = {0};
+	assert(classifier_init(&left, &ctx, 3) == 0);
+	assert(classifier_init(&right, &ctx, 3) == 0);
+	assert(value_registry_init(&left.registry, &ctx, "left") == 0);
+	assert(value_registry_init(&right.registry, &ctx, "right") == 0);
+	// The left classes split over two groups; the right groups pin
+	// columns 0 and 31 to the first bitmap word and columns 32 and 70
+	// to the second and the partial last word of the 71-column space.
+	assert(value_registry_start(&left.registry) == 0);
+	assert(value_registry_collect(&left.registry, 0) == 0);
+	assert(value_registry_start(&left.registry) == 0);
+	assert(value_registry_collect(&left.registry, 1) == 0);
+	assert(value_registry_start(&right.registry) == 0);
+	assert(value_registry_collect(&right.registry, 0) == 0);
+	assert(value_registry_collect(&right.registry, 31) == 0);
+	assert(value_registry_start(&right.registry) == 0);
+	assert(value_registry_collect(&right.registry, 32) == 0);
+	assert(value_registry_collect(&right.registry, 70) == 0);
+	memcpy(left.rule_groups, (uint32_t[]){0, 0, 1}, 3 * sizeof(uint32_t));
+	memcpy(right.rule_groups, (uint32_t[]){0, 1, 0}, 3 * sizeof(uint32_t));
+	struct classifier_rule dummy = {};
+	const struct classifier_rule *rules[] = {&dummy, &dummy, &dummy};
+	struct rule_table table = {0};
+	assert(classify_join_rules(
+		       &ctx, "join", &left, &right, rules, 3, &table
+	       ) == 0);
+	assert(table.class_count == 2);
+	for (uint32_t h = 0; h < 71; ++h) {
+		uint32_t want = UINT32_MAX;
+		if (h == 0 || h == 31) {
+			want = 0;
+		} else if (h == 32 || h == 70) {
+			want = 1;
+		}
+		assert(rule_table_get(&table, 0, h) == want);
+		want = UINT32_MAX;
+		if (h == 0 || h == 31) {
+			want = 2;
+		}
+		assert(rule_table_get(&table, 1, h) == want);
+	}
+	rule_table_free(&table);
+	classifier_fini(&left, &ctx, 3);
+	classifier_fini(&right, &ctx, 3);
+	assert(block_allocator_free_size(&allocator) == initial);
+	memory_context_fini(&ctx);
+	free(memory);
+}
+
 static void
 run_failed_join_cleanup_test(void) {
 	// The classifiers live under a roomy arena; the joint builds under
@@ -247,8 +310,9 @@ main(void) {
 	run_first_match_projection_test();
 	run_duplicate_rows_fit_test();
 	run_uncovered_classes_test();
+	run_word_boundary_test();
 	run_failed_join_cleanup_test();
-	puts("first-match/projection, duplicate rows and failed-build "
-	     "cleanup: PASS");
+	puts("first-match/projection, duplicate rows, word boundaries and "
+	     "failed-build cleanup: PASS");
 	return 0;
 }
