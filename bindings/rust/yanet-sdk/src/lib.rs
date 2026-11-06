@@ -8,10 +8,13 @@
 //! build closure returns, and the scope the closure receives allocates the
 //! owned blocks and registers counters and devices. A device is registered once
 //! and the [`Registered`] it returns is copied into every entry that uses it.
-//! The parts of a table are the author's ranges, borrowed for the build:
+//! The parts of a table are the author's ranges, borrowed for the build. A
+//! value a configuration may lack, such as a table most entries leave empty,
+//! is a [`ShmOption`] field: held inline behind a tag and built from optional
+//! parts, it allocates nothing when absent:
 //!
 //! ```
-//! use yanet_sdk::{Device, Lpm4, LpmRange, ShmBox, ShmLayout, ShmSlice};
+//! use yanet_sdk::{Device, Lpm4, Lpm6, LpmRange, ShmBox, ShmLayout, ShmOption, ShmSlice};
 //!
 //! #[derive(ShmLayout)]
 //! #[repr(C)]
@@ -26,6 +29,7 @@
 //!     default: ShmBox<Entry>,
 //!     entries: ShmSlice<Entry>,
 //!     routes: Lpm4,
+//!     routes_v6: ShmOption<Lpm6>,
 //! }
 //!
 //! fn config<'b, W: yanet_sdk::Owner, E: From<yanet_sdk::BuildError<W::Error>>>(
@@ -37,6 +41,7 @@
 //!         default: scope.boxed(EntryParts { device: eth0, weight: 0 })?,
 //!         entries: scope.slice(3, |i| Ok(EntryParts { device: eth0, weight: [1, 2, 3][i] }))?,
 //!         routes: ranges,
+//!         routes_v6: None,
 //!     })
 //! }
 //! ```
@@ -115,6 +120,7 @@
 pub use yanet_packet as packet;
 pub use yanet_sdk_derive::{FfiRecord, ShmLayout, api};
 pub use yanet_shm::{
+    option::ShmOption,
     rel::{ShmBox, ShmSlice},
     resolve::Resolve,
     shm::ShmLayout,
@@ -141,7 +147,7 @@ pub use yanet_sys::{
 pub mod prelude {
     pub use crate::{
         Batch, Counter, CounterRef, Cx, Device, Module, Packet, PerWorker, PerWorkerSlice, PrepareCx, ShmBox,
-        ShmLayout, ShmSlice, Traffic, Verdict, WorkerSlice, WorkerSlot,
+        ShmLayout, ShmOption, ShmSlice, Traffic, Verdict, WorkerSlice, WorkerSlot,
     };
 }
 
@@ -283,6 +289,24 @@ mod doctests {
     /// }
     /// ```
     struct PerWorkerSlicePlainAccepted;
+
+    /// An optional value the tag word would pad, sized other than a multiple
+    /// of 8, is not read: the read rejects it at compile time.
+    ///
+    /// ```compile_fail,E0080
+    /// use yanet_sdk::ShmOption;
+    /// let _: fn(&ShmOption<u32>) -> Option<&u32> = ShmOption::get;
+    /// ```
+    struct PaddedOptionRefused;
+
+    /// An optional value sized a multiple of 8 is read, the accepted twin of
+    /// the refusal above.
+    ///
+    /// ```
+    /// use yanet_sdk::ShmOption;
+    /// let _: fn(&ShmOption<[u32; 2]>) -> Option<&[u32; 2]> = ShmOption::get;
+    /// ```
+    struct UnpaddedOptionAccepted;
 
     /// A caller's replacement alignment limit cannot admit over-aligned
     /// storage.

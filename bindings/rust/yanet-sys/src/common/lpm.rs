@@ -10,6 +10,7 @@ use core::mem::{align_of, offset_of, size_of};
 
 use yanet_shm::{
     opaque::Opaque,
+    option::ShmOption,
     rel::RelPtr,
     resolve::Resolve,
     shm::{MAX_ALIGN, ShmLayout},
@@ -108,6 +109,8 @@ const _: () = {
     assert!(align_of::<Rust>() <= MAX_ALIGN);
     assert!(size_of::<Page>() == size_of::<bindings::lpm_page>());
     assert!(align_of::<Page>() == align_of::<bindings::lpm_page>());
+    // An optional table is the tag word and the table, without padding.
+    assert!(size_of::<ShmOption<Rust>>() == size_of::<u64>() + size_of::<Rust>());
 };
 
 // The mirrored fields keep the C types, not only their places.

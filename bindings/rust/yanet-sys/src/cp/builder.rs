@@ -24,6 +24,7 @@ use core::{
 };
 
 use yanet_shm::{
+    option::ShmOption,
     rel::{ShmBox, ShmSlice},
     root::ShmRoot,
     shm::{MAX_ALIGN, ShmLayout},
@@ -332,6 +333,54 @@ unsafe impl<T: Build> Build for ShmSlice<T> {
             // SAFETY: a non-empty slice owns the live block of as many
             // elements as its count, which the offset leads to.
             unsafe { free_block::<T, W>(target_of(offset, addr), len as usize, memory) }
+        }
+    }
+}
+
+// SAFETY: the tag and the value are the whole value, without padding (the
+// layout check of the value offset). The tag is set only after the value is
+// written whole; an absent value is zeroed, so every byte is initialised, and
+// owns nothing.
+unsafe impl<T: Build> Build for ShmOption<T> {
+    /// The parts of the value, or `None` to leave it absent.
+    type Parts<'b, W: Owner> = Option<T::Parts<'b, W>>;
+
+    unsafe fn write<W: Owner>(
+        parts: Self::Parts<'_, W>,
+        memory: &MemoryContext<'_, W>,
+        addr: usize,
+    ) -> Result<(), Refusal> {
+        let root = memory.root();
+        let value = addr + Self::VALUE_OFFSET;
+        let present = match parts {
+            Some(parts) => {
+                // SAFETY: the value lies in the option, aligned for it as the
+                // option is and the offset is a multiple of its alignment, and
+                // exclusive (caller contract). A refused value owns nothing,
+                // so neither does the option.
+                unsafe { T::write::<W>(parts, memory, value)? };
+                1
+            }
+            None => {
+                // SAFETY: the value's bytes lie in the option, exclusive
+                // (caller contract), and accept every pattern.
+                unsafe { root.ptr::<u8>(value).write_bytes(0, size_of::<T>()) };
+                0
+            }
+        };
+        // SAFETY: the tag word is aligned and exclusive (caller contract).
+        unsafe { root.ptr::<u64>(addr).write(present) };
+        Ok(())
+    }
+
+    unsafe fn free<W: Owner>(addr: usize, memory: &MemoryContext<'_, W>) {
+        let value = addr + Self::VALUE_OFFSET;
+        // SAFETY: the tag was written whole (caller contract).
+        let present = unsafe { memory.root().ptr::<u64>(addr).read() };
+        if present != 0 {
+            // SAFETY: a set tag follows a value written whole, which owns the
+            // live blocks it was written with.
+            unsafe { T::free::<W>(value, memory) }
         }
     }
 }

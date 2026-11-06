@@ -14,9 +14,9 @@ use core::{
 
 use yanet_packet as _;
 use yanet_sdk::{
-    Batch, Build, BuiltObject, CommitCx, Counter, Cx, Device, Kind, Module, Object, ObjectBuilder, ObjectCommitCx,
-    ObjectLink, OwnedSlice, PerWorker, PerWorkerSlice, Refusal, Registered, ShmBox, ShmLayout, ShmSlice, Traffic,
-    Verdict,
+    Batch, Build, BuiltObject, CommitCx, Counter, Cx, Device, Kind, Lpm4, Module, Object, ObjectBuilder,
+    ObjectCommitCx, ObjectLink, OwnedSlice, PerWorker, PerWorkerSlice, Refusal, Registered, ShmBox, ShmLayout,
+    ShmOption, ShmSlice, Traffic, Verdict,
 };
 use yanet_sdk_derive as _;
 use yanet_sdk_testing::{
@@ -127,6 +127,17 @@ struct Counted {
     traffic: Counter<Traffic>,
 }
 
+/// An optional run of ports, an optional word whose write may be refused and
+/// an optional LPM, which builds here always leave absent: building one opens
+/// C memory, which the test owner does not set up.
+#[derive(ShmLayout)]
+#[repr(C)]
+struct Optional {
+    ports: ShmOption<ShmSlice<u64>>,
+    word: ShmOption<Flaky>,
+    routes: ShmOption<Lpm4>,
+}
+
 /// A module with a given configuration type: the builder reads only its name
 /// and that type.
 struct Fixture<C>(PhantomData<fn() -> C>);
@@ -150,10 +161,12 @@ type LanesModule = Fixture<Lanes>;
 type FaultyModule = Fixture<Faulty>;
 type EntriesModule = Fixture<ShmSlice<Entry>>;
 type CountedModule = Fixture<Counted>;
+type OptionalModule = Fixture<Optional>;
 
 /// An owner of an empty arena.
 fn owner() -> TestOwner {
-    // SAFETY: no configuration of this file embeds a C object.
+    // SAFETY: no build of this file writes a C object: the only one, an
+    // optional LPM, is always left absent.
     unsafe { TestOwner::new() }
 }
 
@@ -702,6 +715,83 @@ fn test_build_writes_every_word_of_a_faulty_config_when_none_is_refused() {
         )
     );
     release::<FaultyModule>(&owner, built);
+    owner.assert_released();
+}
+
+/// Builds the optional configuration with the ports and the word present when
+/// given, and the LPM absent.
+fn build_optional(
+    owner: &TestOwner,
+    ports: Option<&[u64]>,
+    word: Option<FlakyParts>,
+) -> Result<Built<OptionalModule, TestOwner>, Failure> {
+    build::<OptionalModule>(owner, |b| {
+        Ok(OptionalParts {
+            ports: ports
+                .map(|ports| b.slice(ports.len(), |idx| Ok(ports[idx])))
+                .transpose()?,
+            word,
+            routes: None,
+        })
+    })
+}
+
+#[test]
+fn test_build_leaves_absent_options_empty_and_unallocated() {
+    let owner = owner();
+
+    let built = build_optional(&owner, None, None).expect("built");
+
+    let (config, _) = body::<OptionalModule>(&owner, &built);
+    assert_eq!(
+        (false, false, false),
+        (config.ports.is_some(), config.word.is_some(), config.routes.is_some())
+    );
+    // Only the root block: an absent LPM allocates no page.
+    assert_eq!(1, owner.live_blocks());
+    release::<OptionalModule>(&owner, built);
+    owner.assert_released();
+}
+
+#[test]
+fn test_build_writes_present_options_readable_in_place() {
+    let owner = owner();
+
+    let built = build_optional(&owner, Some(&[80, 443]), Some(FlakyParts { word: 7, fails: false })).expect("built");
+
+    let (config, view) = body::<OptionalModule>(&owner, &built);
+    assert_eq!(
+        (Some(vec![80, 443]), Some(7)),
+        (
+            config.ports.get().map(|ports| ports.as_slice(&view).to_vec()),
+            config.word.get().map(|word| word.0)
+        )
+    );
+    // The root block and the ports.
+    assert_eq!(2, owner.live_blocks());
+    release::<OptionalModule>(&owner, built);
+    owner.assert_released();
+}
+
+#[test]
+fn test_build_releases_present_options_when_memory_runs_out_at_each_allocation() {
+    let fits = sweep_limits(0..8, owner_failing_alloc_after, |owner| {
+        build_optional(owner, Some(&[80, 443]), Some(FlakyParts { word: 7, fails: false }))
+    });
+
+    // The root block and the ports.
+    assert_eq!(2, fits);
+}
+
+/// verifies that a refused present value leaves its option owning nothing and
+/// the option written before it is returned.
+#[test]
+fn test_build_returns_everything_when_a_present_option_is_refused() {
+    let owner = owner();
+
+    let err = build_optional(&owner, Some(&[80, 443]), Some(FlakyParts { word: 7, fails: true })).expect_err("refused");
+
+    assert_eq!(BuildError::Refused(Refusal::OutOfMemory), err);
     owner.assert_released();
 }
 
