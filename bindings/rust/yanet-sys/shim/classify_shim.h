@@ -1,11 +1,9 @@
 // Helpers over lib/classify, the classification library of the C modules.
 //
-// The compile side wraps the attribute compiles, the joins and the decode a
-// module composes its classifier of, and the frees of what they build; the
-// lookup side wraps the batch lookups of the built classifiers, which the
-// tests hold the Rust lookups to. Both are compiled into the shim library with
-// hidden visibility, as the dataplane shim is, in two objects; a plugin links
-// neither.
+// They wrap the attribute compiles, the joins and the decode a module composes
+// its classifier of, and the frees of what they build; the Rust lookups read
+// the built classifiers. They are compiled into the shim library with hidden
+// visibility, as the dataplane shim is.
 //
 // A rule of an attribute compile is the address of that attribute's view of
 // the rule (a network set, a port or line range set), or NULL for a rule
@@ -146,82 +144,3 @@ yanet_sys_classify_rule_table_free(struct rule_table *table);
 
 YANET_SYS_HIDDEN void
 yanet_sys_classify_rule_map_free(struct vline *rule_map);
-
-// The batch lookups of the built classifiers: one class or rule per input.
-//
-// A class outside the table it indexes reads class zero, a rule map or a rule
-// table outside it no rule, so a lookup stays inside the classifier whatever
-// its input. The attribute lookups read their whole domain: the line one a
-// byte, the port one 16 bits.
-
-// classify_net4_lookup (lib/classify/classifiers/net4.h): addresses as
-// their four bytes in network order, one word each.
-YANET_SYS_HIDDEN void
-yanet_sys_classify_net4_lookup(
-	const struct classify_attr_net4 *attr,
-	const uint32_t *addrs,
-	uint32_t *classes,
-	uint32_t count
-);
-
-// classify_net6_lookup (lib/classify/classifiers/net6.h): addresses of
-// sixteen bytes in network order, one after the other.
-YANET_SYS_HIDDEN void
-yanet_sys_classify_net6_lookup(
-	const struct classify_attr_net6 *attr,
-	const uint8_t *addrs,
-	uint32_t *classes,
-	uint32_t count
-);
-
-YANET_SYS_HIDDEN void
-yanet_sys_classify_line_lookup(
-	const struct classify_attr_line *attr,
-	const uint8_t *values,
-	uint32_t *classes,
-	uint32_t count
-);
-
-YANET_SYS_HIDDEN void
-yanet_sys_classify_port_lookup(
-	const struct classify_attr_port *attr,
-	const uint16_t *ports,
-	uint32_t *classes,
-	uint32_t count
-);
-
-// classify_joint_lookup (lib/classify/query.h).
-YANET_SYS_HIDDEN void
-yanet_sys_classify_joint_lookup(
-	const struct value_table *joint,
-	const uint32_t *left,
-	const uint32_t *right,
-	uint32_t *classes,
-	uint32_t count
-);
-
-// classify_rule_table_lookup (lib/classify/query.h).
-YANET_SYS_HIDDEN void
-yanet_sys_classify_rule_table_lookup(
-	const struct rule_table *table,
-	const uint32_t *left,
-	const uint32_t *right,
-	uint32_t *rules,
-	uint32_t count
-);
-
-// classify_resolve (lib/classify/query.h).
-YANET_SYS_HIDDEN void
-yanet_sys_classify_resolve(
-	const struct vline *rule_map,
-	const uint32_t *classes,
-	uint32_t *rules,
-	uint32_t count
-);
-
-// classify_results_min (lib/classify/query.h): keeps the first match of
-// two decodings of the same packets.
-YANET_SYS_HIDDEN void
-yanet_sys_classify_results_min(
-	uint32_t *rules, const uint32_t *extra, uint32_t count
-);

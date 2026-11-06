@@ -17,7 +17,7 @@ use core::{
 use super::{Build, BuildError, Kind, MemoryContext, Owned, Owner, Refusal, Scope, refused};
 use crate::{
     bindings,
-    classify::{Attribute, Decode, Join, Joint, Node, RuleMap, RuleTable, Rules, link},
+    classify::{Attribute, Decode, Join, Node, Rules, link},
 };
 
 /// The classes of a stage of a composition over a ruleset of build `'b`: the
@@ -78,13 +78,11 @@ fn same_ruleset(sizes: &[usize]) -> Result<(), Refusal> {
     }
 }
 
-/// A classifier or a joint a build wrote, with the stage of its classes.
+/// A classifier of a tree a build wrote, with the stage of its classes.
 ///
-/// Made by [`Scope::compile`], [`Scope::join`] and [`Scope::join_tree`]
-/// only. The joins and the decodes read the stage: those of a tree take the
-/// branch whole, so a node always reads the classes of the classifiers it
-/// holds; the others borrow it, and [`Branch::into_owned`] then hands the
-/// classifier to a field. Dropped, it returns the classifier and the stage.
+/// Made by [`Scope::compile`] and [`Scope::join`] only, and taken whole by the
+/// joins and the decode, so a node always reads the classes of the classifiers
+/// it holds. Dropped, it returns the classifier and the stage.
 ///
 /// ```compile_fail,E0451
 /// use yanet_sys::{
@@ -107,14 +105,6 @@ impl<T: Build, W: Owner> fmt::Debug for Branch<'_, T, W> {
     }
 }
 
-impl<'b, T: Build, W: Owner> Branch<'b, T, W> {
-    /// The classifier, for a field of a configuration, once no join or decode
-    /// is to read the stage.
-    pub fn into_owned(self) -> Owned<'b, T, W> {
-        self.value
-    }
-}
-
 impl<'b, W: Owner, E: From<BuildError<W::Error>>, K: Kind> Scope<'b, '_, W, E, K> {
     /// Joins two branches of the same ruleset into a branch that holds them.
     ///
@@ -122,7 +112,7 @@ impl<'b, W: Owner, E: From<BuildError<W::Error>>, K: Kind> Scope<'b, '_, W, E, K
     ///
     /// The branches are over rulesets of different sizes, or the memory is
     /// exhausted; nothing of the join or the branches is left allocated.
-    pub fn join_tree<L: Node, R: Node>(
+    pub fn join<L: Node, R: Node>(
         self,
         name: &CStr,
         left: Branch<'b, L, W>,
@@ -166,9 +156,10 @@ impl<'b, W: Owner, E: From<BuildError<W::Error>>, K: Kind> Scope<'b, '_, W, E, K
     ///
     /// # Errors
     ///
-    /// As for [`Scope::join_rules`]; the branches are freed with whatever
-    /// the join left allocated.
-    pub fn join_rules_tree<L: Node, R: Node, P>(
+    /// The branches and the projection are over rulesets of different sizes,
+    /// or the memory is exhausted; nothing of the join or the branches is
+    /// left allocated.
+    pub fn join_rules<L: Node, R: Node, P>(
         self,
         name: &CStr,
         left: Branch<'b, L, W>,
@@ -213,9 +204,10 @@ impl<'b, W: Owner, E: From<BuildError<W::Error>>, K: Kind> Scope<'b, '_, W, E, K
     ///
     /// # Errors
     ///
-    /// As for [`Scope::decode`]; the branch is freed with whatever the decode
-    /// left allocated.
-    pub fn decode_tree<N: Node, P>(
+    /// The branch and the projection are over rulesets of different sizes, or
+    /// the memory is exhausted; nothing of the decode or the branch is left
+    /// allocated.
+    pub fn decode<N: Node, P>(
         self,
         name: &CStr,
         input: Branch<'b, N, W>,
@@ -261,107 +253,6 @@ impl<'b, W: Owner, E: From<BuildError<W::Error>>, K: Kind> Scope<'b, '_, W, E, K
             // SAFETY: a rule slot is a nullable pointer to a view the
             // attribute's compile reads as its C view, borrowed for the call.
             unsafe { A::compile(memory, name.as_ptr(), rules.as_ptr().cast(), count, classifier, stage) }
-        })
-    }
-
-    /// Joins the classes of two branches of the same ruleset into a joint
-    /// branch, which holds neither.
-    ///
-    /// # Errors
-    ///
-    /// The branches are over rulesets of different sizes, or the memory is
-    /// exhausted; nothing of the join is left allocated.
-    pub fn join<L: Build, R: Build>(
-        self,
-        name: &CStr,
-        left: &Branch<'b, L, W>,
-        right: &Branch<'b, R, W>,
-    ) -> Result<Branch<'b, Joint, W>, E> {
-        let (left, right) = (&left.stage, &right.stage);
-        same_ruleset(&[left.rules as usize, right.rules as usize]).map_err(refused::<W, E>)?;
-        self.staged(left.rules, |memory, stage, joint: *mut Joint| {
-            // SAFETY: both stages were filled over the rule count.
-            unsafe {
-                bindings::yanet_sys_classify_join(
-                    memory,
-                    name.as_ptr(),
-                    left.raw(),
-                    right.raw(),
-                    left.rules,
-                    joint.cast(),
-                    stage,
-                )
-            }
-        })
-    }
-
-    /// Joins the classes of two branches into the first rule of a projection
-    /// of their ruleset each pair matches, holding neither.
-    ///
-    /// A rule is in the projection when its slot is `Some`, whatever it
-    /// holds.
-    ///
-    /// # Errors
-    ///
-    /// The branches and the projection are over rulesets of different sizes,
-    /// or the memory is exhausted; nothing of the join is left allocated.
-    pub fn join_rules<L: Build, R: Build, P>(
-        self,
-        name: &CStr,
-        left: &Branch<'b, L, W>,
-        right: &Branch<'b, R, W>,
-        rules: &[Option<&P>],
-    ) -> Result<Owned<'b, RuleTable, W>, E> {
-        let (left, right) = (&left.stage, &right.stage);
-        same_ruleset(&[left.rules as usize, right.rules as usize, rules.len()]).map_err(refused::<W, E>)?;
-        self.written(|memory, table: *mut RuleTable| {
-            // SAFETY: both stages were filled over the rule count of the
-            // projection, whose slots C only tests for null.
-            unsafe {
-                bindings::yanet_sys_classify_join_rules(
-                    memory,
-                    name.as_ptr(),
-                    left.raw(),
-                    right.raw(),
-                    rules.as_ptr().cast(),
-                    left.rules,
-                    table.cast(),
-                )
-            }
-        })
-    }
-
-    /// Decodes the classes of a branch into the first rule of a projection of
-    /// its ruleset each class matches, holding none.
-    ///
-    /// A rule is in the projection when its slot is `Some`, whatever it
-    /// holds.
-    ///
-    /// # Errors
-    ///
-    /// The branch and the projection are over rulesets of different sizes, or
-    /// the memory is exhausted; nothing of the decode is left allocated.
-    pub fn decode<T: Build, P>(
-        self,
-        name: &CStr,
-        branch: &Branch<'b, T, W>,
-        rules: &[Option<&P>],
-    ) -> Result<Owned<'b, RuleMap, W>, E> {
-        let stage = &branch.stage;
-        same_ruleset(&[stage.rules as usize, rules.len()]).map_err(refused::<W, E>)?;
-        self.written(|memory, map: *mut RuleMap| {
-            // SAFETY: the stage was filled over the rule count of the
-            // projection, whose slots C only tests for null.
-            unsafe {
-                bindings::yanet_sys_classify_decode(
-                    memory,
-                    name.as_ptr(),
-                    stage.raw(),
-                    rules.as_ptr().cast(),
-                    stage.rules,
-                    map.cast(),
-                )
-            }
         })
     }
 

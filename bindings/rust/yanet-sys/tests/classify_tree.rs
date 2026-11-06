@@ -7,23 +7,22 @@
 //! does not run C.
 
 #[path = "support/arena.rs"]
-#[allow(dead_code, reason = "these tests build through the builder alone")]
 mod arena;
 
-use core::{mem::offset_of, net::Ipv4Addr};
+use core::net::Ipv4Addr;
 
 use arena::ArenaOwner;
 // The workspace denies unused crate dependencies; this test names no crate it
 // imports `as _`.
 use netip as _;
 use yanet_sdk_testing as _;
-use yanet_shm::{rel::ShmBox, shm::ShmLayout};
+use yanet_shm::rel::ShmBox;
 use yanet_sys::{
     classify::{
-        Addr4, BURST, Decode, Join, Joint, LineAttr, LineRange, Lines, Net4, Net4Attr, Net6, Net6Attr, Nets4, Nets6,
-        PortAttr, PortRange, Ports, Rule, RuleMap, Rules,
+        Addr4, BURST, Decode, Join, LineAttr, LineRange, Lines, Net4, Net4Attr, Net6, Net6Attr, Nets4, Nets6, PortAttr,
+        PortRange, Ports, Rule, Rules,
     },
-    cp::{Build, BuildError, Builder, Built, MemoryContext, Owned, Owner, Refusal},
+    cp::{BuildError, Builder, Built, Refusal},
     dp::{Batch, CommitCx, Cx, Module},
 };
 
@@ -213,9 +212,9 @@ fn build4(owner: &ArenaOwner, rules: &[TestRule<Net4>]) -> Built<Tree<Tree4>, Ar
         let dst = scope.compile(c"dst", &dst)?;
         let proto = scope.compile(c"proto", &protos)?;
         let port = scope.compile(c"port", &ports)?;
-        let nets = scope.join_tree(c"nets", src, dst)?;
-        let transport = scope.join_tree(c"transport", proto, port)?;
-        scope.join_rules_tree(c"rules", nets, transport, &projection)
+        let nets = scope.join(c"nets", src, dst)?;
+        let transport = scope.join(c"transport", proto, port)?;
+        scope.join_rules(c"rules", nets, transport, &projection)
     })
     .unwrap()
 }
@@ -243,9 +242,9 @@ fn build6(owner: &ArenaOwner, rules: &[TestRule<Net6>]) -> Built<Tree<Tree6>, Ar
         let dst = scope.compile(c"dst", &dst)?;
         let proto = scope.compile(c"proto", &protos)?;
         let port = scope.compile(c"port", &ports)?;
-        let nets = scope.join_tree(c"nets", src, dst)?;
-        let transport = scope.join_tree(c"transport", proto, port)?;
-        scope.join_rules_tree(c"rules", nets, transport, &projection)
+        let nets = scope.join(c"nets", src, dst)?;
+        let transport = scope.join(c"transport", proto, port)?;
+        scope.join_rules(c"rules", nets, transport, &projection)
     })
     .unwrap()
 }
@@ -398,8 +397,8 @@ fn test_decode_tree_lookup_is_the_first_rule_of_the_projection() {
     let built: Built<Tree<TreeAny>, ArenaOwner> = Builder::build(&owner, "any", |scope| -> Result<_, Error> {
         let proto = scope.compile(c"proto", &protos)?;
         let port = scope.compile(c"port", &ports)?;
-        let transport = scope.join_tree(c"transport", proto, port)?;
-        scope.decode_tree(c"rules", transport, &projection)
+        let transport = scope.join(c"transport", proto, port)?;
+        scope.decode(c"rules", transport, &projection)
     })
     .unwrap();
     let tree = owner.body(&built).get(&owner);
@@ -444,9 +443,9 @@ fn test_rules_tree_of_an_empty_projection_is_no_rule() {
         let dst = scope.compile(c"dst", &none4)?;
         let proto = scope.compile(c"proto", &none_lines)?;
         let port = scope.compile(c"port", &none_ports)?;
-        let nets = scope.join_tree(c"nets", src, dst)?;
-        let transport = scope.join_tree(c"transport", proto, port)?;
-        scope.join_rules_tree(c"rules", nets, transport, &projection)
+        let nets = scope.join(c"nets", src, dst)?;
+        let transport = scope.join(c"transport", proto, port)?;
+        scope.join_rules(c"rules", nets, transport, &projection)
     })
     .unwrap();
     let tree = owner.body(&built).get(&owner);
@@ -469,8 +468,8 @@ fn test_join_tree_refuses_branches_of_rulesets_of_other_sizes() {
     let result: Result<Built<Tree<TreeAny>, ArenaOwner>, Error> = Builder::build(&owner, "mismatch", |scope| {
         let proto = scope.compile(c"proto", &[Some(&lines)])?;
         let port = scope.compile(c"port", &[Some(&ports), Some(&ports)])?;
-        let transport = scope.join_tree(c"transport", proto, port)?;
-        scope.decode_tree(c"rules", transport, &[Some(&())])
+        let transport = scope.join(c"transport", proto, port)?;
+        scope.decode(c"rules", transport, &[Some(&())])
     });
     assert!(matches!(result, Err(BuildError::Refused(Refusal::RuleSetMismatch))));
 }
@@ -524,8 +523,8 @@ fn test_decode_tree_lookup_burst_is_the_lookup_of_each_key() {
     let built: Built<Tree<TreeAny>, ArenaOwner> = Builder::build(&owner, "any", |scope| -> Result<_, Error> {
         let proto = scope.compile(c"proto", &protos)?;
         let port = scope.compile(c"port", &ports)?;
-        let transport = scope.join_tree(c"transport", proto, port)?;
-        scope.decode_tree(c"rules", transport, &projection)
+        let transport = scope.join(c"transport", proto, port)?;
+        scope.decode(c"rules", transport, &projection)
     })
     .unwrap();
     let tree = owner.body(&built).get(&owner);
@@ -538,68 +537,6 @@ fn test_decode_tree_lookup_burst_is_the_lookup_of_each_key() {
     let mut burst = vec![Rule::NONE; keys.len()];
     tree.lookup_burst(&owner, &keys, |&key| key, &mut burst);
     assert_eq!(expected, burst);
-}
-
-/// The parts of the per-stage composition of the rules of any family: the
-/// protocol and the port, their joint and its rule map, each a field of the
-/// configuration as a module composing its own query keeps them.
-#[repr(C)]
-struct Stages {
-    proto: ShmBox<LineAttr>,
-    port: ShmBox<PortAttr>,
-    transport: ShmBox<Joint>,
-    rules: ShmBox<RuleMap>,
-}
-
-// SAFETY: a `#[repr(C)]` struct of four offset words, without padding, which
-// accepts every pattern and needs no drop.
-unsafe impl ShmLayout for Stages {}
-
-// SAFETY: each field is written and freed as its box is, the whole value
-// being the four of them.
-unsafe impl Build for Stages {
-    type Parts<'b, W: Owner> = (
-        Owned<'b, LineAttr, W>,
-        Owned<'b, PortAttr, W>,
-        Owned<'b, Joint, W>,
-        Owned<'b, RuleMap, W>,
-    );
-
-    unsafe fn write<W: Owner>(
-        (proto, port, transport, rules): Self::Parts<'_, W>,
-        memory: &MemoryContext<'_, W>,
-        addr: usize,
-    ) -> Result<(), Refusal> {
-        // SAFETY: each field is an aligned offset word of the value at the
-        // address (caller contract); a box write only stores the offset.
-        unsafe {
-            <ShmBox<LineAttr> as Build>::write(proto, memory, addr + offset_of!(Self, proto))?;
-            <ShmBox<PortAttr> as Build>::write(port, memory, addr + offset_of!(Self, port))?;
-            <ShmBox<Joint> as Build>::write(transport, memory, addr + offset_of!(Self, transport))?;
-            <ShmBox<RuleMap> as Build>::write(rules, memory, addr + offset_of!(Self, rules))
-        }
-    }
-
-    unsafe fn free<W: Owner>(addr: usize, memory: &MemoryContext<'_, W>) {
-        // SAFETY: the value was written whole (caller contract), each field
-        // a box of its block; newest first.
-        unsafe {
-            <ShmBox<RuleMap> as Build>::free(addr + offset_of!(Self, rules), memory);
-            <ShmBox<Joint> as Build>::free(addr + offset_of!(Self, transport), memory);
-            <ShmBox<PortAttr> as Build>::free(addr + offset_of!(Self, port), memory);
-            <ShmBox<LineAttr> as Build>::free(addr + offset_of!(Self, proto), memory);
-        }
-    }
-}
-
-impl Module for Tree<Stages> {
-    const NAME: &'static str = "classify-stages";
-    type Config = Stages;
-    type Prepared<'p> = ();
-
-    fn handle<'id>(_: &mut Cx<'id, Self>, _: &mut Batch<'id>) {}
-
-    fn prepare<'p>(_: &CommitCx<'p, Self>) {}
 }
 
 /// The views of the protocols and the ports of the IPv4 rules, and a
@@ -630,50 +567,6 @@ impl<'a> AnyViews<'a> {
     }
 }
 
-/// verifies that a module composing its own query stage by stage, the
-/// branches borrowed by the per-stage join and decode and then handed to its
-/// fields, reads through the checked lookups the rule the tree of the same
-/// rules does for every key.
-#[test]
-#[cfg_attr(miri, ignore = "Miri does not run C")]
-fn test_per_stage_composition_reads_the_rule_of_the_tree() {
-    let owner = ArenaOwner::new();
-    let rules = rules4();
-    let views = AnyViews::new(&rules);
-    let (protos, ports, projection) = (views.protos(), views.ports(), views.projection());
-    let stages: Built<Tree<Stages>, ArenaOwner> = Builder::build(&owner, "stages", |scope| -> Result<_, Error> {
-        let proto = scope.compile(c"proto", &protos)?;
-        let port = scope.compile(c"port", &ports)?;
-        let transport = scope.join(c"transport", &proto, &port)?;
-        let decoded = scope.decode(c"rules", &transport, &projection)?;
-        Ok((proto.into_owned(), port.into_owned(), transport.into_owned(), decoded))
-    })
-    .unwrap();
-    let tree: Built<Tree<TreeAny>, ArenaOwner> = Builder::build(&owner, "tree", |scope| -> Result<_, Error> {
-        let proto = scope.compile(c"proto", &protos)?;
-        let port = scope.compile(c"port", &ports)?;
-        let transport = scope.join_tree(c"transport", proto, port)?;
-        scope.decode_tree(c"rules", transport, &projection)
-    })
-    .unwrap();
-    let (stages, tree) = (owner.body(&stages), owner.body(&tree).get(&owner));
-    let (edge_protos, edge_ports) = edges(&rules);
-    for &proto in &edge_protos {
-        for &port in &edge_ports {
-            let (mut proto_class, mut port_class, mut class) = ([0], [0], [0]);
-            stages.proto.get(&owner).lookup(&owner, &[proto], &mut proto_class);
-            stages.port.get(&owner).lookup(&owner, &[port], &mut port_class);
-            stages
-                .transport
-                .get(&owner)
-                .lookup(&owner, &proto_class, &port_class, &mut class);
-            let mut rule = [Rule::NONE];
-            stages.rules.get(&owner).lookup(&owner, &class, &mut rule);
-            assert_eq!(tree.lookup(&owner, (proto, port)), rule[0], "{proto} {port}");
-        }
-    }
-}
-
 /// verifies that releasing a tree returns every block its build took from
 /// the arena, and so does a build refused part way, its branches included.
 #[test]
@@ -694,8 +587,8 @@ fn test_tree_build_and_release_leave_the_arena_as_they_found_it() {
     let refused: Result<Built<Tree<TreeAny>, ArenaOwner>, Error> = Builder::build(&owner, "refused", |scope| {
         let proto = scope.compile(c"proto", &protos)?;
         let port = scope.compile(c"port", &ports[1..])?;
-        let transport = scope.join_tree(c"transport", proto, port)?;
-        scope.decode_tree(c"rules", transport, &views.projection())
+        let transport = scope.join(c"transport", proto, port)?;
+        scope.decode(c"rules", transport, &views.projection())
     });
     assert!(matches!(refused, Err(BuildError::Refused(Refusal::RuleSetMismatch))));
     assert_eq!(baseline, owner.free_bytes(), "a refused build");

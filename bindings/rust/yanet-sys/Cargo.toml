@@ -22,8 +22,3 @@ shlex = "1"
 
 [dev-dependencies]
 yanet-sdk-testing = { path = "../yanet-sdk-testing" }
-
-# The classify query against the inline C one; see the benchmark's header.
-[[bench]]
-name = "classify"
-harness = false

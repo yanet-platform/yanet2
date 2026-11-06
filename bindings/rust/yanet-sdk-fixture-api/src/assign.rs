@@ -206,9 +206,9 @@ where
     let dst = scope.compile(dst_name, &dst)?;
     let proto = scope.compile(proto_name, &lines)?;
     let port = scope.compile(port_name, &ports)?;
-    let nets_joint = scope.join_tree(nets_name, src, dst)?;
-    let transport = scope.join_tree(transport_name, proto, port)?;
-    scope.join_rules_tree(rules_name, nets_joint, transport, nets)
+    let nets_joint = scope.join(nets_name, src, dst)?;
+    let transport = scope.join(transport_name, proto, port)?;
+    scope.join_rules(rules_name, nets_joint, transport, nets)
 }
 
 /// Composes the classifier of the rules of any family, `any` holding a slot
@@ -231,6 +231,6 @@ fn any_family<'b>(
         .collect::<Vec<_>>();
     let proto = scope.compile(c"assign any proto", &lines)?;
     let port = scope.compile(c"assign any port", &ports)?;
-    let transport = scope.join_tree(c"assign any transport", proto, port)?;
-    scope.decode_tree(c"assign any rules", transport, any)
+    let transport = scope.join(c"assign any transport", proto, port)?;
+    scope.decode(c"assign any rules", transport, any)
 }

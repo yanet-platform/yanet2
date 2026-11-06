@@ -8,7 +8,6 @@
 use core::{
     convert::Infallible,
     ffi::{c_char, c_void},
-    mem::size_of,
     ptr::NonNull,
 };
 use std::ffi::CString;
@@ -73,24 +72,6 @@ impl ArenaOwner {
     pub fn free_bytes(&self) -> usize {
         // SAFETY: a live arena, never freed.
         unsafe { yanet_sys_test_arena_free_bytes(self.arena) }
-    }
-
-    /// A zeroed block of the arena for one `T`, as a build allocates a C
-    /// object.
-    pub fn alloc<T>(&self) -> *mut T {
-        // SAFETY: a live context.
-        let block = unsafe { bindings::yanet_sys_common_memory_balloc(self.raw_context(), size_of::<T>()) }.cast::<T>();
-        assert!(!block.is_null(), "the C arena is exhausted");
-        // SAFETY: a fresh block of one `T`.
-        unsafe { block.write_bytes(0, 1) };
-        block
-    }
-
-    /// The memory context over the whole arena, for C objects built outside
-    /// a configuration.
-    pub fn raw_context(&self) -> *mut bindings::memory_context {
-        // SAFETY: a live arena, never freed.
-        unsafe { yanet_sys_test_arena_context(self.arena) }
     }
 
     fn context(&self, context: Context) -> *mut bindings::memory_context {

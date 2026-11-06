@@ -125,7 +125,7 @@ impl Node for LineAttr {
 /// The joint of two classifiers: the class of each pair of their classes.
 ///
 /// Joined only with its stage, by
-/// [`Scope::join_tree`](crate::cp::Scope::join_tree).
+/// [`Scope::join`](crate::cp::Scope::join).
 #[repr(C)]
 pub struct Join<L, R> {
     table: Joint,
@@ -135,7 +135,7 @@ pub struct Join<L, R> {
 
 /// The first rule each pair of classes of two classifiers matches.
 ///
-/// Joined by [`Scope::join_rules_tree`](crate::cp::Scope::join_rules_tree).
+/// Joined by [`Scope::join_rules`](crate::cp::Scope::join_rules).
 #[repr(C)]
 pub struct Rules<L, R> {
     table: RuleTable,
@@ -145,7 +145,7 @@ pub struct Rules<L, R> {
 
 /// The first rule each class of a classifier matches.
 ///
-/// Decoded by [`Scope::decode_tree`](crate::cp::Scope::decode_tree).
+/// Decoded by [`Scope::decode`](crate::cp::Scope::decode).
 #[repr(C)]
 pub struct Decode<N> {
     map: RuleMap,
