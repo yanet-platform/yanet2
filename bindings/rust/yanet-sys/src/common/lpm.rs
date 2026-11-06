@@ -10,6 +10,7 @@ use core::mem::{align_of, offset_of, size_of};
 
 use yanet_shm::{
     opaque::Opaque,
+    option::ShmOption,
     rel::RelPtr,
     resolve::Resolve,
     shm::{MAX_ALIGN, ShmLayout},
@@ -111,6 +112,9 @@ const _: () = {
     assert!(align_of::<Rust>() <= MAX_ALIGN);
     assert!(size_of::<Page>() == size_of::<bindings::lpm_page>());
     assert!(align_of::<Page>() == align_of::<bindings::lpm_page>());
+    // An optional table follows its tag at the table's own alignment.
+    assert!(ShmOption::<Rust>::VALUE_OFFSET == align_of::<Rust>());
+    assert!(align_of::<ShmOption<Rust>>() == align_of::<Rust>());
 };
 
 // The mirrored fields keep the C types, not only their places.

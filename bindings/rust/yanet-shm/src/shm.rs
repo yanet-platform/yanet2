@@ -2,14 +2,17 @@
 //!
 //! A configuration is a `#[repr(C)]` struct implementing `ShmLayout`. The
 //! trait is `unsafe`; this crate implements it for an allow-list of leaves,
-//! arrays and the owned edges, and a struct gets it from
+//! arrays, the owned edges and the optional value, and a struct gets it from
 //! `#[derive(ShmLayout)]`, so every implementor is valid for every bit pattern
 //! C may write, needs no drop and is aligned to at most 64. Padding may be
 //! uninitialized and is never accessed as data.
 
 use core::sync::atomic::{AtomicI8, AtomicI16, AtomicI32, AtomicI64, AtomicU8, AtomicU16, AtomicU32, AtomicU64};
 
-use crate::rel::{ShmBox, ShmSlice};
+use crate::{
+    option::ShmOption,
+    rel::{ShmBox, ShmSlice},
+};
 
 /// Largest alignment a shared-memory type may require.
 ///
@@ -28,11 +31,11 @@ pub const MAX_ALIGN: usize = 64;
 ///
 /// # Safety
 ///
-/// Implementors are `#[repr(C)]` structs, allow-listed leaves, arrays or the
-/// owned edges such that every bit pattern is a valid value, dropping is a
-/// no-op and the alignment is at most [`MAX_ALIGN`]. Padding may be
-/// uninitialized; this trait permits typed field access, not viewing the
-/// object representation as an initialized byte slice.
+/// Implementors are `#[repr(C)]` structs, allow-listed leaves, arrays, the
+/// owned edges or the optional value such that every bit pattern is a valid
+/// value, dropping is a no-op and the alignment is at most [`MAX_ALIGN`].
+/// Padding may be uninitialized; this trait permits typed field access, not
+/// viewing the object representation as an initialized byte slice.
 pub unsafe trait ShmLayout: Sized + 'static {}
 
 macro_rules! plain_leaf {
@@ -62,3 +65,11 @@ unsafe impl<T: ShmLayout> ShmLayout for ShmBox<T> {}
 // SAFETY: as for the box, over the whole element range; an empty slice is
 // NULL with a zero count.
 unsafe impl<T: ShmLayout> ShmLayout for ShmSlice<T> {}
+
+// SAFETY: a tag byte accepts every bit pattern and the value is a layout type,
+// so the option is valid for every pattern and needs no drop.
+//
+// The option is aligned as the value, to at most 64. Its value is read only
+// behind a set tag, which a build writes after the whole value, and the padding
+// between them is never read.
+unsafe impl<T: ShmLayout> ShmLayout for ShmOption<T> {}

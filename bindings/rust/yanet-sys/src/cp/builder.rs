@@ -25,6 +25,7 @@ use core::{
 
 use yanet_shm::{
     mutex::Mutex,
+    option::ShmOption,
     rel::{ShmBox, ShmSlice},
     root::ShmRoot,
     shm::{MAX_ALIGN, ShmLayout},
@@ -127,8 +128,9 @@ mod kind {
 /// build's header, as an embedded C object does when it opens its context, and
 /// does not panic. Freeing returns exactly the blocks the write handed to the
 /// value, each once, and reads only inside the value, those blocks and the
-/// links of that tree, and writes those links as an embedded C object does
-/// when it closes its context, which may reach a sibling's context in another
+/// links of that tree; it writes only the tags of the optional values it
+/// releases, clearing them, and those links as an embedded C object does when
+/// it closes its context, which may reach a sibling's context in another
 /// value. The SDK and its derive implement the trait, so that a value of every
 /// type is written and released by code that knows its layout. Implementing it
 /// is gated by `unsafe trait`, which module crates cannot write directly under
@@ -170,7 +172,8 @@ pub unsafe trait Build: ShmLayout {
     ///
     /// The address holds a value written whole by [`Build::write`], every
     /// block it owns was allocated from the memory context with the exact size
-    /// of its payload and is still live, and nothing references them.
+    /// of its payload and is still live, and nothing references the value or
+    /// them.
     #[doc(hidden)]
     unsafe fn free<W: Owner>(addr: usize, memory: &MemoryContext<'_, W>);
 }
@@ -355,6 +358,57 @@ unsafe impl<T: Build> Build for ShmSlice<T> {
             // SAFETY: a non-empty slice owns the live block of as many
             // elements as its count, which the offset leads to.
             unsafe { free_block::<T, W>(target_of(offset, addr), len as usize, memory) }
+        }
+    }
+}
+
+// SAFETY: the tag and the value are the fields of the option, and the value
+// is written whole before the tag is set.
+//
+// A refused value owns nothing, so neither does the option, which, as any
+// refused field, is never read or freed. An absent value is zeroed and owns
+// nothing; the padding after the tag is never written or read. Freeing clears
+// the tag before releasing the value, so a panic between leaks the value rather
+// than leaving a set tag over a released one; such a leak is accepted.
+unsafe impl<T: Build> Build for ShmOption<T> {
+    /// The parts of the value, or `None` to leave it absent.
+    type Parts<'b, W: Owner> = Option<T::Parts<'b, W>>;
+
+    unsafe fn write<W: Owner>(
+        parts: Self::Parts<'_, W>,
+        memory: &MemoryContext<'_, W>,
+        addr: usize,
+    ) -> Result<(), Refusal> {
+        let root = memory.root();
+        let value = addr + Self::VALUE_OFFSET;
+        let tag = match parts {
+            Some(parts) => {
+                // SAFETY: the value lies in the option, aligned and exclusive
+                // (caller contract; the option is aligned as the value).
+                unsafe { T::write::<W>(parts, memory, value)? };
+                1
+            }
+            None => {
+                // SAFETY: the value's bytes lie in the option, exclusive
+                // (caller contract), and accept every pattern.
+                unsafe { root.ptr::<u8>(value).write_bytes(0, size_of::<T>()) };
+                0
+            }
+        };
+        // SAFETY: the tag byte leads the option and is exclusive (caller
+        // contract).
+        unsafe { root.ptr::<u8>(addr).write(tag) };
+        Ok(())
+    }
+
+    unsafe fn free<W: Owner>(addr: usize, memory: &MemoryContext<'_, W>) {
+        // SAFETY: the tag was written whole and nothing references the option
+        // (caller contract).
+        let tag = unsafe { memory.root().ptr::<u8>(addr).replace(0) };
+        if tag != 0 {
+            // SAFETY: a set tag follows a value written whole, which owns the
+            // live blocks it was written with.
+            unsafe { T::free::<W>(addr + Self::VALUE_OFFSET, memory) }
         }
     }
 }
