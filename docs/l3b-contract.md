@@ -3,10 +3,110 @@
 Normative contract for [#2718](https://github.com/yanet-platform/yanet2/issues/2718).
 This specifies target behavior, not implemented behavior or executed evidence.
 
+## Contents
+
+- [Reading This Contract](#reading-this-contract)
+  - [Normative Language](#normative-language)
+  - [Glossary](#glossary)
+  - [Limit Units And Scope](#limit-units-and-scope)
+- [1. Scope And Boundaries](#1-scope-and-boundaries)
+- [2. Configuration And Observation Inventory (F01-F39)](#2-configuration-and-observation-inventory-f01-f39)
+- [3. Operation Inventory (O01-O17)](#3-operation-inventory-o01-o17)
+- [4. Cross-Cutting Obligations (C01-C08)](#4-cross-cutting-obligations-c01-c08)
+- [5. Management Surface, Permits And Error Order](#5-management-surface-permits-and-error-order)
+  - [Atomic Real Vectors And Operator Metadata](#atomic-real-vectors-and-operator-metadata)
+  - [Complete Identity Non-Reuse](#complete-identity-non-reuse)
+- [6. Accepted Readback And Pagination](#6-accepted-readback-and-pagination)
+  - [Live Service Status](#live-service-status)
+  - [ModuleConfig Adoption And Counter Observations](#moduleconfig-adoption-and-counter-observations)
+  - [Semantic Counter Catalogue](#semantic-counter-catalogue)
+- [7. Session Ownership, Capacity And Inspection](#7-session-ownership-capacity-and-inspection)
+  - [Concurrent Session Authority](#concurrent-session-authority)
+- [8. WLC Contract](#8-wlc-contract)
+  - [WLC Inputs And Observations](#wlc-inputs-and-observations)
+- [9. Publisher, Reader Protection And Lifecycle Direction](#9-publisher-reader-protection-and-lifecycle-direction)
+- [10. Scheduler, OPS, Weights And Identities](#10-scheduler-ops-weights-and-identities)
+- [11. Outer Source Policy](#11-outer-source-policy)
+  - [Address Roles For Network Emission](#address-roles-for-network-emission)
+  - [Selected VS Source And Family Transitions](#selected-vs-source-and-family-transitions)
+- [12. Packet Surfaces](#12-packet-surfaces)
+  - [Packet Drop Precedence](#packet-drop-precedence)
+  - [Packet Path Rules](#packet-path-rules)
+  - [External Fanout Configuration And Clone Headers](#external-fanout-configuration-and-clone-headers)
+  - [Adoption And Fanout Boundary Conformance](#adoption-and-fanout-boundary-conformance)
+  - [MSS And Ordinary Encapsulation](#mss-and-ordinary-encapsulation)
+  - [l3b-To-Real Outer Headers](#l3b-to-real-outer-headers)
+- [13. Service Policy Boundary](#13-service-policy-boundary)
+- [14. Native Policy Mapping](#14-native-policy-mapping)
+  - [Native Path Consequences](#native-path-consequences)
+  - [Equality, Counters And Empty Policy](#equality-counters-and-empty-policy)
+- [15. Policy Identity And Revision](#15-policy-identity-and-revision)
+- [16. Format Contract](#16-format-contract)
+  - [Complete Field Presence Matrix](#complete-field-presence-matrix)
+  - [Byte-Page Framing, Cursor Errors And Read-Only Identities](#byte-page-framing-cursor-errors-and-read-only-identities)
+- [17. Counter Identity](#17-counter-identity)
+- [18. Conformance Obligations](#18-conformance-obligations)
+  - [Validation And Retained-Behavior Boundaries](#validation-and-retained-behavior-boundaries)
+  - [Multi-Fault Counter Vectors](#multi-fault-counter-vectors)
+- [19. Downstream Boundaries](#19-downstream-boundaries)
+
+## Reading This Contract
+
+The main contract covers configuration, operations, session authority and
+readback. The [packet companion](l3b-packet-contract.md) contains the complete
+section 12 packet rules and its embedded vectors. Section 12 below preserves
+the original entry anchors; section 18 retains its independent conformance cases.
+
+### Normative Language
+
+The uppercase keywords MUST, MUST NOT, SHOULD and MAY have the meanings of
+[RFC 2119](https://www.rfc-editor.org/rfc/rfc2119.txt) and
+[RFC 8174](https://www.rfc-editor.org/rfc/rfc8174.txt). Declarative defaults,
+ranges, rules and explicit prohibitions are binding even without a keyword;
+lowercase mandatory wording does not weaken them. Descriptions of possible
+outcomes are not permissions. RFC quotations describe the cited RFC's force,
+not an additional product-compliance claim. This convention also applies to
+the packet companion.
+
+### Glossary
+
+| Term | Meaning here |
+| --- | --- |
+| VS | One virtual service with an immutable network selector and one incarnation. |
+| Real binding | One configured full real key belonging to one VS incarnation. |
+| Binding charge | One configured real-to-VS binding: the same endpoint in two VSes counts twice; several ModuleConfig links to one VS count once. Disabled, zero-weight, unhealthy and unlinked members still count. |
+| Selector cell | One real-ID position in a selector's logical lookup/reservation, not a binding or a physical-memory byte. |
+| Accepted configuration | The coherent committed caller configuration and preserved manual state, identified by the owning mutation token; not proof of worker adoption. |
+| Observation | Read-only runtime evidence with availability and provenance, not token-stable accepted configuration. |
+| Incarnation | Opaque identity of one object or real-membership lifetime; same-name/key recreation does not revive the old identity. |
+| Mutation token | Opaque conditional-write grant for one accepted version/context; not an incarnation, create permit or authorization. |
+
+### Limit Units And Scope
+
+| Bound | Unit | Scope |
+| --- | --- | --- |
+| 2097151 | Configured real bindings | Actual dataplane-instance registry, all three schedulers/all owners, including unlinked VSes. |
+| 209715200 | Reserved HASH/WRR real-ID selector cells | Shared pool per generation; charge reservations, not occupied cells only. |
+| 16384 (initial policy) | Ordered VS bindings | Complete candidate of one ModuleConfig, not the instance sum. |
+| 4194304 (initial policy) | Encoded bytes | Complete accepted export of one object, before acceptance. |
+
+These logical limits do not qualify capacity or guarantee allocation. Retained
+physical memory is accounted separately, including current, candidate, retired
+and deleted versions and all still-accessible resources (sections 6–9).
+
 ## 1. Scope And Boundaries
 
 - There are six session timeout classes: `tcp`, `tcp_syn`, `tcp_syn_ack`,
   `tcp_fin`, `udp` and `other`.
+- Configured duration/timeout values are uint32 milliseconds, 0..4294967295 (about 49.7 days),
+  subject to any stated positive-only domain. Absolute monotonic times are
+  uint64 milliseconds in their identified clock domain, not UTC. The server
+  permit clock, dataplane session clock and external-owner clocks are distinct
+  domains; values from different domains are not interchangeable. Widen a
+  duration to uint64 before checked deadline addition; no wrap or saturation.
+  Derived elapsed intervals between same-domain monotonic uint64 millisecond
+  timestamps retain uint64 range, with no narrowing or truncation to uint32.
+  These intervals are not additional configurable durations.
 - No protobuf package, tag, message spelling, C struct layout, attach
   mechanism or final public name is selected here. Final naming stays in
   [#2719](https://github.com/yanet-platform/yanet2/issues/2719). Standalone
@@ -33,44 +133,44 @@ representation and the protobuf/C consequences.
 | ID | Field | Selected semantics |
 | --- | --- | --- |
 | F01 | Names and references | Exact case-sensitive `[A-Za-z0-9_.-]{1,79}`; required, empty rejects; no omission, control byte, normalization, trimming or first-character restriction; no automatic aliases. |
-| F02 | VS VIP, protocol, destination port | Exact decoded address, transport protocol and optional destination port; absent port is a wildcard within the protocol, explicit zero is port zero, range 0..65535. Protocol is TCP or UDP; unspecified and unknown values reject. Immutable inside a live VS incarnation; an identity change is `FailedPrecondition`, a conflicting candidate is `InvalidArgument`. Mapped IPv6 endpoints in a concrete VIP field reject. |
+| F02 | VS VIP, protocol, destination port | Exact decoded address with independently optional protocol and destination port. Absent/null protocol selects TCP+UDP, not arbitrary IP; explicit protocol is TCP or UDP only, and explicit unspecified or unknown values reject. Absent port selects all ports for the selected protocol set; explicit zero is port zero, range 0..65535. One mixed VS shares its incarnation, real set and resources, but actual TCP/UDP distinguishes sessions. Immutable inside a live VS incarnation; an identity change is `FailedPrecondition`, a conflicting candidate is `InvalidArgument` under section 10's global selector-intersection rule. Mapped IPv6 endpoints in a concrete VIP field reject. |
 | F03 | Real destination, family, port | Key is decoded family, address bytes and optional real port inside the VS incarnation; the optional real port domain is 0..65535; absent, zero and other ports stay distinct; no inheritance or implied rewrite; exact duplicate keys reject. Every stored real obeys section 11 DestSet, independently of administrative state, weight or health. |
 | F04 | Real collection and continuity | Explicit nonempty members or explicit empty. Surviving keys keep accepted weights, administrative state, incarnations and pins; removed and readded keys are new and administratively disabled. Authored order is accepted state: a pure reorder advances the token and republishes while preserving surviving state. An explicit empty real collection leaves the VS still classified: traffic directed to it drops at selection rather than falling through to another rule or VS. |
-| F05 | Configured and manual weight | Stored configured-weight domain 0..16777215 for WRR, HASH and WLC; a new or readded real defaults to 1 on omission. Manual weight is an optional uint32 field with mandatory presence: explicit 0 is valid, omission is `InvalidArgument`. Zero excludes new selection in every mode. No clamping. |
-| F06 | Administrative and health state | New and readded reals are administratively disabled; effective enablement is administrative enablement AND health eligibility; health never overrides an administrative disable. Manual enabled is an optional bool with mandatory presence; false is valid. |
+| F05 | Configured and manual weight | Stored configured-weight domain 0..16777215 for WRR, HASH and WLC; a new or readded real defaults to 1 on omission. Manual weight is mandatory in the API; protobuf presence distinguishes missing from valid uint32 0. Omission is `InvalidArgument`. Zero excludes new selection in every mode. No clamping. |
+| F06 | Administrative and health state | New and readded reals are administratively disabled; effective enablement is administrative enablement AND health eligibility; health never overrides an administrative disable. Manual enabled is mandatory in the API; protobuf presence distinguishes missing from valid false. External checker attempt timeout is configurable uint32 milliseconds, positive 1..4294967295, zero rejected, default 500 ms and operational target 100 ms, bound to checker configuration identity/revision under section 10, not a VS setter. |
 | F07 | Scheduler | Create and full replacement select WRR, HASH or WLC explicitly; absent, unspecified and unknown values reject; partial real mutations do not resubmit the scheduler. There are no RR/PURR aliases, public hash masks, index masks or scheduler flags that redefine the selected scheduler. Standalone CHASH is deferred to #2904. |
-| F08 | OPS and removed `pure_l3` | OPS is the only public VS flag, a separate boolean omitted as false; other typed booleans remain. UDP supports all three schedulers; live hits are used without deadline refresh and misses select statelessly, creating no session. For TCP, omitted, false and true normalize to false in accepted state. The redundant `pure_l3` switch is rejected; portless mode is derived from destination-port absence (F02). |
-| F09 | WLC power | Requested power is a retained uint32: omission or explicit 0 stores 0, 1..100 is effective as given, and any other uint32 value is retained verbatim with effective power 10. There is no public `max_weight`; the selector-parameter ceiling is fixed at 100 and is not an input-weight limit. |
-| F10 | WLC inputs, samples and confirmation | Inputs are the original positive weights of administratively enabled, health-eligible reals; one complete all-worker sample; a requested 20 ms sampling, computation, retry and reconciliation cadence, not a deadline or an adoption SLO. Within one input generation, the first two consecutive invalid attempts retain the last applicable successfully published result with degraded freshness; the third and subsequent invalid attempts trigger capped-base fallback publication attempts and WLC not-ready. Without an applicable result, fallback applies immediately; a valid sample resets the streak once. A change of participating real identity, configured weight or effective power starts a new input generation with streak 0; a complete current valid sample is valid even when its source values are unchanged; an equal active output uses guarded confirmation (section 8). Requested WLC power is writable configuration under F09; derived effective power, WLC results, active-state and freshness observations are read-only, never independent caller setters. |
+| F08 | OPS and removed `pure_l3` | OPS is the only public VS flag, a separate boolean omitted as false; other typed booleans remain. TCP-only true is `InvalidArgument`; false/absent is valid. UDP-only and mixed true is retained and acts only on actual UDP. Session/transition rules and validation precedence are in [section 10](#10-scheduler-ops-weights-and-identities). The redundant `pure_l3` switch is rejected; portless mode derives from F02 port absence. |
+| F09 | WLC power | Requested uint32 domain 0..100: absent/0 stores 0 and uses effective 10; 1..100 stores and uses the supplied value. Values >100 are `InvalidArgument`, not clamped or retained. Requested 0 differs from requested 10 in equality/readback. No public `max_weight`; the fixed selector-parameter ceiling 100 is not an input-weight limit. |
+| F10 | WLC inputs, samples and confirmation | Complete all-worker sampling, generation-scoped fallback and guarded confirmation under [section 8](#wlc-inputs-and-observations). Requested cadence 20 ms, not a deadline or adoption SLO; derived results/observations are read-only. |
 | F11 | WLC geometry and resource admission | Logical lookup length 1600*N over all configured unique real bindings including disabled and zero-weight members; an explicit empty selector at N=0. The aggregate binding charge is at most 2097151 per actual dataplane-instance registry across all three schedulers and agent owners, including unlinked VSes; physical admission is separate; all arithmetic is checked before narrowing or allocation. The 10000-VS and 100000-real values are unqualified planning inputs, not API caps. |
 | F12 | Internal WRR cursor (not writable VS format) | Unsigned 64-bit. For a coherent nonempty expanded sequence of length L, `next = (cursor + 1) mod 2^64` and `slot = next mod L`; only a successful coherent selection commits `cursor = next`, and a later failure does not roll it back. Per worker and VS incarnation, shared across links, preserved across ordinary replacement and a control-plane restart. Wrap is ordinary arithmetic and may break strict cyclic order when L does not divide 2^64. Internal runtime state: no public cursor setter and no 32-bit narrowing. |
-| F13 | `session_timeouts.tcp` | Optional uint32 seconds, domain 0..4294967295; omission defaults 60; explicit 0 retained. |
-| F14 | `session_timeouts.tcp_syn` | Optional uint32 seconds; omission inherits the accepted TCP value; explicit 0 retained. SYN without ACK selects this class regardless of FIN or RST, only on an otherwise permitted session operation; the separate rescheduling condition stays SYN with RST clear. |
-| F15 | `session_timeouts.tcp_syn_ack` | Optional uint32 seconds; omission inherits SYN; explicit 0 retained. |
-| F16 | `session_timeouts.tcp_fin` | Optional uint32 seconds; omission inherits TCP; explicit 0 retained. |
-| F17 | `session_timeouts.udp` | Optional uint32 seconds; omission 60; explicit 0 retained. |
-| F18 | `session_timeouts.other` and container | Optional uint32 seconds; omission 60; explicit 0 retained. A permitted ICMP-error refresh uses now plus `other`; Echo, query and OPS never refresh. All classes expire at deadline <= now, and a configuration replacement does not rewrite old deadlines. The timeout container absent, null or `{}` means all children absent and resolves each default above; a scalar or list container rejects. |
+| F13 | `session_timeouts.tcp` | Optional uint32 milliseconds, domain 0..4294967295; omission defaults 60000; explicit 0 retained. |
+| F14 | `session_timeouts.tcp_syn` | Optional uint32 milliseconds; omission inherits the accepted TCP value; explicit 0 retained. SYN without ACK selects this class regardless of FIN or RST, only on an otherwise permitted session operation; the separate rescheduling condition stays SYN with RST clear. |
+| F15 | `session_timeouts.tcp_syn_ack` | Optional uint32 milliseconds; omission inherits SYN; explicit 0 retained. |
+| F16 | `session_timeouts.tcp_fin` | Optional uint32 milliseconds; omission inherits TCP; explicit 0 retained. |
+| F17 | `session_timeouts.udp` | Optional uint32 milliseconds; omission 60000; explicit 0 retained. |
+| F18 | `session_timeouts.other` and container | Optional uint32 milliseconds; omission 60000; explicit 0 retained. A permitted ICMP-error refresh uses now plus `other`; Echo, query and UDP OPS never refresh. All classes expire at deadline <= now, and a configuration replacement does not rewrite old deadlines. The timeout container absent, null or `{}` means all children absent and resolves each default above; a scalar or list container rejects. |
 | F19 | VS source bases M4 and M6 | VS-owned; omission materializes 0.0.0.0 and ::, with no interface or link fallback; supplied dormant values are retained; full replacement omission resets them. A partial real update preserves the materialized bases. Structural validation applies even to dormant families. |
 | F20 | Optional IPv4 source override | Absent differs from explicit 0; a native bare IPv4 host address with no prefix metadata; the literal override or M4 supplies the outer source. A present zero override is structurally valid and fails output admission for a configured IPv4 outer family. |
 | F21 | Optional IPv6 source template | Absent differs from present; present requires a raw address, omitted prefix means 128, prefix domain 0..128 including non-byte lengths, host bits preserved, the byte-splice algorithm of section 11, and SourceSet admission for every derivation input in each configured outer family. Raw template and prefix presence, not a normalized network. Per-real override remains deferred; class restrictions follow the role matrix, not a generic unicast blacklist. |
 | F22 | Service policy binding | Required on VS create and full replacement: source-scoped identity (source namespace plus policy key), immutable revision and complete native ACL content, or an explicit empty-policy choice with the same metadata. Missing or null binding, identity, revision, or content without the explicit empty choice rejects as `InvalidArgument`; omission never means KEEP or allow-all. Explicit empty is deny-all. Partial real state/weight operations preserve the binding. Full semantics in sections 13-16. |
-| F23 | Destination bindings | Nonempty ordered exact VS name and incarnation bindings, or explicit empty that unlinks without deleting the VS; duplicates reject; order affects accepted equality; the VIP, protocol and optional port come from the immutable VS identity; broad or contradictory selectors reject. Separate ICMP paths are not ordinary TCP/UDP bindings. |
-| F24 | `mss_fix` | Typed boolean, default false, dormant for UDP. For a TCP SYN without RST, including SYN-ACK, validate all options through EOL/end before mutation. Valid MD5 Signature or TCP-AO bypasses only MSS processing with the inner segment unchanged, as specified in section 12. Otherwise the first valid MSS above 1220 is clamped to 1220 and a smaller value including 0 is preserved; 536 is inserted when absent and four option bytes fit; a valid full header without room stays unchanged. MSS length is 4; malformed eligible enabled-policy options or a required missing buffer counted-drop. The constants 1220 and 536 are not path-MTU guarantees. No public numeric MSS knob. |
+| F23 | Destination bindings | Nonempty ordered exact VS name and incarnation bindings, or explicit empty that unlinks without deleting the VS; duplicates reject; order affects accepted equality; the VIP, optional protocol and optional port come from the immutable VS identity; selector conflicts use section 10's global intersection rule, not a prohibition on the permitted wildcards. Separate ICMP paths are not ordinary TCP/UDP bindings. |
+| F24 | `mss_fix` | Typed boolean, default false; actual-TCP eligibility, MSS transformations, authentication bypass and failure rules are in the [packet companion](l3b-packet-contract.md#mss-and-ordinary-encapsulation). Dormant for actual UDP, including mixed VSes; no public numeric MSS knob. |
 | F25 | DSCP ownership | Per-VS DSCP policy is outside the l3b API. l3b inherits the inner traffic class and ECN into the outer header; the `dscp` module after l3b owns optional marking with its own configuration and readback, no shared VS token and no atomic two-module update. Destination-prefix marking cannot distinguish two VSes sharing a real, so this is pipeline and real-prefix scope, not per-VS equivalence. Marking must preserve ECN in both families and update the IPv4 checksum. Old packed or per-VS DSCP inputs reject even as null or 0. |
 | F26 | Session size | Omitted or zero creation size resolves the current `l3b.policy.session_default_slots` (initially 65536) once at creation; that default or explicit positive input 1..1073741824 rounds upward to a power of two with a minimum actual size of 16 (1 becomes 16, 1000 becomes 1024); the size is shared across the workers of one VS in one instance. Resize omission or zero is `InvalidArgument`; a raw target below the accepted size is `FailedPrecondition` before rounding; an exactly equal target is a no-op; only a larger target rounds. A later default change never resizes a live VS, and no resource-driven downsize exists. Bounds are not allocation or flow qualification. |
 | F27 | Encapsulation and NAT | Typed VS mode IPIP or GRE with IPIP as default; unknown or explicitly unspecified values reject. Minimal GRE v0 with a four-byte header and no optional key, checksum or sequence. The existing IPIP and GRE helpers are reused with no new header builders and no required separate pipeline hop; MSS precedes encapsulation. NAT is outside the reviewed mode set and is rejected rather than mapped to GRE. |
-| F28 | Mutation token, incarnation, real target | The VS token covers configuration, manual administrative and manual weight changes, deletion and accepted capacity growth; ModuleConfig has its own token; health, WLC, session traffic and automatic back retirement do not advance it. A required expected token is 1..256 bytes; a real target is the full F03 key plus a required incarnation of 1..256 bytes; a missing or malformed shape is `InvalidArgument`. A stale token precedes target lookup, an absent key is `NotFound`, a mismatched incarnation is `Aborted`. |
-| F29 | Create preparation | `PrepareCreate` takes a kind of SERVICE or MODULE_CONFIG and an exact name, observes absence, and returns an opaque token of 1..256 bytes bound to exact kind/name/instance/owner context with a 300-second lifetime measured on authoritative server monotonic time; at most 16384 retained permit records per actual instance registry across both kinds and all issuers. It is not an upsert, not a name or resource reservation, not payload-bound and not exactly-once. A well-shaped unknown, expired, consumed or context-mismatched permit is `Aborted` for an absent target; an otherwise valid existing target is `AlreadyExists`. An absent, empty or oversized request token field or another malformed required field is `InvalidArgument`; an unknown registry entry is not an absent request field. Recovery is `Unavailable`. |
+| F28 | Mutation token, incarnation, real target | Expected token required, 1..256 bytes; real target is full F03 key plus required incarnation, 1..256 bytes. Scope, malformed-input errors, target outcomes and the sole complete existing-object order are in [section 5](#5-management-surface-permits-and-error-order). |
+| F29 | Create preparation | SERVICE or MODULE_CONFIG plus exact name; opaque 1..256-byte context-bound grant, lifetime 300000 ms, read-only uint32 valid_for_ms=300000 at issuance; registry cap 16384 across both kinds/all issuers. No upsert, reservation, payload binding or exactly-once. [Section 5](#5-management-surface-permits-and-error-order) defines separate create/prepare rules, malformed fields, permit failures, recovery and expiry-issuance errors; its existing-object order is not a create-token stage. |
 | F30 | Accepted configuration readback | A coherent snapshot with the object incarnation, accepted token, encoding version, total bytes, offset, chunk, completion and next cursor. The snapshot separates the replacement descriptor from read-only metadata such as the actual accepted capacity, administrative state and real incarnations. WLC result and provenance, health and drain observations stay outside the token-stable bytes. One token and encoding version identify stable bytes; map-like ordering is fixed by the encoding rules, not by a library's deterministic mode. Configuration and token are read from one coherent protected state, coordinated with the final acceptance section and the owner epoch, so a new configuration is never paired with an old token. |
 | F31 | Name-list responses | ASCII lexical inventory with a membership-revision, instance, epoch and position cursor; names, revision, completion and next cursor come from one coherent protected membership state per RPC (section 6), not necessarily newest at reply. Create and delete invalidate subsequent continuation requests; content changes alone do not. Bounded output and work, and authoritative recovery gating; an empty response is not recovery success. |
 | F32 | `ListSessions` request | VS name plus limit and opaque cursor; omitted or 0 limit uses the centralized default (initially 100), a positive value up to the maximum (initially 1000) is accepted, a larger value is `InvalidArgument` rather than clamped. An empty cursor starts; an opaque continuation binds purpose, instance, VS incarnation, owner epoch, observed chain generation, finite initial layer watermarks and position. No cursor registry, TTL or between-RPC pin. A changed record limit shapes the next page, not the identity of the query, so it does not invalidate an in-flight continuation. |
-| F33 | `SessionRecord` and `ListSessions` response | Coherent physical records with the flow key, the stored real key and incarnation, the expiry and the layer identity and role; a portless session reports an absent port rather than a fabricated 0; the page reports the VS and chain identity and one page clock reading used for both the expiry predicate and the response. Cross-page duplicates are allowed and no unique-flow or snapshot guarantee is given; `complete` means the captured traversal end, and the next cursor is empty exactly when complete. A successful sparse page may return zero rows and still advance. |
-| F34 | Network, range and transport presence | Decoded family identity, optional port and source rules, and explicit-empty top-level collections. F02/F03 bare hosts, F19-F21 raw sources and the native ACL networks and ranges of section 14 are deliberately different types; generic network normalization must not erase raw source-template bits. Section 16 carries the per-field binary, ProtoJSON and YAML null, empty and missing matrix. |
+| F33 | `SessionRecord` and `ListSessions` response | Coherent physical records with the flow key including actual TCP/UDP even in a mixed VS, the stored real key and incarnation, the expiry and the layer identity and role; a portless session reports both ports absent rather than fabricated 0. Expiry and the one page clock reading are uint64 milliseconds in the same identified dataplane clock domain; that reading serves both the expiry predicate and the response. The page reports the VS and chain identity. Cross-page duplicates are allowed and no unique-flow or snapshot guarantee is given; `complete` means the captured traversal end, and the next cursor is empty exactly when complete. A successful sparse page may return zero rows and still advance. |
+| F34 | Network, range and transport presence | Decoded family identity, independently optional VS protocol and port, actual session transport, source rules, and explicit-empty top-level collections. F02/F03 bare hosts, F19-F21 raw sources and the native ACL networks and ranges of section 14 are deliberately different types; generic network normalization must not erase raw source-template bits. Section 16 carries the per-field binary, ProtoJSON and YAML null, empty and missing matrix. |
 | F35 | Centralized operational policy | One authoritative location, the `l3b.policy` section of the control-plane configuration, for constants and suitable configurable limits; the CLI uses server defaults and lower layers receive the resolved budget. The initial read limits of 100 default records, 1000 maximum records, 4096 scan steps, a 256 KiB response and a 1024-byte cursor are provisional; the reviewed 4 MiB export cap and 16384 module-binding cap are unqualified. Policy changes are initially restart-required, hard API domains are not adjustable upward, no cap is bypassed automatically, ACL-owned limits are not duplicated in l3b, and lowering a limit must not make accepted configuration unreadable. |
 | F36 | Service runtime status | Separate read-only `GetServiceStatus` observations: VS identity/configuration context, per-real health and published effective enablement/selector weight, WLC mode/freshness/applicability/provenance, scoped readiness and drain/cleanup phases. Bounded live pages, not an accepted export or cross-page snapshot; accepted-config changes abort continuation, runtime-only changes do not. Pending deleted-VS cleanup is addressed by incarnation, not a reused name; no infinite completed-history promise. Section 6 defines the surface. |
 | F37 | ModuleConfig runtime status | Read-only `GetModuleConfigStatus`: accepted incarnation/token, target publication, authoritative relevant worker cohort and adoption `ALL_ADOPTED`, `PENDING`, `UNAVAILABLE` or `NOT_APPLICABLE`; idle workers count. Separate from accepted export, WLC readiness, reader drain and latest-VS acquisition. Section 6 defines availability and provenance. |
 | F38 | Counter observation groups | Full semantic catalogue in section 6, including every counted-drop path, whether implemented or not. Read-only current-binding projection in O16 (VS and full-key/incarnation real groups) and O17 (module totals/reasons and ModuleConfig/family/VIP Echo), with semantic identity, accumulation identity, values and observation provenance. Shared cells read once; no sum of independent retained versions. Retain accumulation identity iff the complete contributing cell set and accumulated state continue without reset. External-owner counters stay external. |
-| F39 | Full-configuration version | Required uint64 0..18446744073709551615 on create and full replacement; explicit zero valid, omission/null rejects. Last accepted full-configuration marker, not a fingerprint of current manual overrides. Older or equal-with-conflicting normalized content is `FailedPrecondition` after stale-token `Aborted`; compare after survivor preservation. Equal version and content with current token is a no-op; greater version publishes even with otherwise equal content. Partial updates, resize and runtime activity preserve it. Recovery preserves its sequence; a new incarnation starts a new sequence. No wrap; rollback requires a larger version. |
+| F39 | Operator metadata | Independent optional `metadata` strings on VS, each real and ModuleConfig: 0..256 decoded UTF-8 bytes, valid UTF-8, no NUL. Omission, textual null and empty normalize to empty, including on replacement; no trim, case or Unicode normalization, interpretation, uniqueness or parent inheritance. O02/O03/O06/O07 write them through full configuration; all metadata participates in normalized equality after survivor preservation. Real metadata belongs to the owning VS token; ModuleConfig has its own token. Metadata-only changes publish normally and advance the owning token once; equal candidates no-op, stale tokens remain `Aborted`. Partial operations, resize, runtime and recovery preserve all strings; recreation uses only newly supplied/default strings. No extra setter, numeric ordering or adoption proof. |
 
 F35 configurable domains: `session_default_slots` is 1..1073741824 resolved
 with F26 rounding; `list_default_records`, `list_max_records`,
@@ -79,7 +179,7 @@ and `module_max_bindings` are positive uint32 with defaults 100, 1000, 4096,
 262144, 4194304 and 16384 respectively, and `session_default_slots` defaults
 to 65536. Default records must not exceed max records; page framing and at
 least a usable chunk or record must fit; incompatible reductions reject
-activation. Cursor 1024, permit 256/300/16384, policy metadata 256, weight and
+activation. Cursor 1024, permit 256 bytes/300000 ms/16384 records, policy metadata 256, operator metadata 256, weight and
 other hard domains cannot be raised through this section. Native ACL limits
 are not configurable l3b quota copies. Rule and collection resource failure is
 `ResourceExhausted` even below a representation ceiling; there is no
@@ -100,20 +200,20 @@ package, tag or C ABI freeze.
 
 | ID | Operation | Selected semantics |
 | --- | --- | --- |
-| O01 | `PrepareCreate` | Explicit absence preparation, not a `Get` side effect; a distinct bounded grant, no name or resource reservation, no payload binding. An existing target is `AlreadyExists` without a new grant; fixed expiry and invalidation of all permits from the preceding absence interval apply. A lost response may retain a record; no deduplication and no invisible extension. |
-| O02 | `CreateService` | Full configuration including required F22 policy binding and F39 version plus a create token, absent target only; an existing valid request is `AlreadyExists` even when equal; duplicates, families and limits are validated before acceptance; new reals are administratively disabled. The first mutation token and incarnation are returned; there is no upsert. A known pre-accept failure preserves state; an uncertain outcome uses readback, not retry. |
-| O03 | `UpdateService` | Full replacement with required F39 version and expected VS token; absent is `NotFound`; a stale token is `Aborted` even when equal. After survivor preservation, older version or equal version with conflicting normalized content is `FailedPrecondition`; equal version and content is a no-op, greater version publishes even with otherwise equal content. Surviving real state, session deadlines and accepted capacity are preserved, and the VS network identity is immutable. The F22 boundary requires the complete policy binding on replacement, rejects changed content under the same identity/revision against the current binding or a retained shared revision the candidate would reuse, and treats changed identity or revision as a configuration change. The writable descriptor excludes resize-only and other read-only metadata. |
+| O01 | `PrepareCreate` | Explicit absence preparation, not a `Get` side effect; a distinct bounded grant, no name or resource reservation, no payload binding. An existing target is `AlreadyExists` without a new grant; fixed expiry and invalidation of all permits from the preceding absence interval apply. An unrepresentable server-side expiry returns `Unavailable` with no grant under section 5's order. A lost response may retain a record; no deduplication and no invisible extension. |
+| O02 | `CreateService` | Full configuration including required F22 policy binding and optional F39 VS/real strings plus a create token, absent target only; an existing valid request is `AlreadyExists` even when equal; duplicates, families and limits are validated before acceptance; new reals are administratively disabled. The first mutation token and incarnation are returned; there is no upsert. A known pre-accept failure preserves state; an uncertain outcome uses readback, not retry. |
+| O03 | `UpdateService` | Full replacement including optional F39 VS/real strings and expected VS token; absent is `NotFound`; a stale token is `Aborted` even when equal. After survivor preservation, an equal normalized candidate including all metadata is a no-op; any change follows normal admission/publication and advances the VS token once. Omitted metadata resets to empty; surviving reals take submitted/default metadata while preserving accepted weight, administrative state, incarnation and pins. Session deadlines and accepted capacity are preserved, and the VS network identity is immutable. The F22 boundary requires the complete policy binding on replacement, rejects changed content under the same identity/revision against the current binding or a retained shared revision the candidate would reuse, and treats changed identity or revision as a configuration change. The writable descriptor excludes resize-only and other read-only metadata. |
 | O04 | `DeleteService` | The current VS token; absent is `NotFound`; accepted incoming links are `FailedPrecondition` with no cascade. Accepted deletion automatically owns session cleanup; old configurations and readers delay reclamation, and there is no operator state-delete command. An accepted deletion accepts no resurrection of the deleted VS through a delayed create or link, and a VS recreated under the same name receives fresh session state: old affinity is not resurrected by name reuse. |
 | O05 | `ListServices` | Bounded authoritative lexical inventory with per-RPC membership coherence under section 6, membership-bound continuation, and `Unavailable` during recovery or bounded coherence failure; no usable partial page on failure and no permit or token issuance side effect. |
-| O06 | `CreateModuleConfig` | A distinct create with the complete explicit members or empty binding collection and a create token, no upsert; every link is validated by target incarnation and any invalid link rejects the whole operation. No internal common-policy field. |
-| O07 | `UpdateModuleConfig` | Full replacement with its own expected token; absent is `NotFound`, an equal state is a no-op, a stale token is `Aborted`. Unlink before VS delete; a delete-first link is `NotFound` or `Aborted` after recreation. Ordered exact bindings replace arbitrary destination rules; no internal common policy. |
+| O06 | `CreateModuleConfig` | A distinct create with the complete explicit members or empty binding collection, optional F39 ModuleConfig string and a create token, no upsert; every link is validated by target incarnation and any invalid link rejects the whole operation. No internal common-policy field. |
+| O07 | `UpdateModuleConfig` | Full replacement including optional F39 ModuleConfig string with its own expected token; absent is `NotFound`, an equal normalized state including metadata is a no-op, a stale token is `Aborted`. Omitted metadata resets to empty; metadata-only changes take normal preparation/admission/atomic publication and advance its token once. Unlink before VS delete; a delete-first link is `NotFound` or `Aborted` after recreation. Ordered exact bindings replace arbitrary destination rules; no internal common policy. |
 | O08 | `ListModuleConfigs` | The same bounded lexical membership inventory and recovery semantics as `ListServices`; it is not a substitute for the full ModuleConfig snapshot. |
 | O09 | `UpdateRealServerState` | Atomic nonempty target vector for one VS under one expected token and one publication; each target requires full key, incarnation and explicit enabled bool. All-or-nothing partial administrative mutation, not health control; preserves other fields including source bases and F39. Missing/null/empty vector or duplicate normalized full keys (even different incarnations) is `InvalidArgument` before token validation. After token validation, first target failure in authored order wins; validate final-candidate weights, not sequential intermediate states. All-equal valid vector is a no-op; any change advances the token once. |
 | O10 | `UpdateRealServerWeight` | Atomic nonempty target vector for one VS under one expected token and one publication; each target requires full key, incarnation and explicit weight in F05's domain for all three modes. Same structural, target-order, final-candidate and all-or-nothing rules as O09; no clamping, implicit splitting or full replacement. Preserves source bases and F39; surviving-real replacement preserves these weights. All-equal valid vector is a no-op; any change advances the token once. No new target cap; bounded transport/resource framing remains downstream. |
-| O11 | `GetService` | A full coherent accepted snapshot and token using the byte-page contract; a fresh absent object is `NotFound`, a stale continuation is `Aborted`, and recovery is `Unavailable`. No permit allocation and no mixed accepted and runtime snapshot. A returned token may still be stale after the read, so the conditional write remains required. |
+| O11 | `GetService` | A full coherent accepted snapshot including F39 VS/real strings and token using the byte-page contract; a fresh absent object is `NotFound`, a stale continuation is `Aborted`, and recovery is `Unavailable`. No permit allocation and no mixed accepted and runtime snapshot. A returned token may still be stale after the read, so the conditional write remains required. |
 | O12 | `ListSessions` | Bounded physical-record inspection with no refresh and no logical-dedup promise, under the selected page, identity, clock and continuation rules. |
-| O13 | `GetModuleConfig` | The full accepted typed snapshot including ordered identity-bound links and its own token, under the same versioned byte-page rules as `GetService`. The state must be recoverable rather than reconstructed from an empty local map. |
-| O14 | `ResizeServiceSessions` | Name, the existing VS token and a required positive size. After domain, existence and token checks, a raw target below the accepted size is `FailedPrecondition` before rounding, an exactly equal target is a no-op even with a back, growth while a back exists is rejected, and a larger target without a back proceeds to preparation and admission. A stale token is `Aborted` before target checks. Accepted growth advances the VS token; traffic and back retirement do not. One recoverable capacity, chain, token and export outcome; no second independent acceptance and no public state token. |
+| O13 | `GetModuleConfig` | The full accepted typed snapshot including ordered identity-bound links, F39 ModuleConfig string and its own token, under the same versioned byte-page rules as `GetService`. The state must be recoverable rather than reconstructed from an empty local map. |
+| O14 | `ResizeServiceSessions` | Name, the existing VS token and a required positive size. After domain, existence and token checks, a raw target below the accepted size is `FailedPrecondition` before rounding, an exactly equal target is a no-op even with a back, growth while a back exists is rejected, and a larger target without a back proceeds to preparation and admission. A stale token is `Aborted` before target checks. Accepted growth advances the VS token; traffic and back retirement do not. All F39 strings are preserved. One recoverable capacity, chain, token and export outcome; no second independent acceptance and no public state token. |
 | O15 | `DeleteModuleConfig` | Name and expected token under the existing-object ordering; absent is `NotFound` and any accepted incoming reference, including a detached function, is `FailedPrecondition`. No cascade and an empty success response; accepted deletion removes outgoing VS links while old readers delay physical reclamation. A late cleanup failure does not undo the accepted deletion. |
 | O16 | `GetServiceStatus` | Read-only bounded live status, separate from O11's immutable accepted export. Observe the current VS or pending cleanup identified by VS incarnation, with F36 and F38 VS/real groups and section 6 consistency rules; each real group carries full key and incarnation. Runtime changes neither advance the mutation token nor invalidate a traversal bound to unchanged accepted configuration. |
 | O17 | `GetModuleConfigStatus` | Read-only bounded live ModuleConfig adoption and F38 module totals/reasons and Echo counter groups under F37 and section 6. O13 remains the accepted export. This adds no counter-specific RPC or synchronous publication barrier. |
@@ -128,35 +228,35 @@ Another writer may already have made the token stale; conditional mutations stil
 validate it. Full configuration and actual session capacity use existing readback,
 not a mandatory full snapshot in every mutation response.
 
-For all existing-object mutations the order is: management recovery gate,
-request-local structural and domain validation, owning-object lookup,
-expected-token check, target and state-dependent preconditions, normalized
-equality, resource admission, acceptance. Local text syntax errors can precede
-a connection and are not proof that the server passed recovery.
-Identity/revision conflict with retained state is a precondition comparison
-after the expected token, not a reason to report `InvalidArgument` instead of
-`Aborted` for a stale request. Compiler grammar errors, allocation exhaustion
-and authoritative unavailability stay distinct. A no-op never waives
-validation. Create, prepare and read continuations retain their separate
-orders.
+All existing-object mutations use the complete [section 5 error order](#5-management-surface-permits-and-error-order).
+Create, prepare and read continuations retain their separate rules there.
 
 ## 4. Cross-Cutting Obligations (C01-C08)
 
 | ID | Obligation |
 | --- | --- |
-| C01 Presence and parsing | Optional text null or omission maps to absence before the field default; a required null or absent value rejects; a required boolean or weight retains false or 0; collections are explicit; read-only metadata is rejected as a writable field. Binary protobuf uses presence and oneof, not textual null. A full replacement omission is not KEEP. Section 16 carries the field-by-field matrix; F36-F38/O16-O17 semantic states and errors are selected in section 6, while exact binary/text schema and cursor codecs remain preimplementation work, not completed format coverage. |
-| C02 Identity and equality | Exact names, decoded addresses, optional ports, incarnations, authored real order, ModuleConfig binding order, the raw requested power and accepted no-op equality agree across clients and C. F39 comparisons use the normalized candidate after survivor preservation; greater version is a change even with otherwise equal content. The F22 equality compares source-scoped identity, revision and the native normalized accepted content including order and counter-relevant identity; same identity/revision with changed content rejects against the current binding or a retained shared revision the candidate would reuse, and changed identity or revision changes configuration even for equal behavior. Stale-token precedence survives, and semantic equality is not inferred from serialization bytes. |
-| C03 Errors and uncertain outcomes | The existing-object order of section 3 with `InvalidArgument`, `NotFound`, `AlreadyExists`, `Aborted`, `FailedPrecondition`, `ResourceExhausted` and `Unavailable` kept distinct, and separate create, prepare and read rules. A timeout or lost reply is not non-application; there is no auto-renewal, deduplication or exactly-once promise. |
+| C01 Presence and parsing | Optional text null or omission maps to absence before the field default; a required null or absent value rejects; a required boolean or weight retains false or 0; collections are explicit; read-only metadata is rejected as a writable field. Writable F39 strings are distinct: omission/null/empty normalize to empty, strict string types and decoded UTF-8 byte limits apply. Binary protobuf uses presence and oneof where required, not textual null. A full replacement omission is not KEEP. Section 16 carries the field-by-field matrix; F36-F38/O16-O17 semantic states and errors are selected in section 6, while exact binary/text schema and cursor codecs remain preimplementation work, not completed format coverage. |
+| C02 Identity and equality | Exact names, decoded addresses, independently optional VS protocol and ports, actual session transport, incarnations, authored real order, ModuleConfig binding order, the raw requested power and accepted no-op equality agree across clients and C. F39 strings participate in full normalized equality after survivor preservation; the same strings with changed content and arbitrary earlier/new strings are allowed under current CAS, subject to all other rules. The F22 equality compares source-scoped identity, revision and the native normalized accepted content including order and counter-relevant identity; same identity/revision with changed content rejects against the current binding or a retained shared revision the candidate would reuse, and changed identity or revision changes configuration even for equal behavior. Stale-token precedence survives, and semantic equality is not inferred from serialization bytes. |
+| C03 Errors and uncertain outcomes | The complete [section 5 error order](#5-management-surface-permits-and-error-order) keeps error classes distinct and create, prepare and read rules separate. A timeout or lost reply is not non-application; there is no auto-renewal, deduplication or exactly-once promise. |
 | C04 Deadline and publication boundary | Admission and preparation are cancellable; the final section is bounded with no mid-commit rollback; success need not await worker adoption or reclamation. |
 | C05 Protobuf and C boundary | A separate versioned incompatible service and package keeps the product, module and CLI identity; there is no silent old-server fallback and no old mutation bypass. Removed fields and tags are reserved, the creation-envelope size is not the old VirtualService tag 6, and real and session identities and shared-memory changes need explicit ABI treatment. The common filter types (`Device`, `VlanRange`, `Fragment`) stay imported common definitions, never redeclared as l3b predicates. Exact package and tags, generated types, C widths, layout and attach migration stay downstream; no freeze, implicit legacy compatibility, guessed shared-memory layout, rolling upgrade or transparent downgrade promise. |
 | C06 CLI and direct-client parity | Both use the authoritative permits, tokens, names, timeout and power semantics and the centralized defaults; a complete document or an error is returned, never a partial replacement. O09/O10 target vectors keep their complete atomic, authored-order semantics through both: one request per vector, no splitting into sequential single-target calls and no partial success. An external DSCP conversion must not mask invalid input or merge conflicting shared-real policies. |
-| C07 Readback and query scope | Accepted, intended or effective, and active observations stay distinct; output and scan work are bounded; record lifetime is preserved. Administrative readiness, WLC freshness and worker convergence are different. There is no requirement to persist confirmation history or expose every internal version. |
+| C07 Readback and query scope | Accepted, intended or effective, and active observations stay distinct; output and scan work are bounded; record lifetime is preserved. F39 is accepted writable configuration, not worker-adoption proof; its changes invalidate configuration-bound export/status cursors, not name membership or session traversal solely by the label. Administrative readiness, WLC freshness and worker convergence are different. There is no requirement to persist confirmation history or expose every internal version. |
 | C08 Acceptance evidence | The service, CLI and conversion boundary cases and the failure, identity and readback examples of section 18 are required obligations, **NOT RUN**; unrelated executions do not verify this contract. Downstream work remains subject to section 19. |
 
 ## 5. Management Surface, Permits And Error Order
 
+The VS mutation token covers configuration, manual administrative and manual
+weight changes, deletion and accepted capacity growth; ModuleConfig has its own
+token. Health, WLC, session traffic and automatic back retirement do not advance
+it. A real target is the full F03 key plus a required 1..256-byte incarnation;
+missing or malformed shape is `InvalidArgument`. Target resolution under the
+order below gives `NotFound` for an absent key and `Aborted` for a mismatched
+incarnation. The [atomic vector rules](#atomic-real-vectors-and-operator-metadata)
+retain authored-order target failures and all-or-nothing application.
+
 - Creation is prepared, not implied: `PrepareCreate` observes absence under the
-  mutation ordering and issues a grant of 300 seconds on authoritative server
+  mutation ordering and issues a grant of 300000 ms on authoritative server
   monotonic time, checked again at final creation acceptance, with at most
   16384 retained permit records per actual instance registry. A token is
   opaque, 1..256 bytes, copied without interpretation, and is neither
@@ -170,8 +270,16 @@ orders.
   valid request for an existing target remains `AlreadyExists`. An absent, empty
   or oversized request token field is `InvalidArgument`; missing means the
   request field, not a registry entry. Recovery remains `Unavailable`.
-- The 300-second lifetime starts at the coordinated issuance decision. A permit
-  is invalid at `now >= expiry` on authoritative server monotonic time. Expiry
+- The 300000 ms lifetime starts at the coordinated issuance decision. Issuance
+  computes expiry by checked uint64 addition after widening the duration; an
+  unrepresentable expiry returns `Unavailable` without a grant, wrap or saturation.
+  This is server-side unavailability, not malformed caller input. The check is
+  at issuance after existing request validation and target-absence determination;
+  an otherwise valid present target still returns `AlreadyExists` before issuance.
+  Issuance time, now and expiry are uint64 milliseconds in the identified
+  authoritative server monotonic clock domain. Readback `valid_for_ms` is the
+  uint32 lifetime 300000 at issuance, not an absolute time or automatic extension.
+  A permit is invalid at `now >= expiry` in that domain. Expiry
   after acceptance does not roll back an accepted create. This is a permit
   lifetime, not a VS lifetime or name/resource reservation.
   The record cap spans both object kinds and all issuers. Admission counts
@@ -224,6 +332,13 @@ orders.
   remain `InvalidArgument`, and recovery remains `Unavailable`. This does not
   define precedence for every combination of malformed request fields. A read
   continuation has its own identity rules rather than a mutation-token stage.
+  Local text syntax errors can precede a connection and do not prove that the
+  server passed recovery. A no-op never waives validation. Identity/revision
+  conflict with retained state is a precondition comparison after the expected
+  token, not a reason to replace stale-request `Aborted` with `InvalidArgument`.
+  Compiler grammar errors, allocation exhaustion and authoritative unavailability
+  stay distinct, as do `InvalidArgument`, `NotFound`, `AlreadyExists`, `Aborted`,
+  `FailedPrecondition`, `ResourceExhausted` and `Unavailable`.
 - Cancellation and a deadline do not prove that a change was not accepted.
   There is no automatic create or update replay with a fresh token after an
   uncertain result, and no automatic permit renewal. An uncertain, cancelled
@@ -233,7 +348,7 @@ orders.
   cleanup failure does not roll it back, and memory of old versions stays
   accounted until it is really released.
 
-### Atomic Real Vectors And Full-Configuration Versions
+### Atomic Real Vectors And Operator Metadata
 
 O09/O10 contain a required nonempty vector for exactly one VS, with one expected
 token. Every member requires the full decoded real key, its incarnation and the
@@ -251,25 +366,35 @@ partial operations preserve F39 and all unrelated fields. Neither operation spli
 implicitly, replaces the full configuration or introduces a target-count cap;
 bounded transport/resource framing must be specified downstream.
 
-F39 is required on every O02/O03 full descriptor and appears in coherent accepted
-readback. Its domain is uint64 0..18446744073709551615, with explicit zero valid
-and missing/null invalid. Under O03, stale CAS remains `Aborted` before version
-comparison. Preserve surviving real state and normalize the whole candidate before
-comparing content. A version lower than the last accepted full version, or an
-equal version with conflicting content, is `FailedPrecondition`. Equal version,
-equal normalized content and current token is a no-op. A greater version follows
-normal preparation/admission/publication and advances CAS even when every other
-field is equal; a version alone does not bypass other validation.
+F39 denotes independent optional `metadata` strings on the VS, each real and
+ModuleConfig. Each is 0..256 decoded UTF-8 bytes, valid UTF-8 with no NUL.
+Omission, textual null and empty string normalize to empty. Preserve whitespace,
+case and Unicode without trimming or normalization. Do not parse numbers, epochs,
+hashes or JSON; no uniqueness or parent inheritance is required. The spelling is
+semantic, not a final wire name, tag or ABI. F22 policy identity/revision and
+read-only systemic metadata remain separate and unchanged.
 
-The marker denotes the last accepted full configuration, not an exact fingerprint
-of current manual overrides. Actually changed O09/O10 updates and accepted resize
-advance CAS but preserve F39; equal partial updates no-op. Health, WLC, sessions
-and other runtime activity preserve both F39 and their existing token rules.
-Recovery preserves the version sequence alongside accepted state while old CAS
-tokens still become stale. Rollback content requires a larger version. Maximum
-version never wraps and does not authorize automatic recreation; a genuinely new
-VS incarnation starts its own sequence. No version ledger, token replacement,
-automatic retry or worker-adoption promise is added.
+O02/O03 write VS and real metadata; O06/O07 write ModuleConfig metadata through
+full configuration, with no extra setter or RPC. Full replacement omission resets
+each string to empty, never KEEP. A surviving real takes submitted/default metadata
+while keeping its accepted weight, administrative state, incarnation and pins.
+Real metadata belongs to the owning VS CAS; ModuleConfig has its own CAS and does
+not write linked VS/real metadata. Preserve survivors before full normalized
+equality, which includes every metadata string. Equal candidate/current CAS is a
+no-op. A metadata-only change takes normal preparation/admission/atomic publication
+and advances the owning CAS once. A stale CAS remains `Aborted` under the existing
+error order; metadata never bypasses validation or admission.
+
+The same metadata with changed content, arbitrary earlier/new strings and rollback
+under current CAS are allowed subject to all other rules. There is no numeric
+ordering, monotonic sequence, overflow or rollback restriction for F39. O09/O10,
+resize and runtime preserve all metadata and retain their existing token rules.
+Recovery preserves accepted strings while old CAS tokens still become stale.
+Recreated objects and readded reals have new incarnations and only newly
+supplied/default strings; equal text revives no old identity, state or pin. Metadata
+is neither a fingerprint of current manual overrides nor proof of worker adoption;
+the existing rules for systemic owner epochs, tokens, incarnations and internal
+publication versions stay unchanged. No version ledger, token replacement or automatic retry is added.
 
 ### Complete Identity Non-Reuse
 
@@ -343,15 +468,30 @@ metadata-only changes do not.
   the real incarnations. Supported input adapters reject read-only metadata
   supplied as a writable field. WLC result and provenance, health and drain
   progress are labelled observations and never change the token-stable bytes.
+- Writable F39 is part of that replacement descriptor, not read-only systemic
+  metadata. O11 coherently exports VS and every real's strings with accepted CAS;
+  O13 exports the ModuleConfig string with its own accepted CAS. Recovery preserves
+  these strings. They do not prove worker adoption. Charge their encoded bytes to
+  existing request/export/resource budgets; no new configurable metadata quota is
+  added, and the 256-byte domain cannot be raised.
 - A configuration, manual or capacity change aborts the continuation with
   `Aborted`; a no-op, a WLC publication or a health publication does not.
   After an owner restart the old cursor is invalid.
+- Metadata-only changes invalidate the owning configuration-bound export/status
+  cursors under the same rules. They do not change name membership or invalidate
+  session traversal solely by the label.
 - A client accepts only a contiguous sequence of one identity, token, encoding
   and total length, and the CLI returns the complete document or an error. A
   client may impose a stricter local memory limit, but it reports a local
   failure rather than a truncated configuration.
-- The export is prepared and accounted before the change is accepted and is
-  not a second authoritative copy. Each page RPC protects its memory until the
+- Before accepting any state-changing operation, prepare and account the exact
+  encoded snapshot, including all accepted fields. If its total
+  exceeds `config_max_export_bytes`, reject with `ResourceExhausted`, preserving
+  accepted state and CAS; never truncate. Exactly the cap passes only this bound,
+  not other admission checks. Passing `module_max_bindings` alone guarantees
+  neither encoded-export fit nor physical fit. Preserve section 5's validation,
+  token and no-op precedence. The export is not a second authoritative copy.
+  Each page RPC protects its memory until the
   copy completes, and an obsolete export is freed only after its protected
   readers and outstanding C accesses finish.
 - Name lists are ASCII-lexicographic with a membership-revision, instance,
@@ -493,6 +633,17 @@ selected here. Accumulation identity alone does not settle that obligation;
 
 ### Semantic Counter Catalogue
 
+The [packet drop precedence](l3b-packet-contract.md#packet-drop-precedence) is normative for each
+packet-owner invocation: the first terminal fault in that sequence supplies its
+single primary drop reason. Do not evaluate later dependent checks or increment
+their drop reasons. This is attribution among existing outcomes, not additional
+rejection or rollback of earlier native COUNT, consumed WRR positions, packet
+preparation or committed session effects. Existing no-partial-session rules
+remain. Funded peer attempts are separate units and continue independently.
+Stage labels below are documentation references, not counter tags or wire fields.
+Shared failure reasons have branch-scoped rows; repeating a reason in S4/S5/S6
+does not create a new reason or permit ordinary-only checks on another branch.
+
 This is the complete target semantic catalogue, including paths not implemented
 today, not an inventory of currently available counters. Each owner invocation
 records input packets/bytes, successful output packets/bytes, and terminal dropped
@@ -513,27 +664,31 @@ layout and numeric widths are not selected. A row listing alternatives requires
 distinct reasons for those alternatives, not one catch-all counter. Relevant VS
 and real views apply only after their identity is safely established.
 
-| Counted outcome/reason | Owner and observation attribution |
-| --- | --- |
-| Malformed/truncated packet or invalid length; missing required transport fields | Detecting l3b invocation: module, plus safely established VS/real; external quote parser stays external. |
-| Real IPv4/IPv6 fragment | Detecting owner before transport/VS lookup; module only in l3b. |
-| Unsupported upper protocol, live AH, ESP or No Next Header | Detecting owner before dispatch; distinct unsupported reasons, no fabricated VS. |
-| IPv4 LSRR/SSRR option with a remaining route; malformed IPv4 source-route option length/pointer | Detecting l3b invocation before dispatch; module only, two distinct reasons; quoted options stay structural quote reasons. |
-| Extension bound/length failure, ninth extension, misplaced/repeated HBH, malformed TLV, rejecting unknown-option action, nonzero live Routing Segments Left | Detecting parser owner; distinguish each admission failure; quoted structural failures remain quote reasons. |
-| Bad enclosing IPv4 checksum on ICMP, bad ICMPv4 message checksum, bad ICMPv6 message/pseudo-header checksum | Detecting ICMP owner before reply/query/fanout; distinguish checks. |
-| Unsupported ICMP type; malformed/incomplete quote, quoted noninitial fragment or missing required quote fields | Detecting ICMP/parser owner; no query/session effect; external parser counters stay external. |
-| No matching VS, including empty ModuleConfig | l3b module only; never attribute to an invented VS. |
-| Echo-inactive (every linked VS at the family/VIP has an empty real set; dedicated reason, not no matching VS), forbidden Echo VIP source, forbidden Echo client source/destination role | Module totals/reasons; no reply increment or arbitrary VS/real attribution. |
-| Descriptor acquisition exhaustion | Pre-provisioned l3b acquisition-failure accounting, module and only safely known child context; never fabricated session miss. |
-| Service-policy denial/no match/empty or COUNT-only terminal actions; runtime policy unavailable | l3b module and known VS; denial and unavailable distinct; native COUNT remains separate. |
-| Session lookup/read failure; selector/coherent selection failure; no eligible real/empty selector; invalid live pin not authorized to reschedule | l3b module and VS, plus real only when safely resolved; distinct causes, not ordinary miss. |
-| Deadline arithmetic failure; required insertion, refresh, copy-forward or rebind failure; suppression-resource admission failure; bounded authority revalidation/repreparation failure | l3b module/VS and safely established real, distinguish each required operation/cause; no partial session/suppression changes. |
-| Malformed eligible MSS option/tail; required MSS packet-buffer space failure | l3b module/VS and selected real; valid logical option-space exhaustion is unchanged forwarding, not a drop. |
-| Encapsulation representable-length failure; headroom/buffer failure | l3b module/VS and selected real; no mode fallback or successful output increment. |
-| Missing/expired session at reverse delivery after owned query; invalid reverse-delivery pin | l3b delivery owner with known VS, real only when established; no requery/reselect/refanout. |
-| Absent, multiple, stale or unprovable ingress/service association | External distributor diagnostics, distinct association reasons; no fabricated l3b child attribution. |
-| Indeterminate ownership; fanout not-ready (including unknown peers, missing family source or peers exceeding burst); insufficient budget | External distributor, distinct failures before clone reservation/output as applicable. |
-| Funded clone allocation/complete-copy failure; funded clone encapsulation length/headroom failure | External distributor per failed attempt, distinct clone failures; remaining funded peers continue, with no refund. |
+| Counted outcome/reason | Stage | Owner and observation attribution |
+| --- | --- | --- |
+| Malformed/truncated packet or invalid length at base-IP validation | S1 | Detecting owner; module only in l3b, external envelope parser stays external. |
+| Malformed/truncated ICMP header or invalid ICMP message length | S3 | Same structural-failure family, at the detecting ICMP owner before dependent checksum/type access; no invented child. |
+| Missing required TCP/UDP transport fields or invalid transport bounds | S5 | Same structural-failure family, before dependent lookup; module only in l3b. |
+| Real IPv4/IPv6 fragment | S2 | Detecting owner before transport/VS lookup; module only in l3b. |
+| Unsupported upper protocol, live AH, ESP or No Next Header | S2 | Detecting owner before dispatch; distinct unsupported reasons, no fabricated VS. |
+| IPv4 LSRR/SSRR option with a remaining route; malformed IPv4 source-route option length/pointer | S2 | Detecting l3b invocation before dispatch; module only, two distinct reasons; quoted options stay structural quote reasons. |
+| Extension bound/length failure, ninth extension, misplaced/repeated HBH, malformed TLV, rejecting unknown-option action, nonzero live Routing Segments Left | S2 | Detecting parser owner; distinguish each admission failure; quoted structural failures remain quote reasons. |
+| Bad enclosing IPv4 checksum on ICMP, bad ICMPv4 message checksum, bad ICMPv6 message/pseudo-header checksum | S3 | Detecting ICMP owner before reply/query/fanout; distinguish checks. |
+| Unsupported ICMP type; malformed/incomplete quote, quoted noninitial fragment or missing required quote fields | S4 | Detecting ICMP/parser owner; no query/session effect; external parser counters stay external. |
+| No matching VS for ordinary traffic, including empty ModuleConfig | S5 | l3b module only; never attribute to an invented VS. |
+| Echo-inactive (every linked VS at the family/VIP has an empty real set; dedicated reason, not no matching VS), forbidden Echo VIP source, forbidden Echo client source/destination role | S4 | Module totals/reasons; no reply increment or arbitrary VS/real attribution. |
+| Echo eligibility acquisition failure; unclaimed Echo destination; Echo reply construction/buffer failure | S4 | Existing acquisition, no-matching-VS and preparation-failure reasons on the Echo branch, respectively; module only, no reply or invented VS/real. |
+| Descriptor acquisition exhaustion | S5 | Pre-provisioned l3b acquisition-failure accounting, module and only safely known child context; never fabricated session miss. |
+| Service-policy denial/no match/empty or COUNT-only terminal actions; runtime policy unavailable | S5 | l3b module and known VS; denial and unavailable distinct; native COUNT remains separate. |
+| Session lookup/read failure; selector/coherent selection failure; no eligible real/empty selector; invalid live pin not authorized to reschedule | S5 | l3b module and VS, plus real only when safely resolved; distinct causes, not ordinary miss. |
+| Deadline arithmetic failure; required insertion, refresh, copy-forward or rebind failure; suppression-resource admission failure; bounded authority revalidation/repreparation failure | S5 | l3b module/VS and safely established real, distinguish each required operation/cause; no partial session/suppression changes. |
+| Malformed eligible MSS option/tail; required MSS packet-buffer space failure | S5 | l3b module/VS and selected real; valid logical option-space exhaustion is unchanged forwarding, not a drop. |
+| Encapsulation representable-length failure; headroom/buffer failure | S5 | l3b module/VS and selected real; no mode fallback or successful output increment. |
+| Reverse-delivery acquisition/read failure; required deadline, refresh, copy-forward, suppression, revalidation/repreparation or encapsulation length/buffer failure | S6 | Existing shared failure reasons on the delivery branch, distinct per cause; l3b module and safely established VS/real, no partial session/suppression effect or successful output. |
+| Missing/expired session at reverse delivery after owned query; invalid reverse-delivery pin | S6 | l3b delivery owner with known VS, real only when established; no requery/reselect/refanout. |
+| Absent, multiple, stale or unprovable ingress/service association | S6 | External distributor diagnostics, distinct association reasons; no fabricated l3b child attribution. |
+| Indeterminate ownership; fanout not-ready (including unknown peers, missing family source or peers exceeding burst); insufficient budget | S6 | External distributor, distinct failures before clone reservation/output as applicable. |
+| Funded clone allocation/complete-copy failure; funded clone encapsulation length/headroom failure | S7 | External distributor per failed attempt, distinct clone failures; remaining funded peers continue, with no refund. |
 
 External original terminal-drop accounting and funded clone-attempt failures are
 different units: one original has at most one primary terminal-drop reason, while
@@ -570,13 +725,21 @@ from the network key and is not reconstructed by current real lookup.
   | No SYN, FIN present, regardless of ACK/RST | `tcp_fin` |
   | No SYN and no FIN, including RST alone | `tcp` |
 
-  UDP uses `udp`; a permitted other-protocol refresh uses `other`. Duration
-  conversion and deadline addition use checked uint64 arithmetic. If
+  UDP uses `udp`; a permitted ICMP-error refresh uses `other`. Durations are
+  uint32 milliseconds, widened to uint64 before checked deadline addition.
+  Session now, t, deadlines, expires_at, page_now and retire_not_before are uint64
+  milliseconds in the same identified dataplane monotonic clock domain. If
   `now > UINT64_MAX - ttl`, a required insert or refresh leaves the prior
   record unchanged and counted-drops the packet, with no wrap, saturation or
   infinite lifetime. OPS and read-only queries do not refresh deadlines or
   require the corresponding deadline-addition check; lookup still treats
   `deadline <= now` as expired.
+  This is an affinity/expiry classifier, not a model of endpoint TCP state.
+  A permitted RST without SYN/FIN therefore uses ordinary `tcp`, without an
+  immediate-delete rule. Its logically live authoritative pin remains in WLC
+  accounting until expiry, subject to the existing eligibility/authority rules.
+  IPVS uses different TCP-state transitions; it does not universally delete
+  immediately on RST.
 - Session state belongs to one VS incarnation. It is created with the service,
   preserved across its replacement, and automatically reclaimed after an
   accepted deletion once old reader rights end; both the front and the
@@ -675,7 +838,7 @@ from the network key and is not reconstructed by current real lookup.
   count and not a forwarding-pin decision. The view is live: concurrent
   changes can cause omissions and repeated flow identities, and finite initial
   watermarks stop inserts from extending the traversal indefinitely. The page
-  uses one clock reading in the session deadline domain for both the expiry
+  uses one uint64 millisecond clock reading in the session deadline domain for both the expiry
   predicate and the response, and inspection never refreshes a session and
   never becomes a WLC sample.
   Omit front and back records with `expires_at <= page_now`; scanning them
@@ -707,6 +870,18 @@ Keep the applicable protected VS descriptor; this does not require the newest
 published configuration. The following table does not apply ordinary miss or
 reschedule permissions to reverse ICMP delivery, which still cannot reselect,
 rebind or create a session; ownership queries remain read-only.
+
+Explanatory view for one exact logical key (not a storage layout or concurrency
+algorithm; the normative rules above and below govern):
+
+```text
+lookup -> front authority, if live
+       -> back, only if live and not superseded
+
+successful newer front commit -- atomically suppresses --> older back authority
+front expires / is reclaimed / slot reused -------------> suppression remains
+physical inspection may still show that back; forwarding/query/WLC cannot use it
+```
 
 | Initial operation | Authority found on revalidation | Required outcome |
 | --- | --- | --- |
@@ -751,6 +926,24 @@ sampled session load feed a hash selector. It is not the IPVS per-connection
 least-connection scheduler. Configured weight 0 is quiescent: the real receives
 no new selection while valid pins remain.
 
+### WLC Inputs And Observations
+
+Inputs are the original positive weights of administratively enabled,
+health-eligible reals and one complete all-worker sample. The requested sampling,
+computation, retry and reconciliation cadence is 20 ms. Targets are a 10–20 ms
+start interval and full-recalculation duration <=20 ms, aiming toward 10 ms,
+not a sample-validity deadline or adoption SLO. Within one input generation,
+the first two consecutive invalid attempts retain the last applicable successfully
+published result with degraded freshness; the third and subsequent invalid
+attempts trigger capped-base fallback publication attempts and WLC not-ready.
+Without an applicable result, fallback applies immediately; a valid sample resets
+the streak once. A change of participating real identity, configured weight or
+effective power starts a new input generation with streak 0. A complete current
+valid sample is valid even when its source values are unchanged or late; an equal
+active output uses guarded confirmation below. Requested WLC power is writable
+configuration under F09; derived effective power, WLC results, active-state and
+freshness observations are read-only, never independent caller setters.
+
 - Go computes WLC on a requested 20 ms cadence from one complete all-worker active-session
   sample. For each eligible real i, let `w_i` be its original positive
   configured weight, `c_i` its sampled active-session count, `W = sum(w_i)`,
@@ -779,12 +972,17 @@ no new selection while valid pins remain.
   2*A>=199*C, otherwise divide A by C with half-up remainder rounding. This is
   mathematical notation, not unchecked machine arithmetic; it introduces no
   numeric count width or count-domain limit.
-- 20 ms is a requested cadence, not a deadline and not an adoption SLO. A
-  delayed complete current valid sample is not invalid merely because it is
-  late. An incomplete, missing or failed attempt follows the existing
+- The requested cadence remains 20 ms. The start-to-start interval target is
+  10–20 ms; independently, full-recalculation duration targets <=20 ms, aiming
+  toward 10 ms. Measure the full duration from the start of sample acquisition
+  through the complete all-worker sample, weight calculation and selector-result
+  preparation, not just the formula. Worker adoption is separate. Record missed
+  interval/duration targets; neither target is a sample-validity deadline or an
+  adoption SLO. A delayed complete current valid sample stays valid, including
+  after 20 ms. An incomplete, missing or failed attempt follows the existing
   three-attempt invalid-sample policy, and sustained failure may lead to
-  fallback or not-ready. Feasibility at any scale is unqualified; failing to
-  fit the cadence creates no deadline and no instant fallback.
+  fallback or not-ready. Feasibility at any scale is unqualified; missing a
+  timing target creates no instant fallback. No measured performance is claimed.
 - The eligible set is the reals that are administratively enabled,
   health-eligible and configured with a positive weight, each contributing its
   original configured weight rather than a pre-clamped value. An empty
@@ -792,7 +990,8 @@ no new selection while valid pins remain.
   not independently clear sessions.
 - Each `c_i` counts logically live authoritative sessions, not physical records.
   Count a logical key once across front/back copies and worker observations,
-  within its VS incarnation, preserving address family and the portless rule
+  within its VS incarnation, preserving address family, actual TCP/UDP transport
+  even in a mixed VS, and the portless rule
   that excludes both transport ports. Attribute it only to its stored full real
   key and incarnation in the eligible WLC input set, while its authoritative
   deadline is unexpired in the sample's observation. A superseded back counts
@@ -815,7 +1014,8 @@ no new selection while valid pins remain.
   removal is a conservative choice, so a health flap can move a whole VS
   temporarily from WLC-shaped to base capped weights, and no upper bound on
   fallback duration is promised. A no-op does not invalidate the retained
-  result; the invalid-sample count is scoped to the input generation, a valid
+  result; metadata-only changes do not change WLC input generation or invalidate
+  the retained result. The invalid-sample count is scoped to the input generation, a valid
   sample breaks the sequence, and publication failures are tracked separately
   and neither increment nor reset that count.
   Any change of participating real identity, configured weight or effective
@@ -1082,8 +1282,10 @@ are not exit/re-entry.
   administrative state. The operator publishes through the Gateway and
   acknowledges generation and serving readiness. Disable publishes before
   route withdrawal; recovery publishes before announcement, and an independent
-  route-announcement lease expires no later than health eligibility. Exact
-  checker, heartbeat and lease deadlines, transport ownership and integration
+  route-announcement lease expires no later than health eligibility. Apart from
+  the attempt timeout selected below, exact polling/retry intervals, heartbeat,
+  health-eligibility and lease deadlines (durations uint32 milliseconds and
+  absolute monotonic times uint64 milliseconds in identified domains), transport ownership and integration
   tests are mandatory health-integration prerequisites, not defaults supplied
   by this representation contract. They must be fixed before enabling that
   integration; administrative, health, WLC and serving readiness remain distinct.
@@ -1139,11 +1341,23 @@ are not exit/re-entry.
   continuity initializes unknown/unhealthy and zero, never fabricated success.
   Stale old-marker deltas cannot enable a real. Administrative drain and health
   expiry remain independent constraints.
+- The external checker owns configurable `attempt_timeout_ms`: uint32
+  milliseconds, positive 1..4294967295; explicit zero or an out-of-domain value
+  rejects checker configuration. Omission/null in checker configuration resolves
+  to 500 ms; 100 ms is the operational target, not a different default or cap.
+  This limits one check attempt, not polling interval, retry count, heartbeat,
+  health-eligibility or route-announcement lease deadlines. Effective timeout
+  accompanies checker configuration identity and immutable revision in every
+  authoritative snapshot; missing/invalid effective timeout is untrusted and
+  fails health closed. A timeout change creates a new checker revision with a
+  coherent snapshot; old-revision observations cannot apply to it. This is
+  external checker configuration/runtime provenance, not a writable VS field or
+  VS mutation token, and the remaining integration deadlines stay prerequisites.
 - The external checker owns effective `retries`, an integer in `0..255`,
   not a new writable VS field. Each authoritative snapshot carries it
   with checker-configuration identity and immutable revision, streak, eligibility,
   continuity marker and observation sequence; deltas belong to that revision.
-  There is no implicit l3b default. A missing or invalid threshold is untrusted
+  There is no implicit retries default. A missing or invalid threshold is untrusted
   and fails health closed, never interpreted as zero. Zero disables on the first
   completed failure. The streak representation MUST distinguish `retries` from
   `retries+1` without overflow: failure count 256 must be representable when
@@ -1154,7 +1368,7 @@ are not exit/re-entry.
   the existing unknown/unhealthy initialization. Old-revision deltas MUST NOT
   apply to the new revision. Checker revision is runtime provenance, not a VS
   mutation token. Administrative disable and health expiry remain stronger than
-  checker eligibility; no external checker's default is inferred here.
+  checker eligibility; no other external checker default is inferred here.
   A snapshot claiming eligible=true with streak>retries contradicts these rules
   and cannot commit as trusted. This does not erase proven history or fabricate
   health: eligible=false below threshold remains valid hysteresis. No new
@@ -1195,14 +1409,16 @@ are not exit/re-entry.
   allocate it. Logical bounds do not waive physical admission or require a
   static-array implementation.
 - OPS is orthogonal to the scheduler and UDP-scoped. Entering OPS retains live
-  session hits without refreshing their deadlines, and misses select
+  session hits under all three schedulers; UDP supports WRR, HASH and WLC. Live
+  hits do not refresh their deadlines, and misses select
   statelessly and create no session; leaving OPS atomically restores refresh
-  on live hits and creation on misses. For a TCP service, omitted, false and
-  true are equivalent and normalize to false in accepted state, so a TCP
-  service with `true` is a no-op under a current token and equal F39 version
-  when all other normalized content is equal; the readback
-  returns false. Clients compare normalized intent with accepted
-  configuration, so a TCP true on input and false on readback is not drift.
+  on live hits and creation on misses. A mixed TCP+UDP VS retains true and applies
+  OPS only to actual UDP; its TCP sessions retain ordinary stateful behavior.
+  For a TCP-only service, true is `InvalidArgument` through both API and CLI;
+  false and absence are valid and resolve to false. This request-local domain
+  check applies to create and full replacement after the recovery gate and before
+  CAS, even for an otherwise equal candidate or stale token; it is never a no-op
+  or a true-to-false normalization. Mixed and UDP-only true remain valid.
   WLC observes session load, not new stateless-packet load.
   OPS belongs to VS configuration, not to a packet or session setting; entry
   and exit take effect through VS configuration publication. Switching alone
@@ -1218,7 +1434,10 @@ are not exit/re-entry.
   Echo or a separate ICMP delivery, and a later readiness or packet-processing
   failure does not roll back the consumed position. It survives replacement, a
   selector rebuild, switching away from WRR and back, and a control-plane
-  only restart; delete followed by create establishes new cursor state. It is
+  only restart while dataplane and shared memory survive. There is no continuity
+  promise across dataplane, shared-memory or host restart, no required zero reset,
+  chosen initial slot or persistence mechanism. Delete followed by create
+  establishes new cursor state. It is
   internal runtime state, not a user-settable field, and advancement does not
   change the configuration token. Given a coherent nonempty expanded sequence of length `L`,
   compute `next = (cursor + 1) mod 2^64` and read `slot = next mod L` without
@@ -1226,23 +1445,33 @@ are not exit/re-entry.
   computing `next` is not itself an advancement. The initial cursor position and
   first slot have no public guarantee. Wrap is ordinary arithmetic, including
   a discontinuity in cyclic slot order when `L` does not divide `2^64`.
-- The VS identity is the destination address, transport protocol and optional
-  destination port. An absent port is a wildcard within the protocol, an
-  explicit zero matches port zero, duplicates reject, and for one address and
-  protocol a portless and a port-specific VS cannot coexist. Distinct explicit
-  ports may coexist. Conflict admission covers all accepted VSes in the actual
+- The immutable VS identity is the decoded family/VIP, optional protocol and
+  optional destination port. Protocol and port are independently optional:
+  absent/null protocol selects exactly TCP+UDP; explicit TCP or UDP selects only
+  that transport. Explicit unspecified or unknown protocol rejects. Absent port
+  selects all ports; explicit zero matches only port zero. Two selectors conflict
+  iff family and VIP agree AND their protocol sets intersect AND their port sets
+  intersect. Thus TCP:443 and UDP:443 may coexist, but a mixed :443 conflicts with
+  either; TCP without a port conflicts with TCP:443 but not UDP:443. Distinct
+  explicit ports may coexist. Conflict admission covers all accepted VSes in the actual
   dataplane instance, including unlinked VSes and different module/agent owners;
   a conflicting candidate is `InvalidArgument`, with no same-identity staging
-  clone. The redundant
+  clone. A current-token replacement cannot change this identity, including
+  changing between mixed and single-protocol selectors; stale-token precedence
+  is unchanged. One mixed VS has one incarnation, real set, selector, WRR cursor
+  per worker and shared session capacity/resource charge, not two child VSes.
+  The redundant
   `pure_l3` switch is removed and the portless mode is derived from
   destination port absence. In portless mode the session identity excludes
   both transport ports, so admitted packets from one client address differing
-  only in source and destination port share the same live pin; the ports are
+  only in source and destination port share the same live pin within the same
+  actual transport; TCP and UDP never share a session. The ports are
   not direct selection-hash inputs, and the exact hash encoding and label
   provenance are not frozen.
 - The canonical logical session key within the existing VS-incarnation scope is
   `(family, transport, client_address, VIP_address, ports)`: family is IPv4 or
-  IPv6, transport is TCP or UDP, and ports is either `Portless` (both absent) or
+  IPv6, transport is the actual TCP or UDP even in a mixed VS (never a wildcard),
+  and ports is either `Portless` (both absent) or
   `Specific(client_port, VIP_port)` (both present). Mode is exactly the VS mode;
   specific port 0 remains 0, not absence. Addresses are exact decoded bytes of
   the stated family, with no implicit IPv4/IPv6 folding. Valid packet-derived
@@ -1256,7 +1485,9 @@ are not exit/re-entry.
   The saved real key and real incarnation are a separate pin value, not the flow
   key. TCP flags, real endpoints and tunnel outer addresses are not session
   identity. Physical storage MAY omit VS-invariant components and derive them
-  from protected immutable context, and MAY include scope bytes. This defines
+  from protected immutable context, and MAY include scope bytes; a mixed VS cannot
+  derive actual transport from its wildcard selector or omit that distinction.
+  This defines
   no new namespace, C struct layout, protobuf field numbers, hash encoding,
   endianness or selected algorithm; the portless selection-hash rule above stays.
 - The real key is the decoded address family, address bytes and optional real
@@ -1271,6 +1502,10 @@ are not exit/re-entry.
   distinguishes the full key and the incarnation, directly or through a safe
   opaque handle, so a reused slot, address or allocator identifier cannot
   alias an old pin to a new real.
+- Metadata-only changes do not change VS network or real identity, session-chain
+  topology, session state/deadlines or the WRR cursor. Surviving real metadata is
+  submitted/default configuration, not preserved manual state; changing or reusing
+  its text never rebinds or revives a pin.
 - A still-live pin whose real is effectively disabled (administratively
   disabled or health-ineligible), absent or has a different incarnation follows
   the invalid-pin disposition rather than an ordinary session miss.
@@ -1440,460 +1675,31 @@ remain unchanged; this is not a global martian filter or a change to DHCP.
 
 ## 12. Packet Surfaces
 
-- Once invoked, l3b consumes and counted-drops ordinary traffic with no matching
-  VS, including an empty ModuleConfig; there is no implicit pass-through.
-  Unrelated routing must occur before this invocation. Unsupported ordinary
-  IPv4 upper protocols counted-drop, preserving separate TCP/UDP admission,
-  Echo and supported ICMP-error paths rather than rejecting all IPv4 ICMP.
-- Bounded validation and real-fragment rejection precede dispatch. Ordinary
-  TCP/UDP traffic alone follows VS lookup, bound service-policy admission,
-  session resolution and eligible-real selection, MSS processing and
-  encapsulation, then, only if session mutation is needed, the required atomic
-  session insert/refresh/copy-forward or authorized rebind commit before handoff.
-  OPS front live eligible hits and misses do not require a write; back migration
-  and invalid-pin rebind do. Packet-preparation failure creates no session and
-  extends no deadline. A failed required commit counted-drops the prepared packet
-  without stateless fallback or partial authority/suppression changes. After a
-  successful commit, later transmission loss does not roll the session back.
-  Lookup/selection alone is not a session commit; the same late-commit boundary
-  applies to permitted reverse-session delivery refresh. Echo and ICMP errors use the separate paths below,
-  not ordinary TCP/UDP VS or service-policy admission.
-- Before Echo reply generation, apply SourceSet separately to the addressed VIP
-  as future reply source and to the request source as a valid request source and
-  future reply destination. A forbidden address on either leg consumes and
-  counted-drops the original. Multicast/broadcast request sources fail because of
-  their SOURCE role, not a global ban on such destinations.
-  It performs no response-counter increment, session lookup/write, real selection,
-  encapsulation or fanout. There is no alternative address or ICMP error reply.
-  This does not change F02 storage/exact lookup or ordinary TCP/UDP admission. It is an
-  explicit product limitation, not full RFC endpoint compliance: RFC 4443 says
-  multicast Echo requests SHOULD receive replies, whose source MUST be unicast.
-  A loopback request source (IPv4 127/8 or IPv6 ::1) is not rejected solely for
-  that class and receives the ordinary reply subject to the remaining checks.
-  RFC 1122 section 3.2.1.3(g) forbids 127/8 addresses outside a host; that
-  restriction does not make a node-local reply an automatic violation. Whether
-  the reply stays node-local or reaches a network egress is an unproved
-  integration boundary, not supported egress.
-- After both address-role checks pass, Echo eligibility aggregates only VSes linked in the invoked ModuleConfig's
-  protected coherent configuration, not necessarily the latest published one.
-  At least one configured real among those VSes at the addressed family/VIP
-  makes it active, regardless of administrative enablement, weight or health.
-  An admitted IPv4/v6 Echo Request then produces one reply without session
-  lookup, creation or refresh. If all those VSes have empty real sets, no reply
-  is generated and the original counted-drops with a dedicated Echo-inactive
-  reason, distinct from no-matching-VS accounting. The reply uses
-  the addressed VIP as source, the request source as destination, the family's
-  Echo Reply type, code zero and valid checksums. Its initial TTL/Hop Limit is
-  65 at l3b handoff, not a promise of 65 after downstream routing.
-  The fixed IPv4 TTL 65 has no knob: this is a known deviation from the
-  RFC 1122 section 3.2.1.7 and RFC 1812 section 4.2.2.9 requirement that a
-  fixed IPv4 TTL be configurable. This IPv4 requirement does not govern the
-  IPv6 Hop Limit.
-  In both families, preserve the request's identifier, sequence and payload
-  byte-for-byte, including an empty payload.
-  Transform the admitted request with unchanged header geometry, rather than
-  constructing bare IP headers. Preserve IPv4 options, IPv6 extensions, TOS/Traffic
-  Class, IPv4 ID/DF and other IP fields, and IPv6 flow label. Only the endpoints,
-  TTL/Hop Limit, ICMP type/code and necessary checksums change as specified above;
-  header lengths remain unchanged. Recompute or correctly update the IPv4 header
-  checksum including options and the separate ICMP message checksum; for ICMPv6,
-  account for the complete message and pseudo-header.
-  Correct code changes from incoming 1 or 255 as well as type changes; a type-only
-  checksum delta is insufficient. Existing fragment, TLV, Routing and checksum
-  admission applies first; live AH never reaches Echo. No partial reply is emitted.
-  This does not implement source-route reversal, special Record Route/Timestamp
-  updates or full RFC endpoint conformance; preserving opaque options is not a
-  claim of safe delivery in every reverse-path context. Retained IPv4 IDs carry
-  known unmitigated reuse/reassembly risk, including Echo replies: a copied Echo
-  ID is a conditional reuse risk under RFC 6864 section 4.3, not an unconditional
-  violation. An Echo Request carrying an LSRR/SSRR option with a remaining
-  route drops before dispatch under the IPv4 source-route rule below; an
-  exhausted source route stays opaque. The later
-  DF/MTU investigation includes Echo, without a new restriction or activation
-  gate, unique-ID allocator or DF1 policy.
-  Count each generated response once by (ModuleConfig, IP family, decoded VIP
-  address), without protocol or port dimensions or arbitrary VS attribution.
-  All linked VSes at that family/VIP share the counter; equal VIPs in different
-  ModuleConfigs do not merge counters. All-empty and other no-response outcomes
-  are not reply-counter events; existing counted-drop accounting still applies.
-  This binding is distinct from VS-scoped native policy counters; F38 selects
-  current-binding readback and accumulation identity, not continuity. The remaining
-  counter naming and protected-lifetime implementation remain downstream.
-- Supported incoming Echo Request and error types accept every code in 0..255;
-  code alone is never grounds for rejection. Length, fragment, quote and
-  ownership validation still apply, including the incoming real-fragment floor.
-  This does not broaden the supported type set. Generated Echo Replies use code
-  zero; delivered errors remain unchanged, including their incoming code.
-- On ICMP paths, validate the checksum over the complete incoming ICMP message,
-  including its header and all message bytes within the validated IP lengths,
-  not just the fields inspected for dispatch or quote parsing. ICMPv6 includes
-  the proper IPv6 pseudo-header; ICMPv4 also requires a valid enclosing IPv4
-  header checksum. An invalid checksum counted-drops before Echo response,
-  ownership query, session mutation or fanout. Accepted codes 0..255 do not
-  bypass these checks. This selects no new ordinary TCP/UDP checksum policy
-  and does not require checksum validation of a truncated quoted packet's body;
-  quoted TCP/UDP admission remains unchanged.
-- Supported ICMPv4 errors are
-  Destination Unreachable, Time Exceeded, Redirect, Source Quench and Parameter
-  Problem; supported ICMPv6 errors are Destination Unreachable, Packet Too Big,
-  Time Exceeded and Parameter Problem. The bounded quote identifies the VIP as
-  quoted source and exposes TCP/UDP ports. Quoted first fragments are usable
-  when ports exist; quoted non-initial fragments counted-drop; IPv6 atomic
-  fragments are ordinary. These quote rules do not admit fragmented incoming
-  error packets through the real-fragment drop floor.
-- For an admitted reverse ICMP quote in VIP-to-client direction, swap both
-  addresses and both ports to recover the canonical client-to-VIP session key;
-  take TCP/UDP transport from the quote, not outer ICMP. Retain quote VIP,
-  protocol, family, fragment and port-presence validation. Portless identity
-  does not waive required quote ports. A wrong quote cannot be rerouted through
-  another VS to fabricate a matching key. Echo and unsupported paths produce no
-  session effects. Packet rejection before a successful session commit leaves no
-  partial session mutation by this operation, subject to normal expiry and
-  independent concurrent operations. Loss after a successful commit does not roll
-  it back. This does not prohibit internal parsing or introduce router-wide drop
-  rules.
-- An ICMP type outside the supported Echo Request and error paths, if delivered
-  to l3b, counted-drops with a distinct unsupported-type reason. It invokes no
-  session operation, real selection, encapsulation or error-distribution path.
-  Traffic needing routing, Neighbor Discovery or local delivery must be directed
-  to those paths before l3b. This is not a router-wide ICMP prohibition and does
-  not alter supported-type, malformed-packet or fragment handling. Exact counter
-  naming is part of the separate naming contract.
-- Raw ICMP errors enter the separate error-distribution module for bounded
-  parsing and offending-flow normalization. Before any ownership query, its trusted
-  ingress binder selects the actual instance and allowed scope; packet fields
-  cannot self-select either. Fully validate the quote, including required ports.
-  For VIP-to-client quotes, use quoted source VIP, quoted source service port and
-  quoted TCP/UDP protocol to select a unique immutable VS incarnation, then its
-  unique external projected-service-incarnation association. Existing global
-  portless/port-specific nonoverlap applies, not a new exact/wildcard priority.
-  Reverse base addresses and ports; omit ports from a portless session key only
-  AFTER selecting the VS. Never extract a destination from a quoted segment list.
-  Protect this coherent association context through query, handoff and budget
-  use; it need not be newest and implies no cross-owner atomic transaction.
-  Absent, multiple, stale or unprovable associations consume and counted-drop the
-  original before query, state effects, clones or tokens. Do not retarget after a
-  query. Recreated names cannot inherit an old incarnation's association; a new
-  VS incarnation does not authorize resetting the external service's bucket credit.
-  Concrete binder API, schema, table and fencing mechanisms remain downstream.
-  Its read-only l3b ownership query
-  protects one coherent session-chain generation and returns only `owned`,
-  `not-owned` or `indeterminate`, never real identity or table memory.
-  `owned` permits a separate handoff of the unchanged error to the same VS for
-  reverse-session delivery to its enabled real; it is not a permanent delivery
-  guarantee across expiry or state changes. Disabled, removed or reincarnated
-  real hits counted-drop without rescheduling. Permitted delivery refreshes
-  to now plus `other`, unless OPS suppresses refresh; it creates no session,
-  selects no new real, rebinds no affinity and revives no expired record.
-  Queries never mutate sessions. Query/delivery API placement, execution
-  context, packet ownership and protected generation lifetime require
-  downstream integration proof, not access to shared tables by the caller.
-  If the session is absent or expired at delivery after an `owned` query, the
-  error counted-drops without another ownership query, refresh attempt or peer
-  fanout, and without reselection, rebind or revival.
-  Fanout readiness is NOT a gate for this owned local delivery. A `not-owned`
-  result uses only the bound external service's readiness, peers and all-or-none
-  budget below; indeterminate handling is unchanged.
-- The error-distribution module owns peer fanout and final error disposition;
-  l3b performs no peer fanout. `indeterminate` consumes and counted-drops the
-  original without retry or fanout; received clones never refan. Each projected
-  service requires positive output-clone `fanout_rate` and `fanout_burst`, with
-  burst at least the eligible peer count. One service-wide budget spans workers:
-  a `not-owned` original atomically funds all eligible clones or emits none.
-  Allocation and encapsulation failures have separate counters. Absent budget
-  fields do not satisfy readiness. The budget is one token bucket per projected
-  service, shared across workers: one token funds one output clone, the rate
-  is a positive integral number of clones per second, and burst is a positive
-  integral capacity in clones. Refill uses elapsed time in one monotonic time
-  domain for the shared bucket, retains fractional credit without floating
-  point and caps total credit at burst; excess credit is discarded, not banked.
-  A newly created budget starts full. A surviving service/dataplane budget
-  keeps its credit across control-plane restart, takeover and configuration
-  replacement; none of those events creates a fresh burst.
-  A rate/capacity change first accrues under the old rate up to the transition,
-  then carries credit capped by the new capacity. Peer-set changes do not refill
-  it. Accrual, policy transition and reservation have one consistent ordering:
-  a packet uses one policy and peer set, never mixed old/new values. For `n`
-  eligible peers it atomically reserves `n` tokens or none. With insufficient
-  credit it counted-drops without partial fanout; with no peers it spends none.
-  Failures after reservation never refund tokens: admission budgets attempts,
-  not guaranteed delivery. If peers grow beyond burst, fanout is not ready and
-  counted-drops without cloning until the configuration or group permits full
-  funding; capacity is never raised implicitly.
-  Bounded numeric representation, clock precision/source, safe elapsed-time
-  arithmetic and clock/arithmetic-error handling must be specified and verified
-  before activation. The cap is not permission to overflow an intermediate:
-  an interval sufficient to fill the bucket must yield the cap without unsafe
-  multiplication. No particular clock hardware, lock or CAS layout is selected.
-  The distributor consumes the original exactly once per invocation on every
-  terminal outcome, including successful fanout, a valid zero-peer set and
-  failure. This is packet ownership, not crash-proof exactly-once processing;
-  only clones leave through peer fanout. Successful fanout and a valid zero-peer
-  set add no drop count merely for consuming the original; zero peers spend no
-  tokens. Existing failure and indeterminate-ownership accounting is unchanged.
-  Each funded peer receives at most one clone attempt. After a peer-local
-  allocation or encapsulation failure, attempts for all remaining funded peers
-  MUST continue. There are no retries, refunds or rollback of emitted clones;
-  atomic budget admission does not imply atomic network delivery. External
-  fanout configuration and update/readback follow the contract below; integration
-  proof remains required.
+[12. Packet Surfaces](l3b-packet-contract.md#12-packet-surfaces).
+
+### Packet Drop Precedence
+
+[Packet Drop Precedence](l3b-packet-contract.md#packet-drop-precedence).
+
+### Packet Path Rules
+
+[Packet Path Rules](l3b-packet-contract.md#packet-path-rules).
 
 ### External Fanout Configuration And Clone Headers
 
-The external owner accepts whole-configuration updates under its own expected
-revision, atomically binding accepted policy, peer/local membership, source
-addresses and budget transition. Failure preserves its last valid state. This
-revision is not an l3b token and provides no cross-l3b transaction. Each projected
-service requires positive uint32 `fanout_rate` (clones/second) and `fanout_burst`
-(clones). Absent required fields or peer configuration are not an explicit empty
-peer set and cannot establish readiness. Existing external limits must be
-reconciled before implementation; no peer node IDs or 65535-peer cap is implied.
-
-Peers are explicit deduplicated (family,address) endpoints, with an explicit local
-endpoint set. Before deduplication or local exclusion, validate EVERY explicit
-peer and local endpoint against DestSet: an invalid peer cannot hide in the local
-set. Validate EVERY explicitly supplied fixed clone source against SourceSet even
-if its family currently has no eligible peer. This external configuration rule is
-deliberately different from VS dormant source-template retention. A provided-invalid
-endpoint or source rejects the whole external configuration, preserving its last
-accepted/active state and revision; no external RPC error code is prescribed here.
-Missing a needed family source instead follows the not-ready rule below, not a new
-configuration-rejection rule. No new wire field, epoch or cross-owner transaction.
-Matching valid local endpoints are excluded. There is no dynamic peer
-health filter. Unknown configuration is not empty. One protected peer/source/
-policy generation determines n and all funded attempts. Missing the configured
-source for any eligible outer family makes the service not-ready, not a reason
-to skip that family. This blocks admission BEFORE reservation: consume and count-drop
-the original, emit no clones and spend no tokens. Valid empty peers spend no credit; unknown peers cannot use
-the empty-success outcome. Preserve burst>=n, all-or-none reservation, no refunds,
-one attempt per funded peer, mandatory remaining attempts and original consumption.
-
-Budget identity is external deployment plus projected-service incarnation.
-Replacement, restart, takeover and detach/reattach preserve credit. Only actual
-retirement followed by a new incarnation can start full, after fencing the old
-reservation authority. Uncertain recovery is unavailable, never reset/refill.
-Preserve monotonic fractional credit, old-rate accrual then carry/clamp on policy
-change, and no peer-churn refill. The clock domain cannot silently change beneath
-surviving state. Clock, precision, safe arithmetic and recovery proofs remain
-preactivation obligations; no nanosecond/uint64 physical layout is selected here.
-
-External readback distinguishes accepted revision and complete service policy,
-peer/local membership, configured sources and budget identity from observations:
-observed generation, readiness, budget availability and fanout/failure accounting
-with provenance. Missing observation is unavailable, never a fabricated full
-bucket or empty peer list. Accepted configuration is not proof of activation.
-The external owner's API must realize these meanings before integration; it is
-not another l3b operation or authority over l3b sessions.
-
-Clones use IPIP only. Outer family is the peer family; protocol/next-header is
-4 for inner IPv4 and 41 for inner IPv6. Use the fixed configured source of that
-outer family and peer destination, TTL/Hop Limit 64, traffic class zero and IPv6
-flow label zero, preserving the complete inner packet unchanged. IPv4 has IHL 5,
-total length 20+L, ID 1, fragmentation field zero (DF0), and valid header checksum.
-IPv6 has payload length L and no extensions or jumbogram, where L is inner length.
-All four inner/outer family pairs are supported; there is no IPv6 source-word
-rewrite. Check complete-copy, headroom and representable lengths before emission:
-after a coherent ready generation funds the set, a peer-local allocation or
-encapsulation failure counts, emits no partial clone, refunds nothing and continues other funded
-attempts. Recipient admission, decapsulation, clone provenance and the ownership-
-query contract require integration proof before activation; source ACLs do not
-constitute cryptographic authentication. Received clones never refan, and external
-trusted-provenance enforcement remains unproved, not implied by this rule.
-
-IPv4 clone ID1/DF0 is separately accepted with known, nonmitigated reassembly risk
-for both inner families: downstream fragmentation with equal outer source,
-destination and protocol and reused ID may corrupt or drop reassembly. This
-choice does not itself block IPv4 activation or establish standards conformance;
-repeating constant ID 1 with DF0 for the same source, destination and protocol
-within the maximum datagram lifetime violates RFC 6864 section 4.3 non-atomic ID
-uniqueness, an accepted known nonconformance. All other integration gates
-remain. The later DF/MTU/PMTU/oversized/feedback
-investigation must cover both l3b-to-real and distributor IPv4 paths. No unique-ID
-allocation, automatic DF1 or mitigation is selected.
+[External Fanout Configuration And Clone Headers](l3b-packet-contract.md#external-fanout-configuration-and-clone-headers).
 
 ### Adoption And Fanout Boundary Conformance
 
-The following vectors are required and **NOT RUN**:
-
-- An empty active topology or detached-only references report `NOT_APPLICABLE`,
-  never vacuous `ALL_ADOPTED`. An idle lagging or joining unacknowledged participant
-  yields `PENDING`; a nonempty coherently observed fully acknowledged cohort yields
-  `ALL_ADOPTED`. Withdrawing a lagging participant cannot exclude it before fencing;
-  unknown topology/fencing yields `UNAVAILABLE`. After proven withdrawal/fencing,
-  evaluate only remaining participants, or `NOT_APPLICABLE` if none remain.
-- Cohort change preserves config token and counter-page validity. Adoption evidence
-  from a different cohort/context cannot establish `ALL_ADOPTED`; adoption does not
-  establish reader drainage or force latest linked-VS descriptor acquisition.
-- Eligible IPv4 and IPv6 peers with only an IPv4 source consume/count-drop the
-  original before reservation, with zero clones and zero token spend. Unknown peer
-  configuration is not empty success; a valid empty set spends zero without a drop
-  merely for consuming the original.
-- With both sources and a coherent ready generation, reserve for the eligible set.
-  A peer-local allocation/encapsulation failure counts and emits no partial clone;
-  attempt all other funded peers without refund. Do not confuse this with missing
-  configured-source admission failure. No new counter tag, timer or fallback.
+[Adoption And Fanout Boundary Conformance](l3b-packet-contract.md#adoption-and-fanout-boundary-conformance).
 
 ### MSS And Ordinary Encapsulation
 
-- The MSS policy is the typed boolean of F24 with the behavior recorded there.
-  Option parsing stops at EOL, skips NOP, checks the other lengths, and the
-  MSS option has length 4. On enabled eligible TCP SYN&&!RST (including SYN-ACK),
-  walk all options through EOL/end before mutation, remembering only the first
-  valid MSS. A malformed option tail even after that MSS, or failure to obtain
-  packet-buffer space for an
-  otherwise required MSS modification, is a counted drop with no partial
-  modification. Insufficient logical TCP option space for the four-byte
-  insertion is not such a failure: a valid header remains unchanged by the MSS
-  step. A disabled policy or noneligible flags add no MSS-specific validation or
-  rejection, including for malformed authentication options. Mutations correct
-  lengths and necessary checksums. The constants 1220 and 536 are not path-MTU guarantees.
-  A structurally valid TCP MD5 Signature (kind 19, length 18) or TCP-AO
-  (kind 29, length at least 4 and within option bounds) anywhere before EOL
-  bypasses MSS insertion and clamping: leave the entire inner segment unchanged
-  in this step. Invalid MD5 length, AO length below 4 or a truncated option is
-  malformed under the enabled eligible parser, not a bypass. EOL terminates
-  parsing; padding after it is not authentication. No keys, authentication
-  verification or new knob is introduced. Although MD5 clamping can be safe,
-  the uniform bypass is deliberately simpler: insertion breaks MD5/AO, and AO
-  may cover other options depending on hidden MKT state. Bypass skips only MSS,
-  never normal ACL, session processing or encapsulation; live AH still drops.
-  With no authentication bypass and no MSS, a valid TCP header of at most 56 bytes
-  grows by four bytes: insert MSS 536 at TCP offset 20, before the old options.
-  Do not reuse EOL/padding space. Preserve all original option and payload bytes
-  with their packet-relative offsets increased by four; correct TCP data offset,
-  lengths and applicable checksums. A full 60-byte header stays unchanged by
-  insertion even if padded. Retain enabled TCP SYN without RST eligibility,
-  including SYN-ACK; only the first valid MSS is processed, with later duplicate
-  MSS values unchanged, not rejected merely for duplication or all clamped.
-  Buffer-failure atomicity and the late session-commit boundary still apply.
-  Malformed-option drops precede session commit and cause no partial packet
-  mutation; this does not promise that a preceding WRR selection never advances.
-- DSCP is not an l3b policy in the new API. l3b transfers the inner traffic
-  class into the outer header and preserves ECN; the configured `dscp` module
-  after l3b performs any marking, with its own configuration and readback, no
-  shared VS token and no promised atomic two-module change. The operator
-  declares the scope explicitly, because the module sees all traffic that
-  reaches it in the pipeline, and because two services with different required
-  marks that share a real cannot be distinguished by the current
-  destination-prefix module. Migrating existing per-VS marks is not automatic:
-  conflicting policies on a shared real need an explicit operator decision or
-  an adapted classification, and a mark must not be silently chosen or
-  extended to all traffic to that real. The shared marker must preserve ECN
-  for both families and update the IPv4 checksum when marking.
-- Encapsulation reuses the existing shared helpers for IPIP and GRE. l3b
-  selects the real and computes the outer source from the source policy of
-  section 11, and the library builds the headers, checks the headroom and
-  returns the result. A typed VS mode selects IPIP or GRE, IPIP is the
-  default, and an unknown or explicitly unspecified value is rejected. GRE is
-  v0 with a four-byte header and no optional key, checksum or sequence, and
-  the inner EtherType follows the packet family; the outer family follows the
-  real and the outer source follows the source policy. The MSS step precedes
-  encapsulation, a length or headroom error is a counted drop rather than a
-  mode switch, and no separate encapsulation hop is required. NAT is outside
-  the current mode set and is rejected rather than mapped to GRE.
-- Packet parsing floor: every real IPv4 packet with MF or a nonzero fragment
-  offset and every IPv6 packet with M or a nonzero fragment offset receives a
-  dedicated counted drop before transport access, VS lookup, ACL evaluation,
-  session, selector, or encapsulation.
-- IPv4 source-route options: on live IPv4 packets, an LSRR (type 131) or SSRR
-  (type 137) option with a remaining route, meaning a well-formed option whose
-  pointer is not greater than its length, counted-drops before dispatch with a
-  dedicated source-route reason: no transport-dependent processing, VS lookup,
-  ACL evaluation, session/selector effects, Echo reply or encapsulation. A
-  malformed option length or pointer, including a pointer below the RFC 791
-  minimum of 4 or an option length outside the IPv4 option area, counted-drops
-  under a distinct malformed-option reason, never the remaining-route reason.
-  An exhausted option (pointer greater than length, which RFC 791 defines as an
-  exhausted route) is unchanged, as are Record Route and Timestamp handling.
-  l3b executes no route and rewrites no destination. Quoted IPv4 headers are
-  validated structurally only: a quoted remaining route is not by itself
-  grounds for rejection. RFC 7126 sections 4.3.5 and 4.4.5 recommend dropping
-  these options by default behind a configuration knob; this drop is fixed with
-  no knob, so it does not claim full RFC 7126 conformance.
-- Live IPv6 processing walks at most eight bounds-checked Hop-by-Hop, Routing,
-  Destination Options and Fragment headers. A ninth supported extension
-  counted-drops before transport access or state effects. Encountered live AH
-  counted-drops as unsupported before transport-dependent processing, ACL,
-  session/selector effects, Echo or fanout, independent of `mss_fix`; this is not
-  an authentication-failure claim. IPv4 protocol51 also follows unsupported drop.
-  Quotes separately retain structural AH parsing using encoded length and a
-  12-byte minimum within the existing eight-header and required-field bounds.
-  A quoted AH is not by itself grounds for rejection or an authentication claim.
-  Every traversed live Routing header must be structurally bounded and have
-  Segments Left zero; nonzero counted-drops before the same effects. An unknown
-  Routing Type with zero is opaque and allowed subject to other admission checks.
-  Do not execute segment lists or rewrite destinations, and generate no Parameter
-  Problem. This is limited admission, not full RFC routing-header compliance.
-  Quoted Routing headers require structure only: nonzero quoted Segments Left
-  alone adds no rejection. Normalize quoted base addresses and reverse ports,
-  not segment lists; general ICMP error delivery for source-routed flows is not
-  promised. For admitted incoming ICMPv6 with Segments Left zero, the pseudo-header
-  uses the current base-header destination. No ordinary TCP/UDP checksum expansion.
-  ESP, No Next Header and unsupported upper protocols counted-drop. An atomic
-  IPv6 fragment (offset zero, M clear) follows ordinary processing. Exact-port
-  VS and ACL port predicates require an available transport header; missing
-  fields fail closed. These TCP/UDP port predicates do not precede Echo or
-  the separate ICMP-error path; no second error parser is introduced in l3b.
-  Hop-by-Hop is permitted only immediately after the corresponding IPv6 base
-  header, both in incoming IPv6 packets and parsed IPv6 quotes. Misplaced or
-  repeated Hop-by-Hop headers counted-drop even within the eight-header bound;
-  reject an invalid quote before ownership query. This selects neither a general
-  ordering for all extensions nor an ICMP Parameter Problem response promise.
-  Live incoming packets on these l3b paths validate every Hop-by-Hop and
-  Destination Options TLV completely within its validated extension-header
-  boundary before transport-dependent processing, ACL evaluation, session/selector
-  effects, Echo response or fanout. Pad1 occupies one byte; PadN requires a present
-  length and all declared bytes within the header. Padding is the only explicitly
-  supported option; all others are unknown for this admission policy. Unknown
-  action bits `00` skip the structurally valid option; `01`, `10` and `11`
-  counted-drop without generating Parameter Problem. This is a bounded admission
-  policy, NOT full RFC option/error-signalling compliance, including for `10/11`.
-  Quotes are separate: structurally validate available traversed headers/TLVs and
-  mandatory fields under the existing bounds, HBH-position, fragment and port
-  rules, but do NOT execute quoted option action bits or require the missing
-  original packet body. Malformed or incomplete quotes before required fields
-  counted-drop before ownership query, with no ICMP reply. This neither expands
-  routing scope nor changes ordinary TCP/UDP checksum policy or the eight-header
-  limit and ninth-header drop.
+[MSS And Ordinary Encapsulation](l3b-packet-contract.md#mss-and-ordinary-encapsulation).
 
 ### l3b-To-Real Outer Headers
 
-Both IPIP and GRE use this matrix, independent of the shared helper's future
-implementation. Encapsulation itself performs no additional TTL/Hop Limit
-decrement; a separate routing hop is outside this rule.
-
-| Inner -> outer | Outer TTL / Hop Limit | IPv4 ID and fragmentation field | IPv6 flow label |
-| --- | --- | --- | --- |
-| IPv4 -> IPv4 | Copy inner TTL | Copy inner ID and fragmentation field | N/A |
-| IPv6 -> IPv4 | Copy inner Hop Limit | ID 1, fragmentation field zero | N/A |
-| IPv4 -> IPv6 | Copy inner TTL | N/A | Zero |
-| IPv6 -> IPv6 | Copy inner Hop Limit | N/A | Copy inner flow label |
-
-**Known risk accepted for the current contract, not mitigated:** copied IPv4
-ID/fragmentation fields and IPv6-to-IPv4 ID 1/DF 0 remain unchanged. If outer
-packets with the same source, destination and protocol reuse an ID and undergo
-downstream fragmentation, their fragments can be misassembled, causing corruption
-or drops. Under RFC 6864 section 4.3, IPv6-to-IPv4 ID 1 with DF 0 repeated for
-the same source, destination and protocol within the maximum datagram lifetime
-violates non-atomic ID uniqueness, an accepted known nonconformance.
-The inner-fragment admission floor does not prevent downstream outer
-fragmentation. Copied DF 1 prevents fragmentation only at compliant nodes; it
-does not guarantee ICMP feedback. Investigation of DF 1 plus MTU/PMTU,
-oversized-packet and ICMP-feedback policy is deferred pending an explicit
-decision; this note selects no such policy or new traffic restriction.
-
-The real-fragment admission floor, inner traffic-class/ECN inheritance,
-external DSCP marking and length/headroom counted-drop rules remain unchanged.
-This matrix does not specify the error distributor's peer-clone headers.
-
-Inner traffic-class/ECN inheritance is RFC 6040 section 4.1 normal mode: both
-ECN bits, including CE, are copied into the outer header and the inner header is
-left unchanged. l3b selects no compatibility mode, which RFC 6040 section 4.3
-requires unless the encapsulator knows that no egress uses a legacy
-decapsulator. Deployment therefore requires compatible decapsulation at every
-real, including dropping an inner Not-ECT packet that arrives with outer CE
-(section 4.2). This deployment requirement is unproved here and is not an l3b
-runtime check.
+[l3b-To-Real Outer Headers](l3b-packet-contract.md#l3b-to-real-outer-headers).
 
 ## 13. Service Policy Boundary
 
@@ -2135,7 +1941,7 @@ ProtoJSON admits its defined numeric strings and integral exponent forms, then
 validates the decoded integer domain. YAML integer fields accept nonnegative
 decimal integer scalars only, not booleans, floats or numeric strings; enum
 fields accept declared names or integer values then domain-check, and booleans
-accept true and false only. YAML names and opaque base64 must be strings. YAML
+accept true and false only. YAML names, F39 metadata and opaque base64 must be strings. YAML
 merge keys, custom tags and alias expansion are rejected rather than adding an
 unbounded expansion surface. Different lexical forms are acceptable only where
 they decode to the same typed value. Multiple raw occurrences in binary
@@ -2160,44 +1966,44 @@ qualification.
 | ID and fields | Presence, empty, zero, defaults and range | Protobuf and C consequences |
 | --- | --- | --- |
 | F01 names and references | R string `[A-Za-z0-9_.-]{1,79}`; empty rejects; exact case, no trim or alias. | Length checked before 80-byte C storage. |
-| F02 VS VIP, protocol, port | VIP R bare host, 4 or 16 decoded bytes; mapped IPv6 rejects. Protocol R TCP or UDP; unspecified and unknown reject. Port OPT uint32 domain 0..65535; absent wildcard, 0 is port zero. | Raw bytes plus family and a port-presence bit; no C zero sentinel. Identity immutable; conflict `InvalidArgument`; current-token identity change `FailedPrecondition`. |
+| F02 VS VIP, protocol, port | VIP R bare host, 4 or 16 decoded bytes; mapped IPv6 rejects. Protocol OPT: absence/null selects TCP+UDP only; explicit TCP or UDP only, explicit unspecified and unknown reject. Port independently OPT uint32 domain 0..65535; absent wildcard, 0 is port zero. | Raw bytes plus family and separate protocol/port presence; no C zero sentinel or unspecified-as-absence mapping. Binary decoding must preserve protocol presence. Identity immutable; global protocol/port-set conflict `InvalidArgument`; current-token identity change `FailedPrecondition`. |
 | F03 real destination and port | Destination R native IPv4 or IPv6 bare host satisfying section 11 DestSet for every stored real, regardless of eligibility. Port OPT 0..65535; no inheritance or rewrite. Duplicate decoded keys reject. | Full family, bytes, presence and value key, not position; no unmap or fallback. |
 | F04 real collection | COL; order retained; no null elements. Empty keeps the VS classified and drops at selection. Aggregate bindings at most 2097151 across all owners and unlinked VSes, plus physical and export bounds. | Explicit choice, checked count and lengths. Surviving incarnations and state preserved; a readded key is a new disabled real. |
 | F05 new-real configured weight; manual weight | New or readded real D(1); explicit 0 retained; 0..16777215 for all schedulers. A surviving real ignores a submitted initial weight as a setter: the current weight is preserved and the supplied domain is still validated. Manual weight R uint32, 0 valid, same domain; missing or null rejects. | Presence-safe manual field, no clamping; survivor behavior comes from the replacement rule, not a stale snapshot overwrite. |
-| F06 manual enabled; administrative, effective, health observations | Manual enabled R bool; false valid. A new real is administratively disabled. Descriptor administrative, effective and health fields are RO. Effective is administrative AND health, never a default healthy. | Separate input and response types; no bool-zero absence sentinel. Health transport and freshness keep their own owner and are not an extra setter. |
+| F06 manual enabled; administrative, effective, health observations | Manual enabled R bool; false valid. A new real is administratively disabled. Descriptor administrative, effective and health fields are RO. Effective is administrative AND health, never a default healthy. External checker attempt_timeout_ms D(500) milliseconds, positive uint32 1..4294967295, zero rejects; operational target 100 ms. | Separate input and response types; no bool-zero absence sentinel. Checker configuration identity/revision binds the effective timeout under section 10; not a writable VS field. Health transport and freshness keep their own owner and are not an extra setter. |
 | F07 scheduler | R enum WRR, HASH or WLC; no default; unspecified, unknown, RR and PURR reject; CHASH unsupported here. | Checked enum mapping; masks and flags are X; no historical aliases. |
-| F08 OPS; pure_l3 | OPS D(false); UDP true retained; all TCP values normalize to false. pure_l3 is X, including false and 0. | Typed bool; portless derived solely from F02 presence. |
-| F09 requested WLC power; effective power; max_weight | Requested D(0), uint32 0..4294967295 retained. Effective 1..100 when requested is in range, otherwise 10; effective and applicability are RO. max_weight and default_wlc_power are X. | uint32 without premature narrowing; no upper-100 input clamp. |
-| F10 WLC samples, results, freshness | RO; not fields of create, replace or manual requests. One complete sample and 20 ms sampling/computation/retry/reconciliation cadence, not adoption SLO; existing fallback rules; no caller default or zero setter. | Observations are separate from the token-stable descriptor; no float coercion of integer counters. |
+| F08 OPS; pure_l3 | OPS D(false); UDP-only and mixed VS true retained, acting only on actual UDP; TCP-only true is InvalidArgument, false/absent valid. pure_l3 is X, including false and 0. | Typed bool; request-local rejection after recovery and before CAS in API/CLI; portless derived solely from F02 port presence. |
+| F09 requested WLC power; effective power; max_weight | Requested D(0), uint32 domain 0..100. Absent/0 stores 0, effective 10; 1..100 stored/effective as supplied; >100 InvalidArgument. Requested 0 and 10 differ in equality/readback. Effective and applicability RO; max_weight/default_wlc_power X. | Validate before narrowing and CAS; no clamping or out-of-range retention. |
+| F10 WLC samples, results, freshness | RO; not fields of create, replace or manual requests. One complete sample and requested 20 ms sampling/computation/retry/reconciliation cadence; start interval target 10–20 ms and full-recalculation duration <=20 ms, aiming toward 10 ms under section 8, not adoption SLO or a time-only invalidity/fallback gate; no caller default or zero setter. | Observations are separate from the token-stable descriptor; no float coercion of integer counters. |
 | F11 selector geometry, N, charges | Derived and RO; 1600*N checked; N=0 is an explicit empty selector; binding charge cap 2097151; physical exhaustion is `ResourceExhausted`. | Checked multiplication and count conversion plus retained-memory accounting; no caller cell count and no 100000-real cap. |
 | F12 internal WRR cursor (excluded from writable VS format) | Internal runtime state, not a descriptor/input field; no public setter or required public observation. uint64 modulo advancement and lifetime unchanged. | uint64, not index or int32; source state independent of the configuration token; this inventory row defines no wire field. |
-| F13 timeouts.tcp | D(60), uint32 0..4294967295 seconds, zero retained. | Optional scalar resolved to a concrete uint32 before C; checked deadline arithmetic. |
+| F13 timeouts.tcp | D(60000), uint32 0..4294967295 milliseconds, zero retained. | Optional scalar resolved to a concrete uint32 before C; widen to uint64 before checked deadline addition in milliseconds. |
 | F14 timeouts.tcp_syn | D(accepted tcp), same domain; zero retained. | Presence resolved before inheritance; classification follows section 7. |
 | F15 timeouts.tcp_syn_ack | D(accepted tcp_syn), same domain; zero retained. | Presence resolved before inheritance. |
 | F16 timeouts.tcp_fin | D(accepted tcp), same domain; zero retained. | Presence resolved before inheritance. |
-| F17 timeouts.udp | D(60), same domain; zero retained. | No zero-to-default conversion. |
-| F18 timeouts.other; timeout container | other D(60), same domain; zero retained. The container absent, null or `{}` means all children absent and resolves the defaults above; a scalar or list container rejects. | Query and Echo never refresh; a permitted error delivery refreshes to now plus other; OPS suppresses refresh; a replacement preserves old deadlines. |
+| F17 timeouts.udp | D(60000), same domain; zero retained. | No zero-to-default conversion. |
+| F18 timeouts.other; timeout container | other D(60000), same domain; zero retained. The container absent, null or `{}` means all children absent and resolves the defaults above; a scalar or list container rejects. | Query and Echo never refresh; a permitted error delivery refreshes to now plus other; OPS suppresses refresh only for actual UDP; a replacement preserves old deadlines. |
 | F19 source bases M4 and M6 | D(0.0.0.0) and D(::); bare host strings in YAML, raw family address bytes on the wire; an empty string or bytes when present rejects. A native v4 or v6 family is required; no prefix. Dormant values retained. | No host-bit masking. The selected-family generated-output admission of section 11 still applies. |
 | F20 IPv4 source override | OPT bare native IPv4 host; a present 0.0.0.0 is structurally valid and the selected-family output admission rejects it. A prefix suffix or an empty wrapper rejects. | Presence bit plus 4 raw bytes; absent differs from zero. |
 | F21 IPv6 source template | OPT wrapper; a present wrapper requires a raw IPv6 host address R and prefix D(128) in 0..128; explicit 0 retained; `{}` rejects. Non-byte prefixes accepted; host bits kept. | Raw 16 bytes plus the resolved prefix, not common network normalization. Dormant structural validity and the configured-family all-output admission are unchanged. |
 | F22 policy envelope | Binding R; source, key and revision R bytes, each 1..256 decoded bytes, base64 in text; empty string or bytes rejects. Exactly one of native nonempty rules or the explicit empty choice; section 14 covers every nested native field. | Owned length-delimited bytes, checked counts, a protected immutable ACL reference and tuple equality. |
 | F23 ModuleConfig bindings | COL; each member has R name and R VS incarnation bytes 1..256; duplicates reject; order retained; empty unlinks only. No VIP, protocol or range fields on a link. | One atomic all-target validation; name and incarnation are separate, not token parsing. |
-| F24 mss_fix | D(false) bool; true is retained and dormant for UDP. A numeric MSS input is X. | Typed bool; no new clamp value. |
+| F24 mss_fix | D(false) bool; true is retained and applies to actual TCP, dormant for actual UDP, including in a mixed VS. A numeric MSS input is X. | Typed bool; no new clamp value. |
 | F25 DSCP | All old packed or per-VS DSCP inputs are X even null or 0; the separate `dscp` module owns marking. | No field in the new descriptor or C config; no shared token. |
 | F26 initial_session_slots; new_slots; actual_slots | Create only: D(current `l3b.policy.session_default_slots`, initially 65536); explicit 0 also means that default; the default or a positive value in 1..1073741824 rounds to the next power of two with minimum 16. Resize: R positive in the same domain; zero rejects. Actual slots RO. An initial size inside a replacement is X. | A creation envelope separate from the descriptor; the raw resize value is compared before rounding: shrink `FailedPrecondition`, equal no-op, back-blocked growth `FailedPrecondition`. |
 | F27 encapsulation mode | D(IPIP) optional enum; explicit unspecified, unknown or NAT rejects; GRE is supported with the fixed minimal header; key, checksum and sequence inputs are excluded. | Presence is distinct from enum zero; checked C mode mapping. |
 | F28 expected token, real target vector/incarnation, returned identities | Expected token R bytes 1..256. O09/O10 vector R nonempty, no null members; each full F03 key, incarnation R bytes 1..256 and operation value R. Duplicate normalized full keys reject even with different incarnations. Returned object incarnation and token are RO bytes 1..256; link-target incarnations use the same width. | Copied length plus bytes. Structural vector errors precede token checks. Owner absence `NotFound`; stale token `Aborted` before target lookup; then first target error in authored order: missing real `NotFound`, wrong incarnation `Aborted`. Final candidate validated and published atomically; no new vector cap. |
-| F29 prepare kind and name; create token; valid_for_seconds | Kind R SERVICE or MODULE_CONFIG; name per F01; create token R bytes 1..256 bound to exact kind/name/instance/owner context; valid_for_seconds RO uint32 (300 at issuance). The 16384 permit count is per registry, not per client. | A permit is distinct from a mutation token. An absent, empty or oversized request token field is `InvalidArgument`; a well-shaped unknown, expired, consumed or context-mismatched permit is `Aborted` for an absent target. Unknown means absent from the authoritative registry, not absent from the request. An otherwise valid existing target is `AlreadyExists`; recovery is `Unavailable`. |
+| F29 prepare kind and name; create token; valid_for_ms | Kind R SERVICE or MODULE_CONFIG; name per F01; create token R bytes 1..256 bound to exact kind/name/instance/owner context; valid_for_ms RO uint32 milliseconds (300000 at issuance). The 16384 permit count is per registry, not per client. | A permit is distinct from a mutation token. An absent, empty or oversized request token field is `InvalidArgument`; a well-shaped unknown, expired, consumed or context-mismatched permit is `Aborted` for an absent target. Unknown means absent from the authoritative registry, not absent from the request. An otherwise valid existing target is `AlreadyExists`; recovery or an unrepresentable server-side expiry at issuance is `Unavailable`, with no grant under section 5's order. |
 | F30 GetService and GetModuleConfig request and snapshot | Request R name; cursor D(empty) bytes 0..1024. Response: incarnation and token R nonempty bytes; encoding version R positive uint32; total and offset uint64 with offset <= total; chunk bytes; complete bool; next cursor bytes 0..1024. All response fields are RO. An empty chunk is valid only at completion; an incomplete success must advance the offset. | total <= the configured export cap (initial 4194304); chunk plus envelope <= the response cap (262144); checked size_t copies. No mixed snapshot, gap, overlap or overflow. An unknown encoding rejects client assembly, never a partial replacement. |
 | F31 list names request and response | No owner name; cursor D(empty); limit D(server default); 0 also means the default; a positive value at most the server maximum. Response names per F01 in ASCII lexical order; an empty page is permitted with an advancing cursor; complete if and only if the next cursor is empty. Names, membership revision, complete and next cursor obey section 6's per-RPC coherent-state rule. Membership identity, instance, epoch and position are RO and carried inside the opaque cursor, not a new revision field. | Uses the F32 bounds for lists; no caller position or revision setter; checked counts and bytes; membership invalidation only on create and delete. Bounded coherence failure is Unavailable with no usable partial page/cursor. |
 | F32 ListSessions request | R VS name; cursor D(empty) bytes 0..1024, empty starts; limit D(100 initially); 0 means the default; 1..1000 initially; above the maximum rejects, no clamp. | An opaque cursor, not the old uint64 cursor. The server resolves one policy snapshot per page; an unchanged limit is not required on continuation. |
-| F33 SessionRecord and response | The entire response is RO. Each row exposes the full network key: actual semantic IPv4/IPv6 family, TCP/UDP protocol, client and VIP addresses, and both ports absent for Portless or both present for Specific, including 0. Mandatory page VS-incarnation context disambiguates logical scope; no per-row scope duplication is required. The separately stored real key and incarnation 1..256 are required, not reconstructed from current real lookup. Decode with record plus page, without GetService or current VS state. expires_at and page_now are uint64 nanoseconds in the same identified dataplane clock domain, with no UTC claim; layer identity and front or back role are required; a zero numeric time is representable. Rows may be empty on an incomplete advancing page. | Complete if and only if the next cursor is empty; uint64 clocks and lossless typed identities; no public memory address. An unsafe read is `Unavailable`, an oversized record is `ResourceExhausted`, and a failure yields no usable partial page. |
-| F34 networks, ranges, transport presence | F02 and F03 bare hosts, F19-F21 raw sources and the section 14 native networks and ranges are deliberately different types; no blanket normalization. | The per-field matrix above applies to every field rather than copying old l3b network semantics. |
+| F33 SessionRecord and response | The entire response is RO. Each row exposes the full network key: actual semantic IPv4/IPv6 family, actual TCP/UDP protocol even in a mixed VS, client and VIP addresses, and both ports absent for Portless or both present for Specific, including 0. Mandatory page VS-incarnation context disambiguates logical scope; no per-row scope duplication is required. The separately stored real key and incarnation 1..256 are required, not reconstructed from current real lookup. Decode with record plus page, without GetService or current VS state. expires_at and page_now are uint64 milliseconds in the same identified dataplane clock domain, with no UTC claim; layer identity and front or back role are required; a zero numeric time is representable. Rows may be empty on an incomplete advancing page. | Complete if and only if the next cursor is empty; uint64 clocks and lossless typed identities; no public memory address. An unsafe read is `Unavailable`, an oversized record is `ResourceExhausted`, and a failure yields no usable partial page. |
+| F34 networks, ranges, transport presence | F02 independently optional VS protocol/port, F03 optional real port and mandatory actual session transport stay distinct. F02 and F03 bare hosts, F19-F21 raw sources and the section 14 native networks and ranges are deliberately different types; no blanket normalization. | The per-field matrix above applies to every field rather than copying old l3b network semantics. |
 | F35 l3b.policy configuration | Not an RPC mutation surface. A missing, null or `{}` section selects defaults; each optional setting missing or null selects its default; explicit zero is invalid for positive budgets. Settings and defaults are in section 2; unknown keys reject. | Checked integer arithmetic, restart-required changes, and the all-accepted-object readability check before a reduction. The CLI sends absence or 0 only on paging and initial-size request fields, not on policy configuration. |
 | F36 GetServiceStatus | Read-only observation groups; current VS identity or incarnation-scoped pending cleanup; accepted-token context distinct from runtime provenance. | Section 6's bounded live pages and configuration-bound continuation; reuse existing applicable identity/read-limit domains. Exact schema and cursor/error representation must precede implementation; no fabricated observation defaults or infinite completed history. |
 | F37 GetModuleConfigStatus | RO accepted incarnation/token, target publication, authoritative worker cohort and typed adoption state under section 6. | No input default/setter, no exclusion of idle workers; codecs/layout remain downstream. |
 | F38 Counter observations | RO semantic identity, accumulation identity, values and provenance in O16 VS/full-key-and-incarnation real groups and O17 module totals/reasons/Echo groups, typed available/unavailable/not-applicable. Full section 6 catalogue includes unimplemented paths; external counters stay external. | Current binding only, shared cells once; no fabricated zero or unknown child attribution, historical aggregation or continuity promise; exact codecs/layout and #3121 numeric/overflow decisions remain downstream. |
-| F39 full-configuration version | R uint64 0..18446744073709551615 on create/full replacement; missing/null rejects, explicit zero valid. ProtoJSON decimal-string output and accepted integer forms; YAML lossless nonnegative decimal integer scalar, no numeric strings/floats. | Presence-safe, no narrowing or zero-as-absence sentinel. Coherent accepted readback preserves it; equality after survivor preservation, stale CAS before older/equal-conflicting `FailedPrecondition`; greater version publishes even if other fields equal. Partial/runtime/resize preserve the marker. No wrap or automatic recreation. |
+| F39 VS, real and ModuleConfig metadata | D(empty) protobuf string; ProtoJSON/YAML string, 0..256 decoded UTF-8 bytes, valid UTF-8, no NUL. Missing, textual null and empty normalize to empty on create/full replacement. Reject numeric/bool/object/list coercion; YAML `"10"` is text, 10 rejects. Preserve whitespace, case and Unicode without trim/normalization; no interpretation, uniqueness or inheritance. | Check decoded UTF-8 byte length before C; owned length-delimited data, no truncation or selected physical layout. All strings enter normalized equality after survivor preservation; real strings use owning VS CAS, ModuleConfig its own CAS. Coherent accepted readback, normal admission/publication and existing budgets apply. Partial/runtime/resize/recovery preserve strings; recreation uses newly supplied/default strings. Final wire names/tags/ABI remain downstream. |
 
 ### Byte-Page Framing, Cursor Errors And Read-Only Identities
 
@@ -2280,6 +2086,60 @@ The following policy-boundary vectors are **NOT RUN**. Use otherwise valid input
 and inject each listed fault independently; assert semantic outcomes, not final
 counter tags, wire layouts or implementation-specific hash values.
 
+### Validation And Retained-Behavior Boundaries
+
+These vectors are **NOT RUN**; they supplement, not replace, the independent
+cases below and the packet companion's embedded cases.
+
+- F09 through binary protobuf, ProtoJSON and CLI YAML: absent/0 stores requested
+  0 with effective 10; 1 and 100 store and use their supplied value. Requested
+  10 and requested 0 remain different accepted values in equality/readback.
+  101, 1000 and UINT32_MAX each return `InvalidArgument` without accepted-state,
+  active-state or CAS effects. For replacement, repeat with current and stale
+  CAS: request-local domain rejection precedes CAS, but recovery remains first
+  (`Unavailable`). No clamping or out-of-range retention; other type/domain rules
+  and real-weight/output-cap/WLC mathematics are unchanged.
+- F08 API/CLI create and full replacement of TCP-only VS: true returns
+  `InvalidArgument`, including otherwise equal candidates and stale CAS, after
+  recovery and before CAS, with no accepted-state/session/CAS effects. False
+  and absence remain valid. UDP-only and mixed TCP+UDP true is retained; actual
+  UDP follows OPS, actual TCP stays stateful and eligible TCP MSS still applies.
+  Preserve mixed identity, transport-distinct sessions and pure_l3 rejection;
+  no TCP true-to-false readback, no-op or drift exception is allowed.
+- Independently inject IPv4 Source Quench(type4) and Redirect(type5) into l3b
+  and the external distributor, with and without a matching live session and
+  with fanout ready/not-ready (including sufficient budget). With valid IP/ICMP
+  integrity, each counted-drops as unsupported type at the detecting owner before
+  quote parsing, association or ownership query, even if a malformed quote or
+  later fault is armed. Assert zero session effects, real selection,
+  encapsulation, reply, clones, fanout and token spending. A bad enclosing IPv4
+  checksum wins first; with that valid, bad complete ICMP checksum wins first,
+  with zero unsupported-type reason and no later processing. Controls retain
+  every supported IPv4 DU/TE/Parameter Problem and IPv6 DU/PTB/TE/Parameter Problem
+  behavior, including codes, quote parsing, ownership and delivery/fanout rules.
+- A ModuleConfig passes module_max_bindings but its exact encoded snapshot
+  exceeds config_max_export_bytes: changing create/replace rejects with
+  `ResourceExhausted`, preserving prior accepted state/CAS (or absence), never
+  truncating. Exactly config_max_export_bytes passes only this bound; physical
+  or other admission may still reject. Repeat through accepted-state-changing
+  manual/capacity operations as applicable; preserve validation, stale-token and
+  validated no-op precedence, plus complete readback of every accepted export.
+- On an otherwise permitted stateful operation, RST without SYN/FIN uses `tcp`,
+  not immediate deletion. A live authoritative eligible pin remains counted by
+  WLC until expiry, then stops; use one positive tcp timeout and its exact expiry
+  boundary. Keep all six classes and every SYN/ACK/FIN/RST combination; an invalid
+  live pin still cannot use RST to bypass reschedule admission.
+- For admitted Echo to a linked family/VIP, a nonempty configured real set whose
+  members are all disabled, zero-weight or unhealthy still permits one reply,
+  subject to the existing address-role/integrity/geometry checks; all-empty stays
+  Echo-inactive. At handoff TTL/Hop Limit is65. Exactly one later routing decrement
+  yields64; do not assert64 for zero or multiple decrements or general egress.
+  Preserve every Echo transformation and the fixed IPv4 configurability deviation.
+- With surviving dataplane/shared memory, CP-only restart preserves each WRR
+  cursor under the existing lifetime rules. A dataplane/shared-memory/host restart
+  carries no continuity, zero-reset, selected-first-slot or persistence requirement;
+  conformance must not assert such a restart position.
+
 - O09/O10: absent, null and empty vectors, a null member, missing full key,
   incarnation or value, and out-of-domain values each yield `InvalidArgument`,
   including with a stale token. Explicit enabled=false and weight=0 are present
@@ -2299,26 +2159,69 @@ counter tags, wire layouts or implementation-specific hash values.
   atomically even if reals are unhealthy. An all-equal valid vector preserves
   token and publication; one or several changed members advance once. Resource
   framing must be bounded downstream, not implemented as an invented target cap.
-- F39 create/replace: explicit0 and18446744073709551615 round-trip losslessly;
-  missing/null, -1 and18446744073709551616 reject. Apply the existing format rules
-  to binary, ProtoJSON and YAML, without treating zero as absence or accepting
-  YAML numeric strings/floats. At accepted version7/current token T, version6 and
-  version7 with a changed timeout yield `FailedPrecondition`; with stale T both
-  yield `Aborted`. Version7/equal normalized content is a no-op; version8 with
-  identical other content publishes and advances CAS once, subject to admission.
-- After version7 accepts a real, manually change its weight1->3 and enable it.
-  F39 stays7 while CAS changes; resubmitting the valid full descriptor with that
-  survivor's initial weight1 at version7/current CAS preserves weight3/admin state
-  before equality and no-ops when all other normalized fields agree. A changed
-  timeout at version7 conflicts. Equal partial updates preserve CAS; changed
-  partial admin/weight updates and accepted growth change CAS but keep F39;
-  equal resize, health, WLC, sessions and back retirement keep their token rules.
-  The marker is not a fingerprint of manual overrides.
-- Recovery preserves F39=7 but invalidates old CAS; a fresh current-token version6
-  still fails. Rollback to earlier content uses version8 or greater, not6. At
-  maximum F39, equal normalized content can no-op but no greater version wraps
-  to0 or automatically recreates the VS. Actual authorized delete/recreate has a
-  new incarnation and may start at0; no historical-version ledger is required.
+- F39 boundaries in all three scopes (VS, each real, ModuleConfig), on O02/O03/O06/O07
+  as applicable, in binary protobuf, ProtoJSON and YAML: omission, textual null and
+  empty normalize to empty; binary has no null. Decoded UTF-8 lengths 0, 1, 255 and
+  256 accept, 257 rejects with `InvalidArgument` before CAS even with a stale token,
+  under the recovery gate. Test ASCII, 128 copies of `é` (256 bytes), 64 copies of
+  `𐐀` (256 bytes), and either accepted boundary plus `a` (257 bytes).
+  Literal and escaped text, including `"\u00e9"` and `"\ud801\udc00"`, have the
+  same decoded-byte checks. Reject invalid UTF-8, lone surrogates and embedded NUL,
+  including escaped `"\u0000"`, before C; never truncate to fit.
+- F39 types and exact text: YAML `"10"` is text while 10, true, `{}` and `[]`
+  reject, as do numeric/bool/object/list ProtoJSON inputs; string `"null"` stays
+  text, not absence. Preserve spaces, tabs, newlines, case and Unicode; `" x "`
+  differs from `"x"`, and composed `"é"` differs from decomposed `"e\u0301"`.
+  Numeric-, epoch-, hash- and JSON-looking strings stay uninterpreted. Equal
+  strings may occur on different objects; no uniqueness or parent inheritance.
+  With nonempty ModuleConfig/VS metadata, omitted child metadata still becomes empty.
+- F39 equality/CAS: for each scope, equal full normalized candidate/current CAS
+  no-ops without preparation, publication or token change. Change only the VS
+  string, one real's string, several VS/real strings together, or the ModuleConfig
+  string: normal preparation/admission/atomic publication advances the owning CAS
+  once, not unrelated tokens; real strings use VS CAS. With stale CAS, equal and
+  different valid metadata both return `Aborted`. With current CAS, the same
+  string and changed timeout or ModuleConfig binding content may publish subject
+  to other rules; arbitrary earlier/new strings and rollback to earlier valid
+  content/labels are allowed, without numeric comparison or a version ledger.
+- After accepting nonempty VS/real strings, manually change real weight1->3 and
+  enable it. Resubmit the full descriptor with initial weight1/current CAS and
+  equal metadata: preserve weight3/admin state/incarnation/pins before equality,
+  and no-op when all other normalized fields agree. Submitted new real metadata
+  replaces its old text without changing that preserved state. Independently omit,
+  use textual null or empty for each nonempty VS/real/ModuleConfig string on full
+  replacement: reset to empty, never KEEP, even for a surviving real; advance the
+  owning CAS only if the full normalized candidate changes. New/readded reals
+  take submitted/default strings and weight, start disabled with new incarnations,
+  and never revive old pins even with identical text.
+- O09/O10, equal resize and accepted growth preserve all F39 strings; equal partial
+  updates preserve CAS, changed partial admin/weight updates and growth advance it
+  under existing rules. Health, WLC, sessions and back retirement preserve strings
+  and their existing token rules. Recovery preserves all accepted strings but
+  invalidates old CAS; reread, then an otherwise valid update with current CAS may
+  reuse any string. Actual authorized delete/recreate uses new object/real
+  incarnations and only newly supplied/default strings, never inherited old labels;
+  equal text restores no old token, identity, state or pin.
+- Metadata-only changes preserve VS network and real identity, session-chain
+  topology/generation, WLC input generation and retained-result applicability,
+  session state/deadlines and WRR cursor. Check all three scopes without treating
+  labels as worker-adoption evidence or changing rules for systemic owner epochs,
+  tokens, incarnations, internal publication versions or F22 policy identity/revision.
+  The owning CAS still advances on an accepted metadata change as specified above.
+- O11 exports VS/real strings and O13 the ModuleConfig string, each coherently
+  paired with accepted CAS through byte pages and recovery. Metadata-only changes
+  abort the owning configuration-bound O11/O13/O16/O17 continuation with `Aborted`;
+  no-ops do not. Name-list O05/O08 membership and O12 session traversal stay valid
+  solely with respect to the label change, subject to their other invalidators.
+  An accepted string never proves worker adoption; status provenance stays separate.
+- F39 bytes consume existing request/export/resource budgets, including many
+  individually valid 256-byte strings. Export-cap or allocation/admission failure
+  returns `ResourceExhausted` without changing accepted state, metadata or CAS;
+  known pre-accept preparation/publication failures likewise preserve prior state.
+  Enforce existing request framing and checked encoded-byte/page limits, not a new
+  configurable metadata quota. A 257-byte string remains invalid even with ample
+  budgets; accepted strings round-trip completely without truncation, and lowering
+  a budget must not make accepted configuration unreadable.
 - Accept exactly WRR/HASH/WLC; reject RR/PURR aliases and writable F12. For HASH,
   inspect selected input components while independently varying base protocol/
   Next Header, source, destination, each specific-mode port and metadata flowLabel.
@@ -2378,10 +2281,14 @@ counter tags, wire layouts or implementation-specific hash values.
   output whose activation FAILED does not confirm it; the next tick retries
   from a fresh sample under the unchanged retry rules.
 - WLC cadence vectors (**NOT RUN**): a complete current valid sample that
-  completes after the next 20 ms tick counts as valid, causes no instant
-  fallback and violates no deadline. A sample missing one worker, a missing
-  sample and a failed attempt each count as invalid under the three-attempt
-  policy instead. No feasibility at any scale is asserted.
+  takes 21 ms through sample acquisition, weights and selector-result preparation
+  misses the <=20 ms duration target but counts as valid, causes no instant
+  fallback and violates no validity deadline. A 15 ms start interval with a 21 ms
+  full duration meets only the interval target; a 25 ms interval with a 10 ms full
+  duration meets only the duration target. Worker adoption later than 20 ms is
+  separate. A sample missing one worker, a missing sample and a failed attempt
+  each count as invalid under the three-attempt policy instead. No measured
+  performance or feasibility at any scale is asserted.
 - For each of the eight address roles in section11, separately use127.0.0.1,
   127.255.255.255 and::1 at the applicable management and dataplane boundaries:
   no class-only rejection. For generated IPv6 source use B=::1,p128 to isolate
@@ -2397,7 +2304,7 @@ counter tags, wire layouts or implementation-specific hash values.
   addressed to that request source and one reply-count increment, with no
   class-only rejection. Do not assert node-local delivery, network egress or
   an outside-host violation; that egress boundary remains unproved.
-- Permit issued at t expires at t+300; create at expiry rejects when absent,
+- Permit issued at t milliseconds expires at t+300000; create at expiry rejects when absent,
   while a create accepted before expiry remains alive afterward. Preparation
   reserves neither name nor resources. OPS is the only VS flag, not a prohibition
   on mss_fix or required enabled booleans; pure_l3 rejects and portless is derived.
@@ -2452,6 +2359,30 @@ all earlier checks passing. No assertion chooses overflow behavior (#3121).
   first allocation and second encapsulation, hand off the third: two distinct
   clone-attempt failures, one clone output, no drop merely for consuming the
   original and no refunds. Valid zero peers likewise consume with no drop/output.
+
+### Multi-Fault Counter Vectors
+
+All vectors below are **NOT RUN**. For each original terminal drop, assert one
+input/drop entry-byte increment, exactly the named primary reason, zero output
+and no later reason increment or dependent processing. Prior permitted COUNT,
+cursor/preparation effects are not undone. Unmentioned prerequisites pass.
+Armed later failures are not permission to execute checks after the terminal fault.
+
+| Vector | Combined faults and required attribution |
+| --- | --- |
+| MF01 Base before fragment | Invalid base declared length plus IPv4 MF -> base malformed/length reason only; do not trust fragment/transport fields from an invalid enclosing structure. IPv4 IHL option region exceeds available bytes while a complete remaining LSRR lies in the available prefix -> S1 region/length reason only, no individual-option scan or remaining-route reason. |
+| MF02 Fragment floor | Valid base, MF plus malformed LSRR -> real-fragment only. Noninitial fragment plus missing required transport fields -> fragment only. No option/transport scan, VS lookup or later effects. |
+| MF03 IPv4 wire order | Well-formed remaining LSRR before a malformed source-route option -> remaining-route only; reversed option order -> malformed-option only. Within one malformed option, no remaining-route attribution. |
+| MF04 Options before protocol | Remaining LSRR plus IPv4 protocol 51 -> source-route only, before unsupported-protocol dispatch. |
+| MF05 IPv6 wire order | Malformed TLV before Fragment(M=1) -> TLV only; real Fragment before the otherwise malformed later TLV -> fragment only. Within each otherwise bounded live HBH and Destination Options header, valid unknown action01/10/11 before malformed PadN -> rejecting-action only; reversed TLVs -> malformed-TLV only. Do not process later TLVs after either terminal fault. |
+| MF06 IPv6 bound and tag | AH before Routing(Segments Left nonzero) -> AH only. Ninth supported extension with invalid internal length -> ninth-extension only, without reading that header. |
+| MF07 Integrity before branch | Bad enclosing IPv4 and ICMP checksums plus forbidden Echo client -> enclosing-checksum only. Valid enclosing checksum plus bad ICMP checksum and malformed quote -> message-checksum only. In both families, structurally valid unsupported ICMP type plus bad complete-message checksum (IPv4 enclosing checksum valid; IPv6 pseudo-header correctly formed) -> message-checksum only, zero unsupported-type reason and no later dependent processing. |
+| MF08 Echo ties | Forbidden VIP and client plus all linked real sets empty -> forbidden-VIP only; valid VIP plus forbidden client and empty sets -> forbidden-client only. No Echo-inactive/reply count. Valid roles but unclaimed VIP plus armed reply-construction failure -> no-matching-VS only, no reply preparation. |
+| MF09 Acquisition before absence | Required descriptor acquisition fails while a lookup without authoritative context would appear absent -> acquisition-failure, not no-matching-VS or session miss; no cursor advance. Repeat for required Echo eligibility-authority acquisition before deciding VIP membership, with no reply. |
+| MF10 Ordinary dependencies | Policy DENY plus armed session-read failure -> policy-denial only, no session read. Malformed eligible MSS plus armed encapsulation/commit failures -> MSS-malformed only, no encapsulation or session commit. |
+| MF11 Encapsulation ties | Unrepresentable encapsulated length plus insufficient headroom -> length only, no headroom acquisition or commit. Repeat on reverse delivery after a valid owned query and live pin; no required refresh/copy-forward commit, requery or refanout. |
+| MF12 External admission | Stale association plus armed ownership/readiness faults -> stale-association only, no query/tokens. Not-owned with unknown peers plus missing source/burst/credit faults -> unknown-peers only; known peers with the latter three -> missing-source only, no reservation. |
+| MF13 Independent clones | Funded A allocation failure plus latent encapsulation fault -> allocation only. After successful allocation, complete-copy failure plus unrepresentable length -> copy only. After successful copy, unrepresentable length plus insufficient headroom -> length only. In each case B is valid and still attempted; no later A operation/reason, extra original terminal-drop reason or refund. |
 
 The following additional bounded vectors are **NOT RUN**:
 
@@ -2707,6 +2638,11 @@ Canonical session-key vectors (all **NOT RUN**):
   and live pin remain equal.
 - TCP versus UDP, IPv4 versus IPv6 and VS deletion/recreation stay isolated;
   two links to the same VS retain the same key and scope.
+- In one mixed VS, identical addresses and ports with actual TCP versus UDP
+  produce distinct logical keys, WLC counts and readback records; front/back
+  copies of each key still deduplicate independently. Portless removes both
+  ports but not actual transport. Shared incarnation, real set and resources do
+  not merge these sessions or add a new HASH input/algorithm.
 - Decode the full network key from a SessionRecord plus mandatory page
   VS-incarnation context without current VS lookup or per-row scope duplication.
   The saved real key/incarnation remains distinct, even after real recreation.
@@ -2727,6 +2663,20 @@ and genuinely distinct values.
 
 Required discriminating vectors include:
 
+- Optional VS protocol (**NOT RUN**): independently combine absent/null, TCP
+  and UDP with port absent, 0, 443 and 65535 through binary presence, ProtoJSON
+  and YAML. Absence/null means TCP+UDP only; explicit unspecified, unknown, empty
+  string and wrong types reject. At the same family/VIP, TCP:443 plus UDP:443
+  accepts; mixed :443 plus either rejects the whole candidate. Mixed portless
+  conflicts with every TCP/UDP port selector; TCP portless plus UDP:443 accepts.
+  Repeat across different owners and unlinked VSes; different family/VIP does
+  not conflict. Omitted versus null protocol normalizes equal, but changing
+  mixed to TCP at a current token is `FailedPrecondition`; stale token is `Aborted`.
+  With OPS and mss_fix true, mixed UDP uses OPS and no MSS, mixed TCP remains
+  stateful with eligible MSS processing; TCP-only OPS=true rejects rather than
+  reading back false. ICMP quotes
+  select the unique VS by actual quoted transport/port before portless key
+  projection; quoted TCP refreshes other even with mixed OPS, quoted UDP does not.
 - C06 batch parity (**NOT RUN**): through both the CLI and a direct client,
   an O09 and an O10 two-target vector with a valid changed first target and a
   missing-key second target at the current token each yield `NotFound` as one
@@ -2778,11 +2728,22 @@ Required discriminating vectors include:
   builder/prior active state. Repeated failures and intervening input changes
   retain applicability checks without asserting bounded staleness or a new
   retry/fallback/readiness rule. These restoration vectors are **NOT RUN**.
-- Six timeouts: container absent, null and `{}`; tcp absent versus 0 versus
-  60; SYN and SYN-ACK inheritance through an explicit 0; uint32 maximum and
-  overflow; all six classes; every SYN/ACK/FIN/RST combination under section 7;
-  representable and overflowing deadline addition with unchanged prior state
-  on failure.
+- Six timeouts: container absent, null and `{}`; tcp absent versus 0, 1, 100,
+  500, 60000 and 4294967295 ms; defaults for tcp/udp/other are 60000 ms;
+  SYN and SYN-ACK inheritance through an explicit 0; 4294967296 rejects;
+  all six classes; every SYN/ACK/FIN/RST combination under section 7.
+  With uint64 millisecond now=4294967295 and ttl=1, expiry=4294967296;
+  widen before addition rather than wrapping at uint32. With now=UINT64_MAX-1,
+  ttl=1 reaches UINT64_MAX; ttl=2 fails without changing prior state.
+  At zero timeout expiry equals the final-attempt now and is immediately expired;
+  readback uses uint64 milliseconds with the same expiry predicate.
+- Permit millisecond boundaries (**NOT RUN**): valid_for_ms=300000 at issuance;
+  create at t+299999 may accept, at t+300000 or later rejects with `Aborted`
+  for an absent target. A present otherwise-valid target retains `AlreadyExists`.
+  After existing validation and absent-target determination, PrepareCreate at
+  t=UINT64_MAX-299999 cannot represent t+300000: return `Unavailable` with no grant,
+  no wrap or saturation, not `InvalidArgument` for malformed caller input;
+  preparation never extends expiry and accepted creation is not rolled back.
 - VS and real ports absent versus 0 versus 65535; duplicate decoded keys and
   reordering; immutable identity; surviving manual state; removed and readded
   identity.
@@ -2830,6 +2791,14 @@ Required discriminating vectors include:
 - Health missing at creation, stale checker or stream, reconnect, gap and
   recovery: no implicit healthy state, complete snapshot before deltas,
   administrative-disable precedence and publication-before-announcement order.
+- Checker timeout (**NOT RUN**): omission/null resolves to 500 ms; explicit
+  1, 100, 500 and 4294967295 ms retain their values; zero, 4294967296 and wrong
+  types reject. The 100 ms target changes neither default nor accepted range.
+  Bind effective timeout to checker identity/revision; missing/invalid effective
+  snapshot timeout fails closed and old-revision observations cannot enable after
+  a timeout change. Verify checked uint64 millisecond attempt deadlines without
+  overflow, separately from retries, polling, heartbeat and lease deadlines;
+  this contract does not supply those remaining integration values.
 - Counter identity duplicates and collisions reject without repair; the final
   naming contract must supply byte-level golden vectors before interoperability
   testing, rather than deriving them from an implementation-local encoding.
@@ -2861,6 +2830,15 @@ Required discriminating vectors include:
   change permitting full funding exits; no implicit growth, accepted-invalid
   external update or corruption-only assumption. Contrast n<=burst with temporary
   credit shortage, where refill can fund n; policy/peers/local/budget stay coherent.
+- Clone bucket millisecond refill (**NOT RUN**): from zero credit, rate=3 clones/second
+  and burst=2, elapsed 100 ms yields 0.3 clone; three such intervals yield 0.9,
+  the fourth 1.2, allowing one reservation and retaining 0.2. A 1000 ms interval
+  caps credit at 2 and discards excess; the next reservation cannot recover it.
+  Long idle: elapsed_ms=4294967296 (>UINT32_MAX) from zero credit at rate=1 and
+  burst=2 must refill to 2; a uint32-truncated interval of 0 is forbidden.
+  At uint32 maximum rate and burst with a very large representable uint64 elapsed
+  interval, reach the cap without overflowing rate times elapsed; no float or refund.
+  Clock regression/error handling remains a preactivation proof obligation.
 - Clone bucket fractional refill/cap, shared-worker contention, new-state full
   versus surviving control-plane restart/takeover, old-rate update accrual and
   carry/clamp, unchanged policy and peer churn, zero/exact/insufficient funding,
