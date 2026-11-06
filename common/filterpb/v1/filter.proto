@@ -24,6 +24,40 @@ message PortRange {
   uint32 to = 2;
 }
 
+// TCP flag match: a packet matches when the flags byte read through
+// mask equals flags, i.e. every bit set in flags is set and every
+// other masked bit is clear. Bits outside the mask are ignored.
+message TcpFlags {
+  // TCP flag bits that must be set: FIN 0x01, SYN 0x02, RST 0x04,
+  // PSH 0x08, ACK 0x10, URG 0x20, ECE 0x40, CWR 0x80.
+  uint32 flags = 1;
+  // TCP flag bits examined; must cover every bit set in flags.
+  uint32 mask = 2;
+}
+
+// An ICMP or ICMPv6 type range [from; to].
+message IcmpTypeRange {
+  uint32 from = 1;
+  uint32 to = 2;
+}
+
+// One protocol of a rule with its transport specific conditions.
+//
+// An entry without specific conditions matches every subtype byte of
+// the protocol. The classifiers read a subtype byte for TCP (flags),
+// ICMP and ICMPv6 (type) only; other protocols resolve at subtype
+// zero.
+message Protocol {
+  // IP protocol number: 1 ICMP, 6 TCP, 17 UDP, 58 ICMPv6, ...
+  uint32 number = 1;
+  // TCP flag conditions; requires number 6.
+  TcpFlags tcp = 2;
+  // ICMP type conditions; requires number 1.
+  repeated IcmpTypeRange icmp_types = 3;
+  // ICMPv6 type conditions; requires number 58.
+  repeated IcmpTypeRange icmp6_types = 4;
+}
+
 enum FragmentKind {
   Any = 0;
   None = 1;

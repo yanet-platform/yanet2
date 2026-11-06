@@ -2,8 +2,17 @@ import type { Rule, PortRange, VlanRange, ProtoRange, Action } from '@yanet/core
 import { ActionKind } from '@yanet/core/api/acl';
 import { formatRange } from '@yanet/core/utils';
 import type { RuleDraft, RuleItem } from './types';
-import { parseRangesRaw, parseProtoRangesRaw, partitionCidrsToTyped } from './parseHelpers';
+import { parseRangesRaw, parseProtoRangesRaw, partitionCidrsToTyped, protocolEntriesToRanges } from './parseHelpers';
 export { parseRangesRaw, parseProtoRangesRaw } from './parseHelpers';
+
+/**
+ * The encoded protocol ranges of a rule across both authoring forms:
+ * the raw ranges and the expansion of the structured entries.
+ */
+const ruleProtoRanges = (rule: Rule): ProtoRange[] => [
+    ...(rule.proto_ranges ?? []),
+    ...protocolEntriesToRanges(rule.protocols),
+];
 
 /**
  * Normalize a wire-shape Action.kind into a concrete ActionKind.
@@ -45,7 +54,8 @@ const coversAllVlans = (ranges: VlanRange[]): boolean => {
  * semantics from modules/acl/api/controlplane.c:235-289:
  * - isL2: no IP entries on either side — rule fires on L2 frames only.
  * - isDeadIp: asymmetric src/dst IP families — no family matched on both sides.
- * - isDeadProto: IP rule with an empty proto_ranges array — matches no traffic.
+ * - isDeadProto: IP rule with an empty protocol set across both authoring
+ *   forms — matches no traffic.
  * - isDead: isDeadIp || isDeadProto.
  * - isEmptySrc: sourceCidrs.length === 0 (no IP match on sources side).
  */
@@ -77,7 +87,7 @@ export const expandRule = (rule: Rule): {
 
     const srcPortRanges = (rule.src_port_ranges ?? []).map(formatRange);
     const dstPortRanges = (rule.dst_port_ranges ?? []).map(formatRange);
-    const protoRanges = (rule.proto_ranges ?? []).map(formatRange);
+    const protoRanges = ruleProtoRanges(rule).map(formatRange);
     const vlanRanges = (rule.vlan_ranges ?? []).map(formatRange);
     const deviceNames = (rule.devices ?? []).map(d => d.name ?? '').filter(Boolean);
 
@@ -91,9 +101,9 @@ export const expandRule = (rule: Rule): {
     const isL2 = v4SrcCount === 0 && v4DstCount === 0 && v6SrcCount === 0 && v6DstCount === 0;
     // isDeadIp: asymmetric src/dst IP families — no single family is matched on both sides.
     const isDeadIp = !hasIP4 && !hasIP6 && !isL2;
-    // isDeadProto: an IP rule with an empty proto_ranges array matches no traffic. The proto
+    // isDeadProto: an IP rule with an empty protocol set matches no traffic. The proto
     // compiler lacks the "count === 0 → full range" fallback that ports/vlans/devices have.
-    const isDeadProto = !isL2 && (rule.proto_ranges?.length ?? 0) === 0;
+    const isDeadProto = !isL2 && ruleProtoRanges(rule).length === 0;
     const isDead = isDeadIp || isDeadProto;
 
     return {
@@ -105,7 +115,7 @@ export const expandRule = (rule: Rule): {
         dstPortRanges,
         isAnyDstPort: coversAllPorts(rule.dst_port_ranges ?? []),
         protoRanges,
-        isAnyProto: coversAllProtos(rule.proto_ranges ?? []),
+        isAnyProto: coversAllProtos(ruleProtoRanges(rule)),
         vlanRanges,
         isAnyVlan: coversAllVlans(rule.vlan_ranges ?? []),
         deviceNames,
@@ -217,7 +227,7 @@ export const ruleToDraft = (rule: Rule): RuleDraft => {
         dstCidrs: [...expanded.dstCidrs],
         srcPortRaw: expanded.srcPortRanges.join(', '),
         dstPortRaw: expanded.dstPortRanges.join(', '),
-        protoRaw: (rule.proto_ranges ?? []).map(protoRangeToStr).join(', '),
+        protoRaw: ruleProtoRanges(rule).map(protoRangeToStr).join(', '),
         vlanRaw: expanded.vlanRanges.join(', '),
         deviceNames: [...expanded.deviceNames],
         counter: rule.counter ?? '',

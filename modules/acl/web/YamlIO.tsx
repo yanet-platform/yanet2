@@ -117,9 +117,11 @@ const YamlIO: React.FC<YamlIOProps> = ({ configName, rules, onImport, disabled }
                 '    dst_port_ranges:\n' +
                 '      - from: 80\n' +
                 '        to: 80\n' +
-                '    proto_ranges:\n' +
-                '      - from: 1536\n' +
-                '        to: 1791\n' +
+                '    protocols:\n' +
+                '      - number: 6\n' +
+                '        tcp:\n' +
+                '          flags: 2\n' +
+                '          mask: 2\n' +
                 '    actions:\n' +
                 '      - kind: ACTION_KIND_PASS'
             }

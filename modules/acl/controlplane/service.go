@@ -285,6 +285,11 @@ func convertRules(reqRules []*aclpb.Rule) ([]cacl.ACLRule, error) {
 		if err != nil {
 			return nil, err
 		}
+		structuredProtocols, err := filterpbconv.ToProtocolRanges(reqRule.Protocols)
+		if err != nil {
+			return nil, err
+		}
+		protoRanges = append(protoRanges, structuredProtocols...)
 		srcPortRanges, err := filterpbconv.ToPortRanges(reqRule.SrcPortRanges)
 		if err != nil {
 			return nil, err

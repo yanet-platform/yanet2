@@ -1,4 +1,5 @@
 import type { Rule, Action } from '@yanet/core/api/acl';
+import { protocolEntriesToRanges } from './parseHelpers';
 
 /** Serialize a range {from, to} to a canonical string for equality comparison. */
 const fmtRange = (r: { from?: number; to?: number }): string =>
@@ -60,7 +61,9 @@ const fieldValues = (rule: Rule, field: RuleField): string[] => {
         case 'dst_port_ranges':
             return (rule.dst_port_ranges ?? []).map(fmtRange);
         case 'proto_ranges':
-            return (rule.proto_ranges ?? []).map(fmtRange);
+            // Both authoring forms compare through their encoded
+            // expansion, so an untouched rule never reads as modified.
+            return [...(rule.proto_ranges ?? []), ...protocolEntriesToRanges(rule.protocols)].map(fmtRange);
         case 'vlan_ranges':
             return (rule.vlan_ranges ?? []).map(fmtRange);
         case 'devices':
