@@ -174,8 +174,9 @@ pub type Lpm6 = Lpm<16>;
 
 const FLAG: u64 = bindings::LPM_VALUE_FLAG as u64;
 
-// SAFETY: `Lpm` is a `#[repr(C)]` mirror of the C struct whose size and
-// field offsets are asserted equal to the bindings' and leave no padding.
+// SAFETY: a `#[repr(C)]` mirror of the C struct whose size and field offsets
+// are asserted equal to the bindings' and leave no padding.
+//
 // Every pattern is valid: the opaque context is never read by Rust, the
 // directory slot is an offset word and the count an integer. Dropping is a
 // no-op and the alignment is 8. The key size names no field, so every table

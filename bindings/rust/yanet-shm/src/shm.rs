@@ -34,10 +34,8 @@ pub const MAX_ALIGN: usize = 64;
 /// Implementors are `#[repr(C)]` structs, allow-listed leaves, arrays, the
 /// owned edges or the optional value such that every bit pattern is a valid
 /// value, there is no implicit padding, dropping is a no-op and the alignment
-/// is at most [`MAX_ALIGN`].
-///
-/// [`Self::AlignUnit`] is exactly `align_of::<Self>()` bytes in size and in
-/// alignment.
+/// is at most [`MAX_ALIGN`], and [`Self::AlignUnit`] is exactly
+/// `align_of::<Self>()` bytes in size and in alignment.
 pub unsafe trait ShmLayout: Sized + 'static {
     /// A blob of bytes exactly as wide and as aligned as the type, which tags
     /// an optional value of it.
@@ -60,9 +58,9 @@ macro_rules! unit_of {
 
 macro_rules! plain_leaf {
     ($($ty:ty),* $(,)?) => {$(
-        // SAFETY: the leaf accepts every bit pattern, has no padding, needs
-        // no drop and is aligned to at most 8; its unit is that of its
-        // alignment.
+        // SAFETY: the leaf accepts every bit pattern, has no padding or drop.
+        //
+        // It is aligned to at most 8, and its unit is that of its alignment.
         unsafe impl ShmLayout for $ty {
             type AlignUnit = unit_of!($ty);
         }
@@ -86,8 +84,10 @@ unsafe impl<T: ShmLayout, const N: usize> ShmLayout for [T; N] {
 }
 
 // SAFETY: an offset accepts every bit pattern; the block it names is owned
-// by the graph and aligned for `T` by the builder. The value is the offset
-// whatever `T` is, so every box has the alignment of the one named.
+// by the graph and aligned for `T` by the builder.
+//
+// The value is the offset whatever `T` is, so every box has the alignment of
+// the one named.
 unsafe impl<T: ShmLayout> ShmLayout for ShmBox<T> {
     type AlignUnit = unit_of!(ShmBox<u8>);
 }
@@ -99,11 +99,13 @@ unsafe impl<T: ShmLayout> ShmLayout for ShmSlice<T> {
 }
 
 // SAFETY: a unit accepts every bit pattern and the value is a layout type, so
-// the option is valid for every pattern and needs no drop. The unit is as wide
-// and as aligned as the value, which this impl takes on trust from the value's
-// own unsafe layout contract and every reading, writing and releasing path
-// checks at compile time; so the value follows it with no padding, the option
-// ends on the value and is aligned as it, and the unit is the option's too.
+// the option is valid for every pattern and needs no drop.
+//
+// The unit is as wide and as aligned as the value, which this impl takes on
+// trust from the value's own unsafe layout contract and every reading, writing
+// and releasing path checks at compile time; so the value follows it with no
+// padding, the option ends on the value and is aligned as it, and the unit is
+// the option's too.
 unsafe impl<T: ShmLayout> ShmLayout for ShmOption<T> {
     type AlignUnit = T::AlignUnit;
 }

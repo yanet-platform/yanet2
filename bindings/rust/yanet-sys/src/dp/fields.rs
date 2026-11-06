@@ -198,8 +198,10 @@ impl<O> ObjectLink<O> {
 }
 
 // SAFETY: a registry index accepts every bit pattern, and the layout is a
-// zero-sized marker; the control plane writes the id the module's counter
-// registry assigned. The marker leaves every counter aligned as the one named.
+// zero-sized marker.
+//
+// The control plane writes the id the module's counter registry assigned. The
+// marker leaves every counter aligned as the one named.
 unsafe impl<T: CounterLayout> ShmLayout for Counter<T> {
     type AlignUnit = <Align<{ align_of::<Counter>() }> as Alignment>::Unit;
 }
@@ -211,8 +213,10 @@ unsafe impl ShmLayout for Device {
 }
 
 // SAFETY: a link index accepts every bit pattern, and the object type is a
-// zero-sized marker; the control plane writes the index the module's object
-// links assigned. The marker leaves every link aligned as the one named.
+// zero-sized marker.
+//
+// The control plane writes the index the module's object links assigned. The
+// marker leaves every link aligned as the one named.
 unsafe impl<O: Object> ShmLayout for ObjectLink<O> {
     type AlignUnit = <Align<{ align_of::<ObjectLink<()>>() }> as Alignment>::Unit;
 }
@@ -633,8 +637,10 @@ impl<'id, T: Copy + ShmLayout> WorkerSlot<'id, T> {
 unsafe impl<T: Copy + ShmLayout + Send> Sync for PerWorker<T> {}
 
 // SAFETY: as above; the block it names is owned by the graph and its slots
-// are plain values aligned for `T` by the builder. The field is the offset and
-// the count whatever `T` is, so it is aligned as the one named.
+// are plain values aligned for `T` by the builder.
+//
+// The field is the offset and the count whatever `T` is, so it is aligned as
+// the one named.
 unsafe impl<T: Copy + ShmLayout> ShmLayout for PerWorker<T> {
     type AlignUnit = <Align<{ align_of::<PerWorker<u64>>() }> as Alignment>::Unit;
 }
@@ -1051,9 +1057,10 @@ impl<'id, T: Copy + ShmLayout> WorkerSlice<'id, T> {
 unsafe impl<T: Copy + ShmLayout + Send> Sync for PerWorkerSlice<T> {}
 
 // SAFETY: as above; the table and the regions it names are owned by the graph,
-// and the regions hold plain values aligned for `T` by the builder. The field
-// is the offset and the counts whatever `T` is, so it is aligned as the one
-// named.
+// and the regions hold plain values aligned for `T` by the builder.
+//
+// The field is the offset and the counts whatever `T` is, so it is aligned as
+// the one named.
 unsafe impl<T: Copy + ShmLayout> ShmLayout for PerWorkerSlice<T> {
     type AlignUnit = <Align<{ align_of::<PerWorkerSlice<u64>>() }> as Alignment>::Unit;
 }

@@ -139,11 +139,12 @@ pub fn expand(input: &DeriveInput) -> syn::Result<TokenStream> {
             );
         };
 
-        // SAFETY: a non-generic repr(C) struct, not packed, aligned to at
-        // most 64, without padding (size equals the sum of its fields) or
-        // drop glue, whose every field is shared-memory data (checked above),
-        // accepts every bit pattern. Its unit is that of its alignment, as wide
-        // and as aligned as the struct (checked above).
+        // SAFETY: a struct of shared-memory fields with no padding or drop
+        // glue accepts every bit pattern (all checked above).
+        //
+        // It is non-generic, repr(C), not packed and aligned to at most 64,
+        // its size the sum of its fields. Its unit is that of its alignment,
+        // as wide and as aligned as the struct.
         unsafe impl #p::ShmLayout for #name {
             type AlignUnit = <#p::Align<{ #core::mem::align_of::<#name>() }> as #p::Alignment>::Unit;
         }

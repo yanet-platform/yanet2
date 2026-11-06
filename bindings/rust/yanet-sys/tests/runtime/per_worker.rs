@@ -407,8 +407,9 @@ struct Regions {
 }
 
 // SAFETY: a per-worker slice field, an offset and two counts, which accept
-// every bit pattern, with no padding and no drop; the unit is that of the
-// alignment.
+// every bit pattern, with no padding and no drop.
+//
+// The unit is that of the alignment.
 unsafe impl ShmLayout for Regions {
     type AlignUnit = <Align<{ align_of::<Regions>() }> as Alignment>::Unit;
 }

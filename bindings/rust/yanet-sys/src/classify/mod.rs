@@ -568,14 +568,14 @@ macro_rules! classifiers {
             assert!(matches::<$name>() && !core::mem::needs_drop::<$name>());
         };
 
-        // SAFETY: a `#[repr(C)]` mirror of the C struct, of its size and
-        // alignment, the alignment within the shared-memory bound, whose
-        // fields lie at the C offsets and leave no padding (asserted with the
-        // types). Every field is an integer, an offset slot, an LPM or a
-        // mirror of those, so every pattern is valid; once the configuration
-        // is published C rewrites only the memory contexts the LPMs embed,
-        // which are opaque. Dropping is a no-op. The unit is that of the
-        // alignment.
+        // SAFETY: a `#[repr(C)]` mirror of the C struct, of its size,
+        // alignment and field offsets, with no padding (asserted with types).
+        //
+        // The alignment is within the shared-memory bound. Every field is an
+        // integer, an offset slot, an LPM or a mirror of those, so every
+        // pattern is valid; once the configuration is published C rewrites
+        // only the memory contexts the LPMs embed, which are opaque. Dropping
+        // is a no-op. The unit is that of the alignment.
         unsafe impl ShmLayout for $name {
             type AlignUnit = <Align<{ align_of::<$name>() }> as Alignment>::Unit;
         }

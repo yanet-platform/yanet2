@@ -167,9 +167,10 @@ struct Counted {
     traffic: Counter<Traffic>,
 }
 
-/// An optional run of ports, an optional word whose write may be refused and
-/// an optional LPM, which builds here always leave absent: building one opens
-/// C memory, which the test owner does not set up.
+/// An optional run of ports, word and LPM.
+///
+/// The word's write may be refused. Builds here always leave the LPM absent:
+/// building one opens C memory, which the test owner does not set up.
 #[derive(ShmLayout)]
 #[repr(C)]
 struct Optional {

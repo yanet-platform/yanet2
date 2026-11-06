@@ -1,9 +1,9 @@
 //! Alignment units: for every alignment a shared-memory type may have, a
-//! blob of bytes exactly that wide and aligned. A type's unit tags an
-//! optional value of it, which then follows the tag with no padding.
+//! blob of bytes exactly that wide and aligned.
 //!
-//! The derive and hand-written layouts name units through `Align`; nothing
-//! else should.
+//! A type's unit tags an optional value of it, which then follows the tag with
+//! no padding. The derive and hand-written layouts name units through `Align`;
+//! nothing else should.
 
 use crate::shm::{MAX_ALIGN, ShmLayout};
 

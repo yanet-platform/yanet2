@@ -341,13 +341,14 @@ unsafe impl<T: Build> Build for ShmSlice<T> {
 }
 
 // SAFETY: the tag and the value are the whole value, without padding: the tag
-// is the value's alignment unit (checked on every path). The tag is set only
-// after the value is written whole; a refused value owns nothing, so neither
-// does the option, which, as any refused field, is never read or freed. An
-// absent value is zeroed, so every byte is initialised, and owns nothing.
-// Freeing clears the tag before releasing the value, so a panic between leaks
-// the value rather than leaving a set tag over a released one; such a leak is
-// accepted.
+// is the value's alignment unit (checked on every path).
+//
+// The tag is set only after the value is written whole; a refused value owns
+// nothing, so neither does the option, which, as any refused field, is never
+// read or freed. An absent value is zeroed, so every byte is initialised, and
+// owns nothing. Freeing clears the tag before releasing the value, so a panic
+// between leaks the value rather than leaving a set tag over a released one;
+// such a leak is accepted.
 unsafe impl<T: Build> Build for ShmOption<T> {
     /// The parts of the value, or `None` to leave it absent.
     type Parts<'b, W: Owner> = Option<T::Parts<'b, W>>;
@@ -362,10 +363,10 @@ unsafe impl<T: Build> Build for ShmOption<T> {
         let value = addr + Self::VALUE_OFFSET;
         let tag = match parts {
             Some(parts) => {
-                // SAFETY: the value lies in the option, aligned for it as the
-                // option is and the offset, the width of its alignment, keeps
-                // it so, and exclusive (caller contract). A refused value owns
-                // nothing, so neither does the option.
+                // SAFETY: the value lies in the option, aligned and exclusive
+                // (caller contract; its offset is its alignment's width).
+                //
+                // A refused value owns nothing, so neither does the option.
                 unsafe { T::write::<W>(parts, memory, value)? };
                 T::AlignUnit::SET
             }

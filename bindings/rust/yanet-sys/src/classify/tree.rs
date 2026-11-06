@@ -386,9 +386,10 @@ macro_rules! holders {
     ($($name:ident<$($param:ident),*> as $inst:ty { $table:ident: $raw:ty, $free:ident; $($edge:ident: $ty:ident),* })*) => {$(
         const _: () = assert!(matches::<$inst>());
 
-        // SAFETY: a `#[repr(C)]` struct of an opaque C object, which accepts
-        // every pattern, and offset words, without padding (asserted above);
-        // the C object leads, so the node has its alignment whatever its
+        // SAFETY: a `#[repr(C)]` struct of an opaque C object and offset
+        // words, which accept every pattern, without padding (asserted above).
+        //
+        // The C object leads, so the node has its alignment whatever its
         // inputs, that of the instance named, and dropping is a no-op.
         unsafe impl<$($param: ShmLayout),*> ShmLayout for $name<$($param),*> {
             type AlignUnit = <Align<{ align_of::<$inst>() }> as Alignment>::Unit;

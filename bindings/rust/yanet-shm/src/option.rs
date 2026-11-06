@@ -15,18 +15,14 @@ use crate::{
 
 /// Value of type `T` that may be absent: a tag, then the value.
 ///
-/// The value is held inline and is read only where the tag is set; an absent
-/// value owns nothing, and its bytes, which a build zeroes, mean nothing. Like
-/// the owning edges it has private fields, no constructor and no
-/// `Copy`/`Clone`: a build writes it in place, the value before the tag, and
-/// only before its configuration is published. A published configuration is
-/// frozen, so a reader sees a complete value behind a set tag.
-///
-/// The option is `align_of::<T>()` bytes larger than `T` and aligned like `T`,
-/// with no padding; an option of a value aligned to 64 costs a 64-byte tag.
-/// The value is present when any byte of the tag is not zero: a build writes
-/// a one in its first byte, and every other pattern of a set tag means the
-/// same, so readers in another process need no more than that.
+/// The value is present when any byte of the tag is not zero, and is read only
+/// then; an absent value owns nothing, and its bytes mean nothing. The option
+/// is `align_of::<T>()` bytes larger than `T`, aligned like `T`, with no
+/// padding: an option of a value aligned to 64 costs a 64-byte tag. It has no
+/// constructor and no `Copy`/`Clone`: a build writes it in place, the value
+/// before the tag, only before its configuration is published, and a
+/// published configuration is frozen, so a reader sees a complete value behind
+/// a set tag.
 #[repr(C)]
 pub struct ShmOption<T: ShmLayout> {
     tag: T::AlignUnit,
