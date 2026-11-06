@@ -12,6 +12,7 @@ use core::sync::atomic::{AtomicI8, AtomicI16, AtomicI32, AtomicI64, AtomicU8, At
 use crate::{
     option::ShmOption,
     rel::{ShmBox, ShmSlice},
+    unit::{Align, Alignment, Unit, matches},
 };
 
 /// Largest alignment a shared-memory type may require.
@@ -34,13 +35,39 @@ pub const MAX_ALIGN: usize = 64;
 /// owned edges or the optional value such that every bit pattern is a valid
 /// value, there is no implicit padding, dropping is a no-op and the alignment
 /// is at most [`MAX_ALIGN`].
-pub unsafe trait ShmLayout: Sized + 'static {}
+///
+/// [`Self::AlignUnit`] is exactly `align_of::<Self>()` bytes in size and in
+/// alignment.
+pub unsafe trait ShmLayout: Sized + 'static {
+    /// A blob of bytes exactly as wide and as aligned as the type, which tags
+    /// an optional value of it.
+    ///
+    /// The derive names it; a hand-written layout names
+    /// `<Align<{ align_of::<Self>() }> as Alignment>::Unit` from the hidden
+    /// `unit` module, or, if generic with an alignment its parameters do not
+    /// change, that of one instance. Only the optional value may hold the unit
+    /// of another type: an edge holding its target's unit makes the type's
+    /// alignment depend on itself, which rustc refuses as a cycle.
+    type AlignUnit: Unit;
+}
+
+/// The unit of the alignment of `$ty`, a type without generic parameters.
+macro_rules! unit_of {
+    ($ty:ty) => {
+        <Align<{ align_of::<$ty>() }> as Alignment>::Unit
+    };
+}
 
 macro_rules! plain_leaf {
     ($($ty:ty),* $(,)?) => {$(
         // SAFETY: the leaf accepts every bit pattern, has no padding, needs
-        // no drop and is aligned to at most 8.
-        unsafe impl ShmLayout for $ty {}
+        // no drop and is aligned to at most 8; its unit is that of its
+        // alignment.
+        unsafe impl ShmLayout for $ty {
+            type AlignUnit = unit_of!($ty);
+        }
+
+        const _: () = assert!(matches::<$ty>() && !core::mem::needs_drop::<$ty>());
     )*};
 }
 
@@ -53,59 +80,35 @@ plain_leaf! {
 }
 
 // SAFETY: an array of layout elements has no padding between elements and
-// no invalid pattern.
-unsafe impl<T: ShmLayout, const N: usize> ShmLayout for [T; N] {}
+// no invalid pattern, and is aligned as an element, also when empty.
+unsafe impl<T: ShmLayout, const N: usize> ShmLayout for [T; N] {
+    type AlignUnit = T::AlignUnit;
+}
 
 // SAFETY: an offset accepts every bit pattern; the block it names is owned
-// by the graph and aligned for `T` by the builder.
-unsafe impl<T: ShmLayout> ShmLayout for ShmBox<T> {}
+// by the graph and aligned for `T` by the builder. The value is the offset
+// whatever `T` is, so every box has the alignment of the one named.
+unsafe impl<T: ShmLayout> ShmLayout for ShmBox<T> {
+    type AlignUnit = unit_of!(ShmBox<u8>);
+}
 
 // SAFETY: as for the box, over the whole element range; an empty slice is
 // NULL with a zero count.
-unsafe impl<T: ShmLayout> ShmLayout for ShmSlice<T> {}
-
-// SAFETY: a tag word accepts every bit pattern and the value is a layout type,
-// so the option is valid for every pattern, needs no drop and is aligned to at
-// most 8. A word-layout value follows the tag word with no padding and ends on
-// a word, so the option has none.
-unsafe impl<T: WordLayout> ShmLayout for ShmOption<T> {}
-
-/// Marks a layout type made of whole 8-byte words: sized a multiple of 8 and
-/// aligned to at most 8, so it follows a word with no padding and leaves none
-/// after it.
-///
-/// [`ShmOption`] holds only such a value. A struct gets no implementation from
-/// `#[derive(ShmLayout)]`; the SDK implements it for its word types.
-///
-/// # Safety
-///
-/// `size_of::<Self>()` is a multiple of 8 and `align_of::<Self>()` is at most
-/// 8.
-pub unsafe trait WordLayout: ShmLayout {}
-
-macro_rules! word_leaf {
-    ($($ty:ty),* $(,)?) => {$(
-        // SAFETY: the leaf is 8 bytes aligned to 8, or empty.
-        unsafe impl WordLayout for $ty {}
-    )*};
+unsafe impl<T: ShmLayout> ShmLayout for ShmSlice<T> {
+    type AlignUnit = unit_of!(ShmSlice<u8>);
 }
 
-word_leaf! { u64, i64, AtomicU64, AtomicI64, () }
-
-// SAFETY: elements of whole words make an array of whole words aligned as an
-// element.
-unsafe impl<T: WordLayout, const N: usize> WordLayout for [T; N] {}
-
-// SAFETY: one offset word.
-unsafe impl<T: ShmLayout> WordLayout for ShmBox<T> {}
-
-// SAFETY: an offset word and a count word.
-unsafe impl<T: ShmLayout> WordLayout for ShmSlice<T> {}
-
-// SAFETY: a tag word and a word-layout value.
-unsafe impl<T: WordLayout> WordLayout for ShmOption<T> {}
+// SAFETY: a unit accepts every bit pattern and the value is a layout type, so
+// the option is valid for every pattern and needs no drop. The unit is as wide
+// and as aligned as the value, which this impl takes on trust from the value's
+// own unsafe layout contract and every reading, writing and releasing path
+// checks at compile time; so the value follows it with no padding, the option
+// ends on the value and is aligned as it, and the unit is the option's too.
+unsafe impl<T: ShmLayout> ShmLayout for ShmOption<T> {
+    type AlignUnit = T::AlignUnit;
+}
 
 const _: () = {
-    assert!(size_of::<ShmBox<u8>>().is_multiple_of(8) && align_of::<ShmBox<u8>>() <= 8);
-    assert!(size_of::<ShmSlice<u8>>().is_multiple_of(8) && align_of::<ShmSlice<u8>>() <= 8);
+    assert!(matches::<[u32; 3]>() && matches::<[u64; 0]>());
+    assert!(matches::<ShmBox<[u8; 3]>>() && matches::<ShmSlice<u16>>());
 };

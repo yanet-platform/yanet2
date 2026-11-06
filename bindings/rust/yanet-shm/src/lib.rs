@@ -14,6 +14,8 @@ pub mod rel;
 pub mod resolve;
 pub mod root;
 pub mod shm;
+#[doc(hidden)]
+pub mod unit;
 
 // Test-only dependencies are visible to the library's own test target.
 #[cfg(test)]

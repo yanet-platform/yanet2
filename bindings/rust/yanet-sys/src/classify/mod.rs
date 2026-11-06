@@ -36,6 +36,7 @@ use yanet_shm::{
     rel::RelPtr,
     resolve::Resolve,
     shm::{MAX_ALIGN, ShmLayout},
+    unit::{Align, Alignment, matches},
 };
 
 pub use self::tree::{BURST, Decode, Join, Node, Rules, link};
@@ -564,6 +565,7 @@ macro_rules! classifiers {
             assert!(size_of::<$name>() == size_of::<bindings::$raw>());
             assert!(align_of::<$name>() == align_of::<bindings::$raw>());
             assert!(align_of::<$name>() <= MAX_ALIGN);
+            assert!(matches::<$name>() && !core::mem::needs_drop::<$name>());
         };
 
         // SAFETY: a `#[repr(C)]` mirror of the C struct, of its size and
@@ -572,8 +574,11 @@ macro_rules! classifiers {
         // types). Every field is an integer, an offset slot, an LPM or a
         // mirror of those, so every pattern is valid; once the configuration
         // is published C rewrites only the memory contexts the LPMs embed,
-        // which are opaque. Dropping is a no-op.
-        unsafe impl ShmLayout for $name {}
+        // which are opaque. Dropping is a no-op. The unit is that of the
+        // alignment.
+        unsafe impl ShmLayout for $name {
+            type AlignUnit = <Align<{ align_of::<$name>() }> as Alignment>::Unit;
+        }
 
         // SAFETY: the C object is the whole value; the compile, the join or
         // the decode that wrote it allocated only in the memory context, in

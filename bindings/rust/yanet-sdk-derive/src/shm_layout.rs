@@ -108,6 +108,7 @@ pub fn expand(input: &DeriveInput) -> syn::Result<TokenStream> {
     let padding_msg = format!("ShmLayout: `{name}` has implicit padding; add explicit padding fields");
     let drop_msg = format!("ShmLayout: `{name}` needs drop; shared-memory types are never dropped");
     let align_msg = format!("ShmLayout: `{name}` is aligned to more than the block allocator's MAX_ALIGN");
+    let unit_msg = format!("ShmLayout: the alignment unit of `{name}` is not as wide and as aligned as it");
     let vis = &input.vis;
     let parts_name = format_ident!("{}Parts", name);
     let name_str = parts_name.to_string();
@@ -130,13 +131,22 @@ pub fn expand(input: &DeriveInput) -> syn::Result<TokenStream> {
             );
             #core::assert!(!#core::mem::needs_drop::<#name>(), #drop_msg);
             #core::assert!(#core::mem::align_of::<#name>() <= #p::MAX_ALIGN, #align_msg);
+            #core::assert!(
+                #core::mem::size_of::<<#name as #p::ShmLayout>::AlignUnit>() == #core::mem::align_of::<#name>()
+                    && #core::mem::align_of::<<#name as #p::ShmLayout>::AlignUnit>()
+                        == #core::mem::align_of::<#name>(),
+                #unit_msg,
+            );
         };
 
         // SAFETY: a non-generic repr(C) struct, not packed, aligned to at
         // most 64, without padding (size equals the sum of its fields) or
         // drop glue, whose every field is shared-memory data (checked above),
-        // accepts every bit pattern.
-        unsafe impl #p::ShmLayout for #name {}
+        // accepts every bit pattern. Its unit is that of its alignment, as wide
+        // and as aligned as the struct (checked above).
+        unsafe impl #p::ShmLayout for #name {
+            type AlignUnit = <#p::Align<{ #core::mem::align_of::<#name>() }> as #p::Alignment>::Unit;
+        }
 
         #[doc = #parts_doc]
         #vis struct #parts_name<'b, __W: #p::Owner> {

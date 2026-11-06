@@ -385,9 +385,10 @@ mod doctests {
     /// ```
     struct NoDropAccepted;
 
-    /// An alignment beyond the block allocator's 64 is refused.
+    /// An alignment beyond the block allocator's 64 is refused: no alignment
+    /// unit is that wide.
     ///
-    /// ```compile_fail,E0080
+    /// ```compile_fail,E0277
     /// use yanet_sdk::ShmLayout;
     ///
     /// #[derive(ShmLayout)]

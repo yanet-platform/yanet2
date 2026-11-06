@@ -13,7 +13,8 @@ use yanet_shm::{
     option::ShmOption,
     rel::RelPtr,
     resolve::Resolve,
-    shm::{MAX_ALIGN, ShmLayout, WordLayout},
+    shm::{MAX_ALIGN, ShmLayout},
+    unit::{Align, Alignment, matches},
 };
 
 use crate::{bindings, cp::FfiRecord};
@@ -109,10 +110,9 @@ const _: () = {
     assert!(align_of::<Rust>() <= MAX_ALIGN);
     assert!(size_of::<Page>() == size_of::<bindings::lpm_page>());
     assert!(align_of::<Page>() == align_of::<bindings::lpm_page>());
-    // The table is whole words, aligned to at most 8.
-    assert!(size_of::<Rust>().is_multiple_of(8) && align_of::<Rust>() <= 8);
-    // An optional table is the tag word and the table, without padding.
-    assert!(size_of::<ShmOption<Rust>>() == size_of::<u64>() + size_of::<Rust>());
+    assert!(matches::<Rust>());
+    // An optional table is its tag and the table, without padding.
+    assert!(size_of::<ShmOption<Rust>>() == align_of::<Rust>() + size_of::<Rust>());
 };
 
 // The mirrored fields keep the C types, not only their places.
@@ -178,9 +178,8 @@ const FLAG: u64 = bindings::LPM_VALUE_FLAG as u64;
 // field offsets are asserted equal to the bindings' and leave no padding.
 // Every pattern is valid: the opaque context is never read by Rust, the
 // directory slot is an offset word and the count an integer. Dropping is a
-// no-op and the alignment is 8.
-unsafe impl<const K: usize> ShmLayout for Lpm<K> {}
-
-// SAFETY: the key size names no field, so every table has the layout asserted
-// above: whole words, aligned to 8.
-unsafe impl<const K: usize> WordLayout for Lpm<K> {}
+// no-op and the alignment is 8. The key size names no field, so every table
+// has the layout and the unit asserted above.
+unsafe impl<const K: usize> ShmLayout for Lpm<K> {
+    type AlignUnit = <Align<{ align_of::<Lpm<4>>() }> as Alignment>::Unit;
+}

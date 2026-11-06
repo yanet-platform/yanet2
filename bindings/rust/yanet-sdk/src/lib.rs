@@ -10,8 +10,8 @@
 //! and the [`Registered`] it returns is copied into every entry that uses it.
 //! The parts of a table are the author's ranges, borrowed for the build. A
 //! value a configuration may lack, such as a table most entries leave empty,
-//! is a [`ShmOption`] field: held inline behind a tag and built from optional
-//! parts, it allocates nothing when absent:
+//! is a [`ShmOption`] field: held inline behind a tag as wide as the value's
+//! alignment and built from optional parts, it allocates nothing when absent:
 //!
 //! ```
 //! use yanet_sdk::{Device, Lpm4, Lpm6, LpmRange, ShmBox, ShmLayout, ShmOption, ShmSlice};
@@ -123,7 +123,7 @@ pub use yanet_shm::{
     option::ShmOption,
     rel::{ShmBox, ShmSlice},
     resolve::Resolve,
-    shm::{ShmLayout, WordLayout},
+    shm::ShmLayout,
 };
 pub use yanet_sys::{
     classify::{
@@ -154,7 +154,10 @@ pub mod prelude {
 /// Paths the derive expands to; not part of the API.
 #[doc(hidden)]
 pub mod __private {
-    pub use yanet_shm::shm::{MAX_ALIGN, ShmLayout};
+    pub use yanet_shm::{
+        shm::{MAX_ALIGN, ShmLayout},
+        unit::{Align, Alignment},
+    };
     pub use yanet_sys::cp::{Build, FfiRecord, MemoryContext, Owner, Partial, Refusal};
 }
 
@@ -290,38 +293,103 @@ mod doctests {
     /// ```
     struct PerWorkerSlicePlainAccepted;
 
-    /// An optional value the tag word would pad, one not of whole words, is
-    /// no layout type: a configuration holding one does not type-check.
-    ///
-    /// ```compile_fail,E0277
-    /// use yanet_sdk::{ShmLayout, ShmOption};
-    ///
-    /// #[derive(ShmLayout)]
-    /// #[repr(C)]
-    /// struct Config {
-    ///     value: ShmOption<u32>,
-    /// }
-    /// ```
-    struct PaddedOptionRefused;
-
-    /// An optional value of whole words is a layout type, the accepted twin of
-    /// the refusal above.
+    /// An optional value of any layout type is a layout type: a derived struct
+    /// aligned to 4 and one aligned to 64 follow their tag with no padding.
     ///
     /// ```
     /// use yanet_sdk::{ShmLayout, ShmOption};
     ///
     /// #[derive(ShmLayout)]
     /// #[repr(C)]
+    /// struct Narrow {
+    ///     value: u32,
+    /// }
+    ///
+    /// #[derive(ShmLayout)]
+    /// #[repr(C, align(64))]
+    /// struct Line {
+    ///     words: [u64; 8],
+    /// }
+    ///
+    /// #[derive(ShmLayout)]
+    /// #[repr(C)]
     /// struct Config {
-    ///     value: ShmOption<[u64; 2]>,
+    ///     line: ShmOption<Line>,
+    ///     narrow: [ShmOption<Narrow>; 8],
     /// }
     /// ```
-    struct UnpaddedOptionAccepted;
+    struct AlignedOptionsAccepted;
 
-    /// A caller's replacement alignment limit cannot admit over-aligned
-    /// storage.
+    /// A struct linking to its own type through an optional edge is a layout
+    /// type: the edge's alignment does not depend on its target.
+    ///
+    /// ```
+    /// use yanet_sdk::{ShmBox, ShmLayout, ShmOption};
+    ///
+    /// #[derive(ShmLayout)]
+    /// #[repr(C)]
+    /// struct Node {
+    ///     value: u64,
+    ///     next: ShmOption<ShmBox<Node>>,
+    /// }
+    /// ```
+    struct RecursiveOptionAccepted;
+
+    /// Two structs linking to each other through optional edges are layout
+    /// types: no edge's alignment depends on its target.
+    ///
+    /// ```
+    /// use yanet_sdk::{ShmBox, ShmLayout, ShmOption};
+    ///
+    /// #[derive(ShmLayout)]
+    /// #[repr(C)]
+    /// struct Even {
+    ///     value: u64,
+    ///     next: ShmOption<ShmBox<Odd>>,
+    /// }
+    ///
+    /// #[derive(ShmLayout)]
+    /// #[repr(C)]
+    /// struct Odd {
+    ///     value: u64,
+    ///     next: ShmOption<ShmBox<Even>>,
+    /// }
+    /// ```
+    struct MutuallyRecursiveOptionsAccepted;
+
+    /// An option of a value whose hand-written layout names a unit other than
+    /// that of its alignment is refused where it is read.
     ///
     /// ```compile_fail,E0080
+    /// use yanet_sdk::{
+    ///     ShmLayout, ShmOption,
+    ///     __private::{Align, Alignment},
+    /// };
+    ///
+    /// #[repr(C)]
+    /// struct Word(u64);
+    ///
+    /// // SAFETY: not sound, on purpose: the unit is narrower than the
+    /// // alignment.
+    /// unsafe impl ShmLayout for Word {
+    ///     type AlignUnit = <Align<4> as Alignment>::Unit;
+    /// }
+    ///
+    /// fn read(option: &ShmOption<Word>) -> Option<u64> {
+    ///     option.get().map(|word| word.0)
+    /// }
+    ///
+    /// fn main() {
+    ///     let read: fn(&ShmOption<Word>) -> Option<u64> = read;
+    ///     println!("{:p}", read);
+    /// }
+    /// ```
+    struct MisalignedUnitRefused;
+
+    /// A caller's replacement alignment limit cannot admit over-aligned
+    /// storage: no alignment unit is wider than 64.
+    ///
+    /// ```compile_fail,E0277
     /// #![forbid(unsafe_code)]
     /// extern crate self as yanet_sdk;
     /// extern crate yanet_sdk as sdk_real;
