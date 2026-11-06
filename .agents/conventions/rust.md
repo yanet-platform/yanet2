@@ -27,6 +27,7 @@ Loaded by path in Claude Code and on demand elsewhere, for the agent writing or 
 - **Comments**: follow `.agents/conventions/comments.md` (brief + blank + detailed), for both `///`/`//!` doc comments and plain `//`. `.rustfmt.toml`'s `wrap_comments` reflows any line past `comment_width` (80 columns) on `cargo +nightly-2026-10-22 fmt`, so keep each line within that width and author the blank-line separator so a reflow never merges it away. Place a comment only where the item is not self-explanatory.
 - **No infallible `TryFrom`**: replace with `From`, or remove the impl if the call site is trivially inlinable.
 - **`assert_eq!` order**: expected first, actual second: `assert_eq!(expected, actual)`.
+- **`assert_matches!` for shapes**: in new or touched tests, assert a variant with `assert_matches!(result, Err(Error::Parse { .. }))`, not `assert!(result.is_err())` or `assert!(matches!(…))`: a failure prints the value, and the pattern pins the error kind rather than any error (`Err(_)` when the error type has no variant to name). The macro is not in the prelude: `use core::assert_matches;`.
 - **Style**: prefer shadowing to `_str`, destructure `self` rather than `self.0`, put bounds in `where`, and import types directly.
 - **Struct literals**: follow declaration order, including generated protos; rustfmt/clippy do not check this.
 - **Tests**: follow `.agents/conventions/tests.md` (naming `fn test_<what_to_test>_<case>`, one-brief `verifies that` doc comment, self-describing `#[case]` names). Reference: `modules/pdump/cli/src/printer.rs`.
