@@ -3,6 +3,7 @@ package xcfg
 import (
 	"errors"
 	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -408,4 +409,62 @@ func Test_Load_LineErrorUnwrapsFromPathError(t *testing.T) {
 	lineErr, ok := errors.AsType[*LineError](pe)
 	require.True(t, ok)
 	require.Equal(t, 5, lineErr.Line)
+}
+
+// Test_LoadConfig_IncludesBeforeEnvironment verifies that partial files form
+// one validated configuration, with includes and then environment winning.
+func Test_LoadConfig_IncludesBeforeEnvironment(t *testing.T) {
+	type Server struct {
+		Name NonEmptyString `yaml:"name"`
+		Addr NonEmptyString `yaml:"addr"`
+	}
+	type Config struct {
+		Inner  customUnmarshalInner `yaml:"inner"`
+		Server Server               `yaml:"server"`
+	}
+	directory := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(directory, "shared.yaml"), []byte(`
+inner: {addr: shared}
+server: {name: shared, addr: shared}
+`), 0o600))
+	path := filepath.Join(directory, "main.yaml")
+	require.NoError(t, os.WriteFile(path, []byte(`
+include: [shared.yaml]
+server: {name: main, addr: main}
+`), 0o600))
+	t.Setenv("YANET_SERVER_ADDR", "environment")
+	config, err := LoadConfig[Config](path, WithKnownFields(), WithEnv())
+	require.NoError(t, err)
+	require.Equal(t, "shared", config.Inner.Addr.Unwrap())
+	require.Equal(t, "shared", config.Server.Name.Unwrap())
+	require.Equal(t, "environment", config.Server.Addr.Unwrap())
+}
+
+// Test_LoadConfig_IncludeMountedDirectories verifies that projected YAML keys
+// are read once, hidden generations are skipped and lists are replaced.
+func Test_LoadConfig_IncludeMountedDirectories(t *testing.T) {
+	type Config struct {
+		Name  string   `yaml:"name"`
+		Items []string `yaml:"items"`
+	}
+	directory := t.TempDir()
+	mount := filepath.Join(directory, "conf.d", "20-transport")
+	generation := filepath.Join(mount, "..generation")
+	require.NoError(t, os.MkdirAll(generation, 0o700))
+	require.NoError(t, os.WriteFile(filepath.Join(generation, "transport.yaml"),
+		[]byte("name: mounted\nitems: [new]\n"), 0o600))
+	require.NoError(t, os.Symlink("..generation", filepath.Join(mount, "..data")))
+	require.NoError(t, os.Symlink("..data/transport.yaml", filepath.Join(mount, "transport.yaml")))
+	require.NoError(t, os.Symlink("..data/optional.yaml", filepath.Join(mount, "optional.yaml")))
+	base := filepath.Join(directory, "conf.d", "10-base")
+	require.NoError(t, os.MkdirAll(base, 0o700))
+	require.NoError(t, os.WriteFile(filepath.Join(base, "config.yml"),
+		[]byte("name: base\nitems: [old, removed]\n"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(mount, ".ignored.yaml"), []byte("not: [valid"), 0o600))
+	path := filepath.Join(directory, "main.yaml")
+	require.NoError(t, os.WriteFile(path, []byte("include: [conf.d]\n"), 0o600))
+	config, err := LoadConfig[Config](path, WithKnownFields())
+	require.NoError(t, err)
+	require.Equal(t, "mounted", config.Name)
+	require.Equal(t, []string{"new"}, config.Items)
 }

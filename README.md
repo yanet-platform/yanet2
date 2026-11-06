@@ -55,6 +55,11 @@ YANET employs a multi-language approach to leverage the strengths of different p
 - **Protocol Buffers** - Efficient binary serialization format. Protobuf API compatibility policy: see [docs/proto-compatibility.md](docs/proto-compatibility.md).
 - **Meson** - Build system for core components.
 
+## Configuration
+
+YAML configurations support [file and directory includes](docs/configuration-includes.md)
+for separately mounted functional, endpoint and TLS settings.
+
 ## 🔧 Building & Requirements
 
 ### System Requirements

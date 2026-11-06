@@ -51,3 +51,17 @@ func Test_LoadRequest_RejectsUnknownKey(t *testing.T) {
 	require.ErrorContains(t, err, "failed to parse module config")
 	require.ErrorContains(t, err, `unknown object member name "config"`)
 }
+
+// Test_LoadRequest_ComposesIncludes verifies that module requests retain
+// included payloads while the declaring file supplies the object name.
+func Test_LoadRequest_ComposesIncludes(t *testing.T) {
+	path := writeModuleConfig(t, "include: [payload.yaml]\nname: decap0\n")
+	fragment := filepath.Join(filepath.Dir(path), "payload.yaml")
+	require.NoError(t, os.WriteFile(fragment, []byte("prefixes4: [10.0.0.0/8]\n"), 0o600))
+	request, err := operator.LoadRequest(decapUpdateMethod, path)
+	require.NoError(t, err)
+	decap := request.(*decappb.UpdateConfigRequest)
+	require.Equal(t, "decap0", decap.GetName())
+	require.Len(t, decap.GetPrefixes4(), 1)
+	require.Equal(t, "10.0.0.0/8", decap.GetPrefixes4()[0].AsLogValue())
+}

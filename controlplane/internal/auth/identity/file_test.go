@@ -1,6 +1,8 @@
 package identity_test
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -41,4 +43,24 @@ func Test_IdentityProvider_MissingLoginIsUnsupported(t *testing.T) {
 		Identifier: "subject-42",
 	})
 	require.ErrorIs(t, err, identity.ErrSubjectUnsupported)
+}
+
+// Test_IdentityProvider_Includes verifies that composed identity data is
+// available through lookup only while its optional source is present.
+func Test_IdentityProvider_Includes(t *testing.T) {
+	directory := t.TempDir()
+	fragment := filepath.Join(directory, "users.yaml")
+	require.NoError(t, os.WriteFile(fragment, []byte("identities:\n  - username: alice\n    groups: [operators]\n"), 0o600))
+	path := filepath.Join(directory, "main.yaml")
+	require.NoError(t, os.WriteFile(path, []byte("include: [users.yaml]\n"), 0o600))
+	provider, err := identity.NewIdentityProviderFromFile(path)
+	require.NoError(t, err)
+	resolved, err := provider.ResolveIdentity(t.Context(), core.Subject{Login: "alice"})
+	require.NoError(t, err)
+	require.Equal(t, []string{"operators"}, resolved.Groups)
+	require.NoError(t, os.Remove(fragment))
+	provider, err = identity.NewIdentityProviderFromFile(path)
+	require.NoError(t, err)
+	_, err = provider.ResolveIdentity(t.Context(), core.Subject{Login: "alice"})
+	require.ErrorIs(t, err, identity.ErrIdentityNotFound)
 }

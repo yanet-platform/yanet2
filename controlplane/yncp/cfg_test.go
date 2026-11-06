@@ -1,14 +1,79 @@
 package yncp_test
 
 import (
+	"fmt"
 	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/yanet-platform/yanet2/common/go/testutils/tlscert"
 	"github.com/yanet-platform/yanet2/common/go/xcfg"
+	x509auth "github.com/yanet-platform/yanet2/controlplane/internal/auth/x509"
 	"github.com/yanet-platform/yanet2/controlplane/yncp"
 )
+
+// Test_Config_IncludedListenersAndClientTrust verifies that composition
+// replaces generated plaintext listeners and preserves client trust settings.
+func Test_Config_IncludedListenersAndClientTrust(t *testing.T) {
+	certificateAuthority := tlscert.NewCA(t)
+	directory := t.TempDir()
+	fragment := fmt.Sprintf(`gateway:
+  server:
+    grpc:
+      endpoint: ""
+      tls:
+        endpoint: "[::1]:8443"
+        key_pairs:
+          - type: file
+            config:
+              cert_file: /pki/server.pem
+              key_file: /pki/server-key.pem
+    http:
+      endpoint: ""
+      tls:
+        endpoint: "[::1]:9443"
+        key_pairs:
+          - type: file
+            config:
+              cert_file: /pki/server.pem
+              key_file: /pki/server-key.pem
+  auth:
+    mode: enabled
+    authenticators:
+      - type: x509
+        config:
+          ca_sources: [%q]
+`, certificateAuthority.BundleFile())
+	require.NoError(t, os.WriteFile(filepath.Join(directory, "transport.yaml"), []byte(fragment), 0o600))
+	path := filepath.Join(directory, "main.yaml")
+	require.NoError(t, os.WriteFile(path, []byte(`include: [transport.yaml]
+gateway:
+  instance_id: 0
+  server:
+    grpc: {endpoint: '[::]:8080'}
+    http: {endpoint: '[::]:8081'}
+`), 0o600))
+	config, err := xcfg.LoadConfig[yncp.Config](path, xcfg.WithKnownFields())
+	require.NoError(t, err)
+	require.NoError(t, config.Gateway.InstanceID.Validate())
+	require.NotNil(t, config.Gateway.Server.GRPC)
+	require.Empty(t, config.Gateway.Server.GRPC.Endpoint)
+	require.NotNil(t, config.Gateway.Server.GRPC.TLS)
+	require.Equal(t, "[::1]:8443", config.Gateway.Server.GRPC.TLS.Endpoint.Unwrap())
+	require.Len(t, config.Gateway.Server.GRPC.TLS.KeyPairs, 1)
+	require.NotNil(t, config.Gateway.Server.HTTP)
+	require.Empty(t, config.Gateway.Server.HTTP.Endpoint)
+	require.NotNil(t, config.Gateway.Server.HTTP.TLS)
+	require.Equal(t, "[::1]:9443", config.Gateway.Server.HTTP.TLS.Endpoint.Unwrap())
+	require.Len(t, config.Gateway.Auth.Authenticators, 1)
+	settings := &config.Gateway.Auth.Authenticators[0].Config
+	authenticator, err := x509auth.NewFromConfig(settings)
+	require.NoError(t, err)
+	t.Cleanup(authenticator.Close)
+	require.True(t, certificateAuthority.Pool().Equal(authenticator.ClientCAs()))
+}
 
 // Test_ShippedDefaultConfig_NoUnknownKeys guards the shipped default config
 // against a key that matches no field in yncp.Config, including one nested

@@ -3,11 +3,11 @@ package identity
 import (
 	"context"
 	"fmt"
-	"os"
 
 	"gopkg.in/yaml.v3"
 
 	"github.com/yanet-platform/yanet2/common/go/rcucache"
+	"github.com/yanet-platform/yanet2/common/go/xcfg"
 	"github.com/yanet-platform/yanet2/controlplane/internal/auth/core"
 )
 
@@ -62,7 +62,7 @@ func (m *IdentityProvider) ResolveIdentity(
 
 // loadIdentitiesFile reads and parses the identities YAML file into a map.
 func loadIdentitiesFile(path string) (map[string]Identity, error) {
-	buf, err := os.ReadFile(path)
+	buf, err := xcfg.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read file: %w", err)
 	}
