@@ -494,7 +494,8 @@ fn test_packet_reports_the_parsers_headers() {
 }
 
 /// verifies that the declared protocol is the low byte of the transport
-/// tag and that the unavailable mark, bit 8, is not part of it.
+/// tag and that the unavailable mark, bit 8, is not part of it, for a taken
+/// packet and a peeked one alike.
 #[test]
 fn test_transport_protocol_masks_the_unavailable_mark() {
     let mark = bindings::PACKET_TRANSPORT_HEADER_UNAVAILABLE as u16;
@@ -505,8 +506,21 @@ fn test_transport_protocol_masks_the_unavailable_mark() {
         (6, 6, true),
     ] {
         let mut frame = Frame::new(headers(0x0800, tag, 34), 0, &[0; 60], 0);
-        let packet = frame.packet();
+        let mut front = bindings::packet_front::default();
+        // SAFETY: the front is this test's and the packet is linked and on
+        // no list.
+        unsafe { push(&raw mut front.input, frame.link()) };
+        // SAFETY: the front is this test's; the batch reads only its front,
+        // and the context and worker it is given are never read.
+        let mut batch = unsafe { Batch::new(NonNull::from(&mut front), NonNull::dangling(), NonNull::dangling()) };
 
+        let peeked = batch
+            .peek()
+            .map(|view| (view.transport_protocol(), view.transport_header_available()))
+            .collect::<Vec<_>>();
+        let packet = batch.next().expect("the input packet");
+
+        assert_eq!(vec![(protocol, available)], peeked, "tag {tag:#x}");
         assert_eq!(
             (protocol, available),
             (packet.transport_protocol(), packet.transport_header_available()),
