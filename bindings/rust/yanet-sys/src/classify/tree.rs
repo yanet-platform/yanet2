@@ -137,7 +137,7 @@ pub struct Join<L, R> {
 
 /// The first rule each pair of classes of two classifiers matches.
 ///
-/// Joined by [`Scope::compile_rules`](crate::cp::Scope::compile_rules).
+/// Joined by [`Scope::branch_rules`](crate::cp::Scope::branch_rules).
 #[repr(C)]
 pub struct Rules<L, R> {
     table: RuleTable,
@@ -200,7 +200,9 @@ impl<L: Node, R: Node> Rules<L, R> {
     ///
     /// Classifies the items a burst of [`BURST`] at a time, each stage over
     /// the whole burst before the next: the lookups of a stage are
-    /// independent, so their reads of the tables overlap.
+    /// independent, so their reads of the tables overlap. The key of an item
+    /// is taken once per attribute of the tree, so it should be a cheap read
+    /// of fields already parsed.
     ///
     /// # Panics
     ///
