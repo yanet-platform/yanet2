@@ -17,7 +17,7 @@ use core::{
 use super::{Build, BuildError, Kind, MemoryContext, Owned, Owner, Refusal, Scope, refused};
 use crate::{
     bindings,
-    classify::{Attribute, Decode, Join, Node, Rules, link},
+    classify::{Attribute, Decode, Join, Node, Paths, Rules, link},
 };
 
 /// The classes of a stage of a composition over a ruleset of build `'b`: the
@@ -76,6 +76,17 @@ fn same_ruleset(sizes: &[usize]) -> Result<(), Refusal> {
         [first, rest @ ..] if rest.iter().any(|size| size != first) => Err(Refusal::RuleSetMismatch),
         _ => Ok(()),
     }
+}
+
+/// A path of [`Scope::join_paths`]: the projection of its rules that
+/// restrict a port, which its rule table joins, and of those that do not,
+/// which its rule map decodes, with the names of both in the memory tree.
+#[derive(Debug)]
+pub struct PathRules<'p, R> {
+    pub table: &'p CStr,
+    pub ported: &'p [Option<&'p R>],
+    pub map: &'p CStr,
+    pub plain: &'p [Option<&'p R>],
 }
 
 /// A classifier of a tree a build wrote, with the stage of its classes.
@@ -235,6 +246,88 @@ impl<'b, W: Owner, E: From<BuildError<W::Error>>, K: Kind> Scope<'b, '_, W, E, K
                 unsafe { link(memory, map.addr() + Decode::<N>::EDGE, input) };
             }
             status
+        })
+    }
+
+    /// Joins a core and the ports into the first rule of each path of a
+    /// ruleset, holding both: for each path a projection of its rules that
+    /// restrict a port, which the ports were compiled over, and one of those
+    /// that do not, each named in the memory tree.
+    ///
+    /// A rule is in a projection when its slot is `Some`, whatever it holds.
+    ///
+    /// # Errors
+    ///
+    /// The branches and the projections are over rulesets of different
+    /// sizes, or the memory is exhausted; nothing of the join or the branches
+    /// is left allocated.
+    pub fn join_paths<C: Node, P: Node, R, const N: usize>(
+        self,
+        core: Branch<'b, C, W>,
+        ports: Branch<'b, P, W>,
+        paths: [PathRules<'_, R>; N],
+    ) -> Result<Owned<'b, Paths<C, P, N>, W>, E> {
+        const { assert!(N > 0, "paths of no path") };
+        let count = core.stage.rules as usize;
+        let sizes = paths.iter().flat_map(|path| [path.ported.len(), path.plain.len()]);
+        if ports.stage.rules as usize != count || sizes.into_iter().any(|size| size != count) {
+            return Err(refused::<W, E>(Refusal::RuleSetMismatch));
+        }
+        let memory = self.memory;
+        let (Branch { value: core, stage: core_stage }, Branch { value: ports, stage: ports_stage }) = (core, ports);
+        self.written(|context, node: *mut Paths<C, P, N>| {
+            let root = memory.root();
+            let status = paths.iter().enumerate().try_for_each(|(idx, path)| {
+                let (table, map) = (
+                    Paths::<C, P, N>::table(node.addr(), idx),
+                    Paths::<C, P, N>::map(node.addr(), idx),
+                );
+                // SAFETY: both stages were filled over the rule count of the
+                // projections, whose slots C only tests for null; the table
+                // and the map lie in the zeroed node.
+                let status = unsafe {
+                    match bindings::yanet_sys_classify_join_rules(
+                        context,
+                        path.table.as_ptr(),
+                        core_stage.raw(),
+                        ports_stage.raw(),
+                        path.ported.as_ptr().cast(),
+                        core_stage.rules,
+                        root.ptr(table),
+                    ) {
+                        0 => bindings::yanet_sys_classify_decode(
+                            context,
+                            path.map.as_ptr(),
+                            core_stage.raw(),
+                            path.plain.as_ptr().cast(),
+                            core_stage.rules,
+                            root.ptr(map),
+                        ),
+                        status => status,
+                    }
+                };
+                if status == 0 { Ok(()) } else { Err(status) }
+            });
+            if let Err(status) = status {
+                for path in 0..N {
+                    // SAFETY: each table and map is written whole or left
+                    // zeroed, which C frees as empty.
+                    unsafe {
+                        bindings::yanet_sys_classify_rule_map_free(root.ptr(Paths::<C, P, N>::map(node.addr(), path)));
+                        bindings::yanet_sys_classify_rule_table_free(
+                            root.ptr(Paths::<C, P, N>::table(node.addr(), path)),
+                        );
+                    }
+                }
+                return status;
+            }
+            let (core_edge, ports_edge) = Paths::<C, P, N>::EDGES;
+            // SAFETY: as for a joint.
+            unsafe {
+                link(memory, node.addr() + core_edge, core);
+                link(memory, node.addr() + ports_edge, ports);
+            }
+            0
         })
     }
 
