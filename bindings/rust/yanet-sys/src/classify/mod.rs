@@ -7,7 +7,9 @@
 //! dataplane looks the classes of a batch up attribute by attribute and
 //! through the same joints. Every classifier, joint and decoder is a C object
 //! a build writes in a block of its own, as the field types of this module,
-//! and every lookup is the C one, through the shim compiled into the plugin.
+//! each a mirror of its C struct. Every lookup is a Rust port of the C one
+//! over that layout, as the LPM's is, so a module classifies without a call
+//! into C; the tests hold the ports to the C lookups of the shim.
 //!
 //! The compiles are C the shim compiles in, but the joins and the decode call
 //! the classification library's compiler (`lib/classify/compiler/helper.c`):
@@ -22,15 +24,15 @@
 use core::{
     convert::Infallible,
     marker::PhantomData,
-    mem::{align_of, size_of},
+    mem::{align_of, offset_of, size_of},
     net::Ipv4Addr,
-    ops::Range,
     ptr, slice,
 };
 
 use netip::{Ipv4Network, Ipv6Network};
 use yanet_shm::{
     opaque::Opaque,
+    rel::RelPtr,
     resolve::Resolve,
     shm::{MAX_ALIGN, ShmLayout},
 };
@@ -40,6 +42,7 @@ pub use crate::bindings::{
 };
 use crate::{
     bindings,
+    common::lpm::Lpm,
     cp::{Build, FfiRecord, MemoryContext, Owner, Refusal},
 };
 
@@ -307,29 +310,286 @@ mod sealed {
     impl Sealed for super::Lines<'_> {}
 }
 
-/// The shared-memory C objects of a classification, each opaque and freed by
-/// its C free: a compiled one is written only by its compile, an empty one
-/// also from the parts `()`, as the zeroed object C frees and reads as empty.
-macro_rules! classifiers {
-    ($($(#[$doc:meta])* $name:ident: $raw:ident, $free:ident, $kind:ident;)*) => {$(
-        $(#[$doc])*
-        #[repr(C)]
-        pub struct $name {
-            /// Written by the C build only; the lookups read it from C.
-            _c: Opaque<bindings::$raw>,
-        }
+/// The memory context a C object of the classification allocates its blocks
+/// in, held by offset: C frees it with the object, Rust never follows it.
+type ContextSlot = RelPtr<Opaque<bindings::memory_context>>;
 
+/// C's `struct vline`: a value for each index of a dense domain, in one
+/// block.
+#[repr(C)]
+struct Line {
+    _memory_context: ContextSlot,
+    size: u32,
+    /// The padding of the C layout before the slot of the values.
+    _pad: u32,
+    values: RelPtr<u32>,
+}
+
+/// The rows of C's `struct value_table` and `struct rule_table`: a directory
+/// of offset slots, one per row, each to the block of the row's values.
+#[repr(transparent)]
+struct Rows(RelPtr<RelPtr<u32>>);
+
+/// C's `struct value_table`: a value for each pair of one of its rows and one
+/// of its columns.
+#[repr(C)]
+struct Table {
+    _memory_context: ContextSlot,
+    v_dim: u32,
+    h_dim: u32,
+    values: Rows,
+}
+
+const _: () = {
+    type C = bindings::vline;
+    assert!(size_of::<Line>() == size_of::<C>());
+    assert!(align_of::<Line>() == align_of::<C>());
+    assert!(offset_of!(Line, _memory_context) == offset_of!(C, memory_context));
+    assert!(offset_of!(Line, size) == offset_of!(C, size));
+    assert!(offset_of!(Line, values) == offset_of!(C, values));
+    // The fields leave no padding.
+    assert!(size_of::<Line>() == size_of::<ContextSlot>() + 2 * size_of::<u32>() + size_of::<RelPtr<u32>>());
+};
+
+const _: () = {
+    type C = bindings::value_table;
+    assert!(size_of::<Table>() == size_of::<C>());
+    assert!(align_of::<Table>() == align_of::<C>());
+    assert!(offset_of!(Table, _memory_context) == offset_of!(C, memory_context));
+    assert!(offset_of!(Table, v_dim) == offset_of!(C, v_dim));
+    assert!(offset_of!(Table, h_dim) == offset_of!(C, h_dim));
+    assert!(offset_of!(Table, values) == offset_of!(C, values));
+    // The fields leave no padding.
+    assert!(size_of::<Table>() == size_of::<ContextSlot>() + 2 * size_of::<u32>() + size_of::<Rows>());
+};
+
+// The mirrored fields keep the C types, not only their places.
+const _: fn(&bindings::vline) -> (*mut bindings::memory_context, u32, *mut u32) =
+    |line| (line.memory_context, line.size, line.values);
+const _: fn(&bindings::value_table) -> (*mut bindings::memory_context, u32, u32, *mut *mut u32) =
+    |table| (table.memory_context, table.v_dim, table.h_dim, table.values);
+
+impl Line {
+    /// The value at an index of the line.
+    ///
+    /// # Safety
+    ///
+    /// The index is below the line's size.
+    #[inline(always)]
+    unsafe fn get<'g>(&'g self, cx: &impl Resolve<'g>, idx: u32) -> u32 {
+        debug_assert!(idx < self.size, "index {idx} past a line of {}", self.size);
+        let slot = ptr::from_ref(&self.values).addr();
+        let values: *const u32 = cx.shm_root().rel(slot, self.values.offset());
+        // SAFETY: a line of a classifier is built whole by C, its slot
+        // pointing at its values, and frozen for 'g (`Resolve` contract); the
+        // caller keeps the index inside.
+        unsafe { values.add(idx as usize).read() }
+    }
+
+    /// The value at an index, `None` past the line, as for every index of an
+    /// empty one.
+    #[inline(always)]
+    fn get_checked<'g>(&'g self, cx: &impl Resolve<'g>, idx: u32) -> Option<u32> {
+        // SAFETY: the index is below the size.
+        (idx < self.size).then(|| unsafe { self.get(cx, idx) })
+    }
+}
+
+impl Rows {
+    /// The value at a column of a row.
+    ///
+    /// # Safety
+    ///
+    /// The directory holds the row, and the row the column.
+    #[inline(always)]
+    unsafe fn get<'g>(&'g self, cx: &impl Resolve<'g>, row: u32, column: u32) -> u32 {
+        let Self(directory) = self;
+        let root = cx.shm_root();
+        let slots: *const isize = root.rel(ptr::from_ref(directory).addr(), directory.offset());
+        // SAFETY: the rows of a classifier are built whole by C, an aligned
+        // offset slot per row, and frozen for 'g (`Resolve` contract); the
+        // caller keeps the row inside.
+        let slot = unsafe { slots.add(row as usize) };
+        // SAFETY: as above; the offset is read as integer bits and never as a
+        // pointer.
+        let block: *const u32 = root.rel(slot.addr(), unsafe { slot.read() });
+        // SAFETY: as above, the row's block holds every column; the caller
+        // keeps the column inside.
+        unsafe { block.add(column as usize).read() }
+    }
+}
+
+impl Table {
+    /// The value of a pair inside the table.
+    ///
+    /// # Safety
+    ///
+    /// The row and the column are below the table's counts of them.
+    #[inline(always)]
+    unsafe fn get<'g>(&'g self, cx: &impl Resolve<'g>, row: u32, column: u32) -> u32 {
+        debug_assert!(
+            row < self.v_dim && column < self.h_dim,
+            "pair ({row}, {column}) outside a table of {} by {}",
+            self.v_dim,
+            self.h_dim
+        );
+        // SAFETY: the table's directory holds every row below its count of
+        // rows, each every column below its count of columns.
+        unsafe { self.values.get(cx, row, column) }
+    }
+
+    /// The value of a pair, `None` for a pair outside the table.
+    #[inline(always)]
+    fn get_checked<'g>(&'g self, cx: &impl Resolve<'g>, row: u32, column: u32) -> Option<u32> {
+        // SAFETY: the pair is inside the table.
+        (row < self.v_dim && column < self.h_dim).then(|| unsafe { self.get(cx, row, column) })
+    }
+}
+
+/// The classifier of an IPv4 address: the longest-prefix match of the
+/// address, whose value is its class.
+///
+/// Compiled only with its stage, by
+/// [`Scope::compile`](crate::cp::Scope::compile).
+#[repr(C)]
+pub struct Net4Attr {
+    lpm: Lpm<4>,
+}
+
+/// The classifier of an IPv6 address: a longest-prefix match of each half,
+/// and a table of the regions the low half splits.
+///
+/// The high half's value is the class of the address or, marked, a row of the
+/// table, read at the low half's class. Compiled only with its stage, as
+/// above.
+#[repr(C)]
+pub struct Net6Attr {
+    hi: Lpm<8>,
+    lo: Lpm<8>,
+    comb: Table,
+}
+
+/// The classifier of a port.
+///
+/// Compiled only with its stage, as above.
+#[repr(C)]
+pub struct PortAttr {
+    line: Line,
+}
+
+/// The classifier of a byte of a packet: its protocol number, its TCP flags
+/// or its ICMP type.
+///
+/// Compiled only with its stage, as above.
+#[repr(C)]
+pub struct LineAttr {
+    line: Line,
+}
+
+/// The joint of the classes of two stages, C's `struct value_table`.
+///
+/// Joined only with its stage, by [`Scope::join`](crate::cp::Scope::join).
+#[repr(C)]
+pub struct Joint {
+    table: Table,
+}
+
+/// The first rule each pair of classes of two stages matches.
+///
+/// Joined by [`Scope::join_rules`](crate::cp::Scope::join_rules); the parts
+/// `()` are a table of no rule.
+#[repr(C)]
+pub struct RuleTable {
+    _memory_context: ContextSlot,
+    v_dim: u32,
+    h_dim: u32,
+    /// The row of the rules of each left class, which the left classes of one
+    /// first-match row share.
+    class_map: Line,
+    rows: Rows,
+    _class_count: u32,
+    /// The padding of the C layout after the count of the rows.
+    _pad: u32,
+}
+
+/// The first rule each class of a stage matches.
+///
+/// Decoded by [`Scope::decode`](crate::cp::Scope::decode); the parts `()` are
+/// a map of no rule.
+#[repr(C)]
+pub struct RuleMap {
+    line: Line,
+}
+
+const _: () = {
+    assert!(offset_of!(Net4Attr, lpm) == offset_of!(bindings::classify_attr_net4, lpm));
+    assert!(offset_of!(Net6Attr, hi) == offset_of!(bindings::classify_attr_net6, hi));
+    assert!(offset_of!(Net6Attr, lo) == offset_of!(bindings::classify_attr_net6, lo));
+    assert!(offset_of!(Net6Attr, comb) == offset_of!(bindings::classify_attr_net6, comb));
+    assert!(offset_of!(PortAttr, line) == offset_of!(bindings::classify_attr_port, line));
+    assert!(offset_of!(LineAttr, line) == offset_of!(bindings::classify_attr_line, line));
+    type C = bindings::rule_table;
+    assert!(offset_of!(RuleTable, _memory_context) == offset_of!(C, memory_context));
+    assert!(offset_of!(RuleTable, v_dim) == offset_of!(C, v_dim));
+    assert!(offset_of!(RuleTable, h_dim) == offset_of!(C, h_dim));
+    assert!(offset_of!(RuleTable, class_map) == offset_of!(C, class_map));
+    assert!(offset_of!(RuleTable, rows) == offset_of!(C, rows));
+    assert!(offset_of!(RuleTable, _class_count) == offset_of!(C, class_count));
+    // The fields leave no padding.
+    assert!(size_of::<Net6Attr>() == 2 * size_of::<Lpm<8>>() + size_of::<Table>());
+    assert!(
+        size_of::<RuleTable>()
+            == size_of::<ContextSlot>() + 4 * size_of::<u32>() + size_of::<Line>() + size_of::<Rows>()
+    );
+};
+
+// The mirrored fields keep the C types, not only their places.
+const _: fn(&bindings::classify_attr_net4) -> &bindings::lpm = |attr| &attr.lpm;
+const _: fn(&bindings::classify_attr_net6) -> (&bindings::lpm, &bindings::lpm, &bindings::value_table) =
+    |attr| (&attr.hi, &attr.lo, &attr.comb);
+const _: fn(&bindings::classify_attr_port) -> &bindings::vline = |attr| &attr.line;
+const _: fn(&bindings::classify_attr_line) -> &bindings::vline = |attr| &attr.line;
+#[allow(clippy::type_complexity)]
+const _: fn(
+    &bindings::rule_table,
+) -> (
+    *mut bindings::memory_context,
+    u32,
+    u32,
+    &bindings::vline,
+    *mut *mut u32,
+    u32,
+) = |table| {
+    (
+        table.memory_context,
+        table.v_dim,
+        table.h_dim,
+        &table.class_map,
+        table.rows,
+        table.class_count,
+    )
+};
+
+/// The shared-memory impls of the C objects of a classification.
+///
+/// Each mirrors its C struct and is freed by its C free: a compiled one is
+/// written only by its compile, an empty one also from the parts `()`, as the
+/// zeroed object C frees and reads as empty.
+macro_rules! classifiers {
+    ($($name:ident: $raw:ident, $free:ident, $kind:ident;)*) => {$(
         const _: () = {
             assert!(size_of::<$name>() == size_of::<bindings::$raw>());
             assert!(align_of::<$name>() == align_of::<bindings::$raw>());
             assert!(align_of::<$name>() <= MAX_ALIGN);
         };
 
-        // SAFETY: a `#[repr(C)]` opaque wrapper of the C struct, of its size
-        // and alignment, the alignment within the shared-memory bound. Rust
-        // never reads the bytes, so every pattern is valid, and C rewrites
-        // none of them once the configuration is published. Dropping is a
-        // no-op.
+        // SAFETY: a `#[repr(C)]` mirror of the C struct, of its size and
+        // alignment, the alignment within the shared-memory bound, whose
+        // fields lie at the C offsets and leave no padding (asserted with the
+        // types). Every field is an integer, an offset slot, an LPM or a
+        // mirror of those, so every pattern is valid; once the configuration
+        // is published C rewrites only the memory contexts the LPMs embed,
+        // which are opaque. Dropping is a no-op.
         unsafe impl ShmLayout for $name {}
 
         // SAFETY: the C object is the whole value; the compile, the join or
@@ -368,72 +628,33 @@ macro_rules! classifiers {
 }
 
 classifiers! {
-    /// The classifier of an IPv4 address.
-    ///
-    /// Compiled only with its stage, by
-    /// [`Scope::compile`](crate::cp::Scope::compile).
     Net4Attr: classify_attr_net4, yanet_sys_classify_net4_free, compiled;
-    /// The classifier of an IPv6 address.
-    ///
-    /// Compiled only with its stage, as above.
     Net6Attr: classify_attr_net6, yanet_sys_classify_net6_free, compiled;
-    /// The classifier of a port.
-    ///
-    /// Compiled only with its stage, as above.
     PortAttr: classify_attr_port, yanet_sys_classify_port_free, compiled;
-    /// The classifier of a byte of a packet: its protocol number, its TCP
-    /// flags or its ICMP type.
-    ///
-    /// Compiled only with its stage, as above.
     LineAttr: classify_attr_line, yanet_sys_classify_line_free, compiled;
-    /// The joint of the classes of two stages, C's `struct value_table`.
-    ///
-    /// Joined only with its stage, by [`Scope::join`](crate::cp::Scope::join).
     Joint: value_table, yanet_sys_classify_joint_free, compiled;
-    /// The first rule each pair of classes of two stages matches.
-    ///
-    /// Joined by [`Scope::join_rules`](crate::cp::Scope::join_rules); the
-    /// parts `()` are a table of no rule.
     RuleTable: rule_table, yanet_sys_classify_rule_table_free, empty;
-    /// The first rule each class of a stage matches.
-    ///
-    /// Decoded by [`Scope::decode`](crate::cp::Scope::decode); the parts `()`
-    /// are a map of no rule.
     RuleMap: vline, yanet_sys_classify_rule_map_free, empty;
 }
 
-/// The C object behind a published classifier, with the root's provenance.
-fn raw<'g, T, C>(cx: &impl Resolve<'g>, value: &'g T) -> *const C {
-    cx.shm_root().ptr::<C>(ptr::from_ref(value).addr())
-}
+/// The mark of a value of the high half of an IPv6 classifier that is a row
+/// of its table.
+const ROW_MARK: u32 = bindings::FILTER_NET6_ROW_MARK;
 
-/// The longest run a lookup passes C: what its `uint32_t` count holds.
-const RUN: usize = u32::MAX as usize;
-
-/// The longest run of IPv6 addresses: C offsets an address by its index times
-/// its sixteen bytes in `uint32_t`, which a longer run would wrap.
-const RUN6: usize = RUN / 16;
-
-// The last address of a run starts below 2^32 bytes.
-const _: () = assert!((RUN6 - 1) * 16 <= u32::MAX as usize);
-
-/// Calls `lookup` over the inputs in runs of at most `max`, with the range of
-/// each run and its length; a batch a dataplane hands a module is one run.
+/// The value an LPM of a classifier holds for a key, as C reads it: the
+/// invalid value where no range covers the key, which a compile never leaves.
 #[inline(always)]
-fn runs(len: usize, max: usize, mut lookup: impl FnMut(Range<usize>, u32)) {
-    let mut start = 0;
-    while start < len {
-        let run = (len - start).min(max);
-        // The run fits, as `max` is at most `u32::MAX`.
-        lookup(start..start + run, run as u32);
-        start += run;
-    }
+fn lpm_value<'g, const K: usize>(lpm: &'g Lpm<K>, cx: &impl Resolve<'g>, key: &[u8; K]) -> u32 {
+    lpm.lookup(cx, key).unwrap_or(bindings::LPM_VALUE_INVALID)
 }
 
-// SAFETY (every lookup below): the classifier belongs to the configuration
-// published and frozen for 'g (`Resolve` contract) and was built whole by its
-// C build; C only reads it and the inputs, and writes one output per input of
-// the run, into an output run of the same length.
+/// The high and the low half of an IPv6 address.
+#[inline(always)]
+fn halves(addr: &[u8; 16]) -> (&[u8; 8], &[u8; 8]) {
+    let (hi, lo) = addr.split_at(8);
+    // Each half is eight bytes long.
+    (hi.try_into().unwrap(), lo.try_into().unwrap())
+}
 
 impl Net4Attr {
     /// The class of each address.
@@ -441,20 +662,12 @@ impl Net4Attr {
     /// # Panics
     ///
     /// The classes are fewer than the addresses.
-    #[inline]
+    #[inline(always)]
     pub fn lookup<'g>(&'g self, cx: &impl Resolve<'g>, addrs: &[Addr4], classes: &mut [u32]) {
         let classes = &mut classes[..addrs.len()];
-        runs(addrs.len(), RUN, |run, count| {
-            // SAFETY: see above.
-            unsafe {
-                bindings::yanet_sys_classify_net4_lookup(
-                    raw(cx, self),
-                    addrs[run.clone()].as_ptr().cast(),
-                    classes[run].as_mut_ptr(),
-                    count,
-                );
-            }
-        });
+        for (class, &Addr4(addr)) in classes.iter_mut().zip(addrs) {
+            *class = lpm_value(&self.lpm, cx, &addr.to_ne_bytes());
+        }
     }
 }
 
@@ -464,20 +677,27 @@ impl Net6Attr {
     /// # Panics
     ///
     /// The classes are fewer than the addresses.
-    #[inline]
+    #[inline(always)]
     pub fn lookup<'g>(&'g self, cx: &impl Resolve<'g>, addrs: &[[u8; 16]], classes: &mut [u32]) {
         let classes = &mut classes[..addrs.len()];
-        runs(addrs.len(), RUN6, |run, count| {
-            // SAFETY: see above; the addresses are consecutive bytes.
-            unsafe {
-                bindings::yanet_sys_classify_net6_lookup(
-                    raw(cx, self),
-                    addrs[run.clone()].as_ptr().cast(),
-                    classes[run].as_mut_ptr(),
-                    count,
-                );
-            }
-        });
+        for (class, addr) in classes.iter_mut().zip(addrs) {
+            *class = self.class(cx, addr);
+        }
+    }
+
+    /// The class of an address: the value of its high half, or for a marked
+    /// one the table's value at that row and at the class of the low half.
+    #[inline(always)]
+    fn class<'g>(&'g self, cx: &impl Resolve<'g>, addr: &[u8; 16]) -> u32 {
+        let (hi, lo) = halves(addr);
+        let value = lpm_value(&self.hi, cx, hi);
+        if value & ROW_MARK == 0 {
+            return value;
+        }
+        let column = lpm_value(&self.lo, cx, lo);
+        // SAFETY: the compile marks only rows of the table, whose columns are
+        // the classes of the low half.
+        unsafe { self.comb.get(cx, value & !ROW_MARK, column) }
     }
 }
 
@@ -487,20 +707,13 @@ impl PortAttr {
     /// # Panics
     ///
     /// The classes are fewer than the ports.
-    #[inline]
+    #[inline(always)]
     pub fn lookup<'g>(&'g self, cx: &impl Resolve<'g>, ports: &[u16], classes: &mut [u32]) {
         let classes = &mut classes[..ports.len()];
-        runs(ports.len(), RUN, |run, count| {
-            // SAFETY: see above; the line spans the whole port domain.
-            unsafe {
-                bindings::yanet_sys_classify_port_lookup(
-                    raw(cx, self),
-                    ports[run.clone()].as_ptr(),
-                    classes[run].as_mut_ptr(),
-                    count,
-                );
-            }
-        });
+        for (class, &port) in classes.iter_mut().zip(ports) {
+            // SAFETY: the compile lays the line over the whole port domain.
+            *class = unsafe { self.line.get(cx, u32::from(port)) };
+        }
     }
 }
 
@@ -510,20 +723,13 @@ impl LineAttr {
     /// # Panics
     ///
     /// The classes are fewer than the bytes.
-    #[inline]
+    #[inline(always)]
     pub fn lookup<'g>(&'g self, cx: &impl Resolve<'g>, bytes: &[u8], classes: &mut [u32]) {
         let classes = &mut classes[..bytes.len()];
-        runs(bytes.len(), RUN, |run, count| {
-            // SAFETY: see above; the line spans the whole byte domain.
-            unsafe {
-                bindings::yanet_sys_classify_line_lookup(
-                    raw(cx, self),
-                    bytes[run.clone()].as_ptr(),
-                    classes[run].as_mut_ptr(),
-                    count,
-                );
-            }
-        });
+        for (class, &byte) in classes.iter_mut().zip(bytes) {
+            // SAFETY: the compile lays the line over the whole byte domain.
+            *class = unsafe { self.line.get(cx, u32::from(byte)) };
+        }
     }
 }
 
@@ -534,22 +740,12 @@ impl Joint {
     /// # Panics
     ///
     /// The right classes or the output are fewer than the left classes.
-    #[inline]
+    #[inline(always)]
     pub fn lookup<'g>(&'g self, cx: &impl Resolve<'g>, left: &[u32], right: &[u32], classes: &mut [u32]) {
         let (right, classes) = (&right[..left.len()], &mut classes[..left.len()]);
-        runs(left.len(), RUN, |run, count| {
-            // SAFETY: see above; the shim reads a pair outside the joint as
-            // class zero.
-            unsafe {
-                bindings::yanet_sys_classify_joint_lookup(
-                    raw(cx, self),
-                    left[run.clone()].as_ptr(),
-                    right[run.clone()].as_ptr(),
-                    classes[run].as_mut_ptr(),
-                    count,
-                );
-            }
-        });
+        for ((class, &left), &right) in classes.iter_mut().zip(left).zip(right) {
+            *class = self.table.get_checked(cx, left, right).unwrap_or(0);
+        }
     }
 }
 
@@ -560,22 +756,24 @@ impl RuleTable {
     /// # Panics
     ///
     /// The right classes or the output are fewer than the left classes.
-    #[inline]
+    #[inline(always)]
     pub fn lookup<'g>(&'g self, cx: &impl Resolve<'g>, left: &[u32], right: &[u32], rules: &mut [Rule]) {
         let (right, rules) = (&right[..left.len()], &mut rules[..left.len()]);
-        runs(left.len(), RUN, |run, count| {
-            // SAFETY: see above; the shim reads a pair outside the table as
-            // no rule, and an empty table holds none.
-            unsafe {
-                bindings::yanet_sys_classify_rule_table_lookup(
-                    raw(cx, self),
-                    left[run.clone()].as_ptr(),
-                    right[run.clone()].as_ptr(),
-                    rules[run].as_mut_ptr().cast(),
-                    count,
-                );
-            }
-        });
+        for ((rule, &left), &right) in rules.iter_mut().zip(left).zip(right) {
+            *rule = self.rule(cx, left, right);
+        }
+    }
+
+    /// The first rule of a pair of classes, none for a pair outside the
+    /// table, as for every pair of an empty one.
+    #[inline(always)]
+    fn rule<'g>(&'g self, cx: &impl Resolve<'g>, left: u32, right: u32) -> Rule {
+        if left >= self.v_dim || right >= self.h_dim {
+            return Rule::NONE;
+        }
+        // SAFETY: the class map holds a row for each left class, and each row
+        // a rule for each right class.
+        Rule(unsafe { self.rows.get(cx, self.class_map.get(cx, left), right) })
     }
 }
 
@@ -586,23 +784,17 @@ impl RuleMap {
     /// # Panics
     ///
     /// The output is shorter than the classes.
-    #[inline]
+    #[inline(always)]
     pub fn lookup<'g>(&'g self, cx: &impl Resolve<'g>, classes: &[u32], rules: &mut [Rule]) {
         let rules = &mut rules[..classes.len()];
-        runs(classes.len(), RUN, |run, count| {
-            // SAFETY: see above; the shim reads a class outside the map as no
-            // rule, and an empty map holds none.
-            unsafe {
-                bindings::yanet_sys_classify_resolve(
-                    raw(cx, self),
-                    classes[run.clone()].as_ptr(),
-                    rules[run].as_mut_ptr().cast(),
-                    count,
-                );
-            }
-        });
+        for (rule, &class) in rules.iter_mut().zip(classes) {
+            *rule = self.line.get_checked(cx, class).map_or(Rule::NONE, Rule);
+        }
     }
 }
+
+// The merge of two decodings takes the smaller word as the first match.
+const _: () = assert!(Rule::NONE.0 == u32::MAX);
 
 /// Keeps in each rule the first match of it and the rule of another decoding
 /// of the same packet, as `classify_results_min` does.
@@ -610,46 +802,237 @@ impl RuleMap {
 /// # Panics
 ///
 /// The other rules are fewer than the rules.
-#[inline]
+#[inline(always)]
 pub fn results_min(rules: &mut [Rule], extra: &[Rule]) {
     let extra = &extra[..rules.len()];
-    runs(rules.len(), RUN, |run, count| {
-        // SAFETY: C reads and writes the run of both slices.
-        unsafe {
-            bindings::yanet_sys_classify_results_min(
-                rules[run.clone()].as_mut_ptr().cast(),
-                extra[run].as_ptr().cast(),
-                count,
-            );
-        }
-    });
+    for (Rule(rule), &Rule(extra)) in rules.iter_mut().zip(extra) {
+        // No rule is the largest word, so the first match is the smaller.
+        *rule = (*rule).min(extra);
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    extern crate std;
+    use core::{
+        array,
+        mem::{offset_of, size_of, size_of_val},
+        net::Ipv4Addr,
+    };
 
-    use core::net::Ipv4Addr;
-    use std::{vec, vec::Vec};
+    use yanet_sdk_testing::{BlockArena, View};
 
-    use super::{Addr4, LineRange, Lines, Net4, Net6, Nets4, Nets6, PortRange, Ports, Rule, runs};
-    use crate::cp::Refusal;
+    use super::{
+        Addr4, Joint, LineAttr, LineRange, Lines, Net4, Net6, Net6Attr, Nets4, Nets6, PortRange, Ports, ROW_MARK, Rule,
+        RuleMap, RuleTable,
+    };
+    use crate::{bindings, cp::Refusal};
 
-    /// Collects the runs of an input of the length under a cap.
-    fn collect(len: usize, max: usize) -> Vec<(usize, usize, u32)> {
-        let mut seen = Vec::new();
-        runs(len, max, |run, count| seen.push((run.start, run.end, count)));
-        seen
+    /// Writes a value at an address of a block of the arena.
+    fn put<T>(arena: &'static BlockArena, addr: usize, value: T) {
+        // SAFETY: the tests write aligned values inside blocks of the arena
+        // they allocated, which nothing references yet.
+        unsafe { arena.root().ptr::<T>(addr).write(value) }
     }
 
-    /// verifies that the runs cover the input in order, each at most the cap
-    /// long and its length as its count, and that an empty input makes none.
+    /// The address of a zeroed block of the arena.
+    fn block(arena: &'static BlockArena, size: usize) -> usize {
+        arena.alloc(size).as_ptr().addr()
+    }
+
+    /// Points the offset slot at an address to the target, as C sets an
+    /// offset pointer.
+    fn point(arena: &'static BlockArena, slot: usize, target: usize) {
+        put(arena, slot, target.wrapping_sub(slot) as isize);
+    }
+
+    /// Lays a line of the values out at an address as C does: its size, and
+    /// the slot of a block of the values.
+    fn lay_line(arena: &'static BlockArena, line: usize, values: &[u32]) {
+        let values_at = block(arena, size_of_val(values));
+        for (idx, &value) in values.iter().enumerate() {
+            put(arena, values_at + idx * size_of::<u32>(), value);
+        }
+        put(arena, line + offset_of!(bindings::vline, size), values.len() as u32);
+        point(arena, line + offset_of!(bindings::vline, values), values_at);
+    }
+
+    /// Lays rows of values out behind the slot at an address as C lays out a
+    /// table's: a directory with a slot per row, each to a block of the row.
+    fn lay_rows(arena: &'static BlockArena, slot: usize, rows: &[&[u32]]) {
+        let directory = block(arena, rows.len() * size_of::<isize>());
+        for (idx, row) in rows.iter().enumerate() {
+            let row_at = block(arena, size_of_val(*row));
+            for (column, &value) in row.iter().enumerate() {
+                put(arena, row_at + column * size_of::<u32>(), value);
+            }
+            point(arena, directory + idx * size_of::<isize>(), row_at);
+        }
+        point(arena, slot, directory);
+    }
+
+    /// Lays a table of the rows, all of one length, out at an address as C
+    /// does.
+    fn lay_table(arena: &'static BlockArena, table: usize, rows: &[&[u32]]) {
+        put(
+            arena,
+            table + offset_of!(bindings::value_table, v_dim),
+            rows.len() as u32,
+        );
+        put(
+            arena,
+            table + offset_of!(bindings::value_table, h_dim),
+            rows[0].len() as u32,
+        );
+        lay_rows(arena, table + offset_of!(bindings::value_table, values), rows);
+    }
+
+    /// Lays an LPM out at an address as C does, of one page of leaves: a key
+    /// maps to the value of its first byte.
+    fn lay_lpm(arena: &'static BlockArena, lpm: usize, value: impl Fn(u8) -> u32) {
+        let page = block(arena, 256 * size_of::<u64>());
+        for byte in 0..=u8::MAX {
+            // A leaf stores its value as the C insert does.
+            let leaf = (u64::from(value(byte)) << 1) | u64::from(bindings::LPM_VALUE_FLAG);
+            put(arena, page + usize::from(byte) * size_of::<u64>(), leaf);
+        }
+        let directory = block(arena, size_of::<isize>());
+        point(arena, directory, page);
+        point(arena, lpm + offset_of!(bindings::lpm, pages), directory);
+        put(arena, lpm + offset_of!(bindings::lpm, page_count), 1usize);
+    }
+
     #[test]
-    fn test_runs_cover_the_input_under_the_cap() {
-        assert_eq!(Vec::<(usize, usize, u32)>::new(), collect(0, 4));
-        assert_eq!(vec![(0, 3, 3)], collect(3, 4));
-        assert_eq!(vec![(0, 4, 4)], collect(4, 4));
-        assert_eq!(vec![(0, 4, 4), (4, 8, 4), (8, 10, 2)], collect(10, 4));
+    fn test_line_attr_lookup_reads_the_class_of_each_byte() {
+        let arena = BlockArena::new();
+        let attr = block(arena, size_of::<LineAttr>());
+        let classes: [u32; 256] = array::from_fn(|byte| byte as u32 % 3);
+        lay_line(arena, attr + offset_of!(bindings::classify_attr_line, line), &classes);
+
+        // SAFETY: laid out as C lays it out, and frozen for the test.
+        let (view, attr) = unsafe { (View::new(arena.root()), &*arena.root().ptr::<LineAttr>(attr)) };
+        let mut out = [u32::MAX; 4];
+        attr.lookup(&view, &[0, 4, 128, 255], &mut out);
+        assert_eq!([0, 1, 2, 0], out);
+    }
+
+    /// verifies that a rule map reads the rule of each class it holds, and
+    /// no rule for a class past it, as for any class of an empty map.
+    #[test]
+    fn test_rule_map_lookup_is_no_rule_past_the_map() {
+        let arena = BlockArena::new();
+        let map = block(arena, size_of::<RuleMap>());
+        lay_line(arena, map, &[3, Rule::NONE.0, 1]);
+        let empty = block(arena, size_of::<RuleMap>());
+
+        // SAFETY: laid out as C lays them out, and frozen for the test.
+        let (view, map, empty) = unsafe {
+            let root = arena.root();
+            (
+                View::new(root),
+                &*root.ptr::<RuleMap>(map),
+                &*root.ptr::<RuleMap>(empty),
+            )
+        };
+        let classes = [0, 1, 2, 3, u32::MAX];
+        let (mut rules, mut empty_rules) = ([Rule(7); 5], [Rule(7); 5]);
+        map.lookup(&view, &classes, &mut rules);
+        empty.lookup(&view, &classes, &mut empty_rules);
+        assert_eq!(
+            ([Rule(3), Rule::NONE, Rule(1), Rule::NONE, Rule::NONE], [Rule::NONE; 5]),
+            (rules, empty_rules)
+        );
+    }
+
+    /// verifies that a joint reads the class of each pair inside its table,
+    /// and class zero for a class past either side.
+    #[test]
+    fn test_joint_lookup_is_class_zero_outside_the_table() {
+        let arena = BlockArena::new();
+        let joint = block(arena, size_of::<Joint>());
+        lay_table(arena, joint, &[&[10, 11, 12], &[20, 21, 22]]);
+
+        // SAFETY: laid out as C lays it out, and frozen for the test.
+        let (view, joint) = unsafe { (View::new(arena.root()), &*arena.root().ptr::<Joint>(joint)) };
+        let left = [0, 0, 1, 1, 2, 0, u32::MAX];
+        let right = [0, 2, 1, 2, 0, 3, 0];
+        let mut classes = [u32::MAX; 7];
+        joint.lookup(&view, &left, &right, &mut classes);
+        assert_eq!([10, 12, 21, 22, 0, 0, 0], classes);
+    }
+
+    /// verifies that a rule table reads the rule of a pair from the row its
+    /// left class maps to, and no rule for a pair outside it, as for any
+    /// pair of an empty table.
+    #[test]
+    fn test_rule_table_lookup_reads_the_row_of_the_left_class() {
+        type C = bindings::rule_table;
+        let arena = BlockArena::new();
+        let table = block(arena, size_of::<RuleTable>());
+        put(arena, table + offset_of!(C, v_dim), 3u32);
+        put(arena, table + offset_of!(C, h_dim), 2u32);
+        lay_line(arena, table + offset_of!(C, class_map), &[1, 0, 1]);
+        lay_rows(arena, table + offset_of!(C, rows), &[&[5, Rule::NONE.0], &[2, 4]]);
+        put(arena, table + offset_of!(C, class_count), 2u32);
+        let empty = block(arena, size_of::<RuleTable>());
+
+        // SAFETY: laid out as C lays them out, and frozen for the test.
+        let (view, table, empty) = unsafe {
+            let root = arena.root();
+            (
+                View::new(root),
+                &*root.ptr::<RuleTable>(table),
+                &*root.ptr::<RuleTable>(empty),
+            )
+        };
+        let left = [0, 0, 1, 1, 2, 3, 0];
+        let right = [0, 1, 0, 1, 1, 0, 2];
+        let (mut rules, mut empty_rules) = ([Rule(7); 7], [Rule(7); 7]);
+        table.lookup(&view, &left, &right, &mut rules);
+        empty.lookup(&view, &left, &right, &mut empty_rules);
+        assert_eq!(
+            (
+                [Rule(2), Rule(4), Rule(5), Rule::NONE, Rule(4), Rule::NONE, Rule::NONE],
+                [Rule::NONE; 7]
+            ),
+            (rules, empty_rules)
+        );
+    }
+
+    /// verifies that an IPv6 classifier takes the class of an address from
+    /// its high half, and for a marked high half from its table, at the row
+    /// the mark names and the column of the low half's class.
+    #[test]
+    fn test_net6_attr_lookup_takes_a_marked_row_from_the_table() {
+        type C = bindings::classify_attr_net6;
+        let arena = BlockArena::new();
+        let attr = block(arena, size_of::<Net6Attr>());
+        // High halves from 0x20 are of the second row, the others of class 7.
+        lay_lpm(arena, attr + offset_of!(C, hi), |byte| {
+            if byte == 0x20 { ROW_MARK | 1 } else { 7 }
+        });
+        // Low halves from 0 are of column 0, from 1 of column 2, the others
+        // of column 1.
+        lay_lpm(arena, attr + offset_of!(C, lo), |byte| match byte {
+            0 => 0,
+            1 => 2,
+            _ => 1,
+        });
+        lay_table(arena, attr + offset_of!(C, comb), &[&[30, 31, 32], &[40, 41, 42]]);
+
+        // SAFETY: laid out as C lays it out, and frozen for the test.
+        let (view, attr) = unsafe { (View::new(arena.root()), &*arena.root().ptr::<Net6Attr>(attr)) };
+        let addr = |hi: u8, lo: u8| {
+            let mut addr = [0; 16];
+            (addr[0], addr[8]) = (hi, lo);
+            addr
+        };
+        let mut classes = [u32::MAX; 4];
+        attr.lookup(
+            &view,
+            &[addr(0x21, 1), addr(0x20, 0), addr(0x20, 5), addr(0x20, 1)],
+            &mut classes,
+        );
+        assert_eq!([7, 40, 41, 42], classes);
     }
 
     /// verifies that an IPv4 view takes contiguous masks only, the empty one

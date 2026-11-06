@@ -30,6 +30,7 @@ fn main() {
 
     generate_bindings(&flags, &shim_dir, &out_dir.join("bindings.rs"));
     build_shim(&flags, &shim_dir);
+    build_classify_tests(&flags, &shim_dir);
 
     println!(
         "cargo:rerun-if-changed={}",
@@ -46,30 +47,16 @@ const PACKET_SOURCES: [&str; 3] = [
     "lib/dataplane/packet/packet.c",
 ];
 
-/// Compiles the shims with the flags of the dataplane's C sources, their
-/// optimisation level among them.
-///
-/// The dataplane shim wraps header-inline C routing helpers and the packet
-/// encapsulation routines, whose sources it compiles in; the common shim wraps
-/// the header-inline LPM and memory routines of `common/`; the classify shims
-/// wrap the compiles and the lookups of `lib/classify`, in an object each, so
-/// a plugin pulls only the lookups. They are linked into every module plugin
-/// with hidden visibility, so a plugin exports nothing of them and imports
-/// none of the encapsulation from the host.
-fn build_shim(flags: &CFlags, shim_dir: &Path) {
+/// A C build with the flags of the dataplane's C sources, their optimisation
+/// level among them.
+fn c_build(flags: &CFlags, shim_dir: &Path) -> cc::Build {
     let mut build = cc::Build::new();
     build
         .compiler(&flags.compiler)
-        .file(shim_dir.join("classify_cp_shim.c"))
-        .file(shim_dir.join("classify_dp_shim.c"))
-        .file(shim_dir.join("common_shim.c"))
-        .file(shim_dir.join("dp_shim.c"))
-        .files(PACKET_SOURCES.map(|source| flags.source(source)))
         .include(shim_dir)
         .opt_level_str(flags.opt_level())
         // Not silencing: drops cc-rs's own warning set, so the build's options alone apply.
-        .warnings(false)
-        .flag("-fvisibility=hidden");
+        .warnings(false);
     for arg in flags.header_args().iter().chain(flags.warning_args()) {
         build.flag(arg);
     }
@@ -78,6 +65,28 @@ fn build_shim(flags: &CFlags, shim_dir: &Path) {
             build.flag(arg);
         }
     }
+    build
+}
+
+/// Compiles the shims.
+///
+/// The dataplane shim wraps header-inline C routing helpers and the packet
+/// encapsulation routines, whose sources it compiles in; the common shim wraps
+/// the header-inline LPM and memory routines of `common/`; the classify shims
+/// wrap the compiles and the lookups of `lib/classify`, in an object each: the
+/// builder calls the compiles, and the lookups are what the tests hold the
+/// Rust ports to, so a plugin pulls neither. They are linked into every module
+/// plugin with hidden visibility, so a plugin exports nothing of them and
+/// imports none of the encapsulation from the host.
+fn build_shim(flags: &CFlags, shim_dir: &Path) {
+    let mut build = c_build(flags, shim_dir);
+    build
+        .file(shim_dir.join("classify_cp_shim.c"))
+        .file(shim_dir.join("classify_dp_shim.c"))
+        .file(shim_dir.join("common_shim.c"))
+        .file(shim_dir.join("dp_shim.c"))
+        .files(PACKET_SOURCES.map(|source| flags.source(source)))
+        .flag("-fvisibility=hidden");
     for file in [
         "classify_cp_shim.c",
         "classify_dp_shim.c",
@@ -91,6 +100,23 @@ fn build_shim(flags: &CFlags, shim_dir: &Path) {
         println!("cargo:rerun-if-changed={}", shim_dir.join(file).display());
     }
     build.compile("yanet_sys_shims");
+}
+
+/// Compiles the C the native classify tests build classifiers with: a block
+/// arena and the classification library's compiler.
+///
+/// The compile shim calls the compiler's joins and decode. Cargo is told
+/// nothing of the archive, so only a test that names it links it, and no
+/// plugin or api archive carries it; the shims' build already gives the
+/// linker the directory it lands in.
+fn build_classify_tests(flags: &CFlags, shim_dir: &Path) {
+    let arena = shim_dir.join("tests/classify_arena.c");
+    println!("cargo:rerun-if-changed={}", arena.display());
+    c_build(flags, shim_dir)
+        .file(arena)
+        .file(flags.source("lib/classify/compiler/helper.c"))
+        .cargo_metadata(false)
+        .compile("yanet_sys_classify_tests");
 }
 
 fn generate_bindings(flags: &CFlags, shim_dir: &Path, out: &Path) {
@@ -172,6 +198,8 @@ fn generate_bindings(flags: &CFlags, shim_dir: &Path, out: &Path) {
         .allowlist_var("MEMORY_BLOCK_ALLOCATOR_MAX_SIZE")
         .allowlist_var("PACKET_TRANSPORT_HEADER_UNAVAILABLE")
         .allowlist_var("YANET_SYS_CLASSIFY_.*")
+        // The mark of an IPv6 classifier's value that is a row of its table.
+        .allowlist_var("FILTER_NET6_ROW_MARK")
         .allowlist_var("YANET_SYS_DP_WORKER_IDX_NONE")
         // Reached only behind pointers the SDK never follows, their own bytes
         // never read.

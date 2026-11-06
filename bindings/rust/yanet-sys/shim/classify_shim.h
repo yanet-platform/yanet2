@@ -2,9 +2,10 @@
 //
 // The compile side wraps the attribute compiles, the joins and the decode a
 // module composes its classifier of, and the frees of what they build; the
-// lookup side wraps the batch lookups of the built classifiers. Both are
-// compiled into the shim library with hidden visibility, as the dataplane
-// shim is, in two objects, so a plugin links only the lookups.
+// lookup side wraps the batch lookups of the built classifiers, which the
+// tests hold the Rust lookups to. Both are compiled into the shim library with
+// hidden visibility, as the dataplane shim is, in two objects; a plugin links
+// neither.
 //
 // A rule of an attribute compile is the address of that attribute's view of
 // the rule (a network set, a port or line range set), or NULL for a rule
