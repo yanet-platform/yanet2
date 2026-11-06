@@ -129,9 +129,17 @@ yanet_sys_classify_net4_class(
 	return lpm4_lookup(&attr->lpm, (const uint8_t *)&addr);
 }
 
-// Flattened: the batch lookup of one address is otherwise kept out of line,
-// a call left in the Rust that inlines this.
-__attribute__((flatten)) uint32_t
+// Two LPM walks are past the inliner's budget, so the IPv6 lookup forces its
+// own inlining where its bitcode meets the Rust that calls it, and flattens
+// the batch lookup of one address into itself. gcc, which builds the shim as
+// machine code only, rejects the former on a function of external linkage.
+#ifdef __clang__
+#define YANET_SYS_INLINE_ACROSS __attribute__((always_inline))
+#else
+#define YANET_SYS_INLINE_ACROSS
+#endif
+
+YANET_SYS_INLINE_ACROSS __attribute__((flatten)) uint32_t
 yanet_sys_classify_net6_class(
 	const struct classify_attr_net6 *attr, const uint8_t *addr
 ) {

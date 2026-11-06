@@ -8,6 +8,13 @@
 //! through the same joints. Every classifier, joint and decoder is a C object
 //! a build writes in a block of its own, as the field types of this module,
 //! and every lookup is the C one, through the shim compiled into the plugin.
+//! Those lookups take the classes from the caller, so they check each against
+//! the table it indexes.
+//!
+//! A module may compose the same stages as one tree instead ([`Join`],
+//! [`Rules`], [`Decode`]): each node holds the classifiers whose classes it
+//! reads, so a lookup takes a packet's fields, one key at a time, and reads
+//! every table unchecked.
 //!
 //! The compiles are C the shim compiles in, but the joins and the decode call
 //! the classification library's compiler (`lib/classify/compiler/helper.c`):
