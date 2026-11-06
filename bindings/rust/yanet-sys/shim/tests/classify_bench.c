@@ -101,7 +101,9 @@ yanet_sys_bench_c_run_burst(
 			}
 			classify_joint_lookup(q->nets, src, dst, nets, n);
 			classify_joint_lookup(q->ports, sport, dport, ports, n);
-			classify_combine(q->root, q->rules, nets, ports, rules, n);
+			classify_combine(
+				q->root, q->rules, nets, ports, rules, n
+			);
 			for (uint32_t idx = 0; idx < n; ++idx) {
 				sum += rules[idx];
 			}

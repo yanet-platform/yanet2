@@ -250,8 +250,8 @@ fn acl_keys(rules: &[BenchRule]) -> Vec<Key> {
         .collect()
 }
 
-/// Bytes read to evict the caches: twice the last-level cache of any CPU the
-/// benchmark meets.
+/// Bytes read to evict the caches: at least twice the last-level cache of a
+/// CPU of up to 64 MiB of it, as the benchmark assumes.
 const EVICT_BYTES: usize = 128 << 20;
 
 /// Reads every cache line of the buffer, which pushes the classifier and the
