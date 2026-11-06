@@ -15,8 +15,8 @@
 //!
 //! A module may compose the same stages as one tree instead ([`Join`],
 //! [`Rules`], [`Decode`]): each node holds the classifiers whose classes it
-//! reads, so a lookup takes a packet's fields, one key at a time, and reads
-//! every table unchecked.
+//! reads, so a lookup takes a packet's fields, for one packet or a burst of
+//! them, and reads every table unchecked.
 //!
 //! The compiles are C the shim compiles in, but the joins and the decode call
 //! the classification library's compiler (`lib/classify/compiler/helper.c`):

@@ -1,5 +1,5 @@
 //! The classify query of a Rust module against the inline C query of a C
-//! module, one key per query, over the same classifier.
+//! module, one key or one burst of keys per query, over the same classifier.
 //!
 //! The query is the C modules' shape: two IPv4 addresses and two ports, the
 //! addresses joined, the ports joined, the two joints joined at the root and
@@ -509,10 +509,10 @@ fn tree(owner: &ArenaOwner, rules: &[BenchRule]) -> Built<TreeModule, ArenaOwner
         let dst = scope.compile(c"dst", &slots(&views.dst))?;
         let sport = scope.compile(c"sport", &slots(&views.sports))?;
         let dport = scope.compile(c"dport", &slots(&views.dports))?;
-        let nets = scope.join_branches(c"nets", src, dst)?;
-        let ports = scope.join_branches(c"ports", sport, dport)?;
-        let root = scope.join_branches(c"root", nets, ports)?;
-        scope.decode_branch(c"rules", root, &projection)
+        let nets = scope.join_tree(c"nets", src, dst)?;
+        let ports = scope.join_tree(c"ports", sport, dport)?;
+        let root = scope.join_tree(c"root", nets, ports)?;
+        scope.decode_tree(c"rules", root, &projection)
     })
     .unwrap()
 }

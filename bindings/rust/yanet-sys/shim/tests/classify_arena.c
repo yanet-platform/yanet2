@@ -50,6 +50,13 @@ yanet_sys_test_arena_context(struct yanet_sys_test_arena *arena) {
 	return &arena->context;
 }
 
+// The bytes of the arena no block holds: what a build takes and a release
+// returns, as the allocator gives every block back to its pool.
+size_t
+yanet_sys_test_arena_free_bytes(struct yanet_sys_test_arena *arena) {
+	return block_allocator_free_size(&arena->allocator);
+}
+
 // Opens a memory context over the arena at the given place, as a module
 // header embeds one.
 void

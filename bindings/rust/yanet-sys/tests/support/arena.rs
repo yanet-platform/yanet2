@@ -26,6 +26,7 @@ unsafe extern "C" {
     fn yanet_sys_test_arena_new(size: usize) -> *mut c_void;
     fn yanet_sys_test_arena_base(arena: *mut c_void) -> *mut u8;
     fn yanet_sys_test_arena_context(arena: *mut c_void) -> *mut bindings::memory_context;
+    fn yanet_sys_test_arena_free_bytes(arena: *mut c_void) -> usize;
     fn yanet_sys_test_arena_init_context(
         arena: *mut c_void,
         context: *mut bindings::memory_context,
@@ -64,6 +65,14 @@ impl ArenaOwner {
         // SAFETY: the body of a configuration built in the arena, written
         // whole and never released.
         unsafe { &*self.root.ptr::<M::Config>(addr) }
+    }
+
+    /// The bytes of the arena no block holds, which a release brings back to
+    /// what they were before the build.
+    #[allow(dead_code, reason = "the tests check releases, the benchmark does not")]
+    pub fn free_bytes(&self) -> usize {
+        // SAFETY: a live arena, never freed.
+        unsafe { yanet_sys_test_arena_free_bytes(self.arena) }
     }
 
     /// The memory context over the whole arena, for C objects built outside

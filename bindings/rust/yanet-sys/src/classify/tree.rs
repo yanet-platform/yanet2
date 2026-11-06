@@ -125,7 +125,7 @@ impl Node for LineAttr {
 /// The joint of two classifiers: the class of each pair of their classes.
 ///
 /// Joined only with its stage, by
-/// [`Scope::join_branches`](crate::cp::Scope::join_branches).
+/// [`Scope::join_tree`](crate::cp::Scope::join_tree).
 #[repr(C)]
 pub struct Join<L, R> {
     table: Joint,
@@ -135,7 +135,7 @@ pub struct Join<L, R> {
 
 /// The first rule each pair of classes of two classifiers matches.
 ///
-/// Joined by [`Scope::branch_rules`](crate::cp::Scope::branch_rules).
+/// Joined by [`Scope::join_rules_tree`](crate::cp::Scope::join_rules_tree).
 #[repr(C)]
 pub struct Rules<L, R> {
     table: RuleTable,
@@ -145,7 +145,7 @@ pub struct Rules<L, R> {
 
 /// The first rule each class of a classifier matches.
 ///
-/// Decoded by [`Scope::decode_branch`](crate::cp::Scope::decode_branch).
+/// Decoded by [`Scope::decode_tree`](crate::cp::Scope::decode_tree).
 #[repr(C)]
 pub struct Decode<N> {
     map: RuleMap,
@@ -368,8 +368,9 @@ macro_rules! holders {
             }
 
             unsafe fn free<W: Owner>(addr: usize, memory: &MemoryContext<'_, W>) {
-                // SAFETY: the node was written whole (caller contract), its C
-                // object at its start.
+                // SAFETY: the node holds a value (caller contract), which only
+                // the scope's joins and decodes write, whole: the C object at
+                // its start, then the edges.
                 unsafe {
                     bindings::$free(memory.root().ptr::<$raw>(addr + offset_of!(Self, $table)));
                     $(<ShmBox<$ty> as Build>::free::<W>(addr + offset_of!(Self, $edge), memory);)*

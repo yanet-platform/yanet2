@@ -80,7 +80,7 @@ fn same_ruleset(sizes: &[usize]) -> Result<(), Refusal> {
 
 /// A classifier or a joint a build wrote, with the stage of its classes.
 ///
-/// Made by [`Scope::compile`], [`Scope::join`] and [`Scope::join_branches`]
+/// Made by [`Scope::compile`], [`Scope::join`] and [`Scope::join_tree`]
 /// only. The joins and the decodes read the stage: those of a tree take the
 /// branch whole, so a node always reads the classes of the classifiers it
 /// holds; the others borrow it, and [`Branch::into_owned`] then hands the
@@ -122,7 +122,7 @@ impl<'b, W: Owner, E: From<BuildError<W::Error>>, K: Kind> Scope<'b, '_, W, E, K
     ///
     /// The branches are over rulesets of different sizes, or the memory is
     /// exhausted; nothing of the join or the branches is left allocated.
-    pub fn join_branches<L: Node, R: Node>(
+    pub fn join_tree<L: Node, R: Node>(
         self,
         name: &CStr,
         left: Branch<'b, L, W>,
@@ -166,8 +166,9 @@ impl<'b, W: Owner, E: From<BuildError<W::Error>>, K: Kind> Scope<'b, '_, W, E, K
     ///
     /// # Errors
     ///
-    /// As for [`Scope::join_rules`].
-    pub fn branch_rules<L: Node, R: Node, P>(
+    /// As for [`Scope::join_rules`]; the branches are freed with whatever
+    /// the join left allocated.
+    pub fn join_rules_tree<L: Node, R: Node, P>(
         self,
         name: &CStr,
         left: Branch<'b, L, W>,
@@ -212,8 +213,9 @@ impl<'b, W: Owner, E: From<BuildError<W::Error>>, K: Kind> Scope<'b, '_, W, E, K
     ///
     /// # Errors
     ///
-    /// As for [`Scope::decode`].
-    pub fn decode_branch<N: Node, P>(
+    /// As for [`Scope::decode`]; the branch is freed with whatever the decode
+    /// left allocated.
+    pub fn decode_tree<N: Node, P>(
         self,
         name: &CStr,
         input: Branch<'b, N, W>,
