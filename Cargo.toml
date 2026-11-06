@@ -2,6 +2,12 @@
 
 resolver = "2"
 
+# The Rust module SDK is a workspace of its own. Excluding it keeps cargo from
+# taking this workspace as the root of its crates when a consumer reaches them
+# by path through a crate of this one, which fails on the SDK's inherited
+# fields.
+exclude = ["bindings/rust"]
+
 # Module CLI crates are listed explicitly rather than globbed.
 #
 # A glob would also match out-of-tree (gitignored) modules, and any
