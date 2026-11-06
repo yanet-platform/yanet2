@@ -925,6 +925,19 @@ impl<'b> PacketView<'b> {
         unsafe { (*self.raw.as_ptr()).transport_header.type_ }
     }
 
+    /// Declared transport protocol, as [`Packet::transport_protocol`].
+    #[inline(always)]
+    pub fn transport_protocol(&self) -> u8 {
+        (self.transport_type() & 0xff) as u8
+    }
+
+    /// Reports whether the parser left the unavailable mark off the
+    /// transport header, as [`Packet::transport_header_available`].
+    #[inline(always)]
+    pub fn transport_header_available(&self) -> bool {
+        u32::from(self.transport_type()) & bindings::PACKET_TRANSPORT_HEADER_UNAVAILABLE == 0
+    }
+
     /// Offset of the packet's fragment in its datagram, as
     /// [`Packet::fragment_offset`].
     #[inline(always)]
