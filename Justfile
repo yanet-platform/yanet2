@@ -30,7 +30,7 @@ build-debug:
 
 # Setup build environment with optional coverage
 setup COVERAGE_MODE="false":
-    @make setup MESON_SETUP_FLAGS="-Dbuildtype=debug -Db_sanitize=none -Dfuzzing=disabled -Ddataplane_only=false -Db_coverage={{ COVERAGE_MODE }}"
+    @make setup MESON_SETUP_FLAGS="-Dbuildtype=debug -Db_sanitize=none -Db_lundef=true -Dfuzzing=disabled -Ddataplane_only=false -Db_coverage={{ COVERAGE_MODE }}"
 
 # === Test Targets ===
 
