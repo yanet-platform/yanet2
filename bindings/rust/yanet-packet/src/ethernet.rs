@@ -44,14 +44,12 @@ impl EthernetHeader {
         split_header_mut(buf)
     }
 
-    /// Destination MAC address: the receiving interface on this link,
-    /// rewritten at every hop.
+    /// Destination MAC address, a group one for broadcast and multicast.
     pub fn dst(&self) -> MacAddr {
         MacAddr::from(self.dst)
     }
 
-    /// Source MAC address: the interface that last sent the frame on this
-    /// link.
+    /// Source MAC address, an individual one in any valid frame.
     pub fn src(&self) -> MacAddr {
         MacAddr::from(self.src)
     }

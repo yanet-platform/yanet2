@@ -88,14 +88,14 @@ impl Ipv4Header {
         self.checksum.get()
     }
 
-    /// Source address, as the packet carries it now; unlike the MAC
-    /// addresses, it is not rewritten at every hop.
+    /// Source address as the packet carries it now; after NAT or
+    /// encapsulation it may differ from the original sender's.
     pub fn src(&self) -> Ipv4Addr {
         Ipv4Addr::from(self.src)
     }
 
-    /// Destination address, as the packet carries it now; unlike the MAC
-    /// addresses, it is not rewritten at every hop.
+    /// Destination address as the packet carries it now; after NAT or
+    /// encapsulation it may differ from the original receiver's.
     pub fn dst(&self) -> Ipv4Addr {
         Ipv4Addr::from(self.dst)
     }
