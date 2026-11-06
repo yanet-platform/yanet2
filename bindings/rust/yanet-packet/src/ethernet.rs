@@ -7,8 +7,7 @@ pub const ETHERTYPE_IPV4: u16 = 0x0800;
 pub const ETHERTYPE_IPV6: u16 = 0x86dd;
 /// Tag protocol identifier of an 802.1Q customer VLAN tag.
 pub const ETHERTYPE_VLAN: u16 = 0x8100;
-/// Tag protocol identifier of an 802.1ad service VLAN tag, the outer one
-/// of a double-tagged frame.
+/// Tag protocol identifier of an 802.1ad service VLAN tag.
 pub const ETHERTYPE_QINQ: u16 = 0x88a8;
 
 /// Ethernet II header.
