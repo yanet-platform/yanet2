@@ -3,6 +3,7 @@ package example_test
 import (
 	"errors"
 	"fmt"
+	"sync"
 	"sync/atomic"
 	"testing"
 
@@ -25,13 +26,30 @@ func (m *mockModuleHandle) Free() error {
 	return nil
 }
 
-type mockBackend struct{}
+// mockBackend mirrors the backend contract: a name the dataplane has
+// nothing under fails the delete with ffi.ErrNotFound.
+type mockBackend struct {
+	mu        sync.Mutex
+	published map[string]bool
+}
 
 func (m *mockBackend) UpdateModule(name string) (example.ModuleHandle, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.published == nil {
+		m.published = map[string]bool{}
+	}
+	m.published[name] = true
 	return &mockModuleHandle{}, nil
 }
 
 func (m *mockBackend) DeleteModule(name string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if !m.published[name] {
+		return ffi.ErrNotFound
+	}
+	delete(m.published, name)
 	return nil
 }
 

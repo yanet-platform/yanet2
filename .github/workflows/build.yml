@@ -37,6 +37,9 @@ on:
       - ".github/actions/protoc/**"
       - ".github/actions/cli-inputs/**"
       - "tests/functional/**"
+      # The whole module SDK surface, so its metadata and the reference
+      # module's build files reach the sdk-example gate.
+      - "sdk/**"
       # The Rust module SDK is a workspace of its own that neither meson nor
       # the CLI builds; its own workflows check it.
       #
@@ -79,6 +82,9 @@ on:
       - ".github/actions/protoc/**"
       - ".github/actions/cli-inputs/**"
       - "tests/functional/**"
+      # The whole module SDK surface, so its metadata and the reference
+      # module's build files reach the sdk-example gate.
+      - "sdk/**"
       # The Rust module SDK is a workspace of its own that neither meson nor
       # the CLI builds; its own workflows check it.
       #
@@ -701,7 +707,7 @@ jobs:
     runs-on: ubuntu-24.04
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           submodules: true
 
@@ -714,12 +720,12 @@ jobs:
         uses: dtolnay/rust-toolchain@d124f86f28ff42855784ff3319f48ac182c248f8 # 1.99.1
 
       - name: Cache rust
-        uses: Swatinem/rust-cache@v2.9.2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           shared-key: sdk-example
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
-      - uses: hendrikmuhs/ccache-action@v1.2.23
+      - uses: hendrikmuhs/ccache-action@f09c25b45002a07be2955cbe52e8cee55643f89d # v1.2.24
         name: ccache
         with:
           key: ${{ runner.os }}-sdk-example-cache
@@ -727,7 +733,7 @@ jobs:
           verbose: 2
           save: ${{ github.ref == 'refs/heads/main' }}
 
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: "1.27.x"
           cache: false

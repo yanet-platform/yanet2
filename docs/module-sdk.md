@@ -19,12 +19,14 @@ version.
 ```sh
 # once, in the yanet2 checkout (this is the SDK):
 git submodule update --init
-meson setup build && meson compile -C build   # `make sdk` after `meson setup build`
+make sdk                                     # or: meson setup build && meson compile -C build
 
 # per module build, in the module's own tree:
 cp -r sdk/example ~/my-module && cd ~/my-module
-# adjust: module name in dataplane/api sources, go.mod module path,
-# the go.mod replace directive and cli/ path deps -> your yanet2 checkout
+# rename: module name in the dataplane/api sources; module path and every
+# internal import (and the proto go_package) to the new module path
+grep -rl yanet-platform/yanet2/sdk/example . | xargs -r sed -i s#yanet-platform/yanet2/sdk/example#github.com/me/my-module#
+# adjust: the go.mod replace directive and cli/ path deps -> your yanet2 checkout
 make YANET_ROOT=/path/to/yanet2 test
 ```
 
@@ -34,7 +36,10 @@ make YANET_ROOT=/path/to/yanet2 test
   `plugin_dir`;
 - `lib<name>_cp.a` — the control-plane FFI archive linked by the module's
   Go bindings;
-- the control-plane daemon binary and the `yanet-cli-<name>` CLI.
+- the control-plane daemon binary.
+
+The `yanet-cli-<name>` CLI builds into the checkout's `target/` instead
+(the Makefile points `CARGO_TARGET_DIR` there), next to the in-tree CLIs.
 
 The module SDK's pkg-config metadata lives at
 `<yanet2>/build/sdk/yanet-module-sdk.pc`; the reference Makefile points
@@ -57,9 +62,15 @@ descriptor (see `lib/dataplane/module/module.h` and
 `sdk/example/dataplane/`):
 
 ```c
-struct module *
+YANET_MODULE_EXPORT struct module *
 new_module_mine() {
 	struct module *module = malloc(sizeof(*module));
+	if (module == NULL) {
+		return NULL;
+	}
+
+	// The loader copies the returned descriptor wholesale, so unset
+	// fields must not carry heap garbage.
 	memset(module, 0, sizeof(*module));
 	snprintf(module->name, sizeof(module->name), "%s", "mine");
 	module->handler = mine_handle_packets;
@@ -67,6 +78,10 @@ new_module_mine() {
 	return module;
 }
 ```
+
+`YANET_MODULE_EXPORT` keeps the constructor reachable for the loader's
+lookup even when the module is compiled with hidden visibility, and a
+`NULL` return is the loader's constructor-failure path.
 
 Undefined references to yanet and DPDK symbols are intentional: they are
 left unresolved in the `.so` and satisfied by the dataplane binary's
@@ -170,6 +185,9 @@ is preferred when the module has its own repository.
 
 - Devices (`devices/`) cannot be plugins: `dp_load_device` resolves
   constructors only in the main binary.
+- The checkout path must be whitespace-free: pkg-config flag lists are
+  split on whitespace with no quoting, so the generated metadata cannot
+  carry such a path.
 - No web UI registration for out-of-tree modules: `web/` discovers module
   UIs by globbing its own tree.
 - The SDK is build-directory based, not installable: the pkg-config

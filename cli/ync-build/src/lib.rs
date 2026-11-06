@@ -37,10 +37,12 @@ pub fn client(root: impl AsRef<Path>, protos: &[&str]) -> Build {
     }
 }
 
-/// Starts a client build whose protos also resolve through extra include
-/// directories beyond `root` — for a module built outside the checkout,
-/// whose proto lives in the module tree while its imports live in the
-/// checkout's.
+/// Starts a client build with extra proto include directories, for a
+/// module living outside the checkout.
+///
+/// The module's own protos resolve through the extra directories while
+/// their imports keep resolving against the checkout the CLI builds
+/// against.
 pub fn client_includes(root: impl AsRef<Path>, extra_includes: &[impl AsRef<Path>], protos: &[&str]) -> Build {
     Build {
         root: root.as_ref().to_path_buf(),

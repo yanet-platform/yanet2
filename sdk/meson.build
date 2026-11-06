@@ -1,22 +1,10 @@
-# YANET module SDK: the build-side surface for out-of-tree dataplane module
-# plugins (.so).
+# The build-side half of the module SDK: the archive stamping a plugin with
+# the ABI version it was compiled against, and the pkg-config metadata an
+# out-of-tree module compiles and links with.
 #
-# The runtime half already lives in lib/dataplane/config: the dataplane
-# scans plugin_dir for lib<name>_dp.so files, refuses any whose exported
-# yanet_module_abi_version does not match, and dp_load_module prefers a
-# plugin's new_module_<name> over the statically linked built-ins.
-#
-# This directory supplies the build half for a module developed outside the
-# yanet2 meson project:
-#
-#   - libmodule_abi_export.a, a PIC archive stamping a plugin with the
-#     compiled-against YANET_MODULE_ABI_VERSION, and
-#   - build/sdk/yanet-module-sdk.pc, carrying the include paths and defines
-#     an in-tree module translation unit compiles with.
-#
-# An out-of-tree module consumes both by pointing PKG_CONFIG_PATH at
-# <builddir>/sdk and depending on yanet-module-sdk; see docs/module-sdk.md
-# and sdk/example for a complete reference module.
+# The loader half (plugin discovery and the ABI check) lives in the
+# dataplane; docs/module-sdk.md describes the contract and sdk/example is
+# the reference consumer.
 
 # Not captured in a variable on purpose: nothing in this build consumes
 # the target object, the .pc names the archive by its output path, and an
@@ -68,6 +56,9 @@ foreach dir : run_command(
   '-mindepth', '1',
   '-maxdepth', '1',
   '-type', 'd',
+  # A reconfigure of an already-built tree would otherwise pick up the
+  # per-target object directories the build created since the setup.
+  '-not', '-name', '*.p',
   check: true,
 ).stdout().strip().split('\n')
   dpdk_lib_dirs += [dir]
@@ -105,6 +96,45 @@ if yanet_isa_flag != ''
   sdk_defines += [yanet_isa_flag]
 endif
 
+# A sanitized tree instruments the ABI archive like every other target, so
+# a plugin linking it wholesale must compile and link with the same
+# sanitizers or its objects stay unresolved; the set mirrors the supported
+# sanitized builds (ASan+UBSan and TSan).
+sdk_sanitizers = []
+foreach sanitizer : ['address', 'undefined', 'thread']
+  if b_sanitize.contains(sanitizer)
+    sdk_sanitizers += [sanitizer]
+  endif
+endforeach
+sdk_sanitize_flags = ''
+if sdk_sanitizers.length() > 0
+  sdk_sanitize_flags = '-fsanitize=' + ','.join(sdk_sanitizers)
+endif
+
+sdk_cflags = [sdk_inc_flags, ' '.join(sdk_defines)]
+sdk_libs = []
+if sdk_sanitize_flags != ''
+  sdk_cflags += [sdk_sanitize_flags]
+  sdk_libs += [sdk_sanitize_flags]
+endif
+# rte_config.h first (the DPDK headers need it), then the ABI tripwires:
+# every plugin translation unit compiles them with the plugin's own
+# compiler and flags, not just the prebuilt archive.
+sdk_cflags += [
+  '-include rte_config.h',
+  '-include lib/dataplane/config/plugin_abi_assert.h',
+]
+
+# Nothing references the ABI version symbol at link time (the loader
+# dlsym's it), so the archive is linked wholesale or the linker would drop
+# its only object.
+sdk_libs += [
+  '-L${yanet_builddir}/sdk',
+  '-Wl,--whole-archive',
+  '-lmodule_abi_export',
+  '-Wl,--no-whole-archive',
+]
+
 # Read straight from the header both sides compile, so the .pc can never
 # drift from the loader's expectation (consumers assert their mirrors
 # against this variable).
@@ -119,8 +149,8 @@ sdk_conf.set('YANET_VERSION', yanet_version)
 sdk_conf.set('YANET_SRCROOT', meson.project_source_root())
 sdk_conf.set('YANET_BUILDDIR', meson.global_build_root())
 sdk_conf.set('YANET_MODULE_ABI_VERSION', module_abi_version)
-sdk_conf.set('SDK_INC_FLAGS', sdk_inc_flags)
-sdk_conf.set('SDK_DEFINES', ' '.join(sdk_defines))
+sdk_conf.set('SDK_CFLAGS', ' '.join(sdk_cflags))
+sdk_conf.set('SDK_LIBS', ' '.join(sdk_libs))
 
 configure_file(
   input: 'yanet-module-sdk.pc.in',

@@ -22,7 +22,8 @@ type Backend interface {
 	// UpdateModule creates a module config and publishes it to the
 	// dataplane.
 	UpdateModule(name string) (ModuleHandle, error)
-	// DeleteModule removes a module config.
+	// DeleteModule removes a module config; a name the dataplane has
+	// nothing under fails with ffi.ErrNotFound.
 	DeleteModule(name string) error
 }
 
@@ -102,15 +103,25 @@ func (m *ExampleService) UpdateConfig(
 }
 
 // DeleteConfig removes the named config if it is not referenced by any
-// pipeline.
+// pipeline. A config an earlier daemon process left in shared memory is
+// removed from the dataplane directly.
 func (m *ExampleService) DeleteConfig(
 	ctx context.Context,
 	req *examplepb.DeleteConfigRequest,
 ) (*examplepb.DeleteConfigResponse, error) {
 	name := req.GetName()
-	err := m.configs.Delete(name, func(*config) error {
-		return m.backend.DeleteModule(name)
-	})
+	err := m.configs.DeleteOr(name,
+		func(*config) error {
+			return m.backend.DeleteModule(name)
+		},
+		func() error {
+			err := m.backend.DeleteModule(name)
+			if errors.Is(err, ffi.ErrNotFound) {
+				return configstore.ErrNotFound
+			}
+			return err
+		},
+	)
 	if errors.Is(err, configstore.ErrNotFound) {
 		return nil, status.Errorf(codes.NotFound, "config %q not found", name)
 	}
