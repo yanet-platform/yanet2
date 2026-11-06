@@ -34,6 +34,7 @@
 //! last-level cache, and only the lookups of the batch are timed.
 
 #[path = "../tests/support/arena.rs"]
+#[allow(dead_code, reason = "the benchmark checks no release")]
 mod arena;
 
 use core::{ffi::CStr, hint::black_box};
@@ -401,22 +402,12 @@ fn slots<T>(views: &[T]) -> Vec<Option<&T>> {
     views.iter().map(Some).collect()
 }
 
-/// A zeroed block of the arena for one `T`.
-fn alloc<T>(owner: &ArenaOwner) -> *mut T {
-    // SAFETY: a live context.
-    let block = unsafe { bindings::yanet_sys_common_memory_balloc(owner.raw_context(), size_of::<T>()) }.cast::<T>();
-    assert!(!block.is_null(), "the C arena is exhausted");
-    // SAFETY: a fresh block of one `T`.
-    unsafe { block.write_bytes(0, 1) };
-    block
-}
-
 /// A C object with the stage of its classes.
 type Staged<T> = (*mut T, *mut bindings::classifier);
 
 /// Compiles an attribute's classifier as a C module does.
 fn compile<A: Attribute>(owner: &ArenaOwner, name: &CStr, rules: &[Option<&A>]) -> Staged<A::Classifier> {
-    let (classifier, stage) = (alloc::<A::Classifier>(owner), alloc::<bindings::classifier>(owner));
+    let (classifier, stage) = (owner.alloc::<A::Classifier>(), owner.alloc::<bindings::classifier>());
     // SAFETY: each rule is a view of the attribute, borrowed for the call;
     // the outputs are zeroed blocks of the arena.
     let status = unsafe {
@@ -435,7 +426,7 @@ fn compile<A: Attribute>(owner: &ArenaOwner, name: &CStr, rules: &[Option<&A>]) 
 
 /// Joins two stages as a C module does.
 fn join<L, R>(owner: &ArenaOwner, name: &CStr, left: Staged<L>, right: Staged<R>, rules: u32) -> Staged<Joint> {
-    let (joint, stage) = (alloc::<Joint>(owner), alloc::<bindings::classifier>(owner));
+    let (joint, stage) = (owner.alloc::<Joint>(), owner.alloc::<bindings::classifier>());
     // SAFETY: both stages were filled over the rule count.
     let status = unsafe {
         bindings::yanet_sys_classify_join(
@@ -474,7 +465,7 @@ fn parts(owner: &ArenaOwner, rules: &[BenchRule]) -> Parts {
     let nets = join(owner, c"nets", src, dst, count);
     let ports = join(owner, c"ports", sport, dport, count);
     let root = join(owner, c"root", nets, ports, count);
-    let map = alloc::<RuleMap>(owner);
+    let map = owner.alloc::<RuleMap>();
     let projection = vec![Some(&()); rules.len()];
     // SAFETY: the root stage was filled over the rule count of the
     // projection.

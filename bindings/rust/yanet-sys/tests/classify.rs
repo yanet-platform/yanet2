@@ -8,18 +8,17 @@
 //! their stages and one past each end, as a class from the caller may be.
 //! Natively only: Miri does not run C.
 
-use core::{
-    ffi::{CStr, c_void},
-    fmt::Debug,
-    mem::{size_of, transmute},
-    ptr::NonNull,
-};
+#[path = "support/arena.rs"]
+#[allow(dead_code, reason = "these tests compile outside a configuration")]
+mod arena;
 
+use core::{ffi::CStr, fmt::Debug, mem::transmute};
+
+use arena::ArenaOwner as Arena;
 // The workspace denies unused crate dependencies; this test names no crate it
 // imports `as _`.
 use netip as _;
 use yanet_sdk_testing as _;
-use yanet_shm::{resolve::Resolve, root::ShmRoot};
 use yanet_sys::{
     bindings,
     classify::{
@@ -27,61 +26,6 @@ use yanet_sys::{
         PortRange, Ports, Rule, RuleMap, RuleTable, results_min,
     },
 };
-
-// The C memory of the tests, with the classification library's compiler,
-// which the joins and the decode of the shim call.
-#[link(name = "yanet_sys_classify_tests", kind = "static", modifiers = "+whole-archive")]
-unsafe extern "C" {
-    fn yanet_sys_test_arena_new(size: usize) -> *mut c_void;
-    fn yanet_sys_test_arena_base(arena: *mut c_void) -> *mut u8;
-    fn yanet_sys_test_arena_context(arena: *mut c_void) -> *mut bindings::memory_context;
-}
-
-/// Bytes of the C arena of a test.
-const ARENA_SIZE: usize = 64 << 20;
-
-/// The C memory of a test, leaked: the context the compiles allocate in, and
-/// the root of the region its blocks lie in.
-struct Arena {
-    root: ShmRoot,
-    context: *mut bindings::memory_context,
-}
-
-impl Arena {
-    fn new() -> Self {
-        // SAFETY: a C allocation with no precondition.
-        let arena = unsafe { yanet_sys_test_arena_new(ARENA_SIZE) };
-        assert!(!arena.is_null(), "no heap for the C arena");
-        // SAFETY: a live arena, never freed.
-        let (base, context) = unsafe { (yanet_sys_test_arena_base(arena), yanet_sys_test_arena_context(arena)) };
-        Self {
-            // SAFETY: a raw pointer from C to the one region every block of
-            // the context lies in.
-            root: unsafe { ShmRoot::from_mapping(NonNull::new(base).expect("an arena has a region")) },
-            context,
-        }
-    }
-
-    /// A zeroed block of the arena for one `T`, as a build allocates a C
-    /// object.
-    fn alloc<T>(&self) -> *mut T {
-        // SAFETY: a live context.
-        let block = unsafe { bindings::yanet_sys_common_memory_balloc(self.context, size_of::<T>()) }.cast::<T>();
-        assert!(!block.is_null(), "the C arena is exhausted");
-        // SAFETY: a fresh block of one `T`.
-        unsafe { block.write_bytes(0, 1) };
-        block
-    }
-}
-
-// SAFETY: the root covers the arena's region, which holds every classifier a
-// test builds; a test looks a classifier up only once it is built, and frees
-// none.
-unsafe impl<'g> Resolve<'g> for Arena {
-    fn shm_root(&self) -> ShmRoot {
-        self.root
-    }
-}
 
 /// The source and destination networks of a rule, by family; a rule of any
 /// family names none.
@@ -184,7 +128,7 @@ fn compile<A: Attribute>(arena: &Arena, name: &CStr, rules: &[Option<&A>]) -> St
     // call; the classifier and the stage are zeroed blocks of the arena.
     let status = unsafe {
         A::compile(
-            arena.context,
+            arena.raw_context(),
             name.as_ptr(),
             rules.as_ptr().cast(),
             count(rules),
@@ -207,7 +151,15 @@ fn join(
     // SAFETY: both stages were filled over the ruleset; the joint and the
     // stage are zeroed blocks of the arena.
     let status = unsafe {
-        bindings::yanet_sys_classify_join(arena.context, name.as_ptr(), left, right, rules, joint.cast(), stage)
+        bindings::yanet_sys_classify_join(
+            arena.raw_context(),
+            name.as_ptr(),
+            left,
+            right,
+            rules,
+            joint.cast(),
+            stage,
+        )
     };
     assert_eq!(0, status, "join {name:?}");
     (joint, stage)
@@ -226,7 +178,7 @@ fn join_rules<R>(
     // table is a zeroed block of the arena.
     let status = unsafe {
         bindings::yanet_sys_classify_join_rules(
-            arena.context,
+            arena.raw_context(),
             name.as_ptr(),
             left,
             right,
@@ -246,7 +198,7 @@ fn decode<R>(arena: &Arena, name: &CStr, stage: *mut bindings::classifier, rules
     // map is a zeroed block of the arena.
     let status = unsafe {
         bindings::yanet_sys_classify_decode(
-            arena.context,
+            arena.raw_context(),
             name.as_ptr(),
             stage,
             rules.as_ptr().cast(),

@@ -7,6 +7,7 @@
 //! does not run C.
 
 #[path = "support/arena.rs"]
+#[allow(dead_code, reason = "these tests build through the builder alone")]
 mod arena;
 
 use core::{mem::offset_of, net::Ipv4Addr};
