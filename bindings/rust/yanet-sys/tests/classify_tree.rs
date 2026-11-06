@@ -460,7 +460,7 @@ fn test_rules_tree_of_an_empty_projection_is_no_rule() {
 
 #[test]
 #[cfg_attr(miri, ignore = "Miri does not run C")]
-fn test_join_tree_refuses_branches_of_rulesets_of_other_sizes() {
+fn test_join_refuses_branches_of_rulesets_of_other_sizes() {
     let owner = ArenaOwner::new();
     let lines = Lines::new(&[TCP]).unwrap();
     let http = [port(80, 80)];
@@ -472,6 +472,61 @@ fn test_join_tree_refuses_branches_of_rulesets_of_other_sizes() {
         scope.decode(c"rules", transport, &[Some(&())])
     });
     assert!(matches!(result, Err(BuildError::Refused(Refusal::RuleSetMismatch))));
+}
+
+/// verifies that the IPv4 tree reports the first matching rule over every
+/// port of the protocols of the rules and every protocol of a few ports, not
+/// only at the edges of their ranges.
+#[test]
+#[cfg_attr(miri, ignore = "Miri does not run C")]
+fn test_rules_tree4_lookup_is_the_first_matching_rule_over_whole_domains() {
+    let owner = ArenaOwner::new();
+    let rules = rules4();
+    let built = build4(&owner, &rules);
+    let tree = owner.body(&built).get(&owner);
+    let pairs = [
+        ([10, 0, 0, 1], [192, 0, 2, 200]),
+        ([10, 1, 2, 3], [198, 51, 100, 5]),
+        ([1, 2, 3, 4], [203, 0, 113, 7]),
+    ];
+    let keys = (0..=u16::MAX)
+        .flat_map(|port| [0, 6, 17].map(|proto| (proto, port)))
+        .chain((0..=u8::MAX).flat_map(|proto| [22, 53, 80, 1500].map(|port| (proto, port))));
+    for (proto, port) in keys {
+        for (src, dst) in pairs {
+            let (src, dst) = (u32::from_be_bytes(src), u32::from_be_bytes(dst));
+            let expected = first(
+                &rules,
+                |rule| any_or(&rule.src, |net| in4(net, src)) && any_or(&rule.dst, |net| in4(net, dst)),
+                proto,
+                port,
+            );
+            let key = (
+                (Addr4::from(src.to_be_bytes()), Addr4::from(dst.to_be_bytes())),
+                (proto, port),
+            );
+            assert_eq!(expected, tree.lookup(&owner, key).index(), "{proto} {port}");
+        }
+    }
+}
+
+/// verifies that the IPv6 tree tells apart two destinations of one high
+/// half on either side of a network that splits the low half, which only the
+/// table of the rows of split high halves does.
+#[test]
+#[cfg_attr(miri, ignore = "Miri does not run C")]
+fn test_rules_tree6_lookup_splits_a_high_half_by_its_low_half() {
+    let owner = ArenaOwner::new();
+    let built = build6(&owner, &rules6());
+    let tree = owner.body(&built).get(&owner);
+    let doc6 = 0x2001_0db8_u128 << 96;
+    let lookup = |dst: u128| {
+        let key = ((doc6.to_be_bytes(), dst.to_be_bytes()), (UDP.from as u8, 53));
+        tree.lookup(&owner, key).index()
+    };
+    // The first rule's destination is the upper half of the low half's
+    // range of its high half.
+    assert_eq!((Some(0), None), (lookup(doc6 | (1 << 63) | 2), lookup(doc6 | 2)));
 }
 
 /// verifies that a burst lookup reports for each key the rule a lookup of the
