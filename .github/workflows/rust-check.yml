@@ -58,6 +58,15 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: Check SDK workspace exclusion
+        run: |
+          python3 - <<'PYTHON'
+          import tomllib
+          with open("Cargo.toml", "rb") as manifest:
+              workspace = tomllib.load(manifest)["workspace"]
+          assert "bindings/rust" in workspace.get("exclude", []), \
+              "SDK workspace must remain excluded from the root workspace"
+          PYTHON
       # Pinned: a floating nightly rewraps comments differently from one
       # day to the next and turns untouched files red.
       #
