@@ -9,21 +9,21 @@
 
 use core::{
     marker::PhantomData,
-    sync::atomic::{AtomicU32, Ordering},
+    sync::atomic::{AtomicU8, AtomicU32, Ordering},
 };
 
 use yanet_packet as _;
 use yanet_sdk::{
-    Batch, Build, BuiltObject, CommitCx, Counter, Cx, Device, Kind, Module, Object, ObjectBuilder, ObjectCommitCx,
-    ObjectLink, OwnedSlice, PerWorker, PerWorkerSlice, Refusal, Registered, ShmBox, ShmLayout, ShmSlice, Traffic,
-    Verdict,
+    Batch, Build, BuiltObject, CommitCx, Counter, Cx, Device, Kind, Lpm4, Module, Object, ObjectBuilder,
+    ObjectCommitCx, ObjectLink, OwnedSlice, PerWorker, PerWorkerSlice, Refusal, Registered, ShmBox, ShmLayout,
+    ShmOption, ShmSlice, Traffic, Verdict,
 };
 use yanet_sdk_derive as _;
 use yanet_sdk_testing::{
     View,
     cp::{Call, LiveHeaders, TestError, TestOwner},
 };
-use yanet_shm as _;
+use yanet_shm::unit::{Align, Alignment};
 use yanet_sys::{
     bindings::CP_OBJECT_NAME_LEN,
     cp::{BuildError, Builder, Built, Header, MemoryContext, Owner, Scope},
@@ -74,8 +74,11 @@ struct FlakyParts {
     fails: bool,
 }
 
-// SAFETY: a word accepts every bit pattern and has no padding.
-unsafe impl ShmLayout for Flaky {}
+// SAFETY: a word accepts every bit pattern, has no padding and no drop, and
+// its unit is that of its alignment.
+unsafe impl ShmLayout for Flaky {
+    type AlignUnit = <Align<{ align_of::<Flaky>() }> as Alignment>::Unit;
+}
 
 // SAFETY: the word is the whole value, written or refused as a whole. It
 // stands in, under Miri, for an embedded C object whose initialisation runs
@@ -119,12 +122,97 @@ struct Faulty {
     tail: ShmSlice<u64>,
 }
 
+/// A word that records, when it is released, whether the tag of the option
+/// holding it was still set.
+#[repr(C)]
+struct Probe(u64);
+
+/// What the last released [`Probe`] saw of its option's tag: unset until one
+/// is released, then clear or set.
+static PROBED_TAG: AtomicU8 = AtomicU8::new(PROBED_NOTHING);
+const PROBED_NOTHING: u8 = 0;
+const PROBED_CLEAR: u8 = 1;
+const PROBED_SET: u8 = 2;
+
+// SAFETY: a word accepts every bit pattern, has no padding and no drop, and
+// its unit is that of its alignment.
+unsafe impl ShmLayout for Probe {
+    type AlignUnit = <Align<{ align_of::<Probe>() }> as Alignment>::Unit;
+}
+
+// SAFETY: the word is the whole value and owns nothing. Releasing it reads the
+// tag byte of the option it is held in, which leads it by one word.
+unsafe impl Build for Probe {
+    type Parts<'b, W: Owner> = u64;
+
+    unsafe fn write<W: Owner>(word: u64, memory: &MemoryContext<'_, W>, addr: usize) -> Result<(), Refusal> {
+        // SAFETY: the address is aligned and exclusive (caller contract).
+        unsafe { memory.root().ptr::<u64>(addr).write(word) };
+        Ok(())
+    }
+
+    unsafe fn free<W: Owner>(addr: usize, memory: &MemoryContext<'_, W>) {
+        // SAFETY: a probe is only ever held in an option, whose tag, a word
+        // wide, leads it in the same live block.
+        let tag = unsafe { memory.root().ptr::<u8>(addr - size_of::<u64>()).read() };
+        PROBED_TAG.store(if tag == 0 { PROBED_CLEAR } else { PROBED_SET }, Ordering::Relaxed);
+    }
+}
+
 /// A counter of hits and one of the packets and bytes of the traffic.
 #[derive(ShmLayout)]
 #[repr(C)]
 struct Counted {
     hits: Counter,
     traffic: Counter<Traffic>,
+}
+
+/// An optional run of ports, word and LPM.
+///
+/// The word's write may be refused. Builds here always leave the LPM absent:
+/// building one opens C memory, which the test owner does not set up.
+#[derive(ShmLayout)]
+#[repr(C)]
+struct Optional {
+    ports: ShmOption<ShmSlice<u64>>,
+    word: ShmOption<Flaky>,
+    routes: ShmOption<Lpm4>,
+}
+
+/// Two 32-bit words, aligned to 4.
+#[derive(ShmLayout)]
+#[repr(C)]
+struct Narrow {
+    low: u32,
+    high: u32,
+}
+
+/// Eight words on a cache line of their own, aligned to 64.
+#[derive(ShmLayout)]
+#[repr(C, align(64))]
+struct Line {
+    words: [u64; 8],
+}
+
+/// An optional value aligned to 4.
+#[derive(ShmLayout)]
+#[repr(C)]
+struct NarrowOptional {
+    narrow: ShmOption<Narrow>,
+}
+
+/// An optional value aligned to 64.
+#[derive(ShmLayout)]
+#[repr(C)]
+struct LineOptional {
+    line: ShmOption<Line>,
+}
+
+/// An optional probe.
+#[derive(ShmLayout)]
+#[repr(C)]
+struct ProbedOptional {
+    probe: ShmOption<Probe>,
 }
 
 /// A module with a given configuration type: the builder reads only its name
@@ -150,10 +238,15 @@ type LanesModule = Fixture<Lanes>;
 type FaultyModule = Fixture<Faulty>;
 type EntriesModule = Fixture<ShmSlice<Entry>>;
 type CountedModule = Fixture<Counted>;
+type OptionalModule = Fixture<Optional>;
+type NarrowOptionalModule = Fixture<NarrowOptional>;
+type LineOptionalModule = Fixture<LineOptional>;
+type ProbedOptionalModule = Fixture<ProbedOptional>;
 
 /// An owner of an empty arena.
 fn owner() -> TestOwner {
-    // SAFETY: no configuration of this file embeds a C object.
+    // SAFETY: no build of this file writes a C object: the only one, an
+    // optional LPM, is always left absent.
     unsafe { TestOwner::new() }
 }
 
@@ -702,6 +795,173 @@ fn test_build_writes_every_word_of_a_faulty_config_when_none_is_refused() {
         )
     );
     release::<FaultyModule>(&owner, built);
+    owner.assert_released();
+}
+
+/// Builds the optional configuration with the ports and the word present when
+/// given, and the LPM absent.
+fn build_optional(
+    owner: &TestOwner,
+    ports: Option<&[u64]>,
+    word: Option<FlakyParts>,
+) -> Result<Built<OptionalModule, TestOwner>, Failure> {
+    build::<OptionalModule>(owner, |b| {
+        Ok(OptionalParts {
+            ports: ports
+                .map(|ports| b.slice(ports.len(), |idx| Ok(ports[idx])))
+                .transpose()?,
+            word,
+            routes: None,
+        })
+    })
+}
+
+#[test]
+fn test_build_leaves_absent_options_empty_and_unallocated() {
+    let owner = owner();
+
+    let built = build_optional(&owner, None, None).expect("built");
+
+    let (config, _) = body::<OptionalModule>(&owner, &built);
+    assert_eq!(
+        (false, false, false),
+        (config.ports.is_some(), config.word.is_some(), config.routes.is_some())
+    );
+    // Only the root block: an absent LPM allocates no page.
+    assert_eq!(1, owner.live_blocks());
+    release::<OptionalModule>(&owner, built);
+    owner.assert_released();
+}
+
+#[test]
+fn test_build_writes_present_options_readable_in_place() {
+    let owner = owner();
+
+    let built = build_optional(&owner, Some(&[80, 443]), Some(FlakyParts { word: 7, fails: false })).expect("built");
+
+    let (config, view) = body::<OptionalModule>(&owner, &built);
+    assert_eq!(
+        (Some(vec![80, 443]), Some(7)),
+        (
+            config.ports.get().map(|ports| ports.as_slice(&view).to_vec()),
+            config.word.get().map(|word| word.0)
+        )
+    );
+    // The root block and the ports.
+    assert_eq!(2, owner.live_blocks());
+    release::<OptionalModule>(&owner, built);
+    owner.assert_released();
+}
+
+#[test]
+fn test_build_releases_present_options_when_memory_runs_out_at_each_allocation() {
+    let fits = sweep_limits(0..8, owner_failing_alloc_after, |owner| {
+        build_optional(owner, Some(&[80, 443]), Some(FlakyParts { word: 7, fails: false }))
+    });
+
+    // The root block and the ports.
+    assert_eq!(2, fits);
+}
+
+/// verifies that a refused present value leaves its option owning nothing and
+/// the option written before it is returned.
+#[test]
+fn test_build_returns_everything_when_a_present_option_is_refused() {
+    let owner = owner();
+
+    let err = build_optional(&owner, Some(&[80, 443]), Some(FlakyParts { word: 7, fails: true })).expect_err("refused");
+
+    assert_eq!(BuildError::Refused(Refusal::OutOfMemory), err);
+    owner.assert_released();
+}
+
+#[test]
+fn test_option_layout_is_tag_of_value_alignment_then_value() {
+    assert_eq!(
+        (4 + 8, 4, 64 + 64, 64),
+        (
+            size_of::<ShmOption<Narrow>>(),
+            align_of::<ShmOption<Narrow>>(),
+            size_of::<ShmOption<Line>>(),
+            align_of::<ShmOption<Line>>()
+        )
+    );
+}
+
+#[test]
+fn test_build_leaves_absent_narrow_option_unallocated() {
+    let owner = owner();
+
+    let built = build::<NarrowOptionalModule>(&owner, |_| Ok(NarrowOptionalParts { narrow: None })).expect("built");
+
+    let (config, _) = body::<NarrowOptionalModule>(&owner, &built);
+    assert_eq!(None, config.narrow.get().map(|narrow| (narrow.low, narrow.high)));
+    // Only the root block.
+    assert_eq!(1, owner.live_blocks());
+    release::<NarrowOptionalModule>(&owner, built);
+    owner.assert_released();
+}
+
+#[test]
+fn test_build_writes_present_narrow_option_readable_in_place() {
+    let owner = owner();
+
+    let built = build::<NarrowOptionalModule>(&owner, |_| {
+        Ok(NarrowOptionalParts {
+            narrow: Some(NarrowParts { low: 1, high: 2 }),
+        })
+    })
+    .expect("built");
+
+    let (config, _) = body::<NarrowOptionalModule>(&owner, &built);
+    assert_eq!(
+        Some((1, 2)),
+        config.narrow.get().map(|narrow| (narrow.low, narrow.high))
+    );
+    assert_eq!(1, owner.live_blocks());
+    release::<NarrowOptionalModule>(&owner, built);
+    owner.assert_released();
+}
+
+#[test]
+fn test_build_leaves_absent_line_option_unallocated() {
+    let owner = owner();
+
+    let built = build::<LineOptionalModule>(&owner, |_| Ok(LineOptionalParts { line: None })).expect("built");
+
+    let (config, _) = body::<LineOptionalModule>(&owner, &built);
+    assert_eq!(None, config.line.get().map(|line| line.words));
+    // Only the root block.
+    assert_eq!(1, owner.live_blocks());
+    release::<LineOptionalModule>(&owner, built);
+    owner.assert_released();
+}
+
+#[test]
+fn test_build_writes_present_line_option_readable_in_place() {
+    let owner = owner();
+    let words = [1, 2, 3, 4, 5, 6, 7, 8];
+
+    let built = build::<LineOptionalModule>(&owner, |_| Ok(LineOptionalParts { line: Some(LineParts { words }) }))
+        .expect("built");
+
+    let (config, _) = body::<LineOptionalModule>(&owner, &built);
+    assert_eq!(Some(words), config.line.get().map(|line| line.words));
+    assert_eq!(1, owner.live_blocks());
+    release::<LineOptionalModule>(&owner, built);
+    owner.assert_released();
+}
+
+/// verifies that releasing a present option clears its tag before releasing
+/// its value, so a value is never released under a set tag.
+#[test]
+fn test_release_clears_an_option_tag_before_its_value() {
+    let owner = owner();
+    let built = build::<ProbedOptionalModule>(&owner, |_| Ok(ProbedOptionalParts { probe: Some(7) })).expect("built");
+
+    release::<ProbedOptionalModule>(&owner, built);
+
+    assert_eq!(PROBED_CLEAR, PROBED_TAG.load(Ordering::Relaxed));
     owner.assert_released();
 }
 

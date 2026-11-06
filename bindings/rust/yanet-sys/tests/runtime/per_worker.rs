@@ -6,7 +6,10 @@
 use core::{cell::Cell, convert::Infallible};
 
 use yanet_sdk_testing::BlockArena;
-use yanet_shm::shm::ShmLayout;
+use yanet_shm::{
+    shm::ShmLayout,
+    unit::{Align, Alignment},
+};
 use yanet_sys::{
     bindings,
     cp::{Build, MemoryContext, Owner, Refusal},
@@ -35,8 +38,10 @@ struct Config<T = u64> {
 }
 
 // SAFETY: a per-worker field, an offset and a count, which accept every bit
-// pattern, with no padding and no drop.
-unsafe impl<T: Copy + ShmLayout> ShmLayout for Config<T> {}
+// pattern, with no padding and no drop, aligned as the field whatever `T` is.
+unsafe impl<T: Copy + ShmLayout> ShmLayout for Config<T> {
+    type AlignUnit = <Align<{ align_of::<Config>() }> as Alignment>::Unit;
+}
 
 // SAFETY: the configuration is laid out by hand and never built: its parts
 // cannot exist, so nothing is ever written, and its slot block belongs to the
@@ -403,7 +408,11 @@ struct Regions {
 
 // SAFETY: a per-worker slice field, an offset and two counts, which accept
 // every bit pattern, with no padding and no drop.
-unsafe impl ShmLayout for Regions {}
+//
+// The unit is that of the alignment.
+unsafe impl ShmLayout for Regions {
+    type AlignUnit = <Align<{ align_of::<Regions>() }> as Alignment>::Unit;
+}
 
 // SAFETY: as for `Config`: laid out by hand and never built.
 unsafe impl Build for Regions {

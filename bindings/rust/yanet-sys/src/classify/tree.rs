@@ -11,10 +11,15 @@
 
 use core::{
     convert::Infallible,
-    mem::{offset_of, size_of},
+    mem::{align_of, offset_of, size_of},
 };
 
-use yanet_shm::{rel::ShmBox, resolve::Resolve, shm::ShmLayout};
+use yanet_shm::{
+    rel::ShmBox,
+    resolve::Resolve,
+    shm::ShmLayout,
+    unit::{Align, Alignment, matches},
+};
 
 use super::{Addr4, Joint, LineAttr, Net4Attr, Net6Attr, PortAttr, Rule, RuleMap, RuleTable, lpm_value};
 use crate::{
@@ -28,14 +33,19 @@ use crate::{
 /// class of the stage it was compiled or joined with.
 ///
 /// ```compile_fail,E0277
-/// use yanet_shm::{resolve::Resolve, shm::ShmLayout};
+/// use yanet_shm::{
+///     resolve::Resolve,
+///     shm::ShmLayout, unit::{Align, Alignment},
+/// };
 /// use yanet_sys::{
 ///     classify::Node,
 ///     cp::{Build, MemoryContext, Owner, Refusal},
 /// };
 /// #[repr(C)]
 /// struct Mine(u32);
-/// unsafe impl ShmLayout for Mine {}
+/// unsafe impl ShmLayout for Mine {
+///     type AlignUnit = <Align<{ align_of::<Mine>() }> as Alignment>::Unit;
+/// }
 /// unsafe impl Build for Mine {
 ///     type Parts<'b, W: Owner> = u32;
 ///     unsafe fn write<W: Owner>(_: u32, _: &MemoryContext<'_, W>, _: usize) -> Result<(), Refusal> {
@@ -370,14 +380,20 @@ const _: () = {
     assert!(offset_of!(Decode<u8>, map) == 0);
 };
 
-/// The shared-memory impls of the nodes that hold their inputs.
+/// The shared-memory impls of the nodes that hold their inputs, each with an
+/// instance that names the alignment of every instance.
 macro_rules! holders {
-    ($($name:ident<$($param:ident),*> { $table:ident: $raw:ty, $free:ident; $($edge:ident: $ty:ident),* })*) => {$(
-        // SAFETY: a `#[repr(C)]` struct of an opaque C object, which accepts
-        // every pattern, and offset words, without padding (asserted above);
-        // the C object leads, so the node has its alignment, and dropping is
-        // a no-op.
-        unsafe impl<$($param: ShmLayout),*> ShmLayout for $name<$($param),*> {}
+    ($($name:ident<$($param:ident),*> as $inst:ty { $table:ident: $raw:ty, $free:ident; $($edge:ident: $ty:ident),* })*) => {$(
+        const _: () = assert!(matches::<$inst>());
+
+        // SAFETY: a `#[repr(C)]` struct of an opaque C object and offset
+        // words, which accept every pattern, without padding (asserted above).
+        //
+        // The C object leads, so the node has its alignment whatever its
+        // inputs, that of the instance named, and dropping is a no-op.
+        unsafe impl<$($param: ShmLayout),*> ShmLayout for $name<$($param),*> {
+            type AlignUnit = <Align<{ align_of::<$inst>() }> as Alignment>::Unit;
+        }
 
         // SAFETY: written only by the scope's joins and decodes, which put
         // the C object and the owned edges whole; freeing returns what the C
@@ -408,9 +424,9 @@ macro_rules! holders {
 }
 
 holders! {
-    Join<L, R> { table: bindings::value_table, yanet_sys_classify_joint_free; right: R, left: L }
-    Rules<L, R> { table: bindings::rule_table, yanet_sys_classify_rule_table_free; right: R, left: L }
-    Decode<N> { map: bindings::vline, yanet_sys_classify_rule_map_free; input: N }
+    Join<L, R> as Join<u8, u8> { table: bindings::value_table, yanet_sys_classify_joint_free; right: R, left: L }
+    Rules<L, R> as Rules<u8, u8> { table: bindings::rule_table, yanet_sys_classify_rule_table_free; right: R, left: L }
+    Decode<N> as Decode<u8> { map: bindings::vline, yanet_sys_classify_rule_map_free; input: N }
 }
 
 mod sealed {

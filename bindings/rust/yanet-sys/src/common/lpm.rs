@@ -10,9 +10,11 @@ use core::mem::{align_of, offset_of, size_of};
 
 use yanet_shm::{
     opaque::Opaque,
+    option::ShmOption,
     rel::RelPtr,
     resolve::Resolve,
     shm::{MAX_ALIGN, ShmLayout},
+    unit::{Align, Alignment, matches},
 };
 
 use crate::{bindings, cp::FfiRecord};
@@ -108,6 +110,9 @@ const _: () = {
     assert!(align_of::<Rust>() <= MAX_ALIGN);
     assert!(size_of::<Page>() == size_of::<bindings::lpm_page>());
     assert!(align_of::<Page>() == align_of::<bindings::lpm_page>());
+    assert!(matches::<Rust>());
+    // An optional table is its tag and the table, without padding.
+    assert!(size_of::<ShmOption<Rust>>() == align_of::<Rust>() + size_of::<Rust>());
 };
 
 // The mirrored fields keep the C types, not only their places.
@@ -169,9 +174,13 @@ pub type Lpm6 = Lpm<16>;
 
 const FLAG: u64 = bindings::LPM_VALUE_FLAG as u64;
 
-// SAFETY: `Lpm` is a `#[repr(C)]` mirror of the C struct whose size and
-// field offsets are asserted equal to the bindings' and leave no padding.
+// SAFETY: a `#[repr(C)]` mirror of the C struct whose size and field offsets
+// are asserted equal to the bindings' and leave no padding.
+//
 // Every pattern is valid: the opaque context is never read by Rust, the
 // directory slot is an offset word and the count an integer. Dropping is a
-// no-op and the alignment is 8.
-unsafe impl<const K: usize> ShmLayout for Lpm<K> {}
+// no-op and the alignment is 8. The key size names no field, so every table
+// has the layout and the unit asserted above.
+unsafe impl<const K: usize> ShmLayout for Lpm<K> {
+    type AlignUnit = <Align<{ align_of::<Lpm<4>>() }> as Alignment>::Unit;
+}

@@ -7,6 +7,7 @@ use yanet_shm::{
     rel::RelPtr,
     root::ShmRoot,
     shm::{MAX_ALIGN, ShmLayout},
+    unit::{Align, Alignment, matches},
 };
 
 use crate::dp::{
@@ -199,18 +200,36 @@ impl<O> ObjectLink<O> {
 }
 
 // SAFETY: a registry index accepts every bit pattern, and the layout is a
-// zero-sized marker; the control plane writes the id the module's counter
-// registry assigned.
-unsafe impl<T: CounterLayout> ShmLayout for Counter<T> {}
+// zero-sized marker.
+//
+// The control plane writes the id the module's counter registry assigned. The
+// marker leaves every counter aligned as the one named.
+unsafe impl<T: CounterLayout> ShmLayout for Counter<T> {
+    type AlignUnit = <Align<{ align_of::<Counter>() }> as Alignment>::Unit;
+}
 
 // SAFETY: a device index accepts every bit pattern; the control plane writes
 // the index the module's device list assigned.
-unsafe impl ShmLayout for Device {}
+unsafe impl ShmLayout for Device {
+    type AlignUnit = <Align<{ align_of::<Device>() }> as Alignment>::Unit;
+}
 
 // SAFETY: a link index accepts every bit pattern, and the object type is a
-// zero-sized marker; the control plane writes the index the module's object
-// links assigned.
-unsafe impl<O: Object> ShmLayout for ObjectLink<O> {}
+// zero-sized marker.
+//
+// The control plane writes the index the module's object links assigned. The
+// marker leaves every link aligned as the one named.
+unsafe impl<O: Object> ShmLayout for ObjectLink<O> {
+    type AlignUnit = <Align<{ align_of::<ObjectLink<()>>() }> as Alignment>::Unit;
+}
+
+const _: () = {
+    assert!(matches::<Counter>() && matches::<Counter<Traffic>>());
+    assert!(matches::<Device>() && !core::mem::needs_drop::<Device>());
+    // A link is its index word whatever it names, so the unit named above is
+    // every link's.
+    assert!(align_of::<ObjectLink<()>>() == align_of::<u64>() && size_of::<ObjectLink<()>>() == size_of::<u64>());
+};
 
 /// Bytes of the widest cache line a slot of [`PerWorker`] or a region of
 /// [`PerWorkerSlice`] keeps to itself.
@@ -408,13 +427,15 @@ impl<T: Copy + ShmLayout> PerWorker<T> {
 ///
 /// ```compile_fail,E0277
 /// # use core::marker::PhantomData;
-/// # use yanet_shm::shm::ShmLayout;
+/// # use yanet_shm::{shm::ShmLayout, unit::{Align, Alignment}};
 /// # use yanet_sys::dp::WorkerSlot;
 /// #[derive(Clone, Copy)]
 /// #[repr(C)]
 /// struct Local(u64, PhantomData<*const ()>);
-/// // SAFETY: a plain word with no padding and no drop.
-/// unsafe impl ShmLayout for Local {}
+/// // SAFETY: a plain word with no padding and no drop, aligned as one.
+/// unsafe impl ShmLayout for Local {
+///     type AlignUnit = <Align<{ align_of::<Local>() }> as Alignment>::Unit;
+/// }
 /// fn moves<T: Send>() {}
 /// moves::<WorkerSlot<'static, Local>>();
 /// ```
@@ -423,7 +444,7 @@ impl<T: Copy + ShmLayout> PerWorker<T> {
 /// field, which would outlive the block it points into:
 ///
 /// ```compile_fail,E0277
-/// # use yanet_shm::shm::ShmLayout;
+/// # use yanet_shm::{shm::ShmLayout, unit::{Align, Alignment}};
 /// # use yanet_sys::dp::WorkerSlot;
 /// fn layout<T: ShmLayout>() {}
 /// layout::<WorkerSlot<'static, u64>>();
@@ -432,7 +453,7 @@ impl<T: Copy + ShmLayout> PerWorker<T> {
 /// The field it comes from has one:
 ///
 /// ```
-/// # use yanet_shm::shm::ShmLayout;
+/// # use yanet_shm::{shm::ShmLayout, unit::{Align, Alignment}};
 /// # use yanet_sys::dp::PerWorker;
 /// fn layout<T: ShmLayout>() {}
 /// layout::<PerWorker<u64>>();
@@ -620,13 +641,19 @@ unsafe impl<T: Copy + ShmLayout + Send> Sync for PerWorker<T> {}
 
 // SAFETY: as above; the block it names is owned by the graph and its slots
 // are plain values aligned for `T` by the builder.
-unsafe impl<T: Copy + ShmLayout> ShmLayout for PerWorker<T> {}
+//
+// The field is the offset and the count whatever `T` is, so it is aligned as
+// the one named.
+unsafe impl<T: Copy + ShmLayout> ShmLayout for PerWorker<T> {
+    type AlignUnit = <Align<{ align_of::<PerWorker<u64>>() }> as Alignment>::Unit;
+}
 
 // The builder writes and frees the field through two raw words, the offset
 // and then the count right after it, not through the struct, so its layout
 // must stay what these assertions state.
 const _: () = {
     assert!(size_of::<PerWorker<u64>>() == 16);
+    assert!(matches::<PerWorker<u64>>() && matches::<PerWorker<[u8; 64]>>());
     assert!(core::mem::offset_of!(PerWorker<u64>, workers) == size_of::<isize>());
 };
 
@@ -818,13 +845,15 @@ impl<T: Copy + ShmLayout> PerWorkerSlice<T> {
 ///
 /// ```compile_fail,E0277
 /// # use core::marker::PhantomData;
-/// # use yanet_shm::shm::ShmLayout;
+/// # use yanet_shm::{shm::ShmLayout, unit::{Align, Alignment}};
 /// # use yanet_sys::dp::WorkerSlice;
 /// #[derive(Clone, Copy)]
 /// #[repr(C)]
 /// struct Local(u64, PhantomData<*const ()>);
-/// // SAFETY: a plain word with no padding and no drop.
-/// unsafe impl ShmLayout for Local {}
+/// // SAFETY: a plain word with no padding and no drop, aligned as one.
+/// unsafe impl ShmLayout for Local {
+///     type AlignUnit = <Align<{ align_of::<Local>() }> as Alignment>::Unit;
+/// }
 /// fn moves<T: Send>() {}
 /// moves::<WorkerSlice<'static, Local>>();
 /// ```
@@ -833,7 +862,7 @@ impl<T: Copy + ShmLayout> PerWorkerSlice<T> {
 /// which would outlive the block it points into:
 ///
 /// ```compile_fail,E0277
-/// # use yanet_shm::shm::ShmLayout;
+/// # use yanet_shm::{shm::ShmLayout, unit::{Align, Alignment}};
 /// # use yanet_sys::dp::WorkerSlice;
 /// fn layout<T: ShmLayout>() {}
 /// layout::<WorkerSlice<'static, u64>>();
@@ -842,7 +871,7 @@ impl<T: Copy + ShmLayout> PerWorkerSlice<T> {
 /// The field it comes from has one:
 ///
 /// ```
-/// # use yanet_shm::shm::ShmLayout;
+/// # use yanet_shm::{shm::ShmLayout, unit::{Align, Alignment}};
 /// # use yanet_sys::dp::PerWorkerSlice;
 /// fn layout<T: ShmLayout>() {}
 /// layout::<PerWorkerSlice<u64>>();
@@ -1032,13 +1061,19 @@ unsafe impl<T: Copy + ShmLayout + Send> Sync for PerWorkerSlice<T> {}
 
 // SAFETY: as above; the table and the regions it names are owned by the graph,
 // and the regions hold plain values aligned for `T` by the builder.
-unsafe impl<T: Copy + ShmLayout> ShmLayout for PerWorkerSlice<T> {}
+//
+// The field is the offset and the counts whatever `T` is, so it is aligned as
+// the one named.
+unsafe impl<T: Copy + ShmLayout> ShmLayout for PerWorkerSlice<T> {
+    type AlignUnit = <Align<{ align_of::<PerWorkerSlice<u64>>() }> as Alignment>::Unit;
+}
 
 // The builder writes and frees the field through three raw words, the table
 // offset, then the worker count and the length right after it, not through the
 // struct, so its layout must stay what these assertions state.
 const _: () = {
     assert!(size_of::<PerWorkerSlice<u64>>() == 24);
+    assert!(matches::<PerWorkerSlice<u64>>() && matches::<PerWorkerSlice<u8>>());
     assert!(core::mem::offset_of!(PerWorkerSlice<u64>, workers) == size_of::<isize>());
     assert!(core::mem::offset_of!(PerWorkerSlice<u64>, len) == 2 * size_of::<isize>());
 };

@@ -7,7 +7,11 @@ use core::{
     mem::{offset_of, size_of},
 };
 
-use yanet_shm::{rel::RelPtr, shm::ShmLayout};
+use yanet_shm::{
+    rel::RelPtr,
+    shm::ShmLayout,
+    unit::{Align, Alignment},
+};
 use yanet_sys::{
     bindings,
     cp::{Build, MemoryContext, Owner, Refusal},
@@ -26,8 +30,10 @@ struct Config {
 }
 
 // SAFETY: three registry indices of eight bytes, which accept every bit
-// pattern, with no padding and no drop.
-unsafe impl ShmLayout for Config {}
+// pattern, with no padding and no drop; the unit is that of the alignment.
+unsafe impl ShmLayout for Config {
+    type AlignUnit = <Align<{ align_of::<Config>() }> as Alignment>::Unit;
+}
 
 // SAFETY: the configuration is laid out by hand and never built: its parts
 // cannot exist, so nothing is ever written, and it owns no block to free.
