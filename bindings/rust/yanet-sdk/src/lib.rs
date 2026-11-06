@@ -128,7 +128,7 @@ pub use yanet_sys::{
     cp::{
         BlockAddr, Branch, Build, BuildError, Builder, Built, BuiltObject, Context, FfiRecord, Header, Kind,
         ModuleKind, ObjectBuilder, ObjectKind, Owned, OwnedRegions, OwnedSlice, OwnedSlots, Owner, Refusal, Registered,
-        Scope, Stage, Staged,
+        Scope,
     },
     dp::{
         Batch, CommitCx, Counter, CounterLayout, CounterRef, Cx, Device, DeviceRef, DscpMark, Module, ModuleCx, Object,

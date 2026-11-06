@@ -202,10 +202,10 @@ where
         .zip(nets)
         .map(|(view, pair)| pair.map(|_| &view.ports))
         .collect::<Vec<_>>();
-    let src = scope.branch(src_name, &src)?;
-    let dst = scope.branch(dst_name, &dst)?;
-    let proto = scope.branch(proto_name, &lines)?;
-    let port = scope.branch(port_name, &ports)?;
+    let src = scope.compile(src_name, &src)?;
+    let dst = scope.compile(dst_name, &dst)?;
+    let proto = scope.compile(proto_name, &lines)?;
+    let port = scope.compile(port_name, &ports)?;
     let nets_joint = scope.join_branches(nets_name, src, dst)?;
     let transport = scope.join_branches(transport_name, proto, port)?;
     scope.branch_rules(rules_name, nets_joint, transport, nets)
@@ -229,8 +229,8 @@ fn any_family<'b>(
         .zip(any)
         .map(|(view, slot)| slot.map(|_| &view.ports))
         .collect::<Vec<_>>();
-    let proto = scope.branch(c"assign any proto", &lines)?;
-    let port = scope.branch(c"assign any port", &ports)?;
+    let proto = scope.compile(c"assign any proto", &lines)?;
+    let port = scope.compile(c"assign any port", &ports)?;
     let transport = scope.join_branches(c"assign any transport", proto, port)?;
     scope.decode_branch(c"assign any rules", transport, any)
 }
