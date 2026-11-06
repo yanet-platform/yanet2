@@ -13,6 +13,11 @@
 #include "lib/classify/compiler/u16_ranges.h"
 #include "lib/classify/rule_table.h"
 
+_Static_assert(
+	YANET_SYS_CLASSIFY_NO_RULE == CLASSIFY_RULE_INVALID,
+	"the rule word of no match is the library's"
+);
+
 // The getters of the attribute compiles: a rule is the address of the view
 // the compile reads, so each getter hands out the view itself.
 static void

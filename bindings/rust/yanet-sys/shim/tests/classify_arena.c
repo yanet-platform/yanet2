@@ -6,6 +6,7 @@
 // resolves its lookups through, and is never freed.
 #include <stddef.h>
 #include <stdlib.h>
+#include <string.h>
 
 #include "common/memory.h"
 #include "common/memory_block.h"
@@ -29,6 +30,11 @@ yanet_sys_test_arena_new(size_t size) {
 	    ) != 0) {
 		free(arena);
 		return NULL;
+	}
+	// Every page faulted in before the allocator takes the region, as the
+	// dataplane's test harness zeroes its arena, when the environment asks.
+	if (getenv("YANET_SYS_TEST_ARENA_PREFAULT") != NULL) {
+		memset(arena->region, 0, size);
 	}
 	block_allocator_init(&arena->allocator);
 	block_allocator_put_arena(&arena->allocator, arena->region, size);

@@ -8,7 +8,6 @@
 use core::{
     convert::Infallible,
     ffi::{c_char, c_void},
-    mem::size_of,
     ptr::NonNull,
 };
 use std::ffi::CString;

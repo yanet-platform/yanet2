@@ -10,20 +10,20 @@
 #[allow(dead_code, reason = "these tests build through the builder alone")]
 mod arena;
 
-use core::{mem::offset_of, net::Ipv4Addr};
+use core::net::Ipv4Addr;
 
 use arena::ArenaOwner;
 // The workspace denies unused crate dependencies; this test names no crate it
 // imports `as _`.
 use netip as _;
 use yanet_sdk_testing as _;
-use yanet_shm::{rel::ShmBox, shm::ShmLayout};
+use yanet_shm::rel::ShmBox;
 use yanet_sys::{
     classify::{
-        Addr4, BURST, Decode, Join, Joint, LineAttr, LineRange, Lines, Net4, Net4Attr, Net6, Net6Attr, Nets4, Nets6,
-        PortAttr, PortRange, Ports, Rule, RuleMap, Rules,
+        Addr4, BURST, Decode, Join, LineAttr, LineRange, Lines, Net4, Net4Attr, Net6, Net6Attr, Nets4, Nets6, Paths,
+        PortAttr, PortRange, Ports, Rule, Rules,
     },
-    cp::{Build, BuildError, Builder, Built, MemoryContext, Owned, Owner, Refusal},
+    cp::{BuildError, Builder, Built, PathRules, Refusal},
     dp::{Batch, CommitCx, Cx, Module},
 };
 
@@ -57,7 +57,15 @@ macro_rules! tree_module {
     )*};
 }
 
+/// The IPv4 rules on a TCP path and a UDP path: the networks joined into the
+/// core, the destination ports of the rules that restrict one.
+type Paths4 = Paths<Join<Net4Attr, Net4Attr>, PortAttr, 2>;
+
+/// The protocols of the paths of [`Paths4`], by path.
+const PATHS: [u8; 2] = [6, 17];
+
 tree_module! {
+    Paths4: "classify-paths-v4";
     Tree4: "classify-tree-v4";
     Tree6: "classify-tree-v6";
     TreeAny: "classify-tree-any";
@@ -213,9 +221,9 @@ fn build4(owner: &ArenaOwner, rules: &[TestRule<Net4>]) -> Built<Tree<Tree4>, Ar
         let dst = scope.compile(c"dst", &dst)?;
         let proto = scope.compile(c"proto", &protos)?;
         let port = scope.compile(c"port", &ports)?;
-        let nets = scope.join_tree(c"nets", src, dst)?;
-        let transport = scope.join_tree(c"transport", proto, port)?;
-        scope.join_rules_tree(c"rules", nets, transport, &projection)
+        let nets = scope.join(c"nets", src, dst)?;
+        let transport = scope.join(c"transport", proto, port)?;
+        scope.join_rules(c"rules", nets, transport, &projection)
     })
     .unwrap()
 }
@@ -243,9 +251,9 @@ fn build6(owner: &ArenaOwner, rules: &[TestRule<Net6>]) -> Built<Tree<Tree6>, Ar
         let dst = scope.compile(c"dst", &dst)?;
         let proto = scope.compile(c"proto", &protos)?;
         let port = scope.compile(c"port", &ports)?;
-        let nets = scope.join_tree(c"nets", src, dst)?;
-        let transport = scope.join_tree(c"transport", proto, port)?;
-        scope.join_rules_tree(c"rules", nets, transport, &projection)
+        let nets = scope.join(c"nets", src, dst)?;
+        let transport = scope.join(c"transport", proto, port)?;
+        scope.join_rules(c"rules", nets, transport, &projection)
     })
     .unwrap()
 }
@@ -281,6 +289,65 @@ fn edges<N>(rules: &[TestRule<N>]) -> (Vec<u8>, Vec<u16>) {
     ports.sort_unstable();
     ports.dedup();
     (protos, ports)
+}
+
+/// Builds the paths of the IPv4 rules.
+fn build_paths4(owner: &ArenaOwner, rules: &[TestRule<Net4>]) -> Built<Tree<Paths4>, ArenaOwner> {
+    let views = rules
+        .iter()
+        .map(|rule| {
+            (
+                Nets4::new(&rule.src).unwrap(),
+                Nets4::new(&rule.dst).unwrap(),
+                Ports::new(&rule.ports).unwrap(),
+            )
+        })
+        .collect::<Vec<_>>();
+    let src = views.iter().map(|view| Some(&view.0)).collect::<Vec<_>>();
+    let dst = views.iter().map(|view| Some(&view.1)).collect::<Vec<_>>();
+    // The ports over the rules that restrict one only.
+    let ports = views
+        .iter()
+        .zip(rules)
+        .map(|(view, rule)| (!rule.ports.is_empty()).then_some(&view.2))
+        .collect::<Vec<_>>();
+    let on = |proto: u8, ported: bool| {
+        rules
+            .iter()
+            .map(|rule| {
+                let of = any_or(&rule.protos, |range| {
+                    (range.from..=range.to).contains(&u32::from(proto))
+                });
+                (of && rule.ports.is_empty() != ported).then_some(&())
+            })
+            .collect::<Vec<_>>()
+    };
+    let [tcp, udp] = PATHS.map(|proto| (on(proto, true), on(proto, false)));
+    Builder::build(owner, "paths", |scope| -> Result<_, Error> {
+        let src = scope.compile(c"src", &src)?;
+        let dst = scope.compile(c"dst", &dst)?;
+        let port = scope.compile(c"port", &ports)?;
+        let core = scope.join(c"core", src, dst)?;
+        scope.join_paths(
+            core,
+            port,
+            [
+                PathRules {
+                    table: c"tcp table",
+                    ported: &tcp.0,
+                    map: c"tcp map",
+                    plain: &tcp.1,
+                },
+                PathRules {
+                    table: c"udp table",
+                    ported: &udp.0,
+                    map: c"udp map",
+                    plain: &udp.1,
+                },
+            ],
+        )
+    })
+    .unwrap()
 }
 
 /// The IPv4 addresses at the edges of every network of the rules.
@@ -398,8 +465,8 @@ fn test_decode_tree_lookup_is_the_first_rule_of_the_projection() {
     let built: Built<Tree<TreeAny>, ArenaOwner> = Builder::build(&owner, "any", |scope| -> Result<_, Error> {
         let proto = scope.compile(c"proto", &protos)?;
         let port = scope.compile(c"port", &ports)?;
-        let transport = scope.join_tree(c"transport", proto, port)?;
-        scope.decode_tree(c"rules", transport, &projection)
+        let transport = scope.join(c"transport", proto, port)?;
+        scope.decode(c"rules", transport, &projection)
     })
     .unwrap();
     let tree = owner.body(&built).get(&owner);
@@ -444,9 +511,9 @@ fn test_rules_tree_of_an_empty_projection_is_no_rule() {
         let dst = scope.compile(c"dst", &none4)?;
         let proto = scope.compile(c"proto", &none_lines)?;
         let port = scope.compile(c"port", &none_ports)?;
-        let nets = scope.join_tree(c"nets", src, dst)?;
-        let transport = scope.join_tree(c"transport", proto, port)?;
-        scope.join_rules_tree(c"rules", nets, transport, &projection)
+        let nets = scope.join(c"nets", src, dst)?;
+        let transport = scope.join(c"transport", proto, port)?;
+        scope.join_rules(c"rules", nets, transport, &projection)
     })
     .unwrap();
     let tree = owner.body(&built).get(&owner);
@@ -461,7 +528,7 @@ fn test_rules_tree_of_an_empty_projection_is_no_rule() {
 
 #[test]
 #[cfg_attr(miri, ignore = "Miri does not run C")]
-fn test_join_tree_refuses_branches_of_rulesets_of_other_sizes() {
+fn test_join_refuses_branches_of_rulesets_of_other_sizes() {
     let owner = ArenaOwner::new();
     let lines = Lines::new(&[TCP]).unwrap();
     let http = [port(80, 80)];
@@ -469,10 +536,116 @@ fn test_join_tree_refuses_branches_of_rulesets_of_other_sizes() {
     let result: Result<Built<Tree<TreeAny>, ArenaOwner>, Error> = Builder::build(&owner, "mismatch", |scope| {
         let proto = scope.compile(c"proto", &[Some(&lines)])?;
         let port = scope.compile(c"port", &[Some(&ports), Some(&ports)])?;
-        let transport = scope.join_tree(c"transport", proto, port)?;
-        scope.decode_tree(c"rules", transport, &[Some(&())])
+        let transport = scope.join(c"transport", proto, port)?;
+        scope.decode(c"rules", transport, &[Some(&())])
     });
     assert!(matches!(result, Err(BuildError::Refused(Refusal::RuleSetMismatch))));
+}
+
+/// verifies that the IPv4 tree reports the first matching rule over every
+/// port of the protocols of the rules and every protocol of a few ports, not
+/// only at the edges of their ranges.
+#[test]
+#[cfg_attr(miri, ignore = "Miri does not run C")]
+fn test_rules_tree4_lookup_is_the_first_matching_rule_over_whole_domains() {
+    let owner = ArenaOwner::new();
+    let rules = rules4();
+    let built = build4(&owner, &rules);
+    let tree = owner.body(&built).get(&owner);
+    let pairs = [
+        ([10, 0, 0, 1], [192, 0, 2, 200]),
+        ([10, 1, 2, 3], [198, 51, 100, 5]),
+        ([1, 2, 3, 4], [203, 0, 113, 7]),
+    ];
+    let keys = (0..=u16::MAX)
+        .flat_map(|port| [0, 6, 17].map(|proto| (proto, port)))
+        .chain((0..=u8::MAX).flat_map(|proto| [22, 53, 80, 1500].map(|port| (proto, port))));
+    for (proto, port) in keys {
+        for (src, dst) in pairs {
+            let (src, dst) = (u32::from_be_bytes(src), u32::from_be_bytes(dst));
+            let expected = first(
+                &rules,
+                |rule| any_or(&rule.src, |net| in4(net, src)) && any_or(&rule.dst, |net| in4(net, dst)),
+                proto,
+                port,
+            );
+            let key = (
+                (Addr4::from(src.to_be_bytes()), Addr4::from(dst.to_be_bytes())),
+                (proto, port),
+            );
+            assert_eq!(expected, tree.lookup(&owner, key).index(), "{proto} {port}");
+        }
+    }
+}
+
+/// verifies that the IPv6 tree tells apart two destinations of one high
+/// half on either side of a network that splits the low half, which only the
+/// table of the rows of split high halves does.
+#[test]
+#[cfg_attr(miri, ignore = "Miri does not run C")]
+fn test_rules_tree6_lookup_splits_a_high_half_by_its_low_half() {
+    let owner = ArenaOwner::new();
+    let built = build6(&owner, &rules6());
+    let tree = owner.body(&built).get(&owner);
+    let doc6 = 0x2001_0db8_u128 << 96;
+    let lookup = |dst: u128| {
+        let key = ((doc6.to_be_bytes(), dst.to_be_bytes()), (UDP.from as u8, 53));
+        tree.lookup(&owner, key).index()
+    };
+    // The first rule's destination is the upper half of the low half's
+    // range of its high half.
+    assert_eq!((Some(0), None), (lookup(doc6 | (1 << 63) | 2), lookup(doc6 | 2)));
+}
+
+/// verifies that the paths report on the path of a protocol the first rule
+/// of that protocol a key matches, one key at a time and a burst at a time.
+#[test]
+#[cfg_attr(miri, ignore = "Miri does not run C")]
+fn test_paths4_lookup_is_the_first_matching_rule_of_the_path() {
+    let owner = ArenaOwner::new();
+    let rules = rules4();
+    let built = build_paths4(&owner, &rules);
+    let paths = owner.body(&built).get(&owner);
+    let addrs = edges4(&rules);
+    let (_, ports) = edges(&rules);
+    let mut keys = Vec::new();
+    for &src in &addrs {
+        for &dst in &addrs {
+            for (path, proto) in PATHS.into_iter().enumerate() {
+                for &port in &ports {
+                    keys.push((path, proto, src, dst, port));
+                }
+            }
+        }
+    }
+    let key = |&(path, _, src, dst, port): &(usize, u8, u32, u32, u16)| {
+        (
+            path,
+            ((Addr4::from(src.to_be_bytes()), Addr4::from(dst.to_be_bytes())), port),
+        )
+    };
+    let expected = keys
+        .iter()
+        .map(|&(_, proto, src, dst, port)| {
+            first(
+                &rules,
+                |rule| any_or(&rule.src, |net| in4(net, src)) && any_or(&rule.dst, |net| in4(net, dst)),
+                proto,
+                port,
+            )
+        })
+        .collect::<Vec<_>>();
+    let found = keys
+        .iter()
+        .map(|item| {
+            let (path, key) = key(item);
+            paths.lookup(&owner, path, key).index()
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(expected, found);
+    let mut burst = vec![Rule::NONE; keys.len()];
+    paths.lookup_burst(&owner, &keys, key, &mut burst);
+    assert_eq!(expected, burst.iter().map(|rule| rule.index()).collect::<Vec<_>>());
 }
 
 /// verifies that a burst lookup reports for each key the rule a lookup of the
@@ -524,8 +697,8 @@ fn test_decode_tree_lookup_burst_is_the_lookup_of_each_key() {
     let built: Built<Tree<TreeAny>, ArenaOwner> = Builder::build(&owner, "any", |scope| -> Result<_, Error> {
         let proto = scope.compile(c"proto", &protos)?;
         let port = scope.compile(c"port", &ports)?;
-        let transport = scope.join_tree(c"transport", proto, port)?;
-        scope.decode_tree(c"rules", transport, &projection)
+        let transport = scope.join(c"transport", proto, port)?;
+        scope.decode(c"rules", transport, &projection)
     })
     .unwrap();
     let tree = owner.body(&built).get(&owner);
@@ -538,68 +711,6 @@ fn test_decode_tree_lookup_burst_is_the_lookup_of_each_key() {
     let mut burst = vec![Rule::NONE; keys.len()];
     tree.lookup_burst(&owner, &keys, |&key| key, &mut burst);
     assert_eq!(expected, burst);
-}
-
-/// The parts of the per-stage composition of the rules of any family: the
-/// protocol and the port, their joint and its rule map, each a field of the
-/// configuration as a module composing its own query keeps them.
-#[repr(C)]
-struct Stages {
-    proto: ShmBox<LineAttr>,
-    port: ShmBox<PortAttr>,
-    transport: ShmBox<Joint>,
-    rules: ShmBox<RuleMap>,
-}
-
-// SAFETY: a `#[repr(C)]` struct of four offset words, without padding, which
-// accepts every pattern and needs no drop.
-unsafe impl ShmLayout for Stages {}
-
-// SAFETY: each field is written and freed as its box is, the whole value
-// being the four of them.
-unsafe impl Build for Stages {
-    type Parts<'b, W: Owner> = (
-        Owned<'b, LineAttr, W>,
-        Owned<'b, PortAttr, W>,
-        Owned<'b, Joint, W>,
-        Owned<'b, RuleMap, W>,
-    );
-
-    unsafe fn write<W: Owner>(
-        (proto, port, transport, rules): Self::Parts<'_, W>,
-        memory: &MemoryContext<'_, W>,
-        addr: usize,
-    ) -> Result<(), Refusal> {
-        // SAFETY: each field is an aligned offset word of the value at the
-        // address (caller contract); a box write only stores the offset.
-        unsafe {
-            <ShmBox<LineAttr> as Build>::write(proto, memory, addr + offset_of!(Self, proto))?;
-            <ShmBox<PortAttr> as Build>::write(port, memory, addr + offset_of!(Self, port))?;
-            <ShmBox<Joint> as Build>::write(transport, memory, addr + offset_of!(Self, transport))?;
-            <ShmBox<RuleMap> as Build>::write(rules, memory, addr + offset_of!(Self, rules))
-        }
-    }
-
-    unsafe fn free<W: Owner>(addr: usize, memory: &MemoryContext<'_, W>) {
-        // SAFETY: the value was written whole (caller contract), each field
-        // a box of its block; newest first.
-        unsafe {
-            <ShmBox<RuleMap> as Build>::free(addr + offset_of!(Self, rules), memory);
-            <ShmBox<Joint> as Build>::free(addr + offset_of!(Self, transport), memory);
-            <ShmBox<PortAttr> as Build>::free(addr + offset_of!(Self, port), memory);
-            <ShmBox<LineAttr> as Build>::free(addr + offset_of!(Self, proto), memory);
-        }
-    }
-}
-
-impl Module for Tree<Stages> {
-    const NAME: &'static str = "classify-stages";
-    type Config = Stages;
-    type Prepared<'p> = ();
-
-    fn handle<'id>(_: &mut Cx<'id, Self>, _: &mut Batch<'id>) {}
-
-    fn prepare<'p>(_: &CommitCx<'p, Self>) {}
 }
 
 /// The views of the protocols and the ports of the IPv4 rules, and a
@@ -630,50 +741,6 @@ impl<'a> AnyViews<'a> {
     }
 }
 
-/// verifies that a module composing its own query stage by stage, the
-/// branches borrowed by the per-stage join and decode and then handed to its
-/// fields, reads through the checked lookups the rule the tree of the same
-/// rules does for every key.
-#[test]
-#[cfg_attr(miri, ignore = "Miri does not run C")]
-fn test_per_stage_composition_reads_the_rule_of_the_tree() {
-    let owner = ArenaOwner::new();
-    let rules = rules4();
-    let views = AnyViews::new(&rules);
-    let (protos, ports, projection) = (views.protos(), views.ports(), views.projection());
-    let stages: Built<Tree<Stages>, ArenaOwner> = Builder::build(&owner, "stages", |scope| -> Result<_, Error> {
-        let proto = scope.compile(c"proto", &protos)?;
-        let port = scope.compile(c"port", &ports)?;
-        let transport = scope.join(c"transport", &proto, &port)?;
-        let decoded = scope.decode(c"rules", &transport, &projection)?;
-        Ok((proto.into_owned(), port.into_owned(), transport.into_owned(), decoded))
-    })
-    .unwrap();
-    let tree: Built<Tree<TreeAny>, ArenaOwner> = Builder::build(&owner, "tree", |scope| -> Result<_, Error> {
-        let proto = scope.compile(c"proto", &protos)?;
-        let port = scope.compile(c"port", &ports)?;
-        let transport = scope.join_tree(c"transport", proto, port)?;
-        scope.decode_tree(c"rules", transport, &projection)
-    })
-    .unwrap();
-    let (stages, tree) = (owner.body(&stages), owner.body(&tree).get(&owner));
-    let (edge_protos, edge_ports) = edges(&rules);
-    for &proto in &edge_protos {
-        for &port in &edge_ports {
-            let (mut proto_class, mut port_class, mut class) = ([0], [0], [0]);
-            stages.proto.get(&owner).lookup(&owner, &[proto], &mut proto_class);
-            stages.port.get(&owner).lookup(&owner, &[port], &mut port_class);
-            stages
-                .transport
-                .get(&owner)
-                .lookup(&owner, &proto_class, &port_class, &mut class);
-            let mut rule = [Rule::NONE];
-            stages.rules.get(&owner).lookup(&owner, &class, &mut rule);
-            assert_eq!(tree.lookup(&owner, (proto, port)), rule[0], "{proto} {port}");
-        }
-    }
-}
-
 /// verifies that releasing a tree returns every block its build took from
 /// the arena, and so does a build refused part way, its branches included.
 #[test]
@@ -689,13 +756,18 @@ fn test_tree_build_and_release_leave_the_arena_as_they_found_it() {
     unsafe { built.destroy(&owner) };
     assert_eq!(baseline, owner.free_bytes(), "a released tree");
 
+    let built = build_paths4(&owner, &rules);
+    // SAFETY: as above.
+    unsafe { built.destroy(&owner) };
+    assert_eq!(baseline, owner.free_bytes(), "released paths");
+
     let views = AnyViews::new(&rules);
     let (protos, ports) = (views.protos(), views.ports());
     let refused: Result<Built<Tree<TreeAny>, ArenaOwner>, Error> = Builder::build(&owner, "refused", |scope| {
         let proto = scope.compile(c"proto", &protos)?;
         let port = scope.compile(c"port", &ports[1..])?;
-        let transport = scope.join_tree(c"transport", proto, port)?;
-        scope.decode_tree(c"rules", transport, &views.projection())
+        let transport = scope.join(c"transport", proto, port)?;
+        scope.decode(c"rules", transport, &views.projection())
     });
     assert!(matches!(refused, Err(BuildError::Refused(Refusal::RuleSetMismatch))));
     assert_eq!(baseline, owner.free_bytes(), "a refused build");

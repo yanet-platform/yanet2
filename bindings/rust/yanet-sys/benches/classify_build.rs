@@ -20,13 +20,17 @@
 //! table, then scans every class against the bound the table that reads it
 //! sets, as a validation at build would. `--acl-shape` builds instead after
 //! the composition of the ACL module and prints its build steps and table
-//! sizes only.
+//! sizes only, and `--paths` builds the same composition as the paths node of
+//! the tree, through the builder, and prints its total time.
 //!
 //! `YANET_SYS_TEST_ARENA_MIB=65536 cargo bench -p yanet-sys --bench
-//! classify_build -- [RULES] [--acl-shape]`, 200000 rules by default.
+//! classify_build -- [RULES] [--acl-shape | --paths]`, 200000 rules by
+//! default. `YANET_SYS_TEST_ARENA_PREFAULT=1` faults the arena in before the
+//! build, as the dataplane's test harness does, so a build is timed against
+//! the ACL module's compile without the page faults of a fresh arena.
 
 #[path = "../tests/support/arena.rs"]
-#[allow(dead_code, reason = "the benchmark reads no configuration")]
+#[allow(dead_code, reason = "the benchmark checks no release")]
 mod arena;
 
 use core::{ffi::CStr, hint::black_box, mem::size_of};
@@ -37,11 +41,14 @@ use arena::ArenaOwner;
 // crate it imports `as _`.
 use netip as _;
 use yanet_sdk_testing as _;
-// The arena's root is not followed: the scan reads C's own pointers.
-use yanet_shm as _;
+use yanet_shm::rel::ShmBox;
 use yanet_sys::{
     bindings,
-    classify::{Attribute, Joint, LineRange, Lines, Net6, Nets6, PortRange, Ports, RuleTable},
+    classify::{
+        Attribute, Join, Joint, LineRange, Lines, Net6, Net6Attr, Nets6, Paths, PortAttr, PortRange, Ports, RuleTable,
+    },
+    cp::{BuildError, Builder, Built, PathRules},
+    dp::{Batch, CommitCx, Cx, Module},
 };
 
 /// A seeded xorshift generator, so a ruleset is the same in every process.
@@ -455,6 +462,76 @@ fn acl_shape<'a>(
     print_rule_table("udp rule table", udp);
 }
 
+/// The paths node of the IPv6 rules: the networks joined into the core, the
+/// destination ports of the rules that restrict one, a TCP and a UDP path.
+type Paths6 = Paths<Join<Net6Attr, Net6Attr>, PortAttr, 2>;
+
+/// The module of the paths node; never run.
+struct PathsModule;
+
+impl Module for PathsModule {
+    const NAME: &'static str = "classify-build-paths";
+    type Config = ShmBox<Paths6>;
+    type Prepared<'p> = ();
+
+    fn handle<'id>(_: &mut Cx<'id, Self>, _: &mut Batch<'id>) {}
+
+    fn prepare<'p>(_: &CommitCx<'p, Self>) {}
+}
+
+/// Builds the ACL composition as the paths node of the tree, through the
+/// builder, and prints its total time.
+fn paths<'a>(
+    owner: &ArenaOwner,
+    rules: &[Rule],
+    src: &[Option<&Nets6<'a>>],
+    dst: &[Option<&Nets6<'a>>],
+    ports: &[Option<&Ports<'a>>],
+) {
+    let of = |proto: u32, rule: &Rule| rule.protos.is_empty() || rule.protos.iter().any(|range| range.from == proto);
+    let projection = |proto: u32, ported: bool| {
+        rules
+            .iter()
+            .map(|rule| (of(proto, rule) && rule.ports.is_empty() != ported).then_some(&()))
+            .collect::<Vec<_>>()
+    };
+    let ported = ports
+        .iter()
+        .zip(rules)
+        .map(|(view, rule)| (!rule.ports.is_empty()).then_some(*view).flatten())
+        .collect::<Vec<_>>();
+    let [tcp, udp] = [6, 17].map(|proto| (projection(proto, true), projection(proto, false)));
+    let start = Instant::now();
+    let built: Built<PathsModule, ArenaOwner> =
+        Builder::build(owner, "paths", |scope| -> Result<_, BuildError<arena::Never>> {
+            let src = scope.compile(c"src", src)?;
+            let dst = scope.compile(c"dst", dst)?;
+            let port = scope.compile(c"port", &ported)?;
+            let core = scope.join(c"core", src, dst)?;
+            scope.join_paths(
+                core,
+                port,
+                [
+                    PathRules {
+                        table: c"tcp table",
+                        ported: &tcp.0,
+                        map: c"tcp map",
+                        plain: &tcp.1,
+                    },
+                    PathRules {
+                        table: c"udp table",
+                        ported: &udp.0,
+                        map: c"udp map",
+                        plain: &udp.1,
+                    },
+                ],
+            )
+        })
+        .unwrap();
+    println!("build\ttotal\t{:.1} ms", start.elapsed().as_secs_f64() * 1e3);
+    black_box(owner.body(&built));
+}
+
 fn main() {
     let count = env::args().skip(1).find_map(|arg| arg.parse().ok()).unwrap_or(200_000);
     let owner = ArenaOwner::new();
@@ -491,6 +568,10 @@ fn main() {
     let protos = views.iter().map(|view| Some(&view.2)).collect::<Vec<_>>();
     let ports = views.iter().map(|view| Some(&view.3)).collect::<Vec<_>>();
     let projection = views.iter().map(|_| Some(&())).collect::<Vec<_>>();
+    if env::args().any(|arg| arg == "--paths") {
+        paths(&owner, &rules, &src, &dst, &ports);
+        return;
+    }
     if env::args().any(|arg| arg == "--acl-shape") {
         acl_shape(&owner, &rules, &src, &dst, &ports);
         return;
