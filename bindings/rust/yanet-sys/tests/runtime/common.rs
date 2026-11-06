@@ -3,13 +3,13 @@
 //!
 //! It follows no packet rule of C and no rule of the dataplane.
 
+use alloc::alloc::{alloc_zeroed, dealloc, handle_alloc_error};
 use core::{
     alloc::Layout,
     marker::PhantomData,
     mem::{align_of, size_of, size_of_val},
     ptr::NonNull,
 };
-use std::alloc::{alloc_zeroed, dealloc, handle_alloc_error};
 
 use yanet_sdk_testing::BlockArena;
 use yanet_sys::{

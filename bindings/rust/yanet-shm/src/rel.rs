@@ -103,7 +103,7 @@ impl<T> ShmBox<T> {
 }
 
 const _: () = {
-    assert!(core::mem::size_of::<RelPtr<u64>>() == core::mem::size_of::<*const u8>());
-    assert!(core::mem::size_of::<ShmBox<u64>>() == 8);
-    assert!(core::mem::size_of::<ShmSlice<u64>>() == 16);
+    assert!(size_of::<RelPtr<u64>>() == size_of::<*const u8>());
+    assert!(size_of::<ShmBox<u64>>() == 8);
+    assert!(size_of::<ShmSlice<u64>>() == 16);
 };

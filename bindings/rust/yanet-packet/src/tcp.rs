@@ -25,26 +25,39 @@ pub struct TcpHeader {
 }
 
 impl TcpHeader {
+    /// Bytes of the header without options.
     pub const MIN_LEN: usize = 20;
+    /// Flag bit: the sender has no more data.
     pub const FIN: u16 = 0x01;
+    /// Flag bit: synchronise sequence numbers.
     pub const SYN: u16 = 0x02;
+    /// Flag bit: reset the connection.
     pub const RST: u16 = 0x04;
+    /// Flag bit: push the data to the receiving application.
     pub const PSH: u16 = 0x08;
+    /// Flag bit: the acknowledgment number is significant.
     pub const ACK: u16 = 0x10;
+    /// Flag bit: the urgent pointer is significant.
     pub const URG: u16 = 0x20;
 
+    /// Source port, in host byte order.
     pub fn src_port(&self) -> u16 {
         self.src_port.get()
     }
 
+    /// Destination port, in host byte order.
     pub fn dst_port(&self) -> u16 {
         self.dst_port.get()
     }
 
+    /// Sequence number of the first data byte, or with SYN set the initial
+    /// sequence number, in host byte order.
     pub fn seq(&self) -> u32 {
         self.seq.get()
     }
 
+    /// Acknowledgment number, the next sequence number the sender expects,
+    /// in host byte order.
     pub fn ack(&self) -> u32 {
         self.ack.get()
     }
@@ -64,24 +77,30 @@ impl TcpHeader {
         self.offset_flags.get() & 0x01ff
     }
 
+    /// Receive window, before any window scaling.
     pub fn window(&self) -> u16 {
         self.window.get()
     }
 
+    /// Checksum as stored.
     pub fn checksum(&self) -> u16 {
         self.checksum.get()
     }
 
+    /// Urgent pointer, the offset past the sequence number where urgent data
+    /// ends, in host byte order.
     pub fn urgent(&self) -> u16 {
         self.urgent.get()
     }
 
+    /// Sets the source port and updates the checksum.
     pub fn set_src_port(&mut self, port: u16) {
         let old = self.src_port.get();
         self.src_port.set(port);
         self.update_word(old, port);
     }
 
+    /// Sets the destination port and updates the checksum.
     pub fn set_dst_port(&mut self, port: u16) {
         let old = self.dst_port.get();
         self.dst_port.set(port);
@@ -127,8 +146,11 @@ fn split_options(header: &TcpHeader, available: usize) -> Result<usize, ParseErr
 #[derive(Debug, Clone, Copy)]
 #[non_exhaustive]
 pub struct TcpPacket<'a> {
+    /// Fixed header.
     pub header: &'a TcpHeader,
+    /// Options, the bytes the data offset counts past the fixed header.
     pub options: &'a [u8],
+    /// Bytes after the options up to the end of the input.
     pub payload: &'a [u8],
 }
 
@@ -157,8 +179,11 @@ impl<'a> TcpPacket<'a> {
 #[derive(Debug)]
 #[non_exhaustive]
 pub struct TcpPacketMut<'a> {
+    /// Fixed header.
     pub header: &'a mut TcpHeader,
+    /// Options, the bytes the data offset counts past the fixed header.
     pub options: &'a mut [u8],
+    /// Bytes after the options up to the end of the input.
     pub payload: &'a mut [u8],
 }
 
@@ -317,7 +342,7 @@ mod tests {
             .concat()
         }
 
-        fn read(packet: &TcpPacket) -> Self {
+        fn read(packet: &TcpPacket<'_>) -> Self {
             let header = packet.header;
             Self {
                 src_port: header.src_port(),

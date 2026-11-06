@@ -25,8 +25,10 @@ pub struct Ipv4Header {
 }
 
 impl Ipv4Header {
+    /// Bytes of the header without options.
     pub const MIN_LEN: usize = 20;
 
+    /// IP version, 4 for a header that parsed.
     pub fn version(&self) -> u8 {
         self.version_ihl >> 4
     }
@@ -41,18 +43,22 @@ impl Ipv4Header {
         usize::from(self.ihl()) * 4
     }
 
+    /// Differentiated services codepoint, 0 to 63.
     pub fn dscp(&self) -> u8 {
         self.tos >> 2
     }
 
+    /// Explicit congestion notification codepoint, 0 to 3.
     pub fn ecn(&self) -> u8 {
         self.tos & 3
     }
 
+    /// Length of the packet in bytes, header included.
     pub fn total_len(&self) -> u16 {
         self.total_len.get()
     }
 
+    /// Identification, shared by the fragments of a packet.
     pub fn id(&self) -> u16 {
         self.id.get()
     }
@@ -67,22 +73,29 @@ impl Ipv4Header {
         self.frag.get() & 0x3fff != 0
     }
 
+    /// Time to live: the hops left before a router discards the packet.
     pub fn ttl(&self) -> u8 {
         self.ttl
     }
 
+    /// IP protocol number of the payload.
     pub fn protocol(&self) -> u8 {
         self.protocol
     }
 
+    /// Header checksum as stored.
     pub fn checksum(&self) -> u16 {
         self.checksum.get()
     }
 
+    /// Source address, as the packet carries it now; unlike the MAC
+    /// addresses, it is not rewritten at every hop.
     pub fn src(&self) -> Ipv4Addr {
         Ipv4Addr::from(self.src)
     }
 
+    /// Destination address, as the packet carries it now; unlike the MAC
+    /// addresses, it is not rewritten at every hop.
     pub fn dst(&self) -> Ipv4Addr {
         Ipv4Addr::from(self.dst)
     }
@@ -123,18 +136,24 @@ impl Ipv4Header {
         self.replace_checksum(old, total_len);
     }
 
+    /// Sets the identification and updates the checksum.
     pub fn set_id(&mut self, id: u16) {
         let old = self.id.get();
         self.id.set(id);
         self.replace_checksum(old, id);
     }
 
+    /// Sets the TTL and updates the checksum.
     pub fn set_ttl(&mut self, ttl: u8) {
         let old = self.ttl_word();
         self.ttl = ttl;
         self.replace_checksum(old, self.ttl_word());
     }
 
+    /// Sets the protocol and updates the header checksum.
+    ///
+    /// The L4 pseudo-header checksum covers the protocol too and is left as
+    /// it was.
     pub fn set_protocol(&mut self, protocol: u8) {
         let old = self.ttl_word();
         self.protocol = protocol;
@@ -209,7 +228,9 @@ fn split_lengths(header: &Ipv4Header, available: usize) -> Result<(usize, usize)
 #[derive(Debug, Clone, Copy)]
 #[non_exhaustive]
 pub struct Ipv4Packet<'a> {
+    /// Fixed header.
     pub header: &'a Ipv4Header,
+    /// Options, the bytes the header length counts past the fixed header.
     pub options: &'a [u8],
     /// Bytes after the header up to the total length.
     pub payload: &'a [u8],
@@ -254,7 +275,9 @@ impl<'a> Ipv4Packet<'a> {
 #[derive(Debug)]
 #[non_exhaustive]
 pub struct Ipv4PacketMut<'a> {
+    /// Fixed header.
     pub header: &'a mut Ipv4Header,
+    /// Options, the bytes the header length counts past the fixed header.
     pub options: &'a mut [u8],
     /// Bytes after the header up to the total length.
     pub payload: &'a mut [u8],
@@ -550,7 +573,7 @@ mod tests {
             .concat()
         }
 
-        fn read(packet: &Ipv4Packet) -> Self {
+        fn read(packet: &Ipv4Packet<'_>) -> Self {
             let header = packet.header;
             Self {
                 dscp: header.dscp(),

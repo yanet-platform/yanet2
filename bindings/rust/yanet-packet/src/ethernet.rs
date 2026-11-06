@@ -3,9 +3,14 @@ use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout, Unaligned, byteorde
 
 use crate::{ParseError, split_header, split_header_mut};
 
+/// Ethertype of IPv4.
 pub const ETHERTYPE_IPV4: u16 = 0x0800;
+/// Ethertype of IPv6.
 pub const ETHERTYPE_IPV6: u16 = 0x86dd;
+/// Tag protocol identifier of an 802.1Q customer VLAN tag.
 pub const ETHERTYPE_VLAN: u16 = 0x8100;
+/// Tag protocol identifier of an 802.1ad service VLAN tag, the outer one
+/// of a double-tagged frame.
 pub const ETHERTYPE_QINQ: u16 = 0x88a8;
 
 /// Ethernet II header.
@@ -18,6 +23,7 @@ pub struct EthernetHeader {
 }
 
 impl EthernetHeader {
+    /// Bytes of the header.
     pub const LEN: usize = 14;
 
     /// Splits the header off the front of the input.
@@ -38,26 +44,37 @@ impl EthernetHeader {
         split_header_mut(buf)
     }
 
+    /// Destination MAC address: the receiving interface on this link,
+    /// rewritten at every hop.
     pub fn dst(&self) -> MacAddr {
         MacAddr::from(self.dst)
     }
 
+    /// Source MAC address: the interface that last sent the frame on this
+    /// link.
     pub fn src(&self) -> MacAddr {
         MacAddr::from(self.src)
     }
 
+    /// Sets the destination MAC address; the header carries no checksum to
+    /// update.
     pub fn set_dst(&mut self, addr: MacAddr) {
         self.dst = addr.octets();
     }
 
+    /// Sets the source MAC address; the header carries no checksum to
+    /// update.
     pub fn set_src(&mut self, addr: MacAddr) {
         self.src = addr.octets();
     }
 
+    /// Ethertype of the payload, or the tag protocol identifier when a VLAN
+    /// tag follows.
     pub fn ethertype(&self) -> u16 {
         self.ethertype.get()
     }
 
+    /// Sets the ethertype or the tag protocol identifier.
     pub fn set_ethertype(&mut self, ethertype: u16) {
         self.ethertype.set(ethertype);
     }
@@ -77,6 +94,7 @@ pub struct VlanTag {
 }
 
 impl VlanTag {
+    /// Bytes of the tag.
     pub const LEN: usize = 4;
 
     /// Splits the tag off the front of the input.
@@ -102,6 +120,8 @@ impl VlanTag {
         (self.tci.get() >> 13) as u8
     }
 
+    /// Drop eligible indicator: the frame may be dropped first under
+    /// congestion.
     pub fn drop_eligible(&self) -> bool {
         self.tci.get() & 0x1000 != 0
     }
@@ -127,6 +147,7 @@ impl VlanTag {
             .set((self.tci.get() & 0x1fff) | (u16::from(priority & 7) << 13));
     }
 
+    /// Sets the ethertype of the payload that follows the tag.
     pub fn set_ethertype(&mut self, ethertype: u16) {
         self.ethertype.set(ethertype);
     }

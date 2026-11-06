@@ -11,6 +11,10 @@
 
 #![no_std]
 #![forbid(unsafe_code)]
+#![allow(
+    missing_docs,
+    reason = "test fixture: its fields and impls would only restate their names"
+)]
 
 pub mod assign;
 

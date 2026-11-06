@@ -28,7 +28,7 @@ pub enum Args {
 }
 
 impl Parse for Args {
-    fn parse(input: ParseStream) -> syn::Result<Self> {
+    fn parse(input: ParseStream<'_>) -> syn::Result<Self> {
         let key: Ident = input.parse()?;
         let kind: fn(Path) -> Self = match key.to_string().as_str() {
             "module" => Self::Module,

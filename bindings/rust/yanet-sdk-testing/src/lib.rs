@@ -11,6 +11,7 @@ extern crate alloc;
 #[cfg(feature = "cp")]
 pub mod cp;
 
+use alloc::alloc::{alloc, handle_alloc_error};
 use core::{
     alloc::Layout,
     cell::Cell,
@@ -18,10 +19,7 @@ use core::{
     ptr::{self, NonNull},
     sync::atomic::AtomicPtr,
 };
-use std::{
-    alloc::{alloc, handle_alloc_error},
-    sync::Mutex,
-};
+use std::sync::Mutex;
 
 use yanet_shm::{resolve::Resolve, root::ShmRoot};
 
@@ -60,6 +58,10 @@ static ARENAS: Mutex<Vec<AtomicPtr<BlockArena>>> = Mutex::new(Vec::new());
 
 impl BlockArena {
     /// Empty arena, leaked.
+    ///
+    /// # Panics
+    ///
+    /// When another thread panicked while holding the list of arenas.
     pub fn new() -> &'static Self {
         let layout = Layout::from_size_align(REGION_SIZE, BLOCK).expect("region layout");
         // SAFETY: the layout has a non-zero size.
@@ -74,6 +76,10 @@ impl BlockArena {
 
     /// Allocates a zeroed block aligned to 64, followed by a gap of at least
     /// 64 unwritten bytes.
+    ///
+    /// # Panics
+    ///
+    /// When the arena has no room left for the block and its gap.
     pub fn alloc(&self, size: usize) -> NonNull<u8> {
         let size = size.max(1);
         let offset = self.used.get();

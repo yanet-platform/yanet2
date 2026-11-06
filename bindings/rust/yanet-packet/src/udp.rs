@@ -17,6 +17,7 @@ pub struct UdpHeader {
 }
 
 impl UdpHeader {
+    /// Bytes of the header.
     pub const LEN: usize = 8;
 
     /// Splits the header and its payload off the front of the input.
@@ -61,10 +62,12 @@ impl UdpHeader {
         Ok(length - Self::LEN)
     }
 
+    /// Source port, in host byte order.
     pub fn src_port(&self) -> u16 {
         self.src_port.get()
     }
 
+    /// Destination port, in host byte order.
     pub fn dst_port(&self) -> u16 {
         self.dst_port.get()
     }
@@ -74,6 +77,7 @@ impl UdpHeader {
         self.length.get()
     }
 
+    /// Checksum as stored; zero when the sender skipped it.
     pub fn checksum(&self) -> u16 {
         self.checksum.get()
     }
@@ -84,12 +88,14 @@ impl UdpHeader {
         self.checksum.get() == 0
     }
 
+    /// Sets the source port and updates the checksum, if any.
     pub fn set_src_port(&mut self, port: u16) {
         let old = self.src_port.get();
         self.src_port.set(port);
         self.update_word(old, port);
     }
 
+    /// Sets the destination port and updates the checksum, if any.
     pub fn set_dst_port(&mut self, port: u16) {
         let old = self.dst_port.get();
         self.dst_port.set(port);

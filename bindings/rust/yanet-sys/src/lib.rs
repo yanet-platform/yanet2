@@ -15,10 +15,14 @@
     non_upper_case_globals,
     non_snake_case,
     dead_code,
+    missing_docs,
     unnecessary_transmutes,
     unsafe_op_in_unsafe_fn,
+    unused_qualifications,
     clippy::all,
-    clippy::undocumented_unsafe_blocks
+    clippy::ptr_as_ptr,
+    clippy::undocumented_unsafe_blocks,
+    reason = "bindgen generates this module from the C headers"
 )]
 pub mod bindings {
     include!(concat!(env!("OUT_DIR"), "/bindings.rs"));

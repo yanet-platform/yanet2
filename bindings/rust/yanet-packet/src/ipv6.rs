@@ -24,6 +24,7 @@ pub struct Ipv6Header {
 }
 
 impl Ipv6Header {
+    /// Bytes of the fixed header.
     pub const LEN: usize = 40;
 
     /// Splits the header and its payload off the front of the input.
@@ -68,43 +69,56 @@ impl Ipv6Header {
         Ok(payload_len)
     }
 
+    /// IP version, 6 for a header that parsed.
     pub fn version(&self) -> u8 {
         (self.version_tc_flow.get() >> 28) as u8
     }
 
+    /// Traffic class: the DSCP in the upper six bits, ECN in the lower two.
     pub fn traffic_class(&self) -> u8 {
         (self.version_tc_flow.get() >> 20) as u8
     }
 
+    /// Flow label, 20 bits.
     pub fn flow_label(&self) -> u32 {
         self.version_tc_flow.get() & 0x000f_ffff
     }
 
+    /// Length of the payload in bytes, extension headers included.
     pub fn payload_len(&self) -> u16 {
         self.payload_len.get()
     }
 
+    /// Type of the first extension header, or the IP protocol number of the
+    /// payload.
     pub fn next_header(&self) -> u8 {
         self.next_header
     }
 
+    /// Hop limit: the hops left before a router discards the packet.
     pub fn hop_limit(&self) -> u8 {
         self.hop_limit
     }
 
+    /// Source address, as the packet carries it now; unlike the MAC
+    /// addresses, it is not rewritten at every hop.
     pub fn src(&self) -> Ipv6Addr {
         Ipv6Addr::from(self.src)
     }
 
+    /// Destination address, as the packet carries it now; unlike the MAC
+    /// addresses, it is not rewritten at every hop.
     pub fn dst(&self) -> Ipv6Addr {
         Ipv6Addr::from(self.dst)
     }
 
+    /// Sets the traffic class; the version and the flow label are kept.
     pub fn set_traffic_class(&mut self, traffic_class: u8) {
         let word = self.version_tc_flow.get() & !0x0ff0_0000;
         self.version_tc_flow.set(word | (u32::from(traffic_class) << 20));
     }
 
+    /// Sets the hop limit; the IPv6 header carries no checksum to update.
     pub fn set_hop_limit(&mut self, hop_limit: u8) {
         self.hop_limit = hop_limit;
     }

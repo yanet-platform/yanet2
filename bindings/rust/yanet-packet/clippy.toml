@@ -1,0 +1,2 @@
+# Protocol names the doc comments write as prose, not as code.
+doc-valid-idents = ["ICMPv4", "ICMPv6", ".."]

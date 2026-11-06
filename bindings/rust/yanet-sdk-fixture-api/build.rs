@@ -1,3 +1,6 @@
+//! Build script of the fixture api crate: the C header of its records and
+//! constants, written when the build names a header directory.
+
 fn main() {
     // The header carries the constants of the module crate.
     println!("cargo:rerun-if-changed=../yanet-sdk-fixture/src");

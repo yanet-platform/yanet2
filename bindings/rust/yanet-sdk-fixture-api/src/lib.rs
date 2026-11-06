@@ -8,6 +8,10 @@
 //! carries the records, the mode values and the fault values.
 
 #![forbid(unsafe_code)]
+#![allow(
+    missing_docs,
+    reason = "test fixture: its fields and impls would only restate their names"
+)]
 
 pub mod assign;
 
@@ -94,6 +98,10 @@ pub struct Fixture;
 impl Fixture {
     /// A configuration named `name` with weights 1, 2 and 3 allocated first,
     /// then the fault the spec selects, then the counter and the device.
+    ///
+    /// # Panics
+    ///
+    /// When the fault selects a panic, for the panic guard of the export.
     pub fn build(
         agent: &Agent,
         name: &str,
@@ -227,6 +235,10 @@ impl State {
     /// two values holding `seed`; the fault, a `FIXTURE_FAULT_*`
     /// constant, fails the build after it has allocated the slots and the
     /// regions.
+    ///
+    /// # Panics
+    ///
+    /// When the fault selects a panic, for the panic guard of the export.
     pub fn build(
         agent: &Agent,
         name: &str,
@@ -274,6 +286,10 @@ impl State {
 
     /// The seed of the object, unless the fault, a `FIXTURE_FAULT_*`
     /// constant, fails the query.
+    ///
+    /// # Panics
+    ///
+    /// When the fault selects a panic, for the panic guard of the export.
     pub fn seed(
         agent: &Agent,
         state: &BuiltObject<yanet_sdk_fixture::State, Agent>,

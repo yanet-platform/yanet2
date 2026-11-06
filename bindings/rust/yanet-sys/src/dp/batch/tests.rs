@@ -1,11 +1,11 @@
-extern crate std;
+extern crate alloc;
 
-use core::alloc::Layout;
-use std::{
+use alloc::{
     alloc::{alloc_zeroed, dealloc},
     vec,
     vec::Vec,
 };
+use core::alloc::Layout;
 
 use super::*;
 

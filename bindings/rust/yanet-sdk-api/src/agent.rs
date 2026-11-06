@@ -439,7 +439,7 @@ pub unsafe fn release_at<B: Releasable>(raw: NonNull<B::Raw>) -> Result<(), Reta
     let mut chain = ptr::null_mut();
     // SAFETY: the header is an initialised one of this mapping, built by
     // this crate; the out-parameter points at a null chain.
-    if unsafe { B::try_destroy(raw.as_ptr(), &mut chain) } != 0 {
+    if unsafe { B::try_destroy(raw.as_ptr(), &raw mut chain) } != 0 {
         // SAFETY: the chain, if any, is ours alone.
         let error = unsafe { from_c_chain(chain) };
         return Err(Retained { built, error });
@@ -531,7 +531,7 @@ unsafe impl Owner for Agent {
                 self.agent.as_ptr(),
                 module.as_ptr().cast::<c_char>(),
                 name.as_ptr().cast::<c_char>(),
-                &mut chain,
+                &raw mut chain,
             )
         } != 0
         {
@@ -560,7 +560,7 @@ unsafe impl Owner for Agent {
                 self.agent.as_ptr(),
                 ty.as_ptr().cast::<c_char>(),
                 name.as_ptr().cast::<c_char>(),
-                &mut chain,
+                &raw mut chain,
             )
         } != 0
         {
@@ -587,7 +587,7 @@ unsafe impl Owner for Agent {
                 &raw mut (*header_at::<bindings::cp_module>(self, header)).counter_registry,
                 name.as_ptr().cast::<c_char>(),
                 size,
-                &mut chain,
+                &raw mut chain,
             )
         };
         if id == COUNTER_INVALID {
@@ -606,8 +606,8 @@ unsafe impl Owner for Agent {
             bindings::cp_module_link_device(
                 header_at::<bindings::cp_module>(self, header),
                 name.as_ptr().cast::<c_char>(),
-                &mut index,
-                &mut chain,
+                &raw mut index,
+                &raw mut chain,
             )
         } != 0
         {
@@ -628,8 +628,8 @@ unsafe impl Owner for Agent {
                 header_at::<bindings::cp_module>(self, header),
                 ty.as_ptr().cast::<c_char>(),
                 name.as_ptr().cast::<c_char>(),
-                &mut index,
-                &mut chain,
+                &raw mut index,
+                &raw mut chain,
             )
         } != 0
         {
