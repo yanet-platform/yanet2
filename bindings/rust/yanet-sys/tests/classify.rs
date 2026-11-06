@@ -123,7 +123,7 @@ type Staged<T> = (*mut T, *mut bindings::classifier);
 /// Compiles the classifier of an attribute over the rules, `None` for a rule
 /// outside the projection.
 fn compile<A: Attribute>(arena: &Arena, name: &CStr, rules: &[Option<&A>]) -> Staged<A::Classifier> {
-    let (classifier, stage) = (arena.alloc::<A::Classifier>(), arena.alloc::<bindings::classifier>());
+    let (classifier, stage) = (arena.zeroed::<A::Classifier>(), arena.zeroed::<bindings::classifier>());
     // SAFETY: a rule is a view of the attribute or none, borrowed for the
     // call; the classifier and the stage are zeroed blocks of the arena.
     let status = unsafe {
@@ -147,7 +147,7 @@ fn join(
     (left, right): (*mut bindings::classifier, *mut bindings::classifier),
     rules: u32,
 ) -> Staged<Joint> {
-    let (joint, stage) = (arena.alloc::<Joint>(), arena.alloc::<bindings::classifier>());
+    let (joint, stage) = (arena.zeroed::<Joint>(), arena.zeroed::<bindings::classifier>());
     // SAFETY: both stages were filled over the ruleset; the joint and the
     // stage are zeroed blocks of the arena.
     let status = unsafe {
@@ -173,7 +173,7 @@ fn join_rules<R>(
     (left, right): (*mut bindings::classifier, *mut bindings::classifier),
     rules: &[Option<&R>],
 ) -> *mut RuleTable {
-    let table = arena.alloc::<RuleTable>();
+    let table = arena.zeroed::<RuleTable>();
     // SAFETY: both stages were filled over the ruleset of the projection; the
     // table is a zeroed block of the arena.
     let status = unsafe {
@@ -193,7 +193,7 @@ fn join_rules<R>(
 
 /// The first rule of the projection each class of a stage matches.
 fn decode<R>(arena: &Arena, name: &CStr, stage: *mut bindings::classifier, rules: &[Option<&R>]) -> *mut RuleMap {
-    let map = arena.alloc::<RuleMap>();
+    let map = arena.zeroed::<RuleMap>();
     // SAFETY: the stage was filled over the ruleset of the projection; the
     // map is a zeroed block of the arena.
     let status = unsafe {

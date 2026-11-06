@@ -27,3 +27,9 @@ yanet-sdk-testing = { path = "../yanet-sdk-testing" }
 [[bench]]
 name = "classify"
 harness = false
+
+# The build of a production-shaped classifier and the cost of validating it;
+# see the benchmark's header.
+[[bench]]
+name = "classify_build"
+harness = false

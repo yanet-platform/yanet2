@@ -1,10 +1,10 @@
-//! An owner whose memory is a C block arena, so a test builds classifiers
-//! through the builder as an agent does: the C compiles, joins and decodes
-//! allocate in the memory context of the module header, over the arena.
+//! An owner whose memory is a C block arena: a test or a benchmark builds
+//! classifiers in it through the builder as an agent does, the C compiles,
+//! joins and decodes allocating in the memory context of the module header,
+//! or as C objects of its own outside a configuration.
 //!
-//! The arena is leaked and never checked for leaks; its registries hand out
-//! index zero.
-
+//! The arena is leaked; its free bytes tell what a release returned. Its
+//! registries hand out index zero.
 use core::{
     convert::Infallible,
     ffi::{c_char, c_void},
@@ -35,8 +35,15 @@ unsafe extern "C" {
     );
 }
 
-/// Bytes of the C arena of a test.
-const ARENA_SIZE: usize = 256 << 20;
+/// Bytes of the C arena of a test, in MiB: `YANET_SYS_TEST_ARENA_MIB`, 256 by
+/// default.
+fn arena_size() -> usize {
+    std::env::var("YANET_SYS_TEST_ARENA_MIB")
+        .ok()
+        .and_then(|mib| mib.parse::<usize>().ok())
+        .unwrap_or(256)
+        << 20
+}
 
 /// An owner over a leaked C arena.
 pub struct ArenaOwner {
@@ -47,7 +54,7 @@ pub struct ArenaOwner {
 impl ArenaOwner {
     pub fn new() -> Self {
         // SAFETY: a C allocation with no precondition.
-        let arena = unsafe { yanet_sys_test_arena_new(ARENA_SIZE) };
+        let arena = unsafe { yanet_sys_test_arena_new(arena_size()) };
         assert!(!arena.is_null(), "no heap for the C arena");
         // SAFETY: a live arena, never freed.
         let base = unsafe { yanet_sys_test_arena_base(arena) };
@@ -77,7 +84,7 @@ impl ArenaOwner {
 
     /// A zeroed block of the arena for one `T`, as a build allocates a C
     /// object.
-    pub fn alloc<T>(&self) -> *mut T {
+    pub fn zeroed<T>(&self) -> *mut T {
         // SAFETY: a live context.
         let block = unsafe { bindings::yanet_sys_common_memory_balloc(self.raw_context(), size_of::<T>()) }.cast::<T>();
         assert!(!block.is_null(), "the C arena is exhausted");
@@ -98,9 +105,9 @@ impl ArenaOwner {
     }
 }
 
-// SAFETY: the root covers the arena's region, which holds every block of a
-// configuration, frozen once built: a test reads a configuration only after
-// its build, and releases none it reads.
+// SAFETY: the root covers the arena's region, which holds every block of the
+// arena, a configuration's or a C object built outside one: a test or a
+// benchmark reads a block only once it is built, and frees none it reads.
 unsafe impl<'g> Resolve<'g> for ArenaOwner {
     fn shm_root(&self) -> ShmRoot {
         self.root

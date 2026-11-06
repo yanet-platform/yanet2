@@ -407,7 +407,7 @@ type Staged<T> = (*mut T, *mut bindings::classifier);
 
 /// Compiles an attribute's classifier as a C module does.
 fn compile<A: Attribute>(owner: &ArenaOwner, name: &CStr, rules: &[Option<&A>]) -> Staged<A::Classifier> {
-    let (classifier, stage) = (owner.alloc::<A::Classifier>(), owner.alloc::<bindings::classifier>());
+    let (classifier, stage) = (owner.zeroed::<A::Classifier>(), owner.zeroed::<bindings::classifier>());
     // SAFETY: each rule is a view of the attribute, borrowed for the call;
     // the outputs are zeroed blocks of the arena.
     let status = unsafe {
@@ -426,7 +426,7 @@ fn compile<A: Attribute>(owner: &ArenaOwner, name: &CStr, rules: &[Option<&A>]) 
 
 /// Joins two stages as a C module does.
 fn join<L, R>(owner: &ArenaOwner, name: &CStr, left: Staged<L>, right: Staged<R>, rules: u32) -> Staged<Joint> {
-    let (joint, stage) = (owner.alloc::<Joint>(), owner.alloc::<bindings::classifier>());
+    let (joint, stage) = (owner.zeroed::<Joint>(), owner.zeroed::<bindings::classifier>());
     // SAFETY: both stages were filled over the rule count.
     let status = unsafe {
         bindings::yanet_sys_classify_join(
@@ -465,7 +465,7 @@ fn parts(owner: &ArenaOwner, rules: &[BenchRule]) -> Parts {
     let nets = join(owner, c"nets", src, dst, count);
     let ports = join(owner, c"ports", sport, dport, count);
     let root = join(owner, c"root", nets, ports, count);
-    let map = owner.alloc::<RuleMap>();
+    let map = owner.zeroed::<RuleMap>();
     let projection = vec![Some(&()); rules.len()];
     // SAFETY: the root stage was filled over the rule count of the
     // projection.
