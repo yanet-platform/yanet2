@@ -508,18 +508,18 @@ dataplane_create_devices(
 		    )) {
 			// The vdev exposes a single virtqueue depth for both
 			// directions, so size it to the largest configured rx
-			// or tx queue length across the device workers.
+			// or tx queue length across the device queues.
 			uint16_t queue_size = 0;
-			for (uint32_t wrk_idx = 0;
-			     wrk_idx < device_config->worker_count;
-			     ++wrk_idx) {
-				struct dataplane_device_worker_config *worker =
-					device_config->workers + wrk_idx;
-				if (worker->rx_queue_len > queue_size) {
-					queue_size = worker->rx_queue_len;
+			for (uint32_t queue_idx = 0;
+			     queue_idx < device_config->queue_count;
+			     ++queue_idx) {
+				const struct dataplane_queue_config *queue =
+					device_config->queues + queue_idx;
+				if (queue->rx_queue_len > queue_size) {
+					queue_size = queue->rx_queue_len;
 				}
-				if (worker->tx_queue_len > queue_size) {
-					queue_size = worker->tx_queue_len;
+				if (queue->tx_queue_len > queue_size) {
+					queue_size = queue->tx_queue_len;
 				}
 			}
 			if (queue_size == 0) {
@@ -531,7 +531,7 @@ dataplane_create_devices(
 				    device_config->port_name +
 					    strlen("virtio_user_"),
 				    device_config->mac_addr,
-				    device_config->worker_count,
+				    device_config->queue_count,
 				    queue_size
 			    )) {
 				LOG(ERROR,
@@ -549,12 +549,12 @@ dataplane_create_devices(
 			// The rings are single-producer/single-consumer and
 			// the device exposes exactly one rx/tx queue pair,
 			// so only one worker may poll it.
-			if (device_config->worker_count != 1) {
+			if (device_config->queue_count != 1) {
 				LOG(ERROR,
 				    "ring device %s requires exactly one "
-				    "worker, got %u",
+				    "queue, got %u",
 				    device_config->port_name,
-				    device_config->worker_count);
+				    device_config->queue_count);
 				return -1;
 			}
 			if (dpdk_add_ring_port(device_config->port_name)) {
@@ -1161,10 +1161,31 @@ dataplane_init(
 		for (uint64_t device_idx = 0;
 		     device_idx < dataplane->device_count;
 		     ++device_idx) {
+			// The topology counts bound workers, not queues: a
+			// worker owning several queues of the device is one
+			// bound worker. The nested one-worker-per-queue form
+			// counts the same either way.
+			uint64_t bound_worker_count = 0;
+			for (uint32_t wrk_idx = 0;
+			     wrk_idx < dataplane->worker_count;
+			     ++wrk_idx) {
+				const struct dataplane_worker_config *worker =
+					&dataplane->workers[wrk_idx].config;
+				for (uint32_t asgn_idx = 0;
+				     asgn_idx < worker->assignment_count;
+				     ++asgn_idx) {
+					if (worker->assignments[asgn_idx]
+						    .device_id == device_idx) {
+						++bound_worker_count;
+						break;
+					}
+				}
+			}
+
 			if (dp_topology_set_device_queue_counts(
 				    dp_config,
 				    device_idx,
-				    dataplane->devices[device_idx].queue_count,
+				    bound_worker_count,
 				    dataplane->devices[device_idx]
 					    .rss_queue_count
 			    ) != 0) {
