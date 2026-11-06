@@ -132,7 +132,8 @@ yanet_sys_classify_net4_class(
 // Two LPM walks are past the inliner's budget, so the IPv6 lookup forces its
 // own inlining where its bitcode meets the Rust that calls it, and flattens
 // the batch lookup of one address into itself. gcc, which builds the shim as
-// machine code only, rejects the former on a function of external linkage.
+// machine code only, warns on the former for a function of external linkage,
+// an error under -Werror.
 #ifdef __clang__
 #define YANET_SYS_INLINE_ACROSS __attribute__((always_inline))
 #else
