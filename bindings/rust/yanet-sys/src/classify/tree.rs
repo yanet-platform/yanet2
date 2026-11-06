@@ -191,7 +191,8 @@ macro_rules! holders {
 
         // SAFETY: written only by the scope's joins and decodes, which put
         // the C object and the owned edges whole; freeing returns what the C
-        // build allocated in its context, then the right input and the left.
+        // build allocated in its context, then its inputs, the right one
+        // before the left.
         unsafe impl<$($param: Build),*> Build for $name<$($param),*> {
             type Parts<'b, W: Owner> = Infallible;
 
