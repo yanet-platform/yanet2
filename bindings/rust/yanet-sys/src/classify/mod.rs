@@ -475,18 +475,15 @@ pub struct LineAttr {
     line: Line,
 }
 
-/// The joint of the classes of two stages, C's `struct value_table`.
-///
-/// Joined only with its stage, by [`Scope::join`](crate::cp::Scope::join).
+/// The joint of the classes of two stages, C's `struct value_table`: the
+/// table of a [`Join`], which the join writes.
 #[repr(C)]
 pub struct Joint {
     table: Table,
 }
 
-/// The first rule each pair of classes of two stages matches.
-///
-/// Joined by [`Scope::join_rules`](crate::cp::Scope::join_rules); the parts
-/// `()` are a table of no rule.
+/// The first rule each pair of classes of two stages matches, C's
+/// `struct rule_table`: the table of a [`Rules`], which the join writes.
 #[repr(C)]
 pub struct RuleTable {
     _memory_context: ContextSlot,
@@ -501,10 +498,8 @@ pub struct RuleTable {
     _pad: u32,
 }
 
-/// The first rule each class of a stage matches.
-///
-/// Decoded by [`Scope::decode`](crate::cp::Scope::decode); the parts `()` are
-/// a map of no rule.
+/// The first rule each class of a stage matches, C's `struct vline`: the map
+/// of a [`Decode`], which the decode writes.
 #[repr(C)]
 pub struct RuleMap {
     line: Line,
@@ -561,11 +556,10 @@ const _: fn(
 
 /// The shared-memory impls of the C objects of a classification.
 ///
-/// Each mirrors its C struct and is freed by its C free: a compiled one is
-/// written only by its compile, an empty one also from the parts `()`, as the
-/// zeroed object C frees and reads as empty.
+/// Each mirrors its C struct, is written only by its compile, join or decode
+/// and is freed by its C free.
 macro_rules! classifiers {
-    ($($name:ident: $raw:ident, $free:ident, $kind:ident;)*) => {$(
+    ($($name:ident: $raw:ident, $free:ident;)*) => {$(
         const _: () = {
             assert!(size_of::<$name>() == size_of::<bindings::$raw>());
             assert!(align_of::<$name>() == align_of::<bindings::$raw>());
@@ -583,17 +577,12 @@ macro_rules! classifiers {
 
         // SAFETY: the C object is the whole value; the compile, the join or
         // the decode that wrote it allocated only in the memory context, in
-        // blocks and child contexts its C free returns and unlinks, and the
-        // zeroed object owns nothing.
+        // blocks and child contexts its C free returns and unlinks.
         unsafe impl Build for $name {
-            type Parts<'b, W: Owner> = classifiers!(@parts $kind);
+            type Parts<'b, W: Owner> = Infallible;
 
-            unsafe fn write<W: Owner>(
-                parts: Self::Parts<'_, W>,
-                memory: &MemoryContext<'_, W>,
-                addr: usize,
-            ) -> Result<(), Refusal> {
-                classifiers!(@write $kind, parts, memory, addr, $raw)
+            unsafe fn write<W: Owner>(parts: Infallible, _: &MemoryContext<'_, W>, _: usize) -> Result<(), Refusal> {
+                match parts {}
             }
 
             unsafe fn free<W: Owner>(addr: usize, memory: &MemoryContext<'_, W>) {
@@ -602,28 +591,16 @@ macro_rules! classifiers {
             }
         }
     )*};
-    (@parts compiled) => { Infallible };
-    (@parts empty) => { () };
-    (@write compiled, $parts:ident, $memory:ident, $addr:ident, $raw:ident) => {{
-        let _ = ($memory, $addr);
-        match $parts {}
-    }};
-    (@write empty, $parts:ident, $memory:ident, $addr:ident, $raw:ident) => {{
-        let () = $parts;
-        // SAFETY: the address is aligned and exclusive (caller contract).
-        unsafe { $memory.root().ptr::<bindings::$raw>($addr).write(bindings::$raw::default()) };
-        Ok(())
-    }};
 }
 
 classifiers! {
-    Net4Attr: classify_attr_net4, yanet_sys_classify_net4_free, compiled;
-    Net6Attr: classify_attr_net6, yanet_sys_classify_net6_free, compiled;
-    PortAttr: classify_attr_port, yanet_sys_classify_port_free, compiled;
-    LineAttr: classify_attr_line, yanet_sys_classify_line_free, compiled;
-    Joint: value_table, yanet_sys_classify_joint_free, compiled;
-    RuleTable: rule_table, yanet_sys_classify_rule_table_free, empty;
-    RuleMap: vline, yanet_sys_classify_rule_map_free, empty;
+    Net4Attr: classify_attr_net4, yanet_sys_classify_net4_free;
+    Net6Attr: classify_attr_net6, yanet_sys_classify_net6_free;
+    PortAttr: classify_attr_port, yanet_sys_classify_port_free;
+    LineAttr: classify_attr_line, yanet_sys_classify_line_free;
+    Joint: value_table, yanet_sys_classify_joint_free;
+    RuleTable: rule_table, yanet_sys_classify_rule_table_free;
+    RuleMap: vline, yanet_sys_classify_rule_map_free;
 }
 
 /// The mark of a value of the high half of an IPv6 classifier that is a row
