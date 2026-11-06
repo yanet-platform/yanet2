@@ -93,7 +93,7 @@ impl Default for Rule {
 
 /// An IPv4 address as the IPv4 lookup takes it: its four bytes in network
 /// order, held as one aligned word.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 #[repr(transparent)]
 pub struct Addr4(u32);
 
@@ -838,26 +838,26 @@ mod tests {
     use crate::{bindings, cp::Refusal};
 
     /// Writes a value at an address of a block of the arena.
-    fn put<T>(arena: &'static BlockArena, addr: usize, value: T) {
+    pub fn put<T>(arena: &'static BlockArena, addr: usize, value: T) {
         // SAFETY: the tests write aligned values inside blocks of the arena
         // they allocated, which nothing references yet.
         unsafe { arena.root().ptr::<T>(addr).write(value) }
     }
 
     /// The address of a zeroed block of the arena.
-    fn block(arena: &'static BlockArena, size: usize) -> usize {
+    pub fn block(arena: &'static BlockArena, size: usize) -> usize {
         arena.alloc(size).as_ptr().addr()
     }
 
     /// Points the offset slot at an address to the target, as C sets an
     /// offset pointer.
-    fn point(arena: &'static BlockArena, slot: usize, target: usize) {
+    pub fn point(arena: &'static BlockArena, slot: usize, target: usize) {
         put(arena, slot, target.wrapping_sub(slot) as isize);
     }
 
     /// Lays a line of the values out at an address as C does: its size, and
     /// the slot of a block of the values.
-    fn lay_line(arena: &'static BlockArena, line: usize, values: &[u32]) {
+    pub fn lay_line(arena: &'static BlockArena, line: usize, values: &[u32]) {
         let values_at = block(arena, size_of_val(values));
         for (idx, &value) in values.iter().enumerate() {
             put(arena, values_at + idx * size_of::<u32>(), value);
@@ -868,7 +868,7 @@ mod tests {
 
     /// Lays rows of values out behind the slot at an address as C lays out a
     /// table's: a directory with a slot per row, each to a block of the row.
-    fn lay_rows(arena: &'static BlockArena, slot: usize, rows: &[&[u32]]) {
+    pub fn lay_rows(arena: &'static BlockArena, slot: usize, rows: &[&[u32]]) {
         let directory = block(arena, rows.len() * size_of::<isize>());
         for (idx, row) in rows.iter().enumerate() {
             let row_at = block(arena, size_of_val(*row));
@@ -882,7 +882,7 @@ mod tests {
 
     /// Lays a table of the rows, all of one length, out at an address as C
     /// does.
-    fn lay_table(arena: &'static BlockArena, table: usize, rows: &[&[u32]]) {
+    pub fn lay_table(arena: &'static BlockArena, table: usize, rows: &[&[u32]]) {
         put(
             arena,
             table + offset_of!(bindings::value_table, v_dim),
@@ -898,7 +898,7 @@ mod tests {
 
     /// Lays an LPM out at an address as C does, of one page of leaves: a key
     /// maps to the value of its first byte.
-    fn lay_lpm(arena: &'static BlockArena, lpm: usize, value: impl Fn(u8) -> u32) {
+    pub fn lay_lpm(arena: &'static BlockArena, lpm: usize, value: impl Fn(u8) -> u32) {
         let page = block(arena, 256 * size_of::<u64>());
         for byte in 0..=u8::MAX {
             // A leaf stores its value as the C insert does.

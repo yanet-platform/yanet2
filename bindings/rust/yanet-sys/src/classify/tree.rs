@@ -53,7 +53,7 @@ use crate::{
 pub trait Node: Build + sealed::Sealed {
     /// What the node classifies: an attribute's value, or the pair of keys
     /// of a joint.
-    type Key: Copy;
+    type Key: Copy + Default;
 
     /// The class of a key.
     #[doc(hidden)]
@@ -199,9 +199,8 @@ impl<L: Node, R: Node> Rules<L, R> {
     ///
     /// Classifies the items a burst of [`BURST`] at a time, each stage over
     /// the whole burst before the next: the lookups of a stage are
-    /// independent, so their reads of the tables overlap. The key of an item
-    /// is taken once per attribute of the tree, so it should be a cheap read
-    /// of fields already parsed.
+    /// independent, so their reads of the tables overlap. The key of each
+    /// item is taken once.
     ///
     /// # Panics
     ///
@@ -216,7 +215,9 @@ impl<L: Node, R: Node> Rules<L, R> {
     ) {
         let rules = &mut rules[..items.len()];
         for (items, rules) in items.chunks(BURST).zip(rules.chunks_mut(BURST)) {
-            let (left, right) = sides(self.left.get(cx), self.right.get(cx), cx, items, &key);
+            let keys = burst_keys(items, &key);
+            let keys = &keys[..items.len()];
+            let (left, right) = sides(self.left.get(cx), self.right.get(cx), cx, keys, &|&key| key);
             for ((rule, &left), &right) in rules.iter_mut().zip(&left).zip(&right) {
                 *rule = self.pair(cx, left, right);
             }
@@ -257,9 +258,12 @@ impl<N: Node> Decode<N> {
     ) {
         let rules = &mut rules[..items.len()];
         for (items, rules) in items.chunks(BURST).zip(rules.chunks_mut(BURST)) {
+            let keys = burst_keys(items, &key);
             let mut classes = [0; BURST];
             let classes = &mut classes[..items.len()];
-            self.input.get(cx).classes(cx, items, &key, classes);
+            self.input
+                .get(cx)
+                .classes(cx, &keys[..items.len()], |&key| key, classes);
             for (rule, &class) in rules.iter_mut().zip(&*classes) {
                 *rule = self.rule(cx, class);
             }
@@ -273,6 +277,17 @@ impl<N: Node> Decode<N> {
         // from, below its size.
         Rule(unsafe { self.map.line.get(cx, class) })
     }
+}
+
+/// The key of each item of a burst of at most [`BURST`], each taken once,
+/// and the default key past them.
+#[inline(always)]
+fn burst_keys<T, K: Copy + Default>(items: &[T], key: impl Fn(&T) -> K) -> [K; BURST] {
+    let mut keys = [K::default(); BURST];
+    for (slot, item) in keys.iter_mut().zip(items) {
+        *slot = key(item);
+    }
+    keys
 }
 
 /// The classes of both inputs of a node over a burst of items: the whole
@@ -415,4 +430,111 @@ impl<N> Decode<N> {
     /// Offset of the edge of the input.
     #[doc(hidden)]
     pub const EDGE: usize = offset_of!(Self, input);
+}
+
+#[cfg(test)]
+mod tests {
+    use core::{
+        array,
+        mem::{offset_of, size_of},
+    };
+
+    use yanet_sdk_testing::{BlockArena, View};
+
+    use super::{Decode, Join, Rules};
+    use crate::{
+        bindings,
+        classify::{
+            LineAttr, Rule,
+            tests::{block, lay_line, lay_rows, point, put},
+        },
+    };
+
+    /// The keys of the tests: pairs of bytes over both domains, more than a
+    /// burst and not a whole number of bursts.
+    fn keys() -> [(u8, u8); 40] {
+        array::from_fn(|idx| ((idx * 7) as u8, (idx * 13 + 1) as u8))
+    }
+
+    /// The address of a byte attribute laid out in the arena, of the class
+    /// of each byte.
+    fn line_attr(arena: &'static BlockArena, class: impl Fn(u8) -> u32) -> usize {
+        let attr = block(arena, size_of::<LineAttr>());
+        let classes: [u32; 256] = array::from_fn(|byte| class(byte as u8));
+        lay_line(arena, attr + offset_of!(bindings::classify_attr_line, line), &classes);
+        attr
+    }
+
+    /// verifies that a decode reads, one key at a time and a burst at a time,
+    /// the rule of the joint class of the classes of both bytes of a key.
+    #[test]
+    fn test_decode_tree_reads_the_rule_of_the_joint_class() {
+        type Tree = Decode<Join<LineAttr, LineAttr>>;
+        let arena = BlockArena::new();
+        let (left, right) = (
+            line_attr(arena, |byte| u32::from(byte) % 3),
+            line_attr(arena, |byte| u32::from(byte) % 2),
+        );
+        // The joint class of a pair is its row times two plus its column.
+        let join = block(arena, size_of::<Join<LineAttr, LineAttr>>());
+        put(arena, join + offset_of!(bindings::value_table, v_dim), 3u32);
+        put(arena, join + offset_of!(bindings::value_table, h_dim), 2u32);
+        lay_rows(
+            arena,
+            join + offset_of!(bindings::value_table, values),
+            &[&[0, 1], &[2, 3], &[4, 5]],
+        );
+        let (left_edge, right_edge) = Join::<LineAttr, LineAttr>::EDGES;
+        point(arena, join + left_edge, left);
+        point(arena, join + right_edge, right);
+        // The last joint class matches no rule.
+        let tree = block(arena, size_of::<Tree>());
+        lay_line(arena, tree, &[10, 11, 12, 13, 14, Rule::NONE.0]);
+        point(arena, tree + Tree::EDGE, join);
+
+        // SAFETY: laid out as C lays it out and a build links it, and frozen
+        // for the test.
+        let (view, tree) = unsafe { (View::new(arena.root()), &*arena.root().ptr::<Tree>(tree)) };
+        let expected = keys().map(|(left, right)| match left % 3 * 2 + right % 2 {
+            5 => Rule::NONE,
+            class => Rule(10 + u32::from(class)),
+        });
+        assert_eq!(expected, keys().map(|key| tree.lookup(&view, key)));
+        let mut burst = [Rule(7); 40];
+        tree.lookup_burst(&view, &keys(), |&key| key, &mut burst);
+        assert_eq!(expected, burst);
+    }
+
+    /// verifies that a rule table reads, one key at a time and a burst at a
+    /// time, the rule of the class of the right byte in the row the class of
+    /// the left byte maps to.
+    #[test]
+    fn test_rules_tree_reads_the_row_of_the_left_class() {
+        type Tree = Rules<LineAttr, LineAttr>;
+        type C = bindings::rule_table;
+        let arena = BlockArena::new();
+        let (left, right) = (
+            line_attr(arena, |byte| u32::from(byte) % 3),
+            line_attr(arena, |byte| u32::from(byte) % 2),
+        );
+        let tree = block(arena, size_of::<Tree>());
+        put(arena, tree + offset_of!(C, v_dim), 3u32);
+        put(arena, tree + offset_of!(C, h_dim), 2u32);
+        lay_line(arena, tree + offset_of!(C, class_map), &[1, 0, 1]);
+        lay_rows(arena, tree + offset_of!(C, rows), &[&[5, Rule::NONE.0], &[2, 4]]);
+        put(arena, tree + offset_of!(C, class_count), 2u32);
+        let (left_edge, right_edge) = Tree::EDGES;
+        point(arena, tree + left_edge, left);
+        point(arena, tree + right_edge, right);
+
+        // SAFETY: laid out as C lays it out and a build links it, and frozen
+        // for the test.
+        let (view, tree) = unsafe { (View::new(arena.root()), &*arena.root().ptr::<Tree>(tree)) };
+        let rows = [[Rule(5), Rule::NONE], [Rule(2), Rule(4)]];
+        let expected = keys().map(|(left, right)| rows[[1, 0, 1][usize::from(left % 3)]][usize::from(right % 2)]);
+        assert_eq!(expected, keys().map(|key| tree.lookup(&view, key)));
+        let mut burst = [Rule(7); 40];
+        tree.lookup_burst(&view, &keys(), |&key| key, &mut burst);
+        assert_eq!(expected, burst);
+    }
 }
