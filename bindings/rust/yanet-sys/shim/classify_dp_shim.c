@@ -121,3 +121,54 @@ yanet_sys_classify_results_min(
 ) {
 	classify_results_min(rules, extra, count);
 }
+
+uint32_t
+yanet_sys_classify_net4_class(
+	const struct classify_attr_net4 *attr, uint32_t addr
+) {
+	return lpm4_lookup(&attr->lpm, (const uint8_t *)&addr);
+}
+
+// Flattened: the batch lookup of one address is otherwise kept out of line,
+// a call left in the Rust that inlines this.
+__attribute__((flatten)) uint32_t
+yanet_sys_classify_net6_class(
+	const struct classify_attr_net6 *attr, const uint8_t *addr
+) {
+	uint32_t class;
+	classify_net6_lookup(attr, addr, &class, 1);
+	return class;
+}
+
+uint32_t
+yanet_sys_classify_line_class(
+	const struct classify_attr_line *attr, uint8_t value
+) {
+	return vline_get((struct vline *)&attr->line, value);
+}
+
+uint32_t
+yanet_sys_classify_port_class(
+	const struct classify_attr_port *attr, uint16_t port
+) {
+	return vline_get((struct vline *)&attr->line, port);
+}
+
+uint32_t
+yanet_sys_classify_joint_class(
+	const struct value_table *joint, uint32_t left, uint32_t right
+) {
+	return value_table_get(joint, left, right);
+}
+
+uint32_t
+yanet_sys_classify_rule_table_rule(
+	const struct rule_table *table, uint32_t left, uint32_t right
+) {
+	return rule_table_get(table, left, right);
+}
+
+uint32_t
+yanet_sys_classify_rule_map_rule(const struct vline *rule_map, uint32_t class) {
+	return vline_get((struct vline *)rule_map, class);
+}

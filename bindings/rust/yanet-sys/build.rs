@@ -22,6 +22,8 @@ fn main() {
     let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
     println!("cargo:rerun-if-env-changed=LIBCLANG_PATH");
     println!("cargo:rerun-if-env-changed=CLANG_PATH");
+    println!("cargo:rerun-if-env-changed={LTO_CC_ENV}");
+    println!("cargo:rerun-if-env-changed={LTO_AR_ENV}");
 
     // The repository root is three directories above this crate.
     let root = fs::canonicalize(manifest_dir.join("../../..")).unwrap();
@@ -30,6 +32,7 @@ fn main() {
 
     generate_bindings(&flags, &shim_dir, &out_dir.join("bindings.rs"));
     build_shim(&flags, &shim_dir);
+    build_classify_tests(&flags, &shim_dir);
 
     println!(
         "cargo:rerun-if-changed={}",
@@ -46,8 +49,51 @@ const PACKET_SOURCES: [&str; 3] = [
     "lib/dataplane/packet/packet.c",
 ];
 
-/// Compiles the shims with the flags of the dataplane's C sources, their
-/// optimisation level among them.
+/// Environment variable naming the clang that compiles the shims into
+/// ThinLTO bitcode, for a plugin linked with cross-language LTO.
+///
+/// Unset, the shims are machine code from the dataplane's compiler. Set, it
+/// must be the clang of rustc's LLVM major (`rustc -vV`), and the Rust build
+/// must pass `-Clinker-plugin-lto` with a target CPU of the dataplane's
+/// `-march` and link with the lld of the same major; the shim's lookups then
+/// inline into the Rust that calls them.
+const LTO_CC_ENV: &str = "YANET_SYS_LTO_CC";
+
+/// Environment variable naming the `llvm-ar` that archives the bitcode, of the
+/// same LLVM major as [`LTO_CC_ENV`].
+const LTO_AR_ENV: &str = "YANET_SYS_LTO_AR";
+
+/// A C build with the flags of the dataplane's C sources, their optimisation
+/// level among them; bitcode from the compiler of [`LTO_CC_ENV`] when it is
+/// set and the build asks for it.
+fn c_build(flags: &CFlags, shim_dir: &Path, bitcode: bool) -> cc::Build {
+    let mut build = cc::Build::new();
+    build
+        .include(shim_dir)
+        .opt_level_str(flags.opt_level())
+        // Not silencing: drops cc-rs's own warning set, so the build's options alone apply.
+        .warnings(false);
+    match env::var_os(LTO_CC_ENV).filter(|_| bitcode) {
+        Some(clang) => {
+            let ar = env::var_os(LTO_AR_ENV).unwrap_or_else(|| panic!("{LTO_CC_ENV} is set but {LTO_AR_ENV} is not"));
+            build.compiler(clang).archiver(ar).flag("-flto=thin");
+        }
+        None => {
+            build.compiler(&flags.compiler);
+        }
+    }
+    for arg in flags.header_args().iter().chain(flags.warning_args()) {
+        build.flag(arg);
+    }
+    if env::var_os("CARGO_CFG_SANITIZE").is_some() {
+        for arg in flags.sanitizer_args() {
+            build.flag(arg);
+        }
+    }
+    build
+}
+
+/// Compiles the shims.
 ///
 /// The dataplane shim wraps header-inline C routing helpers and the packet
 /// encapsulation routines, whose sources it compiles in; the common shim wraps
@@ -57,27 +103,14 @@ const PACKET_SOURCES: [&str; 3] = [
 /// with hidden visibility, so a plugin exports nothing of them and imports
 /// none of the encapsulation from the host.
 fn build_shim(flags: &CFlags, shim_dir: &Path) {
-    let mut build = cc::Build::new();
+    let mut build = c_build(flags, shim_dir, true);
     build
-        .compiler(&flags.compiler)
         .file(shim_dir.join("classify_cp_shim.c"))
         .file(shim_dir.join("classify_dp_shim.c"))
         .file(shim_dir.join("common_shim.c"))
         .file(shim_dir.join("dp_shim.c"))
         .files(PACKET_SOURCES.map(|source| flags.source(source)))
-        .include(shim_dir)
-        .opt_level_str(flags.opt_level())
-        // Not silencing: drops cc-rs's own warning set, so the build's options alone apply.
-        .warnings(false)
         .flag("-fvisibility=hidden");
-    for arg in flags.header_args().iter().chain(flags.warning_args()) {
-        build.flag(arg);
-    }
-    if env::var_os("CARGO_CFG_SANITIZE").is_some() {
-        for arg in flags.sanitizer_args() {
-            build.flag(arg);
-        }
-    }
     for file in [
         "classify_cp_shim.c",
         "classify_dp_shim.c",
@@ -91,6 +124,30 @@ fn build_shim(flags: &CFlags, shim_dir: &Path) {
         println!("cargo:rerun-if-changed={}", shim_dir.join(file).display());
     }
     build.compile("yanet_sys_shims");
+}
+
+/// Compiles the C the native classify tests and benchmark build classifiers
+/// with: a block arena and the classification library's compiler, and the
+/// inline C query the benchmark measures against.
+///
+/// The compile shim calls the compiler's joins and decode. Cargo is told
+/// nothing of the archive, so only a test that names it links it, and no
+/// plugin or api archive carries it; the shims' build already gives the
+/// linker the directory it lands in. It is machine code of the dataplane's
+/// compiler even in a bitcode build, as the C modules are.
+fn build_classify_tests(flags: &CFlags, shim_dir: &Path) {
+    let (arena, bench) = (
+        shim_dir.join("tests/classify_arena.c"),
+        shim_dir.join("tests/classify_bench.c"),
+    );
+    println!("cargo:rerun-if-changed={}", arena.display());
+    println!("cargo:rerun-if-changed={}", bench.display());
+    c_build(flags, shim_dir, false)
+        .file(arena)
+        .file(bench)
+        .file(flags.source("lib/classify/compiler/helper.c"))
+        .cargo_metadata(false)
+        .compile("yanet_sys_classify_tests");
 }
 
 fn generate_bindings(flags: &CFlags, shim_dir: &Path, out: &Path) {

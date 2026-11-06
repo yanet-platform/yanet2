@@ -224,3 +224,46 @@ YANET_SYS_HIDDEN void
 yanet_sys_classify_results_min(
 	uint32_t *rules, const uint32_t *extra, uint32_t count
 );
+
+// The single-key lookups of a classifier tree: one class or rule per call.
+//
+// Unlike the batch lookups above they read their input unchecked, as the C
+// modules do: the tree passes a joint, a rule table or a rule map only the
+// classes of the very stages it was joined or decoded from, which its
+// dimensions were sized by. Built for inlining across the language boundary.
+
+YANET_SYS_HIDDEN uint32_t
+yanet_sys_classify_net4_class(
+	const struct classify_attr_net4 *attr, uint32_t addr
+);
+
+YANET_SYS_HIDDEN uint32_t
+yanet_sys_classify_net6_class(
+	const struct classify_attr_net6 *attr, const uint8_t *addr
+);
+
+YANET_SYS_HIDDEN uint32_t
+yanet_sys_classify_line_class(
+	const struct classify_attr_line *attr, uint8_t value
+);
+
+YANET_SYS_HIDDEN uint32_t
+yanet_sys_classify_port_class(
+	const struct classify_attr_port *attr, uint16_t port
+);
+
+// value_table_get (common/value.h), the pair inside the joint.
+YANET_SYS_HIDDEN uint32_t
+yanet_sys_classify_joint_class(
+	const struct value_table *joint, uint32_t left, uint32_t right
+);
+
+// rule_table_get (lib/classify/rule_table.h), the pair inside the table.
+YANET_SYS_HIDDEN uint32_t
+yanet_sys_classify_rule_table_rule(
+	const struct rule_table *table, uint32_t left, uint32_t right
+);
+
+// vline_get (common/value.h), the class inside the map.
+YANET_SYS_HIDDEN uint32_t
+yanet_sys_classify_rule_map_rule(const struct vline *rule_map, uint32_t class);

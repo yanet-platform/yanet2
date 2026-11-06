@@ -84,3 +84,10 @@ option(
   value: 'disabled',
   description: 'Configure the Rust SDK fixture targets (the api archive and the plugins the Go tests load); needs cargo and a control-plane build.',
 )
+
+option(
+  'sdk_rust_llvm_bindir',
+  type: 'string',
+  value: '',
+  description: 'Directory of the clang, ld.lld and llvm-ar of the LLVM major of rustc (rustc -vV); set, the Rust SDK fixture plugins build the C shims into ThinLTO bitcode and link with cross-language LTO, so the shim lookups inline into the plugins. x86_64 only.',
+)
