@@ -20,8 +20,7 @@ BINDIR ?= $(PREFIX)/bin
 TARGET_DIR ?= target
 RELEASE_DIR := $(TARGET_DIR)/release
 
-# Keep inherited flags as data when make exports them to recipes and submakes.
-# Leave GOFLAGS undefined otherwise so Go can use persisted GOENV settings.
+# Preserve literal inherited defaults; leave absent defaults to Go's environment.
 ifneq ($(origin GOFLAGS), undefined)
 override GOFLAGS := $(value GOFLAGS)
 export GOFLAGS
@@ -241,7 +240,11 @@ go-cache-clean:
 	go clean -cache
 
 setup:
-	meson setup $(EXTRA_MODULES_FLAG) build
+	@if [ -f build/build.ninja ]; then \
+		meson configure $(MESON_SETUP_FLAGS) $(EXTRA_MODULES_FLAG) build && meson setup --reconfigure build; \
+	else \
+		meson setup $(MESON_SETUP_FLAGS) $(EXTRA_MODULES_FLAG) build; \
+	fi
 
 setup-debug:
 	@if [ ! -d "build" ]; then \
@@ -320,8 +323,19 @@ cli-clean:
 test:
 	$(MAKE) test-only
 
+# A failed package listing must not turn into an empty successful test run.
 test-only: go-test-prepare
-	CGO_CPPFLAGS="$(strip $(CGO_CPPFLAGS) $(YANET_CGO_CPPFLAGS))" go test $(GO_FIXTURE_TAGS) -count=1 $(or $(GO_TEST_PACKAGES),$$(go list $(GO_FIXTURE_TAGS) ./... | grep -v '^github.com/yanet-platform/yanet2/tests/functional/main'))
+	@set -eu; set -f; \
+	export CGO_CPPFLAGS="$(strip $(CGO_CPPFLAGS) $(YANET_CGO_CPPFLAGS))"; \
+	packages="$(GO_TEST_PACKAGES)"; \
+	if [ -z "$$packages" ]; then \
+		packages=$$(go list $(GO_FIXTURE_TAGS) -f '{{.ImportPath}}' -json=false ./...); \
+		packages=$$(printf '%s\n' "$$packages" | grep -v '^github.com/yanet-platform/yanet2/tests/functional/main' || test "$$?" -eq 1); \
+	fi; \
+	if [ -z "$$packages" ]; then \
+		printf '%s\n' 'ERROR: no Go test packages selected' >&2; exit 1; \
+	fi; \
+	go test $(GO_FIXTURE_TAGS) -count=1 $$packages
 	$(if $(GO_TEST_PACKAGES),,meson test -C build)
 
 test-asan:
