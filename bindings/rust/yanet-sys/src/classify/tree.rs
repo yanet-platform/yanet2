@@ -5,9 +5,9 @@
 //! queries pass the table only the classes of those stages
 //! (`lib/classify/query.h`). The tree keeps that promise by construction: a
 //! node is written only by a [`Scope`](crate::cp::Scope), together with the
-//! very nodes it was joined or decoded from, and its fields are private, so a
-//! class never leaves the SDK and no lookup checks one. Every read is the C
-//! one of the shim, which a plugin built with cross-language LTO inlines.
+//! very nodes it was joined or decoded from, and its fields are private, so no
+//! lookup takes a class from module code and none checks one. Every read is the
+//! C one of the shim, which a plugin built with cross-language LTO inlines.
 
 use core::{
     convert::Infallible,
@@ -26,6 +26,30 @@ use crate::{
 ///
 /// Sealed: every node is one of this module's, so each class it reports is a
 /// class of the stage it was compiled or joined with.
+///
+/// ```compile_fail,E0277
+/// use yanet_shm::{resolve::Resolve, shm::ShmLayout};
+/// use yanet_sys::{
+///     classify::Node,
+///     cp::{Build, MemoryContext, Owner, Refusal},
+/// };
+/// #[repr(C)]
+/// struct Mine(u32);
+/// unsafe impl ShmLayout for Mine {}
+/// unsafe impl Build for Mine {
+///     type Parts<'b, W: Owner> = u32;
+///     unsafe fn write<W: Owner>(_: u32, _: &MemoryContext<'_, W>, _: usize) -> Result<(), Refusal> {
+///         Ok(())
+///     }
+///     unsafe fn free<W: Owner>(_: usize, _: &MemoryContext<'_, W>) {}
+/// }
+/// impl Node for Mine {
+///     type Key = u32;
+///     fn class<'g>(&'g self, _: &impl Resolve<'g>, key: u32) -> u32 {
+///         key
+///     }
+/// }
+/// ```
 pub trait Node: Build + sealed::Sealed {
     /// What the node classifies: an attribute's value, or the pair of keys
     /// of a joint.
@@ -167,7 +191,7 @@ macro_rules! holders {
 
         // SAFETY: written only by the scope's joins and decodes, which put
         // the C object and the owned edges whole; freeing returns what the C
-        // build allocated in its context, then the inputs, newest first.
+        // build allocated in its context, then the right input and the left.
         unsafe impl<$($param: Build),*> Build for $name<$($param),*> {
             type Parts<'b, W: Owner> = Infallible;
 
