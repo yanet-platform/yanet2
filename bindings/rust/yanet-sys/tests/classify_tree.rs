@@ -313,6 +313,7 @@ fn edges6(rules: &[TestRule<Net6>]) -> Vec<u128> {
 }
 
 #[test]
+#[cfg_attr(miri, ignore = "Miri does not run C")]
 fn test_rules_tree4_lookup_is_the_first_matching_rule() {
     let owner = ArenaOwner::new();
     let rules = rules4();
@@ -348,6 +349,7 @@ fn test_rules_tree4_lookup_is_the_first_matching_rule() {
 }
 
 #[test]
+#[cfg_attr(miri, ignore = "Miri does not run C")]
 fn test_rules_tree6_lookup_is_the_first_matching_rule() {
     let owner = ArenaOwner::new();
     let rules = rules6();
@@ -378,6 +380,7 @@ fn test_rules_tree6_lookup_is_the_first_matching_rule() {
 }
 
 #[test]
+#[cfg_attr(miri, ignore = "Miri does not run C")]
 fn test_decode_tree_lookup_is_the_first_rule_of_the_projection() {
     let owner = ArenaOwner::new();
     let rules = rules4();
@@ -415,6 +418,7 @@ fn test_decode_tree_lookup_is_the_first_rule_of_the_projection() {
 }
 
 #[test]
+#[cfg_attr(miri, ignore = "Miri does not run C")]
 fn test_rules_tree_of_an_empty_projection_is_no_rule() {
     let owner = ArenaOwner::new();
     let rules = rules4();
@@ -455,6 +459,7 @@ fn test_rules_tree_of_an_empty_projection_is_no_rule() {
 }
 
 #[test]
+#[cfg_attr(miri, ignore = "Miri does not run C")]
 fn test_join_branches_refuses_branches_of_rulesets_of_other_sizes() {
     let owner = ArenaOwner::new();
     let lines = Lines::new(&[TCP]).unwrap();
