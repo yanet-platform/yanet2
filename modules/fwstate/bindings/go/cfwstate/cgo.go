@@ -4,7 +4,6 @@ package cfwstate
 //
 //#include "api/agent.h"
 //#include "modules/fwstate/api/fwstate_cp.h"
-//#include "lib/fwstate/config.h"
 //#include "lib/statemap/fwmap.h"
 //#include "lib/fwstate/fwstate_cursor.h"
 //#include "lib/errors/errors.h"
@@ -60,9 +59,21 @@ func NewModuleConfig(
 	defer C.free(unsafe.Pointer(cName))
 
 	var cSync *C.struct_fwstate_sync_config
+	var cEndpoints []C.struct_fwstate_sync_endpoint
+	var cListeners []C.struct_fwstate_sync_listen_endpoint
 	if syncConfig != nil {
 		cSyncConfig := syncConfig.toC()
 		cSync = &cSyncConfig
+		cEndpoints = syncConfig.endpointsToC()
+		cListeners = syncConfig.listenersToC()
+	}
+	var cEndpointsPtr *C.struct_fwstate_sync_endpoint
+	if len(cEndpoints) > 0 {
+		cEndpointsPtr = &cEndpoints[0]
+	}
+	var cListenersPtr *C.struct_fwstate_sync_listen_endpoint
+	if len(cListeners) > 0 {
+		cListenersPtr = &cListeners[0]
 	}
 
 	var cFw4Name *C.char
@@ -82,6 +93,10 @@ func NewModuleConfig(
 		(*C.struct_agent)(agent.AsRawPtr()),
 		cName,
 		cSync,
+		cEndpointsPtr,
+		C.uint32_t(len(cEndpoints)),
+		cListenersPtr,
+		C.uint32_t(len(cListeners)),
 		cFw4Name,
 		cFw6Name,
 		&cErr,

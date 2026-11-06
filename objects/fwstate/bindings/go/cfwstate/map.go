@@ -6,7 +6,7 @@ package cfwstate
 //#include "common/container_of.h"
 //#include "common/numutils.h"
 //#include "lib/errors/errors.h"
-//#include "lib/fwstate/config.h"
+//#include "lib/fwstate/types.h"
 //#include "lib/statemap/fwmap.h"
 //#include "lib/fwstate/fwstate_cursor.h"
 //#include "lib/fwstate/stash.h"

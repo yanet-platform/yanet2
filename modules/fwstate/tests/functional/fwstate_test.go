@@ -65,17 +65,25 @@ func setupFWStateHarness(t *testing.T) (*dataplaneut.Harness, *ffi.Agent) {
 // fwstateTestSyncConfig enables synchronization with production timeouts.
 func fwstateTestSyncConfig() cfwstate.SyncConfig {
 	return cfwstate.SyncConfig{
-		DstEther: [6]byte{0x33, 0x33, 0x00, 0x00, 0x00, 0x01},
-		DstAddrMulticast: [16]byte{
-			0xff, 0x02, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x01,
-		},
-		PortMulticast: syncPort,
-		TcpSynAck:     uint64(120e9),
-		TcpSyn:        uint64(120e9),
-		TcpFin:        uint64(120e9),
-		Tcp:           uint64(120e9),
-		Udp:           uint64(30e9),
-		Default:       uint64(16e9),
+		Endpoints: []cfwstate.SyncEndpoint{{
+			SrcAddr: [16]byte{0xfd, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1},
+			DstAddr: [16]byte{
+				0xff, 0x02, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x01,
+			},
+			Port: syncPort,
+		}},
+		Listeners: []cfwstate.SyncListenEndpoint{{
+			DstAddr: [16]byte{
+				0xff, 0x02, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x01,
+			},
+			Port: syncPort,
+		}},
+		TcpSynAck: uint64(120e9),
+		TcpSyn:    uint64(120e9),
+		TcpFin:    uint64(120e9),
+		Tcp:       uint64(120e9),
+		Udp:       uint64(30e9),
+		Default:   uint64(16e9),
 	}
 }
 
@@ -326,4 +334,26 @@ func TestFWStateSyncPacketOOBGuard(t *testing.T) {
 		require.Len(t, rawResult.Output, 1, "multi-segment external sync must be passed through post-fix")
 		require.Empty(t, rawResult.Drop, "multi-segment external sync must not be dropped post-fix")
 	})
+}
+
+// Test_FWState_ZeroPortDestinationsRejected verifies that the module
+// constructor refuses a zero port: a disabled entry is an absent entry
+// under the list contract, so nothing downstream needs to skip one.
+func Test_FWState_ZeroPortDestinationsRejected(t *testing.T) {
+	_, agent := setupFWStateHarness(t)
+
+	syncConfig := fwstateTestSyncConfig()
+	syncConfig.Endpoints = append(syncConfig.Endpoints, cfwstate.SyncEndpoint{
+		SrcAddr: syncConfig.Endpoints[0].SrcAddr,
+		DstAddr: syncConfig.Endpoints[0].DstAddr,
+	})
+	_, err := cfwstate.NewModuleConfig(agent, "zero-port", &syncConfig, "", "")
+	require.ErrorContains(t, err, "endpoints[1]: port must be nonzero")
+
+	syncConfig = fwstateTestSyncConfig()
+	syncConfig.Listeners = append(syncConfig.Listeners, cfwstate.SyncListenEndpoint{
+		DstAddr: [16]byte{0xff, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1},
+	})
+	_, err = cfwstate.NewModuleConfig(agent, "zero-port", &syncConfig, "", "")
+	require.ErrorContains(t, err, "listeners[1]: port must be nonzero")
 }

@@ -11,7 +11,6 @@
 #include "lib/controlplane/config/cp_object.h"
 #include "lib/controlplane/config/zone.h"
 #include "lib/dataplane/object/object.h"
-#include "lib/fwstate/config.h"
 #include "lib/fwstate/ops.h"
 #include "lib/fwstate/stash.h"
 #include "lib/fwstate/types.h"
