@@ -1,10 +1,11 @@
 // Verifies that the classify lookups of the SDK's shim stay inside the object
 // they index, whatever class they are given.
 //
-// The safe Rust lookups take classes from the caller, which may come from
-// another classifier; a class beyond a joint, a rule table or a rule map must
-// read class zero or no rule, never memory past the object. In-range classes
-// must read what the library itself reads.
+// These lookups are the reference the SDK's Rust lookups are tested against,
+// over classes past each end too, as safe Rust takes classes from the caller:
+// a class beyond a joint, a rule table or a rule map reads class zero or no
+// rule, never memory past the object. In-range classes read what the library
+// itself reads.
 #include "classify_shim.h"
 
 #include "common/value.h"

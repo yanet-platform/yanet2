@@ -7,9 +7,9 @@
 # the alias sdk-rust-fixtures builds just them.
 sdk_rust_fixtures = get_option('sdk_rust_fixtures')
 
-# The classify shims of the SDK, which the plugins compile in through cargo,
-# built here against the C library to pin that their lookups stay inside the
-# objects they index.
+# The classify shims of the SDK, whose lookups the Rust ones are tested
+# against, built here against the C library to pin that those lookups stay
+# inside the objects they index.
 classify_shim_guard_test = executable(
   'classify_shim_guard_test',
   [
