@@ -9,9 +9,9 @@
 //! a build writes in a block of its own, as the field types of this module,
 //! each a mirror of its C struct. Every lookup is a Rust port of the C one
 //! over that layout, as the LPM's is, so a module classifies without a call
-//! into C; the tests hold the ports to the C lookups of the shim. Those
-//! lookups take the classes from the caller, so they check each against the
-//! table it indexes.
+//! into C; the tests hold the ports to the C lookups of the shim. The lookups
+//! of the joints, the rule tables and the rule maps take their classes from
+//! the caller, so they check each against the table it indexes.
 //!
 //! A module may compose the same stages as one tree instead ([`Join`],
 //! [`Rules`], [`Decode`]): each node holds the classifiers whose classes it
