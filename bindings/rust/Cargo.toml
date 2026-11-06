@@ -25,13 +25,39 @@ rust-version = "1.99"
 publish = false
 
 [workspace.lints.rust]
+elided_lifetimes_in_paths = "deny"
+let_underscore_drop = "deny"
+missing_docs = "deny"
 raw_borrows_via_references = "deny"
+trivial_casts = "deny"
+unit_bindings = "deny"
 unsafe_op_in_unsafe_fn = "deny"
 unused_crate_dependencies = "deny"
+unused_lifetimes = "deny"
+unused_qualifications = "deny"
 
 [workspace.lints.clippy]
+alloc_instead_of_core = "deny"
+as_ptr_cast_mut = "deny"
+borrow_as_ptr = "deny"
+cast_ptr_alignment = "deny"
+doc_markdown = "deny"
+large_stack_arrays = "deny"
+missing_panics_doc = "deny"
+ptr_as_ptr = "deny"
+ptr_cast_constness = "deny"
+ref_as_ptr = "deny"
+std_instead_of_alloc = "deny"
 std_instead_of_core = "deny"
+transmute_ptr_to_ptr = "deny"
 undocumented_unsafe_blocks = "deny"
+unnecessary_safety_comment = "deny"
+unnecessary_safety_doc = "deny"
+wildcard_imports = "deny"
+
+[workspace.lints.rustdoc]
+broken_intra_doc_links = "deny"
+private_intra_doc_links = "deny"
 
 # Plugins and the api archive build with thin LTO, the rest of the workspace
 # without.

@@ -12,16 +12,37 @@ use core::{
 pub enum ParseError {
     /// The input ends inside the header: before the fixed part, or before the
     /// end of the options that the header length field counts.
-    Truncated { needed: usize, available: usize },
+    Truncated {
+        /// Bytes the header needs.
+        needed: usize,
+        /// Bytes of the input.
+        available: usize,
+    },
     /// The IP version field does not match the header type.
-    Version { found: u8 },
+    Version {
+        /// Version the field holds.
+        found: u8,
+    },
     /// The header length field, in 32-bit words, is below the five words of
     /// the fixed part.
-    HeaderLen { words: u8 },
+    HeaderLen {
+        /// Value of the header length field.
+        words: u8,
+    },
     /// The length field is below the length of the header it covers.
-    LengthBelowHeader { length: usize, header_len: usize },
+    LengthBelowHeader {
+        /// Bytes the length field reaches, from the start of the input.
+        length: usize,
+        /// Length of the header, options included.
+        header_len: usize,
+    },
     /// The length field reaches past the end of the input.
-    LengthBeyondInput { length: usize, available: usize },
+    LengthBeyondInput {
+        /// Bytes the length field reaches, from the start of the input.
+        length: usize,
+        /// Bytes of the input.
+        available: usize,
+    },
 }
 
 impl Display for ParseError {

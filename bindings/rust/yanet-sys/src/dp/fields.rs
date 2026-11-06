@@ -91,7 +91,9 @@ pub trait CounterLayout: Copy + 'static + sealed::Sealed {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 #[repr(C)]
 pub struct Traffic {
+    /// Packets, one per packet added.
     pub packets: u64,
+    /// Bytes of those packets.
     pub bytes: u64,
 }
 
@@ -366,9 +368,10 @@ impl<T: Copy + ShmLayout> PerWorker<T> {
 /// it with its call context, shared to read and exclusive to write.
 ///
 /// The call context is a branded token of the call and the handle a cell it
-/// owns, as in GhostCell or qcell: every access to a slot needs the context,
-/// so a shared borrow of the context lends the slot shared and a mutable one
-/// lends it exclusive. A small value is copied out of a shared borrow.
+/// owns, as in `GhostCell` or `qcell`: every access to a slot needs the
+/// context, so a shared borrow of the context lends the slot shared and a
+/// mutable one lends it exclusive. A small value is copied out of a shared
+/// borrow.
 ///
 /// Only the handler's call context of the same brand reaches the slot: the
 /// one whose prepared value, or linked object's prepared value, the handle
@@ -882,7 +885,7 @@ impl<'id, T: Copy + ShmLayout> WorkerSlice<'id, T> {
     /// The region, borrowed shared while the call context stays borrowed.
     ///
     /// The call context is a branded token of the call and the handle a cell
-    /// it owns, as in GhostCell or qcell: every write to a region takes the
+    /// it owns, as in `GhostCell` or `qcell`: every write to a region takes the
     /// context mutably, through [`Self::get_mut`], so a shared borrow through
     /// a shared context never overlaps a mutable one. Shared borrows of the
     /// region, and the rest of the context, go together:

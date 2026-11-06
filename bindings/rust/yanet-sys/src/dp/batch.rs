@@ -279,7 +279,7 @@ impl<'id> Batch<'id> {
     /// counters, as C's `packet_front_pass` does.
     ///
     /// The input counters count the whole input, so, as in C
-    /// (lib/dataplane/module/packet_front.h), a handler calls this before it
+    /// (`lib/dataplane/module/packet_front.h`), a handler calls this before it
     /// takes any packet: packets taken first are counted again in the output.
     /// Core tracks this in yanet2 #3078 (keep a front's input counters in
     /// step with its input list).

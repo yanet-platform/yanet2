@@ -34,7 +34,9 @@ pub enum Call {
 /// The failure of a routine of the owner.
 #[derive(Debug, PartialEq, Eq)]
 pub enum TestError {
+    /// A registration or a link refused by a planned failure.
     Registration,
+    /// A header initialisation refused by a planned failure.
     Header,
 }
 
@@ -136,6 +138,7 @@ impl TestOwner {
             .collect()
     }
 
+    /// Number of the blocks handed out and not yet returned.
     pub fn live_blocks(&self) -> usize {
         self.blocks.borrow().len()
     }
@@ -162,6 +165,10 @@ impl TestOwner {
     }
 
     /// Asserts that no block or header is left and the builder broke no rule.
+    ///
+    /// # Panics
+    ///
+    /// When a block or a header is left, or the builder broke a rule.
     pub fn assert_released(&self) {
         let left = (self.live_blocks(), self.headers.borrow().len());
         assert_eq!((0, 0, Vec::new()), (left.0, left.1, self.violations.borrow().clone()));

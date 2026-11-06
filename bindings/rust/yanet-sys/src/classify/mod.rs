@@ -133,7 +133,7 @@ macro_rules! views {
                 Ok(Self {
                     raw: bindings::$raw {
                         // The compile only reads through the pointer.
-                        items: items.as_ptr() as _,
+                        items: items.as_ptr().cast_mut().cast(),
                         count,
                     },
                     _items: PhantomData,

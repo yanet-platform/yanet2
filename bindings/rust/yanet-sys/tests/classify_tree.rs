@@ -6,6 +6,8 @@
 //! at the edges of every network and range of the rules. Natively only: Miri
 //! does not run C.
 
+extern crate alloc;
+
 #[path = "support/arena.rs"]
 mod arena;
 

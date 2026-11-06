@@ -563,8 +563,8 @@ fn test_blocks_scope_and_parts_are_debug_for_any_owner() {
     fn is_debug<T: core::fmt::Debug>() {}
 
     is_debug::<yanet_sdk::Owned<'static, u64, TestOwner>>();
-    is_debug::<yanet_sdk::OwnedSlice<'static, u64, TestOwner>>();
-    is_debug::<yanet_sdk::Registered<'static, Counter>>();
+    is_debug::<OwnedSlice<'static, u64, TestOwner>>();
+    is_debug::<Registered<'static, Counter>>();
     is_debug::<Scope<'static, 'static, TestOwner>>();
     is_debug::<PolicyParts<'static, TestOwner>>();
 }

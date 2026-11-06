@@ -21,7 +21,7 @@ impl Module for Exported {
     const NAME: &'static str = "exported";
     type Config = u64;
     type Prepared<'p> = u64;
-    fn handle(_: &mut Cx<Self>, batch: &mut Batch) {
+    fn handle(_: &mut Cx<'_, Self>, batch: &mut Batch<'_>) {
         batch.dispatch(|_| Verdict::Pass);
     }
     fn prepare(_: &CommitCx<'_, Self>) -> u64 {

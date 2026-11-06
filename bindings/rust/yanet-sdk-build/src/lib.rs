@@ -34,7 +34,10 @@ const SDK_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/..");
 /// cbindgen would see them only through a nightly expansion of the crate. The C
 /// side declares the prototypes over the header's types.
 ///
-/// Panics when cbindgen fails, which fails the build.
+/// # Panics
+///
+/// When cargo does not set the variables of a build script or cbindgen
+/// fails, which fails the build.
 pub fn generate_header(records: &[&str], dependencies: &[&str]) {
     println!("cargo:rerun-if-env-changed=YANET_SDK_HEADER_DIR");
     println!("cargo:rerun-if-changed=src");

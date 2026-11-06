@@ -5,12 +5,12 @@
 //! The arena is leaked and never checked for leaks; its registries hand out
 //! index zero.
 
+use alloc::ffi::CString;
 use core::{
     convert::Infallible,
     ffi::{c_char, c_void},
     ptr::NonNull,
 };
-use std::ffi::CString;
 
 use yanet_shm::{resolve::Resolve, root::ShmRoot};
 use yanet_sys::{

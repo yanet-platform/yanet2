@@ -10,12 +10,28 @@ netip = "0.4"
 zerocopy = { version = "0.8", default-features = false, features = ["derive"] }
 
 [lints.rust]
+elided_lifetimes_in_paths = "deny"
+let_underscore_drop = "deny"
+trivial_casts = "deny"
+unit_bindings = "deny"
 unsafe_code = "forbid"
 unused_crate_dependencies = "deny"
+unused_lifetimes = "deny"
+unused_qualifications = "deny"
 
 [lints.clippy]
-std_instead_of_core = "deny"
 alloc_instead_of_core = "deny"
+doc_markdown = "deny"
+large_stack_arrays = "deny"
+missing_panics_doc = "deny"
+std_instead_of_alloc = "deny"
+std_instead_of_core = "deny"
+unnecessary_safety_comment = "deny"
+wildcard_imports = "deny"
+
+[lints.rustdoc]
+broken_intra_doc_links = "deny"
+private_intra_doc_links = "deny"
 
 [dev-dependencies]
 proptest = { version = "1.12", default-features = false, features = ["std"] }

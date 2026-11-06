@@ -87,7 +87,7 @@ pub fn tagged(kind: ErrorKind, message: &CStr) -> ApiError {
     let mut chain = ptr::null_mut();
     // SAFETY: the out-parameter points at a null chain, the format takes one
     // string, and the message is NUL terminated.
-    unsafe { bindings::yanet_error_add_kind(&mut chain, kind.to_c(), c"%s".as_ptr(), message.as_ptr()) };
+    unsafe { bindings::yanet_error_add_kind(&raw mut chain, kind.to_c(), c"%s".as_ptr(), message.as_ptr()) };
     // SAFETY: the chain is the one just made, ours alone.
     unsafe { from_c_chain(chain) }
 }

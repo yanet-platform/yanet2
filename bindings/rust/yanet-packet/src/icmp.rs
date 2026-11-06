@@ -36,14 +36,18 @@ impl Icmpv4Header {
         split_header_mut(buf)
     }
 
+    /// Message type, which with the code selects the message: 8 for an
+    /// echo request.
     pub fn icmp_type(&self) -> u8 {
         self.icmp_type
     }
 
+    /// Message code, the subtype within the type.
     pub fn code(&self) -> u8 {
         self.code
     }
 
+    /// Checksum as stored.
     pub fn checksum(&self) -> u16 {
         self.checksum.get()
     }
@@ -53,6 +57,7 @@ impl Icmpv4Header {
         self.rest
     }
 
+    /// Sets the message type and code and updates the checksum.
     pub fn set_type_code(&mut self, icmp_type: u8, code: u8) {
         let old = u16::from_be_bytes([self.icmp_type, self.code]);
         self.icmp_type = icmp_type;
@@ -61,6 +66,7 @@ impl Icmpv4Header {
         self.checksum.set(checksum::update(self.checksum.get(), old, new));
     }
 
+    /// Sets the message-specific bytes and updates the checksum.
     pub fn set_rest(&mut self, rest: [u8; 4]) {
         let old = core::mem::replace(&mut self.rest, rest);
         self.checksum
@@ -99,14 +105,18 @@ impl Icmpv6Header {
         split_header_mut(buf)
     }
 
+    /// Message type, which with the code selects the message: 128 for an
+    /// echo request.
     pub fn icmp_type(&self) -> u8 {
         self.icmp_type
     }
 
+    /// Message code, the subtype within the type.
     pub fn code(&self) -> u8 {
         self.code
     }
 
+    /// Checksum as stored.
     pub fn checksum(&self) -> u16 {
         self.checksum.get()
     }
@@ -116,6 +126,7 @@ impl Icmpv6Header {
         self.rest
     }
 
+    /// Sets the message type and code and updates the checksum.
     pub fn set_type_code(&mut self, icmp_type: u8, code: u8) {
         let old = u16::from_be_bytes([self.icmp_type, self.code]);
         self.icmp_type = icmp_type;
@@ -124,6 +135,7 @@ impl Icmpv6Header {
         self.checksum.set(checksum::update(self.checksum.get(), old, new));
     }
 
+    /// Sets the message-specific bytes and updates the checksum.
     pub fn set_rest(&mut self, rest: [u8; 4]) {
         let old = core::mem::replace(&mut self.rest, rest);
         self.checksum
