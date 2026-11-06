@@ -53,11 +53,7 @@ where
     T::mut_from_prefix(buf).map_err(|_| ParseError::Truncated { needed: size_of::<T>(), available })
 }
 
-/// IP protocol number of ICMP.
 pub const IPPROTO_ICMP: u8 = 1;
-/// IP protocol number of TCP.
 pub const IPPROTO_TCP: u8 = 6;
-/// IP protocol number of UDP.
 pub const IPPROTO_UDP: u8 = 17;
-/// IP protocol number of ICMPv6.
 pub const IPPROTO_ICMPV6: u8 = 58;

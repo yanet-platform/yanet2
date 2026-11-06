@@ -24,7 +24,6 @@ pub struct Ipv6Header {
 }
 
 impl Ipv6Header {
-    /// Bytes of the fixed header.
     pub const LEN: usize = 40;
 
     /// Splits the header and its payload off the front of the input.
@@ -84,7 +83,9 @@ impl Ipv6Header {
         self.version_tc_flow.get() & 0x000f_ffff
     }
 
-    /// Length of the payload in bytes, extension headers included.
+    /// Payload Length field: the bytes after the fixed header, extension
+    /// headers included, or zero in a jumbogram, whose length the Jumbo
+    /// Payload option carries.
     pub fn payload_len(&self) -> u16 {
         self.payload_len.get()
     }

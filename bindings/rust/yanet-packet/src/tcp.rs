@@ -56,8 +56,8 @@ impl TcpHeader {
         self.seq.get()
     }
 
-    /// Acknowledgment number, the next sequence number the sender expects,
-    /// in host byte order.
+    /// Acknowledgment number, in host byte order; with ACK set, the next
+    /// sequence number the sender expects.
     pub fn ack(&self) -> u32 {
         self.ack.get()
     }
@@ -87,8 +87,8 @@ impl TcpHeader {
         self.checksum.get()
     }
 
-    /// Urgent pointer, the offset past the sequence number where urgent data
-    /// ends, in host byte order.
+    /// Urgent pointer, in host byte order; with URG set, the offset from the
+    /// sequence number to the octet that follows the urgent data.
     pub fn urgent(&self) -> u16 {
         self.urgent.get()
     }
@@ -146,7 +146,6 @@ fn split_options(header: &TcpHeader, available: usize) -> Result<usize, ParseErr
 #[derive(Debug, Clone, Copy)]
 #[non_exhaustive]
 pub struct TcpPacket<'a> {
-    /// Fixed header.
     pub header: &'a TcpHeader,
     /// Options, the bytes the data offset counts past the fixed header.
     pub options: &'a [u8],
@@ -179,7 +178,6 @@ impl<'a> TcpPacket<'a> {
 #[derive(Debug)]
 #[non_exhaustive]
 pub struct TcpPacketMut<'a> {
-    /// Fixed header.
     pub header: &'a mut TcpHeader,
     /// Options, the bytes the data offset counts past the fixed header.
     pub options: &'a mut [u8],

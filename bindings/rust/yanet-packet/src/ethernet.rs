@@ -3,9 +3,7 @@ use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout, Unaligned, byteorde
 
 use crate::{ParseError, split_header, split_header_mut};
 
-/// Ethertype of IPv4.
 pub const ETHERTYPE_IPV4: u16 = 0x0800;
-/// Ethertype of IPv6.
 pub const ETHERTYPE_IPV6: u16 = 0x86dd;
 /// Tag protocol identifier of an 802.1Q customer VLAN tag.
 pub const ETHERTYPE_VLAN: u16 = 0x8100;
@@ -23,7 +21,6 @@ pub struct EthernetHeader {
 }
 
 impl EthernetHeader {
-    /// Bytes of the header.
     pub const LEN: usize = 14;
 
     /// Splits the header off the front of the input.
@@ -92,7 +89,6 @@ pub struct VlanTag {
 }
 
 impl VlanTag {
-    /// Bytes of the tag.
     pub const LEN: usize = 4;
 
     /// Splits the tag off the front of the input.

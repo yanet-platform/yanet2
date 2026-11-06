@@ -228,7 +228,6 @@ fn split_lengths(header: &Ipv4Header, available: usize) -> Result<(usize, usize)
 #[derive(Debug, Clone, Copy)]
 #[non_exhaustive]
 pub struct Ipv4Packet<'a> {
-    /// Fixed header.
     pub header: &'a Ipv4Header,
     /// Options, the bytes the header length counts past the fixed header.
     pub options: &'a [u8],
@@ -275,7 +274,6 @@ impl<'a> Ipv4Packet<'a> {
 #[derive(Debug)]
 #[non_exhaustive]
 pub struct Ipv4PacketMut<'a> {
-    /// Fixed header.
     pub header: &'a mut Ipv4Header,
     /// Options, the bytes the header length counts past the fixed header.
     pub options: &'a mut [u8],

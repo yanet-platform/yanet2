@@ -4,8 +4,6 @@ use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout, Unaligned, byteorde
 
 use crate::{ParseError, checksum, split_header, split_header_mut};
 
-/// UDP header.
-///
 /// Updates never store a zero checksum, which would mean "no checksum".
 #[derive(Debug, Clone, Copy, PartialEq, Eq, FromBytes, IntoBytes, KnownLayout, Immutable, Unaligned)]
 #[repr(C)]
@@ -17,7 +15,6 @@ pub struct UdpHeader {
 }
 
 impl UdpHeader {
-    /// Bytes of the header.
     pub const LEN: usize = 8;
 
     /// Splits the header and its payload off the front of the input.

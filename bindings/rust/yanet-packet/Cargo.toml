@@ -12,7 +12,6 @@ zerocopy = { version = "0.8", default-features = false, features = ["derive"] }
 [lints.rust]
 elided_lifetimes_in_paths = "deny"
 let_underscore_drop = "deny"
-missing_docs = "deny"
 trivial_casts = "deny"
 unit_bindings = "deny"
 unsafe_code = "forbid"

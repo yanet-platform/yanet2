@@ -16,7 +16,6 @@ pub struct Icmpv4Header {
 }
 
 impl Icmpv4Header {
-    /// Bytes of the header.
     pub const LEN: usize = 8;
 
     /// Splits the header off the front of the input.
@@ -86,7 +85,6 @@ pub struct Icmpv6Header {
 }
 
 impl Icmpv6Header {
-    /// Bytes of the header.
     pub const LEN: usize = 8;
 
     /// Splits the header off the front of the input.
