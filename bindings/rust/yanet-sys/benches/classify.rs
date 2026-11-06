@@ -22,16 +22,16 @@
 //! variant alone, for `perf stat`; its instructions per key are those of a run
 //! less those of a run of zero rounds, over the rounds times the keys.
 //!
-//! Those keys repeat and the classifier stays in cache. `-- --cold [REPS]`
-//! measures past the cache instead, over `acl`, a seeded ruleset of 2000
-//! rules of random source and destination networks and common destination
-//! ports, and 65536 keys, half made to match a random rule and half random:
-//!
-//! - `large`: every key once per round, so the tables and the keys stream
-//!   through the caches as a busy router's do;
-//! - `cold`: bursts of 32 keys at random places, each after a read of a buffer
-//!   larger than the last-level cache, timed alone, as the first burst after
-//!   other work.
+//! Those keys repeat and the classifier stays in cache. `-- --workload
+//! [REPS]` measures the shape of a dataplane worker instead, over `acl`, a
+//! seeded ruleset of 2000 rules of random source and destination networks and
+//! common destination ports, and 65536 keys, half made to match a random
+//! rule and half random. The worker hands a module a batch of up to 32
+//! packets per receive queue, up to 64 at a time, and between two batches
+//! runs the rest of its pipeline, which takes part of the caches; so each
+//! batch of 32 or 64 keys, at a random place, follows the reads and writes of
+//! a given number of bytes of other memory, from none to more than the
+//! last-level cache, and only the lookups of the batch are timed.
 
 #[path = "../tests/support/arena.rs"]
 mod arena;
@@ -250,32 +250,54 @@ fn acl_keys(rules: &[BenchRule]) -> Vec<Key> {
         .collect()
 }
 
-/// Bytes read to evict the caches: at least twice the last-level cache of a
-/// CPU of up to 64 MiB of it, as the benchmark assumes.
-const EVICT_BYTES: usize = 128 << 20;
+/// Bytes of the memory the work between two batches walks: at least twice the
+/// last-level cache of a CPU with up to 64 MiB of it, as the benchmark
+/// assumes, so the walk touches lines no batch used lately.
+const OTHER_BYTES: usize = 256 << 20;
 
-/// Reads every cache line of the buffer, which pushes the classifier and the
-/// keys out of every cache level.
+/// The work between two batches: reads and writes one word of each cache line
+/// of the next bytes of other memory, from a cursor that wraps around it, as
+/// the rest of a pipeline reads and writes packets and state.
 #[inline(never)]
-fn evict(buffer: &[u64]) {
-    let mut sum = 0u64;
-    for line in buffer.chunks(8) {
-        sum = sum.wrapping_add(line[0]);
+fn other_work(memory: &mut [u64], cursor: &mut usize, bytes: usize) {
+    let words = memory.len();
+    for _ in 0..bytes / 64 {
+        memory[*cursor] = memory[*cursor].wrapping_add(1);
+        *cursor = (*cursor + 8) % words;
     }
-    black_box(sum);
+    black_box(&mut *memory);
 }
 
-/// Times the variants over the `acl` ruleset in the `large` and `cold`
-/// regimes, and prints the median nanoseconds per key and the median of the
-/// ratios to C of each.
-fn cold(owner: &ArenaOwner, reps: usize) {
+/// The batch sizes of [`workload`]: one receive burst, and the most a module
+/// handles at once.
+const BATCHES: [usize; 2] = [32, 64];
+
+/// The bytes of other memory each batch of [`workload`] follows.
+const OTHER: [usize; 6] = [0, 64 << 10, 256 << 10, 1 << 20, 4 << 20, 16 << 20];
+
+/// The batches timed per variant and repetition of [`workload`].
+const WORKLOAD_BATCHES: usize = 512;
+
+/// Times the variants over the `acl` ruleset in the shape of a worker, and
+/// prints per batch size, bytes of other memory and variant the median
+/// nanoseconds per key and the median of the ratios to C.
+fn workload(owner: &ArenaOwner, reps: usize) {
     let rules = acl();
     let keys = acl_keys(&rules);
-    let bench = Bench::new(owner, &rules);
+    // A copy of the classifier for each variant, so that no variant reads
+    // tables another has just brought into the caches: four of the parts of
+    // a C module and two trees, of four builds.
+    let benches: [Bench<'_>; 4] = core::array::from_fn(|_| Bench::new(owner, &rules));
+    let bench_of = |variant: usize| match VARIANTS[variant] {
+        "c" | "tree" => &benches[0],
+        "stages" | "tree-burst" => &benches[1],
+        "c-burst" => &benches[2],
+        _ => &benches[3],
+    };
     for (name, joint) in [
-        ("nets", bench.parts.nets),
-        ("ports", bench.parts.ports),
-        ("root", bench.parts.root),
+        ("nets", benches[0].parts.nets),
+        ("ports", benches[0].parts.ports),
+        ("root", benches[0].parts.root),
     ] {
         // SAFETY: a joint built whole in the arena and never freed.
         let table = unsafe { &*joint.cast::<bindings::value_table>() };
@@ -287,52 +309,53 @@ fn cold(owner: &ArenaOwner, reps: usize) {
             bytes >> 10
         );
     }
-    let buffer = (0..EVICT_BYTES / 8).map(|idx| idx as u64).collect::<Vec<_>>();
+    let mut memory = (0..OTHER_BYTES / 8).map(|idx| idx as u64).collect::<Vec<_>>();
+    let mut cursor = 0;
     let mut rng = Rng(0xda94_2042_e4dd_58b5);
-    let bursts = (0..256)
-        .map(|_| rng.below(keys.len() as u64 / 32) as usize * 32)
-        .collect::<Vec<_>>();
-    for regime in ["large", "cold"] {
-        let mut ns = VARIANTS.map(|_| Vec::new());
-        let mut ratios = VARIANTS.map(|_| Vec::new());
-        let mut sums = VARIANTS.map(|_| 0);
-        for _ in 0..reps {
-            let mut times = [0.0; VARIANTS.len()];
-            for (idx, variant) in VARIANTS.iter().enumerate() {
-                let (mut elapsed, mut sum, mut count) = (0.0, 0, 0);
-                if regime == "large" {
-                    let rounds = 20;
-                    let start = Instant::now();
-                    sum = bench.run(variant, &keys, rounds);
-                    elapsed = start.elapsed().as_nanos() as f64;
-                    count = rounds as usize * keys.len();
-                } else {
-                    for &at in &bursts {
-                        evict(&buffer);
+    for batch in BATCHES {
+        let places = (0..WORKLOAD_BATCHES)
+            .map(|_| rng.below((keys.len() / batch) as u64) as usize * batch)
+            .collect::<Vec<_>>();
+        for other in OTHER {
+            let mut ns = VARIANTS.map(|_| Vec::new());
+            let mut ratios = VARIANTS.map(|_| Vec::new());
+            let mut sums = VARIANTS.map(|_| 0);
+            // One pass untimed, then every batch through every variant, each
+            // after its own work and first in turn, so a drift of the machine
+            // and the keys a batch shares fall on all of them alike.
+            for rep in 0..=reps {
+                let mut elapsed = [0.0; VARIANTS.len()];
+                sums = VARIANTS.map(|_| 0);
+                for (place, &at) in places.iter().enumerate() {
+                    for turn in 0..VARIANTS.len() {
+                        let idx = (place + turn) % VARIANTS.len();
+                        other_work(&mut memory, &mut cursor, other);
                         let start = Instant::now();
-                        sum += bench.run(variant, &keys[at..at + 32], 1);
-                        elapsed += start.elapsed().as_nanos() as f64;
-                        count += 32;
+                        sums[idx] += bench_of(idx).run(VARIANTS[idx], &keys[at..at + batch], 1);
+                        elapsed[idx] += start.elapsed().as_nanos() as f64;
                     }
                 }
-                sums[idx] = sum;
-                times[idx] = elapsed / count as f64;
-                ns[idx].push(times[idx]);
+                if rep == 0 {
+                    continue;
+                }
+                let times = elapsed.map(|elapsed| elapsed / (places.len() * batch) as f64);
+                for idx in 0..VARIANTS.len() {
+                    ns[idx].push(times[idx]);
+                    ratios[idx].push(times[idx] / times[0]);
+                }
             }
-            for idx in 0..VARIANTS.len() {
-                ratios[idx].push(times[idx] / times[0]);
-            }
-        }
-        assert!(
-            sums.iter().all(|&sum| sum == sums[0]),
-            "the variants disagree: {sums:?}"
-        );
-        for (idx, variant) in VARIANTS.iter().enumerate() {
-            println!(
-                "acl\t{regime}\t{variant}\t{:.3}\t{:.3}",
-                median(&mut ns[idx]),
-                median(&mut ratios[idx])
+            assert!(
+                sums.iter().all(|&sum| sum == sums[0]),
+                "the variants disagree: {sums:?}"
             );
+            for (idx, variant) in VARIANTS.iter().enumerate() {
+                println!(
+                    "{batch}\t{}\t{variant}\t{:.3}\t{:.3}",
+                    other >> 10,
+                    median(&mut ns[idx]),
+                    median(&mut ratios[idx])
+                );
+            }
         }
     }
 }
@@ -663,8 +686,8 @@ fn main() {
         println!("{}", bench.run(variant, &keys, rounds.parse().unwrap()));
         return;
     }
-    if args.first().map(String::as_str) == Some("--cold") {
-        cold(&owner, args.get(1).map_or(5, |arg| arg.parse().unwrap()));
+    if args.first().map(String::as_str) == Some("--workload") {
+        workload(&owner, args.get(1).map_or(5, |arg| arg.parse().unwrap()));
         return;
     }
     let rounds = args.first().map_or(200_000, |arg| arg.parse().unwrap());
