@@ -19,7 +19,7 @@ use yanet_sdk_testing as _;
 use yanet_shm::rel::ShmBox;
 use yanet_sys::{
     classify::{
-        Addr4, Decode, Join, LineAttr, LineRange, Lines, Net4, Net4Attr, Net6, Net6Attr, Nets4, Nets6, PortAttr,
+        Addr4, BURST, Decode, Join, LineAttr, LineRange, Lines, Net4, Net4Attr, Net6, Net6Attr, Nets4, Nets6, PortAttr,
         PortRange, Ports, Rule, Rules,
     },
     cp::{BuildError, Builder, Built, Refusal},
@@ -529,6 +529,71 @@ fn test_rules_tree6_lookup_splits_a_high_half_by_its_low_half() {
     assert_eq!((Some(0), None), (lookup(doc6 | (1 << 63) | 2), lookup(doc6 | 2)));
 }
 
+/// verifies that a burst lookup reports for each key the rule a lookup of the
+/// key alone does, over bursts of every length up to a full one and a short
+/// last one.
+#[test]
+#[cfg_attr(miri, ignore = "Miri does not run C")]
+fn test_rules_tree4_lookup_burst_is_the_lookup_of_each_key() {
+    let owner = ArenaOwner::new();
+    let rules = rules4();
+    let built = build4(&owner, &rules);
+    let tree = owner.body(&built).get(&owner);
+    let addrs = edges4(&rules);
+    let (protos, ports) = edges(&rules);
+    let mut keys = Vec::new();
+    for (idx, &src) in addrs.iter().enumerate() {
+        for &dst in &addrs {
+            let (proto, port) = (protos[idx % protos.len()], ports[(idx * 7) % ports.len()]);
+            keys.push((
+                (Addr4::from(src.to_be_bytes()), Addr4::from(dst.to_be_bytes())),
+                (proto, port),
+            ));
+        }
+    }
+    // Not a whole number of bursts.
+    keys.truncate(keys.len() / BURST * BURST - 5);
+    let expected = keys.iter().map(|&key| tree.lookup(&owner, key)).collect::<Vec<_>>();
+    for len in [1, 7, BURST, keys.len()] {
+        let mut rules = vec![Rule::NONE; len];
+        tree.lookup_burst(&owner, &keys[..len], |&key| key, &mut rules);
+        assert_eq!(expected[..len], rules[..], "{len} keys");
+    }
+}
+
+/// verifies that a burst decode reports for each key the rule a lookup of the
+/// key alone does.
+#[test]
+#[cfg_attr(miri, ignore = "Miri does not run C")]
+fn test_decode_tree_lookup_burst_is_the_lookup_of_each_key() {
+    let owner = ArenaOwner::new();
+    let rules = rules4();
+    let views = rules
+        .iter()
+        .map(|rule| (Lines::new(&rule.protos).unwrap(), Ports::new(&rule.ports).unwrap()))
+        .collect::<Vec<_>>();
+    let protos = views.iter().map(|view| Some(&view.0)).collect::<Vec<_>>();
+    let ports = views.iter().map(|view| Some(&view.1)).collect::<Vec<_>>();
+    let projection = views.iter().map(|_| Some(&())).collect::<Vec<_>>();
+    let built: Built<Tree<TreeAny>, ArenaOwner> = Builder::build(&owner, "any", |scope| -> Result<_, Error> {
+        let proto = scope.compile(c"proto", &protos)?;
+        let port = scope.compile(c"port", &ports)?;
+        let transport = scope.join(c"transport", proto, port)?;
+        scope.decode(c"rules", transport, &projection)
+    })
+    .unwrap();
+    let tree = owner.body(&built).get(&owner);
+    let (edge_protos, edge_ports) = edges(&rules);
+    let keys = edge_protos
+        .iter()
+        .flat_map(|&proto| edge_ports.iter().map(move |&port| (proto, port)))
+        .collect::<Vec<_>>();
+    let expected = keys.iter().map(|&key| tree.lookup(&owner, key)).collect::<Vec<_>>();
+    let mut burst = vec![Rule::NONE; keys.len()];
+    tree.lookup_burst(&owner, &keys, |&key| key, &mut burst);
+    assert_eq!(expected, burst);
+}
+
 /// The views of the protocols and the ports of the IPv4 rules, and a
 /// projection of every other rule.
 struct AnyViews<'a> {
@@ -582,4 +647,31 @@ fn test_tree_build_and_release_leave_the_arena_as_they_found_it() {
     });
     assert!(matches!(refused, Err(BuildError::Refused(Refusal::RuleSetMismatch))));
     assert_eq!(baseline, owner.free_bytes(), "a refused build");
+}
+
+/// verifies that a burst lookup of the IPv6 tree reports for each key the
+/// rule a lookup of the key alone does.
+#[test]
+#[cfg_attr(miri, ignore = "Miri does not run C")]
+fn test_rules_tree6_lookup_burst_is_the_lookup_of_each_key() {
+    let owner = ArenaOwner::new();
+    let rules = rules6();
+    let built = build6(&owner, &rules);
+    let tree = owner.body(&built).get(&owner);
+    let addrs = edges6(&rules);
+    let (protos, ports) = edges(&rules);
+    let keys = addrs
+        .iter()
+        .enumerate()
+        .flat_map(|(idx, &src)| {
+            let transport = (protos[idx % protos.len()], ports[(idx * 7) % ports.len()]);
+            addrs
+                .iter()
+                .map(move |&dst| ((src.to_be_bytes(), dst.to_be_bytes()), transport))
+        })
+        .collect::<Vec<_>>();
+    let expected = keys.iter().map(|&key| tree.lookup(&owner, key)).collect::<Vec<_>>();
+    let mut burst = vec![Rule::NONE; keys.len()];
+    tree.lookup_burst(&owner, &keys, |&key| key, &mut burst);
+    assert_eq!(expected, burst);
 }

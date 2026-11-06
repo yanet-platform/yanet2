@@ -7,10 +7,10 @@
 //! last classes to the first rule they match. Every classifier, joint, rule
 //! table and rule map is a C object a build writes, its type here a mirror of
 //! its C struct, and each node of the tree holds the classifiers whose classes
-//! it reads. The dataplane looks a packet's fields up through Rust ports of the
-//! C lookups over those layouts, as the LPM's is: no call into C and, the
-//! classes never leaving the tree, no check of a class against the table it
-//! indexes.
+//! it reads. The dataplane looks a packet's fields up, for one packet or a
+//! burst of them, through Rust ports of the C lookups over those layouts, as
+//! the LPM's is: no call into C and, the classes never leaving the tree, no
+//! check of a class against the table it indexes.
 //!
 //! The compiles are C the shim compiles in, but the joins and the decode call
 //! the classification library's compiler (`lib/classify/compiler/helper.c`):
@@ -38,7 +38,7 @@ use yanet_shm::{
     shm::{MAX_ALIGN, ShmLayout},
 };
 
-pub use self::tree::{Decode, Join, Node, Rules, link};
+pub use self::tree::{BURST, Decode, Join, Node, Rules, link};
 pub use crate::bindings::{
     classify_line_range as LineRange, filter_port_range as PortRange, net4 as Net4, net6 as Net6,
 };
@@ -87,7 +87,7 @@ impl Default for Rule {
 
 /// An IPv4 address as the IPv4 lookup takes it: its four bytes in network
 /// order, held as one aligned word.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 #[repr(transparent)]
 pub struct Addr4(u32);
 

@@ -53,12 +53,31 @@ use crate::{
 pub trait Node: Build + sealed::Sealed {
     /// What the node classifies: an attribute's value, or the pair of keys
     /// of a joint.
-    type Key: Copy;
+    type Key: Copy + Default;
 
     /// The class of a key.
     #[doc(hidden)]
     fn class<'g>(&'g self, cx: &impl Resolve<'g>, key: Self::Key) -> u32;
+
+    /// The class of the key of each item of a burst of at most [`BURST`].
+    #[doc(hidden)]
+    #[inline(always)]
+    fn classes<'g, T>(
+        &'g self,
+        cx: &impl Resolve<'g>,
+        items: &[T],
+        key: impl Fn(&T) -> Self::Key,
+        classes: &mut [u32],
+    ) {
+        for (class, item) in classes.iter_mut().zip(items) {
+            *class = self.class(cx, key(item));
+        }
+    }
 }
+
+/// The most items a burst lookup classifies a stage at a time: the burst a
+/// dataplane worker hands a module.
+pub const BURST: usize = 32;
 
 // SAFETY (every read below): the classifier belongs to the configuration
 // published and frozen for 'g (`Resolve` contract) and was built whole by its
@@ -141,6 +160,20 @@ impl<L: Node, R: Node> Node for Join<L, R> {
         let (left, right) = (self.left.get(cx).class(cx, left), self.right.get(cx).class(cx, right));
         self.pair(cx, left, right)
     }
+
+    #[inline(always)]
+    fn classes<'g, T>(
+        &'g self,
+        cx: &impl Resolve<'g>,
+        items: &[T],
+        key: impl Fn(&T) -> Self::Key,
+        classes: &mut [u32],
+    ) {
+        let (left, right) = sides(self.left.get(cx), self.right.get(cx), cx, items, &key);
+        for ((class, &left), &right) in classes.iter_mut().zip(&left).zip(&right) {
+            *class = self.pair(cx, left, right);
+        }
+    }
 }
 
 impl<L: Node, R: Node> Join<L, R> {
@@ -160,6 +193,35 @@ impl<L: Node, R: Node> Rules<L, R> {
     pub fn lookup<'g>(&'g self, cx: &impl Resolve<'g>, (left, right): (L::Key, R::Key)) -> Rule {
         let (left, right) = (self.left.get(cx).class(cx, left), self.right.get(cx).class(cx, right));
         self.pair(cx, left, right)
+    }
+
+    /// The first rule the key of each item matches, [`Rule::NONE`] for none.
+    ///
+    /// Classifies the items a burst of [`BURST`] at a time, each stage over
+    /// the whole burst before the next: the lookups of a stage are
+    /// independent, so their reads of the tables overlap. The key of each
+    /// item is taken once.
+    ///
+    /// # Panics
+    ///
+    /// The rules are fewer than the items.
+    #[inline]
+    pub fn lookup_burst<'g, T>(
+        &'g self,
+        cx: &impl Resolve<'g>,
+        items: &[T],
+        key: impl Fn(&T) -> (L::Key, R::Key),
+        rules: &mut [Rule],
+    ) {
+        let rules = &mut rules[..items.len()];
+        for (items, rules) in items.chunks(BURST).zip(rules.chunks_mut(BURST)) {
+            let keys = burst_keys(items, &key);
+            let keys = &keys[..items.len()];
+            let (left, right) = sides(self.left.get(cx), self.right.get(cx), cx, keys, &|&key| key);
+            for ((rule, &left), &right) in rules.iter_mut().zip(&left).zip(&right) {
+                *rule = self.pair(cx, left, right);
+            }
+        }
     }
 
     /// The first rule of a pair of classes of the inputs.
@@ -207,12 +269,93 @@ impl<N: Node> Decode<N> {
         self.rule(cx, class)
     }
 
+    /// The first rule the key of each item matches, [`Rule::NONE`] for none,
+    /// a burst at a time as [`Rules::lookup_burst`] does.
+    ///
+    /// # Panics
+    ///
+    /// The rules are fewer than the items.
+    #[inline]
+    pub fn lookup_burst<'g, T>(
+        &'g self,
+        cx: &impl Resolve<'g>,
+        items: &[T],
+        key: impl Fn(&T) -> N::Key,
+        rules: &mut [Rule],
+    ) {
+        let rules = &mut rules[..items.len()];
+        for (items, rules) in items.chunks(BURST).zip(rules.chunks_mut(BURST)) {
+            let keys = burst_keys(items, &key);
+            let mut classes = [0; BURST];
+            let classes = &mut classes[..items.len()];
+            self.input
+                .get(cx)
+                .classes(cx, &keys[..items.len()], |&key| key, classes);
+            for (rule, &class) in rules.iter_mut().zip(&*classes) {
+                *rule = self.rule(cx, class);
+            }
+        }
+    }
+
     /// The first rule of a class of the input.
     #[inline(always)]
     fn rule<'g>(&'g self, cx: &impl Resolve<'g>, class: u32) -> Rule {
         // SAFETY: see above; the class is of the stage the map was decoded
         // from.
         unsafe { self.map.rule(cx, class) }
+    }
+}
+
+/// The key of each item of a burst of at most [`BURST`], each taken once,
+/// and the default key past them.
+#[inline(always)]
+fn burst_keys<T, K: Copy + Default>(items: &[T], key: impl Fn(&T) -> K) -> [K; BURST] {
+    let mut keys = [K::default(); BURST];
+    for (slot, item) in keys.iter_mut().zip(items) {
+        *slot = key(item);
+    }
+    keys
+}
+
+/// The classes of both inputs of a node over a burst of items: the whole
+/// burst through the left input, then through the right.
+#[inline(always)]
+fn sides<'g, L: Node, R: Node, T>(
+    left: &'g L,
+    right: &'g R,
+    cx: &impl Resolve<'g>,
+    items: &[T],
+    key: &impl Fn(&T) -> (L::Key, R::Key),
+) -> (BurstClasses, BurstClasses) {
+    debug_assert!(items.len() <= BURST, "a burst of {} items", items.len());
+    let (mut lefts, mut rights) = (BurstClasses::new(items.len()), BurstClasses::new(items.len()));
+    left.classes(cx, items, |item| key(item).0, lefts.as_mut());
+    right.classes(cx, items, |item| key(item).1, rights.as_mut());
+    (lefts, rights)
+}
+
+/// The classes of a burst of at most [`BURST`] items.
+struct BurstClasses {
+    classes: [u32; BURST],
+    len: usize,
+}
+
+impl BurstClasses {
+    fn new(len: usize) -> Self {
+        Self { classes: [0; BURST], len }
+    }
+
+    fn as_mut(&mut self) -> &mut [u32] {
+        &mut self.classes[..self.len]
+    }
+}
+
+impl<'a> IntoIterator for &'a BurstClasses {
+    type Item = &'a u32;
+    type IntoIter = core::slice::Iter<'a, u32>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.classes[..self.len].iter()
     }
 }
 
@@ -335,7 +478,8 @@ mod tests {
         },
     };
 
-    /// The keys of the tests: pairs of bytes over both domains.
+    /// The keys of the tests: pairs of bytes over both domains, more than a
+    /// burst and not a whole number of bursts.
     fn keys() -> [(u8, u8); 40] {
         array::from_fn(|idx| ((idx * 7) as u8, (idx * 13 + 1) as u8))
     }
@@ -349,8 +493,8 @@ mod tests {
         attr
     }
 
-    /// verifies that a decode reads the rule of the joint class of the classes
-    /// of both bytes of a key.
+    /// verifies that a decode reads, one key at a time and a burst at a time,
+    /// the rule of the joint class of the classes of both bytes of a key.
     #[test]
     fn test_decode_tree_reads_the_rule_of_the_joint_class() {
         type Tree = Decode<Join<LineAttr, LineAttr>>;
@@ -384,10 +528,14 @@ mod tests {
             class => Rule(10 + u32::from(class)),
         });
         assert_eq!(expected, keys().map(|key| tree.lookup(&view, key)));
+        let mut burst = [Rule(7); 40];
+        tree.lookup_burst(&view, &keys(), |&key| key, &mut burst);
+        assert_eq!(expected, burst);
     }
 
-    /// verifies that a rule table reads the rule of the class of the right byte
-    /// in the row the class of the left byte maps to.
+    /// verifies that a rule table reads, one key at a time and a burst at a
+    /// time, the rule of the class of the right byte in the row the class of
+    /// the left byte maps to.
     #[test]
     fn test_rules_tree_reads_the_row_of_the_left_class() {
         type Tree = Rules<LineAttr, LineAttr>;
@@ -413,5 +561,8 @@ mod tests {
         let rows = [[Rule(5), Rule::NONE], [Rule(2), Rule(4)]];
         let expected = keys().map(|(left, right)| rows[[1, 0, 1][usize::from(left % 3)]][usize::from(right % 2)]);
         assert_eq!(expected, keys().map(|key| tree.lookup(&view, key)));
+        let mut burst = [Rule(7); 40];
+        tree.lookup_burst(&view, &keys(), |&key| key, &mut burst);
+        assert_eq!(expected, burst);
     }
 }
