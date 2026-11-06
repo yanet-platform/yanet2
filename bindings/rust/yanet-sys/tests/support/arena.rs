@@ -38,11 +38,11 @@ unsafe extern "C" {
 /// Bytes of the C arena of a test, in MiB: `YANET_SYS_TEST_ARENA_MIB`, 256 by
 /// default.
 fn arena_size() -> usize {
-    std::env::var("YANET_SYS_TEST_ARENA_MIB")
-        .ok()
-        .and_then(|mib| mib.parse::<usize>().ok())
-        .unwrap_or(256)
-        << 20
+    let mib = std::env::var("YANET_SYS_TEST_ARENA_MIB").map_or(256, |mib| {
+        mib.parse::<usize>()
+            .unwrap_or_else(|_| panic!("YANET_SYS_TEST_ARENA_MIB={mib} is not a count of MiB"))
+    });
+    mib.checked_mul(1 << 20).expect("YANET_SYS_TEST_ARENA_MIB is too large")
 }
 
 /// An owner over a leaked C arena.

@@ -2,26 +2,28 @@
 //! cost of checking once that every class it holds fits the table that reads
 //! it.
 //!
-//! The ruleset is seeded and synthetic, in the production profile the ACL
-//! dataset benchmark (`modules/acl/tests/functional`) is calibrated against:
-//! networks nest inside 64 supernets with a weighted prefix length, and rules
-//! draw them from shared pools, sources from one of 35 % of the rule count
-//! and destinations from one of 6 %. One rule of ten names a source and a
-//! destination only; the others 1 to 3 sources, a destination and the
-//! destination ports of a popular port, a random one or a range. A rule is of
-//! TCP or of UDP. One rule of a thousand names 100 to 10k sources instead, as
-//! a blocklist would, and a catch-all rule ends the set. The IPv4 rules of
-//! that profile are left to an IPv4 classifier.
+//! The ruleset is seeded and synthetic, after the production profile the
+//! ACL dataset benchmark (`modules/acl/tests/functional`) is calibrated
+//! against, of its IPv6 rules: networks nest inside 64 supernets with a
+//! weighted prefix length, and rules draw them from shared pools, sources
+//! from one of 35 % of the rule count and destinations from one of 6 %. One
+//! rule of ten names a source and a destination only; the others 1 to 3
+//! sources, a destination and the destination ports of a popular port, a
+//! random one or a range. A rule is of TCP or of UDP. Added to that profile,
+//! one rule of a thousand names 100 to 10k sources, as a blocklist would; a
+//! catch-all rule ends the set.
 //!
-//! The classifier is the IPv6 one of the assign fixture: the source and the
-//! destination joined, the protocol and the port joined, and the rule table
-//! of both, each a C object built as the builder builds it. The benchmark
-//! prints the time of each build step and the size of each table, then
-//! scans every value of every table against the bound the table that reads
-//! it sets, as a validation at build would.
+//! By default the classifier is the IPv6 tree of the assign fixture: the
+//! source and the destination joined, the protocol and the port joined, and
+//! the rule table of both, each a C object built as the builder builds it.
+//! The benchmark prints the time of each build step and the size of each
+//! table, then scans every class against the bound the table that reads it
+//! sets, as a validation at build would. `--acl-shape` builds instead after
+//! the composition of the ACL module and prints its build steps and table
+//! sizes only.
 //!
 //! `YANET_SYS_TEST_ARENA_MIB=65536 cargo bench -p yanet-sys --bench
-//! classify_build -- RULES`, 200000 rules by default.
+//! classify_build -- [RULES] [--acl-shape]`, 200000 rules by default.
 
 #[path = "../tests/support/arena.rs"]
 #[allow(dead_code, reason = "the benchmark reads no configuration")]
@@ -318,8 +320,12 @@ fn scan_line(line: *const bindings::vline, bound: u32, scan: &mut Scan) {
 }
 
 /// Scans the rows of a table directory with a check, an absent row
-/// skipped.
+/// skipped, and every row of an absent directory: a compile that frees an
+/// IPv6 table it needs no row of keeps the table's dimensions.
 fn scan_rows(directory: usize, rows: u32, columns: u32, scan: &mut Scan, mut check: impl FnMut(&mut Scan, u32)) {
+    if directory == 0 {
+        return;
+    }
     for row in 0..rows as usize {
         let cells = target(directory + row * size_of::<usize>()) as *const u32;
         if cells.is_null() {
@@ -403,11 +409,13 @@ fn print_rule_table(name: &str, table: *const bindings::rule_table) {
     );
 }
 
-/// Builds the classifier the way the ACL module composes it: a core of the
-/// networks every protocol path shares, the ports over only the rules that
-/// restrict a port, a rule table per protocol over the rules of that
-/// protocol with ports, and a rule map per protocol of those without, which
-/// a lookup takes the earlier of.
+/// Builds the classifier after the composition of the ACL module: a core of
+/// the networks every protocol path shares, the ports over only the rules
+/// that restrict a port, a rule table per protocol over the rules of that
+/// protocol with ports, and a rule map per protocol of those without, which a
+/// lookup takes the earlier of. The ACL also folds the device and the
+/// protocol into its core and joins its roots apart from the rule tables;
+/// those are left out.
 fn acl_shape<'a>(
     owner: &ArenaOwner,
     rules: &[Rule],
@@ -448,10 +456,7 @@ fn acl_shape<'a>(
 }
 
 fn main() {
-    let count = env::args()
-        .skip(1)
-        .find(|arg| arg != "--bench")
-        .map_or(200_000, |arg| arg.parse().unwrap());
+    let count = env::args().skip(1).find_map(|arg| arg.parse().ok()).unwrap_or(200_000);
     let owner = ArenaOwner::new();
     let rules = timed("generate", || ruleset(count));
     let networks = |side: fn(&Rule) -> &Vec<Net6>| rules.iter().map(|rule| side(rule).len()).sum::<usize>();
