@@ -85,8 +85,18 @@ fn same_ruleset(sizes: &[usize]) -> Result<(), Refusal> {
 /// and the decodes of the tree take, so a node always reads the classes of the
 /// classifiers it holds.
 ///
-/// Made by [`Scope::branch`] and [`Scope::join_branches`]; dropped, it
+/// Made by [`Scope::branch`] and [`Scope::join_branches`] only; dropped, it
 /// returns the classifier and the stage.
+///
+/// ```compile_fail,E0451
+/// use yanet_sys::{
+///     classify::Net4Attr,
+///     cp::{Branch, Owned, Owner, Stage},
+/// };
+/// fn forge<'b, W: Owner>(value: Owned<'b, Net4Attr, W>, stage: Stage<'b, W>) -> Branch<'b, Net4Attr, W> {
+///     Branch { value, stage }
+/// }
+/// ```
 #[must_use]
 pub struct Branch<'b, T: Build, W: Owner> {
     value: Owned<'b, T, W>,
