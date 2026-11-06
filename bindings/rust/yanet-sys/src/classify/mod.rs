@@ -38,7 +38,7 @@ use yanet_shm::{
     shm::{MAX_ALIGN, ShmLayout},
 };
 
-pub use self::tree::{BURST, Decode, Join, Node, Rules, link};
+pub use self::tree::{BURST, Decode, Join, Node, Paths, Rules, link};
 pub use crate::bindings::{
     classify_line_range as LineRange, filter_port_range as PortRange, net4 as Net4, net6 as Net6,
 };
