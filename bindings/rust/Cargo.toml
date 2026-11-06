@@ -25,6 +25,7 @@ rust-version = "1.99"
 publish = false
 
 [workspace.lints.rust]
+raw_borrows_via_references = "deny"
 unsafe_op_in_unsafe_fn = "deny"
 unused_crate_dependencies = "deny"
 
