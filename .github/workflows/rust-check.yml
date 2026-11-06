@@ -109,4 +109,9 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - uses: ./.github/actions/protoc
         timeout-minutes: 5
-      - run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      # With CARGO_BUILD_WARNINGS=deny a crate that only warns still builds, so
+      # --keep-going checks its dependents too and the run lists every warning
+      # before it fails.
+      - run: cargo clippy --workspace --all-targets --locked --keep-going
+        env:
+          CARGO_BUILD_WARNINGS: deny

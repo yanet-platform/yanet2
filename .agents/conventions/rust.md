@@ -9,7 +9,7 @@ paths:
 Loaded by path in Claude Code and on demand elsewhere, for the agent writing or reviewing Rust; this is the single source for these rules.
 
 - `.rustfmt.toml` uses nightly-only options (`wrap_comments`, `format_code_in_doc_comments`, `imports_granularity`, `group_imports`). Always use `cargo +nightly-2026-10-22 fmt` — the date `rust-check.yml` pins, installed once with `rustup toolchain install nightly-2026-10-22 --component rustfmt`; a newer nightly rewraps comments differently. Bump the date together with a workspace reformat.
-- Run `cargo +nightly-2026-10-22 fmt -- --check` and `cargo clippy --workspace --all-targets --locked -- -D warnings` (what CI runs, tests included) before committing.
+- Run `cargo +nightly-2026-10-22 fmt -- --check` and `CARGO_BUILD_WARNINGS=deny cargo clippy --workspace --all-targets --locked --keep-going` (what CI runs, tests included) before committing.
 - **`cargo fmt --all` also formats local path dependencies**, so it reaches outside the crate you think you are formatting. Scope it deliberately when the workspace pulls in path deps from another tree.
 - Proto compilation needs `protobuf-compiler` in CI.
 - **Proto crates**: tonic-include crates expose `pub mod pb`, never `pub mod <crate>`; consume shared `common/rust/` crates through `extern_path`.
