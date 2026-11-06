@@ -10,7 +10,9 @@ version = "0.1.0"
 edition = "2024"
 publish = false
 
-rust-version = "1.88"
+# Matches the workspace the path dependencies come from; an older
+# toolchain is rejected during dependency resolution anyway.
+rust-version = "1.99"
 
 [dependencies]
 ync = { path = "../../../cli/core", package = "yanet-cli" }

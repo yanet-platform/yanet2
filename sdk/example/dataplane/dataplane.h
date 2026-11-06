@@ -2,5 +2,5 @@
 
 #include "lib/dataplane/module/module.h"
 
-struct module *
+YANET_MODULE_EXPORT struct module *
 new_module_example();

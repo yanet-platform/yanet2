@@ -8,6 +8,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/yanet-platform/yanet2/controlplane/configstore"
+	"github.com/yanet-platform/yanet2/controlplane/crud"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	examplepb "github.com/yanet-platform/yanet2/sdk/example/controlplane/examplepb/v1"
 )
@@ -22,7 +23,8 @@ type Backend interface {
 	// UpdateModule creates a module config and publishes it to the
 	// dataplane.
 	UpdateModule(name string) (ModuleHandle, error)
-	// DeleteModule removes a module config.
+	// DeleteModule removes a module config; a name the dataplane has
+	// nothing under fails with ffi.ErrNotFound.
 	DeleteModule(name string) error
 }
 
@@ -92,35 +94,37 @@ func (m *ExampleService) UpdateConfig(
 		return &config{Module: module}, nil
 	})
 	if err != nil {
-		return nil, status.Errorf(
-			codes.Internal,
-			"failed to update module config %q: %v", name, err,
-		)
+		return nil, crud.PublishError(name, err)
 	}
 
 	return &examplepb.UpdateConfigResponse{}, nil
 }
 
 // DeleteConfig removes the named config if it is not referenced by any
-// pipeline.
+// pipeline. A config an earlier daemon process left in shared memory is
+// removed from the dataplane directly.
 func (m *ExampleService) DeleteConfig(
 	ctx context.Context,
 	req *examplepb.DeleteConfigRequest,
 ) (*examplepb.DeleteConfigResponse, error) {
 	name := req.GetName()
-	err := m.configs.Delete(name, func(*config) error {
-		return m.backend.DeleteModule(name)
-	})
+	err := m.configs.DeleteOr(name,
+		func(*config) error {
+			return m.backend.DeleteModule(name)
+		},
+		func() error {
+			err := m.backend.DeleteModule(name)
+			if errors.Is(err, ffi.ErrNotFound) {
+				return configstore.ErrNotFound
+			}
+			return err
+		},
+	)
 	if errors.Is(err, configstore.ErrNotFound) {
 		return nil, status.Errorf(codes.NotFound, "config %q not found", name)
 	}
 	if err != nil {
-		code := codes.Internal
-		if errors.Is(err, ffi.ErrFailedPrecondition) {
-			// A chain still references the config.
-			code = codes.FailedPrecondition
-		}
-		return nil, status.Errorf(code, "failed to delete module config %q: %v", name, err)
+		return nil, crud.DeleteError(name, err)
 	}
 
 	return &examplepb.DeleteConfigResponse{}, nil

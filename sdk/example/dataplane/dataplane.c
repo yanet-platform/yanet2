@@ -30,7 +30,7 @@ example_module_commit(
 	(void)cp_module;
 }
 
-struct module *
+YANET_MODULE_EXPORT struct module *
 new_module_example() {
 	struct module *module = (struct module *)malloc(sizeof(*module));
 

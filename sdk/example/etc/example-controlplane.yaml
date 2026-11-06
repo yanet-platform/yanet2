@@ -4,9 +4,10 @@
 #   yanet-example-controlplane --config sdk/example/etc/example-controlplane.yaml
 #
 # The dataplane side needs the plugin deployed and named; in dataplane.yaml:
-#   plugin_dir: /usr/lib/yanet2/modules
-#   modules:
-#     - example
+#   dataplane:
+#     plugin_dir: /usr/lib/yanet2/modules
+#     modules:
+#       - example
 module:
   # Dataplane instance the module's agent serves.
   instance_id: 0
@@ -24,9 +25,13 @@ register:
   # Gateway heartbeat period.
   interval: 30s
 
+# Gateways receiving the registration heartbeat; the empty list serves the
+# endpoint directly, reachable without a gateway. To register, replace it
+# with a block list:
+#   gateways:
+#     - name: primary
+#       endpoint: "[::1]:8080"
 gateways: []
-  # - name: primary
-  #   endpoint: "[::1]:8080"
 
 logging:
   level: info
