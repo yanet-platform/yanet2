@@ -123,7 +123,7 @@ pub use yanet_shm::{
     option::ShmOption,
     rel::{ShmBox, ShmSlice},
     resolve::Resolve,
-    shm::ShmLayout,
+    shm::{ShmLayout, WordLayout},
 };
 pub use yanet_sys::{
     classify::{
@@ -290,21 +290,31 @@ mod doctests {
     /// ```
     struct PerWorkerSlicePlainAccepted;
 
-    /// An optional value the tag word would pad, sized other than a multiple
-    /// of 8, is not read: the read rejects it at compile time.
+    /// An optional value the tag word would pad, one not of whole words, is
+    /// no layout type: a configuration holding one does not type-check.
     ///
-    /// ```compile_fail,E0080
-    /// use yanet_sdk::ShmOption;
-    /// let _: fn(&ShmOption<u32>) -> Option<&u32> = ShmOption::get;
+    /// ```compile_fail,E0277
+    /// use yanet_sdk::{ShmLayout, ShmOption};
+    ///
+    /// #[derive(ShmLayout)]
+    /// #[repr(C)]
+    /// struct Config {
+    ///     value: ShmOption<u32>,
+    /// }
     /// ```
     struct PaddedOptionRefused;
 
-    /// An optional value sized a multiple of 8 is read, the accepted twin of
+    /// An optional value of whole words is a layout type, the accepted twin of
     /// the refusal above.
     ///
     /// ```
-    /// use yanet_sdk::ShmOption;
-    /// let _: fn(&ShmOption<[u32; 2]>) -> Option<&[u32; 2]> = ShmOption::get;
+    /// use yanet_sdk::{ShmLayout, ShmOption};
+    ///
+    /// #[derive(ShmLayout)]
+    /// #[repr(C)]
+    /// struct Config {
+    ///     value: ShmOption<[u64; 2]>,
+    /// }
     /// ```
     struct UnpaddedOptionAccepted;
 

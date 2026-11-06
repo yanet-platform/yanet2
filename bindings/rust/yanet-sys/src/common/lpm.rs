@@ -13,7 +13,7 @@ use yanet_shm::{
     option::ShmOption,
     rel::RelPtr,
     resolve::Resolve,
-    shm::{MAX_ALIGN, ShmLayout},
+    shm::{MAX_ALIGN, ShmLayout, WordLayout},
 };
 
 use crate::{bindings, cp::FfiRecord};
@@ -109,6 +109,8 @@ const _: () = {
     assert!(align_of::<Rust>() <= MAX_ALIGN);
     assert!(size_of::<Page>() == size_of::<bindings::lpm_page>());
     assert!(align_of::<Page>() == align_of::<bindings::lpm_page>());
+    // The table is whole words, aligned to at most 8.
+    assert!(size_of::<Rust>().is_multiple_of(8) && align_of::<Rust>() <= 8);
     // An optional table is the tag word and the table, without padding.
     assert!(size_of::<ShmOption<Rust>>() == size_of::<u64>() + size_of::<Rust>());
 };
@@ -178,3 +180,7 @@ const FLAG: u64 = bindings::LPM_VALUE_FLAG as u64;
 // directory slot is an offset word and the count an integer. Dropping is a
 // no-op and the alignment is 8.
 unsafe impl<const K: usize> ShmLayout for Lpm<K> {}
+
+// SAFETY: the key size names no field, so every table has the layout asserted
+// above: whole words, aligned to 8.
+unsafe impl<const K: usize> WordLayout for Lpm<K> {}

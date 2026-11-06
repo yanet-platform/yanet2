@@ -16,7 +16,7 @@ use yanet_packet as _;
 use yanet_sdk::{
     Batch, Build, BuiltObject, CommitCx, Counter, Cx, Device, Kind, Lpm4, Module, Object, ObjectBuilder,
     ObjectCommitCx, ObjectLink, OwnedSlice, PerWorker, PerWorkerSlice, Refusal, Registered, ShmBox, ShmLayout,
-    ShmOption, ShmSlice, Traffic, Verdict,
+    ShmOption, ShmSlice, Traffic, Verdict, WordLayout,
 };
 use yanet_sdk_derive as _;
 use yanet_sdk_testing::{
@@ -76,6 +76,9 @@ struct FlakyParts {
 
 // SAFETY: a word accepts every bit pattern and has no padding.
 unsafe impl ShmLayout for Flaky {}
+
+// SAFETY: one word.
+unsafe impl WordLayout for Flaky {}
 
 // SAFETY: the word is the whole value, written or refused as a whole. It
 // stands in, under Miri, for an embedded C object whose initialisation runs

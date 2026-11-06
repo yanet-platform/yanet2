@@ -27,7 +27,7 @@ use yanet_shm::{
     option::ShmOption,
     rel::{ShmBox, ShmSlice},
     root::ShmRoot,
-    shm::{MAX_ALIGN, ShmLayout},
+    shm::{MAX_ALIGN, ShmLayout, WordLayout},
 };
 
 use super::{
@@ -337,11 +337,10 @@ unsafe impl<T: Build> Build for ShmSlice<T> {
     }
 }
 
-// SAFETY: the tag and the value are the whole value, without padding (the
-// layout check of the value offset). The tag is set only after the value is
-// written whole; an absent value is zeroed, so every byte is initialised, and
-// owns nothing.
-unsafe impl<T: Build> Build for ShmOption<T> {
+// SAFETY: the tag and the value are the whole value, without padding (a
+// word-layout value). The tag is set only after the value is written whole; an
+// absent value is zeroed, so every byte is initialised, and owns nothing.
+unsafe impl<T: Build + WordLayout> Build for ShmOption<T> {
     /// The parts of the value, or `None` to leave it absent.
     type Parts<'b, W: Owner> = Option<T::Parts<'b, W>>;
 
