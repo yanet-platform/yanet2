@@ -1,10 +1,11 @@
 //! The control-plane side of a classification: the compiles, the joins and
 //! the decodes a build composes, each the C routine of `lib/classify`.
 //!
-//! A stage remembers the size of the ruleset it was compiled or joined over,
-//! and a join or a decode refuses stages and projections of other sizes: the
-//! identity of a ruleset is its length only, so the caller keeps one ruleset
-//! per composition.
+//! A compile or a join makes a [`Branch`], a classifier with the stage of its
+//! classes. A branch remembers the size of the ruleset it was compiled or
+//! joined over, and a join or a decode refuses branches and projections of
+//! other sizes: the identity of a ruleset is its length only, so the caller
+//! keeps one ruleset per composition.
 
 use core::{
     ffi::{CStr, c_int},
@@ -22,11 +23,10 @@ use crate::{
 /// The classes of a stage of a composition over a ruleset of build `'b`: the
 /// registry of its class space and the group of each rule.
 ///
-/// Made by [`Scope::compile`] and [`Scope::join`], and read by the joins and
-/// the decodes of the same build and ruleset; it is scratch of the build in
-/// its memory, which it returns when dropped.
-#[must_use]
-pub struct Stage<'b, W: Owner> {
+/// Held by a [`Branch`] and read by the joins and the decodes of the same
+/// build and ruleset; it is scratch of the build in its memory, which it
+/// returns when dropped.
+struct Stage<'b, W: Owner> {
     addr: usize,
     rules: u32,
     memory: &'b MemoryContext<'b, W>,
@@ -65,9 +65,6 @@ impl<W: Owner> Drop for Stage<'_, W> {
     }
 }
 
-/// A classifier or a joint a build wrote, with the stage of its classes.
-pub type Staged<'b, T, W> = (Owned<'b, T, W>, Stage<'b, W>);
-
 /// The rule count of a ruleset as C takes it.
 fn rule_count(len: usize) -> Result<u32, Refusal> {
     u32::try_from(len).map_err(|_| Refusal::TooManyItems)
@@ -81,20 +78,21 @@ fn same_ruleset(sizes: &[usize]) -> Result<(), Refusal> {
     }
 }
 
-/// A classifier of a tree with the stage of its classes, which only the joins
-/// and the decodes of the tree take, so a node always reads the classes of the
-/// classifiers it holds.
+/// A classifier or a joint a build wrote, with the stage of its classes.
 ///
-/// Made by [`Scope::branch`] and [`Scope::join_branches`] only; dropped, it
-/// returns the classifier and the stage.
+/// Made by [`Scope::compile`], [`Scope::join`] and [`Scope::join_branches`]
+/// only. The joins and the decodes read the stage: those of a tree take the
+/// branch whole, so a node always reads the classes of the classifiers it
+/// holds; the others borrow it, and [`Branch::into_owned`] then hands the
+/// classifier to a field. Dropped, it returns the classifier and the stage.
 ///
 /// ```compile_fail,E0451
 /// use yanet_sys::{
 ///     classify::Net4Attr,
-///     cp::{Branch, Owned, Owner, Stage},
+///     cp::{Branch, Owned, Owner},
 /// };
-/// fn forge<'b, W: Owner>(value: Owned<'b, Net4Attr, W>, stage: Stage<'b, W>) -> Branch<'b, Net4Attr, W> {
-///     Branch { value, stage }
+/// fn forge<'b, W: Owner>(value: Owned<'b, Net4Attr, W>) -> Branch<'b, Net4Attr, W> {
+///     Branch { value, stage: unimplemented!() }
 /// }
 /// ```
 #[must_use]
@@ -109,22 +107,15 @@ impl<T: Build, W: Owner> fmt::Debug for Branch<'_, T, W> {
     }
 }
 
-impl<'b, W: Owner, E: From<BuildError<W::Error>>, K: Kind> Scope<'b, '_, W, E, K> {
-    /// Compiles the classifier of an attribute over a ruleset as a branch of
-    /// a tree, as [`Scope::compile`] does.
-    ///
-    /// # Errors
-    ///
-    /// As for [`Scope::compile`].
-    pub fn branch<A>(self, name: &CStr, rules: &[Option<&A>]) -> Result<Branch<'b, A::Classifier, W>, E>
-    where
-        A: Attribute,
-        A::Classifier: Node,
-    {
-        let (value, stage) = self.compile(name, rules)?;
-        Ok(Branch { value, stage })
+impl<'b, T: Build, W: Owner> Branch<'b, T, W> {
+    /// The classifier, for a field of a configuration, once no join or decode
+    /// is to read the stage.
+    pub fn into_owned(self) -> Owned<'b, T, W> {
+        self.value
     }
+}
 
+impl<'b, W: Owner, E: From<BuildError<W::Error>>, K: Kind> Scope<'b, '_, W, E, K> {
     /// Joins two branches of the same ruleset into a branch that holds them.
     ///
     /// # Errors
@@ -140,7 +131,7 @@ impl<'b, W: Owner, E: From<BuildError<W::Error>>, K: Kind> Scope<'b, '_, W, E, K
         same_ruleset(&[left.stage.rules as usize, right.stage.rules as usize]).map_err(refused::<W, E>)?;
         let memory = self.memory;
         let (Branch { value: left, stage: left_stage }, Branch { value: right, stage: right_stage }) = (left, right);
-        let (value, stage) = self.staged(left_stage.rules, |context, stage, join: *mut Join<L, R>| {
+        self.staged(left_stage.rules, |context, stage, join: *mut Join<L, R>| {
             // SAFETY: both stages were filled over the rule count, and the
             // joint leads the zeroed node.
             let status = unsafe {
@@ -164,8 +155,7 @@ impl<'b, W: Owner, E: From<BuildError<W::Error>>, K: Kind> Scope<'b, '_, W, E, K
                 }
             }
             status
-        })?;
-        Ok(Branch { value, stage })
+        })
     }
 
     /// Joins two branches into the first rule of a projection of their
@@ -255,7 +245,7 @@ impl<'b, W: Owner, E: From<BuildError<W::Error>>, K: Kind> Scope<'b, '_, W, E, K
     }
 
     /// Compiles the classifier of an attribute over a ruleset, one view of
-    /// the attribute per rule, and returns it with the stage of its classes.
+    /// the attribute per rule, into a branch.
     ///
     /// The name titles the memory contexts of the compile in the memory tree.
     ///
@@ -263,7 +253,7 @@ impl<'b, W: Owner, E: From<BuildError<W::Error>>, K: Kind> Scope<'b, '_, W, E, K
     ///
     /// The rules are more than C counts, or the memory is exhausted; nothing
     /// of the compile is left allocated.
-    pub fn compile<A: Attribute>(self, name: &CStr, rules: &[Option<&A>]) -> Result<Staged<'b, A::Classifier, W>, E> {
+    pub fn compile<A: Attribute>(self, name: &CStr, rules: &[Option<&A>]) -> Result<Branch<'b, A::Classifier, W>, E> {
         let count = rule_count(rules.len()).map_err(refused::<W, E>)?;
         self.staged(count, |memory, stage, classifier| {
             // SAFETY: a rule slot is a nullable pointer to a view the
@@ -272,14 +262,20 @@ impl<'b, W: Owner, E: From<BuildError<W::Error>>, K: Kind> Scope<'b, '_, W, E, K
         })
     }
 
-    /// Joins the classes of two stages of the same ruleset into a joint and
-    /// the stage of its classes.
+    /// Joins the classes of two branches of the same ruleset into a joint
+    /// branch, which holds neither.
     ///
     /// # Errors
     ///
-    /// The stages are over rulesets of different sizes, or the memory is
+    /// The branches are over rulesets of different sizes, or the memory is
     /// exhausted; nothing of the join is left allocated.
-    pub fn join(self, name: &CStr, left: &Stage<'b, W>, right: &Stage<'b, W>) -> Result<Staged<'b, Joint, W>, E> {
+    pub fn join<L: Build, R: Build>(
+        self,
+        name: &CStr,
+        left: &Branch<'b, L, W>,
+        right: &Branch<'b, R, W>,
+    ) -> Result<Branch<'b, Joint, W>, E> {
+        let (left, right) = (&left.stage, &right.stage);
         same_ruleset(&[left.rules as usize, right.rules as usize]).map_err(refused::<W, E>)?;
         self.staged(left.rules, |memory, stage, joint: *mut Joint| {
             // SAFETY: both stages were filled over the rule count.
@@ -297,23 +293,24 @@ impl<'b, W: Owner, E: From<BuildError<W::Error>>, K: Kind> Scope<'b, '_, W, E, K
         })
     }
 
-    /// Joins the classes of two stages into the first rule of a projection
-    /// of their ruleset each pair matches.
+    /// Joins the classes of two branches into the first rule of a projection
+    /// of their ruleset each pair matches, holding neither.
     ///
     /// A rule is in the projection when its slot is `Some`, whatever it
     /// holds.
     ///
     /// # Errors
     ///
-    /// The stages and the projection are over rulesets of different sizes,
+    /// The branches and the projection are over rulesets of different sizes,
     /// or the memory is exhausted; nothing of the join is left allocated.
-    pub fn join_rules<R>(
+    pub fn join_rules<L: Build, R: Build, P>(
         self,
         name: &CStr,
-        left: &Stage<'b, W>,
-        right: &Stage<'b, W>,
-        rules: &[Option<&R>],
+        left: &Branch<'b, L, W>,
+        right: &Branch<'b, R, W>,
+        rules: &[Option<&P>],
     ) -> Result<Owned<'b, RuleTable, W>, E> {
+        let (left, right) = (&left.stage, &right.stage);
         same_ruleset(&[left.rules as usize, right.rules as usize, rules.len()]).map_err(refused::<W, E>)?;
         self.written(|memory, table: *mut RuleTable| {
             // SAFETY: both stages were filled over the rule count of the
@@ -332,22 +329,23 @@ impl<'b, W: Owner, E: From<BuildError<W::Error>>, K: Kind> Scope<'b, '_, W, E, K
         })
     }
 
-    /// Decodes the classes of a stage into the first rule of a projection of
-    /// its ruleset each class matches.
+    /// Decodes the classes of a branch into the first rule of a projection of
+    /// its ruleset each class matches, holding none.
     ///
     /// A rule is in the projection when its slot is `Some`, whatever it
     /// holds.
     ///
     /// # Errors
     ///
-    /// The stage and the projection are over rulesets of different sizes, or
+    /// The branch and the projection are over rulesets of different sizes, or
     /// the memory is exhausted; nothing of the decode is left allocated.
-    pub fn decode<R>(
+    pub fn decode<T: Build, P>(
         self,
         name: &CStr,
-        stage: &Stage<'b, W>,
-        rules: &[Option<&R>],
+        branch: &Branch<'b, T, W>,
+        rules: &[Option<&P>],
     ) -> Result<Owned<'b, RuleMap, W>, E> {
+        let stage = &branch.stage;
         same_ruleset(&[stage.rules as usize, rules.len()]).map_err(refused::<W, E>)?;
         self.written(|memory, map: *mut RuleMap| {
             // SAFETY: the stage was filled over the rule count of the
@@ -408,7 +406,7 @@ impl<'b, W: Owner, E: From<BuildError<W::Error>>, K: Kind> Scope<'b, '_, W, E, K
         self,
         rules: u32,
         write: impl FnOnce(*mut bindings::memory_context, *mut bindings::classifier, *mut T) -> c_int,
-    ) -> Result<Staged<'b, T, W>, E> {
+    ) -> Result<Branch<'b, T, W>, E> {
         let memory = self.memory;
         let addr = self.alloc(size_of::<bindings::classifier>())?;
         let root = memory.root();
@@ -416,15 +414,15 @@ impl<'b, W: Owner, E: From<BuildError<W::Error>>, K: Kind> Scope<'b, '_, W, E, K
         // SAFETY: the block is ours, of the size of one stage.
         unsafe { stage.write_bytes(0, 1) };
         match self.written(|context, value| write(context, stage, value)) {
-            Ok(value) => Ok((
+            Ok(value) => Ok(Branch {
                 value,
-                Stage {
+                stage: Stage {
                     addr,
                     rules,
                     memory,
                     _brand: PhantomData,
                 },
-            )),
+            }),
             Err(err) => {
                 // SAFETY: the stage was zeroed and then, if the routine ran,
                 // left by it in a state its C finalizer releases, as it does

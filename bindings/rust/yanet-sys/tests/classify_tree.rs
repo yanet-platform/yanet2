@@ -19,7 +19,7 @@ use yanet_sdk_testing as _;
 use yanet_shm::rel::ShmBox;
 use yanet_sys::{
     classify::{
-        Addr4, Decode, Join, LineAttr, LineRange, Lines, Net4, Net4Attr, Net6, Net6Attr, Nets4, Nets6, PortAttr,
+        Addr4, BURST, Decode, Join, LineAttr, LineRange, Lines, Net4, Net4Attr, Net6, Net6Attr, Nets4, Nets6, PortAttr,
         PortRange, Ports, Rule, Rules,
     },
     cp::{BuildError, Builder, Built, Refusal},
@@ -208,10 +208,10 @@ fn build4(owner: &ArenaOwner, rules: &[TestRule<Net4>]) -> Built<Tree<Tree4>, Ar
     let ports = views.iter().map(|view| Some(&view.3)).collect::<Vec<_>>();
     let projection = views.iter().map(|_| Some(&())).collect::<Vec<_>>();
     Builder::build(owner, "v4", |scope| -> Result<_, Error> {
-        let src = scope.branch(c"src", &src)?;
-        let dst = scope.branch(c"dst", &dst)?;
-        let proto = scope.branch(c"proto", &protos)?;
-        let port = scope.branch(c"port", &ports)?;
+        let src = scope.compile(c"src", &src)?;
+        let dst = scope.compile(c"dst", &dst)?;
+        let proto = scope.compile(c"proto", &protos)?;
+        let port = scope.compile(c"port", &ports)?;
         let nets = scope.join_branches(c"nets", src, dst)?;
         let transport = scope.join_branches(c"transport", proto, port)?;
         scope.branch_rules(c"rules", nets, transport, &projection)
@@ -238,10 +238,10 @@ fn build6(owner: &ArenaOwner, rules: &[TestRule<Net6>]) -> Built<Tree<Tree6>, Ar
     let ports = views.iter().map(|view| Some(&view.3)).collect::<Vec<_>>();
     let projection = views.iter().map(|_| Some(&())).collect::<Vec<_>>();
     Builder::build(owner, "v6", |scope| -> Result<_, Error> {
-        let src = scope.branch(c"src", &src)?;
-        let dst = scope.branch(c"dst", &dst)?;
-        let proto = scope.branch(c"proto", &protos)?;
-        let port = scope.branch(c"port", &ports)?;
+        let src = scope.compile(c"src", &src)?;
+        let dst = scope.compile(c"dst", &dst)?;
+        let proto = scope.compile(c"proto", &protos)?;
+        let port = scope.compile(c"port", &ports)?;
         let nets = scope.join_branches(c"nets", src, dst)?;
         let transport = scope.join_branches(c"transport", proto, port)?;
         scope.branch_rules(c"rules", nets, transport, &projection)
@@ -395,8 +395,8 @@ fn test_decode_tree_lookup_is_the_first_rule_of_the_projection() {
         .map(|idx| (idx % 2 == 1).then_some(&()))
         .collect::<Vec<_>>();
     let built: Built<Tree<TreeAny>, ArenaOwner> = Builder::build(&owner, "any", |scope| -> Result<_, Error> {
-        let proto = scope.branch(c"proto", &protos)?;
-        let port = scope.branch(c"port", &ports)?;
+        let proto = scope.compile(c"proto", &protos)?;
+        let port = scope.compile(c"port", &ports)?;
         let transport = scope.join_branches(c"transport", proto, port)?;
         scope.decode_branch(c"rules", transport, &projection)
     })
@@ -439,10 +439,10 @@ fn test_rules_tree_of_an_empty_projection_is_no_rule() {
     let none_ports: Vec<Option<&Ports<'_>>> = views.iter().map(|_| None).collect();
     let projection: Vec<Option<&()>> = views.iter().map(|_| None).collect();
     let built: Built<Tree<Tree4>, ArenaOwner> = Builder::build(&owner, "empty", |scope| -> Result<_, Error> {
-        let src = scope.branch(c"src", &none4)?;
-        let dst = scope.branch(c"dst", &none4)?;
-        let proto = scope.branch(c"proto", &none_lines)?;
-        let port = scope.branch(c"port", &none_ports)?;
+        let src = scope.compile(c"src", &none4)?;
+        let dst = scope.compile(c"dst", &none4)?;
+        let proto = scope.compile(c"proto", &none_lines)?;
+        let port = scope.compile(c"port", &none_ports)?;
         let nets = scope.join_branches(c"nets", src, dst)?;
         let transport = scope.join_branches(c"transport", proto, port)?;
         scope.branch_rules(c"rules", nets, transport, &projection)
@@ -466,10 +466,75 @@ fn test_join_branches_refuses_branches_of_rulesets_of_other_sizes() {
     let http = [port(80, 80)];
     let ports = Ports::new(&http).unwrap();
     let result: Result<Built<Tree<TreeAny>, ArenaOwner>, Error> = Builder::build(&owner, "mismatch", |scope| {
-        let proto = scope.branch(c"proto", &[Some(&lines)])?;
-        let port = scope.branch(c"port", &[Some(&ports), Some(&ports)])?;
+        let proto = scope.compile(c"proto", &[Some(&lines)])?;
+        let port = scope.compile(c"port", &[Some(&ports), Some(&ports)])?;
         let transport = scope.join_branches(c"transport", proto, port)?;
         scope.decode_branch(c"rules", transport, &[Some(&())])
     });
     assert!(matches!(result, Err(BuildError::Refused(Refusal::RuleSetMismatch))));
+}
+
+/// verifies that a burst lookup reports for each key the rule a lookup of the
+/// key alone does, over bursts of every length up to a full one and a short
+/// last one.
+#[test]
+#[cfg_attr(miri, ignore = "Miri does not run C")]
+fn test_rules_tree4_lookup_burst_is_the_lookup_of_each_key() {
+    let owner = ArenaOwner::new();
+    let rules = rules4();
+    let built = build4(&owner, &rules);
+    let tree = owner.body(&built).get(&owner);
+    let addrs = edges4(&rules);
+    let (protos, ports) = edges(&rules);
+    let mut keys = Vec::new();
+    for (idx, &src) in addrs.iter().enumerate() {
+        for &dst in &addrs {
+            let (proto, port) = (protos[idx % protos.len()], ports[(idx * 7) % ports.len()]);
+            keys.push((
+                (Addr4::from(src.to_be_bytes()), Addr4::from(dst.to_be_bytes())),
+                (proto, port),
+            ));
+        }
+    }
+    // Not a whole number of bursts.
+    keys.truncate(keys.len() / BURST * BURST - 5);
+    let expected = keys.iter().map(|&key| tree.lookup(&owner, key)).collect::<Vec<_>>();
+    for len in [1, 7, BURST, keys.len()] {
+        let mut rules = vec![Rule::NONE; len];
+        tree.lookup_burst(&owner, &keys[..len], |&key| key, &mut rules);
+        assert_eq!(expected[..len], rules[..], "{len} keys");
+    }
+}
+
+/// verifies that a burst decode reports for each key the rule a lookup of the
+/// key alone does.
+#[test]
+#[cfg_attr(miri, ignore = "Miri does not run C")]
+fn test_decode_tree_lookup_burst_is_the_lookup_of_each_key() {
+    let owner = ArenaOwner::new();
+    let rules = rules4();
+    let views = rules
+        .iter()
+        .map(|rule| (Lines::new(&rule.protos).unwrap(), Ports::new(&rule.ports).unwrap()))
+        .collect::<Vec<_>>();
+    let protos = views.iter().map(|view| Some(&view.0)).collect::<Vec<_>>();
+    let ports = views.iter().map(|view| Some(&view.1)).collect::<Vec<_>>();
+    let projection = views.iter().map(|_| Some(&())).collect::<Vec<_>>();
+    let built: Built<Tree<TreeAny>, ArenaOwner> = Builder::build(&owner, "any", |scope| -> Result<_, Error> {
+        let proto = scope.compile(c"proto", &protos)?;
+        let port = scope.compile(c"port", &ports)?;
+        let transport = scope.join_branches(c"transport", proto, port)?;
+        scope.decode_branch(c"rules", transport, &projection)
+    })
+    .unwrap();
+    let tree = owner.body(&built).get(&owner);
+    let (edge_protos, edge_ports) = edges(&rules);
+    let keys = edge_protos
+        .iter()
+        .flat_map(|&proto| edge_ports.iter().map(move |&port| (proto, port)))
+        .collect::<Vec<_>>();
+    let expected = keys.iter().map(|&key| tree.lookup(&owner, key)).collect::<Vec<_>>();
+    let mut burst = vec![Rule::NONE; keys.len()];
+    tree.lookup_burst(&owner, &keys, |&key| key, &mut burst);
+    assert_eq!(expected, burst);
 }

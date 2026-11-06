@@ -64,3 +64,48 @@ yanet_sys_bench_c_run(
 	}
 	return sum;
 }
+
+// As yanet_sys_bench_c_run, with the batch query a C module runs over a
+// burst: each lookup over the whole burst of 32 keys before the next, the
+// fields of the keys gathered first as a module gathers them from packets.
+uint64_t
+yanet_sys_bench_c_run_burst(
+	const struct yanet_sys_bench_query *q,
+	const struct yanet_sys_bench_key *keys,
+	uint32_t count,
+	uint64_t rounds
+) {
+	uint64_t sum = 0;
+	for (uint64_t round = 0; round < rounds; ++round) {
+		__asm__ volatile("" ::: "memory");
+		for (uint32_t start = 0; start < count; start += 32) {
+			uint32_t n = count - start < 32 ? count - start : 32;
+			uint32_t src_addrs[32], dst_addrs[32];
+			uint32_t src[32], dst[32], sport[32], dport[32];
+			uint32_t nets[32], ports[32], rules[32];
+			for (uint32_t idx = 0; idx < n; ++idx) {
+				src_addrs[idx] = keys[start + idx].src;
+				dst_addrs[idx] = keys[start + idx].dst;
+			}
+			classify_net4_lookup(q->src, src_addrs, src, n);
+			classify_net4_lookup(q->dst, dst_addrs, dst, n);
+			for (uint32_t idx = 0; idx < n; ++idx) {
+				sport[idx] = vline_get(
+					(struct vline *)&q->sport->line,
+					keys[start + idx].sport
+				);
+				dport[idx] = vline_get(
+					(struct vline *)&q->dport->line,
+					keys[start + idx].dport
+				);
+			}
+			classify_joint_lookup(q->nets, src, dst, nets, n);
+			classify_joint_lookup(q->ports, sport, dport, ports, n);
+			classify_combine(q->root, q->rules, nets, ports, rules, n);
+			for (uint32_t idx = 0; idx < n; ++idx) {
+				sum += rules[idx];
+			}
+		}
+	}
+	return sum;
+}
