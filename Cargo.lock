@@ -2557,6 +2557,7 @@ version = "0.4.1"
 dependencies = [
  "clap",
  "clap_complete",
+ "netip",
  "prost",
  "serde",
  "serde_yaml",

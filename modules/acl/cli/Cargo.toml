@@ -12,6 +12,7 @@ workspace = true
 ync.workspace = true
 commonpb.workspace = true
 filterpb.workspace = true
+netip.workspace = true
 clap = { workspace = true, features = ["wrap_help"] }
 clap_complete.workspace = true
 prost.workspace = true
