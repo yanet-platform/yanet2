@@ -102,18 +102,24 @@ fn build_shim(flags: &CFlags, shim_dir: &Path) {
     build.compile("yanet_sys_shims");
 }
 
-/// Compiles the C the native classify tests build classifiers with: a block
-/// arena and the classification library's compiler.
+/// Compiles the C the native classify tests and benchmark build classifiers
+/// with: a block arena and the classification library's compiler, and the
+/// inline C query the benchmark measures against.
 ///
 /// The compile shim calls the compiler's joins and decode. Cargo is told
 /// nothing of the archive, so only a test that names it links it, and no
 /// plugin or api archive carries it; the shims' build already gives the
 /// linker the directory it lands in.
 fn build_classify_tests(flags: &CFlags, shim_dir: &Path) {
-    let arena = shim_dir.join("tests/classify_arena.c");
+    let (arena, bench) = (
+        shim_dir.join("tests/classify_arena.c"),
+        shim_dir.join("tests/classify_bench.c"),
+    );
     println!("cargo:rerun-if-changed={}", arena.display());
+    println!("cargo:rerun-if-changed={}", bench.display());
     c_build(flags, shim_dir)
         .file(arena)
+        .file(bench)
         .file(flags.source("lib/classify/compiler/helper.c"))
         .cargo_metadata(false)
         .compile("yanet_sys_classify_tests");

@@ -1,16 +1,16 @@
-//! The assign module's records and build: each family's classifier composed
-//! over the classify bindings of the SDK, over the rules of the family, and
-//! that of the rules of any family over theirs; a path without rules is
-//! written empty.
+//! The assign module's records and build: each family's classifier tree
+//! composed over the classify bindings of the SDK, over the rules of the
+//! family, and that of the rules of any family over theirs; a tree without
+//! rules matches none.
 
 use core::ffi::CStr;
 
 use yanet_sdk::{
-    Attribute, Builder, Built, FfiRecord, Joint, LineAttr, LineRange, Lines, Net4, Net6, Nets4, Nets6, Owned, PortAttr,
-    PortRange, Ports, RuleMap, RuleTable, Scope,
+    Attribute, Builder, Built, FfiRecord, Join, LineRange, Lines, Net4, Net6, Nets4, Nets6, Node, Owned, PortRange,
+    Ports, Rules, Scope,
 };
 use yanet_sdk_api::{Agent, ApiError, ErrorKind};
-use yanet_sdk_fixture::assign::{ActionParts, Assign4Parts, Assign6Parts, AssignAnyParts, AssignConfigParts};
+use yanet_sdk_fixture::assign::{ActionParts, AssignAny, AssignConfigParts, Transport};
 
 use crate::text;
 
@@ -76,26 +76,8 @@ impl Assign {
         Builder::<yanet_sdk_fixture::assign::Assign>::build::<ApiError, _>(agent, name, |scope| {
             let v4 = views.iter().map(|view| view.v4.as_ref()).collect::<Vec<_>>();
             let v6 = views.iter().map(|view| view.v6.as_ref()).collect::<Vec<_>>();
-            let (src, dst, proto, port, nets, transport, rules4) = family(scope, &views, &v4, NAMES4)?;
-            let v4 = Assign4Parts {
-                src,
-                dst,
-                proto,
-                port,
-                nets,
-                transport,
-                rules: rules4,
-            };
-            let (src, dst, proto, port, nets, transport, rules6) = family(scope, &views, &v6, NAMES6)?;
-            let v6 = Assign6Parts {
-                src,
-                dst,
-                proto,
-                port,
-                nets,
-                transport,
-                rules: rules6,
-            };
+            let v4 = family(scope, &views, &v4, NAMES4)?;
+            let v6 = family(scope, &views, &v6, NAMES6)?;
             let any = views.iter().map(|view| view.any.as_ref()).collect::<Vec<_>>();
             let any = any_family(scope, &views, &any)?;
             let actions = scope.slice(rules.len(), |idx| {
@@ -185,21 +167,12 @@ const NAMES6: Names = [
 
 type Scoped<'b, 'env> = Scope<'b, 'env, Agent, ApiError>;
 
-/// The parts of a family's classifier: its four attributes, both joints and
-/// the rule table.
-type FamilyParts<'b, C> = (
-    Owned<'b, C, Agent>,
-    Owned<'b, C, Agent>,
-    Owned<'b, LineAttr, Agent>,
-    Owned<'b, PortAttr, Agent>,
-    Owned<'b, Joint, Agent>,
-    Owned<'b, Joint, Agent>,
-    Owned<'b, RuleTable, Agent>,
-);
+/// The classifier tree of a family whose networks are classified by `C`.
+type Family<C> = Rules<Join<C, C>, Transport>;
 
 /// Composes a family's classifier over the rules whose networks are of the
 /// family, `nets` holding each rule's pair or `None` for a rule of the other.
-fn family<'b, N: Attribute>(
+fn family<'b, N>(
     scope: Scoped<'b, '_>,
     views: &[RuleViews<'_>],
     nets: &[Option<&(N, N)>],
@@ -212,7 +185,11 @@ fn family<'b, N: Attribute>(
         transport_name,
         rules_name,
     ]: Names,
-) -> Result<FamilyParts<'b, N::Classifier>, ApiError> {
+) -> Result<Owned<'b, Family<N::Classifier>, Agent>, ApiError>
+where
+    N: Attribute,
+    N::Classifier: Node,
+{
     let src = nets.iter().map(|pair| pair.map(|(src, _)| src)).collect::<Vec<_>>();
     let dst = nets.iter().map(|pair| pair.map(|(_, dst)| dst)).collect::<Vec<_>>();
     let lines = views
@@ -225,28 +202,23 @@ fn family<'b, N: Attribute>(
         .zip(nets)
         .map(|(view, pair)| pair.map(|_| &view.ports))
         .collect::<Vec<_>>();
-    let (src, src_stage) = scope.compile(src_name, &src)?;
-    let (dst, dst_stage) = scope.compile(dst_name, &dst)?;
-    let (proto, proto_stage) = scope.compile(proto_name, &lines)?;
-    let (port, port_stage) = scope.compile(port_name, &ports)?;
-    let (nets_joint, nets_stage) = scope.join(nets_name, &src_stage, &dst_stage)?;
-    let (transport, transport_stage) = scope.join(transport_name, &proto_stage, &port_stage)?;
-    let rules = if nets.iter().all(Option::is_none) {
-        scope.boxed::<RuleTable>(())?
-    } else {
-        scope.join_rules(rules_name, &nets_stage, &transport_stage, nets)?
-    };
-    Ok((src, dst, proto, port, nets_joint, transport, rules))
+    let src = scope.branch(src_name, &src)?;
+    let dst = scope.branch(dst_name, &dst)?;
+    let proto = scope.branch(proto_name, &lines)?;
+    let port = scope.branch(port_name, &ports)?;
+    let nets_joint = scope.join_branches(nets_name, src, dst)?;
+    let transport = scope.join_branches(transport_name, proto, port)?;
+    scope.branch_rules(rules_name, nets_joint, transport, nets)
 }
 
 /// Composes the classifier of the rules of any family, `any` holding a slot
 /// for each such rule and `None` for a rule of a family: the protocol and the
-/// port join into one stage, decoded into the first rule of each class.
+/// port join, decoded into the first rule of each class.
 fn any_family<'b>(
     scope: Scoped<'b, '_>,
     views: &[RuleViews<'_>],
     any: &[Option<&()>],
-) -> Result<AssignAnyParts<'b, Agent>, ApiError> {
+) -> Result<Owned<'b, AssignAny, Agent>, ApiError> {
     let lines = views
         .iter()
         .zip(any)
@@ -257,13 +229,8 @@ fn any_family<'b>(
         .zip(any)
         .map(|(view, slot)| slot.map(|_| &view.ports))
         .collect::<Vec<_>>();
-    let (proto, proto_stage) = scope.compile(c"assign any proto", &lines)?;
-    let (port, port_stage) = scope.compile(c"assign any port", &ports)?;
-    let (transport, transport_stage) = scope.join(c"assign any transport", &proto_stage, &port_stage)?;
-    let rules = if any.iter().all(Option::is_none) {
-        scope.boxed::<RuleMap>(())?
-    } else {
-        scope.decode(c"assign any rules", &transport_stage, any)?
-    };
-    Ok(AssignAnyParts { proto, port, transport, rules })
+    let proto = scope.branch(c"assign any proto", &lines)?;
+    let port = scope.branch(c"assign any port", &ports)?;
+    let transport = scope.join_branches(c"assign any transport", proto, port)?;
+    scope.decode_branch(c"assign any rules", transport, any)
 }

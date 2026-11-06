@@ -49,3 +49,14 @@ struct memory_context *
 yanet_sys_test_arena_context(struct yanet_sys_test_arena *arena) {
 	return &arena->context;
 }
+
+// Opens a memory context over the arena at the given place, as a module
+// header embeds one.
+void
+yanet_sys_test_arena_init_context(
+	struct yanet_sys_test_arena *arena,
+	struct memory_context *context,
+	const char *name
+) {
+	memory_context_init(context, name, &arena->allocator);
+}

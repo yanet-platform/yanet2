@@ -16,7 +16,7 @@ use core::{
 use super::{Build, BuildError, Kind, MemoryContext, Owned, Owner, Refusal, Scope, refused};
 use crate::{
     bindings,
-    classify::{Attribute, Joint, RuleMap, RuleTable},
+    classify::{Attribute, Decode, Join, Joint, Node, RuleMap, RuleTable, Rules, link},
 };
 
 /// The classes of a stage of a composition over a ruleset of build `'b`: the
@@ -81,7 +81,169 @@ fn same_ruleset(sizes: &[usize]) -> Result<(), Refusal> {
     }
 }
 
+/// A classifier of a tree with the stage of its classes, which only the joins
+/// and the decodes of the tree take, so a node always reads the classes of the
+/// classifiers it holds.
+///
+/// Made by [`Scope::branch`] and [`Scope::join_branches`]; dropped, it
+/// returns the classifier and the stage.
+#[must_use]
+pub struct Branch<'b, T: Build, W: Owner> {
+    value: Owned<'b, T, W>,
+    stage: Stage<'b, W>,
+}
+
+impl<T: Build, W: Owner> fmt::Debug for Branch<'_, T, W> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
+        f.debug_struct("Branch").field("stage", &self.stage).finish()
+    }
+}
+
 impl<'b, W: Owner, E: From<BuildError<W::Error>>, K: Kind> Scope<'b, '_, W, E, K> {
+    /// Compiles the classifier of an attribute over a ruleset as a branch of
+    /// a tree, as [`Scope::compile`] does.
+    ///
+    /// # Errors
+    ///
+    /// As for [`Scope::compile`].
+    pub fn branch<A>(self, name: &CStr, rules: &[Option<&A>]) -> Result<Branch<'b, A::Classifier, W>, E>
+    where
+        A: Attribute,
+        A::Classifier: Node,
+    {
+        let (value, stage) = self.compile(name, rules)?;
+        Ok(Branch { value, stage })
+    }
+
+    /// Joins two branches of the same ruleset into a branch that holds them.
+    ///
+    /// # Errors
+    ///
+    /// The branches are over rulesets of different sizes, or the memory is
+    /// exhausted; nothing of the join or the branches is left allocated.
+    pub fn join_branches<L: Node, R: Node>(
+        self,
+        name: &CStr,
+        left: Branch<'b, L, W>,
+        right: Branch<'b, R, W>,
+    ) -> Result<Branch<'b, Join<L, R>, W>, E> {
+        same_ruleset(&[left.stage.rules as usize, right.stage.rules as usize]).map_err(refused::<W, E>)?;
+        let memory = self.memory;
+        let (Branch { value: left, stage: left_stage }, Branch { value: right, stage: right_stage }) = (left, right);
+        let (value, stage) = self.staged(left_stage.rules, |context, stage, join: *mut Join<L, R>| {
+            // SAFETY: both stages were filled over the rule count, and the
+            // joint leads the zeroed node.
+            let status = unsafe {
+                bindings::yanet_sys_classify_join(
+                    context,
+                    name.as_ptr(),
+                    left_stage.raw(),
+                    right_stage.raw(),
+                    left_stage.rules,
+                    join.cast(),
+                    stage,
+                )
+            };
+            if status == 0 {
+                let (left_edge, right_edge) = Join::<L, R>::EDGES;
+                // SAFETY: the node's joint is written whole and its edges are
+                // not; the classifiers are of this build.
+                unsafe {
+                    link(memory, join.addr() + left_edge, left);
+                    link(memory, join.addr() + right_edge, right);
+                }
+            }
+            status
+        })?;
+        Ok(Branch { value, stage })
+    }
+
+    /// Joins two branches into the first rule of a projection of their
+    /// ruleset each pair of their classes matches, holding the branches.
+    ///
+    /// A rule is in the projection when its slot is `Some`, whatever it
+    /// holds.
+    ///
+    /// # Errors
+    ///
+    /// As for [`Scope::join_rules`].
+    pub fn branch_rules<L: Node, R: Node, P>(
+        self,
+        name: &CStr,
+        left: Branch<'b, L, W>,
+        right: Branch<'b, R, W>,
+        rules: &[Option<&P>],
+    ) -> Result<Owned<'b, Rules<L, R>, W>, E> {
+        same_ruleset(&[left.stage.rules as usize, right.stage.rules as usize, rules.len()]).map_err(refused::<W, E>)?;
+        let memory = self.memory;
+        let (Branch { value: left, stage: left_stage }, Branch { value: right, stage: right_stage }) = (left, right);
+        self.written(|context, table: *mut Rules<L, R>| {
+            // SAFETY: both stages were filled over the rule count of the
+            // projection, whose slots C only tests for null; the table leads
+            // the zeroed node.
+            let status = unsafe {
+                bindings::yanet_sys_classify_join_rules(
+                    context,
+                    name.as_ptr(),
+                    left_stage.raw(),
+                    right_stage.raw(),
+                    rules.as_ptr().cast(),
+                    left_stage.rules,
+                    table.cast(),
+                )
+            };
+            if status == 0 {
+                let (left_edge, right_edge) = Rules::<L, R>::EDGES;
+                // SAFETY: as for a joint.
+                unsafe {
+                    link(memory, table.addr() + left_edge, left);
+                    link(memory, table.addr() + right_edge, right);
+                }
+            }
+            status
+        })
+    }
+
+    /// Decodes a branch into the first rule of a projection of its ruleset
+    /// each of its classes matches, holding the branch.
+    ///
+    /// A rule is in the projection when its slot is `Some`, whatever it
+    /// holds.
+    ///
+    /// # Errors
+    ///
+    /// As for [`Scope::decode`].
+    pub fn decode_branch<N: Node, P>(
+        self,
+        name: &CStr,
+        input: Branch<'b, N, W>,
+        rules: &[Option<&P>],
+    ) -> Result<Owned<'b, Decode<N>, W>, E> {
+        same_ruleset(&[input.stage.rules as usize, rules.len()]).map_err(refused::<W, E>)?;
+        let memory = self.memory;
+        let Branch { value: input, stage } = input;
+        self.written(|context, map: *mut Decode<N>| {
+            // SAFETY: the stage was filled over the rule count of the
+            // projection, whose slots C only tests for null; the map leads
+            // the zeroed node.
+            let status = unsafe {
+                bindings::yanet_sys_classify_decode(
+                    context,
+                    name.as_ptr(),
+                    stage.raw(),
+                    rules.as_ptr().cast(),
+                    stage.rules,
+                    map.cast(),
+                )
+            };
+            if status == 0 {
+                // SAFETY: as for a joint.
+                unsafe { link(memory, map.addr() + Decode::<N>::EDGE, input) };
+            }
+            status
+        })
+    }
+
     /// Compiles the classifier of an attribute over a ruleset, one view of
     /// the attribute per rule, and returns it with the stage of its classes.
     ///
