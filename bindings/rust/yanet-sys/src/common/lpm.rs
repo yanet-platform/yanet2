@@ -84,6 +84,9 @@ impl<const K: usize> LpmRange<K> {
 unsafe impl<const K: usize> FfiRecord for LpmRange<K> {}
 
 /// Longest-prefix-match table over big-endian keys of `K` bytes.
+///
+/// A table built from no ranges is empty: it holds no page, opens no C memory
+/// context and finds nothing, so it costs only its own bytes.
 #[repr(C)]
 pub struct Lpm<const K: usize> {
     /// The allocator context of the table's blocks. C rewrites its sibling
@@ -115,6 +118,12 @@ const _: fn(&bindings::lpm) -> (&bindings::memory_context, *mut *mut bindings::l
     |lpm| (&lpm.memory_context, lpm.pages, lpm.page_count);
 
 impl<const K: usize> Lpm<K> {
+    /// Reports whether the table was built from no ranges, so it holds no page.
+    #[inline(always)]
+    pub fn is_empty(&self) -> bool {
+        self.pages.offset() == 0
+    }
+
     /// Looks a big-endian key up through `cx`, bit for bit like the C
     /// `lpm_lookup`; `None` when no inserted range covers it.
     ///
@@ -129,12 +138,15 @@ impl<const K: usize> Lpm<K> {
     #[inline(always)]
     pub fn lookup<'g>(&'g self, cx: &impl Resolve<'g>, key: &[u8; K]) -> Option<u32> {
         const { assert!(K >= 1 && K <= 16, "LPM keys are 1 to 16 bytes") };
+        if self.is_empty() {
+            return None;
+        }
         let root = cx.shm_root();
         let directory_slot = core::ptr::from_ref(&self.pages).addr();
         let directory: *const isize = root.rel(directory_slot, self.pages.offset());
         // SAFETY: the LPM belongs to a published graph frozen for 'g
-        // (`Resolve` contract), and a built LPM has a non-null directory
-        // whose first entry is an offset word, aligned.
+        // (`Resolve` contract), and a built table that is not empty has a
+        // non-null directory whose first entry is an offset word, aligned.
         let first_chunk = unsafe { directory.read() };
         // The offset is read as integer bits and never as a pointer.
         let mut page: *const bindings::lpm_page = root.rel(directory.addr(), first_chunk);

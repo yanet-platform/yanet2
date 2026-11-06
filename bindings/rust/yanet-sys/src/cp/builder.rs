@@ -477,7 +477,8 @@ unsafe impl<T: Copy + ShmLayout> Build for PerWorkerSlice<T> {
 // the context tree under the header, which opening and closing a context
 // update (`common/memory.h`).
 unsafe impl<const K: usize> Build for Lpm<K> {
-    /// The ranges, inserted in order: on an overlap the later one wins.
+    /// The ranges, inserted in order: on an overlap the later one wins. No
+    /// ranges leave the table empty, allocating nothing.
     type Parts<'b, W: Owner> = &'b [LpmRange<K>];
 
     unsafe fn write<W: Owner>(
@@ -490,6 +491,13 @@ unsafe impl<const K: usize> Build for Lpm<K> {
             return Err(Refusal::InvalidRange);
         }
         let root = memory.root();
+        if parts.is_empty() {
+            // SAFETY: the table's bytes lie in a block of the build, exclusive
+            // (caller contract), and a zeroed table is the empty one: a null
+            // directory and no C memory context to close.
+            unsafe { root.ptr::<u8>(addr).write_bytes(0, size_of::<Lpm<K>>()) };
+            return Ok(());
+        }
         let lpm = root.ptr::<bindings::lpm>(addr);
         // SAFETY: the table lies in a block of the build (caller contract),
         // and the context is the header's, which the owner set up for C.
@@ -515,8 +523,14 @@ unsafe impl<const K: usize> Build for Lpm<K> {
     }
 
     unsafe fn free<W: Owner>(addr: usize, memory: &MemoryContext<'_, W>) {
-        // SAFETY: the table was written whole (caller contract), so its
-        // pages and context are live.
+        // SAFETY: the table was written whole (caller contract).
+        let lpm = unsafe { &*memory.root().ptr::<Lpm<K>>(addr) };
+        if lpm.is_empty() {
+            // An empty table opened nothing in C.
+            return;
+        }
+        // SAFETY: a table that is not empty was initialised, so its pages and
+        // context are live.
         unsafe { bindings::yanet_sys_common_lpm_free(memory.root().ptr(addr)) };
     }
 }
