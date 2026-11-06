@@ -710,14 +710,13 @@ dataplane_worker_init(
 			worker->owned[assignment->device_id] = asgn_idx;
 		}
 
-		uint16_t rx_queue_len =
-			assignment_config->rx_queue_len
-				? assignment_config->rx_queue_len
-				: 4096;
-		uint16_t tx_queue_len =
-			assignment_config->tx_queue_len
-				? assignment_config->tx_queue_len
-				: 4096;
+		// The declared queue carries the effective sizing: a field the
+		// queue left unset already took the device default or the
+		// built-in one at config parse.
+		const struct dataplane_queue_config *queue_config =
+			device->queues + assignment_config->queue_id;
+		uint16_t rx_queue_len = queue_config->rx_queue_len;
+		uint16_t tx_queue_len = queue_config->tx_queue_len;
 
 		if (rte_eth_tx_queue_setup(
 			    assignment->port_id,
@@ -743,9 +742,7 @@ dataplane_worker_init(
 			assignment->queue_id
 		);
 
-		uint32_t num_mbufs = assignment_config->num_mbufs
-					     ? assignment_config->num_mbufs
-					     : 16384;
+		uint32_t num_mbufs = queue_config->num_mbufs;
 
 		// Sized under both limits the pool enforces, so a small pool
 		// degrades instead of failing to start.
