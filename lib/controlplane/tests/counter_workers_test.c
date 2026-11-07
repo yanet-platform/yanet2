@@ -660,6 +660,12 @@ test_worker_rx_mempool_gauges(struct dp_config *dp_config) {
 			"worker %lu assignment queue id",
 			(unsigned long)w_idx
 		);
+		TEST_ASSERT_EQUAL(
+			1,
+			assignments[0].weight,
+			"worker %lu assignment weight",
+			(unsigned long)w_idx
+		);
 	}
 
 	// An out-of-range worker index must refuse rather than fill.

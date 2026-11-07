@@ -267,6 +267,9 @@ test_numeric_field_ranges(void) {
 		{"dataplane:\n  workers:\n    - assignments:\n        - queue: "
 		 "%s\n",
 		 "4294967296"},
+		{"dataplane:\n  workers:\n    - assignments:\n        - "
+		 "weight: %s\n",
+		 "17"},
 	};
 
 	for (size_t field_idx = 0;
@@ -559,6 +562,51 @@ test_queues_list_form(void) {
 	dataplane_config_free(config);
 }
 
+// The weight carries an assignment's rx service: parsed explicit, 1 by
+// default, and 1 through the nested form's expansion.
+static void
+test_assignment_weights(void) {
+	const char yaml[] = "dataplane:\n"
+			    "  devices:\n"
+			    "    - port_name: eth0\n"
+			    "      queue_count: 2\n"
+			    "    - port_name: eth1\n"
+			    "      queue_count: 1\n"
+			    "  workers:\n"
+			    "    - core_id: 4\n"
+			    "      assignments:\n"
+			    "        - {device: eth0, queue: 0, weight: 4}\n"
+			    "        - {device: eth0, queue: 1}\n"
+			    "    - core_id: 3\n"
+			    "      assignments:\n"
+			    "        - {device: eth1, queue: 0}\n";
+
+	struct dataplane_config *config = NULL;
+	assert(parse_yaml(yaml, &config) == 0);
+
+	// The top-level assignments take the explicit weight and the
+	// default.
+	assert(config->worker_count == 2);
+	assert(config->workers[0].assignments[0].weight == 4);
+	assert(config->workers[0].assignments[1].weight == 1);
+	assert(config->workers[1].assignments[0].weight == 1);
+	assert(config->workers[1].assignments[0].device_id == 1);
+
+	dataplane_config_free(config);
+
+	// The nested form keeps its one-burst meaning: weight 1.
+	const char nested[] = "dataplane:\n"
+			      "  devices:\n"
+			      "    - port_name: eth0\n"
+			      "      workers:\n"
+			      "        - core_id: 3\n";
+	config = NULL;
+	assert(parse_yaml(nested, &config) == 0);
+	assert(config->worker_count == 1);
+	assert(config->workers[0].assignments[0].weight == 1);
+	dataplane_config_free(config);
+}
+
 // The nested devices[].workers[] shape and the explicit queues plus
 // top-level workers shape describe the same configuration.
 static void
@@ -784,6 +832,22 @@ test_assignments_rejected(void) {
 		 "  workers:\n"
 		 "    - assignments:\n"
 		 "        - {queue: 0}\n"},
+		{"a weight below one",
+		 "dataplane:\n"
+		 "  devices:\n"
+		 "    - port_name: eth0\n"
+		 "      queue_count: 1\n"
+		 "  workers:\n"
+		 "    - assignments:\n"
+		 "        - {device: eth0, queue: 0, weight: 0}\n"},
+		{"a weight above the service bound",
+		 "dataplane:\n"
+		 "  devices:\n"
+		 "    - port_name: eth0\n"
+		 "      queue_count: 1\n"
+		 "  workers:\n"
+		 "    - assignments:\n"
+		 "        - {device: eth0, queue: 0, weight: 17}\n"},
 		{"an rx queue after a steering queue in one worker",
 		 "dataplane:\n"
 		 "  devices:\n"
@@ -940,6 +1004,7 @@ main(int argc, char **argv) {
 	test_queue_roles_rejected();
 	test_queue_count_form();
 	test_queues_list_form();
+	test_assignment_weights();
 	test_worker_forms_equivalent();
 	test_queue_declarations_rejected();
 	test_assignments_rejected();

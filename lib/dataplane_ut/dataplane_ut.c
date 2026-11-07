@@ -341,9 +341,11 @@ dataplane_ut_new(const struct dataplane_ut_config *cfg) {
 		if (cfg->workers != NULL) {
 			assignment->device_id = cfg->workers[idx].device_id;
 			assignment->queue_id = cfg->workers[idx].queue_id;
+			assignment->weight = 1;
 		} else {
 			assignment->device_id = 0;
 			assignment->queue_id = (uint32_t)idx;
+			assignment->weight = 1;
 		}
 		SET_OFFSET_OF(&dp_worker->assignments, assignment);
 

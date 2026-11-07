@@ -66,7 +66,9 @@ enum dataplane_queue_declaration {
 	dataplane_queue_nested = 1 << 2, // nested devices[].workers[] entries
 };
 
-// One (device, queue) pair a worker polls.
+// One (device, queue) pair a worker polls, with the pair's rx service:
+// how many bursts the pair takes per worker round, always at least one;
+// the nested workers[] form keeps its one-burst-per-round meaning.
 //
 // The device travels by name and is resolved to device_id by
 // dataplane_config_init, exactly like a connection's src_device; the
@@ -76,6 +78,7 @@ struct dataplane_assignment_config {
 	char device[80];
 	uint32_t device_id;
 	uint32_t queue_id;
+	uint8_t weight;
 };
 
 // A worker thread: one core, one instance, one or more assignments.

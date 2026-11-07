@@ -711,6 +711,7 @@ yanet_get_worker_assignments(
 		assignments[idx] = (struct worker_assignment_metadata){
 			.device_id = source[idx].device_id,
 			.queue_id = source[idx].queue_id,
+			.weight = source[idx].weight,
 		};
 	}
 
