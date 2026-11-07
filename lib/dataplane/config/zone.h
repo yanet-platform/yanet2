@@ -64,9 +64,13 @@ struct dp_port_counters {
 };
 
 // One (device, queue) pair a worker polls and transmits on.
+//
+// The weight is the assignment's rx service: up to weight bursts in a
+// worker round, always at least 1.
 struct dp_worker_assignment {
 	uint32_t device_id;
 	uint32_t queue_id;
+	uint32_t weight;
 };
 
 struct dp_worker {
@@ -154,7 +158,7 @@ struct dp_worker {
 // against a different layout of the control-plane zone or the dataplane
 // structures recognises a foreign magic and refuses the attach instead
 // of misreading shifted fields. Bump it on every layout change.
-#define DP_CONFIG_READY_MAGIC UINT64_C(0xDEAD10CC00000009)
+#define DP_CONFIG_READY_MAGIC UINT64_C(0xDEAD10CC0000000A)
 
 struct dp_config {
 	uint32_t instance_count;

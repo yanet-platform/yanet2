@@ -214,6 +214,8 @@ struct WorkerRow {
     device: u32,
     #[tabled(rename = "Queue")]
     queue: u32,
+    #[tabled(rename = "Weight")]
+    weight: u32,
     #[tabled(rename = "Iterations")]
     iterations: String,
     #[tabled(rename = "RX")]
@@ -261,6 +263,7 @@ impl From<&WorkerCounter> for WorkerRow {
             core: w.core_id,
             device: w.device_id,
             queue: w.queue_id,
+            weight: w.assignments.first().map(|a| display_weight(a.weight)).unwrap_or(1),
             iterations: format_compact(w.iterations),
             rx: if w.rx_bytes > 0 {
                 format!("{} ({})", format_compact(w.rx_packets), ByteSize::b(w.rx_bytes))
@@ -312,6 +315,15 @@ fn format_worker_counters(response: &WorkerCountersResponse) {
     }
 }
 
+/// Renders an assignment's rx service weight.
+///
+/// A control plane from before the field existed leaves it absent, which
+/// arrives as zero; every valid configuration carries at least one burst
+/// per round.
+fn display_weight(weight: u32) -> u32 {
+    weight.max(1)
+}
+
 /// Prints one worker's device assignments when it polls more than one
 /// queue; a single-assignment worker is already fully described by the
 /// table's Device and Queue columns.
@@ -323,7 +335,14 @@ fn print_worker_assignments(worker: &WorkerCounter) {
     let parts: Vec<String> = worker
         .assignments
         .iter()
-        .map(|a| format!("device {} queue {}", a.device_id, a.queue_id))
+        .map(|a| {
+            format!(
+                "device {} queue {} weight {}",
+                a.device_id,
+                a.queue_id,
+                display_weight(a.weight)
+            )
+        })
         .collect();
     println!("worker {} assignments: {}", worker.worker_idx, parts.join("; "));
 }

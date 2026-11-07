@@ -8,6 +8,7 @@
 
 #include "common/strutils.h"
 #include "lib/dataplane/packet/packet.h"
+#include "lib/dataplane/worker/rx_service.h"
 
 static void
 print_scalar(const char *value, size_t length) {
@@ -369,6 +370,7 @@ expand_device_workers(struct dataplane_config *config) {
 			worker->assignment_count = 1;
 			worker->assignments->device_id = (uint32_t)dev_idx;
 			worker->assignments->queue_id = idx;
+			worker->assignments->weight = 1;
 
 			++wrk_idx;
 		}
@@ -708,6 +710,7 @@ enum state {
 	state_assignment,
 	state_assignment_device,
 	state_assignment_queue,
+	state_assignment_weight,
 
 	state_connections,
 	state_connection,
@@ -1203,6 +1206,21 @@ dataplane_config_init(FILE *file, struct dataplane_config **config) {
 
 				state = state_assignment;
 				break;
+			case state_assignment_weight:
+				if (parse_unsigned(
+					    "workers.assignments.weight",
+					    start,
+					    scalar_length,
+					    1,
+					    WORKER_RX_WEIGHT_MAX,
+					    &value
+				    ) != 0) {
+					goto error;
+				}
+				assignment->weight = (uint8_t)value;
+
+				state = state_assignment;
+				break;
 
 			case state_connection_src:
 				strtcpy(connection->src_device,
@@ -1396,6 +1414,8 @@ dataplane_config_init(FILE *file, struct dataplane_config **config) {
 					state = state_assignment_device;
 				} else if (!strcmp("queue", start)) {
 					state = state_assignment_queue;
+				} else if (!strcmp("weight", start)) {
+					state = state_assignment_weight;
 				} else {
 					goto error;
 				}
@@ -1638,6 +1658,7 @@ dataplane_config_init(FILE *file, struct dataplane_config **config) {
 				assignment = worker->assignments +
 					     worker->assignment_count;
 				memset(assignment, 0, sizeof(*assignment));
+				assignment->weight = 1;
 				++worker->assignment_count;
 
 				state = state_assignment;

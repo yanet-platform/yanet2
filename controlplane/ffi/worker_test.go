@@ -45,6 +45,26 @@ func TestWorkerCountersReportsPoolGauges(t *testing.T) {
 	}
 }
 
+// TestWorkerCountersReportsAssignments verifies that every worker's
+// snapshot lists its assignments with their rx service weight.
+//
+// The harness creates one default-weighted assignment per worker.
+func TestWorkerCountersReportsAssignments(t *testing.T) {
+	harness := newWorkerCountersHarness(t, 2)
+
+	dpConfig := harness.SharedMemory().DPConfig(0)
+	workers, err := dpConfig.WorkerCounters()
+	require.NoError(t, err)
+	require.Len(t, workers, 2)
+
+	for idx, worker := range workers {
+		require.Len(t, worker.Assignments, 1, "worker %d", idx)
+		require.Equal(t, uint32(0), worker.Assignments[0].DeviceID, "worker %d", idx)
+		require.Equal(t, uint32(idx), worker.Assignments[0].QueueID, "worker %d", idx)
+		require.Equal(t, uint32(1), worker.Assignments[0].Weight, "worker %d", idx)
+	}
+}
+
 // TestWorkerCountersRejectsZeroCapacity verifies that a pool reported
 // with no capacity fails the read naming the worker rather than
 // surfacing a zero-valued pool.

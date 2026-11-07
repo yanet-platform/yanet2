@@ -21,19 +21,25 @@ struct dp_worker;
 struct worker_read_ctx {
 	uint16_t read_size;
 
-	// Batch received at the end of the previous round, parsed at the
-	// start of the current one.
+	// The assignment's rx service: up to weight bursts in a round, at
+	// least 1.
+	uint16_t weight;
+
+	// The batches received at the end of the previous round, parsed at
+	// the start of the current one, held flat in one window.
 	//
-	// The batch is polled and its coldest lines prefetched before the
-	// transmit of its predecessor, so the parse runs on lines the caches
-	// already hold. A non-zero count means the batch is still pending:
-	// every consumer resets the count once the mbufs leave its hands.
-	struct rte_mbuf *staged[WORKER_RX_BURST_SIZE];
+	// The batches are polled and their coldest lines prefetched before
+	// the transmit of their predecessor, so the parse runs on lines the
+	// caches already hold. A non-zero count means batches are still
+	// pending: every consumer resets the count once the mbufs leave its
+	// hands. The window covers the assignment's whole round of rx and is
+	// reserved when the worker starts.
+	struct rte_mbuf **staged;
 	uint16_t staged_count;
 };
 
 // One (device, queue) pair the worker polls and transmits on, with its
-// per-queue state: the staged RX batch and the private SP/SC mempool.
+// per-queue state: the staged RX batches and the private SP/SC mempool.
 // The queue's ring sizing is consumed at initialization and not kept.
 struct worker_assignment {
 	uint32_t device_id;
