@@ -2259,7 +2259,7 @@ checksum = "589f6da84c646204747d1270a2a5661ea66ed1cced2631d546fdfb155959f9ec"
 
 [[package]]
 name = "yanet-cli"
-version = "0.3.0"
+version = "0.4.1"
 dependencies = [
  "base64 0.23.1",
  "byteorder",
@@ -2295,7 +2295,7 @@ dependencies = [
 
 [[package]]
 name = "yanet-cli-build"
-version = "0.3.0"
+version = "0.4.1"
 dependencies = [
  "prost-build",
  "tonic-prost-build",
@@ -2317,7 +2317,7 @@ dependencies = [
 
 [[package]]
 name = "yanet-cli-rpc"
-version = "0.3.0"
+version = "0.4.1"
 dependencies = [
  "bytes",
  "http",
@@ -2328,7 +2328,7 @@ dependencies = [
 
 [[package]]
 name = "yanet-commonpb"
-version = "0.3.0"
+version = "0.4.1"
 dependencies = [
  "netip",
  "prost",
@@ -2340,7 +2340,7 @@ dependencies = [
 
 [[package]]
 name = "yanet-ynpb"
-version = "0.3.0"
+version = "0.4.1"
 dependencies = [
  "prost",
  "prost-types",
