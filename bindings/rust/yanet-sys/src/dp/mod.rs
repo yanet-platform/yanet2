@@ -82,7 +82,7 @@ pub mod object;
 #[doc(hidden)]
 pub mod rt;
 
-pub use batch::{Batch, DeviceRef, DscpMark, Packet, PacketView, ResizeError, TunnelError, Verdict};
+pub use batch::{Batch, DeviceRef, DscpMark, Packet, PacketView, ParseError, ResizeError, TunnelError, Verdict};
 pub use cx::{BoundCounter, CommitCx, CounterRef, Cx, ModuleCx, ObjectCommitCx, PrepareCx};
 pub use fields::{
     Counter, CounterLayout, Device, ObjectLink, PerWorker, PerWorkerSlice, Traffic, WorkerSlice, WorkerSlot,

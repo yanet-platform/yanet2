@@ -132,7 +132,7 @@ pub use yanet_sys::{
     },
     dp::{
         Batch, CommitCx, Counter, CounterLayout, CounterRef, Cx, Device, DeviceRef, DscpMark, Module, ModuleCx, Object,
-        ObjectCommitCx, ObjectConfig, ObjectLink, Packet, PacketView, PerWorker, PerWorkerSlice, PrepareCx,
+        ObjectCommitCx, ObjectConfig, ObjectLink, Packet, PacketView, ParseError, PerWorker, PerWorkerSlice, PrepareCx,
         ResizeError, Traffic, TunnelError, Verdict, WorkerSlice, WorkerSlot,
     },
 };
