@@ -70,15 +70,16 @@ func Test_PluginDir_RequestedModuleWithoutPlugin_RefusesToStart(t *testing.T) {
 	require.Error(t, err)
 }
 
-// onlyStashPlugin returns an adjust that starts a bed's harness from a
-// directory holding the stash plugin alone, which carries the stash module
-// and the state object type, and asks it for that module alone.
-func onlyStashPlugin(t *testing.T) func(*dataplaneut.Config) {
+// onlyJoinedPlugin returns an adjust that starts a bed's harness from a
+// directory holding, as the stash module's plugin, the fixture plugin that
+// exports the stash module with the state object type, and asks it for that
+// module alone.
+func onlyJoinedPlugin(t *testing.T) func(*dataplaneut.Config) {
 	t.Helper()
 
 	dir := t.TempDir()
-	const plugin = "libstash_dp.so"
-	require.NoError(t, os.Symlink(filepath.Join(cfixture.PluginDir, plugin), filepath.Join(dir, plugin)))
+	joined := filepath.Join(cfixture.PluginDir, "libstash_state_plugin.so")
+	require.NoError(t, os.Symlink(joined, filepath.Join(dir, "libstash_dp.so")))
 	return func(config *dataplaneut.Config) {
 		config.PluginDir = dir
 		config.Modules = []string{"stash"}
@@ -90,7 +91,7 @@ func onlyStashPlugin(t *testing.T) func(*dataplaneut.Config) {
 // registers both: an object of the type is built and published, and the
 // module writes it.
 func Test_PluginDir_ModuleWithItsObjectType_ServesBoth(t *testing.T) {
-	bed := newBed(t, onlyStashPlugin(t))
+	bed := newBed(t, onlyJoinedPlugin(t))
 	object := bed.state("state", 10)
 	bed.publishObjects(object)
 	bed.serve([]*instance{bed.stashInstance("stash", "state")}, nil)

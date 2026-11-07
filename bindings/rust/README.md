@@ -16,7 +16,7 @@ builder, the derive, the module-crate facade and the packet header views.
 | `yanet-sdk-build` | `std`, build-dependency | `generate_header`: an api crate's `build.rs` writes the C header of its records and constants |
 | `yanet-sdk-plugin` | `no_std` | a dataplane plugin's runtime: the panic handler (C `abort`), `export_module!` and `export_object!`, so a plugin is a `#![no_std]` cdylib of one line (a module's line lists the object types its plugin carries; an object type that ships without a module is a plugin of its own), built under `--profile plugin` (`panic = "abort"`) |
 | `yanet-sdk-testing` | `std`, dev-only | the block arena (one region, as one mapping) and resolving context of the tests, Miri included; with the `cp` feature `TestOwner`, the owner of the configuration builder under Miri and natively, with no C memory |
-| `yanet-sdk-fixture` | library `no_std`, `forbid(unsafe_code)` | minimal modules, `Fixture` (a test program whose mode word selects what it does with a batch), `Tally` (a prepared value and counters, those of tagged registries included, by id among them), `Fib` (forwards by a route FIB of two C LPM tables) and `Assign` (classify) and `Stash` (writes a linked `State`), and the object type `State` (atomic slots and their prepared seed), with no tests; their plugins `lib{fixture,tally,fib,assign,stash}_dp.so`, the stash plugin carrying `State`, are examples of one line over `yanet-sdk-plugin`, built on request (`--features plugin`, `--profile plugin`) |
+| `yanet-sdk-fixture` | library `no_std`, `forbid(unsafe_code)` | minimal modules, `Fixture` (a test program whose mode word selects what it does with a batch), `Tally` (a prepared value and counters, those of tagged registries included, by id among them), `Fib` (forwards by a route FIB of two C LPM tables) and `Assign` (classify) and `Stash` (writes a linked `State`), and the object type `State` (atomic slots and their prepared seed), with no tests; their plugins `lib{fixture,tally,fib,assign,fixture_state,stash}_dp.so` and `libstash_state_plugin.so` (`Stash` with `State`, named outside the loader's pattern) are examples of one line over `yanet-sdk-plugin`, built on request (`--features plugin`, `--profile plugin`) |
 | `yanet-sdk-fixture-api` | `std`, `forbid(unsafe_code)` | the api crate of the fixture modules and object type: the records and the `build` and `free` exports per module and object type, and the queries of the object, that the Go tests call over an agent; its header carries the records and the modes |
 | `yanet-packet` | `no_std` | packet header views, extractable to its own repository |
 
@@ -134,8 +134,11 @@ plugins and build configurations through the exports of
 
 Meson builds what they need, through cargo, only when its option is on: the
 api archive with only its exports global, its header, and the directory of the
-plugins `lib{fixture,tally,fib,assign,stash}_dp.so`, which holds
-nothing else. `cargo test` and Miri never build the plugins: a `no_std` cdylib
+plugins `lib{fixture,tally,fib,assign,fixture_state,stash}_dp.so`, which holds
+nothing else the loader picks up: `libstash_state_plugin.so`, the stash module
+with the state type in one plugin, is named outside its pattern, and a test
+links it into a directory of its own. `cargo test` and Miri never build the
+plugins: a `no_std` cdylib
 cannot be built with unwinding, so they have a profile of their own.
 
 ```sh

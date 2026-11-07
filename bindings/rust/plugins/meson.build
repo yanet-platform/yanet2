@@ -2,9 +2,11 @@
 #
 # The dataplane loader maps each lib<name>_dp.so of a directory it scans to the
 # module <name>, and finds an object type of a loaded plugin by its type name,
-# so the Go tests are handed this directory and nothing else lives in it. The
-# plugins build under their own profile: a no_std plugin cannot unwind, which
-# the api archive needs.
+# so the Go tests are handed this directory and nothing else it would load
+# lives in it. The plugin of the stash module with the state type is named
+# outside that pattern, as it would collide with their plugins of their own; a
+# test links it into a directory of its own. The plugins build under their own
+# profile: a no_std plugin cannot unwind, which the api archive needs.
 rust_sdk_fixture_plugins = custom_target(
   'rust-sdk-fixture-plugins',
   output: [
@@ -12,7 +14,9 @@ rust_sdk_fixture_plugins = custom_target(
     'libtally_dp.so',
     'libfib_dp.so',
     'libassign_dp.so',
+    'libfixture_state_dp.so',
     'libstash_dp.so',
+    'libstash_state_plugin.so',
   ],
   command: [
     'sh', '-c',
