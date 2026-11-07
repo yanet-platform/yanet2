@@ -14,9 +14,9 @@ use core::{
 
 use yanet_packet as _;
 use yanet_sdk::{
-    Batch, Build, BuiltObject, CommitCx, Counter, Cx, Device, Kind, Module, Object, ObjectBuilder, ObjectCommitCx,
-    ObjectLink, OwnedSlice, PerWorker, PerWorkerSlice, Refusal, Registered, ShmBox, ShmLayout, ShmSlice, Traffic,
-    Verdict,
+    Batch, Build, BuiltObject, CommitCx, Counter, Cx, Device, Kind, Lpm4, Lpm6, Module, Object, ObjectBuilder,
+    ObjectCommitCx, ObjectLink, OwnedSlice, PerWorker, PerWorkerSlice, Refusal, Registered, ShmBox, ShmLayout,
+    ShmSlice, Traffic, Verdict,
 };
 use yanet_sdk_derive as _;
 use yanet_sdk_testing::{
@@ -127,6 +127,13 @@ struct Counted {
     traffic: Counter<Traffic>,
 }
 
+#[derive(ShmLayout)]
+#[repr(C)]
+struct Tables {
+    v4: Lpm4,
+    v6: Lpm6,
+}
+
 /// A module with a given configuration type: the builder reads only its name
 /// and that type.
 struct Fixture<C>(PhantomData<fn() -> C>);
@@ -150,10 +157,12 @@ type LanesModule = Fixture<Lanes>;
 type FaultyModule = Fixture<Faulty>;
 type EntriesModule = Fixture<ShmSlice<Entry>>;
 type CountedModule = Fixture<Counted>;
+type TablesModule = Fixture<Tables>;
 
 /// An owner of an empty arena.
 fn owner() -> TestOwner {
-    // SAFETY: no configuration of this file embeds a C object.
+    // SAFETY: no build of this file opens a C object: its only tables are
+    // built from no ranges, which leaves them empty.
     unsafe { TestOwner::new() }
 }
 
@@ -238,6 +247,30 @@ fn body<'a, M: Module>(owner: &'a TestOwner, built: &'a Built<M, TestOwner>) -> 
 fn release<M: Module>(owner: &TestOwner, built: Built<M, TestOwner>) {
     // SAFETY: handed over by the builder, unreferenced, released once.
     unsafe { built.destroy(owner) };
+}
+
+/// verifies that tables built from no ranges allocate nothing, find nothing
+/// and are released without C.
+#[test]
+fn test_build_leaves_tables_of_no_ranges_empty_and_unallocated() {
+    let owner = owner();
+
+    let built = build::<TablesModule>(&owner, |_| Ok(TablesParts { v4: &[], v6: &[] })).expect("built");
+
+    let (config, view) = body::<TablesModule>(&owner, &built);
+    assert_eq!(
+        (true, true, None, None),
+        (
+            config.v4.is_empty(),
+            config.v6.is_empty(),
+            config.v4.lookup(&view, &[10, 0, 0, 1]),
+            config.v6.lookup(&view, &[0xfd; 16])
+        )
+    );
+    // Only the root block.
+    assert_eq!(1, owner.live_blocks());
+    release::<TablesModule>(&owner, built);
+    owner.assert_released();
 }
 
 #[test]
