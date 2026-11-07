@@ -127,7 +127,6 @@ struct Counted {
     traffic: Counter<Traffic>,
 }
 
-/// A table of each family.
 #[derive(ShmLayout)]
 #[repr(C)]
 struct Tables {
