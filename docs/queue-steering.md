@@ -60,8 +60,9 @@ Startup rejects:
   reaches a steering queue. Without RSS (`rss_hash: 0`) the table is left
   alone and unmatched traffic lands on queue 0.
 - **Modules.** `dp_config_device_rss_queue_count` reports how many of a
-  port's queues are RSS queues; the device's worker count still counts every
-  queue, steering queues included.
+  port's queues are RSS queues; the device's worker count counts the
+  workers bound to it, once per worker however many of its queues —
+  steering queues included — that worker polls.
 - **Pipes.** A steering worker pipes into other ports' steering queues, or
   their RSS queues when they have none. A data worker pipes into RSS queues
   only, so data never lands on a steering queue.
