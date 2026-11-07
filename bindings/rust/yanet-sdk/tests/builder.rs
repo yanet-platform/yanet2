@@ -26,6 +26,7 @@ use yanet_sdk_testing::{
 use yanet_shm as _;
 use yanet_sys::{
     bindings::CP_OBJECT_NAME_LEN,
+    common::LINE_BLOCK_ALIGN,
     cp::{BuildError, Builder, Built, Header, MemoryContext, Owner, Scope},
     dp::ModuleConfig,
 };
@@ -1251,12 +1252,11 @@ fn test_per_worker_slots_share_no_128_byte_line_with_each_other_or_outside() {
 }
 
 /// verifies that every worker's slot keeps 128-byte lines of its own, holding
-/// no byte outside the block, whether the block starts on a 128-byte line or
-/// 64 bytes past one, as a sanitizer build shifts it.
+/// no byte outside the block, at every start an owner may give the block.
 #[test]
 fn test_per_worker_layout_keeps_slots_on_own_128_byte_lines_at_either_start() {
     fn check<T: Copy + ShmLayout>() {
-        for block in [4096, 4096 + 64] {
+        for &block in block_starts() {
             assert!(own_lines::<T>(block, 4), "{} bytes from {block}", size_of::<T>());
         }
     }
@@ -1555,9 +1555,43 @@ fn test_per_worker_slice_build_allocates_a_block_per_region_and_the_table() {
     expected.extend([3 * size_of::<isize>(), size_of::<ModuleConfig<Flows>>()]);
     expected.sort_unstable();
     // Five budgets of 24 bytes fill one 128-byte line, and the slack.
-    assert_eq!((128 + 64, expected), (region, sizes));
+    assert_eq!((128 + line_slack(), expected), (region, sizes));
     release::<FlowsModule>(&owner, built);
     owner.assert_released();
+}
+
+/// verifies that a region and a slot block of whole lines take no slack
+/// where the C allocator aligns a block of a line to the line, so that a
+/// power-of-two array takes a block of its own size.
+#[test]
+fn test_per_worker_blocks_of_whole_lines_take_no_slack_without_red_zones() {
+    let lines = 1 << 15;
+
+    let region = PerWorkerSlice::<[u64; 16]>::region_block(lines).expect("region size");
+    let slots = PerWorker::<[u64; 16]>::block_size(4).expect("block size");
+
+    assert_eq!(lines * 128 + line_slack(), region);
+    assert_eq!(4 * 128 + line_slack(), slots);
+    if LINE_BLOCK_ALIGN == 128 {
+        assert!(region.is_power_of_two());
+    }
+}
+
+/// The bytes a slot or region block keeps for its first line: none where the
+/// C allocator aligns the block to the line, the rest of the line otherwise.
+fn line_slack() -> usize {
+    128 - LINE_BLOCK_ALIGN
+}
+
+/// Starts an owner may give a block of a line or more: on a 128-byte line, or
+/// also 64 bytes past one where a sanitizer build shifts the block past its
+/// red zone.
+fn block_starts() -> &'static [usize] {
+    if LINE_BLOCK_ALIGN == 128 {
+        &[4096]
+    } else {
+        &[4096, 4096 + 64]
+    }
 }
 
 #[test]
@@ -1616,12 +1650,11 @@ fn test_per_worker_slice_write_to_one_region_leaves_the_others_unchanged() {
 }
 
 /// verifies that a region keeps 128-byte lines of its own, holding no byte
-/// outside its block, whether the block starts on a 128-byte line or 64 bytes
-/// past one, as a sanitizer build shifts it.
+/// outside its block, at every start an owner may give the block.
 #[test]
 fn test_per_worker_slice_layout_keeps_a_region_on_own_128_byte_lines_at_either_start() {
     fn check<T: Copy + ShmLayout>(len: usize) {
-        for block in [4096, 4096 + 64] {
+        for &block in block_starts() {
             assert!(
                 region_owns_its_lines::<T>(block, len),
                 "{len} of {} bytes from {block}",
@@ -1685,7 +1718,7 @@ fn test_per_worker_slice_build_without_workers_leaves_the_field_null_and_unalloc
 /// lines after the slack.
 fn largest_region_len() -> usize {
     let max = yanet_sys::bindings::MEMORY_BLOCK_ALLOCATOR_MAX_SIZE as usize;
-    (max - 64) / 128 * 128 / size_of::<u64>()
+    (max - line_slack()) / 128 * 128 / size_of::<u64>()
 }
 
 /// verifies that the largest region the largest block holds passes the size

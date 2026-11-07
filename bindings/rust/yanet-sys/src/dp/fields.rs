@@ -9,10 +9,13 @@ use yanet_shm::{
     shm::{MAX_ALIGN, ShmLayout},
 };
 
-use crate::dp::{
-    cx::{Cx, PrepareCx},
-    module::Module,
-    object::Object,
+use crate::{
+    common::LINE_BLOCK_ALIGN,
+    dp::{
+        cx::{Cx, PrepareCx},
+        module::Module,
+        object::Object,
+    },
 };
 
 /// Per-worker counter of the module, registered by the control plane as a C
@@ -219,17 +222,17 @@ const SLOT_LINE: usize = 128;
 /// Most bytes the first 128-byte line of a slot or region block lies past the
 /// block's start.
 ///
-/// Every such block is at least [`MAX_ALIGN`] bytes, which the allocator
-/// aligns it to (C's `MEMORY_BLOCK_MAX_ALIGN`, which `yanet-sys` asserts
-/// equal), so its start is a multiple of [`MAX_ALIGN`] and the next line at
-/// most this far.
-const LINE_SLACK: usize = SLOT_LINE - MAX_ALIGN;
+/// Every such block is at least a line, which its owner aligns to
+/// [`LINE_BLOCK_ALIGN`]: to the line itself, so a block of whole lines takes
+/// no slack, unless the C allocator keeps sanitizer red zones, which leave
+/// the next line up to 64 bytes on.
+const LINE_SLACK: usize = SLOT_LINE - LINE_BLOCK_ALIGN;
 
-// The slack holds only while the allocator's alignment divides the line and
-// the smallest block, a line and the slack, gets that alignment whole.
+// The slack holds only while the owner's alignment divides the line and is
+// no less than the alignment of a layout type.
 const _: () = {
-    assert!(MAX_ALIGN.is_power_of_two() && SLOT_LINE.is_multiple_of(MAX_ALIGN));
-    assert!(SLOT_LINE + LINE_SLACK >= MAX_ALIGN);
+    assert!(LINE_BLOCK_ALIGN.is_power_of_two() && SLOT_LINE.is_multiple_of(LINE_BLOCK_ALIGN));
+    assert!(LINE_BLOCK_ALIGN >= MAX_ALIGN);
 };
 
 /// The first 128-byte line at or after the address.
@@ -275,9 +278,9 @@ impl<T: Copy + ShmLayout> PerWorker<T> {
     /// Bytes of the slot block of the given number of workers, `None` when
     /// the size overflows.
     ///
-    /// The block starts on a 64-byte line only (a sanitizer build shifts it
-    /// by its red zone), so it holds the slots and the most the first slot
-    /// may lie past the block's start.
+    /// It holds the slots and the most the first slot may lie past the
+    /// block's start: nothing where the owner aligns the block to a line,
+    /// 64 bytes where a sanitizer build shifts it by its red zone.
     #[doc(hidden)]
     pub const fn block_size(workers: usize) -> Option<usize> {
         match workers.checked_mul(Self::STRIDE) {
@@ -661,9 +664,9 @@ impl<T: Copy + ShmLayout> PerWorkerSlice<T> {
     /// when the values take no bytes, `None` when the size overflows.
     ///
     /// The values are rounded up to whole 128-byte lines, plus the most the
-    /// region may lie past the block's start: a block of at least 64 bytes
-    /// starts on a 64-byte line only (a sanitizer build shifts it by its red
-    /// zone).
+    /// region may lie past the block's start: nothing where the owner aligns
+    /// the block to a line, so a power-of-two array takes a block of its own
+    /// size, and 64 bytes where a sanitizer build shifts it by its red zone.
     #[doc(hidden)]
     pub const fn region_block(len: usize) -> Option<usize> {
         match len.checked_mul(size_of::<T>()) {

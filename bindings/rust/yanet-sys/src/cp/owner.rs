@@ -17,8 +17,11 @@ use super::addr::{BlockAddr, Context, Header};
 /// The builder trusts every method: [`Owner::root`] must cover every block
 /// [`Owner::alloc`] and [`Owner::alloc_in`] return; both return blocks owned
 /// by the caller until freed, aligned to the smaller of 64 and the size
-/// rounded up to a power of two; the C-facing methods run the C routines they
-/// name.
+/// rounded up to a power of two, and a block of 128 bytes or more to
+/// [`LINE_BLOCK_ALIGN`], as the C block allocator aligns them; the C-facing
+/// methods run the C routines they name.
+///
+/// [`LINE_BLOCK_ALIGN`]: crate::common::LINE_BLOCK_ALIGN
 ///
 /// [`Owner::free`], [`Owner::free_in`], [`Owner::fini_header`] and
 /// [`Owner::fini_object_header`] must not panic: the builder calls them from
