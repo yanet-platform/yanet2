@@ -517,8 +517,8 @@ func freeStash(ptr unsafe.Pointer) (int, unsafe.Pointer, error) {
 	return int(rc), unsafe.Pointer(cErr), errno
 }
 
-// StateType is the object type of a state object, as its plugin registers it
-// with the dataplane.
+// StateType is the object type of a state object, as the stash plugin, which
+// carries it, registers it with the dataplane.
 const StateType = "fixture_state"
 
 // StateObject is a state object built by the api in the memory of an agent:

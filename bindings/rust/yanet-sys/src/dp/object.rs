@@ -16,8 +16,9 @@ use crate::{bindings, cp::Build, dp::cx::ObjectCommitCx};
 /// the object's plugin, which registers the type with the dataplane, and its
 /// api crate, which builds it.
 ///
-/// An object type ships in a plugin of its own, as every plugin exports one
-/// `yanet_module_abi_version`.
+/// An object type ships in the plugin of a module that lists it in its
+/// `export_module!`, or in a plugin of its own through `export_object!`, as
+/// every plugin exports one `yanet_module_abi_version`.
 pub trait Object: Sized + 'static {
     /// Object type name, as the dataplane registers the type and as the
     /// object's plugin exports it.
