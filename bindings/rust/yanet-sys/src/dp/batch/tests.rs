@@ -619,6 +619,70 @@ fn test_data_mut_writes_the_frame() {
     assert_eq!(0xee, frame.frame()[0]);
 }
 
+/// verifies that a chained frame reads segment by segment in chain order,
+/// each segment from its own data offset and length, empty ones included,
+/// and that its length is the head's packet length, for a taken packet and a
+/// peeked one alike.
+#[test]
+fn test_segments_read_a_chained_frame_in_order() {
+    let (mut first, mut second, mut third, mut fourth) = ([1u8; 64], [2u8; 64], [3u8; 64], [4u8; 64]);
+    let mut fourth = mbuf(&mut fourth, 0, 3);
+    let mut third = bindings::rte_mbuf {
+        next: &raw mut fourth,
+        ..mbuf(&mut third, 32, 0)
+    };
+    let mut second = bindings::rte_mbuf {
+        next: &raw mut third,
+        ..mbuf(&mut second, 8, 5)
+    };
+    let mut head = bindings::rte_mbuf {
+        next: &raw mut second,
+        pkt_len: 14,
+        ..mbuf(&mut first, 16, 6)
+    };
+    let mut descriptor = bindings::packet {
+        mbuf: &raw mut head,
+        data_len: 6,
+        ..Default::default()
+    };
+    let mut front = bindings::packet_front::default();
+    // SAFETY: the front is this test's and the packet is linked and on no
+    // list.
+    unsafe { push(&raw mut front.input, &raw mut descriptor) };
+    // SAFETY: the front is this test's; the batch reads only its front, and
+    // the context and worker it is given are never read.
+    let mut batch = unsafe { Batch::new(NonNull::from(&mut front), NonNull::dangling(), NonNull::dangling()) };
+    let expected = (vec![vec![1; 6], vec![2; 5], vec![], vec![4; 3]], 14);
+
+    let peeked = batch
+        .peek()
+        .map(|view| {
+            (
+                view.segments().map(<[u8]>::to_vec).collect::<Vec<_>>(),
+                view.frame_len(),
+            )
+        })
+        .collect::<Vec<_>>();
+    let packet = batch.next().expect("the input packet");
+
+    assert_eq!(vec![expected.clone()], peeked);
+    assert_eq!(
+        expected,
+        (packet.segments().map(<[u8]>::to_vec).collect(), packet.frame_len())
+    );
+}
+
+/// verifies that an unchained frame is one segment, its first, and its
+/// length that segment's.
+#[test]
+fn test_segments_of_an_unchained_frame_are_its_data() {
+    let mut frame = ipv4_udp(4);
+    let packet = frame.packet();
+
+    assert_eq!(vec![packet.data()], packet.segments().collect::<Vec<_>>());
+    assert_eq!(42, packet.frame_len());
+}
+
 /// verifies that the header types and offsets a packet reports are the
 /// parser's, the network type in host order, and the frame has the length
 /// of the first segment.

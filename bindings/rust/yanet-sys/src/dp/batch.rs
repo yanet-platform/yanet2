@@ -535,6 +535,31 @@ unsafe fn segment(packet: *mut bindings::packet) -> (*mut u8, usize) {
     }
 }
 
+/// Bytes of each segment of an mbuf chain, in order: C's `rte_pktmbuf_mtod`
+/// and `rte_pktmbuf_data_len` of every segment.
+///
+/// # Safety
+///
+/// The chain must be valid, its segments' bytes unwritten while `'a` lasts.
+#[inline(always)]
+unsafe fn segments<'a>(mbuf: *mut bindings::rte_mbuf) -> impl Iterator<Item = &'a [u8]> {
+    core::iter::successors(NonNull::new(mbuf), |segment| {
+        // SAFETY: a segment of a valid chain (caller contract).
+        NonNull::new(unsafe { (*segment.as_ptr()).next })
+    })
+    .map(|segment| {
+        let segment = segment.as_ptr();
+        // SAFETY: a segment of a valid chain spans its data length from its
+        // data offset, unwritten while `'a` lasts (caller contract).
+        unsafe {
+            core::slice::from_raw_parts(
+                (*segment).buf_addr.cast::<u8>().add(usize::from((*segment).data_off)),
+                usize::from((*segment).data_len),
+            )
+        }
+    })
+}
+
 /// Reports whether the parser found a header: an unparsed one is all zero,
 /// as an allocated packet's are.
 #[inline(always)]
@@ -601,7 +626,8 @@ fn check(result: core::ffi::c_int) -> Result<(), TunnelError> {
 }
 
 impl Packet<'_> {
-    /// Bytes of the first segment of the frame.
+    /// Bytes of the first segment of the frame, which holds the parsed
+    /// headers; a chained frame goes on in further segments.
     #[inline(always)]
     pub fn data(&self) -> &[u8] {
         let (start, len) = self.segment();
@@ -625,6 +651,25 @@ impl Packet<'_> {
         // SAFETY: the packet and its first mbuf segment are valid for the
         // call (attach: packet).
         unsafe { segment(self.raw.as_ptr()) }
+    }
+
+    /// Bytes of the frame segment by segment, in order: the first segment,
+    /// as [`Packet::data`] holds it, then those a chained packet goes on in.
+    #[inline(always)]
+    pub fn segments(&self) -> impl Iterator<Item = &[u8]> {
+        // SAFETY: the mbuf chain of an owned packet is valid and exclusively
+        // ours for the call (attach: packet), and the shared borrow of the
+        // packet keeps it unwritten.
+        unsafe { segments((*self.raw.as_ptr()).mbuf) }
+    }
+
+    /// Length of the frame across its segments: the mbuf's packet length,
+    /// as C's `rte_pktmbuf_pkt_len` reads it.
+    #[inline(always)]
+    pub fn frame_len(&self) -> usize {
+        // SAFETY: an owned packet's descriptor and mbuf are this call's
+        // (attach: packet).
+        unsafe { (*(*self.raw.as_ptr()).mbuf).pkt_len as usize }
     }
 
     /// Grows the frame at the front, into the headroom, and returns the new
@@ -976,7 +1021,7 @@ impl Packet<'_> {
 }
 
 impl<'b> PacketView<'b> {
-    /// Bytes of the first segment of the frame.
+    /// Bytes of the first segment of the frame, as [`Packet::data`].
     #[inline(always)]
     pub fn data(&self) -> &'b [u8] {
         // SAFETY: an input packet of the borrowed batch is valid with its
@@ -986,6 +1031,20 @@ impl<'b> PacketView<'b> {
             let (start, len) = segment(self.raw.as_ptr());
             core::slice::from_raw_parts(start, len)
         }
+    }
+
+    /// Bytes of the frame segment by segment, as [`Packet::segments`].
+    #[inline(always)]
+    pub fn segments(&self) -> impl Iterator<Item = &'b [u8]> + use<'b> {
+        // SAFETY: as above, for every segment of its chain.
+        unsafe { segments((*self.raw.as_ptr()).mbuf) }
+    }
+
+    /// Length of the frame across its segments, as [`Packet::frame_len`].
+    #[inline(always)]
+    pub fn frame_len(&self) -> usize {
+        // SAFETY: as above.
+        unsafe { (*(*self.raw.as_ptr()).mbuf).pkt_len as usize }
     }
 
     /// Ether type of the network header the parser found, host order.

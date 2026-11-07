@@ -56,11 +56,11 @@
 //!   header and no later than the end of the frame, and an IPv4 or IPv6 one
 //!   lies whole in the frame; a parsed transport header starts at or after the
 //!   network header and no later than the end of the frame, and an available
-//!   TCP or UDP one lies whole in it; unparsed headers are zero. The frame is
-//!   the first segment: the parser checks against the packet length, and
-//!   received packets hold their headers in the first segment. A copy may chain
-//!   segments, as in C; reads are bounds-checked to the first segment. Every
-//!   packet operation of the SDK keeps this.
+//!   TCP or UDP one lies whole in it; unparsed headers are zero. Here the frame
+//!   is the first segment, which holds the headers: the parser checks against
+//!   the packet length, and received packets hold their headers in the first
+//!   segment. A copy may chain segments, as in C; reads are bounds-checked to
+//!   the segment they read. Every packet operation of the SDK keeps this.
 //! - **unwind**: no foreign exception unwinds through Rust frames.
 //! - **align**: the block allocator aligns a block to at least the smaller of
 //!   `MAX_ALIGN` and its size rounded up to a power of two, so the prepared
