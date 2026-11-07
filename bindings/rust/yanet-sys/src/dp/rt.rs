@@ -207,15 +207,23 @@ pub unsafe fn new_object<O: Object>(commit: bindings::object_commit_ectx_handler
     }
 }
 
-/// Exports a module to the dataplane plugin loader.
+/// Exports a module to the dataplane plugin loader, with the object types its
+/// plugin carries.
 ///
 /// Emits `new_module_<name>`, `yanet_module_abi_version` and the C handler
 /// and commit trampolines. The name is the module's declared name with each
 /// `-` written as `_`, as the dataplane's module list names the loader
-/// (`route-mpls` by `new_module_route_mpls`), or the build fails. Generated
-/// into each plugin crate as its only line; the input grammar (identifiers and
-/// `::`-separated paths) is part of the safety boundary, used outside the
-/// macro's `unsafe`.
+/// (`route-mpls` by `new_module_route_mpls`), or the build fails.
+///
+/// `objects` lists the object types the plugin carries beside the module,
+/// each as `<type> = <path>`: exported and checked as by `export_object!`, but
+/// without a second ABI version, which a plugin exports once. A module and the
+/// object types it links share a plugin this way, as a C module's plugin
+/// carries its object types.
+///
+/// Generated into each plugin crate as its only line; the input grammar
+/// (identifiers and `::`-separated paths) is part of the safety boundary, used
+/// outside the macro's `unsafe`.
 ///
 /// The module is exported under its own name only; the check is a const
 /// assertion, which rustc reports as E0080:
@@ -251,9 +259,75 @@ pub unsafe fn new_object<O: Object>(commit: bindings::object_commit_ectx_handler
 /// }
 /// yanet_sys::export_module!(name = route_mpls, module = RouteMpls);
 /// ```
+///
+/// So is a module with the object types its plugin carries, each under its
+/// type name:
+///
+/// ```
+/// use yanet_sys::dp::{Batch, CommitCx, Cx, Module, Object, ObjectCommitCx, Verdict};
+/// struct Mine;
+/// impl Module for Mine {
+///     const NAME: &'static str = "mine";
+///     type Config = u64;
+///     type Prepared<'p> = ();
+///     fn handle(_: &mut Cx<Self>, batch: &mut Batch) {
+///         batch.dispatch(|_| Verdict::Pass);
+///     }
+///     fn prepare(_: &CommitCx<'_, Self>) {}
+/// }
+/// struct Table;
+/// impl Object for Table {
+///     const TYPE: &'static str = "mine_table";
+///     type Config = u64;
+///     type Prepared<'p> = ();
+///     fn prepare(_: &ObjectCommitCx<'_, Self>) {}
+/// }
+/// struct Set;
+/// impl Object for Set {
+///     const TYPE: &'static str = "mine_set";
+///     type Config = u64;
+///     type Prepared<'p> = ();
+///     fn prepare(_: &ObjectCommitCx<'_, Self>) {}
+/// }
+/// yanet_sys::export_module!(
+///     name = mine,
+///     module = Mine,
+///     objects = [mine_table = Table, mine_set = Set]
+/// );
+/// ```
+///
+/// An object type it carries is checked as `export_object!` checks one, so a
+/// type listed under another name is refused:
+///
+/// ```compile_fail,E0080
+/// use yanet_sys::dp::{Batch, CommitCx, Cx, Module, Object, ObjectCommitCx, Verdict};
+/// struct Mine;
+/// impl Module for Mine {
+///     const NAME: &'static str = "mine";
+///     type Config = u64;
+///     type Prepared<'p> = ();
+///     fn handle(_: &mut Cx<Self>, batch: &mut Batch) {
+///         batch.dispatch(|_| Verdict::Pass);
+///     }
+///     fn prepare(_: &CommitCx<'_, Self>) {}
+/// }
+/// struct Table;
+/// impl Object for Table {
+///     const TYPE: &'static str = "mine_table";
+///     type Config = u64;
+///     type Prepared<'p> = ();
+///     fn prepare(_: &ObjectCommitCx<'_, Self>) {}
+/// }
+/// yanet_sys::export_module!(name = mine, module = Mine, objects = [table = Table]);
+/// ```
 #[macro_export]
 macro_rules! export_module {
-    (name = $name:ident, module = $($module:ident)::+ $(,)?) => {
+    (
+        name = $name:ident,
+        module = $($module:ident)::+
+        $(, objects = [$($object_name:ident = $($object:ident)::+),* $(,)?])?
+        $(,)?
+    ) => {
         const _: () = {
             type __ExportedModule = $($module)::+;
 
@@ -301,20 +375,22 @@ macro_rules! export_module {
                 }
             }
         };
+        $($($crate::__export_object_type!(name = $object_name, object = $($object)::+);)*)?
     };
 }
 
-/// Exports an object type to the dataplane object loader.
+/// Exports an object type to the dataplane object loader, as a plugin of its
+/// own.
 ///
 /// Emits `new_object_<name>`, `yanet_module_abi_version`, which the plugin
 /// loader asks of every plugin, and the C commit trampoline, which the
-/// descriptor registers for a non-zero-sized prepared value; an object type is
-/// a plugin of its own, as the two exports of a module and an object in one
-/// plugin collide. The name is the object's type name as it is, as the loader
-/// looks a type up by `new_object_<type>`, or the build fails. Generated into
-/// each plugin crate as its only line; the input grammar (identifiers and
-/// `::`-separated paths) is part of the safety boundary, used outside the
-/// macro's `unsafe`.
+/// descriptor registers for a non-zero-sized prepared value. A plugin exports
+/// the ABI version once, so an object type that ships with a module is listed
+/// in the module's `export_module!` instead. The name is the object's type name
+/// as it is, as the loader looks a type up by `new_object_<type>`, or the build
+/// fails. Generated into each plugin crate as its only line; the input grammar
+/// (identifiers and `::`-separated paths) is part of the safety boundary, used
+/// outside the macro's `unsafe`.
 ///
 /// The type is exported under its own name only; the check is a const
 /// assertion, which rustc reports as E0080:
@@ -381,6 +457,23 @@ macro_rules! export_module {
 macro_rules! export_object {
     (name = $name:ident, object = $($object:ident)::+ $(,)?) => {
         const _: () = {
+            #[unsafe(export_name = "yanet_module_abi_version")]
+            pub static YANET_MODULE_ABI_VERSION: u32 = $crate::dp::rt::ABI_VERSION;
+        };
+        $crate::__export_object_type!(name = $name, object = $($object)::+);
+    };
+}
+
+/// Emits an object type's loader entry `new_object_<name>` and its commit
+/// trampoline, after the checks of its name and prepared value.
+///
+/// What `export_object!` exports besides the ABI version, and what
+/// `export_module!` exports for each object type it lists.
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __export_object_type {
+    (name = $name:ident, object = $($object:ident)::+) => {
+        const _: () = {
             type __ExportedObject = $($object)::+;
 
             const _: () = ::core::assert!(
@@ -388,16 +481,13 @@ macro_rules! export_object {
                     ::core::stringify!($name),
                     <__ExportedObject as $crate::dp::Object>::TYPE,
                 ),
-                "export_object!: the name is not Object::TYPE",
+                "an object type is exported under a name other than its Object::TYPE",
             );
             const _: () = ::core::assert!(
                 $crate::dp::__private::fits_object_type(<__ExportedObject as $crate::dp::Object>::TYPE),
-                "export_object!: Object::TYPE must be non-empty, without NUL, and fit the C object type fields",
+                "Object::TYPE must be non-empty, without NUL, and fit the C object type fields",
             );
             const _: () = $crate::dp::__private::check_object_prepared::<__ExportedObject>();
-
-            #[unsafe(export_name = "yanet_module_abi_version")]
-            pub static YANET_MODULE_ABI_VERSION: u32 = $crate::dp::rt::ABI_VERSION;
 
             unsafe extern "C" fn commit_ectx(
                 ectx: *mut $crate::dp::__private::bindings::object_ectx,

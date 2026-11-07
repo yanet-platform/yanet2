@@ -12,7 +12,6 @@ rust_sdk_fixture_plugins = custom_target(
     'libtally_dp.so',
     'libfib_dp.so',
     'libassign_dp.so',
-    'libfixture_state_dp.so',
     'libstash_dp.so',
   ],
   command: [

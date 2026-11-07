@@ -14,9 +14,9 @@ builder, the derive, the module-crate facade and the packet header views.
 | `yanet-sdk` | `no_std`, `forbid(unsafe_code)` | the module-crate surface: `Module`, `Object`, contexts, batches, field types (`Counter`, `Device`, `PerWorker` and `PerWorkerSlice` with their prepared `WorkerSlot` and `WorkerSlice` handles, ...), the derive and the builders |
 | `yanet-sdk-api` | `std` | the control-plane side of a module: `Agent`, a non-owning handle on an attached C agent that owns the configurations and objects an API builds (the builder's `Owner` over the C routines a C module's API calls, the release of a configuration as those do, the release of an object as a C object's owner does, and `Agent::read`, the control-plane read of an object's body under a branded `ObjectCx` its edges resolve through), `ApiError`, the C error chain, and the guards and conversions the exports of `#[yanet_sdk::api]` expand to (`catch_unwind`, so an api crate is built with unwinding); a crate of its own because a dataplane plugin never links these C calls |
 | `yanet-sdk-build` | `std`, build-dependency | `generate_header`: an api crate's `build.rs` writes the C header of its records and constants |
-| `yanet-sdk-plugin` | `no_std` | a dataplane plugin's runtime: the panic handler (C `abort`), `export_module!` and `export_object!`, so a plugin is a `#![no_std]` cdylib of one line (an object type is a plugin of its own), built under `--profile plugin` (`panic = "abort"`) |
+| `yanet-sdk-plugin` | `no_std` | a dataplane plugin's runtime: the panic handler (C `abort`), `export_module!` and `export_object!`, so a plugin is a `#![no_std]` cdylib of one line (a module's line lists the object types its plugin carries; an object type that ships without a module is a plugin of its own), built under `--profile plugin` (`panic = "abort"`) |
 | `yanet-sdk-testing` | `std`, dev-only | the block arena (one region, as one mapping) and resolving context of the tests, Miri included; with the `cp` feature `TestOwner`, the owner of the configuration builder under Miri and natively, with no C memory |
-| `yanet-sdk-fixture` | library `no_std`, `forbid(unsafe_code)` | minimal modules, `Fixture` (a test program whose mode word selects what it does with a batch), `Tally` (a prepared value and counters), `Fib` (forwards by a route FIB of two C LPM tables) and `Assign` (classify) and `Stash` (writes a linked `State`), and the object type `State` (atomic slots and their prepared seed), with no tests; their plugins `lib{fixture,tally,fib,assign,fixture_state,stash}_dp.so` are examples of one line over `yanet-sdk-plugin`, built on request (`--features plugin`, `--profile plugin`) |
+| `yanet-sdk-fixture` | library `no_std`, `forbid(unsafe_code)` | minimal modules, `Fixture` (a test program whose mode word selects what it does with a batch), `Tally` (a prepared value and counters), `Fib` (forwards by a route FIB of two C LPM tables) and `Assign` (classify) and `Stash` (writes a linked `State`), and the object type `State` (atomic slots and their prepared seed), with no tests; their plugins `lib{fixture,tally,fib,assign,stash}_dp.so`, the stash plugin carrying `State`, are examples of one line over `yanet-sdk-plugin`, built on request (`--features plugin`, `--profile plugin`) |
 | `yanet-sdk-fixture-api` | `std`, `forbid(unsafe_code)` | the api crate of the fixture modules and object type: the records and the `build` and `free` exports per module and object type, and the queries of the object, that the Go tests call over an agent; its header carries the records and the modes |
 | `yanet-packet` | `no_std` | packet header views, extractable to its own repository |
 
@@ -73,8 +73,10 @@ field), which the handler and the prepare step resolve to the object's
 configuration in the running generation and to the object's prepared value:
 `Object::prepare` makes it per worker context, run by the object type's commit
 hook, which `export_object!` registers only for a non-zero-sized value. An
-object type ships in a plugin of its own, as every plugin exports
-one `yanet_module_abi_version`.
+object type ships in the plugin of a module that lists it,
+`export_module!(name = .., module = .., objects = [<type> = <path>])`, as a C
+module's plugin carries its object types, or in a plugin of its own through
+`export_object!`: every plugin exports one `yanet_module_abi_version`.
 
 The crate's `build.rs` is `yanet_sdk_build::generate_header(&["Record", ..], &[])`.
 With `$YANET_SDK_HEADER_DIR` set it writes `<crate>.h`, which holds the listed
@@ -120,7 +122,7 @@ plugins and build configurations through the exports of
 
 Meson builds what they need, through cargo, only when its option is on: the
 api archive with only its exports global, its header, and the directory of the
-plugins `lib{fixture,tally,fib,assign,fixture_state,stash}_dp.so`, which holds
+plugins `lib{fixture,tally,fib,assign,stash}_dp.so`, which holds
 nothing else. `cargo test` and Miri never build the plugins: a `no_std` cdylib
 cannot be built with unwinding, so they have a profile of their own.
 

@@ -8,7 +8,14 @@
 //! yanet_sdk_plugin::export_module!(name = mine, module = mine::Mine);
 //! ```
 //!
-//! An object type is a plugin of its own, of one `export_object!` line.
+//! The object types a module links ship in its plugin, listed in that line:
+//!
+//! ```ignore
+//! yanet_sdk_plugin::export_module!(name = mine, module = mine::Mine, objects = [mine_table = mine::Table]);
+//! ```
+//!
+//! An object type that ships without a module is a plugin of its own, of one
+//! `export_object!` line.
 //!
 //! The crate supplies the panic handler a `no_std` binary needs. It aborts
 //! through C `abort`, which the dataplane executable provides, so a panic in a
