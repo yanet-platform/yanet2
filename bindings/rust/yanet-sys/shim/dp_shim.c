@@ -10,6 +10,7 @@
 #include "lib/dataplane/packet/data.h"
 #include "lib/dataplane/packet/decap.h"
 #include "lib/dataplane/packet/encap.h"
+#include "lib/dataplane/packet/packet.h"
 #include "lib/dataplane/pipeline/econtext.h"
 #include "lib/dataplane/pipeline/schedule.h"
 
@@ -64,6 +65,11 @@ yanet_sys_dp_headroom_prepend(struct rte_mbuf *mbuf, uint16_t len) {
 void
 yanet_sys_dp_front_pass(struct packet_front *packet_front) {
 	packet_front_pass(packet_front);
+}
+
+int
+yanet_sys_dp_parse(struct packet *packet) {
+	return parse_packet(packet);
 }
 
 // The Rust `DscpMark` carries these values.

@@ -1,15 +1,15 @@
 // Dataplane helpers over the C the Rust handler runtime builds on.
 //
 // The shim holds the packet redirect of a module to a device entry, the
-// headroom growth of a frame and the packet encapsulation routines, whose
-// sources the build compiles in. It is compiled into each module plugin with
-// hidden visibility, so the routing logic (recirculation budget, device entry
-// scheduling, pending counters) and the encapsulation stay the C code every C
-// module runs, and a plugin exports and imports none of it: the symbols are
-// hidden, so a call resolves inside the plugin at load time. A Rust call site
-// still reaches the function through a plugin-local global offset table slot,
-// one extra load per call, because stable rustc emits a non-relaxable
-// GOT-relative reference.
+// headroom growth of a frame, the packet parser and the packet encapsulation
+// routines, whose sources the build compiles in. It is compiled into each
+// module plugin with hidden visibility, so the routing logic (recirculation
+// budget, device entry scheduling, pending counters), the parser and the
+// encapsulation stay the C code every C module runs, and a plugin exports and
+// imports none of it: the symbols are hidden, so a call resolves inside the
+// plugin at load time. A Rust call site still reaches the function through a
+// plugin-local global offset table slot, one extra load per call, because
+// stable rustc emits a non-relaxable GOT-relative reference.
 #pragma once
 
 #include <stdint.h>
@@ -65,6 +65,15 @@ yanet_sys_dp_headroom_prepend(struct rte_mbuf *mbuf, uint16_t len);
 // The Rust runtime inlines its own twin; a test compares the two.
 YANET_SYS_HIDDEN void
 yanet_sys_dp_front_pass(struct packet_front *packet_front);
+
+// parse_packet (lib/dataplane/packet/packet.h): parses the frame as the
+// dataplane parses a received packet; 0 on success, -1 when it refuses it.
+//
+// It writes the header types and offsets, the VLAN id of a tagged frame, the
+// flow hash and the fragment fields of the packet, and reads its first
+// segment within the packet length.
+YANET_SYS_HIDDEN int
+yanet_sys_dp_parse(struct packet *packet);
 
 // The packet encapsulation of lib/dataplane/packet, as the C modules call it.
 //

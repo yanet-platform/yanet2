@@ -40,7 +40,8 @@ fn main() {
     flags.rerun_on_headers();
 }
 
-/// C sources of `lib/dataplane/packet` the shim's encapsulation calls.
+/// C sources of `lib/dataplane/packet` the shim's encapsulation and parsing
+/// call.
 const PACKET_SOURCES: [&str; 3] = [
     "lib/dataplane/packet/encap.c",
     "lib/dataplane/packet/decap.c",
@@ -70,13 +71,14 @@ fn c_build(flags: &CFlags, shim_dir: &Path) -> cc::Build {
 
 /// Compiles the shims.
 ///
-/// The dataplane shim wraps header-inline C routing helpers and the packet
-/// encapsulation routines, whose sources it compiles in; the common shim wraps
-/// the header-inline LPM and memory routines of `common/`; the classify shim
-/// wraps the compiles, the joins and the decode of `lib/classify`, which the
-/// builder calls, so a plugin pulls none of it. They are linked into every
-/// module plugin with hidden visibility, so a plugin exports nothing of them
-/// and imports none of the encapsulation from the host.
+/// The dataplane shim wraps header-inline C routing helpers, the packet
+/// parser and the packet encapsulation routines, whose sources it compiles
+/// in; the common shim wraps the header-inline LPM and memory routines of
+/// `common/`; the classify shim wraps the compiles, the joins and the decode
+/// of `lib/classify`, which the builder calls, so a plugin pulls none of it.
+/// They are linked into every module plugin with hidden visibility, so a
+/// plugin exports nothing of them and imports none of the parsing or the
+/// encapsulation from the host.
 fn build_shim(flags: &CFlags, shim_dir: &Path) {
     let mut build = c_build(flags, shim_dir);
     build
@@ -163,6 +165,8 @@ fn generate_bindings(flags: &CFlags, shim_dir: &Path, out: &Path) {
         .allowlist_type("packet")
         .allowlist_type("packet_list")
         .allowlist_type("packet_front")
+        // The parser's flag bits of a packet.
+        .allowlist_type("packet_flag")
         .allowlist_type("rte_mbuf")
         .allowlist_type("agent")
         .allowlist_type("yanet_error")

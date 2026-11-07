@@ -314,6 +314,12 @@ impl Frame {
         }
     }
 
+    /// The descriptor as it is now.
+    fn descriptor(&self) -> bindings::packet {
+        // SAFETY: the descriptor is initialised, in the buffer.
+        unsafe { *self.base.cast::<bindings::packet>().as_ptr() }
+    }
+
     /// Network and transport header offsets as they are now.
     fn offsets(&self) -> (u16, u16) {
         // SAFETY: the descriptor is initialised, in the buffer.
@@ -351,6 +357,145 @@ fn headers(network_type: u16, transport_type: u16, transport_offset: u16) -> bin
 fn ipv4_udp(tailroom: u16) -> Frame {
     let frame: [u8; 42] = core::array::from_fn(|idx| idx as u8);
     Frame::new(headers(0x0800, 17, 34), 16, &frame, tailroom)
+}
+
+/// Source and destination of the IPv4 headers the tests build.
+const IPV4_ADDRESSES: [u8; 8] = [10, 0, 0, 1, 10, 0, 0, 2];
+
+/// Source and destination of the IPv6 headers the tests build.
+const IPV6_ADDRESSES: [u8; 32] = [
+    0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, //
+    0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2,
+];
+
+/// An Ethernet frame of the ether type, host order, around the bytes.
+fn ether(ether_type: u16, payload: &[u8]) -> Vec<u8> {
+    let mut frame = vec![0u8; 12];
+    frame.extend_from_slice(&ether_type.to_be_bytes());
+    frame.extend_from_slice(payload);
+    frame
+}
+
+/// An IPv4 header without options, of the protocol and the flags-and-offset
+/// word, host order, from the test addresses, before the payload, whose
+/// length the total length counts.
+fn ipv4(protocol: u8, fragment: u16, payload: &[u8]) -> Vec<u8> {
+    let total = u16::try_from(20 + payload.len()).expect("an IPv4 datagram");
+    let mut header = vec![0x45, 0];
+    header.extend_from_slice(&total.to_be_bytes());
+    header.extend_from_slice(&[0, 0]);
+    header.extend_from_slice(&fragment.to_be_bytes());
+    header.extend_from_slice(&[64, protocol, 0, 0]);
+    header.extend_from_slice(&IPV4_ADDRESSES);
+    header.extend_from_slice(payload);
+    header
+}
+
+/// An IPv6 header of the next header, from the test addresses, before the
+/// payload, whose length the payload length counts.
+fn ipv6(next_header: u8, payload: &[u8]) -> Vec<u8> {
+    let len = u16::try_from(payload.len()).expect("an IPv6 payload");
+    let mut header = vec![0x60, 0, 0, 0];
+    header.extend_from_slice(&len.to_be_bytes());
+    header.extend_from_slice(&[next_header, 64]);
+    header.extend_from_slice(&IPV6_ADDRESSES);
+    header.extend_from_slice(payload);
+    header
+}
+
+/// An IPv6 Fragment header of the next header, offset in 8-byte units and
+/// more-fragments bit, before the payload.
+fn ipv6_fragment(next_header: u8, offset: u16, more: bool, payload: &[u8]) -> Vec<u8> {
+    let mut header = vec![next_header, 0];
+    header.extend_from_slice(&((offset << 3) | u16::from(more)).to_be_bytes());
+    header.extend_from_slice(&[0, 0, 0, 1]);
+    header.extend_from_slice(payload);
+    header
+}
+
+/// A TCP header without options between the ports.
+fn tcp(src_port: u16, dst_port: u16) -> Vec<u8> {
+    let mut header = src_port.to_be_bytes().to_vec();
+    header.extend_from_slice(&dst_port.to_be_bytes());
+    header.extend_from_slice(&[0; 8]);
+    header.extend_from_slice(&[0x50, 0x02, 0xff, 0xff, 0, 0, 0, 0]);
+    header
+}
+
+/// A UDP header between the ports, of an empty datagram.
+fn udp(src_port: u16, dst_port: u16) -> Vec<u8> {
+    let mut header = src_port.to_be_bytes().to_vec();
+    header.extend_from_slice(&dst_port.to_be_bytes());
+    header.extend_from_slice(&[0, 8, 0, 0]);
+    header
+}
+
+/// CRC-32C of the bytes onto a running value, as the x86 instruction the
+/// parser's hash uses computes it: reflected, with no inversion.
+fn crc32c(bytes: &[u8], mut crc: u32) -> u32 {
+    for byte in bytes {
+        crc ^= u32::from(*byte);
+        for _ in 0..8 {
+            crc = (crc >> 1) ^ (0x82f6_3b78 & (crc & 1).wrapping_neg());
+        }
+    }
+    crc
+}
+
+/// Descriptor of a packet that an earlier parse left: a VLAN id, a hash, the
+/// fragment fields and a TCP header behind IPv4.
+fn stale() -> bindings::packet {
+    bindings::packet {
+        hash: 0x5eed,
+        flags: 1 << bindings::packet_flag_PACKET_FLAG_FRAGMENTED,
+        vlan: 7,
+        fragment_offset: 3,
+        ..headers(0x0800, 6, 34)
+    }
+}
+
+/// The parse results the tests compare: header types and offsets, the
+/// availability mark, the VLAN id, hash, fragment flag and offset.
+#[derive(Debug, PartialEq, Eq)]
+struct Parsed {
+    network: (u16, u16),
+    transport: (u8, u16),
+    available: bool,
+    vlan: u16,
+    hash: u32,
+    is_fragment: bool,
+    fragment_offset: u16,
+}
+
+impl Parsed {
+    /// The results a packet reports, with the VLAN id of its descriptor,
+    /// which has no accessor.
+    fn of(frame: &mut Frame) -> Self {
+        let vlan = frame.descriptor().vlan;
+        let packet = frame.packet();
+        Self {
+            network: (packet.network_type(), packet.network_offset()),
+            transport: (packet.transport_protocol(), packet.transport_offset()),
+            available: packet.transport_header_available(),
+            vlan,
+            hash: packet.hash(),
+            is_fragment: packet.is_fragment(),
+            fragment_offset: packet.fragment_offset(),
+        }
+    }
+
+    /// The results of an unparsed packet.
+    fn none() -> Self {
+        Self {
+            network: (0, 0),
+            transport: (0, 0),
+            available: true,
+            vlan: 0,
+            hash: 0,
+            is_fragment: false,
+            fragment_offset: 0,
+        }
+    }
 }
 
 /// verifies that a prepend takes exactly the room the headroom holds
@@ -542,6 +687,192 @@ fn test_fragment_offset_reports_the_parsers_offset() {
 
         assert_eq!(offset, frame.packet().fragment_offset());
     }
+}
+
+/// verifies that a taken and a peeked packet report the parser's hash and
+/// that only the parser's fragment mark among the flags makes a fragment.
+#[test]
+fn test_hash_and_fragment_flag_report_the_parsers() {
+    let fragment = 1 << bindings::packet_flag_PACKET_FLAG_FRAGMENTED;
+    let sync = 1 << bindings::packet_flag_PACKET_FLAG_FWSTATE_SYNC_INTERNAL;
+    for (flags, is_fragment) in [(0, false), (fragment, true), (sync, false), (fragment | sync, true)] {
+        let descriptor = bindings::packet {
+            hash: 0xdead_beef,
+            flags,
+            ..headers(0x0800, 17, 34)
+        };
+        let mut frame = Frame::new(descriptor, 0, &[0; 60], 0);
+        let mut front = bindings::packet_front::default();
+        // SAFETY: the front is this test's and the packet is linked and on
+        // no list.
+        unsafe { push(&raw mut front.input, frame.link()) };
+        // SAFETY: the front is this test's; the batch reads only its front,
+        // and the context and worker it is given are never read.
+        let mut batch = unsafe { Batch::new(NonNull::from(&mut front), NonNull::dangling(), NonNull::dangling()) };
+
+        let peeked = batch
+            .peek()
+            .map(|view| (view.hash(), view.is_fragment()))
+            .collect::<Vec<_>>();
+        let packet = batch.next().expect("the input packet");
+
+        assert_eq!(vec![(0xdead_beef, is_fragment)], peeked, "flags {flags:#x}");
+        assert_eq!(
+            (0xdead_beef, is_fragment),
+            (packet.hash(), packet.is_fragment()),
+            "flags {flags:#x}"
+        );
+    }
+}
+
+/// verifies that parsing a frame built in a packet with no parse yet
+/// reports the C parser's headers and its hash of the addresses and ports.
+#[cfg(not(miri))]
+#[test]
+fn test_parse_reports_the_headers_and_hash_of_a_built_frame() {
+    let ipv4_hash = |ports: [u16; 2]| {
+        let hash = crc32c(&IPV4_ADDRESSES, 0);
+        crc32c(&[ports[0].to_be_bytes(), ports[1].to_be_bytes()].concat(), hash)
+    };
+    let ipv6_hash = crc32c(
+        &[53u16.to_be_bytes(), 5353u16.to_be_bytes()].concat(),
+        crc32c(&IPV6_ADDRESSES, 0),
+    );
+    for (name, frame, expected) in [
+        (
+            "IPv4 TCP",
+            ether(0x0800, &ipv4(6, 0, &tcp(1000, 443))),
+            Parsed {
+                network: (0x0800, 14),
+                transport: (6, 34),
+                hash: ipv4_hash([1000, 443]),
+                ..Parsed::none()
+            },
+        ),
+        (
+            "IPv6 UDP",
+            ether(0x86dd, &ipv6(17, &udp(53, 5353))),
+            Parsed {
+                network: (0x86dd, 14),
+                transport: (17, 54),
+                hash: ipv6_hash,
+                ..Parsed::none()
+            },
+        ),
+        (
+            "VLAN-tagged IPv4 UDP",
+            ether(
+                0x8100,
+                &[&[0x21, 0x23, 0x08, 0x00][..], &ipv4(17, 0, &udp(4789, 4790))].concat(),
+            ),
+            Parsed {
+                network: (0x0800, 18),
+                transport: (17, 38),
+                vlan: 0x123,
+                hash: ipv4_hash([4789, 4790]),
+                ..Parsed::none()
+            },
+        ),
+    ] {
+        let mut frame = Frame::new(Default::default(), 0, &frame, 0);
+
+        assert_eq!(Ok(()), frame.packet().parse(), "{name}");
+        assert_eq!(expected, Parsed::of(&mut frame), "{name}");
+    }
+}
+
+/// verifies that the parser's fragment flag tells a first fragment, whose
+/// offset is zero, from an unfragmented packet, and marks a fragment after
+/// the first, whose transport header is unavailable, for both families.
+#[cfg(not(miri))]
+#[test]
+fn test_parse_marks_first_and_later_fragments() {
+    let udp_header = udp(53, 53);
+    let v4 = |fragment| ether(0x0800, &ipv4(17, fragment, &udp_header));
+    let v6 = |offset, more| ether(0x86dd, &ipv6(44, &ipv6_fragment(17, offset, more, &udp_header)));
+    // Expected: the fragment flag, the fragment offset as the parser scales
+    // it and the availability of the transport header.
+    for (name, frame, expected) in [
+        ("unfragmented IPv4", v4(0), (false, 0, true)),
+        ("first IPv4 fragment", v4(0x2000), (true, 0, true)),
+        ("later IPv4 fragment", v4(2), (true, 2, false)),
+        ("first IPv6 fragment", v6(0, true), (true, 0, true)),
+        ("later IPv6 fragment", v6(2, false), (true, 16, false)),
+    ] {
+        let mut frame = Frame::new(Default::default(), 0, &frame, 0);
+        assert_eq!(Ok(()), frame.packet().parse(), "{name}");
+
+        let packet = frame.packet();
+        let actual = (
+            packet.is_fragment(),
+            packet.fragment_offset(),
+            packet.transport_header_available(),
+        );
+        assert_eq!(expected, actual, "{name}");
+    }
+}
+
+/// verifies that a parse keeps nothing an earlier parse left: a frame that
+/// is neither IPv4 nor IPv6 and carries no VLAN tag leaves its transport
+/// header unparsed and no VLAN id, hash or fragment fields.
+#[cfg(not(miri))]
+#[test]
+fn test_parse_clears_what_an_earlier_parse_left() {
+    let mut frame = Frame::new(stale(), 0, &ether(0x0806, &[0; 28]), 0);
+
+    assert_eq!(Ok(()), frame.packet().parse());
+    assert_eq!(
+        Parsed {
+            network: (0x0806, 14),
+            ..Parsed::none()
+        },
+        Parsed::of(&mut frame)
+    );
+}
+
+/// verifies that a frame the parser refuses, including one cut short in a
+/// header it records before checking its length, leaves the packet
+/// unparsed and the frame as it was.
+#[cfg(not(miri))]
+#[test]
+fn test_parse_refusal_leaves_the_packet_unparsed() {
+    let ipv4_tcp = ipv4(6, 0, &tcp(1000, 443));
+    for (name, frame) in [
+        ("frame shorter than an Ethernet header", vec![0; 10]),
+        ("IPv4 header cut short", ether(0x0800, &ipv4_tcp[..12])),
+        ("TCP header cut short", ether(0x0800, &ipv4(6, 0, &[0; 10]))),
+        ("IPv6 payload beyond the frame", ether(0x86dd, &ipv6(17, &[0; 8])[..44])),
+    ] {
+        let mut built = Frame::new(stale(), 0, &frame, 0);
+
+        assert_eq!(Err(ParseError), built.packet().parse(), "{name}");
+        assert_eq!(Parsed::none(), Parsed::of(&mut built), "{name}");
+        assert_eq!(&frame[..], built.frame(), "{name}");
+    }
+}
+
+/// verifies that a parse refuses a chained packet, whose headers the parser
+/// would read in the first segment alone, and leaves it as it was.
+#[test]
+fn test_parse_refuses_a_chained_packet() {
+    let (mut head_buffer, mut tail_buffer) = ([0u8; 512], [0u8; 512]);
+    let mut tail = mbuf(&mut tail_buffer, 256, 60);
+    let mut head = bindings::rte_mbuf {
+        next: &raw mut tail,
+        ..mbuf(&mut head_buffer, 256, 60)
+    };
+    let mut descriptor = bindings::packet { mbuf: &raw mut head, ..stale() };
+    let mut packet = Packet {
+        raw: NonNull::from(&mut descriptor),
+        _brand: PhantomData,
+        _local: PhantomData,
+    };
+
+    assert_eq!(Err(ParseError), packet.parse());
+    assert_eq!(
+        (0x5eed, 7, 34),
+        (descriptor.hash, descriptor.vlan, descriptor.transport_header.offset)
+    );
 }
 
 /// verifies that peeking reads every input packet in order without taking

@@ -103,6 +103,11 @@ pub struct ResizeError;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct TunnelError;
 
+/// A frame the packet parser refuses, or a chained packet, which it does not
+/// parse.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ParseError;
+
 /// How an encapsulation takes the inner DSCP, the C `DSCP_MARK_*` values
 /// (lib/dataplane/packet/dscp.h).
 ///
@@ -564,6 +569,31 @@ unsafe fn parsed_end(packet: *mut bindings::packet) -> usize {
     (usize::from(network.offset) + network_len).max(usize::from(transport.offset) + transport_len)
 }
 
+/// Clears what the parser writes of a packet, as an allocated packet has
+/// it: the headers unparsed, no VLAN id, hash or flags.
+///
+/// # Safety
+///
+/// The packet must be valid and exclusively owned.
+#[inline(always)]
+unsafe fn clear_parse(packet: *mut bindings::packet) {
+    // SAFETY: guaranteed by the caller.
+    unsafe {
+        (*packet).hash = 0;
+        (*packet).flags = 0;
+        (*packet).vlan = 0;
+        (*packet).fragment_offset = 0;
+        (*packet).network_header = bindings::network_header::default();
+        (*packet).transport_header = bindings::transport_header::default();
+    }
+}
+
+/// Reports whether packet flags carry the parser's fragment mark.
+#[inline(always)]
+fn is_fragment(flags: u16) -> bool {
+    flags & (1 << bindings::packet_flag_PACKET_FLAG_FRAGMENTED) != 0
+}
+
 /// Maps the C result of a tunnel routine: zero is success.
 #[inline(always)]
 fn check(result: core::ffi::c_int) -> Result<(), TunnelError> {
@@ -827,6 +857,37 @@ impl Packet<'_> {
         check(unsafe { bindings::yanet_sys_dp_decap(self.raw.as_ptr()) })
     }
 
+    /// Parses the frame as the dataplane parses a received packet
+    /// (`parse_packet`, lib/dataplane/packet/packet.h): the header types and
+    /// offsets, the VLAN id, the flow hash and the fragment fields.
+    ///
+    /// For a frame the module built or rewrote. Nothing of an earlier parse
+    /// remains: the parser leaves the VLAN id of an untagged frame and the
+    /// transport header of a frame that is neither IPv4 nor IPv6 as they
+    /// were, so both are cleared first. A frame the parser refuses leaves the
+    /// packet unparsed, as an allocated one. A chained packet is refused and
+    /// left as it was, since the parser reads the first segment only.
+    #[inline]
+    pub fn parse(&mut self) -> Result<(), ParseError> {
+        if self.chained() {
+            return Err(ParseError);
+        }
+        let raw = self.raw.as_ptr();
+        // SAFETY: the packet is exclusively ours for the call (attach:
+        // packet); the parser writes only its descriptor and reads its only
+        // segment within the packet length, which is that segment's length.
+        // A refused frame is cleared again: the parser may have recorded a
+        // header before finding it cut short, which no reader may see.
+        unsafe {
+            clear_parse(raw);
+            if bindings::yanet_sys_dp_parse(raw) == 0 {
+                return Ok(());
+            }
+            clear_parse(raw);
+        }
+        Err(ParseError)
+    }
+
     /// Ether type of the network header the parser found, host order.
     #[inline(always)]
     pub fn network_type(&self) -> u16 {
@@ -888,6 +949,29 @@ impl Packet<'_> {
     pub fn transport_offset(&self) -> u16 {
         // SAFETY: as above.
         unsafe { (*self.raw.as_ptr()).transport_header.offset }
+    }
+
+    /// Flow hash the parser computed: CRC-32C over the IP addresses and,
+    /// unless the packet is a fragment after the first, the TCP or UDP
+    /// ports.
+    ///
+    /// A tunnel operation leaves it as parsed.
+    #[inline(always)]
+    pub fn hash(&self) -> u32 {
+        // SAFETY: as above.
+        unsafe { (*self.raw.as_ptr()).hash }
+    }
+
+    /// Reports whether the parser found the packet to be a fragment of a
+    /// datagram, the first one included (`PACKET_FLAG_FRAGMENTED`,
+    /// lib/dataplane/packet/packet.h).
+    ///
+    /// The fragment offset is zero for a first fragment and an unfragmented
+    /// packet alike; this tells them apart.
+    #[inline(always)]
+    pub fn is_fragment(&self) -> bool {
+        // SAFETY: as above.
+        is_fragment(unsafe { (*self.raw.as_ptr()).flags })
     }
 }
 
@@ -951,6 +1035,21 @@ impl<'b> PacketView<'b> {
     pub fn transport_offset(&self) -> u16 {
         // SAFETY: as above.
         unsafe { (*self.raw.as_ptr()).transport_header.offset }
+    }
+
+    /// Flow hash the parser computed, as [`Packet::hash`].
+    #[inline(always)]
+    pub fn hash(&self) -> u32 {
+        // SAFETY: as above.
+        unsafe { (*self.raw.as_ptr()).hash }
+    }
+
+    /// Reports whether the parser found the packet to be a fragment, the
+    /// first one included, as [`Packet::is_fragment`].
+    #[inline(always)]
+    pub fn is_fragment(&self) -> bool {
+        // SAFETY: as above.
+        is_fragment(unsafe { (*self.raw.as_ptr()).flags })
     }
 }
 
