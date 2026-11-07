@@ -650,8 +650,8 @@ func PublishedLinks(agent *ffi.Agent, name string) ([]LinkedObject, error) {
 	return objects, nil
 }
 
-// StateType is the object type of a state object, as its plugin registers it
-// with the dataplane.
+// StateType is the object type of a state object, as the stash plugin, which
+// carries it, registers it with the dataplane.
 const StateType = "fixture_state"
 
 // StateObject is a state object built by the api in the memory of an agent:

@@ -1,7 +1,12 @@
-//! The stash module as a plugin the dataplane loader picks up by its file name.
+//! The stash module, with the state object type it links, as a plugin the
+//! dataplane loader picks up by its file name.
 
 #![no_std]
 // The example shares the dependencies of its package.
 #![allow(unused_crate_dependencies)]
 
-yanet_sdk_plugin::export_module!(name = stash, module = yanet_sdk_fixture::Stash);
+yanet_sdk_plugin::export_module!(
+    name = stash,
+    module = yanet_sdk_fixture::Stash,
+    objects = [fixture_state = yanet_sdk_fixture::State],
+);
