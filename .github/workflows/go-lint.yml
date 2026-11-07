@@ -79,9 +79,22 @@ jobs:
         run: make proto-go
 
       # External clients import the generated API packages, so they must
-      # build without a C toolchain.
+      # build without a C toolchain. Proto packages may live in nested Go
+      # modules (the out-of-tree module SDK example); each builds from the
+      # module owning it.
       - name: Build protobuf packages without cgo
-        run: CGO_ENABLED=0 go build $(git ls-files '*.proto' | xargs -n1 dirname | sort -u | sed 's|^|./|')
+        run: |
+          git ls-files '*.proto' | xargs -n1 dirname | sort -u | while read -r dir; do
+            root=.
+            probe=$dir
+            while [ "$probe" != . ]; do
+              probe=$(dirname "$probe")
+              if [ -f "$probe/go.mod" ]; then root=$probe; break; fi
+            done
+            printf '%s %s\n' "$root" "${dir#"$root"/}"
+          done | sort -u | while read -r root dir; do
+            (cd "$root" && CGO_ENABLED=0 go build "./$dir")
+          done
 
       # CGO test packages compile production translation units whose headers
       # reach DPDK, so typechecking needs a configured (not built) tree.

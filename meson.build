@@ -450,6 +450,9 @@ subdir('lib')
 subdir('devices')
 subdir('objects')
 subdir('modules')
+# After the module/device traversal so the SDK reflects the final
+# yanet_c_args and ISA flag.
+subdir('sdk')
 # Tests that link modules and devices.
 subdir('lib/dataplane_ut/tests')
 if not dataplane_only
