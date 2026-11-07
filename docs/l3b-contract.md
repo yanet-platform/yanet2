@@ -153,11 +153,11 @@ representation and the protobuf/C consequences.
 | F19 | VS source bases M4 and M6 | VS-owned; omission materializes 0.0.0.0 and ::, with no interface or link fallback; supplied dormant values are retained; full replacement omission resets them. A partial real update preserves the materialized bases. Structural validation applies even to dormant families. |
 | F20 | Optional IPv4 source override | Absent differs from explicit 0; a native bare IPv4 host address with no prefix metadata; the literal override or M4 supplies the outer source. A present zero override is structurally valid and fails output admission for a configured IPv4 outer family. |
 | F21 | Optional IPv6 source template | Absent differs from present; present requires a raw address, omitted prefix means 128, prefix domain 0..128 including non-byte lengths, host bits preserved, the byte-splice algorithm of section 11, and SourceSet admission for every derivation input in each configured outer family. Raw template and prefix presence, not a normalized network. Per-real override remains deferred; class restrictions follow the role matrix, not a generic unicast blacklist. |
-| F22 | Service policy binding | Required on VS create and full replacement: source-scoped identity (source namespace plus policy key), immutable revision and complete native ACL content, or an explicit empty-policy choice with the same metadata. Missing or null binding, identity, revision, or content without the explicit empty choice rejects as `InvalidArgument`; omission never means KEEP or allow-all. Explicit empty is deny-all. Partial real state/weight operations preserve the binding. Full semantics in sections 13-16. |
+| F22 | Service policy binding | Required on VS create and full replacement: source-scoped identity (source namespace plus policy key), immutable revision and complete native ACL content, or an explicit empty-policy choice with the same metadata. Missing or null binding, identity, revision, or content without the explicit empty choice rejects as `InvalidArgument`; omission never means KEEP or allow-all. Explicit empty is deny-all. Partial real state/weight operations preserve the binding. Section 15 orders tuple/content comparison with acceptance and defines retained lifetime; full semantics in sections 13-16. |
 | F23 | Destination bindings | Nonempty ordered exact VS name and incarnation bindings, or explicit empty that unlinks without deleting the VS; duplicates reject; order affects accepted equality; the VIP, optional protocol and optional port come from the immutable VS identity; selector conflicts use section 10's global intersection rule, not a prohibition on the permitted wildcards. Separate ICMP paths are not ordinary TCP/UDP bindings. |
 | F24 | `mss_fix` | Typed boolean, default false; actual-TCP eligibility, MSS transformations, authentication bypass and failure rules are in the [packet companion](l3b-packet-contract.md#mss-and-ordinary-encapsulation). Dormant for actual UDP, including mixed VSes; no public numeric MSS knob. |
 | F25 | DSCP ownership | Per-VS DSCP policy is outside the l3b API. l3b inherits the inner traffic class and ECN into the outer header; the `dscp` module after l3b owns optional marking with its own configuration and readback, no shared VS token and no atomic two-module update. Destination-prefix marking cannot distinguish two VSes sharing a real, so this is pipeline and real-prefix scope, not per-VS equivalence. Marking must preserve ECN in both families and update the IPv4 checksum. Old packed or per-VS DSCP inputs reject even as null or 0. |
-| F26 | Session size | Omitted or zero creation size resolves the current `l3b.policy.session_default_slots` (initially 65536) once at creation; that default or explicit positive input 1..1073741824 rounds upward to a power of two with a minimum actual size of 16 (1 becomes 16, 1000 becomes 1024); the size is shared across the workers of one VS in one instance. Resize omission or zero is `InvalidArgument`; a raw target below the accepted size is `FailedPrecondition` before rounding; an exactly equal target is a no-op; only a larger target rounds. A later default change never resizes a live VS, and no resource-driven downsize exists. Bounds are not allocation or flow qualification. |
+| F26 | Session size | Omitted or zero creation size resolves the current `l3b.policy.session_default_slots` (initially 65536) once at creation; that default or explicit positive input 1..1073741824 rounds upward to a power of two with a minimum actual size of 16 (1 becomes 16, 1000 becomes 1024); the size is shared across the workers of one VS in one instance. Resize omission or zero is `InvalidArgument`; a raw target below the accepted size is `FailedPrecondition` before rounding; an exactly equal target is a no-op; only a larger target rounds, and growth while a back physically exists is `FailedPrecondition`. A later default change never resizes a live VS, and no resource-driven downsize exists. Bounds are not allocation or flow qualification. |
 | F27 | Encapsulation and NAT | Typed VS mode IPIP or GRE with IPIP as default; unknown or explicitly unspecified values reject. Minimal GRE v0 with a four-byte header and no optional key, checksum or sequence. The existing IPIP and GRE helpers are reused with no new header builders and no required separate pipeline hop; MSS precedes encapsulation. NAT is outside the reviewed mode set and is rejected rather than mapped to GRE. |
 | F28 | Mutation token, incarnation, real target | Expected token required, 1..256 bytes; real target is full F03 key plus required incarnation, 1..256 bytes. Scope, malformed-input errors, target outcomes and the sole complete existing-object order are in [section 5](#5-management-surface-permits-and-error-order). |
 | F29 | Create preparation | SERVICE or MODULE_CONFIG plus exact name; opaque 1..256-byte context-bound grant, lifetime 300000 ms, read-only uint32 valid_for_ms=300000 at issuance; registry cap 16384 across both kinds/all issuers. No upsert, reservation, payload binding or exactly-once. [Section 5](#5-management-surface-permits-and-error-order) defines separate create/prepare rules, malformed fields, permit failures, recovery and expiry-issuance errors; its existing-object order is not a create-token stage. |
@@ -201,8 +201,8 @@ package, tag or C ABI freeze.
 | ID | Operation | Selected semantics |
 | --- | --- | --- |
 | O01 | `PrepareCreate` | Explicit absence preparation, not a `Get` side effect; a distinct bounded grant, no name or resource reservation, no payload binding. An existing target is `AlreadyExists` without a new grant; fixed expiry and invalidation of all permits from the preceding absence interval apply. An unrepresentable server-side expiry returns `Unavailable` with no grant under section 5's order. A lost response may retain a record; no deduplication and no invisible extension. |
-| O02 | `CreateService` | Full configuration including required F22 policy binding and optional F39 VS/real strings plus a create token, absent target only; an existing valid request is `AlreadyExists` even when equal; duplicates, families and limits are validated before acceptance; new reals are administratively disabled. The first mutation token and incarnation are returned; there is no upsert. A known pre-accept failure preserves state; an uncertain outcome uses readback, not retry. |
-| O03 | `UpdateService` | Full replacement including optional F39 VS/real strings and expected VS token; absent is `NotFound`; a stale token is `Aborted` even when equal. After survivor preservation, an equal normalized candidate including all metadata is a no-op; any change follows normal admission/publication and advances the VS token once. Omitted metadata resets to empty; surviving reals take submitted/default metadata while preserving accepted weight, administrative state, incarnation and pins. Session deadlines and accepted capacity are preserved, and the VS network identity is immutable. The F22 boundary requires the complete policy binding on replacement, rejects changed content under the same identity/revision against the current binding or a retained shared revision the candidate would reuse, and treats changed identity or revision as a configuration change. The writable descriptor excludes resize-only and other read-only metadata. |
+| O02 | `CreateService` | Full configuration including required F22 policy binding and optional F39 VS/real strings plus a create token, absent target only; an existing valid request is `AlreadyExists` even when equal; duplicates, families and limits are validated before acceptance; new reals are administratively disabled. F22's final tuple comparison is ordered with acceptance under section 15. The first mutation token and incarnation are returned; there is no upsert. A known pre-accept failure preserves state; an uncertain outcome uses readback, not retry. |
+| O03 | `UpdateService` | Full replacement including optional F39 VS/real strings and expected VS token; absent is `NotFound`; a stale token is `Aborted` even when equal. After survivor preservation, an equal normalized candidate including all metadata is a no-op; any change follows normal admission/publication and advances the VS token once. Omitted metadata resets to empty; surviving reals take submitted/default metadata while preserving accepted weight, administrative state, incarnation and pins. Session deadlines and accepted capacity are preserved, and the VS network identity is immutable. The F22 boundary requires the complete policy binding on replacement, rejects changed content under the same identity/revision against the current binding or any retained occurrence under section 15's acceptance ordering, and treats changed identity or revision as a configuration change. The writable descriptor excludes resize-only and other read-only metadata. |
 | O04 | `DeleteService` | The current VS token; absent is `NotFound`; accepted incoming links are `FailedPrecondition` with no cascade. Accepted deletion automatically owns session cleanup; old configurations and readers delay reclamation, and there is no operator state-delete command. An accepted deletion accepts no resurrection of the deleted VS through a delayed create or link, and a VS recreated under the same name receives fresh session state: old affinity is not resurrected by name reuse. |
 | O05 | `ListServices` | Bounded authoritative lexical inventory with per-RPC membership coherence under section 6, membership-bound continuation, and `Unavailable` during recovery or bounded coherence failure; no usable partial page on failure and no permit or token issuance side effect. |
 | O06 | `CreateModuleConfig` | A distinct create with the complete explicit members or empty binding collection, optional F39 ModuleConfig string and a create token, no upsert; every link is validated by target incarnation and any invalid link rejects the whole operation. No internal common-policy field. |
@@ -213,7 +213,7 @@ package, tag or C ABI freeze.
 | O11 | `GetService` | A full coherent accepted snapshot including F39 VS/real strings and token using the byte-page contract; a fresh absent object is `NotFound`, a stale continuation is `Aborted`, and recovery is `Unavailable`. No permit allocation and no mixed accepted and runtime snapshot. A returned token may still be stale after the read, so the conditional write remains required. |
 | O12 | `ListSessions` | Bounded physical-record inspection with no refresh and no logical-dedup promise, under the selected page, identity, clock and continuation rules. |
 | O13 | `GetModuleConfig` | The full accepted typed snapshot including ordered identity-bound links, F39 ModuleConfig string and its own token, under the same versioned byte-page rules as `GetService`. The state must be recoverable rather than reconstructed from an empty local map. |
-| O14 | `ResizeServiceSessions` | Name, the existing VS token and a required positive size. After domain, existence and token checks, a raw target below the accepted size is `FailedPrecondition` before rounding, an exactly equal target is a no-op even with a back, growth while a back exists is rejected, and a larger target without a back proceeds to preparation and admission. A stale token is `Aborted` before target checks. Accepted growth advances the VS token; traffic and back retirement do not. All F39 strings are preserved. One recoverable capacity, chain, token and export outcome; no second independent acceptance and no public state token. |
+| O14 | `ResizeServiceSessions` | Name, the existing VS token and a required positive size. After domain, existence and token checks, a raw target below the accepted size is `FailedPrecondition` before rounding, an exactly equal target is a no-op even with a back, growth while a back physically exists is `FailedPrecondition`, and a larger target without a back proceeds to preparation and admission. A stale token is `Aborted` before target checks. Accepted growth advances the VS token; traffic and back retirement do not. All F39 strings are preserved. One recoverable capacity, chain, token and export outcome; no second independent acceptance and no public state token. |
 | O15 | `DeleteModuleConfig` | Name and expected token under the existing-object ordering; absent is `NotFound` and any accepted incoming reference, including a detached function, is `FailedPrecondition`. No cascade and an empty success response; accepted deletion removes outgoing VS links while old readers delay physical reclamation. A late cleanup failure does not undo the accepted deletion. |
 | O16 | `GetServiceStatus` | Read-only bounded live status, separate from O11's immutable accepted export. Observe the current VS or pending cleanup identified by VS incarnation, with F36 and F38 VS/real groups and section 6 consistency rules; each real group carries full key and incarnation. Runtime changes neither advance the mutation token nor invalidate a traversal bound to unchanged accepted configuration. |
 | O17 | `GetModuleConfigStatus` | Read-only bounded live ModuleConfig adoption and F38 module totals/reasons and Echo counter groups under F37 and section 6. O13 remains the accepted export. This adds no counter-specific RPC or synchronous publication barrier. |
@@ -236,7 +236,7 @@ Create, prepare and read continuations retain their separate rules there.
 | ID | Obligation |
 | --- | --- |
 | C01 Presence and parsing | Optional text null or omission maps to absence before the field default; a required null or absent value rejects; a required boolean or weight retains false or 0; collections are explicit; read-only metadata is rejected as a writable field. Writable F39 strings are distinct: omission/null/empty normalize to empty, strict string types and decoded UTF-8 byte limits apply. Binary protobuf uses presence and oneof where required, not textual null. A full replacement omission is not KEEP. Section 16 carries the field-by-field matrix; F36-F38/O16-O17 semantic states and errors are selected in section 6, while exact binary/text schema and cursor codecs remain preimplementation work, not completed format coverage. |
-| C02 Identity and equality | Exact names, decoded addresses, independently optional VS protocol and ports, actual session transport, incarnations, authored real order, ModuleConfig binding order, the raw requested power and accepted no-op equality agree across clients and C. F39 strings participate in full normalized equality after survivor preservation; the same strings with changed content and arbitrary earlier/new strings are allowed under current CAS, subject to all other rules. The F22 equality compares source-scoped identity, revision and the native normalized accepted content including order and counter-relevant identity; same identity/revision with changed content rejects against the current binding or a retained shared revision the candidate would reuse, and changed identity or revision changes configuration even for equal behavior. Stale-token precedence survives, and semantic equality is not inferred from serialization bytes. |
+| C02 Identity and equality | Exact names, decoded addresses, independently optional VS protocol and ports, actual session transport, incarnations, authored real order, ModuleConfig binding order, the raw requested power and accepted no-op equality agree across clients and C. F39 strings participate in full normalized equality after survivor preservation; the same strings with changed content and arbitrary earlier/new strings are allowed under current CAS, subject to all other rules. The F22 equality compares source-scoped identity, revision and the native normalized accepted content including order and counter-relevant identity; same identity/revision with changed content rejects against the current binding or any retained occurrence under section 15's acceptance ordering, and changed identity or revision changes configuration even for equal behavior. Stale-token precedence survives, and semantic equality is not inferred from serialization bytes. |
 | C03 Errors and uncertain outcomes | The complete [section 5 error order](#5-management-surface-permits-and-error-order) keeps error classes distinct and create, prepare and read rules separate. A timeout or lost reply is not non-application; there is no auto-renewal, deduplication or exactly-once promise. |
 | C04 Deadline and publication boundary | Admission and preparation are cancellable; the final section is bounded with no mid-commit rollback; success need not await worker adoption or reclamation. |
 | C05 Protobuf and C boundary | A separate versioned incompatible service and package keeps the product, module and CLI identity; there is no silent old-server fallback and no old mutation bypass. Removed fields and tags are reserved, the creation-envelope size is not the old VirtualService tag 6, and real and session identities and shared-memory changes need explicit ABI treatment. The common filter types (`Device`, `VlanRange`, `Fragment`) stay imported common definitions, never redeclared as l3b predicates. Exact package and tags, generated types, C widths, layout and attach migration stay downstream; no freeze, implicit legacy compatibility, guessed shared-memory layout, rolling upgrade or transparent downgrade promise. |
@@ -395,6 +395,12 @@ supplied/default strings; equal text revives no old identity, state or pin. Meta
 is neither a fingerprint of current manual overrides nor proof of worker adoption;
 the existing rules for systemic owner epochs, tokens, incarnations and internal
 publication versions stay unchanged. No version ledger, token replacement or automatic retry is added.
+
+Operator/CLI note: frequently changing metadata causes owning-token churn and
+invalidates configuration-bound export/status continuations, including changes
+only to a real's metadata under its VS token. An equal normalized candidate is a
+no-op. A label change alone does not invalidate name-list membership or session
+traversal; their other invalidators still apply.
 
 ### Complete Identity Non-Reuse
 
@@ -821,10 +827,16 @@ from the network key and is not reconstructed by current real lookup.
 - The capacity change is a separate operation under the shared VS token.
   After domain, existence and token checks, a raw target below the accepted
   front size is `FailedPrecondition` before rounding, an exactly equal target
-  is a no-op even while a back drains, and a larger target is rejected while a
-  back exists. 1024 to 1000 rejects, 1024 to 1024 is a no-op and 1024 to 1025
+  is a no-op even while a back drains, and a larger target is
+  `FailedPrecondition` while a back physically exists. 1024 to 1000 rejects,
+  1024 to 1024 is a no-op and 1024 to 1025
   requests an actual 2048 front. The asymmetry with creation is deliberate and
   visible in the service and CLI documentation.
+- Operator/CLI note: capacity is grow-only for the entire VS incarnation.
+  Configuration replacement, expired sessions and back retirement do not shrink
+  it. A smaller capacity requires explicit unlink, delete and create under the
+  existing rules, with a new incarnation and fresh sessions, losing old affinity.
+  The CLI MUST NOT perform that destructive recreation implicitly for resize.
 - Accepted growth advances the VS token; traffic and automatic back retirement
   do not. It yields one recoverable capacity, chain, token and export outcome
   rather than a second independent acceptance after the chain push. A
@@ -1720,10 +1732,12 @@ remain unchanged; this is not a global martian filter or a change to DHCP.
   content, including order and counter-relevant identity. Equal normalized
   content under the same identity/revision is equal; changed content under
   that identity/revision is `InvalidArgument` against the current accepted
-  binding or any shared retained revision it would reuse. Different identity
+  binding or any retained occurrence of that tuple. Different identity
   or revision is a configuration change even for equal packet behavior. This
-  requires no global revision ledger, cross-VS transaction or
-  counter-continuity guarantee.
+  requires no global revision ledger, transaction mutating several VSes or
+  counter-continuity guarantee. It does require the instance-wide tuple
+  comparison and acceptance ordering of section 15, even when compiled policy
+  allocations are not shared.
 - Existing validation and expected-token ordering applies: a stale token is
   `Aborted` even for equal content. Only an unchanged full accepted result
   under the current token is a no-op, preserving the token without
@@ -1773,9 +1787,19 @@ remain unchanged; this is not a global martian filter or a change to DHCP.
 
 ## 14. Native Policy Mapping
 
-The native message vocabulary is defined by the public ACL and common filter
-schemas at commit `ea506c95b08681e3a333ed44175273bf5bca35ee`.
+The native message vocabulary is defined by the public
+[ACL schema](https://github.com/yanet-platform/yanet2/blob/ea506c95b08681e3a333ed44175273bf5bca35ee/modules/acl/controlplane/aclpb/v1/acl.proto)
+and [common filter schema](https://github.com/yanet-platform/yanet2/blob/ea506c95b08681e3a333ed44175273bf5bca35ee/common/filterpb/v1/filter.proto)
+at commit `ea506c95b08681e3a333ed44175273bf5bca35ee`.
 The complete accepted subset and its behavior are specified below.
+
+This pin is fixed, not a reference to the repository's latest schema. Changing
+it requires explicit review of the accepted subset, defaults, normalization,
+equality and conformance vectors, with synchronized contract and translation
+updates. New upstream fields are not implicitly accepted. A change to accepted
+meaning requires an explicit compatibility decision under C05; a pin update
+MUST NOT silently reinterpret an existing policy tuple. This selects no new
+schema version, wire tag or migration mechanism.
 
 The content branch of the F22 binding contains an ordered sequence of the
 existing native ACL rule messages, not a standalone ACL update request. No ACL
@@ -1864,14 +1888,11 @@ YAML spelling, wire bytes, allocator identity or hashes; the standalone ACL
 request equality is not evidence for it.
 
 The caller's exact (source, key, revision) tuple denotes immutable normalized
-content; reclamation does not authorize redefining it. The server compares
-against the current binding and any retained shared revision the candidate would
-reuse, rejecting changed content under the same tuple in those comparisons.
-No historical lookup is required once an old revision is no longer retained
-and would not be reused; no permanent revision ledger is introduced. A
-different tuple changes configuration even with equal rules. Equal policy
-alone is not full-VS equality. Provenance bytes grant no authorization and no
-token substitute.
+content; reclamation does not authorize redefining it. Section 15 defines the
+server's comparison, acceptance ordering and retained lifetime, without a
+permanent revision ledger. A different tuple changes configuration even with
+equal rules. Equal policy alone is not full-VS equality. Provenance bytes grant
+no authorization and no token substitute.
 
 Counter identity is VS-incarnation scoped plus the native counter tag, under
 the collision checks of section 17 and protected descriptor/storage binding.
@@ -1908,6 +1929,47 @@ textual base64. This is a uniform representation policy, not a native quota or
 measured capacity. No parsing, charset or Unicode normalization, separators,
 naming authority, namespace registration or hash-as-authorization is
 introduced.
+
+The caller MUST NOT associate different normalized content with the same tuple,
+including after deletion, reclamation or owner takeover. New content requires a
+different revision (or a different source/key). The server's mandatory detection
+is bounded by retained state; it is not a permanent historical guarantee.
+
+Within one actual dataplane instance, compare the candidate with the current
+binding and every retained occurrence of that tuple across all VSes and mutation
+owners. Changed normalized content is `InvalidArgument`, independent of whether
+the implementation shares compiled allocations. The final comparison and making
+the new binding authoritative are one serialized acceptance decision: two cold
+creates or replacements of different VSes cannot both accept conflicting content
+while that tuple remains retained. Apply section 5's error order at the final
+coordinated recheck, including target existence, create-permit and expected-token
+checks. Rejection does not change accepted state or tokens or consume the create
+permit. There is no post-accept rollback or second authoritative commit.
+
+A revision is retained while any of these rights or states survives:
+- a current accepted VS binding;
+- an old, retiring or deleted descriptor still protected by structural roots or
+  reader rights, including a worker processing its packet;
+- a preparation holding a protected reference to an already accepted revision;
+- an unsettled recoverable operation whose policy rights or outcome have not
+  been reconciled, or a shared entry still available for reuse.
+
+Removing the last current binding does not end retention. Final release and
+new acceptance are ordered so that protected old content cannot disappear from
+the comparison early. A new unaccepted request or private compilation alone
+establishes no authoritative tuple/content association; cold candidates recheck
+at acceptance, and rejected or cancelled work releases only its own temporary
+rights. Existing physical accounting and bounded-work rules cover these rights;
+uncertain authoritative recovery remains `Unavailable`, never an assumed empty
+set of revisions.
+
+Once all such rights and reusable entries have ended safely, the server need not
+look up that tuple's history. Submitting changed content under it is still a
+caller violation, even if the server can no longer detect it; it is not a lawful
+redefinition or proof that an old observer's tuple denotes new content. This
+requires no permanent ledger or distributed comparison between independent
+dataplane instances. Coordination by tuple does not atomically mutate several
+VSes; its concrete index, locking and lifetime representation remain downstream.
 
 ## 16. Format Contract
 
@@ -2717,11 +2779,45 @@ Required discriminating vectors include:
   expiry after it remains eligible for physical inspection, including duplicate
   copies. Expired-only scan work consumes budget and advances an incomplete
   empty page rather than returning expired rows or stalling.
-- Changed normalized content under the same policy tuple rejects against the
-  current binding and a retained shared revision the candidate would reuse.
-  A no-longer-retained, non-reused revision requires no historical lookup;
-  caller fixtures still preserve tuple immutability, not redefine it after
-  reclamation or require a permanent ledger.
+- F22 concurrency (**NOT RUN**): two otherwise valid cold creates of different
+  VSes with nonconflicting selectors, or two valid replacements of different
+  VSes, submit the same tuple with different normalized content. While the first
+  accepted revision remains retained, at most one conflicting candidate accepts;
+  the other returns `InvalidArgument` before acceptance, preserving its accepted
+  state/token and unconsumed create permit. Repeat with separate compiled
+  allocations and different mutation owners in the same instance. Same tuple
+  and equal normalized content has no tuple conflict; each operation still
+  passes its own checks, without a multi-VS transaction guarantee.
+- F22 retention (**NOT RUN**): move the last current binding to another revision
+  while a reader, retiring/deleted descriptor or preparation still protects the
+  old accepted revision. Conflicting content under the old tuple still rejects.
+  Repeat through owner takeover and unsettled recoverable outcomes; uncertain
+  authority is `Unavailable`, not permission to accept a conflicting revision.
+  Order last release with a new acceptance; no protected old occurrence is
+  omitted merely because its last current binding disappeared.
+  Also leave only a shared entry available for reuse after every other holder
+  ends: conflicting content still returns `InvalidArgument`, preserving the
+  rejected operation's accepted state/token/permit until that entry safely ends.
+- Cancelling a cold, never-accepted preparation establishes no permanent tuple
+  association. Concurrent candidates recheck current authoritative content at
+  acceptance; failure releases only that preparation's temporary rights, never
+  another accepted revision's protection (**NOT RUN**).
+- After all holders and reusable entries are safely gone, no historical lookup
+  is required. A diagnostic fixture submitting T/X, full reclamation, then T/Y
+  with X != Y violates the caller contract; it cannot require acceptance or
+  historical conflict detection. Valid callers always choose a new revision
+  for changed content. No permanent ledger is required (**NOT RUN**).
+- F22 error precedence (**NOT RUN**): conflict plus stale expected token remains
+  `Aborted`; an otherwise valid create against an existing target remains
+  `AlreadyExists`; an absent target with invalid/expired permit remains `Aborted`.
+  Recovery remains `Unavailable`; no conflict bypasses section 5's ordering.
+- Resize boundaries (**NOT RUN**): with a current token and accepted size 1024,
+  raw 1000 is `FailedPrecondition`, 1024 no-ops even with a back, and 1025 is
+  `FailedPrecondition` while the back physically exists, including after logical
+  drain but before observation-safe release. After release, 1025 may grow to 2048
+  subject to ordinary preparation/admission; only accepted growth advances the
+  token. A stale token is `Aborted` before these target checks. Failures preserve
+  accepted capacity, chain and token; no third table or hidden recreation occurs.
 - A valid WLC sample following invalid samples resets that generation's streak
   once; subsequent activation or confirmation failure does not charge an invalid
   sample, reset the streak again, advance freshness, or alter committed
