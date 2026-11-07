@@ -197,6 +197,7 @@ fn generate_bindings(flags: &CFlags, shim_dir: &Path, out: &Path) {
         .allowlist_var("RTE_PKTMBUF_HEADROOM")
         .allowlist_var("MEMORY_BLOCK_MAX_ALIGN")
         .allowlist_var("MEMORY_BLOCK_ALLOCATOR_MAX_SIZE")
+        .allowlist_var("ASAN_RED_ZONE")
         .allowlist_var("PACKET_TRANSPORT_HEADER_UNAVAILABLE")
         .allowlist_var("YANET_SYS_CLASSIFY_.*")
         // The mark of an IPv6 classifier's value that is a row of its table.

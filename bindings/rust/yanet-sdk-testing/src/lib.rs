@@ -30,6 +30,10 @@ const REGION_SIZE: usize = 1 << 20;
 /// Alignment of a block, and bytes left unwritten after each one.
 const BLOCK: usize = 64;
 
+/// Alignment of a block of a line or more: the 128 bytes the C block
+/// allocator aligns such a block to, the most an owner promises.
+const LINE: usize = 128;
+
 /// Shared memory of a test: one leaked region, whose base is the root.
 ///
 /// It is the model of a product, which has one mapping. Blocks are never
@@ -63,7 +67,7 @@ impl BlockArena {
     ///
     /// When another thread panicked while holding the list of arenas.
     pub fn new() -> &'static Self {
-        let layout = Layout::from_size_align(REGION_SIZE, BLOCK).expect("region layout");
+        let layout = Layout::from_size_align(REGION_SIZE, LINE).expect("region layout");
         // SAFETY: the layout has a non-zero size.
         let region = NonNull::new(unsafe { alloc(layout) }).unwrap_or_else(|| handle_alloc_error(layout));
         let arena: &'static Self = Box::leak(Box::new(Self { region, used: Cell::new(0) }));
@@ -74,15 +78,16 @@ impl BlockArena {
         arena
     }
 
-    /// Allocates a zeroed block aligned to 64, followed by a gap of at least
-    /// 64 unwritten bytes.
+    /// Allocates a zeroed block aligned to 64, or to 128 when it takes a line
+    /// or more, followed by a gap of at least 64 unwritten bytes.
     ///
     /// # Panics
     ///
     /// When the arena has no room left for the block and its gap.
     pub fn alloc(&self, size: usize) -> NonNull<u8> {
         let size = size.max(1);
-        let offset = self.used.get();
+        let align = if size >= LINE { LINE } else { BLOCK };
+        let offset = self.used.get().next_multiple_of(align);
         let end = size
             .next_multiple_of(BLOCK)
             .checked_add(BLOCK)
