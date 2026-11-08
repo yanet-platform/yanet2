@@ -651,6 +651,7 @@ const _: () = assert!(Rule::NONE.0 == u32::MAX);
 /// # Panics
 ///
 /// The other rules are fewer than the rules.
+#[doc(alias = "classify_results_min")]
 #[inline(always)]
 pub fn results_min(rules: &mut [Rule], extra: &[Rule]) {
     let extra = &extra[..rules.len()];

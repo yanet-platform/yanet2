@@ -750,6 +750,7 @@ impl Packet<'_> {
     ///
     /// Beyond the tailroom, or on a chained packet, the packet is left
     /// unchanged.
+    #[doc(alias = "rte_pktmbuf_append")]
     #[inline]
     pub fn append(&mut self, len: usize) -> Result<&mut [u8], ResizeError> {
         let raw = self.raw.as_ptr();
@@ -780,6 +781,7 @@ impl Packet<'_> {
     /// of the frame and the fixed IPv4 or IPv6 header and an available TCP or
     /// UDP header whole. A trim that would not, one beyond the frame length,
     /// or one on a chained packet leaves the packet unchanged.
+    #[doc(alias = "rte_pktmbuf_trim")]
     #[inline]
     pub fn trim(&mut self, len: usize) -> Result<(), ResizeError> {
         let raw = self.raw.as_ptr();
@@ -819,6 +821,7 @@ impl Packet<'_> {
 
     /// Prepends an outer IPv6 header to an IPv4 or IPv6 packet, as
     /// [`Packet::encap_ipv4`] does with IPv4, through `packet_ip6_encap`.
+    #[doc(alias = "packet_ip6_encap")]
     #[inline]
     pub fn encap_ipv6(&mut self, dst: [u8; 16], src: [u8; 16], dscp: DscpMark) -> Result<(), TunnelError> {
         // SAFETY: as for `encap_ipv4`.
@@ -946,6 +949,7 @@ impl Packet<'_> {
     /// were, so both are cleared first. A frame the parser refuses leaves the
     /// packet unparsed, as an allocated one. A chained packet is refused and
     /// left as it was, since the parser reads the first segment only.
+    #[doc(alias = "parse_packet")]
     #[inline]
     pub fn parse(&mut self) -> Result<(), ParseError> {
         if self.chained() {
@@ -995,6 +999,7 @@ impl Packet<'_> {
     /// meaningful also when the transport header itself is unavailable
     /// inside a non-initial fragment (`packet_transport_protocol`,
     /// lib/dataplane/packet/packet.h).
+    #[doc(alias = "packet_transport_protocol")]
     #[inline(always)]
     pub fn transport_protocol(&self) -> u8 {
         (self.transport_type() & 0xff) as u8
@@ -1006,6 +1011,7 @@ impl Packet<'_> {
     ///
     /// A true result does not guarantee readable bytes; callers check
     /// lengths.
+    #[doc(alias = "packet_transport_header_available")]
     #[inline(always)]
     pub fn transport_header_available(&self) -> bool {
         u32::from(self.transport_type()) & bindings::PACKET_TRANSPORT_HEADER_UNAVAILABLE == 0
