@@ -85,32 +85,32 @@ pub unsafe fn from_c_chain(chain: *mut yanet_error) -> ApiError {
     ApiError { chain: NonNull::new(chain) }
 }
 
+/// The chain of an error for C, which then owns it; never null, a call that
+/// failed without a chain gets one that says so.
+pub fn into_c_chain(mut error: ApiError) -> *mut yanet_error {
+    if error.chain.is_none() {
+        error = ApiError::new(ErrorKind::Untagged, "the call failed without a message");
+    }
+    error.chain.take().map_or(ptr::null_mut(), NonNull::as_ptr)
+}
+
+/// Adds an error over a chain as one frame of its kind, as C reports it, and
+/// of its whole message, so that the chain stays as its cause.
+///
+/// # Safety
+///
+/// `*chain` is null or a chain the caller owns.
+pub unsafe fn wrap_c_chain(error: ApiError, chain: &mut *mut yanet_error) {
+    // SAFETY: caller contract.
+    unsafe { add_frame(chain, error.c_kind(), &error.to_string()) };
+}
+
 impl ApiError {
     /// An error of one frame, of the given kind and message.
     ///
     /// The message ends at its first NUL byte, as C reads it.
     pub fn new(kind: ErrorKind, message: &str) -> Self {
         with_c_kind(kind.to_c(), message)
-    }
-
-    /// The chain for C, which then owns it; never null, a call that failed
-    /// without a chain gets one that says so.
-    pub fn into_c_chain(mut self) -> *mut yanet_error {
-        if self.chain.is_none() {
-            self = Self::new(ErrorKind::Untagged, "the call failed without a message");
-        }
-        self.chain.take().map_or(ptr::null_mut(), NonNull::as_ptr)
-    }
-
-    /// Adds the error over the chain at `chain` as one frame of its kind, as C
-    /// reports it, and of its whole message, so that chain stays as its cause.
-    ///
-    /// # Safety
-    ///
-    /// `*chain` is null or a chain the caller owns.
-    pub(crate) unsafe fn wrap_c_chain(self, chain: &mut *mut yanet_error) {
-        // SAFETY: caller contract.
-        unsafe { add_frame(chain, self.c_kind(), &self.to_string()) };
     }
 
     /// The kind of the outermost frame that carries one.

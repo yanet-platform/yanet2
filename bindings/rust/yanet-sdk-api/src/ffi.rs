@@ -21,7 +21,7 @@ use yanet_sys::{
 
 use crate::{
     agent::{Agent, Releasable, handle_at, raw_at, release_at},
-    error::{ApiError, ErrorKind},
+    error::{ApiError, ErrorKind, into_c_chain, wrap_c_chain},
 };
 
 /// The `err` argument of an export: null, or the place for a chain.
@@ -135,10 +135,10 @@ fn set_err(err: ErrOut, error: ApiError) {
     // contract).
     let chain = unsafe { &mut *err };
     if chain.is_null() {
-        *chain = error.into_c_chain();
+        *chain = into_c_chain(error);
     } else {
         // SAFETY: as above.
-        unsafe { error.wrap_c_chain(chain) };
+        unsafe { wrap_c_chain(error, chain) };
     }
 }
 
