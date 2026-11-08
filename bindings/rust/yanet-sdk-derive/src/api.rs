@@ -5,7 +5,7 @@
 //! reports a failure in a trailing `yanet_error` argument. The impl is the api
 //! of a module, whose builds return configurations, or of an object type,
 //! whose builds return objects; a method returning `Result<u64, _>` is a
-//! query of either.
+//! query of either, which may also write records the caller passes.
 //!
 //! The generated code carries `Span::mixed_site()`, so it is macro output
 //! for the lints of the api crate: `#![forbid(unsafe_code)]` does not see
@@ -59,6 +59,10 @@ enum Lowered<'a> {
     Object(&'a Type),
     Record(&'a Type),
     Slice(&'a Type),
+    /// `&mut T`: a record a query writes.
+    OutRecord(&'a Type),
+    /// `&mut [T]`: records a query writes.
+    OutSlice(&'a Type),
     Int(&'a Type),
 }
 
@@ -70,12 +74,14 @@ fn simple_ident(ty: &Type) -> Option<&Ident> {
     }
 }
 
+/// Whether a type names one of the handles that cross by shared reference
+/// only: the agent, a string or an object.
+fn is_handle(ty: &Type) -> bool {
+    simple_ident(ty).is_some_and(|ident| ident == "Agent" || ident == "str" || ident == "BuiltObject")
+}
+
 fn lower(ty: &Type) -> syn::Result<Lowered<'_>> {
     match ty {
-        Type::Reference(TypeReference { mutability: Some(_), .. }) => Err(syn::Error::new(
-            ty.span(),
-            "a mutable reference does not cross the C boundary: take `&T`",
-        )),
         Type::Reference(TypeReference {
             lifetime: Some(Lifetime { ident, .. }),
             ..
@@ -83,6 +89,14 @@ fn lower(ty: &Type) -> syn::Result<Lowered<'_>> {
             ty.span(),
             "a named lifetime lets the method keep what C lent for the call: elide it",
         )),
+        Type::Reference(TypeReference { mutability: Some(_), elem, .. }) => match &**elem {
+            Type::Slice(slice) => Ok(Lowered::OutSlice(&slice.elem)),
+            elem if is_handle(elem) => Err(syn::Error::new(
+                ty.span(),
+                "only a query's output crosses by mutable reference: `&mut Record` or `&mut [Record]`",
+            )),
+            elem => Ok(Lowered::OutRecord(elem)),
+        },
         Type::Reference(reference) => Ok(match &*reference.elem {
             elem if simple_ident(elem).is_some_and(|ident| ident == "Agent") => Lowered::Agent,
             elem if simple_ident(elem).is_some_and(|ident| ident == "str") => Lowered::Str,
@@ -95,8 +109,8 @@ fn lower(ty: &Type) -> syn::Result<Lowered<'_>> {
         }
         _ => Err(syn::Error::new(
             ty.span(),
-            "unsupported parameter type: use `&Agent`, `&str`, `&BuiltObject<O, Agent>`, `&Record`, `&[Record]` or \
-             u8..u64, i8..i64, usize",
+            "unsupported parameter type: use `&Agent`, `&str`, `&BuiltObject<O, Agent>`, `&Record`, `&[Record]`, a \
+             query's `&mut Record` or `&mut [Record]`, or u8..u64, i8..i64, usize",
         )),
     }
 }
@@ -122,6 +136,9 @@ fn snake(name: &str) -> String {
 /// reads a value, such as a field of an object, rather than building. Its
 /// export writes the value through a `uint64_t *out` before the error
 /// argument and returns 0, or -1 with the error set.
+///
+/// A query that reads several values writes them into the records the caller
+/// passes as its outputs.
 fn is_query(output: &ReturnType) -> bool {
     let ReturnType::Type(_, ty) = output else {
         return false;
@@ -168,6 +185,10 @@ fn export(stem: &str, attr: &Args, self_ty: &Ident, method: &ImplItemFn) -> syn:
     let mut agent_params = Vec::new();
     let mut c_params = Vec::new();
     let mut convert = Vec::new();
+    // The outputs are zeroed once every argument is accepted, so that a
+    // refused argument leaves them untouched.
+    let mut zero = Vec::new();
+    let mut first_output = None;
     let mut args = Vec::new();
     for (index, arg) in sig.inputs.iter().enumerate() {
         let FnArg::Typed(arg) = arg else {
@@ -215,6 +236,19 @@ fn export(stem: &str, attr: &Args, self_ty: &Ident, method: &ImplItemFn) -> syn:
                 c_params.push(quote_spanned!(ms=> #c: *const #record, #len: usize));
                 convert.push(quote_spanned!(record.span()=> let #v = #p::slice_of::<#record>(#c, #len, #label)?;));
             }
+            Lowered::OutRecord(record) => {
+                first_output.get_or_insert(ty.span());
+                c_params.push(quote_spanned!(ms=> #c: *mut #record));
+                convert.push(quote_spanned!(record.span()=> let #v = #p::out_record::<#record>(#c, #label)?;));
+                zero.push(quote_spanned!(ms=> let #v = #p::zeroed(#v);));
+            }
+            Lowered::OutSlice(record) => {
+                first_output.get_or_insert(ty.span());
+                let len = Ident::new(&format!("__a{index}_len"), ms);
+                c_params.push(quote_spanned!(ms=> #c: *mut #record, #len: usize));
+                convert.push(quote_spanned!(record.span()=> let #v = #p::out_slice::<#record>(#c, #len, #label)?;));
+                zero.push(quote_spanned!(ms=> let #v = #p::zeroed_slice(#v);));
+            }
             Lowered::Int(int) => {
                 c_params.push(quote_spanned!(ms=> #c: #int));
                 args.push(quote_spanned!(ms=> #c));
@@ -247,12 +281,19 @@ fn export(stem: &str, attr: &Args, self_ty: &Ident, method: &ImplItemFn) -> syn:
                 unsafe {
                     #p::query(#agent_param, __out, __err, |__agent| {
                         #(#convert)*
+                        #(#zero)*
                         let __value: #ret = #self_ty::#name(#(#args),*);
                         __value
                     })
                 }
             }
         });
+    }
+    if let Some(span) = first_output {
+        return Err(syn::Error::new(
+            span,
+            "only a query, which returns `Result<u64, Error>`, writes outputs",
+        ));
     }
     let (built, header, target) = match attr {
         Args::Module(target) => (quote!(Built), quote!(cp_module), target),

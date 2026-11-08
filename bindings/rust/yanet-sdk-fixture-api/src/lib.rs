@@ -84,6 +84,17 @@ pub struct FibList {
     pub count: u64,
 }
 
+/// The shape of a state object, as one query reads it: its seed, its number
+/// of slots, and the workers and values per worker of its regions.
+#[derive(FfiRecord)]
+#[repr(C)]
+pub struct StateShape {
+    pub seed: u64,
+    pub slots: u64,
+    pub workers: u64,
+    pub region_len: u64,
+}
+
 /// The text of a NUL terminated name.
 fn text(name: &[u8; FIB_NAME_LEN]) -> Result<&str, Error> {
     CStr::from_bytes_until_nul(name)
@@ -294,6 +305,45 @@ impl State {
     ) -> Result<u64, Error> {
         with_slot(agent, state, index, |slot| {
             slot.fetch_add(delta, Ordering::Relaxed).wrapping_add(delta)
+        })
+    }
+
+    /// Writes the values of the object's slots, from the first, into as many
+    /// places as `values` has, and returns the number of slots; the places
+    /// past the slots stay zero.
+    pub fn values(
+        agent: &Agent,
+        state: &BuiltObject<yanet_sdk_fixture::State, Agent>,
+        values: &mut [u64],
+    ) -> Result<u64, Error> {
+        agent.read(state, |cx, config| {
+            let slots = config.slots.as_slice(&cx);
+            for (value, slot) in values.iter_mut().zip(slots) {
+                *value = slot.load(Ordering::Relaxed);
+            }
+            Ok(slots.len() as u64)
+        })
+    }
+
+    /// Writes the shape of the object in `shape` and returns its number of
+    /// slots, the length of the places `values` fills whole.
+    ///
+    /// The output comes before the object, so that a refused object shows
+    /// the output untouched: the export zeroes it only once it accepts every
+    /// argument.
+    pub fn shape(
+        agent: &Agent,
+        shape: &mut StateShape,
+        state: &BuiltObject<yanet_sdk_fixture::State, Agent>,
+    ) -> Result<u64, Error> {
+        agent.read(state, |cx, config| {
+            *shape = StateShape {
+                seed: config.seed,
+                slots: config.slots.as_slice(&cx).len() as u64,
+                workers: config.regions.worker_count(),
+                region_len: config.regions.len() as u64,
+            };
+            Ok(shape.slots)
         })
     }
 

@@ -112,6 +112,8 @@ pub fn derive_ffi_record(input: TokenStream) -> TokenStream {
 /// | `&str` | `const char *`, NUL terminated UTF-8 |
 /// | `&T`, `T: FfiRecord` | `const T *` |
 /// | `&[T]`, `T: FfiRecord` | `const T *x, size_t x_len`; `(NULL, 0)` is empty |
+/// | `&mut T`, `T: FfiRecord` (a query only) | `T *`, a record the query writes |
+/// | `&mut [T]`, `T: FfiRecord` (a query only) | `T *x, size_t x_len`, records the query writes; `(NULL, 0)` is empty |
 /// | `&BuiltObject<O, Agent>` (`object = O` only) | `struct cp_object *`, an object a build of the crate returned and nothing releases; one of another type is refused |
 /// | `u8`..`u64`, `i8`..`i64`, `usize` | the same C integer |
 /// | returns `Result<Built<M, Agent>, Error>` (`module = M`) | `struct cp_module *`, `NULL` on failure |
@@ -124,6 +126,14 @@ pub fn derive_ffi_record(input: TokenStream) -> TokenStream {
 /// Only a `_free` sets errno, which tells a busy refusal from a failure; a
 /// build or a query reports through its result and `err` alone, and errno is
 /// unspecified after it.
+///
+/// A query reads several values in one call through its outputs, records the
+/// caller owns and nothing else reaches during the call, the other arguments
+/// included. The export zeroes them once it accepts every argument, so the
+/// method starts from zero even over memory C left uninitialised, and a
+/// refused argument leaves them untouched; a failed method leaves what it
+/// wrote. A query that fills a slice commonly returns how many values it has,
+/// so a caller whose slice was short calls again with a longer one.
 ///
 /// The expansion's `unsafe` carries the macro's own spans, so the api crate
 /// keeps `#![forbid(unsafe_code)]`:
@@ -742,6 +752,110 @@ mod doctests {
     /// }
     /// ```
     struct OtherObjectParameterRefused;
+
+    /// A build writes no output.
+    ///
+    /// ```compile_fail
+    /// # use yanet_sdk::{BuiltObject, Object, ObjectBuilder};
+    /// # use yanet_sdk_api::{Agent, Error};
+    /// # struct Mine;
+    /// # impl Object for Mine {
+    /// #     const TYPE: &'static str = "mine";
+    /// #     type Config = u64;
+    /// #     type Prepared<'p> = ();
+    /// #     fn prepare(_: &yanet_sdk::ObjectCommitCx<'_, Self>) {}
+    /// # }
+    /// # pub struct Api;
+    /// #[yanet_sdk::api(object = Mine)]
+    /// impl Api {
+    ///     pub fn new(agent: &Agent, name: &str, words: &mut [u64]) -> Result<BuiltObject<Mine, Agent>, Error> {
+    ///         words.fill(0);
+    ///         ObjectBuilder::<Mine>::build(agent, name, |_| Ok(0))
+    ///     }
+    /// }
+    /// ```
+    struct BuildOutputRefused;
+
+    /// A query writes outputs: a record and a slice of records.
+    ///
+    /// ```no_run
+    /// # use yanet_sdk::{BuiltObject, FfiRecord, Object};
+    /// # use yanet_sdk_api::{Agent, Error};
+    /// # struct Mine;
+    /// # impl Object for Mine {
+    /// #     const TYPE: &'static str = "mine";
+    /// #     type Config = u64;
+    /// #     type Prepared<'p> = ();
+    /// #     fn prepare(_: &yanet_sdk::ObjectCommitCx<'_, Self>) {}
+    /// # }
+    /// #[derive(FfiRecord)]
+    /// #[repr(C)]
+    /// pub struct Shape {
+    ///     word: u64,
+    /// }
+    ///
+    /// # pub struct Api;
+    /// #[yanet_sdk::api(object = Mine)]
+    /// impl Api {
+    ///     pub fn read(
+    ///         agent: &Agent,
+    ///         mine: &BuiltObject<Mine, Agent>,
+    ///         shape: &mut Shape,
+    ///         words: &mut [u64],
+    ///     ) -> Result<u64, Error> {
+    ///         shape.word = agent.read(mine, |_, word| *word);
+    ///         words.fill(shape.word);
+    ///         Ok(words.len() as u64)
+    ///     }
+    /// }
+    /// ```
+    struct QueryOutputsAccepted;
+
+    /// A string is no output.
+    ///
+    /// ```compile_fail
+    /// # use yanet_sdk::{BuiltObject, Object};
+    /// # use yanet_sdk_api::{Agent, Error};
+    /// # struct Mine;
+    /// # impl Object for Mine {
+    /// #     const TYPE: &'static str = "mine";
+    /// #     type Config = u64;
+    /// #     type Prepared<'p> = ();
+    /// #     fn prepare(_: &yanet_sdk::ObjectCommitCx<'_, Self>) {}
+    /// # }
+    /// # pub struct Api;
+    /// #[yanet_sdk::api(object = Mine)]
+    /// impl Api {
+    ///     pub fn word(agent: &Agent, mine: &BuiltObject<Mine, Agent>, name: &mut str) -> Result<u64, Error> {
+    ///         name.make_ascii_lowercase();
+    ///         Ok(agent.read(mine, |_, word| *word))
+    ///     }
+    /// }
+    /// ```
+    struct StringOutputRefused;
+
+    /// An output of a type that is not a record, such as `bool`, is refused.
+    ///
+    /// ```compile_fail,E0277
+    /// # use yanet_sdk::{BuiltObject, Object};
+    /// # use yanet_sdk_api::{Agent, Error};
+    /// # struct Mine;
+    /// # impl Object for Mine {
+    /// #     const TYPE: &'static str = "mine";
+    /// #     type Config = u64;
+    /// #     type Prepared<'p> = ();
+    /// #     fn prepare(_: &yanet_sdk::ObjectCommitCx<'_, Self>) {}
+    /// # }
+    /// # pub struct Api;
+    /// #[yanet_sdk::api(object = Mine)]
+    /// impl Api {
+    ///     pub fn word(agent: &Agent, mine: &BuiltObject<Mine, Agent>, set: &mut bool) -> Result<u64, Error> {
+    ///         *set = true;
+    ///         Ok(agent.read(mine, |_, word| *word))
+    ///     }
+    /// }
+    /// ```
+    struct NonRecordOutputRefused;
 
     /// A module api takes no object parameter.
     ///
