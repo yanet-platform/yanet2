@@ -20,7 +20,7 @@ use yanet_sys::{
     dp::{Module, Object},
 };
 
-use crate::error::{ApiError, ErrorKind, from_c_chain, tagged};
+use crate::error::{ApiError, ErrorKind, from_c_chain};
 
 /// A handle on an agent attached to the shared memory, the owner of the
 /// configurations built there.
@@ -408,9 +408,9 @@ pub unsafe fn handle_at<B: Releasable>(raw: NonNull<B::Raw>) -> Result<B, ApiErr
     // contract); C wrote it whole.
     let field = unsafe { slice::from_raw_parts(root.ptr::<u8>(raw.addr().get() + B::TYPE_FIELD), B::TYPE_LEN) };
     if CStr::from_bytes_until_nul(field).map(CStr::to_bytes) != Ok(B::TYPE_NAME.as_bytes()) {
-        return Err(tagged(
+        return Err(ApiError::new(
             ErrorKind::InvalidArgument,
-            c"the handle is of another module or object type",
+            "the handle is of another module or object type",
         ));
     }
     // SAFETY: the address is a header of this mapping of the handle's type
@@ -462,9 +462,9 @@ pub unsafe fn release_at<B: Releasable>(raw: NonNull<B::Raw>) -> Result<(), Reta
 /// A name as the NUL terminated bytes of a C field of `N` bytes.
 fn c_name<const N: usize>(name: &str) -> Result<[u8; N], ApiError> {
     if name.len() >= N || name.bytes().any(|byte| byte == 0) {
-        return Err(tagged(
+        return Err(ApiError::new(
             ErrorKind::InvalidArgument,
-            c"a name holds a NUL or does not fit its C field whole",
+            "a name holds a NUL or does not fit its C field whole",
         ));
     }
     let mut bytes = [0; N];

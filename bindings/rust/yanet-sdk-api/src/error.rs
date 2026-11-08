@@ -85,28 +85,19 @@ pub unsafe fn from_c_chain(chain: *mut yanet_error) -> ApiError {
     ApiError { chain: NonNull::new(chain) }
 }
 
-/// A new chain of one frame.
-pub fn tagged(kind: ErrorKind, message: &CStr) -> ApiError {
-    let mut chain = ptr::null_mut();
-    // SAFETY: the out-parameter points at a null chain, the format takes one
-    // string, and the message is NUL terminated.
-    unsafe { bindings::yanet_error_add_kind(&raw mut chain, kind.to_c(), c"%s".as_ptr(), message.as_ptr()) };
-    // SAFETY: the chain is the one just made, ours alone.
-    unsafe { from_c_chain(chain) }
-}
-
 impl ApiError {
-    /// An error of one frame, of the given kind, for a method that refuses its
-    /// input.
+    /// An error of one frame, of the given kind and message.
+    ///
+    /// The message ends at its first NUL byte, as C reads it.
     pub fn new(kind: ErrorKind, message: &str) -> Self {
-        from_str(kind, message)
+        with_c_kind(kind.to_c(), message)
     }
 
     /// The chain for C, which then owns it; never null, a call that failed
     /// without a chain gets one that says so.
     pub fn into_c_chain(mut self) -> *mut yanet_error {
         if self.chain.is_none() {
-            self = from_str(ErrorKind::Untagged, "the call failed without a message");
+            self = Self::new(ErrorKind::Untagged, "the call failed without a message");
         }
         self.chain.take().map_or(ptr::null_mut(), NonNull::as_ptr)
     }
@@ -143,9 +134,9 @@ impl From<BuildError<ApiError>> for ApiError {
         match err {
             BuildError::Owner(err) => err,
             BuildError::Refused(refusal) => Self::from(refusal),
-            _ => tagged(
+            _ => Self::new(
                 ErrorKind::Untagged,
-                c"the build failed for a reason this crate does not name",
+                "the build failed for a reason this crate does not name",
             ),
         }
     }
@@ -155,13 +146,6 @@ impl From<Refusal> for ApiError {
     fn from(refusal: Refusal) -> Self {
         with_c_kind(refusal.kind(), refusal.message())
     }
-}
-
-/// A new chain of one frame holding `message`, which needs no terminator.
-///
-/// The message ends at its first NUL byte, as C reads it.
-pub fn from_str(kind: ErrorKind, message: &str) -> ApiError {
-    with_c_kind(kind.to_c(), message)
 }
 
 /// A new chain of one frame holding a message, tagged with a kind as C names
