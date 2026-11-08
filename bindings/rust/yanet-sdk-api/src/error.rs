@@ -78,7 +78,9 @@ unsafe impl Sync for ApiError {}
 ///
 /// # Safety
 ///
-/// `chain` is null or a chain nothing else will free.
+/// `chain` is null or a live chain whose ownership passes to the error:
+/// nothing else frees it or uses it afterwards, save the static out-of-memory
+/// frame that chains share and nothing frees.
 pub unsafe fn from_c_chain(chain: *mut yanet_error) -> ApiError {
     ApiError { chain: NonNull::new(chain) }
 }
