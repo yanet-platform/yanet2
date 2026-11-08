@@ -145,15 +145,9 @@ impl From<BuildError<ApiError>> for ApiError {
     }
 }
 
-// The message is the refusal's own, tagged with the kind its documentation
-// names.
 impl From<Refusal> for ApiError {
     fn from(refusal: Refusal) -> Self {
-        let kind = match refusal {
-            Refusal::OutOfMemory => ErrorKind::ResourceExhausted,
-            _ => ErrorKind::InvalidArgument,
-        };
-        from_str(kind, refusal.message())
+        from_str(ErrorKind::from_c(refusal.kind()), refusal.message())
     }
 }
 
