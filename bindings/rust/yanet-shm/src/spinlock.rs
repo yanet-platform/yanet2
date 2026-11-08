@@ -12,17 +12,12 @@ const SPINS_PER_WAIT: u32 = 1024;
 
 /// A test-and-test-and-set spinlock over one shared-memory word.
 ///
-/// It guards data kept beside it in the same shared-memory struct; the guard
-/// marks the critical section. The word holds no pointer, so the lock works in
-/// every process that maps it, wherever the mapping lands. Zero is free and any
-/// other value is held, so every bit pattern is a valid state; a block that
-/// starts nonzero is a lock that is never released, not undefined behaviour.
-///
-/// A panic that unwinds out of the critical section releases the lock: there
-/// is no poisoning. A holder that never returns, such as a process that aborts
-/// or is killed, leaves the lock held for good, and every later waiter spins
-/// forever. The word is not the C spinlock's: the two do not stand in for each
-/// other in a struct shared with C.
+/// It guards data kept beside it in a shared-memory struct, in every process
+/// that maps it. Zero is free and any other value held, so every bit pattern
+/// is a valid state; a block that starts nonzero is never released. A panic
+/// that unwinds out of the critical section releases the lock, but a holder
+/// that never returns, such as a killed process, leaves it held for good. The
+/// word does not stand in for the C spinlock's in a struct shared with C.
 #[repr(C)]
 #[derive(Debug, Default)]
 pub struct RawSpinlock {
@@ -48,7 +43,9 @@ impl RawSpinlock {
     /// Takes the lock if it is free, without waiting.
     #[inline]
     pub fn try_lock(&self) -> Option<RawSpinlockGuard<'_>> {
-        if self.word.swap(1, Ordering::Acquire) == 0 {
+        // A held lock is refused on a plain load, which leaves the cache line
+        // shared with the waiters.
+        if self.word.load(Ordering::Relaxed) == 0 && self.word.swap(1, Ordering::Acquire) == 0 {
             Some(RawSpinlockGuard { lock: self })
         } else {
             None
