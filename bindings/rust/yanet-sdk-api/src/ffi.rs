@@ -21,14 +21,14 @@ use yanet_sys::{
 
 use crate::{
     agent::{Agent, Releasable, handle_at, raw_at, release_at},
-    error::{ApiError, ErrorKind, from_str},
+    error::{ApiError, ErrorKind},
 };
 
 /// The `err` argument of an export: null, or the place for a chain.
 type ErrOut = *mut *mut yanet_error;
 
 fn invalid(argument: &str, what: &str) -> ApiError {
-    from_str(ErrorKind::InvalidArgument, &format!("argument `{argument}` {what}"))
+    ApiError::new(ErrorKind::InvalidArgument, &format!("argument `{argument}` {what}"))
 }
 
 /// A pointer C passed for a non-null argument: not null, aligned.
@@ -106,7 +106,7 @@ fn panic_error(payload: Box<dyn Any + Send>) -> ApiError {
         .copied()
         .or_else(|| payload.downcast_ref::<String>().map(String::as_str))
         .unwrap_or("no message");
-    let error = from_str(ErrorKind::Untagged, &format!("panic: {message}"));
+    let error = ApiError::new(ErrorKind::Untagged, &format!("panic: {message}"));
     if let Err(second) = catch_unwind(AssertUnwindSafe(|| drop(payload))) {
         if second.is::<&str>() || second.is::<String>() {
             drop(second);
