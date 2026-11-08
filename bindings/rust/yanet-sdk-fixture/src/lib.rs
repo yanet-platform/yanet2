@@ -67,6 +67,9 @@ pub const FIXTURE_MODE_CLONE: u64 = 10;
 /// configuration's argument says, filled with 0xbb; passes it when
 /// accepted and drops it when refused.
 pub const FIXTURE_MODE_ALLOC_PREPEND: u64 = 11;
+/// Passes every packet after making a copy of it and freeing the copy, and
+/// makes a packet and frees it.
+pub const FIXTURE_MODE_FREE: u64 = 12;
 
 /// The configuration of [`Fixture`]: a mode, and one of each kind of resource
 /// a build registers or allocates.
@@ -194,6 +197,17 @@ impl Module for Fixture {
                         }
                         _ => batch.drop(packet),
                     }
+                }
+            }
+            FIXTURE_MODE_FREE => {
+                while let Some(packet) = batch.next() {
+                    if let Some(copy) = batch.clone(&packet) {
+                        batch.free(copy);
+                    }
+                    batch.pass(packet);
+                }
+                if let Some(packet) = batch.alloc() {
+                    batch.free(packet);
                 }
             }
             _ => batch.dispatch(|_| Verdict::Pass),

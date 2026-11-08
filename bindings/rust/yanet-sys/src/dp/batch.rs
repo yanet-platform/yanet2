@@ -3,7 +3,8 @@
 //! The packet lists stay C's and are used as a C handler uses them: taking
 //! a packet pops it off the input list, and its verdict moves it to the
 //! output or drop list or routes it to a device. Every input packet is
-//! passed, dropped or routed to a device (module: drain).
+//! passed, dropped or routed to a device (module: drain); a packet the module
+//! made may go back to its pool instead.
 
 use core::{marker::PhantomData, mem::size_of, ptr::NonNull};
 
@@ -49,8 +50,8 @@ pub struct Batch<'id> {
 /// A packet taken from or allocated by the batch, owned until it is
 /// disposed of.
 ///
-/// Not `Copy` or `Clone`; consumed by passing, dropping or redirecting it. A
-/// packet that is never disposed of is on no list
+/// Not `Copy` or `Clone`; consumed by passing, dropping, redirecting or
+/// freeing it. A packet that is never disposed of is on no list
 /// after the call, as one a C handler forgets.
 ///
 /// A packet cannot be kept beyond the call it was taken in (a lifetime error,
@@ -71,7 +72,7 @@ pub struct Batch<'id> {
 ///     *kept = batch.next();
 /// }
 /// ```
-#[must_use = "a packet is passed, dropped or redirected; one left alone is lost"]
+#[must_use = "a packet is passed, dropped, redirected or freed; one left alone is lost"]
 pub struct Packet<'id> {
     raw: NonNull<bindings::packet>,
     // Invariant brand: values of two different contexts never unify, so they cannot be mixed.
@@ -191,8 +192,9 @@ pub enum Verdict<'d> {
     Redirect(DeviceRef<'d>),
 }
 
-// The packet allocator and copy of the host dataplane (lib/dataplane/worker),
-// exported by its executable; the plugin resolves them at load time.
+// The packet allocator, copy and free of the host dataplane
+// (lib/dataplane/worker), exported by its executable; the plugin resolves them
+// at load time.
 unsafe extern "C" {
     /// Allocates a packet from the worker's pool, null when it is empty; the
     /// packet metadata is zeroed and the mbuf empty.
@@ -208,6 +210,10 @@ unsafe extern "C" {
         packet: *mut bindings::packet,
         packet_recirc_limit: u16,
     ) -> *mut bindings::packet;
+
+    /// Returns the mbuf of a packet, every segment of its chain, to the pool
+    /// it came from.
+    fn worker_packet_free(packet: *mut bindings::packet);
 }
 
 impl<'id> Batch<'id> {
@@ -238,8 +244,8 @@ impl<'id> Batch<'id> {
     /// pool is exhausted, as C's `worker_packet_alloc` does.
     ///
     /// The packet is owned like a taken one: it is passed (emitted after
-    /// the input packets already passed), dropped or redirected; one left
-    /// alone never returns to the pool. Its frame starts empty, with the
+    /// the input packets already passed), dropped, redirected or freed; one
+    /// left alone never returns to the pool. Its frame starts empty, with the
     /// pool's headroom in front; grow it with [`Packet::append`] and
     /// [`Packet::prepend`]. Its metadata starts zeroed, so its headers count
     /// as unparsed.
@@ -258,9 +264,9 @@ impl<'id> Batch<'id> {
     /// the pool is exhausted, as C's `worker_clone_packet` does.
     ///
     /// The copy carries the frame and metadata of the source and is owned
-    /// like an allocated packet: it ends by its verdict. C splits the
-    /// source's recirculation budget between the two; nothing else of the
-    /// source changes.
+    /// like an allocated packet: it ends by its verdict or is freed. C
+    /// splits the source's recirculation budget between the two; nothing
+    /// else of the source changes.
     #[inline(always)]
     pub fn clone(&mut self, packet: &Packet<'id>) -> Option<Packet<'id>> {
         // SAFETY: the call's worker and context (constructor contract), the
@@ -278,6 +284,21 @@ impl<'id> Batch<'id> {
             _brand: PhantomData,
             _local: PhantomData,
         })
+    }
+
+    /// Returns a packet to its pool, as C's `worker_packet_free` does.
+    ///
+    /// For a packet the module made and gives up on, such as one the packet
+    /// parser refuses: it ends on no list and in no count of the front, where
+    /// a dropped one is counted. An input packet is dropped instead, so that
+    /// every input has its verdict (module: drain).
+    #[inline(always)]
+    pub fn free(&mut self, packet: Packet<'id>) {
+        // SAFETY: an owned packet of this batch is on no list and
+        // exclusively ours (only taking, allocating and copying create one,
+        // and its value is consumed here), so nothing reaches its mbuf once
+        // C has returned it.
+        unsafe { worker_packet_free(packet.raw.as_ptr()) }
     }
 
     /// Passes every input packet not yet taken, with the front's input

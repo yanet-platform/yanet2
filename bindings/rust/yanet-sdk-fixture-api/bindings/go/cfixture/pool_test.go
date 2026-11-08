@@ -231,3 +231,51 @@ func Test_AllocPrepend_OneByteBeyondTheHeadroom_IsRefused(t *testing.T) {
 
 	require.Equal(t, [][]byte{{}}, result.Drop)
 }
+
+// Test_Free_FreedPackets_EndOnNoList verifies that the packets a module made
+// and freed, a copy and an allocated one, end on neither the transmit nor the
+// drop list, where the input it passed ends on the transmit list.
+func Test_Free_FreedPackets_EndOnNoList(t *testing.T) {
+	bed := poolBed(t, cfixture.ModeFree, 0)
+	source := ipv4UDP()
+
+	result := bed.run(0, source)
+
+	require.Equal(t, [][]byte{source}, result.Output)
+	require.Empty(t, result.Drop)
+}
+
+// Test_Free_FreedPackets_LeaveNothingOutstanding verifies that once the round
+// is over, every packet a module made and freed is back in the pool.
+func Test_Free_FreedPackets_LeaveNothingOutstanding(t *testing.T) {
+	bed := poolBed(t, cfixture.ModeFree, 0)
+
+	bed.run(0, ipv4UDP())
+
+	require.Zero(t, bed.harness.OutstandingMbufs())
+}
+
+// Test_Free_FreedPackets_CountedByNoModuleCounter verifies that the counters of
+// a module that frees the packets it made count the input it passed in and
+// out, and none of the freed packets.
+func Test_Free_FreedPackets_CountedByNoModuleCounter(t *testing.T) {
+	bed := newBed(t)
+	inst := bed.fixtureInstance(fixtureOf(cfixture.ModeFree))
+	bed.serveBeforeForward(inst)
+	source := ipv4UDP()
+	bed.run(0, source)
+
+	for _, tc := range []struct {
+		name    string
+		counter string
+		want    []uint64
+	}{
+		{name: "input counter counts the input", counter: "rx", want: packetsAndBytes(1, len(source))},
+		{name: "output counter counts only the passed input", counter: "tx", want: packetsAndBytes(1, len(source))},
+		{name: "drop counter counts no freed packet", counter: "drop", want: packetsAndBytes(0, 0)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			require.Equal(t, tc.want, bed.counter(inst, tc.counter)[0])
+		})
+	}
+}
