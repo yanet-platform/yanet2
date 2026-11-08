@@ -221,6 +221,40 @@ func Test_Tally_TaggedCounters_CountInTheRegistryOfTheirTag(t *testing.T) {
 	}
 }
 
+// Test_Tally_CountersById_CountUnderTheIdsTheRegistrarGave verifies that the
+// counters of a registry picked by id through the handle resolved at commit
+// are those the registrar registered under their names, a name given twice
+// once, that an id past them counts nowhere and that only the worker the round
+// ran on counts.
+func Test_Tally_CountersById_CountUnderTheIdsTheRegistrarGave(t *testing.T) {
+	bed := newBed(t)
+	inst := bed.tallyInstance("config", 7)
+	bed.serveBeforeForward(inst)
+	// First bytes 0 to 4 pick ids 0, 1, 2, 3 and 0; the registrar gave 0 and 1.
+	bed.run(1, arpFrames(5)...)
+
+	for _, tc := range []struct {
+		name    string
+		counter string
+		want    [][]uint64
+	}{
+		{
+			name:    "first name, id 0",
+			counter: "wide",
+			want:    [][]uint64{{0, 0}, packetsAndBytes(2, 120), {0, 0}, {0, 0}},
+		},
+		{
+			name:    "second name, id 1",
+			counter: "narrow",
+			want:    [][]uint64{{0, 0}, packetsAndBytes(1, 60), {0, 0}, {0, 0}},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			require.Equal(t, tc.want, bed.taggedCounter(inst, "lanes", tc.counter))
+		})
+	}
+}
+
 // Test_Tally_TaggedCounters_StayOutOfTheModuleCounters verifies that the
 // counters of the tagged registries are not among the module's own counters,
 // which list one of their own asked beside them.

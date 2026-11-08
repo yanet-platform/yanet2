@@ -94,6 +94,58 @@ impl<T> TaggedCounter<T> {
 // order of the fields.
 const _: () = assert!(size_of::<TaggedCounter>() == 2 * size_of::<u64>());
 
+/// Per-worker counters of the module in one of its tagged registries, picked
+/// by id: those the configuration's data names by index, such as a counter
+/// per rule that a record of a flow keeps.
+///
+/// Holds the registry's index among the module's tagged registries and the
+/// number of counters the configuration registered in it, whose ids run from
+/// zero, each of layout `T`. Readers find them as the counters of a
+/// [`TaggedCounter`], and C carries their values over alike. The dataplane
+/// resolves the registry once per generation, as a C module hoists the handle
+/// array of a registry into its prepared state, and adds by id through the
+/// handle, a single hop per packet.
+///
+/// A C registry may hold more counters than the configuration registered: C
+/// follows them with those it carries over by name from the configuration this
+/// one replaces, of the sizes they had there. Their ids are past the
+/// configuration's and out of the handle's reach.
+#[repr(C)]
+pub struct TaggedCounters<T = u64> {
+    registry: u64,
+    len: u64,
+    // What one worker's values of each counter are; the configuration stores
+    // the registry and the number of counters only.
+    _layout: PhantomData<fn() -> T>,
+}
+
+impl<T> TaggedCounters<T> {
+    /// Index of the registry among the module's tagged registries, zero when
+    /// the configuration registered no counter in it: the first counter makes
+    /// the registry.
+    #[inline(always)]
+    pub fn registry(&self) -> u64 {
+        self.registry
+    }
+
+    /// Number of counters the configuration registered, the bound of the ids
+    /// it counts under.
+    #[inline(always)]
+    pub fn len(&self) -> u64 {
+        self.len
+    }
+
+    /// Whether the configuration registered no counter.
+    #[inline(always)]
+    pub fn is_empty(&self) -> bool {
+        self.len == 0
+    }
+}
+
+// The builder writes the registry index and the number of counters as the two
+// words of the value, in the order of the fields.
+const _: () = assert!(size_of::<TaggedCounters>() == 2 * size_of::<u64>());
+
 /// What one worker's values of a [`Counter`] are, and how a value of the
 /// layout adds to them.
 ///
@@ -245,6 +297,11 @@ unsafe impl<T: CounterLayout> ShmLayout for Counter<T> {}
 // the layout is a zero-sized marker; the control plane writes the indices the
 // module's tagged registry assigned.
 unsafe impl<T> ShmLayout for TaggedCounter<T> where T: CounterLayout {}
+
+// SAFETY: a registry index and a number of counters accept every bit pattern,
+// and the layout is a zero-sized marker; the control plane writes the index the
+// module's tagged registry assigned and the number of counters it registered.
+unsafe impl<T> ShmLayout for TaggedCounters<T> where T: CounterLayout {}
 
 // SAFETY: a device index accepts every bit pattern; the control plane writes
 // the index the module's device list assigned.

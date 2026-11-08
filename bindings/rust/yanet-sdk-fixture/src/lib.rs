@@ -22,7 +22,8 @@ use core::sync::atomic::{AtomicU64, Ordering};
 
 use yanet_sdk::{
     Batch, CommitCx, Counter, CounterRef, Cx, Device, Lpm4, Lpm6, Module, Object, ObjectCommitCx, ObjectLink,
-    PerWorker, PerWorkerSlice, ShmLayout, ShmSlice, TaggedCounter, Traffic, Verdict, WorkerSlice, WorkerSlot,
+    PerWorker, PerWorkerSlice, ShmLayout, ShmSlice, TaggedCounter, TaggedCounters, TaggedCountersRef, Traffic, Verdict,
+    WorkerSlice, WorkerSlot,
 };
 // The plugin examples use it.
 #[cfg(feature = "plugin")]
@@ -221,8 +222,8 @@ impl Module for Fixture {
 /// counters picked by value, one held by a handle, one of the packets and
 /// bytes, the packets each worker has seen and a counter of running sums of
 /// them; and in tagged registries two counters of packets and bytes picked by
-/// value, for packets whose first byte is even and odd, and one held by a
-/// handle.
+/// value, for packets whose first byte is even and odd, one held by a handle
+/// and the counters of packets and bytes of another registry, picked by id.
 #[derive(ShmLayout)]
 #[repr(C)]
 pub struct TallyConfig {
@@ -234,16 +235,18 @@ pub struct TallyConfig {
     pub running: Counter,
     pub by_parity: [TaggedCounter<Traffic>; 2],
     pub tagged_held: TaggedCounter,
+    pub by_id: TaggedCounters<Traffic>,
 }
 
 /// What [`Tally`] makes at commit: the handle of the held counter, twice the
-/// configuration's word, the handle of the worker's slot of packets seen and
-/// the handle of the held tagged counter.
+/// configuration's word, the handle of the worker's slot of packets seen, the
+/// handle of the held tagged counter and that of the counters picked by id.
 pub struct Stamp<'p> {
     held: CounterRef<'p>,
     stamp: u64,
     seen: Option<WorkerSlot<'p, u64>>,
     tagged_held: CounterRef<'p>,
+    by_id: TaggedCountersRef<'p, Traffic>,
 }
 
 /// Counts each packet in the counter its first byte selects, by value, unless
@@ -253,7 +256,9 @@ pub struct Stamp<'p> {
 /// the running counter, unless the commit found no worker. Counts a packet and
 /// its bytes in the tagged counter of the parity of its first byte, by value,
 /// unless it is empty, and adds 3 to the held tagged counter through its
-/// handle.
+/// handle. Counts a packet and its bytes in the counter whose id is its first
+/// byte modulo 4, through the handle made at commit, unless it is empty; an id
+/// past the counters registered counts nowhere.
 /// Passes the packets when the stamp is 14 and drops them otherwise.
 pub struct Tally;
 
@@ -267,11 +272,13 @@ impl Module for Tally {
         let prepared = cx.prepared();
         let held = prepared.held.bind(cx);
         let tagged_held = prepared.tagged_held.bind(cx);
+        let by_id = prepared.by_id.bind(cx);
         let pass = prepared.stamp == 14;
         batch.dispatch(|packet| {
             if let Some(byte) = packet.data().first() {
                 config.by_value[usize::from(byte % 3)].add(cx, 1);
                 config.by_parity[usize::from(byte % 2)].add(cx, Traffic::packet(packet.data().len() as u64));
+                by_id.add(u64::from(byte % 4), Traffic::packet(packet.data().len() as u64));
             }
             held.add(2);
             tagged_held.add(3);
@@ -293,6 +300,7 @@ impl Module for Tally {
             stamp: config.word * 2,
             seen: config.seen.handle(cx),
             tagged_held: config.tagged_held.resolve(cx),
+            by_id: config.by_id.resolve(cx),
         }
     }
 }

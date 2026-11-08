@@ -142,7 +142,9 @@ impl Tally {
     /// Its tagged counters are `even` of the registry `routes`, the held one,
     /// registered first, and then `odd` and `even` of the registry `rules`,
     /// the counters by parity: a registry order and a counter order other than
-    /// the fields', and one name in two registries.
+    /// the fields', and one name in two registries. The counters picked by id
+    /// are those a registrar registers last in the registry `lanes` as
+    /// `wide`, `narrow` and `wide` again: two counters, ids 0 and 1.
     pub fn build(agent: &Agent, name: &str, word: u64) -> Result<Built<yanet_sdk_fixture::Tally, Agent>, ApiError> {
         Builder::<yanet_sdk_fixture::Tally>::build::<ApiError, _>(agent, name, |scope| {
             let tagged_held = scope.counter_in("routes", "even")?;
@@ -154,6 +156,10 @@ impl Tally {
             let even = scope.counter_in("rules", "even")?;
             let traffic = scope.counter("traffic")?;
             let running = scope.counter("running")?;
+            let mut lanes = scope.counters_in("lanes")?;
+            for name in ["wide", "narrow", "wide"] {
+                lanes.counter(name)?;
+            }
             Ok(TallyConfigParts {
                 word,
                 by_value: [v0, v1, v2],
@@ -163,6 +169,7 @@ impl Tally {
                 running,
                 by_parity: [even, odd],
                 tagged_held,
+                by_id: lanes,
             })
         })
     }
