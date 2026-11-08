@@ -16,7 +16,7 @@ use yanet_packet as _;
 use yanet_sdk::{
     Batch, Build, BuiltObject, CommitCx, Counter, Cx, Device, Kind, Lpm4, Lpm6, Module, Object, ObjectBuilder,
     ObjectCommitCx, ObjectLink, OwnedSlice, PerWorker, PerWorkerSlice, Refusal, Registered, ShmBox, ShmLayout,
-    ShmSlice, TaggedCounter, Traffic, Verdict,
+    ShmSlice, TaggedCounter, TaggedCounters, Traffic, Verdict,
 };
 use yanet_sdk_derive as _;
 use yanet_sdk_testing::{
@@ -171,6 +171,17 @@ struct Tagged {
 }
 
 type TaggedModule = Fixture<Tagged>;
+
+/// A tagged counter beside the counters of another tagged registry, picked by
+/// id.
+#[derive(ShmLayout)]
+#[repr(C)]
+struct ByRule {
+    route: TaggedCounter,
+    rules: TaggedCounters<Traffic>,
+}
+
+type ByRuleModule = Fixture<ByRule>;
 type TablesModule = Fixture<Tables>;
 
 /// An owner of an empty arena.
@@ -719,7 +730,7 @@ fn test_build_registers_each_tagged_counter_with_the_size_of_its_layout() {
 
     let (config, _) = body::<TaggedModule>(&owner, &built);
     assert_eq!(
-        ((1, 2, 3), vec![1, 2, 1, 1]),
+        ((0, 0, 1), vec![1, 2, 1, 1]),
         (
             (config.rule.id(), config.route.id(), config.again.id()),
             owner.counter_sizes()
@@ -756,6 +767,138 @@ fn test_build_refuses_a_counter_tag_that_does_not_fit_its_c_field() {
 
         assert_eq!(
             (BuildError::Refused(Refusal::InvalidName), 2),
+            (err, owner.counter_registries().len())
+        );
+        owner.assert_released();
+    }
+}
+
+/// The parts of the configuration by rule, its route in the registry
+/// `routes`, made first, and the rules registered in the registry `rules` under
+/// the given names, whose ids it collects.
+fn by_rule<'b>(
+    b: Scope<'b, '_, TestOwner>,
+    names: &[&str],
+    ids: &mut Vec<u64>,
+) -> Result<ByRuleParts<'b, TestOwner>, Failure> {
+    let route = b.counter_in("routes", "allow")?;
+    let mut rules = b.counters_in("rules")?;
+    for name in names {
+        ids.push(rules.counter(name)?);
+    }
+    Ok(ByRuleParts { route, rules })
+}
+
+/// verifies that a registrar gives the ids of a registry from zero in the
+/// order the names first come, a name given again its id back, and that the
+/// field is written with the registry of its tag and the number of counters.
+#[test]
+fn test_build_writes_tagged_counters_with_their_registry_and_count() {
+    let owner = owner();
+    let mut ids = Vec::new();
+
+    let built = build::<ByRuleModule>(&owner, |b| by_rule(b, &["deny", "allow", "deny"], &mut ids)).expect("built");
+
+    let (config, _) = body::<ByRuleModule>(&owner, &built);
+    assert_eq!(
+        (vec![0, 1, 0], 1, 2),
+        (ids, config.rules.registry(), config.rules.len())
+    );
+    release::<ByRuleModule>(&owner, built);
+    owner.assert_released();
+}
+
+/// verifies that a registrar registers each counter with as many values as
+/// its layout holds.
+#[test]
+fn test_build_registers_each_counter_of_a_registrar_with_the_size_of_its_layout() {
+    let owner = owner();
+
+    let built = build::<ByRuleModule>(&owner, |b| by_rule(b, &["deny", "allow"], &mut Vec::new())).expect("built");
+
+    assert_eq!(vec![1, 2, 2], owner.counter_sizes());
+    release::<ByRuleModule>(&owner, built);
+    owner.assert_released();
+}
+
+/// verifies that a registrar that registers nothing makes no registry and
+/// writes a field without counters.
+#[test]
+fn test_build_writes_an_empty_registrar_without_counters() {
+    let owner = owner();
+
+    let built = build::<ByRuleModule>(&owner, |b| by_rule(b, &[], &mut Vec::new())).expect("built");
+
+    let (config, _) = body::<ByRuleModule>(&owner, &built);
+    assert_eq!(
+        ((0, true), vec!["routes".to_string()]),
+        (
+            (config.rules.registry(), config.rules.is_empty()),
+            owner.counter_registries()
+        )
+    );
+    release::<ByRuleModule>(&owner, built);
+    owner.assert_released();
+}
+
+/// verifies that a registrar refuses a counter its registry numbers past the
+/// next id, after a counter registered amid its own other than through it, and
+/// the build returns everything it took.
+#[test]
+fn test_build_refuses_a_counter_registered_amid_a_registrars_own() {
+    let owner = owner();
+
+    let err = build::<ByRuleModule>(&owner, |b| {
+        let route = b.counter_in("routes", "allow")?;
+        let mut rules = b.counters_in("rules")?;
+        rules.counter("allow")?;
+        let _ = b.counter_in::<u64>("rules", "aside")?;
+        rules.counter("deny")?;
+        Ok(ByRuleParts { route, rules })
+    })
+    .expect_err("refused counter");
+
+    assert_eq!(BuildError::Refused(Refusal::ForeignCounter), err);
+    owner.assert_released();
+}
+
+/// verifies that a registrar's name registered in the registry before under
+/// another size is refused by the owner, as C refuses it, and the build returns
+/// everything it took.
+#[test]
+fn test_build_refuses_a_registrar_name_registered_before_with_another_size() {
+    let owner = owner();
+
+    let err = build::<ByRuleModule>(&owner, |b| {
+        let route = b.counter_in("routes", "allow")?;
+        let _ = b.counter_in::<u64>("rules", "allow")?;
+        let mut rules = b.counters_in("rules")?;
+        rules.counter("allow")?;
+        Ok(ByRuleParts { route, rules })
+    })
+    .expect_err("refused counter");
+
+    assert_eq!(BuildError::Owner(TestError::Registration), err);
+    owner.assert_released();
+}
+
+/// verifies that a registrar's tag C would cut short is refused before the
+/// owner is asked, and the build returns everything it took.
+#[test]
+fn test_build_refuses_a_registrar_tag_that_does_not_fit_its_c_field() {
+    let overlong = "r".repeat(COUNTER_TAG_VALUE_LEN as usize);
+    for tag in [overlong.as_str(), "ru\0les", ""] {
+        let owner = owner();
+
+        let err = build::<ByRuleModule>(&owner, |b| {
+            let route = b.counter_in("routes", "allow")?;
+            let rules = b.counters_in(tag)?;
+            Ok(ByRuleParts { route, rules })
+        })
+        .expect_err("refused tag");
+
+        assert_eq!(
+            (BuildError::Refused(Refusal::InvalidName), 1),
             (err, owner.counter_registries().len())
         );
         owner.assert_released();

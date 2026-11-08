@@ -32,6 +32,10 @@ pub enum Refusal {
     /// A name that is empty, holds a NUL or does not fit its C field with the
     /// terminator, which C would cut short; `YANET_ERROR_INVALID_ARGUMENT`.
     InvalidName,
+    /// A counter that a registrar's tagged registry took amid the registrar's
+    /// counters other than through it, of a size the registrar does not
+    /// vouch for; `YANET_ERROR_INVALID_ARGUMENT`.
+    ForeignCounter,
 }
 
 impl Refusal {
@@ -46,6 +50,7 @@ impl Refusal {
             Self::TooManyItems => "more items than C counts",
             Self::RuleSetMismatch => "a join or a decode over rulesets of different sizes",
             Self::InvalidName => "a name is empty, holds a NUL or does not fit its C field",
+            Self::ForeignCounter => "a counter registered amid a registrar's counters other than through it",
         }
     }
 }

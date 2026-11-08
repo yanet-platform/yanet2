@@ -137,7 +137,10 @@ pub unsafe trait Owner: 'static {
     /// and the counter's id in it.
     ///
     /// The first registration under a tag makes its registry, as
-    /// `cp_module_counter_registry` does; a later one finds it.
+    /// `cp_module_counter_registry` does; a later one finds it. The ids of a
+    /// registry run from zero in the order the names first come, and a name
+    /// registered before gets its id back, refused under another size, as
+    /// `counter_registry_register` numbers them.
     ///
     /// # Safety
     ///
