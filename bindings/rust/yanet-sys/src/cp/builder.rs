@@ -45,7 +45,7 @@ use crate::{
 
 mod classify;
 
-pub use classify::Branch;
+pub use classify::{Branch, PathRules};
 
 /// Invariant lifetime brand: values of two builds never unify.
 type Brand<'b> = PhantomData<fn(&'b ()) -> &'b ()>;

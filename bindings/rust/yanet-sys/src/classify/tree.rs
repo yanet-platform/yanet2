@@ -152,6 +152,24 @@ pub struct Decode<N> {
     input: ShmBox<N>,
 }
 
+/// The first rule each key matches on one of several paths, as the ACL module
+/// composes it: a core classifier and a classifier of the ports, which every
+/// path shares, and on each path a rule table of their classes over the
+/// path's rules that restrict a port and a rule map of the core's classes
+/// over its rules that do not.
+///
+/// The ports are classified over the rules that restrict a port only, so a
+/// rule without one stays out of the port classes, and a lookup takes the
+/// earlier of the path's table and map. Joined by
+/// [`Scope::join_paths`](crate::cp::Scope::join_paths).
+#[repr(C)]
+pub struct Paths<C, P, const N: usize> {
+    tables: [RuleTable; N],
+    maps: [RuleMap; N],
+    core: ShmBox<C>,
+    ports: ShmBox<P>,
+}
+
 impl<L: Node, R: Node> Node for Join<L, R> {
     type Key = (L::Key, R::Key);
 
@@ -306,6 +324,55 @@ impl<N: Node> Decode<N> {
     }
 }
 
+impl<C: Node, P: Node, const N: usize> Paths<C, P, N> {
+    /// The first rule a key matches on a path, [`Rule::NONE`] for none.
+    ///
+    /// # Panics
+    ///
+    /// The path is not below `N`.
+    #[inline(always)]
+    pub fn lookup<'g>(&'g self, cx: &impl Resolve<'g>, path: usize, (core, ports): (C::Key, P::Key)) -> Rule {
+        let (core, ports) = (self.core.get(cx).class(cx, core), self.ports.get(cx).class(cx, ports));
+        self.rule(cx, path, core, ports)
+    }
+
+    /// The first rule the key of each item matches on its path, [`Rule::NONE`]
+    /// for none, a burst at a time as [`Rules::lookup_burst`] does.
+    ///
+    /// # Panics
+    ///
+    /// The rules are fewer than the items, or a path is not below `N`.
+    #[inline]
+    pub fn lookup_burst<'g, T>(
+        &'g self,
+        cx: &impl Resolve<'g>,
+        items: &[T],
+        key: impl Fn(&T) -> (usize, (C::Key, P::Key)),
+        rules: &mut [Rule],
+    ) {
+        let rules = &mut rules[..items.len()];
+        for (items, rules) in items.chunks(BURST).zip(rules.chunks_mut(BURST)) {
+            let keys = burst_keys(items, &key);
+            let keys = &keys[..items.len()];
+            let (core, ports) = sides(self.core.get(cx), self.ports.get(cx), cx, keys, &|&(_, key)| key);
+            for (((rule, &(path, _)), &core), &ports) in rules.iter_mut().zip(keys).zip(&core).zip(&ports) {
+                *rule = self.rule(cx, path, core, ports);
+            }
+        }
+    }
+
+    /// The earlier of the rules of the path's table and map.
+    #[inline(always)]
+    fn rule<'g>(&'g self, cx: &impl Resolve<'g>, path: usize, core: u32, ports: u32) -> Rule {
+        let (table, map) = (&self.tables[path], &self.maps[path]);
+        // SAFETY: see above; the classes are of the stages every table and
+        // map of the node was joined or decoded from.
+        let (Rule(ported), Rule(plain)) = unsafe { (table.rule(cx, core, ports), map.rule(cx, core)) };
+        // No rule is the largest word, so the first match is the smaller.
+        Rule(ported.min(plain))
+    }
+}
+
 /// The key of each item of a burst of at most [`BURST`], each taken once,
 /// and the default key past them.
 #[inline(always)]
@@ -368,7 +435,44 @@ const _: () = {
     assert!(offset_of!(Join<u8, u8>, table) == 0);
     assert!(offset_of!(Rules<u8, u8>, table) == 0);
     assert!(offset_of!(Decode<u8>, map) == 0);
+    // The tables and the maps keep the alignment of the edges, so no array
+    // of them leaves padding before the next field.
+    assert!(size_of::<RuleTable>().is_multiple_of(size_of::<Edge>()));
+    assert!(size_of::<RuleMap>().is_multiple_of(size_of::<Edge>()));
+    assert!(
+        size_of::<Paths<u8, u8, 3>>() == 3 * size_of::<RuleTable>() + 3 * size_of::<RuleMap>() + 2 * size_of::<Edge>()
+    );
 };
+
+// SAFETY: a `#[repr(C)]` struct of arrays of opaque C objects, which accept
+// every pattern, and offset words, without padding (asserted above); the C
+// objects lead, so the node has their alignment, and dropping is a no-op.
+unsafe impl<C: ShmLayout, P: ShmLayout, const N: usize> ShmLayout for Paths<C, P, N> {}
+
+// SAFETY: written only by the scope's join of paths, which puts every table,
+// map and edge whole; freeing returns what the C builds allocated in the
+// context, then the inputs, the ports before the core.
+unsafe impl<C: Build, P: Build, const N: usize> Build for Paths<C, P, N> {
+    type Parts<'b, W: Owner> = Infallible;
+
+    unsafe fn write<W: Owner>(parts: Infallible, _: &MemoryContext<'_, W>, _: usize) -> Result<(), Refusal> {
+        match parts {}
+    }
+
+    unsafe fn free<W: Owner>(addr: usize, memory: &MemoryContext<'_, W>) {
+        let root = memory.root();
+        // SAFETY: the node holds a value (caller contract), which only the
+        // scope's join of paths writes, whole; the newest first.
+        unsafe {
+            for path in (0..N).rev() {
+                bindings::yanet_sys_classify_rule_map_free(root.ptr(Self::map(addr, path)));
+                bindings::yanet_sys_classify_rule_table_free(root.ptr(Self::table(addr, path)));
+            }
+            <ShmBox<P> as Build>::free::<W>(addr + offset_of!(Self, ports), memory);
+            <ShmBox<C> as Build>::free::<W>(addr + offset_of!(Self, core), memory);
+        }
+    }
+}
 
 /// The shared-memory impls of the nodes that hold their inputs.
 macro_rules! holders {
@@ -458,6 +562,24 @@ impl<N> Decode<N> {
     /// Offset of the edge of the input.
     #[doc(hidden)]
     pub const EDGE: usize = offset_of!(Self, input);
+}
+
+impl<C, P, const N: usize> Paths<C, P, N> {
+    /// Offsets of the edges of the core and of the ports.
+    #[doc(hidden)]
+    pub const EDGES: (usize, usize) = (offset_of!(Self, core), offset_of!(Self, ports));
+
+    /// Address of the rule table of a path of the node at an address.
+    #[doc(hidden)]
+    pub fn table(addr: usize, path: usize) -> usize {
+        addr + offset_of!(Self, tables) + path * size_of::<RuleTable>()
+    }
+
+    /// Address of the rule map of a path of the node at an address.
+    #[doc(hidden)]
+    pub fn map(addr: usize, path: usize) -> usize {
+        addr + offset_of!(Self, maps) + path * size_of::<RuleMap>()
+    }
 }
 
 #[cfg(test)]

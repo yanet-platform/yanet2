@@ -74,6 +74,34 @@ impl ArenaOwner {
         unsafe { yanet_sys_test_arena_free_bytes(self.arena) }
     }
 
+    /// Holds blocks of the arena, largest first, until no more than `bytes`
+    /// of it are free, so a build runs out of memory past them.
+    pub fn hold_all_but(&self, bytes: usize) -> Vec<(*mut c_void, usize)> {
+        let mut held = Vec::new();
+        let mut size = self.free_bytes().checked_next_power_of_two().unwrap_or(1);
+        while size > 0 {
+            while self.free_bytes() >= bytes + size {
+                // SAFETY: the arena's context is live.
+                let block =
+                    unsafe { bindings::yanet_sys_common_memory_balloc(yanet_sys_test_arena_context(self.arena), size) };
+                if block.is_null() {
+                    break;
+                }
+                held.push((block, size));
+            }
+            size /= 2;
+        }
+        held
+    }
+
+    /// Frees the blocks [`ArenaOwner::hold_all_but`] held.
+    pub fn release(&self, held: Vec<(*mut c_void, usize)>) {
+        for (block, size) in held.into_iter().rev() {
+            // SAFETY: a block of the arena's context of that size.
+            unsafe { bindings::yanet_sys_common_memory_bfree(yanet_sys_test_arena_context(self.arena), block, size) };
+        }
+    }
+
     fn context(&self, context: Context) -> *mut bindings::memory_context {
         self.root.ptr(context.get())
     }

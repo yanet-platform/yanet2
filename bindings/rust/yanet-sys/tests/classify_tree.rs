@@ -11,7 +11,7 @@ extern crate alloc;
 #[path = "support/arena.rs"]
 mod arena;
 
-use core::net::Ipv4Addr;
+use core::{assert_matches, cell::RefCell, net::Ipv4Addr};
 
 use arena::ArenaOwner;
 // The workspace denies unused crate dependencies; this test names no crate it
@@ -21,10 +21,10 @@ use yanet_sdk_testing as _;
 use yanet_shm::rel::ShmBox;
 use yanet_sys::{
     classify::{
-        Addr4, BURST, Decode, Join, LineAttr, LineRange, Lines, Net4, Net4Attr, Net6, Net6Attr, Nets4, Nets6, PortAttr,
-        PortRange, Ports, Rule, Rules,
+        Addr4, BURST, Decode, Join, LineAttr, LineRange, Lines, Net4, Net4Attr, Net6, Net6Attr, Nets4, Nets6, Paths,
+        PortAttr, PortRange, Ports, Rule, Rules,
     },
-    cp::{BuildError, Builder, Built, Refusal},
+    cp::{BuildError, Builder, Built, PathRules, Refusal},
     dp::{Batch, CommitCx, Cx, Module},
 };
 
@@ -58,7 +58,15 @@ macro_rules! tree_module {
     )*};
 }
 
+/// The IPv4 rules on a TCP path and a UDP path: the networks joined into the
+/// core, the destination ports of the rules that restrict one.
+type Paths4 = Paths<Join<Net4Attr, Net4Attr>, PortAttr, 2>;
+
+/// The protocols of the paths of [`Paths4`], by path.
+const PATHS: [u8; 2] = [6, 17];
+
 tree_module! {
+    Paths4: "classify-paths-v4";
     Tree4: "classify-tree-v4";
     Tree6: "classify-tree-v6";
     TreeAny: "classify-tree-any";
@@ -284,6 +292,75 @@ fn edges<N>(rules: &[TestRule<N>]) -> (Vec<u8>, Vec<u16>) {
     (protos, ports)
 }
 
+/// Builds the paths of the IPv4 rules.
+fn build_paths4(owner: &ArenaOwner, rules: &[TestRule<Net4>]) -> Built<Tree<Paths4>, ArenaOwner> {
+    try_build_paths4(owner, rules, || ()).unwrap()
+}
+
+/// Builds the paths of the IPv4 rules, calling `before_join` once the build
+/// reaches the join of the paths.
+fn try_build_paths4(
+    owner: &ArenaOwner,
+    rules: &[TestRule<Net4>],
+    before_join: impl FnOnce(),
+) -> Result<Built<Tree<Paths4>, ArenaOwner>, Error> {
+    let views = rules
+        .iter()
+        .map(|rule| {
+            (
+                Nets4::new(&rule.src).unwrap(),
+                Nets4::new(&rule.dst).unwrap(),
+                Ports::new(&rule.ports).unwrap(),
+            )
+        })
+        .collect::<Vec<_>>();
+    let src = views.iter().map(|view| Some(&view.0)).collect::<Vec<_>>();
+    let dst = views.iter().map(|view| Some(&view.1)).collect::<Vec<_>>();
+    // The ports over the rules that restrict one only.
+    let ports = views
+        .iter()
+        .zip(rules)
+        .map(|(view, rule)| (!rule.ports.is_empty()).then_some(&view.2))
+        .collect::<Vec<_>>();
+    let on = |proto: u8, ported: bool| {
+        rules
+            .iter()
+            .map(|rule| {
+                let of = any_or(&rule.protos, |range| {
+                    (range.from..=range.to).contains(&u32::from(proto))
+                });
+                (of && rule.ports.is_empty() != ported).then_some(&())
+            })
+            .collect::<Vec<_>>()
+    };
+    let [tcp, udp] = PATHS.map(|proto| (on(proto, true), on(proto, false)));
+    Builder::build(owner, "paths", |scope| -> Result<_, Error> {
+        let src = scope.compile(c"src", &src)?;
+        let dst = scope.compile(c"dst", &dst)?;
+        let port = scope.compile(c"port", &ports)?;
+        let core = scope.join(c"core", src, dst)?;
+        before_join();
+        scope.join_paths(
+            core,
+            port,
+            [
+                PathRules {
+                    table: c"tcp table",
+                    ported: &tcp.0,
+                    map: c"tcp map",
+                    plain: &tcp.1,
+                },
+                PathRules {
+                    table: c"udp table",
+                    ported: &udp.0,
+                    map: c"udp map",
+                    plain: &udp.1,
+                },
+            ],
+        )
+    })
+}
+
 /// The IPv4 addresses at the edges of every network of the rules.
 fn edges4(rules: &[TestRule<Net4>]) -> Vec<u32> {
     let mut addrs = vec![0, u32::MAX, u32::from(Ipv4Addr::new(10, 200, 0, 1))];
@@ -476,6 +553,92 @@ fn test_join_refuses_branches_of_rulesets_of_other_sizes() {
     assert!(matches!(result, Err(BuildError::Refused(Refusal::RuleSetMismatch))));
 }
 
+/// verifies that a join of the paths over a ports branch or a projection of
+/// another size than the core's ruleset is refused, leaving the arena as it
+/// found it.
+#[test]
+#[cfg_attr(miri, ignore = "Miri does not run C")]
+fn test_join_paths_refuses_rulesets_of_other_sizes() {
+    let owner = ArenaOwner::new();
+    let any = Nets4::new(&[]).unwrap();
+    let http = [port(80, 80)];
+    let ports = Ports::new(&http).unwrap();
+    // The ports branch and the second path take the sizes of the case, the
+    // first path those of the core's one rule.
+    for (case, port_rules, ported, plain) in [
+        ("a ports branch of two rules", 2, 1, 1),
+        ("a ported projection of two rules", 1, 2, 1),
+        ("a port-free projection of two rules", 1, 1, 2),
+    ] {
+        let baseline = owner.free_bytes();
+        let result: Result<Built<Tree<Paths4>, ArenaOwner>, Error> = Builder::build(&owner, "mismatch", |scope| {
+            let src = scope.compile(c"src", &[Some(&any)])?;
+            let dst = scope.compile(c"dst", &[Some(&any)])?;
+            let port = scope.compile(c"port", &vec![Some(&ports); port_rules])?;
+            let core = scope.join(c"core", src, dst)?;
+            let (ported, plain) = (vec![Some(&()); ported], vec![None; plain]);
+            let path = |ported, plain| PathRules {
+                table: c"table",
+                ported,
+                map: c"map",
+                plain,
+            };
+            scope.join_paths(core, port, [path(&[Some(&())], &[None]), path(&ported, &plain)])
+        });
+        assert_matches!(result, Err(BuildError::Refused(Refusal::RuleSetMismatch)), "{case}");
+        assert_eq!(baseline, owner.free_bytes(), "{case}");
+    }
+}
+
+/// verifies that a join of the paths refused for want of memory at any of its
+/// allocations, on the first path or on the second after the first was
+/// written, gives the arena back every block the build took.
+#[test]
+#[cfg_attr(miri, ignore = "Miri does not run C")]
+fn test_join_paths_out_of_memory_leaves_the_arena_as_it_found_it() {
+    let owner = ArenaOwner::new();
+    // The rules and many more on the UDP path alone, so the join of its table
+    // needs far more memory than the TCP path, written before it.
+    let mut rules = rules4();
+    rules.extend((0..48u8).map(|idx| TestRule {
+        src: vec![],
+        dst: vec![net4([198, 18, idx, 0], 24)],
+        protos: vec![UDP],
+        ports: vec![port(5000 + u16::from(idx) * 10, 5004 + u16::from(idx) * 10)],
+    }));
+    let baseline = owner.free_bytes();
+    // A join of a budget of bytes past what the build holds before it.
+    let join = |budget: usize| {
+        let held = RefCell::new(Vec::new());
+        let built = try_build_paths4(&owner, &rules, || *held.borrow_mut() = owner.hold_all_but(budget));
+        let joined = built.map(|built| {
+            // SAFETY: built by this owner and referenced by nothing.
+            unsafe { built.destroy(&owner) };
+        });
+        owner.release(held.take());
+        joined
+    };
+    let mut enough = 64;
+    while join(enough).is_err() {
+        enough *= 2;
+    }
+
+    let (mut refused, mut joined) = (0, 0);
+    // Every size of the smallest block, so the build runs out at each of its
+    // allocations in turn.
+    for budget in (0..=enough).step_by(8) {
+        match join(budget) {
+            Ok(()) => joined += 1,
+            Err(error) => {
+                assert_matches!(error, BuildError::Refused(Refusal::OutOfMemory));
+                refused += 1;
+            }
+        }
+        assert_eq!(baseline, owner.free_bytes(), "a join of {budget} bytes");
+    }
+    assert!(refused > 0 && joined > 0, "{refused} joins refused, {joined} joined");
+}
+
 /// verifies that the IPv4 tree reports the first matching rule over every
 /// port of the protocols of the rules and every protocol of a few ports, not
 /// only at the edges of their ranges.
@@ -529,6 +692,57 @@ fn test_rules_tree6_lookup_splits_a_high_half_by_its_low_half() {
     // The first rule's destination is the upper half of the low half's
     // range of its high half.
     assert_eq!((Some(0), None), (lookup(doc6 | (1 << 63) | 2), lookup(doc6 | 2)));
+}
+
+/// verifies that the paths report on the path of a protocol the first rule
+/// of that protocol a key matches, one key at a time and a burst at a time.
+#[test]
+#[cfg_attr(miri, ignore = "Miri does not run C")]
+fn test_paths4_lookup_is_the_first_matching_rule_of_the_path() {
+    let owner = ArenaOwner::new();
+    let rules = rules4();
+    let built = build_paths4(&owner, &rules);
+    let paths = owner.body(&built).get(&owner);
+    let addrs = edges4(&rules);
+    let (_, ports) = edges(&rules);
+    let mut keys = Vec::new();
+    for &src in &addrs {
+        for &dst in &addrs {
+            for (path, proto) in PATHS.into_iter().enumerate() {
+                for &port in &ports {
+                    keys.push((path, proto, src, dst, port));
+                }
+            }
+        }
+    }
+    let key = |&(path, _, src, dst, port): &(usize, u8, u32, u32, u16)| {
+        (
+            path,
+            ((Addr4::from(src.to_be_bytes()), Addr4::from(dst.to_be_bytes())), port),
+        )
+    };
+    let expected = keys
+        .iter()
+        .map(|&(_, proto, src, dst, port)| {
+            first(
+                &rules,
+                |rule| any_or(&rule.src, |net| in4(net, src)) && any_or(&rule.dst, |net| in4(net, dst)),
+                proto,
+                port,
+            )
+        })
+        .collect::<Vec<_>>();
+    let found = keys
+        .iter()
+        .map(|item| {
+            let (path, key) = key(item);
+            paths.lookup(&owner, path, key).index()
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(expected, found);
+    let mut burst = vec![Rule::NONE; keys.len()];
+    paths.lookup_burst(&owner, &keys, key, &mut burst);
+    assert_eq!(expected, burst.iter().map(|rule| rule.index()).collect::<Vec<_>>());
 }
 
 /// verifies that a burst lookup reports for each key the rule a lookup of the
@@ -639,6 +853,11 @@ fn test_tree_build_and_release_leave_the_arena_as_they_found_it() {
     unsafe { built.destroy(&owner) };
     assert_eq!(baseline, owner.free_bytes(), "a released tree");
 
+    let built = build_paths4(&owner, &rules);
+    // SAFETY: as above.
+    unsafe { built.destroy(&owner) };
+    assert_eq!(baseline, owner.free_bytes(), "released paths");
+
     let views = AnyViews::new(&rules);
     let (protos, ports) = (views.protos(), views.ports());
     let refused: Result<Built<Tree<TreeAny>, ArenaOwner>, Error> = Builder::build(&owner, "refused", |scope| {
@@ -647,7 +866,7 @@ fn test_tree_build_and_release_leave_the_arena_as_they_found_it() {
         let transport = scope.join(c"transport", proto, port)?;
         scope.decode(c"rules", transport, &views.projection())
     });
-    assert!(matches!(refused, Err(BuildError::Refused(Refusal::RuleSetMismatch))));
+    assert_matches!(refused, Err(BuildError::Refused(Refusal::RuleSetMismatch)));
     assert_eq!(baseline, owner.free_bytes(), "a refused build");
 }
 
