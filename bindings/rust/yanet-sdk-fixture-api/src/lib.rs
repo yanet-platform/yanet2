@@ -84,6 +84,18 @@ pub struct FibList {
     pub count: u64,
 }
 
+/// Bytes of an object's type or name in a record, the terminating NUL
+/// included, as in C's fields of them.
+pub const OBJECT_NAME_LEN: usize = 80;
+
+/// An object a configuration links: its type and its name, NUL terminated.
+#[derive(FfiRecord)]
+#[repr(C)]
+pub struct Link {
+    pub ty: [u8; OBJECT_NAME_LEN],
+    pub name: [u8; OBJECT_NAME_LEN],
+}
+
 /// The shape of a state object, as one query reads it: its seed, its number
 /// of slots, and the workers and values per worker of its regions.
 #[derive(FfiRecord)]
@@ -251,6 +263,55 @@ impl Stash {
                 filled: scope.counter("filled")?,
             })
         })
+    }
+
+    /// The seed of the state object that the configuration named `name`
+    /// writes, as the generation the dataplane runs holds them; the fault, a
+    /// `FIXTURE_FAULT_*` constant, panics inside the read.
+    ///
+    /// # Panics
+    ///
+    /// When the fault selects a panic, for the release of the pin as the read
+    /// unwinds.
+    pub fn published_seed(agent: &Agent, name: &str, fault: u64) -> Result<u64, Error> {
+        agent.read_published::<yanet_sdk_fixture::Stash, _>(name, |cx, config| match fault {
+            FIXTURE_FAULT_NONE => Ok(cx.object(&config.state).seed),
+            FIXTURE_FAULT_PANIC => panic!("fixture fault"),
+            _ => Err(Error::new(ErrorKind::InvalidArgument, "unknown fault")),
+        })?
+    }
+
+    /// Writes the values of the slots of that state object, as `State::values`
+    /// does, and returns the number of slots.
+    pub fn published_values(agent: &Agent, name: &str, values: &mut [u64]) -> Result<u64, Error> {
+        agent.read_published::<yanet_sdk_fixture::Stash, _>(name, |cx, config| {
+            let slots = cx.object(&config.state).slots.as_slice(&cx);
+            for (value, slot) in values.iter_mut().zip(slots) {
+                *value = slot.load(Ordering::Relaxed);
+            }
+            slots.len() as u64
+        })
+    }
+
+    /// Writes the objects the configuration named `name` links, in link
+    /// order, into as many places as `links` has, and returns the number of
+    /// links.
+    pub fn published_links(agent: &Agent, name: &str, links: &mut [Link]) -> Result<u64, Error> {
+        agent.read_published::<yanet_sdk_fixture::Stash, _>(name, |cx, _| {
+            for (link, key) in links.iter_mut().zip(cx.links()) {
+                put(&mut link.ty, key.ty());
+                put(&mut link.name, key.name());
+            }
+            cx.links().len() as u64
+        })
+    }
+}
+
+/// Copies a name into a field of a record, which the export zeroed: as much
+/// of it as fits before the field's last byte, which stays the terminator.
+fn put(field: &mut [u8; OBJECT_NAME_LEN], name: &CStr) {
+    for (to, from) in field[..OBJECT_NAME_LEN - 1].iter_mut().zip(name.to_bytes()) {
+        *to = *from;
     }
 }
 

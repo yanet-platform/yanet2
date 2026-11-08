@@ -10,6 +10,7 @@ fn main() {
             "FibDevice",
             "FibRoute",
             "FibList",
+            "Link",
             "StateShape",
             "Range4",
             "Range6",

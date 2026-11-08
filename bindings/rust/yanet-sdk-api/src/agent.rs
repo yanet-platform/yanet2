@@ -17,7 +17,7 @@ use yanet_sys::{
     },
     counters::COUNTER_INVALID,
     cp::{BlockAddr, Built, BuiltObject, Context, Header, Owner},
-    dp::{Module, Object},
+    dp::{Module, ModuleConfig, Object, ObjectConfig, ObjectLink},
 };
 
 use crate::error::{Error, ErrorKind, from_c_chain};
@@ -231,6 +231,224 @@ impl Agent {
             },
             config,
         )
+    }
+
+    /// Runs `f` over the configuration of module `M` named `name` that the
+    /// agent's current generation publishes, whichever agent published it:
+    /// what the dataplane runs under the name.
+    ///
+    /// The generation is pinned for the call alone, as a C module's api pins
+    /// it to read, so the configuration and every object it links stay live
+    /// while `f` runs, a panic of `f` included, and an update that publishes a
+    /// newer generation meanwhile waits for nothing. The context `f` is given
+    /// resolves the configuration's edges, and its object links to the
+    /// objects of the same generation. Each call brands the context and the
+    /// configuration with a lifetime of its own, as [`Agent::read`] does, so
+    /// neither leaves `f`.
+    ///
+    /// Fails as not found when the generation holds no configuration of the
+    /// module under the name, and as an invalid argument for a name that does
+    /// not fit its C field whole.
+    ///
+    /// ```no_run
+    /// # use yanet_sdk_api::Agent;
+    /// # use yanet_shm::rel::ShmSlice;
+    /// # use yanet_sys::dp::{Batch, CommitCx, Cx, Module, Object, ObjectLink, Verdict};
+    /// # struct Counts;
+    /// # impl Object for Counts {
+    /// #     const TYPE: &'static str = "counts";
+    /// #     type Config = ShmSlice<u64>;
+    /// #     type Prepared<'p> = ();
+    /// #     fn prepare(_: &yanet_sys::dp::ObjectCommitCx<'_, Self>) {}
+    /// # }
+    /// # struct Mine;
+    /// # impl Module for Mine {
+    /// #     const NAME: &'static str = "mine";
+    /// #     type Config = ObjectLink<Counts>;
+    /// #     type Prepared<'p> = ();
+    /// #     fn prepare(_: &CommitCx<'_, Self>) {}
+    /// #     fn handle<'id>(_: &mut Cx<'id, Self>, batch: &mut Batch<'id>) {
+    /// #         batch.dispatch(|_| Verdict::Pass);
+    /// #     }
+    /// # }
+    /// fn total(agent: &Agent, name: &str) -> Result<u64, yanet_sdk_api::Error> {
+    ///     agent.read_published::<Mine, _>(name, |cx, counts| {
+    ///         cx.object(counts).as_slice(&cx).iter().sum()
+    ///     })
+    /// }
+    /// ```
+    pub fn read_published<M: Module, R>(
+        &self,
+        name: &str,
+        f: impl for<'g> FnOnce(PublishedCx<'g>, &'g M::Config) -> R,
+    ) -> Result<R, Error> {
+        let module_type = c_name::<{ CP_MODULE_TYPE_LEN as usize }>(M::NAME)?;
+        let module_name = c_name::<{ CP_MODULE_NAME_LEN as usize }>(name)?;
+        let pin = GenerationPin::acquire(self);
+        // SAFETY: the generation is pinned, and the names are NUL terminated.
+        let module = unsafe {
+            bindings::cp_config_gen_lookup_module(
+                pin.generation,
+                module_type.as_ptr().cast::<c_char>(),
+                module_name.as_ptr().cast::<c_char>(),
+            )
+        };
+        let Some(module) = NonNull::new(module) else {
+            return Err(Error::new(
+                ErrorKind::NotFound,
+                &format!("{} config '{name}' is not published", M::NAME),
+            ));
+        };
+        let root = self.root();
+        // SAFETY: a configuration of the module's type that a generation holds
+        // was built over `M`, as the dataplane that loads `M` for the type
+        // trusts, written whole and frozen but for its atomics; the pin keeps
+        // it live until the read returns. C returned a pointer of the mapping.
+        let config = unsafe { (*root.ptr::<ModuleConfig<M::Config>>(module.addr().get())).body() };
+        Ok(f(
+            PublishedCx {
+                root,
+                generation: pin.generation,
+                module,
+                _brand: PhantomData,
+            },
+            config,
+        ))
+    }
+}
+
+/// A pin of the generation the configuration of an agent publishes,
+/// released when dropped, as a panic of the read unwinds too.
+struct GenerationPin<'a> {
+    agent: &'a Agent,
+    generation: *mut bindings::cp_config_gen,
+}
+
+impl<'a> GenerationPin<'a> {
+    fn acquire(agent: &'a Agent) -> Self {
+        // SAFETY: the agent is live (constructor contract), and so is the
+        // configuration it is attached to.
+        let generation = unsafe { bindings::yanet_sys_cp_gen_acquire(agent.agent.as_ptr()) };
+        Self { agent, generation }
+    }
+}
+
+impl Drop for GenerationPin<'_> {
+    fn drop(&mut self) {
+        // SAFETY: the pin was taken over this agent and is released once.
+        unsafe { bindings::yanet_sys_cp_gen_release(self.agent.agent.as_ptr(), self.generation) };
+    }
+}
+
+/// The context a read of a published configuration resolves through, made
+/// by [`Agent::read_published`] for that read alone: the configuration's
+/// edges, and its object links to the objects of the pinned generation.
+#[derive(Clone, Copy)]
+pub struct PublishedCx<'g> {
+    root: ShmRoot,
+    generation: *mut bindings::cp_config_gen,
+    module: NonNull<bindings::cp_module>,
+    // Invariant brand, as an object read's.
+    _brand: PhantomData<fn(&'g ()) -> &'g ()>,
+}
+
+impl fmt::Debug for PublishedCx<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
+        f.debug_struct("PublishedCx").finish_non_exhaustive()
+    }
+}
+
+impl<'g> PublishedCx<'g> {
+    /// The objects the configuration links, by type and name, in link order.
+    pub fn links(&self) -> impl ExactSizeIterator<Item = ObjectKey<'g>> + use<'g> {
+        let cx = *self;
+        (0..cx.link_count()).map(move |index| cx.key(index))
+    }
+
+    /// The object a link of the configuration names, as the pinned
+    /// generation holds it.
+    ///
+    /// # Panics
+    ///
+    /// For a link that is not the configuration's, which only another read
+    /// reaches: C resolved each link of this one to an object of the link's
+    /// type when it installed the configuration.
+    pub fn object<O: Object>(&self, link: &'g ObjectLink<O>) -> &'g O::Config {
+        let index = link.index() as usize;
+        assert!(index < self.link_count(), "the link is not the configuration's");
+        let key = self.key(index);
+        assert!(
+            key.ty.to_bytes() == O::TYPE.as_bytes(),
+            "the link is not the configuration's"
+        );
+        // SAFETY: the generation is pinned, and the names are NUL terminated.
+        let object =
+            unsafe { bindings::cp_config_gen_lookup_object(self.generation, key.ty.as_ptr(), key.name.as_ptr()) };
+        let object = NonNull::new(object).expect("C resolves each link of a configuration it installed");
+        // SAFETY: an object of type `O` that a generation holds was built over
+        // `O`, as the dataplane that loads `O` for the type trusts, written
+        // whole and frozen but for its atomics; the pin keeps it live until
+        // the read returns. C returned a pointer of the mapping.
+        unsafe { (*self.root.ptr::<ObjectConfig<O::Config>>(object.addr().get())).body() }
+    }
+
+    fn link_count(&self) -> usize {
+        // SAFETY: the configuration's header is live while the generation is
+        // pinned, and C wrote its links before it published it.
+        unsafe { (*self.module.as_ptr()).object_count as usize }
+    }
+
+    /// The type and name of the link at `index`, below the link count.
+    fn key(&self, index: usize) -> ObjectKey<'g> {
+        // SAFETY: the header is live while the generation is pinned. Its slot
+        // holds the offset of the first link from the slot, as C's relative
+        // pointers do, and the index is below the link count, so the link is
+        // one C wrote, each name terminated inside its field (strtcpy).
+        unsafe {
+            let slot = &raw const (*self.module.as_ptr()).objects;
+            let first = self
+                .root
+                .rel::<bindings::cp_module_object>(slot.addr(), slot.cast::<isize>().read());
+            let link = first.add(index);
+            ObjectKey {
+                ty: CStr::from_ptr((&raw const (*link).type_).cast::<c_char>()),
+                name: CStr::from_ptr((&raw const (*link).name).cast::<c_char>()),
+            }
+        }
+    }
+}
+
+// SAFETY: the root covers the whole mapping (constructor contract of the
+// agent). A context is made only by `Agent::read_published`, under a fresh
+// invariant brand, together with the one `'g` reference it hands out: the
+// body of a configuration the pinned generation holds, which its build wrote
+// whole, and it resolves the configuration's links only to objects of that
+// generation. Both are `Build` types, which change through a shared reference
+// only by their atomics and opaque bytes (see `ObjectCx`), and live for the
+// read, as the pin is released only once it returns.
+unsafe impl<'g> Resolve<'g> for PublishedCx<'g> {
+    fn shm_root(&self) -> ShmRoot {
+        self.root
+    }
+}
+
+/// An object a configuration links, by its type and its name: what the
+/// generation finds the object by.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ObjectKey<'g> {
+    ty: &'g CStr,
+    name: &'g CStr,
+}
+
+impl<'g> ObjectKey<'g> {
+    /// The object's type.
+    pub fn ty(&self) -> &'g CStr {
+        self.ty
+    }
+
+    /// The object's name.
+    pub fn name(&self) -> &'g CStr {
+        self.name
     }
 }
 

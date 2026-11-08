@@ -65,6 +65,24 @@ yanet_cp_yanet_sdk_fixture_api__stash_free(
 	struct cp_module *module, yanet_error **err
 );
 
+int
+yanet_cp_yanet_sdk_fixture_api__stash_published_seed(
+	struct agent *agent, const char *name, uint64_t fault, uint64_t *out,
+	yanet_error **err
+);
+
+int
+yanet_cp_yanet_sdk_fixture_api__stash_published_values(
+	struct agent *agent, const char *name, uint64_t *values,
+	size_t values_len, uint64_t *out, yanet_error **err
+);
+
+int
+yanet_cp_yanet_sdk_fixture_api__stash_published_links(
+	struct agent *agent, const char *name, struct Link *links,
+	size_t links_len, uint64_t *out, yanet_error **err
+);
+
 struct cp_object *
 yanet_cp_yanet_sdk_fixture_api__state_build(
 	struct agent *agent, const char *name, uint64_t seed, uint64_t count,
@@ -530,6 +548,106 @@ func freeStash(ptr unsafe.Pointer) (int, unsafe.Pointer, error) {
 	var cErr *C.yanet_error
 	rc, errno := C.yanet_cp_yanet_sdk_fixture_api__stash_free((*C.struct_cp_module)(ptr), &cErr)
 	return int(rc), unsafe.Pointer(cErr), errno
+}
+
+// PublishedSeed reads the seed of the state object that the stash
+// configuration name writes, as the agent's current generation holds them,
+// under a pin of that generation; fault panics inside the read.
+func PublishedSeed(agent *ffi.Agent, name string, fault Fault) (uint64, error) {
+	if err := refuseNUL(name); err != nil {
+		return 0, fmt.Errorf("failed to read stash config: %w", err)
+	}
+	cName := C.CString(name)
+	defer C.free(unsafe.Pointer(cName))
+
+	var seed C.uint64_t
+	var cErr *C.yanet_error
+	rc := C.yanet_cp_yanet_sdk_fixture_api__stash_published_seed(
+		(*C.struct_agent)(agent.AsRawPtr()),
+		cName,
+		C.uint64_t(fault),
+		&seed,
+		&cErr,
+	)
+	if rc != 0 {
+		return 0, fmt.Errorf("failed to read stash config %q: %w", name, cerrors.FromC(unsafe.Pointer(cErr)))
+	}
+	return uint64(seed), nil
+}
+
+// PublishedValues reads the values of the slots of that state object into
+// values, as Values does, and returns the number of slots.
+func PublishedValues(agent *ffi.Agent, name string, values []uint64) (uint64, error) {
+	if err := refuseNUL(name); err != nil {
+		return 0, fmt.Errorf("failed to read stash config: %w", err)
+	}
+	cName := C.CString(name)
+	defer C.free(unsafe.Pointer(cName))
+
+	var count C.uint64_t
+	var cErr *C.yanet_error
+	rc := C.yanet_cp_yanet_sdk_fixture_api__stash_published_values(
+		(*C.struct_agent)(agent.AsRawPtr()),
+		cName,
+		(*C.uint64_t)(unsafe.SliceData(values)),
+		C.size_t(len(values)),
+		&count,
+		&cErr,
+	)
+	if rc != 0 {
+		return 0, fmt.Errorf("failed to read stash config %q: %w", name, cerrors.FromC(unsafe.Pointer(cErr)))
+	}
+	return uint64(count), nil
+}
+
+// LinkedObject is an object a configuration links, by type and name.
+type LinkedObject struct {
+	Type string
+	Name string
+}
+
+// PublishedLinks returns the objects that the stash configuration name links
+// in the agent's current generation, in link order.
+//
+// It asks how many there are and reads them into a slice of that length,
+// again while a newer generation makes the slice short.
+func PublishedLinks(agent *ffi.Agent, name string) ([]LinkedObject, error) {
+	if err := refuseNUL(name); err != nil {
+		return nil, fmt.Errorf("failed to read stash config: %w", err)
+	}
+	cName := C.CString(name)
+	defer C.free(unsafe.Pointer(cName))
+
+	var links []C.struct_Link
+	for {
+		var count C.uint64_t
+		var cErr *C.yanet_error
+		rc := C.yanet_cp_yanet_sdk_fixture_api__stash_published_links(
+			(*C.struct_agent)(agent.AsRawPtr()),
+			cName,
+			unsafe.SliceData(links),
+			C.size_t(len(links)),
+			&count,
+			&cErr,
+		)
+		if rc != 0 {
+			return nil, fmt.Errorf("failed to read stash config %q: %w", name, cerrors.FromC(unsafe.Pointer(cErr)))
+		}
+		if int(count) <= len(links) {
+			links = links[:count]
+			break
+		}
+		links = make([]C.struct_Link, count)
+	}
+
+	objects := make([]LinkedObject, 0, len(links))
+	for _, link := range links {
+		objects = append(objects, LinkedObject{
+			Type: C.GoString((*C.char)(unsafe.Pointer(&link.ty[0]))),
+			Name: C.GoString((*C.char)(unsafe.Pointer(&link.name[0]))),
+		})
+	}
+	return objects, nil
 }
 
 // StateType is the object type of a state object, as its plugin registers it

@@ -75,7 +75,9 @@ fn c_build(flags: &CFlags, shim_dir: &Path) -> cc::Build {
 /// parser and the packet encapsulation routines, whose sources it compiles
 /// in; the common shim wraps the header-inline LPM and memory routines of
 /// `common/`; the classify shim wraps the compiles, the joins and the decode
-/// of `lib/classify`, which the builder calls, so a plugin pulls none of it.
+/// of `lib/classify`, which the builder calls, and the control-plane shim the
+/// header-inline pin of a generation, which an api crate's reads take, so a
+/// plugin pulls none of either.
 /// They are linked into every module plugin with hidden visibility, so a
 /// plugin exports nothing of them and imports none of the parsing or the
 /// encapsulation from the host.
@@ -84,6 +86,7 @@ fn build_shim(flags: &CFlags, shim_dir: &Path) {
     build
         .file(shim_dir.join("classify_cp_shim.c"))
         .file(shim_dir.join("common_shim.c"))
+        .file(shim_dir.join("cp_shim.c"))
         .file(shim_dir.join("dp_shim.c"))
         .files(PACKET_SOURCES.map(|source| flags.source(source)))
         .flag("-fvisibility=hidden");
@@ -92,6 +95,8 @@ fn build_shim(flags: &CFlags, shim_dir: &Path) {
         "classify_shim.h",
         "common_shim.c",
         "common_shim.h",
+        "cp_shim.c",
+        "cp_shim.h",
         "dp_shim.c",
         "dp_shim.h",
         "shim_visibility.h",
@@ -174,11 +179,15 @@ fn generate_bindings(flags: &CFlags, shim_dir: &Path, out: &Path) {
         .allowlist_function("yanet_sys_common_.*")
         .allowlist_function("yanet_sys_dp_.*")
         .allowlist_function("yanet_sys_classify_.*")
+        .allowlist_function("yanet_sys_cp_.*")
         // The agent owner of the configuration builder: the C routines a C
         // module's control-plane API calls for the same steps.
         .allowlist_function("cp_module_(init|fini|try_destroy|link_device|link_object|counter_registry)")
         .allowlist_function("cp_object_(init|fini|try_destroy)")
         .allowlist_function("counter_registry_register")
+        // A read of what the dataplane runs finds the configuration and the
+        // objects it links in a pinned generation.
+        .allowlist_function("cp_config_gen_lookup_(module|object)")
         .allowlist_function("agent_destroy_released")
         // The dataplane's worker count, which sizes per-worker state; the ring
         // object reads the same `dp_config` field.
