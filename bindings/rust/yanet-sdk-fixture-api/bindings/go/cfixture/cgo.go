@@ -166,6 +166,9 @@ const (
 	// bytes as the argument says, filled with 0xbb, and passes it when
 	// accepted or drops it when refused.
 	ModeAllocPrepend Mode = C.FIXTURE_MODE_ALLOC_PREPEND
+	// ModeFree passes every packet after making a copy of it and freeing the
+	// copy, and makes a packet and frees it.
+	ModeFree Mode = C.FIXTURE_MODE_FREE
 )
 
 // Fault selects how a fixture build fails after it has allocated a block.
