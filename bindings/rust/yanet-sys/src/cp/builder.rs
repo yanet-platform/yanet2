@@ -1090,6 +1090,7 @@ impl<'b, W: Owner, E: From<BuildError<W::Error>>> Scope<'b, '_, W, E, ModuleKind
     ///
     /// The type or the name is empty, holds a NUL or does not fit its C field
     /// with the terminator, or the owner refuses the link.
+    #[doc(alias = "cp_module_link_object")]
     pub fn object<O: Object>(self, name: &str) -> Result<Registered<'b, ObjectLink<O>>, E> {
         if !fits_c_field(O::TYPE, bindings::CP_OBJECT_TYPE_LEN) || !fits_c_field(name, bindings::CP_OBJECT_NAME_LEN) {
             return Err(refused::<W, E>(Refusal::InvalidName));

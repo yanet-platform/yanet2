@@ -309,6 +309,7 @@ pub struct RouteList {
 ///
 /// The bytes differ from C's: a `ShmSlice` is a pointer then a length, where
 /// `route_fib` keeps a count then a pointer.
+#[doc(alias = "route_fib")]
 #[derive(ShmLayout)]
 #[repr(C)]
 pub struct RouteFib {

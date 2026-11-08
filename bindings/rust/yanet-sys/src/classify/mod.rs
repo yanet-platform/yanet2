@@ -477,6 +477,7 @@ pub struct LineAttr {
 
 /// The joint of the classes of two stages, C's `struct value_table`: the
 /// table of a [`Join`], which the join writes.
+#[doc(alias = "value_table")]
 #[repr(C)]
 pub struct Joint {
     table: Table,
@@ -484,6 +485,7 @@ pub struct Joint {
 
 /// The first rule each pair of classes of two stages matches, C's
 /// `struct rule_table`: the table of a [`Rules`], which the join writes.
+#[doc(alias = "rule_table")]
 #[repr(C)]
 pub struct RuleTable {
     _memory_context: ContextSlot,
@@ -500,6 +502,7 @@ pub struct RuleTable {
 
 /// The first rule each class of a stage matches, C's `struct vline`: the map
 /// of a [`Decode`], which the decode writes.
+#[doc(alias = "vline")]
 #[repr(C)]
 pub struct RuleMap {
     line: Line,
