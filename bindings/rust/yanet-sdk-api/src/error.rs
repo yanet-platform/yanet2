@@ -2,7 +2,7 @@
 
 use core::{
     error::Error,
-    ffi::{CStr, c_char, c_int},
+    ffi::{CStr, c_int},
     fmt::{self, Display, Formatter},
     ptr::{self, NonNull},
 };
@@ -195,17 +195,11 @@ impl Drop for ApiError {
 }
 
 /// Writes a C string, as UTF-8 where it is and U+FFFD where it is not.
-fn write_c_str(f: &mut Formatter<'_>, message: *const c_char) -> Result<(), fmt::Error> {
-    if message.is_null() {
-        return Ok(());
-    }
-    // SAFETY: a non-null message of a live frame is NUL terminated and lives
-    // as long as the frame.
-    let bytes = unsafe { CStr::from_ptr(message) }.to_bytes();
-    for chunk in bytes.utf8_chunks() {
+fn write_c_str(f: &mut Formatter<'_>, message: &CStr) -> Result<(), fmt::Error> {
+    for chunk in message.to_bytes().utf8_chunks() {
         f.write_str(chunk.valid())?;
         if !chunk.invalid().is_empty() {
-            f.write_str(char::REPLACEMENT_CHARACTER.encode_utf8(&mut [0; 4]))?;
+            f.write_str("\u{FFFD}")?;
         }
     }
     Ok(())
@@ -225,8 +219,13 @@ impl Display for ApiError {
             first = false;
             // SAFETY: the frame belongs to the live chain, whose frames
             // outlive this borrow of the error.
-            write_c_str(f, unsafe { bindings::yanet_error_message(frame) })?;
-            // SAFETY: as above.
+            let message = unsafe { bindings::yanet_error_message(frame) };
+            if !message.is_null() {
+                // SAFETY: the message of a live frame is NUL terminated and
+                // lives as long as the frame.
+                write_c_str(f, unsafe { CStr::from_ptr(message) })?;
+            }
+            // SAFETY: the frame belongs to the live chain, as for its message.
             frame = unsafe { bindings::yanet_error_cause(frame) };
         }
         Ok(())
