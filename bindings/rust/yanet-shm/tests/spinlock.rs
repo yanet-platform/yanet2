@@ -102,6 +102,44 @@ fn test_lock_with_calls_the_hook_while_held() {
     });
 }
 
+/// verifies that a waiter that takes the lock after spinning sees what the
+/// holder wrote before releasing it.
+///
+/// The hook runs only while spinning, so once it has run, the holder's write
+/// and the waiter's read are ordered by the lock alone; under Miri a missing
+/// acquire on that path is a reported data race, whatever the schedule.
+#[test]
+fn test_lock_with_contended_sees_the_holders_writes() {
+    let guarded = Guarded {
+        lock: RawSpinlock::new(),
+        count: UnsafeCell::new(0),
+    };
+    let waits = AtomicU32::new(0);
+
+    let seen = thread::scope(|scope| {
+        let guarded = &guarded;
+        let waits = &waits;
+        let guard = guarded.lock.lock();
+        let waiter = scope.spawn(move || {
+            let _guard = guarded.lock.lock_with(|| {
+                waits.fetch_add(1, Ordering::Relaxed);
+                thread::yield_now();
+            });
+            // SAFETY: the guard above makes this the only holder.
+            unsafe { *guarded.count.get() }
+        });
+        while waits.load(Ordering::Relaxed) == 0 {
+            hint::spin_loop();
+        }
+        // SAFETY: the guard taken above makes this the only holder.
+        unsafe { *guarded.count.get() = 7 };
+        drop(guard);
+        waiter.join().expect("the waiter takes the released lock")
+    });
+
+    assert_eq!(7, seen);
+}
+
 /// A value whose drop panics, carried by a wait hook.
 struct PanicsOnDrop;
 
