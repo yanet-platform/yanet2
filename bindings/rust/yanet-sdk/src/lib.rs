@@ -133,7 +133,7 @@ pub use yanet_sys::{
     dp::{
         Batch, CommitCx, Counter, CounterLayout, CounterRef, Cx, Device, DeviceRef, DscpMark, Module, ModuleCx, Object,
         ObjectCommitCx, ObjectConfig, ObjectLink, Packet, PacketView, ParseError, PerWorker, PerWorkerSlice, PrepareCx,
-        ResizeError, Traffic, TunnelError, Verdict, WorkerSlice, WorkerSlot,
+        ResizeError, TaggedCounter, Traffic, TunnelError, Verdict, WorkerSlice, WorkerSlot,
     },
 };
 
@@ -172,6 +172,17 @@ mod doctests {
     /// ```
     struct ObjectCounterRefused;
 
+    /// An object scope registers no tagged counter either: an object header
+    /// carries no tagged counter registries.
+    ///
+    /// ```compile_fail,E0599
+    /// use yanet_sdk::{BuildError, ObjectKind, Owner, Scope};
+    /// fn count<W: Owner>(scope: Scope<'_, '_, W, BuildError<W::Error>, ObjectKind>) {
+    ///     let _ = scope.counter_in::<u64>("rules", "hits");
+    /// }
+    /// ```
+    struct ObjectTaggedCounterRefused;
+
     /// An object scope links no device: an object header carries no module
     /// device list.
     ///
@@ -201,7 +212,7 @@ mod doctests {
     /// ```
     struct ObjectObjectRefused;
 
-    /// A module scope registers all three, the accepted twin of the three
+    /// A module scope registers all four, the accepted twin of the four
     /// above.
     ///
     /// ```
@@ -215,6 +226,7 @@ mod doctests {
     /// }
     /// fn register<W: Owner>(scope: Scope<'_, '_, W, BuildError<W::Error>, ModuleKind>) {
     ///     let _ = scope.counter::<u64>("hits");
+    ///     let _ = scope.counter_in::<u64>("rules", "hits");
     ///     let _ = scope.device("eth0");
     ///     let _ = scope.object::<State>("state");
     /// }

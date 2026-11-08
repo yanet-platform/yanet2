@@ -16,7 +16,7 @@ use yanet_packet as _;
 use yanet_sdk::{
     Batch, Build, BuiltObject, CommitCx, Counter, Cx, Device, Kind, Lpm4, Lpm6, Module, Object, ObjectBuilder,
     ObjectCommitCx, ObjectLink, OwnedSlice, PerWorker, PerWorkerSlice, Refusal, Registered, ShmBox, ShmLayout,
-    ShmSlice, Traffic, Verdict,
+    ShmSlice, TaggedCounter, Traffic, Verdict,
 };
 use yanet_sdk_derive as _;
 use yanet_sdk_testing::{
@@ -25,7 +25,7 @@ use yanet_sdk_testing::{
 };
 use yanet_shm as _;
 use yanet_sys::{
-    bindings::CP_OBJECT_NAME_LEN,
+    bindings::{COUNTER_TAG_VALUE_LEN, CP_OBJECT_NAME_LEN},
     common::LINE_BLOCK_ALIGN,
     cp::{BuildError, Builder, Built, Header, MemoryContext, Owner, Scope},
     dp::ModuleConfig,
@@ -158,6 +158,19 @@ type LanesModule = Fixture<Lanes>;
 type FaultyModule = Fixture<Faulty>;
 type EntriesModule = Fixture<ShmSlice<Entry>>;
 type CountedModule = Fixture<Counted>;
+
+/// A counter of the module's own beside counters of two tagged registries,
+/// one name in both.
+#[derive(ShmLayout)]
+#[repr(C)]
+struct Tagged {
+    hits: Counter,
+    rule: TaggedCounter<Traffic>,
+    route: TaggedCounter,
+    again: TaggedCounter,
+}
+
+type TaggedModule = Fixture<Tagged>;
 type TablesModule = Fixture<Tables>;
 
 /// An owner of an empty arena.
@@ -661,6 +674,105 @@ fn test_build_registers_each_counter_with_the_size_of_its_layout() {
         ((config.hits.id(), config.traffic.id()), owner.counter_sizes())
     );
     release::<CountedModule>(&owner, built);
+    owner.assert_released();
+}
+
+/// The parts of the tagged configuration, whose tags are `rules`, `routes`
+/// and the given last one.
+fn tagged<'b>(b: Scope<'b, '_, TestOwner>, last: &str) -> Result<TaggedParts<'b, TestOwner>, Failure> {
+    Ok(TaggedParts {
+        hits: b.counter("hits")?,
+        rule: b.counter_in("rules", "allow")?,
+        route: b.counter_in("routes", "allow")?,
+        again: b.counter_in(last, "deny")?,
+    })
+}
+
+/// verifies that a tagged counter is written with the index of its tag's
+/// registry, which the first registration under the tag makes and a later one
+/// finds.
+#[test]
+fn test_build_writes_each_tagged_counter_with_the_registry_of_its_tag() {
+    let owner = owner();
+
+    let built = build::<TaggedModule>(&owner, |b| tagged(b, "rules")).expect("built");
+
+    let (config, _) = body::<TaggedModule>(&owner, &built);
+    assert_eq!(
+        ((0, 1, 0), vec!["rules".to_string(), "routes".to_string()]),
+        (
+            (config.rule.registry(), config.route.registry(), config.again.registry()),
+            owner.counter_registries()
+        )
+    );
+    release::<TaggedModule>(&owner, built);
+    owner.assert_released();
+}
+
+/// verifies that each tagged counter is registered with as many values as its
+/// layout holds and written with the id the owner assigned.
+#[test]
+fn test_build_registers_each_tagged_counter_with_the_size_of_its_layout() {
+    let owner = owner();
+
+    let built = build::<TaggedModule>(&owner, |b| tagged(b, "rules")).expect("built");
+
+    let (config, _) = body::<TaggedModule>(&owner, &built);
+    assert_eq!(
+        ((1, 2, 3), vec![1, 2, 1, 1]),
+        (
+            (config.rule.id(), config.route.id(), config.again.id()),
+            owner.counter_sizes()
+        )
+    );
+    release::<TaggedModule>(&owner, built);
+    owner.assert_released();
+}
+
+/// verifies that a build whose tagged counter the owner refuses, at each
+/// registration, returns everything it took.
+#[test]
+fn test_build_releases_everything_when_a_tagged_counter_fails_at_each_call() {
+    for allowed in 0..4 {
+        let owner = owner();
+        owner.fail_after(Call::Registration, allowed);
+
+        let err = build::<TaggedModule>(&owner, |b| tagged(b, "rules")).expect_err("refused registration");
+
+        assert_eq!(BuildError::Owner(TestError::Registration), err);
+        owner.assert_released();
+    }
+}
+
+/// verifies that a counter tag C would cut short is refused before the owner
+/// is asked, and the build returns everything it took.
+#[test]
+fn test_build_refuses_a_counter_tag_that_does_not_fit_its_c_field() {
+    let overlong = "r".repeat(COUNTER_TAG_VALUE_LEN as usize);
+    for tag in [overlong.as_str(), "ru\0les", ""] {
+        let owner = owner();
+
+        let err = build::<TaggedModule>(&owner, |b| tagged(b, tag)).expect_err("refused tag");
+
+        assert_eq!(
+            (BuildError::Refused(Refusal::InvalidName), 2),
+            (err, owner.counter_registries().len())
+        );
+        owner.assert_released();
+    }
+}
+
+/// verifies that a counter tag filling its C field with the terminator makes
+/// a registry of the whole tag.
+#[test]
+fn test_build_registers_a_counter_tag_that_fills_its_c_field() {
+    let owner = owner();
+    let tag = "r".repeat(COUNTER_TAG_VALUE_LEN as usize - 1);
+
+    let built = build::<TaggedModule>(&owner, |b| tagged(b, &tag)).expect("built");
+
+    assert_eq!(Some(tag), owner.counter_registries().pop());
+    release::<TaggedModule>(&owner, built);
     owner.assert_released();
 }
 

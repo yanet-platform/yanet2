@@ -9,7 +9,7 @@ use crate::{
     counters::counter_get_address,
     dp::{
         batch::DeviceRef,
-        fields::{Counter, CounterLayout, Device, ObjectLink},
+        fields::{Counter, CounterLayout, Device, ObjectLink, TaggedCounter},
         module::Module,
         object::{Object, ObjectConfig},
     },
@@ -578,6 +578,82 @@ impl<T: CounterLayout> Counter<T> {
     pub fn resolve<'c, M: Module>(&'c self, cx: &CommitCx<'c, M>) -> CounterRef<'c, T> {
         // SAFETY: as for adding, for the pass instead of the call.
         let value = unsafe { counter_value(cx.root, cx.ectx, self.id()) };
+        CounterRef {
+            // SAFETY: the value lies in the counter storage block, not at
+            // address zero.
+            value: unsafe { NonNull::new_unchecked(value) },
+            _brand: PhantomData,
+            _layout: PhantomData,
+        }
+    }
+}
+
+/// Address of the context's worker's value of a counter of a tagged registry,
+/// as C's `counter_get_address(id, module_ectx_counter_storage(ectx,
+/// registry))`.
+///
+/// # Safety
+///
+/// As for [`counter_value`], for the runtime storages of the context instead
+/// of its counter storage: the registry must be an index of the module's
+/// tagged registries and the id an index of that registry.
+#[inline(always)]
+unsafe fn tagged_counter_value(
+    root: ShmRoot,
+    ectx: NonNull<bindings::module_ectx>,
+    registry: u64,
+    id: u64,
+) -> *mut u64 {
+    let ectx = ectx.as_ptr();
+    // SAFETY: the context is frozen and its runtime storage addresses were
+    // derived, one per tagged registry of the module (caller contract).
+    unsafe {
+        debug_assert!(
+            registry < (*ectx).runtime_counter_storage_count,
+            "a tagged registry beyond the registries of the module context"
+        );
+        let storages = root.ptr::<*mut bindings::counter_storage>((*ectx).abs_runtime_counter_storages_base.addr());
+        let storage = root.ptr::<bindings::counter_storage>((*storages.add(registry as usize)).addr());
+        counter_get_address(root, storage, id)
+    }
+}
+
+impl<T> TaggedCounter<T>
+where
+    T: CounterLayout,
+{
+    /// Adds the value to the current worker's copy of the counter, one of a
+    /// data-indexed set the handler picks by value, as a [`Counter`] adds.
+    ///
+    /// The same plain add as the handle's.
+    #[doc(alias = "module_ectx_counter_storage")]
+    #[inline(always)]
+    pub fn add<'id, M>(&'id self, cx: &Cx<'id, M>, value: T)
+    where
+        M: Module,
+    {
+        // SAFETY: the context is frozen for the call and its runtime storage
+        // addresses were derived before release to the worker (attach: call,
+        // frozen, publish); a built tagged counter names a tagged registry of
+        // the module and an id of it, whose storage of this context holds the
+        // counter's aligned values next to each other, as many as the
+        // layout's, the size it was registered with.
+        unsafe { value.add_to(tagged_counter_value(cx.root, cx.ectx, self.registry(), self.id())) };
+    }
+
+    /// The context's worker's values of the counter, for the prepared value,
+    /// as a [`Counter`] resolves.
+    ///
+    /// The handle holds the address C's `counter_get_address` returns in the
+    /// storage `module_ectx_counter_storage` finds.
+    #[doc(alias = "module_ectx_counter_storage")]
+    #[inline(always)]
+    pub fn resolve<'c, M>(&'c self, cx: &CommitCx<'c, M>) -> CounterRef<'c, T>
+    where
+        M: Module,
+    {
+        // SAFETY: as for adding, for the pass instead of the call.
+        let value = unsafe { tagged_counter_value(cx.root, cx.ectx, self.registry(), self.id()) };
         CounterRef {
             // SAFETY: the value lies in the counter storage block, not at
             // address zero.
