@@ -90,6 +90,18 @@ yanet_cp_yanet_sdk_fixture_api__state_seed(
 );
 
 int
+yanet_cp_yanet_sdk_fixture_api__state_values(
+	struct agent *agent, struct cp_object *state, uint64_t *values,
+	size_t values_len, uint64_t *out, yanet_error **err
+);
+
+int
+yanet_cp_yanet_sdk_fixture_api__state_shape(
+	struct agent *agent, struct StateShape *shape, struct cp_object *state,
+	uint64_t *out, yanet_error **err
+);
+
+int
 yanet_cp_yanet_sdk_fixture_api__state_free(
 	struct cp_object *object, yanet_error **err
 );
@@ -615,6 +627,71 @@ func (m *StateObject) Seed(fault Fault, out *uint64) error {
 		return fmt.Errorf("failed to read the seed: %w", cerrors.FromC(unsafe.Pointer(cErr)))
 	}
 	return nil
+}
+
+// Values reads the values of the object's slots, from the first, into values
+// in one call and returns the number of slots; the places of values past the
+// slots end up zero.
+func (m *StateObject) Values(values []uint64) (uint64, error) {
+	return m.values((*C.uint64_t)(unsafe.SliceData(values)), len(values))
+}
+
+// ValuesIntoNull calls the values query with no place for length values, as a
+// C caller that lost its buffer does, and returns the error of the refusal.
+func (m *StateObject) ValuesIntoNull(length int) error {
+	_, err := m.values(nil, length)
+	return err
+}
+
+func (m *StateObject) values(values *C.uint64_t, length int) (uint64, error) {
+	var count C.uint64_t
+	var cErr *C.yanet_error
+	rc := C.yanet_cp_yanet_sdk_fixture_api__state_values(
+		(*C.struct_agent)(m.agent.AsRawPtr()),
+		(*C.struct_cp_object)(m.ptr.AsRawPtr()),
+		values,
+		C.size_t(length),
+		&count,
+		&cErr,
+	)
+	if rc != 0 {
+		return 0, fmt.Errorf("failed to read the slots: %w", cerrors.FromC(unsafe.Pointer(cErr)))
+	}
+	return uint64(count), nil
+}
+
+// StateShape is the shape of a state object, as one query reads it: its seed,
+// its number of slots, and the workers and values per worker of its regions.
+//
+// It is laid out as the api's record, which the query writes in place.
+type StateShape struct {
+	Seed      uint64
+	Slots     uint64
+	Workers   uint64
+	RegionLen uint64
+}
+
+// The query writes a StateShape where the api's record is.
+var _ [unsafe.Sizeof(StateShape{})]byte = [C.sizeof_struct_StateShape]byte{}
+
+// Shape writes the shape of the object at out in one call and returns its
+// number of slots.
+//
+// A nil out is passed on as it is, and the api refuses it.
+func (m *StateObject) Shape(out *StateShape) (uint64, error) {
+	var count C.uint64_t
+	var cErr *C.yanet_error
+	rc := C.yanet_cp_yanet_sdk_fixture_api__state_shape(
+		(*C.struct_agent)(m.agent.AsRawPtr()),
+		(*C.struct_StateShape)(unsafe.Pointer(out)),
+		(*C.struct_cp_object)(m.ptr.AsRawPtr()),
+		&count,
+		&cErr,
+	)
+	if rc != 0 {
+		return 0, fmt.Errorf("failed to read the shape: %w", cerrors.FromC(unsafe.Pointer(cErr)))
+	}
+	return uint64(count), nil
 }
 
 // Free destroys the object, or reports ffi.ErrStillReferenced while a live

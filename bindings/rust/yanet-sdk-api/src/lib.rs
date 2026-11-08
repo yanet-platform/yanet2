@@ -32,6 +32,6 @@ pub mod __private {
 
     pub use crate::{
         Agent, Error,
-        ffi::{build, c_str, free, handle, query, record, slice_of},
+        ffi::{build, c_str, free, handle, out_record, out_slice, query, record, slice_of, zeroed, zeroed_slice},
     };
 }

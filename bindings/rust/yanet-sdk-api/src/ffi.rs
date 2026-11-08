@@ -99,6 +99,68 @@ pub unsafe fn slice_of<'a, T: FfiRecord>(pointer: *const T, len: usize, argument
     Ok(unsafe { slice::from_raw_parts(pointer.as_ptr(), len) })
 }
 
+/// A record a query writes, checked and not yet touched: [`zeroed`] makes it
+/// the method's once every argument is accepted.
+///
+/// # Safety
+///
+/// `pointer` is null, misaligned or points at `size_of::<T>()` writable bytes
+/// that nothing else reads or writes during the call, the other arguments
+/// included.
+pub unsafe fn out_record<T: FfiRecord>(pointer: *mut T, argument: &str) -> Result<NonNull<T>, Error> {
+    checked(pointer, argument)
+}
+
+/// Records a query writes, checked and not yet touched: [`zeroed_slice`] makes
+/// them the method's once every argument is accepted; `(NULL, 0)` is empty.
+///
+/// # Safety
+///
+/// `pointer` is null, misaligned or points at `len` records writable as for
+/// [`out_record`].
+pub unsafe fn out_slice<T: FfiRecord>(pointer: *mut T, len: usize, argument: &str) -> Result<NonNull<[T]>, Error> {
+    if pointer.is_null() && len == 0 {
+        return Ok(NonNull::slice_from_raw_parts(NonNull::dangling(), 0));
+    }
+    let pointer = checked(pointer, argument)?;
+    if len
+        .checked_mul(size_of::<T>())
+        .is_none_or(|bytes| bytes > isize::MAX as usize)
+    {
+        return Err(invalid(argument, "is longer than a slice can be"));
+    }
+    Ok(NonNull::slice_from_raw_parts(pointer, len))
+}
+
+/// The output record, zeroed: a value of `T`, as every bit pattern is, which
+/// C may have handed over uninitialised.
+///
+/// # Safety
+///
+/// `out` came from [`out_record`], whose contract holds while `'a` lives.
+pub unsafe fn zeroed<'a, T: FfiRecord>(mut out: NonNull<T>) -> &'a mut T {
+    // SAFETY: writable, aligned and reached by nothing else (caller
+    // contract); all-zero bytes are a value of `T` (`FfiRecord`).
+    unsafe {
+        out.write_bytes(0, 1);
+        out.as_mut()
+    }
+}
+
+/// The output records, zeroed, as [`zeroed`] makes one.
+///
+/// # Safety
+///
+/// `out` came from [`out_slice`], whose contract holds while `'a` lives.
+pub unsafe fn zeroed_slice<'a, T: FfiRecord>(mut out: NonNull<[T]>) -> &'a mut [T] {
+    // SAFETY: as for `zeroed`, over the `len` records of a slice that fits
+    // the address space (checked); an empty one is dangling and aligned.
+    unsafe {
+        out.cast::<T>().write_bytes(0, out.len());
+        out.as_mut()
+    }
+}
+
 /// Preserves a panic message while containing a panicking payload destructor.
 fn panic_error(payload: Box<dyn Any + Send>) -> Error {
     let message = payload
@@ -199,6 +261,10 @@ pub unsafe fn handle<B: Releasable>(pointer: *mut B::Raw, argument: &str) -> Res
 /// The body of a query export: runs `body` over the agent and writes its
 /// value at `out`, 0, or -1 with `*err` set on failure and `out` untouched.
 ///
+/// The records a query writes are its arguments: `body` zeroes them once it
+/// accepts every argument, so a refused one leaves them untouched, and a
+/// failed method leaves what it wrote.
+///
 /// # Safety
 ///
 /// As for [`build`]; `out` is null, misaligned or writable.
@@ -269,4 +335,50 @@ pub unsafe fn free<B: Releasable>(raw: *mut B::Raw, err: ErrOut) -> c_int {
         })
     });
     released_or_errno(released, busy, err)
+}
+
+#[cfg(test)]
+mod tests {
+    use core::{mem::MaybeUninit, ptr::NonNull};
+
+    use super::{zeroed, zeroed_slice};
+
+    /// verifies that records C left uninitialised reach the method as zeroed
+    /// values, which Miri checks for the slice formed over them.
+    #[test]
+    fn test_zeroed_slice_uninitialised_reads_zero() {
+        let mut places = [MaybeUninit::<u64>::uninit(); 4];
+        let out = NonNull::slice_from_raw_parts(NonNull::from(&mut places).cast::<u64>(), places.len());
+
+        // SAFETY: the places are writable and aligned, and nothing else
+        // reaches them while the slice lives.
+        let values = unsafe { zeroed_slice(out) };
+
+        assert_eq!([0; 4], *values);
+    }
+
+    /// verifies that a record C left uninitialised reaches the method as a
+    /// zeroed value.
+    #[test]
+    fn test_zeroed_uninitialised_record_reads_zero() {
+        let mut place = MaybeUninit::<u64>::uninit();
+
+        // SAFETY: the place is writable and aligned, and nothing else reaches
+        // it while the reference lives.
+        let value = unsafe { zeroed(NonNull::from(&mut place).cast::<u64>()) };
+
+        assert_eq!(0, *value);
+    }
+
+    /// verifies that the empty slice of no address, as C passes it, is
+    /// zeroed without a write.
+    #[test]
+    fn test_zeroed_slice_dangling_empty_is_empty() {
+        let out = NonNull::slice_from_raw_parts(NonNull::<u64>::dangling(), 0);
+
+        // SAFETY: an empty slice reaches no memory.
+        let values = unsafe { zeroed_slice(out) };
+
+        assert!(values.is_empty());
+    }
 }

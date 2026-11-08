@@ -42,6 +42,8 @@ keeps it):
 | `&str` | `const char *`, NUL terminated UTF-8 |
 | `&T`, `T: FfiRecord` | `const T *` |
 | `&[T]`, `T: FfiRecord` | `const T *x, size_t x_len`; `(NULL, 0)` is empty |
+| `&mut T`, `T: FfiRecord` (a query only) | `T *`, a record the query writes |
+| `&mut [T]`, `T: FfiRecord` (a query only) | `T *x, size_t x_len`, records the query writes; `(NULL, 0)` is empty |
 | `&BuiltObject<O, Agent>` (`object = O` only) | `struct cp_object *`, an object a build of the crate returned and nothing releases; one of another type is refused |
 | `u8`..`u64`, `i8`..`i64`, `usize` | the same C integer |
 | returns `Result<Built<M, Agent>, Error>` (`module = M`) | `struct cp_module *`, NULL on failure |
@@ -49,7 +51,11 @@ keeps it):
 | returns `Result<u64, Error>` (a query) | `int`, 0 or -1 on failure, with `uint64_t *out` before `err`, written on success |
 
 A null or misaligned pointer is an invalid-argument error; a panic of the
-method is caught and comes back as an error with its message. The impl also
+method is caught and comes back as an error with its message. A query reads
+several values in one call through its outputs, which the export zeroes once
+it accepts every argument: a refused argument leaves them untouched, and a
+query that fills a slice commonly returns how many values it has, so a caller
+whose slice was short calls again with a longer one. The impl also
 gains `int yanet_cp_<crate>__<snake type>_free(struct cp_module *, struct yanet_error **)`,
 which releases a configuration as a C module's `<name>_module_config_free`
 does: 0, or -1 with a busy error and errno `EAGAIN` while a live generation
