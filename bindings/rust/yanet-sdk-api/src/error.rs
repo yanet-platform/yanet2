@@ -65,12 +65,13 @@ pub struct ApiError {
     chain: Option<NonNull<yanet_error>>,
 }
 
-// SAFETY: the chain is heap memory the value owns alone, freed from whichever
-// thread drops it, and its frames are never written; the out-of-memory frame
-// is a static that is never freed.
+// SAFETY: the value owns its chain alone, save the static out-of-memory frame
+// that chains share and nothing frees, and `lib/errors/errors.h` lets any
+// thread read a chain and its owner free it from any thread.
 unsafe impl Send for ApiError {}
 
-// SAFETY: as for `Send`, a shared reference only reads the frames.
+// SAFETY: a shared reference only reads the chain, which `lib/errors/errors.h`
+// lets any number of threads do at once.
 unsafe impl Sync for ApiError {}
 
 /// Takes ownership of the chain C wrote to an error out-parameter.
