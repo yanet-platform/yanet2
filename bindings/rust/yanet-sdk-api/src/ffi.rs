@@ -21,18 +21,18 @@ use yanet_sys::{
 
 use crate::{
     agent::{Agent, Releasable, handle_at, raw_at, release_at},
-    error::{ApiError, ErrorKind, into_c_chain, wrap_c_chain},
+    error::{Error, ErrorKind, into_c_chain, wrap_c_chain},
 };
 
 /// The `err` argument of an export: null, or the place for a chain.
 type ErrOut = *mut *mut yanet_error;
 
-fn invalid(argument: &str, what: &str) -> ApiError {
-    ApiError::new(ErrorKind::InvalidArgument, &format!("argument `{argument}` {what}"))
+fn invalid(argument: &str, what: &str) -> Error {
+    Error::new(ErrorKind::InvalidArgument, &format!("argument `{argument}` {what}"))
 }
 
 /// A pointer C passed for a non-null argument: not null, aligned.
-fn checked<T>(pointer: *mut T, argument: &str) -> Result<NonNull<T>, ApiError> {
+fn checked<T>(pointer: *mut T, argument: &str) -> Result<NonNull<T>, Error> {
     match NonNull::new(pointer) {
         Some(pointer) if pointer.is_aligned() => Ok(pointer),
         _ => Err(invalid(argument, "is null or misaligned")),
@@ -45,7 +45,7 @@ fn checked<T>(pointer: *mut T, argument: &str) -> Result<NonNull<T>, ApiError> {
 ///
 /// The pointer is null, misaligned or an attached agent, with the other
 /// requirements of [`Agent::from_raw`].
-unsafe fn attached(pointer: *mut bindings::agent, argument: &str) -> Result<Agent, ApiError> {
+unsafe fn attached(pointer: *mut bindings::agent, argument: &str) -> Result<Agent, Error> {
     // SAFETY: caller contract.
     Ok(unsafe { Agent::from_raw(checked(pointer, argument)?) })
 }
@@ -56,7 +56,7 @@ unsafe fn attached(pointer: *mut bindings::agent, argument: &str) -> Result<Agen
 ///
 /// `pointer` is null or a NUL terminated string that lives, unchanged, as long
 /// as `'a`.
-pub unsafe fn c_str<'a>(pointer: *const c_char, argument: &str) -> Result<&'a str, ApiError> {
+pub unsafe fn c_str<'a>(pointer: *const c_char, argument: &str) -> Result<&'a str, Error> {
     let pointer = checked(pointer.cast_mut(), argument)?;
     // SAFETY: a non-null string is NUL terminated (caller contract).
     unsafe { CStr::from_ptr(pointer.as_ptr()) }
@@ -70,7 +70,7 @@ pub unsafe fn c_str<'a>(pointer: *const c_char, argument: &str) -> Result<&'a st
 ///
 /// `pointer` is null, misaligned or points at `size_of::<T>()` readable bytes
 /// that live, unchanged, as long as `'a`.
-pub unsafe fn record<'a, T: FfiRecord>(pointer: *const T, argument: &str) -> Result<&'a T, ApiError> {
+pub unsafe fn record<'a, T: FfiRecord>(pointer: *const T, argument: &str) -> Result<&'a T, Error> {
     let pointer = checked(pointer.cast_mut(), argument)?;
     // SAFETY: aligned, and every bit pattern of the readable bytes is a value
     // of `T` (caller contract, `FfiRecord`).
@@ -83,7 +83,7 @@ pub unsafe fn record<'a, T: FfiRecord>(pointer: *const T, argument: &str) -> Res
 ///
 /// `pointer` is null, misaligned or points at `len` records readable and
 /// unchanged as long as `'a`, as for [`record`].
-pub unsafe fn slice_of<'a, T: FfiRecord>(pointer: *const T, len: usize, argument: &str) -> Result<&'a [T], ApiError> {
+pub unsafe fn slice_of<'a, T: FfiRecord>(pointer: *const T, len: usize, argument: &str) -> Result<&'a [T], Error> {
     if pointer.is_null() && len == 0 {
         return Ok(&[]);
     }
@@ -100,13 +100,13 @@ pub unsafe fn slice_of<'a, T: FfiRecord>(pointer: *const T, len: usize, argument
 }
 
 /// Preserves a panic message while containing a panicking payload destructor.
-fn panic_error(payload: Box<dyn Any + Send>) -> ApiError {
+fn panic_error(payload: Box<dyn Any + Send>) -> Error {
     let message = payload
         .downcast_ref::<&str>()
         .copied()
         .or_else(|| payload.downcast_ref::<String>().map(String::as_str))
         .unwrap_or("no message");
-    let error = ApiError::new(ErrorKind::Untagged, &format!("panic: {message}"));
+    let error = Error::new(ErrorKind::Untagged, &format!("panic: {message}"));
     if let Err(second) = catch_unwind(AssertUnwindSafe(|| drop(payload))) {
         if second.is::<&str>() || second.is::<String>() {
             drop(second);
@@ -120,14 +120,14 @@ fn panic_error(payload: Box<dyn Any + Send>) -> ApiError {
 }
 
 /// Runs `body`, a panic of which is an error.
-fn guarded<T>(body: impl FnOnce() -> Result<T, ApiError>) -> Result<T, ApiError> {
+fn guarded<T>(body: impl FnOnce() -> Result<T, Error>) -> Result<T, Error> {
     catch_unwind(AssertUnwindSafe(body)).unwrap_or_else(|payload| Err(panic_error(payload)))
 }
 
 /// Hands `error` to C at `err` unless it is null or misaligned: as the chain
 /// there when it holds none, and otherwise over the chain it holds, which stays
 /// as the cause.
-fn set_err(err: ErrOut, error: ApiError) {
+fn set_err(err: ErrOut, error: Error) {
     if err.is_null() || !err.is_aligned() {
         return;
     }
@@ -167,7 +167,7 @@ fn errno_of(kind: ErrorKind) -> c_int {
 pub unsafe fn build<B: Releasable>(
     agent_pointer: *mut bindings::agent,
     err: ErrOut,
-    body: impl FnOnce(&Agent) -> Result<B, ApiError>,
+    body: impl FnOnce(&Agent) -> Result<B, Error>,
 ) -> *mut B::Raw {
     let header = guarded(|| {
         // SAFETY: the export contract.
@@ -189,7 +189,7 @@ pub unsafe fn build<B: Releasable>(
 /// object) an export of this crate returned and nothing released, nor
 /// releases during the call, a pointer of the mapping of the agent of the
 /// call.
-pub unsafe fn handle<B: Releasable>(pointer: *mut B::Raw, argument: &str) -> Result<B, ApiError> {
+pub unsafe fn handle<B: Releasable>(pointer: *mut B::Raw, argument: &str) -> Result<B, Error> {
     let pointer = checked(pointer, argument)?;
     // SAFETY: the caller's contract; the handle is only lent to the method,
     // which cannot release it.
@@ -206,7 +206,7 @@ pub unsafe fn query(
     agent_pointer: *mut bindings::agent,
     out: *mut u64,
     err: ErrOut,
-    body: impl FnOnce(&Agent) -> Result<u64, ApiError>,
+    body: impl FnOnce(&Agent) -> Result<u64, Error>,
 ) -> c_int {
     let value = guarded(|| {
         let out = checked(out, "out")?;
@@ -229,7 +229,7 @@ pub unsafe fn query(
 
 /// What a free export returns: 0 for a release, otherwise -1 with `*err` set
 /// and errno EAGAIN for a busy refusal, or the errno of the error's kind.
-fn released_or_errno(released: Result<(), ApiError>, busy: bool, err: ErrOut) -> c_int {
+fn released_or_errno(released: Result<(), Error>, busy: bool, err: ErrOut) -> c_int {
     match released {
         Ok(()) => 0,
         Err(error) => {

@@ -114,9 +114,9 @@ pub fn derive_ffi_record(input: TokenStream) -> TokenStream {
 /// | `&[T]`, `T: FfiRecord` | `const T *x, size_t x_len`; `(NULL, 0)` is empty |
 /// | `&BuiltObject<O, Agent>` (`object = O` only) | `struct cp_object *`, an object a build of the crate returned and nothing releases; one of another type is refused |
 /// | `u8`..`u64`, `i8`..`i64`, `usize` | the same C integer |
-/// | returns `Result<Built<M, Agent>, ApiError>` (`module = M`) | `struct cp_module *`, `NULL` on failure |
-/// | returns `Result<BuiltObject<O, Agent>, ApiError>` (`object = O`) | `struct cp_object *`, `NULL` on failure |
-/// | returns `Result<u64, ApiError>` (a query) | `int`, 0 or -1 on failure, with a trailing `uint64_t *out` before `err` that a success writes |
+/// | returns `Result<Built<M, Agent>, Error>` (`module = M`) | `struct cp_module *`, `NULL` on failure |
+/// | returns `Result<BuiltObject<O, Agent>, Error>` (`object = O`) | `struct cp_object *`, `NULL` on failure |
+/// | returns `Result<u64, Error>` (a query) | `int`, 0 or -1 on failure, with a trailing `uint64_t *out` before `err` that a success writes |
 ///
 /// Anything else is a compile error at the offending type. A null or
 /// misaligned pointer for an argument is refused as an invalid argument. A
@@ -132,7 +132,7 @@ pub fn derive_ffi_record(input: TokenStream) -> TokenStream {
 /// #![forbid(unsafe_code)]
 ///
 /// use yanet_sdk::{Batch, Builder, Built, CommitCx, Cx, FfiRecord, Module, Verdict};
-/// use yanet_sdk_api::{Agent, ApiError};
+/// use yanet_sdk_api::{Agent, Error};
 ///
 /// struct Mine;
 /// impl Module for Mine {
@@ -160,7 +160,7 @@ pub fn derive_ffi_record(input: TokenStream) -> TokenStream {
 ///         name: &str,
 ///         input: &Input,
 ///         ranges: &[u32],
-///     ) -> Result<Built<Mine, Agent>, ApiError> {
+///     ) -> Result<Built<Mine, Agent>, Error> {
 ///         Builder::<Mine>::build(agent, name, |_| Ok(input.weight + ranges.len() as u64))
 ///     }
 /// }
@@ -502,7 +502,7 @@ mod doctests {
     ///
     /// ```compile_fail
     /// # use yanet_sdk::{Batch, Builder, Built, CommitCx, Cx, FfiRecord, Module, Verdict};
-    /// # use yanet_sdk_api::{Agent, ApiError};
+    /// # use yanet_sdk_api::{Agent, Error};
     /// # struct Mine;
     /// # struct Other;
     /// # impl Module for Mine {
@@ -517,7 +517,7 @@ mod doctests {
     /// # pub struct Api;
     /// #[yanet_sdk::api(module = Mine)]
     /// impl Api {
-    ///     pub fn new(agent: &Agent, name: &str, _flag: bool) -> Result<Built<Mine, Agent>, ApiError> {
+    ///     pub fn new(agent: &Agent, name: &str, _flag: bool) -> Result<Built<Mine, Agent>, Error> {
     ///         Builder::<Mine>::build(agent, name, |_| Ok(0))
     ///     }
     /// }
@@ -528,7 +528,7 @@ mod doctests {
     ///
     /// ```no_run
     /// # use yanet_sdk::{Batch, Builder, Built, CommitCx, Cx, FfiRecord, Module, Verdict};
-    /// # use yanet_sdk_api::{Agent, ApiError};
+    /// # use yanet_sdk_api::{Agent, Error};
     /// # struct Mine;
     /// # struct Other;
     /// # impl Module for Mine {
@@ -543,7 +543,7 @@ mod doctests {
     /// # pub struct Api;
     /// #[yanet_sdk::api(module = Mine)]
     /// impl Api {
-    ///     pub fn new(agent: &Agent, name: &str, _flag: u8) -> Result<Built<Mine, Agent>, ApiError> {
+    ///     pub fn new(agent: &Agent, name: &str, _flag: u8) -> Result<Built<Mine, Agent>, Error> {
     ///         Builder::<Mine>::build(agent, name, |_| Ok(0))
     ///     }
     /// }
@@ -554,7 +554,7 @@ mod doctests {
     ///
     /// ```compile_fail
     /// # use yanet_sdk::{Batch, Builder, Built, CommitCx, Cx, FfiRecord, Module, Verdict};
-    /// # use yanet_sdk_api::{Agent, ApiError};
+    /// # use yanet_sdk_api::{Agent, Error};
     /// # struct Mine;
     /// # struct Other;
     /// # impl Module for Mine {
@@ -580,7 +580,7 @@ mod doctests {
     ///
     /// ```no_run
     /// # use yanet_sdk::{Batch, Builder, Built, CommitCx, Cx, FfiRecord, Module, Verdict};
-    /// # use yanet_sdk_api::{Agent, ApiError};
+    /// # use yanet_sdk_api::{Agent, Error};
     /// # struct Mine;
     /// # struct Other;
     /// # impl Module for Mine {
@@ -595,7 +595,7 @@ mod doctests {
     /// # pub struct Api;
     /// #[yanet_sdk::api(module = Mine)]
     /// impl Api {
-    ///     pub fn new(agent: &Agent, name: &str, _flag: u8) -> Result<Built<Mine, Agent>, ApiError> {
+    ///     pub fn new(agent: &Agent, name: &str, _flag: u8) -> Result<Built<Mine, Agent>, Error> {
     ///         Builder::<Mine>::build(agent, name, |_| Ok(0))
     ///     }
     /// }
@@ -606,7 +606,7 @@ mod doctests {
     ///
     /// ```compile_fail
     /// # use yanet_sdk::{Batch, Builder, Built, CommitCx, Cx, FfiRecord, Module, Verdict};
-    /// # use yanet_sdk_api::{Agent, ApiError};
+    /// # use yanet_sdk_api::{Agent, Error};
     /// # struct Mine;
     /// # struct Other;
     /// # impl Module for Mine {
@@ -621,8 +621,8 @@ mod doctests {
     /// # pub struct Api;
     /// #[yanet_sdk::api(module = Mine)]
     /// impl Api {
-    ///     pub fn new(agent: &Agent, name: &str, _flag: u8) -> Result<Built<Other, Agent>, ApiError> {
-    ///         Err(ApiError::from(yanet_sdk::Refusal::OutOfMemory))
+    ///     pub fn new(agent: &Agent, name: &str, _flag: u8) -> Result<Built<Other, Agent>, Error> {
+    ///         Err(Error::from(yanet_sdk::Refusal::OutOfMemory))
     ///     }
     /// }
     /// ```
@@ -632,7 +632,7 @@ mod doctests {
     ///
     /// ```no_run
     /// # use yanet_sdk::{Batch, Builder, Built, CommitCx, Cx, FfiRecord, Module, Verdict};
-    /// # use yanet_sdk_api::{Agent, ApiError};
+    /// # use yanet_sdk_api::{Agent, Error};
     /// # struct Mine;
     /// # struct Other;
     /// # impl Module for Mine {
@@ -647,7 +647,7 @@ mod doctests {
     /// # pub struct Api;
     /// #[yanet_sdk::api(module = Mine)]
     /// impl Api {
-    ///     pub fn new(agent: &Agent, name: &str, _flag: u8) -> Result<Built<Mine, Agent>, ApiError> {
+    ///     pub fn new(agent: &Agent, name: &str, _flag: u8) -> Result<Built<Mine, Agent>, Error> {
     ///         Builder::<Mine>::build(agent, name, |_| Ok(0))
     ///     }
     /// }
@@ -659,7 +659,7 @@ mod doctests {
     ///
     /// ```no_run
     /// # use yanet_sdk::{BuiltObject, Object, ObjectBuilder};
-    /// # use yanet_sdk_api::{Agent, ApiError};
+    /// # use yanet_sdk_api::{Agent, Error};
     /// # struct Mine;
     /// # impl Object for Mine {
     /// #     const TYPE: &'static str = "mine";
@@ -674,11 +674,11 @@ mod doctests {
     ///         agent: &Agent,
     ///         name: &str,
     ///         word: u64,
-    ///     ) -> Result<BuiltObject<Mine, Agent>, ApiError> {
+    ///     ) -> Result<BuiltObject<Mine, Agent>, Error> {
     ///         ObjectBuilder::<Mine>::build(agent, name, |_| Ok(word))
     ///     }
     ///
-    ///     pub fn word(agent: &Agent, mine: &BuiltObject<Mine, Agent>) -> Result<u64, ApiError> {
+    ///     pub fn word(agent: &Agent, mine: &BuiltObject<Mine, Agent>) -> Result<u64, Error> {
     ///         Ok(agent.read(mine, |_, word| *word))
     ///     }
     /// }
@@ -689,7 +689,7 @@ mod doctests {
     ///
     /// ```compile_fail,E0308
     /// # use yanet_sdk::{BuiltObject, Object, ObjectBuilder};
-    /// # use yanet_sdk_api::{Agent, ApiError};
+    /// # use yanet_sdk_api::{Agent, Error};
     /// # struct Mine;
     /// # struct Other;
     /// # impl Object for Mine {
@@ -707,7 +707,7 @@ mod doctests {
     /// # pub struct Api;
     /// #[yanet_sdk::api(object = Mine)]
     /// impl Api {
-    ///     pub fn new(agent: &Agent, name: &str) -> Result<BuiltObject<Other, Agent>, ApiError> {
+    ///     pub fn new(agent: &Agent, name: &str) -> Result<BuiltObject<Other, Agent>, Error> {
     ///         ObjectBuilder::<Other>::build(agent, name, |_| Ok(0))
     ///     }
     /// }
@@ -718,7 +718,7 @@ mod doctests {
     ///
     /// ```compile_fail,E0308
     /// # use yanet_sdk::{BuiltObject, Object};
-    /// # use yanet_sdk_api::{Agent, ApiError};
+    /// # use yanet_sdk_api::{Agent, Error};
     /// # struct Mine;
     /// # struct Other;
     /// # impl Object for Mine {
@@ -736,7 +736,7 @@ mod doctests {
     /// # pub struct Api;
     /// #[yanet_sdk::api(object = Mine)]
     /// impl Api {
-    ///     pub fn word(agent: &Agent, other: &BuiltObject<Other, Agent>) -> Result<u64, ApiError> {
+    ///     pub fn word(agent: &Agent, other: &BuiltObject<Other, Agent>) -> Result<u64, Error> {
     ///         Ok(agent.read(other, |_, word| *word))
     ///     }
     /// }
@@ -747,7 +747,7 @@ mod doctests {
     ///
     /// ```compile_fail
     /// # use yanet_sdk::{Batch, Builder, Built, BuiltObject, CommitCx, Cx, Module, Object, Verdict};
-    /// # use yanet_sdk_api::{Agent, ApiError};
+    /// # use yanet_sdk_api::{Agent, Error};
     /// # struct Mine;
     /// # impl Module for Mine {
     /// #     const NAME: &'static str = "mine";
@@ -767,7 +767,7 @@ mod doctests {
     /// # pub struct Api;
     /// #[yanet_sdk::api(module = Mine)]
     /// impl Api {
-    ///     pub fn new(agent: &Agent, name: &str, mine: &BuiltObject<Mine, Agent>) -> Result<Built<Mine, Agent>, ApiError> {
+    ///     pub fn new(agent: &Agent, name: &str, mine: &BuiltObject<Mine, Agent>) -> Result<Built<Mine, Agent>, Error> {
     ///         let word = agent.read(mine, |_, word| *word);
     ///         Builder::<Mine>::build(agent, name, |_| Ok(word))
     ///     }
@@ -779,7 +779,7 @@ mod doctests {
     ///
     /// ```compile_fail,E0308
     /// # use yanet_sdk::{Batch, Builder, Built, CommitCx, Cx, Module, Object, Verdict};
-    /// # use yanet_sdk_api::{Agent, ApiError};
+    /// # use yanet_sdk_api::{Agent, Error};
     /// # struct Mine;
     /// # impl Module for Mine {
     /// #     const NAME: &'static str = "mine";
@@ -799,7 +799,7 @@ mod doctests {
     /// # pub struct Api;
     /// #[yanet_sdk::api(object = Mine)]
     /// impl Api {
-    ///     pub fn new(agent: &Agent, name: &str) -> Result<Built<Mine, Agent>, ApiError> {
+    ///     pub fn new(agent: &Agent, name: &str) -> Result<Built<Mine, Agent>, Error> {
     ///         Builder::<Mine>::build(agent, name, |_| Ok(0))
     ///     }
     /// }

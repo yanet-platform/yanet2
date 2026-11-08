@@ -21,7 +21,7 @@ use core::{
 };
 
 use yanet_sdk::{Builder, Built, BuiltObject, FfiRecord, LpmRange, ObjectBuilder, Refusal};
-use yanet_sdk_api::{Agent, ApiError, ErrorKind};
+use yanet_sdk_api::{Agent, Error, ErrorKind};
 use yanet_sdk_fixture::{
     ConfigParts, RouteFibParts, RouteListParts, RouteParts, StashConfigParts, StateConfigParts, TallyConfigParts,
 };
@@ -85,11 +85,11 @@ pub struct FibList {
 }
 
 /// The text of a NUL terminated name.
-fn text(name: &[u8; FIB_NAME_LEN]) -> Result<&str, ApiError> {
+fn text(name: &[u8; FIB_NAME_LEN]) -> Result<&str, Error> {
     CStr::from_bytes_until_nul(name)
         .ok()
         .and_then(|name| name.to_str().ok())
-        .ok_or_else(|| ApiError::new(ErrorKind::InvalidArgument, "a name is not NUL terminated UTF-8"))
+        .ok_or_else(|| Error::new(ErrorKind::InvalidArgument, "a name is not NUL terminated UTF-8"))
 }
 
 pub struct Fixture;
@@ -109,15 +109,15 @@ impl Fixture {
         device: &str,
         spec: &FixtureSpec,
         ranges: &[Range4],
-    ) -> Result<Built<yanet_sdk_fixture::Fixture, Agent>, ApiError> {
-        Builder::<yanet_sdk_fixture::Fixture>::build::<ApiError, _>(agent, name, |scope| {
+    ) -> Result<Built<yanet_sdk_fixture::Fixture, Agent>, Error> {
+        Builder::<yanet_sdk_fixture::Fixture>::build::<Error, _>(agent, name, |scope| {
             let weights = scope.slice::<u64>(3, |idx| Ok(idx as u64 + 1))?;
             match spec.fault {
                 FIXTURE_FAULT_NONE => {}
-                FIXTURE_FAULT_ERROR => return Err(ApiError::from(Refusal::BlockTooLarge)),
+                FIXTURE_FAULT_ERROR => return Err(Error::from(Refusal::BlockTooLarge)),
                 FIXTURE_FAULT_PANIC => panic!("fixture fault"),
                 FIXTURE_FAULT_PANIC_PAYLOAD => std::panic::panic_any(PanicOnDrop),
-                _ => return Err(ApiError::new(ErrorKind::InvalidArgument, "unknown fault")),
+                _ => return Err(Error::new(ErrorKind::InvalidArgument, "unknown fault")),
             }
             Ok(ConfigParts {
                 mode: spec.mode,
@@ -145,8 +145,8 @@ impl Tally {
     /// the fields', and one name in two registries. The counters picked by id
     /// are those a registrar registers last in the registry `lanes` as
     /// `wide`, `narrow` and `wide` again: two counters, ids 0 and 1.
-    pub fn build(agent: &Agent, name: &str, word: u64) -> Result<Built<yanet_sdk_fixture::Tally, Agent>, ApiError> {
-        Builder::<yanet_sdk_fixture::Tally>::build::<ApiError, _>(agent, name, |scope| {
+    pub fn build(agent: &Agent, name: &str, word: u64) -> Result<Built<yanet_sdk_fixture::Tally, Agent>, Error> {
+        Builder::<yanet_sdk_fixture::Tally>::build::<Error, _>(agent, name, |scope| {
             let tagged_held = scope.counter_in("routes", "even")?;
             let held = scope.counter("held")?;
             let v2 = scope.counter("v2")?;
@@ -191,19 +191,19 @@ impl Fib {
         indexes: &[u64],
         v6: &[Range6],
         v4: &[Range4],
-    ) -> Result<Built<yanet_sdk_fixture::Fib, Agent>, ApiError> {
-        Builder::<yanet_sdk_fixture::Fib>::build::<ApiError, _>(agent, name, |scope| {
+    ) -> Result<Built<yanet_sdk_fixture::Fib, Agent>, Error> {
+        Builder::<yanet_sdk_fixture::Fib>::build::<Error, _>(agent, name, |scope| {
             let devices = devices
                 .iter()
                 .map(|device| scope.device(text(&device.name)?))
-                .collect::<Result<Vec<_>, ApiError>>()?;
+                .collect::<Result<Vec<_>, Error>>()?;
             Ok(RouteFibParts {
                 lpm_v6: v6,
                 lpm_v4: v4,
                 routes: scope.slice(routes.len(), |idx| {
                     let route = &routes[idx];
                     let device = devices.get(usize::from(route.device)).copied().ok_or_else(|| {
-                        ApiError::new(ErrorKind::InvalidArgument, "a route names a device out of the list")
+                        Error::new(ErrorKind::InvalidArgument, "a route names a device out of the list")
                     })?;
                     Ok(RouteParts {
                         dst_addr: route.dst_addr,
@@ -232,8 +232,8 @@ impl Stash {
     /// A configuration named `name` that writes the state object named
     /// `state`, which a generation must hold when it is installed, and counts
     /// in `seen` and `filled`.
-    pub fn build(agent: &Agent, name: &str, state: &str) -> Result<Built<yanet_sdk_fixture::Stash, Agent>, ApiError> {
-        Builder::<yanet_sdk_fixture::Stash>::build::<ApiError, _>(agent, name, |scope| {
+    pub fn build(agent: &Agent, name: &str, state: &str) -> Result<Built<yanet_sdk_fixture::Stash, Agent>, Error> {
+        Builder::<yanet_sdk_fixture::Stash>::build::<Error, _>(agent, name, |scope| {
             Ok(StashConfigParts {
                 state: scope.object(state)?,
                 seen: scope.counter("seen")?,
@@ -262,17 +262,17 @@ impl State {
         seed: u64,
         count: u64,
         fault: u64,
-    ) -> Result<BuiltObject<yanet_sdk_fixture::State, Agent>, ApiError> {
-        let count = usize::try_from(count).map_err(|_| ApiError::from(Refusal::TooManyItems))?;
-        ObjectBuilder::<yanet_sdk_fixture::State>::build::<ApiError, _>(agent, name, |scope| {
+    ) -> Result<BuiltObject<yanet_sdk_fixture::State, Agent>, Error> {
+        let count = usize::try_from(count).map_err(|_| Error::from(Refusal::TooManyItems))?;
+        ObjectBuilder::<yanet_sdk_fixture::State>::build::<Error, _>(agent, name, |scope| {
             let slots = scope.slice(count, |idx| Ok(AtomicU64::new(seed.wrapping_add(idx as u64))))?;
             let workers = scope.per_worker(seed)?;
             let regions = scope.per_worker_slice(STATE_REGION_LEN, seed)?;
             match fault {
                 FIXTURE_FAULT_NONE => {}
-                FIXTURE_FAULT_ERROR => return Err(ApiError::from(Refusal::BlockTooLarge)),
+                FIXTURE_FAULT_ERROR => return Err(Error::from(Refusal::BlockTooLarge)),
                 FIXTURE_FAULT_PANIC => panic!("fixture fault"),
-                _ => return Err(ApiError::new(ErrorKind::InvalidArgument, "unknown fault")),
+                _ => return Err(Error::new(ErrorKind::InvalidArgument, "unknown fault")),
             }
             Ok(StateConfigParts { seed, slots, workers, regions })
         })
@@ -280,11 +280,7 @@ impl State {
 
     /// The value of slot `index` of the object, read by the control plane
     /// while the object may be published.
-    pub fn slot(
-        agent: &Agent,
-        state: &BuiltObject<yanet_sdk_fixture::State, Agent>,
-        index: u64,
-    ) -> Result<u64, ApiError> {
+    pub fn slot(agent: &Agent, state: &BuiltObject<yanet_sdk_fixture::State, Agent>, index: u64) -> Result<u64, Error> {
         with_slot(agent, state, index, |slot| slot.load(Ordering::Relaxed))
     }
 
@@ -295,7 +291,7 @@ impl State {
         state: &BuiltObject<yanet_sdk_fixture::State, Agent>,
         index: u64,
         delta: u64,
-    ) -> Result<u64, ApiError> {
+    ) -> Result<u64, Error> {
         with_slot(agent, state, index, |slot| {
             slot.fetch_add(delta, Ordering::Relaxed).wrapping_add(delta)
         })
@@ -307,16 +303,12 @@ impl State {
     /// # Panics
     ///
     /// When the fault selects a panic, for the panic guard of the export.
-    pub fn seed(
-        agent: &Agent,
-        state: &BuiltObject<yanet_sdk_fixture::State, Agent>,
-        fault: u64,
-    ) -> Result<u64, ApiError> {
+    pub fn seed(agent: &Agent, state: &BuiltObject<yanet_sdk_fixture::State, Agent>, fault: u64) -> Result<u64, Error> {
         match fault {
             FIXTURE_FAULT_NONE => Ok(agent.read(state, |_, config| config.seed)),
-            FIXTURE_FAULT_ERROR => Err(ApiError::from(Refusal::BlockTooLarge)),
+            FIXTURE_FAULT_ERROR => Err(Error::from(Refusal::BlockTooLarge)),
             FIXTURE_FAULT_PANIC => panic!("fixture fault"),
-            _ => Err(ApiError::new(ErrorKind::InvalidArgument, "unknown fault")),
+            _ => Err(Error::new(ErrorKind::InvalidArgument, "unknown fault")),
         }
     }
 }
@@ -327,13 +319,13 @@ fn with_slot(
     state: &BuiltObject<yanet_sdk_fixture::State, Agent>,
     index: u64,
     f: impl FnOnce(&AtomicU64) -> u64,
-) -> Result<u64, ApiError> {
+) -> Result<u64, Error> {
     agent.read(state, |cx, config| {
         usize::try_from(index)
             .ok()
             .and_then(|index| config.slots.as_slice(&cx).get(index))
             .map(f)
-            .ok_or_else(|| ApiError::new(ErrorKind::InvalidArgument, "the slot is out of the object"))
+            .ok_or_else(|| Error::new(ErrorKind::InvalidArgument, "the slot is out of the object"))
     })
 }
 
