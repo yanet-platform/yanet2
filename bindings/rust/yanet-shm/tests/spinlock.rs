@@ -101,3 +101,29 @@ fn test_lock_with_calls_the_hook_while_held() {
         waiter.join().expect("the waiter takes the released lock");
     });
 }
+
+/// A value whose drop panics, carried by a wait hook.
+struct PanicsOnDrop;
+
+impl Drop for PanicsOnDrop {
+    fn drop(&mut self) {
+        panic!("the wait hook's capture panics on drop");
+    }
+}
+
+/// verifies that a wait hook whose drop panics after the lock is taken
+/// leaves the lock free.
+#[test]
+fn test_lock_with_released_when_the_hook_panics_on_drop() {
+    let lock = RawSpinlock::new();
+    let capture = PanicsOnDrop;
+
+    let result = panic::catch_unwind(|| {
+        let _guard = lock.lock_with(move || {
+            let _ = &capture;
+        });
+    });
+
+    assert_matches!(result, Err(_));
+    assert_matches!(lock.try_lock(), Some(_));
+}

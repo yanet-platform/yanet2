@@ -59,18 +59,22 @@ impl RawSpinlock {
     /// gives the CPU up, such as a thread yield; a waiter pinned to a core of
     /// its own needs none.
     #[inline]
-    pub fn lock_with<F>(&self, wait: F) -> RawSpinlockGuard<'_>
+    pub fn lock_with<F>(&self, mut wait: F) -> RawSpinlockGuard<'_>
     where
         F: FnMut(),
     {
         if self.word.swap(1, Ordering::Acquire) != 0 {
-            self.lock_contended(wait);
+            self.lock_contended(&mut wait);
         }
-        RawSpinlockGuard { lock: self }
+        let guard = RawSpinlockGuard { lock: self };
+        // The hook is dropped while the guard lives, so a drop that panics
+        // releases the lock as it unwinds.
+        drop(wait);
+        guard
     }
 
     #[cold]
-    fn lock_contended<F>(&self, mut wait: F)
+    fn lock_contended<F>(&self, wait: &mut F)
     where
         F: FnMut(),
     {
