@@ -59,6 +59,41 @@ impl<T> Counter<T> {
     }
 }
 
+/// Per-worker counter of the module in one of its tagged registries, apart
+/// from the module's own counters: one the configuration's data defines, such
+/// as a counter per rule.
+///
+/// Holds the registry's index among the module's tagged registries and the
+/// counter's index in that registry. Readers find the counters of a registry
+/// as the module's runtime counters under its tag, and C carries their values
+/// by tag and name over to a configuration that replaces this one. The values
+/// and their adds are those of a [`Counter`] of the same layout.
+#[repr(C)]
+pub struct TaggedCounter<T = u64> {
+    registry: u64,
+    id: u64,
+    // What one worker's values are; the configuration stores the indices only.
+    _layout: PhantomData<fn() -> T>,
+}
+
+impl<T> TaggedCounter<T> {
+    /// Index of the counter's registry among the module's tagged registries.
+    #[inline(always)]
+    pub fn registry(&self) -> u64 {
+        self.registry
+    }
+
+    /// Index in the counter's registry.
+    #[inline(always)]
+    pub fn id(&self) -> u64 {
+        self.id
+    }
+}
+
+// The builder writes the two indices as the two words of the value, in the
+// order of the fields.
+const _: () = assert!(size_of::<TaggedCounter>() == 2 * size_of::<u64>());
+
 /// What one worker's values of a [`Counter`] are, and how a value of the
 /// layout adds to them.
 ///
@@ -205,6 +240,11 @@ impl<O> ObjectLink<O> {
 // zero-sized marker; the control plane writes the id the module's counter
 // registry assigned.
 unsafe impl<T: CounterLayout> ShmLayout for Counter<T> {}
+
+// SAFETY: a registry index and a counter index accept every bit pattern, and
+// the layout is a zero-sized marker; the control plane writes the indices the
+// module's tagged registry assigned.
+unsafe impl<T> ShmLayout for TaggedCounter<T> where T: CounterLayout {}
 
 // SAFETY: a device index accepts every bit pattern; the control plane writes
 // the index the module's device list assigned.

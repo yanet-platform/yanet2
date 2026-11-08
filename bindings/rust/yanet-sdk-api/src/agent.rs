@@ -12,8 +12,8 @@ use core::{
 use yanet_shm::{resolve::Resolve, root::ShmRoot};
 use yanet_sys::{
     bindings::{
-        self, COUNTER_NAME_LEN, CP_DEVICE_NAME_LEN, CP_MODULE_NAME_LEN, CP_MODULE_TYPE_LEN, CP_OBJECT_NAME_LEN,
-        CP_OBJECT_TYPE_LEN,
+        self, COUNTER_NAME_LEN, COUNTER_TAG_VALUE_LEN, CP_DEVICE_NAME_LEN, CP_MODULE_NAME_LEN, CP_MODULE_TYPE_LEN,
+        CP_OBJECT_NAME_LEN, CP_OBJECT_TYPE_LEN,
     },
     counters::COUNTER_INVALID,
     cp::{BlockAddr, Built, BuiltObject, Context, Header, Owner},
@@ -595,6 +595,43 @@ unsafe impl Owner for Agent {
             return Err(unsafe { from_c_chain(chain) });
         }
         Ok(id)
+    }
+
+    unsafe fn register_counter_in(
+        &self,
+        header: Header,
+        tag: &str,
+        name: &str,
+        size: u64,
+    ) -> Result<(u64, u64), ApiError> {
+        let tag = c_name::<{ COUNTER_TAG_VALUE_LEN as usize }>(tag)?;
+        let name = c_name::<{ COUNTER_NAME_LEN as usize }>(name)?;
+        let (mut registry, mut chain) = (0, ptr::null_mut());
+        // SAFETY: the header is initialised (caller contract); the tag is NUL
+        // terminated and the out-parameters are valid.
+        let counters = unsafe {
+            bindings::cp_module_counter_registry(
+                header_at::<bindings::cp_module>(self, header),
+                tag.as_ptr().cast::<c_char>(),
+                &raw mut registry,
+                &raw mut chain,
+            )
+        };
+        if counters.is_null() {
+            // SAFETY: the chain C wrote, if any, is ours alone.
+            return Err(unsafe { from_c_chain(chain) });
+        }
+        // SAFETY: the registry is one of the header's, initialised and kept
+        // in place until the header is finalised; the name is NUL terminated
+        // and the out-parameter points at a null chain.
+        let id = unsafe {
+            bindings::counter_registry_register(counters, name.as_ptr().cast::<c_char>(), size, &raw mut chain)
+        };
+        if id == COUNTER_INVALID {
+            // SAFETY: the chain C wrote, if any, is ours alone.
+            return Err(unsafe { from_c_chain(chain) });
+        }
+        Ok((registry, id))
     }
 
     unsafe fn link_device(&self, header: Header, name: &str) -> Result<u64, ApiError> {

@@ -176,7 +176,7 @@ fn generate_bindings(flags: &CFlags, shim_dir: &Path, out: &Path) {
         .allowlist_function("yanet_sys_classify_.*")
         // The agent owner of the configuration builder: the C routines a C
         // module's control-plane API calls for the same steps.
-        .allowlist_function("cp_module_(init|fini|try_destroy|link_device|link_object)")
+        .allowlist_function("cp_module_(init|fini|try_destroy|link_device|link_object|counter_registry)")
         .allowlist_function("cp_object_(init|fini|try_destroy)")
         .allowlist_function("counter_registry_register")
         .allowlist_function("agent_destroy_released")
@@ -191,6 +191,9 @@ fn generate_bindings(flags: &CFlags, shim_dir: &Path, out: &Path) {
         .allowlist_var("LPM_.*")
         .allowlist_var("CP_(MODULE_TYPE|MODULE_NAME|DEVICE_NAME|OBJECT_TYPE|OBJECT_NAME)_LEN")
         .allowlist_var("COUNTER_NAME_LEN")
+        // A tagged counter registry is found by its tag as a counter tag
+        // value, which C cuts to this length.
+        .allowlist_var("COUNTER_TAG_VALUE_LEN")
         .allowlist_var("YANET_MODULE_ABI_VERSION")
         .allowlist_var("(MODULE|OBJECT)_TYPE_LEN")
         .allowlist_var("MBUF_MAX_SIZE")

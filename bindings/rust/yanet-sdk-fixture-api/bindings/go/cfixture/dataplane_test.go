@@ -179,6 +179,81 @@ func Test_Tally_Counters_CountOnTheRunningWorker(t *testing.T) {
 	}
 }
 
+// Test_Tally_TaggedCounters_CountInTheRegistryOfTheirTag verifies that a
+// tagged counter added to by value and one added to through a handle are those
+// registered under their tags and names, with as many values, that only the
+// worker the round ran on counts, and that one name in two registries is two
+// counters.
+func Test_Tally_TaggedCounters_CountInTheRegistryOfTheirTag(t *testing.T) {
+	bed := newBed(t)
+	inst := bed.tallyInstance("config", 7)
+	bed.serveBeforeForward(inst)
+	bed.run(1, arpFrames(5)...)
+
+	for _, tc := range []struct {
+		name    string
+		tag     string
+		counter string
+		want    [][]uint64
+	}{
+		{
+			name:    "packets of an even first byte by value",
+			tag:     "rules",
+			counter: "even",
+			want:    [][]uint64{{0, 0}, packetsAndBytes(3, 180), {0, 0}, {0, 0}},
+		},
+		{
+			name:    "packets of an odd first byte by value",
+			tag:     "rules",
+			counter: "odd",
+			want:    [][]uint64{{0, 0}, packetsAndBytes(2, 120), {0, 0}, {0, 0}},
+		},
+		{
+			name:    "counter by handle of the same name in another registry",
+			tag:     "routes",
+			counter: "even",
+			want:    [][]uint64{{0}, {15}, {0}, {0}},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			require.Equal(t, tc.want, bed.taggedCounter(inst, tc.tag, tc.counter))
+		})
+	}
+}
+
+// Test_Tally_TaggedCounters_StayOutOfTheModuleCounters verifies that the
+// counters of the tagged registries are not among the module's own counters,
+// which list one of their own asked beside them.
+func Test_Tally_TaggedCounters_StayOutOfTheModuleCounters(t *testing.T) {
+	bed := newBed(t)
+	inst := bed.tallyInstance("config", 7)
+	bed.serveBeforeForward(inst)
+
+	require.Equal(t, []string{"held"}, bed.moduleCounterNames(inst, "even", "odd", "held"))
+}
+
+// Test_Tally_TaggedCounters_CarryOverToANewConfiguration verifies that the
+// values of a tagged counter carry over to a configuration of the same name
+// that replaces the one that counted: the packets counted before the
+// replacement and after it add up.
+func Test_Tally_TaggedCounters_CarryOverToANewConfiguration(t *testing.T) {
+	bed := newBed(t)
+	inst := bed.tallyInstance("config", 7)
+	bed.serveBeforeForward(inst)
+	bed.run(1, arpFrames(2)...)
+	replacement := bed.tallyInstance("config", 7)
+	replacement.path = inst.path
+	bed.publishModules(replacement)
+
+	bed.run(1, arpFrames(2)...)
+
+	require.Equal(
+		t,
+		[][]uint64{{0, 0}, packetsAndBytes(2, 120), {0, 0}, {0, 0}},
+		bed.taggedCounter(replacement, "rules", "even"),
+	)
+}
+
 // perWorkerValues returns a single-value counter of every worker of a bed,
 // zero except for the given workers.
 func perWorkerValues(values map[int]uint64) [][]uint64 {

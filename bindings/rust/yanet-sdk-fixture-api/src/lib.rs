@@ -138,12 +138,20 @@ impl Tally {
     /// A configuration named `name` over `word`, whose counters are registered
     /// in the order `held`, `v2`, `v0`, `v1`, an order other than the fields',
     /// and then `traffic` and `running`, with no packet seen on any worker.
+    ///
+    /// Its tagged counters are `even` of the registry `routes`, the held one,
+    /// registered first, and then `odd` and `even` of the registry `rules`,
+    /// the counters by parity: a registry order and a counter order other than
+    /// the fields', and one name in two registries.
     pub fn build(agent: &Agent, name: &str, word: u64) -> Result<Built<yanet_sdk_fixture::Tally, Agent>, ApiError> {
         Builder::<yanet_sdk_fixture::Tally>::build::<ApiError, _>(agent, name, |scope| {
+            let tagged_held = scope.counter_in("routes", "even")?;
             let held = scope.counter("held")?;
             let v2 = scope.counter("v2")?;
+            let odd = scope.counter_in("rules", "odd")?;
             let v0 = scope.counter("v0")?;
             let v1 = scope.counter("v1")?;
+            let even = scope.counter_in("rules", "even")?;
             let traffic = scope.counter("traffic")?;
             let running = scope.counter("running")?;
             Ok(TallyConfigParts {
@@ -153,6 +161,8 @@ impl Tally {
                 traffic,
                 seen: scope.per_worker(0)?,
                 running,
+                by_parity: [even, odd],
+                tagged_held,
             })
         })
     }

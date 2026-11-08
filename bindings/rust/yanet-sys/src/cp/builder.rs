@@ -39,7 +39,7 @@ use crate::{
     common::lpm::{Lpm, LpmRange},
     dp::{
         Counter, CounterLayout, Device, Module, ModuleConfig, Object, ObjectConfig, ObjectLink, PerWorker,
-        PerWorkerSlice,
+        PerWorkerSlice, TaggedCounter,
     },
 };
 
@@ -354,6 +354,32 @@ unsafe impl<T: CounterLayout> Build for Counter<T> {
     unsafe fn free<W: Owner>(_: usize, _: &MemoryContext<'_, W>) {}
 }
 
+// SAFETY: the registry index and the counter index are the whole value.
+unsafe impl<T> Build for TaggedCounter<T>
+where
+    T: CounterLayout,
+{
+    type Parts<'b, W: Owner> = Registered<'b, TaggedCounter<T>>;
+
+    unsafe fn write<W: Owner>(
+        parts: Self::Parts<'_, W>,
+        memory: &MemoryContext<'_, W>,
+        addr: usize,
+    ) -> Result<(), Refusal> {
+        let root = memory.root();
+        // SAFETY: the registry index and the counter index are the counter's
+        // two words in the order of its fields, aligned and exclusive (caller
+        // contract).
+        unsafe {
+            root.ptr::<u64>(addr).write(parts.registry);
+            root.ptr::<u64>(addr + size_of::<u64>()).write(parts.index);
+        }
+        Ok(())
+    }
+
+    unsafe fn free<W: Owner>(_: usize, _: &MemoryContext<'_, W>) {}
+}
+
 // SAFETY: the device index is the whole value.
 unsafe impl Build for Device {
     type Parts<'b, W: Owner> = Registered<'b, Device>;
@@ -564,13 +590,16 @@ pub struct OwnedSlice<'b, T: Build, W: Owner> {
 }
 
 /// A counter, device or object link registered in build `'b`, by its
-/// registry index.
+/// registry index; a counter of a tagged registry also by the registry's
+/// index.
 ///
 /// Created by a [`Scope`] only. It is copied rather than registered again: C
 /// finds a registration by name with a linear scan of the registry, so a
 /// device registered once is copied into every entry that goes through it.
 #[must_use]
 pub struct Registered<'b, T> {
+    // The tagged registry of a counter registered in one, zero for the rest.
+    registry: u64,
     index: u64,
     _brand: Brand<'b>,
     _kind: PhantomData<fn() -> T>,
@@ -652,7 +681,10 @@ impl<T> Copy for Registered<'_, T> {}
 
 impl<T> fmt::Debug for Registered<'_, T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
-        f.debug_struct("Registered").field("index", &self.index).finish()
+        f.debug_struct("Registered")
+            .field("registry", &self.registry)
+            .field("index", &self.index)
+            .finish()
     }
 }
 
@@ -1068,6 +1100,35 @@ impl<'b, W: Owner, E: From<BuildError<W::Error>>> Scope<'b, '_, W, E, ModuleKind
         Ok(Registered::new(id))
     }
 
+    /// Registers a counter of the given name with the module's tagged registry
+    /// of the given tag, of as many values as its layout holds.
+    ///
+    /// The first registration under a tag makes its registry, as C's
+    /// `cp_module_counter_registry` does. Readers find the counters of the
+    /// registry by the tag, apart from the module's own counters, and C carries
+    /// their values by tag and name over to a configuration that replaces this
+    /// one.
+    ///
+    /// # Errors
+    ///
+    /// The tag is empty, holds a NUL or does not fit a C counter tag value with
+    /// the terminator, or the owner refuses the registration, as C does for a
+    /// name registered in the registry before with another size.
+    #[doc(alias = "cp_module_counter_registry")]
+    pub fn counter_in<T>(self, tag: &str, name: &str) -> Result<Registered<'b, TaggedCounter<T>>, E>
+    where
+        T: CounterLayout,
+    {
+        if !fits_c_field(tag, bindings::COUNTER_TAG_VALUE_LEN) {
+            return Err(refused::<W, E>(Refusal::InvalidName));
+        }
+        let size = T::VALUES as u64;
+        // SAFETY: the header is initialised and not yet published.
+        let (registry, id) =
+            unsafe { self.memory.owner.register_counter_in(self.header, tag, name, size) }.map_err(failed::<W, E>)?;
+        Ok(Registered::tagged(registry, id))
+    }
+
     /// Links the device of the given name to the module.
     ///
     /// # Errors
@@ -1100,6 +1161,10 @@ impl<'b, W: Owner, E: From<BuildError<W::Error>>> Scope<'b, '_, W, E, ModuleKind
         Ok(Registered::new(index))
     }
 }
+
+// A tag fits its registry's C field when it fits a counter tag value, the
+// field readers find the registry by.
+const _: () = assert!(bindings::COUNTER_TAG_VALUE_LEN <= bindings::COUNTER_NAME_LEN);
 
 /// Whether a name fits a C field of `len` bytes whole: not empty, no NUL, and
 /// room for the terminator.
@@ -1186,7 +1251,12 @@ impl<T: Copy + ShmLayout, W: Owner> Drop for OwnedRegions<'_, T, W> {
 
 impl<T> Registered<'_, T> {
     fn new(index: u64) -> Self {
+        Self::tagged(0, index)
+    }
+
+    fn tagged(registry: u64, index: u64) -> Self {
         Self {
+            registry,
             index,
             _brand: PhantomData,
             _kind: PhantomData,
