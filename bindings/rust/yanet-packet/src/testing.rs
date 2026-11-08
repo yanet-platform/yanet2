@@ -110,6 +110,15 @@ impl Family {
             Self::V6 => checksum::l4_is_valid_ipv6(Ipv6Addr::from(src), Ipv6Addr::from(dst), protocol, segment),
         }
     }
+
+    /// Whether the checksum of a segment split into slices verifies over the
+    /// pseudo header.
+    pub fn l4_is_valid_slices(self, src: [u8; 16], dst: [u8; 16], protocol: u8, segment: Vec<&[u8]>) -> bool {
+        match self {
+            Self::V4 => checksum::l4_is_valid_ipv4_slices(Self::v4(src), Self::v4(dst), protocol, segment),
+            Self::V6 => checksum::l4_is_valid_ipv6_slices(Ipv6Addr::from(src), Ipv6Addr::from(dst), protocol, segment),
+        }
+    }
 }
 
 /// A mutation of an L4 header: a port or a pseudo-header address changes.
