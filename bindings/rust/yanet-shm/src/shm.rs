@@ -9,7 +9,10 @@
 
 use core::sync::atomic::{AtomicI8, AtomicI16, AtomicI32, AtomicI64, AtomicU8, AtomicU16, AtomicU32, AtomicU64};
 
-use crate::rel::{ShmBox, ShmSlice};
+use crate::{
+    rel::{ShmBox, ShmSlice},
+    spinlock::RawSpinlock,
+};
 
 /// Largest alignment a shared-memory type may require.
 ///
@@ -47,7 +50,7 @@ plain_leaf! {
     i8, i16, i32, i64,
     AtomicU8, AtomicU16, AtomicU32, AtomicU64,
     AtomicI8, AtomicI16, AtomicI32, AtomicI64,
-    (),
+    RawSpinlock, (),
 }
 
 // SAFETY: an array of layout elements has no padding between elements and

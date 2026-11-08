@@ -118,6 +118,7 @@ pub use yanet_shm::{
     rel::{ShmBox, ShmSlice},
     resolve::Resolve,
     shm::ShmLayout,
+    spinlock::{RawSpinlock, RawSpinlockGuard},
 };
 pub use yanet_sys::{
     classify::{

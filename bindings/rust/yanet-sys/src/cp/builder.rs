@@ -27,6 +27,7 @@ use yanet_shm::{
     rel::{ShmBox, ShmSlice},
     root::ShmRoot,
     shm::{MAX_ALIGN, ShmLayout},
+    spinlock::RawSpinlock,
 };
 
 use super::{
@@ -243,7 +244,7 @@ plain_build! {
     u8, u16, u32, u64, i8, i16, i32, i64,
     AtomicU8, AtomicU16, AtomicU32, AtomicU64,
     AtomicI8, AtomicI16, AtomicI32, AtomicI64,
-    (),
+    RawSpinlock, (),
 }
 
 // SAFETY: each element is written at its own offset, covering the array.

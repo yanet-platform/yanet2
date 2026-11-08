@@ -15,8 +15,8 @@ use core::{
 use yanet_packet as _;
 use yanet_sdk::{
     Batch, Build, BuiltObject, CommitCx, Counter, Cx, Device, Kind, Lpm4, Lpm6, Module, Object, ObjectBuilder,
-    ObjectCommitCx, ObjectLink, OwnedSlice, PerWorker, PerWorkerSlice, Refusal, Registered, ShmBox, ShmLayout,
-    ShmSlice, Traffic, Verdict,
+    ObjectCommitCx, ObjectLink, OwnedSlice, PerWorker, PerWorkerSlice, RawSpinlock, Refusal, Registered, ShmBox,
+    ShmLayout, ShmSlice, Traffic, Verdict,
 };
 use yanet_sdk_derive as _;
 use yanet_sdk_testing::{
@@ -128,6 +128,14 @@ struct Counted {
     traffic: Counter<Traffic>,
 }
 
+/// A spinlock and the count it guards.
+#[derive(ShmLayout)]
+#[repr(C)]
+struct Locked {
+    lock: RawSpinlock,
+    count: AtomicU32,
+}
+
 #[derive(ShmLayout)]
 #[repr(C)]
 struct Tables {
@@ -158,6 +166,7 @@ type LanesModule = Fixture<Lanes>;
 type FaultyModule = Fixture<Faulty>;
 type EntriesModule = Fixture<ShmSlice<Entry>>;
 type CountedModule = Fixture<Counted>;
+type LockedModule = Fixture<Locked>;
 type TablesModule = Fixture<Tables>;
 
 /// An owner of an empty arena.
@@ -303,6 +312,27 @@ fn test_build_writes_nested_slices_and_a_box() {
         )
     );
     release::<PolicyModule>(&owner, built);
+    owner.assert_released();
+}
+
+#[test]
+fn test_build_writes_a_spinlock_free_to_take() {
+    let owner = owner();
+
+    let built = build::<LockedModule>(&owner, |_| {
+        Ok(LockedParts {
+            lock: RawSpinlock::new(),
+            count: AtomicU32::new(7),
+        })
+    })
+    .expect("built");
+
+    let (config, _) = body::<LockedModule>(&owner, &built);
+    let guard = config.lock.lock();
+    config.count.fetch_add(1, Ordering::Relaxed);
+    drop(guard);
+    assert_eq!(8, config.count.load(Ordering::Relaxed));
+    release::<LockedModule>(&owner, built);
     owner.assert_released();
 }
 
