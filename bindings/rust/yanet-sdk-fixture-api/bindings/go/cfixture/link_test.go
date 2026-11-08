@@ -336,3 +336,77 @@ func Test_Stash_ObjectWorkerSlice_RestartsWithANewObject(t *testing.T) {
 	growth := counterGrowth(t, before, bed.counter(stash, "filled"))
 	require.Equal(t, perWorkerValues(map[int]uint64{1: 42 + 44}), growth)
 }
+
+// Test_Stash_PublishedSeed_ReadsTheLinkedObject verifies that a read of the
+// configuration a generation publishes resolves its link to the object the
+// same generation holds.
+func Test_Stash_PublishedSeed_ReadsTheLinkedObject(t *testing.T) {
+	bed, _ := servedStash(t)
+
+	seed, err := cfixture.PublishedSeed(bed.agent, "stash", cfixture.FaultNone)
+
+	require.NoError(t, err)
+	require.Equal(t, uint64(10), seed)
+}
+
+// Test_Stash_PublishedSeed_Unpublished_IsNotFound verifies that a
+// configuration built but not published is not found by a read of what the
+// dataplane runs.
+func Test_Stash_PublishedSeed_Unpublished_IsNotFound(t *testing.T) {
+	bed := newBed(t)
+	bed.stashInstance("stash", "state")
+
+	_, err := cfixture.PublishedSeed(bed.agent, "stash", cfixture.FaultNone)
+
+	require.ErrorIs(t, err, ffi.ErrNotFound)
+}
+
+// Test_Stash_PublishedValues_AfterObjectReplace_ReadsTheNewObject verifies
+// that a read follows the generation: once a same-name object from seed 20
+// replaces the linked one, the link resolves to the new object.
+func Test_Stash_PublishedValues_AfterObjectReplace_ReadsTheNewObject(t *testing.T) {
+	bed, _ := servedStash(t)
+	bed.publishObjects(bed.state("state", 20))
+	values := make([]uint64, stateSlots)
+
+	_, err := cfixture.PublishedValues(bed.agent, "stash", values)
+	require.NoError(t, err)
+
+	require.Equal(t, []uint64{20, 21, 22, 23}, values)
+}
+
+// Test_Stash_PublishedLinks_NamesTheLinkedObject verifies that a read lists
+// the objects the published configuration links, by type and name.
+func Test_Stash_PublishedLinks_NamesTheLinkedObject(t *testing.T) {
+	bed, _ := servedStash(t)
+
+	links, err := cfixture.PublishedLinks(bed.agent, "stash")
+
+	require.NoError(t, err)
+	require.Equal(t, []cfixture.LinkedObject{{Type: cfixture.StateType, Name: "state"}}, links)
+}
+
+// Test_Stash_PublishedSeed_ReleasesThePin verifies that a read releases its
+// pin of the generation: the configuration a later one replaces is freed at
+// once.
+func Test_Stash_PublishedSeed_ReleasesThePin(t *testing.T) {
+	bed, _, stash := servedStashInstance(t)
+	_, err := cfixture.PublishedSeed(bed.agent, "stash", cfixture.FaultNone)
+	require.NoError(t, err)
+
+	bed.publishModules(bed.stashInstance("stash", "state"))
+
+	require.NoError(t, stash.config.Free())
+}
+
+// Test_Stash_PublishedSeed_Panic_ReleasesThePin verifies that a read that
+// panics releases its pin of the generation as it unwinds.
+func Test_Stash_PublishedSeed_Panic_ReleasesThePin(t *testing.T) {
+	bed, _, stash := servedStashInstance(t)
+	_, err := cfixture.PublishedSeed(bed.agent, "stash", cfixture.FaultPanic)
+	require.ErrorContains(t, err, "panic: fixture fault")
+
+	bed.publishModules(bed.stashInstance("stash", "state"))
+
+	require.NoError(t, stash.config.Free())
+}

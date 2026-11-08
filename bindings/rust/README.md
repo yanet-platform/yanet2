@@ -73,7 +73,12 @@ after it.
 
 An object type (`Object`, `ObjectBuilder`, `export_object!`,
 `#[yanet_sdk::api(object = O)]`) is state built, published by name and
-released by its control plane, and read there through `Agent::read`. A module
+released by its control plane, and read there through `Agent::read`. What the
+dataplane runs, the configuration of a module that the current generation
+publishes under a name, is read through `Agent::read_published`, which pins the
+generation for the call alone: its `PublishedCx` resolves the configuration's
+edges, lists its object links by type and name, and resolves a link to the
+object of the same generation. A module
 configuration links it by type and name (`Scope::object`, an `ObjectLink`
 field), which the handler and the prepare step resolve to the object's
 configuration in the running generation and to the object's prepared value:

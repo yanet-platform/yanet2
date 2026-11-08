@@ -8,8 +8,10 @@
 //! the configuration builder with the C routines a C module's API calls for
 //! the same steps, and releases a configuration as those do. It owns the
 //! objects built there in the same way, which are released as a C object's
-//! owner releases them and read through [`Agent::read`]. Every C failure is an
-//! [`Error`].
+//! owner releases them and read through [`Agent::read`]. What the dataplane
+//! runs, the configuration a generation publishes under a name and the objects
+//! it links, is read through [`Agent::read_published`] under a pin of that
+//! generation. Every C failure is an [`Error`].
 //!
 //! A `std` crate: the exports of `#[yanet_sdk::api]` catch the panic of a
 //! method (`catch_unwind`) and hand it to C as an error, so an api crate is
@@ -19,7 +21,7 @@ mod agent;
 mod error;
 mod ffi;
 
-pub use agent::{Agent, ObjectCx, Retained};
+pub use agent::{Agent, ObjectCx, ObjectKey, PublishedCx, Retained};
 pub use error::{Error, ErrorKind};
 
 /// Paths the exports of `#[yanet_sdk::api]` expand to; not part of the API.

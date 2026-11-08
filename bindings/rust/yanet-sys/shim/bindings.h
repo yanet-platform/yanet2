@@ -16,6 +16,7 @@
 #include "lib/controlplane/config/cp_device.h"
 #include "lib/controlplane/config/cp_module.h"
 #include "lib/controlplane/config/cp_object.h"
+#include "lib/controlplane/config/zone.h"
 #include "lib/counters/counters.h"
 #include "lib/dataplane/config/zone.h"
 #include "lib/dataplane/module/module.h"
@@ -32,4 +33,5 @@
 
 #include "classify_shim.h"
 #include "common_shim.h"
+#include "cp_shim.h"
 #include "dp_shim.h"
