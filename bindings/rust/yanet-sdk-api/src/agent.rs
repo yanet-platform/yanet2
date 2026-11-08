@@ -20,7 +20,7 @@ use yanet_sys::{
     dp::{Module, Object},
 };
 
-use crate::error::{ApiError, ErrorKind, from_c_chain};
+use crate::error::{Error, ErrorKind, from_c_chain};
 
 /// A handle on an agent attached to the shared memory, the owner of the
 /// configurations built there.
@@ -53,7 +53,7 @@ pub struct Retained<B> {
     /// The configuration or the object, intact.
     pub built: B,
     /// Why it was kept; busy while a generation holds it.
-    pub error: ApiError,
+    pub error: Error,
 }
 
 impl<B: fmt::Debug> fmt::Debug for Retained<B> {
@@ -400,7 +400,7 @@ impl<O: Object> Releasable for BuiltObject<O, Agent> {
 /// whole mapping. Headers carry no kind, so a header of the other kind is not
 /// detected. When its type name is the handle's, it is a header of such a
 /// handle, built over an [`Agent`].
-pub unsafe fn handle_at<B: Releasable>(raw: NonNull<B::Raw>) -> Result<B, ApiError> {
+pub unsafe fn handle_at<B: Releasable>(raw: NonNull<B::Raw>) -> Result<B, Error> {
     // SAFETY: the pointer has the provenance of the whole mapping (caller
     // contract).
     let root = unsafe { ShmRoot::from_mapping(raw.cast()) };
@@ -408,7 +408,7 @@ pub unsafe fn handle_at<B: Releasable>(raw: NonNull<B::Raw>) -> Result<B, ApiErr
     // contract); C wrote it whole.
     let field = unsafe { slice::from_raw_parts(root.ptr::<u8>(raw.addr().get() + B::TYPE_FIELD), B::TYPE_LEN) };
     if CStr::from_bytes_until_nul(field).map(CStr::to_bytes) != Ok(B::TYPE_NAME.as_bytes()) {
-        return Err(ApiError::new(
+        return Err(Error::new(
             ErrorKind::InvalidArgument,
             "the handle is of another module or object type",
         ));
@@ -460,9 +460,9 @@ pub unsafe fn release_at<B: Releasable>(raw: NonNull<B::Raw>) -> Result<(), Reta
 }
 
 /// A name as the NUL terminated bytes of a C field of `N` bytes.
-fn c_name<const N: usize>(name: &str) -> Result<[u8; N], ApiError> {
+fn c_name<const N: usize>(name: &str) -> Result<[u8; N], Error> {
     if name.len() >= N || name.bytes().any(|byte| byte == 0) {
-        return Err(ApiError::new(
+        return Err(Error::new(
             ErrorKind::InvalidArgument,
             "a name holds a NUL or does not fit its C field whole",
         ));
@@ -479,7 +479,7 @@ fn c_name<const N: usize>(name: &str) -> Result<[u8; N], ApiError> {
 // context in the header over the agent's memory. The worker count is the
 // dataplane's, which C fixes when it starts the instance.
 unsafe impl Owner for Agent {
-    type Error = ApiError;
+    type Error = Error;
 
     fn root(&self) -> ShmRoot {
         // SAFETY: the pointer has the provenance of the whole mapping
@@ -518,7 +518,7 @@ unsafe impl Owner for Agent {
         };
     }
 
-    unsafe fn init_header(&self, header: Header, module: &str, name: &str) -> Result<(), ApiError> {
+    unsafe fn init_header(&self, header: Header, module: &str, name: &str) -> Result<(), Error> {
         let module = c_name::<{ CP_MODULE_TYPE_LEN as usize }>(module)?;
         let name = c_name::<{ CP_MODULE_NAME_LEN as usize }>(name)?;
         let mut chain = ptr::null_mut();
@@ -547,7 +547,7 @@ unsafe impl Owner for Agent {
         unsafe { bindings::cp_module_fini(header_at::<bindings::cp_module>(self, header)) };
     }
 
-    unsafe fn init_object_header(&self, header: Header, ty: &str, name: &str) -> Result<(), ApiError> {
+    unsafe fn init_object_header(&self, header: Header, ty: &str, name: &str) -> Result<(), Error> {
         let ty = c_name::<{ CP_OBJECT_TYPE_LEN as usize }>(ty)?;
         let name = c_name::<{ CP_OBJECT_NAME_LEN as usize }>(name)?;
         let mut chain = ptr::null_mut();
@@ -576,7 +576,7 @@ unsafe impl Owner for Agent {
         unsafe { bindings::cp_object_fini(header_at::<bindings::cp_object>(self, header)) };
     }
 
-    unsafe fn register_counter(&self, header: Header, name: &str, size: u64) -> Result<u64, ApiError> {
+    unsafe fn register_counter(&self, header: Header, name: &str, size: u64) -> Result<u64, Error> {
         let name = c_name::<{ COUNTER_NAME_LEN as usize }>(name)?;
         let mut chain = ptr::null_mut();
         // SAFETY: the header is initialised (caller contract), so its
@@ -603,7 +603,7 @@ unsafe impl Owner for Agent {
         tag: &str,
         name: &str,
         size: u64,
-    ) -> Result<(u64, u64), ApiError> {
+    ) -> Result<(u64, u64), Error> {
         let tag = c_name::<{ COUNTER_TAG_VALUE_LEN as usize }>(tag)?;
         let name = c_name::<{ COUNTER_NAME_LEN as usize }>(name)?;
         let (mut registry, mut chain) = (0, ptr::null_mut());
@@ -634,7 +634,7 @@ unsafe impl Owner for Agent {
         Ok((registry, id))
     }
 
-    unsafe fn link_device(&self, header: Header, name: &str) -> Result<u64, ApiError> {
+    unsafe fn link_device(&self, header: Header, name: &str) -> Result<u64, Error> {
         let name = c_name::<{ CP_DEVICE_NAME_LEN as usize }>(name)?;
         let (mut index, mut chain) = (0, ptr::null_mut());
         // SAFETY: the header is initialised (caller contract); the name is
@@ -654,7 +654,7 @@ unsafe impl Owner for Agent {
         Ok(index)
     }
 
-    unsafe fn link_object(&self, header: Header, ty: &str, name: &str) -> Result<u64, ApiError> {
+    unsafe fn link_object(&self, header: Header, ty: &str, name: &str) -> Result<u64, Error> {
         let ty = c_name::<{ CP_OBJECT_TYPE_LEN as usize }>(ty)?;
         let name = c_name::<{ CP_OBJECT_NAME_LEN as usize }>(name)?;
         let (mut index, mut chain) = (0, ptr::null_mut());

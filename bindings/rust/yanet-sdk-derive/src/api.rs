@@ -235,7 +235,7 @@ fn export(stem: &str, attr: &Args, self_ty: &Ident, method: &ImplItemFn) -> syn:
     };
     let doc = format!(" C export of `{self_ty}::{name}`.");
     if is_query(&sig.output) {
-        let ret = quote_spanned!(ret_span=> ::core::result::Result<u64, #p::ApiError>);
+        let ret = quote_spanned!(ret_span=> ::core::result::Result<u64, #p::Error>);
         return Ok(quote_spanned! {ms=>
             #[doc = #doc]
             #[unsafe(no_mangle)]
@@ -259,7 +259,7 @@ fn export(stem: &str, attr: &Args, self_ty: &Ident, method: &ImplItemFn) -> syn:
         Args::Object(target) => (quote!(BuiltObject), quote!(cp_object), target),
     };
     let ret = quote_spanned! {ret_span=>
-        ::core::result::Result<#p::#built<#target, #p::Agent>, #p::ApiError>
+        ::core::result::Result<#p::#built<#target, #p::Agent>, #p::Error>
     };
     Ok(quote_spanned! {ms=>
         #[doc = #doc]

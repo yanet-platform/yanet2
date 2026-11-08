@@ -9,7 +9,7 @@ use yanet_sdk::{
     Attribute, Builder, Built, FfiRecord, Join, LineRange, Lines, Net4, Net6, Nets4, Nets6, Node, Owned, PortRange,
     Ports, Rules, Scope,
 };
-use yanet_sdk_api::{Agent, ApiError, ErrorKind};
+use yanet_sdk_api::{Agent, Error, ErrorKind};
 use yanet_sdk_fixture::assign::{ActionParts, AssignAny, AssignConfigParts, Transport};
 
 use crate::text;
@@ -68,12 +68,12 @@ impl Assign {
         nets6: &[Net6],
         lines: &[LineRange],
         ports: &[PortRange],
-    ) -> Result<Built<yanet_sdk_fixture::assign::Assign, Agent>, ApiError> {
+    ) -> Result<Built<yanet_sdk_fixture::assign::Assign, Agent>, Error> {
         let views = rules
             .iter()
             .map(|rule| RuleViews::new(rule, nets4, nets6, lines, ports))
             .collect::<Result<Vec<_>, _>>()?;
-        Builder::<yanet_sdk_fixture::assign::Assign>::build::<ApiError, _>(agent, name, |scope| {
+        Builder::<yanet_sdk_fixture::assign::Assign>::build::<Error, _>(agent, name, |scope| {
             let v4 = views.iter().map(|view| view.v4.as_ref()).collect::<Vec<_>>();
             let v6 = views.iter().map(|view| view.v6.as_ref()).collect::<Vec<_>>();
             let v4 = family(scope, &views, &v4, NAMES4)?;
@@ -92,12 +92,12 @@ impl Assign {
 }
 
 /// The run of an array a span names.
-fn run<'a, T>(items: &'a [T], span: &Span) -> Result<&'a [T], ApiError> {
+fn run<'a, T>(items: &'a [T], span: &Span) -> Result<&'a [T], Error> {
     usize::try_from(span.offset)
         .ok()
         .zip(usize::try_from(span.count).ok())
         .and_then(|(offset, count)| items.get(offset..offset.checked_add(count)?))
-        .ok_or_else(|| ApiError::new(ErrorKind::InvalidArgument, "a rule names a run out of its array"))
+        .ok_or_else(|| Error::new(ErrorKind::InvalidArgument, "a rule names a run out of its array"))
 }
 
 /// The views of a rule: its networks in its family's slot, the others empty,
@@ -117,7 +117,7 @@ impl<'a> RuleViews<'a> {
         nets6: &'a [Net6],
         lines: &'a [LineRange],
         ports: &'a [PortRange],
-    ) -> Result<Self, ApiError> {
+    ) -> Result<Self, Error> {
         let (v4, v6, any) = match rule.family {
             ASSIGN_FAMILY_IPV4 => {
                 let pair = (Nets4::new(run(nets4, &rule.src)?)?, Nets4::new(run(nets4, &rule.dst)?)?);
@@ -128,7 +128,7 @@ impl<'a> RuleViews<'a> {
                 (None, Some(pair), None)
             }
             ASSIGN_FAMILY_ANY => (None, None, Some(())),
-            _ => return Err(ApiError::new(ErrorKind::InvalidArgument, "a rule of an unknown family")),
+            _ => return Err(Error::new(ErrorKind::InvalidArgument, "a rule of an unknown family")),
         };
         Ok(Self {
             v4,
@@ -165,7 +165,7 @@ const NAMES6: Names = [
     c"assign v6 rules",
 ];
 
-type Scoped<'b, 'env> = Scope<'b, 'env, Agent, ApiError>;
+type Scoped<'b, 'env> = Scope<'b, 'env, Agent, Error>;
 
 /// The classifier tree of a family whose networks are classified by `C`.
 type Family<C> = Rules<Join<C, C>, Transport>;
@@ -185,7 +185,7 @@ fn family<'b, N>(
         transport_name,
         rules_name,
     ]: Names,
-) -> Result<Owned<'b, Family<N::Classifier>, Agent>, ApiError>
+) -> Result<Owned<'b, Family<N::Classifier>, Agent>, Error>
 where
     N: Attribute,
     N::Classifier: Node,
@@ -218,7 +218,7 @@ fn any_family<'b>(
     scope: Scoped<'b, '_>,
     views: &[RuleViews<'_>],
     any: &[Option<&()>],
-) -> Result<Owned<'b, AssignAny, Agent>, ApiError> {
+) -> Result<Owned<'b, AssignAny, Agent>, Error> {
     let lines = views
         .iter()
         .zip(any)
