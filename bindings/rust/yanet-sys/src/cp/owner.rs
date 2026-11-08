@@ -91,6 +91,7 @@ pub unsafe trait Owner: 'static {
     ///
     /// The header must be at the start of a block of this owner, large enough
     /// for the header, which the routine overwrites whole.
+    #[doc(alias = "cp_module_init")]
     unsafe fn init_header(&self, header: Header, module: &str, name: &str) -> Result<(), Self::Error>;
 
     /// Releases what [`Owner::init_header`] set up, as `cp_module_fini`
@@ -100,6 +101,7 @@ pub unsafe trait Owner: 'static {
     ///
     /// The header must have been initialised by this owner and be no longer
     /// referenced.
+    #[doc(alias = "cp_module_fini")]
     unsafe fn fini_header(&self, header: Header);
 
     /// Initialises the C object header of an object of a type and name, as
@@ -108,6 +110,7 @@ pub unsafe trait Owner: 'static {
     /// # Safety
     ///
     /// As for [`Owner::init_header`].
+    #[doc(alias = "cp_object_init")]
     unsafe fn init_object_header(&self, header: Header, ty: &str, name: &str) -> Result<(), Self::Error>;
 
     /// Releases what [`Owner::init_object_header`] set up, as
@@ -118,6 +121,7 @@ pub unsafe trait Owner: 'static {
     /// The header must have been initialised by
     /// [`Owner::init_object_header`] of this owner and be no longer
     /// referenced.
+    #[doc(alias = "cp_object_fini")]
     unsafe fn fini_object_header(&self, header: Header);
 
     /// Registers a counter of the given number of values (C size) with the
@@ -142,5 +146,6 @@ pub unsafe trait Owner: 'static {
     /// # Safety
     ///
     /// As for [`Owner::register_counter`].
+    #[doc(alias = "cp_module_link_object")]
     unsafe fn link_object(&self, header: Header, ty: &str, name: &str) -> Result<u64, Self::Error>;
 }
