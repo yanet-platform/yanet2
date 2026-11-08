@@ -111,24 +111,30 @@ impl ApiError {
         self.chain.take().map_or(ptr::null_mut(), NonNull::as_ptr)
     }
 
-    /// Adds the error over the chain at `chain` as one frame of its kind and
-    /// whole message, so that chain stays as its cause.
+    /// Adds the error over the chain at `chain` as one frame of its kind, as C
+    /// reports it, and of its whole message, so that chain stays as its cause.
     ///
     /// # Safety
     ///
     /// `*chain` is null or a chain the caller owns.
     pub(crate) unsafe fn wrap_c_chain(self, chain: &mut *mut yanet_error) {
         // SAFETY: caller contract.
-        unsafe { add_frame(chain, self.kind(), &self.to_string()) };
+        unsafe { add_frame(chain, self.c_kind(), &self.to_string()) };
     }
 
     /// The kind of the outermost frame that carries one.
     pub fn kind(&self) -> ErrorKind {
+        ErrorKind::from_c(self.c_kind())
+    }
+
+    /// The kind C reports for the chain, one this crate does not name
+    /// included.
+    fn c_kind(&self) -> bindings::yanet_error_kind {
         let Some(chain) = self.chain else {
-            return ErrorKind::Untagged;
+            return bindings::yanet_error_kind_YANET_ERROR_NONE;
         };
         // SAFETY: the chain is live until drop.
-        ErrorKind::from_c(unsafe { bindings::yanet_error_kind(chain.as_ptr()) })
+        unsafe { bindings::yanet_error_kind(chain.as_ptr()) }
     }
 }
 
@@ -147,7 +153,7 @@ impl From<BuildError<ApiError>> for ApiError {
 
 impl From<Refusal> for ApiError {
     fn from(refusal: Refusal) -> Self {
-        from_str(ErrorKind::from_c(refusal.kind()), refusal.message())
+        with_c_kind(refusal.kind(), refusal.message())
     }
 }
 
@@ -155,6 +161,12 @@ impl From<Refusal> for ApiError {
 ///
 /// The message ends at its first NUL byte, as C reads it.
 pub fn from_str(kind: ErrorKind, message: &str) -> ApiError {
+    with_c_kind(kind.to_c(), message)
+}
+
+/// A new chain of one frame holding a message, tagged with a kind as C names
+/// it, one this crate does not name included.
+fn with_c_kind(kind: bindings::yanet_error_kind, message: &str) -> ApiError {
     let mut chain = ptr::null_mut();
     // SAFETY: the chain is null.
     unsafe { add_frame(&mut chain, kind, message) };
@@ -168,13 +180,13 @@ pub fn from_str(kind: ErrorKind, message: &str) -> ApiError {
 /// # Safety
 ///
 /// `*chain` is null or a chain the caller owns.
-unsafe fn add_frame(chain: &mut *mut yanet_error, kind: ErrorKind, message: &str) {
+unsafe fn add_frame(chain: &mut *mut yanet_error, kind: bindings::yanet_error_kind, message: &str) {
     // SAFETY: the chain by the caller contract, and the format takes the
     // length and the bytes of one string.
     unsafe {
         bindings::yanet_error_add_kind(
             chain,
-            kind.to_c(),
+            kind,
             c"%.*s".as_ptr(),
             message.len().min(c_int::MAX as usize) as c_int,
             message.as_ptr(),
