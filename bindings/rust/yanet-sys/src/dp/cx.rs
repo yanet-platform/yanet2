@@ -554,6 +554,8 @@ impl<T: CounterLayout> Counter<T> {
 
     /// The context's worker's values of the counter, for the prepared value.
     ///
+    /// The handle holds the address C's `counter_get_address` returns.
+    ///
     /// The handle is made with the prepare context, not the invocation context:
     ///
     /// ```compile_fail,E0308
@@ -571,6 +573,7 @@ impl<T: CounterLayout> Counter<T> {
     ///     let _ = cx.config().resolve(cx);
     /// }
     /// ```
+    #[doc(alias = "counter_get_address")]
     #[inline(always)]
     pub fn resolve<'c, M: Module>(&'c self, cx: &CommitCx<'c, M>) -> CounterRef<'c, T> {
         // SAFETY: as for adding, for the pass instead of the call.
@@ -588,6 +591,9 @@ impl<T: CounterLayout> Counter<T> {
 impl Device {
     /// Routing target that transmits through the device, `None` when the
     /// device is not part of the running generation.
+    ///
+    /// The target is the one C's `module_ectx_device_target` finds.
+    #[doc(alias = "module_ectx_device_target")]
     #[inline(always)]
     pub fn resolve<'id, M: Module>(&'id self, cx: &Cx<'id, M>) -> Option<DeviceRef<'id>> {
         device_target(cx, self, false)
@@ -595,6 +601,9 @@ impl Device {
 
     /// Routing target that re-enters the input of the device, `None` when
     /// the device is not part of the running generation.
+    ///
+    /// The target is the one C's `module_ectx_device_target` finds.
+    #[doc(alias = "module_ectx_device_target")]
     #[inline(always)]
     pub fn resolve_input<'id, M: Module>(&'id self, cx: &Cx<'id, M>) -> Option<DeviceRef<'id>> {
         device_target(cx, self, true)
@@ -631,6 +640,7 @@ impl<O: Object> ObjectLink<O> {
     /// Always there: the link was recorded by the build of this configuration,
     /// and C installs no configuration whose link the generation does not
     /// resolve to an object of the type and name.
+    #[doc(alias = "object_link_get_address")]
     #[inline(always)]
     pub fn get<'id>(&'id self, cx: &impl ModuleCx<'id>) -> &'id O::Config {
         let root = cx.shm_root();

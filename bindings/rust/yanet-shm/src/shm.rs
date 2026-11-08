@@ -21,6 +21,7 @@ use crate::rel::{ShmBox, ShmSlice};
 /// naturally aligned up to the 2 MiB hugepage, but a build with the address
 /// sanitizer shifts each one by its 64-byte red zone. This crate has no C, so
 /// `yanet-sys` asserts the two are equal.
+#[doc(alias = "MEMORY_BLOCK_MAX_ALIGN")]
 pub const MAX_ALIGN: usize = 64;
 
 /// Marks a type that may live in shared memory.

@@ -18,6 +18,7 @@ use crate::{bindings, cp::Build, dp::cx::ObjectCommitCx};
 ///
 /// An object type ships in a plugin of its own, as every plugin exports one
 /// `yanet_module_abi_version`.
+#[doc(alias = "cp_object")]
 pub trait Object: Sized + 'static {
     /// Object type name, as the dataplane registers the type and as the
     /// object's plugin exports it.

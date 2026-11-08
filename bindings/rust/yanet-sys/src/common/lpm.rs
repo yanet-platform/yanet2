@@ -135,6 +135,7 @@ impl<const K: usize> Lpm<K> {
     /// stores `LPM_VALUE_SET(value)`, `(value << 1) | LPM_VALUE_FLAG` on a
     /// 32-bit value (`common/lpm.h:26`, `:247`), and the lookup shifts it back,
     /// so a value inserted with bit 31 set reads back without it.
+    #[doc(alias = "lpm_lookup")]
     #[inline(always)]
     pub fn lookup<'g>(&'g self, cx: &impl Resolve<'g>, key: &[u8; K]) -> Option<u32> {
         const { assert!(K >= 1 && K <= 16, "LPM keys are 1 to 16 bytes") };

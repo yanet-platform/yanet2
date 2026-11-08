@@ -117,11 +117,14 @@ pub struct ParseError;
 #[repr(u8)]
 pub enum DscpMark {
     /// The outer DSCP is zero.
+    #[doc(alias = "DSCP_MARK_NEVER")]
     Never = 0,
     /// The outer DSCP is zero, as for `Never`; the value of a module
     /// configuration that names no marking.
+    #[doc(alias = "DSCP_MARK_DEFAULT")]
     Default = 1,
     /// The outer DSCP is the inner one.
+    #[doc(alias = "DSCP_MARK_ALWAYS")]
     Always = 2,
 }
 
@@ -249,6 +252,7 @@ impl<'id> Batch<'id> {
     /// pool's headroom in front; grow it with [`Packet::append`] and
     /// [`Packet::prepend`]. Its metadata starts zeroed, so its headers count
     /// as unparsed.
+    #[doc(alias = "worker_packet_alloc")]
     #[inline(always)]
     pub fn alloc(&mut self) -> Option<Packet<'id>> {
         // SAFETY: the call's worker (constructor contract).
@@ -267,6 +271,7 @@ impl<'id> Batch<'id> {
     /// like an allocated packet: it ends by its verdict or is freed. C
     /// splits the source's recirculation budget between the two; nothing
     /// else of the source changes.
+    #[doc(alias = "worker_clone_packet")]
     #[inline(always)]
     pub fn clone(&mut self, packet: &Packet<'id>) -> Option<Packet<'id>> {
         // SAFETY: the call's worker and context (constructor contract), the
@@ -292,6 +297,7 @@ impl<'id> Batch<'id> {
     /// parser refuses: it ends on no list and in no count of the front, where
     /// a dropped one is counted. An input packet is dropped instead, so that
     /// every input has its verdict (module: drain).
+    #[doc(alias = "worker_packet_free")]
     #[inline(always)]
     pub fn free(&mut self, packet: Packet<'id>) {
         // SAFETY: an owned packet of this batch is on no list and
@@ -309,6 +315,7 @@ impl<'id> Batch<'id> {
     /// takes any packet: packets taken first are counted again in the output.
     /// Core tracks this in yanet2 #3078 (keep a front's input counters in
     /// step with its input list).
+    #[doc(alias = "packet_front_pass")]
     #[inline(always)]
     pub fn pass_all(&mut self) {
         let front = self.front.as_ptr();
@@ -686,6 +693,7 @@ impl Packet<'_> {
 
     /// Length of the frame across its segments: the mbuf's packet length,
     /// as C's `rte_pktmbuf_pkt_len` reads it.
+    #[doc(alias = "rte_pktmbuf_pkt_len")]
     #[inline(always)]
     pub fn frame_len(&self) -> usize {
         // SAFETY: an owned packet's descriptor and mbuf are this call's
@@ -698,8 +706,9 @@ impl Packet<'_> {
     ///
     /// Header views read the same headers and unparsed headers stay
     /// unparsed. The packet descriptor shares the buffer with the headroom,
-    /// as in C, so the room is what the headroom holds beyond the
-    /// descriptor; beyond it the packet is left unchanged.
+    /// as in C's `packet_headroom_prepend`, so the room is what the headroom
+    /// holds beyond the descriptor; beyond it the packet is left unchanged.
+    #[doc(alias = "packet_headroom_prepend")]
     #[inline]
     pub fn prepend(&mut self, len: usize) -> Result<&mut [u8], ResizeError> {
         let raw = self.raw.as_ptr();
@@ -741,6 +750,7 @@ impl Packet<'_> {
     ///
     /// Beyond the tailroom, or on a chained packet, the packet is left
     /// unchanged.
+    #[doc(alias = "rte_pktmbuf_append")]
     #[inline]
     pub fn append(&mut self, len: usize) -> Result<&mut [u8], ResizeError> {
         let raw = self.raw.as_ptr();
@@ -771,6 +781,7 @@ impl Packet<'_> {
     /// of the frame and the fixed IPv4 or IPv6 header and an available TCP or
     /// UDP header whole. A trim that would not, one beyond the frame length,
     /// or one on a chained packet leaves the packet unchanged.
+    #[doc(alias = "rte_pktmbuf_trim")]
     #[inline]
     pub fn trim(&mut self, len: usize) -> Result<(), ResizeError> {
         let raw = self.raw.as_ptr();
@@ -797,6 +808,7 @@ impl Packet<'_> {
     /// header offset moves with the inner packet. The refusal of an
     /// unsupported inner type (an unparsed packet's included) or of a spent
     /// headroom leaves the packet unchanged.
+    #[doc(alias = "packet_ip4_encap")]
     #[inline]
     pub fn encap_ipv4(&mut self, dst: [u8; 4], src: [u8; 4], dscp: DscpMark) -> Result<(), TunnelError> {
         // SAFETY: the packet is exclusively ours for the call (attach:
@@ -809,6 +821,7 @@ impl Packet<'_> {
 
     /// Prepends an outer IPv6 header to an IPv4 or IPv6 packet, as
     /// [`Packet::encap_ipv4`] does with IPv4, through `packet_ip6_encap`.
+    #[doc(alias = "packet_ip6_encap")]
     #[inline]
     pub fn encap_ipv6(&mut self, dst: [u8; 16], src: [u8; 16], dscp: DscpMark) -> Result<(), TunnelError> {
         // SAFETY: as for `encap_ipv4`.
@@ -824,6 +837,7 @@ impl Packet<'_> {
     /// traffic class modulo 8. The packet needs its network header parsed: an
     /// unparsed one is refused. A spent headroom leaves the packet
     /// unchanged.
+    #[doc(alias = "packet_mpls_encap")]
     #[inline]
     pub fn encap_mpls(&mut self, label: u32, traffic_class: u8, bottom: bool, ttl: u8) -> Result<(), TunnelError> {
         // SAFETY: as for `encap_ipv4`.
@@ -842,6 +856,7 @@ impl Packet<'_> {
     /// segment only). Two headers are prepended one after the other, so a
     /// spent headroom may leave the UDP header written: the caller drops a
     /// packet it could not wrap.
+    #[doc(alias = "packet_ip4_encap_udp")]
     #[inline]
     pub fn encap_ipv4_udp(
         &mut self,
@@ -917,6 +932,7 @@ impl Packet<'_> {
     /// frame is unchanged when the packet is a fragment, the tunnel is of
     /// another kind, or the inner header is truncated; C may still have
     /// updated the packet's parse metadata (hash, fragment fields).
+    #[doc(alias = "packet_decap")]
     #[inline]
     pub fn decap(&mut self) -> Result<(), TunnelError> {
         // SAFETY: the packet is exclusively ours for the call (attach: packet).
@@ -933,6 +949,7 @@ impl Packet<'_> {
     /// were, so both are cleared first. A frame the parser refuses leaves the
     /// packet unparsed, as an allocated one. A chained packet is refused and
     /// left as it was, since the parser reads the first segment only.
+    #[doc(alias = "parse_packet")]
     #[inline]
     pub fn parse(&mut self) -> Result<(), ParseError> {
         if self.chained() {
@@ -982,6 +999,7 @@ impl Packet<'_> {
     /// meaningful also when the transport header itself is unavailable
     /// inside a non-initial fragment (`packet_transport_protocol`,
     /// lib/dataplane/packet/packet.h).
+    #[doc(alias = "packet_transport_protocol")]
     #[inline(always)]
     pub fn transport_protocol(&self) -> u8 {
         (self.transport_type() & 0xff) as u8
@@ -993,6 +1011,7 @@ impl Packet<'_> {
     ///
     /// A true result does not guarantee readable bytes; callers check
     /// lengths.
+    #[doc(alias = "packet_transport_header_available")]
     #[inline(always)]
     pub fn transport_header_available(&self) -> bool {
         u32::from(self.transport_type()) & bindings::PACKET_TRANSPORT_HEADER_UNAVAILABLE == 0
