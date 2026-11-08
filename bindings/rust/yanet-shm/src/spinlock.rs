@@ -16,8 +16,13 @@ const SPINS_PER_WAIT: u32 = 1024;
 /// marks the critical section. The word holds no pointer, so the lock works in
 /// every process that maps it, wherever the mapping lands. Zero is free and any
 /// other value is held, so every bit pattern is a valid state; a block that
-/// starts nonzero is a lock that is never released, not undefined behaviour. A
-/// panic inside the critical section releases the lock: there is no poisoning.
+/// starts nonzero is a lock that is never released, not undefined behaviour.
+///
+/// A panic that unwinds out of the critical section releases the lock: there
+/// is no poisoning. A holder that never returns, such as a process that aborts
+/// or is killed, leaves the lock held for good, and every later waiter spins
+/// forever. The word is not the C spinlock's: the two do not stand in for each
+/// other in a struct shared with C.
 #[repr(C)]
 #[derive(Debug, Default)]
 pub struct RawSpinlock {
@@ -38,6 +43,16 @@ impl RawSpinlock {
     #[inline]
     pub fn lock(&self) -> RawSpinlockGuard<'_> {
         self.lock_with(|| {})
+    }
+
+    /// Takes the lock if it is free, without waiting.
+    #[inline]
+    pub fn try_lock(&self) -> Option<RawSpinlockGuard<'_>> {
+        if self.word.swap(1, Ordering::Acquire) == 0 {
+            Some(RawSpinlockGuard { lock: self })
+        } else {
+            None
+        }
     }
 
     /// Takes the lock as [`Self::lock`] does, calling the hook between rounds
@@ -82,6 +97,7 @@ impl RawSpinlock {
 }
 
 /// Holds a [`RawSpinlock`] and releases it when dropped.
+#[derive(Debug)]
 #[must_use = "dropping the guard releases the lock at once"]
 pub struct RawSpinlockGuard<'a> {
     lock: &'a RawSpinlock,

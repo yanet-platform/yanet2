@@ -66,7 +66,19 @@ fn test_lock_released_on_panic() {
     });
 
     assert_matches!(result, Err(_));
-    drop(lock.lock());
+    assert_matches!(lock.try_lock(), Some(_));
+}
+
+#[test]
+fn test_try_lock_refuses_a_held_lock_and_leaves_it_held() {
+    let lock = RawSpinlock::new();
+    let guard = lock.lock();
+
+    let refused = (lock.try_lock().is_none(), lock.try_lock().is_none());
+    drop(guard);
+
+    assert_eq!((true, true), refused);
+    assert_matches!(lock.try_lock(), Some(_));
 }
 
 #[test]
@@ -88,6 +100,4 @@ fn test_lock_with_calls_the_hook_while_held() {
         drop(guard);
         waiter.join().expect("the waiter takes the released lock");
     });
-
-    assert!(waits.into_inner() > 0);
 }

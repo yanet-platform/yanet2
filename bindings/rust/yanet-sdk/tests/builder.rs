@@ -328,7 +328,7 @@ fn test_build_writes_a_spinlock_free_to_take() {
     .expect("built");
 
     let (config, _) = body::<LockedModule>(&owner, &built);
-    let guard = config.lock.lock();
+    let guard = config.lock.try_lock().expect("a built lock is free");
     config.count.fetch_add(1, Ordering::Relaxed);
     drop(guard);
     assert_eq!(8, config.count.load(Ordering::Relaxed));
