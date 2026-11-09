@@ -169,7 +169,7 @@ pub unsafe fn commit_object_ectx<O: Object>(ectx: *mut bindings::object_ectx, cp
     // buffer is allocated (attach: call, frozen, publish).
     let out = root.ptr::<O::Prepared<'_>>(unsafe { (*ectx).abs_object_prepared }.addr());
     // SAFETY: the header is an object of this type, its body frozen but for
-    // its atomics (attach: binding, frozen).
+    // its atomics and mutex payloads (attach: binding, frozen).
     let config = unsafe { (*root.ptr::<ObjectConfig<O::Config>>(cp_object.addr())).body() };
     // SAFETY: root, context and configuration as stated above.
     let cx = unsafe { ObjectCommitCx::<O>::new(root, NonNull::new_unchecked(ectx), config) };

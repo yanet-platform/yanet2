@@ -685,7 +685,8 @@ impl<'c, O: Object> ObjectCommitCx<'c, O> {
     ///
     /// The root covers the mapping, the execution context is the one being
     /// committed, and the configuration is the published one of the object
-    /// being committed, frozen for the pass but for its atomics.
+    /// being committed, frozen for the pass but for its atomics and mutex
+    /// payloads.
     #[inline(always)]
     pub(crate) unsafe fn new(root: ShmRoot, ectx: NonNull<bindings::object_ectx>, config: &'c O::Config) -> Self {
         Self {
@@ -1133,8 +1134,8 @@ impl<O: Object> ObjectLink<O> {
         // SAFETY: the object context is frozen and its absolute fields were
         // derived before the module's (attach: call, frozen); the object is
         // one of type `O`, as C resolves the link by its type name, whose
-        // body is frozen except for its atomics and outlives the generation
-        // (attach: binding, frozen, reclaim).
+        // body is frozen except for its atomics and mutex payloads and outlives
+        // the generation (attach: binding, frozen, reclaim).
         unsafe {
             let cp_object = (*object_ectx).abs_cp_object;
             (*root.ptr::<ObjectConfig<O::Config>>(cp_object.addr())).body()

@@ -35,11 +35,12 @@
 //!   resolves to holds the body and prepared value that type declares.
 //! - **frozen**: configuration bytes are frozen after publish and
 //!   execution-context bytes once the context is released to its worker; C
-//!   writes only `Opaque` bytes and atomics of configurations. The one
-//!   exception the SDK makes is per-worker state: a worker's handler writes its
-//!   own slot or region, through the handle in its prepared value, and no
-//!   reference covers the slot or region but the shared or exclusive borrows
-//!   the handler takes through that handle, never both kinds at once.
+//!   writes only `Opaque` bytes and atomics of configurations. Shared mutex
+//!   payloads change only through a live lock guard. The SDK also allows
+//!   per-worker state: a worker's handler writes its own slot or region,
+//!   through the handle in its prepared value, and no reference covers the slot
+//!   or region but the shared or exclusive borrows the handler takes through
+//!   that handle, never both kinds at once.
 //! - **publish**: C publishes a generation with a release store, workers load
 //!   it with acquire, and the commit pass (with the prepare step) completes
 //!   before the worker's first handler call of that generation. Besides a

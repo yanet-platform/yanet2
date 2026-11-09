@@ -1,33 +1,30 @@
-//! A spinlock that lives in shared memory.
+//! The private lock byte of a shared-memory mutex.
 
 #![forbid(unsafe_code)]
 
 use core::{
     hint,
-    sync::atomic::{AtomicU32, Ordering},
+    sync::atomic::{AtomicU8, Ordering},
 };
 
 /// How many times a waiter spins between calls of its wait hook.
 const SPINS_PER_WAIT: u32 = 1024;
 
-/// A test-and-test-and-set spinlock over one shared-memory word.
+/// A test-and-test-and-set spinlock over one shared-memory byte.
 ///
-/// It guards data kept beside it in a shared-memory struct, in every process
-/// that maps it. Zero is free and any other value held, so every bit pattern
-/// is a valid state; a block that starts nonzero is never released. A panic
-/// that unwinds out of the critical section releases the lock, but a holder
-/// that never returns, such as a killed process, leaves it held for good. The
-/// word does not stand in for the C spinlock's in a struct shared with C.
+/// Zero is free and any other value held, so every bit pattern is valid.
+/// Byte alignment lets the enclosing mutex place any payload immediately
+/// after its explicit header without implicit padding.
 #[repr(C)]
 #[derive(Debug, Default)]
 pub struct RawSpinlock {
-    word: AtomicU32,
+    word: AtomicU8,
 }
 
 impl RawSpinlock {
     /// A free lock.
     pub const fn new() -> Self {
-        Self { word: AtomicU32::new(0) }
+        Self { word: AtomicU8::new(0) }
     }
 
     /// Spins until the lock is free, takes it and returns the guard that
@@ -111,3 +108,8 @@ impl Drop for RawSpinlockGuard<'_> {
         self.lock.word.store(0, Ordering::Release);
     }
 }
+
+const _: () = {
+    assert!(size_of::<RawSpinlock>() == 1);
+    assert!(align_of::<RawSpinlock>() == 1);
+};

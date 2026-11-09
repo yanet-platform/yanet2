@@ -15,8 +15,8 @@ use core::{
 use yanet_packet as _;
 use yanet_sdk::{
     Batch, Build, BuiltObject, CommitCx, Counter, Cx, Device, Kind, Lpm4, Lpm6, Module, Object, ObjectBuilder,
-    ObjectCommitCx, ObjectCounter, ObjectLink, OwnedSlice, PerWorker, PerWorkerSlice, RawSpinlock, Refusal, Registered,
-    ShmBox, ShmLayout, ShmSlice, TaggedCounter, TaggedCounters, Traffic, Verdict,
+    ObjectCommitCx, ObjectCounter, ObjectLink, OwnedSlice, PerWorker, PerWorkerSlice, Refusal, Registered, ShmBox,
+    ShmLayout, ShmSlice, TaggedCounter, TaggedCounters, Traffic, Verdict,
 };
 use yanet_sdk_derive as _;
 use yanet_sdk_testing::{
@@ -128,13 +128,33 @@ struct Counted {
     traffic: Counter<Traffic>,
 }
 
-/// A spinlock and the count it guards.
-#[derive(ShmLayout)]
-#[repr(C)]
-struct Locked {
-    lock: RawSpinlock,
-    count: AtomicU32,
+mod locked {
+    #![forbid(unsafe_code)]
+
+    use yanet_sdk::{ShmLayout, SpinMutex};
+
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, ShmLayout)]
+    #[repr(C)]
+    pub struct Counts {
+        pub packets: u64,
+        pub bytes: u64,
+    }
+
+    #[derive(ShmLayout)]
+    #[repr(C)]
+    pub struct Locked {
+        pub state: SpinMutex<Counts>,
+    }
+
+    /// Adds one packet and its bytes through the safe shared-state API.
+    pub fn add(config: &Locked) {
+        let mut state = config.state.lock();
+        state.packets += 1;
+        state.bytes += 64;
+    }
 }
+
+use locked::{Counts, Locked, LockedParts};
 
 #[derive(ShmLayout)]
 #[repr(C)]
@@ -340,22 +360,23 @@ fn test_build_writes_nested_slices_and_a_box() {
 }
 
 #[test]
-fn test_build_writes_a_spinlock_free_to_take() {
+fn test_build_writes_an_unlocked_mutex_with_plain_state() {
     let owner = owner();
 
     let built = build::<LockedModule>(&owner, |_| {
         Ok(LockedParts {
-            lock: RawSpinlock::new(),
-            count: AtomicU32::new(7),
+            state: Counts { packets: 7, bytes: 448 },
         })
     })
     .expect("built");
 
     let (config, _) = body::<LockedModule>(&owner, &built);
-    let guard = config.lock.try_lock().expect("a built lock is free");
-    config.count.fetch_add(1, Ordering::Relaxed);
-    drop(guard);
-    assert_eq!(8, config.count.load(Ordering::Relaxed));
+    assert_eq!(
+        Counts { packets: 7, bytes: 448 },
+        *config.state.try_lock().expect("free")
+    );
+    locked::add(config);
+    assert_eq!(Counts { packets: 8, bytes: 512 }, *config.state.lock());
     release::<LockedModule>(&owner, built);
     owner.assert_released();
 }

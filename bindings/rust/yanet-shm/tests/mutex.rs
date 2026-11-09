@@ -1,28 +1,18 @@
-//! The spinlock's exclusion and release, under Miri as natively.
+//! The mutex's exclusion and release, under Miri as natively.
 //!
 //! Under Miri a missing happens-before edge between two holders is a reported
 //! data race, so these cases also check the memory ordering of the lock.
 
+#![forbid(unsafe_code)]
+
 use core::{
-    assert_matches,
-    cell::UnsafeCell,
-    hint,
+    assert_matches, hint,
     sync::atomic::{AtomicU32, Ordering},
 };
 use std::{panic, thread};
 
 use yanet_sdk_testing as _;
-use yanet_shm::spinlock::RawSpinlock;
-
-/// Data kept beside the lock that guards it, as a shared-memory struct keeps
-/// it.
-struct Guarded {
-    lock: RawSpinlock,
-    count: UnsafeCell<u32>,
-}
-
-// SAFETY: the count is reached only while the lock is held.
-unsafe impl Sync for Guarded {}
+use yanet_shm::mutex::SpinMutex;
 
 /// verifies that holders on several threads never overlap.
 ///
@@ -34,36 +24,29 @@ fn test_lock_excludes_concurrent_holders() {
     const THREADS: u32 = 4;
     const ROUNDS: u32 = if cfg!(miri) { 50 } else { 100_000 };
 
-    let guarded = Guarded {
-        lock: RawSpinlock::new(),
-        count: UnsafeCell::new(0),
-    };
+    let guarded = SpinMutex::new(0_u32);
     thread::scope(|scope| {
-        // Shares the whole struct: a closure would otherwise capture the
-        // count alone, which is not shareable by itself.
         let guarded = &guarded;
         for _ in 0..THREADS {
             scope.spawn(move || {
                 for _ in 0..ROUNDS {
-                    let _guard = guarded.lock.lock();
-                    // SAFETY: the guard above makes this the only holder.
-                    unsafe { *guarded.count.get() += 1 };
+                    *guarded.lock() += 1;
                 }
             });
         }
     });
 
-    assert_eq!(THREADS * ROUNDS, guarded.count.into_inner());
+    assert_eq!(THREADS * ROUNDS, *guarded.lock());
 }
 
 #[test]
 fn test_lock_released_on_panic() {
-    let lock = RawSpinlock::new();
+    let lock = SpinMutex::new(0_u32);
 
-    let result = panic::catch_unwind(|| {
+    let result = panic::catch_unwind(panic::AssertUnwindSafe(|| {
         let _guard = lock.lock();
         panic!("panic while the lock is held");
-    });
+    }));
 
     assert_matches!(result, Err(_));
     assert_matches!(lock.try_lock(), Some(_));
@@ -71,7 +54,7 @@ fn test_lock_released_on_panic() {
 
 #[test]
 fn test_try_lock_refuses_a_held_lock_and_leaves_it_held() {
-    let lock = RawSpinlock::new();
+    let lock = SpinMutex::new(0_u32);
     let guard = lock.lock();
 
     let refused = (lock.try_lock().is_none(), lock.try_lock().is_none());
@@ -81,9 +64,50 @@ fn test_try_lock_refuses_a_held_lock_and_leaves_it_held() {
     assert_matches!(lock.try_lock(), Some(_));
 }
 
+/// verifies that a successful nonblocking acquisition observes the previous
+/// holder's writes, ordered by the mutex alone.
+#[test]
+fn test_try_lock_observes_the_previous_holders_writes() {
+    let state = SpinMutex::new(0_u32);
+    let waiting = AtomicU32::new(0);
+
+    let seen = thread::scope(|scope| {
+        let mut guard = state.lock();
+        let waiter = scope.spawn(|| {
+            loop {
+                if let Some(guard) = state.try_lock() {
+                    break *guard;
+                }
+                waiting.store(1, Ordering::Relaxed);
+                thread::yield_now();
+            }
+        });
+        while waiting.load(Ordering::Relaxed) == 0 {
+            hint::spin_loop();
+        }
+        *guard = 7;
+        drop(guard);
+        waiter.join().expect("the waiter acquires the released mutex")
+    });
+
+    assert_eq!(7, seen);
+}
+
+#[test]
+fn test_guard_can_be_used_and_released_on_another_thread() {
+    let state = SpinMutex::new(7_u32);
+    let mut guard = state.lock();
+
+    thread::scope(|scope| {
+        scope.spawn(move || *guard += 1).join().expect("the holder finishes");
+    });
+
+    assert_eq!(8, *state.try_lock().expect("released on the other thread"));
+}
+
 #[test]
 fn test_lock_with_calls_the_hook_while_held() {
-    let lock = RawSpinlock::new();
+    let lock = SpinMutex::new(0_u32);
     let waits = AtomicU32::new(0);
 
     thread::scope(|scope| {
@@ -102,6 +126,22 @@ fn test_lock_with_calls_the_hook_while_held() {
     });
 }
 
+#[test]
+fn test_lock_with_panicking_wait_hook_leaves_the_current_holder_locked() {
+    let state = SpinMutex::new(7_u32);
+    let guard = state.lock();
+
+    let result = panic::catch_unwind(panic::AssertUnwindSafe(|| {
+        drop(state.lock_with(|| panic!("stop waiting")));
+    }));
+
+    assert_matches!(result, Err(_));
+    assert_matches!(state.try_lock(), None);
+    assert_eq!(7, *guard);
+    drop(guard);
+    assert_matches!(state.try_lock(), Some(_));
+}
+
 /// verifies that a waiter that takes the lock after spinning sees what the
 /// holder wrote before releasing it.
 ///
@@ -110,29 +150,24 @@ fn test_lock_with_calls_the_hook_while_held() {
 /// acquire on that path is a reported data race, whatever the schedule.
 #[test]
 fn test_lock_with_contended_sees_the_holders_writes() {
-    let guarded = Guarded {
-        lock: RawSpinlock::new(),
-        count: UnsafeCell::new(0),
-    };
+    let guarded = SpinMutex::new(0_u32);
     let waits = AtomicU32::new(0);
 
     let seen = thread::scope(|scope| {
         let guarded = &guarded;
         let waits = &waits;
-        let guard = guarded.lock.lock();
+        let mut guard = guarded.lock();
         let waiter = scope.spawn(move || {
-            let _guard = guarded.lock.lock_with(|| {
+            let guard = guarded.lock_with(|| {
                 waits.fetch_add(1, Ordering::Relaxed);
                 thread::yield_now();
             });
-            // SAFETY: the guard above makes this the only holder.
-            unsafe { *guarded.count.get() }
+            *guard
         });
         while waits.load(Ordering::Relaxed) == 0 {
             hint::spin_loop();
         }
-        // SAFETY: the guard taken above makes this the only holder.
-        unsafe { *guarded.count.get() = 7 };
+        *guard = 7;
         drop(guard);
         waiter.join().expect("the waiter takes the released lock")
     });
@@ -153,14 +188,14 @@ impl Drop for PanicsOnDrop {
 /// leaves the lock free.
 #[test]
 fn test_lock_with_released_when_the_hook_panics_on_drop() {
-    let lock = RawSpinlock::new();
+    let lock = SpinMutex::new(0_u32);
     let capture = PanicsOnDrop;
 
-    let result = panic::catch_unwind(|| {
+    let result = panic::catch_unwind(panic::AssertUnwindSafe(|| {
         let _guard = lock.lock_with(move || {
             let _ = &capture;
         });
-    });
+    }));
 
     assert_matches!(result, Err(_));
     assert_matches!(lock.try_lock(), Some(_));

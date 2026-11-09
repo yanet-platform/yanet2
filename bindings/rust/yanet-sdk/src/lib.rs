@@ -116,10 +116,10 @@
 pub use yanet_packet as packet;
 pub use yanet_sdk_derive::{FfiRecord, ShmLayout, api};
 pub use yanet_shm::{
+    mutex::{SpinMutex, SpinMutexGuard},
     rel::{ShmBox, ShmSlice},
     resolve::Resolve,
     shm::ShmLayout,
-    spinlock::{RawSpinlock, RawSpinlockGuard},
 };
 pub use yanet_sys::{
     classify::{
