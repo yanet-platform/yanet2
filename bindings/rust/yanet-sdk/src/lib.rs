@@ -116,7 +116,7 @@
 pub use yanet_packet as packet;
 pub use yanet_sdk_derive::{FfiRecord, ShmLayout, api};
 pub use yanet_shm::{
-    mutex::{SpinMutex, SpinMutexGuard},
+    mutex::{Mutex, MutexGuard},
     rel::{ShmBox, ShmSlice},
     resolve::Resolve,
     shm::ShmLayout,

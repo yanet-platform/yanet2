@@ -131,7 +131,7 @@ struct Counted {
 mod locked {
     #![forbid(unsafe_code)]
 
-    use yanet_sdk::{PerWorker, PerWorkerSlice, ShmLayout, ShmSlice, SpinMutex};
+    use yanet_sdk::{Mutex, PerWorker, PerWorkerSlice, ShmLayout, ShmSlice};
 
     #[derive(Clone, Copy, Debug, PartialEq, Eq, ShmLayout)]
     #[repr(C)]
@@ -143,7 +143,7 @@ mod locked {
     #[derive(ShmLayout)]
     #[repr(C)]
     pub struct Locked {
-        pub state: SpinMutex<Counts>,
+        pub state: Mutex<Counts>,
     }
 
     #[derive(Clone, Copy, Debug, PartialEq, Eq, ShmLayout)]
@@ -157,7 +157,7 @@ mod locked {
     #[repr(C)]
     pub struct PaddedRoot {
         pub tag: u8,
-        pub state: SpinMutex<Padded>,
+        pub state: Mutex<Padded>,
         pub items: ShmSlice<Padded>,
         pub tail: u8,
     }
@@ -443,7 +443,7 @@ fn test_build_padded_root_mutex_and_slice_use_only_typed_fields() {
     }
     assert_eq!(Padded { narrow: 8, wide: 13 }, *config.state.lock());
     assert_eq!(16, size_of::<Padded>());
-    assert_eq!(24, size_of::<yanet_sdk::SpinMutex<Padded>>());
+    assert_eq!(24, size_of::<yanet_sdk::Mutex<Padded>>());
     release::<Fixture<PaddedRoot>>(&owner, built);
     owner.assert_released();
 }

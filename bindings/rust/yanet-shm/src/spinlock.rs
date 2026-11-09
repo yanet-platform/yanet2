@@ -15,11 +15,11 @@ const SPINS_PER_WAIT: u32 = 1024;
 /// Zero is free and any other value held, so every bit pattern is valid.
 #[repr(C)]
 #[derive(Debug, Default)]
-pub struct RawSpinlock {
+pub struct Spinlock {
     word: AtomicU8,
 }
 
-impl RawSpinlock {
+impl Spinlock {
     /// A free lock.
     pub const fn new() -> Self {
         Self { word: AtomicU8::new(0) }
@@ -31,17 +31,17 @@ impl RawSpinlock {
     /// Taking the lock acquires everything the previous holder wrote before
     /// releasing it.
     #[inline]
-    pub fn lock(&self) -> RawSpinlockGuard<'_> {
+    pub fn lock(&self) -> SpinlockGuard<'_> {
         self.lock_with(|| {})
     }
 
     /// Takes the lock if it is free, without waiting.
     #[inline]
-    pub fn try_lock(&self) -> Option<RawSpinlockGuard<'_>> {
+    pub fn try_lock(&self) -> Option<SpinlockGuard<'_>> {
         // A held lock is refused on a plain load, which leaves the cache line
         // shared with the waiters.
         if self.word.load(Ordering::Relaxed) == 0 && self.word.swap(1, Ordering::Acquire) == 0 {
-            Some(RawSpinlockGuard { lock: self })
+            Some(SpinlockGuard { lock: self })
         } else {
             None
         }
@@ -54,14 +54,14 @@ impl RawSpinlock {
     /// gives the CPU up, such as a thread yield; a waiter pinned to a core of
     /// its own needs none.
     #[inline]
-    pub fn lock_with<F>(&self, mut wait: F) -> RawSpinlockGuard<'_>
+    pub fn lock_with<F>(&self, mut wait: F) -> SpinlockGuard<'_>
     where
         F: FnMut(),
     {
         if self.word.swap(1, Ordering::Acquire) != 0 {
             self.lock_contended(&mut wait);
         }
-        let guard = RawSpinlockGuard { lock: self };
+        let guard = SpinlockGuard { lock: self };
         // The hook is dropped while the guard lives, so a drop that panics
         // releases the lock as it unwinds.
         drop(wait);
@@ -92,14 +92,14 @@ impl RawSpinlock {
     }
 }
 
-/// Holds a [`RawSpinlock`] and releases it when dropped.
+/// Holds a [`Spinlock`] and releases it when dropped.
 #[derive(Debug)]
 #[must_use = "dropping the guard releases the lock at once"]
-pub struct RawSpinlockGuard<'a> {
-    lock: &'a RawSpinlock,
+pub struct SpinlockGuard<'a> {
+    lock: &'a Spinlock,
 }
 
-impl Drop for RawSpinlockGuard<'_> {
+impl Drop for SpinlockGuard<'_> {
     #[inline]
     fn drop(&mut self) {
         // Publishes the holder's writes to whoever takes the lock next.
@@ -108,6 +108,6 @@ impl Drop for RawSpinlockGuard<'_> {
 }
 
 const _: () = {
-    assert!(size_of::<RawSpinlock>() == 1);
-    assert!(align_of::<RawSpinlock>() == 1);
+    assert!(size_of::<Spinlock>() == 1);
+    assert!(align_of::<Spinlock>() == 1);
 };

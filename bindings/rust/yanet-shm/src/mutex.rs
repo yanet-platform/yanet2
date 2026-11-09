@@ -7,7 +7,7 @@ use core::{
 
 use crate::{
     shm::ShmLayout,
-    spinlock::{RawSpinlock, RawSpinlockGuard},
+    spinlock::{Spinlock, SpinlockGuard},
 };
 
 /// A spin mutex protecting a plain shared-memory value.
@@ -24,8 +24,8 @@ use crate::{
 ///
 /// ```
 /// #![forbid(unsafe_code)]
-/// use yanet_shm::mutex::SpinMutex;
-/// let state = SpinMutex::new([0_u64; 2]);
+/// use yanet_shm::mutex::Mutex;
+/// let state = Mutex::new([0_u64; 2]);
 /// {
 ///     let mut guard = state.lock();
 ///     guard[0] += 1;
@@ -37,39 +37,39 @@ use crate::{
 /// Owning edges cannot be protected and then moved through the guard:
 ///
 /// ```compile_fail,E0277
-/// use yanet_shm::{mutex::SpinMutex, rel::ShmBox};
-/// fn move_edge(_: SpinMutex<ShmBox<u64>>) {}
+/// use yanet_shm::{mutex::Mutex, rel::ShmBox};
+/// fn move_edge(_: Mutex<ShmBox<u64>>) {}
 /// ```
 #[repr(C)]
-pub struct SpinMutex<T>
+pub struct Mutex<T>
 where
     T: Copy + ShmLayout,
 {
-    lock: RawSpinlock,
+    lock: Spinlock,
     value: UnsafeCell<T>,
 }
 
-impl<T> SpinMutex<T>
+impl<T> Mutex<T>
 where
     T: Copy + ShmLayout,
 {
     /// An unlocked mutex containing the initial value.
     pub const fn new(value: T) -> Self {
         Self {
-            lock: RawSpinlock::new(),
+            lock: Spinlock::new(),
             value: UnsafeCell::new(value),
         }
     }
 
     /// Spins until the value can be borrowed exclusively.
     #[inline]
-    pub fn lock(&self) -> SpinMutexGuard<'_, T> {
+    pub fn lock(&self) -> MutexGuard<'_, T> {
         self.guard(self.lock.lock())
     }
 
     /// Borrows the value exclusively if the mutex is free, without waiting.
     #[inline]
-    pub fn try_lock(&self) -> Option<SpinMutexGuard<'_, T>> {
+    pub fn try_lock(&self) -> Option<MutexGuard<'_, T>> {
         self.lock.try_lock().map(|lock| self.guard(lock))
     }
 
@@ -80,7 +80,7 @@ where
     /// hook that panics, including when dropped, never strands a lock this
     /// call acquired.
     #[inline]
-    pub fn lock_with<F>(&self, wait: F) -> SpinMutexGuard<'_, T>
+    pub fn lock_with<F>(&self, wait: F) -> MutexGuard<'_, T>
     where
         F: FnMut(),
     {
@@ -89,8 +89,8 @@ where
 
     /// Borrows the payload while the guard of this mutex keeps it exclusive.
     #[inline]
-    fn guard<'a>(&'a self, lock: RawSpinlockGuard<'a>) -> SpinMutexGuard<'a, T> {
-        SpinMutexGuard {
+    fn guard<'a>(&'a self, lock: SpinlockGuard<'a>) -> MutexGuard<'a, T> {
+        MutexGuard {
             // SAFETY: every caller holds this mutex's lock, and the payload
             // is private. The exclusive borrow ends before the guard unlocks.
             value: unsafe { &mut *self.value.get() },
@@ -101,20 +101,20 @@ where
 
 // SAFETY: only a lock holder can reach the payload. The lock orders every
 // holder's access, and the payload can be transferred between threads.
-unsafe impl<T> Sync for SpinMutex<T> where T: Copy + ShmLayout + Send {}
+unsafe impl<T> Sync for Mutex<T> where T: Copy + ShmLayout + Send {}
 
 // SAFETY: the lock byte and payload accept every bit pattern and need no
 // drop. C representation aligns the payload; padding is never accessed as
 // data, and the whole value has the payload's permitted alignment.
-unsafe impl<T> ShmLayout for SpinMutex<T> where T: Copy + ShmLayout {}
+unsafe impl<T> ShmLayout for Mutex<T> where T: Copy + ShmLayout {}
 
 /// An exclusive borrow that releases the mutex when dropped.
 ///
 /// A reference to the payload cannot outlive its guard:
 ///
 /// ```compile_fail,E0515
-/// use yanet_shm::mutex::SpinMutex;
-/// fn escape(mutex: &SpinMutex<u64>) -> &u64 {
+/// use yanet_shm::mutex::Mutex;
+/// fn escape(mutex: &Mutex<u64>) -> &u64 {
 ///     &*mutex.lock()
 /// }
 /// ```
@@ -122,8 +122,8 @@ unsafe impl<T> ShmLayout for SpinMutex<T> where T: Copy + ShmLayout {}
 /// Mutating through a shared guard is refused:
 ///
 /// ```compile_fail,E0596
-/// use yanet_shm::mutex::SpinMutexGuard;
-/// fn write(guard: &SpinMutexGuard<'_, u64>) {
+/// use yanet_shm::mutex::MutexGuard;
+/// fn write(guard: &MutexGuard<'_, u64>) {
 ///     **guard = 1;
 /// }
 /// ```
@@ -133,29 +133,29 @@ unsafe impl<T> ShmLayout for SpinMutex<T> where T: Copy + ShmLayout {}
 ///
 /// ```compile_fail,E0277
 /// use core::{cell::Cell, marker::PhantomData};
-/// use yanet_shm::{mutex::{SpinMutex, SpinMutexGuard}, shm::ShmLayout};
+/// use yanet_shm::{mutex::{Mutex, MutexGuard}, shm::ShmLayout};
 /// #[derive(Clone, Copy)]
 /// #[repr(C)]
 /// struct Local(u32, PhantomData<Cell<()>>);
 /// // SAFETY: a word and a zero-sized marker, without padding or drop.
 /// unsafe impl ShmLayout for Local {}
 /// fn shared<T: Sync>() {}
-/// shared::<SpinMutex<Local>>();
-/// shared::<SpinMutexGuard<'_, Local>>();
+/// shared::<Mutex<Local>>();
+/// shared::<MutexGuard<'_, Local>>();
 /// ```
 #[derive(Debug)]
 #[must_use = "dropping the guard releases the mutex at once"]
-pub struct SpinMutexGuard<'a, T>
+pub struct MutexGuard<'a, T>
 where
     T: Copy + ShmLayout,
 {
     // The mutable reference also bounds sharing of the guard by whether the
     // payload may be shared, independently of whether its mutex may be shared.
     value: &'a mut T,
-    _lock: RawSpinlockGuard<'a>,
+    _lock: SpinlockGuard<'a>,
 }
 
-impl<T> Deref for SpinMutexGuard<'_, T>
+impl<T> Deref for MutexGuard<'_, T>
 where
     T: Copy + ShmLayout,
 {
@@ -167,7 +167,7 @@ where
     }
 }
 
-impl<T> DerefMut for SpinMutexGuard<'_, T>
+impl<T> DerefMut for MutexGuard<'_, T>
 where
     T: Copy + ShmLayout,
 {
@@ -181,7 +181,7 @@ where
 mod tests {
     use core::{cell::Cell, marker::PhantomData};
 
-    use super::{SpinMutex, SpinMutexGuard};
+    use super::{Mutex, MutexGuard};
     use crate::shm::ShmLayout;
 
     #[derive(Clone, Copy)]
@@ -200,10 +200,10 @@ mod tests {
 
     /// Checks the compact representation and the payload's alignment.
     fn check_layout<T: Copy + ShmLayout>() {
-        assert_eq!(align_of::<T>(), core::mem::offset_of!(SpinMutex<T>, value));
-        assert_eq!(align_of::<T>() + size_of::<T>(), size_of::<SpinMutex<T>>());
-        assert_eq!(align_of::<T>(), align_of::<SpinMutex<T>>());
-        assert!(!core::mem::needs_drop::<SpinMutex<T>>());
+        assert_eq!(align_of::<T>(), core::mem::offset_of!(Mutex<T>, value));
+        assert_eq!(align_of::<T>() + size_of::<T>(), size_of::<Mutex<T>>());
+        assert_eq!(align_of::<T>(), align_of::<Mutex<T>>());
+        assert!(!core::mem::needs_drop::<Mutex<T>>());
     }
 
     #[test]
@@ -222,9 +222,9 @@ mod tests {
         fn send<T: Send>() {}
         fn share<T: Sync>() {}
 
-        send::<SpinMutex<Local>>();
-        share::<SpinMutex<Local>>();
-        send::<SpinMutexGuard<'_, Local>>();
-        share::<SpinMutexGuard<'_, u32>>();
+        send::<Mutex<Local>>();
+        share::<Mutex<Local>>();
+        send::<MutexGuard<'_, Local>>();
+        share::<MutexGuard<'_, u32>>();
     }
 }

@@ -24,7 +24,7 @@ use core::{
 };
 
 use yanet_shm::{
-    mutex::SpinMutex,
+    mutex::Mutex,
     rel::{ShmBox, ShmSlice},
     root::ShmRoot,
     shm::{MAX_ALIGN, ShmLayout},
@@ -254,7 +254,7 @@ plain_build! {
 
 // SAFETY: a copyable payload owns no blocks or address-relative edges. The
 // mutex is written whole with its lock free and needs no release work.
-unsafe impl<T> Build for SpinMutex<T>
+unsafe impl<T> Build for Mutex<T>
 where
     T: Copy + ShmLayout,
 {
