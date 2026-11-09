@@ -29,8 +29,9 @@
 //! # Objects
 //!
 //! An object, C's `cp_object`, is built the same way by
-//! [`ObjectBuilder::build`], over a scope of [`ObjectKind`] that registers no
-//! counter and links no device or object, and handed over as a [`BuiltObject`].
+//! [`ObjectBuilder::build`], over a scope of [`ObjectKind`] that registers
+//! counters in the object's own registry and links no device or object, and
+//! handed over as a [`BuiltObject`].
 //! It is state that outlives the module configurations linking it: the control
 //! plane publishes it by name before any module links it and releases it once
 //! no generation holds it.

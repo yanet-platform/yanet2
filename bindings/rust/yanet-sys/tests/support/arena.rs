@@ -171,6 +171,10 @@ unsafe impl Owner for ArenaOwner {
         Ok((0, 0))
     }
 
+    unsafe fn register_object_counter(&self, _: Header, _: &str, _: u64) -> Result<u64, Never> {
+        Ok(0)
+    }
+
     unsafe fn link_device(&self, _: Header, _: &str) -> Result<u64, Never> {
         Ok(0)
     }
