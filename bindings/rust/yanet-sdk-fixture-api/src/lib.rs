@@ -160,7 +160,8 @@ pub struct Tally;
 impl Tally {
     /// A configuration named `name` over `word`, whose counters are registered
     /// in the order `held`, `v2`, `v0`, `v1`, an order other than the fields',
-    /// and then `traffic` and `running`, with no packet seen on any worker.
+    /// and then `traffic`, `parity` and `running`, with no packet seen on any
+    /// worker.
     ///
     /// Its tagged counters are `even` of the registry `routes`, the held one,
     /// registered first, and then `odd` and `even` of the registry `rules`,
@@ -178,6 +179,7 @@ impl Tally {
             let v1 = scope.counter("v1")?;
             let even = scope.counter_in("rules", "even")?;
             let traffic = scope.counter("traffic")?;
+            let parity = scope.counter("parity")?;
             let running = scope.counter("running")?;
             let mut lanes = scope.counters_in("lanes")?;
             for name in ["wide", "narrow", "wide"] {
@@ -188,6 +190,7 @@ impl Tally {
                 by_value: [v0, v1, v2],
                 held,
                 traffic,
+                parity,
                 seen: scope.per_worker(0)?,
                 running,
                 by_parity: [even, odd],

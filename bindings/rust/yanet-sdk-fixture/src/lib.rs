@@ -21,7 +21,7 @@ pub mod assign;
 use core::sync::atomic::{AtomicU64, Ordering};
 
 use yanet_sdk::{
-    Batch, CommitCx, Counter, CounterRef, Cx, Device, Lpm4, Lpm6, Module, Object, ObjectCommitCx, ObjectCounter,
+    Batch, CommitCx, Counter, CounterRef, Cx, Device, Gauge, Lpm4, Lpm6, Module, Object, ObjectCommitCx, ObjectCounter,
     ObjectLink, PerWorker, PerWorkerSlice, ShmLayout, ShmSlice, TaggedCounter, TaggedCounters, TaggedCountersRef,
     Traffic, Verdict, WorkerSlice, WorkerSlot,
 };
@@ -220,10 +220,12 @@ impl Module for Fixture {
 
 /// The configuration of [`Tally`]: a word the commit derives from, three
 /// counters picked by value, one held by a handle, one of the packets and
-/// bytes, the packets each worker has seen and a counter of running sums of
-/// them; and in tagged registries two counters of packets and bytes picked by
-/// value, for packets whose first byte is even and odd, one held by a handle
-/// and the counters of packets and bytes of another registry, picked by id.
+/// bytes, one of the packets and bytes of packets whose first byte is even, at
+/// index 0, and odd, at index 1, the packets each worker has seen and a
+/// counter of running sums of them; and in tagged registries two
+/// counters of packets and bytes picked by value, for packets whose first byte
+/// is even and odd, one held by a handle and the counters of packets and bytes
+/// of another registry, picked by id.
 #[derive(ShmLayout)]
 #[repr(C)]
 pub struct TallyConfig {
@@ -231,6 +233,7 @@ pub struct TallyConfig {
     pub by_value: [Counter; 3],
     pub held: Counter,
     pub traffic: Counter<Traffic>,
+    pub parity: Counter<[Traffic; 2]>,
     pub seen: PerWorker<u64>,
     pub running: Counter,
     pub by_parity: [TaggedCounter<Traffic>; 2],
@@ -238,11 +241,18 @@ pub struct TallyConfig {
     pub by_id: TaggedCounters<Traffic>,
 }
 
-/// What [`Tally`] makes at commit: the handle of the held counter, twice the
-/// configuration's word, the handle of the worker's slot of packets seen, the
-/// handle of the held tagged counter and that of the counters picked by id.
+// The indices of the packets and bytes of packets whose first byte is even and
+// odd in the counter by parity of the tally.
+const EVEN: usize = 0;
+const ODD: usize = 1;
+
+/// What [`Tally`] makes at commit: the handle of the held counter, that of the
+/// counter by parity, twice the configuration's word, the handle of the
+/// worker's slot of packets seen, the handle of the held tagged counter and
+/// that of the counters picked by id.
 pub struct Stamp<'p> {
     held: CounterRef<'p>,
+    parity: CounterRef<'p, [Traffic; 2]>,
     stamp: u64,
     seen: Option<WorkerSlot<'p, u64>>,
     tagged_held: CounterRef<'p>,
@@ -251,11 +261,13 @@ pub struct Stamp<'p> {
 
 /// Counts each packet in the counter its first byte selects, by value, unless
 /// it is empty, in the held counter, through the handle made at commit, and
-/// its bytes in the traffic; counts it in place in the worker's slot of
-/// packets seen, through the handle made at commit, and adds the new count to
-/// the running counter, unless the commit found no worker. Counts a packet and
-/// its bytes in the tagged counter of the parity of its first byte, by value,
-/// unless it is empty, and adds 3 to the held tagged counter through its
+/// its bytes in the traffic; counts a packet and its bytes in the counter by
+/// parity, at the index of the parity of its first byte, through the handle
+/// made at commit, unless it is empty; counts it in place in the worker's slot
+/// of packets seen, through the handle made at commit, and adds the new count
+/// to the running counter, unless the commit found no worker. Counts a packet
+/// and its bytes in the tagged counter of the parity of its first byte, by
+/// value, unless it is empty, and adds 3 to the held tagged counter through its
 /// handle. Counts a packet and its bytes in the counter whose id is its first
 /// byte modulo 4, through the handle made at commit, unless it is empty; an id
 /// past the counters registered counts nowhere.
@@ -271,12 +283,19 @@ impl Module for Tally {
         let config = cx.config();
         let prepared = cx.prepared();
         let held = prepared.held.bind(cx);
+        let parity = prepared.parity.bind(cx);
         let tagged_held = prepared.tagged_held.bind(cx);
         let by_id = prepared.by_id.bind(cx);
         let pass = prepared.stamp == 14;
         batch.dispatch(|packet| {
             if let Some(byte) = packet.data().first() {
                 config.by_value[usize::from(byte % 3)].add(cx, 1);
+                let side = if byte % 2 == 0 {
+                    parity.at::<EVEN>()
+                } else {
+                    parity.at::<ODD>()
+                };
+                side.add(Traffic::packet(packet.data().len() as u64));
                 config.by_parity[usize::from(byte % 2)].add(cx, Traffic::packet(packet.data().len() as u64));
                 by_id.add(u64::from(byte % 4), Traffic::packet(packet.data().len() as u64));
             }
@@ -297,6 +316,7 @@ impl Module for Tally {
         let config = cx.config();
         Stamp {
             held: config.held.resolve(cx),
+            parity: config.parity.resolve(cx),
             stamp: config.word * 2,
             seen: config.seen.handle(cx),
             tagged_held: config.tagged_held.resolve(cx),
@@ -395,8 +415,8 @@ fn route_indexes<'id>(cx: &Cx<'id, Fib>, fib: &'id RouteFib, frame: &[u8]) -> Op
 
 /// The configuration of [`State`]: the seed it was built from, a slot per
 /// item, which the control plane changes while the object is published, a
-/// slot per worker, a region per worker and a counter of the object's own,
-/// which [`Stash`] keeps as a gauge.
+/// slot per worker, a region per worker and a gauge of the object's own, which
+/// [`Stash`] keeps.
 #[derive(ShmLayout)]
 #[repr(C)]
 pub struct StateConfig {
@@ -404,7 +424,7 @@ pub struct StateConfig {
     pub slots: ShmSlice<AtomicU64>,
     pub workers: PerWorker<u64>,
     pub regions: PerWorkerSlice<u64>,
-    pub held: ObjectCounter,
+    pub held: ObjectCounter<Gauge>,
 }
 
 /// An object of atomic slots, the shape of state kept across configuration
@@ -433,7 +453,7 @@ pub struct StatePrepared<'p> {
     pub seed: u64,
     pub worker: Option<WorkerSlot<'p, u64>>,
     pub region: Option<WorkerSlice<'p, u64>>,
-    pub held: CounterRef<'p>,
+    pub held: CounterRef<'p, Gauge>,
 }
 
 /// The configuration of [`Stash`]: the state object it writes, linked by
@@ -469,7 +489,7 @@ impl Module for Stash {
         let seed = prepared.seed;
         let seen = &cx.config().seen;
         let filled = &cx.config().filled;
-        let held = prepared.held.gauge(cx);
+        let held = prepared.held.bind(cx);
         batch.dispatch(|packet| {
             let slot = packet
                 .data()
