@@ -134,6 +134,9 @@ mod kind {
 /// is gated by `unsafe trait`, which module crates cannot write directly under
 /// `#![forbid(unsafe_code)]`; writing and freeing are unsafe functions, so
 /// calling them is gated too.
+///
+/// A whole value has all its fields initialized; padding may remain
+/// uninitialized and must never be read as data.
 pub unsafe trait Build: ShmLayout {
     /// What the author supplies for a value of this type inside a build of an
     /// owner.

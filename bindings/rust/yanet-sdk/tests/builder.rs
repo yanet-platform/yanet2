@@ -131,7 +131,7 @@ struct Counted {
 mod locked {
     #![forbid(unsafe_code)]
 
-    use yanet_sdk::{ShmLayout, SpinMutex};
+    use yanet_sdk::{PerWorker, PerWorkerSlice, ShmLayout, ShmSlice, SpinMutex};
 
     #[derive(Clone, Copy, Debug, PartialEq, Eq, ShmLayout)]
     #[repr(C)]
@@ -146,6 +146,29 @@ mod locked {
         pub state: SpinMutex<Counts>,
     }
 
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, ShmLayout)]
+    #[repr(C)]
+    pub struct Padded {
+        pub narrow: u8,
+        pub wide: u64,
+    }
+
+    #[derive(ShmLayout)]
+    #[repr(C)]
+    pub struct PaddedRoot {
+        pub tag: u8,
+        pub state: SpinMutex<Padded>,
+        pub items: ShmSlice<Padded>,
+        pub tail: u8,
+    }
+
+    #[derive(ShmLayout)]
+    #[repr(C)]
+    pub struct PaddedWorkers {
+        pub slots: PerWorker<Padded>,
+        pub regions: PerWorkerSlice<Padded>,
+    }
+
     /// Adds one packet and its bytes through the safe shared-state API.
     pub fn add(config: &Locked) {
         let mut state = config.state.lock();
@@ -155,6 +178,15 @@ mod locked {
 }
 
 use locked::{Counts, Locked, LockedParts};
+
+#[derive(ShmLayout)]
+#[repr(C)]
+struct PaddedFaulty {
+    tag: u8,
+    items: ShmSlice<locked::Padded>,
+    gate: Flaky,
+    tail: ShmBox<locked::Padded>,
+}
 
 #[derive(ShmLayout)]
 #[repr(C)]
@@ -378,6 +410,105 @@ fn test_build_writes_an_unlocked_mutex_with_plain_state() {
     locked::add(config);
     assert_eq!(Counts { packets: 8, bytes: 512 }, *config.state.lock());
     release::<LockedModule>(&owner, built);
+    owner.assert_released();
+}
+
+/// verifies that padding in the root, mutex and slice elements is never
+/// required to be initialized or accessed as data.
+#[test]
+fn test_build_padded_root_mutex_and_slice_use_only_typed_fields() {
+    use locked::{Padded, PaddedParts, PaddedRoot, PaddedRootParts};
+
+    let owner = owner();
+    let built = build::<Fixture<PaddedRoot>>(&owner, |b| {
+        Ok(PaddedRootParts {
+            tag: 1,
+            state: Padded { narrow: 7, wide: 11 },
+            items: b.slice(2, |i| Ok(PaddedParts { narrow: i as u8, wide: 17 + i as u64 }))?,
+            tail: 2,
+        })
+    })
+    .expect("built");
+    let (config, view) = body::<Fixture<PaddedRoot>>(&owner, &built);
+    assert_eq!((1, 2), (config.tag, config.tail));
+    assert_eq!(
+        [Padded { narrow: 0, wide: 17 }, Padded { narrow: 1, wide: 18 }],
+        config.items.as_slice(&view)
+    );
+    {
+        let mut state = config.state.lock();
+        assert_eq!(Padded { narrow: 7, wide: 11 }, *state);
+        state.narrow += 1;
+        state.wide += 2;
+    }
+    assert_eq!(Padded { narrow: 8, wide: 13 }, *config.state.lock());
+    assert_eq!(16, size_of::<Padded>());
+    assert_eq!(24, size_of::<yanet_sdk::SpinMutex<Padded>>());
+    release::<Fixture<PaddedRoot>>(&owner, built);
+    owner.assert_released();
+}
+
+/// verifies that padded values survive typed copies into worker slots and
+/// region arrays without reading their padding.
+#[test]
+fn test_build_padded_worker_slots_and_regions_use_typed_copies() {
+    use locked::{Padded, PaddedWorkers, PaddedWorkersParts};
+
+    let owner = owner_of_workers(3);
+    let initial = Padded { narrow: 5, wide: 17 };
+    let built = build::<Fixture<PaddedWorkers>>(&owner, |b| {
+        Ok(PaddedWorkersParts {
+            slots: b.per_worker(initial)?,
+            regions: b.per_worker_slice(2, initial)?,
+        })
+    })
+    .expect("built");
+    let (config, _) = body::<Fixture<PaddedWorkers>>(&owner, &built);
+    assert_eq!(vec![initial; 3], slot_values(&owner, &config.slots));
+    assert_eq!(vec![vec![initial; 2]; 3], region_values(&owner, &config.regions));
+    release::<Fixture<PaddedWorkers>>(&owner, built);
+    owner.assert_released();
+}
+
+/// verifies that partial construction releases every padded worker block
+/// when any allocation fails.
+#[test]
+fn test_build_padded_worker_allocation_failure_releases_every_block() {
+    use locked::{Padded, PaddedWorkers, PaddedWorkersParts};
+
+    for allowed in 0..6 {
+        let owner = owner_of_workers(3);
+        owner.fail_after(Call::Alloc, allowed);
+        let initial = Padded { narrow: 5, wide: 17 };
+        let err = build::<Fixture<PaddedWorkers>>(&owner, |b| {
+            Ok(PaddedWorkersParts {
+                slots: b.per_worker(initial)?,
+                regions: b.per_worker_slice(2, initial)?,
+            })
+        })
+        .expect_err("no memory for a block");
+        assert_eq!(BuildError::Refused(Refusal::OutOfMemory), err, "{allowed} blocks");
+        owner.assert_released();
+    }
+}
+
+/// verifies that a failed field write releases padded children on both
+/// sides of the failure without reading an incomplete root.
+#[test]
+fn test_build_padded_field_failure_releases_written_and_unwritten_children() {
+    use locked::PaddedParts;
+
+    let owner = owner();
+    let err = build::<Fixture<PaddedFaulty>>(&owner, |b| {
+        Ok(PaddedFaultyParts {
+            tag: 1,
+            items: b.slice(2, |_| Ok(PaddedParts { narrow: 5, wide: 17 }))?,
+            gate: FlakyParts { word: 0, fails: true },
+            tail: b.boxed(PaddedParts { narrow: 7, wide: 19 })?,
+        })
+    })
+    .expect_err("field write refused");
+    assert_eq!(BuildError::Refused(Refusal::OutOfMemory), err);
     owner.assert_released();
 }
 

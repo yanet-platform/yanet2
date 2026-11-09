@@ -4,8 +4,8 @@
 //! trait is `unsafe`; this crate implements it for an allow-list of leaves,
 //! arrays and the owned edges, and a struct gets it from
 //! `#[derive(ShmLayout)]`, so every implementor is valid for every bit pattern
-//! C may write, has no implicit padding, needs no drop and is aligned to at
-//! most 64.
+//! C may write, needs no drop and is aligned to at most 64. Padding may be
+//! uninitialized and is never accessed as data.
 
 use core::sync::atomic::{AtomicI8, AtomicI16, AtomicI32, AtomicI64, AtomicU8, AtomicU16, AtomicU32, AtomicU64};
 
@@ -29,9 +29,10 @@ pub const MAX_ALIGN: usize = 64;
 /// # Safety
 ///
 /// Implementors are `#[repr(C)]` structs, allow-listed leaves, arrays or the
-/// owned edges such that every bit pattern is a valid value, there is no
-/// implicit padding, dropping is a no-op and the alignment is at most
-/// [`MAX_ALIGN`].
+/// owned edges such that every bit pattern is a valid value, dropping is a
+/// no-op and the alignment is at most [`MAX_ALIGN`]. Padding may be
+/// uninitialized; this trait permits typed field access, not viewing the
+/// object representation as an initialized byte slice.
 pub unsafe trait ShmLayout: Sized + 'static {}
 
 macro_rules! plain_leaf {

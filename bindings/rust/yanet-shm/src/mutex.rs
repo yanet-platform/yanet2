@@ -6,7 +6,7 @@ use core::{
 };
 
 use crate::{
-    shm::{MAX_ALIGN, ShmLayout},
+    shm::ShmLayout,
     spinlock::{RawSpinlock, RawSpinlockGuard},
 };
 
@@ -19,8 +19,8 @@ use crate::{
 /// leaves it locked. The layout is independent of the C spinlock's layout.
 /// Only copyable layout values are accepted, so the guard cannot move an
 /// owning edge or an address-relative pointer out of its storage.
-/// Storage is a 64-byte initialised header followed by the value, with the
-/// value's alignment and no implicit padding.
+/// Storage follows the C representation: a lock byte, alignment padding and
+/// the value. Padding is not initialized data and must never be read as bytes.
 ///
 /// ```
 /// #![forbid(unsafe_code)]
@@ -46,9 +46,6 @@ where
     T: Copy + ShmLayout,
 {
     lock: RawSpinlock,
-    // A 64-byte header aligns every permitted payload without implicit
-    // padding; byte-aligned fields also avoid tail padding for small values.
-    padding: [u8; MAX_ALIGN - 1],
     value: UnsafeCell<T>,
 }
 
@@ -60,7 +57,6 @@ where
     pub const fn new(value: T) -> Self {
         Self {
             lock: RawSpinlock::new(),
-            padding: [0; MAX_ALIGN - 1],
             value: UnsafeCell::new(value),
         }
     }
@@ -107,9 +103,9 @@ where
 // holder's access, and the payload can be transferred between threads.
 unsafe impl<T> Sync for SpinMutex<T> where T: Copy + ShmLayout + Send {}
 
-// SAFETY: the header has only explicit bytes and is a multiple of every
-// allowed payload alignment. The payload has no padding, invalid bit pattern
-// or drop, so neither does the whole value; its alignment is the payload's.
+// SAFETY: the lock byte and payload accept every bit pattern and need no
+// drop. C representation aligns the payload; padding is never accessed as
+// data, and the whole value has the payload's permitted alignment.
 unsafe impl<T> ShmLayout for SpinMutex<T> where T: Copy + ShmLayout {}
 
 /// An exclusive borrow that releases the mutex when dropped.
@@ -202,17 +198,16 @@ mod tests {
     // SAFETY: a word and a zero-sized marker, without padding or drop.
     unsafe impl ShmLayout for Local {}
 
-    /// Checks the layout promise for every byte, including the payload's
-    /// start and the end of the containing value.
+    /// Checks the compact representation and the payload's alignment.
     fn check_layout<T: Copy + ShmLayout>() {
-        assert_eq!(64, core::mem::offset_of!(SpinMutex<T>, value));
-        assert_eq!(64 + size_of::<T>(), size_of::<SpinMutex<T>>());
+        assert_eq!(align_of::<T>(), core::mem::offset_of!(SpinMutex<T>, value));
+        assert_eq!(align_of::<T>() + size_of::<T>(), size_of::<SpinMutex<T>>());
         assert_eq!(align_of::<T>(), align_of::<SpinMutex<T>>());
         assert!(!core::mem::needs_drop::<SpinMutex<T>>());
     }
 
     #[test]
-    fn test_mutex_layout_has_no_padding_for_small_empty_and_aligned_payloads() {
+    fn test_mutex_layout_is_compact_for_small_empty_and_aligned_payloads() {
         check_layout::<()>();
         check_layout::<u8>();
         check_layout::<[u8; 3]>();

@@ -13,8 +13,6 @@ const SPINS_PER_WAIT: u32 = 1024;
 /// A test-and-test-and-set spinlock over one shared-memory byte.
 ///
 /// Zero is free and any other value held, so every bit pattern is valid.
-/// Byte alignment lets the enclosing mutex place any payload immediately
-/// after its explicit header without implicit padding.
 #[repr(C)]
 #[derive(Debug, Default)]
 pub struct RawSpinlock {
