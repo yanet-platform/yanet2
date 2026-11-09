@@ -356,6 +356,23 @@ func (m *bed) taggedCounter(inst *instance, tag, name string) [][]uint64 {
 	return groups[0].Counters[0].Values
 }
 
+// objectCounter returns, per worker, the values of the counter of that name
+// in the own registry of the object of that type and name, which the dataplane
+// keeps apart from the counters of the modules linking the object.
+func (m *bed) objectCounter(objectType, objectName, name string) [][]uint64 {
+	m.t.Helper()
+
+	groups, err := m.harness.SharedMemory().DPConfig(0).CountersByTags([]ffi.CounterTag{
+		{Key: "object_type", Value: objectType},
+		{Key: "object_name", Value: objectName},
+		{Key: "kind", Value: "object"},
+	}, []string{name})
+	require.NoError(m.t, err)
+	require.Len(m.t, groups, 1, "counters of %s:%s", objectType, objectName)
+	require.Len(m.t, groups[0].Counters, 1, "counter %s of %s:%s", name, objectType, objectName)
+	return groups[0].Counters[0].Values
+}
+
 // counterGrowth returns, per worker, how much each value of a counter grew
 // from before to after, both rows of every worker of a bed.
 func counterGrowth(t *testing.T, before, after [][]uint64) [][]uint64 {

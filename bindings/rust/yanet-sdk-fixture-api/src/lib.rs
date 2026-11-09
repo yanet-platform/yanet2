@@ -320,10 +320,10 @@ pub struct State;
 #[yanet_sdk::api(object = yanet_sdk_fixture::State)]
 impl State {
     /// An object named `name` of `count` slots, slot n holding `seed` + n,
-    /// wrapping, a slot per worker holding `seed` and a region per worker of
-    /// two values holding `seed`; the fault, a `FIXTURE_FAULT_*`
-    /// constant, fails the build after it has allocated the slots and the
-    /// regions.
+    /// wrapping, a slot per worker holding `seed`, a region per worker of
+    /// two values holding `seed` and the object's counter `held`; the fault, a
+    /// `FIXTURE_FAULT_*` constant, fails the build after it has allocated the
+    /// slots and the regions and registered the counter.
     ///
     /// # Panics
     ///
@@ -340,13 +340,14 @@ impl State {
             let slots = scope.slice(count, |idx| Ok(AtomicU64::new(seed.wrapping_add(idx as u64))))?;
             let workers = scope.per_worker(seed)?;
             let regions = scope.per_worker_slice(STATE_REGION_LEN, seed)?;
+            let held = scope.counter("held")?;
             match fault {
                 FIXTURE_FAULT_NONE => {}
                 FIXTURE_FAULT_ERROR => return Err(Error::from(Refusal::BlockTooLarge)),
                 FIXTURE_FAULT_PANIC => panic!("fixture fault"),
                 _ => return Err(Error::new(ErrorKind::InvalidArgument, "unknown fault")),
             }
-            Ok(StateConfigParts { seed, slots, workers, regions })
+            Ok(StateConfigParts { seed, slots, workers, regions, held })
         })
     }
 

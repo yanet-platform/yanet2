@@ -1,5 +1,5 @@
-//! Configuration field types backed by C registries of the module, and the
-//! per-worker state of a configuration.
+//! Configuration field types backed by C registries of the module or the
+//! object, and the per-worker state of a configuration.
 
 use core::{marker::PhantomData, ptr::NonNull};
 
@@ -145,6 +145,41 @@ impl<T> TaggedCounters<T> {
 // The builder writes the registry index and the number of counters as the two
 // words of the value, in the order of the fields.
 const _: () = assert!(size_of::<TaggedCounters>() == 2 * size_of::<u64>());
+
+/// Per-worker counter of an object, registered by the control plane in the
+/// object's own C counter registry as a counter of as many values as its
+/// layout `T` holds.
+///
+/// Holds the counter's index in the object's registry. Readers find the
+/// counters of an object by its type and name, apart from those of the modules
+/// linking it, and C carries their values by name over to an object of the
+/// same type and name that replaces this one. Only the object's prepare step
+/// resolves the counter, into a [`CounterRef`] its prepared value keeps: the
+/// handler of a module linking the object binds that handle to add, or binds it
+/// as a gauge, but adds to no object's counter by id:
+///
+/// ```compile_fail,E0599
+/// # use yanet_sys::dp::{Cx, Module, ObjectCounter};
+/// fn count<'id, M: Module<Config = ObjectCounter>>(cx: &Cx<'id, M>) {
+///     cx.config().add(cx, 1);
+/// }
+/// ```
+///
+/// [`CounterRef`]: crate::dp::CounterRef
+#[repr(C)]
+pub struct ObjectCounter<T = u64> {
+    id: u64,
+    // What one worker's values are; the object stores the index only.
+    _layout: PhantomData<fn() -> T>,
+}
+
+impl<T> ObjectCounter<T> {
+    /// Index in the object's counter registry.
+    #[inline(always)]
+    pub fn id(&self) -> u64 {
+        self.id
+    }
+}
 
 /// What one worker's values of a [`Counter`] are, and how a value of the
 /// layout adds to them.
@@ -302,6 +337,11 @@ unsafe impl<T> ShmLayout for TaggedCounter<T> where T: CounterLayout {}
 // and the layout is a zero-sized marker; the control plane writes the index the
 // module's tagged registry assigned and the number of counters it registered.
 unsafe impl<T> ShmLayout for TaggedCounters<T> where T: CounterLayout {}
+
+// SAFETY: a registry index accepts every bit pattern, and the layout is a
+// zero-sized marker; the control plane writes the id the object's counter
+// registry assigned.
+unsafe impl<T> ShmLayout for ObjectCounter<T> where T: CounterLayout {}
 
 // SAFETY: a device index accepts every bit pattern; the control plane writes
 // the index the module's device list assigned.

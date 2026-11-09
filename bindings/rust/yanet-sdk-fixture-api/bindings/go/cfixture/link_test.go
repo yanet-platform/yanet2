@@ -337,6 +337,67 @@ func Test_Stash_ObjectWorkerSlice_RestartsWithANewObject(t *testing.T) {
 	require.Equal(t, perWorkerValues(map[int]uint64{1: 42 + 44}), growth)
 }
 
+// gaugeFrames returns frames for the stash's gauge, all different: hold frames,
+// whose first byte is even, then release frames, whose first byte is odd.
+func gaugeFrames(hold, release int) [][]byte {
+	frames := arpFrames(2 * max(hold, release))
+	picked := make([][]byte, 0, hold+release)
+	for idx := range hold {
+		picked = append(picked, frames[2*idx])
+	}
+	for idx := range release {
+		picked = append(picked, frames[2*idx+1])
+	}
+	return picked
+}
+
+// stateGauge returns, per worker, the value of the counter held of the state
+// object named state, which the stash keeps as a gauge.
+func (m *bed) stateGauge(state string) [][]uint64 {
+	m.t.Helper()
+
+	return m.objectCounter(cfixture.StateType, state, "held")
+}
+
+// Test_Stash_ObjectGauge_KeepsTheLevelOfEachWorker verifies that the module
+// raises and lowers the linked object's counter of the worker it runs on:
+// three packets held on worker 1 leave 3, two held and one let go on worker 2
+// leave 1, and no other worker's value moves.
+func Test_Stash_ObjectGauge_KeepsTheLevelOfEachWorker(t *testing.T) {
+	bed, _ := servedStash(t)
+
+	bed.run(1, gaugeFrames(3, 0)...)
+	bed.run(2, gaugeFrames(2, 1)...)
+
+	require.Equal(t, perWorkerValues(map[int]uint64{1: 3, 2: 1}), bed.stateGauge("state"))
+}
+
+// Test_Stash_ObjectGauge_ReadsTheWorkersOwnValue verifies that the module reads
+// the gauge of the worker it runs on: while worker 1 holds two, a packet to
+// let go on worker 2, which holds none, takes nothing.
+func Test_Stash_ObjectGauge_ReadsTheWorkersOwnValue(t *testing.T) {
+	bed, _ := servedStash(t)
+	bed.run(1, gaugeFrames(2, 0)...)
+
+	bed.run(2, gaugeFrames(0, 1)...)
+
+	require.Equal(t, perWorkerValues(map[int]uint64{1: 2}), bed.stateGauge("state"))
+}
+
+// Test_Stash_ObjectGauge_CarriesOverToASameNameObject verifies that the values
+// of the object's counter carry over to an object of the same type and name
+// that replaces the one that counted: two held before the replacement and one
+// after it make 3 on worker 1.
+func Test_Stash_ObjectGauge_CarriesOverToASameNameObject(t *testing.T) {
+	bed, _ := servedStash(t)
+	bed.run(1, gaugeFrames(2, 0)...)
+	bed.publishObjects(bed.state("state", 20))
+
+	bed.run(1, gaugeFrames(1, 0)...)
+
+	require.Equal(t, perWorkerValues(map[int]uint64{1: 3}), bed.stateGauge("state"))
+}
+
 // Test_Stash_PublishedSeed_ReadsTheLinkedObject verifies that a read of the
 // configuration a generation publishes resolves its link to the object the
 // same generation holds.

@@ -38,8 +38,8 @@ use crate::{
     bindings,
     common::lpm::{Lpm, LpmRange},
     dp::{
-        Counter, CounterLayout, Device, Module, ModuleConfig, Object, ObjectConfig, ObjectLink, PerWorker,
-        PerWorkerSlice, TaggedCounter, TaggedCounters,
+        Counter, CounterLayout, Device, Module, ModuleConfig, Object, ObjectConfig, ObjectCounter, ObjectLink,
+        PerWorker, PerWorkerSlice, TaggedCounter, TaggedCounters,
     },
 };
 
@@ -77,8 +77,10 @@ pub trait Kind: kind::Sealed + 'static {
 /// into.
 pub enum ModuleKind {}
 
-/// The kind of an object: its header carries no module registries, so its
-/// scope registers no counter and links no device or object.
+/// The kind of an object: its header carries the object's own counter
+/// registry, which its scope registers counters into, and no module
+/// registries, so its scope registers no tagged counter and links no device or
+/// object.
 pub enum ObjectKind {}
 
 impl Kind for ModuleKind {
@@ -339,6 +341,27 @@ unsafe impl<T: Build> Build for ShmSlice<T> {
 // SAFETY: the registry index is the whole value.
 unsafe impl<T: CounterLayout> Build for Counter<T> {
     type Parts<'b, W: Owner> = Registered<'b, Counter<T>>;
+
+    unsafe fn write<W: Owner>(
+        parts: Self::Parts<'_, W>,
+        memory: &MemoryContext<'_, W>,
+        addr: usize,
+    ) -> Result<(), Refusal> {
+        // SAFETY: the registry index is the counter's only word, aligned and
+        // exclusive (caller contract).
+        unsafe { memory.root().ptr::<u64>(addr).write(parts.index) };
+        Ok(())
+    }
+
+    unsafe fn free<W: Owner>(_: usize, _: &MemoryContext<'_, W>) {}
+}
+
+// SAFETY: the registry index is the whole value.
+unsafe impl<T> Build for ObjectCounter<T>
+where
+    T: CounterLayout,
+{
+    type Parts<'b, W: Owner> = Registered<'b, ObjectCounter<T>>;
 
     unsafe fn write<W: Owner>(
         parts: Self::Parts<'_, W>,
@@ -1250,6 +1273,37 @@ impl<'b, W: Owner, E: From<BuildError<W::Error>>> Scope<'b, '_, W, E, ModuleKind
     }
 }
 
+impl<'b, W, E> Scope<'b, '_, W, E, ObjectKind>
+where
+    W: Owner,
+    E: From<BuildError<W::Error>>,
+{
+    /// Registers a counter of the given name with the object's own registry,
+    /// of as many values as its layout holds; the layout usually comes from
+    /// the field the counter is built into.
+    ///
+    /// Readers find the object's counters by its type and name, and C carries
+    /// their values by name over to an object of the same type and name that
+    /// replaces this one. The object's prepare step resolves the counter for
+    /// the modules linking the object.
+    ///
+    /// # Errors
+    ///
+    /// The owner refuses the registration, as C does for a name registered
+    /// before with another size.
+    pub fn counter<T>(self, name: &str) -> Result<Registered<'b, ObjectCounter<T>>, E>
+    where
+        T: CounterLayout,
+    {
+        let size = T::VALUES as u64;
+        // SAFETY: the header is an initialised object header, not yet
+        // published.
+        let id =
+            unsafe { self.memory.owner.register_object_counter(self.header, name, size) }.map_err(failed::<W, E>)?;
+        Ok(Registered::new(id))
+    }
+}
+
 // A tag fits its registry's C field when it fits a counter tag value, the
 // field readers find the registry by.
 const _: () = assert!(bindings::COUNTER_TAG_VALUE_LEN <= bindings::COUNTER_NAME_LEN);
@@ -1439,9 +1493,9 @@ impl<O: Object> ObjectBuilder<O> {
     /// Builds an object of the given name; the caller owns it and publishes
     /// it.
     ///
-    /// As [`Builder::build`], over an object scope, which registers no counter
-    /// and links no device or object, as the object's header carries no module
-    /// registries.
+    /// As [`Builder::build`], over an object scope, which registers counters in
+    /// the object's own registry and links no device or object, as the
+    /// object's header carries no module registries.
     ///
     /// # Errors
     ///

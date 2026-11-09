@@ -84,6 +84,10 @@ pub struct TestOwner {
     /// in the order the names first came; a registry's counters are numbered
     /// in its own order, as C numbers them.
     tagged_counters: RefCell<Vec<(Header, u64, String, u64)>>,
+    /// Header, name and size of each counter of an object's own registry, in
+    /// the order the names first came; an object's counters are numbered in
+    /// its own order, as C numbers them.
+    object_counters: RefCell<Vec<(Header, String, u64)>>,
     /// Header, type and name of each object link made, in the order of the
     /// links; a header's links are numbered in its own order, as C numbers
     /// them in the module's object list. The arena never reuses a header's
@@ -115,6 +119,7 @@ impl TestOwner {
             counter_sizes: RefCell::default(),
             counter_registries: RefCell::default(),
             tagged_counters: RefCell::default(),
+            object_counters: RefCell::default(),
             object_links: RefCell::default(),
             countdowns: Default::default(),
             violations: RefCell::default(),
@@ -358,6 +363,27 @@ unsafe impl Owner for TestOwner {
                 let id = own.count() as u64;
                 counters.push((header, registry, name.to_string(), size));
                 Ok((registry, id))
+            }
+        }
+    }
+
+    unsafe fn register_object_counter(&self, header: Header, name: &str, size: u64) -> Result<u64, TestError> {
+        self.counter_sizes.borrow_mut().push(size);
+        if self.fails(Call::Registration) {
+            return Err(TestError::Registration);
+        }
+        // The counters of an object are numbered from zero, apart from the
+        // modules' counters, and a name met before gets its id back, refused
+        // under another size.
+        let mut counters = self.object_counters.borrow_mut();
+        let mut own = counters.iter().filter(|counter| counter.0 == header);
+        match own.clone().position(|counter| counter.1 == name) {
+            Some(id) if own.nth(id).is_some_and(|counter| counter.2 == size) => Ok(id as u64),
+            Some(..) => Err(TestError::Registration),
+            None => {
+                let id = own.count() as u64;
+                counters.push((header, name.to_string(), size));
+                Ok(id)
             }
         }
     }
