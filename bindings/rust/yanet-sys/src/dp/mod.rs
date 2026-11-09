@@ -33,6 +33,11 @@
 //!   plugin exporting it, the api crate building its objects and every module
 //!   linking one use the one Rust type of that name, so the object a link
 //!   resolves to holds the body and prepared value that type declares.
+//! - **counters**: C builds a module context with one runtime counter storage
+//!   per tagged registry of its configuration, the storage of each registry at
+//!   the registry's index, and an object context with the counter storage it
+//!   spawns from the object's registry; it builds no context it cannot give
+//!   them (`lib/controlplane/config/econtext.c`).
 //! - **frozen**: configuration bytes are frozen after publish and
 //!   execution-context bytes once the context is released to its worker; C
 //!   writes only `Opaque` bytes and atomics of configurations. Shared mutex
