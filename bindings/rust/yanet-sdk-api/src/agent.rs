@@ -9,7 +9,7 @@ use core::{
     slice,
 };
 
-use yanet_shm::{resolve::Resolve, root::ShmRoot};
+use yanet_shm::{resolve::Resolve, root::ShmRoot, shm::ShmLayout};
 use yanet_sys::{
     bindings::{
         self, COUNTER_NAME_LEN, COUNTER_TAG_VALUE_LEN, CP_DEVICE_NAME_LEN, CP_MODULE_NAME_LEN, CP_MODULE_TYPE_LEN,
@@ -17,7 +17,7 @@ use yanet_sys::{
     },
     counters::COUNTER_INVALID,
     cp::{BlockAddr, Built, BuiltObject, Context, Header, Owner},
-    dp::{Module, ModuleConfig, Object, ObjectConfig, ObjectLink},
+    dp::{Module, ModuleConfig, Object, ObjectConfig, ObjectLink, PerWorker},
 };
 
 use crate::error::{Error, ErrorKind, from_c_chain};
@@ -392,6 +392,26 @@ impl<'g> PublishedCx<'g> {
         unsafe { (*self.root.ptr::<ObjectConfig<O::Config>>(object.addr().get())).body() }
     }
 
+    /// The values of a per-worker field of the configuration or of an object
+    /// it links, one per worker, in worker order.
+    ///
+    /// Each value is copied out of its worker's slot while the worker may
+    /// write it, as the control plane copies a worker's counters: each aligned
+    /// word is read whole, but a value of several words may join words of
+    /// different writes, and the values of different workers are not of one
+    /// moment.
+    pub fn slots<T>(&self, field: &'g PerWorker<T>) -> impl ExactSizeIterator<Item = T> + use<'g, T>
+    where
+        T: Copy + ShmLayout,
+    {
+        // SAFETY: the root covers the mapping, and a `'g` reference is one
+        // this read reached: in the body of the configuration the pinned
+        // generation holds or of an object it links, which its build wrote
+        // whole and which stays live until the read returns; the values, of
+        // the same brand, are read before then.
+        unsafe { slot_values(self.root, field) }
+    }
+
     fn link_count(&self) -> usize {
         // SAFETY: the configuration's header is live while the generation is
         // pinned, and C wrote its links before it published it.
@@ -468,6 +488,22 @@ impl fmt::Debug for ObjectCx<'_> {
     }
 }
 
+impl<'g> ObjectCx<'g> {
+    /// The values of a per-worker field of the object, one per worker, in
+    /// worker order, each copied out of its worker's slot as
+    /// [`PublishedCx::slots`] copies it.
+    pub fn slots<T>(&self, field: &'g PerWorker<T>) -> impl ExactSizeIterator<Item = T> + use<'g, T>
+    where
+        T: Copy + ShmLayout,
+    {
+        // SAFETY: the root covers the mapping, and a `'g` reference is one
+        // this read reached: in the body of a live object, which its build
+        // wrote whole and which stays live while its handle is borrowed for
+        // the read; the values, of the same brand, are read before it ends.
+        unsafe { slot_values(self.root, field) }
+    }
+}
+
 // SAFETY: the root covers the whole mapping (constructor contract of the
 // agent). A context is made only by `Agent::read`, under a fresh invariant
 // brand, together with the one `'g` reference it hands out: the body of a
@@ -482,6 +518,25 @@ unsafe impl<'g> Resolve<'g> for ObjectCx<'g> {
     fn shm_root(&self) -> ShmRoot {
         self.root
     }
+}
+
+/// The values of a per-worker field, one per worker, in worker order, each
+/// copied out of its worker's slot when the iterator reaches it.
+///
+/// # Safety
+///
+/// The root covers the mapping, and the field lies in the body of a
+/// configuration or an object that its build wrote whole and that stays live
+/// while the values are read.
+unsafe fn slot_values<'g, T>(root: ShmRoot, field: &'g PerWorker<T>) -> impl ExactSizeIterator<Item = T> + use<'g, T>
+where
+    T: Copy + ShmLayout,
+{
+    (0..field.worker_count() as usize).map(move |worker| {
+        // SAFETY: the body is live and written whole (caller contract), and
+        // the index is below the slot count.
+        unsafe { field.read_slot(root, worker as u64) }
+    })
 }
 
 /// The C header of a configuration or an object in the mapping of the agent.

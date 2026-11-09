@@ -451,6 +451,33 @@ func Test_StateObject_Values_NullWithLength_IsInvalidArgument(t *testing.T) {
 	require.ErrorIs(t, err, ffi.ErrInvalidArgument)
 }
 
+// Test_StateObject_Workers_Unpublished_ReadsTheSeedOfEachWorker verifies that
+// a query reads the slot per worker of an object that no worker has run, which
+// holds the seed the object was built from, by worker.
+func Test_StateObject_Workers_Unpublished_ReadsTheSeedOfEachWorker(t *testing.T) {
+	bed := newBed(t)
+	object := bed.state("state", 10)
+	values := make([]uint64, workerCount)
+
+	_, err := object.Workers(values)
+	require.NoError(t, err)
+
+	require.Equal(t, []uint64{10, 10, 10, 10}, values)
+}
+
+// Test_StateObject_Workers_NoPlaces_ReturnsTheWorkerCount verifies that a
+// query given an empty slice returns how many workers the object keeps a slot
+// for.
+func Test_StateObject_Workers_NoPlaces_ReturnsTheWorkerCount(t *testing.T) {
+	bed := newBed(t, withWorkers(3))
+	object := bed.state("state", 10)
+
+	count, err := object.Workers(nil)
+
+	require.NoError(t, err)
+	require.Equal(t, uint64(3), count)
+}
+
 // Test_StateObject_Shape_FillsTheRecord verifies that a query fills every
 // field of the caller's record, whatever it held.
 func Test_StateObject_Shape_FillsTheRecord(t *testing.T) {

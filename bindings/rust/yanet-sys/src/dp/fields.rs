@@ -353,6 +353,11 @@ const fn next_line(addr: usize) -> usize {
 /// [`Self::STRIDE`] apart, so no slot shares a cache line of up to 128 bytes
 /// with another worker's slot or with memory outside the slots.
 ///
+/// The control plane reads the slots while the workers write them, as it reads
+/// their counters: it copies each slot out with a volatile read
+/// (`ObjectCx::slots` and `PublishedCx::slots` of `yanet-sdk-api`), which makes
+/// no reference, so the handler's borrows stay the only references to its slot.
+///
 /// All workers' slots share one block, and the initial value is passed whole,
 /// so this is for small state of a size known at compile time; state that is
 /// large or sized from the configuration is a [`PerWorkerSlice`], one block
@@ -449,6 +454,29 @@ impl<T: Copy + ShmLayout> PerWorker<T> {
             slot: unsafe { NonNull::new_unchecked(slot) },
             _brand: PhantomData,
         })
+    }
+
+    /// A copy of the slot of the worker of the given index, read while the
+    /// worker may write it.
+    ///
+    /// The read is volatile and makes no reference to the slot. Each aligned
+    /// word of the value is read whole, but a value of several words may join
+    /// words of different writes.
+    ///
+    /// # Safety
+    ///
+    /// The root covers the mapping, the field lies in the body of a
+    /// configuration or an object that its build wrote whole and that stays
+    /// live for the call, and the index is below the slot count.
+    #[doc(hidden)]
+    #[inline(always)]
+    pub unsafe fn read_slot(&self, root: ShmRoot, worker: u64) -> T {
+        // SAFETY: the slot lies in the slot block of a live body the build
+        // wrote whole, aligned for `T`, and every bit pattern is a value of
+        // `T` (caller contract, `ShmLayout`). The worker's writes reach the
+        // slot through its handle alone, and a volatile read makes no
+        // reference that could alias the worker's borrows.
+        unsafe { self.slot_at(root, worker).read_volatile() }
     }
 
     /// The slot of the worker of the given index.
@@ -625,11 +653,12 @@ impl<'id, T: Copy + ShmLayout> WorkerSlot<'id, T> {
         // or of the object context it links, under the call's brand, so the
         // slot is the call's worker's: aligned, written whole by the build, in
         // a block the configuration or object holds at least as long as the
-        // call's generation (attach: reclaim) and touched by no other thread
-        // (attach: frozen). Nothing writes the slot while the borrow lives:
-        // every write takes the context mutably, which stays shared-borrowed
-        // for as long. The context is the call's own, so the borrow ends
-        // within the call.
+        // call's generation (attach: reclaim), written by no other thread and
+        // read only by the control plane's volatile copies, which make no
+        // reference (attach: frozen). Nothing writes the slot while the borrow
+        // lives: every write takes the context mutably, which stays
+        // shared-borrowed for as long. The context is the call's own, so the
+        // borrow ends within the call.
         unsafe { self.slot.as_ref() }
     }
 

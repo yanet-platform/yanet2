@@ -147,6 +147,49 @@ fn test_per_worker_handle_of_a_module_carries_over_between_calls_of_its_worker()
     assert_eq!([0, 3 + 2 * ODD, 0], slots::<u64, _>(&ectx, block));
 }
 
+/// The control plane's copies of the slots of a counting configuration, by
+/// worker.
+#[cfg(miri)]
+fn copies<M: Module<Config = Config>>(ectx: &Ectx<M>) -> [u64; WORKERS] {
+    let root = ectx.arena.root();
+    // SAFETY: the arena covers the configuration, written whole and live with
+    // the context, and each index is below the slot count.
+    core::array::from_fn(|worker| unsafe { ectx.config().seen.read_slot(root, worker as u64) })
+}
+
+/// verifies that the control plane's copy of each worker's slot reads what
+/// the worker's calls wrote there.
+#[cfg(miri)]
+#[test]
+fn test_per_worker_read_slot_copies_what_each_worker_wrote() {
+    PREPARE_WORKER.with(|worker| worker.set(1));
+    let (mut ectx, _) = seen::<u64, Held>();
+    ectx.set_worker(1);
+
+    ectx.run(&mut numbered(2));
+
+    // First bytes 0 and 1: one even and one odd.
+    assert_eq!([0, 1 + ODD, 0], copies(&ectx));
+}
+
+/// verifies that a worker counts on in its slot after the control plane has
+/// copied it: the copy makes no reference that the handle's later borrows
+/// would conflict with.
+#[cfg(miri)]
+#[test]
+fn test_per_worker_read_slot_leaves_the_handle_usable() {
+    PREPARE_WORKER.with(|worker| worker.set(1));
+    let (mut ectx, block) = seen::<u64, Held>();
+    ectx.set_worker(1);
+    ectx.run(&mut numbered(2));
+    copies(&ectx);
+
+    ectx.run(&mut numbered(3));
+
+    // First bytes 0, 1, then 0, 1, 2: three even and two odd.
+    assert_eq!([0, 3 + 2 * ODD, 0], slots::<u64, _>(&ectx, block));
+}
+
 /// verifies that a module's prepare step whose context is not among its
 /// generation's worker contexts, here one of no generation, makes no handle.
 #[test]

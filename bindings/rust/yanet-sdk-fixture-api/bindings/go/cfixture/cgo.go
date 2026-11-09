@@ -38,6 +38,12 @@ yanet_cp_yanet_sdk_fixture_api__tally_free(
 	struct cp_module *module, yanet_error **err
 );
 
+int
+yanet_cp_yanet_sdk_fixture_api__tally_published_seen(
+	struct agent *agent, const char *name, uint64_t *seen, size_t seen_len,
+	uint64_t *out, yanet_error **err
+);
+
 struct cp_module *
 yanet_cp_yanet_sdk_fixture_api__fib_build(
 	struct agent *agent, const char *name,
@@ -78,6 +84,12 @@ yanet_cp_yanet_sdk_fixture_api__stash_published_values(
 );
 
 int
+yanet_cp_yanet_sdk_fixture_api__stash_published_workers(
+	struct agent *agent, const char *name, uint64_t *values,
+	size_t values_len, uint64_t *out, yanet_error **err
+);
+
+int
 yanet_cp_yanet_sdk_fixture_api__stash_published_links(
 	struct agent *agent, const char *name, struct Link *links,
 	size_t links_len, uint64_t *out, yanet_error **err
@@ -109,6 +121,12 @@ yanet_cp_yanet_sdk_fixture_api__state_seed(
 
 int
 yanet_cp_yanet_sdk_fixture_api__state_values(
+	struct agent *agent, struct cp_object *state, uint64_t *values,
+	size_t values_len, uint64_t *out, yanet_error **err
+);
+
+int
+yanet_cp_yanet_sdk_fixture_api__state_workers(
 	struct agent *agent, struct cp_object *state, uint64_t *values,
 	size_t values_len, uint64_t *out, yanet_error **err
 );
@@ -453,6 +471,32 @@ func freeTally(ptr unsafe.Pointer) (int, unsafe.Pointer, error) {
 	return int(rc), unsafe.Pointer(cErr), errno
 }
 
+// PublishedSeen reads the packets each worker has seen under the tally
+// configuration name, as the agent's current generation holds it, by worker,
+// into seen, and returns the number of workers.
+func PublishedSeen(agent *ffi.Agent, name string, seen []uint64) (uint64, error) {
+	if err := refuseNUL(name); err != nil {
+		return 0, fmt.Errorf("failed to read tally config: %w", err)
+	}
+	cName := C.CString(name)
+	defer C.free(unsafe.Pointer(cName))
+
+	var count C.uint64_t
+	var cErr *C.yanet_error
+	rc := C.yanet_cp_yanet_sdk_fixture_api__tally_published_seen(
+		(*C.struct_agent)(agent.AsRawPtr()),
+		cName,
+		(*C.uint64_t)(unsafe.SliceData(seen)),
+		C.size_t(len(seen)),
+		&count,
+		&cErr,
+	)
+	if rc != 0 {
+		return 0, fmt.Errorf("failed to read tally config %q: %w", name, cerrors.FromC(unsafe.Pointer(cErr)))
+	}
+	return uint64(count), nil
+}
+
 // Fib is what a FIB configuration is built from.
 type Fib struct {
 	// Devices are registered once each and copied into the routes that use
@@ -587,6 +631,31 @@ func PublishedValues(agent *ffi.Agent, name string, values []uint64) (uint64, er
 	var count C.uint64_t
 	var cErr *C.yanet_error
 	rc := C.yanet_cp_yanet_sdk_fixture_api__stash_published_values(
+		(*C.struct_agent)(agent.AsRawPtr()),
+		cName,
+		(*C.uint64_t)(unsafe.SliceData(values)),
+		C.size_t(len(values)),
+		&count,
+		&cErr,
+	)
+	if rc != 0 {
+		return 0, fmt.Errorf("failed to read stash config %q: %w", name, cerrors.FromC(unsafe.Pointer(cErr)))
+	}
+	return uint64(count), nil
+}
+
+// PublishedWorkers reads the values of the slot per worker of that state
+// object into values, as Workers does, and returns the number of workers.
+func PublishedWorkers(agent *ffi.Agent, name string, values []uint64) (uint64, error) {
+	if err := refuseNUL(name); err != nil {
+		return 0, fmt.Errorf("failed to read stash config: %w", err)
+	}
+	cName := C.CString(name)
+	defer C.free(unsafe.Pointer(cName))
+
+	var count C.uint64_t
+	var cErr *C.yanet_error
+	rc := C.yanet_cp_yanet_sdk_fixture_api__stash_published_workers(
 		(*C.struct_agent)(agent.AsRawPtr()),
 		cName,
 		(*C.uint64_t)(unsafe.SliceData(values)),
@@ -774,6 +843,26 @@ func (m *StateObject) values(values *C.uint64_t, length int) (uint64, error) {
 	)
 	if rc != 0 {
 		return 0, fmt.Errorf("failed to read the slots: %w", cerrors.FromC(unsafe.Pointer(cErr)))
+	}
+	return uint64(count), nil
+}
+
+// Workers reads the values of the object's slot per worker, by worker, into
+// values in one call and returns the number of workers; the places of values
+// past the workers end up zero.
+func (m *StateObject) Workers(values []uint64) (uint64, error) {
+	var count C.uint64_t
+	var cErr *C.yanet_error
+	rc := C.yanet_cp_yanet_sdk_fixture_api__state_workers(
+		(*C.struct_agent)(m.agent.AsRawPtr()),
+		(*C.struct_cp_object)(m.ptr.AsRawPtr()),
+		(*C.uint64_t)(unsafe.SliceData(values)),
+		C.size_t(len(values)),
+		&count,
+		&cErr,
+	)
+	if rc != 0 {
+		return 0, fmt.Errorf("failed to read the slots per worker: %w", cerrors.FromC(unsafe.Pointer(cErr)))
 	}
 	return uint64(count), nil
 }

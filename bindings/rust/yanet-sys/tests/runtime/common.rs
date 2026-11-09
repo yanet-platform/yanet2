@@ -111,6 +111,19 @@ impl<M: Module> Ectx<M> {
         }
     }
 
+    /// The body of the configuration the context runs.
+    #[cfg(miri)]
+    pub fn config(&self) -> &M::Config {
+        let root = self.arena.root();
+        // SAFETY: the context and its configuration lie in the arena, written
+        // whole before the commit at construction and frozen since.
+        unsafe {
+            let context = &*root.ptr::<bindings::module_ectx>(self.ectx);
+            let body = context.abs_cp_module.addr() + ModuleConfig::<M::Config>::BODY_OFFSET;
+            &*root.ptr::<M::Config>(body)
+        }
+    }
+
     /// Runs the following calls on the worker of the given index.
     pub fn set_worker(&mut self, idx: u64) {
         self.worker.idx = idx;

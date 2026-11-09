@@ -370,6 +370,24 @@ func Test_Tally_PerWorker_RestartsWithANewConfiguration(t *testing.T) {
 	require.Equal(t, perWorkerValues(map[int]uint64{1: 1 + 2}), growth)
 }
 
+// Test_Tally_PublishedSeen_ReadsWhatEachWorkerWrote verifies that a read of
+// the published configuration reads each worker's slot of its own: three
+// packets on worker 1 and two on worker 3 count them to 3 and 2, while workers
+// 0 and 2 run none.
+func Test_Tally_PublishedSeen_ReadsWhatEachWorkerWrote(t *testing.T) {
+	bed := newBed(t)
+	inst := bed.tallyInstance("config", 7)
+	bed.serveBeforeForward(inst)
+	bed.run(1, arpFrames(3)...)
+	bed.run(3, arpFrames(2)...)
+	seen := make([]uint64, workerCount)
+
+	_, err := cfixture.PublishedSeen(bed.agent, "config", seen)
+	require.NoError(t, err)
+
+	require.Equal(t, []uint64{0, 3, 0, 2}, seen)
+}
+
 // Test_Tally_PerWorker_SizedByTheWorkers verifies that the slot per worker of
 // a configuration takes more memory on a dataplane of more workers, and that
 // freeing the configuration gives all of it back.

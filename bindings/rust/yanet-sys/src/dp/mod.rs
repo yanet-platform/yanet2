@@ -39,7 +39,9 @@
 //!   exception the SDK makes is per-worker state: a worker's handler writes its
 //!   own slot or region, through the handle in its prepared value, and no
 //!   reference covers the slot or region but the shared or exclusive borrows
-//!   the handler takes through that handle, never both kinds at once.
+//!   the handler takes through that handle, never both kinds at once. The
+//!   control plane only copies a slot out, with a volatile read that makes no
+//!   reference, as it copies a worker's counters.
 //! - **publish**: C publishes a generation with a release store, workers load
 //!   it with acquire, and the commit pass (with the prepare step) completes
 //!   before the worker's first handler call of that generation. Besides a

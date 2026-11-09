@@ -337,6 +337,40 @@ func Test_Stash_ObjectWorkerSlice_RestartsWithANewObject(t *testing.T) {
 	require.Equal(t, perWorkerValues(map[int]uint64{1: 42 + 44}), growth)
 }
 
+// Test_StateObject_Workers_ReadsWhatEachWorkerWrote verifies that a query of
+// the object's owner reads each worker's slot from the seed 10 the slots start
+// at: two packets on worker 1 count it to 12, one on worker 2 to 11 and three
+// on worker 3 to 13, while worker 0 runs none.
+func Test_StateObject_Workers_ReadsWhatEachWorkerWrote(t *testing.T) {
+	bed, object := servedStash(t)
+	bed.run(1, arpFrames(2)...)
+	bed.run(2, arpFrames(1)...)
+	bed.run(3, arpFrames(3)...)
+	values := make([]uint64, workerCount)
+
+	_, err := object.Workers(values)
+	require.NoError(t, err)
+
+	require.Equal(t, []uint64{10, 12, 11, 13}, values)
+}
+
+// Test_Stash_PublishedWorkers_ReadsWhatEachWorkerWrote verifies that a read of
+// the published configuration reads each worker's slot of the object it links:
+// two packets on worker 1 count it from the seed 10 to 12, one on worker 2 to
+// 11 and three on worker 3 to 13, while worker 0 runs none.
+func Test_Stash_PublishedWorkers_ReadsWhatEachWorkerWrote(t *testing.T) {
+	bed, _ := servedStash(t)
+	bed.run(1, arpFrames(2)...)
+	bed.run(2, arpFrames(1)...)
+	bed.run(3, arpFrames(3)...)
+	values := make([]uint64, workerCount)
+
+	_, err := cfixture.PublishedWorkers(bed.agent, "stash", values)
+	require.NoError(t, err)
+
+	require.Equal(t, []uint64{10, 12, 11, 13}, values)
+}
+
 // Test_Stash_PublishedSeed_ReadsTheLinkedObject verifies that a read of the
 // configuration a generation publishes resolves its link to the object the
 // same generation holds.

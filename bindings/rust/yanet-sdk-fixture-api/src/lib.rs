@@ -196,6 +196,13 @@ impl Tally {
             })
         })
     }
+
+    /// Writes the packets each worker has seen under the configuration named
+    /// `name`, as the generation the dataplane runs holds it, by worker, into
+    /// as many places as `seen` has, and returns the number of workers.
+    pub fn published_seen(agent: &Agent, name: &str, seen: &mut [u64]) -> Result<u64, Error> {
+        agent.read_published::<yanet_sdk_fixture::Tally, _>(name, |cx, config| fill(seen, cx.slots(&config.seen)))
+    }
 }
 
 pub struct Fib;
@@ -293,6 +300,14 @@ impl Stash {
         })
     }
 
+    /// Writes the values of the per-worker slots of that state object, as
+    /// `State::workers` does, and returns the number of workers.
+    pub fn published_workers(agent: &Agent, name: &str, values: &mut [u64]) -> Result<u64, Error> {
+        agent.read_published::<yanet_sdk_fixture::Stash, _>(name, |cx, config| {
+            fill(values, cx.slots(&cx.object(&config.state).workers))
+        })
+    }
+
     /// Writes the objects the configuration named `name` links, in link
     /// order, into as many places as `links` has, and returns the number of
     /// links.
@@ -305,6 +320,19 @@ impl Stash {
             cx.links().len() as u64
         })
     }
+}
+
+/// Copies values into as many places as there are, and returns the number of
+/// values.
+fn fill<I>(places: &mut [u64], values: I) -> u64
+where
+    I: ExactSizeIterator<Item = u64>,
+{
+    let count = values.len() as u64;
+    for (place, value) in places.iter_mut().zip(values) {
+        *place = value;
+    }
+    count
 }
 
 /// Copies a name into a field of a record, which the export zeroed: as much
@@ -384,6 +412,17 @@ impl State {
             }
             Ok(slots.len() as u64)
         })
+    }
+
+    /// Writes the values of the object's slot per worker, by worker, into as
+    /// many places as `values` has, and returns the number of workers; the
+    /// places past the workers stay zero.
+    pub fn workers(
+        agent: &Agent,
+        state: &BuiltObject<yanet_sdk_fixture::State, Agent>,
+        values: &mut [u64],
+    ) -> Result<u64, Error> {
+        Ok(agent.read(state, |cx, config| fill(values, cx.slots(&config.workers))))
     }
 
     /// Writes the shape of the object in `shape` and returns its number of
