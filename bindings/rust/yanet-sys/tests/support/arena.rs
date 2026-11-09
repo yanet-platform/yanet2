@@ -117,8 +117,7 @@ unsafe impl Owner for ArenaOwner {
     fn alloc(&self, size: usize) -> Option<BlockAddr> {
         // SAFETY: the arena's context is live.
         let block = unsafe { bindings::yanet_sys_common_memory_balloc(yanet_sys_test_arena_context(self.arena), size) };
-        // SAFETY: a block of the arena.
-        (!block.is_null()).then(|| unsafe { BlockAddr::new(block.addr()) })
+        (!block.is_null()).then(|| BlockAddr::new(block.addr()))
     }
 
     unsafe fn free(&self, addr: BlockAddr, size: usize) {
@@ -137,8 +136,7 @@ unsafe impl Owner for ArenaOwner {
         // SAFETY: the context of a header this owner initialised (caller
         // contract).
         let block = unsafe { bindings::yanet_sys_common_memory_balloc(self.context(context), size) };
-        // SAFETY: a block of the arena.
-        (!block.is_null()).then(|| unsafe { BlockAddr::new(block.addr()) })
+        (!block.is_null()).then(|| BlockAddr::new(block.addr()))
     }
 
     unsafe fn free_in(&self, context: Context, addr: BlockAddr, size: usize) {

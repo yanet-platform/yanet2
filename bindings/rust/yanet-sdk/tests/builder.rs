@@ -1619,10 +1619,9 @@ fn test_object_build_releases_everything_when_a_counter_fails_at_each_call() {
 fn test_test_owner_records_a_header_finalised_as_the_other_kind() {
     let owner = owner();
     let block = owner.alloc(64).expect("block");
+    let header = Header::at(block);
     // SAFETY: the block is the owner's and large enough for the test owner,
     // which reads no header bytes.
-    let header = unsafe { Header::at(block) };
-    // SAFETY: as above.
     unsafe { owner.init_header(header, "fixture", "config0") }.expect("header");
 
     // SAFETY: the header is the owner's and unreferenced.

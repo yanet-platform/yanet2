@@ -54,10 +54,9 @@ pub struct BlockAddr(usize);
 impl Header {
     /// The header at the start of a root block.
     ///
-    /// # Safety
-    ///
-    /// The block is large enough for a module header.
-    pub unsafe fn at(block: BlockAddr) -> Self {
+    /// Only the address is taken: the unsafe routines a header is passed to
+    /// state what it must be.
+    pub fn at(block: BlockAddr) -> Self {
         Self(block.0)
     }
 
@@ -83,10 +82,9 @@ impl Context {
 impl BlockAddr {
     /// The block whose payload starts at an address.
     ///
-    /// # Safety
-    ///
-    /// The address is the payload of a block of the owner.
-    pub unsafe fn new(addr: usize) -> Self {
+    /// Only the address is taken: the unsafe routines a block is passed to
+    /// state what it must be.
+    pub fn new(addr: usize) -> Self {
         Self(addr)
     }
 

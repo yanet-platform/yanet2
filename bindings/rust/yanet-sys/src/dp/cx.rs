@@ -90,9 +90,10 @@ const DEVICE_ABSENT: u16 = u16::MAX;
 pub struct Cx<'id, M: Module> {
     root: ShmRoot,
     ectx: NonNull<bindings::module_ectx>,
-    worker: NonNull<bindings::dp_worker>,
     config: &'id M::Config,
-    prepared: NonNull<M::Prepared<'id>>,
+    prepared: &'id M::Prepared<'id>,
+    worker: u64,
+    now: u64,
     // Invariant brand: values of two different contexts never unify, so they cannot be mixed.
     _brand: PhantomData<fn(&'id ()) -> &'id ()>,
     // Neither Send nor Sync on purpose, independent of the pointer fields.
@@ -532,12 +533,20 @@ impl<'id, M: Module> Cx<'id, M> {
         config: &'id M::Config,
         prepared: NonNull<M::Prepared<'id>>,
     ) -> Self {
+        let worker = worker.as_ptr();
+        // SAFETY: the buffer holds the value the commit pass wrote before
+        // the worker's first call of the generation (attach: publish),
+        // frozen and this worker's alone for the call; the worker structure
+        // is live for the call, and neither its index nor its time changes
+        // during it (constructor contract, attach: call).
+        let (prepared, worker, now) = unsafe { (prepared.as_ref(), (*worker).idx, (*worker).current_time) };
         Self {
             root,
             ectx,
-            worker,
             config,
             prepared,
+            worker,
+            now,
             _brand: PhantomData,
             _local: PhantomData,
         }
@@ -553,28 +562,20 @@ impl<'id, M: Module> Cx<'id, M> {
     /// the module's prepare step made it.
     #[inline(always)]
     pub fn prepared(&self) -> &'id M::Prepared<'id> {
-        // SAFETY: the buffer holds the value the commit pass wrote before
-        // the worker's first call of the generation (attach: publish),
-        // frozen and this worker's alone for the call (constructor
-        // contract).
-        unsafe { self.prepared.as_ref() }
+        self.prepared
     }
 
     /// Index of the worker running the call.
     #[inline(always)]
     pub fn worker(&self) -> u64 {
-        // SAFETY: the worker structure is live for the call (attach: call) and
-        // its index is fixed at startup.
-        unsafe { (*self.worker.as_ptr()).idx }
+        self.worker
     }
 
     /// Time of the worker's current round, in nanoseconds; the only time
     /// source of a module.
     #[inline(always)]
     pub fn now(&self) -> u64 {
-        // SAFETY: the worker structure is live for the call (attach: call) and
-        // its time is written only by this worker between rounds.
-        unsafe { (*self.worker.as_ptr()).current_time }
+        self.now
     }
 }
 

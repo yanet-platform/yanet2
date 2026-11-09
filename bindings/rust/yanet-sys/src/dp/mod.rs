@@ -25,7 +25,10 @@
 //!   buffer. It derives the absolute fields of the object contexts a module
 //!   context links before those of the module context
 //!   (`config_gen_ectx_resolve_counters`,
-//!   `lib/dataplane/config/gen_resolve.c`).
+//!   `lib/dataplane/config/gen_resolve.c`). The worker's index and time do not
+//!   change during a call: C sets the index at startup and the time at the
+//!   start of each round (`worker_round_prepare`,
+//!   `lib/dataplane/worker/round.h`).
 //! - **binding**: the loader registers the descriptor under the module's name
 //!   and the dataplane calls a module's handlers only with contexts of that
 //!   module, whose configuration the control plane built with the body type the
