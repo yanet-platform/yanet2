@@ -129,8 +129,8 @@ pub use yanet_sys::{
     common::lpm::{Lpm4, Lpm6, LpmRange},
     cp::{
         BlockAddr, Branch, Build, BuildError, Builder, Built, BuiltObject, Context, CounterRegistrar, FfiRecord,
-        Header, Kind, ModuleKind, ObjectBuilder, ObjectKind, Owned, OwnedRegions, OwnedSlice, OwnedSlots, Owner,
-        Refusal, Registered, Scope,
+        Header, Kind, ModuleKind, NameField, ObjectBuilder, ObjectKind, Owned, OwnedRegions, OwnedSlice, OwnedSlots,
+        Owner, Refusal, Registered, Scope,
     },
     dp::{
         Batch, BoundGauge, CommitCx, Counter, CounterLayout, CounterRef, Cx, Device, DeviceRef, DscpMark, Module,

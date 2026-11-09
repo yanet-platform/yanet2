@@ -16,7 +16,7 @@ use yanet_sys::{
         CP_OBJECT_NAME_LEN, CP_OBJECT_TYPE_LEN,
     },
     counters::COUNTER_INVALID,
-    cp::{BlockAddr, Built, BuiltObject, Context, Header, Owner},
+    cp::{BlockAddr, Built, BuiltObject, Context, Header, NameField, Owner},
     dp::{Module, ModuleConfig, Object, ObjectConfig, ObjectLink},
 };
 
@@ -282,8 +282,8 @@ impl Agent {
         name: &str,
         f: impl for<'g> FnOnce(PublishedCx<'g>, &'g M::Config) -> R,
     ) -> Result<R, Error> {
-        let module_type = c_name::<{ CP_MODULE_TYPE_LEN as usize }>(M::NAME)?;
-        let module_name = c_name::<{ CP_MODULE_NAME_LEN as usize }>(name)?;
+        let module_type = c_name::<{ CP_MODULE_TYPE_LEN as usize }>(NameField::ModuleType, M::NAME)?;
+        let module_name = c_name::<{ CP_MODULE_NAME_LEN as usize }>(NameField::ConfigName, name)?;
         let pin = GenerationPin::acquire(self);
         // SAFETY: the generation is pinned, and the names are NUL terminated.
         let module = unsafe {
@@ -680,14 +680,10 @@ pub unsafe fn release_at<B: Releasable>(raw: NonNull<B::Raw>) -> Result<(), Reta
     Ok(())
 }
 
-/// A name as the NUL terminated bytes of a C field of `N` bytes.
-fn c_name<const N: usize>(name: &str) -> Result<[u8; N], Error> {
-    if name.len() >= N || name.bytes().any(|byte| byte == 0) {
-        return Err(Error::new(
-            ErrorKind::InvalidArgument,
-            "a name holds a NUL or does not fit its C field whole",
-        ));
-    }
+/// A name as the NUL terminated bytes of the C field it fills, of `N` bytes,
+/// refused as the builder refuses it.
+fn c_name<const N: usize>(field: NameField, name: &str) -> Result<[u8; N], Error> {
+    field.check(name)?;
     let mut bytes = [0; N];
     bytes[..name.len()].copy_from_slice(name.as_bytes());
     Ok(bytes)
@@ -740,8 +736,8 @@ unsafe impl Owner for Agent {
     }
 
     unsafe fn init_header(&self, header: Header, module: &str, name: &str) -> Result<(), Error> {
-        let module = c_name::<{ CP_MODULE_TYPE_LEN as usize }>(module)?;
-        let name = c_name::<{ CP_MODULE_NAME_LEN as usize }>(name)?;
+        let module = c_name::<{ CP_MODULE_TYPE_LEN as usize }>(NameField::ModuleType, module)?;
+        let name = c_name::<{ CP_MODULE_NAME_LEN as usize }>(NameField::ConfigName, name)?;
         let mut chain = ptr::null_mut();
         // SAFETY: the header is a block of this agent large enough for it
         // (caller contract), the names are NUL terminated and the
@@ -769,8 +765,8 @@ unsafe impl Owner for Agent {
     }
 
     unsafe fn init_object_header(&self, header: Header, ty: &str, name: &str) -> Result<(), Error> {
-        let ty = c_name::<{ CP_OBJECT_TYPE_LEN as usize }>(ty)?;
-        let name = c_name::<{ CP_OBJECT_NAME_LEN as usize }>(name)?;
+        let ty = c_name::<{ CP_OBJECT_TYPE_LEN as usize }>(NameField::ObjectType, ty)?;
+        let name = c_name::<{ CP_OBJECT_NAME_LEN as usize }>(NameField::ObjectName, name)?;
         let mut chain = ptr::null_mut();
         // SAFETY: the header is a block of this agent large enough for it
         // (caller contract), the names are NUL terminated and the
@@ -798,7 +794,7 @@ unsafe impl Owner for Agent {
     }
 
     unsafe fn register_counter(&self, header: Header, name: &str, size: u64) -> Result<u64, Error> {
-        let name = c_name::<{ COUNTER_NAME_LEN as usize }>(name)?;
+        let name = c_name::<{ COUNTER_NAME_LEN as usize }>(NameField::CounterName, name)?;
         let mut chain = ptr::null_mut();
         // SAFETY: the header is initialised (caller contract), so its
         // registry is; the name is NUL terminated and the out-parameter
@@ -825,8 +821,8 @@ unsafe impl Owner for Agent {
         name: &str,
         size: u64,
     ) -> Result<(u64, u64), Error> {
-        let tag = c_name::<{ COUNTER_TAG_VALUE_LEN as usize }>(tag)?;
-        let name = c_name::<{ COUNTER_NAME_LEN as usize }>(name)?;
+        let tag = c_name::<{ COUNTER_TAG_VALUE_LEN as usize }>(NameField::CounterTag, tag)?;
+        let name = c_name::<{ COUNTER_NAME_LEN as usize }>(NameField::CounterName, name)?;
         let (mut registry, mut chain) = (0, ptr::null_mut());
         // SAFETY: the header is initialised (caller contract); the tag is NUL
         // terminated and the out-parameters are valid.
@@ -856,7 +852,7 @@ unsafe impl Owner for Agent {
     }
 
     unsafe fn register_object_counter(&self, header: Header, name: &str, size: u64) -> Result<u64, Error> {
-        let name = c_name::<{ COUNTER_NAME_LEN as usize }>(name)?;
+        let name = c_name::<{ COUNTER_NAME_LEN as usize }>(NameField::CounterName, name)?;
         let mut chain = ptr::null_mut();
         // SAFETY: the header is an initialised object header (caller
         // contract), so its registry is; the name is NUL terminated and the
@@ -877,7 +873,7 @@ unsafe impl Owner for Agent {
     }
 
     unsafe fn link_device(&self, header: Header, name: &str) -> Result<u64, Error> {
-        let name = c_name::<{ CP_DEVICE_NAME_LEN as usize }>(name)?;
+        let name = c_name::<{ CP_DEVICE_NAME_LEN as usize }>(NameField::DeviceName, name)?;
         let (mut index, mut chain) = (0, ptr::null_mut());
         // SAFETY: the header is initialised (caller contract); the name is
         // NUL terminated and the out-parameters are valid.
@@ -897,8 +893,8 @@ unsafe impl Owner for Agent {
     }
 
     unsafe fn link_object(&self, header: Header, ty: &str, name: &str) -> Result<u64, Error> {
-        let ty = c_name::<{ CP_OBJECT_TYPE_LEN as usize }>(ty)?;
-        let name = c_name::<{ CP_OBJECT_NAME_LEN as usize }>(name)?;
+        let ty = c_name::<{ CP_OBJECT_TYPE_LEN as usize }>(NameField::ObjectType, ty)?;
+        let name = c_name::<{ CP_OBJECT_NAME_LEN as usize }>(NameField::ObjectName, name)?;
         let (mut index, mut chain) = (0, ptr::null_mut());
         // SAFETY: the header is initialised (caller contract); the names are
         // NUL terminated and the out-parameters are valid.

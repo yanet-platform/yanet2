@@ -54,6 +54,21 @@ var failedFixtureBuilds = []struct {
 		wantKind: ffi.ErrInvalidArgument,
 	},
 	{
+		name:     "empty name",
+		options:  fixtureOptions{name: "", counter: "hits", device: "port0"},
+		wantKind: ffi.ErrInvalidArgument,
+	},
+	{
+		name:     "empty counter name",
+		options:  fixtureOptions{name: "config", counter: "", device: "port0"},
+		wantKind: ffi.ErrInvalidArgument,
+	},
+	{
+		name:     "empty device name",
+		options:  fixtureOptions{name: "config", counter: "hits", device: ""},
+		wantKind: ffi.ErrInvalidArgument,
+	},
+	{
 		name:     "counter name with a NUL",
 		options:  fixtureOptions{name: "config", counter: "hits\x00x", device: "port0"},
 		wantKind: ffi.ErrInvalidArgument,
@@ -175,6 +190,45 @@ func Test_FixtureConfig_Build_Failure_ReturnsMemoryToBaseline(t *testing.T) {
 
 			require.Error(t, err)
 			require.Equal(t, bed.baseline, bed.agent.BlockAllocatorFreeSize())
+		})
+	}
+}
+
+// Test_FixtureConfig_Build_InvalidName_NamesItsFieldAndBounds verifies that a
+// build refused for the length of a name says which name it is, how long it
+// is and how long its field lets it be.
+func Test_FixtureConfig_Build_InvalidName_NamesItsFieldAndBounds(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		options fixtureOptions
+		message string
+	}{
+		{
+			name:    "empty config name",
+			options: fixtureOptions{name: "", counter: "hits", device: "port0"},
+			message: "config name has 0 bytes, must have from 1 to 79",
+		},
+		{
+			name:    "overlong counter name",
+			options: fixtureOptions{name: "config", counter: strings.Repeat("c", 128), device: "port0"},
+			message: "counter name has 128 bytes, must have from 1 to 127",
+		},
+		{
+			name: "overlong device name",
+			options: fixtureOptions{
+				name:    "config",
+				counter: "hits",
+				device:  strings.Repeat("d", ffi.MaxDeviceNameLen),
+			},
+			message: "device name has 80 bytes, must have from 1 to 79",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			bed := newBed(t)
+
+			_, err := bed.buildFixture(tc.options)
+
+			require.ErrorContains(t, err, tc.message)
 		})
 	}
 }

@@ -14,9 +14,9 @@ use core::{
 
 use yanet_packet as _;
 use yanet_sdk::{
-    Batch, Build, BuiltObject, CommitCx, Counter, Cx, Device, Kind, Lpm4, Lpm6, Module, Object, ObjectBuilder,
-    ObjectCommitCx, ObjectCounter, ObjectLink, OwnedSlice, PerWorker, PerWorkerSlice, Refusal, Registered, ShmBox,
-    ShmLayout, ShmSlice, TaggedCounter, TaggedCounters, Traffic, Verdict,
+    Batch, Build, BuiltObject, CommitCx, Counter, Cx, Device, Kind, Lpm4, Lpm6, Module, NameField, Object,
+    ObjectBuilder, ObjectCommitCx, ObjectCounter, ObjectLink, OwnedSlice, PerWorker, PerWorkerSlice, Refusal,
+    Registered, ShmBox, ShmLayout, ShmSlice, TaggedCounter, TaggedCounters, Traffic, Verdict,
 };
 use yanet_sdk_derive as _;
 use yanet_sdk_testing::{
@@ -25,7 +25,7 @@ use yanet_sdk_testing::{
 };
 use yanet_shm as _;
 use yanet_sys::{
-    bindings::{COUNTER_TAG_VALUE_LEN, CP_OBJECT_NAME_LEN},
+    bindings::{COUNTER_NAME_LEN, COUNTER_TAG_VALUE_LEN, CP_DEVICE_NAME_LEN, CP_MODULE_NAME_LEN, CP_OBJECT_NAME_LEN},
     common::LINE_BLOCK_ALIGN,
     cp::{BuildError, Builder, Built, Header, MemoryContext, Owner, Scope},
     dp::ModuleConfig,
@@ -219,6 +219,7 @@ type FaultyModule = Fixture<Faulty>;
 type EntriesModule = Fixture<ShmSlice<Entry>>;
 type CountedModule = Fixture<Counted>;
 type LockedModule = Fixture<Locked>;
+type DeviceModule = Fixture<Device>;
 
 /// A counter of the module's own beside counters of two tagged registries,
 /// one name in both.
@@ -870,6 +871,103 @@ fn test_build_registers_each_counter_with_the_size_of_its_layout() {
     owner.assert_released();
 }
 
+/// verifies that a counter name C would cut short is refused before the owner
+/// is asked, and the build returns everything it took.
+#[test]
+fn test_build_refuses_a_counter_name_that_does_not_fit_its_c_field() {
+    let overlong = "c".repeat(COUNTER_NAME_LEN as usize);
+    for name in [overlong.as_str(), "hi\0ts", ""] {
+        let owner = owner();
+        owner.fail_after(Call::Registration, 0);
+
+        let err = build::<CountedModule>(&owner, |b| {
+            Ok(CountedParts {
+                hits: b.counter(name)?,
+                traffic: b.counter("traffic")?,
+            })
+        })
+        .expect_err("refused name");
+
+        let refusal = Refusal::InvalidName {
+            field: NameField::CounterName,
+            len: name.len(),
+        };
+        assert_eq!(BuildError::Refused(refusal), err);
+        owner.assert_released();
+    }
+}
+
+/// verifies that a device name C would cut short is refused before the owner
+/// is asked, and the build returns everything it took.
+#[test]
+fn test_build_refuses_a_device_name_that_does_not_fit_its_c_field() {
+    let overlong = "d".repeat(CP_DEVICE_NAME_LEN as usize);
+    for name in [overlong.as_str(), "eth\0", ""] {
+        let owner = owner();
+        owner.fail_after(Call::Registration, 0);
+
+        let err = build::<DeviceModule>(&owner, |b| b.device(name)).expect_err("refused name");
+
+        let refusal = Refusal::InvalidName {
+            field: NameField::DeviceName,
+            len: name.len(),
+        };
+        assert_eq!(BuildError::Refused(refusal), err);
+        owner.assert_released();
+    }
+}
+
+/// verifies that a config name C would cut short is refused before anything
+/// is allocated.
+#[test]
+fn test_build_refuses_a_config_name_that_does_not_fit_its_c_field() {
+    let overlong = "w".repeat(CP_MODULE_NAME_LEN as usize);
+    for name in [overlong.as_str(), "wo\0rds", ""] {
+        let owner = owner();
+        owner.fail_after(Call::Alloc, 0);
+
+        let err = Builder::<WordsModule>::build::<Failure, _>(&owner, name, |b| b.slice(0, |_| Ok(0)))
+            .expect_err("refused name");
+
+        let refusal = Refusal::InvalidName {
+            field: NameField::ConfigName,
+            len: name.len(),
+        };
+        assert_eq!(BuildError::Refused(refusal), err);
+        owner.assert_released();
+    }
+}
+
+/// A module of an empty type, which no configuration takes.
+struct Untyped;
+
+impl Module for Untyped {
+    const NAME: &'static str = "";
+    type Config = ShmSlice<u64>;
+    type Prepared<'p> = ();
+
+    fn prepare(_: &CommitCx<'_, Self>) {}
+
+    fn handle<'id>(_: &mut Cx<'id, Self>, batch: &mut Batch<'id>) {
+        batch.dispatch(|_| Verdict::Pass);
+    }
+}
+
+/// verifies that the empty type of a module is refused before anything is
+/// allocated.
+#[test]
+fn test_build_refuses_an_empty_module_type() {
+    let owner = owner();
+    owner.fail_after(Call::Alloc, 0);
+
+    let err =
+        Builder::<Untyped>::build::<Failure, _>(&owner, "words", |b| b.slice(0, |_| Ok(0))).expect_err("refused type");
+
+    let refusal = Refusal::InvalidName { field: NameField::ModuleType, len: 0 };
+    assert_eq!(BuildError::Refused(refusal), err);
+    owner.assert_released();
+}
+
 /// The parts of the tagged configuration, whose tags are `rules`, `routes`
 /// and the given last one.
 fn tagged<'b>(b: Scope<'b, '_, TestOwner>, last: &str) -> Result<TaggedParts<'b, TestOwner>, Failure> {
@@ -947,10 +1045,43 @@ fn test_build_refuses_a_counter_tag_that_does_not_fit_its_c_field() {
 
         let err = build::<TaggedModule>(&owner, |b| tagged(b, tag)).expect_err("refused tag");
 
+        let refusal = Refusal::InvalidName {
+            field: NameField::CounterTag,
+            len: tag.len(),
+        };
         assert_eq!(
-            (BuildError::Refused(Refusal::InvalidName), 2),
+            (BuildError::Refused(refusal), 2),
             (err, owner.counter_registries().len())
         );
+        owner.assert_released();
+    }
+}
+
+/// verifies that a tagged counter's name C would cut short is refused before
+/// the owner is asked, and the build returns everything it took.
+#[test]
+fn test_build_refuses_a_tagged_counter_name_that_does_not_fit_its_c_field() {
+    let overlong = "a".repeat(COUNTER_NAME_LEN as usize);
+    for name in [overlong.as_str(), "al\0low", ""] {
+        let owner = owner();
+        owner.fail_after(Call::Registration, 0);
+
+        let err = build::<TaggedModule>(&owner, |b| {
+            let rule = b.counter_in("rules", name)?;
+            Ok(TaggedParts {
+                hits: b.counter("hits")?,
+                rule,
+                route: b.counter_in("routes", "allow")?,
+                again: b.counter_in("rules", "deny")?,
+            })
+        })
+        .expect_err("refused name");
+
+        let refusal = Refusal::InvalidName {
+            field: NameField::CounterName,
+            len: name.len(),
+        };
+        assert_eq!(BuildError::Refused(refusal), err);
         owner.assert_released();
     }
 }
@@ -1079,10 +1210,42 @@ fn test_build_refuses_a_registrar_tag_that_does_not_fit_its_c_field() {
         })
         .expect_err("refused tag");
 
+        let refusal = Refusal::InvalidName {
+            field: NameField::CounterTag,
+            len: tag.len(),
+        };
         assert_eq!(
-            (BuildError::Refused(Refusal::InvalidName), 1),
+            (BuildError::Refused(refusal), 1),
             (err, owner.counter_registries().len())
         );
+        owner.assert_released();
+    }
+}
+
+/// verifies that a registrar's counter name C would cut short is refused
+/// before the owner is asked, and the build returns everything it took.
+#[test]
+fn test_build_refuses_a_registrar_counter_name_that_does_not_fit_its_c_field() {
+    let overlong = "d".repeat(COUNTER_NAME_LEN as usize);
+    for name in [overlong.as_str(), "de\0ny", ""] {
+        let owner = owner();
+        owner.fail_after(Call::Registration, 0);
+
+        let err = build::<ByRuleModule>(&owner, |b| {
+            let mut rules = b.counters_in("rules")?;
+            rules.counter(name)?;
+            Ok(ByRuleParts {
+                route: b.counter_in("routes", "allow")?,
+                rules,
+            })
+        })
+        .expect_err("refused name");
+
+        let refusal = Refusal::InvalidName {
+            field: NameField::CounterName,
+            len: name.len(),
+        };
+        assert_eq!(BuildError::Refused(refusal), err);
         owner.assert_released();
     }
 }
@@ -1194,6 +1357,53 @@ fn build_policy_object(
     rules: &[(u64, &[u64])],
 ) -> Result<BuiltObject<PolicyState, TestOwner>, Failure> {
     ObjectBuilder::<PolicyState>::build(owner, "state0", |b| policy(b, rules))
+}
+
+/// verifies that an object name C would cut short is refused before anything
+/// is allocated.
+#[test]
+fn test_object_build_refuses_a_name_that_does_not_fit_its_c_field() {
+    let overlong = "s".repeat(CP_OBJECT_NAME_LEN as usize);
+    for name in [overlong.as_str(), "sta\0te", ""] {
+        let owner = owner();
+        owner.fail_after(Call::Alloc, 0);
+
+        let err = ObjectBuilder::<PolicyState>::build::<Failure, _>(&owner, name, |b| policy(b, &[]))
+            .expect_err("refused name");
+
+        let refusal = Refusal::InvalidName {
+            field: NameField::ObjectName,
+            len: name.len(),
+        };
+        assert_eq!(BuildError::Refused(refusal), err);
+        owner.assert_released();
+    }
+}
+
+/// An object of an empty type, which no object takes.
+struct UntypedState;
+
+impl Object for UntypedState {
+    const TYPE: &'static str = "";
+    type Config = Policy;
+    type Prepared<'p> = ();
+
+    fn prepare(_: &ObjectCommitCx<'_, Self>) {}
+}
+
+/// verifies that the empty type of an object is refused before anything is
+/// allocated.
+#[test]
+fn test_object_build_refuses_an_empty_object_type() {
+    let owner = owner();
+    owner.fail_after(Call::Alloc, 0);
+
+    let err = ObjectBuilder::<UntypedState>::build::<Failure, _>(&owner, "state0", |b| policy(b, &[]))
+        .expect_err("refused type");
+
+    let refusal = Refusal::InvalidName { field: NameField::ObjectType, len: 0 };
+    assert_eq!(BuildError::Refused(refusal), err);
+    owner.assert_released();
 }
 
 /// Releases an object built in the given owner.
@@ -1407,6 +1617,28 @@ fn test_object_build_registers_each_counter_with_the_objects_registry() {
     owner.assert_released();
 }
 
+/// verifies that an object counter's name C would cut short is refused before
+/// the owner is asked, and the build returns everything it took.
+#[test]
+fn test_object_build_refuses_a_counter_name_that_does_not_fit_its_c_field() {
+    let overlong = "h".repeat(COUNTER_NAME_LEN as usize);
+    for name in [overlong.as_str(), "he\0ld", ""] {
+        let owner = owner();
+        // The two counters before the named one are registered, and the
+        // owner refuses the next registration it is asked for.
+        owner.fail_after(Call::Registration, 2);
+
+        let err = build_held_object(&owner, name).expect_err("refused name");
+
+        let refusal = Refusal::InvalidName {
+            field: NameField::CounterName,
+            len: name.len(),
+        };
+        assert_eq!(BuildError::Refused(refusal), err);
+        owner.assert_released();
+    }
+}
+
 /// verifies that the counters of each object are numbered from zero, apart
 /// from those of another object and of a module.
 #[test]
@@ -1551,12 +1783,29 @@ fn test_build_refuses_an_object_name_that_does_not_fit_its_c_field() {
 
         let err = build::<LinkedModule>(&owner, |b| linked(b, ["state0", name])).expect_err("refused name");
 
-        assert_eq!(
-            (BuildError::Refused(Refusal::InvalidName), 1),
-            (err, owner.object_links().len())
-        );
+        let refusal = Refusal::InvalidName {
+            field: NameField::ObjectName,
+            len: name.len(),
+        };
+        assert_eq!((BuildError::Refused(refusal), 1), (err, owner.object_links().len()));
         owner.assert_released();
     }
+}
+
+type UntypedLinkModule = Fixture<ObjectLink<UntypedState>>;
+
+/// verifies that a link to an object of an empty type is refused before the
+/// owner is asked.
+#[test]
+fn test_build_refuses_a_link_to_an_object_of_an_empty_type() {
+    let owner = owner();
+    owner.fail_after(Call::Registration, 0);
+
+    let err = build::<UntypedLinkModule>(&owner, |b| b.object("state0")).expect_err("refused type");
+
+    let refusal = Refusal::InvalidName { field: NameField::ObjectType, len: 0 };
+    assert_eq!(BuildError::Refused(refusal), err);
+    owner.assert_released();
 }
 
 /// verifies that an object name filling its C field with the terminator is

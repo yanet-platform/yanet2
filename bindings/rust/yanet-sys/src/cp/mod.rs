@@ -49,6 +49,6 @@ pub use builder::{
 };
 #[doc(hidden)]
 pub use builder::{MemoryContext, Partial};
-pub use error::{BuildError, Refusal};
+pub use error::{BuildError, NameField, Refusal};
 pub use owner::Owner;
 pub use record::FfiRecord;

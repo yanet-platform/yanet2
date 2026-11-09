@@ -142,7 +142,7 @@ impl From<BuildError<Error>> for Error {
 
 impl From<Refusal> for Error {
     fn from(refusal: Refusal) -> Self {
-        with_c_kind(refusal.kind(), refusal.message())
+        with_c_kind(refusal.kind(), &refusal.to_string())
     }
 }
 

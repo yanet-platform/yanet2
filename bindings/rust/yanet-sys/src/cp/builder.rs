@@ -32,7 +32,7 @@ use yanet_shm::{
 
 use super::{
     addr::{BlockAddr, Context, Header},
-    error::{BuildError, Refusal},
+    error::{BuildError, NameField, Refusal},
     owner::Owner,
 };
 use crate::{
@@ -56,6 +56,14 @@ type Brand<'b> = PhantomData<fn(&'b ()) -> &'b ()>;
 ///
 /// Sealed: the kinds are [`ModuleKind`] and [`ObjectKind`].
 pub trait Kind: kind::Sealed + 'static {
+    /// The C field the type of a build of the kind fills.
+    #[doc(hidden)]
+    const TYPE: NameField;
+
+    /// The C field the name of a build of the kind fills.
+    #[doc(hidden)]
+    const NAME: NameField;
+
     /// Initialises the header of a build of the type and name.
     ///
     /// # Safety
@@ -85,6 +93,9 @@ pub enum ModuleKind {}
 pub enum ObjectKind {}
 
 impl Kind for ModuleKind {
+    const TYPE: NameField = NameField::ModuleType;
+    const NAME: NameField = NameField::ConfigName;
+
     unsafe fn init<W: Owner>(owner: &W, header: Header, ty: &str, name: &str) -> Result<(), W::Error> {
         // SAFETY: the caller's contract.
         unsafe { owner.init_header(header, ty, name) }
@@ -97,6 +108,9 @@ impl Kind for ModuleKind {
 }
 
 impl Kind for ObjectKind {
+    const TYPE: NameField = NameField::ObjectType;
+    const NAME: NameField = NameField::ObjectName;
+
     unsafe fn init<W: Owner>(owner: &W, header: Header, ty: &str, name: &str) -> Result<(), W::Error> {
         // SAFETY: the caller's contract.
         unsafe { owner.init_object_header(header, ty, name) }
@@ -1192,9 +1206,11 @@ impl<'b, W: Owner, E: From<BuildError<W::Error>>> Scope<'b, '_, W, E, ModuleKind
     ///
     /// # Errors
     ///
-    /// The owner refuses the registration, as C does for a name registered
-    /// before with another size.
+    /// The name is empty, holds a NUL or does not fit a C counter name with
+    /// the terminator, or the owner refuses the registration, as C does for a
+    /// name registered before with another size.
     pub fn counter<T: CounterLayout>(self, name: &str) -> Result<Registered<'b, Counter<T>>, E> {
+        NameField::CounterName.check(name).map_err(refused::<W, E>)?;
         let size = T::VALUES as u64;
         // SAFETY: the header is initialised and not yet published.
         let id = unsafe { self.memory.owner.register_counter(self.header, name, size) }.map_err(failed::<W, E>)?;
@@ -1212,17 +1228,17 @@ impl<'b, W: Owner, E: From<BuildError<W::Error>>> Scope<'b, '_, W, E, ModuleKind
     ///
     /// # Errors
     ///
-    /// The tag is empty, holds a NUL or does not fit a C counter tag value with
-    /// the terminator, or the owner refuses the registration, as C does for a
-    /// name registered in the registry before with another size.
+    /// The tag or the name is empty, holds a NUL or does not fit its C field,
+    /// a counter tag value or a counter name, with the terminator, or the
+    /// owner refuses the registration, as C does for a name registered in the
+    /// registry before with another size.
     #[doc(alias = "cp_module_counter_registry")]
     pub fn counter_in<T>(self, tag: &str, name: &str) -> Result<Registered<'b, TaggedCounter<T>>, E>
     where
         T: CounterLayout,
     {
-        if !fits_c_field(tag, bindings::COUNTER_TAG_VALUE_LEN) {
-            return Err(refused::<W, E>(Refusal::InvalidName));
-        }
+        NameField::CounterTag.check(tag).map_err(refused::<W, E>)?;
+        NameField::CounterName.check(name).map_err(refused::<W, E>)?;
         let size = T::VALUES as u64;
         // SAFETY: the header is initialised and not yet published.
         let (registry, id) =
@@ -1247,9 +1263,7 @@ impl<'b, W: Owner, E: From<BuildError<W::Error>>> Scope<'b, '_, W, E, ModuleKind
     where
         T: CounterLayout,
     {
-        if !fits_c_field(tag, bindings::COUNTER_TAG_VALUE_LEN) {
-            return Err(refused::<W, E>(Refusal::InvalidName));
-        }
+        NameField::CounterTag.check(tag).map_err(refused::<W, E>)?;
         Ok(CounterRegistrar {
             memory: self.memory,
             header: self.header,
@@ -1265,8 +1279,10 @@ impl<'b, W: Owner, E: From<BuildError<W::Error>>> Scope<'b, '_, W, E, ModuleKind
     ///
     /// # Errors
     ///
-    /// The owner refuses the device.
+    /// The name is empty, holds a NUL or does not fit a C device name with the
+    /// terminator, or the owner refuses the device.
     pub fn device(self, name: &str) -> Result<Registered<'b, Device>, E> {
+        NameField::DeviceName.check(name).map_err(refused::<W, E>)?;
         // SAFETY: the header is initialised and not yet published.
         let index = unsafe { self.memory.owner.link_device(self.header, name) }.map_err(failed::<W, E>)?;
         Ok(Registered::new(index))
@@ -1285,9 +1301,8 @@ impl<'b, W: Owner, E: From<BuildError<W::Error>>> Scope<'b, '_, W, E, ModuleKind
     /// with the terminator, or the owner refuses the link.
     #[doc(alias = "cp_module_link_object")]
     pub fn object<O: Object>(self, name: &str) -> Result<Registered<'b, ObjectLink<O>>, E> {
-        if !fits_c_field(O::TYPE, bindings::CP_OBJECT_TYPE_LEN) || !fits_c_field(name, bindings::CP_OBJECT_NAME_LEN) {
-            return Err(refused::<W, E>(Refusal::InvalidName));
-        }
+        NameField::ObjectType.check(O::TYPE).map_err(refused::<W, E>)?;
+        NameField::ObjectName.check(name).map_err(refused::<W, E>)?;
         // SAFETY: the header is initialised and not yet published.
         let index = unsafe { self.memory.owner.link_object(self.header, O::TYPE, name) }.map_err(failed::<W, E>)?;
         Ok(Registered::new(index))
@@ -1310,12 +1325,14 @@ where
     ///
     /// # Errors
     ///
-    /// The owner refuses the registration, as C does for a name registered
-    /// before with another size.
+    /// The name is empty, holds a NUL or does not fit a C counter name with
+    /// the terminator, or the owner refuses the registration, as C does for a
+    /// name registered before with another size.
     pub fn counter<T>(self, name: &str) -> Result<Registered<'b, ObjectCounter<T>>, E>
     where
         T: CounterLayout,
     {
+        NameField::CounterName.check(name).map_err(refused::<W, E>)?;
         let size = T::VALUES as u64;
         // SAFETY: the header is an initialised object header, not yet
         // published.
@@ -1328,12 +1345,6 @@ where
 // A tag fits its registry's C field when it fits a counter tag value, the
 // field readers find the registry by.
 const _: () = assert!(bindings::COUNTER_TAG_VALUE_LEN <= bindings::COUNTER_NAME_LEN);
-
-/// Whether a name fits a C field of `len` bytes whole: not empty, no NUL, and
-/// room for the terminator.
-fn fits_c_field(name: &str, len: u32) -> bool {
-    !name.is_empty() && name.len() < len as usize && !name.bytes().any(|byte| byte == 0)
-}
 
 impl<T: Build, W: Owner> Owned<'_, T, W> {
     /// Hands the block over to the field it is written into: its address,
@@ -1423,11 +1434,13 @@ where
     ///
     /// # Errors
     ///
-    /// The owner refuses the registration, as C does for a name registered in
-    /// the registry before with another size, or the registry gives the counter
-    /// an id past the next one, having taken a counter amid the registrar's
-    /// other than through it.
+    /// The name is empty, holds a NUL or does not fit a C counter name with
+    /// the terminator, the owner refuses the registration, as C does for a
+    /// name registered in the registry before with another size, or the
+    /// registry gives the counter an id past the next one, having taken a
+    /// counter amid the registrar's other than through it.
     pub fn counter(&mut self, name: &str) -> Result<u64, BuildError<W::Error>> {
+        NameField::CounterName.check(name)?;
         let size = T::VALUES as u64;
         // SAFETY: the header is initialised and not yet published: the
         // registrar is of the build, which publishes nothing before it ends.
@@ -1477,8 +1490,9 @@ impl<M: Module> Builder<M> {
     ///
     /// # Errors
     ///
-    /// The owner's memory is exhausted, its header routine refuses the module
-    /// type or the name, the closure fails, or the write of the body is
+    /// The module type or the name is empty, holds a NUL or does not fit its C
+    /// field with the terminator, the owner's memory is exhausted, its header
+    /// routine refuses them, the closure fails, or the write of the body is
     /// refused.
     pub fn build<'env, E, W>(
         owner: &W,
@@ -1520,8 +1534,9 @@ impl<O: Object> ObjectBuilder<O> {
     ///
     /// # Errors
     ///
-    /// The owner's memory is exhausted, its header routine refuses the object
-    /// type or the name, the closure fails, or the write of the body is
+    /// The object type or the name is empty, holds a NUL or does not fit its C
+    /// field with the terminator, the owner's memory is exhausted, its header
+    /// routine refuses them, the closure fails, or the write of the body is
     /// refused.
     pub fn build<'env, E, W>(
         owner: &W,
@@ -1553,6 +1568,9 @@ impl<O: Object> ObjectBuilder<O> {
 /// Builds the root block of a module configuration or an object: the header
 /// of the kind at its start, then the body written from the closure's parts at
 /// the body offset; returns the header, or releases everything on failure.
+///
+/// A type or a name its C field would not hold whole is refused before
+/// anything is allocated.
 fn build_root<'env, K: Kind, C: Build, W: Owner, E: From<BuildError<W::Error>>>(
     owner: &W,
     ty: &str,
@@ -1561,6 +1579,8 @@ fn build_root<'env, K: Kind, C: Build, W: Owner, E: From<BuildError<W::Error>>>(
     body_offset: usize,
     f: impl for<'b> FnOnce(Scope<'b, 'env, W, E, K>) -> Result<C::Parts<'b, W>, E>,
 ) -> Result<Header, E> {
+    K::TYPE.check(ty).map_err(refused::<W, E>)?;
+    K::NAME.check(name).map_err(refused::<W, E>)?;
     let block = owner.alloc(size).ok_or_else(|| refused::<W, E>(Refusal::OutOfMemory))?;
     // SAFETY: the root block holds the header and the body, so it is large
     // enough for the header.
