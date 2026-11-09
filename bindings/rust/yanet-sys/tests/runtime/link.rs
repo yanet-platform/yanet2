@@ -16,11 +16,11 @@ use yanet_sys::{
     bindings,
     dp::{
         Batch, CommitCx, CounterRef, Cx, Module, Object, ObjectCommitCx, ObjectConfig, ObjectCounter, ObjectLink,
-        Verdict, rt,
+        Verdict,
     },
 };
 
-use crate::common::{Ectx, numbered, write};
+use crate::common::{Ectx, commit_object, numbered, write};
 
 /// An object of atomic slots, which prepares their number.
 struct Slots;
@@ -132,9 +132,7 @@ unsafe fn link<O: Object<Config = ShmSlice<AtomicU64>>>(
             object_context.abs_object_prepared = root.ptr(alloc(prepared_size));
         }
         write(arena, object_ectx, object_context);
-        if prepared_size != 0 {
-            rt::commit_object_ectx::<O>(root.ptr(object_ectx), root.ptr(object));
-        }
+        commit_object::<O>(arena, object_ectx, object);
         write(
             arena,
             links,
@@ -265,7 +263,7 @@ unsafe fn link_held(arena: &'static BlockArena, context: &mut bindings::module_e
         write(arena, object_ectx, object_context);
         let slot = object_ectx + offset_of!(bindings::object_ectx, counter_storage);
         write(arena, slot, storage as isize - slot as isize);
-        rt::commit_object_ectx::<Held>(root.ptr(object_ectx), root.ptr(object));
+        commit_object::<Held>(arena, object_ectx, object);
         write(arena, links, link);
     }
     context.object_link_count = 1;

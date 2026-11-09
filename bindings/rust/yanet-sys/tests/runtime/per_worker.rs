@@ -12,11 +12,11 @@ use yanet_sys::{
     cp::{Build, MemoryContext, Owner, Refusal},
     dp::{
         Batch, CommitCx, Cx, Module, Object, ObjectCommitCx, ObjectConfig, ObjectLink, PerWorker, PerWorkerSlice,
-        Verdict, WorkerSlice, WorkerSlot, rt,
+        Verdict, WorkerSlice, WorkerSlot,
     },
 };
 
-use crate::common::{Ectx, numbered, write};
+use crate::common::{Ectx, commit_object, numbered, write};
 
 /// Workers the slots are laid out for.
 const WORKERS: usize = 3;
@@ -324,7 +324,7 @@ unsafe fn link_budgets(arena: &'static BlockArena, context: &mut bindings::modul
     unsafe {
         write(arena, body, [slots as isize - body as isize, WORKERS as isize]);
         write(arena, object_ectx, object_context);
-        rt::commit_object_ectx::<Budgets>(root.ptr(object_ectx), root.ptr(object));
+        commit_object::<Budgets>(arena, object_ectx, object);
         write(arena, links, link);
     }
     context.object_link_count = 1;
@@ -602,7 +602,7 @@ fn test_per_worker_slice_handle_of_an_object_is_read_through_a_link() {
                 ..Default::default()
             };
             write(arena, object_ectx, object_context);
-            rt::commit_object_ectx::<Flows>(root.ptr(object_ectx), root.ptr(object));
+            commit_object::<Flows>(arena, object_ectx, object);
             write(arena, links, link);
             context.object_link_count = 1;
             context.abs_object_links = root.ptr(links);
