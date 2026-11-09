@@ -316,6 +316,46 @@ func (m *bed) counter(inst *instance, name string) [][]uint64 {
 	return counters[0].Values
 }
 
+// moduleCounterNames returns the names of the instance's own counters among
+// the given ones, in the order the dataplane lists them.
+func (m *bed) moduleCounterNames(inst *instance, names ...string) []string {
+	m.t.Helper()
+
+	path := inst.path
+	counters := m.harness.SharedMemory().DPConfig(0).ModuleCounters(
+		path.Device, path.Pipeline, path.Function, path.Chain, path.ModuleType, path.ModuleName,
+		names,
+	)
+	found := make([]string, 0, len(counters))
+	for _, counter := range counters {
+		found = append(found, counter.Name)
+	}
+	return found
+}
+
+// taggedCounter returns, per worker, the values of the counter of that name
+// in the instance's tagged registry of the tag, which the dataplane keeps
+// among the instance's runtime counters under the tag.
+func (m *bed) taggedCounter(inst *instance, tag, name string) [][]uint64 {
+	m.t.Helper()
+
+	path := inst.path
+	groups, err := m.harness.SharedMemory().DPConfig(0).CountersByTags([]ffi.CounterTag{
+		{Key: "device", Value: path.Device},
+		{Key: "pipeline", Value: path.Pipeline},
+		{Key: "function", Value: path.Function},
+		{Key: "chain", Value: path.Chain},
+		{Key: "module_type", Value: path.ModuleType},
+		{Key: "module_name", Value: path.ModuleName},
+		{Key: "kind", Value: "runtime"},
+		{Key: "config", Value: tag},
+	}, []string{name})
+	require.NoError(m.t, err)
+	require.Len(m.t, groups, 1, "registry %s of %s", tag, inst.name)
+	require.Len(m.t, groups[0].Counters, 1, "counter %s of registry %s of %s", name, tag, inst.name)
+	return groups[0].Counters[0].Values
+}
+
 // counterGrowth returns, per worker, how much each value of a counter grew
 // from before to after, both rows of every worker of a bed.
 func counterGrowth(t *testing.T, before, after [][]uint64) [][]uint64 {

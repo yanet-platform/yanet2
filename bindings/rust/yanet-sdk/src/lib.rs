@@ -127,14 +127,15 @@ pub use yanet_sys::{
     },
     common::lpm::{Lpm4, Lpm6, LpmRange},
     cp::{
-        BlockAddr, Branch, Build, BuildError, Builder, Built, BuiltObject, Context, FfiRecord, Header, Kind,
-        ModuleKind, ObjectBuilder, ObjectKind, Owned, OwnedRegions, OwnedSlice, OwnedSlots, Owner, Refusal, Registered,
-        Scope,
+        BlockAddr, Branch, Build, BuildError, Builder, Built, BuiltObject, Context, CounterRegistrar, FfiRecord,
+        Header, Kind, ModuleKind, ObjectBuilder, ObjectKind, Owned, OwnedRegions, OwnedSlice, OwnedSlots, Owner,
+        Refusal, Registered, Scope,
     },
     dp::{
         Batch, CommitCx, Counter, CounterLayout, CounterRef, Cx, Device, DeviceRef, DscpMark, Module, ModuleCx, Object,
         ObjectCommitCx, ObjectConfig, ObjectLink, Packet, PacketView, ParseError, PerWorker, PerWorkerSlice, PrepareCx,
-        ResizeError, Traffic, TunnelError, Verdict, WorkerSlice, WorkerSlot,
+        ResizeError, TaggedCounter, TaggedCounters, TaggedCountersRef, Traffic, TunnelError, Verdict, WorkerSlice,
+        WorkerSlot,
     },
 };
 
@@ -173,6 +174,28 @@ mod doctests {
     /// ```
     struct ObjectCounterRefused;
 
+    /// An object scope registers no tagged counter either: an object header
+    /// carries no tagged counter registries.
+    ///
+    /// ```compile_fail,E0599
+    /// use yanet_sdk::{BuildError, ObjectKind, Owner, Scope};
+    /// fn count<W: Owner>(scope: Scope<'_, '_, W, BuildError<W::Error>, ObjectKind>) {
+    ///     let _ = scope.counter_in::<u64>("rules", "hits");
+    /// }
+    /// ```
+    struct ObjectTaggedCounterRefused;
+
+    /// An object scope registers no counters of a tagged registry through a
+    /// registrar either.
+    ///
+    /// ```compile_fail,E0599
+    /// use yanet_sdk::{BuildError, ObjectKind, Owner, Scope};
+    /// fn count<W: Owner>(scope: Scope<'_, '_, W, BuildError<W::Error>, ObjectKind>) {
+    ///     let _ = scope.counters_in::<u64>("rules");
+    /// }
+    /// ```
+    struct ObjectTaggedCountersRefused;
+
     /// An object scope links no device: an object header carries no module
     /// device list.
     ///
@@ -202,7 +225,7 @@ mod doctests {
     /// ```
     struct ObjectObjectRefused;
 
-    /// A module scope registers all three, the accepted twin of the three
+    /// A module scope registers all five, the accepted twin of the five
     /// above.
     ///
     /// ```
@@ -216,6 +239,8 @@ mod doctests {
     /// }
     /// fn register<W: Owner>(scope: Scope<'_, '_, W, BuildError<W::Error>, ModuleKind>) {
     ///     let _ = scope.counter::<u64>("hits");
+    ///     let _ = scope.counter_in::<u64>("rules", "hits");
+    ///     let _ = scope.counters_in::<u64>("rules");
     ///     let _ = scope.device("eth0");
     ///     let _ = scope.object::<State>("state");
     /// }

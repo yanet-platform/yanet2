@@ -76,6 +76,14 @@ pub struct TestOwner {
     workers: u64,
     /// Size of each counter registered, in the order of the registrations.
     counter_sizes: RefCell<Vec<u64>>,
+    /// Header and tag of each tagged counter registry made, in the order of
+    /// the first registrations under the tags; a header's registries are
+    /// numbered in its own order, as C numbers them in the module's list.
+    counter_registries: RefCell<Vec<(Header, String)>>,
+    /// Header, registry, name and size of each counter of a tagged registry,
+    /// in the order the names first came; a registry's counters are numbered
+    /// in its own order, as C numbers them.
+    tagged_counters: RefCell<Vec<(Header, u64, String, u64)>>,
     /// Header, type and name of each object link made, in the order of the
     /// links; a header's links are numbered in its own order, as C numbers
     /// them in the module's object list. The arena never reuses a header's
@@ -105,6 +113,8 @@ impl TestOwner {
             registered: Cell::new(0),
             workers: 1,
             counter_sizes: RefCell::default(),
+            counter_registries: RefCell::default(),
+            tagged_counters: RefCell::default(),
             object_links: RefCell::default(),
             countdowns: Default::default(),
             violations: RefCell::default(),
@@ -126,6 +136,17 @@ impl TestOwner {
     /// those refused included.
     pub fn counter_sizes(&self) -> Vec<u64> {
         self.counter_sizes.borrow().clone()
+    }
+
+    /// Tag of each tagged counter registry made, in the order of the first
+    /// registrations under the tags, those refused included: C keeps a
+    /// registry it made for a counter it refuses.
+    pub fn counter_registries(&self) -> Vec<String> {
+        self.counter_registries
+            .borrow()
+            .iter()
+            .map(|(_, tag)| tag.clone())
+            .collect()
     }
 
     /// Type and name of each object link made, in the order of the links;
@@ -297,6 +318,48 @@ unsafe impl Owner for TestOwner {
     unsafe fn register_counter(&self, _header: Header, _name: &str, size: u64) -> Result<u64, TestError> {
         self.counter_sizes.borrow_mut().push(size);
         self.register()
+    }
+
+    unsafe fn register_counter_in(
+        &self,
+        header: Header,
+        tag: &str,
+        name: &str,
+        size: u64,
+    ) -> Result<(u64, u64), TestError> {
+        // The registries of a header are numbered from zero, apart from its
+        // counters, and a tag met before finds its registry again.
+        let registry = {
+            let mut registries = self.counter_registries.borrow_mut();
+            let own = registries.iter().filter(|registry| registry.0 == header);
+            match own.clone().position(|registry| registry.1 == tag) {
+                Some(index) => index as u64,
+                None => {
+                    let index = own.count() as u64;
+                    registries.push((header, tag.to_string()));
+                    index
+                }
+            }
+        };
+        self.counter_sizes.borrow_mut().push(size);
+        if self.fails(Call::Registration) {
+            return Err(TestError::Registration);
+        }
+        // The counters of a registry are numbered from zero, and a name met
+        // before gets its id back, refused under another size.
+        let mut counters = self.tagged_counters.borrow_mut();
+        let mut own = counters
+            .iter()
+            .filter(|counter| counter.0 == header && counter.1 == registry);
+        match own.clone().position(|counter| counter.2 == name) {
+            Some(id) if own.nth(id).is_some_and(|counter| counter.3 == size) => Ok((registry, id as u64)),
+            Some(..) => Err(TestError::Registration),
+            None => {
+                let id = own.count() as u64;
+                counters.push((header, registry, name.to_string(), size));
+                Ok((registry, id))
+            }
+        }
     }
 
     unsafe fn link_device(&self, _header: Header, _name: &str) -> Result<u64, TestError> {

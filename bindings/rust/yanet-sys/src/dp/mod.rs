@@ -83,9 +83,12 @@ pub mod object;
 pub mod rt;
 
 pub use batch::{Batch, DeviceRef, DscpMark, Packet, PacketView, ParseError, ResizeError, TunnelError, Verdict};
-pub use cx::{BoundCounter, CommitCx, CounterRef, Cx, ModuleCx, ObjectCommitCx, PrepareCx};
+pub use cx::{
+    BoundCounter, BoundTaggedCounters, CommitCx, CounterRef, Cx, ModuleCx, ObjectCommitCx, PrepareCx, TaggedCountersRef,
+};
 pub use fields::{
-    Counter, CounterLayout, Device, ObjectLink, PerWorker, PerWorkerSlice, Traffic, WorkerSlice, WorkerSlot,
+    Counter, CounterLayout, Device, ObjectLink, PerWorker, PerWorkerSlice, TaggedCounter, TaggedCounters, Traffic,
+    WorkerSlice, WorkerSlot,
 };
 pub use module::{Module, ModuleConfig};
 pub use object::{Object, ObjectConfig};

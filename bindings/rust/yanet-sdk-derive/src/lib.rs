@@ -112,11 +112,13 @@ pub fn derive_ffi_record(input: TokenStream) -> TokenStream {
 /// | `&str` | `const char *`, NUL terminated UTF-8 |
 /// | `&T`, `T: FfiRecord` | `const T *` |
 /// | `&[T]`, `T: FfiRecord` | `const T *x, size_t x_len`; `(NULL, 0)` is empty |
+/// | `&mut T`, `T: FfiRecord` (a query only) | `T *`, a record the query writes |
+/// | `&mut [T]`, `T: FfiRecord` (a query only) | `T *x, size_t x_len`, records the query writes; `(NULL, 0)` is empty |
 /// | `&BuiltObject<O, Agent>` (`object = O` only) | `struct cp_object *`, an object a build of the crate returned and nothing releases; one of another type is refused |
 /// | `u8`..`u64`, `i8`..`i64`, `usize` | the same C integer |
-/// | returns `Result<Built<M, Agent>, ApiError>` (`module = M`) | `struct cp_module *`, `NULL` on failure |
-/// | returns `Result<BuiltObject<O, Agent>, ApiError>` (`object = O`) | `struct cp_object *`, `NULL` on failure |
-/// | returns `Result<u64, ApiError>` (a query) | `int`, 0 or -1 on failure, with a trailing `uint64_t *out` before `err` that a success writes |
+/// | returns `Result<Built<M, Agent>, Error>` (`module = M`) | `struct cp_module *`, `NULL` on failure |
+/// | returns `Result<BuiltObject<O, Agent>, Error>` (`object = O`) | `struct cp_object *`, `NULL` on failure |
+/// | returns `Result<u64, Error>` (a query) | `int`, 0 or -1 on failure, with a trailing `uint64_t *out` before `err` that a success writes |
 ///
 /// Anything else is a compile error at the offending type. A null or
 /// misaligned pointer for an argument is refused as an invalid argument. A
@@ -125,6 +127,14 @@ pub fn derive_ffi_record(input: TokenStream) -> TokenStream {
 /// build or a query reports through its result and `err` alone, and errno is
 /// unspecified after it.
 ///
+/// A query reads several values in one call through its outputs, records the
+/// caller owns and nothing else reaches during the call, the other arguments
+/// included. The export zeroes them once it accepts every argument, so the
+/// method starts from zero even over memory C left uninitialised, and a
+/// refused argument leaves them untouched; a failed method leaves what it
+/// wrote. A query that fills a slice commonly returns how many values it has,
+/// so a caller whose slice was short calls again with a longer one.
+///
 /// The expansion's `unsafe` carries the macro's own spans, so the api crate
 /// keeps `#![forbid(unsafe_code)]`:
 ///
@@ -132,7 +142,7 @@ pub fn derive_ffi_record(input: TokenStream) -> TokenStream {
 /// #![forbid(unsafe_code)]
 ///
 /// use yanet_sdk::{Batch, Builder, Built, CommitCx, Cx, FfiRecord, Module, Verdict};
-/// use yanet_sdk_api::{Agent, ApiError};
+/// use yanet_sdk_api::{Agent, Error};
 ///
 /// struct Mine;
 /// impl Module for Mine {
@@ -160,7 +170,7 @@ pub fn derive_ffi_record(input: TokenStream) -> TokenStream {
 ///         name: &str,
 ///         input: &Input,
 ///         ranges: &[u32],
-///     ) -> Result<Built<Mine, Agent>, ApiError> {
+///     ) -> Result<Built<Mine, Agent>, Error> {
 ///         Builder::<Mine>::build(agent, name, |_| Ok(input.weight + ranges.len() as u64))
 ///     }
 /// }
@@ -502,7 +512,7 @@ mod doctests {
     ///
     /// ```compile_fail
     /// # use yanet_sdk::{Batch, Builder, Built, CommitCx, Cx, FfiRecord, Module, Verdict};
-    /// # use yanet_sdk_api::{Agent, ApiError};
+    /// # use yanet_sdk_api::{Agent, Error};
     /// # struct Mine;
     /// # struct Other;
     /// # impl Module for Mine {
@@ -517,7 +527,7 @@ mod doctests {
     /// # pub struct Api;
     /// #[yanet_sdk::api(module = Mine)]
     /// impl Api {
-    ///     pub fn new(agent: &Agent, name: &str, _flag: bool) -> Result<Built<Mine, Agent>, ApiError> {
+    ///     pub fn new(agent: &Agent, name: &str, _flag: bool) -> Result<Built<Mine, Agent>, Error> {
     ///         Builder::<Mine>::build(agent, name, |_| Ok(0))
     ///     }
     /// }
@@ -528,7 +538,7 @@ mod doctests {
     ///
     /// ```no_run
     /// # use yanet_sdk::{Batch, Builder, Built, CommitCx, Cx, FfiRecord, Module, Verdict};
-    /// # use yanet_sdk_api::{Agent, ApiError};
+    /// # use yanet_sdk_api::{Agent, Error};
     /// # struct Mine;
     /// # struct Other;
     /// # impl Module for Mine {
@@ -543,7 +553,7 @@ mod doctests {
     /// # pub struct Api;
     /// #[yanet_sdk::api(module = Mine)]
     /// impl Api {
-    ///     pub fn new(agent: &Agent, name: &str, _flag: u8) -> Result<Built<Mine, Agent>, ApiError> {
+    ///     pub fn new(agent: &Agent, name: &str, _flag: u8) -> Result<Built<Mine, Agent>, Error> {
     ///         Builder::<Mine>::build(agent, name, |_| Ok(0))
     ///     }
     /// }
@@ -554,7 +564,7 @@ mod doctests {
     ///
     /// ```compile_fail
     /// # use yanet_sdk::{Batch, Builder, Built, CommitCx, Cx, FfiRecord, Module, Verdict};
-    /// # use yanet_sdk_api::{Agent, ApiError};
+    /// # use yanet_sdk_api::{Agent, Error};
     /// # struct Mine;
     /// # struct Other;
     /// # impl Module for Mine {
@@ -580,7 +590,7 @@ mod doctests {
     ///
     /// ```no_run
     /// # use yanet_sdk::{Batch, Builder, Built, CommitCx, Cx, FfiRecord, Module, Verdict};
-    /// # use yanet_sdk_api::{Agent, ApiError};
+    /// # use yanet_sdk_api::{Agent, Error};
     /// # struct Mine;
     /// # struct Other;
     /// # impl Module for Mine {
@@ -595,7 +605,7 @@ mod doctests {
     /// # pub struct Api;
     /// #[yanet_sdk::api(module = Mine)]
     /// impl Api {
-    ///     pub fn new(agent: &Agent, name: &str, _flag: u8) -> Result<Built<Mine, Agent>, ApiError> {
+    ///     pub fn new(agent: &Agent, name: &str, _flag: u8) -> Result<Built<Mine, Agent>, Error> {
     ///         Builder::<Mine>::build(agent, name, |_| Ok(0))
     ///     }
     /// }
@@ -606,7 +616,7 @@ mod doctests {
     ///
     /// ```compile_fail
     /// # use yanet_sdk::{Batch, Builder, Built, CommitCx, Cx, FfiRecord, Module, Verdict};
-    /// # use yanet_sdk_api::{Agent, ApiError};
+    /// # use yanet_sdk_api::{Agent, Error};
     /// # struct Mine;
     /// # struct Other;
     /// # impl Module for Mine {
@@ -621,8 +631,8 @@ mod doctests {
     /// # pub struct Api;
     /// #[yanet_sdk::api(module = Mine)]
     /// impl Api {
-    ///     pub fn new(agent: &Agent, name: &str, _flag: u8) -> Result<Built<Other, Agent>, ApiError> {
-    ///         Err(ApiError::from(yanet_sdk::Refusal::OutOfMemory))
+    ///     pub fn new(agent: &Agent, name: &str, _flag: u8) -> Result<Built<Other, Agent>, Error> {
+    ///         Err(Error::from(yanet_sdk::Refusal::OutOfMemory))
     ///     }
     /// }
     /// ```
@@ -632,7 +642,7 @@ mod doctests {
     ///
     /// ```no_run
     /// # use yanet_sdk::{Batch, Builder, Built, CommitCx, Cx, FfiRecord, Module, Verdict};
-    /// # use yanet_sdk_api::{Agent, ApiError};
+    /// # use yanet_sdk_api::{Agent, Error};
     /// # struct Mine;
     /// # struct Other;
     /// # impl Module for Mine {
@@ -647,7 +657,7 @@ mod doctests {
     /// # pub struct Api;
     /// #[yanet_sdk::api(module = Mine)]
     /// impl Api {
-    ///     pub fn new(agent: &Agent, name: &str, _flag: u8) -> Result<Built<Mine, Agent>, ApiError> {
+    ///     pub fn new(agent: &Agent, name: &str, _flag: u8) -> Result<Built<Mine, Agent>, Error> {
     ///         Builder::<Mine>::build(agent, name, |_| Ok(0))
     ///     }
     /// }
@@ -659,7 +669,7 @@ mod doctests {
     ///
     /// ```no_run
     /// # use yanet_sdk::{BuiltObject, Object, ObjectBuilder};
-    /// # use yanet_sdk_api::{Agent, ApiError};
+    /// # use yanet_sdk_api::{Agent, Error};
     /// # struct Mine;
     /// # impl Object for Mine {
     /// #     const TYPE: &'static str = "mine";
@@ -674,11 +684,11 @@ mod doctests {
     ///         agent: &Agent,
     ///         name: &str,
     ///         word: u64,
-    ///     ) -> Result<BuiltObject<Mine, Agent>, ApiError> {
+    ///     ) -> Result<BuiltObject<Mine, Agent>, Error> {
     ///         ObjectBuilder::<Mine>::build(agent, name, |_| Ok(word))
     ///     }
     ///
-    ///     pub fn word(agent: &Agent, mine: &BuiltObject<Mine, Agent>) -> Result<u64, ApiError> {
+    ///     pub fn word(agent: &Agent, mine: &BuiltObject<Mine, Agent>) -> Result<u64, Error> {
     ///         Ok(agent.read(mine, |_, word| *word))
     ///     }
     /// }
@@ -689,7 +699,7 @@ mod doctests {
     ///
     /// ```compile_fail,E0308
     /// # use yanet_sdk::{BuiltObject, Object, ObjectBuilder};
-    /// # use yanet_sdk_api::{Agent, ApiError};
+    /// # use yanet_sdk_api::{Agent, Error};
     /// # struct Mine;
     /// # struct Other;
     /// # impl Object for Mine {
@@ -707,7 +717,7 @@ mod doctests {
     /// # pub struct Api;
     /// #[yanet_sdk::api(object = Mine)]
     /// impl Api {
-    ///     pub fn new(agent: &Agent, name: &str) -> Result<BuiltObject<Other, Agent>, ApiError> {
+    ///     pub fn new(agent: &Agent, name: &str) -> Result<BuiltObject<Other, Agent>, Error> {
     ///         ObjectBuilder::<Other>::build(agent, name, |_| Ok(0))
     ///     }
     /// }
@@ -718,7 +728,7 @@ mod doctests {
     ///
     /// ```compile_fail,E0308
     /// # use yanet_sdk::{BuiltObject, Object};
-    /// # use yanet_sdk_api::{Agent, ApiError};
+    /// # use yanet_sdk_api::{Agent, Error};
     /// # struct Mine;
     /// # struct Other;
     /// # impl Object for Mine {
@@ -736,18 +746,122 @@ mod doctests {
     /// # pub struct Api;
     /// #[yanet_sdk::api(object = Mine)]
     /// impl Api {
-    ///     pub fn word(agent: &Agent, other: &BuiltObject<Other, Agent>) -> Result<u64, ApiError> {
+    ///     pub fn word(agent: &Agent, other: &BuiltObject<Other, Agent>) -> Result<u64, Error> {
     ///         Ok(agent.read(other, |_, word| *word))
     ///     }
     /// }
     /// ```
     struct OtherObjectParameterRefused;
 
+    /// A build writes no output.
+    ///
+    /// ```compile_fail
+    /// # use yanet_sdk::{BuiltObject, Object, ObjectBuilder};
+    /// # use yanet_sdk_api::{Agent, Error};
+    /// # struct Mine;
+    /// # impl Object for Mine {
+    /// #     const TYPE: &'static str = "mine";
+    /// #     type Config = u64;
+    /// #     type Prepared<'p> = ();
+    /// #     fn prepare(_: &yanet_sdk::ObjectCommitCx<'_, Self>) {}
+    /// # }
+    /// # pub struct Api;
+    /// #[yanet_sdk::api(object = Mine)]
+    /// impl Api {
+    ///     pub fn new(agent: &Agent, name: &str, words: &mut [u64]) -> Result<BuiltObject<Mine, Agent>, Error> {
+    ///         words.fill(0);
+    ///         ObjectBuilder::<Mine>::build(agent, name, |_| Ok(0))
+    ///     }
+    /// }
+    /// ```
+    struct BuildOutputRefused;
+
+    /// A query writes outputs: a record and a slice of records.
+    ///
+    /// ```no_run
+    /// # use yanet_sdk::{BuiltObject, FfiRecord, Object};
+    /// # use yanet_sdk_api::{Agent, Error};
+    /// # struct Mine;
+    /// # impl Object for Mine {
+    /// #     const TYPE: &'static str = "mine";
+    /// #     type Config = u64;
+    /// #     type Prepared<'p> = ();
+    /// #     fn prepare(_: &yanet_sdk::ObjectCommitCx<'_, Self>) {}
+    /// # }
+    /// #[derive(FfiRecord)]
+    /// #[repr(C)]
+    /// pub struct Shape {
+    ///     word: u64,
+    /// }
+    ///
+    /// # pub struct Api;
+    /// #[yanet_sdk::api(object = Mine)]
+    /// impl Api {
+    ///     pub fn read(
+    ///         agent: &Agent,
+    ///         mine: &BuiltObject<Mine, Agent>,
+    ///         shape: &mut Shape,
+    ///         words: &mut [u64],
+    ///     ) -> Result<u64, Error> {
+    ///         shape.word = agent.read(mine, |_, word| *word);
+    ///         words.fill(shape.word);
+    ///         Ok(words.len() as u64)
+    ///     }
+    /// }
+    /// ```
+    struct QueryOutputsAccepted;
+
+    /// A string is no output.
+    ///
+    /// ```compile_fail
+    /// # use yanet_sdk::{BuiltObject, Object};
+    /// # use yanet_sdk_api::{Agent, Error};
+    /// # struct Mine;
+    /// # impl Object for Mine {
+    /// #     const TYPE: &'static str = "mine";
+    /// #     type Config = u64;
+    /// #     type Prepared<'p> = ();
+    /// #     fn prepare(_: &yanet_sdk::ObjectCommitCx<'_, Self>) {}
+    /// # }
+    /// # pub struct Api;
+    /// #[yanet_sdk::api(object = Mine)]
+    /// impl Api {
+    ///     pub fn word(agent: &Agent, mine: &BuiltObject<Mine, Agent>, name: &mut str) -> Result<u64, Error> {
+    ///         name.make_ascii_lowercase();
+    ///         Ok(agent.read(mine, |_, word| *word))
+    ///     }
+    /// }
+    /// ```
+    struct StringOutputRefused;
+
+    /// An output of a type that is not a record, such as `bool`, is refused.
+    ///
+    /// ```compile_fail,E0277
+    /// # use yanet_sdk::{BuiltObject, Object};
+    /// # use yanet_sdk_api::{Agent, Error};
+    /// # struct Mine;
+    /// # impl Object for Mine {
+    /// #     const TYPE: &'static str = "mine";
+    /// #     type Config = u64;
+    /// #     type Prepared<'p> = ();
+    /// #     fn prepare(_: &yanet_sdk::ObjectCommitCx<'_, Self>) {}
+    /// # }
+    /// # pub struct Api;
+    /// #[yanet_sdk::api(object = Mine)]
+    /// impl Api {
+    ///     pub fn word(agent: &Agent, mine: &BuiltObject<Mine, Agent>, set: &mut bool) -> Result<u64, Error> {
+    ///         *set = true;
+    ///         Ok(agent.read(mine, |_, word| *word))
+    ///     }
+    /// }
+    /// ```
+    struct NonRecordOutputRefused;
+
     /// A module api takes no object parameter.
     ///
     /// ```compile_fail
     /// # use yanet_sdk::{Batch, Builder, Built, BuiltObject, CommitCx, Cx, Module, Object, Verdict};
-    /// # use yanet_sdk_api::{Agent, ApiError};
+    /// # use yanet_sdk_api::{Agent, Error};
     /// # struct Mine;
     /// # impl Module for Mine {
     /// #     const NAME: &'static str = "mine";
@@ -767,7 +881,7 @@ mod doctests {
     /// # pub struct Api;
     /// #[yanet_sdk::api(module = Mine)]
     /// impl Api {
-    ///     pub fn new(agent: &Agent, name: &str, mine: &BuiltObject<Mine, Agent>) -> Result<Built<Mine, Agent>, ApiError> {
+    ///     pub fn new(agent: &Agent, name: &str, mine: &BuiltObject<Mine, Agent>) -> Result<Built<Mine, Agent>, Error> {
     ///         let word = agent.read(mine, |_, word| *word);
     ///         Builder::<Mine>::build(agent, name, |_| Ok(word))
     ///     }
@@ -779,7 +893,7 @@ mod doctests {
     ///
     /// ```compile_fail,E0308
     /// # use yanet_sdk::{Batch, Builder, Built, CommitCx, Cx, Module, Object, Verdict};
-    /// # use yanet_sdk_api::{Agent, ApiError};
+    /// # use yanet_sdk_api::{Agent, Error};
     /// # struct Mine;
     /// # impl Module for Mine {
     /// #     const NAME: &'static str = "mine";
@@ -799,7 +913,7 @@ mod doctests {
     /// # pub struct Api;
     /// #[yanet_sdk::api(object = Mine)]
     /// impl Api {
-    ///     pub fn new(agent: &Agent, name: &str) -> Result<Built<Mine, Agent>, ApiError> {
+    ///     pub fn new(agent: &Agent, name: &str) -> Result<Built<Mine, Agent>, Error> {
     ///         Builder::<Mine>::build(agent, name, |_| Ok(0))
     ///     }
     /// }

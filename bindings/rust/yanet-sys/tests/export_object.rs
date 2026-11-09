@@ -1,8 +1,9 @@
 //! The plugin exports `export_object!` produces, called through their C
 //! declarations as the dataplane's loader calls them.
 //!
-//! A test binary of its own: a module and an object export in one binary
-//! collide on the ABI version, as they would in one plugin.
+//! A test binary of its own: `export_object!` exports the ABI version, as
+//! `export_module!` does, so the two collide in one binary as they would in
+//! one plugin.
 
 use core::ffi::{CStr, c_void};
 

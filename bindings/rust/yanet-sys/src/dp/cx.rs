@@ -6,10 +6,10 @@ use yanet_shm::{resolve::Resolve, root::ShmRoot};
 
 use crate::{
     bindings,
-    counters::counter_get_address,
+    counters::{counter_get_address, counter_handle_value, counter_value_handles},
     dp::{
         batch::DeviceRef,
-        fields::{Counter, CounterLayout, Device, ObjectLink},
+        fields::{Counter, CounterLayout, Device, ObjectLink, TaggedCounter, TaggedCounters},
         module::Module,
         object::{Object, ObjectConfig},
     },
@@ -246,6 +246,147 @@ impl<T: CounterLayout> BoundCounter<'_, T> {
         // of the layout `T`, resolved for the generation the call runs
         // (bound to the call context of the same brand).
         unsafe { value.add_to(self.value.as_ptr()) };
+    }
+}
+
+/// Handle of the context's worker's values of the counters of a
+/// [`TaggedCounters`] field, resolved once per generation for the prepared
+/// value: the handle table of the registry's storage and the number of
+/// counters the configuration registered.
+///
+/// Like a [`CounterRef`], it is `Send` and does not write: the handler binds it
+/// to its context and adds by id through the bound view. Binding is free.
+///
+/// Only the call context binds: the prepare context does not, so a handle
+/// never writes on the assigner thread:
+///
+/// ```compile_fail,E0308
+/// # use yanet_sys::dp::{CommitCx, Module, TaggedCounters};
+/// fn early<'p, M: Module<Config = TaggedCounters>>(cx: &CommitCx<'p, M>) {
+///     cx.config().resolve(cx).bind(cx).add(0, 1);
+/// }
+/// ```
+///
+/// The handler binds the handle of its prepared value and adds by id:
+///
+/// ```
+/// use yanet_sys::dp::{
+///     Batch, CommitCx, Cx, Module, TaggedCounters, TaggedCountersRef, Traffic, Verdict,
+/// };
+/// struct Mine;
+/// impl Module for Mine {
+///     const NAME: &'static str = "mine";
+///     type Config = TaggedCounters<Traffic>;
+///     type Prepared<'p> = TaggedCountersRef<'p, Traffic>;
+///     fn handle<'id>(cx: &mut Cx<'id, Self>, batch: &mut Batch<'id>) {
+///         let counters = cx.prepared().bind(cx);
+///         batch.dispatch(|packet| {
+///             let id = packet.data().first().copied().unwrap_or_default();
+///             counters.add(u64::from(id), Traffic::packet(packet.data().len() as u64));
+///             Verdict::Pass
+///         });
+///     }
+///     fn prepare<'p>(cx: &CommitCx<'p, Self>) -> TaggedCountersRef<'p, Traffic> {
+///         cx.config().resolve(cx)
+///     }
+/// }
+/// ```
+pub struct TaggedCountersRef<'p, T = u64> {
+    table: NonNull<isize>,
+    len: u64,
+    // Invariant brand: values of two different contexts never unify, so they cannot be mixed.
+    _brand: PhantomData<fn(&'p ()) -> &'p ()>,
+    // The counters' layout, which sets the values each adds to.
+    _layout: PhantomData<fn() -> T>,
+}
+
+impl<T> Clone for TaggedCountersRef<'_, T> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl<T> Copy for TaggedCountersRef<'_, T> {}
+
+// SAFETY: the handle is an address and a number and writes nothing; only the
+// bound view writes, and binding needs the call context of the same invariant
+// brand, that of the worker's call whose prepared value holds the handle; the
+// context is neither `Send` nor `Sync`, so every write happens on that worker
+// in its call.
+unsafe impl<T> Send for TaggedCountersRef<'_, T> {}
+
+impl<'id, T> TaggedCountersRef<'id, T> {
+    /// The handle bound to the call's context, to add through.
+    #[inline(always)]
+    pub fn bind<M>(&self, _cx: &Cx<'id, M>) -> BoundTaggedCounters<'id, T>
+    where
+        M: Module,
+    {
+        BoundTaggedCounters {
+            table: self.table,
+            len: self.len,
+            _brand: PhantomData,
+            _local: PhantomData,
+            _layout: PhantomData,
+        }
+    }
+}
+
+/// A [`TaggedCountersRef`] bound to the worker's call: adds to the worker's
+/// copies of the counters by id.
+///
+/// Neither `Send` nor `Sync`: the values are this worker's.
+///
+/// A bound handle is not sent to another thread:
+///
+/// ```compile_fail,E0277
+/// # use yanet_sys::dp::BoundTaggedCounters;
+/// fn send(rules: BoundTaggedCounters<'_>) {
+///     std::thread::scope(|scope| {
+///         scope.spawn(move || rules.add(0, 1));
+///     });
+/// }
+/// ```
+pub struct BoundTaggedCounters<'id, T = u64> {
+    table: NonNull<isize>,
+    len: u64,
+    // Invariant brand: values of two different contexts never unify, so they cannot be mixed.
+    _brand: PhantomData<fn(&'id ()) -> &'id ()>,
+    // Neither Send nor Sync on purpose, independent of the pointer fields.
+    _local: PhantomData<*mut ()>,
+    // The counters' layout, which sets the values each adds to.
+    _layout: PhantomData<fn() -> T>,
+}
+
+impl<T> Clone for BoundTaggedCounters<'_, T> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl<T> Copy for BoundTaggedCounters<'_, T> {}
+
+impl<T> BoundTaggedCounters<'_, T>
+where
+    T: CounterLayout,
+{
+    /// Adds the value to the worker's copy of the counter of the given id; an
+    /// id past the counters the configuration registered counts nowhere.
+    ///
+    /// A plain add, as the `+=` of a C module: only this worker writes its
+    /// copy.
+    #[inline(always)]
+    pub fn add(&self, id: u64, value: T) {
+        if id >= self.len {
+            return;
+        }
+        // SAFETY: the table is the handle table of the registry's storage for
+        // the generation the call runs, resolved by the bound handle (bound to
+        // the call context of the same brand), with the root's provenance; the
+        // id is below the counters the configuration registered, which C keeps
+        // first in the registry, each of the layout `T`, so the handle names
+        // this worker's aligned values of the counter, as many as the layout's.
+        unsafe { value.add_to(counter_handle_value(self.table.as_ptr(), id)) };
     }
 }
 
@@ -582,6 +723,143 @@ impl<T: CounterLayout> Counter<T> {
             // SAFETY: the value lies in the counter storage block, not at
             // address zero.
             value: unsafe { NonNull::new_unchecked(value) },
+            _brand: PhantomData,
+            _layout: PhantomData,
+        }
+    }
+}
+
+/// Address of the context's worker's value of a counter of a tagged registry,
+/// as C's `counter_get_address(id, module_ectx_counter_storage(ectx,
+/// registry))`.
+///
+/// # Safety
+///
+/// As for [`counter_value`], for the runtime storages of the context instead
+/// of its counter storage: the registry must be an index of the module's
+/// tagged registries and the id an index of that registry.
+#[inline(always)]
+unsafe fn tagged_counter_value(
+    root: ShmRoot,
+    ectx: NonNull<bindings::module_ectx>,
+    registry: u64,
+    id: u64,
+) -> *mut u64 {
+    // SAFETY: as for the storage, and the id indexes its registry (caller
+    // contract).
+    unsafe { counter_get_address(root, tagged_counter_storage(root, ectx, registry), id) }
+}
+
+/// The context's worker's storage of a tagged registry, as C's
+/// `module_ectx_counter_storage(ectx, registry)` finds it.
+///
+/// # Safety
+///
+/// The context must have its runtime storage addresses derived, one per tagged
+/// registry of the module, and stay frozen while the result is used, and the
+/// registry must be an index of the module's tagged registries.
+#[inline(always)]
+unsafe fn tagged_counter_storage(
+    root: ShmRoot,
+    ectx: NonNull<bindings::module_ectx>,
+    registry: u64,
+) -> *mut bindings::counter_storage {
+    let ectx = ectx.as_ptr();
+    // SAFETY: the context is frozen and its runtime storage addresses were
+    // derived, one per tagged registry of the module (caller contract).
+    unsafe {
+        debug_assert!(
+            registry < (*ectx).runtime_counter_storage_count,
+            "a tagged registry beyond the registries of the module context"
+        );
+        let storages = root.ptr::<*mut bindings::counter_storage>((*ectx).abs_runtime_counter_storages_base.addr());
+        root.ptr::<bindings::counter_storage>((*storages.add(registry as usize)).addr())
+    }
+}
+
+impl<T> TaggedCounter<T>
+where
+    T: CounterLayout,
+{
+    /// Adds the value to the current worker's copy of the counter, one of a
+    /// data-indexed set the handler picks by value, as a [`Counter`] adds.
+    ///
+    /// The same plain add as the handle's.
+    #[doc(alias = "module_ectx_counter_storage")]
+    #[inline(always)]
+    pub fn add<'id, M>(&'id self, cx: &Cx<'id, M>, value: T)
+    where
+        M: Module,
+    {
+        // SAFETY: the context is frozen for the call and its runtime storage
+        // addresses were derived before release to the worker (attach: call,
+        // frozen, publish); a built tagged counter names a tagged registry of
+        // the module and an id of it, whose storage of this context holds the
+        // counter's aligned values next to each other, as many as the
+        // layout's, the size it was registered with.
+        unsafe { value.add_to(tagged_counter_value(cx.root, cx.ectx, self.registry(), self.id())) };
+    }
+
+    /// The context's worker's values of the counter, for the prepared value,
+    /// as a [`Counter`] resolves.
+    ///
+    /// The handle holds the address C's `counter_get_address` returns in the
+    /// storage `module_ectx_counter_storage` finds.
+    #[doc(alias = "module_ectx_counter_storage")]
+    #[inline(always)]
+    pub fn resolve<'c, M>(&'c self, cx: &CommitCx<'c, M>) -> CounterRef<'c, T>
+    where
+        M: Module,
+    {
+        // SAFETY: as for adding, for the pass instead of the call.
+        let value = unsafe { tagged_counter_value(cx.root, cx.ectx, self.registry(), self.id()) };
+        CounterRef {
+            // SAFETY: the value lies in the counter storage block, not at
+            // address zero.
+            value: unsafe { NonNull::new_unchecked(value) },
+            _brand: PhantomData,
+            _layout: PhantomData,
+        }
+    }
+}
+
+impl<T> TaggedCounters<T>
+where
+    T: CounterLayout,
+{
+    /// The context's worker's values of the counters, for the prepared value:
+    /// the handle table of the registry's storage, which the handler adds
+    /// through by id, a single hop per packet.
+    ///
+    /// The table is the one in the storage C's `module_ectx_counter_storage`
+    /// finds, which a C module hoists into its prepared state, as acl's
+    /// `rules_handles`.
+    #[doc(alias = "module_ectx_counter_storage")]
+    #[inline(always)]
+    pub fn resolve<'c, M>(&'c self, cx: &CommitCx<'c, M>) -> TaggedCountersRef<'c, T>
+    where
+        M: Module,
+    {
+        let table = if self.is_empty() {
+            // No registry to find, and no id below the bound: the table is
+            // never read.
+            NonNull::dangling()
+        } else {
+            // SAFETY: the context is frozen for the pass and its runtime
+            // storage addresses were derived before (attach: call, frozen,
+            // publish); a built field with counters names a tagged registry of
+            // the module, the one they were registered in, whose storage of
+            // this context holds a handle per counter of the registry, those
+            // of the configuration first. The table is a live block, not at
+            // address zero.
+            unsafe {
+                let storage = tagged_counter_storage(cx.root, cx.ectx, self.registry());
+                NonNull::new_unchecked(counter_value_handles(cx.root, storage))
+            }
+        };
+        TaggedCountersRef {
+            table,
+            len: self.len(),
             _brand: PhantomData,
             _layout: PhantomData,
         }

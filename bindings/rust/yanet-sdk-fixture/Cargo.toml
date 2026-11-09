@@ -54,3 +54,10 @@ required-features = ["plugin"]
 name = "stash_dp"
 crate-type = ["cdylib"]
 required-features = ["plugin"]
+
+# The stash module and the state object type in one plugin, named outside the
+# loader's pattern: a test links it into a directory of its own.
+[[example]]
+name = "stash_state_plugin"
+crate-type = ["cdylib"]
+required-features = ["plugin"]

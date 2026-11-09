@@ -1,9 +1,9 @@
 //! The error of a C control-plane call.
 
 use core::{
-    error::Error,
-    ffi::{CStr, c_char, c_int},
+    ffi::{CStr, c_int},
     fmt::{self, Display, Formatter},
+    mem::ManuallyDrop,
     ptr::{self, NonNull},
 };
 
@@ -59,110 +59,103 @@ impl ErrorKind {
 
 /// A failed C call: the error chain C built, freed when dropped.
 ///
-/// C may fail and leave no chain; the error then has no message and no kind.
-/// It displays the messages of the chain, outermost first, joined by ": ".
-pub struct ApiError {
-    chain: Option<NonNull<yanet_error>>,
+/// A call that failed and left no chain gets one untagged frame that says so.
+/// The error displays the messages of the chain, outermost first, joined by
+/// ": ".
+pub struct Error {
+    chain: NonNull<yanet_error>,
 }
 
-// SAFETY: the chain is heap memory the value owns alone, freed from whichever
-// thread drops it, and its frames are never written; the out-of-memory frame
-// is a static that is never freed.
-unsafe impl Send for ApiError {}
+// SAFETY: the value owns its chain alone, save the static out-of-memory frame
+// that chains share and nothing frees, and `lib/errors/errors.h` lets any
+// thread read a chain and its owner free it from any thread.
+unsafe impl Send for Error {}
 
-// SAFETY: as for `Send`, a shared reference only reads the frames.
-unsafe impl Sync for ApiError {}
+// SAFETY: a shared reference only reads the chain, which `lib/errors/errors.h`
+// lets any number of threads do at once.
+unsafe impl Sync for Error {}
 
-/// Takes ownership of the chain C wrote to an error out-parameter.
+/// Takes ownership of the chain C wrote to an error out-parameter; a call that
+/// failed and wrote none gets a chain that says so.
 ///
 /// # Safety
 ///
-/// `chain` is null or a chain nothing else will free.
-pub unsafe fn from_c_chain(chain: *mut yanet_error) -> ApiError {
-    ApiError { chain: NonNull::new(chain) }
+/// `chain` is null or a live chain whose ownership passes to the error:
+/// nothing else frees it or uses it afterwards, save the static out-of-memory
+/// frame that chains share and nothing frees.
+pub unsafe fn from_c_chain(chain: *mut yanet_error) -> Error {
+    match NonNull::new(chain) {
+        Some(chain) => Error { chain },
+        None => Error::new(ErrorKind::Untagged, "the call failed without a message"),
+    }
 }
 
-/// A new chain of one frame.
-pub fn tagged(kind: ErrorKind, message: &CStr) -> ApiError {
-    let mut chain = ptr::null_mut();
-    // SAFETY: the out-parameter points at a null chain, the format takes one
-    // string, and the message is NUL terminated.
-    unsafe { bindings::yanet_error_add_kind(&raw mut chain, kind.to_c(), c"%s".as_ptr(), message.as_ptr()) };
-    // SAFETY: the chain is the one just made, ours alone.
-    unsafe { from_c_chain(chain) }
+/// The chain of an error for C, which then owns it; never null.
+pub fn into_c_chain(error: Error) -> *mut yanet_error {
+    ManuallyDrop::new(error).chain.as_ptr()
 }
 
-impl ApiError {
-    /// An error of one frame, of the given kind, for a method that refuses its
-    /// input.
+/// Adds an error over a chain as one frame of its kind, as C reports it, and
+/// of its whole message, so that the chain stays as its cause.
+///
+/// # Safety
+///
+/// `*chain` is null or a chain the caller owns.
+pub unsafe fn wrap_c_chain(error: Error, chain: &mut *mut yanet_error) {
+    // SAFETY: caller contract.
+    unsafe { add_frame(chain, error.c_kind(), &error.to_string()) };
+}
+
+impl Error {
+    /// An error of one frame, of the given kind and message.
+    ///
+    /// The message ends at its first NUL byte, as C reads it.
     pub fn new(kind: ErrorKind, message: &str) -> Self {
-        from_str(kind, message)
-    }
-
-    /// The chain for C, which then owns it; never null, a call that failed
-    /// without a chain gets one that says so.
-    pub fn into_c_chain(mut self) -> *mut yanet_error {
-        if self.chain.is_none() {
-            self = from_str(ErrorKind::Untagged, "the call failed without a message");
-        }
-        self.chain.take().map_or(ptr::null_mut(), NonNull::as_ptr)
-    }
-
-    /// Adds the error over the chain at `chain` as one frame of its kind and
-    /// whole message, so that chain stays as its cause.
-    ///
-    /// # Safety
-    ///
-    /// `*chain` is null or a chain the caller owns.
-    pub(crate) unsafe fn wrap_c_chain(self, chain: &mut *mut yanet_error) {
-        // SAFETY: caller contract.
-        unsafe { add_frame(chain, self.kind(), &self.to_string()) };
+        with_c_kind(kind.to_c(), message)
     }
 
     /// The kind of the outermost frame that carries one.
     pub fn kind(&self) -> ErrorKind {
-        let Some(chain) = self.chain else {
-            return ErrorKind::Untagged;
-        };
+        ErrorKind::from_c(self.c_kind())
+    }
+
+    /// The kind C reports for the chain, one this crate does not name
+    /// included.
+    fn c_kind(&self) -> bindings::yanet_error_kind {
         // SAFETY: the chain is live until drop.
-        ErrorKind::from_c(unsafe { bindings::yanet_error_kind(chain.as_ptr()) })
+        unsafe { bindings::yanet_error_kind(self.chain.as_ptr()) }
     }
 }
 
-impl From<BuildError<ApiError>> for ApiError {
-    fn from(err: BuildError<ApiError>) -> Self {
+impl From<BuildError<Error>> for Error {
+    fn from(err: BuildError<Error>) -> Self {
         match err {
             BuildError::Owner(err) => err,
             BuildError::Refused(refusal) => Self::from(refusal),
-            _ => tagged(
+            _ => Self::new(
                 ErrorKind::Untagged,
-                c"the build failed for a reason this crate does not name",
+                "the build failed for a reason this crate does not name",
             ),
         }
     }
 }
 
-// The message is the refusal's own, tagged with the kind its documentation
-// names.
-impl From<Refusal> for ApiError {
+impl From<Refusal> for Error {
     fn from(refusal: Refusal) -> Self {
-        let kind = match refusal {
-            Refusal::OutOfMemory => ErrorKind::ResourceExhausted,
-            _ => ErrorKind::InvalidArgument,
-        };
-        from_str(kind, refusal.message())
+        with_c_kind(refusal.kind(), refusal.message())
     }
 }
 
-/// A new chain of one frame holding `message`, which needs no terminator.
-///
-/// The message ends at its first NUL byte, as C reads it.
-pub fn from_str(kind: ErrorKind, message: &str) -> ApiError {
+/// A new chain of one frame holding a message, tagged with a kind as C names
+/// it, one this crate does not name included.
+fn with_c_kind(kind: bindings::yanet_error_kind, message: &str) -> Error {
     let mut chain = ptr::null_mut();
     // SAFETY: the chain is null.
     unsafe { add_frame(&mut chain, kind, message) };
-    // SAFETY: the chain is the one just made, ours alone.
-    unsafe { from_c_chain(chain) }
+    // C writes a new chain to the out-parameter, ours alone save the static
+    // out-of-memory frame that chains share.
+    let chain = NonNull::new(chain).expect("a new C error chain is never null");
+    Error { chain }
 }
 
 /// Adds a frame holding `message`, which needs no terminator, over the chain
@@ -171,13 +164,13 @@ pub fn from_str(kind: ErrorKind, message: &str) -> ApiError {
 /// # Safety
 ///
 /// `*chain` is null or a chain the caller owns.
-unsafe fn add_frame(chain: &mut *mut yanet_error, kind: ErrorKind, message: &str) {
+unsafe fn add_frame(chain: &mut *mut yanet_error, kind: bindings::yanet_error_kind, message: &str) {
     // SAFETY: the chain by the caller contract, and the format takes the
     // length and the bytes of one string.
     unsafe {
         bindings::yanet_error_add_kind(
             chain,
-            kind.to_c(),
+            kind,
             c"%.*s".as_ptr(),
             message.len().min(c_int::MAX as usize) as c_int,
             message.as_ptr(),
@@ -185,38 +178,27 @@ unsafe fn add_frame(chain: &mut *mut yanet_error, kind: ErrorKind, message: &str
     };
 }
 
-impl Drop for ApiError {
+impl Drop for Error {
     fn drop(&mut self) {
-        if let Some(chain) = self.chain {
-            // SAFETY: the chain is ours and is not used again.
-            unsafe { bindings::yanet_error_free(chain.as_ptr()) };
-        }
+        // SAFETY: the chain is ours and is not used again.
+        unsafe { bindings::yanet_error_free(self.chain.as_ptr()) };
     }
 }
 
 /// Writes a C string, as UTF-8 where it is and U+FFFD where it is not.
-fn write_c_str(f: &mut Formatter<'_>, message: *const c_char) -> Result<(), fmt::Error> {
-    if message.is_null() {
-        return Ok(());
-    }
-    // SAFETY: a non-null message of a live frame is NUL terminated and lives
-    // as long as the frame.
-    let bytes = unsafe { CStr::from_ptr(message) }.to_bytes();
-    for chunk in bytes.utf8_chunks() {
+fn write_c_str(f: &mut Formatter<'_>, message: &CStr) -> Result<(), fmt::Error> {
+    for chunk in message.to_bytes().utf8_chunks() {
         f.write_str(chunk.valid())?;
         if !chunk.invalid().is_empty() {
-            f.write_str(char::REPLACEMENT_CHARACTER.encode_utf8(&mut [0; 4]))?;
+            f.write_str("\u{FFFD}")?;
         }
     }
     Ok(())
 }
 
-impl Display for ApiError {
+impl Display for Error {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), fmt::Error> {
-        let Some(chain) = self.chain else {
-            return f.write_str("the call failed without a message");
-        };
-        let mut frame = chain.as_ptr().cast_const();
+        let mut frame = self.chain.as_ptr().cast_const();
         let mut first = true;
         while !frame.is_null() {
             if !first {
@@ -225,21 +207,26 @@ impl Display for ApiError {
             first = false;
             // SAFETY: the frame belongs to the live chain, whose frames
             // outlive this borrow of the error.
-            write_c_str(f, unsafe { bindings::yanet_error_message(frame) })?;
-            // SAFETY: as above.
+            let message = unsafe { bindings::yanet_error_message(frame) };
+            if !message.is_null() {
+                // SAFETY: the message of a live frame is NUL terminated and
+                // lives as long as the frame.
+                write_c_str(f, unsafe { CStr::from_ptr(message) })?;
+            }
+            // SAFETY: the frame belongs to the live chain, as for its message.
             frame = unsafe { bindings::yanet_error_cause(frame) };
         }
         Ok(())
     }
 }
 
-impl fmt::Debug for ApiError {
+impl fmt::Debug for Error {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), fmt::Error> {
-        f.debug_struct("ApiError")
+        f.debug_struct("Error")
             .field("kind", &self.kind())
             .field("message", &format_args!("{self}"))
             .finish()
     }
 }
 
-impl Error for ApiError {}
+impl core::error::Error for Error {}

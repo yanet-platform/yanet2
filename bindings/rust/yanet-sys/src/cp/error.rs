@@ -2,6 +2,8 @@
 
 use core::{error::Error, fmt};
 
+use crate::bindings;
+
 /// A request the SDK refuses on its own, before or instead of a C routine.
 ///
 /// Each variant names the `yanet_error_kind` (`lib/errors/errors.h`) the
@@ -32,6 +34,10 @@ pub enum Refusal {
     /// A name that is empty, holds a NUL or does not fit its C field with the
     /// terminator, which C would cut short; `YANET_ERROR_INVALID_ARGUMENT`.
     InvalidName,
+    /// A counter that a registrar's tagged registry took amid the registrar's
+    /// counters other than through it, of a size the registrar does not
+    /// vouch for; `YANET_ERROR_INVALID_ARGUMENT`.
+    ForeignCounter,
 }
 
 impl Refusal {
@@ -46,6 +52,21 @@ impl Refusal {
             Self::TooManyItems => "more items than C counts",
             Self::RuleSetMismatch => "a join or a decode over rulesets of different sizes",
             Self::InvalidName => "a name is empty, holds a NUL or does not fit its C field",
+            Self::ForeignCounter => "a counter registered amid a registrar's counters other than through it",
+        }
+    }
+
+    /// The `yanet_error_kind` the C-facing layer reports the refusal with.
+    pub fn kind(self) -> bindings::yanet_error_kind {
+        match self {
+            Self::OutOfMemory => bindings::yanet_error_kind_YANET_ERROR_RESOURCE_EXHAUSTED,
+            Self::BlockTooLarge
+            | Self::InvalidRange
+            | Self::InvalidMask
+            | Self::TooManyItems
+            | Self::RuleSetMismatch
+            | Self::InvalidName
+            | Self::ForeignCounter => bindings::yanet_error_kind_YANET_ERROR_INVALID_ARGUMENT,
         }
     }
 }

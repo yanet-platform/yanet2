@@ -40,6 +40,36 @@ pub fn sum(data: &[u8]) -> u16 {
     fold(partial_sum(data))
 }
 
+/// Unfolded one's-complement sum of the slices' bytes taken in order as one
+/// run, and the length of the run.
+///
+/// The run's words start at its even bytes, so a slice that starts at an odd
+/// byte holds each byte in the other half of a word than its own sum reads it
+/// in: that sum is the byte swap of the slice's share (RFC 1071, section 2).
+/// The slices that start at odd bytes are summed together, and their sum is
+/// folded before the swap, which keeps its carries.
+fn run_sum<'a>(slices: impl IntoIterator<Item = &'a [u8]>) -> (u64, usize) {
+    let (mut even, mut odd, mut len) = (0, 0, 0);
+    for slice in slices {
+        if len % 2 == 0 {
+            even += partial_sum(slice);
+        } else {
+            odd += partial_sum(slice);
+        }
+        len += slice.len();
+    }
+    (even + u64::from(fold(odd).swap_bytes()), len)
+}
+
+/// Folded one's-complement sum of the slices' bytes taken in order as one
+/// run, not complemented: [`sum`] of their concatenation, without copying it.
+///
+/// Sums a run that lies in several buffers, such as the segments of a chained
+/// packet.
+pub fn sum_slices<'a>(slices: impl IntoIterator<Item = &'a [u8]>) -> u16 {
+    fold(run_sum(slices).0)
+}
+
 /// One's-complement addition with end-around carry.
 fn plus(val0: u16, val1: u16) -> u16 {
     let sum = val0.wrapping_add(val1);
@@ -114,8 +144,10 @@ fn l4_checksum(pseudo: u64, segment: &[u8]) -> u16 {
     !fold(pseudo + partial_sum(segment))
 }
 
-fn l4_is_valid(pseudo: u64, segment: &[u8]) -> bool {
-    fold(pseudo + partial_sum(segment)) == 0xffff
+/// Whether the pseudo header's and the segment's unfolded sums add up to an
+/// all-ones sum.
+fn l4_is_valid(pseudo: u64, segment: u64) -> bool {
+    fold(pseudo + segment) == 0xffff
 }
 
 /// Full L4 checksum over IPv4 of a segment whose checksum field is zero.
@@ -148,7 +180,7 @@ pub fn l4_checksum_ipv6(src: Ipv6Addr, dst: Ipv6Addr, next_header: u8, segment: 
 pub fn l4_is_valid_ipv4(src: Ipv4Addr, dst: Ipv4Addr, protocol: u8, segment: &[u8]) -> bool {
     l4_is_valid(
         pseudo_sum_ipv4(src.octets(), dst.octets(), protocol, segment.len() as u16),
-        segment,
+        partial_sum(segment),
     )
 }
 
@@ -158,16 +190,60 @@ pub fn l4_is_valid_ipv4(src: Ipv4Addr, dst: Ipv4Addr, protocol: u8, segment: &[u
 pub fn l4_is_valid_ipv6(src: Ipv6Addr, dst: Ipv6Addr, next_header: u8, segment: &[u8]) -> bool {
     l4_is_valid(
         pseudo_sum_ipv6(src.octets(), dst.octets(), next_header, segment.len() as u32),
-        segment,
+        partial_sum(segment),
+    )
+}
+
+/// Verifies over IPv4 an L4 segment that includes its checksum field and lies
+/// in several slices, taken in order as one run: [`l4_is_valid_ipv4`] of their
+/// concatenation, without copying it.
+pub fn l4_is_valid_ipv4_slices<'a>(
+    src: Ipv4Addr,
+    dst: Ipv4Addr,
+    protocol: u8,
+    segment: impl IntoIterator<Item = &'a [u8]>,
+) -> bool {
+    let (sum, len) = run_sum(segment);
+    l4_is_valid(pseudo_sum_ipv4(src.octets(), dst.octets(), protocol, len as u16), sum)
+}
+
+/// Verifies over IPv6 an L4 segment that lies in several slices, as
+/// [`l4_is_valid_ipv4_slices`] does over IPv4: [`l4_is_valid_ipv6`] of their
+/// concatenation.
+pub fn l4_is_valid_ipv6_slices<'a>(
+    src: Ipv6Addr,
+    dst: Ipv6Addr,
+    next_header: u8,
+    segment: impl IntoIterator<Item = &'a [u8]>,
+) -> bool {
+    let (sum, len) = run_sum(segment);
+    l4_is_valid(
+        pseudo_sum_ipv6(src.octets(), dst.octets(), next_header, len as u32),
+        sum,
     )
 }
 
 #[cfg(test)]
 mod tests {
-    use proptest::{collection::vec, prelude::*};
+    use proptest::{collection::vec, prelude::*, sample::Index};
 
     use super::*;
     use crate::testing;
+
+    /// The slices the cuts split the bytes into, in order; repeated cuts make
+    /// empty slices.
+    fn split<'a>(data: &'a [u8], cuts: &[Index]) -> Vec<&'a [u8]> {
+        let mut ends: Vec<usize> = cuts.iter().map(|cut| cut.index(data.len() + 1)).collect();
+        ends.sort_unstable();
+        let mut start = 0;
+        let mut parts = Vec::with_capacity(ends.len() + 1);
+        for end in ends {
+            parts.push(&data[start..end]);
+            start = end;
+        }
+        parts.push(&data[start..]);
+        parts
+    }
 
     /// The C reducer: folds a 32-bit accumulator with two end-around
     /// carries; the second fold cannot overflow 16 bits.
@@ -213,6 +289,22 @@ mod tests {
     #[test]
     fn test_sum_odd_tail_is_high_byte() {
         assert_eq!(0x0102 + 0x0300, sum(&[1, 2, 3]));
+    }
+
+    #[test]
+    fn test_sum_slices_odd_start_is_low_byte() {
+        assert_eq!(0x0102 + 0x0300, sum_slices([&[1u8][..], &[2, 3]]));
+        assert_eq!(0x0102 + 0x0300, sum_slices([&[1u8][..], &[], &[2], &[3]]));
+        assert_eq!(0, sum_slices([]));
+    }
+
+    #[test]
+    fn test_sum_slices_odd_start_keeps_carries() {
+        // The second slice sums to 0x1_0000_feff unfolded: a swap of its low
+        // 16 bits would give 0xfffe.
+        let data = [0, 0xff, 0xff, 0xff, 0xff, 0xff];
+        assert_eq!(0x00ff, sum(&data));
+        assert_eq!(0x00ff, sum_slices([&data[..1], &data[1..]]));
     }
 
     #[test]
@@ -299,6 +391,35 @@ mod tests {
         #[test]
         fn test_sum_matches_c_up_to_byte_swap(data in vec(any::<u8>(), 0..=300)) {
             prop_assert_eq!(c_csum(&data).swap_bytes(), sum(&data));
+        }
+
+        #[test]
+        fn test_sum_slices_equals_sum_of_concatenation(
+            data in vec(any::<u8>(), 0..=300),
+            cuts in vec(any::<Index>(), 0..=8),
+        ) {
+            prop_assert_eq!(sum(&data), sum_slices(split(&data, &cuts)));
+        }
+
+        #[test]
+        fn test_l4_is_valid_slices_equals_contiguous(
+            family in testing::family(),
+            addrs in any::<([u8; 16], [u8; 16])>(),
+            protocol in any::<u8>(),
+            data in vec(any::<u8>(), 8..=300),
+            checksummed in any::<bool>(),
+            cuts in vec(any::<Index>(), 0..=8),
+        ) {
+            let ((src, dst), mut data) = (addrs, data);
+            if checksummed {
+                // UDP's checksum field; any word of the segment would do.
+                data[6..8].fill(0);
+                let cksum = family.l4_checksum(src, dst, protocol, &data);
+                data[6..8].copy_from_slice(&cksum.to_be_bytes());
+            }
+            let valid = family.l4_is_valid(src, dst, protocol, &data);
+            prop_assert!(valid || !checksummed);
+            prop_assert_eq!(valid, family.l4_is_valid_slices(src, dst, protocol, split(&data, &cuts)));
         }
 
         #[test]

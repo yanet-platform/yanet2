@@ -388,6 +388,121 @@ func Test_StateObject_Seed_NilOut_IsInvalidArgument(t *testing.T) {
 	require.ErrorIs(t, err, ffi.ErrInvalidArgument)
 }
 
+// Test_StateObject_Values_ReadsEverySlotInOneCall verifies that a query fills
+// the caller's slice with the values it reads.
+func Test_StateObject_Values_ReadsEverySlotInOneCall(t *testing.T) {
+	bed := newBed(t)
+	object := bed.state("state", 10)
+	values := make([]uint64, stateSlots)
+
+	_, err := object.Values(values)
+	require.NoError(t, err)
+
+	require.Equal(t, []uint64{10, 11, 12, 13}, values)
+}
+
+// Test_StateObject_Values_ShortSlice_ReadsTheFirstSlots verifies that a query
+// writes no further than the caller's slice reaches.
+func Test_StateObject_Values_ShortSlice_ReadsTheFirstSlots(t *testing.T) {
+	bed := newBed(t)
+	object := bed.state("state", 10)
+	values := make([]uint64, 2)
+
+	_, err := object.Values(values)
+	require.NoError(t, err)
+
+	require.Equal(t, []uint64{10, 11}, values)
+}
+
+// Test_StateObject_Values_LongSlice_ZeroesThePlacesPastTheSlots verifies that
+// the places of a slice the query leaves are zero, whatever they held.
+func Test_StateObject_Values_LongSlice_ZeroesThePlacesPastTheSlots(t *testing.T) {
+	bed := newBed(t)
+	object := bed.state("state", 10)
+	values := []uint64{0xdead, 0xdead, 0xdead, 0xdead, 0xdead, 0xdead}
+
+	_, err := object.Values(values)
+	require.NoError(t, err)
+
+	require.Equal(t, []uint64{10, 11, 12, 13, 0, 0}, values)
+}
+
+// Test_StateObject_Values_NoPlaces_ReturnsTheSlotCount verifies that a query
+// given an empty slice returns how many values it has, which sizes the slice
+// of the next call.
+func Test_StateObject_Values_NoPlaces_ReturnsTheSlotCount(t *testing.T) {
+	bed := newBed(t)
+	object := bed.state("state", 10)
+
+	count, err := object.Values(nil)
+
+	require.NoError(t, err)
+	require.Equal(t, uint64(stateSlots), count)
+}
+
+// Test_StateObject_Values_NullWithLength_IsInvalidArgument verifies that a
+// slice with places but no address is refused as an invalid argument.
+func Test_StateObject_Values_NullWithLength_IsInvalidArgument(t *testing.T) {
+	bed := newBed(t)
+	object := bed.state("state", 10)
+
+	err := object.ValuesIntoNull(stateSlots)
+
+	require.ErrorIs(t, err, ffi.ErrInvalidArgument)
+}
+
+// Test_StateObject_Shape_FillsTheRecord verifies that a query fills every
+// field of the caller's record, whatever it held.
+func Test_StateObject_Shape_FillsTheRecord(t *testing.T) {
+	bed := newBed(t)
+	object := bed.state("state", 10)
+	shape := cfixture.StateShape{Seed: 0xdead, Slots: 0xdead, Workers: 0xdead, RegionLen: 0xdead}
+
+	_, err := object.Shape(&shape)
+	require.NoError(t, err)
+
+	require.Equal(t, cfixture.StateShape{Seed: 10, Slots: stateSlots, Workers: workerCount, RegionLen: 2}, shape)
+}
+
+// Test_StateObject_Shape_ReturnsTheSlotCount verifies that a query with a
+// record still returns its value.
+func Test_StateObject_Shape_ReturnsTheSlotCount(t *testing.T) {
+	bed := newBed(t)
+	object := bed.state("state", 10)
+	var shape cfixture.StateShape
+
+	count, err := object.Shape(&shape)
+
+	require.NoError(t, err)
+	require.Equal(t, uint64(stateSlots), count)
+}
+
+// Test_StateObject_Shape_RefusedObject_LeavesTheRecordUntouched verifies that
+// a refused argument after an output leaves the output as it was: the export
+// zeroes its outputs only once it accepts every argument.
+func Test_StateObject_Shape_RefusedObject_LeavesTheRecordUntouched(t *testing.T) {
+	bed := newBed(t)
+	object := bed.state("state", 10)
+	require.NoError(t, object.Free())
+	shape := cfixture.StateShape{Seed: 0xdead, Slots: 0xdead, Workers: 0xdead, RegionLen: 0xdead}
+
+	_, err := object.Shape(&shape)
+	require.Error(t, err)
+
+	require.Equal(t, cfixture.StateShape{Seed: 0xdead, Slots: 0xdead, Workers: 0xdead, RegionLen: 0xdead}, shape)
+}
+
+// Test_StateObject_Shape_NilRecord_IsInvalidArgument verifies that a query
+// with no place for its record is refused as an invalid argument.
+func Test_StateObject_Shape_NilRecord_IsInvalidArgument(t *testing.T) {
+	bed := newBed(t)
+	object := bed.state("state", 10)
+
+	_, err := object.Shape(nil)
+
+	require.ErrorIs(t, err, ffi.ErrInvalidArgument)
+}
+
 // Test_StateObject_Free_Twice_IsNoOp verifies that a second free of a freed
 // object does nothing and reports nothing.
 func Test_StateObject_Free_Twice_IsNoOp(t *testing.T) {

@@ -28,15 +28,52 @@ pub const COUNTER_INVALID: u64 = u64::MAX;
 /// was spawned from.
 #[inline(always)]
 pub(crate) unsafe fn counter_get_address(root: ShmRoot, storage: *mut bindings::counter_storage, id: u64) -> *mut u64 {
+    // SAFETY: the storage is live and frozen and the id indexes its handle
+    // table (caller contract).
+    unsafe { counter_handle_value(counter_value_handles(root, storage), id) }
+}
+
+/// The handle table of a counter storage, one self-relative pointer per
+/// registered counter, each naming the counter's first value, with the
+/// provenance of the root.
+///
+/// # Safety
+///
+/// The root must cover the mapping the storage lies in, and the storage must
+/// be a live counter storage whose handle table the control plane does not
+/// change while the result is used.
+#[inline(always)]
+pub(crate) unsafe fn counter_value_handles(root: ShmRoot, storage: *mut bindings::counter_storage) -> *mut isize {
     // SAFETY: the storage is live and frozen (caller contract); the handle
-    // table slot is a field of it, and the table it names holds one
-    // self-relative offset per registered counter. Offsets are read as
-    // integers, never as pointers.
+    // table slot is a field of it. The offset is read as an integer, never as
+    // a pointer.
     unsafe {
         let table_slot = &raw const (*storage).counter_value_handles;
-        let table = root.rel::<isize>(table_slot.addr(), table_slot.cast::<isize>().read());
+        root.rel::<isize>(table_slot.addr(), table_slot.cast::<isize>().read())
+    }
+}
+
+/// Address of the first value of the counter of the given id, which its
+/// handle in the table names: the handle C's `counter_handle_get_value` casts
+/// to `uint64_t *`.
+///
+/// # Safety
+///
+/// The table must be the live handle table of a counter storage that the
+/// control plane does not change while the result is used, with the provenance
+/// of a root covering the storage's mapping, and the id an index of the
+/// registry the storage was spawned from.
+#[inline(always)]
+pub(crate) unsafe fn counter_handle_value(table: *mut isize, id: u64) -> *mut u64 {
+    // SAFETY: the table holds one self-relative offset per registered counter
+    // and the id is below them (caller contract). The offset is read as an
+    // integer; the value keeps the table's provenance, which covers the
+    // mapping.
+    unsafe {
         let handle = table.add(id as usize);
-        root.rel::<u64>(handle.addr(), handle.read())
+        handle
+            .cast::<u64>()
+            .with_addr(handle.addr().wrapping_add_signed(handle.read()))
     }
 }
 
