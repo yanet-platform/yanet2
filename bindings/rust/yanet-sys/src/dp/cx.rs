@@ -1,6 +1,6 @@
 //! Per-invocation contexts of a module.
 
-use core::{marker::PhantomData, mem::size_of, ptr::NonNull};
+use core::{marker::PhantomData, mem::size_of, ops::AddAssign, ptr::NonNull};
 
 use yanet_shm::{resolve::Resolve, root::ShmRoot};
 
@@ -176,7 +176,8 @@ impl<'id, T> CounterRef<'id, T> {
     ///     type Config = Counter;
     ///     type Prepared<'p> = CounterRef<'p>;
     ///     fn handle<'id>(cx: &mut Cx<'id, Self>, batch: &mut Batch<'id>) {
-    ///         cx.prepared().bind(cx).add(1);
+    ///         let mut hits = cx.prepared().bind(cx);
+    ///         hits += 1;
     ///         batch.dispatch(|_| Verdict::Pass);
     ///     }
     ///     fn prepare<'p>(cx: &CommitCx<'p, Self>) -> CounterRef<'p> {
@@ -311,6 +312,16 @@ impl<T: CounterLayout> BoundCounter<'_, T> {
         // of the layout `T`, resolved for the generation the call runs
         // (bound to the call context of the same brand).
         unsafe { value.add_to(self.value.as_ptr()) };
+    }
+}
+
+impl<T> AddAssign<T> for BoundCounter<'_, T>
+where
+    T: CounterLayout,
+{
+    #[inline(always)]
+    fn add_assign(&mut self, value: T) {
+        self.add(value);
     }
 }
 

@@ -68,7 +68,7 @@ impl Module for Reach {
 
     fn handle<'id>(cx: &mut Cx<'id, Self>, batch: &mut Batch<'id>) {
         let config = cx.config();
-        let (held, held_pair, held_tagged, by_id) = (
+        let (mut held, mut held_pair, mut held_tagged, by_id) = (
             cx.prepared().0.bind(cx),
             cx.prepared().1.bind(cx),
             cx.prepared().2.bind(cx),
@@ -78,11 +78,11 @@ impl Module for Reach {
         let _ = (cx.worker(), cx.now());
         batch.dispatch(|packet| {
             config.counter.add(cx, 1);
-            held.add(1);
+            held += 1;
             config.pair.add(cx, Traffic::packet(packet.data().len() as u64));
-            held_pair.add(Traffic::packet(packet.data().len() as u64));
+            held_pair += Traffic::packet(packet.data().len() as u64);
             config.tagged.add(cx, Traffic::packet(packet.data().len() as u64));
-            held_tagged.add(Traffic::packet(packet.data().len() as u64));
+            held_tagged += Traffic::packet(packet.data().len() as u64);
             by_id.add(u64::from(packet.data()[0]), Traffic::packet(packet.data().len() as u64));
             if present && packet.data()[0] == 0 {
                 Verdict::Pass
