@@ -61,7 +61,6 @@ pub fn expand(input: &DeriveInput) -> syn::Result<TokenStream> {
     let p = quote!(#sdk::__private);
 
     let mut bounds = Vec::new();
-    let mut sizes = Vec::new();
     let mut parts_fields = Vec::new();
     let mut writes = Vec::new();
     let mut guards = Vec::new();
@@ -79,7 +78,6 @@ pub fn expand(input: &DeriveInput) -> syn::Result<TokenStream> {
         bounds.push(quote_spanned! {ty.span()=>
             __field_is_build::<#ty>();
         });
-        sizes.push(quote!(+ #core::mem::size_of::<#ty>()));
         parts_fields.push(quote_spanned!(ty.span()=> #vis #ident: <#ty as #p::Build>::Parts<'b, __W>));
         debug_bounds.push(quote_spanned!(ty.span()=> <#ty as #p::Build>::Parts<'b, __W>: #core::fmt::Debug));
         writes.push(quote_spanned! {ty.span()=>
@@ -105,7 +103,6 @@ pub fn expand(input: &DeriveInput) -> syn::Result<TokenStream> {
         field_idents.push(ident);
         field_names.push(ident.to_string());
     }
-    let padding_msg = format!("ShmLayout: `{name}` has implicit padding; add explicit padding fields");
     let drop_msg = format!("ShmLayout: `{name}` needs drop; shared-memory types are never dropped");
     let align_msg = format!("ShmLayout: `{name}` is aligned to more than the block allocator's MAX_ALIGN");
     let vis = &input.vis;
@@ -124,18 +121,14 @@ pub fn expand(input: &DeriveInput) -> syn::Result<TokenStream> {
             fn __fields() {
                 #(#bounds)*
             }
-            #core::assert!(
-                #core::mem::size_of::<#name>() == 0 #(#sizes)*,
-                #padding_msg,
-            );
             #core::assert!(!#core::mem::needs_drop::<#name>(), #drop_msg);
             #core::assert!(#core::mem::align_of::<#name>() <= #p::MAX_ALIGN, #align_msg);
         };
 
         // SAFETY: a non-generic repr(C) struct, not packed, aligned to at
-        // most 64, without padding (size equals the sum of its fields) or
-        // drop glue, whose every field is shared-memory data (checked above),
-        // accepts every bit pattern.
+        // most 64 and without drop glue, whose every field is shared-memory
+        // data (checked above), accepts every bit pattern. Padding is never
+        // accessed as data.
         unsafe impl #p::ShmLayout for #name {}
 
         #[doc = #parts_doc]

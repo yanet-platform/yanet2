@@ -24,6 +24,7 @@ use core::{
 };
 
 use yanet_shm::{
+    mutex::Mutex,
     rel::{ShmBox, ShmSlice},
     root::ShmRoot,
     shm::{MAX_ALIGN, ShmLayout},
@@ -133,6 +134,9 @@ mod kind {
 /// is gated by `unsafe trait`, which module crates cannot write directly under
 /// `#![forbid(unsafe_code)]`; writing and freeing are unsafe functions, so
 /// calling them is gated too.
+///
+/// A whole value has all its fields initialized; padding may remain
+/// uninitialized and must never be read as data.
 pub unsafe trait Build: ShmLayout {
     /// What the author supplies for a value of this type inside a build of an
     /// owner.
@@ -246,6 +250,23 @@ plain_build! {
     AtomicU8, AtomicU16, AtomicU32, AtomicU64,
     AtomicI8, AtomicI16, AtomicI32, AtomicI64,
     (),
+}
+
+// SAFETY: a copyable payload owns no blocks or address-relative edges. The
+// mutex is written whole with its lock free and needs no release work.
+unsafe impl<T> Build for Mutex<T>
+where
+    T: Copy + ShmLayout,
+{
+    type Parts<'b, W: Owner> = T;
+
+    unsafe fn write<W: Owner>(parts: T, memory: &MemoryContext<'_, W>, addr: usize) -> Result<(), Refusal> {
+        // SAFETY: the destination is aligned and exclusive (caller contract).
+        unsafe { memory.root().ptr::<Self>(addr).write(Self::new(parts)) };
+        Ok(())
+    }
+
+    unsafe fn free<W: Owner>(_: usize, _: &MemoryContext<'_, W>) {}
 }
 
 // SAFETY: each element is written at its own offset, covering the array.
@@ -1672,7 +1693,7 @@ impl<O, W> BuiltObject<O, W> {
 impl<O: Object, W: Owner> BuiltObject<O, W> {
     /// The object's body, published or not, read as the dataplane reads it:
     /// its state changes only through the types that allow a shared change,
-    /// as atomics.
+    /// as atomics and mutexes.
     ///
     /// # Safety
     ///

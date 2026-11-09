@@ -139,8 +139,8 @@ impl Agent {
 
     /// Runs `f` over the body of an object, published or not, read as the
     /// dataplane reads it: its state changes only through the types that
-    /// allow a shared change, as atomics. The body's edges resolve through
-    /// the context `f` is given.
+    /// allow a shared change, as atomics and mutexes. The body's edges resolve
+    /// through the context `f` is given.
     ///
     /// Each call brands the context and the body with a lifetime of its own,
     /// so the context resolves only what this read reached, and neither
@@ -302,8 +302,9 @@ impl Agent {
         let root = self.root();
         // SAFETY: a configuration of the module's type that a generation holds
         // was built over `M`, as the dataplane that loads `M` for the type
-        // trusts, written whole and frozen but for its atomics; the pin keeps
-        // it live until the read returns. C returned a pointer of the mapping.
+        // trusts, written whole and frozen but for its atomics and mutex
+        // payloads; the pin keeps it live until the read returns. C
+        // returned a pointer of the mapping.
         let config = unsafe { (*root.ptr::<ModuleConfig<M::Config>>(module.addr().get())).body() };
         Ok(f(
             PublishedCx {
@@ -387,8 +388,9 @@ impl<'g> PublishedCx<'g> {
         let object = NonNull::new(object).expect("C resolves each link of a configuration it installed");
         // SAFETY: an object of type `O` that a generation holds was built over
         // `O`, as the dataplane that loads `O` for the type trusts, written
-        // whole and frozen but for its atomics; the pin keeps it live until
-        // the read returns. C returned a pointer of the mapping.
+        // whole and frozen but for its atomics and mutex payloads; the pin
+        // keeps it live until the read returns. C returned a pointer of
+        // the mapping.
         unsafe { (*self.root.ptr::<ObjectConfig<O::Config>>(object.addr().get())).body() }
     }
 
@@ -424,8 +426,8 @@ impl<'g> PublishedCx<'g> {
 // body of a configuration the pinned generation holds, which its build wrote
 // whole, and it resolves the configuration's links only to objects of that
 // generation. Both are `Build` types, which change through a shared reference
-// only by their atomics and opaque bytes (see `ObjectCx`), and live for the
-// read, as the pin is released only once it returns.
+// only by their atomics, opaque bytes and guarded mutex payloads, and live for
+// the read, as the pin is released only once it returns.
 unsafe impl<'g> Resolve<'g> for PublishedCx<'g> {
     fn shm_root(&self) -> ShmRoot {
         self.root
@@ -473,9 +475,10 @@ impl fmt::Debug for ObjectCx<'_> {
 // brand, together with the one `'g` reference it hands out: the body of a
 // live object, which its build wrote whole. The `Sync` bound does not by
 // itself rule out a shared change; what does is that the body is a `Build`
-// type, an unsafe trait whose impls are the SDK's (scalars, atomics, `Opaque`
-// bytes, the edge types, the C objects it binds, and the derive over those),
-// of which only atomics and opaque bytes change through a shared reference.
+// type, an unsafe trait whose impls are the SDK's (scalars, atomics, opaque
+// bytes, mutexes, the edge types, the C objects it binds, and the derive over
+// those), of which only atomics, opaque bytes and guarded mutex payloads
+// change through a shared reference.
 // The body lives for the read, as the object's handle is borrowed for it and
 // a release takes the handle by value.
 unsafe impl<'g> Resolve<'g> for ObjectCx<'g> {

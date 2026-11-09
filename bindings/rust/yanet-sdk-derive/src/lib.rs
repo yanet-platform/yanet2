@@ -19,10 +19,10 @@ use syn::{DeriveInput, ItemImpl, parse_macro_input};
 /// writes the value from, for a shared-memory struct.
 ///
 /// Accepts only a non-generic `#[repr(C)]` struct with named fields (an
-/// alignment up to 64 may be added), every field of which is `Build`, with no
-/// implicit padding and no drop glue. The generated `<Type>Parts` has one field
-/// per field of the struct, holding the parts of that field's type, each
-/// written at the field's place. The fields are written in order, and a
+/// alignment up to 64 may be added), every field of which is `Build`, with
+/// no drop glue. Padding is never read as data. The generated `<Type>Parts` has
+/// one field per field of the struct, holding the parts of that field's type,
+/// each written at the field's place. The fields are written in order, and a
 /// refused field returns the ones before it.
 ///
 /// ```
@@ -41,7 +41,7 @@ use syn::{DeriveInput, ItemImpl, parse_macro_input};
 /// struct Config {
 ///     first: ShmBox<Item>,
 ///     flags: u32,
-///     // Explicit padding keeps the struct free of implicit padding.
+///     // Reserved bytes remain explicit when they are part of an ABI.
 ///     pad: u32,
 /// }
 ///
@@ -282,9 +282,9 @@ mod doctests {
     /// ```
     struct ConcreteAccepted;
 
-    /// Implicit padding is refused.
+    /// Implicit padding is accepted for typed shared-memory access.
     ///
-    /// ```compile_fail,E0080
+    /// ```
     /// use yanet_sdk::ShmLayout;
     ///
     /// #[derive(ShmLayout)]
@@ -294,7 +294,7 @@ mod doctests {
     ///     wide: u64,
     /// }
     /// ```
-    struct PaddingRefused;
+    struct PaddingAccepted;
 
     /// Naming the padding as a field is accepted.
     ///
