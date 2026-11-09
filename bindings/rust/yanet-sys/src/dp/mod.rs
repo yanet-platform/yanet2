@@ -51,6 +51,8 @@
 //!   left it.
 //! - **packet**: a packet a module sees, with its mbuf, is exclusively owned by
 //!   the worker for the call, with no shared or cloned mbuf data reachable. Its
+//!   descriptor is initialised throughout, as the receive path and the
+//!   allocator zero it before filling it in and a copy takes its source's. Its
 //!   header offsets are the parser's (`parse_packet`, which drops what it
 //!   cannot parse): a parsed network header starts after at least the Ethernet
 //!   header and no later than the end of the frame, and an IPv4 or IPv6 one
@@ -82,7 +84,9 @@ pub mod object;
 #[doc(hidden)]
 pub mod rt;
 
-pub use batch::{Batch, DeviceRef, DscpMark, Packet, PacketView, ParseError, ResizeError, TunnelError, Verdict};
+pub use batch::{
+    Batch, DeviceRef, DscpMark, Packet, PacketMeta, PacketView, ParseError, ResizeError, TunnelError, Verdict,
+};
 pub use cx::{
     BoundCounter, BoundGauge, BoundTaggedCounters, CommitCx, CounterRef, Cx, ModuleCx, ObjectCommitCx, PrepareCx,
     TaggedCountersRef,
