@@ -154,6 +154,19 @@ pub unsafe trait Owner: 'static {
         size: u64,
     ) -> Result<(u64, u64), Self::Error>;
 
+    /// Registers a counter of the given number of values (C size) with the
+    /// object's own registry and returns its id.
+    ///
+    /// The ids run from zero in the order the names first come, and a name
+    /// registered before gets its id back, refused under another size, as
+    /// `counter_registry_register` numbers the registry of a `cp_object`.
+    ///
+    /// # Safety
+    ///
+    /// The header must be an object header initialised by this owner and not
+    /// published.
+    unsafe fn register_object_counter(&self, header: Header, name: &str, size: u64) -> Result<u64, Self::Error>;
+
     /// Links a device to the module and returns its index.
     ///
     /// # Safety

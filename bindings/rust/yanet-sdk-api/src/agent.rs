@@ -852,6 +852,27 @@ unsafe impl Owner for Agent {
         Ok((registry, id))
     }
 
+    unsafe fn register_object_counter(&self, header: Header, name: &str, size: u64) -> Result<u64, Error> {
+        let name = c_name::<{ COUNTER_NAME_LEN as usize }>(name)?;
+        let mut chain = ptr::null_mut();
+        // SAFETY: the header is an initialised object header (caller
+        // contract), so its registry is; the name is NUL terminated and the
+        // out-parameter points at a null chain.
+        let id = unsafe {
+            bindings::counter_registry_register(
+                &raw mut (*header_at::<bindings::cp_object>(self, header)).counter_registry,
+                name.as_ptr().cast::<c_char>(),
+                size,
+                &raw mut chain,
+            )
+        };
+        if id == COUNTER_INVALID {
+            // SAFETY: the chain C wrote, if any, is ours alone.
+            return Err(unsafe { from_c_chain(chain) });
+        }
+        Ok(id)
+    }
+
     unsafe fn link_device(&self, header: Header, name: &str) -> Result<u64, Error> {
         let name = c_name::<{ CP_DEVICE_NAME_LEN as usize }>(name)?;
         let (mut index, mut chain) = (0, ptr::null_mut());

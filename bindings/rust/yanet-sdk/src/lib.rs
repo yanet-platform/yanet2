@@ -57,7 +57,8 @@
 //!
 //! State that outlives the configurations, rebuilt whole on every update, is
 //! an [`Object`]: built the same way by [`ObjectBuilder`], over a scope that
-//! registers no counter and links no device or object, published by name
+//! registers counters of the object's own, [`ObjectCounter`] fields its
+//! prepare step resolves, and links no device or object, published by name
 //! before a module links it and released by its owner once no generation holds
 //! it. A module's scope links it by type and name into an [`ObjectLink`] field,
 //! which the handler resolves to the object's configuration and to the value
@@ -132,10 +133,10 @@ pub use yanet_sys::{
         Refusal, Registered, Scope,
     },
     dp::{
-        Batch, CommitCx, Counter, CounterLayout, CounterRef, Cx, Device, DeviceRef, DscpMark, Module, ModuleCx, Object,
-        ObjectCommitCx, ObjectConfig, ObjectLink, Packet, PacketView, ParseError, PerWorker, PerWorkerSlice, PrepareCx,
-        ResizeError, TaggedCounter, TaggedCounters, TaggedCountersRef, Traffic, TunnelError, Verdict, WorkerSlice,
-        WorkerSlot,
+        Batch, BoundGauge, CommitCx, Counter, CounterLayout, CounterRef, Cx, Device, DeviceRef, DscpMark, Module,
+        ModuleCx, Object, ObjectCommitCx, ObjectConfig, ObjectCounter, ObjectLink, Packet, PacketView, ParseError,
+        PerWorker, PerWorkerSlice, PrepareCx, ResizeError, TaggedCounter, TaggedCounters, TaggedCountersRef, Traffic,
+        TunnelError, Verdict, WorkerSlice, WorkerSlot,
     },
 };
 
@@ -163,19 +164,47 @@ use yanet_sdk_testing as _;
 #[cfg(doctest)]
 mod doctests {
 
-    /// An object scope registers no counter: an object header carries no
-    /// module counter registry.
+    /// An object scope's counter is the object's: it does not build a
+    /// module's counter field, which indexes the module's registry.
     ///
-    /// ```compile_fail,E0599
-    /// use yanet_sdk::{BuildError, ObjectKind, Owner, Scope};
-    /// fn count<W: Owner>(scope: Scope<'_, '_, W, BuildError<W::Error>, ObjectKind>) {
-    ///     let _ = scope.counter::<u64>("hits");
+    /// ```compile_fail,E0308
+    /// use yanet_sdk::{BuildError, Counter, ObjectKind, Owner, Registered, Scope};
+    /// fn count<'b, W: Owner>(
+    ///     scope: Scope<'b, '_, W, BuildError<W::Error>, ObjectKind>,
+    /// ) -> Result<Registered<'b, Counter>, BuildError<W::Error>> {
+    ///     scope.counter::<u64>("hits")
     /// }
     /// ```
-    struct ObjectCounterRefused;
+    struct ObjectCounterAsModuleCounterRefused;
 
-    /// An object scope registers no tagged counter either: an object header
-    /// carries no tagged counter registries.
+    /// A module scope's counter does not build an object's counter field
+    /// either.
+    ///
+    /// ```compile_fail,E0308
+    /// use yanet_sdk::{BuildError, ModuleKind, ObjectCounter, Owner, Registered, Scope};
+    /// fn count<'b, W: Owner>(
+    ///     scope: Scope<'b, '_, W, BuildError<W::Error>, ModuleKind>,
+    /// ) -> Result<Registered<'b, ObjectCounter>, BuildError<W::Error>> {
+    ///     scope.counter::<u64>("hits")
+    /// }
+    /// ```
+    struct ModuleCounterAsObjectCounterRefused;
+
+    /// An object scope registers counters of its own, which build an object's
+    /// counter field, the accepted twin of the two above.
+    ///
+    /// ```
+    /// use yanet_sdk::{BuildError, ObjectCounter, ObjectKind, Owner, Registered, Scope};
+    /// fn count<'b, W: Owner>(
+    ///     scope: Scope<'b, '_, W, BuildError<W::Error>, ObjectKind>,
+    /// ) -> Result<Registered<'b, ObjectCounter>, BuildError<W::Error>> {
+    ///     scope.counter::<u64>("hits")
+    /// }
+    /// ```
+    struct ObjectCounterAccepted;
+
+    /// An object scope registers no tagged counter: an object header carries
+    /// no tagged counter registries.
     ///
     /// ```compile_fail,E0599
     /// use yanet_sdk::{BuildError, ObjectKind, Owner, Scope};
@@ -225,7 +254,8 @@ mod doctests {
     /// ```
     struct ObjectObjectRefused;
 
-    /// A module scope registers all five, the accepted twin of the five
+    /// A module scope registers a counter, tagged counters and a device and
+    /// links an object, the accepted twin of the object scope's refusals
     /// above.
     ///
     /// ```

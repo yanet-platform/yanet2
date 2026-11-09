@@ -15,8 +15,8 @@ use core::{
 use yanet_packet as _;
 use yanet_sdk::{
     Batch, Build, BuiltObject, CommitCx, Counter, Cx, Device, Kind, Lpm4, Lpm6, Module, Object, ObjectBuilder,
-    ObjectCommitCx, ObjectLink, OwnedSlice, PerWorker, PerWorkerSlice, RawSpinlock, Refusal, Registered, ShmBox,
-    ShmLayout, ShmSlice, TaggedCounter, TaggedCounters, Traffic, Verdict,
+    ObjectCommitCx, ObjectCounter, ObjectLink, OwnedSlice, PerWorker, PerWorkerSlice, RawSpinlock, Refusal, Registered,
+    ShmBox, ShmLayout, ShmSlice, TaggedCounter, TaggedCounters, Traffic, Verdict,
 };
 use yanet_sdk_derive as _;
 use yanet_sdk_testing::{
@@ -1045,7 +1045,7 @@ fn build_policy_object(
 }
 
 /// Releases an object built in the given owner.
-fn release_object(owner: &TestOwner, built: BuiltObject<PolicyState, TestOwner>) {
+fn release_object<O: Object>(owner: &TestOwner, built: BuiltObject<O, TestOwner>) {
     // SAFETY: handed over by the builder, unreferenced, released once.
     unsafe { built.destroy(owner) };
 }
@@ -1195,6 +1195,118 @@ fn test_object_build_returns_everything_when_a_write_is_refused() {
 
     assert_eq!(BuildError::Refused(Refusal::OutOfMemory), err);
     owner.assert_released();
+}
+
+/// Counters of an object's own: one of a value, one of traffic and a last one
+/// whose name a test picks.
+#[derive(ShmLayout)]
+#[repr(C)]
+struct Held {
+    held: ObjectCounter,
+    traffic: ObjectCounter<Traffic>,
+    last: ObjectCounter,
+}
+
+/// An object of counters of its own: the builder reads only its type name and
+/// its configuration type.
+struct HeldState;
+
+impl Object for HeldState {
+    const TYPE: &'static str = "held_state";
+    type Config = Held;
+    type Prepared<'p> = ();
+
+    fn prepare(_: &ObjectCommitCx<'_, Self>) {}
+}
+
+/// Builds the object of counters, its last counter under the given name.
+fn build_held_object(owner: &TestOwner, last: &str) -> Result<BuiltObject<HeldState, TestOwner>, Failure> {
+    ObjectBuilder::<HeldState>::build(owner, "held0", |b| {
+        Ok(HeldParts {
+            held: b.counter("held")?,
+            traffic: b.counter("traffic")?,
+            last: b.counter(last)?,
+        })
+    })
+}
+
+/// The ids the object's counters were written with.
+fn held_ids(owner: &TestOwner, built: &BuiltObject<HeldState, TestOwner>) -> (u64, u64, u64) {
+    // SAFETY: the object was built in this owner's memory and is not
+    // released while the borrow lives.
+    let config = unsafe { built.config(owner) };
+    (config.held.id(), config.traffic.id(), config.last.id())
+}
+
+/// verifies that an object's counters are registered with as many values as
+/// their layouts hold and written with the ids of the object's registry, from
+/// zero in the order the names first come, a name given again its id back.
+#[test]
+fn test_object_build_registers_each_counter_with_the_objects_registry() {
+    let owner = owner();
+
+    let built = build_held_object(&owner, "held").expect("built");
+
+    assert_eq!(
+        ((0, 1, 0), vec![1, 2, 1]),
+        (held_ids(&owner, &built), owner.counter_sizes())
+    );
+    release_object(&owner, built);
+    owner.assert_released();
+}
+
+/// verifies that the counters of each object are numbered from zero, apart
+/// from those of another object and of a module.
+#[test]
+fn test_object_build_numbers_its_counters_apart_from_others() {
+    let owner = owner();
+    let module = build::<CountedModule>(&owner, |b| {
+        Ok(CountedParts {
+            hits: b.counter("hits")?,
+            traffic: b.counter("traffic")?,
+        })
+    })
+    .expect("built module");
+    let first = build_held_object(&owner, "free").expect("built first");
+
+    let second = build_held_object(&owner, "free").expect("built second");
+
+    assert_eq!(
+        ((0, 1, 2), (0, 1, 2)),
+        (held_ids(&owner, &first), held_ids(&owner, &second))
+    );
+    release_object(&owner, second);
+    release_object(&owner, first);
+    release::<CountedModule>(&owner, module);
+    owner.assert_released();
+}
+
+/// verifies that an object's counter name registered before under another
+/// size is refused by the owner, as C refuses it, and the build returns
+/// everything it took.
+#[test]
+fn test_object_build_refuses_a_counter_name_registered_before_with_another_size() {
+    let owner = owner();
+
+    let err = build_held_object(&owner, "traffic").expect_err("refused counter");
+
+    assert_eq!(BuildError::Owner(TestError::Registration), err);
+    owner.assert_released();
+}
+
+/// verifies that a build whose object counter the owner refuses, at each
+/// registration, returns everything it took.
+#[test]
+fn test_object_build_releases_everything_when_a_counter_fails_at_each_call() {
+    for allowed in 0..3 {
+        let owner = owner();
+        owner.fail_after(Call::Registration, allowed);
+
+        let err = build_held_object(&owner, "held").expect_err("refused registration");
+
+        assert_eq!(BuildError::Owner(TestError::Registration), err);
+        owner.assert_released();
+    }
 }
 
 /// verifies that the test owner records a header finalised as the other kind

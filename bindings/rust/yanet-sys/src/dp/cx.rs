@@ -9,7 +9,7 @@ use crate::{
     counters::{counter_get_address, counter_handle_value, counter_value_handles},
     dp::{
         batch::DeviceRef,
-        fields::{Counter, CounterLayout, Device, ObjectLink, TaggedCounter, TaggedCounters},
+        fields::{Counter, CounterLayout, Device, ObjectCounter, ObjectLink, TaggedCounter, TaggedCounters},
         module::Module,
         object::{Object, ObjectConfig},
     },
@@ -95,13 +95,15 @@ pub struct Cx<'id, M: Module> {
 }
 
 /// A counter's values of the context's worker, resolved once at commit, of a
-/// [`Counter`] of the layout `T`.
+/// counter of the layout `T`: a module's [`Counter`] or [`TaggedCounter`], or
+/// an [`ObjectCounter`] the object's prepare step resolves.
 ///
 /// Holds the address of the first value, as a C module holds the pointer
 /// `counter_get_address` returned. `Send`, so a prepared value holding it can
 /// travel from the assigner thread to its worker, but it does not write: the
-/// handler binds it to its context and adds through the bound view, which
-/// stays on the worker. Binding is free: the view is the same address.
+/// handler binds it to its context and adds through the bound view, or reads
+/// and changes a `u64` counter through a gauge view, either of which stays on
+/// the worker. Binding is free: the view is the same address.
 ///
 /// A handle does not outlive the prepare context that made it (a lifetime
 /// error, which has no code):
@@ -143,11 +145,12 @@ impl<T> Clone for CounterRef<'_, T> {
 
 impl<T> Copy for CounterRef<'_, T> {}
 
-// SAFETY: the handle is an address and writes nothing; only the bound view
-// writes, and binding needs the call context of the same invariant brand,
-// that of the worker's call whose prepared value holds the handle; the
-// context is neither `Send` nor `Sync`, so every write happens on that
-// worker in its call.
+// SAFETY: the handle is an address and writes nothing; only the bound views
+// write, and binding needs the call context of the same invariant brand: that
+// of the worker's call whose prepared value holds the handle, or that reads it
+// from the prepared value of an object the module links, which C made for the
+// object's context of the same worker; the context is neither `Send` nor
+// `Sync`, so every write happens on that worker in its call.
 unsafe impl<T> Send for CounterRef<'_, T> {}
 
 impl<'id, T> CounterRef<'id, T> {
@@ -188,6 +191,68 @@ impl<'id, T> CounterRef<'id, T> {
             _brand: PhantomData,
             _local: PhantomData,
             _layout: PhantomData,
+        }
+    }
+}
+
+impl<'id> CounterRef<'id, u64> {
+    /// The handle bound to the call's context as a gauge: a level the worker
+    /// raises and lowers, such as the records it keeps in a table, rather
+    /// than a count of what happened.
+    ///
+    /// Only the call context binds a gauge, as it binds a counter:
+    ///
+    /// ```compile_fail,E0308
+    /// # use yanet_sys::dp::{CommitCx, Counter, Module};
+    /// fn early<'p, M: Module<Config = Counter>>(cx: &CommitCx<'p, M>) {
+    ///     cx.config().resolve(cx).gauge(cx).sub(1);
+    /// }
+    /// ```
+    ///
+    /// The handler binds the handle of its prepared value, and takes from
+    /// the gauge only what the worker holds:
+    ///
+    /// ```
+    /// use yanet_sys::dp::{Batch, CommitCx, Counter, CounterRef, Cx, Module, Verdict};
+    /// struct Mine;
+    /// impl Module for Mine {
+    ///     const NAME: &'static str = "mine";
+    ///     type Config = Counter;
+    ///     type Prepared<'p> = CounterRef<'p>;
+    ///     fn handle<'id>(cx: &mut Cx<'id, Self>, batch: &mut Batch<'id>) {
+    ///         let held = cx.prepared().gauge(cx);
+    ///         batch.dispatch(|packet| {
+    ///             if !packet.data().is_empty() {
+    ///                 held.add(1);
+    ///             } else if held.get() != 0 {
+    ///                 held.sub(1);
+    ///             }
+    ///             Verdict::Pass
+    ///         });
+    ///     }
+    ///     fn prepare<'p>(cx: &CommitCx<'p, Self>) -> CounterRef<'p> {
+    ///         cx.config().resolve(cx)
+    ///     }
+    /// }
+    /// ```
+    ///
+    /// A gauge is one value, so a counter of traffic is not bound as one:
+    ///
+    /// ```compile_fail,E0599
+    /// # use yanet_sys::dp::{CounterRef, Cx, Module, Traffic};
+    /// fn level<'id, M: Module>(cx: &Cx<'id, M>, traffic: CounterRef<'id, Traffic>) {
+    ///     traffic.gauge(cx).add(1);
+    /// }
+    /// ```
+    #[inline(always)]
+    pub fn gauge<M>(&self, _cx: &Cx<'id, M>) -> BoundGauge<'id>
+    where
+        M: Module,
+    {
+        BoundGauge {
+            value: self.value,
+            _brand: PhantomData,
+            _local: PhantomData,
         }
     }
 }
@@ -246,6 +311,72 @@ impl<T: CounterLayout> BoundCounter<'_, T> {
         // of the layout `T`, resolved for the generation the call runs
         // (bound to the call context of the same brand).
         unsafe { value.add_to(self.value.as_ptr()) };
+    }
+}
+
+/// A `u64` counter handle bound to the worker's call as a gauge: reads the
+/// worker's copy of the counter, adds to it and takes from it.
+///
+/// Readers sum the copies of the workers, as for every counter, so a gauge
+/// each worker keeps for its own share of a level reads as the whole level.
+/// Neither `Send` nor `Sync`: the value is this worker's.
+///
+/// A bound gauge is not sent to another thread:
+///
+/// ```compile_fail,E0277
+/// # use yanet_sys::dp::BoundGauge;
+/// fn send(held: BoundGauge<'_>) {
+///     std::thread::scope(|scope| {
+///         scope.spawn(move || held.sub(1));
+///     });
+/// }
+/// ```
+pub struct BoundGauge<'id> {
+    value: NonNull<u64>,
+    // Invariant brand: values of two different contexts never unify, so they cannot be mixed.
+    _brand: PhantomData<fn(&'id ()) -> &'id ()>,
+    // Neither Send nor Sync on purpose, independent of the pointer fields.
+    _local: PhantomData<*mut ()>,
+}
+
+impl Clone for BoundGauge<'_> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl Copy for BoundGauge<'_> {}
+
+impl BoundGauge<'_> {
+    /// The worker's copy of the gauge: what this worker made it, as no other
+    /// writes it.
+    #[inline(always)]
+    pub fn get(&self) -> u64 {
+        // SAFETY: the handle holds this worker's aligned value of the
+        // counter, resolved for the generation the call runs (bound to the
+        // call context of the same brand), which only this worker writes.
+        unsafe { self.value.as_ptr().read() }
+    }
+
+    /// Adds the value to the worker's copy, wrapping, as a bound counter
+    /// adds.
+    #[inline(always)]
+    pub fn add(&self, value: u64) {
+        // SAFETY: as for reading; the counter's only value.
+        unsafe { value.add_to(self.value.as_ptr()) };
+    }
+
+    /// Takes the value from the worker's copy, wrapping below zero as an add
+    /// wraps past the top: a gauge that must not go below zero is read first.
+    ///
+    /// A plain write, as an add's: only this worker writes its copy.
+    #[inline(always)]
+    pub fn sub(&self, value: u64) {
+        let slot = self.value.as_ptr();
+        // SAFETY: as for reading. The control plane reads the value with
+        // memcpy (lib/controlplane/agent/counters.c), as it does after the
+        // plain `+=` of a C module.
+        unsafe { *slot = (*slot).wrapping_sub(value) };
     }
 }
 
@@ -535,7 +666,8 @@ unsafe impl<'c, M: Module> Resolve<'c> for CommitCx<'c, M> {
 /// Context of the prepare pass for one worker context of an object.
 ///
 /// Gives the object's configuration, whose edges resolve through it, and the
-/// context's worker to the object's prepare step. Neither `Send` nor `Sync`.
+/// context's worker to the object's prepare step, and resolves the object's
+/// counters. Neither `Send` nor `Sync`.
 pub struct ObjectCommitCx<'c, O: Object> {
     root: ShmRoot,
     ectx: NonNull<bindings::object_ectx>,
@@ -860,6 +992,81 @@ where
         TaggedCountersRef {
             table,
             len: self.len(),
+            _brand: PhantomData,
+            _layout: PhantomData,
+        }
+    }
+}
+
+/// Address of the context's worker's value of a counter of the object, as
+/// C's `counter_get_address(id, ADDR_OF(&ectx->counter_storage))`.
+///
+/// The context keeps its counter storage as a relative address only: C
+/// derives no absolute twin of it.
+///
+/// # Safety
+///
+/// The context must be the object's context being committed, frozen while
+/// the result is used, with the counter storage C spawned from the object's
+/// registry when it built the context, and the id must be an index of that
+/// registry.
+#[inline(always)]
+unsafe fn object_counter_value(root: ShmRoot, ectx: NonNull<bindings::object_ectx>, id: u64) -> *mut u64 {
+    // SAFETY: the context is frozen and its storage slot holds the offset to
+    // the storage C spawned for it (caller contract). The offset is read as
+    // an integer, never as a pointer.
+    unsafe {
+        let slot = &raw const (*ectx.as_ptr()).counter_storage;
+        let offset = slot.cast::<isize>().read();
+        debug_assert!(offset != 0, "an object context without a counter storage");
+        counter_get_address(root, root.rel(slot.addr(), offset), id)
+    }
+}
+
+impl<T> ObjectCounter<T>
+where
+    T: CounterLayout,
+{
+    /// The context's worker's values of the object's counter, for the
+    /// object's prepared value.
+    ///
+    /// The handle holds the address C's `counter_get_address` returns in the
+    /// counter storage of the object's context.
+    ///
+    /// Only the object's prepare context resolves it, not a module's:
+    ///
+    /// ```compile_fail,E0308
+    /// # use yanet_sys::dp::{CommitCx, Module, ObjectCounter};
+    /// fn wrong<'p, M: Module<Config = ObjectCounter>>(cx: &CommitCx<'p, M>) {
+    ///     let _ = cx.config().resolve(cx);
+    /// }
+    /// ```
+    ///
+    /// With the object's prepare context it is accepted:
+    ///
+    /// ```
+    /// # use yanet_sys::dp::{Object, ObjectCommitCx, ObjectCounter};
+    /// fn right<'p, O: Object<Config = ObjectCounter>>(cx: &ObjectCommitCx<'p, O>) {
+    ///     let _ = cx.config().resolve(cx);
+    /// }
+    /// ```
+    #[doc(alias = "counter_get_address")]
+    #[inline(always)]
+    pub fn resolve<'c, O>(&'c self, cx: &ObjectCommitCx<'c, O>) -> CounterRef<'c, T>
+    where
+        O: Object,
+    {
+        // SAFETY: the context is the object's one being committed, frozen for
+        // the pass (constructor contract, attach: frozen), and C spawned its
+        // counter storage from the object's registry when it built the
+        // context; a built object counter id indexes that registry, whose
+        // storage holds the counter's aligned values next to each other, as
+        // many as the layout's, the size it was registered with.
+        let value = unsafe { object_counter_value(cx.root, cx.ectx, self.id()) };
+        CounterRef {
+            // SAFETY: the value lies in the counter storage block, not at
+            // address zero.
+            value: unsafe { NonNull::new_unchecked(value) },
             _brand: PhantomData,
             _layout: PhantomData,
         }

@@ -21,9 +21,9 @@ pub mod assign;
 use core::sync::atomic::{AtomicU64, Ordering};
 
 use yanet_sdk::{
-    Batch, CommitCx, Counter, CounterRef, Cx, Device, Lpm4, Lpm6, Module, Object, ObjectCommitCx, ObjectLink,
-    PerWorker, PerWorkerSlice, ShmLayout, ShmSlice, TaggedCounter, TaggedCounters, TaggedCountersRef, Traffic, Verdict,
-    WorkerSlice, WorkerSlot,
+    Batch, CommitCx, Counter, CounterRef, Cx, Device, Lpm4, Lpm6, Module, Object, ObjectCommitCx, ObjectCounter,
+    ObjectLink, PerWorker, PerWorkerSlice, ShmLayout, ShmSlice, TaggedCounter, TaggedCounters, TaggedCountersRef,
+    Traffic, Verdict, WorkerSlice, WorkerSlot,
 };
 // The plugin examples use it.
 #[cfg(feature = "plugin")]
@@ -395,7 +395,8 @@ fn route_indexes<'id>(cx: &Cx<'id, Fib>, fib: &'id RouteFib, frame: &[u8]) -> Op
 
 /// The configuration of [`State`]: the seed it was built from, a slot per
 /// item, which the control plane changes while the object is published, a
-/// slot per worker and a region per worker.
+/// slot per worker, a region per worker and a counter of the object's own,
+/// which [`Stash`] keeps as a gauge.
 #[derive(ShmLayout)]
 #[repr(C)]
 pub struct StateConfig {
@@ -403,6 +404,7 @@ pub struct StateConfig {
     pub slots: ShmSlice<AtomicU64>,
     pub workers: PerWorker<u64>,
     pub regions: PerWorkerSlice<u64>,
+    pub held: ObjectCounter,
 }
 
 /// An object of atomic slots, the shape of state kept across configuration
@@ -420,16 +422,18 @@ impl Object for State {
             seed: config.seed,
             worker: config.workers.handle(cx),
             region: config.regions.handle(cx),
+            held: config.held.resolve(cx),
         }
     }
 }
 
-/// What [`State`] prepares for each worker: its seed and the handles of the
-/// worker's slot and region.
+/// What [`State`] prepares for each worker: its seed, the handles of the
+/// worker's slot and region and the worker's values of its counter.
 pub struct StatePrepared<'p> {
     pub seed: u64,
     pub worker: Option<WorkerSlot<'p, u64>>,
     pub region: Option<WorkerSlice<'p, u64>>,
+    pub held: CounterRef<'p>,
 }
 
 /// The configuration of [`Stash`]: the state object it writes, linked by
@@ -448,7 +452,9 @@ pub struct StashConfig {
 /// packet in the object's slot of the worker and adds the new count to the
 /// seen counter, and adds one to every value of the object's region of the
 /// worker and their sum to the filled counter, each unless the object's commit
-/// made no handle.
+/// made no handle. Holds a packet of an even first byte in the object's
+/// counter of the worker, kept as a gauge, and lets one go for a packet of an
+/// odd first byte while the worker holds any.
 pub struct Stash;
 
 impl Module for Stash {
@@ -463,6 +469,7 @@ impl Module for Stash {
         let seed = prepared.seed;
         let seen = &cx.config().seen;
         let filled = &cx.config().filled;
+        let held = prepared.held.gauge(cx);
         batch.dispatch(|packet| {
             let slot = packet
                 .data()
@@ -484,6 +491,11 @@ impl Module for Stash {
                     .iter_mut()
                     .for_each(|value| *value = value.wrapping_add(1));
                 filled.add(cx, region.get(cx).iter().copied().fold(0, u64::wrapping_add));
+            }
+            match packet.data().first() {
+                Some(byte) if byte % 2 == 0 => held.add(1),
+                Some(..) if held.get() != 0 => held.sub(1),
+                _ => {}
             }
             Verdict::Pass
         });
