@@ -120,12 +120,14 @@ struct Faulty {
     tail: ShmSlice<u64>,
 }
 
-/// A counter of hits and one of the packets and bytes of the traffic.
+/// A counter of hits, one of the packets and bytes of the traffic and one of
+/// three such pairs.
 #[derive(ShmLayout)]
 #[repr(C)]
 struct Counted {
     hits: Counter,
     traffic: Counter<Traffic>,
+    lanes: Counter<[Traffic; 3]>,
 }
 
 mod locked {
@@ -857,14 +859,18 @@ fn test_build_registers_each_counter_with_the_size_of_its_layout() {
         Ok(CountedParts {
             hits: b.counter("hits")?,
             traffic: b.counter("traffic")?,
+            lanes: b.counter("lanes")?,
         })
     })
     .expect("built");
 
     let (config, _) = body::<CountedModule>(&owner, &built);
     assert_eq!(
-        ((0, 1), vec![1, 2]),
-        ((config.hits.id(), config.traffic.id()), owner.counter_sizes())
+        ((0, 1, 2), vec![1, 2, 6]),
+        (
+            (config.hits.id(), config.traffic.id(), config.lanes.id()),
+            owner.counter_sizes()
+        )
     );
     release::<CountedModule>(&owner, built);
     owner.assert_released();
@@ -1416,6 +1422,7 @@ fn test_object_build_numbers_its_counters_apart_from_others() {
         Ok(CountedParts {
             hits: b.counter("hits")?,
             traffic: b.counter("traffic")?,
+            lanes: b.counter("lanes")?,
         })
     })
     .expect("built module");

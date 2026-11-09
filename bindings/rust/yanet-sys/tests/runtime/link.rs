@@ -15,8 +15,8 @@ use yanet_shm::rel::{RelPtr, ShmSlice};
 use yanet_sys::{
     bindings,
     dp::{
-        Batch, CommitCx, CounterRef, Cx, Module, Object, ObjectCommitCx, ObjectConfig, ObjectCounter, ObjectLink,
-        Verdict,
+        Batch, CommitCx, CounterRef, Cx, Gauge, Module, Object, ObjectCommitCx, ObjectConfig, ObjectCounter,
+        ObjectLink, Verdict,
     },
 };
 
@@ -183,23 +183,22 @@ fn test_miri_reach_of_an_object_link_without_a_prepared_value() {
     assert_eq!((8, 2), (first, *ectx.prepared()));
 }
 
-/// An object of one counter of its own, which prepares the worker's handle
-/// on it.
+/// An object of one gauge of its own, which prepares the worker's handle on
+/// it.
 struct Held;
 
 impl Object for Held {
     const TYPE: &'static str = "held";
-    type Config = ObjectCounter;
-    type Prepared<'p> = CounterRef<'p>;
+    type Config = ObjectCounter<Gauge>;
+    type Prepared<'p> = CounterRef<'p, Gauge>;
 
-    fn prepare<'p>(cx: &ObjectCommitCx<'p, Self>) -> CounterRef<'p> {
+    fn prepare<'p>(cx: &ObjectCommitCx<'p, Self>) -> CounterRef<'p, Gauge> {
         cx.config().resolve(cx)
     }
 }
 
-/// Keeps the linked object's counter as a gauge: holds a packet of an even
-/// first byte and lets one go for a packet of an odd first byte while the
-/// worker holds any.
+/// Keeps the linked object's gauge: holds a packet of an even first byte and
+/// lets one go for a packet of an odd first byte while the worker holds any.
 struct Holder;
 
 impl Module for Holder {
@@ -208,7 +207,7 @@ impl Module for Holder {
     type Prepared<'p> = ();
 
     fn handle<'id>(cx: &mut Cx<'id, Self>, batch: &mut Batch<'id>) {
-        let held = cx.config().prepared(cx).gauge(cx);
+        let held = cx.config().prepared(cx).bind(cx);
         batch.dispatch(|packet| {
             match packet.data().first() {
                 Some(byte) if byte % 2 == 0 => held.add(1),
@@ -238,9 +237,9 @@ unsafe fn link_held(arena: &'static BlockArena, context: &mut bindings::module_e
         alloc(size_of::<u64>()),
         alloc(size_of::<RelPtr<u64>>()),
         alloc(size_of::<bindings::counter_storage>()),
-        alloc(size_of::<ObjectConfig<ObjectCounter>>()),
+        alloc(size_of::<ObjectConfig<ObjectCounter<Gauge>>>()),
         alloc(size_of::<bindings::object_ectx>()),
-        alloc(size_of::<CounterRef<'static>>()),
+        alloc(size_of::<CounterRef<'static, Gauge>>()),
         alloc(size_of::<bindings::module_object_link_ectx>()),
     );
     let object_context = bindings::object_ectx {
@@ -259,7 +258,7 @@ unsafe fn link_held(arena: &'static BlockArena, context: &mut bindings::module_e
         write(arena, table, value as isize - table as isize);
         let handles = storage + offset_of!(bindings::counter_storage, counter_value_handles);
         write(arena, handles, table as isize - handles as isize);
-        write(arena, object + ObjectConfig::<ObjectCounter>::BODY_OFFSET, 0u64);
+        write(arena, object + ObjectConfig::<ObjectCounter<Gauge>>::BODY_OFFSET, 0u64);
         write(arena, object_ectx, object_context);
         let slot = object_ectx + offset_of!(bindings::object_ectx, counter_storage);
         write(arena, slot, storage as isize - slot as isize);

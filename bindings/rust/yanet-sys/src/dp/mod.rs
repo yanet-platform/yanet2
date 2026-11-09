@@ -93,11 +93,10 @@ pub use batch::{
     Batch, DeviceRef, DscpMark, Packet, PacketMeta, PacketView, ParseError, ResizeError, TunnelError, Verdict,
 };
 pub use cx::{
-    BoundCounter, BoundGauge, BoundTaggedCounters, CommitCx, CounterRef, Cx, ModuleCx, ObjectCommitCx, PrepareCx,
-    TaggedCountersRef,
+    BoundCounter, BoundTaggedCounters, CommitCx, CounterRef, Cx, ModuleCx, ObjectCommitCx, PrepareCx, TaggedCountersRef,
 };
 pub use fields::{
-    Counter, CounterLayout, Device, ObjectCounter, ObjectLink, PerWorker, PerWorkerSlice, TaggedCounter,
+    Counter, CounterLayout, Device, Gauge, ObjectCounter, ObjectLink, PerWorker, PerWorkerSlice, TaggedCounter,
     TaggedCounters, Traffic, WorkerSlice, WorkerSlot,
 };
 pub use module::{Module, ModuleConfig};

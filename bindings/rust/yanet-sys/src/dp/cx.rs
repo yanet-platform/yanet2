@@ -1,6 +1,11 @@
 //! Per-invocation contexts of a module.
 
-use core::{marker::PhantomData, mem::size_of, ops::AddAssign, ptr::NonNull};
+use core::{
+    marker::PhantomData,
+    mem::size_of,
+    ops::{AddAssign, SubAssign},
+    ptr::NonNull,
+};
 
 use yanet_shm::{resolve::Resolve, root::ShmRoot};
 
@@ -9,7 +14,7 @@ use crate::{
     counters::{counter_get_address, counter_handle_value, counter_value_handles},
     dp::{
         batch::DeviceRef,
-        fields::{Counter, CounterLayout, Device, ObjectCounter, ObjectLink, TaggedCounter, TaggedCounters},
+        fields::{Counter, CounterLayout, Device, Gauge, ObjectCounter, ObjectLink, TaggedCounter, TaggedCounters},
         module::Module,
         object::{Object, ObjectConfig},
     },
@@ -101,9 +106,8 @@ pub struct Cx<'id, M: Module> {
 /// Holds the address of the first value, as a C module holds the pointer
 /// `counter_get_address` returned. `Send`, so a prepared value holding it can
 /// travel from the assigner thread to its worker, but it does not write: the
-/// handler binds it to its context and adds through the bound view, or reads
-/// and changes a `u64` counter through a gauge view, either of which stays on
-/// the worker. Binding is free: the view is the same address.
+/// handler binds it to its context and reads and adds through the bound view,
+/// which stays on the worker. Binding is free: the view is the same address.
 ///
 /// A handle does not outlive the prepare context that made it (a lifetime
 /// error, which has no code):
@@ -196,71 +200,10 @@ impl<'id, T> CounterRef<'id, T> {
     }
 }
 
-impl<'id> CounterRef<'id, u64> {
-    /// The handle bound to the call's context as a gauge: a level the worker
-    /// raises and lowers, such as the records it keeps in a table, rather
-    /// than a count of what happened.
-    ///
-    /// Only the call context binds a gauge, as it binds a counter:
-    ///
-    /// ```compile_fail,E0308
-    /// # use yanet_sys::dp::{CommitCx, Counter, Module};
-    /// fn early<'p, M: Module<Config = Counter>>(cx: &CommitCx<'p, M>) {
-    ///     cx.config().resolve(cx).gauge(cx).sub(1);
-    /// }
-    /// ```
-    ///
-    /// The handler binds the handle of its prepared value, and takes from
-    /// the gauge only what the worker holds:
-    ///
-    /// ```
-    /// use yanet_sys::dp::{Batch, CommitCx, Counter, CounterRef, Cx, Module, Verdict};
-    /// struct Mine;
-    /// impl Module for Mine {
-    ///     const NAME: &'static str = "mine";
-    ///     type Config = Counter;
-    ///     type Prepared<'p> = CounterRef<'p>;
-    ///     fn handle<'id>(cx: &mut Cx<'id, Self>, batch: &mut Batch<'id>) {
-    ///         let held = cx.prepared().gauge(cx);
-    ///         batch.dispatch(|packet| {
-    ///             if !packet.data().is_empty() {
-    ///                 held.add(1);
-    ///             } else if held.get() != 0 {
-    ///                 held.sub(1);
-    ///             }
-    ///             Verdict::Pass
-    ///         });
-    ///     }
-    ///     fn prepare<'p>(cx: &CommitCx<'p, Self>) -> CounterRef<'p> {
-    ///         cx.config().resolve(cx)
-    ///     }
-    /// }
-    /// ```
-    ///
-    /// A gauge is one value, so a counter of traffic is not bound as one:
-    ///
-    /// ```compile_fail,E0599
-    /// # use yanet_sys::dp::{CounterRef, Cx, Module, Traffic};
-    /// fn level<'id, M: Module>(cx: &Cx<'id, M>, traffic: CounterRef<'id, Traffic>) {
-    ///     traffic.gauge(cx).add(1);
-    /// }
-    /// ```
-    #[inline(always)]
-    pub fn gauge<M>(&self, _cx: &Cx<'id, M>) -> BoundGauge<'id>
-    where
-        M: Module,
-    {
-        BoundGauge {
-            value: self.value,
-            _brand: PhantomData,
-            _local: PhantomData,
-        }
-    }
-}
-
-/// A counter handle bound to the worker's call: adds to the worker's copy.
+/// A counter handle bound to the worker's call: reads the worker's values of
+/// the counter and adds to them, and takes from a [`Gauge`].
 ///
-/// Neither `Send` nor `Sync`: the value is this worker's.
+/// Neither `Send` nor `Sync`: the values are this worker's.
 ///
 /// A bound handle is not sent to another thread:
 ///
@@ -307,87 +250,125 @@ impl<T: CounterLayout> BoundCounter<'_, T> {
     /// A plain add, as the `+=` of a C module: only this worker writes its
     /// copy.
     #[inline(always)]
-    pub fn add(&self, value: T) {
+    pub fn add(&self, value: T::Value) {
         // SAFETY: the handle holds the first value of this worker's counter
         // of the layout `T`, resolved for the generation the call runs
         // (bound to the call context of the same brand).
-        unsafe { value.add_to(self.value.as_ptr()) };
+        unsafe { T::add_to(value, self.value.as_ptr()) };
+    }
+
+    /// The worker's copy of the counter, which only this worker writes.
+    #[inline(always)]
+    pub fn get(&self) -> T::Value {
+        // SAFETY: as for adding, for reading.
+        unsafe { T::read(self.value.as_ptr()) }
     }
 }
 
-impl<T> AddAssign<T> for BoundCounter<'_, T>
+impl<T> AddAssign<T::Value> for BoundCounter<'_, T>
 where
     T: CounterLayout,
 {
     #[inline(always)]
-    fn add_assign(&mut self, value: T) {
+    fn add_assign(&mut self, value: T::Value) {
         self.add(value);
     }
 }
 
-/// A `u64` counter handle bound to the worker's call as a gauge: reads the
-/// worker's copy of the counter, adds to it and takes from it.
-///
-/// Readers sum the copies of the workers, as for every counter, so a gauge
-/// each worker keeps for its own share of a level reads as the whole level.
-/// Neither `Send` nor `Sync`: the value is this worker's.
-///
-/// A bound gauge is not sent to another thread:
-///
-/// ```compile_fail,E0277
-/// # use yanet_sys::dp::BoundGauge;
-/// fn send(held: BoundGauge<'_>) {
-///     std::thread::scope(|scope| {
-///         scope.spawn(move || held.sub(1));
-///     });
-/// }
-/// ```
-pub struct BoundGauge<'id> {
-    value: NonNull<u64>,
-    // Invariant brand: values of two different contexts never unify, so they cannot be mixed.
-    _brand: PhantomData<fn(&'id ()) -> &'id ()>,
-    // Neither Send nor Sync on purpose, independent of the pointer fields.
-    _local: PhantomData<*mut ()>,
-}
-
-impl Clone for BoundGauge<'_> {
-    fn clone(&self) -> Self {
-        *self
-    }
-}
-
-impl Copy for BoundGauge<'_> {}
-
-impl BoundGauge<'_> {
-    /// The worker's copy of the gauge: what this worker made it, as no other
-    /// writes it.
-    #[inline(always)]
-    pub fn get(&self) -> u64 {
-        // SAFETY: the handle holds this worker's aligned value of the
-        // counter, resolved for the generation the call runs (bound to the
-        // call context of the same brand), which only this worker writes.
-        unsafe { self.value.as_ptr().read() }
-    }
-
-    /// Adds the value to the worker's copy, wrapping, as a bound counter
-    /// adds.
-    #[inline(always)]
-    pub fn add(&self, value: u64) {
-        // SAFETY: as for reading; the counter's only value.
-        unsafe { value.add_to(self.value.as_ptr()) };
-    }
-
-    /// Takes the value from the worker's copy, wrapping below zero as an add
-    /// wraps past the top: a gauge that must not go below zero is read first.
+impl BoundCounter<'_, Gauge> {
+    /// Takes the value from the worker's copy of the gauge.
     ///
-    /// A plain write, as an add's: only this worker writes its copy.
+    /// The plain `-=` of a C module, as an add is its `+=`: only this worker
+    /// writes its copy. A worker that takes more than it gave wraps its copy
+    /// below zero, and the sum of the workers' copies stays the level.
+    ///
+    /// A counter of what happened only adds, and takes nothing:
+    ///
+    /// ```compile_fail,E0599
+    /// # use yanet_sys::dp::BoundCounter;
+    /// fn undo(hits: BoundCounter<'_>) {
+    ///     hits.sub(1);
+    /// }
+    /// ```
     #[inline(always)]
     pub fn sub(&self, value: u64) {
         let slot = self.value.as_ptr();
-        // SAFETY: as for reading. The control plane reads the value with
-        // memcpy (lib/controlplane/agent/counters.c), as it does after the
-        // plain `+=` of a C module.
+        // SAFETY: the handle holds this worker's aligned value of the gauge,
+        // resolved for the generation the call runs (bound to the call
+        // context of the same brand), which only this worker writes. The
+        // control plane reads it with memcpy (lib/controlplane/agent/
+        // counters.c), as it does after the plain `-=` of a C module.
         unsafe { *slot = (*slot).wrapping_sub(value) };
+    }
+}
+
+impl SubAssign<u64> for BoundCounter<'_, Gauge> {
+    #[inline(always)]
+    fn sub_assign(&mut self, value: u64) {
+        self.sub(value);
+    }
+}
+
+impl<'id, T, const N: usize> BoundCounter<'id, [T; N]>
+where
+    T: CounterLayout,
+{
+    /// The counter's value at the index, bound as a counter of its own
+    /// layout.
+    ///
+    /// The index is a constant, which the build checks: one past the values
+    /// fails it.
+    ///
+    /// ```compile_fail,E0080
+    /// # use yanet_sys::dp::{BoundCounter, Gauge};
+    /// fn past(levels: BoundCounter<'_, [Gauge; 4]>) {
+    ///     levels.at::<4>().add(1);
+    /// }
+    /// # // The build checks the index only in a function it emits.
+    /// # let _: fn(BoundCounter<'_, [Gauge; 4]>) = past;
+    /// ```
+    ///
+    /// The handler picks a value of a counter of several by its index:
+    ///
+    /// ```
+    /// use yanet_sys::dp::{Batch, CommitCx, Counter, CounterRef, Cx, Module, Traffic, Verdict};
+    /// const SHORT: usize = 0;
+    /// const LONG: usize = 1;
+    /// struct Mine;
+    /// impl Module for Mine {
+    ///     const NAME: &'static str = "mine";
+    ///     type Config = Counter<[Traffic; 2]>;
+    ///     type Prepared<'p> = CounterRef<'p, [Traffic; 2]>;
+    ///     fn handle<'id>(cx: &mut Cx<'id, Self>, batch: &mut Batch<'id>) {
+    ///         let sizes = cx.prepared().bind(cx);
+    ///         batch.dispatch(|packet| {
+    ///             let len = packet.data().len() as u64;
+    ///             let size = if len < 128 {
+    ///                 sizes.at::<SHORT>()
+    ///             } else {
+    ///                 sizes.at::<LONG>()
+    ///             };
+    ///             size.add(Traffic::packet(len));
+    ///             Verdict::Pass
+    ///         });
+    ///     }
+    ///     fn prepare<'p>(cx: &CommitCx<'p, Self>) -> CounterRef<'p, [Traffic; 2]> {
+    ///         cx.config().resolve(cx)
+    ///     }
+    /// }
+    /// ```
+    #[inline(always)]
+    pub fn at<const I: usize>(&self) -> BoundCounter<'id, T> {
+        const { assert!(I < N, "an index past the counter's values") };
+        BoundCounter {
+            // SAFETY: the handle holds the first of this worker's N runs of
+            // the element's values, next to each other, and the index is
+            // below N.
+            value: unsafe { self.value.add(I * T::VALUES) },
+            _brand: PhantomData,
+            _local: PhantomData,
+            _layout: PhantomData,
+        }
     }
 }
 
@@ -518,7 +499,7 @@ where
     /// A plain add, as the `+=` of a C module: only this worker writes its
     /// copy.
     #[inline(always)]
-    pub fn add(&self, id: u64, value: T) {
+    pub fn add(&self, id: u64, value: T::Value) {
         if id >= self.len {
             return;
         }
@@ -528,7 +509,7 @@ where
         // id is below the counters the configuration registered, which C keeps
         // first in the registry, each of the layout `T`, so the handle names
         // this worker's aligned values of the counter, as many as the layout's.
-        unsafe { value.add_to(counter_handle_value(self.table.as_ptr(), id)) };
+        unsafe { T::add_to(value, counter_handle_value(self.table.as_ptr(), id)) };
     }
 }
 
@@ -827,14 +808,14 @@ impl<T: CounterLayout> Counter<T> {
     ///
     /// The same plain add as the handle's.
     #[inline(always)]
-    pub fn add<'id, M: Module>(&'id self, cx: &Cx<'id, M>, value: T) {
+    pub fn add<'id, M: Module>(&'id self, cx: &Cx<'id, M>, value: T::Value) {
         // SAFETY: the context is frozen for the call and its counter storage
         // address was derived before release to the worker (attach: call,
         // frozen, publish); a built counter id indexes the module's counter
         // registry, whose storage of this context holds the counter's
         // aligned values next to each other, as many as the layout's, the
         // size it was registered with.
-        unsafe { value.add_to(counter_value(cx.root, cx.ectx, self.id())) };
+        unsafe { T::add_to(value, counter_value(cx.root, cx.ectx, self.id())) };
     }
 
     /// The context's worker's values of the counter, for the prepared value.
@@ -931,7 +912,7 @@ where
     /// The same plain add as the handle's.
     #[doc(alias = "module_ectx_counter_storage")]
     #[inline(always)]
-    pub fn add<'id, M>(&'id self, cx: &Cx<'id, M>, value: T)
+    pub fn add<'id, M>(&'id self, cx: &Cx<'id, M>, value: T::Value)
     where
         M: Module,
     {
@@ -942,7 +923,12 @@ where
         // module and an id of it, whose storage of this context holds the
         // counter's aligned values next to each other, as many as the
         // layout's, the size it was registered with.
-        unsafe { value.add_to(tagged_counter_value(cx.root, cx.ectx, self.registry(), self.id())) };
+        unsafe {
+            T::add_to(
+                value,
+                tagged_counter_value(cx.root, cx.ectx, self.registry(), self.id()),
+            )
+        };
     }
 
     /// The context's worker's values of the counter, for the prepared value,

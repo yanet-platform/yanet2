@@ -22,9 +22,10 @@ use crate::{
 /// counter of as many values as its layout `T` holds.
 ///
 /// Holds the counter's index in the module's C counter registry; the
-/// dataplane adds a `T` to the current worker's values without atomic
-/// read-modify-write, as C modules do. `T` is a single `u64` by default, or
-/// [`Traffic`] for the packets and bytes every module counts its traffic with.
+/// dataplane adds to the current worker's values without atomic
+/// read-modify-write, as C modules do. `T` is a single `u64` by default, one
+/// of the layouts [`CounterLayout`] names otherwise, such as [`Traffic`] for
+/// the packets and bytes every module counts its traffic with.
 ///
 /// An add takes a value of the layout, so a counter of traffic is not added a
 /// bare number:
@@ -155,8 +156,8 @@ const _: () = assert!(size_of::<TaggedCounters>() == 2 * size_of::<u64>());
 /// linking it, and C carries their values by name over to an object of the
 /// same type and name that replaces this one. Only the object's prepare step
 /// resolves the counter, into a [`CounterRef`] its prepared value keeps: the
-/// handler of a module linking the object binds that handle to add, or binds it
-/// as a gauge, but adds to no object's counter by id:
+/// handler of a module linking the object binds that handle to add, and to
+/// take from a [`Gauge`], but adds to no object's counter by id:
 ///
 /// ```compile_fail,E0599
 /// # use yanet_sys::dp::{Cx, Module, ObjectCounter};
@@ -181,24 +182,40 @@ impl<T> ObjectCounter<T> {
     }
 }
 
-/// What one worker's values of a [`Counter`] are, and how a value of the
-/// layout adds to them.
+/// What one worker's values of a counter are: how many, what an add takes and
+/// a read gives, and whether the counter counts what happened or holds a
+/// level.
 ///
-/// Sealed: the layouts are a `u64` and [`Traffic`]; a module adds none of its
-/// own:
+/// The layout is the module's contract with the counter's readers, as one C
+/// mechanism serves counts and levels alike: each worker's values are `u64`s,
+/// which readers sum.
+///
+/// - `u64`: a count, which only adds.
+/// - [`Traffic`]: the packets and bytes of a traffic count, which only adds.
+/// - [`Gauge`]: a level, which also takes.
+/// - `[T; N]`: N values of the layout `T` under one name, each picked by its
+///   index; C registers a counter of up to 64 values.
+///
+/// Sealed: a module adds no layout of its own:
 ///
 /// ```compile_fail,E0277
 /// # use yanet_sys::dp::CounterLayout;
-/// #[derive(Clone, Copy)]
-/// struct Mine(u64);
+/// struct Mine;
 /// impl CounterLayout for Mine {
 ///     const VALUES: usize = 1;
-///     unsafe fn add_to(self, _: *mut u64) {}
+///     type Value = u64;
+///     unsafe fn add_to(_: u64, _: *mut u64) {}
+///     unsafe fn read(_: *const u64) -> u64 {
+///         0
+///     }
 /// }
 /// ```
-pub trait CounterLayout: Copy + 'static + sealed::Sealed {
+pub trait CounterLayout: 'static + sealed::Sealed {
     /// Number of values, the size C registers the counter with.
     const VALUES: usize;
+
+    /// What an add takes and a read gives.
+    type Value: Copy;
 
     /// Adds each value to the worker's value at the same place.
     ///
@@ -208,7 +225,15 @@ pub trait CounterLayout: Copy + 'static + sealed::Sealed {
     /// many as the layout holds, aligned and next to each other, which only
     /// this worker writes and which stay live for the call.
     #[doc(hidden)]
-    unsafe fn add_to(self, slot: *mut u64);
+    unsafe fn add_to(value: Self::Value, slot: *mut u64);
+
+    /// Reads the worker's values.
+    ///
+    /// # Safety
+    ///
+    /// As for [`CounterLayout::add_to`], for reading.
+    #[doc(hidden)]
+    unsafe fn read(slot: *const u64) -> Self::Value;
 }
 
 /// The packets and bytes of the traffic a counter counts, as the counters
@@ -232,26 +257,122 @@ impl Traffic {
 
 impl CounterLayout for u64 {
     const VALUES: usize = 1;
+    type Value = u64;
 
     #[inline(always)]
-    unsafe fn add_to(self, slot: *mut u64) {
+    unsafe fn add_to(value: u64, slot: *mut u64) {
         // SAFETY: the counter's only value (caller contract).
-        unsafe { add_value(slot, self) };
+        unsafe { add_value(slot, value) };
+    }
+
+    #[inline(always)]
+    unsafe fn read(slot: *const u64) -> u64 {
+        // SAFETY: the counter's only value (caller contract).
+        unsafe { slot.read() }
     }
 }
 
 impl CounterLayout for Traffic {
     const VALUES: usize = 2;
+    type Value = Traffic;
 
     #[inline(always)]
-    unsafe fn add_to(self, slot: *mut u64) {
-        let Self { packets, bytes } = self;
+    unsafe fn add_to(value: Traffic, slot: *mut u64) {
+        let Traffic { packets, bytes } = value;
         // SAFETY: the counter's two values (caller contract), in the order
         // of the fields.
         unsafe {
             add_value(slot, packets);
             add_value(slot.add(1), bytes);
         }
+    }
+
+    #[inline(always)]
+    unsafe fn read(slot: *const u64) -> Traffic {
+        // SAFETY: as for adding, for reading.
+        unsafe {
+            Traffic {
+                packets: slot.read(),
+                bytes: slot.add(1).read(),
+            }
+        }
+    }
+}
+
+/// A level the worker raises and lowers, such as the records it keeps in a
+/// table, rather than a count of what happened: one `u64`, which a bound
+/// handle also takes from.
+///
+/// Readers sum the workers' values, as for every counter, and the sum is the
+/// level. A worker may take what another gave: its own value then wraps below
+/// zero, as C's unsigned `-=` does, and the sum stays exact. One worker's value
+/// is a level of its own only when the module takes on each worker what that
+/// worker gave.
+///
+/// A module raises the level of its worker and lowers it:
+///
+/// ```
+/// use yanet_sys::dp::{Batch, CommitCx, Counter, CounterRef, Cx, Gauge, Module, Verdict};
+/// struct Mine;
+/// impl Module for Mine {
+///     const NAME: &'static str = "mine";
+///     type Config = Counter<Gauge>;
+///     type Prepared<'p> = CounterRef<'p, Gauge>;
+///     fn handle<'id>(cx: &mut Cx<'id, Self>, batch: &mut Batch<'id>) {
+///         let held = cx.prepared().bind(cx);
+///         batch.dispatch(|packet| {
+///             if !packet.data().is_empty() {
+///                 held.add(1);
+///             } else if held.get() != 0 {
+///                 held.sub(1);
+///             }
+///             Verdict::Pass
+///         });
+///     }
+///     fn prepare<'p>(cx: &CommitCx<'p, Self>) -> CounterRef<'p, Gauge> {
+///         cx.config().resolve(cx)
+///     }
+/// }
+/// ```
+pub enum Gauge {}
+
+impl CounterLayout for Gauge {
+    const VALUES: usize = 1;
+    type Value = u64;
+
+    #[inline(always)]
+    unsafe fn add_to(value: u64, slot: *mut u64) {
+        // SAFETY: the counter's only value (caller contract).
+        unsafe { add_value(slot, value) };
+    }
+
+    #[inline(always)]
+    unsafe fn read(slot: *const u64) -> u64 {
+        // SAFETY: the counter's only value (caller contract).
+        unsafe { slot.read() }
+    }
+}
+
+impl<T, const N: usize> CounterLayout for [T; N]
+where
+    T: CounterLayout,
+{
+    const VALUES: usize = N * T::VALUES;
+    type Value = [T::Value; N];
+
+    #[inline(always)]
+    unsafe fn add_to(value: [T::Value; N], slot: *mut u64) {
+        for (idx, value) in value.into_iter().enumerate() {
+            // SAFETY: the counter's N runs of the element's values (caller
+            // contract), in the order of the indices.
+            unsafe { T::add_to(value, slot.add(idx * T::VALUES)) };
+        }
+    }
+
+    #[inline(always)]
+    unsafe fn read(slot: *const u64) -> [T::Value; N] {
+        // SAFETY: as for adding, for reading.
+        core::array::from_fn(|idx| unsafe { T::read(slot.add(idx * T::VALUES)) })
     }
 }
 
@@ -282,6 +403,10 @@ mod sealed {
     impl Sealed for u64 {}
 
     impl Sealed for super::Traffic {}
+
+    impl Sealed for super::Gauge {}
+
+    impl<T, const N: usize> Sealed for [T; N] where T: super::CounterLayout {}
 }
 
 /// A device linked to the module configuration, by its index in the
