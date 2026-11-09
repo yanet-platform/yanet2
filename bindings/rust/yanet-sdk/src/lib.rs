@@ -133,9 +133,9 @@ pub use yanet_sys::{
     },
     dp::{
         Batch, BoundGauge, CommitCx, Counter, CounterLayout, CounterRef, Cx, Device, DeviceRef, DscpMark, Module,
-        ModuleCx, Object, ObjectCommitCx, ObjectConfig, ObjectCounter, ObjectLink, Packet, PacketView, ParseError,
-        PerWorker, PerWorkerSlice, PrepareCx, ResizeError, TaggedCounter, TaggedCounters, TaggedCountersRef, Traffic,
-        TunnelError, Verdict, WorkerSlice, WorkerSlot,
+        ModuleCx, Object, ObjectCommitCx, ObjectConfig, ObjectCounter, ObjectLink, Packet, PacketMeta, PacketView,
+        ParseError, PerWorker, PerWorkerSlice, PrepareCx, ResizeError, TaggedCounter, TaggedCounters,
+        TaggedCountersRef, Traffic, TunnelError, Verdict, WorkerSlice, WorkerSlot,
     },
 };
 

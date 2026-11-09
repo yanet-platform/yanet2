@@ -6,7 +6,7 @@
 //! passed, dropped or routed to a device (module: drain); a packet the module
 //! made may go back to its pool instead.
 
-use core::{marker::PhantomData, mem::size_of, ptr::NonNull};
+use core::{marker::PhantomData, mem::size_of, ops::Deref, ptr::NonNull};
 
 use crate::bindings;
 
@@ -52,7 +52,8 @@ pub struct Batch<'id> {
 ///
 /// Not `Copy` or `Clone`; consumed by passing, dropping, redirecting or
 /// freeing it. A packet that is never disposed of is on no list
-/// after the call, as one a C handler forgets.
+/// after the call, as one a C handler forgets. It dereferences to its
+/// [`PacketMeta`] for reading; writes take the packet mutably.
 ///
 /// A packet cannot be kept beyond the call it was taken in (a lifetime error,
 /// which has no code):
@@ -81,15 +82,37 @@ pub struct Packet<'id> {
     _local: PhantomData<*mut ()>,
 }
 
+/// Descriptor of a packet, read-only: the parser's results and the frame.
+///
+/// A taken packet dereferences to it, and [`Batch::peek`] yields it for an
+/// input packet. It is the descriptor itself, in the headroom of its mbuf,
+/// where C finds it from the mbuf: it is neither `Clone` nor `Copy`, as a
+/// copy would outlive its packet, and never borrowed mutably, as swapping
+/// two would part each from its mbuf:
+///
+/// ```compile_fail,E0596
+/// use yanet_sys::dp::Packet;
+/// fn swap<'a>(a: &mut Packet<'a>, b: &mut Packet<'a>) {
+///     core::mem::swap(&mut **a, &mut **b);
+/// }
+/// ```
+///
+/// Reading both is accepted:
+///
+/// ```
+/// use yanet_sys::dp::Packet;
+/// fn same_flow<'a>(a: &Packet<'a>, b: &Packet<'a>) -> bool {
+///     a.hash() == b.hash()
+/// }
+/// ```
+#[repr(transparent)]
+pub struct PacketMeta(bindings::packet);
+
 /// Read-only view of an input packet the handler has not taken.
 ///
 /// Lives while the batch is borrowed for [`Batch::peek`], so no input packet
 /// is taken, disposed of or written meanwhile.
-#[derive(Clone, Copy)]
-pub struct PacketView<'b> {
-    raw: NonNull<bindings::packet>,
-    _batch: PhantomData<&'b ()>,
-}
+pub type PacketView<'b> = &'b PacketMeta;
 
 /// A resize the packet's buffer cannot take; the packet is unchanged.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -269,14 +292,37 @@ impl<'id> Batch<'id> {
     ///
     /// The copy carries the frame and metadata of the source and is owned
     /// like an allocated packet: it ends by its verdict or is freed. C
-    /// splits the source's recirculation budget between the two; nothing
-    /// else of the source changes.
+    /// splits the source's recirculation budget between the two, so the
+    /// source is borrowed mutably; nothing else of it changes.
+    ///
+    /// No view of the source lives across the copy:
+    ///
+    /// ```compile_fail,E0502
+    /// use yanet_sys::dp::{Batch, Packet};
+    /// fn view_across<'a>(batch: &mut Batch<'a>, packet: &mut Packet<'a>) {
+    ///     let meta = &**packet;
+    ///     let copy = batch.clone(packet);
+    ///     let _ = (meta.hash(), copy);
+    /// }
+    /// ```
+    ///
+    /// Reading the source before and after the copy is accepted:
+    ///
+    /// ```
+    /// use yanet_sys::dp::{Batch, Packet};
+    /// fn view_around<'a>(batch: &mut Batch<'a>, packet: &mut Packet<'a>) {
+    ///     let hash = packet.hash();
+    ///     let copy = batch.clone(packet);
+    ///     let _ = (hash, packet.hash(), copy);
+    /// }
+    /// ```
     #[doc(alias = "worker_clone_packet")]
     #[inline(always)]
-    pub fn clone(&mut self, packet: &Packet<'id>) -> Option<Packet<'id>> {
+    pub fn clone(&mut self, packet: &mut Packet<'id>) -> Option<Packet<'id>> {
         // SAFETY: the call's worker and context (constructor contract), the
         // context frozen (attach: frozen); the source is an owned packet of
-        // this call, and no Rust reference covers the metadata C updates.
+        // this call, borrowed mutably, so no Rust reference covers the
+        // metadata C updates.
         let raw = NonNull::new(unsafe {
             worker_clone_packet(
                 self.worker.as_ptr(),
@@ -357,15 +403,17 @@ impl<'id> Batch<'id> {
     /// }
     /// ```
     #[inline(always)]
-    pub fn peek(&self) -> impl Iterator<Item = PacketView<'_>> {
-        let view = |raw| PacketView { raw, _batch: PhantomData };
+    pub fn peek(&self) -> impl Iterator<Item = &PacketMeta> {
+        let view = |raw: *mut bindings::packet| {
+            // SAFETY: an input packet of the borrowed batch is valid and
+            // initialised (attach: packet), and the transparent wrapper has
+            // its layout; nothing writes it while the batch is borrowed.
+            NonNull::new(raw).map(|raw| unsafe { raw.cast::<PacketMeta>().as_ref() })
+        };
         // SAFETY: the input list is exclusively this call's (constructor
         // contract) and stays unchanged while the batch is borrowed.
         let first = unsafe { (*self.front.as_ptr()).input.first };
-        core::iter::successors(NonNull::new(first).map(view), move |current: &PacketView<'_>| {
-            // SAFETY: as above.
-            NonNull::new(unsafe { (*current.raw.as_ptr()).next }).map(view)
-        })
+        core::iter::successors(view(first), move |PacketMeta(packet)| view(packet.next))
     }
 
     /// Takes the next input packet.
@@ -545,17 +593,16 @@ unsafe fn grow_front(mbuf: *mut bindings::rte_mbuf, len: u16) -> bool {
     true
 }
 
-/// Start and length of the first segment of a packet's frame: C's
-/// `packet_data` and `packet_data_len` (lib/dataplane/packet/data.h).
+/// Start and length of the first segment of a packet's frame, from its mbuf:
+/// C's `packet_data` and `packet_data_len` (lib/dataplane/packet/data.h).
 ///
 /// # Safety
 ///
-/// The packet must be valid, with its mbuf.
+/// The mbuf must be valid.
 #[inline(always)]
-unsafe fn segment(packet: *mut bindings::packet) -> (*mut u8, usize) {
+unsafe fn segment(mbuf: *mut bindings::rte_mbuf) -> (*mut u8, usize) {
     // SAFETY: guaranteed by the caller.
     unsafe {
-        let mbuf = (*packet).mbuf;
         (
             (*mbuf).buf_addr.cast::<u8>().add(usize::from((*mbuf).data_off)),
             usize::from((*mbuf).data_len),
@@ -595,33 +642,6 @@ fn parsed(type_: u16, offset: u16) -> bool {
     type_ != 0 || offset != 0
 }
 
-/// End of what the parser vouches for, from the start of the frame; zero for
-/// an unparsed packet.
-///
-/// That is (attach: packet) the start of a parsed network or transport
-/// header, the fixed IPv4 or IPv6 header and an available TCP or UDP header.
-///
-/// # Safety
-///
-/// The packet must be valid.
-#[inline(always)]
-unsafe fn parsed_end(packet: *mut bindings::packet) -> usize {
-    // SAFETY: guaranteed by the caller.
-    let (network, transport) = unsafe { ((*packet).network_header, (*packet).transport_header) };
-    let network_len = match u16::from_be(network.type_) {
-        0x0800 => 20,
-        0x86dd => 40,
-        _ => 0,
-    };
-    let available = u32::from(transport.type_) & bindings::PACKET_TRANSPORT_HEADER_UNAVAILABLE == 0;
-    let transport_len = match (available, transport.type_ & 0xff) {
-        (true, 6) => 20,
-        (true, 17) => 8,
-        _ => 0,
-    };
-    (usize::from(network.offset) + network_len).max(usize::from(transport.offset) + transport_len)
-}
-
 /// Clears what the parser writes of a packet, as an allocated packet has
 /// it: the headers unparsed, no VLAN id, hash or flags.
 ///
@@ -641,64 +661,37 @@ unsafe fn clear_parse(packet: *mut bindings::packet) {
     }
 }
 
-/// Reports whether packet flags carry the parser's fragment mark.
-#[inline(always)]
-fn is_fragment(flags: u16) -> bool {
-    flags & (1 << bindings::packet_flag_PACKET_FLAG_FRAGMENTED) != 0
-}
-
 /// Maps the C result of a tunnel routine: zero is success.
 #[inline(always)]
 fn check(result: core::ffi::c_int) -> Result<(), TunnelError> {
     if result == 0 { Ok(()) } else { Err(TunnelError) }
 }
 
-impl Packet<'_> {
-    /// Bytes of the first segment of the frame, which holds the parsed
-    /// headers; a chained frame goes on in further segments.
-    #[inline(always)]
-    pub fn data(&self) -> &[u8] {
-        let (start, len) = self.segment();
-        // SAFETY: the mbuf of an owned packet is valid; its first segment
-        // spans the data length from the data offset, exclusively ours
-        // (attach: packet).
-        unsafe { core::slice::from_raw_parts(start, len) }
-    }
+impl Deref for Packet<'_> {
+    type Target = PacketMeta;
 
+    #[inline(always)]
+    fn deref(&self) -> &PacketMeta {
+        // SAFETY: an owned packet's descriptor is valid and initialised and
+        // exclusively ours for the call (attach: packet), and the
+        // transparent wrapper has its layout. Nothing writes it while the
+        // packet is borrowed shared: every write of a descriptor takes its
+        // packet mutably or consumes it.
+        unsafe { self.raw.cast::<PacketMeta>().as_ref() }
+    }
+}
+
+impl Packet<'_> {
     /// Mutable bytes of the first segment of the frame.
     #[inline(always)]
     pub fn data_mut(&mut self) -> &mut [u8] {
-        let (start, len) = self.segment();
-        // SAFETY: as above; the packet is exclusively owned, with no shared
-        // or cloned data reachable (attach: packet).
-        unsafe { core::slice::from_raw_parts_mut(start, len) }
-    }
-
-    #[inline(always)]
-    fn segment(&self) -> (*mut u8, usize) {
-        // SAFETY: the packet and its first mbuf segment are valid for the
-        // call (attach: packet).
-        unsafe { segment(self.raw.as_ptr()) }
-    }
-
-    /// Bytes of the frame segment by segment, in order: the first segment,
-    /// as [`Packet::data`] holds it, then those a chained packet goes on in.
-    #[inline(always)]
-    pub fn segments(&self) -> impl Iterator<Item = &[u8]> {
-        // SAFETY: the mbuf chain of an owned packet is valid and exclusively
-        // ours for the call (attach: packet), and the shared borrow of the
-        // packet keeps it unwritten.
-        unsafe { segments((*self.raw.as_ptr()).mbuf) }
-    }
-
-    /// Length of the frame across its segments: the mbuf's packet length,
-    /// as C's `rte_pktmbuf_pkt_len` reads it.
-    #[doc(alias = "rte_pktmbuf_pkt_len")]
-    #[inline(always)]
-    pub fn frame_len(&self) -> usize {
-        // SAFETY: an owned packet's descriptor and mbuf are this call's
-        // (attach: packet).
-        unsafe { (*(*self.raw.as_ptr()).mbuf).pkt_len as usize }
+        // SAFETY: the packet and its mbuf are exclusively ours for the call,
+        // with no shared or cloned data reachable (attach: packet); the first
+        // segment spans the data length from the data offset.
+        unsafe {
+            let (start, len) = segment((*self.raw.as_ptr()).mbuf);
+            core::slice::from_raw_parts_mut(start, len)
+        }
     }
 
     /// Grows the frame at the front, into the headroom, and returns the new
@@ -732,17 +725,9 @@ impl Packet<'_> {
             if parsed((*transport).type_, (*transport).offset) {
                 (*transport).offset += len16;
             }
-            let (start, _) = segment(raw);
+            let (start, _) = segment((*raw).mbuf);
             Ok(core::slice::from_raw_parts_mut(start, len))
         }
-    }
-
-    /// Whether the packet's mbuf continues in further segments.
-    #[inline(always)]
-    fn chained(&self) -> bool {
-        // SAFETY: an owned packet's descriptor and mbuf are this call's
-        // (attach: packet).
-        unsafe { !(*(*self.raw.as_ptr()).mbuf).next.is_null() }
     }
 
     /// Grows the frame at the end, into the tailroom of a single-segment
@@ -765,7 +750,7 @@ impl Packet<'_> {
             if len > usize::from((*mbuf).buf_len) - used {
                 return Err(ResizeError);
             }
-            let (start, old_len) = segment(raw);
+            let (start, old_len) = segment(mbuf);
             (*mbuf).data_len += len as u16;
             (*mbuf).pkt_len += len as u32;
             (*raw).data_len = (*mbuf).data_len;
@@ -789,7 +774,7 @@ impl Packet<'_> {
         unsafe {
             let mbuf = (*raw).mbuf;
             let data_len = usize::from((*mbuf).data_len);
-            if !(*mbuf).next.is_null() || len > data_len || data_len - len < parsed_end(raw) {
+            if !(*mbuf).next.is_null() || len > data_len || data_len - len < self.parsed_end() {
                 return Err(ResizeError);
             }
             (*mbuf).data_len -= len as u16;
@@ -913,13 +898,13 @@ impl Packet<'_> {
         if self.network_offset() == 0 {
             return Err(TunnelError);
         }
+        let PacketMeta(packet) = &**self;
+        let transport = packet.transport_header;
         let raw = self.raw.as_ptr();
-        // SAFETY: the packet is exclusively ours for the call (attach:
-        // packet).
-        let transport = unsafe { (*raw).transport_header };
         let result = encap(raw);
         if !parsed(transport.type_, transport.offset) {
-            // SAFETY: as above.
+            // SAFETY: the packet is exclusively ours for the call (attach:
+            // packet).
             unsafe { (*raw).transport_header = transport };
         }
         check(result)
@@ -970,19 +955,56 @@ impl Packet<'_> {
         }
         Err(ParseError)
     }
+}
+
+impl PacketMeta {
+    /// Bytes of the first segment of the frame, which holds the parsed
+    /// headers; a chained frame goes on in further segments.
+    #[inline(always)]
+    pub fn data(&self) -> &[u8] {
+        let Self(packet) = self;
+        // SAFETY: a descriptor is reached only through a shared borrow of
+        // its packet or batch, so its mbuf is valid and unwritten meanwhile;
+        // the first segment spans the data length from the data offset
+        // (attach: packet).
+        unsafe {
+            let (start, len) = segment(packet.mbuf);
+            core::slice::from_raw_parts(start, len)
+        }
+    }
+
+    /// Bytes of the frame segment by segment, in order: the first segment,
+    /// as [`PacketMeta::data`] holds it, then those a chained packet goes on
+    /// in.
+    #[inline(always)]
+    pub fn segments(&self) -> impl Iterator<Item = &[u8]> {
+        let Self(packet) = self;
+        // SAFETY: as for the first segment, for every segment of the chain.
+        unsafe { segments(packet.mbuf) }
+    }
+
+    /// Length of the frame across its segments: the mbuf's packet length,
+    /// as C's `rte_pktmbuf_pkt_len` reads it.
+    #[doc(alias = "rte_pktmbuf_pkt_len")]
+    #[inline(always)]
+    pub fn frame_len(&self) -> usize {
+        let Self(packet) = self;
+        // SAFETY: as for the first segment.
+        unsafe { (*packet.mbuf).pkt_len as usize }
+    }
 
     /// Ether type of the network header the parser found, host order.
     #[inline(always)]
     pub fn network_type(&self) -> u16 {
-        // SAFETY: the packet is exclusively ours for the call (attach: packet).
-        u16::from_be(unsafe { (*self.raw.as_ptr()).network_header.type_ })
+        let Self(packet) = self;
+        u16::from_be(packet.network_header.type_)
     }
 
     /// Offset of the network header from the start of the frame.
     #[inline(always)]
     pub fn network_offset(&self) -> u16 {
-        // SAFETY: as above.
-        unsafe { (*self.raw.as_ptr()).network_header.offset }
+        let Self(packet) = self;
+        packet.network_header.offset
     }
 
     /// Raw transport tag the parser wrote: the protocol number in the low
@@ -991,8 +1013,8 @@ impl Packet<'_> {
     /// Read it through the protocol and availability accessors.
     #[inline(always)]
     pub fn transport_type(&self) -> u16 {
-        // SAFETY: as above.
-        unsafe { (*self.raw.as_ptr()).transport_header.type_ }
+        let Self(packet) = self;
+        packet.transport_header.type_
     }
 
     /// Declared transport protocol: the protocol number of the IP header,
@@ -1025,15 +1047,15 @@ impl Packet<'_> {
     /// cleared, which is bytes. A tunnel operation leaves it as parsed.
     #[inline(always)]
     pub fn fragment_offset(&self) -> u16 {
-        // SAFETY: as above.
-        unsafe { (*self.raw.as_ptr()).fragment_offset }
+        let Self(packet) = self;
+        packet.fragment_offset
     }
 
     /// Offset of the transport header from the start of the frame.
     #[inline(always)]
     pub fn transport_offset(&self) -> u16 {
-        // SAFETY: as above.
-        unsafe { (*self.raw.as_ptr()).transport_header.offset }
+        let Self(packet) = self;
+        packet.transport_header.offset
     }
 
     /// Flow hash the parser computed: CRC-32C over the IP addresses and,
@@ -1043,8 +1065,8 @@ impl Packet<'_> {
     /// A tunnel operation leaves it as parsed.
     #[inline(always)]
     pub fn hash(&self) -> u32 {
-        // SAFETY: as above.
-        unsafe { (*self.raw.as_ptr()).hash }
+        let Self(packet) = self;
+        packet.hash
     }
 
     /// Reports whether the parser found the packet to be a fragment of a
@@ -1055,100 +1077,40 @@ impl Packet<'_> {
     /// packet alike; this tells them apart.
     #[inline(always)]
     pub fn is_fragment(&self) -> bool {
-        // SAFETY: as above.
-        is_fragment(unsafe { (*self.raw.as_ptr()).flags })
-    }
-}
-
-impl<'b> PacketView<'b> {
-    /// Bytes of the first segment of the frame, as [`Packet::data`].
-    #[inline(always)]
-    pub fn data(&self) -> &'b [u8] {
-        // SAFETY: an input packet of the borrowed batch is valid with its
-        // mbuf (attach: packet), and nothing writes it while the batch is
-        // borrowed.
-        unsafe {
-            let (start, len) = segment(self.raw.as_ptr());
-            core::slice::from_raw_parts(start, len)
-        }
+        let Self(packet) = self;
+        packet.flags & (1 << bindings::packet_flag_PACKET_FLAG_FRAGMENTED) != 0
     }
 
-    /// Bytes of the frame segment by segment, as [`Packet::segments`].
+    /// Whether the packet's mbuf continues in further segments.
     #[inline(always)]
-    pub fn segments(&self) -> impl Iterator<Item = &'b [u8]> + use<'b> {
-        // SAFETY: as above, for every segment of its chain.
-        unsafe { segments((*self.raw.as_ptr()).mbuf) }
+    fn chained(&self) -> bool {
+        let Self(packet) = self;
+        // SAFETY: as for the first segment.
+        unsafe { !(*packet.mbuf).next.is_null() }
     }
 
-    /// Length of the frame across its segments, as [`Packet::frame_len`].
+    /// End of what the parser vouches for, from the start of the frame; zero
+    /// for an unparsed packet.
+    ///
+    /// That is (attach: packet) the start of a parsed network or transport
+    /// header, the fixed IPv4 or IPv6 header and an available TCP or UDP
+    /// header.
     #[inline(always)]
-    pub fn frame_len(&self) -> usize {
-        // SAFETY: as above.
-        unsafe { (*(*self.raw.as_ptr()).mbuf).pkt_len as usize }
-    }
-
-    /// Ether type of the network header the parser found, host order.
-    #[inline(always)]
-    pub fn network_type(&self) -> u16 {
-        // SAFETY: as above.
-        u16::from_be(unsafe { (*self.raw.as_ptr()).network_header.type_ })
-    }
-
-    /// Offset of the network header from the start of the frame.
-    #[inline(always)]
-    pub fn network_offset(&self) -> u16 {
-        // SAFETY: as above.
-        unsafe { (*self.raw.as_ptr()).network_header.offset }
-    }
-
-    /// Raw transport tag the parser wrote, as [`Packet::transport_type`].
-    #[inline(always)]
-    pub fn transport_type(&self) -> u16 {
-        // SAFETY: as above.
-        unsafe { (*self.raw.as_ptr()).transport_header.type_ }
-    }
-
-    /// Declared transport protocol, as [`Packet::transport_protocol`].
-    #[inline(always)]
-    pub fn transport_protocol(&self) -> u8 {
-        (self.transport_type() & 0xff) as u8
-    }
-
-    /// Reports whether the parser left the unavailable mark off the
-    /// transport header, as [`Packet::transport_header_available`].
-    #[inline(always)]
-    pub fn transport_header_available(&self) -> bool {
-        u32::from(self.transport_type()) & bindings::PACKET_TRANSPORT_HEADER_UNAVAILABLE == 0
-    }
-
-    /// Offset of the packet's fragment in its datagram, as
-    /// [`Packet::fragment_offset`].
-    #[inline(always)]
-    pub fn fragment_offset(&self) -> u16 {
-        // SAFETY: as above.
-        unsafe { (*self.raw.as_ptr()).fragment_offset }
-    }
-
-    /// Offset of the transport header from the start of the frame.
-    #[inline(always)]
-    pub fn transport_offset(&self) -> u16 {
-        // SAFETY: as above.
-        unsafe { (*self.raw.as_ptr()).transport_header.offset }
-    }
-
-    /// Flow hash the parser computed, as [`Packet::hash`].
-    #[inline(always)]
-    pub fn hash(&self) -> u32 {
-        // SAFETY: as above.
-        unsafe { (*self.raw.as_ptr()).hash }
-    }
-
-    /// Reports whether the parser found the packet to be a fragment, the
-    /// first one included, as [`Packet::is_fragment`].
-    #[inline(always)]
-    pub fn is_fragment(&self) -> bool {
-        // SAFETY: as above.
-        is_fragment(unsafe { (*self.raw.as_ptr()).flags })
+    fn parsed_end(&self) -> usize {
+        let Self(packet) = self;
+        let (network, transport) = (packet.network_header, packet.transport_header);
+        let network_len = match u16::from_be(network.type_) {
+            0x0800 => 20,
+            0x86dd => 40,
+            _ => 0,
+        };
+        let available = u32::from(transport.type_) & bindings::PACKET_TRANSPORT_HEADER_UNAVAILABLE == 0;
+        let transport_len = match (available, transport.type_ & 0xff) {
+            (true, 6) => 20,
+            (true, 17) => 8,
+            _ => 0,
+        };
+        (usize::from(network.offset) + network_len).max(usize::from(transport.offset) + transport_len)
     }
 }
 

@@ -178,8 +178,8 @@ impl Module for Fixture {
                 batch.pass(packet);
             }
             FIXTURE_MODE_CLONE => {
-                while let Some(packet) = batch.next() {
-                    if let Some(mut copy) = batch.clone(&packet) {
+                while let Some(mut packet) = batch.next() {
+                    if let Some(mut copy) = batch.clone(&mut packet) {
                         if let Some(byte) = copy.data_mut().first_mut() {
                             *byte = 0xff;
                         }
@@ -201,8 +201,8 @@ impl Module for Fixture {
                 }
             }
             FIXTURE_MODE_FREE => {
-                while let Some(packet) = batch.next() {
-                    if let Some(copy) = batch.clone(&packet) {
+                while let Some(mut packet) = batch.next() {
+                    if let Some(copy) = batch.clone(&mut packet) {
                         batch.free(copy);
                     }
                     batch.pass(packet);
