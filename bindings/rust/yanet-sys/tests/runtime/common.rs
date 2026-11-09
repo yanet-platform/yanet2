@@ -6,6 +6,7 @@
 use alloc::alloc::{alloc_zeroed, dealloc, handle_alloc_error};
 use core::{
     alloc::Layout,
+    ffi::c_void,
     marker::PhantomData,
     mem::{align_of, size_of, size_of_val},
     ptr::NonNull,
@@ -14,8 +15,15 @@ use core::{
 use yanet_sdk_testing::BlockArena;
 use yanet_sys::{
     bindings,
-    dp::{Module, ModuleConfig, rt},
+    dp::{
+        __private::{new_module, new_object},
+        Module, ModuleConfig, Object,
+    },
 };
+
+unsafe extern "C" {
+    fn free(ptr: *mut c_void);
+}
 
 /// Writes `value` at `addr` of a block just allocated in `arena`.
 ///
@@ -28,6 +36,49 @@ pub unsafe fn write<T>(arena: &'static BlockArena, addr: usize, value: T) {
     unsafe { arena.root().ptr::<T>(addr).write(value) }
 }
 
+/// The handler and commit hook a module's plugin export registers, read from
+/// its descriptor as the dataplane's loader reads them.
+fn module_hooks<M: Module>() -> (bindings::module_handler, bindings::module_commit_ectx_handler) {
+    let module = new_module::<M>();
+    assert!(!module.is_null(), "C malloc returned no descriptor");
+    // SAFETY: the descriptor was just allocated with C malloc and
+    // initialised; it is read here and released with C free, as the loader
+    // does.
+    unsafe {
+        let hooks = ((*module).handler, (*module).commit_ectx_handler);
+        free(module.cast());
+        hooks
+    }
+}
+
+/// Runs the commit hook an object type's plugin export registers over the
+/// object's context, as the dataplane does before it commits a module
+/// context linking the object; a type without a prepared value registers
+/// none, and nothing runs.
+///
+/// # Safety
+///
+/// The context and the configuration must lie in `arena`, laid out for `O`,
+/// the context's prepared buffer allocated when `O` has a prepared value.
+pub unsafe fn commit_object<O: Object>(arena: &'static BlockArena, object_ectx: usize, object: usize) {
+    let descriptor = new_object::<O>();
+    assert!(!descriptor.is_null(), "C malloc returned no descriptor");
+    // SAFETY: the descriptor was just allocated with C malloc and
+    // initialised; it is read here and released with C free, as the loader
+    // does.
+    let commit = unsafe {
+        let commit = (*descriptor).commit_ectx_handler;
+        free(descriptor.cast());
+        commit
+    };
+    if let Some(commit) = commit {
+        let root = arena.root();
+        // SAFETY: the context lies in the arena, whose root it is, laid out
+        // for the type with its buffer (caller contract).
+        unsafe { commit(root.ptr(object_ectx), root.ptr(object)) };
+    }
+}
+
 /// Fake dataplane state for calling a module's handler.
 pub struct Ectx<M> {
     pub arena: &'static BlockArena,
@@ -35,6 +86,8 @@ pub struct Ectx<M> {
     /// of the mapping.
     ectx: usize,
     worker: bindings::dp_worker,
+    /// The handler the module's descriptor registers.
+    handler: bindings::module_handler,
     _module: PhantomData<fn() -> M>,
 }
 
@@ -61,8 +114,7 @@ impl<M: Module> Ectx<M> {
                 "the configuration is aligned beyond a block of the arena"
             )
         };
-        // The checks a plugin export makes on the prepared value.
-        yanet_sys::dp::__private::check_prepared::<M>();
+        let (handler, commit) = module_hooks::<M>();
         assert!(
             size_of_val(config) <= size_of::<M::Config>(),
             "the words exceed the body"
@@ -88,13 +140,15 @@ impl<M: Module> Ectx<M> {
         let ectx = alloc(size_of::<bindings::module_ectx>());
         // SAFETY: the context block was just allocated.
         unsafe { write(arena, ectx, context) };
+        let commit = commit.expect("a module registers its commit hook");
         // SAFETY: the context lies in the arena, whose root it is, and its
         // configuration is a published one of the module (caller contract).
-        unsafe { rt::commit_ectx::<M>(root.ptr(ectx), root.ptr(cp_module)) };
+        unsafe { commit(root.ptr(ectx), root.ptr(cp_module)) };
         Self {
             arena,
             ectx,
             worker: Default::default(),
+            handler,
             _module: PhantomData,
         }
     }
@@ -133,9 +187,10 @@ impl<M: Module> Ectx<M> {
             front.input_count = packets.len() as u64;
             front.input_bytes = u64::from(FRAME) * packets.len() as u64;
         }
+        let handler = self.handler.expect("a module registers its handler");
         // SAFETY: the context lies in the arena, whose root it is, committed
         // at construction; the worker, front and packets are live and ours.
-        unsafe { rt::handle::<M>(&raw mut self.worker, self.arena.root().ptr(self.ectx), &raw mut front) };
+        unsafe { handler(&raw mut self.worker, self.arena.root().ptr(self.ectx), &raw mut front) };
     }
 }
 

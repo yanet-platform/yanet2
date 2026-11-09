@@ -82,8 +82,7 @@ pub mod cx;
 pub mod fields;
 pub mod module;
 pub mod object;
-#[doc(hidden)]
-pub mod rt;
+mod rt;
 
 pub use batch::{
     Batch, DeviceRef, DscpMark, Packet, PacketMeta, PacketView, ParseError, ResizeError, TunnelError, Verdict,
@@ -102,14 +101,22 @@ pub use object::{Object, ObjectConfig};
 /// Items the export macros name; not part of the API.
 #[doc(hidden)]
 pub mod __private {
-    pub use crate::bindings;
+    pub use crate::{
+        bindings,
+        dp::rt::{ABI_VERSION, new_module, new_object},
+    };
 
-    /// Fails const evaluation when the prepared value of a module cannot live
-    /// in the dataplane's buffer: the dataplane never drops it, and the block
-    /// allocator aligns it to at most `MAX_ALIGN`; a zero-sized one has a
+    /// Fails const evaluation when a module cannot be exported: its name does
+    /// not fit the C module type field, or its prepared value cannot live in
+    /// the dataplane's buffer, which the dataplane never drops and the block
+    /// allocator aligns to at most `MAX_ALIGN`; a zero-sized one must have a
     /// value.
-    pub const fn check_prepared<M: crate::dp::Module>() {
+    pub const fn check_module<M: crate::dp::Module>() {
         const {
+            assert!(
+                fits_module_type(M::NAME),
+                "Module::NAME must be non-empty, without NUL, and fit the C module type field"
+            );
             assert!(
                 !core::mem::needs_drop::<M::Prepared<'static>>(),
                 "Module::Prepared needs no drop: the dataplane never drops its buffer"
@@ -132,10 +139,15 @@ pub mod __private {
         }
     }
 
-    /// Fails const evaluation when the prepared value of an object cannot
-    /// live in the dataplane's buffer, as for a module's.
-    pub const fn check_object_prepared<O: crate::dp::Object>() {
+    /// Fails const evaluation when an object type cannot be exported: its
+    /// name does not fit the C object type fields, or its prepared value
+    /// cannot live in the dataplane's buffer, as for a module.
+    pub const fn check_object<O: crate::dp::Object>() {
         const {
+            assert!(
+                fits_object_type(O::TYPE),
+                "Object::TYPE must be non-empty, without NUL, and fit the C object type fields"
+            );
             assert!(
                 !core::mem::needs_drop::<O::Prepared<'static>>(),
                 "Object::Prepared needs no drop: the dataplane never drops its buffer"
@@ -160,7 +172,7 @@ pub mod __private {
 
     /// Reports whether a module name fits the C module type field
     /// (`MODULE_TYPE_LEN`): non-empty, without NUL, shorter than the field.
-    pub const fn fits_module_type(name: &str) -> bool {
+    const fn fits_module_type(name: &str) -> bool {
         let bytes = name.as_bytes();
         if bytes.is_empty() || bytes.len() >= bindings::MODULE_TYPE_LEN as usize {
             return false;
@@ -178,7 +190,7 @@ pub mod __private {
     /// Reports whether an object type name fits the C object type fields
     /// (`OBJECT_TYPE_LEN`, `CP_OBJECT_TYPE_LEN`): non-empty, without NUL,
     /// shorter than either field.
-    pub const fn fits_object_type(name: &str) -> bool {
+    const fn fits_object_type(name: &str) -> bool {
         let bytes = name.as_bytes();
         let len = if bindings::OBJECT_TYPE_LEN < bindings::CP_OBJECT_TYPE_LEN {
             bindings::OBJECT_TYPE_LEN

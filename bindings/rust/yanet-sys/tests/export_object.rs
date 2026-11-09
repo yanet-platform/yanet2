@@ -12,7 +12,7 @@ use yanet_sdk_testing as _;
 use yanet_shm as _;
 use yanet_sys::{
     bindings,
-    dp::{Object, ObjectCommitCx, rt},
+    dp::{__private::new_object, Object, ObjectCommitCx},
 };
 
 /// An object type of one word, with no prepared value.
@@ -78,19 +78,15 @@ fn test_object_plugin_exports_the_abi_version() {
     assert_eq!(bindings::YANET_MODULE_ABI_VERSION, version);
 }
 
-/// Stands in for the commit trampoline of a type, which the descriptor only
-/// stores.
-unsafe extern "C" fn hook(_: *mut bindings::object_ectx, _: *mut bindings::cp_object) {}
-
 /// verifies that the descriptor of a type with a prepared value registers the
 /// commit hook and the size of the value.
 #[test]
 fn test_new_object_with_a_prepared_value_registers_its_hook_and_size() {
-    // SAFETY: the type name fits the C field; the descriptor is malloc'd, read
-    // here and released with C free as the loader does.
+    let object = new_object::<Prepared>();
+    assert!(!object.is_null());
+    // SAFETY: the descriptor is malloc'd, read here and released with C free
+    // as the loader does.
     let (commit, prepared_size) = unsafe {
-        let object = rt::new_object::<Prepared>(Some(hook));
-        assert!(!object.is_null());
         let described = ((*object).commit_ectx_handler.is_some(), (*object).prepared_size);
         free(object.cast());
         described
