@@ -159,6 +159,22 @@ fn test_per_worker_handle_of_a_module_without_a_worker_is_none() {
     assert_eq!([0, 0, 0], slots::<u64, _>(&ectx, block));
 }
 
+/// verifies that a module's prepare step on a worker past the slots of its
+/// field, laid out for fewer workers than the one running, makes no handle,
+/// and that no slot changes.
+#[cfg(miri)]
+#[test]
+fn test_per_worker_handle_of_a_worker_past_the_slots_is_none() {
+    PREPARE_WORKER.with(|worker| worker.set(WORKERS as u64));
+    let (mut ectx, block) = seen::<u64, Held>();
+    ectx.set_worker(WORKERS as u64);
+
+    ectx.run(&mut numbered(3));
+
+    assert!(ectx.prepared().is_none());
+    assert_eq!([0, 0, 0], slots::<u64, _>(&ectx, block));
+}
+
 /// Counts the packets of its worker in place, in the value of its worker's
 /// array slot that the first byte selects, through the handle its prepare
 /// step made, and passes them.
@@ -530,6 +546,25 @@ fn test_per_worker_slice_handle_of_no_values_borrows_an_empty_region() {
     ectx.run(&mut numbered(3));
 
     assert_eq!(Some(0), ectx.prepared().map(|table| table.len()));
+}
+
+/// verifies that a module's prepare step on a worker past the regions of its
+/// field, laid out for fewer workers than the one running, makes no handle,
+/// and that no region changes.
+#[cfg(miri)]
+#[test]
+fn test_per_worker_slice_handle_of_a_worker_past_the_regions_is_none() {
+    PREPARE_WORKER.with(|worker| worker.set(WORKERS as u64));
+    let mut blocks = [0; WORKERS];
+    // SAFETY: the setup lays out the field the configuration starts with; the
+    // module counts no counter and redirects no packet.
+    let mut ectx = unsafe { Ectx::<Spread>::new(&[], |arena, body, _| blocks = lay_out_regions(arena, body, LEN)) };
+    ectx.set_worker(WORKERS as u64);
+
+    ectx.run(&mut numbered(7));
+
+    assert!(ectx.prepared().is_none());
+    assert_eq!([vec![0; LEN], vec![0; LEN], vec![0; LEN]], regions(&ectx, blocks, LEN));
 }
 
 /// An object with a region per worker, which prepares the handle of its

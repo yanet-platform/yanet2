@@ -451,7 +451,8 @@ impl<T: Copy + ShmLayout> PerWorker<T> {
     /// A handle on the slot of the prepare context's worker, for its prepared
     /// value: the only way to a slot, which the handler reads and writes
     /// through it; `None` when a module's context is not among its
-    /// generation's worker contexts.
+    /// generation's worker contexts, or when the field holds no slot for the
+    /// context's worker.
     ///
     /// ```
     /// use yanet_sys::dp::{Batch, CommitCx, Cx, Module, PerWorker, Verdict, WorkerSlot};
@@ -483,23 +484,25 @@ impl<T: Copy + ShmLayout> PerWorker<T> {
     #[inline(always)]
     pub fn handle<'p>(&'p self, cx: &impl PrepareCx<'p>) -> Option<WorkerSlot<'p, T>> {
         let worker = cx.prepare_worker()?;
-        let slot = self.slot_at(cx.shm_root(), worker);
         Some(WorkerSlot {
-            // SAFETY: a slot lies in the slot block, not at address zero.
-            slot: unsafe { NonNull::new_unchecked(slot) },
+            slot: self.slot_at(cx.shm_root(), worker)?,
             _brand: PhantomData,
         })
     }
 
-    /// The slot of the worker of the given index.
+    /// The slot of the worker of the given index, none past the slots.
     #[inline(always)]
-    fn slot_at(&self, root: ShmRoot, worker: u64) -> *mut T {
-        debug_assert!(worker < self.workers, "a worker past the slots");
+    fn slot_at(&self, root: ShmRoot, worker: u64) -> Option<NonNull<T>> {
+        if worker >= self.workers {
+            return None;
+        }
         let field = core::ptr::from_ref(self).addr();
         let first = Self::first_slot(field.wrapping_add_signed(self.slots.offset()));
         let slot = root.ptr::<T>(first.wrapping_add((worker as usize).wrapping_mul(Self::STRIDE)));
         debug_assert!(slot.is_aligned(), "misaligned per-worker slot");
-        slot
+        // SAFETY: the worker has a slot, which lies in the slot block, not at
+        // address zero.
+        Some(unsafe { NonNull::new_unchecked(slot) })
     }
 }
 
@@ -854,7 +857,8 @@ impl<T: Copy + ShmLayout> PerWorkerSlice<T> {
     /// A handle on the region of the prepare context's worker, for its
     /// prepared value: the only way to a region, which the handler borrows
     /// through it; `None` when a module's context is not among its
-    /// generation's worker contexts.
+    /// generation's worker contexts, or when the field holds no region for the
+    /// context's worker.
     ///
     /// ```
     /// use yanet_sys::dp::{Batch, CommitCx, Cx, Module, PerWorkerSlice, Verdict, WorkerSlice};
@@ -895,34 +899,35 @@ impl<T: Copy + ShmLayout> PerWorkerSlice<T> {
     #[inline(always)]
     pub fn handle<'p>(&'p self, cx: &impl PrepareCx<'p>) -> Option<WorkerSlice<'p, T>> {
         let worker = cx.prepare_worker()?;
-        debug_assert!(worker < self.workers, "a worker past the regions");
-        let region = if self.regions.offset() == 0 {
-            NonNull::dangling()
-        } else {
-            // SAFETY: a region lies in its block, not at address zero.
-            unsafe { NonNull::new_unchecked(self.region_at(cx.shm_root(), worker)) }
-        };
         Some(WorkerSlice {
-            region,
+            region: self.region_at(cx.shm_root(), worker)?,
             len: self.len(),
             _brand: PhantomData,
         })
     }
 
-    /// The first value of the region of the worker of the given index.
+    /// The first value of the region of the worker of the given index, none
+    /// past the regions, and dangling when the field holds no table.
     #[inline(always)]
-    fn region_at(&self, root: ShmRoot, worker: u64) -> *mut T {
+    fn region_at(&self, root: ShmRoot, worker: u64) -> Option<NonNull<T>> {
+        if worker >= self.workers {
+            return None;
+        }
+        if self.regions.offset() == 0 {
+            return Some(NonNull::dangling());
+        }
         let field = core::ptr::from_ref(self).addr();
         let entry = field
             .wrapping_add_signed(self.regions.offset())
             .wrapping_add((worker as usize).wrapping_mul(size_of::<isize>()));
         // SAFETY: the table holds an offset per worker, written whole by the
-        // build, aligned, and frozen with the configuration (attach: frozen);
-        // the worker is one of them (attach: call).
+        // build, aligned, and frozen with the configuration (attach: frozen),
+        // and the worker is one of them.
         let offset = unsafe { root.ptr::<isize>(entry).read() };
         let region = root.ptr::<T>(Self::first_element(entry.wrapping_add_signed(offset)));
         debug_assert!(region.is_aligned(), "misaligned per-worker region");
-        region
+        // SAFETY: a region lies in its block, not at address zero.
+        Some(unsafe { NonNull::new_unchecked(region) })
     }
 }
 

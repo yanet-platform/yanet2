@@ -937,8 +937,9 @@ where
     {
         // SAFETY: the context is frozen for the call and its runtime storage
         // addresses were derived before release to the worker (attach: call,
-        // frozen, publish); a built tagged counter names a tagged registry of
-        // the module and an id of it, whose storage of this context holds the
+        // frozen, publish), one per tagged registry of the module (attach:
+        // counters); a built tagged counter names a tagged registry of the
+        // module and an id of it, whose storage of this context holds the
         // counter's aligned values next to each other, as many as the
         // layout's, the size it was registered with.
         unsafe { value.add_to(tagged_counter_value(cx.root, cx.ectx, self.registry(), self.id())) };
@@ -977,33 +978,40 @@ where
     ///
     /// The table is the one in the storage C's `module_ectx_counter_storage`
     /// finds, which a C module hoists into its prepared state, as acl's
-    /// `rules_handles`.
+    /// `rules_handles`. A registry the context holds no storage for, which that
+    /// lookup refuses too, gives an empty handle, through which every add
+    /// counts nowhere.
     #[doc(alias = "module_ectx_counter_storage")]
     #[inline(always)]
     pub fn resolve<'c, M>(&'c self, cx: &CommitCx<'c, M>) -> TaggedCountersRef<'c, T>
     where
         M: Module,
     {
-        let table = if self.is_empty() {
-            // No registry to find, and no id below the bound: the table is
-            // never read.
-            NonNull::dangling()
+        // SAFETY: the context is live and frozen for the pass (attach: call,
+        // frozen).
+        let registries = unsafe { (*cx.ectx.as_ptr()).runtime_counter_storage_count };
+        let (table, len) = if self.is_empty() || self.registry() >= registries {
+            // No counters, or no storage of the context for their registry: no
+            // id is below the bound, so the table is never read.
+            (NonNull::dangling(), 0)
         } else {
             // SAFETY: the context is frozen for the pass and its runtime
             // storage addresses were derived before (attach: call, frozen,
-            // publish); a built field with counters names a tagged registry of
-            // the module, the one they were registered in, whose storage of
-            // this context holds a handle per counter of the registry, those
-            // of the configuration first. The table is a live block, not at
-            // address zero.
-            unsafe {
+            // publish), one per tagged registry of the module, the field's
+            // among them (attach: counters); a built field with counters names
+            // the registry they were registered in, whose storage of this
+            // context holds a handle per counter of the registry, those of the
+            // configuration first. The table is a live block, not at address
+            // zero.
+            let table = unsafe {
                 let storage = tagged_counter_storage(cx.root, cx.ectx, self.registry());
                 NonNull::new_unchecked(counter_value_handles(cx.root, storage))
-            }
+            };
+            (table, self.len())
         };
         TaggedCountersRef {
             table,
-            len: self.len(),
+            len,
             _brand: PhantomData,
             _layout: PhantomData,
         }
@@ -1071,9 +1079,10 @@ where
         // SAFETY: the context is the object's one being committed, frozen for
         // the pass (constructor contract, attach: frozen), and C spawned its
         // counter storage from the object's registry when it built the
-        // context; a built object counter id indexes that registry, whose
-        // storage holds the counter's aligned values next to each other, as
-        // many as the layout's, the size it was registered with.
+        // context (attach: counters); a built object counter id indexes that
+        // registry, whose storage holds the counter's aligned values next to
+        // each other, as many as the layout's, the size it was registered
+        // with.
         let value = unsafe { object_counter_value(cx.root, cx.ectx, self.id()) };
         CounterRef {
             // SAFETY: the value lies in the counter storage block, not at
