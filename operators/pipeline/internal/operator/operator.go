@@ -44,11 +44,22 @@ func NewOperator(cfg *Config, options ...Option) (*Operator, error) {
 		readiness.WithLog(log.With(zap.String("operator", "pipeline"))),
 	)
 
+	gatewayNames := make([]string, len(cfg.Gateways))
+	for idx := range cfg.Gateways {
+		gatewayNames[idx] = cfg.Gateways[idx].Name
+	}
+	source := NewStageQueueSource(
+		gatewayNames,
+		WithStageQueueMetrics(metrics),
+		WithStageQueueLog(log),
+	)
+
 	actuators := make([]Actuator, 0, len(cfg.Gateways))
 	for idx, gw := range cfg.Gateways {
 		actuator, err := NewGatewayActuator(
 			gw,
 			WithGatewayActuatorMetrics(gatewayMetrics[idx]),
+			WithGatewayActuatorStageObserver(source),
 			WithGatewayActuatorLog(log),
 		)
 		if err != nil {
@@ -65,11 +76,6 @@ func NewOperator(cfg *Config, options ...Option) (*Operator, error) {
 	fanOut := operator.NewFanOutActuator(
 		actuators,
 		operator.WithFanOutLog(log),
-	)
-
-	source := NewStageQueueSource(
-		WithStageQueueMetrics(metrics),
-		WithStageQueueLog(log),
 	)
 
 	stages := cfg.Stages

@@ -53,14 +53,24 @@ func (noopGatewayActuatorMetricsObserver) OnApplyCompleted(error)          {}
 func (noopGatewayActuatorMetricsObserver) OnResourceUpdated(string, error) {}
 func (noopGatewayActuatorMetricsObserver) OnGC(int, int, error)            {}
 
+// noopGatewayActuatorStageObserver is the default
+// GatewayActuatorStageObserver wired into gateway-actuator options when no
+// stage queue listens.
+type noopGatewayActuatorStageObserver struct{}
+
+func (noopGatewayActuatorStageObserver) OnStageApplying(string, *StageConfig)       {}
+func (noopGatewayActuatorStageObserver) OnStageApplied(string, *StageConfig, error) {}
+
 type gatewayActuatorOptions struct {
 	Metrics GatewayActuatorMetricsObserver
+	Stages  GatewayActuatorStageObserver
 	Log     *zap.Logger
 }
 
 func newGatewayActuatorOptions() *gatewayActuatorOptions {
 	return &gatewayActuatorOptions{
 		Metrics: noopGatewayActuatorMetricsObserver{},
+		Stages:  noopGatewayActuatorStageObserver{},
 		Log:     zap.NewNop(),
 	}
 }
@@ -79,5 +89,13 @@ func WithGatewayActuatorLog(log *zap.Logger) GatewayActuatorOption {
 func WithGatewayActuatorMetrics(metrics GatewayActuatorMetricsObserver) GatewayActuatorOption {
 	return func(o *gatewayActuatorOptions) {
 		o.Metrics = metrics
+	}
+}
+
+// WithGatewayActuatorStageObserver attaches the observer of the stages the
+// gateway applies.
+func WithGatewayActuatorStageObserver(stages GatewayActuatorStageObserver) GatewayActuatorOption {
+	return func(o *gatewayActuatorOptions) {
+		o.Stages = stages
 	}
 }

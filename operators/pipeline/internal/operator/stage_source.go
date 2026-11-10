@@ -49,35 +49,41 @@ func WithStageQueueMetrics(metrics QueueMetricsObserver) StageQueueOption {
 // StageQueueSource is the operator.StateSource[*StageConfig] used by
 // the pipeline operator.
 //
-// It wraps an ordered queue of target stages.
-//
-// The head is the active reconcile target. On a successful Apply the head is
-// dropped unless it is the only element, in which case it is retained as the
-// steady-state target.
+// It wraps an ordered queue of target stages; the head is the active
+// reconcile target. The queue drops the head only once no gateway is
+// applying it and its latest apply succeeded on every gateway, so the
+// gateways move through the stages in lock-step. The last stage stays as
+// the steady-state target.
 //
 // SetStages and Switch atomically replace the queue and wake the reconcile
-// loop, including during apply-backoff where the wake produces an
-// xbackoff.ErrInterrupted that the loop converts into a fresh Snapshot.
+// loop.
 type StageQueueSource struct {
 	mu     sync.Mutex
 	stages []*StageConfig
-	wakeCh chan struct{}
+	// gateways are the names every head must reach before the queue moves on.
+	gateways []string
+	// pending holds the gateways that are applying the head or whose latest
+	// apply of it did not succeed.
+	pending map[string]struct{}
+	wakeCh  chan struct{}
 
 	metrics QueueMetricsObserver
 	log     *zap.Logger
 }
 
-// NewStageQueueSource constructs an empty StageQueueSource.
-func NewStageQueueSource(options ...StageQueueOption) *StageQueueSource {
+// NewStageQueueSource constructs an empty StageQueueSource whose stages
+// must reach every one of the named gateways.
+func NewStageQueueSource(gateways []string, options ...StageQueueOption) *StageQueueSource {
 	opts := newStageQueueOptions()
 	for _, o := range options {
 		o(opts)
 	}
 
 	return &StageQueueSource{
-		wakeCh:  make(chan struct{}, 1),
-		metrics: opts.Metrics,
-		log:     opts.Log,
+		gateways: gateways,
+		wakeCh:   make(chan struct{}, 1),
+		metrics:  opts.Metrics,
+		log:      opts.Log,
 	}
 }
 
@@ -93,11 +99,15 @@ func (m *StageQueueSource) SetStages(stages []*StageConfig) {
 
 // replaceStages swaps the queue under the lock and signals the
 // reconcile loop.
+//
+// The new head waits for every gateway, even one that applied the same
+// stage before the swap.
 func (m *StageQueueSource) replaceStages(stages []*StageConfig) int {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	m.stages = stages
+	m.awaitEveryGatewayLocked()
 
 	select {
 	case m.wakeCh <- struct{}{}:
@@ -143,10 +153,30 @@ func (m *StageQueueSource) Wake() <-chan struct{} {
 	return m.wakeCh
 }
 
-// Advance drops the just-applied head from the queue, exposing the
-// next stage. The tail stage is preserved as the steady-state target.
-func (m *StageQueueSource) Advance(applied *StageConfig) {
-	advanced, depth := m.popHead(applied)
+// Advance does nothing: the queue moves on once every gateway applied the
+// head, see OnStageApplied.
+func (m *StageQueueSource) Advance(*StageConfig) {}
+
+// OnStageApplying makes the head wait for the gateway until its apply of
+// the head ends.
+func (m *StageQueueSource) OnStageApplying(gateway string, stage *StageConfig) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if m.isHeadLocked(stage) {
+		m.pending[gateway] = struct{}{}
+	}
+}
+
+// OnStageApplied records how one gateway's apply of the stage ended, and
+// drops the head once no gateway is applying it and its latest apply
+// succeeded on every gateway, unless it is the last stage.
+//
+// A failed apply leaves the head waiting for that gateway. A report for a
+// stage that is no longer the head, because the queue moved on or was
+// replaced meanwhile, changes nothing.
+func (m *StageQueueSource) OnStageApplied(gateway string, stage *StageConfig, err error) {
+	advanced, depth := m.record(gateway, stage, err)
 	if !advanced {
 		return
 	}
@@ -155,30 +185,29 @@ func (m *StageQueueSource) Advance(applied *StageConfig) {
 	m.metrics.OnQueueChanged(depth)
 }
 
-// popHead drops the just-applied head if it is still at the front of
-// the queue.
-//
-// If the queue was concurrently replaced by SetStages while Apply was
-// in flight, the stage we just applied may no longer be at the head;
-// in that case the queue is left alone so the new head wins on the
-// next iteration.
-//
-// The single-element queue is also preserved as the steady-state target.
-func (m *StageQueueSource) popHead(applied *StageConfig) (bool, int) {
+// record updates the gateways the head waits for and pops the head when none
+// is left, unless it is the last stage.
+func (m *StageQueueSource) record(gateway string, stage *StageConfig, err error) (bool, int) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	if len(m.stages) == 0 || m.stages[0] != applied {
+	if !m.isHeadLocked(stage) {
 		return false, 0
 	}
-	if len(m.stages) == 1 {
+	if err != nil {
+		m.pending[gateway] = struct{}{}
+		return false, 0
+	}
+	delete(m.pending, gateway)
+	if len(m.pending) > 0 || len(m.stages) == 1 {
 		return false, 0
 	}
 
 	next := m.stages[1]
 	m.stages = m.stages[1:]
+	m.awaitEveryGatewayLocked()
 	m.log.Info("advanced to next stage",
-		zap.String("from", applied.Name),
+		zap.String("from", stage.Name),
 		zap.String("to", next.Name),
 	)
 
@@ -188,4 +217,21 @@ func (m *StageQueueSource) popHead(applied *StageConfig) (bool, int) {
 	}
 
 	return true, len(m.stages)
+}
+
+// isHeadLocked reports whether the stage is the head of the queue.
+//
+// The caller holds the lock.
+func (m *StageQueueSource) isHeadLocked(stage *StageConfig) bool {
+	return len(m.stages) > 0 && m.stages[0] == stage
+}
+
+// awaitEveryGatewayLocked makes the head wait for every gateway again.
+//
+// The caller holds the lock.
+func (m *StageQueueSource) awaitEveryGatewayLocked() {
+	m.pending = map[string]struct{}{}
+	for _, gateway := range m.gateways {
+		m.pending[gateway] = struct{}{}
+	}
 }
