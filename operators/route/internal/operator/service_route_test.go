@@ -251,16 +251,20 @@ func Test_RouteService_FeedRIB_FirstNameOwnsSession(t *testing.T) {
 	require.False(t, ok, "a later update name must not create another session RIB")
 }
 
-// Test_RouteService_FeedRIB_HeartbeatOnlyStartsNoSession verifies that a
-// stream carrying only heartbeats starts no session, creates no RIB and
-// reports no change.
-func Test_RouteService_FeedRIB_HeartbeatOnlyStartsNoSession(t *testing.T) {
+// Test_RouteService_FeedRIB_HeartbeatStartsSession verifies that a stream
+// carrying only heartbeats starts its session, so an import whose BIRD
+// table is empty still takes the RIB over, and that the heartbeats
+// themselves report no change.
+func Test_RouteService_FeedRIB_HeartbeatStartsSession(t *testing.T) {
 	sessionStarts := 0
 	changes := 0
 	svc := NewRouteService(neigh.NewNeighTable(),
 		WithRouteServiceOnRIBSessionStart(func(string, uint64) { sessionStarts++ }),
 		WithRouteServiceOnChanged(func() { changes++ }),
 	)
+	defer func() {
+		require.NoError(t, svc.Close())
+	}()
 
 	stream := &feedRIBTestStream{updates: []*operatorpb.Update{
 		{Name: "route0", Heartbeat: true},
@@ -268,10 +272,57 @@ func Test_RouteService_FeedRIB_HeartbeatOnlyStartsNoSession(t *testing.T) {
 	}}
 	require.NoError(t, svc.FeedRIB(stream))
 
-	require.Zero(t, sessionStarts)
-	require.Zero(t, changes)
+	require.Equal(t, 1, sessionStarts)
+	require.Equal(t, 1, changes, "only the end of the stream may report a change")
 	_, ok := svc.ribs.Get("route0")
-	require.False(t, ok, "a heartbeat must not create a RIB")
+	require.True(t, ok, "the session must create its RIB")
+}
+
+// Test_RouteService_FeedRIB_NewSessionSweepsOpenPredecessor verifies that a
+// new session removes, one RIB TTL after it started, the routes of an older
+// session it did not send again, even while the older stream stays open.
+func Test_RouteService_FeedRIB_NewSessionSweepsOpenPredecessor(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		const ttl = 5 * time.Minute
+		svc := NewRouteService(neigh.NewNeighTable(), WithRouteServiceRIBTTL(ttl))
+		old := &operatorpb.Route{
+			Prefix:  mustNetwork(t, "10.0.0.0/24"),
+			NextHop: commonpb.NewIPAddressFromAddr(netip.MustParseAddr("192.0.2.1")),
+			Peer:    commonpb.NewIPAddressFromAddr(netip.MustParseAddr("198.51.100.1")),
+			Source:  operatorpb.RouteSourceID_ROUTE_SOURCE_ID_BIRD,
+		}
+		streamA := &channelFeedRIBStream{updates: make(chan *operatorpb.Update)}
+		streamB := &channelFeedRIBStream{updates: make(chan *operatorpb.Update)}
+		var feeds errgroup.Group
+		feeds.Go(func() error { return svc.FeedRIB(streamA) })
+		feeds.Go(func() error { return svc.FeedRIB(streamB) })
+		routes := func() int {
+			response, err := svc.ShowRoutes(t.Context(), &operatorpb.ShowRoutesRequest{Name: "route0"})
+			require.NoError(t, err)
+			return len(response.GetRoutes())
+		}
+
+		streamA.updates <- &operatorpb.Update{Name: "route0", Route: old}
+		streamA.updates <- &operatorpb.Update{Name: "route0"}
+		synctest.Wait()
+		require.Equal(t, 1, routes())
+
+		// A stays open: only the start of B can schedule the sweep.
+		streamB.updates <- &operatorpb.Update{Name: "route0", Heartbeat: true}
+		synctest.Wait()
+
+		time.Sleep(ttl - time.Nanosecond)
+		synctest.Wait()
+		require.Equal(t, 1, routes(), "the old route must stay until the RIB TTL")
+		time.Sleep(time.Nanosecond)
+		synctest.Wait()
+		require.Equal(t, 0, routes(), "the old route must go one RIB TTL after the new session started")
+
+		close(streamA.updates)
+		close(streamB.updates)
+		require.NoError(t, feeds.Wait())
+		require.NoError(t, svc.Close())
+	})
 }
 
 // Test_RouteService_FeedRIB_HeartbeatChangesNoRoutes verifies that a

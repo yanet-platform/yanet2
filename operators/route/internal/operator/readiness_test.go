@@ -261,6 +261,8 @@ func TestRIBReadiness_LowRate_READY(t *testing.T) {
 		helper := newBirdRIBReadiness(cfg, store, "route0", tracker)
 
 		helper.OnSessionStart("route0", 1)
+		// The session delivers its table before it can settle.
+		helper.OnUpdate(1)
 
 		ctx, cancel := context.WithCancel(t.Context())
 
@@ -277,6 +279,42 @@ func TestRIBReadiness_LowRate_READY(t *testing.T) {
 
 		cancel()
 		_ = eg.Wait()
+	})
+}
+
+// Test_BirdRIBReadiness_QuietSessionStartWaitsForFirstUpdate verifies that
+// a session that has delivered nothing yet never settles on the routes an
+// older session left, and settles once its first update arrived.
+func Test_BirdRIBReadiness_QuietSessionStartWaitsForFirstUpdate(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		cfg := ReadinessConfig{
+			RateThreshold:   1000,
+			StabilityWindow: 50 * time.Millisecond,
+			SampleInterval:  20 * time.Millisecond,
+		}
+		store := newRIBStore()
+		// The route an older session left behind.
+		seedRoute(t, store, "route0")
+		tracker := readiness.NewTracker(specs("rib"))
+		helper := newBirdRIBReadiness(cfg, store, "route0", tracker)
+		helper.OnSessionStart("route0", 2)
+
+		ctx, cancel := context.WithCancel(t.Context())
+		var workers errgroup.Group
+		workers.Go(func() error { return helper.Run(ctx) })
+
+		synctest.Sleep(10 * time.Second)
+		scope := requireScope(t, tracker, "rib")
+		require.Equal(t, readinesspb.State_STATE_DEGRADED, scope.State)
+		require.Len(t, scope.GetReasons(), 1)
+		require.Equal(t, "SYNCING", scope.GetReasons()[0].GetCode())
+
+		helper.OnUpdate(1)
+		synctest.Sleep(200 * time.Millisecond)
+		require.Equal(t, readinesspb.State_STATE_READY, requireScope(t, tracker, "rib").State)
+
+		cancel()
+		require.NoError(t, workers.Wait())
 	})
 }
 
@@ -338,6 +376,8 @@ func TestRIBReadiness_SessionEnd_Degraded(t *testing.T) {
 		helper := newBirdRIBReadiness(cfg, store, "route0", tracker)
 
 		helper.OnSessionStart("route0", 1)
+		// The session delivers its table before it can settle.
+		helper.OnUpdate(1)
 
 		ctx, cancel := context.WithCancel(t.Context())
 
@@ -484,6 +524,8 @@ func TestRIBReadiness_SupersededSession(t *testing.T) {
 		// Session A starts (id=1) — routes are present so tracker enters
 		// DEGRADED(SYNCING) rather than NOT_READY(SYNCING).
 		helper.OnSessionStart("route0", 1)
+		// The session delivers its table before it can settle.
+		helper.OnUpdate(1)
 
 		s := requireScope(t, tracker, "rib")
 		assert.Equal(t, readinesspb.State_STATE_DEGRADED, s.State)
@@ -492,6 +534,8 @@ func TestRIBReadiness_SupersededSession(t *testing.T) {
 
 		// Session B starts (id=2), superseding A.
 		helper.OnSessionStart("route0", 2)
+		// The session delivers its table before it can settle.
+		helper.OnUpdate(1)
 
 		s = requireScope(t, tracker, "rib")
 		assert.Equal(t, readinesspb.State_STATE_DEGRADED, s.State)
@@ -721,6 +765,8 @@ func TestRIBReadiness_SettledNoRoutes(t *testing.T) {
 		helper := newBirdRIBReadiness(cfg, store, "route0", tracker)
 
 		helper.OnSessionStart("route0", 1)
+		// The session delivers its table before it can settle.
+		helper.OnUpdate(1)
 
 		ctx, cancel := context.WithCancel(t.Context())
 		eg, ctx := errgroup.WithContext(ctx)
@@ -758,6 +804,8 @@ func TestRIBReadiness_SessionEndedWithRoutes(t *testing.T) {
 		helper := newBirdRIBReadiness(cfg, store, "route0", tracker)
 
 		helper.OnSessionStart("route0", 1)
+		// The session delivers its table before it can settle.
+		helper.OnUpdate(1)
 
 		ctx, cancel := context.WithCancel(t.Context())
 		eg, ctx := errgroup.WithContext(ctx)
@@ -801,6 +849,8 @@ func TestRIBReadiness_TTLPurgeAfterSessionEnd(t *testing.T) {
 		helper := newBirdRIBReadiness(cfg, store, "route0", tracker)
 
 		helper.OnSessionStart("route0", 1)
+		// The session delivers its table before it can settle.
+		helper.OnUpdate(1)
 
 		ctx, cancel := context.WithCancel(t.Context())
 		eg, ctx := errgroup.WithContext(ctx)
@@ -903,6 +953,8 @@ func TestBirdRestartHoldInvariant(t *testing.T) {
 		helper := newBirdRIBReadiness(cfg, store, "route0", tracker)
 
 		helper.OnSessionStart("route0", 1)
+		// The session delivers its table before it can settle.
+		helper.OnUpdate(1)
 
 		ctx, cancel := context.WithCancel(t.Context())
 		eg, _ := errgroup.WithContext(ctx)
