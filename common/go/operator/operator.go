@@ -4,11 +4,14 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"slices"
+	"sync"
 
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
 
+	"github.com/yanet-platform/yanet2/common/go/readiness"
 	"github.com/yanet-platform/yanet2/common/go/xcfg"
 )
 
@@ -37,6 +40,13 @@ type grpcServerOption struct {
 	Services []ServiceRegistrar
 }
 
+type readinessOption struct {
+	// Name scopes the readiness service the embedded server registers.
+	Name string
+	// Tracker is served by that service and drained on shutdown.
+	Tracker *readiness.Tracker
+}
+
 type options struct {
 	// Reconcile supplies timing defaults consumed by the reconcile loop.
 	Reconcile ReconcileConfig
@@ -52,6 +62,8 @@ type options struct {
 	Metrics ReconcilerMetricsObserver
 	// GRPCServer is nil when the embedded server is disabled.
 	GRPCServer *grpcServerOption
+	// Readiness is nil when the operator reports no readiness.
+	Readiness *readinessOption
 	// Log is the fallback logger for operator components.
 	Log *zap.Logger
 }
@@ -122,6 +134,23 @@ func WithGRPCServer(cfg GRPCServerConfig, services ...ServiceRegistrar) Option {
 	}
 }
 
+// WithReadiness reports the tracker as the operator's readiness.
+//
+// The embedded server, when enabled, serves the tracker under the given
+// name, see ReadinessServiceName, in place of a readiness service registered
+// by hand: a second registration under that name stops the process at
+// startup. Every shutdown drains the tracker before the work stops, so one
+// built with the drain latch keeps an apply cut off by the shutdown from
+// overwriting the drain.
+func WithReadiness(name string, tracker *readiness.Tracker) Option {
+	return func(o *options) {
+		o.Readiness = &readinessOption{
+			Name:    name,
+			Tracker: tracker,
+		}
+	}
+}
+
 // WithWorkers attaches additional long-running goroutines to the
 // operator's errgroup.
 //
@@ -153,8 +182,8 @@ func WithMetrics(observer ReconcilerMetricsObserver) Option {
 // It always runs the optional PreRun hook, the reconciler, and any
 // configured workers.
 //
-// The embedded gRPC server and gateway-registration loop are opt-in via
-// WithGRPCServer and WithGateways respectively.
+// The embedded gRPC server, gateway-registration loop and readiness are
+// opt-in via WithGRPCServer, WithGateways and WithReadiness respectively.
 type Operator[T any] struct {
 	server            *GRPCServer
 	endpoint          string
@@ -166,6 +195,7 @@ type Operator[T any] struct {
 	gateways          []GatewayConfig
 	register          RegisterConfig
 	serviceNames      []string
+	readiness         *readiness.Tracker
 
 	log *zap.Logger
 }
@@ -187,12 +217,26 @@ func NewOperator[T any](
 		endpoint          string
 		advertiseEndpoint string
 		serviceNames      []string
+		tracker           *readiness.Tracker
 	)
 
+	if opts.Readiness != nil {
+		tracker = opts.Readiness.Tracker
+	}
+
 	if opts.GRPCServer != nil {
+		services := opts.GRPCServer.Services
+		if opts.Readiness != nil {
+			// Clipped, so the append never writes into the caller's slice.
+			services = append(
+				slices.Clip(services),
+				NewReadinessServiceRegistrar(opts.Readiness.Name, tracker),
+			)
+		}
+
 		server, serviceNames = NewGRPCServer(
 			opts.GRPCServer.Config,
-			opts.GRPCServer.Services,
+			services,
 			WithGRPCLog(log),
 		)
 		endpoint = opts.GRPCServer.Config.Endpoint.Unwrap()
@@ -222,6 +266,7 @@ func NewOperator[T any](
 		gateways:          opts.Gateways,
 		register:          opts.Register,
 		serviceNames:      serviceNames,
+		readiness:         tracker,
 		log:               log,
 	}
 }
@@ -238,8 +283,10 @@ func (m *Operator[T]) Close() error {
 // server. The gateway-registration loop runs only when WithGateways supplied
 // a non-empty gateway list.
 //
-// Run blocks until the supplied context is cancelled or any goroutine
-// returns a non-nil error.
+// Run blocks until the supplied context is cancelled or any part fails.
+// Either way the shutdown drains the readiness first, stops the reconciler,
+// the workers and the registration next, and stops the server last, so its
+// clients see the drain while it still answers.
 func (m *Operator[T]) Run(ctx context.Context) error {
 	if len(m.gateways) > 0 && m.server == nil {
 		m.log.Warn(
@@ -258,41 +305,82 @@ func (m *Operator[T]) Run(ctx context.Context) error {
 	}
 
 	wg, ctx := errgroup.WithContext(ctx)
+	// The work and the server outlive the shared context, so that the
+	// shutdown can stop them one after the other.
+	workCtx, stopWork := context.WithCancel(context.WithoutCancel(ctx))
+	defer stopWork()
+	serveCtx, stopServing := context.WithCancel(context.WithoutCancel(ctx))
+	defer stopServing()
 
+	// Every runner shares the group, so the first failure starts the
+	// shutdown at once and is the error returned. The counter only tells
+	// the shutdown when the work has stopped.
+	var work sync.WaitGroup
+	for _, runner := range m.runners(listener) {
+		work.Add(1)
+		wg.Go(func() error {
+			return runCounted(workCtx, runner, &work)
+		})
+	}
 	if m.server != nil {
 		wg.Go(func() error {
-			return m.server.Run(ctx, listener)
+			return m.server.Run(serveCtx, listener)
 		})
-
-		if len(m.gateways) > 0 {
-			advertiseEndpoint := m.advertiseEndpoint
-			if advertiseEndpoint == "" {
-				advertiseEndpoint = listener.Addr().String()
-			}
-
-			wg.Go(func() error {
-				runner := NewGatewayRegRunner(
-					m.gateways,
-					m.serviceNames,
-					advertiseEndpoint,
-					WithGatewayRegInterval(m.register.Interval.Unwrap()),
-					WithGatewayRegLog(m.log),
-				)
-				return runner.Run(ctx)
-			})
-		}
 	}
-
 	wg.Go(func() error {
-		return m.reconciler.Run(ctx)
+		return m.stopInOrder(ctx, stopWork, &work, stopServing)
 	})
-	for _, worker := range m.workers {
-		wg.Go(func() error {
-			return worker(ctx)
-		})
-	}
 
 	return wg.Wait()
+}
+
+// runners lists the reconciler, the workers and, when the server registers
+// with gateways, the registration loop.
+func (m *Operator[T]) runners(listener net.Listener) []Runner {
+	runners := append([]Runner{m.reconciler.Run}, m.workers...)
+	if m.server == nil || len(m.gateways) == 0 {
+		return runners
+	}
+
+	advertiseEndpoint := m.advertiseEndpoint
+	if advertiseEndpoint == "" {
+		advertiseEndpoint = listener.Addr().String()
+	}
+	registration := NewGatewayRegRunner(
+		m.gateways,
+		m.serviceNames,
+		advertiseEndpoint,
+		WithGatewayRegInterval(m.register.Interval.Unwrap()),
+		WithGatewayRegLog(m.log),
+	)
+
+	return append(runners, registration.Run)
+}
+
+// runCounted runs the runner and counts it out of the work once it returns.
+func runCounted(ctx context.Context, runner Runner, work *sync.WaitGroup) error {
+	defer work.Done()
+
+	return runner(ctx)
+}
+
+// stopInOrder waits for the shutdown, drains the readiness, stops the work
+// and waits for it, and only then stops the server.
+func (m *Operator[T]) stopInOrder(
+	ctx context.Context,
+	stopWork context.CancelFunc,
+	work *sync.WaitGroup,
+	stopServing context.CancelFunc,
+) error {
+	<-ctx.Done()
+	if m.readiness != nil {
+		m.readiness.Drain()
+	}
+	stopWork()
+	work.Wait()
+	stopServing()
+
+	return nil
 }
 
 func (m *Operator[T]) makeListener() (net.Listener, error) {

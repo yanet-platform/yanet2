@@ -1,7 +1,6 @@
 package operator
 
 import (
-	"context"
 	"fmt"
 
 	"go.uber.org/zap"
@@ -67,17 +66,8 @@ func NewOperator(cfg *Config, options ...Option) (*operator.Operator[neigh.Nexth
 		source,
 		operator.WithLog(opts.Log),
 		operator.WithReconcile(cfg.Reconcile),
-		operator.WithGRPCServer(
-			cfg.Server,
-			operator.NewReadinessServiceRegistrar("neighbour_sidecar", tracker),
-		),
-		operator.WithWorkers(
-			monitor.Run,
-			func(ctx context.Context) error {
-				<-ctx.Done()
-				tracker.Drain()
-				return nil
-			},
-		),
+		operator.WithGRPCServer(cfg.Server),
+		operator.WithReadiness("neighbour_sidecar", tracker),
+		operator.WithWorkers(monitor.Run),
 	), nil
 }
