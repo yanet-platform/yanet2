@@ -18,12 +18,32 @@ use syn::{DeriveInput, ItemImpl, parse_macro_input};
 /// Derives `ShmLayout` and `Build`, with the `<Type>Parts` struct a build
 /// writes the value from, for a shared-memory struct.
 ///
-/// Accepts only a non-generic `#[repr(C)]` struct with named fields (an
-/// alignment up to 64 may be added), every field of which is `Build`, with
-/// no drop glue. Padding is never read as data. The generated `<Type>Parts` has
-/// one field per field of the struct, holding the parts of that field's type,
-/// each written at the field's place. The fields are written in order, and a
-/// refused field returns the ones before it.
+/// Accepts only a `#[repr(C)]` struct with named fields (an alignment up to 64
+/// may be added), every field of which is `Build`, with no drop glue. Padding
+/// is never read as data. The generated `<Type>Parts` has one field per field
+/// of the struct, holding the parts of that field's type, each written at the
+/// field's place. The fields are written in order, and a refused field returns
+/// the ones before it.
+///
+/// A struct may take type and const parameters, but no lifetime: each type
+/// parameter is bound by `Build`, and every field must be `Build` for every
+/// argument the bounds admit. `<Type>Parts` takes the build's lifetime and
+/// owner, then the struct's parameters.
+///
+/// ```
+/// use yanet_sdk::{Build, OwnedSlice, Owner, ShmLayout, ShmSlice};
+///
+/// #[derive(ShmLayout)]
+/// #[repr(C)]
+/// struct Table<T, const N: usize> {
+///     slots: ShmSlice<T>,
+///     heads: [u32; N],
+/// }
+///
+/// fn parts<'b, W: Owner, T: Build>(slots: OwnedSlice<'b, T, W>) -> TableParts<'b, W, T, 4> {
+///     TableParts { slots, heads: [0; 4] }
+/// }
+/// ```
 ///
 /// ```
 /// #![forbid(unsafe_code)]
@@ -256,9 +276,50 @@ mod doctests {
     /// ```
     struct EmptyStructRefused;
 
-    /// A generic struct is refused.
+    /// A struct with a lifetime is refused, as shared memory holds only
+    /// `'static` data.
     ///
     /// ```compile_fail
+    /// use yanet_sdk::ShmLayout;
+    ///
+    /// #[derive(ShmLayout)]
+    /// #[repr(C)]
+    /// struct Config<'a> {
+    ///     value: &'a u64,
+    /// }
+    /// ```
+    struct LifetimeRefused;
+
+    /// A struct generic over its field type is accepted, and each instance is
+    /// shared-memory data.
+    ///
+    /// ```
+    /// use yanet_sdk::{Build, Owner, ShmBox, ShmLayout};
+    ///
+    /// #[derive(ShmLayout)]
+    /// #[repr(C)]
+    /// struct Config<T> {
+    ///     value: T,
+    ///     boxed: ShmBox<T>,
+    /// }
+    ///
+    /// fn is_layout<T: ShmLayout>() {}
+    /// is_layout::<Config<u64>>();
+    /// is_layout::<Config<Config<u32>>>();
+    ///
+    /// fn parts<'b, W: Owner, T: Build>(
+    ///     value: T::Parts<'b, W>,
+    ///     boxed: yanet_sdk::Owned<'b, T, W>,
+    /// ) -> ConfigParts<'b, W, T> {
+    ///     ConfigParts { value, boxed }
+    /// }
+    /// ```
+    struct GenericAccepted;
+
+    /// A generic struct instantiated with a type that is not shared-memory
+    /// data is refused.
+    ///
+    /// ```compile_fail,E0277
     /// use yanet_sdk::ShmLayout;
     ///
     /// #[derive(ShmLayout)]
@@ -266,8 +327,111 @@ mod doctests {
     /// struct Config<T> {
     ///     value: T,
     /// }
+    ///
+    /// fn is_layout<T: ShmLayout>() {}
+    /// is_layout::<Config<bool>>();
     /// ```
-    struct GenericRefused;
+    struct GenericBoolArgumentRefused;
+
+    /// A field that needs more of a parameter than `Build`, as a mutex needs
+    /// `Copy`, is refused unless the struct bounds the parameter.
+    ///
+    /// ```compile_fail,E0277
+    /// use yanet_sdk::{Mutex, ShmLayout};
+    ///
+    /// #[derive(ShmLayout)]
+    /// #[repr(C)]
+    /// struct Config<T> {
+    ///     locked: Mutex<T>,
+    /// }
+    /// ```
+    struct GenericFieldUnboundRefused;
+
+    /// With the bounds the field needs, it is accepted.
+    ///
+    /// ```
+    /// use yanet_sdk::{Mutex, ShmLayout};
+    ///
+    /// #[derive(ShmLayout)]
+    /// #[repr(C)]
+    /// struct Config<T: Copy + ShmLayout> {
+    ///     locked: Mutex<T>,
+    /// }
+    /// ```
+    struct GenericFieldBoundAccepted;
+
+    /// A const parameter is accepted.
+    ///
+    /// ```
+    /// use yanet_sdk::ShmLayout;
+    ///
+    /// #[derive(ShmLayout)]
+    /// #[repr(C)]
+    /// struct Config<const N: usize> {
+    ///     values: [u64; N],
+    /// }
+    ///
+    /// fn is_layout<T: ShmLayout>() {}
+    /// is_layout::<Config<4>>();
+    /// ```
+    struct ConstGenericAccepted;
+
+    /// A generic struct that needs drop is refused where it is declared.
+    ///
+    /// ```compile_fail,E0119
+    /// use yanet_sdk::ShmLayout;
+    ///
+    /// #[derive(ShmLayout)]
+    /// #[repr(C)]
+    /// struct Config<T> {
+    ///     value: T,
+    /// }
+    ///
+    /// impl<T> Drop for Config<T> {
+    ///     fn drop(&mut self) {}
+    /// }
+    /// ```
+    struct GenericDropRefused;
+
+    /// A generic struct aligned beyond 64 is refused where it is declared.
+    ///
+    /// ```compile_fail,E0080
+    /// use yanet_sdk::ShmLayout;
+    ///
+    /// #[derive(ShmLayout)]
+    /// #[repr(C, align(128))]
+    /// struct Config<T> {
+    ///     value: T,
+    /// }
+    /// ```
+    struct GenericAlign128Refused;
+
+    /// A generic struct with a hint beyond 64 among several is refused, as
+    /// the compiler takes the largest.
+    ///
+    /// ```compile_fail,E0080
+    /// use yanet_sdk::ShmLayout;
+    ///
+    /// #[derive(ShmLayout)]
+    /// #[repr(C, align(256), align(8))]
+    /// struct Config<T> {
+    ///     value: T,
+    /// }
+    /// ```
+    struct GenericAlignHintsRefused;
+
+    /// A generic struct aligned to 64 is accepted.
+    ///
+    /// ```
+    /// use yanet_sdk::ShmLayout;
+    ///
+    /// #[derive(ShmLayout)]
+    /// #[repr(C, align(64))]
+    /// struct Config<T> {
+    ///     value: T,
+    /// }
+    /// ```
+    struct GenericAlign64Accepted;
 
     /// A struct of a concrete type is accepted.
     ///

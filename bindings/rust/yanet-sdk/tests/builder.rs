@@ -65,6 +65,16 @@ struct Lanes {
     lanes: [ShmSlice<u64>; 2],
 }
 
+/// A node generic over its value and a count: a boxed value, a run of values
+/// and a fixed array of them.
+#[derive(ShmLayout)]
+#[repr(C)]
+struct Node<T, const N: usize> {
+    head: ShmBox<T>,
+    tail: ShmSlice<T>,
+    fixed: [T; N],
+}
+
 /// A word whose write is refused when its parts say so.
 #[repr(C)]
 struct Flaky(u64);
@@ -215,6 +225,7 @@ impl<C: Build + Sync> Module for Fixture<C> {
 
 type PolicyModule = Fixture<Policy>;
 type HygieneModule = Fixture<Hygiene>;
+type NodeModule = Fixture<Node<Rule, 2>>;
 type WordsModule = Fixture<ShmSlice<u64>>;
 type LanesModule = Fixture<Lanes>;
 type FaultyModule = Fixture<Faulty>;
@@ -310,6 +321,24 @@ fn build<'env, M: Module>(
     f: impl for<'b> FnOnce(Scope<'b, 'env, TestOwner>) -> Result<<M::Config as Build>::Parts<'b, TestOwner>, Failure>,
 ) -> Result<Built<M, TestOwner>, Failure> {
     Builder::<M>::build(owner, M::NAME, f)
+}
+
+/// Builds a node of rules, each owning a block of ports: a boxed rule, a run
+/// of two and a fixed pair.
+fn build_node(owner: &TestOwner) -> Result<Built<NodeModule, TestOwner>, Failure> {
+    build::<NodeModule>(owner, |b| {
+        let rule = |id: u64, ports: &[u64]| -> Result<RuleParts<'_, TestOwner>, Failure> {
+            Ok(RuleParts {
+                id,
+                ports: b.slice(ports.len(), |idx| Ok(ports[idx]))?,
+            })
+        };
+        Ok(NodeParts {
+            head: b.boxed(rule(1, &[80])?)?,
+            tail: b.slice(2, |idx| rule(2 + idx as u64, &[53]))?,
+            fixed: [rule(4, &[443])?, rule(5, &[])?],
+        })
+    })
 }
 
 /// Builds the policy configuration with the rules, each an id and its ports.
@@ -796,6 +825,49 @@ fn test_derive_expansion_is_hygienic_for_field_names() {
     );
     release::<HygieneModule>(&owner, built);
     owner.assert_released();
+}
+
+/// A rule's id and its ports, read through the view.
+fn id_ports<'a>(rule: &'a Rule, view: &View<'a>) -> (u64, Vec<u64>) {
+    (rule.id, rule.ports.as_slice(view).to_vec())
+}
+
+#[test]
+fn test_build_writes_and_releases_a_generic_struct() {
+    let owner = owner();
+
+    let built = build_node(&owner).expect("built");
+
+    let (config, view) = body::<NodeModule>(&owner, &built);
+    let tail: Vec<_> = config
+        .tail
+        .as_slice(&view)
+        .iter()
+        .map(|rule| id_ports(rule, &view))
+        .collect();
+    assert_eq!(
+        (
+            (1, vec![80]),
+            vec![(2, vec![53]), (3, vec![53])],
+            [(4, vec![443]), (5, vec![])]
+        ),
+        (
+            id_ports(config.head.get(&view), &view),
+            tail,
+            [id_ports(&config.fixed[0], &view), id_ports(&config.fixed[1], &view)]
+        )
+    );
+    release::<NodeModule>(&owner, built);
+    owner.assert_released();
+}
+
+#[test]
+fn test_build_of_a_generic_struct_releases_everything_when_memory_runs_out_at_each_allocation() {
+    let fits = sweep_limits(0..64, owner_failing_alloc_after, build_node);
+
+    // The root block, the boxed rule, the run, and the ports of every rule
+    // but the last.
+    assert_eq!(7, fits);
 }
 
 /// verifies that the blocks, the scope and the derived parts are `Debug`
