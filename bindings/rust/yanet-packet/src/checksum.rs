@@ -6,21 +6,23 @@
 
 use core::net::{Ipv4Addr, Ipv6Addr};
 
-/// Unfolded one's-complement sum of the bytes as big-endian 16-bit words.
+/// Unfolded one's-complement sum of the bytes as native-order 16-bit words.
 ///
-/// An odd trailing byte is the high half of a final word. The sum runs over
-/// 32-bit words, half the additions of 16-bit ones; as 2^16 is 1 modulo
-/// 0xffff, it folds to the same value as the 16-bit word sum (RFC 1071,
-/// section 2). The 64-bit accumulator cannot overflow below 16 GiB of data,
-/// unlike the 32-bit C one.
+/// The sum is independent of byte order (RFC 1071, section 2): folded, it is
+/// the sum of the big-endian words in network byte order, which one
+/// conversion makes numeric, and the loop stays a plain widening add that
+/// vectorizes. An odd trailing byte is the high byte of a final big-endian
+/// word. The 32-bit words halve the additions and fold to the same value as
+/// 16-bit ones, as 2^16 is 1 modulo 0xffff. The 64-bit accumulator cannot
+/// overflow below 16 GiB of data, unlike the 32-bit C one.
 fn partial_sum(data: &[u8]) -> u64 {
     let (chunks, remainder) = data.as_chunks::<4>();
-    let mut acc: u64 = chunks.iter().map(|&chunk| u64::from(u32::from_be_bytes(chunk))).sum();
+    let mut acc: u64 = chunks.iter().map(|&chunk| u64::from(u32::from_ne_bytes(chunk))).sum();
     match *remainder {
         [] => {}
-        [hi] => acc += u64::from(u16::from_be_bytes([hi, 0])),
-        [hi, lo] => acc += u64::from(u16::from_be_bytes([hi, lo])),
-        [b0, b1, hi, ..] => acc += u64::from(u16::from_be_bytes([b0, b1])) + u64::from(u16::from_be_bytes([hi, 0])),
+        [hi] => acc += u64::from(u16::from_ne_bytes([hi, 0])),
+        [hi, lo] => acc += u64::from(u16::from_ne_bytes([hi, lo])),
+        [b0, b1, hi, ..] => acc += u64::from(u16::from_ne_bytes([b0, b1])) + u64::from(u16::from_ne_bytes([hi, 0])),
     }
     acc
 }
@@ -37,11 +39,11 @@ fn fold(mut acc: u64) -> u16 {
 ///
 /// Equals the C sum of the same bytes up to a byte swap of the result.
 pub fn sum(data: &[u8]) -> u16 {
-    fold(partial_sum(data))
+    u16::from_be(fold(partial_sum(data)))
 }
 
 /// Unfolded one's-complement sum of the slices' bytes taken in order as one
-/// run, and the length of the run.
+/// run, as native-order words, and the length of the run.
 ///
 /// The run's words start at its even bytes, so a slice that starts at an odd
 /// byte holds each byte in the other half of a word than its own sum reads it
@@ -67,7 +69,7 @@ fn run_sum<'a>(slices: impl IntoIterator<Item = &'a [u8]>) -> (u64, usize) {
 /// Sums a run that lies in several buffers, such as the segments of a chained
 /// packet.
 pub fn sum_slices<'a>(slices: impl IntoIterator<Item = &'a [u8]>) -> u16 {
-    fold(run_sum(slices).0)
+    u16::from_be(fold(run_sum(slices).0))
 }
 
 /// One's-complement addition with end-around carry.
@@ -126,26 +128,29 @@ fn no_zero(inverted: u16) -> u16 {
     if inverted == 0xffff { inverted } else { !inverted }
 }
 
-/// Unfolded sum of the IPv4 pseudo header; only its [`fold`] is meaningful.
+/// Unfolded sum of the IPv4 pseudo header as native-order words; only its
+/// [`fold`] is meaningful.
+///
+/// The protocol and the length enter as their words in network byte order.
 fn pseudo_sum_ipv4(src: [u8; 4], dst: [u8; 4], protocol: u8, l4_len: u16) -> u64 {
-    partial_sum(&src) + partial_sum(&dst) + u64::from(protocol) + u64::from(l4_len)
+    partial_sum(&src) + partial_sum(&dst) + u64::from(u16::from(protocol).to_be()) + u64::from(l4_len.to_be())
 }
 
-/// Unfolded sum of the IPv6 pseudo header; only its [`fold`] is meaningful.
+/// Unfolded sum of the IPv6 pseudo header as native-order words; only its
+/// [`fold`] is meaningful.
+///
+/// The length and the next header enter as their 32-bit words in network
+/// byte order.
 fn pseudo_sum_ipv6(src: [u8; 16], dst: [u8; 16], next_header: u8, l4_len: u32) -> u64 {
-    partial_sum(&src)
-        + partial_sum(&dst)
-        + u64::from(l4_len >> 16)
-        + u64::from(l4_len & 0xffff)
-        + u64::from(next_header)
+    partial_sum(&src) + partial_sum(&dst) + u64::from(l4_len.to_be()) + u64::from(u32::from(next_header).to_be())
 }
 
 fn l4_checksum(pseudo: u64, segment: &[u8]) -> u16 {
-    !fold(pseudo + partial_sum(segment))
+    !u16::from_be(fold(pseudo + partial_sum(segment)))
 }
 
 /// Whether the pseudo header's and the segment's unfolded sums add up to an
-/// all-ones sum.
+/// all-ones sum, which reads the same in either byte order.
 fn l4_is_valid(pseudo: u64, segment: u64) -> bool {
     fold(pseudo + segment) == 0xffff
 }
@@ -228,7 +233,7 @@ mod tests {
     use proptest::{collection::vec, prelude::*, sample::Index};
 
     use super::*;
-    use crate::testing;
+    use crate::testing::{self, Family};
 
     /// The slices the cuts split the bytes into, in order; repeated cuts make
     /// empty slices.
@@ -286,9 +291,57 @@ mod tests {
         sum
     }
 
+    /// A TCP segment over IPv4 from `192.0.2.1:49152` to `198.51.100.2:443`
+    /// with the data "hello!", its checksum field zero, and its checksum,
+    /// computed word by word outside this code.
+    fn known_tcp_ipv4() -> (Ipv4Addr, Ipv4Addr, [u8; 26], u16) {
+        let segment = [
+            0xc0, 0x00, 0x01, 0xbb, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x50, 0x18, 0xff, 0xff, 0x00, 0x00,
+            0x00, 0x00, b'h', b'e', b'l', b'l', b'o', b'!',
+        ];
+        let (src, dst) = (Ipv4Addr::new(192, 0, 2, 1), Ipv4Addr::new(198, 51, 100, 2));
+        (src, dst, segment, 0xbdde)
+    }
+
+    /// A UDP datagram over IPv6 from `[2001:db8::1]:53` to
+    /// `[2001:db8::2]:33000` with the data "hello", odd in length, its checksum
+    /// field zero, and its checksum, computed word by word outside this code.
+    fn known_udp_ipv6() -> (Ipv6Addr, Ipv6Addr, [u8; 13], u16) {
+        let segment = [
+            0x00, 0x35, 0x80, 0xe8, 0x00, 0x0d, 0x00, 0x00, b'h', b'e', b'l', b'l', b'o',
+        ];
+        let src = Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 1);
+        let dst = Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 2);
+        (src, dst, segment, 0xdf6f)
+    }
+
+    /// verifies that the bytes of RFC 1071's numerical example (section 3)
+    /// sum to its result, which the RFC reaches in either byte order.
+    #[test]
+    fn test_sum_rfc1071_example() {
+        assert_eq!(0xddf2, sum(&[0x00, 0x01, 0xf2, 0x03, 0xf4, 0xf5, 0xf6, 0xf7]));
+    }
+
     #[test]
     fn test_sum_odd_tail_is_high_byte() {
         assert_eq!(0x0102 + 0x0300, sum(&[1, 2, 3]));
+    }
+
+    #[test]
+    fn test_sum_odd_tail_after_words_is_high_byte() {
+        // 0x0001 + 0xf203 + 0xf4f5 + 0xf600 is 0x2_dcf9, which folds to 0xdcfb.
+        assert_eq!(0xdcfb, sum(&[0x00, 0x01, 0xf2, 0x03, 0xf4, 0xf5, 0xf6]));
+    }
+
+    /// verifies that runs of the word 0x0100 as long as full segments sum to
+    /// their count of words times 0x0100, folded, an odd tail being one more.
+    #[test]
+    fn test_sum_long_runs_of_one_word() {
+        let run = [1u8, 0].repeat(710);
+        // 710 words are 0x2_c600, which folds to 0xc602.
+        assert_eq!(0xc602, sum(&run));
+        // 268 words and the tail are 0x1_0d00, which folds to 0x0d01.
+        assert_eq!(0x0d01, sum(&run[..537]));
     }
 
     #[test]
@@ -296,6 +349,15 @@ mod tests {
         assert_eq!(0x0102 + 0x0300, sum_slices([&[1u8][..], &[2, 3]]));
         assert_eq!(0x0102 + 0x0300, sum_slices([&[1u8][..], &[], &[2], &[3]]));
         assert_eq!(0, sum_slices([]));
+    }
+
+    /// verifies that a run as long as a full segment, cut at odd offsets into
+    /// slices hundreds of bytes long, sums as the whole run.
+    #[test]
+    fn test_sum_slices_long_run_cut_at_odd_offsets() {
+        let run: Vec<u8> = (0..1420u32).map(|i| (i * 151 + 7) as u8).collect();
+        let slices = [&run[..1], &run[1..538], &run[538..1001], &run[1001..]];
+        assert_eq!(sum(&run), sum_slices(slices));
     }
 
     #[test]
@@ -377,12 +439,41 @@ mod tests {
     fn test_pseudo_sums_ipv4_ipv6() {
         assert_eq!(
             fold(0x0a00 + 0x0001 + 0xc0a8 + 0x0102 + 6 + 40),
-            fold(pseudo_sum_ipv4([10, 0, 0, 1], [192, 168, 1, 2], 6, 40))
+            u16::from_be(fold(pseudo_sum_ipv4([10, 0, 0, 1], [192, 168, 1, 2], 6, 40)))
         );
         let src = [1u8; 16];
         let dst = [2u8; 16];
         let expected = 8 * 0x0101 + 8 * 0x0202 + 1 + 0x0002 + 17;
-        assert_eq!(fold(expected), fold(pseudo_sum_ipv6(src, dst, 17, 0x1_0002)));
+        assert_eq!(
+            fold(expected),
+            u16::from_be(fold(pseudo_sum_ipv6(src, dst, 17, 0x1_0002)))
+        );
+    }
+
+    #[test]
+    fn test_l4_checksum_ipv4_known_tcp_segment() {
+        let (src, dst, segment, cksum) = known_tcp_ipv4();
+        assert_eq!(cksum, l4_checksum_ipv4(src, dst, 6, &segment));
+    }
+
+    #[test]
+    fn test_l4_checksum_ipv6_known_udp_datagram() {
+        let (src, dst, segment, cksum) = known_udp_ipv6();
+        assert_eq!(cksum, l4_checksum_ipv6(src, dst, 17, &segment));
+    }
+
+    #[test]
+    fn test_l4_is_valid_ipv4_known_tcp_segment() {
+        let (src, dst, mut segment, cksum) = known_tcp_ipv4();
+        segment[16..18].copy_from_slice(&cksum.to_be_bytes());
+        assert!(l4_is_valid_ipv4(src, dst, 6, &segment));
+    }
+
+    #[test]
+    fn test_l4_is_valid_ipv6_known_udp_datagram() {
+        let (src, dst, mut segment, cksum) = known_udp_ipv6();
+        segment[6..8].copy_from_slice(&cksum.to_be_bytes());
+        assert!(l4_is_valid_ipv6(src, dst, 17, &segment));
     }
 
     proptest! {
@@ -426,7 +517,7 @@ mod tests {
         fn test_partial_sum_folds_like_16_bit_words(data in vec(any::<u8>(), 0..=300)) {
             let words: u64 = data
                 .chunks(2)
-                .map(|pair| u64::from(u16::from_be_bytes([pair[0], *pair.get(1).unwrap_or(&0)])))
+                .map(|pair| u64::from(u16::from_ne_bytes([pair[0], *pair.get(1).unwrap_or(&0)])))
                 .sum();
             prop_assert_eq!(fold(words), fold(partial_sum(&data)));
         }
@@ -462,6 +553,24 @@ mod tests {
             let updated = update(full, old, new);
             data[8..10].copy_from_slice(&new.to_be_bytes());
             prop_assert!(testing::same_checksum(updated, !sum(&data)));
+        }
+
+        #[test]
+        fn test_update_bytes_of_an_address_equals_full_recompute_modulo_zero_sign(
+            family in testing::family(),
+            addrs in any::<([u8; 16], [u8; 16])>(),
+            new in any::<[u8; 16]>(),
+            protocol in any::<u8>(),
+            segment in vec(any::<u8>(), 0..=300),
+        ) {
+            let (src, dst) = addrs;
+            let len = match family {
+                Family::V4 => 4,
+                Family::V6 => 16,
+            };
+            let full = family.l4_checksum(src, dst, protocol, &segment);
+            let updated = update_bytes(full, &src[..len], &new[..len]);
+            prop_assert!(testing::same_checksum(family.l4_checksum(new, dst, protocol, &segment), updated));
         }
 
         #[test]
