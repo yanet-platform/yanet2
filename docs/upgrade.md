@@ -3,6 +3,21 @@
 Manual steps required when upgrading an existing deployment. The packaging
 does not perform these automatically.
 
+## Weighted assignments change the shared worker layout
+
+Worker assignments gain their rx service weight, which moves from the
+dataplane's config parser through the shared worker records into the
+counters API. The shared-memory config layout changes (`DP_CONFIG_READY_MAGIC`)
+and the worker layout crosses the plugin boundary
+(`YANET_MODULE_ABI_VERSION`), so the dataplane, the control plane and any
+loaded plugins must be upgraded and restarted together: a control plane
+from before the change refuses to attach to the new dataplane, and an
+older plugin is rejected at load.
+
+The workers counters response gains `weight` on each assignment; older
+control planes serving new CLIs leave the field absent, which the
+counters CLI renders as the default 1.
+
 ## FWState synchronization splits emission from reception
 
 `SyncConfig` replaces its flat source, destination MAC and multicast/unicast
