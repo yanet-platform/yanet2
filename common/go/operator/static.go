@@ -99,7 +99,11 @@ func NewStaticModuleOperator(
 		return nil, err
 	}
 
-	tracker := readiness.NewTracker(staticScopes(cfg), readiness.WithLog(log))
+	tracker := readiness.NewTracker(
+		staticScopes(cfg),
+		readiness.WithDrainLatch(),
+		readiness.WithLog(log),
+	)
 	operatorLabel := commonpb.NewLabel("operator", name)
 	reconcilerMetrics := NewReconcilerMetrics("generic_operator", operatorLabel)
 	metricsCollectors := []MetricsCollector{reconcilerMetrics}
@@ -137,15 +141,10 @@ func NewStaticModuleOperator(
 		newStaticSource(state),
 		WithGRPCServer(
 			cfg.Server,
-			NewReadinessServiceRegistrar(name, tracker),
 			NewMetricsServiceRegistrar(name, metricsCollectors...),
 		),
+		WithReadiness(name, tracker),
 		WithGateways(cfg.Register, cfg.Gateways...),
-		WithWorkers(func(ctx context.Context) error {
-			<-ctx.Done()
-			tracker.Drain()
-			return nil
-		}),
 		WithLog(log),
 		WithMetrics(reconcilerMetrics),
 		WithReconcile(cfg.Reconcile),

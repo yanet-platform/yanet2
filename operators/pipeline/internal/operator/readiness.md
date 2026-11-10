@@ -4,7 +4,8 @@ The pipeline operator exposes one readiness scope per configured gateway,
 covering all stages pushed to that gateway.
 
 - gRPC FQN: `operators.pipeline.operatorpb.v1.ReadinessService`
-- Service implementation: `readiness_service.go` (`ReadinessService`).
+- Service implementation: the operator framework (`common/go/operator`)
+  serves the shared readiness contract under the operator's name.
 - Scope logic: `operator.go` (the observed actuator wiring).
 
 ## Scopes
@@ -24,10 +25,10 @@ State is driven by the apply outcome recorded through `Observe` (via
   `APPLY_FAILED`.
 - Apply failed, scope never applied: `STATE_NOT_READY`, reason `APPLY_FAILED`.
 
-On shutdown `Drain` flips every scope to `STATE_NOT_READY` (`SHUTTING_DOWN`).
-This is best-effort: operator trackers are not drain-latched, so an apply in
-flight when shutdown begins can overwrite the `SHUTTING_DOWN` value before the
-reconciler stops.
+On shutdown `Drain` flips every scope to `STATE_NOT_READY` (`SHUTTING_DOWN`)
+before the reconciler stops, while the service still answers. The tracker is
+drain-latched, so an apply cut off by the shutdown leaves `SHUTTING_DOWN` in
+place.
 
 ## `observed_at` freshness
 

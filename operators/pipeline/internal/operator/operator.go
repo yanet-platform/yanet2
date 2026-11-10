@@ -43,6 +43,7 @@ func NewOperator(cfg *Config, options ...Option) (*Operator, error) {
 	)
 
 	tracker := readiness.NewTracker(readinessScopeSpecs(cfg),
+		readiness.WithDrainLatch(),
 		readiness.WithLog(log.With(zap.String("operator", "pipeline"))),
 	)
 
@@ -75,7 +76,6 @@ func NewOperator(cfg *Config, options ...Option) (*Operator, error) {
 	)
 
 	stages := cfg.Stages
-	readinessSvc := NewReadinessService(tracker)
 	services := []operator.ServiceRegistrar{
 		func(s *grpc.Server) string {
 			operatorpb.RegisterPipelineOperatorServiceServer(s, service)
@@ -85,23 +85,15 @@ func NewOperator(cfg *Config, options ...Option) (*Operator, error) {
 			operatorpb.RegisterMetricsServiceServer(s, service)
 			return operatorpb.MetricsService_ServiceDesc.ServiceName
 		},
-		func(s *grpc.Server) string {
-			operatorpb.RegisterReadinessServiceServer(s, readinessSvc)
-			return operatorpb.ReadinessService_ServiceDesc.ServiceName
-		},
 	}
 
 	app := operator.NewOperator(
 		fanOut,
 		source,
 		operator.WithGRPCServer(cfg.Server, services...),
+		operator.WithReadiness("pipeline", tracker),
 		operator.WithReconcile(cfg.Reconcile),
 		operator.WithGateways(cfg.Register, cfg.Gateways...),
-		operator.WithWorkers(func(ctx context.Context) error {
-			<-ctx.Done()
-			tracker.Drain()
-			return nil
-		}),
 		operator.WithPreRun(func(ctx context.Context) error {
 			if len(stages) == 0 {
 				return nil

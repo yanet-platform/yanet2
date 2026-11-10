@@ -62,6 +62,7 @@ func NewOperator(cfg *Config, options ...Option) (*Operator, error) {
 	routeRIBStore := newRIBStore(withRIBStoreLog(log))
 
 	tracker := readiness.NewTracker(readinessScopeSpecs(cfg, moduleName),
+		readiness.WithDrainLatch(),
 		readiness.WithLog(log.With(zap.String("operator", "route"))),
 	)
 
@@ -191,8 +192,6 @@ func NewOperator(cfg *Config, options ...Option) (*Operator, error) {
 		operator.WithFanOutLog(log),
 	)
 
-	readinessSvc := NewReadinessService(tracker)
-
 	services := []operator.ServiceRegistrar{
 		func(s *grpc.Server) string {
 			operatorpb.RegisterRouteServiceServer(s, routeSvc)
@@ -210,20 +209,9 @@ func NewOperator(cfg *Config, options ...Option) (*Operator, error) {
 			operatorpb.RegisterRouteOperatorServiceServer(s, operatorSvc)
 			return operatorpb.RouteOperatorService_ServiceDesc.ServiceName
 		},
-		func(s *grpc.Server) string {
-			operatorpb.RegisterReadinessServiceServer(s, readinessSvc)
-			return operatorpb.ReadinessService_ServiceDesc.ServiceName
-		},
 	}
 
-	workers := []operator.Runner{
-		func(ctx context.Context) error {
-			<-ctx.Done()
-			tracker.Drain()
-			return nil
-		},
-		ribHelper.Run,
-	}
+	workers := []operator.Runner{ribHelper.Run}
 	if !cfg.NetlinkMonitor.Disabled {
 		workers = append(workers, neighMonitor.Run)
 	}
@@ -232,6 +220,7 @@ func NewOperator(cfg *Config, options ...Option) (*Operator, error) {
 		fanOut,
 		source,
 		operator.WithGRPCServer(cfg.Server, services...),
+		operator.WithReadiness("route", tracker),
 		operator.WithLog(log),
 		operator.WithReconcile(cfg.Reconcile),
 		operator.WithGateways(cfg.Register, cfg.Gateways...),

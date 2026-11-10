@@ -5,7 +5,8 @@ FIB apply and configured static-path resolution per gateway, neighbour
 observations, the RIB content, and (optionally) the BIRD FeedRIB transport session.
 
 - gRPC FQN: `operators.route.operatorpb.v1.ReadinessService`
-- Service implementation: `readiness_service.go` (`ReadinessService`).
+- Service implementation: the operator framework (`common/go/operator`)
+  serves the shared readiness contract under the operator's name.
 - Scope logic: `operator.go` (tracker construction and the FIB/neighbour
   wiring), `rib_readiness.go` (the RIB/BIRD helper).
 
@@ -170,10 +171,10 @@ During normal operation it never reaches `STATE_NOT_READY`; only the shutdown
 drain forces it there.
 
 On shutdown `Drain` flips every route scope to `STATE_NOT_READY` with reason
-`SHUTTING_DOWN`, including `fib`, `neighbours`, `rib`, and `bird-session`.
-This is best-effort: the operator tracker is not drain-latched, so an apply in
-flight when shutdown begins can overwrite the `SHUTTING_DOWN` value before the
-reconciler stops.
+`SHUTTING_DOWN`, including `fib`, `neighbours`, `rib`, and `bird-session`,
+before the reconciler and the readiness workers stop, while the service still
+answers. The tracker is drain-latched, so neither an apply cut off by the
+shutdown nor a late neighbour or RIB update moves a scope off `SHUTTING_DOWN`.
 
 ## `observed_at` freshness
 
