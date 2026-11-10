@@ -408,6 +408,46 @@ func Test_AdapterService_RetryDelay_ResetAfterHealthyAttempt(t *testing.T) {
 	}
 }
 
+// Test_AdapterService_RetryDelay_SupersededAttemptKeepsDelay verifies that
+// an attempt the route operator closed itself, as it does for a stream
+// another writer superseded, keeps the grown delay however long it ran.
+func Test_AdapterService_RetryDelay_SupersededAttemptKeepsDelay(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		// Twenty rejected streams grow the delay to its cap, then the route
+		// operator keeps one stream for ten minutes and closes it with a
+		// summary.
+		const longAttempt = 20
+		const uptime = 10 * time.Minute
+		network := memnet.NewNetwork()
+		serveBIRDExport(t, network.Listen("bird.sock"), quietBIRDExport)
+		opened := make(chan time.Time, 64)
+		recorder := &feedRIBRecorder{Handle: func(idx int, stream feedRIBServerStream) error {
+			select {
+			case opened <- time.Now():
+			default:
+			}
+			if idx == longAttempt {
+				select {
+				case <-time.After(uptime):
+					return stream.SendAndClose(&routepb.UpdateSummary{})
+				case <-stream.Context().Done():
+				}
+			}
+			return status.Error(codes.Unavailable, "route operator rejects the stream")
+		}}
+		serveRouteService(t, network.Listen(memoryRouteOperator), recorder)
+		startMemoryImport(t, network, newImportRequest(t, "bird.sock"))
+
+		var long time.Time
+		for range longAttempt + 1 {
+			long = receiveEvent(t, opened)
+		}
+		next := receiveEvent(t, opened)
+		// The 30 s cap with its 50 % jitter, not the initial 500 ms.
+		require.GreaterOrEqual(t, next.Sub(long.Add(uptime)), 15*time.Second)
+	})
+}
+
 // Test_AdapterService_BIRDSocketFailureReleasesBlockedSend verifies that a
 // BIRD socket hanging up while an update waits on a stream blocked by flow
 // control ends the attempt, and the import opens a new stream.
