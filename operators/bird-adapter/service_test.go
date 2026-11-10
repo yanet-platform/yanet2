@@ -10,7 +10,6 @@ import (
 	"slices"
 	"sync"
 	"sync/atomic"
-	"syscall"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -24,10 +23,10 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/encoding"
 	"google.golang.org/grpc/status"
-	"google.golang.org/grpc/test/bufconn"
 	"google.golang.org/protobuf/proto"
 
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
+	"github.com/yanet-platform/yanet2/common/go/testutils/memnet"
 	birdadapter "github.com/yanet-platform/yanet2/operators/bird-adapter"
 	adapterpb "github.com/yanet-platform/yanet2/operators/bird-adapter/adapterpb/v1"
 	routepb "github.com/yanet-platform/yanet2/operators/route/operatorpb/v1"
@@ -92,7 +91,7 @@ func Test_AdapterService_IdleImportReplaysAfterGatewayRestart(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
-				network := newMemoryNetwork()
+				network := memnet.NewNetwork()
 				serveBIRDExport(t, network.Listen("bird.sock"), quietBIRDExport)
 				receiver := &recordingRIBReceiver{Committed: make(chan []*routepb.Update, 4)}
 				server := serveRouteService(t, network.Listen(memoryRouteOperator), receiver)
@@ -185,7 +184,7 @@ func receiveRIBCommit(t *testing.T, commits <-chan []*routepb.Update) []*routepb
 // route operator endpoint comes back.
 func Test_AdapterService_BusyImportReopensStreamAfterGatewayRestart(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		network := newMemoryNetwork()
+		network := memnet.NewNetwork()
 		serveBIRDExport(t, network.Listen("bird.sock"), func(idx int, connection net.Conn) error {
 			for {
 				if _, err := connection.Write(birdRouteChunk(1)); err != nil {
@@ -223,7 +222,7 @@ func Test_AdapterService_BusyImportReopensStreamAfterGatewayRestart(t *testing.T
 // replays its table on it.
 func Test_AdapterService_ServerClosedStreamRestarts(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		network := newMemoryNetwork()
+		network := memnet.NewNetwork()
 		serveBIRDExport(t, network.Listen("bird.sock"), quietBIRDExport)
 		commits := make(chan []*routepb.Update, 4)
 		recorder := &feedRIBRecorder{Handle: func(idx int, stream feedRIBServerStream) error {
@@ -259,7 +258,7 @@ func Test_AdapterService_ServerClosedStreamRestarts(t *testing.T) {
 // without waiting out its retry delay.
 func Test_AdapterService_Close_DuringRetryBackoff(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		network := newMemoryNetwork()
+		network := memnet.NewNetwork()
 		serveBIRDExport(t, network.Listen("bird.sock"), quietBIRDExport)
 		opened := make(chan time.Time, 64)
 		serveRouteService(t, network.Listen(memoryRouteOperator), rejectingRecorder(opened))
@@ -284,7 +283,7 @@ func Test_AdapterService_Close_DuringRetryBackoff(t *testing.T) {
 // jitter included, and that the waits do reach that cap.
 func Test_AdapterService_RetryDelay_CappedAfterJitter(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		network := newMemoryNetwork()
+		network := memnet.NewNetwork()
 		serveBIRDExport(t, network.Listen("bird.sock"), quietBIRDExport)
 		opened := make(chan time.Time, 64)
 		serveRouteService(t, network.Listen(memoryRouteOperator), rejectingRecorder(opened))
@@ -342,7 +341,7 @@ func Test_AdapterService_RetryDelay_ResetAfterHealthyAttempt(t *testing.T) {
 				// Twenty rejected streams grow the delay to its cap, then
 				// the route operator keeps one stream for the uptime.
 				const longAttempt = 20
-				network := newMemoryNetwork()
+				network := memnet.NewNetwork()
 				serveBIRDExport(t, network.Listen("bird.sock"), quietBIRDExport)
 				opened := make(chan time.Time, 64)
 				recorder := &feedRIBRecorder{Handle: func(idx int, stream feedRIBServerStream) error {
@@ -381,7 +380,7 @@ func Test_AdapterService_RetryDelay_ResetAfterHealthyAttempt(t *testing.T) {
 // then.
 func Test_AdapterService_BIRDSocketFailureReleasesBlockedSend(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		network := newMemoryNetwork()
+		network := memnet.NewNetwork()
 		serveBIRDExport(t, network.Listen("flood.sock"), func(idx int, connection net.Conn) error {
 			if idx == 0 {
 				floodBIRDExport(connection)
@@ -425,7 +424,7 @@ func Test_AdapterService_BIRDSocketFailureReleasesBlockedSend(t *testing.T) {
 // new import keeps writing the RIB.
 func Test_AdapterService_SetupConfig_ReplacementLeavesOneWriter(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		network := newMemoryNetwork()
+		network := memnet.NewNetwork()
 		serveBIRDExport(t, network.Listen("first.sock"), quietBIRDExport)
 		serveBIRDExport(t, network.Listen("second.sock"), quietBIRDExport)
 		commits := make(chan int, 4)
@@ -462,7 +461,7 @@ func Test_AdapterService_SetupConfig_ReplacementLeavesOneWriter(t *testing.T) {
 // leaves the running import and its stream in place.
 func Test_AdapterService_SetupConfig_FailedReplacementKeepsImport(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		network := newMemoryNetwork()
+		network := memnet.NewNetwork()
 		serveBIRDExport(t, network.Listen("bird.sock"), quietBIRDExport)
 		commits := make(chan int, 4)
 		recorder := &feedRIBRecorder{Handle: func(idx int, stream feedRIBServerStream) error {
@@ -503,7 +502,7 @@ func Test_AdapterService_SetupConfig_FailedReplacementKeepsImport(t *testing.T) 
 // deadline, and that the closed service refuses new setups.
 func Test_AdapterService_Close_DuringSetup(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		network := newMemoryNetwork()
+		network := memnet.NewNetwork()
 		serveBIRDExport(t, network.Listen("bird.sock"), quietBIRDExport)
 		// The endpoint accepts connections but never speaks gRPC, so the
 		// setup waits for the connection to become ready.
@@ -553,7 +552,7 @@ func Test_AdapterService_Close_DuringSetup(t *testing.T) {
 // the stream nobody reads among them.
 func Test_AdapterService_Close_WithBlockedSend(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		network := newMemoryNetwork()
+		network := memnet.NewNetwork()
 		serveBIRDExport(t, network.Listen("bird.sock"), func(idx int, connection net.Conn) error {
 			floodBIRDExport(connection)
 			_, _ = io.Copy(io.Discard, connection)
@@ -578,7 +577,7 @@ func Test_AdapterService_Close_WithBlockedSend(t *testing.T) {
 // retrying.
 func Test_AdapterService_SetupConfig_NoSocketsStartsNoStream(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		network := newMemoryNetwork()
+		network := memnet.NewNetwork()
 		recorder := &feedRIBRecorder{Handle: func(idx int, stream feedRIBServerStream) error {
 			<-stream.Context().Done()
 			return stream.Context().Err()
@@ -633,7 +632,7 @@ func Test_AdapterService_IdleImportSendsHeartbeats(t *testing.T) {
 // the commit of its table.
 func assertIdleHeartbeats(t *testing.T, dumpTimeout time.Duration, interval time.Duration) {
 	t.Helper()
-	network := newMemoryNetwork()
+	network := memnet.NewNetwork()
 	serveBIRDExport(t, network.Listen("bird.sock"), quietBIRDExport)
 	committed := make(chan time.Time, 1)
 	heartbeats := make(chan receivedUpdate, 16)
@@ -676,7 +675,7 @@ func assertIdleHeartbeats(t *testing.T, dumpTimeout time.Duration, interval time
 // new stream.
 func Test_AdapterService_FailedHeartbeatReplaysOnNewStream(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		network := newMemoryNetwork()
+		network := memnet.NewNetwork()
 		serveBIRDExport(t, network.Listen("bird.sock"), quietBIRDExport)
 		commits := make(chan []*routepb.Update, 4)
 		recorder := &feedRIBRecorder{Handle: func(idx int, stream feedRIBServerStream) error {
@@ -720,7 +719,7 @@ func Test_AdapterService_FailedHeartbeatReplaysOnNewStream(t *testing.T) {
 // import stays silent for an hour of fake time until the first one exits.
 func Test_AdapterService_SetupConfig_ChainedReplacementsNeverOverlap(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		network := newMemoryNetwork()
+		network := memnet.NewNetwork()
 		serveBIRDExport(t, network.Listen("first.sock"), quietBIRDExport)
 		serveBIRDExport(t, network.Listen("second.sock"), quietBIRDExport)
 		thirdPrefix := netip.MustParsePrefix("2001:db8:3::/48")
@@ -1035,7 +1034,7 @@ const memoryRouteOperator = "route-operator"
 // test ends, before the fixtures it reads from stop.
 func newMemoryService(
 	t *testing.T,
-	network *memoryNetwork,
+	network *memnet.Network,
 	options ...birdadapter.AdapterServiceOption,
 ) *birdadapter.AdapterService {
 	t.Helper()
@@ -1061,7 +1060,7 @@ func newMemoryService(
 // built by newMemoryService.
 func startMemoryImport(
 	t *testing.T,
-	network *memoryNetwork,
+	network *memnet.Network,
 	request *adapterpb.SetupConfigRequest,
 	options ...birdadapter.AdapterServiceOption,
 ) *birdadapter.AdapterService {
@@ -1096,40 +1095,4 @@ func receiveEvent[T any](t *testing.T, events <-chan T) T {
 		var zero T
 		return zero
 	}
-}
-
-// memoryNetwork connects dialers to the bufconn listeners bound on it by
-// address, whose connections block on condition variables: a goroutine
-// waiting on one counts as durably blocked inside a synctest bubble, which a
-// goroutine waiting on a socket never does.
-type memoryNetwork struct {
-	mu        sync.Mutex
-	listeners map[string]*bufconn.Listener
-}
-
-func newMemoryNetwork() *memoryNetwork {
-	return &memoryNetwork{listeners: map[string]*bufconn.Listener{}}
-}
-
-// Listen binds a new listener to address in place of the previous one.
-func (m *memoryNetwork) Listen(address string) *bufconn.Listener {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	listener := bufconn.Listen(64 * 1024)
-	m.listeners[address] = listener
-	return listener
-}
-
-// Dial connects to the listener bound to address, and fails as a refused
-// connection does when none is.
-func (m *memoryNetwork) Dial(ctx context.Context, address string) (net.Conn, error) {
-	m.mu.Lock()
-	listener := m.listeners[address]
-	m.mu.Unlock()
-
-	if listener == nil {
-		return nil, &net.OpError{Op: "dial", Net: "memory", Err: syscall.ECONNREFUSED}
-	}
-	return listener.DialContext(ctx)
 }
